@@ -1,7 +1,7 @@
 import { t } from "./i18n";
 import type { DocumentStore } from "./model";
 import { edgeStyle, nodeStyle } from "./palette";
-import { classOf, isGroupType, isStratigraphicType } from "./rules";
+import { classOf, conceptParts, isGroupType, isStratigraphicType, nodeElements } from "./rules";
 import { BADGE_RULES, resolveEffective, sourceLabel } from "./funnel";
 import type { AuthorityCandidate, EmEdge, EmNode } from "./types";
 import { qualiaList } from "./vocab";
@@ -275,6 +275,40 @@ export function renderInspector(
       store.updateNode(nodeId, { description: desc.value }),
     );
     root.appendChild(desc);
+  }
+
+  // 1.6.9 · the ELEMENTS OF THE NODE the datamodel declares beside name and
+  // description (today `definition`, on StratigraphicNode and so on every
+  // stratigraphic subtype). Read, not edited: the value is a CONCEPT of a
+  // controlled vocabulary and EMStudio has no concept source to pick it from —
+  // a free-text box would write labels without concepts, or invent URIs.
+  for (const rule of nodeElements(node.node_type)) {
+    const key = (rule.em_json ?? `data.${rule.field}`).replace(/^data\./, "");
+    const raw = ((node.data ?? {}) as Record<string, unknown>)[key];
+    if (raw === undefined || raw === null || raw === "") continue;
+    const labelKey = `insp.el.${rule.field}`;
+    const title = t(labelKey);
+    root.appendChild(el("div", "insp-field-label", title === labelKey ? rule.field : title));
+    const row = el("div", "insp-element");
+    if (rule.description) row.title = rule.description;
+    if (rule.value === "concept") {
+      const { concept, label } = conceptParts(raw);
+      row.appendChild(el("span", "insp-element-label", label || t("insp.elNoLabel")));
+      if (concept) {
+        const a = document.createElement("a");
+        a.className = "insp-element-concept";
+        a.href = concept;
+        a.target = "_blank";
+        a.rel = "noopener";
+        a.textContent = concept;
+        row.appendChild(a);
+      } else {
+        row.appendChild(el("span", "insp-element-note", t("insp.elLabelOnly")));
+      }
+    } else {
+      row.appendChild(el("span", "insp-element-label", String(raw)));
+    }
+    root.appendChild(row);
   }
 
   // PropertyNode value: the property's measured/asserted value, stored in

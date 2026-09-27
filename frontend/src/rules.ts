@@ -21,6 +21,13 @@ interface EdgeTypeDef {
    *  datamodel 1.6.13. Absent means CONTEXT, which is what makes a new edge
    *  born non-traversable. */
   dtc_role?: string;
+  /** An OLDER SPELLING of another edge type: the same relation under another
+   *  name, accepted when read, never written (connections datamodel 1.6.20).
+   *  `is_bonded_to.spelling_of = "bonded_to"`. */
+  spelling_of?: string;
+  /** `null` means SYMMETRIC — the same rule as s3Dgraphy's connections_loader
+   *  (`is_symmetric = reverse is None`). */
+  reverse?: { name?: string } | null;
 }
 
 interface NodeTypeEntry {
@@ -413,6 +420,9 @@ export function allowedEdgeTypes(
   const out: string[] = [];
   for (const [name, def] of Object.entries(EDGE_TYPES)) {
     if (name === GENERIC_EDGE) continue;
+    // 1.6.20 · a spelling is not a relation of its own: the menu offers the
+    // canonical name only, and a validator still sees the relation through it.
+    if (def.spelling_of) continue;
     const ac = def.allowed_connections;
     if (!ac) continue;
     if (!intersects(ac.source, sa) || !intersects(ac.target, ta)) continue;
@@ -453,6 +463,158 @@ export function connectValidity(
     intersects(g.source, ancestorsOf(sourceType)) &&
     intersects(g.target, ancestorsOf(targetType));
   return ok ? "generic" : "invalid";
+}
+
+/**
+ * The canonical name of an edge type: an older spelling (`spelling_of`) reads as
+ * the relation it spells, anything else is itself. Read off the datamodel, so a
+ * third spelling added in s3Dgraphy needs no edit here.
+ */
+export function canonicalEdgeType(edgeType: string | undefined): string {
+  const t = edgeType ?? "";
+  return EDGE_TYPES[t]?.spelling_of ?? t;
+}
+
+/** Every name accepted for the relation `edgeType` spells (itself included) —
+ *  the TS twin of s3Dgraphy's `ConnectionsDatamodel.spellings()`. A reverse is
+ *  NOT a spelling: `overlies` → {overlies}. */
+export function edgeSpellings(edgeType: string): Set<string> {
+  const canonical = canonicalEdgeType(edgeType);
+  const out = new Set<string>([canonical]);
+  for (const [name, def] of Object.entries(EDGE_TYPES))
+    if (def.spelling_of === canonical) out.add(name);
+  return out;
+}
+
+/** Symmetric per the datamodel: an explicit `reverse: null`. */
+export function isSymmetricEdgeType(edgeType: string | undefined): boolean {
+  const def = EDGE_TYPES[canonicalEdgeType(edgeType)];
+  return !!def && "reverse" in def && def.reverse === null;
+}
+
+/**
+ * One key per RELATION: the canonical name plus the pair — unordered when the
+ * relation is symmetric (a bond between A and B is one bond, whichever end it
+ * was written from). Two edges with the same key say the same thing.
+ */
+export function relationKey(e: {
+  source: string;
+  target: string;
+  edge_type?: string;
+}): string {
+  const t = canonicalEdgeType(e.edge_type);
+  // generic_connection has no reverse either, but its verso is the author's
+  const unordered = isSymmetricEdgeType(t) && t !== GENERIC_EDGE;
+  const [a, b] =
+    unordered && e.target < e.source
+      ? [e.target, e.source]
+      : [e.source, e.target];
+  return `${t}\u0000${a}\u0000${b}`;
+}
+
+/**
+ * The VIEW of an edge list with one edge per relation. The document keeps every
+ * edge it was given (a spelling is accepted when read); only what is DRAWN is
+ * collapsed, so a pair written `bonded_to` and `is_bonded_to` shows one line.
+ * The canonically-spelled edge wins when present, else the first; order is the
+ * order of first appearance. `generic_connection` is left alone: its direction
+ * is the author's, even though the datamodel gives it no reverse.
+ */
+export function collapseSpellings<
+  E extends { source: string; target: string; edge_type?: string },
+>(edges: readonly E[]): E[] {
+  const slot = new Map<string, number>();
+  const out: E[] = [];
+  for (const e of edges) {
+    if ((e.edge_type ?? "") === GENERIC_EDGE) {
+      out.push(e);
+      continue;
+    }
+    const k = relationKey(e);
+    const at = slot.get(k);
+    if (at === undefined) {
+      slot.set(k, out.length);
+      out.push(e);
+    } else if (
+      out[at].edge_type !== canonicalEdgeType(out[at].edge_type) &&
+      e.edge_type === canonicalEdgeType(e.edge_type)
+    ) {
+      out[at] = e; // prefer the canonical spelling
+    }
+  }
+  return out;
+}
+
+/** A property the datamodel declares as an ELEMENT OF THE NODE (`kind:
+ *  "node_element"`, node datamodel 1.6.9 — today only `definition`): it lives
+ *  in `data.<field>` (`em_json`), not on a PropertyNode. */
+export interface NodeElementRule {
+  field: string;
+  value?: string;
+  em_json?: string;
+  description?: string;
+}
+
+// class name → its hand-authored `properties`, from every section of the node
+// datamodel (entries carry `class`; subtypes nest under `subtypes`).
+const CLASS_PROPERTIES = new Map<string, Record<string, unknown>>();
+(function index(v: unknown): void {
+  if (!v || typeof v !== "object" || Array.isArray(v)) return;
+  const o = v as Record<string, unknown>;
+  if (typeof o.class === "string" && o.properties && typeof o.properties === "object")
+    CLASS_PROPERTIES.set(o.class, o.properties as Record<string, unknown>);
+  for (const child of Object.values(o)) index(child);
+})(nodeDatamodel);
+
+/**
+ * The node elements a node_type carries, INHERITED up its class chain — the
+ * same walk s3Dgraphy's `get_node_element_rule` does over the MRO: the first
+ * class that declares a field as an OBJECT answers; the string entries
+ * (`"name": "P1_is_identified_by"`) are mapping notes and are skipped.
+ */
+export function nodeElements(nodeType: string | undefined): NodeElementRule[] {
+  const out: NodeElementRule[] = [];
+  const seen = new Set<string>();
+  for (const cls of ancestorsOf(nodeType)) {
+    const props = CLASS_PROPERTIES.get(cls);
+    if (!props) continue;
+    for (const [field, rule] of Object.entries(props)) {
+      if (seen.has(field) || !rule || typeof rule !== "object") continue;
+      const r = rule as Record<string, unknown>;
+      if (r.kind !== "node_element") continue;
+      seen.add(field);
+      out.push({
+        field,
+        value: typeof r.value === "string" ? r.value : undefined,
+        em_json: typeof r.em_json === "string" ? r.em_json : undefined,
+        description: typeof r.description === "string" ? r.description : undefined,
+      });
+    }
+  }
+  return out;
+}
+
+/**
+ * `(concept, label)` of a concept-valued element — the TS twin of s3Dgraphy's
+ * `definition_parts`: `{concept, label}`; a bare IRI string is a concept with no
+ * label; any other string is a label with NO concept (nothing is invented).
+ */
+export function conceptParts(value: unknown): { concept: string; label: string } {
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    const o = value as Record<string, unknown>;
+    return {
+      concept: typeof o.concept === "string" ? o.concept.trim() : "",
+      label: typeof o.label === "string" ? o.label.trim() : "",
+    };
+  }
+  if (typeof value === "string") {
+    const v = value.trim();
+    // exactly Python's prefixes, so the two readers split the same strings
+    return ["http://", "https://", "urn:"].some((p) => v.startsWith(p))
+      ? { concept: v, label: "" }
+      : { concept: "", label: v };
+  }
+  return { concept: "", label: "" };
 }
 
 export function edgeTypeLabel(edgeType: string): string {

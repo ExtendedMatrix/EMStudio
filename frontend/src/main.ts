@@ -166,6 +166,8 @@ import {
 } from "./renderer";
 import {
   allowedEdgeTypes,
+  collapseSpellings,
+  relationKey,
   classOf,
   CONNECTIONS_VERSION,
   connectValidity,
@@ -2371,6 +2373,10 @@ function filteredView(opts: { wholeGraph?: boolean } = {}): {
     );
     vEdges = vEdges.filter((e) => !ADORNMENT_EDGE_TYPES.has(e.edge_type ?? ""));
   }
+  // 1.6.20 · one line per RELATION: a pair written with both spellings
+  // (`bonded_to` + `is_bonded_to`, `equals` + `is_physically_equal_to`) is one
+  // bond, drawn once. The document keeps both edges; only the view collapses.
+  vEdges = collapseSpellings(vEdges);
   return {
     nodes: vNodes,
     edges: vEdges,
@@ -5755,6 +5761,18 @@ function finishConnect(forceCreate = false): void {
   }
 }
 
+/** The relation already stands, under any spelling and — when symmetric — from
+ *  either end (1.6.20): `bonded_to` A→B exists if `is_bonded_to` B→A does. */
+function hasRelation(
+  edges: readonly EmDocument["graph"]["edges"][number][],
+  source: string,
+  target: string,
+  edgeType: string,
+): boolean {
+  const k = relationKey({ source, target, edge_type: edgeType });
+  return edges.some((e) => relationKey(e) === k);
+}
+
 function createEdge(source: string, target: string, edgeType: string): void {
   if (!store) return;
   // DAG · connecting two nodes of the corpus writes the edge IN the corpus. This
@@ -5762,14 +5780,14 @@ function createEdge(source: string, target: string, edgeType: string): void {
   // output that already has one — one output, two inputs, no duplicate.
   if (canvasWritesToCorpus()) {
     const corpus = canvasStore()!;
-    if (corpus.hasEdge(source, target, edgeType)) {
+    if (hasRelation(corpus.doc.graph.edges, source, target, edgeType)) {
       toast(`${edgeTypeLabel(edgeType)} already exists`);
       return;
     }
     corpus.addEdge(source, target, edgeType);
     return;
   }
-  if (store.hasEdge(source, target, edgeType)) {
+  if (hasRelation(store.doc.graph.edges, source, target, edgeType)) {
     toast(`${edgeTypeLabel(edgeType)} already exists`);
     return;
   }

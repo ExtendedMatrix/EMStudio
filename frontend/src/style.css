@@ -3118,6 +3118,20 @@ body.sync-active #footer-brand #em-version {
   resize: vertical;
 }
 
+.insp-element {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 12.5px;
+  margin: 2px 0 6px;
+}
+.insp-element-concept,
+.insp-element-note {
+  font-size: 11px;
+  color: var(--text-muted);
+  word-break: break-all;
+}
+
 .insp-actions {
   display: flex;
   gap: 8px;
