@@ -2984,6 +2984,18 @@ body.sync-active #footer-brand #em-version {
   padding: 6px 14px;
   z-index: 25;
 }
+/* TOCCARE · «Annulla» inside a toast: the gesture it reports, taken back */
+#toast .toast-action {
+  margin-left: 10px;
+  background: none;
+  border: 1px solid currentColor;
+  border-radius: var(--radius);
+  color: inherit;
+  font: inherit;
+  font-weight: 600;
+  padding: 1px 8px;
+  cursor: pointer;
+}
 
 #edge-menu {
   position: absolute;

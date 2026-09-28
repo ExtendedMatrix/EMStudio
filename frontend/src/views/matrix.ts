@@ -14,6 +14,40 @@ import { BAND_GAP } from "../scene";
 import type { Scene, SceneGroup, SceneNode, SubBand } from "../scene";
 import type { EmDocument } from "../types";
 
+/**
+ * TOCCARE · the re-stack, remembered.
+ *
+ * Two passes below move nodes for the VIEW: the phase sub-bands translate each
+ * band rigidly so it starts at a cursor (`delta = cursor − band top`), and the
+ * swimlane re-stack grows a lane upwards by whatever pokes above it (`top`).
+ * Both read the CURRENT positions, so both used to answer a hand-moved node by
+ * moving it back: nudge the topmost node of a band 3 px down and the band's top
+ * moves 3 px down, the delta shrinks by 3, and the node is drawn exactly where it
+ * was — with every other node of the band 3 px higher. That is the «nodo
+ * inchiodato» of the night of 30 set, measured, and it cannot be fixed by
+ * storing the position better: the position WAS stored.
+ *
+ * So the translations are computed when the STRUCTURE of the view changes and
+ * then kept: `key` says what the structure was (main.ts builds it from the
+ * em-core swimlanes, the shown phases, the folds, the filters and the node
+ * count, plus a counter bumped by an explicit «Riordina»). With the same key the
+ * band deltas and the lane `top` growths are reused, so moving a node — or
+ * changing its epoch — moves that node and nothing else. Lanes still grow
+ * DOWNWARDS when content passes their bottom (pushing the lanes below), never
+ * upwards: growing upwards is what dragged the whole lane along.
+ */
+export interface RestackMemo {
+  key: string;
+  /** `${laneId}|${bandKey}` → the band's translation */
+  band: Map<string, number>;
+  /** lane id → the upward growth (`top`) of the lane */
+  top: Map<string, number>;
+}
+
+export function newRestackMemo(): RestackMemo {
+  return { key: "", band: new Map(), top: new Map() };
+}
+
 export const GROUP_HEADER = 20;
 export const GROUP_PAD = 12;
 const CELL_GAP = 14;
@@ -46,7 +80,17 @@ export function buildMatrixScene(
   phasesVisible?: Set<string>,
   /** epoch/phase ids with a chronology-coherence conflict → warning marker */
   warnIds?: Set<string>,
+  /** TOCCARE · the remembered re-stack, and the key of the structure it was
+   *  computed for (see RestackMemo). Without it every build re-flows. */
+  memo?: RestackMemo,
+  memoKey?: string,
 ): Scene | null {
+  const frozen = !!memo && memoKey !== undefined && memo.key === memoKey;
+  if (memo && !frozen) {
+    memo.key = memoKey ?? "";
+    memo.band.clear();
+    memo.top.clear();
+  }
   // A layoutOverride (a VIEW layout computed by em-core on the filtered
   // subgraph) recompacts the Matrix when detail-rings hide nodes, so hidden
   // nodes leave no gaps — the archival doc.layout is untouched (folding carried
@@ -661,14 +705,26 @@ export function buildMatrixScene(
         const hasContent = Number.isFinite(bMinY[bi]);
         if (!hasContent && isResidual) continue; // empty residual → skip
         const h = hasContent ? bMaxY[bi] - bMinY[bi] : EMPTY_BAND_H;
+        // TOCCARE · the band's translation: remembered while the structure is
+        // the same (see RestackMemo), so its content — including a node just
+        // moved by hand — is never re-anchored to the band top
+        const memoK = `${lane.id}|${key}`;
+        const delta = hasContent
+          ? frozen && memo!.band.has(memoK)
+            ? memo!.band.get(memoK)!
+            : cursor - bMinY[bi]
+          : 0;
         if (hasContent) {
-          const delta = cursor - bMinY[bi];
+          memo?.band.set(memoK, delta);
           for (const [id, b] of nodeBand)
             if (b === bi) {
               const sn = scene.byId.get(id);
               if (sn) sn.y += delta;
             }
         }
+        // the band's rect is where its content IS (with a fresh delta that is
+        // `cursor`, as before); an empty band takes the running cursor
+        const bandY = hasContent ? bMinY[bi] + delta : cursor;
         subBands.push({
           laneId: lane.id,
           phaseId: key,
@@ -679,7 +735,7 @@ export function buildMatrixScene(
             typeof nodeById.get(key)?.data?.color === "string"
               ? (nodeById.get(key)!.data!.color as string)
               : lane.color,
-          y: cursor,
+          y: bandY,
           height: h,
           residual: isResidual,
           first: firstBand,
@@ -692,7 +748,7 @@ export function buildMatrixScene(
           warn: isResidual ? undefined : warnIds?.has(key),
         });
         firstBand = false;
-        cursor += h + BAND_GAP;
+        cursor = Math.max(cursor, bandY + h + BAND_GAP);
       }
       bandExtentByLane.set(lane.id, cursor);
     }
@@ -723,6 +779,12 @@ export function buildMatrixScene(
       const above = origY[li] + 8 - sn.y;
       if (above > 0) top[li] = Math.max(top[li], above);
     }
+    // TOCCARE · a lane's upward growth is remembered too (RestackMemo): a node
+    // nudged above the lane top pokes out instead of dragging the lane down
+    scene.lanes.forEach((l, i) => {
+      if (frozen && memo!.top.has(l.id)) top[i] = memo!.top.get(l.id)!;
+      else memo?.top.set(l.id, top[i]);
+    });
     // Empty phase bands carry no nodes, so the node loop above misses them —
     // grow the lane to the bottom of its stacked sub-bands too, or a lane with
     // several (or unit-less) phases spills its bands over the next lane.

@@ -58,6 +58,9 @@ export interface CanvasTheme {
    *  make you think you had clicked something. */
   peerAware: string;
   hoverSoft: string;
+  /** TOCCARE · the wash of a drop target (lane / band) during a drag — the
+   *  CSS `--bg-hover`, the same wash a hovered row has in the chrome */
+  bgHover: string;
   /** group container: body wash, dashed border, header tint fallback.
    *  The header TITLE ink is not a theme value: the title-tab carries a
    *  semantic label_background, so the ink is labelOn(that fill) — see
@@ -105,6 +108,7 @@ const LIGHT: CanvasTheme = {
   // PELLE · the selection went ochre, so the peer ring left it: blue now
   peerAware: "#1F6FEB",
   hoverSoft: "#8FB4D8",
+  bgHover: "#d9e9f7",
   groupBody: "rgba(190,196,204,0.25)",
   groupBorder: "#000000",
   groupHeaderFallback: "#F6D7A4",
@@ -144,6 +148,7 @@ const DARK: CanvasTheme = {
   marqueeWash: "rgba(227,180,58,0.12)",
   peerAware: "#6EA6FF",
   hoverSoft: "#4A6A8E",
+  bgHover: "#1d2c3e",
   groupBody: "rgba(120,132,148,0.20)",
   groupBorder: "#8b95a3",
   groupHeaderFallback: "#6b5324",

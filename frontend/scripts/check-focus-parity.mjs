@@ -661,6 +661,14 @@ const NINE = [
       perche: "`shelf.ts` pushes the listener onto a list and calls it from " +
               "`changed()`, which runs inside the mutation: the shelf is changed " +
               "by a gesture, not after a wait" },
+    // TOCCARE · the canvas pointermove listener is wrapped in the dev stopwatch
+    // (`perf.ts::perfTime`), which calls its argument AT ONCE and returns its
+    // value — so this read still happens inside the fresh event, exactly as it
+    // did when the body was handed to `addEventListener` directly.
+    { chi: "(argomento di perfTime)", ramo: "if",
+      testo: "over && over.winId !== activeWin().id",
+      perche: "`perfTime(name, fn)` is `fn()` between two clock reads: " +
+              "synchronous, never stored" },
   ];
   for (const t of Sorg.tempoIgnoto(TS, "activeWin", "main.ts"))
     ok(IGNOTE.some((i) => nome(i) === Sorg.identita(t)),

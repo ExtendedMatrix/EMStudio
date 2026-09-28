@@ -108,6 +108,12 @@ interface RouteCache {
 }
 const routeCaches = new WeakMap<Scene, RouteCache>();
 
+/** TOCCARE · a drag moves scene nodes in place (no rebuild), so the routes
+ *  cached for that scene object must be recomputed on the next paint. */
+export function invalidateRoutes(scene: Scene): void {
+  routeCaches.delete(scene);
+}
+
 function routesFor(scene: Scene, state: RenderState): RouteCache {
   const key = state.filterKey ?? "all";
   const hit = routeCaches.get(scene);

@@ -141,6 +141,7 @@ import {
 } from "./naming";
 import {
   applyTheme,
+  canvasFont,
   canvasTheme,
   storeMode,
   whenCanvasFontsReady,
@@ -169,6 +170,7 @@ import {
   hitBandLabel,
   hitPdDecorator,
   hitPdTag,
+  invalidateRoutes,
   render,
   type ConnectDrag,
 } from "./renderer";
@@ -305,7 +307,7 @@ import {
   type Scene,
 } from "./scene";
 import { HIT_TOL_PX } from "./shape-geom";
-import { GROUP_HEADER, GROUP_PAD } from "./views/matrix";
+import { GROUP_HEADER, GROUP_PAD, newRestackMemo } from "./views/matrix";
 import { setupSearch } from "./search";
 import {
   addEmDataHost,
@@ -454,6 +456,13 @@ import { buildGraphScene, type GraphAlgorithm } from "./views/graph";
 import { buildMatrixScene } from "./views/matrix";
 import { renderStudyPanel } from "./study-panel";
 import { perfRelease, perfSettled, perfTime, perfTimeAsync } from "./perf";
+import {
+  DragGate,
+  dropTargetAt,
+  sameTarget,
+  type DropOptions,
+  type DropTarget,
+} from "./drag";
 
 declare global {
   interface Window {
@@ -1218,6 +1227,24 @@ function toast(msg: string): void {
   toastTimer = window.setTimeout(() => toastEl.classList.add("hidden"), 2600);
 }
 
+/** TOCCARE · a toast that can take the gesture back: «US12 → Medioevo  Annulla».
+ *  The button undoes ONE step of the store the gesture wrote to — the gesture
+ *  was one step (`store.batch`), so that is the whole of it. */
+function toastUndo(msg: string, st: DocumentStore): void {
+  toast(msg);
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.className = "toast-action";
+  btn.textContent = t("toolbar.undo");
+  btn.addEventListener("click", () => {
+    st.undo();
+    toastEl.classList.add("hidden");
+  });
+  toastEl.append(" ", btn);
+  window.clearTimeout(toastTimer);
+  toastTimer = window.setTimeout(() => toastEl.classList.add("hidden"), 5000);
+}
+
 /**
  * WIN4 · the height the DOCKED window bar takes from the canvas.
  *
@@ -1489,6 +1516,8 @@ interface LiveGesture {
   connect: ConnectDrag | null;
   insertBoundary: number | null;
   marquee: { x0: number; y0: number; x1: number; y1: number } | null;
+  /** TOCCARE · the lane or group a drag in flight would reassign to */
+  dropTarget: DropTarget | null;
 }
 
 interface GraphPaint {
@@ -1634,6 +1663,51 @@ function paintGraphWindow(p: GraphPaint): void {
     c.strokeRect(rx, ry, rw, rh);
     c.restore();
   }
+  // TOCCARE · where the drag in flight would land, when that would CHANGE the
+  // node: the lane (or phase band) as a `--bg-hover` wash with ochre edges and
+  // its name, or a group as its outline — never both (drag.ts::dropTargetAt)
+  if (live?.dropTarget) {
+    const dt = live.dropTarget;
+    const th = canvasTheme();
+    c.setTransform(dpr, 0, 0, dpr, 0, 0);
+    c.save();
+    if (dt.kind === "lane") {
+      const y0 = dt.y * vp.scale + vp.y;
+      const hh = dt.h * vp.scale;
+      c.globalAlpha = 0.55;
+      c.fillStyle = th.bgHover;
+      c.fillRect(0, y0, w, hh);
+      c.globalAlpha = 1;
+      c.strokeStyle = th.accent;
+      c.lineWidth = 2;
+      c.beginPath();
+      c.moveTo(0, y0);
+      c.lineTo(w, y0);
+      c.moveTo(0, y0 + hh);
+      c.lineTo(w, y0 + hh);
+      c.stroke();
+      c.font = canvasFont(600, 13);
+      const label = `→ ${dt.label}`;
+      const tw = c.measureText(label).width;
+      const ly = Math.min(Math.max(y0 + 6, 6), Math.max(6, y0 + hh - 26));
+      c.fillStyle = th.accent;
+      c.fillRect(w / 2 - tw / 2 - 8, ly, tw + 16, 20);
+      c.fillStyle = th.onAccent;
+      c.textAlign = "center";
+      c.textBaseline = "middle";
+      c.fillText(label, w / 2, ly + 10);
+    } else {
+      const g = dt.group;
+      const x0 = g.x * vp.scale + vp.x;
+      const y0 = g.y * vp.scale + vp.y;
+      c.fillStyle = th.selectWashSoft;
+      c.fillRect(x0, y0, g.w * vp.scale, g.h * vp.scale);
+      c.strokeStyle = th.accent;
+      c.lineWidth = 2.5;
+      c.strokeRect(x0, y0, g.w * vp.scale, g.h * vp.scale);
+    }
+    c.restore();
+  }
 }
 
 /**
@@ -1650,12 +1724,25 @@ function draw(): void {
   perfTime("draw", drawNow);
 }
 
+/** TOCCARE · at most one paint per frame: a drag asks for one per pointermove,
+ *  and the browser delivers several of those per frame on a fast mouse. */
+let drawQueued = false;
+function requestDraw(): void {
+  if (drawQueued) return;
+  drawQueued = true;
+  requestAnimationFrame(() => {
+    drawQueued = false;
+    perfTime("frame", draw);
+  });
+}
+
 function drawNow(): void {
   const liveId = activeWin().id;
   const gesture: LiveGesture = {
     hoverId, hoverEdgeIdx, connect,
     insertBoundary: view === "matrix" ? hoverInsertBoundary : null,
     marquee,
+    dropTarget,
   };
   for (const g of graphMounts()) {
     g.paint(g.winId === liveId ? gesture : null);
@@ -2667,6 +2754,37 @@ function buildScenes(): void {
   perfSettled();
 }
 
+/**
+ * TOCCARE · the matrix re-stack is remembered (`RestackMemo`, views/matrix.ts)
+ * and recomputed only when THIS changes — the structure of the view, not the
+ * position of a node. A hand-moved node therefore stays where it was left until
+ * one of these moves, or until an explicit «Riordina» (`reflowMatrix`) bumps
+ * the counter.
+ */
+const restackMemo = newRestackMemo();
+let restackEpoch = 0;
+function restackKey(
+  doc: EmDocument,
+  fview: { nodes: unknown[] },
+  phasesVisible: Set<string>,
+): string {
+  const lanes = (matrixViewLayout ?? doc.layout)?.swimlanes ?? [];
+  return [
+    restackEpoch,
+    emtree.active()?.id ?? "",
+    JSON.stringify(lanes),
+    [...phasesVisible].sort().join(","),
+    (doc.layout?.folded_groups ?? []).join(","),
+    fview.nodes.length,
+    matrixViewLayout ? "view" : "doc",
+  ].join("§");
+}
+
+/** «Riordina»: forget the remembered re-stack; the next build re-flows. */
+function reflowMatrix(): void {
+  restackEpoch++;
+}
+
 function buildScenesNow(): void {
   if (!store) return;
   const doc = store.doc;
@@ -2690,6 +2808,8 @@ function buildScenesNow(): void {
     matrixViewLayout ?? undefined,
     phasesVisible,
     warnIds,
+    restackMemo,
+    restackKey(doc, fview, phasesVisible),
   );
   scenes.graph = buildGraphScene(doc, fview, {
     algorithm: graphAlgorithm,
@@ -5763,132 +5883,271 @@ function placeNode(wx: number, wy: number): void {
   toast(`${id} created`);
 }
 
-// After a node/group DRAG ends (D2 inverse): landing inside a group box adds/
-// re-parents membership — the innermost (smallest) box of a matryoshka wins;
-// landing in a different epoch lane re-assigns has_first_epoch (a group carries
-// its epoch-placed members along).
-// Returns true if the drop RE-ASSIGNED the node (into a group, or to a different
-// epoch/phase band); false if it landed in the same place — the caller then
-// persists the freely-dragged position instead of letting the rebuild snap it
-// back.
-function handleDrop(nodeId: string, wx: number, wy: number): boolean {
-  if (!store || view !== "matrix" || inContext()) return false;
-  const st = store; // non-null capture (narrowing is lost inside callbacks)
-  const s = scene();
-  if (!s) return false;
-  // act on the WHOLE selection when the dragged node is part of a multi-selection
-  const ids =
-    selectedIds.has(nodeId) && selectedIds.size > 1 ? [...selectedIds] : [nodeId];
-  const mm = buildMembership(store.doc);
+// ---------- TOCCARE · the drag, from the first frame to the commit ----------
+//
+// A drag touches the SCENE while it is in flight and the STORE once, at the
+// release (`commitNodeDrag`). The rules it follows are in `drag.ts` (when it
+// starts, group-or-lane) and in `views/matrix.ts::RestackMemo` (why what you
+// drop stays where you dropped it).
 
-  // forbid dropping a group into itself or its own descendants
+/** Everything a node drag moves on the canvas, with its start position. */
+function collectMoving(s: Scene): NonNullable<typeof dragMoving> {
+  const nodes = new Map<string, { x: number; y: number }>();
+  const groups = new Map<string, { x: number; y: number }>();
+  const add = (id: string): void => {
+    const n = s.byId.get(id);
+    if (n) nodes.set(id, { x: n.x, y: n.y });
+    const g = s.groupsById?.get(id);
+    if (g) groups.set(id, { x: g.x, y: g.y });
+  };
+  add(dragNodeId!);
+  for (const id of dragMemberIds ?? []) add(id);
+  if (dragIsGroupMove) {
+    // a document INSTANCE drawn in the group has a scene id of its own and no
+    // membership edge: it moves because it is drawn inside the box
+    const g = s.groupsById?.get(dragNodeId!);
+    if (g)
+      for (const n of s.nodes)
+        if (n.instanceOf && n.x >= g.x && n.y >= g.y &&
+            n.x + n.w <= g.x + g.w && n.y + n.h <= g.y + g.h)
+          add(n.id);
+  }
+  return { nodes, groups };
+}
+
+/** The ids a drop acts on: the whole selection when the pressed node is in it. */
+function dropIds(primary: string): string[] {
+  return selectedIds.has(primary) && selectedIds.size > 1 ? [...selectedIds] : [primary];
+}
+
+/** What `dropTargetAt` needs to know about THIS drag, computed at the press. */
+function dropOptionsFor(primary: string): Omit<DropOptions, "alt"> {
+  const st = store!;
+  const mm = buildMembership(st.doc);
+  const ids = dropIds(primary);
+  // never into itself or its own descendants
   const forbidden = new Set<string>(ids);
   for (const id of ids) {
     const stk = [id];
     while (stk.length) {
       const g = stk.pop()!;
-      for (const c of mm.childrenOf.get(g) ?? []) {
+      for (const c of mm.childrenOf.get(g) ?? [])
         if (!forbidden.has(c)) {
           forbidden.add(c);
           stk.push(c);
         }
-      }
     }
   }
+  // the pressed node's own container chain (primary parent, then its parents)
+  const own = new Set<string>();
+  for (let c = mm.primaryOf.get(primary); c && !own.has(c); c = mm.primaryOf.get(c))
+    own.add(c);
+  const accepts = (gid: string): boolean => {
+    const gt = st.node(gid)?.node_type;
+    return ids.some(
+      (id) =>
+        id !== gid &&
+        mm.primaryOf.get(id) !== gid &&
+        allowedEdgeTypes(st.node(id)?.node_type, gt).some((t) => MEMBERSHIP_EDGES.has(t)),
+    );
+  };
+  return { forbidden, own, accepts };
+}
 
-  // 1) innermost group box (smallest area) at the drop point → move the whole
-  //    selection into it (each node only if the datamodel allows a membership)
-  const boxes = (s.groups ?? []).filter(
-    (g) =>
-      !forbidden.has(g.id) &&
-      !g.folded &&
-      wx >= g.x &&
-      wx <= g.x + g.w &&
-      wy >= g.y &&
-      wy <= g.y + g.h,
-  );
-  boxes.sort((a, b) => a.w * a.h - b.w * b.h);
-  const target = boxes[0];
-  if (target) {
-    const groupNode = store.node(target.id);
-    let moved = 0;
-    for (const id of ids) {
-      if (id === target.id) continue;
-      const primary = mm.primaryOf.get(id) ?? null;
-      if (primary === target.id) continue; // already primarily in it
-      const edgeType = allowedEdgeTypes(
-        store.node(id)?.node_type,
-        groupNode?.node_type,
-      ).find((t) => MEMBERSHIP_EDGES.has(t));
-      if (edgeType) {
-        store.moveToGroup(id, target.id, edgeType, primary);
-        moved++;
-      }
-    }
-    if (moved) {
-      toast(`moved ${moved} into ${groupNode?.name ?? "group"}`);
-      return true;
+function liveDropTarget(wx: number, wy: number, alt: boolean): DropTarget | null {
+  const s = scene();
+  if (!s || !dragDropOpts) return null;
+  return dropTargetAt(s, wx, wy, { ...dragDropOpts, alt });
+}
+
+/** Membership moves of a drop into a group (D2 inverse); returns how many. */
+function dropIntoGroup(ids: string[], groupId: string): number {
+  const st = store!;
+  const mm = buildMembership(st.doc);
+  const groupNode = st.node(groupId);
+  let moved = 0;
+  for (const id of ids) {
+    if (id === groupId) continue;
+    const primary = mm.primaryOf.get(id) ?? null;
+    if (primary === groupId) continue; // already primarily in it
+    const edgeType = allowedEdgeTypes(st.node(id)?.node_type, groupNode?.node_type)
+      .find((t) => MEMBERSHIP_EDGES.has(t));
+    if (edgeType) {
+      st.moveToGroup(id, groupId, edgeType, primary);
+      moved++;
     }
   }
+  return moved;
+}
 
-  // 2) not into a group → re-assign the epoch of the lane at the drop point.
-  //    A dragged group carries its epoch-placed members along.
-  const lane = s.lanes.find((l) => wy >= l.y && wy <= l.y + l.height);
-  if (!lane) return false;
+/** The nodes whose FIRST EPOCH a lane drop reassigns: the dragged ones that are
+ *  epoch-placed, a dragged group carrying its epoch-placed members along. */
+function epochTargetsFor(ids: string[]): string[] {
+  const st = store!;
+  const mm = buildMembership(st.doc);
   const candidates = new Set<string>(ids);
   for (const id of ids) {
-    if (isGroupType(store.node(id)?.node_type)) {
-      const stk = [id];
-      while (stk.length) {
-        const g = stk.pop()!;
-        for (const c of mm.childrenOf.get(g) ?? []) {
-          if (!candidates.has(c)) {
-            candidates.add(c);
-            stk.push(c);
-          }
+    if (!isGroupType(st.node(id)?.node_type)) continue;
+    const stk = [id];
+    while (stk.length) {
+      const g = stk.pop()!;
+      for (const c of mm.childrenOf.get(g) ?? [])
+        if (!candidates.has(c)) {
+          candidates.add(c);
+          stk.push(c);
         }
-      }
     }
   }
   const placed = new Set(
-    store.doc.graph.edges
-      .filter((e) => e.edge_type === "has_first_epoch")
-      .map((e) => e.source),
+    st.doc.graph.edges.filter((e) => e.edge_type === "has_first_epoch").map((e) => e.source),
   );
-  let targets = [...candidates].filter((id) => placed.has(id));
-  if (!targets.length)
-    targets = ids.filter((id) =>
-      isStratigraphicType(st.node(id)?.node_type),
-    );
-  if (!targets.length) return false;
-  // if the lane is showing phase sub-bands, resolve which band the drop landed
-  // in and attribute to that phase (the residual band's phaseId is the epoch
-  // itself → un-phased). Otherwise attribute to the epoch lane.
-  let targetEpoch = lane.id;
-  let targetLabel = lane.label;
-  const bandsHere = (s.subBands ?? [])
-    .filter((b) => b.laneId === lane.id)
-    .sort((a, b) => a.y - b.y);
-  if (bandsHere.length) {
-    let chosen = bandsHere[0];
-    for (const b of bandsHere) if (wy >= b.y - 13) chosen = b; // gaps → band below
-    targetEpoch = chosen.phaseId;
-    targetLabel = chosen.residual ? `${lane.label} (unphased)` : chosen.label;
+  const targets = [...candidates].filter((id) => placed.has(id));
+  return targets.length
+    ? targets
+    : ids.filter((id) => isStratigraphicType(st.node(id)?.node_type));
+}
+
+/**
+ * Commit the positions the scene was dropped at.
+ *
+ * MEASURED, not predicted: rebuild the committed scene, look where each node
+ * landed, move it by the difference, and look again. The view places a node
+ * through several passes (its lane found from its position, the phase band from
+ * its epoch, the lane and band translations), and a lane change moves it from
+ * one set of translations to another — predicting that would be a second copy
+ * of `buildMatrixScene`. Two corrections converge: the translations are
+ * remembered (`RestackMemo`), so the second one is exact.
+ */
+function settleDropped(dropped: Map<string, { x: number; y: number }>): void {
+  const st = store!;
+  const primary = dragNodeId!;
+  const groupIds = [primary, ...(dragMemberIds ?? [])];
+  for (let pass = 0; pass < 4; pass++) {
+    buildScenes();
+    const s = scene();
+    if (!s) return;
+    if (dragIsGroupMove) {
+      const want = dropped.get(primary);
+      const got = s.byId.get(primary);
+      if (!want || !got) return;
+      const dx = want.x - got.x;
+      const dy = want.y - got.y;
+      if (Math.abs(dx) + Math.abs(dy) <= 0.5) return;
+      st.moveNodesBy(groupIds, dx, dy, false);
+      continue;
+    }
+    let done = true;
+    for (const [id, want] of dropped) {
+      const got = s.byId.get(id);
+      if (!got || got.instanceOf) continue; // an instance follows its group
+      const dx = want.x - got.x;
+      const dy = want.y - got.y;
+      if (Math.abs(dx) + Math.abs(dy) <= 0.5) continue;
+      done = false;
+      moveOneByDelta(id, dx, dy, false);
+    }
+    if (done) return;
   }
-  // dropped back in the SAME epoch/band → not a reassignment; let the caller keep
-  // the freely-dragged position (a single node dropped where it already belongs)
-  if (ids.length === 1) {
-    const cur = st.doc.graph.edges.find(
-      (e) =>
-        (e.edge_type === "has_first_epoch" ||
-          e.edge_type === "survive_in_epoch") &&
-        e.source === ids[0],
-    )?.target;
-    if (cur === targetEpoch) return false;
+}
+
+/** The release of a node drag: reassign (if the target changed) and place, as
+ *  ONE undoable step, then say what happened with an «Annulla» at hand. */
+function commitNodeDrag(wx: number, wy: number, alt: boolean): void {
+  const st = store;
+  const s = scene();
+  if (!st || !s || !dragMoving || !dragNodeId) return;
+  const t = liveDropTarget(wx, wy, alt);
+  const reassign = t && !sameTarget(t, dragStartTarget) ? t : null;
+  const dropped = new Map<string, { x: number; y: number }>();
+  for (const id of dragMoving.nodes.keys()) {
+    const n = s.byId.get(id);
+    if (n) dropped.set(id, { x: n.x, y: n.y });
   }
-  st.setFirstEpoch(targets, targetEpoch);
-  toast(`moved ${targets.length} to ${targetLabel}`);
-  if (bandsHere.length) void runLayout(false); // clean placement in the new band
+  const ids = dropIds(dragNodeId);
+  const names = (list: string[]): string =>
+    list.length === 1
+      ? String(st.node(list[0])?.name || list[0])
+      : `${list.length}`;
+  let message: string | null = null;
+  st.batch(() => {
+    if (reassign?.kind === "group") {
+      const n = dropIntoGroup(ids, reassign.group.id);
+      if (n) message = `${names(ids)} → ${reassign.group.title}`;
+    } else if (reassign?.kind === "lane") {
+      const targets = epochTargetsFor(ids);
+      if (targets.length) {
+        st.setFirstEpoch(targets, reassign.epochId);
+        message = `${names(targets)} → ${reassign.label}`;
+      }
+    }
+    settleDropped(dropped);
+  });
+  if (message) toastUndo(message, st);
+}
+
+/** Forget the drag in flight (after a commit, or instead of one). */
+function endNodeDrag(): void {
+  dragGate = null;
+  dragMoving = null;
+  dragDropOpts = null;
+  dragStartTarget = null;
+  dropTarget = null;
+}
+
+/** Esc during a drag: nothing was written, so a rebuild IS the undo. */
+function cancelDrag(): boolean {
+  if (dragMode === "node" && dragMoving) {
+    dragMode = "none";
+    endNodeDrag();
+    dragNodeId = null;
+    dragMemberIds = null;
+    buildScenes();
+    draw();
+    return true;
+  }
+  if (dragMode === "graphnode" && graphDragBefore) {
+    const ov = canvasOverrides() ?? graphOverrides;
+    ov.clear();
+    for (const [k, v] of graphDragBefore) ov.set(k, v);
+    dragMode = "none";
+    dragGate = null;
+    graphDragBefore = null;
+    dragNodeId = null;
+    buildScenes();
+    draw();
+    return true;
+  }
+  return false;
+}
+
+/** Arrow-key nudge of the selection: 1 px, Shift 10 px, SCREEN pixels — the
+ *  unit of the drag. One press, one undo step; no re-layout. */
+function nudgeSelection(dxPx: number, dyPx: number): boolean {
+  const st = store;
+  const ids = selectedIds.size ? [...selectedIds] : selectedId ? [selectedId] : [];
+  if (!st || !ids.length || inContext()) return false;
+  const vp = viewport();
+  const dx = dxPx / vp.scale;
+  const dy = dyPx / vp.scale;
+  if (view === "matrix") {
+    const s = scene();
+    const moving = ids.filter((id) => s?.byId.has(id));
+    if (!moving.length) return false;
+    st.batch(() => {
+      for (const id of moving) moveOneByDelta(id, dx, dy, false);
+    });
+    return true;
+  }
+  const ov = canvasOverrides();
+  const s = scene();
+  if (!ov || !s) return false;
+  for (const id of ids) {
+    const sn = s.byId.get(id);
+    const base = ov.get(id) ?? (sn ? { x: sn.x, y: sn.y } : null);
+    if (base) ov.set(id, { x: base.x + dx, y: base.y + dy });
+  }
+  buildScenes();
+  draw();
   return true;
 }
 
@@ -19023,6 +19282,9 @@ btnLayout.title =
 // a layout-less document (e.g. a live snapshot).
 async function runLayout(fresh: boolean): Promise<void> {
   if (!store) return;
+  // TOCCARE · a layout is the explicit «Riordina» (and what structural edits
+  // ask for): the remembered re-stack is recomputed from the new positions
+  reflowMatrix();
   const { computeLayout } = await import("./emcore");
   const prev = store.doc.layout;
   // Pins & anchors are INTENT, not computed geometry — they must survive every
@@ -19318,12 +19580,21 @@ function wireGraphCanvas(canvas: HTMLCanvasElement, winId: string): void {
       return;
     }
     const hit = hitTest(s, w.x, w.y, hitTol());
+    if (hit?.instanceOf && view === "matrix" && !inContext()) {
+      // TOCCARE · a document INSTANCE is drawn by the view in its usage context;
+      // it has no position of its own to store and no membership of its own to
+      // change (a drop used to hand its scene id to moveToGroup, which wrote an
+      // edge from a node that does not exist). A press on it is a click.
+      dragMode = "none";
+      canvas.setPointerCapture(e.pointerId);
+      return;
+    }
     if (hit && (view === "matrix" || inContext())) {
       dragMode = "node";
       dragNodeId = hit.id;
-      dragStartScene = { x: hit.x, y: hit.y };
-      dragCheckpointed = false;
-      dragSceneDirty = false;
+      dragGate = new DragGate(e.clientX, e.clientY);
+      dragMoving = null;
+      dropTarget = null;
       // Shift+drag a member node → detach it from its container (D2). Membership
       // is read from the GRAPH (buildMembership.primaryOf), not the rendered
       // memberOf map — the latter only covers relocate-type groups, not outline
@@ -19368,12 +19639,21 @@ function wireGraphCanvas(canvas: HTMLCanvasElement, winId: string): void {
         dragMemberIds = [...selectedIds].filter((id) => id !== hit.id);
         dragIsGroupMove = false; // move each node respecting its own container
       }
+      // TOCCARE · what the drop is compared against: the target under the press.
+      // A release on the SAME target is a move; only a different one reassigns.
+      dragDropOpts = view === "matrix" && !inContext() ? dropOptionsFor(hit.id) : null;
+      dragStartTarget = dragDropOpts
+        ? dropTargetAt(s, w.x, w.y, { ...dragDropOpts, alt: false })
+        : null;
     } else if (hit && canvasOverrides() && !inContext()) {
       // Graph / DTC view: drag a node to place it (persisted as an override in
       // THIS projection's map, see canvasOverrides).
       // Shift = LIQUID — the connected 1-hop cluster follows, for manual grouping.
       dragMode = "graphnode";
       dragNodeId = hit.id;
+      dragGate = new DragGate(e.clientX, e.clientY);
+      // Esc puts the map back as it was at the press
+      graphDragBefore = new Map(canvasOverrides() ?? graphOverrides);
       graphLiquid = e.shiftKey;
     } else {
       // Matrix: a click in the left swimlane-label strip selects that epoch, so
@@ -19481,93 +19761,92 @@ function wireGraphCanvas(canvas: HTMLCanvasElement, winId: string): void {
       return;
     }
     if (dragMode === "graphnode" && dragNodeId && store) {
-      if (Math.abs(e.clientX - lastX) + Math.abs(e.clientY - lastY) > 3)
-        moved = true;
-      if (moved) {
-        const ddx = (e.clientX - lastX) / vp.scale;
-        const ddy = (e.clientY - lastY) / vp.scale;
-        const s = scene();
-        const targets = new Set<string>([dragNodeId]);
-        if (graphLiquid) {
-          for (const ed of store.doc.graph.edges) {
-            if (ed.source === dragNodeId) targets.add(ed.target);
-            else if (ed.target === dragNodeId) targets.add(ed.source);
-          }
+      // TOCCARE · the same gate as the matrix (cumulative from the press), and
+      // the SCENE moves, not the document: the override map is updated for the
+      // next rebuild, but nothing is rebuilt per pointermove any more (it was a
+      // full buildScenes() + draw() for every pixel).
+      const d = dragGate?.move(e.clientX, e.clientY);
+      if (!d) return;
+      moved = true;
+      const ddx = d.dx / vp.scale;
+      const ddy = d.dy / vp.scale;
+      const s = scene();
+      const targets = new Set<string>([dragNodeId]);
+      if (graphLiquid) {
+        for (const ed of store.doc.graph.edges) {
+          if (ed.source === dragNodeId) targets.add(ed.target);
+          else if (ed.target === dragNodeId) targets.add(ed.source);
         }
-        const overrides = canvasOverrides() ?? graphOverrides;
-        for (const id of targets) {
-          const sn = s?.byId.get(id);
-          const base = overrides.get(id) ?? (sn ? { x: sn.x, y: sn.y } : null);
-          if (base) overrides.set(id, { x: base.x + ddx, y: base.y + ddy });
-        }
-        lastX = e.clientX;
-        lastY = e.clientY;
-        buildScenes();
-        draw();
       }
+      const overrides = canvasOverrides() ?? graphOverrides;
+      for (const id of targets) {
+        const sn = s?.byId.get(id);
+        const base = overrides.get(id) ?? (sn ? { x: sn.x, y: sn.y } : null);
+        if (base) overrides.set(id, { x: base.x + ddx, y: base.y + ddy });
+        if (sn) {
+          sn.x += ddx;
+          sn.y += ddy;
+        }
+      }
+      if (s) invalidateRoutes(s);
+      requestDraw();
       return;
     }
     if (dragMode === "node" && dragNodeId && store) {
-      const dx = e.clientX - lastX;
-      const dy = e.clientY - lastY;
-      if (Math.abs(dx) + Math.abs(dy) > 3) moved = true;
-      if (moved) {
-        const s = scene();
-        const n = s?.byId.get(dragNodeId);
-        // Shift+drag detach (D2): drop the membership edge, free the node at its
-        // current canvas position, then let subsequent frames move it normally.
-        if (dragDetachPending && n && s && store && dragDetachSet.length) {
-          for (const d of dragDetachSet) {
-            const dn = s.byId.get(d.id);
-            store.removeFromGroup(
-              d.id,
-              d.container,
-              dn ? { x: dn.x, y: dn.y, w: dn.w, h: dn.h } : undefined,
-            );
-          }
-          toast(
-            dragDetachSet.length > 1
-              ? `moved ${dragDetachSet.length} out of group`
-              : "moved out of group",
+      const d = dragGate?.move(e.clientX, e.clientY);
+      if (!d) return;
+      moved = true;
+      // Shift+drag detach (D2): drop the membership edge, free the node at its
+      // current canvas position, then let subsequent frames move it normally.
+      if (dragDetachPending && store && dragDetachSet.length) {
+        const s0 = scene();
+        for (const dd of dragDetachSet) {
+          const dn = s0?.byId.get(dd.id);
+          store.removeFromGroup(
+            dd.id,
+            dd.container,
+            dn ? { x: dn.x, y: dn.y, w: dn.w, h: dn.h } : undefined,
           );
-          dragDetachPending = false;
-          dragDetachSet = [];
-          dragCheckpointed = true;
-          lastX = e.clientX;
-          lastY = e.clientY;
-          return;
         }
-        if (n && s && dragMemberIds && store && !inContext()) {
-          if (dragIsGroupMove) {
-            // whole-group drag: move the group node; members follow (container pass)
-            store.moveNodesBy(
-              [dragNodeId, ...dragMemberIds],
-              dx / vp.scale,
-              dy / vp.scale,
-              !dragCheckpointed,
-            );
-          } else {
-            // multi-selection move: shift EACH node respecting its own container
-            for (const id of [dragNodeId, ...dragMemberIds])
-              moveOneByDelta(id, dx / vp.scale, dy / vp.scale, !dragCheckpointed);
-          }
-          dragCheckpointed = true;
-          lastX = e.clientX;
-          lastY = e.clientY;
-          return;
-        }
-        if (n && s) {
-          // single-node drag: move the SCENE node directly so it follows the
-          // cursor (a per-frame store rebuild would let the phase sub-band reflow
-          // snap it back / jump). Committed on pointerup by handleDrop or reset.
-          n.x += dx / vp.scale;
-          n.y += dy / vp.scale;
-          dragSceneDirty = true;
-          draw();
-        }
-        lastX = e.clientX;
-        lastY = e.clientY;
+        toast(
+          dragDetachSet.length > 1
+            ? `moved ${dragDetachSet.length} out of group`
+            : "moved out of group",
+        );
+        dragDetachPending = false;
+        dragDetachSet = [];
+        dragMoving = null; // the scene was rebuilt: collect again below
       }
+      const s = scene();
+      if (!s) return;
+      // TOCCARE · every drag — one node, a group, a selection — moves the SCENE
+      // and nothing else until the release. The store is written once, in
+      // `commitNodeDrag`; until then no onChange fires, so the inspector, the
+      // tables, the narrative and the other windows are not rebuilt per pixel
+      // (a group drag was 38 ms a frame, measured, all of it that).
+      if (!dragMoving) dragMoving = collectMoving(s);
+      const wdx = d.dx / vp.scale;
+      const wdy = d.dy / vp.scale;
+      for (const id of dragMoving.nodes.keys()) {
+        const n = s.byId.get(id);
+        if (n) {
+          n.x += wdx;
+          n.y += wdy;
+        }
+      }
+      for (const id of dragMoving.groups.keys()) {
+        const g = s.groupsById?.get(id);
+        if (g) {
+          g.x += wdx;
+          g.y += wdy;
+        }
+      }
+      // the target under the pointer, drawn only when the drop would CHANGE
+      // something (another lane / band, or a group to join)
+      const t = liveDropTarget(w.x, w.y, e.altKey);
+      dropTarget = t && !sameTarget(t, dragStartTarget) ? t : null;
+      invalidateRoutes(s);
+      requestDraw();
       return;
     }
 
@@ -19705,7 +19984,15 @@ function wireGraphCanvas(canvas: HTMLCanvasElement, winId: string): void {
     }
     if (mode === "graphnode") {
       if (!moved && dragNodeId) select(dragNodeId); // click (no drag) = select
+      else if (moved) {
+        // the overrides were written during the drag; ONE rebuild settles the
+        // projection on them (edges re-routed, minimap, other windows)
+        buildScenes();
+        draw();
+      }
       dragNodeId = null;
+      dragGate = null;
+      graphDragBefore = null;
       graphLiquid = false;
       return;
     }
@@ -19790,33 +20077,13 @@ function wireGraphCanvas(canvas: HTMLCanvasElement, winId: string): void {
       if (hit && (e.shiftKey || e.metaKey || e.ctrlKey))
         toggleSelect(hit.instanceOf ?? hit.id);
       else select(hit ? (hit.instanceOf ?? hit.id) : null);
-    } else if (mode === "node" && dragNodeId) {
-      // drag ended → route the drop (into a group box, or a different epoch lane)
-      const reassigned = handleDrop(dragNodeId, w.x, w.y);
-      // a single-node drag moved the SCENE node directly. If the drop did NOT
-      // reassign it (dropped where it already belongs), PERSIST the freely-dragged
-      // position to layout.positions — otherwise the rebuild snaps it back. Use the
-      // net delta (not the absolute scene y, which bakes in the view-side lane
-      // re-stack / sub-band shift and would make the node run away — cf. 203c6c8).
-      if (dragSceneDirty && !reassigned && dragStartScene) {
-        const sn = scene()?.byId.get(dragNodeId);
-        if (sn) {
-          const ddx = sn.x - dragStartScene.x;
-          const ddy = sn.y - dragStartScene.y;
-          if (Math.abs(ddx) + Math.abs(ddy) > 0.5)
-            moveOneByDelta(dragNodeId, ddx, ddy, true);
-        }
-      }
-      // rebuild so the node settles into its committed spot (persisted position,
-      // or reassigned band/lane)
-      if (dragSceneDirty) {
-        buildScenes();
-        draw();
-      }
+    } else if (mode === "node" && dragNodeId && dragMoving) {
+      // drag ended → ONE commit: the reassignment, if the target changed, and
+      // the position the node was dropped at, in a single undo step
+      commitNodeDrag(w.x, w.y, e.altKey);
     }
-    dragSceneDirty = false;
+    endNodeDrag();
     dragNodeId = null;
-    dragStartScene = null;
     dragMemberIds = null;
   });
   // Double-click a group container → enter its isolated canvas. Uses the native
@@ -19935,16 +20202,23 @@ let moved = false;
 let lastX = 0;
 let lastY = 0;
 let dragNodeId: string | null = null;
-// scene position of a single dragged node at drag start, so pointerup can persist
-// the net delta to layout.positions (a single-node drag moves the scene node
-// directly for smoothness; without this it would snap back on rebuild)
-let dragStartScene: { x: number; y: number } | null = null;
+// TOCCARE · the drag in flight: its start gate (cumulative threshold), what it
+// moves on the SCENE (start positions, so Esc and the commit know the net
+// delta), the drop target it was pressed on and the one under the pointer now
+let dragGate: DragGate | null = null;
+let dragMoving: {
+  nodes: Map<string, { x: number; y: number }>;
+  groups: Map<string, { x: number; y: number }>;
+} | null = null;
+let dragDropOpts: Omit<DropOptions, "alt"> | null = null;
+let dragStartTarget: DropTarget | null = null;
+let dropTarget: DropTarget | null = null;
+let graphDragBefore: Map<string, { x: number; y: number }> | null = null;
 let graphLiquid = false; // Shift held at graph-drag start → drag the cluster
 let dragMemberIds: string[] | null = null;
 // true = group-drag (move the group node, members follow); false = multi-select
 // move (move each selected node, respecting its container)
 let dragIsGroupMove = false;
-let dragCheckpointed = false;
 let dragDetachPending = false; // Shift+drag a member → pull it out of its group
 // nodes to pull out of their groups on shift+drag (whole selection if multi)
 let dragDetachSet: { id: string; container: string }[] = [];
@@ -20003,10 +20277,6 @@ function insertSlotDates(bi: number): { start?: number; end?: number } {
   const end = upper ? boundOf(upper.id, "start_time") : undefined;
   return { start, end };
 }
-// a single-node drag moves the SCENE node directly (no per-frame rebuild) so it
-// tracks the cursor smoothly even inside phase sub-bands; the drop is committed
-// on pointerup (reassign via handleDrop, else the scene resets on rebuild).
-let dragSceneDirty = false;
 
 
 // Move ONE node by a world delta, respecting its container: a member of an
@@ -20311,6 +20581,28 @@ window.addEventListener("keydown", (e) => {
     return;
   }
   if (e.key === "0") fit();
+  // TOCCARE · Esc during a drag puts everything back where it was at the press
+  if (e.key === "Escape" && cancelDrag()) {
+    e.preventDefault();
+    return;
+  }
+  // TOCCARE · arrows nudge the selection: 1 px, Shift 10 px, screen pixels. Only
+  // when the page (or a canvas) has the keyboard — a list or a tree keeps its
+  // own arrow navigation.
+  if (
+    e.key.startsWith("Arrow") &&
+    !e.metaKey && !e.ctrlKey && !e.altKey &&
+    (e.target === document.body || e.target instanceof HTMLCanvasElement) &&
+    (view === "matrix" || canvasOverrides())
+  ) {
+    const k = e.shiftKey ? 10 : 1;
+    const dx = e.key === "ArrowLeft" ? -k : e.key === "ArrowRight" ? k : 0;
+    const dy = e.key === "ArrowUp" ? -k : e.key === "ArrowDown" ? k : 0;
+    if ((dx || dy) && nudgeSelection(dx, dy)) {
+      e.preventDefault();
+      return;
+    }
+  }
   if (e.key === "Escape") {
     if (ctxMenuEl) hideContextMenu();
     else if (placingType) cancelPlacing();

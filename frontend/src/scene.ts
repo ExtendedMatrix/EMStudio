@@ -214,7 +214,7 @@ export function hitHandle(
   wy: number,
   scale: number,
 ): boolean {
-  const r = 8 / Math.sqrt(scale); // slightly larger than drawn, easier to grab
+  let r = 8 / Math.sqrt(scale); // slightly larger than drawn, easier to grab
   // the SAME anchor the renderer draws (EM2 · shape-geom.ts): grabbing a handle
   // that is not where you can see it is the kind of bug nobody reports, they
   // just stop using the gesture
@@ -222,6 +222,13 @@ export function hitHandle(
   const a = handleAnchor(vb);
   const dx = wx - a.x;
   const dy = wy - a.y;
+  // TOCCARE · inside the drawing, the body wins over most of the handle: zoomed
+  // out, a 32-unit extractor is 7 px on screen and a 16-unit handle radius
+  // covered all of it, so pressing the glyph to MOVE it started a connector
+  // (measured: 10 of 137 drags on TempluMare at 23 %). Outside the drawing the
+  // handle keeps its whole radius.
+  if (wx >= vb.x && wx <= vb.x + vb.w && wy >= vb.y && wy <= vb.y + vb.h)
+    r = Math.min(r, vb.w * 0.25);
   return dx * dx + dy * dy <= r * r;
 }
 
