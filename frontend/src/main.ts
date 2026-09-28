@@ -1741,7 +1741,7 @@ function paintGraphWindow(p: GraphPaint): void {
  */
 function draw(): void {
   perfTime("draw", drawNow);
-  perfSettled(); // «release → settled» ends at the last PAINT, not the last rebuild
+  perfSettled("paint"); // «release → settled» ends at a PAINT (see perf.ts)
 }
 
 /** TOCCARE · at most one paint per frame: a drag asks for one per pointermove,
@@ -3236,7 +3236,8 @@ function flushChange(): void {
   refreshNameStatus();          // NAME1: label colours follow the graph
   ensureScenes();               // (recomputes the hidden types first)
   if (filterPanelOpen()) renderCirclesPanel(); // refresh circle counts
-  updateInfo();
+  updateInfo();             // (the issues: the canvas draws their «!»)
+  draw();                   // the canvas first: the node stops where it was left
   updateLegend();
   updateToolbar();
   refreshInspector();

@@ -96,14 +96,25 @@ export async function perfTimeAsync<T>(
   }
 }
 
+let paintOwed = false;
+
 export function perfRelease(): void {
   if (!ON) return;
   state.releaseAt = performance.now();
   state.settledAt = state.releaseAt;
+  paintOwed = false;
 }
 
-/** The scene has reached its committed state (called after a rebuild). */
-export function perfSettled(): void {
+/**
+ * «Release → settled»: called with "scene" after every rebuild and with "paint"
+ * after every paint. Settled is the FIRST paint after the LAST rebuild that
+ * followed the release — the moment the node is on screen where it stays.
+ */
+export function perfSettled(what: "scene" | "paint" = "scene"): void {
   if (!ON || !state.releaseAt) return;
-  state.settledAt = performance.now();
+  if (what === "scene") paintOwed = true;
+  else if (paintOwed) {
+    paintOwed = false;
+    state.settledAt = performance.now();
+  }
 }
