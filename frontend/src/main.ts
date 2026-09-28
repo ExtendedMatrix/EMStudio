@@ -149,6 +149,7 @@ import {
 } from "./theme";
 import { buildNodeList, type NodeListCallbacks } from "./nodelist";
 import { windowIcon } from "./window-icons";
+import { iconUrlFor } from "./icons";
 import { buildOverview, type OverviewApi } from "./overview";
 import { edgeStyle } from "./palette";
 import {
@@ -186,6 +187,7 @@ import {
   narrativeViewTypeDescription,
   isDtcNodeType,
   nodeTypeForClass,
+  nodeLabel,
   resourceTypeOfLocator,
   typeDescription,
   // (the datamodel version exports are read by `versions.ts` for the footer's
@@ -1865,7 +1867,46 @@ function refreshInspector(): void {
   renderViewer();
   renderAnnotator();
   refreshSurfaces("inspector");
+  renderNameStrip();
 }
+
+/**
+ * STRUTTURA · the NAME STRIP: the selected element's name, large (Comfortaa
+ * 700, `--brand-ink`), and its context «type · epoch · part of X». With nothing
+ * selected it names the GRAPH. Selection-driven like the inspector, so it is
+ * redrawn wherever the inspector is (`refreshInspector`, `updateInfo`).
+ */
+function renderNameStrip(): void {
+  const title = document.getElementById("ns-title");
+  const ctx = document.getElementById("ns-ctx");
+  if (!title || !ctx) return;
+  const n = store && selectedId ? store.node(selectedId) : null;
+  if (!store) {
+    title.textContent = "EMStudio";
+    ctx.textContent = "";
+    return;
+  }
+  if (!n) {
+    const g = store.doc.graph;
+    title.textContent = String(g["name"] ?? store.doc.header?.["name"] ?? g.graph_id ?? "EMStudio");
+    ctx.textContent = t("strip.graphCtx", { n: String(store.liveNodes().length) });
+    return;
+  }
+  title.textContent = String(n.name || n.id);
+  const edges = store.doc.graph.edges;
+  const ep = edges.find((e) => e.source === n.id && e.edge_type === "has_first_epoch");
+  const part = edges.find((e) => e.source === n.id && e.edge_type === "is_part_of");
+  const name = (id: string | undefined): string =>
+    id ? String(store!.node(id)?.name || id) : "";
+  ctx.textContent = [
+    nodeLabel(n.node_type),
+    ep ? name(ep.target) : "",
+    part ? t("strip.partOf", { x: name(part.target) }) : "",
+  ].filter(Boolean).join(" · ");
+}
+document.getElementById("ns-save")?.addEventListener("click", () => click("btn-save"));
+document.getElementById("ns-publish")?.addEventListener("click", () => click("btn-publish"));
+onLocaleChange(renderNameStrip);
 
 // HDT-O authority autocomplete → em-bridge /resolve-authority (P1-D, offline).
 // Fully graceful: any non-200 / 501 / network error yields [] so the inspector
@@ -2345,6 +2386,7 @@ function updateInfo(): void {
     `${title} — ${liveNodeCount} nodes, ${liveEdgeCount} edges` +
     (lanes ? `, ${lanes} epochs` : "") +
     (buried > 0 ? ` (+${buried} deleted)` : "");
+  renderNameStrip();
 }
 
 // The visible subgraph after folding + the "circles of detail" filter — one
@@ -17823,7 +17865,11 @@ function wireBarDropdown(
  * list, and it stays where it is.)
  */
 function buildWindowSearch(win: Win): HTMLElement | null {
-  if (win.type !== "graph" && win.type !== "table" && win.type !== "narrative")
+  // STRUTTURA · the GRAPH's box is gone: the full-text search in the name strip
+  // is the graph's search now (one `setupSearch`, one more mount, and the pick
+  // reaches the graph as it always did). The table keeps its filter and the
+  // narrative its find-in-prose — those search what THAT window shows.
+  if (win.type !== "table" && win.type !== "narrative")
     return null;
   const wrap = document.createElement("div");
   wrap.className = "win-search";
@@ -17831,39 +17877,11 @@ function buildWindowSearch(win: Win): HTMLElement | null {
   input.type = "search";
   input.autocomplete = "off";
   input.className = "win-search-input";
-  input.placeholder = t(
-    win.type === "graph"
-      ? "win.searchGraph"
-      : win.type === "table"
-        ? "win.searchTable"
-        : "win.searchNarrative",
-  );
+  input.placeholder = t(win.type === "table" ? "win.searchTable" : "win.searchNarrative");
   wrap.appendChild(input);
   // a click in the box must not be read as a gesture on the window underneath
   input.addEventListener("pointerdown", (e) => e.stopPropagation());
 
-  if (win.type === "graph") {
-    const results = document.createElement("div");
-    results.className = "win-search-results hidden";
-    wrap.appendChild(results);
-    // the SAME implementation the master box used — one search, many mounts
-    setupSearch(
-      input,
-      results,
-      () => store?.doc ?? null,
-      (id) => {
-        focusThen(win, () => {
-          if (inContext()) {
-            contextStack = [];
-            rebuildContext();
-          }
-          select(id);
-          centerOn(id);
-        });
-      },
-    );
-    return wrap;
-  }
   if (win.type === "table") {
     input.value = emDataFilter();
     input.addEventListener("input", () => {
@@ -18795,6 +18813,9 @@ btnLayout.addEventListener("click", async (ev) => {
   },
 );
 
+// STRUTTURA · the name strip's FULL-TEXT search: the same `setupSearch`, one
+// mount. A pick selects the node and reveals it in a graph window, as the
+// per-window box did (`revealFromTable` is that gesture from any window).
 setupSearch(
   document.getElementById("search") as HTMLInputElement,
   document.getElementById("search-results")!,
@@ -18804,9 +18825,10 @@ setupSearch(
       contextStack = [];
       rebuildContext();
     }
-    select(id);
-    centerOn(id);
+    revealFromTable(id);   // selects, and centres it in a graph window if one is open
   },
+  t("strip.noResults"),
+  iconUrlFor,
 );
 
 // ---------- drag & drop ----------
@@ -19970,6 +19992,16 @@ window.addEventListener("keydown", (e) => {
     return;
   }
   if (inField) return;
+  // STRUTTURA · «/» takes you to the full-text search of the name strip
+  if (e.key === "/" && !e.metaKey && !e.ctrlKey && !e.altKey) {
+    const box = document.getElementById("search") as HTMLInputElement | null;
+    if (box) {
+      e.preventDefault();
+      box.focus();
+      box.select();
+      return;
+    }
+  }
   // WIN7 · Ctrl+Space magnifies the focused area and brings it back — Blender's
   // shortcut, and it must be read BEFORE the plain-Space pan below, which would
   // otherwise swallow it and leave the canvas in a grab it never got out of.

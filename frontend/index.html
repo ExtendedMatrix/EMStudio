@@ -258,17 +258,30 @@
            include folders (DosCo, resource collection) and databases, and a
            filter that guessed would hide the file the user came for. -->
       <input type="file" id="aux-file-input" hidden />
-      <!-- HDR1 · the master search box is GONE from here. It searched "the
-           document" from a bar that belongs to no window, which in a tiled shell
-           means it had no scope. Every window carries its own full search now
-           (graph · table · narrative), and the Outliner always had one. The
-           input stays in the DOM, hidden, because `setupSearch` is still the one
-           implementation and the per-window boxes are built on it. -->
-      <div id="search-wrap" class="hidden">
-        <input id="search" type="search" placeholder="Search nodes…" data-i18n-placeholder="toolbar.search" autocomplete="off" />
-        <div id="search-results" class="hidden"></div>
-      </div>
+      <!-- STRUTTURA · the master search came BACK, one floor down: it lives in
+           the name strip below (#name-strip), where it searches the whole
+           graph — which is a scope after all, once the bar under it says which
+           graph and which element. The per-window graph box is gone. -->
     </header>
+    <!-- STRUTTURA · the NAME STRIP (scrivania v5 `#strip`): the selected
+         element's name, large, with its context; the full-text search on the
+         graph; the document's two verbs. Selection-driven, like the inspector:
+         `renderNameStrip` in main.ts. -->
+    <div id="name-strip">
+      <div class="ns-name">
+        <h1 id="ns-title">EMStudio</h1>
+        <span id="ns-ctx"></span>
+      </div>
+      <div id="search-wrap" class="ns-search">
+        <input id="search" type="search" placeholder="Search the graph…" data-i18n-placeholder="strip.search" autocomplete="off" aria-label="Search the graph" />
+        <div id="search-results" class="hidden" role="listbox"></div>
+      </div>
+      <span class="ns-grow"></span>
+      <div class="ns-actions">
+        <button id="ns-save" class="ns-btn" type="button" data-i18n="strip.save">em.json</button>
+        <button id="ns-publish" class="ns-btn primary" type="button" data-i18n="strip.publish">Publish…</button>
+      </div>
+    </div>
     <main>
       <div id="tile-root">
       <!-- GONE (15 set 2026) · `#canvas-wrap`, `#canvas`, `#window-header`

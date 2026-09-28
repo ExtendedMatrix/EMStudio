@@ -7698,3 +7698,115 @@ body.gesturing-resize * {
 #tile-root > .tile-div.dragging {
   background: var(--accent);
 }
+
+/* ── STRUTTURA fase 5 · the name strip (scrivania v5 `.strip`) ─────────────── */
+#name-strip {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex: 0 0 auto;
+  padding: 8px 16px;
+  background: var(--bg-app);
+  border-bottom: 1px solid var(--border);
+  min-width: 0;
+}
+#name-strip .ns-name {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  min-width: 0;
+  flex: 0 1 auto;
+}
+#ns-title {
+  margin: 0;
+  font: 700 1.55rem/1.1 var(--font-display);
+  color: var(--brand-ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 34ch;
+}
+#ns-ctx {
+  font-size: 12.5px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 44ch;
+}
+#name-strip .ns-grow { flex: 1; }
+#name-strip #search-wrap {
+  position: relative;
+  flex: 0 1 360px;
+  min-width: 160px;
+}
+#name-strip #search {
+  width: 100%;
+  background: var(--bg-panel);
+  border: 1px solid var(--border-strong);
+  color: var(--text);
+  padding: 5px 10px;
+  font-size: 13px;
+  border-radius: var(--radius);
+}
+#name-strip #search::placeholder { color: var(--text-faint); }
+#name-strip #search-results {
+  left: 0;
+  right: auto;
+  top: calc(100% + 4px);
+  width: min(480px, 90vw);
+  padding: 4px 0;
+}
+#name-strip .search-hit {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border-bottom: 0;
+  padding: 6px 12px;
+}
+#name-strip .search-hit .hit-glyph {
+  width: 22px;
+  height: 12px;
+  object-fit: contain;
+  flex: none;
+}
+#name-strip .search-hit .hit-name { flex: none; }
+#name-strip .search-hit .hit-ex {
+  flex: 1;
+  min-width: 0;
+  color: var(--text-muted);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+#name-strip .search-hit .hit-type { flex: none; }
+#name-strip .search-hit mark {
+  background: var(--bg-accent-soft);
+  color: inherit;
+  border-bottom: 2px solid var(--accent);
+  padding: 0 1px;
+}
+#name-strip .search-none {
+  margin: 8px 12px;
+  color: var(--text-muted);
+  font-size: 12.5px;
+}
+#name-strip .ns-actions { display: flex; gap: 6px; flex: none; }
+#name-strip .ns-btn {
+  height: 28px;
+  padding: 0 11px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--bg-panel);
+  color: var(--text);
+  font: 500 12.5px var(--font-sans);
+  cursor: pointer;
+}
+#name-strip .ns-btn:hover { background: var(--bg-hover); }
+#name-strip .ns-btn.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--on-accent);
+  font-weight: 600;
+}

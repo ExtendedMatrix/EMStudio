@@ -127,4 +127,28 @@ const eq = (got, want, what) => {
      "…and keeps a matching member in its container's context");
 }
 
+// ── 5 · the full-text search of the name strip ──────────────────────────────
+{
+  globalThis.window ??= globalThis;
+  const Srch = await load("search.ts");
+  const doc = { graph: {
+    nodes: [
+      { id: "u1", name: "USM101", node_type: "US", description: "Muro in blocchetti" },
+      { id: "p1", name: "material_type", node_type: "property", data: { value: "tufo giallo" } },
+      { id: "e1", name: "Medioevo", node_type: "EpochNode" },
+      { id: "u2", name: "US102", node_type: "US", description: "Strato" },
+    ],
+    edges: [
+      { source: "u1", target: "p1", edge_type: "has_property" },
+      { source: "u1", target: "e1", edge_type: "has_first_epoch" },
+    ] } };
+  const ids = (q) => Srch.searchGraph(doc, q).map((h) => h.node.id);
+  ok(ids("tufo").includes("u1"), "a property VALUE finds the unit that has it");
+  ok(ids("medioevo").includes("u1"), "…and so does its epoch's name");
+  eq(ids("muro medioevo"), ["u1"], "every word must match (AND)");
+  eq(ids("medioevo"), ["e1", "u1"], "a hit on the NAME ranks before a hit through the epoch");
+  ok(Srch.highlight("Muro <b>", "muro").startsWith("<mark>Muro</mark> &lt;b&gt;"),
+     "the excerpt is escaped and the words marked");
+}
+
 console.log(`studio: ${checks} checks passed`);
