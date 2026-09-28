@@ -80,6 +80,8 @@ export interface CanvasTheme {
   edgeProvenance: string;
   /** the neutral fill a node falls back to when the rules give none */
   nodeFallbackFill: string;
+  /** ink on an accent (ochre) fill: count badges, folded-group badges */
+  onAccent: string;
   /** ink for a label drawn ON a coloured (semantic) fill — see labelOn() */
   onLight: string;
   onDark: string;
@@ -112,6 +114,7 @@ const LIGHT: CanvasTheme = {
   edgeInk: "#1a1a1a",
   edgeProvenance: "#9a7b34",
   nodeFallbackFill: "#FFFFFF",
+  onAccent: "#1D1D1B",
   onLight: "#1a1a1a",
   onDark: "#f5f5f5",
 };
@@ -150,6 +153,7 @@ const DARK: CanvasTheme = {
   edgeInk: "#e3e8ef",
   edgeProvenance: "#d9bd7a",
   nodeFallbackFill: "#242C38",
+  onAccent: "#1D1D1B",
   onLight: "#1a1a1a",
   onDark: "#f5f5f5",
 };
@@ -246,4 +250,76 @@ export function watchSystemTheme(onChange: (name: ThemeName) => void): void {
     if (storedMode() !== "auto") return;
     onChange(applyTheme("auto"));
   });
+}
+
+// ── Canvas type (PELLE) ──────────────────────────────────────────────────────
+//
+// The canvas used to write `system-ui, sans-serif` by hand in a dozen places.
+// Now ONE helper builds every canvas font, and the family comes from the CSS
+// variable `--font-canvas` (default Sora) — the same value the chrome uses, so
+// the drawing and the panels speak one face. Mono (ids, dates) from `--font-mono`.
+//
+// Read lazily and cached: `getComputedStyle` per label would be a style recalc
+// per node per frame. `refreshCanvasFonts()` re-reads (after the webfonts load).
+
+const SANS_FALLBACK = "Sora, system-ui, -apple-system, sans-serif";
+const MONO_FALLBACK = "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace";
+let sansFamily: string | null = null;
+let monoFamily: string | null = null;
+
+function readVar(name: string, fallback: string): string {
+  if (typeof document === "undefined" || typeof getComputedStyle !== "function")
+    return fallback;
+  const v = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+  return v || fallback;
+}
+
+export function refreshCanvasFonts(): void {
+  sansFamily = readVar("--font-canvas", SANS_FALLBACK);
+  monoFamily = readVar("--font-mono", MONO_FALLBACK);
+}
+
+/** A canvas `ctx.font` string: `canvasFont(600, 11)` → `600 11px Sora, …`.
+ *  `style` carries an optional `italic`; `mono` switches to the mono stack. */
+export function canvasFont(
+  weight: number | string,
+  px: number,
+  opts: { mono?: boolean; italic?: boolean } = {},
+): string {
+  if (sansFamily === null || monoFamily === null) refreshCanvasFonts();
+  const fam = opts.mono ? monoFamily! : sansFamily!;
+  return `${opts.italic ? "italic " : ""}${weight} ${px}px ${fam}`;
+}
+
+/** The canvas type scale of the desk (EM design system): fixed sizes, and a
+ *  label that does not fit is cut with an ellipsis — never shrunk below 10px. */
+export const CANVAS_TYPE = {
+  nodeLabel: { weight: 600, px: 11 },
+  groupHeader: { weight: 600, px: 11 },
+  laneLabel: { weight: 600, px: 12.5 },
+  laneDates: { weight: 400, px: 11 },
+  minPx: 10,
+} as const;
+
+/**
+ * Redraw once when the webfonts are in. A canvas does not repaint itself when a
+ * font arrives, so without this the first frame stays in the fallback face until
+ * the next interaction. `document.fonts.load` and not only `.ready`: a face the
+ * DOM has not used yet (600 on a fresh canvas) is not pending, so `.ready`
+ * alone would resolve without it.
+ */
+export function whenCanvasFontsReady(redraw: () => void): void {
+  const fonts = typeof document !== "undefined" ? document.fonts : undefined;
+  if (!fonts) return;
+  const fam = readVar("--font-canvas", SANS_FALLBACK).split(",")[0].trim();
+  void Promise.all([
+    fonts.load(`400 11px ${fam}`),
+    fonts.load(`600 11px ${fam}`),
+  ])
+    .catch(() => undefined)
+    .then(() => fonts.ready)
+    .then(() => {
+      refreshCanvasFonts();
+      redraw();
+    });
 }

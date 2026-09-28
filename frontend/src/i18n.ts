@@ -1070,6 +1070,7 @@ const EN: Dict = {
   "panel.inspector": "Inspector",
   "panel.log": "Log",
   "footer.warnings": "{n} warnings",
+  "footer.warning1": "1 warning",
   "footer.warningsTip": "Warnings and errors in the Log",
   "panel.stratiminer": "StratiMiner",
   // WIN2 · the canvas projections a graph window can show
@@ -2332,6 +2333,7 @@ const IT: Dict = {
   "panel.inspector": "Ispettore",
   "panel.log": "Registro",
   "footer.warnings": "{n} avvisi",
+  "footer.warning1": "1 avviso",
   "footer.warningsTip": "Avvisi ed errori nel Registro",
   "panel.stratiminer": "StratiMiner",
   // WIN2 · la proiezione DTC

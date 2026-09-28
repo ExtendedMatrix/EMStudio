@@ -15,7 +15,7 @@ import {
 import { BAND_GAP } from "./scene";
 import {
   segmentEntry, drawBoxOf, handleAnchor, shapePath } from "./shape-geom";
-import { canvasTheme, labelOn } from "./theme";
+import { CANVAS_TYPE, canvasFont, canvasTheme, labelOn } from "./theme";
 import type { Scene, Viewport } from "./scene";
 
 export interface ConnectDrag {
@@ -166,6 +166,11 @@ const LANE_COLORS = (): [string, string] => {
   return [t.laneA, t.laneB];
 };
 const accentColor = (): string => canvasTheme().accent;
+/** PELLE · the fixed size of the desk's scale, stepped down to 10px only when
+ *  the box is too short to hold it (a label never scales with the box height
+ *  any more, and never goes below 10px: a long one is cut with an ellipsis). */
+const fitPx = (px: number, boxH: number): number =>
+  boxH >= px * 2 ? px : Math.max(CANVAS_TYPE.minPx, Math.min(px, boxH * 0.55));
 const groupHeaderFill = (): string => canvasTheme().groupHeaderFallback;
 const groupBodyFill = (): string => canvasTheme().groupBody;
 
@@ -323,7 +328,7 @@ function drawGroupContainer(
   // themes, so a per-theme ink went illegible on it (peach-on-cyan in dark). The
   // label carries its own contrast via labelOn (DARK2).
   if (drawLabels) {
-    ctx.font = `600 ${Math.min(11, g.headerH * 0.55)}px system-ui, sans-serif`;
+    ctx.font = canvasFont(CANVAS_TYPE.groupHeader.weight, fitPx(CANVAS_TYPE.groupHeader.px, g.headerH));
     ctx.fillStyle = labelOn(headerFill);
     ctx.textAlign = "left";
     ctx.textBaseline = "middle";
@@ -343,8 +348,8 @@ function drawGroupContainer(
     ctx.arc(g.x + g.w, g.y, r, 0, Math.PI * 2);
     ctx.fillStyle = accentColor();
     ctx.fill();
-    ctx.fillStyle = canvasTheme().handleFill;
-    ctx.font = `${r * 1.1}px system-ui, sans-serif`;
+    ctx.fillStyle = canvasTheme().onAccent;
+    ctx.font = canvasFont(600, r * 1.1);
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
     ctx.fillText(String(badge), g.x + g.w, g.y + r * 0.05);
@@ -687,7 +692,7 @@ export function render(
       ctx.stroke();
       if (drawLabels) {
         const label = String(n.node.name || n.id);
-        ctx.font = `10px system-ui, sans-serif`;
+        ctx.font = canvasFont(CANVAS_TYPE.nodeLabel.weight, CANVAS_TYPE.minPx);
         // ON the sheet, whose fill is white paper from the datamodel: the ink
         // follows the FILL, not the theme (`labelOn`). Using the canvas ink here
         // made the name disappear on a white sheet in dark mode.
@@ -706,7 +711,7 @@ export function render(
         ctx.fillStyle = n.instanceOf ? canvasTheme().labelMuted : canvasTheme().labelInk;
         ctx.fill();
         ctx.fillStyle = canvasTheme().handleFill;
-        ctx.font = `${r * 1.15}px system-ui, sans-serif`;
+        ctx.font = canvasFont(600, r * 1.15);
         ctx.textAlign = "center";
         ctx.textBaseline = "middle";
         ctx.fillText(String(n.useCount), bx, by + r * 0.05);
@@ -745,7 +750,7 @@ export function render(
       ctx.stroke();
       if (drawLabels) {
         const label = String(n.node.name || n.id);
-        ctx.font = `${Math.min(11, n.h * 0.42)}px system-ui, sans-serif`;
+        ctx.font = canvasFont(500, fitPx(CANVAS_TYPE.nodeLabel.px, n.h));
         // the annotation draws its own pale field (st.fill): ink from the fill
         ctx.fillStyle = labelInk(
           state,
@@ -799,8 +804,7 @@ export function render(
       ctx.drawImage(icon, ix, iy, iw, ih);
       if (drawLabels) {
         const label = String(n.node.name || n.id);
-        const fs = 10;
-        ctx.font = `${fs}px system-ui, sans-serif`;
+        ctx.font = canvasFont(CANVAS_TYPE.nodeLabel.weight, CANVAS_TYPE.minPx);
         ctx.fillStyle = labelInk(state, n.node.id ?? n.id, canvasTheme().labelInk);
         if (st.labelPosition === "top_left") {
           ctx.textAlign = "left";
@@ -920,8 +924,7 @@ export function render(
 
     if (drawLabels) {
       const label = String(n.node.name || n.id);
-      const fs = Math.min(11, n.h * 0.42);
-      ctx.font = `${fs}px system-ui, sans-serif`;
+      ctx.font = canvasFont(CANVAS_TYPE.nodeLabel.weight, fitPx(CANVAS_TYPE.nodeLabel.px, n.h));
       // A SHRUNKEN shape (BR) cannot hold its own name: `textColor` is computed
       // from the fill, so over BR's black square it is near-white — and the name
       // is far wider than 22 px, so most of it would land outside the square as
@@ -965,8 +968,8 @@ export function render(
       ctx.arc(bx, by, r, 0, Math.PI * 2);
       ctx.fillStyle = accentColor();
       ctx.fill();
-      ctx.fillStyle = canvasTheme().handleFill;
-      ctx.font = `${r * 1.1}px system-ui, sans-serif`;
+      ctx.fillStyle = canvasTheme().onAccent;
+      ctx.font = canvasFont(600, r * 1.1);
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
       ctx.fillText(String(n.badge), bx, by + r * 0.05);
@@ -1026,7 +1029,7 @@ export function render(
   for (const n of scene.nodes) {
     if (!n.pinned || n.collapsed) continue;
     const s = 12 / vp.scale;
-    ctx.font = `${s}px system-ui, sans-serif`;
+    ctx.font = canvasFont(400, s);
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
     ctx.fillText("🔒", n.x + n.w - s * 0.35, n.y + s * 0.35);
@@ -1141,7 +1144,7 @@ export function render(
       ctx.stroke();
       if (isMore) {
         ctx.fillStyle = labelOn(canvasTheme().handleFill);
-        ctx.font = `700 ${Math.round(badgePx * 0.5)}px system-ui, sans-serif`;
+        ctx.font = canvasFont(700, Math.round(badgePx * 0.5));
         ctx.fillText(`+${ads.length - nShown}`, bx + badgePx / 2, topY + badgePx / 2 + 0.5);
         adornmentHits.push({ ornamentId: n.id, x: bx, y: topY, w: badgePx, h: badgePx });
         continue;
@@ -1156,7 +1159,7 @@ export function render(
       if (img) ctx.drawImage(img, bx + pad, topY + pad, badgePx - 2 * pad, badgePx - 2 * pad);
       else {
         ctx.fillStyle = labelOn(canvasTheme().handleFill);
-        ctx.font = `700 ${Math.round(badgePx * 0.62)}px system-ui, sans-serif`;
+        ctx.font = canvasFont(700, Math.round(badgePx * 0.62));
         ctx.fillText((b.kind[0] || "?").toUpperCase(), bx + badgePx / 2, topY + badgePx / 2 + 0.5);
       }
       if (b.inherited) {
@@ -1208,7 +1211,7 @@ export function render(
     ctx.strokeStyle = canvasTheme().chipBorder;
     ctx.stroke();
     ctx.fillStyle = labelOn(pdFill);
-    ctx.font = `700 ${Math.round(badgePx * 0.55)}px system-ui, sans-serif`;
+    ctx.font = canvasFont(700, Math.round(badgePx * 0.55));
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
     ctx.fillText("PD", tx + PD_W / 2, ty + badgePx / 2 + 0.5);
@@ -1248,7 +1251,7 @@ export function render(
       ctx.strokeRect(x, y, PD_TAG_W, PD_TAG_H);
     }
     ctx.fillStyle = "#5a4522";
-    ctx.font = "700 9px system-ui, sans-serif";
+    ctx.font = canvasFont(700, 9);
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
     ctx.fillText("PD", x + PD_TAG_W / 2, y + PD_TAG_H / 2 + 0.5);
@@ -1271,7 +1274,7 @@ export function render(
     ctx.lineWidth = 0.8;
     ctx.stroke();
     ctx.fillStyle = "#3a2a00";
-    ctx.font = "700 8px system-ui, sans-serif";
+    ctx.font = canvasFont(700, 8);
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
     ctx.fillText("!", x + WARN_W / 2, cy + 2);
@@ -1298,9 +1301,9 @@ export function render(
     const showBounds = !!boundsText && sh > 36;
     // The chip now carries the epoch's own colour, so there is no separate
     // colour dot: the whole pastille IS the colour swatch (DARK2).
-    ctx.font = "600 12px system-ui, sans-serif";
+    ctx.font = canvasFont(CANVAS_TYPE.laneLabel.weight, CANVAS_TYPE.laneLabel.px);
     const nameW = ctx.measureText(lane.label).width;
-    ctx.font = "10px system-ui, sans-serif";
+    ctx.font = canvasFont(CANVAS_TYPE.laneDates.weight, CANVAS_TYPE.laneDates.px, { mono: true });
     const boundsW = showBounds ? ctx.measureText(boundsText).width : 0;
     const hasPd = !!lane.paradataGroupId;
     const tagSpace = hasPd ? PD_TAG_W + 6 : 0;
@@ -1332,15 +1335,15 @@ export function render(
     }
     const textX = chipX + 8;
     ctx.fillStyle = chipInk;
-    ctx.font = "600 12px system-ui, sans-serif";
+    ctx.font = canvasFont(CANVAS_TYPE.laneLabel.weight, CANVAS_TYPE.laneLabel.px);
     ctx.fillText(lane.label, textX, ty);
     if (showBounds) {
       // the bounds line is the same ink, softened — still derived from the fill
       ctx.save();
       ctx.globalAlpha = 0.72;
       ctx.fillStyle = chipInk;
-      ctx.font = "10px system-ui, sans-serif";
-      ctx.fillText(boundsText, textX, ty + 15);
+      ctx.font = canvasFont(CANVAS_TYPE.laneDates.weight, CANVAS_TYPE.laneDates.px, { mono: true });
+      ctx.fillText(boundsText, textX, ty + 16);
       ctx.restore();
     }
     if (hasWarn) drawWarn(textX + nameW + 4, ty + 6);
@@ -1445,9 +1448,9 @@ export function render(
       // the residual band never does (it's the epoch, already on the lane chip)
       const hasBounds = !sb.residual && (sb.start != null || sb.end != null);
       const boundsText = hasBounds ? `${sb.start ?? "?"} – ${sb.end ?? "?"}` : "";
-      ctx.font = "600 10px system-ui, sans-serif";
+      ctx.font = canvasFont(sb.residual ? 400 : 600, 11, { italic: sb.residual });
       const nameW = ctx.measureText(sb.label).width;
-      ctx.font = "9px system-ui, sans-serif";
+      ctx.font = canvasFont(400, CANVAS_TYPE.minPx, { mono: true });
       const boundsW = hasBounds ? ctx.measureText(boundsText).width : 0;
       // indent deeper (sub-phase) bands so the hierarchy reads at a glance
       const chipX = RAIL + 14 + (sb.depth ?? 0) * 16;
@@ -1456,7 +1459,7 @@ export function render(
       const hasWarn = !!sb.warn;
       const warnSpace = hasWarn ? WARN_W + 4 : 0;
       const chipW = 7 + 5 + Math.max(nameW, boundsW) + warnSpace + tagSpace + 8;
-      const chipH = hasBounds ? 28 : 16;
+      const chipH = hasBounds ? 30 : 17;
       const selectedBand = sb.phaseId === state.selectedId;
       // same rule as the lane chip: a coloured phase fills its own colour and
       // takes labelOn for the ink; the residual band (the epoch) has no colour
@@ -1483,16 +1486,14 @@ export function render(
       }
       const bandTextX = chipX + 7 + 5;
       ctx.fillStyle = bandInk;
-      ctx.font = sb.residual
-        ? "italic 10px system-ui, sans-serif"
-        : "600 10px system-ui, sans-serif";
+      ctx.font = canvasFont(sb.residual ? 400 : 600, 11, { italic: sb.residual });
       ctx.fillText(sb.label, bandTextX, ty);
       if (hasBounds) {
         ctx.save();
         ctx.globalAlpha = 0.72;
         ctx.fillStyle = bandInk;
-        ctx.font = "9px system-ui, sans-serif";
-        ctx.fillText(boundsText, bandTextX, ty + 13);
+        ctx.font = canvasFont(400, CANVAS_TYPE.minPx, { mono: true });
+        ctx.fillText(boundsText, bandTextX, ty + 15);
         ctx.restore();
       }
       if (hasWarn) drawWarn(bandTextX + nameW + 4, ty + 5);

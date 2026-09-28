@@ -172,6 +172,11 @@ function arrowSvg(r: EdgeRoute, size: number, color: string): string {
   return `<polygon points="${tip.x},${tip.y} ${p1.join(",")} ${p2.join(",")}" fill="${color}"/>`;
 }
 
+/** PELLE · the canvas face (Sora, see theme.ts `canvasFont`), so an exported
+ *  SVG reads like the canvas. The font is NOT embedded: a viewer without Sora
+ *  installed falls back to its system sans, as it did before. */
+const SVG_FONT = "Sora, system-ui, sans-serif";
+
 export function sceneToSvg(
   scene: Scene,
   edgeVisible: (t: string | undefined) => boolean,
@@ -181,7 +186,7 @@ export function sceneToSvg(
   const pad = 30;
   const parts: string[] = [];
   parts.push(
-    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${b.x - pad} ${b.y - pad} ${b.w + pad * 2} ${b.h + pad * 2}" font-family="system-ui, sans-serif">`,
+    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${b.x - pad} ${b.y - pad} ${b.w + pad * 2} ${b.h + pad * 2}" font-family="${SVG_FONT}">`,
   );
   parts.push(`<title>${esc(title)}</title>`);
   parts.push(
@@ -193,7 +198,7 @@ export function sceneToSvg(
       `<rect x="${b.x - pad}" y="${lane.y}" width="${b.w + pad * 2}" height="${lane.height}" fill="${i % 2 ? INK.laneB : INK.laneA}"/>`,
     );
     parts.push(
-      `<text x="${b.x - pad + 6}" y="${lane.y + 16}" font-size="13" fill="${INK.label}">${esc(lane.label)}</text>`,
+      `<text x="${b.x - pad + 6}" y="${lane.y + 16}" font-size="12.5" font-weight="600" fill="${INK.label}">${esc(lane.label)}</text>`,
     );
   });
 
@@ -217,7 +222,7 @@ export function sceneToSvg(
     const st = nodeStyle(n.node.node_type);
     const label = esc(String(n.node.name || n.id).slice(0, 24));
     parts.push(
-      `<text x="${n.x + n.w / 2}" y="${n.y + n.h / 2}" font-size="${Math.min(11, n.h * 0.42)}" fill="${st.textColor}" text-anchor="middle" dominant-baseline="central">${label}</text>`,
+      `<text x="${n.x + n.w / 2}" y="${n.y + n.h / 2}" font-size="${n.h >= 22 ? 11 : 10}" font-weight="600" fill="${st.textColor}" text-anchor="middle" dominant-baseline="central">${label}</text>`,
     );
   }
 
@@ -234,7 +239,7 @@ export function sceneToSvg(
 // picture that invents it.
 
 const SVG_HEAD = '<svg xmlns="http://www.w3.org/2000/svg" '
-  + 'font-family="system-ui, sans-serif"';
+  + `font-family="${SVG_FONT}"`;
 
 /** A metric scale bar's nice round length, given metres per pixel. */
 function niceMetres(target: number): number {

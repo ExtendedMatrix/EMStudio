@@ -141,6 +141,7 @@ import {
   applyTheme,
   canvasTheme,
   storeMode,
+  whenCanvasFontsReady,
   storedMode,
   watchSystemTheme,
   type ThemeMode,
@@ -10416,7 +10417,7 @@ function renderWarningsPill(): void {
   const el = document.getElementById("footer-warnings");
   if (!el) return;
   const owed = logAttention();
-  el.textContent = t("footer.warnings", { n: String(owed) });
+  el.textContent = owed === 1 ? t("footer.warning1") : t("footer.warnings", { n: String(owed) });
   el.title = t("footer.warningsTip");
   el.classList.toggle("ok", owed === 0);
 }
@@ -19950,6 +19951,9 @@ void wireDesktopDeepLink();
 initI18n();
 populateLanguageSelect();
 renderWarningsPill();
+// PELLE · the canvas face (Sora) arrives after the first frame; one redraw when
+// it is in, so the drawing does not stay in the fallback until the next click.
+whenCanvasFontsReady(() => draw());
 // Evaluate the empty state ONCE at boot. Without this, the canvas overlays kept
 // whatever the markup said until the first document arrived — so the filter
 // button sat there, enabled, filtering nothing (POL1 point 8 was only half true:
