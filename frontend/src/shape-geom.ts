@@ -20,8 +20,71 @@
  * Everything type-specific comes from `em_visual_rules` via `nodeStyle()`;
  * nothing about the EM language is decided here.
  */
+import rules from "./assets/em_visual_rules.json";
 import { ICON_NODE_TYPES } from "./icons";
 import type { NodeStyle } from "./palette";
+
+/**
+ * TOCCARE · the tolerance of every pointer test on a node, in SCREEN pixels.
+ *
+ * One number, declared here and divided by the zoom at the call site: a node
+ * that is 6 px tall on screen stays catchable, one that is 600 px tall does not
+ * grow a 30 px halo. It is applied AROUND the silhouette, never instead of it —
+ * `hitTest` tries the exact shape first, so a near miss can never steal a click
+ * from the node that is actually under the pointer.
+ */
+export const HIT_TOL_PX = 3;
+
+/** The tallest a glyph is ever drawn, world units (the renderer's historic 30). */
+export const GLYPH_MAX_H = 30;
+
+/** Width / height of the document SHEET the renderer draws in vector (not the
+ *  bitmap `document.svg`, which nobody draws): one constant for both. */
+export const DOC_SHEET_ASPECT = 0.78;
+
+const GLYPHS: Record<string, { aspect?: unknown }> =
+  (rules as unknown as { "2d_glyphs"?: Record<string, { aspect?: unknown }> })[
+    "2d_glyphs"
+  ] ?? {};
+
+/**
+ * The DECLARED aspect (width / height) of a node's glyph, or null.
+ *
+ * TOCCARE · this is what retires the "ICON nodes keep the box" exception of EM1:
+ * the proportions were only knowable once a bitmap had decoded, so the hit area
+ * would have changed shape as icons loaded. Since NIGHT-GLIFI the datamodel
+ * declares `2d_glyphs[*].aspect` — keyed by node_type, or `dtc:<kind>` for the
+ * DTC glyphs chosen per node — so the fitted rect is a number known before any
+ * image exists, the same number em-core reads for the EM3 box.
+ *
+ * The order mirrors the renderer: a type that has its own icon draws that icon,
+ * and only otherwise does a `dtc_kind` pick the glyph.
+ */
+export function glyphAspect(
+  nodeType: string,
+  data?: Record<string, unknown> | null,
+): number | null {
+  if (nodeType === "document") return DOC_SHEET_ASPECT;
+  const kind = data?.["dtc_kind"];
+  const entry = ICON_NODE_TYPES.has(nodeType)
+    ? GLYPHS[nodeType]
+    : typeof kind === "string"
+      ? GLYPHS[`dtc:${kind}`]
+      : undefined;
+  const a = entry?.aspect;
+  return typeof a === "number" && Number.isFinite(a) && a > 0 ? a : null;
+}
+
+/**
+ * The rect a glyph is DRAWN in: "contain" fit of the declared aspect inside the
+ * node box, never taller than GLYPH_MAX_H, centred. The renderer draws into it
+ * and the hit test tests it — one expression, so they cannot drift.
+ */
+export function glyphRectOf(n: Box, aspect: number): Box {
+  const h = Math.min(n.h, GLYPH_MAX_H, n.w / aspect);
+  const w = h * aspect;
+  return { x: n.x + n.w / 2 - w / 2, y: n.y + n.h / 2 - h / 2, w, h };
+}
 
 /**
  * Types the renderer draws as a GLYPH rather than as a shape — an image fitted
@@ -57,11 +120,12 @@ export function drawsAsGlyph(
  * agreed by coincidence, and a coincidence is not a contract — the visible bullet
  * and the grabbable bullet are the same object and must come from one expression.
  *
- * The anchor is the middle of the box's RIGHT EDGE, and that is the reason EM2
- * squared the box of glyph nodes in em-core: the handle is only "attached to the
- * glyph" if the box ends where the glyph ends. Nothing is corrected here — a
- * handle nudged inwards to meet a narrow drawing would be a second geometry, and
- * the first thing it would break is the edge that starts from it.
+ * The anchor is the middle of the RIGHT EDGE of the box it is given. Callers
+ * give it `visibleBoxOf(n)` (scene.ts), not the node box (TOCCARE): for most
+ * types the two coincide — EM2 squared the glyph boxes in em-core precisely so
+ * that they would — but a `document` keeps em-core's 90 × 32 box around a 23 px
+ * sheet, and a handle 33 px to the right of the sheet is attached to nothing.
+ * That is not a second geometry: it is the one the renderer draws with.
  */
 export function handleAnchor(n: Box): { x: number; y: number } {
   return { x: n.x + n.w, y: n.y + n.h / 2 };
@@ -317,17 +381,82 @@ export function pointInShape(
     }
     case "corner_brackets":
       return true; // the extent, on purpose — see the doc comment
-    default: {
-      const r = cornerRadius(h);
-      // inside the cross made by the two inner rectangles → in, no corner to test
-      const inX = px >= x + r && px <= x + w - r;
-      const inY = py >= y + r && py <= y + h - r;
-      if (inX || inY) return true;
-      const cx = px < x + r ? x + r : x + w - r;
-      const cy = py < y + r ? y + r : y + h - r;
-      return (px - cx) ** 2 + (py - cy) ** 2 <= r * r;
-    }
+    default:
+      return inRoundRect(x, y, w, h, cornerRadius(h), px, py);
   }
+}
+
+/** Inside a rounded rectangle, the radius computed exactly (no "close enough"). */
+function inRoundRect(
+  x: number, y: number, w: number, h: number, r: number, px: number, py: number,
+): boolean {
+  if (px < x || px > x + w || py < y || py > y + h) return false;
+  // inside the cross made by the two inner rectangles → in, no corner to test
+  const inX = px >= x + r && px <= x + w - r;
+  const inY = py >= y + r && py <= y + h - r;
+  if (inX || inY) return true;
+  const cx = px < x + r ? x + r : x + w - r;
+  const cy = py < y + r ? y + r : y + h - r;
+  return (px - cx) ** 2 + (py - cy) ** 2 <= r * r;
+}
+
+function distSqToSegment(
+  px: number, py: number, ax: number, ay: number, bx: number, by: number,
+): number {
+  const vx = bx - ax, vy = by - ay;
+  const len2 = vx * vx + vy * vy;
+  const t = len2 ? Math.max(0, Math.min(1, ((px - ax) * vx + (py - ay) * vy) / len2)) : 0;
+  const dx = px - (ax + t * vx), dy = py - (ay + t * vy);
+  return dx * dx + dy * dy;
+}
+
+/**
+ * Inside the shape, or within `tol` world units of its outline (TOCCARE).
+ *
+ * The tolerance follows the silhouette — a band of constant width around the
+ * polygon, the ellipse or the rounded rectangle — instead of inflating the box,
+ * which would hand a rhombus back the corners EM1 took away from it.
+ */
+export function pointNearShape(
+  shape: string,
+  b: Box,
+  px: number,
+  py: number,
+  tol: number,
+): boolean {
+  if (pointInShape(shape, b, px, py)) return true;
+  if (tol <= 0) return false;
+  if (px < b.x - tol || px > b.x + b.w + tol || py < b.y - tol || py > b.y + b.h + tol)
+    return false;
+  const poly = polygonOf(shape, b);
+  if (poly) {
+    const t2 = tol * tol;
+    for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+      if (distSqToSegment(px, py, poly[j][0], poly[j][1], poly[i][0], poly[i][1]) <= t2)
+        return true;
+    }
+    return false;
+  }
+  const { x, y, w, h } = b;
+  switch (shape) {
+    case "ellipse":
+    case "circle": {
+      const nx = (px - (x + w / 2)) / (w / 2 + tol);
+      const ny = (py - (y + h / 2)) / (h / 2 + tol);
+      return nx * nx + ny * ny <= 1;
+    }
+    case "corner_brackets":
+      return true; // the box grown by tol, tested just above
+    default:
+      // Minkowski sum of a rounded rect and a disc: the same rect, radius + tol
+      return inRoundRect(x - tol, y - tol, w + 2 * tol, h + 2 * tol,
+                         cornerRadius(h) + tol, px, py);
+  }
+}
+
+/** Inside a rect grown by `tol` on every side. */
+export function pointNearRect(b: Box, px: number, py: number, tol: number): boolean {
+  return px >= b.x - tol && px <= b.x + b.w + tol && py >= b.y - tol && py <= b.y + b.h + tol;
 }
 
 /**

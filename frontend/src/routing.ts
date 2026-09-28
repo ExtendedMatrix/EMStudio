@@ -2,7 +2,20 @@
 // target, and "bridge" arcs where a horizontal run crosses a vertical run of
 // another edge. Routes are cached per scene + edge-filter key and recomputed
 // on any document mutation (scenes are rebuilt then).
-import type { Scene } from "./scene";
+import { visibleBoxOf, type Scene } from "./scene";
+import type { Box } from "./shape-geom";
+
+/**
+ * TOCCARE · an edge starts and ends on what is DRAWN (`visibleBoxOf`), not on the
+ * node box: for a document the box is 90 wide around a 23 px sheet, and ports
+ * spread along the box put the connector's foot in empty canvas. For every other
+ * type the two rects coincide, so their routes do not change.
+ */
+function boxesOf(scene: Scene): Map<string, Box> {
+  const m = new Map<string, Box>();
+  for (const n of scene.byId.values()) m.set(n.id, visibleBoxOf(n));
+  return m;
+}
 
 export interface EdgeRoute {
   /** polyline points, world space (first = source anchor, last = target) */
@@ -28,7 +41,7 @@ const EPS = 0.5;
  * distinct anchor positions spread along the side (yEd-style ports),
  * ordered by the position of the opposite endpoint so fans don't cross.
  */
-function computePorts(scene: Scene): Map<string, number> {
+function computePorts(scene: Scene, vb: Map<string, Box>): Map<string, number> {
   interface Slot {
     edge: number;
     end: "s" | "t";
@@ -49,8 +62,8 @@ function computePorts(scene: Scene): Map<string, number> {
 
   for (let i = 0; i < scene.edges.length; i++) {
     const e = scene.edges[i];
-    const a = scene.byId.get(e.source)!;
-    const b = scene.byId.get(e.target)!;
+    const a = vb.get(e.source)!;
+    const b = vb.get(e.target)!;
     if (b.y >= a.y + a.h - 2) {
       push(e.source, "bottom", i, "s", b.x + b.w / 2);
       push(e.target, "top", i, "t", a.x + a.w / 2);
@@ -71,7 +84,7 @@ function computePorts(scene: Scene): Map<string, number> {
   for (const [key, slots] of sides) {
     const nodeId = key.slice(0, key.lastIndexOf("|"));
     const side = key.slice(key.lastIndexOf("|") + 1);
-    const n = scene.byId.get(nodeId)!;
+    const n = vb.get(nodeId)!;
     slots.sort(
       (a, b) => a.otherPos - b.otherPos || a.edge - b.edge,
     );
@@ -90,10 +103,11 @@ function routeOne(
   scene: Scene,
   si: number,
   ports: Map<string, number>,
+  vb: Map<string, Box>,
 ): { x: number; y: number }[] {
   const e = scene.edges[si];
-  const a = scene.byId.get(e.source)!;
-  const b = scene.byId.get(e.target)!;
+  const a = vb.get(e.source)!;
+  const b = vb.get(e.target)!;
   const sp = ports.get(`${si}|s`);
   const tp = ports.get(`${si}|t`);
   const acx = sp ?? a.x + a.w / 2;
@@ -177,9 +191,10 @@ interface VSeg {
 }
 
 export function routeScene(scene: Scene, visible: boolean[]): EdgeRoute[] {
-  const ports = computePorts(scene);
+  const vb = boxesOf(scene);
+  const ports = computePorts(scene, vb);
   const routes: EdgeRoute[] = scene.edges.map((_, i) => ({
-    pts: routeOne(scene, i, ports),
+    pts: routeOne(scene, i, ports, vb),
     bridges: [],
   }));
 

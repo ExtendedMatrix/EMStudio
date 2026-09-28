@@ -12,9 +12,10 @@ import {
   traceRoute,
   type EdgeRoute,
 } from "./routing";
-import { BAND_GAP } from "./scene";
+import { BAND_GAP, visibleBoxOf } from "./scene";
 import {
-  segmentEntry, drawBoxOf, handleAnchor, shapePath } from "./shape-geom";
+  segmentEntry, drawBoxOf, DOC_SHEET_ASPECT, glyphAspect, glyphRectOf, handleAnchor,
+  shapePath } from "./shape-geom";
 import { CANVAS_TYPE, canvasFont, canvasTheme, labelOn } from "./theme";
 import type { Scene, Viewport } from "./scene";
 
@@ -664,10 +665,8 @@ export function render(
       // WIDTH says canonical/instance, COLOUR says geometry — resolved once,
       // from the datamodel, by the same rule s3Dgraphy uses.
       const variant = documentVariant(data, isCanonical);
-      const ih = Math.min(n.h, 30);
-      const iw = ih * 0.78;
-      const x0 = n.x + n.w / 2 - iw / 2;
-      const y0 = n.y + n.h / 2 - ih / 2;
+      // TOCCARE · the sheet's rect is `glyphRectOf` — the one the hit test uses
+      const { x: x0, y: y0, w: iw, h: ih } = glyphRectOf(n, DOC_SHEET_ASPECT);
       const f = iw * 0.32; // folded corner
       ctx.beginPath();
       ctx.moveTo(x0, y0);
@@ -797,14 +796,15 @@ export function render(
       // em-core, they are what hit-testing and edge routing use, and node sizes
       // sit under the determinism contract (invariant 7, the 8 layout tests).
       // Doing it in the renderer alone would draw a box that clicks do not match.
-      const aspect = icon.naturalWidth / Math.max(1, icon.naturalHeight);
-      const maxH = Math.min(n.h, 30);
-      const maxW = n.w;
-      const scale = Math.min(maxH, maxW / aspect);
-      const ih = scale;
-      const iw = scale * aspect;
-      const ix = n.x + n.w / 2 - iw / 2;
-      const iy = n.y + n.h / 2 - ih / 2;
+      //
+      // TOCCARE · the aspect is the DECLARED one (`2d_glyphs`, via glyphAspect)
+      // whenever there is one, so the drawn rect is `glyphRectOf` — the rect the
+      // hit test, the ring and the handle use. The bitmap's own proportions are
+      // the fallback for a glyph the datamodel does not describe.
+      const aspect =
+        glyphAspect(n.node.node_type, n.node.data as Record<string, unknown> | undefined) ??
+        icon.naturalWidth / Math.max(1, icon.naturalHeight);
+      const { x: ix, y: iy, w: iw, h: ih } = glyphRectOf(n, aspect);
       // PELLE · a bitmap rasterised at the size it occupies on the device
       // (drawn size × dpr × zoom band), not the SVG's 23 px natural size scaled up
       ctx.imageSmoothingQuality = "high";
@@ -1022,10 +1022,10 @@ export function render(
       const isActive = n.id === active;
       if (!isActive && !showAll) continue;
       const r = (isActive ? 5.5 : 4) / Math.sqrt(vp.scale);
-      // the anchor is `shape-geom.ts::handleAnchor` — the same expression
-      // `scene.ts::hitHandle` grabs (EM2). Since EM2 gave glyph nodes a square
-      // box in em-core, this lands ON the glyph instead of out in a margin.
-      const ha = handleAnchor(n);
+      // the anchor is `shape-geom.ts::handleAnchor` of `visibleBoxOf` — the same
+      // expression `scene.ts::hitHandle` grabs (EM2, TOCCARE): ON the drawing,
+      // also for the document sheet that em-core leaves in a 90 × 32 box.
+      const ha = handleAnchor(visibleBoxOf(n));
       ctx.beginPath();
       ctx.arc(ha.x, ha.y, r, 0, Math.PI * 2);
       ctx.fillStyle = canvasTheme().handleFill;
@@ -1076,7 +1076,7 @@ export function render(
     const from = scene.byId.get(state.connect.fromId);
     // The band starts at the source node's handle when that node is here, and
     // at the AREA EDGE the connector crossed when it is not (see `fromAnchor`).
-    const origin = from ? handleAnchor(from) : state.connect.fromAnchor;
+    const origin = from ? handleAnchor(visibleBoxOf(from)) : state.connect.fromAnchor;
     // The band must always have a VISIBLE start. Its origin can be off screen in
     // two ways: the node is in another area (`fromAnchor`, set at the crossing)
     // or it is in this scene but outside the current framing — panned away, or

@@ -301,8 +301,10 @@ import {
   hitTest,
   sceneBounds,
   Viewport,
+  visibleBoxOf,
   type Scene,
 } from "./scene";
+import { HIT_TOL_PX } from "./shape-geom";
 import { GROUP_HEADER, GROUP_PAD } from "./views/matrix";
 import { setupSearch } from "./search";
 import {
@@ -451,6 +453,7 @@ import { ingestionAct, storeLocator } from "./stamp-ingest";
 import { buildGraphScene, type GraphAlgorithm } from "./views/graph";
 import { buildMatrixScene } from "./views/matrix";
 import { renderStudyPanel } from "./study-panel";
+import { perfRelease, perfSettled, perfTime, perfTimeAsync } from "./perf";
 
 declare global {
   interface Window {
@@ -1354,6 +1357,46 @@ window.__EM_SCENE__ = () => {
   };
 };
 
+// TOCCARE · the gesture seam: what a drag CHANGED, readable without pixels —
+// the selection, a node's first epoch, its stored position and the undo depth.
+// Read-only like `__EM_SCENE__`; `check-drag`'s browser twin reads it.
+(window as unknown as { __EM_DRAG__?: unknown }).__EM_DRAG__ = {
+  selected: () => [...selectedIds],
+  epochOf: (id: string) =>
+    store?.doc.graph.edges.find(
+      (e) => e.edge_type === "has_first_epoch" && e.source === id,
+    )?.target ?? null,
+  stored: (id: string) => store?.doc.layout?.positions?.[id] ?? null,
+  sceneOf: (id: string) => {
+    const n = scene()?.byId.get(id);
+    return n ? { x: n.x, y: n.y, w: n.w, h: n.h } : null;
+  },
+  laneAt: (id: string) => {
+    const s = scene();
+    const n = s?.byId.get(id);
+    if (!s || !n) return null;
+    const cy = n.y + n.h / 2;
+    return s.lanes.find((l) => cy >= l.y && cy < l.y + l.height)?.id ?? null;
+  },
+  lanes: () => (scene()?.lanes ?? []).map((l) => ({ id: l.id, y: l.y, h: l.height })),
+  memberOf: (id: string) => scene()?.memberOf?.get(id) ?? null,
+  bands: () => (scene()?.subBands ?? []).map((b) => ({ lane: b.laneId, phase: b.phaseId, y: b.y, h: b.height })),
+  /** the node a press at canvas point (sx, sy) would take */
+  hitAt: (sx: number, sy: number) => {
+    const s = scene();
+    if (!s) return null;
+    const w = viewport().toWorld(sx, sy);
+    return hitTest(s, w.x, w.y, hitTol())?.id ?? null;
+  },
+  canUndo: () => !!store?.canUndo,
+  undo: () => store?.undo(),
+  /** a rebuild with nothing changed: what survives it is what was committed */
+  rebuild: () => {
+    buildScenes();
+    draw();
+  },
+};
+
 // …and the FIGURES this process renders for an export, so a test can carry them
 // out and check what the exporters do with them (the pictures are the point of
 // the whole path, and reading them out of a download inside a browser is not a
@@ -1531,10 +1574,12 @@ function paintGraphWindow(p: GraphPaint): void {
       // selection wash must NOT paint a phantom box at its layout rect (its
       // selection is the ring on the "PD" tablet, drawn by the renderer).
       if (!sn || sn.collapsed) continue;
-      const x = sn.x * vp.scale + vp.x - 3;
-      const y = sn.y * vp.scale + vp.y - 3;
-      const bw = sn.w * vp.scale + 6;
-      const bh = sn.h * vp.scale + 6;
+      // TOCCARE · the ring goes around what is DRAWN (visibleBoxOf), like the click
+      const vb = visibleBoxOf(sn);
+      const x = vb.x * vp.scale + vp.x - 3;
+      const y = vb.y * vp.scale + vp.y - 3;
+      const bw = vb.w * vp.scale + 6;
+      const bh = vb.h * vp.scale + 6;
       const active = id === selectedId;
       const th = canvasTheme();
       c.fillStyle = active ? th.selectWash : th.selectWashSoft;
@@ -1557,11 +1602,12 @@ function paintGraphWindow(p: GraphPaint): void {
     c.setLineDash([6, 4]);
     for (const sn of s.nodes) {
       if (sn.collapsed || !isVolatile(store.node(sn.id))) continue;
+      const vb = visibleBoxOf(sn);
       c.strokeRect(
-        sn.x * vp.scale + vp.x - 3,
-        sn.y * vp.scale + vp.y - 3,
-        sn.w * vp.scale + 6,
-        sn.h * vp.scale + 6,
+        vb.x * vp.scale + vp.x - 3,
+        vb.y * vp.scale + vp.y - 3,
+        vb.w * vp.scale + 6,
+        vb.h * vp.scale + 6,
       );
     }
     c.setLineDash([]);
@@ -1601,6 +1647,10 @@ function paintGraphWindow(p: GraphPaint): void {
  * naming that window is a fact rather than a second drawing path.
  */
 function draw(): void {
+  perfTime("draw", drawNow);
+}
+
+function drawNow(): void {
   const liveId = activeWin().id;
   const gesture: LiveGesture = {
     hoverId, hoverEdgeIdx, connect,
@@ -1653,6 +1703,9 @@ function select(nodeId: string | null): void {
   // selection just arrived FROM the peer (avoid the echo loop)
   if (!applyingRemoteSelect) sync.sendSelect(nodeId, [...selectedIds]);
 }
+
+/** TOCCARE · the node hit tolerance in WORLD units: HIT_TOL_PX on screen. */
+const hitTol = (): number => HIT_TOL_PX / viewport().scale;
 
 /** Index (into the current scene's edges) of the connector under a world point,
  *  within a scale-aware grab tolerance; -1 if none. Uses the SAME edgeVisible +
@@ -2610,6 +2663,11 @@ function phasedTopEpochs(): Set<string> {
 }
 
 function buildScenes(): void {
+  perfTime("buildScenes", buildScenesNow);
+  perfSettled();
+}
+
+function buildScenesNow(): void {
   if (!store) return;
   const doc = store.doc;
   const fview = filteredView();
@@ -2745,7 +2803,9 @@ async function refreshMatrixViewLayout(): Promise<void> {
       edges: v.edges,
     } as EmDocument["graph"];
     // seed with the archival layout (From-Sketch) so kept nodes barely move
-    matrixViewLayout = await computeLayout(subGraph, doc.layout ?? undefined);
+    matrixViewLayout = await perfTimeAsync("runLayout", () =>
+      computeLayout(subGraph, doc.layout ?? undefined),
+    );
   } catch {
     matrixViewLayout = null; // fall back to archival on failure
   }
@@ -2925,7 +2985,7 @@ function slotNameFor(d: EmDocument, sourceName: string): string {
  * scene five times and push five ops down the sync channel.
  */
 function wireStore(s: DocumentStore): void {
-  s.onChange(() => {
+  s.onChange(() => perfTime("onChange", () => {
     // Guard: a background slot must not redraw the canvas. Today only the active
     // store is ever mutated (edits go through the active document), but the sync
     // channel and a future aux bake could touch another one, and the symptom of
@@ -2951,7 +3011,7 @@ function wireStore(s: DocumentStore): void {
     renderEmData();           // every mounted EM-Data table is a live view of it
     refreshTileSurfaces();    // WIN7 · …and so is every other window on screen
     draw();
-  });
+  }));
   // forward local graph mutations to a connected peer (op-log, ADR-002 §2).
   // Remote-applied ops don't re-emit (DocumentStore suppresses), so no echo.
   s.onOp((op) => {
@@ -5843,7 +5903,7 @@ function updateConnect(wx: number, wy: number): void {
   connect.x = wx;
   connect.y = wy;
   const s = scene();
-  const hit = s ? hitTest(s, wx, wy) : null;
+  const hit = s ? hitTest(s, wx, wy, hitTol()) : null;
   if (hit && hit.id !== connect.fromId) {
     connect.targetId = hit.id;
     connect.validity = connectValidity(
@@ -18973,7 +19033,9 @@ async function runLayout(fresh: boolean): Promise<void> {
   const sketch = fresh
     ? { pinned: prev?.pinned, anchors: prev?.anchors }
     : prev;
-  const layout = await computeLayout(store.doc.graph, sketch);
+  const layout = await perfTimeAsync("runLayout", () =>
+    computeLayout(store!.doc.graph, sketch),
+  );
   store.setLayout(layout);
 }
 
@@ -19255,7 +19317,7 @@ function wireGraphCanvas(canvas: HTMLCanvasElement, winId: string): void {
       canvas.setPointerCapture(e.pointerId);
       return;
     }
-    const hit = hitTest(s, w.x, w.y);
+    const hit = hitTest(s, w.x, w.y, hitTol());
     if (hit && (view === "matrix" || inContext())) {
       dragMode = "node";
       dragNodeId = hit.id;
@@ -19337,7 +19399,7 @@ function wireGraphCanvas(canvas: HTMLCanvasElement, winId: string): void {
     }
     canvas.setPointerCapture(e.pointerId);
   });
-  canvas.addEventListener("pointermove", (e) => {
+  canvas.addEventListener("pointermove", (e) => perfTime(dragMode === "none" ? "hover" : "dragMove", () => {
     const rect = canvas.getBoundingClientRect();
     const sx = e.clientX - rect.left;
     const sy = e.clientY - rect.top;
@@ -19513,7 +19575,7 @@ function wireGraphCanvas(canvas: HTMLCanvasElement, winId: string): void {
     const s = scene();
     if (!s) return;
     const showId = getSettings().developer.showNodeIds;
-    const hit = hitTest(s, w.x, w.y);
+    const hit = hitTest(s, w.x, w.y, hitTol());
     // A group container's big box shouldn't swallow a connector line running
     // through its empty interior: over a container we still probe for an edge,
     // so hover (and thus selection) reach it. Leaf nodes keep priority.
@@ -19576,8 +19638,9 @@ function wireGraphCanvas(canvas: HTMLCanvasElement, winId: string): void {
     } else {
       tooltip.classList.add("hidden");
     }
-  });
+  }));
   canvas.addEventListener("pointerup", (e) => {
+    perfRelease();
     canvas.classList.remove("panning");
     const mode = dragMode;
     dragMode = "none";
@@ -19668,7 +19731,10 @@ function wireGraphCanvas(canvas: HTMLCanvasElement, winId: string): void {
               // marquee must not sweep it up (it would select a phantom box in the
               // empty space where the PDG's layout rect sits).
               !n.collapsed &&
-              n.x < x1 && n.x + n.w > x0 && n.y < y1 && n.y + n.h > y0,
+              // TOCCARE · the marquee sweeps what is DRAWN, like the click
+              ((b) => b.x < x1 && b.x + b.w > x0 && b.y < y1 && b.y + b.h > y0)(
+                visibleBoxOf(n),
+              ),
           )
           .map((n) => n.id);
         selectMany(ids);
@@ -19684,7 +19750,7 @@ function wireGraphCanvas(canvas: HTMLCanvasElement, winId: string): void {
       return;
     }
     if (!moved) {
-      const hit = hitTest(s, w.x, w.y);
+      const hit = hitTest(s, w.x, w.y, hitTol());
       // group container ± toggle
       const toggle = hitGroupToggle(s, w.x, w.y);
       if (toggle && store) {
@@ -19770,7 +19836,7 @@ function wireGraphCanvas(canvas: HTMLCanvasElement, winId: string): void {
       return;
     }
     const w = worldPos(e);
-    const hit = hitTest(s, w.x, w.y);
+    const hit = hitTest(s, w.x, w.y, hitTol());
     if (!hit) return;
     if (isGroupType(hit.node.node_type)) {
       e.preventDefault();
@@ -19816,7 +19882,7 @@ function wireGraphCanvas(canvas: HTMLCanvasElement, winId: string): void {
     e.preventDefault();
     const wp = worldPos(e);
     const s = scene();
-    const hit = s ? hitTest(s, wp.x, wp.y) : null;
+    const hit = s ? hitTest(s, wp.x, wp.y, hitTol()) : null;
     // DTCEMS1 · a parent that did NOT resolve gets a menu of its own, and the
     // reason is not cosmetic: that node is in no document at all — it is the
     // drawing of an absence — so the document's own menu (group, rename,

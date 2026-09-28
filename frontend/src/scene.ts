@@ -1,6 +1,15 @@
 import type { AdornmentBadge } from "./adornments";
 import { nodeStyle } from "./palette";
-import { drawBoxOf, drawsAsGlyph, handleAnchor, pointInShape } from "./shape-geom";
+import {
+  drawBoxOf,
+  drawsAsGlyph,
+  glyphAspect,
+  glyphRectOf,
+  handleAnchor,
+  pointNearRect,
+  pointNearShape,
+  type Box,
+} from "./shape-geom";
 import type { EmEdge, EmNode } from "./types";
 
 export interface SceneNode {
@@ -209,25 +218,64 @@ export function hitHandle(
   // the SAME anchor the renderer draws (EM2 · shape-geom.ts): grabbing a handle
   // that is not where you can see it is the kind of bug nobody reports, they
   // just stop using the gesture
-  const a = handleAnchor(n);
+  const vb = visibleBoxOf(n);
+  const a = handleAnchor(vb);
   const dx = wx - a.x;
   const dy = wy - a.y;
   return dx * dx + dy * dy <= r * r;
 }
 
-/** Topmost node under a world-space point (nodes drawn in array order). */
-export function hitTest(scene: Scene, wx: number, wy: number): SceneNode | null {
-  for (let i = scene.nodes.length - 1; i >= 0; i--) {
-    const n = scene.nodes[i];
-    if (n.collapsed) continue; // PD1 · collapsed-to-tablet node is not on the canvas
-    if (wx < n.x || wx > n.x + n.w || wy < n.y || wy > n.y + n.h) continue;
-    if (pointInNodeShape(n, wx, wy)) return n;
+/**
+ * Topmost node under a world-space point (nodes drawn in array order).
+ *
+ * TOCCARE · two passes. The exact silhouette first, top to bottom, so the node
+ * that is really under the pointer always wins; only if none is, the same walk
+ * again with `tol` (world units — the caller passes `HIT_TOL_PX / vp.scale`), so
+ * a near miss lands on the nearest drawing instead of on empty canvas.
+ */
+export function hitTest(
+  scene: Scene,
+  wx: number,
+  wy: number,
+  tol = 0,
+): SceneNode | null {
+  for (const t of tol > 0 ? [0, tol] : [0]) {
+    for (let i = scene.nodes.length - 1; i >= 0; i--) {
+      const n = scene.nodes[i];
+      if (n.collapsed) continue; // PD1 · collapsed-to-tablet node is not on the canvas
+      if (wx < n.x - t || wx > n.x + n.w + t || wy < n.y - t || wy > n.y + n.h + t)
+        continue;
+      if (pointInNodeShape(n, wx, wy, t)) return n;
+    }
   }
   return null;
 }
 
 /**
- * Inside the node's SILHOUETTE, not merely inside its box (EM1).
+ * The rect the node's DRAWING occupies — what hover, selection ring, marquee,
+ * connect handle and edge ports all use (TOCCARE).
+ *
+ * * a glyph → its fitted rect (`glyphRectOf`, the declared aspect);
+ * * the property annotation → its whole box (it fills it);
+ * * any shape → `drawBoxOf` (BR's 22 px rhombus, every other type its box).
+ *
+ * A glyph whose aspect is not declared keeps its box: better a target a little
+ * larger than the drawing than one that changes shape when a bitmap decodes.
+ */
+export function visibleBoxOf(n: SceneNode): Box {
+  const type = n.node.node_type;
+  const data = n.node.data as Record<string, unknown> | undefined;
+  if (drawsAsGlyph(type, data)) {
+    if (type === "property") return { x: n.x, y: n.y, w: n.w, h: n.h };
+    const a = glyphAspect(type, data);
+    return a ? glyphRectOf(n, a) : { x: n.x, y: n.y, w: n.w, h: n.h };
+  }
+  return drawBoxOf(nodeStyle(type), n);
+}
+
+/**
+ * Inside the node's SILHOUETTE, not merely inside its box (EM1), or within `tol`
+ * of it (TOCCARE).
  *
  * The box test alone was right while every type filled its box and wrong the
  * moment they stopped: a click 30 px to the right of BR's 22 px rhombus selected
@@ -235,18 +283,16 @@ export function hitTest(scene: Scene, wx: number, wy: number): SceneNode | null 
  * The geometry comes from `shape-geom.ts` — the same vertices the renderer
  * strokes — so what you can click is what you can see, by construction.
  *
- * ICON nodes keep the box, and that is deliberate: their drawing is an image
- * fitted into the box, and its fitted rect is only known once the image has
- * DECODED (`naturalWidth`). Deriving the hit area from it would make the target
- * change shape as icons load, which is worse than a target slightly larger than
- * the glyph. The box-vs-icon-proportions question is the POL2 §4 follow-up and
- * needs the aspect ratio declared in the datamodel, not read off a bitmap.
+ * Glyphs test their fitted rect (`visibleBoxOf`). They used to keep the whole
+ * box because the fit was only known once the image had decoded; the aspect is
+ * declared in `2d_glyphs` now, and a `document` — 90 × 32 of box around a 23 px
+ * sheet — was the worst of it: 67 px of invisible wings that selected it.
  */
-function pointInNodeShape(n: SceneNode, wx: number, wy: number): boolean {
+function pointInNodeShape(n: SceneNode, wx: number, wy: number, tol: number): boolean {
   const type = n.node.node_type;
   // the node's data too: a DTC node is a glyph even when its type is not (EM2)
   if (drawsAsGlyph(type, n.node.data as Record<string, unknown> | undefined))
-    return true; // box, see above
+    return pointNearRect(visibleBoxOf(n), wx, wy, tol);
   const st = nodeStyle(type);
-  return pointInShape(st.shape, drawBoxOf(st, n), wx, wy);
+  return pointNearShape(st.shape, drawBoxOf(st, n), wx, wy, tol);
 }
