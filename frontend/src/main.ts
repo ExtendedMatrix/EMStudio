@@ -139,6 +139,7 @@ import {
 } from "./naming";
 import {
   applyTheme,
+  canvasTheme,
   storeMode,
   storedMode,
   watchSystemTheme,
@@ -1526,8 +1527,9 @@ function paintGraphWindow(p: GraphPaint): void {
       const bw = sn.w * vp.scale + 6;
       const bh = sn.h * vp.scale + 6;
       const active = id === selectedId;
-      c.fillStyle = active ? "rgba(31,111,235,0.22)" : "rgba(91,155,240,0.15)";
-      c.strokeStyle = active ? "#1F6FEB" : "#5b9bf0";
+      const th = canvasTheme();
+      c.fillStyle = active ? th.selectWash : th.selectWashSoft;
+      c.strokeStyle = active ? th.accent : th.selectSoft;
       c.lineWidth = active ? 3 : 2;
       c.fillRect(x, y, bw, bh);
       c.strokeRect(x, y, bw, bh);
@@ -1569,8 +1571,8 @@ function paintGraphWindow(p: GraphPaint): void {
       rw = Math.abs(bx - ax),
       rh = Math.abs(by - ay);
     c.save();
-    c.fillStyle = "rgba(31,111,235,0.12)";
-    c.strokeStyle = "#1F6FEB";
+    c.fillStyle = canvasTheme().marqueeWash;
+    c.strokeStyle = canvasTheme().accent;
     c.lineWidth = 1;
     c.setLineDash([4, 3]);
     c.fillRect(rx, ry, rw, rh);
@@ -10409,10 +10411,22 @@ function logAttention(): number {
  *  line would flicker through a sync burst, and the badge is not worth that. */
 let lastLogAttention = 0;
 
+/** PELLE · the status-bar pill: the same count the Log tab's badge carries. */
+function renderWarningsPill(): void {
+  const el = document.getElementById("footer-warnings");
+  if (!el) return;
+  const owed = logAttention();
+  el.textContent = t("footer.warnings", { n: String(owed) });
+  el.title = t("footer.warningsTip");
+  el.classList.toggle("ok", owed === 0);
+}
+onLocaleChange(renderWarningsPill);
+
 onLogChange(() => {
   refreshLogPanel();
   const owed = logAttention();
   if (owed === lastLogAttention) return;
+  renderWarningsPill();
   lastLogAttention = owed;
   renderAreaHeaders();
 });
@@ -19935,6 +19949,7 @@ void wireDesktopDeepLink();
 // would show a frame of English (or an LTR frame in Hebrew) and then flip.
 initI18n();
 populateLanguageSelect();
+renderWarningsPill();
 // Evaluate the empty state ONCE at boot. Without this, the canvas overlays kept
 // whatever the markup said until the first document arrived — so the filter
 // button sat there, enabled, filtering nothing (POL1 point 8 was only half true:

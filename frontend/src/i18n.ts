@@ -1069,6 +1069,8 @@ const EN: Dict = {
   "panel.outliner": "Outliner",
   "panel.inspector": "Inspector",
   "panel.log": "Log",
+  "footer.warnings": "{n} warnings",
+  "footer.warningsTip": "Warnings and errors in the Log",
   "panel.stratiminer": "StratiMiner",
   // WIN2 · the canvas projections a graph window can show
   "mode.matrix": "Matrix",
@@ -2329,6 +2331,8 @@ const IT: Dict = {
   "panel.outliner": "Outliner",
   "panel.inspector": "Ispettore",
   "panel.log": "Registro",
+  "footer.warnings": "{n} avvisi",
+  "footer.warningsTip": "Avvisi ed errori nel Registro",
   "panel.stratiminer": "StratiMiner",
   // WIN2 · la proiezione DTC
   "mode.matrix": "Matrix",

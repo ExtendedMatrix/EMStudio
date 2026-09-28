@@ -1,7 +1,8 @@
 /* ── Theme tokens (DARK1) ─────────────────────────────────────────────────
-   ONE source for every chrome colour. The light values are exactly what was
-   hardcoded before, so the light theme is unchanged; `[data-theme="dark"]`
-   overrides the same names.
+   ONE source for every chrome colour; `[data-theme="dark"]` overrides the same
+   names. PELLE (Sep 2026): the values of brand/accent/hover now come from the
+   Extended Matrix design system (.claude/wip/design/scrivania/) — ultramarine
+   chrome, ochre selection and primary action, aquamarine hover.
 
    What is NOT here, on purpose: the SEMANTIC colours of the EM language — the
    fills and borders of stratigraphic nodes, the group title tabs, the document
@@ -12,15 +13,20 @@
 :root {
   color-scheme: light;
   /* identity */
-  --brand: #1f3864;
-  --on-brand: #fff;
-  --accent: #1f6feb;
+  --brand: #073763;
+  --on-brand: #fcfcfc;
+  /* PELLE · the Extended Matrix design system (2022 manual): ochre is time and
+     the ONE thing to do — the canvas selection, the focus ring, the single
+     primary action of a view. A fill or a rule; as text only via --accent-ink.
+     Words on an ochre fill are --on-accent (charcoal), in both themes. */
+  --accent: #bf9000;
+  --on-accent: #1d1d1b;
   /* surfaces, from the app frame inwards */
   --bg-app: #eef1f5;
   --bg-panel: #fff;
   --bg-elevated: #fff;      /* menus, modals, tooltips-on-light */
   --bg-sunken: #f4f6f8;     /* wells: reports, readonly fields */
-  --bg-hover: #f0f6ff;
+  --bg-hover: #d9e9f7;
   --bg-subtle: #f7f9fb;
   /* ink */
   --text: #24292f;
@@ -45,7 +51,7 @@
   --lane-b: #f7fafd;
   /* accent-tinted surfaces (selected rows, active chips) and the inverse
      surface (tooltips, the log panel) — both must flip, or dark grows islands */
-  --bg-accent-soft: #e4efff;
+  --bg-accent-soft: #f6ecd0;
   --bg-inverse: #24292f;
   --on-inverse: #f0f3f7;
   --bg-danger-soft: #fbeeed;
@@ -60,7 +66,7 @@
   --ok-border: #b6ddb9;
   --info-soft: #e0f4ff;
   --info-ink: #04486b;
-  --accent-ink: #1f4e8c;
+  --accent-ink: #8a6800;
   --ai-ink: #a04a00;
   /* the wordmark ink in the status bar: navy on light, and it needs its
      own dark value — the brand navy on a dark footer measured 1.52:1 */
@@ -74,14 +80,15 @@
 
 [data-theme="dark"] {
   color-scheme: dark;
-  --brand: #16202f;
+  --brand: #0c2036;
   --on-brand: #e8edf4;
-  --accent: #4c8dff;
+  --accent: #e3b43a;
+  --on-accent: #1d1d1b;
   --bg-app: #0f151d;
   --bg-panel: #171e28;
   --bg-elevated: #1e2632;
   --bg-sunken: #131a23;
-  --bg-hover: #21303f;
+  --bg-hover: #1d2c3e;
   --bg-subtle: #1b232e;
   --text: #e3e8ef;
   --text-muted: #b3bcc8;
@@ -96,7 +103,7 @@
   --canvas-bg: #121821;
   --lane-a: #1a222d;
   --lane-b: #151c25;
-  --bg-accent-soft: #1d2c3e;
+  --bg-accent-soft: #3a2f12;
   --bg-inverse: #2b3543;
   --on-inverse: #e8edf4;
   --bg-danger-soft: #3a1f1e;
@@ -109,7 +116,7 @@
   --ok-border: #2f6b43;
   --info-soft: #12303f;
   --info-ink: #a5dcff;
-  --accent-ink: #cfe0fb;
+  --accent-ink: #e3b43a;
   --ai-ink: #ffb066;
   --brand-ink: #b9cfea;
   --border-faint: #232c38;
@@ -421,6 +428,24 @@ main {
   margin-left: auto;
   opacity: 0.9;
 }
+/* PELLE · warnings pill (the desk's status bar): amber when there are any,
+   a green outline when there are none. */
+#statusbar .warn-pill {
+  flex: 0 0 auto;
+  padding: 1px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--warn-border);
+  background: var(--warn-soft);
+  color: var(--warn-ink);
+  font-weight: 600;
+  white-space: nowrap;
+}
+#statusbar .warn-pill.ok {
+  border-color: var(--ok-ink);
+  background: transparent;
+  color: var(--ok-ink);
+  font-weight: 500;
+}
 
 /* ---------- EM-Data table (DP-81) ---------- */
 /* WIN6-RESIDUAL · the dock's own chrome (#emdata-dock / -head / -resizer /
@@ -523,12 +548,14 @@ table.emdata-table td.emdata-rowop button {
   cursor: pointer;
 }
 /* Volatile (AUX2): a mapped-but-not-baked node — visible everywhere, marked in
-   accent blue, excluded from save until baked. Single flag drives graph + table. */
+   blue, excluded from save until baked. Single flag drives graph + table.
+   PELLE: the accent went ochre (selection), so volatile keeps its blue through
+   --info-ink — a state, not the selection, must not look like one. */
 table.emdata-table tr.emdata-vol td {
-  color: var(--accent);
+  color: var(--info-ink);
 }
 table.emdata-table tr.emdata-vol td.emdata-ro {
-  color: var(--accent);
+  color: var(--info-ink);
   opacity: 0.85;
 }
 .emdata-empty {
@@ -755,7 +782,7 @@ body.sync-active #mode-indicator::before {
   background: var(--bg-app);
 }
 .settings-tab.active {
-  color: var(--accent);
+  color: var(--accent-ink);
   border-bottom-color: var(--accent);
   font-weight: 600;
 }
@@ -822,7 +849,7 @@ body.sync-active #mode-indicator::before {
   background: var(--bg-app);
   padding: 2px 6px;
   border-radius: 4px;
-  color: var(--accent);
+  color: var(--brand-ink);
 }
 /* Always reachable, whatever the content length: outside the scroll area and
    non-shrinkable. The white background matters — the body scrolls UNDER it. */
@@ -974,11 +1001,11 @@ body.sync-active #mode-indicator::before {
   line-height: 1.3;
   padding: 0 5px;
   cursor: pointer;
-  color: var(--accent);
+  color: var(--brand-ink);
   white-space: nowrap;
 }
 .rp-open3d:hover {
-  border-color: var(--accent);
+  border-color: var(--brand-ink);
 }
 
 /* a Shelf row that holds a 3D viewer stacks instead of sitting on one line */
@@ -1004,9 +1031,10 @@ body.sync-active #mode-indicator::before {
   font-size: 13px;
 }
 .modal-foot button.primary {
-  background: var(--brand);
-  color: var(--on-brand);
-  border-color: var(--brand);
+  background: var(--accent);
+  color: var(--on-accent);
+  border-color: var(--accent);
+  font-weight: 600;
 }
 .modal-foot button:hover {
   filter: brightness(0.97);
@@ -1067,7 +1095,7 @@ body.sync-active #mode-indicator::before {
   min-height: 0;
 }
 #toolbar .dd-menu button:hover:not(:disabled) {
-  background: var(--bg-accent-soft);
+  background: var(--bg-hover);
 }
 /* MENU1 · disabled menu item (e.g. Hub, or undo/redo with nothing to do) */
 #toolbar .dd-menu button:disabled {
@@ -1084,7 +1112,7 @@ body.sync-active #mode-indicator::before {
   cursor: help;
 }
 .dd-menu button.dd-disabled:hover {
-  background: var(--bg-accent-soft);
+  background: var(--bg-hover);
   color: var(--text-muted);
 }
 /* MENU1 · section separator + label inside a dropdown menu */
@@ -1208,7 +1236,7 @@ body.sync-active #mode-indicator::before {
   color: var(--text);
 }
 .ctx-menu button:hover {
-  background: var(--bg-accent-soft);
+  background: var(--bg-hover);
 }
 .ctx-menu .ctx-disabled {
   padding: 6px 8px;
@@ -1252,7 +1280,7 @@ body.sync-active #mode-indicator::before {
   padding: 0;
   font: inherit;
   font-size: 13px;
-  color: var(--accent);
+  color: var(--brand-ink);
   text-decoration: underline;
   cursor: pointer;
 }
@@ -1439,7 +1467,7 @@ body.sync-active #mode-indicator::before {
 
 .log-clickable:hover,
 .log-clickable:focus-visible {
-  background: var(--bg-accent-soft);
+  background: var(--bg-hover);
   color: var(--text);
   outline: none;
 }
@@ -1554,8 +1582,8 @@ body.sync-active #mode-indicator::before {
 }
 
 .nl-disc:hover {
-  background: var(--bg-accent-soft);
-  color: var(--accent);
+  background: var(--bg-hover);
+  color: var(--brand-ink);
 }
 
 .nl-sect-groups {
@@ -1605,8 +1633,8 @@ body.sync-active #mode-indicator::before {
 }
 
 .nl-icon:hover {
-  background: var(--bg-accent-soft);
-  color: var(--accent);
+  background: var(--bg-hover);
+  color: var(--brand-ink);
 }
 
 .nl-gname {
@@ -1667,7 +1695,7 @@ body.sync-active #mode-indicator::before {
 .win-header .win-type-toggle:hover,
 .win-header .win-mode-toggle:hover {
   background: var(--bg-panel);
-  border-color: var(--accent);
+  border-color: var(--brand-ink);
 }
 .win-header .win-mode-label {
   font-weight: 600;
@@ -1696,7 +1724,7 @@ body.sync-active #mode-indicator::before {
 .win-header .win-algo:hover,
 .win-header .wi-chip:hover {
   background: var(--bg-panel);
-  border-color: var(--accent);
+  border-color: var(--brand-ink);
 }
 .win-header .win-sep {
   width: 1px;
@@ -1812,7 +1840,7 @@ body.sync-active #mode-indicator::before {
   cursor: pointer;
 }
 .win-header .dd-menu button:hover {
-  background: var(--bg-accent-soft);
+  background: var(--bg-hover);
 }
 .win-header .dd-menu button.active {
   font-weight: 600;
@@ -2003,7 +2031,7 @@ body.sync-active #mode-indicator::before {
   color: var(--text);
 }
 .cm-item:hover {
-  background: var(--bg-accent-soft);
+  background: var(--bg-hover);
 }
 .vocab-menu {
   width: 264px;
@@ -2025,7 +2053,7 @@ body.sync-active #mode-indicator::before {
   overflow-y: auto;
 }
 .vocab-detail b {
-  color: var(--accent);
+  color: var(--brand-ink);
   font-weight: 600;
 }
 
@@ -2100,7 +2128,7 @@ body.sync-active #footer-brand #em-version {
   padding: 1.5px 0;
 }
 .ver-pop .ver-row b {
-  color: var(--accent);
+  color: var(--brand-ink);
   font-variant-numeric: tabular-nums;
 }
 .ver-pop .ver-row span {
@@ -2113,7 +2141,7 @@ body.sync-active #footer-brand #em-version {
   text-decoration: none;
 }
 .ver-pop .ver-row a.ver-link:hover {
-  color: var(--accent);
+  color: var(--brand-ink);
   text-decoration: underline;
 }
 
@@ -2211,7 +2239,7 @@ body.sync-active #footer-brand #em-version {
   border: none;
   padding: 2px 4px;
   font-size: 12.5px;
-  color: var(--accent);
+  color: var(--brand-ink);
   cursor: pointer;
   border-radius: 4px;
   overflow: hidden;
@@ -2276,7 +2304,7 @@ body.sync-active #footer-brand #em-version {
 .win-res-chevron:hover {
   opacity: 1;
   color: var(--text);
-  border-color: var(--accent);
+  border-color: var(--brand-ink);
 }
 /* the connector legend, at the foot of a GRAPH window's panel only */
 .win-legend {
@@ -2355,7 +2383,7 @@ body.sync-active #footer-brand #em-version {
   cursor: pointer;
 }
 .np-item:hover:not(:disabled) {
-  border-color: var(--accent);
+  border-color: var(--brand-ink);
 }
 .np-item-static {
   background: none;
@@ -2402,7 +2430,7 @@ body.sync-active #footer-brand #em-version {
 }
 
 .pal-sect-toggle:hover {
-  color: var(--accent);
+  color: var(--brand-ink);
 }
 
 .pal-item {
@@ -2459,8 +2487,8 @@ body.sync-active #footer-brand #em-version {
 }
 
 .aux-sect-head button:hover {
-  border-color: var(--accent);
-  color: var(--accent);
+  border-color: var(--brand-ink);
+  color: var(--brand-ink);
 }
 
 .aux-empty {
@@ -2758,7 +2786,7 @@ body.sync-active #footer-brand #em-version {
   padding: 1px 3px;
   font-weight: 600;
   font-size: 12px;
-  color: var(--accent);
+  color: var(--brand-ink);
   cursor: pointer;
 }
 
@@ -2795,7 +2823,7 @@ body.sync-active #footer-brand #em-version {
   top: calc(var(--live-y, 0px) + var(--winbar-h, 0px) + 10px);
   left: calc(var(--live-x, 0px) + var(--live-w, 100%) / 2);
   transform: translateX(-50%);
-  background: var(--accent);
+  background: var(--brand);
   color: var(--on-brand);
   font-size: 12.5px;
   border-radius: 6px;
@@ -2873,7 +2901,7 @@ body.sync-active #footer-brand #em-version {
 #chrono-banner button.cb-sort {
   background: var(--accent);
   border-color: var(--accent);
-  color: var(--on-brand);
+  color: var(--on-accent);
 }
 #chrono-banner button.cb-close {
   border: none;
@@ -3384,7 +3412,7 @@ body.sync-active #footer-brand #em-version {
   display: inline-block;
   margin-top: 5px;
   font-size: 12px;
-  color: var(--accent);
+  color: var(--brand-ink);
   word-break: break-all;
 }
 
@@ -3414,14 +3442,14 @@ body.sync-active #footer-brand #em-version {
   margin-top: 6px;
   border: 1px solid var(--border);
   background: var(--bg-panel);
-  color: var(--accent);
+  color: var(--brand-ink);
   border-radius: 5px;
   padding: 2px 8px;
   font-size: 11px;
   cursor: pointer;
 }
 .nv-goto:hover {
-  border-color: var(--accent);
+  border-color: var(--brand-ink);
 }
 
 /* ---------- N9: the map embed ---------- */
@@ -3512,7 +3540,7 @@ body.sync-active #footer-brand #em-version {
   color: var(--text-muted);
 }
 .insp-stamp-who {
-  color: var(--accent);
+  color: var(--brand-ink);
   text-decoration: none;
   font-variant-numeric: tabular-nums;
 }
@@ -3660,7 +3688,7 @@ body.sync-active #footer-brand #em-version {
 }
 .osm-btn:hover {
   background: var(--bg-panel);
-  border-color: var(--accent);
+  border-color: var(--brand-ink);
 }
 .osm-home {
   font-size: 12px;
@@ -3784,7 +3812,7 @@ body.sync-active #footer-brand #em-version {
 }
 
 .em3d-open {
-  color: var(--accent);
+  color: var(--brand-ink);
   text-decoration: none;
 }
 .em3d-open:hover {
@@ -3855,8 +3883,8 @@ body.sync-active #footer-brand #em-version {
 }
 
 .nv-mini:hover {
-  border-color: var(--accent);
-  color: var(--accent);
+  border-color: var(--brand-ink);
+  color: var(--brand-ink);
 }
 
 .nv-lane-select,
@@ -4058,7 +4086,7 @@ body.sync-active #footer-brand #em-version {
   cursor: pointer;
 }
 
-.nv-generate:hover:not(:disabled) { background: var(--bg-accent-soft); }
+.nv-generate:hover:not(:disabled) { background: var(--bg-hover); }
 .nv-generate:disabled { opacity: 0.55; cursor: progress; }
 
 /* An unendorsed AI paragraph reads as provisional at a glance: nobody has put
@@ -4110,7 +4138,7 @@ body.sync-active #footer-brand #em-version {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 
-.nv-prov-link:hover:not(:disabled) { background: var(--bg-accent-soft); }
+.nv-prov-link:hover:not(:disabled) { background: var(--bg-hover); }
 .nv-prov-link:disabled { cursor: not-allowed; opacity: 0.5; }
 
 .nv-endorse {
@@ -4229,12 +4257,12 @@ body.sync-active #footer-brand #em-version {
 }
 
 .sm-opt:hover {
-  border-color: var(--accent);
+  border-color: var(--brand-ink);
 }
 
 .sm-opt.active {
   border-color: var(--accent);
-  background: var(--bg-hover);
+  background: var(--bg-accent-soft);
   font-weight: 600;
 }
 
@@ -4306,8 +4334,8 @@ body.sync-active #footer-brand #em-version {
 
 .sm-path button:hover:not(:disabled),
 #stratiminer .sm-primary:hover:not(:disabled) {
-  border-color: var(--accent);
-  color: var(--accent);
+  border-color: var(--brand-ink);
+  color: var(--brand-ink);
 }
 
 #stratiminer button:disabled {
@@ -4392,8 +4420,8 @@ body.sync-active #footer-brand #em-version {
 }
 
 .sm-fallback button:hover {
-  border-color: var(--accent);
-  color: var(--accent);
+  border-color: var(--brand-ink);
+  color: var(--brand-ink);
 }
 
 /* ── EMTree panel (the workspace: every open graph, one active) ───────────────
@@ -4438,8 +4466,8 @@ body.sync-active #footer-brand #em-version {
 }
 
 .et-actions button:hover {
-  border-color: var(--accent);
-  color: var(--accent);
+  border-color: var(--brand-ink);
+  color: var(--brand-ink);
 }
 
 /* OVR1 · EMTree view toggle (List | Overview) */
@@ -4676,7 +4704,7 @@ body.sync-active #footer-brand #em-version {
 
 .col-toggle:hover {
   background: var(--bg-subtle);
-  color: var(--accent);
+  color: var(--brand-ink);
 }
 
 /* ── POL1 · the always-present "+ epoch" ─────────────────────────────────────
@@ -4702,8 +4730,8 @@ body.sync-active #footer-brand #em-version {
 }
 
 #btn-add-epoch:hover {
-  border-color: var(--accent);
-  color: var(--accent);
+  border-color: var(--brand-ink);
+  color: var(--brand-ink);
 }
 
 /* ── POL1 · inline rename in the EMTree ─────────────────────────────────────── */
@@ -4941,7 +4969,7 @@ body.sync-active #footer-brand #em-version {
 /* the magnify chip of the focused window's bar, while it IS magnified */
 #win-instances .wi-chip.wi-on {
   background: var(--accent);
-  color: #fff;
+  color: var(--on-accent);
   border-color: var(--accent);
 }
 /* the graph's drawing surface fills what the bar leaves. STEP A · the in-area
@@ -5209,7 +5237,7 @@ body.sync-active #footer-brand #em-version {
 /* the ✎ toggle shows whether the narrative is in writing mode */
 .win-header .win-act.win-act-on {
   background: var(--accent);
-  color: #fff;
+  color: var(--on-accent);
   border-color: var(--accent);
 }
 
@@ -5384,7 +5412,7 @@ object.viewer-media {
 .viewer-link {
   display: inline-block;
   margin-top: 12px;
-  color: var(--accent-ink);
+  color: var(--brand-ink);
 }
 
 /* W1 · the collection strip. Same height as the caption below it, so a Viewer
@@ -5457,7 +5485,7 @@ object.viewer-media {
   font: inherit;
 }
 .viewer-thumb:hover {
-  border-color: var(--accent);
+  border-color: var(--brand-ink);
 }
 .viewer-thumb img {
   width: 100%;
@@ -5729,7 +5757,7 @@ object.viewer-media {
   text-align: left;
 }
 .annot-tool:hover:not(:disabled) {
-  border-color: var(--accent);
+  border-color: var(--brand-ink);
 }
 .annot-tool.current {
   border-color: var(--accent);
@@ -5844,7 +5872,7 @@ object.viewer-media {
   text-overflow: ellipsis;
 }
 .footer-chip:hover {
-  border-color: var(--accent);
+  border-color: var(--brand-ink);
   color: var(--text);
 }
 .footer-chip.verified {
@@ -5895,7 +5923,7 @@ object.viewer-media {
   font-size: 12.5px;
 }
 .shelf-row:hover {
-  border-color: var(--accent);
+  border-color: var(--brand-ink);
 }
 .shelf-icon {
   font-size: 15px;
@@ -6296,7 +6324,7 @@ object.viewer-media {
   padding: 2px 8px;
 }
 .conflict-btn:hover:not(:disabled) {
-  border-color: var(--accent);
+  border-color: var(--brand-ink);
   color: var(--text);
 }
 .conflict-btn:disabled {
@@ -6351,7 +6379,7 @@ object.viewer-media {
 }
 .sync-ctl-btn.on {
   border-color: var(--accent);
-  color: var(--accent);
+  color: var(--accent-ink);
 }
 
 /* P4.1b · the gesture that empties a field — quiet until you look for it. */
@@ -6371,8 +6399,8 @@ object.viewer-media {
   opacity: 1;
 }
 .insp-field-clear:hover {
-  background: var(--bg-accent-soft);
-  color: var(--accent);
+  background: var(--bg-hover);
+  color: var(--brand-ink);
 }
 
 /* A2/IIIF · the interoperability corner of the annotator bar.
@@ -6403,7 +6431,7 @@ object.viewer-media {
 }
 .annot-iiif .ghost-btn:hover {
   color: var(--text);
-  border-color: var(--accent);
+  border-color: var(--brand-ink);
 }
 
 /* IIIF · the shelf's own thumbnail. Sized to the glyph it replaces, so a list

@@ -44,9 +44,15 @@ export interface CanvasTheme {
   labelInk: string;
   /** muted canvas text (band names, counts, hints) */
   labelMuted: string;
-  /** selection / hover accents */
+  /** selection / hover accents. PELLE: ochre (the EM design system's
+   *  `em-accent`) — the selection is the one warm thing on the canvas. */
   accent: string;
   selectSoft: string;
+  /** the translucent washes under a selected node (active / other selected)
+   *  and inside the marquee — screen-space overlays drawn by main.ts */
+  selectWash: string;
+  selectWashSoft: string;
+  marqueeWash: string;
   /** P4.3 · the awareness ring: somebody ELSE's selection in a live room.
    *  Deliberately not the selection colour — a ring that looked like yours would
    *  make you think you had clicked something. */
@@ -89,10 +95,14 @@ const LIGHT: CanvasTheme = {
   laneChipInk: "#2c4a6e",
   labelInk: "#1a1a1a",
   labelMuted: "#46505c",
-  accent: "#1F6FEB",
-  selectSoft: "#5b9bf0",
-  peerAware: "#b8860b",
-  hoverSoft: "#a9c9f5",
+  accent: "#BF9000",
+  selectSoft: "#D4B04A",
+  selectWash: "rgba(191,144,0,0.20)",
+  selectWashSoft: "rgba(212,176,74,0.14)",
+  marqueeWash: "rgba(191,144,0,0.10)",
+  // PELLE · the selection went ochre, so the peer ring left it: blue now
+  peerAware: "#1F6FEB",
+  hoverSoft: "#8FB4D8",
   groupBody: "rgba(190,196,204,0.25)",
   groupBorder: "#000000",
   groupHeaderFallback: "#F6D7A4",
@@ -124,10 +134,13 @@ const DARK: CanvasTheme = {
   laneChipInk: "#bcd2ee",
   labelInk: "#e3e8ef",
   labelMuted: "#b3bcc8",
-  accent: "#4C8DFF",
-  selectSoft: "#6ea6ff",
-  peerAware: "#d9bd7a",
-  hoverSoft: "#3f5f8a",
+  accent: "#E3B43A",
+  selectSoft: "#B8943A",
+  selectWash: "rgba(227,180,58,0.22)",
+  selectWashSoft: "rgba(184,148,58,0.16)",
+  marqueeWash: "rgba(227,180,58,0.12)",
+  peerAware: "#6EA6FF",
+  hoverSoft: "#4A6A8E",
   groupBody: "rgba(120,132,148,0.20)",
   groupBorder: "#8b95a3",
   groupHeaderFallback: "#6b5324",
