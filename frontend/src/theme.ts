@@ -150,7 +150,9 @@ const DARK: CanvasTheme = {
   handleFill: "#1E2632",
   handleRing: "#8b95a3",
   edgeDefault: "#7c8794",
-  edgeInk: "#e3e8ef",
+  // PELLE · mid grey, not near-white: the stratigraphic line is drawn both on
+  // the dark canvas and INSIDE the light group fills, and must hold 3:1 on both
+  edgeInk: "#77818E",
   edgeProvenance: "#d9bd7a",
   nodeFallbackFill: "#242C38",
   onAccent: "#1D1D1B",

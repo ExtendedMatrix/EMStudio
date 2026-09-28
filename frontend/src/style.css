@@ -241,6 +241,13 @@ select,
 textarea {
   font-family: inherit;
 }
+/* PELLE · the design system's focus: 2px ochre, offset 2px — --accent-ink in
+   light (the fill ochre is 2.8:1 on white), the bright ochre in dark. A floor:
+   any component rule that draws its own focus still wins by specificity. */
+:focus-visible {
+  outline: 2px solid var(--accent-ink);
+  outline-offset: 2px;
+}
 
 /* full-height column: header (wraps) · main (fills) · status footer */
 body {
@@ -295,48 +302,52 @@ body.sync-active #statusbar {
   display: inline-flex;
   align-items: center;
   align-self: center;
-  gap: 7px;
-  font-weight: 700;
-  letter-spacing: 0.4px;
+  gap: 9px;
   margin-right: 4px;
 }
-/* Hourglass brand mark in the header; frame is currentColor (white on the
-   dark toolbar), the rising arrow keeps its gold. */
+/* PELLE · the mark at 27px (the desk: 26–28), frame in currentColor with its
+   own stroke, arrow in ochre. Beside it the wordmark in Comfortaa 700 / 20px
+   and the build version in mono — the three faces of the manual in one line. */
 #brand .brand-mark {
   display: block;
-  height: 20px;
+  height: 27px;
   width: auto;
 }
 #brand .brand-word {
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 20px;
+  letter-spacing: 0.01em;
   line-height: 1;
 }
 #brand .app-ver {
-  /* sit on the wordmark's baseline (not the flex bottom, which made it hang
-     low) with the parent's 7px gap; small, dim, tabular so digits align */
+  /* sit on the wordmark's baseline, small and dim, in mono so digits align */
   align-self: baseline;
-  margin-left: -1px;
-  font-size: 11px;
-  font-weight: 500;
-  letter-spacing: 0.2px;
+  margin-left: -2px;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  font-weight: 400;
   line-height: 1;
-  opacity: 0.6;
-  font-variant-numeric: tabular-nums;
+  opacity: 0.8;
   white-space: nowrap;
 }
 
+/* PELLE · the desk's bar buttons: transparent on the ultramarine, a thin
+   off-white rule, radius 6 (--radius), 12.5px. Quieter than the old filled
+   chips, so the bar reads as chrome and the canvas as the work. */
 #toolbar button,
 #toolbar select {
-  background: rgba(255, 255, 255, 0.12);
+  background: transparent;
   color: var(--on-brand);
-  border: 1px solid rgba(255, 255, 255, 0.25);
-  border-radius: 6px;
-  padding: 4px 12px;
-  font-size: 13px;
+  border: 1px solid rgba(252, 252, 252, 0.3);
+  border-radius: var(--radius);
+  padding: 4px 10px;
+  font-size: 12.5px;
   cursor: pointer;
 }
 
 #toolbar button:hover {
-  background: rgba(255, 255, 255, 0.22);
+  background: rgba(252, 252, 252, 0.12);
 }
 
 /* HDR1/HDR-ALIGN · WORKSPACE TABS, on the master-header's own line.
@@ -372,17 +383,17 @@ body.sync-active #statusbar {
   gap: 6px;
   flex: 0 0 auto;
   /* the metrics of `#toolbar button`, stated here so the two can never drift */
-  padding: 4px 12px;
-  font-size: 13px;
-  background: rgba(255, 255, 255, 0.12);
+  padding: 4px 10px;
+  font-size: 12.5px;
+  background: transparent;
   color: var(--on-brand);
-  border: 1px solid rgba(255, 255, 255, 0.25);
-  border-radius: 6px;
+  border: 1px solid rgba(252, 252, 252, 0.3);
+  border-radius: var(--radius);
   cursor: pointer;
   white-space: nowrap;
 }
 #workspace-bar .ws-tab:hover {
-  background: rgba(255, 255, 255, 0.22);
+  background: rgba(252, 252, 252, 0.12);
 }
 #workspace-bar .ws-tab .ws-ic {
   font-size: 12px;
@@ -393,8 +404,11 @@ body.sync-active #statusbar {
    workspace switch, which is the thing the alignment pass exists to stop. */
 #workspace-bar .ws-tab.active {
   background: var(--bg-panel);
-  color: var(--text);
+  color: var(--brand-ink);
   border-color: var(--bg-panel);
+  /* PELLE · the ochre rule under the active tab, as on the desk — a shadow,
+     so the box does not change */
+  box-shadow: inset 0 -2px 0 var(--accent);
 }
 #workspace-bar .ws-tab.active .ws-ic {
   opacity: 1;
@@ -416,7 +430,7 @@ body.sync-active #statusbar {
 
 #view-toggle {
   display: flex;
-  border-radius: 6px;
+  border-radius: var(--radius);
   overflow: hidden;
   border: 1px solid rgba(255, 255, 255, 0.25);
 }
@@ -447,7 +461,7 @@ body.sync-active #statusbar {
 #search {
   background: rgba(255, 255, 255, 0.14);
   border: 1px solid rgba(255, 255, 255, 0.3);
-  border-radius: 6px;
+  border-radius: var(--radius);
   color: var(--on-brand);
   padding: 5px 10px;
   font-size: 13px;
@@ -468,7 +482,7 @@ body.sync-active #statusbar {
   overflow: auto;
   background: var(--bg-panel);
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-lg);
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
   z-index: 30;
 }
@@ -498,7 +512,7 @@ body.sync-active #statusbar {
   font-size: 11px;
   color: var(--text-muted);
   background: var(--bg-app);
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   padding: 1px 5px;
 }
 
@@ -523,9 +537,10 @@ main {
   flex: 0 0 auto;
   min-height: 26px;
   padding: 3px 12px;
-  background: var(--bg-app);
+  /* PELLE · the desk's status bar: the sunk surface, counts in mono */
+  background: var(--bg-sunken);
   border-top: 1px solid var(--border);
-  font-size: 12px;
+  font-size: 11.5px;
   color: var(--text-muted);
   overflow: hidden;
 }
@@ -533,6 +548,8 @@ main {
 #statusbar #info {
   margin-left: auto;
   opacity: 0.9;
+  font-family: var(--font-mono);
+  font-size: 11px;
 }
 /* PELLE · warnings pill (the desk's status bar): amber when there are any,
    a green outline when there are none. */
@@ -576,7 +593,7 @@ main {
   height: 18px;
   padding: 0;
   border: 0;
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   background: transparent;
   color: var(--text-faint);
   font-size: 10px;
@@ -685,7 +702,7 @@ table.emdata-table tr.emdata-vol td.emdata-ro {
   background: var(--bg-panel);
   color: var(--text);
   border: 1px solid var(--border);
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
 }
 
 /* Extended Matrix brand mark in the footer, next to the EMStudio wordmark.
@@ -721,7 +738,7 @@ body.sync-active #footer-brand {
   font-weight: 600;
   letter-spacing: 0.2px;
   padding: 1px 8px;
-  border-radius: 9px;
+  border-radius: var(--radius-lg);
   color: var(--text-muted);
   background: var(--bg-subtle);
   border: 1px solid var(--border);
@@ -816,7 +833,7 @@ body.sync-active #mode-indicator::before {
   display: flex;
   flex-direction: column;
   background: var(--bg-panel);
-  border-radius: 10px;
+  border-radius: var(--radius-lg);
   box-shadow: 0 12px 40px rgba(0, 0, 0, 0.28);
   overflow: hidden;   /* clips the rounded corners; the BODY does the scrolling */
   font-size: 13px;
@@ -930,7 +947,7 @@ body.sync-active #mode-indicator::before {
 .settings-sect select {
   padding: 5px 8px;
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--radius);
   font-size: 13px;
   background: var(--bg-panel);
   color: var(--text);
@@ -954,7 +971,7 @@ body.sync-active #mode-indicator::before {
 .settings-url code {
   background: var(--bg-app);
   padding: 2px 6px;
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   color: var(--brand-ink);
 }
 /* Always reachable, whatever the content length: outside the scroll area and
@@ -995,7 +1012,7 @@ body.sync-active #mode-indicator::before {
   gap: 8px;
   padding: 4px 8px;
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--radius);
   font-size: 12px;
   color: var(--text);
 }
@@ -1023,7 +1040,7 @@ body.sync-active #mode-indicator::before {
   width: 52px;
   height: 52px;
   border: 1px solid var(--border);
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   background: var(--bg-sunken);
   overflow: hidden;
   display: flex;
@@ -1102,7 +1119,7 @@ body.sync-active #mode-indicator::before {
   margin-top: 2px;
   border: 1px solid var(--border);
   background: var(--bg-panel);
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   font-size: 9px;
   line-height: 1.3;
   padding: 0 5px;
@@ -1130,7 +1147,7 @@ body.sync-active #mode-indicator::before {
 }
 .modal-foot button {
   padding: 6px 14px;
-  border-radius: 6px;
+  border-radius: var(--radius);
   border: 1px solid var(--border);
   background: var(--bg-panel);
   cursor: pointer;
@@ -1175,7 +1192,7 @@ body.sync-active #mode-indicator::before {
   z-index: 900;
   background: var(--bg-panel);
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-lg);
   box-shadow: 0 6px 24px rgba(0, 0, 0, 0.18);
   padding: 4px;
   min-width: 160px;
@@ -1194,7 +1211,7 @@ body.sync-active #mode-indicator::before {
   margin: 0;
   border: 0;
   background: transparent;
-  border-radius: 5px;
+  border-radius: var(--radius);
   color: var(--text);
   font-size: 13px;
   white-space: nowrap;
@@ -1252,7 +1269,7 @@ body.sync-active #mode-indicator::before {
   z-index: 901;
   background: var(--bg-panel);
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-lg);
   box-shadow: 0 6px 24px rgba(0, 0, 0, 0.18);
   padding: 4px;
   min-width: 150px;
@@ -1269,6 +1286,7 @@ body.sync-active #mode-indicator::before {
   text-transform: uppercase;
   letter-spacing: 0.06em;
   color: var(--text-faint);
+  font-weight: 600;
 }
 /* MENU1 · active session mode gets a leading check */
 #toolbar .dd-menu button.mode-active::before {
@@ -1287,7 +1305,7 @@ body.sync-active #mode-indicator::before {
   background: var(--bg-panel);
   color: var(--text);
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: var(--radius-lg);
   box-shadow: 0 10px 40px rgba(0, 0, 0, 0.28);
   padding: 14px 16px;
   font-size: 13px;
@@ -1317,7 +1335,7 @@ body.sync-active #mode-indicator::before {
   z-index: 1000;
   background: var(--bg-panel);
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-lg);
   box-shadow: 0 6px 24px rgba(0, 0, 0, 0.18);
   padding: 4px;
   min-width: 190px;
@@ -1326,9 +1344,10 @@ body.sync-active #mode-indicator::before {
 .ctx-menu .ctx-header {
   padding: 4px 8px 6px;
   color: var(--text-muted);
-  font-size: 11px;
+  font-size: 10.5px;
   text-transform: uppercase;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.06em;
+  font-weight: 600;
 }
 .ctx-menu button {
   display: block;
@@ -1337,7 +1356,7 @@ body.sync-active #mode-indicator::before {
   padding: 6px 8px;
   border: 0;
   background: transparent;
-  border-radius: 5px;
+  border-radius: var(--radius);
   cursor: pointer;
   color: var(--text);
 }
@@ -1443,9 +1462,9 @@ body.sync-active #mode-indicator::before {
   padding: 4px 2px;
 }
 .insp-section-title {
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.4px;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
   text-transform: uppercase;
   color: var(--text-muted);
   margin: 2px 0 8px;
@@ -1493,7 +1512,7 @@ body.sync-active #mode-indicator::before {
   color: var(--text-muted);
   background: var(--bg-sunken);
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--radius);
   padding: 5px 8px;
   margin-bottom: 10px;
   word-break: break-word;
@@ -1504,9 +1523,9 @@ body.sync-active #mode-indicator::before {
   align-items: baseline;
   justify-content: space-between;
   gap: 8px;
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.4px;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
   text-transform: uppercase;
   color: var(--text-muted);
   margin: 14px 0 6px;
@@ -1566,7 +1585,7 @@ body.sync-active #mode-indicator::before {
 /* a warning that points at something you can go look at */
 .log-clickable {
   cursor: pointer;
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   padding: 1px 3px;
   margin-left: -3px;
 }
@@ -1594,7 +1613,7 @@ body.sync-active #mode-indicator::before {
 
 .nl-filter {
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--radius);
   padding: 5px 8px;
   font-size: 13px;
   margin-bottom: 4px;
@@ -1624,7 +1643,7 @@ body.sync-active #mode-indicator::before {
   cursor: pointer;
   font-size: 12.5px;
   color: var(--text);
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
 }
 
 .nl-row:hover {
@@ -1638,7 +1657,7 @@ body.sync-active #mode-indicator::before {
 .nl-dot {
   width: 11px;
   height: 11px;
-  border-radius: 3px;
+  border-radius: var(--radius-sm);
   border: 1.5px solid;
   margin-top: 2px;
   flex: none;
@@ -1663,6 +1682,7 @@ body.sync-active #mode-indicator::before {
   gap: 2px;
   cursor: pointer;
   user-select: none;
+  font-weight: 600;
 }
 
 .nl-sect > span {
@@ -1683,7 +1703,7 @@ body.sync-active #mode-indicator::before {
   font-size: 10px;
   line-height: 1;
   padding: 2px 3px;
-  border-radius: 3px;
+  border-radius: var(--radius-sm);
   flex: none;
 }
 
@@ -1720,7 +1740,7 @@ body.sync-active #mode-indicator::before {
 .nl-grow {
   display: flex;
   align-items: center;
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
 }
 
 .nl-grow:hover {
@@ -1734,7 +1754,7 @@ body.sync-active #mode-indicator::before {
   font-size: 13px;
   color: var(--text-muted);
   padding: 3px 6px;
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   flex: none;
 }
 
@@ -1792,7 +1812,7 @@ body.sync-active #mode-indicator::before {
   padding: 0 10px;
   background: var(--bg-elevated);
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-lg);
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
   color: var(--text);
   font-size: 12.5px;
@@ -1813,7 +1833,7 @@ body.sync-active #mode-indicator::before {
   height: 30px;
   background: var(--bg-elevated);
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-lg);
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
   color: var(--text);
   font-size: 12.5px;
@@ -1882,7 +1902,7 @@ body.sync-active #mode-indicator::before {
   padding: 0 8px;
   background: var(--bg-elevated);
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-lg);
   color: var(--text);
   font-size: 12px;
 }
@@ -1897,7 +1917,7 @@ body.sync-active #mode-indicator::before {
   overflow-y: auto;
   background: var(--bg-panel);
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-lg);
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
   min-width: 220px;
 }
@@ -1940,7 +1960,7 @@ body.sync-active #mode-indicator::before {
   padding: 6px 10px;
   border: 0;
   background: transparent;
-  border-radius: 5px;
+  border-radius: var(--radius);
   color: var(--text);
   font-size: 13px;
   cursor: pointer;
@@ -1972,7 +1992,7 @@ body.sync-active #mode-indicator::before {
   line-height: 1;
   background: var(--bg-elevated);
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-lg);
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
   cursor: pointer;
   color: var(--text);
@@ -2013,7 +2033,7 @@ body.sync-active #mode-indicator::before {
   overflow-y: auto;
   background: var(--bg-elevated);
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-lg);
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.15);
   padding: 10px 12px;
   z-index: 22;
@@ -2042,7 +2062,7 @@ body.sync-active #mode-indicator::before {
   flex: 1;
   padding: 3px 6px;
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--radius);
   font-size: 12px;
   background: var(--bg-panel);
   color: var(--text);
@@ -2054,6 +2074,7 @@ body.sync-active #mode-indicator::before {
   letter-spacing: 0.06em;
   color: var(--text-faint);
   margin: 10px 0 4px;
+  font-weight: 600;
 }
 
 .fp-row {
@@ -2068,7 +2089,7 @@ body.sync-active #mode-indicator::before {
   width: 100%;
   padding: 5px 10px;
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--radius);
   background: var(--bg-subtle);
   color: var(--text-muted);
   font-size: 11.5px;
@@ -2088,7 +2109,7 @@ body.sync-active #mode-indicator::before {
   flex-direction: column;
   background: var(--bg-panel);
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-lg);
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
   padding: 8px;
   font-size: 12.5px;
@@ -2110,7 +2131,7 @@ body.sync-active #mode-indicator::before {
   box-sizing: border-box;
   padding: 4px 8px;
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--radius);
   font-size: 12.5px;
   margin-bottom: 6px;
 }
@@ -2118,11 +2139,12 @@ body.sync-active #mode-indicator::before {
   overflow-y: auto;
 }
 .cm-sect {
-  font-size: 10px;
+  font-size: 10.5px;
   text-transform: uppercase;
   letter-spacing: 0.06em;
   color: var(--text-dim);
   margin: 6px 0 2px;
+  font-weight: 600;
 }
 .cm-item {
   display: block;
@@ -2130,7 +2152,7 @@ body.sync-active #mode-indicator::before {
   text-align: left;
   padding: 4px 8px;
   border: none;
-  border-radius: 5px;
+  border-radius: var(--radius);
   background: transparent;
   cursor: pointer;
   font-size: 12.5px;
@@ -2175,7 +2197,7 @@ body.sync-active #mode-indicator::before {
      canvas. A token, so the minimap belongs to the theme like everything else. */
   background: var(--bg-overview);
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-lg);
   box-shadow: 0 3px 10px rgba(0, 0, 0, 0.09);
   cursor: pointer;
   z-index: 15;
@@ -2190,7 +2212,7 @@ body.sync-active #mode-indicator::before {
   color: #14310a;
   background: #88b04b;
   border: none;
-  border-radius: 8px;
+  border-radius: var(--radius-lg);
   padding: 1px 6px;
   cursor: pointer;
 }
@@ -2211,7 +2233,7 @@ body.sync-active #footer-brand #em-version {
   background: var(--bg-panel);
   color: var(--text);
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: var(--radius-lg);
   box-shadow: 0 12px 40px rgba(0, 0, 0, 0.28);
   padding: 12px 14px;
   font-size: 12px;
@@ -2222,10 +2244,11 @@ body.sync-active #footer-brand #em-version {
 }
 .ver-pop .ver-sect {
   margin: 10px 0 3px;
-  font-size: 10px;
+  font-size: 10.5px;
   text-transform: uppercase;
   letter-spacing: 0.06em;
   color: var(--text-dim);
+  font-weight: 600;
 }
 .ver-pop .ver-row {
   display: flex;
@@ -2268,7 +2291,7 @@ body.sync-active #footer-brand #em-version {
   font-size: 11px;
   font-weight: 600;
   padding: 2px 8px;
-  border-radius: 10px;
+  border-radius: var(--radius-lg);
   border: 1.5px solid;
 }
 
@@ -2303,10 +2326,11 @@ body.sync-active #footer-brand #em-version {
 
 .insp-sect {
   margin: 14px 0 6px;
-  font-size: 12px;
+  font-size: 10.5px;
   text-transform: uppercase;
   letter-spacing: 0.06em;
   color: var(--text-muted);
+  font-weight: 600;
 }
 
 .insp-data {
@@ -2347,7 +2371,7 @@ body.sync-active #footer-brand #em-version {
   font-size: 12.5px;
   color: var(--brand-ink);
   cursor: pointer;
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -2435,6 +2459,7 @@ body.sync-active #footer-brand #em-version {
   letter-spacing: 0.06em;
   color: var(--text-faint);
   margin: 2px 4px 4px;
+  font-weight: 600;
 }
 .et-recent-list {
   list-style: none;
@@ -2455,7 +2480,7 @@ body.sync-active #footer-brand #em-version {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
 }
 .et-recent:hover {
   background: var(--bg-subtle);
@@ -2473,6 +2498,7 @@ body.sync-active #footer-brand #em-version {
   letter-spacing: 0.06em;
   color: var(--text-faint);
   margin: 10px 4px 4px;
+  font-weight: 600;
 }
 .np-item {
   display: flex;
@@ -2483,7 +2509,7 @@ body.sync-active #footer-brand #em-version {
   padding: 6px 8px;
   margin: 3px 0;
   border: 1px solid var(--border);
-  border-radius: 5px;
+  border-radius: var(--radius);
   background: var(--bg-subtle);
   font: inherit;
   cursor: pointer;
@@ -2513,6 +2539,7 @@ body.sync-active #footer-brand #em-version {
   letter-spacing: 0.06em;
   color: var(--text-faint);
   margin: 10px 4px 4px;
+  font-weight: 600;
 }
 
 .pal-sect:first-child {
@@ -2546,7 +2573,7 @@ body.sync-active #footer-brand #em-version {
   width: 100%;
   background: none;
   border: 1px solid transparent;
-  border-radius: 6px;
+  border-radius: var(--radius);
   padding: 3px 6px;
   font-size: 12px;
   cursor: pointer;
@@ -2576,17 +2603,18 @@ body.sync-active #footer-brand #em-version {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  font-size: 11px;
+  font-size: 10.5px;
   text-transform: uppercase;
-  letter-spacing: 0.5px;
+  letter-spacing: 0.06em;
   color: var(--text-muted);
   margin-bottom: 6px;
+  font-weight: 600;
 }
 
 .aux-sect-head button {
   border: 1px solid var(--border);
   background: var(--bg-subtle);
-  border-radius: 5px;
+  border-radius: var(--radius);
   padding: 2px 7px;
   font-size: 11px;
   cursor: pointer;
@@ -2616,7 +2644,7 @@ body.sync-active #footer-brand #em-version {
 .aux-row {
   position: relative;
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--radius);
   background: var(--bg-subtle);
 }
 
@@ -2662,7 +2690,7 @@ body.sync-active #footer-brand #em-version {
   text-transform: uppercase;
   letter-spacing: 0.4px;
   padding: 1px 5px;
-  border-radius: 8px;
+  border-radius: var(--radius-lg);
 }
 
 .aux-volatile {
@@ -2720,7 +2748,7 @@ body.sync-active #footer-brand #em-version {
   font-size: 11px;
   padding: 3px 5px;
   border: 1px solid var(--border);
-  border-radius: 5px;
+  border-radius: var(--radius);
 }
 
 .aux-field input[readonly] {
@@ -2827,7 +2855,7 @@ body.sync-active #footer-brand #em-version {
 .aux-keys code {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   background: var(--bg-sunken);
-  border-radius: 3px;
+  border-radius: var(--radius-sm);
   padding: 0 3px;
   margin-right: 2px;
 }
@@ -2841,7 +2869,7 @@ body.sync-active #footer-brand #em-version {
 .aux-actions button {
   border: 1px solid var(--border);
   background: var(--bg-subtle);
-  border-radius: 5px;
+  border-radius: var(--radius);
   padding: 3px 8px;
   font-size: 11px;
   cursor: pointer;
@@ -2932,7 +2960,7 @@ body.sync-active #footer-brand #em-version {
   background: var(--brand);
   color: var(--on-brand);
   font-size: 12.5px;
-  border-radius: 6px;
+  border-radius: var(--radius);
   padding: 5px 12px;
   z-index: 20;
 }
@@ -2956,7 +2984,7 @@ body.sync-active #footer-brand #em-version {
   border: 1px solid var(--warn-border);
   color: var(--warn-ink);
   font-size: 12.5px;
-  border-radius: 8px;
+  border-radius: var(--radius-lg);
   padding: 7px 12px;
   z-index: 22;
   box-shadow: 0 4px 14px rgba(0, 0, 0, 0.08);
@@ -2999,7 +3027,7 @@ body.sync-active #footer-brand #em-version {
   background: var(--bg-panel);
   color: var(--warn-ink);
   font-size: 12px;
-  border-radius: 6px;
+  border-radius: var(--radius);
   padding: 4px 10px;
   cursor: pointer;
   white-space: nowrap;
@@ -3025,7 +3053,7 @@ body.sync-active #footer-brand #em-version {
   background: var(--bg-inverse);
   color: var(--on-brand);
   font-size: 12.5px;
-  border-radius: 6px;
+  border-radius: var(--radius);
   padding: 6px 14px;
   z-index: 25;
 }
@@ -3034,7 +3062,7 @@ body.sync-active #footer-brand #em-version {
   position: absolute;
   background: var(--bg-panel);
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-lg);
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
   padding: 6px;
   z-index: 30;
@@ -3061,7 +3089,7 @@ body.sync-active #footer-brand #em-version {
   text-align: left;
   background: none;
   border: none;
-  border-radius: 5px;
+  border-radius: var(--radius);
   padding: 5px 8px;
   font-size: 12.5px;
   cursor: pointer;
@@ -3085,7 +3113,7 @@ body.sync-active #footer-brand #em-version {
   font-size: 16px;
   font-weight: 600;
   border: 1px solid transparent;
-  border-radius: 5px;
+  border-radius: var(--radius);
   padding: 4px 6px;
   margin: 6px 0 2px;
 }
@@ -3108,7 +3136,7 @@ body.sync-active #footer-brand #em-version {
   max-height: 180px;
   overflow-y: auto;
   border: 1px solid var(--border);
-  border-radius: 5px;
+  border-radius: var(--radius);
 }
 .insp-auth-item {
   text-align: left;
@@ -3207,7 +3235,7 @@ body.sync-active #footer-brand #em-version {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 12px;
   border: 1px solid var(--border);
-  border-radius: 5px;
+  border-radius: var(--radius);
   padding: 4px 6px;
 }
 
@@ -3228,7 +3256,7 @@ body.sync-active #footer-brand #em-version {
   padding: 6px 8px;
   border: 1px solid #e6c200;   /* saturated attention yellow: legible on both grounds */
   background: var(--warn-soft);
-  border-radius: 6px;
+  border-radius: var(--radius);
   font-size: 11.5px;
 }
 .insp-warn-title {
@@ -3246,7 +3274,7 @@ body.sync-active #footer-brand #em-version {
   font-size: 12.5px;
   font-family: inherit;
   border: 1px solid var(--border);
-  border-radius: 5px;
+  border-radius: var(--radius);
   padding: 5px 6px;
   margin: 6px 0;
   resize: vertical;
@@ -3276,7 +3304,7 @@ body.sync-active #footer-brand #em-version {
   flex: 1;
   background: var(--bg-sunken);
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--radius);
   padding: 5px 8px;
   font-size: 12px;
   cursor: pointer;
@@ -3312,7 +3340,7 @@ body.sync-active #footer-brand #em-version {
   font-size: 14px;
   cursor: pointer;
   padding: 0 5px;
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
 }
 
 .insp-edge-del:hover {
@@ -3326,7 +3354,7 @@ body.sync-active #footer-brand #em-version {
   background: var(--bg-inverse);
   color: var(--on-brand);
   padding: 6px 9px;
-  border-radius: 6px;
+  border-radius: var(--radius);
   font-size: 12px;
   max-width: 360px;
   pointer-events: none;
@@ -3445,7 +3473,7 @@ body.sync-active #footer-brand #em-version {
   letter-spacing: 0.5px;
   background: var(--bg-accent-soft);
   color: var(--accent-ink);
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   padding: 1px 6px;
 }
 
@@ -3453,7 +3481,7 @@ body.sync-active #footer-brand #em-version {
   font-size: 10.5px;
   color: var(--text-muted);
   background: var(--bg-app);
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   padding: 1px 6px;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
 }
@@ -3476,7 +3504,7 @@ body.sync-active #footer-brand #em-version {
 .nv-embed {
   border: 1px solid var(--border);
   border-left: 3px solid var(--border-strong);
-  border-radius: 6px;
+  border-radius: var(--radius);
   background: var(--bg-panel);
   padding: 9px 12px;
   margin: 0 0 10px;
@@ -3549,7 +3577,7 @@ body.sync-active #footer-brand #em-version {
   border: 1px solid var(--border);
   background: var(--bg-panel);
   color: var(--brand-ink);
-  border-radius: 5px;
+  border-radius: var(--radius);
   padding: 2px 8px;
   font-size: 11px;
   cursor: pointer;
@@ -3595,7 +3623,7 @@ body.sync-active #footer-brand #em-version {
   position: relative;
   height: 260px;
   border: 1px solid var(--border);
-  border-radius: 5px;
+  border-radius: var(--radius);
   overflow: hidden;
   background: var(--bg-subtle);
   cursor: grab;
@@ -3666,7 +3694,7 @@ body.sync-active #footer-brand #em-version {
 }
 .insp-geo-hits:not(:empty) {
   border: 1px solid var(--border-faint);
-  border-radius: 5px;
+  border-radius: var(--radius);
   padding: 3px;
 }
 .insp-geo-hit {
@@ -3675,7 +3703,7 @@ body.sync-active #footer-brand #em-version {
   text-align: left;
   background: none;
   border: none;
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   padding: 4px 6px;
   font-size: 12px;
   color: var(--text);
@@ -3747,7 +3775,7 @@ body.sync-active #footer-brand #em-version {
   letter-spacing: 0.5px;
   color: var(--text);
   background: rgb(255 255 255 / 82%);
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   padding: 2px 4px 3px;
 }
 .osm-north span {
@@ -3786,7 +3814,7 @@ body.sync-active #footer-brand #em-version {
   padding: 0;
   border: 1px solid var(--border-strong);
   background: rgb(255 255 255 / 92%);
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   font-size: 14px;
   line-height: 1;
   cursor: pointer;
@@ -3856,7 +3884,7 @@ body.sync-active #footer-brand #em-version {
   position: relative;
   height: var(--em3d-h);
   border: 1px solid var(--border);
-  border-radius: 5px;
+  border-radius: var(--radius);
   overflow: hidden;
   background: var(--bg-inverse);
 }
@@ -3928,7 +3956,7 @@ body.sync-active #footer-brand #em-version {
 .em3d-unload {
   border: 1px solid var(--border);
   background: var(--bg-panel);
-  border-radius: 5px;
+  border-radius: var(--radius);
   padding: 1px 7px;
   font-size: 10.5px;
   cursor: pointer;
@@ -3980,7 +4008,7 @@ body.sync-active #footer-brand #em-version {
 .nv-mini {
   border: 1px solid var(--border);
   background: var(--bg-panel);
-  border-radius: 5px;
+  border-radius: var(--radius);
   padding: 1px 7px;
   font-size: 11.5px;
   line-height: 1.5;
@@ -3996,7 +4024,7 @@ body.sync-active #footer-brand #em-version {
 .nv-lane-select,
 .nv-viewtype {
   border: 1px solid var(--border);
-  border-radius: 5px;
+  border-radius: var(--radius);
   background: var(--bg-panel);
   font-size: 11px;
   color: var(--text-muted);
@@ -4007,7 +4035,7 @@ body.sync-active #footer-brand #em-version {
 .nv-editable:focus {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
-  border-radius: 3px;
+  border-radius: var(--radius-sm);
 }
 
 /* SURFACE-STABLE · ONE definition of the story's column, and one width for the
@@ -4080,7 +4108,7 @@ body.sync-active #footer-brand #em-version {
 
 .nv-prose-edit {
   cursor: text;
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
 }
 
 .nv-prose-edit:hover {
@@ -4093,7 +4121,7 @@ body.sync-active #footer-brand #em-version {
   font-size: 15px;
   line-height: 1.6;
   border: 1px solid var(--accent);
-  border-radius: 6px;
+  border-radius: var(--radius);
   padding: 8px 10px;
   resize: vertical;
 }
@@ -4119,7 +4147,7 @@ body.sync-active #footer-brand #em-version {
   background: var(--bg-accent-soft);
   outline: 2px dashed var(--accent);
   outline-offset: 6px;
-  border-radius: 6px;
+  border-radius: var(--radius);
 }
 
 /* ── N6 · authorship, generation, endorsement ─────────────────────────────── */
@@ -4149,7 +4177,7 @@ body.sync-active #footer-brand #em-version {
   gap: 5px;
   font-size: 11.5px;
   border: 1.5px solid;
-  border-radius: 10px;
+  border-radius: var(--radius-lg);
   padding: 1px 8px;
 }
 
@@ -4169,7 +4197,7 @@ body.sync-active #footer-brand #em-version {
   font-size: 11.5px;
   padding: 1px 4px;
   border: 1px solid var(--border);
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   background: var(--panel, var(--bg-panel));
   color: var(--text);
   max-width: 190px;
@@ -4185,7 +4213,7 @@ body.sync-active #footer-brand #em-version {
 .nv-generate {
   font-size: 11.5px;
   padding: 2px 9px;
-  border-radius: 5px;
+  border-radius: var(--radius);
   border: 1px solid #00aaff;
   background: var(--info-soft);
   color: var(--info-ink);
@@ -4224,7 +4252,7 @@ body.sync-active #footer-brand #em-version {
   font-size: 9.5px;
   letter-spacing: 0.6px;
   border: 1.5px solid;
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   padding: 0 6px;
 }
 
@@ -4236,7 +4264,7 @@ body.sync-active #footer-brand #em-version {
 .nv-prov-link {
   border: 1px solid var(--border);
   background: none;
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   padding: 0 6px;
   font-size: 10.5px;
   color: var(--text-muted);
@@ -4251,7 +4279,7 @@ body.sync-active #footer-brand #em-version {
   border: 1px solid #ff6600;
   background: var(--bg-panel);
   color: var(--ai-ink);
-  border-radius: 5px;
+  border-radius: var(--radius);
   padding: 1px 9px;
   font-size: 11px;
   cursor: pointer;
@@ -4286,7 +4314,7 @@ body.sync-active #footer-brand #em-version {
 .nv-wants-attention {
   outline: 2px solid #ff6600;
   outline-offset: 2px;
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   animation: nv-pulse 0.6s ease-in-out 3;
 }
 
@@ -4357,7 +4385,7 @@ body.sync-active #footer-brand #em-version {
   align-items: center;
   padding: 5px 8px;
   border: 1px solid var(--border);
-  border-radius: 5px;
+  border-radius: var(--radius);
   font-size: 12px;
   cursor: pointer;
 }
@@ -4401,7 +4429,7 @@ body.sync-active #footer-brand #em-version {
   font-size: 11px;
   padding: 4px 6px;
   border: 1px solid var(--border);
-  border-radius: 5px;
+  border-radius: var(--radius);
 }
 
 .sm-lang {
@@ -4432,7 +4460,7 @@ body.sync-active #footer-brand #em-version {
   text-align: left;
   padding: 5px 9px;
   border: 1px solid var(--border);
-  border-radius: 5px;
+  border-radius: var(--radius);
   background: var(--bg-subtle);
   font-size: 12px;
   cursor: pointer;
@@ -4468,7 +4496,7 @@ body.sync-active #footer-brand #em-version {
   padding: 7px 9px;
   border: 1px solid var(--border);
   border-left: 3px solid var(--accent);
-  border-radius: 5px;
+  border-radius: var(--radius);
   background: var(--bg-sunken);
   font-size: 11.5px;
   line-height: 1.45;
@@ -4511,7 +4539,7 @@ body.sync-active #footer-brand #em-version {
   line-height: 1.4;
   padding: 5px 6px;
   border: 1px solid var(--border);
-  border-radius: 5px;
+  border-radius: var(--radius);
   resize: vertical;
 }
 
@@ -4519,7 +4547,7 @@ body.sync-active #footer-brand #em-version {
   margin-top: 5px;
   padding: 4px 9px;
   border: 1px solid var(--border);
-  border-radius: 5px;
+  border-radius: var(--radius);
   background: var(--bg-subtle);
   font-size: 11.5px;
   cursor: pointer;
@@ -4565,7 +4593,7 @@ body.sync-active #footer-brand #em-version {
   flex: 1;
   padding: 5px 9px;
   border: 1px solid var(--border);
-  border-radius: 5px;
+  border-radius: var(--radius);
   background: var(--bg-subtle);
   font-size: 12px;
   cursor: pointer;
@@ -4586,7 +4614,7 @@ body.sync-active #footer-brand #em-version {
   flex: 1;
   padding: 4px 8px;
   border: 1px solid var(--border);
-  border-radius: 5px;
+  border-radius: var(--radius);
   background: var(--bg-subtle);
   font-size: 11.5px;
   color: var(--text-dim);
@@ -4612,7 +4640,7 @@ body.sync-active #footer-brand #em-version {
   position: relative;
   border: 1px solid var(--border);
   border-left: 3px solid transparent;
-  border-radius: 6px;
+  border-radius: var(--radius);
   background: var(--bg-panel);
 }
 .ov-card.active {
@@ -4706,7 +4734,7 @@ body.sync-active #footer-brand #em-version {
   align-items: center;
   border: 1px solid var(--border);
   border-left: 3px solid transparent;
-  border-radius: 5px;
+  border-radius: var(--radius);
   background: var(--bg-panel);
 }
 
@@ -4756,7 +4784,7 @@ body.sync-active #footer-brand #em-version {
   font-size: 15px;
   line-height: 1;
   cursor: pointer;
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
 }
 
 .et-close:hover {
@@ -4828,7 +4856,7 @@ body.sync-active #footer-brand #em-version {
   gap: 3px;
   padding: 4px 9px;
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--radius);
   background: var(--bg-panel);
   box-shadow: 0 1px 3px rgb(0 0 0 / 8%);
   font-size: 12px;
@@ -4849,7 +4877,7 @@ body.sync-active #footer-brand #em-version {
   font-weight: 600;
   padding: 1px 3px;
   border: 1px solid var(--accent);
-  border-radius: 3px;
+  border-radius: var(--radius-sm);
 }
 
 /* The browser-fallback file inputs are driven by the "…" buttons, never shown:
@@ -4864,15 +4892,15 @@ body.sync-active #footer-brand #em-version {
 .insp-propagative {
   margin: 8px 0;
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--radius);
   padding: 4px 8px 6px;
   background: var(--bg-subtle);
 }
 .insp-sect-summary {
   cursor: pointer;
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.3px;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
   text-transform: uppercase;
   color: var(--text-muted);
   padding: 2px 0;
@@ -4902,7 +4930,7 @@ body.sync-active #footer-brand #em-version {
   flex: 0 0 auto;
   font-size: 10.5px;
   padding: 1px 6px;
-  border-radius: 8px;
+  border-radius: var(--radius-lg);
   background: var(--bg-accent-soft);
   color: var(--accent-ink);
 }
@@ -4924,7 +4952,7 @@ body.sync-active #footer-brand #em-version {
   padding: 5px 8px;
   background: var(--bg-elevated);
   border: 1px solid var(--border);
-  border-radius: 7px;
+  border-radius: var(--radius);
   color: var(--text);
   font-size: 12px;
 }
@@ -4977,7 +5005,7 @@ body.sync-active #footer-brand #em-version {
   padding: 0 9px;
   background: transparent;
   border: 1px solid transparent;
-  border-radius: 8px;
+  border-radius: var(--radius-lg);
   color: var(--text);
   font-size: 12.5px;
   cursor: pointer;
@@ -5203,7 +5231,7 @@ body.sync-active #footer-brand #em-version {
   text-align: left;
   padding: 6px 8px;
   border: 1px solid transparent;
-  border-radius: 7px;
+  border-radius: var(--radius);
   background: transparent;
   color: var(--text);
   font-size: 12.5px;
@@ -5242,7 +5270,7 @@ body.sync-active #footer-brand #em-version {
   padding: 6px 8px;
   background: var(--bg-elevated);
   border: 1px solid var(--border);
-  border-radius: 7px;
+  border-radius: var(--radius);
   color: var(--text);
   font-size: 13px;
 }
@@ -5352,7 +5380,7 @@ body.sync-active #footer-brand #em-version {
 .nv-view .nv-hit {
   background: var(--bg-accent-soft);
   box-shadow: inset 3px 0 0 var(--accent);
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
 }
 
 /* WIN7 · "here is the block you came for" — a brief outline after a panel has
@@ -5360,7 +5388,7 @@ body.sync-active #footer-brand #em-version {
 .settings-sect-flash {
   outline: 2px solid var(--accent);
   outline-offset: 3px;
-  border-radius: 6px;
+  border-radius: var(--radius);
   transition: outline-color 0.6s ease;
 }
 
@@ -5381,7 +5409,7 @@ body.sync-active #footer-brand #em-version {
   flex-direction: column;
   background: var(--bg-panel);
   border: 1px solid var(--border-strong);
-  border-radius: 10px;
+  border-radius: var(--radius-lg);
   box-shadow: 0 18px 48px rgba(0, 0, 0, 0.45);
   overflow: hidden;
 }
@@ -5471,7 +5499,7 @@ body.sync-active #footer-brand #em-version {
   object-fit: contain;
   background: var(--bg-app);
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--radius);
 }
 /* a PDF has no intrinsic size to fit to, so it takes the stage */
 object.viewer-media {
@@ -5510,7 +5538,7 @@ object.viewer-media {
   padding: 6px 8px;
   background: var(--bg-elevated);
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--radius);
   font-size: 11.5px;
   color: var(--text);
   word-break: break-all;
@@ -5545,7 +5573,7 @@ object.viewer-media {
   height: 22px;
   padding: 0;
   border: 1px solid var(--border);
-  border-radius: 5px;
+  border-radius: var(--radius);
   background: var(--bg-elevated);
   color: var(--text);
   cursor: pointer;
@@ -5584,7 +5612,7 @@ object.viewer-media {
   gap: 6px;
   padding: 8px;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-lg);
   background: var(--bg-panel);
   color: var(--text);
   cursor: pointer;
@@ -5598,7 +5626,7 @@ object.viewer-media {
   height: 92px;
   object-fit: contain;
   background: var(--bg-app);
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
 }
 .viewer-thumb-glyph {
   display: flex;
@@ -5608,7 +5636,7 @@ object.viewer-media {
   height: 92px;
   font-size: 30px;
   background: var(--bg-app);
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
 }
 .viewer-thumb-label {
   font-size: 11px;
@@ -5634,7 +5662,7 @@ object.viewer-media {
   height: 22px;
   padding: 0;
   border: 1px solid var(--border);
-  border-radius: 5px;
+  border-radius: var(--radius);
   background: var(--bg-elevated);
   color: var(--text);
   cursor: pointer;
@@ -5674,7 +5702,7 @@ object.viewer-media {
   align-items: center;
   gap: 8px;
   padding: 4px 8px;
-  border-radius: 5px;
+  border-radius: var(--radius);
   font-size: 12.5px;
   color: var(--text);
   cursor: default;
@@ -5801,7 +5829,7 @@ object.viewer-media {
   object-fit: contain;
   background: var(--bg-app);
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--radius);
 }
 #annotator-image.hidden {
   display: none;
@@ -5854,7 +5882,7 @@ object.viewer-media {
   gap: 8px;
   padding: 6px 8px;
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--radius);
   background: var(--bg-panel);
   color: var(--text);
   cursor: pointer;
@@ -5900,7 +5928,7 @@ object.viewer-media {
   gap: 8px;
   padding: 10px 12px;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-lg);
   background: var(--bg-panel);
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
   max-height: calc(100% - 24px);
@@ -5925,7 +5953,7 @@ object.viewer-media {
   width: 100%;
   padding: 4px 6px;
   border: 1px solid var(--border);
-  border-radius: 5px;
+  border-radius: var(--radius);
   background: var(--bg-app);
   color: var(--text);
   font: inherit;
@@ -5946,7 +5974,7 @@ object.viewer-media {
 .annot-cancel {
   padding: 5px 12px;
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--radius);
   background: var(--bg-elevated);
   color: var(--text);
   cursor: pointer;
@@ -5966,7 +5994,7 @@ object.viewer-media {
 .footer-chip {
   padding: 1px 8px;
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: var(--radius-lg);
   background: transparent;
   color: var(--text-muted);
   font: inherit;
@@ -6024,7 +6052,7 @@ object.viewer-media {
   gap: 10px;
   padding: 6px 8px;
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--radius);
   background: var(--bg-panel);
   font-size: 12.5px;
 }
@@ -6065,7 +6093,7 @@ object.viewer-media {
 .shelf-badge {
   padding: 1px 7px;
   border: 1px solid var(--border);
-  border-radius: 9px;
+  border-radius: var(--radius-lg);
   font-size: 10px;
   color: var(--text-muted);
   white-space: nowrap;
@@ -6089,7 +6117,7 @@ object.viewer-media {
 .me-intro { color: var(--text-muted); margin: 0 0 10px; line-height: 1.45; }
 .me-box {
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--radius);
   padding: 8px 10px;
   margin-bottom: 10px;
 }
@@ -6106,7 +6134,7 @@ object.viewer-media {
    give a path, and the path is what the importer reads) */
 .me-picker {
   border: 1px solid var(--border);
-  border-radius: 5px;
+  border-radius: var(--radius);
   margin: 6px 0;
   padding: 4px 6px;
   background: var(--bg-elevated);
@@ -6122,14 +6150,14 @@ object.viewer-media {
 .storage-places {
   position: fixed; z-index: 200;
   background: var(--bg-panel); border: 1px solid var(--border-strong);
-  border-radius: 6px; padding: 3px; display: flex; flex-direction: column;
+  border-radius: var(--radius); padding: 3px; display: flex; flex-direction: column;
   min-width: 12rem; max-height: 18rem; overflow: auto;
   box-shadow: 0 6px 18px rgba(0, 0, 0, .4);
 }
 .storage-places.hidden { display: none; }
 .storage-place {
   text-align: left; padding: 3px 7px; border: 1px solid transparent;
-  border-radius: 4px; background: transparent; color: var(--text);
+  border-radius: var(--radius-sm); background: transparent; color: var(--text);
   font: inherit; font-size: 11px; cursor: pointer;
 }
 .storage-place:hover:not(:disabled) { border-color: var(--border);
@@ -6154,7 +6182,7 @@ object.viewer-media {
 }
 .me-side-row {
   display: block; width: 100%; text-align: left; padding: 1px 5px;
-  border: 1px solid transparent; border-radius: 3px; background: transparent;
+  border: 1px solid transparent; border-radius: var(--radius-sm); background: transparent;
   color: var(--text); font: inherit; font-size: 11px; cursor: pointer;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
@@ -6178,7 +6206,7 @@ object.viewer-media {
   text-align: left;
   padding: 2px 6px;
   border: 1px solid transparent;
-  border-radius: 3px;
+  border-radius: var(--radius-sm);
   background: transparent;
   color: var(--text);
   font: inherit;
@@ -6210,7 +6238,7 @@ object.viewer-media {
 .me-samples.me-empty { font-style: italic; opacity: .6; }
 .me-prop { width: 9rem; margin-left: 4px; }
 .me-badge { font-size: 10px; padding: 0 5px; border: 1px solid var(--border);
-            border-radius: 8px; margin-left: 4px; }
+            border-radius: var(--radius-lg); margin-left: 4px; }
 .me-badge.me-direct { border-color: #b8893a; color: #d8bd30; }
 .me-verdict { border-left: 3px solid var(--border); padding: 4px 8px;
               margin: 6px 0; }
@@ -6224,7 +6252,7 @@ object.viewer-media {
 .me-preview summary { cursor: pointer; color: var(--text-muted); }
 .me-preview pre {
   max-height: 14rem; overflow: auto; background: var(--bg-elevated);
-  border: 1px solid var(--border); border-radius: 4px; padding: 6px;
+  border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 6px;
   font-size: 10px;
 }
 
@@ -6274,7 +6302,7 @@ object.viewer-media {
   background: transparent;
   color: var(--text);
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--radius);
 }
 /* WHERE the bytes are */
 .shelf-badge.v-minio { border-color: #3a7fb8; color: #6fb3e0; }
@@ -6323,7 +6351,7 @@ object.viewer-media {
 .shelf-actions button {
   padding: 2px 8px;
   border: 1px solid var(--border);
-  border-radius: 5px;
+  border-radius: var(--radius);
   background: var(--bg-elevated);
   color: var(--text);
   font: inherit;
@@ -6333,7 +6361,7 @@ object.viewer-media {
 .storage-nav-wide {
   padding: 2px 8px;
   border: 1px solid var(--border);
-  border-radius: 5px;
+  border-radius: var(--radius);
   background: var(--bg-elevated);
   color: var(--text);
   font: inherit;
@@ -6366,7 +6394,7 @@ object.viewer-media {
   overflow-y: auto;
   background: var(--bg-panel, var(--bg));
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-lg);
   box-shadow: 0 10px 28px rgba(0, 0, 0, 0.28);
   padding: 10px 12px;
 }
@@ -6388,7 +6416,7 @@ object.viewer-media {
   cursor: pointer;
   font-size: 13px;
   padding: 2px 4px;
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
 }
 .conflict-close:hover {
   background: var(--bg-hover);
@@ -6422,7 +6450,7 @@ object.viewer-media {
 .conflict-btn {
   background: none;
   border: 1px solid var(--border);
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   color: var(--text-muted);
   cursor: pointer;
   font: inherit;
@@ -6450,7 +6478,7 @@ object.viewer-media {
 .sync-readonly {
   color: var(--warn, #d9bd7a);
   border: 1px solid currentColor;
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   padding: 0 5px;
   font-size: 10.5px;
   letter-spacing: 0.02em;
@@ -6471,7 +6499,7 @@ object.viewer-media {
 .sync-ctl-btn {
   background: none;
   border: 1px solid transparent;
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   color: var(--text-muted);
   cursor: pointer;
   font: inherit;
@@ -6498,7 +6526,7 @@ object.viewer-media {
   font-size: 11px;
   padding: 0 4px;
   margin-left: 4px;
-  border-radius: 3px;
+  border-radius: var(--radius-sm);
   opacity: 0;
 }
 .insp-data dd:hover .insp-field-clear {
@@ -6522,7 +6550,7 @@ object.viewer-media {
   font-size: 10px;
   letter-spacing: 0.08em;
   padding: 1px 5px;
-  border-radius: 3px;
+  border-radius: var(--radius-sm);
   border: 1px solid var(--line);
   color: var(--text-faint);
 }
@@ -6531,7 +6559,7 @@ object.viewer-media {
   padding: 2px 7px;
   background: transparent;
   border: 1px solid var(--line);
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   color: var(--text-dim);
   cursor: pointer;
 }
@@ -6546,7 +6574,7 @@ object.viewer-media {
   width: 100%;
   height: 100%;
   object-fit: cover;
-  border-radius: 3px;
+  border-radius: var(--radius-sm);
   display: block;
 }
 
@@ -6587,7 +6615,7 @@ object.viewer-media {
   font-size: 11.5px;
   padding: 2px 7px;
   border: 1.4px solid var(--border-strong);
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   white-space: nowrap;   /* colour comes from nodeStyle.textColor at render */
 }
 
@@ -6610,7 +6638,7 @@ object.viewer-media {
 .nv-rung {
   padding: 1px 6px;
   border: 1px solid var(--border);
-  border-radius: 9px;
+  border-radius: var(--radius-lg);
   color: var(--text-faint);
   font-size: 10.5px;
 }
@@ -6631,7 +6659,7 @@ object.viewer-media {
 .nv-timeline-bar {
   min-width: 40px;
   border: 1.4px solid var(--border-strong);
-  border-radius: 3px;
+  border-radius: var(--radius-sm);
   padding: 2px 6px;
   margin-bottom: 4px;
   font-size: 11px;
@@ -6678,7 +6706,7 @@ object.viewer-media {
   display: inline-flex;
   flex-direction: column;
   border: 1.4px solid var(--border-strong);
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   padding: 2px 7px;
   max-width: 220px;
 }
@@ -6702,7 +6730,7 @@ object.viewer-media {
   font-style: italic;
   color: var(--text-faint);
   border: 1px dashed var(--border);
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   padding: 2px 7px;
 }
 
@@ -6712,7 +6740,7 @@ object.viewer-media {
   max-width: 100%;
   max-height: 240px;
   border: 1px solid var(--border);
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   display: block;
 }
 
@@ -6756,7 +6784,7 @@ body.nv-standalone main.nv-standalone-main {
 .nv-standalone-problem {
   border: 1px solid var(--border);
   border-left: 3px solid var(--border-strong);
-  border-radius: 6px;
+  border-radius: var(--radius);
   background: var(--bg-panel);
   padding: 1.25rem 1.4rem;
 }
@@ -6813,7 +6841,7 @@ body.nv-standalone main.nv-standalone-main {
   max-height: 90vh;
   overflow: auto;
   background: var(--bg-panel);
-  border-radius: 8px;
+  border-radius: var(--radius-lg);
   padding: 12px;
 }
 .nv-lightbox-img {
@@ -6821,7 +6849,7 @@ body.nv-standalone main.nv-standalone-main {
   max-width: 100%;
   max-height: 70vh;
   margin: 0 auto;
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
 }
 .nv-lightbox-caption { margin-top: 10px; font-size: 13px; }
 .nv-lightbox-region {
@@ -6838,7 +6866,7 @@ body.nv-standalone main.nv-standalone-main {
   border: 1px solid var(--border);
   background: var(--bg-elevated);
   color: var(--text);
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   cursor: pointer;
   padding: 2px 8px;
 }
@@ -6851,7 +6879,7 @@ body.nv-standalone main.nv-standalone-main {
   height: auto;
   display: block;
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--radius);
   background: var(--bg-panel);
   touch-action: none;   /* the orbit gesture is ours, not the page's */
   cursor: grab;
@@ -6872,7 +6900,7 @@ body.nv-standalone main.nv-standalone-main {
 }
 .ing-drop {
   border: 1px dashed var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-lg);
   padding: 10px;
   background: var(--bg-sunken);
   display: flex;
@@ -6908,7 +6936,7 @@ body.nv-standalone main.nv-standalone-main {
 .ing-signed, .ing-unsigned {
   margin-top: 8px;
   padding: 5px 8px;
-  border-radius: 6px;
+  border-radius: var(--radius);
   font-size: 11.5px;
   line-height: 1.35;
 }
@@ -6945,7 +6973,7 @@ body.nv-standalone main.nv-standalone-main {
 .ing-tally-signed { border-color: var(--ok, var(--border)); }
 .ing-tally-failed { border-color: var(--warn, var(--border)); }
 .ing-debt {
-  margin: 6px 0 2px; padding: 5px 8px; border-radius: 6px;
+  margin: 6px 0 2px; padding: 5px 8px; border-radius: var(--radius);
   font-size: 11.5px; color: var(--text-faint); background: var(--bg-sunken);
 }
 .ing-debt-owed {
@@ -6968,7 +6996,7 @@ body.nv-standalone main.nv-standalone-main {
 .ing-select {
   background: var(--bg-sunken);
   border: 1px solid var(--border-subtle, var(--border));
-  border-radius: 5px;
+  border-radius: var(--radius);
   color: var(--text);
   padding: 4px 6px;
   font-size: 12.5px;
@@ -6988,7 +7016,7 @@ body.nv-standalone main.nv-standalone-main {
   align-items: center;
   gap: 8px;
   padding: 4px 6px;
-  border-radius: 5px;
+  border-radius: var(--radius);
 }
 .ing-row:hover { background: var(--bg-elevated); }
 .ing-kind, .ing-state {
@@ -7086,7 +7114,7 @@ body.nv-standalone main.nv-standalone-main {
   min-width: 0;
   padding: 2px 6px;
   border: 1px solid var(--border);
-  border-radius: 5px;
+  border-radius: var(--radius);
   background: var(--bg-app);
   color: var(--text);
   font: inherit;
@@ -7103,7 +7131,7 @@ body.nv-standalone main.nv-standalone-main {
   box-sizing: border-box;
   padding: 3px 6px;
   border: 1px solid var(--border);
-  border-radius: 5px;
+  border-radius: var(--radius);
   background: var(--bg-app);
   color: var(--text);
   font: inherit;
@@ -7118,7 +7146,7 @@ body.nv-standalone main.nv-standalone-main {
   align-self: flex-end;
   padding: 3px 10px;
   border: 1px solid var(--border);
-  border-radius: 5px;
+  border-radius: var(--radius);
   background: var(--bg-elevated);
   color: var(--text);
   font: inherit;
@@ -7182,7 +7210,7 @@ body.nv-standalone main.nv-standalone-main {
    a creation nobody can see is indistinguishable from a dead button. */
 .nv-prose-edit.nv-just-added {
   animation: nv-just-added 1.6s ease-out;
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
 }
 @keyframes nv-just-added {
   0%   { background: var(--bg-accent-soft); box-shadow: 0 0 0 3px var(--bg-accent-soft); }
@@ -7213,7 +7241,7 @@ body.nv-standalone main.nv-standalone-main {
   background: var(--panel, #fff);
   color: var(--text, #1a1a1a);
   border: 1px solid var(--border, #ccc);
-  border-radius: 8px;
+  border-radius: var(--radius-lg);
   box-shadow: 0 8px 28px rgba(0, 0, 0, .22);
   font-size: 13px;
 }
@@ -7244,7 +7272,7 @@ body.nv-standalone main.nv-standalone-main {
 .mem-invite { display: flex; justify-content: space-between; gap: .5rem; align-items: center; }
 .mem-token { display: flex; gap: .4rem; align-items: center; margin: .3rem 0; }
 .mem-token code { word-break: break-all; font-size: .85em; }
-.mem-ghost { background: transparent; border: 1px solid var(--border, #ccc); border-radius: 5px; cursor: pointer; color: inherit; }
+.mem-ghost { background: transparent; border: 1px solid var(--border, #ccc); border-radius: var(--radius); cursor: pointer; color: inherit; }
 
 /* the chip says, quietly, that this session may act */
 #hub-roster.can-manage { font-weight: 600; }
@@ -7317,7 +7345,7 @@ body.nv-standalone main.nv-standalone-main {
   margin: 6px 8px 10px;
   padding: 8px 10px;
   border: 1px solid var(--line, #d8d8d8);
-  border-radius: 6px;
+  border-radius: var(--radius);
   background: var(--panel, rgba(127, 127, 127, 0.06));
   font-size: 11.5px;
   line-height: 1.55;
@@ -7343,7 +7371,7 @@ body.nv-standalone main.nv-standalone-main {
  */
 .stamp-compose {
   margin: 6px 8px 10px; padding: 8px 10px;
-  border: 1px solid var(--line, #d8d8d8); border-radius: 6px;
+  border: 1px solid var(--line, #d8d8d8); border-radius: var(--radius);
   background: var(--panel, rgba(127, 127, 127, 0.06));
   font-size: 11.5px; line-height: 1.5;
 }
@@ -7374,7 +7402,7 @@ body.nv-standalone main.nv-standalone-main {
  * lettore di ultima istanza è un umano con un editor di testo. */
 .stamp-emitted {
   margin: 6px 8px 10px; padding: 8px 10px;
-  border: 1px solid var(--line, #d8d8d8); border-radius: 6px;
+  border: 1px solid var(--line, #d8d8d8); border-radius: var(--radius);
   background: var(--panel, rgba(127, 127, 127, 0.06)); font-size: 11.5px;
 }
 .stamp-emitted-head { font-weight: 600; margin-bottom: 4px; }
