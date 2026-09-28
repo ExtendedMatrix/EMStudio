@@ -814,18 +814,21 @@ export function render(
         ctx.font = canvasFont(CANVAS_TYPE.nodeLabel.weight, CANVAS_TYPE.minPx);
         ctx.fillStyle = labelInk(state, n.node.id ?? n.id, canvasTheme().labelInk);
         if (st.labelPosition === "top_left") {
-          ctx.textAlign = "left";
-          ctx.textBaseline = "bottom";
-          const lx = n.x + n.w / 2 - iw / 2 - 2;
-          const ly = iy - 2;
-          ctx.fillText(label, lx, ly);
-          const tw = ctx.measureText(label).width;
-          ctx.strokeStyle = canvasTheme().labelInk;
-          ctx.lineWidth = 0.8 / Math.sqrt(vp.scale);
-          ctx.beginPath();
-          ctx.moveTo(lx, ly + 1.5);
-          ctx.lineTo(lx + tw, ly + 1.5);
-          ctx.stroke();
+          // STRUTTURA · PELLE's defect 3: the yEd `top_left` label sat on the
+          // glyph's top edge and covered it («X.01» over the extractor's
+          // disc), and its underline crossed the connector coming in from
+          // above. It goes UNDER the glyph now, centred, ellipsised to the node
+          // box — the node, its size and its glyph are untouched.
+          ctx.textAlign = "center";
+          ctx.textBaseline = "top";
+          const maxW = Math.max(n.w, iw + 16) - 4;
+          let text = label;
+          if (ctx.measureText(text).width > maxW) {
+            while (text.length > 2 && ctx.measureText(text + "…").width > maxW)
+              text = text.slice(0, -1);
+            text += "…";
+          }
+          ctx.fillText(text, n.x + n.w / 2, iy + ih + 2 / Math.sqrt(vp.scale));
         } else if (ctx.measureText(label).width > iw - 10 && n.w > iw + 8) {
           // DAG · a glyph-only node whose name does not fit ON the glyph. The
           // ellipsis path below would print "…" over a 30px gear, so the node
@@ -1273,7 +1276,12 @@ export function render(
   const PD_TAG_H = 14;
   const drawPdTag = (x: number, y: number, pdgId: string): void => {
     ctx.save();
-    ctx.fillStyle = groupHeaderFill(); // paradata group colour (yEd folder tab)
+    // STRUTTURA · the PARADATA colour itself — the group's `label_background`
+    // from em_visual_rules (the peach folder tab), the same in both themes like
+    // every semantic fill. It used to be the theme's `groupHeaderFallback`,
+    // which in dark is a brown #6b5324 under a brown #5a4522 ink: the tablet
+    // read as a smudge (PELLE's defect 2). The ink follows the fill (`labelOn`).
+    ctx.fillStyle = pdFill;   // declared with the PD decorators above
     ctx.strokeStyle = "rgba(0,0,0,0.30)";
     ctx.lineWidth = 1;
     if (typeof ctx.roundRect === "function") {
@@ -1285,7 +1293,7 @@ export function render(
       ctx.fillRect(x, y, PD_TAG_W, PD_TAG_H);
       ctx.strokeRect(x, y, PD_TAG_W, PD_TAG_H);
     }
-    ctx.fillStyle = "#5a4522";
+    ctx.fillStyle = labelOn(pdFill) === canvasTheme().onLight ? "#5a3200" : labelOn(pdFill);
     ctx.font = canvasFont(700, 9);
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";

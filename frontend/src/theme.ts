@@ -186,12 +186,34 @@ export function setCanvasTheme(name: ThemeName): void {
  * in dark mode, because the node itself is still white-ish.
  */
 export function labelOn(fill: string, t: CanvasTheme = canvasTheme()): string {
-  const h = fill.replace("#", "");
-  if (h.length < 6) return t.onLight;
-  const r = parseInt(h.slice(0, 2), 16) / 255;
-  const g = parseInt(h.slice(2, 4), 16) / 255;
-  const b = parseInt(h.slice(4, 6), 16) / 255;
+  const rgb = visibleRgb(fill, t);
+  if (!rgb) return t.onLight;
+  const [r, g, b] = rgb.map((c) => c / 255);
   return 0.2126 * r + 0.7152 * g + 0.0722 * b > 0.45 ? t.onLight : t.onDark;
+}
+
+/**
+ * STRUTTURA · the colour a fill actually SHOWS, as 0–255 channels.
+ *
+ * `#rrggbb` is itself. A translucent `rgba(…)` — the header of a US container is
+ * its border at 22 % — is composited over the canvas background, because that
+ * is what the eye reads. Before this, `labelOn` could not parse `rgba` at all
+ * and fell to the light ink: a near-white title on a pale pink band in light
+ * mode (PELLE's defect 1, measured about 1.3:1).
+ */
+export function visibleRgb(fill: string, t: CanvasTheme = canvasTheme()): [number, number, number] | null {
+  const hex = (h: string): [number, number, number] | null => {
+    const x = h.replace("#", "");
+    if (x.length < 6) return null;
+    const v = [0, 2, 4].map((i) => parseInt(x.slice(i, i + 2), 16));
+    return v.some(Number.isNaN) ? null : (v as [number, number, number]);
+  };
+  const m = fill.match(/^rgba?\(\s*([\d.]+)\s*,\s*([\d.]+)\s*,\s*([\d.]+)\s*(?:,\s*([\d.]+)\s*)?\)$/i);
+  if (!m) return hex(fill);
+  const a = m[4] === undefined ? 1 : Number(m[4]);
+  const under = hex(t.canvasBg) ?? [255, 255, 255];
+  return [1, 2, 3].map((i, k) => Math.round(Number(m[i]) * a + under[k] * (1 - a))) as
+    [number, number, number];
 }
 
 const STORAGE_KEY = "emstudio.theme";
