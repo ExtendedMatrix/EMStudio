@@ -221,3 +221,103 @@ export function imageForUrl(url: string | null): HTMLImageElement | null {
 export function imageFor(nodeType: string): HTMLImageElement | null {
   return imageForUrl(iconUrlFor(nodeType));
 }
+
+// ── Crisp glyphs (PELLE) ────────────────────────────────────────────────────
+//
+// The vendored SVGs carry a viewBox and no width/height (extractor.svg is
+// `viewBox="0 0 23.51 23.51"`). Loaded as an `Image` and drawn with
+// `drawImage`, WebKit (Tauri on macOS) rasterises such an SVG at its NATURAL size
+// — ~23 px — and then scales that bitmap up: soft edges, thin strokes. Chromium
+// hides it better but does the same at some zooms.
+//
+// So an SVG glyph is rasterised ONCE per scale band at the size it will actually
+// occupy on the device: the SVG text gets an explicit width/height (so its
+// intrinsic size IS the target, in every engine), is decoded, and painted into an
+// offscreen canvas that the renderer then blits. Bands are half-octaves
+// (1×, 1.41×, 2×, 2.83×, 4×, …) of (drawn size × devicePixelRatio × zoom), rounded UP, so
+// a band serves a whole range of zooms and the cache stays small; above
+// MAX_SIDE px the engine's own vector path draws the plain image (a bitmap that
+// big buys nothing and costs memory). The asset files are not touched: they are
+// vendored from the datamodel.
+
+const MAX_SIDE = 2048;
+const svgTextCache = new Map<string, string | null>();
+const crispCache = new Map<string, HTMLCanvasElement | null>();
+
+function svgText(url: string): string | null {
+  const hit = svgTextCache.get(url);
+  if (hit !== undefined) return hit;
+  let text: string | null = null;
+  try {
+    const m = /^data:image\/svg\+xml(;base64)?,(.*)$/s.exec(url);
+    if (m) {
+      text = m[1]
+        ? new TextDecoder().decode(Uint8Array.from(atob(m[2]), (c) => c.charCodeAt(0)))
+        : decodeURIComponent(m[2]);
+    }
+  } catch {
+    text = null;
+  }
+  svgTextCache.set(url, text);
+  return text;
+}
+
+/** the root <svg …> tag with width/height forced to the target pixels */
+function sizedSvg(text: string, w: number, h: number): string | null {
+  const m = /<svg\b[^>]*>/i.exec(text);
+  if (!m) return null;
+  const tag = m[0]
+    .replace(/\s(width|height)\s*=\s*("[^"]*"|'[^']*')/gi, "")
+    .replace(/<svg\b/i, `<svg width="${w}" height="${h}" preserveAspectRatio="xMidYMid meet"`)
+    .replace(/\spreserveAspectRatio\s*=\s*("[^"]*"|'[^']*')(?=[^>]*preserveAspectRatio)/i, "");
+  return text.slice(0, m.index) + tag + text.slice(m.index + m[0].length);
+}
+
+/** the smallest band ≥ the wanted device-pixel scale */
+export function scaleBand(pixelScale: number): number {
+  // half-octave steps (1, 1.41, 2, 2.83, 4, …): the blit then shrinks the
+  // bitmap by at most √2, which smoothing handles without visible stair-steps
+  return 2 ** (Math.max(0, Math.ceil(2 * Math.log2(Math.max(1e-6, pixelScale)))) / 2);
+}
+
+/**
+ * A crisp bitmap of `img` for a draw of `w × h` world units at `pixelScale`
+ * device pixels per unit (dpr × zoom), or `img` itself when it is a raster, not
+ * ready yet, or cannot be re-sized. The caller draws the result into the same
+ * `w × h` box — the only thing that changes is how many pixels it carries.
+ */
+export function crispImage(
+  img: HTMLImageElement,
+  w: number,
+  h: number,
+  pixelScale: number,
+): CanvasImageSource {
+  const url = img.src;
+  const text = svgText(url);
+  if (!text || typeof document === "undefined") return img;
+  const band = scaleBand(pixelScale);
+  const pw = Math.max(1, Math.ceil(w * band));
+  const ph = Math.max(1, Math.ceil(h * band));
+  if (pw > MAX_SIDE || ph > MAX_SIDE) return img;
+  const key = `${url.length}:${url.slice(-48)}|${pw}x${ph}`;
+  const hit = crispCache.get(key);
+  if (hit) return hit;
+  if (hit === null) return img; // in flight, or failed: the plain image meanwhile
+  crispCache.set(key, null);
+  const src = sizedSvg(text, pw, ph);
+  if (!src) return img;
+  const raster = new Image(pw, ph);
+  raster.onload = () => {
+    const c = document.createElement("canvas");
+    c.width = pw;
+    c.height = ph;
+    const cx = c.getContext("2d");
+    if (!cx) return;
+    cx.imageSmoothingQuality = "high";
+    cx.drawImage(raster, 0, 0, pw, ph);
+    crispCache.set(key, c);
+    redraw?.();
+  };
+  raster.src = "data:image/svg+xml;charset=utf-8," + encodeURIComponent(src);
+  return img;
+}

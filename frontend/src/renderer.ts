@@ -2,7 +2,7 @@
 // one hit-testing model, one style system, styles driven by the EM palette
 // metadata (palette.ts ← em_visual_rules.json). Edges are routed
 // orthogonally with crossing bridges (routing.ts), yEd-style.
-import { dtcGlyphUrl, ICON_NODE_TYPES, imageFor, imageForUrl } from "./icons";
+import { crispImage, dtcGlyphUrl, ICON_NODE_TYPES, imageFor, imageForUrl } from "./icons";
 import { dtcGlyphName } from "./rules";
 import { documentVariant, edgeInk, edgeStyle, nodeStyle } from "./palette";
 import {
@@ -801,7 +801,10 @@ export function render(
       const iw = scale * aspect;
       const ix = n.x + n.w / 2 - iw / 2;
       const iy = n.y + n.h / 2 - ih / 2;
-      ctx.drawImage(icon, ix, iy, iw, ih);
+      // PELLE · a bitmap rasterised at the size it occupies on the device
+      // (drawn size × dpr × zoom band), not the SVG's 23 px natural size scaled up
+      ctx.imageSmoothingQuality = "high";
+      ctx.drawImage(crispImage(icon, iw, ih, dpr * vp.scale), ix, iy, iw, ih);
       if (drawLabels) {
         const label = String(n.node.name || n.id);
         ctx.font = canvasFont(CANVAS_TYPE.nodeLabel.weight, CANVAS_TYPE.minPx);
@@ -1156,7 +1159,11 @@ export function render(
       if (b.inherited) ctx.globalAlpha = 0.5;
       const img = imageFor(b.kind);
       const pad = badgePx * BADGE_ICON_INSET;
-      if (img) ctx.drawImage(img, bx + pad, topY + pad, badgePx - 2 * pad, badgePx - 2 * pad);
+      if (img) {
+        const side = badgePx - 2 * pad; // already screen px: the band is dpr alone
+        ctx.imageSmoothingQuality = "high";
+        ctx.drawImage(crispImage(img, side, side, dpr), bx + pad, topY + pad, side, side);
+      }
       else {
         ctx.fillStyle = labelOn(canvasTheme().handleFill);
         ctx.font = canvasFont(700, Math.round(badgePx * 0.62));
