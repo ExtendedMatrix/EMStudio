@@ -87,6 +87,7 @@ import {
 } from "./shell/types";
 import {
   layoutRects,
+  DIVIDER,
   sameRect,
   type DividerRect,
   type Rect,
@@ -11477,7 +11478,12 @@ function placeAt(el: HTMLElement, r: Rect): void {
 
 /** The arrangement, as coordinates. Cheap enough to run on every resize. */
 function positionAreas(): void {
-  const root: Rect = { x: 0, y: 0, w: tileRoot.clientWidth, h: tileRoot.clientHeight };
+  // STRUTTURA · the areas sit INSET from the app window by the same 6 px the
+  // dividers leave between them (`DIVIDER`), so every window is a rounded card
+  // on the app's ground, as on the desk (`.work { padding: 6px }`).
+  const root: Rect = { x: DIVIDER, y: DIVIDER,
+                       w: Math.max(0, tileRoot.clientWidth - 2 * DIVIDER),
+                       h: Math.max(0, tileRoot.clientHeight - 2 * DIVIDER) };
   const { areas, dividers } = layoutRects(layoutOf(), root);
   for (const [id, r] of areas) {
     const el = winAreas.get(id);

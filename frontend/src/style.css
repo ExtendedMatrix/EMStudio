@@ -7659,3 +7659,42 @@ body.gesturing-resize * {
   display: inline-block;
   vertical-align: -3px;
 }
+
+/* ── STRUTTURA fase 4 · the windows are rounded cards (scrivania v5 `.win`) ──
+   10 px radius, a 1 px line, 6 px of the app's ground between them and around
+   them (the inset is `positionAreas`, the gap is `DIVIDER`). The focused one
+   takes the stronger line and an ochre thread under its header; the others
+   keep a sunken header. What says which window takes the edits is the COLOUR,
+   so the headers are no longer dimmed. */
+#tile-root {
+  background: var(--bg-app);
+}
+#tile-root .tile-area {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  background: var(--bg-panel);
+}
+#tile-root .tile-area.tile-active {
+  border-color: var(--border-strong);
+}
+#tile-root .tile-area > .tile-bar.win-header {
+  background: var(--bg-sunken);
+  border-bottom: 1px solid var(--border);
+  opacity: 1;
+}
+#tile-root .tile-area.tile-active > .tile-bar.win-header {
+  background: var(--bg-hover);
+  box-shadow: inset 0 -2px 0 var(--accent);
+  opacity: 1;
+}
+/* the divider is the GAP between two cards: invisible until it is grabbed */
+#tile-root > .tile-div {
+  background: transparent;
+  opacity: 1;
+  border-radius: 3px;
+}
+#tile-root > .tile-div:hover,
+#tile-root > .tile-div.dragging {
+  background: var(--accent);
+}
