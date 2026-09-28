@@ -545,6 +545,77 @@ export function collapseSpellings<
   return out;
 }
 
+/** What «Uniforma le grafie» does to ONE edge written under an older spelling.
+ *  `duplicate`: the canonical edge already stands, same two nodes, same verso.
+ *  `duplicate-reversed`: it stands from the other end — the same bond, since a
+ *  spelling only ever names a symmetric relation (s3Dgraphy's loader refuses a
+ *  `spelling_of` on a directed one). `respell`: no canonical edge yet — the old
+ *  one is replaced by one with the canonical name. */
+export type SpellingStepKind = "duplicate" | "duplicate-reversed" | "respell";
+
+export interface SpellingStep<E> {
+  edge: E;
+  canonical: string;
+  kind: SpellingStepKind;
+}
+
+export interface SpellingPlan<E> {
+  steps: SpellingStep<E>[];
+  /** older spelling → how many edges carry it */
+  bySpelling: Record<string, number>;
+  duplicates: number;
+  reversed: number;
+  respelled: number;
+}
+
+/**
+ * The plan of «Uniforma le grafie»: every edge whose `edge_type` is an older
+ * spelling (`spelling_of`, read off the datamodel — no list here), and what
+ * becomes of it. Pure, so the count shown BEFORE acting is the very plan that
+ * is then applied. Walks in document order; an edge respelled earlier in the
+ * walk counts as present for the ones after it, so two old edges of one bond
+ * leave one canonical edge, not two.
+ */
+export function planUniformSpellings<
+  E extends { source: string; target: string; edge_type?: string },
+>(edges: readonly E[]): SpellingPlan<E> {
+  const triple = (s: string, t: string, b: string): string =>
+    `${s}\u0000${t}\u0000${b}`;
+  const exact = new Set<string>();
+  const relations = new Set<string>();
+  for (const e of edges) {
+    const t = e.edge_type ?? "";
+    if (canonicalEdgeType(t) !== t) continue;
+    exact.add(triple(e.source, t, e.target));
+    relations.add(relationKey(e));
+  }
+  const plan: SpellingPlan<E> = {
+    steps: [], bySpelling: {}, duplicates: 0, reversed: 0, respelled: 0,
+  };
+  for (const e of edges) {
+    const t = e.edge_type ?? "";
+    const canonical = canonicalEdgeType(t);
+    if (canonical === t) continue;
+    plan.bySpelling[t] = (plan.bySpelling[t] ?? 0) + 1;
+    const k = relationKey(e);
+    let kind: SpellingStepKind;
+    if (exact.has(triple(e.source, canonical, e.target))) {
+      kind = "duplicate";
+      plan.duplicates++;
+    } else if (relations.has(k)) {
+      kind = "duplicate-reversed";
+      plan.reversed++;
+    } else {
+      kind = "respell";
+      plan.respelled++;
+      exact.add(triple(e.source, canonical, e.target));
+      relations.add(k);
+    }
+    plan.steps.push({ edge: e, canonical, kind });
+  }
+  return plan;
+}
+
 /** A property the datamodel declares as an ELEMENT OF THE NODE (`kind:
  *  "node_element"`, node datamodel 1.6.9 — today only `definition`): it lives
  *  in `data.<field>` (`em_json`), not on a PropertyNode. */

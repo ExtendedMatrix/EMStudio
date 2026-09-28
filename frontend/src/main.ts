@@ -166,6 +166,7 @@ import {
 } from "./renderer";
 import {
   allowedEdgeTypes,
+  canonicalEdgeType,
   collapseSpellings,
   relationKey,
   classOf,
@@ -1989,6 +1990,100 @@ function promptDeletePhase(phaseId: string): void {
     };
     foot.appendChild(b);
   });
+  modal.appendChild(card);
+  modal.addEventListener("click", (e) => {
+    if (e.target === modal) close();
+  });
+  document.addEventListener("keydown", onKey, true);
+  document.body.appendChild(modal);
+}
+
+/**
+ * SPELL1 · «Uniforma le grafie». The count first — how many edges, under which
+ * spellings, how many are exact duplicates of a canonical edge — then one
+ * gesture that the store applies as ONE undo step and emits as ordinary
+ * `delete_edge` / `add_edge` operations (so a room sees it like any other edit).
+ * The plan shown is the plan applied: both come from `planUniformSpellings`.
+ */
+function promptUniformSpellings(): void {
+  const target = store;
+  if (!target) return;
+  const plan = target.spellingPlan();
+  if (!plan.steps.length) {
+    toast(t("menu.noOldSpellings"));
+    return;
+  }
+  const before = target.liveEdges().length;
+  const after = before - plan.duplicates - plan.reversed;
+  const modal = document.createElement("div");
+  modal.className = "modal";
+  const card = document.createElement("div");
+  card.className = "modal-card";
+  const head = document.createElement("div");
+  head.className = "modal-head";
+  head.textContent = t("spell.title");
+  const body = document.createElement("div");
+  body.className = "modal-body";
+  const intro = document.createElement("p");
+  intro.textContent = t("spell.intro", { n: plan.steps.length });
+  body.appendChild(intro);
+  const spellings = document.createElement("ul");
+  for (const [old, n] of Object.entries(plan.bySpelling)) {
+    const li = document.createElement("li");
+    li.innerHTML = `<code>${escapeHtml(old)}</code> → <code>${escapeHtml(
+      canonicalEdgeType(old))}</code>: <b>${n}</b>`;
+    spellings.appendChild(li);
+  }
+  body.appendChild(spellings);
+  const kinds = document.createElement("ul");
+  for (const [key, n] of [
+    ["spell.duplicates", plan.duplicates],
+    ["spell.reversed", plan.reversed],
+    ["spell.respelled", plan.respelled],
+  ] as const) {
+    if (!n) continue;
+    const li = document.createElement("li");
+    li.textContent = t(key, { n });
+    kinds.appendChild(li);
+  }
+  body.appendChild(kinds);
+  const tail = document.createElement("p");
+  tail.textContent = t("spell.after", { before, after });
+  body.appendChild(tail);
+  if (sync.room) {
+    const room = document.createElement("p");
+    room.textContent = t("spell.room");
+    body.appendChild(room);
+  }
+  const foot = document.createElement("div");
+  foot.className = "modal-foot";
+  card.append(head, body, foot);
+  const close = (): void => {
+    modal.remove();
+    document.removeEventListener("keydown", onKey, true);
+  };
+  const onKey = (e: KeyboardEvent): void => {
+    if (e.key === "Escape") {
+      e.stopPropagation();
+      close();
+    }
+  };
+  const cancel = document.createElement("button");
+  cancel.textContent = t("common.cancel");
+  cancel.onclick = close;
+  const apply = document.createElement("button");
+  apply.className = "primary";
+  apply.textContent = t("spell.apply");
+  apply.onclick = () => {
+    close();
+    if (store !== target) return; // the graph changed under the dialog
+    const done = target.uniformSpellings();
+    toast(t("spell.done", {
+      removed: done.duplicates + done.reversed,
+      respelled: done.respelled,
+    }));
+  };
+  foot.append(cancel, apply);
   modal.appendChild(card);
   modal.addEventListener("click", (e) => {
     if (e.target === modal) close();
@@ -17889,6 +17984,25 @@ const WINDOW_MENUS: Record<WindowType, WinMenu[]> = {
           ...algoItems,
         ];
       },
+    },
+    {
+      // SPELL1 · the document-level fix-ups of the graph. Today one: bring the
+      // edges to the canonical spelling — explicitly, never at load (E.D., 27
+      // set 2026: a spelling is accepted when read, and rewriting it is a
+      // decision somebody makes, visibly and undoably).
+      label: "menu.graph",
+      items: () => [
+        {
+          label: "menu.uniformSpellings",
+          run: () => promptUniformSpellings(),
+          disabledReason: () =>
+            !store
+              ? t("menu.noGraph")
+              : store.spellingPlan().steps.length
+                ? null
+                : t("menu.noOldSpellings"),
+        },
+      ],
     },
   ],
   narrative: [

@@ -13,7 +13,8 @@ import type {
 } from "./types";
 import { MEMBERSHIP_EDGES } from "./folding";
 import { paradataGroupName } from "./naming";
-import { edgeTypeFor, nodeTypeForClass } from "./rules";
+import { edgeTypeFor, nodeTypeForClass, planUniformSpellings } from "./rules";
+import type { SpellingPlan } from "./rules";
 import { VOLATILE_KEY } from "./volatile";
 import { currentIdentity } from "./identity";
 import { resolveNodePair } from "./container";
@@ -1579,6 +1580,58 @@ export class DocumentStore {
     }
     this.emit();
     if (removed) this.emitOp({ op: "delete_edge", edge: removed });
+  }
+
+  /** What «Uniforma le grafie» would do to the LIVE edges, without doing it. */
+  spellingPlan(): SpellingPlan<EmEdge> {
+    return planUniformSpellings(this.liveEdges());
+  }
+
+  /**
+   * «Uniforma le grafie» — the explicit command that brings the document to the
+   * canonical spelling (never done silently at load: a spelling is accepted when
+   * read). ONE undo step, and every change leaves through the same door as an
+   * inspector edit: `delete_edge` / `add_edge` on `emitOp`, which a room turns
+   * into `remove_edge` / `add_edge` and a sidecar forwards as is.
+   *
+   * A respelled edge keeps every key it carried (`attributes`, label, …) and its
+   * place in the list; only `edge_type` and `id` change. The id is NEW, not the
+   * old one: in a room the old edge stays as a tombstone under its id, and
+   * `remove_edge` matches by id first — one id for two relations would make the
+   * next removal hit the tombstone and leave the live edge standing
+   * (check-uniform-spellings measures it).
+   */
+  uniformSpellings(): SpellingPlan<EmEdge> {
+    const plan = this.spellingPlan();
+    if (!plan.steps.length) return plan;
+    this.batch(() => {
+      const g = this.doc.graph;
+      const ids = new Set(g.edges.map((e) => e.id));
+      for (const step of plan.steps) {
+        const ix = g.edges.indexOf(step.edge);
+        if (ix < 0) continue;
+        const old = g.edges[ix];
+        if (step.kind === "respell") {
+          const base = `${old.source}__${step.canonical}__${old.target}`;
+          let id = base;
+          let i = 2;
+          while (ids.has(id)) id = `${base}__${i++}`;
+          ids.add(id);
+          const edge: EmEdge = {
+            ...(JSON.parse(JSON.stringify(old)) as EmEdge),
+            id,
+            edge_type: step.canonical,
+          };
+          g.edges.splice(ix, 1, edge);
+          this.emitOp({ op: "delete_edge", edge: old });
+          this.emitOp({ op: "add_edge", edge });
+        } else {
+          g.edges.splice(ix, 1);
+          this.emitOp({ op: "delete_edge", edge: old });
+        }
+      }
+    });
+    return plan;
   }
 
   /** Remove a node from a container/group: drop the membership edge(s) from
