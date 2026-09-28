@@ -5333,40 +5333,93 @@ body.sync-active #footer-brand #em-version {
   font-size: 12.5px;
 }
 
-/* WIN5 · the corner grips: drag inside to split, onto a neighbour to join.
-   Two per area (top-left and bottom-right) so every direction is reachable. */
+/* WIN5 → STRUTTURA · the corner grips, as in Blender: four per area, 11 px,
+   the cursor turns to a cross, and on hover a small ochre L of the window's
+   own radius — nothing else, so four corners on every area stay quiet. */
 .tile-corner {
   position: absolute;
-  width: 14px;
-  height: 14px;
+  width: 11px;
+  height: 11px;
   z-index: 30;
-  opacity: 0.35;
-  background:
-    linear-gradient(var(--border), var(--border)) no-repeat,
-    linear-gradient(var(--border), var(--border)) no-repeat;
+  cursor: crosshair;
 }
-.tile-corner:hover {
-  opacity: 1;
-  background-color: var(--accent);
+.tile-corner::before {
+  content: "";
+  position: absolute;
+  inset: 2px;
+  border: 0 solid var(--accent);
+  opacity: 0;
+  transition: opacity 0.12s;
 }
-.tile-corner-tl {
-  top: 0;
-  left: 0;
-  cursor: nwse-resize;
-  background-size: 100% 2px, 2px 100%;
-  background-position: 0 0, 0 0;
+.tile-corner:hover::before { opacity: 1; }
+.tile-corner-tl { top: 0; left: 0; }
+.tile-corner-tr { top: 0; right: 0; }
+.tile-corner-bl { bottom: 0; left: 0; }
+.tile-corner-br { bottom: 0; right: 0; }
+.tile-corner-tl::before { border-top-width: 2px; border-left-width: 2px; border-top-left-radius: 8px; }
+.tile-corner-tr::before { border-top-width: 2px; border-right-width: 2px; border-top-right-radius: 8px; }
+.tile-corner-bl::before { border-bottom-width: 2px; border-left-width: 2px; border-bottom-left-radius: 8px; }
+.tile-corner-br::before { border-bottom-width: 2px; border-right-width: 2px; border-bottom-right-radius: 8px; }
+/* while a corner is dragged: the cross everywhere, no text selection */
+body.gesturing,
+body.gesturing * {
+  cursor: crosshair !important;
+  user-select: none;
 }
-.tile-corner-br {
-  right: 0;
-  bottom: 0;
-  cursor: nwse-resize;
-  background-size: 100% 2px, 2px 100%;
-  background-position: 0 100%, 100% 0;
+/* the live preview of the gesture (scrivania v5 `.gest`) */
+.gest {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  pointer-events: none;
 }
-/* the neighbour a release would absorb */
-.tile-join-target {
-  outline: 2px solid var(--accent);
-  outline-offset: -2px;
+.gest .gline {
+  position: fixed;
+  background: var(--accent);
+  box-shadow: 0 0 0 1px var(--bg-panel);
+}
+.gest .gnew {
+  position: fixed;
+  background: var(--bg-accent-soft);
+  opacity: 0.55;
+  border-radius: var(--radius-lg);
+}
+.gest .gjoin {
+  position: fixed;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(7, 55, 99, 0.28);
+  border-radius: var(--radius-lg);
+  box-shadow: inset 0 0 0 2px var(--accent);
+}
+.gest .gjoin span {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  max-width: 80%;
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: var(--bg-panel);
+  color: var(--text);
+  font-size: 12.5px;
+  text-align: center;
+  box-shadow: var(--shadow, 0 4px 16px rgba(7, 55, 99, 0.14));
+}
+.gest .gjoin b {
+  font-size: 1.6rem;
+  line-height: 1;
+  color: var(--accent-ink);
+}
+.gest .gjoin.no {
+  background: rgba(120, 120, 120, 0.22);
+  box-shadow: inset 0 0 0 2px var(--border-strong);
+}
+.gest .gjoin.no b { color: var(--text-muted); }
+/* the header starts clear of the top-left grip (`barOffset` is gone) */
+#tile-root .tile-area > .tile-bar.win-header {
+  padding-left: 12px;
 }
 /* the ✎ toggle shows whether the narrative is in writing mode */
 .win-header .win-act.win-act-on {

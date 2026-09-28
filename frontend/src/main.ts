@@ -11074,21 +11074,25 @@ function unmountGraphCanvas(winId: string): void {
  * `draw()` runs it over every graph window.
  */
 
-// ── WIN5 · the corner gesture (Blender) ─────────────────────────────────────
+// ── WIN5 → STRUTTURA · the corner gesture, as in Blender ────────────────────
 //
-// Every area carries two corner grips. Drag one and where you RELEASE says what
-// you meant:
+// Every area carries FOUR corner grips (11 px, the cursor turns to a cross, an
+// ochre L of the window's radius appears on hover and nothing else). Drag one,
+// and where the pointer IS says what you mean — shown live, before the release:
 //
-//   · released INSIDE the same area  → SPLIT it. The dominant axis of the drag
-//     picks the direction: dragging sideways cuts a new area beside this one,
-//     dragging up/down cuts one above/below.
-//   · released ON A NEIGHBOURING AREA → JOIN: this area absorbs that one and
-//     the divider between them goes away.
+//   · INSIDE the same area → SPLIT. The dominant axis of the drag picks the cut;
+//     an ochre line follows the pointer and the new area is washed in, on the
+//     side of the corner you started from. The release cuts at the POINTER's
+//     ratio (held within 0.12–0.88), the new window on that side.
+//   · OUT, over the area that is this one's SIBLING (the whole other side of
+//     the split) → JOIN. That area darkens with an arrow in the direction of
+//     the drag: «Join: this window goes away». This area absorbs it.
+//   · OUT, over any other area → a grey veil, «⊘ Cannot join: the two windows
+//     do not share a whole side». The release does nothing and says so.
 //
-// The same two verbs as the ⇥ / ⇤ / ⊟ buttons — the buttons stay, because a
-// gesture nobody discovers is not a feature. This is the direct-manipulation
-// way in, and it reads the geometry off the DOM: no second model of where the
-// areas are.
+// Esc cancels. A drag under 8 px stays a click. Pointer events, so a pen or a
+// finger work the same. It replaces the → ↓ ⊟ chips (fase 2), and reads the
+// geometry off the DOM: no second model of where the areas are.
 
 /** The area element under a point, and the window it holds. */
 function areaAt(x: number, y: number): { el: HTMLElement; winId: string } | null {
@@ -11102,66 +11106,134 @@ function areaAt(x: number, y: number): { el: HTMLElement; winId: string } | null
   return null;
 }
 
+type CornerKey = "tl" | "tr" | "bl" | "br";
+type CornerPlan =
+  | { kind: "split"; dir: "row" | "col"; ratio: number; side: "a" | "b" }
+  | { kind: "join"; target: string; ok: boolean }
+  | null;
+
 /**
- * Attach the two corner grips to an area.
- *
- * `barOffset` pushes the TOP-LEFT grip below that area's docked bar: the two
- * would otherwise overlap by a few pixels and the grip would occasionally eat a
- * click meant for the window-type dropdown — a gesture stealing a menu is worse
- * than a gesture nobody finds.
+ * What a corner drag means at this point — PURE apart from the rectangles it is
+ * handed, so the three answers (split here, join that, cannot join) are decided
+ * in one place and the preview and the release can never disagree.
  */
-function addCornerGrips(area: HTMLElement, winId: string, barOffset: string): void {
-  for (const corner of ["tl", "br"] as const) {
+function cornerPlan(corner: CornerKey, own: DOMRect, x0: number, y0: number,
+                    x: number, y: number, winId: string): CornerPlan {
+  const dx = x - x0;
+  const dy = y - y0;
+  if (Math.hypot(dx, dy) < 8) return null;
+  const inside = x > own.left + 2 && x < own.right - 2 &&
+                 y > own.top + 2 && y < own.bottom - 2;
+  if (inside) {
+    const dir: "row" | "col" = Math.abs(dx) >= Math.abs(dy) ? "row" : "col";
+    const raw = dir === "row" ? (x - own.left) / own.width : (y - own.top) / own.height;
+    const ratio = Math.min(0.88, Math.max(0.12, raw));
+    // the new window is born on the side of the corner the drag started from
+    const side: "a" | "b" = (dir === "row" ? corner.includes("l") : corner.includes("t"))
+      ? "a" : "b";
+    return { kind: "split", dir, ratio, side };
+  }
+  const over = areaAt(x, y);
+  if (!over || over.winId === winId) return null;
+  const sib = siblingIdsOf(winId);
+  return { kind: "join", target: over.winId,
+           ok: sib.length === 1 && sib[0] === over.winId };
+}
+
+/** Attach the four corner grips to an area. */
+function addCornerGrips(area: HTMLElement, winId: string): void {
+  for (const corner of ["tl", "tr", "bl", "br"] as const) {
     const grip = document.createElement("div");
     grip.className = `tile-corner tile-corner-${corner}`;
-    if (corner === "tl") grip.style.top = barOffset;
     grip.title = t("tile.corner");
-    grip.addEventListener("pointerdown", (e) => e.stopPropagation());
-    grip.addEventListener("mousedown", (e) => {
+    grip.addEventListener("pointerdown", (e) => {
+      if (e.button !== 0) return;
       e.preventDefault();
       e.stopPropagation();
+      const own = area.getBoundingClientRect();
       const x0 = e.clientX;
       const y0 = e.clientY;
-      let target: HTMLElement | null = null;
-      const clearTarget = (): void => {
-        document
-          .querySelectorAll(".tile-join-target")
-          .forEach((el) => el.classList.remove("tile-join-target"));
-      };
-      const move = (ev: MouseEvent): void => {
-        clearTarget();
-        const over = areaAt(ev.clientX, ev.clientY);
-        // highlight only a neighbour we could actually absorb
-        const siblings = siblingIdsOf(winId);
-        if (over && over.winId !== winId && siblings.includes(over.winId)) {
-          over.el.classList.add("tile-join-target");
-          target = over.el;
-        } else {
-          target = null;
+      const veil = document.createElement("div");
+      veil.className = "gest";
+      document.body.appendChild(veil);
+      document.body.classList.add("gesturing");
+      shellGesture = true;
+      let plan: CornerPlan = null;
+      const box = (cls: string, l: number, tp: number, w: number, h: number,
+                   html = ""): string =>
+        `<div class="${cls}" style="left:${l}px;top:${tp}px;width:${w}px;height:${h}px">${html}</div>`;
+      const paint = (): void => {
+        if (!plan) { veil.innerHTML = ""; return; }
+        if (plan.kind === "split") {
+          const R = own;
+          const at = plan.dir === "row" ? R.left + R.width * plan.ratio
+                                        : R.top + R.height * plan.ratio;
+          const nw = plan.dir === "row"
+            ? (plan.side === "a"
+                ? [R.left, R.top, at - R.left, R.height]
+                : [at, R.top, R.right - at, R.height])
+            : (plan.side === "a"
+                ? [R.left, R.top, R.width, at - R.top]
+                : [R.left, at, R.width, R.bottom - at]);
+          veil.innerHTML = box("gnew", nw[0], nw[1], nw[2], nw[3]) +
+            (plan.dir === "row"
+              ? box("gline v", at - 1, R.top, 2, R.height)
+              : box("gline h", R.left, at - 1, R.width, 2));
+          return;
         }
+        const tgt = winAreas.get(plan.target);
+        if (!tgt) { veil.innerHTML = ""; return; }
+        const T = tgt.getBoundingClientRect();
+        const dx = lastX - x0, dy = lastY - y0;
+        const arrow = Math.abs(dx) >= Math.abs(dy) ? (dx > 0 ? "→" : "←")
+                                                   : (dy > 0 ? "↓" : "↑");
+        veil.innerHTML = box(`gjoin${plan.ok ? "" : " no"}`, T.left, T.top, T.width, T.height,
+          `<span><b>${plan.ok ? arrow : "⊘"}</b>${escapeHtml(t(plan.ok ? "tile.joinOk" : "tile.joinNo"))}</span>`);
       };
-      const up = (ev: MouseEvent): void => {
-        window.removeEventListener("mousemove", move);
-        window.removeEventListener("mouseup", up);
-        clearTarget();
-        const dx = ev.clientX - x0;
-        const dy = ev.clientY - y0;
-        if (Math.abs(dx) + Math.abs(dy) < 8) return; // a click, not a drag
-        const over = areaAt(ev.clientX, ev.clientY);
-        if (target && over && over.winId !== winId) {
-          // JOIN · the dragged area absorbs the one released on
+      let lastX = x0, lastY = y0;
+      const move = (ev: PointerEvent): void => {
+        lastX = ev.clientX; lastY = ev.clientY;
+        plan = cornerPlan(corner, own, x0, y0, ev.clientX, ev.clientY, winId);
+        paint();
+      };
+      const end = (): void => {
+        window.removeEventListener("pointermove", move);
+        window.removeEventListener("pointerup", up);
+        window.removeEventListener("pointercancel", cancel);
+        window.removeEventListener("keydown", esc, true);
+        veil.remove();
+        document.body.classList.remove("gesturing");
+        shellGesture = false;
+      };
+      const up = (): void => {
+        end();
+        const p = plan;
+        if (!p) return;                               // a click, not a drag
+        if (p.kind === "split") {
           setActiveWin(winId);
+          splitWindow(winId, p.dir, activeWorkspace(), p.ratio, p.side);
+          renderTiles();
+          toast(t("tile.splitDone"));
+        } else if (p.ok) {
+          setActiveWin(winId);                        // the dragged area stays
           joinWindow(winId);
-        } else if (over && over.winId === winId) {
-          // SPLIT · the dominant axis decides the cut
-          splitWindow(winId, Math.abs(dx) >= Math.abs(dy) ? "row" : "col");
+          renderTiles();
+          toast(t("tile.joinDone"));
         } else {
-          return; // released on nothing meaningful: do nothing, quietly
+          toast(t("tile.joinNo"));                    // nothing happens, and it says so
         }
-        renderTiles();
       };
-      window.addEventListener("mousemove", move);
-      window.addEventListener("mouseup", up);
+      const cancel = (): void => { plan = null; end(); };
+      const esc = (ev: KeyboardEvent): void => {
+        if (ev.key !== "Escape") return;
+        ev.stopPropagation();
+        ev.preventDefault();
+        cancel();
+      };
+      window.addEventListener("pointermove", move);
+      window.addEventListener("pointerup", up);
+      window.addEventListener("pointercancel", cancel);
+      window.addEventListener("keydown", esc, true);
     });
     area.appendChild(grip);
   }
@@ -11562,7 +11634,7 @@ function renderTiles(): void {
     area.querySelectorAll(".tile-corner, .win-resources, .win-res-chevron")
       .forEach((g) => g.remove());
     buildResourcePanel(area, win);
-    addCornerGrips(area, id, "var(--winbar-h, 0px)");
+    addCornerGrips(area, id);
   }
   positionAreas();
   renderAreaHeaders();
