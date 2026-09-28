@@ -11,7 +11,9 @@
  *   · EXPLAINED in the inspector — for the selected node only.
  *
  * The LOG stays the log: the history of what happened. This is the state of
- * now, recomputed from the document on every change.
+ * now, recomputed from the document on every change. (What the log OWES
+ * somebody — its warn/error lines — is appended by the caller, `allIssues` in
+ * main.ts, so a burst of log lines never recomputes the document.)
  *
  * Pure: every source that needs the store or the scene is HANDED IN by the
  * caller (`IssueSources`), so this module runs in node (`check-studio.mjs`).

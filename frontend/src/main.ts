@@ -699,7 +699,6 @@ const hintBar = document.getElementById("hint-bar")!;
 const breadcrumb = document.getElementById("breadcrumb")!;
 const edgeMenu = document.getElementById("edge-menu")!;
 const toastEl = document.getElementById("toast")!;
-const chronoBanner = document.getElementById("chrono-banner")!;
 const btnMatrix = document.getElementById("btn-matrix") as HTMLButtonElement;
 const btnGraph = document.getElementById("btn-graph") as HTMLButtonElement;
 const btnNarrative = document.getElementById("btn-narrative") as HTMLButtonElement;
@@ -1511,6 +1510,7 @@ function paintGraphWindow(p: GraphPaint): void {
       insertBoundary: live?.insertBoundary ?? null,
       monochrome,
       nameStatus, // NAME1: orange/red labels, one answer shared with the menu
+      warnIds: warnedNodes, // STRUTTURA · the «!» on a node with a warning
       peerSelections: hubPeerSelections,   // P4.3 · awareness, never a lock
     },
     w,
@@ -1855,6 +1855,61 @@ function renderInspectorInto(host: HTMLElement): void {
     },
     selectedEdge,
   );
+  renderInspectorIssues(host);
+}
+
+/**
+ * STRUTTURA · EXPLAINED in the inspector: for the selected node only, a section
+ * «Avvisi · n» at the top — `--warn-soft` when there is at least one warning,
+ * `--bg-hover` when they are only hints. What was the «⚠ Coherence» box of an
+ * epoch is part of this now (its warnings are `issues()` rows of rule
+ * `chronology` on that epoch).
+ */
+function renderInspectorIssues(host: HTMLElement): void {
+  host.querySelector(".insp-issues")?.remove();
+  if (!selectedId) return;
+  const mine = currentIssues.filter((i) => i.node === selectedId || issueUnitOf(i.node) === selectedId);
+  if (!mine.length) return;
+  const sec = document.createElement("section");
+  sec.className = "insp-issues" + (mine.some((i) => i.sev === "warn") ? "" : " only-info");
+  const eb = document.createElement("div");
+  eb.className = "insp-issues-eyebrow";
+  eb.textContent = t("issues.section", { n: String(mine.length) });
+  sec.appendChild(eb);
+  for (const i of mine) {
+    const row = document.createElement("div");
+    row.className = `insp-issue ${i.sev}`;
+    const ico = document.createElement("span");
+    ico.className = "ico";
+    ico.textContent = i.sev === "warn" ? "▲" : "●";
+    const txt = document.createElement("span");
+    if (i.node && i.node !== selectedId && store?.node(i.node)) {
+      const a = document.createElement("button");
+      a.className = "tv-link";
+      a.textContent = String(store.node(i.node)?.name || i.node);
+      a.addEventListener("click", () => revealFromWarning(i.node));
+      txt.append(a, " ", issueText(i));
+    } else {
+      txt.append(i.txt);
+    }
+    row.append(ico, txt);
+    if (i.action) {
+      const b = document.createElement("button");
+      b.className = "tv-act";
+      b.textContent = i.action.label;
+      b.addEventListener("click", () => i.action!.run());
+      row.appendChild(b);
+    }
+    sec.appendChild(row);
+  }
+  const open = document.createElement("button");
+  open.className = "tv-link insp-issues-open";
+  open.textContent = `${t("issues.openTable")} →`;
+  open.addEventListener("click", openIssuesTable);
+  sec.appendChild(open);
+  const head = host.querySelector(".insp-head");
+  if (head) head.after(sec);
+  else host.prepend(sec);
 }
 
 /**
@@ -2646,98 +2701,16 @@ function buildScenes(): void {
     algorithm: graphAlgorithm,
     overrides: multigraphOverrides,
   });
-  updateChronoBanner();
 }
 
-// ---- chronology validation banner (item 10) ----
-// A dismissible strip above the canvas, shown in Matrix view when the lane
-// stack doesn't follow newest-first chronology (offers a one-click sort) or
-// adjacent epochs overlap / leave gaps (advisory). Document state, not
-// selection state — so it lives above the canvas, not in the inspector.
-let chronoBannerDismissed = false;
-let chronoBannerExpanded = false;
-
-function updateChronoBanner(): void {
-  if (!store || view !== "matrix") {
-    chronoBanner.classList.add("hidden");
-    return;
-  }
-  const orderOk = store.lanesMatchDateOrder();
-  const issues = store.chronologyIssues();
-  if (chronoBannerDismissed || (orderOk && issues.length === 0)) {
-    chronoBanner.classList.add("hidden");
-    return;
-  }
-  chronoBanner.replaceChildren();
-
-  const row = document.createElement("div");
-  row.className = "cb-row";
-
-  const msg = document.createElement("span");
-  msg.className = "cb-msg";
-  msg.append("⚠ ");
-  if (!orderOk) {
-    const b = document.createElement("b");
-    b.textContent = "Lane fuori ordine cronologico.";
-    msg.appendChild(b);
-  } else if (issues.length) {
-    msg.append("Problemi di coerenza cronologica.");
-  }
-  row.appendChild(msg);
-
-  if (issues.length) {
-    const n = issues.length;
-    const toggle = document.createElement("button");
-    toggle.className = "cb-toggle";
-    toggle.textContent = `${chronoBannerExpanded ? "▾" : "▸"} ${n} problem${
-      n === 1 ? "a" : "i"
-    }`;
-    toggle.addEventListener("click", () => {
-      chronoBannerExpanded = !chronoBannerExpanded;
-      updateChronoBanner();
-    });
-    row.appendChild(toggle);
-  }
-
-  if (!orderOk) {
-    const sort = document.createElement("button");
-    sort.className = "cb-sort";
-    sort.textContent = "Ordina lane per data";
-    sort.title = t("epoch.sortTitle");
-    sort.addEventListener("click", () => {
-      store!.sortLanesByDate();
-      void runLayout(false).then(() => {
-        buildScenes();
-        fit();
-      });
-    });
-    row.appendChild(sort);
-  }
-
-  const close = document.createElement("button");
-  close.className = "cb-close";
-  close.textContent = "✕";
-  close.title = "Nascondi";
-  close.addEventListener("click", () => {
-    chronoBannerDismissed = true;
-    chronoBanner.classList.add("hidden");
-  });
-  row.appendChild(close);
-  chronoBanner.appendChild(row);
-
-  if (issues.length && chronoBannerExpanded) {
-    const list = document.createElement("ul");
-    list.className = "cb-details";
-    for (const w of issues) {
-      const li = document.createElement("li");
-      li.textContent = w;
-      list.appendChild(li);
-    }
-    chronoBanner.appendChild(list);
-  }
-
-  chronoBanner.classList.remove("hidden");
-}
+/*
+ * GONE (30 set 2026) · the chronology BANNER (`#chrono-banner`,
+ * `updateChronoBanner`). It floated over the focused window — a second place
+ * that counted warnings, with its own dismiss. Its two halves are rows of
+ * `issues()` now: the lane order (with «Ordina lane per data» as the row's
+ * ACTION, in the Warnings view and the pill's popover) and the chronology
+ * coherence (`chronologyIssues` → per-epoch + cross-epoch issues).
+ */
 
 // Recompute the Matrix VIEW layout (em-core on the visible subgraph) so the
 // Matrix recompacts under a filter; clears it when nothing is hidden. Async
@@ -3546,7 +3519,6 @@ function loadDocument(
   // workspace slot rather than a document that replaced whatever was open.)
   const slot = emtree.add(loaded, slotNameFor(d, sourceName), path);
   activateSlot(slot.id, { rebuildOnly: true });
-  chronoBannerDismissed = false; // re-evaluate chronology for the new document
   dropHint.classList.add("hidden");
   updateBreadcrumb();
   // Matrix needs stored node POSITIONS. A doc may carry a layout object with
@@ -5520,6 +5492,11 @@ const outlinerCallbacks: NodeListCallbacks = {
     const mm = buildMembership(store.doc);
     return (mm.membersOf.get(id)?.filter((m) => m !== id).length ?? 0) > 0;
   },
+  // STRUTTURA · MARKED where they are: the WARNINGS of a unit and of what its
+  // paradata group holds — hints are not marked, so the list stays quiet
+  warningsOf: (id) =>
+    currentIssues.filter((i) => i.sev === "warn" && (i.node === id || issueUnitOf(i.node) === id))
+      .map((i) => i.txt),
 };
 
 /**
@@ -9524,6 +9501,8 @@ function refreshNameStatus(): void {
 // table's Warnings view and «con avvisi» facet.
 let currentIssues: Issue[] = [];
 let issueUnitOf: (nodeId: string) => string | null = () => null;
+/** the nodes that carry a warning — the canvas badge reads this */
+let warnedNodes = new Set<string>();
 
 function refreshIssues(): void {
   if (!store) {
@@ -9551,6 +9530,7 @@ function refreshIssues(): void {
     t: (k, v) => t(k, v),
   });
   issueUnitOf = unitOfIssue(s.doc, isStratigraphicType, nodes);
+  warnedNodes = new Set(currentIssues.filter((i) => i.sev === "warn" && i.node).map((i) => i.node));
   renderWarningsPill();
 }
 
@@ -9572,7 +9552,7 @@ function tableCtx(): ViewCtx | null {
     doc: store.doc,
     nodes: store.liveNodes() as EmNode[],
     isUnit: isStratigraphicType,
-    issues: currentIssues,
+    issues: allIssues(),
     unitOfIssue: (id) => issueUnitOf(id),
     t: (k, v) => t(k, v),
   };
@@ -10525,14 +10505,152 @@ function logAttention(): number {
  *  line would flicker through a sync burst, and the badge is not worth that. */
 let lastLogAttention = 0;
 
-/** PELLE · the status-bar pill: the same count the Log tab's badge carries. */
+/**
+ * STRUTTURA · the status-bar pill: the ONE place issues are COUNTED, «▲ n · ● m»
+ * (warnings, hints) from `issues()` — the log's warn/error lines among them.
+ * A click opens them grouped by severity (`renderWarningsPopover`).
+ */
 function renderWarningsPill(): void {
   const el = document.getElementById("footer-warnings");
   if (!el) return;
-  const owed = logAttention();
-  el.textContent = owed === 1 ? t("footer.warning1") : t("footer.warnings", { n: String(owed) });
-  el.title = t("footer.warningsTip");
-  el.classList.toggle("ok", owed === 0);
+  const all = allIssues();
+  const nw = all.filter((i) => i.sev === "warn").length;
+  const ni = all.length - nw;
+  el.innerHTML = all.length
+    ? [nw ? `<span class="sv warn">▲ ${nw}</span>` : "",
+       ni ? `<span class="sv info">● ${ni}</span>` : ""].filter(Boolean).join(" · ")
+    : escapeHtml(t("issues.none"));
+  el.title = t("issues.pillTip");
+  el.classList.toggle("ok", all.length === 0);
+  if (issuesPopOpen) renderWarningsPopover();
+}
+
+/** The document's issues and, after them, what the log owes somebody. */
+function allIssues(): Issue[] {
+  const log = logEntries()
+    .filter((e) => e.level !== "info")
+    .map((e, k) => ({
+      id: `log::${k}`, node: "", rule: "log",
+      sev: (e.level === "error" ? "warn" : "info") as Issue["sev"], txt: e.message,
+    }));
+  return [...currentIssues, ...log];
+}
+
+/** An issue's text without the leading «name: » when the name is already a
+ *  link right before it. */
+function issueText(i: Issue): string {
+  const n = i.node ? String(store?.node(i.node)?.name || i.node) : "";
+  return n && i.txt.startsWith(`${n}: `) ? i.txt.slice(n.length + 2) : i.txt;
+}
+
+let issuesPopOpen = false;
+
+/** The pill's popover: grouped by severity, five per group then «+k», each row
+ *  a link to its node and its fix when it has one, and the way to the table. */
+function renderWarningsPopover(): void {
+  document.getElementById("issues-pop")?.remove();
+  const pill = document.getElementById("footer-warnings");
+  pill?.setAttribute("aria-expanded", issuesPopOpen ? "true" : "false");
+  if (!issuesPopOpen || !pill) return;
+  const all = allIssues();
+  const pop = document.createElement("div");
+  pop.id = "issues-pop";
+  pop.className = "issues-pop";
+  pop.setAttribute("role", "dialog");
+  pop.setAttribute("aria-label", t("table.sheet.Issues"));
+  const head = document.createElement("h4");
+  head.textContent = t("issues.popHead", { n: String(all.length) });
+  pop.appendChild(head);
+  for (const sev of ["warn", "info"] as const) {
+    const group = all.filter((i) => i.sev === sev);
+    if (!group.length) continue;
+    const eb = document.createElement("div");
+    eb.className = "issues-eyebrow";
+    eb.textContent = `${sev === "warn" ? "▲" : "●"} ${t(`issues.sev.${sev}`)} · ${group.length}`;
+    pop.appendChild(eb);
+    const ul = document.createElement("ul");
+    for (const i of group.slice(0, 5)) {
+      const li = document.createElement("li");
+      if (i.node && store?.node(i.node)) {
+        const a = document.createElement("button");
+        a.className = "tv-link";
+        a.textContent = String(store.node(i.node)?.name || i.node);
+        a.addEventListener("click", () => revealFromWarning(i.node));
+        li.append(a, " ");
+      }
+      const txt = document.createElement("span");
+      txt.textContent = li.childNodes.length ? issueText(i) : i.txt;
+      li.appendChild(txt);
+      if (i.action) {
+        const b = document.createElement("button");
+        b.className = "tv-act";
+        b.textContent = i.action.label;
+        b.addEventListener("click", () => { i.action!.run(); });
+        li.append(" ", b);
+      }
+      ul.appendChild(li);
+    }
+    if (group.length > 5) {
+      const more = document.createElement("li");
+      more.className = "issues-more";
+      more.textContent = `+${group.length - 5}`;
+      ul.appendChild(more);
+    }
+    pop.appendChild(ul);
+  }
+  if (!all.length) {
+    const p = document.createElement("p");
+    p.textContent = t("issues.none");
+    pop.appendChild(p);
+  }
+  const open = document.createElement("button");
+  open.className = "ns-btn";
+  open.textContent = t("issues.openTable");
+  open.addEventListener("click", openIssuesTable);
+  pop.appendChild(open);
+  pop.addEventListener("pointerdown", (e) => e.stopPropagation());
+  document.body.appendChild(pop);
+}
+
+document.getElementById("footer-warnings")?.addEventListener("click", (e) => {
+  e.stopPropagation();
+  issuesPopOpen = !issuesPopOpen;
+  renderWarningsPopover();
+});
+document.addEventListener("pointerdown", (e) => {
+  if (!issuesPopOpen) return;
+  if ((e.target as HTMLElement).closest?.("#issues-pop, #footer-warnings")) return;
+  issuesPopOpen = false;
+  renderWarningsPopover();
+});
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && issuesPopOpen) { issuesPopOpen = false; renderWarningsPopover(); }
+});
+
+/**
+ * «Apri la tabella degli avvisi»: the FIRST table window goes to the Warnings
+ * view and takes the focus; with no table open, the graph is split and a new
+ * table opens beneath it on that view (the desk's `openWarnTable`).
+ */
+function openIssuesTable(): void {
+  issuesPopOpen = false;
+  renderWarningsPopover();
+  let table = windowsOf().find((w) => w.type === "table");
+  if (!table) {
+    const anchor = windowsOf().find((w) => w.type === "graph") ?? activeWin();
+    setActiveWin(anchor.id);
+    const made = splitWindow(anchor.id, "col", activeWorkspace(), 0.62, "b");
+    if (!made) return;
+    setWinType(made, "table");
+    table = made;
+  }
+  if (maximizedWin() && maximizedWin() !== table.id) toggleMaximize(maximizedWin()!);
+  setSheet("Issues", table);
+  setActiveWin(table.id);
+  renderTiles();
+  const area = winAreas.get(table.id);
+  area?.classList.add("flash");
+  setTimeout(() => area?.classList.remove("flash"), 1100);
 }
 onLocaleChange(renderWarningsPill);
 
@@ -20327,7 +20445,7 @@ refreshIdentityChip();     // IDENTITY · who is authoring, from the first frame
 initEmData({
   getStore: () => store,
   getCtx: tableCtx,
-  runIssueAction: (id) => currentIssues.find((i) => i.id === id)?.action?.run(),
+  runIssueAction: (id) => allIssues().find((i) => i.id === id)?.action?.run(),
   // CURRENT-ELEMENT · the row lives on the window, not in the table module
   currentRow: () => currentRowId(),
   // ROWSELECT · picking a row selects its NODE, and shows it if a graph window

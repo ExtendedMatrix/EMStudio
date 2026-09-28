@@ -197,6 +197,13 @@ const eq = (got, want, what) => {
       t: (k, v) => `${k}${v ? JSON.stringify(v) : ""}` });
     const socket = iss.filter((i) => i.rule === "datamodel");
     eq(socket.length, 1, "pancia A: ONE datamodel warning — the extractor extracted_from an RSF");
+    let sorted = 0;
+    const lane = I.issues({ doc, nodes: g.nodes, isUnit: R.isStratigraphicType, lanesInOrder: false,
+      sortLanes: { label: "sort", run: () => { sorted++; } }, t: (k) => k })
+      .find((i) => i.rule === "chronology");
+    ok(lane && lane.sev === "warn" && lane.node === "", "the lane order is a document-level warning");
+    lane.action.run();
+    eq(sorted, 1, "…whose ACTION is «Ordina lane per data» (the banner's button, now the row's)");
     eq(g.nodes.find((n) => n.id === socket[0].node)?.name, "X.01", "…on the extractor");
     const unitOf = I.unitOfIssue(doc, R.isStratigraphicType, g.nodes);
     eq(unitOf(socket[0].node), "USM101", "…whose unit (its paradata group's) is USM101");

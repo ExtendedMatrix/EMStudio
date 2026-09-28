@@ -305,7 +305,6 @@
              area — so the panel followed the focus instead of belonging to the
              window you opened it on. There is no singleton left: each area that
              has a provider gets its own, and keeps it when the pointer leaves. -->
-        <div id="chrono-banner" class="hidden"></div>
         <!-- The empty state has to offer BOTH ways of getting a graph. Dropping
              a file assumes one already exists; StratiMiner is for when it does
              not, which is exactly the moment its panel would otherwise be
@@ -489,7 +488,9 @@
       <span id="info">open or drop an .em.json file</span>
       <!-- PELLE · the warnings pill, as on the desk: amber when the Log owes
            somebody a warning or an error, a green outline when it owes nothing. -->
-      <span id="footer-warnings" class="warn-pill ok">0</span>
+      <!-- STRUTTURA · counted in ONE place: «▲ n · ● m» from `issues()`, and
+           a click opens them grouped by severity (`renderWarningsPopover`). -->
+      <button id="footer-warnings" class="warn-pill ok" type="button" aria-expanded="false" aria-haspopup="dialog">0</button>
     </footer>
     <!-- P3 · the conflict review panel. A dated merge still overwrote somebody:
          this is where the silence becomes a list. A reviewable NOTICE, not an

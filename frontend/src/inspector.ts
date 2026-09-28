@@ -516,14 +516,10 @@ export function renderInspector(
       root.appendChild(pbar);
     }
 
-    // coherence warnings (start/end order, phases within the parent span, …)
-    const warns = store.epochCoherenceWarnings(nodeId);
-    if (warns.length) {
-      const box = el("div", "insp-warn");
-      box.appendChild(el("div", "insp-warn-title", "⚠ Coherence"));
-      for (const w of warns) box.appendChild(el("div", "insp-warn-item", w));
-      root.appendChild(box);
-    }
+    // STRUTTURA · the coherence warnings (start/end order, phases within the
+    // parent span, …) are no longer a box of their own here: they are rows of
+    // `issues()` (rule `chronology`), shown in the inspector's «Avvisi» section
+    // at the top — one place that explains, for every kind of warning.
 
     // Phase bands (view state): its own section at the end. Bands show by
     // DEFAULT; this collapses/expands ALL of THIS epoch's phases at once, and

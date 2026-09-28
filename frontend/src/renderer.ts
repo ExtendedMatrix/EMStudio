@@ -73,6 +73,10 @@ export interface RenderState {
    * answer. Absent for every node that is fine, which is most of them.
    */
   nameStatus?: Map<string, { status: "ok" | "warn" | "dup" }> | null;
+  /** STRUTTURA · nodes with a WARNING (`issues()`): an ochre «!» on the top-left
+   *  corner, drawn over the node and outside the layout — the node, its size
+   *  and its colours stay what `em_visual_rules` says. */
+  warnIds?: Set<string> | null;
 }
 
 /** Label ink for a node: default, ORANGE when its name has a problem, RED when
@@ -1036,6 +1040,30 @@ export function render(
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
     ctx.fillText("🔒", n.x + n.w - s * 0.35, n.y + s * 0.35);
+  }
+
+  // STRUTTURA · the WARNING badge: an ochre disc with «!», on the top-left
+  // corner (the top-right one is the lock's and the use-count's). World-space
+  // like the lock, a constant screen size; chrome, never a node's own style.
+  if (state.warnIds?.size) {
+    const r = 7 / vp.scale;
+    for (const n of scene.nodes) {
+      if (!state.warnIds.has(n.id)) continue;
+      const cx = n.x;
+      const cy = n.y;
+      ctx.beginPath();
+      ctx.arc(cx, cy, r, 0, Math.PI * 2);
+      ctx.fillStyle = "#e3b43a";
+      ctx.fill();
+      ctx.lineWidth = 2 / vp.scale;
+      ctx.strokeStyle = canvasTheme().handleRing;
+      ctx.stroke();
+      ctx.fillStyle = "#1d1d1b";
+      ctx.font = canvasFont(700, 10 / vp.scale);
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText("!", cx, cy + 0.5 / vp.scale);
+    }
   }
 
   // BADGE1 ornament badges are drawn in SCREEN space (DEC1) — see the pass after
