@@ -248,7 +248,10 @@ function bodyOf(src, signature) {
     "…in both complete dictionaries");
   ok(!/ws\.documentation/.test(WS) && !/ws\.documentation"/.test(I18N),
     "…and the old key is gone, not left beside it");
-  const preset = WS.slice(WS.indexOf('id: "assets"'), WS.indexOf('id: "canvas"'));
+  // STRUTTURA (30 set 2026) · the Acquisition preset is PARKED now, after
+  // `canvas` in the file: its block runs from its id to the next preset's id.
+  const from = WS.indexOf('id: "assets"');
+  const preset = WS.slice(from, WS.indexOf("id: ", from + 1));
   ok(/id: "assets"/.test(preset),
     "the ID stays `assets`: saved arrangements and the tiling checks are keyed " +
       "by it, and renaming an id to match a label would discard somebody's " +

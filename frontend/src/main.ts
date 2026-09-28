@@ -18512,6 +18512,17 @@ function renderWorkspaceBar(): void {
     b.innerHTML =
       `<span class="ws-ic">${w.icon}</span><span class="ws-lb">${escapeHtml(label)}</span>`;
     b.addEventListener("click", () => setWorkspace(w.id));
+    if (w.builtin && w.arrangement) {
+      // STUDIO · a built-in's arrangement is applied once and is yours after
+      // that; double-clicking its tab is the way back to the one it came with
+      b.addEventListener("dblclick", (e) => {
+        e.stopPropagation();
+        if (!confirm(t("ws.resetConfirm"))) return;
+        if (w.id !== activeWorkspace()) setActiveWorkspace(w.id);
+        applyArrangement(w.id);
+        renderTiles();
+      });
+    }
     if (!w.builtin) {
       // rename in place: a workspace you made is named after what you use it for,
       // and that changes
@@ -19986,6 +19997,21 @@ registerBuiltinSurfaces({
   unmountGraph: unmountGraphCanvas,
   repaintGraphs: draw,
 });
+// STUDIO · the app STARTS with the Studio's three windows (E.D., 28 set 2026):
+// the outliner, the graph, the inspector. A workspace still holding the single
+// window `seedWindows` gave it — i.e. one nobody has shaped yet — gets its
+// preset once; after that the arrangement is the user's, and joining it back to
+// one window is a choice the next boot respects.
+{
+  const KEY = "emstudio.arranged";
+  let done: string[] = [];
+  try { done = JSON.parse(localStorage.getItem(KEY) ?? "[]") as string[]; } catch { /* fresh */ }
+  const ws = activeWorkspace();
+  if (!done.includes(ws)) {
+    if (!isTiled(ws)) applyArrangement(ws);
+    try { localStorage.setItem(KEY, JSON.stringify([...done, ws])); } catch { /* not fatal */ }
+  }
+}
 renderTiles(); // WIN5 · lay out the arrangement this session was left in
 
 // …and THEN what this page was asked to be about. One function, because the

@@ -7431,3 +7431,67 @@ body.nv-standalone main.nv-standalone-main {
 /* la normalità: nessun colore. Deliberato — vedi sopra. */
 .ing-stamp-poor { color: inherit; opacity: 0.6; font-style: italic; }
 .ing-stamp-none { color: #b3261e; }
+
+/* ── STUDIO · the outliner by epoch (scrivania v5 `drawUnits`) ──────────────
+   An epoch heading carries its span in mono on the right; its units sit
+   beneath, and what a container holds is indented under it (the inline
+   padding is written by nodelist.ts from the outline's depth). */
+.nl-epoch {
+  text-transform: none;
+  letter-spacing: 0;
+  font-size: 11.5px;
+  color: var(--text-muted);
+  margin-top: 10px;
+}
+.nl-epoch .nl-epoch-name {
+  cursor: pointer;
+  font-weight: 700;
+  color: var(--text);
+}
+.nl-epoch .nl-epoch-name:hover {
+  color: var(--brand-ink);
+  text-decoration: underline dotted;
+}
+.nl-subepoch {
+  font-size: 11px;
+  margin-top: 4px;
+}
+.nl-epoch .nl-span {
+  flex: none;
+  font: 400 10.5px var(--font-mono);
+  color: var(--text-faint);
+  padding-left: 6px;
+}
+.nl-row.nl-unit {
+  align-items: center;
+  border-bottom: 0;
+  padding-top: 4px;
+  padding-bottom: 4px;
+}
+.nl-row.nl-unit .nl-dot {
+  margin-top: 0;
+}
+.nl-row.nl-unit.selected {
+  box-shadow: inset 3px 0 0 var(--accent);
+  font-weight: 600;
+}
+.nl-uname {
+  flex: none;
+  font-weight: 600;
+}
+.nl-udesc {
+  flex: 1;
+  min-width: 0;
+  color: var(--text-faint);
+  font-size: 11.5px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* STUDIO · the one mark the outliner makes: a WARNING (never a hint) */
+.nl-wmark {
+  flex: none;
+  margin-left: auto;
+  color: var(--warn-ink);
+  font-size: 10px;
+}

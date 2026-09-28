@@ -204,6 +204,46 @@ export type ArrangementNode =
  * part that changed — and they are English by default now (see `i18n.ts`).
  */
 const BUILTIN_WORKSPACES: WorkspacePreset[] = [
+  // STUDIO · the ONE workspace the app starts with (E.D., 28 set 2026): the
+  // outliner by epoch on the left, the graph in the middle, the inspector on the
+  // right — the desk's «Standard» preset. The other arrangements are PARKED
+  // below and come back one at a time, as each is rethought around what the
+  // user does in it.
+  //
+  // The id stays `canvas`: every saved arrangement, every persisted active
+  // window and the tiling checks are keyed by it. The label is what changed.
+  // The graph window is FIRST in `wins` because `applyArrangement` reuses the
+  // workspace's first existing window as the anchor, and that window has always
+  // been the graph (`seedWindows`): putting the outliner first would turn the
+  // user's canvas into an outliner.
+  {
+    id: "canvas", labelKey: "ws.studio", hintKey: "ws.studioHint",
+    icon: "▦", windowType: "graph", graphMode: "matrix", builtin: true,
+    arrangement: {
+      wins: [
+        { name: "canvas", type: "graph", state: { mode: "matrix" } },
+        { name: "outliner", type: "emtree", state: { "current.panel": "nodelist" } },
+        { name: "inspector", type: "inspector" },
+      ],
+      active: "canvas",
+      layout: { dir: "row", ratio: 0.16, a: { win: "outliner" },
+                b: { dir: "row", ratio: 0.76, a: { win: "canvas" },
+                     b: { win: "inspector" } } },
+    },
+  },
+];
+
+/**
+ * PARKED · the arrangements that left the bar on 28 September 2026 and wait to
+ * come back, one at a time, as each is rethought on the user's UX.
+ *
+ * Kept whole and with their ids, for two reasons. Their SAVED arrangements stay
+ * in `localStorage` untouched (`loadRegistry` carries them through every save),
+ * so the day one returns it returns as the user left it. And returning one costs
+ * ONE LINE: move its entry into `BUILTIN_WORKSPACES` above. A persisted active id
+ * that points here falls back to `canvas` in silence (`initial`).
+ */
+export const PARKED_WORKSPACES: WorkspacePreset[] = [
   // 1 · ACQUISITION — the material comes in: the disk, the room's store, what was
   // just said about what arrived, and the chain being written.
   //
@@ -244,27 +284,6 @@ const BUILTIN_WORKSPACES: WorkspacePreset[] = [
                 b: { dir: "row", ratio: 0.44, a: { win: "store" },
                      b: { dir: "col", ratio: 0.52, a: { win: "chain" },
                           b: { win: "inspector" } } } },
-    },
-  },
-  // 2 · GRAPH — the cockpit of interpretation, and the old IDE arrangement made
-  // concrete: the canvas (matrix/graph are its MODES, not other tabs), the table
-  // across the bottom, and the panels in a column — Outliner is the EMtree
-  // window's second tab, Log the Inspector window's.
-  {
-    id: "canvas", labelKey: "ws.graph", hintKey: "ws.graphHint",
-    icon: "▦", windowType: "graph", graphMode: "matrix", builtin: true,
-    arrangement: {
-      wins: [
-        { name: "canvas", type: "graph", state: { mode: "matrix" } },
-        { name: "table", type: "table" },
-        { name: "emtree", type: "emtree" },
-        { name: "inspector", type: "inspector" },
-      ],
-      layout: { dir: "row", ratio: 0.72,
-                a: { dir: "col", ratio: 0.68, a: { win: "canvas" },
-                     b: { win: "table" } },
-                b: { dir: "col", ratio: 0.42, a: { win: "emtree" },
-                     b: { win: "inspector" } } },
     },
   },
   // 3 · DTC — provenance: the corpus DAG (acquisitions → derivations →
@@ -379,7 +398,8 @@ function loadCustom(): WorkspacePreset[] {
     if (!Array.isArray(parsed)) return [];
     return parsed.filter(
       (w) =>
-        w && typeof w.id === "string" && !BUILTIN_WORKSPACES.some((b) => b.id === w.id),
+        w && typeof w.id === "string" &&
+        ![...BUILTIN_WORKSPACES, ...PARKED_WORKSPACES].some((b) => b.id === w.id),
     );
   } catch {
     return [];
@@ -646,9 +666,29 @@ function loadRegistry(): Registry {
 
 const registry = loadRegistry();
 
+/**
+ * The saved arrangements of the PARKED workspaces, carried through untouched.
+ *
+ * `loadRegistry` only rebuilds the workspaces in the bar, and `persistWindows`
+ * writes the registry whole — so without this, the first save after the bar lost
+ * six tabs would have erased six arrangements somebody shaped. Parking a tab is
+ * a decision about the bar, not about the user's layouts.
+ */
+const parkedSaved: Record<string, unknown> = (() => {
+  try {
+    const raw = localStorage.getItem(WINDOWS_KEY);
+    const parsed = raw ? (JSON.parse(raw) as Record<string, unknown>) : {};
+    const out: Record<string, unknown> = {};
+    for (const p of PARKED_WORKSPACES) if (parsed[p.id]) out[p.id] = parsed[p.id];
+    return out;
+  } catch {
+    return {};
+  }
+})();
+
 function persistWindows(): void {
   try {
-    localStorage.setItem(WINDOWS_KEY, JSON.stringify(registry));
+    localStorage.setItem(WINDOWS_KEY, JSON.stringify({ ...parkedSaved, ...registry }));
   } catch {
     /* storage disabled */
   }

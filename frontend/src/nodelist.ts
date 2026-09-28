@@ -2,9 +2,11 @@
 // fold/unfold and explode (isolate) controls — then the filterable table of
 // every node (name / type / description); click selects and centres.
 import { nodeStyle } from "./palette";
-import { isGroupType } from "./rules";
-import type { EmDocument } from "./types";
+import { isGroupType, isStratigraphicType } from "./rules";
+import type { EmDocument, EmNode } from "./types";
 import { liveNodes } from "./crdt";
+import { buildOutline, epochSpan, type OutlineUnit } from "./outline";
+import { t } from "./i18n";
 
 export interface NodeListApi {
   refresh: () => void;
@@ -19,6 +21,9 @@ export interface NodeListCallbacks {
   onFoldGroups: (ids: string[], folded: boolean) => void;
   /** true when the node physically contains others (is_part_of members) */
   isContainer: (id: string) => boolean;
+  /** STUDIO · the WARNINGS on a node (not the hints): a row carries a discreet
+   *  ▲ when there are any, and its tooltip says what they are. Absent = none. */
+  warningsOf?: (id: string) => string[];
 }
 
 export function buildNodeList(
@@ -30,7 +35,8 @@ export function buildNodeList(
   root.innerHTML = "";
   const filter = document.createElement("input");
   filter.type = "search";
-  filter.placeholder = "Filter…";
+  filter.placeholder = t("outliner.search");
+  filter.setAttribute("aria-label", t("outliner.search"));
   filter.className = "nl-filter";
   root.appendChild(filter);
   const count = document.createElement("div");
@@ -54,7 +60,10 @@ export function buildNodeList(
     (() => {
       try {
         const raw = localStorage.getItem(COLLAPSE_KEY);
-        return Array.isArray(JSON.parse(raw ?? "[]")) ? JSON.parse(raw!) : [];
+        // STUDIO · on a first run the list opens on the EPOCHS: the groups and
+        // the flat list of every node are there, one click away, folded
+        if (raw == null) return ["groups", "nodes"];
+        return Array.isArray(JSON.parse(raw)) ? JSON.parse(raw) : [];
       } catch {
         return [];
       }
@@ -130,6 +139,80 @@ export function buildNodeList(
     const matches = (n: (typeof doc.graph.nodes)[number]): boolean =>
       !q || match(n.name) || match(n.id) || match(n.node_type) || match(n.description);
 
+    // ---- STUDIO · the units BY EPOCH (newest on top), containers indented ----
+    //
+    // The desk's outliner (`drawUnits`): an epoch heading with its span in mono
+    // on the right, the units born in it beneath, and what a container holds
+    // indented under the container. The shape is `outline.ts`'s; this draws it.
+    const outline = buildOutline(doc, liveNodes(doc.graph as never) as unknown as EmNode[],
+                                 isStratigraphicType, q ? matches : undefined);
+    const unitRow = (u: OutlineUnit): HTMLElement => {
+      const n = u.node;
+      const row = document.createElement("button");
+      row.className = "nl-row nl-unit" + (n.id === selected ? " selected" : "");
+      row.style.paddingLeft = `${14 + u.depth * 16}px`;
+      const st = nodeStyle(n.node_type);
+      const dot = document.createElement("span");
+      dot.className = "nl-dot";
+      dot.style.background = st.fill;
+      dot.style.borderColor = st.border;
+      row.appendChild(dot);
+      const name = document.createElement("b");
+      name.className = "nl-uname";
+      name.textContent = String(n.name || n.id);
+      row.appendChild(name);
+      const desc = document.createElement("span");
+      desc.className = "nl-udesc";
+      desc.textContent = String(n.description ?? "");
+      row.appendChild(desc);
+      const warns = groupCb.warningsOf?.(n.id) ?? [];
+      if (warns.length) {
+        const mark = document.createElement("span");
+        mark.className = "nl-wmark";
+        mark.textContent = "▲";
+        mark.title = warns.join("\n");
+        mark.setAttribute("aria-label", t("issues.section", { n: String(warns.length) }));
+        row.appendChild(mark);
+      }
+      row.title = `${n.id} [${n.node_type}]`;
+      row.addEventListener("click", () => onPick(n.id));
+      row.draggable = true;
+      row.addEventListener("dragstart", (e) => {
+        e.dataTransfer?.setData("application/x-em-node-id", n.id);
+        e.dataTransfer?.setData("text/plain", String(n.name || n.id));
+        if (e.dataTransfer) e.dataTransfer.effectAllowed = "copy";
+      });
+      // the FIRST row of a node wins the selection highlight: a unit appears
+      // once here and once more in the flat list below
+      if (!rows.has(n.id)) rows.set(n.id, row);
+      return row;
+    };
+    for (const ep of outline.epochs) {
+      const sec = section(`epoch:${ep.node.id}`, String(ep.node.name || ep.node.id),
+                          "nl-sect nl-epoch" + (ep.depth ? " nl-subepoch" : ""));
+      sec.head.style.paddingLeft = `${6 + ep.depth * 14}px`;
+      const span = document.createElement("span");
+      span.className = "nl-span";
+      span.textContent = epochSpan(ep.node);
+      sec.head.appendChild(span);
+      sec.label.addEventListener("click", (ev) => {
+        // the NAME of an epoch is a node you can select; the triangle and the
+        // rest of the heading fold the section
+        ev.stopPropagation();
+        onPick(ep.node.id);
+      });
+      sec.label.classList.add("nl-epoch-name");
+      listEl.appendChild(sec.head);
+      listEl.appendChild(sec.body);
+      for (const u of ep.units) sec.body.appendChild(unitRow(u));
+    }
+    if (outline.unplaced.length) {
+      const sec = section("epoch:none", t("outliner.noEpoch"), "nl-sect nl-epoch");
+      listEl.appendChild(sec.head);
+      listEl.appendChild(sec.body);
+      for (const u of outline.unplaced) sec.body.appendChild(unitRow(u));
+    }
+
     // ---- groups section (fold / explode inline) ----
     // node groups by type PLUS stratigraphic containers (is_part_of members)
     // P4.5 · the same live view the canvas draws: a tombstoned node is gone
@@ -155,7 +238,7 @@ export function buildNodeList(
       }
       const top = section(
         "groups",
-        `Groups (${groups.length})`,
+        t("outliner.groups", { n: String(groups.length) }),
         "nl-sect nl-sect-groups",
       );
       listEl.appendChild(top.head);
@@ -219,7 +302,7 @@ export function buildNodeList(
           });
           row.appendChild(explode);
           sec.body.appendChild(row);
-          rows.set(g.id, row);
+          if (!rows.has(g.id)) rows.set(g.id, row);
         }
       }
     }
@@ -233,7 +316,7 @@ export function buildNodeList(
     // The Nodes heading is now ALWAYS there, where before it only appeared when
     // there were groups above it: a collapsed section whose heading disappears
     // takes its rows out of reach, and the way back would be gone with it.
-    const nodesSec = section("nodes", `Nodes (${nodes.length})`, "nl-sect");
+    const nodesSec = section("nodes", t("outliner.allNodes", { n: String(nodes.length) }), "nl-sect");
     listEl.appendChild(nodesSec.head);
     listEl.appendChild(nodesSec.body);
     for (const n of nodes) {
@@ -271,7 +354,7 @@ export function buildNodeList(
         if (e.dataTransfer) e.dataTransfer.effectAllowed = "copy";
       });
       nodesSec.body.appendChild(row);
-      rows.set(n.id, row);
+      if (!rows.has(n.id)) rows.set(n.id, row);
     }
   };
 

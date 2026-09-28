@@ -31,7 +31,7 @@
  * tell a guessed term from a checked one, so the selector says which it is.
  */
 
-export type Locale = "en" | "it" | "el" | "he" | "es" | "pl" | "ro" | "fr";
+export type Locale = "en" | "it" | "de" | "el" | "he" | "es" | "pl" | "ro" | "fr";
 
 export interface LocaleInfo {
   code: Locale;
@@ -44,6 +44,7 @@ export interface LocaleInfo {
 export const LOCALES: LocaleInfo[] = [
   { code: "en", label: "English" },
   { code: "it", label: "Italiano" },
+  { code: "de", label: "Deutsch" },
   { code: "el", label: "Ελληνικά" },
   { code: "he", label: "עברית", rtl: true },
   { code: "es", label: "Español" },
@@ -524,6 +525,16 @@ const EN: Dict = {
   "ws.acquisitionHint": "Where the material comes in: the disk, the room's object store, the chain being written, and the Inspector for what just arrived. Named after the model's own word for this moment — a DTCAcquisitionNode, crmdig:D12.",
   "ws.graph": "Graph",
   "ws.graphHint": "The cockpit of interpretation: the canvas (matrix and graph are its modes), the table underneath, the Outliner and the Inspector/Log beside it.",
+  // ── STRUTTURA (30 set 2026) · the desk's structure: one workspace, the
+  // window header, the corner gesture, the name strip, the table, the issues ──
+  "ws.studio": "Studio",
+  "ws.studioHint": "The outliner by epoch, the graph, the inspector: the one arrangement the app starts with.",
+  "ws.resetConfirm": "Put this workspace back to its original arrangement? The windows you added or moved go away.",
+  "outliner.search": "Search units",
+  "outliner.noEpoch": "No epoch",
+  "outliner.groups": "Groups ({n})",
+  "outliner.allNodes": "All nodes ({n})",
+  "issues.section": "Warnings · {n}",
   "ws.dtc": "DTC",
   "ws.dtcHint": "Documentation, Transformation, Communication: the provenance DAG of the corpus (acquisitions → derivations → attributions), with the Inspector beside it.",
   "ws.comparisons": "Comparisons",
@@ -1810,6 +1821,15 @@ const IT: Dict = {
   "ws.acquisitionHint": "Dove entra il materiale: il disco, l'object store della stanza, la catena che si sta scrivendo e l'Ispettore per quel che è appena arrivato. Il nome è la parola che il modello dà a questo momento — un DTCAcquisitionNode, crmdig:D12.",
   "ws.graph": "Grafo",
   "ws.graphHint": "La cabina dell'interpretazione: la tela (matrice e grafo sono i suoi modi), la tabella sotto, l'Outliner e l'Ispettore/Log a lato.",
+  // ── STRUTTURA (30 set 2026) ──
+  "ws.studio": "Studio",
+  "ws.studioHint": "L'outliner per epoche, il grafo, l'ispettore: l'unica disposizione con cui parte l'app.",
+  "ws.resetConfirm": "Riportare questo spazio di lavoro alla disposizione originale? Le finestre aggiunte o spostate spariscono.",
+  "outliner.search": "Cerca unità",
+  "outliner.noEpoch": "Senza epoca",
+  "outliner.groups": "Gruppi ({n})",
+  "outliner.allNodes": "Tutti i nodi ({n})",
+  "issues.section": "Avvisi · {n}",
   "ws.dtc": "DTC",
   "ws.dtcHint": "Documentation, Transformation, Communication: il DAG della provenienza del corpus (acquisizioni → derivazioni → attribuzioni), con l'Ispettore a lato.",
   "ws.comparisons": "Confronti",
@@ -3241,8 +3261,33 @@ export function setValidated(code: Locale, on: boolean): void {
   }
 }
 
+// ── Deutsch · an AI DRAFT (30 set 2026), like the six above ──────────────────
+//
+// It exists because the night's brief asks every NEW key in it, en AND de: the
+// datamodel already speaks German (`datamodel_translations.json`, 28 set) and
+// the chrome should follow. It starts with the keys of the desk's structure and
+// falls back to English for the rest, the same way the other drafts do; E.D.
+// validates it in the selector like the others.
+const DE: Dict = {
+  "toolbar.file": "Datei",
+  "toolbar.new": "Neu",
+  "toolbar.open": "Öffnen…",
+  "toolbar.save": "Speichern",
+  "toolbar.saveAs": "Speichern unter…",
+  "toolbar.export": "Exportieren",
+  // ── STRUTTURA (30 set 2026) ──
+  "ws.studio": "Studio",
+  "ws.studioHint": "Der Outliner nach Epochen, der Graph, der Inspektor: die eine Anordnung, mit der die App startet.",
+  "ws.resetConfirm": "Diesen Arbeitsbereich auf seine ursprüngliche Anordnung zurücksetzen? Hinzugefügte oder verschobene Fenster verschwinden.",
+  "outliner.search": "Einheiten suchen",
+  "outliner.noEpoch": "Ohne Epoche",
+  "outliner.groups": "Gruppen ({n})",
+  "outliner.allNodes": "Alle Knoten ({n})",
+  "issues.section": "Warnungen · {n}",
+};
+
 const DICTS: Record<Locale, Dict> = {
-  en: EN, it: IT, el: EL, he: HE, es: ES, pl: PL, ro: RO, fr: FR,
+  en: EN, it: IT, de: DE, el: EL, he: HE, es: ES, pl: PL, ro: RO, fr: FR,
 };
 
 // ── state ─────────────────────────────────────────────────────────────────────
