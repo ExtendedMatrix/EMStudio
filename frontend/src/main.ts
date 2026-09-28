@@ -455,7 +455,7 @@ import { ingestionAct, storeLocator } from "./stamp-ingest";
 import { buildGraphScene, type GraphAlgorithm } from "./views/graph";
 import { buildMatrixScene } from "./views/matrix";
 import { renderStudyPanel } from "./study-panel";
-import { perfRelease, perfSettled, perfTime, perfTimeAsync } from "./perf";
+import { perfCount, perfRelease, perfSettled, perfTime, perfTimeAsync } from "./perf";
 import {
   DragGate,
   dropTargetAt,
@@ -568,7 +568,25 @@ let matrixViewLayout: import("./types").EmLayout | null = null;
 // epoch that has phases; this set holds the top-level epochs the user COLLAPSED
 // back into a single lane (opt-out). Keyed by the top-level epoch (the lane).
 const phasesCollapsed = new Set<string>();
-const scenes: Partial<Record<ViewKind, Scene | null>> = {};
+/**
+ * TOCCARE · the scenes, rebuilt LAZILY after a document change.
+ *
+ * A store change used to rebuild every scene and refresh every surface
+ * synchronously, once per mutation — a gesture that wrote three times paid for
+ * three full rebuilds, and a drag that wrote per pointermove paid for one per
+ * pixel. Now a change only marks the scenes dirty (`scenesDirty`) and queues ONE
+ * refresh for the next frame (`flushChange`). Whoever reads a scene before that
+ * — a handler that adds a node and selects it in the same tick — gets it rebuilt
+ * on the spot, through this proxy: correctness does not wait for the frame.
+ */
+const sceneCache: Partial<Record<ViewKind, Scene | null>> = {};
+let scenesDirty = false;
+const scenes = new Proxy(sceneCache, {
+  get(target, key) {
+    if (scenesDirty) ensureScenes();
+    return target[key as ViewKind];
+  },
+}) as Partial<Record<ViewKind, Scene | null>>;
 // WIN2b · the camera belongs to a (WINDOW, mode) pair, not to the app. Two graph
 // windows in the same projection keep their own pan and zoom, and coming back to
 // a window returns you where you left it. Keyed lazily: a window that never
@@ -1326,6 +1344,7 @@ const edgeVisible = (_t?: string): boolean => true;
 const inContext = (): boolean => contextStack.length > 0;
 
 function scene(): Scene | null {
+  ensureScenes();
   return inContext() ? contextScene : (scenes[view] ?? null);
 }
 
@@ -1722,6 +1741,7 @@ function paintGraphWindow(p: GraphPaint): void {
  */
 function draw(): void {
   perfTime("draw", drawNow);
+  perfSettled(); // «release → settled» ends at the last PAINT, not the last rebuild
 }
 
 /** TOCCARE · at most one paint per frame: a drag asks for one per pointermove,
@@ -2750,8 +2770,112 @@ function phasedTopEpochs(): Set<string> {
 }
 
 function buildScenes(): void {
+  // a rebuild that answers a document change also owes what the change made
+  // stale upstream of the scenes: the hidden types, and the hypergraph canvas
+  const fromChange = scenesDirty;
+  scenesDirty = false;
+  if (fromChange) recomputeHiddenFromCircles();
+  const before = slideSnapshot();
   perfTime("buildScenes", buildScenesNow);
+  if (fromChange && inContext())
+    contextScene = contextSceneFor(contextStack[contextStack.length - 1]);
+  startSlide(before);
   perfSettled();
+}
+
+/** Rebuild now if a document change is pending (see `scenes`). */
+function ensureScenes(): void {
+  if (scenesDirty) buildScenes();
+}
+
+// ---------- TOCCARE · the slide ----------
+//
+// When a rebuild MOVES nodes the hand did not just place — a layout, a
+// «Riordina», an undo, Esc during a drag — they glide from where they were to
+// where they go in SLIDE_MS, ease-out, so the eye can follow what moved. What
+// the hand placed does not slide (`slideSuppressed`, set by the commit and the
+// nudge): it is already where it belongs. prefers-reduced-motion: no slide.
+const SLIDE_MS = 180;
+let slideSuppressed = 0;
+interface SlideItem {
+  obj: { x: number; y: number };
+  fx: number;
+  fy: number;
+  tx: number;
+  ty: number;
+  s: Scene;
+}
+let slideRun: { start: number; items: SlideItem[] } | null = null;
+type SlideSnap = {
+  slot: string;
+  views: Map<ViewKind, { nodes: Map<string, { x: number; y: number }>; groups: Map<string, { x: number; y: number }> }>;
+};
+const reducedMotion = (): boolean => {
+  try {
+    return matchMedia("(prefers-reduced-motion: reduce)").matches;
+  } catch {
+    return false;
+  }
+};
+function slideSnapshot(): SlideSnap | null {
+  if (slideSuppressed > 0 || reducedMotion()) return null;
+  const views: SlideSnap["views"] = new Map();
+  for (const v of ["matrix", "graph"] as ViewKind[]) {
+    const sc = sceneCache[v];
+    if (!sc) continue;
+    const nodes = new Map<string, { x: number; y: number }>();
+    for (const n of sc.byId.values()) nodes.set(n.id, { x: n.x, y: n.y });
+    const groups = new Map<string, { x: number; y: number }>();
+    for (const g of sc.groups ?? []) groups.set(g.id, { x: g.x, y: g.y });
+    views.set(v, { nodes, groups });
+  }
+  return { slot: emtree.active()?.id ?? "", views };
+}
+function startSlide(before: SlideSnap | null): void {
+  if (!before || slideSuppressed > 0 || before.slot !== (emtree.active()?.id ?? "")) return;
+  const items: SlideItem[] = [];
+  const add = (obj: { id: string; x: number; y: number }, from: { x: number; y: number } | undefined, s: Scene) => {
+    if (!from || (Math.abs(from.x - obj.x) <= 0.5 && Math.abs(from.y - obj.y) <= 0.5)) return;
+    items.push({ obj, fx: from.x, fy: from.y, tx: obj.x, ty: obj.y, s });
+  };
+  for (const [v, snap] of before.views) {
+    const sc = sceneCache[v];
+    if (!sc) continue;
+    for (const n of sc.byId.values()) add(n, snap.nodes.get(n.id), sc);
+    for (const g of sc.groups ?? []) add(g, snap.groups.get(g.id), sc);
+  }
+  if (!items.length) return;
+  for (const it of items) {
+    it.obj.x = it.fx;
+    it.obj.y = it.fy;
+  }
+  const run = { start: performance.now(), items };
+  slideRun = run;
+  const step = (now: number): void => {
+    if (slideRun !== run) return; // superseded by a newer rebuild
+    const t = Math.min(1, (now - run.start) / SLIDE_MS);
+    const e = 1 - (1 - t) ** 3;
+    for (const it of run.items) {
+      it.obj.x = it.fx + (it.tx - it.fx) * e;
+      it.obj.y = it.fy + (it.ty - it.fy) * e;
+    }
+    for (const sc of new Set(run.items.map((i) => i.s))) invalidateRoutes(sc);
+    draw();
+    if (t < 1) requestAnimationFrame(step);
+    else slideRun = null;
+  };
+  requestAnimationFrame(step);
+}
+/** Jump a running slide to its end (a press must grab the node where it IS going). */
+function finishSlide(): void {
+  const run = slideRun;
+  if (!run) return;
+  slideRun = null;
+  for (const it of run.items) {
+    it.obj.x = it.tx;
+    it.obj.y = it.ty;
+  }
+  for (const sc of new Set(run.items.map((i) => i.s))) invalidateRoutes(sc);
 }
 
 /**
@@ -3104,34 +3228,44 @@ function slotNameFor(d: EmDocument, sourceName: string): string {
  * as many times as the graph had been activated, so one edit would rebuild the
  * scene five times and push five ops down the sync channel.
  */
+/** TOCCARE · the one refresh a burst of document changes owes (see `scenes`). */
+let changeQueued = false;
+function flushChange(): void {
+  changeQueued = false;
+  if (!store) return;
+  refreshNameStatus();          // NAME1: label colours follow the graph
+  ensureScenes();               // (recomputes the hidden types first)
+  if (filterPanelOpen()) renderCirclesPanel(); // refresh circle counts
+  updateInfo();
+  updateLegend();
+  updateToolbar();
+  refreshInspector();
+  renderViewer();           // VIEWER · it follows the selection, like the Inspector
+  renderAnnotator();        // A2 · and so does the annotator: same picture rule
+  refreshNarrativeView();   // embeds are references: a graph edit shows here
+  nodeList.refresh();
+  refreshEMTree();          // node/edge counts and the dirty dot live there
+  renderEmData();           // every mounted EM-Data table is a live view of it
+  refreshTileSurfaces();    // WIN7 · …and so is every other window on screen
+  draw();
+}
+
 function wireStore(s: DocumentStore): void {
-  s.onChange(() => perfTime("onChange", () => {
+  s.onChange(() => {
     // Guard: a background slot must not redraw the canvas. Today only the active
     // store is ever mutated (edits go through the active document), but the sync
     // channel and a future aux bake could touch another one, and the symptom of
     // that would be the canvas flickering to a graph nobody selected.
     if (s !== store) return;
     lastTouchedStore = s;  // …and undo now knows which stack the user means
-    recomputeHiddenFromCircles(); // keep hidden sets in sync with new types
-    refreshNameStatus();          // NAME1: label colours follow the graph
-    buildScenes();
-    if (filterPanelOpen()) renderCirclesPanel(); // refresh circle counts
-    if (inContext()) {
-      contextScene = contextSceneFor(contextStack[contextStack.length - 1]);
-    }
-    updateInfo();
-    updateLegend();
-    updateToolbar();
-    refreshInspector();
-    renderViewer();           // VIEWER · it follows the selection, like the Inspector
-    renderAnnotator();        // A2 · and so does the annotator: same picture rule
-    refreshNarrativeView();   // embeds are references: a graph edit shows here
-    nodeList.refresh();
-    refreshEMTree();          // node/edge counts and the dirty dot live there
-    renderEmData();           // every mounted EM-Data table is a live view of it
-    refreshTileSurfaces();    // WIN7 · …and so is every other window on screen
-    draw();
-  }));
+    // TOCCARE · a change marks the scenes dirty and queues ONE refresh for the
+    // next frame: three writes in a gesture are one rebuild, not three
+    perfCount("onChange");
+    scenesDirty = true;
+    if (changeQueued) return;
+    changeQueued = true;
+    requestAnimationFrame(() => perfTime("onChangeFlush", flushChange));
+  });
   // forward local graph mutations to a connected peer (op-log, ADR-002 §2).
   // Remote-applied ops don't re-emit (DocumentStore suppresses), so no echo.
   s.onOp((op) => {
@@ -6069,19 +6203,28 @@ function commitNodeDrag(wx: number, wy: number, alt: boolean): void {
       ? String(st.node(list[0])?.name || list[0])
       : `${list.length}`;
   let message: string | null = null;
-  st.batch(() => {
-    if (reassign?.kind === "group") {
-      const n = dropIntoGroup(ids, reassign.group.id);
-      if (n) message = `${names(ids)} → ${reassign.group.title}`;
-    } else if (reassign?.kind === "lane") {
-      const targets = epochTargetsFor(ids);
-      if (targets.length) {
-        st.setFirstEpoch(targets, reassign.epochId);
-        message = `${names(targets)} → ${reassign.label}`;
+  // what the hand placed is already where it belongs: it does not slide
+  slideSuppressed++;
+  try {
+    st.batch(() => {
+      if (reassign?.kind === "group") {
+        const n = dropIntoGroup(ids, reassign.group.id);
+        if (n) message = `${names(ids)} → ${reassign.group.title}`;
+      } else if (reassign?.kind === "lane") {
+        const targets = epochTargetsFor(ids);
+        if (targets.length) {
+          st.setFirstEpoch(targets, reassign.epochId);
+          message = `${names(targets)} → ${reassign.label}`;
+        }
       }
-    }
-    settleDropped(dropped);
-  });
+      settleDropped(dropped);
+    });
+    // the batch's own change: rebuild now, still unslid, so the flush finds the
+    // scene already final
+    buildScenes();
+  } finally {
+    slideSuppressed--;
+  }
   if (message) toastUndo(message, st);
 }
 
@@ -6133,9 +6276,16 @@ function nudgeSelection(dxPx: number, dyPx: number): boolean {
     const s = scene();
     const moving = ids.filter((id) => s?.byId.has(id));
     if (!moving.length) return false;
-    st.batch(() => {
-      for (const id of moving) moveOneByDelta(id, dx, dy, false);
-    });
+    slideSuppressed++;
+    try {
+      st.batch(() => {
+        for (const id of moving) moveOneByDelta(id, dx, dy, false);
+      });
+      buildScenes();
+    } finally {
+      slideSuppressed--;
+    }
+    draw();
     return true;
   }
   const ov = canvasOverrides();
@@ -19479,6 +19629,7 @@ function wireGraphCanvas(canvas: HTMLCanvasElement, winId: string): void {
   });
   canvas.addEventListener("pointerdown", (e) => {
     claim();
+    finishSlide(); // TOCCARE · grab the node where it is going, not mid-glide
     hideEdgeMenu();
     moved = false;
     lastX = e.clientX;
@@ -19768,6 +19919,7 @@ function wireGraphCanvas(canvas: HTMLCanvasElement, winId: string): void {
       const d = dragGate?.move(e.clientX, e.clientY);
       if (!d) return;
       moved = true;
+      tooltip.classList.add("hidden");
       const ddx = d.dx / vp.scale;
       const ddy = d.dy / vp.scale;
       const s = scene();
@@ -19824,7 +19976,10 @@ function wireGraphCanvas(canvas: HTMLCanvasElement, winId: string): void {
       // `commitNodeDrag`; until then no onChange fires, so the inspector, the
       // tables, the narrative and the other windows are not rebuilt per pixel
       // (a group drag was 38 ms a frame, measured, all of it that).
-      if (!dragMoving) dragMoving = collectMoving(s);
+      if (!dragMoving) {
+        dragMoving = collectMoving(s);
+        tooltip.classList.add("hidden"); // the hover card belongs to the hover
+      }
       const wdx = d.dx / vp.scale;
       const wdy = d.dy / vp.scale;
       for (const id of dragMoving.nodes.keys()) {
