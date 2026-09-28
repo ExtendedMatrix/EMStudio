@@ -12,13 +12,17 @@
  *
  * Pure: the document, the live nodes, the issues and a translator come in.
  * Nothing is written, and the one computation that is not ours — the propagated
- * chronology — is READ from what s3Dgraphy wrote (`CALCUL_START_T/END_T`), never
- * recomputed here (CLAUDE.md, invariant 2).
+ * chronology — is ASKED of s3Dgraphy through the bridge (`chron-bridge.ts`,
+ * `POST /chronology`) and handed in as a map, never recomputed here (CLAUDE.md,
+ * invariant 2). It used to be read from `CALCUL_START_T/END_T` in the document;
+ * since MICRO-cronologia the document no longer carries them: the chronology is
+ * derived state, and its provenance is the stratigraphic relations themselves.
  */
 import type { EmDocument, EmNode } from "./types";
 import type { FacetDef, FacetRow, FacetValue } from "./facets";
 import type { Issue } from "./issues";
 import { epochSpan, epochStart } from "./outline";
+import type { ChronEntry } from "./chron-bridge";
 
 export type EmdbSheet = "US" | "Units" | "Epochs" | "Authors" | "Documents" | "Claims";
 export type ComputedView = "Chron" | "Issues";
@@ -154,6 +158,16 @@ export function writtenStart(ix: Index, id: string): number | null {
  * `is_part_of` members, recursively. A member with no date of its own is read
  * through `changed_from` back to its original (a reused capital is dated by the
  * capital it was). This is reading the graph, not propagating it.
+ *
+ * PREVIEW ONLY (MICRO-cronologia). The rule is s3Dgraphy's `contained`
+ * (`member_start` / `containment_tpq_detail`), and with the bridge on the view
+ * shows THAT. This copy stays for one reason: with the bridge off, the one
+ * reading of the chronology a user can still get is a pure read of the document
+ * — no propagation, no epochs of the container, no TPQ/TAQ — and hiding it would
+ * leave the column empty for a question the file can answer. It is marked as a
+ * preview wherever it is shown, and `check-chronology.mjs` pins it to the same
+ * answer s3Dgraphy gives on pancia A, so a drift is a failing check rather than
+ * two rules.
  */
 export type FindDate = { v: number; via: string; origin?: string; fromEpoch?: boolean };
 
@@ -197,30 +211,26 @@ export function fromFinds(ix: Index, id: string): FindDate | null {
   return best;
 }
 
-/** What s3Dgraphy's `calculate_chronology` wrote, if the document carries it. */
-export function propagated(n: EmNode): { start: number | null; end: number | null } | null {
-  const d = (n.data ?? {}) as Record<string, unknown>;
-  const a = (n as Record<string, unknown>).attributes as Record<string, unknown> | undefined;
-  const s = num(d.CALCUL_START_T ?? a?.CALCUL_START_T);
-  const e = num(d.CALCUL_END_T ?? a?.CALCUL_END_T);
-  return s == null && e == null ? null : { start: s, end: e };
-}
-
 export interface ChronRow {
   node: EmNode;
   epoch: string;
   written: number | null;
+  /** the TS preview of the `contained` rule (see `fromFinds`) */
   finds: FindDate | null;
-  prop: { start: number | null; end: number | null } | null;
+  /** s3Dgraphy's answer for this node, when the bridge gave one */
+  chron: ChronEntry | null;
 }
 
-export function chronRows(ctx: ViewCtx, ix: Index): ChronRow[] {
+/** `chron` is the map `POST /chronology` returned, or null when there is none
+ *  (bridge off, not asked yet). */
+export function chronRows(ctx: ViewCtx, ix: Index,
+                          chron: Record<string, ChronEntry> | null = null): ChronRow[] {
   return ctx.nodes.filter((n) => ctx.isUnit(n.node_type)).map((n) => ({
     node: n,
     epoch: nameOf(ix, ix.out(n.id, "has_first_epoch")[0]),
     written: writtenStart(ix, n.id),
     finds: fromFinds(ix, n.id),
-    prop: propagated(n),
+    chron: chron?.[n.id] ?? null,
   }));
 }
 

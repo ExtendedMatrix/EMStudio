@@ -50,6 +50,8 @@ import {
   type FacetSelection,
 } from "./facets";
 import { t } from "./i18n";
+import { chronologyFor, onChronologyUpdate, type ChronEntry, type ChronRule,
+         type ChronState } from "./chron-bridge";
 
 let getStore: () => DocumentStore | null = () => null;
 let getCtx: () => ViewCtx | null = () => null;
@@ -210,6 +212,8 @@ export function initEmData(opts: {
   if (opts.setCurrentRow) setCurrentRow = opts.setCurrentRow;
   if (opts.onRowPicked) onRowPicked = opts.onRowPicked;
   if (opts.runIssueAction) runIssueAction = opts.runIssueAction;
+  // MICRO-cronologia · an answer from the bridge redraws the tables
+  onChronologyUpdate(() => renderEmData());
   try {
     const saved = localStorage.getItem(LS_SHEET) as TableView | null;
     if (saved && VIEWS.includes(saved)) defaultSheet = saved;
@@ -404,9 +408,13 @@ function renderEmDataInto(host: EmDataHost): void {
   const cards = st.view === "cards" && CARD_VIEWS.includes(st.sheet);
 
   if (st.sheet === "Chron") {
-    const rows = chronRows(ctx, ix).filter((r) => passes(r.node.id, String(r.node.name)));
+    // asked of s3Dgraphy through the bridge when the view is drawn and the
+    // document changed; the answer lives in memory, the document gets nothing
+    const cs = chronologyFor(store.doc, () => store.toJSON());
+    const rows = chronRows(ctx, ix, cs.status === "ok" ? cs.map : null)
+      .filter((r) => passes(r.node.id, String(r.node.name)));
     count = rows.length;
-    content = cards ? chronCardsHtml(rows) : chronTableHtml(rows);
+    content = cards ? chronCardsHtml(rows, cs) : chronTableHtml(rows, cs);
   } else if (st.sheet === "Issues") {
     const rows = ctx.issues.filter((i) => passes(i.id, i.txt));
     count = rows.length;
@@ -472,37 +480,97 @@ const nm = (n: { name?: unknown; id: string } | undefined | null): string =>
 const link = (n: { name?: unknown; id: string } | undefined | null): string =>
   n ? `<button class="tv-link" type="button" data-go="${escapeAttr(n.id)}">${escapeHtml(nm(n))}</button>` : "—";
 
-function chronTableHtml(rows: ReturnType<typeof chronRows>): string {
+type ChronRowT = ReturnType<typeof chronRows>[number];
+
+/** The pieces both chronology renderers share: one reading of each cell. */
+function chronCells(cs: ChronState) {
   const ix = getCtx() ? indexOf(getCtx()!) : null;
-  const byName = (id?: string): string => (id && ix ? nm(ix.byId.get(id)) : "");
-  const finds = (r: ReturnType<typeof chronRows>[number]): string => r.finds
-    ? `≥ ${r.finds.v} <span class="tv-d">${escapeHtml(t("table.tpqFrom", { x: byName(r.finds.via) }))}` +
-      `${r.finds.origin ? " ← " + escapeHtml(byName(r.finds.origin)) : ""}` +
-      `${r.finds.fromEpoch ? " · " + escapeHtml(t("table.byEpoch")) : ""}</span>` : "—";
-  const prop = (r: ReturnType<typeof chronRows>[number]): string => r.prop
-    ? `${r.prop.start ?? "?"} – ${r.prop.end ?? "?"}`
-    : `<span class="tv-d">${escapeHtml(t("table.fromS3d"))}</span>`;
-  return `<div class="tv-pad"><p class="tv-lead">${escapeHtml(t("table.chronLead"))}</p>` +
+  const byName = (id?: string | null): string => (id && ix ? nm(ix.byId.get(id)) : "");
+  const ruleLabel = (r: ChronRule | null): string => (r ? t(`table.rule.${r}`) : "");
+  const dim = (s: string): string => `<span class="tv-d">${escapeHtml(s)}</span>`;
+  // the provenance of a propagated bound IS the relation it arrived along
+  // (E.D., 29 set): «≥ 1100 · is_after USM101», «≥ 100 · contenuti · RSF100b ←
+  // SF100», «≤ 1300 · epoca · Medioevo», «≥ 180 · scritta»
+  const why = (e: ChronEntry, side: "start" | "end"): string => {
+    const rule = side === "start" ? e.start_rule : e.end_rule;
+    const src = byName(side === "start" ? e.start_source : e.end_source);
+    const rel = side === "start" ? e.start_relation : e.end_relation;
+    if (rule === "written") return ruleLabel(rule);   // the unit's own date
+    if (rule === "contained" && e.contained)
+      return `${ruleLabel(rule)} · ${byName(e.contained.source)}` +
+        (e.contained.original ? " ← " + byName(e.contained.original) : "");
+    if (rule === "tpq" || rule === "taq") return `${rel ?? ruleLabel(rule)} ${src}`;
+    return `${ruleLabel(rule)}${src ? " · " + src : ""}`;
+  };
+  const bound = (e: ChronEntry, side: "start" | "end"): string => {
+    const v = side === "start" ? e.start : e.end;
+    if (v == null) return "";
+    return `${side === "start" ? "≥" : "≤"} ${v} ` + dim(`· ${why(e, side)}`);
+  };
+  const stale = cs.stale ? " " + dim(t("table.chronStale")) : "";
+  const prop = (r: ChronRowT): string => {
+    if (r.chron) {
+      const parts = [bound(r.chron, "start"), bound(r.chron, "end")].filter(Boolean);
+      return (parts.join("<br>") || "—") + stale;
+    }
+    switch (cs.status) {
+      case "ok": return "—";
+      case "off": return dim(t("table.chronOff"));
+      case "error": return dim(t("table.chronError", { x: cs.error ?? "" }));
+      default: return dim(t("table.chronLoading"));
+    }
+  };
+  // the rule from the contents: s3Dgraphy's when the bridge answered, the TS
+  // preview (marked) when it did not
+  const finds = (r: ChronRowT): string => {
+    if (cs.status === "ok") {
+      const c = r.chron?.contained;
+      return c
+        ? `≥ ${c.start} ${dim(t("table.tpqFrom", { x: byName(c.source) }) +
+            (c.original ? " ← " + byName(c.original) : ""))}`
+        : "—";
+    }
+    return r.finds
+      ? `≥ ${r.finds.v} ${dim(t("table.tpqFrom", { x: byName(r.finds.via) }) +
+          (r.finds.origin ? " ← " + byName(r.finds.origin) : "") +
+          (r.finds.fromEpoch ? " · " + t("table.byEpoch") : ""))} ` +
+        `<span class="tv-tag">${escapeHtml(t("table.preview"))}</span>`
+      : "—";
+  };
+  // what surrounds the table: how to start the bridge, and what s3Dgraphy said
+  const notes = (): string => {
+    if (cs.status === "off")
+      return `<p class="tv-lead"><b>${escapeHtml(t("table.chronOff"))}.</b> ` +
+        `${escapeHtml(t("table.chronOffHow"))}</p>`;
+    if (cs.status === "ok" && cs.warnings.length)
+      return `<details class="tv-lead"><summary>${escapeHtml(
+        t("table.chronWarnings", { n: String(cs.warnings.length) }))}</summary><ul>` +
+        cs.warnings.map((w) => `<li>${escapeHtml(w)}</li>`).join("") + `</ul></details>`;
+    return "";
+  };
+  return { prop, finds, notes };
+}
+
+function chronTableHtml(rows: ChronRowT[], cs: ChronState): string {
+  const c = chronCells(cs);
+  return `<div class="tv-pad"><p class="tv-lead">${escapeHtml(t("table.chronLead"))}</p>${c.notes()}` +
     `<table class="emdata-table tv-table"><thead><tr><th>${escapeHtml(t("table.col.unit"))}</th>` +
     `<th>${escapeHtml(t("table.col.epoch"))}</th><th>${escapeHtml(t("table.col.written"))}</th>` +
     `<th>${escapeHtml(t("table.col.finds"))}</th><th>${escapeHtml(t("table.col.propagated"))}</th></tr></thead><tbody>` +
     rows.map((r) => `<tr data-id="${escapeAttr(r.node.id)}"${r.node.id === currentRowOf() ? ' class="emdata-current"' : ""}>` +
       `<td class="tv-id">${escapeHtml(nm(r.node))}</td><td>${escapeHtml(r.epoch || "—")}</td>` +
       `<td class="tv-num tv-w">${r.written ?? `<span class="tv-d">${escapeHtml(t("table.nothing"))}</span>`}</td>` +
-      `<td class="tv-num">${finds(r)}</td><td class="tv-num">${prop(r)}</td></tr>`).join("") +
+      `<td class="tv-num">${c.finds(r)}</td><td class="tv-num">${c.prop(r)}</td></tr>`).join("") +
     `</tbody></table></div>`;
 }
 
-function chronCardsHtml(rows: ReturnType<typeof chronRows>): string {
-  const ix = getCtx() ? indexOf(getCtx()!) : null;
-  const byName = (id?: string): string => (id && ix ? nm(ix.byId.get(id)) : "");
-  return `<div class="tv-pad"><p class="tv-lead">${escapeHtml(t("table.chronLead"))}</p><div class="tv-cols">` +
+function chronCardsHtml(rows: ChronRowT[], cs: ChronState): string {
+  const c = chronCells(cs);
+  return `<div class="tv-pad"><p class="tv-lead">${escapeHtml(t("table.chronLead"))}</p>${c.notes()}<div class="tv-cols">` +
     rows.map((r) => `<div class="tv-card" data-id="${escapeAttr(r.node.id)}"><h3>${escapeHtml(nm(r.node))}</h3>` +
       `<div class="tv-f"><span>${escapeHtml(t("table.col.written"))}</span><span class="tv-num">${r.written ?? escapeHtml(t("table.nothing"))}</span></div>` +
-      `<div class="tv-f"><span>${escapeHtml(t("table.col.finds"))}</span><span class="tv-num">${r.finds
-        ? `≥ ${r.finds.v} <span class="tv-d">${escapeHtml(t("table.tpqFrom", { x: byName(r.finds.via) }))}${r.finds.origin ? " ← " + escapeHtml(byName(r.finds.origin)) : ""}${r.finds.fromEpoch ? " · " + escapeHtml(t("table.byEpoch")) : ""}</span>` : "—"}</span></div>` +
-      `<div class="tv-f"><span>${escapeHtml(t("table.col.propagated"))}</span><span class="tv-num">${r.prop
-        ? `${r.prop.start ?? "?"} – ${r.prop.end ?? "?"}` : `<span class="tv-d">${escapeHtml(t("table.fromS3d"))}</span>`}</span></div></div>`).join("") +
+      `<div class="tv-f"><span>${escapeHtml(t("table.col.finds"))}</span><span class="tv-num">${c.finds(r)}</span></div>` +
+      `<div class="tv-f"><span>${escapeHtml(t("table.col.propagated"))}</span><span class="tv-num">${c.prop(r)}</span></div></div>`).join("") +
     `</div></div>`;
 }
 

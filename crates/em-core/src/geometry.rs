@@ -12,7 +12,9 @@
 //! this module hardcodes no type and no number, it reads
 //! `frontend/src/assets/em_visual_rules.json` — the pinned vendored copy that
 //! `frontend/scripts/sync-datamodels.sh` refreshes from s3Dgraphy (ADR-001), the
-//! same file `palette.ts` and the renderer read.
+//! same file `palette.ts` and the renderer read — through the copy the same
+//! script writes for this crate, `assets/em_visual_rules.core.json`, which is
+//! that file without `2d_glyphs` (MICRO-cronologia § 6).
 //!
 //! Compile time rather than runtime for one reason, and it is the determinism
 //! contract (invariant 7): the same document must lay out identically in the CLI,
@@ -28,8 +30,13 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
 /// The vendored visual rules. See the module docs for why this is `include_str!`.
+///
+/// em-core's OWN copy, written by `sync-datamodels.sh` from the vendored
+/// frontend file with the `2d_glyphs` block removed: the pictograms as vector
+/// paths (~62 KB) are the renderer's, and the layout reads none of them. The two
+/// copies coincide apart from that block — `tests/visual_rules_core.rs`.
 const VISUAL_RULES_JSON: &str =
-    include_str!("../../../frontend/src/assets/em_visual_rules.json");
+    include_str!("../assets/em_visual_rules.core.json");
 
 /// How one node type's box differs from the default box.
 ///
@@ -333,11 +340,13 @@ mod tests {
         assert_eq!(square.apply(90.0, 32.0), (32.0, 32.0));
         assert_eq!(square.apply(120.0, 40.0), (40.0, 40.0));
 
-        // a NON-square glyph: same height, narrower box (author = 0.875 = 448/512)
+        // a NON-square glyph: same height, narrower box. author was 0.875 (448/512,
+        // measured on the WRONG file — the Font Awesome silhouette); em_visual_rules
+        // 1.6.18 corrected it to 0.984, the pictogram's 126×128 (NIGHT-GLIFI).
         let boxes = type_boxes();
         let (w, h) = box_for(&boxes, "author", 90.0, 32.0);
         assert_eq!(h, 32.0, "the height is the node height for every glyph");
-        assert_eq!(w, 28.0, "0.875 × 32 = 28 — the width follows the drawing");
+        assert!((w - 31.488).abs() < 1e-9, "0.984 × 32 = 31.488 — the width follows the drawing");
         // …and every glyph keeps the SAME height, which is E.D.'s rule
         for t in ["extractor", "author", "license", "narrative"] {
             assert_eq!(box_for(&boxes, t, 90.0, 32.0).1, 32.0);
@@ -361,7 +370,7 @@ mod tests {
         for (t, expect_w) in [
             ("extractor", 32.0),   // 1.000 × 32
             ("combiner", 32.0),    // 1.000 × 32
-            ("author", 28.0),      // 0.875 × 32
+            ("author", 31.488),    // 0.984 × 32 (was 0.875 until rules 1.6.18)
             ("author_ai", 31.488), // 0.984 × 32
             ("license", 31.264),   // 0.977 × 32
             ("embargo", 31.744),   // 0.992 × 32

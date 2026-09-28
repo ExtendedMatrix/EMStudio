@@ -49,6 +49,23 @@ fi
 }
 
 cp "$CFG/em_visual_rules.json" "$DST/"
+# em-core bakes the visual rules into its binary (`geometry.rs`, include_str!),
+# and the layout reads only the box shapes and the glyph aspects. Since 1.6.18
+# the rules also carry `2d_glyphs` — every pictogram as vector paths, ~62 KB of
+# the file — which the layout never touches. So em-core gets its OWN copy with
+# that block removed, written HERE from the same source in the same run: the two
+# copies differ by that one block and nothing else, and
+# `crates/em-core/tests/visual_rules_core.rs` asserts it.
+CORE_RULES="$FRONTEND/../crates/em-core/assets/em_visual_rules.core.json"
+mkdir -p "$(dirname "$CORE_RULES")"
+python3 - "$DST/em_visual_rules.json" "$CORE_RULES" <<'PYEOF'
+import json, sys
+src, dst = sys.argv[1], sys.argv[2]
+rules = json.loads(open(src, encoding="utf-8").read())
+rules.pop("2d_glyphs", None)
+with open(dst, "w", encoding="utf-8") as fh:
+    fh.write(json.dumps(rules, indent=2, ensure_ascii=False) + "\n")
+PYEOF
 cp "$CFG/s3Dgraphy_connections_datamodel.json" "$DST/"
 cp "$CFG/s3Dgraphy_node_datamodel.json" "$DST/"
 # the class hierarchy now lives in a separate GENERATED file (s3Dgraphy P1-A);

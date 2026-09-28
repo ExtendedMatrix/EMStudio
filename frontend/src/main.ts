@@ -1,6 +1,7 @@
 import "./style.css";
 import { applyFolding, buildMembership, MEMBERSHIP_EDGES } from "./folding";
 import { geoOf, georeferenceScene, reprojectPoint, setBridgeResolver } from "./geo";
+import { setChronologyBridgeResolver } from "./chron-bridge";
 import type { PlacedScene } from "./geo";
 import {
   buildContainer,
@@ -6982,6 +6983,9 @@ setStorageBridgeResolver(bridgeUrl);
 setStampBridgeResolver(bridgeUrl);
 setHintsBridgeResolver(bridgeUrl);
 setComposeBridgeResolver(bridgeUrl);
+// MICRO-cronologia · the Chronology view asks s3Dgraphy for the propagated
+// chronology through the same bridge, by the same rule.
+setChronologyBridgeResolver(bridgeUrl);
 document.getElementById("btn-graphml")!.addEventListener("click", async () => {
   if (!store) {
     toast("Open a document first");

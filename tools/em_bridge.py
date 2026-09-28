@@ -23,6 +23,14 @@ Endpoints:
     POST /export-ttl       ← em.json body   → Turtle (text/turtle), downloadable
                              (RDF/CIDOC projection via s3Dgraphy rdf_exporter;
                              needs rdflib bundled — 501 if unavailable)
+    POST /chronology       ← em.json body   → {chronology: {node_id: {start, end,
+                             start_source, end_source, rule, start_rule,
+                             end_rule, start_relation, end_relation,
+                             contained?}}, warnings: [...]}
+                             (MICRO-cronologia — s3Dgraphy api.chronology: the
+                             propagated chronology COMPUTED on the document and
+                             returned; nothing is written, nothing goes back into
+                             the document. 501 if the active s3dgraphy predates it)
     GET  /fs/list?path=<dir>  → {roots|path, parent, entries: [{name, type,
                                  size, mtime, ext}]}  (dirs first, then files)
     GET  /fs/checksum?path=<file> → {checksum: "sha256:<hex>", bytes}
@@ -648,6 +656,8 @@ def make_handler(api):
                 self._import_graphml(raw)
             elif route == "/export-ttl":
                 self._export_ttl(raw)
+            elif route == "/chronology":
+                self._chronology(raw)
             elif route == "/export-narrative":
                 self._export_narrative(raw, urllib.parse.parse_qs(
                     urllib.parse.urlparse(self.path).query))
@@ -3329,6 +3339,34 @@ def make_handler(api):
         # em.json (JSON body) → Turtle (RDF/CIDOC projection), downloadable.
         # rdflib is imported lazily: the sidecar still starts and serves GraphML
         # even if rdflib was not bundled — TTL then fails with a clear 501.
+        # The propagated chronology, computed on request (MICRO-cronologia,
+        # E.D. 29 set 2026). It is DERIVED state: the document sends itself, the
+        # bridge answers with the map, and the map lives in the client's memory.
+        # Nothing is written into the document, ever: the provenance of a
+        # propagated date is the stratigraphic relation it travels along, which
+        # the document already holds (E.D., «cronologia calcolata implicita»).
+        def _chronology(self, raw):
+            try:
+                doc = json.loads(raw.decode("utf-8"))
+            except Exception as exc:
+                self._fail(400, f"invalid JSON body: {exc}")
+                return
+            if not hasattr(api, "chronology"):
+                self._fail(501, "this s3dgraphy has no `chronology` on its access "
+                                "API — point the bridge at a newer s3Dgraphy")
+                return
+            try:
+                graph, warnings = api.load_emjson(doc)
+                for w in warnings:
+                    sys.stderr.write(f"  [bridge] warning: {w}\n")
+                out = api.chronology(graph)
+            except Exception as exc:  # pragma: no cover — surface to the UI
+                import traceback
+                traceback.print_exc()
+                self._fail(500, f"chronology failed: {exc}")
+                return
+            self._json(out)
+
         def _export_ttl(self, raw):
             try:
                 doc = json.loads(raw.decode("utf-8"))

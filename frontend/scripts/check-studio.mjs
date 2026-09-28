@@ -214,8 +214,8 @@ const eq = (got, want, what) => {
     const ff = V.fromFinds(ix, "USM101");
     eq([ff.v, ff.via, ff.origin, ff.fromEpoch], [100, "RSF1", "SF100", true],
        "from the finds: RSF100b ← SF100 (changed_from), dated by the original's epoch");
-    eq(V.propagated(g.nodes.find((n) => n.id === "USM101")), null,
-       "the propagated column is s3Dgraphy's: nothing written → nothing invented");
+    eq(V.chronRows(ctx, ix).find((r) => r.node.id === "USM101").chron, null,
+       "the propagated column is s3Dgraphy's (asked of the bridge): no answer → nothing invented");
     const facts = V.factsFor("Units", ctx, ix);
     ok(facts.get("USM101").fx.state.includes("warn"), "USM101 carries «with warnings»");
     ok(facts.get("USM101").fx.state.includes("pd"), "…and «with paradata»");

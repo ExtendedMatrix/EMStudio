@@ -1,0 +1,1180 @@
+{
+  "formal_language": "EM",
+  "version": "1.6.19",
+  "_note_material_vs_qualia_color": [
+    "DUE COSE DIVERSE CHE SI CHIAMANO ENTRAMBE color. Non confonderle: e gia successo.",
+    "1) QUI, in node_styles.<tipo>.style.material.rgba_color — il COLORE DEL MATERIALE BLENDER del proxy 3D, in float LINEARI. UNA sola chiave: `rgba_color`. Fino a S8 il file ne usava due (`color` sui 13 tipi stratigrafici, `rgba_color` sugli altri) e get_material_color() ne leggeva una sola, restituendo None per 21 tipi su 38; ora sono unificate e la vecchia `color` e letta solo come tolleranza verso file scritti prima. Un tipo che non diventa mai una mesh NON ha material affatto (i contenitori di gruppo, e da S7 i dieci nodi che rendono per icona): per loro get_material_color() torna None, ed e corretto.",
+    "1-bis) SEMPRE QUI ma diverso: `border_color` e `fill_color` sono gli HEX sRGB del disegno 2D (canvas EMStudio, GraphML yEd). Stessa idea di colore, altro spazio e altro consumatore — EMStudio legge questi e non tocca mai `material`. Convivono di proposito: material = LINEARE per Blender, hex = sRGB per lo schermo.",
+    "2) ALTROVE, in em_qualia_types.json, la qualia `color` (getty_aat 300080438, data_type controlled_vocabulary, vocabulary_source munsell_or_aat) — il COLORE PERCEPITO della superficie o del materiale reale, rilevato in scavo e classificato Munsell/AAT. E un dato archeologico sul mondo, non un parametro di rendering: non ha niente a che vedere con questo file e non va tenuto in sincronia con esso.",
+    "In breve: qui si decide di che colore DISEGNARE una US; li si registra di che colore ERA."
+  ],
+  "_changelog": {
+    "1.6.19": "THE RIGHT HALF (E.D., 29 Sep 2026, MICRO-cronologia § 4). Seventeen declarations named the wrong half — `2d_file_vect` pointing at a `.png` (AUTH_AI, LIC, EMB, TSU, serUSD) or `2d_file_rast` pointing at an `.svg` (EP, GEO, GRAPH, LINK, RM, RMDoc, RMSF, SE, SS, serUSVs, GCP, RGT). Each duplicated the OTHER field of the same style, so removing it changes nothing icons.ts draws (it dedupes by basename); it only stops a field from lying about its kind. The rule is now enforced by tests/test_visual_assets.py: vect → .svg, rast → .png. AUTH_AI / LIC / EMB are left raster-only on purpose: their vector pictograms exist as drafts in src/2D/bozze/ and are pointed at only after E.D. approves them (NIGHT-GLIFI referto § 5). REMOVAL, no style added.",
+    "1.6.18": "THE GLYPHS BECOME PATHS (E.D., 28 Sep 2026). New block `2d_glyphs`: for every 2d_render_glyph_types type and every dtc_kinds glyph, the official pictogram as vector paths (absolute M/L/C/Z, one colour per layer, a closed `_roles` vocabulary saying which colours a consumer may retheme). Generated from the authored SVGs by s3dgraphy.tools.glyphs_from_svg and guarded by tests/test_glyph_paths.py (drift zero). Five pictograms that existed only as PNG (author_ai, license, embargo) or whose vector was not the pictogram (author: a Font Awesome silhouette; narrative: a 617 KB stipple illustration) are redrawn as DRAFTS in src/2D/bozze/ and flagged `draft: true` until E.D. approves them. One aspect corrected: author 0.875 → 0.984 (see 2d_render_glyph_types._aspect_correction_1_6_18). ADDITIVE otherwise: no existing style changed, 2d_file_vect/2d_file_rast kept for consumers that do not read the block.",
+    "1.6.16": "Asset declarations made TRUE. Four styles named a 2D file that is not there — SE.png, TSU.svg, serUSD.svg and unknown.png (which never existed) — and GRAPH named two, so it drew no icon at all. icons.ts returns null for a missing file and the canvas quietly draws the shape, so all five failed silently. Now: graph.svg authored (neutral gray, three nodes and their edges, the meta-container), unknown points at the generic_node.svg that exists, the three stale halves name the file that is there. Enforced by tests/test_visual_assets.py; the 16 unmodelled .glb are REPORTED (there and in sync-datamodels.sh), not asserted — a placeholder that looks official is harder to notice than an absence.",
+    "1.6.15": "Georeferencing gets its symbol on the canvas: node_styles GCP (GCPSetNode, crosshair) and RGT (RegistrationTransformNode, axes + rotation arc), in the same #FF6600 reference family as GEO/SS/LINK, each with its own 2D icon. ADDITIVE. Also 1.6.14-era: dtc_kinds.process.photogrammetry. Note the limit of a per-TYPE rule: whether a transform is georeferenced or a site-local frame is an INSTANCE fact (data.crs) and is read from the has_gcp_set edge, not from the style.",
+    "1.6.14": "BUGFIX-GLYPH follow-up (2026-08-05, E.D.): SE now renders its GLYPH in the scene (the new SE.svg, a stratigraphic-section box with a writable middle band) instead of a bare triangle, so a name can be written inside it. Added SE to 2d_render_glyph_types (aspect 1.331 from the SVG viewBox) and switched SE 2d_icon_prefer to vector (the raster SE.png is the stale stipple; the new symbol is the SVG). Dropped the interim shape_bbox=square. The shape:triangle stays declared for other consumers but the 2D scene draws the glyph. NOTE: verify the SVG carries a light background for dark-canvas legibility (like combiner.svg).",
+    "1.6.13": "BUGFIX-GLYPH (2026-08-05): SE (StratigraphicEvent) gains shape_bbox=\"square\" on its style, like BR. Its triangle was drawn in the wide default 90x32 box, leaving the connect handle far from the glyph; a square bbox (side = min(w,h)) makes the triangle sit in a ~32x32 box with the handle adjacent, matching BR (diamond, square) and the glyph types. No shape_scale: unlike BR (a 0.7 marker) the SE triangle stays full-size. The SCENE representation of SE remains the triangle shape, not the raster icon (S10/POL5 decision unchanged).",
+    "1.6.12": "EM3 - `2d_render_glyph_types` guadagna una tabella `aspect`: la larghezza del box di un nodo-glifo e la sua ALTEZZA per l'aspect del disegno, quindi tutti i glifi hanno la stessa altezza e differiscono solo in larghezza (regola E.D.). Default 1.0 = quadrato, che e cio che sono gli undici glifi DTC dopo l'autocrop di POL4 ed extractor/combiner per costruzione; l'unico davvero non quadrato oggi e `author` (0.875 = 448/512). I numeri sono STATICI e misurati una volta dai file: un aspect letto da naturalWidth a runtime farebbe dipendere il layout da quando un bitmap finisce di decodificare (box che salta, due run diversi sullo stesso documento). Il prezzo di un numero statico e che puo diventare stantio se un asset viene ridisegnato: da questa versione sync-datamodels.sh ri-misura ogni file vendorato e AVVISA se una dichiarazione sbaglia di oltre il 2%.",
+    "1.6.11": "EM2 — aggiunto `2d_render_glyph_types`: l'elenco dei node_type che il renderer 2D disegna come GLIFO quadrato centrato invece che come forma. Nessuno stile modificato: e un fatto che esisteva gia, ma scritto a mano dentro icons.ts di EMStudio (il set ICON_NODE_TYPES), e quindi invisibile al motore di layout. Serve al motore perche un glifo quadrato dentro un box 90x32 lascia margini vuoti ai lati, e la maniglia di connessione — ancorata al bordo destro del box — finisce lontana dal glifo: con questo elenco il box diventa quadrato e la maniglia lo tocca. Chiave = node_type di runtime e non l'abbreviazione di node_styles, cosi il motore Rust lo legge senza tabella di alias. Esclusi di proposito document e property (geometria custom non quadrata: foglio con angolo piegato, annotazione con parentesi) e i nodi DTC, il cui glifo si decide per NODO da data.dtc_kind.",
+    "1.6.10": "POL6 — RINOMINA di due token, nessuna classe nuova e nessuno stile nuovo: gli stili si scambiano di chiave. `USN` torna a essere l'unita NEGATIVA (rettangolo grigio a contorno pieno, label di display US-) e la NEUTRA diventa `USNt` (contorno ai soli quattro angoli). POL5 aveva fatto il contrario per qualche ora: e una convenzione sbagliata, perche USN si legge 'US Negativa' — e cosi lo scrive la linea storica di s3dgraphy e cosi lo vendorizza pyArchInit, che con questo ritorno NON e piu in disaccordo con noi. Nessun colore, nessuna forma e nessun numero modificati: le chiavi sono scambiate e i due `_comment` aggiornati.",
+    "1.6.9": "POL5 — correzioni di POL4 su indicazione di E.D. (1) BR torna ROMBO (era diventato quadrato): fill nero e altezza 0.7x restano, e il bounding box e quadrato via il nuovo `shape_bbox: square`, cosi il rombo e equilatero invece di essere schiacciato nel box 90x32. Il token di forma `square` non serve piu ed e stato ritirato: quadrato = `rectangle` + `shape_bbox: square`, un meccanismo solo. (2) DUE tipi dove ce n'era uno: `USN` e ora l'unita NEUTRA (i risparmi della muratura: finestre, porte, il volume di una stanza — vuoti VOLUTI) con i quattro angoli, e l'unita NEGATIVA/distruttiva e `USNeg`, etichetta di display `US-`, resa come una US grigia a contorno pieno. Il grigio di entrambe passa a #8C8C8C (grigio gia in uso nel linguaggio, la scala `symbolic`) perche #C4C4C4 su fill #F0F0F0 era illeggibile, tanto piu con soli quattro tick di inchiostro. (3) NARR e SE dichiarano il RASTER come icona (256 px, reso dall'SVG) tramite il nuovo flag `2d_icon_prefer: raster`: i vettori restano DICHIARATI perche esistono — questo file e dove un consumatore chiede cosa esiste — e il flag dice quale dei due disegnare. Sono illustrazioni da 617 e 284 KB per un glifo che nessun renderer disegna oltre i 30 px, e un consumatore che inlinea gli asset lo pagava tutto. NB il flag e anche cio che dice al vendor di EMStudio quale dei due file copiare: senza, la regola 'un raster oscurato dal proprio vettore e irraggiungibile' teneva il vettore e buttava il raster, cioe l'esatto contrario di questa decisione.",
+    "1.6.8": "POL4 — tre forme e un'icona, tutte decise da E.D. (1) BR passa da diamante bianco a QUADRATO NERO al 70% dell'altezza di una US: nuovo token di forma `square` piu il nuovo campo `style.shape_scale`, che rimpicciolisce il DISEGNO dentro il box senza toccare il box (le dimensioni per tipo stanno in em-core, invariante 7 di EMStudio). Coerentemente src/2D/continuity.svg perde la rotazione di 45 gradi: era lo stesso quadrato, ruotato. (2) USN passa da rettangolo tratteggiato a `corner_brackets`, contorno ai soli quattro angoli — un bordo continuo afferma un margine che lo scavo non osserva. (3) NARR punta finalmente alle EMNarrative.svg/.png di E.D. al posto del segnaposto narrative.png. Nessun colore cambiato tranne il fill di BR (#FFFFFF -> #000000). NB i due nuovi token di forma richiedono un consumatore che li conosca: chi non li conosce cade sul proprio default (in EMStudio il rounded_rectangle), quindi il peggio che accade e una forma generica, non un errore.",
+    "1.6.7": "S10 — curato il colore di SE (StratigraphicEventNode), l'ultimo segnaposto rimasto fra i tipi che qualcuno disegna davvero. Era #BC0000, un rosso mai scelto che contraddiceva il proprio border_color nero, e il node datamodel dichiarava il simbolo 'to be defined': non c'era una decisione da rispettare, c'era un buco. Ora TEAL #2A8C8C, material lineare (0.023, 0.262, 0.262), con border_color coerente — la famiglia cromatica delle attivita, l'unica del linguaggio che significa 'e successo qualcosa' invece di 'qualcosa c'e'. Aggiornato di conseguenza il campo symbol nel node datamodel.",
+    "1.6.6": "S8 — unificata la chiave del colore-materiale su `rgba_color`. Rinominate le 14 voci che usavano `style.material.color` (i 13 tipi stratigrafici piu UL): valori invariati, nessun altro campo toccato. Ora tutte le 24 voci con un material parlano la stessa chiave. get_material_color() legge `rgba_color` come autoritativa e mantiene `color` solo come tolleranza per file scritti prima della rinomina. Gli hex 2D border_color/fill_color NON sono stati toccati: sono un'altra cosa (sRGB per il canvas) e hanno un altro consumatore (EMStudio). Verificato che i 14 materiali Blender di EMtools producono rgb identici a prima.",
+    "1.6.5": "S7 — applicate le decisioni E.D. sull'inventario dei material segnaposto. TOLTO il blocco `material` a 10 tipi che non diventano mai una mesh e rendono per icona o forma (PROP, COMB, EXT, DOC, EP, AUTH, LINK, GEO, SS, unknown): il loro colore 2D resta in border_color/fill_color, e get_material_color ora restituisce None come per i 4 contenitori di gruppo. RIMOSSA del tutto la voce `ANG`, duplicato legacy di ActivityNodeGroup senza alcun consumatore in s3Dgraphy, EM-blender-tools o EMStudio (GRAPH, citato nella stessa nota della 1.6.0, resta perche e usato). AGGIUNTO `UL` (Working Unit), unico tipo stratigrafico che ne era privo: 2D dal simbolo del datamodel (rettangolo bianco, bordo arancio #D86400), material 3D uguale al rosso US per decisione E.D. RM/RMDoc/RMSF e SE lasciati invariati per decisione E.D. Nessuno dei 13 colori stratigrafici esistenti e stato modificato.",
+    "1.6.4": "Sola documentazione: aggiunta _note_material_vs_qualia_color per fissare la distinzione fra il colore di display di questo file (node_styles.*.style.material, chiavi legacy color/rgba_color, stesso concetto) e la qualia `color` di em_qualia_types.json (colore percepito Munsell/AAT). Nessuno stile modificato. Inventario dei 15 material segnaposto in .claude/wip/colori-15-proposta.md, in attesa di decisione E.D.",
+    "1.6.3": "N7 — added NARR (NarrativeNode, DP-79), the only node type with no entry here: it fell through to `unknown` and rendered as a red dotted question mark on every canvas. Neutral grey like GRAPH because a narrative is a meta-level object over the graph, not a claim about the site; solid border rather than GRAPH's dashed because it is a real authored object, not an anchor for metadata. Raster src/2D/narrative.png (128px); the .svg does not exist yet and the renderer takes the raster.",
+    "1.6.2": "Q-C — the geometry axis is the scale of METRIC AUTHORITY OF PLACEMENT, and it is authoritative on the RMDoc (the spatial instance), not on the Document. Added the `symbolic` rung (#8C8C8C neutral grey, border_width 4.0) as the LOWEST step of the ladder: a base that is not metric at all (not-to-scale map, schematic plan, sketch). Full ladder: reality_based -> observable -> asserted -> symbolic; `em_based` is unchanged and is NOT a rung of it but a provenance statement. Grey is deliberately distinct from the BLACK of canonical_unknown ('not classified yet' vs 'classified as making no metric claim'). Position (X,Y,Z + rotation) lives on the RMDoc and nowhere else; a Document may mirror the value on its yEd border for diagram convenience but carries no position. NOTE: the reference node for `symbolic` is not yet in templates/em_palette_template.graphml — that file must be edited in yEd, not by hand.",
+    "1.6.1": "Fix border_color to the correct sRGB display hex against the EM 1.3 standard colour table. ROOT CAUSE: border_color was generated by writing the LINEAR material.color straight to hex (0.328 -> 0x54 -> #540909) instead of converting linear->sRGB (0.328 -> 0.608 -> 0x9B -> #9B3333). material.color stays LINEAR (Blender convention); border_color is the sRGB display value = the EM 1.3 standard Hex column. Corrected borders: US/serSU/TSU #540909->#9B3333, SF #AF8208->#D8BD30, VSF #70581E->#B19F61, USVs/serUSVs #0546CC->#248FE7, USVn/serUSVn #083107->#31792D, USN #8C8C8C->#C4C4C4 (sRGB of its 0.55 grey). US/USVs/USVn/SF/VSF now match the EM 1.3 table exactly; TSU (US-red material) and USN follow the same rule. Also reverted USVs/USVn/serUSVs/serUSVn material.color, which an earlier dev8 pass had wrongly overwritten with sRGB values, back to the canonical LINEAR values (USVs/serUSVs 0.018,0.275,0.799; USVn/serUSVn 0.031,0.191,0.026). fill_color unchanged (US/SF white, USVs/USVn black per the 2D icons). Then completed full coherence (EM 1.5 table for USD + 'RSF is red like US'): recomputed the last linear-as-hex materials to true LINEAR so sRGB(material)==border_color for EVERY type (and Blender 3D now matches the 2D display) — RSF material (0.608,0.2,0.2)->(0.328,0.033,0.033)=US red (border #9B3333); USD/serUSD material (0.847,0.392,0)->(0.687,0.127,0)=sRGB^-1(#D86400) (border #D86400 unchanged). Net rule for the whole file: material.color = LINEAR, border_color = sRGB(material) = the EM standard Hex.",
+    "1.6.0": "Version realigned to track the EM language version (EM 1.6); supersedes the 1.5.x line. Added canonical group-container styles for ActivityNodeGroup, ParadataNodeGroup and TimeBranchNodeGroup (mirroring the existing LocationNodeGroup pattern): neutral grey container (fill #F5F5F5, dashed #000000 border, roundrectangle) distinguished by the group title-tab colour in `label_background` — Activity #CCFFFF, Paradata #FFCC99, TimeBranch #99CC00 (green). Sourced from the point-of-truth palette template (templates/em_palette_template.graphml, nodes Att.[xx] / US[xxx]_PD / TB.0), aligning em_visual_rules with the GraphML palette. Previously ParadataNodeGroup and TimeBranchNodeGroup both resolved through the shared grey 'GRAPH' style and could not be told apart; ActivityNodeGroup rendered via the legacy purple-ellipse 'ANG'. Legacy 'ANG' and 'GRAPH' styles retained unchanged for back-compat with other consumers.",
+    "1.5.3": "Fix USD / serUSD material colour: RGB was (0.549, 0.103, 0.0) = #8C1A00 (red), should be #D86400 (orange) to match the canonical USD documentary colour used in the GraphML palette template, node_registry defaults and document_variant_styles.observable. USD border_color also corrected from #8C1A00 to #D86400 (serUSD border was already correct).",
+    "1.5.2": "Added RSF (Reused Special Find / spolia) node style — octagon, red border (#9B3333), white fill. Sibling of SF/VSF, distinguished by border colour. Originating DP: DP-26.",
+    "1.5.1": "Added LocationNodeGroup node style (dashed roundrectangle, kind-based border colour) and is_in_location edge style with primary_modifier override.",
+    "1.5.0": "Initial EM 1.5 visual rules.",
+    "1.6.17": "Added RepresentationModelNodeGroup node style (EM16-RMNG): the group family's dashed roundrectangle with the RM family's #FF6600 title-tab, and the is_in_representation_model_group edge style. Additive only — no existing style touched, and the epoch↔RM / Document→RM edges keep the rendering they had."
+  },
+  "2d_render_glyph_types": {
+    "_comment": "Node types the 2D renderer draws as a CENTRED GLYPH (their official icon) instead of a shape. Their box is HEIGHT-DRIVEN: the height is the engine node height and the width is that height times the `aspect` below (EM2 made them square; EM3 generalised the square to a per-glyph aspect). Keyed by RUNTIME node_type, deliberately: this block is read both by EMStudio's icons.ts and by its Rust layout engine, and a list keyed by node_type needs no alias table on either side (`node_styles` is keyed by the short abbreviation, EXT/COMB/..., which the engine does not know). Added in 1.6.11 (EM2) because the fact had been living as a hand-written set inside icons.ts, and the layout engine needs the same fact to give those nodes a height-driven box: a glyph drawn 32 wide inside a 90x32 box leaves empty margins, and the connect handle — anchored to the right edge of the box — ends up floating away from the glyph. NB two things this does NOT include. (1) `document` and `property`: they are drawn with custom geometry (a sheet with a folded corner, a bracketed text annotation) that is NOT square, and squaring their box would crush the text. (2) DTC nodes: their glyph is chosen per NODE from `data.dtc_kind` and not from the type, so a consumer decides that node by node — a plain `link` is not a glyph, a `link` with a dtc_kind is.",
+    "types": [
+      "extractor",
+      "combiner",
+      "author",
+      "author_ai",
+      "license",
+      "embargo",
+      "narrative",
+      "SE"
+    ],
+    "_aspect_comment": "EM3 - width of a glyph box = its HEIGHT x this aspect (natural width / natural height of the drawing). The height is the engine's node height, so every glyph keeps the same height and only the width differs (E.D.'s rule). Default 1.0 (square) when a type or kind is absent, which is what the eleven DTC glyphs are after the POL4 autocrop and what extractor/combiner are by construction. STATIC ON PURPOSE: these numbers are measured from the assets ONCE, here, and never read from the loaded image at runtime. An aspect taken from naturalWidth would make the layout depend on when a bitmap finishes decoding - the box would jump under the user and two runs of the same document could differ, which is the determinism contract (EMStudio invariant 7). The cost of a static number is that it can go stale if an asset is redrawn: frontend/scripts/sync-datamodels.sh re-measures every vendored file and WARNS when a declaration is more than 2% off, so the staleness is caught where the assets are copied. Values below measured 2026-08-05 from the files each type actually renders (SVG viewBox, PNG header; narrative uses EMNarrative.png because of its 2d_icon_prefer raster).",
+    "aspect": {
+      "extractor": 1.0,
+      "combiner": 1.0,
+      "author": 0.984,
+      "author_ai": 0.984,
+      "license": 0.977,
+      "embargo": 0.992,
+      "narrative": 0.981,
+      "SE": 1.331
+    },
+    "_aspect_correction_1_6_18": "author 0.875 → 0.984 (2026-09-30). 0.875 was measured from src/2D/author.svg (448×512), a Font Awesome silhouette that is NOT the palette pictogram; the pictogram (author.png, 126×128, redrawn as src/2D/bozze/author.svg) is 0.984, the same as author_ai. The drawing wins (2d_glyphs rule), and the layout reads this number. Until EMStudio draws 2d_glyphs, sync-datamodels.sh will WARN on author, because icons.ts still resolves the FA author.svg."
+  },
+  "node_styles": {
+    "US": {
+      "file_3d": "src/3D/US.glb",
+      "file_2d": "src/2D/US.png",
+      "style": {
+        "material": {
+          "rgba_color": {
+            "r": 0.328,
+            "g": 0.033,
+            "b": 0.033,
+            "a": 1.0
+          }
+        },
+        "border_color": "#9B3333",
+        "fill_color": "#F0F0F0",
+        "border_style": "solid",
+        "shape": "rectangle",
+        "border_width": 4
+      },
+      "label_position": "over"
+    },
+    "USVn": {
+      "file_3d": "src/3D/USVn.glb",
+      "2d_file_rast": "src/2D/US.png",
+      "2d_file_vect": "src/2D/US.svg",
+      "style": {
+        "material": {
+          "rgba_color": {
+            "r": 0.031,
+            "g": 0.191,
+            "b": 0.026,
+            "a": 1.0
+          }
+        },
+        "border_color": "#31792D",
+        "fill_color": "#000000",
+        "border_style": "solid",
+        "shape": "hexagon",
+        "border_width": 4
+      },
+      "label_position": "over"
+    },
+    "USVs": {
+      "3d_file": "src/3D/USVs.glb",
+      "2d_file_rast": "src/2D/USVs.png",
+      "2d_file_vect": "src/2D/USVs.svg",
+      "style": {
+        "material": {
+          "rgba_color": {
+            "r": 0.018,
+            "g": 0.275,
+            "b": 0.799,
+            "a": 1.0
+          }
+        },
+        "border_color": "#248FE7",
+        "fill_color": "#000000",
+        "border_style": "solid",
+        "shape": "parallelogram",
+        "border_width": 4
+      },
+      "label_position": "over"
+    },
+    "VSF": {
+      "3d_file": "src/3D/VSF.glb",
+      "2d_file_rast": "src/2D/VSF.png",
+      "2d_file_vect": "src/2D/VSF.svg",
+      "style": {
+        "material": {
+          "rgba_color": {
+            "r": 0.439,
+            "g": 0.346,
+            "b": 0.119,
+            "a": 1.0
+          }
+        },
+        "border_color": "#B19F61",
+        "fill_color": "#CCCCCC",
+        "border_style": "solid",
+        "shape": "octagon",
+        "border_width": 4
+      },
+      "label_position": "over"
+    },
+    "SF": {
+      "3d_file": "src/3D/SF.glb",
+      "2d_file_rast": "src/2D/SF.png",
+      "2d_file_vect": "src/2D/SF.svg",
+      "style": {
+        "material": {
+          "rgba_color": {
+            "r": 0.686,
+            "g": 0.508,
+            "b": 0.029,
+            "a": 1.0
+          }
+        },
+        "border_color": "#D8BD30",
+        "fill_color": "#CCCCCC",
+        "border_style": "solid",
+        "shape": "octagon",
+        "border_width": 4
+      },
+      "label_position": "over"
+    },
+    "RSF": {
+      "3d_file": "src/3D/RSF.glb",
+      "2d_file_rast": "src/2D/RSF.png",
+      "_comment": "Reused Special Find (RSF / spolia): a physical object observed in situ but originally produced for a different context. Octagon (sibling of SF/VSF) with the EM red border (#9B3333). Originating DP: DP-26.",
+      "style": {
+        "material": {
+          "rgba_color": {
+            "r": 0.328,
+            "g": 0.033,
+            "b": 0.033,
+            "a": 1.0
+          }
+        },
+        "border_color": "#9B3333",
+        "fill_color": "#FFFFFF",
+        "border_style": "solid",
+        "shape": "octagon",
+        "border_width": 4
+      },
+      "label_position": "over"
+    },
+    "USD": {
+      "3d_file": "src/3D/USD.glb",
+      "2d_file_rast": "src/2D/USD.png",
+      "2d_file_vect": "src/2D/USD.svg",
+      "style": {
+        "material": {
+          "rgba_color": {
+            "r": 0.687,
+            "g": 0.127,
+            "b": 0.0,
+            "a": 1.0
+          }
+        },
+        "border_color": "#D86400",
+        "fill_color": "#F5F5F5",
+        "border_style": "solid",
+        "shape": "rounded_rectangle",
+        "border_width": 4
+      },
+      "label_position": "over"
+    },
+    "serSU": {
+      "3d_file": "src/3D/serSU.glb",
+      "2d_file_rast": "src/2D/serSU.png",
+      "2d_file_vect": "src/2D/serSU.svg",
+      "style": {
+        "material": {
+          "rgba_color": {
+            "r": 0.328,
+            "g": 0.033,
+            "b": 0.033,
+            "a": 1.0
+          }
+        },
+        "border_color": "#9B3333",
+        "fill_color": "#EFEFEF",
+        "border_style": "solid",
+        "shape": "ellipse",
+        "border_width": 4
+      },
+      "label_position": "over"
+    },
+    "serUSD": {
+      "3d_file": "src/3D/serUSD.glb",
+      "2d_file_rast": "src/2D/serUSD.png",
+      "style": {
+        "material": {
+          "rgba_color": {
+            "r": 0.687,
+            "g": 0.127,
+            "b": 0.0,
+            "a": 1.0
+          }
+        },
+        "border_color": "#D86400",
+        "fill_color": "#FFFFFF",
+        "border_style": "solid",
+        "shape": "ellipse",
+        "border_width": 4
+      },
+      "label_position": "over"
+    },
+    "serUSVn": {
+      "3d_file": "src/3D/serUSV.glb",
+      "2d_file_rast": "src/2D/serUSV.png",
+      "2d_file_vect": "src/2D/serUSVn.svg",
+      "style": {
+        "material": {
+          "rgba_color": {
+            "r": 0.031,
+            "g": 0.191,
+            "b": 0.026,
+            "a": 1.0
+          }
+        },
+        "border_color": "#31792D",
+        "fill_color": "#000000",
+        "border_style": "solid",
+        "shape": "ellipse",
+        "border_width": 4
+      },
+      "label_position": "over"
+    },
+    "serUSVs": {
+      "file_3d": "src/3D/serUSVs.glb",
+      "2d_file_vect": "src/2D/serUSVs.svg",
+      "style": {
+        "material": {
+          "rgba_color": {
+            "r": 0.018,
+            "g": 0.275,
+            "b": 0.799,
+            "a": 1.0
+          }
+        },
+        "border_color": "#248FE7",
+        "fill_color": "#000000",
+        "border_style": "solid",
+        "shape": "ellipse",
+        "border_width": 4
+      },
+      "label_position": "over"
+    },
+    "TSU": {
+      "3d_file": "src/3D/TSU.glb",
+      "2d_file_rast": "src/2D/TSU.png",
+      "style": {
+        "material": {
+          "rgba_color": {
+            "r": 0.328,
+            "g": 0.033,
+            "b": 0.033,
+            "a": 1.0
+          }
+        },
+        "border_color": "#9B3333",
+        "fill_color": "#DDDDDD",
+        "border_style": "dotted",
+        "shape": "rectangle",
+        "border_width": 4
+      },
+      "label_position": "over"
+    },
+    "BR": {
+      "_comment": "Continuity node (BR): the marker that BOUNDS a life span — 'this unit stops surviving here'. POL5 (2026-08-04, correzione di POL4): a black RHOMBUS — a diamond, not a square — inscribed in a SQUARE bounding box (`shape_bbox: square`, so height = width) and 0.7x the height of a stratigraphic unit. POL4 had made it a square, which lost the diamond silhouette EM has always used for continuity (and which the GraphML exporter emits as `<Shape type=\"diamond\"/>`, so a square here would have contradicted the round-trip). What POL4 got right and stays: the FILL is black (it was white, and a white diamond read as a claim about matter like every other outlined glyph) and the height is 0.7x, because a boundary marker is punctuation, not a unit. Both numbers live here and not in a renderer: a constant hardcoded in one consumer would be a second source.",
+      "3d_file": "src/3D/BR.glb",
+      "2d_file_rast": "src/2D/continuity.png",
+      "2d_file_vect": "src/2D/continuity.svg",
+      "style": {
+        "material": {
+          "rgba_color": {
+            "r": 0.0,
+            "g": 0.0,
+            "b": 0.0,
+            "a": 1.0
+          }
+        },
+        "border_color": "#000000",
+        "fill_color": "#000000",
+        "border_style": "solid",
+        "shape": "diamond",
+        "shape_bbox": "square",
+        "shape_scale": 0.7,
+        "border_width": 4
+      },
+      "label_position": "center"
+    },
+    "SE": {
+      "_comment": "Stratigraphic Event: l'ATTO che crea, modifica o distrugge un'unita — un terremoto che fa cadere l'intonaco, una demolizione, l'inizio di un cantiere. Non e materia, e un processo, e per questo non appartiene a nessuna delle famiglie cromatiche della materia (rosso reale, verde/blu virtuale, arancio documentario, giallo special find, grigio negativo). Prende il TEAL della famiglia attivita: un ActivityNodeGroup e un fascio di atti e porta gia la linguetta ciano #CCFFFF, quindi il ciano e l'unico colore del linguaggio che dice gia 'e successo qualcosa' invece di 'qualcosa c'e'. Curato in S10 (2026-08-02): fino ad allora SE portava il segnaposto #BC0000 mai scelto, che per giunta contraddiceva il proprio bordo nero, e il node datamodel dichiarava il simbolo 'to be defined'. Il nero di BR e stato scartato di proposito: un material nero rende un proxy illeggibile in viewport, e i proxy SE si vedono (Heriverse li disegna fra i suoi stratigraphicTypes). POL5 (2026-08-04): l'ICONA e il raster (`2d_icon_prefer: raster`), come per NARR e per la stessa ragione — SE.svg e un tratteggio vettorializzato da 284 KB per un glifo che nessun renderer disegna oltre i 30 px. Il vettore resta dichiarato perche esiste; il flag dice quale dei due DISEGNARE. Il PNG a 256 px e reso DA quell'SVG, quindi i due non possono divergere. Nel grafo SE resta comunque un TRIANGOLO disegnato (shape), non l'icona: il raster serve a palette ed elenchi.",
+      "3d_file": "src/3D/SE.glb",
+      "2d_file_vect": "src/2D/SE.svg",
+      "2d_icon_prefer": "vector",
+      "style": {
+        "material": {
+          "rgba_color": {
+            "r": 0.023,
+            "g": 0.262,
+            "b": 0.262,
+            "a": 1.0
+          }
+        },
+        "border_color": "#2A8C8C",
+        "fill_color": "#FFFFFF",
+        "border_style": "dashed",
+        "shape": "triangle",
+        "border_width": 4
+      },
+      "label_position": "over"
+    },
+    "PROP": {
+      "3d_file": "src/3D/property.glb",
+      "2d_file_rast": "src/2D/property.png",
+      "2d_file_vect": "src/2D/property.svg",
+      "style": {
+        "border_color": "#000000",
+        "fill_color": "#FFFFFF",
+        "border_style": "dashed",
+        "shape": "circle"
+      },
+      "label_position": "over"
+    },
+    "COMB": {
+      "3d_file": "src/3D/combiner.glb",
+      "2d_file_rast": "src/2D/combiner.png",
+      "2d_file_vect": "src/2D/combiner.svg",
+      "style": {
+        "border_color": "#FFCC00",
+        "fill_color": "#FFFFFF",
+        "border_style": "dashed",
+        "shape": "hexagon"
+      },
+      "label_position": "top_left"
+    },
+    "EXT": {
+      "3d_file": "src/3D/extractor.glb",
+      "2d_file_rast": "src/2D/extractor.png",
+      "2d_file_vect": "src/2D/extractor.svg",
+      "style": {
+        "border_color": "#0033CC",
+        "fill_color": "#F0F0F0",
+        "border_style": "solid",
+        "shape": "pentagon"
+      },
+      "label_position": "top_left"
+    },
+    "DOC": {
+      "3d_file": "src/3D/document.glb",
+      "2d_file_rast": "src/2D/document.png",
+      "2d_file_vect": "src/2D/document.svg",
+      "style": {
+        "border_color": "#000000",
+        "fill_color": "#E0E0E0",
+        "border_style": "solid",
+        "shape": "ellipse"
+      },
+      "label_position": "over"
+    },
+    "EP": {
+      "3d_file": "src/3D/epoch.glb",
+      "2d_file_vect": "src/2D/EpochNode.svg",
+      "style": {
+        "border_color": "#009933",
+        "fill_color": "#FFFFFF",
+        "border_style": "solid",
+        "shape": "rectangle"
+      },
+      "label_position": "over"
+    },
+    "AUTH": {
+      "file_3d": "src/3D/author.glb",
+      "2d_file_rast": "src/2D/author.png",
+      "2d_file_vect": "src/2D/author.svg",
+      "style": {
+        "border_color": "#FF6600",
+        "fill_color": "#FFFFFF",
+        "border_style": "solid",
+        "shape": "star"
+      },
+      "label_position": "over"
+    },
+    "AUTH_AI": {
+      "_comment": "AI-assisted author. Same star shape as AUTH for visual family unity, but cyan/blue tones to distinguish at a glance from human author (red/orange). The graphml palette identifies it via the 'AI.' label prefix (em_palette_icons).",
+      "file_3d": "src/3D/author_ai.glb",
+      "2d_file_rast": "src/2D/author_ai.png",
+      "style": {
+        "material": {
+          "rgba_color": {
+            "r": 0.0,
+            "g": 0.5,
+            "b": 0.8,
+            "a": 1.0
+          }
+        },
+        "border_color": "#00AAFF",
+        "fill_color": "#E0F4FF",
+        "border_style": "solid",
+        "shape": "star"
+      },
+      "label_position": "over"
+    },
+    "LIC": {
+      "_comment": "License node. Shield shape carrying a gold border to read clearly as a rights / legal artifact. Connected via has_license to any Node or to the GraphNode for graph-wide licensing. Graphml palette prefix: 'LI.'.",
+      "file_3d": "src/3D/license.glb",
+      "2d_file_rast": "src/2D/license.png",
+      "style": {
+        "material": {
+          "rgba_color": {
+            "r": 0.8,
+            "g": 0.6,
+            "b": 0.0,
+            "a": 1.0
+          }
+        },
+        "border_color": "#FFD700",
+        "fill_color": "#FFF8DC",
+        "border_style": "solid",
+        "shape": "shield"
+      },
+      "label_position": "over"
+    },
+    "EMB": {
+      "_comment": "Embargo node. Octagon with red dashed border to read as a temporal restriction (the dashed border encodes 'temporary'). Connected via has_embargo to a Node, LicenseNode or GraphNode. Graphml palette prefix: 'EB.'.",
+      "file_3d": "src/3D/embargo.glb",
+      "2d_file_rast": "src/2D/embargo.png",
+      "style": {
+        "material": {
+          "rgba_color": {
+            "r": 0.8,
+            "g": 0.0,
+            "b": 0.0,
+            "a": 1.0
+          }
+        },
+        "border_color": "#CC0000",
+        "fill_color": "#FFEEEE",
+        "border_style": "dashed",
+        "shape": "octagon"
+      },
+      "label_position": "over"
+    },
+    "GRAPH": {
+      "_comment": "Top-level container node representing the EM graph itself. Anchor for graph-wide metadata propagation (default author, license, embargo, epoch). Rendered as a dashed rounded rectangle to read as a meta-container, neutral gray to stay visually distinct from stratigraphic and paradata nodes. Graphml palette prefix: 'G.'.",
+      "file_3d": "src/3D/graph.glb",
+      "2d_file_vect": "src/2D/graph.svg",
+      "style": {
+        "material": {
+          "rgba_color": {
+            "r": 0.3,
+            "g": 0.3,
+            "b": 0.3,
+            "a": 1.0
+          }
+        },
+        "border_color": "#333333",
+        "fill_color": "#EEEEEE",
+        "border_style": "dashed",
+        "shape": "rounded_rectangle"
+      },
+      "label_position": "over"
+    },
+    "NARR": {
+      "_comment": "EM Narrative (DP-79). A NarrativeNode is a crm:E33 Linguistic Object over the graph — chapters of prose and embeds — not an assertion about the site, which is why it stays neutral grey and must not read as stratigraphy or paradata. Solid border, unlike GRAPH's dashed: a narrative is a real authored object, not an anchor for metadata propagation. POL4 (2026-08-04): the drawing now EXISTS — E.D.'s hourglass-over-open-book — and replaces the old narrative.png placeholder. POL5 (E.D.'s decision): the ICON is the RASTER — `2d_icon_prefer: raster`. The vector is still declared, because it exists and this file is where a consumer asks what exists; the flag says which of the two to DRAW. It is an ILLUSTRATION, not a glyph (8 paths, 114k coordinates of stipple trace, 617 KB even after the precision pass), and a consumer that inlines its assets paid 604 KB of bundle for something no renderer draws taller than 30 px. The 256 px PNG is rendered FROM that SVG, so the two cannot drift.",
+      "file_3d": "src/3D/narrative.glb",
+      "2d_file_rast": "src/2D/EMNarrative.png",
+      "2d_file_vect": "src/2D/EMNarrative.svg",
+      "2d_icon_prefer": "raster",
+      "style": {
+        "material": {
+          "rgba_color": {
+            "r": 0.35,
+            "g": 0.35,
+            "b": 0.4,
+            "a": 1.0
+          }
+        },
+        "border_color": "#5A5A66",
+        "fill_color": "#F2F2F5",
+        "border_style": "solid",
+        "shape": "rounded_rectangle"
+      },
+      "label_position": "over"
+    },
+    "LINK": {
+      "file_3d": "src/3D/link.glb",
+      "2d_file_vect": "src/2D/link.svg",
+      "style": {
+        "border_color": "#FF6600",
+        "fill_color": "#FFFFFF",
+        "border_style": "solid",
+        "shape": "chain"
+      },
+      "label_position": "over"
+    },
+    "GCP": {
+      "_comment": "Ground control points — the EVIDENCE behind a registration: which point was seen on which photograph at which pixel, and where it is in the world. The NODE IS THE SET, never the single GCP (data.points), which is why the icon shows one target among several marks. Same orange as the other reference/georeferencing nodes (GEO, SS, LINK) because it is that family; the crosshair shape distinguishes measurement-of-a-place from position-of-a-site. Graphml palette prefix: 'GC.'.",
+      "file_3d": "src/3D/gcp_set.glb",
+      "2d_file_vect": "src/2D/gcp_set.svg",
+      "style": {
+        "border_color": "#FF6600",
+        "fill_color": "#FFFFFF",
+        "border_style": "solid",
+        "shape": "crosshair"
+      },
+      "label_position": "over"
+    },
+    "RGT": {
+      "_comment": "Registration transform — the SOLUTION: the 7-parameter similarity that places a produced model, with its RMS. Drawn as axes plus a rotation arc. NOTE, and it is a limit of a per-TYPE rule: whether a given transform is georeferenced (data.crs set) or a site-local frame (crs null) is an INSTANCE fact and cannot be encoded here — a reader tells the two modes apart by the presence of the has_gcp_set edge, which is why that edge exists. Graphml palette prefix: 'RG.'.",
+      "file_3d": "src/3D/registration_transform.glb",
+      "2d_file_vect": "src/2D/registration_transform.svg",
+      "style": {
+        "border_color": "#FF6600",
+        "fill_color": "#FFFFFF",
+        "border_style": "solid",
+        "shape": "axes"
+      },
+      "label_position": "over"
+    },
+    "GEO": {
+      "file_3d": "src/3D/geo.glb",
+      "2d_file_vect": "src/2D/geo_position.svg",
+      "style": {
+        "border_color": "#FF6600",
+        "fill_color": "#FFFFFF",
+        "border_style": "solid",
+        "shape": "globe"
+      },
+      "label_position": "over"
+    },
+    "RM": {
+      "file_3d": "src/3D/rm.glb",
+      "2d_file_vect": "src/2D/representation_model.svg",
+      "style": {
+        "material": {
+          "rgba_color": {
+            "r": 0.5,
+            "g": 0.0,
+            "b": 0.0,
+            "a": 1.0
+          }
+        },
+        "border_color": "#FF6600",
+        "fill_color": "#FFFFFF",
+        "border_style": "solid",
+        "shape": "model"
+      },
+      "label_position": "over"
+    },
+    "RMDoc": {
+      "file_3d": "src/3D/rmdoc.glb",
+      "2d_file_vect": "src/2D/representation_model_doc.svg",
+      "style": {
+        "material": {
+          "rgba_color": {
+            "r": 0.5,
+            "g": 0.0,
+            "b": 0.0,
+            "a": 1.0
+          }
+        },
+        "border_color": "#FF6600",
+        "fill_color": "#FFFFFF",
+        "border_style": "solid",
+        "shape": "model"
+      },
+      "label_position": "over"
+    },
+    "RMSF": {
+      "file_3d": "src/3D/rmsf.glb",
+      "2d_file_vect": "src/2D/representation_model_sf.svg",
+      "style": {
+        "material": {
+          "rgba_color": {
+            "r": 0.5,
+            "g": 0.0,
+            "b": 0.0,
+            "a": 1.0
+          }
+        },
+        "border_color": "#FF6600",
+        "fill_color": "#FFFFFF",
+        "border_style": "solid",
+        "shape": "model"
+      },
+      "label_position": "over"
+    },
+    "SS": {
+      "file_3d": "src/3D/ss.glb",
+      "2d_file_vect": "src/2D/semantic_shape.svg",
+      "style": {
+        "border_color": "#FF6600",
+        "fill_color": "#FFFFFF",
+        "border_style": "solid",
+        "shape": "model"
+      },
+      "label_position": "over"
+    },
+    "unknown": {
+      "file_3d": "src/3D/unknown.glb",
+      "file_2d": "src/2D/generic_node.svg",
+      "style": {
+        "border_color": "#FF0000",
+        "fill_color": "#FFFFFF",
+        "border_style": "dotted",
+        "shape": "question_mark"
+      },
+      "label_position": "center"
+    },
+    "UL": {
+      "_comment": "Working Unit (E25 Human-Made Feature): le tracce di lavorazione della pietra su una superficie architettonica — subbia, gradina, iccozza, colpi di mazzuolo. UL e la TRACCIA, non l'atto che l'ha prodotta (quello e una E12 Production a parte, via P108i). Il 2D segue il simbolo dichiarato nel node datamodel — rettangolo bianco con bordo arancio — e resta distinguibile sia dalla US (stesso rettangolo, bordo rosso) sia dalla USD (stesso arancio, ma rounded_rectangle). Il material 3D e invece il ROSSO della US (decisione E.D. 2026-08-02: le UL restano rosse per ora); le sotto-colorazioni per tipologia di lavorazione sono un follow-up.",
+      "file_3d": "src/3D/US.glb",
+      "file_2d": "src/2D/US.png",
+      "style": {
+        "material": {
+          "rgba_color": {
+            "r": 0.328,
+            "g": 0.033,
+            "b": 0.033,
+            "a": 1.0
+          }
+        },
+        "border_color": "#D86400",
+        "fill_color": "#FFFFFF",
+        "border_style": "solid",
+        "shape": "rectangle",
+        "border_width": 4
+      },
+      "label_position": "over"
+    },
+    "USNt": {
+      "_comment": "NEUTRAL stratigraphic unit (POL5, token USNt since POL6): a void that is part of the DESIGN — the `risparmi` of masonry, a window or door opening, the volume of a room. NOT the negative unit, which is USN (displayed US-) below: nothing was removed here, so there is no interface produced by a removal. Drawn with the outline only at the FOUR CORNERS (`corner_brackets`), and the reason is semantic: a continuous border states a surface, and a risparmio has none — what is observed is the EXTENT of the void, which is what a crop mark says. Grey #8C8C8C, one of the language's existing greys (it is the `symbolic` rung of document_variant_styles): the #C4C4C4 this entry carried before POL4 was already faint against the #F0F0F0 fill, and with only four ticks of ink left there was nothing to see. Same grey as USN on purpose — the SHAPE tells the two voids apart, which is how EM distinguishes types everywhere else.",
+      "file_3d": "src/3D/US.glb",
+      "file_2d": "src/2D/US.png",
+      "style": {
+        "material": {
+          "rgba_color": {
+            "r": 0.55,
+            "g": 0.55,
+            "b": 0.55,
+            "a": 1.0
+          }
+        },
+        "border_color": "#8C8C8C",
+        "fill_color": "#F0F0F0",
+        "border_style": "solid",
+        "shape": "corner_brackets",
+        "border_width": 4
+      },
+      "label_position": "over"
+    },
+    "USN": {
+      "_comment": "NEGATIVE / destructive stratigraphic unit, displayed US- (POL5; token USN again since POL6). A lacuna produced by a REMOVAL: a pit cut, an erosion surface, a demolition void. Rendered like a US — same rectangle, same thick frame — because it IS a unit of the sequence and behaves like one; only the colour changes, to the neutral grey of the absence family. E.D.: 'una US grigia a contorno pieno', explicitly NOT the orange roundrectangle of USD (which is the DOCUMENTARY unit and unrelated). This type answers to the node_type `USN`, as it always did: POL5 moved it to `USNeg` for a few hours and POL6 put it back, because the spelling says negativa and because pyArchInit vendors the same token with the same meaning.",
+      "file_3d": "src/3D/US.glb",
+      "file_2d": "src/2D/US.png",
+      "style": {
+        "material": {
+          "rgba_color": {
+            "r": 0.55,
+            "g": 0.55,
+            "b": 0.55,
+            "a": 1.0
+          }
+        },
+        "border_color": "#8C8C8C",
+        "fill_color": "#F0F0F0",
+        "border_style": "solid",
+        "shape": "rectangle",
+        "border_width": 4
+      },
+      "label_position": "over"
+    },
+    "ActivityNodeGroup": {
+      "_comment": "yEd group-folder rendering for an activity (logical grouping of stratigraphic actions). Canonical EM palette (point of truth = templates/em_palette_template.graphml, node 'Att.[xx]'): neutral grey container, dashed black border, distinguished by the CYAN group title-tab (label_background). Supersedes the legacy 'ANG' purple-ellipse style for group-container rendering; ANG kept for back-compat with other consumers.",
+      "style": {
+        "shape": "roundrectangle",
+        "fill_color": "#F5F5F5",
+        "border_color": "#000000",
+        "border_style": "dashed",
+        "border_width": 1.0,
+        "label_background": "#CCFFFF",
+        "label_position": "top"
+      }
+    },
+    "ParadataNodeGroup": {
+      "_comment": "yEd group-folder rendering for a paradata node group (holds all paradata of a stratigraphic unit). Canonical EM palette (point of truth = em_palette_template.graphml, node 'US[xxx]_PD'): neutral grey container, dashed black border, distinguished by the PEACH group title-tab (label_background). Supersedes routing through the shared 'GRAPH' grey style; GRAPH kept for the graph-metadata container.",
+      "style": {
+        "shape": "roundrectangle",
+        "fill_color": "#F5F5F5",
+        "border_color": "#000000",
+        "border_style": "dashed",
+        "border_width": 1.0,
+        "label_background": "#FFCC99",
+        "label_position": "top"
+      }
+    },
+    "TimeBranchNodeGroup": {
+      "_comment": "yEd group-folder rendering for a time branch (alternative reconstructive hypotheses; two TB can be linked by contrasts_with). Canonical EM palette (point of truth = em_palette_template.graphml, node 'TB.0'): neutral grey container, dashed black border, distinguished by the GREEN group title-tab (label_background). Distinct from ParadataNodeGroup, which the legacy shared 'GRAPH' alias could not express.",
+      "style": {
+        "shape": "roundrectangle",
+        "fill_color": "#F5F5F5",
+        "border_color": "#000000",
+        "border_style": "dashed",
+        "border_width": 1.0,
+        "label_background": "#99CC00",
+        "label_position": "top"
+      }
+    },
+    "LocationNodeGroup": {
+      "_comment": "yEd group-folder rendering for spatial / locational membership. Dashed round-rectangle to read clearly as a *group container* and to stay distinct from the solid-rectangle stratigraphic units. Border colour varies by 'kind' (toponym / study / functional). When several is_in_location memberships exist on the same node, only the one with is_primary=true is drawn as a folder; the others are emitted as labels/badges (yEd cannot stack overlapping group folders). See em_data and the Location concept page in the manual.",
+      "style": {
+        "shape": "roundrectangle",
+        "fill_color": "#F5F5F5",
+        "border_color": "#000000",
+        "border_style": "dashed",
+        "border_width": 1.0,
+        "label_background": "#EBEBEB",
+        "label_position": "top"
+      },
+      "kind_modifiers": {
+        "_comment": "Border colour overrides keyed on the LocationNodeGroup.kind enum value.",
+        "toponym": {
+          "border_color": "#888888",
+          "description": "External / administrative identity (Pompei, Lazio, Italia)."
+        },
+        "study": {
+          "border_color": "#3A5A8C",
+          "description": "Operational / procedural identity (saggio, settore, quadrato, sondage)."
+        },
+        "functional": {
+          "border_color": "#000000",
+          "description": "Interpretive / semantic identity (basilica, room A, courtyard)."
+        }
+      }
+    },
+    "RepresentationModelNodeGroup": {
+      "_comment": "Group-folder rendering for an RM container (EM16-RMNG): the named set of representation models a Document publishes — «Survey 2015» under D.01. Shape and frame are the GROUP family's, unchanged and deliberately not reinvented (roundrectangle, neutral grey fill, dashed black border) — what identifies the family is the group title-tab colour, exactly as cyan identifies ActivityNodeGroup, peach ParadataNodeGroup, green TimeBranchNodeGroup and grey LocationNodeGroup. The tab here carries #FF6600, which is the RM family's OWN border colour (see the RM / RMDoc / RMSF styles): the box reads as «a group of representation models» without a new shape and without a new colour being invented. Verified free before use: #FF6600 was not in use as a label_background by any other style, and is not among the colours the GraphML importer keys on.",
+      "style": {
+        "shape": "roundrectangle",
+        "fill_color": "#F5F5F5",
+        "border_color": "#000000",
+        "border_style": "dashed",
+        "border_width": 1.0,
+        "label_background": "#FF6600",
+        "label_position": "top"
+      }
+    }
+  },
+  "document_roles": {
+    "_comment": "Axis 1 of the three-axis Master-Document classification (EM 1.6). Declares how this document participates in the reconstructive reasoning. 'analytical' = primary source for direct reasoning about this context. 'comparative' = external comparison material (other sites, epochs, typologies). Not visualized as colour — metadata only.",
+    "analytical": {
+      "description": "Primary source for direct reconstructive reasoning about this context."
+    },
+    "comparative": {
+      "description": "External document used as comparative reference (other sites, other epochs, typologies)."
+    }
+  },
+  "document_content_natures": {
+    "_comment": "Axis 2 of the three-axis Master-Document classification (EM 1.6). Describes the intrinsic nature of the document's content. '2d_object' = image, drawing, photograph, text. '3d_object' = three-dimensional model. Not visualized as colour — metadata only.",
+    "2d_object": {
+      "description": "Image, drawing, photograph, or textual document."
+    },
+    "3d_object": {
+      "description": "Three-dimensional model (mesh, laser scan, photogrammetric reconstruction)."
+    }
+  },
+  "document_variant_styles": {
+    "_comment": "Axis 3 of the three-axis Canonical-Document classification (EM 1.6). Declares how the document's Representation Model (RM) is spatialized in the 3D scene. Q-C (EM 1.6): the axis is a scale of METRIC AUTHORITY OF PLACEMENT, and it is authoritative on the **RMDoc** — the spatial instance — not on the Document. The Document's existence is certain; what has degrees is its spatialisation, which is what the RMDoc IS (proxy:US :: RMSF:SF :: RM:state :: RMDoc:Document). The position itself (X,Y,Z + rotation) lives on the RMDoc and nowhere else; the Document may mirror the value on its yEd border for diagram convenience, but it carries no position. The ladder, from most to least metric authority: reality_based → observable → asserted → symbolic. `em_based` is not a rung of that ladder but a provenance statement (the asset IS an EM-derived reconstruction). Temporality is a separate matter: it is an attribution, certain or argued through a paradata chain, never a grade on this axis. The 'geometry' property drives both the GraphML DocumentNode border colour (in yEd) and the RM contour colour in the 3D viewport (per the v1.6 toggle). Documents without an RM (e.g. PDF articles, bibliographies) omit the geometry property entirely — no node, no colour. Border WIDTH carries the canonical/instance distinction: width >= 3.0 is the canonical document, anything thinner is a use-instance. The COLOUR classifies the canonical document's geometry-axis category. A black thick border means 'canonical without geometry classification' (canonical_unknown). Renamed from 'master' in schema 2: every digital document is a copy, so 'master' misread as 'original vs copies'; what the flag marks is the document drawn at its own creation, vs the instances that re-use it. Kept in sync with the reference nodes in templates/em_palette_template.graphml.",
+    "default": {
+      "border_color": "#000000",
+      "border_style": "solid",
+      "border_width": 1.0,
+      "_comment": "Use-instance / non-canonical document. Thin black border. Used for DocumentNodes without a canonical role (citation references, paradata pointers, etc.)."
+    },
+    "canonical_unknown": {
+      "border_color": "#000000",
+      "border_style": "solid",
+      "border_width": 4.0,
+      "description": "Master document whose RM spatialisation has not been classified yet on the geometry axis. Thick black border distinguishes it from a non-Master Instance (thin black) while remaining neutral on classification."
+    },
+    "reality_based": {
+      "border_color": "#9B3333",
+      "border_style": "solid",
+      "border_width": 4.0,
+      "description": "Robust sensor / algorithmic positioning: photogrammetric model, photo from a calibrated photogrammetric sequence, instrumentally-surveyed special find."
+    },
+    "observable": {
+      "border_color": "#D86400",
+      "border_style": "solid",
+      "border_width": 4.0,
+      "description": "Position reconstructed with approximation from rigorous archaeological documentation (plans, sections, measured drawings). Criterion-based, residual uncertainty remains."
+    },
+    "asserted": {
+      "border_color": "#D8BD30",
+      "border_style": "solid",
+      "border_width": 4.0,
+      "description": "Compositional positioning asserted by the operator, without claim of restitution (e.g. placing a comparative element in the scene for analytical purposes)."
+    },
+    "symbolic": {
+      "border_color": "#8C8C8C",
+      "border_style": "solid",
+      "border_width": 4.0,
+      "description": "Lowest rung of the metric-authority ladder (Q-C, EM 1.6): the base is NOT metric at all — a not-to-scale map, a schematic plan, a sketch. The spatialisation places the asset where it is useful to look at, and claims no measurable correspondence with the ground. Distinct from 'asserted', where the operator asserts a position but the base itself could have carried a metric. Neutral grey because there is no metric claim to grade; distinct from the BLACK of canonical_unknown, which means 'not classified yet' rather than 'classified as non-metric'."
+    },
+    "em_based": {
+      "border_color": "#4A7FB8",
+      "border_style": "solid",
+      "border_width": 4.0,
+      "description": "3D reconstruction produced via the Extended Matrix methodology — the document itself IS an EM-derived reconstruction. Typical case: a hypothesis model built from another EM graph, used here as a comparative or derivative source."
+    }
+  },
+  "dtc_kinds": {
+    "_comment": "DATA-DRIVEN, EXPANDABLE per-kind vocabulary for the DTC substrate profile (ECHOES). Mirrors the Master-Document axis vocabularies above (document_roles/content_natures): the three base kinds (input/process/output) each list specific kinds seeded from the 2017 DTC palette. Adding a new kind (e.g. audio, spectroscopy) is a JSON entry here (+ a glyph) — NOT a code change; the DTC node classes validate against these keys via s3dgraphy.utils.get_dtc_kinds(). `glyph` names the 2017 DTC SVG (wired in the later glyph/visual-manager slice; recorded here as data only).",
+    "input": {
+      "photo": {
+        "label": "Photograph",
+        "glyph": "09_photos",
+        "description": "Photographic acquisition (single image or set)."
+      },
+      "laserscanner": {
+        "label": "Laser scan",
+        "glyph": "10_laserscanner",
+        "description": "Terrestrial/close-range laser scanning acquisition."
+      },
+      "topographic": {
+        "label": "Topographic survey",
+        "glyph": "01_topographicnetwork",
+        "description": "Total-station / topographic-network acquisition."
+      }
+    },
+    "process": {
+      "photogrammetry": {
+        "label": "Photogrammetry",
+        "glyph": "03_mesh",
+        "description": "Structure-from-motion reconstruction: a cluster of photographs becomes a 3D model. A specific kind of transformation, named because what a reader needs to know about a mesh is which family of process made it — and because the placement (RegistrationTransform) only means something for this one."
+      },
+      "transformation": {
+        "label": "Transformation",
+        "glyph": "00_transformation",
+        "description": "A processing/transformation step turning inputs into produced digital objects."
+      }
+    },
+    "acquisition": {
+      "download": {
+        "label": "Download",
+        "glyph": null,
+        "description": "Retrieval of a digital object from a remote (opaque, Tier-0) repository."
+      },
+      "ingest": {
+        "label": "Ingest",
+        "glyph": null,
+        "description": "Generic ingestion of a digital object into the study."
+      },
+      "local_import": {
+        "label": "Local import",
+        "glyph": null,
+        "description": "Acquisition from the local file system (project-folder search) — the local analog of remote acquisition."
+      },
+      "uri_reference": {
+        "label": "URI reference",
+        "glyph": null,
+        "description": "The URI was acquired, not the object: the resource stays where it is and is reached through its own access protocol (an open link, or one you subscribe to). No bytes were copied — calling this a download would record a retrieval that never happened."
+      }
+    },
+    "output": {
+      "pointcloud": {
+        "label": "Point cloud",
+        "glyph": "02_pointcloud",
+        "description": "Produced point cloud."
+      },
+      "mesh": {
+        "label": "Mesh",
+        "glyph": "03_mesh",
+        "description": "Produced 3D mesh model."
+      },
+      "dem": {
+        "label": "DEM",
+        "glyph": "07_DEM",
+        "description": "Digital Elevation Model."
+      },
+      "orthophoto": {
+        "label": "Orthophoto",
+        "glyph": "08_ortophoto",
+        "description": "Produced orthophoto / orthomosaic."
+      },
+      "points": {
+        "label": "Points",
+        "glyph": "04_points",
+        "description": "Vector point features."
+      },
+      "lines": {
+        "label": "Lines",
+        "glyph": "05_lines",
+        "description": "Vector line features."
+      },
+      "polygons": {
+        "label": "Polygons",
+        "glyph": "06_polygons",
+        "description": "Vector polygon features."
+      }
+    },
+    "device": {
+      "_comment": "THE APPARATUS AXIS — what a step happened ON, not what went in or came out. crmdig:L12_happened_on_device, deliberately NOT L10_had_input: the photographs are the input and the camera is not, and flattening the two makes «which files did this body take» unanswerable, which is the only reason the node exists. One class (DTCDeviceNode, crmdig:D8_Digital_Device) and the genus from here, so adding an apparatus stays a JSON entry plus a sign — the same rule the flow axes follow. | THE GLYPHS ARE ONE FAMILY: 11_device is a rounded box with a connector on one side, the poorest shape that still says «apparatus» and free of any optical cue because a computer has no lens. Two boxes whose connectors touch read as a RIG — a computer with a sensor on it, a camera on a drone — which is how an assembly is said without inventing a second symbol. Every genus keeps that outline IDENTICAL and changes one inner mark, so the family reads from far away and the genus from close up. The SVGs live in JSON_config/src/2D/dtc/ beside 00–10; these names are declared here first and drawn separately. | NOTE FOR WHOEVER EXTENDS THIS: `laserscanner` sits on the `input` axis above, and now that this axis exists it is in the wrong box — a scanner is an apparatus, not an input. It is NOT moved: stamps already emitted carry that kind on that axis, and moving it would invalidate them in silence, which is the defect this whole substrate is built against. Left to E.D.",
+      "camera": {
+        "label": "Camera",
+        "glyph": "11_device_optical",
+        "description": "A photographic or video body. The circle is the GENUS mark and sits inside the family outline: the outline itself stays free of optics so a computer can wear it."
+      },
+      "sensor": {
+        "label": "Sensor",
+        "glyph": "11_device_sensor",
+        "description": "A measuring instrument that is not a camera — multispectral, thermal, a lidar head, a magnetometer. The wave mark says «it records a quantity»."
+      },
+      "drone": {
+        "label": "Drone",
+        "glyph": "11_device_drone",
+        "description": "The airframe that carried the apparatus. Its own device because it is the thing that flew, and a rig is drawn as its connector touching the payload's."
+      },
+      "computer": {
+        "label": "Computer",
+        "glyph": "11_device_computer",
+        "description": "The machine a processing step ran on. Here because «the reconstruction produced different numbers on the two workstations» is a question somebody will ask, and it is the reason the family outline had to stay free of optics."
+      },
+      "scanner": {
+        "label": "Scanner",
+        "glyph": "11_device_scanner",
+        "description": "A range or structured-light scanner — the APPARATUS. Distinct from the `laserscanner` entry on the `input` axis, which is a kind of input and is left where it is on purpose (see the note above)."
+      },
+      "total_station": {
+        "label": "Total station",
+        "glyph": "11_device_station",
+        "description": "A theodolite with a rangefinder — the instrument behind a `topographic` input."
+      },
+      "gnss": {
+        "label": "GNSS receiver",
+        "glyph": "11_device_gnss",
+        "description": "A satellite positioning receiver: the apparatus that produces a how.acquisition.location whose `source` is a measurement and not a person's word."
+      }
+    }
+  },
+  "edge_style": {
+    "is_before": {
+      "style": {
+        "color": "#FF0000",
+        "line_style": "solid",
+        "width": 2
+      },
+      "label": "Is Before"
+    },
+    "has_same_time": {
+      "style": {
+        "color": "#00FF00",
+        "line_style": "solid",
+        "width": 2
+      },
+      "label": "Contemporaneous Elements"
+    },
+    "changed_from": {
+      "style": {
+        "color": "#0000FF",
+        "line_style": "dotted",
+        "width": 2
+      },
+      "label": "Temporal Transformation"
+    },
+    "has_data_provenance": {
+      "style": {
+        "color": "#FFA500",
+        "line_style": "dashed",
+        "width": 1.5
+      },
+      "label": "Data Provenance"
+    },
+    "contrasts_with": {
+      "style": {
+        "color": "#800080",
+        "line_style": "dashed-dotted",
+        "width": 1.5
+      },
+      "label": "Contrasting Properties"
+    },
+    "has_first_epoch": {
+      "style": {
+        "color": "#008000",
+        "line_style": "solid",
+        "width": 2
+      },
+      "label": "Has First Epoch"
+    },
+    "survive_in_epoch": {
+      "style": {
+        "color": "#FF69B4",
+        "line_style": "dotted",
+        "width": 1.5
+      },
+      "label": "Survives In Epoch"
+    },
+    "is_in_activity": {
+      "style": {
+        "color": "#1E90FF",
+        "line_style": "solid",
+        "width": 2
+      },
+      "label": "Part of Activity"
+    },
+    "is_in_location": {
+      "_comment": "Edge expressing spatial / locational membership of a node into a LocationNodeGroup, or the recursive Location → Location hierarchy. Default style is the non-primary membership rendering. The 'primary_modifier' applies when the edge attribute is_primary=true (in em-graph this membership is also drawn as the yEd group folder).",
+      "style": {
+        "color": "#888888",
+        "line_style": "dotted",
+        "width": 1
+      },
+      "label": "Is in location",
+      "primary_modifier": {
+        "color": "#444444",
+        "line_style": "solid",
+        "width": 2,
+        "description": "Applied when is_primary=true on the edge."
+      }
+    },
+    "has_property": {
+      "style": {
+        "color": "#FFD700",
+        "line_style": "dashed",
+        "width": 1.5
+      },
+      "label": "Has Property"
+    },
+    "extracted_from": {
+      "style": {
+        "color": "#A52A2A",
+        "line_style": "dotted",
+        "width": 1.5
+      },
+      "label": "Extracted From"
+    },
+    "combines": {
+      "style": {
+        "color": "#FF6347",
+        "line_style": "solid",
+        "width": 2
+      },
+      "label": "Combines"
+    },
+    "has_timebranch": {
+      "style": {
+        "color": "#4682B4",
+        "line_style": "solid",
+        "width": 2
+      },
+      "label": "Included in Timebranch"
+    },
+    "generic_connection": {
+      "style": {
+        "color": "#808080",
+        "line_style": "dashed",
+        "width": 1
+      },
+      "label": "Generic Connection"
+    },
+    "has_linked_resource": {
+      "style": {
+        "color": "#9400D3",
+        "line_style": "solid",
+        "width": 1.5
+      },
+      "label": "Has Link"
+    },
+    "has_semantic_shape": {
+      "style": {
+        "color": "#4B0082",
+        "line_style": "dotted",
+        "width": 1.5
+      },
+      "label": "Has Semantic Shape"
+    },
+    "has_representation_model": {
+      "style": {
+        "color": "#8A2BE2",
+        "line_style": "dashed",
+        "width": 1.5
+      },
+      "label": "Has Representation Model"
+    },
+    "is_in_paradata_nodegroup": {
+      "style": {
+        "color": "#FF7F50",
+        "line_style": "solid",
+        "width": 1.5
+      },
+      "label": "Belongs to a Paradata Node Group"
+    },
+    "has_paradata_nodegroup": {
+      "style": {
+        "color": "#FF4500",
+        "line_style": "solid",
+        "width": 1.5
+      },
+      "label": "Is connected to a Paradata Node Group"
+    },
+    "has_author": {
+      "style": {
+        "color": "#DA70D6",
+        "line_style": "dashed",
+        "width": 1.5
+      },
+      "label": "Has Author"
+    },
+    "has_geoposition": {
+      "style": {
+        "color": "#2E8B57",
+        "line_style": "dotted",
+        "width": 1.5
+      },
+      "label": "Has Geoposition"
+    },
+    "is_in_timebranch": {
+      "style": {
+        "color": "#4169E1",
+        "line_style": "solid",
+        "width": 1.5
+      },
+      "label": "Included in Timebranch"
+    },
+    "is_in_representation_model_group": {
+      "_comment": "Membership of a representation model in an RM container (EM16-RMNG). Dashed like the other membership edges that are TAGS rather than structure (has_representation_model, has_property), and carrying the RM family's #FF6600 so the line reads as part of the same family as the group's title-tab. NOTE: is_in_functional_unit has no entry in this block — a pre-existing gap, reported and not fixed here.",
+      "style": {
+        "color": "#FF6600",
+        "line_style": "dashed",
+        "width": 1.5
+      },
+      "label": "Is in Representation Model Group"
+    }
+  }
+}
