@@ -4277,12 +4277,13 @@ async function wireDesktopDeepLink(): Promise<void> {
   const tauri = (window as unknown as { __TAURI_INTERNALS__?: unknown });
   if (!tauri.__TAURI_INTERNALS__) return;          // web build: nothing to wire
   try {
-    // Resolved at RUNTIME and not by the bundler: the plugin is a desktop-only
-    // dependency that is not installed in this build, and a static import would
-    // fail the type-check and the web bundle to serve a path neither has. The
-    // specifier is built so no bundler can follow it.
-    const specifier = ["@tauri-apps", "plugin-deep-link"].join("/");
-    const plugin = await (new Function("s", "return import(s)")(specifier)) as {
+    // Imported by a LITERAL specifier, so the bundler inlines it. It used to be
+    // built at runtime ("so no bundler can follow it"), which is exactly why no
+    // bundle ever contained it: in the single-file desktop build a bare module
+    // name reaches the webview unresolved and fails with «does not resolve to a
+    // valid URL» (dev.12, 28 Sep 2026). The package is a thin `invoke` wrapper,
+    // harmless on the web, where the guard above returns before it is touched.
+    const plugin = await import("@tauri-apps/plugin-deep-link") as {
       onOpenUrl?: (cb: (urls: string[]) => void) => Promise<unknown>;
       getCurrent?: () => Promise<string[] | null>;
     };
@@ -5131,7 +5132,9 @@ async function openRecentFile(r: RecentFile): Promise<void> {
       return;
     }
     if (!(await confirmLeaveSidecar("Opening a file"))) return;
-    loadDocument(JSON.parse(res.text) as EmDocument, baseName(res.path), res.path);
+    // the same door as the browser: a container `{graphs:{…}}` (what s3Dgraphy
+    // writes) and a single graph (a container-of-one) both open.
+    loadContainerDocument(JSON.parse(res.text), baseName(res.path), res.path);
   } catch {
     removeRecent(r.path);
     toast("Il file recente non è più leggibile — rimosso dai recenti.");
@@ -5146,11 +5149,10 @@ async function openDocument(): Promise<void> {
       const res = await openEmJson();
       if (!res) return; // cancelled
       if (!(await confirmLeaveSidecar("Opening a file"))) return;
-      loadDocument(
-        JSON.parse(res.text) as EmDocument,
-        baseName(res.path),
-        res.path,
-      );
+      // through the container reader, like the browser's <input type=file>:
+      // calling `loadDocument` here refused every `{graphs:{…}}` file with
+      // «missing graph.nodes» (reported 28 Sep 2026 on dev.10–dev.12).
+      loadContainerDocument(JSON.parse(res.text), baseName(res.path), res.path);
     } catch (e) {
       info.textContent = `open failed: ${e instanceof Error ? e.message : e}`;
     }

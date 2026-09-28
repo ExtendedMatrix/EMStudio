@@ -1,13 +1,36 @@
 import { readFileSync } from "node:fs";
-import { defineConfig } from "vite";
+import { fileURLToPath } from "node:url";
+import { defineConfig, type Plugin } from "vite";
 import { viteSingleFile } from "vite-plugin-singlefile";
 
 // EMStudio app version — single source of truth is package.json (kept in sync
 // with Cargo.toml + tauri.conf.json by scripts/set-version.sh). Inlined at
 // build time and shown in the GUI so testers know which build they're on.
-const pkg = JSON.parse(
-  readFileSync(new URL("./package.json", import.meta.url), "utf-8"),
-) as { version: string };
+const PKG_PATH = fileURLToPath(new URL("./package.json", import.meta.url));
+const readVersion = () =>
+  (JSON.parse(readFileSync(PKG_PATH, "utf-8")) as { version: string }).version;
+const pkg = { version: readVersion() };
+
+// …and in DEV the badge must not lie either. `define` is read once, when Vite
+// starts, so a `./em.sh devrel` bump left em.localhost showing dev.8 for weeks
+// while serving current code. A version change in package.json restarts the
+// dev server, which re-reads this config: one restart per release, none for a
+// dependency install that leaves the version alone.
+const versionFollowsPackageJson = (): Plugin => ({
+  name: "emstudio-version-follows-package-json",
+  apply: "serve",
+  configureServer(server) {
+    server.watcher.add(PKG_PATH);
+    server.watcher.on("change", (file) => {
+      if (file !== PKG_PATH) return;
+      let next: string;
+      try { next = readVersion(); } catch { return; } // half-written file: wait
+      if (next === pkg.version) return;
+      server.config.logger.info(`version ${pkg.version} → ${next}: restarting`);
+      void server.restart();
+    });
+  },
+});
 
 // Single-file build: dist/index.html is fully self-contained, so it works
 // over file://, inside the Tauri shell, and as an e-mail-able artefact.
@@ -101,7 +124,8 @@ export default defineConfig(({ command }) => {
   // `Local: http://localhost:5173/`, serving the editor at the root with
   // `/@vite/client` beside it. There is nothing to inline in a dev server, so the
   // plugin belongs to the build alone.
-  plugins: entry === "reader" || command === "serve" ? [] : [viteSingleFile()],
+  plugins: command === "serve" ? [versionFollowsPackageJson()]
+    : entry === "reader" ? [] : [viteSingleFile()],
   build: {
     outDir: "dist",
     rollupOptions: {

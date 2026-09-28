@@ -445,4 +445,41 @@ const freshReport = () => ({ addedGraphs: [], mergedGraphs: [], mergedNodes: 0,
      "…and with no Resource type resolved, nothing is silently assumed");
 }
 
+// ── every door a person opens a file by is the CONTAINER reader ─────────────
+// Reported 28 Sep 2026 (dev.10–dev.12): the desktop File › Open and the recents
+// called `loadDocument` straight on the JSON, which knows one graph and nothing
+// else, so every `{graphs:{…}}` file — what s3Dgraphy writes since 13 Aug —
+// failed with «missing graph.nodes» while the browser opened it. The fence is on
+// the functions, read by the parser; the internal loaders (new graph, a mapping's
+// result, a bridge conversion, the test data) keep `loadDocument` on purpose.
+{
+  const { readFileSync, existsSync } = await import("node:fs");
+  const Sorg = await import("./sorgenti.mjs");
+  const main = readFileSync(new URL("../src/main.ts", import.meta.url).pathname, "utf8");
+  for (const door of ["openDocument", "openRecentFile"]) {
+    const body = Sorg.dentro(main, door);
+    ok(body, `the parser finds ${door}: a rename must fail here, not pass on ""`);
+    ok(Sorg.chiama(body, "loadContainerDocument"),
+       `${door} opens through the container reader`);
+    ok(!Sorg.chiama(body, "loadDocument"),
+       `…and never through the single-graph door, which refuses a container`);
+  }
+
+  // The two files of the report, when this machine has them (the benchmark
+  // lives on the project share, not in the repo): the container and its
+  // single-graph twin both yield exactly one member with nodes.
+  const dir = process.env.EM_BM01_DIR;
+  if (dir) {
+    for (const f of ["BM01_base_fable-5.1_v6.2.em.json",
+                     "BM01_base_fable-5.1_v6.2.single.em.json"]) {
+      const path = `${dir}/${f}`;
+      ok(existsSync(path), `${f} is where EM_BM01_DIR says`);
+      const parsed = C.parseContainer(JSON.parse(readFileSync(path, "utf8")));
+      eq(parsed.members.length, 1, `${f} opens as one graph`);
+      ok(parsed.members[0].doc.graph.nodes.length > 0,
+         `…whose graph has its nodes (${parsed.members[0].doc.graph.nodes.length})`);
+    }
+  }
+}
+
 console.log(`container: ${checks} checks passed`);
