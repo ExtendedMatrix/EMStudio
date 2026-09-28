@@ -59,6 +59,39 @@ const eq = (got, want, what) => {
      "the parked tab's saved arrangement survives the next save");
 }
 
+// ── 1b · the arrangement verbs the gestures call ────────────────────────────
+{
+  const W = await load("workspace.ts");
+  const L = await load("shell/layout.ts");
+  const I = await load("window-icons.ts");
+  W.applyArrangement("canvas");
+  const g = W.windowsOf("canvas")[0];
+  const made = W.splitWindow(g.id, "col", "canvas", 0.3, "a");
+  const leafOf = (p, id) => p.kind === "leaf" ? null
+    : (p.a.kind === "leaf" && p.a.winId === id) || (p.b.kind === "leaf" && p.b.winId === id)
+      ? p : leafOf(p.a, id) ?? leafOf(p.b, id);
+  const sp = leafOf(W.layoutOf("canvas"), made.id);
+  eq([sp.dir, sp.ratio, sp.a.winId, sp.b.winId], ["col", 0.3, made.id, g.id],
+     "splitWindow cuts at the pointer's ratio, the new window on the corner's side");
+  const clamped = W.splitWindow(made.id, "row", "canvas", 0.99);
+  eq(leafOf(W.layoutOf("canvas"), clamped.id).ratio, 0.88, "…the ratio is held within 0.12–0.88");
+  const { dividers } = L.layoutRects(W.layoutOf("canvas"), { x: 0, y: 0, w: 1000, h: 800 });
+  eq(new Set(dividers.map((d) => d.path)).size, dividers.length, "every divider has its own path");
+  const root = dividers.find((d) => d.path === "");
+  W.setSplitRatioAt("", 0.4, "canvas");
+  eq(W.layoutOf("canvas").ratio, 0.4, "a divider moves by its path — the root too");
+  ok(root, "…and the root divider is listed");
+  const before = W.windowsOf("canvas").length;
+  const gone = W.closeSplitSide("", "a", "canvas");
+  eq(gone.length, 1, "dragging the root divider over the outliner closes it");
+  eq(W.windowsOf("canvas").length, before - 1, "…and only it");
+  ok(W.paneIds(W.layoutOf("canvas")).includes(W.activeWin("canvas").id),
+     "the focus lands in what stayed");
+  for (const t of Object.keys(W.WINDOW_TYPE_META))
+    ok(I.WINDOW_ICON_PATHS[t] && W.WINDOW_TYPE_META[t].icon.startsWith("<svg"),
+       `the ${t} window has a line icon`);
+}
+
 // ── 2 · the outliner by epoch ───────────────────────────────────────────────
 {
   const O = await load("outline.ts");

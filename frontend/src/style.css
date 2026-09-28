@@ -7495,3 +7495,114 @@ body.nv-standalone main.nv-standalone-main {
   color: var(--warn-ink);
   font-size: 10px;
 }
+
+/* ── STRUTTURA · the window header (scrivania v5 `.wt`, `.seg`) ─────────────
+   The TYPE is one control with a line icon and its name; the MODE is a
+   segmented control up to three modes; the arrangement chips are gone. */
+.win-header .wico {
+  display: block;
+  flex: none;
+}
+.win-header .win-type-toggle {
+  gap: 6px;
+  padding: 0 8px 0 7px;
+  color: var(--brand-ink);
+  font-weight: 600;
+}
+.win-header .win-type-icon {
+  display: inline-flex;
+  font-size: 0;
+}
+.win-header .win-type-label {
+  font: 600 12.5px var(--font-sans);
+  white-space: nowrap;
+}
+.tile-area.tile-active > .win-header .win-type-toggle {
+  border-color: var(--accent);
+}
+.win-header .dd-menu .wt-ic {
+  display: inline-flex;
+  vertical-align: -3px;
+  margin-right: 4px;
+  color: var(--brand-ink);
+}
+.win-header .dd-menu .dd-sep {
+  height: 1px;
+  margin: 4px 6px;
+  background: var(--border);
+}
+.win-header .dd-menu .dd-group {
+  padding: 6px 10px 2px;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+.win-header .dd-menu .win-close-item {
+  color: var(--danger);
+}
+.win-header .win-seg {
+  display: inline-flex;
+  flex: none;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  overflow: hidden;
+  background: var(--bg-panel);
+}
+.win-header .win-seg button {
+  border: 0;
+  border-right: 1px solid var(--border);
+  background: none;
+  padding: 3px 10px;
+  font: 500 12px var(--font-sans);
+  color: var(--text-muted);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.win-header .win-seg button:last-child {
+  border-right: 0;
+}
+.win-header .win-seg button:hover {
+  color: var(--text);
+  background: var(--bg-hover);
+}
+.win-header .win-seg button[aria-pressed="true"] {
+  background: var(--bg-accent-soft);
+  color: var(--text);
+  font-weight: 600;
+  box-shadow: inset 0 -2px 0 var(--accent);
+}
+/* the empty part of the header is the double-click target: let it grow */
+.win-header .win-sep {
+  flex: 1 1 auto;
+  align-self: stretch;
+  min-width: 24px;
+  width: auto;
+  height: auto;
+  background: transparent;
+}
+.win-header .wi-chip.wi-restore {
+  flex: none;
+  width: auto;
+  padding: 0 9px;
+  white-space: nowrap;
+  background: var(--bg-accent-soft);
+  border-color: var(--accent);
+  color: var(--text);
+}
+/* the side a divider is about to close: greyed as the preview */
+#tile-root > .tile-area.closing {
+  opacity: 0.35;
+  filter: grayscale(1);
+  box-shadow: inset 0 0 0 2px var(--accent);
+}
+body.gesturing-resize,
+body.gesturing-resize * {
+  user-select: none;
+}
+/* the workspace tab's line icon */
+.ws-tab .ws-ic .wico {
+  display: inline-block;
+  vertical-align: -3px;
+}

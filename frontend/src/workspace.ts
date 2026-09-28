@@ -19,6 +19,7 @@
  */
 
 import type { ViewKind } from "./types";
+import { windowIcon } from "./window-icons";
 
 /** The kinds of editor a window can host. DTC is a MODE of the graph window
  *  (WIN2), not a type of its own. */
@@ -484,17 +485,20 @@ export function removeWorkspace(id: WorkspaceId): boolean {
  *  (WIN1 checkpoint 2). DTC is a MODE of the graph window, so it is not a
  *  transform target here — it is reached from the header's Mode dropdown. */
 export const WINDOW_TYPE_META: Record<WindowType, { icon: string; labelKey: string }> = {
-  graph: { icon: "▦", labelKey: "win.graph" },
-  narrative: { icon: "❧", labelKey: "win.narrative" },
-  table: { icon: "▤", labelKey: "win.tabular" },
-  doc: { icon: "▧", labelKey: "win.doc" },
-  emtree: { icon: "⌸", labelKey: "win.emtree" },
-  inspector: { icon: "◉", labelKey: "win.inspector" },
-  viewer: { icon: "▣", labelKey: "win.viewer" },
-  storage: { icon: "🗄", labelKey: "win.storage" },
-  annotator: { icon: "✎", labelKey: "win.annotator" },
-  shelf: { icon: "▤▤", labelKey: "win.shelf" },
-  study: { icon: "◈", labelKey: "win.study" },
+  // STRUTTURA · `icon` is the line glyph of `window-icons.ts` (SVG markup), no
+  // longer an emoji: the header, the type menu and the workspace tabs all set
+  // it as markup, so the one change of drawing reaches all three.
+  graph: { icon: windowIcon("graph"), labelKey: "win.graph" },
+  narrative: { icon: windowIcon("narrative"), labelKey: "win.narrative" },
+  table: { icon: windowIcon("table"), labelKey: "win.tabular" },
+  doc: { icon: windowIcon("doc"), labelKey: "win.doc" },
+  emtree: { icon: windowIcon("emtree"), labelKey: "win.emtree" },
+  inspector: { icon: windowIcon("inspector"), labelKey: "win.inspector" },
+  viewer: { icon: windowIcon("viewer"), labelKey: "win.viewer" },
+  storage: { icon: windowIcon("storage"), labelKey: "win.storage" },
+  annotator: { icon: windowIcon("annotator"), labelKey: "win.annotator" },
+  shelf: { icon: windowIcon("shelf"), labelKey: "win.shelf" },
+  study: { icon: windowIcon("study"), labelKey: "win.study" },
 };
 
 /** The window type the active workspace currently shows — the ACTIVE window's
@@ -760,6 +764,11 @@ export function splitWindow(
   winId: string,
   dir: "row" | "col",
   ws: WorkspaceId = active,
+  // STRUTTURA · the corner gesture cuts WHERE the pointer is, on the side of
+  // the corner it started from. Defaults are the chips' behaviour (half, new
+  // window after), so every existing caller and check-tiling read the same.
+  ratio = 0.5,
+  side: "a" | "b" = "b",
 ): Win | null {
   const entry = registry[ws];
   const src = entry.wins.find((w) => w.id === winId);
@@ -774,12 +783,14 @@ export function splitWindow(
     entry.layout,
     entry.wins.filter((w) => w.id !== clone.id),
   );
+  const fresh: Pane = { kind: "leaf", winId: clone.id };
+  const r = Math.min(0.88, Math.max(0.12, ratio));
   entry.layout = mapLeaf(base, winId, (leaf) => ({
     kind: "split",
     dir,
-    ratio: 0.5,
-    a: leaf,
-    b: { kind: "leaf", winId: clone.id },
+    ratio: r,
+    a: side === "a" ? fresh : leaf,
+    b: side === "a" ? leaf : fresh,
   }));
   persistWindows();
   return clone;
@@ -872,6 +883,63 @@ export function setSplitRatio(
   };
   registry[ws].layout = walk(layoutOf(ws));
   persistWindows();
+}
+
+/** The pane at a PATH from the root ("" = root, "a"/"b" per level), or null. */
+export function paneAt(path: string, ws: WorkspaceId = active): Pane | null {
+  let p: Pane = layoutOf(ws);
+  for (const c of path) {
+    if (p.kind !== "split") return null;
+    p = c === "a" ? p.a : p.b;
+  }
+  return p;
+}
+
+/** Replace the pane at a path. Returns a NEW tree. */
+function replaceAt(p: Pane, path: string, make: (old: Pane) => Pane): Pane {
+  if (!path) return make(p);
+  if (p.kind !== "split") return p;
+  return path[0] === "a"
+    ? { ...p, a: replaceAt(p.a, path.slice(1), make) }
+    : { ...p, b: replaceAt(p.b, path.slice(1), make) };
+}
+
+/**
+ * STRUTTURA · move a divider by the PATH of its split — the name that is never
+ * ambiguous (`setSplitRatio` keys on the first leaf, which two nested splits
+ * can share, and which a split whose first side is itself split does not have
+ * as a direct child: those dividers could not be dragged at all).
+ */
+export function setSplitRatioAt(path: string, ratio: number,
+                                ws: WorkspaceId = active): void {
+  const clamp = Math.min(0.9, Math.max(0.1, ratio));
+  const at = paneAt(path, ws);
+  if (!at || at.kind !== "split") return;
+  registry[ws].layout = replaceAt(layoutOf(ws), path, (p) => ({ ...p, ratio: clamp }) as Pane);
+  persistWindows();
+}
+
+/**
+ * STRUTTURA · close one SIDE of a split: the divider dragged all the way over it
+ * (the desk's `.seam` + `.closing`). Every window on that side goes, the other
+ * side takes the space, and the focus lands in what stayed. Refused on the root
+ * of a single window — there is no split to collapse.
+ */
+export function closeSplitSide(path: string, side: "a" | "b",
+                               ws: WorkspaceId = active): string[] {
+  const entry = registry[ws];
+  endMagnification(ws);
+  const at = paneAt(path, ws);
+  if (!at || at.kind !== "split") return [];
+  const gone = paneIds(side === "a" ? at.a : at.b);
+  const keep = side === "a" ? at.b : at.a;
+  entry.layout = replaceAt(layoutOf(ws), path, () => keep);
+  const dead = new Set(gone);
+  entry.wins = entry.wins.filter((w) => !dead.has(w.id));
+  if (dead.has(entry.activeId)) entry.activeId = paneIds(keep)[0];
+  entry.layout = repairLayout(entry.layout, entry.wins);
+  persistWindows();
+  return gone;
 }
 
 // ───────────────────────── WIN7 · magnify (full-screen area) ─────────────────

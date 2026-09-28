@@ -55,6 +55,11 @@ export interface DividerRect {
    *  ratio off it, and reading it from here means the drag never has to ask the
    *  DOM where anything is. */
   span: Rect;
+  /** STRUTTURA · the split's PATH from the root ("" = root, then "a"/"b" per
+   *  level): the one name that is never ambiguous. Two nested splits can share
+   *  a first leaf; they cannot share a path. The divider drag resizes and
+   *  closes by it (`setSplitRatioAt`, `closeSplitSide`). */
+  path: string;
 }
 
 export interface LayoutResult {
@@ -82,7 +87,7 @@ export function firstLeafId(p: Pane): string {
 export function layoutRects(pane: Pane, rect: Rect): LayoutResult {
   const areas = new Map<string, Rect>();
   const dividers: DividerRect[] = [];
-  const walk = (p: Pane, r: Rect): void => {
+  const walk = (p: Pane, r: Rect, path = ""): void => {
     if (p.kind === "leaf") {
       areas.set(p.winId, r);
       return;
@@ -95,23 +100,25 @@ export function layoutRects(pane: Pane, rect: Rect): LayoutResult {
     const first = Math.round(usable * p.ratio);
     const second = usable - first;
     if (p.dir === "row") {
-      walk(p.a, { x: r.x, y: r.y, w: first, h: r.h });
+      walk(p.a, { x: r.x, y: r.y, w: first, h: r.h }, path + "a");
       dividers.push({
         firstId: firstLeafId(p.a),
         dir: "row",
         rect: { x: r.x + first, y: r.y, w: DIVIDER, h: r.h },
         span: r,
+        path,
       });
-      walk(p.b, { x: r.x + first + DIVIDER, y: r.y, w: second, h: r.h });
+      walk(p.b, { x: r.x + first + DIVIDER, y: r.y, w: second, h: r.h }, path + "b");
     } else {
-      walk(p.a, { x: r.x, y: r.y, w: r.w, h: first });
+      walk(p.a, { x: r.x, y: r.y, w: r.w, h: first }, path + "a");
       dividers.push({
         firstId: firstLeafId(p.a),
         dir: "col",
         rect: { x: r.x, y: r.y + first, w: r.w, h: DIVIDER },
         span: r,
+        path,
       });
-      walk(p.b, { x: r.x, y: r.y + first + DIVIDER, w: r.w, h: second });
+      walk(p.b, { x: r.x, y: r.y + first + DIVIDER, w: r.w, h: second }, path + "b");
     }
   };
   walk(pane, rect);

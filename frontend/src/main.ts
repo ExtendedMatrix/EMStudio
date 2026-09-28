@@ -147,6 +147,7 @@ import {
   type ThemeMode,
 } from "./theme";
 import { buildNodeList, type NodeListCallbacks } from "./nodelist";
+import { windowIcon } from "./window-icons";
 import { buildOverview, type OverviewApi } from "./overview";
 import { edgeStyle } from "./palette";
 import {
@@ -328,13 +329,15 @@ import {
   closeWindow,
   GRAPH_MODES,
   applyArrangement,
-  canJoin,
   joinWindow,
   siblingIdsOf,
   layoutOf,
   maximizedWin,
   paneIds,
   toggleMaximize,
+  paneAt,
+  setSplitRatioAt,
+  closeSplitSide,
   setActiveWin,
   setActiveWorkspace,
   setWinCurrent,
@@ -346,7 +349,6 @@ import {
   winModes,
   setWinType,
   syncActiveWorkspace,
-  setSplitRatio,
   splitWindow,
   winMode,
   windowsOf,
@@ -11201,6 +11203,11 @@ function addCornerGrips(area: HTMLElement, winId: string, barOffset: string): vo
  * to print.
  */
 
+/** STRUTTURA · true while a divider or a corner is being dragged: the pointer
+ *  crosses other areas on the way, and handing them the focus mid-gesture would
+ *  move the canvas overlays and the edits to a window nobody chose. */
+let shellGesture = false;
+
 /** One area per window, for the lifetime of the window. */
 const winAreas = new Map<string, HTMLElement>();
 /** The divider strips, pooled: a split adds one, a join hides one. */
@@ -11224,6 +11231,15 @@ function createArea(winId: string): HTMLElement {
   // SAME bar every other area gets — every area is a window, so every area says
   // what it is and offers its own verbs.
   bar.className = "tile-bar win-header";
+  // STRUTTURA · a double-click on the EMPTY part of the header magnifies the
+  // window and brings it back (Blender's gesture, beside Ctrl+Space). Only the
+  // bar itself and its spacer: a double-click on a control is that control's.
+  bar.addEventListener("dblclick", (e) => {
+    const tgt = e.target as HTMLElement;
+    if (tgt !== bar && !tgt.classList.contains("win-sep")) return;
+    e.preventDefault();
+    magnifyWindow(winId);
+  });
   area.appendChild(bar);
   const winNow = (): Win | undefined => windowsOf().find((w) => w.id === winId);
   /*
@@ -11252,7 +11268,7 @@ function createArea(winId: string): HTMLElement {
   // Guarded: never mid-drag (moving across a divider while dragging a node must
   // not hand the node to another window), and never while placing a node.
   area.addEventListener("pointerenter", () => {
-    if (dragMode !== "none" || connect || placingType) return;
+    if (dragMode !== "none" || connect || placingType || shellGesture) return;
     if (activeWin().id === winId) return;
     selectWindow(winId);
   });
@@ -11398,29 +11414,59 @@ function positionAreas(): void {
   while (tileDividers.length < dividers.length) {
     const div = document.createElement("div");
     div.className = "tile-div";
-    div.addEventListener("mousedown", (e) => {
+    // STRUTTURA · the divider resizes, and dragged ALL THE WAY (under 7 % or
+    // over 93 % of its split) it CLOSES the side it covers: that side goes grey
+    // as the preview, and the release closes it (the desk's `.seam` +
+    // `.closing`). Pointer events, so a pen or a finger drag it too.
+    div.addEventListener("pointerdown", (e) => {
       const info = dividerInfo.get(div);
-      if (!info) return;
+      if (!info || e.button !== 0) return;
       e.preventDefault();
       div.classList.add("dragging");
+      document.body.classList.add("gesturing-resize");
+      shellGesture = true;
       const base = tileRoot.getBoundingClientRect();
-      const move = (ev: MouseEvent): void => {
-        const r =
+      const split = paneAt(info.path);
+      const sideIds = (side: "a" | "b"): string[] =>
+        split && split.kind === "split" ? paneIds(side === "a" ? split.a : split.b) : [];
+      let closing: "a" | "b" | null = null;
+      const mark = (side: "a" | "b" | null): void => {
+        for (const s2 of ["a", "b"] as const)
+          for (const id of sideIds(s2))
+            winAreas.get(id)?.classList.toggle("closing", s2 === side);
+      };
+      const move = (ev: PointerEvent): void => {
+        const f =
           info.dir === "col"
             ? (ev.clientY - base.top - info.span.y) / Math.max(1, info.span.h)
             : (ev.clientX - base.left - info.span.x) / Math.max(1, info.span.w);
-        setSplitRatio(info.firstId, r);
+        const next = f < 0.07 ? "a" : f > 0.93 ? "b" : null;
+        if (next !== closing) { closing = next; mark(closing); }
+        setSplitRatioAt(info.path, f);
         positionAreas();       // four numbers per area — nothing is rebuilt
         draw();
         draw();
       };
       const up = (): void => {
         div.classList.remove("dragging");
-        window.removeEventListener("mousemove", move);
-        window.removeEventListener("mouseup", up);
+        document.body.classList.remove("gesturing-resize");
+        shellGesture = false;
+        window.removeEventListener("pointermove", move);
+        window.removeEventListener("pointerup", up);
+        window.removeEventListener("pointercancel", up);
+        mark(null);
+        if (closing) {
+          const gone = closeSplitSide(info.path, closing);
+          if (gone.length) {
+            renderTiles();
+            toast(t(gone.length === 1 ? "win.closedOne" : "win.closedMany",
+                    { n: String(gone.length) }));
+          }
+        }
       };
-      window.addEventListener("mousemove", move);
-      window.addEventListener("mouseup", up);
+      window.addEventListener("pointermove", move);
+      window.addEventListener("pointerup", up);
+      window.addEventListener("pointercancel", up);
     });
     tileRoot.appendChild(div);
     tileDividers.push(div);
@@ -17267,14 +17313,24 @@ function buildAreaHeader(win: Win): DocumentFragment {
   const frag = document.createDocumentFragment();
   const type = win.type;
 
-  // ── the window TYPE: icon only, name in the dropdown ──────────────────────
+  // ── the window TYPE: line icon + NAME, one control (STRUTTURA) ───────────
+  //
+  // HDR1 had put the icon alone here ("a word repeated in every bar is a word
+  // you stop reading"). Measured on the desk, it was the other way round: the
+  // MODE read and the TYPE did not, because an emoji is not a name. So the type
+  // says what it is, and its menu ends with the one verb that removes it.
   const typeDd = document.createElement("div");
   typeDd.className = "dropdown win-type";
   const typeTog = document.createElement("button");
   typeTog.className = "dd-toggle win-type-toggle";
   typeTog.title = t("win.typeTitle");
+  // an EMtree window on its Outliner tab IS the outliner, and says so
+  const showsOutliner = type === "emtree" && panelIdOf(win) === "nodelist";
+  const typeIcon = showsOutliner ? windowIcon("outliner") : WINDOW_TYPE_META[type].icon;
+  const typeName = showsOutliner ? t("panel.outliner") : t(WINDOW_TYPE_META[type].labelKey);
   typeTog.innerHTML =
-    `<span class="win-type-icon">${WINDOW_TYPE_META[type].icon}</span>` +
+    `<span class="win-type-icon">${typeIcon}</span>` +
+    `<span class="win-type-label">${escapeHtml(typeName)}</span>` +
     `<span class="win-type-caret">▾</span>`;
   const typeMenu = document.createElement("div");
   typeMenu.className = "dd-menu hidden";
@@ -17283,17 +17339,59 @@ function buildAreaHeader(win: Win): DocumentFragment {
     const b = document.createElement("button");
     b.dataset.wt = tt;
     b.classList.toggle("active", tt === type);
-    b.innerHTML = `<span class="wt-ic">${meta.icon}</span> ${t(meta.labelKey)}`;
+    b.innerHTML = `<span class="wt-ic">${meta.icon}</span> ${escapeHtml(t(meta.labelKey))}`;
     b.addEventListener("click", () => transformWindowOf(win, tt));
     typeMenu.appendChild(b);
+  }
+  // CLOSE is the last item of the type menu, after a rule — the × chip is gone
+  // with the other four, and a window is also closed by dragging a divider all
+  // the way over it (`positionAreas`).
+  if (windowsOf().length > 1) {
+    const sep = document.createElement("div");
+    sep.className = "dd-sep";
+    typeMenu.appendChild(sep);
+    const close = document.createElement("button");
+    close.className = "win-close-item";
+    close.textContent = t("win.closeItem");
+    close.addEventListener("click", () => {
+      setActiveWin(win.id);   // the focus follows the verb, and the verb says WHICH
+      closeActiveWindow(win);
+    });
+    typeMenu.appendChild(close);
   }
   wireBarDropdown(typeTog, typeMenu);
   typeDd.append(typeTog, typeMenu);
   frag.appendChild(typeDd);
 
   // ── the MODE: which projection of the document THIS window shows ──────────
+  //
+  // STRUTTURA · up to three modes are a SEGMENTED control, where every choice is
+  // visible and one click away (the desk's `.seg`); from four up a dropdown,
+  // because a row of five buttons is the header again. Either way the mode is
+  // written by its name, without the word «Mode».
   const modes = headerModesOf(win);
-  if (modes) {
+  if (modes && modes.items.length <= 3) {
+    const seg = document.createElement("span");
+    seg.className = "win-seg";
+    seg.setAttribute("role", "group");
+    seg.setAttribute("aria-label", t("win.modeTitle"));
+    for (const m of modes.items) {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.textContent = m.label;
+      b.setAttribute("aria-pressed", m.current ? "true" : "false");
+      if (m.disabled) {
+        b.classList.add("dd-disabled");
+        b.setAttribute("aria-disabled", "true");
+        b.title = m.disabled;
+        b.addEventListener("click", (e) => { e.stopPropagation(); toast(m.disabled!); });
+      } else {
+        b.addEventListener("click", (e) => { e.stopPropagation(); if (!m.current) m.run(); });
+      }
+      seg.appendChild(b);
+    }
+    frag.appendChild(seg);
+  } else if (modes) {
     const modeDd = document.createElement("div");
     modeDd.className = "dropdown win-mode";
     const modeTog = document.createElement("button");
@@ -17305,6 +17403,12 @@ function buildAreaHeader(win: Win): DocumentFragment {
     const modeMenu = document.createElement("div");
     modeMenu.className = "dd-menu hidden";
     for (const m of modes.items) {
+      if (m.group) {
+        const g = document.createElement("div");
+        g.className = "dd-group";
+        g.textContent = m.group;
+        modeMenu.appendChild(g);
+      }
       const b = document.createElement("button");
       b.textContent = m.label;
       b.classList.toggle("active", m.current);
@@ -17427,50 +17531,31 @@ function buildAreaHeader(win: Win): DocumentFragment {
 
   const spacer = document.createElement("span");
   spacer.className = "win-sep";
+  spacer.title = t("win.maxHint");
   frag.appendChild(spacer);
 
   // ── that window's own SEARCH (HDR1) ───────────────────────────────────────
   const search = buildWindowSearch(win);
   if (search) frag.appendChild(search);
 
-  // ── the arrangement verbs: split, magnify, join, close ────────────────────
-  const arr = document.createElement("span");
-  arr.className = "win-arrange";
-  const chip = (glyph: string, title: string, on: boolean, run: () => void): void => {
-    const b = document.createElement("button");
-    b.className = "wi-chip wi-add" + (on ? " wi-on" : "");
-    b.textContent = glyph;
-    b.title = title;
-    b.addEventListener("click", (e) => {
+  // ── the arrangement verbs are GESTURES now (STRUTTURA) ───────────────────
+  //
+  // The five chips → ↓ ⛶ ⊟ × took half of every header. Split and join are the
+  // corner gesture (`addCornerGrips`), magnify is a double-click on the empty
+  // part of the header or Ctrl+Space, close is the last item of the type menu or
+  // a divider dragged all the way. What stays is the one chip that answers
+  // "how do I get my arrangement back?" while a window is magnified.
+  if (maximizedWin() === win.id) {
+    const restore = document.createElement("button");
+    restore.className = "wi-chip wi-restore";
+    restore.textContent = `⤡ ${t("win.restore")}`;
+    restore.title = t("win.unmaximize");
+    restore.addEventListener("click", (e) => {
       e.stopPropagation();
-      run();
+      magnifyWindow(win.id);
     });
-    arr.appendChild(b);
-  };
-  chip("→", t("win.splitRight"), false, () => splitAreaOf(win, "row"));
-  chip("↓", t("win.splitDown"), false, () => splitAreaOf(win, "col"));
-  const magnified = maximizedWin() === win.id;
-  chip("⛶", t(magnified ? "win.unmaximize" : "win.maximize"), magnified, () =>
-    magnifyWindow(win.id),
-  );
-  if (canJoin(win.id))
-    chip("⊟", t("win.join"), false, () => {
-      joinWindow(win.id);
-      renderTiles();
-    });
-  if (windowsOf().length > 1) {
-    const close = document.createElement("button");
-    close.className = "wi-chip wi-close";
-    close.textContent = "×";
-    close.title = t("win.close");
-    close.addEventListener("click", (e) => {
-      e.stopPropagation();
-      setActiveWin(win.id);   // the focus follows the verb, and the verb says WHICH
-      closeActiveWindow(win);
-    });
-    arr.appendChild(close);
+    frag.appendChild(restore);
   }
-  frag.appendChild(arr);
   // ONE SURFACE · the head does NOT know who has the focus, and that is
   // stronger than the parity it used to be checked for.
   //
@@ -17496,12 +17581,11 @@ function focusThen(win: Win, run: () => void): void {
   run();
 }
 
-/** Split the area of a SPECIFIC window (its own bar's verb). */
-function splitAreaOf(win: Win, dir: "row" | "col"): void {
-  setActiveWin(win.id);
-  splitWindow(win.id, dir);
-  renderTiles();
-}
+/*
+ * GONE (30 set 2026) · `splitAreaOf()`, the verb of the → and ↓ chips. The chips
+ * left the header (STRUTTURA fase 2): splitting is the corner gesture now, and
+ * it calls `splitWindow` with the ratio and the side the pointer chose.
+ */
 
 /**
  * DAG · show the corpus as a picture, from the Documentation tab.
@@ -17564,14 +17648,14 @@ function transformWindowOf(win: Win, type: WindowType): void {
 function headerModesOf(win: Win): {
   currentLabel: string;
   items: { label: string; current: boolean; run: () => void;
-           disabled?: string }[];
+           disabled?: string; group?: string }[];
 } | null {
   if (win.type === "graph") {
     const cur = winMode(win);
     return {
-      currentLabel: t("mode.label", { mode: t(`mode.${cur}`) }),
+      currentLabel: t(`mode.${cur}`),
       items: GRAPH_MODES.map((m) => ({
-        label: t("mode.label", { mode: t(`mode.${m}`) }),
+        label: t(`mode.${m}`),
         current: m === cur,
         run: () => focusThen(win, () => setWindowMode(win, m)),
       })),
@@ -17584,9 +17668,9 @@ function headerModesOf(win: Win): {
   if (winModes(win.type).length) {
     const cur = winModeOf(win);
     return {
-      currentLabel: t("mode.label", { mode: t(`mode.${cur}`) }),
+      currentLabel: t(`mode.${cur}`),
       items: winModes(win.type).map((m) => ({
-        label: t("mode.label", { mode: t(`mode.${m}`) }),
+        label: t(`mode.${m}`),
         current: m === cur,
         // A mode that is planned but not built is LISTED and disabled, with the
         // reason — the same treatment the menus give an action that cannot run.
@@ -17610,12 +17694,7 @@ function headerModesOf(win: Win): {
     // "US view" was a sheet NAME in a selector; as a mode it reads "US view
     // Mode", which says the same word twice. The sheet keys are the names.
     const label = (k: string): string =>
-      t("mode.label", {
-        mode: (EM_DATA_SHEETS.find((s) => s.key === k)?.label ?? k).replace(
-          / view$/,
-          "",
-        ),
-      });
+      EM_DATA_SHEETS.find((s) => s.key === k)?.label ?? k;
     return {
       currentLabel: label(cur),
       items: EM_DATA_SHEETS.map((sheet) => ({
@@ -18510,7 +18589,9 @@ function renderWorkspaceBar(): void {
     // am I" and not "what am I supposed to be doing here"
     b.title = w.hintKey ? `${label} — ${t(w.hintKey)}` : label;
     b.innerHTML =
-      `<span class="ws-ic">${w.icon}</span><span class="ws-lb">${escapeHtml(label)}</span>`;
+      // STRUTTURA · the tab carries the line icon of the window it centres on
+      `<span class="ws-ic">${WINDOW_TYPE_META[w.windowType]?.icon ?? w.icon}</span>` +
+      `<span class="ws-lb">${escapeHtml(label)}</span>`;
     b.addEventListener("click", () => setWorkspace(w.id));
     if (w.builtin && w.arrangement) {
       // STUDIO · a built-in's arrangement is applied once and is yours after
