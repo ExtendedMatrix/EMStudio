@@ -151,4 +151,71 @@ const eq = (got, want, what) => {
      "the excerpt is escaped and the words marked");
 }
 
+// ── 6 · the facets engine and the table's views ─────────────────────────────
+{
+  const F = await load("facets.ts");
+  const rows = [
+    { text: "usm101 muro", fx: { type: ["US"], epoch: ["E2a", "E2"], state: ["pd"] } },
+    { text: "sf100 capitello", fx: { type: ["SF"], epoch: ["E1"], state: [] } },
+    { text: "us102 strato", fx: { type: ["US"], epoch: ["E2"], state: ["warn"] } },
+  ];
+  const label = (k, v) => ({ E1: "Età imperiale", E2: "Medioevo", E2a: "Medioevo · fase I" })[v] ?? v;
+  const pass = (sel) => rows.filter((r) => F.passRow(r, sel, label)).map((r) => r.text.split(" ")[0]);
+  eq(pass({ q: "", f: { type: ["US"] } }), ["usm101", "us102"], "a ticked value filters");
+  eq(pass({ q: "", f: { type: ["US"], state: ["pd"] } }), ["usm101"], "facets combine (AND across facets)");
+  eq(pass({ q: "", f: { epoch: ["E2"] } }), ["usm101", "us102"], "a mother epoch finds the units of its sub-epochs");
+  eq(pass({ q: "epoca:med", f: {} }), ["usm101", "us102"], "`epoca:med` matches the LABEL (Italian key)");
+  eq(pass({ q: "epoch:imperiale", f: {} }), ["sf100"], "`epoch:` is the English key");
+  eq(pass({ q: "tipo:sf capitello", f: {} }), ["sf100"], "a token and a word together");
+  const c = F.facetCounts(rows, { q: "", f: { type: ["SF"] } }, "type");
+  eq([c.get("US"), c.get("SF")], [2, 1], "counts ignore the facet's own selection");
+  const mother = { v: "E2", label: "Medioevo", children: ["E2a", "E2b"] };
+  eq(F.toggleValue({ q: "", f: {} }, "epoch", mother, true).f.epoch, ["E2", "E2a", "E2b"],
+     "ticking a mother ticks her sub-epochs");
+  const defs = [{ key: "epoch", labelKey: "table.fx.epoch",
+                  values: () => [mother, { v: "E2a", label: "a" }, { v: "E2b", label: "b" }] },
+                { key: "type", labelKey: "table.fx.type",
+                  values: () => ["A", "B", "C", "D"].map((v) => ({ v, label: v })) }];
+  eq(F.selectionTokens({ q: "", f: { epoch: ["E2", "E2a", "E2b"] } }, defs).map((x) => x.label),
+     ["Medioevo"], "a mother ticked with her children shows as ONE token");
+  eq(F.selectionTokens({ q: "", f: { type: ["A", "B", "C", "D"] } }, defs)[0].count, 4,
+     "more than three in one facet collapse into «Tipo: 4 ×»");
+}
+{
+  const V = await load("table-views.ts");
+  const I = await load("issues.ts");
+  const R = await load("rules.ts");
+  const fx = JSON.parse(await (await import("node:fs/promises")).readFile(
+    new URL("../../.claude/wip/design/paradata-in-pancia/pancia_A_estrattore_su_RSF.em.json",
+            import.meta.url), "utf8").catch(() => "null"));
+  if (fx) {
+    const g = fx.graphs ? Object.values(fx.graphs)[0] : fx.graph;
+    const doc = { graph: g };
+    const iss = I.issues({ doc, nodes: g.nodes, isUnit: R.isStratigraphicType,
+      edgeAllowed: (et, st, dt) => R.allowedEdgeTypes(st, dt).map(R.canonicalEdgeType)
+        .includes(R.canonicalEdgeType(et)),
+      t: (k, v) => `${k}${v ? JSON.stringify(v) : ""}` });
+    const socket = iss.filter((i) => i.rule === "datamodel");
+    eq(socket.length, 1, "pancia A: ONE datamodel warning — the extractor extracted_from an RSF");
+    eq(g.nodes.find((n) => n.id === socket[0].node)?.name, "X.01", "…on the extractor");
+    const unitOf = I.unitOfIssue(doc, R.isStratigraphicType, g.nodes);
+    eq(unitOf(socket[0].node), "USM101", "…whose unit (its paradata group's) is USM101");
+    const ctx = { doc, nodes: g.nodes, isUnit: R.isStratigraphicType, issues: iss,
+                  unitOfIssue: unitOf, t: (k) => k };
+    const ix = V.indexOf(ctx);
+    eq(V.writtenStart(ix, "USM101"), 180, "the written date is the unit's absolute_time_start");
+    const ff = V.fromFinds(ix, "USM101");
+    eq([ff.v, ff.via, ff.origin, ff.fromEpoch], [100, "RSF1", "SF100", true],
+       "from the finds: RSF100b ← SF100 (changed_from), dated by the original's epoch");
+    eq(V.propagated(g.nodes.find((n) => n.id === "USM101")), null,
+       "the propagated column is s3Dgraphy's: nothing written → nothing invented");
+    const facts = V.factsFor("Units", ctx, ix);
+    ok(facts.get("USM101").fx.state.includes("warn"), "USM101 carries «with warnings»");
+    ok(facts.get("USM101").fx.state.includes("pd"), "…and «with paradata»");
+    eq(V.epochTree(ctx, ix).map((e) => e.node.id), ["EP_MED", "EP_ROM"], "epochs newest first");
+    const cards = V.docCards(ctx, ix, new Set(["RSF1"]));
+    eq(cards.length, 0, "a document card is for documents only");
+  }
+}
+
 console.log(`studio: ${checks} checks passed`);

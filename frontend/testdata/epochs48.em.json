@@ -1,0 +1,3089 @@
+{
+ "header": {
+  "name": "Fixture 48 epoche (STRUTTURA)",
+  "schema_version": "1.6"
+ },
+ "graph": {
+  "graph_id": "epochs48",
+  "name": "Fixture 48 epoche",
+  "nodes": [
+   {
+    "id": "A1",
+    "name": "Anna Bianchi",
+    "node_type": "author",
+    "data": {}
+   },
+   {
+    "id": "AI1",
+    "name": "StratiMiner",
+    "node_type": "author_ai",
+    "data": {}
+   },
+   {
+    "id": "EP00",
+    "name": "Età contemporanea",
+    "node_type": "EpochNode",
+    "data": {
+     "start_time": 1800,
+     "end_time": 2000
+    }
+   },
+   {
+    "id": "EP00_0",
+    "name": "Età contemporanea · fase I",
+    "node_type": "EpochNode",
+    "data": {
+     "start_time": 1800,
+     "end_time": 1867
+    }
+   },
+   {
+    "id": "U001",
+    "name": "USM101",
+    "node_type": "USM",
+    "description": "unità 1 di Età contemporanea"
+   },
+   {
+    "id": "U002",
+    "name": "SF102",
+    "node_type": "SF",
+    "description": "unità 2 di Età contemporanea"
+   },
+   {
+    "id": "EP00_1",
+    "name": "Età contemporanea · fase II",
+    "node_type": "EpochNode",
+    "data": {
+     "start_time": 1867,
+     "end_time": 1933
+    }
+   },
+   {
+    "id": "U003",
+    "name": "US103",
+    "node_type": "US",
+    "description": "unità 3 di Età contemporanea"
+   },
+   {
+    "id": "U004",
+    "name": "US104",
+    "node_type": "US",
+    "description": "unità 4 di Età contemporanea"
+   },
+   {
+    "id": "R004",
+    "name": "RSF204",
+    "node_type": "RSF",
+    "description": "reperto contenuto"
+   },
+   {
+    "id": "P004",
+    "name": "material_type",
+    "node_type": "property",
+    "data": {
+     "property_type": "material_type",
+     "value": "tufo"
+    }
+   },
+   {
+    "id": "X004",
+    "name": "X.04",
+    "node_type": "extractor",
+    "data": {}
+   },
+   {
+    "id": "EP00_2",
+    "name": "Età contemporanea · fase III",
+    "node_type": "EpochNode",
+    "data": {
+     "start_time": 1933,
+     "end_time": 2000
+    }
+   },
+   {
+    "id": "U005",
+    "name": "US105",
+    "node_type": "US",
+    "description": "unità 5 di Età contemporanea"
+   },
+   {
+    "id": "P005",
+    "name": "material_type",
+    "node_type": "property",
+    "data": {
+     "property_type": "material_type",
+     "value": "laterizio"
+    }
+   },
+   {
+    "id": "X005",
+    "name": "X.05",
+    "node_type": "extractor",
+    "data": {}
+   },
+   {
+    "id": "U006",
+    "name": "US106",
+    "node_type": "US",
+    "description": "unità 6 di Età contemporanea"
+   },
+   {
+    "id": "R006",
+    "name": "RSF206",
+    "node_type": "RSF",
+    "description": "reperto contenuto"
+   },
+   {
+    "id": "P006",
+    "name": "material_type",
+    "node_type": "property",
+    "data": {
+     "property_type": "material_type",
+     "value": "laterizio"
+    }
+   },
+   {
+    "id": "X006",
+    "name": "X.06",
+    "node_type": "extractor",
+    "data": {}
+   },
+   {
+    "id": "EP01",
+    "name": "Età moderna",
+    "node_type": "EpochNode",
+    "data": {
+     "start_time": 1500,
+     "end_time": 1800
+    }
+   },
+   {
+    "id": "EP01_0",
+    "name": "Età moderna · fase I",
+    "node_type": "EpochNode",
+    "data": {
+     "start_time": 1500,
+     "end_time": 1600
+    }
+   },
+   {
+    "id": "U007",
+    "name": "USVs107",
+    "node_type": "USVs",
+    "description": "unità 7 di Età moderna"
+   },
+   {
+    "id": "P007",
+    "name": "material_type",
+    "node_type": "property",
+    "data": {
+     "property_type": "material_type",
+     "value": "tufo"
+    }
+   },
+   {
+    "id": "X007",
+    "name": "X.07",
+    "node_type": "extractor",
+    "data": {}
+   },
+   {
+    "id": "U008",
+    "name": "USVs108",
+    "node_type": "USVs",
+    "description": "unità 8 di Età moderna"
+   },
+   {
+    "id": "EP01_1",
+    "name": "Età moderna · fase II",
+    "node_type": "EpochNode",
+    "data": {
+     "start_time": 1600,
+     "end_time": 1700
+    }
+   },
+   {
+    "id": "U009",
+    "name": "US109",
+    "node_type": "US",
+    "description": "unità 9 di Età moderna"
+   },
+   {
+    "id": "U010",
+    "name": "US110",
+    "node_type": "US",
+    "description": "unità 10 di Età moderna"
+   },
+   {
+    "id": "R010",
+    "name": "RSF210",
+    "node_type": "RSF",
+    "description": "reperto contenuto"
+   },
+   {
+    "id": "EP01_2",
+    "name": "Età moderna · fase III",
+    "node_type": "EpochNode",
+    "data": {
+     "start_time": 1700,
+     "end_time": 1800
+    }
+   },
+   {
+    "id": "U011",
+    "name": "US111",
+    "node_type": "US",
+    "description": "unità 11 di Età moderna"
+   },
+   {
+    "id": "P011",
+    "name": "material_type",
+    "node_type": "property",
+    "data": {
+     "property_type": "material_type",
+     "value": "tufo"
+    }
+   },
+   {
+    "id": "X011",
+    "name": "X.11",
+    "node_type": "extractor",
+    "data": {}
+   },
+   {
+    "id": "U012",
+    "name": "USVs112",
+    "node_type": "USVs",
+    "description": "unità 12 di Età moderna"
+   },
+   {
+    "id": "P012",
+    "name": "material_type",
+    "node_type": "property",
+    "data": {
+     "property_type": "material_type",
+     "value": "marmo"
+    }
+   },
+   {
+    "id": "X012",
+    "name": "X.12",
+    "node_type": "extractor",
+    "data": {}
+   },
+   {
+    "id": "EP02",
+    "name": "Basso Medioevo",
+    "node_type": "EpochNode",
+    "data": {
+     "start_time": 1250,
+     "end_time": 1500
+    }
+   },
+   {
+    "id": "EP02_0",
+    "name": "Basso Medioevo · fase I",
+    "node_type": "EpochNode",
+    "data": {
+     "start_time": 1250,
+     "end_time": 1333
+    }
+   },
+   {
+    "id": "U013",
+    "name": "US113",
+    "node_type": "US",
+    "description": "unità 13 di Basso Medioevo"
+   },
+   {
+    "id": "U014",
+    "name": "US114",
+    "node_type": "US",
+    "description": "unità 14 di Basso Medioevo"
+   },
+   {
+    "id": "R014",
+    "name": "RSF214",
+    "node_type": "RSF",
+    "description": "reperto contenuto"
+   },
+   {
+    "id": "P014",
+    "name": "material_type",
+    "node_type": "property",
+    "data": {
+     "property_type": "material_type",
+     "value": "marmo"
+    }
+   },
+   {
+    "id": "X014",
+    "name": "X.14",
+    "node_type": "extractor",
+    "data": {}
+   },
+   {
+    "id": "EP02_1",
+    "name": "Basso Medioevo · fase II",
+    "node_type": "EpochNode",
+    "data": {
+     "start_time": 1333,
+     "end_time": 1417
+    }
+   },
+   {
+    "id": "U015",
+    "name": "USVs115",
+    "node_type": "USVs",
+    "description": "unità 15 di Basso Medioevo"
+   },
+   {
+    "id": "P015",
+    "name": "material_type",
+    "node_type": "property",
+    "data": {
+     "property_type": "material_type",
+     "value": "tufo"
+    }
+   },
+   {
+    "id": "X015",
+    "name": "X.15",
+    "node_type": "extractor",
+    "data": {}
+   },
+   {
+    "id": "U016",
+    "name": "USVs116",
+    "node_type": "USVs",
+    "description": "unità 16 di Basso Medioevo"
+   },
+   {
+    "id": "EP02_2",
+    "name": "Basso Medioevo · fase III",
+    "node_type": "EpochNode",
+    "data": {
+     "start_time": 1417,
+     "end_time": 1500
+    }
+   },
+   {
+    "id": "U017",
+    "name": "USM117",
+    "node_type": "USM",
+    "description": "unità 17 di Basso Medioevo"
+   },
+   {
+    "id": "U018",
+    "name": "SF118",
+    "node_type": "SF",
+    "description": "unità 18 di Basso Medioevo"
+   },
+   {
+    "id": "P018",
+    "name": "material_type",
+    "node_type": "property",
+    "data": {
+     "property_type": "material_type",
+     "value": "tufo"
+    }
+   },
+   {
+    "id": "X018",
+    "name": "X.18",
+    "node_type": "extractor",
+    "data": {}
+   },
+   {
+    "id": "EP03",
+    "name": "Alto Medioevo",
+    "node_type": "EpochNode",
+    "data": {
+     "start_time": 600,
+     "end_time": 1250
+    }
+   },
+   {
+    "id": "EP03_0",
+    "name": "Alto Medioevo · fase I",
+    "node_type": "EpochNode",
+    "data": {
+     "start_time": 600,
+     "end_time": 817
+    }
+   },
+   {
+    "id": "U019",
+    "name": "US119",
+    "node_type": "US",
+    "description": "unità 19 di Alto Medioevo"
+   },
+   {
+    "id": "P019",
+    "name": "material_type",
+    "node_type": "property",
+    "data": {
+     "property_type": "material_type",
+     "value": "laterizio"
+    }
+   },
+   {
+    "id": "X019",
+    "name": "X.19",
+    "node_type": "extractor",
+    "data": {}
+   },
+   {
+    "id": "U020",
+    "name": "USM120",
+    "node_type": "USM",
+    "description": "unità 20 di Alto Medioevo"
+   },
+   {
+    "id": "R020",
+    "name": "RSF220",
+    "node_type": "RSF",
+    "description": "reperto contenuto"
+   },
+   {
+    "id": "EP03_1",
+    "name": "Alto Medioevo · fase II",
+    "node_type": "EpochNode",
+    "data": {
+     "start_time": 817,
+     "end_time": 1033
+    }
+   },
+   {
+    "id": "U021",
+    "name": "USM121",
+    "node_type": "USM",
+    "description": "unità 21 di Alto Medioevo"
+   },
+   {
+    "id": "U022",
+    "name": "US122",
+    "node_type": "US",
+    "description": "unità 22 di Alto Medioevo"
+   },
+   {
+    "id": "R022",
+    "name": "RSF222",
+    "node_type": "RSF",
+    "description": "reperto contenuto"
+   },
+   {
+    "id": "P022",
+    "name": "material_type",
+    "node_type": "property",
+    "data": {
+     "property_type": "material_type",
+     "value": "laterizio"
+    }
+   },
+   {
+    "id": "X022",
+    "name": "X.22",
+    "node_type": "extractor",
+    "data": {}
+   },
+   {
+    "id": "EP03_2",
+    "name": "Alto Medioevo · fase III",
+    "node_type": "EpochNode",
+    "data": {
+     "start_time": 1033,
+     "end_time": 1250
+    }
+   },
+   {
+    "id": "U023",
+    "name": "USM123",
+    "node_type": "USM",
+    "description": "unità 23 di Alto Medioevo"
+   },
+   {
+    "id": "P023",
+    "name": "material_type",
+    "node_type": "property",
+    "data": {
+     "property_type": "material_type",
+     "value": "laterizio"
+    }
+   },
+   {
+    "id": "X023",
+    "name": "X.23",
+    "node_type": "extractor",
+    "data": {}
+   },
+   {
+    "id": "U024",
+    "name": "US124",
+    "node_type": "US",
+    "description": "unità 24 di Alto Medioevo"
+   },
+   {
+    "id": "R024",
+    "name": "RSF224",
+    "node_type": "RSF",
+    "description": "reperto contenuto"
+   },
+   {
+    "id": "EP04",
+    "name": "Tardoantico",
+    "node_type": "EpochNode",
+    "data": {
+     "start_time": 300,
+     "end_time": 600
+    }
+   },
+   {
+    "id": "EP04_0",
+    "name": "Tardoantico · fase I",
+    "node_type": "EpochNode",
+    "data": {
+     "start_time": 300,
+     "end_time": 400
+    }
+   },
+   {
+    "id": "U025",
+    "name": "US125",
+    "node_type": "US",
+    "description": "unità 25 di Tardoantico"
+   },
+   {
+    "id": "U026",
+    "name": "USVs126",
+    "node_type": "USVs",
+    "description": "unità 26 di Tardoantico"
+   },
+   {
+    "id": "EP04_1",
+    "name": "Tardoantico · fase II",
+    "node_type": "EpochNode",
+    "data": {
+     "start_time": 400,
+     "end_time": 500
+    }
+   },
+   {
+    "id": "U027",
+    "name": "USM127",
+    "node_type": "USM",
+    "description": "unità 27 di Tardoantico"
+   },
+   {
+    "id": "P027",
+    "name": "material_type",
+    "node_type": "property",
+    "data": {
+     "property_type": "material_type",
+     "value": "laterizio"
+    }
+   },
+   {
+    "id": "X027",
+    "name": "X.27",
+    "node_type": "extractor",
+    "data": {}
+   },
+   {
+    "id": "U028",
+    "name": "USVs128",
+    "node_type": "USVs",
+    "description": "unità 28 di Tardoantico"
+   },
+   {
+    "id": "EP04_2",
+    "name": "Tardoantico · fase III",
+    "node_type": "EpochNode",
+    "data": {
+     "start_time": 500,
+     "end_time": 600
+    }
+   },
+   {
+    "id": "U029",
+    "name": "US129",
+    "node_type": "US",
+    "description": "unità 29 di Tardoantico"
+   },
+   {
+    "id": "U030",
+    "name": "USM130",
+    "node_type": "USM",
+    "description": "unità 30 di Tardoantico"
+   },
+   {
+    "id": "R030",
+    "name": "RSF230",
+    "node_type": "RSF",
+    "description": "reperto contenuto"
+   },
+   {
+    "id": "EP05",
+    "name": "Età imperiale",
+    "node_type": "EpochNode",
+    "data": {
+     "start_time": -27,
+     "end_time": 300
+    }
+   },
+   {
+    "id": "EP05_0",
+    "name": "Età imperiale · fase I",
+    "node_type": "EpochNode",
+    "data": {
+     "start_time": -27,
+     "end_time": 82
+    }
+   },
+   {
+    "id": "U031",
+    "name": "US131",
+    "node_type": "US",
+    "description": "unità 31 di Età imperiale"
+   },
+   {
+    "id": "P031",
+    "name": "material_type",
+    "node_type": "property",
+    "data": {
+     "property_type": "material_type",
+     "value": "marmo"
+    }
+   },
+   {
+    "id": "X031",
+    "name": "X.31",
+    "node_type": "extractor",
+    "data": {}
+   },
+   {
+    "id": "U032",
+    "name": "USVs132",
+    "node_type": "USVs",
+    "description": "unità 32 di Età imperiale"
+   },
+   {
+    "id": "EP05_1",
+    "name": "Età imperiale · fase II",
+    "node_type": "EpochNode",
+    "data": {
+     "start_time": 82,
+     "end_time": 191
+    }
+   },
+   {
+    "id": "U033",
+    "name": "SF133",
+    "node_type": "SF",
+    "description": "unità 33 di Età imperiale"
+   },
+   {
+    "id": "P033",
+    "name": "material_type",
+    "node_type": "property",
+    "data": {
+     "property_type": "material_type",
+     "value": "laterizio"
+    }
+   },
+   {
+    "id": "X033",
+    "name": "X.33",
+    "node_type": "extractor",
+    "data": {}
+   },
+   {
+    "id": "U034",
+    "name": "US134",
+    "node_type": "US",
+    "description": "unità 34 di Età imperiale"
+   },
+   {
+    "id": "R034",
+    "name": "RSF234",
+    "node_type": "RSF",
+    "description": "reperto contenuto"
+   },
+   {
+    "id": "EP05_2",
+    "name": "Età imperiale · fase III",
+    "node_type": "EpochNode",
+    "data": {
+     "start_time": 191,
+     "end_time": 300
+    }
+   },
+   {
+    "id": "U035",
+    "name": "USM135",
+    "node_type": "USM",
+    "description": "unità 35 di Età imperiale"
+   },
+   {
+    "id": "P035",
+    "name": "material_type",
+    "node_type": "property",
+    "data": {
+     "property_type": "material_type",
+     "value": "tufo"
+    }
+   },
+   {
+    "id": "X035",
+    "name": "X.35",
+    "node_type": "extractor",
+    "data": {}
+   },
+   {
+    "id": "U036",
+    "name": "US136",
+    "node_type": "US",
+    "description": "unità 36 di Età imperiale"
+   },
+   {
+    "id": "R036",
+    "name": "RSF236",
+    "node_type": "RSF",
+    "description": "reperto contenuto"
+   },
+   {
+    "id": "P036",
+    "name": "material_type",
+    "node_type": "property",
+    "data": {
+     "property_type": "material_type",
+     "value": "laterizio"
+    }
+   },
+   {
+    "id": "X036",
+    "name": "X.36",
+    "node_type": "extractor",
+    "data": {}
+   },
+   {
+    "id": "EP06",
+    "name": "Età repubblicana",
+    "node_type": "EpochNode",
+    "data": {
+     "start_time": -509,
+     "end_time": -27
+    }
+   },
+   {
+    "id": "EP06_0",
+    "name": "Età repubblicana · fase I",
+    "node_type": "EpochNode",
+    "data": {
+     "start_time": -509,
+     "end_time": -348
+    }
+   },
+   {
+    "id": "U037",
+    "name": "US137",
+    "node_type": "US",
+    "description": "unità 37 di Età repubblicana"
+   },
+   {
+    "id": "P037",
+    "name": "material_type",
+    "node_type": "property",
+    "data": {
+     "property_type": "material_type",
+     "value": "laterizio"
+    }
+   },
+   {
+    "id": "X037",
+    "name": "X.37",
+    "node_type": "extractor",
+    "data": {}
+   },
+   {
+    "id": "U038",
+    "name": "US138",
+    "node_type": "US",
+    "description": "unità 38 di Età repubblicana"
+   },
+   {
+    "id": "R038",
+    "name": "RSF238",
+    "node_type": "RSF",
+    "description": "reperto contenuto"
+   },
+   {
+    "id": "EP06_1",
+    "name": "Età repubblicana · fase II",
+    "node_type": "EpochNode",
+    "data": {
+     "start_time": -348,
+     "end_time": -188
+    }
+   },
+   {
+    "id": "U039",
+    "name": "USVs139",
+    "node_type": "USVs",
+    "description": "unità 39 di Età repubblicana"
+   },
+   {
+    "id": "P039",
+    "name": "material_type",
+    "node_type": "property",
+    "data": {
+     "property_type": "material_type",
+     "value": "tufo"
+    }
+   },
+   {
+    "id": "X039",
+    "name": "X.39",
+    "node_type": "extractor",
+    "data": {}
+   },
+   {
+    "id": "U040",
+    "name": "USVs140",
+    "node_type": "USVs",
+    "description": "unità 40 di Età repubblicana"
+   },
+   {
+    "id": "P040",
+    "name": "material_type",
+    "node_type": "property",
+    "data": {
+     "property_type": "material_type",
+     "value": "laterizio"
+    }
+   },
+   {
+    "id": "X040",
+    "name": "X.40",
+    "node_type": "extractor",
+    "data": {}
+   },
+   {
+    "id": "EP06_2",
+    "name": "Età repubblicana · fase III",
+    "node_type": "EpochNode",
+    "data": {
+     "start_time": -188,
+     "end_time": -27
+    }
+   },
+   {
+    "id": "U041",
+    "name": "SF141",
+    "node_type": "SF",
+    "description": "unità 41 di Età repubblicana"
+   },
+   {
+    "id": "U042",
+    "name": "US142",
+    "node_type": "US",
+    "description": "unità 42 di Età repubblicana"
+   },
+   {
+    "id": "R042",
+    "name": "RSF242",
+    "node_type": "RSF",
+    "description": "reperto contenuto"
+   },
+   {
+    "id": "P042",
+    "name": "material_type",
+    "node_type": "property",
+    "data": {
+     "property_type": "material_type",
+     "value": "tufo"
+    }
+   },
+   {
+    "id": "X042",
+    "name": "X.42",
+    "node_type": "extractor",
+    "data": {}
+   },
+   {
+    "id": "EP07",
+    "name": "Età arcaica",
+    "node_type": "EpochNode",
+    "data": {
+     "start_time": -750,
+     "end_time": -509
+    }
+   },
+   {
+    "id": "EP07_0",
+    "name": "Età arcaica · fase I",
+    "node_type": "EpochNode",
+    "data": {
+     "start_time": -750,
+     "end_time": -670
+    }
+   },
+   {
+    "id": "U043",
+    "name": "US143",
+    "node_type": "US",
+    "description": "unità 43 di Età arcaica"
+   },
+   {
+    "id": "P043",
+    "name": "material_type",
+    "node_type": "property",
+    "data": {
+     "property_type": "material_type",
+     "value": "marmo"
+    }
+   },
+   {
+    "id": "X043",
+    "name": "X.43",
+    "node_type": "extractor",
+    "data": {}
+   },
+   {
+    "id": "U044",
+    "name": "USM144",
+    "node_type": "USM",
+    "description": "unità 44 di Età arcaica"
+   },
+   {
+    "id": "R044",
+    "name": "RSF244",
+    "node_type": "RSF",
+    "description": "reperto contenuto"
+   },
+   {
+    "id": "P044",
+    "name": "material_type",
+    "node_type": "property",
+    "data": {
+     "property_type": "material_type",
+     "value": "tufo"
+    }
+   },
+   {
+    "id": "X044",
+    "name": "X.44",
+    "node_type": "extractor",
+    "data": {}
+   },
+   {
+    "id": "EP07_1",
+    "name": "Età arcaica · fase II",
+    "node_type": "EpochNode",
+    "data": {
+     "start_time": -670,
+     "end_time": -589
+    }
+   },
+   {
+    "id": "U045",
+    "name": "USVs145",
+    "node_type": "USVs",
+    "description": "unità 45 di Età arcaica"
+   },
+   {
+    "id": "P045",
+    "name": "material_type",
+    "node_type": "property",
+    "data": {
+     "property_type": "material_type",
+     "value": "marmo"
+    }
+   },
+   {
+    "id": "X045",
+    "name": "X.45",
+    "node_type": "extractor",
+    "data": {}
+   },
+   {
+    "id": "U046",
+    "name": "US146",
+    "node_type": "US",
+    "description": "unità 46 di Età arcaica"
+   },
+   {
+    "id": "R046",
+    "name": "RSF246",
+    "node_type": "RSF",
+    "description": "reperto contenuto"
+   },
+   {
+    "id": "EP07_2",
+    "name": "Età arcaica · fase III",
+    "node_type": "EpochNode",
+    "data": {
+     "start_time": -589,
+     "end_time": -509
+    }
+   },
+   {
+    "id": "U047",
+    "name": "USVs147",
+    "node_type": "USVs",
+    "description": "unità 47 di Età arcaica"
+   },
+   {
+    "id": "U048",
+    "name": "US148",
+    "node_type": "US",
+    "description": "unità 48 di Età arcaica"
+   },
+   {
+    "id": "R048",
+    "name": "RSF248",
+    "node_type": "RSF",
+    "description": "reperto contenuto"
+   },
+   {
+    "id": "EP08",
+    "name": "Età del Ferro",
+    "node_type": "EpochNode",
+    "data": {
+     "start_time": -1000,
+     "end_time": -750
+    }
+   },
+   {
+    "id": "EP08_0",
+    "name": "Età del Ferro · fase I",
+    "node_type": "EpochNode",
+    "data": {
+     "start_time": -1000,
+     "end_time": -917
+    }
+   },
+   {
+    "id": "U049",
+    "name": "USVs149",
+    "node_type": "USVs",
+    "description": "unità 49 di Età del Ferro"
+   },
+   {
+    "id": "P049",
+    "name": "material_type",
+    "node_type": "property",
+    "data": {
+     "property_type": "material_type",
+     "value": "laterizio"
+    }
+   },
+   {
+    "id": "X049",
+    "name": "X.49",
+    "node_type": "extractor",
+    "data": {}
+   },
+   {
+    "id": "U050",
+    "name": "US150",
+    "node_type": "US",
+    "description": "unità 50 di Età del Ferro"
+   },
+   {
+    "id": "R050",
+    "name": "RSF250",
+    "node_type": "RSF",
+    "description": "reperto contenuto"
+   },
+   {
+    "id": "EP08_1",
+    "name": "Età del Ferro · fase II",
+    "node_type": "EpochNode",
+    "data": {
+     "start_time": -917,
+     "end_time": -833
+    }
+   },
+   {
+    "id": "U051",
+    "name": "SF151",
+    "node_type": "SF",
+    "description": "unità 51 di Età del Ferro"
+   },
+   {
+    "id": "P051",
+    "name": "material_type",
+    "node_type": "property",
+    "data": {
+     "property_type": "material_type",
+     "value": "tufo"
+    }
+   },
+   {
+    "id": "X051",
+    "name": "X.51",
+    "node_type": "extractor",
+    "data": {}
+   },
+   {
+    "id": "U052",
+    "name": "SF152",
+    "node_type": "SF",
+    "description": "unità 52 di Età del Ferro"
+   },
+   {
+    "id": "P052",
+    "name": "material_type",
+    "node_type": "property",
+    "data": {
+     "property_type": "material_type",
+     "value": "laterizio"
+    }
+   },
+   {
+    "id": "X052",
+    "name": "X.52",
+    "node_type": "extractor",
+    "data": {}
+   },
+   {
+    "id": "EP08_2",
+    "name": "Età del Ferro · fase III",
+    "node_type": "EpochNode",
+    "data": {
+     "start_time": -833,
+     "end_time": -750
+    }
+   },
+   {
+    "id": "U053",
+    "name": "US153",
+    "node_type": "US",
+    "description": "unità 53 di Età del Ferro"
+   },
+   {
+    "id": "P053",
+    "name": "material_type",
+    "node_type": "property",
+    "data": {
+     "property_type": "material_type",
+     "value": "tufo"
+    }
+   },
+   {
+    "id": "X053",
+    "name": "X.53",
+    "node_type": "extractor",
+    "data": {}
+   },
+   {
+    "id": "U054",
+    "name": "USM154",
+    "node_type": "USM",
+    "description": "unità 54 di Età del Ferro"
+   },
+   {
+    "id": "R054",
+    "name": "RSF254",
+    "node_type": "RSF",
+    "description": "reperto contenuto"
+   },
+   {
+    "id": "EP09",
+    "name": "Età del Bronzo",
+    "node_type": "EpochNode",
+    "data": {
+     "start_time": -2200,
+     "end_time": -1000
+    }
+   },
+   {
+    "id": "EP09_0",
+    "name": "Età del Bronzo · fase I",
+    "node_type": "EpochNode",
+    "data": {
+     "start_time": -2200,
+     "end_time": -1800
+    }
+   },
+   {
+    "id": "U055",
+    "name": "US155",
+    "node_type": "US",
+    "description": "unità 55 di Età del Bronzo"
+   },
+   {
+    "id": "U056",
+    "name": "USVs156",
+    "node_type": "USVs",
+    "description": "unità 56 di Età del Bronzo"
+   },
+   {
+    "id": "P056",
+    "name": "material_type",
+    "node_type": "property",
+    "data": {
+     "property_type": "material_type",
+     "value": "marmo"
+    }
+   },
+   {
+    "id": "X056",
+    "name": "X.56",
+    "node_type": "extractor",
+    "data": {}
+   },
+   {
+    "id": "EP09_1",
+    "name": "Età del Bronzo · fase II",
+    "node_type": "EpochNode",
+    "data": {
+     "start_time": -1800,
+     "end_time": -1400
+    }
+   },
+   {
+    "id": "U057",
+    "name": "USM157",
+    "node_type": "USM",
+    "description": "unità 57 di Età del Bronzo"
+   },
+   {
+    "id": "U058",
+    "name": "SF158",
+    "node_type": "SF",
+    "description": "unità 58 di Età del Bronzo"
+   },
+   {
+    "id": "P058",
+    "name": "material_type",
+    "node_type": "property",
+    "data": {
+     "property_type": "material_type",
+     "value": "laterizio"
+    }
+   },
+   {
+    "id": "X058",
+    "name": "X.58",
+    "node_type": "extractor",
+    "data": {}
+   },
+   {
+    "id": "EP09_2",
+    "name": "Età del Bronzo · fase III",
+    "node_type": "EpochNode",
+    "data": {
+     "start_time": -1400,
+     "end_time": -1000
+    }
+   },
+   {
+    "id": "U059",
+    "name": "SF159",
+    "node_type": "SF",
+    "description": "unità 59 di Età del Bronzo"
+   },
+   {
+    "id": "U060",
+    "name": "US160",
+    "node_type": "US",
+    "description": "unità 60 di Età del Bronzo"
+   },
+   {
+    "id": "R060",
+    "name": "RSF260",
+    "node_type": "RSF",
+    "description": "reperto contenuto"
+   },
+   {
+    "id": "P060",
+    "name": "material_type",
+    "node_type": "property",
+    "data": {
+     "property_type": "material_type",
+     "value": "marmo"
+    }
+   },
+   {
+    "id": "X060",
+    "name": "X.60",
+    "node_type": "extractor",
+    "data": {}
+   },
+   {
+    "id": "EP10",
+    "name": "Eneolitico",
+    "node_type": "EpochNode",
+    "data": {
+     "start_time": -3500,
+     "end_time": -2200
+    }
+   },
+   {
+    "id": "EP10_0",
+    "name": "Eneolitico · fase I",
+    "node_type": "EpochNode",
+    "data": {
+     "start_time": -3500,
+     "end_time": -3067
+    }
+   },
+   {
+    "id": "U061",
+    "name": "USM161",
+    "node_type": "USM",
+    "description": "unità 61 di Eneolitico"
+   },
+   {
+    "id": "U062",
+    "name": "US162",
+    "node_type": "US",
+    "description": "unità 62 di Eneolitico"
+   },
+   {
+    "id": "R062",
+    "name": "RSF262",
+    "node_type": "RSF",
+    "description": "reperto contenuto"
+   },
+   {
+    "id": "EP10_1",
+    "name": "Eneolitico · fase II",
+    "node_type": "EpochNode",
+    "data": {
+     "start_time": -3067,
+     "end_time": -2633
+    }
+   },
+   {
+    "id": "U063",
+    "name": "US163",
+    "node_type": "US",
+    "description": "unità 63 di Eneolitico"
+   },
+   {
+    "id": "U064",
+    "name": "USVs164",
+    "node_type": "USVs",
+    "description": "unità 64 di Eneolitico"
+   },
+   {
+    "id": "P064",
+    "name": "material_type",
+    "node_type": "property",
+    "data": {
+     "property_type": "material_type",
+     "value": "marmo"
+    }
+   },
+   {
+    "id": "X064",
+    "name": "X.64",
+    "node_type": "extractor",
+    "data": {}
+   },
+   {
+    "id": "EP10_2",
+    "name": "Eneolitico · fase III",
+    "node_type": "EpochNode",
+    "data": {
+     "start_time": -2633,
+     "end_time": -2200
+    }
+   },
+   {
+    "id": "U065",
+    "name": "USVs165",
+    "node_type": "USVs",
+    "description": "unità 65 di Eneolitico"
+   },
+   {
+    "id": "P065",
+    "name": "material_type",
+    "node_type": "property",
+    "data": {
+     "property_type": "material_type",
+     "value": "marmo"
+    }
+   },
+   {
+    "id": "X065",
+    "name": "X.65",
+    "node_type": "extractor",
+    "data": {}
+   },
+   {
+    "id": "U066",
+    "name": "USM166",
+    "node_type": "USM",
+    "description": "unità 66 di Eneolitico"
+   },
+   {
+    "id": "R066",
+    "name": "RSF266",
+    "node_type": "RSF",
+    "description": "reperto contenuto"
+   },
+   {
+    "id": "EP11",
+    "name": "Neolitico",
+    "node_type": "EpochNode",
+    "data": {
+     "start_time": -6000,
+     "end_time": -3500
+    }
+   },
+   {
+    "id": "EP11_0",
+    "name": "Neolitico · fase I",
+    "node_type": "EpochNode",
+    "data": {
+     "start_time": -6000,
+     "end_time": -5167
+    }
+   },
+   {
+    "id": "U067",
+    "name": "US167",
+    "node_type": "US",
+    "description": "unità 67 di Neolitico"
+   },
+   {
+    "id": "P067",
+    "name": "material_type",
+    "node_type": "property",
+    "data": {
+     "property_type": "material_type",
+     "value": "tufo"
+    }
+   },
+   {
+    "id": "X067",
+    "name": "X.67",
+    "node_type": "extractor",
+    "data": {}
+   },
+   {
+    "id": "U068",
+    "name": "US168",
+    "node_type": "US",
+    "description": "unità 68 di Neolitico"
+   },
+   {
+    "id": "R068",
+    "name": "RSF268",
+    "node_type": "RSF",
+    "description": "reperto contenuto"
+   },
+   {
+    "id": "EP11_1",
+    "name": "Neolitico · fase II",
+    "node_type": "EpochNode",
+    "data": {
+     "start_time": -5167,
+     "end_time": -4333
+    }
+   },
+   {
+    "id": "U069",
+    "name": "US169",
+    "node_type": "US",
+    "description": "unità 69 di Neolitico"
+   },
+   {
+    "id": "U070",
+    "name": "SF170",
+    "node_type": "SF",
+    "description": "unità 70 di Neolitico"
+   },
+   {
+    "id": "EP11_2",
+    "name": "Neolitico · fase III",
+    "node_type": "EpochNode",
+    "data": {
+     "start_time": -4333,
+     "end_time": -3500
+    }
+   },
+   {
+    "id": "U071",
+    "name": "US171",
+    "node_type": "US",
+    "description": "unità 71 di Neolitico"
+   },
+   {
+    "id": "P071",
+    "name": "material_type",
+    "node_type": "property",
+    "data": {
+     "property_type": "material_type",
+     "value": "laterizio"
+    }
+   },
+   {
+    "id": "X071",
+    "name": "X.71",
+    "node_type": "extractor",
+    "data": {}
+   },
+   {
+    "id": "U072",
+    "name": "US172",
+    "node_type": "US",
+    "description": "unità 72 di Neolitico"
+   },
+   {
+    "id": "R072",
+    "name": "RSF272",
+    "node_type": "RSF",
+    "description": "reperto contenuto"
+   }
+  ],
+  "edges": [
+   {
+    "id": "e1",
+    "source": "EP00",
+    "target": "EP00_0",
+    "edge_type": "has_sub_epoch"
+   },
+   {
+    "id": "e2",
+    "source": "U001",
+    "target": "EP00_0",
+    "edge_type": "has_first_epoch"
+   },
+   {
+    "id": "e3",
+    "source": "U002",
+    "target": "EP00_0",
+    "edge_type": "has_first_epoch"
+   },
+   {
+    "id": "e4",
+    "source": "EP00",
+    "target": "EP00_1",
+    "edge_type": "has_sub_epoch"
+   },
+   {
+    "id": "e5",
+    "source": "U003",
+    "target": "EP00_1",
+    "edge_type": "has_first_epoch"
+   },
+   {
+    "id": "e6",
+    "source": "U004",
+    "target": "EP00_1",
+    "edge_type": "has_first_epoch"
+   },
+   {
+    "id": "e7",
+    "source": "R004",
+    "target": "EP00_1",
+    "edge_type": "has_first_epoch"
+   },
+   {
+    "id": "e8",
+    "source": "R004",
+    "target": "U004",
+    "edge_type": "is_part_of"
+   },
+   {
+    "id": "e9",
+    "source": "U004",
+    "target": "P004",
+    "edge_type": "has_property"
+   },
+   {
+    "id": "e10",
+    "source": "P004",
+    "target": "X004",
+    "edge_type": "has_data_provenance"
+   },
+   {
+    "id": "e11",
+    "source": "X004",
+    "target": "A1",
+    "edge_type": "has_author"
+   },
+   {
+    "id": "e12",
+    "source": "EP00",
+    "target": "EP00_2",
+    "edge_type": "has_sub_epoch"
+   },
+   {
+    "id": "e13",
+    "source": "U005",
+    "target": "EP00_2",
+    "edge_type": "has_first_epoch"
+   },
+   {
+    "id": "e14",
+    "source": "U005",
+    "target": "P005",
+    "edge_type": "has_property"
+   },
+   {
+    "id": "e15",
+    "source": "P005",
+    "target": "X005",
+    "edge_type": "has_data_provenance"
+   },
+   {
+    "id": "e16",
+    "source": "X005",
+    "target": "A1",
+    "edge_type": "has_author"
+   },
+   {
+    "id": "e17",
+    "source": "U006",
+    "target": "EP00_2",
+    "edge_type": "has_first_epoch"
+   },
+   {
+    "id": "e18",
+    "source": "R006",
+    "target": "EP00_2",
+    "edge_type": "has_first_epoch"
+   },
+   {
+    "id": "e19",
+    "source": "R006",
+    "target": "U006",
+    "edge_type": "is_part_of"
+   },
+   {
+    "id": "e20",
+    "source": "U006",
+    "target": "P006",
+    "edge_type": "has_property"
+   },
+   {
+    "id": "e21",
+    "source": "P006",
+    "target": "X006",
+    "edge_type": "has_data_provenance"
+   },
+   {
+    "id": "e22",
+    "source": "X006",
+    "target": "A1",
+    "edge_type": "has_author"
+   },
+   {
+    "id": "e23",
+    "source": "EP01",
+    "target": "EP01_0",
+    "edge_type": "has_sub_epoch"
+   },
+   {
+    "id": "e24",
+    "source": "U007",
+    "target": "EP01_0",
+    "edge_type": "has_first_epoch"
+   },
+   {
+    "id": "e25",
+    "source": "U007",
+    "target": "P007",
+    "edge_type": "has_property"
+   },
+   {
+    "id": "e26",
+    "source": "P007",
+    "target": "X007",
+    "edge_type": "has_data_provenance"
+   },
+   {
+    "id": "e27",
+    "source": "X007",
+    "target": "A1",
+    "edge_type": "has_author"
+   },
+   {
+    "id": "e28",
+    "source": "U008",
+    "target": "EP01_0",
+    "edge_type": "has_first_epoch"
+   },
+   {
+    "id": "e29",
+    "source": "EP01",
+    "target": "EP01_1",
+    "edge_type": "has_sub_epoch"
+   },
+   {
+    "id": "e30",
+    "source": "U009",
+    "target": "EP01_1",
+    "edge_type": "has_first_epoch"
+   },
+   {
+    "id": "e31",
+    "source": "U010",
+    "target": "EP01_1",
+    "edge_type": "has_first_epoch"
+   },
+   {
+    "id": "e32",
+    "source": "R010",
+    "target": "EP01_1",
+    "edge_type": "has_first_epoch"
+   },
+   {
+    "id": "e33",
+    "source": "R010",
+    "target": "U010",
+    "edge_type": "is_part_of"
+   },
+   {
+    "id": "e34",
+    "source": "EP01",
+    "target": "EP01_2",
+    "edge_type": "has_sub_epoch"
+   },
+   {
+    "id": "e35",
+    "source": "U011",
+    "target": "EP01_2",
+    "edge_type": "has_first_epoch"
+   },
+   {
+    "id": "e36",
+    "source": "U011",
+    "target": "P011",
+    "edge_type": "has_property"
+   },
+   {
+    "id": "e37",
+    "source": "P011",
+    "target": "X011",
+    "edge_type": "has_data_provenance"
+   },
+   {
+    "id": "e38",
+    "source": "X011",
+    "target": "A1",
+    "edge_type": "has_author"
+   },
+   {
+    "id": "e39",
+    "source": "U012",
+    "target": "EP01_2",
+    "edge_type": "has_first_epoch"
+   },
+   {
+    "id": "e40",
+    "source": "U012",
+    "target": "P012",
+    "edge_type": "has_property"
+   },
+   {
+    "id": "e41",
+    "source": "P012",
+    "target": "X012",
+    "edge_type": "has_data_provenance"
+   },
+   {
+    "id": "e42",
+    "source": "X012",
+    "target": "A1",
+    "edge_type": "has_author"
+   },
+   {
+    "id": "e43",
+    "source": "EP02",
+    "target": "EP02_0",
+    "edge_type": "has_sub_epoch"
+   },
+   {
+    "id": "e44",
+    "source": "U013",
+    "target": "EP02_0",
+    "edge_type": "has_first_epoch"
+   },
+   {
+    "id": "e45",
+    "source": "U014",
+    "target": "EP02_0",
+    "edge_type": "has_first_epoch"
+   },
+   {
+    "id": "e46",
+    "source": "R014",
+    "target": "EP02_0",
+    "edge_type": "has_first_epoch"
+   },
+   {
+    "id": "e47",
+    "source": "R014",
+    "target": "U014",
+    "edge_type": "is_part_of"
+   },
+   {
+    "id": "e48",
+    "source": "U014",
+    "target": "P014",
+    "edge_type": "has_property"
+   },
+   {
+    "id": "e49",
+    "source": "P014",
+    "target": "X014",
+    "edge_type": "has_data_provenance"
+   },
+   {
+    "id": "e50",
+    "source": "X014",
+    "target": "A1",
+    "edge_type": "has_author"
+   },
+   {
+    "id": "e51",
+    "source": "EP02",
+    "target": "EP02_1",
+    "edge_type": "has_sub_epoch"
+   },
+   {
+    "id": "e52",
+    "source": "U015",
+    "target": "EP02_1",
+    "edge_type": "has_first_epoch"
+   },
+   {
+    "id": "e53",
+    "source": "U015",
+    "target": "P015",
+    "edge_type": "has_property"
+   },
+   {
+    "id": "e54",
+    "source": "P015",
+    "target": "X015",
+    "edge_type": "has_data_provenance"
+   },
+   {
+    "id": "e55",
+    "source": "X015",
+    "target": "AI1",
+    "edge_type": "has_author"
+   },
+   {
+    "id": "e56",
+    "source": "U016",
+    "target": "EP02_1",
+    "edge_type": "has_first_epoch"
+   },
+   {
+    "id": "e57",
+    "source": "EP02",
+    "target": "EP02_2",
+    "edge_type": "has_sub_epoch"
+   },
+   {
+    "id": "e58",
+    "source": "U017",
+    "target": "EP02_2",
+    "edge_type": "has_first_epoch"
+   },
+   {
+    "id": "e59",
+    "source": "U018",
+    "target": "EP02_2",
+    "edge_type": "has_first_epoch"
+   },
+   {
+    "id": "e60",
+    "source": "U018",
+    "target": "P018",
+    "edge_type": "has_property"
+   },
+   {
+    "id": "e61",
+    "source": "P018",
+    "target": "X018",
+    "edge_type": "has_data_provenance"
+   },
+   {
+    "id": "e62",
+    "source": "X018",
+    "target": "A1",
+    "edge_type": "has_author"
+   },
+   {
+    "id": "e63",
+    "source": "EP03",
+    "target": "EP03_0",
+    "edge_type": "has_sub_epoch"
+   },
+   {
+    "id": "e64",
+    "source": "U019",
+    "target": "EP03_0",
+    "edge_type": "has_first_epoch"
+   },
+   {
+    "id": "e65",
+    "source": "U019",
+    "target": "P019",
+    "edge_type": "has_property"
+   },
+   {
+    "id": "e66",
+    "source": "P019",
+    "target": "X019",
+    "edge_type": "has_data_provenance"
+   },
+   {
+    "id": "e67",
+    "source": "X019",
+    "target": "AI1",
+    "edge_type": "has_author"
+   },
+   {
+    "id": "e68",
+    "source": "U020",
+    "target": "EP03_0",
+    "edge_type": "has_first_epoch"
+   },
+   {
+    "id": "e69",
+    "source": "R020",
+    "target": "EP03_0",
+    "edge_type": "has_first_epoch"
+   },
+   {
+    "id": "e70",
+    "source": "R020",
+    "target": "U020",
+    "edge_type": "is_part_of"
+   },
+   {
+    "id": "e71",
+    "source": "EP03",
+    "target": "EP03_1",
+    "edge_type": "has_sub_epoch"
+   },
+   {
+    "id": "e72",
+    "source": "U021",
+    "target": "EP03_1",
+    "edge_type": "has_first_epoch"
+   },
+   {
+    "id": "e73",
+    "source": "U022",
+    "target": "EP03_1",
+    "edge_type": "has_first_epoch"
+   },
+   {
+    "id": "e74",
+    "source": "R022",
+    "target": "EP03_1",
+    "edge_type": "has_first_epoch"
+   },
+   {
+    "id": "e75",
+    "source": "R022",
+    "target": "U022",
+    "edge_type": "is_part_of"
+   },
+   {
+    "id": "e76",
+    "source": "U022",
+    "target": "P022",
+    "edge_type": "has_property"
+   },
+   {
+    "id": "e77",
+    "source": "P022",
+    "target": "X022",
+    "edge_type": "has_data_provenance"
+   },
+   {
+    "id": "e78",
+    "source": "X022",
+    "target": "A1",
+    "edge_type": "has_author"
+   },
+   {
+    "id": "e79",
+    "source": "EP03",
+    "target": "EP03_2",
+    "edge_type": "has_sub_epoch"
+   },
+   {
+    "id": "e80",
+    "source": "U023",
+    "target": "EP03_2",
+    "edge_type": "has_first_epoch"
+   },
+   {
+    "id": "e81",
+    "source": "U023",
+    "target": "P023",
+    "edge_type": "has_property"
+   },
+   {
+    "id": "e82",
+    "source": "P023",
+    "target": "X023",
+    "edge_type": "has_data_provenance"
+   },
+   {
+    "id": "e83",
+    "source": "X023",
+    "target": "AI1",
+    "edge_type": "has_author"
+   },
+   {
+    "id": "e84",
+    "source": "U024",
+    "target": "EP03_2",
+    "edge_type": "has_first_epoch"
+   },
+   {
+    "id": "e85",
+    "source": "R024",
+    "target": "EP03_2",
+    "edge_type": "has_first_epoch"
+   },
+   {
+    "id": "e86",
+    "source": "R024",
+    "target": "U024",
+    "edge_type": "is_part_of"
+   },
+   {
+    "id": "e87",
+    "source": "EP04",
+    "target": "EP04_0",
+    "edge_type": "has_sub_epoch"
+   },
+   {
+    "id": "e88",
+    "source": "U025",
+    "target": "EP04_0",
+    "edge_type": "has_first_epoch"
+   },
+   {
+    "id": "e89",
+    "source": "U026",
+    "target": "EP04_0",
+    "edge_type": "has_first_epoch"
+   },
+   {
+    "id": "e90",
+    "source": "EP04",
+    "target": "EP04_1",
+    "edge_type": "has_sub_epoch"
+   },
+   {
+    "id": "e91",
+    "source": "U027",
+    "target": "EP04_1",
+    "edge_type": "has_first_epoch"
+   },
+   {
+    "id": "e92",
+    "source": "U027",
+    "target": "P027",
+    "edge_type": "has_property"
+   },
+   {
+    "id": "e93",
+    "source": "P027",
+    "target": "X027",
+    "edge_type": "has_data_provenance"
+   },
+   {
+    "id": "e94",
+    "source": "X027",
+    "target": "AI1",
+    "edge_type": "has_author"
+   },
+   {
+    "id": "e95",
+    "source": "U028",
+    "target": "EP04_1",
+    "edge_type": "has_first_epoch"
+   },
+   {
+    "id": "e96",
+    "source": "EP04",
+    "target": "EP04_2",
+    "edge_type": "has_sub_epoch"
+   },
+   {
+    "id": "e97",
+    "source": "U029",
+    "target": "EP04_2",
+    "edge_type": "has_first_epoch"
+   },
+   {
+    "id": "e98",
+    "source": "U030",
+    "target": "EP04_2",
+    "edge_type": "has_first_epoch"
+   },
+   {
+    "id": "e99",
+    "source": "R030",
+    "target": "EP04_2",
+    "edge_type": "has_first_epoch"
+   },
+   {
+    "id": "e100",
+    "source": "R030",
+    "target": "U030",
+    "edge_type": "is_part_of"
+   },
+   {
+    "id": "e101",
+    "source": "EP05",
+    "target": "EP05_0",
+    "edge_type": "has_sub_epoch"
+   },
+   {
+    "id": "e102",
+    "source": "U031",
+    "target": "EP05_0",
+    "edge_type": "has_first_epoch"
+   },
+   {
+    "id": "e103",
+    "source": "U031",
+    "target": "P031",
+    "edge_type": "has_property"
+   },
+   {
+    "id": "e104",
+    "source": "P031",
+    "target": "X031",
+    "edge_type": "has_data_provenance"
+   },
+   {
+    "id": "e105",
+    "source": "X031",
+    "target": "AI1",
+    "edge_type": "has_author"
+   },
+   {
+    "id": "e106",
+    "source": "U032",
+    "target": "EP05_0",
+    "edge_type": "has_first_epoch"
+   },
+   {
+    "id": "e107",
+    "source": "EP05",
+    "target": "EP05_1",
+    "edge_type": "has_sub_epoch"
+   },
+   {
+    "id": "e108",
+    "source": "U033",
+    "target": "EP05_1",
+    "edge_type": "has_first_epoch"
+   },
+   {
+    "id": "e109",
+    "source": "U033",
+    "target": "P033",
+    "edge_type": "has_property"
+   },
+   {
+    "id": "e110",
+    "source": "P033",
+    "target": "X033",
+    "edge_type": "has_data_provenance"
+   },
+   {
+    "id": "e111",
+    "source": "X033",
+    "target": "AI1",
+    "edge_type": "has_author"
+   },
+   {
+    "id": "e112",
+    "source": "U034",
+    "target": "EP05_1",
+    "edge_type": "has_first_epoch"
+   },
+   {
+    "id": "e113",
+    "source": "R034",
+    "target": "EP05_1",
+    "edge_type": "has_first_epoch"
+   },
+   {
+    "id": "e114",
+    "source": "R034",
+    "target": "U034",
+    "edge_type": "is_part_of"
+   },
+   {
+    "id": "e115",
+    "source": "EP05",
+    "target": "EP05_2",
+    "edge_type": "has_sub_epoch"
+   },
+   {
+    "id": "e116",
+    "source": "U035",
+    "target": "EP05_2",
+    "edge_type": "has_first_epoch"
+   },
+   {
+    "id": "e117",
+    "source": "U035",
+    "target": "P035",
+    "edge_type": "has_property"
+   },
+   {
+    "id": "e118",
+    "source": "P035",
+    "target": "X035",
+    "edge_type": "has_data_provenance"
+   },
+   {
+    "id": "e119",
+    "source": "X035",
+    "target": "AI1",
+    "edge_type": "has_author"
+   },
+   {
+    "id": "e120",
+    "source": "U036",
+    "target": "EP05_2",
+    "edge_type": "has_first_epoch"
+   },
+   {
+    "id": "e121",
+    "source": "R036",
+    "target": "EP05_2",
+    "edge_type": "has_first_epoch"
+   },
+   {
+    "id": "e122",
+    "source": "R036",
+    "target": "U036",
+    "edge_type": "is_part_of"
+   },
+   {
+    "id": "e123",
+    "source": "U036",
+    "target": "P036",
+    "edge_type": "has_property"
+   },
+   {
+    "id": "e124",
+    "source": "P036",
+    "target": "X036",
+    "edge_type": "has_data_provenance"
+   },
+   {
+    "id": "e125",
+    "source": "X036",
+    "target": "A1",
+    "edge_type": "has_author"
+   },
+   {
+    "id": "e126",
+    "source": "EP06",
+    "target": "EP06_0",
+    "edge_type": "has_sub_epoch"
+   },
+   {
+    "id": "e127",
+    "source": "U037",
+    "target": "EP06_0",
+    "edge_type": "has_first_epoch"
+   },
+   {
+    "id": "e128",
+    "source": "U037",
+    "target": "P037",
+    "edge_type": "has_property"
+   },
+   {
+    "id": "e129",
+    "source": "P037",
+    "target": "X037",
+    "edge_type": "has_data_provenance"
+   },
+   {
+    "id": "e130",
+    "source": "X037",
+    "target": "A1",
+    "edge_type": "has_author"
+   },
+   {
+    "id": "e131",
+    "source": "U038",
+    "target": "EP06_0",
+    "edge_type": "has_first_epoch"
+   },
+   {
+    "id": "e132",
+    "source": "R038",
+    "target": "EP06_0",
+    "edge_type": "has_first_epoch"
+   },
+   {
+    "id": "e133",
+    "source": "R038",
+    "target": "U038",
+    "edge_type": "is_part_of"
+   },
+   {
+    "id": "e134",
+    "source": "EP06",
+    "target": "EP06_1",
+    "edge_type": "has_sub_epoch"
+   },
+   {
+    "id": "e135",
+    "source": "U039",
+    "target": "EP06_1",
+    "edge_type": "has_first_epoch"
+   },
+   {
+    "id": "e136",
+    "source": "U039",
+    "target": "P039",
+    "edge_type": "has_property"
+   },
+   {
+    "id": "e137",
+    "source": "P039",
+    "target": "X039",
+    "edge_type": "has_data_provenance"
+   },
+   {
+    "id": "e138",
+    "source": "X039",
+    "target": "AI1",
+    "edge_type": "has_author"
+   },
+   {
+    "id": "e139",
+    "source": "U040",
+    "target": "EP06_1",
+    "edge_type": "has_first_epoch"
+   },
+   {
+    "id": "e140",
+    "source": "U040",
+    "target": "P040",
+    "edge_type": "has_property"
+   },
+   {
+    "id": "e141",
+    "source": "P040",
+    "target": "X040",
+    "edge_type": "has_data_provenance"
+   },
+   {
+    "id": "e142",
+    "source": "X040",
+    "target": "AI1",
+    "edge_type": "has_author"
+   },
+   {
+    "id": "e143",
+    "source": "EP06",
+    "target": "EP06_2",
+    "edge_type": "has_sub_epoch"
+   },
+   {
+    "id": "e144",
+    "source": "U041",
+    "target": "EP06_2",
+    "edge_type": "has_first_epoch"
+   },
+   {
+    "id": "e145",
+    "source": "U042",
+    "target": "EP06_2",
+    "edge_type": "has_first_epoch"
+   },
+   {
+    "id": "e146",
+    "source": "R042",
+    "target": "EP06_2",
+    "edge_type": "has_first_epoch"
+   },
+   {
+    "id": "e147",
+    "source": "R042",
+    "target": "U042",
+    "edge_type": "is_part_of"
+   },
+   {
+    "id": "e148",
+    "source": "U042",
+    "target": "P042",
+    "edge_type": "has_property"
+   },
+   {
+    "id": "e149",
+    "source": "P042",
+    "target": "X042",
+    "edge_type": "has_data_provenance"
+   },
+   {
+    "id": "e150",
+    "source": "X042",
+    "target": "A1",
+    "edge_type": "has_author"
+   },
+   {
+    "id": "e151",
+    "source": "EP07",
+    "target": "EP07_0",
+    "edge_type": "has_sub_epoch"
+   },
+   {
+    "id": "e152",
+    "source": "U043",
+    "target": "EP07_0",
+    "edge_type": "has_first_epoch"
+   },
+   {
+    "id": "e153",
+    "source": "U043",
+    "target": "P043",
+    "edge_type": "has_property"
+   },
+   {
+    "id": "e154",
+    "source": "P043",
+    "target": "X043",
+    "edge_type": "has_data_provenance"
+   },
+   {
+    "id": "e155",
+    "source": "X043",
+    "target": "A1",
+    "edge_type": "has_author"
+   },
+   {
+    "id": "e156",
+    "source": "U044",
+    "target": "EP07_0",
+    "edge_type": "has_first_epoch"
+   },
+   {
+    "id": "e157",
+    "source": "R044",
+    "target": "EP07_0",
+    "edge_type": "has_first_epoch"
+   },
+   {
+    "id": "e158",
+    "source": "R044",
+    "target": "U044",
+    "edge_type": "is_part_of"
+   },
+   {
+    "id": "e159",
+    "source": "U044",
+    "target": "P044",
+    "edge_type": "has_property"
+   },
+   {
+    "id": "e160",
+    "source": "P044",
+    "target": "X044",
+    "edge_type": "has_data_provenance"
+   },
+   {
+    "id": "e161",
+    "source": "X044",
+    "target": "AI1",
+    "edge_type": "has_author"
+   },
+   {
+    "id": "e162",
+    "source": "EP07",
+    "target": "EP07_1",
+    "edge_type": "has_sub_epoch"
+   },
+   {
+    "id": "e163",
+    "source": "U045",
+    "target": "EP07_1",
+    "edge_type": "has_first_epoch"
+   },
+   {
+    "id": "e164",
+    "source": "U045",
+    "target": "P045",
+    "edge_type": "has_property"
+   },
+   {
+    "id": "e165",
+    "source": "P045",
+    "target": "X045",
+    "edge_type": "has_data_provenance"
+   },
+   {
+    "id": "e166",
+    "source": "X045",
+    "target": "AI1",
+    "edge_type": "has_author"
+   },
+   {
+    "id": "e167",
+    "source": "U046",
+    "target": "EP07_1",
+    "edge_type": "has_first_epoch"
+   },
+   {
+    "id": "e168",
+    "source": "R046",
+    "target": "EP07_1",
+    "edge_type": "has_first_epoch"
+   },
+   {
+    "id": "e169",
+    "source": "R046",
+    "target": "U046",
+    "edge_type": "is_part_of"
+   },
+   {
+    "id": "e170",
+    "source": "EP07",
+    "target": "EP07_2",
+    "edge_type": "has_sub_epoch"
+   },
+   {
+    "id": "e171",
+    "source": "U047",
+    "target": "EP07_2",
+    "edge_type": "has_first_epoch"
+   },
+   {
+    "id": "e172",
+    "source": "U048",
+    "target": "EP07_2",
+    "edge_type": "has_first_epoch"
+   },
+   {
+    "id": "e173",
+    "source": "R048",
+    "target": "EP07_2",
+    "edge_type": "has_first_epoch"
+   },
+   {
+    "id": "e174",
+    "source": "R048",
+    "target": "U048",
+    "edge_type": "is_part_of"
+   },
+   {
+    "id": "e175",
+    "source": "EP08",
+    "target": "EP08_0",
+    "edge_type": "has_sub_epoch"
+   },
+   {
+    "id": "e176",
+    "source": "U049",
+    "target": "EP08_0",
+    "edge_type": "has_first_epoch"
+   },
+   {
+    "id": "e177",
+    "source": "U049",
+    "target": "P049",
+    "edge_type": "has_property"
+   },
+   {
+    "id": "e178",
+    "source": "P049",
+    "target": "X049",
+    "edge_type": "has_data_provenance"
+   },
+   {
+    "id": "e179",
+    "source": "X049",
+    "target": "AI1",
+    "edge_type": "has_author"
+   },
+   {
+    "id": "e180",
+    "source": "U050",
+    "target": "EP08_0",
+    "edge_type": "has_first_epoch"
+   },
+   {
+    "id": "e181",
+    "source": "R050",
+    "target": "EP08_0",
+    "edge_type": "has_first_epoch"
+   },
+   {
+    "id": "e182",
+    "source": "R050",
+    "target": "U050",
+    "edge_type": "is_part_of"
+   },
+   {
+    "id": "e183",
+    "source": "EP08",
+    "target": "EP08_1",
+    "edge_type": "has_sub_epoch"
+   },
+   {
+    "id": "e184",
+    "source": "U051",
+    "target": "EP08_1",
+    "edge_type": "has_first_epoch"
+   },
+   {
+    "id": "e185",
+    "source": "U051",
+    "target": "P051",
+    "edge_type": "has_property"
+   },
+   {
+    "id": "e186",
+    "source": "P051",
+    "target": "X051",
+    "edge_type": "has_data_provenance"
+   },
+   {
+    "id": "e187",
+    "source": "X051",
+    "target": "A1",
+    "edge_type": "has_author"
+   },
+   {
+    "id": "e188",
+    "source": "U052",
+    "target": "EP08_1",
+    "edge_type": "has_first_epoch"
+   },
+   {
+    "id": "e189",
+    "source": "U052",
+    "target": "P052",
+    "edge_type": "has_property"
+   },
+   {
+    "id": "e190",
+    "source": "P052",
+    "target": "X052",
+    "edge_type": "has_data_provenance"
+   },
+   {
+    "id": "e191",
+    "source": "X052",
+    "target": "A1",
+    "edge_type": "has_author"
+   },
+   {
+    "id": "e192",
+    "source": "EP08",
+    "target": "EP08_2",
+    "edge_type": "has_sub_epoch"
+   },
+   {
+    "id": "e193",
+    "source": "U053",
+    "target": "EP08_2",
+    "edge_type": "has_first_epoch"
+   },
+   {
+    "id": "e194",
+    "source": "U053",
+    "target": "P053",
+    "edge_type": "has_property"
+   },
+   {
+    "id": "e195",
+    "source": "P053",
+    "target": "X053",
+    "edge_type": "has_data_provenance"
+   },
+   {
+    "id": "e196",
+    "source": "X053",
+    "target": "A1",
+    "edge_type": "has_author"
+   },
+   {
+    "id": "e197",
+    "source": "U054",
+    "target": "EP08_2",
+    "edge_type": "has_first_epoch"
+   },
+   {
+    "id": "e198",
+    "source": "R054",
+    "target": "EP08_2",
+    "edge_type": "has_first_epoch"
+   },
+   {
+    "id": "e199",
+    "source": "R054",
+    "target": "U054",
+    "edge_type": "is_part_of"
+   },
+   {
+    "id": "e200",
+    "source": "EP09",
+    "target": "EP09_0",
+    "edge_type": "has_sub_epoch"
+   },
+   {
+    "id": "e201",
+    "source": "U055",
+    "target": "EP09_0",
+    "edge_type": "has_first_epoch"
+   },
+   {
+    "id": "e202",
+    "source": "U056",
+    "target": "EP09_0",
+    "edge_type": "has_first_epoch"
+   },
+   {
+    "id": "e203",
+    "source": "U056",
+    "target": "P056",
+    "edge_type": "has_property"
+   },
+   {
+    "id": "e204",
+    "source": "P056",
+    "target": "X056",
+    "edge_type": "has_data_provenance"
+   },
+   {
+    "id": "e205",
+    "source": "X056",
+    "target": "AI1",
+    "edge_type": "has_author"
+   },
+   {
+    "id": "e206",
+    "source": "EP09",
+    "target": "EP09_1",
+    "edge_type": "has_sub_epoch"
+   },
+   {
+    "id": "e207",
+    "source": "U057",
+    "target": "EP09_1",
+    "edge_type": "has_first_epoch"
+   },
+   {
+    "id": "e208",
+    "source": "U058",
+    "target": "EP09_1",
+    "edge_type": "has_first_epoch"
+   },
+   {
+    "id": "e209",
+    "source": "U058",
+    "target": "P058",
+    "edge_type": "has_property"
+   },
+   {
+    "id": "e210",
+    "source": "P058",
+    "target": "X058",
+    "edge_type": "has_data_provenance"
+   },
+   {
+    "id": "e211",
+    "source": "X058",
+    "target": "AI1",
+    "edge_type": "has_author"
+   },
+   {
+    "id": "e212",
+    "source": "EP09",
+    "target": "EP09_2",
+    "edge_type": "has_sub_epoch"
+   },
+   {
+    "id": "e213",
+    "source": "U059",
+    "target": "EP09_2",
+    "edge_type": "has_first_epoch"
+   },
+   {
+    "id": "e214",
+    "source": "U060",
+    "target": "EP09_2",
+    "edge_type": "has_first_epoch"
+   },
+   {
+    "id": "e215",
+    "source": "R060",
+    "target": "EP09_2",
+    "edge_type": "has_first_epoch"
+   },
+   {
+    "id": "e216",
+    "source": "R060",
+    "target": "U060",
+    "edge_type": "is_part_of"
+   },
+   {
+    "id": "e217",
+    "source": "U060",
+    "target": "P060",
+    "edge_type": "has_property"
+   },
+   {
+    "id": "e218",
+    "source": "P060",
+    "target": "X060",
+    "edge_type": "has_data_provenance"
+   },
+   {
+    "id": "e219",
+    "source": "X060",
+    "target": "AI1",
+    "edge_type": "has_author"
+   },
+   {
+    "id": "e220",
+    "source": "EP10",
+    "target": "EP10_0",
+    "edge_type": "has_sub_epoch"
+   },
+   {
+    "id": "e221",
+    "source": "U061",
+    "target": "EP10_0",
+    "edge_type": "has_first_epoch"
+   },
+   {
+    "id": "e222",
+    "source": "U062",
+    "target": "EP10_0",
+    "edge_type": "has_first_epoch"
+   },
+   {
+    "id": "e223",
+    "source": "R062",
+    "target": "EP10_0",
+    "edge_type": "has_first_epoch"
+   },
+   {
+    "id": "e224",
+    "source": "R062",
+    "target": "U062",
+    "edge_type": "is_part_of"
+   },
+   {
+    "id": "e225",
+    "source": "EP10",
+    "target": "EP10_1",
+    "edge_type": "has_sub_epoch"
+   },
+   {
+    "id": "e226",
+    "source": "U063",
+    "target": "EP10_1",
+    "edge_type": "has_first_epoch"
+   },
+   {
+    "id": "e227",
+    "source": "U064",
+    "target": "EP10_1",
+    "edge_type": "has_first_epoch"
+   },
+   {
+    "id": "e228",
+    "source": "U064",
+    "target": "P064",
+    "edge_type": "has_property"
+   },
+   {
+    "id": "e229",
+    "source": "P064",
+    "target": "X064",
+    "edge_type": "has_data_provenance"
+   },
+   {
+    "id": "e230",
+    "source": "X064",
+    "target": "A1",
+    "edge_type": "has_author"
+   },
+   {
+    "id": "e231",
+    "source": "EP10",
+    "target": "EP10_2",
+    "edge_type": "has_sub_epoch"
+   },
+   {
+    "id": "e232",
+    "source": "U065",
+    "target": "EP10_2",
+    "edge_type": "has_first_epoch"
+   },
+   {
+    "id": "e233",
+    "source": "U065",
+    "target": "P065",
+    "edge_type": "has_property"
+   },
+   {
+    "id": "e234",
+    "source": "P065",
+    "target": "X065",
+    "edge_type": "has_data_provenance"
+   },
+   {
+    "id": "e235",
+    "source": "X065",
+    "target": "A1",
+    "edge_type": "has_author"
+   },
+   {
+    "id": "e236",
+    "source": "U066",
+    "target": "EP10_2",
+    "edge_type": "has_first_epoch"
+   },
+   {
+    "id": "e237",
+    "source": "R066",
+    "target": "EP10_2",
+    "edge_type": "has_first_epoch"
+   },
+   {
+    "id": "e238",
+    "source": "R066",
+    "target": "U066",
+    "edge_type": "is_part_of"
+   },
+   {
+    "id": "e239",
+    "source": "EP11",
+    "target": "EP11_0",
+    "edge_type": "has_sub_epoch"
+   },
+   {
+    "id": "e240",
+    "source": "U067",
+    "target": "EP11_0",
+    "edge_type": "has_first_epoch"
+   },
+   {
+    "id": "e241",
+    "source": "U067",
+    "target": "P067",
+    "edge_type": "has_property"
+   },
+   {
+    "id": "e242",
+    "source": "P067",
+    "target": "X067",
+    "edge_type": "has_data_provenance"
+   },
+   {
+    "id": "e243",
+    "source": "X067",
+    "target": "AI1",
+    "edge_type": "has_author"
+   },
+   {
+    "id": "e244",
+    "source": "U068",
+    "target": "EP11_0",
+    "edge_type": "has_first_epoch"
+   },
+   {
+    "id": "e245",
+    "source": "R068",
+    "target": "EP11_0",
+    "edge_type": "has_first_epoch"
+   },
+   {
+    "id": "e246",
+    "source": "R068",
+    "target": "U068",
+    "edge_type": "is_part_of"
+   },
+   {
+    "id": "e247",
+    "source": "EP11",
+    "target": "EP11_1",
+    "edge_type": "has_sub_epoch"
+   },
+   {
+    "id": "e248",
+    "source": "U069",
+    "target": "EP11_1",
+    "edge_type": "has_first_epoch"
+   },
+   {
+    "id": "e249",
+    "source": "U070",
+    "target": "EP11_1",
+    "edge_type": "has_first_epoch"
+   },
+   {
+    "id": "e250",
+    "source": "EP11",
+    "target": "EP11_2",
+    "edge_type": "has_sub_epoch"
+   },
+   {
+    "id": "e251",
+    "source": "U071",
+    "target": "EP11_2",
+    "edge_type": "has_first_epoch"
+   },
+   {
+    "id": "e252",
+    "source": "U071",
+    "target": "P071",
+    "edge_type": "has_property"
+   },
+   {
+    "id": "e253",
+    "source": "P071",
+    "target": "X071",
+    "edge_type": "has_data_provenance"
+   },
+   {
+    "id": "e254",
+    "source": "X071",
+    "target": "AI1",
+    "edge_type": "has_author"
+   },
+   {
+    "id": "e255",
+    "source": "U072",
+    "target": "EP11_2",
+    "edge_type": "has_first_epoch"
+   },
+   {
+    "id": "e256",
+    "source": "R072",
+    "target": "EP11_2",
+    "edge_type": "has_first_epoch"
+   },
+   {
+    "id": "e257",
+    "source": "R072",
+    "target": "U072",
+    "edge_type": "is_part_of"
+   }
+  ]
+ }
+}

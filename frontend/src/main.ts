@@ -149,6 +149,8 @@ import {
 } from "./theme";
 import { buildNodeList, type NodeListCallbacks } from "./nodelist";
 import { windowIcon } from "./window-icons";
+import { issues as computeIssues, unitOfIssue, type Issue } from "./issues";
+import { CARD_VIEWS, COMPUTED_VIEWS, EMDB_SHEETS, type TableView, type ViewCtx } from "./table-views";
 import { iconUrlFor } from "./icons";
 import { buildOverview, type OverviewApi } from "./overview";
 import { edgeStyle } from "./palette";
@@ -307,15 +309,15 @@ import {
   addEmDataRow,
   toggleEmDataClaimForm,
   removeEmDataHost,
-  emDataFilter,
-  setEmDataFilter,
   currentSheetKey,
   initEmData,
   renderEmData,
   setSheet,
+  setTableView,
   setVolatileProvider,
+  tableViewOf,
 } from "./emdata";
-import { addRow, deleteRow, EM_DATA_SHEETS } from "./em-data";
+import { addRow, deleteRow } from "./em-data";
 import { isVolatile } from "./volatile";
 import { addRecent, removeRecent, type RecentFile } from "./recent";
 import {
@@ -2254,7 +2256,10 @@ function updateToolbar(): void {
   // The filter panel filters nothing without a graph, and an enabled control that
   // does nothing is a worse answer than an absent one; the epoch "+" belongs to
   // Matrix, which is the EM mode.
-  btnAddEpoch.classList.toggle("hidden", !store || view !== "matrix");
+  // STRUTTURA · a canvas overlay, placed on the FOCUSED area: over a table or
+  // an inspector it would sit on their own controls, so it shows on a graph only
+  btnAddEpoch.classList.toggle("hidden",
+    !store || view !== "matrix" || activeWin().type !== "graph");
   refreshFunnel();
   if (!store && filterPanelOpen()) closeFilterPanel();
   paintColumnToggles(); // the right handle appears with the side panel
@@ -2365,6 +2370,7 @@ function rebuildContext(): void {
 }
 
 function updateInfo(): void {
+  refreshIssues();
   if (!store) return;
   const g = store.doc.graph;
   const lanes = scenes.matrix?.lanes.length ?? 0;
@@ -9510,6 +9516,68 @@ function refreshNameStatus(): void {
   nameStatus = store ? nameStatusMap(store.doc, namingOpts()) : new Map();
 }
 
+// ── STRUTTURA · the ONE model of what needs attention (`issues.ts`) ─────────
+//
+// Recomputed from the document on every change (`updateInfo`), and read by the
+// three places the desk gives it: the pill of the status bar (counted), the
+// outliner and the canvas (marked), the inspector (explained) — and by the
+// table's Warnings view and «con avvisi» facet.
+let currentIssues: Issue[] = [];
+let issueUnitOf: (nodeId: string) => string | null = () => null;
+
+function refreshIssues(): void {
+  if (!store) {
+    currentIssues = [];
+    issueUnitOf = () => null;
+    renderWarningsPill();
+    return;
+  }
+  refreshNameStatus();
+  const s = store;
+  const nodes = s.liveNodes() as EmNode[];
+  currentIssues = computeIssues({
+    doc: s.doc,
+    nodes,
+    isUnit: isStratigraphicType,
+    epochWarnings: (id) => s.epochCoherenceWarnings(id),
+    crossEpoch: s.crossEpochWarnings(),
+    lanesInOrder: s.lanesMatchDateOrder(),
+    laneOrderText: t("issues.laneOrder"),
+    sortLanes: { label: t("issues.sortLanes"), run: sortLanesByDateNow },
+    diagnostics: documentDiagnostics(s.doc).flatMap((g) => g.records),
+    edgeAllowed: (et, st, dt) =>
+      allowedEdgeTypes(st, dt).map(canonicalEdgeType).includes(canonicalEdgeType(et)),
+    names: nameStatus,
+    t: (k, v) => t(k, v),
+  });
+  issueUnitOf = unitOfIssue(s.doc, isStratigraphicType, nodes);
+  renderWarningsPill();
+}
+
+/** «Ordina lane per data» — the chronology banner's one fix, now the `action`
+ *  of its issue (the Warnings view, the pill's popover). */
+function sortLanesByDateNow(): void {
+  if (!store) return;
+  store.sortLanesByDate();
+  void runLayout(false).then(() => {
+    buildScenes();
+    fit();
+  });
+}
+
+/** The table views' context: the document, the live nodes, the issues. */
+function tableCtx(): ViewCtx | null {
+  if (!store) return null;
+  return {
+    doc: store.doc,
+    nodes: store.liveNodes() as EmNode[],
+    isUnit: isStratigraphicType,
+    issues: currentIssues,
+    unitOfIssue: (id) => issueUnitOf(id),
+    t: (k, v) => t(k, v),
+  };
+}
+
 /** The last graph was closed: back to the empty canvas, without a stale view. */
 function closeWorkspace(): void {
   store = null;
@@ -11618,6 +11686,8 @@ function setAreaFocused(winId: string, on: boolean): void {
   // overlay, and closing one that cannot apply is not a re-arrangement.
   if (windowsOf().find((w) => w.id === winId)?.type !== "graph"
       && filterPanelOpen()) closeFilterPanel();
+  btnAddEpoch.classList.toggle("hidden",
+    !store || view !== "matrix" || activeWin().type !== "graph");
   refreshFunnel();
 }
 
@@ -17545,6 +17615,26 @@ function buildAreaHeader(win: Win): DocumentFragment {
     frag.appendChild(modeDd);
   }
 
+  // ── STRUTTURA · Rows | Cards, for the three sheets that have cards ────────
+  if (type === "table" && CARD_VIEWS.includes(currentSheetKey(win))) {
+    const seg = document.createElement("span");
+    seg.className = "win-seg";
+    seg.setAttribute("role", "group");
+    for (const v of ["rows", "cards"] as const) {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.textContent = t(`table.view.${v}`);
+      b.setAttribute("aria-pressed", tableViewOf(win) === v ? "true" : "false");
+      b.addEventListener("click", (e) => {
+        e.stopPropagation();
+        setTableView(win, v);
+        renderAreaHeaders();
+      });
+      seg.appendChild(b);
+    }
+    frag.appendChild(seg);
+  }
+
   // ── the per-type MENUS (WINDOW_MENUS) ─────────────────────────────────────
   for (const menu of WINDOW_MENUS[type]) {
     const dd = document.createElement("div");
@@ -17810,22 +17900,25 @@ function headerModesOf(win: Win): {
     };
   }
   if (win.type === "table") {
-    const cur = currentSheetKey();
-    // "US view" was a sheet NAME in a selector; as a mode it reads "US view
-    // Mode", which says the same word twice. The sheet keys are the names.
-    const label = (k: string): string =>
-      EM_DATA_SHEETS.find((s) => s.key === k)?.label ?? k;
+    // STRUTTURA · the sheet selector, in TWO GROUPS: the EMdb sheets (editable)
+    // and the computed views (read-only). Per window: two tables, two sheets.
+    const cur = currentSheetKey(win);
+    const item = (k: TableView, group?: string) => ({
+      label: t(`table.sheet.${k}`),
+      current: k === cur,
+      group,
+      run: () =>
+        focusThen(win, () => {
+          setSheet(k, win);
+          renderAreaHeaders();
+        }),
+    });
     return {
-      currentLabel: label(cur),
-      items: EM_DATA_SHEETS.map((sheet) => ({
-        label: label(sheet.key),
-        current: sheet.key === cur,
-        run: () =>
-          focusThen(win, () => {
-            setSheet(sheet.key);
-            renderAreaHeaders();
-          }),
-      })),
+      currentLabel: t(`table.sheet.${cur}`),
+      items: [
+        ...EMDB_SHEETS.map((k, i) => item(k, i === 0 ? t("table.grpSheets") : undefined)),
+        ...COMPUTED_VIEWS.map((k, i) => item(k, i === 0 ? t("table.grpComputed") : undefined)),
+      ],
     };
   }
   return null;
@@ -17869,7 +17962,9 @@ function buildWindowSearch(win: Win): HTMLElement | null {
   // is the graph's search now (one `setupSearch`, one more mount, and the pick
   // reaches the graph as it always did). The table keeps its filter and the
   // narrative its find-in-prose — those search what THAT window shows.
-  if (win.type !== "table" && win.type !== "narrative")
+  // …and the TABLE's filter moved into the table itself, as the first field of
+  // its filter bar (`emdata.ts`), next to the facets it combines with.
+  if (win.type !== "narrative")
     return null;
   const wrap = document.createElement("div");
   wrap.className = "win-search";
@@ -17877,18 +17972,11 @@ function buildWindowSearch(win: Win): HTMLElement | null {
   input.type = "search";
   input.autocomplete = "off";
   input.className = "win-search-input";
-  input.placeholder = t(win.type === "table" ? "win.searchTable" : "win.searchNarrative");
+  input.placeholder = t("win.searchNarrative");
   wrap.appendChild(input);
   // a click in the box must not be read as a gesture on the window underneath
   input.addEventListener("pointerdown", (e) => e.stopPropagation());
 
-  if (win.type === "table") {
-    input.value = emDataFilter();
-    input.addEventListener("input", () => {
-      setEmDataFilter(input.value);
-    });
-    return wrap;
-  }
   // narrative: find in the prose, and take you to it
   input.addEventListener("input", () => {
     highlightNarrative(input.value);
@@ -18375,7 +18463,7 @@ const WINDOW_MENUS: Record<WindowType, WinMenu[]> = {
   table: [
     {
       label: "menu.rows",
-      items: () => [
+      items: (win) => [
         {
           // FOCUS-NOJITTER · calls the mutator directly. It used to click a
           // `+ row` button in the table's head — a button that only existed in
@@ -18385,7 +18473,7 @@ const WINDOW_MENUS: Record<WindowType, WinMenu[]> = {
           label: "menu.addRow",
           run: () => {
             if (!store) return;
-            if (!addEmDataRow(store))
+            if (!addEmDataRow(store, win))
               toast(t("menu.sheetNoNewRows"));
           },
           disabledReason: () => (store ? null : t("menu.noGraph")),
@@ -18393,10 +18481,10 @@ const WINDOW_MENUS: Record<WindowType, WinMenu[]> = {
         {
           label: "Aggiungi claim",
           run: () => {
-            if (store) toggleEmDataClaimForm(store);
+            if (store) toggleEmDataClaimForm(store, win);
           },
           disabledReason: () =>
-            currentSheetKey() === "Claims"
+            currentSheetKey(win) === "Claims"
               ? null
               : t("menu.claimsFromSheet"),
         },
@@ -20238,6 +20326,8 @@ initAnnotatorGestures();   // A2 · the overlay is a singleton: wire it once
 refreshIdentityChip();     // IDENTITY · who is authoring, from the first frame
 initEmData({
   getStore: () => store,
+  getCtx: tableCtx,
+  runIssueAction: (id) => currentIssues.find((i) => i.id === id)?.action?.run(),
   // CURRENT-ELEMENT · the row lives on the window, not in the table module
   currentRow: () => currentRowId(),
   // ROWSELECT · picking a row selects its NODE, and shows it if a graph window

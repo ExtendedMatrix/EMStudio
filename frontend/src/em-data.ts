@@ -16,6 +16,7 @@
 import type { DocumentStore } from "./model";
 import type { EmEdge, EmNode } from "./types";
 import { isStratigraphicType, nodeLabel, typesOfClass } from "./rules";
+import { RELATION_CLAIMS } from "./table-views";
 
 // ── deterministic identity (mirror of UnifiedXLSXImporter._mint) ────────────
 // Fixed namespace, copied verbatim from s3Dgraphy so ids computed here match the
@@ -155,6 +156,10 @@ export interface Row {
   cells: Record<string, string>;
   /** AUX2: a mapped-but-not-baked node — visible, marked, not yet persisted */
   volatile: boolean;
+  /** STRUTTURA · a row that is shown, not edited here (an edge claim) */
+  readonly?: boolean;
+  /** STRUTTURA · nesting of the first cell (sub-epochs under their mother) */
+  depth?: number;
 }
 
 export interface Table {
@@ -257,19 +262,51 @@ export function buildTable(
       { key: "ID", label: "ID", editor: { kind: "text" } },
       { key: "START", label: "Start", editor: { kind: "number" } },
       { key: "END", label: "End", editor: { kind: "number" } },
+      // STRUTTURA · the EMdb Epochs.PARENT column. The nesting is READ FROM THE
+      // EDGES (`has_sub_epoch`), never from the dates: it is the importer's
+      // assertion (`unified_xlsx_importer.py`), and two spans that happen to
+      // nest are not a sub-epoch.
+      { key: "PARENT", label: "Parent", editor: { kind: "readonly" } },
       { key: "COLOR", label: "Color", editor: { kind: "color" } },
     ];
-    const rows: Row[] = nodes.filter(isEpoch).map((n) => {
+    const parentOf = new Map<string, string>();
+    const kids = new Map<string, string[]>();
+    for (const e of edges)
+      if (e.edge_type === "has_sub_epoch") {
+        parentOf.set(e.target, e.source);
+        kids.set(e.source, [...(kids.get(e.source) ?? []), e.target]);
+      }
+    const startOf = (n: EmNode): number => {
       const d = dataOf(n);
+      const v = Number(d.start_time ?? d.start);
+      return Number.isFinite(v) ? v : -Infinity;
+    };
+    const newest = (a: EmNode, b: EmNode): number => startOf(b) - startOf(a);
+    const ordered: Array<[EmNode, number]> = [];
+    const seen = new Set<string>();
+    const rec = (n: EmNode, depth: number): void => {
+      if (seen.has(n.id)) return;
+      seen.add(n.id);
+      ordered.push([n, depth]);
+      (kids.get(n.id) ?? []).map((k) => byId.get(k)).filter((k): k is EmNode => !!k && isEpoch(k))
+        .sort(newest).forEach((k) => rec(k, depth + 1));
+    };
+    nodes.filter((n) => isEpoch(n) && !parentOf.has(n.id)).sort(newest).forEach((n) => rec(n, 0));
+    nodes.filter(isEpoch).forEach((n) => rec(n, 0)); // a cycle's members, never dropped
+    const rows: Row[] = ordered.map(([n, depth]) => {
+      const d = dataOf(n);
+      const par = parentOf.get(n.id);
       return {
         id: n.id,
         cells: {
           ID: str(n.name) || n.id,
           START: str(d.start_time ?? d.start ?? ""),
           END: str(d.end_time ?? d.end ?? ""),
+          PARENT: par ? str(byId.get(par)?.name) || par : "—",
           COLOR: str(d.fill_color ?? (n as Record<string, unknown>).color ?? ""),
         },
         volatile: V(n.id),
+        depth,
       };
     });
     return { sheet, columns, rows, canAdd: true };
@@ -408,6 +445,9 @@ export function buildTable(
   };
   const columns: Column[] = [
     { key: "TARGET_ID", label: "Target", editor: { kind: "readonly" }, provenance: true },
+    // STRUTTURA · what KIND of statement the row is: a qualia (a property), an
+    // epoch membership, a relation — the desk's «Genere»
+    { key: "KIND", label: "Kind", editor: { kind: "readonly" } },
     { key: "PROPERTY_TYPE", label: "Property", editor: { kind: "text" } },
     { key: "VALUE", label: "Value", editor: { kind: "text" } },
     { key: "UNITS", label: "Units", editor: { kind: "text" } },
@@ -422,6 +462,7 @@ export function buildTable(
       id: p.id,
       cells: {
         TARGET_ID: tgt ? str(tgt.name) || tgt.id : "—",
+        KIND: "qualia",
         PROPERTY_TYPE: str(
           (p as Record<string, unknown>).property_type ?? d.property_type ?? p.name ?? "",
         ),
@@ -440,6 +481,25 @@ export function buildTable(
       },
       volatile: V(p.id),
     };
+  });
+  // …and the two other kinds of claim, READ-ONLY: they are edges, and an edge
+  // is edited on the canvas. Epoch membership and the stratigraphic relations of
+  // every unit, the same statements the EMdb Claims sheet lists.
+  const RELATIONS = new Set(RELATION_CLAIMS);
+  edges.forEach((e, i) => {
+    const s = byId.get(e.source);
+    const d = byId.get(e.target);
+    if (!s || !d || !isStratigraphicType(s.node_type)) return;
+    const et = e.edge_type ?? "";
+    const kind = et === "has_first_epoch" ? "epoch" : RELATIONS.has(et) ? "relation" : "";
+    if (!kind) return;
+    rows.push({
+      id: `claim:${e.id ?? i}`,
+      cells: { TARGET_ID: str(s.name) || s.id, KIND: kind, PROPERTY_TYPE: et,
+               VALUE: str(d.name) || d.id, UNITS: "", COMBINER_REASONING: "", PROVENANCE: "" },
+      volatile: false,
+      readonly: true,
+    });
   });
   return { sheet, columns, rows, canAdd: false };
 }

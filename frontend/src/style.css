@@ -7810,3 +7810,179 @@ body.gesturing-resize * {
   color: var(--on-accent);
   font-weight: 600;
 }
+
+/* ── STRUTTURA fase 6 · the table window (scrivania v5 `.fbar`, `.fpop`) ──── */
+.tile-tablebody .fbar {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 8px 14px;
+  background: var(--bg-panel);
+  border-bottom: 1px solid var(--border);
+}
+.fbar .fq {
+  width: 210px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--bg-sunken);
+  padding: 4px 8px;
+  font-size: 12.5px;
+  color: var(--text);
+}
+.fbar .fbtn {
+  border: 1px solid var(--border-strong);
+  background: var(--bg-panel);
+  border-radius: var(--radius);
+  padding: 3px 9px;
+  font-size: 12px;
+  color: var(--text);
+  cursor: pointer;
+}
+.fbar .fbtn.on { border-color: var(--accent); background: var(--bg-accent-soft); }
+.fbar .fbtn b { font: 600 11px var(--font-mono); }
+.fbar .fbtn .car { color: var(--text-faint); font-size: 10px; }
+.fbar .ftok {
+  border: 0;
+  background: var(--bg-hover);
+  color: var(--info-ink);
+  border-radius: 999px;
+  padding: 2px 4px 2px 10px;
+  font-size: 11.5px;
+  cursor: pointer;
+}
+.fbar .ftok span { display: inline-block; width: 16px; opacity: 0.7; }
+.fbar .ftok:hover span { opacity: 1; }
+.fbar .fgrow { flex: 1; }
+.fbar .fcount { font: 11px var(--font-mono); color: var(--text-faint); }
+.fbar .fclear {
+  border: 0;
+  background: none;
+  color: var(--brand-ink);
+  font-size: 12px;
+  cursor: pointer;
+}
+.fpop {
+  position: fixed;
+  z-index: 90;
+  width: 290px;
+  max-height: 60vh;
+  display: flex;
+  flex-direction: column;
+  padding: 6px 0;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 4px 16px rgba(7, 55, 99, 0.18);
+  color: var(--text);
+}
+.fpop .fpq {
+  margin: 4px 10px 6px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--bg-sunken);
+  padding: 4px 8px;
+  font-size: 12.5px;
+  color: var(--text);
+}
+.fpop .fpl { overflow: auto; min-height: 0; }
+.fpop .fpl label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 12px;
+  font-size: 12.5px;
+  cursor: pointer;
+}
+.fpop .fpl label:hover { background: var(--bg-hover); }
+.fpop .fpl .l { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fpop .fpl .h { font: 10px var(--font-mono); color: var(--text-faint); }
+.fpop .fpl .c { font: 11px var(--font-mono); color: var(--text-muted); min-width: 18px; text-align: right; }
+.fpop .fpnone { margin: 8px 12px; color: var(--text-muted); font-size: 12.5px; }
+.fpop .fpf {
+  display: flex;
+  gap: 4px;
+  justify-content: flex-end;
+  padding: 6px 10px 2px;
+  margin-top: 4px;
+  border-top: 1px solid var(--border);
+}
+.fpop .fpf button {
+  border: 0;
+  background: none;
+  color: var(--brand-ink);
+  font-size: 12px;
+  cursor: pointer;
+  padding: 2px 6px;
+}
+/* the computed views and the cards */
+.tv-pad { padding: 14px 16px; }
+.tv-lead { max-width: 76ch; margin: 0 0 12px; color: var(--text-muted); font-size: 12.5px; }
+.tv-table { width: 100%; }
+.tv-table tbody tr[data-id] { cursor: pointer; }
+.tv-table tbody tr[data-id]:hover td { background: var(--bg-hover); }
+.tv-id { font: 600 12.5px var(--font-mono); white-space: nowrap; }
+.tv-num { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+.tv-w { font-weight: 600; }
+.tv-d { color: var(--text-muted); font-weight: 400; font-family: var(--font-sans); font-size: 11.5px; }
+.tv-ok { color: var(--ok-ink); }
+.tv-cols { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; }
+.tv-card {
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 12px 14px;
+  cursor: pointer;
+}
+.tv-card:hover { border-color: var(--border-strong); }
+.tv-card h3 { margin: 0 0 6px; font: 700 1rem var(--font-display); color: var(--brand-ink); }
+.tv-meta { display: flex; gap: 6px; flex-wrap: wrap; margin: 0 0 6px; }
+.tv-tag {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 6px;
+  border-radius: 4px;
+  border: 1px solid var(--border-strong);
+  font: 600 11px/1.4 var(--font-sans);
+  color: var(--text-muted);
+  background: var(--bg-panel);
+}
+.tv-tag.pd { background: #ffcc99; border-color: #d9a066; color: #5a3200; }
+.tv-chain { display: flex; flex-direction: column; gap: 3px; font-size: 12.5px; padding: 4px 0; }
+.tv-chain > div { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.tv-ar { color: var(--text-faint); font-family: var(--font-mono); }
+.tv-desc { margin: 0 0 8px; color: var(--text-muted); font-size: 12.5px; }
+.tv-eyebrow {
+  font-size: 10.5px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase;
+  color: var(--text-muted); margin: 0 0 4px;
+}
+.tv-f { display: grid; grid-template-columns: 110px 1fr; gap: 6px; padding: 3px 0; font-size: 12.5px; }
+.tv-f > span:first-child { color: var(--text-muted); }
+.tv-link {
+  border: 0; background: none; padding: 0; cursor: pointer;
+  font: 500 12px var(--font-mono); color: var(--brand-ink); border-bottom: 1px dotted currentColor;
+}
+.tv-act {
+  border: 1px solid var(--accent); background: var(--bg-accent-soft); color: var(--text);
+  border-radius: var(--radius); padding: 2px 8px; font-size: 12px; cursor: pointer; white-space: nowrap;
+}
+.sevtag { font: 600 11.5px var(--font-sans); white-space: nowrap; }
+.sevtag.warn { color: var(--warn-ink); }
+.sevtag.info { color: var(--info-ink); }
+.emdata-ro-row td { color: var(--text-muted); }
+/* a long epoch name ellipsises instead of wrapping over three lines */
+.nl-epoch > span:not(.nl-span) {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.nl-epoch { flex-wrap: nowrap; }
+.tv-table th, .tv-table td { padding: 6px 10px; text-align: left; border-bottom: 1px solid var(--border); }
+.tv-table th {
+  font-size: 10.5px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase;
+  color: var(--text-muted); background: var(--bg-sunken);
+}

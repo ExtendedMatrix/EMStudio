@@ -32,6 +32,9 @@ import { t } from "../i18n";
 export interface TableMount {
   body: HTMLElement;
   readonly count: HTMLElement | null;
+  /** STRUTTURA · the window this mount belongs to: its sheet, its row/card
+   *  choice and its filters are PER WINDOW (two tables, two questions) */
+  win?: Win;
   enabled: () => boolean;
   place?: { recall: () => number; remember: (at: number) => void };
 }
@@ -133,6 +136,7 @@ export function registerBuiltinSurfaces(deps: SurfaceDeps): void {
           const el = body;
           host = {
             body: el,
+            win,
             get count() { return strip(el.parentElement, "win-strip-count"); },
             enabled: () => el.isConnected,
             place: surfacePlace(win),
