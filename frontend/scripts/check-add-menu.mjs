@@ -296,7 +296,7 @@ function doc() {
   const link = ex.find((l) => l.nodeId === "D3");
   const res = M.applyExistingLink(st, "X2", link);
   eq([res.source, res.target], ["X2", "D3"], "the edge runs extractor → document");
-  eq(st.node("X2").name, "D.03.2", "…and the extractor takes its name from D.03 (NAME1): D.03.2");
+  eq(st.node("X2").name, "D.03.02", "…and the extractor takes its name from D.03 (RIFINITURE: <source>.<NN>; the old D.03.1 keeps ordinal 1): D.03.02");
   ok(st.doc.graph.edges.some((e) => e.source === "X2" && e.target === "D3" && e.edge_type === "extracted_from"),
      "the edge is in the graph");
   st.undo();

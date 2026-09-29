@@ -56,7 +56,10 @@ export interface IssueSources {
   /** the socket check: is this edge type allowed between these node types? */
   edgeAllowed?: (edgeType: string, sourceType: string, targetType: string) => boolean | null;
   /** NAME1 statuses */
-  names?: Map<string, { status: "ok" | "warn" | "dup"; reason?: string }>;
+  names?: Map<string, { status: "ok" | "warn" | "dup"; reason?: string; outOfRule?: boolean; suggestion?: string }>;
+  /** RIFINITURE · «Rinomina secondo la regola» for the extractors named before
+   *  `<source>.<NN>`: one node, or many at once (one undo step) */
+  renameRule?: { label: string; bulkLabel: (n: number) => string; run: (nodes: string[]) => void };
   /** CATENA · s3dgraphy `api.validate["info"]`, the client reading of
    *  `diagnostics.extraction_source_hints`: an extractor that reads a unit
    *  without a property of the name it feeds. A SUGGESTION, never a warning. */
@@ -112,10 +115,21 @@ export function issues(src: IssueSources): Issue[] {
     }
 
   // ── naming (NAME1): a duplicate is a warning, a malformed name a hint ─────
-  for (const [id, st] of src.names ?? [])
-    if (byId.has(id) && st.status !== "ok")
-      push({ node: id, sev: st.status === "dup" ? "warn" : "info", rule: "naming",
+  for (const [id, st] of src.names ?? []) {
+    if (!byId.has(id) || st.status === "ok") continue;
+    // RIFINITURE · an extractor named before the rule: information, with the
+    // rename one click away — never applied on its own
+    if (st.outOfRule && st.status === "warn") {
+      const r = src.renameRule;
+      push({ node: id, sev: "info", rule: "naming",
+             txt: t("issues.nameRule", { n: name(id), s: st.suggestion ?? "" }),
+             ...(r ? { action: { label: r.label, run: () => r.run([id]) },
+                       bulk: { key: "name-rule", label: r.bulkLabel, run: r.run } } : {}) });
+      continue;
+    }
+    push({ node: id, sev: st.status === "dup" ? "warn" : "info", rule: "naming",
              txt: `${name(id)}: ${st.reason ?? t(st.status === "dup" ? "issues.nameDup" : "issues.nameWarn")}` });
+  }
 
   // ── hints that cost nothing: a unit with no property, an extractor with no
   //    author (the desk's two «suggerimenti») ───────────────────────────────

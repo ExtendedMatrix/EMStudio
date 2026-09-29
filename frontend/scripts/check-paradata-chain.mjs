@@ -132,7 +132,7 @@ const undoDepth = (st) => st.undoStack?.length ?? (st.canUndo ? 1 : 0);
   const st = fresh();
   const before = undoDepth(st);
   const r = chain.addReading(st, "P_H", { kind: "document", id: "D3" });
-  eq(N(st, r.extractorId).name, "D.3.1", "a reading on D.3 is D.3.1 (NAME1: D.<n> → D.<n>.<ordinal>, no zero padding)");
+  eq(N(st, r.extractorId).name, "D.3.01", "a reading on D.3 is D.3.01 (RIFINITURE: <source>.<NN>, the rule of s3Dgraphy)");
   eq(undoDepth(st) - before, 1, "…one undo step");
   ok(E(st, "has_data_provenance").some((e) => e.source === "P_H" && e.target === r.extractorId), "has_data_provenance from the property");
   ok(E(st, "is_in_paradata_nodegroup").some((e) => e.source === r.extractorId && e.target === "PD_USM101"),
@@ -145,7 +145,7 @@ const undoDepth = (st) => st.undoStack?.length ?? (st.canUndo ? 1 : 0);
   const region = N(st, g.regionId);
   eq([region.node_type, region.data.resource_id], ["annotation_region", "D3"], "…an annotation_region on D.3");
   ok(E(st, "is_on_resource").some((e) => e.source === region.id && e.target === "D3"), "…is_on_resource D.3");
-  eq(N(st, r.extractorId).name, "D.3.1", "…and the extractor keeps its name");
+  eq(N(st, r.extractorId).name, "D.3.01", "…and the extractor keeps its name");
   eq(chain.readingsOfDocument(st.doc, "D3"), [r.extractorId], "D.3 lists the reading once");
   // re-tracing replaces the region, never adds a second
   chain.setReadingGeometry(st, r.extractorId, "D3", { kind: "region", shape_kind: "rect", rect: [0.5, 0.5, 0.1, 0.1] });
@@ -163,8 +163,8 @@ const undoDepth = (st) => st.undoStack?.length ?? (st.canUndo ? 1 : 0);
   eq(r.moved, ["X1"], "…and moves the direct extractor under it");
   const prov = chain.provenanceOf(st.doc, "P_DAT");
   eq([prov.direct, prov.combiners, prov.combined.get(r.combinerCreated)], [[], [r.combinerCreated], ["X1", r.extractorId]],
-     "P_DAT → C.1 → {D.1.1, D.2.1}");
-  eq(N(st, r.extractorId).name, "D.2.1", "the new reading is D.2.1");
+     "P_DAT → C.1 → {D.1.1, D.2.01}");
+  eq(N(st, r.extractorId).name, "D.2.01", "the new reading is D.2.01");
   const third = chain.addReading(st, "P_DAT", { kind: "document", id: "D3" });
   eq([third.combinerCreated, third.combinerId], [null, r.combinerCreated], "a third source joins the same combiner");
   st.undo();
@@ -177,15 +177,15 @@ const undoDepth = (st) => st.undoStack?.length ?? (st.canUndo ? 1 : 0);
 {
   const st = fresh();
   const r = chain.addReading(st, "P_CAPH", { kind: "unit", id: "USM101" });
-  eq(N(st, r.extractorId).name, "USM101.1", "a reading from USM101 is USM101.1 (the unit's name for the document's)");
+  eq(N(st, r.extractorId).name, "USM101.01", "a reading from USM101 is USM101.01 (the unit's name for the document's)");
   eq(chain.sourceOf(st.doc, r.extractorId).kind, "unit", "…its source is a unit");
   eq(chain.extractionSourceHints(st.doc, isStratigraphicType), [],
      "USM101 has a height of its own: no hint");
   const r2 = chain.addReading(st, "P_CAPH", { kind: "unit", id: "USV106" });
-  eq(N(st, r2.extractorId).name, "USV106.1", "a second unit source: USV106.1");
+  eq(N(st, r2.extractorId).name, "USV106.01", "a second unit source: USV106.01");
   ok(r2.combinerCreated, "…the second source of P_CAPH made its combiner");
   eq(chain.extractionSourceHints(st.doc, isStratigraphicType).map((h) => [h.extractor_name, h.unit_name, h.property_name]),
-     [["USV106.1", "USV106", "height"]], "USV106 has no height: ONE hint (api.validate info), through the combiner");
+     [["USV106.01", "USV106", "height"]], "USV106 has no height: ONE hint (api.validate info), through the combiner");
   HINT_DOC = st.doc;
 }
 
@@ -200,7 +200,7 @@ print(json.dumps(api.validate(g)["info"]))`;
     const got = JSON.parse(execFileSync(PY, ["-c", script], { input: JSON.stringify(HINT_DOC),
       env: { ...process.env, PYTHONPATH: `${S3D}src` } }).toString().trim().split("\n").pop());
     eq(got.length, 1, "s3Dgraphy's api.validate lists the same ONE info");
-    ok(got[0].includes("USV106.1") && got[0].includes("USV106") && got[0].includes("height"),
+    ok(got[0].includes("USV106.01") && got[0].includes("USV106") && got[0].includes("height"),
        "…about the same extractor, unit and property");
   } else console.log("  (s3Dgraphy venv not found: the Python comparison is skipped)");
 }
@@ -219,7 +219,7 @@ print(json.dumps(api.validate(g)["info"]))`;
   eq(naming.sourceOfExtractor(doc, "X"), null, "a region on a bare file: no source for the name");
   doc.graph.nodes.push({ id: "D", node_type: "document", name: "D.7" });
   doc.graph.edges.push({ source: "D", target: "F", edge_type: "has_linked_resource" });
-  eq(naming.deriveExtractorName(doc, "X"), "D.7.1", "…until a document links the file: D.7.1");
+  eq(naming.deriveExtractorName(doc, "X"), "D.7.01", "…until a document links the file: D.7.01");
 }
 
 // ── «Usa come valore» ───────────────────────────────────────────────────────
@@ -389,7 +389,7 @@ print(json.dumps(api.validate(g)["info"]))`;
   const d = N(st, r.documentId);
   eq([d.node_type, d.name, d.data.tropy, d.data.url], ["document", "D.4", "tropy:item/2144", "/archivio/foto_USM101_1932.jpg"],
      "…a DocumentNode D.<n>, the Tropy item kept, the file as its url");
-  eq(r.extractors.map((x) => N(st, x).name), ["D.4.1", "D.4.2"],
+  eq(r.extractors.map((x) => N(st, x).name), ["D.4.01", "D.4.02"],
      "…one extractor per selection, named by NAME1 from the document its region is on (not Temp<n>)");
   const g = chain.geometryOf(st.doc, r.extractors[0]);
   eq([g.kind, g.rect], ["region", [0.2, 0.3, 0.15, 0.2]], "…the selection's region is the reading's geometry");

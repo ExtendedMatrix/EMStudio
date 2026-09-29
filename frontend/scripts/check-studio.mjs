@@ -225,6 +225,23 @@ const eq = (got, want, what) => {
   const V = await load("table-views.ts");
   const I = await load("issues.ts");
   const R = await load("rules.ts");
+  // RIFINITURE · an extractor named before the rule <source>.<NN> is INFORMATION,
+  // with «Rinomina secondo la regola» as its action and as a bulk (one call)
+  {
+    const Nm = await load("naming.ts");
+    const g = { nodes: [{ id: "d", node_type: "document", name: "D.3" },
+      { id: "a", node_type: "extractor", name: "D.3.1" }, { id: "b", node_type: "extractor", name: "D.3.2" }],
+      edges: [{ source: "a", target: "d", edge_type: "extracted_from" }, { source: "b", target: "d", edge_type: "extracted_from" }] };
+    const calls = [];
+    const iss = I.issues({ doc: { graph: g }, nodes: g.nodes, isUnit: () => false, names: Nm.nameStatusMap({ graph: g }),
+      renameRule: { label: "rename", bulkLabel: (n) => `all ${n}`, run: (ids) => calls.push(ids) },
+      t: (k, v) => `${k}${v ? JSON.stringify(v) : ""}` }).filter((i) => i.rule === "naming");
+    eq(iss.map((i) => [i.node, i.sev, i.bulk?.key]), [["a", "info", "name-rule"], ["b", "info", "name-rule"]],
+       "two out-of-rule extractors: two INFO rows, one bulk key");
+    ok(iss[0].txt.includes("D.3.01"), "…the row says the rule's name");
+    iss[0].action.run(); iss[0].bulk.run(["a", "b"]);
+    eq(calls, [["a"], ["a", "b"]], "…the action renames one, the bulk all of them in one call");
+  }
   const fx = JSON.parse(await (await import("node:fs/promises")).readFile(
     new URL("../../.claude/wip/design/paradata-in-pancia/pancia_A_estrattore_su_RSF.em.json",
             import.meta.url), "utf8").catch(() => "null"));

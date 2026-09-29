@@ -8,7 +8,10 @@
  * `extractor_01` (`DocumentStore.freshLabel`), which says nothing.
  *
  *   Document  `D.<n>`            — D.1, D.10, …           (unique, non-empty)
- *   Extractor `<documentName>.<ordinal>`                   (ordinal unique per document)
+ *   Extractor `<sourceName>.<NN>` — D.03.01, USM101.01, D.12.101
+ *                                  (the source's name AS IT IS, then an ordinal
+ *                                  unique per source, TWO digits — three when
+ *                                  they are needed: s3Dgraphy's `f"{n:02d}"`)
  *   Extractor `Temp<n>`          — while not yet attached to a document
  *   Combiner  `C.<n>`            — C.1, C.2, …             (unique)
  *
@@ -59,6 +62,9 @@ export interface NameCheck {
   suggestion?: string;
   /** Why, in one phrase, for the tooltip and the context-menu entry. */
   reason?: string;
+  /** RIFINITURE · an extractor named before the `<source>.<NN>` rule: the
+   *  name is right but for the writing of its ordinal (information only) */
+  outOfRule?: boolean;
 }
 
 export interface NamingOptions {
@@ -200,23 +206,43 @@ export function extractorsOfDocument(doc: NamingDoc, documentId: string): string
 }
 
 /**
- * The next free ordinal for extractors of a document, by NAME.
+ * RIFINITURE · the ordinal as the rule writes it: two digits, three (or more)
+ * when they are needed — `1` → `01`, `101` → `101`. The same as s3Dgraphy's
+ * xlsx importer (`f"{doc_short}.{counter:02d}"`, unified_xlsx_importer.py), so
+ * an extractor named here and one named by the importer read the same.
+ */
+export function ordinalTag(n: number): string {
+  return String(n).padStart(2, "0");
+}
+
+/** The ordinal a name carries after `<source>.`, whatever its format (`1`,
+ *  `01`, `001` → 1), or null when the tail is not a number. */
+function ordinalAfter(name: string, prefix: string): number | null {
+  if (!name.startsWith(prefix)) return null;
+  const tail = name.slice(prefix.length);
+  return /^\d+$/.test(tail) && Number(tail) > 0 ? Number(tail) : null;
+}
+
+/**
+ * The next free ordinal for extractors of a source, by NAME.
  *
  * Reads the ordinals off the existing names rather than counting nodes: with
- * `D.10.1` and `D.10.3` present the answer is 2, and filling the hole is right —
+ * `D.10.01` and `D.10.03` present the answer is 2, and filling the hole is right —
  * a document's extractors are a set of numbered extractions, not a sequence, and
- * jumping to 4 would suggest a `D.10.2` exists somewhere.
+ * jumping to 4 would suggest a `D.10.02` exists somewhere. An ordinal written
+ * out of the rule (`D.10.1`, from before RIFINITURE) is still that ordinal: it
+ * is TAKEN, so a new extractor never becomes a second «first of D.10».
+ * `exceptId` leaves one extractor out — the one being (re)named.
  */
-export function nextExtractorOrdinal(doc: NamingDoc, documentName: string): number {
+export function nextExtractorOrdinal(doc: NamingDoc, documentName: string, exceptId?: string): number {
   const base = documentName.trim();
   if (!base) return 1;
   const prefix = `${base}.`;
   const used = new Set<number>();
   for (const n of nodesOfType(doc, "extractor")) {
-    const nm = nameOf(n);
-    if (!nm.startsWith(prefix)) continue;
-    const tail = nm.slice(prefix.length);
-    if (/^\d+$/.test(tail)) used.add(Number(tail));
+    if (n.id === exceptId) continue;
+    const k = ordinalAfter(nameOf(n), prefix);
+    if (k !== null) used.add(k);
   }
   return firstFree(used);
 }
@@ -226,8 +252,10 @@ export function nextExtractorOrdinal(doc: NamingDoc, documentName: string): numb
  * (or to one whose own name is empty — then there is nothing to derive from and
  * the extractor keeps a temporary name).
  *
- * When the extractor already carries a valid ordinal for that document it keeps
- * it: re-deriving would renumber a node every time the graph is checked.
+ * When the extractor already carries an ordinal for that source it KEEPS the
+ * number: re-deriving would renumber a node every time the graph is checked. An
+ * ordinal out of the rule keeps its number too and only changes its writing
+ * (`D.3.1` → `D.3.01`), unless another extractor of the same source holds it.
  */
 export function deriveExtractorName(
   doc: NamingDoc,
@@ -238,13 +266,62 @@ export function deriveExtractorName(
   const self = doc.graph.nodes.find((n) => n.id === extractorId);
   const current = self ? nameOf(self) : "";
   const prefix = `${parent.name}.`;
-  if (current.startsWith(prefix) && /^\d+$/.test(current.slice(prefix.length))) {
-    const taken = doc.graph.nodes.some(
-      (n) => n.id !== extractorId && nameOf(n) === current,
-    );
-    if (!taken) return current; // already right, and not somebody else's name
+  const mine = ordinalAfter(current, prefix);
+  if (mine !== null) {
+    const want = `${prefix}${ordinalTag(mine)}`;
+    const clash = doc.graph.nodes.some((n) => {
+      if (n.id === extractorId) return false;
+      if (nameOf(n) === want) return true;
+      return n.node_type === "extractor" && ordinalAfter(nameOf(n), prefix) === mine;
+    });
+    if (!clash) return want; // right, or right but for the writing of the number
   }
-  return `${parent.name}.${nextExtractorOrdinal(doc, parent.name)}`;
+  return `${prefix}${ordinalTag(nextExtractorOrdinal(doc, parent.name, extractorId))}`;
+}
+
+/**
+ * RIFINITURE · true when an extractor's name is the rule's name but for the
+ * writing of its ordinal (`D.3.1`, `USM101.1`, `D.3.001` beside `D.3.01`): an
+ * extractor named before the rule changed. INFORMATION, never a warning, and
+ * never renamed on its own — `ruleRenames` is the explicit command.
+ */
+export function isOutOfRule(doc: NamingDoc, extractorId: string): boolean {
+  const self = doc.graph.nodes.find((n) => n.id === extractorId);
+  if (!self || self.node_type !== "extractor") return false;
+  const parent = documentOfExtractor(doc, extractorId);
+  if (!parent?.name) return false;
+  const name = nameOf(self);
+  const prefix = `${parent.name}.`;
+  const k = ordinalAfter(name, prefix);
+  return k !== null && name !== `${prefix}${ordinalTag(k)}`;
+}
+
+/**
+ * RIFINITURE · «Rinomina secondo la regola»: the renames that bring the given
+ * extractors (all the out-of-rule ones when `ids` is omitted) to the rule,
+ * computed ONE AFTER THE OTHER on a copy of the names — so two extractors never
+ * receive the same free ordinal. Pure: the caller applies the list in one
+ * `batch` (one undo step).
+ */
+export function ruleRenames(
+  doc: NamingDoc,
+  ids?: string[],
+): { id: string; from: string; to: string }[] {
+  const work: NamingDoc = {
+    graph: { nodes: doc.graph.nodes.map((n) => ({ ...n })), edges: doc.graph.edges },
+  };
+  const targets = ids ?? work.graph.nodes.filter((n) => isOutOfRule(work, n.id)).map((n) => n.id);
+  const out: { id: string; from: string; to: string }[] = [];
+  for (const id of targets) {
+    const node = work.graph.nodes.find((n) => n.id === id);
+    if (!node || node.node_type !== "extractor") continue;
+    const to = deriveExtractorName(work, id);
+    const from = nameOf(node);
+    if (!to || to === from) continue;
+    node.name = to;
+    out.push({ id, from, to });
+  }
+  return out;
 }
 
 /** Next free `C.<n>`. */
@@ -413,6 +490,13 @@ export function computeNameStatus(
   }
   if (name === derived) return { status: "ok" };
   const parent = documentOfExtractor(doc, nodeId);
+  if (isOutOfRule(doc, nodeId))
+    return {
+      status: "warn",
+      outOfRule: true,
+      suggestion: derived,
+      reason: `named before the rule <source>.<NN>: ${derived}`,
+    };
   return {
     status: "warn",
     suggestion: derived,

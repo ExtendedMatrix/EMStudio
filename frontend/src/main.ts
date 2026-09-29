@@ -139,6 +139,8 @@ import {
   nextDocumentName,
   nextFreeName,
   nameStatusMap,
+  ruleRenames,
+  isOutOfRule,
   paradataGroupRenameOnAttach,
   renameOnAttach,
   type NameCheck,
@@ -2190,6 +2192,19 @@ function renderInspectorIssues(host: HTMLElement): void {
     b.className = "tv-act insp-ai-all";
     b.textContent = t(selAi.length > 1 ? "ai.verifySelection" : "ai.verifyAll", { n: String(ids.length) });
     b.addEventListener("click", () => verifyAiNodes(ids));
+    sec.appendChild(b);
+  }
+  // RIFINITURE · «Rinomina secondo la regola» in bulk, as «Verifica»: every
+  // out-of-rule extractor of this node's chain, or of the selection
+  const ruleIds = [...new Set(mine.filter((i) => i.bulk?.key === "name-rule").map((i) => i.node))];
+  const selRule = selectedIds.size > 1 && store
+    ? [...selectedIds].filter((id) => isOutOfRule(store!.doc, id)) : [];
+  if (ruleIds.length > 1 || selRule.length > 1) {
+    const ids = selRule.length > 1 ? selRule : ruleIds;
+    const b = document.createElement("button");
+    b.className = "tv-act insp-name-rule";
+    b.textContent = t(selRule.length > 1 ? "naming.renameRuleSel" : "naming.renameRuleAll", { n: String(ids.length) });
+    b.addEventListener("click", () => renameExtractorsByRule(ids));
     sec.appendChild(b);
   }
   const open = document.createElement("button");
@@ -10770,6 +10785,8 @@ function refreshIssues(): void {
     aiNodes: aiv.unvalidatedAi(s.doc),
     verifyAi: { label: t("ai.verify"), bulkLabel: (n) => t("ai.verifyAll", { n: String(n) }),
                 run: (ids) => verifyAiNodes(ids) },
+    renameRule: { label: t("naming.renameRule"), bulkLabel: (n) => t("naming.renameRuleAll", { n: String(n) }),
+                  run: (ids) => renameExtractorsByRule(ids) },
     t: (k, v) => t(k, v),
   });
   issueUnitOf = unitOfIssue(s.doc, isStratigraphicType, nodes);
@@ -14650,6 +14667,23 @@ function verifyAiNodes(ids: string[]): void {
   refreshIssues();
   refreshInspector();
   renderDocView();
+  draw();
+}
+
+/** RIFINITURE · «Rinomina secondo la regola»: the given extractors (the ones
+ *  named before `<source>.<NN>`) take the rule's name, in ONE undo step. The
+ *  names are computed one after the other (`ruleRenames`), so two never meet. */
+function renameExtractorsByRule(ids: string[]): void {
+  if (!store) return;
+  const s = store;
+  const list = ruleRenames(s.doc, ids);
+  if (!list.length) return;
+  s.batch(() => { for (const r of list) s.updateNode(r.id, { name: r.to }); });
+  const msg = t("naming.renamedRule", { n: String(list.length) });
+  logInfo(msg, list.map((r) => r.id));
+  toastUndo(msg, s);
+  refreshIssues();
+  refreshInspector();
   draw();
 }
 

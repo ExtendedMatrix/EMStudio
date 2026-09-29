@@ -1,0 +1,12 @@
+{
+  "rule": "<source>.<NN> — the source's name as it is, then an ordinal per source written with two digits (three or more when needed); Temp<n> while there is no source",
+  "source_of_rule": "s3Dgraphy src/s3dgraphy/importer/unified_xlsx_importer.py _create_extractor: f\"{doc_short}.{counter:02d}\"",
+  "cases": [
+    { "source": "D.03",   "source_type": "document", "existing": 0,   "next": "D.03.01",   "why": "a document's first extractor" },
+    { "source": "D.01",   "source_type": "document", "existing": 1,   "next": "D.01.02",   "why": "the second of a document (xlsx D.01.02)" },
+    { "source": "D.3",    "source_type": "document", "existing": 0,   "next": "D.3.01",    "why": "the source name stays as it is, only the ordinal is padded" },
+    { "source": "USM101", "source_type": "USM",      "existing": 0,   "next": "USM101.01", "why": "a unit read as a source" },
+    { "source": "US5",    "source_type": "US",       "existing": 0,   "next": "US5.01",    "why": "xlsx US5.01" },
+    { "source": "D.12",   "source_type": "document", "existing": 100, "next": "D.12.101",  "why": "three digits when they are needed" }
+  ]
+}
