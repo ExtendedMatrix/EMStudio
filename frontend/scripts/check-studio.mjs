@@ -236,7 +236,10 @@ const eq = (got, want, what) => {
         .includes(R.canonicalEdgeType(et)),
       t: (k, v) => `${k}${v ? JSON.stringify(v) : ""}` });
     const socket = iss.filter((i) => i.rule === "datamodel");
-    eq(socket.length, 1, "pancia A: ONE datamodel warning — the extractor extracted_from an RSF");
+    // connections 1.6.24: an extractor may read FROM A UNIT (extracted_from.target += StratigraphicNode),
+    // so the extractor reading the RSF — pancia A's one datamodel warning until 1.6.23 — is now legal.
+    eq(socket.length, 0, "pancia A: NO datamodel warning — since 1.6.24 an extractor may read from an RSF");
+    const xId = g.nodes.find((n) => n.name === "X.01")?.id;
     let sorted = 0;
     const lane = I.issues({ doc, nodes: g.nodes, isUnit: R.isStratigraphicType, lanesInOrder: false,
       sortLanes: { label: "sort", run: () => { sorted++; } }, t: (k) => k })
@@ -244,9 +247,9 @@ const eq = (got, want, what) => {
     ok(lane && lane.sev === "warn" && lane.node === "", "the lane order is a document-level warning");
     lane.action.run();
     eq(sorted, 1, "…whose ACTION is «Ordina lane per data» (the banner's button, now the row's)");
-    eq(g.nodes.find((n) => n.id === socket[0].node)?.name, "X.01", "…on the extractor");
+    ok(!!xId, "the extractor X.01 is in the fixture");
     const unitOf = I.unitOfIssue(doc, R.isStratigraphicType, g.nodes);
-    eq(unitOf(socket[0].node), "USM101", "…whose unit (its paradata group's) is USM101");
+    eq(unitOf(xId), "USM101", "…and its unit (its paradata group's) is USM101");
     const ctx = { doc, nodes: g.nodes, isUnit: R.isStratigraphicType, issues: iss,
                   unitOfIssue: unitOf, t: (k) => k };
     const ix = V.indexOf(ctx);
@@ -257,7 +260,7 @@ const eq = (got, want, what) => {
     eq(V.chronRows(ctx, ix).find((r) => r.node.id === "USM101").chron, null,
        "the propagated column is s3Dgraphy's (asked of the bridge): no answer → nothing invented");
     const facts = V.factsFor("Units", ctx, ix);
-    ok(facts.get("USM101").fx.state.includes("warn"), "USM101 carries «with warnings»");
+    ok(!facts.get("USM101").fx.state.includes("warn"), "USM101 no longer carries «with warnings» (1.6.24)");
     ok(facts.get("USM101").fx.state.includes("pd"), "…and «with paradata»");
     eq(V.epochTree(ctx, ix).map((e) => e.node.id), ["EP_MED", "EP_ROM"], "epochs newest first");
     const cards = V.docCards(ctx, ix, new Set(["RSF1"]));
