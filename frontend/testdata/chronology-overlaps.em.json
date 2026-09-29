@@ -1,0 +1,197 @@
+{
+  "header": {
+    "format": "em.json",
+    "version": "1.0",
+    "datamodel_versions": {
+      "connections": "1.6.26",
+      "nodes": "1.6.9",
+      "qualia": "1.6.2"
+    },
+    "ontology_versions": {}
+  },
+  "graph": {
+    "graph_id": "chronology-overlaps",
+    "name": "Cronologia che si sovrappone",
+    "description": "Fixture di check-interactions: Alto medioevo sta dentro Medioevo; Tardo medioevo sporge 20 anni su Medioevo (1280–1300).",
+    "nodes": [
+      {
+        "id": "EP_MOD",
+        "node_type": "EpochNode",
+        "name": "Età moderna",
+        "description": "",
+        "data": {
+          "end_time": 1800,
+          "start_time": 1500
+        }
+      },
+      {
+        "id": "EP_TMED",
+        "node_type": "EpochNode",
+        "name": "Tardo medioevo",
+        "description": "",
+        "data": {
+          "end_time": 1450,
+          "start_time": 1280
+        }
+      },
+      {
+        "id": "EP_MED",
+        "node_type": "EpochNode",
+        "name": "Medioevo",
+        "description": "",
+        "data": {
+          "end_time": 1300,
+          "start_time": 900
+        }
+      },
+      {
+        "id": "EP_ALTO",
+        "node_type": "EpochNode",
+        "name": "Alto medioevo",
+        "description": "",
+        "data": {
+          "end_time": 1100,
+          "start_time": 950
+        }
+      },
+      {
+        "id": "US1",
+        "node_type": "US",
+        "name": "US1",
+        "description": "crollo",
+        "data": {}
+      },
+      {
+        "id": "US2",
+        "node_type": "US",
+        "name": "US2",
+        "description": "riporto",
+        "data": {}
+      },
+      {
+        "id": "US3",
+        "node_type": "US",
+        "name": "US3",
+        "description": "muro",
+        "data": {}
+      },
+      {
+        "id": "US4",
+        "node_type": "US",
+        "name": "US4",
+        "description": "battuto",
+        "data": {}
+      }
+    ],
+    "edges": [
+      {
+        "id": "US4__has_first_epoch__EP_MOD",
+        "edge_type": "has_first_epoch",
+        "source": "US4",
+        "target": "EP_MOD"
+      },
+      {
+        "id": "US2__has_first_epoch__EP_TMED",
+        "edge_type": "has_first_epoch",
+        "source": "US2",
+        "target": "EP_TMED"
+      },
+      {
+        "id": "US3__has_first_epoch__EP_MED",
+        "edge_type": "has_first_epoch",
+        "source": "US3",
+        "target": "EP_MED"
+      },
+      {
+        "id": "US1__has_first_epoch__EP_ALTO",
+        "edge_type": "has_first_epoch",
+        "source": "US1",
+        "target": "EP_ALTO"
+      },
+      {
+        "id": "US4__is_after__US2",
+        "edge_type": "is_after",
+        "source": "US4",
+        "target": "US2"
+      },
+      {
+        "id": "US2__is_after__US3",
+        "edge_type": "is_after",
+        "source": "US2",
+        "target": "US3"
+      },
+      {
+        "id": "US3__is_after__US1",
+        "edge_type": "is_after",
+        "source": "US3",
+        "target": "US1"
+      }
+    ],
+    "data": {}
+  },
+  "layout": {
+    "canvas": {
+      "title": "Cronologia che si sovrappone",
+      "width": 90.0,
+      "height": 400.0
+    },
+    "swimlanes": [
+      {
+        "epoch_id": "EP_MOD",
+        "order": 0,
+        "y": 0.0,
+        "height": 80.0
+      },
+      {
+        "epoch_id": "EP_TMED",
+        "order": 1,
+        "y": 80.0,
+        "height": 80.0
+      },
+      {
+        "epoch_id": "EP_ALTO",
+        "order": 2,
+        "y": 160.0,
+        "height": 80.0
+      },
+      {
+        "epoch_id": "EP_MED",
+        "order": 3,
+        "y": 240.0,
+        "height": 80.0
+      }
+    ],
+    "sectors": [],
+    "positions": {
+      "US1": {
+        "x": 0.0,
+        "y": 184.0,
+        "w": 90.0,
+        "h": 32.0
+      },
+      "US2": {
+        "x": 0.0,
+        "y": 104.0,
+        "w": 90.0,
+        "h": 32.0
+      },
+      "US3": {
+        "x": 0.0,
+        "y": 264.0,
+        "w": 90.0,
+        "h": 32.0
+      },
+      "US4": {
+        "x": 0.0,
+        "y": 24.0,
+        "w": 90.0,
+        "h": 32.0
+      }
+    },
+    "folded_groups": [],
+    "group_spaces": {},
+    "edge_routes": {},
+    "pinned": [],
+    "anchors": []
+  }
+}

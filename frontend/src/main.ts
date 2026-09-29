@@ -1529,6 +1529,32 @@ window.__EM_SCENE__ = () => {
     buildScenes();
     draw();
   },
+  /** AUDIT · ONE graph window's picture, in THAT window's page coordinates: its
+   *  mode, the boxes of its own scene through its own camera, and whose store
+   *  it writes to. What a click in that window should resolve against. */
+  winScene: (winId: string) => {
+    const mount = graphWindows.get(winId);
+    if (!mount) return null;
+    const mode = graphModeOf(winId);
+    const s = scenes[mode] ?? null;
+    const vp = viewportFor(winId, mode);
+    const r = mount.cv.getBoundingClientRect();
+    return {
+      mode,
+      rect: { x: r.x, y: r.y, w: r.width, h: r.height },
+      boxes: (s?.nodes ?? []).map((n) => ({
+        id: n.id, x: r.x + n.x * vp.scale + vp.x, y: r.y + n.y * vp.scale + vp.y,
+        w: n.w * vp.scale, h: n.h * vp.scale,
+      })),
+    };
+  },
+  /** AUDIT · a change that arrives from ELSEWHERE (a peer, another window): one
+   *  store write, not typed by anybody on this page */
+  edit: (id: string, patch: Record<string, unknown>) => store?.updateNode(id, patch),
+  nodeCount: () => store?.liveNodes().length ?? 0,
+  dirty: () => !!store?.dirty,
+  /** the graph as it stands — two reads equal = nothing was written between */
+  graphJson: () => JSON.stringify(store?.doc.graph ?? null),
 };
 
 // …and the FIGURES this process renders for an export, so a test can carry them
