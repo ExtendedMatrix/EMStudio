@@ -161,6 +161,9 @@ import { buildOverview, type OverviewApi } from "./overview";
 import { edgeStyle } from "./palette";
 import { glyphMarkupFor, typeIconElement } from "./type-icons";
 import { buildLegendPanel, legendContent, showLegendModal } from "./legend";
+import { datamodelPhraseBook, linkedPhrase, phraseDirFor } from "./phrases";
+import connectionsDatamodel from "./assets/s3Dgraphy_connections_datamodel.json";
+import datamodelTranslations from "./assets/datamodel_translations.json";
 import { createResourceThumb } from "./resource-preview";
 import {
   addCategories,
@@ -6572,11 +6575,15 @@ function addEntry(
   };
 }
 
-/** The phrase of a «Collegato a X» entry: position for units (invariant 3),
- *  «per» otherwise, with the relation the datamodel names beside it. */
+/** FRASI · the phrase of a «Collegato a X» entry: the edge's `ui_phrase` from
+ *  the datamodel, in the interface language, then English (`phrases.ts`); until
+ *  the datamodel has one, the preposition of before — position for units
+ *  (invariant 3), «per» otherwise. */
+const DATAMODEL_PHRASES = datamodelPhraseBook(connectionsDatamodel, datamodelTranslations);
 function linkedLabel(it: LinkedItem, otherName: string): string {
   const key = it.relation === "above" ? "add.above" : it.relation === "below" ? "add.below" : "add.for";
-  return t(key, { type: it.label, name: otherName });
+  return linkedPhrase(DATAMODEL_PHRASES, it.edgeType, phraseDirFor(it.dir), getLocale(),
+    { node: it.label, x: otherName }, t(key, { type: it.label, name: otherName })).text;
 }
 
 /** Where the menu's world point comes from: a client point over a graph window. */
