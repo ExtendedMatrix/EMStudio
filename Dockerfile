@@ -77,7 +77,12 @@ COPY scripts /build/scripts
 COPY frontend ./
 
 # ENTRAMBE, in un comando solo perché sono un artefatto solo.
-RUN npm run build:all
+# RIFINITURE · `build:web` e non `build:all`: l'editor servito lascia fuori
+# three.js (engine3d.js accanto, chiesto alla prima apertura di un modello 3D).
+# Misurato servendo come serve Caddy qui (senza `encode`): three nel file unico
+# costava +800 kB a TUTTI al primo caricamento, +0,33 s a 20 Mbit/s e +1,3 s a
+# 5 Mbit/s. La desktop resta `npm run build`, il file unico: lì legge dal disco.
+RUN npm run build:web
 
 # La promessa della base relativa, verificata contro la shell appena costruita
 # invece che contro il commento che la descrive.

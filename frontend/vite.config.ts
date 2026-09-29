@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { defineConfig, type Plugin } from "vite";
+import { defineConfig, transformWithEsbuild, type Plugin } from "vite";
 import { viteSingleFile } from "vite-plugin-singlefile";
 
 // EMStudio app version — single source of truth is package.json (kept in sync
@@ -50,7 +50,11 @@ const versionFollowsPackageJson = (): Plugin => ({
 // that one draws the matrix, this one reads the story. They share every module that matters — the
 // narrative renderer, the embeds, the palette — so the viewer is a second ENTRY,
 // never a second implementation.
-const entry = process.env.EM_ENTRY === "reader" ? "reader" : "index";
+const entry = process.env.EM_ENTRY === "reader" ? "reader"
+  : process.env.EM_ENTRY === "engine3d" ? "engine3d" : "index";
+// RIFINITURE · the web build of the editor leaves three.js out of the single
+// file and fetches `engine3d.js` when a model opens (`npm run build:web`)
+const lazy3d = process.env.EM_LAZY_3D === "1";
 
 // ── WHERE THE DEV SERVER LIVES, and why it is not `/` ───────────────────────
 //
@@ -73,6 +77,19 @@ const entry = process.env.EM_ENTRY === "reader" ? "reader" : "index";
 // property that lets the editor open from `file://` and the reader be served
 // from any prefix.
 const devBase = process.env.EM_DEV_BASE || "/em/studio/";
+
+/** RIFINITURE · a lib ES build keeps its whitespace (Vite leaves it for the
+ *  consumer's bundler). `engine3d.js` has no consumer bundler — the browser
+ *  imports it as it is — so it is minified whole, after rollup. */
+function minifyWholeChunk(): Plugin {
+  return {
+    name: "em-minify-engine3d",
+    async renderChunk(code, chunk) {
+      const r = await transformWithEsbuild(code, chunk.fileName, { minify: true, format: "esm" });
+      return { code: r.code, map: null };
+    },
+  };
+}
 
 export default defineConfig(({ command }) => {
   return ({
@@ -109,7 +126,7 @@ export default defineConfig(({ command }) => {
   // every module request resolve against whatever directory the page was asked
   // for. Two situations, two answers, one line each.
   base: command === "serve" ? devBase : "./",
-  define: { __EMSTUDIO_VERSION__: JSON.stringify(pkg.version) },
+  define: { __EMSTUDIO_VERSION__: JSON.stringify(pkg.version), __EM_LAZY_3D__: JSON.stringify(lazy3d) },
   // The EDITOR is one file you can double-click, and that is a product
   // property: it opens from a USB stick, in a trench, with no server. The
   // READER is SERVED (StratiGraph Catalog, the field node), so it does not need to be —
@@ -125,10 +142,13 @@ export default defineConfig(({ command }) => {
   // `/@vite/client` beside it. There is nothing to inline in a dev server, so the
   // plugin belongs to the build alone.
   plugins: command === "serve" ? [versionFollowsPackageJson()]
-    : entry === "reader" ? [] : [viteSingleFile()],
+    : entry === "reader" ? [] : entry === "engine3d" ? [minifyWholeChunk()] : [viteSingleFile()],
   build: {
     outDir: "dist",
-    rollupOptions: {
+    // RIFINITURE · the engine is a library build: ONE self-contained ES module
+    ...(entry === "engine3d" ? { lib: { entry: new URL("./src/engine3d-entry.ts", import.meta.url).pathname,
+                                        formats: ["es" as const], fileName: () => "engine3d.js" } } : {}),
+    rollupOptions: entry === "engine3d" ? {} : {
       input: new URL(`./${entry}.html`, import.meta.url).pathname,
     },
     // single-file output: nothing stale can linger, and unlink is not

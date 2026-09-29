@@ -39,15 +39,20 @@ let enginePromise: Promise<any> | null = null;
 
 async function engine(): Promise<any> {
   if (!enginePromise) {
-    enginePromise = (async () => {
-      const [THREE, loaderMod, controlsMod] = await Promise.all([
-        import("three"),
-        import("three/examples/jsm/loaders/GLTFLoader.js"),
-        import("three/examples/jsm/controls/OrbitControls.js"),
-      ]);
-      return { THREE, GLTFLoader: loaderMod.GLTFLoader,
-               OrbitControls: controlsMod.OrbitControls };
-    })();
+    // RIFINITURE · the web build fetches the engine beside the page, once, on
+    // the first model opened. A CONSTANT condition, so the other arm — three
+    // inline — is dropped from that build by rollup and esbuild alike.
+    enginePromise = __EM_LAZY_3D__
+      ? import(/* @vite-ignore */ new URL("./engine3d.js", document.baseURI).href)
+      : (async () => {
+          const [THREE, loaderMod, controlsMod] = await Promise.all([
+            import("three"),
+            import("three/examples/jsm/loaders/GLTFLoader.js"),
+            import("three/examples/jsm/controls/OrbitControls.js"),
+          ]);
+          return { THREE, GLTFLoader: loaderMod.GLTFLoader,
+                   OrbitControls: controlsMod.OrbitControls };
+        })();
   }
   return enginePromise;
 }
