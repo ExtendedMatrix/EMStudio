@@ -687,6 +687,13 @@ export function renderEMTree(host: HTMLElement, tree: EMTree,
     const nodes = slot.store.doc.graph?.nodes?.length ?? 0;
     const edges = slot.store.doc.graph?.edges?.length ?? 0;
     const aux = slot.auxiliaryFiles.length;
+    // COLLEGARE · the graph's stories, under it: a narrative lives IN a graph
+    const stories = (slot.store.doc.graph?.nodes ?? []).filter((n) => n.node_type === "narrative")
+      .map((n) => {
+        const ch = ((n.data ?? {}) as { chapters?: unknown[] }).chapters;
+        return `<div class="et-story" data-story="${esc(n.id)}">❧ ${esc(String(n.name || n.id))}`
+          + ` <span class="et-meta">${Array.isArray(ch) ? ch.length : 0} ${esc(labels("emtree.chapters"))}</span></div>`;
+      }).join("");
     return `
       <li class="et-slot${isActive ? " active" : ""}" data-id="${esc(slot.id)}">
         <button class="et-pick" data-id="${esc(slot.id)}"
@@ -699,6 +706,7 @@ export function renderEMTree(host: HTMLElement, tree: EMTree,
         <!-- Aux files: the STUB. Shown as a count so the place is visible in the
              UI and nobody wonders where they would go; the list, the mapping and
              the bake are ET2. -->
+        ${stories}
         <div class="et-aux">${aux === 0
           ? labels("emtree.noAux")
           : `${aux} ${labels("emtree.auxFiles")}`}</div>

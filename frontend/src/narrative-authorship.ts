@@ -325,3 +325,54 @@ export function bylineOf(doc: EmDocument | null, narrativeId: string,
   }
   return { responsible, assisted };
 }
+
+// ── COLLEGARE · the signer IS the identity of the header ─────────────────────
+
+/** The identity signing: its ORCID and the name to show. */
+export interface SignerIdentity {
+  orcid: string;
+  label: string;
+  verified?: boolean;
+}
+
+/**
+ * The human AuthorNode that carries this identity's ORCID (`data.orcid`) —
+ * found, or CREATED (call it inside the batch of the act that needs it, so the
+ * author and the signature are one undo step). A signature has somebody behind
+ * it, and that somebody is the person at the keyboard, not a pick from a list.
+ */
+export function authorForIdentity(store: DocumentStore, me: SignerIdentity): string {
+  const found = store.doc.graph.nodes.find((n) => n.node_type === AUTHOR_TYPE
+    && String(((n.data ?? {}) as Record<string, unknown>).orcid ?? "") === me.orcid);
+  if (found) return found.id;
+  const id = store.newId();
+  store.addNode({ id, name: me.label, node_type: AUTHOR_TYPE, description: "",
+                  data: { orcid: me.orcid, verified: !!me.verified } });
+  return id;
+}
+
+/** Verify one AI paragraph AS the identity: one undo step (author + signature).
+ *  Without an identity nothing is written — the caller opens the identity. */
+export function verifyAs(store: DocumentStore, narrativeId: string, chapter: number, block: number,
+                         me: SignerIdentity | null): "needs-identity" | "verified" {
+  if (!me) return "needs-identity";
+  store.batch(() => endorseBlock(store, narrativeId, chapter, block, authorForIdentity(store, me)));
+  return "verified";
+}
+
+/** …a whole chapter, one act per paragraph, one undo step. */
+export function verifyChapterAs(store: DocumentStore, narrativeId: string, chapter: number,
+                                me: SignerIdentity | null): number | "needs-identity" {
+  if (!me) return "needs-identity";
+  let n = 0;
+  store.batch(() => { n = endorseChapter(store, narrativeId, chapter, authorForIdentity(store, me)); });
+  return n;
+}
+
+/** «Firmo io» on a chapter. */
+export function signChapterAs(store: DocumentStore, narrativeId: string, chapter: number,
+                              me: SignerIdentity | null): "needs-identity" | "signed" {
+  if (!me) return "needs-identity";
+  store.batch(() => setChapterAuthor(store, narrativeId, chapter, authorForIdentity(store, me)));
+  return "signed";
+}

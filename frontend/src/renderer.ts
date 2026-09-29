@@ -87,6 +87,11 @@ export interface RenderState {
    *  corner, drawn over the node and outside the layout — the node, its size
    *  and its colours stay what `em_visual_rules` says. */
   warnIds?: Set<string> | null;
+  /** COLLEGARE · the Matrix follows the story: the lane the current chapter
+   *  narrates lights up, and the nodes it cites (embeds, mentions, the owners
+   *  of a cited property) carry a mark. Chrome, never the node's own style. */
+  storyLane?: string | null;
+  storyCited?: Set<string> | null;
   /** LEGENDA · the edge type picked in this window's legend: drawn on top at
    *  full strength, the others faded. Per window, never in the document. */
   highlightEdgeType?: string | null;
@@ -521,6 +526,16 @@ export function render(
       ctx.globalAlpha = 0.05;
       ctx.fillStyle = lane.color;
       ctx.fillRect(worldLeft, lane.y, worldRight - worldLeft, lane.height);
+      ctx.restore();
+    }
+    // COLLEGARE · the lane the current chapter narrates: a wash and a rail
+    if (lane.id === state.storyLane) {
+      ctx.save();
+      ctx.globalAlpha = 0.12;
+      ctx.fillStyle = accentColor();
+      ctx.fillRect(worldLeft, lane.y, worldRight - worldLeft, lane.height);
+      ctx.globalAlpha = 0.9;
+      ctx.fillRect(worldLeft, lane.y, 5 / vp.scale, lane.height);
       ctx.restore();
     }
     // selected epoch → a faint accent wash over the whole lane (visual feedback)
@@ -1172,6 +1187,20 @@ export function render(
       ctx.textBaseline = "middle";
       ctx.fillText("!", cx, cy + 0.5 / vp.scale);
     }
+  }
+
+  // COLLEGARE · what the current chapter cites: a dashed accent frame around it
+  if (state.storyCited?.size) {
+    ctx.save();
+    ctx.strokeStyle = accentColor();
+    ctx.lineWidth = 2.2 / vp.scale;
+    ctx.setLineDash([5 / vp.scale, 3 / vp.scale]);
+    const pad = 4 / vp.scale;
+    for (const n of scene.nodes) {
+      if (!state.storyCited.has(n.instanceOf ?? n.id)) continue;
+      ctx.strokeRect(n.x - pad, n.y - pad, n.w + pad * 2, n.h + pad * 2);
+    }
+    ctx.restore();
   }
 
   // BADGE1 ornament badges are drawn in SCREEN space (DEC1) — see the pass after

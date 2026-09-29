@@ -191,6 +191,7 @@ import { renderNarrativeIndex } from "./narrative-index";
 import { renderCiteSection, renderNarrativeInspector } from "./narrative-inspector";
 import { linkGroupOf } from "./add-menu";
 import { refsForViewType, unvalidatedForExport, viewTypesFor, type ProjChapter } from "./narrative-projection";
+import { chapterCitedIds, interpretiveCoverage, storyCoverage } from "./narrative-coverage";
 import { setSitePicker, type NarrativeSelection, type Reading } from "./narrative";
 import { renderSitePosition } from "./study-panel";
 import {
@@ -1676,6 +1677,8 @@ function paintGraphWindow(p: GraphPaint): void {
       monochrome,
       nameStatus, // NAME1: orange/red labels, one answer shared with the menu
       warnIds: warnedNodes, // STRUTTURA · the «!» on a node with a warning
+      // COLLEGARE · the Matrix follows the chapter the story is on
+      ...storyMarks(),
       peerSelections: hubPeerSelections,   // P4.3 · awareness, never a lock
       highlightEdgeType: p.highlightEdgeType ?? null,
     },
@@ -12017,9 +12020,145 @@ function setNarrativeSelection(narrativeId: string, sel: NarrativeSelection): vo
   syncGraphToChapter();
 }
 
-/** fase 5 · the Matrix follows the chapter (a no-op until then). */
+/**
+ * COLLEGARE · FASE 5 · the Matrix follows the chapter: the lane the current
+ * chapter narrates lights up, and what it cites — embeds, mentions, and the
+ * owners of a cited property — is marked. Read from the story window's current
+ * chapter every paint; nothing is stored.
+ */
+function storyMarks(): { storyLane: string | null; storyCited: Set<string> | null } {
+  if (!store || !narrativeOpen()) return { storyLane: null, storyCited: null };
+  const story = windowsOf().find((w) => w.type === "narrative");
+  const narr = activeNarrative();
+  if (!story || !narr) return { storyLane: null, storyCited: null };
+  const ci = nvSel && nvFocus && nvSel.narrativeId === narr.id ? nvSel.chapter : validCurrentChapter(story);
+  if (ci == null) return { storyLane: null, storyCited: null };
+  const ch = (narr.chapters as ProjChapter[])[ci];
+  return { storyLane: ch?.anchor ?? null, storyCited: chapterCitedIds(store.doc, narr.id, ci) };
+}
 function syncGraphToChapter(): void {
   draw();
+}
+
+// ── COLLEGARE · FASE 5 · the COVERAGE in the Index ──────────────────────────
+//
+// Two ways, one picture. OFFLINE the client module answers at once and follows
+// every keystroke (`narrative-coverage.ts`, pinned against s3Dgraphy by
+// `check-narrative-desk`). With a BRIDGE, the library itself is asked in the
+// background (`/narrative-report`) and ITS numbers are the ones shown — the
+// per-epoch narratives and the unexplained reconstructions; a disagreement with
+// the client is logged, because it would mean the pin has slipped.
+let bridgeReport: { key: string; epochs: Map<string, number>; unexplained: { id: string; name: string }[] } | null = null;
+let bridgeReportAsked = "";
+function coverageKey(doc: EmDocument): string {
+  const narr = doc.graph.nodes.filter((n) => n.node_type === "narrative").map((n) => JSON.stringify(n.data ?? {})).join("|");
+  return `${doc.graph.nodes.length}:${doc.graph.edges.length}:${narr.length}:${narr.slice(-64)}`;
+}
+function askBridgeReport(doc: EmDocument): void {
+  const key = coverageKey(doc);
+  if (bridgeReportAsked === key) return;
+  bridgeReportAsked = key;
+  window.setTimeout(() => {
+    if (bridgeReportAsked !== key || !store) return;
+    void (async () => {
+      try {
+        const res = await fetch(`${await bridgeUrl()}/narrative-report`, {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ doc: JSON.parse(store!.toJSON()) }),
+        });
+        if (!res.ok) return;
+        const j = await res.json() as { coverage_by_epoch?: { id: string; narratives: number }[];
+          unexplained_reconstructions?: { id: string; name: string }[] };
+        const epochs = new Map((j.coverage_by_epoch ?? []).map((r) => [r.id, r.narratives]));
+        const mine = new Map(interpretiveCoverage(store!.doc).map((r) => [r.id, r.narratives]));
+        for (const [id, n] of epochs)
+          if (mine.has(id) && mine.get(id) !== n) logInfo(t("nidx.coverageDiffers", { id, lib: String(n), client: String(mine.get(id)) }));
+        bridgeReport = { key, epochs, unexplained: j.unexplained_reconstructions ?? [] };
+        refreshSurfaces("narrative-index");
+      } catch {
+        /* no bridge: the client's numbers stand */
+      }
+    })();
+  }, 700);
+}
+
+function renderCoverageInto(host: HTMLElement, narrativeId: string): void {
+  if (!store) return;
+  const st = store;
+  const cov = storyCoverage(st.doc, narrativeId, (tp) => isStratigraphicType(tp));
+  const key = coverageKey(st.doc);
+  askBridgeReport(st.doc);
+  const lib = bridgeReport && bridgeReport.key === key ? bridgeReport : null;
+  const name = (id: string): string => String(st.node(id)?.name ?? id);
+  const chip = (id: string): HTMLElement => {
+    const b = document.createElement("button");
+    b.className = "nidx-chip";
+    b.type = "button";
+    b.dataset.go = id;
+    b.textContent = name(id);
+    b.title = t("nidx.chipTitle");
+    b.addEventListener("click", () => { select(id); centerOn(id); });
+    return b;
+  };
+  const eyebrow = document.createElement("div");
+  eyebrow.className = "nidx-eyebrow";
+  eyebrow.textContent = t("nidx.coverage");
+  const via = document.createElement("span");
+  via.className = "nidx-tag";
+  via.textContent = lib ? t("nidx.viaBridge") : t("nidx.viaClient");
+  via.title = lib ? t("nidx.viaBridgeTitle") : t("nidx.viaClientTitle");
+  eyebrow.appendChild(via);
+  host.appendChild(eyebrow);
+  for (const e of cov.epochs) {
+    const box = document.createElement("div");
+    box.className = "nidx-covrow";
+    box.dataset.epoch = e.id;
+    const head = document.createElement("div");
+    head.className = "nidx-covh";
+    const n = lib?.epochs.get(e.id) ?? e.narratives;
+    head.innerHTML = `<span>${escapeHtml(e.name)}</span><span class="nidx-grow"></span>`
+      + `<span class="nidx-num" title="${escapeHtml(t("nidx.narrativesTitle", { n: String(n) }))}">${e.cited.length}/${e.units.length}</span>`;
+    box.appendChild(head);
+    const bar = document.createElement("div");
+    bar.className = "nidx-bar";
+    const fill = document.createElement("i");
+    fill.style.width = `${e.units.length ? Math.round((e.cited.length / e.units.length) * 100) : 0}%`;
+    bar.appendChild(fill);
+    box.appendChild(bar);
+    const missing = e.units.filter((u) => !e.cited.includes(u));
+    if (missing.length) {
+      const out = document.createElement("div");
+      out.className = "nidx-out";
+      out.appendChild(Object.assign(document.createElement("span"), { className: "nidx-dim", textContent: `${t("nidx.notYet")}: ` }));
+      for (const u of missing.slice(0, 12)) out.appendChild(chip(u));
+      if (missing.length > 12) out.appendChild(document.createTextNode(` +${missing.length - 12}`));
+      box.appendChild(out);
+    }
+    host.appendChild(box);
+  }
+  const docs = document.createElement("div");
+  docs.className = "nidx-covrow";
+  docs.dataset.row = "sources";
+  docs.innerHTML = `<div class="nidx-covh"><span>${escapeHtml(t("nidx.sourcesCited"))}</span><span class="nidx-grow"></span><span class="nidx-num">${cov.docsCited.length}/${cov.docs.length}</span></div>`;
+  const uncited = cov.docs.filter((d) => !cov.docsCited.includes(d));
+  if (uncited.length) {
+    const out = document.createElement("div");
+    out.className = "nidx-out";
+    for (const d of uncited.slice(0, 12)) out.appendChild(chip(d));
+    docs.appendChild(out);
+  }
+  host.appendChild(docs);
+  const recon = lib ? lib.unexplained : cov.unexplained;
+  const rc = document.createElement("div");
+  rc.className = "nidx-covrow " + (recon.length ? "warn" : "ok");
+  rc.innerHTML = `<div class="nidx-covh"><span>${escapeHtml(recon.length ? `▲ ${t("nidx.unexplained")}` : `✓ ${t("nidx.allExplained")}`)}</span></div>`;
+  if (recon.length) {
+    const out = document.createElement("div");
+    out.className = "nidx-out";
+    for (const r of recon) out.appendChild(chip(r.id));
+    rc.appendChild(out);
+  }
+  host.appendChild(rc);
 }
 
 // ── COLLEGARE · who signs: the IDENTITY of the header ──────────────────────
@@ -12042,23 +12181,15 @@ function requireIdentity(): boolean {
   return false;
 }
 
-/** The human AuthorNode of the identity — call INSIDE a batch. */
-function identityAuthorId(st: DocumentStore): string {
-  const me = identityRef()!;
-  const found = st.doc.graph.nodes.find((n) => n.node_type === "author"
-    && String(((n.data ?? {}) as Record<string, unknown>).orcid ?? "") === me.orcid);
-  if (found) return found.id;
-  const id = st.newId();
-  st.addNode({ id, name: me.label, node_type: "author", description: "",
-               data: { orcid: me.orcid, verified: !!currentIdentity()?.verified } });
-  return id;
+function identityForSigning(): nauth.SignerIdentity | null {
+  const me = identityRef();
+  return me ? { ...me, verified: !!currentIdentity()?.verified } : null;
 }
 
 function verifyBlock(narrativeId: string, c: number, b: number): void {
   if (!store || !requireIdentity()) return;
-  const st = store;
   try {
-    st.batch(() => nauth.endorseBlock(st, narrativeId, c, b, identityAuthorId(st)));
+    nauth.verifyAs(store, narrativeId, c, b, identityForSigning());
     logInfo(t("ninsp.verified", { who: identityRef()!.label }), [narrativeId]);
   } catch (e) {
     toast(e instanceof Error ? e.message : String(e));
@@ -12067,10 +12198,8 @@ function verifyBlock(narrativeId: string, c: number, b: number): void {
 
 function verifyChapter(narrativeId: string, c: number): void {
   if (!store || !requireIdentity()) return;
-  const st = store;
   try {
-    let n = 0;
-    st.batch(() => { n = nauth.endorseChapter(st, narrativeId, c, identityAuthorId(st)); });
+    const n = nauth.verifyChapterAs(store, narrativeId, c, identityForSigning());
     toast(t("ninsp.verifiedN", { n: String(n) }));
   } catch (e) {
     toast(e instanceof Error ? e.message : String(e));
@@ -12079,8 +12208,7 @@ function verifyChapter(narrativeId: string, c: number): void {
 
 function signChapterAsMe(narrativeId: string, c: number): void {
   if (!store || !requireIdentity()) return;
-  const st = store;
-  st.batch(() => nauth.setChapterAuthor(st, narrativeId, c, identityAuthorId(st)));
+  nauth.signChapterAs(store, narrativeId, c, identityForSigning());
 }
 
 /** A document whose file is a 3D model (by its extension — never stored). */
@@ -13621,6 +13749,7 @@ function setCurrentChapterIndex(win: Win, i: number | null): void {
   markCurrentChapter(i);
   updateWindowHeader(); // the menus enable/disable with it
   refreshSurfaces("narrative-index"); // its own host: the page is not rebuilt
+  syncGraphToChapter(); // the Matrix follows the chapter (canvases only)
 }
 
 /**
@@ -13946,6 +14075,7 @@ function renderNarrativeIndexInto(body: HTMLElement, _win: Win): void {
       onAddEpochChapter: (id: string) => addEpochChapter(s, narrId, id),
       onRegenerate: () => toast(t("ai.regenerateUnavailable")),
       canRegenerate: () => false,
+      coverage: (h: HTMLElement) => renderCoverageInto(h, narrId),
     } : {}),
   });
 }

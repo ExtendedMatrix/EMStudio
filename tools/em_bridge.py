@@ -658,6 +658,17 @@ def make_handler(api):
                 self._export_ttl(raw)
             elif route == "/chronology":
                 self._chronology(raw)
+            elif route == "/narrative-report":
+                # COLLEGARE · the coverage the Index shows, asked of the library
+                # that owns the rules (`s3dgraphy.narrative.query`): derived now,
+                # from the document the client sends, never stored.
+                try:
+                    body = json.loads(raw.decode("utf-8")) if raw else {}
+                    doc = body.get("doc") if isinstance(body, dict) and "doc" in body else body
+                    graph, _warnings = api.load_emjson(doc)
+                    self._json({"ok": True, **api.narrative_report(graph)})
+                except Exception as exc:  # pragma: no cover — surface to the UI
+                    self._fail(500, f"narrative report failed: {exc}")
             elif route == "/export-narrative":
                 self._export_narrative(raw, urllib.parse.parse_qs(
                     urllib.parse.urlparse(self.path).query))
