@@ -309,6 +309,55 @@ test("A9", "un file lasciato su un capitolo non arriva al caricatore globale", a
   return { pass: !reached, detail: { windowLoaderReached: reached } };
 });
 
+// ── PARTE 1 · il focus è sacro ──────────────────────────────────────────────
+test("1.doc", "Doc: nome → Tab → il focus è nel titolo, vivo", async () => {
+  const { p, ctx } = await open({ doc: "catena", ws: "provenance" });
+  const first = p.locator(".doc-input").first();
+  await first.waitFor({ timeout: 8000 });
+  await first.click();
+  await p.keyboard.press("End");
+  await p.keyboard.type("z");
+  await p.keyboard.press("Tab");
+  await p.waitForTimeout(500);
+  await p.keyboard.type("T");
+  await p.waitForTimeout(300);
+  const focus = await activeDesc(p);
+  const second = await p.locator(".doc-input").nth(1).inputValue();
+  await ctx.close();
+  return { pass: focus.includes("doc-input") && second.endsWith("T"), detail: { focus, second } };
+});
+test("1.flush", "un cambio ridisegna una volta: tela e ispettore non due volte", async () => {
+  const { p, ctx } = await open({ doc: "catena", init: { "em.perf": "1" } });
+  await pick(p, "USM101");
+  await p.evaluate(() => window.__EM_PERF__.reset());
+  await p.evaluate(() => window.__EM_DRAG__.edit("US102", { description: "cambiato" }));
+  await p.waitForTimeout(400);
+  const counts = await p.evaluate(() => ({ ...window.__EM_PERF__.counts }));
+  await ctx.close();
+  const draws = counts.draw ?? 0;
+  const insp = counts.inspector ?? 0;
+  return { pass: draws <= 1 && insp <= 1 && (counts.onChange ?? 0) >= 1, detail: counts };
+});
+test("1.colour", "il colore scrive allo change, non a ogni input", async () => {
+  const { p, ctx } = await open({ doc: "catena" });
+  await pick(p, "EP_MED");
+  const sw = p.locator('.tile-area input[type="color"]').first();
+  const had = await sw.count();
+  if (!had) { await ctx.close(); return { pass: false, detail: { swatch: 0 } }; }
+  const before = await p.evaluate(() => window.__EM_DRAG__.canUndo());
+  const writes = await p.evaluate(() => {
+    const sw = document.querySelector('.tile-area input[type="color"]');
+    const before = JSON.stringify(window.__EM_DRAG__.data("EP_MED"));
+    for (const c of ["#112233", "#223344", "#334455"]) { sw.value = c; sw.dispatchEvent(new Event("input", { bubbles: true })); }
+    const mid = JSON.stringify(window.__EM_DRAG__.data("EP_MED"));
+    sw.dispatchEvent(new Event("change", { bubbles: true }));
+    const after = JSON.stringify(window.__EM_DRAG__.data("EP_MED"));
+    return { unchangedWhileDragging: before === mid, written: after.includes("#334455") };
+  });
+  await ctx.close();
+  return { pass: writes.unchangedWhileDragging && writes.written, detail: { ...writes, before } };
+});
+
 // ── run ─────────────────────────────────────────────────────────────────────
 const chosen = cases.filter((c) => !only.length || only.includes(c.id) || only.some((o) => c.id.startsWith(o + ".")));
 for (const c of chosen) {

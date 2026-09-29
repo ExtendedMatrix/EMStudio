@@ -81,6 +81,7 @@ import {
   surfaceOf,
   unmountSurface,
 } from "./shell/surface";
+import { duringStoreFlush, keepFocusAcross, heldBy } from "./shell/hold";
 import {
   registerBuiltinSurfaces,
   type PanelMount,
@@ -2011,6 +2012,7 @@ function selectMany(ids: string[]): void {
  * panel never knew which one it was.
  */
 function renderInspectorInto(host: HTMLElement): void {
+  perfCount("inspector"); // AUDIT · how many rebuilds one change costs
   if (!store) {
     host.textContent = "";
     return;
@@ -3426,21 +3428,29 @@ let changeQueued = false;
 function flushChange(): void {
   changeQueued = false;
   if (!store) return;
-  refreshNameStatus();          // NAME1: label colours follow the graph
-  ensureScenes();               // (recomputes the hidden types first)
-  if (filterPanelOpen()) renderCirclesPanel(); // refresh circle counts
-  updateInfo();             // (the issues: the canvas draws their «!»)
-  draw();                   // the canvas first: the node stops where it was left
-  updateToolbar();
-  refreshInspector();
-  renderViewer();           // VIEWER · it follows the selection, like the Inspector
-  renderAnnotator();        // A2 · and so does the annotator: same picture rule
-  refreshNarrativeView();   // embeds are references: a graph edit shows here
-  nodeList.refresh();
-  refreshEMTree();          // node/edge counts and the dirty dot live there
-  renderEmData();           // every mounted EM-Data table is a live view of it
-  refreshTileSurfaces();    // WIN7 · …and so is every other window on screen
-  draw();
+  // AUDIT N0 · ONE repaint per change, and not of the window being written in:
+  // inside `duringStoreFlush` a surface whose focus is in a field is held
+  // (`shell/hold.ts`) and repainted when the focus leaves it. It used to be
+  // every window, twice for the canvas, the viewer and the annotator.
+  duringStoreFlush(() => {
+    refreshNameStatus();          // NAME1: label colours follow the graph
+    ensureScenes();               // (recomputes the hidden types first)
+    if (filterPanelOpen()) renderCirclesPanel(); // refresh circle counts
+    updateInfo();             // (the issues: the canvas draws their «!»)
+    draw();                   // the canvas first: the node stops where it was left
+    updateToolbar();
+    renderNameStrip();
+    renderViewer();           // VIEWER · it follows the selection, like the Inspector
+    renderAnnotator();        // A2 · and so does the annotator: same picture rule
+    if (logDrawer.open && logDrawer.onlySel) renderLogDrawer();
+    refreshEMTree();          // node/edge counts and the dirty dot live there
+    renderEmData();           // every mounted EM-Data table is a live view of it
+    // WIN7 · …and so is every other window on screen: the Inspector, the
+    // Outliner, the narrative, the Doc, the Study, the Storage — each through its
+    // surface, ONCE (the canvases were drawn above, the tables just now: a table
+    // surface's refresh repaints every table, so N of them cost N+1 before)
+    refreshSurfaces(undefined, ["graph", "table"]);
+  });
 }
 
 function wireStore(s: DocumentStore): void {
@@ -11052,7 +11062,8 @@ const mappingEditorEl = document.getElementById("mapping-editor")!;
 let meState: MappingEditorState = { ...EMPTY_MAPPING_STATE };
 
 function refreshMappingEditor(): void {
-  renderMappingEditor(mappingEditorEl, meState, meHandlers);
+  keepFocusAcross(mappingEditorEl,
+    () => renderMappingEditor(mappingEditorEl, meState, meHandlers));
 }
 
 /** One call to the bridge's mapping surface. Returns null and sets the note when
@@ -14550,7 +14561,8 @@ function renderDocViewInto(
     store.updateNode(current.id, {
       data: { ...(current.data ?? {}), [key]: v },
     } as Partial<EmNode>);
-    repaint();
+    // AUDIT A2 · no repaint here: the store's own flush repaints this window,
+    // and holds it while the focus is in the next field (Tab stays alive)
   };
   field(t("doc.name"), current.name ?? "", (v) =>
     store?.updateNode(current.id, { name: v }),
@@ -17149,7 +17161,12 @@ function storageHostsNow(): StorageHost[] {
 
 /** Paint every Storage surface on screen. */
 function renderStorage(): void {
-  for (const host of storageHostsNow()) renderStorageInto(host);
+  for (const host of storageHostsNow()) {
+    // AUDIT N0 · the delivery form's text fields rebuild the panel on commit;
+    // while the focus is in one of its fields that waits for the blur
+    if (heldBy(host.body, () => renderStorageInto(host))) continue;
+    renderStorageInto(host);
+  }
 }
 
 /**
@@ -17513,7 +17530,7 @@ function stampComposeBox(win: Win, entries: FsEntry[]): HTMLElement {
     tick.onchange = () => {
       draft.originDeclared = tick.checked;
       // la spunta fa comparire/sparire l'ostacolo, non la forma del modulo
-      refreshComposeFeet();
+      refreshComposeFeet(tick);
     };
     const words = document.createElement("span");
     // LA FRASE È IL GESTO: non «conferma», ma quello che si sta affermando.
@@ -17522,7 +17539,7 @@ function stampComposeBox(win: Win, entries: FsEntry[]): HTMLElement {
     decl.appendChild(line);
     decl.appendChild(field(t("compose.campaign"), draft.campaign, (v) => {
       draft.campaign = v;
-      redrawNeighbourhood();
+      redrawDraftPicture();
     }, { placeholder: t("compose.campaignHint"), key: "campaign" }));
     for (const key of ["camera", "lens", "folder"]) {
       decl.appendChild(field(t(`compose.${key}`), draft.campaignMetadata[key] ?? "",
@@ -17550,13 +17567,13 @@ function stampComposeBox(win: Win, entries: FsEntry[]): HTMLElement {
   }
   select.onchange = () => {
     draft.kind = select.value;
-    refreshComposeFeet();
-    redrawNeighbourhood();
+    refreshComposeFeet(select);
+    redrawDraftPicture();
   };
   act.appendChild(labelled(t("compose.kind"), select));
 
   act.appendChild(field(t("compose.technique"), draft.technique, (v) => {
-    draft.technique = v; redrawNeighbourhood();
+    draft.technique = v; redrawDraftPicture();
   }, { placeholder: t("compose.techniqueHint"), key: "technique" }));
 
   act.appendChild(field(t("compose.parameters"),
@@ -17589,7 +17606,7 @@ function stampComposeBox(win: Win, entries: FsEntry[]): HTMLElement {
   act.appendChild(swRow);
 
   act.appendChild(field(t("compose.operator"), draft.operator.id, (v) => {
-    draft.operator.id = v; redrawNeighbourhood();
+    draft.operator.id = v; redrawDraftPicture();
   }, { placeholder: "https://orcid.org/0000-0002-…", key: "operator" }));
 
   // ── la DATA DELL'ATTO ────────────────────────────────────────────────────
@@ -17611,7 +17628,7 @@ function stampComposeBox(win: Win, entries: FsEntry[]): HTMLElement {
   const when = document.createElement("div");
   when.className = "stamp-compose-row";
   when.appendChild(field(t("compose.at"), draft.at, (v) => {
-    draft.at = v; redrawNeighbourhood();
+    draft.at = v; redrawDraftPicture();
   }, { placeholder: "2026-03-14T09:00:00Z", key: "at" }));
   const today = document.createElement("button");
   today.className = "ghost";
@@ -17673,15 +17690,35 @@ function stampComposeBox(win: Win, entries: FsEntry[]): HTMLElement {
  *
  * Quindi si riscrive il pezzo che cambia e nient'altro.
  */
-function refreshComposeFeet(): void {
+function refreshComposeFeet(from: HTMLElement): void {
   const draft = stampDraft;
-  const btn = document.querySelector<HTMLButtonElement>("button[data-action=stamp]");
-  if (!draft || !btn) return;
+  // AUDIT · THIS form's foot, not the first one on the page: with two Storage
+  // windows `document.querySelector` updated the other one
+  const form = from.closest<HTMLElement>(".stamp-compose");
+  const btn = form?.querySelector<HTMLButtonElement>("button[data-action=stamp]");
+  if (!draft || !btn || !form) return;
   const why = readyToStamp(draft);
   btn.disabled = !!why || stampEmitting;
   btn.title = why ?? "";
-  const reason = document.querySelector<HTMLElement>(".stamp-compose-why");
+  let reason = form.querySelector<HTMLElement>(".stamp-compose-why");
+  if (!reason && why) {
+    reason = document.createElement("i");
+    reason.className = "stamp-compose-why";
+    btn.parentElement?.appendChild(reason);
+  }
   if (reason) reason.textContent = why ?? "";
+}
+
+/**
+ * AUDIT A1 · what a key in the stamp form repaints: the DRAFT'S PICTURE in the
+ * DTC window, and nothing of the form. `redrawNeighbourhood` also rebuilt the
+ * Storage (it empties the body and re-asks the bridge for the listing), so each
+ * letter of «Volo» took the field away and flashed «Loading…» — measured: «V».
+ */
+function redrawDraftPicture(): void {
+  if (!store) return;
+  buildScenes();
+  draw();
 }
 
 /** Un ingresso si aggiunge o si toglie — e deve essere TIMBRATO: si legge il suo
@@ -17772,7 +17809,7 @@ function field(text: string, value: string, onInput: (v: string) => void,
   input.value = value;
   if (opts.placeholder) input.placeholder = opts.placeholder;
   if (opts.key) input.dataset.field = opts.key;
-  input.oninput = () => { onInput(input.value); refreshComposeFeet(); };
+  input.oninput = () => { onInput(input.value); refreshComposeFeet(input); };
   const wrap = labelled(text, input);
   if (opts.small) wrap.classList.add("small");
   return wrap;
@@ -18623,7 +18660,7 @@ function ingestDelivery(): HTMLElement {
   lic.placeholder = t("assets.licensePlaceholder");
   lic.addEventListener("change", () => {
     ingestDraft.license = lic.value.trim();
-    renderStorage();
+    duringStoreFlush(renderStorage); // AUDIT A2 · Tab stays in the next field
   });
   ingestField(box, t("assets.license"), lic, t("assets.licenseHint"));
   const offer = ing("div", "insp-actions");
@@ -18644,7 +18681,7 @@ function ingestDelivery(): HTMLElement {
   until.value = ingestDraft.embargoUntil;
   until.addEventListener("change", () => {
     ingestDraft.embargoUntil = until.value.trim();
-    renderStorage();
+    duringStoreFlush(renderStorage); // AUDIT A2 · Tab stays in the next field
   });
   ingestField(box, t("assets.embargo"), until, t("assets.embargoHint"));
   if (ingestDraft.embargoUntil) {

@@ -242,7 +242,11 @@ export function renderInspector(
       else d.color = val;
       store.updateNode(nodeId, { data: d });
     };
-    swatch.addEventListener("input", () => {
+    // AUDIT · the picker shows its colour live in the hex field, and WRITES once,
+    // when it closes (`change`): on `input` every drag step was a store write and
+    // a rebuild of the whole app under the open picker
+    swatch.addEventListener("input", () => { hex.value = swatch.value; });
+    swatch.addEventListener("change", () => {
       hex.value = swatch.value;
       apply(swatch.value);
     });

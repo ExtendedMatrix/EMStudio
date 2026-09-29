@@ -29,6 +29,7 @@
  * thing a reviewer has to remember.
  */
 import type { Win, WindowType } from "../workspace";
+import { heldBy } from "./hold";
 
 /** What a surface may legitimately declare about itself. Read by the shell, not
  *  deduced from an `if` somewhere in `main.ts` — the annotator is single-instance
@@ -121,8 +122,15 @@ export function surfaceOf(winId: string): Surface | null {
 
 /** Repaint every live mount, or every live mount of one type. The document
  *  changed; who has the focus has nothing to do with it. */
-export function refreshSurfaces(type?: WindowType): void {
-  for (const surface of surfacesOfType(type)) surface.refresh();
+export function refreshSurfaces(type?: WindowType, except: WindowType[] = []): void {
+  for (const { win, surface, host } of mounted.values()) {
+    if (type && win.type !== type) continue;
+    if (except.includes(win.type)) continue;
+    if (!host.isConnected) continue;
+    // AUDIT N0 · a document change does not rebuild the window being written in
+    if (heldBy(host, () => surface.refresh())) continue;
+    surface.refresh();
+  }
 }
 
 /**

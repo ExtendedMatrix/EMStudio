@@ -18,6 +18,7 @@
 import type { DocumentStore } from "./model";
 import type { Win } from "./workspace";
 import { winCurrent, setWinCurrent } from "./workspace";
+import { heldBy } from "./shell/hold";
 import {
   addQualiaClaim,
   addRow,
@@ -227,7 +228,12 @@ export function initEmData(opts: {
 
 /** Rebuild the visible tables from the store. */
 export function renderEmData(): void {
-  for (const h of hosts) if (h.enabled()) renderEmDataInto(h);
+  for (const h of hosts) {
+    if (!h.enabled()) continue;
+    // AUDIT N0 · a cell being written keeps its table until the focus leaves it
+    if (heldBy(h.body, () => renderEmDataInto(h))) continue;
+    renderEmDataInto(h);
+  }
   drawPop();
 }
 
