@@ -1245,7 +1245,8 @@ const EN: Dict = {
   "compose.openFolder": "One act for the {n} unstamped files here…",
   "compose.emittedHead": "{name} is stamped",
   "compose.erratum":
-    "A stamp is never modified. If something in it is wrong the only move is to "
+    "The facts of a stamp are never modified (its title and description are a "
+    + "courtesy, editable above). If a fact in it is wrong the only move is to "
     + "issue a correction — a new act, with its own date and author — and the "
     + "place that keeps an erratum is the graph's record, which is not built yet.",
   "compose.fromThis": "Compose a step from this…",
@@ -1841,6 +1842,15 @@ const EN: Dict = {
   "compose.descriptionPh": "a line or two: what these bytes are",
   "receipt.filed": "{n} receipts filed on the shelf",
   "receipt.label": "receipt",
+  "receipt.editInStamp": "Edit in the stamp",
+  "receipt.editInStampHint": "The title and the description are written in the stamp: this opens its form on this file, and the copy here follows",
+  "receipt.noWords": "no title, no description",
+  "receipt.editWords": "Edit title and description",
+  "receipt.wordsNote": "Only the title and the description change: they are a courtesy, not the act — the bytes, the provenance, how and who stay as they are.",
+  "receipt.saveWords": "Save in the stamp",
+  "receipt.cancelWords": "Cancel",
+  "receipt.wordsFailed": "The stamp was not rewritten: {why}",
+  "receipt.wordsSaved": "{name}: title and description saved in the stamp · {n} shelf copies updated",
   "receipt.version": "stamp v{v}",
   "receipt.parents": "parent {first}",
   "receipt.origin": "origin",
@@ -2999,7 +3009,8 @@ const IT: Dict = {
   "compose.openFolder": "Un atto solo per i {n} file non timbrati qui…",
   "compose.emittedHead": "{name} è timbrato",
   "compose.erratum":
-    "Un timbro non si modifica mai. Se qualcosa è sbagliato l'unica mossa è "
+    "I fatti di un timbro non si modificano mai (titolo e descrizione sono una "
+    + "cortesia, si correggono qui sopra). Se un fatto è sbagliato l'unica mossa è "
     + "emettere una correzione — un atto nuovo, con la sua data e il suo autore "
     + "— e il posto che tiene un'errata è il record del grafo, che non c'è ancora.",
   "compose.fromThis": "Componi un passo da questo…",
@@ -3575,6 +3586,15 @@ const IT: Dict = {
   "compose.descriptionPh": "una riga o due: cosa sono questi byte",
   "receipt.filed": "{n} ricevute nello shelf",
   "receipt.label": "ricevuta",
+  "receipt.editInStamp": "Modifica nel timbro",
+  "receipt.editInStampHint": "Titolo e descrizione si scrivono nel timbro: apre il suo modulo su questo file, e la copia qui segue",
+  "receipt.noWords": "nessun titolo, nessuna descrizione",
+  "receipt.editWords": "Modifica titolo e descrizione",
+  "receipt.wordsNote": "Cambiano solo titolo e descrizione: sono una cortesia, non l'atto — i byte, la provenienza, il come e il chi restano quelli.",
+  "receipt.saveWords": "Salva nel timbro",
+  "receipt.cancelWords": "Annulla",
+  "receipt.wordsFailed": "Il timbro non è stato riscritto: {why}",
+  "receipt.wordsSaved": "{name}: titolo e descrizione salvati nel timbro · {n} copie dello shelf aggiornate",
   "receipt.version": "timbro v{v}",
   "receipt.parents": "genitore {first}",
   "receipt.origin": "origine",
@@ -4725,6 +4745,15 @@ const DE: Dict = {
   "compose.descriptionPh": "ein, zwei Zeilen: was diese Bytes sind",
   "receipt.filed": "{n} Quittungen im Regal abgelegt",
   "receipt.label": "Quittung",
+  "receipt.editInStamp": "Im Stempel bearbeiten",
+  "receipt.editInStampHint": "Titel und Beschreibung stehen im Stempel: öffnet sein Formular für diese Datei, und die Kopie hier folgt",
+  "receipt.noWords": "kein Titel, keine Beschreibung",
+  "receipt.editWords": "Titel und Beschreibung bearbeiten",
+  "receipt.wordsNote": "Nur Titel und Beschreibung ändern sich: eine Höflichkeit, nicht der Akt — Bytes, Herkunft, Wie und Wer bleiben.",
+  "receipt.saveWords": "Im Stempel speichern",
+  "receipt.cancelWords": "Abbrechen",
+  "receipt.wordsFailed": "Der Stempel wurde nicht neu geschrieben: {why}",
+  "receipt.wordsSaved": "{name}: Titel und Beschreibung im Stempel gespeichert · {n} Regal-Kopien aktualisiert",
   "receipt.version": "Stempel v{v}",
   "receipt.parents": "Elternteil {first}",
   "receipt.origin": "Ursprung",

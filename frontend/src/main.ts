@@ -204,7 +204,7 @@ import * as chain from "./paradata-chain";
 import { mediumOf as mediumOfDoc, renderChainSection, type ChainUi } from "./paradata-inspector";
 import { renderReadingStage, type TraceGeometry } from "./doc-reading";
 import * as aiv from "./ai-validation";
-import { checkReceipt, receiptOf, receiptsOfEmission, type ReceiptCheck } from "./receipt";
+import { checkReceipt, receiptOf, receiptsOfEmission, refreshedCopies, type ReceiptCheck } from "./receipt";
 import { parseTropy, promoteToDocument, tropyOf, tropyShelfInputs } from "./tropy";
 import {
   closeAddMenu,
@@ -490,7 +490,7 @@ import { hintsPathFor, readHints, recordFound, setHintsBridgeResolver } from "./
 // da s3Dgraphy attraverso il bridge: `stamp-compose.ts` non costruisce mai un
 // timbro, lo chiede.
 import {
-  emitDraft, kindAxis, newDraft, outputFrom, readyToStamp,
+  emitDraft, kindAxis, newDraft, outputFrom, readyToStamp, retitleStamp,
   setComposeBridgeResolver, type Draft, type DraftInput,
 } from "./stamp-compose";
 import { adaptDraft } from "./views/stamps";
@@ -15161,6 +15161,16 @@ function shelfRow(entry: ShelfEntry): HTMLElement {
     pr.addEventListener("click", () => promoteShelfEntry(entry));
     actions.appendChild(pr);
   }
+  // RIFINITURE · the description is written IN THE STAMP: the shelf shows the
+  // receipt's copy read-only, and this opens the stamp's form on that file
+  if (rec && /^\//.test(entry.locator)) {
+    const ed = document.createElement("button");
+    ed.textContent = t("receipt.editInStamp");
+    ed.title = t("receipt.editInStampHint");
+    ed.dataset.editStamp = entry.id;
+    ed.addEventListener("click", () => openStampEditor(entry.locator));
+    actions.appendChild(ed);
+  }
   if (isAnnotatable(entry)) {
     const annotate = document.createElement("button");
     annotate.textContent = t("shelf.annotate");
@@ -17739,6 +17749,8 @@ function stampedBox(path: string, stamp: Stamp): HTMLElement {
   head.textContent = t("compose.emittedHead", { name: baseName(path) });
   box.appendChild(head);
 
+  box.appendChild(stampWordsBox(path, stamp));
+
   const pre = document.createElement("pre");
   pre.className = "stamp-emitted-body";
   pre.dataset.readonly = "stamp";
@@ -17758,6 +17770,106 @@ function stampedBox(path: string, stamp: Stamp): HTMLElement {
   forward.onclick = () => { void composeFromStamped(path, stamp); };
   box.appendChild(forward);
   return box;
+}
+
+// ── RIFINITURE · the title and the description, written IN the stamp ────────
+//
+// The one change a stamp admits: both are a courtesy, not its substance
+// (dtcstamp), so rewriting them is not modifying the act — the bridge proves it
+// (`/stamp/retitle`) before it writes. The shelf keeps a COPY (the receipt),
+// read-only there; «Modifica nel timbro» leads here, and saving refreshes both.
+
+/** the stamp whose words are being edited (a path), or null */
+let stampEditing: string | null = null;
+
+/** «Modifica nel timbro» from the shelf: the Contents desk, the file selected
+ *  in its Storage, and the stamp's words open for editing. */
+function openStampEditor(path: string): void {
+  let win = windowsOf().find((w) => w.type === "storage");
+  if (!win) {
+    setWorkspace("assets");
+    win = windowsOf().find((w) => w.type === "storage");
+  }
+  if (!win) return;
+  const folder = path.slice(0, path.lastIndexOf("/")) || "/";
+  stampEditing = path;
+  if (storagePath(win) !== folder) setStoragePath(win, folder);
+  if (storageSelected(win) !== path) setStorageSelected(win, path);
+  else renderStorage();
+}
+
+function stampWordsBox(path: string, stamp: Stamp): HTMLElement {
+  const self = ((stamp as unknown as { self?: Record<string, unknown> }).self ?? {});
+  const title = String(self.label ?? "");
+  const desc = String(self.description ?? "");
+  const box = document.createElement("div");
+  box.className = "stamp-words";
+  box.dataset.stampWords = path;
+  if (stampEditing !== path) {
+    const shown = document.createElement("div");
+    shown.className = "stamp-words-shown";
+    shown.textContent = [title, desc].filter(Boolean).join(" — ") || t("receipt.noWords");
+    const b = document.createElement("button");
+    b.className = "ghost";
+    b.dataset.action = "edit-stamp-words";
+    b.textContent = t("receipt.editWords");
+    b.onclick = () => { stampEditing = path; renderStorage(); };
+    box.append(shown, b);
+    return box;
+  }
+  let nextTitle = title;
+  let nextDesc = desc;
+  box.appendChild(field(t("compose.title"), title, (v) => { nextTitle = v; }, { key: "stamp-title" }));
+  const ta = document.createElement("textarea");
+  ta.value = desc;
+  ta.rows = 3;
+  ta.placeholder = t("compose.descriptionPh");
+  ta.dataset.field = "stamp-description";
+  ta.oninput = () => { nextDesc = ta.value; };
+  box.appendChild(labelled(t("compose.description"), ta));
+  const note = document.createElement("i");
+  note.className = "stamp-emitted-note";
+  note.textContent = t("receipt.wordsNote");
+  box.appendChild(note);
+  const row = document.createElement("div");
+  row.className = "stamp-words-actions";
+  const save = document.createElement("button");
+  save.className = "primary";
+  save.dataset.action = "save-stamp-words";
+  save.textContent = t("receipt.saveWords");
+  save.onclick = () => void saveStampWords(path, nextTitle, nextDesc);
+  const cancel = document.createElement("button");
+  cancel.className = "ghost";
+  cancel.textContent = t("receipt.cancelWords");
+  cancel.onclick = () => { stampEditing = null; renderStorage(); };
+  row.append(save, cancel);
+  box.appendChild(row);
+  return box;
+}
+
+async function saveStampWords(path: string, title: string, description: string): Promise<void> {
+  let res;
+  try {
+    res = await retitleStamp(path, title, description);
+  } catch {
+    toast(t("storage.bridgeDown"));
+    return;
+  }
+  if (!res.ok || !res.receipt) {
+    toast(t("receipt.wordsFailed", { why: res.error ?? "" }));
+    return;
+  }
+  // the shelf's copy follows, in the receipt's one form
+  const ups = refreshedCopies(shelfEntries(), path, res.receipt);
+  for (const u of ups) updateShelfEntry(u.id, u.patch);
+  for (const u of ups) receiptChecks.delete(u.id);
+  stampEditing = null;
+  const msg = t("receipt.wordsSaved", { name: baseName(path), n: String(ups.length) });
+  logInfo(msg);
+  toast(msg);
+  void askStamps(path);
+  renderShelf();
+  renderStorage();
 }
 
 /** «Componi un passo DA questo»: l'artefatto timbrato diventa l'ingresso di una

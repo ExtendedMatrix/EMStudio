@@ -342,8 +342,13 @@ function scrittureDi(src) {
   return out;
 }
 
+// RIFINITURE (E.D., 29 set 2026: «la descrizione si scrive nel timbro») ·
+// `/stamp/retitle` riscrive SOLO `self.label` / `self.description` — una cortesia,
+// fuori dalla `substance` di dtcstamp — e il bridge rifiuta (409) un timbro
+// riscritto che non dica la stessa cosa (`stamps_agree`). Il client manda il
+// percorso del FILE, mai quello del timbro: la seconda metà della guardia resta.
 const ROTTE_DI_SCRITTURA = new Set(["/stamp/hints", "/stamp/identity",
-                                    "/stamp/emit"]);
+                                    "/stamp/emit", "/stamp/retitle"]);
 
 function nessunaScritturaDiTimbri(src, dove) {
   const errori = [];

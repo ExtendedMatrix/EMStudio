@@ -38,7 +38,7 @@ const bundle = await esbuild.build({
       export * as receipts from "./receipt";
       export * as tropy from "./tropy";
       export * as shelf from "./shelf";
-      export { newDraft, emitDraft, readyToStamp, setComposeBridgeResolver, outputFrom } from "./stamp-compose";
+      export { newDraft, emitDraft, readyToStamp, setComposeBridgeResolver, outputFrom, retitleStamp } from "./stamp-compose";
       export { dtcKindsFor } from "./rules";
       export { issues } from "./issues";
       export { ViewerKeeper } from "./viewer-keep";
@@ -377,6 +377,29 @@ print(json.dumps(api.validate(g)["info"]))`;
       appendFileSync(files[0], "retouched");
       eq(receipts.checkReceipt(rec0, side, sha(files[0])), "file-changed", "a file changed under its receipt is said so");
       eq(receipts.checkReceipt(rec0, null, null), "unreachable", "nothing reachable: nothing claimed");
+      // RIFINITURE · the description is written IN THE STAMP: «Modifica nel
+      // timbro» rewrites self.label/description, the act stays the same, and
+      // the receipt and the shelf's copy follow
+      const f1 = files[1];
+      const sideBefore = JSON.parse(readF(`${f1}.stamp.json`, "utf8"));
+      const rt = await M.retitleStamp(f1, "Prospetto nord, foto 2", "il prospetto nord con il capitello reimpiegato");
+      eq(rt.ok, true, "retitle · the bridge rewrites the stamp's title and description");
+      const sideAfter = JSON.parse(readF(`${f1}.stamp.json`, "utf8"));
+      eq([sideAfter.self.label, sideAfter.self.description],
+         ["Prospetto nord, foto 2", "il prospetto nord con il capitello reimpiegato"], "retitle · …in the sidecar");
+      const strip = (x) => { const c = JSON.parse(JSON.stringify(x)); delete c.self.label; delete c.self.description; return c; };
+      eq(strip(sideAfter), strip(sideBefore), "retitle · …and NOTHING else of the act changed");
+      eq([rt.receipt.title, rt.receipt.description, rt.receipt.id],
+         ["Prospetto nord, foto 2", "il prospetto nord con il capitello reimpiegato", sideBefore.self.resource_id],
+         "retitle · the new receipt, same identity");
+      const e1 = shelf.shelfEntries().find((e) => e.locator === f1);
+      for (const u of receipts.refreshedCopies(shelf.shelfEntries(), f1, rt.receipt)) shelf.updateShelfEntry(u.id, u.patch);
+      const e1b = shelf.shelfEntries().find((e) => e.id === e1.id);
+      eq([receipts.receiptOf(e1b).description, e1b.name], ["il prospetto nord con il capitello reimpiegato", "Prospetto nord, foto 2"],
+         "retitle · the shelf's copy is the new receipt (and the name followed the title it was)");
+      eq(receipts.checkReceipt(receipts.receiptOf(e1b), sideAfter, sha(f1)), "ok", "retitle · …and it agrees with the sidecar");
+      const none = await M.retitleStamp(`${dir}/non_timbrato.jpg`, "x", "y");
+      eq(none.ok, false, "retitle · a file with no stamp has nothing to retitle");
     } finally {
       proc.kill();
     }

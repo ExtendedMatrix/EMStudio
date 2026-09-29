@@ -797,6 +797,19 @@ def make_handler(api):
                     self._fail(400, f"invalid JSON body: {exc}")
                     return
                 self._stamp_emit(body)
+            elif route == "/stamp/retitle":
+                # RIFINITURE · the stamp's TITLE and DESCRIPTION, rewritten in
+                # its sidecar. They are a courtesy, not substance (dtcstamp
+                # `substance`, test_the_title_is_not_substance): the act is not
+                # touched, and the endpoint proves it before it writes.
+                if not self._fs_gate():
+                    return
+                try:
+                    body = json.loads(raw.decode("utf-8")) if raw else {}
+                except Exception as exc:
+                    self._fail(400, f"invalid JSON body: {exc}")
+                    return
+                self._stamp_retitle(body)
             elif route == "/stamp/hints":
                 # …e l'unica scrittura della notte. `<asset>.hints.json`, mai un
                 # `.stamp.json`: il rifiuto è QUI oltre che nel frontend, perché
@@ -1125,6 +1138,79 @@ def make_handler(api):
             self._json({"ok": True, "process_id": process_id, "stamps": stamps,
                         "written": written, "refused": refused,
                         "warnings": warnings})
+
+        def _stamp_retitle(self, body):
+            """Riscrive `self.label` / `self.description` di un timbro emesso.
+
+            **Non è una modifica dell'atto**, ed è l'endpoint a dimostrarlo prima
+            di scrivere: il timbro nuovo deve avere la STESSA sostanza del vecchio
+            (`dtcstamp.stamps_agree`) — le impronte, la provenienza, il come e il
+            chi restano quelli. Titolo e descrizione sono una cortesia per chi
+            legge (dtcstamp 46b3b78), fuori da `substance` per definizione: due
+            persone che chiamano diversamente gli stessi byte non si
+            contraddicono. Qualunque altro campo resta com'è; chi volesse
+            correggere un fatto emette un'errata, non passa da qui.
+
+            Risponde con il timbro e la sua RICEVUTA (`dtcstamp.receipt`), così
+            la copia sullo shelf si aggiorna con la stessa forma di sempre.
+            """
+            import copy
+            path = str(body.get("path") or "").strip()
+            if not path:
+                self._fail(400, "POST /stamp/retitle wants {path, label?, description?}")
+                return
+            full = os.path.abspath(os.path.expanduser(path))
+            if not _fs_inside_roots(full):
+                self._fail(403, f"{path} is outside the folders this bridge serves")
+                return
+            stamp_path = full if full.endswith(".stamp.json") else full + ".stamp.json"
+            try:
+                with open(stamp_path, encoding="utf-8") as fh:
+                    old = json.load(fh)
+            except FileNotFoundError:
+                self._fail(404, f"{path} has no stamp to retitle")
+                return
+            except Exception as exc:
+                self._fail(422, f"the stamp is not readable: {exc}")
+                return
+            try:
+                import dtcstamp as S
+                S.validate_stamp(old)
+            except Exception as exc:
+                self._fail(422, f"not a valid stamp: {exc}")
+                return
+            new = copy.deepcopy(old)
+            itself = new.setdefault("self", {})
+            for key in ("label", "description"):
+                if key not in body:
+                    continue
+                text = str(body.get(key) or "").strip()
+                if text:
+                    itself[key] = text
+                else:
+                    itself.pop(key, None)
+            if not S.stamps_agree(old, new) or S.substance(old) != S.substance(new):
+                self._fail(409, "the retitled stamp would not say the same thing: "
+                                "only the title and the description may change here")
+                return
+            try:
+                S.validate_stamp(new)
+                rec = S.receipt(new)
+            except Exception as exc:
+                self._fail(422, f"the retitled stamp is not valid: {exc}")
+                return
+            if new != old:
+                tmp = stamp_path + ".tmp"
+                try:
+                    with open(tmp, "w", encoding="utf-8") as fh:
+                        json.dump(new, fh, ensure_ascii=False, indent=1)
+                        fh.write("\n")
+                    os.replace(tmp, stamp_path)
+                except OSError as exc:
+                    self._fail(500, f"cannot write the stamp: {exc}")
+                    return
+            self._json({"ok": True, "stamp_path": stamp_path, "changed": new != old,
+                        "stamp": new, "receipt": rec})
 
         def _stamp_hints(self, body):
             """Scrive `<asset>.hints.json`. **L'unica scrittura, e mai un timbro.**

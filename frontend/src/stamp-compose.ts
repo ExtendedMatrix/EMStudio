@@ -276,6 +276,26 @@ export async function emitDraft(
   };
 }
 
+/**
+ * RIFINITURE · the TITLE and DESCRIPTION of a stamp already emitted, rewritten
+ * in its sidecar — the one change a stamp admits, because both are a courtesy
+ * and not its substance (dtcstamp). The bridge proves it (`stamps_agree`) before
+ * it writes, and answers with the new stamp and its receipt, so the shelf's copy
+ * is refreshed in the one form it has.
+ */
+export async function retitleStamp(path: string, label: string, description: string):
+  Promise<{ ok: boolean; stamp?: unknown; receipt?: StampReceipt | null; changed?: boolean; error?: string }> {
+  const res = await fetch(`${await bridge()}/stamp/retitle`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ path, label, description }),
+  });
+  const answer = (await res.json().catch(() => ({}))) as {
+    ok?: boolean; stamp?: unknown; receipt?: StampReceipt | null; changed?: boolean; error?: string };
+  return { ok: res.ok && !!answer.ok, stamp: answer.stamp, receipt: answer.receipt ?? null,
+           changed: answer.changed, error: answer.error ?? (res.ok ? undefined : `bridge ${res.status}`) };
+}
+
 /** Una voce di directory → un'uscita della bozza. */
 export function outputFrom(entry: FsEntry): DraftOutput {
   return { path: entry.path, name: entry.name, size: entry.size,

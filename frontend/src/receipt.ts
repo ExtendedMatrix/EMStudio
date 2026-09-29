@@ -60,3 +60,22 @@ export function checkReceipt(
       || (self.digest && receipt.checksum && self.digest !== receipt.checksum))) return "sidecar-differs";
   return "ok";
 }
+
+/**
+ * RIFINITURE · the shelf's COPY after the stamp was retitled: every entry of
+ * that file takes the new receipt. Its name follows the title only while it was
+ * the receipt's own (the old title, or the file name when there was none): a
+ * name somebody gave the entry by hand stays theirs. Pure — the caller applies.
+ */
+export function refreshedCopies(entries: ShelfEntry[], path: string, next: StampReceipt):
+  Array<{ id: string; patch: Partial<ShelfEntry> }> {
+  const base = path.split("/").pop() || path;
+  return entries.filter((e) => e.locator === path).map((e) => {
+    const old = receiptOf(e);
+    const followed = e.name === (old?.title || base);
+    return { id: e.id, patch: {
+      extra: { ...(e.extra ?? {}), [RECEIPT_KEY]: next },
+      ...(followed ? { name: next.title || base } : {}),
+    } };
+  });
+}
