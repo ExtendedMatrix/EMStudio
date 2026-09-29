@@ -1804,6 +1804,13 @@ const EN: Dict = {
   "ai.verifiedBy": "verified by {who}",
   "ai.pending": "made with AI support: not verified yet (click to verify)",
   "ai.verifiedN": "{n} AI data verified",
+  "handle.up": "above",
+  "handle.down": "below",
+  "handle.noneAbove": "⊘ {a} cannot sit above {b}: no EM relation in that direction",
+  "handle.noneBelow": "⊘ {a} cannot sit below {b}: no EM relation in that direction",
+  "handle.menuUp": "↑ Above {name}",
+  "handle.menuDown": "↓ Below {name}",
+  "handle.shown": "Drag the handle: up for the nodes above, down for the nodes below",
 };
 
 // ── Italiano: complete, because E.D. works in it ───────────────────────────────
@@ -3481,6 +3488,13 @@ const IT: Dict = {
   "ai.verifiedBy": "verificato da {who}",
   "ai.pending": "fatto con supporto AI: non ancora verificato (clic per verificare)",
   "ai.verifiedN": "{n} dati AI verificati",
+  "handle.up": "sopra",
+  "handle.down": "sotto",
+  "handle.noneAbove": "⊘ {a} non può stare sopra {b}: nessuna relazione EM in quel verso",
+  "handle.noneBelow": "⊘ {a} non può stare sotto {b}: nessuna relazione EM in quel verso",
+  "handle.menuUp": "↑ Sopra {name}",
+  "handle.menuDown": "↓ Sotto {name}",
+  "handle.shown": "Trascina la maniglia: su per i nodi sopra, giù per quelli sotto",
 };
 
 // ── The six other project languages: AI DRAFTS, awaiting validation ───────────
@@ -4574,6 +4588,13 @@ const DE: Dict = {
   "ai.verifiedBy": "geprüft von {who}",
   "ai.pending": "mit KI-Unterstützung erstellt: noch nicht geprüft (Klick zum Prüfen)",
   "ai.verifiedN": "{n} KI-Daten geprüft",
+  "handle.up": "darüber",
+  "handle.down": "darunter",
+  "handle.noneAbove": "⊘ {a} kann nicht über {b} stehen: keine EM-Relation in dieser Richtung",
+  "handle.noneBelow": "⊘ {a} kann nicht unter {b} stehen: keine EM-Relation in dieser Richtung",
+  "handle.menuUp": "↑ Über {name}",
+  "handle.menuDown": "↓ Unter {name}",
+  "handle.shown": "Den Griff ziehen: nach oben für die Knoten darüber, nach unten für die darunter",
 };
 
 const DICTS: Record<Locale, Dict> = {

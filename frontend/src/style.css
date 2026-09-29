@@ -8403,3 +8403,8 @@ body.gesturing-resize * {
   color: var(--text); cursor: pointer; }
 .rd-item.sel { border-color: var(--accent); background: var(--bg-accent-soft); }
 .rd-item.on { outline: 2px solid var(--accent); }
+
+/* CATENA · the maniglia's hint under the pointer */
+#handle-hint { position: fixed; z-index: 60; pointer-events: none; font: 600 11.5px/1.3 var(--font-sans);
+  background: var(--bg-inverse); color: var(--on-inverse); padding: 2px 7px; border-radius: 10px; white-space: nowrap; }
+#handle-hint.bad { background: var(--danger); color: #fff; }

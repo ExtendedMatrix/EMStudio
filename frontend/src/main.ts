@@ -171,6 +171,9 @@ import {
   addableItems,
   applyExistingLink,
   connectItems,
+  handleEdgeTypes,
+  handleItems,
+  type HandleDir,
   existingLinks,
   EXISTING_PER_GROUP,
   itemKey,
@@ -6285,30 +6288,67 @@ function updateConnect(wx: number, wy: number): void {
   if (!connect || !store) return;
   connect.x = wx;
   connect.y = wy;
+  // CATENA · the maniglia: the drag's vertical sense decides the direction —
+  // up proposes the nodes above (they are the edge's source), down the nodes
+  // below — once the pointer has moved a few pixels (invariant 3)
+  if (connect.y0 === undefined) connect.y0 = wy;
+  const dy = (wy - connect.y0) * viewport().scale;
+  if (Math.abs(dy) > 8) connect.dir = dy < 0 ? "up" : "down";
   const s = scene();
   const hit = s ? hitTest(s, wx, wy, hitTol()) : null;
+  // DAG · resolve the SOURCE in its own document: on the corpus canvas it
+  // is a corpus node, and `store.node` there returns nothing — which read as
+  // "no EM connection allows undefined → …" and refused every link.
+  const srcType = storeOfNode(connect.fromId)?.node(connect.fromId)?.node_type;
   if (hit && hit.id !== connect.fromId) {
     connect.targetId = hit.id;
-    connect.validity = connectValidity(
-      // DAG · resolve the SOURCE in its own document: on the corpus canvas it
-      // is a corpus node, and `store.node` there returns nothing — which read as
-      // "no EM connection allows undefined → …" and refused every link.
-      storeOfNode(connect.fromId)?.node(connect.fromId)?.node_type,
-      hit.node.node_type,
-    );
+    // with a direction, only an EM relation in that verso is admitted: the
+    // generic fallback of the old connector would be a link nobody asked for
+    connect.validity = connect.dir
+      ? (handleEdgeTypes(srcType, hit.node.node_type, connect.dir).length ? "valid" : "invalid")
+      : connectValidity(srcType, hit.node.node_type);
   } else {
     connect.targetId = null;
     connect.validity = null;
   }
+  showHandleHint();
   draw();
+}
+
+/** CATENA · the line under the pointer while the maniglia is dragged:
+ *  «↑ sopra · US102», «↓ sotto · ⊘». */
+function showHandleHint(): void {
+  let hint = document.getElementById("handle-hint");
+  if (!connect || !connect.dir) { hint?.remove(); return; }
+  if (!hint) {
+    hint = document.createElement("div");
+    hint.id = "handle-hint";
+    document.body.appendChild(hint);
+  }
+  const vp = viewport();
+  const r = liveCanvas()?.getBoundingClientRect();
+  hint.style.left = `${(r?.left ?? 0) + connect.x * vp.scale + vp.x + 14}px`;
+  hint.style.top = `${(r?.top ?? 0) + connect.y * vp.scale + vp.y - 10}px`;
+  const tgt = connect.targetId ? storeOfNode(connect.targetId)?.node(connect.targetId) : null;
+  const label = connect.dir === "up" ? `↑ ${t("handle.up")}` : `↓ ${t("handle.down")}`;
+  hint.textContent = tgt
+    ? `${label} · ${connect.validity === "invalid" ? "⊘" : String(tgt.name ?? tgt.id)}`
+    : label;
+  hint.classList.toggle("bad", connect.validity === "invalid");
 }
 
 function finishConnect(forceCreate = false): void {
   if (!connect || !store) return;
   const { fromId, targetId, validity, x, y } = connect;
+  const dir = connect.dir ?? null;
   connect = null;
+  showHandleHint();
   setCanvasCursor("connecting", false);
   draw();
+  if (dir) {
+    finishHandle(fromId, targetId, validity, x, y, dir, forceCreate);
+    return;
+  }
   // Dropped in the void → offer to CREATE a target node. Hold Shift/Alt to
   // FORCE this even when the drop lands on a node or (often) inside a
   // container box that hitTest would otherwise treat as the target — handy
@@ -6331,6 +6371,35 @@ function finishConnect(forceCreate = false): void {
   } else {
     showEdgeMenu(fromId, targetId, types);
   }
+}
+
+/**
+ * CATENA · the maniglia released. On an ADMITTED node: the edge, in the
+ * direction the drag said (down: X → it; up: it → X). On a node the direction
+ * does not admit: ⊘ and a toast, nothing written. In the VOID: the link
+ * component of COLLEGARE, «Nuovo» and «Esistenti», for that direction only.
+ */
+function finishHandle(fromId: string, targetId: string | null, validity: ConnectDrag["validity"],
+                      x: number, y: number, dir: HandleDir, forceCreate: boolean): void {
+  if (forceCreate || !targetId) {
+    const vp = viewport();
+    const r = liveCanvas()?.getBoundingClientRect();
+    openAddMenu(activeWin(), (r?.left ?? 0) + x * vp.scale + vp.x, (r?.top ?? 0) + y * vp.scale + vp.y,
+                { fromId, dir });
+    return;
+  }
+  const src = storeOfNode(fromId)?.node(fromId);
+  const tgt = storeOfNode(targetId)?.node(targetId);
+  void validity;
+  const types = handleEdgeTypes(src?.node_type, tgt?.node_type, dir);
+  if (!types.length) {
+    toast(t(dir === "up" ? "handle.noneAbove" : "handle.noneBelow",
+            { a: String(tgt?.name ?? targetId), b: String(src?.name ?? fromId) }));
+    return;
+  }
+  const [s, d] = dir === "down" ? [fromId, targetId] : [targetId, fromId];
+  if (types.length === 1) createEdge(s, d, types[0]);
+  else showEdgeMenu(s, d, types);
 }
 
 /** The relation already stands, under any spelling and — when symmetric — from
@@ -6664,14 +6733,17 @@ function documentPreset(v: NewDocumentValues): NonNullable<AddSpec["preset"]> {
  * `allowedEdgeTypes` as the «Nuovo» entries); a pick is `linkExisting`.
  * The corpus canvas links nothing here: its nodes are not the study's.
  */
-function existingMenu(selId: string, anchor: boolean): {
+function existingMenu(selId: string, anchor: boolean, dir?: HandleDir): {
   groups: { label: string; entries: AddMenuEntry[] }[];
   flat: AddMenuEntry[];
 } {
   if (!store || canvasWritesToCorpus()) return { groups: [], flat: [] };
   const sel = store.node(selId);
   const selName = String(sel?.name ?? selId);
-  const links = existingLinks(store.doc, selId, { anchor });
+  // CATENA · the maniglia: only the links in its direction (down = X is the
+  // source, up = the existing node is)
+  const links = existingLinks(store.doc, selId, { anchor })
+    .filter((l) => !dir || l.dir === (dir === "down" ? "out" : "in"));
   const perNode = new Map<string, number>();
   for (const l of links) perNode.set(l.nodeId, (perNode.get(l.nodeId) ?? 0) + 1);
   const entryOf = (l: ExistingLink): AddMenuEntry => ({
@@ -7011,6 +7083,8 @@ function openAddMenu(
     at?: { x: number; y: number };
     /** right-click on empty space: «Riordina tutto» at the foot */
     reflowAll?: boolean;
+    /** CATENA · the maniglia released in the void: only this direction */
+    dir?: HandleDir;
   } = {},
 ): void {
   if (!store) {
@@ -7037,7 +7111,7 @@ function openAddMenu(
   //    already there), both from `allowedEdgeTypes`, one search over both.
   if (opts.fromId) {
     const src = storeOfNode(opts.fromId)?.node(opts.fromId);
-    const items = connectItems(ctx, src?.node_type);
+    const items = opts.dir ? handleItems(ctx, src?.node_type, opts.dir) : connectItems(ctx, src?.node_type);
     const multi = new Map<string, number>();
     for (const i of items) multi.set(i.nodeType, (multi.get(i.nodeType) ?? 0) + 1);
     const entries = items.map((i) =>
@@ -7051,12 +7125,14 @@ function openAddMenu(
       list.push(entries[k]);
       byCat.set(i.category, list);
     });
-    const ex = existingMenu(opts.fromId, true);
+    const ex = existingMenu(opts.fromId, !opts.dir, opts.dir);
     const newMatches = (e: AddMenuEntry, q: string): boolean =>
       matchesAdd({ label: e.label, alias: e.alias, nodeType: e.nodeType ?? "", description: e.description ?? "", category: e.detail ?? "" }, q);
     const exKeys = new Set(ex.flat.map((e) => e.key));
     showAddMenu({
-      title: t("add.fromNode", { name: String(src?.name ?? src?.node_type ?? "") }),
+      title: opts.dir
+        ? t(opts.dir === "up" ? "handle.menuUp" : "handle.menuDown", { name: String(src?.name ?? src?.node_type ?? "") })
+        : t("add.fromNode", { name: String(src?.name ?? src?.node_type ?? "") }),
       context,
       placeholder: t("link.q"),
       linked: [],
@@ -21575,7 +21651,25 @@ function wireGraphCanvas(canvas: HTMLCanvasElement, winId: string): void {
     const s = scene();
     const hit = s ? hitTest(s, wp.x, wp.y, hitTol()) : null;
     const g = hit ? s?.groupsById?.get(hit.id) : undefined;
-    if (hit && !(g && !g.folded && wp.y > g.y + g.headerH)) return;
+    if (hit && !(g && !g.folded && wp.y > g.y + g.headerH)) {
+      // CATENA · a press held on a NODE shows its handle: the node is
+      // selected, and the handle is drawn on the selected node (drag it up or
+      // down). The finger that moves is still a drag of the node.
+      const nodeId = hit.id;
+      longPress = {
+        x: e.clientX,
+        y: e.clientY,
+        timer: window.setTimeout(() => {
+          longPress = null;
+          dragMode = "none";
+          select(nodeId);
+          refreshInspector();
+          draw();
+          toast(t("handle.shown"));
+        }, 500),
+      };
+      return;
+    }
     const x = e.clientX;
     const y = e.clientY;
     longPress = {

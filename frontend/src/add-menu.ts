@@ -259,6 +259,44 @@ export function connectItems(ctx: AddContext, srcType: string | undefined): Link
   return out;
 }
 
+// ── CATENA · the maniglia: up for the nodes above, down for the nodes below ──
+
+export type HandleDir = "up" | "down";
+
+/**
+ * The edges the maniglia offers between X and another node in one direction —
+ * `allowedEdgeTypes` read with the arrows-down rule (invariant 3: the source of
+ * a directed edge is ABOVE its target):
+ *   · DOWN — X is the source: `allowedEdgeTypes(X, other)` (US below, the
+ *     property of a US, the extractor of a property, the document or the unit
+ *     of an extractor);
+ *   · UP — the other is the source: `allowedEdgeTypes(other, X)` (US above, the
+ *     owner of a property, the property of an extractor).
+ * Symmetric relations sit side by side and belong to neither direction.
+ */
+export function handleEdgeTypes(selfType: string | undefined, otherType: string | undefined,
+                                dir: HandleDir): string[] {
+  const list = dir === "down" ? allowedEdgeTypes(selfType, otherType) : allowedEdgeTypes(otherType, selfType);
+  return list.filter((e) => !isSymmetricEdgeType(e));
+}
+
+/** The «Nuovo» half of the maniglia dropped in the void, for one direction:
+ *  every addable type the datamodel lets sit above (up) or below (down) X, one
+ *  entry per edge — the same shape as `connectItems`. */
+export function handleItems(ctx: AddContext, selType: string | undefined, dir: HandleDir): LinkedItem[] {
+  const out: LinkedItem[] = [];
+  const selStrat = isStratigraphicType(selType);
+  for (const c of addCategories(ctx).filter((k) => k.state !== "off"))
+    for (const it of c.items) {
+      if (isGroupType(it.nodeType)) continue;
+      const pair = selStrat && isStratigraphicType(it.nodeType);
+      for (const e of handleEdgeTypes(selType, it.nodeType, dir))
+        out.push({ ...it, dir: dir === "down" ? "out" : "in", edgeType: e,
+                   relation: pair ? (dir === "up" ? "above" : "below") : "for" });
+    }
+  return out;
+}
+
 // ── COLLEGARE · linking to what already exists ────────────────────────────────
 
 /**

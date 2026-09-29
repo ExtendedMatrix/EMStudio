@@ -29,6 +29,7 @@ const bundle = await esbuild.build({
       export { DocumentStore } from "./model";
       export * as naming from "./naming";
       export { isStratigraphicType, allowedEdgeTypes } from "./rules";
+      export { handleEdgeTypes, existingLinks } from "./add-menu";
     `,
     resolveDir: SRC,
     loader: "ts",
@@ -36,11 +37,20 @@ const bundle = await esbuild.build({
   bundle: true,
   format: "esm",
   write: false,
+  plugins: [{
+    // `./icons` uses import.meta.glob, which only Vite has (as in check-add-menu)
+    name: "stub-icons",
+    setup(build) {
+      build.onResolve({ filter: /\.\/icons$/ }, () => ({ path: "icons-stub", namespace: "stub" }));
+      build.onLoad({ filter: /.*/, namespace: "stub" }, () => ({
+        contents: `export const ICON_NODE_TYPES = new Set(["extractor", "combiner"]);`, loader: "ts" }));
+    },
+  }],
 });
 const M = await import(
   "data:text/javascript;base64," + Buffer.from(bundle.outputFiles[0].text).toString("base64")
 );
-const { chain, DocumentStore, naming, isStratigraphicType } = M;
+const { chain, DocumentStore, naming, isStratigraphicType, handleEdgeTypes, existingLinks } = M;
 
 let checks = 0;
 const ok = (cond, what) => { assert.ok(cond, what); checks++; };
@@ -196,6 +206,33 @@ print(json.dumps(api.validate(g)["info"]))`;
   eq(chain.useAsValue(st, "X1"), "P_DAT", "the reading's property takes the value");
   ok(chain.propertyValue(N(st, "P_DAT")).startsWith("Il capitello nord"), "…the passage's text");
   eq(undoDepth(st) - before, 1, "…in one undo step");
+}
+
+// ── fase 4 · the maniglia: up = the nodes above (they are the source) ────────
+{
+  const has = (a, b, dir, e) => handleEdgeTypes(a, b, dir).includes(e);
+  ok(has("US", "US", "up", "is_after") && has("US", "US", "down", "is_after"), "US: US above and below (is_after)");
+  ok(has("US", "property", "down", "has_property") && !has("US", "property", "up", "has_property"),
+     "a US's property is BELOW it");
+  ok(has("property", "US", "up", "has_property"), "a property's owner is ABOVE it");
+  ok(has("property", "extractor", "down", "has_data_provenance"), "a property's extractor is below it");
+  ok(has("extractor", "property", "up", "has_data_provenance"), "an extractor's property is above it");
+  ok(has("extractor", "document", "down", "extracted_from") && has("extractor", "US", "down", "extracted_from"),
+     "an extractor's document — or unit (1.6.24) — is below it");
+  eq(handleEdgeTypes("US", "extractor", "down"), [], "nothing admits an extractor below a US: ⊘");
+  ok(!handleEdgeTypes("US", "US", "up").some((e) => ["has_same_time", "equals", "contrasts_with"].includes(e)),
+     "symmetric relations belong to neither direction");
+  // the gesture's write: RSF100b ↓ onto the existing P_H — one has_property,
+  // the same the app makes (createEdge with the one admitted type)
+  const st = fresh();
+  const types = handleEdgeTypes(N(st, "RSF100b").node_type, N(st, "P_H").node_type, "down");
+  eq(types, ["has_property"], "RSF100b ↓ height: has_property is the one relation");
+  st.addEdge("RSF100b", "P_H", types[0]);
+  eq(chain.ownersOf(st.doc, "P_H").map((o) => o.owner), ["USM101", "RSF100b"], "…and the property now has two owners");
+  // in the void: the existing half of the menu, in that direction only
+  const down = existingLinks(st.doc, "USV106").filter((l) => l.dir === "out");
+  ok(down.every((l) => handleEdgeTypes("USVs", l.nodeType, "down").includes(l.edgeType) || l.relation === "below"),
+     "the void menu's «Esistenti» (down) are links X → existing");
 }
 
 console.log(`paradata-chain: ${checks} checks ✓`);

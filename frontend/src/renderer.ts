@@ -46,6 +46,11 @@ export interface ConnectDrag {
    * as the source node is visible again.
    */
   fromAnchor?: { x: number; y: number };
+  /** CATENA · the maniglia's direction, decided by the drag: up = the nodes
+   *  above (they are the edge's source), down = the nodes below */
+  dir?: "up" | "down" | null;
+  /** world y where the drag started, to read the direction from */
+  y0?: number;
 }
 
 export interface RenderState {

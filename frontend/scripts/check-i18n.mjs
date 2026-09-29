@@ -39,7 +39,10 @@ const eq = (got, want, what) => {
  * scan reports comments as findings — which is how a sweep loses its credibility.
  */
 function blankComments(src) {
-  const out = [...src];
+  // UTF-16 units, the same the indices below count in: `[...src]` split by code
+  // point, so every emoji before a comment shifted the blanking one place (the
+  // 🖼/📄/📁 of the Storage made the comments past them half-blanked, measured)
+  const out = src.split("");
   const n = src.length;
   let i = 0;
   const blank = (from, to) => {
