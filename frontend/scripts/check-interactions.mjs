@@ -804,6 +804,51 @@ test("7.dtc", "la finestra DTC vuota dice che il DTC nasce dai timbri, e offre l
   return { pass: /timbri/.test(txt) && /Storage/.test(txt) && !/Shift\+A/.test(txt), detail: { txt } };
 });
 
+// ── PARTE 8 · outliner e ricerca ───────────────────────────────────────────
+test("8.count", "l'outliner conta «358 nodi · 12 epoche», e «n su 358» quando filtra", async () => {
+  const { p, ctx } = await open({ doc: "epochs48" });
+  const c0 = await p.evaluate(() => document.querySelector(".nl-count")?.textContent ?? "");
+  await p.fill(".nl-filter", "USM10");
+  await p.waitForTimeout(300);
+  const c1 = await p.evaluate(() => document.querySelector(".nl-count")?.textContent ?? "");
+  await ctx.close();
+  const m = /^(\d+) su 358$/.exec(c1);
+  return { pass: c0 === "358 nodi · 12 epoche" && !!m && Number(m[1]) <= 358, detail: { c0, c1 } };
+});
+test("8.once", "un elenco solo: per epoca ogni unità compare una volta; A–Z senza proprietà temporali", async () => {
+  const { p, ctx } = await open({ doc: "catena" });
+  const byEpoch = await p.evaluate(() => [...document.querySelectorAll(".nl-rows .nl-row")].map((r) => r.querySelector("b")?.textContent));
+  await p.click('.nl-mode[data-mode="az"]');
+  await p.waitForTimeout(200);
+  const az = await p.evaluate(() => [...document.querySelectorAll(".nl-rows .nl-row")].map((r) => r.querySelector("b")?.textContent));
+  await p.click('.nl-mode[data-mode="epoch"]');
+  await ctx.close();
+  const dup = byEpoch.filter((n, i) => byEpoch.indexOf(n) !== i);
+  return { pass: !dup.length && byEpoch.includes("USM101") && az.includes("USM101") && !az.some((n) => /^absolute_time_(start|end)$/.test(n ?? "")),
+           detail: { dup, byEpoch: byEpoch.length, az: az.length, temporal: az.filter((n) => /absolute_time/.test(n ?? "")) } };
+});
+test("8.search", "«USM101» + Invio seleziona l'unità, non PD_USM101; la tendina ha tipo, frecce e Invio", async () => {
+  const { p, ctx } = await open({ doc: "catena" });
+  await p.click("#search");
+  await p.keyboard.type("USM101");
+  await p.waitForTimeout(250);
+  const list = await p.evaluate(() => ({ role: document.getElementById("search-results").getAttribute("role"),
+    hits: [...document.querySelectorAll("#search-results .search-hit")].map((b) => [b.querySelector(".hit-name").textContent, b.querySelector(".hit-type").textContent]) }));
+  await p.keyboard.press("Enter");
+  await p.waitForTimeout(300);
+  const sel1 = await p.evaluate(() => window.__EM_DRAG__.selected()[0]);
+  await p.click("#search");
+  await p.keyboard.type("USM101");
+  await p.waitForTimeout(250);
+  await p.keyboard.press("ArrowDown");
+  await p.keyboard.press("Enter");
+  await p.waitForTimeout(300);
+  const sel2 = await p.evaluate(() => window.__EM_DRAG__.selected()[0]);
+  await ctx.close();
+  return { pass: list.role === "listbox" && list.hits[0]?.[0] === "USM101" && sel1 === "USM101" && !!sel2 && sel2 !== "USM101",
+           detail: { list, sel1, sel2 } };
+});
+
 // ── run ─────────────────────────────────────────────────────────────────────
 const chosen = cases.filter((c) => !only.length || only.includes(c.id) || only.some((o) => c.id.startsWith(o + ".")));
 for (const c of chosen) {

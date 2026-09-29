@@ -45,6 +45,9 @@ export interface NodeListCallbacks {
   /** STUDIO · the WARNINGS on a node (not the hints): a row carries a discreet
    *  ▲ when there are any, and its tooltip says what they are. Absent = none. */
   warningsOf?: (id: string) => string[];
+  /** AUDIT N7 · an epoch's temporal property (absolute_time_start/end): a
+   *  bound of the epoch, not a row of its own in the A–Z list */
+  isTemporalProperty?: (id: string) => boolean;
 }
 
 export function buildNodeList(
@@ -60,9 +63,38 @@ export function buildNodeList(
   filter.setAttribute("aria-label", t("outliner.search"));
   filter.className = "nl-filter";
   root.appendChild(filter);
+  // AUDIT N7 · ONE LIST, two orders: «Per epoca» (the units under their epoch,
+  // then the groups) or «A–Z» (every node, flat). It used to be both at once,
+  // and every unit appeared twice.
+  const MODE_KEY = "emstudio.outliner.mode";
+  let mode: "epoch" | "az" = (() => {
+    try { return localStorage.getItem(MODE_KEY) === "az" ? "az" : "epoch"; } catch { return "epoch"; }
+  })();
+  const bar = document.createElement("div");
+  bar.className = "nl-bar";
   const count = document.createElement("div");
   count.className = "nl-count";
-  root.appendChild(count);
+  const seg = document.createElement("span");
+  seg.className = "nl-modes";
+  seg.setAttribute("role", "group");
+  const modeBtn = (m: "epoch" | "az", label: string): HTMLButtonElement => {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "nl-mode";
+    b.dataset.mode = m;
+    b.textContent = label;
+    b.addEventListener("click", () => {
+      mode = m;
+      try { localStorage.setItem(MODE_KEY, m); } catch { /* private mode */ }
+      rebuild();
+    });
+    seg.appendChild(b);
+    return b;
+  };
+  const byEpochBtn = modeBtn("epoch", t("outliner.byEpoch"));
+  const azBtn = modeBtn("az", t("outliner.az"));
+  bar.append(count, seg);
+  root.appendChild(bar);
   const listEl = document.createElement("div");
   listEl.className = "nl-rows";
   root.appendChild(listEl);
@@ -147,6 +179,10 @@ export function buildNodeList(
   const rebuild = (): void => {
     listEl.innerHTML = "";
     rows.clear();
+    for (const [b, m] of [[byEpochBtn, "epoch"], [azBtn, "az"]] as const) {
+      b.classList.toggle("on", mode === m);
+      b.setAttribute("aria-pressed", String(mode === m));
+    }
     const doc = getDoc();
     if (!doc) {
       count.textContent = "";
@@ -170,7 +206,21 @@ export function buildNodeList(
     // The desk's outliner (`drawUnits`): an epoch heading with its span in mono
     // on the right, the units born in it beneath, and what a container holds
     // indented under the container. The shape is `outline.ts`'s; this draws it.
-    const outline = buildOutline(doc, liveNodes(doc.graph as never) as unknown as EmNode[],
+    const visible = liveNodes(doc.graph as never) as unknown as typeof doc.graph.nodes;
+    const shownIds = new Set<string>();
+    const subEpochs = new Set((doc.graph.edges ?? []).filter((e) => e.edge_type === "has_sub_epoch").map((e) => e.target));
+    const epochCount = visible.filter((n) => n.node_type === "EpochNode" && !subEpochs.has(n.id)).length;
+    const sayCount = (): void => {
+      count.textContent = q
+        ? t("outliner.countOf", { n: String(shownIds.size), total: String(visible.length) })
+        : t("outliner.count", { n: String(visible.length), e: String(epochCount) });
+    };
+    if (mode === "az") {
+      azList(doc, visible, q ? matches : null, shownIds);
+      sayCount();
+      return;
+    }
+    const outline = buildOutline(doc, visible as unknown as EmNode[],
                                  isStratigraphicType, q ? matches : undefined);
     const unitRow = (u: OutlineUnit): HTMLElement => {
       const n = u.node;
@@ -203,9 +253,8 @@ export function buildNodeList(
         e.dataTransfer?.setData("text/plain", String(n.name || n.id));
         if (e.dataTransfer) e.dataTransfer.effectAllowed = "copy";
       });
-      // the FIRST row of a node wins the selection highlight: a unit appears
-      // once here and once more in the flat list below
       if (!rows.has(n.id)) rows.set(n.id, row);
+      shownIds.add(n.id);
       return row;
     };
     for (const ep of outline.epochs) {
@@ -238,7 +287,6 @@ export function buildNodeList(
     // node groups by type PLUS stratigraphic containers (is_part_of members)
     // P4.5 · the same live view the canvas draws: a tombstoned node is gone
     // from every surface, and still in the document for the merge
-    const visible = liveNodes(doc.graph as never) as unknown as typeof doc.graph.nodes;
     const groups = visible
       .filter(
         (n) =>
@@ -324,22 +372,23 @@ export function buildNodeList(
           row.appendChild(explode);
           sec.body.appendChild(row);
           if (!rows.has(g.id)) rows.set(g.id, row);
+          shownIds.add(g.id);
         }
       }
     }
 
+    sayCount();
+  };
+
+  /** AUDIT N7 · the A–Z order: every node, flat — the epochs' temporal
+   *  properties are their bounds, not rows of their own */
+  const azList = (doc: EmDocument, visible: EmDocument["graph"]["nodes"],
+                  matches: ((n: EmDocument["graph"]["nodes"][number]) => boolean) | null,
+                  shownIds: Set<string>): void => {
     const nodes = visible
-      .filter((n) => !isGroupType(n.node_type) && matches(n))
-      .sort((a, b) =>
-        String(a.name || a.id).localeCompare(String(b.name || b.id)),
-      );
-    count.textContent = `${nodes.length + groups.length} / ${visible.length} nodes`;
-    // The Nodes heading is now ALWAYS there, where before it only appeared when
-    // there were groups above it: a collapsed section whose heading disappears
-    // takes its rows out of reach, and the way back would be gone with it.
-    const nodesSec = section("nodes", t("outliner.allNodes", { n: String(nodes.length) }), "nl-sect");
-    listEl.appendChild(nodesSec.head);
-    listEl.appendChild(nodesSec.body);
+      .filter((n) => !groupCb.isTemporalProperty?.(n.id) && (!matches || matches(n)))
+      .sort((a, b) => String(a.name || a.id).localeCompare(String(b.name || b.id), undefined, { numeric: true }));
+    void doc;
     for (const n of nodes) {
       const row = document.createElement("button");
       row.className = "nl-row" + (n.id === selected ? " selected" : "");
@@ -360,17 +409,16 @@ export function buildNodeList(
       row.appendChild(body);
       row.addEventListener("click", () => onPick(n.id));
       // Drag-to-embed (N3): a row is the handle for dropping this node into a
-      // narrative chapter. The canvas cannot be the drag source — the narrative
-      // view is an overlay OVER it, so the two never share the screen — and
-      // this list is the graph's other face, always visible beside the story.
+      // narrative chapter.
       row.draggable = true;
       row.addEventListener("dragstart", (e) => {
         e.dataTransfer?.setData("application/x-em-node-id", n.id);
         e.dataTransfer?.setData("text/plain", String(n.name || n.id));
         if (e.dataTransfer) e.dataTransfer.effectAllowed = "copy";
       });
-      nodesSec.body.appendChild(row);
+      listEl.appendChild(row);
       if (!rows.has(n.id)) rows.set(n.id, row);
+      shownIds.add(n.id);
     }
   };
 

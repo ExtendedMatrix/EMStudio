@@ -500,7 +500,7 @@ body.sync-active #statusbar {
   color: var(--text);
 }
 
-.search-hit:hover {
+.search-hit.on, .search-hit:hover {
   background: var(--bg-hover);
 }
 
@@ -8611,3 +8611,9 @@ button.shelf-badge { cursor: pointer; font: inherit; font-size: 10.5px; }
 .win-empty { padding: 18px 16px; display: flex; flex-direction: column; gap: 8px; align-items: flex-start; color: var(--muted, #666); font-size: 12.5px; max-width: 52ch; }
 .win-empty p { margin: 0; }
 .win-empty-acts { display: flex; gap: 6px; flex-wrap: wrap; }
+
+/* AUDIT N7 · the Outliner's count and its two orders */
+.nl-bar { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
+.nl-modes { display: inline-flex; border: 1px solid var(--border, #ddd); border-radius: 999px; overflow: hidden; }
+.nl-mode { border: 0; background: none; font-size: 11px; padding: 1px 8px; cursor: pointer; color: var(--muted, #666); }
+.nl-mode.on { background: var(--sel-bg, rgba(74, 144, 217, 0.12)); color: var(--text, #222); font-weight: 600; }

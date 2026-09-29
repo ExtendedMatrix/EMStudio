@@ -61,6 +61,10 @@ type Dict = Record<string, string>;
 // `emtree.`, `empty.`, `toast.`) so a translator can work a screen at a time and
 // an unused key is findable.
 const EN: Dict = {
+  "outliner.count": "{n} nodes · {e} epochs",
+  "outliner.countOf": "{n} of {total}",
+  "outliner.byEpoch": "By epoch",
+  "outliner.az": "A–Z",
   "strip.untitled": "Untitled",
   "strip.noGraph": "no graph open",
   "empty.graphT": "No graph yet",
@@ -2010,6 +2014,10 @@ const EN: Dict = {
 
 // ── Italiano: complete, because E.D. works in it ───────────────────────────────
 const IT: Dict = {
+  "outliner.count": "{n} nodi · {e} epoche",
+  "outliner.countOf": "{n} su {total}",
+  "outliner.byEpoch": "Per epoca",
+  "outliner.az": "A–Z",
   "strip.untitled": "Senza titolo",
   "strip.noGraph": "nessun grafo aperto",
   "empty.graphT": "Ancora nessun grafo",
@@ -4535,6 +4543,10 @@ export function setValidated(code: Locale, on: boolean): void {
 // falls back to English for the rest, the same way the other drafts do; E.D.
 // validates it in the selector like the others.
 const DE: Dict = {
+  "outliner.count": "{n} Knoten · {e} Epochen",
+  "outliner.countOf": "{n} von {total}",
+  "outliner.byEpoch": "Nach Epoche",
+  "outliner.az": "A–Z",
   "strip.untitled": "Ohne Titel",
   "strip.noGraph": "kein Graph offen",
   "empty.graphT": "Noch kein Graph",

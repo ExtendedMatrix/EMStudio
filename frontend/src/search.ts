@@ -23,7 +23,18 @@ const str = (v: unknown): string => (v == null ? "" : String(v));
 const valueOf = (p: EmNode): string =>
   str((p as Record<string, unknown>).value ?? p.data?.value ?? p.description);
 
-export function searchGraph(doc: EmDocument | null, query: string, limit = 14): SearchHit[] {
+/**
+ * AUDIT N7 · THE ORDER OF THE HITS: an EXACT name first, then a name that
+ * STARTS with the query, then a name that CONTAINS it, then the rest of the
+ * text (a value, a description, an epoch). At equal rank the UNITS come first,
+ * then the other nodes, then the groups (a `…NodeGroup`) — measured before:
+ * «USM101» + Enter took `PD_USM101`, the paradata group, not the unit.
+ */
+export type SearchKindRank = (nodeType: string) => number;
+const defaultKindRank: SearchKindRank = (t) => (t.endsWith("NodeGroup") ? 2 : 1);
+
+export function searchGraph(doc: EmDocument | null, query: string, limit = 14,
+                            kindRank: SearchKindRank = defaultKindRank): SearchHit[] {
   if (!doc) return [];
   const toks = query.trim().toLowerCase().split(/\s+/).filter(Boolean);
   if (!toks.length) return [];
@@ -42,7 +53,7 @@ export function searchGraph(doc: EmDocument | null, query: string, limit = 14): 
       props.set(s.id, [...(props.get(s.id) ?? []), d]);
     else if (e.edge_type === "has_first_epoch" && !epoch.has(s.id)) epoch.set(s.id, d);
   }
-  const hits: Array<SearchHit & { rank: number }> = [];
+  const hits: Array<SearchHit & { rank: number; kind: number }> = [];
   for (const n of nodes) {
     const name = str(n.name || n.id);
     const ps = props.get(n.id) ?? [];
@@ -52,16 +63,18 @@ export function searchGraph(doc: EmDocument | null, query: string, limit = 14): 
                   ep ? str(ep.name) : ""];
     const text = bits.join(" ").toLowerCase();
     if (!toks.every((t) => text.includes(t))) continue;
-    const rank = toks.every((t) => name.toLowerCase().includes(t)) ? 0 : 1;
+    const lname = name.toLowerCase(), q = toks.join(" ");
+    const rank = lname === q ? 0 : lname.startsWith(q) ? 1
+      : toks.every((t) => lname.includes(t)) ? 2 : 3;
     const excerpt = [valueOf(n) !== str(n.description) ? valueOf(n) : "",
                      str(n.description),
                      ...ps.map((p) => `${str(p.name)} ${valueOf(p)}`.trim())
                        .filter((x) => toks.some((t) => x.toLowerCase().includes(t))),
                      ep ? str(ep.name) : ""]
       .filter(Boolean).join(" · ").slice(0, 110);
-    hits.push({ node: n, excerpt, rank });
+    hits.push({ node: n, excerpt, rank, kind: kindRank(n.node_type) });
   }
-  hits.sort((a, b) => a.rank - b.rank ||
+  hits.sort((a, b) => a.rank - b.rank || a.kind - b.kind ||
     str(a.node.name || a.node.id).localeCompare(str(b.node.name || b.node.id),
                                                undefined, { numeric: true }));
   return hits.slice(0, limit).map(({ node, excerpt }) => ({ node, excerpt }));
@@ -90,10 +103,30 @@ export function setupSearch(
    *  URL; injected, so this module stays free of the bundler's asset globbing
    *  and runs in node (`check-studio.mjs`) */
   glyphFor: (nodeType: string) => string | null = () => null,
+  kindRank: SearchKindRank = defaultKindRank,
 ): void {
+  resultsBox.setAttribute("role", "listbox");
+  input.setAttribute("aria-autocomplete", "list");
+  let at = 0;
+  let shown: SearchHit[] = [];
   const hide = (): void => {
     resultsBox.classList.add("hidden");
     resultsBox.innerHTML = "";
+    shown = [];
+  };
+  const mark = (): void => {
+    [...resultsBox.querySelectorAll<HTMLElement>(".search-hit")].forEach((b, i) => {
+      b.classList.toggle("on", i === at);
+      b.setAttribute("aria-selected", String(i === at));
+      if (i === at) b.scrollIntoView({ block: "nearest" });
+    });
+  };
+  const take = (h: SearchHit | undefined): void => {
+    if (!h) return;
+    onPick(h.node.id);
+    input.value = "";
+    hide();
+    input.blur();
   };
 
   const run = (): void => {
@@ -102,7 +135,9 @@ export function setupSearch(
       hide();
       return;
     }
-    const hits = searchGraph(getDoc(), q);
+    const hits = searchGraph(getDoc(), q, 14, kindRank);
+    shown = hits;
+    at = 0;
     resultsBox.innerHTML = "";
     if (!hits.length) {
       const p = document.createElement("p");
@@ -126,15 +161,12 @@ export function setupSearch(
         `<b class="hit-name">${highlight(String(n.name || n.id), q)}</b>` +
         `<span class="hit-ex">${highlight(excerpt, q)}</span>` +
         `<span class="hit-type">${esc(n.node_type)}</span>`;
-      b.addEventListener("click", () => {
-        onPick(n.id);
-        input.value = "";
-        hide();
-        input.blur();
-      });
+      b.addEventListener("mousedown", (e) => e.preventDefault());
+      b.addEventListener("click", () => take(hits.find((h) => h.node.id === n.id)));
       resultsBox.appendChild(b);
     }
     resultsBox.classList.remove("hidden");
+    mark();
   };
 
   input.addEventListener("input", run);
@@ -145,16 +177,18 @@ export function setupSearch(
       hide();
       input.blur();
     }
+    if (ev.key === "ArrowDown" || ev.key === "ArrowUp") {
+      ev.preventDefault();
+      if (!shown.length) run();
+      at = Math.max(0, Math.min(shown.length - 1, at + (ev.key === "ArrowDown" ? 1 : -1)));
+      mark();
+    }
     if (ev.key === "Enter") {
-      // Invio seleziona il primo risultato — computed, not read off the list,
-      // so a fast typist is never one repaint behind
-      const first = searchGraph(getDoc(), input.value)[0];
-      if (first) {
-        onPick(first.node.id);
-        input.value = "";
-        hide();
-        input.blur();
-      }
+      ev.preventDefault();
+      // Invio takes the highlighted hit (the first one unless the arrows moved)
+      // — the first is computed, not read off the list, so a fast typist is
+      // never one repaint behind
+      take(at > 0 && shown[at] ? shown[at] : searchGraph(getDoc(), input.value, 14, kindRank)[0]);
     }
   });
   document.addEventListener("pointerdown", (ev) => {

@@ -6005,6 +6005,7 @@ const outlinerCallbacks: NodeListCallbacks = {
   warningsOf: (id) =>
     currentIssues.filter((i) => i.sev === "warn" && (i.node === id || issueUnitOf(i.node) === id))
       .map((i) => i.txt),
+  isTemporalProperty: (id) => !!store?.epochOfTemporalProperty(id),
 };
 
 /**
@@ -22666,6 +22667,8 @@ setupSearch(
   },
   t("strip.noResults"),
   (nt) => glyphMarkupFor(nt) ?? iconUrlFor(nt),
+  // AUDIT N7 · at equal rank: the units, then the other nodes, then the groups
+  (nt) => (isStratigraphicType(nt) ? 0 : nt.endsWith("NodeGroup") ? 2 : 1),
 );
 
 // ---------- drag & drop ----------
