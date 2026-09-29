@@ -1041,4 +1041,33 @@ eq(doc.graph.nodes.filter(
      "stabile · …ed è il costruttore della superficie a mettere `.nv-view` sull'host");
 }
 
+// ── RIFINITURE · Leggi and Stampa are PAGES, white in both themes ────────────
+// The page is `.nv-paper`: Leggi wraps the story in one, Stampa's sheet is one,
+// Scrivi and Notebook are not. The paper re-declares the LIGHT colour tokens of
+// `:root` — held equal here, or the paper would drift into a third theme.
+{
+  const V = await load("narrative.ts");
+  const render = (reading, editor) => {
+    const host = document.createElement("div");
+    V.renderNarrativeView(host, doc, "narr-1", () => {}, undefined, editor, undefined, undefined, { reading });
+    return host;
+  };
+  const ed = { updateBlock() {}, insertBlock() {}, removeBlock() {}, moveBlock() {}, addChapter() {},
+               generateDraft() {}, promptOf: () => null };
+  eq(!!render("read").querySelector(".nv-paper .nv-chapter"), true, "paper · Leggi: the chapters are on the paper");
+  eq(!!render("print").querySelector(".nv-print.nv-paper"), true, "paper · Stampa: the sheet is the paper");
+  eq(render("write", ed).querySelector(".nv-paper"), null, "paper · Scrivi follows the theme: no paper");
+  eq(render("notebook").querySelector(".nv-paper"), null, "paper · Notebook follows the theme: no paper");
+  eq(render(undefined).querySelector(".nv-paper") !== null, true,
+     "paper · the published reader (no editor → Leggi) is on the same paper");
+  const css = (await import("node:fs")).readFileSync(new URL("../src/style.css", import.meta.url), "utf8");
+  const block = (sel) => { const i = css.indexOf(`${sel} {`); return css.slice(i, css.indexOf("\n}", i)); };
+  const toks = (b) => Object.fromEntries([...b.matchAll(/^\s*(--[\w-]+):\s*([^;]+);/gm)]
+    .filter((m) => !/^--(font|radius)/.test(m[1])).map((m) => [m[1], m[2].trim()]));
+  const root = toks(block(":root")), paper = toks(block(".nv-paper"));
+  eq(Object.keys(paper).length > 30, true, "paper · the paper declares the colour tokens");
+  eq(paper, root, "paper · …and they are exactly the light ones of :root");
+  ok(/\.nv-paper \{\s*color-scheme: light;/.test(css), "paper · color-scheme light on the paper (form controls, scrollbars)");
+}
+
 console.log(`narrative: ${checks} checks passed`);

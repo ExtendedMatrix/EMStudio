@@ -1040,7 +1040,11 @@ export function renderNarrativeView(
     }
     head.appendChild(help);
   }
-  container.appendChild(head);
+  // RIFINITURE · LEGGI is a page: white paper in both themes (`.nv-paper`),
+  // framed by the window in the current theme. SCRIVI follows the theme.
+  const paper = writing ? container : el("div", "nv-paper nv-sheet");
+  if (!writing) container.appendChild(paper);
+  paper.appendChild(head);
 
   const sel = page.selection ?? null;
   const pick = (s: NarrativeSelection): void => page.onSelectPart?.(s);
@@ -1218,7 +1222,7 @@ export function renderNarrativeView(
         }
       });
     }
-    container.appendChild(section);
+    paper.appendChild(section);
   });
 }
 
@@ -1288,7 +1292,8 @@ function editableInPlace(text: string, index: Map<string, EmNode>, ci: number, b
 // ── STAMPA · the page as DOCX and LaTeX will print it ──────────────────────
 function renderPrintPreview(container: HTMLElement, nr: Narrative, index: Map<string, EmNode>,
                             page: PageHooks): void {
-  const sheet = el("div", "nv-print");
+  // RIFINITURE · the print sheet is paper in both themes
+  const sheet = el("div", "nv-print nv-paper");
   sheet.appendChild(el("h1", "nv-title", nr.name));
   if (nr.description) sheet.appendChild(el("p", "nv-lede", nr.description));
   const { items, bibliography } = printItems(nr.chapters as ProjChapter[], index);

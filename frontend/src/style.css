@@ -3320,7 +3320,10 @@ body.sync-active #footer-brand #em-version {
   text-transform: uppercase;
   letter-spacing: 0.5px;
   background: var(--bg-accent-soft);
-  color: var(--accent-ink);
+  /* RIFINITURE · 10px words need 4.5:1: --accent-ink on its soft tint measured
+     4.39 in light (and on the paper of Leggi); a touch of the ink makes it ~4.9,
+     and in dark it only lifts a ratio that was 6.8 */
+  color: color-mix(in srgb, var(--accent-ink) 88%, var(--text));
   border-radius: var(--radius-sm);
   padding: 1px 6px;
 }
@@ -8242,6 +8245,71 @@ body.gesturing-resize * {
 .nv-print-fig figcaption { font-size: 12.5px; margin-top: 4px; }
 .nv-print-bib { font-size: 13px; }
 .nv-print-note, .nv-print-miss { font-size: 11.5px; color: var(--text-muted); }
+
+/* RIFINITURE · LEGGI and STAMPA are PAGES: white paper and dark ink in BOTH
+   themes, inside a window framed in the current theme — as a PDF viewer does.
+   Scrivi and Notebook follow the theme. The paper re-declares the LIGHT colour
+   tokens of `:root`, so everything on it — embeds, chips, figures, the 3D
+   card — takes the page's colours without a rule of its own; check-narrative
+   holds the copy equal to `:root` (a drifted copy would be a third theme). */
+.nv-paper {
+  color-scheme: light;
+  --brand: #073763;
+  --on-brand: #fcfcfc;
+  --accent: #bf9000;
+  --on-accent: #1d1d1b;
+  --bg-app: #eef1f5;
+  --bg-panel: #fff;
+  --bg-elevated: #fff;
+  --bg-sunken: #f4f6f8;
+  --bg-hover: #d9e9f7;
+  --bg-subtle: #f7f9fb;
+  --text: #24292f;
+  --text-muted: #46505c;
+  --text-faint: #636c78;
+  --text-dim: #656e7a;
+  --border: #d8dee6;
+  --border-strong: #9aa4b0;
+  --danger: #c93c37;
+  --warn: #8a5a00;
+  --ok: #2ca05a;
+  --sync: #35c98a;
+  --canvas-bg: #fbfcfe;
+  --lane-a: #edf3fa;
+  --lane-b: #f7fafd;
+  --bg-accent-soft: #f6ecd0;
+  --bg-inverse: #24292f;
+  --on-inverse: #f0f3f7;
+  --bg-danger-soft: #fbeeed;
+  --bg-overview: rgba(255, 255, 255, 0.93);
+  --warn-soft: #fff4e0;
+  --warn-ink: #8a5a00;
+  --warn-border: #f0c98d;
+  --ok-soft: #e8f5e9;
+  --ok-ink: #2e6b32;
+  --ok-border: #b6ddb9;
+  --info-soft: #e0f4ff;
+  --info-ink: #04486b;
+  --accent-ink: #8a6800;
+  --ai-ink: #a04a00;
+  --brand-ink: #073763;
+  --border-faint: #eef1f4;
+  --danger-border: #e4b6b4;
+  background: var(--bg-panel);
+  color: var(--text);
+}
+.nv-view[data-reading="read"],
+.nv-view[data-reading="print"] {
+  background: var(--bg-app);
+}
+.nv-paper.nv-sheet {
+  max-width: 800px;
+  margin: 0 auto;
+  padding: 40px 12px 56px;
+  border-radius: 2px;
+  box-shadow: 0 1px 3px rgb(0 0 0 / 18%), 0 6px 24px rgb(0 0 0 / 10%);
+}
+
 .nv-withheld { display: flex; gap: 10px; align-items: center; border: 1px dashed var(--ai-ink, #a04a00); color: var(--ai-ink, #a04a00); padding: 6px 10px; border-radius: var(--radius); font-family: var(--font-sans, sans-serif); font-size: 12px; margin: 8px 0; }
 .nv-nb { max-width: 760px; margin: 0 auto; }
 .nv-nb-cell { margin: 6px 0; padding: 6px 10px; border-radius: var(--radius); }
