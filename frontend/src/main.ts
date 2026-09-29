@@ -194,6 +194,8 @@ import { refsForViewType, unvalidatedForExport, viewTypesFor, type ProjChapter }
 import { chapterCitedIds, interpretiveCoverage, storyCoverage } from "./narrative-coverage";
 import { setSitePicker, type NarrativeSelection, type Reading } from "./narrative";
 import { renderSitePosition } from "./study-panel";
+import * as chain from "./paradata-chain";
+import { renderChainSection, type ChainUi } from "./paradata-inspector";
 import {
   closeAddMenu,
   showAddMenu,
@@ -1454,6 +1456,10 @@ window.__EM_SCENE__ = () => {
 // Read-only like `__EM_SCENE__`; `check-drag`'s browser twin reads it.
 (window as unknown as { __EM_DRAG__?: unknown }).__EM_DRAG__ = {
   selected: () => [...selectedIds],
+  /** CATENA · the live edges of one type (read-only), and the node by id */
+  edgesOf: (type: string) => (store?.liveEdges() ?? []).filter((e) => e.edge_type === type),
+  node: (id: string) => store?.node(id) ?? null,
+
   epochOf: (id: string) =>
     store?.doc.graph.edges.find(
       (e) => e.edge_type === "has_first_epoch" && e.source === id,
@@ -2108,6 +2114,7 @@ function renderInspectorInto(host: HTMLElement): void {
     },
     selectedEdge,
   );
+  if (selectedId) renderChainSection(host, chainUi(owning), selectedId); // CATENA
   renderInspectorIssues(host);
   renderNodeHistory(host);
   citeSectionFor(host); // COLLEGARE · «Cita in «capitolo»», with the story open
@@ -6703,6 +6710,95 @@ function linkExisting(selId: string, l: ExistingLink): void {
   select(selId);
   toastUndo(msg, st);
   draw();
+}
+
+// ── CATENA · the paradata chain in the inspector ─────────────────────────────
+
+/** The callbacks the chain section draws with, bound to the store it reads. */
+function chainUi(st: DocumentStore): ChainUi {
+  return {
+    store: st,
+    isUnit: isStratigraphicType,
+    canOwnProperty: (nt) => !!nt && allowedEdgeTypes(nt, "property").includes("has_property"),
+    jump: (id) => {
+      select(id);
+      centerOn(id);
+      buildScenes();
+      draw();
+    },
+    inherit: (ownerId, anchor) => {
+      const r = anchor.getBoundingClientRect();
+      openInheritMenu(ownerId, r.left, r.bottom);
+    },
+    useAsValue: (x) => {
+      const p = chain.useAsValue(st, x);
+      if (!p) return;
+      const msg = t("chain.valueSet", { prop: String(st.node(p)?.name ?? p), value: chain.propertyValue(st.node(p)) });
+      logInfo(msg, [p, x]);
+      toastUndo(msg, st);
+    },
+  };
+}
+
+/**
+ * «Eredita da…» — the link component on the properties of the OTHER units, the
+ * ones with the same name as a property this unit already has on top. A pick is
+ * `chain.inheritProperty`: one more `has_property`, declared `inherited`, one
+ * undo step. Never automatic.
+ */
+function openInheritMenu(ownerId: string, clientX: number, clientY: number): void {
+  if (!store) return;
+  const st = store;
+  const owner = st.node(ownerId);
+  const cands = chain.inheritCandidates(st.doc, ownerId, isStratigraphicType);
+  const entryOf = (c: (typeof cands)[number]): AddMenuEntry => {
+    const u = st.node(c.unitId);
+    const p = st.node(c.propertyId);
+    const value = chain.propertyValue(p);
+    return {
+      key: `inh|${c.unitId}|${c.propertyId}`,
+      label: `${String(u?.name ?? c.unitId)} · ${String(p?.name ?? c.propertyId)}${value ? ` = ${value}` : ""}`,
+      detail: c.sameName ? t("chain.sameName") : "",
+      nodeType: "property",
+      description: String(u?.description ?? ""),
+      alias: String(p?.name ?? ""),
+      icon: () => typeIconElement(String(u?.node_type ?? "US")),
+      run: () => {
+        chain.inheritProperty(st, ownerId, c.propertyId);
+        const msg = t("chain.inherited", { unit: String(owner?.name ?? ownerId),
+          prop: String(p?.name ?? c.propertyId), from: String(u?.name ?? c.unitId) });
+        logInfo(msg, [ownerId, c.propertyId]);
+        toastUndo(msg, st);
+      },
+    };
+  };
+  const flat = cands.map(entryOf);
+  addMenuPoint.x = clientX;
+  addMenuPoint.y = clientY;
+  showAddMenu({
+    title: t("chain.inheritTitle"),
+    context: String(owner?.name ?? ownerId),
+    placeholder: t("link.q"),
+    linked: [],
+    recent: [],
+    categories: [],
+    existing: {
+      header: t("chain.inheritNote"),
+      groups: [
+        { label: t("chain.sameNameGroup"), entries: flat.filter((_, i) => cands[i].sameName) },
+        { label: t("chain.otherGroup"), entries: flat.filter((_, i) => !cands[i].sameName) },
+      ],
+      perGroup: EXISTING_PER_GROUP,
+      more: (n) => t("link.more", { n }),
+      none: t("chain.inheritNone"),
+    },
+    extra: [],
+    searchable: flat,
+    matches: (e, q) => [e.label, e.description ?? ""].some((x) => x.toLowerCase().includes(q.trim().toLowerCase())),
+    count: t("link.count", { n: flat.length }),
+    noResults: t("add.noResults"),
+    keysHint: t("add.keys"),
+  }, clientX, clientY);
 }
 
 /** COLLEGARE · «Collega a un esistente…»: the same list, alone, with its search. */

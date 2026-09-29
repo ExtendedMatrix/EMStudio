@@ -620,18 +620,31 @@ export function applyOp(section: Section, op: CrdtOp): OpResult {
       target: op.target,
     };
     if (!edge.id) edge.id = `${edge.source}__${edge.edge_type}__${edge.target}`;
+    const declared = declaredEdgeAttributes(op.attributes);
     const triple = `${edge.source}|${edge.edge_type}|${edge.target}`;
     for (const existing of edges) {
       if (`${existing.source}|${existing.edge_type}|${existing.target}` !== triple) continue;
-      const attrs = (existing.attributes ?? {}) as Record<string, unknown>;
+      const attrs = ((existing.attributes ??= {}) as Record<string, unknown>);
+      let learned = mergeDeclared(attrs, declared);
+      // the relation was created by its OLDEST add, whichever arrives first:
+      // without this two adds converge only in one order
+      const born = clockOf(attrs.created_at as string | undefined, attrs.created_by as string | undefined);
+      if (isStamped(clock) && (!isStamped(born) || clockOrder(clock, born) < 0)) {
+        Object.assign(attrs, { created_at: clock.ts, created_by: clock.by });
+        learned = true;
+      }
       const mark = (attrs[REMOVED_KEY] ?? {}) as Clock;
       if (isStamped(mark) && clockOrder(clock, mark) > 0) {
         delete attrs[REMOVED_KEY];
         return { applied: true, reason: "resurrected", fields: [] };
       }
-      return { applied: false, reason: "idempotent", fields: [] };
+      if (!Object.keys(attrs).length) delete existing.attributes;
+      return learned ? { applied: true, reason: "declared", fields: [] }
+                     : { applied: false, reason: "idempotent", fields: [] };
     }
-    if (isStamped(clock)) edge.attributes = { created_at: clock.ts, created_by: clock.by };
+    const attrs: Record<string, unknown> = { ...declared };
+    if (isStamped(clock)) Object.assign(attrs, { created_at: clock.ts, created_by: clock.by });
+    if (Object.keys(attrs).length) edge.attributes = attrs;
     edges.push(edge);
     return { applied: true, reason: "added", fields: [] };
   }
@@ -651,6 +664,38 @@ export function applyOp(section: Section, op: CrdtOp): OpResult {
     return { applied: true, reason: "removed", fields: [] };
   }
   return { applied: false, reason: "no such relation", fields: [] };
+}
+
+/**
+ * CATENA · the attributes an `add_edge` DECLARES about the relation — today
+ * `inherited: true` on an heir's `has_property` (connections 1.6.23). The
+ * bookkeeping keys are the clock's, never the op's: `created_at`/`created_by`
+ * come from the op's clock and `removed` from a `remove_edge`, so an op that
+ * carried them would be forging a stamp. Same rule in s3dgraphy `crdt.py`.
+ */
+const EDGE_CLOCK_KEYS = new Set([REMOVED_KEY, "created_at", "created_by"]);
+function declaredEdgeAttributes(raw: unknown): Record<string, unknown> {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
+  const out: Record<string, unknown> = {};
+  for (const k of Object.keys(raw as Record<string, unknown>).sort()) {
+    if (!EDGE_CLOCK_KEYS.has(k)) out[k] = (raw as Record<string, unknown>)[k];
+  }
+  return out;
+}
+/**
+ * Fold declarations into an edge that already exists. Commutative, so two
+ * adds of one relation converge in any order: a key nobody declared is taken,
+ * and two different values of one key settle on the greater JSON (a rule with no
+ * clock in it, because a declaration is not an edit of a field). True when the
+ * edge learned something.
+ */
+function mergeDeclared(attrs: Record<string, unknown>, declared: Record<string, unknown>): boolean {
+  let learned = false;
+  for (const [k, v] of Object.entries(declared)) {
+    if (!(k in attrs)) { attrs[k] = v; learned = true; continue; }
+    if (JSON.stringify(v) > JSON.stringify(attrs[k])) { attrs[k] = v; learned = true; }
+  }
+  return learned;
 }
 
 export function applyOps(section: Section, ops: CrdtOp[]): OpResult[] {

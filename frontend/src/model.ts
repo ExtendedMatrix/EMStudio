@@ -1497,13 +1497,22 @@ export class DocumentStore {
     }
   }
 
-  addEdge(source: string, target: string, edgeType: string): EmEdge {
+  /**
+   * `attributes` are DECLARED attributes of the relation — today one:
+   * `inherited: true` on the `has_property` of an heir (connections 1.6.23). They
+   * travel in the op (`add_edge` carries them, crdt.ts and s3dgraphy crdt.py
+   * alike), so a declaration made live reaches the other side as a declaration.
+   */
+  addEdge(source: string, target: string, edgeType: string,
+          attributes?: Record<string, unknown>): EmEdge {
     this.checkpoint();
     const ids = new Set(this.doc.graph.edges.map((e) => e.id));
     let id = `${source}__${edgeType}__${target}`;
     let i = 2;
     while (ids.has(id)) id = `${source}__${edgeType}__${target}__${i++}`;
-    const edge: EmEdge = { id, source, target, edge_type: edgeType };
+    const edge: EmEdge = { id, source, target, edge_type: edgeType,
+                           ...(attributes && Object.keys(attributes).length
+                             ? { attributes: { ...attributes } } : {}) };
     this.doc.graph.edges.push(edge);
     this.emit();
     this.emitOp({ op: "add_edge", edge });

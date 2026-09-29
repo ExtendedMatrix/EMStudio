@@ -221,6 +221,26 @@ const digest = (s) => K.contentDigest({ graphs: { [s.graph_id]: s },
      "…and the reverse order lands there too");
 }
 
+{
+  // CATENA · the declared attributes of an add_edge (an heir's `inherited`):
+  // the SAME fixture as s3Dgraphy/tests/fixtures/crdt-parity-edge-attrs.json
+  const fixture = JSON.parse(readFileSync(
+    new URL("../testdata/crdt-parity-edge-attrs.json", import.meta.url), "utf8"));
+  const s = structuredClone(fixture.section);
+  C.applyOps(s, fixture.ops);
+  const byId = Object.fromEntries(s.edges.map((e) => [e.id, e]));
+  eq(byId["USV7__has_property__P1"].attributes.inherited, true,
+     "an add_edge carries `inherited` to the other side");
+  eq(byId["US5__has_property__P1"].attributes,
+     { created_at: "2026-08-13T10:00:00Z", created_by: "0000-0002-1825-0097" },
+     "…and the clock keys an op sends (created_at, removed) are not the op's to set");
+  eq(digest(s), fixture.expected_digest,
+     "declared edge attributes land on the digest s3Dgraphy computes");
+  const reversed = structuredClone(fixture.section);
+  C.applyOps(reversed, [...fixture.ops].reverse());
+  eq(digest(reversed), fixture.expected_digest, "…in either order");
+}
+
 // ── the WHOLE `data` map travels, not half of it ─────────────────────────────
 //
 // The bug this guards against, measured live: a rights edit changed a node's

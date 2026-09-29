@@ -165,8 +165,13 @@ export function opsForLocalChange(
   }
   if (local.op === "add_edge" && local.edge) {
     const e = local.edge as Record<string, unknown>;
+    // the relation's DECLARED attributes travel (an heir's `inherited`); the
+    // clock keys are the relay's to stamp, and crdt drops them if sent
+    const attrs = { ...((e.attributes ?? {}) as Record<string, unknown>) };
+    for (const k of ["created_at", "created_by", "removed"]) delete attrs[k];
     return [{ op: "add_edge", id: String(e.id ?? ""), source: e.source,
-              target: e.target, edge_type: e.edge_type }];
+              target: e.target, edge_type: e.edge_type,
+              ...(Object.keys(attrs).length ? { attributes: attrs } : {}) }];
   }
   if (local.op === "delete_edge" && local.edge) {
     const e = local.edge as Record<string, unknown>;

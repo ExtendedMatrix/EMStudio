@@ -93,34 +93,108 @@ function firstFree(used: Set<number>): number {
   return i;
 }
 
+/** The edge that puts an annotation region on its image (P106i). */
+export const IS_ON_RESOURCE = "is_on_resource";
+/** The edge from a document to the file it is made of (P67). */
+export const HAS_LINKED_RESOURCE = "has_linked_resource";
+
+/** What an extractor reads FROM, as the name needs it. */
+export interface ExtractorSource {
+  /** the node the name derives from: a document, or a unit */
+  id: string;
+  name: string;
+  kind: "document" | "unit";
+  /** set when the reading goes through an annotation region of that document */
+  regionId?: string;
+}
+
 /**
- * The document an extractor extracts from, via `extracted_from`.
+ * The document a REGION is on: its `is_on_resource` target (or `data.resource_id`)
+ * when that is a document, else the document that `has_linked_resource` the
+ * image file. Null when the region is on a bare file nobody promoted.
+ */
+function documentOfRegion(
+  doc: NamingDoc,
+  regionId: string,
+  byId: Map<string, NamingDoc["graph"]["nodes"][number]>,
+): { id: string; name: string } | null {
+  const region = byId.get(regionId) as { data?: Record<string, unknown> } | undefined;
+  const onIds = (doc.graph.edges ?? [])
+    .filter((e) => e.edge_type === IS_ON_RESOURCE && e.source === regionId)
+    .map((e) => e.target);
+  const rid = region?.data?.resource_id;
+  if (typeof rid === "string" && !onIds.includes(rid)) onIds.push(rid);
+  for (const on of onIds) {
+    const t = byId.get(on);
+    if (t?.node_type === "document") return { id: t.id, name: nameOf(t) };
+    for (const e of doc.graph.edges ?? []) {
+      if (e.edge_type !== HAS_LINKED_RESOURCE || e.target !== on) continue;
+      const d = byId.get(e.source);
+      if (d?.node_type === "document") return { id: d.id, name: nameOf(d) };
+    }
+  }
+  return null;
+}
+
+/**
+ * What an extractor extracts FROM, via `extracted_from` — the node its name
+ * derives from.
  *
- * When an extractor points at SEVERAL documents the first edge in document order
+ * Connections 1.6.24 lists three kinds of target, and each names the extractor:
+ *   · a DOCUMENT — `D.3` → `D.3.<n>`;
+ *   · an ANNOTATION REGION — the traced part of an image: the name comes from
+ *     the DOCUMENT the region is on (`D.3.<n>`, the reading is still "the n-th of
+ *     D.3"); a region on an unpromoted file names nothing, and the extractor
+ *     stays `Temp<n>`;
+ *   · a STRATIGRAPHIC UNIT (since 1.6.24, a property read off another unit) —
+ *     `USM101` → `USM101.<n>`, the same rule with the unit's name.
+ * The datamodel admits nothing else as a target, so any other target type is
+ * read as a unit: the socket check (`issues`, rule `datamodel`) is where a wrong
+ * edge is reported, not the name.
+ *
+ * When an extractor points at SEVERAL sources the first edge in document order
  * wins, deterministically. That is a legal graph (an extraction can cite more
  * than one source) and the name can only carry one, so the rule is stated rather
  * than left to chance.
+ */
+export function sourceOfExtractor(doc: NamingDoc, extractorId: string): ExtractorSource | null {
+  const byId = new Map(doc.graph.nodes.map((n) => [n.id, n]));
+  for (const e of doc.graph.edges ?? []) {
+    if (e.edge_type !== EXTRACTED_FROM || e.source !== extractorId) continue;
+    const target = byId.get(e.target);
+    if (!target) continue;
+    if (target.node_type === "document")
+      return { id: target.id, name: nameOf(target), kind: "document" };
+    if (target.node_type === "annotation_region") {
+      const d = documentOfRegion(doc, target.id, byId);
+      if (d) return { ...d, kind: "document", regionId: target.id };
+      continue;
+    }
+    return { id: target.id, name: nameOf(target), kind: "unit" };
+  }
+  return null;
+}
+
+/**
+ * The document (or, since connections 1.6.24, the unit) an extractor extracts
+ * from — `sourceOfExtractor` without the kind. Kept under its old name: it is
+ * the question every caller of NAME1 asks.
  */
 export function documentOfExtractor(
   doc: NamingDoc,
   extractorId: string,
 ): { id: string; name: string } | null {
-  const byId = new Map(doc.graph.nodes.map((n) => [n.id, n]));
-  for (const e of doc.graph.edges ?? []) {
-    if (e.edge_type !== EXTRACTED_FROM || e.source !== extractorId) continue;
-    const target = byId.get(e.target);
-    if (target?.node_type === "document") {
-      return { id: target.id, name: nameOf(target) };
-    }
-  }
-  return null;
+  const s = sourceOfExtractor(doc, extractorId);
+  return s ? { id: s.id, name: s.name } : null;
 }
 
 /** Extractor ids attached to a given document id. */
 export function extractorsOfDocument(doc: NamingDoc, documentId: string): string[] {
   const out: string[] = [];
   for (const e of doc.graph.edges ?? []) {
-    if (e.edge_type === EXTRACTED_FROM && e.target === documentId) out.push(e.source);
+    if (e.edge_type !== EXTRACTED_FROM || out.includes(e.source)) continue;
+    if (e.target === documentId || sourceOfExtractor(doc, e.source)?.id === documentId)
+      out.push(e.source);
   }
   return out;
 }
