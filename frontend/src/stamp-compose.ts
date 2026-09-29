@@ -75,6 +75,15 @@ export interface Draft {
    *  che appartengono all'EVENTO e non si ripetono su quattrocento file */
   campaignMetadata: Record<string, string>;
   kind: string;
+  /** AUDIT N3 · the CAPTURE an origin was (photo, laser scan, survey…), from the
+   *  `input` axis of `dtc_kinds`, sent AS the act's kind. Provisional: s3Dgraphy's
+   *  acquisition accepts only the `acquisition` axis, so the bridge carries a
+   *  capture as `how.acquisition.capture` over the library's default acquisition
+   *  until the datamodel gives the acquisition a capture axis (the night's
+   *  report asks for it). */
+  capture: string;
+  /** AUDIT N3 · why the form opened on this road — said under the question */
+  why: string;
   technique: string;
   parameters: Record<string, unknown>;
   software: Software[];
@@ -101,6 +110,8 @@ export function newDraft(outputs: DraftOutput[]): Draft {
     campaign: "",
     campaignMetadata: {},
     kind: "",
+    capture: "",
+    why: "",
     technique: "",
     parameters: {},
     software: [],
@@ -119,41 +130,51 @@ export function newDraft(outputs: DraftOutput[]): Draft {
  *  Misurato da `check-stamps.mjs` contro i gestori veri dell'interfaccia: se un
  *  giorno qualcuno accorciasse la strada dell'origine, la prova fallirebbe
  *  prima che il difetto arrivi a un utente. */
-export const gestures = {
-  /** clic sul genitore nell'elenco dei file già timbrati. Il modo «viene da
-   *  qualcosa» è già quello attivo, quindi non costa niente sceglierlo. */
-  nameAParent: 1,
-  /** clic su «È un'origine» · spunta sulla dichiarazione · nome della campagna */
-  declareAnOrigin: 3,
-} as const;
-
-/** Perché questa bozza non si può ancora timbrare, o `null` se si può.
+/**
+ * AUDIT N3 · THE STAMP IN TWO QUESTIONS (scrivania v10, E.D. 8 ott 2026).
  *
- *  Una frase e non un booleano: un bottone spento senza una ragione è un vicolo
- *  cieco, e la ragione qui è sempre una cosa che una persona può fare.
+ * First «where does it come from?» — an ORIGIN (you produced it: in the field,
+ * in the lab, from an archive) or OTHER FILES (a process). Then only the fields
+ * of that case. The road is not a default that costs gestures to leave any more
+ * (DTCEMS2 counted 1 against 3): it is decided FROM THE DATA — «comes from»
+ * only when stamped files that can be its inputs are there — and the form says
+ * why under the question. An origin is not the easy road because the form
+ * cannot offer another one: with no stamped file there is no input to name.
+ *
+ * The required fields, per road, in the order the form shows them — the first
+ * missing one is where «Timbra» puts the focus.
  */
-export function readyToStamp(draft: Draft): string | null {
-  if (!draft.outputs.length) return "no output selected";
-  if (!draft.kind) return "the act needs a kind, from the controlled vocabulary";
-  if (!draft.at) return "the act needs its date — the date of the act, not today's";
-  if (draft.origin) {
-    if (!draft.originDeclared)
-      return "declare explicitly that these bytes are born here";
-    if (!draft.campaign.trim())
-      return "name the acquisition campaign: an origin with no campaign is a bare assertion";
-    return null;
-  }
-  if (!draft.inputs.length)
-    // È il caso che il formato distingue e che l'interfaccia non deve poter
-    // confondere: senza ingressi e senza dichiarazione d'origine, un timbro
-    // direbbe «non so come è stato fatto» spacciandolo per «nato qui».
-    return "name at least one stamped input, or say this is an origin";
-  return null;
+export type StampField = "kind" | "inputs" | "software" | "operator" | "at";
+
+export function requiredFields(draft: Draft): StampField[] {
+  return draft.origin
+    ? ["kind", "operator", "at"]
+    : ["kind", "inputs", "software", "operator", "at"];
 }
 
-/** L'asse del vocabolario da cui pescare `dtc_kind`: `acquisition` per
- *  un'origine, `process` per un passo derivato. Due assi diversi perché sono
- *  due specie di evento, e il vocabolario li tiene separati da sempre. */
+/** The fields still missing, in the form's order. */
+export function missingFields(draft: Draft): StampField[] {
+  return requiredFields(draft).filter((f) => {
+    switch (f) {
+      case "kind": return !draft.kind;
+      case "inputs": return !draft.inputs.length;
+      case "software": return !draft.software.some((s) => s.name.trim());
+      case "operator": return !draft.operator.id.trim() && !draft.operator.label.trim();
+      case "at": return !draft.at.trim();
+    }
+  });
+}
+
+export function readyToStamp(draft: Draft): string | null {
+  if (!draft.outputs.length) return "no output selected";
+  return missingFields(draft)[0] ?? null;
+}
+
+/** Which road to open on: «comes from» only when there is something to come from. */
+export function roadFor(stampedNearby: number): boolean {
+  return stampedNearby === 0;   // true = an origin
+}
+
 export function kindAxis(draft: Draft): "acquisition" | "process" {
   return draft.origin ? "acquisition" : "process";
 }
@@ -255,7 +276,7 @@ export async function emitDraft(
         ? { name: draft.campaign.trim(), metadata: draft.campaignMetadata }
         : undefined,
     },
-    operator: draft.operator.id ? draft.operator : undefined,
+    operator: draft.operator.id || draft.operator.label ? draft.operator : undefined,
     registry,
     write: true,
   };

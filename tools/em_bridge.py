@@ -938,6 +938,19 @@ def make_handler(api):
             origin = bool(act.get("origin"))
             axis = "acquisition" if origin else "process"
             allowed = list(vocab.get(axis) or ())
+            # AUDIT N3 · PROVISIONAL: an origin may name the CAPTURE it was
+            # (photo, laser scan, survey — the `input` axis). s3Dgraphy's
+            # acquisition takes only the `acquisition` axis as its dtc_kind, so
+            # the capture is carried as `how.acquisition.capture` and the act is
+            # the library's default acquisition, until the datamodel gives the
+            # acquisition a capture axis (asked in the night's report).
+            capture = None
+            if origin and kind in (vocab.get("input") or ()):
+                from s3dgraphy.dtc.ingest import DEFAULT_ACQUISITION_KIND
+                capture, kind = kind, DEFAULT_ACQUISITION_KIND
+                acq_meta = dict((act.get("acquisition") or {}).get("metadata") or {})
+                acq_meta["capture"] = capture
+                act = {**act, "acquisition": {**(act.get("acquisition") or {}), "metadata": acq_meta}}
             if kind not in allowed:
                 self._fail(400,
                            f"dtc_kind {kind!r} is not in the {axis} vocabulary "
@@ -1122,6 +1135,16 @@ def make_handler(api):
                     continue
                 clean = {k: v for k, v in stamp.items() if not str(k).startswith("_")}
                 notes = list(stamp.get("_notes") or [])
+                # AUDIT N3 · an operator known BY NAME only (the form takes «a
+                # name or an ORCID»): no author node can carry it without an id
+                # (`_author_of` would fall back to the node id as a label), so
+                # the name is written where the format puts it, `by.operator`,
+                # and nothing is invented for the id. DECLARED, like the act's
+                # fields above: the clean door is `api` carrying a label.
+                if label and not orcid:
+                    by = clean.setdefault("by", {})
+                    if isinstance(by, dict) and not by.get("operator"):
+                        by["operator"] = {"label": label}
                 if stamp_path is None:
                     notes.append(
                         "emitted and not written: these bytes have no path on "

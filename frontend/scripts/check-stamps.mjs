@@ -456,78 +456,48 @@ prova("un timbro senza byte NON indovina la causa", () => {
 
 const C = await carica("stamp-compose.ts");
 
-console.log("\n· A2 — l'origine non è la via comoda");
+console.log("\n· N3 — il timbro in due domande (sostituisce A2, E.D. 8 ott 2026)");
 
 /**
- * I GESTI, CONTATI SUL PREDICATO VERO e non sulla costante che li dichiara.
- *
- * Si parte da una bozza fresca con i soli campi dell'atto — quelli che le due
- * strade pagano uguale — e si contano le mutazioni necessarie perché
- * `readyToStamp` smetta di rifiutare. Contare così misura il DISEGNO: se domani
- * qualcuno togliesse una condizione all'origine, questo numero scende e la
- * prova cade, mentre la costante continuerebbe a dire 3.
+ * DTCEMS2 contava i GESTI: «viene da» acceso all'apertura (1 gesto), l'origine a
+ * tre (clic, spunta, campagna), perché la via comoda non fosse l'origine finta.
+ * La scrivania v10 (AUDIT N3) cambia il disegno e questa sezione lo misura: la
+ * strada si decide DAI DATI — «viene da altri file» solo se ci sono file timbrati
+ * che possono esserne l'ingresso — e ogni strada chiede i suoi campi. L'argine
+ * contro l'origine finta non è più un costo in clic: è che, dove un ingresso
+ * esiste, il modulo apre su «viene da», e un processo senza ingresso non timbra.
  */
-function gestiPerTimbrare(strada) {
-  const draft = C.newDraft([{ path: "/p/x.glb", name: "x.glb", size: 1, mtime: 1 }]);
-  draft.kind = strada === "origine" ? "local_import" : "transformation";
-  draft.at = "2026-03-14T09:00:00Z";
-  const passi = strada === "origine"
-    ? [() => { draft.origin = true; },
-       () => { draft.originDeclared = true; },
-       () => { draft.campaign = "Volo 2026-03"; }]
-    : [() => { draft.inputs.push({ resource_id: "res:a", digest: "sha256:aa",
-                                   label: "a" }); }];
-  let n = 0;
-  for (const passo of passi) {
-    if (C.readyToStamp(draft) === null) return n;   // bastava di meno
-    passo(); n++;
-  }
-  return C.readyToStamp(draft) === null ? n : Infinity;
-}
-
-prova("nominare un genitore costa 1 gesto, dichiarare un'origine ne costa 3", () => {
-  const genitore = gestiPerTimbrare("genitore");
-  const origine = gestiPerTimbrare("origine");
-  console.log(`      genitore: ${genitore} · origine: ${origine}`);
-  assert.equal(genitore, 1);
-  assert.equal(origine, 3);
-  assert.ok(origine >= genitore + 2,
-    "se dichiarare un'origine non costa sensibilmente di più, in una settimana " +
-    "è tutto un'origine finta e il timbro smette di dire qualcosa");
-  // …e i due numeri sono quelli che il modulo DICHIARA: una costante che
-  // mentisse sul proprio disegno sarebbe peggio di nessuna costante
-  assert.equal(C.gestures.nameAParent, genitore);
-  assert.equal(C.gestures.declareAnOrigin, origine);
+prova("la strada si decide dai dati: origine solo se non c'è niente da cui venire", () => {
+  assert.equal(C.roadFor(0), true, "nessun file timbrato accanto → origine");
+  assert.equal(C.roadFor(3), false, "file timbrati accanto → viene da altri file");
 });
 
-prova("IL CONTROESEMPIO: un'origine senza condizioni in più fa cadere la misura", () => {
-  // Deliberato: il predicato che qualcuno scriverebbe «per semplificare».
-  const rilassato = (draft) => {
-    if (!draft.outputs.length) return "no output";
-    if (!draft.kind) return "kind";
-    if (!draft.at) return "at";
-    if (draft.origin) return null;              // ← la scorciatoia
-    if (!draft.inputs.length) return "inputs";
-    return null;
-  };
-  const draft = C.newDraft([{ path: "/p/x", name: "x", size: 1, mtime: 1 }]);
-  draft.kind = "local_import"; draft.at = "2026-01-01T00:00:00Z";
-  let n = 0;
-  for (const passo of [() => { draft.origin = true; },
-                       () => { draft.originDeclared = true; },
-                       () => { draft.campaign = "c"; }]) {
-    if (rilassato(draft) === null) break;
-    passo(); n++;
-  }
-  assert.equal(n, 1, "con quel predicato l'origine costerebbe UN gesto");
-  assert.ok(!(n >= C.gestures.nameAParent + 2),
-    "…e la prova qui sopra deve cadere su un disegno così");
+prova("ogni strada chiede i suoi campi, nell'ordine del modulo", () => {
+  const d = C.newDraft([{ path: "/p/x.glb", name: "x.glb", size: 1, mtime: 1 }]);
+  d.origin = true;
+  assert.deepEqual(C.requiredFields(d), ["kind", "operator", "at"]);
+  d.origin = false;
+  assert.deepEqual(C.requiredFields(d), ["kind", "inputs", "software", "operator", "at"]);
 });
 
-prova("il modo ATTIVO all'apertura è «viene da qualcosa»", () => {
-  // È la riga che rende la via comoda quella giusta: scegliere «viene da» non
-  // costa un clic perché è già scelto.
+prova("un processo senza ingresso non timbra, e dice quale campo manca per primo", () => {
+  const d = C.newDraft([{ path: "/p/x.glb", name: "x.glb", size: 1, mtime: 1 }]);
+  d.kind = "k"; d.at = "2026-03-14"; d.operator = { id: "", label: "M. Rossi" };
+  d.software = [{ name: "Metashape" }];
+  assert.equal(C.readyToStamp(d), "inputs");
+  d.inputs.push({ resource_id: "res:a", digest: "sha256:aa", label: "a" });
+  assert.equal(C.readyToStamp(d), null);
+  const o = C.newDraft([{ path: "/p/y.jpg", name: "y.jpg", size: 1, mtime: 1 }]);
+  o.origin = true;
+  assert.equal(C.readyToStamp(o), "kind", "un'origine senza tipo non timbra");
+  o.kind = "k"; o.at = "2026-03-14";
+  assert.equal(C.readyToStamp(o), "operator", "…né senza operatore");
+});
+
+prova("il modulo puro nasce «viene da»: la strada la sceglie chi lo apre, dai dati", () => {
   assert.equal(C.newDraft([]).origin, false);
+  assert.ok(codice("main.ts").includes("stampDraft.origin = roadFor(stamped)"),
+    "openDraft decide la strada da quanti file timbrati ci sono accanto");
 });
 
 console.log("\n· A6 — quello che non deve succedere");
@@ -538,7 +508,7 @@ prova("la data dell'atto NON è now() per difetto", () => {
   const src = codice("main.ts");
   // …e «oggi» esiste come GESTO, con la sua spiegazione
   assert.ok(src.includes('dataset.field = "today"'));
-  assert.ok(codice("i18n.ts").includes("compose.todayHint"));
+  assert.ok(codice("i18n.ts").includes("stamp2.today"));
 });
 
 prova("il vocabolario dtc_kind non si allarga dall'interfaccia", () => {
@@ -570,11 +540,13 @@ console.log("\n· A3 — Stamp, mai Sign");
  *  guarda i valori risolti e non il file: un valore lo si può chiedere solo se
  *  si sa quale chiedere. */
 const CHIAVI_COMPORRE = [
-  "compose.head", "compose.question", "compose.derived", "compose.derivedHint",
-  "compose.origin", "compose.originHint", "compose.inputs", "compose.noStamped",
-  "compose.originDeclare", "compose.campaign", "compose.kind", "compose.technique",
-  "compose.parameters", "compose.software", "compose.version", "compose.commit",
-  "compose.operator", "compose.at", "compose.today", "compose.todayHint",
+  "compose.head", "stamp2.question", "stamp2.origin", "stamp2.originSub",
+  "stamp2.derived", "stamp2.derivedSub", "stamp2.whyOrigin", "stamp2.whyDerived",
+  "stamp2.kind", "stamp2.captures", "stamp2.acquisitions", "stamp2.processes",
+  "stamp2.instrument", "stamp2.inputs", "stamp2.noInputs", "compose.software",
+  "compose.parameters", "compose.commit", "stamp2.operator", "stamp2.date",
+  "stamp2.today", "stamp2.description", "stamp2.stamp", "stamp2.where",
+  "stamp2.errNeeded", "stamp2.errInputs",
   "compose.stamping", "compose.cancel", "compose.open", "compose.openFolder",
   "compose.erratum", "compose.fromThis", "compose.fromThisHint",
 ];

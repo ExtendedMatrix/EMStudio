@@ -494,7 +494,7 @@ import { hintsPathFor, readHints, recordFound, setHintsBridgeResolver } from "./
 // da s3Dgraphy attraverso il bridge: `stamp-compose.ts` non costruisce mai un
 // timbro, lo chiede.
 import {
-  emitDraft, kindAxis, newDraft, outputFrom, readyToStamp, retitleStamp,
+  emitDraft, missingFields, newDraft, outputFrom, requiredFields, retitleStamp, roadFor,
   setComposeBridgeResolver, type Draft, type DraftInput,
 } from "./stamp-compose";
 import { adaptDraft } from "./views/stamps";
@@ -17436,7 +17436,7 @@ function renderStorageInto(host: StorageHost): void {
         b.className = "primary";
         b.dataset.action = "compose-group";
         b.textContent = t("compose.openGroup", { n: String(picked.length) });
-        b.onclick = () => openDraft(picked);
+        b.onclick = () => openDraft(picked, listing.entries);
         const clear = document.createElement("button");
         clear.className = "ghost";
         clear.textContent = t("compose.clearPick");
@@ -17475,8 +17475,18 @@ function renderStorageInto(host: StorageHost): void {
 // la stessa macchina di scene di tutto il resto — comporre e leggere devono
 // somigliarsi, perché sono la stessa cosa vista prima e dopo.
 
-function openDraft(outputs: FsEntry[]): void {
+function openDraft(outputs: FsEntry[], nearby: FsEntry[] = []): void {
   stampDraft = newDraft(outputs.map(outputFrom));
+  // AUDIT N3 · THE ROAD FROM THE DATA: «viene da altri file» only when stamped
+  // files that can be its inputs are there, and the form says why
+  const stamped = nearby.filter((e) => e.type === "file" && !isStampPath(e.path)
+    && !outputs.some((o) => o.path === e.path)
+    && nearby.some((x) => x.path === stampPathFor(e.path))).length;
+  stampDraft.origin = roadFor(stamped);
+  stampDraft.originDeclared = stampDraft.origin;
+  stampDraft.why = stamped
+    ? t("stamp2.whyDerived", { n: String(stamped) })
+    : t("stamp2.whyOrigin");
   // L'OPERATORE È CHI STA LAVORANDO, e non un default inventato:
   // `currentIdentity()` è l'identità che questa sessione ha dichiarato
   // (`identity.ts`, claim-now/verify-later). Resta modificabile, e assente resta
@@ -17533,230 +17543,280 @@ function stampComposeBox(win: Win, entries: FsEntry[]): HTMLElement {
   const draft = stampDraft as Draft;
   const box = document.createElement("div");
   box.className = "stamp-compose";
+  box.dataset.road = draft.origin ? "origin" : "derived";
 
   const head = document.createElement("div");
   head.className = "stamp-compose-head";
   head.textContent = t("compose.head", { n: String(draft.outputs.length) });
   box.appendChild(head);
 
-  // ── 1 · LA DOMANDA ────────────────────────────────────────────────────────
+  // ── 1 · LA DOMANDA: «Da dove viene?» ─────────────────────────────────────
   const ask = document.createElement("div");
   ask.className = "stamp-compose-ask";
   const question = document.createElement("div");
   question.className = "stamp-compose-question";
-  question.textContent = t("compose.question");
+  question.textContent = t("stamp2.question");
   ask.appendChild(question);
   const modes = document.createElement("div");
   modes.className = "stamp-compose-modes";
-  const mode = (label: string, isOrigin: boolean, hint: string): void => {
+  const mode = (isOrigin: boolean): void => {
     const b = document.createElement("button");
-    b.className = "ghost" + (draft.origin === isOrigin ? " on" : "");
-    b.textContent = label;
-    b.title = hint;
+    b.type = "button";
+    b.className = "stamp-road" + (draft.origin === isOrigin ? " on" : "");
     b.dataset.mode = isOrigin ? "origin" : "derived";
+    b.setAttribute("aria-pressed", String(draft.origin === isOrigin));
+    const strong = document.createElement("b");
+    strong.textContent = t(isOrigin ? "stamp2.origin" : "stamp2.derived");
+    const sub = document.createElement("span");
+    sub.textContent = t(isOrigin ? "stamp2.originSub" : "stamp2.derivedSub");
+    b.append(strong, sub);
     b.onclick = () => {
+      if (draft.origin === isOrigin) return;
       draft.origin = isOrigin;
-      // cambiare strada azzera la dichiarazione: una spunta rimasta accesa da
-      // un giro precedente sarebbe un'origine dichiarata senza che nessuno
-      // l'abbia dichiarata adesso
-      draft.originDeclared = false;
+      draft.originDeclared = isOrigin;
       draft.kind = "";
+      draft.capture = "";
+      draft.why = "";
       renderStorage();
-      redrawNeighbourhood();
+      redrawDraftPicture();
     };
     modes.appendChild(b);
   };
-  mode(t("compose.derived"), false, t("compose.derivedHint"));
-  mode(t("compose.origin"), true, t("compose.originHint"));
+  mode(true);
+  mode(false);
   ask.appendChild(modes);
+  if (draft.why) {
+    const why = document.createElement("div");
+    why.className = "stamp-compose-why-road";
+    why.textContent = draft.why;
+    ask.appendChild(why);
+  }
   box.appendChild(ask);
 
-  // ── 2 · gli INGRESSI, oppure la dichiarazione d'origine ───────────────────
-  if (!draft.origin) {
+  // ── 2 · i campi DI QUEL CASO, e soltanto quelli ──────────────────────────
+  const fields = document.createElement("div");
+  fields.className = "stamp-compose-act";
+  box.appendChild(fields);
+  /** the error line under a field, written at blur and at «Timbra» */
+  const errOf = (key: string): HTMLElement => {
+    const e = document.createElement("span");
+    e.className = "stamp-err";
+    e.dataset.err = key;
+    return e;
+  };
+  const wrap = (label: string, control: HTMLElement, key: string | null,
+                opt = false, full = false): HTMLElement => {
+    const w = document.createElement("label");
+    w.className = "stamp-field" + (full ? " full" : "");
+    const span = document.createElement("span");
+    span.textContent = label;
+    if (opt) {
+      const o = document.createElement("span");
+      o.className = "stamp-opt";
+      o.textContent = ` · ${t("stamp2.optional")}`;
+      span.appendChild(o);
+    }
+    w.append(span, control);
+    if (key) w.appendChild(errOf(key));
+    return w;
+  };
+  /** a text field: the draft follows the keys, nothing is redrawn but the
+   *  draft's picture; the check runs at blur */
+  const text = (key: string, value: string, example: string,
+                onInput: (v: string) => void, type = "text"): HTMLInputElement => {
+    const input = document.createElement("input");
+    input.type = type;
+    input.value = value;
+    input.dataset.field = key;
+    // AN EXAMPLE IS AN EXAMPLE: grey, italic, «es. …» — never a value that
+    // looks entered (the commit «9555447», a date, an ORCID were read as data)
+    if (example) input.placeholder = t("stamp2.eg", { x: example });
+    input.oninput = () => { onInput(input.value); clearErr(box, key); };
+    input.onblur = () => checkField(box, key);
+    return input;
+  };
+
+  // Tipo — from the vocabulary; an origin offers the CAPTURES first
+  const select = document.createElement("select");
+  select.dataset.field = "kind";
+  const none = document.createElement("option");
+  none.value = "";
+  none.textContent = t("stamp2.pick");
+  select.appendChild(none);
+  const group = (label: string, items: Array<{ value: string; label: string }>): void => {
+    if (!items.length) return;
+    const g = document.createElement("optgroup");
+    g.label = label;
+    for (const it of items) {
+      const o = document.createElement("option");
+      o.value = it.value;
+      o.textContent = it.label;
+      g.appendChild(o);
+    }
+    select.appendChild(g);
+  };
+  if (draft.origin) {
+    group(t("stamp2.captures"), dtcKindsFor("input").map((k) => ({ value: `capture:${k.kind}`, label: k.label })));
+    group(t("stamp2.acquisitions"), dtcKindsFor("acquisition").map((k) => ({ value: `acq:${k.kind}`, label: k.label })));
+  } else {
+    group(t("stamp2.processes"), dtcKindsFor("process").map((k) => ({ value: `acq:${k.kind}`, label: k.label })));
+  }
+  select.value = draft.capture ? `capture:${draft.capture}` : draft.kind ? `acq:${draft.kind}` : "";
+  select.onchange = () => {
+    const [how, kind] = select.value.split(":");
+    // PROVISIONAL (see `Draft.capture`): a capture is an acquisition from the
+    // local disk that SAYS which capture it was
+    draft.capture = how === "capture" ? kind : "";
+    draft.kind = kind ?? "";
+    checkField(box, "kind");
+    redrawDraftPicture();
+  };
+  select.onblur = () => checkField(box, "kind");
+  fields.appendChild(wrap(t("stamp2.kind"), select, "kind"));
+
+  if (draft.origin) {
+    fields.appendChild(wrap(t("stamp2.instrument"),
+      text("instrument", draft.campaignMetadata.instrument ?? "", t("stamp2.instrumentEg"),
+           (v) => { if (v.trim()) draft.campaignMetadata.instrument = v; else delete draft.campaignMetadata.instrument; }),
+      null, true));
+  } else {
+    // Da quali file — the stamped files next to these, each a toggle
     const stamped = entries.filter((e) =>
       e.type === "file" && !isStampPath(e.path)
-      && entries.some((s) => s.path === stampPathFor(e.path)));
+      && !draft.outputs.some((o) => o.path === e.path)
+      && entries.some((x) => x.path === stampPathFor(e.path)));
     const list = document.createElement("div");
     list.className = "stamp-compose-inputs";
-    const label = document.createElement("div");
-    label.className = "stamp-compose-label";
-    label.textContent = t("compose.inputs");
-    list.appendChild(label);
+    list.dataset.field = "inputs";
+    list.tabIndex = -1;
     if (!stamped.length) {
-      const none = document.createElement("i");
-      none.className = "stamp-compose-none";
-      // UN INGRESSO DEVE ESSERE TIMBRATO: un figlio timbrato non può discendere
-      // da qualcosa che non ha un'identità dichiarata, e dirlo qui è meglio che
-      // lasciare scegliere e poi rifiutare.
-      none.textContent = t("compose.noStamped");
-      list.appendChild(none);
+      const nothing = document.createElement("i");
+      nothing.className = "stamp-compose-none";
+      nothing.textContent = t("stamp2.noInputs");
+      list.appendChild(nothing);
     }
     for (const entry of stamped) {
       const chosen = draft.inputs.some((i) => i.path === entry.path);
       const b = document.createElement("button");
+      b.type = "button";
       b.className = "ghost stamp-compose-input" + (chosen ? " on" : "");
       b.dataset.input = entry.path;
+      b.setAttribute("aria-pressed", String(chosen));
       b.textContent = entry.name;
       b.onclick = () => { void toggleInput(entry, chosen); };
       list.appendChild(b);
     }
-    box.appendChild(list);
-  } else {
-    const decl = document.createElement("div");
-    decl.className = "stamp-compose-origin";
-    const line = document.createElement("label");
-    const tick = document.createElement("input");
-    tick.type = "checkbox";
-    tick.checked = draft.originDeclared;
-    tick.dataset.declare = "origin";
-    tick.onchange = () => {
-      draft.originDeclared = tick.checked;
-      // la spunta fa comparire/sparire l'ostacolo, non la forma del modulo
-      refreshComposeFeet(tick);
+    fields.appendChild(wrap(t("stamp2.inputs"), list, "inputs", false, true));
+    const sw = draft.software[0] ?? { name: "", version: "", commit: "" };
+    const setSw = (patch: Partial<typeof sw>): void => {
+      Object.assign(sw, patch);
+      draft.software = sw.name ? [sw] : [];
     };
-    const words = document.createElement("span");
-    // LA FRASE È IL GESTO: non «conferma», ma quello che si sta affermando.
-    words.textContent = t("compose.originDeclare");
-    line.append(tick, words);
-    decl.appendChild(line);
-    decl.appendChild(field(t("compose.campaign"), draft.campaign, (v) => {
-      draft.campaign = v;
+    fields.appendChild(wrap(t("compose.software"),
+      text("software", [sw.name, sw.version].filter(Boolean).join(" "), t("stamp2.softwareEg"),
+           (v) => { const m = /^(.*?)\s+(v?\d[\w.\-]*)$/.exec(v.trim()); setSw(m ? { name: m[1], version: m[2] } : { name: v.trim(), version: "" }); }),
+      "software"));
+    fields.appendChild(wrap(t("compose.parameters"),
+      text("parameters", draft.parameters.note ? String(draft.parameters.note)
+             : Object.keys(draft.parameters).length ? JSON.stringify(draft.parameters) : "",
+           t("stamp2.parametersEg"),
+           (v) => {
+             // a JSON object stays one; words are a note — never an error mid-typing
+             try {
+               const parsed = JSON.parse(v);
+               draft.parameters = parsed && typeof parsed === "object" && !Array.isArray(parsed)
+                 ? parsed as Record<string, unknown> : { note: v };
+             } catch { draft.parameters = v.trim() ? { note: v.trim() } : {}; }
+           }),
+      null, true));
+    fields.appendChild(wrap(t("compose.commit"),
+      text("commit", sw.commit ?? "", t("stamp2.commitEg"), (v) => setSw({ commit: v.trim() })),
+      null, true));
+  }
+
+  // Operatore — from the signed identity only; a name or an ORCID
+  const orcidOf = (v: string): string | null => {
+    const m = /(\d{4}-\d{4}-\d{4}-\d{3}[\dX])/.exec(v);
+    return m ? m[1] : null;
+  };
+  fields.appendChild(wrap(t("stamp2.operator"),
+    text("operator", draft.operator.label || draft.operator.id, t("stamp2.operatorEg"), (v) => {
+      const iD = orcidOf(v);
+      draft.operator = iD ? { id: `https://orcid.org/${iD}`, label: v.replace(/https?:\/\/orcid\.org\//, "").replace(iD, "").trim() }
+                          : { id: "", label: v.trim() };
       redrawDraftPicture();
-    }, { placeholder: t("compose.campaignHint"), key: "campaign" }));
-    for (const key of ["camera", "lens", "folder"]) {
-      decl.appendChild(field(t(`compose.${key}`), draft.campaignMetadata[key] ?? "",
-        (v) => { draft.campaignMetadata[key] = v; }, { small: true }));
-    }
-    box.appendChild(decl);
-  }
+    }), "operator"));
 
-  // ── 3 · l'ATTO ───────────────────────────────────────────────────────────
-  const act = document.createElement("div");
-  act.className = "stamp-compose-act";
-
-  // il genere, DAL VOCABOLARIO e non da un elenco scritto qui
-  const kinds = dtcKindsFor(kindAxis(draft));
-  const select = document.createElement("select");
-  select.dataset.field = "kind";
-  const empty = document.createElement("option");
-  empty.value = ""; empty.textContent = t("compose.pickKind");
-  select.appendChild(empty);
-  for (const k of kinds) {
-    const o = document.createElement("option");
-    o.value = k.kind; o.textContent = k.label;
-    if (draft.kind === k.kind) o.selected = true;
-    select.appendChild(o);
-  }
-  select.onchange = () => {
-    draft.kind = select.value;
-    refreshComposeFeet(select);
-    redrawDraftPicture();
-  };
-  act.appendChild(labelled(t("compose.kind"), select));
-
-  act.appendChild(field(t("compose.technique"), draft.technique, (v) => {
-    draft.technique = v; redrawDraftPicture();
-  }, { placeholder: t("compose.techniqueHint"), key: "technique" }));
-
-  act.appendChild(field(t("compose.parameters"),
-    JSON.stringify(draft.parameters), (v) => {
-      try {
-        const parsed = JSON.parse(v || "{}");
-        draft.parameters = (parsed && typeof parsed === "object" && !Array.isArray(parsed))
-          ? parsed as Record<string, unknown> : {};
-      } catch {
-        // UN JSON A META' MENTRE SI DIGITA NON E' UN ERRORE: si tiene l'ultimo
-        // valore buono e non si urla. Il bottone Stamp resta comunque governato
-        // da `readyToStamp`, che guarda i campi che contano.
-      }
-    }, { placeholder: '{"target_faces": 50000}', key: "parameters" }));
-
-  // il software, col COMMIT: «EM Tools 1.6» non dice quale build
-  const sw = draft.software[0] ?? { name: "", version: "", commit: "" };
-  const swRow = document.createElement("div");
-  swRow.className = "stamp-compose-row";
-  const setSw = (patch: Partial<typeof sw>): void => {
-    Object.assign(sw, patch);
-    draft.software = sw.name ? [sw] : [];
-  };
-  swRow.appendChild(field(t("compose.software"), sw.name ?? "",
-    (v) => setSw({ name: v }), { small: true, key: "software" }));
-  swRow.appendChild(field(t("compose.version"), sw.version ?? "",
-    (v) => setSw({ version: v }), { small: true }));
-  swRow.appendChild(field(t("compose.commit"), sw.commit ?? "",
-    (v) => setSw({ commit: v }), { small: true, placeholder: "9555447" }));
-  act.appendChild(swRow);
-
-  act.appendChild(field(t("compose.operator"), draft.operator.id, (v) => {
-    draft.operator.id = v; redrawDraftPicture();
-  }, { placeholder: "https://orcid.org/0000-0002-…", key: "operator" }));
-
-  // ── la DATA DELL'ATTO ────────────────────────────────────────────────────
-  //
-  // Vuota all'apertura, e il bottone «oggi» è un GESTO. La data dell'atto non è
-  // `now()` per difetto: un atto avvenuto a marzo deve poterlo dire, e una data
-  // che il programma mette da sé è una data che nessuno ha visto.
-  // CATENA · the stamp's TITLE (one file) and DESCRIPTION (optional, the same
-  // for every file of a group): `self.label` / `self.description`, a courtesy
-  // outside the stamp's substance (dtcstamp 46b3b78)
-  const words = document.createElement("div");
-  words.className = "stamp-compose-row";
-  if (draft.outputs.length === 1)
-    words.appendChild(field(t("compose.title"), draft.title, (v) => { draft.title = v; },
-      { placeholder: draft.outputs[0]?.name ?? "", key: "title" }));
-  words.appendChild(field(t("compose.description"), draft.description, (v) => { draft.description = v; },
-    { placeholder: t("compose.descriptionPh"), key: "description" }));
-  act.appendChild(words);
-  const when = document.createElement("div");
-  when.className = "stamp-compose-row";
-  when.appendChild(field(t("compose.at"), draft.at, (v) => {
-    draft.at = v; redrawDraftPicture();
-  }, { placeholder: "2026-03-14T09:00:00Z", key: "at" }));
+  // Data — the date of the act, empty until somebody says it; «Oggi» is a gesture
+  const when = document.createElement("span");
+  when.className = "stamp-when";
+  const at = text("at", draft.at.slice(0, 10), "", (v) => { draft.at = v; redrawDraftPicture(); }, "date");
   const today = document.createElement("button");
+  today.type = "button";
   today.className = "ghost";
   today.dataset.field = "today";
-  today.textContent = t("compose.today");
-  today.title = t("compose.todayHint");
+  today.textContent = t("stamp2.today");
   today.onclick = () => {
-    draft.at = new Date().toISOString().replace(/\.\d{3}Z$/, "Z");
-    renderStorage();
-    redrawNeighbourhood();
+    draft.at = new Date().toISOString().slice(0, 10);
+    at.value = draft.at;
+    checkField(box, "at");
+    redrawDraftPicture();
   };
-  when.appendChild(today);
-  act.appendChild(when);
-  box.appendChild(act);
+  when.append(at, today);
+  fields.appendChild(wrap(t("stamp2.date"), when, "at"));
 
-  // ── 4 · STAMP ────────────────────────────────────────────────────────────
-  const why = readyToStamp(draft);
+  if (draft.outputs.length === 1)
+    fields.appendChild(wrap(t("compose.title"),
+      text("title", draft.title, draft.outputs[0]?.name ?? "", (v) => { draft.title = v; }), null, true));
+  fields.appendChild(wrap(t("stamp2.description"),
+    text("description", draft.description, t("stamp2.descriptionEg"), (v) => { draft.description = v; }),
+    null, true, true));
+
+  // ── 3 · TIMBRA ───────────────────────────────────────────────────────────
   const feet = document.createElement("div");
   feet.className = "stamp-compose-feet";
   const stampBtn = document.createElement("button");
+  stampBtn.type = "button";
   stampBtn.className = "primary";
   stampBtn.dataset.action = "stamp";
-  // «STAMP», MAI «SIGN». Non c'è una chiave, non c'è non ripudiabilità, e
-  // nessun terzo può dimostrare che quel timbro l'ha emesso proprio quella
-  // persona: c'è un'impronta e una dichiarazione. In ambito patrimoniale
-  // «firmato» promette cose precise, e la promessa la paga qualcun altro in una
-  // controversia.
-  stampBtn.textContent = stampEmitting
-    ? t("compose.stamping")
-    : t("compose.stamp", { n: String(draft.outputs.length) });
-  stampBtn.disabled = !!why || stampEmitting;
-  if (why) stampBtn.title = why;
-  stampBtn.onclick = () => { void doStamp(win); };
+  // «STAMP», MAI «SIGN»: c'è un'impronta e una dichiarazione, non una firma
+  stampBtn.textContent = stampEmitting ? t("compose.stamping") : t("stamp2.stamp");
+  stampBtn.disabled = stampEmitting;
+  stampBtn.onclick = () => {
+    // the check is next to each field, and the focus goes to the first gap
+    const missing = missingFields(draft);
+    for (const f of requiredFields(draft)) checkField(box, f);
+    if (missing.length) {
+      box.querySelector<HTMLElement>(`[data-field="${missing[0]}"]`)?.focus();
+      return;
+    }
+    void doStamp(win);
+  };
   const cancel = document.createElement("button");
+  cancel.type = "button";
   cancel.className = "ghost";
   cancel.textContent = t("compose.cancel");
   cancel.onclick = closeDraft;
-  feet.append(stampBtn, cancel);
-  if (why) {
-    const reason = document.createElement("i");
-    reason.className = "stamp-compose-why";
-    reason.textContent = why;
-    feet.appendChild(reason);
-  }
+  const note = document.createElement("span");
+  note.className = "stamp-compose-note";
+  note.textContent = t("stamp2.where");
+  feet.append(stampBtn, cancel, note);
   box.appendChild(feet);
   return box;
+}
+
+/** AUDIT N3 · the check of ONE field, written next to it */
+function checkField(form: HTMLElement, key: string): void {
+  const draft = stampDraft;
+  const line = form.querySelector<HTMLElement>(`[data-err="${key}"]`);
+  if (!draft || !line) return;
+  const missing = missingFields(draft).includes(key as never);
+  line.textContent = missing ? t(key === "inputs" ? "stamp2.errInputs" : "stamp2.errNeeded") : "";
+  form.querySelector(`[data-field="${key}"]`)?.setAttribute("aria-invalid", String(missing));
+}
+function clearErr(form: HTMLElement, key: string): void {
+  const line = form.querySelector<HTMLElement>(`[data-err="${key}"]`);
+  if (line?.textContent) checkField(form, key);
 }
 
 /**
@@ -17773,22 +17833,10 @@ function stampComposeBox(win: Win, entries: FsEntry[]): HTMLElement {
  * Quindi si riscrive il pezzo che cambia e nient'altro.
  */
 function refreshComposeFeet(from: HTMLElement): void {
-  const draft = stampDraft;
-  // AUDIT · THIS form's foot, not the first one on the page: with two Storage
-  // windows `document.querySelector` updated the other one
+  // AUDIT N3 · the foot no longer carries the reason: each field says its own
+  // (`checkField`), and «Timbra» takes the focus to the first gap
   const form = from.closest<HTMLElement>(".stamp-compose");
-  const btn = form?.querySelector<HTMLButtonElement>("button[data-action=stamp]");
-  if (!draft || !btn || !form) return;
-  const why = readyToStamp(draft);
-  btn.disabled = !!why || stampEmitting;
-  btn.title = why ?? "";
-  let reason = form.querySelector<HTMLElement>(".stamp-compose-why");
-  if (!reason && why) {
-    reason = document.createElement("i");
-    reason.className = "stamp-compose-why";
-    btn.parentElement?.appendChild(reason);
-  }
-  if (reason) reason.textContent = why ?? "";
+  if (form && stampDraft) for (const f of requiredFields(stampDraft)) clearErr(form, f);
 }
 
 /**
@@ -17906,7 +17954,7 @@ function composeButtons(entry: FsEntry, listing: FsListing): HTMLElement {
   one.className = "ghost";
   one.dataset.action = "compose-one";
   one.textContent = t("compose.open", { name: entry.name });
-  one.onclick = () => openDraft([entry]);
+  one.onclick = () => openDraft([entry], listing.entries);
   box.appendChild(one);
   box.appendChild(composeFolderButton(listing, true));
   return box;
@@ -17936,7 +17984,7 @@ function composeFolderButton(listing: FsListing, inline = false): HTMLElement {
   b.dataset.action = "compose-folder";
   b.textContent = t("compose.openFolder", { n: String(stampable.length) });
   b.disabled = !stampable.length;
-  b.onclick = () => openDraft(stampable);
+  b.onclick = () => openDraft(stampable, listing.entries);
   if (inline) return b;
   const box = document.createElement("div");
   box.className = "stamp-report-ask";
@@ -18116,8 +18164,11 @@ async function composeFromStamped(path: string, stamp: Stamp): Promise<void> {
     toast(t("compose.nothingToMake"));
     return;
   }
-  openDraft(stampable);
+  openDraft(stampable, listing.entries);
   if (stampDraft) {
+    stampDraft.origin = false;
+    stampDraft.originDeclared = false;
+    stampDraft.why = t("stamp2.whyFrom", { name: baseName(path) });
     stampDraft.inputs = [{
       resource_id: stamp.self.resource_id,
       digest: stamp.self.digest ?? "",

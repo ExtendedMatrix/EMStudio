@@ -479,6 +479,92 @@ test("3.filters", "attraversare un'altra finestra non chiude il pannello filtri"
   return { pass: open1 && r.open && r.x < insp.x - 100, detail: { open1, after: r } };
 });
 
+// ── PARTE 4 · il timbro, in due domande ─────────────────────────────────────
+import { readdirSync, rmSync } from "node:fs";
+/** the two folders start without stamps (the bridge's root is on this disk) */
+async function resetFolders() {
+  const root = await rootPath();
+  for (const f of ["vuota", "modelli"]) {
+    for (const n of readdirSync(`${root}/${f}`)) if (n.endsWith(".stamp.json")) rmSync(`${root}/${f}/${n}`);
+  }
+  return root;
+}
+const roadOf = (p) => p.evaluate(() => ({
+  road: document.querySelector(".stamp-compose")?.dataset.road ?? null,
+  pressed: document.querySelector('.stamp-road[aria-pressed="true"]')?.dataset.mode ?? null,
+  why: document.querySelector(".stamp-compose-why-road")?.textContent ?? "",
+  fields: [...document.querySelectorAll(".stamp-compose [data-field]")].map((e) => e.dataset.field),
+}));
+async function stampHere(p, kindLabel, { inputs = [], software = "", operator = "Mario Rossi" } = {}) {
+  const sel = p.locator('.stamp-compose select[data-field="kind"]');
+  const value = await sel.evaluate((s, lbl) => [...s.options].find((o) => o.textContent === lbl)?.value, kindLabel);
+  await sel.selectOption(value);
+  for (const name of inputs) {
+    await p.locator(".stamp-compose-input", { hasText: name }).click();
+    await p.waitForTimeout(900);
+  }
+  if (software) await p.fill('.stamp-compose input[data-field="software"]', software);
+  await p.fill('.stamp-compose input[data-field="operator"]', operator);
+  await p.click('.stamp-compose button[data-field="today"]');
+  await p.click('.stamp-compose button[data-action="stamp"]');
+  await p.waitForTimeout(2500);
+}
+test("4.origin", "una cartella senza timbri apre su «È un'origine», e dice perché", async () => {
+  await resetFolders();
+  const { p, ctx } = await open({ doc: "catena" });
+  await openStampFor(p, "vuota", "foto1.jpg");
+  const r = await roadOf(p);
+  await ctx.close();
+  return { pass: r.road === "origin" && r.pressed === "origin" && /origine|origin/i.test(r.why)
+    && !r.fields.includes("software") && !r.fields.includes("commit") && r.fields.includes("instrument"), detail: r };
+});
+test("4.examples", "gli esempi sono esempi: «es. …», e nessun valore finto nei campi", async () => {
+  const { p, ctx } = await open({ doc: "catena" });
+  await openStampFor(p, "vuota", "foto1.jpg");
+  const f = await p.evaluate(() => [...document.querySelectorAll(".stamp-compose input[type=text], .stamp-compose input[type=date]")]
+    .map((i) => ({ k: i.dataset.field, v: i.value, ph: i.placeholder })));
+  const kinds = await p.evaluate(() => [...document.querySelectorAll('.stamp-compose select[data-field="kind"] optgroup')].map((g) => g.label));
+  await ctx.close();
+  const bad = f.filter((x) => x.k !== "title" && (x.v || (x.ph && !/^(es\.|e\.g\.)/.test(x.ph))));
+  return { pass: !bad.length && kinds[0] === "Cattura" && kinds[1] === "Acquisizione", detail: { bad, kinds } };
+});
+test("4.focus", "con Tipo mancante «Timbra» mette il focus su Tipo, e l'errore sta accanto", async () => {
+  const { p, ctx } = await open({ doc: "catena" });
+  await openStampFor(p, "vuota", "foto1.jpg");
+  await p.click('.stamp-compose button[data-action="stamp"]');
+  await p.waitForTimeout(300);
+  const focus = await activeDesc(p);
+  const err = await p.evaluate(() => document.querySelector('.stamp-compose [data-err="kind"]')?.textContent ?? "");
+  await ctx.close();
+  return { pass: focus.includes("[kind]") && !!err, detail: { focus, err } };
+});
+test("4.sidecar", "origine timbrata, poi un modello in /modelli apre su «Viene da altri file»; i sidecar hanno kind e ingressi", async () => {
+  const root = await resetFolders();
+  const { p, ctx } = await open({ doc: "catena" });
+  await openStampFor(p, "modelli", "foto1.jpg");
+  const first = await roadOf(p);
+  await stampHere(p, "Photograph");
+  const photo = existsSync(`${root}/modelli/foto1.jpg.stamp.json`)
+    ? JSON.parse(readFileSync(`${root}/modelli/foto1.jpg.stamp.json`, "utf8")) : null;
+  await storageClick(p, "muro.gltf");
+  await p.click("button[data-action=compose-one]");
+  await p.waitForSelector(".stamp-compose");
+  const second = await roadOf(p);
+  await stampHere(p, "Photogrammetry", { inputs: ["foto1.jpg"], software: "Metashape 2.1" });
+  const mesh = existsSync(`${root}/modelli/muro.gltf.stamp.json`)
+    ? JSON.parse(readFileSync(`${root}/modelli/muro.gltf.stamp.json`, "utf8")) : null;
+  await ctx.close();
+  const kindOf = (st) => st?.how?.dtc_kind ?? null;
+  const from = mesh?.from ?? [];
+  return {
+    pass: first.road === "origin" && !!photo && !!kindOf(photo) && photo?.how?.acquisition?.capture === "photo"
+      && photo?.by?.operator?.label === "Mario Rossi"
+      && second.road === "derived" && !!mesh && kindOf(mesh) === "photogrammetry" && from.length === 1,
+    detail: { first: first.road, second: second.road, photoKind: kindOf(photo), capture: photo?.how?.acquisition ?? null, operator: photo?.by?.operator ?? null,
+              meshKind: kindOf(mesh), from: from.map((f) => f.resource_id ?? f) },
+  };
+});
+
 // ── run ─────────────────────────────────────────────────────────────────────
 const chosen = cases.filter((c) => !only.length || only.includes(c.id) || only.some((o) => c.id.startsWith(o + ".")));
 for (const c of chosen) {
