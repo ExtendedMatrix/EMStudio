@@ -376,3 +376,12 @@ export function signChapterAs(store: DocumentStore, narrativeId: string, chapter
   store.batch(() => setChapterAuthor(store, narrativeId, chapter, authorForIdentity(store, me)));
   return "signed";
 }
+
+/** NARRATIVE-DESK · «Firmo io» on the whole story: the identity becomes a
+ *  responsible author of the narrative (`has_author`), one undo step. */
+export function signNarrativeAs(store: DocumentStore, narrativeId: string,
+                                me: SignerIdentity | null): "needs-identity" | "signed" {
+  if (!me) return "needs-identity";
+  store.batch(() => addNarrativeAuthor(store, narrativeId, authorForIdentity(store, me)));
+  return "signed";
+}

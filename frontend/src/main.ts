@@ -108,7 +108,7 @@ import {
   unknownCapabilities,
 } from "./connectors";
 import type { ConnectorVersions } from "./connectors";
-import { narrativesIn, renderNarrativeView, VIEW_TYPE_MIME } from "./narrative";
+import { narrativesIn, renderNarrativeView } from "./narrative";
 import { acceptInvite, canManage, pendingJoin } from "./members";
 
 import {
@@ -226,8 +226,6 @@ import {
   hdtoProfileTypes,
   isGroupType,
   isStratigraphicType,
-  narrativeViewTypes,
-  narrativeViewTypeDescription,
   isDtcNodeType,
   nodeTypeForClass,
   nodeLabel,
@@ -5665,10 +5663,11 @@ const RESOURCE_PROVIDERS: Partial<Record<WindowType, ResourceProvider>> = {
   // graph has no provider, because this is where the GRAPHIC TOOLS will live
   // (draw, measure, annotate on the canvas). Giving the graph a provider again
   // is the whole of bringing the triangle back.
-  // the narrative building blocks. NOT the node types, which are of no use
-  // while reading or writing a story — and NOT the connector legend, which
-  // explains EDGES and belongs where edges are drawn.
-  narrative: { render: (host) => renderNarrativePalette(host) },
+  // narrative: NONE (NARRATIVE-DESK, 29 set 2026). Measured, its palette held
+  // three things, each with a home now: «+ Chapter» is at the foot of the
+  // Index; the view types dragged onto an embed are «How it is shown» in the
+  // embed's Inspector; the note sent you to drag a node from the Outliner onto
+  // a chapter, which the drop still does. So the «›» beside the page is gone.
   // A2 · the annotator offers the ways of TRACING. Same registry, same panel,
   // same chevron — what a window offers was never "the node types".
   annotator: { render: (host) => renderAnnotatorTools(host) },
@@ -12090,8 +12089,57 @@ function storyMarks(): { storyLane: string | null; storyCited: Set<string> | nul
   const ch = (narr.chapters as ProjChapter[])[ci];
   return { storyLane: ch?.anchor ?? null, storyCited: chapterCitedIds(store.doc, narr.id, ci) };
 }
+/** NARRATIVE-DESK · the lane the Matrix last centred on: it moves only when
+ *  the current chapter's lane CHANGES, never under a pan made since. */
+let centredStoryLane: string | null = null;
 function syncGraphToChapter(): void {
+  const lane = storyMarks().storyLane;
+  if (lane !== centredStoryLane) {
+    centredStoryLane = lane;
+    if (lane) centreMatrixOn(lane);
+  }
   draw();
+}
+
+/**
+ * NARRATIVE-DESK · the Matrix follows the chapter: every graph window showing
+ * the Matrix frames the lane the current chapter narrates (it used to stay on
+ * the whole graph, shrunk). The frame is the lane's band, as wide as the units
+ * it holds; an activity anchor, which is not a lane, frames its box.
+ */
+function centreMatrixOn(anchor: string): void {
+  if (inContext()) return;
+  ensureScenes();
+  const s = scenes["matrix"];
+  if (!s) return;
+  let b: { x: number; y: number; w: number; h: number } | null = null;
+  const lane = s.lanes.find((l) => l.id === anchor);
+  if (lane) {
+    const inLane = s.nodes.filter((n) => {
+      const cy = n.y + n.h / 2;
+      return cy >= lane.y && cy <= lane.y + lane.height;
+    });
+    const all = sceneBounds(s);
+    const x0 = inLane.length ? Math.min(...inLane.map((n) => n.x)) : all.x;
+    const x1 = inLane.length ? Math.max(...inLane.map((n) => n.x + n.w)) : all.x + all.w;
+    b = { x: x0, y: lane.y, w: Math.max(1, x1 - x0), h: lane.height };
+  } else {
+    const n = s.byId.get(anchor);
+    if (n) b = { x: n.x, y: n.y, w: n.w, h: n.h };
+  }
+  if (!b) return;
+  for (const g of graphMounts()) {
+    const win = windowsOf().find((w) => w.id === g.winId);
+    if (!win || winMode(win) !== "matrix") continue;
+    const w = g.cv.clientWidth, h = g.cv.clientHeight;
+    if (!w || !h) continue;
+    const vp = viewportFor(g.winId, "matrix");
+    vp.fit(b, w, h, 48);
+    vp.scale = Math.min(vp.scale, 1.2);   // a lane of two units is not a close-up
+    // centred, unless the lane is wider than the window: then from its left
+    vp.x = b.w * vp.scale > w - 96 ? 48 - b.x * vp.scale : w / 2 - (b.x + b.w / 2) * vp.scale;
+    vp.y = h / 2 - (b.y + b.h / 2) * vp.scale;
+  }
 }
 
 // ── COLLEGARE · FASE 5 · the COVERAGE in the Index ──────────────────────────
@@ -12731,96 +12779,6 @@ function renderNarrativeInto(host: HTMLElement, win: Win): void {
   renderResourcePanels(); // the story changed: its blocks panel repaints
   // the Index's find survives a repaint of the page
   if (narrativeQuery) highlightNarrative(narrativeQuery);
-}
-
-/**
- * NARRWS1 · the narrative mode's OWN resources panel — narrative building blocks,
- * NOT the graph node-types (which are useless while reading/writing a story).
- * Per-mode, coherent with MODE1/DP-82. "＋ Capitolo" and "🗺 Mappa del sito" are
- * direct, unambiguous actions (reuse the narrative-edit mutators); the embed
- * view-types are listed from the datamodel (`narrativeViewTypes`) as a guide —
- * inserting one with a specific node reference is done from the chapter's own +
- * button, which knows the target chapter and ref. Site map ties to GEO1: the
- * embed points at the graph-self node, whose map reads the site position.
- */
-function renderNarrativePalette(host: HTMLElement): void {
-  host.textContent = "";
-  // STEP A · NO `centralMode` guard. This panel belongs to a NARRATIVE WINDOW,
-  // and `centralMode` describes whichever window has the focus — so the guard
-  // emptied the panel the moment the pointer moved to another area, which is
-  // the anchoring bug wearing a different hat. The window's type is the only
-  // condition that matters, and the provider registry has already checked it.
-  const narr =
-    narrativesIn(store?.doc ?? null).find((n) => n.id === selectedNarrativeId) ??
-    narrativesIn(store?.doc ?? null)[0];
-
-  const section = (title: string): HTMLElement => {
-    const h = document.createElement("div");
-    h.className = "np-sect";
-    h.textContent = title;
-    host.appendChild(h);
-    return h;
-  };
-  const item = (
-    label: string,
-    hint: string,
-    onClick: (() => void) | null,
-  ): void => {
-    const b = document.createElement("button");
-    b.className = "np-item" + (onClick ? "" : " np-item-static");
-    b.title = hint;
-    b.innerHTML = `<span class="np-label">${label}</span><span class="np-hint">${hint}</span>`;
-    if (onClick) b.addEventListener("click", onClick);
-    else b.disabled = true;
-    host.appendChild(b);
-  };
-
-  section(t("palette.narrative"));
-  if (!narr || !store) {
-    item(t("palette.noNarrative"), t("palette.noNarrativeHint"), null);
-    return;
-  }
-  const nid = narr.id;
-  // structure
-  item(t("palette.addChapter"), t("palette.addChapterHint"), () => {
-    nedit.addChapter(store!, nid);
-    refreshNarrativeView();
-  });
-  // MENU-AUDIT · "🗺 Mappa del sito" was here too, and it inserted into the LAST
-  // chapter while the header's Inserisci ▸ Mappa del sito inserts into the
-  // CURRENT one. Not two ways to the same place: the same action with two
-  // different targets, which is worse than a duplicate. The header item stays
-  // (it acts on the current element, like everything else in that menu, and says
-  // so when there isn't one).
-
-  // embeds — the datamodel's narrative view-types, as a guide (insert with a
-  // reference from the chapter's + button, which knows chapter and node).
-  // D1-full (P5) · the view types were listed as a GUIDE and were dead buttons.
-  // Now they are draggable: drop one on an embed and that embed changes how it
-  // is shown. They still cannot be clicked to insert, and that is deliberate —
-  // an embed without a reference points at nothing, so a view type alone is not
-  // a block anybody wants. Inserting WITH a reference is the other gesture:
-  // drag a node from the node list onto a chapter (D2).
-  section(t("palette.views"));
-  for (const vt of narrativeViewTypes()) {
-    const hint = narrativeViewTypeDescription(vt) || vt;
-    const b = document.createElement("button");
-    b.className = "np-item np-item-drag";
-    b.title = `${hint}\n\n${t("palette.dragViewHint")}`;
-    b.draggable = true;
-    b.innerHTML = `<span class="np-label">${vt}</span><span class="np-hint">${hint}</span>`;
-    b.addEventListener("dragstart", (e) => {
-      e.dataTransfer?.setData(VIEW_TYPE_MIME, vt);
-      e.dataTransfer?.setData("text/plain", vt);
-      if (e.dataTransfer) e.dataTransfer.effectAllowed = "copy";
-    });
-    host.appendChild(b);
-  }
-  const guide = document.createElement("div");
-  guide.className = "np-sect np-sect-note";
-  guide.textContent =
-    t("palette.dragNodeHint");
-  host.appendChild(guide);
 }
 
 // NARR-BUTTONS · `setNarrativeOpen()` is GONE. It was the WIN1 back-compat
@@ -14126,10 +14084,20 @@ function renderNarrativeIndexInto(body: HTMLElement, _win: Win): void {
     narrativeId: narrId,
     current: story ? currentChapterIndex(story) : null,
     onPick: (i) => {
-      for (const w of windowsOf()) if (w.type === "narrative") setCurrentChapterIndex(w, i);
+      // NARRATIVE-DESK · picking a chapter in the Index is picking the CHAPTER:
+      // the Inspector shows it and the Matrix centres on its lane
+      if (narrId) setNarrativeSelection(narrId, { chapter: i, block: null });
+      else for (const w of windowsOf()) if (w.type === "narrative") setCurrentChapterIndex(w, i);
       const host = story ? narrativeHostOf(story) : null;
       host?.querySelectorAll<HTMLElement>(".nv-chapter")[i]?.scrollIntoView({ block: "start", behavior: "smooth" });
     },
+    ...(s && narrId ? {
+      onSignMe: () => {
+        if (!requireIdentity()) return;
+        nauth.signNarrativeAs(s, narrId, identityForSigning());
+      },
+      signTitle: identityRef() ? t("ninsp.signAs", { who: identityRef()!.label }) : t("ninsp.needIdentity"),
+    } : {}),
     ...(s && narrId ? {
       onAddChapter: () => nedit.addChapter(s, narrId),
       undescribedEpochs: () => undescribedEpochs(s, narrId),

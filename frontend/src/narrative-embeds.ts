@@ -331,10 +331,13 @@ export function matrixEmbed(node: EmNode, doc: EmDocument | null): HTMLElement {
       || String(node.node_type ?? "") === "epoch";
     const laid = !!(doc as { layout?: { swimlanes?: unknown[] } } | null)
       ?.layout?.swimlanes?.length;
-    return nothingYet(b, isEpoch
-      ? t("nv.emptyEpoch") + (laid ? "" : " " + t("nv.notLaidOut"))
-        + t("nv.emptyEpochRest")
-      : t("nv.emptyScope"));
+    // NARRATIVE-DESK · ONE line on the page («Nessuna unità in quest'epoca»);
+    // the questions that came up empty stay, in the tooltip, for whoever asks
+    if (!isEpoch) return nothingYet(b, t("nv.emptyScope"));
+    nothingYet(b, t("nv.emptyEpochShort"));
+    (b.lastElementChild as HTMLElement).title = t("nv.emptyEpoch")
+      + (laid ? "" : " " + t("nv.notLaidOut")) + t("nv.emptyEpochRest");
+    return b;
   }
 
   const index = indexOf(doc);

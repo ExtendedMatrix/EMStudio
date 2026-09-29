@@ -3279,7 +3279,8 @@ body.sync-active #footer-brand #em-version {
   font-size: 26px;
   line-height: 1.2;
   margin: 0 0 6px;
-  color: var(--brand);
+  /* NARRATIVE-DESK · the text colour: --brand was dark blue on the dark page */
+  color: var(--text);
 }
 
 .nv-meta {
@@ -3324,13 +3325,14 @@ body.sync-active #footer-brand #em-version {
   padding: 1px 6px;
 }
 
+/* NARRATIVE-DESK · the lane as a chip with its name (was the UUID, monospace) */
 .nv-anchor {
-  font-size: 10.5px;
+  font-size: 11px;
   color: var(--text-muted);
-  background: var(--bg-app);
-  border-radius: var(--radius-sm);
-  padding: 1px 6px;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0 7px;
+  white-space: nowrap;
 }
 
 .nv-prose p {
@@ -8196,15 +8198,15 @@ body.gesturing-resize * {
 .nidx-eyebrow { font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-muted); display: flex; gap: 6px; align-items: center; }
 .nidx-title { display: block; font-size: 14px; margin: 2px 0; }
 .nidx-by, .nidx-dim { color: var(--text-muted); font-size: 11.5px; }
-.nidx-tag { font-size: 10px; border: 1px solid var(--border); border-radius: 8px; padding: 0 5px; text-transform: none; letter-spacing: 0; }
+.nidx-tag { white-space: nowrap; font-size: 10px; border: 1px solid var(--border); border-radius: 8px; padding: 0 5px; text-transform: none; letter-spacing: 0; }
 .nidx-tag.ai { color: var(--ai-ink, #a04a00); border-color: currentColor; }
 .nidx-tag.todo { color: var(--text-muted); font-style: italic; }
 .nidx-ch { list-style: none; margin: 0; padding: 0; }
-.nidx-row { display: flex; align-items: center; gap: 6px; width: 100%; border: 0; background: none; color: var(--text); font: inherit; text-align: left; padding: 4px 6px; border-radius: var(--radius); cursor: pointer; }
+.nidx-row { display: flex; align-items: baseline; gap: 6px; width: 100%; border: 0; background: none; color: var(--text); font: inherit; text-align: left; padding: 4px 6px; border-radius: var(--radius); cursor: pointer; }
 .nidx-row:hover { background: var(--bg-hover); }
 .nidx-row.on { background: var(--accent-wash, rgba(191,144,0,.15)); box-shadow: inset 2px 0 0 var(--accent); }
 .nidx-n { color: var(--text-faint); font-variant-numeric: tabular-nums; min-width: 1.4em; }
-.nidx-t { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.nidx-t { min-width: 0; overflow-wrap: anywhere; }  /* NARRATIVE-DESK · wraps, never «Marcomannic…» */
 .nidx-star { color: var(--accent); }
 .nidx-grow { flex: 1; }
 .nidx-lane { font-size: 10.5px; color: var(--text-muted); white-space: nowrap; }
@@ -8323,3 +8325,4 @@ body.gesturing-resize * {
 .nidx-nohit { margin: 4px 6px; font-style: italic; }
 /* NARRATIVE-DESK · why the AI preferences opened by themselves */
 .settings-why { margin: 4px 0 8px; padding: 6px 10px; border-left: 3px solid var(--accent); background: var(--accent-wash, rgba(191,144,0,.12)); color: var(--text); font-size: 12.5px; }
+.nidx-sign { margin-left: 6px; font: inherit; font-size: 11px; border: 1px solid var(--border); background: var(--bg); color: var(--text); border-radius: var(--radius); padding: 0 6px; cursor: pointer; }

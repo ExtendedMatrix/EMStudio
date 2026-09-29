@@ -20,6 +20,10 @@ export interface IndexHooks {
   narrativeId: string | null;
   current: number | null;
   onPick(chapter: number): void;
+  /** NARRATIVE-DESK · «Firmo io» when nobody is responsible for the story (the
+   *  identity of the header); absent → read-only */
+  onSignMe?(): void;
+  signTitle?: string;
   /** absent → the Index is read-only (a window with no document) */
   onAddChapter?(): void;
   undescribedEpochs?(): { id: string; name: string }[];
@@ -83,6 +87,14 @@ export function renderNarrativeIndex(host: HTMLElement, doc: EmDocument | null, 
   const by = el("div", "nidx-by");
   by.appendChild(el("span", "nidx-dim", `${t("nv.curatedBy")} `));
   by.appendChild(document.createTextNode(responsible.map((a) => a.label).join(", ") || "—"));
+  if (!responsible.length && hooks.onSignMe) {
+    const sign = el("button", "nidx-sign", t("ninsp.signMe")) as HTMLButtonElement;
+    sign.type = "button";
+    sign.dataset.nidxact = "sign";
+    if (hooks.signTitle) sign.title = hooks.signTitle;
+    sign.addEventListener("click", () => hooks.onSignMe?.());
+    by.appendChild(sign);
+  }
   if (assisted.length) {
     by.appendChild(el("span", "nidx-dim", ` · ${t("nv.assistedBy")} `));
     by.appendChild(document.createTextNode(assisted.map((a) => a.label).join(", ")));
@@ -130,7 +142,9 @@ export function renderNarrativeIndex(host: HTMLElement, doc: EmDocument | null, 
     }
     b.appendChild(el("span", "nidx-grow"));
     const lane = ch.anchor ? index.get(ch.anchor) : undefined;
-    if (lane) b.appendChild(el("span", "nidx-lane", String(lane.name ?? lane.id)));
+    // the lane's chip only when it says something the title does not
+    const laneName = lane ? String(lane.name ?? lane.id) : "";
+    if (lane && laneName !== (ch.title ?? "")) b.appendChild(el("span", "nidx-lane", laneName));
     const needs = chapterNeeds(ch as Parameters<typeof chapterNeeds>[0]);
     if (needs.ai) b.appendChild(el("span", "nidx-tag ai", `AI ${needs.ai}`));
     if (needs.todo) b.appendChild(el("span", "nidx-tag todo", t("nidx.toWrite")));

@@ -126,7 +126,9 @@ eq(doc.graph.nodes.filter(
   // an empty scope is an honest placeholder, not an error
   const empty = E.matrixEmbed(byId("ep-0"), doc);
   ok(empty.querySelector(".nv-empty"), "matrix · empty scope says so");
-  has(empty, "the reference is valid", "matrix · and says the ref is fine");
+  // NARRATIVE-DESK · the page says it in one line, the tooltip says why
+  ok((empty.querySelector(".nv-empty").getAttribute("title") ?? "").includes("the reference is valid"),
+     "matrix · and says the ref is fine (in the tooltip)");
 }
 
 // ── timeline ────────────────────────────────────────────────────────────────
@@ -695,10 +697,14 @@ eq(doc.graph.nodes.filter(
   const empty = JSON.parse(JSON.stringify(flat));
   empty.graph.nodes.push({ id: "EP0", name: "Fase 0", node_type: "EpochNode",
                            description: "", data: {} });
-  const said = text(E.matrixEmbed(
-    empty.graph.nodes.find((n) => n.id === "EP0"), empty));
+  const box = E.matrixEmbed(empty.graph.nodes.find((n) => n.id === "EP0"), empty);
+  const note = box.querySelector(".nv-empty");
+  // NARRATIVE-DESK (29 set): una riga sulla pagina, la spiegazione nel tooltip
+  eq(text(note), "No unit in this epoch",
+     "epoca vuota · sulla pagina è una riga sola");
+  const said = note.getAttribute("title") ?? "";
   ok(said.includes("has_first_epoch") && said.includes("layout's lane"),
-     `epoca vuota · dice quali risoluzioni ha provato — «${said.slice(0, 90)}»`);
+     `epoca vuota · il tooltip dice quali risoluzioni ha provato — «${said.slice(0, 90)}»`);
   ok(said.includes("the reference is valid"),
      "epoca vuota · …e che il riferimento non è il problema");
 }

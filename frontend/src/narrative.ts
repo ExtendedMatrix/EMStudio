@@ -1002,10 +1002,10 @@ export function renderNarrativeView(
 
   const head = el("header", "nv-head");
   head.appendChild(el("h1", "nv-title", current.name));
+  // NARRATIVE-DESK · «template · n capitoli», as on the desk
   const meta: string[] = [];
-  if (current.lang) meta.push(current.lang);
-  if (current.templateId) meta.push(`template: ${current.templateId}`);
-  meta.push(`${current.chapters.length} chapters`);
+  if (current.templateId) meta.push(current.templateId);
+  meta.push(t("nv.nChapters", { n: String(current.chapters.length) }));
   head.appendChild(el("div", "nv-meta", meta.join(" · ")));
   if (current.description)
     head.appendChild(el("p", "nv-lede", current.description));
@@ -1017,11 +1017,11 @@ export function renderNarrativeView(
   // header («Firmo io» in the chapter's Inspector), not a select on the page.
   const { responsible, assisted } = bylineOf(doc, current.id, current.chapters);
   const declared = narrativeAuthors(doc, current.id);
+  // NARRATIVE-DESK · with nobody responsible the page says nothing: the Index
+  // carries «a cura di — · Firmo io», where it can be fixed. The big orange
+  // «no person responsible» between the title and the story is gone.
   const byline = el("div", "nv-authors");
   byline.appendChild(el("span", "nv-authors-label", t("nv.curatedBy")));
-  if (!responsible.length)
-    byline.appendChild(el("span", "nv-prov-dim nv-prov-missing",
-      t("nv.noResponsible")));
   for (const a of responsible) {
     const chip = authorChip(a, false);
     chip.title = declared.some((d) => d.id === a.id)
@@ -1029,7 +1029,7 @@ export function renderNarrativeView(
       : t("nv.endorsedGenerated");
     byline.appendChild(chip);
   }
-  head.appendChild(byline);
+  if (responsible.length) head.appendChild(byline);
   if (assisted.length) {
     const help = el("div", "nv-authors nv-assist");
     help.appendChild(el("span", "nv-authors-label", t("nv.assistedBy")));
@@ -1075,18 +1075,21 @@ export function renderNarrativeView(
       h.appendChild(badge);
     }
     if (chapter.anchor) {
-      // The chapter usually takes its title FROM the lane, so echoing the lane's
-      // name beside it just says the same word twice. Show the id in that case:
-      // it is the part the reader cannot already see.
+      // NARRATIVE-DESK · the lane is a CHIP WITH ITS NAME, never the UUID. The
+      // chapter usually takes its title from the lane, and then the chip would
+      // say the same word twice: it is not drawn. A lane that is not in this
+      // graph says so, and keeps its id in the tooltip.
       const anchorNode = index.get(chapter.anchor);
       const laneName = anchorNode ? String(anchorNode.name || "") : "";
-      const label = laneName && laneName !== chapter.title ? laneName : chapter.anchor;
-      const chip = el("span", "nv-anchor", label);
-      chip.title = laneName
-        ? `This chapter narrates the lane “${laneName}” (${chapter.anchor})`
-        : `This chapter narrates the lane “${chapter.anchor}”, which is not in this graph`;
-      if (!anchorNode) chip.classList.add("nv-anchor-missing");
-      h.appendChild(chip);
+      if (!anchorNode) {
+        const chip = el("span", "nv-anchor nv-anchor-missing", t("nv.laneMissing"));
+        chip.title = t("nv.laneNotHere", { id: chapter.anchor });
+        h.appendChild(chip);
+      } else if (laneName && laneName !== chapter.title) {
+        const chip = el("span", "nv-anchor", laneName);
+        chip.title = t("nv.narratesLane", { name: laneName });
+        h.appendChild(chip);
+      }
     }
     if (chapter.authored_by) {
       const node = index.get(chapter.authored_by);
@@ -1099,10 +1102,14 @@ export function renderNarrativeView(
       chip.title = t("nv.whoSignsChapter");
       h.appendChild(chip);
     }
-    if (writing) {
+    // NARRATIVE-DESK · the chapter's head is a way to its Inspector in every
+    // reading of the page, not only while writing
+    if (page.onSelectPart) {
       h.classList.add("nv-selectable");
       if (sel && sel.chapter === ci && sel.block == null) h.classList.add("nv-sel");
       h.addEventListener("click", () => pick({ chapter: ci, block: null }));
+    }
+    if (writing) {
       title.setAttribute("contenteditable", "true");
       title.spellcheck = false;
       title.classList.add("nv-editable");
