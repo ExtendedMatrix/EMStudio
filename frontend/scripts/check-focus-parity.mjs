@@ -74,6 +74,8 @@ const CONVERTED = {
   // 3 ott 2026 (COLLEGARE) · the Index was BORN converted: no singleton ever,
   // and the id it would have had is asserted absent all the same
   "narrative-index": ["narrative-index-view"],
+  // 8 ott 2026 (AUDIT N5) · the Chronology check, born converted like the Index
+  chronology: ["chronology-view"],
   // 13 set 2026 · the two HOSTED types. Their singletons were of two kinds and
   // both are listed: the surface they were mounted into (`#panel-view`) and the
   // four PANELS themselves, which were elements taken from the document at boot

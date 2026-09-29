@@ -206,6 +206,7 @@ import { mediumOf as mediumOfDoc, renderChainSection, type ChainUi } from "./par
 import { DOC_TOOLS, renderReadingStage, selectedPassage, type DocTool,
          type TraceAnchor, type TraceGeometry } from "./doc-reading";
 import { openReadingBubble, type BubbleUnit } from "./reading-bubble";
+import { renderChronology, type ChronoEpoch, type ChronologyData } from "./chronology";
 import { ReadingFiles, type PlaceOutcome } from "./reading-files";
 import * as aiv from "./ai-validation";
 import { checkReceipt, receiptOf, receiptsOfEmission, refreshedCopies, type ReceiptCheck } from "./receipt";
@@ -221,6 +222,7 @@ import {
   hitAddPhase,
   hitAdornmentBadge,
   hitBandLabel,
+  drawnLabelRects,
   hitPdDecorator,
   hitPdTag,
   invalidateRoutes,
@@ -1577,6 +1579,8 @@ window.__EM_SCENE__ = () => {
   dirty: () => !!store?.dirty,
   /** the graph as it stands — two reads equal = nothing was written between */
   graphJson: () => JSON.stringify(store?.doc.graph ?? null),
+  /** AUDIT N5 · the lane chips and phase labels as last drawn (screen) */
+  labels: () => drawnLabelRects(),
 };
 
 // …and the FIGURES this process renders for an export, so a test can carry them
@@ -2181,6 +2185,7 @@ function renderInspectorInto(host: HTMLElement): void {
     const chip = aiChipFor(selectedId);
     if (chip) host.querySelector(".insp-head .insp-chip")?.after(chip);
   }
+  renderInspectorChronology(host);
   renderInspectorIssues(host);
   renderNodeHistory(host);
   citeSectionFor(host); // COLLEGARE · «Cita in «capitolo»», with the story open
@@ -10923,6 +10928,7 @@ function refreshIssues(): void {
     isUnit: isStratigraphicType,
     epochWarnings: (id) => s.epochCoherenceWarnings(id),
     crossEpoch: s.crossEpochWarnings(),
+    checkChronology: { label: t("chr.check"), run: () => openChronology() },
     lanesInOrder: s.lanesMatchDateOrder(),
     laneOrderText: t("issues.laneOrder"),
     sortLanes: { label: t("issues.sortLanes"), run: sortLanesByDateNow },
@@ -11653,6 +11659,8 @@ function openStratiMiner(): void {
 document
   .getElementById("btn-tool-stratiminer")
   ?.addEventListener("click", openStratiMiner);
+// AUDIT N5 · Strumenti ▸ Verifica la cronologia
+document.getElementById("btn-tool-chronology")?.addEventListener("click", () => openChronology());
 document
   .getElementById("btn-tool-mapping")
   ?.addEventListener("click", openMappingEditor);
@@ -14544,6 +14552,7 @@ const TRANSFORM_TYPES: WindowType[] = [
   "storage",
   // AUDIT N4 · no "annotator": the Doc window is the one tracer
   "shelf",
+  "chronology",
   "study",
   "narrative-index",
 ];
@@ -15073,6 +15082,159 @@ function renderStudyWindow(): void {
 /** NARRATIVE-DESK · the story's find lives in the Index; kept here so a
  *  repaint of the Index (it repaints on every chapter change) keeps it. */
 let narrativeQuery = "";
+/**
+ * AUDIT N6 · AN EMPTY WINDOW SAYS WHAT IS MISSING, and offers the right gesture.
+ * `key` is the sentence (i18n), `actions` the one or two buttons that remedy it.
+ */
+function emptyState(key: string, actions: Array<{ label: string; run: () => void }> = []): HTMLElement {
+  const box = document.createElement("div");
+  box.className = "win-empty";
+  box.dataset.empty = key;
+  const p = document.createElement("p");
+  p.textContent = t(key);
+  box.appendChild(p);
+  if (actions.length) {
+    const row = document.createElement("div");
+    row.className = "win-empty-acts";
+    for (const a of actions) {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "insp-btn";
+      b.textContent = a.label;
+      b.addEventListener("click", a.run);
+      row.appendChild(b);
+    }
+    box.appendChild(row);
+  }
+  return box;
+}
+
+// ── AUDIT N5 · LA VERIFICA DELLA CRONOLOGIA ──────────────────────────────────
+//
+// Reached from four places: Tools ▸ Verifica la cronologia, the lane menu of the
+// Matrix, the epoch's Inspector («Cronologia»), and the chronology warnings (their
+// action). Every remedy is ONE undo step — a re-nesting included, whose relayout
+// is computed on a trial copy first and written in the same batch.
+
+function chronologyData(): ChronologyData | null {
+  if (!store) return null;
+  const st = store;
+  const epochs: ChronoEpoch[] = st.liveNodes().filter((n) => n.node_type === "EpochNode").map((n) => {
+    const d = (n.data ?? {}) as Record<string, unknown>;
+    const num = (v: unknown) => (v == null || v === "" || !Number.isFinite(Number(v)) ? null : Number(v));
+    return { id: n.id, name: String(n.name || n.id), start: num(d.start_time), end: num(d.end_time), parent: st.parentEpoch(n.id) };
+  });
+  const others: Array<{ epoch: string; text: string }> = [];
+  const seen = new Set<string>();
+  for (const id of st.topEpochIds())
+    for (const w of st.epochCoherenceWarnings(id))
+      if (!seen.has(w)) { seen.add(w); others.push({ epoch: id, text: w }); }
+  return { epochs, overlaps: st.epochOverlaps(), others, selected: selectedId };
+}
+
+function renderChronologyInto(body: HTMLElement, _win: Win): void {
+  const data = chronologyData();
+  if (!data || !store) {
+    body.textContent = "";
+    body.appendChild(emptyState("empty.chronology"));
+    return;
+  }
+  const st = store;
+  const name = (id: string) => String(st.node(id)?.name ?? id);
+  renderChronology(body, data, {
+    onSelect: (id) => { select(id); centerOn(id); },
+    onSetBound: (id, which, v) => {
+      st.setEpochBound(id, which, v);
+      toastUndo(t(which === "start" ? "chr.didStart" : "chr.didEnd", { a: name(id), y: v }), st);
+    },
+    onMakePhase: (inner, outer) => void restructureEpochs((s) => s.makePhaseOf(inner, outer),
+      t("chr.didPhase", { a: name(inner), b: name(outer) })),
+    onMakeEpoch: (id) => void restructureEpochs((s) => s.makeTopEpoch(id), t("chr.didEpoch", { a: name(id) })),
+    onRefused: (why) => toast(why),
+  });
+}
+
+/** A change of the epochs' NESTING, as one undo step: the change is tried on a
+ *  copy, the layout computed for it (a phase has no lane of its own), and then
+ *  the change and its layout are written together. */
+async function restructureEpochs(change: (s: DocumentStore) => void, msg: string): Promise<void> {
+  if (!store) return;
+  const st = store;
+  const trial = new DocumentStore(JSON.parse(JSON.stringify(st.doc)) as EmDocument);
+  change(trial);
+  let layout: EmDocument["layout"] | null = null;
+  try {
+    const { computeLayout } = await import("./emcore");
+    layout = await computeLayout(trial.doc.graph, trial.doc.layout);
+  } catch (err) {
+    logInfo(`chronology: layout not recomputed (${String((err as Error).message ?? err)})`);
+  }
+  st.batch(() => {
+    change(st);
+    if (layout) st.setLayout(layout as NonNullable<EmDocument["layout"]>);
+  });
+  reflowMatrix();
+  toastUndo(msg, st);
+}
+
+/** Open (or bring forward) the Chronology window, split off the graph window. */
+function openChronology(epochId?: string): void {
+  if (!store) { toast(t("menu.noGraph")); return; }
+  let win = windowsOf().find((w) => w.type === "chronology");
+  if (!win) {
+    const anchor = windowsOf().find((w) => w.type === "graph") ?? activeWin();
+    setActiveWin(anchor.id);
+    const made = splitWindow(anchor.id, "col", activeWorkspace(), 0.5, "b");
+    if (!made) return;
+    setWinType(made, "chronology");
+    win = made;
+  }
+  if (maximizedWin() && maximizedWin() !== win.id) toggleMaximize(maximizedWin()!);
+  setActiveWin(win.id);
+  renderTiles();
+  if (epochId) select(epochId);
+  const area = winAreas.get(win.id);
+  area?.classList.add("flash");
+  setTimeout(() => area?.classList.remove("flash"), 1100);
+}
+
+/** The epoch's Inspector: its chronology problems, and the tool. */
+function renderInspectorChronology(host: HTMLElement): void {
+  host.querySelector(".insp-chrono")?.remove();
+  if (!store || !selectedId || store.node(selectedId)?.node_type !== "EpochNode") return;
+  const st = store;
+  const id = selectedId;
+  const mine = st.epochOverlaps().filter((o) => o.later === id || o.earlier === id);
+  const sec = document.createElement("section");
+  sec.className = "insp-chrono";
+  const eb = document.createElement("div");
+  eb.className = "insp-sect";
+  eb.textContent = t("chr.title");
+  sec.appendChild(eb);
+  for (const o of mine) {
+    const other = o.later === id ? o.earlier : o.later;
+    const p = document.createElement("p");
+    p.className = "insp-chrono-bad";
+    p.textContent = t("chr.overlapsShort", { b: String(st.node(other)?.name ?? other), n: String(o.delta) });
+    sec.appendChild(p);
+  }
+  if (!mine.length) {
+    const p = document.createElement("p");
+    p.className = "insp-hint";
+    p.textContent = t("chr.noOverlap");
+    sec.appendChild(p);
+  }
+  const b = document.createElement("button");
+  b.type = "button";
+  b.className = "insp-btn";
+  b.dataset.action = "check-chronology";
+  b.textContent = t("chr.check");
+  b.addEventListener("click", () => openChronology(id));
+  sec.appendChild(b);
+  const head = host.querySelector(".insp-head");
+  if (head) head.after(sec); else host.prepend(sec);
+}
+
 function renderNarrativeIndexInto(body: HTMLElement, _win: Win): void {
   const hadFind = document.activeElement instanceof HTMLInputElement
     && document.activeElement.classList.contains("nidx-search") && body.contains(document.activeElement);
@@ -21870,6 +22032,7 @@ const WINDOW_MENUS: Record<WindowType, WinMenu[]> = {
   // and it is the same one `emtree`, `inspector` and `storage` are in.
   study: [],
   "narrative-index": [],
+  chronology: [],
   // SHELF · HDR2 · the list's own verbs, now that `#shelf-bar` is gone. Open and
   // Save are here rather than in the header for one reason: they are punctuation
   // — once when you sit down, once when you get up — while the name, the count
@@ -22392,6 +22555,8 @@ function showLaneMenu(clientX: number, clientY: number, lane: { id: string; labe
     menu.appendChild(b);
   };
   item(t("ctx.reflowLane"), () => void reflowNodes(nodesInLane(lane.id)));
+  // AUDIT N5 · next to Riordina / Nuova epoca sopra / sotto
+  item(t("chr.checkEllipsis"), () => openChronology(lane.id));
   const i = laneStackIndex(lane.id);
   if (i >= 0) {
     // the boundary above the lane is `i`, the one below `i + 1` — the same
@@ -23942,6 +24107,7 @@ registerBuiltinSurfaces({
   renderShelfInto, renderViewerInto, renderDocViewInto, reflectDocWidth,
   renderStudyInto,
   renderNarrativeIndexInto,
+  renderChronologyInto,
   // …and the two the hosted panels need: which tab this window shows, and how a
   // panel gets built into a host. `shell/` draws none of them — it only knows
   // that a panel can be repainted, told the selection moved, and taken down.

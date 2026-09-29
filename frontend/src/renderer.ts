@@ -285,6 +285,12 @@ export function hitPdDecorator(sx: number, sy: number): string | null {
 // Screen-space hit rects for phase sub-band label chips → the id to select on
 // click (the phase id, or the epoch id for the residual band). Rebuilt each draw.
 let bandLabelHits: { id: string; x: number; y: number; w: number; h: number }[] = [];
+/** AUDIT N5 · the lane chips as drawn (screen), so a phase label never covers
+ *  one — and so a check can measure that it does not */
+let laneChipHits: { id: string; x: number; y: number; w: number; h: number }[] = [];
+export function drawnLabelRects(): { lanes: typeof laneChipHits; bands: typeof bandLabelHits } {
+  return { lanes: laneChipHits.map((r) => ({ ...r })), bands: bandLabelHits.map((r) => ({ ...r })) };
+}
 export function hitBandLabel(sx: number, sy: number): string | null {
   for (const t of bandLabelHits)
     if (sx >= t.x && sx <= t.x + t.w && sy >= t.y && sy <= t.y + t.h)
@@ -1505,6 +1511,8 @@ export function render(
     ctx.textBaseline = "top";
     ctx.restore();
   };
+  laneChipHits = [];
+  bandLabelHits = [];
   for (const lane of scene.lanes) {
     const sy = lane.y * vp.scale + vp.y;
     const sh = lane.height * vp.scale;
@@ -1536,6 +1544,7 @@ export function render(
     const chipW = 8 + Math.max(nameW, boundsW) + warnSpace + tagSpace + 8;
     const chipH = showBounds ? 32 : 18;
     const selectedLane = lane.id === state.selectedId;
+    laneChipHits.push({ id: lane.id, x: chipX, y: ty - 2, w: chipW, h: chipH });
     // fill = the epoch's semantic colour (falls back to the neutral chip when
     // the epoch declares none); ink = labelOn(that fill) so the contrast lives
     // in the chip, not in a per-theme token laid on a semantic surface.
@@ -1578,6 +1587,10 @@ export function render(
     const addR = 7;
     const addCx = RAIL + 14;
     const addCy = ty - 2 + chipH + 12;
+    // AUDIT N5 · only when it fits in THIS lane: in a thin lane it hung over the
+    // next one (the lane menu and the Inspector's «+ Add phase» remain)
+    if (addCy + addR > sy + sh - 1) continue;
+    laneChipHits[laneChipHits.length - 1].h = addCy + addR - (ty - 2);
     const ecol = lane.color || canvasTheme().labelMuted;
     ctx.strokeStyle = ecol;
     ctx.lineWidth = 1.5;
@@ -1641,15 +1654,21 @@ export function render(
     ctx.restore();
   }
 
-  // phase sub-band labels: a small indented chip (colour dot + name) at each
-  // band's top-left; the band flush with the lane top is pushed below the lane
-  // chip so the two don't collide
+  // phase sub-band labels. AUDIT N5 · THE PHASES ARE SUB-LANES INSIDE THE LANE,
+  // not tags drawn over its label: measured on epochs48 at the fitted zoom, a
+  // 30 px chip in a 14 px band covered «Età contemporanea» and its neighbours.
+  // So a label (1) stays INSIDE its band — full chip, one line, bare text or
+  // nothing, by the room there is; (2) never covers a lane chip — it moves to
+  // its right; (3) drops the epoch's name it repeats («Età contemporanea ·
+  // fase II» inside Età contemporanea reads «fase II»).
   if (scene.subBands?.length) {
-    bandLabelHits = [];
+    const laneLabelOf = new Map(scene.lanes.map((l) => [l.id, l.label]));
+    const clash = (x: number, y: number, w: number, h: number) =>
+      laneChipHits.find((r) => x < r.x + r.w && r.x < x + w && y < r.y + r.h && r.y < y + h) ?? null;
     for (const sb of scene.subBands) {
       const sy = sb.y * vp.scale + vp.y;
       const sh = sb.height * vp.scale;
-      if (sy + sh < 0 || sy > viewH || sh < 14) continue;
+      if (sy + sh < 0 || sy > viewH || sh < 11) continue;
       // nesting rail: a vertical colour bar indented by depth, echoing the
       // lane's own left rail so a sub-phase reads as contained at a glance.
       // Skip the residual band — that IS the epoch, already marked by the lane
@@ -1666,23 +1685,46 @@ export function render(
           ctx.restore();
         }
       }
-      const ty = Math.max(sy + 3, 4);
-      // a phase band shows its start–end under the name (like the lane chip);
-      // the residual band never does (it's the epoch, already on the lane chip)
-      const hasBounds = !sb.residual && (sb.start != null || sb.end != null);
+      // the residual band IS the epoch, and the lane chip already names it
+      if (sb.residual) continue;
+      const parent = laneLabelOf.get(sb.laneId) ?? "";
+      const label = parent && sb.label.startsWith(`${parent} · `) ? sb.label.slice(parent.length + 3) : sb.label;
+      const fullRoom = sh >= 34, lineRoom = sh >= 19;
+      if (!lineRoom) {
+        // bare text, no box: the band is thinner than a chip
+        ctx.save();
+        ctx.font = canvasFont(600, 9.5);
+        const w = ctx.measureText(label).width;
+        let x = RAIL + 14 + (sb.depth ?? 0) * 16;
+        const y = sy + (sh - 10) / 2;
+        const c = clash(x, y, w, 10);
+        if (c) x = c.x + c.w + 6;
+        ctx.fillStyle = canvasTheme().labelMuted;
+        ctx.textBaseline = "top";
+        ctx.fillText(label, x, y);
+        ctx.restore();
+        bandLabelHits.push({ id: sb.phaseId, x, y, w, h: 10 });
+        continue;
+      }
+      const ty = Math.max(sy + 2, 4);
+      // a phase band shows its start–end under the name (like the lane chip)
+      // when the band has the room for two lines
+      const hasBounds = fullRoom && (sb.start != null || sb.end != null);
       const boundsText = hasBounds ? `${sb.start ?? "?"} – ${sb.end ?? "?"}` : "";
       ctx.font = canvasFont(sb.residual ? 400 : 600, 11, { italic: sb.residual });
-      const nameW = ctx.measureText(sb.label).width;
+      const nameW = ctx.measureText(label).width;
       ctx.font = canvasFont(400, CANVAS_TYPE.minPx, { mono: true });
       const boundsW = hasBounds ? ctx.measureText(boundsText).width : 0;
       // indent deeper (sub-phase) bands so the hierarchy reads at a glance
-      const chipX = RAIL + 14 + (sb.depth ?? 0) * 16;
+      let chipX = RAIL + 14 + (sb.depth ?? 0) * 16;
       const hasPd = !!sb.paradataGroupId;
       const tagSpace = hasPd ? PD_TAG_W + 5 : 0;
       const hasWarn = !!sb.warn;
       const warnSpace = hasWarn ? WARN_W + 4 : 0;
       const chipW = 7 + 5 + Math.max(nameW, boundsW) + warnSpace + tagSpace + 8;
       const chipH = hasBounds ? 30 : 17;
+      const hit = clash(chipX, ty - 1, chipW, chipH);
+      if (hit) chipX = hit.x + hit.w + 6;
       const selectedBand = sb.phaseId === state.selectedId;
       // same rule as the lane chip: a coloured phase fills its own colour and
       // takes labelOn for the ink; the residual band (the epoch) has no colour
@@ -1710,7 +1752,7 @@ export function render(
       const bandTextX = chipX + 7 + 5;
       ctx.fillStyle = bandInk;
       ctx.font = canvasFont(sb.residual ? 400 : 600, 11, { italic: sb.residual });
-      ctx.fillText(sb.label, bandTextX, ty);
+      ctx.fillText(label, bandTextX, ty);
       if (hasBounds) {
         ctx.save();
         ctx.globalAlpha = 0.72;

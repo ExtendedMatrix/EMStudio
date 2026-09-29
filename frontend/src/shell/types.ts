@@ -80,6 +80,8 @@ export interface SurfaceDeps {
   renderStudyInto(body: HTMLElement): void;
   /** COLLEGARE · the Index of a story, into any body. */
   renderNarrativeIndexInto(body: HTMLElement, win: Win): void;
+  /** AUDIT N5 · the chronology check, into any body. */
+  renderChronologyInto(body: HTMLElement, win: Win): void;
   /** Which of its tabs this hosted window is showing (per WINDOW, never per
    *  type — two Inspector windows can sit on different tabs, and that is what
    *  makes the second one a view of its own instead of a duplicate). */
@@ -355,6 +357,32 @@ export function registerBuiltinSurfaces(deps: SurfaceDeps): void {
           const el = body;
           const w = win;
           paintSurface(w, el, () => deps.renderNarrativeIndexInto(el, w));
+        },
+        setFocused(on) { markFocus(body, on); },
+        destroy() { body?.remove(); body = null; win = null; },
+      };
+    },
+  });
+
+  // ── AUDIT N5 · CHRONOLOGY · the epochs on a time axis, and their remedies ──
+  registerSurfaceType({
+    id: "chronology",
+    create(): Surface {
+      let body: HTMLElement | null = null;
+      let win: Win | null = null;
+      return {
+        mount(area, w) {
+          win = w;
+          body = document.createElement("div");
+          body.className = "tile-chronobody";
+          area.appendChild(body);
+          this.refresh();
+        },
+        refresh() {
+          if (!body || !win || !body.isConnected) return;
+          const el = body;
+          const w = win;
+          paintSurface(w, el, () => deps.renderChronologyInto(el, w));
         },
         setFocused(on) { markFocus(body, on); },
         destroy() { body?.remove(); body = null; win = null; },

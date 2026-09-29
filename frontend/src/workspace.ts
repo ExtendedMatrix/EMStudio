@@ -63,7 +63,14 @@ export type WindowType =
   // COLLEGARE · the INDEX of a story: its chapters, what still needs writing,
   // and the coverage — how much of the graph the story rests on. The left
   // column of the Narrative space; the page itself is the `narrative` window.
-  | "narrative-index";
+  | "narrative-index"
+  // AUDIT N5 · THE CHRONOLOGY CHECK: the epochs and phases as bars on a time
+  // axis, the overlaps with their delta and their remedies, the bounds table.
+  // A window of its own and not a sheet of the Table: it draws an axis, it
+  // offers remedies per overlap, and it is opened from four places (Tools, the
+  // lane menu, the epoch's Inspector, the chronology warnings) next to the
+  // Matrix it corrects.
+  | "chronology";
 
 /** A single window instance — its own id + type + type-specific state. */
 export interface Win {
@@ -489,6 +496,7 @@ export const WINDOW_TYPE_META: Record<WindowType, { icon: string; labelKey: stri
   shelf: { icon: windowIcon("shelf"), labelKey: "win.shelf" },
   study: { icon: windowIcon("study"), labelKey: "win.study" },
   "narrative-index": { icon: windowIcon("narrative-index"), labelKey: "win.narrativeIndex" },
+  chronology: { icon: windowIcon("chronology"), labelKey: "win.chronology" },
 };
 
 /** The window type the active workspace currently shows — the ACTIVE window's

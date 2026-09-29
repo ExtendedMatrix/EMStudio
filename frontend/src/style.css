@@ -8569,3 +8569,41 @@ button.shelf-badge { cursor: pointer; font: inherit; font-size: 10.5px; }
 .stamp-words textarea { width: 100%; font: inherit; font-size: 12.5px; resize: vertical;
   border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg-panel); color: var(--text); padding: 5px 7px; }
 .stamp-words-actions { display: flex; gap: 6px; }
+
+/* ── AUDIT N5 · la verifica della cronologia ─────────────────────────────── */
+.tile-chronobody { height: 100%; overflow: auto; }
+.chr { padding: 10px 14px 16px; font-size: 12px; display: flex; flex-direction: column; gap: 10px; }
+.chr-lead { margin: 0; opacity: 0.8; max-width: 70ch; }
+.chr-empty { opacity: 0.75; }
+.chr-svg { overflow-x: auto; }
+.chr-axis { width: 100%; min-width: 560px; height: auto; font-size: 11px; }
+.chr-grid { stroke: var(--border, #ddd); stroke-width: 1; }
+.chr-tick { fill: var(--muted, #888); font-size: 10px; font-family: var(--mono, monospace); }
+.chr-name { fill: var(--text, #222); }
+.chr-name.sub { fill: var(--muted, #666); font-size: 10.5px; }
+.chr-row { cursor: pointer; }
+.chr-row.sel .chr-name { font-weight: 700; }
+.chr-bar { fill: var(--accent-soft, #b9d3ee); stroke: var(--accent, #4a90d9); stroke-width: 1; }
+.chr-bar.sub { fill: var(--bg-hover, #e9eef4); }
+.chr-bar.bad { stroke: var(--danger, #b3261e); }
+.chr-ov { fill: rgba(179, 38, 30, 0.22); stroke: var(--danger, #b3261e); stroke-dasharray: 3 2; }
+.chr-issues { display: flex; flex-direction: column; gap: 6px; }
+.chr-card { border: 1px solid var(--border, #ddd); border-left: 3px solid var(--danger, #b3261e); border-radius: 6px; padding: 7px 10px; display: flex; flex-direction: column; gap: 4px; }
+.chr-card.ok { border-left-color: var(--ok, #2e7d32); }
+.chr-card.other { border-left-color: var(--warn, #b26a00); }
+.chr-why { opacity: 0.75; font-size: 11px; }
+.chr-acts { display: flex; flex-wrap: wrap; gap: 6px; }
+.chr-fix[aria-disabled="true"] { opacity: 0.5; cursor: not-allowed; }
+.chr-table { border-collapse: collapse; width: 100%; max-width: 720px; }
+.chr-table th, .chr-table td { text-align: left; padding: 3px 6px; border-bottom: 1px solid var(--border, #eee); }
+.chr-table tr.sub td:first-child { padding-left: 20px; opacity: 0.85; }
+.chr-table tr.on td { background: var(--sel-bg, rgba(74, 144, 217, 0.08)); }
+.chr-num { width: 72px; font-family: var(--mono, monospace); }
+.chr-delta { font-family: var(--mono, monospace); }
+.chr-delta.bad { color: var(--danger, #b3261e); font-weight: 600; }
+.insp-chrono { margin: 6px 0 10px; }
+.insp-chrono-bad { color: var(--danger, #b3261e); margin: 2px 0; font-size: 12px; }
+/* AUDIT N6 · an empty window says what is missing */
+.win-empty { padding: 18px 16px; display: flex; flex-direction: column; gap: 8px; align-items: flex-start; color: var(--muted, #666); font-size: 12.5px; max-width: 52ch; }
+.win-empty p { margin: 0; }
+.win-empty-acts { display: flex; gap: 6px; flex-wrap: wrap; }

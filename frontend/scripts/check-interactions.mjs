@@ -668,6 +668,103 @@ test("5.shelf", "Shelf ▸ Annota apre la finestra Doc con quella risorsa, senza
   return { pass: !!r.doc && r.img && r.tools && !r.annotator, detail: { ...r, name } };
 });
 
+// ── PARTE 6 · la verifica della cronologia ──────────────────────────────────
+const cards = (p) => p.evaluate(() => [...document.querySelectorAll(".chr-card[data-overlap]")]
+  .map((c) => ({ pair: c.dataset.overlap, delta: Number(c.dataset.delta), text: c.querySelector("b").textContent,
+    phaseDisabled: c.querySelector('[data-remedy="phase"]')?.getAttribute("aria-disabled") === "true",
+    phaseTitle: c.querySelector('[data-remedy="phase"]')?.title ?? "" })));
+async function openChrono(p) {
+  await p.click("#dd-tools .dd-toggle").catch(() => {});
+  await p.evaluate(() => document.getElementById("btn-tool-chronology").click());
+  await p.waitForSelector(".chr", { timeout: 8000 });
+  await p.waitForTimeout(300);
+}
+test("6.deltas", "la fixture mostra due sovrapposizioni con i delta giusti", async () => {
+  const { p, ctx } = await open({ doc: "chronology-overlaps" });
+  await openChrono(p);
+  const c = await cards(p);
+  await ctx.close();
+  const alto = c.find((x) => x.pair === "EP_ALTO|EP_MED");
+  const tardo = c.find((x) => x.pair === "EP_TMED|EP_MED");
+  return { pass: c.length === 2 && alto?.delta === 150 && !alto.phaseDisabled && tardo?.delta === 20 && tardo.phaseDisabled
+    && /150/.test(tardo.phaseTitle) && /1280.1300/.test(tardo.text), detail: c };
+});
+test("6.remedies", "«Rendi fase» crea has_sub_epoch e toglie l'avviso; «inizia nel 1300» toglie l'altro; undo riporta tutto", async () => {
+  const { p, ctx } = await open({ doc: "chronology-overlaps" });
+  await openChrono(p);
+  const graph0 = await p.evaluate(() => window.__EM_DRAG__.graphJson());
+  await p.click('.chr-card[data-overlap="EP_ALTO|EP_MED"] [data-remedy="phase"]');
+  await p.waitForTimeout(900);
+  const sub = await p.evaluate(() => window.__EM_DRAG__.edgesOf("has_sub_epoch").map((e) => `${e.source}>${e.target}`));
+  const after1 = await cards(p);
+  const unitStays = await p.evaluate(() => window.__EM_DRAG__.epochOf("US1"));
+  await p.click('.chr-card[data-overlap="EP_TMED|EP_MED"] [data-remedy="start"]');
+  await p.waitForTimeout(500);
+  const after2 = await cards(p);
+  const start = await p.evaluate(() => window.__EM_DRAG__.data("EP_TMED").start_time);
+  await p.evaluate(() => window.__EM_DRAG__.undo());
+  await p.waitForTimeout(300);
+  await p.evaluate(() => window.__EM_DRAG__.undo());
+  await p.waitForTimeout(600);
+  const back = await p.evaluate((g0) => window.__EM_DRAG__.graphJson() === g0, graph0);
+  const after3 = await cards(p);
+  await ctx.close();
+  return { pass: sub.includes("EP_MED>EP_ALTO") && after1.length === 1 && unitStays === "EP_ALTO"
+    && after2.length === 0 && Number(start) === 1300 && back && after3.length === 2,
+    detail: { sub, after1: after1.length, unitStays, after2: after2.length, start, back, after3: after3.length } };
+});
+test("6.entries", "si arriva alla Cronologia dal menu della corsia e dall'ispettore dell'epoca", async () => {
+  const { p, ctx } = await open({ doc: "chronology-overlaps" });
+  await pick(p, "EP_MED");
+  const inInspector = await p.evaluate(() => !!document.querySelector('.insp-chrono [data-action="check-chronology"]'));
+  const says = await p.evaluate(() => document.querySelector(".insp-chrono")?.innerText ?? "");
+  await p.click('.insp-chrono [data-action="check-chronology"]');
+  await p.waitForTimeout(500);
+  const opened = await p.evaluate(() => window.__EM_DRAG__.wins().some((w) => w.type === "chronology"));
+  await ctx.close();
+  return { pass: inInspector && opened && /20|150/.test(says), detail: { inInspector, opened, says } };
+});
+
+test("6.lanes", "epochs48: le fasi sono sotto-corsie, nessuna etichetta copre un'altra", async () => {
+  const { p, ctx } = await open({ doc: "epochs48" });
+  await p.waitForTimeout(400);
+  const measure = () => p.evaluate(() => {
+    const { lanes, bands } = window.__EM_DRAG__.labels();
+    const x = (a, b) => a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
+    let overLane = 0, overBand = 0;
+    for (const b of bands) for (const l of lanes) if (x(b, l)) overLane++;
+    for (let i = 0; i < bands.length; i++) for (let j = i + 1; j < bands.length; j++) if (x(bands[i], bands[j])) overBand++;
+    return { lanes: lanes.length, bands: bands.length, overLane, overBand };
+  });
+  const fitted = await measure();
+  // …and zoomed in, where the chips have room
+  const win = await winOf(p, "graph");
+  const ws = await p.evaluate((w) => window.__EM_DRAG__.winScene(w), win);
+  await p.mouse.move(ws.rect.x + 300, ws.rect.y + 60);
+  for (let i = 0; i < 4; i++) { await p.mouse.wheel(0, -240); await p.waitForTimeout(80); }
+  await p.waitForTimeout(300);
+  const zoomed = await measure();
+  await ctx.close();
+  return { pass: fitted.bands > 0 && !fitted.overLane && !fitted.overBand && !zoomed.overLane && !zoomed.overBand,
+           detail: { fitted, zoomed } };
+});
+
+test("6.lanemenu", "TempluMare: il clic destro sull'intestazione della corsia apre il menu (con la Cronologia) e non sposta la tela", async () => {
+  const { p, ctx } = await open({ doc: "TempluMare" });
+  const win = await winOf(p, "graph");
+  const ws = await p.evaluate((w) => window.__EM_DRAG__.winScene(w), win);
+  const x = ws.rect.x + 60, y = ws.rect.y + ws.rect.h * 0.4;
+  await p.mouse.move(x, y);
+  await p.waitForTimeout(100);
+  const vp0 = await p.evaluate(() => window.__EM_SCENE__().vp);
+  await p.mouse.click(x, y, { button: "right" });
+  await p.waitForTimeout(300);
+  const vp1 = await p.evaluate(() => window.__EM_SCENE__().vp);
+  const items = await p.evaluate(() => [...document.querySelectorAll(".ctx-menu button")].map((b) => b.textContent));
+  await ctx.close();
+  return { pass: JSON.stringify(vp0) === JSON.stringify(vp1) && items.some((t) => /cronologia/i.test(t)), detail: { vp0, vp1, items } };
+});
+
 // ── run ─────────────────────────────────────────────────────────────────────
 const chosen = cases.filter((c) => !only.length || only.includes(c.id) || only.some((o) => c.id.startsWith(o + ".")));
 for (const c of chosen) {

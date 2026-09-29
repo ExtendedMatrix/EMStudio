@@ -265,6 +265,22 @@ const HDTO_ROLE_CLASS: Record<HdtoRole, string> = {
   project: "ProjectNode",
 };
 
+/** AUDIT N5 · two top-level epochs that share an interval (see `epochOverlaps`). */
+export interface EpochOverlap {
+  /** the one that starts later, and the other */
+  later: string;
+  earlier: string;
+  /** the shared interval and its length, in the epochs' own unit (years) */
+  from: number;
+  to: number;
+  delta: number;
+  /** when one lies ENTIRELY inside the other: that one, and its container */
+  inner: string | null;
+  outer: string | null;
+  /** how far the later one sticks out of the other, when not contained */
+  overhang: number;
+}
+
 export class DocumentStore {
   doc: EmDocument;
   dirty = false;
@@ -1404,26 +1420,73 @@ export class DocumentStore {
    *  conflict — two epochs claiming the same absolute time). Gaps are NOT
    *  reported: a hiatus between epochs is legitimate in archaeology. */
   crossEpochWarnings(): string[] {
-    const out: string[] = [];
+    // the words of the warnings table; the Chronology window says it in the
+    // reader's language, from the same data (`epochOverlaps`)
+    return this.epochOverlaps().map((o) =>
+      `${this.node(o.later)?.name ?? o.later} overlaps ${this.node(o.earlier)?.name ?? o.earlier} by ${o.delta} years (${o.from}–${o.to}).`);
+  }
+
+  /**
+   * AUDIT N5 · the OVERLAPS between top-level epochs, as data: which two, the
+   * interval they share and its length, and whether one lies entirely inside
+   * the other (then it is usually a PHASE of it, E.D.: «epoche e periodi non si
+   * sovrappongono»).
+   *
+   * EVERY PAIR, not neighbours by start. The old check compared each epoch
+   * with the one before it only, so an epoch nested in a long one hid the next
+   * overlap: measured on `chronology-overlaps.em.json`, Medioevo 900–1300 with
+   * Alto medioevo 950–1100 inside it and Tardo medioevo 1280–1450 — the 20
+   * years Tardo medioevo shares with Medioevo were never reported.
+   */
+  epochOverlaps(): EpochOverlap[] {
     const tops = this.topEpochIds()
-      .map((id) => ({
-        name: this.node(id)?.name ?? id,
-        s: this.startOf(id),
-        e: this.endOf(id),
-      }))
-      .filter((x) => x.s != null && x.e != null) as {
-      name: string;
-      s: number;
-      e: number;
-    }[];
-    tops.sort((a, b) => a.s - b.s); // oldest first
-    for (let i = 1; i < tops.length; i++) {
-      const prev = tops[i - 1];
-      const cur = tops[i];
-      if (cur.s < prev.e)
-        out.push(`${cur.name} overlaps ${prev.name} (${cur.s} < ${prev.e}).`);
-    }
-    return out;
+      .map((id) => ({ id, s: this.startOf(id), e: this.endOf(id) }))
+      .filter((x): x is { id: string; s: number; e: number } => x.s != null && x.e != null && x.s <= x.e);
+    const out: EpochOverlap[] = [];
+    for (let i = 0; i < tops.length; i++)
+      for (let j = i + 1; j < tops.length; j++) {
+        const [p, q] = [tops[i], tops[j]];
+        const from = Math.max(p.s, q.s), to = Math.min(p.e, q.e);
+        if (from >= to) continue;
+        // the LATER is the one that starts later (a tie: the one that ends first)
+        const later = p.s !== q.s ? (p.s > q.s ? p : q) : (p.e <= q.e ? p : q);
+        const earlier = later === p ? q : p;
+        const inP = p.s >= q.s && p.e <= q.e, inQ = q.s >= p.s && q.e <= p.e;
+        const inner = inP && inQ ? later : inP ? p : inQ ? q : null;
+        const outer = inner ? (inner === p ? q : p) : null;
+        out.push({
+          later: later.id, earlier: earlier.id, from, to, delta: to - from,
+          inner: inner?.id ?? null, outer: outer?.id ?? null,
+          overhang: inner ? 0 : Math.min(Math.abs(later.e - earlier.e), Math.abs(later.s - earlier.s)),
+        });
+      }
+    // the widest first: the one most likely to be a wrong bound
+    return out.sort((a, b) => b.delta - a.delta || a.from - b.from);
+  }
+
+  /** AUDIT N5 · «Rendi fase di Y»: X becomes a sub-epoch of Y (`has_sub_epoch`).
+   *  Its units stay with it (their `has_first_epoch` still points at X), its
+   *  lane goes (a phase is a band inside its epoch's lane). One undo step. */
+  makePhaseOf(innerId: string, outerId: string): void {
+    if (innerId === outerId || !this.node(innerId) || !this.node(outerId)) return;
+    this.batch(() => {
+      for (const e of this.doc.graph.edges.filter((x) => x.edge_type === "has_sub_epoch" && x.target === innerId))
+        this.deleteEdge(e);
+      this.addEdge(outerId, innerId, "has_sub_epoch");
+      const lanes = this.doc.layout?.swimlanes;
+      if (Array.isArray(lanes)) {
+        const kept = lanes.filter((l) => l.epoch_id !== innerId);
+        kept.forEach((l, i) => { l.order = i; });
+        this.doc.layout!.swimlanes = kept;
+      }
+    });
+  }
+
+  /** AUDIT N5 · «— epoca —»: a phase goes back to being an epoch. One step. */
+  makeTopEpoch(phaseId: string): void {
+    const edges = this.doc.graph.edges.filter((x) => x.edge_type === "has_sub_epoch" && x.target === phaseId);
+    if (!edges.length) return;
+    this.batch(() => { for (const e of edges) this.deleteEdge(e); });
   }
 
   /** All chronology problems across the document: cross-epoch span overlaps +
@@ -1450,6 +1513,10 @@ export class DocumentStore {
   /** Set an epoch's start/end bound; mirror the value into its
    *  absolute_time_* PropertyNode when the paradata group exists. */
   setEpochBound(epochId: string, which: "start" | "end", value: string): void {
+    // AUDIT N5 · the bound and its absolute_time_* property: ONE undo step
+    this.batch(() => this.setEpochBoundNow(epochId, which, value));
+  }
+  private setEpochBoundNow(epochId: string, which: "start" | "end", value: string): void {
     const epoch = this.node(epochId);
     if (!epoch) return;
     const v = value.trim();

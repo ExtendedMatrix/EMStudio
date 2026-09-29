@@ -50,6 +50,9 @@ export interface IssueSources {
   /** false when the lane stack is out of chronological order */
   lanesInOrder?: boolean;
   sortLanes?: { label: string; run: () => void };
+  /** AUDIT N5 · «Verifica la cronologia»: the remedy of every overlap and
+   *  coherence row — the window that checks the deltas and corrects them */
+  checkChronology?: { label: string; run: () => void };
   laneOrderText?: string;
   /** `documentDiagnostics` records, flattened */
   diagnostics?: Array<{ kind: string; nodeId: string; message: string }>;
@@ -92,12 +95,14 @@ export function issues(src: IssueSources): Issue[] {
            txt: src.laneOrderText ?? "lanes out of chronological order",
            action: src.sortLanes });
   for (const w of src.crossEpoch ?? [])
-    push({ node: "", sev: "warn", rule: "chronology", txt: w });
+    push({ node: "", sev: "warn", rule: "chronology", txt: w,
+           ...(src.checkChronology ? { action: src.checkChronology } : {}) });
   if (src.epochWarnings)
     for (const n of nodes)
       if (n.node_type === "EpochNode")
         for (const w of src.epochWarnings(n.id))
-          push({ node: n.id, sev: "warn", rule: "chronology", txt: `${name(n.id)}: ${w}` });
+          push({ node: n.id, sev: "warn", rule: "chronology", txt: `${name(n.id)}: ${w}`,
+                 ...(src.checkChronology ? { action: src.checkChronology } : {}) });
 
   // ── the datamodel: diagnostics already computed, and the socket check ─────
   for (const d of src.diagnostics ?? [])
