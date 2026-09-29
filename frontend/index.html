@@ -162,10 +162,10 @@
       <div class="dropdown" id="dd-tools">
         <button class="dd-toggle" title="Tools — one-shot instruments"><span data-i18n="toolbar.tools">Tools</span> ▾</button>
         <div class="dd-menu hidden">
-          <!-- PALETTE1 · the node palette is a panel you open, not a fixed
-               column. Open, it shows the types the FOCUSED window can place. -->
-          <button id="btn-tool-palette" title="Node palette: the types the focused window can place">
-            <span data-i18n="toolbar.palette">Node palette</span>
+          <!-- SHIFT-A · the node palette left (1 ott 2026): a node is added at
+               the cursor. This is the menu's way into the same «Aggiungi». -->
+          <button id="btn-tool-add" data-i18n-title="add.headerBtn" title="Add a node (⇧A)">
+            <span data-i18n="tools.addNode">Add node…</span> <span class="dd-key">⇧A</span>
           </button>
           <div class="dd-sep"></div>
           <button id="btn-tool-stratiminer" title="StratiMiner: build a graph from a folder of unstructured sources, via the reviewable em_data.xlsx table">
@@ -322,7 +322,6 @@
             </button>
           </span>
         </div>
-        <div id="hint-bar" class="hidden"></div>
         <div id="edge-menu" class="hidden"></div>
         <button
           id="btn-view-props"

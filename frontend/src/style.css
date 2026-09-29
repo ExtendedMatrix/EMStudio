@@ -1421,13 +1421,6 @@ body.sync-active #mode-indicator::before {
   font-size: 11px;
 }
 
-.legend-item {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  white-space: nowrap;
-  padding: 1px 0;
-}
 
 .legend-swatch {
   display: inline-block;
@@ -2274,12 +2267,6 @@ body.sync-active #footer-brand #em-version {
   text-decoration: underline;
 }
 
-.pal-icon {
-  width: 26px;
-  height: 18px;
-  object-fit: contain;
-  flex: none;
-}
 
 .insp-head {
   display: flex;
@@ -2436,18 +2423,7 @@ body.sync-active #footer-brand #em-version {
   color: var(--text);
   border-color: var(--brand-ink);
 }
-/* the connector legend, at the foot of a GRAPH window's panel only */
-.win-legend {
-  margin-top: 10px;
-  padding-top: 8px;
-  border-top: 1px solid var(--border);
-  flex: 0 0 auto;
-}
 
-/* the palette items and the narrative blocks are laid straight into the panel */
-.win-resources > .pal-sect:first-child {
-  margin-top: 0;
-}
 
 /* QOL1 · recent files list in the EMTree panel */
 .et-recents {
@@ -2533,61 +2509,12 @@ body.sync-active #footer-brand #em-version {
   white-space: normal;
 }
 
-.pal-sect {
-  font-size: 10.5px;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: var(--text-faint);
-  margin: 10px 4px 4px;
-  font-weight: 600;
-}
 
-.pal-sect:first-child {
-  margin-top: 0;
-}
 
-/* HDT-O section is a clickable header (button) that reuses .pal-sect styling
-   but stays interactive; the gated group collapses below it. */
-.pal-sect-toggle {
-  display: block;
-  width: calc(100% - 8px);
-  text-align: left;
-  background: none;
-  border: 0;
-  cursor: pointer;
-  font: inherit;
-  font-size: 10.5px;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: var(--text-faint);
-}
 
-.pal-sect-toggle:hover {
-  color: var(--brand-ink);
-}
 
-.pal-item {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  width: 100%;
-  background: none;
-  border: 1px solid transparent;
-  border-radius: var(--radius);
-  padding: 3px 6px;
-  font-size: 12px;
-  cursor: pointer;
-  color: var(--text);
-}
 
-.pal-item:hover {
-  background: var(--bg-hover);
-}
 
-.pal-item.active {
-  border-color: var(--accent);
-  background: var(--bg-accent-soft);
-}
 
 /* ── EMTree · auxiliary files (AUX1) ──────────────────────────────────────
    The EMtools section reproposed: a per-graph list with add/remove and a
@@ -2932,12 +2859,6 @@ body.sync-active #footer-brand #em-version {
   cursor: crosshair;
 }
 
-/* palette item dragged over the canvas (DND1) — the drag image is the browser's,
-   so the only feedback we can give is on the target itself */
-.tile-area > canvas.drop-target {
-  outline: 2px dashed var(--accent);
-  outline-offset: -3px;
-}
 
 /* CROSS-AREA CONNECTOR · while a connector is open the area that has the editor
    is outlined: after the connector crosses into another area its start node may
@@ -2951,19 +2872,6 @@ body.sync-active #footer-brand #em-version {
   cursor: alias;
 }
 
-#hint-bar {
-  position: absolute;
-  /* WIN4 · below the docked bar of the FOCUSED area (`--live-*`) */
-  top: calc(var(--live-y, 0px) + var(--winbar-h, 0px) + 10px);
-  left: calc(var(--live-x, 0px) + var(--live-w, 100%) / 2);
-  transform: translateX(-50%);
-  background: var(--brand);
-  color: var(--on-brand);
-  font-size: 12.5px;
-  border-radius: var(--radius);
-  padding: 5px 12px;
-  z-index: 20;
-}
 
 /* ONE SURFACE (15 set) · placed against the FOCUSED AREA, whose rectangle the
    shell publishes as `--live-*`. This was a child of `#canvas-wrap`, so its own
@@ -4883,25 +4791,6 @@ body.sync-active #footer-brand #em-version {
   color: var(--ok-ink);
 }
 
-/* WIN3 · left panel: per-mode content + filter box. `pal-hidden` is the filter's
-   own hide (kept separate from `.hidden`, which callers use for whole panels). */
-.pal-filter {
-  width: 100%;
-  margin: 0 0 6px;
-  padding: 5px 8px;
-  background: var(--bg-elevated);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  color: var(--text);
-  font-size: 12px;
-}
-.pal-filter:focus {
-  outline: none;
-  border-color: var(--accent);
-}
-.pal-hidden {
-  display: none !important;
-}
 
 /* WIN3/WIN4 · inside the bar the controls lose their own chrome — the BAR is
    the surface. (WIN3 shipped this bar as a translucent floating overlay; WIN4
@@ -8058,4 +7947,12 @@ body.gesturing-resize * {
   position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
   color: var(--text-faint); font-size: 12.5px; pointer-events: none; user-select: none;
   z-index: 2;
+}
+/* SHIFT-A · a shortcut shown at the right of a menu item (Tools ▸ Aggiungi nodo… ⇧A) */
+.dd-menu .dd-key {
+  float: right;
+  margin-left: 18px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-faint);
 }

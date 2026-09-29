@@ -157,12 +157,7 @@ import { CARD_VIEWS, COMPUTED_VIEWS, EMDB_SHEETS, type TableView, type ViewCtx }
 import { iconUrlFor } from "./icons";
 import { buildOverview, type OverviewApi } from "./overview";
 import { edgeStyle } from "./palette";
-import {
-  buildPalette,
-  PALETTE_MIME,
-  typeIconElement,
-  type PaletteDragPayload,
-} from "./palette-ui";
+import { typeIconElement } from "./type-icons";
 import { createResourceThumb } from "./resource-preview";
 import {
   addCategories,
@@ -676,13 +671,6 @@ let selectedId: string | null = null;
 // is what Delete removes); hover is a transient index into the current scene.
 let selectedEdge: EmEdge | null = null;
 let hoverEdgeIdx: number | null = null;
-let placingType: string | null = null;
-// for DTC palette items: the specific kind (photo, mesh, …) to stamp on the
-// created node's data.dtc_kind; null for non-DTC placement.
-let placingKind: string | null = null;
-// true when the DTC item being placed is a RESOURCE (output → a ResourceNode) — so
-// placeNode also stamps data.resource_type.
-let placingIsResource = false;
 let connect: ConnectDrag | null = null;
 /** graph-view "liquid" filters: hidden node / edge types */
 // hidden type sets are DERIVED from the visible circles of the CURRENT view
@@ -748,7 +736,6 @@ const contextViewport = new Viewport();
 const info = document.getElementById("info")!;
 const tooltip = document.getElementById("tooltip")!;
 const dropHint = document.getElementById("drop-hint")!;
-const hintBar = document.getElementById("hint-bar")!;
 const breadcrumb = document.getElementById("breadcrumb")!;
 const edgeMenu = document.getElementById("edge-menu")!;
 const toastEl = document.getElementById("toast")!;
@@ -2462,47 +2449,14 @@ function promptDeleteEpoch(epochId: string): void {
   document.body.appendChild(modal);
 }
 
-/**
- * The connector legend — WHAT THE EDGES MEAN, drawn into a Graph window's own
- * resources panel.
- *
- * STEP A moved it here from a singleton `#legend` in the app-wide column. It was
- * appearing under the NARRATIVE panel too, where it explains nothing: a story
- * has no edges on screen. It belongs where edges are drawn, so it is part of the
- * graph provider's offer and of nothing else.
+/*
+ * GONE (1 ott 2026, SHIFT-A) · `renderLegendInto` / `updateLegend`, the
+ * connector legend. It lived in the graph window's resources panel, next to the
+ * node palette, and it left with it: that panel has no provider now. What an
+ * edge MEANS is still on screen where it is asked — the connector tooltip on
+ * hover (type + endpoints) and the filter panel's circles of detail, which list
+ * the relations by name.
  */
-function renderLegendInto(host: HTMLElement): void {
-  const s = scene();
-  if (!s) return;
-  const types = new Set<string>();
-  for (const e of s.edges) types.add(e.edge.edge_type ?? "edge");
-  if (!types.size) return;
-  const box = document.createElement("div");
-  box.className = "win-legend";
-  const head = document.createElement("div");
-  head.className = "pal-sect";
-  head.textContent = "Relations";
-  box.appendChild(head);
-  for (const t of [...types].sort()) {
-    const st = edgeStyle(t);
-    const item = document.createElement("span");
-    item.className = "legend-item";
-    const sw = document.createElement("span");
-    sw.className = "legend-swatch";
-    sw.style.borderBottomColor = st.color;
-    sw.style.borderBottomStyle = st.dash.length ? "dashed" : "solid";
-    item.appendChild(sw);
-    item.appendChild(document.createTextNode(st.label));
-    box.appendChild(item);
-  }
-  host.appendChild(box);
-}
-
-/** The scene changed, so the edge types on screen may have: repaint the panels
- *  that show them. */
-function updateLegend(): void {
-  renderResourcePanels();
-}
 
 function updateToolbar(): void {
   btnUndo.disabled = !undoStore()?.canUndo;
@@ -2621,7 +2575,6 @@ function rebuildContext(): void {
     ? contextSceneFor(contextStack[contextStack.length - 1])
     : null;
   updateBreadcrumb();
-  updateLegend();
   fit();
 }
 
@@ -3237,7 +3190,6 @@ function applyCanvasView(v: ViewKind): void {
   } else {
     updateInfo();
   }
-  updateLegend();
   // The "+ epoch" overlay is Matrix-only, so switching view has to re-evaluate it.
   updateToolbar();
   // WIN2b · frame this projection the FIRST time this window shows it (for this
@@ -3278,7 +3230,6 @@ function flushChange(): void {
   if (filterPanelOpen()) renderCirclesPanel(); // refresh circle counts
   updateInfo();             // (the issues: the canvas draws their «!»)
   draw();                   // the canvas first: the node stops where it was left
-  updateLegend();
   updateToolbar();
   refreshInspector();
   renderViewer();           // VIEWER · it follows the selection, like the Inspector
@@ -4060,7 +4011,6 @@ function clearDocument(): void {
   info.textContent = "open or drop an .em.json file";
   updateToolbar();
   updateBreadcrumb();
-  updateLegend();
   nodeList.refresh();
   draw();
   announceOpenDocument();   // C1 · nothing open here any more, and it is said
@@ -5543,71 +5493,11 @@ async function openDocument(): Promise<void> {
   fileInput.click();
 }
 
-// ---------- placing (palette) ----------
-// WIN3 · the palette is rebuilt when the canvas projection changes, because its
-// CONTENT is per-mode (DTC offers the DTC chunks, not the stratigraphic types).
-// One factory, called again — not a second palette that could drift.
-/** Every palette currently mounted — one per open panel. STEP A made the panel
- *  per-window, so there can be several, and the "what am I placing" highlight
- *  belongs to all of them. Cleared whenever the panels are rebuilt. */
-const paletteUis: ReturnType<typeof buildPalette>[] = [];
-function buildPaletteForMode(host: HTMLElement, win: Win): void {
-  const ui = buildPalette(
-  host,
-  (t, kind, isResource) => {
-    if (!store) {
-      toast("Open a document first");
-      return;
-    }
-    // Epochs are swimlanes in Matrix, not free-dropped nodes — clicking the
-    // EpochNode palette entry adds a lane at the top (newest) and selects it for
-    // dating (the chronology, not an xy click, decides its final position; the
-    // "Ordina lane per data" banner sorts it in). Graph view keeps free-drop.
-    if (t === "EpochNode" && view === "matrix") {
-      if (placingType) cancelPlacing();
-      addEpochEmMode();
-      return;
-    }
-    // toggle: same item again cancels. The key includes the DTC kind so two
-    // DTC items of the same node_type toggle independently.
-    const key = kind ? `${t}:${kind}` : t;
-    const active = placingType === t && placingKind === (kind ?? null);
-    placingType = active ? null : t;
-    placingKind = active ? null : (kind ?? null);
-    placingIsResource = active ? false : !!isResource;
-    // STEP A · the placing type is a fact about the SESSION, not about one
-    // panel: every mounted palette shows it, so two Graph windows with their
-    // panels open never disagree about what you are holding.
-    for (const p of paletteUis) p.setActive(placingType ? (placingKind ? key : t) : null);
-    setCanvasCursor("placing", !!placingType);
-    if (placingType) {
-      const what = placingKind ?? placingType;
-      hintBar.textContent = `Click the canvas to place a ${what} — Esc to cancel`;
-      hintBar.classList.remove("hidden");
-    } else {
-      hintBar.classList.add("hidden");
-    }
-  },
-  // The palette shows what THIS window can place. A graph window in DTC mode
-  // offers the DTC glyphs, anywhere else the stratigraphic types (WIN3's
-  // per-mode content, read from the WINDOW — in a tiled shell "the window's
-  // projection" and "the app's view" are different things).
-  { mode: winMode(win) },
-  );
-  paletteUis.push(ui);
-}
-
-// ── PALETTE1 · the palette is a PANEL you open ──────────────────────────────
-//
-// It used to be a fixed column, always there, showing one general offer for the
-// whole workspace. Two things were wrong with that in a tiled shell: it cost the
-// canvas its width whether or not you were placing anything, and "the types you
-// can place" is a fact about a WINDOW — the focused one — not about the app.
-//
-// So: one palette, opened and closed from Tools, showing the types of the window
-// that has the focus. Closed, the column is gone and the canvas has the space.
-// The drop itself is untouched (DND1/WIN6: every area accepts a drop and places
-// in its own camera), and so is the filter box at the top.
+// GONE (1 ott 2026, SHIFT-A) · the node palette: `buildPaletteForMode`,
+// `paletteUis`, the click-to-arm `placingType` and its drag & drop. A node is
+// added AT THE CURSOR now, from the «Aggiungi» menu (Shift+A, right-click, the
+// «+» of a graph window, the long press) — `addNodeFromMenu`. What the palette
+// offered per mode is `add-menu.ts`'s context rule, from the same datamodel.
 
 /**
  * ─────────────── STEP A · the RESOURCES panel, anchored to its window ─────────
@@ -5635,13 +5525,12 @@ interface ResourceProvider {
 }
 
 const RESOURCE_PROVIDERS: Partial<Record<WindowType, ResourceProvider>> = {
-  // the 46 stratigraphic types — or, in DTC Mode, the DTC glyphs (WIN3)
-  graph: {
-    render: (host, win) => {
-      buildPaletteForMode(host, win);
-      renderLegendInto(host);
-    },
-  },
+  // graph: NONE, on purpose (SHIFT-A, 1 ott 2026). The node palette left: a
+  // node is added at the cursor. The SPACE stays — the sidebar mechanism, the
+  // `--palette-w` the canvas reads, the chevron — empty and hidden while the
+  // graph has no provider, because this is where the GRAPHIC TOOLS will live
+  // (draw, measure, annotate on the canvas). Giving the graph a provider again
+  // is the whole of bringing the triangle back.
   // the narrative building blocks. NOT the node types, which are of no use
   // while reading or writing a story — and NOT the connector legend, which
   // explains EDGES and belongs where edges are drawn.
@@ -5651,10 +5540,6 @@ const RESOURCE_PROVIDERS: Partial<Record<WindowType, ResourceProvider>> = {
   annotator: { render: (host) => renderAnnotatorTools(host) },
 };
 
-/** True when this window has something to offer — the ONE place that answers it. */
-function hasResources(win: Win): boolean {
-  return !!RESOURCE_PROVIDERS[win.type];
-}
 
 /** Is this window's panel open? Per INSTANCE, persisted with the window. */
 function resourcesOpen(win: Win): boolean {
@@ -5715,7 +5600,6 @@ function buildResourcePanel(area: HTMLElement, win: Win): void {
 /** Repaint every mounted panel in place — for a scene or document change, which
  *  must not cost a re-tile. */
 function renderResourcePanels(): void {
-  paletteUis.length = 0;
   for (const area of document.querySelectorAll<HTMLElement>(".tile-area")) {
     const panel = area.querySelector<HTMLElement>(":scope > .win-resources");
     if (!panel) continue;
@@ -5728,19 +5612,18 @@ function renderResourcePanels(): void {
   }
 }
 
-/** Open or close the FOCUSED window's panel — Tools ▸ Palette nodi. The chevron
- *  on each area does the same for its own window; both go through
- *  `setResourcesOpen`, so there is one state and it belongs to the window. */
-function togglePalette(): void {
-  const win = activeWin();
-  if (!hasResources(win)) {
-    toast(t("toast.noResourcePanel"));
+// SHIFT-A · Tools ▸ «Aggiungi nodo… ⇧A» took the place of «Palette nodi»: the
+// same menu as the key, over the active graph window (or the first one).
+document.getElementById("btn-tool-add")?.addEventListener("click", () => {
+  const win = activeWin().type === "graph" ? activeWin() : windowsOf().find((w) => w.type === "graph");
+  const cv = win && graphWindows.get(win.id)?.cv;
+  if (!win || !cv) {
+    toast(t("add.noGraphWindow"));
     return;
   }
-  setResourcesOpen(win, !resourcesOpen(win));
-}
-
-document.getElementById("btn-tool-palette")?.addEventListener("click", togglePalette);
+  const r = cv.getBoundingClientRect();
+  openAddMenu(win, r.left + r.width / 2, r.top + r.height / 2);
+});
 // STEP A · the chevrons are BUILT PER AREA (`buildResourcePanel`) and wired
 // there, to their own window. There is no singleton to bind here any more —
 // that singleton was the follow-the-focus bug.
@@ -5778,15 +5661,6 @@ async function reassertSizes(): Promise<void> {
     // still a valid layout, only its glyph boxes are out of date.
     logWarn(`size re-assert skipped: ${e instanceof Error ? e.message : e}`);
   }
-}
-
-function cancelPlacing(): void {
-  placingType = null;
-  placingKind = null;
-  placingIsResource = false;
-  for (const p of paletteUis) p.setActive(null);
-  setCanvasCursor("placing", false);
-  hintBar.classList.add("hidden");
 }
 
 // EM-mode add-epoch: insert a lane at `index` in the top-level stack (default
@@ -5890,9 +5764,9 @@ const nodeList = {
  * gesture was aimed at: not an error anyone would see, just a node in a graph
  * nobody was looking at.
  *
- * One resolver, used by every authoring path on the canvas (`placeNode`,
- * `createNodeAt`, `createEdge`, the delete key), so the four cannot disagree
- * about which document a gesture lands in.
+ * One resolver, used by every authoring path on the canvas (`addNodeFromMenu`,
+ * `createEdge`, the delete key), so the three cannot disagree about which
+ * document a gesture lands in.
  */
 function canvasStore(): DocumentStore | null {
   if (view !== "dtc") return store;
@@ -5967,96 +5841,6 @@ const RIGHTS_TYPES = new Set<string>(
     .map((cls) => nodeTypeForClass(cls))
     .filter((nt): nt is string => !!nt),
 );
-
-function placeNode(wx: number, wy: number): void {
-  if (!store || !placingType) return;
-  // DAG · authoring the CORPUS: the same gesture, a different document. The
-  // corpus has no lanes, no groups and no matrix, so none of the study-side
-  // homing below applies — a node is created, stamped with its DTC kind, and the
-  // DAG lays it out by rank the moment it exists.
-  if (canvasWritesToCorpus()) {
-    const corpus = canvasStore()!;
-    if (!corpusAcceptsType(placingType)) {
-      toast(t("dtc.corpusRefusesType", { type: placingType }));
-      cancelPlacing();
-      return;
-    }
-    const cid = corpus.newId();
-    const cnode: EmNode = {
-      id: cid,
-      name: corpus.freshLabel(placingType),
-      node_type: placingType,
-      description: "",
-    };
-    if (placingKind) {
-      cnode.data = { dtc_kind: placingKind };
-      if (placingIsResource) cnode.data.resource_type = placingKind;
-    }
-    corpus.addNode(cnode, { x: wx - 45, y: wy - 15, w: 90, h: 30 });
-    select(cid);
-    cancelPlacing();
-    toast(t("dtc.corpusCreated", { name: cnode.name ?? cid }));
-    return;
-  }
-  // Epochs are special: an EpochNode + a swimlane (Matrix lane / Graph node,
-  // invariant 4). Lets you populate epochs in a fresh graph.
-  if (placingType === "EpochNode") {
-    const w = 140,
-      h = 30;
-    const ep = store.addEpoch(undefined, { x: wx - w / 2, y: wy - h / 2, w, h });
-    select(ep.id);
-    cancelPlacing();
-    toast(`epoch ${ep.name} created`);
-    return;
-  }
-  // id = UUID (identity, collision-free across tools); name = human label
-  const id = store.newId();
-  // NAME1 · the paradata chain has a convention (D.<n> / <doc>.<ord> / C.<n>);
-  // every other type keeps the store's generic fresh label. A new extractor is
-  // born unattached, so it gets a Temp name and is numbered when the
-  // `extracted_from` edge appears — see `createEdge`.
-  const name = initialName(store.doc, placingType) ?? store.freshLabel(placingType);
-  const w = isGroupType(placingType) ? 120 : 90;
-  const h = 30;
-  const node: EmNode = { id, name, node_type: placingType, description: "" };
-  // DTC palette items carry a kind → stamp it so the node renders its glyph and
-  // projects its crm:P2_has_type (em.json = single source of truth).
-  if (placingKind) {
-    // DTC chunk (input/process) carries dtc_kind; a DTC OUTPUT is a Resource
-    // (ResourceNode) → also stamp resource_type (slice b). em.json = source of truth.
-    node.data = { dtc_kind: placingKind };
-    if (placingIsResource) node.data.resource_type = placingKind;
-  }
-  if (inContext()) {
-    const gid = contextStack[contextStack.length - 1];
-    store.addNode(node);
-    store.moveInGroupSpace(gid, id, { x: wx - w / 2, y: wy - h / 2, w, h }, false);
-    // membership edge into the group we are inside
-    const g = store.node(gid);
-    const types = allowedEdgeTypes(placingType, g?.node_type);
-    const membership = types.find((t) => t.startsWith("is_in_"));
-    if (membership) store.addEdge(id, gid, membership);
-  } else {
-    store.addNode(node, { x: wx - w / 2, y: wy - h / 2, w, h });
-    // matrix view: assign the epoch of the lane the node was dropped in
-    if (view === "matrix" && isStratigraphicType(placingType)) {
-      const lane = scenes.matrix?.lanes.find(
-        (l) => wy >= l.y && wy <= l.y + l.height,
-      );
-      if (lane) store.addEdge(id, lane.id, "has_first_epoch");
-    }
-  }
-  ensureCircleVisibleFor(placingType); // reveal its ring if the filter hid it
-  // BUGFIX-GLYPH · a glyph/shape type must never keep the wide default box: ask
-  // em-core (the size owner) to re-assert the new node's box from its TYPE, so a
-  // freshly created extractor/combiner/SE/BR is born ~square with the handle
-  // adjacent — not only after a Matrix re-load (EM2/EM3).
-  void reassertSizes();
-  select(id);
-  if (vocabularyFor(placingType)) openQualiaPicker(id, wx, wy); // pick its label
-  cancelPlacing();
-  toast(`${id} created`);
-}
 
 // ---------- TOCCARE · the drag, from the first frame to the commit ----------
 //
@@ -6524,8 +6308,8 @@ function hideEdgeMenu(): void {
 //
 // ONE creation, for the four ways into the «Aggiungi» menu (Shift+A, right-click
 // on empty canvas, the «+» in a graph window's header, the long press) and for
-// the anchor drag. It replaces two copies (`placeNode` for the palette and
-// `createNodeAt` for the anchor), which had drifted: neither put a node into
+// the anchor drag. It replaced two copies (`placeNode` for the palette, gone
+// with it, and `createNodeAt` for the anchor), which had drifted: neither put a node into
 // the group body under the cursor, neither knew the phase bands, and both made
 // a node and its edge two undo steps.
 //
@@ -9900,7 +9684,6 @@ function applyTemplate(t: DetailTemplate): void {
   circleState[view] = new Set(t.circles);
   recomputeHiddenFromCircles();
   buildScenes();
-  updateLegend();
   draw();
   renderCirclesPanel();
   if (view === "matrix") void refreshMatrixViewLayout();
@@ -9982,8 +9765,7 @@ function renderCirclesPanel(): void {
         else visible.delete(circle.key);
         recomputeHiddenFromCircles();
         buildScenes();
-        updateLegend();
-        draw();
+              draw();
         // Matrix recompacts on the filtered subgraph (em-core view layout);
         // in Graph the layout already reflows, so just invalidate for later.
         if (view === "matrix") void refreshMatrixViewLayout();
@@ -10023,8 +9805,7 @@ function renderCirclesPanel(): void {
     circleState[view] = defaultVisibleCircles(view);
     recomputeHiddenFromCircles();
     buildScenes();
-    updateLegend();
-    draw();
+      draw();
     renderCirclesPanel();
     if (view === "matrix") void refreshMatrixViewLayout();
     else matrixViewLayout = null;
@@ -10302,7 +10083,6 @@ function closeWorkspace(): void {
   nodeList.refresh();
   updateToolbar();
   updateBreadcrumb();
-  updateLegend();
   refreshInspector();
   refreshNarrativeView();
   draw();
@@ -10380,7 +10160,6 @@ function applyLanguage(code: Locale): void {
   refreshInspector();
   nodeList.refresh();
   refreshNarrativeView();
-  updateLegend();
   updateToolbar();
   draw();                   // the canvas draws no chrome, but the legend feeds it
 }
@@ -11943,6 +11722,8 @@ interface GraphMount {
   winId: string;
   cv: HTMLCanvasElement;
   paint: (live: LiveGesture | null) => void;
+  /** the empty-canvas hint, which lives in the area beside the canvas */
+  hint?: HTMLElement;
 }
 const graphWindows = new Map<string, GraphMount>();
 function graphMounts(): GraphMount[] {
@@ -11972,11 +11753,22 @@ function mountGraphCanvas(cv: HTMLCanvasElement, mini: HTMLCanvasElement,
     vp.y = h / 2 - wy * vp.scale;
     draw();
   });
+  // SHIFT-A · the discreet hint of an EMPTY graph canvas — a document open and
+  // nothing on it yet. It goes with the first node, because it is computed from
+  // the scene every paint and not stored anywhere.
+  const hint = document.createElement("div");
+  hint.className = "canvas-empty-hint hidden";
+  cv.parentElement?.appendChild(hint);
   const mount: GraphMount = {
     winId,
     cv,
+    hint,
     paint: (live) => {
       const mode = graphModeOf(winId);
+      const shown = live && inContext() ? contextScene : (scenes[mode] ?? null);
+      const empty = !!store && !(shown?.nodes.length);
+      hint.classList.toggle("hidden", !empty);
+      if (empty) hint.textContent = t("add.emptyHint");
       paintGraphWindow({
         winId, cv, mode,
         // the hypergraph context belongs to the window that entered it, and the
@@ -12000,6 +11792,7 @@ function graphModeOf(winId: string): ViewKind {
 }
 
 function unmountGraphCanvas(winId: string): void {
+  graphWindows.get(winId)?.hint?.remove();
   graphWindows.delete(winId);
 }
 /*
@@ -12287,28 +12080,22 @@ function createArea(winId: string): HTMLElement {
   // Guarded: never mid-drag (moving across a divider while dragging a node must
   // not hand the node to another window), and never while placing a node.
   area.addEventListener("pointerenter", () => {
-    if (dragMode !== "none" || connect || placingType || shellGesture) return;
+    if (dragMode !== "none" || connect || shellGesture) return;
     if (activeWin().id === winId) return;
     selectWindow(winId);
   });
-  // ── the palette drop lands on THIS window ────────────────────────────────
+  // ── a Storage drag lands on THIS window (a Viewer or a Shelf) ────────────
   //
-  // A drag from the palette is an HTML5 drag: pointer events do not fire, so
-  // focus-follows-mouse cannot hand the editor over mid-drag and the drop would
-  // be delivered to whichever canvas happened to be the editor — creating the
-  // node in the wrong window. So the area accepts the drop itself: it takes the
-  // focus and places the node at the point of the GRAPH that was pointed at, in
-  // this area's own camera.
+  // An HTML5 drag fires no pointer events, so focus-follows-mouse cannot hand
+  // the window over mid-drag: the area accepts the drop itself and takes the
+  // focus. (The node palette's drop was the other half of this; it left with
+  // the palette, SHIFT-A.)
   area.addEventListener("dragover", (e) => {
     if (storageDragPayload(e) &&
         ["viewer", "shelf"].includes(winNow()?.type ?? "")) {
       e.preventDefault();
       area.classList.add("drop-target");
-      return;
     }
-    if (!paletteDragPayload(e)) return;
-    e.preventDefault();
-    area.classList.add("drop-target");
   });
   area.addEventListener("dragleave", () => area.classList.remove("drop-target"));
   area.addEventListener("drop", (e) => {
@@ -12330,9 +12117,6 @@ function createArea(winId: string): HTMLElement {
       else void addFileToShelf(resource);
       return;
     }
-    // …and a PALETTE drop is the canvas's (`wireGraphCanvas`), which knows where
-    // in the graph the pointer was. The area used to catch it because a
-    // secondary area had no live canvas to catch it with.
   });
   /*
    * GONE (15 set 2026) · the area's own `pointerdown`.
@@ -12581,7 +12365,6 @@ function renderTiles(): void {
   }
   // the resources panel and the corner grips belong to the ARRANGEMENT: they are
   // rebuilt here, with it, and never on a focus change
-  paletteUis.length = 0;
   for (const [id, area] of winAreas) {
     const win = windowsOf().find((w) => w.id === id);
     if (!win) continue;
@@ -19789,20 +19572,6 @@ window.addEventListener("drop", (e) => {
   if (f) loadFile(f);
 });
 
-// PALETTE drag → instantiate at the cursor. Sibling of the click-to-arm gesture,
-// not a replacement: it reuses `placeNode`, so lane/epoch assignment, group
-// membership when inside a hypergraph, the DTC kind stamp and the qualia picker
-// all behave identically. Setting the placing* trio is how a drop "arms" the
-// same code path for one shot; placeNode's cancelPlacing clears it.
-const paletteDragPayload = (e: DragEvent): PaletteDragPayload | null => {
-  const raw = e.dataTransfer?.getData(PALETTE_MIME);
-  if (!raw) return null;
-  try {
-    return JSON.parse(raw) as PaletteDragPayload;
-  } catch {
-    return null; // a foreign drag claiming our MIME is not worth a crash
-  }
-};
 /**
  * THE TEN GESTURES, wired to ONE window's canvas.
  *
@@ -19847,7 +19616,7 @@ function wireGraphCanvas(canvas: HTMLCanvasElement, winId: string): void {
   /** Take the focus, unless a gesture is already in flight somewhere: a drag
    *  that crosses a divider must not hand its node to another window. */
   const claim = (): void => {
-    if (dragMode !== "none" || connect || placingType) return;
+    if (dragMode !== "none" || connect) return;
     if (activeWin().id !== winId) selectWindow(winId);
   };
 
@@ -19855,14 +19624,6 @@ function wireGraphCanvas(canvas: HTMLCanvasElement, winId: string): void {
     const rect = canvas.getBoundingClientRect();
     return viewport().toWorld(e.clientX - rect.left, e.clientY - rect.top);
   }
-  canvas.addEventListener("dragover", (e) => {
-    claim();
-    if (!e.dataTransfer?.types?.includes(PALETTE_MIME)) return;
-    e.preventDefault(); // without this the drop event never fires
-    e.dataTransfer.dropEffect = "copy";
-    canvas.classList.add("drop-target");
-  });
-  canvas.addEventListener("dragleave", () => canvas.classList.remove("drop-target"));
   // SHIFT-A · the tablet's right-click: a press held 500 ms on empty space opens
   // «Aggiungi» there. A finger that moves is a pan, a press on a node is the
   // node's — the same threshold as the drag (DRAG_START_PX), measured the same way.
@@ -19900,22 +19661,6 @@ function wireGraphCanvas(canvas: HTMLCanvasElement, winId: string): void {
   });
   canvas.addEventListener("pointerup", endLongPress);
   canvas.addEventListener("pointercancel", endLongPress);
-  canvas.addEventListener("drop", (e) => {
-    claim();
-    canvas.classList.remove("drop-target");
-    const p = paletteDragPayload(e);
-    if (!p) return; // not ours (a file drop bubbles on to the window handler)
-    e.preventDefault();
-    if (!store) {
-      toast("Open a document first");
-      return;
-    }
-    placingType = p.nodeType;
-    placingKind = p.kind ?? null;
-    placingIsResource = !!p.isResource;
-    const w = worldPos(e);
-    placeNode(w.x, w.y);
-  });
   canvas.addEventListener("pointerdown", (e) => {
     claim();
     finishSlide(); // TOCCARE · grab the node where it is going, not mid-glide
@@ -19937,7 +19682,8 @@ function wireGraphCanvas(canvas: HTMLCanvasElement, winId: string): void {
     }
     // "PD" tag in a lane / band label chip → enter that epoch/phase temporal PDG
     // (same as double-clicking the old box). Resolved on pointerup as a click.
-    if (!placingType) {
+    // The screen-space chips of the canvas, before any node hit:
+    {
       const rect = canvas.getBoundingClientRect();
       const lx = e.clientX - rect.left;
       const ly = e.clientY - rect.top;
@@ -19992,10 +19738,6 @@ function wireGraphCanvas(canvas: HTMLCanvasElement, winId: string): void {
     const s = scene();
     if (!s) return;
     const w = worldPos(e);
-    if (placingType) {
-      dragMode = "none";
-      return; // click placement handled on pointerup
-    }
     // connect handle? The bullet shows on the hovered/selected node always, and
     // on EVERY node when zoomed in (renderer) — so allow starting a connect from
     // any node's right-edge handle there, not only the focused one (the handle
@@ -20305,7 +20047,7 @@ function wireGraphCanvas(canvas: HTMLCanvasElement, winId: string): void {
     const overContainer =
       !!hit && (s.groupsById?.has(hit.id) || isGroupType(hit.node.node_type));
     const eiHover =
-      placingType || (hit && !overContainer) ? -1 : pickEdgeAt(w.x, w.y);
+      hit && !overContainer ? -1 : pickEdgeAt(w.x, w.y);
     const newHoverEdge = eiHover >= 0 ? eiHover : null;
     // when a connector is hovered, don't also accent the node/container under it
     const newHover = newHoverEdge != null ? null : (hit?.id ?? null);
@@ -20323,7 +20065,6 @@ function wireGraphCanvas(canvas: HTMLCanvasElement, winId: string): void {
         : "default";
     if (
       newHoverEdge != null &&
-      !placingType &&
       getSettings().interaction.edgeTooltips
     ) {
       // connector tooltip: the edge type + its endpoints (endpoint labels follow
@@ -20342,7 +20083,7 @@ function wireGraphCanvas(canvas: HTMLCanvasElement, winId: string): void {
       tooltip.style.left = Math.min(e.clientX + 14, innerWidth - 380) + "px";
       tooltip.style.top = e.clientY + 14 + "px";
       tooltip.classList.remove("hidden");
-    } else if (hit && !placingType) {
+    } else if (hit) {
       // The node id only surfaces when the developer "show node ids" setting is
       // on — otherwise both the title fallback and the type line stay id-free.
       tooltip.innerHTML = `<b></b> <span class="tt-type"></span><br><span class="tt-desc"></span>`;
@@ -20443,10 +20184,6 @@ function wireGraphCanvas(canvas: HTMLCanvasElement, winId: string): void {
     const s = scene();
     if (!s) return;
     const w = worldPos(e);
-    if (placingType) {
-      placeNode(w.x, w.y);
-      return;
-    }
     if (mode === "marquee") {
       const m = marquee;
       marquee = null;
@@ -20690,7 +20427,7 @@ let insertPending: number | null = null; // insert boundary pressed → add epoc
 // the last) is the cursor near? Only in Matrix, in the left strip, when idle —
 // drives the "insert epoch here" affordance (hover indicator + click).
 function insertBoundaryAt(sx: number, sy: number): number | null {
-  if (view !== "matrix" || !store || placingType || dragMode !== "none")
+  if (view !== "matrix" || !store || dragMode !== "none")
     return null;
   const s = scenes.matrix;
   if (!s || !s.lanes.length) return null;
@@ -21066,7 +20803,6 @@ window.addEventListener("keydown", (e) => {
   }
   if (e.key === "Escape") {
     if (ctxMenuEl) hideContextMenu();
-    else if (placingType) cancelPlacing();
     else if (filterPanelOpen()) closeFilterPanel();
     else if (!edgeMenu.classList.contains("hidden")) hideEdgeMenu();
     else if (inContext()) {
