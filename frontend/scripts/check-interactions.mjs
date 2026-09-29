@@ -129,7 +129,7 @@ async function storageInto(p, names) {
   for (const n of names) {
     const row = p.locator(".storage-row", { has: p.locator(".storage-name", { hasText: new RegExp(`^${n}$`) }) }).first();
     await row.waitFor({ timeout: 8000 });
-    await row.dblclick();
+    await row.click();          // AUDIT N10 · one click opens a folder
     await p.waitForTimeout(600);
   }
 }
@@ -941,6 +941,53 @@ test("10.tabs", "doppio clic su una scheda dello spazio = rinomina, per tutte; i
   const items = await p.evaluate(() => [...document.querySelectorAll(".ctx-menu button")].map((b) => b.textContent));
   await ctx.close();
   return { pass: label === "Strati" && items.some((i) => /Rinomina/.test(i)) && items.some((i) => /Ripristina/.test(i)), detail: { label, items } };
+});
+
+// ── PARTE 11 · shelf e storage leggibili ────────────────────────────────────
+const SHELF3 = { id: "shelf", name: "Shelf di prova", entries: [
+  { id: "sh1", name: "prospetto_nord_USM101_campagna2026.jpg", kind: "image", locator: "/Users/x/scavo/foto/prospetto_nord_USM101_campagna2026.jpg", scope: "own-study", residency: "resident", checksum: "sha256:4c5b80263bfa65b08e8f85db68426ebcfe31b0cbb36b07ad9286f11b3739679b" },
+  { id: "sh2", name: "rilievo.glb", kind: "model", locator: "https://example.org/iiif/rilievo.glb", scope: "other-HDT", residency: "reference" },
+  { id: "sh3", name: "scheda_US105.pdf", kind: "document", locator: "s3://bucket/room/scheda_US105.pdf", scope: "own-study", residency: "resident" }] };
+for (const w of [1280, 1600]) {
+  test(`11.shelf${w}`, `shelf a ${w}: righe a due livelli senza testo sovrapposto, conteggio intero`, async () => {
+    const { p, ctx } = await open({ doc: "catena", ws: "assets", w, h: 860, init: { "emstudio.shelf": JSON.stringify(SHELF3) } });
+    await p.waitForTimeout(500);
+    const r = await p.evaluate(() => {
+      const x = (a, b) => a.left < b.right - 0.5 && b.left < a.right - 0.5 && a.top < b.bottom - 0.5 && b.top < a.bottom - 0.5;
+      const bad = [];
+      for (const row of document.querySelectorAll(".shelf-row")) {
+        const parts = [...row.children].map((c) => c.getBoundingClientRect()).filter((q) => q.width && q.height);
+        for (let i = 0; i < parts.length; i++) for (let j = i + 1; j < parts.length; j++) if (x(parts[i], parts[j])) bad.push(`${row.dataset.entry}:${i}×${j}`);
+        const name = row.querySelector(".shelf-name").getBoundingClientRect();
+        if (name.width < 60) bad.push(`${row.dataset.entry}:name ${Math.round(name.width)}px`);
+      }
+      const c = document.querySelector('[data-win$=":shelf"] .win-strip-count');
+      const cr = c?.getBoundingClientRect();
+      // whole AND in view: inside every clipping box around it (the strip, the
+      // bar), not scrolled or cut out of them
+      let inView = !!cr && cr.width > 20;
+      for (let e = c?.parentElement; e && inView && !e.classList.contains("tile-area"); e = e.parentElement) {
+        const st = getComputedStyle(e);
+        if (st.overflowX === "visible" && st.overflow === "visible") continue;
+        const q = e.getBoundingClientRect();
+        if (cr.left < q.left - 0.5 || cr.right > q.right + 0.5 || cr.top < q.top - 0.5 || cr.bottom > q.bottom + 0.5) inView = false;
+      }
+      return { bad, count: c?.textContent ?? "", countWhole: !!c && c.scrollWidth <= c.clientWidth + 1 && inView };
+    });
+    await ctx.close();
+    return { pass: !r.bad.length && r.countWhole && /3/.test(r.count), detail: r };
+  });
+}
+test("11.folder", "una cartella dello Storage si apre con un clic", async () => {
+  const { p, ctx } = await open({ doc: "catena", ws: "assets" });
+  const root = await rootPath();
+  const row = p.locator(".storage-row", { has: p.locator(".storage-name", { hasText: /^fs$/ }) }).first();
+  await row.waitFor({ timeout: 8000 });
+  await row.click();
+  await p.waitForTimeout(700);
+  const names = await p.evaluate(() => [...document.querySelectorAll(".storage-row .storage-name")].map((n) => n.textContent));
+  await ctx.close();
+  return { pass: names.includes("vuota") && names.includes("modelli"), detail: { names, root } };
 });
 
 // ── run ─────────────────────────────────────────────────────────────────────

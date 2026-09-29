@@ -20358,6 +20358,12 @@ function storageRow(win: Win, entry: FsEntry): HTMLElement {
     // ONE click selects a file; a folder is navigated and never selected (see
     // `storageSelected`). Clicking the selected one again clears it, so there is
     // a way back to «nothing is selected» that is not a keyboard secret.
+    // AUDIT N10 · a FOLDER opens with one click (it opened only on the double
+    // click, which nothing on the row said)
+    if (entry.type === "dir") {
+      if (!entry.outside) setStoragePath(win, entry.path);
+      return;
+    }
     if (entry.type !== "file") return;
     // CATENA · ⌘/Ctrl/Shift-click PICKS several files: the group an EM Stamp is
     // composed for («EM Stamp di gruppo»)
@@ -20371,9 +20377,7 @@ function storageRow(win: Win, entry: FsEntry): HTMLElement {
     if (storagePicked(win).length) setStoragePicked(win, []);
     setStorageSelected(win, storageSelected(win) === entry.path ? null : entry.path);
   });
-  row.addEventListener("dblclick", () => {
-    if (entry.type === "dir") setStoragePath(win, entry.path);
-  });
+  row.dataset.type = entry.type;
   row.draggable = true;
   row.addEventListener("dragstart", (e) => {
     const payload: StorageDragPayload = {

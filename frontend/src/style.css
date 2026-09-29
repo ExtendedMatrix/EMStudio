@@ -8617,3 +8617,49 @@ button.shelf-badge { cursor: pointer; font: inherit; font-size: 10.5px; }
 .nl-modes { display: inline-flex; border: 1px solid var(--border, #ddd); border-radius: 999px; overflow: hidden; }
 .nl-mode { border: 0; background: none; font-size: 11px; padding: 1px 8px; cursor: pointer; color: var(--muted, #666); }
 .nl-mode.on { background: var(--sel-bg, rgba(74, 144, 217, 0.12)); color: var(--text, #222); font-weight: 600; }
+
+/* ── AUDIT N10 · shelf rows in two levels ─────────────────────────────────────
+ * The row was ONE line of four columns (icon · name · badges · actions), and in
+ * a narrow window the badges and the buttons took the width and the NAME went
+ * to zero (measured at 1280: «receipt · res:… own study resident» over each
+ * other, the name gone). Now: the name on the first line, whole or ellipsed;
+ * under it what it is — type · state · provenance — as small quiet badges; the
+ * actions last, wrapping. Nothing is on top of anything. */
+.shelf-row {
+  grid-template-columns: 22px minmax(0, 1fr);
+  grid-template-areas: "icon main" "icon badges" "icon actions";
+  align-items: start;
+  row-gap: 3px;
+}
+.shelf-row > .shelf-icon { grid-area: icon; padding-top: 2px; }
+.shelf-row > .shelf-main { grid-area: main; }
+.shelf-row > .shelf-badges { grid-area: badges; justify-content: flex-start; min-width: 0; }
+.shelf-row > .shelf-actions { grid-area: actions; flex-wrap: wrap; }
+.shelf-row .shelf-name { font-weight: 600; }
+.shelf-row .shelf-badge { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.shelf-receipt, .shelf-sub { overflow: hidden; text-overflow: ellipsis; }
+/* AUDIT N10 · the header's count is always WHOLE («71 risorse», never «0 re…»):
+ * it does not shrink; the shelf's name does, down to a readable minimum */
+.win-strip-count { white-space: nowrap; flex-shrink: 0; }
+.win-strip-shelfname { min-width: 56px; flex: 1 1 90px; }
+.win-strip:has(.win-strip-shelfname) { flex: 1 1 auto; }
+/* …and the shelf TABLE: every column has a floor and ellipses what exceeds it,
+ * headers included (measured: «fence/own-study» written over its neighbour) */
+.shelf-table { table-layout: fixed; }
+.shelf-table th, .shelf-table td {
+  min-width: 7ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.shelf-table-wrap, .tile-shelfbody { overflow-x: auto; }
+/* AUDIT N10 · a folder of the Storage opens with ONE click */
+.storage-row[data-type="dir"] { cursor: pointer; }
+/* AUDIT N10 · a NARROW window keeps what counts in its header in view: the type
+ * shrinks to its icon, the shelf's name gives way to its count (the bar would
+ * otherwise scroll it out of sight, «0 re…») */
+.tile-area { container-type: inline-size; }
+@container (max-width: 380px) {
+  .win-header .win-type-label, .win-header .win-type-caret { display: none; }
+  .win-strip-shelfname { display: none; }
+  /* …and what still does not fit goes to a second row, never out of sight */
+  .tile-area > .tile-bar { flex-wrap: wrap; height: auto; row-gap: 4px; overflow-x: hidden; }
+  .win-strip { flex-shrink: 0; overflow: visible; }
+}
