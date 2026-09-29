@@ -30,6 +30,9 @@ export interface SceneNode {
   instanceOf?: string;
   /** how many times this document is used in the scene (corner decorator) */
   useCount?: number;
+  /** CATENA · a DATED document (its own has_first_epoch): the master in its
+   *  epoch's lane, re-instanced in every paradata group that reads it */
+  dated?: boolean;
   /** position is pinned (locked) — the renderer shows a small lock badge */
   pinned?: boolean;
   /** BADGE1 · ornament miniatures (author/license/embargo) pinned to a corner;

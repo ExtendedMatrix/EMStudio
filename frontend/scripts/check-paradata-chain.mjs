@@ -12,7 +12,11 @@
 import * as esbuild from "esbuild";
 import assert from "node:assert/strict";
 import { readFileSync, existsSync } from "node:fs";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
+import { mkdtempSync, writeFileSync, readFileSync as readF, appendFileSync, realpathSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { createHash } from "node:crypto";
+import { createServer } from "node:net";
 
 const mem = new Map();
 globalThis.localStorage = {
@@ -31,6 +35,11 @@ const bundle = await esbuild.build({
       export { isStratigraphicType, allowedEdgeTypes } from "./rules";
       export { handleEdgeTypes, existingLinks } from "./add-menu";
       export * as aiv from "./ai-validation";
+      export * as receipts from "./receipt";
+      export * as tropy from "./tropy";
+      export * as shelf from "./shelf";
+      export { newDraft, emitDraft, readyToStamp, setComposeBridgeResolver, outputFrom } from "./stamp-compose";
+      export { dtcKindsFor } from "./rules";
       export { issues } from "./issues";
     `,
     resolveDir: SRC,
@@ -52,7 +61,8 @@ const bundle = await esbuild.build({
 const M = await import(
   "data:text/javascript;base64," + Buffer.from(bundle.outputFiles[0].text).toString("base64")
 );
-const { chain, DocumentStore, naming, isStratigraphicType, handleEdgeTypes, existingLinks, aiv, issues } = M;
+const { chain, DocumentStore, naming, isStratigraphicType, handleEdgeTypes, existingLinks, aiv, issues,
+        receipts, tropy, shelf } = M;
 const S3D = new URL("../../../s3Dgraphy/", import.meta.url).pathname;
 const PY = `${S3D}.venv/bin/python`;
 /** ask s3Dgraphy (when its venv is there) a question about a document */
@@ -284,6 +294,107 @@ print(json.dumps(api.validate(g)["info"]))`;
      "a StratiMiner extractor (has_author → AuthorAINode) stays among the warnings");
   aiv.verifyNodesAs(st, ["X1"], ME);
   eq(aiv.unvalidatedAi(st.doc), [], "…until a person verifies it");
+}
+
+// ── fase 6 · a GROUP stamp on three files writes three receipts ────────────
+{
+  const BR = new URL("../../tools/em_bridge.py", import.meta.url).pathname;
+  if (!existsSync(PY)) console.log("  (s3Dgraphy venv not found: the stamp round trip is skipped)");
+  else {
+    const dir = realpathSync(mkdtempSync(`${tmpdir()}/catena-stamp-`)); // /var → /private/var
+    const files = ["prospetto_01.jpg", "prospetto_02.jpg", "prospetto_03.jpg"].map((n, i) => {
+      const p = `${dir}/${n}`;
+      writeFileSync(p, `bytes of photo ${i} ${"x".repeat(100 + i)}`);
+      return p;
+    });
+    const port = await new Promise((res) => { const srv = createServer(); srv.listen(0, () => {
+      const pt = srv.address().port; srv.close(() => res(pt)); }); });
+    const proc = spawn(PY, [BR, "--port", String(port), "--s3dgraphy", `${S3D}src`, "--fs-root", dir],
+                       { stdio: "ignore", env: { ...process.env, PYTHONPATH: `${S3D}src` } });
+    const base = `http://127.0.0.1:${port}`;
+    try {
+      for (let i = 0; i < 80; i++) {
+        try { if ((await fetch(`${base}/health`)).ok) break; } catch { /* not yet */ }
+        await new Promise((r) => setTimeout(r, 150));
+      }
+      M.setComposeBridgeResolver(async () => base);
+      // the bridge's /fs and /stamp routes want the local EMStudio's Origin, which a
+      // browser sends and node does not
+      const nodeFetch = globalThis.fetch;
+      globalThis.fetch = (u, init = {}) => nodeFetch(u, { ...init,
+        headers: { ...(init.headers ?? {}), Origin: "http://localhost:5173" } });
+      const sha = (p) => `sha256:${createHash("sha256").update(readF(p)).digest("hex")}`;
+      const outs = files.map((p) => ({ ...M.outputFrom({ name: p.split("/").pop(), path: p, type: "file",
+        size: readF(p).length, mtime: 0, ext: "jpg" }), digest: sha(p) }));
+      const draft = M.newDraft(outs);
+      Object.assign(draft, { origin: true, originDeclared: true, campaign: "CE26",
+        kind: M.dtcKindsFor("acquisition")[0]?.kind ?? "", at: "2026-03-14T09:00:00Z",
+        description: "prospetto nord di USM101, campagna 2026",
+        operator: { id: "https://orcid.org/0000-0002-1825-0097", label: "Emanuel Demetrescu" } });
+      eq(M.readyToStamp(draft), null, "the group draft is ready (origin declared, kind, date)");
+      const res = await M.emitDraft(draft, { graph_id: "catena" });
+      if (res.written.length !== 3) console.log(JSON.stringify(res).slice(0, 1500));
+      eq(res.written.length, 3, "ONE act, three stamps written");
+      const recs = receipts.receiptsOfEmission(res.stamps);
+      eq(recs.length, 3, "…three receipts");
+      ok(recs.every((r, i) => r.checksum === outs[i].digest), "…each with the file's sha256 as its checksum");
+      ok(recs.every((r) => r.extra.stamp_receipt.description === "prospetto nord di USM101, campagna 2026"),
+         "…the group's description on each (a copy)");
+      eq(Object.keys(recs[0].extra.stamp_receipt).sort(), ["checksum", "description", "id", "parents", "stamp", "title"],
+         "the receipt is dtcstamp's form {id, checksum, stamp, parents, title?, description?}");
+      const side = JSON.parse(readF(`${files[0]}.stamp.json`, "utf8"));
+      eq([side.self.label, side.self.description], ["prospetto_01.jpg", "prospetto nord di USM101, campagna 2026"],
+         "the sidecar carries self.label and self.description");
+      const before = shelf.shelfEntries().length;
+      for (const r of recs) shelf.addToShelf(r);
+      eq(shelf.shelfEntries().length - before, 3, "three shelf entries");
+      const e0 = shelf.shelfEntries().find((e) => e.locator === files[0]);
+      const rec0 = receipts.receiptOf(e0);
+      eq(receipts.checkReceipt(rec0, side, sha(files[0])), "ok", "the receipt matches the sidecar and the bytes");
+      appendFileSync(files[0], "retouched");
+      eq(receipts.checkReceipt(rec0, side, sha(files[0])), "file-changed", "a file changed under its receipt is said so");
+      eq(receipts.checkReceipt(rec0, null, null), "unreachable", "nothing reachable: nothing claimed");
+    } finally {
+      proc.kill();
+    }
+  }
+}
+
+// ── a Tropy item promoted becomes a document and its readings ─────────────
+{
+  const session = {
+    "@context": "https://tropy.org/v1/contexts/item.jsonld",
+    "@graph": [{
+      "@type": "Item", "@id": "tropy:item/2144", "title": "Foto storica USM101, 1932",
+      "photo": [{ "@type": "Photo", "@id": "tropy:photo/9", "path": "/archivio/foto_USM101_1932.jpg",
+        "width": 2000, "height": 1000, "checksum": "a1b2", "note": [{ "text": "Il capitello nord è già visibile" }],
+        "selection": [{ "@type": "Selection", "x": 400, "y": 300, "width": 300, "height": 200,
+                        "note": [{ "html": "<p>capitello nord in situ</p>" }] },
+                      { "@type": "Selection", "x": 1200, "y": 250, "width": 250, "height": 220, "note": [] }] }],
+    }],
+  };
+  const items = tropy.parseTropy(session);
+  eq(items.map((i) => [i.id, i.title, i.photos.length]), [["tropy:item/2144", "Foto storica USM101, 1932", 1]],
+     "a Tropy session parses to its item");
+  eq(items[0].photos[0].selections.map((x) => [x.rect, x.note]),
+     [[[0.2, 0.3, 0.15, 0.2], "capitello nord in situ"], [[0.6, 0.25, 0.125, 0.22], ""]],
+     "…the selections, normalised to the photo, with their notes");
+  const inputs = tropy.tropyShelfInputs(items);
+  const entry = shelf.addToShelf(inputs[0]);
+  ok(tropy.tropyOf(entry)?.selections.length === 2, "the shelf entry keeps the selections");
+  const st = fresh();
+  const before = undoDepth(st);
+  const r = tropy.promoteToDocument(st, entry);
+  eq(undoDepth(st) - before, 1, "«Promuovi a documento» is one undo step");
+  const d = N(st, r.documentId);
+  eq([d.node_type, d.name, d.data.tropy, d.data.url], ["document", "D.4", "tropy:item/2144", "/archivio/foto_USM101_1932.jpg"],
+     "…a DocumentNode D.<n>, the Tropy item kept, the file as its url");
+  eq(r.extractors.map((x) => N(st, x).name), ["D.4.1", "D.4.2"],
+     "…one extractor per selection, named by NAME1 from the document its region is on (not Temp<n>)");
+  const g = chain.geometryOf(st.doc, r.extractors[0]);
+  eq([g.kind, g.rect], ["region", [0.2, 0.3, 0.15, 0.2]], "…the selection's region is the reading's geometry");
+  eq(N(st, r.extractors[0]).description, "capitello nord in situ", "…its note the reading's description");
+  eq(chain.readingsOfDocument(st.doc, r.documentId).length, 2, "the document lists the two readings");
 }
 
 console.log(`paradata-chain: ${checks} checks ✓`);

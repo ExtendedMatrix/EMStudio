@@ -81,6 +81,12 @@ export interface Draft {
   operator: { id: string; label: string };
   /** la data dell'ATTO, che non è quella di adesso */
   at: string;
+  /** CATENA · il TITOLO del timbro (`self.label`, dtcstamp 46b3b78): per un solo
+   *  file; vuoto = il nome del file. Una cortesia, fuori dalla sostanza. */
+  title: string;
+  /** CATENA · la DESCRIZIONE facoltativa (`self.description`), la stessa per
+   *  ogni uscita di un timbro di gruppo: breve, una riga o due */
+  description: string;
 }
 
 export function newDraft(outputs: DraftOutput[]): Draft {
@@ -103,6 +109,8 @@ export function newDraft(outputs: DraftOutput[]): Draft {
     // avvenuto a marzo deve poterlo dire, e un default che nessuno vede è una
     // data che nessuno ha scelto. L'interfaccia offre «oggi» come un GESTO.
     at: "",
+    title: "",
+    description: "",
   };
 }
 
@@ -163,10 +171,24 @@ async function bridge(): Promise<string> {
   return await resolveBridge();
 }
 
+/** CATENA · what a shelf keeps for a stamped file — dtcstamp's `receipt()`:
+ *  the stamp's identity and the words a person reads, AS A COPY. The truth is
+ *  the sidecar; the receipt is compared with it when it is reachable. */
+export interface StampReceipt {
+  id: string;
+  checksum?: string;
+  stamp: number;
+  parents: Array<{ resource_id: string; digest?: string; kind?: string }>;
+  title?: string;
+  description?: string;
+}
+
 export interface EmitResult {
   ok: boolean;
   process_id?: string;
-  stamps: Array<{ path: string; stamp_path: string; stamp: unknown; notes: string[] }>;
+  stamps: Array<{ path: string; stamp_path: string; stamp: unknown; notes: string[];
+                  /** CATENA · `dtcstamp.receipt(stamp)`, as the bridge made it */
+                  receipt?: StampReceipt | null }>;
   written: string[];
   refused: Array<{ path: string; why: string }>;
   warnings: string[];
@@ -210,7 +232,9 @@ export async function emitDraft(
       path: o.path,
       resource_id: `res:${(o.digest ?? "").slice(7, 19) || o.name}`,
       digest: o.digest,
-      name: o.name,
+      // the title names ONE file; a group keeps each file's own name
+      name: (draft.outputs.length === 1 && draft.title.trim()) || o.name,
+      description: draft.description.trim() || undefined,
       media_type: o.media_type,
       packaging: "file",
       tier: draft.origin ? "master" : "distribution",

@@ -452,19 +452,40 @@ export function buildMatrixScene(
   const instancesByGroup = new Map<string, SceneNode[]>();
   {
     const docUsages = new Map<string, { edgeKey: string; extractorId: string }[]>();
-    for (const e of edges) {
+    // CATENA · a reading of an IMAGE reads its region, which is on the document
+    // (`is_on_resource`): that is a use of the document too, counted ONCE per
+    // extractor whichever of the two edges it has
+    // (read off the DOCUMENT's edges: regions are not drawn in the Matrix, so
+    // the view has already dropped their edges)
+    const live = doc.graph.edges.filter((e) => !((e.attributes ?? {}) as Record<string, unknown>).removed);
+    const regionDoc = new Map<string, string>();
+    for (const e of live)
+      if (e.edge_type === "is_on_resource" && nodeById.get(e.source)?.node_type === "annotation_region"
+          && nodeById.get(e.target)?.node_type === "document") regionDoc.set(e.source, e.target);
+    const viaRegion = live.filter((e) => e.edge_type === "extracted_from" && regionDoc.has(e.target));
+    const counted = new Set<string>();
+    for (const e of [...edges, ...viaRegion]) {
       if (e.edge_type !== "extracted_from") continue;
-      const doc = nodeById.get(e.target);
-      if (!doc || doc.node_type !== "document") continue;
-      if (!scene.byId.has(e.source) || !scene.byId.has(e.target)) continue;
+      const docId = nodeById.get(e.target)?.node_type === "document" ? e.target : regionDoc.get(e.target);
+      const doc = docId ? nodeById.get(docId) : undefined;
+      if (!doc || !docId) continue;
+      if (!scene.byId.has(e.source) || !scene.byId.has(docId)) continue;
+      if (counted.has(`${e.source}|${docId}`)) continue;
+      counted.add(`${e.source}|${docId}`);
       const key = e.id ?? `${e.source}→${e.target}`;
-      if (!docUsages.has(e.target)) docUsages.set(e.target, []);
-      docUsages.get(e.target)!.push({ edgeKey: key, extractorId: e.source });
+      if (!docUsages.has(docId)) docUsages.set(docId, []);
+      docUsages.get(docId)!.push({ edgeKey: key, extractorId: e.source });
     }
+    // CATENA · a document DATED by its own has_first_epoch sits in its epoch's
+    // lane as the master, and is re-instanced even for ONE use: the reading is
+    // in a paradata group, the source in its time
+    const dated = new Set(live.filter((e) => e.edge_type === "has_first_epoch"
+      && nodeById.get(e.source)?.node_type === "document").map((e) => e.source));
     for (const [docId, usages] of docUsages) {
-      if (usages.length < 2) continue;
+      if (usages.length < 2 && !dated.has(docId)) continue;
       const master = scene.byId.get(docId)!;
       master.useCount = usages.length;
+      if (dated.has(docId)) master.dated = true;
       const masterCtx = membership.primaryOf.get(docId);
       let k = 0;
       for (const u of usages) {

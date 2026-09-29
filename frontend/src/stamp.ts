@@ -68,6 +68,11 @@ export interface Stamp {
   stamp: number;
   self: {
     resource_id: string;
+    /** CATENA · the title (dtcstamp 46b3b78): optional, a courtesy, outside
+     *  the stamp's substance; the word `from[].label` already uses */
+    label?: string;
+    /** CATENA · the optional description, a line or two */
+    description?: string;
     digest?: string;
     digest_covers?: string;
     media_type?: string;

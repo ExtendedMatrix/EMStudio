@@ -193,9 +193,16 @@ export function adaptChain(
   return { nodes: [...nodes.values()], edges, missing: missing.size };
 }
 
+/** The stamp's own title first (`self.label`, dtcstamp 46b3b78 — dtcstamp's
+ *  `stamp_title` rule: not when it merely repeats the id), then the file's name,
+ *  then the id. */
 function labelOf(stamp: Stamp, path?: string): string {
-  if (path) return path.split("/").pop() ?? stamp.self.resource_id;
-  return stamp.self.resource_id;
+  const rid = stamp.self.resource_id;
+  const own = String(stamp.self.label ?? "").trim();
+  const tail = rid.split(":").pop()?.split("/").pop() ?? rid;
+  if (own && own !== rid && own !== tail) return own;
+  if (path) return path.split("/").pop() ?? rid;
+  return rid;
 }
 
 function short(digest: string): string {

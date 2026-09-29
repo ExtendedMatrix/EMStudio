@@ -782,7 +782,7 @@ export function render(
       const isCanonical =
         data["is_canonical"] === true ||
         data["is_master"] === true ||
-        (!n.instanceOf && (n.useCount ?? 0) > 1);
+        (!n.instanceOf && ((n.useCount ?? 0) > 1 || !!n.dated));
       // WIDTH says canonical/instance, COLOUR says geometry — resolved once,
       // from the datamodel, by the same rule s3Dgraphy uses.
       const variant = documentVariant(data, isCanonical);

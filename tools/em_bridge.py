@@ -981,8 +981,12 @@ def make_handler(api):
                             "primitives", "format"):
                     if out.get(key) not in (None, "", {}):
                         data[key] = out[key]
+                # CATENA · the stamp's title and description (dtcstamp 46b3b78):
+                # emit_stamp writes self.label from the name and self.description
+                # from the description — both optional, both a courtesy
                 nodes.append({"id": out["resource_id"], "node_type": "resource",
                               "name": out.get("name") or out["resource_id"],
+                              "description": str(out.get("description") or ""),
                               "data": data})
             for inp in (body.get("inputs") or []):
                 data = {"checksum": inp.get("digest")}
@@ -1098,8 +1102,15 @@ def make_handler(api):
                         "emitted and not written: these bytes have no path on "
                         "this disk, so there is no file to put a courtesy copy "
                         "beside. The stamp travels with the object instead.")
+                # the RECEIPT a shelf keeps: dtcstamp's one form, never rebuilt
+                try:
+                    from dtcstamp import receipt as _receipt
+                    rec = _receipt(clean)
+                except Exception as exc:     # an older dtcstamp: no receipt()
+                    rec = None
+                    notes.append(f"no receipt: {exc}")
                 stamps.append({"path": out.get("path"), "stamp_path": stamp_path,
-                               "stamp": clean, "notes": notes})
+                               "stamp": clean, "notes": notes, "receipt": rec})
                 if stamp_path and body.get("write", True):
                     try:
                         with open(stamp_path, "w", encoding="utf-8") as fh:

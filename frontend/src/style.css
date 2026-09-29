@@ -8408,3 +8408,15 @@ body.gesturing-resize * {
 #handle-hint { position: fixed; z-index: 60; pointer-events: none; font: 600 11.5px/1.3 var(--font-sans);
   background: var(--bg-inverse); color: var(--on-inverse); padding: 2px 7px; border-radius: 10px; white-space: nowrap; }
 #handle-hint.bad { background: var(--danger); color: #fff; }
+.chain-dating { display: flex; gap: 6px; } .chain-year { max-width: 7ch; flex: none; }
+
+/* CATENA · the shelf's receipts, Tropy, the group pick */
+.shelf-bar { display: flex; gap: 6px; padding: 6px 8px; border-bottom: 1px solid var(--border); }
+.shelf-receipt { font-size: 11px; color: var(--text-muted); font-family: var(--font-mono); display: flex; flex-wrap: wrap; gap: 4px 8px; align-items: baseline; margin-top: 2px; }
+.shelf-receipt-words { font-family: var(--font-sans); color: var(--text); width: 100%; }
+.shelf-sub { font-size: 11px; color: var(--text-muted); }
+.shelf-badge.promoted { border-color: var(--ok-border); color: var(--ok-ink); }
+.shelf-badge.receipt-file-changed, .shelf-badge.receipt-sidecar-differs { border-color: var(--warn-border); color: var(--warn-ink); background: var(--warn-soft); }
+.shelf-badge.receipt-ok { border-color: var(--ok-border); color: var(--ok-ink); }
+button.shelf-badge { cursor: pointer; font: inherit; font-size: 10.5px; }
+.storage-row.storage-picked { outline: 2px solid var(--accent); outline-offset: -2px; background: var(--bg-accent-soft); }

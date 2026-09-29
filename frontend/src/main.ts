@@ -202,6 +202,8 @@ import * as chain from "./paradata-chain";
 import { mediumOf as mediumOfDoc, renderChainSection, type ChainUi } from "./paradata-inspector";
 import { renderReadingStage, type TraceGeometry } from "./doc-reading";
 import * as aiv from "./ai-validation";
+import { checkReceipt, receiptOf, receiptsOfEmission, type ReceiptCheck } from "./receipt";
+import { parseTropy, promoteToDocument, tropyOf, tropyShelfInputs } from "./tropy";
 import {
   closeAddMenu,
   showAddMenu,
@@ -6832,6 +6834,7 @@ function chainUi(st: DocumentStore): ChainUi {
     },
     openReading,
     aiChip: aiChipFor,
+    documentExtras: (host, docId) => renderDocumentDating(st, host, docId),
     useAsValue: (x) => {
       const p = chain.useAsValue(st, x);
       if (!p) return;
@@ -6840,6 +6843,65 @@ function chainUi(st: DocumentStore): ChainUi {
       toastUndo(msg, st);
     },
   };
+}
+
+/**
+ * CATENA · dating a document: its EPOCH (`has_first_epoch`, which the datamodel
+ * admits for a DocumentNode) and its YEAR (`data.year`, the Doc window's own
+ * field). A dated document is the MASTER in its epoch's lane of the Matrix, with
+ * a thick border; its instances sit in the paradata groups that read it.
+ */
+function renderDocumentDating(st: DocumentStore, host: HTMLElement, docId: string): void {
+  const d = st.node(docId);
+  if (!d) return;
+  const h = document.createElement("h3");
+  h.className = "insp-sect";
+  h.textContent = t("chain.dating");
+  host.appendChild(h);
+  const row = document.createElement("div");
+  row.className = "chain-dating";
+  const sel = document.createElement("select");
+  sel.className = "chain-value";
+  sel.dataset.docEpoch = docId;
+  const cur = st.liveEdges().find((e) => e.source === docId && e.edge_type === "has_first_epoch")?.target ?? "";
+  sel.appendChild(new Option(t("chain.noEpoch"), ""));
+  const epochs = st.topEpochIdsChrono().flatMap((id) => [id, ...st.epochPhases(id)]);
+  for (const id of epochs) {
+    const ep = st.node(id);
+    if (!ep) continue;
+    const phase = !!st.parentEpoch(id);
+    sel.appendChild(new Option(`${phase ? "· " : ""}${String(ep.name ?? id)}`, id, false, id === cur));
+  }
+  sel.addEventListener("change", () => {
+    const v = sel.value;
+    st.batch(() => {
+      if (v) st.setFirstEpoch([docId], v);
+      else {
+        const e = st.liveEdges().find((x) => x.source === docId && x.edge_type === "has_first_epoch");
+        if (e) st.deleteEdge(e);
+      }
+    });
+    const msg = v ? t("chain.datedIn", { d: String(d.name ?? docId), e: String(st.node(v)?.name ?? v) })
+                  : t("chain.undated", { d: String(d.name ?? docId) });
+    logInfo(msg, [docId]);
+    void runLayout(false).then(() => { select(docId); toastUndo(msg, st); });
+  });
+  const year = document.createElement("input");
+  year.className = "chain-value chain-year";
+  year.inputMode = "numeric";
+  year.placeholder = t("chain.yearPh");
+  year.dataset.docYear = docId;
+  year.value = String(((d.data ?? {}) as Record<string, unknown>).year ?? "");
+  year.addEventListener("keydown", (e) => { e.stopPropagation(); if (e.key === "Enter") year.blur(); });
+  year.addEventListener("change", () => {
+    const data = { ...((st.node(docId)?.data ?? {}) as Record<string, unknown>) };
+    const v = year.value.trim();
+    if (v) data.year = /^-?\d+$/.test(v) ? Number(v) : v;
+    else delete data.year;
+    st.updateNode(docId, { data });
+  });
+  row.append(sel, year);
+  host.appendChild(row);
 }
 
 /**
@@ -14737,6 +14799,7 @@ function renderShelfInto(win: Win, body: HTMLElement,
   }
   paintSurface(win, body, () => {
     body.textContent = "";
+    body.appendChild(shelfBar());
     if (!entries.length) {
       const empty = document.createElement("div");
       empty.className = "viewer-empty";
@@ -15034,8 +15097,37 @@ function shelfRow(entry: ShelfEntry): HTMLElement {
     badges.appendChild(sum);
   }
 
+  // CATENA · the RECEIPT of a stamped file (dtcstamp's receipt(), a copy), and
+  // how it compares with the sidecar and the bytes when they are reachable
+  const rec = receiptOf(entry);
+  if (rec) main.appendChild(receiptLine(entry, rec));
+  // CATENA · a Tropy photo: its notes and selections, and whether it was promoted
+  const tr = tropyOf(entry);
+  if (tr) {
+    const tl = document.createElement("div");
+    tl.className = "shelf-sub";
+    tl.textContent = [t("tropy.from"), tr.notes.length ? t("tropy.notes", { n: String(tr.notes.length) }) : "",
+      tr.selections.length ? t("tropy.selections", { n: String(tr.selections.length) }) : ""].filter(Boolean).join(" · ");
+    main.appendChild(tl);
+  }
+  const promoted = String(entry.extra?.promoted_to ?? "");
+  if (promoted && store?.node(promoted)) {
+    const pb = document.createElement("span");
+    pb.className = "shelf-badge promoted";
+    pb.textContent = `${t("tropy.promoted")} · ${String(store.node(promoted)?.name ?? "")}`;
+    badges.appendChild(pb);
+  }
+
   const actions = document.createElement("div");
   actions.className = "shelf-actions";
+  if (!promoted || !store?.node(promoted)) {
+    const pr = document.createElement("button");
+    pr.textContent = t("tropy.promote");
+    pr.title = t("tropy.promoteHint");
+    pr.dataset.promote = entry.id;
+    pr.addEventListener("click", () => promoteShelfEntry(entry));
+    actions.appendChild(pr);
+  }
   if (isAnnotatable(entry)) {
     const annotate = document.createElement("button");
     annotate.textContent = t("shelf.annotate");
@@ -15054,6 +15146,107 @@ function shelfRow(entry: ShelfEntry): HTMLElement {
 
   row.append(icon, main, badges, actions);
   return row;
+}
+
+// ── CATENA · the shelf's bar, the receipts, Tropy, «Promuovi a documento» ────
+
+/** «Importa sessione Tropy (JSON-LD)…» — the shelf is where a Tropy session lands. */
+function shelfBar(): HTMLElement {
+  const bar = document.createElement("div");
+  bar.className = "shelf-bar";
+  const b = document.createElement("button");
+  b.textContent = t("tropy.import");
+  b.dataset.tropy = "1";
+  b.addEventListener("click", () => {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = ".json,.jsonld,application/ld+json,application/json";
+    input.addEventListener("change", () => {
+      const f = input.files?.[0];
+      if (f) void f.text().then((txt) => importTropy(txt, f.name));
+    });
+    input.click();
+  });
+  bar.appendChild(b);
+  return bar;
+}
+
+function importTropy(txt: string, fileName: string): number {
+  let items;
+  try {
+    items = parseTropy(JSON.parse(txt));
+  } catch (err) {
+    toast(t("tropy.bad", { why: String((err as Error).message ?? err) }));
+    return 0;
+  }
+  const inputs = tropyShelfInputs(items);
+  for (const i of inputs) addToShelf(i);
+  const sels = items.reduce((n, it) => n + it.photos.reduce((m, p) => m + p.selections.length, 0), 0);
+  const notes = items.reduce((n, it) => n + it.photos.reduce((m, p) => m + p.notes.length, 0), 0);
+  const msg = t("tropy.done", { file: fileName, n: String(inputs.length), notes: String(notes), sels: String(sels) });
+  logInfo(msg);
+  toast(msg);
+  renderShelf();
+  return inputs.length;
+}
+
+/** «Promuovi a documento»: the DocumentNode and one reading per selection. */
+function promoteShelfEntry(entry: ShelfEntry): void {
+  if (!store) return;
+  const st = store;
+  const r = promoteToDocument(st, entry);
+  updateShelfEntry(entry.id, { extra: { ...(entry.extra ?? {}), promoted_to: r.documentId } });
+  const d = String(st.node(r.documentId)?.name ?? r.documentId);
+  const msg = t("tropy.promotedMsg", { d, n: String(r.extractors.length) });
+  logInfo(msg, [r.documentId, ...r.extractors]);
+  toastUndo(msg, st);
+  renderShelf();
+  select(r.documentId);
+  refreshInspector();
+  draw();
+}
+
+/** receipt checks, once per entry per session (↻ asks again) */
+const receiptChecks = new Map<string, ReceiptCheck | "checking">();
+function receiptLine(entry: ShelfEntry, rec: NonNullable<ReturnType<typeof receiptOf>>): HTMLElement {
+  const line = document.createElement("div");
+  line.className = "shelf-receipt";
+  line.dataset.receipt = entry.id;
+  const bits = [`${t("receipt.label")} · ${rec.id}`, rec.checksum ? `⌗ ${rec.checksum.slice(7, 15)}` : "",
+    t("receipt.version", { v: String(rec.stamp) }),
+    rec.parents.length ? t("receipt.parents", { n: String(rec.parents.length), first: rec.parents[0].resource_id }) : t("receipt.origin")];
+  line.appendChild(document.createTextNode(bits.filter(Boolean).join(" · ")));
+  if (rec.title || rec.description) {
+    const w = document.createElement("div");
+    w.className = "shelf-receipt-words";
+    w.textContent = [rec.title, rec.description].filter(Boolean).join(" — ");
+    w.title = t("receipt.copyHint");
+    line.appendChild(w);
+  }
+  const st = receiptChecks.get(entry.id);
+  const tag = document.createElement("button");
+  tag.type = "button";
+  tag.className = `shelf-badge receipt-${st ?? "unchecked"}`;
+  tag.textContent = st === "checking" ? "…" : t(`receipt.check.${st ?? "unchecked"}`);
+  tag.title = t("receipt.checkHint");
+  tag.addEventListener("click", () => void runReceiptCheck(entry.id, entry.locator, rec));
+  line.appendChild(tag);
+  if (st === undefined && /^\//.test(entry.locator)) void runReceiptCheck(entry.id, entry.locator, rec);
+  return line;
+}
+
+async function runReceiptCheck(id: string, path: string, rec: NonNullable<ReturnType<typeof receiptOf>>): Promise<void> {
+  if (receiptChecks.get(id) === "checking") return;
+  receiptChecks.set(id, "checking");
+  let sidecar = null;
+  let digest: string | null = null;
+  try { sidecar = await readStamp(stampPathFor(path)); } catch { sidecar = null; }
+  try { digest = await digestOf(path, 0, Date.now()); } catch { digest = null; }
+  const res = checkReceipt(rec, sidecar as never, digest);
+  receiptChecks.set(id, res);
+  if (res === "file-changed" || res === "sidecar-differs")
+    logInfo(t(`receipt.check.${res}`) + ` · ${path}`);
+  renderShelf();
 }
 
 /**
@@ -16742,6 +16935,16 @@ function storageSelected(win: Win): string | null {
   return typeof value === "string" ? value : null;
 }
 
+/** CATENA · the files PICKED together (⌘-click), for a group stamp. */
+function storagePicked(win: Win): string[] {
+  const v = winCurrent(win, "fsPicked");
+  return Array.isArray(v) ? v.map(String) : [];
+}
+function setStoragePicked(win: Win, paths: string[]): void {
+  setWinCurrent(win, "fsPicked", paths.length ? paths : null);
+  renderStorage();
+}
+
 function setStorageSelected(win: Win, path: string | null): void {
   if (storageSelected(win) === path) return;
   setWinCurrent(win, "fsSelected", path);
@@ -16975,7 +17178,24 @@ function renderStorageInto(host: StorageHost): void {
       const selected = storageSelected(win);
       const entry = selected
         ? listing.entries.find((e) => e.path === selected) : undefined;
-      if (entry && !isStampPath(entry.path))
+      const picked = storagePicked(win).map((pth) => listing.entries.find((e) => e.path === pth))
+        .filter((e): e is FsEntry => !!e && e.type === "file" && !isStampPath(e.path) && !e.outside);
+      if (picked.length > 1) {
+        // CATENA · «EM Stamp di gruppo»: ONE act for the files picked together
+        const box = document.createElement("div");
+        box.className = "stamp-report-ask";
+        const b = document.createElement("button");
+        b.className = "primary";
+        b.dataset.action = "compose-group";
+        b.textContent = t("compose.openGroup", { n: String(picked.length) });
+        b.onclick = () => openDraft(picked);
+        const clear = document.createElement("button");
+        clear.className = "ghost";
+        clear.textContent = t("compose.clearPick");
+        clear.onclick = () => setStoragePicked(win, []);
+        box.append(b, clear);
+        body.appendChild(box);
+      } else if (entry && !isStampPath(entry.path))
         body.appendChild(composeButtons(entry, listing));
       else if (!listing.roots)
         body.appendChild(composeFolderButton(listing));
@@ -17228,6 +17448,17 @@ function stampComposeBox(win: Win, entries: FsEntry[]): HTMLElement {
   // Vuota all'apertura, e il bottone «oggi» è un GESTO. La data dell'atto non è
   // `now()` per difetto: un atto avvenuto a marzo deve poterlo dire, e una data
   // che il programma mette da sé è una data che nessuno ha visto.
+  // CATENA · the stamp's TITLE (one file) and DESCRIPTION (optional, the same
+  // for every file of a group): `self.label` / `self.description`, a courtesy
+  // outside the stamp's substance (dtcstamp 46b3b78)
+  const words = document.createElement("div");
+  words.className = "stamp-compose-row";
+  if (draft.outputs.length === 1)
+    words.appendChild(field(t("compose.title"), draft.title, (v) => { draft.title = v; },
+      { placeholder: draft.outputs[0]?.name ?? "", key: "title" }));
+  words.appendChild(field(t("compose.description"), draft.description, (v) => { draft.description = v; },
+    { placeholder: t("compose.descriptionPh"), key: "description" }));
+  act.appendChild(words);
   const when = document.createElement("div");
   when.className = "stamp-compose-row";
   when.appendChild(field(t("compose.at"), draft.at, (v) => {
@@ -17350,6 +17581,14 @@ async function doStamp(win: Win): Promise<void> {
       toast(out.error);
     } else if (out.written.length) {
       toast(t("compose.done", { n: String(out.written.length), s: seconds }));
+      // CATENA · every written stamp files its RECEIPT on the shelf (a copy;
+      // the sidecar stays the truth)
+      const recs = receiptsOfEmission(out.stamps.filter((st) => out.written.includes(st.stamp_path)));
+      for (const r of recs) addToShelf(r);
+      if (recs.length) {
+        logInfo(t("receipt.filed", { n: String(recs.length) }));
+        renderShelf();
+      }
       stampDraft = null;
       // …e si rilegge il disco: adesso quel file HA un timbro, e la vista deve
       // mostrare il verbale invece della bozza.
@@ -19298,11 +19537,22 @@ function storageRow(win: Win, entry: FsEntry): HTMLElement {
   if (entry.type === "file" && storageSelected(win) === entry.path) {
     row.classList.add("storage-selected");
   }
-  row.addEventListener("click", () => {
+  if (entry.type === "file" && storagePicked(win).includes(entry.path)) row.classList.add("storage-picked");
+  row.addEventListener("click", (e) => {
     // ONE click selects a file; a folder is navigated and never selected (see
     // `storageSelected`). Clicking the selected one again clears it, so there is
     // a way back to «nothing is selected» that is not a keyboard secret.
     if (entry.type !== "file") return;
+    // CATENA · ⌘/Ctrl/Shift-click PICKS several files: the group an EM Stamp is
+    // composed for («EM Stamp di gruppo»)
+    if (e.metaKey || e.ctrlKey || e.shiftKey) {
+      const cur = storagePicked(win);
+      const sel = storageSelected(win);
+      const base = cur.length ? cur : sel && sel !== entry.path ? [sel] : [];
+      setStoragePicked(win, base.includes(entry.path) ? base.filter((x) => x !== entry.path) : [...base, entry.path]);
+      return;
+    }
+    if (storagePicked(win).length) setStoragePicked(win, []);
     setStorageSelected(win, storageSelected(win) === entry.path ? null : entry.path);
   });
   row.addEventListener("dblclick", () => {
