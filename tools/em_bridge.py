@@ -737,6 +737,13 @@ def make_handler(api):
                     self._fail(400, f"invalid JSON body: {exc}")
                     return
                 self._generate_narrative_draft(body)
+            elif route == "/propose-reading":
+                try:
+                    body = json.loads(raw.decode("utf-8")) if raw else {}
+                except Exception as exc:
+                    self._fail(400, f"invalid JSON body: {exc}")
+                    return
+                self._propose_reading(body)
             elif route in ("/stratiminer-prompt", "/stratiminer-extract",
                            "/import-em-data"):
                 try:
@@ -2200,6 +2207,51 @@ def make_handler(api):
                 "pdf_text": api.pdf_text_available(),
                 "extractor": api.source_text_extractor(),
             }
+
+        def _propose_reading(self, body):
+            """CATENA · «Proponi con AI» on a text document: which passage states
+            this property, and what value. Body {text, property, unit?, question?,
+            provider?, model?} → {ok, start, end, quote, value, why, provider,
+            model}. The quote is CHECKED to be a substring of the text (an
+            invented citation is refused, 502). Nothing is written here: the
+            frontend makes the proposal a reading marked ai_assisted, signed by
+            the person, and it stays among the warnings until verified."""
+            text = str(body.get("text") or "")
+            prop = str(body.get("property") or "").strip()
+            if not text or not prop:
+                self._fail(400, "/propose-reading needs 'text' and 'property'")
+                return
+            try:
+                _here = str(pathlib.Path(__file__).resolve().parent)
+                if _here not in sys.path:
+                    sys.path.insert(0, _here)
+                from llm_provider import (LLMError, READING_SYSTEM_PROMPT,
+                                          build_reading_prompt, get_provider,
+                                          parse_reading_reply)
+            except ImportError as exc:
+                self._fail(501, f"LLM seam unavailable: {exc}")
+                return
+            reading = {"text": text, "property": prop,
+                       "unit": str(body.get("unit") or ""),
+                       "question": str(body.get("question") or "")}
+            try:
+                opts = {}
+                if (body.get("model") or "").strip():
+                    opts["model"] = body["model"].strip()
+                provider = get_provider(body.get("provider"), **opts)
+                reply = provider.generate(READING_SYSTEM_PROMPT,
+                                          build_reading_prompt(reading),
+                                          {"reading": reading})
+                out = parse_reading_reply(reply, text)
+            except LLMError as exc:
+                self._fail(exc.status, str(exc))
+                return
+            except Exception as exc:
+                self._fail(502, f"reading proposal failed: {exc}")
+                return
+            self._json({"ok": True, **out,
+                        "provider": getattr(provider, "name", ""),
+                        "model": getattr(provider, "model", "")})
 
         def _stratiminer(self, route, body):
             for need in ("em_data_sheets", "import_em_data"):

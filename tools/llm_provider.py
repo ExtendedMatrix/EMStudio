@@ -248,6 +248,24 @@ class EchoProvider(LLMProvider):
         # an option — which is exactly when being able to select it matters.
         pass
 
+    def _echo_reading(self, reading: Dict[str, Any]) -> str:
+        """«Proponi con AI» with no model: the first paragraph that names the
+        property (else the first with a number), quoted exactly — obviously
+        machine-picked, and a real quote, so the whole path can be exercised."""
+        text = str(reading.get("text") or "")
+        prop = str(reading.get("property") or "").lower()
+        paras = [p.strip() for p in text.split("\n") if p.strip()]
+        words = [w for w in prop.replace("_", " ").split() if len(w) > 2]
+        pick = next((p for p in paras if any(w in p.lower() for w in words)), None)
+        pick = pick or next((p for p in paras if any(c.isdigit() for c in p)), None)
+        pick = pick or (paras[0] if paras else "")
+        value = ""
+        for tok in pick.replace(",", ".").split():
+            if any(c.isdigit() for c in tok):
+                value = tok.strip(".;:")
+                break
+        return json.dumps({"quote": pick, "value": value, "why": "echo: first matching paragraph"})
+
     def generate(self, system: str, prompt: str,
                  context: Dict[str, Any]) -> str:
         # Two shapes of task reach this provider, and the context says which:
@@ -258,6 +276,8 @@ class EchoProvider(LLMProvider):
         # exists to prevent.
         if context.get("sheets"):
             return self._echo_table(context)
+        if context.get("reading"):
+            return self._echo_reading(context["reading"])
         activity = (context.get("activity") or {}).get("name", "questa attività")
         actions = [a.get("name", "?") for a in context.get("actions") or []]
         epochs = [e.get("name", "?") for e in context.get("epochs") or []]
@@ -308,6 +328,42 @@ SYSTEM_PROMPT = (
     "uncertainty, and invent nothing. Your text will be marked as an "
     "unendorsed AI draft until a named human validates it."
 )
+
+
+READING_SYSTEM_PROMPT = (
+    "You help an archaeologist READ a source. You are given the text of one "
+    "document and the property of a stratigraphic unit they want to document. "
+    "Find the ONE passage of the text that states it, copy it EXACTLY (it must "
+    "be a substring of the text), and give the value it supports. Answer only "
+    "with JSON: {\"quote\": \"...\", \"value\": \"...\", \"why\": \"...\"}. "
+    "If the text says nothing about it, answer {\"quote\": \"\", \"value\": \"\", "
+    "\"why\": \"not in this text\"}. Never invent a quote.")
+
+
+def build_reading_prompt(reading: Dict[str, Any]) -> str:
+    """The user message of «Proponi con AI»: the property, the unit, the text."""
+    return (f"Property: {reading.get('property', '')}\n"
+            f"Unit: {reading.get('unit', '')}\n"
+            f"Question: {reading.get('question') or 'Which passage states it, and what value?'}\n"
+            f"--- TEXT ---\n{reading.get('text', '')}")
+
+
+def parse_reading_reply(text: str, source: str) -> Dict[str, Any]:
+    """The model's JSON, CHECKED against the source: a quote that is not in the
+    text is refused (an invented citation is worse than none). Returns
+    {start, end, quote, value, why}; start = -1 when nothing was found."""
+    raw = text.strip()
+    if raw.startswith("```"):
+        raw = raw.strip("`").split("\n", 1)[-1]
+    i, j = raw.find("{"), raw.rfind("}")
+    data = json.loads(raw[i:j + 1]) if i >= 0 and j > i else {}
+    quote = str(data.get("quote") or "").strip()
+    start = source.find(quote) if quote else -1
+    if quote and start < 0:
+        raise LLMError(502, "the model quoted a passage that is not in the text")
+    return {"start": start, "end": start + len(quote) if start >= 0 else -1,
+            "quote": quote, "value": str(data.get("value") or ""),
+            "why": str(data.get("why") or "")}
 
 
 def build_prompt(context: Dict[str, Any], extra: str = "") -> str:

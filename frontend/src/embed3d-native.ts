@@ -54,6 +54,26 @@ async function engine(): Promise<any> {
 
 export interface ViewerHandle {
   dispose(): void;
+  /** CATENA · replace the markers (a reading's points) without reloading */
+  setMarkers?(markers: Marker3D[]): void;
+}
+
+/** CATENA · a point on the model with its label — a reading's geometry. */
+export interface Marker3D {
+  id: string;
+  label: string;
+  p: [number, number, number];
+  selected?: boolean;
+}
+
+export interface Viewer3DOptions {
+  label?: string;
+  /** a click on the model (no drag): the point hit, in the model's frame, and
+   *  the name of the mesh it is on. Absent = the viewer only orbits. */
+  onPick?: (p: [number, number, number], on: string) => void;
+  /** a click on a marker */
+  onMarker?: (id: string) => void;
+  markers?: Marker3D[];
 }
 
 /**
@@ -64,9 +84,11 @@ export interface ViewerHandle {
  * models because somebody scrolled past the title.
  */
 export function mount3dViewer(host: HTMLElement, url: string,
-                              opts: { label?: string } = {}): ViewerHandle {
+                              opts: Viewer3DOptions = {}): ViewerHandle {
   let disposed = false;
   let cleanup: (() => void) | null = null;
+  let markers: Marker3D[] = opts.markers ?? [];
+  let applyMarkers: (() => void) | null = null;
 
   const status = document.createElement("div");
   status.className = "nv-embed-note";
@@ -115,13 +137,71 @@ export function mount3dViewer(host: HTMLElement, url: string,
       const controls = new OrbitControls(camera, renderer.domElement);
       controls.enableDamping = true;
 
+      // CATENA · the readings' points: a sphere each, and a label that follows
+      // it on screen (HTML, so it reads at any zoom and takes the theme)
+      const markerGroup = new THREE.Group();
+      scene.add(markerGroup);
+      const labels = document.createElement("div");
+      labels.className = "v3d-labels";
+      let markerRadius = 0.05;
+      applyMarkers = () => {
+        markerGroup.clear();
+        labels.textContent = "";
+        for (const m of markers) {
+          const s = new THREE.Mesh(new THREE.SphereGeometry(markerRadius, 16, 12),
+            new THREE.MeshBasicMaterial({ color: m.selected ? 0xbf9000 : 0xe3b43a }));
+          s.position.set(m.p[0], m.p[1], m.p[2]);
+          s.userData.markerId = m.id;
+          markerGroup.add(s);
+          const l = document.createElement("span");
+          l.className = "v3d-label" + (m.selected ? " sel" : "");
+          l.textContent = m.label;
+          l.dataset.marker = m.id;
+          labels.appendChild(l);
+        }
+      };
+      const placeLabels = () => {
+        const w = renderer.domElement.clientWidth || width;
+        const h = renderer.domElement.clientHeight || height;
+        markers.forEach((m, i) => {
+          const el = labels.children[i] as HTMLElement | undefined;
+          if (!el) return;
+          const v = new THREE.Vector3(m.p[0], m.p[1], m.p[2]).project(camera);
+          el.style.left = `${((v.x + 1) / 2) * w}px`;
+          el.style.top = `${((1 - v.y) / 2) * h}px`;
+          el.style.display = v.z < 1 ? "" : "none";
+        });
+      };
       let frame = 0;
       const tick = () => {
         if (disposed) return;
         frame = requestAnimationFrame(tick);
         controls.update();
         renderer.render(scene, camera);
+        placeLabels();
       };
+      // a CLICK is a press and a release without a drag — a drag orbits
+      let down: { x: number; y: number } | null = null;
+      const ray = new THREE.Raycaster();
+      const onDown = (e: PointerEvent) => { down = { x: e.clientX, y: e.clientY }; };
+      const onUp = (e: PointerEvent) => {
+        const moved = !down || Math.hypot(e.clientX - down.x, e.clientY - down.y) > 4;
+        down = null;
+        if (moved || (!opts.onPick && !opts.onMarker)) return;
+        const r = renderer.domElement.getBoundingClientRect();
+        ray.setFromCamera(new THREE.Vector2(((e.clientX - r.left) / r.width) * 2 - 1,
+          -((e.clientY - r.top) / r.height) * 2 + 1), camera);
+        const hitM = ray.intersectObjects(markerGroup.children, false)[0];
+        if (hitM && opts.onMarker) { opts.onMarker(String(hitM.object.userData.markerId)); return; }
+        const targets = scene.children.filter((o: any) => o !== markerGroup);
+        const hit = ray.intersectObjects(targets, true)[0];
+        if (!hit || !opts.onPick) return;
+        const round = (v: number) => Math.round(v * 1000) / 1000;
+        opts.onPick([round(hit.point.x), round(hit.point.y), round(hit.point.z)],
+          String(hit.object?.name || hit.object?.parent?.name || ""));
+      };
+      renderer.domElement.addEventListener("pointerdown", onDown);
+      renderer.domElement.addEventListener("pointerup", onUp);
 
       new GLTFLoader().load(
         url,
@@ -141,9 +221,13 @@ export function mount3dViewer(host: HTMLElement, url: string,
           camera.far = span * 100;
           camera.updateProjectionMatrix();
           controls.update();
+          markerRadius = span / 80;
+          applyMarkers?.();
 
           status.remove();
           host.appendChild(renderer.domElement);
+          host.appendChild(labels);
+          host.dataset.ready = "1";
           const hint = document.createElement("div");
           hint.className = "nv-embed-note";
           hint.textContent = t("em3d.dragHint");
@@ -168,6 +252,10 @@ export function mount3dViewer(host: HTMLElement, url: string,
     dispose() {
       disposed = true;
       cleanup?.();
+    },
+    setMarkers(next: Marker3D[]) {
+      markers = next;
+      applyMarkers?.();
     },
   };
 }

@@ -197,6 +197,8 @@ import { setSitePicker, type NarrativeSelection, type Reading } from "./narrativ
 import { renderSitePosition } from "./study-panel";
 import * as chain from "./paradata-chain";
 import { mediumOf as mediumOfDoc, renderChainSection, type ChainUi } from "./paradata-inspector";
+import { renderReadingStage, type TraceGeometry } from "./doc-reading";
+import * as aiv from "./ai-validation";
 import {
   closeAddMenu,
   showAddMenu,
@@ -6736,6 +6738,7 @@ function chainUi(st: DocumentStore): ChainUi {
       openReadingSourceMenu(propertyId, r.left, r.bottom);
     },
     openReading,
+    aiChip: aiChipFor,
     useAsValue: (x) => {
       const p = chain.useAsValue(st, x);
       if (!p) return;
@@ -14203,6 +14206,8 @@ function renderDocViewInto(
     });
     list.appendChild(b);
   }
+  // CATENA · the source itself, to read, trace on and describe (its readings)
+  if (store) renderDocReadingStage(win, detail, current);
   // the current document's fields, straight onto the node
   const data = (current.data ?? {}) as Record<string, unknown>;
   const field = (
@@ -14262,6 +14267,182 @@ function renderDocViewInto(
   detail.appendChild(jump);
 }
 
+
+// ── CATENA · the Doc window reads the source ────────────────────────────────
+
+/** Resolved media urls: a path on disk goes through the bridge (`fsFileUrl`,
+ *  async), a fetchable url is used as it is. Cached, a repaint follows. */
+const docUrlCache = new Map<string, string | null>();
+function docMediaUrl(d: EmNode): string | null {
+  const st = store;
+  const own = viewerSourceOf(d);
+  const linked = st?.liveEdges().filter((e) => e.source === d.id && e.edge_type === "has_linked_resource")
+    .map((e) => viewerSourceOf(st.node(e.target) ?? null)).find(Boolean) ?? null;
+  const src = own ?? linked;
+  if (!src) return null;
+  if (viewerIsFetchable(src) || src.startsWith("/em/") || src.startsWith("./")) return src;
+  if (docUrlCache.has(src)) return docUrlCache.get(src) ?? null;
+  docUrlCache.set(src, null);
+  void fsFileUrl(src).then((u) => { docUrlCache.set(src, u); renderDocView(); }).catch(() => { /* unreachable: stays null */ });
+  return null;
+}
+
+async function docText(d: EmNode): Promise<string | null> {
+  const data = (d.data ?? {}) as Record<string, unknown>;
+  if (typeof data.text === "string" && data.text) return data.text;
+  const url = docMediaUrl(d);
+  const loc = String(viewerSourceOf(d) ?? "");
+  if (!url || !/\.(txt|md|csv|json|xml|html?)(\?|#|$)/i.test(loc)) return null;
+  try {
+    const r = await fetch(url);
+    return r.ok ? await r.text() : null;
+  } catch {
+    return null;
+  }
+}
+
+/** The AI chip of a node: dashed until a person verifies it, then ✓ and the
+ *  ORCID. A click on a pending chip is «Verifica». */
+function aiChipFor(id: string): HTMLElement | null {
+  if (!store) return null;
+  const state = aiv.aiState(store.doc, id);
+  if (state === "none") return null;
+  const b = document.createElement("button");
+  b.type = "button";
+  b.className = `chain-ai ${state === "verified" ? "ok" : "pending"}`;
+  const n = store.node(id);
+  const by = String(((n?.data ?? {}) as Record<string, unknown>).validated_by ?? "");
+  const orcid = String(((store.node(by)?.data ?? {}) as Record<string, unknown>).orcid ?? "");
+  b.textContent = state === "verified" ? "AI ✓" : "AI";
+  b.title = state === "verified" ? t("ai.verifiedBy", { who: `${String(store.node(by)?.name ?? "")} ${orcid}`.trim() })
+    : t("ai.pending");
+  if (state === "pending") b.addEventListener("click", (e) => { e.stopPropagation(); verifyAiNodes([id]); });
+  return b;
+}
+
+function renderDocReadingStage(win: Win, detail: HTMLElement, d: EmNode): void {
+  if (!store) return;
+  const st = store;
+  const armedRaw = winCurrent(win, "reading");
+  const reads = chain.readingsOfDocument(st.doc, d.id);
+  const armed = typeof armedRaw === "string" && reads.includes(armedRaw) ? armedRaw : null;
+  const selectedReading = selectedId && reads.includes(selectedId) ? selectedId : null;
+  const medium = chainMedium(d);
+  const url = docMediaUrl(d);
+  renderReadingStage(detail, {
+    store: st,
+    docId: d.id,
+    medium,
+    armed,
+    current: armed ?? selectedReading,
+    imageUrl: medium === "image" ? url : null,
+    modelUrl: medium === "3d" ? url : null,
+    text: () => docText(d),
+    onTrace: (x, g) => traceReading(win, x, d.id, g),
+    onSelect: (x) => { setWinCurrent(win, "reading", null); select(x); refreshInspector(); renderDocView(); draw(); },
+    onDisarm: () => { setWinCurrent(win, "reading", null); renderDocView(); },
+    onUseValue: (x) => chainUi(st).useAsValue(x),
+    onPropose: (x, text) => void proposeReading(win, x, d.id, text),
+    onVerify: (x) => verifyAiNodes([x]),
+    aiChip: aiChipFor,
+  });
+}
+
+function traceReading(win: Win, x: string, docId: string, g: TraceGeometry): void {
+  if (!store) return;
+  chain.setReadingGeometry(store, x, docId, g);
+  setWinCurrent(win, "reading", null);
+  const name = String(store.node(x)?.name ?? x);
+  const msg = t(g.kind === "region" ? "rd.regionDone" : g.kind === "passage" ? "rd.passageDone" : "rd.pointDone", { x: name });
+  logInfo(msg, [x, docId]);
+  toastUndo(msg, store);
+  select(x);
+  refreshInspector();
+  renderDocView();
+}
+
+/**
+ * «Proponi con AI» — the provider of the preferences (none configured: the
+ * preferences open, and the action resumes once saved). The bridge answers a
+ * passage it has CHECKED is in the text; it becomes the reading's geometry and
+ * result, marked `ai_assisted` (by an AuthorAINode, fields geometry + result),
+ * the reading signed by the person when an identity is set. It stays among the
+ * warnings until somebody verifies it. One undo step.
+ */
+async function proposeReading(win: Win, x: string, docId: string, text: string): Promise<void> {
+  if (!store) return;
+  if (!(await aiConfigured())) {
+    askForAiThen(() => void proposeReading(win, x, docId, text));
+    return;
+  }
+  const st = store;
+  const ai = getSettings().ai;
+  const p = chain.propertyOfExtractor(st.doc, x);
+  const prop = st.node(p ?? "");
+  const owner = p ? chain.ownersOf(st.doc, p).find((o) => o.original)?.owner : undefined;
+  toast(t("rd.aiAsking"));
+  let res: { start: number; end: number; quote: string; value: string; why: string; provider: string; model: string };
+  try {
+    const r = await fetch(`${await bridgeUrl()}/propose-reading`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text, property: String(prop?.name ?? ""),
+        unit: String(st.node(owner ?? "")?.name ?? ""), provider: ai.provider, model: ai.model }),
+    });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok || !j.ok) { toast(t("rd.aiFailed", { why: String(j?.error ?? r.status) })); return; }
+    res = j;
+  } catch (err) {
+    toast(t("rd.aiFailed", { why: t("rd.aiNoBridge") }));
+    logInfo(String(err));
+    return;
+  }
+  if (res.start < 0) { toast(t("rd.aiNothing", { why: res.why })); return; }
+  const me = identityForSigning();
+  st.batch(() => {
+    chain.setReadingGeometry(st, x, docId, { kind: "passage", start: res.start, end: res.end, text: res.quote });
+    const by = aiv.aiAuthorFor(st, res.provider || ai.provider, res.model || ai.model);
+    const n = st.node(x);
+    if (n && res.value) st.updateNode(x, { data: { ...((n.data ?? {}) as Record<string, unknown>), result: res.value } });
+    aiv.markAiAssisted(st, x, { by, model: res.model || ai.model || undefined,
+                                fields: ["data.geometry", ...(res.value ? ["data.result"] : [])] });
+    // the reading stays the PERSON's: has_author their AuthorNode, never the model
+    if (me) {
+      const author = nauth.authorForIdentity(st, me);
+      if (!st.hasEdge(x, author, "has_author")) st.addEdge(x, author, "has_author");
+    }
+  });
+  setWinCurrent(win, "reading", null);
+  const msg = t("rd.aiProposed", { x: String(st.node(x)?.name ?? x) });
+  logInfo(msg, [x]);
+  toastUndo(msg, st);
+  select(x);
+  refreshInspector();
+  renderDocView();
+}
+
+/** «Verifica» of AI nodes (one, a chapter's, a selection): with the identity,
+ *  `validated_by` + `validated_at` in one undo step; without, the identity. */
+function verifyAiNodes(ids: string[]): void {
+  if (!store || !requireIdentity()) return;
+  const r = aiv.verifyNodesAs(store, ids, identityForSigning());
+  if (r === "needs-identity") return;
+  const msg = t("ai.verifiedN", { n: String(r.verified.length) });
+  logInfo(msg, r.verified);
+  toastUndo(msg, store);
+  refreshIssues();
+  refreshInspector();
+  renderDocView();
+  draw();
+}
+
+// Esc disarms a reading waiting for its trace
+document.addEventListener("keydown", (e) => {
+  if (e.key !== "Escape") return;
+  let any = false;
+  for (const w of windowsOf()) if (w.type === "doc" && winCurrent(w, "reading")) { setWinCurrent(w, "reading", null); any = true; }
+  if (any) renderDocView();
+});
 
 // ── SHELF1 · THE WIDE LIST ──────────────────────────────────────────────────
 //
