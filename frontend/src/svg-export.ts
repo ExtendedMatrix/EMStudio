@@ -4,6 +4,8 @@
 import { t } from "./i18n";
 import { epochEnd, epochStart, nameOf, timelineSpans } from "./narrative-embeds";
 import { edgeStyle, nodeStyle } from "./palette";
+import { glyphFor, glyphPathsSvg } from "./glyphs";
+import { glyphRectOf } from "./shape-geom";
 import { routeScene, SYMMETRIC_EDGES, type EdgeRoute } from "./routing";
 import { sceneBounds, type Scene, type SceneNode } from "./scene";
 import type { EmDocument, EmNode } from "./types";
@@ -218,9 +220,26 @@ export function sceneToSvg(
   });
 
   for (const n of scene.nodes) {
-    parts.push(shapeSvg(n));
     const st = nodeStyle(n.node.node_type);
     const label = esc(String(n.node.name || n.id).slice(0, 24));
+    // SHIFT-A fase 6b · a glyph type is written as ITS PATHS — the same layers the
+    // canvas draws, in the EM colours (a figure is printed, it does not follow the
+    // reader's dark mode) — and never as an embedded image. Contain-fit into the
+    // rect the canvas uses (`glyphRectOf`), the name under the glyph.
+    const g = glyphFor(n.node.node_type, n.node.data as Record<string, unknown> | undefined);
+    if (g) {
+      const r = glyphRectOf(n, g.aspect);
+      const [, , vw, vh] = g.viewBox;
+      const k = Math.min(r.w / vw, r.h / vh);
+      const ox = r.x + (r.w - vw * k) / 2;
+      const oy = r.y + (r.h - vh * k) / 2;
+      parts.push(`<g transform="translate(${ox.toFixed(2)} ${oy.toFixed(2)}) scale(${k.toFixed(4)})">${glyphPathsSvg(g)}</g>`);
+      parts.push(
+        `<text x="${n.x + n.w / 2}" y="${r.y + r.h + 10}" font-size="10" font-weight="600" fill="${INK.text}" text-anchor="middle">${label}</text>`,
+      );
+      continue;
+    }
+    parts.push(shapeSvg(n));
     parts.push(
       `<text x="${n.x + n.w / 2}" y="${n.y + n.h / 2}" font-size="${n.h >= 22 ? 11 : 10}" font-weight="600" fill="${st.textColor}" text-anchor="middle" dominant-baseline="central">${label}</text>`,
     );

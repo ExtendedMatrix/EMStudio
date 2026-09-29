@@ -131,10 +131,41 @@ for style in styles.values():                 # or declared by one
 # serUSV): declared nowhere, deliberate all the same.
 reachable |= {"continuity", "serUSV"}
 
+# SHIFT-A (1 ott 2026) · a declaration that icons.ts NEVER READS makes nothing
+# reachable. `declaredBasenames` tries the style's `2d_file_vect` first; when that
+# file exists, the style's raster declaration is never consulted. NARR is the
+# case: since em_visual_rules 1.6.20 its vector is the glyph `narrative.svg`, and
+# its raster half still names `EMNarrative.png` — whose stem would otherwise pull
+# the 617 KB illustration `EMNarrative.svg` into the bundle (SVG shadows PNG),
+# for a renderer that asks for `narrative.svg` and nothing else.
+declared_elsewhere = set(styles)
+for style in styles.values():
+    if isinstance(style, dict) and isinstance(style.get("2d_file_vect"), str):
+        declared_elsewhere.add(pathlib.PurePath(style["2d_file_vect"]).stem)
+for style in styles.values():
+    if not isinstance(style, dict):
+        continue
+    vect = style.get("2d_file_vect")
+    if not (isinstance(vect, str) and (cfg / vect).is_file()):
+        continue
+    for key in ("2d_file_rast", "file_2d"):
+        path = style.get(key)
+        if not isinstance(path, str):
+            continue
+        stem = pathlib.PurePath(path).stem
+        if stem != pathlib.PurePath(vect).stem and stem not in declared_elsewhere:
+            # still reachable if ANOTHER style declares it
+            others = [st for st in styles.values() if isinstance(st, dict) and st is not style
+                      and any(isinstance(st.get(k), str) and pathlib.PurePath(st[k]).stem == stem
+                              for k in ("2d_file_vect", "2d_file_rast", "file_2d"))]
+            if not others:
+                reachable.discard(stem)
+
 src = cfg / "src/2D"
 out = dst / "icons2d"
 out.mkdir(parents=True, exist_ok=True)
 copied = skipped = 0
+kept = set()
 for f in sorted(src.iterdir()):
     if f.suffix.lower() not in (".svg", ".png"):
         continue
@@ -149,8 +180,18 @@ for f in sorted(src.iterdir()):
         skipped += 1
         continue
     shutil.copy2(f, out / f.name)
+    kept.add(f.name)
     copied += 1
-print(f"  icons2d          {copied} vendored, {skipped} unreachable/shadowed")
+# SHIFT-A (1 ott 2026) · a file this script vendored LAST time and would not
+# vendor now is pruned: a PNG shadowed by the SVG that just arrived (author_ai,
+# license, embargo, narrative since em_visual_rules 1.6.20) is inlined by the
+# single-file build all the same, and nothing can ever reach it.
+pruned = 0
+for g in sorted(out.iterdir()):
+    if g.suffix.lower() in (".svg", ".png") and g.name not in kept:
+        g.unlink()
+        pruned += 1
+print(f"  icons2d          {copied} vendored, {skipped} unreachable/shadowed, {pruned} pruned")
 PYEOF
 
 # DECLARED BUT ABSENT — the assets the datamodel promises and does not have.

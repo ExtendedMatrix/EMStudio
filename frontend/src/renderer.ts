@@ -16,7 +16,16 @@ import { BAND_GAP, visibleBoxOf } from "./scene";
 import {
   segmentEntry, drawBoxOf, DOC_SHEET_ASPECT, glyphAspect, glyphRectOf, handleAnchor,
   shapePath } from "./shape-geom";
-import { CANVAS_TYPE, canvasFont, canvasTheme, labelOn } from "./theme";
+import { activeTheme, CANVAS_TYPE, canvasFont, canvasTheme, labelOn } from "./theme";
+import { drawGlyph, glyphFor, type GlyphInk } from "./glyphs";
+
+/** SHIFT-A fase 6b · the theme colours the RECOLOURABLE roles of a glyph take
+ *  (`2d_glyphs._roles`): ink → the canvas ink, paper → the canvas ground, halo
+ *  flipped — on a dark canvas only. Every other role keeps its EM hex. */
+function glyphInk(): GlyphInk {
+  const th = canvasTheme();
+  return { ink: th.labelInk, paper: th.canvasBg, dark: activeTheme() === "dark" };
+}
 import type { Scene, Viewport } from "./scene";
 
 export interface ConnectDrag {
@@ -643,10 +652,21 @@ export function render(
     // document gets the sheet with the label over it
     // extractor/combiner → official 2D icon; DTC nodes → their per-kind glyph
     // (data-driven from node.data.dtc_kind via dtc_kinds). Both render glyph-only.
-    let icon = ICON_NODE_TYPES.has(n.node.node_type)
-      ? imageFor(n.node.node_type)
-      : null;
-    if (!icon) {
+    //
+    // SHIFT-A fase 6b · a type with an entry in `2d_glyphs` is drawn FROM ITS
+    // PATHS (`glyphs.ts`), and its bitmap is never even requested: sharp at every
+    // zoom, in every engine, and never a file that can be missing. The bitmap
+    // path below stays for a glyph the datamodel does not describe.
+    const pathGlyph = glyphFor(
+      n.node.node_type,
+      n.node.data as Record<string, unknown> | undefined,
+    );
+    let icon = pathGlyph
+      ? null
+      : ICON_NODE_TYPES.has(n.node.node_type)
+        ? imageFor(n.node.node_type)
+        : null;
+    if (!icon && !pathGlyph) {
       const glyph = dtcGlyphUrl(
         dtcGlyphName(
           (n.node.data as Record<string, unknown> | undefined)?.dtc_kind as
@@ -786,7 +806,7 @@ export function render(
       continue;
     }
 
-    if (icon) {
+    if (icon || pathGlyph) {
       // POL2 · the icon is FITTED to the node box, preserving its aspect ratio.
       //
       // It used to be sized from the height alone (`min(n.h, 30)`) and the width
@@ -808,13 +828,20 @@ export function render(
       // hit test, the ring and the handle use. The bitmap's own proportions are
       // the fallback for a glyph the datamodel does not describe.
       const aspect =
+        pathGlyph?.aspect ??
         glyphAspect(n.node.node_type, n.node.data as Record<string, unknown> | undefined) ??
-        icon.naturalWidth / Math.max(1, icon.naturalHeight);
+        (icon ? icon.naturalWidth / Math.max(1, icon.naturalHeight) : 1);
       const { x: ix, y: iy, w: iw, h: ih } = glyphRectOf(n, aspect);
-      // PELLE · a bitmap rasterised at the size it occupies on the device
-      // (drawn size × dpr × zoom band), not the SVG's 23 px natural size scaled up
-      ctx.imageSmoothingQuality = "high";
-      ctx.drawImage(crispImage(icon, iw, ih, dpr * vp.scale), ix, iy, iw, ih);
+      if (pathGlyph) {
+        // "contain" fit of the viewBox into the rect the hit test uses; the
+        // stroke widths are viewBox units, so they scale with the glyph
+        drawGlyph(ctx, pathGlyph, ix, iy, iw, ih, glyphInk());
+      } else if (icon) {
+        // PELLE · a bitmap rasterised at the size it occupies on the device
+        // (drawn size × dpr × zoom band), not the SVG's 23 px natural size scaled up
+        ctx.imageSmoothingQuality = "high";
+        ctx.drawImage(crispImage(icon, iw, ih, dpr * vp.scale), ix, iy, iw, ih);
+      }
       if (drawLabels) {
         const label = String(n.node.name || n.id);
         ctx.font = canvasFont(CANVAS_TYPE.nodeLabel.weight, CANVAS_TYPE.minPx);
@@ -1194,9 +1221,16 @@ export function render(
       // attenuated (dimmed, dashed outline) and is NOT a click target — it has
       // no ornament node on this referent. The node's own value is a full badge.
       if (b.inherited) ctx.globalAlpha = 0.5;
-      const img = imageFor(b.kind);
       const pad = badgePx * BADGE_ICON_INSET;
-      if (img) {
+      // SHIFT-A fase 6b · the ornament's own paths, when the datamodel has them
+      const bg = glyphFor(b.kind);
+      const img = bg ? null : imageFor(b.kind);
+      if (bg) {
+        const side = badgePx - 2 * pad;
+        // the chip is `handleFill` — dark on a dark canvas — so the glyph takes
+        // the same theme recolouring as on the canvas
+        drawGlyph(ctx, bg, bx + pad, topY + pad, side, side, glyphInk());
+      } else if (img) {
         const side = badgePx - 2 * pad; // already screen px: the band is dpr alone
         ctx.imageSmoothingQuality = "high";
         ctx.drawImage(crispImage(img, side, side, dpr), bx + pad, topY + pad, side, side);

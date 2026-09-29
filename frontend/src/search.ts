@@ -86,8 +86,9 @@ export function setupSearch(
   getDoc: () => EmDocument | null,
   onPick: (nodeId: string) => void,
   noResults = "—",
-  /** the node glyph's URL — injected, so this module stays free of the
-   *  bundler's asset globbing and runs in node (`check-studio.mjs`) */
+  /** the node glyph — inline `<svg>` markup (drawn from `2d_glyphs`) or a file
+   *  URL; injected, so this module stays free of the bundler's asset globbing
+   *  and runs in node (`check-studio.mjs`) */
   glyphFor: (nodeType: string) => string | null = () => null,
 ): void {
   const hide = (): void => {
@@ -116,9 +117,12 @@ export function setupSearch(
       b.className = "search-hit";
       b.setAttribute("role", "option");
       const icon = glyphFor(n.node_type);
+      // SHIFT-A fase 6b · the injected answer is inline SVG markup for a type
+      // drawn from paths, or a URL for one that still has only a file
       b.innerHTML =
-        (icon ? `<img class="hit-glyph" src="${esc(icon)}" alt="">`
-              : `<span class="hit-glyph"></span>`) +
+        (icon?.startsWith("<svg") ? `<span class="hit-glyph glyph-inline">${icon}</span>`
+          : icon ? `<img class="hit-glyph" src="${esc(icon)}" alt="">`
+          : `<span class="hit-glyph"></span>`) +
         `<b class="hit-name">${highlight(String(n.name || n.id), q)}</b>` +
         `<span class="hit-ex">${highlight(excerpt, q)}</span>` +
         `<span class="hit-type">${esc(n.node_type)}</span>`;

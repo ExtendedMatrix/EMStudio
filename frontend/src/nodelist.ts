@@ -7,6 +7,27 @@ import type { EmDocument, EmNode } from "./types";
 import { liveNodes } from "./crdt";
 import { buildOutline, epochSpan, type OutlineUnit } from "./outline";
 import { t } from "./i18n";
+import { glyphFor, glyphSvg } from "./glyphs";
+import { activeTheme, canvasTheme } from "./theme";
+
+/** SHIFT-A fase 6b · a row's mark: the node's GLYPH, inline, when the datamodel
+ *  draws it from paths (extractor, combiner, the ornaments, the DTC kinds) —
+ *  the same paths as the canvas — else the coloured dot of its style. */
+function rowMark(n: EmNode): HTMLElement {
+  const g = glyphFor(n.node_type, n.data as Record<string, unknown> | undefined);
+  const el = document.createElement("span");
+  if (g) {
+    const th = canvasTheme();
+    el.className = "nl-dot nl-glyph glyph-inline";
+    el.innerHTML = glyphSvg(g, { ink: th.labelInk, paper: th.canvasBg, dark: activeTheme() === "dark" });
+    return el;
+  }
+  const st = nodeStyle(n.node_type);
+  el.className = "nl-dot";
+  el.style.background = st.fill;
+  el.style.borderColor = st.border;
+  return el;
+}
 
 export interface NodeListApi {
   refresh: () => void;
@@ -151,12 +172,7 @@ export function buildNodeList(
       const row = document.createElement("button");
       row.className = "nl-row nl-unit" + (n.id === selected ? " selected" : "");
       row.style.paddingLeft = `${14 + u.depth * 16}px`;
-      const st = nodeStyle(n.node_type);
-      const dot = document.createElement("span");
-      dot.className = "nl-dot";
-      dot.style.background = st.fill;
-      dot.style.borderColor = st.border;
-      row.appendChild(dot);
+      row.appendChild(rowMark(n));
       const name = document.createElement("b");
       name.className = "nl-uname";
       name.textContent = String(n.name || n.id);
@@ -322,12 +338,7 @@ export function buildNodeList(
     for (const n of nodes) {
       const row = document.createElement("button");
       row.className = "nl-row" + (n.id === selected ? " selected" : "");
-      const st = nodeStyle(n.node_type);
-      const dot = document.createElement("span");
-      dot.className = "nl-dot";
-      dot.style.background = st.fill;
-      dot.style.borderColor = st.border;
-      row.appendChild(dot);
+      row.appendChild(rowMark(n));
       const body = document.createElement("span");
       body.className = "nl-body";
       const name = document.createElement("b");

@@ -1,3 +1,4 @@
+import { glyphContains, glyphFor } from "./glyphs";
 import type { AdornmentBadge } from "./adornments";
 import { nodeStyle } from "./palette";
 import {
@@ -295,11 +296,31 @@ export function visibleBoxOf(n: SceneNode): Box {
  * declared in `2d_glyphs` now, and a `document` — 90 × 32 of box around a 23 px
  * sheet — was the worst of it: 67 px of invisible wings that selected it.
  */
+/** A 2D context for `isPointInPath` alone — never drawn, never attached. Null
+ *  where there is no DOM (node, the checks): the hit test keeps the rect there. */
+let hitCtx: CanvasRenderingContext2D | null | undefined;
+function hitContext(): CanvasRenderingContext2D | null {
+  if (hitCtx === undefined)
+    hitCtx = typeof document !== "undefined" ? document.createElement("canvas").getContext("2d") : null;
+  return hitCtx;
+}
+
 function pointInNodeShape(n: SceneNode, wx: number, wy: number, tol: number): boolean {
   const type = n.node.node_type;
+  const data = n.node.data as Record<string, unknown> | undefined;
   // the node's data too: a DTC node is a glyph even when its type is not (EM2)
-  if (drawsAsGlyph(type, n.node.data as Record<string, unknown> | undefined))
-    return pointNearRect(visibleBoxOf(n), wx, wy, tol);
+  if (drawsAsGlyph(type, data)) {
+    const rect = visibleBoxOf(n);
+    if (!pointNearRect(rect, wx, wy, tol)) return false;
+    // SHIFT-A fase 6b · a glyph drawn from PATHS is touched on its drawing: the
+    // first ground layer (`glyphContains`), with the same tolerance. A point in
+    // the rect but off the silhouette — the corners around a disc — is not a
+    // hit. No ground layer, or no Path2D: the rect, as before.
+    const g = glyphFor(type, data);
+    const ctx = g ? hitContext() : null;
+    const on = g && ctx ? glyphContains(ctx, g, rect, wx, wy, tol) : null;
+    return on ?? true;
+  }
   const st = nodeStyle(type);
   return pointNearShape(st.shape, drawBoxOf(st, n), wx, wy, tol);
 }

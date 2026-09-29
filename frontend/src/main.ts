@@ -158,7 +158,7 @@ import { CARD_VIEWS, COMPUTED_VIEWS, EMDB_SHEETS, type TableView, type ViewCtx }
 import { iconUrlFor } from "./icons";
 import { buildOverview, type OverviewApi } from "./overview";
 import { edgeStyle } from "./palette";
-import { typeIconElement } from "./type-icons";
+import { glyphMarkupFor, typeIconElement } from "./type-icons";
 import { createResourceThumb } from "./resource-preview";
 import {
   addCategories,
@@ -19952,7 +19952,7 @@ setupSearch(
     revealFromTable(id);   // selects, and centres it in a graph window if one is open
   },
   t("strip.noResults"),
-  iconUrlFor,
+  (nt) => glyphMarkupFor(nt) ?? iconUrlFor(nt),
 );
 
 // ---------- drag & drop ----------

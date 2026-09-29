@@ -10,6 +10,8 @@
 // `add-menu-ui.ts`; what stays here is the part every type list needs.
 import { nodeStyle } from "./palette";
 import { dtcGlyphName, isGroupType } from "./rules";
+import { glyphByKey, glyphSvg, type Glyph, type GlyphInk } from "./glyphs";
+import { activeTheme, canvasTheme } from "./theme";
 
 import { dtcGlyphUrl, iconUrlFor } from "./icons";
 
@@ -19,6 +21,10 @@ import { dtcGlyphUrl, iconUrlFor } from "./icons";
  */
 export function typeIconElement(nodeType: string, kind?: string): HTMLElement {
   if (isGroupType(nodeType)) return groupSwatch(nodeType);
+  // SHIFT-A fase 6b · a type the datamodel draws from paths is the SAME paths
+  // here, inline — sharp, themed, and the file it used to load is not needed
+  const g = glyphByKey(kind ? `dtc:${kind}` : nodeType);
+  if (g) return glyphElement(g);
   const url = kind ? dtcGlyphUrl(dtcGlyphName(kind)) : iconUrlFor(nodeType);
   if (url) {
     const img = document.createElement("img");
@@ -27,6 +33,28 @@ export function typeIconElement(nodeType: string, kind?: string): HTMLElement {
     return img;
   }
   return swatch(nodeType);
+}
+
+/** The theme's colours for the recolourable roles of a glyph drawn in the DOM —
+ *  the same rule as the canvas (`renderer.ts::glyphInk`). */
+export function domGlyphInk(): GlyphInk {
+  const th = canvasTheme();
+  return { ink: th.labelInk, paper: th.canvasBg, dark: activeTheme() === "dark" };
+}
+
+/** A glyph as an inline `<svg>` in a span the lists size with CSS. */
+export function glyphElement(g: Glyph): HTMLElement {
+  const span = document.createElement("span");
+  span.className = "glyph-inline";
+  span.innerHTML = glyphSvg(g, domGlyphInk());
+  return span;
+}
+
+/** The markup of a type's glyph, for the lists that write HTML (the search):
+ *  inline paths when the datamodel has them, else null. */
+export function glyphMarkupFor(nodeType: string): string | null {
+  const g = glyphByKey(nodeType);
+  return g ? glyphSvg(g, domGlyphInk()) : null;
 }
 
 function swatch(nodeType: string): HTMLCanvasElement {

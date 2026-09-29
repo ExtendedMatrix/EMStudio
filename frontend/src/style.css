@@ -8002,3 +8002,9 @@ body.gesturing-resize * {
 .shortcuts-table { border-collapse: collapse; width: 100%; font-size: 13px; }
 .shortcuts-table td { padding: 5px 10px; border-bottom: 1px solid var(--border); }
 .shortcuts-key { white-space: nowrap; font-family: var(--font-mono); font-weight: 600; }
+/* SHIFT-A fase 6b · a glyph drawn inline from `2d_glyphs` (menus, outliner, search) */
+.glyph-inline { display: inline-flex; align-items: center; justify-content: center; }
+.glyph-inline > svg { width: 100%; height: 100%; display: block; }
+.addm-ic > .glyph-inline { width: 24px; height: 14px; }
+.nl-dot.nl-glyph { background: none !important; border: 0 !important; border-radius: 0; width: 14px; height: 14px; margin-top: 0; }
+.hit-glyph.glyph-inline { width: 18px; height: 18px; }
