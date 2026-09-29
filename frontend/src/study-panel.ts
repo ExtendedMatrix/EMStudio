@@ -584,6 +584,9 @@ export function renderSitePosition(host: HTMLElement, store: DocumentStore): voi
         store.clearSitePosition();
         return;
       }
+      // BOTH numbers, or nothing: `Number("")` is 0, and a latitude typed first
+      // used to write a site on the Greenwich meridian (COLLEGARE, measured)
+      if (latIn.value.trim() === "" || lonIn.value.trim() === "") return;
       if (Number.isFinite(lat) && Number.isFinite(lon))
         store.setSitePosition(lon, lat);
     };

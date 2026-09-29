@@ -155,7 +155,9 @@ export function viewTypesFor(node: EmNode | undefined, isStrat: (t: string) => b
     : ["document", "source", "paradata"];
   else if (t === "property" || t === "extractor" || t === "combiner") out = ["paradata"];
   else if (t.startsWith("representation_model")) out = ["rm", "scene3d"];
-  else if (isStrat(t)) out = ["us", "matrix", "timeline", "table"];
+  // a unit is not a scope a table queries (the table reads a graph, an epoch,
+  // an activity): `us` with its certainty, or where it sits in a sequence
+  else if (isStrat(t)) out = ["us", "matrix", "timeline"];
   else out = ["us"];
   return out.filter((v) => VIEW_TYPES.includes(v));
 }

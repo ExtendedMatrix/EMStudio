@@ -8292,3 +8292,11 @@ body.gesturing-resize * {
 .ninsp-move { flex-direction: row; align-items: center; }
 .ninsp-grow { flex: 1; }
 .ninsp-cite { padding: 8px 10px; border-bottom: 1px solid var(--border); background: var(--accent-wash, rgba(191,144,0,.08)); display: flex; flex-direction: column; gap: 4px; }
+/* COLLEGARE · fase 4 · the site picker in a popover, and the map's button */
+.sitepick { width: 380px; max-height: min(640px, calc(100vh - 16px)); }
+.sitepick-x { margin-left: auto; border: 0; background: none; color: var(--text-muted); font-size: 16px; cursor: pointer; }
+.sitepick-body { overflow: auto; padding: 0 12px 8px; }
+.sitepick-geo { display: flex; flex-direction: column; gap: 4px; margin-bottom: 8px; padding-bottom: 8px; border-bottom: 1px solid var(--border); }
+.sitepick .insp-geo-map { min-height: 0; }
+.sitepick .insp-geo-map > * { max-width: 100%; }
+.nv-site-pick { margin-top: 6px; font: inherit; font-size: 12px; border: 1px solid var(--accent); background: var(--bg); color: var(--accent-ink, var(--accent)); border-radius: var(--radius); padding: 3px 10px; cursor: pointer; }

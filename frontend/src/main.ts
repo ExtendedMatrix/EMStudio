@@ -185,13 +185,14 @@ import {
   type ExistingLink,
   type LinkedItem,
 } from "./add-menu";
-import { mediumOfFile, openNewDocumentForm, type NewDocumentValues } from "./doc-form";
+import { descriptionFromFile, mediumOfFile, openNewDocumentForm, type NewDocumentValues } from "./doc-form";
 import type { Arrangement } from "./workspace";
 import { renderNarrativeIndex } from "./narrative-index";
 import { renderCiteSection, renderNarrativeInspector } from "./narrative-inspector";
 import { linkGroupOf } from "./add-menu";
-import { unvalidatedForExport, viewTypesFor, type ProjChapter } from "./narrative-projection";
-import type { NarrativeSelection, Reading } from "./narrative";
+import { refsForViewType, unvalidatedForExport, viewTypesFor, type ProjChapter } from "./narrative-projection";
+import { setSitePicker, type NarrativeSelection, type Reading } from "./narrative";
+import { renderSitePosition } from "./study-panel";
 import {
   closeAddMenu,
   showAddMenu,
@@ -12154,20 +12155,280 @@ function renderNarrativeInspectorInto(host: HTMLElement): void {
   });
 }
 
-/** fase 4 · the Blocks menu; until then «+» adds a paragraph there. */
-function openBlocksMenu(narrativeId: string, c: number, at: number, _anchor: HTMLElement, replace: boolean): void {
+/**
+ * COLLEGARE · FASE 4 · the Blocks menu — the «+» between blocks, and «/» on an
+ * empty paragraph (which it replaces). FIRST the block, THEN what it shows: a
+ * media block opens the list of the refs its view type admits
+ * (`refsForViewType`, the renderers' rule), with «Nuovo documento…» / «Nuovo
+ * modello 3D…» where they make sense. Below, «Oppure cita un nodo»: any node, in
+ * its default view. Every insert is ONE undo step (a replaced paragraph and
+ * its block in one batch).
+ */
+/** The map embed's place section (below, with the site picker). */
+let renderMapEmbedSection: (host: HTMLElement, node: EmNode) => void = () => {};
+
+const BLOCK_MEDIA = ["map", "scene3d", "document", "matrix", "paradata", "us", "timeline", "table"];
+
+function insertEmbedAt(narrativeId: string, c: number, at: number, ref: string, vt: string, replace: boolean): void {
   if (!store) return;
   const st = store;
   st.batch(() => {
     if (replace) nedit.deleteBlock(st, narrativeId, c, at);
-    nedit.editChapters(st, narrativeId, (cs) => cs[c]?.blocks?.splice(at, 0, { block_type: "prose", text: "" }));
+    nedit.addEmbed(st, narrativeId, c, ref, vt, at);
+  });
+  logInfo(t("nv.blockAdded", { what: viewTypeLabel(vt), name: String(st.node(ref)?.name ?? ref) }), [narrativeId, ref]);
+  setNarrativeSelection(narrativeId, { chapter: c, block: at });
+}
+
+function openBlocksMenu(narrativeId: string, c: number, at: number, anchor: HTMLElement, replace: boolean): void {
+  if (!store) return;
+  const st = store;
+  const r = anchor.getBoundingClientRect();
+  const x = r.left + 20, y = r.bottom + 4;
+  const blockEntries: AddMenuEntry[] = [
+    { key: "b|prose", label: t("nv.blk.prose"), detail: t("nv.blk.proseHint"), run: () => {
+        if (replace) return; // «/» on an empty paragraph asked for something else
+        nedit.editChapters(st, narrativeId, (cs) => cs[c]?.blocks?.splice(at, 0, { block_type: "prose", text: "" }));
+        setNarrativeSelection(narrativeId, { chapter: c, block: at });
+        // after the page is redrawn by the edit (it is, on the store's change)
+        window.setTimeout(() => activeNarrativeHost()
+          ?.querySelector<HTMLElement>(`.nv-block-row[data-block="${c}:${at}"] .nv-prose-edit`)?.focus(), 60);
+      } },
+    { key: "b|ai", label: t("nv.blk.ai"), detail: t("nv.blk.aiHint"), run: () => {
+        if (replace) nedit.deleteBlock(st, narrativeId, c, at);
+        void generateChapterDraft(narrativeId, c);
+      } },
+    ...BLOCK_MEDIA.filter((vt) => nedit.VIEW_TYPES.includes(vt)).map((vt): AddMenuEntry => ({
+      key: `b|${vt}`, label: viewTypeLabel(vt), detail: t(`nv.blk.${vt}Hint`),
+      run: () => pickRefFor(narrativeId, c, at, vt, replace, x, y),
+    })),
+  ];
+  const nodes = st.liveNodes().filter((n) => LINK_GROUP_ORDER.includes(linkGroupOf(n.node_type) as never));
+  const cite = nodes.map((n): AddMenuEntry => ({
+    key: `c|${n.id}`, label: String(n.name ?? n.id), detail: viewTypeLabel(nedit.defaultViewType(n)),
+    nodeType: n.node_type, description: String(n.description ?? ""), alias: String(n.name ?? n.id),
+    icon: () => typeIconElement(n.node_type),
+    run: () => insertEmbedAt(narrativeId, c, at, n.id, nedit.defaultViewType(n), replace),
+  }));
+  const chapter = (narrativesIn(st.doc).find((n) => n.id === narrativeId)?.chapters ?? [])[c];
+  showAddMenu({
+    title: t("nv.insertTitle"), context: `${chapter?.title ?? ""} · ${at + 1}`, placeholder: t("link.q"),
+    linkedHeader: t("nv.blocks"), linked: blockEntries, recent: [], categories: [],
+    existing: {
+      header: t("nv.orCite"),
+      groups: LINK_GROUP_ORDER.map((g) => ({ label: t(`link.g.${g}`),
+        entries: cite.filter((_, i) => linkGroupOf(nodes[i].node_type) === g) })),
+      perGroup: EXISTING_PER_GROUP, more: (n) => t("link.more", { n }), none: t("link.none"),
+    },
+    extra: [],
+    searchable: [...blockEntries, ...cite],
+    matches: (e, q) => e.key.startsWith("c|") ? existingMatches(e, q)
+      : `${e.label} ${e.detail ?? ""}`.toLowerCase().includes(q.trim().toLowerCase()),
+    onDismiss: () => { if (replace) activeNarrativeHost()
+      ?.querySelector<HTMLElement>(`.nv-block-row[data-block="${c}:${at}"] .nv-prose-edit`)?.focus(); },
+    count: t("link.count", { n: cite.length }), noResults: t("add.noResults"), keysHint: t("add.keys"),
+  }, x, y);
+}
+
+/** The second step: what the block shows. */
+function pickRefFor(narrativeId: string, c: number, at: number, vt: string, replace: boolean, x: number, y: number): void {
+  if (!store) return;
+  const st = store;
+  // the map points at THE GRAPH: its site position (never a point invented)
+  if (vt === "map") {
+    const gid = st.ensureGraphRootId();
+    insertEmbedAt(narrativeId, c, at, gid, "map", replace);
+    if (!st.readSitePosition()) queueMicrotask(() => openSitePicker(x, y));
+    return;
+  }
+  const refs = refsForViewType(vt, st.doc, isStratigraphicType, is3dDocument);
+  const entries = refs.map((n): AddMenuEntry => ({
+    key: `r|${n.id}`, label: String(n.name ?? n.id), detail: String(n.description ?? "").slice(0, 40),
+    nodeType: n.node_type, description: String(n.description ?? ""), alias: String(n.name ?? n.id),
+    icon: () => typeIconElement(n.node_type),
+    run: () => insertEmbedAt(narrativeId, c, at, n.id, vt, replace),
+  }));
+  const news: AddMenuEntry[] = vt === "document" || vt === "scene3d" ? [{
+    key: "r|new", label: vt === "scene3d" ? t("nv.new3d") : t("doc.newDoc"),
+    run: () => askNewDocument(x, y, vt === "scene3d" ? { filename: "model.glb" } : {}, (v) => {
+      const id = st.newId();
+      st.batch(() => {
+        st.addNode({ id, name: v.name, node_type: "document", description: v.description,
+                     ...(v.filename ? { data: { filename: v.filename } } : {}) });
+        if (replace) nedit.deleteBlock(st, narrativeId, c, at);
+        nedit.addEmbed(st, narrativeId, c, id, vt, at);
+      });
+      setNarrativeSelection(narrativeId, { chapter: c, block: at });
+    }),
+  }] : [];
+  // THE GRAPH is a ref even before its node exists (it is created on demand,
+  // `ensureGraphRootId`, as the map does): a scene, a matrix, a timeline, a
+  // table of the whole study are the first things one reaches for
+  const graphViews = viewTypesFor({ id: "", node_type: "graph", name: "" } as EmNode, isStratigraphicType);
+  if (!refs.some((n) => n.node_type === "graph") && graphViews.includes(vt))
+    entries.unshift({
+      key: "r|graph", label: String(st.doc.graph["name"] ?? t("nv.theGraph")), detail: t("nv.theGraph"),
+      run: () => insertEmbedAt(narrativeId, c, at, st.ensureGraphRootId(), vt, replace),
+    });
+  const graphNodes = refs.filter((n) => n.node_type === "graph");
+  showAddMenu({
+    title: viewTypeLabel(vt), context: t("nv.whatItShows"), placeholder: t("link.q"),
+    linkedHeader: news.length ? t("link.new") : undefined, linked: news, recent: [], categories: [],
+    existing: {
+      header: t("nv.pick"),
+      groups: [
+        { label: t("nv.theGraph"), entries: entries.filter((e) => e.key === "r|graph" || graphNodes.some((n) => e.key === `r|${n.id}`)) },
+        { label: viewTypeLabel(vt), entries: entries.filter((e) => e.key !== "r|graph" && !graphNodes.some((n) => e.key === `r|${n.id}`)) },
+      ],
+      perGroup: EXISTING_PER_GROUP, more: (n) => t("link.more", { n }), none: t("nv.noRefs"),
+    },
+    extra: [], searchable: [...news, ...entries], matches: (e, q) => existingMatches(e, q),
+    count: t("link.count", { n: entries.length }), noResults: t("add.noResults"), keysHint: t("add.keys"),
+  }, x, y);
+}
+
+/** A FILE dropped on a chapter: the document's form first, precompiled from the
+ *  file (name, description, filename — the medium read off the extension),
+ *  then the block, in one step; and a reminder to stamp the file in Contenuti. */
+function dropFileOnChapter(narrativeId: string, c: number, f: File, x: number, y: number): void {
+  if (!store) return;
+  const st = store;
+  askNewDocument(x, y, { filename: f.name, description: descriptionFromFile(f.name) }, (v) => {
+    const id = st.newId();
+    const vt = mediumOfFile(v.filename || f.name) === "3d" ? "scene3d" : "document";
+    const at = ((narrativesIn(st.doc).find((n) => n.id === narrativeId)?.chapters ?? [])[c]?.blocks ?? []).length;
+    st.batch(() => {
+      st.addNode({ id, name: v.name, node_type: "document", description: v.description,
+                   data: { filename: v.filename || f.name } });
+      nedit.addEmbed(st, narrativeId, c, id, vt, at);
+    });
+    setNarrativeSelection(narrativeId, { chapter: c, block: at });
+    toast(t("nv.fileStampReminder", { file: f.name }));
+    logInfo(t("nv.fileStampReminder", { file: f.name }), [id]);
   });
 }
-/** fase 4 · a file dropped on a chapter. */
-function dropFileOnChapter(_n: string, _c: number, _f: File, _x: number, _y: number): void {}
 
-/** fase 4 · the map embed's place section (defined with the site picker). */
-let renderMapEmbedSection: (host: HTMLElement, node: EmNode) => void = () => {};
+/**
+ * COLLEGARE · the SITE PICKER in a popover: the one that exists
+ * (`renderSitePosition` — Nominatim search, a click on the map, the numbers,
+ * «togli»), plus «Dal georiferimento 3D»: the centroid of the graph's geometry,
+ * reprojected by the bridge (`georeferenceScene`) — never the shift, which is
+ * the scene's origin and may sit hundreds of metres from the monument.
+ */
+let sitePickHost: HTMLElement | null = null;
+const sitePickWatched = new WeakSet<DocumentStore>();
+function openSitePicker(clientX: number, clientY: number): void {
+  if (!store) return;
+  const st = store;
+  closeSitePicker();
+  const box = document.createElement("div");
+  box.className = "addm sitepick";
+  box.setAttribute("role", "dialog");
+  document.body.appendChild(box);
+  sitePickHost = box;
+  const paint = (): void => {
+    if (!sitePickHost || !store) return;
+    box.textContent = "";
+    const head = document.createElement("div");
+    head.className = "addm-head";
+    head.innerHTML = `<b>${escapeHtml(t("nv.siteTitle"))}</b><span class="addm-ctx">site_position</span>`;
+    const x = document.createElement("button");
+    x.className = "sitepick-x";
+    x.textContent = "×";
+    x.addEventListener("click", closeSitePicker);
+    head.appendChild(x);
+    box.appendChild(head);
+    const body = document.createElement("div");
+    body.className = "sitepick-body";
+    renderSitePosition(body, store);
+    const geo = document.createElement("div");
+    geo.className = "sitepick-geo";
+    const gb = document.createElement("button");
+    gb.className = "insp-btn";
+    gb.textContent = t("nv.siteFrom3d");
+    const note = document.createElement("p");
+    note.className = "insp-hint";
+    note.textContent = t("nv.siteFrom3dNote");
+    gb.addEventListener("click", () => {
+      gb.disabled = true;
+      void georeferenceScene(JSON.parse(store!.toJSON())).then((placed) => {
+        gb.disabled = false;
+        if (!placed) { note.textContent = t("nv.siteNo3d"); return; }
+        if ("error" in placed) { note.textContent = t("nv.site3dError", { why: placed.error }); return; }
+        store!.setSitePosition(placed.centroid[0], placed.centroid[1]);
+        toast(t("nv.siteSet3d"));
+      });
+    });
+    geo.append(gb, note);
+    body.prepend(geo);
+    box.appendChild(body);
+  };
+  paint();
+  if (!sitePickWatched.has(st)) {
+    sitePickWatched.add(st);
+    st.onChange(() => { if (sitePickHost?.isConnected && store === st) paint(); });
+  }
+  const rr = box.getBoundingClientRect();
+  box.style.left = `${Math.max(8, Math.min(clientX, window.innerWidth - rr.width - 8))}px`;
+  box.style.top = `${Math.max(8, Math.min(clientY, window.innerHeight - rr.height - 8))}px`;
+  const off = (e: PointerEvent): void => {
+    if (!sitePickHost) { document.removeEventListener("pointerdown", off, true); return; }
+    if (!box.contains(e.target as Node) && !(e.target as HTMLElement)?.closest?.(".nv-site-pick")) {
+      closeSitePicker();
+      document.removeEventListener("pointerdown", off, true);
+    }
+  };
+  document.addEventListener("pointerdown", off, true);
+}
+function closeSitePicker(): void {
+  sitePickHost?.remove();
+  sitePickHost = null;
+}
+setSitePicker((anchor) => {
+  const r = anchor.getBoundingClientRect();
+  openSitePicker(r.left, r.bottom + 4);
+});
+
+/** The map embed's Inspector: the graph's TWO positions, side by side — the
+ *  site (`site_position`, what the map shows) and the 3D anchor (the
+ *  GeoPositionNode's shift, what the scene is placed from). */
+renderMapEmbedSection = (host: HTMLElement, _node: EmNode): void => {
+  if (!store) return;
+  const st = store;
+  const s = document.createElement("section");
+  s.className = "ninsp-s";
+  const eyebrow = document.createElement("div");
+  eyebrow.className = "ninsp-eyebrow";
+  eyebrow.textContent = t("nv.graphPlace");
+  s.appendChild(eyebrow);
+  const sp = st.readSitePosition();
+  const geoNode = st.doc.graph.nodes.find((n) => n.node_type === "geo_position");
+  const gd = (geoNode?.data ?? {}) as Record<string, unknown>;
+  const row = (k: string, v: string): void => {
+    const f = document.createElement("div");
+    f.className = "ninsp-f";
+    f.innerHTML = `<span class="ninsp-k">${escapeHtml(k)}</span><span class="ninsp-v">${escapeHtml(v)}</span>`;
+    s.appendChild(f);
+  };
+  row("site_position", sp ? `${sp.lat.toFixed(5)}, ${sp.lon.toFixed(5)} (${sp.crs})` : t("nv.notPlaced"));
+  // the same fields `geo.ts` `geoOf` reads: epsg, shift_x, shift_y
+  row(t("nv.anchor3d"), geoNode
+    ? (gd.shift_x != null ? `EPSG:${gd.epsg ?? 4326} · ${gd.shift_x}, ${gd.shift_y}` : String(geoNode.name ?? geoNode.id))
+    : "—");
+  const b = document.createElement("button");
+  b.className = "insp-btn";
+  b.textContent = sp ? t("nv.moveSite") : t("nv.placeSite");
+  b.addEventListener("click", () => {
+    const r = b.getBoundingClientRect();
+    openSitePicker(r.left - 320, r.top);
+  });
+  s.appendChild(b);
+  const note = document.createElement("p");
+  note.className = "ninsp-note";
+  note.textContent = t("nv.graphPlaceNote");
+  s.appendChild(note);
+  host.appendChild(s);
+};
 
 /** «Cita in «capitolo»»: a node of the graph, with the story open. */
 function citeSectionFor(host: HTMLElement): void {

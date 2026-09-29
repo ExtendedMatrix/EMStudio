@@ -307,6 +307,17 @@ function mapCard(node: EmNode, options: Record<string, unknown>,
     } else {
       box.appendChild(el("div", "nv-embed-title", t("nv.siteUnplaced")));
       box.appendChild(el("div", "nv-embed-note", t("nv.siteUnplacedHow")));
+      // COLLEGARE · the block says so AND offers the picker, where there is one
+      // (the editor installs it; the served reader has no store to write to)
+      if (sitePicker) {
+        const b = el("button", "nv-site-pick", t("nv.placeSite")) as HTMLButtonElement;
+        b.type = "button";
+        b.addEventListener("click", (e) => {
+          e.stopPropagation();
+          sitePicker!(b);
+        });
+        box.appendChild(b);
+      }
     }
     return box;
   }
@@ -835,6 +846,13 @@ export interface PageHooks {
   onVerify?(chapter: number, block: number): void;
   /** a FILE dropped on a chapter (the node drop is the editor's `addEmbed`) */
   onFileDrop?(chapter: number, file: File, clientX: number, clientY: number): void;
+}
+
+/** COLLEGARE · «Posiziona il sito…» for a map with no site: installed by the
+ *  editor (it opens the site picker), absent in the served reader. */
+let sitePicker: ((anchor: HTMLElement) => void) | null = null;
+export function setSitePicker(fn: ((anchor: HTMLElement) => void) | null): void {
+  sitePicker = fn;
 }
 
 /** A mention in the page: the node's NAME, clickable, never editable as text. */
