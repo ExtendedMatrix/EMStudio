@@ -30,6 +30,7 @@ export const WINDOW_ICON_PATHS: Record<string, string> = {
   // drawn tonight, same stroke
   emtree: '<rect x="2.5" y="2.5" width="5" height="3" rx="1"/><path d="M5 5.5v7M5 8.5h3.5M5 12.5h3.5"/><rect x="8.5" y="7" width="5" height="3" rx="1"/><rect x="8.5" y="11" width="5" height="3" rx="1"/>',
   annotator: '<rect x="2.5" y="3" width="11" height="10" rx="1.5"/><path d="M5 6h6v4.5H5z" stroke-dasharray="1.6 1.5"/>',
+  "narrative-index": '<path d="M3 3.5h2M3 8h2M3 12.5h2M7 3.5h6M7 8h6M7 12.5h4"/>',
   study: '<path d="M8 13.8s4.5-3.9 4.5-7.3a4.5 4.5 0 0 0-9 0c0 3.4 4.5 7.3 4.5 7.3z"/><circle cx="8" cy="6.4" r="1.6"/>',
 };
 

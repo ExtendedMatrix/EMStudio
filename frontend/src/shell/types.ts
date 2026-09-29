@@ -78,6 +78,8 @@ export interface SurfaceDeps {
   renderDocViewInto(win: Win, list: HTMLElement, detail: HTMLElement): void;
   reflectDocWidth(surface: HTMLElement): void;
   renderStudyInto(body: HTMLElement): void;
+  /** COLLEGARE · the Index of a story, into any body. */
+  renderNarrativeIndexInto(body: HTMLElement, win: Win): void;
   /** Which of its tabs this hosted window is showing (per WINDOW, never per
    *  type — two Inspector windows can sit on different tabs, and that is what
    *  makes the second one a view of its own instead of a duplicate). */
@@ -325,6 +327,34 @@ export function registerBuiltinSurfaces(deps: SurfaceDeps): void {
           if (!body || !win || !body.isConnected) return;
           const el = body;
           paintSurface(win, el, () => deps.renderStudyInto(el));
+        },
+        setFocused(on) { markFocus(body, on); },
+        destroy() { body?.remove(); body = null; win = null; },
+      };
+    },
+  });
+
+  // ── NARRATIVE-INDEX · the story's chapters and its coverage ──────────────
+  //
+  // Born converted (3 ott 2026): one constructor, the same shape as the study.
+  registerSurfaceType({
+    id: "narrative-index",
+    create(): Surface {
+      let body: HTMLElement | null = null;
+      let win: Win | null = null;
+      return {
+        mount(area, w) {
+          win = w;
+          body = document.createElement("div");
+          body.className = "tile-nidxbody";
+          area.appendChild(body);
+          this.refresh();
+        },
+        refresh() {
+          if (!body || !win || !body.isConnected) return;
+          const el = body;
+          const w = win;
+          paintSurface(w, el, () => deps.renderNarrativeIndexInto(el, w));
         },
         setFocused(on) { markFocus(body, on); },
         destroy() { body?.remove(); body = null; win = null; },

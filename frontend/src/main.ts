@@ -185,7 +185,9 @@ import {
   type ExistingLink,
   type LinkedItem,
 } from "./add-menu";
-import { openNewDocumentForm, type NewDocumentValues } from "./doc-form";
+import { mediumOfFile, openNewDocumentForm, type NewDocumentValues } from "./doc-form";
+import type { Arrangement } from "./workspace";
+import { renderNarrativeIndex } from "./narrative-index";
 import {
   closeAddMenu,
   showAddMenu,
@@ -361,6 +363,7 @@ import {
   removeWorkspace,
   renameWorkspace,
   workspaceLabel,
+  workspaceModified,
   isTiled,
   activeWin,
   activeWorkspace,
@@ -1475,6 +1478,10 @@ window.__EM_SCENE__ = () => {
   },
   canUndo: () => !!store?.canUndo,
   undo: () => store?.undo(),
+  /** COLLEGARE · the gestures a probe needs without aiming at pixels */
+  select: (id: string | null) => select(id),
+  wins: () => windowsOf().map((w) => ({ id: w.id, type: w.type, state: w.state })),
+  closeWin: (id: string) => { if (closeWindow(id)) renderTiles(); },
   /** SHIFT-A · what a node IS, read-only: type, name and its edges */
   nodeInfo: (id: string) => {
     const n = store?.node(id);
@@ -1860,6 +1867,13 @@ function sameEdge(a: EmEdge, b: EmEdge): boolean {
 }
 
 function select(nodeId: string | null): void {
+  // COLLEGARE · Contenuti has no inspector: the Storage carries the card of the
+  // document picked in the DTC, so a pick that enters or leaves a document
+  // repaints it
+  const docBefore = !!selectedId && store?.node(selectedId)?.node_type === "document";
+  const docAfter = !!nodeId && store?.node(nodeId)?.node_type === "document";
+  if ((docBefore || docAfter) && selectedId !== nodeId)
+    queueMicrotask(() => { if (windowsOf().some((w) => w.type === "storage")) renderStorage(); });
   selectedId = nodeId;
   selectedIds = new Set(nodeId ? [nodeId] : []);
   selectedEdge = null; // node and connector selection are mutually exclusive
@@ -11959,6 +11973,7 @@ function narrativeEditor(narrativeId: string): NarrativeEditor {
  *  no overlay, no `centralMode` — so there is nothing to ask about the focus. */
 function refreshNarrativeView(): void {
   refreshSurfaces("narrative");
+  refreshSurfaces("narrative-index");
 }
 
 /** Is this window WRITING? Per window, like every other mode: two Narrative
@@ -12920,6 +12935,19 @@ function renderTiles(): void {
   draw();
   setAreaFocused(activeWin().id, true);
   for (const id of placed) if (id !== activeWin().id) setAreaFocused(id, false);
+  queueWorkspaceBar(); // COLLEGARE · a reshaped space goes italic, with ↺
+}
+
+/** The workspace bar follows the arrangement (the «modified» mark) — once per
+ *  tick, and after the module has finished loading. */
+let workspaceBarQueued = false;
+function queueWorkspaceBar(): void {
+  if (workspaceBarQueued) return;
+  workspaceBarQueued = true;
+  queueMicrotask(() => {
+    workspaceBarQueued = false;
+    renderWorkspaceBar();
+  });
 }
 
 // ── CURRENT-ELEMENT · the element the ACTIVE window is working on ───────────
@@ -12956,6 +12984,7 @@ function setCurrentChapterIndex(win: Win, i: number | null): void {
   // Marking a chapter is a class and a header, so that is all it does.
   markCurrentChapter(i);
   updateWindowHeader(); // the menus enable/disable with it
+  refreshSurfaces("narrative-index"); // its own host: the page is not rebuilt
 }
 
 /**
@@ -13092,6 +13121,7 @@ const TRANSFORM_TYPES: WindowType[] = [
   "annotator",
   "shelf",
   "study",
+  "narrative-index",
 ];
 
 /**
@@ -13254,6 +13284,34 @@ function renderDocViewInto(
  *  tonight it did not, because nobody had written its secondary surface. */
 function renderStudyWindow(): void {
   refreshSurfaces("study");
+}
+
+/**
+ * COLLEGARE · the Index window. It follows the story of the workspace's
+ * Narrative window (the focused one, else the first), and a click on a chapter
+ * makes it current THERE and brings it into view — navigation, not an edit.
+ */
+function renderNarrativeIndexInto(body: HTMLElement, _win: Win): void {
+  const story = activeWin().type === "narrative" ? activeWin() : windowsOf().find((w) => w.type === "narrative");
+  const narrId = (story && (winCurrent(story, "narrative") as string | null)) ?? selectedNarrativeId
+    ?? narrativesIn(store?.doc ?? null)[0]?.id ?? null;
+  const s = store;
+  renderNarrativeIndex(body, s?.doc ?? null, {
+    narrativeId: narrId,
+    current: story ? currentChapterIndex(story) : null,
+    onPick: (i) => {
+      for (const w of windowsOf()) if (w.type === "narrative") setCurrentChapterIndex(w, i);
+      const host = story ? narrativeHostOf(story) : null;
+      host?.querySelectorAll<HTMLElement>(".nv-chapter")[i]?.scrollIntoView({ block: "start", behavior: "smooth" });
+    },
+    ...(s && narrId ? {
+      onAddChapter: () => nedit.addChapter(s, narrId),
+      undescribedEpochs: () => undescribedEpochs(s, narrId),
+      onAddEpochChapter: (id: string) => addEpochChapter(s, narrId, id),
+      onRegenerate: () => toast(t("ai.regenerateUnavailable")),
+      canRegenerate: () => false,
+    } : {}),
+  });
 }
 
 /** …and the one renderer both — now all — mounts call. */
@@ -15374,9 +15432,92 @@ function renderStorage(): void {
   for (const host of storageHostsNow()) renderStorageInto(host);
 }
 
+/**
+ * COLLEGARE · the card of the document picked in the DTC, at the head of the
+ * Storage — the Contenuti space has no inspector, because a file is not a node
+ * yet. What it says is read off the graph now: the medium from the file name
+ * (`mediumOfFile`, never stored), the files it links (`has_linked_resource`)
+ * and whether each is stamped (it carries a checksum), how many readings
+ * (`extracted_from`) it feeds, and the way to read it in Fonti.
+ */
+function documentCard(): HTMLElement | null {
+  const d = selectedId && store ? store.node(selectedId) : null;
+  if (!store || !d || d.node_type !== "document") return null;
+  const st = store;
+  const data = (d.data ?? {}) as Record<string, unknown>;
+  const box = document.createElement("div");
+  box.className = "dcard";
+  const eyebrow = document.createElement("div");
+  eyebrow.className = "dcard-eyebrow";
+  eyebrow.textContent = t("dcard.title");
+  const head = document.createElement("div");
+  head.className = "dcard-head";
+  const name = document.createElement("b");
+  name.textContent = String(d.name ?? d.id);
+  const desc = document.createElement("span");
+  desc.className = "dcard-dim";
+  desc.textContent = d.description ?? "";
+  head.append(name, desc);
+  const filename = typeof data.filename === "string" ? data.filename : "";
+  if (filename) {
+    const tag = document.createElement("span");
+    tag.className = "dcard-tag";
+    tag.textContent = t(`dcard.m.${mediumOfFile(filename)}`);
+    head.appendChild(tag);
+  }
+  const files = st.doc.graph.edges
+    .filter((e) => e.source === d.id && e.edge_type === "has_linked_resource")
+    .map((e) => st.node(e.target))
+    .filter((n): n is EmNode => !!n);
+  const fl = document.createElement("div");
+  fl.className = "dcard-row";
+  const fk = document.createElement("span");
+  fk.className = "dcard-dim";
+  fk.textContent = t("dcard.files") + " ";
+  fl.appendChild(fk);
+  if (!files.length && !filename) fl.appendChild(document.createTextNode(t("dcard.nofile")));
+  if (filename && !files.length) fl.appendChild(document.createTextNode(filename));
+  for (const f of files) {
+    const fd = (f.data ?? {}) as Record<string, unknown>;
+    const n = document.createElement("code");
+    n.textContent = String(fd.filename ?? fd.locator ?? f.name ?? f.id).split("/").pop() ?? f.id;
+    fl.appendChild(n);
+    if (fd.checksum || fd.sha256) {
+      const ok = document.createElement("span");
+      ok.className = "dcard-tag ok";
+      ok.textContent = t("dcard.stamped");
+      fl.appendChild(ok);
+    }
+  }
+  const rd = document.createElement("div");
+  rd.className = "dcard-row";
+  const reads = st.doc.graph.edges.filter((e) => e.target === d.id && e.edge_type === "extracted_from").length;
+  rd.innerHTML = `<span class="dcard-dim">${escapeHtml(t("dcard.reads"))}</span> <b>${reads}</b><span class="dcard-grow"></span>`;
+  const go = document.createElement("button");
+  go.className = "dcard-go";
+  go.textContent = t("dcard.toSources");
+  go.addEventListener("click", () => {
+    const id = d.id;
+    setWorkspace("provenance");
+    const docWin = windowsOf().find((w) => w.type === "doc");
+    if (docWin) setWinCurrent(docWin, "doc", id);
+    select(id);
+    renderDocView();
+  });
+  rd.appendChild(go);
+  box.append(eyebrow, head, fl, rd);
+  return box;
+}
+
 function renderStorageInto(host: StorageHost): void {
   const { win, body, crumb, up } = host;
   if (win.type !== "storage") return;
+  // COLLEGARE · the document card stays on top whatever the listing does
+  const withCard = (): void => {
+    body.querySelector(":scope > .dcard")?.remove();
+    const c = documentCard();
+    if (c) body.prepend(c);
+  };
 
   if (winModeOf(win) === "minio") {
     // THE OBJECT STORE, for real now. A file goes to the room's store, comes
@@ -15391,6 +15532,7 @@ function renderStorageInto(host: StorageHost): void {
     paintSurface(win, body, () => {
       body.textContent = "";
       body.appendChild(minioPanel());
+      withCard();
     });
     return;
   }
@@ -15403,6 +15545,7 @@ function renderStorageInto(host: StorageHost): void {
   const wasAt = rememberSurfaceScroll(win, body);
   body.textContent = "";
   body.appendChild(storageEmpty(t("storage.loading")));
+  withCard();
 
   void (async () => {
     let listing: FsListing;
@@ -15422,6 +15565,7 @@ function renderStorageInto(host: StorageHost): void {
         box.appendChild(why);
       }
       body.appendChild(box);
+      withCard();
       if (crumb) crumb.textContent = down ? "" : (path ?? "");
       return;
     }
@@ -15447,6 +15591,7 @@ function renderStorageInto(host: StorageHost): void {
     }
 
     body.textContent = "";
+    withCard();
     if (!listing.entries.length) {
       body.appendChild(storageEmpty(t("storage.emptyFolder")));
       return;
@@ -18576,6 +18721,7 @@ function refreshTileSurfaces(): void {
 function setWindowMode(win: Win, mode: ViewKind): void {
   setWinMode(win, mode);
   setMode(mode); // → reflect + updateWindowHeader
+  queueWorkspaceBar();
 }
 
 /**
@@ -19686,6 +19832,7 @@ const WINDOW_MENUS: Record<WindowType, WinMenu[]> = {
   // fields, where the thing they act on is. An empty menu is the honest state,
   // and it is the same one `emtree`, `inspector` and `storage` are in.
   study: [],
+  "narrative-index": [],
   // SHELF · HDR2 · the list's own verbs, now that `#shelf-bar` is gone. Open and
   // Save are here rather than in the header for one reason: they are punctuation
   // — once when you sit down, once when you get up — while the name, the count
@@ -19902,6 +20049,108 @@ function setWorkspace(id: WorkspaceId): void {
  * from whatever you are looking at; the ones you made can be renamed
  * (double-click) and closed (middle-click or the ×), the built-ins cannot.
  */
+/** Put a built-in back to the arrangement it comes with (after asking). */
+function resetWorkspace(id: WorkspaceId): void {
+  if (!confirm(t("ws.resetConfirm"))) return;
+  if (id !== activeWorkspace()) setActiveWorkspace(id);
+  applyArrangement(id);
+  renderTiles();
+  reflectWorkspaceInBar(id);
+  renderWorkspaceBar();
+}
+
+/**
+ * COLLEGARE · an arrangement said in words, FROM the arrangement: a row is
+ * «·», a column is «sopra» — so Help ▸ Spazi di lavoro cannot drift from what
+ * the tab opens. A graph says its projection, a table its sheet.
+ */
+function describeArrangement(a: Arrangement): string {
+  const byName = new Map(a.wins.map((w) => [w.name, w]));
+  const leaf = (name: string): string => {
+    const w = byName.get(name);
+    if (!w) return name;
+    if (w.type === "graph") return t(`mode.${String(w.state?.["mode"] ?? "matrix")}`);
+    if (w.type === "table") {
+      const sheet = w.state?.["current.table.sheet"];
+      const cards = w.state?.["current.table.view"] === "cards";
+      return sheet ? `${t(`table.sheet.${String(sheet)}`)}${cards ? ` (${t("table.view.cards").toLowerCase()})` : ""}`
+                   : t("win.tabular");
+    }
+    return t(WINDOW_TYPE_META[w.type].labelKey);
+  };
+  const walk = (n: typeof a.layout): string =>
+    "win" in n ? leaf(n.win)
+      : n.dir === "col" ? `${walk(n.a)} ${t("ws.above")} ${walk(n.b)}` : `${walk(n.a)} · ${walk(n.b)}`;
+  return walk(a.layout);
+}
+
+/** Help ▸ Spazi di lavoro: the four spaces, the question each answers, its windows. */
+function showWorkspacesHelp(): void {
+  document.querySelector(".modal.ws-help")?.remove();
+  const modal = document.createElement("div");
+  modal.className = "modal ws-help";
+  const card = document.createElement("div");
+  card.className = "modal-card";
+  const head = document.createElement("div");
+  head.className = "modal-head";
+  head.textContent = t("ws.helpTitle");
+  const body = document.createElement("div");
+  body.className = "modal-body";
+  const lead = document.createElement("p");
+  lead.textContent = t("ws.helpLead");
+  body.appendChild(lead);
+  const table = document.createElement("table");
+  table.className = "shortcuts-table ws-help-table";
+  const hr = document.createElement("tr");
+  for (const k of ["ws.col.space", "ws.col.question", "ws.col.windows", "ws.col.inspector"]) {
+    const th = document.createElement("th");
+    th.textContent = t(k);
+    hr.appendChild(th);
+  }
+  table.appendChild(hr);
+  const close = (): void => {
+    modal.remove();
+    document.removeEventListener("keydown", onKey, true);
+  };
+  const onKey = (e: KeyboardEvent): void => {
+    if (e.key === "Escape") {
+      e.stopPropagation();
+      close();
+    }
+  };
+  for (const w of WORKSPACES.filter((x) => x.builtin && x.arrangement)) {
+    const tr = document.createElement("tr");
+    const name = document.createElement("td");
+    const go = document.createElement("button");
+    go.className = "link";
+    go.textContent = workspaceLabel(w, t);
+    go.addEventListener("click", () => { close(); setWorkspace(w.id); });
+    name.appendChild(go);
+    const q = document.createElement("td");
+    q.textContent = w.hintKey ? t(w.hintKey) : "";
+    const wins = document.createElement("td");
+    wins.textContent = describeArrangement(w.arrangement!);
+    const insp = document.createElement("td");
+    insp.textContent = w.arrangement!.wins.some((x) => x.type === "inspector") ? t("ws.yes") : t("ws.noInspContents");
+    tr.append(name, q, wins, insp);
+    table.appendChild(tr);
+  }
+  body.appendChild(table);
+  const foot = document.createElement("div");
+  foot.className = "modal-foot";
+  const ok = document.createElement("button");
+  ok.className = "primary";
+  ok.textContent = t("ws.helpClose");
+  ok.addEventListener("click", close);
+  foot.appendChild(ok);
+  card.append(head, body, foot);
+  modal.appendChild(card);
+  modal.addEventListener("click", (e) => { if (e.target === modal) close(); });
+  document.body.appendChild(modal);
+  document.addEventListener("keydown", onKey, true);
+}
+document.getElementById("btn-help-workspaces")?.addEventListener("click", showWorkspacesHelp);
+
 function renderWorkspaceBar(): void {
   workspaceBar.innerHTML = "";
   // ONE SPECIES, so no hairline and no grouping: every tab is an arrangement of
@@ -19915,23 +20164,33 @@ function renderWorkspaceBar(): void {
     const isActive = w.id === activeWorkspace();
     b.className = "ws-tab" + (isActive ? " active" : "");
     const label = workspaceLabel(w, t);
-    // the tooltip says what the arrangement is FOR; a label alone answers "where
-    // am I" and not "what am I supposed to be doing here"
-    b.title = w.hintKey ? `${label} — ${t(w.hintKey)}` : label;
+    // COLLEGARE · the tooltip IS the question the space answers (E.D., 29 set)
+    const modified = workspaceModified(w.id);
+    b.title = (w.hintKey ? t(w.hintKey) : label) + (modified ? ` — ${t("ws.modified")}` : "");
     b.innerHTML =
       // STRUTTURA · the tab carries the line icon of the window it centres on
       `<span class="ws-ic">${WINDOW_TYPE_META[w.windowType]?.icon ?? w.icon}</span>` +
       `<span class="ws-lb">${escapeHtml(label)}</span>`;
+    b.classList.toggle("ws-modified", modified);
     b.addEventListener("click", () => setWorkspace(w.id));
+    // …and a reshaped built-in says so: italics and ↺, which puts it back
+    if (modified) {
+      const r = document.createElement("span");
+      r.className = "ws-reset";
+      r.textContent = "↺";
+      r.title = t("ws.reset");
+      r.addEventListener("click", (e) => {
+        e.stopPropagation();
+        resetWorkspace(w.id);
+      });
+      b.appendChild(r);
+    }
     if (w.builtin && w.arrangement) {
       // STUDIO · a built-in's arrangement is applied once and is yours after
       // that; double-clicking its tab is the way back to the one it came with
       b.addEventListener("dblclick", (e) => {
         e.stopPropagation();
-        if (!confirm(t("ws.resetConfirm"))) return;
-        if (w.id !== activeWorkspace()) setActiveWorkspace(w.id);
-        applyArrangement(w.id);
-        renderTiles();
+        resetWorkspace(w.id);
       });
     }
     if (!w.builtin) {
@@ -21647,6 +21906,7 @@ registerBuiltinSurfaces({
   addStorageHost, removeStorageHost, renderStorage,
   renderShelfInto, renderViewerInto, renderDocViewInto, reflectDocWidth,
   renderStudyInto,
+  renderNarrativeIndexInto,
   // …and the two the hosted panels need: which tab this window shows, and how a
   // panel gets built into a host. `shell/` draws none of them — it only knows
   // that a panel can be repainted, told the selection moved, and taken down.

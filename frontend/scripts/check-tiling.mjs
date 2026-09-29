@@ -314,4 +314,56 @@ const eq = (got, want, what) => {
      "the outliner has its own type entry (icon + label)");
 }
 
+// ── COLLEGARE · four spaces, one per activity; what a saved one becomes ─────
+{
+  const ids = W.WORKSPACES.filter((w) => w.builtin).map((w) => w.id);
+  eq(ids, ["canvas", "provenance", "assets", "narrative"],
+     "the four spaces, with the ids every saved arrangement is keyed by");
+  eq(W.PARKED_WORKSPACES.map((w) => w.id), ["dtc", "comparisons", "annotator"], "the rest stay parked");
+  const sig = (id) => W.arrangementSignature(W.WORKSPACES.find((w) => w.id === id).arrangement);
+  eq(sig("canvas"), "row(outliner,row(col(graph:matrix,table),inspector))",
+     "Stratigrafia: Outliner · Matrix above the table · Inspector — complete from the start");
+  eq(sig("provenance"), "row(table,row(col(doc,graph:graph),inspector))",
+     "Fonti: Documents · Document above the graph · Inspector");
+  eq(sig("assets"), "row(col(emtree,shelf),row(storage,graph:dtc))",
+     "Contenuti: EMTree above the Shelf · Storage · DTC — and no Inspector");
+  eq(sig("narrative"), "row(narrative-index,row(narrative,col(graph:matrix,inspector)))",
+     "Narrativa: Index · the page · Matrix above the Inspector");
+  const canvas = W.WORKSPACES.find((w) => w.id === "canvas").arrangement;
+  eq(canvas.wins.find((w) => w.type === "table").state["current.table.sheet"], "Issues",
+     "the Stratigrafia table opens on the warnings");
+  ok(W.WINDOW_TYPE_META["narrative-index"]?.labelKey === "win.narrativeIndex", "the Index is a window type");
+  // «modified»: the shape and the windows, not the ratios
+  W.applyArrangement("narrative");
+  ok(!W.workspaceModified("narrative"), "a space as it comes is not «modified»");
+  const first = W.paneIds(W.layoutOf("narrative"))[0];
+  W.setSplitRatio(first, 0.3, "narrative");
+  ok(!W.workspaceModified("narrative"), "dragging a seam is using the space, not reshaping it");
+  const extra = W.splitWindow(first, "col", "narrative");
+  ok(W.workspaceModified("narrative"), "an added area makes it «modified» (italic, ↺)");
+  W.closeWindow(extra.id, "narrative");
+  ok(!W.workspaceModified("narrative"), "…and closing it again gives the space back");
+  W.applyArrangement("narrative");
+  // the migration, line by line
+  const leaf = (id, type, state = {}) => ({ id, type, state });
+  const L = (winId) => ({ kind: "leaf", winId });
+  const S = (dir, a, b) => ({ kind: "split", dir, ratio: 0.5, a, b });
+  const saved = {
+    canvas: { wins: [leaf("c1", "graph", { mode: "matrix" }), leaf("c2", "outliner"), leaf("c3", "inspector")],
+              activeId: "c1", layout: S("row", L("c2"), S("row", L("c1"), L("c3"))) },
+    provenance: { wins: [leaf("p1", "storage"), leaf("p2", "graph", { mode: "dtc" }), leaf("p3", "inspector")],
+                  activeId: "p1", layout: S("row", L("p1"), S("row", L("p2"), L("p3"))) },
+    assets: { wins: [leaf("a1", "storage"), leaf("a2", "viewer")], activeId: "a1", layout: S("col", L("a1"), L("a2")) },
+    narrative: { wins: [leaf("n1", "narrative")], activeId: "n1", layout: L("n1") },
+    dtc: { wins: [leaf("d1", "graph", { mode: "dtc" })], activeId: "d1", layout: L("d1") },
+    ws7: { wins: [leaf("w1", "table")], activeId: "w1", layout: L("w1") },
+  };
+  const m = W.migrateSavedArrangements(saved);
+  eq(m.reseeded.sort(), ["canvas", "narrative", "provenance"],
+     "the old presets (and a never-arranged leaf) are reseeded with the new arrangement");
+  ok(m.parsed.assets === saved.assets, "an arrangement the user reshaped is kept as it is");
+  ok(m.parsed.dtc === saved.dtc && m.parsed.ws7 === saved.ws7, "parked and user workspaces are untouched");
+  eq(W.migrateSavedArrangements(m.parsed).reseeded, [], "a second pass reseeds nothing");
+}
+
 console.log(`tiling: ${checks} checks passed`);

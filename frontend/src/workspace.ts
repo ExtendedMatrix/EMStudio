@@ -59,7 +59,11 @@ export type WindowType =
   // fields. It was the no-node branch of the INSPECTOR, which made a per-graph
   // panel live inside a per-node window — and ended it with "Select a node to
   // inspect it". A window of its own is the place that sentence was pointing at.
-  | "study";
+  | "study"
+  // COLLEGARE · the INDEX of a story: its chapters, what still needs writing,
+  // and the coverage — how much of the graph the story rests on. The left
+  // column of the Narrative space; the page itself is the `narrative` window.
+  | "narrative-index";
 
 /** A single window instance — its own id + type + type-specific state. */
 export interface Win {
@@ -211,31 +215,91 @@ export type ArrangementNode =
  * part that changed — and they are English by default now (see `i18n.ts`).
  */
 const BUILTIN_WORKSPACES: WorkspacePreset[] = [
-  // STUDIO · the ONE workspace the app starts with (E.D., 28 set 2026): the
-  // outliner by epoch on the left, the graph in the middle, the inspector on the
-  // right — the desk's «Standard» preset. The other arrangements are PARKED
-  // below and come back one at a time, as each is rethought around what the
-  // user does in it.
+  // COLLEGARE · FOUR SPACES, ONE PER ACTIVITY (E.D., 29 set 2026). Each answers
+  // one question, and its windows are the ones that answer it; the tooltip of
+  // the tab IS the question (`hintKey`). The ids are the ones every saved
+  // arrangement is keyed by — only labels and arrangements changed (and
+  // `migrateSavedArrangements` below says, line by line, what happens to a
+  // saved one). The first window of each `wins` is the ANCHOR `applyArrangement`
+  // reuses, so it is the type the workspace has always seeded (`windowType`).
   //
-  // The id stays `canvas`: every saved arrangement, every persisted active
-  // window and the tiling checks are keyed by it. The label is what changed.
-  // The graph window is FIRST in `wins` because `applyArrangement` reuses the
-  // workspace's first existing window as the anchor, and that window has always
-  // been the graph (`seedWindows`): putting the outliner first would turn the
-  // user's canvas into an outliner.
+  // STRATIGRAFIA · «Cosa c'è, in che ordine, e regge?» It starts COMPLETE: the
+  // Matrix above the warnings table, because shrinking or closing the bottom
+  // panel is a gesture, and mounting it by hand is a setup.
   {
-    id: "canvas", labelKey: "ws.studio", hintKey: "ws.studioHint",
+    id: "canvas", labelKey: "ws.stratigraphy", hintKey: "ws.qStratigraphy",
     icon: "▦", windowType: "graph", graphMode: "matrix", builtin: true,
     arrangement: {
       wins: [
         { name: "canvas", type: "graph", state: { mode: "matrix" } },
         { name: "outliner", type: "outliner" },
+        { name: "issues", type: "table", state: { "current.table.sheet": "Issues" } },
         { name: "inspector", type: "inspector" },
       ],
       active: "canvas",
       layout: { dir: "row", ratio: 0.16, a: { win: "outliner" },
-                b: { dir: "row", ratio: 0.76, a: { win: "canvas" },
+                b: { dir: "row", ratio: 0.76,
+                     a: { dir: "col", ratio: 0.64, a: { win: "canvas" }, b: { win: "issues" } },
                      b: { win: "inspector" } } },
+    },
+  },
+  // FONTI · «Da dove viene questo dato?» The documents as cards, the one you are
+  // reading above the graph it feeds, and the Inspector: the paradata chain
+  // lives there.
+  {
+    id: "provenance", labelKey: "ws.sources", hintKey: "ws.qSources",
+    icon: "⌖", windowType: "doc", builtin: true,
+    arrangement: {
+      wins: [
+        { name: "doc", type: "doc" },
+        { name: "docs", type: "table",
+          state: { "current.table.sheet": "Documents", "current.table.view": "cards" } },
+        { name: "graph", type: "graph", state: { mode: "graph" } },
+        { name: "inspector", type: "inspector" },
+      ],
+      active: "doc",
+      layout: { dir: "row", ratio: 0.2, a: { win: "docs" },
+                b: { dir: "row", ratio: 0.72,
+                     a: { dir: "col", ratio: 0.55, a: { win: "doc" }, b: { win: "graph" } },
+                     b: { win: "inspector" } } },
+    },
+  },
+  // CONTENUTI · «Quali file ho, e cosa è diventato documento?» NO Inspector: a
+  // file is not a node yet. The Storage carries its own card instead — the
+  // document picked in the DTC, its stamped files, how many readings it has.
+  {
+    id: "assets", labelKey: "ws.contents", hintKey: "ws.qContents",
+    icon: "⌵", windowType: "storage", builtin: true,
+    arrangement: {
+      wins: [
+        { name: "files", type: "storage", state: { "mode.storage": "filesystem" } },
+        { name: "emtree", type: "emtree" },
+        { name: "shelf", type: "shelf" },
+        { name: "chain", type: "graph", state: { mode: "dtc" } },
+      ],
+      active: "files",
+      layout: { dir: "row", ratio: 0.22,
+                a: { dir: "col", ratio: 0.42, a: { win: "emtree" }, b: { win: "shelf" } },
+                b: { dir: "row", ratio: 0.56, a: { win: "files" }, b: { win: "chain" } } },
+    },
+  },
+  // NARRATIVA · «Come lo racconto, e su cosa poggia?» The Index, the page (which
+  // is the reader: its tools are in the Inspector), and the Matrix that follows
+  // the chapter above the Inspector.
+  {
+    id: "narrative", labelKey: "ws.narrative", hintKey: "ws.qNarrative",
+    icon: "❧", windowType: "narrative", builtin: true,
+    arrangement: {
+      wins: [
+        { name: "story", type: "narrative" },
+        { name: "index", type: "narrative-index" },
+        { name: "canvas", type: "graph", state: { mode: "matrix" } },
+        { name: "inspector", type: "inspector" },
+      ],
+      active: "story",
+      layout: { dir: "row", ratio: 0.19, a: { win: "index" },
+                b: { dir: "row", ratio: 0.6, a: { win: "story" },
+                     b: { dir: "col", ratio: 0.5, a: { win: "canvas" }, b: { win: "inspector" } } } },
     },
   },
 ];
@@ -251,48 +315,6 @@ const BUILTIN_WORKSPACES: WorkspacePreset[] = [
  * that points here falls back to `canvas` in silence (`initial`).
  */
 export const PARKED_WORKSPACES: WorkspacePreset[] = [
-  // 1 · ACQUISITION — the material comes in: the disk, the room's store, what was
-  // just said about what arrived, and the chain being written.
-  //
-  // F4 · IT WAS CALLED «DOCUMENTATION», and the rename is not cosmetic.
-  // `DTCAcquisitionNode` (crmdig:D12_Data_Transfer_Event) is already the name the
-  // MODEL gives this moment, and using the data's own word on the screen is what
-  // makes the person reading a graph in a year and the person looking at the tab
-  // speak the same language. «Documentation» also collided with EM's **Document**
-  // nodes — a tab and a node type with one name is a trap that costs explanations
-  // for years.
-  //
-  // The ID stays `assets`: every saved arrangement, every persisted active window
-  // and the tiling checks are keyed by it, and renaming an id to match a label
-  // would throw away somebody's layouts for a word nobody sees.
-  {
-    id: "assets", labelKey: "ws.acquisition", hintKey: "ws.acquisitionHint",
-    // the funnel is the ICON, not the label
-    icon: "⌵", windowType: "storage", builtin: true,
-    arrangement: {
-      wins: [
-        { name: "disk", type: "storage", state: { "mode.storage": "filesystem" } },
-        { name: "store", type: "storage", state: { "mode.storage": "minio" } },
-        { name: "inspector", type: "inspector" },
-        // …and the CHAIN, so the story being written is visible while it is
-        // written. It is how one checks that the funnel wrote the right one:
-        // yesterday we learned to read a neighbourhood, and this is the other
-        // half of the same gesture.
-        // `mode`, NOT `mode.graph`: a graph window's slot is the bare key and has
-        // always been (`modeKey`, which says so — renaming it would reset every
-        // saved arrangement). Measured: with `mode.graph` this window opened in
-        // Matrix Mode, silently, because `applyArrangement` only spreads
-        // `w.state` and never consults the preset's `graphMode`.
-        { name: "chain", type: "graph", state: { mode: "dtc" } },
-      ],
-      // the STORE is where the act happens: the tab opens on it
-      active: "store",
-      layout: { dir: "row", ratio: 0.24, a: { win: "disk" },
-                b: { dir: "row", ratio: 0.44, a: { win: "store" },
-                     b: { dir: "col", ratio: 0.52, a: { win: "chain" },
-                          b: { win: "inspector" } } } },
-    },
-  },
   // 3 · DTC — provenance: the corpus DAG (acquisitions → derivations →
   // attributions) is a MODE of a graph window, and this is the arrangement that
   // gives it the room a DAG needs, with the Inspector beside it.
@@ -313,40 +335,6 @@ export const PARKED_WORKSPACES: WorkspacePreset[] = [
                 b: { win: "inspector" } },
     },
   },
-  // 3-bis · PROVENANCE — il disco a sinistra, e quello che di quel file si SA a
-  // destra. Due riquadri, e sono due window types che esistono già: una Storage
-  // in modo `filesystem` e una Graph in modo `dtc`.
-  //
-  // È una TAB e non un meccanismo nuovo, ed è il punto: il sistema di finestre
-  // c'è (`workspace.ts` + `shell/surface.ts`), la vista DTC c'è, la selezione di
-  // un file c'è, e da stanotte c'è una quarta sorgente per quella vista — i
-  // `.stamp.json` sul disco. Questa riga è tutto ciò che serviva a metterle una
-  // accanto all'altra.
-  //
-  // Perché non riusare la tab `dtc`: quella è la PROVENIENZA DEL DOCUMENTO
-  // aperto (il corpus, con l'Inspector accanto) e si guarda senza un disco
-  // davanti. Questa parte dai byte. Stessa vista, due gesti diversi — la stessa
-  // ragione per cui `assets` e `canvas` sono due tab e non due modi di una.
-  {
-    id: "provenance", labelKey: "ws.provenance", hintKey: "ws.provenanceHint",
-    icon: "⌖", windowType: "storage", builtin: true,
-    arrangement: {
-      wins: [
-        { name: "disk", type: "storage", state: { "mode.storage": "filesystem" } },
-        // `mode` e NON `mode.graph`: lo slot di una finestra grafo è la chiave
-        // nuda (`modeKey`), e il commento della tab `assets` qui sopra racconta
-        // che cosa costa sbagliarlo — la finestra si apre in Matrix, in
-        // silenzio, perché `applyArrangement` sparge solo `w.state`.
-        { name: "chain", type: "graph", state: { mode: "dtc" } },
-        { name: "inspector", type: "inspector" },
-      ],
-      // si apre sul DISCO: il gesto comincia scegliendo un file
-      active: "disk",
-      layout: { dir: "row", ratio: 0.3, a: { win: "disk" },
-                b: { dir: "row", ratio: 0.68, a: { win: "chain" },
-                     b: { win: "inspector" } } },
-    },
-  },
   // 4 · COMPARISONS — what is NOT yours: the shelf's three fences (own-study /
   // own-HDT / other-HDT), what you are looking at, and what it is.
   {
@@ -361,20 +349,6 @@ export const PARKED_WORKSPACES: WorkspacePreset[] = [
       layout: { dir: "row", ratio: 0.46, a: { win: "shelf" },
                 b: { dir: "col", ratio: 0.6, a: { win: "viewer" },
                      b: { win: "inspector" } } },
-    },
-  },
-  // 5 · NARRATIVE — the telling, and what comes out of it. The story wide, with
-  // a preview beside it for the pictures it points at.
-  {
-    id: "narrative", labelKey: "ws.narrative", hintKey: "ws.narrativeHint",
-    icon: "❧", windowType: "narrative", builtin: true,
-    arrangement: {
-      wins: [
-        { name: "story", type: "narrative" },
-        { name: "viewer", type: "viewer" },
-      ],
-      layout: { dir: "row", ratio: 0.68, a: { win: "story" },
-                b: { win: "viewer" } },
     },
   },
   // 6 · ANNOTATOR — annotating images: the picture with its regions, a preview
@@ -506,6 +480,7 @@ export const WINDOW_TYPE_META: Record<WindowType, { icon: string; labelKey: stri
   annotator: { icon: windowIcon("annotator"), labelKey: "win.annotator" },
   shelf: { icon: windowIcon("shelf"), labelKey: "win.shelf" },
   study: { icon: windowIcon("study"), labelKey: "win.study" },
+  "narrative-index": { icon: windowIcon("narrative-index"), labelKey: "win.narrativeIndex" },
 };
 
 /** The window type the active workspace currently shows — the ACTIVE window's
@@ -652,6 +627,92 @@ export function migrateWin(w: Win): Win {
  *  so what is on disk says what is on screen. */
 let migratedOnLoad = false;
 
+// ── COLLEGARE · what an arrangement IS, as one string ────────────────────────
+//
+// The shape (splits and their direction) and the windows at the leaves (type,
+// and a graph window's projection). NOT the ratios: dragging a seam is using the
+// arrangement, not changing it (the tab does not go italic because an area was
+// made smaller). NOT a table's sheet either: that is what the window shows, and
+// the header's own selectors change it.
+
+function winSig(w: { type: WindowType; state?: Record<string, unknown> } | undefined): string {
+  if (!w) return "?";
+  return w.type === "graph" ? `graph:${String(w.state?.["mode"] ?? "matrix")}` : w.type;
+}
+
+/** The signature of a live arrangement (a tree of window ids + the windows). */
+export function paneSignature(p: Pane, wins: readonly Win[]): string {
+  if (p.kind === "leaf") return winSig(wins.find((w) => w.id === p.winId));
+  return `${p.dir}(${paneSignature(p.a, wins)},${paneSignature(p.b, wins)})`;
+}
+
+/** …and of a declared one. */
+export function arrangementSignature(a: Arrangement): string {
+  const byName = new Map(a.wins.map((w) => [w.name, w]));
+  const walk = (n: ArrangementNode): string =>
+    "win" in n ? winSig(byName.get(n.win)) : `${n.dir}(${walk(n.a)},${walk(n.b)})`;
+  return walk(a.layout);
+}
+
+/**
+ * Has the user reshaped this built-in? Its tab then shows in italics with ↺.
+ * A magnified window is a view of the arrangement, not a change to it: the
+ * arrangement it will return to is what is compared.
+ */
+export function workspaceModified(ws: WorkspaceId = active): boolean {
+  const preset = workspacePreset(ws);
+  if (!preset.builtin || !preset.arrangement) return false;
+  const entry = registry[ws];
+  if (!entry) return false;
+  const tree = entry.maxOf ? entry.saved : entry.layout;
+  if (!tree || tree.kind === "leaf") return false; // not applied yet
+  return paneSignature(tree, entry.wins) !== arrangementSignature(preset.arrangement);
+}
+
+/**
+ * COLLEGARE · THE MIGRATION of the saved arrangements (3 ott 2026), line by line.
+ *
+ * | id | before | saved as the old preset left it | saved reshaped by the user |
+ * |---|---|---|---|
+ * | `canvas` | «Studio»: outliner · matrix · inspector | reseeded → Stratigrafia (with the warnings table) | kept, tab shows «modified» (↺ gives Stratigrafia) |
+ * | `provenance` | parked: disk · DTC · inspector | reseeded → Fonti | kept, «modified» |
+ * | `assets` | parked «Acquisizione»: disk · store · DTC · inspector | reseeded → Contenuti | kept, «modified» |
+ * | `narrative` | parked: story · viewer | reseeded → Narrativa | kept, «modified» |
+ * | `dtc`, `comparisons`, `annotator` | parked | still parked, carried through untouched | idem |
+ * | a workspace the user made | its own | untouched | untouched |
+ *
+ * «Reseeded» = the saved entry is dropped, so the tab applies its new
+ * arrangement the first time it is opened (`applyArrangement`, as for a fresh
+ * install). An entry that is a single leaf was never arranged and is dropped too.
+ * Runs once (`emstudio.workspaces.rev` < 2), and is pure so the check can run it.
+ */
+export const LEGACY_SIGNATURES: Record<string, string[]> = {
+  canvas: ["row(outliner,row(graph:matrix,inspector))", "row(emtree,row(graph:matrix,inspector))"],
+  provenance: ["row(storage,row(graph:dtc,inspector))"],
+  assets: ["row(storage,row(storage,col(graph:dtc,inspector)))"],
+  narrative: ["row(narrative,viewer)"],
+};
+export const WORKSPACES_REV = 2;
+const REV_KEY = "emstudio.workspaces.rev";
+
+export function migrateSavedArrangements(
+  parsed: Record<string, unknown>,
+): { parsed: Record<string, unknown>; reseeded: string[] } {
+  const out = { ...parsed };
+  const reseeded: string[] = [];
+  for (const [ws, legacy] of Object.entries(LEGACY_SIGNATURES)) {
+    const entry = out[ws] as Partial<WorkspaceWindows> | undefined;
+    if (!entry || !Array.isArray(entry.wins)) continue;
+    const tree = (entry.maxOf ? entry.saved : entry.layout) as Pane | undefined;
+    const sig = tree ? paneSignature(tree, entry.wins as Win[]) : "";
+    if (!tree || tree.kind === "leaf" || legacy.includes(sig)) {
+      delete out[ws];
+      reseeded.push(ws);
+    }
+  }
+  return { parsed: out, reseeded };
+}
+
 /** Restore the registry, falling back to the seed for anything malformed — a
  *  corrupted arrangement must never keep the app from opening. */
 function loadRegistry(): Registry {
@@ -659,7 +720,13 @@ function loadRegistry(): Registry {
   try {
     const raw = localStorage.getItem(WINDOWS_KEY);
     if (!raw) return seeded;
-    const parsed = JSON.parse(raw) as Partial<Registry>;
+    let parsed = JSON.parse(raw) as Partial<Registry>;
+    if (Number(localStorage.getItem(REV_KEY) ?? 0) < WORKSPACES_REV) {
+      const m = migrateSavedArrangements(parsed as Record<string, unknown>);
+      parsed = m.parsed as Partial<Registry>;
+      if (m.reseeded.length) migratedOnLoad = true;
+      localStorage.setItem(REV_KEY, String(WORKSPACES_REV));
+    }
     for (const preset of WORKSPACES) {
       const entry = parsed[preset.id];
       if (!entry || !Array.isArray(entry.wins) || entry.wins.length === 0)

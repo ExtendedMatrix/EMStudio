@@ -524,6 +524,7 @@ ok(typeof globalThis.requestAnimationFrame === "function",
     viewer:  "renderViewerInto",
     doc:     "renderDocViewInto",
     study:   "renderStudyInto",
+    "narrative-index": "renderNarrativeIndexInto",
     // 13 set 2026 · the two HOSTED types. A panel window builds its OWN panel in
     // its own area, so what proves it draws is that it asked `mountPanel` for
     // one — which is exactly the call that could not exist while the panel was a

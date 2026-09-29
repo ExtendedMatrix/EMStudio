@@ -39,18 +39,19 @@ const eq = (got, want, what) => {
                          activeId: "dtc:1", layout: { kind: "leaf", winId: "dtc:1" } } };
   mem.set("emstudio.windows", JSON.stringify(saved));
   const W = await load("workspace.ts");
-  eq(W.WORKSPACES.map((w) => w.id), ["canvas"], "the bar holds ONE workspace");
-  eq(W.WORKSPACES[0].labelKey, "ws.studio", "…called Studio");
-  eq(W.PARKED_WORKSPACES.map((w) => w.id),
-     ["assets", "dtc", "provenance", "comparisons", "narrative", "annotator"],
-     "the six others are parked with their ids unchanged");
+  // COLLEGARE (29 set 2026, E.D.) · four spaces, one per activity
+  eq(W.WORKSPACES.map((w) => w.id), ["canvas", "provenance", "assets", "narrative"],
+     "the bar holds the four spaces");
+  eq(W.WORKSPACES[0].labelKey, "ws.stratigraphy", "…the first called Stratigrafia");
+  eq(W.PARKED_WORKSPACES.map((w) => w.id), ["dtc", "comparisons", "annotator"],
+     "the three others are parked with their ids unchanged");
   eq(W.activeWorkspace(), "canvas", "a persisted id pointing at a parked tab falls back to canvas");
-  ok(W.applyArrangement("canvas"), "the Studio arrangement applies");
+  ok(W.applyArrangement("canvas"), "the Stratigrafia arrangement applies");
   const ids = W.paneIds(W.layoutOf("canvas"));
-  eq(W.windowsOf("canvas").map((w) => w.type), ["graph", "outliner", "inspector"],
-     "three windows: graph (the anchor), outliner, inspector");
+  eq(W.windowsOf("canvas").map((w) => w.type), ["graph", "outliner", "table", "inspector"],
+     "four windows: graph (the anchor), outliner, the warnings table, inspector");
   eq(ids.map((id) => W.windowsOf("canvas").find((w) => w.id === id).type),
-     ["outliner", "graph", "inspector"], "left to right: outliner | graph | inspector");
+     ["outliner", "graph", "table", "inspector"], "outliner | graph above the table | inspector");
   // SHIFT-A (1 ott 2026) · the outliner is a WINDOW TYPE of its own, not the
   // second tab of an EMtree window: nothing to open it «on»
   eq(W.windowsOf("canvas")[1].state["current.panel"], undefined,

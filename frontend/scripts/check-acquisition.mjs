@@ -237,19 +237,21 @@ function bodyOf(src, signature) {
   rows.push(["the debt", "cumulative, and it outlives «Clear done»"]);
 }
 
-// ── F4 · 9 · the tab is called what the MODEL calls this moment ─────────────
+// ── F4 · 9 · the tab, and what it is called now ─────────────────────────────
+//
+// COLLEGARE (29 set 2026, E.D.) · the four spaces are named after the ACTIVITY
+// and the question it answers: `assets` came back to the bar as «Contenuti»
+// («Quali file ho, e cosa è diventato documento?»). The funnel is one of the
+// things done there, no longer the name of the place; «Acquisition» stays the
+// model's word for the MOMENT (`DTCAcquisitionNode`, crmdig:D12).
 {
-  ok(/labelKey: "ws\.acquisition"/.test(WS),
-    "the first tab is ACQUISITION — `DTCAcquisitionNode` (crmdig:D12) is " +
-      "already the model's word for this moment, and «Documentation» collided " +
-      "with EM's Document nodes");
-  ok(/"ws\.acquisition": "Acquisition"/.test(I18N)
-     && /"ws\.acquisition": "Acquisizione"/.test(I18N),
+  ok(/id: "assets", labelKey: "ws\.contents", hintKey: "ws\.qContents"/.test(WS),
+    "the `assets` space is «Contenuti», and its tooltip is its question");
+  ok(/"ws\.contents": "Contents"/.test(I18N) && /"ws\.contents": "Contenuti"/.test(I18N),
     "…in both complete dictionaries");
   ok(!/ws\.documentation/.test(WS) && !/ws\.documentation"/.test(I18N),
-    "…and the old key is gone, not left beside it");
-  // STRUTTURA (30 set 2026) · the Acquisition preset is PARKED now, after
-  // `canvas` in the file: its block runs from its id to the next preset's id.
+    "…and the old «Documentation» key is gone, not left beside it");
+  // its block runs from its id to the next preset's id
   const from = WS.indexOf('id: "assets"');
   const preset = WS.slice(from, WS.indexOf("id: ", from + 1));
   ok(/id: "assets"/.test(preset),
@@ -268,7 +270,7 @@ function bodyOf(src, signature) {
       "ANCHOR, which `seedWindows` hands the preset's `graphMode`: reordering " +
       "those two windows would have opened it in the wrong mode with nothing " +
       "on screen to explain why.");
-  rows.push(["the tab", "Acquisition · id unchanged · the chain beside it"]);
+  rows.push(["the tab", "Contenuti · id unchanged · the chain beside it"]);
 }
 
 console.log("\n  property × verdict");

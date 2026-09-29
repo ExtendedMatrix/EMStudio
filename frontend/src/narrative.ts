@@ -175,6 +175,11 @@ function el(tag: string, cls?: string, text?: string): HTMLElement {
 const UNWRITTEN_PROSE =
   /^\s*(?:\[da scrivere:|«da scrivere»|«to be written»)/;  // ALLOW-IT: foreign data
 
+/** Is this prose still the scaffolder's placeholder? (The Index counts them.) */
+export function isUnwrittenProse(text: string | undefined): boolean {
+  return UNWRITTEN_PROSE.test(text ?? "");
+}
+
 function renderProse(text: string): HTMLElement {
   const wrap = el("div", "nv-prose");
   for (const para of text.split(/\n{2,}/)) {

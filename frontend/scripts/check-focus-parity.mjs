@@ -71,6 +71,9 @@ const CONVERTED = {
   viewer:  ["viewer-view", "viewer-stage", "viewer-caption", "viewer-bar"],
   doc:     ["doc-view", "doc-view-list", "doc-view-detail"],
   study:   ["study-view", "study-body"],
+  // 3 ott 2026 (COLLEGARE) · the Index was BORN converted: no singleton ever,
+  // and the id it would have had is asserted absent all the same
+  "narrative-index": ["narrative-index-view"],
   // 13 set 2026 · the two HOSTED types. Their singletons were of two kinds and
   // both are listed: the surface they were mounted into (`#panel-view`) and the
   // four PANELS themselves, which were elements taken from the document at boot
