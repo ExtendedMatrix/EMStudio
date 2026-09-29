@@ -220,6 +220,41 @@ export function initialName(doc: NamingDoc, nodeType: string, nodeId?: string): 
   return null; // every other type keeps the store's own fresh label
 }
 
+/**
+ * SHIFT-A · «the next free identifier of the type» for a unit or any other node
+ * outside the paradata convention: read off the names the document already
+ * gives to that type, never invented.
+ *
+ * The prefix and the digit width are the ones most used by existing nodes of
+ * the SAME type (`SU001…SU050` → `SU051`; `RSF101` → `RSF102`), the number the
+ * first after the highest in use. A type with no numbered names yet answers
+ * null, and the caller keeps the store's generic label.
+ */
+export function nextFreeName(doc: NamingDoc, nodeType: string): string | null {
+  const re = /^([A-Za-z]+[._-]?)(\d+)$/;
+  const byPrefix = new Map<string, { count: number; width: number; max: number }>();
+  const names = new Set<string>();
+  for (const n of doc.graph.nodes) {
+    const name = nameOf(n);
+    names.add(name);
+    if ((n as { node_type?: string }).node_type !== nodeType) continue;
+    const m = re.exec(name);
+    if (!m) continue;
+    const e = byPrefix.get(m[1]) ?? { count: 0, width: 0, max: 0 };
+    e.count++;
+    e.width = Math.max(e.width, m[2].length);
+    e.max = Math.max(e.max, Number(m[2]));
+    byPrefix.set(m[1], e);
+  }
+  const best = [...byPrefix].sort((a, b) => b[1].count - a[1].count || a[0].localeCompare(b[0]))[0];
+  if (!best) return null;
+  const [prefix, e] = best;
+  let k = e.max + 1;
+  let out = `${prefix}${String(k).padStart(e.width, "0")}`;
+  while (names.has(out)) out = `${prefix}${String(++k).padStart(e.width, "0")}`;
+  return out;
+}
+
 /** True when this type takes part in the convention at all. */
 export function isNamedType(nodeType: string | undefined): boolean {
   return nodeType === "extractor" || nodeType === "combiner" || nodeType === "document";

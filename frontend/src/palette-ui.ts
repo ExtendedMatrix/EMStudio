@@ -12,6 +12,24 @@ import {
 } from "./rules";
 
 import { dtcGlyphUrl, iconUrlFor } from "./icons";
+import { dtcGlyphName } from "./rules";
+
+/**
+ * SHIFT-A · the small picture of a type, for the «Aggiungi» menu and any list
+ * that names types: a group is its container box, a type with an official 2D
+ * icon is that icon, a DTC item its kind's glyph, anything else a drawn swatch.
+ */
+export function typeIconElement(nodeType: string, kind?: string): HTMLElement {
+  if (isGroupType(nodeType)) return groupSwatch(nodeType);
+  const url = kind ? dtcGlyphUrl(dtcGlyphName(kind)) : iconUrlFor(nodeType);
+  if (url) {
+    const img = document.createElement("img");
+    img.src = url;
+    img.alt = "";
+    return img;
+  }
+  return swatch(nodeType);
+}
 
 export interface Section {
   label: string;

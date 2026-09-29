@@ -32,6 +32,12 @@ export interface LogEntry {
   message: string;
   /** ms since the page loaded — a wall clock would be noise here. */
   at: number;
+  /** SHIFT-A · the wall clock, for «Storia di questo nodo» (an hour, not an offset) */
+  wall: number;
+  /** SHIFT-A · the nodes the entry is ABOUT: the inspector's node history and
+   *  the drawer's «solo la selezione» filter read them. Optional — most of the
+   *  log (sync, loads) is about no node in particular. */
+  ids?: string[];
 }
 
 /** Ring buffer. A session can emit a lot of sync traffic; keeping the last few
@@ -40,15 +46,21 @@ const MAX_ENTRIES = 500;
 const entries: LogEntry[] = [];
 let listener: (() => void) | null = null;
 
-function push(level: LogLevel, message: string): void {
-  entries.push({ level, message, at: Math.round(performance.now()) });
+function push(level: LogLevel, message: string, ids?: string[]): void {
+  entries.push({
+    level,
+    message,
+    at: Math.round(performance.now()),
+    wall: Date.now(),
+    ...(ids?.length ? { ids } : {}),
+  });
   if (entries.length > MAX_ENTRIES) entries.splice(0, entries.length - MAX_ENTRIES);
   listener?.();
 }
 
-export const logInfo = (m: string): void => push("info", m);
-export const logWarn = (m: string): void => push("warn", m);
-export const logError = (m: string): void => push("error", m);
+export const logInfo = (m: string, ids?: string[]): void => push("info", m, ids);
+export const logWarn = (m: string, ids?: string[]): void => push("warn", m, ids);
+export const logError = (m: string, ids?: string[]): void => push("error", m, ids);
 
 export function logEntries(): readonly LogEntry[] {
   return entries;

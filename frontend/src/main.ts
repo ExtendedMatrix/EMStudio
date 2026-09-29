@@ -134,6 +134,7 @@ import { DocumentStore } from "./model";
 import {
   HAS_PARADATA_NODEGROUP,
   initialName,
+  nextFreeName,
   nameStatusMap,
   paradataGroupRenameOnAttach,
   renameOnAttach,
@@ -159,10 +160,30 @@ import { edgeStyle } from "./palette";
 import {
   buildPalette,
   PALETTE_MIME,
-  SECTIONS,
+  typeIconElement,
   type PaletteDragPayload,
 } from "./palette-ui";
 import { createResourceThumb } from "./resource-preview";
+import {
+  addCategories,
+  addableItems,
+  connectItems,
+  itemKey,
+  linkedItems,
+  matchesAdd,
+  planAdd,
+  recentTypes,
+  rememberType,
+  type AddContext,
+  type AddItem,
+  type LinkedItem,
+} from "./add-menu";
+import {
+  closeAddMenu,
+  showAddMenu,
+  type AddMenuCategory,
+  type AddMenuEntry,
+} from "./add-menu-ui";
 import {
   edgeAt,
   hitAddPhase,
@@ -194,7 +215,6 @@ import {
   nodeTypeForClass,
   nodeLabel,
   resourceTypeOfLocator,
-  typeDescription,
   // (the datamodel version exports are read by `versions.ts` for the footer's
   // breakdown popover — MENU-AUDIT removed this module's second, hardcoded copy)
 } from "./rules";
@@ -457,8 +477,10 @@ import { buildMatrixScene } from "./views/matrix";
 import { renderStudyPanel } from "./study-panel";
 import { perfCount, perfRelease, perfSettled, perfTime, perfTimeAsync } from "./perf";
 import {
+  DRAG_START_PX,
   DragGate,
   dropTargetAt,
+  laneTargetAt,
   sameTarget,
   type DropOptions,
   type DropTarget,
@@ -1436,6 +1458,24 @@ window.__EM_SCENE__ = () => {
   },
   canUndo: () => !!store?.canUndo,
   undo: () => store?.undo(),
+  /** SHIFT-A · what a node IS, read-only: type, name and its edges */
+  nodeInfo: (id: string) => {
+    const n = store?.node(id);
+    if (!n) return null;
+    return {
+      type: n.node_type,
+      name: String(n.name ?? ""),
+      edges: (store?.doc.graph.edges ?? [])
+        .filter((e) => e.source === id || e.target === id)
+        .map((e) => ({ source: e.source, target: e.target, type: String(e.edge_type ?? "") })),
+    };
+  },
+  /** SHIFT-A · the ids of the nodes of one type, in document order */
+  idsOfType: (type: string) =>
+    (store?.doc.graph.nodes ?? []).filter((n) => n.node_type === type).map((n) => n.id),
+  /** SHIFT-A · the scene's groups (world boxes), for aiming at a body */
+  groups: () =>
+    (scene()?.groups ?? []).map((g) => ({ id: g.id, x: g.x, y: g.y, w: g.w, h: g.h, headerH: g.headerH, folded: !!g.folded })),
   /** a rebuild with nothing changed: what survives it is what was committed */
   rebuild: () => {
     buildScenes();
@@ -6153,15 +6193,21 @@ function epochTargetsFor(ids: string[]): string[] {
  * of `buildMatrixScene`. Two corrections converge: the translations are
  * remembered (`RestackMemo`), so the second one is exact.
  */
-function settleDropped(dropped: Map<string, { x: number; y: number }>): void {
+function settleDropped(
+  dropped: Map<string, { x: number; y: number }>,
+  // SHIFT-A · a node born from the menu is settled by the same passes as a
+  // dropped one: it is a drop of a node that did not exist a moment before
+  primary: string = dragNodeId!,
+  members: readonly string[] = dragMemberIds ?? [],
+  groupMove: boolean = dragIsGroupMove,
+): void {
   const st = store!;
-  const primary = dragNodeId!;
-  const groupIds = [primary, ...(dragMemberIds ?? [])];
+  const groupIds = [primary, ...members];
   for (let pass = 0; pass < 4; pass++) {
     buildScenes();
     const s = scene();
     if (!s) return;
-    if (dragIsGroupMove) {
+    if (groupMove) {
       const want = dropped.get(primary);
       const got = s.byId.get(primary);
       if (!want || !got) return;
@@ -6474,11 +6520,54 @@ function hideEdgeMenu(): void {
   edgeMenu.innerHTML = "";
 }
 
-// ---------- create a node at a point (shared by placeNode & connect-create) ----------
-function createNodeAt(type: string, wx: number, wy: number): string | null {
+// ---------- SHIFT-A · a node is added AT THE CURSOR ----------
+//
+// ONE creation, for the four ways into the «Aggiungi» menu (Shift+A, right-click
+// on empty canvas, the «+» in a graph window's header, the long press) and for
+// the anchor drag. It replaces two copies (`placeNode` for the palette and
+// `createNodeAt` for the anchor), which had drifted: neither put a node into
+// the group body under the cursor, neither knew the phase bands, and both made
+// a node and its edge two undo steps.
+//
+// It follows the rules of TOCCARE because it IS a drop — of a node that did not
+// exist a moment ago: `dropTargetAt` decides group or lane (group body yes,
+// title bar no, Alt = lane only), `dropIntoGroup`/`setFirstEpoch` reassign, and
+// `settleDropped` puts it exactly where the hand is. All inside one `batch`.
+
+/** What the menu asks to create. */
+interface AddSpec {
+  nodeType: string;
+  kind?: string;
+  isResource?: boolean;
+  /** «Collegato a X»: the edge, and which end the new node is */
+  link?: { otherId: string; edgeType: string; dir: "out" | "in" };
+}
+
+/** A node's box from its TYPE, asked of em-core (the size owner, EM3) before
+ *  the node exists — so the creation is one step, not a step and a re-assert. */
+async function typeBox(node: EmNode): Promise<{ w: number; h: number }> {
+  const fallback = { w: isGroupType(node.node_type) ? 120 : 90, h: 30 };
+  try {
+    const { computeLayout } = await import("./emcore");
+    const out = await computeLayout(
+      { nodes: [node], edges: [] } as unknown as EmDocument["graph"],
+      { positions: { [node.id]: { x: 0, y: 0, ...fallback } } },
+      { sizesOnly: true },
+    );
+    const r = out.positions?.[node.id] as { w: number; h: number } | undefined;
+    return r ? { w: r.w, h: r.h } : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+/** Create `spec` at world (wx, wy): node, edge and epoch in ONE undo step. */
+async function addNodeFromMenu(spec: AddSpec, wx: number, wy: number, alt: boolean): Promise<string | null> {
   if (!store) return null;
-  // DAG · the connect-drag dropped in the void, on the corpus canvas: the new
-  // target belongs to the corpus, like everything else drawn here.
+  const st = store;
+  const type = spec.nodeType;
+  // DAG · the corpus has no lanes, no groups and no matrix: a node is created,
+  // stamped with its DTC kind, and the DAG lays it out by rank.
   if (canvasWritesToCorpus()) {
     const corpus = canvasStore()!;
     if (!corpusAcceptsType(type)) {
@@ -6486,154 +6575,309 @@ function createNodeAt(type: string, wx: number, wy: number): string | null {
       return null;
     }
     const cid = corpus.newId();
-    corpus.addNode(
-      { id: cid, name: corpus.freshLabel(type), node_type: type, description: "" },
-      { x: wx - 45, y: wy - 15, w: 90, h: 30 },
-    );
+    const cnode: EmNode = { id: cid, name: corpus.freshLabel(type), node_type: type, description: "" };
+    if (spec.kind) {
+      cnode.data = { dtc_kind: spec.kind };
+      if (spec.isResource) cnode.data.resource_type = spec.kind;
+    }
+    corpus.batch(() => {
+      corpus.addNode(cnode, { x: wx - 45, y: wy - 15, w: 90, h: 30 });
+      if (spec.link) {
+        const [a, b] = spec.link.dir === "out" ? [spec.link.otherId, cid] : [cid, spec.link.otherId];
+        corpus.addEdge(a, b, spec.link.edgeType);
+      }
+    });
+    select(cid);
+    rememberType(itemKey(spec));
+    logInfo(t("add.created", { name: cnode.name ?? cid }), [cid]);
+    toastUndo(t("add.created", { name: cnode.name ?? cid }), corpus);
     return cid;
   }
-  if (type === "EpochNode") {
-    const w = 140,
-      h = 30;
-    return store.addEpoch(undefined, { x: wx - w / 2, y: wy - h / 2, w, h }).id;
+  const id = st.newId();
+  // NAME1 · the paradata chain has a convention; every other type keeps the
+  // store's generic fresh label (an extractor is numbered when it is attached)
+  const name = initialName(st.doc, type) ?? nextFreeName(st.doc, type) ?? st.freshLabel(type);
+  const node: EmNode = { id, name, node_type: type, description: "" };
+  if (spec.kind) {
+    node.data = { dtc_kind: spec.kind };
+    if (spec.isResource) node.data.resource_type = spec.kind;
   }
-  const id = store.newId();
-  const name = initialName(store.doc, type) ?? store.freshLabel(type);
-  const w = isGroupType(type) ? 120 : 90;
-  const h = 30;
-  const node = { id, name, node_type: type, description: "" };
-  if (inContext()) {
-    const gid = contextStack[contextStack.length - 1];
-    store.addNode(node);
-    store.moveInGroupSpace(gid, id, { x: wx - w / 2, y: wy - h / 2, w, h }, false);
-    const membership = allowedEdgeTypes(type, store.node(gid)?.node_type).find(
-      (t) => t.startsWith("is_in_"),
-    );
-    if (membership) store.addEdge(id, gid, membership);
-  } else {
-    store.addNode(node, { x: wx - w / 2, y: wy - h / 2, w, h });
-    if (view === "matrix" && isStratigraphicType(type)) {
-      const lane = scenes.matrix?.lanes.find(
-        (l) => wy >= l.y && wy <= l.y + l.height,
-      );
-      if (lane) store.addEdge(id, lane.id, "has_first_epoch");
-    }
+  const box = await typeBox(node);
+  if (store !== st) return null; // another document arrived while em-core answered
+  const rect = { x: wx - box.w / 2, y: wy - box.h / 2, w: box.w, h: box.h };
+  // WHERE, decided on the picture the user is looking at, before the node exists
+  const s = scene();
+  const matrix = view === "matrix" && !inContext() && !!s;
+  const other = spec.link ? st.node(spec.link.otherId) : undefined;
+  const { target, epochId } = planAdd(s, st.doc, type, wx, wy, {
+    alt,
+    matrix,
+    otherId: other?.id,
+  });
+  slideSuppressed++;
+  try {
+    st.batch(() => {
+      if (inContext()) {
+        const gid = contextStack[contextStack.length - 1];
+        st.addNode(node);
+        st.moveInGroupSpace(gid, id, rect, false);
+        const membership = allowedEdgeTypes(type, st.node(gid)?.node_type).find((e) => e.startsWith("is_in_"));
+        if (membership) st.addEdge(id, gid, membership);
+      } else {
+        st.addNode(node, rect);
+        if (target?.kind === "group") dropIntoGroup([id], target.group.id);
+        if (epochId) st.setFirstEpoch([id], epochId);
+      }
+      if (spec.link && other) {
+        const [a, b] = spec.link.dir === "out" ? [other.id, id] : [id, other.id];
+        createEdge(a, b, spec.link.edgeType);
+      }
+      if (matrix) {
+        // the view moves a node by its lane's and band's translations: measure
+        // and correct, as for a drop (TOCCARE), so it is born under the cursor
+        settleDropped(new Map([[id, { x: rect.x, y: rect.y }]]), id, [], false);
+      } else if (!inContext()) {
+        // Graph / DTC / Multigraph: the projection places nodes itself, and a
+        // position there is a manual override — the one a drag would leave
+        canvasOverrides()?.set(id, { x: rect.x, y: rect.y });
+      }
+    });
+    buildScenes();
+  } finally {
+    slideSuppressed--;
   }
-  // BUGFIX-GLYPH · re-assert the new node's box from its TYPE via em-core (see
-  // placeNode): a glyph/shape is born ~square, never with the wide default box.
-  void reassertSizes();
+  ensureCircleVisibleFor(type); // reveal its ring if the filter hid it
+  select(id);
+  rememberType(itemKey(spec));
+  const epochName = epochId ? String(st.node(epochId)?.name ?? "") : "";
+  const shown = String(st.node(id)?.name ?? name);
+  const msg = epochName
+    ? t("add.createdIn", { name: shown, epoch: epochName })
+    : t("add.created", { name: shown });
+  logInfo(
+    other ? `${msg} · ${t("add.linked", { name: String(other.name ?? other.id) })}` : msg,
+    other ? [id, other.id] : [id],
+  );
+  toastUndo(msg, st);
+  draw();
+  if (vocabularyFor(type)) openQualiaPicker(id, wx, wy); // pick its label
   return id;
 }
 
-// ---------- connect-drag dropped in the void → create a target node ----------
-// Menu is datamodel-driven: only node types the EM rules allow as the target
-// of an edge from the source, grouped by the palette taxonomy, with search.
-let createMenuEl: HTMLDivElement | null = null;
-function hideCreateMenu(): void {
-  if (createMenuEl) {
-    createMenuEl.remove();
-    createMenuEl = null;
-    document.removeEventListener("pointerdown", onCreateMenuOutside, true);
-    document.removeEventListener("keydown", onCreateMenuKey, true);
-  }
+/** The label of a category, from its id (the authoring surface's own names). */
+function addCategoryLabel(id: string): string {
+  return t(`add.cat.${id}`, undefined, id);
 }
-function onCreateMenuOutside(e: PointerEvent): void {
-  if (createMenuEl && !createMenuEl.contains(e.target as Node)) hideCreateMenu();
-}
-function onCreateMenuKey(e: KeyboardEvent): void {
-  if (e.key === "Escape") {
-    e.stopPropagation();
-    hideCreateMenu();
-  }
-}
-function onPickCreate(
-  fromId: string,
-  type: string,
+
+/** A menu entry that creates `it` at (wx, wy). */
+function addEntry(
+  it: AddItem | LinkedItem,
   wx: number,
   wy: number,
-): void {
-  if (!store) return;
-  hideCreateMenu();
-  const srcType = storeOfNode(fromId)?.node(fromId)?.node_type;
-  const newId = createNodeAt(type, wx, wy);
-  if (!newId) return;
-  const eTypes = allowedEdgeTypes(srcType, type);
-  if (eTypes.length > 1) showEdgeMenu(fromId, newId, eTypes);
-  else createEdge(fromId, newId, eTypes[0] ?? GENERIC_EDGE);
-  ensureCircleVisibleFor(type); // reveal its ring if the filter hid it
-  select(newId);
-  if (vocabularyFor(type)) openQualiaPicker(newId, wx, wy); // pick its label
+  alt: boolean,
+  label: string,
+  detail?: string,
+  otherId?: string,
+): AddMenuEntry {
+  const li = "edgeType" in it ? (it as LinkedItem) : null;
+  const link = li && otherId ? { otherId, edgeType: li.edgeType, dir: li.dir } : undefined;
+  return {
+    key: link ? `${itemKey(it)}|${link.dir}|${link.edgeType}` : itemKey(it),
+    label,
+    detail,
+    nodeType: it.nodeType,
+    description: it.description,
+    alias: it.alias,
+    icon: () => typeIconElement(it.nodeType, it.kind),
+    run: () => {
+      void addNodeFromMenu(
+        { nodeType: it.nodeType, kind: it.kind, isResource: it.isResource, link },
+        wx, wy, alt,
+      );
+    },
+  };
 }
-function showCreateNodeMenu(fromId: string, wx: number, wy: number): void {
-  if (!store) return;
-  const srcType = storeOfNode(fromId)?.node(fromId)?.node_type;
-  // group the datamodel-allowed target types by the palette taxonomy
-  const groups: { label: string; types: string[] }[] = [];
-  for (const sec of SECTIONS) {
-    const allowed = sec.types.filter(
-      (t) => connectValidity(srcType, t) === "valid",
+
+/** The phrase of a «Collegato a X» entry: position for units (invariant 3),
+ *  «per» otherwise, with the relation the datamodel names beside it. */
+function linkedLabel(it: LinkedItem, otherName: string): string {
+  const key = it.relation === "above" ? "add.above" : it.relation === "below" ? "add.below" : "add.for";
+  return t(key, { type: it.label, name: otherName });
+}
+
+/** Where the menu's world point comes from: a client point over a graph window. */
+function worldAtClient(win: Win, clientX: number, clientY: number): { x: number; y: number } | null {
+  const cv = graphWindows.get(win.id)?.cv;
+  if (!cv) return null;
+  const r = cv.getBoundingClientRect();
+  return viewport().toWorld(clientX - r.left, clientY - r.top);
+}
+
+/**
+ * Open «Aggiungi» over a graph window, at a client point.
+ *
+ * `fromId` = the anchor drag: the edge's source is decided, so the menu is the
+ * list of what can be at the other end. Without it, the selection (a single
+ * node) gives the «Collegato a X» group.
+ */
+function openAddMenu(
+  win: Win,
+  clientX: number,
+  clientY: number,
+  opts: { fromId?: string; alt?: boolean } = {},
+): void {
+  if (!store) {
+    toast("Open a document first");
+    return;
+  }
+  if (win.type !== "graph") return;
+  if (activeWin().id !== win.id) selectWindow(win.id);
+  const wp = worldAtClient(win, clientX, clientY);
+  if (!wp) return;
+  const ctx = winMode(win) as AddContext;
+  const alt = !!opts.alt;
+  const s = scene();
+  const lane = view === "matrix" && s && !inContext() ? laneTargetAt(s, wp.y) : null;
+  const context = t("add.context", { ctx: t(`mode.${ctx}`) }) + (lane ? ` · ${lane.label}` : "");
+  const cats = addCategories(ctx);
+  const allowed = addableItems(ctx);
+
+  // ── the anchor drag: one list, the edge already chosen ──────────────────────
+  if (opts.fromId) {
+    const src = storeOfNode(opts.fromId)?.node(opts.fromId);
+    const items = connectItems(ctx, src?.node_type);
+    const multi = new Map<string, number>();
+    for (const i of items) multi.set(i.nodeType, (multi.get(i.nodeType) ?? 0) + 1);
+    const entries = items.map((i) =>
+      addEntry(i, wp.x, wp.y, alt, i.label,
+        (multi.get(i.nodeType) ?? 0) > 1 ? edgeTypeLabel(i.edgeType) : addCategoryLabel(i.category),
+        opts.fromId),
     );
-    if (allowed.length) groups.push({ label: sec.label, types: allowed });
+    const byCat = new Map<string, AddMenuEntry[]>();
+    items.forEach((i, k) => {
+      const list = byCat.get(i.category) ?? [];
+      list.push(entries[k]);
+      byCat.set(i.category, list);
+    });
+    showAddMenu({
+      title: t("add.fromNode", { name: String(src?.name ?? src?.node_type ?? "") }),
+      context,
+      placeholder: t("add.placeholder"),
+      linked: [],
+      recent: [],
+      categories: [...byCat].map(([c, list]) => ({ label: addCategoryLabel(c), entries: list })),
+      extra: [],
+      searchable: entries,
+      matches: (e, q) => matchesAdd({ label: e.label, alias: e.alias, nodeType: e.nodeType ?? "", description: e.description ?? "", category: e.detail ?? "" }, q),
+      footNote: entries.length ? undefined : t("add.noTarget"),
+      count: t("add.count", { n: entries.length }),
+      noResults: t("add.noResults"),
+      keysHint: t("add.keys"),
+    }, clientX, clientY);
+    return;
   }
-  hideCreateMenu();
-  const menu = document.createElement("div");
-  menu.className = "connect-menu";
-  const title = document.createElement("div");
-  title.className = "cm-title";
-  title.textContent = `New node from ${storeOfNode(fromId)?.node(fromId)?.name || srcType}`;
-  menu.appendChild(title);
-  if (!groups.length) {
-    const empty = document.createElement("div");
-    empty.className = "cm-empty";
-    empty.textContent = "No node type is a valid edge target from here.";
-    menu.appendChild(empty);
-  } else {
-    const search = document.createElement("input");
-    search.className = "cm-search";
-    search.type = "search";
-    search.placeholder = "Search node types…";
-    menu.appendChild(search);
-    const list = document.createElement("div");
-    list.className = "cm-list";
-    menu.appendChild(list);
-    const renderList = (q: string): void => {
-      list.innerHTML = "";
-      const ql = q.trim().toLowerCase();
-      for (const g of groups) {
-        const hits = g.types.filter(
-          (t) =>
-            !ql ||
-            t.toLowerCase().includes(ql) ||
-            (typeDescription(t) || "").toLowerCase().includes(ql),
-        );
-        if (!hits.length) continue;
-        const h = document.createElement("div");
-        h.className = "cm-sect";
-        h.textContent = g.label;
-        list.appendChild(h);
-        for (const t of hits) {
-          const b = document.createElement("button");
-          b.className = "cm-item";
-          b.textContent = t;
-          b.title = typeDescription(t) || t;
-          b.addEventListener("click", () => onPickCreate(fromId, t, wx, wy));
-          list.appendChild(b);
-        }
-      }
-    };
-    search.addEventListener("input", () => renderList(search.value));
-    renderList("");
-    setTimeout(() => search.focus(), 0);
+
+  // ── Shift+A / right-click / «+» ─────────────────────────────────────────────
+  const selId = selectedIds.size <= 1 ? selectedId : null;
+  const sel = selId ? storeOfNode(selId)?.node(selId) : undefined;
+  const otherName = sel ? String(sel.name ?? sel.id) : "";
+  const links = sel ? linkedItems(ctx, sel.node_type) : [];
+  const linkEntry = (i: LinkedItem): AddMenuEntry =>
+    addEntry(i, wp.x, wp.y, alt, linkedLabel(i, otherName), edgeTypeLabel(i.edgeType), sel!.id);
+  // the ornaments (author, licence, embargo, resource) fold into ONE row
+  const chain = links.filter((i) => i.category !== "Context");
+  const ornaments = links.filter((i) => i.category === "Context");
+  const plain = (i: AddItem): AddMenuEntry =>
+    addEntry(i, wp.x, wp.y, alt, i.label, addCategoryLabel(i.category));
+  const recent = recentTypes()
+    .map((k) => allowed.find((i) => itemKey(i) === k))
+    .filter((i): i is AddItem => !!i)
+    .map((i) => addEntry(i, wp.x, wp.y, alt, i.label));
+  const categories: AddMenuCategory[] = cats.map((c) => ({
+    label: addCategoryLabel(c.id),
+    offNote: c.state === "off" ? t("add.notHere") : undefined,
+    hint: c.state === "linked" ? (sel ? "↑" : "") : undefined,
+    entries: c.state === "on" ? c.items.map((i) => addEntry(i, wp.x, wp.y, alt, i.label)) : [],
+  }));
+  const extra: AddMenuEntry[] = [];
+  if (ctx === "matrix" && !inContext())
+    extra.push({
+      key: "epoch",
+      label: t("add.newEpoch"),
+      run: () => addEpochEmMode(),
+    });
+  const linkedAll = [...chain, ...ornaments].map(linkEntry);
+  const needsUnit = ctx === "matrix" && !chain.some((i) => i.category === "Paradata");
+  showAddMenu({
+    title: t("add.title"),
+    context,
+    placeholder: t("add.placeholder"),
+    linkedHeader: sel ? t("add.linked", { name: otherName }) : undefined,
+    linked: chain.map(linkEntry),
+    linkedMore: ornaments.length
+      ? { label: t("add.linkedMore", { name: otherName }), entries: ornaments.map(linkEntry) }
+      : undefined,
+    recent,
+    recentHeader: recent.length ? t("add.recent") : undefined,
+    categories,
+    extra,
+    // a Matrix paradata type is FOUND by the search, spent and saying why: a
+    // search that answered nothing for «estrattore» would teach that it does
+    // not exist, when it only waits for a unit
+    searchable: [
+      ...linkedAll,
+      ...allowed.map(plain),
+      ...cats.filter((c) => c.state === "linked").flatMap((c) =>
+        c.items.map((i) => ({ ...plain(i), disabledReason: t("add.needSelShort") }))),
+      ...extra,
+    ],
+    matches: (e, q) =>
+      matchesAdd({ label: e.label, alias: e.alias, nodeType: e.nodeType ?? "", description: e.description ?? "", category: e.detail ?? "" }, q),
+    footNote: needsUnit ? t("add.needSel") : undefined,
+    count: t("add.count", { n: allowed.length }),
+    noResults: t("add.noResults"),
+    keysHint: t("add.keys"),
+  }, clientX, clientY);
+}
+
+/** Shift+A: over the graph window under the pointer, or the active graph window
+ *  if the pointer is elsewhere (then at its centre). */
+function openAddMenuFromKeyboard(): void {
+  closeAddMenu();
+  const under = document.elementFromPoint(lastPointer.x, lastPointer.y)?.closest<HTMLElement>(".tile-area");
+  const winUnder = under ? windowsOf().find((w) => w.id === under.dataset.win) : undefined;
+  if (winUnder?.type === "graph") {
+    openAddMenu(winUnder, lastPointer.x, lastPointer.y, { alt: lastPointer.alt });
+    return;
   }
+  const win = activeWin().type === "graph" ? activeWin() : windowsOf().find((w) => w.type === "graph");
+  const cv = win && graphWindows.get(win.id)?.cv;
+  if (!win || !cv) {
+    toast(t("add.noGraphWindow"));
+    return;
+  }
+  const r = cv.getBoundingClientRect();
+  openAddMenu(win, r.left + r.width / 2, r.top + r.height / 2);
+}
+
+/** Where the pointer last was, for Shift+A (a key event carries no position). */
+const lastPointer = { x: 0, y: 0, alt: false };
+document.addEventListener(
+  "pointermove",
+  (e) => {
+    lastPointer.x = e.clientX;
+    lastPointer.y = e.clientY;
+    lastPointer.alt = e.altKey;
+  },
+  { passive: true, capture: true },
+);
+
+/** The anchor drag dropped in the void (or forced with Shift/Alt). */
+function showCreateNodeMenu(fromId: string, wx: number, wy: number): void {
   const vp = viewport();
-  const sx = Math.min(wx * vp.scale + vp.x, liveArea().clientWidth - 244);
-  const sy = Math.min(wy * vp.scale + vp.y, liveArea().clientHeight - 280);
-  menu.style.left = Math.max(4, sx) + "px";
-  menu.style.top = Math.max(4, sy) + "px";
-  liveArea().appendChild(menu);
-  createMenuEl = menu;
-  document.addEventListener("pointerdown", onCreateMenuOutside, true);
-  document.addEventListener("keydown", onCreateMenuKey, true);
+  const cv = liveCanvas();
+  const r = cv?.getBoundingClientRect();
+  openAddMenu(activeWin(), (r?.left ?? 0) + wx * vp.scale + vp.x, (r?.top ?? 0) + wy * vp.scale + vp.y, { fromId });
 }
 
 // ---------- controlled-vocabulary picker (PropertyNode → qualia label) ----------
@@ -18292,6 +18536,13 @@ function buildAreaHeader(win: Win): DocumentFragment {
     frag.appendChild(b);
   };
   if (type === "graph") {
+    // SHIFT-A · the «+» beside the mode: «Aggiungi» at the window's centre
+    act("+", t("add.headerBtn"), false, () => {
+      const cv = graphWindows.get(win.id)?.cv;
+      if (!cv) return;
+      const r = cv.getBoundingClientRect();
+      openAddMenu(win, r.left + r.width / 2, r.top + r.height / 2);
+    });
     act("⤢", t("win.fitTitle"), false, () => {
       focusThen(win, () => fit());
     });
@@ -19612,6 +19863,43 @@ function wireGraphCanvas(canvas: HTMLCanvasElement, winId: string): void {
     canvas.classList.add("drop-target");
   });
   canvas.addEventListener("dragleave", () => canvas.classList.remove("drop-target"));
+  // SHIFT-A · the tablet's right-click: a press held 500 ms on empty space opens
+  // «Aggiungi» there. A finger that moves is a pan, a press on a node is the
+  // node's — the same threshold as the drag (DRAG_START_PX), measured the same way.
+  let longPress: { timer: number; x: number; y: number } | null = null;
+  const endLongPress = (): void => {
+    if (longPress) window.clearTimeout(longPress.timer);
+    longPress = null;
+  };
+  canvas.addEventListener("pointerdown", (e) => {
+    endLongPress();
+    if (e.pointerType !== "touch" && e.pointerType !== "pen") return;
+    const wp = worldPos(e);
+    const s = scene();
+    const hit = s ? hitTest(s, wp.x, wp.y, hitTol()) : null;
+    const g = hit ? s?.groupsById?.get(hit.id) : undefined;
+    if (hit && !(g && !g.folded && wp.y > g.y + g.headerH)) return;
+    const x = e.clientX;
+    const y = e.clientY;
+    longPress = {
+      x,
+      y,
+      timer: window.setTimeout(() => {
+        longPress = null;
+        const win = windowsOf().find((w) => w.id === winId);
+        if (!win) return;
+        dragMode = "none"; // the press became a menu, not a pan
+        canvas.classList.remove("panning");
+        openAddMenu(win, x, y);
+      }, 500),
+    };
+  });
+  canvas.addEventListener("pointermove", (e) => {
+    if (longPress && Math.hypot(e.clientX - longPress.x, e.clientY - longPress.y) >= DRAG_START_PX)
+      endLongPress();
+  });
+  canvas.addEventListener("pointerup", endLongPress);
+  canvas.addEventListener("pointercancel", endLongPress);
   canvas.addEventListener("drop", (e) => {
     claim();
     canvas.classList.remove("drop-target");
@@ -20317,6 +20605,17 @@ function wireGraphCanvas(canvas: HTMLCanvasElement, winId: string): void {
       showMissingParentMenu(e.clientX, e.clientY, ghost);
       return;
     }
+    // SHIFT-A · empty space — or the BODY of an open group, which is where a
+    // node can be put (TOCCARE: the body takes the membership, the title bar
+    // does not) — opens «Aggiungi» at the cursor
+    const g = hit ? s?.groupsById?.get(hit.id) : undefined;
+    const inBody = !!g && !g.folded && wp.y > g.y + g.headerH;
+    const win = windowsOf().find((w) => w.id === winId);
+    if ((!hit || inBody) && win) {
+      hideContextMenu();
+      openAddMenu(win, e.clientX, e.clientY, { alt: e.altKey });
+      return;
+    }
     // right-clicking a node outside the current selection selects it first
     if (hit && !selectedIds.has(hit.id)) select(hit.instanceOf ?? hit.id);
     if (!selectedIds.size) {
@@ -20694,6 +20993,12 @@ window.addEventListener("keydown", (e) => {
     return;
   }
   if (inField) return;
+  // SHIFT-A · Blender's gesture: add a node where the pointer is
+  if ((e.key === "A" || e.key === "a") && e.shiftKey && !e.metaKey && !e.ctrlKey && !e.altKey) {
+    e.preventDefault();
+    openAddMenuFromKeyboard();
+    return;
+  }
   // STRUTTURA · «/» takes you to the full-text search of the name strip
   if (e.key === "/" && !e.metaKey && !e.ctrlKey && !e.altKey) {
     const box = document.getElementById("search") as HTMLInputElement | null;

@@ -402,6 +402,20 @@ export function typeDescription(nodeType: string | undefined): string {
   return CLASS_ENTRIES[className]?.description || "";
 }
 
+/** The human label of a node type in the ACTIVE locale (TRAD1): the sidecar's
+ *  `label[locale]`, then its English, then the datamodel's own `label`
+ *  (`nodeLabel`). The «Aggiungi» menu says «Estrattore» in Italian because the
+ *  datamodel says so, not because a UI string does. */
+export function typeLabel(nodeType: string): string {
+  const className = TYPE_TO_CLASS.get(nodeType);
+  const field = className ? _TRANSLATIONS[className]?.label : undefined;
+  if (field) {
+    const loc = field[getLocale()];
+    if (typeof loc === "string" && loc.trim()) return loc;
+  }
+  return nodeLabel(nodeType);
+}
+
 function intersects(allowed: string[] | undefined, anc: string[]): boolean {
   if (!allowed || !allowed.length) return false;
   return allowed.some((a) => anc.includes(a));

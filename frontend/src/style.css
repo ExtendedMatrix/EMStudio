@@ -7988,3 +7988,74 @@ body.gesturing-resize * {
   0% { box-shadow: 0 0 0 3px var(--accent); }
   100% { box-shadow: 0 0 0 0 transparent; }
 }
+
+/* ── SHIFT-A · the «Aggiungi» menu (add-menu-ui.ts) — scrivania v6 `.addm` ── */
+.addm {
+  position: fixed;
+  z-index: 1100;
+  width: 290px;
+  max-height: min(460px, calc(100vh - 16px));
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-elevated);
+  color: var(--text);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.22);
+  padding: 6px 0 4px;
+  font-size: 12.5px;
+}
+.addm-head { display: flex; align-items: baseline; gap: 8px; padding: 2px 12px 6px; }
+.addm-ctx { font-size: 11px; color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.addm-q {
+  margin: 0 10px 6px;
+  width: calc(100% - 20px);
+  box-sizing: border-box;
+  border: 1px solid var(--accent);
+  border-radius: var(--radius);
+  background: var(--bg-sunken);
+  color: var(--text);
+  padding: 5px 8px;
+  font-size: 12.5px;
+  outline: none;
+}
+.addm-body { overflow-y: auto; overflow-x: visible; min-height: 0; }
+.addm-grp {
+  font-size: 10px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase;
+  color: var(--text-muted); padding: 4px 12px 2px;
+}
+.addm-item, .addm-cat {
+  display: flex; align-items: center; gap: 8px; width: 100%; box-sizing: border-box;
+  border: 0; background: none; padding: 5px 12px; font: inherit; color: var(--text);
+  text-align: left; cursor: pointer;
+}
+.addm-cat { position: relative; cursor: default; }
+.addm-item:hover, .addm-item.hi, .addm-cat:not(.off):hover, .addm-cat.open:not(.off), .addm-cat.hi {
+  background: var(--bg-hover);
+}
+.addm-item.off, .addm-cat.off { color: var(--text-faint); cursor: default; }
+.addm-ic { width: 24px; height: 14px; flex: none; display: inline-flex; align-items: center; justify-content: center; }
+.addm-ic img, .addm-ic svg, .addm-ic canvas { max-width: 24px; max-height: 14px; }
+.addm-l { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.addm-d { font-size: 10.5px; color: var(--text-faint); white-space: nowrap; }
+.addm-car { color: var(--text-faint); }
+.addm-sep { height: 1px; background: var(--border); margin: 4px 0; }
+.addm-note { font-size: 11px; color: var(--text-muted); margin: 6px 12px 2px; }
+.addm-sub {
+  display: none; position: fixed; width: 210px; max-height: 360px; overflow-y: auto;
+  background: var(--bg-elevated); border: 1px solid var(--border-strong);
+  border-radius: var(--radius-lg); box-shadow: 0 8px 28px rgba(0, 0, 0, 0.22); padding: 5px 0;
+  z-index: 1101;
+}
+.addm-cat.open:not(.off) > .addm-sub { display: block; }
+.addm-foot {
+  display: flex; justify-content: space-between; padding: 6px 12px 2px;
+  border-top: 1px solid var(--border); margin-top: 6px; font-size: 10.5px; color: var(--text-faint);
+}
+.addm-keys { font-family: var(--font-mono); }
+/* the discreet hint on an empty graph canvas */
+.canvas-empty-hint {
+  position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
+  color: var(--text-faint); font-size: 12.5px; pointer-events: none; user-select: none;
+  z-index: 2;
+}
