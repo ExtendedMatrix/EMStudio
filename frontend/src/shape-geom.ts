@@ -39,8 +39,20 @@ export const HIT_TOL_PX = 3;
 export const GLYPH_MAX_H = 30;
 
 /** Width / height of the document SHEET the renderer draws in vector (not the
- *  bitmap `document.svg`, which nobody draws): one constant for both. */
-export const DOC_SHEET_ASPECT = 0.78;
+ *  bitmap `document.svg`, which nobody draws).
+ *
+ *  SHIFT-A fase 5 · ONE FACT, TWO READERS: em-core gives the document the EM3
+ *  box (height × this aspect, `geometry.rs::SHEET_TYPES_PENDING`) and the
+ *  renderer draws the sheet in `glyphRectOf(n, DOC_SHEET_ASPECT)`. Both read
+ *  `2d_render_glyph_types.aspect.document` when the datamodel declares it and
+ *  fall back to the same 0.78 (23.4 × 30, the drawing's measure) until it does —
+ *  a fact of the datamodel waiting to be carried into s3Dgraphy. */
+export const DOC_SHEET_ASPECT: number = (() => {
+  const a = (rules as unknown as {
+    "2d_render_glyph_types"?: { aspect?: Record<string, unknown> };
+  })["2d_render_glyph_types"]?.aspect?.document;
+  return typeof a === "number" && a >= 0.2 && a <= 5 ? a : 0.78;
+})();
 
 const GLYPHS: Record<string, { aspect?: unknown }> =
   (rules as unknown as { "2d_glyphs"?: Record<string, { aspect?: unknown }> })[

@@ -122,6 +122,23 @@ pub const fn glyph_box() -> TypeBox {
     TypeBox { scale: 1.0, square: true, aspect: 1.0 }
 }
 
+/// SHIFT-A fase 5 (1 ott 2026) · the SHEET types: drawn with custom vector
+/// geometry — not a centred icon, so absent from `2d_render_glyph_types.types` —
+/// but with a box that follows EM3's rule all the same: every glyph has the same
+/// HEIGHT, and the width is height × the drawing's aspect. The document sheet was
+/// the last node left in the default 90 × 32 box around a 23.4 × 30 drawing, so
+/// its connect handle, its ring and its neighbours' spacing all answered to 66
+/// world units of empty paper.
+///
+/// **A FACT OF THE DATAMODEL, declared here until s3Dgraphy carries it.** The
+/// aspect is read from `2d_render_glyph_types.aspect.document` when the vendored
+/// rules declare it; until they do (1.6.19/1.6.20 do not), it is the measure of
+/// the drawing the renderer makes — `renderer.ts`, the folded sheet in
+/// `glyphRectOf(n, DOC_SHEET_ASPECT)`, 23.4 × 30 → 0.78. The day the key exists in
+/// `em_visual_rules`, this table is not consulted for it and the number moves to
+/// where it belongs. `(node_type, fallback aspect)`.
+pub const SHEET_TYPES_PENDING: &[(&str, f64)] = &[("document", 0.78)];
+
 /// Parse a visual-rules document into a box table.
 ///
 /// Two sources inside the same file, both data:
@@ -170,6 +187,14 @@ pub fn type_boxes_from_json(json: &str) -> TypeBoxes {
             out.entry(t.to_string())
                 .or_insert_with(|| glyph_box().with_aspect(aspect_of(aspects, t)));
         }
+    }
+    // the sheets: the datamodel's aspect when it has one, else the declared fact
+    for (t, fallback) in SHEET_TYPES_PENDING {
+        let aspect = aspects
+            .and_then(|m| m.get(*t))
+            .map(|_| aspect_of(aspects, t))
+            .unwrap_or(*fallback);
+        out.entry((*t).to_string()).or_insert_with(|| glyph_box().with_aspect(aspect));
     }
     out
 }
@@ -302,16 +327,32 @@ mod tests {
     #[test]
     fn the_types_with_custom_geometry_stay_rectangular() {
         let boxes = type_boxes();
-        // `document` is a sheet with a folded corner and `property` a bracketed
-        // text annotation: neither is square, and squaring them would crush the
-        // text they exist to carry. US and the two voids are shapes, not glyphs.
-        for t in ["document", "property", "US", "USN", "USNt"] {
+        // `property` is a bracketed text annotation: squaring it would crush the
+        // text it exists to carry. US and the two voids are shapes, not glyphs.
+        // (`document` left this list with SHIFT-A fase 5: see the next test.)
+        for t in ["property", "US", "USN", "USNt"] {
             assert_eq!(
                 box_for(&boxes, t, 90.0, 32.0),
                 (90.0, 32.0),
                 "{t} must keep the default rectangular box"
             );
         }
+    }
+
+    #[test]
+    fn the_document_sheet_takes_the_em3_box() {
+        // SHIFT-A fase 5 · the same height as every glyph, the width from the
+        // sheet's aspect: 0.78 × 32 = 24.96 — no longer 90 × 32 around a 23.4 ×
+        // 30 drawing.
+        let boxes = type_boxes();
+        let (w, h) = box_for(&boxes, "document", 90.0, 32.0);
+        assert_eq!(h, 32.0, "the height is the node height, as for every glyph");
+        assert!((w - 24.96).abs() < 1e-9, "0.78 × 32 = 24.96, got {w}");
+        // …and the datamodel wins the day it declares the aspect
+        let declared = type_boxes_from_json(
+            r#"{"2d_render_glyph_types":{"types":[],"aspect":{"document":0.5}}}"#,
+        );
+        assert_eq!(box_for(&declared, "document", 90.0, 32.0), (16.0, 32.0));
     }
 
     #[test]
@@ -385,11 +426,13 @@ mod tests {
     #[test]
     fn a_malformed_or_empty_rules_file_degrades_to_uniform_boxes() {
         assert!(type_boxes_from_json("not json").is_empty());
-        assert!(type_boxes_from_json("{}").is_empty());
+        // an empty file keeps only the declared sheet fact (SHEET_TYPES_PENDING)
+        let empty = type_boxes_from_json("{}");
+        assert_eq!(empty.keys().collect::<Vec<_>>(), vec!["document"]);
         // an out-of-range scale is ignored rather than trusted
         let t = type_boxes_from_json(
             r#"{"node_styles":{"X":{"style":{"shape_scale":0}}}}"#,
         );
-        assert!(t.is_empty(), "a zero scale would collapse the node to nothing");
+        assert!(!t.contains_key("X"), "a zero scale would collapse the node to nothing");
     }
 }
