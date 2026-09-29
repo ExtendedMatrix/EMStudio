@@ -32,6 +32,9 @@ export const WINDOW_ICON_PATHS: Record<string, string> = {
   annotator: '<rect x="2.5" y="3" width="11" height="10" rx="1.5"/><path d="M5 6h6v4.5H5z" stroke-dasharray="1.6 1.5"/>',
   "narrative-index": '<path d="M3 3.5h2M3 8h2M3 12.5h2M7 3.5h6M7 8h6M7 12.5h4"/>',
   study: '<path d="M8 13.8s4.5-3.9 4.5-7.3a4.5 4.5 0 0 0-9 0c0 3.4 4.5 7.3 4.5 7.3z"/><circle cx="8" cy="6.4" r="1.6"/>',
+  // RIFINITURE · not a window: the ✦ of «ask the AI», in the same stroke, so
+  // the glyph is the same on every platform (the text ✦ is not)
+  ai: '<path d="M8 2.5 9.2 6.8 13.5 8 9.2 9.2 8 13.5 6.8 9.2 2.5 8 6.8 6.8z"/>',
 };
 
 /** The 16 px SVG for a window type (empty box for an unknown one). */

@@ -18,6 +18,7 @@
  */
 
 import { t } from "./i18n";
+import { windowIcon } from "./window-icons";
 import { create3dEmbed, isRef3D, resolve3d } from "./embed3d";
 import { geoOf, georeferenceScene, reprojectPoint } from "./geo";
 import type { GeoRef } from "./geo";
@@ -1106,6 +1107,20 @@ export function renderNarrativeView(
       chip.title = t("nv.whoSignsChapter");
       h.appendChild(chip);
     }
+    // RIFINITURE · «✦ Bozza AI» in the head of every chapter while writing: on
+    // hover, and always on the current one. An AI not configured leads to its
+    // preferences (`generateChapterDraft`), and the draft resumes from there.
+    if (writing && editor!.canGenerate?.(ci)) {
+      const ai = el("button", "nv-ai-draft") as HTMLButtonElement;
+      ai.type = "button";
+      ai.innerHTML = windowIcon("ai", 13);
+      ai.append(` ${t("nv.aiDraft")}`);
+      ai.title = t("nv.aiDraftTitle");
+      ai.dataset.aiDraft = String(ci);
+      if (editor!.generating?.(ci)) { ai.disabled = true; ai.classList.add("busy"); }
+      ai.addEventListener("click", (e) => { e.stopPropagation(); editor!.generate(ci); });
+      h.appendChild(ai);
+    }
     // NARRATIVE-DESK · the chapter's head is a way to its Inspector in every
     // reading of the page, not only while writing
     if (page.onSelectPart) {
@@ -1130,6 +1145,15 @@ export function renderNarrativeView(
       });
     }
     section.appendChild(h);
+    // RIFINITURE · in Leggi a click on the chapter (not on a link, a button, an
+    // embed that goes to its node) opens the chapter's Inspector, as the head does
+    if (!writing && page.onSelectPart)
+      section.addEventListener("click", (e) => {
+        const tg = e.target as Element | null;
+        if (!tg || tg.closest(".nv-chapter-head, a, button, input, textarea, canvas, iframe, .nv-embed, .nv-mention"))
+          return;
+        pick({ chapter: ci, block: null });
+      });
 
     const blocks = chapter.blocks ?? [];
     blocks.forEach((block, bi) => {
@@ -1184,6 +1208,22 @@ export function renderNarrativeView(
       row.dataset.block = `${ci}:${bi}`;
       body.classList.add("nv-block-body");
       row.appendChild(body);
+      // RIFINITURE · an empty or placeholder paragraph invites, discreetly:
+      // «scrivi, oppure ✦ chiedi una bozza»
+      if (writing && block.block_type === "prose" && editor!.canGenerate?.(ci)
+          && (!(block.text ?? "").trim() || isUnwrittenProse(block.text))) {
+        const inv = el("div", "nv-ai-invite");
+        inv.append(`${t("nv.aiInviteWrite")} `);
+        const ask = el("button", "nv-ai-ask") as HTMLButtonElement;
+        ask.type = "button";
+        ask.innerHTML = windowIcon("ai", 12);
+        ask.append(` ${t("nv.aiInviteAsk")}`);
+        ask.dataset.aiDraft = String(ci);
+        ask.disabled = editor!.generating?.(ci);
+        ask.addEventListener("click", (e) => { e.stopPropagation(); editor!.generate(ci); });
+        inv.appendChild(ask);
+        row.appendChild(inv);
+      }
       if (writing) {
         row.classList.add("nv-selectable");
         if (sel && sel.chapter === ci && sel.block === bi) row.classList.add("nv-sel");

@@ -12402,11 +12402,13 @@ function narrativeEditor(narrativeId: string): NarrativeEditor {
       (((s.node(narrativeId)?.data ?? {}) as Record<string, unknown>)
         .chapters as nedit.EditableChapter[] | undefined)?.[c]).length,
     retract: (c, b) => nauth.retractEndorsement(s, narrativeId, c, b),
+    // RIFINITURE · the same rule as `generateChapterDraft` and the chapter's
+    // Inspector: an activity OR an epoch (a site-story chapter narrates an
+    // epoch); only a chapter with no anchor cannot be drafted
     canGenerate: (i) => {
       const anchor = narrativesIn(s.doc)
         .find((n) => n.id === narrativeId)?.chapters[i]?.anchor;
-      return !!anchor
-        && s.node(anchor)?.node_type === "ActivityNodeGroup";
+      return !!anchor && !!s.node(anchor);
     },
     generate: (i) => void generateChapterDraft(narrativeId, i),
     generating: (i) => generating.has(i),

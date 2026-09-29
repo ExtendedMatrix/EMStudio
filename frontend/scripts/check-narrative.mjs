@@ -1070,4 +1070,41 @@ eq(doc.graph.nodes.filter(
   ok(/\.nv-paper \{\s*color-scheme: light;/.test(css), "paper · color-scheme light on the paper (form controls, scrollbars)");
 }
 
+// ── RIFINITURE · the AI is found: «✦ Bozza AI» in each chapter's head while
+// writing, the invite in an empty/placeholder paragraph, the ✦ from
+// window-icons; and in Leggi a click on a chapter opens its Inspector.
+{
+  const V = await load("narrative.ts");
+  const calls = [], picks = [];
+  const ed = { updateBlock() {}, insertBlock() {}, removeBlock() {}, moveBlock() {}, addChapter() {},
+               setProse() {}, generateDraft() {}, promptOf: () => null,
+               canGenerate: () => true, generating: () => false, generate: (i) => calls.push(i) };
+  const d2 = JSON.parse(JSON.stringify(doc));
+  const nar = d2.graph.nodes.find((n) => n.id === "narr-1");
+  nar.data.chapters[0].blocks = [{ block_type: "prose", text: "" }, ...(nar.data.chapters[0].blocks ?? [])];
+  const host = document.createElement("div");
+  V.renderNarrativeView(host, d2, "narr-1", () => {}, undefined, ed, undefined, undefined,
+                        { reading: "write", onSelectPart: (x) => picks.push(x) });
+  const heads = host.querySelectorAll(".nv-chapter-head .nv-ai-draft");
+  eq(heads.length, nar.data.chapters.length, "ai · one «✦ Bozza AI» per chapter head while writing");
+  ok(heads[0].querySelector("svg.wico"), "ai · …its ✦ is the window-icons glyph, not a text character");
+  heads[0].click();
+  eq(calls, [0], "ai · …and it asks for THAT chapter's draft (the preferences first, if the AI is not configured)");
+  const inv = host.querySelector(".nv-ai-invite .nv-ai-ask");
+  ok(inv, "ai · an empty paragraph invites «scrivi, oppure ✦ chiedi una bozza»");
+  inv.click();
+  eq(calls, [0, 0], "ai · …and the invite asks for the same draft");
+  eq(picks.length, 0, "ai · …without selecting the block under it");
+  const noAi = document.createElement("div");
+  V.renderNarrativeView(noAi, d2, "narr-1", () => {}, undefined, { ...ed, canGenerate: () => false },
+                        undefined, undefined, { reading: "write" });
+  eq(noAi.querySelectorAll(".nv-ai-draft, .nv-ai-invite").length, 0, "ai · a chapter with no lane cannot be drafted: no button");
+  const read = document.createElement("div");
+  V.renderNarrativeView(read, d2, "narr-1", () => {}, undefined, undefined, undefined, undefined,
+                        { reading: "read", onSelectPart: (x) => picks.push(x) });
+  eq(read.querySelectorAll(".nv-ai-draft").length, 0, "ai · Leggi has no draft button");
+  read.querySelector(".nv-chapter p, .nv-chapter .nv-prose")?.click();
+  eq(picks.at(-1), { chapter: 0, block: null }, "leggi · a click on the chapter opens ITS Inspector");
+}
+
 console.log(`narrative: ${checks} checks passed`);
