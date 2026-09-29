@@ -2,8 +2,9 @@
  * CATENA · the paradata chain in the Inspector — the property card.
  *
  * For a unit (or a document, or an epoch: every node `has_property` admits) one
- * card per property: name and value, the chain DOCUMENT → EXTRACTOR (→ COMBINER)
- * → PROPERTY with every link clickable, each reading's result and geometry badge,
+ * card per property: name and value, the chain DOCUMENT → PLACE → EXTRACTOR
+ * (→ COMBINER) → PROPERTY with every link clickable (the place opens the
+ * document on it), each reading's result and geometry badge,
  * its description (editable here, the SECONDARY place; the document's window is
  * the main one), «Usa come valore», and — for a property with more than one owner
  * — «condivisa con X» / «ereditata da X». «Eredita da…» opens the link component
@@ -45,6 +46,8 @@ export interface ChainUi {
   addReading?: (propertyId: string, anchor: HTMLElement) => void;
   /** open the document's window on this reading */
   openReading?: (extractorId: string) => void;
+  /** LUOGO · open the document on the reading's place (shown, not re-armed) */
+  openPlace?: (extractorId: string) => void;
   /** «Usa come valore» */
   useAsValue: (extractorId: string) => void;
   /** the AI chip of a node ("" when the node is not AI-assisted) */
@@ -100,20 +103,21 @@ function linkBtn(ui: ChainUi, id: string, cls = ""): HTMLButtonElement {
   return b;
 }
 
-/** One reading: `└ D.3.1 [▭ region] → D.3 ▣`, then its description and result. */
+/** One reading, in the order of the argument (LUOGO):
+ *  `└ D.2 ⬡ → [⌇ polilinea · 4.031 m] → D.2.01 (→ height)` — the document, the
+ *  PLACE in it (its kind, and for a measure its length; a click opens the
+ *  document on that place), the extractor that read it, the property. A reading
+ *  from a unit: `└ USM101 → D.2.01`. */
 function readingRow(ui: ChainUi, x: string, depth: number, withProperty = false): HTMLElement {
   const doc = ui.store.doc;
   const wrap = el("div", "chain-reading");
   wrap.dataset.extractor = x;
   wrap.style.setProperty("--depth", String(depth));
   const row = el("div", "chain-row");
-  row.append(el("span", "chain-ar", "└"), linkBtn(ui, x, "x"));
-  row.appendChild(geometryBadge(geometryOf(doc, x)));
-  const chip = ui.aiChip?.(x);
-  if (chip) row.appendChild(chip);
+  row.appendChild(el("span", "chain-ar", "└"));
   const src = sourceOf(doc, x);
   if (src) {
-    row.append(el("span", "chain-ar", "→"), linkBtn(ui, src.id, src.kind));
+    row.appendChild(linkBtn(ui, src.id, src.kind));
     if (src.kind === "document") {
       const m = mediumOf(ui.store.node(src.id), (id) => ui.store.node(id),
         (id) => doc.graph.edges.filter((e) => e.source === id && e.edge_type === "has_linked_resource").map((e) => e.target));
@@ -122,8 +126,26 @@ function readingRow(ui: ChainUi, x: string, depth: number, withProperty = false)
         tag.title = t(`chain.medium.${m}`);
         row.appendChild(tag);
       }
+      // the place: where in the document the reading looked
+      row.appendChild(el("span", "chain-ar", "→"));
+      const g = geometryOf(doc, x);
+      const badge = geometryBadge(g);
+      badge.classList.add("chain-place");
+      if (g && ui.openPlace) {
+        const b = el("button", badge.className);
+        b.type = "button";
+        b.textContent = badge.textContent;
+        Object.assign(b.dataset, badge.dataset);
+        b.dataset.place = g.regionId ?? "";
+        b.title = t("chain.openPlace");
+        b.addEventListener("click", () => ui.openPlace!(x));
+        row.appendChild(b);
+      } else row.appendChild(badge);
     } else row.appendChild(el("span", "chain-medium unit", t("chain.fromUnit")));
   } else row.appendChild(el("span", "chain-nosrc", t("chain.noSource")));
+  row.append(el("span", "chain-ar", "→"), linkBtn(ui, x, "x"));
+  const chip = ui.aiChip?.(x);
+  if (chip) row.appendChild(chip);
   if (withProperty) {
     const p = propertyOfExtractor(doc, x);
     if (p) row.append(el("span", "chain-ar", "→"), linkBtn(ui, p, "p"));

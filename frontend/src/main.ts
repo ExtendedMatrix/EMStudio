@@ -6856,6 +6856,7 @@ function chainUi(st: DocumentStore): ChainUi {
       openReadingSourceMenu(propertyId, r.left, r.bottom);
     },
     openReading,
+    openPlace,
     aiChip: aiChipFor,
     documentExtras: (host, docId) => renderDocumentDating(st, host, docId),
     useAsValue: (x) => {
@@ -7006,6 +7007,27 @@ function openReading(extractorId: string): void {
   if (docWin) {
     setWinCurrent(docWin, "doc", src.id);
     setWinCurrent(docWin, "reading", extractorId);
+  }
+  select(extractorId);
+  refreshInspector();
+  renderDocView();
+  draw();
+}
+
+/** LUOGO · the chain's place clicked: the document's window on the document,
+ *  the reading selected (its place highlighted on the source), NOT armed. */
+function openPlace(extractorId: string): void {
+  if (!store) return;
+  const src = chain.sourceOf(store.doc, extractorId);
+  if (!src || src.kind !== "document") { select(extractorId); refreshInspector(); return; }
+  let docWin = windowsOf().find((w) => w.type === "doc");
+  if (!docWin) {
+    setWorkspace("provenance");
+    docWin = windowsOf().find((w) => w.type === "doc");
+  }
+  if (docWin) {
+    setWinCurrent(docWin, "doc", src.id);
+    setWinCurrent(docWin, "reading", null);
   }
   select(extractorId);
   refreshInspector();

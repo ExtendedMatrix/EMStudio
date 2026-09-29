@@ -8430,6 +8430,9 @@ body.gesturing-resize * {
 .chain-geo, .chain-medium, .chain-ai { font-size: 10.5px; padding: 0 5px; border-radius: 8px; border: 1px solid var(--border);
   color: var(--text-muted); white-space: nowrap; }
 .chain-geo.none { border-style: dotted; }
+/* LUOGO · the place in the chain opens the document on it */
+button.chain-geo.chain-place { cursor: pointer; font: inherit; font-size: 10.5px; background: var(--bg-elevated); color: inherit; }
+button.chain-geo.chain-place:hover { background: var(--bg-hover); border-color: var(--accent); }
 .chain-geo.todo { border-style: dashed; color: var(--warn-ink); border-color: var(--warn-border); }
 .chain-medium.unit { font-style: italic; }
 .chain-nosrc { font-size: 11px; color: var(--warn-ink); }
