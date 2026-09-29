@@ -23311,8 +23311,10 @@ function deleteSelectedNodes(): void {
     return;
   }
   const plain = ids.filter((id) => !isEpochish(id));
+  nodeLabelBeforeDelete.clear();
+  for (const id of plain) nodeLabelBeforeDelete.set(id, String(storeOfNode(id)?.node(id)?.name || id));
   if (plain.length !== ids.length)
-    toast("Epochs/phases: use Delete epoch / Delete phase in the inspector");
+    toast(t("del.epochsApart"));
   if (plain.length) {
     // DAG · one gesture can only ever hold nodes of one document (the canvas
     // draws one), but group them by owner rather than trusting that: a
@@ -23327,8 +23329,18 @@ function deleteSelectedNodes(): void {
     }
     for (const [owner, ids2] of byOwner) owner.deleteNodes(ids2);
     select(null);
+    // AUDIT N1 · a deletion from the keyboard says what went, and gives it back
+    const [owner, gone] = [...byOwner][0] ?? [];
+    if (owner && gone) {
+      const names = gone.map((id) => nodeLabelBeforeDelete.get(id) ?? id);
+      toastUndo(names.length === 1
+        ? t("del.one", { name: names[0] })
+        : t("del.many", { n: String(names.length), first: names[0] }), owner);
+    }
   }
 }
+/** the names of the nodes about to go, read before they are gone */
+const nodeLabelBeforeDelete = new Map<string, string>();
 
 /** `win`: the graph window the right-click happened in — captured when the menu
  *  opens, never re-read when an item is clicked (the focus may have moved). */
@@ -23447,10 +23459,30 @@ window.addEventListener(
   true,
 );
 
+/**
+ * AUDIT N1 · WHERE A KEY BELONGS. A node shortcut (Backspace/Delete, arrows,
+ * `0`, `+`, `−`, Space-pan) acts on the graph only when the keyboard is on the
+ * graph: the page itself, a canvas, or a row of the Outliner. Anywhere else the
+ * focused control does its own job — a button is pressed by Space and Enter, a
+ * select changes with the arrows, a field takes the letters. Measured before
+ * (A3): Backspace on the focused «Inspector ▾» button deleted US105.
+ */
+function keyScopeOf(target: EventTarget | null): "field" | "control" | "graph" {
+  const el = target instanceof Element ? target : null;
+  if (!el || el === document.body || el === document.documentElement) return "graph";
+  if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement
+      || el instanceof HTMLSelectElement
+      || (el instanceof HTMLElement && el.isContentEditable)) return "field";
+  if (el instanceof HTMLCanvasElement) return "graph";
+  if (el.closest(".nl-row")) return "graph";   // the Outliner's rows name nodes
+  if (el.closest("button, a[href], [role=option], [role=menuitem], [role=tab], summary, [tabindex]"))
+    return "control";
+  return "graph";
+}
+
 window.addEventListener("keydown", (e) => {
-  const inField =
-    e.target instanceof HTMLInputElement ||
-    e.target instanceof HTMLTextAreaElement;
+  const scope = keyScopeOf(e.target);
+  const inField = scope === "field";
   if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "s") {
     e.preventDefault();
     if (e.shiftKey) void saveAsDocument();
@@ -23482,6 +23514,11 @@ window.addEventListener("keydown", (e) => {
     magnifyWindow(activeWin().id);
     return;
   }
+  // AUDIT N1 · from here on, the keys that act ON THE GRAPH: a focused control
+  // keeps them (Space and Enter press a button, the arrows move in a list)
+  if (scope === "control" && (e.code === "Space" || e.key === "Enter" || e.key === "Delete"
+      || e.key === "Backspace" || e.key.startsWith("Arrow") || e.key === "0"
+      || e.key === "+" || e.key === "=" || e.key === "-")) return;
   if (e.code === "Space" && !spaceHeld) {
     // hold Space → pan-always (grab) gesture; prevent page scroll.
     spaceHeld = true;

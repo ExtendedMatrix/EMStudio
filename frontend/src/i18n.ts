@@ -61,6 +61,9 @@ type Dict = Record<string, string>;
 // `emtree.`, `empty.`, `toast.`) so a translator can work a screen at a time and
 // an unused key is findable.
 const EN: Dict = {
+  "del.one": "Deleted {name}",
+  "del.many": "Deleted {n} nodes ({first}…)",
+  "del.epochsApart": "Epochs and phases: use Delete epoch / Delete phase in the Inspector",
   "funnel.ownSource": "its own",
   "funnel.fromActivity": "from Activity",
   "funnel.fromEpoch": "from Epoch",
@@ -1896,6 +1899,9 @@ const EN: Dict = {
 
 // ── Italiano: complete, because E.D. works in it ───────────────────────────────
 const IT: Dict = {
+  "del.one": "Eliminato {name}",
+  "del.many": "Eliminati {n} nodi ({first}…)",
+  "del.epochsApart": "Epoche e fasi: usa Elimina epoca / Elimina fase nell'Ispettore",
   "toolbar.file": "File",
   "toolbar.new": "Nuovo",
   "toolbar.open": "Apri…",
@@ -4307,6 +4313,9 @@ export function setValidated(code: Locale, on: boolean): void {
 // falls back to English for the rest, the same way the other drafts do; E.D.
 // validates it in the selector like the others.
 const DE: Dict = {
+  "del.one": "Gelöscht: {name}",
+  "del.many": "{n} Knoten gelöscht ({first}…)",
+  "del.epochsApart": "Epochen und Phasen: im Inspektor mit Epoche löschen / Phase löschen",
   "toolbar.file": "Datei",
   "toolbar.new": "Neu",
   "toolbar.open": "Öffnen…",

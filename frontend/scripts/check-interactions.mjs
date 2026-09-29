@@ -358,6 +358,47 @@ test("1.colour", "il colore scrive allo change, non a ogni input", async () => {
   return { pass: writes.unchangedWhileDragging && writes.written, detail: { ...writes, before } };
 });
 
+// ── PARTE 2 · le scorciatoie hanno un ambito ────────────────────────────────
+test("2.canvas", "tela + Backspace: il nodo se ne va, il toast dice chi, Annulla lo riporta", async () => {
+  const { p, ctx } = await open({ doc: "catena" });
+  await pick(p, "USM101");
+  await p.evaluate(() => document.activeElement?.blur?.());
+  const before = await p.evaluate(() => window.__EM_DRAG__.nodeCount());
+  await p.keyboard.press("Backspace");
+  await p.waitForTimeout(400);
+  const gone = await p.evaluate(() => window.__EM_DRAG__.nodeCount());
+  const toastText = await p.evaluate(() => document.getElementById("toast")?.innerText ?? "");
+  await p.click("#toast .toast-action");
+  await p.waitForTimeout(400);
+  const back = await p.evaluate(() => window.__EM_DRAG__.nodeCount());
+  await ctx.close();
+  return { pass: gone < before && back === before && /USM101/.test(toastText) && /Annulla/.test(toastText),
+           detail: { before, gone, back, toastText } };
+});
+test("2.space", "Spazio su un pulsante lo attiva (non fa il pan)", async () => {
+  const { p, ctx } = await open({ doc: "catena" });
+  const before = await p.evaluate(() => !document.getElementById("log-drawer")?.classList.contains("hidden"));
+  await p.focus("#footer-log");
+  await p.keyboard.press("Space");
+  await p.waitForTimeout(300);
+  const after = await p.evaluate(() => !document.getElementById("log-drawer")?.classList.contains("hidden"));
+  const panning = await p.evaluate(() => !!document.querySelector("canvas.space-pan"));
+  await ctx.close();
+  return { pass: before !== after && !panning, detail: { before, after, panning } };
+});
+test("2.select", "Backspace in una select dell'ispettore non cancella il nodo", async () => {
+  const { p, ctx } = await open({ doc: "catena" });
+  // a document: its Inspector dates it with an epoch SELECT
+  await pick(p, await p.evaluate(() => window.__EM_DRAG__.idsOfType("document")[0]));
+  const before = await p.evaluate(() => window.__EM_DRAG__.nodeCount());
+  const had = await p.evaluate(() => { const s = [...document.querySelectorAll(".tile-area select")].find((x) => x.offsetParent); if (!s) return false; s.focus(); return true; });
+  await p.keyboard.press("Backspace");
+  await p.waitForTimeout(300);
+  const after = await p.evaluate(() => window.__EM_DRAG__.nodeCount());
+  await ctx.close();
+  return { pass: had && before === after, detail: { had, before, after } };
+});
+
 // ── run ─────────────────────────────────────────────────────────────────────
 const chosen = cases.filter((c) => !only.length || only.includes(c.id) || only.some((o) => c.id.startsWith(o + ".")));
 for (const c of chosen) {
