@@ -2337,7 +2337,7 @@ function renderNameStrip(): void {
   ].filter(Boolean).join(" · ");
 }
 document.getElementById("ns-save")?.addEventListener("click", () => click("btn-save"));
-document.getElementById("ns-publish")?.addEventListener("click", () => click("btn-publish"));
+document.getElementById("ns-publish")?.addEventListener("click", () => publishToStratiGraph());
 onLocaleChange(renderNameStrip);
 
 // HDT-O authority autocomplete → em-bridge /resolve-authority (P1-D, offline).
@@ -8720,10 +8720,8 @@ function downloadBlob(blob: Blob, filename: string, _mime: string): void {
   URL.revokeObjectURL(a.href);
 }
 
-for (const format of Object.keys(NARRATIVE_FORMATS)) {
-  document.getElementById(`btn-narr-${format}`)
-    ?.addEventListener("click", () => exportWithCheck(format));
-}
+// (AUDIT N9 · the File ▸ Export ▸ Narrativa buttons went: the narrative
+// window's «Esporta ▾» is where the story's files are made)
 
 // Export the RDF/CIDOC Turtle projection via the transformer (s3Dgraphy
 // rdf_exporter — invariant 2: produced in Python, never reimplemented in TS).
@@ -10133,13 +10131,14 @@ document.getElementById("shelf-promote-x")?.addEventListener(
 // here: Save, Save As, Export SVG/GraphML/TTL. Those put a file on your own
 // disk — preparation, not publication — and gating them would make the tool
 // useless exactly where it is most needed, in a trench with no network.
-document.getElementById("btn-publish")?.addEventListener("click", () => {
+/** AUDIT N9 · «Pubblica…», the one place of the verb (the name strip) */
+function publishToStratiGraph(): void {
   if (!requireVerifiedIdentity()) return;
   // Verified, and still nothing to publish TO: the StratiGraph delivery
   // endpoint is phase 2. Saying so is the honest end of this path — the gate is
   // real and measurable today, the destination is not there yet.
   toast(t("identity.publishNotConnected"));
-});
+}
 (document.getElementById("settings-close") as HTMLButtonElement).addEventListener(
   "click",
   closeSettings,
@@ -10359,7 +10358,7 @@ function renderResShelf(): void {
     });
     const { row } = resRow(thumb, e.filename, e.key_id);
     const btn = document.createElement("button");
-    btn.textContent = "→ Document";
+    btn.textContent = t("res.toDocument");
     btn.title =
       "Create a Document adopting this resource's stable ID as its node id";
     btn.addEventListener("click", () => hatShelfEntry(e));
@@ -10473,7 +10472,9 @@ async function renderResLinks(): Promise<void> {
     // already-remote (s3/http) resources have nothing to push.
     if (r.kind === "local_path" || r.kind === "file_uri") {
       const btn = document.createElement("button");
-      btn.textContent = "Promote to MinIO";
+      // AUDIT N9 · a different verb from «Promuovi a documento» (the Shelf's):
+      // this moves the BYTES to the object store
+      btn.textContent = t("res.uploadMinio");
       btn.title = "Upload into the shared MinIO (keeps the stable ID) and repoint the locator";
       btn.addEventListener("click", () => void promoteToMinio(r, btn));
       row.appendChild(btn);
@@ -12188,15 +12189,10 @@ function renderWarningsPill(): void {
   if (issuesPopOpen) renderWarningsPopover();
 }
 
-/** The document's issues and, after them, what the log owes somebody. */
+/** The document's issues. AUDIT N9 · ONLY the graph's: the log's lines stay in
+ *  the log (its button counts them), where before «Warnings» counted both. */
 function allIssues(): Issue[] {
-  const log = logEntries()
-    .filter((e) => e.level !== "info")
-    .map((e, k) => ({
-      id: `log::${k}`, node: "", rule: "log",
-      sev: (e.level === "error" ? "warn" : "info") as Issue["sev"], txt: e.message,
-    }));
-  return [...currentIssues, ...log];
+  return [...currentIssues];
 }
 
 /** An issue's text without the leading «name: » when the name is already a
@@ -12275,10 +12271,14 @@ function renderWarningsPopover(): void {
   document.body.appendChild(pop);
 }
 
+// AUDIT N9 · THE PILL POINTS TO THE TABLE. The popover covered the Inspector and
+// repeated the Warnings table open beneath it (measured on Stratigrafia, which
+// starts with that table). The table is the one place the warnings are listed,
+// with their fixes and «Verifica tutti»: the pill opens it — or brings it
+// forward and flashes it — and nothing floats over the work.
 document.getElementById("footer-warnings")?.addEventListener("click", (e) => {
   e.stopPropagation();
-  issuesPopOpen = !issuesPopOpen;
-  renderWarningsPopover();
+  openIssuesTable();
 });
 document.addEventListener("pointerdown", (e) => {
   if (!issuesPopOpen) return;
@@ -21288,7 +21288,10 @@ function buildAreaHeader(win: Win): DocumentFragment {
   // because a row of five buttons is the header again. Either way the mode is
   // written by its name, without the word «Mode».
   const modes = headerModesOf(win);
-  if (modes && modes.items.length <= 3) {
+  // AUDIT N9 · a window's MODES are SEGMENTS (the graph's four included):
+  // «Matrix ▾» with a «Graph» inside it was the second of three «Graph» labels
+  // in one bar. The table's sheet picker, grouped and long, stays a list.
+  if (modes && modes.items.length <= 5 && !modes.items.some((m) => m.group)) {
     const seg = document.createElement("span");
     seg.className = "win-seg";
     seg.setAttribute("role", "group");
@@ -21363,51 +21366,56 @@ function buildAreaHeader(win: Win): DocumentFragment {
     frag.appendChild(seg);
   }
 
-  // ── the per-type MENUS (WINDOW_MENUS) ─────────────────────────────────────
-  for (const menu of WINDOW_MENUS[type]) {
+  // ── the window's MENU, «⋯» (AUDIT N9) ─────────────────────────────────────
+  //
+  // ONE menu per window, called «⋯», that gathers the window's tools — the
+  // graph's Layout and «Normalizza grafie…», the table's rows, the document's
+  // verbs — each group under its own small heading. There used to be one
+  // dropdown per group, named with words the bar already said («Graph ▾» with
+  // one item, beside the type «Graph ▾» and the mode «Matrix ▾»).
+  const menus = WINDOW_MENUS[type];
+  if (menus.length) {
     const dd = document.createElement("div");
     dd.className = "dropdown win-menu";
     const toggle = document.createElement("button");
-    toggle.className = "dd-toggle win-menu-toggle";
-    // the label is a KEY, resolved HERE — so rebuilding the bar (which a locale
-    // change does) re-reads the dictionary. Resolved in the registry instead, it
-    // froze the language the bundle started in: measured after a live switch, the
-    // tabs and the master header moved and this bar still said Chapter · Insert.
-    toggle.innerHTML = `${escapeHtml(t(menu.label))} `
-      + `<span class="win-type-caret">▾</span>`;
+    toggle.className = "dd-toggle win-menu-toggle win-more";
+    toggle.textContent = "⋯";
+    toggle.title = t("win.moreTitle");
+    toggle.setAttribute("aria-label", t("win.moreTitle"));
     const list = document.createElement("div");
     list.className = "dd-menu hidden";
     // built on OPEN, so ✓ and disabled reasons are current every time
     wireBarDropdown(toggle, list, () => {
       list.innerHTML = "";
-      for (const item of menu.items(win)) {
-        const b = document.createElement("button");
-        const reason = item.disabledReason?.() ?? null;
-        b.textContent = (item.checked?.() ? "✓ " : "") + t(item.label);
-        if (reason) {
-          // NO MUTE NO-OP. A `disabled` button was the whole of "most of the
-          // buttons don't work": it swallows the click (so the menu does not
-          // even close), the reason lives in a `title` nobody hovers, and the
-          // user is left with a menu that opens and does nothing. Measured on
-          // the narrative window, where EVERY item of Capitolo/Inserisci/IA was
-          // disabled by one condition — "click a chapter to make it current" —
-          // that the UI never said out loud.
-          //
-          // So it stays visibly unavailable (`.dd-disabled`, aria) but remains
-          // CLICKABLE, and the click SAYS WHY and closes the menu. The reason is
-          // information the user needs to get unstuck, which makes it the one
-          // thing a refusal must not keep to itself.
-          b.classList.add("dd-disabled");
-          b.setAttribute("aria-disabled", "true");
-          b.title = reason;
-          b.addEventListener("click", () => {
-            toast(reason);
-            list.classList.add("hidden");
-          });
-        } else {
-          b.addEventListener("click", item.run);
+      for (const menu of menus) {
+        const items = menu.items(win);
+        if (!items.length) continue;
+        if (menus.length > 1) {
+          // the label is a KEY, resolved HERE — a locale change rebuilds the bar
+          const g = document.createElement("div");
+          g.className = "dd-group";
+          g.textContent = t(menu.label);
+          list.appendChild(g);
         }
-        list.appendChild(b);
+        for (const item of items) {
+          const b = document.createElement("button");
+          const reason = item.disabledReason?.() ?? null;
+          b.textContent = (item.checked?.() ? "✓ " : "") + t(item.label);
+          if (reason) {
+            // NO MUTE NO-OP: visibly unavailable, still clickable, and the click
+            // SAYS WHY and closes the menu
+            b.classList.add("dd-disabled");
+            b.setAttribute("aria-disabled", "true");
+            b.title = reason;
+            b.addEventListener("click", () => {
+              toast(reason);
+              list.classList.add("hidden");
+            });
+          } else {
+            b.addEventListener("click", item.run);
+          }
+          list.appendChild(b);
+        }
       }
     });
     list.addEventListener("click", () => list.classList.add("hidden"));
@@ -21479,7 +21487,9 @@ function buildAreaHeader(win: Win): DocumentFragment {
     const caret = document.createElement("span");
     caret.className = "win-type-caret";
     caret.textContent = "▾";
-    pub.append(`${t("nv.publish")} `, caret);
+    // AUDIT N9 · its verb is EXPORT (files, a reader link): «Pubblica» is the
+    // name strip's, and a word means one thing
+    pub.append(`${t("nv.export")} `, caret);
     pub.title = t("nv.publishTitle");
     pub.addEventListener("click", (e) => {
       e.stopPropagation();
@@ -22156,10 +22166,10 @@ const WINDOW_MENUS: Record<WindowType, WinMenu[]> = {
   annotator: [],
   doc: [
     {
-      label: "Documento",
+      label: "menu.document",
       items: (win) => [
         {
-          label: "Nuovo documento",
+          label: "menu.newDocument",
           run: () => {
             if (!store) return;
             const id = addRow(store, "Documents");
@@ -22169,7 +22179,7 @@ const WINDOW_MENUS: Record<WindowType, WinMenu[]> = {
           disabledReason: () => (store ? null : t("menu.noGraph")),
         },
         {
-          label: "Elimina documento corrente",
+          label: "menu.deleteDocument",
           run: () => {
             const id = currentDocId(win);
             if (!store || !id) return;
@@ -22409,23 +22419,21 @@ function renderWorkspaceBar(): void {
       });
       b.appendChild(r);
     }
-    if (w.builtin && w.arrangement) {
-      // STUDIO · a built-in's arrangement is applied once and is yours after
-      // that; double-clicking its tab is the way back to the one it came with
-      b.addEventListener("dblclick", (e) => {
-        e.stopPropagation();
-        resetWorkspace(w.id);
-      });
-    }
+    // AUDIT N9 · ONE MEANING for the double click on every tab: RENAME (it was
+    // «reset» on a built-in and «rename» on yours). Reset, rename and remove
+    // are in the tab's own menu (right click), each said by its name.
+    const rename = (): void => {
+      const next = prompt(t("ws.renamePrompt"), label);
+      if (next == null || !renameWorkspace(w.id, next)) return;
+      renderWorkspaceBar();
+    };
+    b.addEventListener("dblclick", (e) => { e.stopPropagation(); rename(); });
+    b.addEventListener("contextmenu", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      showWorkspaceTabMenu(e.clientX, e.clientY, w, rename);
+    });
     if (!w.builtin) {
-      // rename in place: a workspace you made is named after what you use it for,
-      // and that changes
-      b.addEventListener("dblclick", (e) => {
-        e.stopPropagation();
-        const next = prompt(t("ws.renamePrompt"), label);
-        if (next == null || !renameWorkspace(w.id, next)) return;
-        renderWorkspaceBar();
-      });
       const x = document.createElement("span");
       x.className = "ws-x";
       x.textContent = "×";
@@ -22452,6 +22460,31 @@ function renderWorkspaceBar(): void {
     setWorkspace(ws.id);
   });
   workspaceBar.appendChild(add);
+}
+/** AUDIT N9 · a tab's menu: rename · reset (a built-in reshaped) · remove (yours) */
+function showWorkspaceTabMenu(x: number, y: number, w: (typeof WORKSPACES)[number], rename: () => void): void {
+  hideContextMenu();
+  const menu = document.createElement("div");
+  menu.className = "ctx-menu";
+  menu.style.left = `${Math.min(x, innerWidth - 220)}px`;
+  menu.style.top = `${Math.min(y, innerHeight - 120)}px`;
+  const item = (label: string, run: () => void, why?: string): void => {
+    const b = document.createElement("button");
+    b.textContent = label;
+    if (why) { b.classList.add("dd-disabled"); b.setAttribute("aria-disabled", "true"); b.title = why; }
+    b.onclick = () => { hideContextMenu(); if (why) toast(why); else run(); };
+    menu.appendChild(b);
+  };
+  item(t("ws.rename"), rename);
+  if (w.builtin) item(t("ws.resetItem"), () => resetWorkspace(w.id),
+    workspaceModified(w.id) ? undefined : t("ws.notModified"));
+  else item(t("ws.removeItem"), () => {
+    if (!removeWorkspace(w.id)) return;
+    renderWorkspaceBar();
+    setWorkspace(activeWorkspace());
+  });
+  document.body.appendChild(menu);
+  ctxMenuEl = menu;
 }
 renderWorkspaceBar();
 onLocaleChange(renderWorkspaceBar);

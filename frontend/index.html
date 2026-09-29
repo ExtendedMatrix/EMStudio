@@ -87,29 +87,14 @@
               <button id="btn-svg" title="Export current view as SVG">SVG</button>
               <button id="btn-graphml" title="Export as yEd GraphML (needs the local dev bridge — see dev.sh)">GraphML</button>
               <button id="btn-ttl" title="Export as RDF/CIDOC Turtle (.ttl) via the s3Dgraphy projection">Turtle (.ttl)</button>
-              <!-- DP-79 P1 · the narrative, rendered. Three formats, ONE bake
-                   (s3Dgraphy `bake_narrative`): they are three readings of the
-                   same snapshot, so they cannot disagree about what the story
-                   said. Separated from the graph exports above because what
-                   they export is a different thing — a text, not a graph. -->
-              <div class="dd-sep"></div>
-              <button id="btn-narr-html" title="Esporta la narrativa come pagina HTML autosufficiente (snapshot)">Narrativa → HTML</button>
-              <button id="btn-narr-docx" title="Esporta la narrativa come documento Word (snapshot)">Narrativa → Word</button>
-              <button id="btn-narr-latex" title="Esporta la narrativa come LaTeX + BibTeX (snapshot)">Narrativa → LaTeX</button>
-              <!-- DP-79 P4 · il quarto, ed è di natura diversa: gli altri tre
-                   congelano gli embed, questo li trasforma in celle di query
-                   che il lettore esegue. Il notebook non contiene le risposte,
-                   contiene le domande. -->
-              <button id="btn-narr-ipynb" title="Esporta la narrativa come notebook Jupyter — VIVO: le celle interrogano il grafo">Narrativa → Jupyter (vivo)</button>
+              <!-- AUDIT N9 · the narrative's four files (HTML, Word, LaTeX,
+                   Jupyter) are exported from the narrative window's «Esporta ▾»,
+                   the one place of that verb (with the check of the unvalidated
+                   AI paragraphs and the reader link). -->
             </div>
           </div>
-          <div class="dd-sep"></div>
-          <!-- IDENTITY · the one action of PUBLICATION shape that exists today.
-               Exporting a file to your own disk is data preparation and is never
-               gated; this one says "make it public, as me", which is why it asks
-               for a verified identity. The destination itself is phase 2 — the
-               button says so rather than pretending. -->
-          <button id="btn-publish" title="Pubblica su StratiGraph (Catalog/HDT) — richiede un'identità ORCID verificata">Pubblica su StratiGraph…</button>
+          <!-- AUDIT N9 · «Pubblica…» has ONE place: the name strip, top right
+               (the identity gate is the same). -->
           <div class="dd-sep"></div>
           <button id="btn-save" title="Save .em.json (⌘S)" data-i18n="toolbar.save">Save</button>
           <button id="btn-save-as" title="Save .em.json to a new file (⇧⌘S)" data-i18n="toolbar.saveAs">Save As…</button>
@@ -877,8 +862,8 @@
             </div>
           </section>
           <section class="settings-sect">
-            <h4>Shelf <span class="res-count" id="res-shelf-count"></span></h4>
-            <p class="settings-hint">Un-hatted resources (not yet a Document / RM).</p>
+            <h4><span data-i18n="res.orphans">Orphan files</span> <span class="res-count" id="res-shelf-count"></span></h4>
+            <p class="settings-hint" data-i18n="res.orphansHint">Files of the scanned folder that are not a Document yet. (The Shelf is its own window.)</p>
             <div id="res-shelf" class="res-list"></div>
           </section>
           <section class="settings-sect">
@@ -888,7 +873,7 @@
           <section class="settings-sect">
             <h4>Resources <span class="res-count" id="res-links-count"></span></h4>
             <p class="settings-hint">
-              The graph's resources (link nodes). <b>Promote to MinIO</b> uploads
+              The graph's resources (link nodes). <b>Upload to MinIO</b> uploads
               a local resource into the shared object store, keeping its stable
               ID, and repoints its locator at the <code>s3://…</code> URI.
             </p>

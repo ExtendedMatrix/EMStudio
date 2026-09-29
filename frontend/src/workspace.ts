@@ -426,7 +426,17 @@ export function workspaceLabel(
   w: WorkspacePreset,
   t: (k: string) => string,
 ): string {
-  return w.label ?? (w.labelKey ? t(w.labelKey) : w.id);
+  return builtinLabels()[w.id] ?? w.label ?? (w.labelKey ? t(w.labelKey) : w.id);
+}
+
+/** AUDIT N9 · a BUILT-IN space can be renamed too (its label is otherwise the
+ *  dictionary's): the name the person gave it, kept per id */
+const BUILTIN_LABELS_KEY = "emstudio.workspaces.labels";
+function builtinLabels(): Record<string, string> {
+  try {
+    const v = JSON.parse(localStorage.getItem(BUILTIN_LABELS_KEY) ?? "{}");
+    return v && typeof v === "object" ? v as Record<string, string> : {};
+  } catch { return {}; }
 }
 
 /**
@@ -458,7 +468,13 @@ export function addWorkspace(label: string): WorkspacePreset {
 /** Rename a workspace the user made. Built-ins keep their dictionary label. */
 export function renameWorkspace(id: WorkspaceId, label: string): boolean {
   const ws = WORKSPACES.find((w) => w.id === id);
-  if (!ws || ws.builtin || !label.trim()) return false;
+  if (!ws || !label.trim()) return false;
+  if (ws.builtin) {
+    const all = builtinLabels();
+    all[id] = label.trim();
+    try { localStorage.setItem(BUILTIN_LABELS_KEY, JSON.stringify(all)); } catch { /* private mode */ }
+    return true;
+  }
   ws.label = label.trim();
   persistCustom();
   return true;

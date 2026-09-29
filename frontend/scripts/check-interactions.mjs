@@ -888,6 +888,61 @@ test("9.read", "«Leggi» dice «→ Fonti» quando lo spazio non ha una Doc", a
   return { pass: labels.some((l) => /Leggi → Fonti/.test(l)), detail: { labels } };
 });
 
+// ── PARTE 10 · intestazioni sobrie, un verbo per azione ─────────────────────
+test("10.header", "l'intestazione del grafo: tipo, modo a segmenti, un solo menu «⋯» (niente tre «Graph»)", async () => {
+  const { p, ctx } = await open({ doc: "catena" });
+  const r = await p.evaluate(() => {
+    const bar = document.querySelector('[data-win="canvas:1"] .tile-bar') ?? document.querySelector(".tile-active .tile-bar");
+    return {
+      seg: [...bar.querySelectorAll(".win-seg button")].map((b) => b.textContent),
+      menus: [...bar.querySelectorAll(".win-menu-toggle")].map((b) => b.textContent.trim()),
+      graphWords: (bar.innerText.match(/\bGrafo\b|\bGraph\b/g) ?? []).length,
+    };
+  });
+  // the «⋯» gathers Layout and «Normalizza grafie…»
+  await p.click('.tile-active .win-more');
+  await p.waitForTimeout(150);
+  const items = await p.evaluate(() => [...document.querySelectorAll(".dd-menu:not(.hidden) button")].map((b) => b.textContent));
+  await p.keyboard.press("Escape");
+  await ctx.close();
+  return { pass: r.seg.length === 4 && r.menus.length === 1 && r.menus[0] === "⋯" && r.graphWords <= 2
+    && items.some((i) => /grafie|spellings/i.test(i)), detail: { ...r, items } };
+});
+test("10.warnings", "la pillola degli avvisi porta alla tabella, non apre un popover sopra l'ispettore; conta solo il grafo", async () => {
+  const { p, ctx } = await open({ doc: "catena" });
+  await p.click("#footer-warnings");
+  await p.waitForTimeout(400);
+  const r = await p.evaluate(() => ({ pop: !!document.getElementById("issues-pop") && !document.getElementById("issues-pop").classList.contains("hidden"),
+    tables: window.__EM_DRAG__.wins().filter((w) => w.type === "table").length,
+    active: document.querySelector(".tile-active")?.dataset.win, pill: document.getElementById("footer-warnings").textContent,
+    issues: window.__EM_DRAG__.issues().filter((i) => i.rule === "log").length }));
+  await ctx.close();
+  return { pass: !r.pop && r.tables === 1 && /issues/.test(r.active ?? "") && !r.issues, detail: r };
+});
+test("10.publish", "«Pubblica» ha un posto solo: la striscia del nome; la narrativa «Esporta»", async () => {
+  const { p, ctx } = await open({ doc: "catena" });
+  const r = await p.evaluate(() => ({
+    file: [...document.querySelectorAll("#dd-file button, #toolbar button")].filter((b) => /Pubblica|Publish/.test(b.textContent)).map((b) => b.id || b.textContent.trim()),
+    strip: !!document.getElementById("ns-publish"),
+  }));
+  await narrativeSpace(p);
+  const nv = await p.evaluate(() => [...document.querySelectorAll(".tile-bar button")].map((b) => b.textContent.trim()).filter((x) => /Pubblica|Esporta|Publish|Export/.test(x)));
+  await ctx.close();
+  return { pass: r.strip && !r.file.length && nv.some((x) => /Esporta/.test(x)) && !nv.some((x) => /Pubblica/.test(x)), detail: { ...r, nv } };
+});
+test("10.tabs", "doppio clic su una scheda dello spazio = rinomina, per tutte; il reset sta nel menu della scheda", async () => {
+  const { p, ctx } = await open({ doc: "catena" });
+  p.once("dialog", (d) => d.accept("Strati"));
+  await p.dblclick('#workspace-bar .ws-tab[data-ws="canvas"]');
+  await p.waitForTimeout(300);
+  const label = await p.evaluate(() => document.querySelector('#workspace-bar .ws-tab[data-ws="canvas"] .ws-lb')?.textContent);
+  await p.click('#workspace-bar .ws-tab[data-ws="canvas"]', { button: "right" });
+  await p.waitForTimeout(200);
+  const items = await p.evaluate(() => [...document.querySelectorAll(".ctx-menu button")].map((b) => b.textContent));
+  await ctx.close();
+  return { pass: label === "Strati" && items.some((i) => /Rinomina/.test(i)) && items.some((i) => /Ripristina/.test(i)), detail: { label, items } };
+});
+
 // ── run ─────────────────────────────────────────────────────────────────────
 const chosen = cases.filter((c) => !only.length || only.includes(c.id) || only.some((o) => c.id.startsWith(o + ".")));
 for (const c of chosen) {

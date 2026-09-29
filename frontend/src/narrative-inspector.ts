@@ -108,14 +108,15 @@ export function renderNarrativeInspector(root: HTMLElement, h: NarrInspectorHook
   if (!block) {
     // ── the chapter ────────────────────────────────────────────────────────
     const s = section(wrap);
-    const lt = el("label", "ninsp-l", t("ninsp.title"));
-    const ti = document.createElement("input");
-    ti.className = "insp-name-input";
-    ti.value = ch.title ?? "";
+    // AUDIT N9 · the title is written IN THE PAGE (the chapter's heading); the
+    // Inspector SHOWS it — one place to edit, not two
+    const lt = el("div", "ninsp-l", t("ninsp.title"));
+    const ti = el("b", "ninsp-title", ch.title ?? "");
     ti.dataset.nvset = "title";
-    ti.addEventListener("change", () => { if (ti.value.trim()) h.onRename(ti.value.trim()); });
+    ti.title = t("ninsp.titleInPage");
     lt.appendChild(ti);
     s.appendChild(lt);
+    void h.onRename;
     const ll = el("label", "ninsp-l", t("ninsp.lane"));
     const ls = document.createElement("select");
     ls.dataset.nvset = "anchor";
