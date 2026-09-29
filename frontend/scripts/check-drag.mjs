@@ -30,7 +30,7 @@ const bundle = await esbuild.build({
       export * from "./drag";
       export { buildMatrixScene, newRestackMemo } from "./views/matrix";
       export { hitTest, visibleBoxOf } from "./scene";
-      export { HIT_TOL_PX } from "./shape-geom";
+      export { DOC_SHEET_ASPECT, HIT_TOL_PX } from "./shape-geom";
       export { DocumentStore } from "./model";
     `,
     resolveDir: SRC,
@@ -194,7 +194,9 @@ const build = (doc, memo, key) =>
   ok(M.hitTest(s, vb.x - 2, cy, M.HIT_TOL_PX)?.id === "x1", "2 px off with the 3 px tolerance: the node");
   const d1 = s.byId.get("d1");
   const dv = M.visibleBoxOf(d1);
-  ok(Math.abs(dv.w - 30 * 0.78) < 1e-9, "the document sheet is 23.4 wide in its 90 box");
+  // the DECLARED aspect (em_visual_rules 1.6.21: 0.636, from document.svg), not a copy of it
+  ok(Math.abs(dv.w - 30 * M.DOC_SHEET_ASPECT) < 1e-9, `the document sheet is ${30 * M.DOC_SHEET_ASPECT} wide in its 90 box`);
+  ok(M.DOC_SHEET_ASPECT === 0.636, "the aspect is the datamodel's, not the 0.78 fallback");
   ok(M.hitTest(s, dv.x - 8, d1.y + 16, 0) === null, "8 px beside the sheet: the document is NOT selected");
 }
 

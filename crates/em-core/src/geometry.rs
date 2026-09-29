@@ -342,12 +342,14 @@ mod tests {
     #[test]
     fn the_document_sheet_takes_the_em3_box() {
         // SHIFT-A fase 5 · the same height as every glyph, the width from the
-        // sheet's aspect: 0.78 × 32 = 24.96 — no longer 90 × 32 around a 23.4 ×
-        // 30 drawing.
+        // sheet's aspect — no longer 90 × 32 around the drawing. Since
+        // em_visual_rules 1.6.21 the datamodel declares it (`aspect.document`
+        // = 0.636, from src/2D/document.svg = the yEd palette node 35 × 55), so
+        // the 0.78 fallback below is not consulted: 0.636 × 32 = 20.352.
         let boxes = type_boxes();
         let (w, h) = box_for(&boxes, "document", 90.0, 32.0);
         assert_eq!(h, 32.0, "the height is the node height, as for every glyph");
-        assert!((w - 24.96).abs() < 1e-9, "0.78 × 32 = 24.96, got {w}");
+        assert!((w - 20.352).abs() < 1e-9, "0.636 × 32 = 20.352, got {w}");
         // …and the datamodel wins the day it declares the aspect
         let declared = type_boxes_from_json(
             r#"{"2d_render_glyph_types":{"types":[],"aspect":{"document":0.5}}}"#,
