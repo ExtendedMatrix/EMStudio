@@ -12675,6 +12675,8 @@ function renderNarrativeInto(host: HTMLElement, win: Win): void {
   // After the render, so the chapters it counts are the ones just drawn.
   ensureCurrentChapter(win);
   renderResourcePanels(); // the story changed: its blocks panel repaints
+  // the Index's find survives a repaint of the page
+  if (narrativeQuery) highlightNarrative(narrativeQuery);
 }
 
 /**
@@ -14056,7 +14058,12 @@ function renderStudyWindow(): void {
  * Narrative window (the focused one, else the first), and a click on a chapter
  * makes it current THERE and brings it into view — navigation, not an edit.
  */
+/** NARRATIVE-DESK · the story's find lives in the Index; kept here so a
+ *  repaint of the Index (it repaints on every chapter change) keeps it. */
+let narrativeQuery = "";
 function renderNarrativeIndexInto(body: HTMLElement, _win: Win): void {
+  const hadFind = document.activeElement instanceof HTMLInputElement
+    && document.activeElement.classList.contains("nidx-search") && body.contains(document.activeElement);
   const story = activeWin().type === "narrative" ? activeWin() : windowsOf().find((w) => w.type === "narrative");
   const narrId = (story && (winCurrent(story, "narrative") as string | null)) ?? selectedNarrativeId
     ?? narrativesIn(store?.doc ?? null)[0]?.id ?? null;
@@ -14077,7 +14084,17 @@ function renderNarrativeIndexInto(body: HTMLElement, _win: Win): void {
       canRegenerate: () => false,
       coverage: (h: HTMLElement) => renderCoverageInto(h, narrId),
     } : {}),
+    query: narrativeQuery,
+    onQuery: (q) => {
+      narrativeQuery = q;
+      highlightNarrative(q);
+    },
   });
+  if (hadFind) {
+    const find = body.querySelector<HTMLInputElement>(".nidx-search");
+    find?.focus();
+    find?.setSelectionRange(find.value.length, find.value.length);
+  }
 }
 
 /** …and the one renderer both — now all — mounts call. */
@@ -19808,16 +19825,19 @@ function buildAreaHeader(win: Win): DocumentFragment {
     frag.appendChild(seg);
     const pub = document.createElement("button");
     pub.className = "win-act nv-publish";
-    pub.textContent = `${t("nv.publish")} ▾`;
+    const caret = document.createElement("span");
+    caret.className = "win-type-caret";
+    caret.textContent = "▾";
+    pub.append(`${t("nv.publish")} `, caret);
     pub.title = t("nv.publishTitle");
     pub.addEventListener("click", (e) => {
       e.stopPropagation();
       openPublishMenu(pub);
     });
     frag.appendChild(pub);
-    // WIN7 · the two data panels a narrative window sends you to
-    act("⌁", t("win.aiTitle"), false, () => openSettings("settings-sect-ai"));
-    act("⌖", t("win.geoTitle"), false, () => focusThen(win, revealSitePosition));
+    // NARRATIVE-DESK · ⌁ and ⌖ are gone: the AI data live in the
+    // preferences (an unconfigured AI opens them by itself), the site is placed
+    // from the Map block and from the map embed's Inspector.
   }
 
   // ── the type's OWN STRIP, in the SAME row (HDR2) ──────────────────────────
@@ -19838,9 +19858,9 @@ function buildAreaHeader(win: Win): DocumentFragment {
   spacer.title = t("win.maxHint");
   frag.appendChild(spacer);
 
-  // ── that window's own SEARCH (HDR1) ───────────────────────────────────────
-  const search = buildWindowSearch(win);
-  if (search) frag.appendChild(search);
+  // ── no window SEARCH in the header any more (HDR1 → NARRATIVE-DESK):
+  // the graph's is the name strip, the table's is its filter bar, the
+  // narrative's is at the head of the Index.
 
   // ── the arrangement verbs are GESTURES now (STRUTTURA) ───────────────────
   //
@@ -20051,33 +20071,6 @@ function wireBarDropdown(
  * and titles of a narrative. (The Outliner already had one, at the top of its
  * list, and it stays where it is.)
  */
-function buildWindowSearch(win: Win): HTMLElement | null {
-  // STRUTTURA · the GRAPH's box is gone: the full-text search in the name strip
-  // is the graph's search now (one `setupSearch`, one more mount, and the pick
-  // reaches the graph as it always did). The table keeps its filter and the
-  // narrative its find-in-prose — those search what THAT window shows.
-  // …and the TABLE's filter moved into the table itself, as the first field of
-  // its filter bar (`emdata.ts`), next to the facets it combines with.
-  if (win.type !== "narrative")
-    return null;
-  const wrap = document.createElement("div");
-  wrap.className = "win-search";
-  const input = document.createElement("input");
-  input.type = "search";
-  input.autocomplete = "off";
-  input.className = "win-search-input";
-  input.placeholder = t("win.searchNarrative");
-  wrap.appendChild(input);
-  // a click in the box must not be read as a gesture on the window underneath
-  input.addEventListener("pointerdown", (e) => e.stopPropagation());
-
-  // narrative: find in the prose, and take you to it
-  input.addEventListener("input", () => {
-    highlightNarrative(input.value);
-  });
-  return wrap;
-}
-
 /**
  * HDR2 · the per-type strip that used to be a SECOND row under the header.
  *
@@ -20367,157 +20360,17 @@ const WINDOW_MENUS: Record<WindowType, WinMenu[]> = {
       ],
     },
   ],
-  narrative: [
-    {
-      // MENU-AUDIT · "Aggiungi capitolo" left this menu, and the menu is better
-      // for it: every item here now acts on the CURRENT chapter, which is what
-      // t("menu.chapter") means. Adding one is not an operation on the current chapter,
-      // and it has two homes that suit it — the narrative palette (always) and
-      // the "+ capitolo" at the end of the story (while writing).
-      label: "menu.chapter",
-      items: (win) => {
-        const narr = activeNarrative();
-        const ci = validCurrentChapter(win);
-        const noChapter = (): string | null =>
-          !narr
-            ? t("menu.noNarrative")
-            : ci == null
-              ? t("menu.pickChapter")
-              : null;
-        return [
-          {
-            label: "menu.deleteChapter",
-            run: () => {
-              if (!store || !narr || ci == null) return;
-              nedit.deleteChapter(store, narr.id, ci);
-              setCurrentChapterIndex(win, null);
-              refreshNarrativeView();
-            },
-            disabledReason: noChapter,
-          },
-          {
-            label: "menu.moveUp",
-            run: () => {
-              if (!store || !narr || ci == null) return;
-              nedit.moveChapter(store, narr.id, ci, -1);
-              setCurrentChapterIndex(win, Math.max(0, ci - 1));
-            },
-            disabledReason: () => noChapter() ?? (ci === 0 ? t("menu.alreadyFirst") : null),
-          },
-          {
-            label: "menu.moveDown",
-            run: () => {
-              if (!store || !narr || ci == null) return;
-              nedit.moveChapter(store, narr.id, ci, 1);
-              setCurrentChapterIndex(win, Math.min(narr.chapters.length - 1, ci + 1));
-            },
-            disabledReason: () =>
-              noChapter() ??
-              (narr && ci === narr.chapters.length - 1 ? t("menu.alreadyLast") : null),
-          },
-        ];
-      },
-    },
-    {
-      label: "menu.insert",
-      items: (win) => {
-        const narr = activeNarrative();
-        const ci = validCurrentChapter(win);
-        // The embed needs a chapter AND a node to point at. The MAP points at
-        // the graph itself (that is what a site map is), so it needs no
-        // selection — which is the case E.D. hit: a map in the introduction.
-        // Every other view type embeds A NODE, so it uses the canvas selection;
-        // with nothing selected the item says so instead of guessing.
-        const insert = (viewType: string, ref: string): void => {
-          if (!store || !narr || ci == null) return;
-          nedit.addEmbed(store, narr.id, ci, ref, viewType);
-          refreshNarrativeView();
-        };
-        const needChapter = (): string | null =>
-          !narr
-            ? t("menu.noNarrative")
-            : ci == null
-              ? t("menu.pickChapter")
-              : null;
-        // WHAT a view embeds, when this window has no canvas to select on.
-        //
-        // Measured: in the Output workspace there IS no graph window, so
-        // `selectedId` is null and every type but the map was permanently
-        // unavailable — a menu that cannot ever be used, next to a palette drag
-        // that works. But a chapter of a site-story is ANCHORED (to its epoch,
-        // or to an activity), and that anchor is exactly what the chapter is
-        // about: embedding it is the obvious meaning of "insert a matrix here".
-        //
-        // So: the canvas selection when there is one (you pointed at something),
-        // else the chapter's anchor (what this chapter is about). Only a chapter
-        // with neither has nothing to embed, and then the item says so.
-        const refFor = (): { id: string; from: string } | null => {
-          if (selectedId) return { id: selectedId, from: t("menu.fromSelection") };
-          const anchor = narr && ci != null
-            ? (narrativesIn(store!.doc).find((n) => n.id === narr.id)
-                ?.chapters[ci] as { anchor?: string } | undefined)?.anchor
-            : undefined;
-          return anchor ? { id: anchor, from: t("menu.fromAnchor") } : null;
-        };
-        return [
-          {
-            label: "menu.siteMap",
-            run: () => store && insert("map", store.ensureGraphRootId()),
-            disabledReason: needChapter,
-          },
-          ...narrativeViewTypes()
-            .filter((vt) => vt !== "map")
-            .map((vt) => ({
-              label: vt,
-              run: () => {
-                const ref = refFor();
-                if (!ref) return;
-                insert(vt, ref.id);
-                toast(`${vt} inserito (${ref.from}: ${
-                  store?.node(ref.id)?.name ?? ref.id})`);
-              },
-              disabledReason: () =>
-                needChapter() ??
-                (refFor()
-                  ? null
-                  : t("menu.nothingToEmbed")),
-            })),
-        ];
-      },
-    },
-    // COLLEGARE · «Esporta» LEFT this menu: «Pubblica ▾», beside the four
-    // readings, is the same five ways out, with the check of what no person
-    // validated before a file. File ▸ Esporta stays, for the project.
-    {
-      label: "menu.ai",
-      items: (win) => {
-        const narr = activeNarrative();
-        const ci = validCurrentChapter(win);
-        return [
-          {
-            label: "menu.regenChapter",
-            run: () => {
-              if (!narr || ci == null) return;
-              void generateChapterDraft(narr.id, ci);
-            },
-            disabledReason: () =>
-              !narr
-                ? t("menu.noNarrative")
-                : ci == null
-                  ? t("menu.pickChapter")
-                  : null,
-          },
-          {
-            // The one thing a failed generation needs next: where the key goes.
-            // In the menu rather than only in the error, so it can be found
-            // BEFORE the first refusal.
-            label: "menu.aiProvider",
-            run: () => openSettings("settings-sect-ai"),
-          },
-        ];
-      },
-    },
-  ],
+  // NARRATIVE-DESK (29 set 2026) · the narrative window carries NO menus.
+  // Each item they held had a second home, and a state offered twice reads as
+  // two states:
+  //  · Chapter ▾ (delete, move up/down) — the chapter's Inspector (▲ ▼ ✕);
+  //  · Insert ▾ (the site map and one entry per view type) — the «+» between
+  //    blocks and «/», i.e. the Blocks menu, which offers the same view types
+  //    (`BLOCK_MEDIA`) plus «Or cite a node»;
+  //  · AI ▾ — «Ask for a draft» is in the chapter's Inspector (and «AI draft»
+  //    in the Blocks menu); the provider and the key are in the preferences,
+  //    where an unconfigured AI now sends you by itself (`withAiConfigured`).
+  narrative: [],
   // MENU-AUDIT · the "Tabella" menu (one item per sheet, with a ✓) is GONE. The
   // sheet selector sits in the window's own head, two centimetres away, showing
   // which sheet is open — and a state offered twice reads as two states. Exactly
@@ -20729,37 +20582,6 @@ function placeBarMenu(toggle: HTMLElement, menu: HTMLElement): void {
       : Math.max(4, r.top - m.height - 4);
   menu.style.left = `${Math.round(left)}px`;
   menu.style.top = `${Math.round(top)}px`;
-}
-
-/**
- * WIN7 · bring the Inspector's graph card up with the SITE POSITION in view.
- *
- * The site position is a graph-scope fact (GEO1), so the panel that holds it is
- * the Inspector's no-selection state — which means clearing the selection first.
- *
- * It used to have to ask WHERE the inspector was — `getElementById("inspector")`
- * and then whether its parent was the focused mount or an area — because there
- * was one of it and it could be anywhere. There are as many as there are
- * Inspector windows now, so the question is only which WINDOW to bring forward,
- * and the answer is the first one showing that tab.
- */
-function revealSitePosition(): void {
-  if (!store) {
-    toast(t("toast.openGraphForPosition"));
-    return;
-  }
-  select(null); // the graph card is the Inspector's no-selection state
-  const inWindow = windowsOf().find(
-    (w) => PANEL_TABS[w.type] && panelIdOf(w) === "inspector",
-  );
-  if (inWindow && activeWin().id !== inWindow.id) selectWindow(inWindow.id);
-  refreshInspector();
-  const anchor = document.getElementById("insp-site-position");
-  if (!anchor) {
-    toast(t("toast.noPositionPanel"));
-    return;
-  }
-  revealBlock(anchor);
 }
 
 /**

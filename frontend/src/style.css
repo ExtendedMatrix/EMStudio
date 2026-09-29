@@ -8314,3 +8314,10 @@ body.gesturing-resize * {
 .nidx-covrow.ok .nidx-covh { color: var(--ok-ink, #2e6b32); }
 .nidx-eyebrow .nidx-tag { margin-left: 6px; }
 .et-story { font-size: 11.5px; padding: 1px 0 1px 14px; color: var(--text); }
+
+/* NARRATIVE-DESK · «Pubblica ▾» carries its whole label (it was a 30px
+   square action, «Publis…») */
+.win-header .win-act.nv-publish { width: auto; padding: 0 10px; white-space: nowrap; }
+/* the story's find, at the head of the Index's chapters */
+.nidx-search { width: 100%; box-sizing: border-box; margin: 4px 0 6px; font: inherit; font-size: 12px; padding: 4px 8px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg); color: var(--text); }
+.nidx-nohit { margin: 4px 6px; font-style: italic; }

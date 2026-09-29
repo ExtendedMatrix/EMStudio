@@ -28,6 +28,20 @@ export interface IndexHooks {
   canRegenerate?(): boolean;
   /** fase 5 · the coverage section, drawn by its own module into this host */
   coverage?(host: HTMLElement): void;
+  /** NARRATIVE-DESK · the story's find, at the head of the chapters: it
+   *  filters them here and marks the prose on the page (`onQuery`) */
+  query?: string;
+  onQuery?(q: string): void;
+}
+
+/** Does a chapter match a find? Its title, and the text of its prose. */
+export function chapterMatches(ch: { title?: string; blocks?: { block_type?: string; text?: string; caption?: string }[] },
+                               q: string): boolean {
+  const needle = q.trim().toLowerCase();
+  if (!needle) return true;
+  if ((ch.title ?? "").toLowerCase().includes(needle)) return true;
+  return (ch.blocks ?? []).some((b) =>
+    `${b.text ?? ""} ${b.caption ?? ""}`.toLowerCase().includes(needle));
 }
 
 function el(tag: string, cls?: string, text?: string): HTMLElement {
@@ -77,6 +91,30 @@ export function renderNarrativeIndex(host: HTMLElement, doc: EmDocument | null, 
   root.appendChild(head);
 
   const index = new Map((doc?.graph?.nodes ?? []).map((n) => [n.id, n]));
+  // the find: filters the rows in place (no repaint, so the caret stays), and
+  // hands the query on for the page to mark
+  const find = document.createElement("input");
+  find.type = "search";
+  find.autocomplete = "off";
+  find.className = "nidx-search";
+  find.placeholder = t("nidx.find");
+  find.value = hooks.query ?? "";
+  root.appendChild(find);
+  const rows: { li: HTMLElement; ch: (typeof nr.chapters)[number] }[] = [];
+  const none = el("p", "nidx-dim nidx-nohit", t("nidx.noHit"));
+  const applyFind = (): void => {
+    let shown = 0;
+    for (const r of rows) {
+      const hit = chapterMatches(r.ch as Parameters<typeof chapterMatches>[0], find.value);
+      r.li.hidden = !hit;
+      if (hit) shown++;
+    }
+    none.hidden = shown > 0;
+  };
+  find.addEventListener("input", () => {
+    applyFind();
+    hooks.onQuery?.(find.value);
+  });
   const list = el("ol", "nidx-ch");
   nr.chapters.forEach((ch, i) => {
     const li = el("li");
@@ -99,8 +137,11 @@ export function renderNarrativeIndex(host: HTMLElement, doc: EmDocument | null, 
     b.addEventListener("click", () => hooks.onPick(i));
     li.appendChild(b);
     list.appendChild(li);
+    rows.push({ li, ch });
   });
   root.appendChild(list);
+  root.appendChild(none);
+  applyFind();
 
   if (hooks.onAddChapter) {
     const add = el("div", "nidx-add");
