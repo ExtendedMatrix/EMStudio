@@ -129,7 +129,6 @@
         "description": "Scheda dei capitelli reimpiegati",
         "data": {
           "filename": "scheda_capitelli_USM101.txt",
-          "medium": "text",
           "text": "Scheda dei capitelli reimpiegati nel muro USM101, campagna 2026.\n\nIl capitello nord (RSF100b) è un corinzio ad acanto spinoso, databile su base stilistica alla fine del II secolo d.C.\n\nIl capitello sud (RSF101b) presenta la stessa lavorazione e proviene con ogni probabilità dalla stessa officina.\n\nEntrambi mostrano la rilavorazione dell’abaco per l’alloggiamento nella muratura medievale.\n\nL’altezza conservata dei capitelli è di 0,48 m; il diametro di base è di 0,42 m."
         }
       },
@@ -139,7 +138,6 @@
         "name": "D.2",
         "description": "Rilievo 3D di USM101, 2026",
         "data": {
-          "medium": "3d",
           "url": "/em/studio/testdata/catena-muro.gltf"
         }
       },
@@ -149,7 +147,6 @@
         "name": "D.3",
         "description": "Foto del prospetto nord di USM101",
         "data": {
-          "medium": "image",
           "url": "/em/studio/testdata/catena-prospetto.jpg"
         }
       },

@@ -429,3 +429,31 @@ export function useAsValue(store: DocumentStore, extractorId: string): string | 
   store.batch(() => store.setPropertyValue(p, v));
   return p;
 }
+
+/**
+ * `api.validate["info"]` in the client — `s3dgraphy.diagnostics.
+ * extraction_source_hints`, same rule: one record per (extractor, unit,
+ * property) where the extractor reads FROM a unit (connections 1.6.24) that has
+ * no property of the same key (`property_type`, else name) as a property the
+ * extractor feeds, directly or through a combiner. Read-only.
+ */
+export function extractionSourceHints(
+  doc: EmDocument,
+  isUnit: (t: string | undefined) => boolean,
+): Array<{ extractor: string; extractor_name: string; unit: string; unit_name: string; property: string; property_name: string }> {
+  const outList: ReturnType<typeof extractionSourceHints> = [];
+  for (const e of edges(doc)) {
+    if (e.edge_type !== EXTRACTED_FROM) continue;
+    const unit = nodeOf(doc, e.target);
+    if (!unit || !isUnit(unit.node_type)) continue;
+    const has = new Set(propertiesOf(doc, unit.id).map((p) => propertyKey(nodeOf(doc, p))));
+    const p = propertyOfExtractor(doc, e.source);
+    const prop = nodeOf(doc, p ?? undefined);
+    if (!prop || prop.node_type !== "property") continue;
+    const key = propertyKey(prop);
+    if (has.has(key)) continue;
+    outList.push({ extractor: e.source, extractor_name: String(nodeOf(doc, e.source)?.name ?? e.source),
+                   unit: unit.id, unit_name: String(unit.name ?? unit.id), property: prop.id, property_name: key });
+  }
+  return outList;
+}

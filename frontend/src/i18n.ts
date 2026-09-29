@@ -1769,6 +1769,14 @@ const EN: Dict = {
   "chain.otherGroup": "Other properties",
   "chain.inheritNone": "No other unit has a property to inherit.",
   "chain.heirValue": "One property, one value: correct it in the unit that made it",
+  "chain.readingMade": "{x}: a reading of {from} for {prop}",
+  "chain.combinerMade": "second source: {c} now combines {n} readings",
+  "chain.alsoHas": "also has {prop}",
+  "chain.newDocument": "New document…",
+  "chain.fromWhere": "Read from where?",
+  "chain.sources": "Sources",
+  "chain.fromUnitGroup": "From a unit (the extractor reads one of its properties)",
+  "issues.sourceHint": "{x} reads {p} from {u}, which has no {p} of its own (a suggestion)",
 };
 
 // ── Italiano: complete, because E.D. works in it ───────────────────────────────
@@ -3411,6 +3419,14 @@ const IT: Dict = {
   "chain.otherGroup": "Altre proprietà",
   "chain.inheritNone": "Nessun’altra unità ha una proprietà da ereditare.",
   "chain.heirValue": "Una proprietà, un valore: si corregge nell’unità che l’ha creata",
+  "chain.readingMade": "{x}: una lettura di {from} per {prop}",
+  "chain.combinerMade": "seconda fonte: {c} ora combina {n} letture",
+  "chain.alsoHas": "ha anche {prop}",
+  "chain.newDocument": "Nuovo documento…",
+  "chain.fromWhere": "Da dove si legge?",
+  "chain.sources": "Fonti",
+  "chain.fromUnitGroup": "Da un’unità (l’estrattore legge una sua proprietà)",
+  "issues.sourceHint": "{x} legge {p} da {u}, che non ha una proprietà {p} (un suggerimento)",
 };
 
 // ── The six other project languages: AI DRAFTS, awaiting validation ───────────
@@ -4469,6 +4485,14 @@ const DE: Dict = {
   "chain.otherGroup": "Andere Eigenschaften",
   "chain.inheritNone": "Keine andere Einheit hat eine Eigenschaft zum Erben.",
   "chain.heirValue": "Eine Eigenschaft, ein Wert: korrigiert wird er in der Einheit, die sie angelegt hat",
+  "chain.readingMade": "{x}: eine Lesung von {from} für {prop}",
+  "chain.combinerMade": "zweite Quelle: {c} kombiniert jetzt {n} Lesungen",
+  "chain.alsoHas": "hat auch {prop}",
+  "chain.newDocument": "Neues Dokument…",
+  "chain.fromWhere": "Woraus wird gelesen?",
+  "chain.sources": "Quellen",
+  "chain.fromUnitGroup": "Aus einer Einheit (der Extraktor liest eine ihrer Eigenschaften)",
+  "issues.sourceHint": "{x} liest {p} aus {u}, das selbst kein {p} hat (ein Hinweis)",
 };
 
 const DICTS: Record<Locale, Dict> = {

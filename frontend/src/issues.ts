@@ -54,6 +54,10 @@ export interface IssueSources {
   edgeAllowed?: (edgeType: string, sourceType: string, targetType: string) => boolean | null;
   /** NAME1 statuses */
   names?: Map<string, { status: "ok" | "warn" | "dup"; reason?: string }>;
+  /** CATENA · s3dgraphy `api.validate["info"]`, the client reading of
+   *  `diagnostics.extraction_source_hints`: an extractor that reads a unit
+   *  without a property of the name it feeds. A SUGGESTION, never a warning. */
+  sourceHints?: Array<{ extractor: string; extractor_name: string; unit_name: string; property_name: string }>;
   /** i18n for the hint texts */
   t: (key: string, vars?: Record<string, string>) => string;
 }
@@ -125,6 +129,11 @@ export function issues(src: IssueSources): Issue[] {
       push({ node: n.id, sev: "info", rule: "author",
              txt: t("issues.noAuthor", { n: name(n.id) }) });
   }
+
+  // ── CATENA · reading from a unit: a hint when the unit lacks the property ──
+  for (const h of src.sourceHints ?? [])
+    push({ node: h.extractor, sev: "info", rule: "paradata",
+           txt: t("issues.sourceHint", { x: h.extractor_name, u: h.unit_name, p: h.property_name }) });
 
   // ── COLLEGARE · the story: an AI paragraph no person validated is a warning
   //    (rule `ai`, as for a node), until somebody signs it. One per chapter.

@@ -30,6 +30,7 @@ import {
   type Geometry,
 } from "./paradata-chain";
 import type { EmNode } from "./types";
+import { mediumOfFile, type Medium } from "./doc-form";
 
 export interface ChainUi {
   store: DocumentStore;
@@ -60,22 +61,19 @@ function el<K extends keyof HTMLElementTagNameMap>(tag: K, cls?: string, text?: 
 
 const MEDIUM_ICON: Record<string, string> = { image: "▣", text: "¶", "3d": "⬡" };
 
-/** The medium of a document, read from what it points at — never a new field
- *  when the data already says it (`data.medium` wins when somebody declared it). */
+/** The medium of a document, read off the file it points at (its own
+ *  `data.url|filename|path`, else a linked resource's) with `mediumOfFile` —
+ *  never stored as a field of its own (doc-form: no «supporto» in EM). A
+ *  document with its text inline (`data.text`, e.g. from a Tropy note) is text. */
 export function mediumOf(doc: EmNode | undefined, resolve: (id: string) => EmNode | undefined,
-                         linked: (id: string) => string[]): "image" | "text" | "3d" | null {
+                         linked: (id: string) => string[]): Medium | null {
   if (!doc) return null;
   const d = (doc.data ?? {}) as Record<string, unknown>;
-  if (d.medium === "image" || d.medium === "text" || d.medium === "3d") return d.medium;
-  const locs = [d.url, d.filename, d.path, ...linked(doc.id).map((r) => {
+  const loc = [d.url, d.filename, d.path, ...linked(doc.id).map((r) => {
     const rd = (resolve(r)?.data ?? {}) as Record<string, unknown>;
     return rd.url ?? rd.filename ?? rd.path;
-  })].filter(Boolean).map((x) => String(x).toLowerCase());
-  for (const l of locs) {
-    if (/\.(glb|gltf|obj|ply|fbx|usdz)(\?|$)/.test(l)) return "3d";
-    if (/\.(jpe?g|png|tiff?|webp|gif|bmp|jp2)(\?|$)/.test(l)) return "image";
-    if (/\.(txt|md|pdf|docx?|odt|html?|xml|json)(\?|$)/.test(l)) return "text";
-  }
+  })].find((x) => typeof x === "string" && x);
+  if (loc) return mediumOfFile(String(loc).split(/[?#]/)[0]);
   if (typeof d.text === "string" && d.text) return "text";
   return null;
 }

@@ -136,6 +136,7 @@ import { DocumentStore } from "./model";
 import {
   HAS_PARADATA_NODEGROUP,
   initialName,
+  nextDocumentName,
   nextFreeName,
   nameStatusMap,
   paradataGroupRenameOnAttach,
@@ -195,7 +196,7 @@ import { chapterCitedIds, interpretiveCoverage, storyCoverage } from "./narrativ
 import { setSitePicker, type NarrativeSelection, type Reading } from "./narrative";
 import { renderSitePosition } from "./study-panel";
 import * as chain from "./paradata-chain";
-import { renderChainSection, type ChainUi } from "./paradata-inspector";
+import { mediumOf as mediumOfDoc, renderChainSection, type ChainUi } from "./paradata-inspector";
 import {
   closeAddMenu,
   showAddMenu,
@@ -6730,6 +6731,11 @@ function chainUi(st: DocumentStore): ChainUi {
       const r = anchor.getBoundingClientRect();
       openInheritMenu(ownerId, r.left, r.bottom);
     },
+    addReading: (propertyId, anchor) => {
+      const r = anchor.getBoundingClientRect();
+      openReadingSourceMenu(propertyId, r.left, r.bottom);
+    },
+    openReading,
     useAsValue: (x) => {
       const p = chain.useAsValue(st, x);
       if (!p) return;
@@ -6799,6 +6805,130 @@ function openInheritMenu(ownerId: string, clientX: number, clientY: number): voi
     noResults: t("add.noResults"),
     keysHint: t("add.keys"),
   }, clientX, clientY);
+}
+
+/**
+ * CATENA · open the document's window on a reading: the Fonti workspace when no
+ * Doc window is on screen (the same move the Storage's document card makes),
+ * the reading's source current in it, and the reading ARMED — the next trace on
+ * the document (a region, a passage, a point) becomes its geometry.
+ */
+function openReading(extractorId: string): void {
+  if (!store) return;
+  const src = chain.sourceOf(store.doc, extractorId);
+  if (!src || src.kind !== "document") { select(extractorId); refreshInspector(); return; }
+  let docWin = windowsOf().find((w) => w.type === "doc");
+  if (!docWin) {
+    setWorkspace("provenance");
+    docWin = windowsOf().find((w) => w.type === "doc");
+  }
+  if (docWin) {
+    setWinCurrent(docWin, "doc", src.id);
+    setWinCurrent(docWin, "reading", extractorId);
+  }
+  select(extractorId);
+  refreshInspector();
+  renderDocView();
+  draw();
+}
+
+/**
+ * CATENA · «+ lettura» — FROM WHERE first: the documents of the graph, «Nuovo
+ * documento…» (the explicit form, never a bare D.nn), and «Da un’unità» with the
+ * units that have a property of the same name on top (connections 1.6.24). The
+ * pick is ONE undo step (`chain.addReading`: the extractor, its name, the
+ * combiner when this is the second source); then the document's window opens on
+ * the new reading.
+ */
+function openReadingSourceMenu(propertyId: string, clientX: number, clientY: number): void {
+  if (!store) return;
+  const st = store;
+  const prop = st.node(propertyId);
+  const key = chain.propertyKey(prop);
+  const owners = new Set(chain.ownersOf(st.doc, propertyId).map((o) => o.owner));
+  const finish = (source: chain.ReadingSource): void => {
+    const r = chain.addReading(st, propertyId, source);
+    const x = String(st.node(r.extractorId)?.name ?? r.extractorId);
+    const from = String(st.node(r.sourceId)?.name ?? r.sourceId);
+    let msg = t("chain.readingMade", { x, from, prop: String(prop?.name ?? propertyId) });
+    if (r.combinerCreated) {
+      msg += " · " + t("chain.combinerMade", { c: String(st.node(r.combinerCreated)?.name ?? ""),
+        n: String(r.moved.length + 1) });
+    }
+    logInfo(msg, [r.extractorId, propertyId, ...(r.combinerCreated ? [r.combinerCreated] : [])]);
+    toastUndo(msg, st);
+    openReading(r.extractorId);
+  };
+  const docs = st.liveNodes().filter((n) => n.node_type === "document");
+  const units = st.liveNodes().filter((n) => isStratigraphicType(n.node_type) && !owners.has(n.id));
+  const same = (u: EmNode): boolean => chain.propertiesOf(st.doc, u.id)
+    .some((p) => chain.propertyKey(st.node(p)) === key);
+  units.sort((a, b) => Number(same(b)) - Number(same(a))
+    || String(a.name ?? "").localeCompare(String(b.name ?? ""), undefined, { numeric: true }));
+  const docEntries: AddMenuEntry[] = docs.map((d) => ({
+    key: `rd|doc|${d.id}`,
+    label: `${String(d.name ?? d.id)} · ${String(d.description ?? "")}`.replace(/ · $/, ""),
+    detail: t(`chain.medium.${chainMedium(d) ?? "text"}`),
+    nodeType: "document",
+    description: String(d.description ?? ""),
+    alias: String(d.name ?? ""),
+    icon: () => typeIconElement("document"),
+    run: () => finish({ kind: "document", id: d.id }),
+  }));
+  const unitEntries: AddMenuEntry[] = units.map((u) => ({
+    key: `rd|unit|${u.id}`,
+    label: String(u.name ?? u.id),
+    detail: same(u) ? t("chain.alsoHas", { prop: String(prop?.name ?? "") }) : String(u.description ?? "").slice(0, 40),
+    nodeType: u.node_type,
+    description: String(u.description ?? ""),
+    alias: String(u.name ?? ""),
+    icon: () => typeIconElement(u.node_type),
+    run: () => finish({ kind: "unit", id: u.id }),
+  }));
+  const newDoc: AddMenuEntry = {
+    key: "rd|new",
+    label: t("chain.newDocument"),
+    icon: () => typeIconElement("document"),
+    run: () => {
+      openNewDocumentForm(clientX, clientY, { name: nextDocumentName(st.doc) }, (v: NewDocumentValues) =>
+        finish({ kind: "new-document", name: v.name, description: v.description,
+                 data: v.filename ? { filename: v.filename } : undefined }));
+    },
+  };
+  addMenuPoint.x = clientX;
+  addMenuPoint.y = clientY;
+  showAddMenu({
+    title: t("chain.fromWhere"),
+    context: String(prop?.name ?? propertyId),
+    placeholder: t("link.q"),
+    linked: [],
+    recent: [],
+    categories: [],
+    existing: {
+      header: t("chain.sources"),
+      groups: [
+        { label: t("link.g.document"), entries: docEntries },
+        { label: t("chain.fromUnitGroup"), entries: unitEntries },
+      ],
+      perGroup: EXISTING_PER_GROUP,
+      more: (n) => t("link.more", { n }),
+      none: t("link.none"),
+    },
+    extra: [newDoc],
+    searchable: [...docEntries, ...unitEntries, newDoc],
+    matches: (e, q) => [e.label, e.description ?? "", e.alias ?? ""].some((x) => x.toLowerCase().includes(q.trim().toLowerCase())),
+    count: t("link.count", { n: docEntries.length + unitEntries.length }),
+    noResults: t("add.noResults"),
+    keysHint: t("add.keys"),
+  }, clientX, clientY);
+}
+
+/** The medium of a document, as the chain section reads it. */
+function chainMedium(d: EmNode): "image" | "text" | "3d" | null {
+  if (!store) return null;
+  const st = store;
+  return mediumOfDoc(d, (id) => st.node(id), (id) => st.liveEdges()
+    .filter((e) => e.source === id && e.edge_type === "has_linked_resource").map((e) => e.target));
 }
 
 /** COLLEGARE · «Collega a un esistente…»: the same list, alone, with its search. */
@@ -10471,6 +10601,7 @@ function refreshIssues(): void {
     edgeAllowed: (et, st, dt) =>
       allowedEdgeTypes(st, dt).map(canonicalEdgeType).includes(canonicalEdgeType(et)),
     names: nameStatus,
+    sourceHints: chain.extractionSourceHints(s.doc, isStratigraphicType),
     t: (k, v) => t(k, v),
   });
   issueUnitOf = unitOfIssue(s.doc, isStratigraphicType, nodes);
