@@ -203,7 +203,9 @@ import { setSitePicker, type NarrativeSelection, type Reading } from "./narrativ
 import { renderSitePosition } from "./study-panel";
 import * as chain from "./paradata-chain";
 import { mediumOf as mediumOfDoc, renderChainSection, type ChainUi } from "./paradata-inspector";
-import { renderReadingStage, type TraceGeometry } from "./doc-reading";
+import { DOC_TOOLS, renderReadingStage, selectedPassage, type DocTool,
+         type TraceAnchor, type TraceGeometry } from "./doc-reading";
+import { openReadingBubble, type BubbleUnit } from "./reading-bubble";
 import { ReadingFiles, type PlaceOutcome } from "./reading-files";
 import * as aiv from "./ai-validation";
 import { checkReceipt, receiptOf, receiptsOfEmission, refreshedCopies, type ReceiptCheck } from "./receipt";
@@ -373,7 +375,7 @@ import {
   setVolatileProvider,
   tableViewOf,
 } from "./emdata";
-import { addRow, deleteRow } from "./em-data";
+import { addQualiaClaim, addRow, deleteRow } from "./em-data";
 import { isVolatile } from "./volatile";
 import { addRecent, removeRecent, type RecentFile } from "./recent";
 import {
@@ -14540,7 +14542,7 @@ const TRANSFORM_TYPES: WindowType[] = [
   "doc",
   "viewer",
   "storage",
-  "annotator",
+  // AUDIT N4 · no "annotator": the Doc window is the one tracer
   "shelf",
   "study",
   "narrative-index",
@@ -14753,6 +14755,8 @@ function renderDocReadingStage(win: Win, detail: HTMLElement, d: EmNode): void {
     modelUrl: medium === "3d" ? url : null,
     text: () => docText(d),
     onTrace: (x, g) => traceReading(win, x, d.id, g),
+    tool: docToolOf(win),
+    onTraceFree: (g, anchor) => askWhatItReads(win, detail, d.id, g, anchor),
     vertices: readingVertices,
     onSelect: (x) => { setWinCurrent(win, "reading", null); select(x); refreshInspector(); renderDocView(); draw(); },
     onDisarm: () => { setWinCurrent(win, "reading", null); renderDocView(); },
@@ -14761,6 +14765,9 @@ function renderDocReadingStage(win: Win, detail: HTMLElement, d: EmNode): void {
     onVerify: (x) => verifyAiNodes([x]),
     aiChip: aiChipFor,
   });
+  // the header's tools follow the document shown (its medium decides them)
+  const strip = winAreas.get(win.id)?.querySelector<HTMLElement>(".win-strip");
+  if (strip) fillDocTools(win, strip);
 }
 
 /** LUOGO · the vertices of a 3D place: a legacy point's own, else its glb's. */
@@ -14886,13 +14893,148 @@ function renameExtractorsByRule(ids: string[]): void {
   draw();
 }
 
-// Esc disarms a reading waiting for its trace
+// Esc disarms a reading waiting for its trace — and puts the tool down: Esc
+// goes back to LOOKING (AUDIT N4: there is no View/Annotate mode any more)
 document.addEventListener("keydown", (e) => {
   if (e.key !== "Escape") return;
+  if ((e.target as HTMLElement | null)?.closest?.(".rd-bubble")) return;
   let any = false;
-  for (const w of windowsOf()) if (w.type === "doc" && winCurrent(w, "reading")) { setWinCurrent(w, "reading", null); any = true; }
-  if (any) renderDocView();
+  for (const w of windowsOf()) {
+    if (w.type !== "doc") continue;
+    if (winCurrent(w, "reading")) { setWinCurrent(w, "reading", null); any = true; }
+    if (winCurrent(w, "doc.tool")) { setWinCurrent(w, "doc.tool", null); any = true; }
+  }
+  if (any) { renderDocView(); refreshDocTools(); }
 });
+
+// ── AUDIT N4 · ONE TRACER, the Doc window's ─────────────────────────────────
+//
+// The tools of the medium, ONCE, in the window's header: ▭ Regione · ⬟ Poligono
+// on an image, ❝ Leggi il passo selezionato on a text, ⌖ Punto · ╱ Linea ·
+// 〰 Polilinea on a model. Choosing one IS tracing; Esc goes back to looking.
+// What they replace: the Annotator's View/Annotate/Mask modes, its tools drawn
+// twice (side panel and surface) and its Region menu — three sets of commands
+// for one gesture, and a second tracer writing a second shape of data.
+
+function docToolOf(win: Win): DocTool | null {
+  const v = winCurrent(win, "doc.tool");
+  return typeof v === "string" ? (v as DocTool) : null;
+}
+const DOC_TOOL_GLYPH: Record<DocTool, string> = {
+  rect: "▭", polygon: "⬟", passage: "❝", point: "⌖", line: "╱", polyline: "〰",
+};
+/** Fill a Doc window's header strip with the tools of its document's medium. */
+function fillDocTools(win: Win, strip: HTMLElement): void {
+  strip.textContent = "";
+  const d = store ? store.node(currentDocId(win) ?? "") : undefined;
+  const medium = d ? chainMedium(d) : null;
+  if (!medium) return;
+  const box = document.createElement("span");
+  box.className = "rd-tools";
+  box.setAttribute("role", "group");
+  box.setAttribute("aria-label", t("rdt.tools"));
+  const current = docToolOf(win);
+  for (const tool of DOC_TOOLS[medium]) {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "win-act rd-tool" + (current === tool ? " on" : "");
+    b.dataset.tool = tool;
+    b.textContent = `${DOC_TOOL_GLYPH[tool]} ${t(`rdt.${tool}`)}`;
+    b.title = t(`rdt.${tool}Hint`);
+    b.setAttribute("aria-pressed", String(current === tool));
+    b.addEventListener("click", (e) => {
+      e.stopPropagation();
+      if (tool === "passage") { readPassageIn(win); return; }
+      setWinCurrent(win, "doc.tool", current === tool ? null : tool);
+      renderDocView();
+      refreshDocTools();
+    });
+    box.appendChild(b);
+  }
+  if (current) box.appendChild(Object.assign(document.createElement("span"), {
+    className: "rd-tools-hint", textContent: t(current === "polygon" ? "rdt.escPoly" : current === "polyline" ? "rdt.escPolyline" : "rdt.esc") }));
+  strip.appendChild(box);
+}
+/** Repaint the tools of every Doc window (the document or the tool changed). */
+function refreshDocTools(): void {
+  for (const w of windowsOf()) {
+    if (w.type !== "doc") continue;
+    const strip = winAreas.get(w.id)?.querySelector<HTMLElement>(".win-strip");
+    if (strip) fillDocTools(w, strip);
+  }
+}
+/** «❝ Leggi il passo selezionato»: the selection in THIS window's text */
+function readPassageIn(win: Win): void {
+  const area = winAreas.get(win.id);
+  const detail = area?.querySelector<HTMLElement>(".doc-detail") ?? null;
+  const got = detail ? selectedPassage(detail) : null;
+  const docId = currentDocId(win);
+  if (!got || !docId || !detail) { toast(t("rdt.selectFirst")); return; }
+  const armed = winCurrent(win, "reading");
+  if (typeof armed === "string" && armed) { traceReading(win, armed, docId, got.g); return; }
+  askWhatItReads(win, detail, docId, got.g, got.anchor);
+}
+
+/**
+ * «Cosa stai estraendo?» — a trace drawn before anybody said what it reads.
+ * The bubble opens under the region, INSIDE this window; the answer makes the
+ * extractor, the region and the chain in one undo step, and the Inspector
+ * shows the chain.
+ */
+function askWhatItReads(win: Win, detail: HTMLElement, docId: string, g: TraceGeometry, anchor: TraceAnchor): void {
+  if (!store) return;
+  const st = store;
+  // the bubble lives in the WINDOW (its area), so the detail's scroller cannot
+  // clip it; the anchor comes in the stage's coordinates and is moved here
+  const stageEl = detail.querySelector<HTMLElement>(".rd-stage") ?? detail;
+  const host = winAreas.get(win.id) ?? stageEl;
+  const hr = host.getBoundingClientRect(), sr = stageEl.getBoundingClientRect();
+  anchor = { x: anchor.x + sr.left - hr.left, y: anchor.y + sr.top - hr.top, w: anchor.w, h: anchor.h };
+  const units: BubbleUnit[] = st.liveNodes()
+    .filter((n) => isStratigraphicType(n.node_type))
+    .map((u) => ({
+      id: u.id, name: String(u.name || u.id),
+      props: chain.propertiesOf(st.doc, u.id).map((pid) => {
+        const p = st.node(pid);
+        return { id: pid, name: String(p?.name ?? pid), value: chain.propertyValue(p) };
+      }),
+    }));
+  const docName = String(st.node(docId)?.name ?? docId);
+  const what = g.kind === "passage"
+    ? `❝ ${g.text.length > 70 ? `${g.text.slice(0, 70)}…` : g.text} · ${docName}`
+    : `${t("bubble.traced")} · ${docName}`;
+  const names = [...new Set(st.liveNodes().filter((n) => n.node_type === "property").map((n) => String(n.name ?? "")))].filter(Boolean).sort();
+  host.dataset.pending = "1";
+  openReadingBubble(host, {
+    anchor, what, units, propertyNames: names,
+    preferUnit: selectedId && isStratigraphicType(st.node(selectedId)?.node_type ?? "") ? selectedId : null,
+    onPick: (propertyId) => readingFromDocument(win, docId, g, () => propertyId),
+    onCreate: (unitId, name) => readingFromDocument(win, docId, g, () => addQualiaClaim(st, unitId, name, "")),
+    onClose: () => { delete host.dataset.pending; },
+  });
+}
+/** ONE undo step: (the new property,) the extractor, its region, the chain. */
+function readingFromDocument(win: Win, docId: string, g: TraceGeometry, property: () => string | null): void {
+  if (!store) return;
+  const st = store;
+  const made = st.batch(() => {
+    const pid = property();
+    if (!pid) return null;
+    const r = chain.addReading(st, pid, { kind: "document", id: docId });
+    const placed = chain.setReadingGeometry(st, r.extractorId, docId, g);
+    return { x: r.extractorId, placed };
+  });
+  if (!made) return;
+  const name = String(st.node(made.x)?.name ?? made.x);
+  const msg = t("bubble.done", { x: name });
+  logInfo(msg, [made.x, docId]);
+  toastUndo(msg, st);
+  if (made.placed?.glb) void readingFiles.place(made.placed, st.doc, g).then((o) => reportPlace(o, name, [made.x, made.placed!.regionId]));
+  setWinCurrent(win, "doc.tool", docToolOf(win));   // the tool stays: trace the next
+  select(made.x);
+  refreshInspector();
+  renderDocView();
+}
 
 // ── SHELF1 · THE WIDE LIST ──────────────────────────────────────────────────
 //
@@ -15434,19 +15576,25 @@ function importTropy(txt: string, fileName: string): number {
 }
 
 /** «Promuovi a documento»: the DocumentNode and one reading per selection. */
-function promoteShelfEntry(entry: ShelfEntry): void {
-  if (!store) return;
+function promoteShelfEntry(entry: ShelfEntry, opts: { quiet?: boolean } = {}): string | null {
+  if (!store) return null;
   const st = store;
   const r = promoteToDocument(st, entry);
   updateShelfEntry(entry.id, { extra: { ...(entry.extra ?? {}), promoted_to: r.documentId } });
   const d = String(st.node(r.documentId)?.name ?? r.documentId);
   const msg = t("tropy.promotedMsg", { d, n: String(r.extractors.length) });
   logInfo(msg, [r.documentId, ...r.extractors]);
-  toastUndo(msg, st);
+  if (!opts.quiet) toastUndo(msg, st);
   renderShelf();
   select(r.documentId);
   refreshInspector();
   draw();
+  return r.documentId;
+}
+/** AUDIT N4 · the document a shelf entry already became (still in the graph) */
+function documentOfShelfEntry(entry: ShelfEntry): string | null {
+  const id = (entry.extra as Record<string, unknown> | undefined)?.promoted_to;
+  return typeof id === "string" && store?.node(id) ? id : null;
 }
 
 /** receipt checks, once per entry per session (↻ asks again) */
@@ -15899,14 +16047,24 @@ function openShelfFile(): void {
 /** Send a shelf resource to the Annotator — the gesture that makes the
  *  annotator usable: "select a resource" now has somewhere to select FROM. */
 function annotateShelfEntry(entry: ShelfEntry): void {
-  const win = windowsOf().find((w) => w.type === "annotator");
+  // AUDIT N4 · «Annota» opens THE tracer — the Doc window — on this resource,
+  // in the current space if it has a Doc window, else in Fonti. A resource that
+  // is not a document yet becomes one first (the same «Promote to document»,
+  // one undo step): a reading reads a document.
+  if (!store) { toast(t("menu.noGraph")); return; }
+  const docId = documentOfShelfEntry(entry) ?? promoteShelfEntry(entry, { quiet: true });
+  if (!docId) return;
+  let win = windowsOf().find((w) => w.type === "doc");
   if (!win) {
-    toast(t("shelf.noAnnotator"));
-    return;
+    setWorkspace("provenance");
+    win = windowsOf().find((w) => w.type === "doc");
   }
-  setAnnotatorShelfSource(entry);
+  if (!win) { toast(t("shelf.noAnnotator")); return; }
+  setWinCurrent(win, "doc", docId);
   selectWindow(win.id);
-  toast(t("shelf.sentToAnnotator", { name: entry.name }));
+  renderDocView();
+  refreshDocTools();
+  toast(t("shelf.sentToDoc", { name: entry.name }));
 }
 
 // ── A2 · THE ANNOTATOR · an image, and the claims traced on it ──────────────
@@ -15988,13 +16146,7 @@ let annotatorLoading: string | null = null;
  */
 let annotatorShelfSource: ShelfEntry | null = null;
 
-function setAnnotatorShelfSource(entry: ShelfEntry | null): void {
-  annotatorShelfSource = entry;
-  annotatorImage = null;        // force the picture to be resolved again
-  annotatorDraft = null;
-  renderAnnotator();
-}
-
+// (AUDIT N4 · `setAnnotatorShelfSource` went: Shelf ▸ Annota opens the Doc)
 /** How wide the annotator's picture is on screen, in CSS pixels. What the Image
  *  API is asked for — not the file's own size, which is the point. */
 function srcWidthForAnnotator(): number {
@@ -21345,6 +21497,11 @@ function buildHeaderStrip(win: Win): HTMLElement {
   const strip = document.createElement("span");
   strip.className = "win-strip";
 
+  if (win.type === "doc") {
+    fillDocTools(win, strip);
+    return strip;
+  }
+
   if (win.type === "storage" && winModeOf(win) === "filesystem") {
     // the object-store mode has no folder to walk, so it has no crumb: its own
     // "where am I" is the room, and the room is in the panel's first line
@@ -21691,8 +21848,8 @@ const WINDOW_MENUS: Record<WindowType, WinMenu[]> = {
         const pinned = !!winCurrent(win, "collection");
         return [
           {
-            label: "Segui la selezione",
-            disabled: pinned ? undefined : t("menu.alreadyFollows"),
+            label: "menu.followSelection",
+            disabledReason: () => (pinned ? null : t("menu.alreadyFollows")),
             run: () => {
               setWinCurrent(win, "collection", null);
               setWinCurrent(win, "item", null);
@@ -21750,35 +21907,9 @@ const WINDOW_MENUS: Record<WindowType, WinMenu[]> = {
       ],
     },
   ],
-  // ANNOTATOR · the tools are in the panel and the Mode is in the header; the
-  // only thing left to command is the region being traced.
-  annotator: [
-    {
-      label: "menu.region",
-      items: () => [
-        {
-          label: "menu.cancelRegion",
-          disabled: annotatorDraft ? undefined : t("menu.noRegionInProgress"),
-          run: () => {
-            annotatorDraft = null;
-            const panel = document.getElementById("annotator-panel");
-            if (panel) panel.dataset.open = "";
-            drawAnnotatorOverlay();
-            renderAnnotatorPanel();
-          },
-        },
-        {
-          label: "Chiudi il poligono",
-          disabled:
-            annotatorDraft?.shape_kind === "polygon" &&
-            (annotatorDraft.points?.length ?? 0) >= 3
-              ? undefined
-              : t("menu.polygonNeeds3"),
-          run: () => renderAnnotatorPanel(),
-        },
-      ],
-    },
-  ],
+  // AUDIT N4 · the Annotator is an alias of the Doc window: no menu of its own
+  // (its «Cancel region» / «Close polygon» are Esc and Enter on the Doc's tools)
+  annotator: [],
   doc: [
     {
       label: "Documento",

@@ -565,6 +565,109 @@ test("4.sidecar", "origine timbrata, poi un modello in /modelli apre su «Viene 
   };
 });
 
+// ── PARTE 5 · un solo tracciatore, e la lettura parte dal documento ─────────
+async function openDocImage(p) {
+  await workspace(p, "provenance");
+  await p.locator(".doc-item", { hasText: "D.3" }).first().click();
+  await p.waitForSelector(".rd-img img", { timeout: 8000 });
+  await p.waitForFunction(() => document.querySelector(".rd-img img")?.complete, null, { timeout: 8000 });
+  await p.waitForTimeout(300);
+}
+const docArea = (p) => p.evaluate(() => {
+  const a = document.querySelector(".rd-stage")?.closest(".tile-area")?.getBoundingClientRect();
+  return a && { x: a.x, y: a.y, w: a.width, h: a.height };
+});
+test("5.onebar", "una sola barra di strumenti nella Doc di un'immagine", async () => {
+  const { p, ctx } = await open({ doc: "catena" });
+  await openDocImage(p);
+  const r = await p.evaluate(() => {
+    const area = document.querySelector(".rd-stage").closest(".tile-area");
+    return {
+      bars: area.querySelectorAll(".rd-tools").length,
+      tools: [...area.querySelectorAll(".rd-tools [data-tool]")].map((b) => b.dataset.tool),
+      others: area.querySelectorAll(".rd-3d-tools, .annot-tools-host, .annot-tools").length,
+      modes: [...area.querySelectorAll(".tile-bar button")].map((b) => b.textContent.trim()).filter((x) => /^(View|Annotate|Mask|Guarda|Annota|Maschera)$/.test(x)),
+      annotatorType: window.__EM_DRAG__.wins().some((w) => w.type === "annotator"),
+    };
+  });
+  await ctx.close();
+  return { pass: r.bars === 1 && r.tools.join() === "rect,polygon" && !r.others && !r.modes.length, detail: r };
+});
+test("5.bubble", "tracciare senza proprietà apre il fumetto accanto alla regione; Invio sceglie e nasce la catena", async () => {
+  const { p, ctx } = await open({ doc: "catena" });
+  await openDocImage(p);
+  const before = await p.evaluate(() => ({ x: window.__EM_DRAG__.idsOfType("extractor").length }));
+  await p.click('.rd-tools [data-tool="rect"]');
+  await p.waitForTimeout(200);
+  const img = await p.evaluate(() => { const r = document.querySelector(".rd-img svg").getBoundingClientRect(); return { x: r.x, y: r.y, w: r.width, h: r.height }; });
+  const a = [img.x + img.w * 0.3, img.y + img.h * 0.3], b = [img.x + img.w * 0.5, img.y + img.h * 0.45];
+  await p.mouse.move(a[0], a[1]); await p.mouse.down();
+  await p.mouse.move((a[0] + b[0]) / 2, (a[1] + b[1]) / 2); await p.mouse.move(b[0], b[1]); await p.mouse.up();
+  await p.waitForTimeout(300);
+  const pop = await p.evaluate(() => { const r = document.querySelector(".rd-bubble")?.getBoundingClientRect(); return r && { x: r.x, y: r.y, w: r.width, h: r.height, focus: document.activeElement?.className }; });
+  const area = await docArea(p);
+  await p.keyboard.press("Enter");
+  await p.waitForTimeout(600);
+  const after = await p.evaluate(() => {
+    const xs = window.__EM_DRAG__.idsOfType("extractor");
+    const sel = window.__EM_DRAG__.selected()[0];
+    const info = sel ? window.__EM_DRAG__.nodeInfo(sel) : null;
+    return { x: xs.length, sel, type: info?.type, region: (info?.edges ?? []).some((e) => e.type === "extracted_from"),
+             chain: !!document.querySelector(".insp-chain"), bubble: !!document.querySelector(".rd-bubble") };
+  });
+  await p.evaluate(() => window.__EM_DRAG__.undo());
+  await p.waitForTimeout(300);
+  const undone = await p.evaluate(() => window.__EM_DRAG__.idsOfType("extractor").length);
+  await ctx.close();
+  const inside = pop && area && pop.x >= area.x && pop.y >= area.y && pop.x + pop.w <= area.x + area.w + 1 && pop.y + pop.h <= area.y + area.h + 1;
+  // right under the region, right above it, or beside it — and never over it
+  const overlaps = pop && !(pop.x > b[0] || pop.x + pop.w < a[0] || pop.y > b[1] || pop.y + pop.h < a[1]);
+  const near = pop && !overlaps && Math.min(Math.abs(pop.y - b[1]), Math.abs(pop.y + pop.h - a[1]),
+    Math.abs(pop.x - b[0]), Math.abs(pop.x + pop.w - a[0])) < 40;
+  return { pass: !!pop && inside && near && after.x === before.x + 1 && after.type === "extractor" && after.region && after.chain && !after.bubble && undone === before.x,
+           detail: { pop, area, after, before, undone } };
+});
+test("5.polygon", "un poligono si chiude con Invio", async () => {
+  const { p, ctx } = await open({ doc: "catena" });
+  await openDocImage(p);
+  await p.click('.rd-tools [data-tool="polygon"]');
+  await p.waitForTimeout(200);
+  const img = await p.evaluate(() => { const r = document.querySelector(".rd-img svg").getBoundingClientRect(); return { x: r.x, y: r.y, w: r.width, h: r.height }; });
+  for (const [fx, fy] of [[0.2, 0.2], [0.4, 0.22], [0.42, 0.4], [0.22, 0.42]]) {
+    await p.mouse.click(img.x + img.w * fx, img.y + img.h * fy);
+    await p.waitForTimeout(120);
+  }
+  const vertices = await p.evaluate(() => document.querySelector(".rd-img")?.dataset.vertices);
+  await p.keyboard.press("Enter");
+  await p.waitForTimeout(300);
+  const bubble = await p.evaluate(() => !!document.querySelector(".rd-bubble"));
+  await p.keyboard.press("Escape");
+  await p.waitForTimeout(200);
+  const gone = await p.evaluate(() => !document.querySelector(".rd-bubble"));
+  await ctx.close();
+  return { pass: vertices === "4" && bubble && gone, detail: { vertices, bubble, gone } };
+});
+
+test("5.shelf", "Shelf ▸ Annota apre la finestra Doc con quella risorsa, senza Annotatore nel layout", async () => {
+  const shelf = { id: "shelf", name: "Shelf", entries: [{ id: "sh1", name: "prospetto.jpg", kind: "image",
+    locator: `http://localhost:${PORT}/em/studio/testdata/catena-prospetto.jpg`, scope: "own-study", residency: "reference" }] };
+  const { p, ctx } = await open({ doc: "catena", init: { "emstudio.shelf": JSON.stringify(shelf) } });
+  await workspace(p, "assets");
+  const btn = p.locator(".shelf-row button", { hasText: /Annota|Annotate/ }).first();
+  await btn.waitFor({ timeout: 8000 });
+  await btn.click();
+  await p.waitForTimeout(900);
+  const r = await p.evaluate(() => {
+    const doc = document.querySelector(".rd-stage");
+    return { ws: document.querySelector("#workspace-bar .ws-tab.active")?.dataset.ws, doc: doc?.dataset.doc ?? null,
+             img: !!document.querySelector(".rd-img img"), tools: !!document.querySelector(".rd-tools"),
+             annotator: window.__EM_DRAG__.wins().some((w) => w.type === "annotator") };
+  });
+  const name = r.doc ? await p.evaluate((id) => window.__EM_DRAG__.nodeInfo(id)?.name, r.doc) : null;
+  await ctx.close();
+  return { pass: !!r.doc && r.img && r.tools && !r.annotator, detail: { ...r, name } };
+});
+
 // ── run ─────────────────────────────────────────────────────────────────────
 const chosen = cases.filter((c) => !only.length || only.includes(c.id) || only.some((o) => c.id.startsWith(o + ".")));
 for (const c of chosen) {

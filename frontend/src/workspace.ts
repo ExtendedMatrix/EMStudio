@@ -355,10 +355,11 @@ export const PARKED_WORKSPACES: WorkspacePreset[] = [
   // to pick the next one from, and the Inspector for what a region became.
   {
     id: "annotator", labelKey: "ws.annotator", hintKey: "ws.annotatorHint",
-    icon: "✎", windowType: "annotator", builtin: true,
+    icon: "✎", windowType: "doc", builtin: true,
     arrangement: {
       wins: [
-        { name: "annotator", type: "annotator" },
+        // AUDIT N4 · the Annotator is the Doc window (one tracer)
+        { name: "annotator", type: "doc" },
         { name: "viewer", type: "viewer" },
         { name: "inspector", type: "inspector" },
       ],
@@ -381,7 +382,14 @@ function loadCustom(): WorkspacePreset[] {
       (w) =>
         w && typeof w.id === "string" &&
         ![...BUILTIN_WORKSPACES, ...PARKED_WORKSPACES].some((b) => b.id === w.id),
-    );
+    ).map((w) => ({
+      // AUDIT N4 · an Annotator in a user's arrangement is a Doc window now
+      ...w,
+      windowType: w.windowType === "annotator" ? "doc" : w.windowType,
+      arrangement: w.arrangement && Array.isArray(w.arrangement.wins)
+        ? { ...w.arrangement, wins: w.arrangement.wins.map((x) => x.type === "annotator" ? { ...x, type: "doc" as WindowType } : x) }
+        : w.arrangement,
+    }));
   } catch {
     return [];
   }
@@ -612,6 +620,13 @@ function seedRegistry(): Registry {
  */
 export function migrateWin(w: Win): Win {
   const state = { ...(w.state ?? {}) };
+  // AUDIT N4 · ONE TRACER: the Annotator is the Doc window now. The type stays
+  // as an ALIAS, so a saved arrangement with an Annotator opens a Doc in its
+  // place (its View/Annotate mode had no meaning in the Doc and is dropped).
+  if (w.type === "annotator") {
+    delete state["mode.annotator"];
+    return { ...w, type: "doc", state };
+  }
   if (w.type === "emtree" && state["current.panel"] === "nodelist") {
     delete state["current.panel"];
     return { ...w, type: "outliner", state };
