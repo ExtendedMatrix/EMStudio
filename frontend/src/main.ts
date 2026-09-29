@@ -8620,6 +8620,15 @@ setAiKeySave.addEventListener("click", async () => {
     ? "Key salvata nel portachiavi — bridge riavviato"
     : t("ai.sessionKeySet"));
   await refreshAiKeyState();
+  // an AI action was waiting for exactly this: keep the provider and model the
+  // form shows, close, and let it run
+  if (aiPending) {
+    saveSettings({ ...getSettings(), ai: {
+      provider: setAiProvider.value || "claude", model: setAiModel.value.trim() } });
+    const resume = aiPending;
+    closeSettings();
+    void resumeAiPending(resume);
+  }
 });
 
 setAiKeyClear.addEventListener("click", async () => {
@@ -9465,6 +9474,11 @@ function revealBlock(target: HTMLElement | null): void {
 }
 function closeSettings(): void {
   settingsModal.classList.add("hidden");
+  // an AI action that was waiting is dropped with the panel (saving takes it
+  // out first, `resumeAiPending`)
+  aiPending = null;
+  const why = document.getElementById("set-ai-why");
+  if (why) why.hidden = true;
 }
 for (const el of [setProtoSel, setHostInp, setPortInp])
   el.addEventListener("input", refreshSyncUrlPreview);
@@ -9607,7 +9621,9 @@ settingsModal.addEventListener("click", (e) => {
     },
   };
   saveSettings(next);
+  const resume = aiPending;
   closeSettings();
+  void resumeAiPending(resume);
   refreshInspector(); // reflect the UUID-visibility toggle immediately
   // A narrative on screen may hold 3D blocks that were waiting for exactly this.
   refreshNarrativeView();
@@ -11795,6 +11811,37 @@ function markChapterGenerating(chapterIndex: number, title: string): void {
  * reason the frontend can be served from anywhere without becoming a place
  * where a credential could leak.
  */
+/**
+ * NARRATIVE-DESK · can the AI answer? A provider that needs no key (the local
+ * `echo`) always can; any other needs the key em-bridge (or the keychain)
+ * holds — asked, never read (`readAiKeyState`).
+ */
+async function aiConfigured(): Promise<boolean> {
+  if (getSettings().ai.provider === "echo") return true;
+  return (await readAiKeyState()).set;
+}
+
+/** The AI action waiting for its configuration, run once it is saved. */
+let aiPending: (() => void) | null = null;
+
+/** Open the AI preferences directly, with the line that says why, and keep the
+ *  action that asked: `resumeAiPending` runs it when the key or the settings
+ *  are saved. Closing the panel without saving drops it. */
+function askForAiThen(run: () => void): void {
+  openSettings("settings-sect-ai");
+  aiPending = run;
+  const why = document.getElementById("set-ai-why");
+  if (why) {
+    why.textContent = t("ai.needProvider");
+    why.hidden = false;
+  }
+}
+
+async function resumeAiPending(run: (() => void) | null): Promise<void> {
+  if (!run || !(await aiConfigured())) return;
+  run();
+}
+
 async function generateChapterDraft(narrativeId: string,
                                     chapterIndex: number): Promise<void> {
   if (!store || generating.has(chapterIndex)) return;
@@ -11806,6 +11853,13 @@ async function generateChapterDraft(narrativeId: string,
   const activityId = chapter?.anchor;
   if (!activityId) {
     toast(t("toast.chapterUnanchored"));
+    return;
+  }
+  // NARRATIVE-DESK · the AI is asked for only once it can answer: an
+  // unconfigured one sends you straight to its preferences, and the draft
+  // resumes by itself once they are saved — no menu, no error after trying.
+  if (!(await aiConfigured())) {
+    askForAiThen(() => void generateChapterDraft(narrativeId, chapterIndex));
     return;
   }
   const ai = getSettings().ai;

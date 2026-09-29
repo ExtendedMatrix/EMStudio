@@ -8321,3 +8321,5 @@ body.gesturing-resize * {
 /* the story's find, at the head of the Index's chapters */
 .nidx-search { width: 100%; box-sizing: border-box; margin: 4px 0 6px; font: inherit; font-size: 12px; padding: 4px 8px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg); color: var(--text); }
 .nidx-nohit { margin: 4px 6px; font-style: italic; }
+/* NARRATIVE-DESK · why the AI preferences opened by themselves */
+.settings-why { margin: 4px 0 8px; padding: 6px 10px; border-left: 3px solid var(--accent); background: var(--accent-wash, rgba(191,144,0,.12)); color: var(--text); font-size: 12.5px; }
