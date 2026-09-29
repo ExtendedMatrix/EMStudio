@@ -3408,7 +3408,15 @@ def make_handler(api):
             except Exception:
                 excluded = 0
             self.send_header("X-EM-Excluded", str(excluded))
-            self.send_header("Access-Control-Expose-Headers", "X-EM-Bib, X-EM-Excluded")
+            # CATENA · the NODES the bake left out (baked.excluded_nodes: the
+            # rows of api.unvalidated_ai), 0 when forced in
+            try:
+                excluded_nodes = 0 if force else len(api.unvalidated_ai(graph))
+            except Exception:
+                excluded_nodes = 0
+            self.send_header("X-EM-Excluded-Nodes", str(excluded_nodes))
+            self.send_header("Access-Control-Expose-Headers",
+                             "X-EM-Bib, X-EM-Excluded, X-EM-Excluded-Nodes")
             self.send_header("Content-Length", str(len(payload)))
             self.end_headers()
             self.wfile.write(payload)

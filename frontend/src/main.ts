@@ -717,6 +717,8 @@ const logDrawer = {
 };
 
 let connect: ConnectDrag | null = null;
+/** CATENA · the AI chips of the canvas, read once per change (see `aiMarks`) */
+let aiMarksCache: Map<string, "pending" | "verified"> | null = null;
 /** graph-view "liquid" filters: hidden node / edge types */
 // hidden type sets are DERIVED from the visible circles of the CURRENT view
 // (recomputeHiddenFromCircles); they are what buildScenes applies.
@@ -1689,6 +1691,7 @@ function paintGraphWindow(p: GraphPaint): void {
       warnIds: warnedNodes, // STRUTTURA · the «!» on a node with a warning
       // COLLEGARE · the Matrix follows the chapter the story is on
       ...storyMarks(),
+      aiNodes: aiMarks(),
       peerSelections: hubPeerSelections,   // P4.3 · awareness, never a lock
       highlightEdgeType: p.highlightEdgeType ?? null,
     },
@@ -2120,7 +2123,11 @@ function renderInspectorInto(host: HTMLElement): void {
     },
     selectedEdge,
   );
-  if (selectedId) renderChainSection(host, chainUi(owning), selectedId); // CATENA
+  if (selectedId) {
+    renderChainSection(host, chainUi(owning), selectedId); // CATENA
+    const chip = aiChipFor(selectedId);
+    if (chip) host.querySelector(".insp-head .insp-chip")?.after(chip);
+  }
   renderInspectorIssues(host);
   renderNodeHistory(host);
   citeSectionFor(host); // COLLEGARE · «Cita in «capitolo»», with the story open
@@ -2169,6 +2176,19 @@ function renderInspectorIssues(host: HTMLElement): void {
       row.appendChild(b);
     }
     sec.appendChild(row);
+  }
+  // CATENA · «Verifica» in bulk from here: every AI datum of this node (and of
+  // its paradata chain), or of the whole selection when several are selected
+  const aiIds = [...new Set(mine.filter((i) => i.rule === "ai" && i.bulk).map((i) => i.node))];
+  const selAi = selectedIds.size > 1
+    ? [...selectedIds].filter((id) => store && aiv.isUnvalidatedAi(store.doc, id)) : [];
+  if (aiIds.length > 1 || selAi.length > 1) {
+    const ids = selAi.length > 1 ? selAi : aiIds;
+    const b = document.createElement("button");
+    b.className = "tv-act insp-ai-all";
+    b.textContent = t(selAi.length > 1 ? "ai.verifySelection" : "ai.verifyAll", { n: String(ids.length) });
+    b.addEventListener("click", () => verifyAiNodes(ids));
+    sec.appendChild(b);
   }
   const open = document.createElement("button");
   open.className = "tv-link insp-issues-open";
@@ -3398,6 +3418,7 @@ function wireStore(s: DocumentStore): void {
     // next frame: three writes in a gesture are one rebuild, not three
     perfCount("onChange");
     scenesDirty = true;
+    aiMarksCache = null; // CATENA · the AI chips are read again on the next draw
     if (changeQueued) return;
     changeQueued = true;
     requestAnimationFrame(() => perfTime("onChangeFlush", flushChange));
@@ -8428,6 +8449,9 @@ async function exportNarrative(format: string, opts: { force?: boolean } = {}): 
     }
     // LaTeX comes with its bibliography: a .bib the author has to fetch
     // separately is a .bib the author forgets to fetch.
+    // CATENA · what the bake left out, as the bridge counted it (baked.excluded_nodes)
+    const exNodes = Number(res.headers.get("X-EM-Excluded-Nodes") ?? "0");
+    if (exNodes) logInfo(t("ai.exportExcluded", { n: String(exNodes) }));
     const bib = res.headers.get("X-EM-Bib");
     if (bib) {
       const text = decodeURIComponent(escape(atob(bib)));
@@ -10681,6 +10705,9 @@ function refreshIssues(): void {
       allowedEdgeTypes(st, dt).map(canonicalEdgeType).includes(canonicalEdgeType(et)),
     names: nameStatus,
     sourceHints: chain.extractionSourceHints(s.doc, isStratigraphicType),
+    aiNodes: aiv.unvalidatedAi(s.doc),
+    verifyAi: { label: t("ai.verify"), bulkLabel: (n) => t("ai.verifyAll", { n: String(n) }),
+                run: (ids) => verifyAiNodes(ids) },
     t: (k, v) => t(k, v),
   });
   issueUnitOf = unitOfIssue(s.doc, isStratigraphicType, nodes);
@@ -12385,6 +12412,19 @@ function setNarrativeSelection(narrativeId: string, sel: NarrativeSelection): vo
  * owners of a cited property — is marked. Read from the story window's current
  * chapter every paint; nothing is stored.
  */
+/** CATENA · node → its AI state, for the chips on the canvas; computed once per
+ *  change of the document (a draw per frame must not walk the edges per node). */
+function aiMarks(): Map<string, "pending" | "verified"> | null {
+  if (!store) return null;
+  if (aiMarksCache) return aiMarksCache;
+  const m = new Map<string, "pending" | "verified">();
+  for (const r of aiv.unvalidatedAi(store.doc)) m.set(r.node, "pending");
+  for (const n of store.liveNodes())
+    if (!m.has(n.id) && aiv.aiState(store.doc, n.id) === "verified") m.set(n.id, "verified");
+  aiMarksCache = m;
+  return m;
+}
+
 function storyMarks(): { storyLane: string | null; storyCited: Set<string> | null } {
   if (!store || !narrativeOpen()) return { storyLane: null, storyCited: null };
   const story = windowsOf().find((w) => w.type === "narrative");
@@ -12607,8 +12647,18 @@ function verifyBlock(narrativeId: string, c: number, b: number): void {
 function verifyChapter(narrativeId: string, c: number): void {
   if (!store || !requireIdentity()) return;
   try {
-    const n = nauth.verifyChapterAs(store, narrativeId, c, identityForSigning());
-    toast(t("ninsp.verifiedN", { n: String(n) }));
+    const st = store;
+    let n: number | "needs-identity" = 0;
+    let nodes = 0;
+    // CATENA · the chapter's AI NODES too (the ones it cites), in the same step
+    st.batch(() => {
+      n = nauth.verifyChapterAs(st, narrativeId, c, identityForSigning());
+      const cited = [...chapterCitedIds(st.doc, narrativeId, c)].filter((id) => aiv.isUnvalidatedAi(st.doc, id));
+      const r = aiv.verifyNodesAs(st, cited, identityForSigning());
+      if (r !== "needs-identity") nodes = r.verified.length;
+    });
+    toast(t("ninsp.verifiedN", { n: String(n) }) + (nodes ? ` · ${t("ai.verifiedN", { n: String(nodes) })}` : ""));
+    if (nodes) refreshIssues();
   } catch (e) {
     toast(e instanceof Error ? e.message : String(e));
   }
@@ -13194,9 +13244,12 @@ function openPublishMenu(anchor: HTMLElement): void {
   }
   const narr = activeNarrative();
   const n = narr ? unvalidatedForExport(narr.chapters as ProjChapter[]).length : 0;
+  const nn = exportedAiNodes().length; // CATENA · the AI nodes the bake leaves out
   const note = document.createElement("p");
   note.className = "nv-pub-note";
-  note.textContent = n ? `▲ ${t("nv.pub.leftOut", { n: String(n) })}` : t("nv.pub.allValidated");
+  note.textContent = n || nn
+    ? `▲ ${[n ? t("nv.pub.leftOut", { n: String(n) }) : "", nn ? t("ai.pub.leftOut", { n: String(nn) }) : ""].filter(Boolean).join(" · ")}`
+    : t("nv.pub.allValidated");
   menu.appendChild(note);
   document.body.appendChild(menu);
   const off = (e: PointerEvent): void => {
@@ -13226,6 +13279,13 @@ function copyReaderLink(): void {
 }
 
 /** Before the file: the paragraphs that stay out, and the explicit choice. */
+/** CATENA · the AI nodes a published export leaves out: the LIBRARY's rule
+ *  (`data.ai_assisted` without `validated_by`, `ai_validation.export_view`) —
+ *  what the bridge will actually drop, not the wider warning list. */
+function exportedAiNodes(): aiv.UnvalidatedRow[] {
+  return store ? aiv.unvalidatedAi(store.doc).filter((r) => r.via === "marker") : [];
+}
+
 function exportWithCheck(format: string): void {
   const narr = activeNarrative();
   if (!store || !narr) {
@@ -13233,7 +13293,8 @@ function exportWithCheck(format: string): void {
     return;
   }
   const out = unvalidatedForExport(narr.chapters as ProjChapter[]);
-  if (!out.length) {
+  const nodesOut = exportedAiNodes();
+  if (!out.length && !nodesOut.length) {
     void exportNarrative(format);
     return;
   }
@@ -13244,7 +13305,7 @@ function exportWithCheck(format: string): void {
   card.className = "modal-card";
   const head = document.createElement("div");
   head.className = "modal-head";
-  head.textContent = t("nv.unval.title", { n: String(out.length) });
+  head.textContent = t("nv.unval.title", { n: String(out.length + nodesOut.length) });
   const body = document.createElement("div");
   body.className = "modal-body";
   body.appendChild(Object.assign(document.createElement("p"), { textContent: t("nv.unval.lead") }));
@@ -13273,7 +13334,25 @@ function exportWithCheck(format: string): void {
     });
     ul.appendChild(li);
   }
-  body.appendChild(ul);
+  if (out.length) body.appendChild(ul);
+  // CATENA · the NODES made with AI that nobody verified: out of the bake (an
+  // embed of one dropped, a mention unresolved), forced = «⚠︎» on their fields
+  if (nodesOut.length) {
+    body.appendChild(Object.assign(document.createElement("p"), { textContent: t("ai.unval.nodes", { n: String(nodesOut.length) }) }));
+    const ul2 = document.createElement("ul");
+    ul2.className = "nv-unval-list";
+    const li = document.createElement("li");
+    nodesOut.forEach((r, i) => {
+      if (i) li.appendChild(document.createTextNode(", "));
+      const a = document.createElement("button");
+      a.className = "link";
+      a.textContent = r.name || r.node;
+      a.addEventListener("click", () => { close(); select(r.node); centerOn(r.node); refreshInspector(); draw(); });
+      li.appendChild(a);
+    });
+    ul2.appendChild(li);
+    body.appendChild(ul2);
+  }
   const foot = document.createElement("div");
   foot.className = "modal-foot";
   const cancel = Object.assign(document.createElement("button"), { textContent: t("doc.cancel") });
@@ -13282,7 +13361,7 @@ function exportWithCheck(format: string): void {
   force.dataset.act = "force";
   force.addEventListener("click", () => { close(); void exportNarrative(format, { force: true }); });
   const without = Object.assign(document.createElement("button"), {
-    className: "primary", textContent: t("nv.unval.without", { n: String(out.length) }) });
+    className: "primary", textContent: t("nv.unval.without", { n: String(out.length + nodesOut.length) }) });
   without.dataset.act = "without";
   without.addEventListener("click", () => { close(); void exportNarrative(format); });
   foot.append(cancel, force, without);
@@ -23089,6 +23168,7 @@ initEmData({
   getStore: () => store,
   getCtx: tableCtx,
   runIssueAction: (id) => allIssues().find((i) => i.id === id)?.action?.run(),
+  runIssueBulk: (key, nodes) => allIssues().find((i) => i.bulk?.key === key)?.bulk?.run(nodes),
   // CURRENT-ELEMENT · the row lives on the window, not in the table module
   currentRow: () => currentRowId(),
   // ROWSELECT · picking a row selects its NODE, and shows it if a graph window

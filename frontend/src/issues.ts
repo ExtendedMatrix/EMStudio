@@ -33,6 +33,9 @@ export interface Issue {
   txt: string;
   /** a one-click fix, when there is one (e.g. «sort lanes by date») */
   action?: { label: string; run: () => void };
+  /** CATENA · the same fix for MANY rows at once (the table's «Verifica tutti»):
+   *  rows with the same `key` are fixed together, with the nodes they are about */
+  bulk?: { key: string; label: (n: number) => string; run: (nodes: string[]) => void };
 }
 
 export interface IssueSources {
@@ -58,6 +61,10 @@ export interface IssueSources {
    *  `diagnostics.extraction_source_hints`: an extractor that reads a unit
    *  without a property of the name it feeds. A SUGGESTION, never a warning. */
   sourceHints?: Array<{ extractor: string; extractor_name: string; unit_name: string; property_name: string }>;
+  /** CATENA · the AI nodes nobody verified (`ai-validation.unvalidatedAi`),
+   *  and the verification that clears them */
+  aiNodes?: Array<{ node: string; name: string; via: "marker" | "has_author"; fields: string[] | null }>;
+  verifyAi?: { label: string; bulkLabel: (n: number) => string; run: (nodes: string[]) => void };
   /** i18n for the hint texts */
   t: (key: string, vars?: Record<string, string>) => string;
 }
@@ -134,6 +141,16 @@ export function issues(src: IssueSources): Issue[] {
   for (const h of src.sourceHints ?? [])
     push({ node: h.extractor, sev: "info", rule: "paradata",
            txt: t("issues.sourceHint", { x: h.extractor_name, u: h.unit_name, p: h.property_name }) });
+
+  // ── CATENA · a node made with AI support (or by an AI author) that no person
+  //    verified: a warning, until somebody verifies it with their identity ──
+  for (const a of src.aiNodes ?? []) {
+    const v = src.verifyAi;
+    push({ node: a.node, sev: "warn", rule: "ai",
+           txt: t(a.via === "has_author" ? "issues.aiAuthor" : "issues.aiNode", { n: a.name || a.node }),
+           ...(v ? { action: { label: v.label, run: () => v.run([a.node]) },
+                     bulk: { key: "ai", label: v.bulkLabel, run: v.run } } : {}) });
+  }
 
   // ── COLLEGARE · the story: an AI paragraph no person validated is a warning
   //    (rule `ai`, as for a node), until somebody signs it. One per chapter.

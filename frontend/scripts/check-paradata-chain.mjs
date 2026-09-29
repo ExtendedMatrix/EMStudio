@@ -30,6 +30,8 @@ const bundle = await esbuild.build({
       export * as naming from "./naming";
       export { isStratigraphicType, allowedEdgeTypes } from "./rules";
       export { handleEdgeTypes, existingLinks } from "./add-menu";
+      export * as aiv from "./ai-validation";
+      export { issues } from "./issues";
     `,
     resolveDir: SRC,
     loader: "ts",
@@ -50,7 +52,20 @@ const bundle = await esbuild.build({
 const M = await import(
   "data:text/javascript;base64," + Buffer.from(bundle.outputFiles[0].text).toString("base64")
 );
-const { chain, DocumentStore, naming, isStratigraphicType, handleEdgeTypes, existingLinks } = M;
+const { chain, DocumentStore, naming, isStratigraphicType, handleEdgeTypes, existingLinks, aiv, issues } = M;
+const S3D = new URL("../../../s3Dgraphy/", import.meta.url).pathname;
+const PY = `${S3D}.venv/bin/python`;
+/** ask s3Dgraphy (when its venv is there) a question about a document */
+function py(doc, expr) {
+  if (!existsSync(PY)) return undefined;
+  const script = `
+import json,sys
+from s3dgraphy import api
+g, w = api.load_emjson(json.loads(sys.stdin.read()))
+print(json.dumps(${expr}))`;
+  return JSON.parse(execFileSync(PY, ["-c", script], { input: JSON.stringify(doc),
+    env: { ...process.env, PYTHONPATH: `${S3D}src` } }).toString().trim().split("\n").pop());
+}
 
 let checks = 0;
 const ok = (cond, what) => { assert.ok(cond, what); checks++; };
@@ -166,8 +181,6 @@ const undoDepth = (st) => st.undoStack?.length ?? (st.canUndo ? 1 : 0);
 
 // ── the same hint s3Dgraphy computes (api.validate → info), when it is installed ─
 {
-  const S3D = new URL("../../../s3Dgraphy/", import.meta.url).pathname;
-  const PY = `${S3D}.venv/bin/python`;
   if (HINT_DOC && existsSync(PY)) {
     const script = `
 import json,sys
@@ -233,6 +246,44 @@ print(json.dumps(api.validate(g)["info"]))`;
   const down = existingLinks(st.doc, "USV106").filter((l) => l.dir === "out");
   ok(down.every((l) => handleEdgeTypes("USVs", l.nodeType, "down").includes(l.edgeType) || l.relation === "below"),
      "the void menu's «Esistenti» (down) are links X → existing");
+}
+
+// ── fase 5 · an AI proposal stays among the warnings until a person verifies ─
+{
+  const st = fresh();
+  const r = chain.addReading(st, "P_MAT", { kind: "document", id: "D1" });
+  const x = r.extractorId;
+  st.batch(() => {
+    chain.setReadingGeometry(st, x, "D1", { kind: "passage", start: 0, end: 10, text: st.node("D1").data.text.slice(0, 10) });
+    const by = aiv.aiAuthorFor(st, "echo", "echo-1");
+    aiv.markAiAssisted(st, x, { by, model: "echo-1", fields: ["data.geometry"] });
+  });
+  eq(N(st, st.node(x).data.ai_assisted.by).node_type, "author_ai", "ai_assisted.by names an AuthorAINode");
+  const warn = () => issues({ doc: st.doc, nodes: st.doc.graph.nodes, isUnit: isStratigraphicType,
+    aiNodes: aiv.unvalidatedAi(st.doc), t: (k) => k }).filter((i) => i.rule === "ai" && i.node === x);
+  eq(warn().map((i) => i.sev), ["warn"], "the AI reading is a warning (rule ai)");
+  const libRows = py(st.doc, "[r['node'] for r in api.unvalidated_ai(g)]");
+  if (libRows) eq(libRows, [x], "s3Dgraphy's api.unvalidated_ai lists the same node");
+  eq(aiv.verifyNodesAs(st, [x], null), "needs-identity", "Verify without an identity writes nothing");
+  ok(!st.node(x).data.validated_by, "…validated_by stays absent");
+  const ME = { orcid: "0000-0002-1825-0097", label: "Emanuel Demetrescu", verified: true };
+  const before = undoDepth(st);
+  eq(aiv.verifyNodesAs(st, [x], ME, "2026-10-05T01:00:00Z").verified, [x], "Verify with the identity");
+  const v = st.node(x).data;
+  eq([N(st, v.validated_by).node_type, N(st, v.validated_by).data.orcid, v.validated_at],
+     ["author", ME.orcid, "2026-10-05T01:00:00Z"], "validated_by = the person's AuthorNode (ORCID), validated_at");
+  eq(undoDepth(st) - before, 1, "…one undo step (the author and the signature)");
+  eq(warn(), [], "…and it leaves the warnings");
+  const after = py(st.doc, "[r['node'] for r in api.unvalidated_ai(g)]");
+  if (after) eq(after, [], "s3Dgraphy agrees: nothing left to verify");
+  eq(aiv.verifyNodesAs(st, ["USM101"], ME).verified, [], "a human node is not «verified» (nothing to verify)");
+  // E.D.'s rule: an extractor authored by an AuthorAINode (StratiMiner) is AI data too
+  const ai = aiv.aiAuthorFor(st, "claude", "sm");
+  st.addEdge("X1", ai, "has_author");
+  eq(aiv.unvalidatedAi(st.doc).map((r2) => [r2.node, r2.via]), [["X1", "has_author"]],
+     "a StratiMiner extractor (has_author → AuthorAINode) stays among the warnings");
+  aiv.verifyNodesAs(st, ["X1"], ME);
+  eq(aiv.unvalidatedAi(st.doc), [], "…until a person verifies it");
 }
 
 console.log(`paradata-chain: ${checks} checks ✓`);

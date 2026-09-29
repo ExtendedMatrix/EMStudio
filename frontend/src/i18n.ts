@@ -1811,6 +1811,13 @@ const EN: Dict = {
   "handle.menuUp": "↑ Above {name}",
   "handle.menuDown": "↓ Below {name}",
   "handle.shown": "Drag the handle: up for the nodes above, down for the nodes below",
+  "issues.aiNode": "{n}: made with AI support, not verified by a person",
+  "issues.aiAuthor": "{n}: written by an AI author (StratiMiner), not verified by a person",
+  "ai.verifyAll": "Verify all ({n})",
+  "ai.verifySelection": "Verify the selection ({n})",
+  "ai.pub.leftOut": "{n} AI nodes not verified, left out",
+  "ai.unval.nodes": "{n} nodes made with AI that nobody verified: they are left out (a forced export keeps them, with «⚠︎»):",
+  "ai.exportExcluded": "The export left out {n} AI nodes nobody verified",
 };
 
 // ── Italiano: complete, because E.D. works in it ───────────────────────────────
@@ -3495,6 +3502,13 @@ const IT: Dict = {
   "handle.menuUp": "↑ Sopra {name}",
   "handle.menuDown": "↓ Sotto {name}",
   "handle.shown": "Trascina la maniglia: su per i nodi sopra, giù per quelli sotto",
+  "issues.aiNode": "{n}: fatto con supporto AI, non verificato da una persona",
+  "issues.aiAuthor": "{n}: scritto da un autore AI (StratiMiner), non verificato da una persona",
+  "ai.verifyAll": "Verifica tutti ({n})",
+  "ai.verifySelection": "Verifica la selezione ({n})",
+  "ai.pub.leftOut": "{n} nodi AI non verificati, esclusi",
+  "ai.unval.nodes": "{n} nodi fatti con AI che nessuno ha verificato: restano fuori (un export forzato li tiene, con «⚠︎»):",
+  "ai.exportExcluded": "L’export ha lasciato fuori {n} nodi AI non verificati",
 };
 
 // ── The six other project languages: AI DRAFTS, awaiting validation ───────────
@@ -4595,6 +4609,13 @@ const DE: Dict = {
   "handle.menuUp": "↑ Über {name}",
   "handle.menuDown": "↓ Unter {name}",
   "handle.shown": "Den Griff ziehen: nach oben für die Knoten darüber, nach unten für die darunter",
+  "issues.aiNode": "{n}: mit KI-Unterstützung erstellt, von keiner Person geprüft",
+  "issues.aiAuthor": "{n}: von einem KI-Autor geschrieben (StratiMiner), von keiner Person geprüft",
+  "ai.verifyAll": "Alle prüfen ({n})",
+  "ai.verifySelection": "Auswahl prüfen ({n})",
+  "ai.pub.leftOut": "{n} ungeprüfte KI-Knoten, ausgelassen",
+  "ai.unval.nodes": "{n} mit KI erstellte Knoten, die niemand geprüft hat: sie bleiben draußen (ein erzwungener Export behält sie, mit «⚠︎»):",
+  "ai.exportExcluded": "Der Export hat {n} ungeprüfte KI-Knoten ausgelassen",
 };
 
 const DICTS: Record<Locale, Dict> = {

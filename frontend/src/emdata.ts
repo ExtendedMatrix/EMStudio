@@ -78,6 +78,7 @@ let setCurrentRow: (id: string | null) => void = () => {};
 let onRowPicked: (id: string) => void = () => {};
 /** a warning's one-click fix, run from the Warnings view */
 let runIssueAction: (issueId: string) => void = () => {};
+let runIssueBulk: (key: string, nodes: string[]) => void = () => {};
 
 /**
  * WIN5 · where a table is drawn. One renderer, many mounts.
@@ -205,6 +206,8 @@ export function initEmData(opts: {
   setCurrentRow?: (id: string | null) => void;
   onRowPicked?: (id: string) => void;
   runIssueAction?: (issueId: string) => void;
+  /** CATENA · the bulk fix of the rows on screen */
+  runIssueBulk?: (key: string, nodes: string[]) => void;
 }): void {
   getStore = opts.getStore;
   if (opts.getCtx) getCtx = opts.getCtx;
@@ -212,6 +215,7 @@ export function initEmData(opts: {
   if (opts.setCurrentRow) setCurrentRow = opts.setCurrentRow;
   if (opts.onRowPicked) onRowPicked = opts.onRowPicked;
   if (opts.runIssueAction) runIssueAction = opts.runIssueAction;
+  if (opts.runIssueBulk) runIssueBulk = opts.runIssueBulk;
   // MICRO-cronologia · an answer from the bridge redraws the tables
   onChronologyUpdate(() => renderEmData());
   try {
@@ -608,7 +612,15 @@ function docCardsHtml(cs: ReturnType<typeof docCards>): string {
 function issuesTableHtml(rows: ViewCtx["issues"], ctx: ViewCtx, ix: ReturnType<typeof indexOf>): string {
   void ctx;
   const ico = (s: string): string => (s === "warn" ? "▲" : "●");
-  return `<div class="tv-pad"><p class="tv-lead">${escapeHtml(t("issues.lead"))}</p>` +
+  // CATENA · «Verifica tutti» over the rows ON SCREEN (the filters decide which)
+  const bulkRows = rows.filter((i) => i.bulk && i.node);
+  const bulkKeys = [...new Set(bulkRows.map((i) => i.bulk!.key))];
+  const bulkBtns = bulkKeys.map((k) => {
+    const rs = bulkRows.filter((i) => i.bulk!.key === k);
+    const nodes = [...new Set(rs.map((i) => i.node))].join(" ");
+    return rs.length > 1 ? `<button class="tv-act" type="button" data-issue-bulk="${escapeAttr(k)}" data-nodes="${escapeAttr(nodes)}">${escapeHtml(rs[0].bulk!.label(rs.length))}</button>` : "";
+  }).join(" ");
+  return `<div class="tv-pad"><p class="tv-lead">${escapeHtml(t("issues.lead"))} ${bulkBtns}</p>` +
     `<table class="emdata-table tv-table"><thead><tr><th>${escapeHtml(t("table.fx.sev"))}</th>` +
     `<th>${escapeHtml(t("table.fx.rule"))}</th><th>${escapeHtml(t("table.col.node"))}</th>` +
     `<th>${escapeHtml(t("table.col.msg"))}</th><th></th></tr></thead><tbody>` +
@@ -661,6 +673,11 @@ function wireBody(host: EmDataHost, store: DocumentStore, st: TableState): void 
     }));
   body.querySelectorAll<HTMLButtonElement>("[data-issue-act]").forEach((b) =>
     b.addEventListener("click", (e) => { e.stopPropagation(); runIssueAction(b.dataset.issueAct!); }));
+  body.querySelectorAll<HTMLButtonElement>("[data-issue-bulk]").forEach((b) =>
+    b.addEventListener("click", (e) => {
+      e.stopPropagation();
+      runIssueBulk(b.dataset.issueBulk!, (b.dataset.nodes ?? "").split(" ").filter(Boolean));
+    }));
 
   // the editable sheets: cell editors, row selection, delete
   const sheet = st.sheet as SheetKey;

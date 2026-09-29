@@ -97,6 +97,9 @@ export interface RenderState {
    *  of a cited property) carry a mark. Chrome, never the node's own style. */
   storyLane?: string | null;
   storyCited?: Set<string> | null;
+  /** CATENA · the AI chip of a node: dashed «AI» until a person verifies it,
+   *  solid «AI ✓» after (data.ai_assisted / validated_by, connections 1.6.25) */
+  aiNodes?: Map<string, "pending" | "verified"> | null;
   /** LEGENDA · the edge type picked in this window's legend: drawn on top at
    *  full strength, the others faded. Per window, never in the document. */
   highlightEdgeType?: string | null;
@@ -1204,6 +1207,37 @@ export function render(
     for (const n of scene.nodes) {
       if (!state.storyCited.has(n.instanceOf ?? n.id)) continue;
       ctx.strokeRect(n.x - pad, n.y - pad, n.w + pad * 2, n.h + pad * 2);
+    }
+    ctx.restore();
+  }
+
+  if (state.aiNodes?.size) {
+    ctx.save();
+    const css = getComputedStyle(document.documentElement);
+    const ink = css.getPropertyValue("--ai-ink").trim() || "#7a4fc4";
+    const panel = css.getPropertyValue("--bg-panel").trim() || "#fff";
+    const h = 13 / Math.sqrt(vp.scale);
+    ctx.font = canvasFont(700, h * 0.7);
+    ctx.textBaseline = "middle";
+    for (const n of scene.nodes) {
+      const st = state.aiNodes.get(n.instanceOf ?? n.id);
+      if (!st) continue;
+      const label = st === "verified" ? "AI ✓" : "AI";
+      const w = ctx.measureText(label).width + h * 0.7;
+      const vb = visibleBoxOf(n);
+      // just OUTSIDE the drawing, bottom-right: the selection frame and the
+      // top corners (warning, lock, ornament badges) are drawn over the inside
+      const x = vb.x + vb.w + 3 / vp.scale, y = vb.y + vb.h - h;
+      ctx.beginPath();
+      ctx.roundRect(x, y, w, h, h / 2);
+      ctx.fillStyle = panel;
+      ctx.fill();
+      ctx.setLineDash(st === "verified" ? [] : [2.5 / vp.scale, 2 / vp.scale]);
+      ctx.lineWidth = 1.2 / vp.scale;
+      ctx.strokeStyle = ink;
+      ctx.stroke();
+      ctx.fillStyle = ink;
+      ctx.fillText(label, x + h * 0.35, y + h / 2);
     }
     ctx.restore();
   }
