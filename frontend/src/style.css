@@ -7882,8 +7882,12 @@ body.gesturing-resize * {
 .addm {
   position: fixed;
   z-index: 1100;
-  width: 290px;
-  max-height: min(460px, calc(100vh - 16px));
+  /* COLLEGARE · a long phrase is not truncated: the menu widens up to a
+     maximum, then the label goes to a second line (MICRO-LEGENDA-2b) */
+  width: max-content;
+  min-width: 290px;
+  max-width: min(440px, calc(100vw - 16px));
+  max-height: min(520px, calc(100vh - 16px));
   display: flex;
   flex-direction: column;
   background: var(--bg-elevated);
@@ -7925,7 +7929,11 @@ body.gesturing-resize * {
 .addm-item.off, .addm-cat.off { color: var(--text-faint); cursor: default; }
 .addm-ic { width: 24px; height: 14px; flex: none; display: inline-flex; align-items: center; justify-content: center; }
 .addm-ic img, .addm-ic svg, .addm-ic canvas { max-width: 24px; max-height: 14px; }
-.addm-l { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.addm-l {
+  flex: 1; min-width: 0; overflow: hidden; white-space: normal; overflow-wrap: anywhere;
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2;
+}
+.addm-lmg { font-size: 11px; color: var(--text-muted); padding: 4px 12px 1px 44px; }
 .addm-d { font-size: 10.5px; color: var(--text-faint); white-space: nowrap; }
 .addm-car { color: var(--text-faint); }
 .addm-sep { height: 1px; background: var(--border); margin: 4px 0; }
@@ -7942,6 +7950,19 @@ body.gesturing-resize * {
   border-top: 1px solid var(--border); margin-top: 6px; font-size: 10.5px; color: var(--text-faint);
 }
 .addm-keys { font-family: var(--font-mono); }
+/* COLLEGARE · «Nuovo documento…» (doc-form.ts): the add menu's box, a form inside */
+.docform { min-width: 300px; }
+.docform-f { display: flex; flex-direction: column; gap: 6px; padding: 0 12px 4px; }
+.docform-f label { display: flex; flex-direction: column; gap: 2px; font-size: 11px; color: var(--text-muted); }
+.docform-f input {
+  border: 1px solid var(--border-strong); border-radius: var(--radius); background: var(--bg-sunken);
+  color: var(--text); padding: 4px 7px; font: inherit; font-size: 12.5px;
+}
+.docform-f input:focus { outline: none; border-color: var(--accent); }
+.docform-acts { display: flex; gap: 6px; justify-content: flex-end; margin-top: 4px; }
+.docform-acts button { font: inherit; font-size: 12px; padding: 3px 10px; border-radius: var(--radius);
+  border: 1px solid var(--border-strong); background: var(--bg); color: var(--text); cursor: pointer; }
+.docform-acts .docform-ok { background: var(--accent); border-color: var(--accent); color: var(--on-accent, #1d1d1b); }
 /* the discreet hint on an empty graph canvas */
 .canvas-empty-hint {
   position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);

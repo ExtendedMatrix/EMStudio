@@ -48,6 +48,20 @@ export interface AddMenuModel {
   recent: AddMenuEntry[];
   recentHeader?: string;
   categories: AddMenuCategory[];
+  /** COLLEGARE · a header over the categories when they are the «Nuovo» half */
+  newHeader?: string;
+  /** COLLEGARE · «Collega a un nodo esistente»: inline groups, the first
+   *  `perGroup` of each shown, the rest reached by the search (which runs over
+   *  `searchable`, where the caller puts every existing entry too) */
+  existing?: {
+    header: string;
+    groups: { label: string; entries: AddMenuEntry[] }[];
+    perGroup: number;
+    /** «+n altri: scrivi per cercare» */
+    more: (n: number) => string;
+    /** shown when there is nothing to link */
+    none: string;
+  };
   /** actions after the categories (Matrix «Nuova epoca…», «Riordina tutto») */
   extra: AddMenuEntry[];
   /** the flat list the search runs over — built by the caller, one per entry */
@@ -215,6 +229,12 @@ export function showAddMenu(model: AddMenuModel, clientX: number, clientY: numbe
     s.className = "addm-sep";
     body.appendChild(s);
   };
+  const note = (text: string): void => {
+    const p = document.createElement("p");
+    p.className = "addm-note";
+    p.textContent = text;
+    body.appendChild(p);
+  };
 
   const closeSub = (): void => {
     if (!subOpen) return;
@@ -305,7 +325,23 @@ export function showAddMenu(model: AddMenuModel, clientX: number, clientY: numbe
         for (const e of model.recent) push(e);
         sep();
       }
+      if (model.newHeader && model.categories.length) group(model.newHeader);
       for (const c of model.categories) categoryRow(c);
+      if (model.existing) {
+        const ex = model.existing;
+        if (model.categories.length || model.linked.length) sep();
+        group(ex.header);
+        const live = ex.groups.filter((g) => g.entries.length);
+        if (!live.length) note(ex.none);
+        for (const g of live) {
+          const h = document.createElement("div");
+          h.className = "addm-lmg";
+          h.textContent = `${g.label} · ${g.entries.length}`;
+          body.appendChild(h);
+          for (const e of g.entries.slice(0, ex.perGroup)) push(e);
+          if (g.entries.length > ex.perGroup) note(ex.more(g.entries.length - ex.perGroup));
+        }
+      }
       if (model.extra.length) {
         sep();
         for (const e of model.extra) push(e);

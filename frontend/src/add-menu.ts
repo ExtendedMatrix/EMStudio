@@ -16,6 +16,8 @@
  */
 import { dropTargetAt, laneTargetAt, type DropTarget } from "./drag";
 import { MEMBERSHIP_EDGES } from "./folding";
+import type { DocumentStore } from "./model";
+import { renameOnAttach } from "./naming";
 import type { Scene } from "./scene";
 import type { EmDocument } from "./types";
 import {
@@ -28,6 +30,7 @@ import {
   isStratigraphicType,
   isSymmetricEdgeType,
   nodeLabel,
+  relationKey,
   typeDescription,
   typeLabel,
 } from "./rules";
@@ -254,6 +257,156 @@ export function connectItems(ctx: AddContext, srcType: string | undefined): Link
         out.push({ ...it, dir: "out", edgeType: e, relation: "for" });
     }
   return out;
+}
+
+// ── COLLEGARE · linking to what already exists ────────────────────────────────
+
+/**
+ * The groups of «Collega a un nodo esistente», in menu order (E.D., desk v9b):
+ * Documents, Units, Properties, Extractors, Combiners. The types are the
+ * authoring surface's own (`SECTIONS`): every stratigraphic type is «Unità», and
+ * the Paradata section's types are one group each. Anything else (groups,
+ * context nodes, epochs) is not a link target here — an epoch is a lane, a group
+ * is grouped, an ornament has its own row.
+ */
+export type LinkGroup = "document" | "strat" | "property" | "extractor" | "combiner";
+const PARADATA_TYPES = SECTIONS.find((s) => s.label === "Paradata")?.types ?? [];
+export const LINK_GROUP_ORDER: LinkGroup[] = [
+  "document", "strat",
+  ...(PARADATA_TYPES.filter((t) => t !== "document") as LinkGroup[]),
+];
+
+export function linkGroupOf(nodeType: string | undefined): LinkGroup | null {
+  if (!nodeType) return null;
+  if (isStratigraphicType(nodeType)) return "strat";
+  return PARADATA_TYPES.includes(nodeType) ? (nodeType as LinkGroup) : null;
+}
+
+/** One entry of «Collega a un nodo esistente»: an edge between X and a node
+ *  that is already in the graph. */
+export interface ExistingLink {
+  nodeId: string;
+  nodeType: string;
+  name: string;
+  description: string;
+  group: LinkGroup;
+  edgeType: string;
+  /** `out` = X → existing, `in` = existing → X */
+  dir: "out" | "in";
+  relation: "above" | "below" | "for";
+}
+
+/**
+ * The existing nodes X can be linked to, from the SAME `allowedEdgeTypes` the
+ * «Nuovo» entries read — one edge per (node, direction), the first the datamodel
+ * lists, as `linkedItems` does for types.
+ *
+ * Two of `linkedItems`' filters are about CREATING and do not carry over: «a
+ * unit links to a unit of its own type» (the next US in a sequence) and «no new
+ * unit for a paradata node» (it would float with no lane). Linking an existing
+ * USM above a US, or an existing US to a property, is the ordinary case.
+ *
+ * Left out: X itself, and a node already joined to X by that relation — under
+ * any spelling, from either end when symmetric (`relationKey`), and for
+ * `is_after` also in the opposite verso, which would close a cycle.
+ *
+ * `anchor`: the connector drag, whose SOURCE is decided (X → existing only),
+ * with one entry per edge when the datamodel allows several — the same shape as
+ * `connectItems`, so the pick is one gesture.
+ */
+export function existingLinks(
+  doc: EmDocument,
+  selId: string,
+  opts: { anchor?: boolean } = {},
+): ExistingLink[] {
+  const nodes = doc.graph.nodes;
+  const sel = nodes.find((n) => n.id === selId);
+  if (!sel) return [];
+  const selType = sel.node_type;
+  const selStrat = isStratigraphicType(selType);
+  const have = new Set(doc.graph.edges.map((e) => relationKey(e)));
+  const joined = (source: string, target: string, edgeType: string): boolean =>
+    have.has(relationKey({ source, target, edge_type: edgeType })) ||
+    (edgeType === "is_after" && have.has(relationKey({ source: target, target: source, edge_type: edgeType })));
+  const out: ExistingLink[] = [];
+  for (const n of nodes) {
+    if (n.id === selId) continue;
+    const group = linkGroupOf(n.node_type);
+    if (!group) continue;
+    const base = {
+      nodeId: n.id, nodeType: n.node_type, name: String(n.name ?? n.id),
+      description: String(n.description ?? ""), group,
+    };
+    const tStrat = isStratigraphicType(n.node_type);
+    if (opts.anchor) {
+      if (connectValidity(selType, n.node_type) !== "valid") continue;
+      for (const e of allowedEdgeTypes(selType, n.node_type))
+        if (!joined(selId, n.id, e)) out.push({ ...base, edgeType: e, dir: "out", relation: "for" });
+      continue;
+    }
+    const pair = tStrat && selStrat;
+    const firstOf = (from: string | undefined, to: string | undefined): string | undefined =>
+      allowedEdgeTypes(from, to).find((e) => !(pair && isSymmetricEdgeType(e)));
+    const eo = firstOf(selType, n.node_type);
+    if (eo && !joined(selId, n.id, eo))
+      out.push({ ...base, edgeType: eo, dir: "out", relation: pair ? "below" : "for" });
+    const ei = firstOf(n.node_type, selType);
+    // the same relation read from the other end is one entry, not two
+    if (ei && !(eo && !pair && ei === eo) && !joined(n.id, selId, ei))
+      out.push({ ...base, edgeType: ei, dir: "in", relation: pair ? "above" : "for" });
+  }
+  const rank = (l: ExistingLink): number => (l.relation === "above" ? 0 : l.relation === "below" ? 1 : 2);
+  return out.sort((a, b) =>
+    LINK_GROUP_ORDER.indexOf(a.group) - LINK_GROUP_ORDER.indexOf(b.group) ||
+    a.name.localeCompare(b.name, undefined, { numeric: true }) ||
+    rank(a) - rank(b));
+}
+
+/** How many existing entries a group shows before «altri: scrivi per cercare». */
+export const EXISTING_PER_GROUP = 6;
+
+/** Does `q` find this existing node? Name, description, node_type. */
+export function matchesExisting(l: ExistingLink, q: string): boolean {
+  const ql = q.trim().toLowerCase();
+  if (!ql) return true;
+  return [l.name, l.description, l.nodeType, typeLabel(l.nodeType)]
+    .some((s) => s.toLowerCase().includes(ql));
+}
+
+/**
+ * A property linked to a second unit becomes SHARED: it now belongs to both.
+ * Returns the owners (the units with `has_property` → it) when there are two or
+ * more after the link, else null — the caller says so in the toast and the log.
+ */
+export function sharedPropertyOwners(doc: EmDocument, propertyId: string): string[] | null {
+  const prop = doc.graph.nodes.find((n) => n.id === propertyId);
+  if (!prop || prop.node_type !== "property") return null;
+  const owners = [...new Set(doc.graph.edges
+    .filter((e) => e.target === propertyId && e.edge_type === "has_property")
+    .map((e) => e.source))];
+  return owners.length > 1 ? owners : null;
+}
+
+/**
+ * Link X to an existing node: the edge, and what the edge means, in ONE undo
+ * step. An extractor attached to a document is NAMED by that edge (NAME1,
+ * `renameOnAttach` — the same trigger `createEdge` uses), so «estrattore senza
+ * documento → D.03» comes out as D.03.nn in the same step.
+ */
+export function applyExistingLink(
+  store: DocumentStore,
+  selId: string,
+  link: Pick<ExistingLink, "nodeId" | "edgeType" | "dir">,
+): { source: string; target: string; renamed: string | null; sharedWith: string[] | null } {
+  const [source, target] = link.dir === "out" ? [selId, link.nodeId] : [link.nodeId, selId];
+  let renamed: string | null = null;
+  store.batch(() => {
+    store.addEdge(source, target, link.edgeType);
+    renamed = renameOnAttach(store.doc, source);
+    if (renamed) store.updateNode(source, { name: renamed });
+  });
+  const sharedWith = link.edgeType === "has_property" ? sharedPropertyOwners(store.doc, target) : null;
+  return { source, target, renamed, sharedWith };
 }
 
 /** Does `q` find this item? Label, node_type, description and category. */

@@ -268,6 +268,79 @@ function doc() {
   M.closeAddMenu();
 }
 
+// ── 8 · COLLEGARE · linking to what already exists ────────────────────────────
+{
+  const d = {
+    graph: {
+      nodes: [
+        N("D3", "document", { name: "D.03", description: "Scheda dei capitelli" }),
+        N("D4", "document", { name: "D.04", description: "Rilievo 2026" }),
+        N("X1", "extractor", { name: "D.03.1" }),
+        N("X2", "extractor", { name: "D.XX" }),
+        N("u1", "US", { name: "US101" }), N("u2", "USM", { name: "USM102" }), N("u3", "US", { name: "US103" }),
+        N("p1", "property", { name: "height" }),
+        N("ep", "EpochNode"), N("au", "author"),
+      ],
+      edges: [E("X1", "extracted_from", "D3"), E("u1", "is_after", "u2"), E("u1", "has_property", "p1")],
+    },
+  };
+  const keys = (ls) => ls.map((l) => `${l.group}:${l.name}:${l.dir}:${l.edgeType}`);
+  const ex = M.existingLinks(d, "X2");
+  ok(keys(ex).includes("document:D.03:out:extracted_from") && keys(ex).includes("document:D.04:out:extracted_from"),
+     "an extractor with no document is offered the existing documents (extracted_from)");
+  ok(!ex.some((l) => l.nodeId === "X2"), "the node itself is not offered");
+  ok(!ex.some((l) => ["ep", "au"].includes(l.nodeId)), "an epoch (a lane) and an ornament are not link targets");
+  eq(M.LINK_GROUP_ORDER, ["document", "strat", "property", "extractor", "combiner"],
+     "the groups: Documenti, Unità, Proprietà, Estrattori, Combiner");
+  const st = new M.DocumentStore(JSON.parse(JSON.stringify(d)));
+  const link = ex.find((l) => l.nodeId === "D3");
+  const res = M.applyExistingLink(st, "X2", link);
+  eq([res.source, res.target], ["X2", "D3"], "the edge runs extractor → document");
+  eq(st.node("X2").name, "D.03.2", "…and the extractor takes its name from D.03 (NAME1): D.03.2");
+  ok(st.doc.graph.edges.some((e) => e.source === "X2" && e.target === "D3" && e.edge_type === "extracted_from"),
+     "the edge is in the graph");
+  st.undo();
+  eq([st.node("X2").name, st.doc.graph.edges.some((e) => e.source === "X2")], ["D.XX", false],
+     "edge and name are ONE undo step");
+  // already linked: not offered again, is_after also the other way round
+  const onU1 = M.existingLinks(d, "u1");
+  ok(!onU1.some((l) => l.nodeId === "u2" && l.edgeType === "is_after"),
+     "a unit already is_after USM102 is not offered USM102 again — in either verso");
+  ok(onU1.some((l) => l.nodeId === "u3" && l.relation === "above") && onU1.some((l) => l.nodeId === "u3" && l.relation === "below"),
+     "another unit of any type is offered above and below (the own-type rule is for creating)");
+  ok(!onU1.some((l) => l.nodeId === "p1" && l.edgeType === "has_property"), "a property it already has is not offered");
+  const onU3 = M.existingLinks(d, "u3");
+  const prop = onU3.find((l) => l.nodeId === "p1" && l.edgeType === "has_property");
+  ok(prop && prop.dir === "out", "an existing property is offered to a second unit (has_property)");
+  const st2 = new M.DocumentStore(JSON.parse(JSON.stringify(d)));
+  const r2 = M.applyExistingLink(st2, "u3", prop);
+  eq(r2.sharedWith?.slice().sort(), ["u1", "u3"], "…and linking it makes it SHARED: both units own it");
+  // the anchor drag: the source is decided, X → existing only
+  const anc = M.existingLinks(d, "X2", { anchor: true });
+  ok(anc.length && anc.every((l) => l.dir === "out"), "the anchor drag offers X → existing only");
+  // the search
+  const find = (q) => ex.filter((l) => M.matchesExisting(l, q)).map((l) => l.name);
+  eq(find("capitelli"), ["D.03"], "the search finds a document by its description");
+  eq(find("d.04"), ["D.04"], "…and by its name");
+  // the same component shows them grouped, 6 per group, the rest behind the search
+  const many = Array.from({ length: 9 }, (_, i) => ({ key: `e${i}`, label: `D.${i}`, run: () => {} }));
+  M.showAddMenu({
+    title: "Link", context: "X", placeholder: "…", linked: [], recent: [], categories: [],
+    existing: { header: "Existing", groups: [{ label: "Documents", entries: many }], perGroup: 6,
+                more: (n) => `+${n} more`, none: "none" },
+    extra: [], searchable: many, matches: (e, q) => e.label.includes(q),
+    count: "9", noResults: "none", keysHint: "",
+  }, 10, 10);
+  eq(document.querySelectorAll(".addm-body .addm-item").length, 6, "six existing rows per group");
+  ok([...document.querySelectorAll(".addm-note")].some((p) => p.textContent === "+3 more"), "…and «+3 altri: scrivi per cercare»");
+  const q = document.querySelector(".addm-q");
+  q.value = "D.8";
+  q.dispatchEvent(new window.Event("input"));
+  eq([...document.querySelectorAll(".addm-body .addm-item")].map((b) => b.dataset.key), ["e8"],
+     "the search reaches the ones beyond the first six");
+  M.closeAddMenu();
+}
+
 // `ADD_TABLE=1 node scripts/check-add-menu.mjs` prints the context × type table
 // as Markdown, for the night's report (generated, never written by hand)
 if (process.env.ADD_TABLE) {

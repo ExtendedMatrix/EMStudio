@@ -168,8 +168,13 @@ import { createResourceThumb } from "./resource-preview";
 import {
   addCategories,
   addableItems,
+  applyExistingLink,
   connectItems,
+  existingLinks,
+  EXISTING_PER_GROUP,
   itemKey,
+  LINK_GROUP_ORDER,
+  matchesExisting,
   linkedItems,
   matchesAdd,
   planAdd,
@@ -177,8 +182,10 @@ import {
   rememberType,
   type AddContext,
   type AddItem,
+  type ExistingLink,
   type LinkedItem,
 } from "./add-menu";
+import { openNewDocumentForm, type NewDocumentValues } from "./doc-form";
 import {
   closeAddMenu,
   showAddMenu,
@@ -204,6 +211,7 @@ import {
   classOf,
   CONNECTIONS_VERSION,
   connectValidity,
+  edgeLabel,
   edgeTypeLabel,
   EM_VERSION,
   GENERIC_EDGE,
@@ -6416,6 +6424,9 @@ interface AddSpec {
   isResource?: boolean;
   /** «Collegato a X»: the edge, and which end the new node is */
   link?: { otherId: string; edgeType: string; dir: "out" | "in" };
+  /** COLLEGARE · what an explicit form already decided («Nuovo documento…»):
+   *  the name, the description and `data` the node is born with */
+  preset?: { name?: string; description?: string; data?: Record<string, unknown> };
 }
 
 /** A node's box from its TYPE, asked of em-core (the size owner, EM3) before
@@ -6471,12 +6482,14 @@ async function addNodeFromMenu(spec: AddSpec, wx: number, wy: number, alt: boole
   const id = st.newId();
   // NAME1 · the paradata chain has a convention; every other type keeps the
   // store's generic fresh label (an extractor is numbered when it is attached)
-  const name = initialName(st.doc, type) ?? nextFreeName(st.doc, type) ?? st.freshLabel(type);
-  const node: EmNode = { id, name, node_type: type, description: "" };
+  const name = spec.preset?.name
+    ?? initialName(st.doc, type) ?? nextFreeName(st.doc, type) ?? st.freshLabel(type);
+  const node: EmNode = { id, name, node_type: type, description: spec.preset?.description ?? "" };
   if (spec.kind) {
     node.data = { dtc_kind: spec.kind };
     if (spec.isResource) node.data.resource_type = spec.kind;
   }
+  if (spec.preset?.data) node.data = { ...(node.data ?? {}), ...spec.preset.data };
   const box = await typeBox(node);
   if (store !== st) return null; // another document arrived while em-core answered
   const rect = { x: wx - box.w / 2, y: wy - box.h / 2, w: box.w, h: box.h };
@@ -6567,12 +6580,133 @@ function addEntry(
     alias: it.alias,
     icon: () => typeIconElement(it.nodeType, it.kind),
     run: () => {
-      void addNodeFromMenu(
-        { nodeType: it.nodeType, kind: it.kind, isResource: it.isResource, link },
-        wx, wy, alt,
-      );
+      const spec: AddSpec = { nodeType: it.nodeType, kind: it.kind, isResource: it.isResource, link };
+      // COLLEGARE · a new document is a decision: the form first, then the node
+      if (it.nodeType === "document" && store && !canvasWritesToCorpus()) {
+        askNewDocument(addMenuPoint.x, addMenuPoint.y, {}, (v) =>
+          void addNodeFromMenu({ ...spec, preset: documentPreset(v) }, wx, wy, alt));
+        return;
+      }
+      void addNodeFromMenu(spec, wx, wy, alt);
     },
   };
+}
+
+/** Where the last «Aggiungi» menu opened (client px): the document form opens
+ *  there too, so the decision stays under the hand that asked for it. */
+const addMenuPoint = { x: 200, y: 200 };
+
+/** COLLEGARE · open «Nuovo documento…» with the next D.nn, then `onDone`. */
+function askNewDocument(
+  clientX: number,
+  clientY: number,
+  preset: Partial<NewDocumentValues>,
+  onDone: (v: NewDocumentValues) => void,
+): void {
+  if (!store) return;
+  const name = preset.name ?? initialName(store.doc, "document") ?? nextFreeName(store.doc, "document") ?? "D.01";
+  openNewDocumentForm(clientX, clientY, { ...preset, name }, onDone);
+}
+
+/** The form's values as what the document node is born with. `filename` is
+ *  the Documents sheet's own column (`data.filename`); nothing else is added. */
+function documentPreset(v: NewDocumentValues): NonNullable<AddSpec["preset"]> {
+  return { name: v.name, description: v.description, data: v.filename ? { filename: v.filename } : undefined };
+}
+
+/**
+ * COLLEGARE · «Collega a un nodo esistente» for X, as menu entries grouped the
+ * way the menu shows them. The candidates are `existingLinks` (the same
+ * `allowedEdgeTypes` as the «Nuovo» entries); a pick is `linkExisting`.
+ * The corpus canvas links nothing here: its nodes are not the study's.
+ */
+function existingMenu(selId: string, anchor: boolean): {
+  groups: { label: string; entries: AddMenuEntry[] }[];
+  flat: AddMenuEntry[];
+} {
+  if (!store || canvasWritesToCorpus()) return { groups: [], flat: [] };
+  const sel = store.node(selId);
+  const selName = String(sel?.name ?? selId);
+  const links = existingLinks(store.doc, selId, { anchor });
+  const perNode = new Map<string, number>();
+  for (const l of links) perNode.set(l.nodeId, (perNode.get(l.nodeId) ?? 0) + 1);
+  const entryOf = (l: ExistingLink): AddMenuEntry => ({
+    key: `ex|${l.nodeId}|${l.dir}|${l.edgeType}`,
+    // the phrase of the datamodel with the node's NAME for {node}: «US102 sopra
+    // USM101», «D.03 per D.03.01» — the same sentence a «Nuovo» entry says
+    label: linkedPhrase(DATAMODEL_PHRASES, l.edgeType, phraseDirFor(l.dir), getLocale(),
+      { node: l.name, x: selName }, l.name).text,
+    detail: (perNode.get(l.nodeId) ?? 0) > 1 || l.relation !== "for" ? edgeLabel(l.edgeType) : l.description.slice(0, 40),
+    nodeType: l.nodeType,
+    description: l.description,
+    alias: l.name,
+    icon: () => typeIconElement(l.nodeType),
+    run: () => linkExisting(selId, l),
+  });
+  const flat = links.map(entryOf);
+  const groups = LINK_GROUP_ORDER.map((g) => ({
+    label: t(`link.g.${g}`),
+    entries: flat.filter((_, i) => links[i].group === g),
+  }));
+  return { groups, flat };
+}
+
+/** COLLEGARE · the pick: one edge to a node that exists, one undo step. */
+function linkExisting(selId: string, l: ExistingLink): void {
+  if (!store) return;
+  const st = store;
+  const res = applyExistingLink(st, selId, l);
+  const a = String(st.node(res.source)?.name ?? res.source);
+  const b = String(st.node(res.target)?.name ?? res.target);
+  let msg = t("link.linked", { a, b, edge: edgeLabel(l.edgeType) });
+  if (res.renamed) msg += ` · ${t("link.renamed", { name: res.renamed })}`;
+  if (res.sharedWith) {
+    const others = res.sharedWith.filter((o) => o !== res.source)
+      .map((o) => String(st.node(o)?.name ?? o)).join(", ");
+    msg = t("link.shared", { prop: b, unit: a, others });
+  }
+  logInfo(msg, [res.source, res.target]);
+  select(selId);
+  toastUndo(msg, st);
+  draw();
+}
+
+/** COLLEGARE · «Collega a un esistente…»: the same list, alone, with its search. */
+function openLinkExistingMenu(selId: string, clientX: number, clientY: number): void {
+  if (!store) return;
+  const sel = store.node(selId);
+  const ex = existingMenu(selId, false);
+  addMenuPoint.x = clientX;
+  addMenuPoint.y = clientY;
+  showAddMenu({
+    title: t("link.existingMenu"),
+    context: String(sel?.name ?? selId),
+    placeholder: t("link.q"),
+    linked: [],
+    recent: [],
+    categories: [],
+    existing: {
+      header: t("link.existing"),
+      groups: ex.groups,
+      perGroup: EXISTING_PER_GROUP,
+      more: (n) => t("link.more", { n }),
+      none: t("link.none"),
+    },
+    extra: [],
+    searchable: ex.flat,
+    matches: (e, q) => existingMatches(e, q),
+    count: t("link.count", { n: ex.flat.length }),
+    noResults: t("add.noResults"),
+    keysHint: t("add.keys"),
+  }, clientX, clientY);
+}
+
+/** The search over an existing entry: its name, description and type. */
+function existingMatches(e: AddMenuEntry, q: string): boolean {
+  return matchesExisting({
+    nodeId: "", nodeType: e.nodeType ?? "", name: e.alias ?? e.label, description: e.description ?? "",
+    group: "strat", edgeType: "", dir: "out", relation: "for",
+  }, q);
 }
 
 /** FRASI · the phrase of a «Collegato a X» entry: the edge's `ui_phrase` from
@@ -6631,16 +6765,21 @@ function openAddMenu(
   const context = t("add.context", { ctx: t(`mode.${ctx}`) }) + (lane ? ` · ${lane.label}` : "");
   const cats = addCategories(ctx);
   const allowed = addableItems(ctx);
+  addMenuPoint.x = clientX;
+  addMenuPoint.y = clientY;
 
-  // ── the anchor drag: one list, the edge already chosen ──────────────────────
+  // ── the anchor drag (and a click on the maniglia): the edge's source is
+  //    decided. COLLEGARE · ONE component with two halves: «Nuovo» (what can be
+  //    created at the other end) and «Collega a un nodo esistente» (what is
+  //    already there), both from `allowedEdgeTypes`, one search over both.
   if (opts.fromId) {
     const src = storeOfNode(opts.fromId)?.node(opts.fromId);
     const items = connectItems(ctx, src?.node_type);
     const multi = new Map<string, number>();
     for (const i of items) multi.set(i.nodeType, (multi.get(i.nodeType) ?? 0) + 1);
     const entries = items.map((i) =>
-      addEntry(i, wp.x, wp.y, alt, i.label,
-        (multi.get(i.nodeType) ?? 0) > 1 ? edgeTypeLabel(i.edgeType) : addCategoryLabel(i.category),
+      addEntry(i, wp.x, wp.y, alt, i.nodeType === "document" ? t("doc.newDoc") : i.label,
+        (multi.get(i.nodeType) ?? 0) > 1 ? edgeLabel(i.edgeType) : addCategoryLabel(i.category),
         opts.fromId),
     );
     const byCat = new Map<string, AddMenuEntry[]>();
@@ -6649,18 +6788,30 @@ function openAddMenu(
       list.push(entries[k]);
       byCat.set(i.category, list);
     });
+    const ex = existingMenu(opts.fromId, true);
+    const newMatches = (e: AddMenuEntry, q: string): boolean =>
+      matchesAdd({ label: e.label, alias: e.alias, nodeType: e.nodeType ?? "", description: e.description ?? "", category: e.detail ?? "" }, q);
+    const exKeys = new Set(ex.flat.map((e) => e.key));
     showAddMenu({
       title: t("add.fromNode", { name: String(src?.name ?? src?.node_type ?? "") }),
       context,
-      placeholder: t("add.placeholder"),
+      placeholder: t("link.q"),
       linked: [],
       recent: [],
+      newHeader: t("link.new"),
       categories: [...byCat].map(([c, list]) => ({ label: addCategoryLabel(c), entries: list })),
+      existing: {
+        header: t("link.existing"),
+        groups: ex.groups,
+        perGroup: EXISTING_PER_GROUP,
+        more: (n) => t("link.more", { n }),
+        none: t("link.none"),
+      },
       extra: [],
-      searchable: entries,
-      matches: (e, q) => matchesAdd({ label: e.label, alias: e.alias, nodeType: e.nodeType ?? "", description: e.description ?? "", category: e.detail ?? "" }, q),
-      footNote: entries.length ? undefined : t("add.noTarget"),
-      count: t("add.count", { n: entries.length }),
+      searchable: [...entries, ...ex.flat],
+      matches: (e, q) => (exKeys.has(e.key) ? existingMatches(e, q) : newMatches(e, q)),
+      footNote: entries.length || ex.flat.length ? undefined : t("add.noTarget"),
+      count: `${t("add.count", { n: entries.length })} · ${t("link.count", { n: ex.flat.length })}`,
       noResults: t("add.noResults"),
       keysHint: t("add.keys"),
     }, clientX, clientY);
@@ -6673,7 +6824,18 @@ function openAddMenu(
   const otherName = sel ? String(sel.name ?? sel.id) : "";
   const links = sel ? linkedItems(ctx, sel.node_type) : [];
   const linkEntry = (i: LinkedItem): AddMenuEntry =>
-    addEntry(i, wp.x, wp.y, alt, linkedLabel(i, otherName), edgeTypeLabel(i.edgeType), sel!.id);
+    addEntry(i, wp.x, wp.y, alt, linkedLabel(i, otherName), edgeLabel(i.edgeType), sel!.id);
+  // COLLEGARE · «Collega a un esistente…», in the «Collegato a X» group: the
+  // list of what is already there, with its own search (same component)
+  const existingCount = sel && selId ? existingMenu(selId, false).flat.length : 0;
+  const linkExistingEntry: AddMenuEntry[] = sel && selId && existingCount
+    ? [{
+        key: "link-existing",
+        label: t("link.existingMenu"),
+        detail: t("link.count", { n: existingCount }),
+        run: () => openLinkExistingMenu(selId, clientX, clientY),
+      }]
+    : [];
   // the ornaments (author, licence, embargo, resource) fold into ONE row
   const chain = links.filter((i) => i.category !== "Context");
   const ornaments = links.filter((i) => i.category === "Context");
@@ -6707,14 +6869,14 @@ function openAddMenu(
       context,
       placeholder: t("add.placeholder"),
       linkedHeader: sel ? t("add.linked", { name: otherName }) : undefined,
-      linked: chain.map(linkEntry),
+      linked: [...chain.map(linkEntry), ...linkExistingEntry],
       linkedMore: ornaments.length
         ? { label: t("add.linkedMore", { name: otherName }), entries: ornaments.map(linkEntry) }
         : undefined,
       recent: [],
       categories: [],
       extra: [],
-      searchable: linkedAll,
+      searchable: [...linkedAll, ...linkExistingEntry],
       matches: (e, q) =>
         matchesAdd({ label: e.label, alias: e.alias, nodeType: e.nodeType ?? "", description: e.description ?? "", category: e.detail ?? "" }, q),
       footNote: linkedAll.length ? undefined : t("add.noTarget"),
@@ -6730,7 +6892,7 @@ function openAddMenu(
     context,
     placeholder: t("add.placeholder"),
     linkedHeader: sel ? t("add.linked", { name: otherName }) : undefined,
-    linked: chain.map(linkEntry),
+    linked: [...chain.map(linkEntry), ...linkExistingEntry],
     linkedMore: ornaments.length
       ? { label: t("add.linkedMore", { name: otherName }), entries: ornaments.map(linkEntry) }
       : undefined,
@@ -6743,6 +6905,7 @@ function openAddMenu(
     // not exist, when it only waits for a unit
     searchable: [
       ...linkedAll,
+      ...linkExistingEntry,
       ...allowed.map(plain),
       ...cats.filter((c) => c.state === "linked").flatMap((c) =>
         c.items.map((i) => ({ ...plain(i), disabledReason: t("add.needSelShort") }))),
