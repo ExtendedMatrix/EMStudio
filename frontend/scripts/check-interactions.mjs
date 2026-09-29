@@ -765,6 +765,45 @@ test("6.lanemenu", "TempluMare: il clic destro sull'intestazione della corsia ap
   return { pass: JSON.stringify(vp0) === JSON.stringify(vp1) && items.some((t) => /cronologia/i.test(t)), detail: { vp0, vp1, items } };
 });
 
+// ── PARTE 7 · stati vuoti che parlano, e i titoli ───────────────────────────
+test("7.new", "File ▸ Nuovo: niente minimappa, e ogni finestra ha la sua frase", async () => {
+  const { p, ctx } = await open({ doc: null });
+  const before = await p.evaluate(() => ({
+    minimap: [...document.querySelectorAll(".win-overview")].filter((m) => m.offsetParent && !m.classList.contains("hidden")).length,
+    hint: document.querySelector(".canvas-empty-hint:not(.hidden)")?.innerText ?? "",
+    outliner: document.querySelector(".nl-empty")?.textContent ?? "",
+    inspector: document.querySelector('[data-win$="inspector"] .win-empty')?.textContent ?? "",
+    title: document.getElementById("ns-title")?.textContent ?? "",
+  }));
+  await p.evaluate(() => document.getElementById("btn-new").click());
+  await p.waitForTimeout(700);
+  const after = await p.evaluate(() => ({
+    minimap: [...document.querySelectorAll(".win-overview")].filter((m) => m.offsetParent && !m.classList.contains("hidden")).length,
+    hint: document.querySelector(".canvas-empty-hint:not(.hidden)")?.innerText ?? "",
+    title: document.getElementById("ns-title")?.textContent ?? "",
+  }));
+  await ctx.close();
+  return { pass: !before.minimap && /grafo/i.test(before.hint) && !!before.outliner && !!before.inspector
+    && !after.minimap && !!after.hint && /Senza titolo/.test(before.title), detail: { before, after } };
+});
+test("7.title", "TempluMare mostra un titolo leggibile, mai l'UUID", async () => {
+  const { p, ctx } = await open({ doc: "TempluMare" });
+  const title = await p.evaluate(() => document.getElementById("ns-title")?.textContent ?? "");
+  const info = await p.evaluate(() => document.getElementById("info")?.textContent ?? "");
+  await ctx.close();
+  const uuid = /[0-9a-f]{8}-[0-9a-f]{4}-/i;
+  return { pass: !!title && !uuid.test(title) && !uuid.test(info), detail: { title, info: info.slice(0, 80) } };
+});
+test("7.dtc", "la finestra DTC vuota dice che il DTC nasce dai timbri, e offre lo Storage", async () => {
+  const { p, ctx } = await open({ doc: null });
+  await p.evaluate(() => document.getElementById("btn-new").click());
+  await p.waitForTimeout(500);
+  await workspace(p, "assets");
+  const txt = await p.evaluate(() => [...document.querySelectorAll(".canvas-empty-hint:not(.hidden)")].map((h) => h.innerText).join(" | "));
+  await ctx.close();
+  return { pass: /timbri/.test(txt) && /Storage/.test(txt) && !/Shift\+A/.test(txt), detail: { txt } };
+});
+
 // ── run ─────────────────────────────────────────────────────────────────────
 const chosen = cases.filter((c) => !only.length || only.includes(c.id) || only.some((o) => c.id.startsWith(o + ".")));
 for (const c of chosen) {

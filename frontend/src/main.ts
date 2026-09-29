@@ -2040,6 +2040,7 @@ function renderInspectorInto(host: HTMLElement): void {
   perfCount("inspector"); // AUDIT · how many rebuilds one change costs
   if (!store) {
     host.textContent = "";
+    host.appendChild(emptyState("empty.inspector"));
     return;
   }
   // COLLEGARE · a part of the story picked on the page: its tools, here
@@ -2288,6 +2289,14 @@ function refreshInspector(): void {
   if (logDrawer.open && logDrawer.onlySel) renderLogDrawer();
 }
 
+/** AUDIT N6 · a graph's title: its name, else «Senza titolo» — never the UUID
+ *  (TempluMare showed «a210d21b-fddc-…», its graph_id). */
+function graphTitle(st: DocumentStore): string {
+  const g = st.doc.graph as Record<string, unknown>;
+  const name = String(g["name"] ?? (st.doc.header as Record<string, unknown> | undefined)?.["name"] ?? "").trim();
+  return name || t("strip.untitled");
+}
+
 /**
  * STRUTTURA · the NAME STRIP: the selected element's name, large (Comfortaa
  * 700, `--brand-ink`), and its context «type · epoch · part of X». With nothing
@@ -2300,13 +2309,12 @@ function renderNameStrip(): void {
   if (!title || !ctx) return;
   const n = store && selectedId ? store.node(selectedId) : null;
   if (!store) {
-    title.textContent = "EMStudio";
-    ctx.textContent = "";
+    title.textContent = t("strip.untitled");
+    ctx.textContent = t("strip.noGraph");
     return;
   }
   if (!n) {
-    const g = store.doc.graph;
-    title.textContent = String(g["name"] ?? store.doc.header?.["name"] ?? g.graph_id ?? "EMStudio");
+    title.textContent = graphTitle(store);
     ctx.textContent = t("strip.graphCtx", { n: String(store.liveNodes().length) });
     return;
   }
@@ -2816,11 +2824,7 @@ function updateInfo(): void {
   if (!store) return;
   const g = store.doc.graph;
   const lanes = scenes.matrix?.lanes.length ?? 0;
-  const title =
-    (g["name"] as string | undefined) ??
-    (store.doc.header?.["name"] as string | undefined) ??
-    g.graph_id ??
-    "untitled";
+  const title = graphTitle(store);
   // P4.5 · count what is THERE, not what the file still remembers. A removal
   // leaves a tombstone in the document (the merge needs it), so after somebody
   // else deletes a node the raw length is one MORE than what anybody can see —
@@ -3804,6 +3808,7 @@ function studyFailed(what: string, why: string): void {
   // on would be the wrong kind of loud.
   const hint = document.getElementById("drop-hint");
   if (!hint || emtree.slots.length) return;
+  hint.classList.remove("hidden");
   hint.textContent = "";
   const said = document.createElement("span");
   said.className = "dh-failed";
@@ -4266,8 +4271,9 @@ function clearDocument(): void {
   selectedId = null;
   selectedIds = new Set();
   marquee = null;
-  dropHint.classList.remove("hidden");
-  info.textContent = "open or drop an .em.json file";
+  // AUDIT N6 · each empty window says it now (`fillGraphEmpty`)
+  dropHint.classList.add("hidden");
+  info.textContent = t("toast.openOrDrop");
   updateToolbar();
   updateBreadcrumb();
   nodeList.refresh();
@@ -10993,7 +10999,7 @@ function closeWorkspace(): void {
   scenes.graph = null;
   scenes.dtc = null;
   scenes.multigraph = null;
-  dropHint.classList.remove("hidden");
+  dropHint.classList.add("hidden");   // AUDIT N6 · the windows say it
   info.textContent = t("toast.openOrDrop");
   select(null);
   nodeList.refresh();
@@ -13321,10 +13327,10 @@ function renderNarrativeInto(host: HTMLElement, win: Win): void {
   // narrative window that opens on a graph with no story writes the outline.
   // Idempotent (`scaffoldNarrativeFromGraph` is a no-op once a narrative
   // exists), so a written story is never disturbed.
-  if (store) {
-    const nid = scaffoldNarrativeFromGraph(store);
-    if (nid) selectedNarrativeId = nid;
-  }
+  // AUDIT A8 · OPENING WRITES NOTHING. The scaffold used to run on every render
+  // of a Narrative window (measured: 26 → 27 nodes, the document dirty and an
+  // undo step, just from looking). Now the empty page offers «Proponi i
+  // capitoli», and the story is made there — at the first gesture, one step.
   const narratives = narrativesIn(store?.doc ?? null);
   const chosen = (winCurrent(win, "narrative") as string | null)
     ?? selectedNarrativeId ?? narratives[0]?.id ?? null;
@@ -13362,6 +13368,12 @@ function renderNarrativeInto(host: HTMLElement, win: Win): void {
       onVerify: (c, b) => { if (current) verifyBlock(current.id, c, b); },
       onInsert: (c, at, anchor, replace) => { if (current) openBlocksMenu(current.id, c, at, anchor, !!replace); },
       onFileDrop: (c, f, x, y) => { if (current) dropFileOnChapter(current.id, c, f, x, y); },
+      onScaffold: () => {
+        if (!store) return;
+        const nid = scaffoldNarrativeFromGraph(store);   // one batch: one undo step
+        if (nid) { selectedNarrativeId = nid; setWinCurrent(win, "narrative", nid); }
+        refreshNarrativeView();
+      },
     },
   );
   // …and the window has something current to act on (see `ensureCurrentChapter`).
@@ -13431,10 +13443,7 @@ function revealFromNarrative(nodeId: string): void {
 // written story is never disturbed.
 btnNarrative.addEventListener("click", () => {
   const win = activeWin();
-  if (store) {
-    const nid = scaffoldNarrativeFromGraph(store);
-    if (nid) selectedNarrativeId = nid;
-  }
+  // AUDIT A8 · opening writes nothing: the page offers «Proponi i capitoli»
   if (win.type !== "narrative") transformWindowOf(win, "narrative");
   else refreshNarrativeView();
 });
@@ -13714,9 +13723,12 @@ function mountGraphCanvas(cv: HTMLCanvasElement, mini: HTMLCanvasElement,
       const mode = graphModeOf(winId);
       const here = contextIn(winId);
       const shown = here ? contextScene : (scenes[mode] ?? null);
-      const empty = !!store && !(shown?.nodes.length);
+      // AUDIT N6 · an empty graph window SAYS what is missing, and offers the
+      // gesture that remedies it; and there is no minimap of nothing
+      const empty = !(shown?.nodes.length);
       hint.classList.toggle("hidden", !empty);
-      if (empty) hint.textContent = t("add.emptyHint");
+      mini.classList.toggle("hidden", empty);
+      if (empty) fillGraphEmpty(hint, win, mode);
       paintGraphWindow({
         winId, cv, mode,
         highlightEdgeType: legendHighlight.get(winId) ?? null,
@@ -13733,6 +13745,53 @@ function mountGraphCanvas(cv: HTMLCanvasElement, mini: HTMLCanvasElement,
   };
   graphWindows.set(winId, mount);
   return mount;
+}
+
+/**
+ * AUDIT N6 · the sentence of an empty graph window, per what is missing: no
+ * graph at all, a graph with nothing in this projection, a DTC with no stamps.
+ * Rebuilt only when that changes (the paint runs per frame).
+ */
+function fillGraphEmpty(hint: HTMLElement, win: Win, mode: ViewKind): void {
+  const key = !store ? "none" : mode === "dtc" ? "dtc" : "graph";
+  const k = `${key}:${getLocale()}`;
+  if (hint.dataset.k === k) return;
+  hint.dataset.k = k;
+  hint.textContent = "";
+  hint.classList.add("win-empty", "graph-empty");
+  const b = document.createElement("b");
+  const p = document.createElement("p");
+  const acts = document.createElement("div");
+  acts.className = "win-empty-acts";
+  const act = (label: string, run: () => void): void => {
+    const x = document.createElement("button");
+    x.type = "button";
+    x.className = "insp-btn";
+    x.textContent = label;
+    x.addEventListener("click", (e) => { e.stopPropagation(); run(); });
+    acts.appendChild(x);
+  };
+  if (key === "dtc") {
+    b.textContent = t("empty.dtcT");
+    p.textContent = t("empty.dtcP");
+    act(t("empty.openStorage"), () => {
+      const st = windowsOf().find((w) => w.type === "storage");
+      if (st) selectWindow(st.id); else setWorkspace("assets");
+    });
+  } else {
+    b.textContent = t(key === "none" ? "empty.graphT" : "empty.graphEmptyT");
+    p.textContent = t("empty.graphP");
+    if (key === "none") {
+      act(t("empty.openEmjson"), () => void openDocument());
+      act(t("empty.importGraphml"), () => document.getElementById("btn-import-graphml")?.click());
+    }
+    act(t("empty.firstUnit"), () => {
+      if (!store) newDocument();
+      const r = hint.parentElement?.getBoundingClientRect();
+      if (r) openAddMenu(win, r.left + r.width / 2, r.top + r.height / 2);
+    });
+  }
+  hint.append(b, p, acts);
 }
 
 /** Which projection a graph window is showing. */
@@ -15285,6 +15344,7 @@ function renderNarrativeIndexInto(body: HTMLElement, _win: Win): void {
 function renderStudyInto(body: HTMLElement): void {
   if (!store) {
     body.textContent = "";
+    body.appendChild(emptyState("empty.study"));
     return;
   }
   renderStudyPanel(body, store, {
@@ -24189,6 +24249,7 @@ setVolatileProvider((id) => isVolatile(store?.node(id)));
 // Start from an EMPTY canvas (more natural than auto-loading a sample): use
 // New, Open…, drop a file, or Sync. __EM_TEST_DATA__ still injects a fixture
 // for automated tests.
+renderNameStrip();   // AUDIT N6 · «Senza titolo» from the first frame, not «EMStudio»
 if (window.__EM_TEST_DATA__) {
   // a PROJECT (`{graphs: …}`, with its corpus and shelf) goes through the door
   // a file does; a single graph keeps the old one

@@ -150,6 +150,11 @@ export function buildNodeList(
     const doc = getDoc();
     if (!doc) {
       count.textContent = "";
+      // AUDIT N6 · an empty Outliner says so
+      const p = document.createElement("p");
+      p.className = "win-empty nl-empty";
+      p.textContent = t("empty.outliner");
+      listEl.appendChild(p);
       return;
     }
     const q = filter.value.trim().toLowerCase();

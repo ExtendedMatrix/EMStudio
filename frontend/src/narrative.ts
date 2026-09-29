@@ -847,6 +847,9 @@ export interface PageHooks {
   onVerify?(chapter: number, block: number): void;
   /** a FILE dropped on a chapter (the node drop is the editor's `addEmbed`) */
   onFileDrop?(chapter: number, file: File, clientX: number, clientY: number): void;
+  /** AUDIT A8 · «Proponi i capitoli»: the story is made at the FIRST GESTURE
+   *  (one undo step), never by opening the window */
+  onScaffold?(): void;
 }
 
 /** COLLEGARE · «Posiziona il sito…» for a map with no site: installed by the
@@ -959,19 +962,20 @@ export function renderNarrativeView(
   container.dataset.reading = writing ? "write" : reading === "write" ? "read" : reading;
 
   if (!narratives.length) {
-    const empty = el("div", "nv-empty");
-    empty.appendChild(
-      el("p", undefined,
-        doc ? "This document contains no narrative."
-            : "No document loaded."),
-    );
-    if (doc)
-      empty.appendChild(
-        el("p", "nv-empty-hint",
-          "A narrative is a NarrativeNode in the em.json: chapters over the " +
-          "graph's lanes, with prose and embeds. The s3Dgraphy `site_story` " +
-          "template generates a first draft from an existing graph."),
-      );
+    // AUDIT N6 · the empty state speaks, in the reader's language; AUDIT A8 ·
+    // and nothing is written until somebody asks
+    const empty = el("div", "nv-empty win-empty");
+    empty.appendChild(el("b", undefined, t(doc ? "empty.narrativeT" : "empty.narrativeNoGraphT")));
+    empty.appendChild(el("p", "nv-empty-hint", t(doc ? "empty.narrativeP" : "empty.narrativeNoGraphP")));
+    if (doc && page.onScaffold) {
+      const go = el("button", "insp-btn", t("empty.narrativeGo"));
+      (go as HTMLButtonElement).type = "button";
+      go.dataset.action = "scaffold";
+      go.addEventListener("click", () => page.onScaffold!());
+      const row = el("div", "win-empty-acts");
+      row.appendChild(go);
+      empty.appendChild(row);
+    }
     container.appendChild(empty);
     return;
   }

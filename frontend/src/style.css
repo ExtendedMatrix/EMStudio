@@ -8016,6 +8016,10 @@ body.gesturing-resize * {
   color: var(--text-faint); font-size: 12.5px; pointer-events: none; user-select: none;
   z-index: 2;
 }
+/* AUDIT N6 · …which now says what is missing and offers the remedy */
+.canvas-empty-hint.graph-empty { pointer-events: auto; user-select: text; text-align: center; align-items: center; max-width: 44ch; padding: 0; }
+.canvas-empty-hint.graph-empty b { color: var(--text); font-size: 14px; }
+.win-overview.hidden { display: none; }
 /* SHIFT-A · a shortcut shown at the right of a menu item (Tools ▸ Aggiungi nodo… ⇧A) */
 .dd-menu .dd-key {
   float: right;
