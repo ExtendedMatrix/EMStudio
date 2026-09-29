@@ -1958,6 +1958,12 @@ function select(nodeId: string | null): void {
   const docAfter = !!nodeId && store?.node(nodeId)?.node_type === "document";
   if ((docBefore || docAfter) && selectedId !== nodeId)
     queueMicrotask(() => { if (windowsOf().some((w) => w.type === "storage")) renderStorage(); });
+  // AUDIT N8 · …and the Doc window follows it too, focused or not (the old
+  // annotator repainted only while it had the focus)
+  const readsBefore = !!selectedId && ["document", "extractor"].includes(store?.node(selectedId)?.node_type ?? "");
+  const readsAfter = !!nodeId && ["document", "extractor"].includes(store?.node(nodeId)?.node_type ?? "");
+  if ((readsBefore || readsAfter) && selectedId !== nodeId)
+    queueMicrotask(() => { if (windowsOf().some((w) => w.type === "doc")) renderDocView(); });
   selectedId = nodeId;
   selectedIds = new Set(nodeId ? [nodeId] : []);
   selectedEdge = null; // node and connector selection are mutually exclusive
@@ -6953,6 +6959,9 @@ function chainUi(st: DocumentStore): ChainUi {
     },
     openReading,
     openPlace,
+    // AUDIT N8 · «Leggi» opens the Doc of THIS space; when the space has none it
+    // goes to Fonti, and then the button says so
+    readLabel: () => (windowsOf().some((w) => w.type === "doc") ? t("chain.read") : t("chain.readToSources")),
     aiChip: aiChipFor,
     documentExtras: (host, docId) => renderDocumentDating(st, host, docId),
     useAsValue: (x) => {
@@ -14673,9 +14682,19 @@ function renderDocViewInto(
       `<div class="doc-empty">${t("doc.empty")}</div>`;
     return;
   }
+  // a document selected elsewhere is the one shown (the selection is one)
+  if (selectedId && docs.some((d) => d.id === selectedId) && winCurrent(win, "doc") !== selectedId)
+    setWinCurrent(win, "doc", selectedId);
   const currentId = winCurrent(win, "doc");
   const current = docs.find((d) => d.id === currentId) ?? docs[0];
   const repaint = (): void => renderDocViewInto(win, list, detail);
+  // AUDIT N8 · ONE SELECTION: the Doc shows the document selected anywhere
+  // (the Documents table, the graph, the Outliner); picking one here selects it
+  // and the Inspector follows. In a space whose Table already lists the
+  // documents the Doc does not list them a second time.
+  const listed = windowsOf().some((w) => w.type === "table" && winCurrent(w, "table.sheet") === "Documents");
+  list.classList.toggle("hidden", listed);
+  list.parentElement?.classList.toggle("doc-no-list", listed);
   for (const d of docs) {
     const b = document.createElement("button");
     b.className = "doc-item" + (d.id === current.id ? " current" : "");
@@ -14686,6 +14705,7 @@ function renderDocViewInto(
       (sub ? `<span class="doc-sub">${escapeHtml(sub)}</span>` : "");
     b.addEventListener("click", () => {
       setWinCurrent(win, "doc", d.id);
+      select(d.id);            // the Inspector, the graph and the table follow
       repaint();
     });
     list.appendChild(b);
@@ -14741,13 +14761,10 @@ function renderDocViewInto(
   jump.className = "insp-btn";
   jump.textContent = t("doc.reveal");
   jump.addEventListener("click", () => {
-    // "show it on the canvas" turns THIS window into a graph — including when the
-    // click came from a secondary area, which the focus has just moved to anyway.
-    setActiveWin(win.id);
-    setWinType(win, "graph");
-    renderTiles();
-    select(current.id);
-    centerOn(current.id);
+    // AUDIT N8 · the graph window of THIS space, when there is one (Fonti has it
+    // right under the Doc) — the Doc stays a Doc; only without one does this
+    // window become the graph, as `revealFromNarrative` does
+    revealFromNarrative(current.id);
   });
   detail.appendChild(jump);
 }
@@ -15730,7 +15747,10 @@ function shelfRow(entry: ShelfEntry): HTMLElement {
   // receipt's copy read-only, and this opens the stamp's form on that file
   if (rec && /^\//.test(entry.locator)) {
     const ed = document.createElement("button");
-    ed.textContent = t("receipt.editInStamp");
+    // AUDIT N8 · the Storage of this space; when there is none it goes to
+    // Contenuti, and the button says so
+    ed.textContent = windowsOf().some((w) => w.type === "storage")
+      ? t("receipt.editInStamp") : t("receipt.editInStampTo");
     ed.title = t("receipt.editInStampHint");
     ed.dataset.editStamp = entry.id;
     ed.addEventListener("click", () => openStampEditor(entry.locator));

@@ -83,6 +83,13 @@ const workspace = async (p, ws) => {
   await p.click(`#workspace-bar .ws-tab[data-ws="${ws}"]`);
   await p.waitForTimeout(700);
 };
+/** the Narrativa space, with its story: since A8 the story is made at the
+ *  first gesture («Proponi i capitoli»), not by opening the window */
+const narrativeSpace = async (p) => {
+  await workspace(p, "narrative");
+  const go = p.locator('[data-action="scaffold"]').first();
+  if (await go.count()) { await go.click(); await p.waitForTimeout(600); }
+};
 const pick = async (p, id) => {
   await p.evaluate((i) => window.__EM_DRAG__.select(i), id);
   await p.waitForTimeout(350);
@@ -280,7 +287,7 @@ test("A6", "un cambio da un'altra parte non cancella il testo non confermato", a
 // A7 · writing in the placeholder paragraph does not mix into the placeholder
 test("A7", "narrativa: scrivere nel paragrafo «da scrivere» non lo mescola", async () => {
   const { p, ctx } = await open({ doc: "catena" });
-  await workspace(p, "narrative");
+  await narrativeSpace(p);
   const para = p.locator(".nv-prose-edit").first();
   await para.waitFor({ timeout: 8000 });
   const before = await para.innerText();
@@ -307,7 +314,7 @@ test("A8", "aprire lo spazio Narrativa non scrive nulla nel documento", async ()
 // A9 · a file dropped on a chapter does not reach the window loader
 test("A9", "un file lasciato su un capitolo non arriva al caricatore globale", async () => {
   const { p, ctx } = await open({ doc: "catena" });
-  await workspace(p, "narrative");
+  await narrativeSpace(p);
   await p.waitForSelector(".nv-chapter, section", { timeout: 8000 });
   const reached = await p.evaluate(() => {
     let hit = false;
@@ -568,7 +575,8 @@ test("4.sidecar", "origine timbrata, poi un modello in /modelli apre su «Viene 
 // ── PARTE 5 · un solo tracciatore, e la lettura parte dal documento ─────────
 async function openDocImage(p) {
   await workspace(p, "provenance");
-  await p.locator(".doc-item", { hasText: "D.3" }).first().click();
+  // AUDIT N8 · in Fonti the Documents table is the list: the Doc shows its pick
+  await p.locator('[data-win$=":docs"] .tv-card[data-id="D3"] h3').first().click();
   await p.waitForSelector(".rd-img img", { timeout: 8000 });
   await p.waitForFunction(() => document.querySelector(".rd-img img")?.complete, null, { timeout: 8000 });
   await p.waitForTimeout(300);
@@ -847,6 +855,37 @@ test("8.search", "«USM101» + Invio seleziona l'unità, non PD_USM101; la tendi
   await ctx.close();
   return { pass: list.role === "listbox" && list.hits[0]?.[0] === "USM101" && sel1 === "USM101" && !!sel2 && sel2 !== "USM101",
            detail: { list, sel1, sel2 } };
+});
+
+// ── PARTE 9 · una selezione, tutti i pannelli ──────────────────────────────
+test("9.docsel", "documento scelto (nella tabella Documenti di Fonti) → la Doc lo mostra e l'ispettore è del documento", async () => {
+  const { p, ctx } = await open({ doc: "catena", ws: "provenance" });
+  const docList = await p.evaluate(() => { const l = document.querySelector(".doc-list"); return l ? !l.classList.contains("hidden") && l.offsetParent !== null : false; });
+  // a card of the Documents table
+  await p.locator('[data-win$=":docs"] .tv-card[data-id="D3"] h3').first().click();
+  await p.waitForTimeout(500);
+  const r = await p.evaluate(() => ({ sel: window.__EM_DRAG__.selected()[0], doc: document.querySelector(".rd-stage")?.dataset.doc,
+    insp: document.querySelector('[data-win$="inspector"] .insp-head')?.textContent ?? "" }));
+  await ctx.close();
+  return { pass: !docList && r.sel === "D3" && r.doc === "D3" && /document|D\.3/.test(r.insp), detail: { docList, ...r } };
+});
+test("9.reveal", "«Mostra sul canvas» in Fonti usa il grafo sotto la Doc (la Doc resta Doc)", async () => {
+  const { p, ctx } = await open({ doc: "catena", ws: "provenance" });
+  const before = await p.evaluate(() => window.__EM_DRAG__.wins().map((w) => w.type).sort().join());
+  await p.locator(".doc-detail button", { hasText: /Mostra sul canvas|Show on canvas/ }).first().click();
+  await p.waitForTimeout(500);
+  const after = await p.evaluate(() => window.__EM_DRAG__.wins().map((w) => w.type).sort().join());
+  const ws = await p.evaluate(() => document.querySelector("#workspace-bar .ws-tab.active")?.dataset.ws);
+  const sel = await p.evaluate(() => window.__EM_DRAG__.selected()[0]);
+  await ctx.close();
+  return { pass: before === after && ws === "provenance" && !!sel, detail: { before, after, ws, sel } };
+});
+test("9.read", "«Leggi» dice «→ Fonti» quando lo spazio non ha una Doc", async () => {
+  const { p, ctx } = await open({ doc: "catena" });
+  await pick(p, "USM101");
+  const labels = await p.evaluate(() => [...document.querySelectorAll(".insp-chain .chain-acts button")].map((b) => b.textContent));
+  await ctx.close();
+  return { pass: labels.some((l) => /Leggi → Fonti/.test(l)), detail: { labels } };
 });
 
 // ── run ─────────────────────────────────────────────────────────────────────

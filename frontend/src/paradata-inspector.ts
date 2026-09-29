@@ -48,6 +48,8 @@ export interface ChainUi {
   openReading?: (extractorId: string) => void;
   /** LUOGO · open the document on the reading's place (shown, not re-armed) */
   openPlace?: (extractorId: string) => void;
+  /** AUDIT N8 · the words of «Leggi» — «Leggi → Fonti» when it changes space */
+  readLabel?: () => string;
   /** «Usa come valore» */
   useAsValue: (extractorId: string) => void;
   /** the AI chip of a node ("" when the node is not AI-assisted) */
@@ -169,7 +171,7 @@ function readingRow(ui: ChainUi, x: string, depth: number, withProperty = false)
   if (res) desc.appendChild(el("b", "chain-result", res.length > 80 ? `${res.slice(0, 80)}…` : res));
   const acts = el("span", "chain-acts");
   if (src?.kind === "document" && ui.openReading) {
-    const a = el("button", "tv-act", t("chain.read"));
+    const a = el("button", "tv-act", ui.readLabel?.() ?? t("chain.read"));
     a.type = "button";
     a.title = t("chain.readHint");
     a.addEventListener("click", () => ui.openReading!(x));

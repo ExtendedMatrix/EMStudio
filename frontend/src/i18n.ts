@@ -61,6 +61,8 @@ type Dict = Record<string, string>;
 // `emtree.`, `empty.`, `toast.`) so a translator can work a screen at a time and
 // an unused key is findable.
 const EN: Dict = {
+  "receipt.editInStampTo": "Edit in the stamp → Contents",
+  "chain.readToSources": "Read → Sources",
   "outliner.count": "{n} nodes · {e} epochs",
   "outliner.countOf": "{n} of {total}",
   "outliner.byEpoch": "By epoch",
@@ -2014,6 +2016,8 @@ const EN: Dict = {
 
 // ── Italiano: complete, because E.D. works in it ───────────────────────────────
 const IT: Dict = {
+  "receipt.editInStampTo": "Modifica nel timbro → Contenuti",
+  "chain.readToSources": "Leggi → Fonti",
   "outliner.count": "{n} nodi · {e} epoche",
   "outliner.countOf": "{n} su {total}",
   "outliner.byEpoch": "Per epoca",
@@ -4543,6 +4547,8 @@ export function setValidated(code: Locale, on: boolean): void {
 // falls back to English for the rest, the same way the other drafts do; E.D.
 // validates it in the selector like the others.
 const DE: Dict = {
+  "receipt.editInStampTo": "Im Stempel bearbeiten → Inhalte",
+  "chain.readToSources": "Lesen → Quellen",
   "outliner.count": "{n} Knoten · {e} Epochen",
   "outliner.countOf": "{n} von {total}",
   "outliner.byEpoch": "Nach Epoche",
