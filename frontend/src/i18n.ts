@@ -1506,6 +1506,16 @@ const EN: Dict = {
   "add.cat.HDT-O": "HDT-O",
   "add.cat.DTC": "DTC",
   "tools.addNode": "Add node…",
+  // ── SHIFT-A fase 3 · the canvas context menus ──
+  "ctx.addLinked": "Add linked",
+  "ctx.reflowNode": "Reorder this node",
+  "ctx.selectMembers": "Select the members ({n})",
+  "ctx.delete": "Delete",
+  "ctx.reflowLane": "Reorder the lane",
+  "ctx.epochAbove": "New epoch above",
+  "ctx.epochBelow": "New epoch below",
+  "ctx.reflowAll": "Reorder everything",
+  "ctx.reflowPinned": "A pinned node keeps its place: unlock it first.",
 };
 
 // ── Italiano: complete, because E.D. works in it ───────────────────────────────
@@ -2885,6 +2895,16 @@ const IT: Dict = {
   "add.cat.HDT-O": "HDT-O",
   "add.cat.DTC": "DTC",
   "tools.addNode": "Aggiungi nodo…",
+  // ── SHIFT-A fase 3 · the canvas context menus ──
+  "ctx.addLinked": "Aggiungi collegato",
+  "ctx.reflowNode": "Riordina questo nodo",
+  "ctx.selectMembers": "Seleziona i membri ({n})",
+  "ctx.delete": "Elimina",
+  "ctx.reflowLane": "Riordina la corsia",
+  "ctx.epochAbove": "Nuova epoca sopra",
+  "ctx.epochBelow": "Nuova epoca sotto",
+  "ctx.reflowAll": "Riordina tutto",
+  "ctx.reflowPinned": "Un nodo bloccato tiene il suo posto: sbloccalo prima.",
 };
 
 // ── The six other project languages: AI DRAFTS, awaiting validation ───────────
@@ -3664,6 +3684,14 @@ const DE: Dict = {
   "add.created": "{name} erstellt",
   "add.emptyHint": "Shift+A oder Rechtsklick, um einen Knoten hinzuzufügen",
   "tools.addNode": "Knoten hinzufügen…",
+  // ── SHIFT-A fase 3 · the canvas context menus ──
+  "ctx.addLinked": "Verknüpft hinzufügen",
+  "ctx.reflowNode": "Diesen Knoten neu anordnen",
+  "ctx.delete": "Löschen",
+  "ctx.reflowLane": "Bahn neu anordnen",
+  "ctx.epochAbove": "Neue Epoche darüber",
+  "ctx.epochBelow": "Neue Epoche darunter",
+  "ctx.reflowAll": "Alles neu anordnen",
 };
 
 const DICTS: Record<Locale, Dict> = {

@@ -7956,3 +7956,6 @@ body.gesturing-resize * {
   font-size: 11px;
   color: var(--text-faint);
 }
+/* SHIFT-A fase 3 · the node menu's rules and its one destructive verb */
+.ctx-menu .ctx-sep { height: 1px; background: var(--border); margin: 4px 2px; }
+.ctx-menu button.ctx-danger { color: var(--danger, #b42318); }

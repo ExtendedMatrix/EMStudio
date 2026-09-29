@@ -6508,7 +6508,16 @@ function openAddMenu(
   win: Win,
   clientX: number,
   clientY: number,
-  opts: { fromId?: string; alt?: boolean } = {},
+  opts: {
+    fromId?: string;
+    alt?: boolean;
+    /** «Aggiungi collegato ▸» of a node's menu: only the links to the selection */
+    linkedOnly?: boolean;
+    /** where the node is born, when it is not under the client point */
+    at?: { x: number; y: number };
+    /** right-click on empty space: «Riordina tutto» at the foot */
+    reflowAll?: boolean;
+  } = {},
 ): void {
   if (!store) {
     toast("Open a document first");
@@ -6516,7 +6525,7 @@ function openAddMenu(
   }
   if (win.type !== "graph") return;
   if (activeWin().id !== win.id) selectWindow(win.id);
-  const wp = worldAtClient(win, clientX, clientY);
+  const wp = opts.at ?? worldAtClient(win, clientX, clientY);
   if (!wp) return;
   const ctx = winMode(win) as AddContext;
   const alt = !!opts.alt;
@@ -6584,13 +6593,40 @@ function openAddMenu(
     entries: c.state === "on" ? c.items.map((i) => addEntry(i, wp.x, wp.y, alt, i.label)) : [],
   }));
   const extra: AddMenuEntry[] = [];
-  if (ctx === "matrix" && !inContext())
+  if (ctx === "matrix" && !inContext() && !opts.linkedOnly)
     extra.push({
       key: "epoch",
       label: t("add.newEpoch"),
       run: () => addEpochEmMode(),
     });
+  // SHIFT-A fase 3 · the right-click on empty space ends with the Layout of
+  // today, under its new name
+  if (opts.reflowAll)
+    extra.push({ key: "reflow-all", label: t("ctx.reflowAll"), run: () => void layoutAll(false) });
   const linkedAll = [...chain, ...ornaments].map(linkEntry);
+  if (opts.linkedOnly) {
+    showAddMenu({
+      title: t("ctx.addLinked"),
+      context,
+      placeholder: t("add.placeholder"),
+      linkedHeader: sel ? t("add.linked", { name: otherName }) : undefined,
+      linked: chain.map(linkEntry),
+      linkedMore: ornaments.length
+        ? { label: t("add.linkedMore", { name: otherName }), entries: ornaments.map(linkEntry) }
+        : undefined,
+      recent: [],
+      categories: [],
+      extra: [],
+      searchable: linkedAll,
+      matches: (e, q) =>
+        matchesAdd({ label: e.label, alias: e.alias, nodeType: e.nodeType ?? "", description: e.description ?? "", category: e.detail ?? "" }, q),
+      footNote: linkedAll.length ? undefined : t("add.noTarget"),
+      count: t("add.count", { n: linkedAll.length }),
+      noResults: t("add.noResults"),
+      keysHint: t("add.keys"),
+    }, clientX, clientY);
+    return;
+  }
   const needsUnit = ctx === "matrix" && !chain.some((i) => i.category === "Paradata");
   showAddMenu({
     title: t("add.title"),
@@ -19486,7 +19522,12 @@ async function runLayout(fresh: boolean): Promise<void> {
   store.setLayout(layout);
 }
 
-btnLayout.addEventListener("click", async (ev) => {
+/**
+ * «Layout» / «Riordina tutto»: the whole arrangement of the CURRENT view. One
+ * function for the toolbar button and the canvas menu, so the two cannot
+ * drift. `fresh` (Alt) drops the manual arrangement.
+ */
+async function layoutAll(fresh: boolean): Promise<void> {
   if (!store) return;
   btnLayout.disabled = true;
   try {
@@ -19506,7 +19547,6 @@ btnLayout.addEventListener("click", async (ev) => {
       await refreshMatrixViewLayout();
       toast("Layout (filtered subgraph)");
     } else {
-      const fresh = (ev as MouseEvent).altKey;
       await runLayout(fresh); // store.setLayout → onChange → buildScenes + draw
       toast(fresh ? "Fresh layout (em-core)" : "Layout from sketch (em-core)");
     }
@@ -19515,7 +19555,137 @@ btnLayout.addEventListener("click", async (ev) => {
   } finally {
     btnLayout.disabled = false;
   }
+}
+
+btnLayout.addEventListener("click", (ev) => {
+  void layoutAll((ev as MouseEvent).altKey);
 });
+
+/**
+ * SHIFT-A fase 3 · «Riordina questo nodo» / «Riordina la corsia»: forget the
+ * manual position of `ids` and let the layout put them back — ONE From-Sketch
+ * `runLayout` whose sketch lacks just those positions, so every other hand-placed
+ * node stays where it is (invariant 8). One `setLayout` = one undo step, and the
+ * rebuild slides (TOCCARE, 180 ms) because nothing here suppresses it.
+ *
+ * A PINNED node keeps its pin: a pin is a lock, and «riordina» is not «unlock».
+ * In the projections that place nodes themselves (Graph, DTC, Multigraph) a
+ * manual position is an override; forgetting it is the whole reorder.
+ */
+async function reflowNodes(ids: string[]): Promise<void> {
+  if (!store || !ids.length) return;
+  if (view !== "matrix" || inContext()) {
+    const ov = canvasOverrides();
+    if (!ov) return;
+    for (const id of ids) ov.delete(id);
+    buildScenes();
+    draw();
+    return;
+  }
+  const prev = store.doc.layout;
+  const drop = new Set(ids.filter((id) => !(prev?.pinned ?? []).includes(id)));
+  if (!drop.size) {
+    toast(t("ctx.reflowPinned"));
+    return;
+  }
+  const positions = Object.fromEntries(
+    Object.entries(prev?.positions ?? {}).filter(([id]) => !drop.has(id)),
+  );
+  const spaces = prev?.group_spaces
+    ? Object.fromEntries(
+        Object.entries(prev.group_spaces).map(([g, m]) => [
+          g,
+          Object.fromEntries(Object.entries(m).filter(([id]) => !drop.has(id))),
+        ]),
+      )
+    : undefined;
+  reflowMatrix();
+  try {
+    const { computeLayout } = await import("./emcore");
+    const layout = await perfTimeAsync("runLayout", () =>
+      computeLayout(store!.doc.graph, { ...prev, positions, ...(spaces ? { group_spaces: spaces } : {}) }),
+    );
+    store.setLayout(layout);
+  } catch (e) {
+    toast(`layout failed: ${e instanceof Error ? e.message : e}`);
+  }
+}
+
+/** The nodes drawn in a lane (its phases included): what «Riordina la corsia»
+ *  gives back to the layout. Read off the scene, i.e. what the eye calls "in
+ *  this lane". */
+function nodesInLane(laneId: string): string[] {
+  const s = scene();
+  const lane = s?.lanes.find((l) => l.id === laneId);
+  if (!s || !lane) return [];
+  return s.nodes
+    .filter((n) => !n.instanceOf)
+    .filter((n) => {
+      const cy = n.y + n.h / 2;
+      return cy >= lane.y && cy < lane.y + lane.height;
+    })
+    .map((n) => n.id);
+}
+
+/** The lane whose HEADER (the left label strip, 160 screen px) is under a
+ *  canvas point, in Matrix — the same strip a click selects the epoch from. */
+function laneHeaderAt(sx: number, sy: number): { id: string; label: string } | null {
+  if (view !== "matrix" || inContext() || sx >= 160) return null;
+  const s = scene();
+  const vp = viewport();
+  const lane = s?.lanes.find((l) => {
+    const ly = l.y * vp.scale + vp.y;
+    return sy >= ly && sy <= ly + l.height * vp.scale;
+  });
+  return lane ? { id: lane.id, label: lane.label } : null;
+}
+
+/** The top-level stack index of a lane (0 = top), for «Nuova epoca sopra/sotto». */
+function laneStackIndex(laneId: string): number {
+  const lanes = (store?.doc.layout?.swimlanes ?? [])
+    .filter((l) => store!.parentEpoch(l.epoch_id) == null)
+    .sort((a, b) => a.y - b.y);
+  return lanes.findIndex((l) => l.epoch_id === laneId);
+}
+
+/** Right-click on a lane header: reorder the lane, a new epoch above or below. */
+function showLaneMenu(clientX: number, clientY: number, lane: { id: string; label: string }): void {
+  hideContextMenu();
+  const menu = document.createElement("div");
+  menu.className = "ctx-menu";
+  menu.style.left = Math.min(clientX, innerWidth - 210) + "px";
+  menu.style.top = clientY + "px";
+  const header = document.createElement("div");
+  header.className = "ctx-header";
+  header.textContent = lane.label;
+  menu.appendChild(header);
+  const item = (label: string, run: () => void): void => {
+    const b = document.createElement("button");
+    b.textContent = label;
+    b.onclick = () => {
+      hideContextMenu();
+      run();
+    };
+    menu.appendChild(b);
+  };
+  item(t("ctx.reflowLane"), () => void reflowNodes(nodesInLane(lane.id)));
+  const i = laneStackIndex(lane.id);
+  if (i >= 0) {
+    // the boundary above the lane is `i`, the one below `i + 1` — the same
+    // slots the «+» between lanes uses, with the same interpolated dates
+    item(t("ctx.epochAbove"), () => {
+      const { start, end } = insertSlotDates(i);
+      addEpochEmMode(i, start, end);
+    });
+    item(t("ctx.epochBelow"), () => {
+      const { start, end } = insertSlotDates(i + 1);
+      addEpochEmMode(i + 1, start, end);
+    });
+  }
+  document.body.appendChild(menu);
+  ctxMenuEl = menu;
+}
+
 (document.getElementById("graph-layout") as HTMLSelectElement).addEventListener(
   "change",
   (ev) => {
@@ -20348,9 +20518,16 @@ function wireGraphCanvas(canvas: HTMLCanvasElement, winId: string): void {
     const g = hit ? s?.groupsById?.get(hit.id) : undefined;
     const inBody = !!g && !g.folded && wp.y > g.y + g.headerH;
     const win = windowsOf().find((w) => w.id === winId);
+    // SHIFT-A fase 3 · a lane HEADER (the left label strip) has its own menu
+    const rc = canvas.getBoundingClientRect();
+    const laneHead = !hit ? laneHeaderAt(e.clientX - rc.left, e.clientY - rc.top) : null;
+    if (laneHead) {
+      showLaneMenu(e.clientX, e.clientY, laneHead);
+      return;
+    }
     if ((!hit || inBody) && win) {
       hideContextMenu();
-      openAddMenu(win, e.clientX, e.clientY, { alt: e.altKey });
+      openAddMenu(win, e.clientX, e.clientY, { alt: e.altKey, reflowAll: true });
       return;
     }
     // right-clicking a node outside the current selection selects it first
@@ -20359,7 +20536,7 @@ function wireGraphCanvas(canvas: HTMLCanvasElement, winId: string): void {
       hideContextMenu();
       return;
     }
-    showContextMenu(e.clientX, e.clientY);
+    showContextMenu(e.clientX, e.clientY, win);
   });
 }
 
@@ -20639,7 +20816,46 @@ function showMissingParentMenu(
   ctxMenuEl = menu;
 }
 
-function showContextMenu(clientX: number, clientY: number): void {
+/** Delete the node selection — the Delete key and the context menu's «Elimina»,
+ *  one path. Epochs and phases go through their own flows (swimlane + temporal
+ *  PDG cleanup); everything else by the document that owns it. */
+function deleteSelectedNodes(): void {
+  if (!store) return;
+  // delete the WHOLE multi-selection, not just the active node
+  const ids = selectedIds.size ? [...selectedIds] : selectedId ? [selectedId] : [];
+  // epochs & phases must go through their dedicated flows (swimlane + temporal
+  // PDG cleanup, unit re-home/un-attribution, relayout) — the generic
+  // deleteNodes would leave a phantom lane and orphan PDGs.
+  const isEpochish = (id: string) =>
+    storeOfNode(id)?.node(id)?.node_type === "EpochNode";
+  if (ids.length === 1 && isEpochish(ids[0])) {
+    if (store.parentEpoch(ids[0]) != null) promptDeletePhase(ids[0]);
+    else promptDeleteEpoch(ids[0]);
+    return;
+  }
+  const plain = ids.filter((id) => !isEpochish(id));
+  if (plain.length !== ids.length)
+    toast("Epochs/phases: use Delete epoch / Delete phase in the inspector");
+  if (plain.length) {
+    // DAG · one gesture can only ever hold nodes of one document (the canvas
+    // draws one), but group them by owner rather than trusting that: a
+    // selection that survived a document switch would otherwise delete nothing
+    // and say nothing.
+    const byOwner = new Map<DocumentStore, string[]>();
+    for (const id of plain) {
+      const owner = storeOfNode(id);
+      if (!owner) continue;
+      if (!byOwner.has(owner)) byOwner.set(owner, []);
+      byOwner.get(owner)!.push(id);
+    }
+    for (const [owner, ids2] of byOwner) owner.deleteNodes(ids2);
+    select(null);
+  }
+}
+
+/** `win`: the graph window the right-click happened in — captured when the menu
+ *  opens, never re-read when an item is clicked (the focus may have moved). */
+function showContextMenu(clientX: number, clientY: number, win?: Win): void {
   hideContextMenu();
   if (!store || !selectedIds.size) return;
   const ids = [...selectedIds];
@@ -20653,6 +20869,37 @@ function showContextMenu(clientX: number, clientY: number): void {
   header.className = "ctx-header";
   header.textContent = `${ids.length} node${ids.length > 1 ? "s" : ""} selected`;
   menu.appendChild(header);
+  // ── SHIFT-A fase 3 · the verbs on the node itself ─────────────────────────
+  const item = (label: string, run: () => void, cls?: string): HTMLButtonElement => {
+    const b = document.createElement("button");
+    b.textContent = label;
+    if (cls) b.className = cls;
+    b.onclick = () => {
+      hideContextMenu();
+      run();
+    };
+    menu.appendChild(b);
+    return b;
+  };
+  if (ids.length === 1) {
+    // the «Collegato a X» group of the Aggiungi menu, on its own; the node is
+    // born beside X (to its right), which is where the eye already is
+    const sn = scene()?.byId.get(ids[0]);
+    if (win?.type === "graph") item(`${t("ctx.addLinked")} ▸`, () => {
+      openAddMenu(win, clientX + 12, clientY, {
+        linkedOnly: true,
+        at: sn ? { x: sn.x + sn.w + 80, y: sn.y + sn.h / 2 } : undefined,
+      });
+    });
+  }
+  item(t("ctx.reflowNode"), () => void reflowNodes(ids));
+  const mm = buildMembership(store.doc);
+  const members = [...new Set(ids.flatMap((id) => mm.childrenOf.get(id) ?? []))];
+  if (members.length)
+    item(t("ctx.selectMembers", { n: members.length }), () => selectMany(members));
+  const sepTop = document.createElement("div");
+  sepTop.className = "ctx-sep";
+  menu.appendChild(sepTop);
   // NAME1 · a name that breaks the convention gets a one-click fix, and the
   // suggestion is the same one the orange/red label is complaining about (both
   // read `nameStatus`). Only for a single selection: renaming several nodes to
@@ -20706,6 +20953,10 @@ function showContextMenu(clientX: number, clientY: number): void {
     d.textContent = "No legal group for this selection";
     menu.appendChild(d);
   }
+  const sepDel = document.createElement("div");
+  sepDel.className = "ctx-sep";
+  menu.appendChild(sepDel);
+  item(t("ctx.delete"), () => deleteSelectedNodes(), "ctx-danger");
   document.body.appendChild(menu);
   ctxMenuEl = menu;
 }
@@ -20816,36 +21067,7 @@ window.addEventListener("keydown", (e) => {
     store
   ) {
     e.preventDefault();
-    // delete the WHOLE multi-selection, not just the active node
-    const ids = selectedIds.size ? [...selectedIds] : selectedId ? [selectedId] : [];
-    // epochs & phases must go through their dedicated flows (swimlane + temporal
-    // PDG cleanup, unit re-home/un-attribution, relayout) — the generic
-    // deleteNodes would leave a phantom lane and orphan PDGs.
-    const isEpochish = (id: string) =>
-      storeOfNode(id)?.node(id)?.node_type === "EpochNode";
-    if (ids.length === 1 && isEpochish(ids[0])) {
-      if (store.parentEpoch(ids[0]) != null) promptDeletePhase(ids[0]);
-      else promptDeleteEpoch(ids[0]);
-      return;
-    }
-    const plain = ids.filter((id) => !isEpochish(id));
-    if (plain.length !== ids.length)
-      toast("Epochs/phases: use Delete epoch / Delete phase in the inspector");
-    if (plain.length) {
-      // DAG · one gesture can only ever hold nodes of one document (the canvas
-      // draws one), but group them by owner rather than trusting that: a
-      // selection that survived a document switch would otherwise delete nothing
-      // and say nothing.
-      const byOwner = new Map<DocumentStore, string[]>();
-      for (const id of plain) {
-        const owner = storeOfNode(id);
-        if (!owner) continue;
-        if (!byOwner.has(owner)) byOwner.set(owner, []);
-        byOwner.get(owner)!.push(id);
-      }
-      for (const [owner, ids2] of byOwner) owner.deleteNodes(ids2);
-      select(null);
-    }
+    deleteSelectedNodes();
   }
   if ((e.key === "Delete" || e.key === "Backspace") && selectedEdge && store) {
     e.preventDefault();
