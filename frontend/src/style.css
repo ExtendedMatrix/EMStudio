@@ -7959,3 +7959,46 @@ body.gesturing-resize * {
 /* SHIFT-A fase 3 · the node menu's rules and its one destructive verb */
 .ctx-menu .ctx-sep { height: 1px; background: var(--border); margin: 4px 2px; }
 .ctx-menu button.ctx-danger { color: var(--danger, #b42318); }
+
+/* ── SHIFT-A fase 4 · the Log drawer, its button, the node history ── */
+.footer-log {
+  border: 1px solid var(--border-strong); background: var(--bg-panel); color: var(--text);
+  border-radius: var(--radius-sm); font: 600 11px var(--font-sans); padding: 1px 8px; cursor: pointer;
+  margin-right: 6px;
+}
+.footer-log.on { border-color: var(--accent); }
+.footer-log.owed { color: var(--warn-ink, #8a5a00); }
+.log-drawer {
+  position: fixed; left: 8px; right: 8px; bottom: 30px; z-index: 40;
+  display: flex; flex-direction: column; min-height: 120px;
+  background: var(--bg-elevated); color: var(--text);
+  border: 1px solid var(--border-strong); border-radius: 10px 10px 6px 6px;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.22);
+}
+.log-drawer-grip { height: 6px; cursor: ns-resize; flex: none; border-radius: 10px 10px 0 0; }
+.log-drawer-grip:hover { background: var(--bg-hover); }
+.log-drawer-head {
+  display: flex; align-items: center; gap: 12px; padding: 2px 12px 6px;
+  border-bottom: 1px solid var(--border); font-size: 12px; flex: none;
+}
+.log-drawer-head .grow { flex: 1; }
+.log-drawer-lead { color: var(--text-muted); font-size: 11px; }
+.log-drawer-sel { font-size: 11.5px; color: var(--text-muted); display: inline-flex; gap: 4px; align-items: center; }
+.log-drawer-close { border: 0; background: none; font-size: 16px; cursor: pointer; color: var(--text-muted); }
+.log-drawer-body { overflow: auto; padding: 4px 12px 8px; min-height: 0; flex: 1; font-size: 12px; }
+.log-clock { color: var(--text-faint); font-family: var(--font-mono); font-size: 10.5px; }
+.log-node-link {
+  border: 0; background: none; padding: 0; color: var(--brand-ink, var(--brand)); cursor: pointer;
+  text-decoration: underline; font: inherit;
+}
+.insp-history { margin: 14px 0 6px; padding-top: 8px; border-top: 1px solid var(--border); }
+.insp-history-eyebrow {
+  font-size: 10px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase;
+  color: var(--text-muted); margin-bottom: 4px;
+}
+.insp-history-row { display: flex; gap: 10px; font-size: 12px; margin: 3px 0; }
+.insp-history-clock { color: var(--text-faint); font-family: var(--font-mono); font-size: 10.5px; flex: none; }
+.insp-history-none { margin: 0; font-size: 12px; color: var(--text-muted); }
+.shortcuts-table { border-collapse: collapse; width: 100%; font-size: 13px; }
+.shortcuts-table td { padding: 5px 10px; border-bottom: 1px solid var(--border); }
+.shortcuts-key { white-space: nowrap; font-family: var(--font-mono); font-weight: 600; }

@@ -126,6 +126,8 @@ import {
   logInfo,
   logWarn,
   logEntries,
+  logEntriesAbout,
+  entryClock,
   onLogChange,
   renderLogPanel,
   versionBanner,
@@ -151,7 +153,6 @@ import {
   type ThemeMode,
 } from "./theme";
 import { buildNodeList, type NodeListCallbacks } from "./nodelist";
-import { windowIcon } from "./window-icons";
 import { issues as computeIssues, unitOfIssue, type Issue } from "./issues";
 import { CARD_VIEWS, COMPUTED_VIEWS, EMDB_SHEETS, type TableView, type ViewCtx } from "./table-views";
 import { iconUrlFor } from "./icons";
@@ -671,6 +672,22 @@ let selectedId: string | null = null;
 // is what Delete removes); hover is a transient index into the current scene.
 let selectedEdge: EmEdge | null = null;
 let hoverEdgeIdx: number | null = null;
+// SHIFT-A · the Log drawer's state (declared with the other view state: the
+// selection repaints the drawer when «solo la selezione» is on)
+const LOG_DRAWER_KEY = "emstudio.logdrawer.h";
+const logDrawer = {
+  open: false,
+  onlySel: false,
+  h: ((): number => {
+    try {
+      const v = Number(localStorage.getItem(LOG_DRAWER_KEY));
+      return v >= 120 ? v : 200;
+    } catch {
+      return 200;
+    }
+  })(),
+};
+
 let connect: ConnectDrag | null = null;
 /** graph-view "liquid" filters: hidden node / edge types */
 // hidden type sets are DERIVED from the visible circles of the CURRENT view
@@ -2044,6 +2061,7 @@ function renderInspectorInto(host: HTMLElement): void {
     selectedEdge,
   );
   renderInspectorIssues(host);
+  renderNodeHistory(host);
 }
 
 /**
@@ -2113,6 +2131,8 @@ function refreshInspector(): void {
   renderAnnotator();
   refreshSurfaces("inspector");
   renderNameStrip();
+  // SHIFT-A · «solo la selezione» follows the selection
+  if (logDrawer.open && logDrawer.onlySel) renderLogDrawer();
 }
 
 /**
@@ -3262,6 +3282,7 @@ function wireStore(s: DocumentStore): void {
   // Remote-applied ops don't re-emit (DocumentStore suppresses), so no echo.
   s.onOp((op) => {
     if (s !== store) return;
+    traceOp(op); // SHIFT-A · the node history reads this session's own ops
     // P4.3 · a ROOM speaks per-field CRDT operations; a sidecar speaks the
     // store's own op shape. One writing path, two vocabularies at the door —
     // and the translation happens once, where the door is.
@@ -5738,8 +5759,8 @@ const outlinerCallbacks: NodeListCallbacks = {
  * rebuild a list of every node in the graph each time the selection moves.
  */
 const nodeList = {
-  refresh: (): void => refreshSurfaces("emtree"),
-  setSelected: (id: string | null): void => selectInSurfaces("emtree", id),
+  refresh: (): void => refreshSurfaces("outliner"),
+  setSelected: (id: string | null): void => selectInSurfaces("outliner", id),
 };
 
 /*
@@ -6431,17 +6452,19 @@ async function addNodeFromMenu(spec: AddSpec, wx: number, wy: number, alt: boole
     slideSuppressed--;
   }
   ensureCircleVisibleFor(type); // reveal its ring if the filter hid it
-  select(id);
   rememberType(itemKey(spec));
   const epochName = epochId ? String(st.node(epochId)?.name ?? "") : "";
   const shown = String(st.node(id)?.name ?? name);
   const msg = epochName
     ? t("add.createdIn", { name: shown, epoch: epochName })
     : t("add.created", { name: shown });
+  // logged BEFORE the selection, so the inspector's «Storia di questo nodo»
+  // already has the line when it paints
   logInfo(
     other ? `${msg} · ${t("add.linked", { name: String(other.name ?? other.id) })}` : msg,
     other ? [id, other.id] : [id],
   );
+  select(id);
   toastUndo(msg, st);
   draw();
   if (vocabularyFor(type)) openQualiaPicker(id, wx, wy); // pick its label
@@ -10197,7 +10220,8 @@ function applyLanguage(code: Locale): void {
   nodeList.refresh();
   refreshNarrativeView();
   updateToolbar();
-  draw();                   // the canvas draws no chrome, but the legend feeds it
+  refreshLogPanel();        // SHIFT-A · the Log button and its drawer
+  draw();                   // the canvas draws no chrome
 }
 
 document.getElementById("set-language")?.addEventListener("change", (event) => {
@@ -11022,9 +11046,241 @@ function revealFromWarning(nodeId: string): void {
 /** Redraw the Log tab — only when it is the visible one; there is no point
  *  rebuilding a hidden DOM on every sync message. */
 function refreshLogPanel(): void {
-  // same as the EMtree: the log lives in an Inspector WINDOW — as many as there
-  // are, each drawing whichever of its two tabs is up
-  refreshSurfaces("inspector");
+  // SHIFT-A · the log lives in the status bar's DRAWER now (and its button)
+  renderLogDrawer();
+  renderLogButton();
+}
+
+// ---------- SHIFT-A · the LOG: «what happened», a drawer of the status bar ----------
+//
+// It was the second tab of the Inspector, which made one window answer two
+// questions («what is the selection», «what happened»). It is the same
+// `logpanel.ts` with one more mount: the ring of 500 entries is untouched, the
+// panel only gained «solo la selezione» and links to the nodes an entry names.
+
+/** «Log · n», and — A LOG THAT ONLY EXISTS WHEN YOU LOOK AT IT IS NOT A LOG —
+ *  the attention badge: warnings and errors are counted apart, because they are
+ *  what somebody needs to be TOLD about; info lines are a trail you consult. */
+function renderLogButton(): void {
+  const b = document.getElementById("footer-log");
+  if (!b) return;
+  const owed = logAttention();
+  b.textContent = t("log.button", { n: logEntries().length }) + (owed ? ` (${owed})` : "");
+  b.classList.toggle("owed", owed > 0);
+  b.classList.toggle("on", logDrawer.open);
+  b.setAttribute("aria-expanded", String(logDrawer.open));
+  b.title = t("log.buttonTip");
+}
+
+function renderLogDrawer(): void {
+  const el = document.getElementById("log-drawer");
+  const body = document.getElementById("log-drawer-body");
+  if (!el || !body) return;
+  el.classList.toggle("hidden", !logDrawer.open);
+  el.style.height = `${logDrawer.h}px`;
+  if (!logDrawer.open) return;
+  const sel = logDrawer.onlySel
+    ? new Set(selectedIds.size ? selectedIds : selectedId ? [selectedId] : [])
+    : null;
+  preservingScroll(body, () =>
+    renderLogPanel(body, store?.doc ?? null, EM_VERSION, revealFromWarning, {
+      onlyIds: sel,
+      nameOf: (id) => {
+        const n = storeOfNode(id)?.node(id);
+        return n ? String(n.name || n.id) : null;
+      },
+    }),
+  );
+}
+
+function setLogDrawerOpen(open: boolean): void {
+  logDrawer.open = open;
+  renderLogDrawer();
+  renderLogButton();
+}
+
+document.getElementById("footer-log")?.addEventListener("click", () =>
+  setLogDrawerOpen(!logDrawer.open));
+document.getElementById("log-drawer-close")?.addEventListener("click", () =>
+  setLogDrawerOpen(false));
+document.getElementById("log-only-sel")?.addEventListener("change", (e) => {
+  logDrawer.onlySel = (e.target as HTMLInputElement).checked;
+  renderLogDrawer();
+});
+// the top edge resizes it (≥120 px, ≤70 % of the window), remembered per viewer
+document.querySelector<HTMLElement>(".log-drawer-grip")?.addEventListener("pointerdown", (e) => {
+  e.preventDefault();
+  const grip = e.currentTarget as HTMLElement;
+  grip.setPointerCapture(e.pointerId);
+  const y0 = e.clientY;
+  const h0 = logDrawer.h;
+  const move = (ev: PointerEvent): void => {
+    logDrawer.h = Math.round(Math.max(120, Math.min(innerHeight * 0.7, h0 + (y0 - ev.clientY))));
+    renderLogDrawer();
+  };
+  const up = (): void => {
+    grip.removeEventListener("pointermove", move);
+    grip.removeEventListener("pointerup", up);
+    try {
+      localStorage.setItem(LOG_DRAWER_KEY, String(logDrawer.h));
+    } catch {
+      /* a viewer without storage keeps the default */
+    }
+  };
+  grip.addEventListener("pointermove", move);
+  grip.addEventListener("pointerup", up);
+});
+
+// ---------- SHIFT-A · Help ▸ Scorciatoie ----------
+// The gestures that have no button to be discovered by: a table, not a tour.
+function showShortcuts(): void {
+  document.querySelector(".modal.shortcuts")?.remove();
+  const rows: [string, string][] = [
+    ["⇧A", "shortcuts.add"],
+    [t("shortcuts.rclickKey"), "shortcuts.rclick"],
+    [t("shortcuts.cornerKey"), "shortcuts.corner"],
+    ["⌃Space · 2×", "shortcuts.max"],
+    ["/", "shortcuts.search"],
+    ["⌘Z · ⇧⌘Z", "shortcuts.undo"],
+    ["Esc", "shortcuts.esc"],
+  ];
+  const modal = document.createElement("div");
+  modal.className = "modal shortcuts";
+  const card = document.createElement("div");
+  card.className = "modal-card";
+  const head = document.createElement("div");
+  head.className = "modal-head";
+  head.textContent = t("shortcuts.menu");
+  const body = document.createElement("div");
+  body.className = "modal-body";
+  const table = document.createElement("table");
+  table.className = "shortcuts-table";
+  for (const [k, label] of rows) {
+    const tr = document.createElement("tr");
+    const tk = document.createElement("td");
+    tk.className = "shortcuts-key";
+    tk.textContent = k;
+    const tl = document.createElement("td");
+    tl.textContent = t(label);
+    tr.append(tk, tl);
+    table.appendChild(tr);
+  }
+  body.appendChild(table);
+  const foot = document.createElement("div");
+  foot.className = "modal-foot";
+  const ok = document.createElement("button");
+  ok.className = "primary";
+  ok.textContent = t("shortcuts.close");
+  const close = (): void => {
+    modal.remove();
+    document.removeEventListener("keydown", onKey, true);
+  };
+  const onKey = (e: KeyboardEvent): void => {
+    if (e.key === "Escape") {
+      e.stopPropagation();
+      close();
+    }
+  };
+  ok.onclick = close;
+  foot.appendChild(ok);
+  card.append(head, body, foot);
+  modal.appendChild(card);
+  modal.addEventListener("click", (e) => {
+    if (e.target === modal) close();
+  });
+  document.addEventListener("keydown", onKey, true);
+  document.body.appendChild(modal);
+}
+document.getElementById("btn-help-shortcuts")?.addEventListener("click", showShortcuts);
+
+// ---------- SHIFT-A · «Storia di questo nodo» ----------
+//
+// The last entries of the log that NAME the node, and — where the log has
+// nothing — the CRDT operations this session wrote on it (the op stream the
+// sync already sees, kept here in a ring of its own). An hour and a sentence,
+// never an invented «who»: the stamps say that, in the node's own fields.
+
+interface OpTrace {
+  wall: number;
+  op: import("./model").GraphOp;
+}
+const opTrail: OpTrace[] = [];
+function traceOp(op: import("./model").GraphOp): void {
+  opTrail.push({ wall: Date.now(), op });
+  if (opTrail.length > 500) opTrail.splice(0, opTrail.length - 500);
+}
+
+/** The ids an op touches (the node it edits, or the two ends of its edge). */
+function opIds(op: import("./model").GraphOp): string[] {
+  const o = op as unknown as Record<string, unknown>;
+  const ids: string[] = [];
+  if (typeof o.node_id === "string") ids.push(o.node_id);
+  const node = o.node as { id?: string } | undefined;
+  if (node?.id) ids.push(node.id);
+  const edge = o.edge as { source?: string; target?: string } | undefined;
+  if (edge?.source) ids.push(edge.source);
+  if (edge?.target) ids.push(edge.target);
+  return ids;
+}
+
+/** One sentence for an op: the verb and, for an edge, its relation. */
+function opText(op: import("./model").GraphOp): string {
+  const o = op as unknown as Record<string, unknown>;
+  const edge = o.edge as { edge_type?: string } | undefined;
+  const fields = (o.fields as { field?: string }[] | undefined)?.map((f) => f.field).filter(Boolean);
+  const detail = edge?.edge_type
+    ? edgeTypeLabel(edge.edge_type)
+    : fields?.length
+      ? fields.join(", ")
+      : "";
+  return detail ? `${t(`history.op.${String(o.op)}`, undefined, String(o.op))} · ${detail}` : t(`history.op.${String(o.op)}`, undefined, String(o.op));
+}
+
+function nodeHistory(id: string, max = 6): { wall: number; text: string }[] {
+  const fromLog = logEntriesAbout(id, max).map((e) => ({ wall: e.wall, text: e.message }));
+  if (fromLog.length >= max) return fromLog;
+  const logged = new Set(fromLog.map((r) => Math.round(r.wall / 1000)));
+  const fromOps: { wall: number; text: string }[] = [];
+  for (let i = opTrail.length - 1; i >= 0 && fromOps.length < max; i--) {
+    const tr = opTrail[i];
+    if (!opIds(tr.op).includes(id)) continue;
+    // the log already said it in words, in the same second: one line, not two
+    if (logged.has(Math.round(tr.wall / 1000))) continue;
+    fromOps.push({ wall: tr.wall, text: opText(tr.op) });
+  }
+  return [...fromLog, ...fromOps].sort((a, b) => b.wall - a.wall).slice(0, max);
+}
+
+function renderNodeHistory(host: HTMLElement): void {
+  host.querySelector(".insp-history")?.remove();
+  if (!selectedId || !storeOfNode(selectedId)?.node(selectedId)) return;
+  const sec = document.createElement("section");
+  sec.className = "insp-history";
+  const eb = document.createElement("div");
+  eb.className = "insp-history-eyebrow";
+  eb.textContent = t("history.title");
+  sec.appendChild(eb);
+  const rows = nodeHistory(selectedId);
+  if (!rows.length) {
+    const p = document.createElement("p");
+    p.className = "insp-history-none";
+    p.textContent = t("history.none");
+    sec.appendChild(p);
+  }
+  for (const r of rows) {
+    const row = document.createElement("div");
+    row.className = "insp-history-row";
+    const c = document.createElement("span");
+    c.className = "insp-history-clock";
+    c.textContent = entryClock(r);
+    const tx = document.createElement("span");
+    tx.textContent = r.text;
+    row.append(c, tx);
+    sec.appendChild(row);
+  }
+  // at the foot of the inspector's own column, after everything the node IS
+  const col = host.querySelector(".insp-body") ?? host;
+  col.appendChild(sec);
 }
 /** How many log lines are something somebody should be told about.
  *
@@ -11193,7 +11449,6 @@ onLogChange(() => {
   if (owed === lastLogAttention) return;
   renderWarningsPill();
   lastLogAttention = owed;
-  renderAreaHeaders();
 });
 // ── Narrative view (N2) ───────────────────────────────────────────────────
 // Rendered as an overlay over the canvas (Matrix and Graph are built on scenes,
@@ -12582,6 +12837,7 @@ const TRANSFORM_TYPES: WindowType[] = [
   "narrative",
   "table",
   "emtree",
+  "outliner",
   "inspector",
   "doc",
   "viewer",
@@ -17890,17 +18146,15 @@ function viewerEmpty(message: string): HTMLElement {
 
 /** Which panels a window type shows, in tab order. */
 const PANEL_TABS: Partial<Record<WindowType, { id: string; labelKey: string }[]>> = {
-  emtree: [
-    { id: "emtree", labelKey: "panel.multigraph" },
-    { id: "nodelist", labelKey: "panel.outliner" },
-  ],
-  // WIN7 · StratiMiner is NOT here any more: it is a Tools ▸ instrument that
-  // floats, does its job and closes. The Log stays — a running record of what
-  // the document and the session have been doing is a view, not a tool.
-  inspector: [
-    { id: "inspector", labelKey: "panel.inspector" },
-    { id: "logpanel", labelKey: "panel.log" },
-  ],
+  // SHIFT-A · FOUR WINDOWS, FOUR QUESTIONS (E.D., 29–30 set 2026). Each panel
+  // window has ONE panel now, and so no tab strip:
+  //  · EMtree — which graphs are open, with which sources (the multigraph);
+  //  · Outliner — what is in the active graph (it was EMtree's second tab);
+  //  · Inspector — what the selection is;
+  //  · the Log — what happened: a drawer of the status bar, not a tab here.
+  emtree: [{ id: "emtree", labelKey: "panel.multigraph" }],
+  outliner: [{ id: "nodelist", labelKey: "panel.outliner" }],
+  inspector: [{ id: "inspector", labelKey: "panel.inspector" }],
 };
 
 /*
@@ -17973,12 +18227,6 @@ function mountPanel(panelId: string, host: HTMLElement, win: Win): PanelMount {
   }
   if (panelId === "inspector") {
     const paint = (): void => renderInspectorInto(host);
-    paint();
-    return { refresh: paint };
-  }
-  if (panelId === "logpanel") {
-    const paint = (): void =>
-      renderLogPanel(host, store?.doc ?? null, EM_VERSION, revealFromWarning);
     paint();
     return { refresh: paint };
   }
@@ -18169,10 +18417,8 @@ function buildAreaHeader(win: Win): DocumentFragment {
   const typeTog = document.createElement("button");
   typeTog.className = "dd-toggle win-type-toggle";
   typeTog.title = t("win.typeTitle");
-  // an EMtree window on its Outliner tab IS the outliner, and says so
-  const showsOutliner = type === "emtree" && panelIdOf(win) === "nodelist";
-  const typeIcon = showsOutliner ? windowIcon("outliner") : WINDOW_TYPE_META[type].icon;
-  const typeName = showsOutliner ? t("panel.outliner") : t(WINDOW_TYPE_META[type].labelKey);
+  const typeIcon = WINDOW_TYPE_META[type].icon;
+  const typeName = t(WINDOW_TYPE_META[type].labelKey);
   typeTog.innerHTML =
     `<span class="win-type-icon">${typeIcon}</span>` +
     `<span class="win-type-label">${escapeHtml(typeName)}</span>` +
@@ -18692,27 +18938,15 @@ function buildHeaderStrip(win: Win): HTMLElement {
     return strip;
   }
 
+  // one panel = no tabs to choose between (SHIFT-A: every panel window has one)
   const tabs = PANEL_TABS[win.type];
-  if (tabs) {
+  if (tabs && tabs.length > 1) {
     const showing = panelIdOf(win);
     for (const tab of tabs) {
       const chip = document.createElement("button");
       chip.className = "panel-tab win-strip-tab"
         + (tab.id === showing ? " active" : "");
-      // A LOG THAT ONLY EXISTS WHEN YOU LOOK AT IT IS NOT A LOG.
-      //
-      // Measured on 5 September: `#logpanel` was empty in the DOM after a
-      // perfectly successful open, and the honest reading of an empty element is
-      // «there is nothing». There WAS: `logpanel.ts` keeps a 500-entry ring
-      // buffer whether or not the panel is mounted, and opening the tab showed
-      // all of it at once. So nothing was lost — but nothing said so either.
-      //
-      // The count says so, and only for what somebody needs to be TOLD about:
-      // warnings and errors. Info lines are a trail you go and consult; a badge
-      // for those would be a number that is always on and therefore never read.
-      const owed = tab.id === "logpanel" ? logAttention() : 0;
-      chip.textContent = t(tab.labelKey) + (owed ? ` (${owed})` : "");
-      if (owed) chip.classList.add("win-strip-tab-owed");
+      chip.textContent = t(tab.labelKey);
       chip.addEventListener("click", (e) => {
         e.stopPropagation();
         setWinCurrent(win, "panel", tab.id);
@@ -19169,6 +19403,7 @@ const WINDOW_MENUS: Record<WindowType, WinMenu[]> = {
   // are created and removed through the SAME EM-Data mutators the Documents
   // sheet uses (one way to make a document, whichever window you are in).
   emtree: [],
+  outliner: [],
   inspector: [],
   // VIEWER · nothing to command: it follows the selection and shows what is
   // there. A menu offering "open" or "zoom" would be a viewer pretending to be
@@ -21140,6 +21375,7 @@ void wireDesktopDeepLink();
 initI18n();
 populateLanguageSelect();
 renderWarningsPill();
+renderLogButton(); // SHIFT-A · «Log · n» in the status bar
 // PELLE · the canvas face (Sora) arrives after the first frame; one redraw when
 // it is in, so the drawing does not stay in the fallback until the next click.
 whenCanvasFontsReady(() => draw());

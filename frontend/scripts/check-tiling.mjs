@@ -291,4 +291,27 @@ const eq = (got, want, what) => {
   eq(W.winMode(t), "dtc", "the typed graph reader agrees with the generic one");
 }
 
+// ── SHIFT-A · a SAVED arrangement is migrated: EMtree/nodelist → Outliner ────
+//
+// An EMtree window left on its `nodelist` tab WAS the outliner; it comes back as
+// an `outliner` window. An Inspector left on `logpanel` forgets the tab (the Log
+// is a drawer now). The rest passes through untouched — and a second pass
+// changes nothing (idempotent), so a migrated save stays migrated.
+{
+  const out = W.migrateWin({ id: "a", type: "emtree", state: { "current.panel": "nodelist", keep: 1 } });
+  eq([out.type, out.state["current.panel"], out.state.keep], ["outliner", undefined, 1],
+     "emtree on its nodelist tab → an outliner window, other state kept");
+  const tree = W.migrateWin({ id: "b", type: "emtree", state: { "current.panel": "emtree" } });
+  eq([tree.type, tree.state["current.panel"]], ["emtree", "emtree"],
+     "an EMtree on the multigraph stays an EMtree");
+  const insp = W.migrateWin({ id: "c", type: "inspector", state: { "current.panel": "logpanel" } });
+  eq([insp.type, insp.state["current.panel"]], ["inspector", undefined],
+     "an Inspector left on the Log forgets the tab");
+  eq(W.migrateWin(out), out, "a migrated window passes through unchanged");
+  const g = { id: "d", type: "graph", state: { mode: "dtc" } };
+  eq(W.migrateWin(g), g, "every other window is untouched");
+  ok(W.WINDOW_TYPE_META.outliner?.labelKey === "win.outliner",
+     "the outliner has its own type entry (icon + label)");
+}
+
 console.log(`tiling: ${checks} checks passed`);

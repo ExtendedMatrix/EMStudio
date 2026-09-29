@@ -350,7 +350,7 @@ export function registerBuiltinSurfaces(deps: SurfaceDeps): void {
   // windows side by side are two live inspectors. `panelIdOf(win)` was already
   // per-window — the right thing written in advance — so which tab each one
   // shows was never the part that was broken.
-  const panelSurface = (id: "emtree" | "inspector"): SurfaceType => ({
+  const panelSurface = (id: "emtree" | "outliner" | "inspector"): SurfaceType => ({
     id,
     create(): Surface {
       let root: HTMLElement | null = null;
@@ -410,6 +410,8 @@ export function registerBuiltinSurfaces(deps: SurfaceDeps): void {
     },
   });
   registerSurfaceType(panelSurface("emtree"));
+  // SHIFT-A · the outliner, a window type of its own: the same panel surface
+  registerSurfaceType(panelSurface("outliner"));
   registerSurfaceType(panelSurface("inspector"));
 
   // ── NARRATIVE ────────────────────────────────────────────────────────────

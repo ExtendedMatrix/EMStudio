@@ -47,16 +47,55 @@ const eq = (got, want, what) => {
   eq(W.activeWorkspace(), "canvas", "a persisted id pointing at a parked tab falls back to canvas");
   ok(W.applyArrangement("canvas"), "the Studio arrangement applies");
   const ids = W.paneIds(W.layoutOf("canvas"));
-  eq(W.windowsOf("canvas").map((w) => w.type), ["graph", "emtree", "inspector"],
+  eq(W.windowsOf("canvas").map((w) => w.type), ["graph", "outliner", "inspector"],
      "three windows: graph (the anchor), outliner, inspector");
   eq(ids.map((id) => W.windowsOf("canvas").find((w) => w.id === id).type),
-     ["emtree", "graph", "inspector"], "left to right: outliner | graph | inspector");
-  eq(W.windowsOf("canvas")[1].state["current.panel"], "nodelist",
-     "the EMtree window opens on its Outliner tab");
+     ["outliner", "graph", "inspector"], "left to right: outliner | graph | inspector");
+  // SHIFT-A (1 ott 2026) · the outliner is a WINDOW TYPE of its own, not the
+  // second tab of an EMtree window: nothing to open it «on»
+  eq(W.windowsOf("canvas")[1].state["current.panel"], undefined,
+     "the Outliner is its own window type, with no tab to open on");
   eq(W.winMode(W.windowsOf("canvas")[0]), "matrix", "the graph opens in Matrix");
   const after = JSON.parse(mem.get("emstudio.windows"));
   ok(after.dtc && after.dtc.activeId === "dtc:1",
      "the parked tab's saved arrangement survives the next save");
+}
+
+// ── 1a · SHIFT-A · a saved Studio from before the Outliner was a window ─────
+//
+// The arrangement is loaded as it was saved — and on the way in, the EMtree
+// window on its Outliner tab becomes an Outliner window, and the Inspector that
+// was showing the Log shows the Inspector. The tree (who is where) is untouched.
+{
+  mem.set("emstudio.workspace", "canvas");
+  mem.set("emstudio.windows", JSON.stringify({
+    canvas: {
+      wins: [
+        { id: "canvas:1", type: "graph", state: { mode: "matrix" } },
+        { id: "canvas:2", type: "emtree", state: { "current.panel": "nodelist" } },
+        { id: "canvas:3", type: "inspector", state: { "current.panel": "logpanel" } },
+      ],
+      activeId: "canvas:1",
+      layout: { kind: "split", dir: "row", ratio: 0.2, a: { kind: "leaf", winId: "canvas:2" },
+                b: { kind: "split", dir: "row", ratio: 0.8, a: { kind: "leaf", winId: "canvas:1" },
+                     b: { kind: "leaf", winId: "canvas:3" } } },
+    },
+  }));
+  const b = await esbuild.build({ entryPoints: [`${SRC}workspace.ts`], bundle: true,
+                                  format: "esm", write: false, logLevel: "silent" });
+  const W = await import("data:text/javascript;base64," +
+    Buffer.from(b.outputFiles[0].text).toString("base64") + "#migration");
+  const wins = W.windowsOf("canvas");
+  eq(wins.map((w) => w.type), ["graph", "outliner", "inspector"],
+     "saved emtree/nodelist comes back as an Outliner window");
+  eq([wins[1].state["current.panel"], wins[2].state["current.panel"]], [undefined, undefined],
+     "…and neither it nor the Inspector keeps a tab that no longer exists");
+  eq(W.paneIds(W.layoutOf("canvas")), ["canvas:2", "canvas:1", "canvas:3"],
+     "the arrangement is the one that was saved: outliner | graph | inspector");
+  await Promise.resolve();
+  eq(JSON.parse(mem.get("emstudio.windows")).canvas.wins.map((w) => w.type),
+     ["graph", "outliner", "inspector"], "…and the save is rewritten once, migrated");
+  mem.delete("emstudio.windows");
 }
 
 // ── 1b · the arrangement verbs the gestures call ────────────────────────────

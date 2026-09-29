@@ -62,6 +62,20 @@ export const logInfo = (m: string, ids?: string[]): void => push("info", m, ids)
 export const logWarn = (m: string, ids?: string[]): void => push("warn", m, ids);
 export const logError = (m: string, ids?: string[]): void => push("error", m, ids);
 
+/** SHIFT-A · the entries ABOUT one node, newest first — the inspector's
+ *  «Storia di questo nodo» reads the ring through this, not a copy of it. */
+export function logEntriesAbout(nodeId: string, max = 6): LogEntry[] {
+  const out: LogEntry[] = [];
+  for (let i = entries.length - 1; i >= 0 && out.length < max; i--)
+    if (entries[i].ids?.includes(nodeId)) out.push(entries[i]);
+  return out;
+}
+
+/** hh:mm:ss of an entry, local time. */
+export function entryClock(e: { wall: number }): string {
+  return new Date(e.wall).toTimeString().slice(0, 8);
+}
+
 export function logEntries(): readonly LogEntry[] {
   return entries;
 }
@@ -245,11 +259,19 @@ const expanded = new Set<string>();
  *  main.ts, which owns selection and the viewport. */
 export type RevealFn = (nodeId: string) => void;
 
+/** SHIFT-A · the drawer's reading of the same panel: «solo la selezione» (the
+ *  ids an entry must name one of) and the names of the nodes it links to. */
+export interface LogPanelOptions {
+  onlyIds?: ReadonlySet<string> | null;
+  nameOf?: (id: string) => string | null;
+}
+
 export function renderLogPanel(
   container: HTMLElement,
   doc: EmDocument | null,
   readWithVersion: string,
   onReveal?: RevealFn,
+  opts: LogPanelOptions = {},
 ): void {
   container.textContent = "";
 
@@ -282,7 +304,7 @@ export function renderLogPanel(
     head.addEventListener("click", () => {
       if (expanded.has(g.key)) expanded.delete(g.key);
       else expanded.add(g.key);
-      renderLogPanel(container, doc, readWithVersion, onReveal);
+      renderLogPanel(container, doc, readWithVersion, onReveal, opts);
     });
     box.appendChild(head);
     if (open) {
@@ -326,7 +348,11 @@ export function renderLogPanel(
   }
 
   // — activity —
-  const actHead = el("div", "log-section", `Activity (${entries.length})`);
+  const only = opts.onlyIds ?? null;
+  const shown = only
+    ? entries.filter((e) => e.ids?.some((id) => only.has(id)))
+    : entries;
+  const actHead = el("div", "log-section", `Activity (${shown.length})`);
   const clear = el("button", "log-clear", "clear");
   clear.addEventListener("click", () => clearLog());
   actHead.appendChild(clear);
@@ -334,9 +360,19 @@ export function renderLogPanel(
 
   const log = el("ul", "log-list log-activity");
   // Newest first: the thing that just happened is the thing being looked for.
-  for (const e of [...entries].reverse()) {
+  for (const e of [...shown].reverse()) {
     const li = el("li", `log-${e.level}`);
-    li.textContent = `${LEVEL_MARK[e.level]} ${e.message}`;
+    li.appendChild(el("span", "log-clock", entryClock(e)));
+    li.appendChild(document.createTextNode(` ${LEVEL_MARK[e.level]} ${e.message}`));
+    // SHIFT-A · the nodes an entry is about are LINKS: a click selects and
+    // centres, the same reveal the warnings use
+    for (const id of e.ids ?? []) {
+      const name = opts.nameOf?.(id);
+      if (!name || !onReveal) continue;
+      const a = el("button", "log-node-link", name);
+      a.addEventListener("click", () => onReveal(id));
+      li.append(" ", a);
+    }
     log.appendChild(li);
   }
   container.appendChild(log);

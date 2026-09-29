@@ -31,6 +31,12 @@ export type WindowType =
   // WIN6 · the side panels became window types of their own: everything in the
   // shell is a window now, so anything can be tiled, resized and focused.
   | "emtree"
+  // SHIFT-A · the OUTLINER is a window of its own (1 ott 2026). It was the
+  // `nodelist` tab of the EMtree, and the two answer different questions:
+  // EMtree «which graphs are open, with which sources», Outliner «what is in the
+  // active graph». Four windows, four questions (with the Inspector «what is the
+  // selection» and the Log «what happened»).
+  | "outliner"
   | "inspector"
   // VIEWER · a preview surface: the resource the current element points at,
   // shown as itself. It PLACES nothing (no provider in RESOURCE_PROVIDERS), so
@@ -223,7 +229,7 @@ const BUILTIN_WORKSPACES: WorkspacePreset[] = [
     arrangement: {
       wins: [
         { name: "canvas", type: "graph", state: { mode: "matrix" } },
-        { name: "outliner", type: "emtree", state: { "current.panel": "nodelist" } },
+        { name: "outliner", type: "outliner" },
         { name: "inspector", type: "inspector" },
       ],
       active: "canvas",
@@ -493,6 +499,7 @@ export const WINDOW_TYPE_META: Record<WindowType, { icon: string; labelKey: stri
   table: { icon: windowIcon("table"), labelKey: "win.tabular" },
   doc: { icon: windowIcon("doc"), labelKey: "win.doc" },
   emtree: { icon: windowIcon("emtree"), labelKey: "win.emtree" },
+  outliner: { icon: windowIcon("outliner"), labelKey: "win.outliner" },
   inspector: { icon: windowIcon("inspector"), labelKey: "win.inspector" },
   viewer: { icon: windowIcon("viewer"), labelKey: "win.viewer" },
   storage: { icon: windowIcon("storage"), labelKey: "win.storage" },
@@ -619,6 +626,32 @@ function seedRegistry(): Registry {
   return out;
 }
 
+/**
+ * SHIFT-A · the migration of a SAVED window (1 ott 2026).
+ *
+ * An EMtree window left on its `nodelist` tab WAS the outliner — the header even
+ * said so — so it comes back as an `outliner` window, without the tab. An
+ * Inspector left on the `logpanel` tab forgets it: the Log is a drawer of the
+ * status bar now, and the Inspector has one panel. Pure, and idempotent: a
+ * window already migrated passes through unchanged.
+ */
+export function migrateWin(w: Win): Win {
+  const state = { ...(w.state ?? {}) };
+  if (w.type === "emtree" && state["current.panel"] === "nodelist") {
+    delete state["current.panel"];
+    return { ...w, type: "outliner", state };
+  }
+  if (w.type === "inspector" && state["current.panel"] === "logpanel") {
+    delete state["current.panel"];
+    return { ...w, state };
+  }
+  return w.state ? w : { ...w, state };
+}
+
+/** Set when `loadRegistry` migrated a saved window: the save is rewritten once,
+ *  so what is on disk says what is on screen. */
+let migratedOnLoad = false;
+
 /** Restore the registry, falling back to the seed for anything malformed — a
  *  corrupted arrangement must never keep the app from opening. */
 function loadRegistry(): Registry {
@@ -635,8 +668,12 @@ function loadRegistry(): Registry {
         (w) => w && typeof w.id === "string" && typeof w.type === "string",
       );
       if (!wins.length) continue;
+      const migrated = wins.map((w) => migrateWin({ ...w, state: w.state ?? {} }));
+      if (migrated.some((w, i) => w.type !== wins[i].type ||
+          w.state["current.panel"] !== (wins[i].state ?? {})["current.panel"]))
+        migratedOnLoad = true;
       const restored: WorkspaceWindows = {
-        wins: wins.map((w) => ({ ...w, state: w.state ?? {} })),
+        wins: migrated,
         activeId: wins.some((w) => w.id === entry.activeId)
           ? entry.activeId
           : wins[0].id,
@@ -689,6 +726,9 @@ const parkedSaved: Record<string, unknown> = (() => {
     return {};
   }
 })();
+
+// SHIFT-A · a migrated arrangement is written back once, at load
+if (migratedOnLoad) queueMicrotask(() => persistWindows());
 
 function persistWindows(): void {
   try {

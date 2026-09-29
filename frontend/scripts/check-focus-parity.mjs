@@ -76,7 +76,11 @@ const CONVERTED = {
   // four PANELS themselves, which were elements taken from the document at boot
   // and moved about — the last thing in this application that was one by
   // definition.
-  emtree:    ["panel-view", "panel-view-tabs", "panel-view-body", "emtree", "nodelist"],
+  emtree:    ["panel-view", "panel-view-tabs", "panel-view-body", "emtree"],
+  // 1 ott 2026 (SHIFT-A) · the outliner left the EMtree's tabs for a window type
+  // of its own, and the log left the Inspector's for the status bar's drawer —
+  // their old singleton ids are still asserted absent, under their new owners
+  outliner:  ["nodelist"],
   inspector: ["inspector", "logpanel"],
   // 14 set 2026 · the last two. The narrative was the one type that was also a
   // MODE — an overlay over the canvas — which is why its surface had to be one
