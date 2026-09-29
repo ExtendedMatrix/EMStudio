@@ -87,6 +87,9 @@ export interface RenderState {
    *  corner, drawn over the node and outside the layout — the node, its size
    *  and its colours stay what `em_visual_rules` says. */
   warnIds?: Set<string> | null;
+  /** LEGENDA · the edge type picked in this window's legend: drawn on top at
+   *  full strength, the others faded. Per window, never in the document. */
+  highlightEdgeType?: string | null;
 }
 
 /** Label ink for a node: default, ORANGE when its name has a problem, RED when
@@ -423,6 +426,66 @@ function upwardConflict(scene: Scene, e: Scene["edges"][number]): boolean {
   return tg.y + 0.5 < s.y; // target above source → arrow points up → conflict
 }
 
+/** How one edge is stroked, beyond its type. */
+export interface EdgeStrokeOpts {
+  /** the zoom correction every width and dash is divided by: 1/√scale */
+  k: number;
+  arrowSize: number;
+  bridgeR: number;
+  /** points up against invariant 3: red, solid, at least 2.5 */
+  conflict?: boolean;
+  /** DTCEMS1 · a link to a parent that did not resolve: its own long dash */
+  unresolved?: boolean;
+  /** DTCEMS2 · a draft edge: faded, not coloured */
+  draft?: boolean;
+  /** the hovered node's edges, or the relation picked in the legend: full
+   *  strength, double width */
+  emphasis?: boolean;
+  /** another relation is picked in the legend: this one steps back */
+  faded?: boolean;
+}
+
+/**
+ * THE stroke of an edge: colour, alpha, width, dash and arrowhead, from its
+ * type's `edge_style` (em_visual_rules) and the theme's ink.
+ *
+ * One function, because two callers draw edges: the canvas, and the legend's
+ * samples (`legend.ts`), which hand it a short straight route. A legend drawn
+ * any other way would one day stop looking like the canvas it explains.
+ */
+export function strokeEdge(
+  ctx: CanvasRenderingContext2D,
+  route: EdgeRoute,
+  edgeType: string | undefined,
+  o: EdgeStrokeOpts,
+): void {
+  const st = edgeStyle(edgeType);
+  const conflict = !!o.conflict;
+  // CONN-NIGHT: colour from the THEME (edgeInk), dash pattern from edgeStyle.
+  const col = conflict ? CONFLICT_COLOR : edgeInk(edgeType);
+  ctx.strokeStyle = col;
+  if (o.emphasis) {
+    ctx.globalAlpha = 1;
+    ctx.lineWidth = st.width * 2 * o.k;
+    ctx.setLineDash(st.dash.map((d) => d * o.k));
+  } else {
+    ctx.globalAlpha = conflict ? 1 : edgeType === "is_after" ? 0.85 : 0.45;
+    if (o.draft) ctx.globalAlpha = 0.28;
+    if (o.faded) ctx.globalAlpha *= 0.2;
+    ctx.lineWidth = (conflict ? Math.max(st.width, 2.5) : st.width) * o.k;
+    ctx.setLineDash(conflict ? [] : o.unresolved
+      ? [11 * o.k, 7 * o.k]
+      : st.dash.map((d) => d * o.k));
+  }
+  ctx.beginPath();
+  traceRoute(ctx, route, o.bridgeR);
+  ctx.stroke();
+  ctx.setLineDash([]);
+  if (!SYMMETRIC_EDGES.has(edgeType ?? ""))
+    drawArrowhead(ctx, route, o.emphasis ? o.arrowSize * 1.4 : o.arrowSize, col);
+  ctx.globalAlpha = 1;
+}
+
 export function render(
   ctx: CanvasRenderingContext2D,
   scene: Scene,
@@ -521,7 +584,12 @@ export function render(
   const { routes, visible } = routesFor(scene, state);
   const bridgeR = 3.5;
   const arrowSize = 6 / Math.sqrt(vp.scale);
+  const k = 1 / Math.sqrt(vp.scale);
   const accent: number[] = [];
+  // LEGENDA · a relation picked in the legend: its edges drawn last and at full
+  // strength, every other one faded. A view state, never a document fact.
+  const lit = state.highlightEdgeType ?? null;
+  const litIdx: number[] = [];
   for (let i = 0; i < scene.edges.length; i++) {
     if (!visible[i]) continue;
     const e = scene.edges[i];
@@ -529,14 +597,11 @@ export function render(
       accent.push(i);
       continue;
     }
-    const st = edgeStyle(e.edge.edge_type);
-    const conflict = upwardConflict(scene, e);
-    // CONN-NIGHT: colour from the THEME (edgeInk), dash pattern from edgeStyle.
-    const col = conflict ? CONFLICT_COLOR : edgeInk(e.edge.edge_type);
-    ctx.strokeStyle = col;
-    ctx.globalAlpha = conflict ? 1 : e.edge.edge_type === "is_after" ? 0.85 : 0.45;
-    ctx.lineWidth =
-      (conflict ? Math.max(st.width, 2.5) : st.width) / Math.sqrt(vp.scale);
+    const type = e.edge.edge_type ?? "";
+    if (lit && type === lit) {
+      litIdx.push(i);
+      continue;
+    }
     // DTCEMS1 · the link to a parent that did not resolve. A DRAWING rule about
     // a drawing-only construct — a chain read off the disk is in no graph — and
     // NOT an EM edge type invented at a call site.
@@ -548,35 +613,42 @@ export function render(
     // signal identical to its background.
     const mark = (e.edge as { data?: { unresolved?: boolean; draft?: boolean } })
       .data;
-    const unresolved = !!mark?.unresolved;
-    // DTCEMS2 · una BOZZA non è ancora niente: nessuno di questi archi esiste,
-    // né nel documento né sul disco. Attenuata, non colorata — un colore avrebbe
-    // detto «guarda qui», e quello che va detto è «non c'è ancora».
-    if (mark?.draft) ctx.globalAlpha = 0.28;
-    ctx.setLineDash(conflict ? [] : unresolved
-      ? [11 / Math.sqrt(vp.scale), 7 / Math.sqrt(vp.scale)]
-      : st.dash.map((d) => d / Math.sqrt(vp.scale)));
+    strokeEdge(ctx, routes[i], e.edge.edge_type, {
+      k,
+      arrowSize,
+      bridgeR,
+      conflict: upwardConflict(scene, e),
+      unresolved: !!mark?.unresolved,
+      // DTCEMS2 · una BOZZA non è ancora niente: nessuno di questi archi esiste,
+      // né nel documento né sul disco. Attenuata, non colorata — un colore avrebbe
+      // detto «guarda qui», e quello che va detto è «non c'è ancora».
+      draft: !!mark?.draft,
+      faded: !!lit,
+    });
+  }
+  for (const i of litIdx) {
+    const e = scene.edges[i];
+    // the ochre halo of a picked connector under it (the selection's signal),
+    // so a short edge still reads at full-figure zoom; the edge's own stroke —
+    // colour, dash, arrow — stays on top, the one the legend shows
+    ctx.lineCap = "round";
+    ctx.globalAlpha = 0.32;
+    ctx.strokeStyle = accentColor();
+    ctx.lineWidth = (edgeStyle(e.edge.edge_type).width + 7) * k;
     ctx.beginPath();
     traceRoute(ctx, routes[i], bridgeR);
     ctx.stroke();
-    ctx.setLineDash([]);
-    if (!SYMMETRIC_EDGES.has(e.edge.edge_type ?? ""))
-      drawArrowhead(ctx, routes[i], arrowSize, col);
+    ctx.lineCap = "butt";
+    ctx.globalAlpha = 1;
+    strokeEdge(ctx, routes[i], e.edge.edge_type, {
+      k, arrowSize, bridgeR, conflict: upwardConflict(scene, e), emphasis: true,
+    });
   }
   for (const i of accent) {
     const e = scene.edges[i];
-    const st = edgeStyle(e.edge.edge_type);
-    const col = upwardConflict(scene, e) ? CONFLICT_COLOR : edgeInk(e.edge.edge_type);
-    ctx.strokeStyle = col;
-    ctx.globalAlpha = 1;
-    ctx.lineWidth = (st.width * 2) / Math.sqrt(vp.scale);
-    ctx.setLineDash(st.dash.map((d) => d / Math.sqrt(vp.scale)));
-    ctx.beginPath();
-    traceRoute(ctx, routes[i], bridgeR);
-    ctx.stroke();
-    ctx.setLineDash([]);
-    if (!SYMMETRIC_EDGES.has(e.edge.edge_type ?? ""))
-      drawArrowhead(ctx, routes[i], arrowSize * 1.4, col);
+    strokeEdge(ctx, routes[i], e.edge.edge_type, {
+      k, arrowSize, bridgeR, conflict: upwardConflict(scene, e), emphasis: true,
+    });
   }
   ctx.globalAlpha = 1;
   ctx.setLineDash([]);

@@ -706,6 +706,20 @@ export function edgeTypeLabel(edgeType: string): string {
   return EDGE_TYPES[edgeType]?.label ?? edgeType;
 }
 
+/** LEGENDA · the human label of an edge type in the ACTIVE locale: the
+ *  translations sidecar's entry for the edge (keyed by edge_type, the same shape
+ *  as a class: `label[locale]`), then the datamodel's own English `label`, then
+ *  the edge_type itself. Today the sidecar carries no edge entries, so this is
+ *  `edgeTypeLabel`; the day it does, every caller speaks the language. */
+export function edgeLabel(edgeType: string): string {
+  const field = _TRANSLATIONS[edgeType]?.label;
+  if (field) {
+    const loc = field[getLocale()];
+    if (typeof loc === "string" && loc.trim()) return loc;
+  }
+  return edgeTypeLabel(edgeType);
+}
+
 export function edgeTypeDescription(edgeType: string): string {
   return EDGE_TYPES[edgeType]?.description ?? "";
 }

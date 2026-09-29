@@ -143,6 +143,7 @@ import {
   type NameCheck,
 } from "./naming";
 import {
+  activeTheme,
   applyTheme,
   canvasFont,
   canvasTheme,
@@ -159,6 +160,7 @@ import { iconUrlFor } from "./icons";
 import { buildOverview, type OverviewApi } from "./overview";
 import { edgeStyle } from "./palette";
 import { glyphMarkupFor, typeIconElement } from "./type-icons";
+import { buildLegendPanel, legendContent, showLegendModal } from "./legend";
 import { createResourceThumb } from "./resource-preview";
 import {
   addCategories,
@@ -1593,6 +1595,8 @@ interface GraphPaint {
   live: LiveGesture | null;
   /** this window's own minimap, or null while it has none yet */
   overview: OverviewApi | null;
+  /** LEGENDA · the edge type picked in this window's legend */
+  highlightEdgeType?: string | null;
 }
 
 function paintGraphWindow(p: GraphPaint): void {
@@ -1648,6 +1652,7 @@ function paintGraphWindow(p: GraphPaint): void {
       nameStatus, // NAME1: orange/red labels, one answer shared with the menu
       warnIds: warnedNodes, // STRUTTURA · the «!» on a node with a warning
       peerSelections: hubPeerSelections,   // P4.3 · awareness, never a lock
+      highlightEdgeType: p.highlightEdgeType ?? null,
     },
     w,
     h,
@@ -2470,13 +2475,75 @@ function promptDeleteEpoch(epochId: string): void {
 }
 
 /*
- * GONE (1 ott 2026, SHIFT-A) · `renderLegendInto` / `updateLegend`, the
- * connector legend. It lived in the graph window's resources panel, next to the
- * node palette, and it left with it: that panel has no provider now. What an
- * edge MEANS is still on screen where it is asked — the connector tooltip on
- * hover (type + endpoints) and the filter panel's circles of detail, which list
- * the relations by name.
+ * LEGENDA (2 ott 2026) · the connector legend is back, BESIDE the graph and on
+ * request. It left with the palette (SHIFT-A fase 2, `0352519`, where it was
+ * `renderLegendInto` in the graph window's resources panel); now it is a
+ * floating box in the bottom-left corner of a graph window, opened from the
+ * header's «⇢» beside the «+». What it shows, and how its samples are drawn,
+ * is `legend.ts`.
+ *
+ * Its state is the WINDOW's, never the document's: open or closed and the
+ * «Nodes» fold persist with the window (`winCurrent`, so it is still open next
+ * session for whoever wants it); the relation picked on the canvas lives in this
+ * map only and dies with the session.
  */
+const legendHighlight = new Map<string, string>();
+
+function legendOpen(win: Win): boolean {
+  return winCurrent(win, "legend") === true;
+}
+
+function setLegendOpen(win: Win, open: boolean): void {
+  setWinCurrent(win, "legend", open ? true : null);
+  if (!open) legendHighlight.delete(win.id);
+  renderAreaHeaders();
+  draw();
+}
+
+/** A click on a legend entry: pick that relation, or drop it on a second click. */
+function toggleLegendHighlight(winId: string, edgeType: string): void {
+  if (legendHighlight.get(winId) === edgeType) legendHighlight.delete(winId);
+  else legendHighlight.set(winId, edgeType);
+  draw();
+}
+
+/**
+ * Bring a graph window's legend box in line with what the window just painted.
+ * Rebuilt only when what it would show changed — the content, the pick, the
+ * fold, the language or the theme — because `paint` runs on every hover.
+ */
+function syncLegend(host: HTMLElement, win: Win | undefined, shown: Scene | null): void {
+  if (!win || !legendOpen(win) || !store) {
+    if (host.childElementCount) host.textContent = "";
+    host.dataset.key = "";
+    host.classList.add("hidden");
+    return;
+  }
+  const content = legendContent(shown, edgeVisible);
+  let lit = legendHighlight.get(win.id) ?? null;
+  // a pick whose relation left the view (a filter, another mode) is dropped:
+  // fading every edge for a line nobody can see would be a riddle
+  if (lit && !content.edges.some((e) => e.type === lit)) {
+    legendHighlight.delete(win.id);
+    lit = null;
+  }
+  const nodesOpen = winCurrent(win, "legendNodes") === true;
+  const key = JSON.stringify([content, lit, nodesOpen, getLocale(), activeTheme()]);
+  host.classList.remove("hidden");
+  if (host.dataset.key === key) return;
+  host.dataset.key = key;
+  host.textContent = "";
+  host.appendChild(buildLegendPanel(content, {
+    highlight: lit,
+    onPick: (type) => toggleLegendHighlight(win.id, type),
+    nodesOpen,
+    onNodesToggle: (open) => {
+      setWinCurrent(win, "legendNodes", open ? true : null);
+      host.dataset.key = "";
+    },
+    onClose: () => setLegendOpen(win, false),
+  }));
+}
 
 function updateToolbar(): void {
   btnUndo.disabled = !undoStore()?.canUndo;
@@ -11192,6 +11259,8 @@ function showShortcuts(): void {
   document.body.appendChild(modal);
 }
 document.getElementById("btn-help-shortcuts")?.addEventListener("click", showShortcuts);
+// LEGENDA · the whole language, for someone studying it
+document.getElementById("btn-help-legend")?.addEventListener("click", showLegendModal);
 
 // ---------- SHIFT-A · «Storia di questo nodo» ----------
 //
@@ -12050,6 +12119,10 @@ function mountGraphCanvas(cv: HTMLCanvasElement, mini: HTMLCanvasElement,
   const hint = document.createElement("div");
   hint.className = "canvas-empty-hint hidden";
   cv.parentElement?.appendChild(hint);
+  // LEGENDA · this window's legend box, over the canvas and inside the window
+  const legendHost = document.createElement("div");
+  legendHost.className = "graph-legend-host hidden";
+  cv.parentElement?.appendChild(legendHost);
   const mount: GraphMount = {
     winId,
     cv,
@@ -12062,6 +12135,7 @@ function mountGraphCanvas(cv: HTMLCanvasElement, mini: HTMLCanvasElement,
       if (empty) hint.textContent = t("add.emptyHint");
       paintGraphWindow({
         winId, cv, mode,
+        highlightEdgeType: legendHighlight.get(winId) ?? null,
         // the hypergraph context belongs to the window that entered it, and the
         // context scene is the app's one — so a window in context draws it and
         // every other draws its own projection
@@ -12070,6 +12144,7 @@ function mountGraphCanvas(cv: HTMLCanvasElement, mini: HTMLCanvasElement,
         live,
         overview,
       });
+      syncLegend(legendHost, windowsOf().find((w) => w.id === winId), shown);
     },
   };
   graphWindows.set(winId, mount);
@@ -12084,6 +12159,8 @@ function graphModeOf(winId: string): ViewKind {
 
 function unmountGraphCanvas(winId: string): void {
   graphWindows.get(winId)?.hint?.remove();
+  graphWindows.get(winId)?.cv.parentElement?.querySelector(".graph-legend-host")?.remove();
+  legendHighlight.delete(winId);
   graphWindows.delete(winId);
 }
 /*
@@ -18608,6 +18685,8 @@ function buildAreaHeader(win: Win): DocumentFragment {
       const r = cv.getBoundingClientRect();
       openAddMenu(win, r.left + r.width / 2, r.top + r.height / 2);
     });
+    // LEGENDA · what the lines on THIS canvas mean, in its bottom-left corner
+    act("⇢", t("legend.btn"), legendOpen(win), () => setLegendOpen(win, !legendOpen(win)));
     act("⤢", t("win.fitTitle"), false, () => {
       focusThen(win, () => fit());
     });

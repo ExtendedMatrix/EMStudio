@@ -8008,3 +8008,147 @@ body.gesturing-resize * {
 .addm-ic > .glyph-inline { width: 24px; height: 14px; }
 .nl-dot.nl-glyph { background: none !important; border: 0 !important; border-radius: 0; width: 14px; height: 14px; margin-top: 0; }
 .hit-glyph.glyph-inline { width: 18px; height: 18px; }
+
+/* LEGENDA (2 ott 2026) · the connector legend of ONE graph window: a floating
+   box in the bottom-left corner of its canvas, over the drawing and inside the
+   window, with the design system's radius and shadow (the minimap's sibling in
+   the opposite corner). Only what the window shows; a click picks a relation. */
+.graph-legend-host {
+  position: absolute;
+  left: 10px;
+  bottom: 10px;
+  z-index: 15;
+  max-width: min(300px, calc(100% - 20px));
+  max-height: calc(100% - 20px);
+  display: flex;
+}
+.graph-legend {
+  display: flex;
+  flex-direction: column;
+  min-width: 190px;
+  max-height: 100%;
+  background: var(--bg-elevated);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.18);
+  font-size: 12px;
+  overflow: hidden;
+}
+.gl-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 6px 4px 10px;
+}
+.gl-title {
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+.gl-close {
+  border: 0;
+  background: none;
+  color: var(--text-muted);
+  font-size: 15px;
+  line-height: 1;
+  padding: 2px 6px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+.gl-close:hover { background: var(--bg-hover); color: var(--text); }
+.gl-list {
+  display: flex;
+  flex-direction: column;
+  padding: 0 4px 4px;
+  overflow-y: auto;
+  min-height: 0;
+}
+.graph-legend .gl-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  padding: 3px 6px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+.graph-legend .gl-item:hover { background: var(--bg-hover); }
+.graph-legend .gl-item.on {
+  background: var(--bg-hover);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+.gl-sample { flex: none; display: block; }
+.gl-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.gl-count {
+  flex: none;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-faint);
+  font-size: 11px;
+}
+.gl-empty { padding: 4px 6px 6px; color: var(--text-faint); }
+.gl-nodes {
+  border-top: 1px solid var(--border);
+  padding: 4px 4px 6px;
+  overflow-y: auto;
+  min-height: 0;
+  flex: none;
+  max-height: 45%;
+}
+.gl-nodes > summary {
+  cursor: pointer;
+  padding: 2px 6px;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+.gl-node {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 2px 6px;
+}
+.gl-icon { flex: none; width: 24px; height: 14px; display: inline-flex; align-items: center; justify-content: center; }
+.gl-icon > img, .gl-icon > canvas, .gl-icon > .glyph-inline { max-width: 24px; max-height: 14px; width: 24px; height: 14px; object-fit: contain; }
+/* Help ▸ Legenda EM · the whole language, with a search */
+.modal.em-legend .modal-card { width: min(680px, 94vw); }
+.em-legend .gl-search {
+  width: 100%;
+  box-sizing: border-box;
+  margin-bottom: 8px;
+}
+.em-legend .gl-sect {
+  margin: 10px 0 4px;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+.em-legend .gl-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(290px, 1fr));
+  gap: 0 12px;
+}
+.em-legend .gl-item, .em-legend .gl-node {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 4px;
+}
+.em-legend .hidden { display: none; }
+.gl-code {
+  flex: none;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--text-faint);
+}

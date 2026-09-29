@@ -115,6 +115,20 @@ function luminance(hex: string): number {
 
 const nodeCache = new Map<string, NodeStyle>();
 
+/** LEGENDA · every node type the visual rules style, as a node_type: a rules
+ *  key reached through `NODE_ALIAS` is given by its FIRST alias (`PROP` →
+ *  `property`), the others are node_types already. `unknown` is not a type. */
+export function styledNodeTypes(): string[] {
+  const back = new Map<string, string>();
+  for (const [nt, key] of Object.entries(NODE_ALIAS)) if (!back.has(key)) back.set(key, nt);
+  return Object.keys(nodeStyles).filter((k) => k !== "unknown").map((k) => back.get(k) ?? k);
+}
+
+/** LEGENDA · every edge type the visual rules give an `edge_style`. */
+export function styledEdgeTypes(): string[] {
+  return Object.keys(edgeStyles ?? {});
+}
+
 export function nodeStyle(nodeType?: string): NodeStyle {
   const key = nodeType ?? "unknown";
   const hit = nodeCache.get(key);
