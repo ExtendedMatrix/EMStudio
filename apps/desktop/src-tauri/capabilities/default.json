@@ -19,6 +19,18 @@
       "allow": [{ "path": "**" }]
     },
     {
+      "identifier": "fs:allow-read-file",
+      "allow": [{ "path": "**" }]
+    },
+    {
+      "identifier": "fs:allow-write-file",
+      "allow": [{ "path": "**" }]
+    },
+    {
+      "identifier": "fs:allow-mkdir",
+      "allow": [{ "path": "**" }]
+    },
+    {
       "identifier": "shell:allow-spawn",
       "allow": [{ "name": "binaries/em-bridge", "sidecar": true, "args": true }]
     },

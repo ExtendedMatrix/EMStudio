@@ -78,11 +78,11 @@ export function mediumOf(doc: EmNode | undefined, resolve: (id: string) => EmNod
   return null;
 }
 
+const GEO_ICON: Record<string, string> = { region2d: "▭", passage: "¶", point: "⌖", line: "⟷", polyline: "⌇" };
+
 export function geometryBadge(g: Geometry | null): HTMLElement {
   if (!g) return el("span", "chain-geo none", t("chain.geo.none"));
-  const label = g.kind === "region" ? `▭ ${t("chain.geo.region")}`
-    : g.kind === "passage" ? `¶ ${t("chain.geo.passage")}` : `⌖ ${t("chain.geo.point3d")}`;
-  return el("span", `chain-geo ${g.kind}`, label);
+  return el("span", `chain-geo ${g.kind}`, `${GEO_ICON[g.kind] ?? "·"} ${t(`chain.geo.${g.kind}`)}`);
 }
 
 function linkBtn(ui: ChainUi, id: string, cls = ""): HTMLButtonElement {

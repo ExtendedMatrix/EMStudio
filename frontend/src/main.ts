@@ -203,6 +203,7 @@ import { renderSitePosition } from "./study-panel";
 import * as chain from "./paradata-chain";
 import { mediumOf as mediumOfDoc, renderChainSection, type ChainUi } from "./paradata-inspector";
 import { renderReadingStage, type TraceGeometry } from "./doc-reading";
+import { ReadingFiles, type PlaceOutcome } from "./reading-files";
 import * as aiv from "./ai-validation";
 import { checkReceipt, receiptOf, receiptsOfEmission, refreshedCopies, type ReceiptCheck } from "./receipt";
 import { parseTropy, promoteToDocument, tropyOf, tropyShelfInputs } from "./tropy";
@@ -265,6 +266,8 @@ import {
   pickFolder,
   pickSourceFile,
   pickXlsx,
+  writeBinaryFile,
+  readBinaryFile,
 } from "./tauri";
 import {
   describeExtraction,
@@ -5583,6 +5586,7 @@ async function saveDocument(): Promise<void> {
       store.dirty = false;
       info.textContent = `saved ${baseName(currentFilePath)}`;
       updateToolbar();
+      await flushReadingGlbs();
     } catch (e) {
       toast(`save failed: ${e instanceof Error ? e.message : e}`);
     }
@@ -5605,6 +5609,7 @@ async function saveAsDocument(): Promise<void> {
       store.dirty = false;
       info.textContent = `saved ${baseName(path)}`;
       updateToolbar();
+      await flushReadingGlbs();
     } catch (e) {
       toast(`save failed: ${e instanceof Error ? e.message : e}`);
     }
@@ -6854,7 +6859,7 @@ function chainUi(st: DocumentStore): ChainUi {
     aiChip: aiChipFor,
     documentExtras: (host, docId) => renderDocumentDating(st, host, docId),
     useAsValue: (x) => {
-      const p = chain.useAsValue(st, x);
+      const p = chain.useAsValue(st, x, readingVerticesById);
       if (!p) return;
       const msg = t("chain.valueSet", { prop: String(st.node(p)?.name ?? p), value: chain.propertyValue(st.node(p)) });
       logInfo(msg, [p, x]);
@@ -8203,6 +8208,40 @@ async function bridgeUrl(): Promise<string> {
     "http://localhost:8765";
   return _bridgeUrl;
 }
+/** LUOGO · the glbs of the readings' points, lines and polylines: written by the
+ *  bridge (`api.place_reading`) or the desktop fs under the em.json's folder,
+ *  pending in memory where there is no folder (a browser) — `reading-files.ts`. */
+const readingFiles = new ReadingFiles({
+  projectRoot: () => (currentFilePath ? currentFilePath.replace(/[\\/][^\\/]*$/, "") || null : null),
+  bridge: async () => {
+    try {
+      const base = await bridgeUrl();
+      const r = await fetch(`${base}/health`);
+      return r.ok ? base : null;
+    } catch {
+      return null;
+    }
+  },
+  ...(isTauri() ? { writeFile: writeBinaryFile, readFile: readBinaryFile } : {}),
+  onLoaded: () => renderDocView(),
+});
+/** Say where a reading's glb went — pending is a warning, never silent. */
+function reportPlace(o: PlaceOutcome, name: string, ids: string[]): void {
+  if (o.where === "bridge" || o.where === "desktop") logInfo(t("rd.glbWritten", { x: name, path: o.path }), ids);
+  else if (o.where === "pending") {
+    const msg = t("rd.glbPending", { x: name });
+    logWarn(msg, ids);
+    toast(msg);
+  }
+}
+/** Save found a folder: the pending glbs of this document go beside it. */
+async function flushReadingGlbs(): Promise<void> {
+  if (!store || !readingFiles.pending.size) return;
+  const r = await readingFiles.flush(store.doc);
+  if (r.written.length) logInfo(t("rd.glbFlushed", { n: String(r.written.length) }));
+  if (r.left.length) logWarn(t("rd.glbLeft", { n: String(r.left.length) }));
+}
+
 const BRIDGE_UNREACHABLE =
   "GraphML transformer not reachable — the local sidecar may still be starting; " +
   "otherwise start it with ./dev.sh (or set EM_TRANSFORMER_URL to a server)";
@@ -14572,6 +14611,7 @@ function renderDocReadingStage(win: Win, detail: HTMLElement, d: EmNode): void {
     modelUrl: medium === "3d" ? url : null,
     text: () => docText(d),
     onTrace: (x, g) => traceReading(win, x, d.id, g),
+    vertices: readingVertices,
     onSelect: (x) => { setWinCurrent(win, "reading", null); select(x); refreshInspector(); renderDocView(); draw(); },
     onDisarm: () => { setWinCurrent(win, "reading", null); renderDocView(); },
     onUseValue: (x) => chainUi(st).useAsValue(x),
@@ -14581,14 +14621,32 @@ function renderDocReadingStage(win: Win, detail: HTMLElement, d: EmNode): void {
   });
 }
 
+/** LUOGO · the vertices of a 3D place: a legacy point's own, else its glb's. */
+function readingVertices(g: chain.Geometry): [number, number, number][] | null {
+  if (!chain.isGlbKind(g.kind)) return null;
+  const gg = g as Extract<chain.Geometry, { kind: "point" | "line" | "polyline" }>;
+  return gg.vertices ?? readingFiles.vertices(gg.url);
+}
+function readingVerticesById(regionId: string): [number, number, number][] | null {
+  const r = store?.node(regionId);
+  return r && store ? readingVertices(chain.geometryOfRegion(store.doc, r)) : null;
+}
+
+const TRACE_DONE: Record<string, string> = { region2d: "rd.regionDone", passage: "rd.passageDone",
+  point: "rd.pointDone", line: "rd.lineDone", polyline: "rd.polylineDone" };
+
 function traceReading(win: Win, x: string, docId: string, g: TraceGeometry): void {
   if (!store) return;
-  chain.setReadingGeometry(store, x, docId, g);
+  const st = store;
+  const placed = chain.setReadingGeometry(st, x, docId, g);
   setWinCurrent(win, "reading", null);
-  const name = String(store.node(x)?.name ?? x);
-  const msg = t(g.kind === "region" ? "rd.regionDone" : g.kind === "passage" ? "rd.passageDone" : "rd.pointDone", { x: name });
+  const name = String(st.node(x)?.name ?? x);
+  const measure = placed ? chain.measureOf(st.doc, placed.regionId)?.value : null;
+  const msg = t(TRACE_DONE[g.kind] ?? "rd.pointDone", { x: name, m: measure ?? "" });
   logInfo(msg, [x, docId]);
-  toastUndo(msg, store);
+  toastUndo(msg, st);
+  // the file after the undo step: bridge, desktop, or pending (said)
+  if (placed?.glb) void readingFiles.place(placed, st.doc, g).then((o) => reportPlace(o, name, [x, placed.regionId]));
   select(x);
   refreshInspector();
   renderDocView();
@@ -14638,7 +14696,7 @@ async function proposeReading(win: Win, x: string, docId: string, text: string):
     const n = st.node(x);
     if (n && res.value) st.updateNode(x, { data: { ...((n.data ?? {}) as Record<string, unknown>), result: res.value } });
     aiv.markAiAssisted(st, x, { by, model: res.model || ai.model || undefined,
-                                fields: ["data.geometry", ...(res.value ? ["data.result"] : [])] });
+                                fields: ["extracted_from", ...(res.value ? ["data.result"] : [])] });
     // the reading stays the PERSON's: has_author their AuthorNode, never the model
     if (me) {
       const author = nauth.authorForIdentity(st, me);

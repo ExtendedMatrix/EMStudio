@@ -19,21 +19,21 @@ import { t } from "./i18n";
 import type { DocumentStore } from "./model";
 import {
   geometryOf,
+  isGlbKind,
   propertyOfExtractor,
   readingsOfDocument,
   resultOf,
   setReadingDescription,
   type Geometry,
+  type TraceGeometry,
 } from "./paradata-chain";
+import type { Vec3 } from "./reading-glb";
 import { geometryBadge } from "./paradata-inspector";
 import { mount3dViewer, type ViewerHandle } from "./embed3d-native";
 import { ViewerKeeper } from "./viewer-keep";
 import type { Medium } from "./doc-form";
 
-export type TraceGeometry =
-  | { kind: "region"; shape_kind: "rect"; rect: number[] }
-  | { kind: "passage"; start: number; end: number; text: string }
-  | { kind: "point3d"; p: [number, number, number]; on?: string };
+export type { TraceGeometry };
 
 export interface ReadingStageCtx {
   store: DocumentStore;
@@ -48,6 +48,9 @@ export interface ReadingStageCtx {
   /** the text, inline or fetched; null = not readable here (a PDF) */
   text: () => Promise<string | null>;
   onTrace: (extractorId: string, g: TraceGeometry) => void;
+  /** the vertices of a 3D place — FROM ITS GLB (the node has only the count);
+   *  null while the file is being read (the stage is repainted when it is) */
+  vertices: (g: Geometry) => Vec3[] | null;
   onSelect: (extractorId: string) => void;
   onDisarm: () => void;
   onUseValue: (extractorId: string) => void;
@@ -112,7 +115,7 @@ export function renderReadingStage(host: HTMLElement, ctx: ReadingStageCtx): voi
     ta.addEventListener("change", () => setReadingDescription(store, cur.id, ta.value.trim()));
     box.appendChild(ta);
     const acts = el("div", "rd-acts");
-    const res = resultOf(doc, cur.id);
+    const res = resultOf(doc, cur.id, (rid) => { const g = geometryOf(doc, cur.id); return g && g.regionId === rid ? ctx.vertices(g) : null; });
     if (res) acts.appendChild(el("span", "rd-dim", `${t("rd.result")}: `)).after(el("b", "", res.length > 90 ? `${res.slice(0, 90)}…` : res));
     acts.appendChild(el("span", "rd-grow"));
     if (res && propertyOfExtractor(doc, cur.id)) {
@@ -173,7 +176,7 @@ function imageStage(ctx: ReadingStageCtx, reads: string[]): HTMLElement {
   svg.classList.add("rd-overlay");
   for (const x of reads) {
     const g = geometryOf(ctx.store.doc, x);
-    if (g?.kind !== "region" || !g.rect) continue;
+    if (g?.kind !== "region2d" || !g.rect) continue;
     const r = document.createElementNS(NS, "rect");
     r.setAttribute("x", String(g.rect[0]));
     r.setAttribute("y", String(g.rect[1]));
@@ -195,7 +198,7 @@ function imageStage(ctx: ReadingStageCtx, reads: string[]): HTMLElement {
   // labels of the regions, as HTML over the picture (they read at any size)
   for (const x of reads) {
     const g = geometryOf(ctx.store.doc, x);
-    if (g?.kind !== "region" || !g.rect) continue;
+    if (g?.kind !== "region2d" || !g.rect) continue;
     const l = el("span", "rd-region-label" + (x === ctx.current ? " sel" : ""), String(ctx.store.node(x)?.name ?? ""));
     l.style.left = `${g.rect[0] * 100}%`;
     l.style.top = `${g.rect[1] * 100}%`;
@@ -225,7 +228,7 @@ function imageStage(ctx: ReadingStageCtx, reads: string[]): HTMLElement {
       const w = Math.abs(b[0] - a[0]), h = Math.abs(b[1] - a[1]);
       if (w < 0.005 || h < 0.005 || !ctx.armed) return;   // a click, not a region
       const q = (v: number) => Math.round(v * 10000) / 10000;
-      ctx.onTrace(ctx.armed, { kind: "region", shape_kind: "rect",
+      ctx.onTrace(ctx.armed, { kind: "region2d", shape_kind: "rect",
         rect: [q(Math.min(a[0], b[0])), q(Math.min(a[1], b[1])), q(w), q(h)] });
     };
     svg.addEventListener("pointermove", move);
@@ -324,10 +327,14 @@ function modelStage(ctx: ReadingStageCtx, reads: string[], owner: HTMLElement): 
     wrap.appendChild(el("p", "chain-note", t("rd.no3d")));
     return wrap;
   }
-  const markers = reads.map((x) => [x, geometryOf(ctx.store.doc, x)] as const)
-    .filter(([, g]) => g?.kind === "point3d")
-    .map(([x, g]) => ({ id: x, label: String(ctx.store.node(x)?.name ?? ""),
-                        p: (g as Extract<Geometry, { kind: "point3d" }>).p, selected: x === ctx.current }));
+  // the markers read their vertices from the glb, not from the node
+  const markers = reads.flatMap((x) => {
+    const g = geometryOf(ctx.store.doc, x);
+    if (!g || !isGlbKind(g.kind)) return [];
+    const v = ctx.vertices(g);
+    return v?.length ? [{ id: x, label: String(ctx.store.node(x)?.name ?? ""), kind: g.kind, vertices: v,
+                          selected: x === ctx.current }] : [];
+  });
   // the SAME model as the last paint → the same viewer, moved into this paint,
   // its camera where the reader left it; only a new model is mounted (and framed)
   const url = ctx.modelUrl;
@@ -338,9 +345,9 @@ function modelStage(ctx: ReadingStageCtx, reads: string[], owner: HTMLElement): 
       label: String(ctx.store.node(ctx.docId)?.name ?? ""),
       markers,
       onMarker: (id) => ref.cur.onSelect(id),
-      onPick: (p, on) => {
+      onPick: (p) => {
         const c = ref.cur;
-        if (c.armed) c.onTrace(c.armed, { kind: "point3d", p, ...(on ? { on } : {}) });
+        if (c.armed) c.onTrace(c.armed, { kind: "point", vertices: [p] });
       },
     });
     return { v, extra: { el: host, ctx: ref } };

@@ -5,7 +5,7 @@
 // place; nothing here executes at import time, so bundling into the
 // browser single-file build is harmless.
 import { open, save } from "@tauri-apps/plugin-dialog";
-import { readTextFile, writeTextFile } from "@tauri-apps/plugin-fs";
+import { mkdir, readFile, readTextFile, writeFile, writeTextFile } from "@tauri-apps/plugin-fs";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { invoke } from "@tauri-apps/api/core";
 
@@ -58,6 +58,17 @@ export async function readEmJsonPath(
 /** Overwrite an already-known file in place. */
 export async function writeEmJson(path: string, text: string): Promise<void> {
   await writeTextFile(path, text);
+}
+
+/** LUOGO · a reading's glb, beside the em.json (`readings/<region>.glb`): the
+ *  folder is made as needed. Bytes, not text — the fs plugin's binary pair. */
+export async function writeBinaryFile(path: string, bytes: Uint8Array): Promise<void> {
+  const dir = path.replace(/[\\/][^\\/]*$/, "");
+  if (dir && dir !== path) await mkdir(dir, { recursive: true }).catch(() => { /* exists */ });
+  await writeFile(path, bytes);
+}
+export async function readBinaryFile(path: string): Promise<Uint8Array> {
+  return await readFile(path);
 }
 
 /** Native "Save As…" dialog → the chosen path (already written), or null. */

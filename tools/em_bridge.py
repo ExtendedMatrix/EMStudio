@@ -744,6 +744,18 @@ def make_handler(api):
                     self._fail(400, f"invalid JSON body: {exc}")
                     return
                 self._propose_reading(body)
+            elif route == "/place-reading":
+                # LUOGO · a reading's place, and for a point, a line or a
+                # polyline its glb WRITTEN in the project: it touches the disk,
+                # so the stricter gate of /fs applies
+                if not self._fs_gate():
+                    return
+                try:
+                    body = json.loads(raw.decode("utf-8")) if raw else {}
+                except Exception as exc:
+                    self._fail(400, f"invalid JSON body: {exc}")
+                    return
+                self._place_reading(body)
             elif route in ("/stratiminer-prompt", "/stratiminer-extract",
                            "/import-em-data"):
                 try:
@@ -2304,6 +2316,42 @@ def make_handler(api):
                 "pdf_text": api.pdf_text_available(),
                 "extractor": api.source_text_extractor(),
             }
+
+        def _place_reading(self, body):
+            """LUOGO · `api.place_reading` for EMStudio. Body {doc, extractor_id,
+            on_id, geometry: {geometry_kind, …, vertices?}, project_root} →
+            {ok, region_id, shape_id, glb_url, glb_path, warnings, measure}.
+
+            The client has ALREADY made the nodes (the same uuid5 ids, in its own
+            undo step); what it cannot do in a browser is write a file. So this
+            replays the placement on the document it sends — idempotent, the
+            nodes are found, not doubled — with the project folder, and the glb
+            lands at <project_root>/readings/<region id>.glb. The folder must be
+            inside the served roots, like every other /fs path; nothing is
+            written anywhere else."""
+            if not hasattr(api, "place_reading"):
+                self._fail(501, "this s3dgraphy has no place_reading (needs node datamodel 1.6.10)")
+                return
+            root_raw = str(body.get("project_root") or "")
+            if not root_raw:
+                self._fail(400, "place-reading needs a project_root")
+                return
+            root, err = self._fs_resolve(root_raw, want="dir")
+            if err:
+                self._fail(*err)
+                return
+            try:
+                doc = body.get("doc") or {}
+                graph, _warnings = api.load_emjson(doc)
+                res = api.place_reading(graph, str(body.get("extractor_id") or ""),
+                                        body.get("on_id") or None,
+                                        dict(body.get("geometry") or {}),
+                                        project_root=root)
+                out = res.as_dict()
+                out["measure"] = api.measure(graph, res.region_id, project_root=root)
+                self._json({"ok": True, **out})
+            except Exception as exc:  # pragma: no cover — surface to the UI
+                self._fail(400, f"place-reading failed: {exc}")
 
         def _propose_reading(self, body):
             """CATENA · «Proponi con AI» on a text document: which passage states

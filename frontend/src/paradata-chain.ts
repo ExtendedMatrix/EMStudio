@@ -5,15 +5,13 @@
  *     unit ──has_property──▶ property ──has_data_provenance──▶ extractor ──extracted_from──▶ document
  *                                    └──has_data_provenance──▶ combiner ──combines──▶ extractor …
  *
- * Every edge named here is read off the connections datamodel (1.6.26), not
+ * Every edge named here is read off the connections datamodel (1.6.27), not
  * invented: `has_property` (with more than one owner since 1.6.23, the heirs
  * marked `attributes.inherited`), `has_data_provenance`, `combines`,
  * `extracted_from` (document, annotation region, and since 1.6.24 a unit),
- * `is_on_resource` (a region on its document). The one thing that is NOT in the
- * datamodel is how a reading of TEXT or of a 3D MODEL records where it looked:
- * that is `data.geometry` on the extractor (see `Geometry`), declared here and
- * listed as open in the night's report. A reading of an IMAGE uses the
- * datamodel's own node, the AnnotationRegion.
+ * `is_on_resource` (a region on its document or model). Where a reading looked
+ * is, for every medium, the datamodel's AnnotationRegion (node datamodel 1.6.10,
+ * `geometry_kind`), and for the 3D kinds its glb (`has_semantic_shape`).
  *
  * `scripts/check-paradata-chain.mjs` exercises this file in node.
  */
@@ -29,6 +27,8 @@ import {
   sourceOfExtractor,
   type ExtractorSource,
 } from "./naming";
+import { uuid5 } from "./commands";
+import { glbBytes, polylineLength, pyFixed, type GlbKind, type Vec3 } from "./reading-glb";
 
 export const HAS_PROPERTY = "has_property";
 export const HAS_DATA_PROVENANCE = "has_data_provenance";
@@ -166,57 +166,180 @@ export function sourceOf(doc: EmDocument, extractorId: string): ExtractorSource 
   return sourceOfExtractor(doc, extractorId);
 }
 
-// ── the geometry of a reading ────────────────────────────────────────────────
+// ── the place of a reading ───────────────────────────────────────────────────
 
 /**
- * Where a reading looked, by medium.
+ * Where a reading looked — ONE node for every medium (E.D. 29 set; s3Dgraphy
+ * `annotation/reading.py`, node datamodel 1.6.10): the AnnotationRegionNode the
+ * extractor `extracted_from`s, `is_on_resource` the image, text or model it is
+ * on, told apart by `data.geometry_kind`:
  *
- *   region  — on an image: the datamodel's AnnotationRegionNode (normalised
- *             rect/polygon), which the extractor `extracted_from`s and which is
- *             `is_on_resource` its document;
- *   passage — in a text: `data.geometry = {kind:"passage", start, end, text}`,
- *             character offsets into the text as shown plus the quoted words
- *             (the W3C TextPosition + TextQuote pair: the offsets say where,
- *             the quote survives an edit that moves them);
- *   point3d — on a 3D model: `data.geometry = {kind:"point3d", p:[x,y,z], on?}`,
- *             in the model's own frame.
+ *   region2d — a rect or polygon on an image (normalised; the default, and what
+ *              every older region is);
+ *   passage  — characters start–end of a text plus the quoted words (the W3C
+ *              TextPosition + TextQuote pair: the offsets say where, the quote
+ *              survives an edit that moves them);
+ *   point · line · polyline — on a 3D model. The COORDINATES ARE NOT IN THE
+ *              em.json: they are `readings/<region id>.glb`, reached as a proxy's
+ *              payload is (`has_semantic_shape` → a `generic` SemanticShape whose
+ *              `data.url` is the file). The node keeps what shows it without the
+ *              file: `vertex_count`, and for a measure `length`, `unit`, `crs`.
+ *
+ * `data.geometry` on the extractor is the shape EMStudio wrote from 5 to 7 ott;
+ * it is READ here only so an old file shows its readings (s3Dgraphy migrates it
+ * to a region when it opens the file), never written again.
  */
-export type Geometry =
-  | { kind: "region"; regionId: string; shape_kind: string; rect?: number[]; points?: number[][] }
-  | { kind: "passage"; start: number; end: number; text: string }
-  | { kind: "point3d"; p: [number, number, number]; on?: string };
+export const GEOMETRY_KINDS = ["region2d", "passage", "point", "line", "polyline"] as const;
+export type GeometryKind = (typeof GEOMETRY_KINDS)[number];
+export const GLB_KINDS: readonly GeometryKind[] = ["point", "line", "polyline"];
+export const MEASURE_KINDS: readonly GeometryKind[] = ["line", "polyline"];
+export const HAS_SEMANTIC_SHAPE = "has_semantic_shape";
+export const DEFAULT_UNIT = "m";
+export const DEFAULT_CRS = "local";
+export const isGlbKind = (k: string | undefined): k is GlbKind => GLB_KINDS.includes(k as GeometryKind);
 
-export function geometryOf(doc: EmDocument, extractorId: string): Geometry | null {
+export type Geometry =
+  | { kind: "region2d"; regionId: string; shape_kind: string; rect?: number[]; points?: number[][]; page: number }
+  | { kind: "passage"; regionId: string | null; start: number; end: number; text: string }
+  | { kind: GlbKind; regionId: string | null; vertex_count: number; length?: number; unit?: string; crs?: string;
+      /** the glb (project-relative), when the region has its shape */
+      url?: string;
+      /** a legacy `data.geometry` point only: the one copy of its coordinates */
+      vertices?: Vec3[] };
+
+/** What a gesture traces, before it is a node. The 3D kinds carry their
+ *  vertices, in the frame of the model's glb; they go to the file, not the node. */
+export type TraceGeometry =
+  | { kind: "region2d"; shape_kind: "rect" | "polygon"; rect?: number[]; points?: number[][]; page?: number }
+  | { kind: "passage"; start: number; end: number; text: string }
+  | { kind: GlbKind; vertices: Vec3[] };
+
+/** The region an extractor reads, if it reads one. */
+export function regionOfExtractor(doc: EmDocument, extractorId: string): EmNode | null {
   for (const t of out(doc, extractorId, EXTRACTED_FROM)) {
     const r = nodeOf(doc, t);
-    if (r?.node_type !== "annotation_region") continue;
-    const d = (r.data ?? {}) as Record<string, unknown>;
-    return { kind: "region", regionId: r.id, shape_kind: String(d.shape_kind ?? "rect"),
-             ...(Array.isArray(d.rect) ? { rect: d.rect as number[] } : {}),
-             ...(Array.isArray(d.points) ? { points: d.points as number[][] } : {}) };
+    if (r?.node_type === "annotation_region") return r;
   }
-  const g = ((nodeOf(doc, extractorId)?.data ?? {}) as Record<string, unknown>).geometry as
-    Record<string, unknown> | undefined;
-  if (g?.kind === "passage")
-    return { kind: "passage", start: Number(g.start ?? 0), end: Number(g.end ?? 0), text: String(g.text ?? "") };
-  if (g?.kind === "point3d" && Array.isArray(g.p) && g.p.length === 3)
-    return { kind: "point3d", p: (g.p as number[]).map(Number) as [number, number, number],
-             ...(g.on ? { on: String(g.on) } : {}) };
   return null;
 }
 
-/** What a reading found — the text the next step can take as a value. */
-export function resultOf(doc: EmDocument, extractorId: string): string {
+/** The glb of a region (`has_semantic_shape` → shape `data.url`). */
+export function glbUrlOfRegion(doc: EmDocument, regionId: string): string | null {
+  for (const s of out(doc, regionId, HAS_SEMANTIC_SHAPE)) {
+    const u = ((nodeOf(doc, s)?.data ?? {}) as Record<string, unknown>).url;
+    if (typeof u === "string" && u) return u;
+  }
+  return null;
+}
+
+export function geometryOfRegion(doc: EmDocument, r: EmNode): Geometry {
+  const d = (r.data ?? {}) as Record<string, unknown>;
+  const kind = String(d.geometry_kind || "region2d") as GeometryKind;
+  if (kind === "passage")
+    return { kind, regionId: r.id, start: Number(d.start ?? 0), end: Number(d.end ?? 0), text: String(d.text ?? "") };
+  if (isGlbKind(kind)) {
+    const url = glbUrlOfRegion(doc, r.id);
+    return { kind, regionId: r.id, vertex_count: Number(d.vertex_count ?? 0),
+             ...(d.length != null ? { length: Number(d.length), unit: String(d.unit || DEFAULT_UNIT),
+                                      crs: String(d.crs || DEFAULT_CRS) } : {}),
+             ...(url ? { url } : {}) };
+  }
+  return { kind: "region2d", regionId: r.id, shape_kind: String(d.shape_kind ?? "rect"),
+           ...(Array.isArray(d.rect) ? { rect: d.rect as number[] } : {}),
+           ...(Array.isArray(d.points) ? { points: d.points as number[][] } : {}),
+           page: Number(d.page ?? 0) };
+}
+
+export function geometryOf(doc: EmDocument, extractorId: string): Geometry | null {
+  const r = regionOfExtractor(doc, extractorId);
+  if (r) return geometryOfRegion(doc, r);
+  // a file written 5–7 ott, not reopened by s3Dgraphy yet: read, never written
+  const g = ((nodeOf(doc, extractorId)?.data ?? {}) as Record<string, unknown>).geometry as
+    Record<string, unknown> | undefined;
+  if (g?.kind === "passage")
+    return { kind: "passage", regionId: null, start: Number(g.start ?? 0), end: Number(g.end ?? 0), text: String(g.text ?? "") };
+  if (g?.kind === "point3d" && Array.isArray(g.p) && g.p.length === 3)
+    return { kind: "point", regionId: null, vertex_count: 1,
+             vertices: [(g.p as number[]).map(Number) as Vec3] };
+  return null;
+}
+
+/**
+ * `api.measure` in the client, over the node (its numbers are a cache of the
+ * glb's): `value` is what «Usa come valore» writes — `"1.234 m"`, s3Dgraphy's
+ * `f"{length:.3f} {unit}"` — and null for what measures nothing.
+ */
+export function measureOf(doc: EmDocument, regionId: string): {
+  region_id: string; geometry_kind: GeometryKind; vertex_count: number | null;
+  length: number | null; unit: string | null; crs: string | null; value: string | null;
+} | null {
+  const r = nodeOf(doc, regionId);
+  if (r?.node_type !== "annotation_region") return null;
+  const d = (r.data ?? {}) as Record<string, unknown>;
+  const kind = String(d.geometry_kind || "region2d") as GeometryKind;
+  const length = d.length == null ? null : Number(d.length);
+  const unit = d.unit == null ? null : String(d.unit);
+  return { region_id: regionId, geometry_kind: kind,
+           vertex_count: d.vertex_count == null ? null : Number(d.vertex_count),
+           length, unit, crs: d.crs == null ? null : String(d.crs),
+           value: MEASURE_KINDS.includes(kind) && length != null ? `${pyFixed(length, 3)} ${unit || DEFAULT_UNIT}` : null };
+}
+
+/** The measure's text, for a line or a polyline. */
+export function measureText(g: Geometry | null): string {
+  if (!g || !MEASURE_KINDS.includes(g.kind) || !("length" in g) || g.length == null) return "";
+  return `${pyFixed(g.length, 3)} ${g.unit || DEFAULT_UNIT}`;
+}
+
+/** What a reading found — the text the next step can take as a value. A point's
+ *  height needs its vertices, which live in the glb: `vertices` supplies them
+ *  when they are loaded (a legacy point carries its own). */
+export function resultOf(doc: EmDocument, extractorId: string,
+                         vertices?: (regionId: string) => Vec3[] | null): string {
   const g = geometryOf(doc, extractorId);
   const x = nodeOf(doc, extractorId);
   const own = String(((x?.data ?? {}) as Record<string, unknown>).result ?? "").trim();
   if (own) return own;
   if (!g) return "";
   if (g.kind === "passage") return g.text;
-  if (g.kind === "point3d") return `z ${g.p[2].toFixed(2)} m`;
-  if (g.rect) return `${Math.round(g.rect[2] * 100)}% × ${Math.round(g.rect[3] * 100)}%`;
+  if (g.kind === "line" || g.kind === "polyline") return measureText(g);
+  if (g.kind === "point") {
+    const v = g.vertices ?? (g.regionId && vertices ? vertices(g.regionId) : null);
+    return v?.length === 1 ? `z ${v[0][2].toFixed(2)} m` : "";
+  }
+  if (g.kind === "region2d" && g.rect) return `${Math.round(g.rect[2] * 100)}% × ${Math.round(g.rect[3] * 100)}%`;
   return "";
 }
+
+// ── ids: the ones s3Dgraphy derives, so the bridge and the client agree ──────
+
+/** `uuid5(NAMESPACE_URL, "https://w3id.org/em/annotation")` — s3dgraphy
+ *  `annotation.paradata._ANNOT_NAMESPACE`. */
+const NAMESPACE_URL = "6ba7b811-9dad-11d1-80b4-00c04fd430c8";
+export const ANNOT_NAMESPACE = uuid5(NAMESPACE_URL, "https://w3id.org/em/annotation");
+
+/** The selector string of a region2d or a passage — `AnnotationRegionNode.selector()`. */
+function selectorOf(g: TraceGeometry): string {
+  if (g.kind === "passage") return `char=${g.start},${g.end}`;
+  if (g.kind !== "region2d") return "";
+  if (g.shape_kind === "rect") return "xywh=percent:" + (g.rect ?? []).map((v) => pyFixed(v * 100, 6)).join(",");
+  return `polygon(percent:${(g.points ?? []).map(([x, y]) => `${pyFixed(x * 100, 6)},${pyFixed(y * 100, 6)}`).join(" ")})`;
+}
+
+/** The region's id — `reading._region_key` through `_stable_id`: the same
+ *  reading on the same thing is the same node, in Python and here. */
+export function readingRegionId(onId: string | null, g: TraceGeometry): string {
+  const on = onId ?? "";
+  let key: string;
+  if (g.kind === "region2d") key = `region|${on}|${g.page ?? 0}|${selectorOf(g)}`;
+  else if (g.kind === "passage") key = `passage|${on}|${selectorOf(g)}|${g.text ?? ""}`;
+  else key = `${g.kind}|${on}|${g.vertices.map((p) => p.map((v) => pyFixed(v, 6)).join(",")).join(";")}`;
+  return uuid5(ANNOT_NAMESPACE, key);
+}
+/** `reading.reading_shape_id` */
+export const readingShapeId = (regionId: string): string => uuid5(ANNOT_NAMESPACE, `reading-shape|${regionId}`);
+/** `reading.reading_glb_url` — beside `proxies/`, named by the region id. */
+export const readingGlbUrl = (regionId: string): string => `readings/${regionId}.glb`;
 
 /** The extractors that read a document — directly, or through one of its regions. */
 export function readingsOfDocument(doc: EmDocument, documentId: string): string[] {
@@ -381,50 +504,121 @@ export function setReadingDescription(store: DocumentStore, extractorId: string,
   store.updateNode(extractorId, { description: text });
 }
 
+/** What placing a reading made — and, for the 3D kinds, the glb to write. */
+export interface PlacedReading {
+  extractorId: string;
+  regionId: string;
+  onId: string | null;
+  geometry_kind: GeometryKind;
+  shapeId: string | null;
+  /** project-relative path of the glb (the shape's url) */
+  glbUrl: string | null;
+  /** the file's bytes, `reading_glb.glb_bytes` — written by the caller (the
+   *  bridge's `api.place_reading`, the desktop's fs, or kept pending) */
+  glb: Uint8Array | null;
+  vertices: Vec3[] | null;
+  /** regions this reading no longer reads (its place moved) */
+  replaced: string[];
+}
+
 /**
- * Fix where a reading looked. A REGION becomes an AnnotationRegion node on the
- * document (`is_on_resource`) that the extractor `extracted_from`s — replacing a
- * previous region of the same reading; a passage or a point goes to
- * `data.geometry`. One undo step; the extractor keeps its NAME1 name (the region
- * is on the same document).
+ * Fix where a reading looked: `api.place_reading` in the client, ONE undo step.
+ *
+ *   · an `annotation_region` with `data.geometry_kind` and its fields (region2d:
+ *     the selector; passage: start, end, text; point/line/polyline:
+ *     vertex_count, and for a measure length, unit `m`, crs `local`), plus
+ *     `resource_id`; id = s3Dgraphy's uuid5, so a replay is the same node;
+ *   · `extracted_from` extractor → region, `is_on_resource` region → the
+ *     document (image, text or 3D model) it is on;
+ *   · 3D: a `generic` semantic_shape with `data.url = readings/<region>.glb`
+ *     and `has_semantic_shape` region → shape. The bytes come back in the result
+ *     — a file is not undoable, so it is written outside the batch.
+ *
+ * Placing again MOVES the reading (its `extracted_from` to the old region goes).
+ * s3Dgraphy keeps the old region; here a region nobody reads any more is removed
+ * with its shape — the gesture is «trace again», and an orphan would be a node
+ * nobody can reach from the chain. A legacy `data.geometry` leaves the extractor.
  */
 export function setReadingGeometry(
   store: DocumentStore,
   extractorId: string,
-  documentId: string,
-  g: { kind: "region"; shape_kind: "rect" | "polygon"; rect?: number[]; points?: number[][]; page?: number }
-    | { kind: "passage"; start: number; end: number; text: string }
-    | { kind: "point3d"; p: [number, number, number]; on?: string },
-): void {
-  store.batch(() => {
+  onId: string | null,
+  trace: TraceGeometry | { kind: "region"; shape_kind: "rect" | "polygon"; rect?: number[]; points?: number[][]; page?: number }
+    | { kind: "point3d"; p: Vec3 },
+): PlacedReading | null {
+  const g: TraceGeometry = trace.kind === "region" ? { ...trace, kind: "region2d" }
+    : trace.kind === "point3d" ? { kind: "point", vertices: [trace.p] } : trace;
+  if (isGlbKind(g.kind)) {
+    const v = (g as { vertices: Vec3[] }).vertices;
+    const least = g.kind === "point" ? 1 : 2;
+    if (!Array.isArray(v) || v.length < least || (g.kind === "line" && v.length !== 2))
+      throw new Error(`a ${g.kind} needs ${g.kind === "line" ? "exactly 2" : `at least ${least}`} vertices`);
+  }
+  return store.batch(() => {
     const doc = store.doc;
     const x = store.node(extractorId);
-    if (!x) return;
-    const data = { ...((x.data ?? {}) as Record<string, unknown>) };
-    if (g.kind === "region") {
-      for (const r of out(doc, extractorId, EXTRACTED_FROM)) {
-        if (nodeOf(doc, r)?.node_type === "annotation_region") store.deleteNode(r);
+    if (!x) return null;
+    const on = onId && store.node(onId) ? onId : null;
+    const regionId = readingRegionId(onId, g);
+    const kind = g.kind;
+    let vertices: Vec3[] | null = null;
+    if (!store.node(regionId)) {
+      const data: Record<string, unknown> = { geometry_kind: kind };
+      if (g.kind === "region2d") {
+        data.shape_kind = g.shape_kind;
+        data.page = g.page ?? 0;
+        if (g.rect) data.rect = g.rect;
+        if (g.points) data.points = g.points;
+      } else if (g.kind === "passage") {
+        Object.assign(data, { start: g.start, end: g.end, text: g.text ?? "" });
+      } else {
+        data.vertex_count = g.vertices.length;
+        if (MEASURE_KINDS.includes(kind))
+          Object.assign(data, { length: polylineLength(g.vertices), unit: DEFAULT_UNIT, crs: DEFAULT_CRS });
       }
-      const rid = store.newId();
-      store.addNode({ id: rid, node_type: "annotation_region",
-        name: `${String(x.name ?? "")} · region`,
-        data: { shape_kind: g.shape_kind, ...(g.rect ? { rect: g.rect } : {}),
-                ...(g.points ? { points: g.points } : {}), page: g.page ?? 0,
-                resource_id: documentId } } as EmNode);
-      store.addEdge(rid, documentId, IS_ON_RESOURCE);
-      store.addEdge(extractorId, rid, EXTRACTED_FROM);
-      if (data.geometry) { delete data.geometry; store.updateNode(extractorId, { data }); }
-    } else {
-      data.geometry = { ...g };
-      store.updateNode(extractorId, { data });
+      if (onId) data.resource_id = onId;
+      store.addNode({ id: regionId, node_type: "annotation_region",
+                      name: `${String(x.name ?? extractorId)} · ${kind}`, description: "", data } as EmNode);
     }
+    let shapeId: string | null = null, glbUrl: string | null = null, glb: Uint8Array | null = null;
+    if (g.kind === "point" || g.kind === "line" || g.kind === "polyline") {
+      vertices = g.vertices.map((p) => [Number(p[0]), Number(p[1]), Number(p[2])] as Vec3);
+      shapeId = readingShapeId(regionId);
+      glbUrl = readingGlbUrl(regionId);
+      if (!store.node(shapeId))
+        store.addNode({ id: shapeId, node_type: "semantic_shape", name: `${kind} glb`, description: "",
+                        data: { url: glbUrl, type: "generic" } } as EmNode);
+      if (!store.hasEdge(regionId, shapeId, HAS_SEMANTIC_SHAPE)) store.addEdge(regionId, shapeId, HAS_SEMANTIC_SHAPE);
+      glb = glbBytes(g.kind, vertices, regionId);
+    }
+    // the reading moves: off every other region it read
+    const replaced: string[] = [];
+    for (const e of edges(doc).filter((ed) => ed.source === extractorId && ed.edge_type === EXTRACTED_FROM
+                                              && ed.target !== regionId)) {
+      if (nodeOf(doc, e.target)?.node_type !== "annotation_region") continue;
+      store.deleteEdge(e);
+      replaced.push(e.target);
+    }
+    for (const r of replaced) {
+      if (inn(store.doc, r, EXTRACTED_FROM).length) continue;       // somebody else still reads it
+      for (const sh of out(store.doc, r, HAS_SEMANTIC_SHAPE))
+        if (inn(store.doc, sh, HAS_SEMANTIC_SHAPE).length === 1) store.deleteNode(sh);
+      store.deleteNode(r);
+    }
+    if (!store.hasEdge(extractorId, regionId, EXTRACTED_FROM)) store.addEdge(extractorId, regionId, EXTRACTED_FROM);
+    if (on && !store.hasEdge(regionId, on, IS_ON_RESOURCE)) store.addEdge(regionId, on, IS_ON_RESOURCE);
+    const data = { ...((store.node(extractorId)?.data ?? {}) as Record<string, unknown>) };
+    if (data.geometry) { delete data.geometry; store.updateNode(extractorId, { data }); }
+    return { extractorId, regionId, onId: on, geometry_kind: kind, shapeId, glbUrl, glb, vertices, replaced };
   });
 }
 
-/** «Usa come valore»: the reading's result becomes the property's value. */
-export function useAsValue(store: DocumentStore, extractorId: string): string | null {
+/** «Usa come valore»: the reading's result becomes the property's value — for a
+ *  line or a polyline the measure, `api.measure(...).value`. */
+export function useAsValue(store: DocumentStore, extractorId: string,
+                           vertices?: (regionId: string) => Vec3[] | null): string | null {
   const p = propertyOfExtractor(store.doc, extractorId);
-  const v = resultOf(store.doc, extractorId);
+  const v = resultOf(store.doc, extractorId, vertices);
   if (!p || !v) return null;
   store.batch(() => store.setPropertyValue(p, v));
   return p;

@@ -139,7 +139,7 @@ export function promoteToDocument(store: DocumentStore, e: ShelfEntry): { docume
       const x = store.newId();
       store.addNode({ id: x, node_type: "extractor", name: initialName(store.doc, "extractor") ?? "Temp1",
                       description: s.note, data: { tropy_selection: s.id } } as EmNode);
-      setReadingGeometry(store, x, docId, { kind: "region", shape_kind: "rect", rect: [...s.rect] });
+      setReadingGeometry(store, x, docId, { kind: "region2d", shape_kind: "rect", rect: [...s.rect] });
       const renamed = renameOnAttach(store.doc, x);
       if (renamed) {
         store.updateNode(x, { name: renamed });

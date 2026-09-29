@@ -65,11 +65,13 @@ export interface ViewerHandle {
   frame?(): void;
 }
 
-/** CATENA · a point on the model with its label — a reading's geometry. */
+/** CATENA · a reading's place on the model with its label. LUOGO: its
+ *  vertices come from the reading's glb — one for a point. */
 export interface Marker3D {
   id: string;
   label: string;
-  p: [number, number, number];
+  kind?: "point" | "line" | "polyline";
+  vertices: [number, number, number][];
   selected?: boolean;
 }
 
@@ -156,11 +158,13 @@ export function mount3dViewer(host: HTMLElement, url: string,
         markerGroup.clear();
         labels.textContent = "";
         for (const m of markers) {
-          const s = new THREE.Mesh(new THREE.SphereGeometry(markerRadius, 16, 12),
-            new THREE.MeshBasicMaterial({ color: m.selected ? 0xbf9000 : 0xe3b43a }));
-          s.position.set(m.p[0], m.p[1], m.p[2]);
-          s.userData.markerId = m.id;
-          markerGroup.add(s);
+          for (const p of m.vertices) {
+            const s = new THREE.Mesh(new THREE.SphereGeometry(markerRadius, 16, 12),
+              new THREE.MeshBasicMaterial({ color: m.selected ? 0xbf9000 : 0xe3b43a }));
+            s.position.set(p[0], p[1], p[2]);
+            s.userData.markerId = m.id;
+            markerGroup.add(s);
+          }
           const l = document.createElement("span");
           l.className = "v3d-label" + (m.selected ? " sel" : "");
           l.textContent = m.label;
@@ -174,7 +178,8 @@ export function mount3dViewer(host: HTMLElement, url: string,
         markers.forEach((m, i) => {
           const el = labels.children[i] as HTMLElement | undefined;
           if (!el) return;
-          const v = new THREE.Vector3(m.p[0], m.p[1], m.p[2]).project(camera);
+          const p = m.vertices[0];
+          const v = new THREE.Vector3(p[0], p[1], p[2]).project(camera);
           el.style.left = `${((v.x + 1) / 2) * w}px`;
           el.style.top = `${((1 - v.y) / 2) * h}px`;
           el.style.display = v.z < 1 ? "" : "none";
