@@ -27,6 +27,7 @@ import {
 } from "./paradata-chain";
 import { geometryBadge } from "./paradata-inspector";
 import { mount3dViewer, type ViewerHandle } from "./embed3d-native";
+import { ViewerKeeper } from "./viewer-keep";
 import type { Medium } from "./doc-form";
 
 export type TraceGeometry =
@@ -63,13 +64,15 @@ function el<K extends keyof HTMLElementTagNameMap>(tag: K, cls?: string, text?: 
   return e;
 }
 
-const viewers = new WeakMap<HTMLElement, ViewerHandle>();
+/** RIFINITURE · one 3D viewer per window, KEPT across repaints while the window
+ *  shows the same model (`viewer-keep.ts`): a repaint must not reframe it. The
+ *  extra is the viewer's element and the ctx its callbacks read (the latest). */
+const viewers = new ViewerKeeper<HTMLElement, ViewerHandle, { el: HTMLElement; ctx: { cur: ReadingStageCtx } }>();
 
 /** Draw the stage into `host` (the Doc window's detail, above the fields). */
 export function renderReadingStage(host: HTMLElement, ctx: ReadingStageCtx): void {
-  // the 3D viewer of the previous paint of THIS window goes (one WebGL context each)
-  viewers.get(host)?.dispose();
-  viewers.delete(host);
+  // another medium, or no model: the kept viewer goes (one WebGL context each)
+  if (ctx.medium !== "3d" || !ctx.modelUrl) viewers.drop(host);
   const { store, docId } = ctx;
   const doc = store.doc;
   const stage = el("div", "rd-stage");
@@ -321,18 +324,35 @@ function modelStage(ctx: ReadingStageCtx, reads: string[], owner: HTMLElement): 
     wrap.appendChild(el("p", "chain-note", t("rd.no3d")));
     return wrap;
   }
-  const host = el("div", "rd-3d-host");
-  wrap.appendChild(host);
   const markers = reads.map((x) => [x, geometryOf(ctx.store.doc, x)] as const)
     .filter(([, g]) => g?.kind === "point3d")
     .map(([x, g]) => ({ id: x, label: String(ctx.store.node(x)?.name ?? ""),
                         p: (g as Extract<Geometry, { kind: "point3d" }>).p, selected: x === ctx.current }));
-  const v = mount3dViewer(host, ctx.modelUrl, {
-    label: String(ctx.store.node(ctx.docId)?.name ?? ""),
-    markers,
-    onMarker: (id) => ctx.onSelect(id),
-    onPick: (p, on) => { if (ctx.armed) ctx.onTrace(ctx.armed, { kind: "point3d", p, ...(on ? { on } : {}) }); },
+  // the SAME model as the last paint → the same viewer, moved into this paint,
+  // its camera where the reader left it; only a new model is mounted (and framed)
+  const url = ctx.modelUrl;
+  const kept = viewers.keep(owner, `${ctx.docId}\u0000${url}`, () => {
+    const host = el("div", "rd-3d-host");
+    const ref = { cur: ctx };
+    const v = mount3dViewer(host, url, {
+      label: String(ctx.store.node(ctx.docId)?.name ?? ""),
+      markers,
+      onMarker: (id) => ref.cur.onSelect(id),
+      onPick: (p, on) => {
+        const c = ref.cur;
+        if (c.armed) c.onTrace(c.armed, { kind: "point3d", p, ...(on ? { on } : {}) });
+      },
+    });
+    return { v, extra: { el: host, ctx: ref } };
   });
-  viewers.set(owner, v);
+  kept.extra.ctx.cur = ctx;
+  if (!kept.fresh) kept.v.setMarkers?.(markers);
+  wrap.appendChild(kept.extra.el);
+  // ⤢ · the explicit reframe — the only one besides the model's opening
+  const fit = el("button", "rd-3d-fit", "⤢");
+  fit.type = "button";
+  fit.title = t("rd.fit3d");
+  fit.addEventListener("click", () => kept.v.frame?.());
+  wrap.appendChild(fit);
   return wrap;
 }

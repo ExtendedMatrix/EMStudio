@@ -41,6 +41,7 @@ const bundle = await esbuild.build({
       export { newDraft, emitDraft, readyToStamp, setComposeBridgeResolver, outputFrom } from "./stamp-compose";
       export { dtcKindsFor } from "./rules";
       export { issues } from "./issues";
+      export { ViewerKeeper } from "./viewer-keep";
     `,
     resolveDir: SRC,
     loader: "ts",
@@ -62,7 +63,7 @@ const M = await import(
   "data:text/javascript;base64," + Buffer.from(bundle.outputFiles[0].text).toString("base64")
 );
 const { chain, DocumentStore, naming, isStratigraphicType, handleEdgeTypes, existingLinks, aiv, issues,
-        receipts, tropy, shelf } = M;
+        receipts, tropy, shelf, ViewerKeeper } = M;
 const S3D = new URL("../../../s3Dgraphy/", import.meta.url).pathname;
 const PY = `${S3D}.venv/bin/python`;
 /** ask s3Dgraphy (when its venv is there) a question about a document */
@@ -220,6 +221,28 @@ print(json.dumps(api.validate(g)["info"]))`;
   doc.graph.nodes.push({ id: "D", node_type: "document", name: "D.7" });
   doc.graph.edges.push({ source: "D", target: "F", edge_type: "has_linked_resource" });
   eq(naming.deriveExtractorName(doc, "X"), "D.7.01", "…until a document links the file: D.7.01");
+}
+
+// ── RIFINITURE · the 3D camera stays where it is ─────────────────────────────
+// A repaint of the Doc window (a traced point is one) keeps the viewer of the
+// same model: nothing is mounted again, so nothing frames it again. The reframe
+// happens when the model OPENS and on the explicit ⤢ (`frame`), nowhere else.
+{
+  const K = new ViewerKeeper();
+  const owner = {};
+  let mounted = 0, framed = 0, disposed = 0;
+  const make = () => { mounted++; framed++; // mounting frames (the model opens)
+    return { v: { dispose: () => { disposed++; }, frame: () => { framed++; } }, extra: null }; };
+  const a = K.keep(owner, "D1\u0000colonnato.gltf", make);
+  eq([a.fresh, mounted, framed], [true, 1, 1], "the model opens: one mount, one frame");
+  for (let i = 0; i < 3; i++) K.keep(owner, "D1\u0000colonnato.gltf", make); // three traced points = three repaints
+  eq([mounted, framed, disposed], [1, 1, 0], "three repaints of the same model: no mount, NO reframe");
+  K.get(owner).v.frame();
+  eq(framed, 2, "⤢ is the explicit reframe");
+  const b = K.keep(owner, "D2\u0000muro.gltf", make);
+  eq([b.fresh, mounted, framed, disposed], [true, 2, 3, 1], "another model: the old viewer goes, the new one is framed on opening");
+  K.drop(owner);
+  eq(disposed, 2, "another medium: the kept viewer is disposed");
 }
 
 // ── «Usa come valore» ───────────────────────────────────────────────────────

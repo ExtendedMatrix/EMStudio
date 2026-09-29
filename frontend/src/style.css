@@ -8387,6 +8387,11 @@ body.gesturing-resize * {
 .rd-3d { position: relative; }
 .rd-3d-host { position: relative; min-height: 220px; background: var(--bg-sunken); border-radius: var(--radius-sm); overflow: hidden; }
 .rd-3d.armed .rd-3d-host canvas { cursor: crosshair; }
+/* RIFINITURE · ⤢ reframes the model — the only reframe besides its opening */
+.rd-3d-fit { position: absolute; top: 6px; right: 6px; z-index: 2; width: 26px; height: 26px; padding: 0;
+  border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg-elevated); color: var(--text);
+  font-size: 14px; line-height: 1; cursor: pointer; }
+.rd-3d-fit:hover { background: var(--bg-hover); }
 .v3d-labels { position: absolute; inset: 0; pointer-events: none; }
 .v3d-label { position: absolute; transform: translate(-50%, -140%); font: 600 11px/1.2 var(--font-mono); background: var(--accent);
   color: var(--on-accent); padding: 1px 4px; border-radius: 3px; white-space: nowrap; }

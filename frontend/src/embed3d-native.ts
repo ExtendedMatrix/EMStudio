@@ -56,6 +56,8 @@ export interface ViewerHandle {
   dispose(): void;
   /** CATENA · replace the markers (a reading's points) without reloading */
   setMarkers?(markers: Marker3D[]): void;
+  /** RIFINITURE · frame the model again — the explicit ⤢, never implied */
+  frame?(): void;
 }
 
 /** CATENA · a point on the model with its label — a reading's geometry. */
@@ -89,6 +91,7 @@ export function mount3dViewer(host: HTMLElement, url: string,
   let cleanup: (() => void) | null = null;
   let markers: Marker3D[] = opts.markers ?? [];
   let applyMarkers: (() => void) | null = null;
+  let frameModel: (() => void) | null = null;
 
   const status = document.createElement("div");
   status.className = "nv-embed-note";
@@ -210,17 +213,21 @@ export function mount3dViewer(host: HTMLElement, url: string,
           scene.add(gltf.scene);
           // Frame whatever arrived: a study model may be a metre or a hillside,
           // and a fixed camera would show an empty screen for one of the two.
+          // RIFINITURE · ONLY here (the model opens) and on the explicit ⤢.
           const box = new THREE.Box3().setFromObject(gltf.scene);
           const size = box.getSize(new THREE.Vector3());
           const centre = box.getCenter(new THREE.Vector3());
           const span = Math.max(size.x, size.y, size.z) || 1;
-          controls.target.copy(centre);
-          camera.position.copy(centre).add(
-            new THREE.Vector3(span * 1.4, span * 0.9, span * 1.6));
-          camera.near = span / 100;
-          camera.far = span * 100;
-          camera.updateProjectionMatrix();
-          controls.update();
+          frameModel = () => {
+            controls.target.copy(centre);
+            camera.position.copy(centre).add(
+              new THREE.Vector3(span * 1.4, span * 0.9, span * 1.6));
+            camera.near = span / 100;
+            camera.far = span * 100;
+            camera.updateProjectionMatrix();
+            controls.update();
+          };
+          frameModel();
           markerRadius = span / 80;
           applyMarkers?.();
 
@@ -228,6 +235,9 @@ export function mount3dViewer(host: HTMLElement, url: string,
           host.appendChild(renderer.domElement);
           host.appendChild(labels);
           host.dataset.ready = "1";
+          // the probes' seam: where the camera is (position, then target)
+          (host as unknown as { __v3dCamera?: () => number[] }).__v3dCamera =
+            () => [...camera.position.toArray(), ...controls.target.toArray()];
           const hint = document.createElement("div");
           hint.className = "nv-embed-note";
           hint.textContent = t("em3d.dragHint");
@@ -256,6 +266,9 @@ export function mount3dViewer(host: HTMLElement, url: string,
     setMarkers(next: Marker3D[]) {
       markers = next;
       applyMarkers?.();
+    },
+    frame() {
+      frameModel?.();
     },
   };
 }
