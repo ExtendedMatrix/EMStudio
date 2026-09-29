@@ -8481,6 +8481,12 @@ body.gesturing-resize * {
 .v3d-label { position: absolute; transform: translate(-50%, -140%); font: 600 11px/1.2 var(--font-mono); background: var(--accent);
   color: var(--on-accent); padding: 1px 4px; border-radius: 3px; white-space: nowrap; }
 .v3d-label.sel { background: var(--accent-ink); }
+/* LUOGO · the trace in progress: its own colour (the draft's blue), not the selection's ochre */
+.v3d-label.draft { background: var(--info-ink); color: var(--info-soft); transform: translate(8px, -50%); }
+.rd-3d-tools { display: flex; gap: 4px; margin-bottom: 4px; }
+.rd-3d-tools .tv-act.on { background: var(--info-soft); color: var(--info-ink); border-color: var(--info-ink); }
+.rd-3d-status { font-size: 11.5px; color: var(--info-ink); background: var(--info-soft); border-radius: var(--radius-sm);
+  padding: 3px 8px; margin-bottom: 4px; font-variant-numeric: tabular-nums; }
 .rd-edit { border: 1px solid var(--border); border-radius: var(--radius); padding: 6px 8px; background: var(--bg-panel); }
 .rd-eyebrow { font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-muted); font-weight: 600;
   display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin-bottom: 4px; }

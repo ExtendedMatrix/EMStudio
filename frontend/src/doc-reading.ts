@@ -7,8 +7,12 @@
  *   · text  — select a passage: start, end and the words become the geometry;
  *             «Proponi con AI» asks the provider which passage states the
  *             property (the proposal enters `ai_assisted`, signed by the person);
- *   · 3D    — click a point on the model (`embed3d-native`, raycast): the
- *             point and a labelled marker.
+ *   · 3D    — on the model (`embed3d-native`, raycast), three tools: a POINT
+ *             (one click), a LINE (two clicks: a measure), a POLYLINE (clicks,
+ *             Enter or a double click closes the open path, Esc cancels it: an
+ *             articulated measure). A status line says what is being traced and
+ *             how many vertices; the running measure sits by the last vertex.
+ *             The place's vertices go to its glb; the markers read them back.
  * The reading's DESCRIPTION is written here, next to its geometry — this is its
  * main place (the inspector is the secondary one). Below, the readings of the
  * document with their geometry; the selected one is highlighted on the source.
@@ -27,7 +31,8 @@ import {
   type Geometry,
   type TraceGeometry,
 } from "./paradata-chain";
-import type { Vec3 } from "./reading-glb";
+import { polylineLength, pyFixed, type GlbKind, type Vec3 } from "./reading-glb";
+import { measureText } from "./paradata-chain";
 import { geometryBadge } from "./paradata-inspector";
 import { mount3dViewer, type ViewerHandle } from "./embed3d-native";
 import { ViewerKeeper } from "./viewer-keep";
@@ -70,7 +75,10 @@ function el<K extends keyof HTMLElementTagNameMap>(tag: K, cls?: string, text?: 
 /** RIFINITURE · one 3D viewer per window, KEPT across repaints while the window
  *  shows the same model (`viewer-keep.ts`): a repaint must not reframe it. The
  *  extra is the viewer's element and the ctx its callbacks read (the latest). */
-const viewers = new ViewerKeeper<HTMLElement, ViewerHandle, { el: HTMLElement; ctx: { cur: ReadingStageCtx } }>();
+const viewers = new ViewerKeeper<HTMLElement, ViewerHandle, {
+  el: HTMLElement; ctx: { cur: ReadingStageCtx };
+  hooks: { add: (p: Vec3) => void; dbl: () => void };
+}>();
 
 /** Draw the stage into `host` (the Doc window's detail, above the fields). */
 export function renderReadingStage(host: HTMLElement, ctx: ReadingStageCtx): void {
@@ -83,7 +91,7 @@ export function renderReadingStage(host: HTMLElement, ctx: ReadingStageCtx): voi
   const armed = ctx.armed ? store.node(ctx.armed) : undefined;
   if (armed) {
     const bar = el("div", "rd-armed");
-    const how = ctx.medium === "3d" ? t("rd.click3d") : ctx.medium === "image" ? t("rd.dragImage") : t("rd.selectText");
+    const how = ctx.medium === "3d" ? t("rd.pick3d") : ctx.medium === "image" ? t("rd.dragImage") : t("rd.selectText");
     bar.append(el("b", "", String(armed.name ?? "")), ` · ${how} `, el("span", "rd-dim", t("rd.escCancel")));
     const x = el("button", "tv-link", "×");
     x.type = "button";
@@ -320,7 +328,39 @@ function textStage(ctx: ReadingStageCtx, reads: string[]): HTMLElement {
   return wrap;
 }
 
-// ── 3D: click a point on the model ───────────────────────────────────────────
+// ── 3D: a point, a line, a polyline on the model ─────────────────────────────
+
+/** LUOGO · the trace in progress, per window (kept across repaints like the
+ *  viewer): which reading, which tool, the vertices clicked so far. */
+interface Trace3D { reading: string | null; tool: GlbKind; vertices: Vec3[] }
+const traces = new WeakMap<HTMLElement, Trace3D>();
+/** the stage whose trace Enter and Esc speak to: the last one painted armed */
+let keyTarget: { trace: Trace3D; finish: () => void; cancel: () => void } | null = null;
+
+const measureOfVertices = (vs: Vec3[]): string => (vs.length > 1 ? `${pyFixed(polylineLength(vs), 3)} m` : "");
+const sameVertex = (a: Vec3 | undefined, b: Vec3) =>
+  !!a && Math.abs(a[0] - b[0]) < 1e-9 && Math.abs(a[1] - b[1]) < 1e-9 && Math.abs(a[2] - b[2]) < 1e-9;
+
+// Enter closes a polyline, Esc cancels the vertices of a trace — BEFORE the app's
+// Esc (which disarms the reading): capture phase, and only when there is a trace
+if (typeof document !== "undefined") {
+  document.addEventListener("keydown", (e) => {
+    const k = keyTarget;
+    if (!k || !k.trace.reading) return;
+    const tgt = e.target as HTMLElement | null;
+    if (tgt && (tgt.tagName === "INPUT" || tgt.tagName === "TEXTAREA" || tgt.isContentEditable)) return;
+    if (e.key === "Enter" && k.trace.tool === "polyline" && k.trace.vertices.length) {
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      k.finish();
+    } else if (e.key === "Escape" && k.trace.vertices.length) {
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      k.cancel();
+    }
+  }, true);
+}
+
 function modelStage(ctx: ReadingStageCtx, reads: string[], owner: HTMLElement): HTMLElement {
   const wrap = el("div", "rd-3d" + (ctx.armed ? " armed" : ""));
   if (!ctx.modelUrl) {
@@ -333,27 +373,105 @@ function modelStage(ctx: ReadingStageCtx, reads: string[], owner: HTMLElement): 
     if (!g || !isGlbKind(g.kind)) return [];
     const v = ctx.vertices(g);
     return v?.length ? [{ id: x, label: String(ctx.store.node(x)?.name ?? ""), kind: g.kind, vertices: v,
-                          selected: x === ctx.current }] : [];
+                          note: measureText(g) || undefined, selected: x === ctx.current }] : [];
   });
+  let trace = traces.get(owner);
+  if (!trace) { trace = { reading: null, tool: "point", vertices: [] }; traces.set(owner, trace); }
+  if (trace.reading !== ctx.armed) { trace.reading = ctx.armed; trace.vertices = []; }
+  const tr = trace;
+
+  // the tools and the status line, while a reading waits for its place
+  const status = el("div", "rd-3d-status");
+  status.dataset.trace = tr.tool;
+  const say = () => {
+    const n = tr.vertices.length;
+    status.dataset.vertices = String(n);
+    const what = t(`rd.tracing.${tr.tool}`);
+    const hint = t(`rd.hint3d.${tr.tool}`);
+    const m = measureOfVertices(tr.vertices);
+    status.textContent = n
+      ? `${what} · ${t("rd.vertices", { n: String(n) })}${m ? ` · ${m}` : ""} — ${hint}`
+      : `${what} — ${hint}`;
+  };
+  if (ctx.armed) {
+    const tools = el("div", "rd-3d-tools");
+    for (const k of ["point", "line", "polyline"] as GlbKind[]) {
+      const b = el("button", "tv-act" + (tr.tool === k ? " on" : ""), t(`rd.tool.${k}`));
+      b.type = "button";
+      b.dataset.tool = k;
+      b.setAttribute("aria-pressed", String(tr.tool === k));
+      b.addEventListener("click", () => {
+        tr.tool = k;
+        tr.vertices = [];
+        status.dataset.trace = k;
+        for (const o of tools.querySelectorAll("button")) {
+          const on = (o as HTMLElement).dataset.tool === k;
+          o.classList.toggle("on", on);
+          o.setAttribute("aria-pressed", String(on));
+        }
+        kept.v.setDraft?.(null);
+        say();
+      });
+      tools.appendChild(b);
+    }
+    wrap.appendChild(tools);
+    say();
+    wrap.appendChild(status);
+  }
+
+  const finish = () => {
+    const c = ctxRef.cur;
+    if (!c.armed) return;
+    if (tr.tool === "polyline" && tr.vertices.length < 2) {
+      status.textContent = `${t("rd.tracing.polyline")} — ${t("rd.needTwo")}`;
+      return;
+    }
+    const vertices = tr.vertices.slice();
+    tr.vertices = [];
+    kept.v.setDraft?.(null);
+    c.onTrace(c.armed, { kind: tr.tool, vertices });
+  };
+  const cancel = () => {
+    tr.vertices = [];
+    kept.v.setDraft?.(null);
+    say();
+  };
+  const addVertex = (p: Vec3) => {
+    if (!ctxRef.cur.armed) return;
+    if (tr.tool === "point") { tr.vertices = [p]; finish(); return; }
+    // the second click of a double click lands on the same point: not a vertex
+    if (sameVertex(tr.vertices[tr.vertices.length - 1], p)) return;
+    tr.vertices.push(p);
+    if (tr.tool === "line" && tr.vertices.length === 2) { finish(); return; }
+    kept.v.setDraft?.(tr.vertices.slice(), measureOfVertices(tr.vertices));
+    say();
+  };
+
   // the SAME model as the last paint → the same viewer, moved into this paint,
   // its camera where the reader left it; only a new model is mounted (and framed)
   const url = ctx.modelUrl;
   const kept = viewers.keep(owner, `${ctx.docId}\u0000${url}`, () => {
     const host = el("div", "rd-3d-host");
     const ref = { cur: ctx };
+    const hooks = { add: (_p: Vec3) => {}, dbl: () => {} };
     const v = mount3dViewer(host, url, {
       label: String(ctx.store.node(ctx.docId)?.name ?? ""),
       markers,
       onMarker: (id) => ref.cur.onSelect(id),
-      onPick: (p) => {
-        const c = ref.cur;
-        if (c.armed) c.onTrace(c.armed, { kind: "point", vertices: [p] });
-      },
+      onPick: (p) => hooks.add(p),
+      onDoubleClick: () => hooks.dbl(),
+      tracing: () => !!ref.cur.armed,
     });
-    return { v, extra: { el: host, ctx: ref } };
+    return { v, extra: { el: host, ctx: ref, hooks } };
   });
-  kept.extra.ctx.cur = ctx;
+  const ctxRef = kept.extra.ctx;
+  ctxRef.cur = ctx;
+  // the viewer outlives this paint: its callbacks reach the latest closures
+  kept.extra.hooks.add = addVertex;
+  kept.extra.hooks.dbl = () => { if (tr.tool === "polyline" && tr.vertices.length) finish(); };
   if (!kept.fresh) kept.v.setMarkers?.(markers);
+  kept.v.setDraft?.(tr.vertices.length ? tr.vertices.slice() : null, measureOfVertices(tr.vertices));
+  keyTarget = ctx.armed ? { trace: tr, finish, cancel } : keyTarget?.trace === tr ? null : keyTarget;
   wrap.appendChild(kept.extra.el);
   // ⤢ · the explicit reframe — the only one besides the model's opening
   const fit = el("button", "rd-3d-fit", "⤢");

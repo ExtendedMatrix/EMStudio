@@ -18,6 +18,7 @@ import type { DocumentStore } from "./model";
 import {
   extractorsOfProperty,
   geometryOf,
+  measureText,
   ownersOf,
   propertiesOf,
   propertyOfExtractor,
@@ -80,9 +81,14 @@ export function mediumOf(doc: EmNode | undefined, resolve: (id: string) => EmNod
 
 const GEO_ICON: Record<string, string> = { region2d: "▭", passage: "¶", point: "⌖", line: "⟷", polyline: "⌇" };
 
+/** The badge of a reading's place: its kind, and for a measure its length. */
 export function geometryBadge(g: Geometry | null): HTMLElement {
   if (!g) return el("span", "chain-geo none", t("chain.geo.none"));
-  return el("span", `chain-geo ${g.kind}`, `${GEO_ICON[g.kind] ?? "·"} ${t(`chain.geo.${g.kind}`)}`);
+  const m = measureText(g);
+  const b = el("span", `chain-geo ${g.kind}`, `${GEO_ICON[g.kind] ?? "·"} ${t(`chain.geo.${g.kind}`)}${m ? ` · ${m}` : ""}`);
+  b.dataset.kind = g.kind;
+  if (m) b.dataset.measure = m;
+  return b;
 }
 
 function linkBtn(ui: ChainUi, id: string, cls = ""): HTMLButtonElement {

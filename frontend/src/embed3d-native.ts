@@ -63,6 +63,8 @@ export interface ViewerHandle {
   setMarkers?(markers: Marker3D[]): void;
   /** RIFINITURE · frame the model again — the explicit ⤢, never implied */
   frame?(): void;
+  /** LUOGO · the trace being drawn (a line or polyline not closed yet), or null */
+  setDraft?(vertices: [number, number, number][] | null, note?: string): void;
 }
 
 /** CATENA · a reading's place on the model with its label. LUOGO: its
@@ -72,7 +74,31 @@ export interface Marker3D {
   label: string;
   kind?: "point" | "line" | "polyline";
   vertices: [number, number, number][];
+  /** LUOGO · shown after the label: the measure of a line or a polyline */
+  note?: string;
   selected?: boolean;
+}
+
+/** Where a place's label sits: the middle of its path (a point: the point). */
+export function labelAnchor(vs: [number, number, number][]): [number, number, number] {
+  if (vs.length < 2) return vs[0];
+  const seg: number[] = [];
+  let total = 0;
+  for (let i = 1; i < vs.length; i++) {
+    const d = Math.hypot(vs[i][0] - vs[i - 1][0], vs[i][1] - vs[i - 1][1], vs[i][2] - vs[i - 1][2]);
+    seg.push(d);
+    total += d;
+  }
+  let half = total / 2;
+  for (let i = 0; i < seg.length; i++) {
+    if (half <= seg[i] || i === seg.length - 1) {
+      const f = seg[i] ? Math.min(1, half / seg[i]) : 0;
+      const a = vs[i], b = vs[i + 1];
+      return [a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f, a[2] + (b[2] - a[2]) * f];
+    }
+    half -= seg[i];
+  }
+  return vs[0];
 }
 
 export interface Viewer3DOptions {
@@ -82,6 +108,11 @@ export interface Viewer3DOptions {
   onPick?: (p: [number, number, number], on: string) => void;
   /** a click on a marker */
   onMarker?: (id: string) => void;
+  /** LUOGO · a double click on the canvas (closes a polyline being traced) */
+  onDoubleClick?: () => void;
+  /** LUOGO · true while a reading waits for its place: every click is then a
+   *  vertex, and a marker under it (a line is a wide target) does not take it */
+  tracing?: () => boolean;
   markers?: Marker3D[];
 }
 
@@ -99,6 +130,8 @@ export function mount3dViewer(host: HTMLElement, url: string,
   let markers: Marker3D[] = opts.markers ?? [];
   let applyMarkers: (() => void) | null = null;
   let frameModel: (() => void) | null = null;
+  let draft: { vertices: [number, number, number][]; note: string } | null = null;
+  let applyDraft: (() => void) | null = null;
 
   const status = document.createElement("div");
   status.className = "nv-embed-note";
@@ -154,20 +187,58 @@ export function mount3dViewer(host: HTMLElement, url: string,
       const labels = document.createElement("div");
       labels.className = "v3d-labels";
       let markerRadius = 0.05;
+      // LUOGO · the trace being drawn: its vertices, the path so far, the
+      // running measure beside the last vertex — a colour of its own
+      const draftGroup = new THREE.Group();
+      scene.add(draftGroup);
+      const draftLabel = document.createElement("span");
+      draftLabel.className = "v3d-label draft";
+      draftLabel.style.display = "none";
+      labels.appendChild(draftLabel);
+      applyDraft = () => {
+        draftGroup.clear();
+        if (!labels.contains(draftLabel)) labels.appendChild(draftLabel);
+        const vs = draft?.vertices ?? [];
+        for (const p of vs) {
+          const s = new THREE.Mesh(new THREE.SphereGeometry(markerRadius * 0.7, 16, 12),
+            new THREE.MeshBasicMaterial({ color: 0x3a8fe3 }));
+          s.position.set(p[0], p[1], p[2]);
+          draftGroup.add(s);
+        }
+        if (vs.length > 1) {
+          const line = new THREE.Line(
+            new THREE.BufferGeometry().setFromPoints(vs.map((p) => new THREE.Vector3(p[0], p[1], p[2]))),
+            new THREE.LineBasicMaterial({ color: 0x3a8fe3, depthTest: false }));
+          line.renderOrder = 3;
+          draftGroup.add(line);
+        }
+        draftLabel.textContent = draft?.note ?? "";
+      };
       applyMarkers = () => {
         markerGroup.clear();
         labels.textContent = "";
+        labels.appendChild(draftLabel);
         for (const m of markers) {
+          const color = m.selected ? 0xbf9000 : 0xe3b43a;
           for (const p of m.vertices) {
-            const s = new THREE.Mesh(new THREE.SphereGeometry(markerRadius, 16, 12),
-              new THREE.MeshBasicMaterial({ color: m.selected ? 0xbf9000 : 0xe3b43a }));
+            const s = new THREE.Mesh(new THREE.SphereGeometry(markerRadius * (m.vertices.length > 1 ? 0.7 : 1), 16, 12),
+              new THREE.MeshBasicMaterial({ color }));
             s.position.set(p[0], p[1], p[2]);
             s.userData.markerId = m.id;
             markerGroup.add(s);
           }
+          // a line and a polyline are drawn as what they are: an open path
+          if (m.vertices.length > 1) {
+            const line = new THREE.Line(
+              new THREE.BufferGeometry().setFromPoints(m.vertices.map((p) => new THREE.Vector3(p[0], p[1], p[2]))),
+              new THREE.LineBasicMaterial({ color, depthTest: false }));
+            line.renderOrder = 2;
+            line.userData.markerId = m.id;
+            markerGroup.add(line);
+          }
           const l = document.createElement("span");
           l.className = "v3d-label" + (m.selected ? " sel" : "");
-          l.textContent = m.label;
+          l.textContent = m.note ? `${m.label} · ${m.note}` : m.label;
           l.dataset.marker = m.id;
           labels.appendChild(l);
         }
@@ -176,14 +247,21 @@ export function mount3dViewer(host: HTMLElement, url: string,
         const w = renderer.domElement.clientWidth || width;
         const h = renderer.domElement.clientHeight || height;
         markers.forEach((m, i) => {
-          const el = labels.children[i] as HTMLElement | undefined;
+          const el = labels.children[i + 1] as HTMLElement | undefined;   // [0] is the draft's
           if (!el) return;
-          const p = m.vertices[0];
+          const p = labelAnchor(m.vertices);
           const v = new THREE.Vector3(p[0], p[1], p[2]).project(camera);
           el.style.left = `${((v.x + 1) / 2) * w}px`;
           el.style.top = `${((1 - v.y) / 2) * h}px`;
           el.style.display = v.z < 1 ? "" : "none";
         });
+        if (draft?.vertices.length) {
+          const p = draft.vertices[draft.vertices.length - 1];
+          const v = new THREE.Vector3(p[0], p[1], p[2]).project(camera);
+          draftLabel.style.left = `${((v.x + 1) / 2) * w}px`;
+          draftLabel.style.top = `${((1 - v.y) / 2) * h}px`;
+          draftLabel.style.display = v.z < 1 && draft.note ? "" : "none";
+        } else draftLabel.style.display = "none";
       };
       let frame = 0;
       const tick = () => {
@@ -204,9 +282,12 @@ export function mount3dViewer(host: HTMLElement, url: string,
         const r = renderer.domElement.getBoundingClientRect();
         ray.setFromCamera(new THREE.Vector2(((e.clientX - r.left) / r.width) * 2 - 1,
           -((e.clientY - r.top) / r.height) * 2 + 1), camera);
-        const hitM = ray.intersectObjects(markerGroup.children, false)[0];
+        // a line is hit within a marker's radius, not the default metre; and
+        // while a trace is being drawn every click is a vertex, never a marker
+        ray.params.Line = { threshold: markerRadius };
+        const hitM = draft || opts.tracing?.() ? undefined : ray.intersectObjects(markerGroup.children, false)[0];
         if (hitM && opts.onMarker) { opts.onMarker(String(hitM.object.userData.markerId)); return; }
-        const targets = scene.children.filter((o: any) => o !== markerGroup);
+        const targets = scene.children.filter((o: any) => o !== markerGroup && o !== draftGroup);
         const hit = ray.intersectObjects(targets, true)[0];
         if (!hit || !opts.onPick) return;
         const round = (v: number) => Math.round(v * 1000) / 1000;
@@ -215,6 +296,8 @@ export function mount3dViewer(host: HTMLElement, url: string,
       };
       renderer.domElement.addEventListener("pointerdown", onDown);
       renderer.domElement.addEventListener("pointerup", onUp);
+      if (opts.onDoubleClick)
+        renderer.domElement.addEventListener("dblclick", (e: MouseEvent) => { e.preventDefault(); opts.onDoubleClick!(); });
 
       new GLTFLoader().load(
         url,
@@ -240,6 +323,7 @@ export function mount3dViewer(host: HTMLElement, url: string,
           frameModel();
           markerRadius = span / 80;
           applyMarkers?.();
+          applyDraft?.();
 
           status.remove();
           host.appendChild(renderer.domElement);
@@ -279,6 +363,10 @@ export function mount3dViewer(host: HTMLElement, url: string,
     },
     frame() {
       frameModel?.();
+    },
+    setDraft(vertices, note) {
+      draft = vertices?.length ? { vertices, note: note ?? "" } : null;
+      applyDraft?.();
     },
   };
 }
