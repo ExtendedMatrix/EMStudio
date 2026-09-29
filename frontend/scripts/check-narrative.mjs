@@ -707,29 +707,22 @@ eq(doc.graph.nodes.filter(
   // ── I CONTROLLI RISPONDONO A UN CLICK VERO ────────────────────────────────
   //
   // Il difetto, misurato col mouse vero il 20 ago: premere «+ prose» non faceva
-  // niente. Non un overlay e non un rilevatore custom — i controlli sono legati
-  // al `click` nativo. Quel che li uccideva è che il capitolo imposta il
-  // «capitolo corrente» su `mousedown`, e impostarlo RICOSTRUIVA la vista: il
-  // bottone veniva rimosso dal DOM *fra mousedown e mouseup*, e un `click`
-  // esiste solo se down e up cadono sullo stesso elemento. Nel log del bottone:
-  // `pointerdown`, `mousedown`, poi niente, con `document.contains(button)` a
-  // false.
+  // niente, perché il capitolo impostava il «capitolo corrente» su `mousedown`
+  // e impostarlo RICOSTRUIVA la vista: il bottone spariva fra down e up, e un
+  // `click` esiste solo se down e up cadono sullo stesso elemento.
   //
-  // Quindi due proprietà, e sono quelle che rompendosi hanno spento mezza UI:
-  //   1. il solo evento `click` fa scattare l'azione (mouse, trackpad, touch e
-  //      strumenti di accessibilità lo emettono; una coppia pointer no);
+  // COLLEGARE (3 ott 2026) · la pagina è il lettore: i controlli del capitolo
+  // e del blocco sono nell'Ispettore, e nella pagina restano il «+» fra i
+  // blocchi e la selezione di una parte. Le due proprietà valgono per loro:
+  //   1. il solo `click` fa scattare l'azione;
   //   2. un `mousedown` su un capitolo NON rifà il DOM.
   const V = await load("narrative.ts");
   const acts = [];
   const editor = {
     narrativeId: "narr-1",
-    addChapter() {}, renameChapter() {}, moveChapter() {},
-    deleteChapter: (c) => acts.push(["deleteChapter", c]),
-    toggleCanonical() {}, setAnchor() {},
-    addProse: (c) => acts.push(["addProse", c]),
-    setProse() {}, addEmbed() {}, setViewType() {},
-    moveBlock: (c, b, d) => acts.push(["moveBlock", c, b, d]),
-    deleteBlock: (c, b) => acts.push(["deleteBlock", c, b]),
+    addChapter() {}, renameChapter() {}, moveChapter() {}, deleteChapter() {},
+    toggleCanonical() {}, setAnchor() {}, addProse() {}, setProse() {}, addEmbed() {},
+    setViewType() {}, moveBlock() {}, deleteBlock() {},
     lanes: () => [], authors: () => [], humanAuthors: () => [], addAuthor() {},
     removeAuthor() {}, setChapterAuthor() {}, signer: () => null, setSigner() {},
     endorse() {}, endorseChapter() {}, pendingIn: () => 0,
@@ -739,70 +732,40 @@ eq(doc.graph.nodes.filter(
   const sets = [];
   const host = document.createElement("div");
   V.renderNarrativeView(host, doc, "narr-1", () => {}, undefined, editor,
-                        { index: () => 0, set: (i) => sets.push(i) });
-
-  // il fixture ha un capitolo scrivibile (l'altra sezione è il piede del
-  // pannello): l'indice che conta è quello del capitolo del bottone
+                        { index: () => 0, set: (i) => sets.push(i) }, undefined, {
+    reading: "write",
+    onInsert: (c, at) => acts.push(["insert", c, at]),
+    onSelectPart: (sel) => acts.push(["select", sel.chapter, sel.block]),
+  });
   const chapters = [...host.querySelectorAll(".nv-chapter")];
-  const second = chapters.find(
-    (c) => c.querySelector(".nv-add-row button"));
-  ok(second, "click · c'è un capitolo con i suoi controlli");
+  const second = chapters.find((c) => c.querySelector(".nv-ins-btn"));
+  ok(second, "click · c'è un capitolo con il suo «+» fra i blocchi");
   const chapterIndex = chapters.indexOf(second);
-  const addProse = [...second.querySelectorAll(".nv-add-row button")]
-    .find((b) => /prose/.test(b.textContent || ""));
-  ok(addProse, "click · il capitolo ha il suo «+ prose»");
-
-  // 1 · IL SOLO `click`
-  // linkedom has no MouseEvent constructor; a bubbling `Event` of the right type
-  // is what a listener registered with `addEventListener("click", …)` receives,
-  // which is exactly the binding under test.
+  const plus = second.querySelector(".nv-ins-btn");
   const fire = (element, type) => element.dispatchEvent(
-    new host.ownerDocument.defaultView.Event(type,
-      { bubbles: true, cancelable: true }));
-  fire(addProse, "click");
-  eq(acts, [["addProse", chapterIndex]],
-     "click · il solo evento `click` aggiunge la prosa AL SUO capitolo");
-
-  // 2 · un click con un MICRO-MOVIMENTO: down, spostamento, up, click — che è
-  //     quel che manda un trackpad. L'azione parte una volta, non zero.
+    new host.ownerDocument.defaultView.Event(type, { bubbles: true, cancelable: true }));
+  fire(plus, "click");
+  eq(acts, [["insert", chapterIndex, 0]], "click · il solo `click` apre l'inserimento AL SUO posto");
   acts.length = 0;
   for (const type of ["pointerdown", "mousedown", "pointermove", "mousemove",
                       "pointerup", "mouseup", "click"])
-    fire(addProse, type);
-  eq(acts, [["addProse", chapterIndex]],
-     "click · un click con un micro-movimento conta come UN click");
-
-  // 3 · e il mousedown sul capitolo non deve rifare il DOM: se lo rifà, il
-  //     bottone su cui stai premendo scompare prima dell'up
+    fire(plus, type);
+  eq(acts, [["insert", chapterIndex, 0]], "click · un click con un micro-movimento conta come UN click");
+  // 3 · il mousedown sul capitolo non rifà il DOM
   const beforeNodes = [...second.querySelectorAll("button")];
   fire(second, "mousedown");
-  // ogni mousedown DENTRO quel capitolo (anche quello del bottone, che risale)
-  // chiede lo stesso capitolo — «scrivi dove hai cliccato», e ora è innocuo
-  // perché impostarlo non ricostruisce più niente
   ok(sets.length > 0 && sets.every((v) => v === chapterIndex),
      `click · il mousedown nel capitolo lo rende corrente (${JSON.stringify(sets)})`);
   const afterNodes = [...second.querySelectorAll("button")];
-  eq(afterNodes.length, beforeNodes.length,
-     "click · …e non cambia il numero di controlli");
-  ok(beforeNodes.every((b, i) => b === afterNodes[i]),
-     "click · …NÉ li sostituisce: gli stessi oggetti DOM sono ancora lì "
-     + "(sostituirli è ciò che impediva al click di esistere)");
-  ok(host.contains(addProse),
-     "click · …e il bottone premuto è ancora nel documento");
-
-  // 4 · gli altri controlli `nv-mini` dello stesso capitolo rispondono al solo
-  //     `click` (erano rotti dallo stesso meccanismo, tutti insieme)
+  ok(afterNodes.length === beforeNodes.length && beforeNodes.every((b, i) => b === afterNodes[i]),
+     "click · …e non sostituisce nessun controllo: gli stessi oggetti DOM sono ancora lì");
+  // 4 · un clic su un blocco lo seleziona per l'Ispettore, sul testa del capitolo il capitolo
   acts.length = 0;
-  const tools = second.querySelector(".nv-block-tools");
-  if (tools) {
-    for (const glyph of ["▲", "▼", "✕"]) {
-      const button = [...tools.querySelectorAll("button")]
-        .find((b) => (b.textContent || "").trim() === glyph);
-      if (button) fire(button, "click");
-    }
-    ok(acts.length >= 1,
-       `click · anche ▲ ▼ ✕ rispondono al solo click (${JSON.stringify(acts)})`);
-  }
+  const row = second.querySelector(".nv-block-row");
+  fire(row, "click");
+  fire(second.querySelector(".nv-chapter-head"), "click");
+  eq(acts, [["select", chapterIndex, 0], ["select", chapterIndex, null]],
+     "click · un blocco e la testa del capitolo si selezionano: gli attrezzi sono nell'Ispettore");
 }
 
 {
@@ -1008,28 +971,15 @@ eq(doc.graph.nodes.filter(
 }
 
 {
-  // ── LA STORIA NON SI RI-IMPAGINA · lo stesso layout nei quattro stati ─────
+  // ── LA PAGINA È IL LETTORE · la stessa storia in Scrivi e in Leggi ────────
   //
-  // Il sintomo (E.D., 4 screenshot): la finestra Narrativa ha una forma diversa
-  // a seconda del focus e di edit on/off — la colonna cambia larghezza, gli
-  // embed si stringono, la storia si sposta.
-  //
-  // MISURATO in browser, a pari larghezza d'area (635 px), l'ipotesi «due
-  // renderer» era FALSA — i due mount usano la stessa `renderNarrativeView` da
-  // prima di stanotte, e focus/defocus davano numeri identici. La causa era
-  // un'altra, in due pezzi:
-  //   1. la corsia dei controlli era IN FLUSSO e larga a seconda del contenuto
-  //      (86 px accanto a un paragrafo, 165 accanto a un embed, 0 in lettura):
-  //      entrando in edit la prosa passava 576 → 482 e la matrice 576 → 403;
-  //   2. le regole di PAGINA (il padding di 28 px, il fondo) stavano sull'ID
-  //      `#narrative-view`, non sulla classe che i due mount condividono: la
-  //      stessa storia cominciava 28 px più in alto nell'area secondaria.
-  // Siccome l'area secondaria è in sola lettura, una finestra in edit-mode si
-  // ri-impaginava anche perdendo il focus: da qui «cambia col focus».
-  //
-  // Qui non ci sono pixel (nessun layout headless): si asserisce il CABLAGGIO —
-  // che le corsie esistano nei due modi, che siano una sola definizione, e che
-  // la pagina sia sulla classe condivisa. I pixel sono gli screenshot.
+  // COLLEGARE (E.D., 29 set 2026). Fino a stanotte la difesa contro la
+  // ri-impaginazione era una CORSIA riservata accanto a ogni blocco, vuota in
+  // lettura e piena di ★, select e ▲▼✕ in scrittura. Gli attrezzi sono andati
+  // nell'Ispettore, quindi la corsia non ha più niente da riservare: la
+  // colonna è quella del lettore, intera, nelle quattro letture. Scrivere
+  // aggiunge due cose soltanto: il testo modificabile sul posto e il «+» fra i
+  // blocchi, in una grondaia ALTA ZERO (la storia non si sposta).
   const V = await load("narrative.ts");
   const chrome = {
     narrativeId: "narr-1",
@@ -1046,89 +996,43 @@ eq(doc.graph.nodes.filter(
   const render = (editor) => {
     const host = document.createElement("div");
     V.renderNarrativeView(host, doc, "narr-1", () => {}, undefined, editor,
-                          editor ? { index: () => 0, set: () => {} } : undefined);
+                          editor ? { index: () => 0, set: () => {} } : undefined, undefined,
+                          editor ? { reading: "write", onInsert() {}, onSelectPart() {} } : {});
     return host;
   };
   const reading = render(undefined);
   const writing = render(chrome);
-
   const count = (host, sel) => host.querySelectorAll(sel).length;
-  // 1 · ogni blocco è nella stessa impalcatura nei due modi: riga + corsia
   const rowsR = count(reading, ".nv-block-row");
-  const rowsW = count(writing, ".nv-block-row");
-  ok(rowsR > 0, `stabile · in lettura i blocchi sono in una riga (${rowsR})`);
-  eq(rowsR, rowsW, "stabile · e sono le STESSE righe scrivendo");
-  eq(count(reading, ".nv-block-body"), count(writing, ".nv-block-body"),
-     "stabile · lo stesso numero di corpi-blocco");
-  eq(count(reading, ".nv-block-tools"), rowsR,
-     "stabile · una corsia RISERVATA per ogni riga anche in lettura");
-  eq(count(writing, ".nv-block-tools"), rowsW,
-     "stabile · …e la stessa in scrittura, dove viene riempita");
-  eq([...reading.querySelectorAll(".nv-block-tools")]
-       .every((t) => t.children.length === 0), true,
-     "stabile · in lettura la corsia è VUOTA (nessun controllo fuori focus)");
-  ok([...writing.querySelectorAll(".nv-block-tools")]
-       .some((t) => t.querySelector("button")),
-     "stabile · in scrittura i controlli stanno DENTRO quella corsia");
-
-  // 2 · le altre tre corsie di chrome esistono nei due modi
-  for (const sel of [".nv-chapter-tools", ".nv-add-row", ".nv-authors-tools"]) {
-    ok(count(reading, sel) > 0, `stabile · ${sel} è riservata anche in lettura`);
-    eq(count(reading, sel), count(writing, sel),
-       `stabile · ${sel}: stesso numero nei due modi`);
-  }
-  // …e in lettura sono vuote: è la VISIBILITÀ dei controlli a cambiare
-  eq([...reading.querySelectorAll(".nv-chapter-tools, .nv-add-row, .nv-authors-tools")]
-       .every((t) => t.children.length === 0), true,
-     "stabile · in lettura le corsie di chrome sono vuote, non assenti");
-
-  // 3 · la colonna e le corsie sono definite UNA volta, nel foglio di stile
+  ok(rowsR > 0, `lettore · in lettura i blocchi sono in una riga (${rowsR})`);
+  eq(count(writing, ".nv-block-row"), rowsR, "lettore · e sono le STESSE righe scrivendo");
+  eq(count(writing, ".nv-block-body"), count(reading, ".nv-block-body"), "lettore · lo stesso numero di corpi-blocco");
+  for (const sel of [".nv-block-tools", ".nv-chapter-tools", ".nv-add-row", ".nv-authors-tools",
+                     "select", ".nv-mini"])
+    eq(count(writing, sel), 0, `lettore · in Scrivi nessun ${sel} nella pagina: gli attrezzi sono nell'Ispettore`);
+  ok(count(writing, ".nv-prose-edit") > 0 &&
+     [...writing.querySelectorAll(".nv-prose-edit")].every((p) => p.getAttribute("contenteditable") === "true"),
+     "lettore · in Scrivi il testo si scrive sul posto (contentEditable), nel DOM del lettore");
+  eq(count(reading, ".nv-ins"), 0, "lettore · in Leggi nessuna grondaia d'inserimento");
+  ok(count(writing, ".nv-ins") > 0, "lettore · in Scrivi il «+» fra i blocchi c'è");
   const css = readFileSync(new URL("../src/style.css", import.meta.url), "utf8");
-  // counted by splitting on the DECLARATION (`--name:`), which `var(--name)`
-  // does not match: one definition of the column, or it is two columns
-  const declared = (name) => css.split("--" + name + ":").length - 1;
-  eq(declared("nv-tools-w"), 1,
-     "stabile · la larghezza della corsia è dichiarata UNA sola volta");
-  eq(declared("nv-chrome-line"), 1,
-     "stabile · e così l'altezza di una riga di chrome");
-  // La cascata si INTERROGA (`sorgenti.mjs`): tutte le regole che nominano il
-  // selettore, contando le graffe. `.nv-chapter-tools` è dichiarato due volte —
-  // una in gruppo e una da solo, con l'altezza che riserva — e un lettore che
-  // torna la prima risponde «nessuna altezza» ed è in torto sulla pagina.
   ok(Sorg.dichiara(css, ".nv-block-row", "grid-template-columns") &&
-     Sorg.bloccoCss(css, ".nv-block-row").includes("var(--nv-tools-w)"),
-     "stabile · la riga è una griglia con la corsia come TRACCIA riservata");
-  for (const sel of [".nv-chapter-tools", ".nv-add-row", ".nv-authors-tools"])
-    ok(Sorg.dichiara(css, sel, "min-height", "var(--nv-chrome-line)"),
-       `stabile · ${sel} riserva l'altezza di una riga`);
-
-  // 4 · LA PAGINA, e il difetto che questa sezione misurava non esiste più
-  //
-  // Qui c'erano tre clausole sulla divisione fra `#narrative-view` (l'id del
-  // mount ATTIVO) e `.nv-view` (la classe che i DUE mount condividevano): il
-  // fondo e il padding sulla classe, e solo `position: absolute` sull'id, perché
-  // l'id era un overlay sul canvas.
-  //
-  // Il 14 settembre 2026 la narrativa ha smesso di essere anche un MODO
-  // (`centralMode === "narrative"`) ed è soltanto un tipo di finestra. Non c'è
-  // più un mount attivo e non c'è più un overlay: c'è UNA superficie, costruita
-  // nell'area della sua finestra come quella di ogni altro tipo. Una clausola
-  // che misura la distanza fra due mount non ha più referente — quindi al suo
-  // posto va l'asserzione più forte: **il secondo mount non esiste**.
+     !Sorg.bloccoCss(css, ".nv-block-row").includes("var(--nv-tools-w)"),
+     "lettore · la riga ha UNA traccia: la corsia non è più riservata perché non c'è niente da metterci");
+  ok(Sorg.dichiara(css, ".nv-ins", "height", "0"),
+     "lettore · la grondaia del «+» è alta zero: scrivere non ri-impagina");
+  // LA PAGINA, sulla classe condivisa (invariato dal 14 settembre)
   ok(Sorg.dichiara(css, ".nv-view", "padding") &&
      Sorg.dichiara(css, ".nv-view", "background"),
      "stabile · `.nv-view` porta il fondo e il padding della pagina");
   ok(!Sorg.miraA(css, "#narrative-view"),
-     "stabile · e NESSUNA regola punta più a `#narrative-view`: era l'overlay, " +
-     "cioè il mount che solo la finestra a fuoco poteva usare");
+     "stabile · e NESSUNA regola punta più a `#narrative-view`");
   const html = readFileSync(new URL("../index.html", import.meta.url), "utf8");
   ok(Sorg.elementi(html, "#narrative-view").length === 0,
-     "stabile · …e l'elemento non è più nel markup: la storia si costruisce " +
-     "nell'area della sua finestra (`shell/types.ts`), a fuoco o no");
+     "stabile · …e l'elemento non è più nel markup");
   ok(/tile-narrative nv-view/.test(
        readFileSync(new URL("../src/shell/types.ts", import.meta.url), "utf8")),
-     "stabile · …ed è quel costruttore a mettere `.nv-view` sull'host, così la " +
-     "pagina che la classe descrive è quella che si vede");
+     "stabile · …ed è il costruttore della superficie a mettere `.nv-view` sull'host");
 }
 
 console.log(`narrative: ${checks} checks passed`);

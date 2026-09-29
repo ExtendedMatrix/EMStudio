@@ -24,7 +24,8 @@ import type { GeoRef } from "./geo";
 import { onFirstVisible } from "./lazy";
 import { blockStatus, bylineOf, narrativeAuthors } from "./narrative-authorship";
 import type { AuthorRef, BlockStatus } from "./narrative-authorship";
-import { canonicalViewType, VIEW_TYPES } from "./narrative-edit";
+import { canonicalViewType } from "./narrative-edit";
+import { notebookCells, printItems, type ProjChapter } from "./narrative-projection";
 import {
   certaintyLadder, documentEmbed, existenceCertainty, isRmDoc, matrixEmbed,
   paradataEmbed, rmDocEmbed, tableEmbed, timelineEmbed, unSceneEmbed,
@@ -803,48 +804,120 @@ function authorChip(a: AuthorRef, ai: boolean): HTMLElement {
   return chip;
 }
 
-function chipRemove(a: AuthorRef, onClick: () => void): HTMLButtonElement {
-  const x = el("button", "nv-chip-x", "✕") as HTMLButtonElement;
-  x.title = t("nv.removeAuthor", { who: a.label });
-  x.addEventListener("click", onClick);
-  return x;
+/** COLLEGARE · the four READINGS of one story (the window header's switch). */
+export type Reading = "write" | "read" | "print" | "notebook";
+
+/** Which part of the story the Inspector is showing: a chapter (`block: null`)
+ *  or one of its blocks. */
+export interface NarrativeSelection {
+  chapter: number;
+  block: number | null;
 }
 
-/** A `<select>` over authors. Resets to its placeholder after a pick when the
- *  chosen value is an action rather than a state ("+ autore"). */
-function authorSelect(options: AuthorRef[], selected: string | null,
-                      placeholder: string, title: string,
-                      onPick: (id: string | null) => void): HTMLSelectElement {
-  const sel = document.createElement("select");
-  sel.className = "nv-author-select";
-  sel.title = title;
-  const none = document.createElement("option");
-  none.value = "";
-  none.textContent = placeholder;
-  none.selected = !selected;
-  sel.appendChild(none);
-  for (const a of options) {
-    const o = document.createElement("option");
-    o.value = a.id;
-    o.textContent = a.ai ? `${a.label} (AI)` : a.label;
-    o.selected = a.id === selected;
-    sel.appendChild(o);
+/**
+ * COLLEGARE · the page's hooks. «The page is the reader»: in Scrivi the story is
+ * drawn exactly as a reader sees it and written INTO — the text in place, the
+ * title in place — while every other tool (★, the lane, the order, the author,
+ * the signature, the view type, the caption, verify) is in the Inspector, for
+ * the part selected here. Absent → the page behaves as it always has (the
+ * reader, and the checks that call it with an editor only).
+ */
+export interface PageHooks {
+  reading?: Reading;
+  selection?: NarrativeSelection | null;
+  /** a click on a chapter's head or on a block: the Inspector shows it */
+  onSelectPart?(sel: NarrativeSelection): void;
+  /** the «+» between blocks, and «/» on an empty paragraph (`replace`) */
+  onInsert?(chapter: number, at: number, anchor: HTMLElement, replace?: boolean): void;
+  /** «[[» in a paragraph: pick a node, and the page puts the mention there */
+  onMention?(anchor: HTMLElement, pick: (id: string) => void, cancel: () => void): void;
+  /** «Verifica», from the print preview's hole */
+  onVerify?(chapter: number, block: number): void;
+  /** a FILE dropped on a chapter (the node drop is the editor's `addEmbed`) */
+  onFileDrop?(chapter: number, file: File, clientX: number, clientY: number): void;
+}
+
+/** A mention in the page: the node's NAME, clickable, never editable as text. */
+function mentionChip(ref: string, index: Map<string, EmNode>, editable: boolean,
+                     onReveal?: (id: string) => void): HTMLElement {
+  const node = index.get(ref);
+  const chip = el("span", "nv-mention" + (node ? "" : " nv-mention-miss"),
+    node ? String(node.name || node.id) : `${ref} ?`);
+  chip.dataset.ref = ref;
+  chip.title = node ? `${node.node_type} · ${node.description ?? ""}` : t("nv.mentionMissing", { id: ref });
+  if (editable) chip.setAttribute("contenteditable", "false");
+  if (node && onReveal)
+    chip.addEventListener("click", (e) => {
+      e.stopPropagation();
+      onReveal(ref);
+    });
+  return chip;
+}
+
+/** The prose, as the reader sees it: paragraphs, **bold**, *italic*, and each
+ *  `[[id]]` as the node's name. Shared by Leggi and Scrivi (where the same DOM
+ *  is made editable), so writing happens on the page the reader gets. */
+function renderProseWithMentions(text: string, index: Map<string, EmNode>,
+                                 editable: boolean, onReveal?: (id: string) => void): HTMLElement {
+  const wrap = renderProse(text);
+  const MENTION = /\[\[\s*([^[\]\n]+?)\s*\]\]/g;
+  const walk = (n: Node): void => {
+    for (const c of [...n.childNodes]) {
+      if (c.nodeType === 3) {
+        const s = c.textContent ?? "";
+        if (!MENTION.test(s)) continue;
+        MENTION.lastIndex = 0;
+        const frag = document.createDocumentFragment();
+        let last = 0;
+        for (const m of s.matchAll(MENTION)) {
+          if (m.index! > last) frag.appendChild(document.createTextNode(s.slice(last, m.index)));
+          frag.appendChild(mentionChip(m[1], index, editable, onReveal));
+          last = m.index! + m[0].length;
+        }
+        if (last < s.length) frag.appendChild(document.createTextNode(s.slice(last)));
+        c.parentNode?.replaceChild(frag, c);
+      } else walk(c);
+    }
+  };
+  walk(wrap);
+  return wrap;
+}
+
+/**
+ * The text of an edited paragraph, back to the stored form: a paragraph per
+ * block element, `<br>` a line break, a mention chip `[[id]]`, the emphasis
+ * the renderer drew (`strong`/`em`/`code`) back to its markdown.
+ */
+export function serializeProse(el: HTMLElement): string {
+  const inline = (n: Node): string => {
+    if (n.nodeType === 3) return n.textContent ?? "";
+    const e = n as HTMLElement;
+    if (e.dataset?.ref) return `[[${e.dataset.ref}]]`;
+    const tag = e.tagName?.toLowerCase();
+    if (tag === "br") return "\n";
+    const inner = [...e.childNodes].map(inline).join("");
+    if (tag === "strong" || tag === "b") return `**${inner}**`;
+    if (tag === "em" || tag === "i") return `*${inner}*`;
+    if (tag === "code") return `\`${inner}\``;
+    return inner;
+  };
+  const paras: string[] = [];
+  let loose = "";
+  for (const c of [...el.childNodes]) {
+    const tag = (c as HTMLElement).tagName?.toLowerCase();
+    if (tag === "p" || tag === "div") {
+      if (loose.trim()) paras.push(loose);
+      loose = "";
+      paras.push(inline(c));
+    } else loose += inline(c);
   }
-  sel.disabled = options.length === 0;
-  sel.addEventListener("change", () => onPick(sel.value || null));
-  return sel;
+  if (loose.trim()) paras.push(loose);
+  return paras.map((p) => p.replace(/ /g, " ").trim()).filter(Boolean).join("\n\n");
 }
 
-function iconButton(label: string, title: string,
-                    onClick: () => void): HTMLButtonElement {
-  const b = el("button", "nv-mini", label) as HTMLButtonElement;
-  b.title = title;
-  b.addEventListener("click", (e) => {
-    e.stopPropagation();
-    onClick();
-  });
-  return b;
-}
+/** Where a mention being picked will go: a private-use character in the text,
+ *  so the place survives the page being redrawn while the menu is open. */
+export const MENTION_SLOT = "\ue010";
 
 export function renderNarrativeView(
   container: HTMLElement,
@@ -857,9 +930,14 @@ export function renderNarrativeView(
   /** How a 3D MODEL is shown. Absent → the ATON iframe (the editor's case, and
    *  0 kB); a three-backed factory → navigable in the card (the reader's). */
   viewer?: ViewerFactory,
+  page: PageHooks = {},
 ): void {
   container.textContent = "";
   const narratives = narrativesIn(doc);
+  const reading: Reading = page.reading ?? (editor ? "write" : "read");
+  // writing needs an editor; without one, «Scrivi» is the reading
+  const writing = reading === "write" && !!editor;
+  container.dataset.reading = writing ? "write" : reading === "write" ? "read" : reading;
 
   if (!narratives.length) {
     const empty = el("div", "nv-empty");
@@ -892,6 +970,17 @@ export function renderNarrativeView(
     }
     container.appendChild(bar);
   }
+  const index = new Map((doc?.graph?.nodes ?? []).map((n) => [n.id, n]));
+
+  // ── STAMPA · NOTEBOOK — the page as the exporters will write it ──────────
+  if (reading === "print") {
+    renderPrintPreview(container, current, index, page);
+    return;
+  }
+  if (reading === "notebook") {
+    renderNotebookPreview(container, current, index);
+    return;
+  }
 
   const head = el("header", "nv-head");
   head.appendChild(el("h1", "nv-title", current.name));
@@ -906,9 +995,10 @@ export function renderNarrativeView(
   // The byline is TWO lines, and the split is the point (N8). People who can be
   // asked about a claim go first, as responsible; models follow as assistance.
   // One line listing them as equal co-authors would state something false.
+  // COLLEGARE · names only, in both readings: who signs is the IDENTITY of the
+  // header («Firmo io» in the chapter's Inspector), not a select on the page.
   const { responsible, assisted } = bylineOf(doc, current.id, current.chapters);
   const declared = narrativeAuthors(doc, current.id);
-
   const byline = el("div", "nv-authors");
   byline.appendChild(el("span", "nv-authors-label", t("nv.curatedBy")));
   if (!responsible.length)
@@ -919,79 +1009,68 @@ export function renderNarrativeView(
     chip.title = declared.some((d) => d.id === a.id)
       ? t("nv.humanAuthor")
       : t("nv.endorsedGenerated");
-    if (editor && declared.some((d) => d.id === a.id))
-      chip.appendChild(chipRemove(a, () => editor.removeAuthor(a.id)));
     byline.appendChild(chip);
   }
-  // SURFACE-STABLE · the byline's own chrome gets its own LINE, reserved in both
-  // modes. It used to sit beside the names and wrap when it did not fit — 28 px
-  // of row became 55, so the whole story moved down 27 px on entering edit (and
-  // back up when the window lost the focus, since a secondary area is
-  // read-only). Same rule as the block lane: the affordance's space is spoken
-  // for, and turning on edit fills it instead of making room.
-  const bylineTools = el("div", "nv-authors-tools");
-  byline.appendChild(bylineTools);
-  if (editor) {
-    const add = authorSelect(
-      editor.authors().filter(
-        (a) => !a.ai && !responsible.some((x) => x.id === a.id)),
-      null, t("nv.addAuthor"), t("nv.addAuthorTitle"),
-      (id) => { if (id) editor.addAuthor(id); });
-    bylineTools.appendChild(add);
-
-    // "Signing as" lives once, at the top: an endorsement is the same act
-    // whichever paragraph it lands on, and asking who you are on every click
-    // would turn a signature into a form.
-    const signing = el("span", "nv-signing");
-    signing.appendChild(el("span", "nv-authors-label", t("nv.signingAs")));
-    const humans = editor.humanAuthors();
-    signing.appendChild(authorSelect(
-      humans, editor.signer()?.id ?? null,
-      humans.length ? t("nv.nobody") : t("nv.noHumanAuthor"),
-      "Chi mette il proprio nome quando premi Valida. Solo persone: " +
-      "un modello non può avallare.",
-      (id) => editor.setSigner(id)));
-    bylineTools.appendChild(signing);
-  }
   head.appendChild(byline);
-
-  // «con l'assistenza di …» — declared, attributed, and subordinate. A model is
-  // never a co-author here: nothing it wrote counts until a person endorses it.
   if (assisted.length) {
     const help = el("div", "nv-authors nv-assist");
     help.appendChild(el("span", "nv-authors-label", t("nv.assistedBy")));
     for (const a of assisted) {
       const chip = authorChip(a, true);
       chip.title = t("nv.assistingModelTitle");
-      if (editor && declared.some((d) => d.id === a.id))
-        chip.appendChild(chipRemove(a, () => editor.removeAuthor(a.id)));
       help.appendChild(chip);
     }
     head.appendChild(help);
   }
   container.appendChild(head);
 
-  const index = new Map((doc?.graph?.nodes ?? []).map((n) => [n.id, n]));
+  const sel = page.selection ?? null;
+  const pick = (s: NarrativeSelection): void => page.onSelectPart?.(s);
+  /** the insertion gutter: zero height, so writing never re-paginates */
+  const gutter = (ci: number, at: number, last = false): HTMLElement => {
+    const g = el("div", "nv-ins" + (last ? " nv-ins-end" : ""));
+    const b = el("button", "nv-ins-btn", "+") as HTMLButtonElement;
+    b.type = "button";
+    b.title = t("nv.insertHere");
+    b.setAttribute("aria-label", t("nv.insertHere"));
+    b.addEventListener("click", (e) => {
+      e.stopPropagation();
+      page.onInsert?.(ci, at, b);
+    });
+    g.appendChild(b);
+    return g;
+  };
 
   current.chapters.forEach((chapter, ci) => {
     const section = el("section", "nv-chapter");
-    // CURRENT-ELEMENT · clicking anywhere in a chapter makes it the window's
-    // current one (the marker is a left accent rule, see `.nv-chapter.nv-current`).
-    // Menus that say "the current chapter" then have something true to mean.
+    section.dataset.chapter = String(ci);
     if (currentChapter?.index() === ci) section.classList.add("nv-current");
     if (currentChapter)
       section.addEventListener("mousedown", () => currentChapter.set(ci));
 
     const h = el("div", "nv-chapter-head");
-    h.appendChild(el("h2", "nv-chapter-title", chapter.title || "(untitled)"));
+    const title = el("h2", "nv-chapter-title", chapter.title || "(untitled)");
+    h.appendChild(title);
     if (chapter.canonical) {
-      const badge = el("span", "nv-badge", "canonical");
-      badge.title =
-        "Settled by the author: regenerating the template leaves this chapter " +
-        "untouched.";
+      const badge = el("span", "nv-badge", "★");
+      badge.title = t("nidx.canonical");
       h.appendChild(badge);
     }
-    if (chapter.authored_by && !editor) {
+    if (chapter.anchor) {
+      // The chapter usually takes its title FROM the lane, so echoing the lane's
+      // name beside it just says the same word twice. Show the id in that case:
+      // it is the part the reader cannot already see.
+      const anchorNode = index.get(chapter.anchor);
+      const laneName = anchorNode ? String(anchorNode.name || "") : "";
+      const label = laneName && laneName !== chapter.title ? laneName : chapter.anchor;
+      const chip = el("span", "nv-anchor", label);
+      chip.title = laneName
+        ? `This chapter narrates the lane “${laneName}” (${chapter.anchor})`
+        : `This chapter narrates the lane “${chapter.anchor}”, which is not in this graph`;
+      if (!anchorNode) chip.classList.add("nv-anchor-missing");
+      h.appendChild(chip);
+    }
+    if (chapter.authored_by) {
       const node = index.get(chapter.authored_by);
       const who = node ? String(node.name || node.id) : chapter.authored_by;
       const chip = el("span", "nv-author-chip nv-author-inline", who);
@@ -1002,117 +1081,22 @@ export function renderNarrativeView(
       chip.title = t("nv.whoSignsChapter");
       h.appendChild(chip);
     }
-    if (chapter.anchor) {
-      // The chapter usually takes its title FROM the lane, so echoing the lane's
-      // name beside it just says the same word twice. Show the id in that case:
-      // it is the part the reader cannot already see.
-      const anchorNode = index.get(chapter.anchor);
-      const laneName = anchorNode ? String(anchorNode.name || "") : "";
-      const label = laneName && laneName !== chapter.title
-        ? laneName
-        : chapter.anchor;
-      const chip = el("span", "nv-anchor", label);
-      chip.title = laneName
-        ? `This chapter narrates the lane “${laneName}” (${chapter.anchor})`
-        : `This chapter narrates the lane “${chapter.anchor}”, which is not in this graph`;
-      if (!anchorNode) chip.classList.add("nv-anchor-missing");
-      h.appendChild(chip);
-    }
-    // SURFACE-STABLE · the chapter's toolbar lane exists in both modes, and its
-    // reserved height is what keeps the head the same height either way. Without
-    // it the head was 29 px reading and 31 px writing — three pixels per chapter,
-    // so the fourth chapter sat a line lower than where you left it.
-    const tools = el("div", "nv-chapter-tools");
-    h.appendChild(tools);
-    if (editor) {
-      // The chapter toolbar already carries an author select; without a label
-      // the two read as one, and the user looks for the signer here.
-      tools.appendChild(el("span", "nv-tool-label", t("nv.chapterAuthor")));
-      const canon = iconButton(
-        chapter.canonical ? "★" : "☆",
-        chapter.canonical
-          ? "Settled: the template regeneration leaves this chapter alone. Click to un-settle."
-          : "Mark as settled, so regenerating the template does not touch it.",
-        () => editor.toggleCanonical(ci));
-      tools.appendChild(canon);
-      const laneSel = document.createElement("select");
-      laneSel.className = "nv-lane-select";
-      laneSel.title = "The lane this chapter narrates";
-      const none = document.createElement("option");
-      none.value = "";
-      none.textContent = "(no lane)";
-      none.selected = !chapter.anchor;
-      laneSel.appendChild(none);
-      for (const lane of editor.lanes()) {
-        const o = document.createElement("option");
-        o.value = lane.id;
-        o.textContent = lane.label;
-        o.selected = lane.id === chapter.anchor;
-        laneSel.appendChild(o);
-      }
-      laneSel.addEventListener("change", () =>
-        editor.setAnchor(ci, laneSel.value || null));
-      tools.appendChild(laneSel);
-      tools.appendChild(iconButton("▲", "Move chapter up",
-        () => editor.moveChapter(ci, -1)));
-      tools.appendChild(iconButton("▼", "Move chapter down",
-        () => editor.moveChapter(ci, 1)));
-      tools.appendChild(iconButton("✕", "Delete this chapter",
-        () => editor.deleteChapter(ci)));
-      tools.appendChild(authorSelect(
-        editor.authors(), chapter.authored_by ?? null, t("nv.noAuthor"),
-        t("nv.whoSignsChapter"),
-        (id) => editor.setChapterAuthor(ci, id)));
-      // Generation is anchored to an ACTIVITY: that is where the actions are,
-      // and a briefing built from anything else would be empty. The button is
-      // simply absent elsewhere rather than present and disabled — a control
-      // that can never apply is noise.
-      if (editor.canGenerate(ci)) {
-        const busy = editor.generating(ci);
-        const gen = el("button", "nv-generate",
-          busy ? t("nv.generating") : t("nv.generateDraft")) as HTMLButtonElement;
-        gen.disabled = busy;
-        gen.title = t("nv.generateTitle");
-        gen.addEventListener("click", (e) => {
-          e.stopPropagation();
-          editor.generate(ci);
-        });
-        tools.appendChild(gen);
-      }
-      // "Valida capitolo" states the count in its own label: an endorsement is
-      // a signature, and a button that doesn't say how much it is signing
-      // invites an absent-minded stamp.
-      const pending = editor.pendingIn(ci);
-      if (pending > 0) {
-        const signer = editor.signer();
-        const all = el("button", "nv-endorse nv-endorse-all",
-          t("nv.endorseChapter", { n: String(pending) })) as HTMLButtonElement;
-        all.classList.toggle("nv-endorse-unsigned", !signer);
-        all.title = signer
-          ? t(pending === 1 ? "nv.endorseChapterTitleOne"
-                            : "nv.endorseChapterTitle",
-              { who: signer.label, n: String(pending) })
-          : t("nv.pickSigner");
-        all.addEventListener("click", (e) => {
-          e.stopPropagation();
-          editor.endorseChapter(ci);
-        });
-        tools.appendChild(all);
-      }
-
-      const titleEl = h.querySelector(".nv-chapter-title") as HTMLElement;
-      titleEl.contentEditable = "true";
-      titleEl.spellcheck = false;
-      titleEl.classList.add("nv-editable");
-      titleEl.title = "Click to rename";
-      titleEl.addEventListener("blur", () => {
-        const next = (titleEl.textContent || "").trim();
-        if (next && next !== chapter.title) editor.renameChapter(ci, next);
+    if (writing) {
+      h.classList.add("nv-selectable");
+      if (sel && sel.chapter === ci && sel.block == null) h.classList.add("nv-sel");
+      h.addEventListener("click", () => pick({ chapter: ci, block: null }));
+      title.setAttribute("contenteditable", "true");
+      title.spellcheck = false;
+      title.classList.add("nv-editable");
+      title.addEventListener("blur", () => {
+        const next = (title.textContent || "").trim();
+        if (next && next !== chapter.title) editor!.renameChapter(ci, next);
       });
-      titleEl.addEventListener("keydown", (e) => {
-        if (e.key === "Enter") {
+      title.addEventListener("keydown", (e) => {
+        e.stopPropagation();
+        if (e.key === "Enter" || e.key === "Escape") {
           e.preventDefault();
-          titleEl.blur();
+          title.blur();
         }
       });
     }
@@ -1120,12 +1104,19 @@ export function renderNarrativeView(
 
     const blocks = chapter.blocks ?? [];
     blocks.forEach((block, bi) => {
-      let body = block.block_type === "prose"
-        ? (editor ? editableProse(block.text ?? "", (t) =>
-            editor.setProse(ci, bi, t))
-          : renderProse(block.text ?? ""))
-        : renderEmbed(block, index, doc,
-            `${current.id}:${ci}:${bi}:${block.ref ?? ""}`, onReveal, viewer);
+      if (writing && page.onInsert) section.appendChild(gutter(ci, bi));
+      let body: HTMLElement;
+      if (block.block_type === "prose") {
+        body = writing
+          ? editableInPlace(block.text ?? "", index, ci, bi, editor!, page)
+          : renderProseWithMentions(block.text ?? "", index, false, onReveal);
+      } else {
+        body = renderEmbed(block, index, doc,
+          `${current.id}:${ci}:${bi}:${block.ref ?? ""}`,
+          // writing: a click on an embed SELECTS it (the Inspector has «vai al
+          // nodo»); reading: it goes to the node, as it always has
+          writing ? undefined : onReveal, viewer);
+      }
       // D1-full · drop a VIEW TYPE on an embed and it changes how that embed is
       // shown. Only on an embed, and only to change one: a view type cannot
       // create a block, because a block without a reference points at nothing.
@@ -1149,216 +1140,199 @@ export function renderNarrativeView(
           editor.setViewType(ci, bi, viewType);
         });
       }
-      // Provenance rides with the paragraph in BOTH modes: knowing a machine
+      // Provenance rides with the paragraph in BOTH readings: knowing a machine
       // wrote this is not an authoring convenience, it is what the reader needs.
+      // Its buttons (Valida, Ritira) are in the Inspector now.
       const strip = block.block_type === "prose"
-        ? provenanceStrip(block, index, onReveal,
-            editor ? () => editor.endorse(ci, bi) : undefined,
-            editor ? () => editor.retract(ci, bi) : undefined,
-            editor ? editor.signer() : null)
-        : null;
+        ? provenanceStrip(block, index, onReveal) : null;
       if (strip) {
         const wrap = el("div", `nv-prose-wrap nv-${blockStatus(block)}`);
         wrap.appendChild(body);
         wrap.appendChild(strip);
         body = wrap;
       }
-      // SURFACE-STABLE · the row and its TOOLS LANE exist in both modes, and the
-      // lane is RESERVED whether or not anything is in it.
-      //
-      // Measured on 21 Aug 2026, at equal area widths: entering edit narrowed the
-      // prose from 576 to 482 px and the matrix embed from 576 to 403 — because
-      // the lane was in flow and was a DIFFERENT width per block type (three
-      // buttons for a paragraph, a select plus three for an embed). So the story
-      // re-paginated on entering edit, the embeds did not even agree with the
-      // prose inside edit mode, and — since a secondary area is read-only — a
-      // window in edit mode re-paginated again the moment it lost the focus.
-      // That last one is what read as "the layout changes with the focus".
-      //
-      // One lane, one width (`--nv-tools-w`, defined once in the stylesheet),
-      // always there: the prose and the embeds keep their column in all four
-      // states, and edit mode only fills a space that was already spoken for.
       const row = el("div", "nv-block-row");
+      row.dataset.block = `${ci}:${bi}`;
       body.classList.add("nv-block-body");
       row.appendChild(body);
-      const tools = el("div", "nv-block-tools");
-      row.appendChild(tools);
-      section.appendChild(row);
-      if (!editor) return;                  // read-only: the lane stays empty
-      if (block.block_type === "embed") {
-        const current = canonicalViewType(block.view_type);
-        const sel = document.createElement("select");
-        sel.className = "nv-viewtype";
-        sel.title = "How this reference is shown";
-        for (const vt of VIEW_TYPES) {
-          const o = document.createElement("option");
-          o.value = vt;
-          o.textContent = vt;
-          // The datamodel's own definition, so the author reads what a view type
-          // means instead of inferring it from eleven one-word labels.
-          const what = narrativeViewTypeDescription(vt);
-          if (what) o.title = what;
-          // Compared against the CANONICAL name: a block still holding the
-          // retired `epoch3d` must show `scene3d` as its current selection, not
-          // fall through and silently look like `matrix` (the first option).
-          o.selected = vt === current;
-          sel.appendChild(o);
-        }
-        sel.addEventListener("change", () =>
-          editor.setViewType(ci, bi, sel.value));
-        tools.appendChild(sel);
+      if (writing) {
+        row.classList.add("nv-selectable");
+        if (sel && sel.chapter === ci && sel.block === bi) row.classList.add("nv-sel");
+        row.addEventListener("click", () => pick({ chapter: ci, block: bi }));
       }
-      tools.appendChild(iconButton("▲", "Move up",
-        () => editor.moveBlock(ci, bi, -1)));
-      tools.appendChild(iconButton("▼", "Move down",
-        () => editor.moveBlock(ci, bi, 1)));
-      tools.appendChild(iconButton("✕", "Remove this block",
-        () => editor.deleteBlock(ci, bi)));
+      section.appendChild(row);
     });
+    if (writing && page.onInsert) section.appendChild(gutter(ci, blocks.length, true));
 
-    // SURFACE-STABLE · and the "+ prose" row too: it is one per chapter, so
-    // without a reserved band every chapter after the first sat 27 px lower in
-    // edit mode than in read mode. Present in both, filled in one.
-    const add = el("div", "nv-add-row");
-    section.appendChild(add);
     if (editor) {
-      // `+ prose` adds to THIS chapter (the one the button sits under — `ci` is
-      // this iteration's index, not the window's current chapter), makes that
-      // chapter current, and asks the next render to put the cursor in the new
-      // paragraph.
-      //
-      // The last part is what was missing, and it is the whole of "+ prose does
-      // nothing": the block WAS created (measured: 1 → 2 in the right chapter),
-      // as a faint "(paragrafo vuoto — clicca per scrivere)" that could be
-      // below the fold. A creation nobody can see is indistinguishable from a
-      // dead button.
-      add.appendChild(iconButton("+ prose", "Aggiungi un paragrafo qui",
-        () => {
-          currentChapter?.set(ci);          // you write where you clicked
-          focusProseAfterRender = ci;
-          editor.addProse(ci);
-        }));
-      const hint = el("span", "nv-drop-hint",
-        "…or drag a node from the Nodes tab into this chapter");
-      add.appendChild(hint);
-
       // Drag-to-embed. The drop target is the whole chapter, so the gesture is
-      // "put this in that chapter" rather than a hunt for a 4-pixel line.
+      // "put this in that chapter" rather than a hunt for a 4-pixel line. A
+      // FILE (fase 4) goes to the page's hook: a document first, then the block.
       section.addEventListener("dragover", (e) => {
-        if (!e.dataTransfer?.types.includes("application/x-em-node-id")) return;
+        const types = e.dataTransfer?.types ?? [];
+        const file = types.includes("Files") && !!page.onFileDrop;
+        if (!types.includes(NODE_MIME) && !file) return;
         e.preventDefault();
-        e.dataTransfer.dropEffect = "copy";
+        if (e.dataTransfer) e.dataTransfer.dropEffect = "copy";
         section.classList.add("nv-drop-over");
       });
       section.addEventListener("dragleave", () =>
         section.classList.remove("nv-drop-over"));
       section.addEventListener("drop", (e) => {
         section.classList.remove("nv-drop-over");
-        const ref = e.dataTransfer?.getData("application/x-em-node-id");
-        if (!ref) return;
-        e.preventDefault();
-        editor.addEmbed(ci, ref);
+        const ref = e.dataTransfer?.getData(NODE_MIME);
+        if (ref) {
+          e.preventDefault();
+          editor.addEmbed(ci, ref);
+          return;
+        }
+        const f = e.dataTransfer?.files?.[0];
+        if (f && page.onFileDrop) {
+          e.preventDefault();
+          page.onFileDrop(ci, f, (e as DragEvent).clientX, (e as DragEvent).clientY);
+        }
       });
     }
     container.appendChild(section);
   });
-
-  if (editor) {
-    const foot = el("div", "nv-chapter");
-    foot.appendChild(iconButton(t("nv.addChapter"), t("nv.addChapterTitle"),
-      () => editor.addChapter()));
-    // NARR1 · reintroduce an epoch you deleted (or never described): one chip per
-    // top-level epoch without a chapter. Deleting a chapter (the ✕ above) is the
-    // "togli"; these chips are the "reintroduci".
-    const undescribed = editor.undescribedEpochs?.() ?? [];
-    if (undescribed.length) {
-      const bar = el("div", "nv-undescribed");
-      bar.appendChild(el("span", "nv-tool-label", t("nv.undescribedEpochs")));
-      for (const ep of undescribed)
-        bar.appendChild(iconButton(`+ ${ep.name}`,
-          `Add a chapter for the epoch “${ep.name}”`,
-          () => editor.addEpochChapter?.(ep.id)));
-      foot.appendChild(bar);
-    }
-    // Seam · "regenerate the full draft" via the rich s3Dgraphy site_story
-    // (build_narrative) over the bridge — a follow-up when the endpoint exists.
-    if (editor.regenerateViaBridge) {
-      const regen = iconButton(t("nv.regenerate"),
-        editor.canRegenerate?.()
-          ? "Rebuild the draft from s3Dgraphy site_story via the bridge"
-          : "Needs the bridge and an s3Dgraphy build_narrative endpoint (follow-up)",
-        () => editor.regenerateViaBridge?.());
-      if (!editor.canRegenerate?.()) (regen as HTMLButtonElement).disabled = true;
-      foot.appendChild(regen);
-    }
-    container.appendChild(foot);
-  }
-  // …and if a paragraph was just added, the cursor goes there (see
-  // `focusProseAfterRender`). Last, so the DOM it looks for is complete.
-  focusNewProse(container);
 }
-
-/** Chapter index whose LAST prose block should take the cursor after the next
- *  render, or null. Set by `+ prose`, consumed by `focusNewProse` — the mutation
- *  re-renders the whole view, so "focus the thing I just made" cannot be done in
- *  the click handler that made it. */
-let focusProseAfterRender: number | null = null;
 
 /**
- * Put the cursor in the paragraph that was just added, and bring it into view.
+ * A paragraph written IN the page: the reader's DOM, `contentEditable`.
  *
- * `editableProse` opens its textarea on click, so this clicks it: one behaviour
- * for "start writing here", whether a person or a button asks for it.
+ * Committed on blur (one edit = one undo step, like every mutator). The keys
+ * that belong to the desk (Shift+A, `/` for search, Delete) stop here: typing a
+ * capital A must not open the Add menu. Two keys are the page's own:
+ *   · `/` in an EMPTY paragraph opens the Blocks menu, which replaces it;
+ *   · `[[` opens the link menu, and the pick becomes a mention chip.
  */
-function focusNewProse(container: HTMLElement): void {
-  const ci = focusProseAfterRender;
-  focusProseAfterRender = null;
-  if (ci == null) return;
-  const section = container.querySelectorAll(".nv-chapter")[ci];
-  if (!section) return;
-  const blocks = section.querySelectorAll(".nv-prose-edit");
-  const last = blocks[blocks.length - 1] as HTMLElement | undefined;
-  if (!last) return;
-  last.scrollIntoView({ behavior: "smooth", block: "center" });
-  last.classList.add("nv-just-added");
-  window.setTimeout(() => last.classList.remove("nv-just-added"), 1600);
-  (last as HTMLElement).click();                       // → its textarea
-  const ta = last.querySelector("textarea") as HTMLTextAreaElement | null;
-  ta?.focus();
+function editableInPlace(text: string, index: Map<string, EmNode>, ci: number, bi: number,
+                         editor: NarrativeEditor, page: PageHooks): HTMLElement {
+  const box = renderProseWithMentions(text, index, true);
+  box.classList.add("nv-editable", "nv-prose-edit");
+  box.setAttribute("contenteditable", "true");
+  box.spellcheck = true;
+  box.dataset.block = `${ci}:${bi}`;
+  if (!text.trim()) {
+    box.classList.add("nv-empty-prose");
+    box.dataset.placeholder = t("nv.emptyParagraph");
+  }
+  let settled = text;
+  box.addEventListener("blur", () => {
+    const next = serializeProse(box);
+    if (next !== settled) {
+      settled = next;
+      editor.setProse(ci, bi, next);
+    }
+  });
+  // …a picked mention lands in the TEXT, at the slot, not in a DOM range: the
+  // blur that the menu causes commits and redraws the page before the pick
+  const land = (withSlot: string, id: string | null): void => {
+    const next = withSlot.replace(MENTION_SLOT, id ? `[[${id}]] ` : "").replace(/ {2,}/g, " ");
+    editor.setProse(ci, bi, next.trim());
+  };
+  box.addEventListener("keydown", (e) => {
+    e.stopPropagation();
+    if (e.key === "Escape") {
+      box.blur();
+      return;
+    }
+    if (e.key === "/" && !serializeProse(box).trim() && page.onInsert) {
+      e.preventDefault();
+      page.onInsert(ci, bi, box, true);
+      return;
+    }
+    if (e.key === "[" && page.onMention) {
+      const s = window.getSelection?.();
+      const r = s && s.rangeCount ? s.getRangeAt(0) : null;
+      const node = r?.startContainer;
+      const before = node && node.nodeType === 3 && r ? (node.textContent ?? "").slice(Math.max(0, r.startOffset - 1), r.startOffset) : "";
+      if (before !== "[" || !r) return;
+      e.preventDefault();
+      r.setStart(node!, r.startOffset - 1);
+      r.deleteContents();
+      r.insertNode(document.createTextNode(MENTION_SLOT));
+      const withSlot = serializeProse(box);
+      settled = withSlot; // the blur the menu causes must not commit the slot
+      page.onMention(box, (id) => land(withSlot, id), () => land(withSlot, null));
+    }
+  });
+  return box;
 }
 
-/** A paragraph that becomes a textarea when you click it. Editing prose should
- *  not need a mode switch or a dialog — the text is the interface. */
-function editableProse(text: string,
-                       onCommit: (text: string) => void): HTMLElement {
-  const wrap = el("div", "nv-prose-edit");
-  const view = renderProse(text || "");
-  if (!text.trim())
-    view.appendChild(el("p", "nv-todo", t("nv.emptyParagraph")));
-  wrap.appendChild(view);
-  wrap.title = "Click to edit";
-  wrap.addEventListener("click", () => {
-    if (wrap.querySelector("textarea")) return;
-    const ta = document.createElement("textarea");
-    ta.className = "nv-textarea";
-    ta.value = text;
-    ta.rows = Math.max(3, text.split("\n").length + 1);
-    wrap.textContent = "";
-    wrap.appendChild(ta);
-    ta.focus();
-    const commit = () => {
-      if (ta.value !== text) onCommit(ta.value);
-      else wrap.replaceChildren(renderProse(text));
-    };
-    ta.addEventListener("blur", commit);
-    ta.addEventListener("keydown", (e) => {
-      if (e.key === "Escape") {
-        e.stopPropagation();
-        wrap.replaceChildren(renderProse(text));
+// ── STAMPA · the page as DOCX and LaTeX will print it ──────────────────────
+function renderPrintPreview(container: HTMLElement, nr: Narrative, index: Map<string, EmNode>,
+                            page: PageHooks): void {
+  const sheet = el("div", "nv-print");
+  sheet.appendChild(el("h1", "nv-title", nr.name));
+  if (nr.description) sheet.appendChild(el("p", "nv-lede", nr.description));
+  const { items, bibliography } = printItems(nr.chapters as ProjChapter[], index);
+  let n = 0;
+  for (const it of items) {
+    if (it.kind === "chapter") {
+      sheet.appendChild(el("h2", "nv-chapter-title", `${++n}. ${it.title}`));
+    } else if (it.kind === "prose") {
+      const p = el("p", "nv-print-prose");
+      for (const sgm of it.segments)
+        p.appendChild("text" in sgm ? document.createTextNode(sgm.text) : el("em", undefined, sgm.mention));
+      sheet.appendChild(p);
+    } else if (it.kind === "withheld") {
+      // WHAT A PERSON HAS NOT VALIDATED IS NOT PRINTED (E.D., 29 set 2026): the
+      // hole is shown, with the gesture that fills it
+      const hole = el("div", "nv-withheld");
+      hole.appendChild(el("span", undefined, t("nv.withheld")));
+      if (page.onVerify) {
+        const b = el("button", "nv-mini", t("nv.verify")) as HTMLButtonElement;
+        b.addEventListener("click", () => page.onVerify!(it.chapter, it.block));
+        hole.appendChild(b);
       }
-    });
-  });
-  return wrap;
+      sheet.appendChild(hole);
+    } else if (it.kind === "citation") {
+      const p = el("p", "nv-print-cite");
+      p.appendChild(el("span", undefined, `${it.name} `));
+      p.appendChild(el("b", undefined, `[${it.key}]`));
+      sheet.appendChild(p);
+    } else if (it.kind === "figure") {
+      const f = el("figure", "nv-print-fig");
+      f.appendChild(el("div", "nv-print-ph", it.baked ? t("nv.bakedAtExport") : it.viewType));
+      const cap = el("figcaption");
+      cap.appendChild(el("b", undefined, `${t("nv.figure")} ${it.number}`));
+      cap.appendChild(document.createTextNode(` — ${it.name}${it.caption ? ` — ${it.caption}` : ""}`));
+      f.appendChild(cap);
+      sheet.appendChild(f);
+    } else {
+      sheet.appendChild(el("p", "nv-print-miss", t("nv.unresolvedRef", { id: it.ref })));
+    }
+  }
+  if (bibliography.length) {
+    sheet.appendChild(el("h2", "nv-chapter-title", t("nv.references")));
+    const ol = el("ol", "nv-print-bib");
+    for (const b of bibliography) ol.appendChild(el("li", undefined, `${b.name}${b.description ? ` — ${b.description}` : ""}`));
+    sheet.appendChild(ol);
+    sheet.appendChild(el("p", "nv-print-note", t("nv.bibNote")));
+  }
+  container.appendChild(sheet);
+}
+
+// ── NOTEBOOK · the page as Jupyter will write it ───────────────────────────
+function renderNotebookPreview(container: HTMLElement, nr: Narrative, index: Map<string, EmNode>): void {
+  const nb = el("div", "nv-nb");
+  let i = 1;
+  for (const c of notebookCells(nr.name, nr.chapters as ProjChapter[], index)) {
+    const cell = el("div", `nv-nb-cell nv-nb-${c.cell_type}`);
+    if (c.cell_type === "code") {
+      cell.appendChild(el("span", "nv-nb-n", `[${i++}]`));
+      cell.appendChild(el("pre", undefined, c.source));
+    } else {
+      const src = c.source;
+      if (src.startsWith("## ")) cell.appendChild(el("h2", "nv-chapter-title", src.slice(3)));
+      else if (src.startsWith("# ")) cell.appendChild(el("h1", "nv-title", src.slice(2)));
+      else cell.appendChild(el("p", undefined, src.replace(/^> ?/gm, "")));
+      if (src.startsWith(">")) cell.classList.add("nv-nb-quote");
+    }
+    nb.appendChild(cell);
+  }
+  container.appendChild(nb);
 }
 
 /** Which view types this build actually draws — used by the tests and worth

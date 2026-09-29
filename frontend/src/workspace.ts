@@ -291,7 +291,7 @@ const BUILTIN_WORKSPACES: WorkspacePreset[] = [
     icon: "❧", windowType: "narrative", builtin: true,
     arrangement: {
       wins: [
-        { name: "story", type: "narrative" },
+        { name: "story", type: "narrative", state: { "current.reading": "write" } },
         { name: "index", type: "narrative-index" },
         { name: "canvas", type: "graph", state: { mode: "matrix" } },
         { name: "inspector", type: "inspector" },

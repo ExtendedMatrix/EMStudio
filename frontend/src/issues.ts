@@ -125,6 +125,20 @@ export function issues(src: IssueSources): Issue[] {
       push({ node: n.id, sev: "info", rule: "author",
              txt: t("issues.noAuthor", { n: name(n.id) }) });
   }
+
+  // ── COLLEGARE · the story: an AI paragraph no person validated is a warning
+  //    (rule `ai`, as for a node), until somebody signs it. One per chapter.
+  for (const n of nodes) {
+    if (n.node_type !== "narrative") continue;
+    const chapters = ((n.data ?? {}) as { chapters?: { title?: string; blocks?: {
+      block_type?: string; ai_generated?: boolean; validated_by?: string | null }[] }[] }).chapters ?? [];
+    chapters.forEach((c) => {
+      const k = (c.blocks ?? []).filter((b) =>
+        (b.block_type ?? "prose") === "prose" && b.ai_generated && !b.validated_by).length;
+      if (k) push({ node: n.id, sev: "warn", rule: "ai",
+                    txt: t("issues.aiProse", { n: name(n.id), ch: String(c.title ?? ""), k: String(k) }) });
+    });
+  }
   return out;
 }
 

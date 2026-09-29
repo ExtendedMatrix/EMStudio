@@ -3210,6 +3210,10 @@ def make_handler(api):
             doc = body.get("doc") if isinstance(body, dict) and "doc" in body else body
             narrative_id = (body.get("narrative_id")
                             if isinstance(body, dict) else "") or ""
+            # WHAT NO PERSON VALIDATED IS NOT PRINTED (E.D., 29 set 2026): left
+            # out by s3Dgraphy unless the caller forces it in, for THIS export
+            # only — a choice made in the dialog, never a setting that stays.
+            force = bool(body.get("include_unvalidated")) if isinstance(body, dict) else False
             try:
                 graph, warnings = api.load_emjson(doc)
                 for w in warnings:
@@ -3246,7 +3250,7 @@ def make_handler(api):
                     figures = self._figures_for(body, "pdf")
                     parts = api.export_narrative_latex(
                         graph, narrative_id, fragment=fragment, figures=figures,
-                        figure_suffix=".pdf")
+                        figure_suffix=".pdf", include_unvalidated=force)
                     tex = parts.get("tex", "")
                     bib = parts.get("bib", "")
                     if figures:
@@ -3277,7 +3281,7 @@ def make_handler(api):
                     payload = api.export_narrative_docx(
                         graph, narrative_id,
                         figures=self._figures_for(body, "png"),
-                        figure_suffix=".png")
+                        figure_suffix=".png", include_unvalidated=force)
                     bib = ""
                 elif fmt == "ipynb":
                     # `emjson_url` goes into the loader cell so the notebook can
@@ -3293,13 +3297,15 @@ def make_handler(api):
                         # first time somebody emails it
                         figures=self._figures_for(body, "svg"),
                         figure_suffix=".svg",
+                        include_unvalidated=force,
                     ).encode("utf-8")
                     bib = ""
                 else:
                     payload = api.export_narrative_html(
                         graph, narrative_id,
                         figures=self._figures_for(body, "svg"),
-                        figure_suffix=".svg").encode("utf-8")
+                        figure_suffix=".svg",
+                        include_unvalidated=force).encode("utf-8")
                     bib = ""
             except KeyError:
                 self._fail(404, f"no narrative {narrative_id!r} in this graph")
@@ -3332,6 +3338,14 @@ def make_handler(api):
                 self.send_header("X-EM-Bib", base64.b64encode(
                     bib.encode("utf-8")).decode("ascii"))
                 self.send_header("Access-Control-Expose-Headers", "X-EM-Bib")
+            # …and how many paragraphs stayed out, so the UI can say it after
+            # the fact too (the dialog said it before)
+            try:
+                excluded = 0 if force else len(api.narrative_unvalidated(graph, narrative_id))
+            except Exception:
+                excluded = 0
+            self.send_header("X-EM-Excluded", str(excluded))
+            self.send_header("Access-Control-Expose-Headers", "X-EM-Bib, X-EM-Excluded")
             self.send_header("Content-Length", str(len(payload)))
             self.end_headers()
             self.wfile.write(payload)

@@ -203,6 +203,24 @@ export function setEmbedViewType(store: DocumentStore, narrativeId: string,
   });
 }
 
+/** COLLEGARE · an embed's caption, where the exporters read it
+ *  (`options.caption`: the LaTeX figure's caption, the DOCX figure's). Empty
+ *  removes it, so a figure falls back to the node's name. */
+export function setEmbedCaption(store: DocumentStore, narrativeId: string,
+                                chapterIndex: number, blockIndex: number,
+                                caption: string): void {
+  editChapters(store, narrativeId, (cs) => {
+    const b = cs[chapterIndex]?.blocks?.[blockIndex] as
+      (EditableBlock & { options?: Record<string, unknown> }) | undefined;
+    if (!b || b.block_type !== "embed") return;
+    const opts = { ...(b.options ?? {}) };
+    if (caption.trim()) opts.caption = caption.trim();
+    else delete opts.caption;
+    if (Object.keys(opts).length) b.options = opts;
+    else delete b.options;
+  });
+}
+
 export function deleteBlock(store: DocumentStore, narrativeId: string,
                             chapterIndex: number, blockIndex: number): void {
   editChapters(store, narrativeId, (cs) => {

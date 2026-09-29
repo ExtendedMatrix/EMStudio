@@ -188,6 +188,10 @@ import {
 import { mediumOfFile, openNewDocumentForm, type NewDocumentValues } from "./doc-form";
 import type { Arrangement } from "./workspace";
 import { renderNarrativeIndex } from "./narrative-index";
+import { renderCiteSection, renderNarrativeInspector } from "./narrative-inspector";
+import { linkGroupOf } from "./add-menu";
+import { unvalidatedForExport, viewTypesFor, type ProjChapter } from "./narrative-projection";
+import type { NarrativeSelection, Reading } from "./narrative";
 import {
   closeAddMenu,
   showAddMenu,
@@ -1482,6 +1486,8 @@ window.__EM_SCENE__ = () => {
   select: (id: string | null) => select(id),
   wins: () => windowsOf().map((w) => ({ id: w.id, type: w.type, state: w.state })),
   closeWin: (id: string) => { if (closeWindow(id)) renderTiles(); },
+  data: (id: string) => JSON.parse(JSON.stringify(store?.node(id)?.data ?? null)),
+  issues: () => allIssues().map((i) => ({ rule: i.rule, node: i.node, txt: i.txt })),
   /** SHIFT-A · what a node IS, read-only: type, name and its edges */
   nodeInfo: (id: string) => {
     const n = store?.node(id);
@@ -1867,6 +1873,11 @@ function sameEdge(a: EmEdge, b: EmEdge): boolean {
 }
 
 function select(nodeId: string | null): void {
+  // COLLEGARE · a pick on the graph gives the Inspector back to the node
+  if (nvFocus) {
+    nvFocus = false;
+    queueMicrotask(markNarrativeSelection);
+  }
   // COLLEGARE · Contenuti has no inspector: the Storage carries the card of the
   // document picked in the DTC, so a pick that enters or leaves a document
   // repaints it
@@ -1956,6 +1967,11 @@ function renderInspectorInto(host: HTMLElement): void {
   if (!store) {
     host.textContent = "";
     return;
+  }
+  // COLLEGARE · a part of the story picked on the page: its tools, here
+  if (nvFocus && nvSel && narrativeOpen()) {
+    renderNarrativeInspectorInto(host);
+    if (nvSel) return;
   }
   // DAG · the inspector reads the store the SELECTION BELONGS TO. Clicking an
   // acquisition on the DTC canvas selects a node of the CORPUS, and a panel that
@@ -2092,6 +2108,7 @@ function renderInspectorInto(host: HTMLElement): void {
   );
   renderInspectorIssues(host);
   renderNodeHistory(host);
+  citeSectionFor(host); // COLLEGARE · «Cita in «capitolo»», with the story open
 }
 
 /**
@@ -8037,7 +8054,7 @@ function epochSliceOf(scene: Scene, epochId: string): Scene | null {
   };
 }
 
-async function exportNarrative(format: string): Promise<void> {
+async function exportNarrative(format: string, opts: { force?: boolean } = {}): Promise<void> {
   if (!store) {
     toast(t("toast.openADocument"));
     return;
@@ -8073,7 +8090,10 @@ async function exportNarrative(format: string): Promise<void> {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ doc: JSON.parse(store.toJSON()),
                                narrative_id: chosen,
-                               figures }),
+                               figures,
+                               // COLLEGARE · only when the dialog's «Esporta
+                               // comunque» was pressed, for this export only
+                               ...(opts.force ? { include_unvalidated: true } : {}) }),
       });
     if (!res.ok) {
       let msg = `bridge error ${res.status}`;
@@ -8124,7 +8144,7 @@ function downloadBlob(blob: Blob, filename: string, _mime: string): void {
 
 for (const format of Object.keys(NARRATIVE_FORMATS)) {
   document.getElementById(`btn-narr-${format}`)
-    ?.addEventListener("click", () => { void exportNarrative(format); });
+    ?.addEventListener("click", () => exportWithCheck(format));
 }
 
 // Export the RDF/CIDOC Turtle projection via the transformer (s3Dgraphy
@@ -11738,26 +11758,6 @@ function currentSigner(): string | null {
   return signingAs;
 }
 
-/**
- * Bring the "firmo come" picker to the user instead of describing where it is.
- *
- * Called when an endorsement is attempted with no signer chosen — which only
- * happens when the graph has several human authors, i.e. exactly when the
- * choice matters.
- */
-function revealSignerPicker(): void {
-  const sel = activeNarrativeHost()
-    ?.querySelector<HTMLSelectElement>(".nv-signing select") ?? null;
-  if (!sel) {
-    toast(t("toast.noHumanAuthor"));
-    return;
-  }
-  sel.scrollIntoView({ behavior: "smooth", block: "center" });
-  sel.focus();
-  sel.classList.add("nv-wants-attention");
-  window.setTimeout(() => sel.classList.remove("nv-wants-attention"), 2400);
-  toast(t("toast.pickSigner"));
-}
 /** Chapters with a generation request in flight, so the button can say so and
  *  a double click cannot send two. */
 const generating = new Set<number>();
@@ -11927,33 +11927,9 @@ function narrativeEditor(narrativeId: string): NarrativeEditor {
       signingAs = id;
       refreshNarrativeView();
     },
-    endorse: (c, b) => {
-      const who = currentSigner();
-      if (!who) {
-        revealSignerPicker();
-        return;
-      }
-      try {
-        nauth.endorseBlock(s, narrativeId, c, b, who);
-      } catch (e) {
-        // Every refusal here is something the user has to understand — an
-        // unknown author, or a model asked to vouch for a model.
-        toast(e instanceof Error ? e.message : String(e));
-      }
-    },
-    endorseChapter: (c) => {
-      const who = currentSigner();
-      if (!who) {
-        revealSignerPicker();
-        return;
-      }
-      try {
-        const n = nauth.endorseChapter(s, narrativeId, c, who);
-        toast(`${n} paragraf${n === 1 ? "o avallato" : "i avallati"}`);
-      } catch (e) {
-        toast(e instanceof Error ? e.message : String(e));
-      }
-    },
+    // COLLEGARE · the signer is the identity of the header (`verifyBlock`)
+    endorse: (c, b) => verifyBlock(narrativeId, c, b),
+    endorseChapter: (c) => verifyChapter(narrativeId, c),
     pendingIn: (c) => nauth.pendingInChapter(
       (((s.node(narrativeId)?.data ?? {}) as Record<string, unknown>)
         .chapters as nedit.EditableChapter[] | undefined)?.[c]).length,
@@ -11982,7 +11958,268 @@ function refreshNarrativeView(): void {
  *  on the right). It used to be a module flag, because there was one story on
  *  screen by construction. */
 function narrativeEditingOf(win: Win): boolean {
-  return winCurrent(win, "editing") === true;
+  return readingOf(win) === "write";
+}
+
+/**
+ * COLLEGARE · the four READINGS of a Narrative window: Scrivi · Leggi · Stampa ·
+ * Notebook. Per window, like every mode. A window saved with the old ✎ on reads
+ * as Scrivi, one without as Leggi.
+ */
+const READINGS: Reading[] = ["write", "read", "print", "notebook"];
+function readingOf(win: Win): Reading {
+  const r = winCurrent(win, "reading");
+  if (READINGS.includes(r as Reading)) return r as Reading;
+  return winCurrent(win, "editing") === true ? "write" : "read";
+}
+function setReading(win: Win, r: Reading): void {
+  setWinCurrent(win, "reading", r);
+  setWinCurrent(win, "editing", null);
+  surfaceOf(win.id)?.refresh();
+  renderAreaHeaders();
+  refreshInspector();
+}
+
+// ── COLLEGARE · the part of the story the Inspector is showing ─────────────
+//
+// A click on a chapter's head or on a block, in Scrivi. Set without rebuilding
+// the page (the caret in a paragraph must survive a click next to it); the
+// marks are moved by hand, and the Inspector paints the part. A pick on the
+// canvas (`select`) gives the Inspector back to the node.
+let nvSel: { narrativeId: string; chapter: number; block: number | null } | null = null;
+let nvFocus = false;
+
+function narrativeOpen(): boolean {
+  return windowsOf().some((w) => w.type === "narrative");
+}
+
+function markNarrativeSelection(): void {
+  for (const w of windowsOf()) {
+    if (w.type !== "narrative") continue;
+    const host = narrativeHostOf(w);
+    if (!host) continue;
+    host.querySelectorAll(".nv-sel").forEach((e) => e.classList.remove("nv-sel"));
+    if (!nvSel || !nvFocus) continue;
+    const target = nvSel.block == null
+      ? host.querySelector(`.nv-chapter[data-chapter="${nvSel.chapter}"] > .nv-chapter-head`)
+      : host.querySelector(`.nv-block-row[data-block="${nvSel.chapter}:${nvSel.block}"]`);
+    target?.classList.add("nv-sel");
+  }
+}
+
+function setNarrativeSelection(narrativeId: string, sel: NarrativeSelection): void {
+  nvSel = { narrativeId, chapter: sel.chapter, block: sel.block };
+  nvFocus = true;
+  for (const w of windowsOf()) if (w.type === "narrative") setCurrentChapterIndex(w, sel.chapter);
+  markNarrativeSelection();
+  refreshSurfaces("inspector");
+  syncGraphToChapter();
+}
+
+/** fase 5 · the Matrix follows the chapter (a no-op until then). */
+function syncGraphToChapter(): void {
+  draw();
+}
+
+// ── COLLEGARE · who signs: the IDENTITY of the header ──────────────────────
+//
+// «Firmo come» was a select on the page, over the graph's authors, remembered
+// in `signingAs`. The signer is now the identity this session declared
+// (`currentIdentity()`), and the AuthorNode that carries its ORCID
+// (`data.orcid`) — found, or created in the same undo step as the signature.
+// No identity → the Identity panel opens: a signature has somebody behind it.
+function identityRef(): { orcid: string; label: string } | null {
+  const me = currentIdentity();
+  if (!me) return null;
+  return { orcid: me.orcid, label: [me.name, me.surname].filter(Boolean).join(" ") || me.orcid };
+}
+
+function requireIdentity(): boolean {
+  if (currentIdentity()) return true;
+  toast(t("ninsp.needIdentity"));
+  openSettings("settings-sect-identity");
+  return false;
+}
+
+/** The human AuthorNode of the identity — call INSIDE a batch. */
+function identityAuthorId(st: DocumentStore): string {
+  const me = identityRef()!;
+  const found = st.doc.graph.nodes.find((n) => n.node_type === "author"
+    && String(((n.data ?? {}) as Record<string, unknown>).orcid ?? "") === me.orcid);
+  if (found) return found.id;
+  const id = st.newId();
+  st.addNode({ id, name: me.label, node_type: "author", description: "",
+               data: { orcid: me.orcid, verified: !!currentIdentity()?.verified } });
+  return id;
+}
+
+function verifyBlock(narrativeId: string, c: number, b: number): void {
+  if (!store || !requireIdentity()) return;
+  const st = store;
+  try {
+    st.batch(() => nauth.endorseBlock(st, narrativeId, c, b, identityAuthorId(st)));
+    logInfo(t("ninsp.verified", { who: identityRef()!.label }), [narrativeId]);
+  } catch (e) {
+    toast(e instanceof Error ? e.message : String(e));
+  }
+}
+
+function verifyChapter(narrativeId: string, c: number): void {
+  if (!store || !requireIdentity()) return;
+  const st = store;
+  try {
+    let n = 0;
+    st.batch(() => { n = nauth.endorseChapter(st, narrativeId, c, identityAuthorId(st)); });
+    toast(t("ninsp.verifiedN", { n: String(n) }));
+  } catch (e) {
+    toast(e instanceof Error ? e.message : String(e));
+  }
+}
+
+function signChapterAsMe(narrativeId: string, c: number): void {
+  if (!store || !requireIdentity()) return;
+  const st = store;
+  st.batch(() => nauth.setChapterAuthor(st, narrativeId, c, identityAuthorId(st)));
+}
+
+/** A document whose file is a 3D model (by its extension — never stored). */
+function is3dDocument(n: EmNode): boolean {
+  const d = (n.data ?? {}) as Record<string, unknown>;
+  return [d.filename, d.url, d.locator, d.path].some((v) => typeof v === "string" && mediumOfFile(v) === "3d");
+}
+
+function viewTypeLabel(vt: string): string {
+  return t(`vt.${vt}`, undefined, vt);
+}
+
+/** The Inspector of the selected part of the story. */
+function renderNarrativeInspectorInto(host: HTMLElement): void {
+  if (!store || !nvSel) return;
+  const st = store;
+  const { narrativeId, chapter } = nvSel;
+  const block = nvSel.block;
+  const chapters = (((st.node(narrativeId)?.data ?? {}) as Record<string, unknown>).chapters ?? []) as nedit.EditableChapter[];
+  const ch = chapters[chapter];
+  if (!ch) {
+    nvSel = null;
+    nvFocus = false;
+    return;
+  }
+  renderNarrativeInspector(host, {
+    doc: st.doc, narrativeId, chapter, block,
+    lanes: (st.doc.graph.nodes ?? [])
+      .filter((n) => n.node_type === "EpochNode" || n.node_type === "ActivityNodeGroup")
+      .map((n) => ({ id: n.id, label: String(n.name || n.id) })),
+    identity: identityRef(),
+    viewTypesFor: (n) => viewTypesFor(n, isStratigraphicType, is3dDocument),
+    viewTypeLabel,
+    onRename: (title) => nedit.renameChapter(st, narrativeId, chapter, title),
+    onSetAnchor: (a) => nedit.setChapterAnchor(st, narrativeId, chapter, a),
+    onSignMe: () => signChapterAsMe(narrativeId, chapter),
+    onToggleCanonical: () => nedit.toggleCanonical(st, narrativeId, chapter),
+    canGenerate: () => !!ch.anchor,
+    generating: () => generating.has(chapter),
+    onGenerate: () => void generateChapterDraft(narrativeId, chapter),
+    pending: () => nauth.pendingInChapter(ch).length,
+    onVerifyChapter: () => verifyChapter(narrativeId, chapter),
+    onMove: (d) => {
+      if (block == null) {
+        nedit.moveChapter(st, narrativeId, chapter, d);
+        const to = Math.max(0, Math.min(chapters.length - 1, chapter + d));
+        nvSel = { narrativeId, chapter: to, block: null };
+      } else {
+        nedit.moveBlock(st, narrativeId, chapter, block, d);
+        const to = Math.max(0, Math.min((ch.blocks ?? []).length - 1, block + d));
+        nvSel = { narrativeId, chapter, block: to };
+      }
+      refreshInspector();
+    },
+    onDelete: () => {
+      if (block == null) {
+        nedit.deleteChapter(st, narrativeId, chapter);
+        nvSel = null;
+        nvFocus = false;
+      } else {
+        nedit.deleteBlock(st, narrativeId, chapter, block);
+        nvSel = { narrativeId, chapter, block: null };
+      }
+      refreshInspector();
+    },
+    onVerify: () => block != null && verifyBlock(narrativeId, chapter, block),
+    onRetract: () => block != null && nauth.retractEndorsement(st, narrativeId, chapter, block),
+    onReveal: (id) => revealFromNarrative(id),
+    onSetViewType: (vt) => block != null && nedit.setEmbedViewType(st, narrativeId, chapter, block, vt),
+    onSetCaption: (cap) => block != null && nedit.setEmbedCaption(st, narrativeId, chapter, block, cap),
+    mapSection: (h, node) => renderMapEmbedSection(h, node),
+  });
+}
+
+/** fase 4 · the Blocks menu; until then «+» adds a paragraph there. */
+function openBlocksMenu(narrativeId: string, c: number, at: number, _anchor: HTMLElement, replace: boolean): void {
+  if (!store) return;
+  const st = store;
+  st.batch(() => {
+    if (replace) nedit.deleteBlock(st, narrativeId, c, at);
+    nedit.editChapters(st, narrativeId, (cs) => cs[c]?.blocks?.splice(at, 0, { block_type: "prose", text: "" }));
+  });
+}
+/** fase 4 · a file dropped on a chapter. */
+function dropFileOnChapter(_n: string, _c: number, _f: File, _x: number, _y: number): void {}
+
+/** fase 4 · the map embed's place section (defined with the site picker). */
+let renderMapEmbedSection: (host: HTMLElement, node: EmNode) => void = () => {};
+
+/** «Cita in «capitolo»»: a node of the graph, with the story open. */
+function citeSectionFor(host: HTMLElement): void {
+  if (!store || !selectedId || !narrativeOpen()) return;
+  const node = store.node(selectedId);
+  if (!node || node.node_type === "narrative") return;
+  const story = windowsOf().find((w) => w.type === "narrative");
+  const narr = activeNarrative();
+  if (!story || !narr) return;
+  const chapters = narr.chapters as ProjChapter[];
+  const ci = validCurrentChapter(story) ?? 0;
+  const ch = chapters[ci];
+  if (!ch) return;
+  const citedIn = chapters.filter((c) => (c.blocks ?? []).some((b) =>
+    b.ref === node.id || (b.block_type === "prose" && String(b.text ?? "").includes(`[[${node.id}]]`))))
+    .map((c) => String(c.title ?? ""));
+  const vt = nedit.defaultViewType(node);
+  renderCiteSection(host, {
+    nodeName: String(node.name ?? node.id), citedIn, chapterTitle: String(ch.title ?? ""),
+    viewTypeLabel: viewTypeLabel(vt),
+    onCite: () => {
+      const at = (ch.blocks ?? []).length;
+      nedit.addEmbed(store!, narr.id, ci, node.id, vt);
+      logInfo(t("ninsp.cited", { name: String(node.name ?? node.id), chapter: String(ch.title ?? "") }), [narr.id, node.id]);
+      setNarrativeSelection(narr.id, { chapter: ci, block: at });
+    },
+  });
+}
+
+/** «[[» in a paragraph: the link menu over the graph's nodes; the pick is a mention. */
+function openMentionMenu(anchor: HTMLElement, pick: (id: string) => void, dismiss: () => void): void {
+  if (!store) return;
+  const r = anchor.getBoundingClientRect();
+  const nodes = store.liveNodes().filter((n) => LINK_GROUP_ORDER.includes(linkGroupOf(n.node_type) as never));
+  const entryOf = (n: EmNode): AddMenuEntry => ({
+    key: `m|${n.id}`, label: String(n.name ?? n.id), detail: String(n.description ?? "").slice(0, 40),
+    nodeType: n.node_type, description: String(n.description ?? ""), alias: String(n.name ?? n.id),
+    icon: () => typeIconElement(n.node_type), run: () => pick(n.id),
+  });
+  const flat = nodes.map(entryOf);
+  showAddMenu({
+    title: t("nv.mention"), context: t("nv.mentionCtx"), placeholder: t("link.q"),
+    linked: [], recent: [], categories: [],
+    existing: {
+      header: t("nv.mentionHeader"),
+      groups: LINK_GROUP_ORDER.map((g) => ({ label: t(`link.g.${g}`),
+        entries: flat.filter((_, i) => linkGroupOf(nodes[i].node_type) === g) })),
+      perGroup: EXISTING_PER_GROUP, more: (n) => t("link.more", { n }), none: t("link.none"),
+    },
+    extra: [], searchable: flat, matches: (e, q) => existingMatches(e, q), onDismiss: dismiss,
+    count: t("link.count", { n: flat.length }), noResults: t("add.noResults"), keysHint: t("add.keys"),
+  }, r.left, r.bottom + 4);
 }
 
 /**
@@ -12031,6 +12268,18 @@ function renderNarrativeInto(host: HTMLElement, win: Win): void {
     {
       index: () => currentChapterIndex(win),
       set: (i) => setCurrentChapterIndex(win, i),
+    },
+    undefined,
+    // COLLEGARE · the page is the reader; its tools are in the Inspector
+    {
+      reading: readingOf(win),
+      selection: nvSel && nvFocus && current && nvSel.narrativeId === current.id
+        ? { chapter: nvSel.chapter, block: nvSel.block } : null,
+      onSelectPart: (sel) => { if (current) setNarrativeSelection(current.id, sel); },
+      onMention: (anchor, pick, cancel) => openMentionMenu(anchor, pick, cancel),
+      onVerify: (c, b) => { if (current) verifyBlock(current.id, c, b); },
+      onInsert: (c, at, anchor, replace) => { if (current) openBlocksMenu(current.id, c, at, anchor, !!replace); },
+      onFileDrop: (c, f, x, y) => { if (current) dropFileOnChapter(current.id, c, f, x, y); },
     },
   );
   // …and the window has something current to act on (see `ensureCurrentChapter`).
@@ -12200,13 +12449,139 @@ btnNarrative.addEventListener("click", () => {
 // itself (no active class, no Done/Edit label): the STATE is what it owns, and
 // the window header renders that state (`win-act-on`).
 btnNarrativeEdit.addEventListener("click", () => {
-  // PER WINDOW, like every other mode: the ✎ of the window whose header was
-  // pressed (`focusThen` has made it the active one), not a flag for the app.
+  // PER WINDOW, like every other mode. COLLEGARE · the ✎ is now Scrivi/Leggi
+  // of the header's four readings; this stays the keyboard-reachable toggle.
   const win = activeWin();
-  setWinCurrent(win, "editing", narrativeEditingOf(win) ? null : true);
-  surfaceOf(win.id)?.refresh();
-  renderAreaHeaders();
+  setReading(win, narrativeEditingOf(win) ? "read" : "write");
 });
+
+// ── COLLEGARE · Pubblica ▾ — and WHAT NO PERSON VALIDATED IS NOT PRINTED ────
+//
+// The five ways out: the live reader, and the four files the bridge writes.
+// Before a file, the dialog says how many AI paragraphs stay out, chapter by
+// chapter, each a link to its paragraph. «Esporta comunque, con ⚠︎ accanto»
+// is a choice for THAT export, never a setting that stays.
+function openPublishMenu(anchor: HTMLElement): void {
+  document.querySelector(".nv-pubmenu")?.remove();
+  const menu = document.createElement("div");
+  menu.className = "dd-menu nv-pubmenu";
+  const r = anchor.getBoundingClientRect();
+  menu.style.position = "fixed";
+  menu.style.left = `${Math.min(r.left, window.innerWidth - 320)}px`;
+  menu.style.top = `${r.bottom + 4}px`;
+  const items: [string, string, () => void][] = [
+    ["live", t("nv.pub.live"), () => copyReaderLink()],
+    ["html", t("nv.pub.html"), () => exportWithCheck("html")],
+    ["docx", "DOCX", () => exportWithCheck("docx")],
+    ["latex", t("nv.pub.latex"), () => exportWithCheck("latex")],
+    ["ipynb", "Jupyter", () => exportWithCheck("ipynb")],
+  ];
+  for (const [k, label, run] of items) {
+    const b = document.createElement("button");
+    b.dataset.pub = k;
+    b.innerHTML = `<b>${escapeHtml(label)}</b><br><span class="nv-pub-d">${escapeHtml(t(`nv.pub.${k}Hint`))}</span>`;
+    b.addEventListener("click", () => { menu.remove(); run(); });
+    menu.appendChild(b);
+  }
+  const narr = activeNarrative();
+  const n = narr ? unvalidatedForExport(narr.chapters as ProjChapter[]).length : 0;
+  const note = document.createElement("p");
+  note.className = "nv-pub-note";
+  note.textContent = n ? `▲ ${t("nv.pub.leftOut", { n: String(n) })}` : t("nv.pub.allValidated");
+  menu.appendChild(note);
+  document.body.appendChild(menu);
+  const off = (e: PointerEvent): void => {
+    if (menu.contains(e.target as Node)) return;
+    menu.remove();
+    document.removeEventListener("pointerdown", off, true);
+  };
+  document.addEventListener("pointerdown", off, true);
+}
+
+function copyReaderLink(): void {
+  const narr = activeNarrative();
+  const here = new URLSearchParams(location.search);
+  const study = here.get("study");
+  const emjson = here.get("emjson");
+  if (!narr || (!study && !emjson)) {
+    toast(t("nv.pub.liveNeedsStudy"));
+    return;
+  }
+  const q = new URLSearchParams();
+  if (study) q.set("study", study);
+  if (emjson) q.set("emjson", emjson);
+  q.set("narrative", narr.id);
+  const url = new URL(`reader.html?${q}`, location.href).href;
+  void navigator.clipboard?.writeText(url);
+  toast(t("nv.pub.liveCopied", { url }));
+}
+
+/** Before the file: the paragraphs that stay out, and the explicit choice. */
+function exportWithCheck(format: string): void {
+  const narr = activeNarrative();
+  if (!store || !narr) {
+    void exportNarrative(format);
+    return;
+  }
+  const out = unvalidatedForExport(narr.chapters as ProjChapter[]);
+  if (!out.length) {
+    void exportNarrative(format);
+    return;
+  }
+  document.querySelector(".modal.nv-unval")?.remove();
+  const modal = document.createElement("div");
+  modal.className = "modal nv-unval";
+  const card = document.createElement("div");
+  card.className = "modal-card";
+  const head = document.createElement("div");
+  head.className = "modal-head";
+  head.textContent = t("nv.unval.title", { n: String(out.length) });
+  const body = document.createElement("div");
+  body.className = "modal-body";
+  body.appendChild(Object.assign(document.createElement("p"), { textContent: t("nv.unval.lead") }));
+  const close = (): void => modal.remove();
+  const byCh = new Map<number, typeof out>();
+  for (const o of out) byCh.set(o.chapter, [...(byCh.get(o.chapter) ?? []), o]);
+  const ul = document.createElement("ul");
+  ul.className = "nv-unval-list";
+  for (const [c, rows] of byCh) {
+    const li = document.createElement("li");
+    li.appendChild(document.createTextNode(`«${rows[0].chapter_title}»: `));
+    rows.forEach((o, i) => {
+      if (i) li.appendChild(document.createTextNode(", "));
+      const a = document.createElement("button");
+      a.className = "link";
+      a.textContent = t("nv.unval.para", { n: String(o.block + 1) });
+      a.addEventListener("click", () => {
+        close();
+        const story = windowsOf().find((w) => w.type === "narrative");
+        if (story && readingOf(story) !== "write") setReading(story, "write");
+        setNarrativeSelection(narr.id, { chapter: c, block: o.block });
+        const host = story ? narrativeHostOf(story) : null;
+        host?.querySelector(`.nv-block-row[data-block="${c}:${o.block}"]`)?.scrollIntoView({ block: "center" });
+      });
+      li.appendChild(a);
+    });
+    ul.appendChild(li);
+  }
+  body.appendChild(ul);
+  const foot = document.createElement("div");
+  foot.className = "modal-foot";
+  const cancel = Object.assign(document.createElement("button"), { textContent: t("doc.cancel") });
+  cancel.addEventListener("click", close);
+  const force = Object.assign(document.createElement("button"), { textContent: t("nv.unval.force") });
+  force.dataset.act = "force";
+  force.addEventListener("click", () => { close(); void exportNarrative(format, { force: true }); });
+  const without = Object.assign(document.createElement("button"), {
+    className: "primary", textContent: t("nv.unval.without", { n: String(out.length) }) });
+  without.dataset.act = "without";
+  without.addEventListener("click", () => { close(); void exportNarrative(format); });
+  foot.append(cancel, force, without);
+  card.append(head, body, foot);
+  modal.appendChild(card);
+  modal.addEventListener("click", (e) => { if (e.target === modal) close(); });
+  document.body.appendChild(modal);
+}
 
 btnUndo.addEventListener("click", () => undoStore()?.undo());
 btnRedo.addEventListener("click", () => undoStore()?.redo());
@@ -19018,12 +19393,37 @@ function buildAreaHeader(win: Win): DocumentFragment {
   if (type === "narrative") {
     // ✎ · writing IS a mode of a narrative window, so it is a toggle you can see
     // the state of, not an item buried in a menu
-    act("✎", t("win.editTitle"), narrativeEditingOf(win), () =>
-      focusThen(win, () => {
-        click("btn-narrative-edit");
-        renderAreaHeaders();
-      }),
-    );
+    // COLLEGARE · FOUR READINGS of one story: Scrivi · Leggi · Stampa ·
+    // Notebook. Scrivi is the reader's page, written into; Stampa and Notebook
+    // are what the exporters will write (`narrative-projection.ts`).
+    const seg = document.createElement("span");
+    seg.className = "win-seg nv-readings";
+    seg.setAttribute("role", "group");
+    const cur = readingOf(win);
+    for (const r of READINGS) {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.dataset.reading = r;
+      b.textContent = t(`nv.reading.${r}`);
+      b.title = t(`nv.readingHint.${r}`);
+      b.setAttribute("aria-pressed", String(r === cur));
+      b.classList.toggle("on", r === cur);
+      b.addEventListener("click", (e) => {
+        e.stopPropagation();
+        focusThen(win, () => setReading(win, r));
+      });
+      seg.appendChild(b);
+    }
+    frag.appendChild(seg);
+    const pub = document.createElement("button");
+    pub.className = "win-act nv-publish";
+    pub.textContent = `${t("nv.publish")} ▾`;
+    pub.title = t("nv.publishTitle");
+    pub.addEventListener("click", (e) => {
+      e.stopPropagation();
+      openPublishMenu(pub);
+    });
+    frag.appendChild(pub);
     // WIN7 · the two data panels a narrative window sends you to
     act("⌁", t("win.aiTitle"), false, () => openSettings("settings-sect-ai"));
     act("⌖", t("win.geoTitle"), false, () => focusThen(win, revealSitePosition));
@@ -19694,29 +20094,9 @@ const WINDOW_MENUS: Record<WindowType, WinMenu[]> = {
         ];
       },
     },
-    {
-      // WHERE THE WRITING IS. The four exporters worked and were reachable only
-      // from `File ▸ Esporta` — two menus away from the panel where somebody is
-      // writing the thing they want to export. Same call, same bake, offered
-      // where the story is (the File entry stays: a project-level export belongs
-      // in the project menu too).
-      label: "menu.export",
-      items: () =>
-        Object.entries(NARRATIVE_FORMATS).map(([format, spec]) => ({
-          // LaTeX says it comes as an archive: with figures a `.tex` cannot be
-          // one file, and a download that changes kind without warning is one
-          // somebody double-clicks and gets nothing.
-          label: spec.label + (format === "ipynb" ? " " + t("menu.exportLive")
-            : format === "latex" ? " " + t("menu.exportZip") : ""),
-          run: () => void exportNarrative(format),
-          disabledReason: () =>
-            !store
-              ? t("menu.noGraph")
-              : activeNarrative()
-                ? null
-                : t("menu.nothingToExport"),
-        })),
-    },
+    // COLLEGARE · «Esporta» LEFT this menu: «Pubblica ▾», beside the four
+    // readings, is the same five ways out, with the check of what no person
+    // validated before a file. File ▸ Esporta stays, for the project.
     {
       label: "menu.ai",
       items: (win) => {

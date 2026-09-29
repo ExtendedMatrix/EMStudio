@@ -64,6 +64,8 @@ export interface AddMenuModel {
   };
   /** actions after the categories (Matrix «Nuova epoca…», «Riordina tutto») */
   extra: AddMenuEntry[];
+  /** called once when the menu closes WITHOUT a pick (Esc, a click outside) */
+  onDismiss?: () => void;
   /** the flat list the search runs over — built by the caller, one per entry */
   searchable: AddMenuEntry[];
   matches: (e: AddMenuEntry, q: string) => boolean;
@@ -164,6 +166,8 @@ export function showAddMenu(model: AddMenuModel, clientX: number, clientY: numbe
   foot.append(count, keys);
   menu.appendChild(foot);
 
+  /** a row ran: the close that follows is not a dismissal */
+  let picked = false;
   // ── navigation state: the rows ↑↓ walks, and an open submenu ──────────────
   let rows: { el: HTMLElement; run?: () => void; sub?: () => void }[] = [];
   let hi = 0;
@@ -212,6 +216,7 @@ export function showAddMenu(model: AddMenuModel, clientX: number, clientY: numbe
     }
     btn.addEventListener("click", () => {
       if (e.disabledReason) return;
+      picked = true;
       close();
       e.run();
     });
@@ -265,7 +270,7 @@ export function showAddMenu(model: AddMenuModel, clientX: number, clientY: numbe
     const subRows = c.entries.map((e) => {
       const btn = entryButton(e);
       sub.appendChild(btn);
-      return { el: btn as HTMLElement, run: e.disabledReason ? undefined : () => { close(); e.run(); } };
+      return { el: btn as HTMLElement, run: e.disabledReason ? undefined : () => { picked = true; close(); e.run(); } };
     });
     row.appendChild(sub);
     const open = (): void => {
@@ -295,7 +300,7 @@ export function showAddMenu(model: AddMenuModel, clientX: number, clientY: numbe
   const push = (e: AddMenuEntry): void => {
     const btn = entryButton(e);
     body.appendChild(btn);
-    if (!e.disabledReason) rows.push({ el: btn, run: () => { close(); e.run(); } });
+    if (!e.disabledReason) rows.push({ el: btn, run: () => { picked = true; close(); e.run(); } });
   };
 
   const render = (): void => {
@@ -406,6 +411,7 @@ export function showAddMenu(model: AddMenuModel, clientX: number, clientY: numbe
   function close(): void {
     if (openMenu?.el !== menu) return;
     openMenu = null;
+    if (!picked) queueMicrotask(() => model.onDismiss?.());
     hideTip();
     menu.remove();
     document.removeEventListener("pointerdown", onOutside, true);

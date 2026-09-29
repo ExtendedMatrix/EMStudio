@@ -3927,11 +3927,16 @@ body.sync-active #footer-brand #em-version {
   min-width: 0;
 }
 
+/* COLLEGARE (3 ott 2026) · the lane is GONE, not reserved: the page is the
+   reader, its tools are in the Inspector, so there is nothing to put beside a
+   block in any reading — the column is the reader's, whole, in all four. The
+   insertion «+» sits in a zero-height gutter between blocks (`.nv-ins`), so
+   writing still never re-paginates. */
 .nv-block-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) var(--nv-tools-w);
+  grid-template-columns: minmax(0, 1fr);
   align-items: start;
-  gap: 8px;
+  position: relative;
 }
 
 .nv-block-body {
@@ -8216,3 +8221,74 @@ body.gesturing-resize * {
 .dcard-row { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin-top: 3px; }
 .dcard-grow { flex: 1; }
 .dcard-go { font: inherit; font-size: 11.5px; border: 0; background: none; color: var(--accent-ink, var(--accent)); cursor: pointer; }
+
+/* ── COLLEGARE · the page is the reader (narrative.ts, Scrivi) ───────────── */
+.nv-ins { position: relative; height: 0; z-index: 2; }
+.nv-ins-btn {
+  position: absolute; left: -26px; top: -11px; width: 22px; height: 22px; border-radius: 50%;
+  border: 1px solid var(--border-strong); background: var(--bg-elevated); color: var(--text-muted);
+  font-size: 14px; line-height: 1; cursor: pointer; opacity: 0; transition: opacity .12s;
+}
+.nv-ins:hover .nv-ins-btn, .nv-ins-btn:focus-visible, .nv-ins-end .nv-ins-btn,
+.nv-chapter:hover > .nv-ins .nv-ins-btn { opacity: .55; }
+.nv-ins-btn:hover { opacity: 1 !important; color: var(--accent-ink, var(--accent)); border-color: var(--accent); }
+.nv-ins-end { height: 16px; }
+.nv-ins-end .nv-ins-btn { top: -2px; }
+.nv-selectable { cursor: default; border-radius: var(--radius-sm); }
+.nv-selectable:hover { box-shadow: inset 2px 0 0 var(--border-strong); }
+.nv-sel { box-shadow: inset 3px 0 0 var(--accent) !important; background: var(--accent-wash, rgba(191,144,0,.08)); }
+.nv-editable:focus { outline: none; }
+.nv-prose-edit.nv-editable:focus { box-shadow: 0 0 0 1px var(--accent); }
+.nv-empty-prose:empty::before, .nv-empty-prose:not(:focus):has(> :only-child:empty)::before {
+  content: attr(data-placeholder); color: var(--text-faint); font-style: italic;
+}
+.nv-empty-prose { min-height: 1.6em; }
+.nv-mention {
+  display: inline; padding: 0 5px; border-radius: 8px; background: var(--accent-wash, rgba(191,144,0,.14));
+  color: var(--accent-ink, var(--accent)); font-weight: 600; cursor: pointer; white-space: nowrap;
+}
+.nv-mention-miss { background: none; color: var(--danger, #c93c37); border: 1px dashed currentColor; }
+/* the header's four readings, and Pubblica */
+.win-seg.nv-readings { display: inline-flex; border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
+.win-seg.nv-readings button { font: inherit; font-size: 11.5px; border: 0; background: none; color: var(--text); padding: 2px 8px; cursor: pointer; }
+.win-seg.nv-readings button.on { background: var(--accent); color: var(--on-accent, #1d1d1b); }
+.nv-pubmenu { display: block; z-index: 1200; min-width: 280px; }
+.nv-pubmenu button { display: block; width: 100%; text-align: left; }
+.nv-pub-d { font-size: 11px; color: var(--text-muted); }
+.nv-pub-note { font-size: 11px; color: var(--text-muted); margin: 6px 10px 2px; }
+.nv-unval-list { margin: 6px 0; padding-left: 18px; }
+.nv-unval .link, .ninsp .link, .ninsp-cite .link { background: none; border: 0; padding: 0; color: var(--accent-ink, var(--accent)); font: inherit; cursor: pointer; }
+/* Stampa and Notebook: what the exporters will write */
+.nv-print { max-width: 680px; margin: 0 auto; background: var(--bg-elevated); padding: 28px 36px; box-shadow: 0 1px 6px rgba(0,0,0,.12); font-family: Georgia, "Times New Roman", serif; }
+.nv-print-prose { line-height: 1.6; }
+.nv-print-cite { font-style: normal; }
+.nv-print-fig { margin: 12px 0; }
+.nv-print-ph { border: 1px dashed var(--border-strong); padding: 26px; text-align: center; color: var(--text-muted); font-family: var(--font-sans, sans-serif); font-size: 12px; }
+.nv-print-fig figcaption { font-size: 12.5px; margin-top: 4px; }
+.nv-print-bib { font-size: 13px; }
+.nv-print-note, .nv-print-miss { font-size: 11.5px; color: var(--text-muted); }
+.nv-withheld { display: flex; gap: 10px; align-items: center; border: 1px dashed var(--ai-ink, #a04a00); color: var(--ai-ink, #a04a00); padding: 6px 10px; border-radius: var(--radius); font-family: var(--font-sans, sans-serif); font-size: 12px; margin: 8px 0; }
+.nv-nb { max-width: 760px; margin: 0 auto; }
+.nv-nb-cell { margin: 6px 0; padding: 6px 10px; border-radius: var(--radius); }
+.nv-nb-code { background: var(--bg-sunken); display: flex; gap: 8px; font-family: var(--font-mono); font-size: 12px; }
+.nv-nb-code pre { margin: 0; white-space: pre-wrap; }
+.nv-nb-n { color: var(--text-faint); }
+.nv-nb-quote { border-left: 3px solid var(--ai-ink, #a04a00); }
+/* the Inspector of the story (narrative-inspector.ts) */
+.ninsp { font-size: 12.5px; }
+.ninsp-head { padding: 8px 10px; border-bottom: 1px solid var(--border); }
+.ninsp-dim { color: var(--text-muted); font-size: 11.5px; }
+.ninsp-s { padding: 8px 10px; border-bottom: 1px solid var(--border); display: flex; flex-direction: column; gap: 6px; }
+.ninsp-eyebrow { font-size: 10px; letter-spacing: .08em; text-transform: uppercase; color: var(--text-muted); }
+.ninsp-l { display: flex; flex-direction: column; gap: 2px; font-size: 11px; color: var(--text-muted); }
+.ninsp-f { display: flex; gap: 8px; align-items: baseline; }
+.ninsp-k { color: var(--text-muted); min-width: 64px; font-size: 11.5px; }
+.ninsp-note { font-size: 11px; color: var(--text-faint); margin: 0; }
+.ninsp-tag { font-size: 11px; border: 1px solid var(--border); border-radius: 8px; padding: 0 6px; }
+.ninsp-tag.ai_draft { color: var(--ai-ink, #a04a00); border-color: currentColor; }
+.ninsp-tag.ai_endorsed, .ninsp-tag.human { color: var(--ok-ink, #2e6b32); border-color: currentColor; }
+.ninsp-out td { padding: 2px 6px 2px 0; vertical-align: top; }
+.ninsp-out td:first-child { color: var(--text-muted); white-space: nowrap; }
+.ninsp-move { flex-direction: row; align-items: center; }
+.ninsp-grow { flex: 1; }
+.ninsp-cite { padding: 8px 10px; border-bottom: 1px solid var(--border); background: var(--accent-wash, rgba(191,144,0,.08)); display: flex; flex-direction: column; gap: 4px; }
