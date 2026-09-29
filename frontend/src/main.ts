@@ -732,6 +732,8 @@ let aiMarksCache: Map<string, "pending" | "verified"> | null = null;
 // (recomputeHiddenFromCircles); they are what buildScenes applies.
 const hiddenNodeTypes = new Set<string>();
 const hiddenEdgeTypes = new Set<string>();
+const hiddenNodesNow = hiddenNodeTypes;
+const hiddenEdgesNow = hiddenEdgeTypes;
 // HDT-O-profile node types are ALWAYS hidden on the stratigraphic (EM-lens)
 // canvas — they are graph-level metadata authored via the Canvas panel, kept in
 // em.json for projection + the future HDT-O lens, never rendered as strat boxes.
@@ -749,17 +751,29 @@ const circleState: Record<ViewKind, Set<CircleKey>> = {
 function recomputeHiddenFromCircles(): void {
   hiddenNodeTypes.clear();
   hiddenEdgeTypes.clear();
-  if (!store) return;
-  const visible = circleState[view];
+  const h = hiddenFor(view);
+  for (const x of h.nodes) hiddenNodeTypes.add(x);
+  for (const x of h.edges) hiddenEdgeTypes.add(x);
+}
+/** AUDIT N2 · the types ONE projection hides, from its own circles of detail —
+ *  every scene is built with its own (they used to share the focused one's, so
+ *  a Graph window beside the Matrix was drawn with the Matrix's filter and
+ *  re-laid itself out the moment the pointer entered it). */
+function hiddenFor(v: ViewKind): { nodes: Set<string>; edges: Set<string> } {
+  const nodes = new Set<string>();
+  const edges = new Set<string>();
+  if (!store) return { nodes, edges };
+  const visible = circleState[v];
   for (const n of store.doc.graph.nodes) {
     const c = nodeCircle(n.node_type);
-    if (c && !visible.has(c)) hiddenNodeTypes.add(n.node_type);
+    if (c && !visible.has(c)) nodes.add(n.node_type);
   }
   for (const e of store.doc.graph.edges) {
     const t = e.edge_type ?? "";
     const c = edgeCircle(t);
-    if (c && !visible.has(c)) hiddenEdgeTypes.add(t);
+    if (c && !visible.has(c)) edges.add(t);
   }
+  return { nodes, edges };
 }
 // If a freshly-created node's detail ring is hidden in the current view, turn
 // it back on — otherwise you "create" a node you can't see.
@@ -1402,7 +1416,12 @@ function viewSize(): { w: number; h: number } {
 // from the scene), so every edge in the scene is meant to be shown.
 const edgeVisible = (_t?: string): boolean => true;
 
-const inContext = (): boolean => contextStack.length > 0;
+/** AUDIT N2 · the hypergraph context belongs to the window that entered it:
+ *  `inContext()` asks it of the focused window, `contextIn(id)` of any. */
+let contextWinId: string | null = null;
+const contextIn = (winId: string): boolean =>
+  contextStack.length > 0 && contextWinId === winId;
+const inContext = (): boolean => contextIn(activeWin().id);
 
 function scene(): Scene | null {
   ensureScenes();
@@ -2722,6 +2741,9 @@ function updateBreadcrumb(): void {
 }
 
 function enterGroup(groupId: string): void {
+  // a context entered from another window replaces that one's (one stack)
+  if (contextWinId !== activeWin().id) contextStack = [];
+  contextWinId = activeWin().id;
   contextStack.push(groupId);
   rebuildContext();
 }
@@ -2772,6 +2794,7 @@ function resolveDtcResource(nodeId: string): string | null {
 
 function rebuildContext(): void {
   if (!store) return;
+  if (!contextStack.length) contextWinId = null;
   select(null);
   hoverId = null;
   contextScene = inContext()
@@ -2817,7 +2840,8 @@ function updateInfo(): void {
 // every ornament a real node instead of a badge. The rings still apply on top —
 // they simply all start on in that view — so this is one filter with a switch,
 // not a second, divergible reader.
-function filteredView(opts: { wholeGraph?: boolean } = {}): {
+function filteredView(opts: { wholeGraph?: boolean;
+                        hidden?: { nodes: Set<string>; edges: Set<string> } } = {}): {
   nodes: EmDocument["graph"]["nodes"];
   edges: EmDocument["graph"]["edges"];
   badges: Map<string, number>;
@@ -2825,6 +2849,8 @@ function filteredView(opts: { wholeGraph?: boolean } = {}): {
 } {
   const doc = store!.doc;
   const wholeGraph = !!opts.wholeGraph;
+  const hiddenNodeTypes = opts.hidden?.nodes ?? hiddenNodesNow;
+  const hiddenEdgeTypes = opts.hidden?.edges ?? hiddenEdgesNow;
   const folded = new Set(doc.layout?.folded_groups ?? []);
   const foldedView = folded.size
     ? applyFolding(doc, buildMembership(doc), folded)
@@ -3108,7 +3134,18 @@ function reflowMatrix(): void {
 function buildScenesNow(): void {
   if (!store) return;
   const doc = store.doc;
-  const fview = filteredView();
+  // AUDIT N2 · each projection with ITS circles; equal circle sets share a view
+  const views = new Map<string, ReturnType<typeof filteredView>>();
+  const viewFor = (v: ViewKind, whole = false): ReturnType<typeof filteredView> => {
+    const key = `${whole ? "W" : ""}${[...circleState[v]].sort().join(",")}`;
+    let fv = views.get(key);
+    if (!fv) {
+      fv = filteredView({ wholeGraph: whole, hidden: hiddenFor(v) });
+      views.set(key, fv);
+    }
+    return fv;
+  };
+  const fview = viewFor("matrix");
   // Phase bands show BY DEFAULT for every phased epoch, except those the user
   // collapsed — so a freshly created phase is visible with no extra click.
   const phasesVisible = new Set(
@@ -3131,7 +3168,7 @@ function buildScenesNow(): void {
     restackMemo,
     restackKey(doc, fview, phasesVisible),
   );
-  scenes.graph = buildGraphScene(doc, fview, {
+  scenes.graph = buildGraphScene(doc, viewFor("graph"), {
     algorithm: graphAlgorithm,
     overrides: graphOverrides,
   });
@@ -3183,7 +3220,7 @@ function buildScenesNow(): void {
     ? buildDtcScene(neighbour.nodes, neighbour.edges, dtcOverrides)
     : corpusNodes.length
     ? buildDtcScene(corpusNodes, corpusForView!.liveEdges(), dtcOverrides)
-    : buildDtcScene(fview.nodes, fview.edges, dtcOverrides);
+    : buildDtcScene(viewFor("dtc").nodes, viewFor("dtc").edges, dtcOverrides);
   // …and when the SOURCE changes (a project with a corpus opens, or its first
   // documentation arrives), the DTC view is framed again: the camera it was left
   // with belonged to a different picture, and opening a DAG at 300% zoom on a
@@ -3196,7 +3233,7 @@ function buildScenesNow(): void {
   // ornaments as nodes and the graph-scope layer included, so author, licence,
   // embargo and the site position are visible and selectable (and therefore
   // editable in the Inspector) instead of living only in a side panel.
-  scenes.multigraph = buildGraphScene(doc, filteredView({ wholeGraph: true }), {
+  scenes.multigraph = buildGraphScene(doc, viewFor("multigraph", true), {
     algorithm: graphAlgorithm,
     overrides: multigraphOverrides,
   });
@@ -3319,8 +3356,8 @@ function applyCanvasView(v: ViewKind): void {
     buildScenes();
     if (filterPanelOpen()) renderCirclesPanel();
     // entering Matrix under a filter → recompact via the em-core view layout
+    // (kept when another window leaves Matrix: a Matrix window may still show)
     if (v === "matrix") void refreshMatrixViewLayout();
-    else matrixViewLayout = null;
   }
   if (contextStack.length) {
     contextStack = [];
@@ -6585,12 +6622,21 @@ function showEdgeMenu(
   const s = scene()!;
   const t = s.byId.get(target)!;
   const vp = viewport();
-  edgeMenu.style.left =
-    Math.min((t.x + t.w) * vp.scale + vp.x + 10, liveArea().clientWidth - 240) + "px";
-  edgeMenu.style.top =
-    Math.min(t.y * vp.scale + vp.y, liveArea().clientHeight - 40 * (types.length + 2)) +
-    "px";
+  // AUDIT N2 · canvas coordinates are the WINDOW's, and the menu is a child of
+  // #tile-root: add where that window's canvas sits in the shell, then keep it
+  // inside the window (it was drawn at the canvas point of the top-left window)
+  const root = tileRoot.getBoundingClientRect();
+  const cvr = (liveCanvas() ?? tileRoot).getBoundingClientRect();
+  const area = liveArea().getBoundingClientRect();
   edgeMenu.classList.remove("hidden");
+  const mw = edgeMenu.offsetWidth || 220;
+  const mh = edgeMenu.offsetHeight || 40 * (types.length + 2);
+  const x = cvr.left + (t.x + t.w) * vp.scale + vp.x + 10;
+  const y = cvr.top + t.y * vp.scale + vp.y;
+  const left = Math.max(area.left, Math.min(x, area.right - mw - 4));
+  const top = Math.max(area.top, Math.min(y, area.bottom - mh - 4));
+  edgeMenu.style.left = `${Math.round(left - root.left)}px`;
+  edgeMenu.style.top = `${Math.round(top - root.top)}px`;
 }
 
 function hideEdgeMenu(): void {
@@ -10527,8 +10573,9 @@ function closeFilterPanel(): void {
  * disagree, which is how the funnel ended up on the narrative.
  */
 function refreshFunnel(): void {
-  const belongs =
-    !!store && activeWindowType() === "graph" && !filterPanelOpen();
+  const anchored = activeWindowType() === "graph"
+    || (!!lastGraphWinId && winAreas.has(lastGraphWinId));
+  const belongs = !!store && anchored && !filterPanelOpen();
   btnViewProps.classList.toggle("hidden", !belongs);
 }
 // Monochrome (B/W) display toggle — every node draws black-bordered + white
@@ -13655,7 +13702,8 @@ function mountGraphCanvas(cv: HTMLCanvasElement, mini: HTMLCanvasElement,
     hint,
     paint: (live) => {
       const mode = graphModeOf(winId);
-      const shown = live && inContext() ? contextScene : (scenes[mode] ?? null);
+      const here = contextIn(winId);
+      const shown = here ? contextScene : (scenes[mode] ?? null);
       const empty = !!store && !(shown?.nodes.length);
       hint.classList.toggle("hidden", !empty);
       if (empty) hint.textContent = t("add.emptyHint");
@@ -13665,8 +13713,8 @@ function mountGraphCanvas(cv: HTMLCanvasElement, mini: HTMLCanvasElement,
         // the hypergraph context belongs to the window that entered it, and the
         // context scene is the app's one — so a window in context draws it and
         // every other draws its own projection
-        scene: live && inContext() ? contextScene : (scenes[mode] ?? null),
-        vp: live && inContext() ? contextViewport : viewportFor(winId, mode),
+        scene: here ? contextScene : (scenes[mode] ?? null),
+        vp: here ? contextViewport : viewportFor(winId, mode),
         live,
         overview,
       });
@@ -14190,6 +14238,7 @@ function setAreaFocused(winId: string, on: boolean): void {
   el.classList.toggle("tile-active", on);
   surfaceOf(winId)?.setFocused(on);
   if (!on) return;
+  followWindowView(winId);
   reflectLiveArea();
   // THE TWO OVERLAYS OF A CANVAS, which are the whole of what
   // `applyWindowSurface` had left by tonight. The funnel filters nodes and
@@ -14198,10 +14247,39 @@ function setAreaFocused(winId: string, on: boolean): void {
   // acting on something that is not on screen. This is the one thing a focus
   // change does besides the ring, and it changes no layout: the panel is an
   // overlay, and closing one that cannot apply is not a re-arrangement.
-  if (windowsOf().find((w) => w.id === winId)?.type !== "graph"
-      && filterPanelOpen()) closeFilterPanel();
+  // AUDIT N2 · crossing a window that is not a graph no longer closes the
+  // filter panel: it belongs to the graph window it was opened on
   refreshFunnel();
 }
+
+/**
+ * AUDIT N2 · A5 · THE VIEW FOLLOWS THE GRAPH WINDOW THAT HAS THE FOCUS.
+ *
+ * `view` was the app's one projection, changed only by a mode pick: every
+ * graph window PAINTED its own mode, but hit-testing, dragging, `scene()`,
+ * `viewport()`, `fit()`, the nudge, the filter panel and `canvasStore()` all
+ * read `view`. Measured (A5): in Fonti the Graph window's clicks were resolved
+ * against the Matrix scene (a click on USM101 selected nothing), and the DTC
+ * window in Contenuti wrote to the study graph. Now, when a graph window takes
+ * the focus, `view` becomes ITS mode — so every reader above asks the window
+ * the pointer is in. The scenes are rebuilt only when the two projections keep
+ * different circles of detail (the filtered view is shared by all of them).
+ */
+function followWindowView(winId: string): void {
+  const win = windowsOf().find((w) => w.id === winId);
+  if (!win || win.type !== "graph") return;
+  lastGraphWinId = winId;
+  const mode = winMode(win);
+  if (mode === view) return;
+  view = mode;
+  // every scene already carries its own circles (`buildScenesNow`): only the
+  // app's «current» hidden sets and the panel that lists them follow
+  recomputeHiddenFromCircles();
+  if (filterPanelOpen()) renderCirclesPanel();
+  updateToolbar();
+}
+/** the graph window the canvas overlays belong to (the last one focused) */
+let lastGraphWinId: string | null = null;
 
 /**
  * WHERE THE FOCUSED AREA IS, published as four numbers on the shell.
@@ -14223,7 +14301,11 @@ function setAreaFocused(winId: string, on: boolean): void {
  * hint bar and a menu opened at a point belong to the app, not to a window.
  */
 function reflectLiveArea(): void {
-  const el = winAreas.get(activeWin().id);
+  // AUDIT N2 · the canvas overlays (funnel, detail panel, drop hint) stay on
+  // the graph window they belong to: crossing the Inspector does not move them
+  const anchor = activeWin().type === "graph" || !lastGraphWinId || !winAreas.has(lastGraphWinId)
+    ? activeWin().id : lastGraphWinId;
+  const el = winAreas.get(anchor);
   const root = tileRoot.getBoundingClientRect();
   const r = el ? el.getBoundingClientRect() : root;
   const bar = el?.querySelector<HTMLElement>(":scope > .tile-bar");
@@ -23760,5 +23842,9 @@ setVolatileProvider((id) => isVolatile(store?.node(id)));
 // New, Open…, drop a file, or Sync. __EM_TEST_DATA__ still injects a fixture
 // for automated tests.
 if (window.__EM_TEST_DATA__) {
-  loadDocument(window.__EM_TEST_DATA__, "embedded test data");
+  // a PROJECT (`{graphs: …}`, with its corpus and shelf) goes through the door
+  // a file does; a single graph keeps the old one
+  if ((window.__EM_TEST_DATA__ as unknown as { graphs?: unknown }).graphs)
+    loadContainerDocument(window.__EM_TEST_DATA__, "embedded test data");
+  else loadDocument(window.__EM_TEST_DATA__, "embedded test data");
 }

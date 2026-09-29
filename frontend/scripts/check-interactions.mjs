@@ -228,9 +228,26 @@ test("A5", "due finestre grafo: il clic nella finestra Graph seleziona il suo no
   return { pass: sel.length === 1 && sel[0] === box.id, detail: { mode: ws.mode, aimed: box.id, selected: sel } };
 });
 
+/** catena as a PROJECT with a documentation corpus (a flight and its photo) */
+function catenaWithCorpus() {
+  const c = fixture("catena");
+  return {
+    header: c.header, layout: c.layout, active_graph_id: c.graph.graph_id,
+    graphs: {
+      [c.graph.graph_id]: c.graph,
+      dtc: { graph_id: "dtc", name: "Documentation (DTC)", data: { em_collection: "DTCCorpus" },
+        nodes: [
+          { id: "acq_a", name: "Volo marzo", node_type: "dtc_acquisition", description: "", data: { dtc_kind: "local_import" } },
+          { id: "img1", name: "IMG_1.jpg", node_type: "resource", description: "", data: { residency: "resident" } },
+        ],
+        edges: [{ id: "o1", source: "acq_a", target: "img1", edge_type: "dtc_had_output" }] },
+    },
+  };
+}
+
 // A5b · the DTC window writes to the corpus
 test("A5b", "finestra DTC: un nodo creato lì va nel corpus", async () => {
-  const { p, ctx } = await open({ doc: "catena" });
+  const { p, ctx } = await open({ doc: catenaWithCorpus() });
   await workspace(p, "assets");
   const win = await winOf(p, "graph");
   const ws = await p.evaluate((w) => window.__EM_DRAG__.winScene(w), win);
@@ -397,6 +414,69 @@ test("2.select", "Backspace in una select dell'ispettore non cancella il nodo", 
   const after = await p.evaluate(() => window.__EM_DRAG__.nodeCount());
   await ctx.close();
   return { pass: had && before === after, detail: { had, before, after } };
+});
+
+// ── PARTE 3 · ogni finestra grafo ha la sua vista ───────────────────────────
+test("3.dtcclick", "Stratigrafia (Matrix) e poi Contenuti (DTC): il clic su un nodo del DTC lo seleziona", async () => {
+  const { p, ctx } = await open({ doc: catenaWithCorpus() });
+  await workspace(p, "assets");
+  const win = await winOf(p, "graph");
+  let ws = await p.evaluate((w) => window.__EM_DRAG__.winScene(w), win);
+  await p.mouse.move(ws.rect.x + 20, ws.rect.y + 20);
+  await p.waitForTimeout(200);
+  ws = await p.evaluate((w) => window.__EM_DRAG__.winScene(w), win);
+  const box = ws.boxes.find((b) => b.id === "acq_a");
+  await p.mouse.click(box.x + box.w / 2, box.y + box.h / 2);
+  await p.waitForTimeout(400);
+  const sel = await p.evaluate(() => window.__EM_DRAG__.selected());
+  await ctx.close();
+  return { pass: sel[0] === "acq_a", detail: { mode: ws.mode, selected: sel } };
+});
+test("3.edgemenu", "il menu d'arco in una finestra in basso si apre accanto al puntatore", async () => {
+  const { p, ctx } = await open({ doc: "catena", ws: "provenance" });
+  const win = await winOf(p, "graph");
+  let ws = await p.evaluate((w) => window.__EM_DRAG__.winScene(w), win);
+  await p.mouse.move(ws.rect.x + 30, ws.rect.y + 30);
+  await p.waitForTimeout(200);
+  ws = await p.evaluate((w) => window.__EM_DRAG__.winScene(w), win);
+  const a = ws.boxes.find((b) => b.id === "US102");
+  const t = ws.boxes.find((b) => b.id === "USV106");
+  // from US102's right-edge handle onto USV106
+  const sx = a.x + a.w - 1, sy = a.y + a.h / 2;
+  const ex = t.x + t.w / 2, ey = t.y + t.h / 2;
+  await p.mouse.move(sx, sy);
+  await p.mouse.down();
+  for (let i = 1; i <= 8; i++) await p.mouse.move(sx + (ex - sx) * i / 8, sy + (ey - sy) * i / 8);
+  await p.mouse.up();
+  await p.waitForTimeout(400);
+  const m = await p.evaluate(() => {
+    const el = document.getElementById("edge-menu");
+    if (!el || el.classList.contains("hidden")) return null;
+    const r = el.getBoundingClientRect();
+    return { x: r.x, y: r.y, w: r.width, h: r.height };
+  });
+  await p.keyboard.press("Escape");
+  await ctx.close();
+  if (!m) return { pass: false, detail: { menu: "not shown" } };
+  const inside = m.x >= ws.rect.x - 1 && m.y >= ws.rect.y - 40 && m.x + m.w <= ws.rect.x + ws.rect.w + 1;
+  const near = Math.hypot(m.x - ex, m.y - ey) < 260;
+  return { pass: inside && near, detail: { menu: m, pointer: { x: ex, y: ey }, window: ws.rect } };
+});
+test("3.filters", "attraversare un'altra finestra non chiude il pannello filtri", async () => {
+  const { p, ctx } = await open({ doc: "catena" });
+  const win = await winOf(p, "graph");
+  const ws = await p.evaluate((w) => window.__EM_DRAG__.winScene(w), win);
+  await p.mouse.move(ws.rect.x + 50, ws.rect.y + 50);
+  await p.waitForTimeout(150);
+  await p.click("#btn-view-props");
+  await p.waitForTimeout(200);
+  const open1 = await p.evaluate(() => !document.getElementById("filter-panel")?.classList.contains("hidden"));
+  const insp = await p.evaluate(() => { const r = document.querySelector('[data-win$="inspector"]')?.getBoundingClientRect(); return r && { x: r.x + r.width / 2, y: r.y + r.height / 2 }; });
+  await p.mouse.move(insp.x, insp.y, { steps: 4 });
+  await p.waitForTimeout(200);
+  const r = await p.evaluate(() => { const el = document.getElementById("filter-panel"); return { open: !el?.classList.contains("hidden"), x: el?.getBoundingClientRect().x }; });
+  await ctx.close();
+  return { pass: open1 && r.open && r.x < insp.x - 100, detail: { open1, after: r } };
 });
 
 // ── run ─────────────────────────────────────────────────────────────────────
