@@ -43,7 +43,7 @@ export type WindowType =
   // it carries no palette and no chevron.
   | "viewer"
   // W1 · STORAGE · where the bytes live. Its Modes are the BACKENDS (filesystem
-  // now, MinIO in phase 2, Samba/WebDAV conceivable) — the same shape as the
+  // and the room's MinIO, Samba/WebDAV conceivable) — the same shape as the
   // graph window's projections: one window, several ways of looking.
   | "storage"
   // A2 · ANNOTATOR · an image, and the regions traced on it. Its Modes are what
@@ -90,9 +90,9 @@ export type GraphMode = ViewKind;
  *  `multigraph` first shipped invisible to `winMode`). */
 export const GRAPH_MODES: GraphMode[] = ["matrix", "graph", "dtc", "multigraph"];
 
-/** The backends a Storage window can show. `minio` is present and NOT connected
- *  (phase 2) — it is listed because the window's shape is "one window, several
- *  backends", and a Mode that is coming is better declared than discovered. */
+/** The backends a Storage window can show: the disk, and the room's MinIO
+ *  (`minioPanel`: delivery, lots, derivation). AUDIT C · it said «NOT connected
+ *  (phase 2)», which stopped being true when the panel was implemented. */
 export const STORAGE_MODES = ["filesystem", "minio"] as const;
 
 /** How a Viewer window shows its collection: one item at a time, or all of it.
@@ -478,6 +478,23 @@ export function renameWorkspace(id: WorkspaceId, label: string): boolean {
   ws.label = label.trim();
   persistCustom();
   return true;
+}
+
+/** AUDIT N11 · remove a user's space, and hand back the gesture that brings it
+ *  back as it was (its arrangement included) */
+export function removeWorkspaceUndoable(id: WorkspaceId): (() => void) | null {
+  const i = WORKSPACES.findIndex((w) => w.id === id);
+  if (i < 0 || WORKSPACES[i].builtin) return null;
+  const preset = WORKSPACES[i];
+  const saved = registry[id];
+  if (!removeWorkspace(id)) return null;
+  return () => {
+    if (WORKSPACES.some((w) => w.id === id)) return;
+    WORKSPACES.splice(Math.min(i, WORKSPACES.length), 0, preset);
+    if (saved) registry[id] = saved;
+    persistCustom();
+    persistWindows();
+  };
 }
 
 /** Remove a workspace the user made. Built-ins stay. */

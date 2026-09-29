@@ -990,6 +990,61 @@ test("11.folder", "una cartella dello Storage si apre con un clic", async () => 
   return { pass: names.includes("vuota") && names.includes("modelli"), detail: { names, root } };
 });
 
+// ── PARTE 12 · coerenza ─────────────────────────────────────────────────────
+test("12.shortcuts", "l'aiuto delle scorciatoie si genera dalla mappa dei tasti (≥ 40) ed è cercabile", async () => {
+  const { p, ctx } = await open({ doc: "catena" });
+  await p.evaluate(() => document.getElementById("btn-help-shortcuts").click());
+  await p.waitForSelector(".modal.shortcuts");
+  const all = await p.evaluate(() => document.querySelectorAll(".shortcuts-table tr[data-key]").length);
+  await p.fill(".shortcuts-q", "poligono");
+  await p.waitForTimeout(150);
+  const found = await p.evaluate(() => [...document.querySelectorAll(".shortcuts-table tr[data-key]")].map((r) => r.dataset.key));
+  await ctx.close();
+  return { pass: all >= 40 && found.includes("polyClose") && found.length < all, detail: { all, found } };
+});
+test("12.undoall", "le eliminazioni danno «Annulla»: una connessione, una riga dello shelf", async () => {
+  const shelf = { id: "shelf", name: "Shelf", entries: [{ id: "sh1", name: "prospetto.jpg", kind: "image", locator: "/x/prospetto.jpg", scope: "own-study", residency: "resident" }] };
+  const { p, ctx } = await open({ doc: "catena", init: { "emstudio.shelf": JSON.stringify(shelf) } });
+  // a connection, from the Inspector
+  await pick(p, "USM101");
+  const e0 = await p.evaluate(() => window.__EM_DRAG__.nodeInfo("USM101").edges.length);
+  await p.locator('.tile-area button[title="Elimina questa connessione"]').first().click();
+  await p.waitForTimeout(300);
+  const toast1 = await p.evaluate(() => document.getElementById("toast").innerText);
+  await p.click("#toast .toast-action");
+  await p.waitForTimeout(300);
+  const e1 = await p.evaluate(() => window.__EM_DRAG__.nodeInfo("USM101").edges.length);
+  // a shelf row
+  await workspace(p, "assets");
+  await p.locator('.shelf-row[data-entry="sh1"] .shelf-actions button', { hasText: "✕" }).click();
+  await p.waitForTimeout(300);
+  const toast2 = await p.evaluate(() => document.getElementById("toast").innerText);
+  await p.click("#toast .toast-action");
+  await p.waitForTimeout(300);
+  const back = await p.evaluate(() => !!document.querySelector('.shelf-row[data-entry="sh1"]'));
+  await ctx.close();
+  return { pass: /Annulla/.test(toast1) && e1 === e0 && /prospetto/.test(toast2) && back, detail: { toast1, e0, e1, toast2, back } };
+});
+test("12.settings", "Impostazioni: Annulla riporta la lingua e il tema; Salva dice cosa è cambiato", async () => {
+  const { p, ctx } = await open({ doc: "catena" });
+  await p.evaluate(() => document.getElementById("btn-settings").click());
+  await p.waitForSelector("#settings-modal:not(.hidden)");
+  await p.selectOption("#set-language", "en");
+  await p.waitForTimeout(200);
+  const mid = await p.evaluate(() => document.getElementById("ns-publish").textContent);
+  await p.click("#settings-cancel");
+  await p.waitForTimeout(300);
+  const after = await p.evaluate(() => document.getElementById("ns-publish").textContent);
+  await p.evaluate(() => document.getElementById("btn-settings").click());
+  await p.waitForSelector("#settings-modal:not(.hidden)");
+  await p.evaluate(() => { const c = document.getElementById("set-edge-tips") ?? [...document.querySelectorAll("#settings-modal input[type=checkbox]")][0]; c.click(); });
+  await p.click("#settings-save");
+  await p.waitForTimeout(300);
+  const saved = await p.evaluate(() => document.getElementById("toast").innerText);
+  await ctx.close();
+  return { pass: /Publish/.test(mid) && /Pubblica/.test(after) && /Salvato: /.test(saved) && !/Sync target/.test(saved), detail: { mid, after, saved } };
+});
+
 // ── run ─────────────────────────────────────────────────────────────────────
 const chosen = cases.filter((c) => !only.length || only.includes(c.id) || only.some((o) => c.id.startsWith(o + ".")));
 for (const c of chosen) {

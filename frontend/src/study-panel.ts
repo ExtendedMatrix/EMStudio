@@ -556,7 +556,7 @@ export function renderSitePosition(host: HTMLElement, store: DocumentStore): voi
     // position is what a "site map" block in a chapter reads, so getting to it
     // has to be one click from where the map is being written.
     const heading = el("h3", "insp-sect", "Site position (map)");
-    heading.id = "insp-site-position";
+    heading.dataset.section = "site-position";   // AUDIT C · no id: two panels, two headings
     host.appendChild(heading);
     const sp0 = store.readSitePosition();
     const spStatus = el(

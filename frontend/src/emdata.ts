@@ -62,8 +62,6 @@ let volatileProvider: VolatileProvider = () => false;
 
 const LS_SHEET = "emdata.sheet";
 
-const $ = <T extends HTMLElement>(id: string) =>
-  document.getElementById(id) as T | null;
 
 /** AUX2 sets the single source of truth for "is this node volatile?"; the same
  *  predicate the canvas renderer uses, so table and graph never disagree. */
@@ -200,6 +198,7 @@ export function toggleEmDataClaimForm(store: DocumentStore, win?: Win): boolean 
   return true;
 }
 
+let onDeleted: ((name: string, store: DocumentStore) => void) | null = null;
 export function initEmData(opts: {
   getStore: () => DocumentStore | null;
   getCtx?: () => ViewCtx | null;
@@ -209,7 +208,10 @@ export function initEmData(opts: {
   runIssueAction?: (issueId: string) => void;
   /** CATENA · the bulk fix of the rows on screen */
   runIssueBulk?: (key: string, nodes: string[]) => void;
+  /** AUDIT N11 · a row went: say which, and give it back («Annulla») */
+  onDeleted?: (name: string, store: DocumentStore) => void;
 }): void {
+  if (opts.onDeleted) onDeleted = opts.onDeleted;
   getStore = opts.getStore;
   if (opts.getCtx) getCtx = opts.getCtx;
   if (opts.currentRow) currentRowOf = opts.currentRow;
@@ -717,7 +719,12 @@ function wireBody(host: EmDataHost, store: DocumentStore, st: TableState): void 
     btn.addEventListener("click", (e) => e.preventDefault());
   });
   body.querySelectorAll<HTMLButtonElement>("[data-del]").forEach((btn) => {
-    btn.onclick = () => { deleteRow(store, btn.getAttribute("data-del")!); };
+    btn.onclick = () => {
+      const id = btn.getAttribute("data-del")!;
+      const name = String(store.node(id)?.name || id);
+      deleteRow(store, id);
+      onDeleted?.(name, store);
+    };
   });
 }
 
@@ -754,18 +761,21 @@ function toggleClaimForm(store: DocumentStore, root: HTMLElement): void {
   const opts = units
     .map((u) => `<option value="${escapeAttr(u.id)}">${escapeHtml(String(u.name ?? u.id))}</option>`)
     .join("");
+  // AUDIT C · no ids: with two tables open the form appeared twice and
+  // `#cf-add` found the first one; each form's fields are read inside it
   slot.innerHTML = `<div class="emdata-claimform">
-    <label>Target <select id="cf-target">${opts}</select></label>
-    <label>Property <input id="cf-prop" placeholder="e.g. height" /></label>
-    <label>Value <input id="cf-value" placeholder="e.g. 3.2" /></label>
-    <button id="cf-add">Add claim</button>
+    <label>${escapeHtml(t("claim.target"))} <select data-cf="target">${opts}</select></label>
+    <label>${escapeHtml(t("claim.property"))} <input data-cf="prop" placeholder="${escapeAttr(t("claim.propertyEg"))}" /></label>
+    <label>${escapeHtml(t("claim.value"))} <input data-cf="value" placeholder="${escapeAttr(t("claim.valueEg"))}" /></label>
+    <button data-cf="add">${escapeHtml(t("claim.add"))}</button>
   </div>`;
-  ($("cf-add") as HTMLButtonElement).onclick = () => {
-    const target = ($("cf-target") as HTMLSelectElement)?.value;
-    const prop = ($("cf-prop") as HTMLInputElement)?.value.trim();
-    const value = ($("cf-value") as HTMLInputElement)?.value.trim();
+  const cf = <T extends HTMLElement>(k: string) => slot.querySelector<T>(`[data-cf="${k}"]`);
+  cf<HTMLButtonElement>("add")!.onclick = () => {
+    const target = cf<HTMLSelectElement>("target")?.value;
+    const prop = cf<HTMLInputElement>("prop")?.value.trim();
+    const value = cf<HTMLInputElement>("value")?.value.trim();
     if (!target || !prop) return;
-    addQualiaClaim(store, target, prop, value);
+    addQualiaClaim(store, target, prop, value ?? "");
     slot.innerHTML = "";
   };
 }

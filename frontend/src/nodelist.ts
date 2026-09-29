@@ -323,7 +323,7 @@ export function buildNodeList(
         const foldAll = document.createElement("button");
         foldAll.className = "nl-icon";
         foldAll.textContent = "⊟";
-        foldAll.title = `Fold all ${label(type)} groups`;
+        foldAll.title = t("l.foldAll", { type: label(type) });
         // GRAPH verb inside a LIST heading: stop it here, or folding the groups
         // in the scene would also collapse the section you were looking at.
         foldAll.addEventListener("click", (ev) => {
@@ -334,7 +334,7 @@ export function buildNodeList(
         const unfoldAll = document.createElement("button");
         unfoldAll.className = "nl-icon";
         unfoldAll.textContent = "⊞";
-        unfoldAll.title = `Unfold all ${label(type)} groups`;
+        unfoldAll.title = t("l.unfoldAll", { type: label(type) });
         unfoldAll.addEventListener("click", (ev) => {
           ev.stopPropagation();
           groupCb.onFoldGroups(ids, false);

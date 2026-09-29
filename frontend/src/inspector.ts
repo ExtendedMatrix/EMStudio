@@ -198,7 +198,7 @@ export function renderInspector(
   chip.style.borderColor = st.border;
   head.appendChild(chip);
   const close = el("button", "insp-close", "×");
-  close.title = "Close (Esc)";
+  close.title = t("l.closeEsc");
   close.addEventListener("click", cb.onClose);
   head.appendChild(close);
   root.appendChild(head);
@@ -226,13 +226,13 @@ export function renderInspector(
     swatch.type = "color";
     swatch.className = "insp-color-swatch";
     swatch.value = toHexColor(stored) ?? "#cccccc";
-    swatch.title = "Colour — click to pick";
+    swatch.title = t("l.colourPick");
     const hex = document.createElement("input");
     hex.type = "text";
     hex.className = "insp-color-hex";
     hex.value = stored;
     hex.placeholder = "#RRGGBB";
-    hex.title = "Paste or type a hex colour (#RRGGBB)";
+    hex.title = t("l.colourHex");
     const apply = (v: string): void => {
       const d = {
         ...((store.node(nodeId)?.data ?? {}) as Record<string, unknown>),
@@ -399,7 +399,7 @@ export function renderInspector(
 
       const delBar = el("div", "insp-actions");
       const delPh = el("button", "insp-btn danger", "Delete phase") as HTMLButtonElement;
-      delPh.title = "Remove this phase; its units move to a chosen epoch";
+      delPh.title = t("l.removePhase");
       delPh.addEventListener("click", () => cb.onDeletePhase(nodeId));
       delBar.appendChild(delPh);
       root.appendChild(delBar);
@@ -514,7 +514,7 @@ export function renderInspector(
       }
       const pbar = el("div", "insp-actions");
       const addPh = el("button", "insp-btn", "+ Add phase") as HTMLButtonElement;
-      addPh.title = "Create a phase (sub-epoch) inside this epoch";
+      addPh.title = t("l.addPhase");
       addPh.addEventListener("click", () => cb.onAddPhase(nodeId));
       pbar.appendChild(addPh);
       root.appendChild(pbar);
@@ -595,7 +595,7 @@ export function renderInspector(
     fold.addEventListener("click", () => cb.onToggleFold(nodeId));
     bar.appendChild(fold);
     const enter = el("button", "insp-btn", "Enter group ▸") as HTMLButtonElement;
-    enter.title = "Isolated canvas with only the group members (double-click)";
+    enter.title = t("l.enterGroup");
     enter.addEventListener("click", () => cb.onEnterGroup(nodeId));
     bar.appendChild(enter);
     root.appendChild(bar);
@@ -984,7 +984,7 @@ export function renderInspector(
         b.addEventListener("click", () => cb.onJump(otherId));
         row.appendChild(b);
         const del = el("button", "insp-edge-del", "×");
-        del.title = "Delete this connection";
+        del.title = t("l.deleteConnection");
         del.addEventListener("click", () => cb.onDeleteEdge(edge));
         row.appendChild(del);
         g.appendChild(row);

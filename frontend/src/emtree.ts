@@ -373,6 +373,8 @@ export interface EMTreeHandlers {
   onAuxUnmap?(auxId: string): void;
   /** AUX2 — a per-type option changed (mapping name, folder, toggle…). */
   onAuxOption?(auxId: string, key: string, value: string | boolean): void;
+  /** AUDIT C · a story row opens that story (it was drawn and did nothing) */
+  onOpenStory?(slotId: string, narrativeId: string): void;
 }
 
 function esc(s: string): string {
@@ -489,7 +491,7 @@ function auxSection(tree: EMTree, labels: (key: string) => string): string {
     <div class="aux-sect">
       <div class="aux-sect-head">
         <span>Auxiliary files</span>
-        <button id="aux-add" title="Attach a local file or folder to this graph">+ add</button>
+        <button data-et="aux-add" title="Attach a local file or folder to this graph">+ add</button>
       </div>
       ${slot.auxiliaryFiles.length
         ? `<ul class="aux-list">${rows}</ul>`
@@ -691,8 +693,8 @@ export function renderEMTree(host: HTMLElement, tree: EMTree,
     const stories = (slot.store.doc.graph?.nodes ?? []).filter((n) => n.node_type === "narrative")
       .map((n) => {
         const ch = ((n.data ?? {}) as { chapters?: unknown[] }).chapters;
-        return `<div class="et-story" data-story="${esc(n.id)}">❧ ${esc(String(n.name || n.id))}`
-          + ` <span class="et-meta">${Array.isArray(ch) ? ch.length : 0} ${esc(labels("emtree.chapters"))}</span></div>`;
+        return `<button type="button" class="et-story" data-story="${esc(n.id)}" data-slot="${esc(slot.id)}">❧ ${esc(String(n.name || n.id))}`
+          + ` <span class="et-meta">${Array.isArray(ch) ? ch.length : 0} ${esc(labels("emtree.chapters"))}</span></button>`;
       }).join("");
     return `
       <li class="et-slot${isActive ? " active" : ""}" data-id="${esc(slot.id)}">
@@ -718,10 +720,10 @@ export function renderEMTree(host: HTMLElement, tree: EMTree,
   // ≥1 slot; the toggle is hidden when the workspace is empty.
   const toggle = tree.slots.length
     ? `<div class="et-viewtoggle" role="tablist">
-        <button id="et-mode-list" class="${overviewMode ? "" : "on"}">${
+        <button data-et="et-mode-list" class="${overviewMode ? "" : "on"}">${
           esc(labels("emtree.viewList"))
         }</button>
-        <button id="et-mode-overview" class="${overviewMode ? "on" : ""}">${
+        <button data-et="et-mode-overview" class="${overviewMode ? "on" : ""}">${
           esc(labels("emtree.viewOverview"))
         }</button>
       </div>`
@@ -754,8 +756,8 @@ export function renderEMTree(host: HTMLElement, tree: EMTree,
     <div class="et-panel">
       <p class="et-intro">${esc(labels("emtree.intro"))}</p>
       <div class="et-actions">
-        <button id="et-new">${esc(labels("emtree.new"))}</button>
-        <button id="et-open">${esc(labels("emtree.open"))}</button>
+        <button data-et="et-new">${esc(labels("emtree.new"))}</button>
+        <button data-et="et-open">${esc(labels("emtree.open"))}</button>
       </div>
       ${recentBlock}
       ${toggle}
@@ -776,9 +778,9 @@ export function renderEMTree(host: HTMLElement, tree: EMTree,
     overviewMode = overview;
     renderEMTree(host, tree, handlers, labels);
   };
-  host.querySelector<HTMLButtonElement>("#et-mode-list")
+  host.querySelector<HTMLButtonElement>('[data-et="et-mode-list"]')
     ?.addEventListener("click", () => setMode(false));
-  host.querySelector<HTMLButtonElement>("#et-mode-overview")
+  host.querySelector<HTMLButtonElement>('[data-et="et-mode-overview"]')
     ?.addEventListener("click", () => setMode(true));
   // Overview cards activate their slot on click (same as a list row).
   host.querySelectorAll<HTMLButtonElement>(".ov-pick").forEach((button) => {
@@ -792,6 +794,12 @@ export function renderEMTree(host: HTMLElement, tree: EMTree,
     button.addEventListener("click", () => {
       const id = button.dataset.id;
       if (id) handlers.onActivate(id);
+    });
+  });
+  host.querySelectorAll<HTMLButtonElement>(".et-story").forEach((button) => {
+    button.addEventListener("click", () => {
+      const { slot, story } = button.dataset;
+      if (slot && story) handlers.onOpenStory?.(slot, story);
     });
   });
 
@@ -843,7 +851,7 @@ export function renderEMTree(host: HTMLElement, tree: EMTree,
   });
   // AUX1 · the auxiliary-files section of the active slot. `main.ts` owns the
   // actions (it has the file picker and the store); the tree only reports them.
-  host.querySelector<HTMLButtonElement>("#aux-add")
+  host.querySelector<HTMLButtonElement>('[data-et="aux-add"]')
     ?.addEventListener("click", () => handlers.onAuxAdd?.());
   host.querySelectorAll<HTMLElement>("[data-aux-toggle]").forEach((el) => {
     el.addEventListener("click", () =>
@@ -888,8 +896,8 @@ export function renderEMTree(host: HTMLElement, tree: EMTree,
       if (id) handlers.onRemove(id);
     });
   });
-  host.querySelector<HTMLButtonElement>("#et-open")
+  host.querySelector<HTMLButtonElement>('[data-et="et-open"]')
     ?.addEventListener("click", () => handlers.onOpen());
-  host.querySelector<HTMLButtonElement>("#et-new")
+  host.querySelector<HTMLButtonElement>('[data-et="et-new"]')
     ?.addEventListener("click", () => handlers.onNew());
 }

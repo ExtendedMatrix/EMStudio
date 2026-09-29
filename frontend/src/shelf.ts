@@ -210,6 +210,20 @@ export function removeFromShelf(id: string): void {
   changed();
 }
 
+/** AUDIT N11 · remove, and hand back the gesture that puts it where it was */
+export function removeFromShelfUndoable(id: string): (() => void) | null {
+  const at = entries.findIndex((e) => e.id === id);
+  if (at < 0) return null;
+  const entry = entries[at];
+  entries = entries.filter((e) => e.id !== id);
+  changed();
+  return () => {
+    if (entries.some((e) => e.id === entry.id)) return;
+    entries = [...entries.slice(0, at), entry, ...entries.slice(at)];
+    changed();
+  };
+}
+
 export function updateShelfEntry(id: string, patch: Partial<ShelfEntry>): void {
   const entry = entries.find((e) => e.id === id);
   if (!entry) return;

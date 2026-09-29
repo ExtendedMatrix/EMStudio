@@ -202,20 +202,9 @@
            The node search left this bar: it is now PER WINDOW (HDR1), because a
            search that belongs to no window has no scope to search. -->
       <div id="workspace-bar" role="tablist" aria-label="Workspaces"></div>
-      <!-- WIN2 · the view-toggle was ABSORBED into the Graph window header (the
-           mode belongs to the window, not to the app). The buttons stay in the
-           DOM, hidden: they remain the single owners of the mode handlers, and
-           the header + the leader bar drive them. -->
-      <div id="view-toggle" role="group" class="hidden">
-        <button id="btn-matrix" class="active" data-i18n="toolbar.matrix">Matrix</button>
-        <button id="btn-graph" data-i18n="toolbar.graph">Graph</button>
-        <button
-          id="btn-narrative"
-          title="Narrative — the graph read as a story (chapters, prose, live embeds)"
-        >
-          <span data-i18n="toolbar.narrative">Narrative</span>
-        </button>
-      </div>
+      <!-- AUDIT C · the hidden #view-toggle (Matrix/Graph/Narrative), #btn-fit
+           and #btn-narrative-edit went: nothing clicked them. The window header
+           calls the functions they owned (setMode, fit, setReading). -->
       <!-- WIN2 · mirrored by #win-algo in the window header; hidden here but
            still the owner of the algorithm-change handler. -->
       <select
@@ -227,20 +216,6 @@
         <option value="radial">Radial</option>
         <option value="force">Force</option>
       </select>
-      <!-- HDR1 · ALWAYS hidden, like #btn-fit / #btn-layout above: writing is a
-           mode of a narrative WINDOW (its ✎ toggle) and the master header belongs
-           to no window. Kept in the DOM because it is still the owner of the
-           narrativeEditing handler the window header dispatches to. -->
-      <button
-        id="btn-narrative-edit"
-        class="hidden"
-        title="Edit this narrative: write prose, drag nodes in from the Nodes tab, reorder and settle chapters"
-      >
-        Edit
-      </button>
-      <!-- WIN2 · fit / layout / algorithm moved INTO the window header (they act
-           on a window, not on the app). Hidden here, still the handler owners. -->
-      <button id="btn-fit" class="hidden" title="Fit to view (0)" data-i18n="toolbar.fit">Fit</button>
       <button id="btn-layout" class="hidden" title="Recompute the swimlane layout (em-core, same engine as the CLI)" data-i18n="toolbar.layout">Layout</button>
       <input type="file" id="file-input" accept=".json,.em.json,.emj" hidden />
       <!-- AUX1: the auxiliary-file picker. No `accept`: the five source kinds

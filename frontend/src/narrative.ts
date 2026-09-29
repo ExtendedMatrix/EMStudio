@@ -58,7 +58,7 @@ import type { EmDocument, EmNode } from "./types";
  * the first divergence would be an undo that only half works.
  */
 export const NODE_MIME = "application/x-em-node-id";
-export const VIEW_TYPE_MIME = "application/x-em-view-type";
+// (AUDIT C · `VIEW_TYPE_MIME` went with its receiver: it had no source)
 
 /**
  * How a 3D MODEL gets shown — injected, never imported here.
@@ -179,7 +179,11 @@ const UNWRITTEN_PROSE =
 
 /** Is this prose still the scaffolder's placeholder? (The Index counts them.) */
 export function isUnwrittenProse(text: string | undefined): boolean {
-  return UNWRITTEN_PROSE.test(text ?? "");
+  const s = text ?? "";
+  // AUDIT A7 · the client scaffolder writes its marker AFTER the site's name
+  // («Pancia — «da scrivere»»), in the language of the moment
+  return UNWRITTEN_PROSE.test(s) || /\s—\s«(?:da scrivere|to be written)»/.test(s)   // ALLOW-IT: foreign data
+    || (!!s && s.includes(` — ${t("scaffold.placeholder")}`));
 }
 
 function renderProse(text: string): HTMLElement {
@@ -1174,29 +1178,9 @@ export function renderNarrativeView(
           // nodo»); reading: it goes to the node, as it always has
           writing ? undefined : onReveal, viewer);
       }
-      // D1-full · drop a VIEW TYPE on an embed and it changes how that embed is
-      // shown. Only on an embed, and only to change one: a view type cannot
-      // create a block, because a block without a reference points at nothing.
-      if (editor && block.block_type === "embed") {
-        body.addEventListener("dragover", (e) => {
-          const dt = (e as DragEvent).dataTransfer;
-          if (!dt || !dt.types.includes(VIEW_TYPE_MIME)) return;
-          e.preventDefault();
-          dt.dropEffect = "copy";
-          body.classList.add("nv-drop-target");
-        });
-        body.addEventListener("dragleave", () =>
-          body.classList.remove("nv-drop-target"));
-        body.addEventListener("drop", (e) => {
-          const dt = (e as DragEvent).dataTransfer;
-          body.classList.remove("nv-drop-target");
-          const viewType = dt?.getData(VIEW_TYPE_MIME);
-          if (!viewType) return;
-          e.preventDefault();
-          e.stopPropagation();
-          editor.setViewType(ci, bi, viewType);
-        });
-      }
+      // (AUDIT C · the VIEW-TYPE drop on an embed went: nothing has dragged a
+      // view type since the palette was removed; «mostrato come» is the
+      // Inspector's select)
       // Provenance rides with the paragraph in BOTH readings: knowing a machine
       // wrote this is not an authoring convenience, it is what the reader needs.
       // Its buttons (Valida, Ritira) are in the Inspector now.
@@ -1256,12 +1240,16 @@ export function renderNarrativeView(
         const ref = e.dataTransfer?.getData(NODE_MIME);
         if (ref) {
           e.preventDefault();
+          e.stopPropagation();
           editor.addEmbed(ci, ref);
           return;
         }
         const f = e.dataTransfer?.files?.[0];
         if (f && page.onFileDrop) {
           e.preventDefault();
+          // AUDIT A9 · the chapter took it: the window's loader must not see it
+          // too (it read the image as an em.json, and could ask «Leave Sidecar?»)
+          e.stopPropagation();
           page.onFileDrop(ci, f, (e as DragEvent).clientX, (e as DragEvent).clientY);
         }
       });
@@ -1281,16 +1269,22 @@ export function renderNarrativeView(
  */
 function editableInPlace(text: string, index: Map<string, EmNode>, ci: number, bi: number,
                          editor: NarrativeEditor, page: PageHooks): HTMLElement {
-  const box = renderProseWithMentions(text, index, true);
+  // AUDIT A7 · the scaffolder's «da scrivere» is a PLACEHOLDER, not text: the
+  // paragraph opens empty with those words shown by CSS (`:empty::before`),
+  // and what is typed replaces them. Measured before: typing into it gave
+  // «…da scrivereProva di scrittura». The document keeps its words until
+  // somebody writes (a blur with nothing typed commits nothing).
+  const unwritten = isUnwrittenProse(text);
+  const box = renderProseWithMentions(unwritten ? "" : text, index, true);
   box.classList.add("nv-editable", "nv-prose-edit");
   box.setAttribute("contenteditable", "true");
   box.spellcheck = true;
   box.dataset.block = `${ci}:${bi}`;
-  if (!text.trim()) {
+  if (!text.trim() || unwritten) {
     box.classList.add("nv-empty-prose");
-    box.dataset.placeholder = t("nv.emptyParagraph");
+    box.dataset.placeholder = unwritten ? text.trim() : t("nv.emptyParagraph");
   }
-  let settled = text;
+  let settled = unwritten ? "" : text;
   box.addEventListener("blur", () => {
     const next = serializeProse(box);
     if (next !== settled) {

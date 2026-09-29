@@ -24,7 +24,7 @@ import {
   isAnnotatable,
   loadShelfDocument,
   onShelfChange,
-  removeFromShelf,
+  removeFromShelfUndoable,
   restoreShelf,
   shelfEntries,
   shelfMeta,
@@ -207,6 +207,7 @@ import { DOC_TOOLS, renderReadingStage, selectedPassage, type DocTool,
          type TraceAnchor, type TraceGeometry } from "./doc-reading";
 import { openReadingBubble, type BubbleUnit } from "./reading-bubble";
 import { renderChronology, type ChronoEpoch, type ChronologyData } from "./chronology";
+import { KEYMAP, filterKeymap, keysText } from "./keymap";
 import { ReadingFiles, type PlaceOutcome } from "./reading-files";
 import * as aiv from "./ai-validation";
 import { checkReceipt, receiptOf, receiptsOfEmission, refreshedCopies, type ReceiptCheck } from "./receipt";
@@ -384,7 +385,7 @@ import {
   WORKSPACES,
   WINDOW_TYPE_META,
   addWorkspace,
-  removeWorkspace,
+  removeWorkspaceUndoable,
   renameWorkspace,
   workspaceLabel,
   workspaceModified,
@@ -790,7 +791,7 @@ function ensureCircleVisibleFor(nodeType: string | undefined): void {
   draw();
   if (filterPanelOpen()) renderCirclesPanel();
   const label = CIRCLES.find((x) => x.key === c)?.label ?? c;
-  toast(`Filter: showing “${label}” (new node was hidden)`);
+  toast(t("l.filterShowing", { label }));
 }
 /** group-context navigation stack; empty = full canvas */
 let contextStack: string[] = [];
@@ -812,20 +813,9 @@ const dropHint = document.getElementById("drop-hint")!;
 const breadcrumb = document.getElementById("breadcrumb")!;
 const edgeMenu = document.getElementById("edge-menu")!;
 const toastEl = document.getElementById("toast")!;
-const btnMatrix = document.getElementById("btn-matrix") as HTMLButtonElement;
-const btnGraph = document.getElementById("btn-graph") as HTMLButtonElement;
-const btnNarrative = document.getElementById("btn-narrative") as HTMLButtonElement;
-/** DP-82 · the central-area selector, one segment per CentralMode. A new mode
- *  adds its button here and a token to CENTRAL_MODES — `setMode` lights the right
- *  one from this map, so the active-state logic never grows a special case. */
-const MODE_BUTTONS: Partial<Record<CentralMode, HTMLButtonElement>> = {
-  matrix: btnMatrix,
-  graph: btnGraph,
-  // …and NOT `btnNarrative`: since 14 September that button transforms the
-  // window instead of lighting a mode, so it has no "active" state to keep.
-};
-const btnNarrativeEdit = document.getElementById(
-  "btn-narrative-edit") as HTMLButtonElement;
+// (AUDIT C · the hidden mode buttons #btn-matrix/#btn-graph/#btn-narrative and
+// #btn-narrative-edit went: the window header drives setMode and setReading)
+const MODE_BUTTONS: Partial<Record<CentralMode, HTMLButtonElement>> = {};
 const btnUndo = document.getElementById("btn-undo") as HTMLButtonElement;
 const btnRedo = document.getElementById("btn-redo") as HTMLButtonElement;
 const dirtyDot = document.getElementById("dirty-dot")!;
@@ -1327,6 +1317,23 @@ function toast(msg: string): void {
 /** TOCCARE · a toast that can take the gesture back: «US12 → Medioevo  Annulla».
  *  The button undoes ONE step of the store the gesture wrote to — the gesture
  *  was one step (`store.batch`), so that is the whole of it. */
+/** AUDIT N11 · a toast with «Annulla» for what is not a store step (a shelf
+ *  row, a space): the gesture that puts it back is handed in */
+function toastUndoWith(msg: string, undo: () => void): void {
+  toast(msg);
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.className = "toast-action";
+  btn.textContent = t("toolbar.undo");
+  btn.addEventListener("click", () => {
+    undo();
+    toastEl.classList.add("hidden");
+  });
+  toastEl.append(" ", btn);
+  window.clearTimeout(toastTimer);
+  toastTimer = window.setTimeout(() => toastEl.classList.add("hidden"), 5000);
+}
+
 function toastUndo(msg: string, st: DocumentStore): void {
   toast(msg);
   const btn = document.createElement("button");
@@ -1351,11 +1358,8 @@ function toastUndo(msg: string, st: DocumentStore): void {
  * the bar wraps to two rows on a narrow window, and a hardcoded height would go
  * wrong precisely when it matters.
  */
-function windowBarHeight(): number {
-  const bar = document.getElementById("window-header");
-  if (!bar || bar.classList.contains("hidden")) return 0;
-  return bar.offsetHeight;
-}
+// (AUDIT C · `windowBarHeight()` went: it read `#window-header`, gone with
+// `#canvas-wrap`, and always answered 0 — every area's bar is its own now)
 
 /**
  * The canvas of the window the hand is in — for the two CURSOR classes that used
@@ -1400,7 +1404,7 @@ function viewSize(): { w: number; h: number } {
   const w = cv?.clientWidth || area?.clientWidth || window.innerWidth || 800;
   const h =
     cv?.clientHeight ||
-    Math.max(1, (area?.clientHeight || 0) - windowBarHeight()) ||
+    Math.max(1, area?.clientHeight || 0) ||
     window.innerHeight ||
     600;
   return { w, h };
@@ -2080,14 +2084,18 @@ function renderInspectorInto(host: HTMLElement): void {
         // clear first so the store's onChange re-render doesn't paint a panel
         // for the edge we're removing
         if (selectedEdge && sameEdge(selectedEdge, edge)) selectedEdge = null;
-        (storeOfEdge(edge) ?? store!).deleteEdge(edge);
+        const st = storeOfEdge(edge) ?? store!;
+        st.deleteEdge(edge);
+        // AUDIT N11 · every deletion says what went, and gives it back
+        const nm = (id: string) => String(storeOfNode(id)?.node(id)?.name || id);
+        toastUndo(t("del.edge", { a: nm(edge.source), b: nm(edge.target), type: edgeTypeLabel(String(edge.edge_type ?? "")) }), st);
       },
       onToggleFold: (gid) => requestFold(gid),
       onEnterGroup: enterGroup,
       onAddPhase: (epochId) => {
         const ph = store!.addPhase(epochId);
         select(ph.id);
-        toast(`phase ${ph.name} created`);
+        toast(t("l.phaseCreated", { name: String(ph.name) }));
       },
       onTogglePhases: (epochId) => {
         // epochId is the TOP-level epoch (the inspector resolves it); toggling
@@ -2379,7 +2387,7 @@ function promptDeletePhase(phaseId: string): void {
     // units are laid out under their new epoch, then redraw.
     void runLayout(false).then(() => {
       select(parent);
-      toast(`deleted ${phaseName}`);
+      toast(t("del.one", { name: phaseName }));
     });
   };
   // nothing to re-home → delete straight away (parent is the natural fallback)
@@ -2455,7 +2463,7 @@ function promptDeletePhase(phaseId: string): void {
     }
   };
   const cancel = document.createElement("button");
-  cancel.textContent = "Cancel";
+  cancel.textContent = t("l.cancel");
   cancel.onclick = close;
   foot.appendChild(cancel);
   targets.forEach((t, i) => {
@@ -2581,7 +2589,7 @@ function promptDeleteEpoch(epochId: string): void {
     // no phantom lane lingers, then clear the selection.
     void runLayout(false).then(() => {
       select(null);
-      toast(`deleted ${name}`);
+      toast(t("del.one", { name }));
     });
   };
   // empty epoch → delete straight away
@@ -2617,12 +2625,12 @@ function promptDeleteEpoch(epochId: string): void {
     }
   };
   const cancel = document.createElement("button");
-  cancel.textContent = "Cancel";
+  cancel.textContent = t("l.cancel");
   cancel.onclick = close;
   foot.appendChild(cancel);
   const del = document.createElement("button");
   del.className = "primary";
-  del.textContent = "Delete epoch";
+  del.textContent = t("l.deleteEpoch");
   del.onclick = () => {
     close();
     finishDelete();
@@ -2715,7 +2723,7 @@ function updateToolbar(): void {
   // control that does nothing is a worse answer than an absent one.
   refreshFunnel();
   if (!store && filterPanelOpen()) closeFilterPanel();
-  paintColumnToggles(); // the right handle appears with the side panel
+
   updateWindowTitle();
 }
 
@@ -4261,7 +4269,7 @@ function newDocument(): void {
   if (store && view === "matrix" && store.topEpochIds().length === 0) {
     addEpochEmMode();
   }
-  info.textContent = "new empty graph";
+  info.textContent = t("l.newEmptyGraph");
 }
 
 // Tear the document down to an empty canvas (used when Sync is turned off — the
@@ -5680,7 +5688,7 @@ async function saveDocument(): Promise<void> {
       updateToolbar();
       await flushReadingGlbs();
     } catch (e) {
-      toast(`save failed: ${e instanceof Error ? e.message : e}`);
+      toast(t("l.saveFailed", { why: String(e instanceof Error ? e.message : e) }));
     }
     return;
   }
@@ -5703,7 +5711,7 @@ async function saveAsDocument(): Promise<void> {
       updateToolbar();
       await flushReadingGlbs();
     } catch (e) {
-      toast(`save failed: ${e instanceof Error ? e.message : e}`);
+      toast(t("l.saveFailed", { why: String(e instanceof Error ? e.message : e) }));
     }
     return;
   }
@@ -6500,7 +6508,7 @@ function finishConnect(forceCreate = false): void {
   const src = storeOfNode(fromId)?.node(fromId)?.node_type;
   const tgt = storeOfNode(targetId)?.node(targetId)?.node_type;
   if (validity === "invalid") {
-    toast(`No EM connection allows ${src} → ${tgt}`);
+    toast(t("l.noConnection", { src: String(src), tgt: String(tgt) }));
     return;
   }
   const types =
@@ -6619,28 +6627,28 @@ function showEdgeMenu(
     storeOfNode(id)?.node(id)?.name || id;
   title.textContent = `${endName(source)} → ${endName(target)}`;
   edgeMenu.appendChild(title);
-  for (const t of types) {
+  for (const et of types) {
     const b = document.createElement("button");
     const sw = document.createElement("span");
     sw.className = "legend-swatch";
-    const st = edgeStyle(t);
+    const st = edgeStyle(et);
     sw.style.borderBottomColor = st.color;
     sw.style.borderBottomStyle = st.dash.length ? "dashed" : "solid";
     b.appendChild(sw);
-    b.appendChild(document.createTextNode(" " + edgeTypeLabel(t)));
+    b.appendChild(document.createTextNode(" " + edgeTypeLabel(et)));
     b.addEventListener("click", () => {
       hideEdgeMenu();
-      createEdge(source, target, t);
+      createEdge(source, target, et);
     });
     edgeMenu.appendChild(b);
   }
   const cancel = document.createElement("button");
   cancel.className = "edge-menu-cancel";
-  cancel.textContent = "Cancel";
+  cancel.textContent = t("l.cancel");
   cancel.addEventListener("click", hideEdgeMenu);
   edgeMenu.appendChild(cancel);
   const s = scene()!;
-  const t = s.byId.get(target)!;
+  const tn = s.byId.get(target)!;
   const vp = viewport();
   // AUDIT N2 · canvas coordinates are the WINDOW's, and the menu is a child of
   // #tile-root: add where that window's canvas sits in the shell, then keep it
@@ -6651,8 +6659,8 @@ function showEdgeMenu(
   edgeMenu.classList.remove("hidden");
   const mw = edgeMenu.offsetWidth || 220;
   const mh = edgeMenu.offsetHeight || 40 * (types.length + 2);
-  const x = cvr.left + (t.x + t.w) * vp.scale + vp.x + 10;
-  const y = cvr.top + t.y * vp.scale + vp.y;
+  const x = cvr.left + (tn.x + tn.w) * vp.scale + vp.x + 10;
+  const y = cvr.top + tn.y * vp.scale + vp.y;
   const left = Math.max(area.left, Math.min(x, area.right - mw - 4));
   const top = Math.max(area.top, Math.min(y, area.bottom - mh - 4));
   edgeMenu.style.left = `${Math.round(left - root.left)}px`;
@@ -7593,7 +7601,7 @@ function openQualiaPicker(nodeId: string, wx: number, wy: number): void {
   menu.className = "connect-menu vocab-menu";
   const title = document.createElement("div");
   title.className = "cm-title";
-  title.textContent = "Property — pick a vocabulary term";
+  title.textContent = t("l.pickProperty");
   menu.appendChild(title);
   const search = document.createElement("input");
   search.className = "cm-search";
@@ -7683,7 +7691,7 @@ function openQualiaPicker(nodeId: string, wx: number, wy: number): void {
       listEl.appendChild(b);
     }
     if (first) showDetail(first);
-    else detail.textContent = "no match";
+    else detail.textContent = t("l.noMatch");
   };
   search.addEventListener("input", () => render(search.value));
   render("");
@@ -7714,8 +7722,8 @@ document.querySelectorAll<HTMLElement>(".dropdown").forEach((dd) => {
     closeAllDropdowns();
     if (!willOpen) return;
     menu.classList.remove("hidden");
-    // a menu in the window bar is `fixed` (the bar scrolls) → place it by hand
-    if (dd.closest("#window-header")) placeBarMenu(toggle, menu);
+    // (AUDIT C · the `#window-header` branch went with the element: the window
+    // bars' menus are placed by `wireBarDropdown`)
   });
   menu.addEventListener("click", () => menu.classList.add("hidden"));
 });
@@ -9185,7 +9193,7 @@ setAiKeySave.addEventListener("click", async () => {
   const err = isTauri() ? await setLlmKey(key) : await postSessionKey(key);
   setAiKey.value = "";          // never keep it in the DOM after saving
   if (err) {
-    toast(`Key non salvata: ${err}`);
+    toast(t("l.keyNotSaved", { err: String(err) }));
     return;
   }
   toast(isTauri()
@@ -9210,7 +9218,7 @@ setAiKeyClear.addEventListener("click", async () => {
   }
   const err = isTauri() ? await clearLlmKey() : await postSessionKey(null);
   if (err) {
-    toast(`Key non rimossa: ${err}`);
+    toast(t("l.keyNotRemoved", { err: String(err) }));
     return;
   }
   setAiKey.value = "";
@@ -9891,8 +9899,17 @@ function requireVerifiedIdentity(): boolean {
   return false;
 }
 
+/** AUDIT N11 · SETTINGS APPLY AT «SALVA», AND «ANNULLA» PUTS EVERYTHING BACK.
+ *  Language and theme still preview live (you see what you pick), but they are
+ *  settings like the others: what the panel opened with is kept, and closing
+ *  without saving (Annulla, ✕, the backdrop, Esc) restores it. Identity and the
+ *  AI key are not settings but ACTS with their own buttons (Dichiara, Salva
+ *  key), and stay so. */
+let settingsOpenedWith: { locale: Locale; theme: ThemeMode; settings: string } | null = null;
+
 function openSettings(section?: string): void {
   const s = getSettings();
+  settingsOpenedWith = { locale: getLocale(), theme: storedMode(), settings: JSON.stringify(s) };
   setToolSel.value = s.sync.tool;
   setProtoSel.value = s.sync.protocol;
   setHostInp.value = s.sync.host;
@@ -10045,6 +10062,18 @@ function revealBlock(target: HTMLElement | null): void {
   setTimeout(() => target.classList.remove("settings-sect-flash"), 1400);
 }
 function closeSettings(): void {
+  // closing WITHOUT saving: the previews go back to what the panel opened with
+  const was = settingsOpenedWith;
+  settingsOpenedWith = null;
+  if (was) {
+    if (getLocale() !== was.locale) applyLanguage(was.locale);
+    if (storedMode() !== was.theme) {
+      storeMode(was.theme);
+      applyTheme(was.theme);
+      setThemeSel.value = was.theme;
+      draw();
+    }
+  }
   settingsModal.classList.add("hidden");
   // an AI action that was waiting is dropped with the panel (saving takes it
   // out first, `resumeAiPending`)
@@ -10193,18 +10222,28 @@ settingsModal.addEventListener("click", (e) => {
         ?.value.trim() || getSettings().iiif.mirador,
     },
   };
+  // AUDIT N11 · what changed, said by name (the toast spoke of the sync target
+  // whatever had been changed)
+  const was = settingsOpenedWith;
+  const before = was ? JSON.parse(was.settings) as Settings : getSettings();
+  const changed: string[] = [];
+  if (was && getLocale() !== was.locale) changed.push(t("settings.w.language"));
+  if (was && storedMode() !== was.theme) changed.push(t("settings.w.theme"));
+  for (const k of ["sync", "interaction", "viewer", "iiif", "ai", "developer"] as const)
+    if (JSON.stringify(before[k]) !== JSON.stringify(next[k])) changed.push(t(`settings.w.${k}`));
   saveSettings(next);
+  settingsOpenedWith = null;          // saved: nothing to put back
   const resume = aiPending;
   closeSettings();
   void resumeAiPending(resume);
   refreshInspector(); // reflect the UUID-visibility toggle immediately
   // A narrative on screen may hold 3D blocks that were waiting for exactly this.
   refreshNarrativeView();
-  toast(
-    sync.connected
-      ? "Sync settings saved — reconnect to apply"
-      : `Sync target: ${getSyncUrl()}`,
-  );
+  const syncChanged = JSON.stringify(before.sync) !== JSON.stringify(next.sync);
+  toast(changed.length
+    ? t("settings.saved", { what: changed.join(", ") })
+      + (syncChanged ? ` · ${sync.connected ? t("settings.reconnect") : t("settings.syncTarget", { url: getSyncUrl() })}` : "")
+    : t("settings.nothingChanged"));
 });
 document.addEventListener("keydown", (e) => {
   if (e.key === "Escape" && !settingsModal.classList.contains("hidden")) {
@@ -10652,11 +10691,11 @@ function renderCirclesPanel(): void {
   const tmpl = document.createElement("div");
   tmpl.className = "fp-template";
   const tlbl = document.createElement("span");
-  tlbl.textContent = "Template";
+  tlbl.textContent = t("l.template");
   const tsel = document.createElement("select");
   const ph = document.createElement("option");
   ph.value = "";
-  ph.textContent = "Custom…";
+  ph.textContent = t("l.custom");
   tsel.appendChild(ph);
   for (const t of TEMPLATES) {
     const o = document.createElement("option");
@@ -10709,7 +10748,7 @@ function renderCirclesPanel(): void {
   // node to a black border + white fill — the pre-EM-1.3 shape-only look.
   const dh = document.createElement("div");
   dh.className = "fp-sect";
-  dh.textContent = "Display";
+  dh.textContent = t("l.display");
   filterPanel.appendChild(dh);
   const monoRow = document.createElement("label");
   monoRow.className = "fp-row";
@@ -10726,7 +10765,7 @@ function renderCirclesPanel(): void {
 
   const reset = document.createElement("button");
   reset.className = "fp-reset";
-  reset.textContent = "Reset this view";
+  reset.textContent = t("l.resetView");
   reset.addEventListener("click", () => {
     circleState[view] = defaultVisibleCircles(view);
     recomputeHiddenFromCircles();
@@ -10789,6 +10828,15 @@ function openEMTree(): void {
 }
 
 const emtreeHandlers: EMTreeHandlers = {
+  // AUDIT C · a story in the EMtree opens it: the graph becomes active and the
+  // Narrativa space shows that story
+  onOpenStory: (slotId, narrativeId) => {
+    if (emtree.activeId !== slotId) activateSlot(slotId, { rebuildOnly: false });
+    selectedNarrativeId = narrativeId;
+    setWorkspace("narrative");
+    for (const w of windowsOf()) if (w.type === "narrative") setWinCurrent(w, "narrative", narrativeId);
+    refreshNarrativeView();
+  },
   onActivate: (id) => {
     if (id === emtree.activeId) return;
     activateSlot(id);
@@ -11710,7 +11758,7 @@ document.getElementById("drop-hint-emtree")?.addEventListener("click", (e) => {
 
 /** Kept as a no-op call site: `updateToolbar` still asks the chrome to repaint,
  *  and this is where anything about the area's own panels would go. */
-function paintColumnToggles(): void {}
+// (AUDIT C · `paintColumnToggles`, empty, went with its one caller)
 
 
 
@@ -12007,16 +12055,9 @@ document.querySelector<HTMLElement>(".log-drawer-grip")?.addEventListener("point
 // ---------- SHIFT-A · Help ▸ Scorciatoie ----------
 // The gestures that have no button to be discovered by: a table, not a tour.
 function showShortcuts(): void {
+  // AUDIT N11 · GENERATED from the key map (`keymap.ts`), every key and gesture
+  // (it listed 7 of about 45), grouped by where it acts, and searchable
   document.querySelector(".modal.shortcuts")?.remove();
-  const rows: [string, string][] = [
-    ["⇧A", "shortcuts.add"],
-    [t("shortcuts.rclickKey"), "shortcuts.rclick"],
-    [t("shortcuts.cornerKey"), "shortcuts.corner"],
-    ["⌃Space · 2×", "shortcuts.max"],
-    ["/", "shortcuts.search"],
-    ["⌘Z · ⇧⌘Z", "shortcuts.undo"],
-    ["Esc", "shortcuts.esc"],
-  ];
   const modal = document.createElement("div");
   modal.className = "modal shortcuts";
   const card = document.createElement("div");
@@ -12026,19 +12067,50 @@ function showShortcuts(): void {
   head.textContent = t("shortcuts.menu");
   const body = document.createElement("div");
   body.className = "modal-body";
+  const q = document.createElement("input");
+  q.type = "search";
+  q.className = "shortcuts-q";
+  q.placeholder = t("shortcuts.search");
+  q.setAttribute("aria-label", t("shortcuts.search"));
   const table = document.createElement("table");
   table.className = "shortcuts-table";
-  for (const [k, label] of rows) {
-    const tr = document.createElement("tr");
-    const tk = document.createElement("td");
-    tk.className = "shortcuts-key";
-    tk.textContent = k;
-    const tl = document.createElement("td");
-    tl.textContent = t(label);
-    tr.append(tk, tl);
-    table.appendChild(tr);
-  }
-  body.appendChild(table);
+  const label = (r: (typeof KEYMAP)[number]): string => `${keysText(r, t)} ${t(`keys.${r.id}`)}`;
+  const paint = (): void => {
+    table.textContent = "";
+    const rows = filterKeymap(KEYMAP, q.value, label);
+    let scope = "";
+    for (const r of rows) {
+      if (r.scope !== scope) {
+        scope = r.scope;
+        const tr = document.createElement("tr");
+        const th = document.createElement("th");
+        th.colSpan = 2;
+        th.textContent = t(`keys.scope.${scope}`);
+        tr.appendChild(th);
+        table.appendChild(tr);
+      }
+      const tr = document.createElement("tr");
+      tr.dataset.key = r.id;
+      const tk = document.createElement("td");
+      tk.className = "shortcuts-key";
+      tk.textContent = keysText(r, t);
+      const tl = document.createElement("td");
+      tl.textContent = t(`keys.${r.id}`);
+      tr.append(tk, tl);
+      table.appendChild(tr);
+    }
+    if (!rows.length) {
+      const tr = document.createElement("tr");
+      const td = document.createElement("td");
+      td.colSpan = 2;
+      td.textContent = t("strip.noResults");
+      tr.appendChild(td);
+      table.appendChild(tr);
+    }
+  };
+  q.addEventListener("input", paint);
+  paint();
+  body.append(q, table);
   const foot = document.createElement("div");
   foot.className = "modal-foot";
   const ok = document.createElement("button");
@@ -12063,6 +12135,7 @@ function showShortcuts(): void {
   });
   document.addEventListener("keydown", onKey, true);
   document.body.appendChild(modal);
+  q.focus();
 }
 document.getElementById("btn-help-shortcuts")?.addEventListener("click", showShortcuts);
 // LEGENDA · the whole language, for someone studying it
@@ -12977,9 +13050,11 @@ function renderNarrativeInspectorInto(host: HTMLElement): void {
         nedit.deleteChapter(st, narrativeId, chapter);
         nvSel = null;
         nvFocus = false;
+        toastUndo(t("del.chapter", { name: String(ch.title ?? chapter + 1) }), st);
       } else {
         nedit.deleteBlock(st, narrativeId, chapter, block);
         nvSel = { narrativeId, chapter, block: null };
+        toastUndo(t("del.block"), st);
       }
       refreshInspector();
     },
@@ -13434,39 +13509,9 @@ function revealFromNarrative(nodeId: string): void {
   revealFromWarning(nodeId);
 }
 
-// ── btnNarrative · «this window becomes Narrative» ──────────────────────────
-//
-// It used to be a SWITCH: `setMode(centralMode === "narrative" ? view :
-// "narrative")`, an overlay on and off over the canvas. That was the second way
-// of reaching a narrative, and the reason `#narrative-view` had to be one
-// element — an overlay is over ONE canvas.
-//
-// Now it is the transformation every other type already had, reached by the same
-// verb (`transformWindowOf`) as picking "❧ Narrative" from a window's own type
-// menu. ONE gesture: the button is a shortcut to the menu item, not a different
-// mechanism with a different state. Pressing it on a window that is already a
-// narrative does nothing, which is what a transform means.
-//
-// NARR1 · and the scaffold moved here with it, because "make me a narrative" is
-// exactly when a graph with no story yet should get one. Idempotent:
-// `scaffoldNarrativeFromGraph` is a no-op when a narrative already exists, so a
-// written story is never disturbed.
-btnNarrative.addEventListener("click", () => {
-  const win = activeWin();
-  // AUDIT A8 · opening writes nothing: the page offers «Proponi i capitoli»
-  if (win.type !== "narrative") transformWindowOf(win, "narrative");
-  else refreshNarrativeView();
-});
-// HDR1 · the writing toggle. Invoked by the ✎ action of a narrative window's
-// header, never by a visible master-header button — so it no longer dresses
-// itself (no active class, no Done/Edit label): the STATE is what it owns, and
-// the window header renders that state (`win-act-on`).
-btnNarrativeEdit.addEventListener("click", () => {
-  // PER WINDOW, like every other mode. COLLEGARE · the ✎ is now Scrivi/Leggi
-  // of the header's four readings; this stays the keyboard-reachable toggle.
-  const win = activeWin();
-  setReading(win, narrativeEditingOf(win) ? "read" : "write");
-});
+// (AUDIT C · `btnNarrative` and `btnNarrativeEdit` went: the window type menu
+// transforms a window into a Narrative, and the header's readings Scrivi/Leggi
+// are the writing toggle — nothing clicked the two hidden buttons)
 
 // ── COLLEGARE · Pubblica ▾ — and WHAT NO PERSON VALIDATED IS NOT PRINTED ────
 //
@@ -13627,8 +13672,7 @@ function exportWithCheck(format: string): void {
 
 btnUndo.addEventListener("click", () => undoStore()?.undo());
 btnRedo.addEventListener("click", () => undoStore()?.redo());
-btnMatrix.addEventListener("click", () => setView("matrix"));
-btnGraph.addEventListener("click", () => setView("graph"));
+// (AUDIT C · #btn-matrix / #btn-graph: gone, nothing clicked them)
 
 // ---------- WIN1 · workspace leader (Canvas / Narrative / Tabular) ----------
 // The higher-level switcher that ABSORBS MODE1: each preset mounts an existing
@@ -15341,8 +15385,8 @@ function renderNarrativeIndexInto(body: HTMLElement, _win: Win): void {
       onAddChapter: () => nedit.addChapter(s, narrId),
       undescribedEpochs: () => undescribedEpochs(s, narrId),
       onAddEpochChapter: (id: string) => addEpochChapter(s, narrId, id),
-      onRegenerate: () => toast(t("ai.regenerateUnavailable")),
-      canRegenerate: () => false,
+      // (AUDIT C · «↻ Regenerate» went: always disabled, it promised a gesture
+      // that does not exist)
       coverage: (h: HTMLElement) => renderCoverageInto(h, narrId),
     } : {}),
     query: narrativeQuery,
@@ -15767,8 +15811,10 @@ function shelfRow(entry: ShelfEntry): HTMLElement {
   drop.textContent = "✕";
   drop.title = t("shelf.remove");
   drop.addEventListener("click", () => {
-    removeFromShelf(entry.id);
+    // AUDIT N11 · said, and given back
+    const back = removeFromShelfUndoable(entry.id);
     renderShelf();
+    if (back) toastUndoWith(t("del.one", { name: entry.name }), () => { back(); renderShelf(); });
   });
   actions.appendChild(drop);
 
@@ -17240,7 +17286,7 @@ async function commitAnnotation(input: {
 
 // ── W1 · STORAGE · the window onto where the bytes live ─────────────────────
 //
-// Its MODES are the backends — Filesystem now, MinIO in phase 2 — because "one
+// Its MODES are the backends — Filesystem and the room's MinIO — because "one
 // window, several ways of looking" is the shape the Graph window already has.
 // Adding Samba or WebDAV later is an entry in `WINDOW_MODES` plus a branch in
 // `renderStorage`, not a new window type.
@@ -18955,12 +19001,11 @@ function ingestFunnel(): HTMLElement {
   });
   zone.appendChild(picker);
 
-  // …and FROM THE SHELF, which is the honest answer to "how does a file on my
-  // disk get in here?" in a tiled workspace. Only one Storage surface is mounted
-  // at a time (the app's singleton-surface rule, WIN7), so a drag from the disk
-  // pane into this one is not a gesture that exists yet — while the shelf is a
-  // curated list that already carries the path AND the digest the bridge
-  // computed. Reusing it beats building a second file browser here.
+  // …and FROM THE SHELF, a curated list that already carries the path AND the
+  // digest the bridge computed. (AUDIT C · this said «only one Storage surface
+  // is mounted at a time»: no longer true — two Storage windows live side by
+  // side, and a Storage row dragged onto the funnel works; the shelf stays the
+  // shortcut for what was already chosen.)
   const fromShelf = shelfEntries().filter(
     (entry) => !/^(https?|s3):/i.test(entry.locator));
   if (fromShelf.length) {
@@ -21338,8 +21383,12 @@ function buildAreaHeader(win: Win): DocumentFragment {
       b.textContent = m.label;
       b.classList.toggle("active", m.current);
       if (m.disabled) {
-        b.disabled = true;
-        b.title = m.disabled;   // the REASON, where the pointer already is
+        // AUDIT N11 · visibly unavailable, clickable, and the click says WHY
+        b.classList.add("dd-disabled");
+        b.setAttribute("aria-disabled", "true");
+        b.title = m.disabled;
+        const why = m.disabled;
+        b.addEventListener("click", () => toast(why));
       } else {
         b.addEventListener("click", m.run);
       }
@@ -22214,7 +22263,7 @@ function placeBarMenu(toggle: HTMLElement, menu: HTMLElement): void {
   // hang it off the BAR, not off the toggle: the toggle is shorter than the bar,
   // and anchoring to it drew the menu over the bar's own bottom edge.
   const barBottom =
-    toggle.closest("#window-header")?.getBoundingClientRect().bottom ?? r.bottom;
+    toggle.closest(".tile-bar")?.getBoundingClientRect().bottom ?? r.bottom;
   menu.style.left = "0px";
   menu.style.top = "0px";
   const m = menu.getBoundingClientRect();
@@ -22444,9 +22493,7 @@ function renderWorkspaceBar(): void {
       x.title = t("ws.close");
       x.addEventListener("click", (e) => {
         e.stopPropagation();
-        if (!removeWorkspace(w.id)) return;
-        renderWorkspaceBar();
-        setWorkspace(activeWorkspace());
+        removeSpace(w.id, label);
       });
       b.appendChild(x);
     }
@@ -22465,6 +22512,15 @@ function renderWorkspaceBar(): void {
   });
   workspaceBar.appendChild(add);
 }
+/** AUDIT N11 · a user's space goes with a toast that brings it back */
+function removeSpace(id: string, label: string): void {
+  const back = removeWorkspaceUndoable(id);
+  if (!back) return;
+  renderWorkspaceBar();
+  setWorkspace(activeWorkspace());
+  toastUndoWith(t("del.one", { name: label }), () => { back(); renderWorkspaceBar(); setWorkspace(id); });
+}
+
 /** AUDIT N9 · a tab's menu: rename · reset (a built-in reshaped) · remove (yours) */
 function showWorkspaceTabMenu(x: number, y: number, w: (typeof WORKSPACES)[number], rename: () => void): void {
   hideContextMenu();
@@ -22482,11 +22538,7 @@ function showWorkspaceTabMenu(x: number, y: number, w: (typeof WORKSPACES)[numbe
   item(t("ws.rename"), rename);
   if (w.builtin) item(t("ws.resetItem"), () => resetWorkspace(w.id),
     workspaceModified(w.id) ? undefined : t("ws.notModified"));
-  else item(t("ws.removeItem"), () => {
-    if (!removeWorkspace(w.id)) return;
-    renderWorkspaceBar();
-    setWorkspace(activeWorkspace());
-  });
+  else item(t("ws.removeItem"), () => removeSpace(w.id, workspaceLabel(w, t)));
   document.body.appendChild(menu);
   ctxMenuEl = menu;
 }
@@ -22496,7 +22548,7 @@ onLocaleChange(renderWorkspaceBar);
 // them; there is no fixed markup left to re-label in place.
 onLocaleChange(renderAreaHeaders);
 
-document.getElementById("btn-fit")!.addEventListener("click", fit);
+// (AUDIT C · #btn-fit: gone, the header's ⤢ calls fit)
 const btnLayout = document.getElementById("btn-layout") as HTMLButtonElement;
 btnLayout.title =
   "Recompute the layout of the CURRENT view (Matrix = em-core swimlanes, " +
@@ -22555,7 +22607,7 @@ async function layoutAll(fresh: boolean): Promise<void> {
       toast(fresh ? "Fresh layout (em-core)" : "Layout from sketch (em-core)");
     }
   } catch (e) {
-    toast(`layout failed: ${e instanceof Error ? e.message : e}`);
+    toast(t("l.layoutFailed", { why: String(e instanceof Error ? e.message : e) }));
   } finally {
     btnLayout.disabled = false;
   }
@@ -22611,7 +22663,7 @@ async function reflowNodes(ids: string[]): Promise<void> {
     );
     store.setLayout(layout);
   } catch (e) {
-    toast(`layout failed: ${e instanceof Error ? e.message : e}`);
+    toast(t("l.layoutFailed", { why: String(e instanceof Error ? e.message : e) }));
   }
 }
 
@@ -23343,7 +23395,7 @@ function wireGraphCanvas(canvas: HTMLCanvasElement, winId: string): void {
       if (!moved && store) {
         const ph = store.addPhase(epochId);
         select(ph.id);
-        toast(`phase ${ph.name} created`);
+        toast(t("l.phaseCreated", { name: String(ph.name) }));
       }
       return;
     }
@@ -24290,6 +24342,7 @@ document.getElementById("annotator-mirador")
 initAnnotatorGestures();   // A2 · the overlay is a singleton: wire it once
 refreshIdentityChip();     // IDENTITY · who is authoring, from the first frame
 initEmData({
+  onDeleted: (name, st) => toastUndo(t("del.one", { name }), st),
   getStore: () => store,
   getCtx: tableCtx,
   runIssueAction: (id) => allIssues().find((i) => i.id === id)?.action?.run(),

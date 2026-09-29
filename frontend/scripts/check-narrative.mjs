@@ -434,22 +434,9 @@ eq(doc.graph.nodes.filter(
      [[0, "us2"]],
      "workspace · dropping a node cites it ONCE, through the editor's mutator");
 
-  // D1-full · a view type dropped on an EMBED changes it
-  const embed = host.querySelector(".nv-embed");
-  ok(embed, "workspace · there is an embed to drop on");
-  drag(embed, V.VIEW_TYPE_MIME, "table", "dragover");
-  ok(embed.classList.contains("nv-drop-target"),
-     "workspace · an embed that will take the view type says so");
-  drag(embed, V.VIEW_TYPE_MIME, "table", "drop");
-  eq(calls.filter((c) => c[0] === "setViewType").map((c) => c[3]), ["table"],
-     "workspace · dropping a view type re-renders that embed, via setViewType");
-
-  // …and a view type may NOT create a block: an embed with no reference points
-  // at nothing, and a story does not need a way to write an empty citation.
-  const countBefore = calls.filter((c) => c[0] === "addEmbed").length;
-  drag(chapter, V.VIEW_TYPE_MIME, "matrix", "drop");
-  eq(calls.filter((c) => c[0] === "addEmbed").length, countBefore,
-     "workspace · a view type on a chapter creates nothing");
+  // (AUDIT C · the view-type drop on an embed was removed with its MIME type:
+  // it had no source since the palette went — «mostrato come» is the Inspector's)
+  ok(!("VIEW_TYPE_MIME" in V), "workspace · no receiver is left for a drag nothing starts");
 
   // read-only stays read-only: no editor, no drop targets
   const readOnly = document.createElement("div");
