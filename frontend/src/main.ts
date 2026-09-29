@@ -807,9 +807,6 @@ const btnNarrativeEdit = document.getElementById(
 const btnUndo = document.getElementById("btn-undo") as HTMLButtonElement;
 const btnRedo = document.getElementById("btn-redo") as HTMLButtonElement;
 const dirtyDot = document.getElementById("dirty-dot")!;
-// POL1: the always-present "+ epoch" for Matrix view. Declared up here with the
-// other element refs because `updateToolbar` (much earlier in the file) toggles it.
-const btnAddEpoch = document.getElementById("btn-add-epoch") as HTMLButtonElement;
 const stratiminerEl = document.getElementById("stratiminer") as HTMLDivElement;
 
 // EM-version pill → click for the version breakdown (config files + ontologies)
@@ -2643,14 +2640,8 @@ function updateToolbar(): void {
   btnUndo.disabled = !undoStore()?.canUndo;
   btnRedo.disabled = !undoStore()?.canRedo;
   dirtyDot.classList.toggle("hidden", !store?.dirty);
-  // POL1: the two canvas overlays that only mean something with a document.
-  // The filter panel filters nothing without a graph, and an enabled control that
-  // does nothing is a worse answer than an absent one; the epoch "+" belongs to
-  // Matrix, which is the EM mode.
-  // STRUTTURA · a canvas overlay, placed on the FOCUSED area: over a table or
-  // an inspector it would sit on their own controls, so it shows on a graph only
-  btnAddEpoch.classList.toggle("hidden",
-    !store || view !== "matrix" || activeWin().type !== "graph");
+  // POL1: the filter panel filters nothing without a graph, and an enabled
+  // control that does nothing is a worse answer than an absent one.
   refreshFunnel();
   if (!store && filterPanelOpen()) closeFilterPanel();
   paintColumnToggles(); // the right handle appears with the side panel
@@ -4171,6 +4162,8 @@ function newDocument(): void {
   // has no stored positions, so it runs a fresh layout and lands in Matrix — the
   // EM mode — every time; a graph-mode user who wants no lanes can delete it,
   // which is one gesture, whereas discovering you need one is not.
+  // RIFINITURE · named «Epoca 1» in the reader's language, to be renamed in the
+  // inspector — the one epoch a new Matrix is born with
   if (store && view === "matrix" && store.topEpochIds().length === 0) {
     addEpochEmMode();
   }
@@ -5852,12 +5845,22 @@ async function reassertSizes(): Promise<void> {
 // and slides only the lanes/nodes below it; NO em-core relayout (the layout is
 // recomputed only on the explicit Layout action), so existing nodes don't
 // reshuffle. Optional start/end are the interpolated slot from a spatial insert.
-function addEpochEmMode(index = 0, start?: number, end?: number): void {
+/** RIFINITURE · «Epoca <n>» in the reader's language, n the first free one
+ *  among the epochs already named that way — every new epoch, not only the first */
+function nextEpochName(): string {
+  const used = new Set<string>((store?.liveNodes() ?? [])
+    .filter((n) => n.node_type === "EpochNode").map((n) => String(n.name ?? "")));
+  let k = 1;
+  while (used.has(t("epoch.defaultName", { n: String(k) }))) k++;
+  return t("epoch.defaultName", { n: String(k) });
+}
+
+function addEpochEmMode(index = 0, start?: number, end?: number, name?: string): void {
   if (!store) {
     toast("Open a document first");
     return;
   }
-  const node = store.addEpochAt(index, undefined, start, end);
+  const node = store.addEpochAt(index, name ?? nextEpochName(), start, end);
   // addEpochAt emitted → onChange already rebuilt the scene; just select it.
   select(node.id);
   // date-driven add (top, undated) scrolls to the new lane so the user can date
@@ -11519,15 +11522,11 @@ document.getElementById("drop-hint-emtree")?.addEventListener("click", (e) => {
   openEMTree();
 });
 
-// POL1 · the one epoch gesture. Adds at the TOP of the stack (newest), which is
-// where an undated epoch belongs until the chronology sorts it in — the same
-// `addEpochEmMode` the between-lanes "+" uses, so there is one code path and one
-// behaviour rather than a palette special case beside it.
-btnAddEpoch.addEventListener("click", (e) => {
-  e.stopPropagation(); // the button sits over the canvas
-  if (!store) return;
-  addEpochEmMode();
-});
+// RIFINITURE · the «+ epoch» button (POL1) is gone: it sat on the first lane's
+// label. An epoch is added with the «+» above and below a lane's label (the
+// boundary gesture), the lane's context menu («Nuova epoca sopra/sotto»), and
+// Shift+A «Nuova epoca…» — the one that works with no lane at all. A new Matrix
+// is born with its first epoch (`newDocument`).
 
 // PALETTE-FIX · the old app-level column handles are gone, both of them.
 //
@@ -14101,8 +14100,6 @@ function setAreaFocused(winId: string, on: boolean): void {
   // overlay, and closing one that cannot apply is not a re-arrangement.
   if (windowsOf().find((w) => w.id === winId)?.type !== "graph"
       && filterPanelOpen()) closeFilterPanel();
-  btnAddEpoch.classList.toggle("hidden",
-    !store || view !== "matrix" || activeWin().type !== "graph");
   refreshFunnel();
 }
 

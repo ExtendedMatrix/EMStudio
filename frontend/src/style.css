@@ -4695,33 +4695,6 @@ body.sync-active #footer-brand #em-version {
   color: var(--brand-ink);
 }
 
-/* ── POL1 · the always-present "+ epoch" ─────────────────────────────────────
-   Over the canvas, top-left: next to where the lanes are, and out of the way of
-   the filter button (top-right). It is the ONE gesture for adding an epoch, so it
-   must not look like a canvas decoration — hence a real button chrome. */
-#btn-add-epoch {
-  position: absolute;
-  /* WIN4 · below the docked bar of the FOCUSED area (`--live-*`) */
-  top: calc(var(--live-y, 0px) + var(--winbar-h, 0px) + 10px);
-  left: calc(var(--live-x, 0px) + var(--palette-w, 0px) + 10px);
-  z-index: 5;
-  display: flex;
-  align-items: center;
-  gap: 3px;
-  padding: 4px 9px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--bg-panel);
-  box-shadow: 0 1px 3px rgb(0 0 0 / 8%);
-  font-size: 12px;
-  cursor: pointer;
-}
-
-#btn-add-epoch:hover {
-  border-color: var(--brand-ink);
-  color: var(--brand-ink);
-}
-
 /* ── POL1 · inline rename in the EMTree ─────────────────────────────────────── */
 .et-rename {
   width: 100%;

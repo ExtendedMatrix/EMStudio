@@ -371,6 +371,7 @@ const EN: Dict = {
   "toast.noResourcePanel": "This window has no resources panel.",
   "toast.epochInserted": "New epoch inserted — check start/end",
   "toast.epochAdded": "New epoch — set start/end in the inspector",
+  "epoch.defaultName": "Epoch {n}",
   "log.mapNoFootprint": "map figure without a footprint ({why}): the point stays",
   "toast.openADocument": "Open a document first",
   "toast.manyNarratives": "There is more than one narrative: open one and try again",
@@ -2166,6 +2167,7 @@ const IT: Dict = {
   "toast.noResourcePanel": "Questa finestra non ha un pannello risorse.",
   "toast.epochInserted": "Nuova epoca inserita — controlla start/end",
   "toast.epochAdded": "Nuova epoca — imposta start/end nell'inspector",
+  "epoch.defaultName": "Epoca {n}",
   "log.mapNoFootprint": "figura mappa senza impronta ({why}): resta il punto",
   "toast.openADocument": "Apri prima un documento",
   "toast.manyNarratives": "Ci sono più narrative: aprine una e riprova",
@@ -4589,6 +4591,7 @@ const DE: Dict = {
   "ctx.delete": "Löschen",
   "ctx.reflowLane": "Bahn neu anordnen",
   "ctx.epochAbove": "Neue Epoche darüber",
+  "epoch.defaultName": "Epoche {n}",
   "ctx.epochBelow": "Neue Epoche darunter",
   "ctx.reflowAll": "Alles neu anordnen",
   // ── SHIFT-A fase 4 · the four questions ──
