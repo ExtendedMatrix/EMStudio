@@ -1630,6 +1630,18 @@ test("S7.bar", "la barra: la versione esce (tooltip del marchio, barra di stato,
   return { pass: good(out[1024]) && good(out[1600]) && out[1024].h === out[1600].h && /1\.6\.0/.test(out.about ?? ""), detail: out };
 });
 
+test("S4.graph", "Stratigrafia · un doppio clic su un documento nel Matrix lo apre nella finestra di servizio, accanto al grafo", async () => {
+  const { p, ctx, errors } = await open({ doc: "catena" });
+  const win = await winOf(p, "graph");
+  const ws = await p.evaluate((w) => window.__EM_DRAG__.winScene(w), win);
+  const box = ws.boxes.find((b) => b.id === "D3" || b.id.startsWith("D3"));
+  if (box) await p.mouse.dblclick(box.x + box.w / 2, box.y + box.h / 2);
+  await p.waitForTimeout(1200);
+  const docs = await docWins(p);
+  await ctx.close();
+  return { pass: !!box && docs.length === 1 && docs[0].doc === "D3" && docs[0].service && !errors.length, detail: { box, docs, errors } };
+});
+
 // ── MICRO-UN-POSTO · parte 1 · importare con una mappatura: una porta sola ───
 const TAB = () => `${FS_ROOT}/tabelle`;
 /** the editor as the door leaves it: who filled it, and its three questions */

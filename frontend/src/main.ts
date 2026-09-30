@@ -23090,6 +23090,14 @@ function wireGraphCanvas(canvas: HTMLCanvasElement, winId: string): void {
     if (res) {
       e.preventDefault();
       enterGroup(res);
+      return;
+    }
+    // SPAZIO · the graph asks too: a document double-clicked opens in the
+    // service window (beside this graph the first time)
+    const docId = hit.instanceOf ?? hit.id;
+    if (store?.node(docId)?.node_type === "document") {
+      e.preventDefault();
+      requestDoc(docId, { from: windowsOf().find((w) => w.id === winId) ?? null, reading: null });
     }
   });
   canvas.addEventListener("pointerleave", () => {
