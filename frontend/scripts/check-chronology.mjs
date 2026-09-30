@@ -144,4 +144,48 @@ const doc = { graph: structuredClone(fx.graph) };
   ok(rows.some((r) => r.node.id === "RSF1"), "RSF100b is a row of the chronology");
 }
 
+// ── NIGHT-SPAZIO · «Elimina e travasa» (model.ts `dissolveEpoch`) ───────────
+{
+  const mem = new Map();
+  globalThis.localStorage ??= { getItem: (k) => mem.get(k) ?? null, setItem: (k, v) => mem.set(k, String(v)), removeItem: (k) => mem.delete(k) };
+  const Mo = await load("model.ts");
+  const doc = JSON.parse(await readFile(new URL("../testdata/travaso.em.json", import.meta.url), "utf8"));
+  const edgesOf = (st) => st.doc.graph.edges
+    .filter((e) => ["has_first_epoch", "survive_in_epoch", "has_sub_epoch", "has_representation_model"].includes(e.edge_type))
+    .map((e) => `${e.source} ${e.edge_type} ${e.target}`).sort();
+  {
+    const st = new Mo.DocumentStore(JSON.parse(JSON.stringify(doc)));
+    st.ensureAllEpochParadata();
+    const c = st.epochContent("EP_MED");
+    eq([c.units.sort(), c.phases, c.rms], [["USM101", "USV106"], ["PH_MED1"], ["RM_MED"]],
+       "dissolve · Medioevo holds two units, one phase, one RM");
+    ok(!st.dissolveTargets("EP_MED").includes("EP_MED") && !st.dissolveTargets("EP_MED").includes("PH_MED1"),
+       "dissolve · neither the epoch nor its phase is a target");
+    eq(st.dissolveEpoch("EP_MED", "PH_MED1"), null, "dissolve · into its own phase: refused");
+    const pdg = st.epochParadataGroup("EP_MED");
+    const before = edgesOf(st);
+    const n0 = st.doc.graph.nodes.length;
+    eq(st.dissolveEpoch("EP_MED", "EP_ROM"), { units: 2, phases: 1, rms: 1 }, "dissolve · into Età imperiale");
+    const after = edgesOf(st);
+    ok(["USM101 has_first_epoch EP_ROM", "USV106 has_first_epoch EP_ROM", "EP_ROM has_sub_epoch PH_MED1",
+        "EP_ROM has_representation_model RM_MED", "RSF100b has_first_epoch PH_MED1", "D2 has_representation_model RM_MED"]
+      .every((x) => after.includes(x)) && !after.some((x) => /EP_MED/.test(x)), "dissolve · units, phase and RM moved; the phase keeps its own unit");
+    ok(!st.node("EP_MED") && !st.node(pdg) && !(st.doc.layout?.swimlanes ?? []).some((l) => l.epoch_id === "EP_MED"),
+       "dissolve · the epoch left with its temporal PDG and its lane");
+    st.undo();
+    eq([edgesOf(st), st.doc.graph.nodes.length], [before, n0], "dissolve · ONE undo step brings it all back");
+  }
+  {
+    // into a PHASE of another epoch: the units go to the phase, the phases under its epoch
+    const st = new Mo.DocumentStore(JSON.parse(JSON.stringify(doc)));
+    st.addEdge("EP_MOD", "PH_MED1", "has_sub_epoch");
+    st.deleteEdge({ source: "EP_MED", target: "PH_MED1", edge_type: "has_sub_epoch" });
+    st.addPhase("EP_MED", "Medioevo · fase 2");
+    const ph2 = st.epochPhases("EP_MED")[0];
+    st.dissolveEpoch("EP_MED", "PH_MED1");
+    const after = edgesOf(st);
+    ok(after.includes(`EP_MOD has_sub_epoch ${ph2}`), "dissolve · into a phase: the epoch's phases go under THAT phase's epoch");
+  }
+}
+
 console.log(`chronology: ${checks} checks passed`);

@@ -33,9 +33,16 @@ export interface ChronoEpoch {
 export interface ChronologyData {
   epochs: ChronoEpoch[];
   overlaps: EpochOverlap[];
-  /** the other chronology problems, already said (phase outside its epoch…) */
-  others: Array<{ epoch: string; text: string }>;
+  /** the other chronology problems, already said (phase outside its epoch…);
+   *  `spill` names the epoch a phase comes out of (SPAZIO: its second remedy) */
+  others: Array<{ epoch: string; text: string; spill?: { phase: string; epoch: string } }>;
   selected: string | null;
+  /** SPAZIO · what each epoch holds, for «Elimina…» */
+  contents?: Record<string, { units: number; phases: number; rms: number }>;
+  /** SPAZIO · where each epoch's content may go (not itself, not its phases) */
+  targets?: Record<string, string[]>;
+  /** SPAZIO · the epoch whose «Elimina…» row is open, and its preset target */
+  deleting?: { id: string; to: string | null } | null;
 }
 
 export interface ChronologyHooks {
@@ -45,6 +52,10 @@ export interface ChronologyHooks {
   onMakeEpoch(id: string): void;
   /** a disabled remedy was pressed: say why */
   onRefused(why: string): void;
+  /** SPAZIO · open (or close, with null) the «Elimina…» row of an epoch */
+  onAskDelete?(id: string | null, to?: string | null): void;
+  /** SPAZIO · «Elimina e travasa»: the epoch goes, its content into `to` */
+  onDissolve?(id: string, to: string): void;
 }
 
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, cls?: string, text?: string): HTMLElementTagNameMap[K] {
@@ -204,6 +215,14 @@ export function renderChronology(host: HTMLElement, data: ChronologyData, h: Chr
     acts.appendChild(btn(t("chr.fixInTable"), () => {
       host.querySelector<HTMLInputElement>(`input[data-chnum="${x.epoch}|start"]`)?.focus();
     }));
+    // SPAZIO · a phase that comes out of its epoch can also be dissolved INTO it
+    if (x.spill && h.onAskDelete) {
+      const sp = x.spill;
+      const d = btn(t("chr.dissolveInto", { b: nameOf(sp.epoch) }), () => h.onAskDelete!(sp.phase, sp.epoch));
+      d.dataset.remedy = "dissolve";
+      d.dataset.chdel = sp.phase;
+      acts.appendChild(d);
+    }
     card.appendChild(acts);
     cards.appendChild(card);
   }
@@ -214,10 +233,53 @@ export function renderChronology(host: HTMLElement, data: ChronologyData, h: Chr
   }
   root.appendChild(cards);
 
+  /** «Elimina X · contiene … · e travasa in [ ] · Elimina e travasa · Annulla» */
+  const deleteRow = (e: ChronoEpoch): HTMLElement => {
+    const tr = el("tr", "chr-del-row");
+    const td = el("td");
+    td.colSpan = 7;
+    const box = el("div", "chr-del");
+    box.dataset.chdelRow = e.id;
+    const c = data.contents?.[e.id] ?? { units: 0, phases: 0, rms: 0 };
+    box.appendChild(el("b", "", t("chr.deleteWhat", { a: e.name })));
+    const count = (n: number, one: string, many: string) => t(n === 1 ? one : many, { n: String(n) });
+    const holds = el("span", "chr-del-holds", t("chr.holds", {
+      what: [count(c.units, "chr.oneUnit", "chr.nUnits"), count(c.phases, "chr.onePhase", "chr.nPhases"), `${c.rms} RM`].join(" · ") }));
+    holds.dataset.units = String(c.units);
+    holds.dataset.phases = String(c.phases);
+    holds.dataset.rms = String(c.rms);
+    box.appendChild(holds);
+    box.appendChild(el("span", "", t("chr.moveInto")));
+    const to = el("select", "chr-del-to");
+    to.dataset.chdelto = e.id;
+    to.setAttribute("aria-label", t("chr.moveInto"));
+    const allowed = new Set(data.targets?.[e.id] ?? []);
+    for (const [x, depth] of rows) {
+      if (!allowed.has(x.id)) continue;
+      const o = el("option", "", `${depth ? "— " : ""}${x.name}`);
+      o.value = x.id;
+      to.appendChild(o);
+    }
+    const preset = data.deleting?.to ?? e.parent ?? null;
+    if (preset && allowed.has(preset)) to.value = preset;
+    const go = el("button", "insp-btn chr-del-go", t("chr.deleteGo"));
+    go.type = "button";
+    go.dataset.chdelgo = e.id;
+    go.disabled = !to.options.length;
+    go.addEventListener("click", () => { if (to.value) h.onDissolve!(e.id, to.value); });
+    const no = el("button", "insp-btn", t("common.cancel"));
+    no.type = "button";
+    no.addEventListener("click", () => h.onAskDelete!(null));
+    box.append(to, go, no);
+    td.appendChild(box);
+    tr.appendChild(td);
+    return tr;
+  };
+
   // ── 3 · the bounds ───────────────────────────────────────────────────────
   const table = el("table", "chr-table");
   const head = el("tr");
-  for (const k of ["chr.colEpoch", "chr.colStart", "chr.colEnd", "Δ", "chr.colInside"])
+  for (const k of ["chr.colEpoch", "chr.colStart", "chr.colEnd", "Δ", "chr.colInside", ""])
     head.appendChild(el("th", "", k.startsWith("chr.") ? t(k) : k));
   table.appendChild(el("thead")).appendChild(head);
   const body = el("tbody");
@@ -265,7 +327,19 @@ export function renderChronology(host: HTMLElement, data: ChronologyData, h: Chr
     });
     td.appendChild(sel);
     tr.appendChild(td);
+    // SPAZIO · «Elimina…»: a row of confirmation below, that says what moves where
+    const tdx = el("td", "chr-x");
+    if (h.onAskDelete) {
+      const del = el("button", "insp-btn chr-del-ask", t("chr.deleteAsk"));
+      del.type = "button";
+      del.dataset.chdel = e.id;
+      del.title = t("chr.deleteAskTitle");
+      del.addEventListener("click", () => h.onAskDelete!(data.deleting?.id === e.id ? null : e.id));
+      tdx.appendChild(del);
+    }
+    tr.appendChild(tdx);
     body.appendChild(tr);
+    if (data.deleting?.id === e.id && h.onDissolve) body.appendChild(deleteRow(e));
   }
   table.appendChild(body);
   root.appendChild(table);

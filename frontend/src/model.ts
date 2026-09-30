@@ -2013,6 +2013,98 @@ export class DocumentStore {
     return { units: units.size, phases: sub.size - 1 };
   }
 
+  /** SPAZIO · what an epoch (or a phase) HOLDS, for «Elimina…»: the units
+   *  attributed to it directly (`has_first_epoch` / `survive_in_epoch` — the
+   *  connections datamodel's edges INTO an EpochNode, with `has_sub_epoch`),
+   *  its phases (`has_sub_epoch`) and its representation models
+   *  (`has_representation_model`). A phase's own units travel with the phase. */
+  epochContent(epochId: string): { units: string[]; phases: string[]; rms: string[] } {
+    const units = new Set<string>(), phases: string[] = [], rms: string[] = [];
+    for (const e of this.doc.graph.edges) {
+      if ((e.edge_type === "has_first_epoch" || e.edge_type === "survive_in_epoch") && e.target === epochId)
+        units.add(e.source);
+      else if (e.edge_type === "has_sub_epoch" && e.source === epochId && this.node(e.target)?.node_type === "EpochNode")
+        phases.push(e.target);
+      else if (e.edge_type === "has_representation_model" && e.source === epochId) rms.push(e.target);
+    }
+    return { units: [...units], phases, rms };
+  }
+
+  /** The epochs and phases an epoch's content may move into: every other one
+   *  outside its own subtree (its phases go with it). */
+  dissolveTargets(epochId: string): string[] {
+    const sub = this.epochSubtree(epochId);
+    return this.doc.graph.nodes.filter((n) => n.node_type === "EpochNode" && !sub.has(n.id)).map((n) => n.id);
+  }
+
+  /**
+   * SPAZIO · «Elimina e travasa»: the epoch goes, and what it held moves to
+   * `targetId` — ONE undo step.
+   *
+   *   · its units: `has_first_epoch` and `survive_in_epoch` now point at the target;
+   *   · its phases: `has_sub_epoch` from the target — or, when the target is a
+   *     phase, from THAT phase's epoch (a phase is not nested in a phase);
+   *   · its RMs: `has_representation_model` from the target.
+   *
+   * An edge the target already has is not doubled. Then the epoch leaves as
+   * `deleteEpoch` takes one away — its temporal PDG with its properties, its
+   * swimlane, positions and anchors — but alone: its phases have moved. Edges
+   * that are the epoch's own (`has_author`, `has_property` outside the PDG, the
+   * `has_sub_epoch` that made it a phase) go with it. Null = refused (the target
+   * is the epoch itself, one of its phases, or not an epoch).
+   */
+  dissolveEpoch(epochId: string, targetId: string): { units: number; phases: number; rms: number } | null {
+    const target = this.node(targetId);
+    if (!this.node(epochId) || target?.node_type !== "EpochNode" || !this.dissolveTargets(epochId).includes(targetId))
+      return null;
+    this.checkpoint();
+    const g = this.doc.graph;
+    const content = this.epochContent(epochId);
+    const phaseHome = this.parentEpoch(targetId) ?? targetId;
+    const removed: EmEdge[] = [];
+    const added: EmEdge[] = [];
+    const has = (s: string, t: string, ty: string): boolean =>
+      g.edges.some((e) => e.source === s && e.target === t && e.edge_type === ty && !removed.includes(e))
+      || added.some((e) => e.source === s && e.target === t && e.edge_type === ty);
+    for (const e of [...g.edges]) {
+      let src = e.source, tgt = e.target;
+      if ((e.edge_type === "has_first_epoch" || e.edge_type === "survive_in_epoch") && e.target === epochId) tgt = targetId;
+      else if (e.edge_type === "has_sub_epoch" && e.source === epochId) src = phaseHome;
+      else if (e.edge_type === "has_representation_model" && e.source === epochId) src = targetId;
+      else continue;
+      removed.push(e);
+      if (!has(src, tgt, e.edge_type))
+        added.push({ ...e, id: `${src}__${e.edge_type}__${tgt}`, source: src, target: tgt });
+    }
+    const moved = new Set(removed);
+    g.edges = g.edges.filter((e) => !moved.has(e));
+    g.edges.push(...added);
+    // the epoch itself, with its temporal PDG and the PDG's members
+    const del = new Set<string>([epochId]);
+    for (const e of g.edges)
+      if (e.edge_type === "has_paradata_nodegroup" && e.source === epochId) {
+        del.add(e.target);
+        for (const q of g.edges)
+          if (q.edge_type === "is_in_paradata_nodegroup" && q.target === e.target) del.add(q.source);
+      }
+    const gone: EmEdge[] = [];
+    g.edges = g.edges.filter((e) => {
+      if (del.has(e.source) || del.has(e.target)) { gone.push(e); return false; }
+      return true;
+    });
+    g.nodes = g.nodes.filter((n) => !del.has(n.id));
+    const layout = this.doc.layout;
+    if (layout?.swimlanes) layout.swimlanes = layout.swimlanes.filter((l) => !del.has(l.epoch_id));
+    if (layout?.positions) for (const id of del) delete layout.positions[id];
+    if (layout?.anchors) layout.anchors = layout.anchors.filter((a) => !del.has(a.node) && !del.has(a.to));
+    this.emit();
+    for (const e of removed) this.emitOp({ op: "delete_edge", edge: e });
+    for (const e of added) this.emitOp({ op: "add_edge", edge: e });
+    for (const e of gone) this.emitOp({ op: "delete_edge", edge: e });
+    for (const id of del) this.emitOp({ op: "delete_node", node_id: id });
+    return { units: content.units.length, phases: content.phases.length, rms: content.rms.length };
+  }
+
   /** Delete a top-level epoch coherently (mirrors deletePhase's cleanup):
    *  cascade-delete its sub-phases, remove every epoch/phase in the subtree with
    *  its temporal PDG + property nodes AND its swimlane, drop the units'

@@ -1448,6 +1448,80 @@ test("S4.sources", "Fonti · la richiesta usa la Doc dello spazio (nessuna fines
     detail: { w0, w1, second, w2, errors } };
 });
 
+// ── NIGHT-SPAZIO · parte 5 · eliminare un'epoca e travasarne il contenuto ────
+// `testdata/travaso.em.json` = catena + a phase «Medioevo · fase 1» (with
+// RSF100b in it) and an RM of the Medioevo: the epoch holds two units
+// (USM101, USV106), one phase and one RM.
+const epochEdges = (p) => p.evaluate(() => JSON.parse(window.__EM_DRAG__.graphJson()).edges
+  .filter((e) => ["has_first_epoch", "survive_in_epoch", "has_sub_epoch", "has_representation_model"].includes(e.edge_type))
+  .map((e) => `${e.source} ${e.edge_type} ${e.target}`).sort());
+test("S5.dissolve", "Cronologia · «Elimina…» dice cosa contiene (2 unità · 1 fase · 1 RM), travasa in Età imperiale in un passo, e «Annulla» riporta tutto", async () => {
+  const { p, ctx, errors } = await open({ doc: "travaso" });
+  const before = await epochEdges(p);
+  const nodes0 = await p.evaluate(() => window.__EM_DRAG__.nodeCount());
+  await pick(p, "EP_MED");
+  await p.click('.insp-chrono [data-action="check-chronology"]');
+  await p.waitForTimeout(800);
+  await p.click('button.chr-del-ask[data-chdel="EP_MED"]');
+  await p.waitForTimeout(400);
+  const row = await p.evaluate(() => {
+    const b = document.querySelector('[data-chdel-row="EP_MED"]');
+    const h = b?.querySelector(".chr-del-holds");
+    return b ? { text: b.textContent, units: h?.dataset.units, phases: h?.dataset.phases, rms: h?.dataset.rms,
+      options: [...b.querySelectorAll("select option")].map((o) => o.value) } : null;
+  });
+  await p.screenshot({ path: `${process.env.SHOTS ?? "."}/s5-cronologia-elimina.png` }).catch(() => {});
+  const u0 = await p.evaluate(() => window.__EM_DRAG__.undoDepth());
+  await p.selectOption('select[data-chdelto="EP_MED"]', "EP_ROM");
+  await p.click('button[data-chdelgo="EP_MED"]');
+  await p.waitForTimeout(1500);
+  const u1 = await p.evaluate(() => window.__EM_DRAG__.undoDepth());
+  const after = await epochEdges(p);
+  const gone = await p.evaluate(() => !window.__EM_DRAG__.node("EP_MED"));
+  const toast = await p.evaluate(() => document.getElementById("toast")?.innerText ?? "");
+  await p.click("#toast .toast-action").catch(() => {});
+  await p.waitForTimeout(1200);
+  const back = await epochEdges(p);
+  const nodes2 = await p.evaluate(() => window.__EM_DRAG__.nodeCount());
+  await ctx.close();
+  const want = ["D2 has_representation_model RM_MED", "EP_ROM has_representation_model RM_MED", "EP_ROM has_sub_epoch PH_MED1",
+    "RSF100b has_first_epoch PH_MED1", "USM101 has_first_epoch EP_ROM", "USV106 has_first_epoch EP_ROM"];
+  return { pass: row?.units === "2" && row?.phases === "1" && row?.rms === "1" && !row.options.includes("EP_MED") && !row.options.includes("PH_MED1")
+      && gone && u1 - u0 === 1 && want.every((w) => after.includes(w)) && !after.some((e) => /EP_MED/.test(e))
+      && /Medioevo eliminata · 2 unità, 1 fase, 1 RM passano a Età imperiale/.test(toast) && /Annulla/.test(toast) && JSON.stringify(back) === JSON.stringify(before) && nodes2 === nodes0 && !errors.length,
+    detail: { row, before, after, back, u0, u1, toast, nodes0, nodes2, errors } };
+});
+test("S5.doors", "«Elimina e travasa…» anche nel menu della corsia e nell'ispettore dell'epoca; una fase che esce dall'epoca offre «Elimina e travasa in <epoca>…»", async () => {
+  const { p, ctx, errors } = await open({ doc: "travaso" });
+  await pick(p, "EP_MED");
+  const inInsp = await p.evaluate(() => !!document.querySelector('.insp-chrono [data-action="dissolve-epoch"]'));
+  await p.click('.insp-chrono [data-action="dissolve-epoch"]');
+  await p.waitForTimeout(800);
+  const opened = await p.evaluate(() => !!document.querySelector('[data-chdel-row="EP_MED"]'));
+  // the lane menu: right click on a lane's header
+  const lane = await p.evaluate(() => { const r = [...document.querySelectorAll("canvas")].sort((a, b) => b.width * b.height - a.width * a.height)[0].getBoundingClientRect(); return { x: r.x, y: r.y, h: r.height }; });
+  let laneItem = false;
+  for (const fy of [0.15, 0.4, 0.6]) {
+    await p.mouse.click(lane.x + 60, lane.y + lane.h * fy, { button: "right" });
+    await p.waitForTimeout(350);
+    laneItem = await p.evaluate(() => [...document.querySelectorAll(".ctx-menu button")].some((b) => /Elimina e travasa/.test(b.textContent)));
+    await p.keyboard.press("Escape");
+    if (laneItem) break;
+  }
+  // move the phase out of its epoch: its card offers the dissolve INTO the epoch
+  await p.evaluate(() => window.__EM_DRAG__.edit("PH_MED1", { data: { start_time: 700, end_time: 1100 } }));
+  await p.waitForTimeout(800);
+  const spill = await p.evaluate(() => [...document.querySelectorAll('.chr-card.other [data-remedy="dissolve"]')].map((b) => ({ t: b.textContent, id: b.dataset.chdel })));
+  if (spill.length) {
+    await p.click('.chr-card.other [data-remedy="dissolve"]');
+    await p.waitForTimeout(500);
+  }
+  const preset = await p.evaluate(() => document.querySelector('select[data-chdelto="PH_MED1"]')?.value ?? null);
+  await ctx.close();
+  return { pass: inInsp && opened && laneItem && spill.some((x) => /Elimina e travasa in Medioevo/.test(x.t) && x.id === "PH_MED1") && preset === "EP_MED" && !errors.length,
+    detail: { inInsp, opened, lane, laneItem, spill, preset, errors } };
+});
+
 // ── MICRO-UN-POSTO · parte 1 · importare con una mappatura: una porta sola ───
 const TAB = () => `${FS_ROOT}/tabelle`;
 /** the editor as the door leaves it: who filled it, and its three questions */

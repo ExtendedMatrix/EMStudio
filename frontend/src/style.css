@@ -8449,3 +8449,9 @@ button.shelf-badge { cursor: pointer; font: inherit; font-size: 10.5px; }
 /* ── SPAZIO · the service window's chips, and a Doc's own document ── */
 .win-strip .doc-pick { font: inherit; font-size: 0.78rem; max-width: 12rem; padding: 1px 4px; border: 1px solid var(--border-strong); border-radius: var(--radius-sm); background: var(--bg-panel); color: var(--text); }
 .win-strip .win-svc { font-size: 0.7rem; font-weight: 600; color: #04486b; border: 1px solid currentColor; border-radius: 999px; padding: 0 8px; background: #e6f1f8; white-space: nowrap; }
+
+/* ── SPAZIO · «Elimina e travasa» in the Chronology ── */
+.chr-table td.chr-x { white-space: nowrap; }
+.chr-del { border: 1px dashed var(--danger); border-radius: 8px; padding: 8px 10px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; background: var(--bg-panel); }
+.chr-del .chr-del-holds { color: var(--text-muted); font-size: 0.78rem; }
+.chr-del .chr-del-go { border-color: var(--danger); color: var(--danger); }

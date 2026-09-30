@@ -15324,12 +15324,59 @@ function chronologyData(): ChronologyData | null {
     const num = (v: unknown) => (v == null || v === "" || !Number.isFinite(Number(v)) ? null : Number(v));
     return { id: n.id, name: String(n.name || n.id), start: num(d.start_time), end: num(d.end_time), parent: st.parentEpoch(n.id) };
   });
-  const others: Array<{ epoch: string; text: string }> = [];
+  const others: ChronologyData["others"] = [];
   const seen = new Set<string>();
   for (const id of st.topEpochIds())
     for (const w of st.epochCoherenceWarnings(id))
       if (!seen.has(w)) { seen.add(w); others.push({ epoch: id, text: w }); }
-  return { epochs, overlaps: st.epochOverlaps(), others, selected: selectedId };
+  // SPAZIO · a phase that comes out of its epoch: its card offers «Elimina e
+  // travasa in <epoca>…» beside «Correggi i limiti» (the warning names it)
+  const byId = new Map(epochs.map((e) => [e.id, e]));
+  for (const ph of epochs) {
+    const par = ph.parent ? byId.get(ph.parent) : undefined;
+    if (!par) continue;
+    const out = (ph.start != null && par.start != null && ph.start < par.start)
+      || (ph.end != null && par.end != null && ph.end > par.end);
+    if (!out) continue;
+    const card = others.find((o) => o.text.includes(ph.name) && !o.spill);
+    if (card) card.spill = { phase: ph.id, epoch: par.id };
+    else others.push({ epoch: par.id, text: t("chr.spills", { a: ph.name, b: par.name }), spill: { phase: ph.id, epoch: par.id } });
+  }
+  const contents: NonNullable<ChronologyData["contents"]> = {};
+  const targets: NonNullable<ChronologyData["targets"]> = {};
+  for (const e of epochs) {
+    const c = st.epochContent(e.id);
+    contents[e.id] = { units: c.units.length, phases: c.phases.length, rms: c.rms.length };
+    targets[e.id] = st.dissolveTargets(e.id);
+  }
+  const deleting = chronDeleting && byId.has(chronDeleting.id) ? chronDeleting : null;
+  return { epochs, overlaps: st.epochOverlaps(), others, selected: selectedId, contents, targets, deleting };
+}
+
+/** SPAZIO · the epoch whose «Elimina…» row is open in the Chronology */
+let chronDeleting: { id: string; to: string | null } | null = null;
+
+/** «Elimina e travasa»: ONE undo step, the layout computed for it, «Annulla». */
+function dissolveEpochInto(id: string, to: string): void {
+  if (!store) return;
+  const st = store;
+  const name = String(st.node(id)?.name ?? id), dest = String(st.node(to)?.name ?? to);
+  const c = st.epochContent(id);
+  chronDeleting = null;
+  const what = [c.units.length && t(c.units.length === 1 ? "chr.oneUnit" : "chr.nUnits", { n: String(c.units.length) }),
+    c.phases.length && t(c.phases.length === 1 ? "chr.onePhase" : "chr.nPhases", { n: String(c.phases.length) }),
+    c.rms.length && `${c.rms.length} RM`].filter(Boolean).join(", ") || t("chr.nothing");
+  if (selectedId === id) select(to);
+  void restructureEpochs((s) => { s.dissolveEpoch(id, to); }, t("chr.dissolved", { a: name, what, b: dest }));
+}
+
+/** Open the Chronology with the «Elimina…» row of an epoch (the lane menu and
+ *  the epoch's Inspector come here). */
+function askDissolve(epochId: string, to: string | null = null): void {
+  chronDeleting = { id: epochId, to };
+  openChronology(epochId);
+  refreshSurfaces("chronology");
+  queueMicrotask(() => document.querySelector<HTMLSelectElement>(`select[data-chdelto="${epochId}"]`)?.focus());
 }
 
 function renderChronologyInto(body: HTMLElement, _win: Win): void {
@@ -15351,6 +15398,12 @@ function renderChronologyInto(body: HTMLElement, _win: Win): void {
       t("chr.didPhase", { a: name(inner), b: name(outer) })),
     onMakeEpoch: (id) => void restructureEpochs((s) => s.makeTopEpoch(id), t("chr.didEpoch", { a: name(id) })),
     onRefused: (why) => toast(why),
+    onAskDelete: (id, to) => {
+      chronDeleting = id ? { id, to: to ?? null } : null;
+      refreshSurfaces("chronology");
+      if (id) queueMicrotask(() => document.querySelector<HTMLSelectElement>(`select[data-chdelto="${id}"]`)?.focus());
+    },
+    onDissolve: (id, to) => dissolveEpochInto(id, to),
   });
 }
 
@@ -15645,6 +15698,14 @@ function renderInspectorChronology(host: HTMLElement): void {
   b.textContent = t("chr.check");
   b.addEventListener("click", () => openChronology(id));
   sec.appendChild(b);
+  const d = document.createElement("button");
+  d.type = "button";
+  d.className = "insp-btn";
+  d.dataset.action = "dissolve-epoch";
+  d.textContent = t("chr.dissolveEllipsis");
+  d.title = t("chr.deleteAskTitle");
+  d.addEventListener("click", () => askDissolve(id));
+  sec.appendChild(d);
   const head = host.querySelector(".insp-head");
   if (head) head.after(sec); else host.prepend(sec);
 }
@@ -22167,6 +22228,8 @@ function showLaneMenu(clientX: number, clientY: number, lane: { id: string; labe
   item(t("ctx.reflowLane"), () => void reflowNodes(nodesInLane(lane.id)));
   // AUDIT N5 · next to Riordina / Nuova epoca sopra / sotto
   item(t("chr.checkEllipsis"), () => openChronology(lane.id));
+  // SPAZIO · the same «Elimina e travasa» as the Chronology's row
+  item(t("chr.dissolveEllipsis"), () => askDissolve(lane.id));
   const i = laneStackIndex(lane.id);
   if (i >= 0) {
     // the boundary above the lane is `i`, the one below `i + 1` — the same
