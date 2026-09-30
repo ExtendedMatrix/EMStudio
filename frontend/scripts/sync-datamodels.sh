@@ -309,6 +309,16 @@ mkdir -p "$DST/dtc-glyphs"
 cp "$CFG"/src/2D/dtc/*.svg "$DST/dtc-glyphs/" 2>/dev/null || true
 shopt -u nullglob
 
+# THE FINGERPRINT of what was just copied (2026-10-01), beside the copies:
+# s3Dgraphy's `api.datamodel_fingerprint()` over the six datamodel JSONs,
+# recomputed in JavaScript by `datamodel-fingerprint.mjs` (RFC 8785 on both
+# sides). `scripts/check-datamodel.mjs` (npm run check:datamodel) fails when the
+# copies no longer match this file — somebody edited one by hand — or no longer
+# match the sibling s3Dgraphy. The s3dgraphy version is read when the source can
+# say it; the fingerprint does not depend on it.
+S3D_VERSION="$(python3 -c 'import re,sys,pathlib; p=pathlib.Path(sys.argv[1]).parent/"__init__.py"; m=re.search(r"__version__\s*=\s*[\x27\x22]([^\x27\x22]+)", p.read_text()) if p.is_file() else None; print(m.group(1) if m else "")' "$CFG" 2>/dev/null || true)"
+node "$SCRIPT_DIR/datamodel-fingerprint.mjs" --write "$DST" "$DST/datamodel.fingerprint.json" "$S3D_VERSION"
+
 echo "synced from $CFG:"
 python3 - "$CFG" <<'EOF'
 import json, sys, pathlib
