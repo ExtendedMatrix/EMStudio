@@ -887,12 +887,20 @@ test("9.reveal", "«Mostra sul canvas» in Fonti usa il grafo sotto la Doc (la D
   await ctx.close();
   return { pass: before === after && ws === "provenance" && !!sel, detail: { before, after, ws, sel } };
 });
-test("9.read", "«Leggi» dice «→ Fonti» quando lo spazio non ha una Doc", async () => {
+// NIGHT-SPAZIO · the rule changed: a space without a Doc no longer sends the
+// reader to Fonti — «Leggi» opens the service window BESIDE, in this space
+test("9.read", "«Leggi» in uno spazio senza Doc apre la finestra di servizio accanto, nello stesso spazio (non più «→ Fonti»)", async () => {
   const { p, ctx } = await open({ doc: "catena" });
   await pick(p, "USM101");
   const labels = await p.evaluate(() => [...document.querySelectorAll(".insp-chain .chain-acts button")].map((b) => b.textContent));
+  const ws0 = await p.evaluate(() => document.querySelector("#workspace-bar .ws-tab.active, #workspace-bar .ws-tab[aria-selected=true]")?.dataset.ws ?? null);
+  await p.locator(".insp-chain .chain-acts button", { hasText: "Leggi" }).first().click();
+  await p.waitForTimeout(900);
+  const ws1 = await p.evaluate(() => document.querySelector("#workspace-bar .ws-tab.active, #workspace-bar .ws-tab[aria-selected=true]")?.dataset.ws ?? null);
+  const docs = await p.evaluate(() => window.__EM_DRAG__.wins().filter((w) => w.type === "doc").map((w) => w.state["current.doc.role"] ?? null));
   await ctx.close();
-  return { pass: labels.some((l) => /Leggi → Fonti/.test(l)), detail: { labels } };
+  return { pass: labels.some((l) => /^Leggi$/.test(l.trim())) && !labels.some((l) => /Fonti/.test(l)) && ws0 === ws1
+      && docs.length === 1 && docs[0] === "service", detail: { labels, ws0, ws1, docs } };
 });
 
 // ── PARTE 10 · intestazioni sobrie, un verbo per azione ─────────────────────
@@ -1377,6 +1385,67 @@ test("S3.shared", "Spazio · l'epoca è condivisa con la Cronologia: sceglierla 
       && JSON.stringify(moved) !== JSON.stringify(cam1)
       && JSON.stringify(framed) !== JSON.stringify(moved) && !errors.length,
     detail: { chrMarks, sceneEpoch, cam0, cam1, moved, framed, errors } };
+});
+
+// ── NIGHT-SPAZIO · parte 4 · la finestra di servizio, e ogni Doc il suo documento
+/** the Doc windows on screen: their document, their role, what they draw */
+const docWins = (p) => p.evaluate(() => window.__EM_DRAG__.wins().filter((w) => w.type === "doc").map((w) => {
+  const area = document.querySelector(`[data-win="${w.id}"]`);
+  return { id: w.id, doc: w.state["current.doc"] ?? null, role: w.state["current.doc.role"] ?? null,
+    service: !!area?.querySelector(".win-svc"), keep: !!area?.querySelector("[data-svc-keep]"),
+    medium: area?.querySelector(".rd-3d-host") ? "3d" : area?.querySelector(".rd-img, .rd-image, img.rd-stage-img, .rd-2d") ? "image"
+      : area?.querySelector(".rd-text, .rd-passage") ? "text" : null };
+}));
+test("S4.keep", "Spazio · un RM (3D) dalla Tabella apre la finestra di servizio; «Tieni» la fa tua; una foto dall'ispettore va in una NUOVA finestra di servizio e il 3D resta", async () => {
+  const { p, ctx, errors } = await open({ doc: "spazio", ws: "space" });
+  await p.waitForSelector('[data-open-doc="D2"]', { timeout: 15000 });
+  const before = await docWins(p);
+  await p.click('[data-open-doc="D2"]');
+  await p.waitForTimeout(1500);
+  const opened = await docWins(p);
+  await p.screenshot({ path: `${process.env.SHOTS ?? "."}/s4-servizio-prima-di-tieni.png` }).catch(() => {});
+  await p.locator("[data-svc-keep]").first().click().catch(() => {});
+  await p.waitForTimeout(500);
+  const kept = await docWins(p);
+  // a photo, asked from the Inspector: a reading of P_H on D.3
+  await pick(p, "USM101");
+  await p.locator('[data-add-reading="P_H"]').first().click();
+  await p.waitForTimeout(300);
+  await p.locator(".addm-item", { hasText: "D.3 ·" }).first().click();
+  await p.waitForTimeout(1500);
+  const after = await docWins(p);
+  await p.screenshot({ path: `${process.env.SHOTS ?? "."}/s4-servizio-dopo-tieni.png` }).catch(() => {});
+  await ctx.close();
+  const o = opened.find((w) => w.doc === "D2");
+  const k = kept.find((w) => w.id === o?.id);
+  const a3d = after.find((w) => w.id === o?.id);
+  const photo = after.find((w) => w.doc === "D3");
+  return { pass: !before.length && opened.length === 1 && o?.service && o?.keep && k && !k.service && k.role === "user"
+      && a3d?.doc === "D2" && after.length === 2 && photo && photo.id !== o.id && photo.service && !errors.length,
+    detail: { before, opened, kept, after, errors } };
+});
+test("S4.sources", "Fonti · la richiesta usa la Doc dello spazio (nessuna finestra nuova); due Doc tengono due documenti", async () => {
+  const { p, ctx, errors } = await open({ doc: "catena", ws: "provenance" });
+  const w0 = await docWins(p);
+  await pick(p, "USM101");
+  await p.locator('[data-add-reading="P_H"]').first().click();
+  await p.waitForTimeout(300);
+  await p.locator(".addm-item", { hasText: "D.3 ·" }).first().click();
+  await p.waitForTimeout(1200);
+  const w1 = await docWins(p);
+  // a second Doc, opened by hand (split of the first), on another document
+  const second = await p.evaluate((id) => window.__EM_DRAG__.splitDoc?.(id) ?? null, w1[0]?.id);
+  await p.waitForTimeout(600);
+  if (second) {
+    await p.selectOption(`[data-win="${second}"] select.doc-pick`, "D1").catch(() => {});
+    await p.waitForTimeout(600);
+  }
+  const w2 = await docWins(p);
+  await ctx.close();
+  const main = w2.find((w) => w.id === w1[0]?.id), other = w2.find((w) => w.id === second);
+  return { pass: w0.length === 1 && w1.length === 1 && w1[0].doc === "D3" && !w1[0].service
+      && main?.doc === "D3" && other?.doc === "D1" && other?.role === "user" && !errors.length,
+    detail: { w0, w1, second, w2, errors } };
 });
 
 // ── MICRO-UN-POSTO · parte 1 · importare con una mappatura: una porta sola ───

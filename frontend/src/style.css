@@ -8446,3 +8446,6 @@ button.shelf-badge { cursor: pointer; font: inherit; font-size: 10.5px; }
 .mdl .st.missing { color: var(--danger); }
 .mdl .st.none { color: var(--text-faint); border-style: dashed; }
 .mdl .st.json { color: #04486b; }
+/* ── SPAZIO · the service window's chips, and a Doc's own document ── */
+.win-strip .doc-pick { font: inherit; font-size: 0.78rem; max-width: 12rem; padding: 1px 4px; border: 1px solid var(--border-strong); border-radius: var(--radius-sm); background: var(--bg-panel); color: var(--text); }
+.win-strip .win-svc { font-size: 0.7rem; font-weight: 600; color: #04486b; border: 1px solid currentColor; border-radius: 999px; padding: 0 8px; background: #e6f1f8; white-space: nowrap; }

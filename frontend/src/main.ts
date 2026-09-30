@@ -1591,6 +1591,12 @@ window.__EM_SCENE__ = () => {
     return g?.regionId && store ? chain.measureOf(store.doc, g.regionId) : null;
   },
   measureRegion: (id: string) => (store ? chain.measureOf(store.doc, id) : null),
+  /** SPAZIO · a Doc split by hand (the corner gesture's split), its new id */
+  splitDoc: (winId: string) => {
+    const made = splitWindow(winId, "row", activeWorkspace(), 0.5, "b");
+    renderTiles();
+    return made?.id ?? null;
+  },
   /** the activity log, as the Log drawer lists it */
   log: () => logEntries().map((e) => ({ level: e.level, message: e.message, ids: e.ids ?? [] })),
   /** AUDIT N5 · the lane chips and phase labels as last drawn (screen) */
@@ -2007,6 +2013,7 @@ function select(nodeId: string | null): void {
   const readsAfter = !!nodeId && ["document", "extractor"].includes(store?.node(nodeId)?.node_type ?? "");
   if ((readsBefore || readsAfter) && selectedId !== nodeId)
     queueMicrotask(() => { if (windowsOf().some((w) => w.type === "doc")) renderDocView(); });
+  if (docAfter && nodeId && !docPickFrom) followDocSelection(nodeId);
   selectedId = nodeId;
   selectedIds = new Set(nodeId ? [nodeId] : []);
   selectedEdge = null; // node and connector selection are mutually exclusive
@@ -7014,7 +7021,8 @@ function chainUi(st: DocumentStore): ChainUi {
     openPlace,
     // AUDIT N8 · «Leggi» opens the Doc of THIS space; when the space has none it
     // goes to Fonti, and then the button says so
-    readLabel: () => (windowsOf().some((w) => w.type === "doc") ? t("chain.read") : t("chain.readToSources")),
+    // SPAZIO · «Leggi» opens the service window beside, in THIS space
+    readLabel: () => t("chain.read"),
     aiChip: aiChipFor,
     documentExtras: (host, docId) => renderDocumentDating(st, host, docId),
     useAsValue: (x) => {
@@ -7157,15 +7165,8 @@ function openReading(extractorId: string): void {
   if (!store) return;
   const src = chain.sourceOf(store.doc, extractorId);
   if (!src || src.kind !== "document") { select(extractorId); refreshInspector(); return; }
-  let docWin = windowsOf().find((w) => w.type === "doc");
-  if (!docWin) {
-    setWorkspace("provenance");
-    docWin = windowsOf().find((w) => w.type === "doc");
-  }
-  if (docWin) {
-    setWinCurrent(docWin, "doc", src.id);
-    setWinCurrent(docWin, "reading", extractorId);
-  }
+  // SPAZIO · the catena asks the SERVICE window (or the space's Doc)
+  requestDoc(src.id, { reading: extractorId });
   select(extractorId);
   refreshInspector();
   renderDocView();
@@ -7178,15 +7179,7 @@ function openPlace(extractorId: string): void {
   if (!store) return;
   const src = chain.sourceOf(store.doc, extractorId);
   if (!src || src.kind !== "document") { select(extractorId); refreshInspector(); return; }
-  let docWin = windowsOf().find((w) => w.type === "doc");
-  if (!docWin) {
-    setWorkspace("provenance");
-    docWin = windowsOf().find((w) => w.type === "doc");
-  }
-  if (docWin) {
-    setWinCurrent(docWin, "doc", src.id);
-    setWinCurrent(docWin, "reading", null);
-  }
+  requestDoc(src.id, { reading: null });
   select(extractorId);
   refreshInspector();
   renderDocView();
@@ -14702,9 +14695,9 @@ function renderDocViewInto(
       `<div class="doc-empty">${t("doc.empty")}</div>`;
     return;
   }
-  // a document selected elsewhere is the one shown (the selection is one)
-  if (selectedId && docs.some((d) => d.id === selectedId) && winCurrent(win, "doc") !== selectedId)
-    setWinCurrent(win, "doc", selectedId);
+  // SPAZIO · which document a Doc shows is ITS OWN (`current.doc`): a document
+  // selected elsewhere reaches the service window or the space's Doc through
+  // `select` → `followDocSelection`, never a Doc opened or kept by hand
   const currentId = winCurrent(win, "doc");
   const current = docs.find((d) => d.id === currentId) ?? docs[0];
   const repaint = (): void => renderDocViewInto(win, list, detail);
@@ -14725,7 +14718,10 @@ function renderDocViewInto(
       (sub ? `<span class="doc-sub">${escapeHtml(sub)}</span>` : "");
     b.addEventListener("click", () => {
       setWinCurrent(win, "doc", d.id);
-      select(d.id);            // the Inspector, the graph and the table follow
+      setWinCurrent(win, "reading", null);
+      // the Inspector, the graph and the table follow; the OTHER Docs do not
+      docPickFrom = win.id;
+      try { select(d.id); } finally { docPickFrom = null; }
       repaint();
     });
     list.appendChild(b);
@@ -15028,9 +15024,119 @@ const DOC_TOOL_GLYPH: Record<DocTool, string> = {
   rect: "▭", polygon: "⬟", passage: "❝", point: "⌖", line: "╱", polyline: "〰",
 };
 /** Fill a Doc window's header strip with the tools of its document's medium. */
+// ── SPAZIO · LA FINESTRA DI SERVIZIO ────────────────────────────────────────
+//
+// Whoever asks to SEE or ANNOTATE an asset — the graph, the Inspector, the
+// Shelf, the narrative, the Spazio, the paradata chain — uses ONE Doc window
+// «di servizio». The first time it opens beside the one who asks; after that
+// the same window changes only document and medium (3D, image, text). A Doc of
+// the workspace (Fonti's) is reused; a Doc opened or kept by hand is never
+// touched. The role lives on the window (`current.doc.role`): "service",
+// "user", or none = the workspace's.
+
+/** set while a Doc window's own list picks a document: the selection follows,
+ *  the other Docs do not */
+let docPickFrom: string | null = null;
+
+function docRoleOf(w: Win): "service" | "user" | null {
+  const r = winCurrent(w, "doc.role");
+  return r === "service" || r === "user" ? r : null;
+}
+
+/** The window a request lands in: the service one, else the space's Doc. */
+function docForRequests(): Win | null {
+  const docs = windowsOf().filter((w) => w.type === "doc");
+  return docs.find((w) => docRoleOf(w) === "service") ?? docs.find((w) => docRoleOf(w) === null) ?? null;
+}
+
+/** A document selected elsewhere: the request window shows it, if there is one
+ *  (a selection opens nothing — it is not a request). */
+function followDocSelection(docId: string): void {
+  const w = docForRequests();
+  if (!w || winCurrent(w, "doc") === docId) return;
+  setWinCurrent(w, "doc", docId);
+  setWinCurrent(w, "reading", null);
+  refreshDocTools();
+}
+
+/** Show a document in the service window — opening it beside the asker the
+ *  first time. Returns the window, or null without a graph. */
+function requestDoc(docId: string, opts: { from?: Win | null; reading?: string | null } = {}): Win | null {
+  if (!store || !store.node(docId)) return null;
+  let w = docForRequests();
+  if (!w) {
+    // beside the one who asks — or, for a narrow asker (the Inspector, the
+    // Outliner), beside the big window of the space
+    const big = new Set<WindowType>(["graph", "table", "scene", "narrative", "shelf", "storage", "viewer", "chronology", "study"]);
+    const asker = opts.from ?? activeWin();
+    const anchor = big.has(asker.type) ? asker
+      : windowsOf().find((x) => x.type === "graph") ?? windowsOf().find((x) => big.has(x.type)) ?? asker;
+    if (maximizedWin()) toggleMaximize(maximizedWin()!);
+    setActiveWin(anchor.id);
+    const made = splitWindow(anchor.id, "row", activeWorkspace(), 0.55, "b");
+    if (!made) return null;
+    for (const k of Object.keys(made.state)) delete made.state[k];   // not the anchor's mode or sheet
+    setWinType(made, "doc");
+    setWinCurrent(made, "doc.role", "service");
+    w = made;
+    setWinCurrent(w, "doc", docId);
+    if (opts.reading !== undefined) setWinCurrent(w, "reading", opts.reading);
+    renderTiles();
+  } else {
+    setWinCurrent(w, "doc", docId);
+    if (opts.reading !== undefined) setWinCurrent(w, "reading", opts.reading);
+  }
+  renderDocView();
+  refreshDocTools();
+  const area = winAreas.get(w.id);
+  area?.classList.add("flash");
+  setTimeout(() => area?.classList.remove("flash"), 900);
+  return w;
+}
+
 function fillDocTools(win: Win, strip: HTMLElement): void {
   strip.textContent = "";
   const d = store ? store.node(currentDocId(win) ?? "") : undefined;
+  // SPAZIO · the window's OWN document: changing it here changes only this one
+  const docs = documentsInGraph();
+  if (docs.length) {
+    const pickEl = document.createElement("select");
+    pickEl.className = "doc-pick";
+    pickEl.setAttribute("aria-label", t("svc.document"));
+    if (!d) pickEl.appendChild(Object.assign(document.createElement("option"), { value: "", textContent: "—" }));
+    for (const x of docs)
+      pickEl.appendChild(Object.assign(document.createElement("option"),
+        { value: x.id, textContent: String(x.name || x.id), selected: x.id === d?.id }));
+    pickEl.addEventListener("change", (e) => {
+      e.stopPropagation();
+      if (!pickEl.value) return;
+      setWinCurrent(win, "doc", pickEl.value);
+      setWinCurrent(win, "reading", null);
+      surfaceOf(win.id)?.refresh();
+      fillDocTools(win, strip);
+    });
+    pickEl.addEventListener("pointerdown", (e) => e.stopPropagation());
+    strip.appendChild(pickEl);
+  }
+  if (docRoleOf(win) === "service") {
+    const tag = document.createElement("span");
+    tag.className = "win-svc";
+    tag.textContent = t("svc.tag");
+    tag.title = t("svc.tagTitle");
+    const keep = document.createElement("button");
+    keep.type = "button";
+    keep.className = "win-act";
+    keep.dataset.svcKeep = win.id;
+    keep.textContent = `📌 ${t("svc.keep")}`;
+    keep.title = t("svc.keepTitle");
+    keep.addEventListener("click", (e) => {
+      e.stopPropagation();
+      setWinCurrent(win, "doc.role", "user");
+      toast(t("svc.kept"));
+      fillDocTools(win, strip);
+    });
+    strip.append(tag, keep);
+  }
   const medium = d ? chainMedium(d) : null;
   if (!medium) return;
   const box = document.createElement("span");
@@ -15383,7 +15489,12 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
       missing: (name) => t("space.fileMissing", { x: name }),
     },
     onPickUnit: (id) => { select(id); refreshInspector(); },
-    onPickRm: (id) => { select(id); refreshInspector(); },
+    onPickRm: (id) => {
+      select(id);
+      refreshInspector();
+      const d = currentSpace()?.rms.find((r) => r.id === id)?.documentId;
+      if (d) requestDoc(d, { from: win, reading: null });
+    },
     onNotFound: (rid) => {
       if (spaceNotFound.has(rid)) return;
       spaceNotFound.add(rid);
@@ -16526,16 +16637,10 @@ function annotateShelfEntry(entry: ShelfEntry): void {
   if (!store) { toast(t("menu.noGraph")); return; }
   const docId = documentOfShelfEntry(entry) ?? promoteShelfEntry(entry, { quiet: true });
   if (!docId) return;
-  let win = windowsOf().find((w) => w.type === "doc");
-  if (!win) {
-    setWorkspace("provenance");
-    win = windowsOf().find((w) => w.type === "doc");
-  }
+  // SPAZIO · the shelf asks the service window (or the space's Doc)
+  const win = requestDoc(docId, { reading: null });
   if (!win) { toast(t("shelf.noAnnotator")); return; }
-  setWinCurrent(win, "doc", docId);
   selectWindow(win.id);
-  renderDocView();
-  refreshDocTools();
   toast(t("shelf.sentToDoc", { name: entry.name }));
 }
 
@@ -20956,6 +21061,8 @@ function transformWindowOf(win: Win, type: WindowType): void {
   if (win.type === type) return;
   setActiveWin(win.id);
   setWinType(win, type);
+  // SPAZIO · a Doc made by hand is yours: no request will change it
+  if (type === "doc") setWinCurrent(win, "doc.role", "user");
   renderTiles();   // the area re-surfaces itself, and the wrap re-mounts if it
 }                  // was this window that held it
 
@@ -23686,7 +23793,7 @@ initEmData({
     return { space: sp, units: st.liveNodes().filter((n) => isStratigraphicType(n.node_type)).map((n) => n.id),
              ctx: { node: (id) => st.node(id), t, genre: spaceGenre } };
   },
-  onOpenDoc: (docId) => { select(docId); refreshInspector(); renderDocView(); },
+  onOpenDoc: (docId) => { requestDoc(docId, { reading: null }); select(docId); refreshInspector(); },
 });
 // AUX2: the EM-Data table paints a row blue iff its node is volatile — the SAME
 // marker the canvas overlay reads, so table and graph never disagree.

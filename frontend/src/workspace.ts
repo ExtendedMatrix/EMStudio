@@ -953,6 +953,8 @@ export function splitWindow(
   if (!src) return null;
   endMagnification(ws); // shaping the arrangement brings the arrangement back
   const clone = addWindow(src.type, { ...src.state }, ws); // appends + activates
+  // SPAZIO · a Doc split by hand is the user's: not a second service window
+  if (clone.type === "doc") clone.state["current.doc.role"] = "user";
   // `addWindow` gave the clone a home of its own (any window must have one);
   // here we want it in a SPECIFIC place, so prune that provisional leaf first —
   // otherwise the clone would be placed twice and the tree would out-count the
