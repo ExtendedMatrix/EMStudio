@@ -318,6 +318,7 @@ import type { GraphOp } from "./model";
 import { buildCommand, type CommandVerb } from "./commands";
 import { addResource, fileCounts, foldFiles, movePointers, replaceFile, resourceLabel, storeGraph } from "./resources";
 import { askWhichPointersMove } from "./resource-panel";
+import { addressMap, chooseModel, needsChoice, startResources, type ModelChoice } from "./representation";
 import {
   type AwarenessNote, emptyPresence, type HubOp, noteForRemoteOp, noteForStale,
   opsForLocalChange, peerSelections, planRejoin, stampForResend,
@@ -7410,6 +7411,11 @@ function openReadingSourceMenu(propertyId: string, clientX: number, clientY: num
 function chainMedium(d: EmNode): "image" | "text" | "3d" | null {
   if (!store) return null;
   const st = store;
+  // RISORSA-FILE · a resource of several files (or a datablock) has no url of
+  // its own: its medium is the one of what the viewer will open
+  const chosen = docModelOf(d);
+  if (chosen?.choice.kind === "open") return mediumOfFile(chosen.choice.entry.path);
+  if (chosen?.choice.kind === "blender") return "3d";
   return mediumOfDoc(d, (id) => st.node(id), (id) => st.liveEdges()
     .filter((e) => e.source === id && e.edge_type === "has_linked_resource").map((e) => e.target));
 }
@@ -14930,10 +14936,67 @@ function renderDocViewInto(
 
 // ── CATENA · the Doc window reads the source ────────────────────────────────
 
+/** RISORSA-FILE · where a document's (or an RM's) model is, when its resource
+ *  needs the CHOICE — files (`has_file`), a datablock, representations: the
+ *  representation this viewer opens (`representation.ts chooseModel`), and its
+ *  files' addresses from the `has_file` edges, offline beside the em.json (the
+ *  bridge), online by digest in the store of the room (`?store=` names one
+ *  explicitly). Null when the resource is the plain one-file kind the Doc
+ *  always opened by its url. Cached per document, a repaint follows the bridge. */
+interface DocModel { choice: ModelChoice; url: string | null;
+                     modifier?: (u: string) => string; resolved?: () => Array<[string, string]> }
+const docModelCache = new Map<string, DocModel | null>();
+let bridgeBaseNow: string | null = null;
+function assetStoreBase(): string | null {
+  const forced = new URLSearchParams(location.search).get("store");
+  if (forced) return forced.replace(/\/*$/, "/");
+  const room = sync.room;
+  const hub = getSettings().sync.hubUrl.replace(/\/+$/, "");
+  return room && hub ? `${hub}/v1/rooms/${encodeURIComponent(room)}/asset/` : null;
+}
+function docModelOf(d: EmNode): DocModel | null {
+  const st = storeOfNode(d.id) ?? store;
+  if (!st) return null;
+  // a document's OWN file comes first, as it always did
+  if (d.node_type === "document" && viewerSourceOf(d)) return null;
+  const g = storeGraph(st);
+  const starts = startResources(g, d.id);
+  if (!starts.length || !starts.some((r) => needsChoice(g, r))) return null;
+  const choice = chooseModel(g, starts);
+  const key = `${d.id}\u0000${JSON.stringify(choice)}\u0000${assetStoreBase() ?? currentFilePath ?? ""}`;
+  const hit = docModelCache.get(key);
+  if (hit !== undefined) return hit;
+  if (choice.kind !== "open") {
+    const out = { choice, url: null };
+    docModelCache.set(key, out);
+    return out;
+  }
+  const store0 = assetStoreBase();
+  if (!store0 && !bridgeBaseNow) {
+    void bridgeUrl().then((b) => { bridgeBaseNow = b; renderDocView(); });
+    return { choice, url: null };
+  }
+  const baseDir = currentFilePath ? currentFilePath.replace(/[^/\\]*$/, "") : "";
+  const map = addressMap(choice, store0
+    ? { mode: "online", assetUrl: (c) => `${store0}${encodeURIComponent(c)}` }
+    : { mode: "offline", baseDir,
+        fileUrl: (abs) => `${bridgeBaseNow}/fs/at/${abs.replace(/^\/+/, "").split("/").map(encodeURIComponent).join("/")}` });
+  // a file SET is handed virtual (its files ask one another); one file — a glb,
+  // a tileset's door, a .3tz — goes as its real address
+  const several = choice.files.length > 1;
+  const out: DocModel = several
+    ? { choice, url: map.entryUrl, modifier: map.modifier, resolved: () => [...map.resolved] }
+    : { choice, url: map.modifier(map.entryUrl), resolved: () => [...map.resolved] };
+  docModelCache.set(key, out);
+  return out;
+}
+
 /** Resolved media urls: a path on disk goes through the bridge (`fsFileUrl`,
  *  async), a fetchable url is used as it is. Cached, a repaint follows. */
 const docUrlCache = new Map<string, string | null>();
 function docMediaUrl(d: EmNode): string | null {
+  const chosen = docModelOf(d);
+  if (chosen) return chosen.url;
   const st = store;
   const own = viewerSourceOf(d);
   const linked = st?.liveEdges().filter((e) => e.source === d.id && e.edge_type === "has_linked_resource")
@@ -14966,6 +15029,9 @@ function docModelOptions(d: EmNode): ModelOptions {
     limit: { bytes: v.lodLimitMB * 1024 * 1024, points: v.lodLimitPoints },
     tiles: { memoryMB: v.tilesMemoryMB },
   };
+  const chosen = docModelOf(d);
+  if (chosen?.modifier) { opts.urlModifier = chosen.modifier; opts.lods = false; }
+  if (chosen?.resolved) opts.resolved = chosen.resolved;
   if (!st) return opts;
   const linked = (id: string) => st.liveEdges()
     .filter((e) => e.source === id && e.edge_type === "has_linked_resource").map((e) => st.node(e.target)).filter(Boolean) as EmNode[];
@@ -15037,6 +15103,11 @@ function renderDocReadingStage(win: Win, detail: HTMLElement, d: EmNode): void {
     imageUrl: medium === "image" ? url : null,
     modelUrl: medium === "3d" ? url : null,
     model: medium === "3d" ? docModelOptions(d) : undefined,
+    modelNote: (() => {
+      const c = docModelOf(d)?.choice;
+      if (c?.kind !== "blender") return undefined;
+      return t("declared.onlyBlender", { file: `${c.blendFile.split("/").pop() || c.blendFile} · ${c.datablock}` });
+    })(),
     text: () => docText(d),
     onTrace: (x, g) => traceReading(win, x, d.id, g),
     tool: docToolOf(win),

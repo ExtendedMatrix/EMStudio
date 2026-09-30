@@ -62,6 +62,9 @@ export interface ReadingStageCtx {
   current: string | null;
   imageUrl: string | null;
   modelUrl: string | null;
+  /** RISORSA-FILE · why there is no model here when it is not a fault: «solo in
+   *  Blender · TempluMare_2021.blend · OB_PODIO_LOD1» */
+  modelNote?: string;
   /** MICRO-3DTILES · a big asset: its threshold, its tileset, its LOD set */
   model?: ModelOptions;
   /** the text, inline or fetched; null = not readable here (a PDF) */
@@ -475,7 +478,9 @@ function modelStage(ctx: ReadingStageCtx, reads: string[], owner: HTMLElement, s
   const tracing3d = (c: ReadingStageCtx): boolean => !!c.armed || TOOLS_3D.includes(c.tool as DocTool);
   const wrap = el("div", "rd-3d" + (tracing3d(ctx) ? " armed" : ""));
   if (!ctx.modelUrl) {
-    wrap.appendChild(el("p", "chain-note", t("rd.no3d")));
+    const note = el("p", "chain-note", ctx.modelNote ?? t("rd.no3d"));
+    if (ctx.modelNote) note.dataset.onlyBlender = "1";
+    wrap.appendChild(note);
     return wrap;
   }
   // the markers read their vertices from the node (`data.coords`)

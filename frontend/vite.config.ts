@@ -100,6 +100,38 @@ function minifyWholeChunk(): Plugin {
   };
 }
 
+/** RISORSA-FILE · three r185's DRACOLoader names its DEFAULT decoders with
+ *  `new URL('../libs/draco/…', import.meta.url)` at the top of the module, and
+ *  Vite follows them: in a library build (engine3d.js) all five files were
+ *  inlined — measured, engine3d.js 815 kB → 2.59 MB, for every first model,
+ *  Draco or not. EMStudio hands the loader its decoder itself (the glTF build,
+ *  `tiles3d.ts dracoFor`), so the defaults go: empty strings, no asset. */
+function dracoWithoutDefaults(): Plugin {
+  return {
+    name: "em-draco-without-defaults",
+    enforce: "pre",
+    transform(code, id) {
+      if (!/three\/examples\/jsm\/loaders\/DRACOLoader\.js$/.test(id)) return null;
+      const out = code.replace(/new URL\(\s*'\.\.\/libs\/draco\/[^']+',\s*import\.meta\.url\s*\)\.toString\(\)/g, '""');
+      return out === code ? null : { code: out, map: null };
+    },
+  };
+}
+
+/** RISORSA-FILE · the web build's tiles3d.js asks the Draco decoder BESIDE it
+ *  (`draco/…`, fetched on the first Draco tile): a library build would
+ *  otherwise inline both files as base64 into tiles3d.js. */
+function dracoBeside(): Plugin {
+  const dir = fileURLToPath(new URL("./node_modules/three/examples/jsm/libs/draco/gltf/", import.meta.url));
+  return {
+    name: "em-draco-beside",
+    generateBundle() {
+      for (const f of ["draco_wasm_wrapper.js", "draco_decoder.wasm"])
+        this.emitFile({ type: "asset", fileName: `draco/${f}`, source: readFileSync(dir + f) });
+    },
+  };
+}
+
 export default defineConfig(({ command }) => {
   return ({
   // The dev server is reached through Caddy, which forwards the ORIGINAL Host —
@@ -150,8 +182,9 @@ export default defineConfig(({ command }) => {
   // `Local: http://localhost:5173/`, serving the editor at the root with
   // `/@vite/client` beside it. There is nothing to inline in a dev server, so the
   // plugin belongs to the build alone.
-  plugins: command === "serve" ? [versionFollowsPackageJson()]
-    : entry === "reader" ? [] : entry === "engine3d" || entry === "tiles3d" ? [minifyWholeChunk()] : [viteSingleFile()],
+  plugins: [dracoWithoutDefaults(), ...(command === "serve" ? [versionFollowsPackageJson()]
+    : entry === "reader" ? [] : entry === "engine3d" ? [minifyWholeChunk()]
+    : entry === "tiles3d" ? [minifyWholeChunk(), dracoBeside()] : [viteSingleFile()])],
   build: {
     outDir: "dist",
     // RIFINITURE · the engine is a library build: ONE self-contained ES module

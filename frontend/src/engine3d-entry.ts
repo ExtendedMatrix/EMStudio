@@ -11,6 +11,9 @@
  */
 export * as THREE from "three";
 export { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
+// RISORSA-FILE · a tile of TempluMare is an obj that calls its mtl and textures
+export { OBJLoader } from "three/examples/jsm/loaders/OBJLoader.js";
+export { MTLLoader } from "three/examples/jsm/loaders/MTLLoader.js";
 export { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 // SPAZIO · the proxies' convex hulls (the Scena 3D draws them as they are)
 export { ConvexGeometry } from "three/examples/jsm/geometries/ConvexGeometry.js";
@@ -21,3 +24,8 @@ export { ConvexGeometry } from "three/examples/jsm/geometries/ConvexGeometry.js"
 // tile's mesh and the scene's raycaster would quietly fail.
 export * from "three";
 export { estimateBytesUsed } from "three/examples/jsm/utils/BufferGeometryUtils.js";
+// RISORSA-FILE · Draco-compressed tiles: tiles3d.js takes the loader from here
+// (its decoder files ride in tiles3d.js)
+export { DRACOLoader } from "three/examples/jsm/loaders/DRACOLoader.js";
+// …and the one addon GLTFExtensionsPlugin's metadata reader takes from three
+export { FullScreenQuad } from "three/examples/jsm/postprocessing/Pass.js";

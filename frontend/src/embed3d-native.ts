@@ -48,14 +48,17 @@ export async function engine(): Promise<any> {
     enginePromise = __EM_LAZY_3D__
       ? import(/* @vite-ignore */ new URL("./engine3d.js", document.baseURI).href)
       : (async () => {
-          const [THREE, loaderMod, controlsMod, convexMod] = await Promise.all([
+          const [THREE, loaderMod, controlsMod, convexMod, objMod, mtlMod] = await Promise.all([
             import("three"),
             import("three/examples/jsm/loaders/GLTFLoader.js"),
             import("three/examples/jsm/controls/OrbitControls.js"),
             import("three/examples/jsm/geometries/ConvexGeometry.js"),
+            import("three/examples/jsm/loaders/OBJLoader.js"),
+            import("three/examples/jsm/loaders/MTLLoader.js"),
           ]);
           return { THREE, GLTFLoader: loaderMod.GLTFLoader,
-                   OrbitControls: controlsMod.OrbitControls, ConvexGeometry: convexMod.ConvexGeometry };
+                   OrbitControls: controlsMod.OrbitControls, ConvexGeometry: convexMod.ConvexGeometry,
+                   OBJLoader: objMod.OBJLoader, MTLLoader: mtlMod.MTLLoader };
         })();
   }
   return enginePromise;
@@ -135,6 +138,14 @@ export interface ModelOptions {
   tiles?: { mode?: RefineMode; memoryMB?: number };
   /** look for the `<base>_LOD0…N` siblings of a glb (default: yes) */
   lods?: boolean;
+  /** RISORSA-FILE · the files of a resource of several files: the URL the
+   *  loader is handed is VIRTUAL, and this turns every URL it asks (the mtl
+   *  the obj calls, the textures the mtl calls, a gltf's bin) into a real
+   *  address — offline beside the em.json, online by digest in the store
+   *  (`representation.ts addressMap`). three's `LoadingManager.setURLModifier`. */
+  urlModifier?: (url: string) => string;
+  /** …and what it resolved, for the probes */
+  resolved?: () => Array<[string, string]>;
 }
 
 /** MICRO-3DTILES · the `_LOD<n>` of a glb's locator — in its path or in the
@@ -229,10 +240,10 @@ export function mount3dViewer(host: HTMLElement, url: string,
     if (disposed) return;
     status.textContent = "carico il modello…";
     void (async () => {
-      let E: any, THREE: any, GLTFLoader: any, OrbitControls: any;
+      let E: any, THREE: any, GLTFLoader: any, OrbitControls: any, OBJLoader: any, MTLLoader: any;
       try {
         E = await engine();
-        ({ THREE, GLTFLoader, OrbitControls } = E);
+        ({ THREE, GLTFLoader, OrbitControls, OBJLoader, MTLLoader } = E);
       } catch {
         fail(t("em3d.noEngine"));
         return;
@@ -447,12 +458,55 @@ export function mount3dViewer(host: HTMLElement, url: string,
         content.clear();
       };
 
+      // RISORSA-FILE · every loader asks through ONE manager: the files of a
+      // resource of several files are resolved from its `has_file` edges
+      const manager = new THREE.LoadingManager();
+      if (mo.urlModifier) manager.setURLModifier(mo.urlModifier);
+      (host as unknown as { __v3dResolved?: () => Array<[string, string]> }).__v3dResolved =
+        () => mo.resolved?.() ?? [];
+
+      // ── an OBJ, with the mtl it calls and the textures the mtl calls ──────
+      const openObj = async (u: string) => {
+        try {
+          const text = String(await new THREE.FileLoader(manager).loadAsync(u));
+          const base = u.slice(0, u.lastIndexOf("/") + 1);
+          const libs = [...text.matchAll(/^mtllib\s+(.+?)\s*$/gm)].map((m) => m[1]);
+          const loader = new OBJLoader(manager);
+          if (libs.length) {
+            const mtl = new MTLLoader(manager);
+            mtl.setPath(base);
+            const materials = await mtl.loadAsync(libs[0]);
+            materials.preload();
+            loader.setMaterials(materials);
+          }
+          const group = loader.parse(text);
+          if (disposed) return;
+          clearContent();
+          content.add(group);
+          host.dataset.model = u;
+          host.dataset.modelKind = "obj";
+          let meshes = 0, textured = 0;
+          group.traverse((o: any) => {
+            if (!o.isMesh) return;
+            meshes++;
+            const ms = Array.isArray(o.material) ? o.material : [o.material];
+            if (ms.some((m: any) => m?.map)) textured++;
+          });
+          host.dataset.meshes = String(meshes);
+          host.dataset.textured = String(textured);
+          if (!framed) { framed = true; frameBox(new THREE.Box3().setFromObject(group)); }
+          show();
+        } catch {
+          unreachable();
+        }
+      };
+
       // ── a glb (or one level of a LOD set) ──────────────────────────────────
       let framed = false;
       let glbGen = 0;
       const openGlb = (u: string, onDone?: () => void) => {
         const gen = ++glbGen;
-        new GLTFLoader().load(
+        new GLTFLoader(manager).load(
           u,
           (gltf: any) => {
             if (disposed || gen !== glbGen) return;
@@ -598,7 +652,9 @@ export function mount3dViewer(host: HTMLElement, url: string,
       };
 
       if (isTilesetUrl(url)) { await openTiles(url); return; }
-      const set = mo.lods === false ? [] : await probeLods(url);
+      // RISORSA-FILE · an obj (a file set: obj → mtl → textures)
+      if (/\.obj(\?|#|$)/i.test(url)) { await openObj(url); return; }
+      const set = mo.lods === false || mo.urlModifier ? [] : await probeLods(url);
       if (disposed) return;
       if (set.length) {
         const top = set[set.length - 1];

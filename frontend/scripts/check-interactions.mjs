@@ -55,9 +55,11 @@ const { chromium } = await playwright();
 const browser = await chromium.launch({ executablePath: existsSync(CHR) ? CHR : undefined });
 
 /** A fresh page on a fixture, in a language, with an optional workspace. */
-async function open({ doc = "catena", locale = "it", w = 1600, h = 1000, ws, init, hook } = {}) {
+async function open({ doc = "catena", locale = "it", w = 1600, h = 1000, ws, init, hook, query = "", route } = {}) {
   const d = doc ? (typeof doc === "string" ? fixture(doc) : doc) : null;
   const ctx = await browser.newContext({ viewport: { width: w, height: h } });
+  // RISORSA-FILE · a simulated store, answered before the network
+  if (route) await ctx.route(route.pattern, route.handler);
   const p = await ctx.newPage();
   const errors = [];
   p.on("pageerror", (e) => errors.push(String(e).slice(0, 300)));
@@ -73,7 +75,7 @@ async function open({ doc = "catena", locale = "it", w = 1600, h = 1000, ws, ini
     } catch { /* private mode */ }
   }, [d, locale, init ?? null]);
   if (hook) await p.addInitScript(hook);
-  await p.goto(`http://localhost:${PORT}/em/studio/?bridge=${encodeURIComponent(BRIDGE)}`);
+  await p.goto(`http://localhost:${PORT}/em/studio/?bridge=${encodeURIComponent(BRIDGE)}${query}`);
   if (d) await p.waitForFunction(() => window.__EM_SCENE__?.()?.nodes?.length > 0, null, { timeout: 30000 });
   else await p.waitForSelector("#workspace-bar .ws-tab", { timeout: 30000 });
   await p.waitForTimeout(500);
@@ -2497,6 +2499,110 @@ test("R2.declared", "padre dichiarato · una tile timbrata col padre datablock (
       && !errors.length && !b.errors.length,
     detail: { self: stamp?.self && { packaging: stamp.self.packaging, covers: stamp.self.digest_covers, members: stamp.self.members?.length },
               from, dtc, insp, savedKeys, toasts, errors, errorsB: b.errors } };
+});
+
+// ── NIGHT-RISORSA-FILE · parte 3: il visualizzatore sceglie ────────────────
+/** the risorsa-file fixture, opened as if from `fs/base/` (its files beside it) */
+async function openBaseDoc(docId, opts = {}) {
+  const root = await rootPath();
+  const o = await open({ doc: "catena", ws: "provenance", ...opts });
+  await o.p.evaluate(([d, path]) => window.__EM_DRAG__.openAt(d, path),
+    [fixture("risorsa-file"), `${root}/base/risorsa-file.em.json`]);
+  await o.p.waitForTimeout(800);
+  const win = await o.p.evaluate((id) => window.__EM_DRAG__.openDoc(id), docId);
+  return { ...o, win, root };
+}
+const modelHost = (p, win) => p.evaluate((w) => {
+  const h = document.querySelector(`[data-win="${w}"] .rd-3d-host`);
+  return h && { ready: h.dataset.ready ?? null, kind: h.dataset.modelKind ?? null, model: h.dataset.model ?? null,
+    meshes: Number(h.dataset.meshes ?? 0), textured: Number(h.dataset.textured ?? 0),
+    resolved: h.__v3dResolved?.() ?? [], note: h.querySelector(".nv-embed-note")?.textContent ?? "" };
+}, win);
+const waitModel = async (p, win, ms = 60000) => {
+  const t0 = Date.now();
+  let m = await modelHost(p, win);
+  while (Date.now() - t0 < ms && !(m?.ready === "1" || /raggiungibile|unreachable/.test(m?.note ?? ""))) {
+    await p.waitForTimeout(300);
+    m = await modelHost(p, win);
+  }
+  return { ...m, ms: Date.now() - t0 };
+};
+test("R3.offline", "visualizzatore · OB_PODIO_LOD1 si apre dal file_set (obj + mtl + texture) offline, i percorsi dagli archi has_file", async () => {
+  const { p, ctx, errors, win } = await openBaseDoc("D2");
+  const m = await waitModel(p, win);
+  await p.screenshot({ path: SHOT("r3-podio-lod1-offline") }).catch(() => {});
+  await ctx.close();
+  const got = Object.fromEntries(m.resolved ?? []);
+  return { pass: m.ready === "1" && m.kind === "obj" && m.meshes > 0 && m.textured > 0
+      && /\/fs\/at\/.*LOD1\/OB_PODIO_LOD1\.mtl$/.test(got["OB_PODIO_LOD1.mtl"] ?? "")
+      && /\/fs\/at\/.*LOD1\/textures\/T_OB_PODIO_LOD1\.jpg$/.test(got["textures/T_OB_PODIO_LOD1.jpg"] ?? "")
+      && !errors.length,
+    detail: { ready: m.ready, kind: m.kind, meshes: m.meshes, textured: m.textured, resolved: got, ms: m.ms, note: m.note, errors } };
+});
+test("R3.online", "visualizzatore · lo stesso online: ogni file per digest dallo store (/asset/sha256:…), nessuno dal disco", async () => {
+  const root = await rootPath();
+  const sums = JSON.parse(readFileSync(`${TD}risorsa-file.sums.json`, "utf8"));
+  const byDigest = new Map(Object.entries(sums).map(([rel, v]) => [v.checksum, `${root}/base/RM/TempluMare_tiles/${rel}`]));
+  const asked = [];
+  const route = { pattern: "http://store.invalid/asset/**", handler: async (r) => {
+    const ref = decodeURIComponent(r.request().url().split("/asset/")[1] ?? "");
+    asked.push(ref);
+    const file = byDigest.get(ref);
+    if (!file) return r.fulfill({ status: 404, body: "no asset" });
+    return r.fulfill({ status: 200, body: readFileSync(file), headers: { "access-control-allow-origin": "*" } });
+  } };
+  const { p, ctx, errors, win } = await openBaseDoc("D2", { query: `&store=${encodeURIComponent("http://store.invalid/asset/")}`, route });
+  const m = await waitModel(p, win);
+  const fromDisk = await p.evaluate(() => performance.getEntriesByType("resource").map((e) => e.name).filter((u) => /\/fs\/at\/.*TempluMare_tiles/.test(u)));
+  await p.screenshot({ path: SHOT("r3-podio-lod1-online") }).catch(() => {});
+  await ctx.close();
+  const want = ["OB_PODIO_LOD1.obj", "OB_PODIO_LOD1.mtl", "textures/T_OB_PODIO_LOD1.jpg"].map((k) => sums[`LOD1/${k}`].checksum);
+  return { pass: m.ready === "1" && m.kind === "obj" && m.textured > 0 && want.every((d) => asked.includes(d))
+      && !fromDisk.length && !errors.length,
+    detail: { ready: m.ready, textured: m.textured, asked, fromDisk, note: m.note, errors } };
+});
+test("R3.blender", "visualizzatore · un RM che ha solo il datablock dice «solo in Blender», con il nome del .blend", async () => {
+  const { p, ctx, errors, win } = await openBaseDoc("D4");
+  await p.waitForTimeout(800);
+  const note = await p.evaluate((w) => document.querySelector(`[data-win="${w}"] [data-only-blender]`)?.textContent ?? null, win);
+  await p.screenshot({ path: SHOT("r3-solo-in-blender") }).catch(() => {});
+  await ctx.close();
+  return { pass: note === "solo in Blender · TempluMare_2021.blend · OB_PRATO_LOD1" && !errors.length, detail: { note, errors } };
+});
+test("R3.3tz", "visualizzatore · TempluMare_cesium.3tz si apre senza estrarlo e si raffina come la cartella, con lo stesso allineamento", async () => {
+  const root = await rootPath();
+  const run = async (url) => {
+    const t0 = Date.now();
+    const o = await openTilesDoc("D1", { mutate: (d) => {
+      for (const n of d.graph.nodes) if (n.id === "RES_TS") n.data.url = url;
+      return d;
+    } });
+    const first = await tilesSettle(o.p, o.win, (s) => (s.files ?? []).length >= 1, 30000);
+    const tFirst = Date.now() - t0;
+    // «Automatico»: the renderer refines by the error on screen — the same
+    // camera for both, so the same tiles when it has settled (the hollow temple
+    // leaves nothing under a click at the centre of the root tile)
+    await o.p.click(`[data-win="${o.win}"] .tl-seg [data-mode="auto"]`);
+    let more = await tilesSettle(o.p, o.win, (s) => (s.files ?? []).length > (first.files ?? []).length, 40000);
+    for (let i = 0; i < 20; i++) {
+      await o.p.waitForTimeout(1000);
+      const next = await tilesState(o.p, o.win);
+      if (same(next.files, more.files) && !next.status?.busy) break;
+      more = next;
+    }
+    more.files = [...(more.files ?? [])].sort();
+    const got = await o.fetched(true);
+    await o.p.screenshot({ path: SHOT(`r3-templumare-${url.endsWith(".3tz") ? "3tz" : "cartella"}`) }).catch(() => {});
+    await o.ctx.close();
+    return { first: first.files, more: more.files, box: more.box, line: more.line, tFirst, errors: o.errors,
+             fetchedBodies: got.length };
+  };
+  const folder = await run(`${root}/base/RM/TempluMare_cesium/tileset.json`);
+  const archive = await run(`${root}/base/RM/TempluMare_cesium.3tz`);
+  const round = (b) => b && JSON.stringify(b, (k, v) => (typeof v === "number" ? Math.round(v * 1000) / 1000 : v));
+  return { pass: same(folder.first, archive.first) && same(folder.more, archive.more) && (archive.more ?? []).length > 1
+      && round(folder.box) === round(archive.box) && !folder.errors.length && !archive.errors.length,
+    detail: { folder, archive } };
 });
 
 // ── run ─────────────────────────────────────────────────────────────────────

@@ -30,12 +30,21 @@ const doc = JSON.parse(readFileSync(`${TD}catena.em.json`, "utf8"));
 doc.graph.graph_id = "risorsa-file";
 const g = R.plainGraph(doc.graph);
 const SUMS = JSON.parse(readFileSync(`${TD}risorsa-file.sums.json`, "utf8"));
+// the entry point (the obj) carries its locator beside the em.json of the base
+// (`fs/base/`), the other files only their path relative to it — which is what
+// has_file declares, and what the viewer resolves
 const f = (path) => ({ path: path.replace(/^LOD1\//, ""), checksum: SUMS[path].checksum,
-  size_bytes: SUMS[path].size_bytes });
+  size_bytes: SUMS[path].size_bytes,
+  ...(path.endsWith(".obj") ? { url: `RM/TempluMare_tiles/${path}` } : {}) });
 
 R.addResource(g, { resourceId: "podio_blend", name: "OB_PODIO_LOD1 (TempluMare_2021.blend)",
   kind: "3d_model", packaging: "datablock", tier: "master",
   files: [{ blend_file: "RB/TempluMare_2021.blend", datablock: "OB_PODIO_LOD1" }] });
+// parte 3: an object of the .blend that nothing was exported from — the web
+// viewer has no representation of it to open
+R.addResource(g, { resourceId: "prato_blend", name: "OB_PRATO_LOD1 (TempluMare_2021.blend)",
+  kind: "3d_model", packaging: "datablock", tier: "master",
+  files: [{ blend_file: "RB/TempluMare_2021.blend", datablock: "OB_PRATO_LOD1" }] });
 R.addResource(g, { resourceId: "podio_lod1", name: "OB_PODIO_LOD1", kind: "3d_model",
   packaging: "file_set", tier: "distribution", derivedFrom: ["podio_blend"],
   data: { dtc_kind: "mesh" },
@@ -51,14 +60,23 @@ R.addResource(g, { resourceId: "estl_lod1", name: "OB_EST_L_LOD1", kind: "3d_mod
 R.addResource(g, { resourceId: "estr_lod1", name: "OB_EST_R_LOD1", kind: "3d_model",
   packaging: "file_set", data: { dtc_kind: "mesh" },
   files: [f("LOD1/OB_EST_R_LOD1.obj"), f("LOD1/OB_EST_R_LOD1.mtl"), shared] });
+// D.2 «Rilievo 3D» has no file of its own here: its model is its RM's
+delete doc.graph.nodes.find((n) => n.id === "D2").data.url;
 doc.graph.nodes.push(
   { id: "export_obj", name: "Export OBJ (3DSC)", node_type: "dtc_process", description: "",
     data: { dtc_kind: "format_conversion" } },
-  { id: "RM_PODIO", name: "RM_PODIO", node_type: "representation_model", description: "" });
+  { id: "RM_PODIO", name: "RM_PODIO", node_type: "representation_model", description: "" },
+  // parte 3: an RM whose only resource is the object in the .blend
+  { id: "RM_BLEND", name: "RM_BLEND", node_type: "representation_model", description: "" },
+  { id: "D4", name: "D.4", node_type: "document", description: "Solo nel .blend", data: {} });
 doc.graph.edges.push(
   { id: "export_obj__dtc_had_output__podio_lod1", source: "export_obj", target: "podio_lod1", edge_type: "dtc_had_output" },
   { id: "export_obj__dtc_had_input__podio_blend", source: "export_obj", target: "podio_blend", edge_type: "dtc_had_input" },
   { id: "RM_PODIO__has_linked_resource__podio_lod1", source: "RM_PODIO", target: "podio_lod1", edge_type: "has_linked_resource" },
-  { id: "RM_PODIO__has_first_epoch__EP_MOD", source: "RM_PODIO", target: "EP_MOD", edge_type: "has_first_epoch" });
+  { id: "RM_PODIO__has_first_epoch__EP_MOD", source: "RM_PODIO", target: "EP_MOD", edge_type: "has_first_epoch" },
+  // parte 3: D.2 «Rilievo 3D» has the RM of PODIO; D.4 the RM of the .blend only
+  { id: "D2__has_representation_model__RM_PODIO", source: "D2", target: "RM_PODIO", edge_type: "has_representation_model" },
+  { id: "RM_BLEND__has_linked_resource__prato_blend", source: "RM_BLEND", target: "prato_blend", edge_type: "has_linked_resource" },
+  { id: "D4__has_representation_model__RM_BLEND", source: "D4", target: "RM_BLEND", edge_type: "has_representation_model" });
 writeFileSync(`${TD}risorsa-file.em.json`, JSON.stringify(doc, null, 1) + "\n");
 console.log(`risorsa-file.em.json: ${doc.graph.nodes.length} nodes, ${doc.graph.edges.length} edges`);

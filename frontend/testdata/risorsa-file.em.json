@@ -137,9 +137,7 @@
     "node_type": "document",
     "name": "D.2",
     "description": "Rilievo 3D di USM101, 2026",
-    "data": {
-     "url": "/em/studio/testdata/catena-muro.gltf"
-    }
+    "data": {}
    },
    {
     "id": "D3",
@@ -178,6 +176,19 @@
     }
    },
    {
+    "id": "prato_blend",
+    "name": "OB_PRATO_LOD1 (TempluMare_2021.blend)",
+    "node_type": "resource",
+    "description": "",
+    "data": {
+     "url": "blend://RB/TempluMare_2021.blend#Object/OB_PRATO_LOD1",
+     "url_type": "3d_model",
+     "description": "",
+     "tier": "master",
+     "packaging": "datablock"
+    }
+   },
+   {
     "id": "podio_lod1",
     "name": "OB_PODIO_LOD1",
     "node_type": "resource",
@@ -196,7 +207,7 @@
     "name": "OB_PODIO_LOD1.obj",
     "node_type": "resource_file",
     "data": {
-     "url": "OB_PODIO_LOD1.obj",
+     "url": "RM/TempluMare_tiles/LOD1/OB_PODIO_LOD1.obj",
      "checksum": "sha256:7aec2a734482c5644065738ea08519bb583e99c838c4a0cb624646cbd18f05cd",
      "size_bytes": 46961673
     }
@@ -239,7 +250,7 @@
     "name": "OB_PRATO_LOD1.obj",
     "node_type": "resource_file",
     "data": {
-     "url": "OB_PRATO_LOD1.obj",
+     "url": "RM/TempluMare_tiles/LOD1/OB_PRATO_LOD1.obj",
      "checksum": "sha256:b6e0d50a9dc26418a4b96bcd41dae4ca25efb8f33002ef8a7f43b700358d648a",
      "size_bytes": 26877879
     }
@@ -282,7 +293,7 @@
     "name": "OB_EST_L_LOD1.obj",
     "node_type": "resource_file",
     "data": {
-     "url": "OB_EST_L_LOD1.obj",
+     "url": "RM/TempluMare_tiles/LOD1/OB_EST_L_LOD1.obj",
      "checksum": "sha256:d7aaa7b5daab151bdeae6834b850c6d1a472fe38e701cff9e36f7d29d377b765",
      "size_bytes": 51886357
     }
@@ -325,7 +336,7 @@
     "name": "OB_EST_R_LOD1.obj",
     "node_type": "resource_file",
     "data": {
-     "url": "OB_EST_R_LOD1.obj",
+     "url": "RM/TempluMare_tiles/LOD1/OB_EST_R_LOD1.obj",
      "checksum": "sha256:3255a20cf8205d4c8e4d69b6dd2b210f3a6af3b433ce03028c247a3cde22f9a5",
      "size_bytes": 59686218
     }
@@ -354,6 +365,19 @@
     "name": "RM_PODIO",
     "node_type": "representation_model",
     "description": ""
+   },
+   {
+    "id": "RM_BLEND",
+    "name": "RM_BLEND",
+    "node_type": "representation_model",
+    "description": ""
+   },
+   {
+    "id": "D4",
+    "name": "D.4",
+    "node_type": "document",
+    "description": "Solo nel .blend",
+    "data": {}
    }
   ],
   "edges": [
@@ -626,6 +650,24 @@
     "source": "RM_PODIO",
     "target": "EP_MOD",
     "edge_type": "has_first_epoch"
+   },
+   {
+    "id": "D2__has_representation_model__RM_PODIO",
+    "source": "D2",
+    "target": "RM_PODIO",
+    "edge_type": "has_representation_model"
+   },
+   {
+    "id": "RM_BLEND__has_linked_resource__prato_blend",
+    "source": "RM_BLEND",
+    "target": "prato_blend",
+    "edge_type": "has_linked_resource"
+   },
+   {
+    "id": "D4__has_representation_model__RM_BLEND",
+    "source": "D4",
+    "target": "RM_BLEND",
+    "edge_type": "has_representation_model"
    }
   ],
   "data": {}

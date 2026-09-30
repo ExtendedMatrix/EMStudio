@@ -34,15 +34,27 @@ export type RefineMode = "manual" | "auto";
 
 let tilesPromise: Promise<any> | null = null;
 
-/** 3DTilesRendererJS, loaded once — after three. */
-export async function tilesEngine(): Promise<{ TilesRenderer: any; ImplicitTilingPlugin: any }> {
+/** 3DTilesRendererJS, loaded once — after three. RISORSA-FILE: with it, the
+ *  `.3tz` reader (`tiles3tz.ts`), so an archive costs nothing until the first
+ *  tileset opens — the same moment the renderer itself arrives. */
+export async function tilesEngine(): Promise<{ TilesRenderer: any; ImplicitTilingPlugin: any;
+    Archive3tz: any; Tiles3tzPlugin: any; sourceFor: any; archiveBase: any;
+    DRACOLoader: any; GLTFExtensionsPlugin: any; DRACO_FILES: Record<string, string> }> {
   if (!tilesPromise) {
     // a CONSTANT condition, as in `engine()`: the other arm leaves the build
     tilesPromise = __EM_LAZY_3D__
       ? engine().then(() => import(/* @vite-ignore */ new URL("./tiles3d.js", document.baseURI).href))
       : (async () => {
-          const [r, p] = await Promise.all([import("3d-tiles-renderer/three"), import("3d-tiles-renderer/core/plugins")]);
-          return { TilesRenderer: r.TilesRenderer, ImplicitTilingPlugin: p.ImplicitTilingPlugin };
+          const [r, p, z, d, x, w, m] = await Promise.all([import("3d-tiles-renderer/three"),
+            import("3d-tiles-renderer/core/plugins"), import("./tiles3tz"),
+            import("three/examples/jsm/loaders/DRACOLoader.js"), import("3d-tiles-renderer/src/three/plugins/GLTFExtensionsPlugin.js"),
+            import("../node_modules/three/examples/jsm/libs/draco/gltf/draco_wasm_wrapper.js?url"),
+            import("../node_modules/three/examples/jsm/libs/draco/gltf/draco_decoder.wasm?url")]);
+          return { TilesRenderer: r.TilesRenderer, ImplicitTilingPlugin: p.ImplicitTilingPlugin,
+                   Archive3tz: z.Archive3tz, Tiles3tzPlugin: z.Tiles3tzPlugin,
+                   sourceFor: z.sourceFor, archiveBase: z.archiveBase,
+                   DRACOLoader: d.DRACOLoader, GLTFExtensionsPlugin: x.GLTFExtensionsPlugin,
+                   DRACO_FILES: { "draco_wasm_wrapper.js": w.default, "draco_decoder.wasm": m.default } };
         })();
     tilesPromise.catch(() => { tilesPromise = null; });
   }
@@ -52,7 +64,15 @@ export async function tilesEngine(): Promise<{ TilesRenderer: any; ImplicitTilin
 /** A locator of a tileset: its entry point, `tileset.json` (the `_link`
  *  distribution EMtools writes, `packaging: directory`). */
 export function isTilesetUrl(url: string | null | undefined): boolean {
-  return !!url && /(^|\/)tileset\.json(\?|#|$)/i.test(String(url));
+  return !!url && (/(^|\/)tileset\.json(\?|#|$)/i.test(String(url)) || isArchive3tzUrl(url));
+}
+
+/** RISORSA-FILE · a 3D Tiles ARCHIVE (`.3tz`): a tileset in one file, read
+ *  without extracting it. Also through the bridge's `/fs/file?path=…3tz`. */
+export function isArchive3tzUrl(url: string | null | undefined): boolean {
+  if (!url) return false;
+  const s = String(url);
+  return /\.3tz(\?|#|&|$)/i.test(s) || /\.3tz(%23|%3F|$)/i.test(s);
 }
 
 export interface TilesStatus {
@@ -113,6 +133,17 @@ export interface TilesOptions {
   memoryMB?: number;
 }
 
+let draco: any = null;
+function dracoFor(E: any, T: any): any {
+  if (draco) return draco;
+  const manager = new E.THREE.LoadingManager();
+  manager.setURLModifier((u: string) => T.DRACO_FILES[String(u).split("/").pop() ?? ""] ?? u);
+  draco = new T.DRACOLoader(manager);
+  draco.setDecoderPath("draco/");
+  draco.setDecoderConfig({ type: "wasm" });
+  return draco;
+}
+
 /** A tile's level: an implicit tile's own (`{level}` of its URI, 0 = the root
  *  of the octree/quadtree); in an explicit tree, 0 for the first tile with
  *  content. Measured on 3DSC's `sarcofago_v3_baseline`: content only at level 2
@@ -128,8 +159,22 @@ const levelOf = (tile: any): number => tile?.implicitTilingData
 export function createTilesLayer(E: any, T: any, url: string, camera: any, renderer: any,
                                  opts: TilesOptions = {}): TilesLayer {
   const { THREE } = E;
+  // RISORSA-FILE · a `.3tz`: the tileset is asked under a base nobody serves,
+  // and the plugin answers every file of it from the archive — opened from its
+  // end (the index), then each tile at its offset (tiles3tz.ts)
+  let archivePlugin: any = null;
+  if (isArchive3tzUrl(url) && T.Tiles3tzPlugin) {
+    const base = T.archiveBase();
+    const archive = T.sourceFor(url).then((src: any) => T.Archive3tz.open(src));
+    archivePlugin = new T.Tiles3tzPlugin(archive, base);
+    url = `${base}tileset.json`;
+  }
   const tiles = new T.TilesRenderer(url);
+  if (archivePlugin) tiles.registerPlugin(archivePlugin);
   tiles.registerPlugin(new T.ImplicitTilingPlugin());
+  // RISORSA-FILE · Draco-compressed tiles (TempluMare's b3dm): ONE decoder for
+  // the page, its two files served from the engine's own (never a CDN)
+  if (T.DRACOLoader && T.GLTFExtensionsPlugin) tiles.registerPlugin(new T.GLTFExtensionsPlugin({ dracoLoader: dracoFor(E, T) }));
   // Z-up → Y-up: the one rotation (see the header)
   tiles.group.rotation.x = -Math.PI / 2;
   tiles.setCamera(camera);

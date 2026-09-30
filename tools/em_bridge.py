@@ -662,8 +662,12 @@ def make_handler(api):
             # died in the browser with a bare network error while the same call
             # from curl worked, which is exactly what an unlisted header looks
             # like from the page's side.
+            # RISORSA-FILE · `Range` (a .3tz read from its end, then each tile at
+            # its offset) and the headers a partial answer is read by
             self.send_header("Access-Control-Allow-Headers",
-                             "Content-Type, X-EM-Filename")
+                             "Content-Type, X-EM-Filename, Range")
+            self.send_header("Access-Control-Expose-Headers",
+                             "Content-Range, Accept-Ranges, Content-Length")
 
         def do_OPTIONS(self):
             if not self._gate():
@@ -2289,12 +2293,41 @@ def make_handler(api):
             except OSError as exc:
                 self._fail(403, f"cannot read that file: {exc.strerror}")
                 return
+            # RISORSA-FILE · ONE byte range (`bytes=a-b`, `a-`, `-n`), answered
+            # 206: a .3tz is read without extracting it — its central directory
+            # from the end, then each tile at its offset. Measured before: the
+            # bridge answered 200 and the whole 199 MB archive to `bytes=0-9`.
+            # Several ranges in one request are not served (200, the whole file:
+            # the answer HTTP allows); an impossible one is 416.
+            start, end = 0, size - 1
+            partial = False
+            rng = (self.headers.get("Range") or "").strip()
+            m = re.fullmatch(r"bytes=(\d*)-(\d*)", rng) if rng else None
+            if m and (m.group(1) or m.group(2)):
+                if m.group(1):
+                    start = int(m.group(1))
+                    end = min(int(m.group(2)), size - 1) if m.group(2) else size - 1
+                else:
+                    start = max(0, size - int(m.group(2)))
+                if start >= size or start > end:
+                    if fh is not None:
+                        fh.close()
+                    self.send_response(416)
+                    self._cors()
+                    self.send_header("Content-Range", f"bytes */{size}")
+                    self.send_header("Content-Length", "0")
+                    self.end_headers()
+                    return
+                partial = True
             try:
-                self.send_response(200)
+                self.send_response(206 if partial else 200)
                 self._cors()
                 self.send_header("Content-Type",
                                  media or "application/octet-stream")
-                self.send_header("Content-Length", str(size))
+                self.send_header("Accept-Ranges", "bytes")
+                if partial:
+                    self.send_header("Content-Range", f"bytes {start}-{end}/{size}")
+                self.send_header("Content-Length", str(end - start + 1))
                 # Mild, and REVALIDATED: a folder being worked on changes under
                 # the window, so a long cache would show yesterday's photo with
                 # no way to tell. Long enough to survive a gallery scrolling
@@ -2304,11 +2337,14 @@ def make_handler(api):
                 if fh is not None:
                     # Streamed in chunks: a 200 MB orthophoto must not be read
                     # into memory to be handed to the socket.
-                    while True:
-                        chunk = fh.read(256 * 1024)
+                    fh.seek(start)
+                    left = end - start + 1
+                    while left > 0:
+                        chunk = fh.read(min(256 * 1024, left))
                         if not chunk:
                             break
                         self.wfile.write(chunk)
+                        left -= len(chunk)
             except (BrokenPipeError, ConnectionResetError):
                 pass  # the window navigated away mid-image; not an error
             finally:

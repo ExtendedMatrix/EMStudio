@@ -15,11 +15,18 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
 let checks = 0;
+/** RISORSA-FILE · Vite's `?url` (the Draco decoder's two files), as esbuild
+ *  cannot: the import is the file's URL, here its name */
+const viteUrl = { name: "vite-url", setup(b) {
+  b.onResolve({ filter: /\?url$/ }, (a) => ({ path: a.path, namespace: "vite-url" }));
+  b.onLoad({ filter: /.*/, namespace: "vite-url" }, (a) => ({
+    contents: `export default ${JSON.stringify("url:" + a.path.replace(/\?url$/, "").split("/").pop())};`, loader: "js" }));
+} };
 const ok = (c, what) => { assert.ok(c, what); checks++; };
 const SRC = new URL("../src/", import.meta.url).pathname;
 async function bundle(lazy) {
   const r = await esbuild.build({ entryPoints: [`${SRC}embed3d-native.ts`], bundle: true, format: "esm",
-    write: false, minify: true, define: { __EM_LAZY_3D__: String(lazy) }, logLevel: "silent" });
+    write: false, minify: true, define: { __EM_LAZY_3D__: String(lazy) }, logLevel: "silent", plugins: [viteUrl] });
   return r.outputFiles[0].text;
 }
 const inline = await bundle(false);
@@ -44,7 +51,7 @@ ok(lazy.includes("tiles3d.js"), "web build · …it asks for tiles3d.js, when a 
 ok(/build:tiles3d/.test(pkg.scripts["build:web"]) && /EM_ENTRY=tiles3d/.test(pkg.scripts["build:tiles3d"]),
    "build:web · + tiles3d.js");
 const tl = await esbuild.build({ entryPoints: [`${SRC}tiles3d-entry.ts`], bundle: true, format: "esm", write: false,
-  external: ["three", "three/*"], logLevel: "silent" });
+  external: ["three", "three/*"], logLevel: "silent", plugins: [viteUrl] });
 const tlText = tl.outputFiles[0].text;
 ok(!tlText.includes("THREE.WebGLRenderer:"), "tiles3d.js · no three of its own");
 // every name it takes from three (or three's addons) is one engine3d.js exports
