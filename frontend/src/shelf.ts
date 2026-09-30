@@ -33,6 +33,8 @@
  * browser cannot hash a file it is not allowed to read), and is passed in.
  */
 
+import { addResource } from "./resources";
+
 export type ShelfScope = "own-study" | "own-HDT" | "other-HDT";
 export type ShelfResidency = "reference" | "resident";
 
@@ -258,21 +260,28 @@ export function shelfToDocument(): {
   graph: Record<string, unknown>;
 } {
   const nodes: ShelfNode[] = entries.map((e) => {
-    const data: Record<string, unknown> = { url: e.locator };
-    if (e.kind) data.url_type = e.kind;
-    // written only when RECORDED: absent means nobody said, not a default
-    if (e.checksum) data.checksum = e.checksum;
-    if (e.scope) data.scope = e.scope;
-    if (e.residency) data.residency = e.residency;
-    // …where s3Dgraphy reads it (`ResourceNode.data.role`), so a role stated
-    // here is the one the shelf table reports back
-    if (e.role) data.role = e.role;
-    // …and back go the fields we do not model (media_type, access, origin, …),
-    // written FIRST so a modelled key always wins over a stale copy of itself
+    // RISORSA-FILE · the one constructor, as `add_to_shelf` does in s3Dgraphy:
+    // one file (the implicit form), the kind read from the locator when nobody
+    // said it (`kind: ""`). Scope, residency and role are written only when
+    // RECORDED: absent means nobody said, not a default — and the role goes
+    // where s3Dgraphy reads it (`ResourceNode.data.role`)
+    const node = addResource(null, {
+      resourceId: e.id, name: e.name, kind: e.kind || "",
+      files: [{ path: e.locator, ...(e.checksum ? { checksum: e.checksum } : {}) }],
+      ...(e.scope ? { scope: e.scope } : {}),
+      ...(e.residency ? { residency: e.residency } : {}),
+      ...(e.role ? { role: e.role } : {}),
+    });
+    const data = node.data as Record<string, unknown>;
+    // s3Dgraphy's constructor writes `data.description: ""`; the shelf never
+    // did, and an empty one added on save would be a change nobody made
+    if (data.description === "") delete data.description;
+    // …and back go the fields we do not model (media_type, access, origin, …):
+    // a modelled key always wins over a stale copy of itself
     if (e.extra) for (const [k, v] of Object.entries(e.extra)) {
       if (!(k in data)) data[k] = v;
     }
-    return { id: e.id, node_type: "resource", name: e.name, description: "", data };
+    return { ...node, description: "" } as ShelfNode;
   });
   return {
     header: { format: "em.json", version: "1.0" },

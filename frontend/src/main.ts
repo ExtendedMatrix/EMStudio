@@ -252,6 +252,7 @@ import {
   hdtoProfileTypes,
   isGroupType,
   isStratigraphicType,
+  isDtcChainEdge,
   isDtcNodeType,
   nodeTypeForClass,
   nodeLabel,
@@ -315,6 +316,8 @@ import { type HostInfo, SyncClient, SYNC_ACCEPTS, type SyncAccept } from "./sync
 import * as alignment from "./alignment";
 import type { GraphOp } from "./model";
 import { buildCommand, type CommandVerb } from "./commands";
+import { addResource, fileCounts, foldFiles, movePointers, replaceFile, resourceLabel, storeGraph } from "./resources";
+import { askWhichPointersMove } from "./resource-panel";
 import {
   type AwarenessNote, emptyPresence, type HubOp, noteForRemoteOp, noteForStale,
   opsForLocalChange, peerSelections, planRejoin, stampForResend,
@@ -462,6 +465,7 @@ import {
   type ResourceKind,
   type ResourceUse,
   type Scope,
+  ingestResourceOptions,
 } from "./ingest";
 import {
   clearHandoffFromLocation, handoffFromLocation, parseHandoff, type Handoff,
@@ -1581,6 +1585,8 @@ window.__EM_SCENE__ = () => {
       boxes: (s?.nodes ?? []).map((n) => ({
         id: n.id, x: r.x + n.x * vp.scale + vp.x, y: r.y + n.y * vp.scale + vp.y,
         w: n.w * vp.scale, h: n.h * vp.scale,
+        // RISORSA-FILE · what the box SAYS when it is not the node's name
+        ...(n.label ? { label: n.label } : {}), ...(n.instanceOf ? { instanceOf: n.instanceOf } : {}),
       })),
     };
   },
@@ -2253,6 +2259,9 @@ function renderInspectorInto(host: HTMLElement): void {
           (e) => (digest && e.checksum === digest) || e.name === node.name);
       },
       commandsBlocked: commandsBlockedReason,
+      isResourceOpen: (id) => openResourceFiles.has(id),
+      onToggleResourceFiles: (id) => toggleResourceFiles(id),
+      onReplaceFile: (resId, fileId) => { void replaceFileFlow(resId, fileId); },
       onClearField: (nodeId, field) => {
         (storeOfNode(nodeId) ?? store!).clearField(nodeId, field);
         refreshInspector();
@@ -2931,6 +2940,70 @@ function updateInfo(): void {
 // every ornament a real node instead of a badge. The rings still apply on top —
 // they simply all start on in that view — so this is one filter with a switch,
 // not a second, divergible reader.
+/** RISORSA-FILE · the resources whose files are shown (the drawing only: a
+ *  resource of several files opens CLOSED). */
+const openResourceFiles = new Set<string>();
+function toggleResourceFiles(resId: string): void {
+  if (openResourceFiles.has(resId)) openResourceFiles.delete(resId); else openResourceFiles.add(resId);
+  buildScenes();
+  draw();
+  refreshInspector();
+}
+
+/** RISORSA-FILE · «Sostituisci…» on a file: new bytes make a NEW revision of the
+ *  resource (`replaceFile`, s3Dgraphy `api.replace_file`), and then the one
+ *  question the library leaves to the caller — who points at the old one, and
+ *  which of them move. «All» is the proposal. */
+async function replaceFileFlow(resId: string, fileId: string | null): Promise<void> {
+  const st = storeOfNode(resId) ?? store;
+  if (!st) return;
+  const pick = document.createElement("input");
+  pick.type = "file";
+  const file = await new Promise<File | null>((resolve) => {
+    pick.addEventListener("change", () => resolve(pick.files?.[0] ?? null), { once: true });
+    pick.click();
+  });
+  if (!file) return;
+  let checksum: string;
+  try {
+    checksum = await sha256Of(await file.arrayBuffer());
+  } catch (e) {
+    toast(t("res.replaceFailed", { detail: e instanceof Error ? e.message : String(e) }));
+    return;
+  }
+  const g = storeGraph(st);
+  const out = replaceFile(g, resId, fileId, { checksum, size_bytes: file.size,
+    ...(file.type ? { media_type: file.type } : {}) });
+  const name = String(st.node(resId)?.name ?? resId);
+  // the CITATIONS are what may move (an RM, a property, a document); the DTC
+  // chain of the old resource (the export that produced it) is a statement
+  // about the OLD bytes and stays with them — measured: «all» would otherwise
+  // move `dtc_had_output` and say the export made the corrected texture
+  const citing = out.pointing_at_old.filter((ptr) => !isDtcChainEdge(ptr.edge_type));
+  const staying = out.pointing_at_old.filter((ptr) => isDtcChainEdge(ptr.edge_type));
+  const chosen = await askWhichPointersMove(g, name, citing, staying);
+  const moved = chosen.length ? movePointers(g, resId, out.new_resource_id, chosen) : 0;
+  toast(t("res.moved", { name, n: String(moved) }));
+  select(out.new_resource_id);
+}
+
+/** `sha256:<hex>` of some bytes — the form every checksum of the graph has. */
+async function sha256Of(bytes: ArrayBuffer): Promise<string> {
+  const h = new Uint8Array(await crypto.subtle.digest("SHA-256", bytes));
+  return "sha256:" + [...h].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+/** «▸ OB_PODIO_LOD1 · 3 file» on every box of a resource of several files. */
+function labelResources(scene: Scene | null | undefined, counts: Map<string, number>): void {
+  if (!scene) return;
+  for (const sn of scene.nodes) {
+    if (sn.node.node_type !== "resource" || sn.instanceOf) continue;
+    const k = counts.get(sn.node.id) ?? 0;
+    if (k > 1) sn.label = resourceLabel(String(sn.node.name || sn.id), k,
+      openResourceFiles.has(sn.node.id), t("res.files"));
+  }
+}
+
 function filteredView(opts: { wholeGraph?: boolean;
                         hidden?: { nodes: Set<string>; edges: Set<string> } } = {}): {
   nodes: EmDocument["graph"]["nodes"];
@@ -2959,6 +3032,10 @@ function filteredView(opts: { wholeGraph?: boolean;
     vNodes = vNodes.filter((n) => !dead.has(n.id));
     vEdges = vEdges.filter((e) => !dead.has(e.source) && !dead.has(e.target));
   }
+  // RISORSA-FILE · a resource of several files is ONE node until it is opened:
+  // the files of a closed resource are folded away here, where every
+  // projection reads what is on screen (the document keeps them)
+  ({ nodes: vNodes, edges: vEdges } = foldFiles(vNodes, vEdges, openResourceFiles));
   // ALWAYS drop HDT-O-profile nodes (and any node the panel tagged with
   // data.hdto_role) + their incident edges, so graph-level HDT-O metadata never
   // clutters the stratigraphic canvas. The nodes remain in em.json (single
@@ -3303,15 +3380,26 @@ function buildScenesNow(): void {
   const dtcSource = draftScene ? "stamps" : fromDisk ? "stamps"
     : neighbour ? "neighbourhood"
     : corpusNodes.length ? "corpus" : "study";
+  // RISORSA-FILE · every source of the DTC folds the files of its closed
+  // resources the same way the study view does
+  const dtcOf = (ns: EmNode[], es: EmEdge[]): Scene => {
+    const f = foldFiles(ns, es, openResourceFiles);
+    return buildDtcScene(f.nodes, f.edges, dtcOverrides, { openResources: openResourceFiles });
+  };
   scenes.dtc = draftScene
-    ? buildDtcScene(draftScene.nodes, draftScene.edges, dtcOverrides)
+    ? dtcOf(draftScene.nodes, draftScene.edges)
     : fromDisk
-    ? buildDtcScene(fromDisk.nodes, fromDisk.edges, dtcOverrides)
+    ? dtcOf(fromDisk.nodes, fromDisk.edges)
     : neighbour
-    ? buildDtcScene(neighbour.nodes, neighbour.edges, dtcOverrides)
+    ? dtcOf(neighbour.nodes, neighbour.edges)
     : corpusNodes.length
-    ? buildDtcScene(corpusNodes, corpusForView!.liveEdges(), dtcOverrides)
-    : buildDtcScene(viewFor("dtc").nodes, viewFor("dtc").edges, dtcOverrides);
+    ? dtcOf(corpusNodes, corpusForView!.liveEdges())
+    : buildDtcScene(viewFor("dtc").nodes, viewFor("dtc").edges, dtcOverrides, { openResources: openResourceFiles });
+  {
+    const counts = fileCounts([...doc.graph.edges, ...(corpusForView?.liveEdges() ?? []),
+      ...(draftScene?.edges ?? []), ...(fromDisk?.edges ?? [])]);
+    for (const sc of [scenes.matrix, scenes.graph, scenes.dtc]) labelResources(sc, counts);
+  }
   // …and when the SOURCE changes (a project with a corpus opens, or its first
   // documentation arrives), the DTC view is framed again: the camera it was left
   // with belonged to a different picture, and opening a DAG at 300% zoom on a
@@ -3328,6 +3416,7 @@ function buildScenesNow(): void {
     algorithm: graphAlgorithm,
     overrides: multigraphOverrides,
   });
+  labelResources(scenes.multigraph, fileCounts(doc.graph.edges));
 }
 
 /*
@@ -6780,6 +6869,18 @@ async function typeBox(node: EmNode): Promise<{ w: number; h: number }> {
   }
 }
 
+/** The node a menu entry makes. A RESOURCE comes from `addResource`, the one
+ *  constructor (a DTC output: no file yet, its kind in `dtc_kind`), as
+ *  `inject_dtc` makes it in s3Dgraphy; every other type is a plain node. */
+function menuNode(type: string, id: string, name: string, description: string, spec: AddSpec): EmNode {
+  const data: Record<string, unknown> | undefined = spec.kind
+    ? { dtc_kind: spec.kind, ...(spec.isResource ? { resource_type: spec.kind } : {}) } : undefined;
+  if (type === "resource") return addResource(null, { resourceId: id, name, description, data });
+  const node: EmNode = { id, name, node_type: type, description };
+  if (data) node.data = data;
+  return node;
+}
+
 /** Create `spec` at world (wx, wy): node, edge and epoch in ONE undo step. */
 async function addNodeFromMenu(spec: AddSpec, wx: number, wy: number, alt: boolean): Promise<string | null> {
   if (!store) return null;
@@ -6794,11 +6895,7 @@ async function addNodeFromMenu(spec: AddSpec, wx: number, wy: number, alt: boole
       return null;
     }
     const cid = corpus.newId();
-    const cnode: EmNode = { id: cid, name: corpus.freshLabel(type), node_type: type, description: "" };
-    if (spec.kind) {
-      cnode.data = { dtc_kind: spec.kind };
-      if (spec.isResource) cnode.data.resource_type = spec.kind;
-    }
+    const cnode: EmNode = menuNode(type, cid, corpus.freshLabel(type), "", spec);
     corpus.batch(() => {
       corpus.addNode(cnode, { x: wx - 45, y: wy - 15, w: 90, h: 30 });
       if (spec.link) {
@@ -6817,11 +6914,7 @@ async function addNodeFromMenu(spec: AddSpec, wx: number, wy: number, alt: boole
   // store's generic fresh label (an extractor is numbered when it is attached)
   const name = spec.preset?.name
     ?? initialName(st.doc, type) ?? nextFreeName(st.doc, type) ?? st.freshLabel(type);
-  const node: EmNode = { id, name, node_type: type, description: spec.preset?.description ?? "" };
-  if (spec.kind) {
-    node.data = { dtc_kind: spec.kind };
-    if (spec.isResource) node.data.resource_type = spec.kind;
-  }
+  const node: EmNode = menuNode(type, id, name, spec.preset?.description ?? "", spec);
   if (spec.preset?.data) node.data = { ...(node.data ?? {}), ...spec.preset.data };
   const box = await typeBox(node);
   if (store !== st) return null; // another document arrived while em-core answered
@@ -7957,12 +8050,11 @@ async function scanResourceCollection(
     const payload = (await res.json()) as {
       shelf?: Array<{ resource_id: string; filename: string; rel_path: string }>;
     };
+    // RISORSA-FILE · one file per resource: the implicit form, from addResource
     const nodes: EmNode[] = (payload.shelf ?? []).map((r) => ({
-      id: r.resource_id,
-      name: r.filename,
+      ...addResource(null, { resourceId: r.resource_id, name: r.filename,
+        kind: resourceTypeOfLocator(r.filename), files: [{ path: r.rel_path }] }),
       node_type: nt,
-      description: "",
-      data: { url: r.rel_path, url_type: resourceTypeOfLocator(r.filename) },
     }));
     return { nodes, edges: [] };
   } catch (e) {
@@ -19622,25 +19714,32 @@ async function pullResidentCorpus(): Promise<{ nodes: number; edges: number } | 
  */
 function mirrorIntoCorpus(corpus: DocumentStore, node: EmNode): void {
   const source = (node.data ?? {}) as Record<string, unknown>;
+  // `size_bytes` is where the gate reads a weight (space.ts); `size` is the
+  // name the ingest wrote until RISORSA-FILE, kept for corpora made before it
   const keep = ["url", "url_type", "checksum", "residency", "scope",
-                "media_type", "size", "resource_use"] as const;
-  const existing = corpus.node(node.id);
-  const data: Record<string, unknown> = existing
-    ? { ...((existing.data ?? {}) as Record<string, unknown>) } : {};
-  for (const key of keep) {
-    if (source[key] !== undefined && data[key] === undefined) data[key] = source[key];
-  }
-  if (existing) {
-    corpus.updateNode(existing.id, { data } as Partial<EmNode>);
-    return;
-  }
-  corpus.addNode({
-    id: node.id,
-    name: node.name,
-    node_type: "resource",
-    description: "",
-    data,
-  } as unknown as EmNode);
+                "media_type", "size_bytes", "size", "resource_use"] as const;
+  corpus.batch(() => {
+    let existing = corpus.node(node.id);
+    if (!existing) {
+      // RISORSA-FILE · the one constructor, as `mirror_resource` does in s3Dgraphy.
+      // The kind is passed (s3Dgraphy passes none, so its «External link» is not
+      // empty and the source's kind is then never copied: EMStudio copied it,
+      // and still does)
+      const url = typeof source.url === "string" ? source.url : "";
+      existing = addResource(storeGraph(corpus), { resourceId: node.id,
+        name: String(node.name ?? "") || node.id,
+        kind: typeof source.url_type === "string" ? source.url_type : undefined,
+        files: url ? [{ path: url }] : [] });
+    }
+    const data: Record<string, unknown> = { ...((existing.data ?? {}) as Record<string, unknown>) };
+    let changed = false;
+    for (const key of keep) {
+      if (source[key] !== undefined && (data[key] === undefined || data[key] === "")) {
+        data[key] = source[key]; changed = true;
+      }
+    }
+    if (changed) corpus.updateNode(existing.id, { data } as Partial<EmNode>);
+  });
 }
 
 /** The resource node for one published item — created, or found by digest and
@@ -19649,32 +19748,17 @@ function writeResourceNode(
   doc: DocumentStore, item: IngestItem, digest: string | null, url: string,
 ): string {
   const existing = digest ? findResource(doc, digest) : null;
-  const data: Record<string, unknown> = {
-    ...(digest ? { checksum: digest } : {}),
-    media_type: item.mediaType,
-    residency: ingestDraft.residency,
-    scope: ingestDraft.scope,
-    // the DEDUCED kind and the (correctable) use, kept apart: one is a fact
-    // about the bytes, the other a decision about them
-    url_type: item.kind,
-    resource_use: item.use,
-    ...(item.size ? { size: item.size } : {}),
-    url,
-  };
+  const opts = ingestResourceOptions(item, digest, url, ingestDraft, doc.newId());
   if (existing) {
+    // found by digest: the same bytes, filled in (never a second resource)
+    const fresh = addResource(null, opts).data as Record<string, unknown>;
+    delete fresh.description;
     doc.updateNode(existing.id, {
-      data: { ...(existing.data as Record<string, unknown> | undefined), ...data },
+      data: { ...(existing.data as Record<string, unknown> | undefined), ...fresh },
     } as Partial<EmNode>);
     return existing.id;
   }
-  const node = doc.addNode({
-    id: doc.newId(),
-    name: item.name,
-    node_type: "resource",
-    description: "",
-    data,
-  } as unknown as EmNode);
-  return node.id;
+  return addResource(storeGraph(doc), opts).id;
 }
 
 /** The bridge holds the bytes of a file on disk — the page may not read it. */

@@ -1,0 +1,753 @@
+{
+ "steps": [
+  {
+   "step": "one file is implicit",
+   "value": [
+    {
+     "role": "entry_point",
+     "path": "foto.jpg",
+     "implicit": true,
+     "id": "r1#file",
+     "data": {
+      "url": "foto.jpg",
+      "checksum": "sha256:aa",
+      "size_bytes": 10,
+      "media_type": "image/jpeg"
+     }
+    }
+   ]
+  },
+  {
+   "step": "three files",
+   "value": [
+    {
+     "role": "entry_point",
+     "path": "OB_PODIO_LOD1.obj",
+     "implicit": false,
+     "id": "ef795fc5-03f8-513a-a83b-8ae3fb0e98fa",
+     "data": {
+      "url": "OB_PODIO_LOD1.obj",
+      "checksum": "sha256:o1",
+      "size_bytes": 100,
+      "media_type": "model/obj"
+     }
+    },
+    {
+     "role": "member",
+     "path": "OB_PODIO_LOD1.mtl",
+     "implicit": false,
+     "id": "48d7001b-f0e6-5f4c-ab5c-970c1753b95c",
+     "data": {
+      "url": "OB_PODIO_LOD1.mtl",
+      "checksum": "sha256:m1",
+      "size_bytes": 5
+     }
+    },
+    {
+     "role": "member",
+     "path": "textures/T_OB_PODIO_LOD1.jpg",
+     "implicit": false,
+     "id": "aa2468fb-6495-54d4-a79b-468ed1a9fff1",
+     "data": {
+      "url": "textures/T_OB_PODIO_LOD1.jpg",
+      "checksum": "sha256:t1",
+      "size_bytes": 50,
+      "media_type": "image/jpeg"
+     }
+    }
+   ]
+  },
+  {
+   "step": "datablock",
+   "value": [
+    {
+     "role": "entry_point",
+     "path": "OB_PODIO_LOD1 è",
+     "implicit": true,
+     "id": "rb#file",
+     "data": {
+      "url": "blend://RB/TempluMare%202021.blend#Object/OB_PODIO_LOD1%20%C3%A8"
+     }
+    }
+   ]
+  },
+  {
+   "step": "a shared file is one node",
+   "value": [
+    {
+     "role": "entry_point",
+     "path": "a.obj",
+     "implicit": false,
+     "id": "5f721f27-2b48-5e6a-b029-dbeeb6d16f97",
+     "data": {
+      "url": "a.obj",
+      "checksum": "sha256:a"
+     }
+    },
+    {
+     "role": "member",
+     "path": "LOD1/textures/T_OB_PODIO_LOD1.jpg",
+     "implicit": false,
+     "id": "aa2468fb-6495-54d4-a79b-468ed1a9fff1",
+     "data": {
+      "url": "textures/T_OB_PODIO_LOD1.jpg",
+      "checksum": "sha256:t1",
+      "size_bytes": 50,
+      "media_type": "image/jpeg"
+     }
+    }
+   ]
+  },
+  {
+   "step": "kind read from the url",
+   "value": {
+    "id": "r5",
+    "node_type": "resource",
+    "name": "nuda",
+    "data": {
+     "url": "x/nuda.obj",
+     "url_type": "3d_model",
+     "description": "",
+     "scope": "own-study",
+     "residency": "resident",
+     "primitives": {
+      "faces": 3
+     },
+     "preferred": true,
+     "author": "E.D."
+    }
+   }
+  },
+  {
+   "step": "add_file materializes",
+   "value": {
+    "file_id": "981ec349-d2fd-536c-8a43-23965e63176a",
+    "role": "member",
+    "path": "foto_b.jpg",
+    "materialized": true
+   }
+  },
+  {
+   "step": "after add_file",
+   "value": [
+    {
+     "role": "entry_point",
+     "path": "foto.jpg",
+     "implicit": false,
+     "id": "36f94b34-8fda-5e38-939f-37cd6bcee4a8",
+     "data": {
+      "url": "foto.jpg",
+      "checksum": "sha256:aa",
+      "size_bytes": 10,
+      "media_type": "image/jpeg"
+     }
+    },
+    {
+     "role": "member",
+     "path": "foto_b.jpg",
+     "implicit": false,
+     "id": "981ec349-d2fd-536c-8a43-23965e63176a",
+     "data": {
+      "url": "foto_b.jpg",
+      "checksum": "sha256:ab"
+     }
+    }
+   ]
+  },
+  {
+   "step": "remove_file",
+   "value": {
+    "removed_edge": "r1__has_file__981ec349-d2fd-536c-8a43-23965e63176a",
+    "removed_node": true,
+    "entry_point_left": true
+   }
+  },
+  {
+   "step": "replace_file",
+   "value": {
+    "old_resource_id": "r3",
+    "new_resource_id": "52f9e36f-d838-5c6c-9868-ead0d3e889e9",
+    "old_file_id": "aa2468fb-6495-54d4-a79b-468ed1a9fff1",
+    "new_file_id": "2d4c3642-eec9-5b41-b2df-ec7d36b5cb95",
+    "role": "member",
+    "path": "textures/T_OB_PODIO_LOD1.jpg",
+    "pointing_at_old": [
+     {
+      "edge_id": "rm1__has_linked_resource__r3",
+      "edge_type": "has_linked_resource",
+      "source": "rm1"
+     }
+    ],
+    "old_derived_from": []
+   }
+  },
+  {
+   "step": "replace twice is the same",
+   "value": "52f9e36f-d838-5c6c-9868-ead0d3e889e9"
+  },
+  {
+   "step": "a placeholder keeps the constructor's kind",
+   "value": {
+    "id": "r6",
+    "node_type": "resource",
+    "name": "padre",
+    "data": {
+     "url": "",
+     "url_type": "External link",
+     "description": ""
+    }
+   }
+  },
+  {
+   "step": "a stamped file has an identity",
+   "value": [
+    {
+     "role": "entry_point",
+     "path": "t.glb",
+     "implicit": false,
+     "id": "8ac52a97-e524-5a21-ac23-801cafacbfcd",
+     "data": {
+      "url": "t.glb",
+      "checksum": "sha256:g1",
+      "stamp_receipt": {
+       "digest": "sha256:g1"
+      }
+     }
+    }
+   ]
+  },
+  {
+   "step": "a revision inherits no stamp",
+   "value": {
+    "id": "37722d09-73fd-599b-8809-bb12dcb701ce",
+    "node_type": "resource",
+    "name": "timbrata",
+    "data": {
+     "url": "",
+     "url_type": "3d_model",
+     "description": ""
+    }
+   }
+  },
+  {
+   "step": "revisions",
+   "value": [
+    "r3",
+    "52f9e36f-d838-5c6c-9868-ead0d3e889e9"
+   ]
+  },
+  {
+   "step": "current",
+   "value": "52f9e36f-d838-5c6c-9868-ead0d3e889e9"
+  },
+  {
+   "step": "pick web from r4",
+   "value": {
+    "picked": {
+     "id": "r4",
+     "name": "shared",
+     "kind": "3d_model",
+     "tier": "distribution",
+     "packaging": "file",
+     "tier_declared": null,
+     "packaging_declared": null,
+     "preferred": false,
+     "relation": "self",
+     "distance": 0
+    },
+    "candidates": [
+     {
+      "id": "r4",
+      "name": "shared",
+      "kind": "3d_model",
+      "tier": "distribution",
+      "packaging": "file",
+      "tier_declared": null,
+      "packaging_declared": null,
+      "preferred": false,
+      "relation": "self",
+      "distance": 0
+     },
+     {
+      "id": "rb",
+      "name": "OB_PODIO_LOD1 (blend)",
+      "kind": "3d_model",
+      "tier": "master",
+      "packaging": "datablock",
+      "tier_declared": "master",
+      "packaging_declared": "datablock",
+      "preferred": false,
+      "relation": "source",
+      "distance": 1
+     }
+    ],
+    "reason": "r4 is file (read from the locator), which this reader opens"
+   }
+  },
+  {
+   "step": "pick blender from r4",
+   "value": {
+    "picked": {
+     "id": "rb",
+     "name": "OB_PODIO_LOD1 (blend)",
+     "kind": "3d_model",
+     "tier": "master",
+     "packaging": "datablock",
+     "tier_declared": "master",
+     "packaging_declared": "datablock",
+     "preferred": false,
+     "relation": "source",
+     "distance": 1
+    },
+    "candidates": [
+     {
+      "id": "r4",
+      "name": "shared",
+      "kind": "3d_model",
+      "tier": "distribution",
+      "packaging": "file",
+      "tier_declared": null,
+      "packaging_declared": null,
+      "preferred": false,
+      "relation": "self",
+      "distance": 0
+     },
+     {
+      "id": "rb",
+      "name": "OB_PODIO_LOD1 (blend)",
+      "kind": "3d_model",
+      "tier": "master",
+      "packaging": "datablock",
+      "tier_declared": "master",
+      "packaging_declared": "datablock",
+      "preferred": false,
+      "relation": "source",
+      "distance": 1
+     }
+    ],
+    "reason": "rb is datablock (declared), which this reader opens"
+   }
+  },
+  {
+   "step": "nothing opens",
+   "value": {
+    "picked": null,
+    "candidates": [
+     {
+      "id": "rb",
+      "name": "OB_PODIO_LOD1 (blend)",
+      "kind": "3d_model",
+      "tier": "master",
+      "packaging": "datablock",
+      "tier_declared": "master",
+      "packaging_declared": "datablock",
+      "preferred": false,
+      "relation": "self",
+      "distance": 0
+     },
+     {
+      "id": "r4",
+      "name": "shared",
+      "kind": "3d_model",
+      "tier": "distribution",
+      "packaging": "file",
+      "tier_declared": null,
+      "packaging_declared": null,
+      "preferred": false,
+      "relation": "derived",
+      "distance": 1
+     }
+    ],
+    "reason": "none of the 2 representation(s) opens here: they are ['datablock', 'file'], this reader opens ['archive']"
+   }
+  },
+  {
+   "step": "representations of rb",
+   "value": [
+    {
+     "id": "r4",
+     "name": "shared",
+     "kind": "3d_model",
+     "tier": "distribution",
+     "packaging": "file",
+     "tier_declared": null,
+     "packaging_declared": null,
+     "preferred": false,
+     "relation": "derived",
+     "distance": 1
+    }
+   ]
+  },
+  {
+   "step": "graph",
+   "value": {
+    "nodes": [
+     {
+      "id": "r1",
+      "node_type": "resource",
+      "name": "foto",
+      "data": {
+       "url": "",
+       "url_type": "image",
+       "description": "",
+       "size_bytes": 10,
+       "media_type": "image/jpeg"
+      }
+     },
+     {
+      "id": "r3",
+      "node_type": "resource",
+      "name": "OB_PODIO_LOD1",
+      "data": {
+       "url": "",
+       "url_type": "3d_model",
+       "description": "",
+       "tier": "distribution",
+       "packaging": "file_set"
+      }
+     },
+     {
+      "id": "ef795fc5-03f8-513a-a83b-8ae3fb0e98fa",
+      "node_type": "resource_file",
+      "name": "OB_PODIO_LOD1.obj",
+      "data": {
+       "url": "OB_PODIO_LOD1.obj",
+       "checksum": "sha256:o1",
+       "size_bytes": 100,
+       "media_type": "model/obj"
+      }
+     },
+     {
+      "id": "48d7001b-f0e6-5f4c-ab5c-970c1753b95c",
+      "node_type": "resource_file",
+      "name": "OB_PODIO_LOD1.mtl",
+      "data": {
+       "url": "OB_PODIO_LOD1.mtl",
+       "checksum": "sha256:m1",
+       "size_bytes": 5
+      }
+     },
+     {
+      "id": "aa2468fb-6495-54d4-a79b-468ed1a9fff1",
+      "node_type": "resource_file",
+      "name": "T_OB_PODIO_LOD1.jpg",
+      "data": {
+       "url": "textures/T_OB_PODIO_LOD1.jpg",
+       "checksum": "sha256:t1",
+       "size_bytes": 50,
+       "media_type": "image/jpeg"
+      }
+     },
+     {
+      "id": "rb",
+      "node_type": "resource",
+      "name": "OB_PODIO_LOD1 (blend)",
+      "data": {
+       "url": "blend://RB/TempluMare%202021.blend#Object/OB_PODIO_LOD1%20%C3%A8",
+       "url_type": "3d_model",
+       "description": "",
+       "tier": "master",
+       "packaging": "datablock"
+      }
+     },
+     {
+      "id": "r4",
+      "node_type": "resource",
+      "name": "shared",
+      "data": {
+       "url": "",
+       "url_type": "3d_model",
+       "description": ""
+      }
+     },
+     {
+      "id": "5f721f27-2b48-5e6a-b029-dbeeb6d16f97",
+      "node_type": "resource_file",
+      "name": "a.obj",
+      "data": {
+       "url": "a.obj",
+       "checksum": "sha256:a"
+      }
+     },
+     {
+      "id": "r5",
+      "node_type": "resource",
+      "name": "nuda",
+      "data": {
+       "url": "x/nuda.obj",
+       "url_type": "3d_model",
+       "description": "",
+       "scope": "own-study",
+       "residency": "resident",
+       "primitives": {
+        "faces": 3
+       },
+       "preferred": true,
+       "author": "E.D."
+      }
+     },
+     {
+      "id": "36f94b34-8fda-5e38-939f-37cd6bcee4a8",
+      "node_type": "resource_file",
+      "name": "foto.jpg",
+      "data": {
+       "url": "foto.jpg",
+       "checksum": "sha256:aa",
+       "size_bytes": 10,
+       "media_type": "image/jpeg"
+      }
+     },
+     {
+      "id": "rm1",
+      "node_type": "representation_model",
+      "name": "RM PODIO",
+      "data": {
+       "transform": {
+        "position": [
+         "0.0",
+         "0.0",
+         "0.0"
+        ],
+        "rotation": [
+         "0.0",
+         "0.0",
+         "0.0"
+        ],
+        "scale": [
+         "1.0",
+         "1.0",
+         "1.0"
+        ]
+       }
+      }
+     },
+     {
+      "id": "52f9e36f-d838-5c6c-9868-ead0d3e889e9",
+      "node_type": "resource",
+      "name": "OB_PODIO_LOD1",
+      "data": {
+       "url": "",
+       "url_type": "3d_model",
+       "description": "",
+       "tier": "distribution",
+       "packaging": "file_set"
+      }
+     },
+     {
+      "id": "2d4c3642-eec9-5b41-b2df-ec7d36b5cb95",
+      "node_type": "resource_file",
+      "name": "T_OB_PODIO_LOD1.jpg",
+      "data": {
+       "url": "textures/T_OB_PODIO_LOD1.jpg",
+       "checksum": "sha256:t2",
+       "size_bytes": 51
+      }
+     },
+     {
+      "id": "r6",
+      "node_type": "resource",
+      "name": "padre",
+      "data": {
+       "url": "",
+       "url_type": "External link",
+       "description": ""
+      }
+     },
+     {
+      "id": "r7",
+      "node_type": "resource",
+      "name": "timbrata",
+      "data": {
+       "url": "",
+       "url_type": "3d_model",
+       "description": "",
+       "stamp_receipt": {
+        "id": "s1"
+       },
+       "created_by": "E.D."
+      }
+     },
+     {
+      "id": "8ac52a97-e524-5a21-ac23-801cafacbfcd",
+      "node_type": "resource_file",
+      "name": "t.glb",
+      "data": {
+       "url": "t.glb",
+       "checksum": "sha256:g1",
+       "stamp_receipt": {
+        "digest": "sha256:g1"
+       }
+      }
+     },
+     {
+      "id": "37722d09-73fd-599b-8809-bb12dcb701ce",
+      "node_type": "resource",
+      "name": "timbrata",
+      "data": {
+       "url": "",
+       "url_type": "3d_model",
+       "description": ""
+      }
+     },
+     {
+      "id": "c92aaaaa-4513-5168-8e8b-2e6521d346a9",
+      "node_type": "resource_file",
+      "name": "t.glb",
+      "data": {
+       "url": "t.glb",
+       "checksum": "sha256:g2"
+      }
+     }
+    ],
+    "edges": [
+     {
+      "id": "r3__has_file__ef795fc5-03f8-513a-a83b-8ae3fb0e98fa",
+      "edge_type": "has_file",
+      "source": "r3",
+      "target": "ef795fc5-03f8-513a-a83b-8ae3fb0e98fa",
+      "attributes": {
+       "role": "entry_point",
+       "path": "OB_PODIO_LOD1.obj"
+      }
+     },
+     {
+      "id": "r3__has_file__48d7001b-f0e6-5f4c-ab5c-970c1753b95c",
+      "edge_type": "has_file",
+      "source": "r3",
+      "target": "48d7001b-f0e6-5f4c-ab5c-970c1753b95c",
+      "attributes": {
+       "role": "member",
+       "path": "OB_PODIO_LOD1.mtl"
+      }
+     },
+     {
+      "id": "r3__has_file__aa2468fb-6495-54d4-a79b-468ed1a9fff1",
+      "edge_type": "has_file",
+      "source": "r3",
+      "target": "aa2468fb-6495-54d4-a79b-468ed1a9fff1",
+      "attributes": {
+       "role": "member",
+       "path": "textures/T_OB_PODIO_LOD1.jpg"
+      }
+     },
+     {
+      "id": "r4__has_file__5f721f27-2b48-5e6a-b029-dbeeb6d16f97",
+      "edge_type": "has_file",
+      "source": "r4",
+      "target": "5f721f27-2b48-5e6a-b029-dbeeb6d16f97",
+      "attributes": {
+       "role": "entry_point",
+       "path": "a.obj"
+      }
+     },
+     {
+      "id": "r4__has_file__aa2468fb-6495-54d4-a79b-468ed1a9fff1",
+      "edge_type": "has_file",
+      "source": "r4",
+      "target": "aa2468fb-6495-54d4-a79b-468ed1a9fff1",
+      "attributes": {
+       "role": "member",
+       "path": "LOD1/textures/T_OB_PODIO_LOD1.jpg"
+      }
+     },
+     {
+      "id": "r4~>rb",
+      "edge_type": "dtc_derived_from",
+      "source": "r4",
+      "target": "rb"
+     },
+     {
+      "id": "r1__has_file__36f94b34-8fda-5e38-939f-37cd6bcee4a8",
+      "edge_type": "has_file",
+      "source": "r1",
+      "target": "36f94b34-8fda-5e38-939f-37cd6bcee4a8",
+      "attributes": {
+       "role": "entry_point",
+       "path": "foto.jpg"
+      }
+     },
+     {
+      "id": "rm1__has_linked_resource__r3",
+      "edge_type": "has_linked_resource",
+      "source": "rm1",
+      "target": "r3"
+     },
+     {
+      "id": "52f9e36f-d838-5c6c-9868-ead0d3e889e9__has_file__ef795fc5-03f8-513a-a83b-8ae3fb0e98fa",
+      "edge_type": "has_file",
+      "source": "52f9e36f-d838-5c6c-9868-ead0d3e889e9",
+      "target": "ef795fc5-03f8-513a-a83b-8ae3fb0e98fa",
+      "attributes": {
+       "role": "entry_point",
+       "path": "OB_PODIO_LOD1.obj"
+      }
+     },
+     {
+      "id": "52f9e36f-d838-5c6c-9868-ead0d3e889e9__has_file__48d7001b-f0e6-5f4c-ab5c-970c1753b95c",
+      "edge_type": "has_file",
+      "source": "52f9e36f-d838-5c6c-9868-ead0d3e889e9",
+      "target": "48d7001b-f0e6-5f4c-ab5c-970c1753b95c",
+      "attributes": {
+       "role": "member",
+       "path": "OB_PODIO_LOD1.mtl"
+      }
+     },
+     {
+      "id": "52f9e36f-d838-5c6c-9868-ead0d3e889e9__has_file__2d4c3642-eec9-5b41-b2df-ec7d36b5cb95",
+      "edge_type": "has_file",
+      "source": "52f9e36f-d838-5c6c-9868-ead0d3e889e9",
+      "target": "2d4c3642-eec9-5b41-b2df-ec7d36b5cb95",
+      "attributes": {
+       "role": "member",
+       "path": "textures/T_OB_PODIO_LOD1.jpg"
+      }
+     },
+     {
+      "id": "2d4c3642-eec9-5b41-b2df-ec7d36b5cb95~>aa2468fb-6495-54d4-a79b-468ed1a9fff1",
+      "edge_type": "dtc_derived_from",
+      "source": "2d4c3642-eec9-5b41-b2df-ec7d36b5cb95",
+      "target": "aa2468fb-6495-54d4-a79b-468ed1a9fff1"
+     },
+     {
+      "id": "52f9e36f-d838-5c6c-9868-ead0d3e889e9~revision~>r3",
+      "edge_type": "was_revision_of",
+      "source": "52f9e36f-d838-5c6c-9868-ead0d3e889e9",
+      "target": "r3"
+     },
+     {
+      "id": "r7__has_file__8ac52a97-e524-5a21-ac23-801cafacbfcd",
+      "edge_type": "has_file",
+      "source": "r7",
+      "target": "8ac52a97-e524-5a21-ac23-801cafacbfcd",
+      "attributes": {
+       "role": "entry_point",
+       "path": "t.glb"
+      }
+     },
+     {
+      "id": "37722d09-73fd-599b-8809-bb12dcb701ce__has_file__c92aaaaa-4513-5168-8e8b-2e6521d346a9",
+      "edge_type": "has_file",
+      "source": "37722d09-73fd-599b-8809-bb12dcb701ce",
+      "target": "c92aaaaa-4513-5168-8e8b-2e6521d346a9",
+      "attributes": {
+       "role": "entry_point",
+       "path": "t.glb"
+      }
+     },
+     {
+      "id": "c92aaaaa-4513-5168-8e8b-2e6521d346a9~>8ac52a97-e524-5a21-ac23-801cafacbfcd",
+      "edge_type": "dtc_derived_from",
+      "source": "c92aaaaa-4513-5168-8e8b-2e6521d346a9",
+      "target": "8ac52a97-e524-5a21-ac23-801cafacbfcd"
+     },
+     {
+      "id": "37722d09-73fd-599b-8809-bb12dcb701ce~revision~>r7",
+      "edge_type": "was_revision_of",
+      "source": "37722d09-73fd-599b-8809-bb12dcb701ce",
+      "target": "r7"
+     }
+    ]
+   }
+  }
+ ]
+}

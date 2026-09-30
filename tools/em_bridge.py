@@ -310,6 +310,69 @@ def _listdir_safe(path: str) -> list:
         return []
 
 
+def _compose_resources(targets, inputs):
+    """The outputs and the declared inputs of a composed step as em.json nodes
+    and edges, each resource made by ``api.add_resource`` (RISORSA-FILE).
+
+    What the bridge wrote by hand until 1.6.17 — ``checksum``, ``media_type``,
+    ``packaging``, ``tier``, ``size_bytes``, ``primitives``, ``format`` on an
+    output; ``checksum`` and ``size_bytes`` on an input — goes where
+    ``add_resource`` puts it. An output with ``files`` (``[{path, digest,
+    size_bytes, media_type, role}]``, the entry point first) becomes a resource
+    of several files; its own ``digest`` is then the digest of the members
+    (dtcstamp ``members_digest``) and stays on the resource as ``checksum``.
+    """
+    from s3dgraphy import api
+    from s3dgraphy.graph import Graph
+
+    tiers = ("master", "distribution")
+    packagings = ("file", "directory", "archive", "file_set", "datablock")
+    scratch = Graph("compose")
+    for out, _full, _sp in targets:
+        extra = {"checksum": out.get("digest")}
+        for key in ("media_type", "format"):
+            if out.get(key) not in (None, "", {}):
+                extra[key] = out[key]
+        members = [
+            {k: v for k, v in (("path", f.get("path")), ("checksum", f.get("digest")),
+                               ("size_bytes", f.get("size_bytes")),
+                               ("media_type", f.get("media_type")),
+                               ("role", f.get("role"))) if v not in (None, "")}
+            for f in (out.get("files") or [])]
+        kw = {}
+        if out.get("packaging") in packagings:
+            kw["packaging"] = out["packaging"]
+        elif out.get("packaging") not in (None, ""):
+            extra["packaging"] = out["packaging"]
+        if out.get("tier") in tiers:
+            kw["tier"] = out["tier"]
+        elif out.get("tier") not in (None, ""):
+            extra["tier"] = out["tier"]
+        # CATENA · the stamp's title and description (dtcstamp 46b3b78):
+        # emit_stamp writes self.label from the name and self.description
+        # from the description — both optional, both a courtesy
+        api.add_resource(scratch, resource_id=out["resource_id"],
+                         name=out.get("name") or out["resource_id"],
+                         description=str(out.get("description") or ""),
+                         files=members,
+                         size_bytes=out.get("size_bytes"),
+                         primitives=out.get("primitives") or None,
+                         data=extra, **kw)
+    for inp in inputs:
+        if scratch.find_node_by_id(inp["resource_id"]) is not None:
+            continue
+        api.add_resource(scratch, resource_id=inp["resource_id"],
+                         name=inp.get("label") or inp["resource_id"],
+                         size_bytes=inp.get("size_bytes"),
+                         data={"checksum": inp.get("digest")})
+    em = api.graph_to_emjson(scratch)["graph"]
+    nodes = [n for n in em["nodes"] if n.get("node_type") != "geo_position"]
+    for n in nodes:
+        # the top-level description the editor reads, next to data.description
+        n.setdefault("description", (n.get("data") or {}).get("description", ""))
+    return nodes, list(em["edges"])
+
+
 def _fs_inside_roots(full: str) -> bool:
     """Is this path reachable right now? True everywhere in whole-disk mode."""
     if _FS_ALL:
@@ -1035,27 +1098,13 @@ def make_handler(api):
             orcid = str(operator.get("id") or "").rsplit("/", 1)[-1] or None
 
             # ── 1 · i file diventano un grafo ────────────────────────────────
-            nodes, edges = [], []
-            for out, _full, _sp in targets:
-                data = {"checksum": out.get("digest")}
-                for key in ("media_type", "packaging", "tier", "size_bytes",
-                            "primitives", "format"):
-                    if out.get(key) not in (None, "", {}):
-                        data[key] = out[key]
-                # CATENA · the stamp's title and description (dtcstamp 46b3b78):
-                # emit_stamp writes self.label from the name and self.description
-                # from the description — both optional, both a courtesy
-                nodes.append({"id": out["resource_id"], "node_type": "resource",
-                              "name": out.get("name") or out["resource_id"],
-                              "description": str(out.get("description") or ""),
-                              "data": data})
-            for inp in (body.get("inputs") or []):
-                data = {"checksum": inp.get("digest")}
-                if inp.get("size_bytes") is not None:
-                    data["size_bytes"] = inp["size_bytes"]
-                nodes.append({"id": inp["resource_id"], "node_type": "resource",
-                              "name": inp.get("label") or inp["resource_id"],
-                              "data": data})
+            # RISORSA-FILE · every resource of the step is made by
+            # `api.add_resource`, the one constructor (s3Dgraphy 1.6.17): an
+            # output of ONE file is the implicit form; an output that carries
+            # `files` (a file_set: the obj, the mtl it calls, the textures) is a
+            # resource with one resource_file per member, reached by has_file.
+            # The stamp itself stays the business of dtcstamp (`emit_stamp`).
+            nodes, edges = _compose_resources(targets, body.get("inputs") or [])
             label = str(operator.get("label") or "").strip()
             if label in (orcid or "", f"https://orcid.org/{orcid}"):
                 # UN'ETICHETTA CHE RIPETE L'IDENTIFICATORE NON È UN'ETICHETTA.

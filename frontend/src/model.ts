@@ -1606,12 +1606,15 @@ export class DocumentStore {
    * alike), so a declaration made live reaches the other side as a declaration.
    */
   addEdge(source: string, target: string, edgeType: string,
-          attributes?: Record<string, unknown>): EmEdge {
+          attributes?: Record<string, unknown>, wantId?: string): EmEdge {
     this.checkpoint();
     const ids = new Set(this.doc.graph.edges.map((e) => e.id));
-    let id = `${source}__${edgeType}__${target}`;
+    // `wantId`: an id the caller derives (resources.ts writes s3Dgraphy's own
+    // edge ids, `<res>~>…`, so both tools land on the same edge)
+    let id = wantId ?? `${source}__${edgeType}__${target}`;
     let i = 2;
-    while (ids.has(id)) id = `${source}__${edgeType}__${target}__${i++}`;
+    const base = id;
+    while (ids.has(id)) id = `${base}__${i++}`;
     const edge: EmEdge = { id, source, target, edge_type: edgeType,
                            ...(attributes && Object.keys(attributes).length
                              ? { attributes: { ...attributes } } : {}) };

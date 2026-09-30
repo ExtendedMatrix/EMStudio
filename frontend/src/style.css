@@ -8504,3 +8504,20 @@ button.shelf-badge { cursor: pointer; font: inherit; font-size: 10.5px; }
 .scn-strips { position: absolute; left: 8px; right: 8px; bottom: 8px; z-index: 3; display: flex; flex-direction: column; gap: 4px; pointer-events: none; }
 .scn-strips .v3d-strip { pointer-events: auto; border: 1px solid var(--border); border-radius: var(--radius-sm); padding-right: 8px; }
 .scn-strips .v3d-strip b { font-weight: 600; }
+
+/* RISORSA-FILE · the files of a resource, and the question of a replacement */
+.res-files { display: flex; flex-direction: column; gap: 4px; margin: 4px 0 6px; }
+.res-file-head { display: flex; align-items: center; gap: 6px; }
+.res-file-head .res-path { flex: 1; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.res-role { width: 1em; text-align: center; opacity: 0.8; }
+.res-shared { font-style: italic; }
+.res-fork { color: var(--accent-ink, #8a6400); }
+.res-revisions { margin: 2px 0 6px 1.2em; padding: 0; }
+.res-revisions .is-current { font-weight: 600; }
+.res-modal-back { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.35); z-index: 9000;
+  display: flex; align-items: center; justify-content: center; }
+.res-modal { background: var(--bg-elevated); color: var(--text); border-radius: var(--radius-lg); padding: 14px 16px;
+  min-width: 320px; max-width: 520px; box-shadow: 0 8px 30px rgba(0, 0, 0, 0.3);
+  display: flex; flex-direction: column; gap: 6px; }
+.res-ptr { display: block; font-size: 12px; }
+.res-ptr-all { font-weight: 600; }

@@ -20,6 +20,9 @@ export interface SceneNode {
   w: number;
   h: number;
   node: EmNode;
+  /** RISORSA-FILE · what the box says instead of the node's name — «▸ OB_PODIO_LOD1
+   *  · 3 file» for a resource of several files. Drawing only. */
+  label?: string;
   /** number of hidden nodes this (folded group) node stands for */
   badge?: number;
   /**

@@ -1,0 +1,42 @@
+{
+ "LOD1/OB_PODIO_LOD1.obj": {
+  "checksum": "sha256:7aec2a734482c5644065738ea08519bb583e99c838c4a0cb624646cbd18f05cd",
+  "size_bytes": 46961673
+ },
+ "LOD1/OB_PODIO_LOD1.mtl": {
+  "checksum": "sha256:73ae97db862f68bb9af142d4c0d94192821cdd51653a43eaeec0e08d6a132cce",
+  "size_bytes": 287
+ },
+ "LOD1/textures/T_OB_PODIO_LOD1.jpg": {
+  "checksum": "sha256:57344764818ebde964ff813b14151c0190ac7d78a1a7d2e395bf0654e6656384",
+  "size_bytes": 1292226
+ },
+ "LOD1/OB_PRATO_LOD1.obj": {
+  "checksum": "sha256:b6e0d50a9dc26418a4b96bcd41dae4ca25efb8f33002ef8a7f43b700358d648a",
+  "size_bytes": 26877879
+ },
+ "LOD1/OB_PRATO_LOD1.mtl": {
+  "checksum": "sha256:6dc1fc6477516280f213922d26d53177848e52962d567913d2715a5f3ecb127e",
+  "size_bytes": 287
+ },
+ "LOD1/textures/T_OB_PRATO_LOD1.jpg": {
+  "checksum": "sha256:9501445b30cedf969fd1a40c4de2821d14c999f3fdec481afa2955e7839febda",
+  "size_bytes": 1128876
+ },
+ "LOD1/OB_EST_L_LOD1.obj": {
+  "checksum": "sha256:d7aaa7b5daab151bdeae6834b850c6d1a472fe38e701cff9e36f7d29d377b765",
+  "size_bytes": 51886357
+ },
+ "LOD1/OB_EST_L_LOD1.mtl": {
+  "checksum": "sha256:d98c349af2d37a6368d65223f718d98164d01b28fec5b47b65a087b2f2ff95ac",
+  "size_bytes": 287
+ },
+ "LOD1/OB_EST_R_LOD1.obj": {
+  "checksum": "sha256:3255a20cf8205d4c8e4d69b6dd2b210f3a6af3b433ce03028c247a3cde22f9a5",
+  "size_bytes": 59686218
+ },
+ "LOD1/OB_EST_R_LOD1.mtl": {
+  "checksum": "sha256:1778371afd3999ef524cd3d464c38427929b2ecd6b35d8b81c97c9cc15f37a75",
+  "size_bytes": 287
+ }
+}

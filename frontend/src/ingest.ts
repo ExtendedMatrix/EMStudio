@@ -33,6 +33,8 @@ import type { EmEdge, EmNode } from "./types";
 /** The bit of `DocumentStore` this module needs. A structural interface rather
  *  than an import: it keeps `ingest.ts` testable in node (check-ingest.mjs) and
  *  free of the store's own dependency tree. */
+import type { AddResourceOptions } from "./resources";
+
 export interface IngestStore {
   liveNodes(): EmNode[];
   liveEdges(): EmEdge[];
@@ -173,6 +175,30 @@ function dataOf(node: EmNode | null | undefined): Record<string, unknown> {
 }
 
 /** The live resource with these bytes, or null. Digest or node id. */
+/**
+ * RISORSA-FILE · what the ingestion asks of `addResource` for one file: the
+ * implicit form (one file), with the DEDUCED kind and the (correctable) use
+ * kept apart — one is a fact about the bytes, the other a decision about them.
+ *
+ * The weight goes in `size_bytes`, where s3Dgraphy writes it and where
+ * EMStudio's own gate reads it (`space.ts`, the 200 MB threshold). Measured
+ * before this: the ingestion wrote `data.size`, which nothing read — an
+ * ingested file of any weight was «of unknown weight» to the gate.
+ */
+export function ingestResourceOptions(
+  item: { name: string; size?: number; mediaType: string; kind: string; use: string },
+  digest: string | null, url: string,
+  draft: { residency: string; scope: string }, id: string,
+): AddResourceOptions {
+  return {
+    resourceId: id, name: item.name, kind: item.kind,
+    residency: draft.residency, scope: draft.scope,
+    files: [{ path: url, checksum: digest, media_type: item.mediaType,
+              ...(item.size ? { size_bytes: item.size } : {}) }],
+    data: { resource_use: item.use },
+  };
+}
+
 export function findResource(store: IngestStore, ref: string): EmNode | null {
   if (!ref) return null;
   const byId = store.liveNodes().find((n) => n.id === ref);

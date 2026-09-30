@@ -2270,6 +2270,104 @@ test("T3.saved", "Unità · uno spazio salvato con una Tabella sulla «US view»
     detail: { turned, sheets: r.sheets, storedSheets, head: r.head, label: r.label, errors } };
 });
 
+// ── NIGHT-RISORSA-FILE · parte 1: la risorsa e i suoi file ─────────────────
+const SHOT = (name) => `${process.env.SHOTS ?? "."}/${name}.png`;
+/** «Fonti», its graph window turned to DTC: the DTC with the inspector beside it */
+const openDtcWithInspector = async (doc) => {
+  const o = await open({ doc, ws: "provenance" });
+  await o.p.locator('button[aria-pressed]', { hasText: /^DTC$/ }).first().click();
+  await o.p.waitForTimeout(600);
+  return o;
+};
+const dtcBoxes = async (p) => {
+  const win = await winOf(p, "graph");
+  return p.evaluate((w) => window.__EM_DRAG__.winScene(w), win);
+};
+const resPanel = (p) => p.evaluate(() => {
+  const panel = document.querySelector('[data-win$="inspector"] .res-panel');
+  return panel && {
+    kind: panel.dataset.resPanel,
+    rows: [...panel.querySelectorAll(".res-file")].map((r) => [r.dataset.role, r.dataset.path]),
+    shared: [...panel.querySelectorAll(".res-shared")].map((x) => x.textContent),
+    toggle: panel.querySelector('[data-action="toggle-files"]')?.textContent ?? null,
+    revisions: [...panel.querySelectorAll(".res-revisions button")].map((b) => b.textContent),
+    latest: !!panel.querySelector('[data-action="latest"]'),
+  };
+});
+test("R1.closed", "una risorsa di tre file è UN nodo, chiuso («▸ OB_PODIO_LOD1 · 3 file»), che si apre sui suoi file", async () => {
+  const { p, ctx, errors } = await openDtcWithInspector("risorsa-file");
+  let ws = await dtcBoxes(p);
+  await p.mouse.move(ws.rect.x + 20, ws.rect.y + 20);
+  ws = await dtcBoxes(p);
+  const closed = ws.boxes.find((b) => b.id === "podio_lod1");
+  const filesBefore = ws.boxes.filter((b) => b.instanceOf && b.id.startsWith("podio_lod1::")).length;
+  await pick(p, "podio_lod1");
+  const panel = await resPanel(p);
+  await p.screenshot({ path: SHOT("r1-risorsa-chiusa") }).catch(() => {});
+  await p.click('[data-win$="inspector"] .res-panel [data-action="toggle-files"]');
+  await p.waitForTimeout(500);
+  ws = await dtcBoxes(p);
+  const open1 = ws.boxes.find((b) => b.id === "podio_lod1");
+  const files = ws.boxes.filter((b) => b.id.startsWith("podio_lod1::file::")).map((b) => b.label);
+  await p.screenshot({ path: SHOT("r1-risorsa-aperta") }).catch(() => {});
+  await ctx.close();
+  return { pass: closed?.label === "▸ OB_PODIO_LOD1 · 3 file" && filesBefore === 0
+      && panel?.rows.length === 3 && panel.rows[0][0] === "entry_point" && panel.rows[0][1] === "OB_PODIO_LOD1.obj"
+      && open1?.label === "▾ OB_PODIO_LOD1 · 3 file"
+      && JSON.stringify(files) === JSON.stringify(["OB_PODIO_LOD1.obj", "OB_PODIO_LOD1.mtl", "textures/T_OB_PODIO_LOD1.jpg"])
+      && !errors.length,
+    detail: { closed: closed?.label, filesBefore, panel, open: open1?.label, files, errors } };
+});
+test("R1.shared", "una texture condivisa da due tile si vede sotto tutte e due, e l'ispettore lo dice", async () => {
+  const { p, ctx, errors } = await openDtcWithInspector("risorsa-file");
+  await pick(p, "estl_lod1");
+  const panel = await resPanel(p);
+  await p.click('[data-win$="inspector"] .res-panel [data-action="toggle-files"]');
+  await pick(p, "estr_lod1");
+  await p.click('[data-win$="inspector"] .res-panel [data-action="toggle-files"]');
+  await p.waitForTimeout(500);
+  const ws = await dtcBoxes(p);
+  const shared = ws.boxes.filter((b) => b.label === "textures/T_shared.jpg").map((b) => b.id.split("::")[0]).sort();
+  await ctx.close();
+  return { pass: JSON.stringify(shared) === JSON.stringify(["estl_lod1", "estr_lod1"])
+      && panel?.shared.some((x) => x.includes("OB_EST_R_LOD1")) && !errors.length,
+    detail: { shared, panelShared: panel?.shared, errors } };
+});
+test("R1.replace", "«Sostituisci…» sulla texture: una revisione nuova, la domanda su chi spostare («tutti»), la catena nell'ispettore", async () => {
+  const { p, ctx, errors } = await openDtcWithInspector("risorsa-file");
+  await pick(p, "podio_lod1");
+  const tex = p.locator('[data-win$="inspector"] .res-file[data-path="textures/T_OB_PODIO_LOD1.jpg"] .res-replace');
+  const [chooser] = await Promise.all([p.waitForEvent("filechooser"), tex.click()]);
+  await chooser.setFiles({ name: "T_OB_PODIO_LOD1.jpg", mimeType: "image/jpeg", buffer: Buffer.from("una texture corretta") });
+  await p.waitForSelector('[data-dialog="replace-pointers"]', { timeout: 8000 });
+  const dialog = await p.evaluate(() => ({
+    rows: [...document.querySelectorAll('[data-dialog="replace-pointers"] .res-ptr:not(.res-ptr-all)')].map((r) => r.textContent.trim()),
+    all: document.querySelector('[data-dialog="replace-pointers"] input[data-all]')?.checked ?? null,
+    staying: document.querySelector('[data-dialog="replace-pointers"] .res-ptr-staying')?.textContent ?? "",
+  }));
+  await p.screenshot({ path: SHOT("r1-sostituisci-chi-spostare") }).catch(() => {});
+  await p.click('[data-dialog="replace-pointers"] [data-action="move"]');
+  await p.waitForTimeout(600);
+  const r = await p.evaluate(() => {
+    const sel = window.__EM_DRAG__.selected()[0];
+    const rm = window.__EM_DRAG__.edgesOf("has_linked_resource").filter((e) => e.source === "RM_PODIO").map((e) => e.target);
+    const rev = window.__EM_DRAG__.edgesOf("was_revision_of").map((e) => [e.source, e.target]);
+    return { sel, rm, rev };
+  });
+  const newer = await resPanel(p);
+  await pick(p, "podio_lod1");
+  const older = await resPanel(p);
+  await p.screenshot({ path: SHOT("r1-revisioni") }).catch(() => {});
+  await ctx.close();
+  // the export that produced the OLD bytes is not proposed: it stays, and the dialog says so
+  return { pass: dialog.rows.length === 1 && /RM_PODIO/.test(dialog.rows[0]) && dialog.all === true
+      && /Export OBJ/.test(dialog.staying)
+      && r.rev.length === 1 && r.rev[0][1] === "podio_lod1" && r.sel === r.rev[0][0]
+      && r.rm.length === 1 && r.rm[0] === r.sel
+      && newer?.revisions.length === 2 && !newer.latest && older?.latest === true && !errors.length,
+    detail: { dialog, r, newer, older, errors } };
+});
+
 // ── run ─────────────────────────────────────────────────────────────────────
 const chosen = cases.filter((c) => !only.length || only.includes(c.id) || only.some((o) => c.id.startsWith(o + ".")));
 for (const c of chosen) {

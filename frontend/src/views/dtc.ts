@@ -67,6 +67,14 @@ const NODE_H = 34;
 const H_GAP = 26;
 const LANE_PAD = 26; // breathing room above/below a row inside its lane
 const COL_GAP = 44; // between two process columns
+// RISORSA-FILE · the files of an open resource, hung under it
+const FILE_H = 22;
+const FILE_GAP = 6;
+const FILE_INDENT = 12;
+// a resource is drawn as its GLYPH with the name UNDER it: the files start
+// below that name, not under the box (measured on the first screenshot, where
+// the first file covered the label)
+const FILE_TOP = 18;
 
 /** What a lane holds — decides its name and its colour. The colour tints the
  *  lane the way an epoch's own colour tints its swimlane. */
@@ -103,6 +111,7 @@ export function buildDtcScene(
   nodes: EmNode[],
   edges: EmEdge[],
   overrides?: Map<string, { x: number; y: number }>,
+  opts: { openResources?: ReadonlySet<string>; allNodes?: readonly EmNode[] } = {},
 ): Scene {
   const present = new Set(nodes.map((n) => n.id));
   const keep = new Set<string>();
@@ -337,5 +346,58 @@ export function buildDtcScene(
         sn.y = o.y;
       }
     }
+
+  // ── RISORSA-FILE · an OPEN resource shows its files underneath ────────────
+  //
+  // `has_file` is not a chain relation (it has no dtc_role): a file is not a
+  // stage of making, it is a part of what was made. So the files are not ranked
+  // — they hang under their resource, in its lane, which grows to hold them.
+  // Each is an INSTANCE (`instanceOf` the file node): a texture shared by two
+  // tiles appears under both, and a click on either selects the one file.
+  const open = opts.openResources;
+  if (open?.size) {
+    const byNode = new Map((opts.allNodes ?? nodes).map((n) => [n.id, n]));
+    const filesOf = new Map<string, EmEdge[]>();
+    for (const e of edges)
+      if (e.edge_type === "has_file" && open.has(e.source) && scene.byId.has(e.source))
+        (filesOf.get(e.source) ?? filesOf.set(e.source, []).get(e.source)!).push(e);
+    if (filesOf.size) {
+      const laneOf = new Map<string, number>();
+      for (const sn of scene.nodes) laneOf.set(sn.id, Math.max(0, ranks.indexOf(rank.get(sn.id) ?? 0)));
+      const extra = new Array(ranks.length).fill(0);
+      for (const [res, es] of filesOf) {
+        const i = laneOf.get(res) ?? 0;
+        extra[i] = Math.max(extra[i], es.length * (FILE_H + FILE_GAP) + FILE_TOP);
+      }
+      const shift: number[] = [];
+      let acc = 0;
+      for (let i = 0; i < ranks.length; i++) { shift.push(acc); acc += extra[i]; }
+      for (const sn of scene.nodes) sn.y += shift[laneOf.get(sn.id) ?? 0];
+      scene.lanes.forEach((ln, i) => { ln.y += shift[i]; ln.height += extra[i]; });
+      for (const [res, es] of filesOf) {
+        const owner = scene.byId.get(res)!;
+        const sorted = [...es].sort((a, b) => {
+          const ra = (a.attributes as Record<string, unknown> | undefined) ?? {};
+          const rb = (b.attributes as Record<string, unknown> | undefined) ?? {};
+          return (Number(ra.role !== "entry_point") - Number(rb.role !== "entry_point"))
+            || String(ra.path ?? "").localeCompare(String(rb.path ?? ""));
+        });
+        sorted.forEach((e, k) => {
+          const f = byNode.get(e.target);
+          if (!f) return;
+          const path = String(((e.attributes ?? {}) as Record<string, unknown>).path ?? f.name ?? f.id);
+          const sn: SceneNode = {
+            id: `${res}::file::${f.id}`, instanceOf: f.id, node: f,
+            x: owner.x + FILE_INDENT, y: owner.y + NODE_H + FILE_TOP + k * (FILE_H + FILE_GAP),
+            w: NODE_W - FILE_INDENT, h: FILE_H, label: path,
+          };
+          scene.nodes.push(sn);
+          scene.byId.set(sn.id, sn);
+          scene.edges.push({ source: res, target: sn.id, edge: e });
+        });
+      }
+    }
+  }
+
   return scene;
 }

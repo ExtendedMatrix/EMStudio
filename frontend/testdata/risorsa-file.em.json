@@ -1,0 +1,752 @@
+{
+ "header": {
+  "format": "em.json",
+  "version": "1.0",
+  "datamodel_versions": {
+   "connections": "1.6.26",
+   "nodes": "1.6.9",
+   "qualia": "1.6.2"
+  },
+  "ontology_versions": {}
+ },
+ "graph": {
+  "graph_id": "risorsa-file",
+  "name": "Pancia · la catena del paradata",
+  "description": null,
+  "nodes": [
+   {
+    "id": "EP_MOD",
+    "node_type": "EpochNode",
+    "name": "Età moderna",
+    "description": "",
+    "data": {
+     "end_time": 2026,
+     "start_time": 1900
+    }
+   },
+   {
+    "id": "EP_MED",
+    "node_type": "EpochNode",
+    "name": "Medioevo",
+    "description": "",
+    "data": {
+     "end_time": 1300,
+     "start_time": 900
+    }
+   },
+   {
+    "id": "EP_ROM",
+    "node_type": "EpochNode",
+    "name": "Età imperiale",
+    "description": "",
+    "data": {
+     "end_time": 300,
+     "start_time": 1
+    }
+   },
+   {
+    "id": "USM101",
+    "node_type": "US",
+    "name": "USM101",
+    "description": "Muro medievale con capitelli di reimpiego",
+    "data": {}
+   },
+   {
+    "id": "USV106",
+    "node_type": "USVs",
+    "name": "USV106",
+    "description": "Ricostruzione della cresta del muro",
+    "data": {}
+   },
+   {
+    "id": "US102",
+    "node_type": "US",
+    "name": "US102",
+    "description": "Strato di crollo",
+    "data": {}
+   },
+   {
+    "id": "RSF100b",
+    "node_type": "RSF",
+    "name": "RSF100b",
+    "description": "Capitello nord reimpiegato",
+    "data": {}
+   },
+   {
+    "id": "SF100",
+    "node_type": "SF",
+    "name": "SF100",
+    "description": "Capitello corinzio",
+    "data": {}
+   },
+   {
+    "id": "PD_USM101",
+    "node_type": "ParadataNodeGroup",
+    "name": "PD_USM101",
+    "description": "",
+    "data": {}
+   },
+   {
+    "id": "P_MAT",
+    "node_type": "property",
+    "name": "material",
+    "description": "calcare e laterizi",
+    "data": {
+     "property_type": "material"
+    }
+   },
+   {
+    "id": "P_H",
+    "node_type": "property",
+    "name": "height",
+    "description": "",
+    "data": {
+     "property_type": "height"
+    }
+   },
+   {
+    "id": "P_DAT",
+    "node_type": "property",
+    "name": "absolute_time_start",
+    "description": "1150",
+    "data": {
+     "property_type": "absolute_time_start"
+    }
+   },
+   {
+    "id": "P_CAPH",
+    "node_type": "property",
+    "name": "height",
+    "description": "",
+    "data": {
+     "property_type": "height"
+    }
+   },
+   {
+    "id": "D1",
+    "node_type": "document",
+    "name": "D.1",
+    "description": "Scheda dei capitelli reimpiegati",
+    "data": {
+     "filename": "scheda_capitelli_USM101.txt",
+     "text": "Scheda dei capitelli reimpiegati nel muro USM101, campagna 2026.\n\nIl capitello nord (RSF100b) è un corinzio ad acanto spinoso, databile su base stilistica alla fine del II secolo d.C.\n\nIl capitello sud (RSF101b) presenta la stessa lavorazione e proviene con ogni probabilità dalla stessa officina.\n\nEntrambi mostrano la rilavorazione dell’abaco per l’alloggiamento nella muratura medievale.\n\nL’altezza conservata dei capitelli è di 0,48 m; il diametro di base è di 0,42 m."
+    }
+   },
+   {
+    "id": "D2",
+    "node_type": "document",
+    "name": "D.2",
+    "description": "Rilievo 3D di USM101, 2026",
+    "data": {
+     "url": "/em/studio/testdata/catena-muro.gltf"
+    }
+   },
+   {
+    "id": "D3",
+    "node_type": "document",
+    "name": "D.3",
+    "description": "Foto del prospetto nord di USM101",
+    "data": {
+     "url": "/em/studio/testdata/catena-prospetto.jpg"
+    }
+   },
+   {
+    "id": "X1",
+    "node_type": "extractor",
+    "name": "D.1.1",
+    "description": "datazione stilistica del capitello nord",
+    "data": {
+     "geometry": {
+      "end": 183,
+      "kind": "passage",
+      "start": 66,
+      "text": "Il capitello nord (RSF100b) è un corinzio ad acanto spinoso, databile su base stilistica alla fine del II secolo d.C."
+     }
+    }
+   },
+   {
+    "id": "podio_blend",
+    "name": "OB_PODIO_LOD1 (TempluMare_2021.blend)",
+    "node_type": "resource",
+    "description": "",
+    "data": {
+     "url": "blend://RB/TempluMare_2021.blend#Object/OB_PODIO_LOD1",
+     "url_type": "3d_model",
+     "description": "",
+     "tier": "master",
+     "packaging": "datablock"
+    }
+   },
+   {
+    "id": "podio_lod1",
+    "name": "OB_PODIO_LOD1",
+    "node_type": "resource",
+    "description": "",
+    "data": {
+     "url": "",
+     "url_type": "3d_model",
+     "description": "",
+     "tier": "distribution",
+     "packaging": "file_set",
+     "dtc_kind": "mesh"
+    }
+   },
+   {
+    "id": "474cfbd4-914c-5eed-86c2-e21ff450d0f5",
+    "name": "OB_PODIO_LOD1.obj",
+    "node_type": "resource_file",
+    "data": {
+     "url": "OB_PODIO_LOD1.obj",
+     "checksum": "sha256:7aec2a734482c5644065738ea08519bb583e99c838c4a0cb624646cbd18f05cd",
+     "size_bytes": 46961673
+    }
+   },
+   {
+    "id": "d7524243-8690-5b20-95f9-8646867a039f",
+    "name": "OB_PODIO_LOD1.mtl",
+    "node_type": "resource_file",
+    "data": {
+     "url": "OB_PODIO_LOD1.mtl",
+     "checksum": "sha256:73ae97db862f68bb9af142d4c0d94192821cdd51653a43eaeec0e08d6a132cce",
+     "size_bytes": 287
+    }
+   },
+   {
+    "id": "e006cc56-8ac5-5430-ba6e-8e97a4e4dee0",
+    "name": "T_OB_PODIO_LOD1.jpg",
+    "node_type": "resource_file",
+    "data": {
+     "url": "textures/T_OB_PODIO_LOD1.jpg",
+     "checksum": "sha256:57344764818ebde964ff813b14151c0190ac7d78a1a7d2e395bf0654e6656384",
+     "size_bytes": 1292226
+    }
+   },
+   {
+    "id": "prato_lod1",
+    "name": "OB_PRATO_LOD1",
+    "node_type": "resource",
+    "description": "",
+    "data": {
+     "url": "",
+     "url_type": "3d_model",
+     "description": "",
+     "packaging": "file_set",
+     "dtc_kind": "mesh"
+    }
+   },
+   {
+    "id": "79f133d2-2b36-5e62-aa30-b12a759eecf0",
+    "name": "OB_PRATO_LOD1.obj",
+    "node_type": "resource_file",
+    "data": {
+     "url": "OB_PRATO_LOD1.obj",
+     "checksum": "sha256:b6e0d50a9dc26418a4b96bcd41dae4ca25efb8f33002ef8a7f43b700358d648a",
+     "size_bytes": 26877879
+    }
+   },
+   {
+    "id": "636cb5ac-1430-5642-ac4b-31174239acdd",
+    "name": "OB_PRATO_LOD1.mtl",
+    "node_type": "resource_file",
+    "data": {
+     "url": "OB_PRATO_LOD1.mtl",
+     "checksum": "sha256:6dc1fc6477516280f213922d26d53177848e52962d567913d2715a5f3ecb127e",
+     "size_bytes": 287
+    }
+   },
+   {
+    "id": "34bbf5e0-8f03-50e6-9495-6c85ca0cb33d",
+    "name": "T_OB_PRATO_LOD1.jpg",
+    "node_type": "resource_file",
+    "data": {
+     "url": "textures/T_OB_PRATO_LOD1.jpg",
+     "checksum": "sha256:9501445b30cedf969fd1a40c4de2821d14c999f3fdec481afa2955e7839febda",
+     "size_bytes": 1128876
+    }
+   },
+   {
+    "id": "estl_lod1",
+    "name": "OB_EST_L_LOD1",
+    "node_type": "resource",
+    "description": "",
+    "data": {
+     "url": "",
+     "url_type": "3d_model",
+     "description": "",
+     "packaging": "file_set",
+     "dtc_kind": "mesh"
+    }
+   },
+   {
+    "id": "48f0bbf5-1638-5a39-b0b8-368cef4d3bea",
+    "name": "OB_EST_L_LOD1.obj",
+    "node_type": "resource_file",
+    "data": {
+     "url": "OB_EST_L_LOD1.obj",
+     "checksum": "sha256:d7aaa7b5daab151bdeae6834b850c6d1a472fe38e701cff9e36f7d29d377b765",
+     "size_bytes": 51886357
+    }
+   },
+   {
+    "id": "5f98686c-35d4-5b15-ac70-9e555a3df01c",
+    "name": "OB_EST_L_LOD1.mtl",
+    "node_type": "resource_file",
+    "data": {
+     "url": "OB_EST_L_LOD1.mtl",
+     "checksum": "sha256:d98c349af2d37a6368d65223f718d98164d01b28fec5b47b65a087b2f2ff95ac",
+     "size_bytes": 287
+    }
+   },
+   {
+    "id": "49101c6b-1e5f-5321-8f35-199967289551",
+    "name": "T_shared.jpg",
+    "node_type": "resource_file",
+    "data": {
+     "url": "textures/T_shared.jpg",
+     "checksum": "sha256:5555555555555555555555555555555555555555555555555555555555555555",
+     "size_bytes": 1000
+    }
+   },
+   {
+    "id": "estr_lod1",
+    "name": "OB_EST_R_LOD1",
+    "node_type": "resource",
+    "description": "",
+    "data": {
+     "url": "",
+     "url_type": "3d_model",
+     "description": "",
+     "packaging": "file_set",
+     "dtc_kind": "mesh"
+    }
+   },
+   {
+    "id": "7c40e354-a1a1-59ce-82c1-d7b40c503027",
+    "name": "OB_EST_R_LOD1.obj",
+    "node_type": "resource_file",
+    "data": {
+     "url": "OB_EST_R_LOD1.obj",
+     "checksum": "sha256:3255a20cf8205d4c8e4d69b6dd2b210f3a6af3b433ce03028c247a3cde22f9a5",
+     "size_bytes": 59686218
+    }
+   },
+   {
+    "id": "65d3e969-7ced-5db9-a666-cb36acea7a02",
+    "name": "OB_EST_R_LOD1.mtl",
+    "node_type": "resource_file",
+    "data": {
+     "url": "OB_EST_R_LOD1.mtl",
+     "checksum": "sha256:1778371afd3999ef524cd3d464c38427929b2ecd6b35d8b81c97c9cc15f37a75",
+     "size_bytes": 287
+    }
+   },
+   {
+    "id": "export_obj",
+    "name": "Export OBJ (3DSC)",
+    "node_type": "dtc_process",
+    "description": "",
+    "data": {
+     "dtc_kind": "format_conversion"
+    }
+   },
+   {
+    "id": "RM_PODIO",
+    "name": "RM_PODIO",
+    "node_type": "representation_model",
+    "description": ""
+   }
+  ],
+  "edges": [
+   {
+    "id": "USM101__has_first_epoch__EP_MED",
+    "edge_type": "has_first_epoch",
+    "source": "USM101",
+    "target": "EP_MED"
+   },
+   {
+    "id": "USV106__has_first_epoch__EP_MED",
+    "edge_type": "has_first_epoch",
+    "source": "USV106",
+    "target": "EP_MED"
+   },
+   {
+    "id": "US102__has_first_epoch__EP_MOD",
+    "edge_type": "has_first_epoch",
+    "source": "US102",
+    "target": "EP_MOD"
+   },
+   {
+    "id": "RSF100b__has_first_epoch__EP_MED",
+    "edge_type": "has_first_epoch",
+    "source": "RSF100b",
+    "target": "EP_MED"
+   },
+   {
+    "id": "SF100__has_first_epoch__EP_ROM",
+    "edge_type": "has_first_epoch",
+    "source": "SF100",
+    "target": "EP_ROM"
+   },
+   {
+    "id": "US102__is_after__USM101",
+    "edge_type": "is_after",
+    "source": "US102",
+    "target": "USM101"
+   },
+   {
+    "id": "USV106__is_after__USM101",
+    "edge_type": "is_after",
+    "source": "USV106",
+    "target": "USM101"
+   },
+   {
+    "id": "RSF100b__is_part_of__USM101",
+    "edge_type": "is_part_of",
+    "source": "RSF100b",
+    "target": "USM101"
+   },
+   {
+    "id": "RSF100b__changed_from__SF100",
+    "edge_type": "changed_from",
+    "source": "RSF100b",
+    "target": "SF100"
+   },
+   {
+    "id": "USM101__has_paradata_nodegroup__PD_USM101",
+    "edge_type": "has_paradata_nodegroup",
+    "source": "USM101",
+    "target": "PD_USM101"
+   },
+   {
+    "id": "USM101__has_property__P_MAT",
+    "edge_type": "has_property",
+    "source": "USM101",
+    "target": "P_MAT"
+   },
+   {
+    "id": "USM101__has_property__P_H",
+    "edge_type": "has_property",
+    "source": "USM101",
+    "target": "P_H"
+   },
+   {
+    "id": "USM101__has_property__P_DAT",
+    "edge_type": "has_property",
+    "source": "USM101",
+    "target": "P_DAT"
+   },
+   {
+    "id": "RSF100b__has_property__P_CAPH",
+    "edge_type": "has_property",
+    "source": "RSF100b",
+    "target": "P_CAPH"
+   },
+   {
+    "id": "P_MAT__is_in_paradata_nodegroup__PD_USM101",
+    "edge_type": "is_in_paradata_nodegroup",
+    "source": "P_MAT",
+    "target": "PD_USM101"
+   },
+   {
+    "id": "P_H__is_in_paradata_nodegroup__PD_USM101",
+    "edge_type": "is_in_paradata_nodegroup",
+    "source": "P_H",
+    "target": "PD_USM101"
+   },
+   {
+    "id": "P_DAT__is_in_paradata_nodegroup__PD_USM101",
+    "edge_type": "is_in_paradata_nodegroup",
+    "source": "P_DAT",
+    "target": "PD_USM101"
+   },
+   {
+    "id": "X1__is_in_paradata_nodegroup__PD_USM101",
+    "edge_type": "is_in_paradata_nodegroup",
+    "source": "X1",
+    "target": "PD_USM101"
+   },
+   {
+    "id": "P_DAT__has_data_provenance__X1",
+    "edge_type": "has_data_provenance",
+    "source": "P_DAT",
+    "target": "X1"
+   },
+   {
+    "id": "X1__extracted_from__D1",
+    "edge_type": "extracted_from",
+    "source": "X1",
+    "target": "D1"
+   },
+   {
+    "id": "podio_lod1__has_file__474cfbd4-914c-5eed-86c2-e21ff450d0f5",
+    "edge_type": "has_file",
+    "source": "podio_lod1",
+    "target": "474cfbd4-914c-5eed-86c2-e21ff450d0f5",
+    "attributes": {
+     "role": "entry_point",
+     "path": "OB_PODIO_LOD1.obj"
+    }
+   },
+   {
+    "id": "podio_lod1__has_file__d7524243-8690-5b20-95f9-8646867a039f",
+    "edge_type": "has_file",
+    "source": "podio_lod1",
+    "target": "d7524243-8690-5b20-95f9-8646867a039f",
+    "attributes": {
+     "role": "member",
+     "path": "OB_PODIO_LOD1.mtl"
+    }
+   },
+   {
+    "id": "podio_lod1__has_file__e006cc56-8ac5-5430-ba6e-8e97a4e4dee0",
+    "edge_type": "has_file",
+    "source": "podio_lod1",
+    "target": "e006cc56-8ac5-5430-ba6e-8e97a4e4dee0",
+    "attributes": {
+     "role": "member",
+     "path": "textures/T_OB_PODIO_LOD1.jpg"
+    }
+   },
+   {
+    "id": "podio_lod1~>podio_blend",
+    "edge_type": "dtc_derived_from",
+    "source": "podio_lod1",
+    "target": "podio_blend"
+   },
+   {
+    "id": "prato_lod1__has_file__79f133d2-2b36-5e62-aa30-b12a759eecf0",
+    "edge_type": "has_file",
+    "source": "prato_lod1",
+    "target": "79f133d2-2b36-5e62-aa30-b12a759eecf0",
+    "attributes": {
+     "role": "entry_point",
+     "path": "OB_PRATO_LOD1.obj"
+    }
+   },
+   {
+    "id": "prato_lod1__has_file__636cb5ac-1430-5642-ac4b-31174239acdd",
+    "edge_type": "has_file",
+    "source": "prato_lod1",
+    "target": "636cb5ac-1430-5642-ac4b-31174239acdd",
+    "attributes": {
+     "role": "member",
+     "path": "OB_PRATO_LOD1.mtl"
+    }
+   },
+   {
+    "id": "prato_lod1__has_file__34bbf5e0-8f03-50e6-9495-6c85ca0cb33d",
+    "edge_type": "has_file",
+    "source": "prato_lod1",
+    "target": "34bbf5e0-8f03-50e6-9495-6c85ca0cb33d",
+    "attributes": {
+     "role": "member",
+     "path": "textures/T_OB_PRATO_LOD1.jpg"
+    }
+   },
+   {
+    "id": "estl_lod1__has_file__48f0bbf5-1638-5a39-b0b8-368cef4d3bea",
+    "edge_type": "has_file",
+    "source": "estl_lod1",
+    "target": "48f0bbf5-1638-5a39-b0b8-368cef4d3bea",
+    "attributes": {
+     "role": "entry_point",
+     "path": "OB_EST_L_LOD1.obj"
+    }
+   },
+   {
+    "id": "estl_lod1__has_file__5f98686c-35d4-5b15-ac70-9e555a3df01c",
+    "edge_type": "has_file",
+    "source": "estl_lod1",
+    "target": "5f98686c-35d4-5b15-ac70-9e555a3df01c",
+    "attributes": {
+     "role": "member",
+     "path": "OB_EST_L_LOD1.mtl"
+    }
+   },
+   {
+    "id": "estl_lod1__has_file__49101c6b-1e5f-5321-8f35-199967289551",
+    "edge_type": "has_file",
+    "source": "estl_lod1",
+    "target": "49101c6b-1e5f-5321-8f35-199967289551",
+    "attributes": {
+     "role": "member",
+     "path": "textures/T_shared.jpg"
+    }
+   },
+   {
+    "id": "estr_lod1__has_file__7c40e354-a1a1-59ce-82c1-d7b40c503027",
+    "edge_type": "has_file",
+    "source": "estr_lod1",
+    "target": "7c40e354-a1a1-59ce-82c1-d7b40c503027",
+    "attributes": {
+     "role": "entry_point",
+     "path": "OB_EST_R_LOD1.obj"
+    }
+   },
+   {
+    "id": "estr_lod1__has_file__65d3e969-7ced-5db9-a666-cb36acea7a02",
+    "edge_type": "has_file",
+    "source": "estr_lod1",
+    "target": "65d3e969-7ced-5db9-a666-cb36acea7a02",
+    "attributes": {
+     "role": "member",
+     "path": "OB_EST_R_LOD1.mtl"
+    }
+   },
+   {
+    "id": "estr_lod1__has_file__49101c6b-1e5f-5321-8f35-199967289551",
+    "edge_type": "has_file",
+    "source": "estr_lod1",
+    "target": "49101c6b-1e5f-5321-8f35-199967289551",
+    "attributes": {
+     "role": "member",
+     "path": "textures/T_shared.jpg"
+    }
+   },
+   {
+    "id": "export_obj__dtc_had_output__podio_lod1",
+    "source": "export_obj",
+    "target": "podio_lod1",
+    "edge_type": "dtc_had_output"
+   },
+   {
+    "id": "export_obj__dtc_had_input__podio_blend",
+    "source": "export_obj",
+    "target": "podio_blend",
+    "edge_type": "dtc_had_input"
+   },
+   {
+    "id": "RM_PODIO__has_linked_resource__podio_lod1",
+    "source": "RM_PODIO",
+    "target": "podio_lod1",
+    "edge_type": "has_linked_resource"
+   },
+   {
+    "id": "RM_PODIO__has_first_epoch__EP_MOD",
+    "source": "RM_PODIO",
+    "target": "EP_MOD",
+    "edge_type": "has_first_epoch"
+   }
+  ],
+  "data": {}
+ },
+ "layout": {
+  "canvas": {
+   "title": "Pancia · la catena del paradata",
+   "width": 478,
+   "height": 620
+  },
+  "swimlanes": [
+   {
+    "epoch_id": "EP_MOD",
+    "order": 0,
+    "y": 0,
+    "height": 80
+   },
+   {
+    "epoch_id": "EP_MED",
+    "order": 1,
+    "y": 80,
+    "height": 380
+   },
+   {
+    "epoch_id": "EP_ROM",
+    "order": 2,
+    "y": 460,
+    "height": 80
+   }
+  ],
+  "sectors": [],
+  "positions": {
+   "D1": {
+    "x": 166.52,
+    "y": 404,
+    "w": 24.96,
+    "h": 32
+   },
+   "D2": {
+    "x": 194,
+    "y": 564,
+    "w": 24.96,
+    "h": 32
+   },
+   "D3": {
+    "x": 248.96,
+    "y": 564,
+    "w": 24.96,
+    "h": 32
+   },
+   "PD_USM101": {
+    "x": 0,
+    "y": 254,
+    "w": 358,
+    "h": 118
+   },
+   "P_CAPH": {
+    "x": 388,
+    "y": 254,
+    "w": 90,
+    "h": 32
+   },
+   "P_DAT": {
+    "x": 134,
+    "y": 276,
+    "w": 90,
+    "h": 32
+   },
+   "P_H": {
+    "x": 254,
+    "y": 276,
+    "w": 90,
+    "h": 32
+   },
+   "P_MAT": {
+    "x": 14,
+    "y": 276,
+    "w": 90,
+    "h": 32
+   },
+   "RSF100b": {
+    "x": 14,
+    "y": 176,
+    "w": 90,
+    "h": 32
+   },
+   "SF100": {
+    "x": 194,
+    "y": 484,
+    "w": 90,
+    "h": 32
+   },
+   "US102": {
+    "x": 194,
+    "y": 24,
+    "w": 90,
+    "h": 32
+   },
+   "USM101": {
+    "x": 0,
+    "y": 154,
+    "w": 118,
+    "h": 68
+   },
+   "USV106": {
+    "x": 0,
+    "y": 104,
+    "w": 90,
+    "h": 32
+   },
+   "X1": {
+    "x": 163,
+    "y": 326,
+    "w": 32,
+    "h": 32
+   }
+  },
+  "folded_groups": [],
+  "group_spaces": {},
+  "edge_routes": {},
+  "pinned": [],
+  "anchors": []
+ }
+}

@@ -8,6 +8,7 @@ import { qualiaList } from "./vocab";
 import { getSettings } from "./settings";
 import { currentIdentity, orcidProblem } from "./identity";
 import { acquisitionMembers, derivationChain, resourceUsages } from "./ingest";
+import { renderResourcePanel } from "./resource-panel";
 import type { TwinSearchResult } from "./twins";
 import { renderSitePosition } from "./study-panel";
 
@@ -61,6 +62,11 @@ export interface InspectorCallbacks {
   /** …and whether it is already there, so the button can say "on the shelf"
    *  instead of adding it twice. */
   isOnShelf?: (nodeId: string) => boolean;
+  /** RISORSA-FILE · the files of a resource: shown in the drawing or folded */
+  isResourceOpen?: (resId: string) => boolean;
+  onToggleResourceFiles?: (resId: string) => void;
+  /** …and replacing one of them makes a revision (absent = no bytes to read) */
+  onReplaceFile?: (resId: string, fileId: string | null) => void;
 }
 
 function el(tag: string, cls?: string, text?: string): HTMLElement {
@@ -843,6 +849,17 @@ export function renderInspector(
       }
       root.appendChild(panel);
     }
+  }
+
+  // ── RISORSA-FILE · the files, the resources of a file, the revisions ─────
+  if (nodeId && (node.node_type === "resource" || node.node_type === "resource_file")) {
+    const panel = renderResourcePanel(store, nodeId, {
+      onJump: cb.onJump,
+      isOpen: (id) => cb.isResourceOpen?.(id) ?? false,
+      onToggleFiles: (id) => cb.onToggleResourceFiles?.(id),
+      onReplaceFile: cb.onReplaceFile,
+    });
+    if (panel) root.appendChild(panel);
   }
 
   // ── il LOTTO · un'acquisizione, con i suoi membri ─────────────────────────

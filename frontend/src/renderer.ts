@@ -829,7 +829,7 @@ export function render(
       ctx.lineWidth = 0.9 / Math.sqrt(vp.scale);
       ctx.stroke();
       if (drawLabels) {
-        const label = String(n.node.name || n.id);
+        const label = (n.label ?? String(n.node.name || n.id));
         ctx.font = canvasFont(CANVAS_TYPE.nodeLabel.weight, CANVAS_TYPE.minPx);
         // ON the sheet, whose fill is white paper from the datamodel: the ink
         // follows the FILL, not the theme (`labelOn`). Using the canvas ink here
@@ -887,7 +887,7 @@ export function render(
       ctx.lineWidth = 1.1 / Math.sqrt(vp.scale);
       ctx.stroke();
       if (drawLabels) {
-        const label = String(n.node.name || n.id);
+        const label = (n.label ?? String(n.node.name || n.id));
         ctx.font = canvasFont(500, fitPx(CANVAS_TYPE.nodeLabel.px, n.h));
         // the annotation draws its own pale field (st.fill): ink from the fill
         ctx.fillStyle = labelInk(
@@ -952,7 +952,7 @@ export function render(
         ctx.drawImage(crispImage(icon, iw, ih, dpr * vp.scale), ix, iy, iw, ih);
       }
       if (drawLabels) {
-        const label = String(n.node.name || n.id);
+        const label = (n.label ?? String(n.node.name || n.id));
         ctx.font = canvasFont(CANVAS_TYPE.nodeLabel.weight, CANVAS_TYPE.minPx);
         ctx.fillStyle = labelInk(state, n.node.id ?? n.id, canvasTheme().labelInk);
         if (st.labelPosition === "top_left") {
@@ -1075,7 +1075,7 @@ export function render(
     }
 
     if (drawLabels) {
-      const label = String(n.node.name || n.id);
+      const label = (n.label ?? String(n.node.name || n.id));
       ctx.font = canvasFont(CANVAS_TYPE.nodeLabel.weight, fitPx(CANVAS_TYPE.nodeLabel.px, n.h));
       // A SHRUNKEN shape (BR) cannot hold its own name: `textColor` is computed
       // from the fill, so over BR's black square it is near-white — and the name
