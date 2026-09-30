@@ -45,12 +45,18 @@
 // `zalmoxes-laran` è anche il profilo di una PERSONA, e due repository che NON
 // si sono spostati. Misurato con `curl` il 22 settembre 2026:
 //
-//     zalmoxes-laran/EMStudio        301 → ExtendedMatrix/EMStudio
-//     zalmoxes-laran/EMStudio-doc    301 → ExtendedMatrix/EMStudio-doc
-//     zalmoxes-laran/s3Dgraphy       301 → ExtendedMatrix/s3Dgraphy
+//     <vecchio-proprietario>/EMStudio        301 → ExtendedMatrix/EMStudio
+//     <vecchio-proprietario>/EMStudio-doc    301 → ExtendedMatrix/EMStudio-doc
+//     <vecchio-proprietario>/s3Dgraphy       301 → ExtendedMatrix/s3Dgraphy
 //     zalmoxes-laran/EM-blender-tools  200   ← non si è spostato
 //     zalmoxes-laran/ExtendedMatrix    200   ← nemmeno (è la specifica del
 //                                              linguaggio, non l'organizzazione)
+//
+// (MICRO-UN-POSTO, 30 set 2026: le tre righe dei traslocati qui sopra erano
+// scritte col proprietario vero, e il recinto — che gira anche su sé stesso —
+// era rosso dal 22 settembre per il SUO commento. Il recinto aveva ragione e la
+// regola è la sua: «nessuna esenzione, i commenti non contano». Corretto il
+// commento, non il recinto.)
 //
 // Quindi il divieto è su `<vecchio>/<repo-traslocato>`, non sulla stringa nuda:
 // vietarla tutta renderebbe rossa una firma d'autore corretta, e un recinto che

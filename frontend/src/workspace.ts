@@ -46,10 +46,10 @@ export type WindowType =
   // and the room's MinIO, Samba/WebDAV conceivable) — the same shape as the
   // graph window's projections: one window, several ways of looking.
   | "storage"
-  // A2 · ANNOTATOR · an image, and the regions traced on it. Its Modes are what
-  // the pointer DOES (look / trace / mask), the way Blender's Image Editor has
-  // View / Paint / Mask — not what it shows, which is always the same picture.
-  | "annotator"
+  // (A2's ANNOTATOR is not a type any more: AUDIT N4 made the Doc window the
+  // one tracer, and MICRO-UN-POSTO took its code away. The string stays only
+  // as an ALIAS, read by `migrateWin` and `loadCustom`: a saved Annotator opens
+  // a Doc.)
   // SHELF1 · THE WIDE LIST. The curated, savable list of resources a study
   // works from — a ShelfGraph, not a computed view of a folder's orphans.
   // (video editor: browser → SHELF → timeline.)
@@ -106,18 +106,10 @@ export const VIEWER_MODES = ["single", "gallery"] as const;
  *  the Storage window's backends: the table is not a second shelf. */
 export const SHELF_MODES = ["list", "table"] as const;
 
-/** What the pointer does in an Annotator window. `mask` is DECLARED and not
- *  implemented (phase 2, like the datamodel's `shape_kind: "mask"`): it is
- *  listed because the plan is decided, and it is disabled in the header rather
- *  than silently absent — a mode that will exist is better announced than
- *  discovered. */
-export const ANNOTATOR_MODES = ["view", "annotate", "mask"] as const;
-
 /** The modes that are listed but cannot be entered yet, with the reason shown
- *  to whoever tries. Data, not an `if` in the header code. */
-export const DISABLED_MODES: Record<string, string> = {
-  mask: "win.maskPhase2",
-};
+ *  to whoever tries. Data, not an `if` in the header code. Empty since the
+ *  Annotator's «mask» went with it (MICRO-UN-POSTO). */
+export const DISABLED_MODES: Record<string, string> = {};
 
 /**
  * U1 · THE mode registry: window type → the modes that type offers, in header
@@ -133,7 +125,6 @@ export const WINDOW_MODES: Partial<Record<WindowType, readonly string[]>> = {
   graph: GRAPH_MODES,
   storage: STORAGE_MODES,
   viewer: VIEWER_MODES,
-  annotator: ANNOTATOR_MODES,
   shelf: SHELF_MODES,
 };
 
@@ -392,9 +383,9 @@ function loadCustom(): WorkspacePreset[] {
     ).map((w) => ({
       // AUDIT N4 · an Annotator in a user's arrangement is a Doc window now
       ...w,
-      windowType: w.windowType === "annotator" ? "doc" : w.windowType,
+      windowType: (w.windowType as string) === "annotator" ? "doc" : w.windowType,
       arrangement: w.arrangement && Array.isArray(w.arrangement.wins)
-        ? { ...w.arrangement, wins: w.arrangement.wins.map((x) => x.type === "annotator" ? { ...x, type: "doc" as WindowType } : x) }
+        ? { ...w.arrangement, wins: w.arrangement.wins.map((x) => (x.type as string) === "annotator" ? { ...x, type: "doc" as WindowType } : x) }
         : w.arrangement,
     }));
   } catch {
@@ -525,7 +516,6 @@ export const WINDOW_TYPE_META: Record<WindowType, { icon: string; labelKey: stri
   inspector: { icon: windowIcon("inspector"), labelKey: "win.inspector" },
   viewer: { icon: windowIcon("viewer"), labelKey: "win.viewer" },
   storage: { icon: windowIcon("storage"), labelKey: "win.storage" },
-  annotator: { icon: windowIcon("annotator"), labelKey: "win.annotator" },
   shelf: { icon: windowIcon("shelf"), labelKey: "win.shelf" },
   study: { icon: windowIcon("study"), labelKey: "win.study" },
   "narrative-index": { icon: windowIcon("narrative-index"), labelKey: "win.narrativeIndex" },
@@ -664,7 +654,7 @@ export function migrateWin(w: Win): Win {
   // AUDIT N4 · ONE TRACER: the Annotator is the Doc window now. The type stays
   // as an ALIAS, so a saved arrangement with an Annotator opens a Doc in its
   // place (its View/Annotate mode had no meaning in the Doc and is dropped).
-  if (w.type === "annotator") {
+  if ((w.type as string) === "annotator") {
     delete state["mode.annotator"];
     return { ...w, type: "doc", state };
   }

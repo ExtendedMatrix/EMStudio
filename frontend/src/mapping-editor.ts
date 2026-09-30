@@ -180,11 +180,57 @@ export interface MappingEditorState {
   applied: Record<string, unknown> | null;
   busy: string;
   note: string;
+  /** MICRO-UN-POSTO · who filled the editor. File ▸ Importa ▸ Tabella con
+   *  mappatura opens it empty (`file`); a row of the EMtree brings its auxiliary
+   *  file (`aux`); StratiMiner brings its proposals (`stratiminer`: AI data, to
+   *  be verified). One editor, three ways of filling it. */
+  from?: { kind: "file" | "aux" | "stratiminer"; label?: string; auxId?: string };
+  /** how the source is read: a mapping written here (the columns below), a
+   *  mapping file, a mapping the registry knows, or none (an EM table, read as
+   *  it is — and a folder of resources) */
+  mappingKind?: MappingKind;
+  mappingPath?: string;
+  mappingName?: string;
+  /** where it lands: a new graph, or the graph open now */
+  target?: "new" | "this";
+  /** the graph open now, by name — absent when there is none */
+  hostLabel?: string;
+  /** how it enters: ONE vocabulary for the whole application (`LANDINGS`) */
+  landing?: Landing;
+  /** a provisional apply on the graph open now, still to be written or removed */
+  trial?: { injector: string; nodes: number } | null;
+}
+
+export type MappingKind = "authored" | "file" | "registry" | "none";
+export const MAPPING_KINDS: readonly MappingKind[] = ["authored", "file", "registry", "none"];
+
+/**
+ * THE THREE WAYS A TABLE ENTERS A GRAPH — one vocabulary, used by the editor,
+ * the EMtree and every message (`land.<key>`, it/en/de):
+ *
+ *  · `volatile` — «Provvisoria»: in the graph, in blue, out of the saved file
+ *    until it is written in;
+ *  · `baked` — «Scritta nel grafo»: written in, saved with the document;
+ *  · `attached` — «Allegata come file ausiliario»: kept on the graph as a source
+ *    with a life (re-read when the file changes, written in when agreed); its
+ *    nodes are provisional until then. Only on a graph that exists.
+ */
+export type Landing = "volatile" | "baked" | "attached";
+export const LANDINGS: readonly Landing[] = ["volatile", "baked", "attached"];
+
+/** Why a landing cannot be chosen for a target, or "" when it can. */
+export function landingRefusal(target: "new" | "this", landing: Landing,
+                               hasHost: boolean): string {
+  if (target === "this" && !hasHost) return "impmap.noGraph";
+  if (landing === "attached" && target === "new") return "land.attachedNeedsGraph";
+  return "";
 }
 
 export const EMPTY_STATE: MappingEditorState = {
   path: "", format: "", fields: [], catalog: [], choices: {}, relations: [],
   edgeOptions: {}, name: "", verdict: null, applied: null, busy: "", note: "",
+  from: { kind: "file" }, mappingKind: "authored", mappingPath: "", mappingName: "",
+  target: "new", landing: "baked", trial: null,
 };
 
 /** One row of a listing, in the shape `storage.ts` already returns (`FsEntry`).
@@ -246,7 +292,18 @@ export interface MappingEditorHandlers {
   setRelation(index: number, relation: RelationDraft): void;
   removeRelation(index: number): void;
   validate(): void;
-  apply(mode: "volatile" | "bake"): void;
+  /** the three questions of the door (MICRO-UN-POSTO) */
+  setMappingKind(kind: MappingKind): void;
+  setMappingRef(value: string): void;
+  pickMappingFile(): void;
+  setTarget(target: "new" | "this"): void;
+  setLanding(landing: Landing): void;
+  /** ONE apply: the source, read with the mapping, lands where and how the
+   *  person said */
+  apply(): void;
+  /** the provisional apply on the graph open now: write it in, or take it out */
+  writeTrial(): void;
+  dropTrial(): void;
   exportJson(): void;
   saveToRegistry(): void;
 }
@@ -372,12 +429,16 @@ export function renderMappingEditor(host: HTMLElement,
   intro.textContent = t("me.intro");
   panel.appendChild(intro);
 
+  const from = fromBanner(state);
+  if (from) panel.appendChild(from);
   panel.appendChild(sourceBox(state, handlers, busy));
-  if (state.fields.length) {
+  panel.appendChild(mappingBox(state, handlers, busy));
+  if ((state.mappingKind ?? "authored") === "authored" && state.fields.length) {
     panel.appendChild(fieldsBox(state, handlers, busy));
     panel.appendChild(relationsBox(state, handlers, busy));
     panel.appendChild(outputBox(state, handlers, busy));
   }
+  panel.appendChild(landingBox(state, handlers, busy));
   if (state.note) {
     const note = document.createElement("p");
     note.className = "me-note";
@@ -404,6 +465,7 @@ function sourceBox(state: MappingEditorState, h: MappingEditorHandlers,
   const input = document.createElement("input");
   input.type = "text";
   input.value = state.path;
+  input.dataset.field = "source-path";
   input.placeholder = t("me.pathPlaceholder");
   input.addEventListener("change", () => h.setPath(input.value));
   // TWO WAYS IN, and they are complementary rather than alternatives:
@@ -971,14 +1033,6 @@ function outputBox(state: MappingEditorState, h: MappingEditorHandlers,
 
   const acts = document.createElement("div");
   acts.className = "me-row";
-  for (const mode of ["volatile", "bake"] as const) {
-    const button = document.createElement("button");
-    button.textContent = t(`me.apply.${mode}`);
-    button.title = t(`me.apply.${mode}Why`);
-    button.disabled = busy || state.verdict?.ok === false;
-    button.addEventListener("click", () => h.apply(mode));
-    acts.appendChild(button);
-  }
   const download = document.createElement("button");
   download.textContent = t("me.export");
   download.disabled = busy;
@@ -990,28 +1044,6 @@ function outputBox(state: MappingEditorState, h: MappingEditorHandlers,
   save.addEventListener("click", () => h.saveToRegistry());
   acts.append(download, save);
   section.appendChild(acts);
-
-  // IMPMAP · Apply is a PREVIEW, and says so. It has only ever been able to make
-  // a new graph — the result is adopted as a new slot — and for a while that was
-  // the only way to apply a mapping at all, which is how "apply" came to sound
-  // like "attach". Attaching a table to the graph you are working on now has its
-  // own entry, and the choice of target is asked THERE, once: two target pickers
-  // in two panels would be two answers to the same question.
-  const where = document.createElement("p");
-  where.className = "me-muted";
-  where.textContent = t("impmap.editorNote");
-  section.appendChild(where);
-
-  if (state.applied) {
-    const report = document.createElement("p");
-    report.className = "me-muted";
-    const a = state.applied as { mode?: string; rows?: number;
-                                 nodes_added?: number; edges_added?: number };
-    report.textContent = t("me.applied", {
-      mode: String(a.mode ?? ""), rows: String(a.rows ?? 0),
-      nodes: String(a.nodes_added ?? 0), edges: String(a.edges_added ?? 0) });
-    section.appendChild(report);
-  }
 
   const preview = document.createElement("details");
   preview.className = "me-preview";
@@ -1040,4 +1072,156 @@ function verdictBox(verdict: Verdict): HTMLElement {
     }
   }
   return box;
+}
+
+// ── MICRO-UN-POSTO · the door: who filled it, how it is read, where it lands ──
+
+function fromBanner(state: MappingEditorState): HTMLElement | null {
+  const from = state.from;
+  if (!from || from.kind === "file") return null;
+  const p = document.createElement("p");
+  p.className = `me-from me-from-${from.kind}`;
+  p.dataset.from = from.kind;
+  p.textContent = from.kind === "aux"
+    ? t("me.fromAux", { name: from.label ?? "", graph: state.hostLabel ?? "" })
+    : t("me.fromStratiMiner");
+  return p;
+}
+
+function radio(name: string, value: string, checked: boolean, label: string,
+               disabled: boolean, onPick: () => void, why?: string): HTMLElement {
+  const wrap = document.createElement("label");
+  wrap.className = "me-radio" + (disabled ? " off" : "");
+  const input = document.createElement("input");
+  input.type = "radio";
+  input.name = name;
+  input.value = value;
+  input.checked = checked;
+  input.disabled = disabled;
+  input.addEventListener("change", () => { if (input.checked) onPick(); });
+  const span = document.createElement("span");
+  span.textContent = label;
+  wrap.append(input, span);
+  if (why) wrap.title = why;
+  return wrap;
+}
+
+function mappingBox(state: MappingEditorState, h: MappingEditorHandlers,
+                    busy: boolean): HTMLElement {
+  const section = box("me.mappingHead");
+  section.dataset.box = "mapping";
+  const kind = state.mappingKind ?? "authored";
+  const row = document.createElement("div");
+  row.className = "me-radios";
+  for (const k of MAPPING_KINDS) {
+    row.appendChild(radio("me-mapping", k, k === kind, t(`me.mapping.${k}`), busy,
+                          () => h.setMappingKind(k)));
+  }
+  section.appendChild(row);
+  const hint = document.createElement("p");
+  hint.className = "me-muted";
+  hint.textContent = t(`me.mapping.${kind}Why`);
+  if (kind === "file" || kind === "registry") {
+    const ref = document.createElement("div");
+    ref.className = "me-row";
+    const input = document.createElement("input");
+    input.type = "text";
+    input.dataset.field = "mapping-ref";
+    input.value = (kind === "file" ? state.mappingPath : state.mappingName) ?? "";
+    input.placeholder = t(kind === "file" ? "impmap.mappingFileHint" : "impmap.mappingRegistryHint");
+    input.addEventListener("change", () => h.setMappingRef(input.value));
+    ref.appendChild(input);
+    if (kind === "file") {
+      const choose = document.createElement("button");
+      choose.textContent = t("impmap.choose");
+      choose.disabled = busy;
+      choose.addEventListener("click", () => h.pickMappingFile());
+      ref.appendChild(choose);
+    }
+    section.appendChild(ref);
+  } else if (kind === "authored" && !state.fields.length) {
+    hint.textContent = t("me.mapping.authoredEmpty");
+  }
+  section.appendChild(hint);
+  return section;
+}
+
+function landingBox(state: MappingEditorState, h: MappingEditorHandlers,
+                    busy: boolean): HTMLElement {
+  const section = box("me.landingHead");
+  section.dataset.box = "landing";
+  const hasHost = !!state.hostLabel;
+  const target = state.target ?? "new";
+  const landing = state.landing ?? "baked";
+  const targets = document.createElement("div");
+  targets.className = "me-radios";
+  targets.appendChild(radio("me-target", "new", target === "new", t("impmap.targetNew"),
+                            busy, () => h.setTarget("new"), t("impmap.targetNewWhy")));
+  targets.appendChild(radio("me-target", "this", target === "this",
+                            hasHost ? `${t("impmap.targetThis")} — ${state.hostLabel}` : t("impmap.targetThis"),
+                            busy || !hasHost, () => h.setTarget("this"),
+                            hasHost ? t("impmap.targetThisWhy") : t("impmap.noGraph")));
+  section.appendChild(targets);
+  const lands = document.createElement("div");
+  lands.className = "me-radios me-landings";
+  for (const l of LANDINGS) {
+    const refused = landingRefusal(target, l, hasHost);
+    lands.appendChild(radio("me-landing", l, l === landing, t(`land.${l}`),
+                            busy || !!refused, () => h.setLanding(l),
+                            refused ? t(refused) : t(`land.${l}Why`)));
+  }
+  section.appendChild(lands);
+  const why = document.createElement("p");
+  why.className = "me-muted";
+  const refused = landingRefusal(target, landing, hasHost);
+  why.textContent = refused ? t(refused) : t(`land.${landing}Why`);
+  section.appendChild(why);
+
+  const acts = document.createElement("div");
+  acts.className = "me-row";
+  const apply = document.createElement("button");
+  apply.className = "primary";
+  apply.dataset.action = "apply";
+  apply.textContent = t("me.applyOne");
+  const kind = state.mappingKind ?? "authored";
+  apply.disabled = busy || !!refused || !state.path.trim()
+    || (kind === "authored" && (!state.fields.length || state.verdict?.ok === false))
+    || (kind === "file" && !state.mappingPath?.trim())
+    || (kind === "registry" && !state.mappingName?.trim());
+  apply.addEventListener("click", () => h.apply());
+  acts.appendChild(apply);
+  section.appendChild(acts);
+
+  if (state.trial) {
+    const trial = document.createElement("div");
+    trial.className = "me-row me-trial";
+    const p = document.createElement("span");
+    p.className = "me-muted";
+    p.textContent = t("land.trialOpen", { n: String(state.trial.nodes) });
+    const write = document.createElement("button");
+    write.dataset.action = "write-trial";
+    write.textContent = t("land.writeIn");
+    write.disabled = busy;
+    write.addEventListener("click", () => h.writeTrial());
+    const drop = document.createElement("button");
+    drop.dataset.action = "drop-trial";
+    drop.textContent = t("land.takeOut");
+    drop.disabled = busy;
+    drop.addEventListener("click", () => h.dropTrial());
+    trial.append(p, write, drop);
+    section.appendChild(trial);
+  }
+
+  if (state.applied) {
+    const report = document.createElement("p");
+    report.className = "me-muted";
+    report.dataset.applied = "1";
+    const a = state.applied as { landing?: string; rows?: number;
+                                 nodes_added?: number; edges_added?: number };
+    report.textContent = t("me.applied", {
+      mode: a.landing ? t(`land.${a.landing}`) : "", rows: String(a.rows ?? 0),
+      nodes: String(a.nodes_added ?? 0), edges: String(a.edges_added ?? 0) });
+    section.appendChild(report);
+  }
+  return section;
 }

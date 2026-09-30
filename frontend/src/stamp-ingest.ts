@@ -54,6 +54,7 @@
  */
 
 import type { Stamp } from "./stamp";
+import visualRules from "./assets/em_visual_rules.json";
 
 /** Il genere dell'atto, **preso dal vocabolario e non inventato**: in
  *  `em_visual_rules.json` l'asse `acquisition` porta `ingest`, descritto come
@@ -64,13 +65,15 @@ import type { Stamp } from "./stamp";
 export const INGESTION_KIND = "ingest";
 
 /** I generi dell'asse `acquisition` che dichiarano un TRASFERIMENTO e non una
- *  creazione. Tutti e quattro lo fanno — l'asse non ha una parola per «nato
- *  qui» — e questo elenco esiste per la lettura, non per la scrittura: dice
- *  quali generi, trovati su un timbro senza genitori, NON sono la dichiarazione
- *  di chi ha fatto i byte. */
-export const TRANSFER_KINDS: readonly string[] = [
-  "ingest", "local_import", "download", "uri_reference",
-];
+ *  creazione: la famiglia `retrieval` del vocabolario (em_visual_rules 1.6.22).
+ *  L'altra famiglia, `capture`, è proprio la parola per «nato qui» che prima
+ *  l'asse non aveva. Letto dal datamodel, non elencato a mano; esiste per la
+ *  lettura, non per la scrittura: dice quali generi, trovati su un timbro senza
+ *  genitori, NON sono la dichiarazione di chi ha fatto i byte. */
+export const TRANSFER_KINDS: readonly string[] = Object.entries(
+  ((visualRules as unknown as { dtc_kinds?: Record<string, Record<string, unknown>> })
+    .dtc_kinds?.acquisition ?? {}) as Record<string, { family?: string }>,
+).filter(([k, e]) => !k.startsWith("_") && e?.family === "retrieval").map(([k]) => k);
 
 /** Quanto dice davvero un timbro sulla nascita di ciò che descrive. */
 export type Provenance =

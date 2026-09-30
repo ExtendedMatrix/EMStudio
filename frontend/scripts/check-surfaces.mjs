@@ -392,79 +392,21 @@ ok(typeof globalThis.requestAnimationFrame === "function",
   eq(box.content, "the story, again", "rebuild · …with the new content in it");
 }
 
-// ── 12c · A LIMIT IS NOT A TWIN · two annotators, one constructor ─────────
+// ── 12b/12c · the ANNOTATOR · GONE (MICRO-UN-POSTO, 30 set 2026) ───────────
 //
-// The distinction §2 of the 14 September prompt turns on, made checkable.
-//
-// The limit is real: tracing needs one image element, one overlay and one
-// in-progress gesture, so only one instance can trace. What must NOT follow is
-// that the second instance is drawn by a different function — which is what a
-// branch in `buildSecondarySurface` was. Both mounts go through the same
-// `create`, both build a box, both paint; the difference is that the second gets
-// no tracing tools, and it arrives as an ARGUMENT.
+// Two annotators, one constructor, and the declared single-instance limit were
+// asserted here. The Doc window became the one tracer (AUDIT N4), nothing could
+// reach an Annotator any more, and its surface went with its code. What stays
+// is the ALIAS: an `annotator` window in a saved arrangement opens as a Doc.
 {
   const M = await load("shell/types.ts");
-  const calls = [];
-  M.registerBuiltinSurfaces(new Proxy({}, {
-    get: (_, name) => (...args) => {
-      if (name === "renderAnnotatorInto")
-        calls.push({ tools: args[3] !== null && args[3] !== undefined });
-      if (name === "panelIdOf") return "inspector";
-      if (name === "mountPanel") return { refresh: () => {} };
-      return undefined;
-    },
-  }));
-  const makeEl2 = () => {
-    const el = {
-      className: "", dataset: {}, isConnected: true, children: [], title: "",
-      scrollTop: 0, scrollHeight: 0, clientHeight: 0, clientWidth: 0,
-      classList: { toggle() {}, add() {}, contains: () => false },
-      parentElement: null,
-      appendChild(c) { el.children.push(c); c.parentElement = el; return c; },
-      append(...cs) { cs.forEach((c) => el.appendChild(c)); },
-      remove() {}, querySelector: () => null, querySelectorAll: () => [],
-    };
-    return el;
-  };
-  globalThis.document = { createElement: makeEl2 };
-  const st = M.surfaceTypeOf("annotator");
-  ok(st, "annotator · is a registered surface type");
-  eq(st.capabilities, { multiInstance: false },
-     "annotator · …and carries its limit as a capability");
-  const wa = { id: "a:1", type: "annotator", state: {} };
-  const wb = { id: "a:2", type: "annotator", state: {} };
-  // through the REAL registry, because who traces is decided from it: a test
-  // that called `create` + `mount` by hand would leave the registry empty and
-  // both instances would think they were first. (Measured: `[true, true]`.)
-  const areaA = makeEl2(), areaB = makeEl2();
-  const sa = M.mountSurface(wa, areaA);
-  const sb = M.mountSurface(wb, areaB);
-  ok(areaA.children.length > 0 && areaB.children.length > 0,
-     "two annotators · BOTH built a surface in their own area — a second one " +
-     "must not be refused, only limited");
-  eq(calls.length, 2,
-     "two annotators · …and BOTH painted through the same renderer " +
-     `(got ${calls.length} calls)`);
-  eq(calls.map((c) => c.tools), [true, false],
-     "two annotators · the difference is an ARGUMENT: the first traces (tools), " +
-     "the second looks (none). A branch choosing another function would be the " +
-     "twin coming back under the name of a limit.");
-  M.unmountSurface(wa.id);
-  M.unmountSurface(wb.id);
-  delete globalThis.document;
-}
-
-// ── 12b · the ANNOTATOR's declared limit, stated rather than hidden ───────
-//
-// A second Annotator window gets the same constructor with no tracing tools —
-// a flag, not a branch in another function. The limit itself is unchanged and
-// still true: tracing needs one image element, one overlay and one in-progress
-// gesture. This asserts the DECLARATION exists, so the reason survives.
-{
-  const M = await load("shell/types.ts");
-  eq(M.ANNOTATOR_CAPABILITIES, { multiInstance: false },
-     "annotator · single-instance is DECLARED, with a reason, rather than " +
-     "deduced from an `if` in the middle of main.ts");
+  M.registerBuiltinSurfaces(new Proxy({}, { get: () => () => undefined }));
+  ok(!M.surfaceTypeOf("annotator"), "annotator · no surface of its own any more");
+  ok(!("ANNOTATOR_CAPABILITIES" in M), "annotator · …nor a declared limit for one");
+  const W = await load("workspace.ts");
+  eq(W.migrateWin({ id: "x:annotator", type: "annotator", state: { "mode.annotator": "annotate" } }),
+     { id: "x:annotator", type: "doc", state: {} },
+     "annotator · the ALIAS stays: a saved Annotator opens as a Doc, its mode dropped");
 }
 
 // ── 13 · …and every surface really DRAWS, rather than announcing itself ────

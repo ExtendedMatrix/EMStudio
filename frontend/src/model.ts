@@ -64,10 +64,24 @@ const MAX_UNDO = 80;
  *  node_type "link" → "resource"). Mirrors the Python emjson importer's
  *  `_LEGACY_NODE_TYPE_ALIASES`. Add future renames here. */
 const LEGACY_NODE_TYPE_ALIASES: Record<string, string> = { link: "resource" };
+/** node_type strings that were never a type of the datamodel and open as a
+ *  type + its node elements. Mirrors s3Dgraphy's emjson importer
+ *  `_LEGACY_NODE_TYPE_MIGRATIONS` (node datamodel 1.6.12): a USM is a US whose
+ *  `stratigraphic_kind` is `masonry`, and its name keeps saying USM. An element
+ *  already written is not overwritten. */
+const LEGACY_NODE_TYPE_MIGRATIONS: Record<string, { to: string; data: Record<string, string> }> = {
+  USM: { to: "US", data: { stratigraphic_kind: "masonry" } },
+};
 function migrateLegacyNodeTypes(doc: EmDocument): void {
   for (const n of doc.graph?.nodes ?? []) {
     const to = LEGACY_NODE_TYPE_ALIASES[n.node_type];
     if (to) n.node_type = to;
+    const m = LEGACY_NODE_TYPE_MIGRATIONS[n.node_type];
+    if (m) {
+      n.node_type = m.to;
+      const data = (n.data ??= {}) as Record<string, unknown>;
+      for (const [k, v] of Object.entries(m.data)) if (data[k] === undefined) data[k] = v;
+    }
   }
 }
 
@@ -484,6 +498,11 @@ export class DocumentStore {
       this.batchDepth--;
       this.emit();
     }
+  }
+
+  /** how many undo steps are held — a probe for «one gesture, one step» */
+  get undoDepth(): number {
+    return this.undoStack.length;
   }
 
   get canUndo(): boolean {

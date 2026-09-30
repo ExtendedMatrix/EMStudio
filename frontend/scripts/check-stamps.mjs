@@ -542,7 +542,7 @@ console.log("\n· A3 — Stamp, mai Sign");
 const CHIAVI_COMPORRE = [
   "compose.head", "stamp2.question", "stamp2.origin", "stamp2.originSub",
   "stamp2.derived", "stamp2.derivedSub", "stamp2.whyOrigin", "stamp2.whyDerived",
-  "stamp2.kind", "stamp2.captures", "stamp2.acquisitions", "stamp2.processes",
+  "stamp2.kind", "stamp2.processes",
   "stamp2.instrument", "stamp2.inputs", "stamp2.noInputs", "compose.software",
   "compose.parameters", "compose.commit", "stamp2.operator", "stamp2.date",
   "stamp2.today", "stamp2.description", "stamp2.stamp", "stamp2.where",
@@ -678,10 +678,15 @@ prova("il genere viene dal VOCABOLARIO VENDORIZZATO, non da questa riga", async 
     `«${G.INGESTION_KIND}» non è nell'asse acquisition del vocabolario`);
   for (const k of G.TRANSFER_KINDS)
     assert.ok(Object.hasOwn(asse, k), `«${k}» non è nel vocabolario`);
-  // …e l'interfaccia non ne aggiunge: l'elenco letto è quello del datamodel
-  assert.deepEqual([...G.TRANSFER_KINDS].sort(), Object.keys(asse).sort(),
-    "l'elenco dei generi di trasferimento È l'asse acquisition, non un " +
-    "sottoinsieme scelto a mano che invecchierebbe in silenzio");
+  // …e l'interfaccia non ne aggiunge: l'elenco letto è quello del datamodel.
+  // Da em_visual_rules 1.6.22 l'asse ha due famiglie; un trasferimento è la
+  // famiglia `retrieval`, e una cattura (`capture`) NON lo è: è «nato qui».
+  const recuperi = Object.keys(asse).filter((k) => asse[k]?.family === "retrieval");
+  assert.deepEqual([...G.TRANSFER_KINDS].sort(), recuperi.sort(),
+    "l'elenco dei generi di trasferimento È la famiglia retrieval dell'asse " +
+    "acquisition, non un sottoinsieme scelto a mano che invecchierebbe in silenzio");
+  for (const k of Object.keys(asse).filter((k) => asse[k]?.family === "capture"))
+    assert.ok(!G.TRANSFER_KINDS.includes(k), `la cattura «${k}» non è un trasferimento`);
 });
 
 console.log("\n· I2 — e si VEDE che è povera");

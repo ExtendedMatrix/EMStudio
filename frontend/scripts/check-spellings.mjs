@@ -160,9 +160,17 @@ for (const [old, canon] of PAIRS) {
   for (const t of ["US", "USVs", "USVn", "SF", "VSF", "USM", "USN", "USD", "SE", "BR"]) {
     const els = R.nodeElements(t);
     if (R.classOf(t) === "Node") continue; // not a registered type in this build
-    eq(els.map((r) => r.field), ["definition"], `${t} carries definition`);
-    eq(els[0].value, "concept", `${t}.definition is a concept`);
-    eq(els[0].em_json, "data.definition", `${t}.definition lives in data.definition`);
+    // node datamodel 1.6.12: the US also carries its genre (`stratigraphic_kind`)
+    const def = els.filter((r) => r.field !== "stratigraphic_kind");
+    eq(def.map((r) => r.field), ["definition"], `${t} carries definition`);
+    eq(def[0].value, "concept", `${t}.definition is a concept`);
+    eq(def[0].em_json, "data.definition", `${t}.definition lives in data.definition`);
+  }
+  {
+    const kind = R.nodeElements("US").find((r) => r.field === "stratigraphic_kind");
+    ok(!!kind, "a US carries stratigraphic_kind (1.6.12)");
+    eq(kind?.value, "enum", "stratigraphic_kind is an enum");
+    eq(kind?.em_json, "data.stratigraphic_kind", "it lives in data.stratigraphic_kind");
   }
   eq(fields("EpochNode"), [], "an epoch has no definition");
   eq(fields("property"), [], "a PropertyNode has no definition");

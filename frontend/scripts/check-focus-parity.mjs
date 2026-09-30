@@ -91,7 +91,6 @@ const CONVERTED = {
   // MODE — an overlay over the canvas — which is why its surface had to be one
   // element; the annotator's frame is built by the instance that traces.
   narrative: ["narrative-view"],
-  annotator: ["annotator-view", "annotator-bar", "annotator-stage"],
   // 15 set 2026 · THE LAST ONE. `#canvas-wrap` was the privileged AREA — the one
   // the focus moved into — `#canvas` the one element the ten pointer gestures
   // were bound to, `#window-header` its docked bar, and `#overview` the one
@@ -624,17 +623,11 @@ const NINE = [
   // The branch is not decoration: it is what separates these two from each
   // other, and it is what their two reasons are about. One is the good path,
   // one is the failure.
-  const DICHIARATE = [
-    { chi: "(dentro renderAnnotator)", ramo: "try",
-      testo: "activeWin().id !== win.id || annotatorNodeId() !== nodeId",
-      perche: "guard: compares with `win`, the annotator's own window, captured " +
-              "before `collectionFromFile` — the image lands in the window that " +
-              "asked for it, or in none" },
-    { chi: "(dentro renderAnnotator)", ramo: "catch",
-      testo: "activeWin().id !== win.id",
-      perche: "the same guard on the failing branch: the error message must not " +
-              "be written into somebody else's annotator" },
-  ];
+  // MICRO-UN-POSTO · the two exceptions declared here were both inside
+  // `renderAnnotator` (the guard that an image lands in the window that asked
+  // for it), and went with it. None is declared now: a read of `activeWin()`
+  // after an await must capture its window, or be declared again with a reason.
+  const DICHIARATE = [];
   const nome = (d) => Sorg.identita({ funzione: d.chi, ramo: d.ramo, testo: d.testo });
 
   for (const e of esposte) {

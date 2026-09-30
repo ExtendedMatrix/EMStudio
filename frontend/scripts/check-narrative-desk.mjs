@@ -47,6 +47,7 @@ const bundle = await esbuild.build({
       export { DocumentStore } from "./model";
       export { isStratigraphicType } from "./rules";
       export { renderSitePosition } from "./study-panel";
+      export { openSitePicker } from "./site-picker";
     `,
     resolveDir: SRC, loader: "ts",
   },
@@ -166,15 +167,29 @@ const is3d = (n) => /\.(glb|gltf)$/i.test(String(n.data?.filename ?? n.data?.url
 {
   const st = new M.DocumentStore(fixture());
   const geoBefore = JSON.stringify(st.node("GEO").data);
-  const host = document.createElement("div");
-  M.renderSitePosition(host, st);
-  const [lat, lon] = host.querySelectorAll(".insp-geo-coord");
+  // MICRO-UN-POSTO · the numbers are typed in THE selector (site-picker.ts),
+  // and nothing is written until «Usa questo punto»
+  M.openSitePicker(st, "catena");
+  const pick = document.querySelector(".site-picker");
+  const lat = pick.querySelector('[data-field="lat"]'), lon = pick.querySelector('[data-field="lon"]');
+  const use = pick.querySelector('[data-action="use"]');
   lat.value = "45.9431";
   lat.dispatchEvent(new window.Event("change"));
-  eq(st.readSitePosition(), null, "sito · la sola latitudine non scrive niente (prima scriveva lon 0)");
+  ok(use.disabled, "sito · la sola latitudine non fa un punto (prima scriveva lon 0)");
   lon.value = "22.953";
   lon.dispatchEvent(new window.Event("change"));
-  eq(st.readSitePosition(), { lon: 22.953, lat: 45.9431, crs: "EPSG:4326" }, "sito · le due coordinate: site_position");
+  eq(st.readSitePosition(), null, "sito · le due coordinate fanno un CANDIDATO: niente è scritto prima della conferma");
+  use.click();
+  eq(st.readSitePosition(), { lon: 22.953, lat: 45.9431, crs: "EPSG:4326" }, "sito · «Usa questo punto»: site_position");
+  ok(!document.querySelector(".site-picker"), "sito · …e il selettore si chiude");
+  // the section that SHOWS it: the position and the one button, no fields
+  const host = document.createElement("div");
+  let asked = 0;
+  M.renderSitePosition(host, st, () => asked++);
+  ok(host.querySelector(".site-line")?.dataset.site === "45.9431,22.953" && !host.querySelector("input"),
+     "sito · la sezione mostra la posizione, senza campi");
+  host.querySelector('[data-action="site-set"]').click();
+  eq(asked, 1, "sito · «Imposta la posizione del sito…» apre il selettore");
   const graph = st.doc.graph.nodes.find((n) => n.node_type === "graph");
   eq(graph.data.site_position?.lat, 45.9431, "sito · …scritta sul nodo del grafo");
   eq(JSON.stringify(st.node("GEO").data), geoBefore, "sito · …e lo shift (GeoPositionNode) non cambia");

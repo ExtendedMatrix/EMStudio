@@ -13,6 +13,8 @@ import { renderSitePosition } from "./study-panel";
 
 export interface InspectorCallbacks {
   onJump: (nodeId: string) => void;
+  /** MICRO-UN-POSTO · open the site selector on the graph node */
+  onSetSitePosition?: () => void;
   onClose: () => void;
   onDeleteNode: (nodeId: string) => void;
   onDeleteEdge: (edge: EmEdge) => void;
@@ -192,7 +194,12 @@ export function renderInspector(
 
   const head = el("div", "insp-head");
   const st = nodeStyle(node.node_type);
-  const chip = el("span", "insp-chip", node.node_type);
+  // the genre of a unit, when the datamodel gives it one (1.6.12
+  // `stratigraphic_kind`): «US · muraria». The type and its glyph stay the US's.
+  const kindOf = String(((node.data ?? {}) as Record<string, unknown>).stratigraphic_kind ?? "");
+  const kindKey = `insp.kind.${kindOf}`;
+  const chip = el("span", "insp-chip",
+    kindOf ? `${node.node_type} · ${t(kindKey) === kindKey ? kindOf : t(kindKey)}` : node.node_type);
   chip.style.background = st.fill;
   chip.style.color = st.textColor;
   chip.style.borderColor = st.border;
@@ -310,7 +317,11 @@ export function renderInspector(
         row.appendChild(el("span", "insp-element-note", t("insp.elLabelOnly")));
       }
     } else {
-      row.appendChild(el("span", "insp-element-label", String(raw)));
+      // an enum value of the datamodel reads in the active locale when the UI
+      // has a word for it (`insp.kind.<value>`), else as the datamodel writes it
+      const vKey = `insp.kind.${String(raw)}`;
+      row.appendChild(el("span", "insp-element-label",
+        rule.value === "enum" && t(vKey) !== vKey ? t(vKey) : String(raw)));
     }
     root.appendChild(row);
   }
@@ -921,15 +932,14 @@ export function renderInspector(
         const x = document.createElement("button");
         x.className = "insp-field-clear";
         x.textContent = "×";
-        x.title = "Empty this field. The removal travels as a removal — it does "
-          + "not come back from somebody else's copy.";
+        x.title = t("insp.clearField");
         x.addEventListener("click", () => cb.onClearField!(nodeId!, `data.${k}`));
         dd.appendChild(x);
       }
       dl.appendChild(dd);
     }
     if (dl.childElementCount) {
-      root.appendChild(el("h3", "insp-sect", "Data"));
+      root.appendChild(el("h3", "insp-sect", t("insp.dataSect")));
       root.appendChild(dl);
     }
   }
@@ -940,7 +950,10 @@ export function renderInspector(
   // multigraph mode puts it ON the canvas — so selecting it must offer the site
   // position, not send the reader back to the no-selection Canvas panel to look
   // for it. Same renderer as that panel (renderSitePosition).
-  if (classOf(node.node_type) === "GraphNode") renderSitePosition(root, store);
+  // MICRO-UN-POSTO · and this is THE place of it: the other three show it and
+  // open the same selector here.
+  if (classOf(node.node_type) === "GraphNode")
+    renderSitePosition(root, store, cb.onSetSitePosition, true);
 
   // connections grouped by edge type and direction, deletable
   const groups = new Map<

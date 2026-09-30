@@ -21,7 +21,7 @@
  */
 import type { Win } from "../workspace";
 import type { Surface, SurfaceType } from "./surface";
-import { registerSurfaceType, surfacesOfType } from "./surface";
+import { registerSurfaceType } from "./surface";
 // …and re-exported here, so a checker that bundles THIS file can ask the
 // registry what is in it without a second entry point.
 export { convertedTypes, surfaceTypeOf, mountSurface, unmountSurface } from "./surface";
@@ -92,9 +92,6 @@ export interface SurfaceDeps {
    *  window's ✎ is on. The reading half has taken a host since the audit; what
    *  arrived on 14 September is that the editor knows which host it is in. */
   renderNarrativeInto(host: HTMLElement, win: Win): void;
-  /** …and the annotator's PICTURE, into any stage. */
-  renderAnnotatorInto(stage: HTMLElement, caption: HTMLElement, win: Win,
-                      tools: HTMLElement | null): void;
   /** Wire THIS window's canvas — its ten gestures, its camera, its minimap —
    *  and hand back how to repaint it. The last type to cross over. */
   mountGraph(cv: HTMLCanvasElement, mini: HTMLCanvasElement, win: Win): void;
@@ -116,14 +113,6 @@ function strip<T extends HTMLElement>(area: HTMLElement | null,
 function markFocus(root: HTMLElement | null, on: boolean): void {
   root?.classList.toggle("surf-focus", on);
 }
-
-/** Declared, not deduced from an `if`: the annotator is single-instance because
- *  tracing needs one image element, one overlay canvas and one in-progress
- *  gesture — one picture being traced, one draft. Read by its own `create`
- *  below, so the limit and the code that honours it are the same sentence. */
-export const ANNOTATOR_CAPABILITIES: SurfaceType["capabilities"] = {
-  multiInstance: false,
-};
 
 export function registerBuiltinSurfaces(deps: SurfaceDeps): void {
   // ── TABLE ────────────────────────────────────────────────────────────────
@@ -561,72 +550,6 @@ export function registerBuiltinSurfaces(deps: SurfaceDeps): void {
           cv?.remove();
           mini?.remove();
           cv = mini = null;
-          win = null;
-        },
-      };
-    },
-  });
-
-  // ── ANNOTATOR · one constructor, and a limit that is declared ────────────
-  //
-  // The limit is real and stays: tracing needs one `#annotator-image`, one
-  // overlay canvas and one in-progress gesture, so a second live *annotator*
-  // would be a second annotator rather than a second view of one.
-  //
-  // What goes is the GEMELLO. A second Annotator window used to fall into a
-  // branch of `buildSecondarySurface` that called a different function to draw
-  // the picture. Now it is the same constructor with a FLAG: `create` asks the
-  // registry whether an instance is already tracing, and the second mount builds
-  // the same surface without the tracing tools. A limit expressed as a
-  // capability can be read; a limit expressed as an `if` in another function has
-  // to be rediscovered.
-  registerSurfaceType({
-    id: "annotator",
-    capabilities: ANNOTATOR_CAPABILITIES,
-    create(w): Surface {
-      // WHO TRACES is decided at MOUNT, not here: `mountSurface` registers an
-      // instance AFTER calling its `mount`, so at mount time the registry holds
-      // exactly the annotators that came before this one. Asked in `create` it
-      // would be asked one step too early for the first instance and right by
-      // accident for the rest.
-      let tracing = false;
-      let root: HTMLElement | null = null;
-      let stage: HTMLElement | null = null;
-      let caption: HTMLElement | null = null;
-      let tools: HTMLElement | null = null;
-      let win: Win | null = w;
-      return {
-        mount(area, wi) {
-          win = wi;
-          // the FIRST annotator on screen traces; any other is a view of the
-          // same picture (`ANNOTATOR_CAPABILITIES.multiInstance === false`)
-          tracing = surfacesOfType("annotator").length === 0;
-          root = document.createElement("div");
-          root.className = "tile-viewer viewer-view annot-surface";
-          root.classList.toggle("annot-tracing", tracing);
-          stage = document.createElement("div");
-          stage.className = "viewer-stage annot-stage";
-          caption = document.createElement("div");
-          caption.className = "viewer-caption";
-          if (tracing) {
-            tools = document.createElement("div");
-            tools.className = "annot-tools-host";
-            root.append(tools, stage, caption);
-          } else {
-            root.append(stage, caption);
-          }
-          area.appendChild(root);
-          this.refresh();
-        },
-        refresh() {
-          if (!win || !stage || !caption || !stage.isConnected) return;
-          const s = stage, c = caption, w2 = win, tl = tools;
-          paintSurface(w2, s, () => deps.renderAnnotatorInto(s, c, w2, tl));
-        },
-        setFocused(on) { markFocus(root, on); },
-        destroy() {
-          root?.remove();
-          root = stage = caption = tools = null;
           win = null;
         },
       };

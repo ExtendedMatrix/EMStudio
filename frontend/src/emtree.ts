@@ -484,7 +484,7 @@ function auxSection(tree: EMTree, labels: (key: string) => string): string {
         </button>
         <button class="aux-del" data-aux-remove="${esc(f.id)}"
                 title="Remove this auxiliary file (the document is untouched)">×</button>
-        ${f.expanded ? auxDetail(f) : ""}
+        ${f.expanded ? auxDetail(f, labels) : ""}
       </li>`;
   }).join("");
   return `
@@ -621,7 +621,7 @@ function auxReport(f: AuxiliaryFile): string {
 }
 
 /** The per-file detail panel: type, locator, per-type options, map/bake/unmap. */
-function auxDetail(f: AuxiliaryFile): string {
+function auxDetail(f: AuxiliaryFile, labels: (key: string) => string): string {
   const type = AUX_FILE_TYPES.find((t) => t.value === f.fileType);
   const opts = AUX_OPTIONS[f.fileType] ?? [];
   return `
@@ -646,16 +646,14 @@ function auxDetail(f: AuxiliaryFile): string {
       <div class="aux-actions">
         ${f.mapped
           ? `<button data-aux-unmap="${esc(f.id)}"
-               title="Remove the mapped (volatile) nodes from the graph">Unmap</button>
+               title="${esc(labels("aux.actTakeOutWhy"))}">${esc(labels("aux.actTakeOut"))}</button>
              <button data-aux-bake="${esc(f.id)}"${f.baked ? " disabled" : ""}
-               title="Promote the volatile nodes into the document (they persist on save)">Bake into the graph</button>`
+               title="${esc(labels("aux.actWriteWhy"))}">${esc(labels("aux.actWrite"))}</button>`
           : `<button data-aux-map="${esc(f.id)}"
-               title="Map this source into the graph as volatile nodes (blue, not saved until baked)">Map into the graph</button>`}
-        <span class="aux-hint">${f.baked
-          ? "baked — its content is in the document"
-          : f.mapped
-            ? "volatile — visible in blue, not in the saved em.json until baked"
-            : "attached — not yet mapped"}</span>
+               title="${esc(labels("aux.actAttachWhy"))}">${esc(labels("aux.actAttach"))}</button>`}
+        <span class="aux-hint">${esc(labels(f.baked
+          ? "aux.stateBaked"
+          : f.mapped ? "aux.stateVolatile" : "aux.stateIdle"))}</span>
       </div>
     </div>`;
 }

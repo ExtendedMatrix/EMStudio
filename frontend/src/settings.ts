@@ -93,9 +93,9 @@ export interface IiifSettings {
    *  means "no image service": thumbnails and the zoomable annotator fall back
    *  to what they did before, quietly. */
   base: string;
-  /** Where to send "open in Mirador". The public demo by default — a viewer we
-   *  do not maintain, reading a manifest we generate, which is the whole point
-   *  of speaking the standard. */
+  /** Where "open in Mirador" went. UNREAD since MICRO-UN-POSTO (its one reader
+   *  was the old Annotator's IIIF corner); kept so a saved settings file keeps
+   *  its shape, and for the day Mirador returns in the Doc's «⋯». */
   mirador: string;
 }
 
@@ -239,11 +239,6 @@ export function atonBase(): string {
  *  degrade quietly, not produce a broken picture. */
 export function iiifBase(): string {
   return current.iiif.base.trim().replace(/\/+$/, "");
-}
-
-/** Where "open in Mirador" points. */
-export function miradorBase(): string {
-  return current.iiif.mirador.trim();
 }
 
 /** URL of a Heriverse SCENE — the app that reads an EM graph in 3D. */

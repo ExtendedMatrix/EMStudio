@@ -41,7 +41,10 @@ import {
   type FsListing as MappingFsListing,
   type FsPlace as MappingFsPlace,
   edgeKey,
+  landingRefusal,
   renderMappingEditor,
+  type Landing,
+  type MappingKind,
   typeOfField,
   type FieldChoice,
   type MappingEditorHandlers,
@@ -200,7 +203,7 @@ import { linkGroupOf } from "./add-menu";
 import { refsForViewType, unvalidatedForExport, viewTypesFor, type ProjChapter } from "./narrative-projection";
 import { chapterCitedIds, interpretiveCoverage, storyCoverage } from "./narrative-coverage";
 import { setSitePicker, type NarrativeSelection, type Reading } from "./narrative";
-import { renderSitePosition } from "./study-panel";
+import { openSitePicker } from "./site-picker";
 import * as chain from "./paradata-chain";
 import { mediumOf as mediumOfDoc, renderChainSection, type ChainUi } from "./paradata-inspector";
 import { DOC_TOOLS, renderReadingStage, selectedPassage, type DocTool,
@@ -322,20 +325,14 @@ import {
   getSettings,
   getSyncUrl,
   iiifBase,
-  miradorBase,
   saveSettings,
   SYNC_TOOLS,
   type Settings,
 } from "./settings";
 import { envelope as wireEnvelope } from "./wire";
 import {
-  fetchImageInfo,
-  fittedUrl,
-  type ImageInfo,
   imageService as iiifImageService,
-  isImageResource,
   regionToWebAnnotation,
-  webAnnotationToRegion,
   thumbnailUrl as iiifThumbnailUrl,
 } from "./iiif";
 import {
@@ -351,7 +348,7 @@ import {
 } from "./filters";
 import { adornmentBadges, type AdornmentBadge } from "./adornments";
 import { BADGE_RULES, resolveEffective, sourceLabel } from "./funnel";
-import { type Qualia, qualiaList, vocabularyFor } from "./vocab";
+import { type Qualia, vocabularyFor } from "./vocab";
 import { versionBreakdown } from "./versions";
 import {
   hitGroupToggle,
@@ -379,7 +376,7 @@ import {
   tableViewOf,
 } from "./emdata";
 import { addQualiaClaim, addRow, deleteRow } from "./em-data";
-import { isVolatile } from "./volatile";
+import { isVolatile, VOLATILE_KEY } from "./volatile";
 import { addRecent, removeRecent, type RecentFile } from "./recent";
 import {
   WORKSPACES,
@@ -503,7 +500,7 @@ import {
   setComposeBridgeResolver, type Draft, type DraftInput,
 } from "./stamp-compose";
 import { adaptDraft } from "./views/stamps";
-import { dtcKindsFor } from "./rules";
+import { dtcFamiliesOf, dtcKindsFor } from "./rules";
 import { digestOf, isStampPath, stampPathFor } from "./stamp";
 // DTCEMS3 · il verbale d'ingestione: niente entra nello store senza che si
 // sappia chi ce l'ha messo. La forma dell'atto sta qui; il verbale lo emette
@@ -1585,6 +1582,35 @@ window.__EM_SCENE__ = () => {
   graphJson: () => JSON.stringify(store?.doc.graph ?? null),
   /** AUDIT N5 · the lane chips and phase labels as last drawn (screen) */
   labels: () => drawnLabelRects(),
+  /** MICRO-UN-POSTO · a window turned into another type, as its header's type
+   *  menu would (a Study window is in no built-in space) */
+  retype: (winId: string, type: string) => {
+    const w = windowsOf().find((x) => x.id === winId);
+    if (!w) return false;
+    setWinType(w, type as WindowType);
+    renderTiles();
+    return true;
+  },
+  /** MICRO-UN-POSTO · how many undo steps the store holds */
+  undoDepth: () => store?.undoDepth ?? 0,
+  /** MICRO-UN-POSTO · an auxiliary row on the active graph, as the EMtree's
+   *  «+» would add it (the browser file picker cannot be driven headless), and
+   *  the EMtree opened on it */
+  auxAdd: (row: Partial<AuxiliaryFile> & { locator: string }) => {
+    const slot = emtree.active();
+    if (!slot) return null;
+    const id = row.id ?? crypto.randomUUID();
+    slot.auxiliaryFiles.push({ name: row.locator.split("/").pop() ?? row.locator, kind: "local",
+      fileType: "mapped_source" as AuxFileType, baked: false, mapped: false, expanded: true,
+      ...row, id } as AuxiliaryFile);
+    openEMTree();
+    refreshEMTree();
+    return id;
+  },
+  aux: (id: string) => {
+    const f = emtree.active()?.auxiliaryFiles.find((x) => x.id === id);
+    return f ? { mapped: !!f.mapped, baked: !!f.baked, report: f.report ?? null } : null;
+  },
 };
 
 // …and the FIGURES this process renders for an export, so a test can carry them
@@ -2072,6 +2098,7 @@ function renderInspectorInto(host: HTMLElement): void {
         select(id);
         centerOn(id);
       },
+      onSetSitePosition: () => openSitePickerOnGraph(),
       onClose: () => select(null),
       // DAG · act on the document the thing LIVES in: an acquisition deleted
       // from the DTC canvas is deleted from the corpus, and `store!` there would
@@ -2129,7 +2156,7 @@ function renderInspectorInto(host: HTMLElement): void {
         // moved unit a clean position inside its new band
         void runLayout(false).then(() => {
           select(nodeId);
-          toast(`moved to ${store!.node(epochId)?.name ?? "epoch"}`);
+          toast(t("tst.movedTo", { name: String(store!.node(epochId)?.name ?? t("tst.anEpoch")) }));
         });
       },
       onTogglePin: (nodeId) => {
@@ -2296,7 +2323,6 @@ function renderInspectorIssues(host: HTMLElement): void {
  */
 function refreshInspector(): void {
   renderViewer();
-  renderAnnotator();
   refreshSurfaces("inspector");
   renderNameStrip();
   // SHIFT-A · «solo la selezione» follows the selection
@@ -3503,7 +3529,6 @@ function flushChange(): void {
     updateToolbar();
     renderNameStrip();
     renderViewer();           // VIEWER · it follows the selection, like the Inspector
-    renderAnnotator();        // A2 · and so does the annotator: same picture rule
     if (logDrawer.open && logDrawer.onlySel) renderLogDrawer();
     refreshEMTree();          // node/edge counts and the dirty dot live there
     renderEmData();           // every mounted EM-Data table is a live view of it
@@ -5817,9 +5842,6 @@ const RESOURCE_PROVIDERS: Partial<Record<WindowType, ResourceProvider>> = {
   // Index; the view types dragged onto an embed are «How it is shown» in the
   // embed's Inspector; the note sent you to drag a node from the Outliner onto
   // a chapter, which the drop still does. So the «›» beside the page is gone.
-  // A2 · the annotator offers the ways of TRACING. Same registry, same panel,
-  // same chevron — what a window offers was never "the node types".
-  annotator: { render: (host) => renderAnnotatorTools(host) },
 };
 
 
@@ -6597,7 +6619,7 @@ function createEdge(source: string, target: string, edgeType: string): void {
   const renamed = renameOnAttach(store.doc, source);
   if (renamed) {
     store.updateNode(source, { name: renamed });
-    toast(`numbered ${renamed}`);
+    toast(t("tst.numbered", { n: String(renamed) }));
   }
   // BUGS-UI · the same trigger for a paradata group: a PDG dropped from the
   // palette is born with a generic label and only learns its referent when this
@@ -6607,7 +6629,7 @@ function createEdge(source: string, target: string, edgeType: string): void {
     const pdgName = paradataGroupRenameOnAttach(store.doc, target);
     if (pdgName) {
       store.updateNode(target, { name: pdgName });
-      toast(`named ${pdgName}`);
+      toast(t("tst.named", { name: String(pdgName) }));
     }
   }
 }
@@ -7646,7 +7668,7 @@ function openQualiaPicker(nodeId: string, wx: number, wy: number): void {
       },
     });
     select(nodeId);
-    toast(`property → ${q.name}`);
+    toast(t("tst.property", { name: String(q.name) }));
   };
   const render = (query: string): void => {
     listEl.innerHTML = "";
@@ -7795,42 +7817,70 @@ auxFileInput.addEventListener("change", () => {
  * live graph marked volatile (blue on the canvas and in the EM-Data table), and
  * excluded from `toJSON` until baked. The other types need a bridge endpoint that
  * is not exposed yet (flagged); they report that rather than pretend.
+ *
+ * MICRO-UN-POSTO · the reading and the landing are two steps now: `fetchAuxDelta`
+ * reads the source (the same for a row of the EMtree and for the mapping editor
+ * on the graph open now), and the caller decides how it enters — attached (the
+ * row), provisional (a trial of the editor) or written in (map + bake in ONE
+ * undo step).
  */
-async function mapAux(auxId: string): Promise<void> {
+async function mapAux(auxId: string): Promise<boolean> {
   const f = emtree.active()?.auxiliaryFiles.find((x) => x.id === auxId);
-  if (!f || !store) return;
-  // AUX-COMPLETE: the xlsx aux types map through the bridge /import-em-data.
-  // emdb_xlsx / pyarchinit / source_list carry a registry `mapping` (their sheet
-  // is transformed to nodes by the s3Dgraphy mapping); a bare em_data.xlsx has no
-  // mapping (read directly). dosco / resource_collection are folder-based and use
-  // a different endpoint — flagged as follow-up.
-  // AUX2B · resource_collection is a FOLDER: scan it via the bridge
-  // (/scan-resources, which already exists) and bring its orphan files in as
-  // VOLATILE ResourceNodes (same volatile→bake cycle as the xlsx types). dosco
-  // (documents harvest) still needs a dedicated endpoint — flagged.
-  if (f.fileType === "resource_collection") {
-    await mapResourceCollection(f, auxId);
-    return;
-  }
-  // IMPMAP · a MAPPED SOURCE goes through /mapping-apply instead, because its
-  // mapping is a file beside the dataset rather than a name in the registry —
-  // which is what every partner's descriptor looks like. The five types above
-  // keep /import-em-data: that endpoint is in use, and the two ways in converge
-  // here, at the routing, not by breaking one of them.
-  if (f.fileType === "mapped_source") {
-    await mapMappedSource(f, auxId);
-    return;
-  }
+  if (!f || !store) return false;
+  const got = await fetchAuxDelta(f, auxId);
+  if (!got) return false;
+  const st = store;
+  // re-mapping a row replaces what it brought last time, in one step
+  const added = st.batch(() => {
+    if (f.mapped) st.dropVolatile(auxId);
+    return st.mapVolatile(auxId, got.nodes, got.edges);
+  });
+  f.mapped = true;
+  f.baked = false;
+  if (got.report) f.report = got.report;
+  refreshEMTree();
+  draw();
+  toast(got.report?.unmatchedCount
+    ? t("impmap.attachedWithUnmatched", {
+        name: f.name, added: String(added), unmatched: String(got.report.unmatchedCount) })
+    : t("impmap.attached", { name: f.name, added: String(added) }));
+  return true;
+}
+
+/** What a source brings to the graph open now, read but NOT landed. */
+interface AuxDelta { nodes: EmNode[]; edges: EmEdge[]; report?: AuxMapReport }
+
+/**
+ * Read an auxiliary-shaped source (a row of the EMtree, or the mapping editor's
+ * source on the graph open now) into the nodes and edges it would add. Toasts
+ * its own failure and returns null.
+ *
+ * AUX-COMPLETE: the xlsx aux types map through the bridge /import-em-data.
+ * emdb_xlsx / pyarchinit / source_list carry a registry `mapping` (their sheet
+ * is transformed to nodes by the s3Dgraphy mapping); a bare em_data.xlsx has no
+ * mapping (read directly). AUX2B · resource_collection is a FOLDER: scanned via
+ * /scan-resources, its orphan files come in as ResourceNodes. IMPMAP · a MAPPED
+ * SOURCE goes through /mapping-apply (its mapping is a file beside the dataset,
+ * a registry name, or — from the editor — the mapping written there). dosco
+ * (documents harvest) still needs a dedicated endpoint — flagged.
+ */
+async function fetchAuxDelta(
+  f: Pick<AuxiliaryFile, "name" | "locator" | "fileType" | "options">,
+  injector: string,
+): Promise<AuxDelta | null> {
+  if (!store) return null;
+  if (f.fileType === "resource_collection") return scanResourceCollection(f);
+  if (f.fileType === "mapped_source") return readMappedSource(f, injector);
   if (
     f.fileType !== "emdb_xlsx" &&
     f.fileType !== "pyarchinit" &&
     f.fileType !== "source_list"
   ) {
-    toast(`${f.fileType}: folder mapping needs a dedicated endpoint (follow-up) — see the note`);
-    return;
+    toast(t("aux.folderFollowUp", { type: f.fileType }));
+    return null;
   }
   const mapping = String((f.options ?? {}).mapping ?? "").trim();
-  toast(`mapping ${f.name}…`);
+  toast(t("impmap.mappingVerb", { name: f.name }));
   try {
     const res = await fetch(`${await bridgeUrl()}/import-em-data`, {
       method: "POST",
@@ -7847,37 +7897,28 @@ async function mapAux(auxId: string): Promise<void> {
     const payload = (await res.json()) as { doc?: EmDocument };
     const g = payload.doc?.graph;
     if (!g || !Array.isArray(g.nodes)) throw new Error("no graph in response");
-    const added = store.mapVolatile(auxId, g.nodes, g.edges ?? []);
-    f.mapped = true;
-    f.baked = false;
-    refreshEMTree();
-    toast(`mapped ${f.name} — ${added} volatile node(s) in blue; save excludes them until baked`);
+    return { nodes: g.nodes, edges: g.edges ?? [] };
   } catch (e) {
-    toast(
-      `map failed (${e instanceof Error ? e.message : e}). The bridge (dev.sh) ` +
-        `must be running to map an xlsx via the s3Dgraphy registry.`,
-    );
+    toast(t("aux.mapFailed", { detail: e instanceof Error ? e.message : String(e) }));
+    return null;
   }
 }
 
 /**
- * AUX2B · map a `resource_collection` FOLDER as VOLATILE ResourceNodes.
+ * AUX2B · a `resource_collection` FOLDER as ResourceNodes.
  *
  * Reuses the existing `/scan-resources` (which returns the folder's orphan files
- * with stable ids: `{resource_id, key_id, filename, rel_path}`) and the AUX2
- * volatile path (`store.mapVolatile`): the files enter the graph as ResourceNode
- * (node_type from the vendored registry) marked volatile — blue on the canvas
- * and the EM-Data table, excluded from save until baked. No new mapping logic;
- * no schema invention. Linking a resource to a node (the "hat") stays a later
- * step — here they arrive as the orphan resources the Shelf already models.
+ * with stable ids: `{resource_id, key_id, filename, rel_path}`): the files enter
+ * the graph as ResourceNode (node_type from the vendored registry). No new
+ * mapping logic; no schema invention. Linking a resource to a node (the "hat")
+ * stays a later step — here they arrive as the orphan resources the Shelf models.
  */
-async function mapResourceCollection(
-  f: { id: string; name: string; locator: string },
-  auxId: string,
-): Promise<void> {
-  if (!store) return;
+async function scanResourceCollection(
+  f: Pick<AuxiliaryFile, "name" | "locator">,
+): Promise<AuxDelta | null> {
+  if (!store) return null;
   const nt = nodeTypeForClass("ResourceNode") ?? "resource";
-  toast(`scanning ${f.name}…`);
+  toast(t("aux.scanning", { name: f.name }));
   try {
     const res = await fetch(`${await bridgeUrl()}/scan-resources`, {
       method: "POST",
@@ -7888,66 +7929,56 @@ async function mapResourceCollection(
     const payload = (await res.json()) as {
       shelf?: Array<{ resource_id: string; filename: string; rel_path: string }>;
     };
-    const shelf = payload.shelf ?? [];
-    const nodes: EmNode[] = shelf.map((r) => ({
+    const nodes: EmNode[] = (payload.shelf ?? []).map((r) => ({
       id: r.resource_id,
       name: r.filename,
       node_type: nt,
       description: "",
       data: { url: r.rel_path, url_type: resourceTypeOfLocator(r.filename) },
     }));
-    const added = store.mapVolatile(auxId, nodes, []);
-    const aux = emtree.active()?.auxiliaryFiles.find((x) => x.id === auxId);
-    if (aux) {
-      aux.mapped = true;
-      aux.baked = false;
-    }
-    refreshEMTree();
-    toast(`mapped ${f.name} — ${added} volatile resource(s) in blue; save excludes them until baked`);
+    return { nodes, edges: [] };
   } catch (e) {
-    toast(
-      `scan failed (${e instanceof Error ? e.message : e}). The bridge (dev.sh) ` +
-        `must be running to scan a resource folder.`,
-    );
+    toast(t("aux.scanFailed", { detail: e instanceof Error ? e.message : String(e) }));
+    return null;
   }
 }
 
 /**
- * IMPMAP · map a MAPPED SOURCE onto THIS graph — the second of the two modes.
+ * IMPMAP · read a MAPPED SOURCE onto THIS graph.
  *
- * The other five aux types are shapes somebody agreed on once; this one is any
- * table or XML plus the descriptor that says how to read it, which is how a
- * partner's dataset actually arrives. It goes through `/mapping-apply` and not
- * `/import-em-data` because only that route takes a mapping FILE and, since this
- * round, a host graph to land on.
- *
- * Two things make it the attach mode and not a second import:
+ * Any table or XML plus the descriptor that says how to read it, which is how a
+ * partner's dataset actually arrives. It goes through `/mapping-apply` because
+ * only that route takes a mapping FILE (or the mapping written in the editor)
+ * and a host graph to land on.
  *
  *  * `attach_only` — a row whose key is not in this graph creates NOTHING. The
  *    stratigraphy here is authoritative and the table enriches it; without the
  *    flag a typo in the key column excavates a unit (measured: 620 nodes, one
  *    bad row, 624 nodes, no warning);
- *  * the answer is a DELTA, so it enters through the same volatile path as every
- *    other auxiliary (`store.mapVolatile`) and the existing volatile → bake →
- *    unmap cycle works on it without a second concept.
+ *  * the answer is a DELTA, landed by the caller.
  *
- * And the keys that matched nothing are kept on the row. A count in a toast is
- * not an answer to "which ones?" ten minutes later.
+ * And the keys that matched nothing are kept on the report. A count in a toast
+ * is not an answer to "which ones?" ten minutes later.
  */
-async function mapMappedSource(f: AuxiliaryFile, auxId: string): Promise<void> {
-  if (!store) return;
-  const mappingPath = String((f.options ?? {}).mappingPath ?? "").trim();
-  const mappingName = String((f.options ?? {}).mappingName ?? "").trim();
-  if (!mappingPath && !mappingName) {
+async function readMappedSource(
+  f: Pick<AuxiliaryFile, "name" | "locator" | "options">, injector: string,
+): Promise<AuxDelta | null> {
+  if (!store) return null;
+  const o = f.options ?? {};
+  const inline = o.mapping && typeof o.mapping === "object" ? o.mapping : null;
+  const mappingPath = String(o.mappingPath ?? "").trim();
+  const mappingName = String(o.mappingName ?? "").trim();
+  if (!inline && !mappingPath && !mappingName) {
     toast(t("impmap.needMapping"));
-    return;
+    return null;
   }
-  toast(t("impmap.mapping", { name: f.name }));
+  toast(t("impmap.mappingVerb", { name: f.name }));
   try {
     const answer = await applyMapping({
       path: f.locator,
-      ...(mappingPath ? { mapping_path: mappingPath }
-                      : { mapping_name: mappingName }),
+      ...(inline ? { mapping: inline }
+                 : mappingPath ? { mapping_path: mappingPath }
+                               : { mapping_name: mappingName }),
       mode: "volatile",
       attach_only: true,
       // the host graph travels in the body: the bridge holds no documents, so
@@ -7956,265 +7987,261 @@ async function mapMappedSource(f: AuxiliaryFile, auxId: string): Promise<void> {
       graph_id: String(
         (store.doc.graph as Record<string, unknown>).graph_id ?? "",
       ),
-      injector: auxId,
+      injector,
     });
-    if (!answer) return;
-    const report = auxReportOf(answer.report);
+    if (!answer) return null;
     const g = answer.graph?.graph;
-    const added = g && Array.isArray(g.nodes)
-      ? store.mapVolatile(auxId, g.nodes, g.edges ?? [])
-      : 0;
-    f.mapped = true;
-    f.baked = false;
-    f.report = report;
-    refreshEMTree();
-    draw();
-    toast(report.unmatchedCount
-      ? t("impmap.attachedWithUnmatched", {
-          name: f.name, added: String(added),
-          unmatched: String(report.unmatchedCount) })
-      : t("impmap.attached", { name: f.name, added: String(added) }));
+    return {
+      nodes: g && Array.isArray(g.nodes) ? g.nodes : [],
+      edges: g?.edges ?? [],
+      report: auxReportOf(answer.report),
+    };
   } catch (e) {
     toast(t("impmap.failed",
             { detail: e instanceof Error ? e.message : String(e) }));
+    return null;
   }
 }
 
+// ── MICRO-UN-POSTO · importing with a mapping: ONE door ─────────────────────
+//
+// There were four ways, each with its own words for volatile, bake and attach:
+// File ▸ Import with a mapping (a dialog), Map/Bake on the EMtree's auxiliary
+// rows, the mapping editor's two Apply buttons (which could only make a new
+// graph), and StratiMiner's «convert». Now the door is File ▸ Importa ▸ Tabella
+// con mappatura…, and it ALWAYS opens the mapping editor; the EMtree and
+// StratiMiner are ways of FILLING that editor — the EMtree brings its auxiliary
+// file, StratiMiner brings its proposals (AI data, to be verified). Their
+// entries stay where they are and open the editor.
+//
+// The editor asks three questions — what to read, how to read it (the mapping),
+// and where and how it lands — and the last has ONE vocabulary everywhere
+// (`LANDINGS`, `land.<key>`): provisional, written into the graph, attached as
+// an auxiliary file.
+//
+// Where the dataset carries the stratigraphy, the graph is born out of it (a new
+// graph). Where the graph brings the stratigraphy and the table the rest — far
+// more common — it lands on the graph open now, and a row whose key is not in
+// this graph creates nothing (`attach_only`).
 
-// ── IMPMAP · «Import with a mapping», the ONE way in ────────────────────────
-//
-// There are two ways a legacy dataset becomes a graph, and until this round each
-// lived in a different part of the interface, incompatible with the other:
-//
-//  * **the table brings the stratigraphy.** Relations in the columns; the graph
-//    is born out of the dataset. Only structured databases can do it (DANA, UA
-//    Ilici, pyArchInit). One shot — it is not repeated;
-//  * **the graph brings the stratigraphy, the table brings the rest.** Far more
-//    common: there are no relations in the table at all. The sequence is drawn
-//    here, and an external table is attached to it, mapped, and re-read whenever
-//    it changes.
-//
-// The first lived inside the mapping EDITOR (which could only ever make a new
-// graph), the second inside the auxiliary-files list (which could only take five
-// hard-coded types and a registry name). So the ordinary case — a partner's csv
-// with the descriptor written beside it — fitted neither.
-//
-// This dialog asks the three questions that actually distinguish them, and
-// nothing else: WHAT to read, HOW to read it, and WHERE it lands. The target is
-// the only real choice, and it is two radio buttons rather than two menu items,
-// because it is one act performed on two different things.
-function openImportWithMapping(): void {
+/** Open the ONE editor, filled by whoever opens it. */
+function openImportDoor(fill: Partial<MappingEditorState> = {}): void {
   const slot = emtree.active();
-  const modal = document.createElement("div");
-  modal.className = "modal";
-  const card = document.createElement("div");
-  card.className = "modal-card narrow";
-  card.innerHTML = `
-    <div class="modal-head"><span>${escapeHtml(t("impmap.title"))}</span></div>
-    <div class="modal-body impmap">
-      <p class="impmap-intro">${escapeHtml(t("impmap.intro"))}</p>
-      <label class="impmap-field"><span>${escapeHtml(t("impmap.source"))}</span>
-        <span class="impmap-row">
-          <input id="impmap-source" type="text" placeholder="${escapeHtml(t("impmap.sourceHint"))}" />
-          <button id="impmap-pick-source" type="button">${escapeHtml(t("impmap.choose"))}</button>
-        </span>
-      </label>
-      <fieldset class="impmap-field">
-        <legend>${escapeHtml(t("impmap.mapping"))}</legend>
-        <label class="impmap-inline">
-          <input type="radio" name="impmap-mapping" value="file" checked />
-          <span>${escapeHtml(t("impmap.mappingFile"))}</span>
-        </label>
-        <span class="impmap-row">
-          <input id="impmap-mapping-path" type="text" placeholder="${escapeHtml(t("impmap.mappingFileHint"))}" />
-          <button id="impmap-pick-mapping" type="button">${escapeHtml(t("impmap.choose"))}</button>
-        </span>
-        <label class="impmap-inline">
-          <input type="radio" name="impmap-mapping" value="registry" />
-          <span>${escapeHtml(t("impmap.mappingRegistry"))}</span>
-        </label>
-        <input id="impmap-mapping-name" type="text" placeholder="${escapeHtml(t("impmap.mappingRegistryHint"))}" disabled />
-      </fieldset>
-      <fieldset class="impmap-field">
-        <legend>${escapeHtml(t("impmap.target"))}</legend>
-        <label class="impmap-inline">
-          <input type="radio" name="impmap-target" value="new" checked />
-          <span>${escapeHtml(t("impmap.targetNew"))}</span>
-        </label>
-        <p class="aux-hint">${escapeHtml(t("impmap.targetNewWhy"))}</p>
-        <label class="impmap-inline">
-          <input type="radio" name="impmap-target" value="this" ${slot ? "" : "disabled"} />
-          <span>${escapeHtml(t("impmap.targetThis"))}${slot ? ` — ${escapeHtml(slotLabel(slot))}` : ""}</span>
-        </label>
-        <p class="aux-hint">${escapeHtml(slot ? t("impmap.targetThisWhy") : t("impmap.noGraph"))}</p>
-      </fieldset>
-      <p id="impmap-note" class="aux-hint"></p>
-    </div>
-    <div class="modal-foot">
-      <button id="impmap-cancel" type="button">${escapeHtml(t("impmap.cancel"))}</button>
-      <button id="impmap-run" class="primary" type="button">${escapeHtml(t("impmap.run"))}</button>
-    </div>`;
-  modal.appendChild(card);
-  const q = <T extends HTMLElement>(sel: string): T =>
-    card.querySelector(sel) as T;
-  const sourceInput = q<HTMLInputElement>("#impmap-source");
-  const mappingPath = q<HTMLInputElement>("#impmap-mapping-path");
-  const mappingName = q<HTMLInputElement>("#impmap-mapping-name");
-  const note = q<HTMLElement>("#impmap-note");
-  const run = q<HTMLButtonElement>("#impmap-run");
-  const close = (): void => {
-    modal.remove();
-    document.removeEventListener("keydown", onKey, true);
+  const keepCatalog = {
+    catalog: meState.catalog, groups: meState.groups,
+    propertyType: meState.propertyType, extensions: meState.extensions,
   };
-  const onKey = (e: KeyboardEvent): void => {
-    if (e.key === "Escape") {
-      e.stopPropagation();
-      close();
-    }
+  meState = {
+    ...EMPTY_MAPPING_STATE,
+    ...keepCatalog,
+    choices: {}, relations: [], edgeOptions: {},
+    hostLabel: slot ? slotLabel(slot) : undefined,
+    target: slot && fill.from?.kind === "aux" ? "this" : "new",
+    ...fill,
   };
-  const mappingMode = (): string =>
-    (card.querySelector("input[name=impmap-mapping]:checked") as HTMLInputElement)
-      .value;
-  const targetMode = (): string =>
-    (card.querySelector("input[name=impmap-target]:checked") as HTMLInputElement)
-      .value;
-  for (const radio of card.querySelectorAll("input[name=impmap-mapping]")) {
-    radio.addEventListener("change", () => {
-      const byFile = mappingMode() === "file";
-      mappingPath.disabled = !byFile;
-      q<HTMLButtonElement>("#impmap-pick-mapping").disabled = !byFile;
-      mappingName.disabled = byFile;
-    });
-  }
-  q<HTMLButtonElement>("#impmap-pick-source").addEventListener("click", () => {
-    void pickPathInto(sourceInput, note, "source");
+  openFloatingTool("mapping-editor", t("me.tool"));
+  void ensureMappingCatalog().then(() => {
+    refreshMappingEditor();
+    if ((meState.mappingKind ?? "authored") === "authored" && meState.path.trim()
+        && !meState.fields.length) void readMappingSource();
   });
-  q<HTMLButtonElement>("#impmap-pick-mapping").addEventListener("click", () => {
-    void pickPathInto(mappingPath, note, "mapping");
-  });
-  q<HTMLButtonElement>("#impmap-cancel").addEventListener("click", close);
-  run.addEventListener("click", () => void (async () => {
-    const path = sourceInput.value.trim();
-    const byFile = mappingMode() === "file";
-    const mapping = (byFile ? mappingPath : mappingName).value.trim();
-    if (!path) {
-      note.textContent = t("impmap.needSource");
-      return;
-    }
-    if (!mapping) {
-      note.textContent = t("impmap.needMapping");
-      return;
-    }
-    run.disabled = true;
-    note.textContent = t("impmap.working");
-    const ok = await runImportWithMapping(
-      path, byFile ? { mapping_path: mapping } : { mapping_name: mapping },
-      targetMode() === "this");
-    run.disabled = false;
-    if (ok) close();
-    else note.textContent = t("impmap.seeToast");
-  })());
-  modal.addEventListener("click", (e) => {
-    if (e.target === modal) close();
-  });
-  document.addEventListener("keydown", onKey, true);
-  document.body.appendChild(modal);
-  sourceInput.focus();
 }
 
-/** A real PATH into a field: the native dialog on the desktop, and in a browser
- *  the system dialog plus the bridge's staging — because `<input type=file>`
- *  hands over bytes and withholds the location, and the bridge reads the file. */
-async function pickPathInto(
-  field: HTMLInputElement, note: HTMLElement, what: "source" | "mapping",
-): Promise<void> {
-  await ensureMappingCatalog();
-  const extensions = what === "mapping"
-    ? ["json"] : Object.keys(meState.extensions ?? {});
-  if (isTauri()) {
-    const picked = await pickSourceFile(extensions);
-    if (picked) field.value = picked;
-    return;
+/** The EMtree's Map / Bake: the row's file, in the editor, on this graph. */
+function openImportDoorForAux(auxId: string, landing: Landing): void {
+  const f = emtree.active()?.auxiliaryFiles.find((x) => x.id === auxId);
+  if (!f) return;
+  const o = f.options ?? {};
+  const inline = o.mapping && typeof o.mapping === "object";
+  const mappingKind: MappingKind =
+    f.fileType === "mapped_source"
+      ? (inline ? "authored" : String(o.mappingPath ?? "").trim() ? "file" : "registry")
+      : String(o.mapping ?? "").trim() ? "registry" : "none";
+  openImportDoor({
+    from: { kind: "aux", auxId, label: f.name },
+    path: f.locator,
+    mappingKind,
+    mappingPath: String(o.mappingPath ?? ""),
+    mappingName: String(f.fileType === "mapped_source" ? o.mappingName ?? "" : o.mapping ?? ""),
+    target: "this",
+    landing,
+  });
+}
+
+/** How the editor's answers read as an auxiliary source: the type and options
+ *  `fetchAuxDelta` takes. A row keeps its own type when its mapping is "none"
+ *  (an EM table, a folder of resources). */
+function auxSpecOfEditor(): Pick<AuxiliaryFile, "name" | "locator" | "fileType" | "options"> {
+  const s = meState;
+  const locator = s.path.trim();
+  const name = locator.split(/[\\/]/).pop() || locator;
+  const row = s.from?.kind === "aux"
+    ? emtree.active()?.auxiliaryFiles.find((x) => x.id === s.from?.auxId) : undefined;
+  switch (s.mappingKind ?? "authored") {
+    case "authored":
+      return { name, locator, fileType: "mapped_source" as AuxFileType,
+               options: { mapping: buildMapping(s) } };
+    case "file":
+      return { name, locator, fileType: "mapped_source" as AuxFileType,
+               options: { mappingPath: s.mappingPath ?? "" } };
+    case "registry":
+      return row && row.fileType !== "mapped_source"
+        ? { name, locator, fileType: row.fileType, options: { ...(row.options ?? {}), mapping: s.mappingName ?? "" } }
+        : { name, locator, fileType: "mapped_source" as AuxFileType,
+            options: { mappingName: s.mappingName ?? "" } };
+    default:
+      return { name, locator, fileType: row?.fileType && row.fileType !== "mapped_source"
+                 ? row.fileType : "emdb_xlsx" as AuxFileType, options: {} };
   }
-  const input = document.createElement("input");
-  input.type = "file";
-  if (extensions.length) input.accept = extensions.map((e) => `.${e}`).join(",");
-  input.addEventListener("change", () => void (async () => {
-    const file = input.files?.[0];
-    if (!file) return;
-    note.textContent = t("me.staging", { name: file.name });
-    const path = await stageThroughBridge(file);
-    note.textContent = path ? t("impmap.staged", { name: file.name })
-                            : t("me.stageFailed", { name: file.name });
-    if (path) field.value = path;
-  })());
-  input.click();
 }
 
 /**
- * Run the import against whichever target was chosen. Returns whether it worked.
+ * THE apply. Returns whether it worked.
  *
- * The two branches are deliberately NOT two implementations:
- *
- *  * **new graph** → `mode: "bake"`, no host, nothing to skip. The document that
- *    comes back is adopted as a graph of the project, exactly as the mapping
- *    editor's Apply has always done;
- *  * **this graph** → an auxiliary ROW is registered on the slot and then mapped
- *    through the ordinary `mapAux`. Not a shortcut: an attached table is a thing
- *    with a life (unmap, re-map when the file changes, bake when it is agreed),
- *    and that life already exists on the auxiliary list. A second concept beside
- *    it would be a second thing to bake.
+ *  * **a new graph** → the document that comes back is adopted as a graph of
+ *    the project (provisional: its nodes carry the volatile marker; written in:
+ *    they do not). Attached cannot land on a graph that does not exist yet;
+ *  * **the graph open now** → the source is read as a delta (`fetchAuxDelta`)
+ *    and lands in ONE undo step: attached = a row of the EMtree (a thing with a
+ *    life: re-read, written in when agreed); provisional = a trial the editor
+ *    keeps, to write in or take out; written in = map and bake together.
  */
-async function runImportWithMapping(
-  path: string, mapping: Record<string, string>, onThisGraph: boolean,
-): Promise<boolean> {
+async function applyImportDoor(): Promise<boolean> {
+  const s = meState;
+  const target = s.target ?? "new";
+  const landing = s.landing ?? "baked";
+  const path = s.path.trim();
   const name = path.split(/[\\/]/).pop() || path;
-  if (onThisGraph) {
-    const slot = emtree.active();
-    if (!slot) {
-      toast(t("impmap.noGraph"));
-      return false;
-    }
-    const auxId = crypto.randomUUID();
-    slot.auxiliaryFiles.push({
-      id: auxId,
-      name,
-      kind: "local",
-      locator: path,
-      fileType: "mapped_source" as AuxFileType,
-      baked: false,
-      mapped: false,
-      expanded: true,   // opened on arrival: this is where the unmatched appear
-      options: {
-        mappingPath: mapping.mapping_path ?? "",
-        mappingName: mapping.mapping_name ?? "",
-      },
-    });
-    refreshEMTree();
-    await mapAux(auxId);
-    // `mapAux` reports its own outcome; it also leaves `mapped` false when the
-    // bridge refused, and an aux row that was never mapped is exactly what the
-    // user should be looking at to fix the mapping and try again.
-    return true;
-  }
-  toast(t("impmap.mappingVerb", { name }));
-  try {
-    const answer = await applyMapping({ path, ...mapping, mode: "bake" });
-    const doc = answer?.graph;
-    if (!doc) throw new Error("no graph in response");
-    const report = auxReportOf(answer?.report);
-    loadDocument(doc, name, null);
-    refreshEMTree();
-    draw();
-    toast(t("impmap.imported", { name, nodes: String(report.nodesAdded),
-                                 edges: String(report.edgesAdded),
-                                 rows: String(report.rows) }));
-    return true;
-  } catch (e) {
-    toast(t("impmap.failed",
-            { detail: e instanceof Error ? e.message : String(e) }));
+  if (!path) { s.note = t("impmap.needSource"); return false; }
+  if (landingRefusal(target, landing, !!emtree.active())) {
+    s.note = t(landingRefusal(target, landing, !!emtree.active()));
     return false;
   }
+  if (target === "new") {
+    const kind = s.mappingKind ?? "authored";
+    let doc: EmDocument | undefined;
+    let report: AuxMapReport = { rows: 0, nodesAdded: 0, edgesAdded: 0, unmatched: [], unmatchedCount: 0 };
+    toast(t("impmap.mappingVerb", { name }));
+    try {
+      if (kind === "none") {
+        // an EM table (em_data.xlsx, StratiMiner's): read as it is, no mapping
+        const res = await fetch(`${await bridgeUrl()}/import-em-data`, {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ path }) });
+        if (!res.ok) throw new Error(await smBridgeError(res));
+        const r = (await res.json()) as ImportResult;
+        doc = r.doc;
+        // what StratiMiner's panel used to say after «convert» goes to the Log
+        logInfo(`${name}: ${describeImport(r)}`);
+        for (const w of r.warnings ?? []) logWarn(`${name}: ${w}`);
+        report = { ...report, nodesAdded: r.doc?.graph?.nodes?.length ?? 0,
+                   edgesAdded: r.doc?.graph?.edges?.length ?? 0 };
+        if (landing === "volatile" && doc?.graph) {
+          const inj = `import:${crypto.randomUUID()}`;
+          for (const n of doc.graph.nodes) (n.data ??= {} as Record<string, unknown>)[VOLATILE_KEY] = inj;
+        }
+      } else {
+        const spec = kind === "authored" ? { mapping: buildMapping(s) }
+          : kind === "file" ? { mapping_path: s.mappingPath ?? "" }
+          : { mapping_name: s.mappingName ?? "" };
+        const answer = await applyMapping({ path, ...spec,
+          mode: landing === "volatile" ? "volatile" : "bake" });
+        doc = answer?.graph;
+        report = auxReportOf(answer?.report);
+      }
+      if (!doc) throw new Error("no graph in response");
+    } catch (e) {
+      toast(t("impmap.failed", { detail: e instanceof Error ? e.message : String(e) }));
+      return false;
+    }
+    loadDocument(doc, s.from?.kind === "stratiminer" ? name : `${s.name || name}`, null);
+    s.applied = { landing, rows: report.rows, nodes_added: report.nodesAdded, edges_added: report.edgesAdded };
+    refreshEMTree();
+    draw();
+    toast(t("land.done", { name, mode: t(`land.${landing}`),
+                           nodes: String(report.nodesAdded), edges: String(report.edgesAdded) }));
+    return true;
+  }
+
+  // the graph open now
+  const slot = emtree.active();
+  if (!slot || !store) return false;
+  const st = store;
+  const fromRow = s.from?.kind === "aux"
+    ? slot.auxiliaryFiles.find((x) => x.id === s.from?.auxId) : undefined;
+  const spec = auxSpecOfEditor();
+  if (landing === "attached") {
+    let row = fromRow;
+    if (row) {
+      row.fileType = spec.fileType;
+      row.options = { ...(row.options ?? {}), ...(spec.options ?? {}) };
+      row.locator = spec.locator;
+    } else {
+      row = { id: crypto.randomUUID(), name: spec.name, kind: "local", locator: spec.locator,
+              fileType: spec.fileType, baked: false, mapped: false, expanded: true,
+              options: spec.options };
+      slot.auxiliaryFiles.push(row);
+    }
+    const ok = await mapAux(row.id);
+    s.applied = ok ? { landing, rows: row.report?.rows ?? 0, nodes_added: row.report?.nodesAdded ?? 0,
+                       edges_added: row.report?.edgesAdded ?? 0 } : null;
+    return ok;
+  }
+  // written in, for a row already mapped: its provisional nodes become the
+  // document's (the EMtree's old Bake)
+  if (landing === "baked" && fromRow?.mapped && !fromRow.baked) {
+    const n = st.bakeVolatile(fromRow.id);
+    fromRow.baked = true;
+    refreshEMTree();
+    s.applied = { landing, nodes_added: n };
+    toast(t("land.done", { name: fromRow.name, mode: t("land.baked"), nodes: String(n), edges: "0" }));
+    return true;
+  }
+  const injector = fromRow?.id ?? `import:${crypto.randomUUID()}`;
+  const got = await fetchAuxDelta(spec, injector);
+  if (!got) return false;
+  const added = st.batch(() => {
+    if (fromRow?.mapped) st.dropVolatile(injector);
+    const n = st.mapVolatile(injector, got.nodes, got.edges);
+    if (landing === "baked") st.bakeVolatile(injector);
+    return n;
+  });
+  if (fromRow) {
+    fromRow.mapped = true;
+    fromRow.baked = landing === "baked";
+    if (got.report) fromRow.report = got.report;
+  }
+  s.trial = landing === "volatile" && !fromRow ? { injector, nodes: added } : null;
+  s.applied = { landing, rows: got.report?.rows ?? 0, nodes_added: added, edges_added: got.edges.length };
+  refreshEMTree();
+  draw();
+  toast(t("land.done", { name: spec.name, mode: t(`land.${landing}`),
+                         nodes: String(added), edges: String(got.edges.length) }));
+  return true;
+}
+
+/** A real PATH for the mapping file: the native dialog on the desktop, and in a
+ *  browser the system dialog plus the bridge's staging — because
+ *  `<input type=file>` hands over bytes and withholds the location. */
+async function pickPath(what: "source" | "mapping"): Promise<string | null> {
+  await ensureMappingCatalog();
+  const extensions = what === "mapping" ? ["json"] : Object.keys(meState.extensions ?? {});
+  if (isTauri()) return (await pickSourceFile(extensions)) || null;
+  return await new Promise<string | null>((resolve) => {
+    const input = document.createElement("input");
+    input.type = "file";
+    if (extensions.length) input.accept = extensions.map((e) => `.${e}`).join(",");
+    input.addEventListener("change", () => void (async () => {
+      const file = input.files?.[0];
+      if (!file) return resolve(null);
+      meState.note = t("me.staging", { name: file.name });
+      refreshMappingEditor();
+      const path = await stageThroughBridge(file);
+      meState.note = path ? t("impmap.staged", { name: file.name }) : t("me.stageFailed", { name: file.name });
+      resolve(path);
+    })());
+    input.click();
+  });
 }
 
 /** The bridge's report, in the shape the aux row keeps. */
@@ -8401,7 +8428,7 @@ document.getElementById("btn-graphml")!.addEventListener("click", async () => {
   }
   const g = store.doc.graph;
   const name = String(g["name"] ?? g.graph_id ?? "graph");
-  toast("Exporting GraphML…");
+  toast(t("io.exporting", { fmt: "GraphML" }));
   try {
     const res = await fetch(`${await bridgeUrl()}/graphml`, {
       method: "POST",
@@ -8416,7 +8443,7 @@ document.getElementById("btn-graphml")!.addEventListener("click", async () => {
       } catch {
         /* non-JSON error body */
       }
-      toast(`GraphML export failed: ${msg}`);
+      toast(t("io.exportFailed", { fmt: "GraphML", msg }));
       return;
     }
     const xml = await res.text();
@@ -8425,14 +8452,14 @@ document.getElementById("btn-graphml")!.addEventListener("click", async () => {
       // Native "Save As…" dialog — the webview has no browser download UI.
       const path = await saveGraphml(xml, filename);
       if (!path) return; // cancelled
-      toast(`GraphML exported → ${baseName(path)}`);
+      toast(t("io.exportedTo", { fmt: "GraphML", name: baseName(path) }));
     } else {
       const a = document.createElement("a");
       a.href = URL.createObjectURL(new Blob([xml], { type: "application/xml" }));
       a.download = filename;
       a.click();
       URL.revokeObjectURL(a.href);
-      toast("GraphML exported");
+      toast(t("io.exported", { fmt: "GraphML" }));
     }
   } catch {
     toast(BRIDGE_UNREACHABLE);
@@ -8740,7 +8767,7 @@ document.getElementById("btn-ttl")!.addEventListener("click", async () => {
   }
   const g = store.doc.graph;
   const name = String(g["name"] ?? g.graph_id ?? "graph");
-  toast("Exporting Turtle…");
+  toast(t("io.exporting", { fmt: "Turtle" }));
   try {
     const res = await fetch(`${await bridgeUrl()}/export-ttl`, {
       method: "POST",
@@ -8755,7 +8782,7 @@ document.getElementById("btn-ttl")!.addEventListener("click", async () => {
       } catch {
         /* non-JSON error body */
       }
-      toast(`Turtle export failed: ${msg}`);
+      toast(t("io.exportFailed", { fmt: "Turtle", msg }));
       return;
     }
     const ttl = await res.text();
@@ -8763,14 +8790,14 @@ document.getElementById("btn-ttl")!.addEventListener("click", async () => {
     if (isTauri()) {
       const path = await saveTtl(ttl, filename);
       if (!path) return; // cancelled
-      toast(`Turtle exported → ${baseName(path)}`);
+      toast(t("io.exportedTo", { fmt: "Turtle", name: baseName(path) }));
     } else {
       const a = document.createElement("a");
       a.href = URL.createObjectURL(new Blob([ttl], { type: "text/turtle" }));
       a.download = filename;
       a.click();
       URL.revokeObjectURL(a.href);
-      toast("Turtle exported");
+      toast(t("io.exported", { fmt: "Turtle" }));
     }
   } catch {
     toast(BRIDGE_UNREACHABLE);
@@ -8781,7 +8808,7 @@ document.getElementById("btn-ttl")!.addEventListener("click", async () => {
 // importer), then load it. Same endpoint/constraint as export (invariant 2).
 async function importGraphmlText(text: string, srcName: string): Promise<void> {
   if (!(await confirmLeaveSidecar("Importing GraphML"))) return;
-  toast("Importing GraphML…");
+  toast(t("io.importing", { fmt: "GraphML" }));
   try {
     const res = await fetch(`${await bridgeUrl()}/import-graphml`, {
       method: "POST",
@@ -8796,23 +8823,21 @@ async function importGraphmlText(text: string, srcName: string): Promise<void> {
       } catch {
         /* non-JSON error body */
       }
-      toast(`GraphML import failed: ${msg}`);
+      toast(t("io.importFailed", { fmt: "GraphML", msg }));
       return;
     }
     const doc = (await res.json()) as EmDocument;
     loadDocument(doc, srcName); // no layout → auto fresh-layout on load
-    toast(`Imported ${srcName}`);
+    toast(t("io.imported", { name: srcName }));
   } catch {
     toast(BRIDGE_UNREACHABLE);
   }
 }
 
-// IMPMAP · the single entry. Both modes of loading a legacy dataset go through
-// this dialog; the mapping editor keeps authoring and hands the attaching over,
-// so the choice of target is asked in ONE place.
+// MICRO-UN-POSTO · the one door: File ▸ Importa ▸ Tabella con mappatura…
 document
   .getElementById("btn-import-mapping")!
-  .addEventListener("click", () => openImportWithMapping());
+  .addEventListener("click", () => openImportDoor({ from: { kind: "file" } }));
 
 document
   .getElementById("btn-import-graphml")!
@@ -8868,7 +8893,7 @@ btnSync.addEventListener("click", () => {
       // the host sent its full graph on connect → become a live view of it
       // (ADR-002: "sync mode = see the host's data"). Replaces the document.
       loadDocument(doc, "Blender (sync)");
-      info.textContent = "sync: loaded Blender's graph";
+      info.textContent = t("sync.loadedHost");
       // provisional document label from the graph name, until the host reports
       // its actual file/database via host_info
       if (!hostInfo.file && !hostInfo.database) {
@@ -8912,7 +8937,7 @@ btnSync.addEventListener("click", () => {
       btnSync.textContent = state === "open" ? "Sync ●" : "Sync";
       if (state === "open") info.textContent = `sync: connected to ${syncUrl}`;
       else if (state === "closed")
-        info.textContent = "sync: disconnected (is Blender's server running?)";
+        info.textContent = t("sync.disconnectedHost");
     },
   });
 });
@@ -9928,8 +9953,6 @@ function openSettings(section?: string): void {
   setHeriverseApp.value = s.viewer.heriverseApp;
   const iiifInput = document.getElementById("set-iiif-base") as HTMLInputElement | null;
   if (iiifInput) iiifInput.value = s.iiif.base;
-  const miradorInput = document.getElementById("set-mirador") as HTMLInputElement | null;
-  if (miradorInput) miradorInput.value = s.iiif.mirador;
   void refreshAiKeyState();
   refreshIdentityPanel();
   refreshSyncUrlPreview();
@@ -10218,8 +10241,8 @@ settingsModal.addEventListener("click", (e) => {
     iiif: {
       base: (document.getElementById("set-iiif-base") as HTMLInputElement)
         ?.value.trim().replace(/\/+$/, "") ?? "",
-      mirador: (document.getElementById("set-mirador") as HTMLInputElement)
-        ?.value.trim() || getSettings().iiif.mirador,
+      // the Mirador address had one reader, the old Annotator (MICRO-UN-POSTO)
+      mirador: getSettings().iiif.mirador,
     },
   };
   // AUDIT N11 · what changed, said by name (the toast spoke of the sync target
@@ -10382,7 +10405,7 @@ function renderResShelf(): void {
     ? `(${resLastShelf.length})`
     : "";
   if (!resLastShelf.length) {
-    resShelf.innerHTML = `<div class="res-empty">— Shelf empty (all resources hatted / matched)</div>`;
+    resShelf.innerHTML = `<div class="res-empty">${escapeHtml(t("res.shelfEmpty"))}</div>`;
     return;
   }
   for (const e of resLastShelf) {
@@ -10398,8 +10421,7 @@ function renderResShelf(): void {
     const { row } = resRow(thumb, e.filename, e.key_id);
     const btn = document.createElement("button");
     btn.textContent = t("res.toDocument");
-    btn.title =
-      "Create a Document adopting this resource's stable ID as its node id";
+    btn.title = t("res.toDocumentTitle");
     btn.addEventListener("click", () => hatShelfEntry(e));
     row.appendChild(btn);
     resShelf.appendChild(row);
@@ -10410,10 +10432,10 @@ async function scanResources(): Promise<void> {
   if (!store) return;
   const folder = resFolderInp.value.trim();
   if (!folder) {
-    resStatus.textContent = "Set a folder first.";
+    resStatus.textContent = t("res.needFolder");
     return;
   }
-  resStatus.textContent = "Scanning…";
+  resStatus.textContent = t("res.scanning");
   try {
     const res = await fetch(`${await bridgeUrl()}/scan-resources`, {
       method: "POST",
@@ -10428,13 +10450,13 @@ async function scanResources(): Promise<void> {
       } catch {
         /* non-JSON */
       }
-      resStatus.textContent = `Scan failed: ${msg}`;
+      resStatus.textContent = t("res.scanFailed", { msg });
       return;
     }
     const j = await res.json();
     resLastShelf = (j.shelf ?? []) as OrphanEntry[];
     renderResShelf();
-    resStatus.textContent = `Indexed folder — ${resLastShelf.length} on the Shelf.`;
+    resStatus.textContent = t("res.indexed", { n: String(resLastShelf.length) });
   } catch {
     resStatus.textContent = BRIDGE_UNREACHABLE;
   }
@@ -10446,7 +10468,7 @@ async function scanResources(): Promise<void> {
 function hatShelfEntry(entry: OrphanEntry): void {
   if (!store) return;
   if (store.node(entry.resource_id)) {
-    toast("A node with this stable ID already exists");
+    toast(t("res.idExists"));
     return;
   }
   store.addNode({
@@ -10461,7 +10483,7 @@ function hatShelfEntry(entry: OrphanEntry): void {
   );
   renderResShelf();
   renderResDocuments();
-  toast(`Hatted ${entry.key_id || "resource"} → Document`);
+  toast(t("res.hatted", { name: String(entry.key_id || t("res.aResource")) }));
 }
 
 // ── Resources (link nodes) list + "Promote to MinIO" ───────────────────────────
@@ -10514,7 +10536,7 @@ async function renderResLinks(): Promise<void> {
       // AUDIT N9 · a different verb from «Promuovi a documento» (the Shelf's):
       // this moves the BYTES to the object store
       btn.textContent = t("res.uploadMinio");
-      btn.title = "Upload into the shared MinIO (keeps the stable ID) and repoint the locator";
+      btn.title = t("res.uploadTitle");
       btn.addEventListener("click", () => void promoteToMinio(r, btn));
       row.appendChild(btn);
     }
@@ -10547,7 +10569,7 @@ async function promoteToMinio(r: ResourceRow, btn: HTMLButtonElement): Promise<v
   if (!store) return;
   btn.disabled = true;
   const prev = btn.textContent;
-  btn.textContent = "Promoting…";
+  btn.textContent = t("res.uploading");
   try {
     const res = await fetch(`${await bridgeUrl()}/ingest-minio`, {
       method: "POST",
@@ -10564,7 +10586,7 @@ async function promoteToMinio(r: ResourceRow, btn: HTMLButtonElement): Promise<v
         /* non-JSON */
       }
       // 501 = the [minio] extra isn't bundled — a clear, graceful message.
-      toast(res.status === 501 ? `MinIO unavailable: ${msg}` : `Promote failed: ${msg}`);
+      toast(res.status === 501 ? t("res.minioUnavailable", { msg }) : t("res.uploadFailed", { msg }));
       btn.disabled = false;
       btn.textContent = prev;
       return;
@@ -10574,7 +10596,7 @@ async function promoteToMinio(r: ResourceRow, btn: HTMLButtonElement): Promise<v
     const node = store.node(r.id);
     const data = { ...((node?.data as Record<string, unknown>) ?? {}), url: j.s3_uri };
     store.updateNode(r.id, { data });
-    toast(`Promoted → ${j.s3_uri}`);
+    toast(t("res.uploaded", { uri: j.s3_uri }));
     await renderResLinks();
   } catch {
     toast(BRIDGE_UNREACHABLE);
@@ -10889,7 +10911,7 @@ const emtreeHandlers: EMTreeHandlers = {
     // never in em.json, so this only touches the in-memory graph).
     if (gone.mapped && store) store.dropVolatile(auxId);
     refreshEMTree();
-    toast(`removed ${gone.name} (the document is untouched)`);
+    toast(t("aux.removed", { name: gone.name }));
   },
   onAuxToggle: (auxId) => {
     const f = emtree.active()?.auxiliaryFiles.find((x) => x.id === auxId);
@@ -10909,7 +10931,9 @@ const emtreeHandlers: EMTreeHandlers = {
     (f.options ??= {})[key] = value;
     // no re-render: the field already holds the value; a rebuild would drop focus
   },
-  onAuxMap: (auxId) => void mapAux(auxId),
+  // MICRO-UN-POSTO · Map and Bake stay on the row and open THE editor, filled
+  // with the row's file, on this graph
+  onAuxMap: (auxId) => openImportDoorForAux(auxId, "attached"),
   onAuxUnmap: (auxId) => {
     const f = emtree.active()?.auxiliaryFiles.find((x) => x.id === auxId);
     if (!f || !store) return;
@@ -10917,20 +10941,9 @@ const emtreeHandlers: EMTreeHandlers = {
     f.mapped = false;
     f.baked = false;
     refreshEMTree();
-    toast(`unmapped ${f.name} — ${n} volatile node(s) removed`);
+    toast(t("aux.takenOut", { name: f.name, n: String(n) }));
   },
-  onAuxBake: (auxId) => {
-    const f = emtree.active()?.auxiliaryFiles.find((x) => x.id === auxId);
-    if (!f || !store) return;
-    if (!f.mapped) {
-      toast("map the source first, then bake");
-      return;
-    }
-    const n = store.bakeVolatile(auxId);
-    f.baked = true;
-    refreshEMTree();
-    toast(`baked ${f.name} — ${n} node(s) now persistent (saved with em.json)`);
-  },
+  onAuxBake: (auxId) => openImportDoorForAux(auxId, "baked"),
   onRename: (id, name) => {
     // POL3: renaming a row renames the GRAPH — `emtree.rename` writes
     // `graph.name` in that slot's document, which is the single source. For the
@@ -11569,38 +11582,62 @@ const meHandlers: MappingEditorHandlers = {
     }
     refreshMappingEditor();
   })(),
-  apply: (mode) => void (async () => {
+  setMappingKind: (kind) => {
+    meState.mappingKind = kind;
+    meState.verdict = null;
+    refreshMappingEditor();
+    if (kind === "authored" && meState.path.trim() && !meState.fields.length) void readMappingSource();
+  },
+  setMappingRef: (value) => {
+    if (meState.mappingKind === "file") meState.mappingPath = value;
+    else meState.mappingName = value;
+    refreshMappingEditor();
+  },
+  pickMappingFile: () => void (async () => {
+    const path = await pickPath("mapping");
+    if (path) { meState.mappingPath = path; refreshMappingEditor(); }
+  })(),
+  setTarget: (target) => {
+    meState.target = target;
+    // attached needs a graph that exists: a new graph falls back to written in
+    if (target === "new" && meState.landing === "attached") meState.landing = "baked";
+    refreshMappingEditor();
+  },
+  setLanding: (landing) => {
+    meState.landing = landing;
+    refreshMappingEditor();
+  },
+  // MICRO-UN-POSTO · ONE apply, wherever the editor was filled from
+  apply: () => void (async () => {
     meState.busy = "apply";
     meState.applied = null;
+    meState.note = "";
     refreshMappingEditor();
-    const answer = await askMapping("/mapping-apply", {
-      mapping: buildMapping(meState), path: meState.path, mode });
+    const ok = await applyImportDoor();
     meState.busy = "";
-    if (answer) {
-      const report = (answer.report ?? {}) as Record<string, unknown>;
-      meState.applied = report;
-      meState.verdict = {
-        ok: Boolean(report.ok),
-        errors: (report.errors as string[]) ?? [],
-        warnings: (report.warnings as string[]) ?? [],
-      };
-      const doc = answer.graph as EmDocument | undefined;
-      if (report.ok && doc) {
-        // the mapping's result arrives as a DOCUMENT and is adopted as a graph of
-        // the project — additive, so a mapping applied twice does not replace the
-        // study somebody is working on. In `volatile` mode its nodes carry
-        // `aux_volatile`, so they show and stay out of the saved file until baked.
-        loadDocument(doc, `${meState.name || "mapping"} (${mode})`, null);
-        refreshEMTree();
-        draw();
-        toast(t("me.applied", { mode: String(mode),
-                                rows: String(report.rows ?? 0),
-                                nodes: String(report.nodes_added ?? 0),
-                                edges: String(report.edges_added ?? 0) }));
-      }
-    }
+    if (!ok && !meState.note) meState.note = t("impmap.seeToast");
     refreshMappingEditor();
+    // one-shot: a new graph is behind the tool now, and so is a row of the
+    // EMtree; a trial stays open, because it still asks to be written or removed
+    if (ok && !meState.trial) closeFloatingTool();
   })(),
+  writeTrial: () => {
+    const tr = meState.trial;
+    if (!tr || !store) return;
+    const n = store.bakeVolatile(tr.injector);
+    meState.trial = null;
+    toast(t("land.done", { name: meState.path.split(/[\\/]/).pop() ?? "", mode: t("land.baked"),
+                           nodes: String(n), edges: "0" }));
+    refreshMappingEditor();
+  },
+  dropTrial: () => {
+    const tr = meState.trial;
+    if (!tr || !store) return;
+    const n = store.dropVolatile(tr.injector);
+    meState.trial = null;
+    toast(t("land.takenOut", { n: String(n) }));
+    refreshMappingEditor();
+  },
   exportJson: () => {
     const mapping = buildMapping(meState);
     const blob = new Blob([JSON.stringify(mapping, null, 1)],
@@ -11625,10 +11662,6 @@ const meHandlers: MappingEditorHandlers = {
   })(),
 };
 
-function openMappingEditor(): void {
-  openFloatingTool("mapping-editor", t("me.tool"));
-  void ensureMappingCatalog().then(refreshMappingEditor);
-}
 
 // ── WIN7 · the floating one-shot tool ───────────────────────────────────────
 //
@@ -11726,9 +11759,6 @@ document
   ?.addEventListener("click", openStratiMiner);
 // AUDIT N5 · Strumenti ▸ Verifica la cronologia
 document.getElementById("btn-tool-chronology")?.addEventListener("click", () => openChronology());
-document
-  .getElementById("btn-tool-mapping")
-  ?.addEventListener("click", openMappingEditor);
 document
   .getElementById("drop-hint-stratiminer")
   ?.addEventListener("click", (e) => {
@@ -11878,34 +11908,21 @@ const smHandlers: StratiMinerHandlers = {
     }
   },
 
-  onTransform: async () => {
-    smSet({ busy: "import", report: "", warnings: [] });
-    try {
-      const res = await fetch(`${await bridgeUrl()}/import-em-data`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ path: smState.xlsxPath.trim() }),
-      });
-      if (!res.ok) {
-        const msg = await smBridgeError(res);
-        smSet({ busy: "", report: `Conversione non riuscita: ${msg}` });
-        logError(`StratiMiner import: ${msg}`);
-        return;
-      }
-      const r = (await res.json()) as ImportResult;
-      // The xlsx path is the source name, not a file EMStudio can save back
-      // into: passing it as `path` would point Save at the workbook.
-      loadDocument(r.doc, smState.xlsxPath.trim().split("/").pop() ?? "em_data");
-      smSet({ busy: "", report: describeImport(r), warnings: r.warnings });
-      // WIN7 · ONE-SHOT: the tool has done the thing it was opened for, and the
-      // graph it just made is behind it. Anything it still had to say (the
-      // import report, the warnings) is in the Log, which is a panel that stays.
-      closeFloatingTool();
-      toast(t("sm.graphCreated"));
-    } catch {
-      smSet({ busy: "", report: BRIDGE_UNREACHABLE });
-      logError(`StratiMiner import: ${BRIDGE_UNREACHABLE}`);
-    }
+  // MICRO-UN-POSTO · StratiMiner FILLS the one editor: its em_data.xlsx is the
+  // source, read as it is (an EM table, no mapping), and it arrives flagged as
+  // proposals — AI data that stay among the warnings until a person verifies
+  // them (ai-validation.ts). Where and how it lands is asked there, with the
+  // same words as every other import.
+  onTransform: () => {
+    const xlsx = smState.xlsxPath.trim();
+    if (!xlsx) { toast(t("impmap.needSource")); return; }
+    openImportDoor({
+      from: { kind: "stratiminer", label: xlsx.split("/").pop() ?? xlsx },
+      path: xlsx,
+      mappingKind: "none",
+      target: "new",
+      landing: "baked",
+    });
   },
 
   // Third way out for Path B, after the clipboard and the textarea. 33k characters
@@ -13150,7 +13167,7 @@ function pickRefFor(narrativeId: string, c: number, at: number, vt: string, repl
   if (vt === "map") {
     const gid = st.ensureGraphRootId();
     insertEmbedAt(narrativeId, c, at, gid, "map", replace);
-    if (!st.readSitePosition()) queueMicrotask(() => openSitePicker(x, y));
+    if (!st.readSitePosition()) queueMicrotask(() => openSitePickerOnGraph());
     return;
   }
   const refs = refsForViewType(vt, st.doc, isStratigraphicType, is3dDocument);
@@ -13221,85 +13238,27 @@ function dropFileOnChapter(narrativeId: string, c: number, f: File, x: number, y
 }
 
 /**
- * COLLEGARE · the SITE PICKER in a popover: the one that exists
- * (`renderSitePosition` — Nominatim search, a click on the map, the numbers,
- * «togli»), plus «Dal georiferimento 3D»: the centroid of the graph's geometry,
- * reprojected by the bridge (`georeferenceScene`) — never the shift, which is
- * the scene's origin and may sit hundreds of metres from the monument.
+ * MICRO-UN-POSTO · the site position has ONE place, the inspector of the graph
+ * node, and ONE selector (`site-picker.ts`, the scrivania's v9b). The Study, the
+ * story's map block and the map embed's section show the position and open the
+ * selector ON THE GRAPH NODE: the node is selected (so an inspector on screen
+ * follows it to where the position lives), then the selector opens.
  */
-let sitePickHost: HTMLElement | null = null;
-const sitePickWatched = new WeakSet<DocumentStore>();
-function openSitePicker(clientX: number, clientY: number): void {
+function openSitePickerOnGraph(): void {
   if (!store) return;
   const st = store;
-  closeSitePicker();
-  const box = document.createElement("div");
-  box.className = "addm sitepick";
-  box.setAttribute("role", "dialog");
-  document.body.appendChild(box);
-  sitePickHost = box;
-  const paint = (): void => {
-    if (!sitePickHost || !store) return;
-    box.textContent = "";
-    const head = document.createElement("div");
-    head.className = "addm-head";
-    head.innerHTML = `<b>${escapeHtml(t("nv.siteTitle"))}</b><span class="addm-ctx">site_position</span>`;
-    const x = document.createElement("button");
-    x.className = "sitepick-x";
-    x.textContent = "×";
-    x.addEventListener("click", closeSitePicker);
-    head.appendChild(x);
-    box.appendChild(head);
-    const body = document.createElement("div");
-    body.className = "sitepick-body";
-    renderSitePosition(body, store);
-    const geo = document.createElement("div");
-    geo.className = "sitepick-geo";
-    const gb = document.createElement("button");
-    gb.className = "insp-btn";
-    gb.textContent = t("nv.siteFrom3d");
-    const note = document.createElement("p");
-    note.className = "insp-hint";
-    note.textContent = t("nv.siteFrom3dNote");
-    gb.addEventListener("click", () => {
-      gb.disabled = true;
-      void georeferenceScene(JSON.parse(store!.toJSON())).then((placed) => {
-        gb.disabled = false;
-        if (!placed) { note.textContent = t("nv.siteNo3d"); return; }
-        if ("error" in placed) { note.textContent = t("nv.site3dError", { why: placed.error }); return; }
-        store!.setSitePosition(placed.centroid[0], placed.centroid[1]);
-        toast(t("nv.siteSet3d"));
-      });
-    });
-    geo.append(gb, note);
-    body.prepend(geo);
-    box.appendChild(body);
-  };
-  paint();
-  if (!sitePickWatched.has(st)) {
-    sitePickWatched.add(st);
-    st.onChange(() => { if (sitePickHost?.isConnected && store === st) paint(); });
-  }
-  const rr = box.getBoundingClientRect();
-  box.style.left = `${Math.max(8, Math.min(clientX, window.innerWidth - rr.width - 8))}px`;
-  box.style.top = `${Math.max(8, Math.min(clientY, window.innerHeight - rr.height - 8))}px`;
-  const off = (e: PointerEvent): void => {
-    if (!sitePickHost) { document.removeEventListener("pointerdown", off, true); return; }
-    if (!box.contains(e.target as Node) && !(e.target as HTMLElement)?.closest?.(".nv-site-pick")) {
-      closeSitePicker();
-      document.removeEventListener("pointerdown", off, true);
-    }
-  };
-  document.addEventListener("pointerdown", off, true);
+  const rootNow = () => st.doc.graph.nodes.find((n) => n.node_type === "graph");
+  const root = rootNow();
+  if (root && selectedId !== root.id) select(root.id);
+  const slot = emtree.active();
+  // a graph with no graph-self node gets one only when a point is WRITTEN
+  // (opening the selector writes nothing); then the inspector goes to it
+  openSitePicker(st, slot ? slotLabel(slot) : String(root?.name ?? t("strip.untitled")), () => {
+    const r = rootNow();
+    if (r && selectedId !== r.id && store === st) select(r.id);
+  });
 }
-function closeSitePicker(): void {
-  sitePickHost?.remove();
-  sitePickHost = null;
-}
-setSitePicker((anchor) => {
-  const r = anchor.getBoundingClientRect();
-  openSitePicker(r.left, r.bottom + 4);
-});
+setSitePicker(() => openSitePickerOnGraph());
 
 /** The map embed's Inspector: the graph's TWO positions, side by side — the
  *  site (`site_position`, what the map shows) and the 3D anchor (the
@@ -13328,12 +13287,10 @@ renderMapEmbedSection = (host: HTMLElement, _node: EmNode): void => {
     ? (gd.shift_x != null ? `EPSG:${gd.epsg ?? 4326} · ${gd.shift_x}, ${gd.shift_y}` : String(geoNode.name ?? geoNode.id))
     : "—");
   const b = document.createElement("button");
-  b.className = "insp-btn";
-  b.textContent = sp ? t("nv.moveSite") : t("nv.placeSite");
-  b.addEventListener("click", () => {
-    const r = b.getBoundingClientRect();
-    openSitePicker(r.left - 320, r.top);
-  });
+  b.className = "insp-btn site-set";
+  b.dataset.action = "site-set";
+  b.textContent = t("site.set");
+  b.addEventListener("click", () => openSitePickerOnGraph());
   s.appendChild(b);
   const note = document.createElement("p");
   note.className = "ninsp-note";
@@ -15412,6 +15369,7 @@ function renderStudyInto(body: HTMLElement): void {
   renderStudyPanel(body, store, {
     resolveAuthority: resolveAuthority,
     searchTwins: (term) => searchTwins(term),
+    onSetSitePosition: () => openSitePickerOnGraph(),
   });
 }
 
@@ -16356,19 +16314,6 @@ function annotateShelfEntry(entry: ShelfEntry): void {
   toast(t("shelf.sentToDoc", { name: entry.name }));
 }
 
-// ── A2 · THE ANNOTATOR · an image, and the claims traced on it ──────────────
-//
-// The gesture is small and the meaning is not: tracing "this and not that" on a
-// photograph is already an interpretation, so an annotation is never a coloured
-// box — it is a CLAIM, and the claim needs the chain that makes it readable by
-// somebody else (extractor → property → unit, plus the region as its evidence).
-//
-// None of that semantics lives here. s3Dgraphy builds the chain, the bridge
-// carries the call, and this window does the two things a canvas is for: show
-// the picture, and take the gesture. What it must get right is the COORDINATES —
-// normalised [0,1], the same numbers the datamodel stores — so nothing on this
-// side ever writes down a pixel size that a re-export would invalidate.
-
 /**
  * SHELF1/W1 · load a bridge-served file through CORS, as a `blob:` URL.
  *
@@ -16401,888 +16346,6 @@ async function bridgeBlobUrl(url: string): Promise<string> {
   return objectUrl;
 }
 
-/** The tools the annotator offers. `lasso`/`mask` are declared and disabled:
- *  phase 2, and a tool that is coming is better announced than discovered. */
-const ANNOTATOR_TOOLS = [
-  { id: "rect", glyph: "▭", labelKey: "tool.rect" },
-  { id: "polygon", glyph: "⬟", labelKey: "tool.polygon" },
-  { id: "lasso", glyph: "✎", labelKey: "tool.lasso", disabled: "tool.phase2" },
-] as const;
-
-type AnnotatorTool = (typeof ANNOTATOR_TOOLS)[number]["id"];
-
-/** The region being traced, before it is committed. Normalised, always. */
-interface AnnotatorDraft {
-  shape_kind: "rect" | "polygon";
-  rect?: [number, number, number, number];
-  points?: Array<[number, number]>;
-}
-
-let annotatorTool: AnnotatorTool = "rect";
-let annotatorDraft: AnnotatorDraft | null = null;
-/** The image the window is on: resolved once per source, like the viewer's. */
-let annotatorImage: { key: string; nodeId: string; title: string; url: string;
-                      path?: string; page: number; iiif?: boolean } | null = null;
-let annotatorLoading: string | null = null;
-
-/** SHELF1 · a resource PICKED FROM THE SHELF, when there is one.
- *
- * Before this the annotator followed the selection and nothing else, so
- * "select a document or a resource with an image" had nowhere to select FROM —
- * the empty state was a dead end. The shelf is that somewhere. An explicit pick
- * wins over the selection until it is cleared: you chose this picture, and a
- * click on the canvas should not take it away from under you.
- */
-let annotatorShelfSource: ShelfEntry | null = null;
-
-// (AUDIT N4 · `setAnnotatorShelfSource` went: Shelf ▸ Annota opens the Doc)
-/** How wide the annotator's picture is on screen, in CSS pixels. What the Image
- *  API is asked for — not the file's own size, which is the point. */
-function srcWidthForAnnotator(): number {
-  const host = document.getElementById("annotator-frame")?.parentElement ?? null;
-  const width = host?.clientWidth ?? 0;
-  return width > 64 ? width : 1024;
-}
-
-/** What `info.json` said about the picture on screen, once it has answered.
- *  Filled asynchronously; until then the annotator asks for `max`, which always
- *  works. */
-let annotatorInfo: { key: string; info: ImageInfo | null } | null = null;
-
-/** The Image API URL for the picture on screen, or null when there is no image
- *  service, no checksum, or the resource is not an image — in which case the
- *  annotator does exactly what it did before. */
-function iiifImageUrlFor(node: EmNode | null, cssWidth: number): string | null {
-  if (!node || !isImageResource(node)) return null;
-  const base = iiifBase();
-  const key = `${base}|${node.id}`;
-  if (annotatorInfo?.key !== key) {
-    // ask once, then redraw: the size of the source decides how much of it is
-    // worth fetching, and it is the image server that knows
-    void fetchImageInfo(node, base).then((info) => {
-      annotatorInfo = { key, info };
-      if (info) renderAnnotator();
-    });
-  }
-  return fittedUrl(node, base, cssWidth,
-                   annotatorInfo?.key === key ? annotatorInfo.info : null);
-}
-
-/** The node the annotator is showing — the current element, as everywhere else. */
-function annotatorNodeId(): string | null {
-  return selectedId ?? null;
-}
-
-function annotatorMode(): string {
-  return winModeOf(activeWin());
-}
-
-/**
- * Resolve the picture, then draw. The image is fetched THROUGH THE BRIDGE for a
- * disk path (W1: a page served over http cannot read one — measured), and
- * straight from the URL when the node already carries one.
- */
-function renderAnnotator(): void {
-  const win = activeWin();
-  if (win.type !== "annotator") return;
-  const img = document.getElementById("annotator-image") as HTMLImageElement | null;
-  const title = document.getElementById("annotator-title");
-  const hint = document.getElementById("annotator-hint");
-  if (!img || !title || !hint) return;
-
-  // The Mode reaches the CSS as an attribute, so the difference between looking
-  // and tracing is `pointer-events` and nothing else: the overlay keeps exactly
-  // the same geometry in every mode, which is the SHELL-FIX rule (a surface that
-  // changes size when you change mode makes a mode switch a layout change).
-  // the Mode reaches the CSS on the STAGE of the instance that traces — the
-  // element `ensureAnnotatorFrame` built — not on a singleton view that no
-  // longer exists. Still `pointer-events` and nothing else: a mode change must
-  // never be a layout change (SHELL-FIX).
-  document.getElementById("annotator-frame")?.parentElement
-    ?.setAttribute("data-mode", annotatorMode());
-
-  // SHELF1 · the shelf pick wins over the selection. The annotator used to have
-  // only the selection, so its empty state was a dead end ("select a resource"
-  // — from where?). Now the shelf is the wide list you pick from, and the pick
-  // stays put until it is cleared.
-  const picked = annotatorShelfSource;
-  const nodeId = picked ? null : annotatorNodeId();
-  const node = nodeId ? (store?.node(nodeId) ?? null) : null;
-  const src = picked ? picked.locator : viewerSourceOf(node);
-  hint.textContent = "";
-
-  if (!src) {
-    annotatorImage = null;
-    img.removeAttribute("src");
-    img.classList.add("hidden");
-    title.textContent = shelfEntries().length
-      ? t("annotator.pickFromShelf")
-      : t("annotator.noImage");
-    drawAnnotatorOverlay();
-    renderAnnotatorPanel();
-    return;
-  }
-
-  // A2/IIIF · when the picture is a published image and this deployment has an
-  // Image API, the annotator asks THE IMAGE SERVER for it, at the size of its
-  // own viewport, instead of pulling the original through a blob. A 200-megapixel
-  // scan then costs what fits on screen — which is the difference between an
-  // annotator that opens and one that hangs.
-  //
-  // The geometry is untouched by this: regions are normalised [0,1], so which
-  // rendition is on screen changes nothing about what is recorded.
-  const service = iiifBase() ? iiifImageUrlFor(node, srcWidthForAnnotator()) : null;
-  const key = `${picked ? picked.id : nodeId}|${service ?? src}`;
-  if (annotatorImage?.key === key) {
-    drawAnnotatorOverlay();
-    renderAnnotatorPanel();
-    return;
-  }
-  if (service) {
-    annotatorImage = {
-      key, nodeId: picked ? picked.id : nodeId!,
-      title: picked ? picked.name : String(node?.name || nodeId),
-      url: service, page: 0, iiif: true,
-    };
-    img.classList.remove("hidden");
-    img.src = service;              // public by design: an Image API needs no token
-    title.textContent = annotatorImage.title;
-    hint.textContent = annotatorMode() === "annotate"
-      ? t("annotator.hintDraw") : t("annotator.hintView");
-    refreshAnnotatorIiif();
-    drawAnnotatorOverlay();
-    renderAnnotatorPanel();
-    return;
-  }
-
-  const show = (rawUrl: string, path?: string): void => {
-    annotatorImage = {
-      key,
-      // A shelf pick has no node in the graph yet — the region will be attached
-      // to the resource by id when it is committed (the bridge promotes it to a
-      // Document, W1/A2). Using the shelf entry's id keeps that one identity.
-      nodeId: picked ? picked.id : nodeId!,
-      title: picked ? picked.name : String(node?.name || nodeId),
-      url: rawUrl, path, page: 0,
-    };
-    img.classList.remove("hidden");
-    // through CORS (see `bridgeBlobUrl`): a bare <img src> to the bridge is a
-    // no-cors cross-site request and the /fs gate refuses it — rightly.
-    void bridgeBlobUrl(rawUrl)
-      .then((src) => { img.src = src; })
-      .catch(() => { img.removeAttribute("src"); title.textContent = t("viewer.unreachable"); });
-    title.textContent = annotatorImage.title;
-    hint.textContent = annotatorMode() === "annotate"
-      ? t("annotator.hintDraw") : t("annotator.hintView");
-    drawAnnotatorOverlay();
-    renderAnnotatorPanel();
-  };
-
-  if (viewerIsFetchable(src)) {
-    show(src);
-    return;
-  }
-  // a disk path: the bridge is the only thing that can read it
-  if (annotatorLoading === key) return;
-  annotatorLoading = key;
-  title.textContent = t("storage.loading");
-  void (async () => {
-    try {
-      const collection = await collectionFromFile(src);
-      annotatorLoading = null;
-      if (activeWin().id !== win.id || annotatorNodeId() !== nodeId) return;
-      const item = collection.items[0];
-      if (item) show(item.url, item.path);
-    } catch (err) {
-      annotatorLoading = null;
-      if (activeWin().id !== win.id) return;
-      annotatorImage = null;
-      img.classList.add("hidden");
-      title.textContent = err instanceof BridgeDownError
-        ? t("storage.bridgeDown")
-        : t("viewer.outsideRoots");
-      drawAnnotatorOverlay();
-    }
-  })();
-}
-
-/** Every region already in the graph for the image on screen. Read from the
- *  DOCUMENT, not from a list this window keeps: after a commit the region is a
- *  node like any other, and drawing it from the graph is what makes "the
- *  annotation is in the graph" visible instead of merely asserted. */
-/**
- * SURFACE-AUDIT · the annotator's PICTURE, into the boxes of a window that is
- * not the one tracing.
- *
- * What such a window can honestly show: the image it is on, and how many
- * regions have been traced on it. Not the overlay — the overlay is a
- * canvas sized to `#annotator-image` with the draft state of a gesture in
- * progress, and a second one would be a second annotator. This is the picture,
- * so the window is not blank, plus one line saying where the tracing is.
- */
-/**
- * ONE CONSTRUCTOR, and the flag is `tools`.
- *
- * `tools` is the element the tracing instance builds for its own controls and
- * `null` for any other. So the difference between the annotator that traces and
- * an annotator window that is simply showing the picture is an ARGUMENT, not a
- * second function reached through a branch in `buildSecondarySurface` — which is
- * what §2 asked for, and the difference between a limit and a defect. The limit
- * itself is unchanged and still true: tracing needs one image element, one
- * overlay and one in-progress gesture (`ANNOTATOR_CAPABILITIES`).
- */
-function renderAnnotatorInto(stage: HTMLElement, caption: HTMLElement,
-                             win: Win, tools: HTMLElement | null): void {
-  if (tools) {
-    // the instance that traces: build the frame the gestures are wired to, once
-    ensureAnnotatorFrame(stage);
-    renderAnnotator();
-    renderAnnotatorTools(tools);
-    return;
-  }
-  renderAnnotatorPictureInto(stage, caption);
-  void win;
-}
-
-/**
- * The tracing frame — the image, the overlay, and the gestures on it.
- *
- * Built into the tracing instance's own stage instead of living in the markup,
- * and built ONCE: `initAnnotatorGestures` binds to the overlay, and the module
- * keeps an in-progress draft against it. The ids survive because there is
- * exactly one of these by declaration, and the declaration is readable
- * (`ANNOTATOR_CAPABILITIES`) rather than hidden in an `if`.
- */
-function ensureAnnotatorFrame(stage: HTMLElement): void {
-  if (stage.querySelector("#annotator-frame")) return;
-  stage.textContent = "";
-  const frame = document.createElement("div");
-  frame.id = "annotator-frame";
-  const img = document.createElement("img");
-  img.id = "annotator-image";
-  img.alt = "";
-  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-  svg.id = "annotator-overlay";
-  svg.setAttribute("viewBox", "0 0 1 1");
-  svg.setAttribute("preserveAspectRatio", "none");
-  frame.append(img, svg);
-  stage.appendChild(frame);
-  initAnnotatorGestures();   // wired to THIS overlay, the moment it exists
-}
-
-function renderAnnotatorPictureInto(stage: HTMLElement,
-                                    caption: HTMLElement): void {
-  stage.textContent = "";
-  caption.textContent = "";
-  const image = annotatorImage;
-  if (!image) {
-    stage.appendChild(viewerEmpty(shelfEntries().length
-      ? t("annotator.pickFromShelf") : t("annotator.noImage")));
-    return;
-  }
-  const img = new Image();
-  img.className = "tile-annot-image";
-  img.src = image.url;
-  img.alt = image.title;
-  img.loading = "lazy";
-  stage.appendChild(img);
-  const n = annotatorRegions().length;
-  caption.textContent = `${image.title} · ${t("annotator.regions", { n: String(n) })}`;
-}
-
-function annotatorRegions(): EmNode[] {
-  const image = annotatorImage;
-  if (!image || !store) return [];
-  return store.doc.graph.nodes.filter((n) => {
-    if (n.node_type !== "annotation_region") return false;
-    const data = (n.data ?? {}) as Record<string, unknown>;
-    const page = Number(data.page ?? 0);
-    return data.resource_id === image.nodeId && page === image.page;
-  });
-}
-
-// ── A2/IIIF · the interoperability corner ────────────────────────────────────
-//
-// Three gestures, and all three are the SAME claim seen from different sides:
-// the regions of this image are nodes in the em.json, and W3C Web Annotation /
-// IIIF are how they travel. Nothing here writes a second copy of anything.
-
-/** Show the corner only when the picture really is served by an Image API. */
-function refreshAnnotatorIiif(): void {
-  const corner = document.getElementById("annotator-iiif");
-  if (!corner) return;
-  corner.classList.toggle("hidden", !annotatorImage?.iiif);
-}
-
-/** The node the annotator is showing, when it is a graph resource. */
-function annotatorResourceNode(): EmNode | null {
-  const id = annotatorImage?.nodeId;
-  return id ? (store?.node(id) ?? null) : null;
-}
-
-/** The image's pixel size, as the <img> reports it once loaded. Used to project
- *  a region into PIXEL selectors, which is what viewers implement; without it
- *  the projection falls back to percentages, which are exact anyway. */
-function annotatorPixelSize(): { width: number; height: number } | null {
-  // info.json first: the <img> holds whatever RENDITION was requested, and a
-  // selector in the pixels of a downscaled copy would put the region in the
-  // wrong place for everybody else.
-  if (annotatorInfo?.info) return annotatorInfo.info;
-  const img = document.getElementById("annotator-image") as HTMLImageElement | null;
-  if (!img?.naturalWidth || !img.naturalHeight) return null;
-  return { width: img.naturalWidth, height: img.naturalHeight };
-}
-
-/** EMIT · this image's regions as W3C Web Annotations, on the clipboard.
- *
- *  An AnnotationPage rather than a bare list: it is what a viewer expects to be
- *  handed, and it is what Mirador reads. The target is the image's own IIIF
- *  service id, so the annotations mean something away from this app. */
-function copyWebAnnotations(): void {
-  const resource = annotatorResourceNode();
-  const service = iiifImageService(resource, iiifBase());
-  const regions = annotatorRegions();
-  if (!service || !regions.length) {
-    toast(t("annotator.iiifNothing"));
-    return;
-  }
-  const size = annotatorPixelSize();
-  const page = {
-    "@context": "http://iiif.io/api/presentation/3/context.json",
-    id: `${service.id}/annotations`,
-    type: "AnnotationPage",
-    items: regions.map((r) => regionToWebAnnotation(r, service.id, size)),
-  };
-  const text = JSON.stringify(page, null, 2);
-  void navigator.clipboard?.writeText(text).catch(() => { /* no clipboard: below */ });
-  logInfo(text);
-  toast(t("annotator.iiifCopied", { n: String(regions.length) }));
-}
-
-/** CONSUME · a Web Annotation somebody else made becomes a region of the graph.
- *
- *  Written through the store's ordinary stamped path, so an annotation that
- *  arrives from Mirador is indistinguishable — in provenance terms — from one
- *  traced here: it has an author, a time, and a place in the CRDT. That is the
- *  half of "round-trippable" that matters, and the half most tools skip. */
-function pasteWebAnnotation(): void {
-  const image = annotatorImage;
-  if (!image || !store) return;
-  const raw = window.prompt(t("annotator.iiifPastePrompt"));
-  if (!raw) return;
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(raw);
-  } catch {
-    toast(t("annotator.iiifBadJson"));
-    return;
-  }
-  const items = Array.isArray((parsed as { items?: unknown[] })?.items)
-    ? ((parsed as { items: unknown[] }).items)
-    : [parsed];
-  const size = annotatorPixelSize();
-  let made = 0;
-  for (const item of items) {
-    try {
-      const region = webAnnotationToRegion(item as never, size);
-      const id = region.id || store.newId();
-      if (store.node(id)) continue;              // already here: not news
-      store.addNode({
-        id, node_type: "annotation_region",
-        name: region.name || t("annotator.importedRegion"),
-        data: {
-          shape_kind: region.shape_kind,
-          ...(region.rect ? { rect: region.rect } : {}),
-          ...(region.points ? { points: region.points } : {}),
-          page: region.page ?? 0,
-          resource_id: image.nodeId,
-        },
-      } as EmNode);
-      store.addEdge(id, image.nodeId, "is_on_resource");
-      made += 1;
-    } catch (err) {
-      logInfo(String(err));
-    }
-  }
-  toast(made ? t("annotator.iiifPasted", { n: String(made) })
-             : t("annotator.iiifNoRegion"));
-  renderAnnotator();
-}
-
-/** The manifest of this image, as a URL a viewer can be pointed at.
- *
- *  Built by StratiGraph Server from the ROOM's graph (`/v1/rooms/…/iiif/…/manifest`),
- *  because a manifest must be fetchable by the viewer — a document this page
- *  holds in memory is not something Mirador can open. Without a room there is
- *  no such URL, and the button says so instead of opening an empty viewer. */
-function manifestUrlForAnnotator(): string | null {
-  const image = annotatorImage;
-  const settings = getSettings();
-  if (!image || !sync.room || !settings.sync.hubUrl) return null;
-  const base = settings.sync.hubUrl.replace(/\/+$/, "");
-  return `${base}/v1/rooms/${encodeURIComponent(sync.room)}/iiif/`
-    + `${encodeURIComponent(image.nodeId)}/manifest`;
-}
-
-/** Open this image, with its regions, in Mirador. */
-function openInMirador(): void {
-  const manifest = manifestUrlForAnnotator();
-  if (!manifest) {
-    toast(t("annotator.miradorNeedsRoom"));
-    return;
-  }
-  const viewer = miradorBase();
-  const url = `${viewer}${viewer.includes("?") ? "&" : "?"}`
-    + `iiif-content=${encodeURIComponent(manifest)}`;
-  window.open(url, "_blank", "noopener");
-}
-
-/** Geometry of a region node, in normalised coordinates. */
-function regionGeometry(node: EmNode): AnnotatorDraft | null {
-  const data = (node.data ?? {}) as Record<string, unknown>;
-  const kind = data.shape_kind;
-  if (kind === "rect" && Array.isArray(data.rect) && data.rect.length === 4) {
-    return { shape_kind: "rect", rect: (data.rect as number[]).slice(0, 4) as
-             [number, number, number, number] };
-  }
-  if (kind === "polygon" && Array.isArray(data.points)) {
-    return { shape_kind: "polygon",
-             points: (data.points as number[][]).map((p) => [p[0], p[1]] as [number, number]) };
-  }
-  return null;
-}
-
-/**
- * Draw the overlay in NORMALISED coordinates.
- *
- * The SVG has `viewBox="0 0 1 1"` and stretches over the picture, so a region is
- * written with the same numbers the datamodel stores — no conversion, and
- * nothing to get wrong when the image is displayed at another size. The cost is
- * that strokes stretch with it, which is why the shapes carry
- * `vector-effect: non-scaling-stroke`.
- */
-function drawAnnotatorOverlay(): void {
-  const svg = document.getElementById("annotator-overlay");
-  if (!svg) return;
-  while (svg.firstChild) svg.removeChild(svg.firstChild);
-  const NS = "http://www.w3.org/2000/svg";
-
-  const shape = (geom: AnnotatorDraft, className: string): SVGElement | null => {
-    if (geom.shape_kind === "rect" && geom.rect) {
-      const [x, y, w, h] = geom.rect;
-      const el = document.createElementNS(NS, "rect");
-      el.setAttribute("x", String(x));
-      el.setAttribute("y", String(y));
-      el.setAttribute("width", String(Math.max(w, 0)));
-      el.setAttribute("height", String(Math.max(h, 0)));
-      el.setAttribute("class", className);
-      return el;
-    }
-    if (geom.shape_kind === "polygon" && geom.points?.length) {
-      const el = document.createElementNS(NS, "polygon");
-      el.setAttribute("points", geom.points.map(([x, y]) => `${x},${y}`).join(" "));
-      el.setAttribute("class", className);
-      return el;
-    }
-    return null;
-  };
-
-  for (const region of annotatorRegions()) {
-    const geom = regionGeometry(region);
-    if (!geom) continue;
-    const el = shape(geom, "annot-region");
-    if (el) {
-      el.setAttribute("data-region", region.id);
-      svg.appendChild(el);
-    }
-  }
-  if (annotatorDraft) {
-    const el = shape(annotatorDraft, "annot-draft");
-    if (el) svg.appendChild(el);
-    // a polygon in progress shows its vertices, or you cannot tell where the
-    // next click will attach
-    if (annotatorDraft.shape_kind === "polygon") {
-      for (const [x, y] of annotatorDraft.points ?? []) {
-        const dot = document.createElementNS(NS, "circle");
-        dot.setAttribute("cx", String(x));
-        dot.setAttribute("cy", String(y));
-        dot.setAttribute("r", "0.006");
-        dot.setAttribute("class", "annot-vertex");
-        svg.appendChild(dot);
-      }
-    }
-  }
-}
-
-/** Pointer position → normalised coordinates of the IMAGE, clamped to it. */
-function annotatorPoint(e: PointerEvent | MouseEvent): [number, number] | null {
-  const svg = document.getElementById("annotator-overlay");
-  if (!svg) return null;
-  const box = svg.getBoundingClientRect();
-  if (!box.width || !box.height) return null;
-  const clamp = (v: number): number => Math.min(1, Math.max(0, v));
-  return [clamp((e.clientX - box.left) / box.width),
-          clamp((e.clientY - box.top) / box.height)];
-}
-
-/**
- * The tracing gestures, wired ONCE on the overlay (it is a singleton in the
- * area, like every other surface). Only Mode `annotate` draws: in `view` the
- * same picture is there to be looked at, and a window that drew whenever you
- * dragged would make looking dangerous.
- */
-function initAnnotatorGestures(): void {
-  const svg = document.getElementById("annotator-overlay");
-  if (!svg) return;
-  let dragging = false;
-  let origin: [number, number] | null = null;
-
-  svg.addEventListener("pointerdown", (e) => {
-    if (annotatorMode() !== "annotate" || !annotatorImage) return;
-    const p = annotatorPoint(e as PointerEvent);
-    if (!p) return;
-    e.preventDefault();
-    if (annotatorTool === "rect") {
-      dragging = true;
-      origin = p;
-      annotatorDraft = { shape_kind: "rect", rect: [p[0], p[1], 0, 0] };
-      (svg as unknown as Element).setPointerCapture?.((e as PointerEvent).pointerId);
-    } else if (annotatorTool === "polygon") {
-      // click to add a vertex; the polygon closes from the panel or with Enter,
-      // because "double-click to close" and "click to add" fight each other on
-      // the last vertex.
-      const points = annotatorDraft?.points ?? [];
-      annotatorDraft = { shape_kind: "polygon", points: [...points, p] };
-    }
-    drawAnnotatorOverlay();
-    // The panel is NOT opened here. It used to be, and the bug was instructive:
-    // it opened on pointerDOWN, took its space, and the picture shrank UNDER THE
-    // POINTER — so the rest of the drag was measured against a box that had
-    // changed size, and a 35%-tall gesture recorded as 70%. A surface must not
-    // resize while a gesture is being measured against it. (It is also an
-    // overlay now, so even opening it late moves nothing.)
-    if (annotatorTool === "polygon") renderAnnotatorPanel();
-  });
-
-  svg.addEventListener("pointermove", (e) => {
-    if (!dragging || !origin) return;
-    const p = annotatorPoint(e as PointerEvent);
-    if (!p) return;
-    // dragged in any direction: the rect is normalised so w/h stay positive,
-    // which the datamodel requires and a drag up-left would otherwise break
-    annotatorDraft = {
-      shape_kind: "rect",
-      rect: [Math.min(origin[0], p[0]), Math.min(origin[1], p[1]),
-             Math.abs(p[0] - origin[0]), Math.abs(p[1] - origin[1])],
-    };
-    drawAnnotatorOverlay();
-  });
-
-  const endDrag = (): void => {
-    if (!dragging) return;
-    dragging = false;
-    origin = null;
-    const rect = annotatorDraft?.rect;
-    // a click, not a drag: no region. Without this every stray click on the
-    // picture would open the panel for a zero-sized region.
-    if (rect && (rect[2] < 0.005 || rect[3] < 0.005)) annotatorDraft = null;
-    drawAnnotatorOverlay();
-    renderAnnotatorPanel();
-  };
-  svg.addEventListener("pointerup", endDrag);
-  svg.addEventListener("pointercancel", endDrag);
-
-  window.addEventListener("keydown", (e) => {
-    if (activeWin().type !== "annotator") return;
-    if (e.key === "Escape" && annotatorDraft) {
-      annotatorDraft = null;
-      drawAnnotatorOverlay();
-      renderAnnotatorPanel();
-    }
-  });
-}
-
-/** The left panel of an Annotator window: its TOOLS.
- *
- * U2 · this is the generalisation of `RESOURCE_PROVIDERS`. The registry never
- * said "the node types" — it says "what this window OFFERS", which for a Graph
- * is the palette, for a Narrative the story blocks, and here the ways of
- * tracing. Nothing about the panel had to change to hold a different offer.
- */
-function renderAnnotatorTools(host: HTMLElement): void {
-  // …into an EMPTY host. It used to be called once, into a resources panel that
-  // `buildResourcePanel` had just cleared; now the annotator surface calls it on
-  // every refresh, and without this the tools stacked up — measured: two copies
-  // of "Tracing tools" after the first repaint.
-  host.textContent = "";
-  const box = document.createElement("div");
-  box.className = "annot-tools";
-  const heading = document.createElement("div");
-  heading.className = "palette-heading";
-  heading.textContent = t("annotator.tools");
-  box.appendChild(heading);
-  for (const tool of ANNOTATOR_TOOLS) {
-    const btn = document.createElement("button");
-    btn.className = "annot-tool" + (annotatorTool === tool.id ? " current" : "");
-    btn.dataset.tool = tool.id;
-    btn.innerHTML = `<span class="annot-tool-glyph">${tool.glyph}</span>` +
-                    `<span class="annot-tool-label">${escapeHtml(t(tool.labelKey))}</span>`;
-    if ("disabled" in tool && tool.disabled) {
-      btn.disabled = true;
-      btn.title = t(tool.disabled);
-    } else {
-      btn.addEventListener("click", () => {
-        annotatorTool = tool.id as AnnotatorTool;
-        annotatorDraft = null;
-        drawAnnotatorOverlay();
-        // ONE SURFACE · the tool palette is a RESOURCE PANEL, and repainting one
-        // is not a change to the arrangement. This used to re-lay the whole
-        // workspace out to redraw six buttons.
-        renderResourcePanels();
-        renderAnnotatorPanel();
-      });
-    }
-    box.appendChild(btn);
-  }
-  const note = document.createElement("p");
-  note.className = "annot-tools-note";
-  note.textContent = t("annotator.toolsNote");
-  box.appendChild(note);
-  host.appendChild(box);
-}
-
-// ── A2 · "what am I extracting?" — the panel that turns a shape into a claim ──
-//
-// The question is not decoration: the same traced rectangle means a different
-// thing depending on what is being read out of it (the extent of a unit, a
-// measurement, a state of conservation). So the property TYPE is asked for
-// every time and never defaulted — the bridge refuses a call without one.
-
-function renderAnnotatorPanel(): void {
-  const panel = document.getElementById("annotator-panel");
-  if (!panel) return;
-  const win = activeWin();
-  if (win.type !== "annotator" || !annotatorDraft || !annotatorImage) {
-    panel.classList.add("hidden");
-    panel.textContent = "";
-    return;
-  }
-  if (panel.dataset.open === "1") {
-    // Built already — keep whatever was typed, but the GEOMETRY is not typed: it
-    // is the gesture, and it must read as the gesture actually is.
-    const line = panel.querySelector(".annot-geometry");
-    if (line) line.textContent = describeDraft(annotatorDraft);
-    return;
-  }
-  panel.dataset.open = "1";
-  panel.classList.remove("hidden");
-  panel.textContent = "";
-
-  const title = document.createElement("div");
-  title.className = "annot-panel-title";
-  title.textContent = t("annotator.whatAreYouExtracting");
-  panel.appendChild(title);
-
-  const field = (labelKey: string, control: HTMLElement): void => {
-    const wrap = document.createElement("label");
-    wrap.className = "annot-field";
-    const span = document.createElement("span");
-    span.textContent = t(labelKey);
-    wrap.append(span, control);
-    panel.appendChild(wrap);
-  };
-
-  // TARGET — the stratigraphic nodes of this graph, from the graph itself
-  const target = document.createElement("select");
-  target.className = "annot-input";
-  const none = document.createElement("option");
-  none.value = "";
-  none.textContent = t("annotator.noTarget");
-  target.appendChild(none);
-  const units = (store?.doc.graph.nodes ?? [])
-    .filter((n) => isStratigraphicType(n.node_type))
-    .sort((a, b) => String(a.name).localeCompare(String(b.name)));
-  for (const unit of units) {
-    const option = document.createElement("option");
-    option.value = unit.id;
-    option.textContent = `${unit.name} · ${unit.node_type}`;
-    target.appendChild(option);
-  }
-  if (selectedIds.size === 1) {
-    const only = [...selectedIds][0];
-    if (units.some((u) => u.id === only)) target.value = only;
-  }
-  field("annotator.target", target);
-
-  // PROPERTY TYPE — the qualia vocabulary, never a hand-written list.
-  //
-  // NO DEFAULT, on purpose, and the first version taught me why twice over: it
-  // pre-selected `"material"`, which is not a term in the vocabulary at all (the
-  // id is `material_type`), so the select silently held "" and the commit was
-  // refused by the bridge. Hardcoding an EM term is what ADR-001 forbids — and
-  // even a VALID default would be wrong here, because "what am I extracting" is
-  // the question this panel exists to ask. Answering it on the reader's behalf
-  // would put a word in their mouth that travels into the graph as a claim.
-  const ptype = document.createElement("select");
-  ptype.className = "annot-input";
-  const choose = document.createElement("option");
-  choose.value = "";
-  choose.textContent = t("annotator.choosePropertyType");
-  ptype.appendChild(choose);
-  for (const q of qualiaList()) {
-    const option = document.createElement("option");
-    option.value = q.id;
-    option.textContent = `${q.name} · ${q.categoryLabel}`;
-    option.title = q.description ?? q.rationale ?? "";
-    ptype.appendChild(option);
-  }
-  field("annotator.propertyType", ptype);
-
-  // VALUE — the reading itself
-  const value = document.createElement("input");
-  value.type = "text";
-  value.className = "annot-input";
-  value.placeholder = t("annotator.valuePlaceholder");
-  field("annotator.value", value);
-
-  // AUTHOR — defaults to the graph's own author, which is nearly always right
-  const author = document.createElement("input");
-  author.type = "text";
-  author.className = "annot-input";
-  author.value = defaultAnnotationAuthor();
-  field("annotator.author", author);
-
-  const geometry = document.createElement("p");
-  geometry.className = "annot-geometry";
-  geometry.textContent = describeDraft(annotatorDraft);
-  panel.appendChild(geometry);
-
-  const actions = document.createElement("div");
-  actions.className = "annot-actions";
-  const commit = document.createElement("button");
-  commit.className = "annot-commit";
-  commit.textContent = t("annotator.commit");
-  commit.addEventListener("click", () => {
-    void commitAnnotation({
-      targetUnitId: target.value || null,
-      propertyType: ptype.value,
-      value: value.value.trim(),
-      author: author.value.trim() || null,
-      button: commit,
-    });
-  });
-  const cancel = document.createElement("button");
-  cancel.className = "annot-cancel";
-  cancel.textContent = t("annotator.cancel");
-  cancel.addEventListener("click", () => {
-    annotatorDraft = null;
-    panel.dataset.open = "";
-    drawAnnotatorOverlay();
-    renderAnnotatorPanel();
-  });
-  actions.append(commit, cancel);
-  panel.appendChild(actions);
-}
-
-/** The graph's own author, when it has one — the annotation is nearly always by
- *  whoever is holding the document. */
-function defaultAnnotationAuthor(): string {
-  try {
-    const scope = store?.readGraphScope?.();
-    return String((scope as { author?: string } | undefined)?.author ?? "");
-  } catch {
-    return "";
-  }
-}
-
-function describeDraft(draft: AnnotatorDraft): string {
-  if (draft.shape_kind === "rect" && draft.rect) {
-    const [x, y, w, h] = draft.rect.map((v) => Math.round(v * 1000) / 10);
-    return `rect ${x}% ${y}% · ${w}×${h}%`;
-  }
-  return `polygon · ${draft.points?.length ?? 0} ${t("annotator.points")}`;
-}
-
-/**
- * Commit: the bridge builds the chain, and the graph receives it.
- *
- * The response is a DELTA, so it lands through `store.addSubgraph` as ONE undo
- * step and the layout survives — the alternative (replacing the document with
- * the returned graph) would throw away the arrangement for a gesture that added
- * four nodes.
- */
-async function commitAnnotation(input: {
-  targetUnitId: string | null;
-  propertyType: string;
-  value: string;
-  author: string | null;
-  button: HTMLButtonElement;
-}): Promise<void> {
-  if (!store || !annotatorDraft || !annotatorImage) return;
-  if (annotatorDraft.shape_kind === "polygon" &&
-      (annotatorDraft.points?.length ?? 0) < 3) {
-    toast(t("annotator.polygonNeedsThree"));
-    return;
-  }
-  if (!input.propertyType) {
-    toast(t("annotator.propertyTypeRequired"));
-    return;
-  }
-  if (!input.value) {
-    toast(t("annotator.valueRequired"));
-    return;
-  }
-  const region: Record<string, unknown> = {
-    shape_kind: annotatorDraft.shape_kind,
-    page: annotatorImage.page,
-  };
-  if (annotatorDraft.rect) region.rect = annotatorDraft.rect;
-  if (annotatorDraft.points) region.points = annotatorDraft.points;
-
-  input.button.disabled = true;
-  try {
-    const res = await fetch(`${await bridgeUrl()}/annotate`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        doc: store.doc,
-        image_id: annotatorImage.nodeId,
-        region,
-        interpretation: input.value,
-        property_type: input.propertyType,
-        target_unit_id: input.targetUnitId,
-        author: input.author,
-      }),
-    });
-    const payload = (await res.json().catch(() => null)) as
-      | { ok?: boolean; error?: string; nodes?: EmNode[]; edges?: EmEdge[];
-          warnings?: string[]; region_id?: string; created?: boolean }
-      | null;
-    if (!res.ok || !payload?.ok) {
-      // the bridge's own words: it knows WHY better than a generic failure does
-      toast(payload?.error ?? `bridge ${res.status}`);
-      return;
-    }
-    const added = store.addSubgraph(payload.nodes ?? [], payload.edges ?? []);
-    annotatorDraft = null;
-    const panel = document.getElementById("annotator-panel");
-    if (panel) panel.dataset.open = "";
-    drawAnnotatorOverlay();
-    renderAnnotatorPanel();
-    draw();
-    draw();
-    renderEmData();
-    refreshInspector();
-    for (const w of payload.warnings ?? []) toast(w);
-    toast(added.nodes || added.edges
-      ? t("annotator.committed", { n: String(added.nodes), e: String(added.edges) })
-      : t("annotator.alreadyThere"));
-  } catch (err) {
-    toast(`${t("storage.bridgeDown")} (${err instanceof Error ? err.message : err})`);
-  } finally {
-    input.button.disabled = false;
-  }
-}
 
 // ── W1 · STORAGE · the window onto where the bytes live ─────────────────────
 //
@@ -18016,7 +17079,6 @@ function stampComposeBox(win: Win, entries: FsEntry[]): HTMLElement {
       draft.origin = isOrigin;
       draft.originDeclared = isOrigin;
       draft.kind = "";
-      draft.capture = "";
       draft.why = "";
       renderStorage();
       redrawDraftPicture();
@@ -18097,18 +17159,16 @@ function stampComposeBox(win: Win, entries: FsEntry[]): HTMLElement {
     select.appendChild(g);
   };
   if (draft.origin) {
-    group(t("stamp2.captures"), dtcKindsFor("input").map((k) => ({ value: `capture:${k.kind}`, label: k.label })));
-    group(t("stamp2.acquisitions"), dtcKindsFor("acquisition").map((k) => ({ value: `acq:${k.kind}`, label: k.label })));
+    // the families of the acquisition, as the datamodel names and orders them
+    // (em_visual_rules 1.6.22: capture, then retrieval) — one group each
+    for (const f of dtcFamiliesOf("acquisition"))
+      group(f.label, dtcKindsFor("acquisition", f.family).map((k) => ({ value: k.kind, label: k.label })));
   } else {
-    group(t("stamp2.processes"), dtcKindsFor("process").map((k) => ({ value: `acq:${k.kind}`, label: k.label })));
+    group(t("stamp2.processes"), dtcKindsFor("process").map((k) => ({ value: k.kind, label: k.label })));
   }
-  select.value = draft.capture ? `capture:${draft.capture}` : draft.kind ? `acq:${draft.kind}` : "";
+  select.value = draft.kind;
   select.onchange = () => {
-    const [how, kind] = select.value.split(":");
-    // PROVISIONAL (see `Draft.capture`): a capture is an acquisition from the
-    // local disk that SAYS which capture it was
-    draft.capture = how === "capture" ? kind : "";
-    draft.kind = kind ?? "";
+    draft.kind = select.value;
     checkField(box, "kind");
     redrawDraftPicture();
   };
@@ -22214,9 +21274,6 @@ const WINDOW_MENUS: Record<WindowType, WinMenu[]> = {
       ],
     },
   ],
-  // AUDIT N4 · the Annotator is an alias of the Doc window: no menu of its own
-  // (its «Cancel region» / «Close polygon» are Esc and Enter on the Doc's tools)
-  annotator: [],
   doc: [
     {
       label: "menu.document",
@@ -22243,10 +21300,60 @@ const WINDOW_MENUS: Record<WindowType, WinMenu[]> = {
           disabledReason: () =>
             currentDocId(win) ? null : t("menu.pickDocument"),
         },
+        // MICRO-UN-POSTO · what the old Annotator's IIIF corner did that is
+        // worth keeping: the image's regions, as W3C Web Annotations, for
+        // somebody else's viewer (Mirador reads an AnnotationPage)
+        {
+          label: "menu.copyWebAnnotations",
+          run: () => copyDocWebAnnotations(win),
+          disabledReason: () => docWebAnnotationRefusal(win),
+        },
       ],
     },
   ],
 };
+
+/** The regions traced on a Doc's image (`annotation_region`, region2d, whose
+ *  `resource_id` is the document: `setReadingGeometry(…, docId, …)`). */
+function docImageRegions(docId: string): EmNode[] {
+  return (store?.liveNodes() ?? []).filter((n) => {
+    const d = (n.data ?? {}) as Record<string, unknown>;
+    return n.node_type === "annotation_region" && d.resource_id === docId
+      && String(d.geometry_kind || "region2d") === "region2d";
+  });
+}
+
+/** Why the Doc cannot export its regions, or null when it can. */
+function docWebAnnotationRefusal(win: Win): string | null {
+  const id = currentDocId(win);
+  if (!id || !store) return t("menu.pickDocument");
+  if (!iiifImageService(store.node(id), iiifBase())) return t("menu.waNoIiif");
+  if (!docImageRegions(id).length) return t("menu.waNoRegions");
+  return null;
+}
+
+/** EMIT · the Doc's image regions as a W3C AnnotationPage, on the clipboard
+ *  (and in the Log). The target is the image's own IIIF service, the pixel
+ *  size the picture's natural size — a polygon selector is in pixels. */
+function copyDocWebAnnotations(win: Win): void {
+  const id = currentDocId(win);
+  if (!id || !store || docWebAnnotationRefusal(win)) return;
+  const service = iiifImageService(store.node(id), iiifBase())!;
+  const regions = docImageRegions(id);
+  const img = winAreas.get(win.id)?.querySelector<HTMLImageElement>(".rd-img img");
+  const size = img?.naturalWidth && img.naturalHeight
+    ? { width: img.naturalWidth, height: img.naturalHeight } : null;
+  const page = {
+    "@context": "http://iiif.io/api/presentation/3/context.json",
+    id: `${service.id}/annotations`,
+    type: "AnnotationPage",
+    items: regions.map((r) => regionToWebAnnotation(r, service.id, size)),
+  };
+  const text = JSON.stringify(page, null, 2);
+  void navigator.clipboard?.writeText(text).catch(() => { /* no clipboard: the Log has it */ });
+  logInfo(text, [id]);
+  toast(t("menu.waCopied", { n: String(regions.length) }));
+}
 
 /** Build the header's menus for the ACTIVE window's type. */
 /**
@@ -22596,7 +21703,7 @@ async function layoutAll(fresh: boolean): Promise<void> {
       graphOverrides.clear();
       buildScenes();
       draw();
-      toast(`Graph layout: ${graphAlgorithm}`);
+      toast(t("tst.graphLayout", { name: graphAlgorithm }));
     } else if (matrixTighterThanDefault()) {
       // Matrix filtered beyond its default → recompute the VIEW layout on the
       // visible subgraph (recompact), leaving the archival layout untouched.
@@ -22756,7 +21863,7 @@ function showLaneMenu(clientX: number, clientY: number, lane: { id: string; labe
     } else {
       setView("graph"); // show the effect (setView rebuilds + fits)
     }
-    toast(`Graph layout: ${graphAlgorithm}`);
+    toast(t("tst.graphLayout", { name: graphAlgorithm }));
   },
 );
 
@@ -24284,9 +23391,9 @@ registerBuiltinSurfaces({
   // panel gets built into a host. `shell/` draws none of them — it only knows
   // that a panel can be repainted, told the selection moved, and taken down.
   panelIdOf, mountPanel,
-  // …and the last two types to cross over: the narrative (which stopped being a
-  // MODE on 14 September) and the annotator (one constructor, a declared limit).
-  renderNarrativeInto, renderAnnotatorInto,
+  // …and the narrative, which stopped being a MODE on 14 September (the
+  // annotator's constructor went with the annotator: MICRO-UN-POSTO)
+  renderNarrativeInto,
   // …and the last one to cross over: a graph window's canvas, its ten gestures
   // and its own minimap.
   mountGraph: (cv, mini, win) => { mountGraphCanvas(cv, mini, win); },
@@ -24315,16 +23422,6 @@ renderTiles(); // WIN5 · lay out the arrangement this session was left in
 // see `bootSession`.
 void bootSession();
 
-// A2/IIIF · the interoperability corner of the annotator. Bound once, here,
-// like every other piece of static chrome: the buttons exist in the markup and
-// are hidden until the picture on screen actually has an Image API service.
-document.getElementById("annotator-copy-anno")
-  ?.addEventListener("click", () => copyWebAnnotations());
-document.getElementById("annotator-paste-anno")
-  ?.addEventListener("click", () => pasteWebAnnotation());
-document.getElementById("annotator-mirador")
-  ?.addEventListener("click", () => openInMirador());
-
 // EM-Data (DP-81): a live tabular view on the active store. Reads `store`
 // through a getter so it always sees the current slot; re-renders from the
 // store's onChange (wired in wireStore).
@@ -24339,7 +23436,6 @@ document.getElementById("annotator-mirador")
 // `#table-view-actions`, an element `renderEmData` only ever EMPTIED — the row
 // verbs have been in the window's `Righe ▸` menu since HDR1.
 
-initAnnotatorGestures();   // A2 · the overlay is a singleton: wire it once
 refreshIdentityChip();     // IDENTITY · who is authoring, from the first frame
 initEmData({
   onDeleted: (name, st) => toastUndo(t("del.one", { name }), st),

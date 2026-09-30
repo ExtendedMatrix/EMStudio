@@ -308,14 +308,70 @@ export interface DtcKindItem {
  * stringa scritta in un campo dell'interfaccia, e mai un valore arrivato in un
  * corpo JSON (il bridge lo rifiuta di suo: sono due recinti sullo stesso campo).
  */
-export function dtcKindsFor(axis: string): Array<{ kind: string; label: string }> {
+export function dtcKindsFor(
+  axis: string,
+  family?: string,
+): Array<{ kind: string; label: string }> {
+  // `input` is a READ ALIAS since em_visual_rules 1.6.22 (`_alias_of`): the
+  // captures live in the `acquisition` axis, family `capture`, with the same
+  // keys. Resolved here like s3dgraphy.utils.get_dtc_kinds, so a caller that
+  // still asks the old axis gets the same kinds it always got.
+  const alias = (DTC_KINDS[axis] as Record<string, unknown> | undefined)?._alias_of as
+    | { axis?: string; family?: string }
+    | undefined;
+  if (alias?.axis && alias.axis !== axis) return dtcKindsFor(alias.axis, family ?? alias.family);
   const entries = DTC_KINDS[axis] ?? {};
   const out: Array<{ kind: string; label: string }> = [];
   for (const kind of Object.keys(entries)) {
     if (kind.startsWith("_")) continue;
-    out.push({ kind, label: entries[kind]?.label ?? kind });
+    const e = entries[kind] as { label?: string; family?: string } | undefined;
+    if (family && e?.family !== family) continue;
+    out.push({ kind, label: dtcKindLabel(kind, e?.label) });
   }
   return out;
+}
+
+/** The sidecar's `dtc_kinds` section (translations 1.5): one `label[locale]`
+ *  per kind, plus `family_<name>` for the families of an axis. */
+const _DTC_TRANSLATIONS = (
+  datamodelTranslations as {
+    dtc_kinds?: Record<string, Record<string, Record<string, string | boolean>>>;
+  }
+).dtc_kinds ?? {};
+
+function dtcTranslated(key: string, fallback: string): string {
+  const loc = _DTC_TRANSLATIONS[key]?.label?.[getLocale()];
+  return typeof loc === "string" && loc.trim() ? loc : fallback;
+}
+
+/** A DTC kind's label in the ACTIVE locale, then the rules' English label. */
+export function dtcKindLabel(kind: string, fallback?: string): string {
+  if (fallback === undefined) {
+    for (const base of Object.keys(DTC_KINDS)) {
+      const e = (DTC_KINDS[base] ?? {})[kind];
+      if (!base.startsWith("_") && e?.label) { fallback = e.label; break; }
+    }
+  }
+  return dtcTranslated(kind, fallback ?? kind);
+}
+
+/** The families of one axis, in the datamodel's order (`_families`), with their
+ *  label in the active locale: `acquisition` → capture, retrieval. */
+export function dtcFamiliesOf(axis: string): Array<{ family: string; label: string }> {
+  const fams = (DTC_KINDS[axis] as Record<string, unknown> | undefined)?._families as
+    | Record<string, { label?: string }>
+    | undefined;
+  return Object.entries(fams ?? {}).map(([family, f]) => ({
+    family,
+    label: dtcTranslated(`family_${family}`, f?.label ?? family),
+  }));
+}
+
+/** The family a kind of the axis declares (`capture` | `retrieval` for the
+ *  acquisition), or undefined. Read from the vocabulary, never written. */
+export function dtcKindFamily(kind: string, axis = "acquisition"): string | undefined {
+  const e = (DTC_KINDS[axis] ?? {})[kind] as { family?: string } | undefined;
+  return e?.family;
 }
 
 /** The DTC authoring palette, fully data-driven: one entry per (base kind) ×
@@ -340,7 +396,7 @@ export function dtcAuthoringKinds(): DtcKindItem[] {
       out.push({
         nodeType,
         kind,
-        label: e.label ?? kind,
+        label: dtcKindLabel(kind, e.label ?? kind),
         glyph: e.glyph ?? null,
         isResource: !hasNode,
       });

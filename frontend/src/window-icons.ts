@@ -29,7 +29,6 @@ export const WINDOW_ICON_PATHS: Record<string, string> = {
   narrative: '<path d="M2.5 3.5c2-.8 3.8-.6 5.5.6 1.7-1.2 3.5-1.4 5.5-.6v9c-2-.8-3.8-.6-5.5.6-1.7-1.2-3.5-1.4-5.5-.6zM8 4.1v9"/>',
   // drawn tonight, same stroke
   emtree: '<rect x="2.5" y="2.5" width="5" height="3" rx="1"/><path d="M5 5.5v7M5 8.5h3.5M5 12.5h3.5"/><rect x="8.5" y="7" width="5" height="3" rx="1"/><rect x="8.5" y="11" width="5" height="3" rx="1"/>',
-  annotator: '<rect x="2.5" y="3" width="11" height="10" rx="1.5"/><path d="M5 6h6v4.5H5z" stroke-dasharray="1.6 1.5"/>',
   "narrative-index": '<path d="M3 3.5h2M3 8h2M3 12.5h2M7 3.5h6M7 8h6M7 12.5h4"/>',
   // AUDIT N5 · the chronology: bars on a time axis, one of them nested
   chronology: '<path d="M2.5 13.5h11M3.5 4h6M5.5 7h7M7 10h3.5"/>',

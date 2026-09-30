@@ -938,19 +938,12 @@ def make_handler(api):
             origin = bool(act.get("origin"))
             axis = "acquisition" if origin else "process"
             allowed = list(vocab.get(axis) or ())
-            # AUDIT N3 · PROVISIONAL: an origin may name the CAPTURE it was
-            # (photo, laser scan, survey — the `input` axis). s3Dgraphy's
-            # acquisition takes only the `acquisition` axis as its dtc_kind, so
-            # the capture is carried as `how.acquisition.capture` and the act is
-            # the library's default acquisition, until the datamodel gives the
-            # acquisition a capture axis (asked in the night's report).
-            capture = None
-            if origin and kind in (vocab.get("input") or ()):
-                from s3dgraphy.dtc.ingest import DEFAULT_ACQUISITION_KIND
-                capture, kind = kind, DEFAULT_ACQUISITION_KIND
-                acq_meta = dict((act.get("acquisition") or {}).get("metadata") or {})
-                acq_meta["capture"] = capture
-                act = {**act, "acquisition": {**(act.get("acquisition") or {}), "metadata": acq_meta}}
+            # An origin names what it was: a CAPTURE (photo, laser scan,
+            # survey…) or a RETRIEVAL (download, import…). Since s3Dgraphy's
+            # em_visual_rules 1.6.22 both are families of the `acquisition`
+            # axis, and the capture is the act's `dtc_kind` itself (the
+            # definitive form, `how.dtc_kind = "<capture>"`); the provisional
+            # `local_import` + `how.acquisition.capture` is no longer written.
             if kind not in allowed:
                 self._fail(400,
                            f"dtc_kind {kind!r} is not in the {axis} vocabulary "

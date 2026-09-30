@@ -43,10 +43,10 @@
            keep their IDs so existing handlers (open/save/import/export/undo/
            redo/settings/sync) are reused, not reimplemented. -->
       <div class="dropdown" id="dd-file">
-        <button class="dd-toggle" title="File operations"><span data-i18n="toolbar.file">File</span> ▾</button>
+        <button class="dd-toggle" data-i18n-title="menu.fileTitle" title="File operations"><span data-i18n="toolbar.file">File</span> ▾</button>
         <div class="dd-menu hidden">
-          <button id="btn-new" title="New empty .em.json" data-i18n="toolbar.new">New</button>
-          <button id="btn-open" title="Open an .em.json file" data-i18n="toolbar.open">Open…</button>
+          <button id="btn-new" data-i18n-title="menu.newTitle" title="New empty .em.json" data-i18n="toolbar.new">New</button>
+          <button id="btn-open" data-i18n-title="menu.openTitle" title="Open an .em.json file" data-i18n="toolbar.open">Open…</button>
           <!-- THE THREE VERBS in one place (design note `EM_design_aprire-entrare-creare.md`):
                APRI is the line above — a file, yours, on your disk. These two are
                CREA: a room, empty, or carrying the container in your hands. ENTRA
@@ -58,35 +58,43 @@
                TAKEN INTO this project (shared nodes merge by UUID). No server, no
                session — the whole collaboration story for async work by sector. -->
           <button id="btn-add-project" data-i18n="container.addToProject" data-i18n-title="container.addToProjectTitle">Add to the project…</button>
-          <button
-            id="btn-import-graphml"
-            title="Import a yEd GraphML file (needs the local dev bridge — see dev.sh)"
-          >
-            <span data-i18n="toolbar.importGraphml">Import GraphML…</span>
-          </button>
-          <!-- IMPMAP · the ONE way in for a legacy dataset, whichever of the two
-               modes it is. Beside Import GraphML because it answers the same
-               question ("bring this file in"); the mapping EDITOR stays in
-               Tools, because authoring a descriptor and using one are different
-               acts and only one of them belongs in File. -->
-          <button id="btn-import-mapping" data-i18n-title="impmap.menuTitle"
-                  title="Read a table or an XML through a mapping: into a new graph, or attached to this one">
-            <span data-i18n="impmap.menu">Import with a mapping…</span>
-          </button>
+          <!-- MICRO-UN-POSTO · Import is a SUB-MENU, like Export. «Tabella con
+               mappatura…» is THE door for a table or an XML read through a
+               mapping: it always opens the mapping editor, which the EMtree's
+               Map/Bake and StratiMiner fill in their turn. -->
+          <div class="dd-sub">
+            <button class="dd-sub-toggle">
+              <span data-i18n="toolbar.import">Import</span>
+              <span class="dd-sub-caret">▸</span>
+            </button>
+            <div class="dd-sub-menu hidden">
+              <button
+                id="btn-import-graphml"
+                title="Import a yEd GraphML file (needs the local dev bridge — see dev.sh)"
+                data-i18n-title="toolbar.importGraphmlTitle"
+              >
+                <span data-i18n="toolbar.importGraphmlItem">GraphML…</span>
+              </button>
+              <button id="btn-import-mapping" data-i18n-title="impmap.menuTitle"
+                      title="Read a table or an XML through a mapping: into a new graph, or onto this one">
+                <span data-i18n="impmap.menu">Table with a mapping…</span>
+              </button>
+            </div>
+          </div>
           <!-- BUGS-UI · Export is a nested SUB-MENU (was a section of File):
                three formats flat in the File list read as three File commands.
                The items keep their ids, so the existing export handlers are
                reused untouched. -->
           <div class="dd-sep"></div>
           <div class="dd-sub">
-            <button class="dd-sub-toggle" title="Export the current document">
+            <button class="dd-sub-toggle" data-i18n-title="menu.exportTitle" title="Export the current document">
               <span data-i18n="toolbar.export">Export</span>
               <span class="dd-sub-caret">▸</span>
             </button>
             <div class="dd-sub-menu hidden">
-              <button id="btn-svg" title="Export current view as SVG">SVG</button>
-              <button id="btn-graphml" title="Export as yEd GraphML (needs the local dev bridge — see dev.sh)">GraphML</button>
-              <button id="btn-ttl" title="Export as RDF/CIDOC Turtle (.ttl) via the s3Dgraphy projection">Turtle (.ttl)</button>
+              <button id="btn-svg" data-i18n-title="menu.svgTitle" title="Export current view as SVG">SVG</button>
+              <button id="btn-graphml" data-i18n-title="menu.graphmlTitle" title="Export as yEd GraphML (needs the local dev bridge — see dev.sh)">GraphML</button>
+              <button id="btn-ttl" data-i18n-title="menu.ttlTitle" title="Export as RDF/CIDOC Turtle (.ttl) via the s3Dgraphy projection">Turtle (.ttl)</button>
               <!-- AUDIT N9 · the narrative's four files (HTML, Word, LaTeX,
                    Jupyter) are exported from the narrative window's «Esporta ▾»,
                    the one place of that verb (with the check of the unvalidated
@@ -96,8 +104,8 @@
           <!-- AUDIT N9 · «Pubblica…» has ONE place: the name strip, top right
                (the identity gate is the same). -->
           <div class="dd-sep"></div>
-          <button id="btn-save" title="Save .em.json (⌘S)" data-i18n="toolbar.save">Save</button>
-          <button id="btn-save-as" title="Save .em.json to a new file (⇧⌘S)" data-i18n="toolbar.saveAs">Save As…</button>
+          <button id="btn-save" data-i18n-title="menu.saveTitle" title="Save .em.json (⌘S)" data-i18n="toolbar.save">Save</button>
+          <button id="btn-save-as" data-i18n-title="menu.saveAsTitle" title="Save .em.json to a new file (⇧⌘S)" data-i18n="toolbar.saveAs">Save As…</button>
           <!-- P3 · pin: freeze the project as the thing a citation points at.
                The DOI is the Catalog's to mint; this is the stable snapshot it
                would mint for. -->
@@ -105,7 +113,7 @@
         </div>
       </div>
       <div class="dropdown" id="dd-edit">
-        <button class="dd-toggle" title="Edit"><span data-i18n="toolbar.edit">Edit</span> ▾</button>
+        <button class="dd-toggle" data-i18n-title="menu.editTitle" title="Edit"><span data-i18n="toolbar.edit">Edit</span> ▾</button>
         <div class="dd-menu hidden">
           <button id="btn-undo" data-i18n-title="toolbar.undo" disabled><span data-i18n="toolbar.undoItem">Undo</span></button>
           <button id="btn-redo" data-i18n-title="toolbar.redo" disabled><span data-i18n="toolbar.redoItem">Redo</span></button>
@@ -114,10 +122,10 @@
         </div>
       </div>
       <div class="dropdown" id="dd-mode">
-        <button class="dd-toggle" title="Session mode"><span data-i18n="toolbar.mode">Mode</span> ▾</button>
+        <button class="dd-toggle" data-i18n-title="menu.modeTitle" title="Session mode"><span data-i18n="toolbar.mode">Mode</span> ▾</button>
         <div class="dd-menu hidden">
-          <button id="btn-mode-standalone" title="Standalone: editing a local .em.json"><span data-i18n="toolbar.modeStandalone">Standalone</span></button>
-          <button id="btn-mode-sidecar" title="Sidecar: live-synced to a host (Blender/EMtools) — ADR-002"><span data-i18n="toolbar.modeSidecar">Sidecar (sync)</span></button>
+          <button id="btn-mode-standalone" data-i18n-title="menu.standaloneTitle" title="Standalone: editing a local .em.json"><span data-i18n="toolbar.modeStandalone">Standalone</span></button>
+          <button id="btn-mode-sidecar" data-i18n-title="menu.sidecarTitle" title="Sidecar: live-synced to a host (Blender/EMtools) — ADR-002"><span data-i18n="toolbar.modeSidecar">Sidecar (sync)</span></button>
           <!-- MODES1 · reachable, not faked: the entry exists so the third mode
                has a NAME in the interface, and clicking it says plainly that
                there is no StratiGraph Server to connect to yet. A disabled button would
@@ -145,7 +153,7 @@
            describes the graph you already have). A menu of them at app level,
            each opening a floating panel that closes when its job is done. -->
       <div class="dropdown" id="dd-tools">
-        <button class="dd-toggle" title="Tools — one-shot instruments"><span data-i18n="toolbar.tools">Tools</span> ▾</button>
+        <button class="dd-toggle" data-i18n-title="menu.toolsTitle" title="Tools — one-shot instruments"><span data-i18n="toolbar.tools">Tools</span> ▾</button>
         <div class="dd-menu hidden">
           <!-- SHIFT-A · the node palette left (1 ott 2026): a node is added at
                the cursor. This is the menu's way into the same «Aggiungi». -->
@@ -153,7 +161,7 @@
             <span data-i18n="tools.addNode">Add node…</span> <span class="dd-key">⇧A</span>
           </button>
           <div class="dd-sep"></div>
-          <button id="btn-tool-stratiminer" title="StratiMiner: build a graph from a folder of unstructured sources, via the reviewable em_data.xlsx table">
+          <button id="btn-tool-stratiminer" data-i18n-title="menu.stratiminerTitle" title="StratiMiner: build a graph from a folder of unstructured sources, via the reviewable em_data.xlsx table">
             <span data-i18n="tab.stratiminer">StratiMiner</span>
           </button>
           <!-- MENU-AUDIT · Risorse was a bare button loose in the leader bar,
@@ -161,19 +169,15 @@
                that reaches the bridge for the shared Resource layer — the same
                kind of thing as StratiMiner, and this is where that kind lives.
                The button keeps its id, so its handler is untouched. -->
-          <!-- MAPPING EDITOR · StratiMiner's twin: StratiMiner makes a GRAPH
-               from a folder of sources, this makes the MAPPING FILE an importer
-               applies. Same family (a one-shot instrument that produces an
-               artefact and gets out of the way), so the same menu. -->
-          <button id="btn-tool-mapping" data-i18n-title="me.toolTitle" title="Mapping editor: author the JSON that importers apply — a source's fields → EM/CIDOC targets → relations">
-            <span data-i18n="me.tool">Mapping editor</span>
-          </button>
+          <!-- MICRO-UN-POSTO · the mapping editor is reached from its one door,
+               File ▸ Importa ▸ Tabella con mappatura… (and filled by the EMtree
+               and by StratiMiner): a second entry here was a second door. -->
           <button id="btn-tool-chronology" data-i18n="chr.checkEllipsis" data-i18n-title="chr.checkTitle" title="Check the chronology: the epochs on a time axis, the overlaps with their delta and their remedies">Check the chronology…</button>
-          <button id="btn-resources" title="Resources: the shared Resource layer (Documents · RM · DTC · Shelf) via the bridge" data-i18n="toolbar.resources">Resources</button>
+          <button id="btn-resources" data-i18n-title="menu.resourcesTitle" title="Resources: the shared Resource layer (Documents · RM · DTC · Shelf) via the bridge" data-i18n="toolbar.resources">Resources</button>
         </div>
       </div>
       <div class="dropdown" id="dd-help">
-        <button class="dd-toggle" title="Help"><span data-i18n="toolbar.help">Help</span> ▾</button>
+        <button class="dd-toggle" data-i18n-title="menu.helpTitle" title="Help"><span data-i18n="toolbar.help">Help</span> ▾</button>
         <div class="dd-menu hidden">
           <button id="btn-help-workspaces"><span data-i18n="ws.helpMenu">Workspaces…</span></button>
           <button id="btn-help-shortcuts"><span data-i18n="shortcuts.menu">Shortcuts</span></button>
@@ -192,7 +196,7 @@
            the Mode menu drives connect/disconnect. -->
       <button id="btn-sync" class="hidden" title="Connect to Blender/EMtools for live selection sync (ADR-002)" data-i18n="toolbar.sync">Sync</button>
       <!-- MENU-AUDIT · Risorse moved into the Strumenti menu (see above). -->
-      <span id="dirty-dot" class="hidden" title="unsaved changes">●</span>
+      <span id="dirty-dot" class="hidden" data-i18n-title="menu.dirtyTitle" title="unsaved changes">●</span>
       <span class="tb-sep"></span>
       <!-- HDR1 · WORKSPACE TABS — the master header's only switcher, and the one
            question it answers: which workspace. The built-ins (Graph editing ·
@@ -336,38 +340,12 @@
              built into their own area like every other type — so the last two
              entries of `WRAP_TYPES` that were not the canvas are gone, and with
              them the note that said «another window has this panel». -->
-        <!-- A2 · ANNOTATOR · the interoperability corner and the question panel.
-             GONE from here (14 set 2026): `#annotator-view`, its bar, and the
-             frame (`#annotator-frame`, `#annotator-image`, `#annotator-overlay`).
-             The frame is built by the instance that TRACES, into its own stage
-             (`ensureAnnotatorFrame`), and the gestures are wired the moment it
-             exists. There is one such instance by DECLARATION —
-             `ANNOTATOR_CAPABILITIES = { multiInstance: false }` — because
-             tracing needs one image, one overlay and one in-progress draft; a
-             second Annotator window gets the same constructor with no tools,
-             not a different function. That is the difference between a limit and
-             a defect.
-             What stays here is what is not the picture: the IIIF corner and the
-             panel that asks what is being extracted, both overlays of the app. -->
-        <div id="annotator-iiif" class="annot-iiif hidden">
-          <span id="annotator-iiif-badge" class="annot-iiif-badge"
-                title="questa immagine è servita via IIIF Image API">IIIF</span>
-          <button id="annotator-copy-anno" class="ghost-btn"
-                  title="Copia le regioni di questa immagine come W3C Web Annotation">
-            Copia annotazioni
-          </button>
-          <button id="annotator-paste-anno" class="ghost-btn"
-                  title="Incolla una W3C Web Annotation e falla diventare una regione del grafo">
-            Incolla annotazione
-          </button>
-          <button id="annotator-mirador" class="ghost-btn"
-                  title="Apri questa immagine e le sue regioni in Mirador">
-            Apri in Mirador
-          </button>
-        </div>
-        <span id="annotator-title" class="hidden"></span>
-        <span id="annotator-hint" class="hidden"></span>
-        <div id="annotator-panel" class="hidden"></div>
+        <!-- MICRO-UN-POSTO · the old Annotator's IIIF corner (copy / paste Web
+             Annotations, open in Mirador) and its question panel are GONE with
+             its code: the Annotator had been an alias of the Doc since AUDIT
+             N4, and nothing reached them. What was worth keeping — the image's
+             regions as a W3C AnnotationPage — is «Copia le regioni come Web
+             Annotation» in the Doc's «⋯» menu. -->
       </div>
       <!-- GONE (13 set 2026) · the `#side` PARKING PLACE, and the four panels
            it held.
@@ -692,33 +670,20 @@
           </section>
 
           <section data-settings-tab="viewers" class="settings-sect" id="settings-sect-iiif">
-            <h4 data-i18n="settings.iiif">Immagini (IIIF)</h4>
-            <p class="settings-hint">
-              Dove vivono le <b>immagini</b>. L'indirizzo di un servizio
-              <b>IIIF Image API</b> (Cantaloupe, nello stack StratiGraph):
-              l'identificatore di un'immagine è il suo <b>sha256</b>, quindi qui
-              serve solo l'host. Con questo, le miniature sono una richiesta di
-              <i>taglia</i> e l'annotatore chiede l'immagine grande quanto gli
-              serve — niente pipeline di miniature, niente file duplicati.
-              Lasciato vuoto, tutto funziona come prima: nessuna miniatura,
-              nessun riquadro rotto.
+            <h4 data-i18n="settings.iiif">Images (IIIF)</h4>
+            <p class="settings-hint" data-i18n="settings.iiifHint">
+              Where the images live: the address of an IIIF Image API service
+              (Cantaloupe, in the StratiGraph stack). An image's identifier is its
+              sha256, so only the host goes here. Left empty, everything works as
+              before: no thumbnails, no broken frames.
             </p>
             <label
-              >Servizio IIIF (Image API 3)
+              ><span data-i18n="settings.iiifBase">IIIF service (Image API 3)</span>
               <input
                 id="set-iiif-base"
                 type="text"
                 spellcheck="false"
                 placeholder="https://localhost:8182/iiif/3"
-              />
-            </label>
-            <label
-              >Mirador (apri altrove)
-              <input
-                id="set-mirador"
-                type="text"
-                spellcheck="false"
-                placeholder="https://projectmirador.org/embed/"
               />
             </label>
           </section>

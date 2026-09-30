@@ -55,7 +55,7 @@ const { chromium } = await playwright();
 const browser = await chromium.launch({ executablePath: existsSync(CHR) ? CHR : undefined });
 
 /** A fresh page on a fixture, in a language, with an optional workspace. */
-async function open({ doc = "catena", locale = "it", w = 1600, h = 1000, ws, init } = {}) {
+async function open({ doc = "catena", locale = "it", w = 1600, h = 1000, ws, init, hook } = {}) {
   const d = doc ? (typeof doc === "string" ? fixture(doc) : doc) : null;
   const ctx = await browser.newContext({ viewport: { width: w, height: h } });
   const p = await ctx.newPage();
@@ -72,6 +72,7 @@ async function open({ doc = "catena", locale = "it", w = 1600, h = 1000, ws, ini
       }
     } catch { /* private mode */ }
   }, [d, locale, init ?? null]);
+  if (hook) await p.addInitScript(hook);
   await p.goto(`http://localhost:${PORT}/em/studio/?bridge=${encodeURIComponent(BRIDGE)}`);
   if (d) await p.waitForFunction(() => window.__EM_SCENE__?.()?.nodes?.length > 0, null, { timeout: 30000 });
   else await p.waitForSelector("#workspace-bar .ws-tab", { timeout: 30000 });
@@ -201,7 +202,8 @@ test("A3", "Backspace su un pulsante con il focus non cancella il nodo", async (
 // A4 · Mapping editor: the picker filter takes a whole word
 test("A4", "mapping editor: nel filtro si scrive una parola intera", async () => {
   const { p, ctx } = await open({ doc: "catena" });
-  await p.evaluate(() => document.getElementById("btn-tool-mapping").click());
+  // MICRO-UN-POSTO · the editor is reached from its one door
+  await p.evaluate(() => document.getElementById("btn-import-mapping").click());
   await p.waitForSelector(".me-panel", { timeout: 8000 });
   // «Sfoglia…»: the picker, whose filter is the field
   await p.locator(".me-panel button", { hasText: /Sfoglia|Browse|Durchsuchen/ }).first().click();
@@ -533,7 +535,10 @@ test("4.examples", "gli esempi sono esempi: «es. …», e nessun valore finto n
   const kinds = await p.evaluate(() => [...document.querySelectorAll('.stamp-compose select[data-field="kind"] optgroup')].map((g) => g.label));
   await ctx.close();
   const bad = f.filter((x) => x.k !== "title" && (x.v || (x.ph && !/^(es\.|e\.g\.)/.test(x.ph))));
-  return { pass: !bad.length && kinds[0] === "Cattura" && kinds[1] === "Acquisizione", detail: { bad, kinds } };
+  // MICRO-UN-POSTO · the groups are the datamodel's families now (em_visual_rules
+  // 1.6.22): «Cattura», then «Recupero» — no longer «Acquisizione», which is the
+  // AXIS both families belong to
+  return { pass: !bad.length && kinds[0] === "Cattura" && kinds[1] === "Recupero", detail: { bad, kinds } };
 });
 test("4.focus", "con Tipo mancante «Timbra» mette il focus su Tipo, e l'errore sta accanto", async () => {
   const { p, ctx } = await open({ doc: "catena" });
@@ -550,21 +555,23 @@ test("4.sidecar", "origine timbrata, poi un modello in /modelli apre su «Viene 
   const { p, ctx } = await open({ doc: "catena" });
   await openStampFor(p, "modelli", "foto1.jpg");
   const first = await roadOf(p);
-  await stampHere(p, "Photograph");
+  await stampHere(p, "Fotografia");
   const photo = existsSync(`${root}/modelli/foto1.jpg.stamp.json`)
     ? JSON.parse(readFileSync(`${root}/modelli/foto1.jpg.stamp.json`, "utf8")) : null;
   await storageClick(p, "muro.gltf");
   await p.click("button[data-action=compose-one]");
   await p.waitForSelector(".stamp-compose");
   const second = await roadOf(p);
-  await stampHere(p, "Photogrammetry", { inputs: ["foto1.jpg"], software: "Metashape 2.1" });
+  await stampHere(p, "Fotogrammetria", { inputs: ["foto1.jpg"], software: "Metashape 2.1" });
   const mesh = existsSync(`${root}/modelli/muro.gltf.stamp.json`)
     ? JSON.parse(readFileSync(`${root}/modelli/muro.gltf.stamp.json`, "utf8")) : null;
   await ctx.close();
   const kindOf = (st) => st?.how?.dtc_kind ?? null;
   const from = mesh?.from ?? [];
   return {
-    pass: first.road === "origin" && !!photo && !!kindOf(photo) && photo?.how?.acquisition?.capture === "photo"
+    // MICRO-UN-POSTO · the definitive form (s3Dgraphy 1.6.22): the capture IS
+    // the act's kind, and the provisional `how.acquisition.capture` is gone
+    pass: first.road === "origin" && !!photo && kindOf(photo) === "photo" && photo?.how?.acquisition?.capture === undefined
       && photo?.by?.operator?.label === "Mario Rossi"
       && second.road === "derived" && !!mesh && kindOf(mesh) === "photogrammetry" && from.length === 1,
     detail: { first: first.road, second: second.road, photoKind: kindOf(photo), capture: photo?.how?.acquisition ?? null, operator: photo?.by?.operator ?? null,
@@ -1043,6 +1050,365 @@ test("12.settings", "Impostazioni: Annulla riporta la lingua e il tema; Salva di
   const saved = await p.evaluate(() => document.getElementById("toast").innerText);
   await ctx.close();
   return { pass: /Publish/.test(mid) && /Pubblica/.test(after) && /Salvato: /.test(saved) && !/Sync target/.test(saved), detail: { mid, after, saved } };
+});
+
+// ── MICRO-UN-POSTO · parte 0 · il sync: la cattura, le murature ──────────────
+test("U0.families", "timbro, origine: i generi in due gruppi, come li chiama il datamodel (Cattura, poi Recupero)", async () => {
+  await resetFolders();
+  const { p, ctx } = await open({ doc: "catena" });
+  await openStampFor(p, "vuota", "foto1.jpg");
+  const groups = await p.evaluate(() => [...document.querySelectorAll('.stamp-compose select[data-field="kind"] optgroup')]
+    .map((g) => ({ label: g.label, kinds: [...g.querySelectorAll("option")].map((o) => o.value) })));
+  await ctx.close();
+  const labels = groups.map((g) => g.label);
+  const cap = groups[0]?.kinds ?? [];
+  return { pass: JSON.stringify(labels) === JSON.stringify(["Cattura", "Recupero"])
+      && ["photo", "gnss_survey", "field_drawing", "recording_sheet"].every((k) => cap.includes(k))
+      && (groups[1]?.kinds ?? []).includes("local_import") && !cap.includes("local_import"),
+    detail: { groups } };
+});
+test("U0.usm", "epochs48: le USM aprono come US muraria, l'ispettore dice «US · muraria», niente avvisi «untyped»", async () => {
+  const { p, ctx, errors } = await open({ doc: "epochs48" });
+  const types = await p.evaluate(() => {
+    const g = JSON.parse(window.__EM_DRAG__.graphJson());
+    const usm = g.nodes.filter((n) => /^USM/.test(n.name ?? ""));
+    return { usm: usm.length, asUS: usm.filter((n) => n.node_type === "US" && n.data?.stratigraphic_kind === "masonry").length,
+             legacy: g.nodes.filter((n) => n.node_type === "USM").length };
+  });
+  await pick(p, "U001");
+  const chip = await p.evaluate(() => document.querySelector(".insp-chip")?.textContent ?? null);
+  const scene = await p.evaluate(() => window.__EM_DRAG__.sceneOf("U001")?.node_type ?? window.__EM_DRAG__.node("U001")?.node_type);
+  const untyped = await p.evaluate(() => window.__EM_DRAG__.issues().filter((i) => /untyped|not in this build/.test(i.txt ?? "")).length);
+  await ctx.close();
+  return { pass: types.usm === 13 && types.asUS === 13 && !types.legacy && chip === "US · muraria" && scene === "US" && !untyped && !errors.length,
+    detail: { types, chip, scene, untyped, errors } };
+});
+
+// ── MICRO-UN-POSTO · parte 1 · importare con una mappatura: una porta sola ───
+const TAB = () => `${FS_ROOT}/tabelle`;
+/** the editor as the door leaves it: who filled it, and its three questions */
+const doorState = (p) => p.evaluate(() => {
+  const ed = document.getElementById("mapping-editor");
+  const float = document.getElementById("tool-float");
+  const radios = (n) => [...ed.querySelectorAll(`input[name=${n}]`)].map((i) => ({ v: i.value, on: i.checked, off: i.disabled,
+    label: i.parentElement.textContent.trim() }));
+  return {
+    open: !!ed && !ed.classList.contains("hidden") && !float.classList.contains("hidden"),
+    from: ed.querySelector("[data-from]")?.dataset.from ?? "file",
+    path: ed.querySelector('[data-field="source-path"]')?.value ?? null,
+    mapping: radios("me-mapping").find((r) => r.on)?.v ?? null,
+    target: radios("me-target").find((r) => r.on)?.v ?? null,
+    landings: radios("me-landing"),
+  };
+});
+const fileMenuDoor = (p) => p.evaluate(() => document.getElementById("btn-import-mapping").click());
+test("U1.door", "File ▸ Importa ▸ Tabella con mappatura apre il Mapping editor; tre scelte con un vocabolario; Strumenti non ha una seconda porta", async () => {
+  const { p, ctx } = await open({ doc: "catena" });
+  const inImport = await p.evaluate(() => {
+    const b = document.getElementById("btn-import-mapping");
+    const sub = b?.closest(".dd-sub");
+    return { sub: sub?.querySelector(".dd-sub-toggle")?.textContent.trim() ?? null, text: b?.textContent.trim(),
+             tools: !!document.querySelector("#dd-tools #btn-tool-mapping"), graphml: !!sub?.querySelector("#btn-import-graphml") };
+  });
+  await fileMenuDoor(p);
+  await p.waitForTimeout(400);
+  const st = await doorState(p);
+  await ctx.close();
+  const labels = st.landings.map((l) => l.label);
+  return { pass: /^Importa/.test(inImport.sub ?? "") && inImport.text === "Tabella con mappatura…" && inImport.graphml && !inImport.tools
+      && st.open && st.from === "file"
+      && JSON.stringify(labels) === JSON.stringify(["Provvisoria", "Scritta nel grafo", "Allegata come file ausiliario"]),
+    detail: { inImport, st } };
+});
+test("U1.aux", "EMtree ▸ «Allega…» su un file ausiliario apre lo STESSO editor, con quel file, su questo grafo, «Allegata»", async () => {
+  const { p, ctx } = await open({ doc: "catena" });
+  const id = await p.evaluate((l) => window.__EM_DRAG__.auxAdd({ locator: `${l}/usm.csv`,
+    options: { mappingPath: `${l}/usm_mapping.json` } }), TAB());
+  await p.waitForTimeout(400);
+  await p.locator(`[data-aux-map="${id}"]`).first().click();
+  await p.waitForTimeout(500);
+  const st = await doorState(p);
+  await ctx.close();
+  return { pass: st.open && st.from === "aux" && st.path === `${TAB()}/usm.csv` && st.mapping === "file" && st.target === "this"
+      && st.landings.find((l) => l.on)?.v === "attached",
+    detail: st };
+});
+test("U1.sm", "StratiMiner ▸ «converti» apre lo STESSO editor con le proposte (dati AI da verificare), senza mappatura", async () => {
+  const { p, ctx } = await open({ doc: "catena" });
+  await p.evaluate(() => document.getElementById("btn-tool-stratiminer").click());
+  await p.waitForSelector("#sm-xlsx");
+  await p.fill("#sm-xlsx", `${TAB()}/em_data.xlsx`);
+  await p.dispatchEvent("#sm-xlsx", "change");
+  await p.evaluate(() => { const b = document.getElementById("sm-transform"); b.disabled = false; b.click(); });
+  await p.waitForTimeout(500);
+  const st = await doorState(p);
+  const banner = await p.evaluate(() => document.querySelector("#mapping-editor [data-from]")?.textContent ?? "");
+  await ctx.close();
+  return { pass: st.open && st.from === "stratiminer" && st.path === `${TAB()}/em_data.xlsx` && st.mapping === "none" && /AI/.test(banner),
+    detail: { st, banner } };
+});
+/** fill the door by hand: a csv, its mapping file, the graph open now, a landing */
+async function doorApply(p, landing) {
+  await fileMenuDoor(p);
+  await p.waitForTimeout(400);
+  await p.fill('#mapping-editor [data-field="source-path"]', `${TAB()}/usm.csv`);
+  await p.dispatchEvent('#mapping-editor [data-field="source-path"]', "change");
+  await p.check('#mapping-editor input[name=me-mapping][value=file]');
+  await p.waitForTimeout(150);
+  await p.fill('#mapping-editor [data-field="mapping-ref"]', `${TAB()}/usm_mapping.json`);
+  await p.dispatchEvent('#mapping-editor [data-field="mapping-ref"]', "change");
+  await p.check('#mapping-editor input[name=me-target][value=this]');
+  await p.check(`#mapping-editor input[name=me-landing][value=${landing}]`);
+  await p.waitForTimeout(150);
+  const u0 = await p.evaluate(() => window.__EM_DRAG__.undoDepth());
+  const n0 = await p.evaluate(() => JSON.parse(window.__EM_DRAG__.graphJson()).nodes.length);
+  await p.click('#mapping-editor [data-action="apply"]');
+  await p.waitForTimeout(2500);
+  const u1 = await p.evaluate(() => window.__EM_DRAG__.undoDepth());
+  const g = await p.evaluate(() => JSON.parse(window.__EM_DRAG__.graphJson()));
+  return { u0, u1, n0, n1: g.nodes.length, volatile: g.nodes.filter((n) => n.data?.aux_volatile).length };
+}
+test("U1.undo", "un'applicazione sul grafo aperto = UN passo di undo (scritta nel grafo; allegata); Annulla la toglie tutta", async () => {
+  const { p, ctx } = await open({ doc: "catena" });
+  const baked = await doorApply(p, "baked");
+  await p.evaluate(() => window.__EM_DRAG__.undo());
+  await p.waitForTimeout(300);
+  const back = await p.evaluate(() => JSON.parse(window.__EM_DRAG__.graphJson()).nodes.length);
+  const attached = await doorApply(p, "attached");
+  const rows = await p.evaluate(() => document.querySelectorAll("[data-aux-unmap]").length);
+  await ctx.close();
+  return { pass: baked.u1 - baked.u0 === 1 && baked.n1 === baked.n0 + 1 && !baked.volatile && back === baked.n0
+      && attached.u1 - attached.u0 === 1 && attached.volatile === 1,
+    detail: { baked, back, attached, rows } };
+});
+
+// ── MICRO-UN-POSTO · parte 2 · la posizione del sito: un posto solo ─────────
+/** the selector, filled with numbers and confirmed */
+async function placeSite(p, from, lat, lon) {
+  await p.locator(`${from} [data-action="site-set"]`).first().click();
+  await p.waitForSelector(".site-picker", { timeout: 5000 });
+  await p.fill('.site-picker [data-field="lat"]', String(lat));
+  await p.fill('.site-picker [data-field="lon"]', String(lon));
+  await p.dispatchEvent('.site-picker [data-field="lon"]', "change");
+  await p.click('.site-picker [data-action="use"]');
+  await p.waitForTimeout(400);
+}
+const siteNow = (p) => p.evaluate(() => {
+  const g = JSON.parse(window.__EM_DRAG__.graphJson());
+  const root = g.nodes.find((n) => n.node_type === "graph");
+  return { root: root?.id ?? null, sp: root?.data?.site_position ?? null, selected: window.__EM_DRAG__.selected()[0] ?? null,
+    lines: [...document.querySelectorAll(".site-line")].map((l) => ({ win: l.closest("[data-win]")?.dataset.win ?? "", site: l.dataset.site })),
+    inInspector: !!document.querySelector('[data-win$=":inspector"] [data-section="site-position"]'),
+    ids: document.querySelectorAll("#insp-site-position").length };
+});
+test("U2.site", "la posizione scelta da Study, ispettore del grafo, narrativa o embed mappa finisce in site_position e si vede negli altri", async () => {
+  const { p, ctx, errors } = await open({ doc: "catena" });
+  // the Study: a window of the stratigraphy space turned into one
+  const outl = await winOf(p, "outliner");
+  await p.evaluate((w) => window.__EM_DRAG__.retype(w, "study"), outl);
+  await p.waitForTimeout(500);
+  await placeSite(p, `[data-win="${outl}"]`, 42.3727, 12.4003);
+  const a = await siteNow(p);
+  // …the inspector of the graph node, where the selector opened it
+  await placeSite(p, '[data-win$=":inspector"]', 42.2946, 12.4109);
+  const b = await siteNow(p);
+  // the story: its map block, and the map embed's section in the inspector —
+  // a map block pointing at the graph, put in the first chapter as the Blocks
+  // menu would (`addEmbed`)
+  await narrativeSpace(p);
+  await p.evaluate((root) => {
+    const g = JSON.parse(window.__EM_DRAG__.graphJson());
+    const nv = g.nodes.find((n) => n.node_type === "narrative");
+    const data = JSON.parse(JSON.stringify(nv.data));
+    data.chapters[0].blocks = [{ block_type: "embed", ref: root, view_type: "map" }, ...(data.chapters[0].blocks ?? [])];
+    window.__EM_DRAG__.edit(nv.id, { data });
+  }, b.root);
+  await p.waitForTimeout(600);
+  const story = await p.evaluate(() => {
+    const m = document.querySelector(".nv-map");
+    return { map: !!m, btn: !!m?.querySelector('[data-action="site-set"]') };
+  });
+  let c = null, d = null;
+  if (story.btn) {
+    await placeSite(p, ".nv-map", 42.46, 12.3862);
+    c = await siteNow(p);
+    await workspace(p, "narrative");
+    await p.locator(".nv-map").first().click();
+    await p.waitForTimeout(400);
+    const inMap = await p.evaluate(() => !!document.querySelector('.ninsp-s [data-action="site-set"]'));
+    if (inMap) { await placeSite(p, ".ninsp-s", 42.345, 12.356); d = await siteNow(p); }
+  }
+  await ctx.close();
+  const at = (x, lat) => x && Math.abs(x.sp?.lat - lat) < 1e-6;
+  return { pass: at(a, 42.3727) && a.selected === a.root && a.inInspector && a.lines.some((l) => l.site.startsWith("42.3727"))
+      && at(b, 42.2946) && b.lines.every((l) => l.site.startsWith("42.2946")) && b.lines.length >= 2
+      && at(c, 42.46) && at(d, 42.345) && !a.ids && !errors.length,
+    detail: { a, b, story, c, d, errors } };
+});
+
+// ── MICRO-UN-POSTO · parte 3 · via l'angolo IIIF del vecchio annotatore ──────
+test("U3.webanno", "la Doc di un'immagine ha nel «⋯» «Copia le regioni come Web Annotation»: senza IIIF dice perché, con IIIF copia una AnnotationPage", async () => {
+  const { p, ctx } = await open({ doc: "catena" });
+  const gone = await p.evaluate(() => ({ corner: !!document.getElementById("annotator-iiif"), panel: !!document.getElementById("annotator-panel"),
+    mirador: !!document.getElementById("set-mirador") }));
+  await openDocImage(p);
+  // one region, traced as 5.bubble traces it
+  await p.click('.rd-tools [data-tool="rect"]');
+  await p.waitForTimeout(200);
+  const img = await p.evaluate(() => { const r = document.querySelector(".rd-img svg").getBoundingClientRect(); return { x: r.x, y: r.y, w: r.width, h: r.height }; });
+  await p.mouse.move(img.x + img.w * 0.3, img.y + img.h * 0.3); await p.mouse.down();
+  await p.mouse.move(img.x + img.w * 0.5, img.y + img.h * 0.45, { steps: 3 }); await p.mouse.up();
+  await p.waitForTimeout(300);
+  await p.keyboard.press("Enter");
+  await p.waitForTimeout(600);
+  const docWin = `[data-win="${await winOf(p, "doc")}"]`;
+  const menuItem = async () => {
+    await p.click(`${docWin} .win-more`);
+    await p.waitForTimeout(150);
+    return p.locator(".dd-menu:not(.hidden) button", { hasText: "Web Annotation" }).first();
+  };
+  let item = await menuItem();
+  const off = { disabled: await item.getAttribute("aria-disabled"), why: await item.getAttribute("title") };
+  await item.evaluate((x) => x.click());
+  await p.waitForTimeout(200);
+  // an image served by IIIF: its sha256, and a service in the Settings
+  await p.evaluate(() => window.__EM_DRAG__.edit("D3", { data: { ...window.__EM_DRAG__.data("D3"), checksum: `sha256:${"ab".repeat(32)}` } }));
+  await p.evaluate(() => document.getElementById("btn-settings").click());
+  await p.waitForSelector("#settings-modal:not(.hidden)");
+  await p.click('#settings-tabs [data-tab-target="viewers"]');
+  await p.fill("#set-iiif-base", "https://iiif.test/iiif/3");
+  await p.click("#settings-save");
+  await p.waitForTimeout(300);
+  await p.evaluate(() => { window.__CLIP__ = null; navigator.clipboard.writeText = async (x) => { window.__CLIP__ = x; }; });
+  item = await menuItem();
+  const on = await item.getAttribute("aria-disabled");
+  await item.evaluate((x) => x.click());
+  await p.waitForTimeout(300);
+  const clip = await p.evaluate(() => window.__CLIP__);
+  const toastText = await p.evaluate(() => document.getElementById("toast").innerText);
+  await ctx.close();
+  const page = clip ? JSON.parse(clip) : null;
+  return { pass: !gone.corner && !gone.panel && !gone.mirador && off.disabled === "true" && /IIIF/.test(off.why ?? "") && !on
+      && page?.type === "AnnotationPage" && page.items.length === 1
+      && page.items[0].target.source === `https://iiif.test/iiif/3/${"ab".repeat(32)}` && /1 region/.test(toastText),
+    detail: { gone, off, on, items: page?.items?.length, source: page?.items?.[0]?.target?.source, toastText } };
+});
+
+// ── MICRO-UN-POSTO · parte 4 · i tre «prima» senza numero ────────────────────
+//
+// Each of these runs as it is against an older tree too (`PORT=` a dev server on
+// a `git archive` of that commit): what it reads is the PAGE — the canvas's own
+// text draws, rectangles, the viewport — never a probe that the old code lacks.
+
+/** Every text drawn on the graph canvases, since the last full clear, in PAGE
+ *  coordinates: the draw's transform, the font's size, `measureText`, and the
+ *  canvas's `getBoundingClientRect`. */
+function textDrawHook() {
+  const P = CanvasRenderingContext2D.prototype;
+  const fill = P.fillText, clear = P.clearRect;
+  const log = new Map();
+  window.__TEXT_DRAWS__ = () => {
+    const out = [];
+    for (const [cv, list] of log) {
+      if (!cv.isConnected) continue;
+      const r = cv.getBoundingClientRect();
+      const k = r.width ? cv.width / r.width : 1;
+      for (const d of list) out.push({ text: d.text, x: r.left + d.x / k, y: r.top + d.y / k, w: d.w / k, h: d.h / k });
+    }
+    return out;
+  };
+  P.clearRect = function (x, y, w, h) {
+    if (x <= 0 && y <= 0 && w >= this.canvas.width && h >= this.canvas.height) log.set(this.canvas, []);
+    return clear.apply(this, arguments);
+  };
+  P.fillText = function (text, x, y) {
+    try {
+      const m = this.getTransform();
+      const px = Number((/(\d+(?:\.\d+)?)px/.exec(this.font) ?? [0, 12])[1]);
+      const w = this.measureText(text).width;
+      const bl = this.textBaseline;
+      const top = bl === "middle" ? y - px / 2 : bl === "top" || bl === "hanging" ? y : bl === "bottom" ? y - px : y - px * 0.8;
+      const al = this.textAlign;
+      const left = al === "center" ? x - w / 2 : al === "right" || al === "end" ? x - w : x;
+      const X = m.a * left + m.c * top + m.e, Y = m.b * left + m.d * top + m.f;
+      const list = log.get(this.canvas) ?? [];
+      list.push({ text: String(text), x: X, y: Y, w: w * m.a, h: px * m.d });
+      log.set(this.canvas, list);
+    } catch { /* a draw we cannot read is not a draw we measure */ }
+    return fill.apply(this, arguments);
+  };
+}
+const overlap = (a, b) => a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
+test("U4.phaselabels", "epochs48: nessuna etichetta di fase copre un'etichetta di corsia o un'altra fase (testi disegnati, getBoundingClientRect)", async () => {
+  const f = fixture("epochs48");
+  const ep = new Map(f.graph.nodes.filter((n) => n.node_type === "EpochNode").map((n) => [n.id, n.name]));
+  const phaseIds = new Set(f.graph.edges.filter((e) => e.edge_type === "has_sub_epoch").map((e) => e.target));
+  const tops = [...ep].filter(([id]) => !phaseIds.has(id)).map(([, n]) => n);
+  const phases = [...ep].filter(([id]) => phaseIds.has(id)).map(([, n]) => n);
+  // a phase label is its name, or its name without the epoch's that it repeats
+  const phaseTexts = new Set(phases.flatMap((n) => [n, n.split(" · ").pop()]));
+  const { p, ctx } = await open({ doc: f, hook: textDrawHook });
+  const measure = async () => {
+    await p.waitForTimeout(500);
+    const draws = await p.evaluate(() => window.__TEXT_DRAWS__());
+    const lanes = draws.filter((d) => tops.includes(d.text));
+    const bands = draws.filter((d) => phaseTexts.has(d.text) && !tops.includes(d.text));
+    let overLane = 0, overBand = 0;
+    for (const b of bands) for (const l of lanes) if (overlap(b, l)) overLane++;
+    for (let i = 0; i < bands.length; i++) for (let j = i + 1; j < bands.length; j++) if (overlap(bands[i], bands[j])) overBand++;
+    return { lanes: lanes.length, bands: bands.length, overLane, overBand };
+  };
+  const fitted = await measure();
+  // …and zoomed in, where the chips have room
+  const box = await p.evaluate(() => { const c = [...document.querySelectorAll("canvas")].sort((a, b) =>
+    b.getBoundingClientRect().width * b.getBoundingClientRect().height - a.getBoundingClientRect().width * a.getBoundingClientRect().height)[0].getBoundingClientRect();
+    return { x: c.x, y: c.y, w: c.width, h: c.height }; });
+  await p.mouse.move(box.x + 300, box.y + 60);
+  for (let i = 0; i < 4; i++) { await p.mouse.wheel(0, -240); await p.waitForTimeout(80); }
+  const zoomed = await measure();
+  await ctx.close();
+  return { pass: fitted.lanes > 0 && fitted.bands > 0 && !fitted.overLane && !fitted.overBand && !zoomed.overLane && !zoomed.overBand,
+    detail: { fitted, zoomed } };
+});
+
+test("U4.lanemenu", "TempluMare: clic destro sull'intestazione di corsia (fermo, trascinato, poi Esc e un movimento) non sposta ciò che è disegnato", async () => {
+  const { p, ctx } = await open({ doc: "TempluMare", hook: textDrawHook });
+  // what is ON THE PAGE: where a lane's label is drawn, and the canvas's box.
+  // Not `__EM_SCENE__().vp`: since AUDIT N2 that view follows the window under
+  // the pointer, and a pointer that ends in the Issues table below reads THAT
+  // window's camera — a jump that is not on the screen (measured: {0,0,1}).
+  const drawn = () => p.evaluate(() => {
+    const l = (window.__TEXT_DRAWS__() ?? []).filter((t) => /A\.D\.|B\.C\./.test(t.text)).sort((a, b) => a.text < b.text ? -1 : 1)[0];
+    const cv = [...document.querySelectorAll("canvas")].sort((a, b) => b.width * b.height - a.width * a.height)[0].getBoundingClientRect();
+    return `${l ? `${l.text}@${Math.round(l.x)},${Math.round(l.y)}` : "none"} | ${[cv.x, cv.y, cv.width, cv.height].map(Math.round).join(",")} | ${window.scrollY}`;
+  });
+  const cvr = await p.evaluate(() => { const r = [...document.querySelectorAll("canvas")].sort((a, b) => b.width * b.height - a.width * a.height)[0].getBoundingClientRect(); return { x: r.x, y: r.y, h: r.height }; });
+  await p.waitForTimeout(400);
+  const base = await drawn();
+  const moved = [];
+  let items = [];
+  for (const fy of [0.15, 0.5, 0.85]) {
+    const x = cvr.x + 60, y = cvr.y + cvr.h * fy;
+    await p.mouse.move(x, y);
+    await p.mouse.click(x, y, { button: "right" });
+    await p.waitForTimeout(300);
+    if (!items.length) items = await p.evaluate(() => [...document.querySelectorAll(".ctx-menu button")].map((b) => b.textContent));
+    await p.mouse.move(x + 40, y + 30, { steps: 5 });
+    const a = await drawn();
+    await p.keyboard.press("Escape");
+    await p.mouse.move(x, y);
+    await p.mouse.down({ button: "right" });
+    await p.mouse.move(x + 6, y + 4, { steps: 3 });
+    await p.mouse.up({ button: "right" });
+    await p.waitForTimeout(250);
+    await p.keyboard.press("Escape");
+    await p.mouse.move(x + 150, y + 90, { steps: 8 });
+    await p.waitForTimeout(250);
+    const b = await drawn();
+    if (a !== base || b !== base) moved.push({ fy, a, b });
+  }
+  await ctx.close();
+  return { pass: !base.startsWith("none") && !moved.length && items.some((t) => /cronologia/i.test(t)), detail: { base, moved, items } };
 });
 
 // ── run ─────────────────────────────────────────────────────────────────────

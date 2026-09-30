@@ -309,14 +309,23 @@ function mapCard(node: EmNode, options: Record<string, unknown>,
     if (Number.isFinite(lon) && Number.isFinite(lat)) {
       drawMap(box, node, options, key,
         { ok: true, lat, lon, epsg: 4326, rotation: 0 }, doc);
+      // MICRO-UN-POSTO · shown here, set on the graph node: the same button
+      if (sitePicker) {
+        const b = el("button", "nv-site-pick site-set", t("site.set")) as HTMLButtonElement;
+        b.type = "button";
+        b.dataset.action = "site-set";
+        b.addEventListener("click", (e) => { e.stopPropagation(); sitePicker!(b); });
+        box.appendChild(b);
+      }
     } else {
       box.appendChild(el("div", "nv-embed-title", t("nv.siteUnplaced")));
       box.appendChild(el("div", "nv-embed-note", t("nv.siteUnplacedHow")));
       // COLLEGARE · the block says so AND offers the picker, where there is one
       // (the editor installs it; the served reader has no store to write to)
       if (sitePicker) {
-        const b = el("button", "nv-site-pick", t("nv.placeSite")) as HTMLButtonElement;
+        const b = el("button", "nv-site-pick site-set", t("site.set")) as HTMLButtonElement;
         b.type = "button";
+        b.dataset.action = "site-set";
         b.addEventListener("click", (e) => {
           e.stopPropagation();
           sitePicker!(b);

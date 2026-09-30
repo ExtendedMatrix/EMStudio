@@ -75,13 +75,6 @@ export interface Draft {
    *  che appartengono all'EVENTO e non si ripetono su quattrocento file */
   campaignMetadata: Record<string, string>;
   kind: string;
-  /** AUDIT N3 · the CAPTURE an origin was (photo, laser scan, survey…), from the
-   *  `input` axis of `dtc_kinds`, sent AS the act's kind. Provisional: s3Dgraphy's
-   *  acquisition accepts only the `acquisition` axis, so the bridge carries a
-   *  capture as `how.acquisition.capture` over the library's default acquisition
-   *  until the datamodel gives the acquisition a capture axis (the night's
-   *  report asks for it). */
-  capture: string;
   /** AUDIT N3 · why the form opened on this road — said under the question */
   why: string;
   technique: string;
@@ -110,7 +103,6 @@ export function newDraft(outputs: DraftOutput[]): Draft {
     campaign: "",
     campaignMetadata: {},
     kind: "",
-    capture: "",
     why: "",
     technique: "",
     parameters: {},

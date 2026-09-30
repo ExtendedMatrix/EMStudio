@@ -39,8 +39,7 @@ import type {
   TwinState,
 } from "./model";
 import type { AuthorityCandidate, AuthorityRef } from "./types";
-import { createOsmMap } from "./osm-map";
-import { geocode, GeocodeOffline, zoomFor } from "./geocode";
+import { renderSitePositionLine } from "./site-picker";
 import type { TwinSearchResult } from "./twins";
 import { describeSources } from "./twins";
 import type { InspectorCallbacks } from "./inspector";
@@ -52,7 +51,7 @@ import type { InspectorCallbacks } from "./inspector";
  *  This is a TYPE narrowing: the bindings that arrive are the same ones. */
 export type StudyPanelCallbacks = Pick<
   InspectorCallbacks,
-  "resolveAuthority" | "searchTwins"
+  "resolveAuthority" | "searchTwins" | "onSetSitePosition"
 >;
 
 function el(tag: string, cls?: string, text?: string): HTMLElement {
@@ -432,206 +431,26 @@ function buildTwinField(
 }
 
 /**
- * GEO2 · the place-name search that sits on top of the picker map.
- *
- * Two acts, kept apart: SEARCHING moves the camera and drops a *candidate*
- * marker, and only a confirmation writes `site_position`. A geocoder returns a
- * guess about a name — good enough to fly there, never good enough to record as
- * the site's position without someone saying so.
- *
- * Confirmation is either gesture: click the map where the site actually is (the
- * pre-existing `onPick`, untouched), or accept the candidate as-is.
+ * The site-position section — the graph's `site_position`, SHOWN, with the one
+ * button that opens the selector on the graph node (MICRO-UN-POSTO,
+ * `site-picker.ts`). The inspector of the graph node is where it lives
+ * (`data-section="site-position"`, the anchor the story's ⌖ scrolls to); the
+ * Study shows the same line. Neither edits it inline any more: four inline
+ * editors of one point were four places to disagree.
  */
-function buildPlaceSearch(
-  map: { setView: (lat: number, lon: number, z?: number) => void;
-         setMarker: (lat: number, lon: number) => void },
-  store: DocumentStore,
-): HTMLElement {
-  const wrap = el("div", "insp-geo-search");
-  const row = el("div", "insp-geo-row");
-  const input = document.createElement("input");
-  input.type = "search";
-  input.className = "insp-name-input";
-  input.placeholder = "Search a place…";
-  input.title =
-    "Place-name search (Nominatim / OpenStreetMap). Online only: without a " +
-    "network the map and the manual pick still work.";
-  row.appendChild(input);
-  wrap.appendChild(row);
-  const results = el("div", "insp-geo-hits");
-  wrap.appendChild(results);
-
-  let timer = 0;
-  let inflight: AbortController | null = null;
-  let candidate: { lat: number; lon: number; label: string } | null = null;
-
-  const say = (msg: string, cls = "insp-hint"): void => {
-    results.textContent = "";
-    results.appendChild(el("div", cls, msg));
-  };
-
-  const run = async (q: string): Promise<void> => {
-    inflight?.abort();
-    const ctrl = new AbortController();
-    inflight = ctrl;
-    say("Searching…");
-    try {
-      const hits = await geocode(q, { signal: ctrl.signal });
-      if (ctrl.signal.aborted) return;
-      results.textContent = "";
-      if (!hits.length) {
-        say(`No place found for “${q}”.`);
-        return;
-      }
-      for (const h of hits) {
-        const b = el("button", "insp-geo-hit");
-        const name = el("span", "insp-geo-hit-name", h.label);
-        b.appendChild(name);
-        if (h.kind) b.appendChild(el("small", undefined, ` ${h.kind}`));
-        b.addEventListener("click", () => {
-          // fly there + show the candidate; nothing is written yet
-          map.setView(h.lat, h.lon, zoomFor(h));
-          map.setMarker(h.lat, h.lon);
-          candidate = { lat: h.lat, lon: h.lon, label: h.label };
-          for (const other of results.querySelectorAll(".insp-geo-hit"))
-            other.classList.remove("on");
-          b.classList.add("on");
-          confirm.classList.remove("hidden");
-          confirm.textContent = `Use this point (${h.lat.toFixed(5)}, ${h.lon.toFixed(5)})`;
-        });
-        results.appendChild(b);
-      }
-      results.appendChild(
-        el("div", "insp-hint", "results © OpenStreetMap contributors · Nominatim"),
-      );
-    } catch (e) {
-      if ((e as Error)?.name === "AbortError") return;
-      say(
-        e instanceof GeocodeOffline
-          ? "Place search is available online. Offline you can still pick on the map or type coordinates."
-          : `Search failed: ${(e as Error)?.message ?? "unknown error"}. The map and manual pick still work.`,
-      );
-    }
-  };
-
-  const confirm = document.createElement("button");
-  confirm.className = "insp-btn hidden";
-  confirm.type = "button";
-  confirm.addEventListener("click", () => {
-    if (candidate) store.setSitePosition(candidate.lon, candidate.lat);
-  });
-  row.appendChild(confirm);
-
-  // Debounce: a request per keystroke would be both useless and a breach of the
-  // service's usage policy. The rate gate in geocode.ts is the backstop.
-  input.addEventListener("input", () => {
-    window.clearTimeout(timer);
-    const q = input.value.trim();
-    inflight?.abort();
-    if (q.length < 2) {
-      results.textContent = "";
-      return;
-    }
-    timer = window.setTimeout(() => void run(q), 500);
-  });
-  input.addEventListener("keydown", (e) => {
-    if (e.key !== "Enter") return;
-    e.preventDefault();
-    window.clearTimeout(timer);
-    const q = input.value.trim();
-    if (q.length >= 2) void run(q);
-  });
-  return wrap;
-}
-
-/**
- * MULTIGRAPH · the site-position section, mounted in TWO places by the same
- * function: the canvas panel (no selection) and the graph-self node's own
- * inspector. The multigraph mode exists so graph-scope things can be found by
- * looking at the graph — selecting the GraphNode and not finding where the site
- * lives would defeat it. One renderer, so the two can never drift.
- */
-export function renderSitePosition(host: HTMLElement, store: DocumentStore): void {
-    // WIN7 · the anchor the narrative window's ⌖ button scrolls to. The site
-    // position is what a "site map" block in a chapter reads, so getting to it
-    // has to be one click from where the map is being written.
-    const heading = el("h3", "insp-sect", "Site position (map)");
-    heading.dataset.section = "site-position";   // AUDIT C · no id: two panels, two headings
-    host.appendChild(heading);
-    const sp0 = store.readSitePosition();
-    const spStatus = el(
-      "div",
-      "insp-hint",
-      sp0
-        ? `Positioned · ${sp0.lat.toFixed(5)}, ${sp0.lon.toFixed(5)} (${sp0.crs})`
-        : "Not positioned — pick a point on the map or type coordinates. Distinct from the 3D shift (GeoPositionNode).",
-    );
-    host.appendChild(spStatus);
-
-    const coordRow = el("div", "insp-geo-row");
-    const latIn = document.createElement("input");
-    latIn.className = "insp-name-input insp-geo-coord";
-    latIn.placeholder = "lat";
-    latIn.value = sp0 ? String(sp0.lat) : "";
-    const lonIn = document.createElement("input");
-    lonIn.className = "insp-name-input insp-geo-coord";
-    lonIn.placeholder = "lon";
-    lonIn.value = sp0 ? String(sp0.lon) : "";
-    const commitCoords = (): void => {
-      const lat = Number(latIn.value.trim());
-      const lon = Number(lonIn.value.trim());
-      if (latIn.value.trim() === "" && lonIn.value.trim() === "") {
-        store.clearSitePosition();
-        return;
-      }
-      // BOTH numbers, or nothing: `Number("")` is 0, and a latitude typed first
-      // used to write a site on the Greenwich meridian (COLLEGARE, measured)
-      if (latIn.value.trim() === "" || lonIn.value.trim() === "") return;
-      if (Number.isFinite(lat) && Number.isFinite(lon))
-        store.setSitePosition(lon, lat);
-    };
-    latIn.addEventListener("change", commitCoords);
-    lonIn.addEventListener("change", commitCoords);
-    coordRow.appendChild(latIn);
-    coordRow.appendChild(lonIn);
-    host.appendChild(coordRow);
-
-    const geoBtns = el("div", "insp-geo-row");
-    const pickBtn = document.createElement("button");
-    pickBtn.className = "insp-btn";
-    pickBtn.type = "button";
-    pickBtn.textContent = sp0 ? "Pick again on map" : "Pick on map";
-    geoBtns.appendChild(pickBtn);
-    if (sp0) {
-      const clearBtn = document.createElement("button");
-      clearBtn.className = "insp-btn";
-      clearBtn.type = "button";
-      clearBtn.textContent = "Clear";
-      clearBtn.addEventListener("click", () => store.clearSitePosition());
-      geoBtns.appendChild(clearBtn);
-    }
-    host.appendChild(geoBtns);
-
-    // The picker mounts inline on demand — a click on the map drops the point
-    // (setSitePosition), which re-renders this panel showing the coordinates.
-    const mapHost = el("div", "insp-geo-map");
-    host.appendChild(mapHost);
-    pickBtn.addEventListener("click", () => {
-      if (mapHost.firstChild) {
-        mapHost.textContent = "";
-        return;
-      }
-      const map = createOsmMap({
-        lat: sp0?.lat ?? 41.9,
-        lon: sp0?.lon ?? 12.5,
-        zoom: sp0 ? 15 : 4,
-        markerLabel: "site",
-        onPick: (lat, lon) => store.setSitePosition(lon, lat),
-      });
-      mapHost.appendChild(buildPlaceSearch(map, store));
-      mapHost.appendChild(map.el);
-      map.activate();
-    });
+export function renderSitePosition(host: HTMLElement, store: DocumentStore,
+                                   onSet: (() => void) | undefined,
+                                   anchor = false): void {
+  const heading = el("h3", "insp-sect", t("site.section"));
+  if (anchor) heading.dataset.section = "site-position";
+  host.appendChild(heading);
+  if (onSet) renderSitePositionLine(host, store, onSet);
+  else {
+    const sp = store.readSitePosition();
+    host.appendChild(el("div", "insp-hint",
+      sp ? `${sp.lat.toFixed(5)}, ${sp.lon.toFixed(5)} (${sp.crs})` : t("site.notPlaced")));
+  }
+  host.appendChild(el("div", "insp-hint", t("site.notTheShift")));
 }
 
 /**
@@ -742,7 +561,7 @@ export function renderStudyPanel(
   // site_position), separate from the GeoPositionNode SHIFT (the 3D anchor,
   // edited elsewhere). Pick on a mini-map or type lon/lat; empty = not
   // positioned (no fabricated 0/0). Read by the narrative mini-map / overview.
-  renderSitePosition(panel, store);
+  renderSitePosition(panel, store, cb.onSetSitePosition);
 
   // ── HDT-O (ECHOES D7.1) per-graph panel ────────────────────────────────
   // This graph = a Study (HC9) whose proposition set (HC16) is about a
