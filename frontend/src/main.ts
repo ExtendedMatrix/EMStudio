@@ -230,6 +230,7 @@ import {
   hitAddPhase,
   hitAdornmentBadge,
   hitBandLabel,
+  drawnAddPhase,
   drawnLabelRects,
   hitPdDecorator,
   hitPdTag,
@@ -1632,6 +1633,12 @@ window.__EM_SCENE__ = () => {
   log: () => logEntries().map((e) => ({ level: e.level, message: e.message, ids: e.ids ?? [] })),
   /** AUDIT N5 · the lane chips and phase labels as last drawn (screen) */
   labels: () => drawnLabelRects(),
+  /** RISORSA-FILE · the «+ phase» buttons on the epochs' rails, client px */
+  addPhaseButtons: () => {
+    const cv = [...graphWindows.values()].map((m) => m.cv).find((c) => c.offsetParent);
+    const r = cv?.getBoundingClientRect();
+    return r ? drawnAddPhase().map((h) => ({ id: h.id, x: r.left + h.cx, y: r.top + h.cy })) : [];
+  },
   /** MICRO-UN-POSTO · a window turned into another type, as its header's type
    *  menu would (a Study window is in no built-in space) */
   retype: (winId: string, type: string) => {
@@ -3569,6 +3576,7 @@ function applyCanvasView(v: ViewKind): void {
     contextStack = [];
     rebuildContext();
   }
+  info.title = "";
   if (scenes[v] === null && v === "matrix") {
     info.textContent =
       "no layout section — run: emstudio layout file.em.json -o out.em.json";
@@ -3598,6 +3606,13 @@ function applyCanvasView(v: ViewKind): void {
           missing: String(diskStamps.scene.missing) })
       : t("stamp.chain", {
           name, n: String(diskStamps.chain.resolved.size + 1) });
+  } else if (v === "dtc" && dtcNeighbourhood.status === "failed" && dtcNeighbourhood.noNode) {
+    // RISORSA-FILE · Standalone is the normal state of a desk with no node, and
+    // the bar says so in three words; the sentence (which node, why, where the
+    // chain lives) is in the tooltip. Measured: the bar carried the whole
+    // «Il nodo non ha risposto su … — Nessun nodo configurato …», 180 characters.
+    info.textContent = t("dtc.standaloneShort");
+    info.title = t("dtc.failed", { name: baseName(dtcNeighbourhood.path), why: dtcNeighbourhood.why });
   } else if (v === "dtc" && dtcNeighbourhood.status !== "idle") {
     // THE THREE STATES, and the reason they are three sentences and not one
     // spinner: a picture that is empty because a request is in flight, one that
@@ -17073,7 +17088,9 @@ type NeighbourhoodState =
   //: the node answered, and said WHO ARE YOU. A fourth state and not a flavour
   //: of the third: the remedy is a signature, not a network.
   | { status: "unauthorised"; path: string }
-  | { status: "failed"; path: string; why: string };
+  //: RISORSA-FILE · `noNode`: there is no node to ask (Standalone) — a setting,
+  //: said in three words in the bar, the sentence in its tooltip
+  | { status: "failed"; path: string; why: string; noNode?: boolean };
 
 let dtcNeighbourhood: NeighbourhoodState = { status: "idle" };
 
@@ -17216,7 +17233,7 @@ async function askNeighbourhood(path: string | null): Promise<void> {
     if (!res) {
       // NOT «loading forever»: a node nobody named cannot be asked, and saying
       // so is the difference between a bug and a setting.
-      dtcNeighbourhood = { status: "failed", path, why: t("dtc.noNode") };
+      dtcNeighbourhood = { status: "failed", path, why: t("dtc.noNode"), noNode: true };
       redrawNeighbourhood();
       return;
     }
@@ -23021,6 +23038,26 @@ function wireGraphCanvas(canvas: HTMLCanvasElement, winId: string): void {
     // "PD" tag in a lane / band label chip → enter that epoch/phase temporal PDG
     // (same as double-clicking the old box). Resolved on pointerup as a click.
     // The screen-space chips of the canvas, before any node hit:
+    //
+    // RISORSA-FILE · every CLICK the canvas resolves on pointerup is disarmed
+    // here, at the start of every press. Measured (the toast «fase Phase 2
+    // creata» E.D. saw while writing in the stamp composer): a press on an
+    // epoch's «+» released OUTSIDE the canvas left `addPhasePending` armed, and
+    // the next ordinary click on any graph canvas — the DTC of the stamp being
+    // composed, say — created a phase. The same shape held for the epoch
+    // insertion, the PD tag, the band label, the ornament badge and the PD tablet.
+    // …and the press on one of them CAPTURES the pointer: a release outside is
+    // then seen, as the drag it is, and not as a click.
+    insertPending = null;
+    pdTagPending = null;
+    addPhasePending = null;
+    bandSelectPending = null;
+    adornmentPending = null;
+    pdDecoratorPending = null;
+    const armChip = (): void => {
+      dragMode = "none";
+      try { canvas.setPointerCapture(e.pointerId); } catch { /* a synthetic event */ }
+    };
     {
       const rect = canvas.getBoundingClientRect();
       const lx = e.clientX - rect.left;
@@ -23030,28 +23067,28 @@ function wireGraphCanvas(canvas: HTMLCanvasElement, winId: string): void {
       const ib = insertBoundaryAt(lx, ly);
       if (ib != null) {
         insertPending = ib;
-        dragMode = "none";
+        armChip();
         return;
       }
       // PD tag first (it sits inside the band chip): click it to ENTER the group
       const pd = hitPdTag(lx, ly);
       if (pd) {
         pdTagPending = pd;
-        dragMode = "none";
+        armChip();
         return;
       }
       // "+" quick-add-phase button on an epoch's rail
       const ap = hitAddPhase(lx, ly);
       if (ap) {
         addPhasePending = ap;
-        dragMode = "none";
+        armChip();
         return;
       }
       // elsewhere on a phase band label chip: click to SELECT the phase
       const bl = hitBandLabel(lx, ly);
       if (bl) {
         bandSelectPending = bl;
-        dragMode = "none";
+        armChip();
         return;
       }
       // BADGE1/DEC1 · ornament badge (author/license/embargo) — SCREEN-space hit,
@@ -23061,7 +23098,7 @@ function wireGraphCanvas(canvas: HTMLCanvasElement, winId: string): void {
       const ab = hitAdornmentBadge(lx, ly);
       if (ab) {
         adornmentPending = ab;
-        dragMode = "none";
+        armChip();
         return;
       }
       // PD1 · collapsed-PDG tablet (bottom-left) → single click selects the group;
@@ -23069,7 +23106,7 @@ function wireGraphCanvas(canvas: HTMLCanvasElement, winId: string): void {
       const pdd = hitPdDecorator(lx, ly);
       if (pdd) {
         pdDecoratorPending = pdd;
-        dragMode = "none";
+        armChip();
         return;
       }
     }
@@ -23448,11 +23485,16 @@ function wireGraphCanvas(canvas: HTMLCanvasElement, winId: string): void {
     dragMode = "none";
     dragDetachPending = false;
     dragDetachSet = [];
+    // RISORSA-FILE · a CLICK on a chip of the canvas is a press AND a release on
+    // the same chip: the press captured the pointer, so a release elsewhere
+    // lands here too, and it is not a click
+    const rr = canvas.getBoundingClientRect();
+    const rx = e.clientX - rr.left, ry = e.clientY - rr.top;
     // "PD" tag click → enter the epoch/phase temporal PDG (a click, not a drag)
     if (pdTagPending) {
       const pd = pdTagPending;
       pdTagPending = null;
-      if (!moved) enterGroup(pd);
+      if (!moved && hitPdTag(rx, ry) === pd) enterGroup(pd);
       return;
     }
     // ornament badge click → select the real author/license/embargo node so the
@@ -23460,7 +23502,7 @@ function wireGraphCanvas(canvas: HTMLCanvasElement, winId: string): void {
     if (adornmentPending) {
       const id = adornmentPending;
       adornmentPending = null;
-      if (!moved) select(id);
+      if (!moved && hitAdornmentBadge(rx, ry) === id) select(id);
       return;
     }
     // PD tablet single click → select the collapsed group (Inspector); the double
@@ -23468,21 +23510,21 @@ function wireGraphCanvas(canvas: HTMLCanvasElement, winId: string): void {
     if (pdDecoratorPending) {
       const id = pdDecoratorPending;
       pdDecoratorPending = null;
-      if (!moved) select(id);
+      if (!moved && hitPdDecorator(rx, ry) === id) select(id);
       return;
     }
     // phase band label click → select that phase (residual → the epoch)
     if (bandSelectPending) {
       const id = bandSelectPending;
       bandSelectPending = null;
-      if (!moved) select(id);
+      if (!moved && hitBandLabel(rx, ry) === id) select(id);
       return;
     }
     // epoch "+" button click → add a phase to that epoch
     if (addPhasePending) {
       const epochId = addPhasePending;
       addPhasePending = null;
-      if (!moved && store) {
+      if (!moved && store && hitAddPhase(rx, ry) === epochId) {
         const ph = store.addPhase(epochId);
         select(ph.id);
         toast(t("l.phaseCreated", { name: String(ph.name) }));
@@ -23495,7 +23537,7 @@ function wireGraphCanvas(canvas: HTMLCanvasElement, winId: string): void {
       const bi = insertPending;
       insertPending = null;
       hoverInsertBoundary = null;
-      if (!moved) {
+      if (!moved && insertBoundaryAt(rx, ry) === bi) {
         const { start, end } = insertSlotDates(bi);
         addEpochEmMode(bi, start, end);
       }

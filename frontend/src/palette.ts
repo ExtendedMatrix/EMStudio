@@ -150,6 +150,13 @@ export function placementColour(key: string | null | undefined): string | null {
   return (key && styles[key]?.border_color) || null;
 }
 
+/** RISORSA-FILE · does the visual rules declare a style for this node_type (or
+ *  is it the `unknown` fallback that answers)? */
+export function hasNodeStyle(nodeType?: string): boolean {
+  const key = nodeType ?? "unknown";
+  return !!nodeStyles[NODE_ALIAS[key] ?? key];
+}
+
 export function nodeStyle(nodeType?: string): NodeStyle {
   const key = nodeType ?? "unknown";
   const hit = nodeCache.get(key);

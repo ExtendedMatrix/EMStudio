@@ -1787,6 +1787,7 @@ const EN: Dict = {
     "The story of {name} is on the node, and it asked who is asking.",
   "dtc.noDigest":
     "The bridge could not hash this file, so there is no digest to ask about. A reference without one is weaker, and inventing it would be worse.",
+  "dtc.standaloneShort": "Standalone · no node",
   "dtc.noNode":
     "No node is configured (Mode ▸ Hub), so there is nobody to ask. The chain of a file lives on the node that holds the corpus.",
   "dtc.empty":
@@ -4053,6 +4054,7 @@ const IT: Dict = {
     "La storia di {name} è sul nodo, e il nodo ha chiesto chi sta chiedendo.",
   "dtc.noDigest":
     "Il bridge non ha potuto calcolare l'impronta di questo file, quindi non c'è un digest su cui chiedere. Un riferimento senza impronta è più debole, e inventarla sarebbe peggio.",
+  "dtc.standaloneShort": "Standalone · nessun nodo",
   "dtc.noNode":
     "Nessun nodo configurato (Modo ▸ Hub), quindi non c'è nessuno a cui chiedere. La catena di un file vive sul nodo che tiene il corpus.",
   "dtc.empty":

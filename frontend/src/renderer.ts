@@ -309,6 +309,10 @@ export function hitBandLabel(sx: number, sy: number): string | null {
 // Screen-space hit circles for the "+" quick-add-phase button on each epoch's
 // rail → the epoch id to add a phase to. Rebuilt each draw.
 let addPhaseHits: { id: string; cx: number; cy: number; r: number }[] = [];
+/** …as drawn (canvas px), for a probe that aims at one */
+export function drawnAddPhase(): { id: string; cx: number; cy: number; r: number }[] {
+  return addPhaseHits.map((h) => ({ ...h }));
+}
 export function hitAddPhase(sx: number, sy: number): string | null {
   for (const t of addPhaseHits)
     if ((sx - t.cx) ** 2 + (sy - t.cy) ** 2 <= t.r * t.r) return t.id;

@@ -98,6 +98,15 @@ const ROLE_STYLE: Record<Role, { labelKey: string; color: string }> = {
   use: { labelKey: "dtc.laneUse", color: "#6f5326" },
 };
 
+/** RISORSA-FILE · the colour a DTC node READS as outside the DTC's own lanes
+ *  (the minimap): the colour of the lane its kind of node stands in — an
+ *  acquisition, a process (a device is part of one), what was made. */
+export function dtcRoleColour(node: { node_type: string; data?: Record<string, unknown> }): string {
+  if (node.node_type === "dtc_acquisition") return ROLE_STYLE.acquisition.color;
+  if (isDtcNodeType(node.node_type)) return ROLE_STYLE.process.color;
+  return ROLE_STYLE.output.color;
+}
+
 /** Deterministic order: by name, then id — the same document must always draw
  *  the same picture (invariant 7 in spirit). */
 function byName(a: EmNode, b: EmNode): number {

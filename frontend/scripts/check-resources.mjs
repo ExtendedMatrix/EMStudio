@@ -15,6 +15,8 @@
 //      (`node scripts/check-resources.mjs --scan <root>` scans another tree)
 //   3. on the real store: one gesture one undo step, save and reopen, the
 //      TempluMare graphs unchanged in their resources, a revision, the drawing
+//   4. the minimap: its red is the `unknown` fallback, and a known type (a DTC
+//      process, a resource) must not wear it
 import * as esbuild from "esbuild";
 import assert from "node:assert/strict";
 import { readdirSync, readFileSync, statSync } from "node:fs";
@@ -355,6 +357,19 @@ const R = await load(`export * from "./resources";`);
       eq(strip(out), strip(shelfNodes), `${file}: the shelf opened and saved, its ${shelfNodes.length} resources unchanged in data`);
     }
   }
+}
+
+// ── 4 · the minimap does not call a known type «unknown» ────────────────────
+{
+  const O = await load(`export { minimapInk } from "./overview"; export { nodeStyle } from "./palette";`);
+  const red = O.nodeStyle("__no_such_type__").border;
+  ok(typeof O.minimapInk === "function", "overview.ts says which ink a node has on the minimap");
+  const ink = (t, data) => O.minimapInk?.({ node_type: t, data });
+  for (const [t, data] of [["dtc_process", { dtc_kind: "photogrammetry" }], ["dtc_acquisition", { dtc_kind: "photo" }],
+                           ["dtc_device", { dtc_kind: "camera" }], ["resource", {}], ["resource_file", {}]])
+    ok(ink(t, data) && ink(t, data) !== red, `the minimap: a ${t} is not painted with the «unknown» red (${ink(t, data)})`);
+  eq(ink("US", {}), O.nodeStyle("US").border, "…a type with a style keeps its style's border colour");
+  eq(ink("__no_such_type__", {}), red, "…and a type nobody declared keeps the red that says so");
 }
 
 if (fails.length) {

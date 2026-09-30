@@ -2641,6 +2641,57 @@ test("R4.pack", "impacchettare · nel web il pulsante dice «nella desktop»; il
     detail: { web, out: out && { state: out.state, sha256: out.sha256, cd: out.content_digest }, forms, insp, errors } };
 });
 
+// ── NIGHT-RISORSA-FILE · parte 5: le rifiniture della prova ────────────────
+test("R5.toast", "il «+ fase» premuto e rilasciato FUORI dalla tela non resta armato: il clic dopo (su una tela qualunque, anche mentre si compone un timbro) non crea «fase Phase 2»", async () => {
+  const { p, ctx, errors } = await open({ doc: "catena", ws: "canvas" });
+  await p.waitForTimeout(600);
+  const epochs = () => p.evaluate(() => window.__EM_DRAG__.idsOfType("EpochNode").length);
+  const btn = (await p.evaluate(() => window.__EM_DRAG__.addPhaseButtons()))[0];
+  const before = await epochs();
+  // press on the «+» of an epoch, then leave the canvas and release there
+  // (onto the Inspector: the hand went to write somewhere else)
+  const insp = await p.evaluate(() => { const r = document.querySelector('[data-win$="inspector"]').getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; });
+  await p.mouse.move(btn.x, btn.y);
+  await p.mouse.down();
+  for (let i = 1; i <= 6; i++) await p.mouse.move(btn.x + (insp.x - btn.x) * i / 6, btn.y + (insp.y - btn.y) * i / 6);
+  await p.mouse.up();
+  await p.waitForTimeout(300);
+  const afterRelease = await epochs();
+  // …then an ordinary click on the canvas, far from any «+»
+  const ws = await p.evaluate((w) => window.__EM_DRAG__.winScene(w), await winOf(p, "graph"));
+  await p.mouse.click(ws.rect.x + ws.rect.w * 0.6, ws.rect.y + ws.rect.h * 0.85);
+  await p.waitForTimeout(400);
+  const afterClick = await epochs();
+  const toast = await p.evaluate(() => [...document.querySelectorAll("#toast, .toast")].map((t) => t.textContent).join(" | "));
+  // and the «+» still works as a click
+  await p.mouse.click(btn.x, btn.y);
+  await p.waitForTimeout(400);
+  const afterPlus = await epochs();
+  await ctx.close();
+  return { pass: !!btn && afterRelease === before && afterClick === before && !/fase .* creata/.test(toast)
+      && afterPlus === before + 1 && !errors.length,
+    detail: { btn, before, afterRelease, afterClick, afterPlus, toast, errors } };
+});
+
+test("R5.statusbar", "in Standalone la barra di stato dice «Standalone · nessun nodo», e il dettaglio sta nel tooltip", async () => {
+  const { p, ctx, errors } = await open({ doc: "catena" });
+  await workspace(p, "assets");
+  const root = await rootPath();
+  await storageInto(p, [root.split("/").pop(), "vuota"]);
+  await storageClick(p, "foto1.jpg");
+  await p.waitForTimeout(1200);
+  // …then a graph window turned to DTC (Fonti, its mode button): the DTC reads
+  // the selected file, and asks the node for its chain — there is no node
+  await workspace(p, "provenance");
+  await p.locator('button[aria-pressed]', { hasText: /^DTC$/ }).first().click();
+  await p.waitForTimeout(900);
+  const bar = await p.evaluate(() => { const i = document.getElementById("info"); return { text: i?.textContent ?? "", title: i?.title ?? "" }; });
+  await p.screenshot({ path: SHOT("r5-barra-standalone") }).catch(() => {});
+  await ctx.close();
+  return { pass: bar.text === "Standalone · nessun nodo" && /Modo ▸ Hub/.test(bar.title) && /foto1\.jpg/.test(bar.title) && !errors.length,
+    detail: { bar, errors } };
+});
+
 // ── run ─────────────────────────────────────────────────────────────────────
 const chosen = cases.filter((c) => !only.length || only.includes(c.id) || only.some((o) => c.id.startsWith(o + ".")));
 for (const c of chosen) {
