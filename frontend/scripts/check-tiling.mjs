@@ -310,6 +310,14 @@ const eq = (got, want, what) => {
   eq(W.migrateWin(out), out, "a migrated window passes through unchanged");
   const g = { id: "d", type: "graph", state: { mode: "dtc" } };
   eq(W.migrateWin(g), g, "every other window is untouched");
+  // MICRO-3DTILES-LOD · the «US view» is the Units now (it held one more column,
+  // the first epoch, which the Units have); another sheet stays as it was
+  const usv = W.migrateWin({ id: "e", type: "table", state: { "current.table.sheet": "US", "current.table.q": "x" } });
+  eq([usv.state["current.table.sheet"], usv.state["current.table.q"]], ["Units", "x"],
+     "a Table on the «US view» → on the Units, its filter kept");
+  eq(W.migrateWin(usv), usv, "…and a second pass changes nothing");
+  const docs = { id: "f", type: "table", state: { "current.table.sheet": "Documents" } };
+  eq(W.migrateWin(docs), docs, "a Table on another sheet is untouched");
   ok(W.WINDOW_TYPE_META.outliner?.labelKey === "win.outliner",
      "the outliner has its own type entry (icon + label)");
 }

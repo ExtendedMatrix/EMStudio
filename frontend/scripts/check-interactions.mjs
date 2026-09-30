@@ -2224,6 +2224,52 @@ test("T2.gateLoad", "Soglia · «Caricalo comunque» carica il glb; sotto la sog
       && !a.errors.length && !o.errors.length, detail: { loaded: loaded.model, high: [high.model, high.gate], errors: [...a.errors, ...o.errors] } };
 });
 
+// ── MICRO-3DTILES-LOD · parte 3 · «US view» entra nelle Unità ─────────────────
+test("T3.column", "Unità · la colonna «First epoch» (già della Vista US) è nelle Unità e si modifica: scrive `has_first_epoch`; la Vista US non c'è più", async () => {
+  const { p, ctx, errors } = await open({ doc: "spazio" });
+  const { items } = await sheetMenu(p);
+  await p.locator('.dd-menu:not(.hidden) button[data-sheet="Units"]').first().click();
+  await p.waitForTimeout(600);
+  const head = await p.evaluate(() => [...document.querySelectorAll(".tile-tablebody thead th")].map((x) => x.textContent.trim()));
+  const sel = 'select[data-col="EPOCH"][data-row="US102"]';
+  const before = await p.evaluate(() => window.__EM_DRAG__.nodeInfo("US102").edges.filter((e) => e.type === "has_first_epoch").map((e) => e.target));
+  await p.selectOption(sel, "EP_MED");
+  await p.waitForTimeout(600);
+  const after = await p.evaluate(() => window.__EM_DRAG__.nodeInfo("US102").edges.filter((e) => e.type === "has_first_epoch").map((e) => e.target));
+  const shown = await p.evaluate((s) => document.querySelector(s)?.value ?? null, sel);
+  await ctx.close();
+  return { pass: head.includes("First epoch") && !items.some((i) => i.sheet === "US" || /Vista US|US view/.test(i.label))
+      && same(before, ["EP_MOD"]) && same(after, ["EP_MED"]) && shown === "EP_MED" && !errors.length,
+    detail: { head, sheets: items.map((i) => i.sheet), before, after, shown, errors } };
+});
+test("T3.saved", "Unità · uno spazio salvato con una Tabella sulla «US view» si riapre sulle Unità (con la colonna della prima epoca)", async () => {
+  // the arrangement as this build saves it, with its table turned to the old sheet
+  const a = await open({ doc: "spazio" });
+  const saved = await a.p.evaluate(() => {
+    const out = {};
+    for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i); out[k] = localStorage.getItem(k); }
+    return out;
+  });
+  await a.ctx.close();
+  const reg = JSON.parse(saved["emstudio.windows"] ?? "{}");
+  let turned = 0;
+  for (const ws of Object.values(reg)) for (const w of ws.wins ?? []) if (w.type === "table") { w.state = { ...(w.state ?? {}), "current.table.sheet": "US" }; turned++; }
+  saved["emstudio.windows"] = JSON.stringify(reg);
+  saved["emdata.sheet"] = "US";
+  const { p, ctx, errors } = await open({ doc: "spazio", init: saved });
+  await p.waitForTimeout(600);
+  const r = await p.evaluate(() => ({
+    sheets: window.__EM_DRAG__.wins().filter((w) => w.type === "table").map((w) => w.state["current.table.sheet"] ?? null),
+    stored: JSON.parse(localStorage.getItem("emstudio.windows") ?? "{}"),
+    head: [...document.querySelectorAll(".tile-tablebody thead th")].map((x) => x.textContent.trim()),
+    label: [...document.querySelectorAll("[data-win] .win-mode-label")].map((x) => x.textContent) }));
+  await ctx.close();
+  const storedSheets = Object.values(r.stored).flatMap((ws) => (ws.wins ?? []).filter((w) => w.type === "table").map((w) => w.state?.["current.table.sheet"]));
+  return { pass: turned > 0 && r.sheets.length > 0 && r.sheets.every((s) => s === "Units") && !storedSheets.includes("US")
+      && r.head.includes("First epoch") && r.label.includes("Unità") && !errors.length,
+    detail: { turned, sheets: r.sheets, storedSheets, head: r.head, label: r.label, errors } };
+});
+
 // ── run ─────────────────────────────────────────────────────────────────────
 const chosen = cases.filter((c) => !only.length || only.includes(c.id) || only.some((o) => c.id.startsWith(o + ".")));
 for (const c of chosen) {

@@ -409,7 +409,9 @@ function loadCustom(): WorkspacePreset[] {
       ...w,
       windowType: (w.windowType as string) === "annotator" ? "doc" : w.windowType,
       arrangement: w.arrangement && Array.isArray(w.arrangement.wins)
-        ? { ...w.arrangement, wins: w.arrangement.wins.map((x) => (x.type as string) === "annotator" ? { ...x, type: "doc" as WindowType } : x) }
+        ? { ...w.arrangement, wins: w.arrangement.wins.map((x) => (x.type as string) === "annotator" ? { ...x, type: "doc" as WindowType }
+            // MICRO-3DTILES-LOD · the «US view» is the Units now
+            : x.type === "table" && x.state?.["current.table.sheet"] === "US" ? { ...x, state: { ...x.state, "current.table.sheet": "Units" } } : x) }
         : w.arrangement,
     }));
   } catch {
@@ -691,6 +693,12 @@ export function migrateWin(w: Win): Win {
     delete state["current.panel"];
     return { ...w, state };
   }
+  // MICRO-3DTILES-LOD · a Table on the «US view» opens on the Units, which hold
+  // its one column of its own (the first epoch) now
+  if (w.type === "table" && state["current.table.sheet"] === "US") {
+    state["current.table.sheet"] = "Units";
+    return { ...w, state };
+  }
   return w.state ? w : { ...w, state };
 }
 
@@ -808,7 +816,8 @@ function loadRegistry(): Registry {
       if (!wins.length) continue;
       const migrated = wins.map((w) => migrateWin({ ...w, state: w.state ?? {} }));
       if (migrated.some((w, i) => w.type !== wins[i].type ||
-          w.state["current.panel"] !== (wins[i].state ?? {})["current.panel"]))
+          w.state["current.panel"] !== (wins[i].state ?? {})["current.panel"] ||
+          w.state["current.table.sheet"] !== (wins[i].state ?? {})["current.table.sheet"]))
         migratedOnLoad = true;
       const restored: WorkspaceWindows = {
         wins: migrated,

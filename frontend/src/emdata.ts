@@ -115,13 +115,17 @@ interface TableState extends FacetSelection {
   view: "rows" | "cards";
 }
 
-const VIEWS: TableView[] = ["Units", "US", "Epochs", "Claims", "Authors", "Documents",
+const VIEWS: TableView[] = ["Units", "Epochs", "Claims", "Authors", "Documents",
                             "Chron", "Issues", "Models"];
+/** MICRO-3DTILES-LOD · a sheet that is no more, and where it went: the «US view»
+ *  was the Units with the first epoch (the Units have it now) */
+const RETIRED_SHEETS: Record<string, TableView> = { US: "Units" };
 const noWin: TableState = { sheet: "Units", view: "rows", q: "", f: {} };
 
 function stateOf(win?: Win): TableState {
   if (!win) return { ...noWin, sheet: defaultSheet };
-  const sheet = winCurrent(win, "table.sheet") as TableView | null;
+  const raw = winCurrent(win, "table.sheet") as string | null;
+  const sheet = (raw && RETIRED_SHEETS[raw]) || (raw as TableView | null);
   const view = winCurrent(win, "table.view");
   const q = winCurrent(win, "table.q");
   const f = winCurrent(win, "table.f");
@@ -248,7 +252,8 @@ export function initEmData(opts: {
   // MICRO-cronologia · an answer from the bridge redraws the tables
   onChronologyUpdate(() => renderEmData());
   try {
-    const saved = localStorage.getItem(LS_SHEET) as TableView | null;
+    const stored = localStorage.getItem(LS_SHEET);
+    const saved = ((stored && RETIRED_SHEETS[stored]) || stored) as TableView | null;
     if (saved && VIEWS.includes(saved)) defaultSheet = saved;
   } catch { /* private mode */ }
   renderEmData();

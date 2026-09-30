@@ -1,5 +1,7 @@
 // EM-Data (DP-81): a tabular VIEW on the graph — the five em_data sheets
-// (Units / Epochs / Authors / Documents / Claims) plus a simple US view.
+// (Units / Epochs / Authors / Documents / Claims). MICRO-3DTILES-LOD parte 3: the
+// old «US view» was the Units with one more column, the first epoch — that column
+// is the Units' now, edited the same way, and the sheet is gone.
 //
 // This is NOT a second source of truth. Rows are DERIVED from the em.json graph
 // on every read, and cell edits mutate the SAME DocumentStore the Inspector and
@@ -123,11 +125,9 @@ export type SheetKey =
   | "Epochs"
   | "Authors"
   | "Documents"
-  | "Claims"
-  | "US";
+  | "Claims";
 
 export const EM_DATA_SHEETS: { key: SheetKey; label: string }[] = [
-  { key: "US", label: "US view" },
   { key: "Units", label: "Units" },
   { key: "Epochs", label: "Epochs" },
   { key: "Authors", label: "Authors" },
@@ -218,40 +218,31 @@ export function buildTable(
     return e ? e.target : "";
   };
 
-  if (sheet === "Units" || sheet === "US") {
+  if (sheet === "Units") {
     const units = nodes.filter((n) => isStratigraphicType(n.node_type));
-    const columns: Column[] =
-      sheet === "US"
-        ? [
-            { key: "ID", label: "ID", editor: { kind: "text" } },
-            {
-              key: "TYPE",
-              label: "Type",
-              editor: { kind: "select", options: stratTypeOptions() },
-            },
-            { key: "NAME", label: "Description", editor: { kind: "text" } },
-            {
-              key: "EPOCH",
-              label: "First epoch",
-              editor: { kind: "select", options: epochOptions() },
-            },
-          ]
-        : [
-            { key: "ID", label: "ID", editor: { kind: "text" } },
-            {
-              key: "TYPE",
-              label: "Type",
-              editor: { kind: "select", options: stratTypeOptions() },
-            },
-            { key: "NAME", label: "Name", editor: { kind: "text" } },
-          ];
+    const columns: Column[] = [
+      { key: "ID", label: "ID", editor: { kind: "text" } },
+      {
+        key: "TYPE",
+        label: "Type",
+        editor: { kind: "select", options: stratTypeOptions() },
+      },
+      { key: "NAME", label: "Name", editor: { kind: "text" } },
+      // was the «US view»'s own column: the first epoch, written as
+      // `has_first_epoch` (MICRO-3DTILES-LOD parte 3)
+      {
+        key: "EPOCH",
+        label: "First epoch",
+        editor: { kind: "select", options: epochOptions() },
+      },
+    ];
     const rows: Row[] = units.map((n) => {
       const cells: Record<string, string> = {
         ID: str(n.name) || n.id,
         TYPE: n.node_type,
         NAME: str(n.description),
+        EPOCH: firstEpochIdOf(n.id),
       };
-      if (sheet === "US") cells.EPOCH = firstEpochIdOf(n.id);
       return { id: n.id, cells, volatile: V(n.id) };
     });
     return { sheet, columns, rows, canAdd: true };
@@ -516,7 +507,7 @@ export function applyEdit(
   const n = store.node(rowId);
   if (!n) return false;
 
-  if (sheet === "Units" || sheet === "US") {
+  if (sheet === "Units") {
     if (col === "ID") store.updateNode(rowId, { name: value });
     else if (col === "NAME") store.updateNode(rowId, { description: value });
     else if (col === "TYPE" && value && value !== n.node_type)
@@ -622,7 +613,7 @@ export function addRow(store: DocumentStore, sheet: SheetKey): string | null {
     return `${prefix}${i}`;
   };
 
-  if (sheet === "Units" || sheet === "US") {
+  if (sheet === "Units") {
     const key = nextKey("U");
     const id = emDataMint(graphId, "unit", key);
     store.addNode({ id, name: key, node_type: "US", description: "" });

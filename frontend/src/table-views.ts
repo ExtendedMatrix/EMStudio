@@ -2,7 +2,7 @@
  * STRUTTURA · what the TABLE window shows, sheet by sheet, as data.
  *
  * Two groups (scrivania v5, E.D. 28 set):
- *  · «Schede» — Units, Epochs, Documents, Claims, Authors (+ the US view):
+ *  · «Schede» — Units (with the first epoch), Epochs, Documents, Claims, Authors:
  *    the em_data sheets, EDITABLE, built by `em-data.ts`;
  *  · «Viste calcolate» — Datazioni (the per-unit chronology: TPQ, TAQ, datings),
  *    Warnings, and Models and proxies (`models-sheet.ts`): read-only.
@@ -25,14 +25,15 @@ import type { Issue } from "./issues";
 import { epochSpan, epochStart } from "./outline";
 import type { ChronEntry } from "./chron-bridge";
 
-export type EmdbSheet = "US" | "Units" | "Epochs" | "Authors" | "Documents" | "Claims";
+export type EmdbSheet = "Units" | "Epochs" | "Authors" | "Documents" | "Claims";
 export type ComputedView = "Chron" | "Issues" | "Models";
 export type TableView = EmdbSheet | ComputedView;
 
-// NIGHT-SPAZIO · «Schede» (they are edited) in the order of the scrivania v11b,
-// the US view last: it is the Units with one column of its own (the first
-// epoch, edited here) — kept, and said in the night's report
-export const EMDB_SHEETS: EmdbSheet[] = ["Units", "Epochs", "Documents", "Claims", "Authors", "US"];
+// NIGHT-SPAZIO · «Schede» (they are edited) in the order of the scrivania v11b.
+// MICRO-3DTILES-LOD · the «US view» is gone: it was the Units with the first
+// epoch, and the Units have that column now (a saved window on it opens on the
+// Units, `workspace.ts` `migrateWin`)
+export const EMDB_SHEETS: EmdbSheet[] = ["Units", "Epochs", "Documents", "Claims", "Authors"];
 export const COMPUTED_VIEWS: ComputedView[] = ["Chron", "Issues", "Models"];
 /** the sheets that ALSO have a card view; the others are rows only */
 export const CARD_VIEWS: TableView[] = ["Units", "Documents", "Chron"];
@@ -294,7 +295,7 @@ export function facetsFor(view: TableView, ctx: ViewCtx, ix: Index): FacetDef[] 
     }));
   const states = (): FacetValue[] => STATE_VALUES.map((v) => ({ v, label: t(`table.st.${v}`) }));
   switch (view) {
-    case "Units": case "US": case "Chron":
+    case "Units": case "Chron":
       return [
         { key: "type", labelKey: "table.fx.type", values: unitTypes },
         { key: "epoch", labelKey: "table.fx.epoch", values: epochs },
@@ -334,7 +335,7 @@ export function factsFor(view: TableView, ctx: ViewCtx, ix: Index): Map<string, 
   const out = new Map<string, FacetRow>();
   const warned = new Set(ctx.issues.filter((i) => i.sev === "warn")
     .map((i) => ctx.unitOfIssue(i.node)).filter((x): x is string => !!x));
-  if (view === "Units" || view === "US" || view === "Chron")
+  if (view === "Units" || view === "Chron")
     for (const n of ctx.nodes) if (ctx.isUnit(n.node_type)) out.set(n.id, unitFacts(ix, warned, n));
   if (view === "Claims") {
     for (const n of ctx.nodes) if (n.node_type === "property") out.set(n.id, claimFacts(ix, n));
