@@ -66,11 +66,15 @@ const MAX_UNDO = 80;
 const LEGACY_NODE_TYPE_ALIASES: Record<string, string> = { link: "resource" };
 /** node_type strings that were never a type of the datamodel and open as a
  *  type + its node elements. Mirrors s3Dgraphy's emjson importer
- *  `_LEGACY_NODE_TYPE_MIGRATIONS` (node datamodel 1.6.12): a USM is a US whose
- *  `stratigraphic_kind` is `masonry`, and its name keeps saying USM. An element
- *  already written is not overwritten. */
+ *  `_LEGACY_NODE_TYPE_MIGRATIONS` (node datamodel 1.6.12–1.6.13): a USM is a US
+ *  whose `stratigraphic_kind` is `masonry`, a USR or a USS one whose kind is
+ *  `coating` — the same thing in two languages, so the USS keeps the code it
+ *  came in with (`source_code`, what goes back to pyArchInit). The name keeps
+ *  saying USM / USR / USS. An element already written is not overwritten. */
 const LEGACY_NODE_TYPE_MIGRATIONS: Record<string, { to: string; data: Record<string, string> }> = {
   USM: { to: "US", data: { stratigraphic_kind: "masonry" } },
+  USR: { to: "US", data: { stratigraphic_kind: "coating" } },
+  USS: { to: "US", data: { stratigraphic_kind: "coating", source_code: "USS" } },
 };
 function migrateLegacyNodeTypes(doc: EmDocument): void {
   for (const n of doc.graph?.nodes ?? []) {

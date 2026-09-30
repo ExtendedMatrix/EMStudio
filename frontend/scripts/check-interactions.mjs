@@ -1084,6 +1084,83 @@ test("U0.usm", "epochs48: le USM aprono come US muraria, l'ispettore dice «US �
     detail: { types, chip, scene, untyped, errors } };
 });
 
+// ── NIGHT-SPAZIO · parte 1 · i generi delle US e il decoratore del glifo ────
+// `testdata/generi.em.json` = catena + a USR and a USS as an em.json of 29 Sep
+// wrote them (node_type USR / USS) + a plain US beside them.
+test("S1.genres", "epochs48 e generi: USM → US muraria, USR/USS → US di rivestimento (USS tiene il suo codice); l'ispettore lo dice", async () => {
+  const kinds = async (doc) => {
+    const { p, ctx, errors } = await open({ doc });
+    const r = await p.evaluate(() => {
+      const g = JSON.parse(window.__EM_DRAG__.graphJson());
+      const by = (k) => g.nodes.filter((n) => n.data?.stratigraphic_kind === k).map((n) => n.id).sort();
+      return { masonry: by("masonry").length, coating: by("coating"),
+        legacy: g.nodes.filter((n) => ["USM", "USR", "USS"].includes(n.node_type)).length,
+        codes: Object.fromEntries(g.nodes.filter((n) => n.data?.source_code).map((n) => [n.id, n.data.source_code])) };
+    });
+    return { p, ctx, errors, r };
+  };
+  const a = await kinds("epochs48");
+  await a.ctx.close();
+  const b = await kinds("generi");
+  const chips = {};
+  for (const id of ["USR201", "USS202", "US203"]) {
+    await pick(b.p, id);
+    chips[id] = await b.p.evaluate(() => document.querySelector(".insp-chip")?.textContent ?? null);
+  }
+  const element = await b.p.evaluate(() => [...document.querySelectorAll(".insp-element-label")].map((e) => e.textContent));
+  await b.ctx.close();
+  const pass = a.r.masonry === 13 && !a.r.coating.length && !a.r.legacy
+    && b.r.coating.join() === "USR201,USS202" && b.r.masonry === 1 && !b.r.legacy && JSON.stringify(b.r.codes) === JSON.stringify({ USS202: "USS" })
+    && chips.USR201 === "US · di rivestimento" && chips.USS202 === "US · di rivestimento" && chips.US203 === "US"
+    && !a.errors.length && !b.errors.length;
+  return { pass, detail: { epochs48: a.r, generi: b.r, chips, element, errors: [...a.errors, ...b.errors] } };
+});
+
+/** the genre decorators drawn in one graph window: single capital letters in
+ *  the colour of the unit's border, inside its box, and what is drawn on the
+ *  plain US beside them */
+async function genreDraws(p, win) {
+  await p.waitForTimeout(500);
+  return p.evaluate((w) => {
+    const sc = window.__EM_DRAG__.winScene(w);
+    const draws = window.__TEXT_DRAWS__();
+    const inside = (d, b) => d.x >= b.x - 1 && d.y >= b.y - 1 && d.x + d.w <= b.x + b.w + 1 && d.y + d.h <= b.y + b.h + 1;
+    const out = {};
+    for (const id of ["USR201", "USS202", "US203", "USM204"]) {
+      const b = sc.boxes.find((x) => x.id === id);
+      if (!b) { out[id] = null; continue; }
+      const letters = draws.filter((d) => /^[A-Z]$/.test(d.text) && inside(d, b));
+      out[id] = { box: { w: Math.round(b.w), h: Math.round(b.h) },
+        letters: letters.map((d) => ({ text: d.text, fill: d.fill,
+          // where it sits in the box: 0..1 from the left, 0..1 from the top
+          fx: Number(((d.x + d.w / 2 - b.x) / b.w).toFixed(2)), fy: Number(((d.y + d.h / 2 - b.y) / b.h).toFixed(2)),
+          px: Number(d.h.toFixed(1)) })),
+        name: draws.some((d) => d.text === id && inside(d, b)) };
+    }
+    return { mode: sc.mode, out };
+  }, win);
+}
+test("S1.decorator", "Matrix e Graph: «R» nell'angolo in basso a destra della USR e della USS, «M» della USM, nel colore del bordo; la forma e il nome restano quelli della US", async () => {
+  const { p, ctx, errors } = await open({ doc: "generi", hook: textDrawHook });
+  const win = await winOf(p, "graph");
+  // the US's border as the vendored visual rules declare it (the canvas stroke)
+  const border = JSON.parse(readFileSync(new URL("../src/assets/em_visual_rules.json", import.meta.url), "utf8"))
+    .node_styles.US.style.border_color;
+  const matrix = await genreDraws(p, win);
+  await p.locator(`[data-win="${win}"] .win-seg button`).nth(1).click();
+  const graph = await genreDraws(p, win);
+  await p.screenshot({ path: `${process.env.SHOTS ?? "."}/s1-decoratori-graph.png` }).catch(() => {});
+  await ctx.close();
+  const ok = (m) => {
+    const r = m.out.USR201, s = m.out.USS202, u = m.out.US203, w = m.out.USM204;
+    const deco = (x, L) => x && x.letters.length === 1 && x.letters[0].text === L && x.letters[0].fx > 0.8 && x.letters[0].fy > 0.6
+      && (!border || x.letters[0].fill.toLowerCase() === border.toLowerCase()) && x.name;
+    return deco(r, "R") && deco(s, "R") && deco(w, "M") && u && !u.letters.length && u.name
+      && r.box.w === u.box.w && r.box.h === u.box.h && s.box.w === u.box.w && w.box.w === u.box.w;
+  };
+  return { pass: ok(matrix) && ok(graph) && matrix.mode !== graph.mode && !errors.length, detail: { border, matrix, graph, errors } };
+});
+
 // ── MICRO-UN-POSTO · parte 1 · importare con una mappatura: una porta sola ───
 const TAB = () => `${FS_ROOT}/tabelle`;
 /** the editor as the door leaves it: who filled it, and its three questions */
@@ -1313,7 +1390,7 @@ function textDrawHook() {
       if (!cv.isConnected) continue;
       const r = cv.getBoundingClientRect();
       const k = r.width ? cv.width / r.width : 1;
-      for (const d of list) out.push({ text: d.text, x: r.left + d.x / k, y: r.top + d.y / k, w: d.w / k, h: d.h / k });
+      for (const d of list) out.push({ text: d.text, x: r.left + d.x / k, y: r.top + d.y / k, w: d.w / k, h: d.h / k, fill: d.fill });
     }
     return out;
   };
@@ -1332,7 +1409,7 @@ function textDrawHook() {
       const left = al === "center" ? x - w / 2 : al === "right" || al === "end" ? x - w : x;
       const X = m.a * left + m.c * top + m.e, Y = m.b * left + m.d * top + m.f;
       const list = log.get(this.canvas) ?? [];
-      list.push({ text: String(text), x: X, y: Y, w: w * m.a, h: px * m.d });
+      list.push({ text: String(text), x: X, y: Y, w: w * m.a, h: px * m.d, fill: String(this.fillStyle) });
       log.set(this.canvas, list);
     } catch { /* a draw we cannot read is not a draw we measure */ }
     return fill.apply(this, arguments);

@@ -22,7 +22,8 @@ import { glyphKeys } from "./glyphs";
 import { t } from "./i18n";
 import { styledEdgeTypes, styledNodeTypes } from "./palette";
 import { strokeEdge } from "./renderer";
-import { edgeLabel, typeLabel } from "./rules";
+import { nodeStyle } from "./palette";
+import { edgeLabel, stratigraphicKindLabel, stratigraphicKindLetter, stratigraphicKindOf, stratigraphicKinds, typeLabel } from "./rules";
 import type { Scene } from "./scene";
 import { typeIconElement } from "./type-icons";
 
@@ -31,6 +32,8 @@ export interface LegendEntry {
   type: string;
   /** a DTC item's kind (`data.dtc_kind`), which picks its own glyph */
   kind?: string;
+  /** a US's genre (`data.stratigraphic_kind`): the same glyph, a decorator */
+  genre?: string;
   count: number;
 }
 
@@ -72,10 +75,11 @@ export function legendContent(
     const type = n.node.node_type ?? "unknown";
     const k = (n.node.data as Record<string, unknown> | undefined)?.["dtc_kind"];
     const kind = typeof k === "string" ? k : undefined;
-    const key = kind ? `${type}|${kind}` : type;
+    const genre = stratigraphicKindOf(n.node) ?? undefined;
+    const key = kind ? `${type}|${kind}` : genre ? `${type}|genre:${genre}` : type;
     const hit = nodes.get(key);
     if (hit) hit.count++;
-    else nodes.set(key, { type, kind, count: 1 });
+    else nodes.set(key, { type, kind, genre, count: 1 });
   }
   return {
     edges: [...edges].map(([type, count]) => ({ type, count }))
@@ -85,8 +89,10 @@ export function legendContent(
   };
 }
 
-/** The legend's label of a node entry: the datamodel's, or the DTC kind. */
-function nodeEntryLabel(e: { type: string; kind?: string }): string {
+/** The legend's label of a node entry: the datamodel's, the DTC kind, or the
+ *  type with its genre («US · muraria»). */
+function nodeEntryLabel(e: { type: string; kind?: string; genre?: string }): string {
+  if (e.genre) return `${typeLabel(e.type)} · ${stratigraphicKindLabel(e.genre)}`;
   return e.kind ?? typeLabel(e.type);
 }
 
@@ -104,8 +110,11 @@ export function allEdgeTypes(): string[] {
 /** Every node type the visual rules draw (a shape, a glyph, a group box), as
  *  node_types (`styledNodeTypes`: the rules key a few by a short name, `PROP`
  *  for `property`), then every DTC kind the datamodel draws from paths. */
-export function allNodeEntries(): { type: string; kind?: string }[] {
-  const out: { type: string; kind?: string }[] = styledNodeTypes().map((type) => ({ type }));
+export function allNodeEntries(): { type: string; kind?: string; genre?: string }[] {
+  const out: { type: string; kind?: string; genre?: string }[] = styledNodeTypes().map((type) => ({ type }));
+  // the genres of a US, right after it: the same glyph with its decorator
+  if (out.some((e) => e.type === "US"))
+    out.push(...stratigraphicKinds().map((genre) => ({ type: "US", genre })));
   const kinds: { type: string; kind?: string }[] = glyphKeys()
     .filter((k) => k.startsWith("dtc:"))
     .map((k) => ({ type: "dtc", kind: k.slice(4) }));
@@ -216,13 +225,24 @@ export function buildLegendPanel(c: LegendContent, o: LegendPanelOpts): HTMLElem
   return box;
 }
 
-function nodeRow(e: { type: string; kind?: string }, count?: number): HTMLElement {
+function nodeRow(e: { type: string; kind?: string; genre?: string }, count?: number): HTMLElement {
   const row = document.createElement("div");
   row.className = "gl-node";
-  row.title = e.kind ? `${e.type} · ${e.kind}` : e.type;
+  row.title = e.kind ? `${e.type} · ${e.kind}` : e.genre
+    ? t("legend.genre", { letter: stratigraphicKindLetter(e.genre), type: e.type, genre: stratigraphicKindLabel(e.genre) })
+    : e.type;
   const ic = document.createElement("span");
   ic.className = "gl-icon";
   ic.appendChild(typeIconElement(e.type, e.kind));
+  if (e.genre) {
+    // the decorator as the canvas draws it: its letter, in the border's colour
+    const g = document.createElement("span");
+    g.className = "gl-genre";
+    g.dataset.genre = e.genre;
+    g.textContent = stratigraphicKindLetter(e.genre);
+    g.style.color = nodeStyle(e.type).border;
+    ic.appendChild(g);
+  }
   const lab = document.createElement("span");
   lab.className = "gl-label";
   lab.textContent = nodeEntryLabel(e);
@@ -290,10 +310,10 @@ export function showLegendModal(): void {
     const row = nodeRow(e);
     const code = document.createElement("code");
     code.className = "gl-code";
-    code.textContent = e.kind ?? e.type;
+    code.textContent = e.kind ?? (e.genre ? `${e.type} · ${e.genre}` : e.type);
     row.appendChild(code);
     ng.appendChild(row);
-    rows.push({ el: row, text: `${nodeEntryLabel(e)} ${e.type} ${e.kind ?? ""}`.toLowerCase() });
+    rows.push({ el: row, text: `${nodeEntryLabel(e)} ${e.type} ${e.kind ?? ""} ${e.genre ?? ""}`.toLowerCase() });
   }
   const none = document.createElement("div");
   none.className = "gl-empty hidden";

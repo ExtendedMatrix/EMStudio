@@ -18,6 +18,7 @@
 // And the dark theme: only the roles `_roles` declares recolourable change.
 import * as esbuild from "esbuild";
 import assert from "node:assert/strict";
+import { existsSync } from "node:fs";
 import { parseHTML } from "linkedom";
 
 const mem = new Map();
@@ -177,6 +178,22 @@ const GLYPH_TYPES = rules["2d_render_glyph_types"].types;
   eq(M.glyphFor("US"), null, "a shape type is not a glyph");
   ok(!Object.values(rules["2d_glyphs"]).some((e) => e && typeof e === "object" && e.draft),
      "no glyph is a draft (em_visual_rules 1.6.20)");
+  // NIGHT-SPAZIO · the eight DTC glyphs drawn on 30 Sep and approved (visual
+  // rules 1.6.25): each is drawn from paths on the canvas (the DTC) and has its
+  // SVG among the vendored pictograms, which is what the palette (Shift+A in a
+  // DTC window, the legend) shows beside its name.
+  const APPROVED = ["gnss_survey", "field_drawing", "recording_sheet", "decimation",
+    "georeferencing", "format_conversion", "classification", "vectorization"];
+  const dtcKinds = rules.dtc_kinds;
+  for (const k of APPROVED) {
+    const base = Object.keys(dtcKinds).find((b) => !b.startsWith("_") && dtcKinds[b][k]);
+    const glyph = dtcKinds[base]?.[k]?.glyph;
+    const e = rules["2d_glyphs"][`dtc:${k}`];
+    ok(glyph && e && !e.draft && e.layers?.length > 0 && /^src\/2D\/dtc\//.test(e.source ?? ""),
+       `${k}: approved (${e?.source}), drawn from ${e?.layers?.length ?? 0} layers`);
+    ok(existsSync(new URL(`../src/assets/dtc-glyphs/${glyph}.svg`, import.meta.url)),
+       `${k}: the palette's pictogram assets/dtc-glyphs/${glyph}.svg is vendored`);
+  }
 }
 
 // ── 2 · the renderer never drawImage's a glyph type ──────────────────────────

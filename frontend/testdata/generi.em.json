@@ -1,0 +1,505 @@
+{
+  "header": {
+    "format": "em.json",
+    "version": "1.0",
+    "datamodel_versions": {
+      "connections": "1.6.26",
+      "nodes": "1.6.9",
+      "qualia": "1.6.2"
+    },
+    "ontology_versions": {}
+  },
+  "graph": {
+    "graph_id": "catena",
+    "name": "Generi (catena + USR/USS)",
+    "description": null,
+    "nodes": [
+      {
+        "id": "EP_MOD",
+        "node_type": "EpochNode",
+        "name": "Età moderna",
+        "description": "",
+        "data": {
+          "end_time": 2026,
+          "start_time": 1900
+        }
+      },
+      {
+        "id": "EP_MED",
+        "node_type": "EpochNode",
+        "name": "Medioevo",
+        "description": "",
+        "data": {
+          "end_time": 1300,
+          "start_time": 900
+        }
+      },
+      {
+        "id": "EP_ROM",
+        "node_type": "EpochNode",
+        "name": "Età imperiale",
+        "description": "",
+        "data": {
+          "end_time": 300,
+          "start_time": 1
+        }
+      },
+      {
+        "id": "USM101",
+        "node_type": "US",
+        "name": "USM101",
+        "description": "Muro medievale con capitelli di reimpiego",
+        "data": {}
+      },
+      {
+        "id": "USV106",
+        "node_type": "USVs",
+        "name": "USV106",
+        "description": "Ricostruzione della cresta del muro",
+        "data": {}
+      },
+      {
+        "id": "US102",
+        "node_type": "US",
+        "name": "US102",
+        "description": "Strato di crollo",
+        "data": {}
+      },
+      {
+        "id": "RSF100b",
+        "node_type": "RSF",
+        "name": "RSF100b",
+        "description": "Capitello nord reimpiegato",
+        "data": {}
+      },
+      {
+        "id": "SF100",
+        "node_type": "SF",
+        "name": "SF100",
+        "description": "Capitello corinzio",
+        "data": {}
+      },
+      {
+        "id": "PD_USM101",
+        "node_type": "ParadataNodeGroup",
+        "name": "PD_USM101",
+        "description": "",
+        "data": {}
+      },
+      {
+        "id": "P_MAT",
+        "node_type": "property",
+        "name": "material",
+        "description": "calcare e laterizi",
+        "data": {
+          "property_type": "material"
+        }
+      },
+      {
+        "id": "P_H",
+        "node_type": "property",
+        "name": "height",
+        "description": "",
+        "data": {
+          "property_type": "height"
+        }
+      },
+      {
+        "id": "P_DAT",
+        "node_type": "property",
+        "name": "absolute_time_start",
+        "description": "1150",
+        "data": {
+          "property_type": "absolute_time_start"
+        }
+      },
+      {
+        "id": "P_CAPH",
+        "node_type": "property",
+        "name": "height",
+        "description": "",
+        "data": {
+          "property_type": "height"
+        }
+      },
+      {
+        "id": "D1",
+        "node_type": "document",
+        "name": "D.1",
+        "description": "Scheda dei capitelli reimpiegati",
+        "data": {
+          "filename": "scheda_capitelli_USM101.txt",
+          "text": "Scheda dei capitelli reimpiegati nel muro USM101, campagna 2026.\n\nIl capitello nord (RSF100b) è un corinzio ad acanto spinoso, databile su base stilistica alla fine del II secolo d.C.\n\nIl capitello sud (RSF101b) presenta la stessa lavorazione e proviene con ogni probabilità dalla stessa officina.\n\nEntrambi mostrano la rilavorazione dell’abaco per l’alloggiamento nella muratura medievale.\n\nL’altezza conservata dei capitelli è di 0,48 m; il diametro di base è di 0,42 m."
+        }
+      },
+      {
+        "id": "D2",
+        "node_type": "document",
+        "name": "D.2",
+        "description": "Rilievo 3D di USM101, 2026",
+        "data": {
+          "url": "/em/studio/testdata/catena-muro.gltf"
+        }
+      },
+      {
+        "id": "D3",
+        "node_type": "document",
+        "name": "D.3",
+        "description": "Foto del prospetto nord di USM101",
+        "data": {
+          "url": "/em/studio/testdata/catena-prospetto.jpg"
+        }
+      },
+      {
+        "id": "X1",
+        "node_type": "extractor",
+        "name": "D.1.1",
+        "description": "datazione stilistica del capitello nord",
+        "data": {
+          "geometry": {
+            "end": 183,
+            "kind": "passage",
+            "start": 66,
+            "text": "Il capitello nord (RSF100b) è un corinzio ad acanto spinoso, databile su base stilistica alla fine del II secolo d.C."
+          }
+        }
+      },
+      {
+        "id": "USR201",
+        "node_type": "USR",
+        "name": "USR201",
+        "description": "intonaco della parete nord",
+        "data": {}
+      },
+      {
+        "id": "USS202",
+        "node_type": "USS",
+        "name": "USS202",
+        "description": "pavimento in cocciopesto (scheda inglese)",
+        "data": {}
+      },
+      {
+        "id": "US203",
+        "node_type": "US",
+        "name": "US203",
+        "description": "strato di crollo",
+        "data": {}
+      },
+      {
+        "id": "USM204",
+        "node_type": "USM",
+        "name": "USM204",
+        "description": "muro in opera incerta",
+        "data": {}
+      }
+    ],
+    "edges": [
+      {
+        "id": "USM101__has_first_epoch__EP_MED",
+        "edge_type": "has_first_epoch",
+        "source": "USM101",
+        "target": "EP_MED"
+      },
+      {
+        "id": "USV106__has_first_epoch__EP_MED",
+        "edge_type": "has_first_epoch",
+        "source": "USV106",
+        "target": "EP_MED"
+      },
+      {
+        "id": "US102__has_first_epoch__EP_MOD",
+        "edge_type": "has_first_epoch",
+        "source": "US102",
+        "target": "EP_MOD"
+      },
+      {
+        "id": "RSF100b__has_first_epoch__EP_MED",
+        "edge_type": "has_first_epoch",
+        "source": "RSF100b",
+        "target": "EP_MED"
+      },
+      {
+        "id": "SF100__has_first_epoch__EP_ROM",
+        "edge_type": "has_first_epoch",
+        "source": "SF100",
+        "target": "EP_ROM"
+      },
+      {
+        "id": "US102__is_after__USM101",
+        "edge_type": "is_after",
+        "source": "US102",
+        "target": "USM101"
+      },
+      {
+        "id": "USV106__is_after__USM101",
+        "edge_type": "is_after",
+        "source": "USV106",
+        "target": "USM101"
+      },
+      {
+        "id": "RSF100b__is_part_of__USM101",
+        "edge_type": "is_part_of",
+        "source": "RSF100b",
+        "target": "USM101"
+      },
+      {
+        "id": "RSF100b__changed_from__SF100",
+        "edge_type": "changed_from",
+        "source": "RSF100b",
+        "target": "SF100"
+      },
+      {
+        "id": "USM101__has_paradata_nodegroup__PD_USM101",
+        "edge_type": "has_paradata_nodegroup",
+        "source": "USM101",
+        "target": "PD_USM101"
+      },
+      {
+        "id": "USM101__has_property__P_MAT",
+        "edge_type": "has_property",
+        "source": "USM101",
+        "target": "P_MAT"
+      },
+      {
+        "id": "USM101__has_property__P_H",
+        "edge_type": "has_property",
+        "source": "USM101",
+        "target": "P_H"
+      },
+      {
+        "id": "USM101__has_property__P_DAT",
+        "edge_type": "has_property",
+        "source": "USM101",
+        "target": "P_DAT"
+      },
+      {
+        "id": "RSF100b__has_property__P_CAPH",
+        "edge_type": "has_property",
+        "source": "RSF100b",
+        "target": "P_CAPH"
+      },
+      {
+        "id": "P_MAT__is_in_paradata_nodegroup__PD_USM101",
+        "edge_type": "is_in_paradata_nodegroup",
+        "source": "P_MAT",
+        "target": "PD_USM101"
+      },
+      {
+        "id": "P_H__is_in_paradata_nodegroup__PD_USM101",
+        "edge_type": "is_in_paradata_nodegroup",
+        "source": "P_H",
+        "target": "PD_USM101"
+      },
+      {
+        "id": "P_DAT__is_in_paradata_nodegroup__PD_USM101",
+        "edge_type": "is_in_paradata_nodegroup",
+        "source": "P_DAT",
+        "target": "PD_USM101"
+      },
+      {
+        "id": "X1__is_in_paradata_nodegroup__PD_USM101",
+        "edge_type": "is_in_paradata_nodegroup",
+        "source": "X1",
+        "target": "PD_USM101"
+      },
+      {
+        "id": "P_DAT__has_data_provenance__X1",
+        "edge_type": "has_data_provenance",
+        "source": "P_DAT",
+        "target": "X1"
+      },
+      {
+        "id": "X1__extracted_from__D1",
+        "edge_type": "extracted_from",
+        "source": "X1",
+        "target": "D1"
+      },
+      {
+        "id": "USR201__has_first_epoch__EP_MED",
+        "edge_type": "has_first_epoch",
+        "source": "USR201",
+        "target": "EP_MED"
+      },
+      {
+        "id": "USS202__has_first_epoch__EP_MED",
+        "edge_type": "has_first_epoch",
+        "source": "USS202",
+        "target": "EP_MED"
+      },
+      {
+        "id": "US203__has_first_epoch__EP_MED",
+        "edge_type": "has_first_epoch",
+        "source": "US203",
+        "target": "EP_MED"
+      },
+      {
+        "id": "USR201__is_after__USM101",
+        "edge_type": "is_after",
+        "source": "USR201",
+        "target": "USM101"
+      },
+      {
+        "id": "US203__is_after__USS202",
+        "edge_type": "is_after",
+        "source": "US203",
+        "target": "USS202"
+      },
+      {
+        "id": "USM204__has_first_epoch__EP_MED",
+        "edge_type": "has_first_epoch",
+        "source": "USM204",
+        "target": "EP_MED"
+      },
+      {
+        "id": "USR201__is_after__USM204",
+        "edge_type": "is_after",
+        "source": "USR201",
+        "target": "USM204"
+      }
+    ],
+    "data": {}
+  },
+  "layout": {
+    "canvas": {
+      "title": "Generi (catena + USR/USS)",
+      "width": 478.0,
+      "height": 620.0
+    },
+    "swimlanes": [
+      {
+        "epoch_id": "EP_MOD",
+        "order": 0,
+        "y": 0.0,
+        "height": 80.0
+      },
+      {
+        "epoch_id": "EP_MED",
+        "order": 1,
+        "y": 80.0,
+        "height": 380.0
+      },
+      {
+        "epoch_id": "EP_ROM",
+        "order": 2,
+        "y": 460.0,
+        "height": 80.0
+      }
+    ],
+    "sectors": [],
+    "positions": {
+      "D1": {
+        "x": 166.52,
+        "y": 404.0,
+        "w": 24.96,
+        "h": 32.0
+      },
+      "D2": {
+        "x": 194.0,
+        "y": 564.0,
+        "w": 24.96,
+        "h": 32.0
+      },
+      "D3": {
+        "x": 248.96,
+        "y": 564.0,
+        "w": 24.96,
+        "h": 32.0
+      },
+      "PD_USM101": {
+        "x": 0.0,
+        "y": 254.0,
+        "w": 358.0,
+        "h": 118.0
+      },
+      "P_CAPH": {
+        "x": 388.0,
+        "y": 254.0,
+        "w": 90.0,
+        "h": 32.0
+      },
+      "P_DAT": {
+        "x": 134.0,
+        "y": 276.0,
+        "w": 90.0,
+        "h": 32.0
+      },
+      "P_H": {
+        "x": 254.0,
+        "y": 276.0,
+        "w": 90.0,
+        "h": 32.0
+      },
+      "P_MAT": {
+        "x": 14.0,
+        "y": 276.0,
+        "w": 90.0,
+        "h": 32.0
+      },
+      "RSF100b": {
+        "x": 120.0,
+        "y": 176.0,
+        "w": 90.0,
+        "h": 32.0
+      },
+      "SF100": {
+        "x": 194.0,
+        "y": 484.0,
+        "w": 90.0,
+        "h": 32.0
+      },
+      "US102": {
+        "x": 194.0,
+        "y": 24.0,
+        "w": 90.0,
+        "h": 32.0
+      },
+      "US203": {
+        "x": 240.0,
+        "y": 104.0,
+        "w": 90.0,
+        "h": 32.0
+      },
+      "USM101": {
+        "x": 106.0,
+        "y": 154.0,
+        "w": 118.0,
+        "h": 68.0
+      },
+      "USM204": {
+        "x": 254.0,
+        "y": 154.0,
+        "w": 90.0,
+        "h": 32.0
+      },
+      "USR201": {
+        "x": 120.0,
+        "y": 104.0,
+        "w": 90.0,
+        "h": 32.0
+      },
+      "USS202": {
+        "x": 374.0,
+        "y": 154.0,
+        "w": 90.0,
+        "h": 32.0
+      },
+      "USV106": {
+        "x": 0.0,
+        "y": 104.0,
+        "w": 90.0,
+        "h": 32.0
+      },
+      "X1": {
+        "x": 163.0,
+        "y": 326.0,
+        "w": 32.0,
+        "h": 32.0
+      }
+    },
+    "folded_groups": [],
+    "group_spaces": {},
+    "edge_routes": {},
+    "pinned": [],
+    "anchors": []
+  }
+}

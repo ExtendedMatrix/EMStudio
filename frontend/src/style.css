@@ -7902,7 +7902,9 @@ body.gesturing-resize * {
   gap: 8px;
   padding: 2px 6px;
 }
-.gl-icon { flex: none; width: 24px; height: 14px; display: inline-flex; align-items: center; justify-content: center; }
+.gl-icon { flex: none; width: 24px; height: 14px; display: inline-flex; align-items: center; justify-content: center; position: relative; }
+/* SPAZIO · the genre decorator on the legend's glyph, as the canvas draws it */
+.gl-icon > .gl-genre { position: absolute; right: 1px; bottom: -1px; font: 700 7px/1 var(--font-ui, sans-serif); pointer-events: none; }
 .gl-icon > img, .gl-icon > canvas, .gl-icon > .glyph-inline { max-width: 24px; max-height: 14px; width: 24px; height: 14px; object-fit: contain; }
 /* Help ▸ Legenda EM · the whole language, with a search */
 .modal.em-legend .modal-card { width: min(680px, 94vw); }

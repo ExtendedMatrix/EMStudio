@@ -3,7 +3,7 @@
 // metadata (palette.ts ← em_visual_rules.json). Edges are routed
 // orthogonally with crossing bridges (routing.ts), yEd-style.
 import { crispImage, dtcGlyphUrl, ICON_NODE_TYPES, imageFor, imageForUrl } from "./icons";
-import { dtcGlyphName } from "./rules";
+import { dtcGlyphName, stratigraphicKindLetter, stratigraphicKindOf } from "./rules";
 import { documentVariant, edgeInk, edgeStyle, nodeStyle } from "./palette";
 import {
   drawArrowhead,
@@ -220,6 +220,14 @@ function monoBorder(fill: string): string {
   const b = parseInt(h.slice(4, 6), 16);
   return (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255 > 0.5 ? "#000000" : "#FFFFFF";
 }
+
+// SPAZIO · the genre decorator: its letter (only for a known genre of the
+// datamodel) and its size, a fraction of the drawn height — 32 px box → 11 px.
+function genreLetterOf(n: { node: { node_type?: string; data?: unknown } }): string {
+  const kind = stratigraphicKindOf(n.node);
+  return kind ? stratigraphicKindLetter(kind) : "";
+}
+const genreSize = (drawnH: number): number => Math.max(6, drawnH * 0.34);
 
 // Decorator geometry — the chip side AT 100% ZOOM, in CSS px.
 //
@@ -1086,7 +1094,10 @@ export function render(
       );
       ctx.textAlign = "center";
       ctx.textBaseline = captionOutside ? "top" : "middle";
-      const maxW = n.w - 8;
+      // a genre decorator takes the bottom-right corner: the name keeps its
+      // centre and gives up the same width on both sides
+      const kindLetter = genreLetterOf(n);
+      const maxW = n.w - 8 - (kindLetter && !captionOutside ? 2 * genreSize(sh) : 0);
       let text = label;
       if (ctx.measureText(text).width > maxW) {
         while (text.length > 2 && ctx.measureText(text + "…").width > maxW)
@@ -1098,6 +1109,26 @@ export function render(
         n.x + n.w / 2,
         captionOutside ? sy + sh + 1 : n.y + n.h / 2,
       );
+    }
+
+    // SPAZIO · the GENRE of a US (node datamodel `stratigraphic_kind`): a small
+    // letter — M masonry, R coating, from the datamodel's default code — in the
+    // bottom-right corner INSIDE the drawing, in the colour of its border. The
+    // EM colours and the shape do not change (E.D., 30 Sep 2026); the other
+    // corners are taken (warning top-left, lock/use-count/ornaments top-right,
+    // PD tablet bottom-left, the AI chip just outside bottom-right, the handle on
+    // the right edge at mid-height).
+    {
+      const letter = genreLetterOf(n);
+      if (letter) {
+        const gs = genreSize(sh);
+        ctx.font = canvasFont(700, gs);
+        ctx.fillStyle = borderCol;
+        ctx.textAlign = "right";
+        ctx.textBaseline = "alphabetic";
+        const inset = Math.max(st.borderWidth, 1.4 / vp.scale) + gs * 0.18;
+        ctx.fillText(letter, sx + sw - inset, sy + sh - inset);
+      }
     }
 
     // folded-group badge (count of hidden nodes)

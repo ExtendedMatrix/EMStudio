@@ -912,3 +912,52 @@ export function edgeEndpointClasses(edgeType: string | undefined): Set<string> {
     for (const a of classAncestors(c)) out.add(a);
   return out;
 }
+
+// ── the genres of a US (node datamodel 1.6.12–1.6.13) ─────────────────────────
+// `US.properties.stratigraphic_kind`: masonry, coating. USM and USR/USS are
+// recording PRACTICES, not types (E.D., 30 Sep 2026): the node IS a US, and the
+// genre is an element of it. The EM colours do not change with the genre; the
+// glyph gets a DECORATOR — the letter of its default code after the «US» of the
+// type (USM → M, USR → R), read here, never written in the UI.
+interface StratigraphicKindRule {
+  values?: Record<string, string>;
+  labels?: Record<string, string>;
+  codes?: Record<string, string[]>;
+  default_code?: Record<string, string>;
+}
+const _US_KIND_RULE: StratigraphicKindRule = ((nodeDatamodel as unknown as {
+  stratigraphic_nodes?: { StratigraphicNode?: { subtypes?: { US?: {
+    abbreviation?: string; properties?: { stratigraphic_kind?: StratigraphicKindRule } } } } };
+}).stratigraphic_nodes?.StratigraphicNode?.subtypes?.US?.properties?.stratigraphic_kind) ?? {};
+const _KIND_TRANSLATIONS = (
+  datamodelTranslations as {
+    stratigraphic_kinds?: Record<string, { label?: Record<string, string | boolean> }>;
+  }
+).stratigraphic_kinds ?? {};
+
+/** The genres the datamodel declares for a US, in its order. */
+export function stratigraphicKinds(): string[] {
+  return Object.keys(_US_KIND_RULE.values ?? {});
+}
+
+/** A genre's label in the active locale (translations, section
+ *  `stratigraphic_kinds`), then the datamodel's English label, then the value. */
+export function stratigraphicKindLabel(kind: string): string {
+  const loc = _KIND_TRANSLATIONS[kind]?.label?.[getLocale()];
+  if (typeof loc === "string" && loc.trim()) return loc;
+  return _US_KIND_RULE.labels?.[kind] ?? kind;
+}
+
+/** The decorator's letter: the default code minus the «US» it shares with the
+ *  type (`default_code.masonry` = USM → «M», `coating` = USR → «R»). */
+export function stratigraphicKindLetter(kind: string): string {
+  const code = _US_KIND_RULE.default_code?.[kind] ?? "";
+  const letter = code.startsWith("US") ? code.slice(2) : code;
+  return letter.slice(0, 1).toUpperCase();
+}
+
+/** The genre a node carries — only a known value of the datamodel counts. */
+export function stratigraphicKindOf(node: { data?: unknown } | null | undefined): string | null {
+  const k = (node?.data as Record<string, unknown> | undefined)?.stratigraphic_kind;
+  return typeof k === "string" && k in (_US_KIND_RULE.values ?? {}) ? k : null;
+}

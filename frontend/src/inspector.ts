@@ -1,7 +1,7 @@
 import { t } from "./i18n";
 import type { DocumentStore } from "./model";
 import { edgeStyle, nodeStyle } from "./palette";
-import { classOf, conceptParts, isGroupType, isStratigraphicType, nodeElements } from "./rules";
+import { classOf, conceptParts, isGroupType, isStratigraphicType, nodeElements, stratigraphicKindLabel, stratigraphicKindOf } from "./rules";
 import { BADGE_RULES, resolveEffective, sourceLabel } from "./funnel";
 import type { AuthorityCandidate, EmEdge, EmNode } from "./types";
 import { qualiaList } from "./vocab";
@@ -195,11 +195,12 @@ export function renderInspector(
   const head = el("div", "insp-head");
   const st = nodeStyle(node.node_type);
   // the genre of a unit, when the datamodel gives it one (1.6.12
-  // `stratigraphic_kind`): «US · muraria». The type and its glyph stay the US's.
-  const kindOf = String(((node.data ?? {}) as Record<string, unknown>).stratigraphic_kind ?? "");
-  const kindKey = `insp.kind.${kindOf}`;
+  // `stratigraphic_kind`): «US · muraria», «US · di rivestimento», the label
+  // from the translations' `stratigraphic_kinds`. The type and its glyph stay
+  // the US's.
+  const kindOf = stratigraphicKindOf(node);
   const chip = el("span", "insp-chip",
-    kindOf ? `${node.node_type} · ${t(kindKey) === kindKey ? kindOf : t(kindKey)}` : node.node_type);
+    kindOf ? `${node.node_type} · ${stratigraphicKindLabel(kindOf)}` : node.node_type);
   chip.style.background = st.fill;
   chip.style.color = st.textColor;
   chip.style.borderColor = st.border;
@@ -317,11 +318,10 @@ export function renderInspector(
         row.appendChild(el("span", "insp-element-note", t("insp.elLabelOnly")));
       }
     } else {
-      // an enum value of the datamodel reads in the active locale when the UI
-      // has a word for it (`insp.kind.<value>`), else as the datamodel writes it
-      const vKey = `insp.kind.${String(raw)}`;
+      // the genre reads in the active locale (translations `stratigraphic_kinds`),
+      // any other value as the datamodel writes it
       row.appendChild(el("span", "insp-element-label",
-        rule.value === "enum" && t(vKey) !== vKey ? t(vKey) : String(raw)));
+        rule.field === "stratigraphic_kind" ? stratigraphicKindLabel(String(raw)) : String(raw)));
     }
     root.appendChild(row);
   }
