@@ -33,6 +33,31 @@ ok(lazy.length < inline.length / 3, `web build · the module is a fraction of th
 const pkg = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
 ok(/EM_LAZY_3D=1/.test(pkg.scripts["build:web"]) && /build:engine3d/.test(pkg.scripts["build:web"]),
    "build:web · lazy editor + engine3d.js + reader");
+
+// MICRO-3DTILES · 3DTilesRendererJS the same way, and AFTER three: inline in the
+// single file; in the web build fetched as `tiles3d.js` the first time a TILESET
+// opens — and that file takes three from `engine3d.js`, never a copy of its own
+const TILES = "TilesRenderer: tiles versions at 1.1";
+ok(inline.includes(TILES), "inline build · 3DTilesRendererJS is in the file (desktop, file://)");
+ok(!lazy.includes(TILES), "web build · 3DTilesRendererJS is NOT in the page");
+ok(lazy.includes("tiles3d.js"), "web build · …it asks for tiles3d.js, when a tileset opens");
+ok(/build:tiles3d/.test(pkg.scripts["build:web"]) && /EM_ENTRY=tiles3d/.test(pkg.scripts["build:tiles3d"]),
+   "build:web · + tiles3d.js");
+const tl = await esbuild.build({ entryPoints: [`${SRC}tiles3d-entry.ts`], bundle: true, format: "esm", write: false,
+  external: ["three", "three/*"], logLevel: "silent" });
+const tlText = tl.outputFiles[0].text;
+ok(!tlText.includes("THREE.WebGLRenderer:"), "tiles3d.js · no three of its own");
+// every name it takes from three (or three's addons) is one engine3d.js exports
+const wanted = new Set();
+for (const m of tlText.matchAll(/import\s*\{([^}]*)\}\s*from\s*"(three[^"]*)"/g))
+  for (const part of m[1].split(",")) { const n = part.trim().split(/\s+as\s+/)[0]; if (n) wanted.add(n); }
+const three = await import("three");
+const entry = readFileSync(`${SRC}engine3d-entry.ts`, "utf8");
+const missing = [...wanted].filter((n) => !(n in three) && !new RegExp(`\\b${n}\\b`).test(entry));
+ok(wanted.size > 20 && !missing.length, `tiles3d.js · its ${wanted.size} imports are all exported by engine3d.js (missing: ${missing.join(", ") || "none"})`);
+ok(/export \* from "three"/.test(entry), "engine3d.js · three's named exports, for tiles3d.js");
+const vite = readFileSync(new URL("../vite.config.ts", import.meta.url), "utf8");
+ok(/"\.\/engine3d\.js"/.test(vite) && /THREE_EXTERNAL/.test(vite), "vite · tiles3d.js has three external, pointed at ./engine3d.js");
 const docker = readFileSync(new URL("../../Dockerfile", import.meta.url), "utf8");
 ok(/RUN npm run build:web/.test(docker), "Dockerfile · the served image is the web build");
 const tauri = JSON.parse(readFileSync(new URL("../../apps/desktop/src-tauri/tauri.conf.json", import.meta.url), "utf8"));

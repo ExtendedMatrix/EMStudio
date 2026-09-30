@@ -14,3 +14,10 @@ export { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 export { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 // SPAZIO · the proxies' convex hulls (the Scena 3D draws them as they are)
 export { ConvexGeometry } from "three/examples/jsm/geometries/ConvexGeometry.js";
+// MICRO-3DTILES · three's NAMED exports too, and the one helper 3DTilesRendererJS
+// takes from three's addons: `tiles3d.js` is built with three EXTERNAL and its
+// imports rewritten to this file (`vite.config.ts`), so the page holds ONE three —
+// two copies would each have their own classes, and `instanceof` between a
+// tile's mesh and the scene's raycaster would quietly fail.
+export * from "three";
+export { estimateBytesUsed } from "three/examples/jsm/utils/BufferGeometryUtils.js";

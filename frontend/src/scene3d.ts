@@ -21,8 +21,9 @@
  * never on an epoch change or a toggle: the reader's point of view is theirs
  * (MICRO-RIFINITURE). three.js is the lazy engine of `embed3d-native.ts`.
  */
-import { engine } from "./embed3d-native";
+import { engine, tilesBarTexts } from "./embed3d-native";
 import { onFirstVisible } from "./lazy";
+import { createTilesLayer, isTilesetUrl, tilesBar, tilesEngine, type TilesLayer } from "./tiles3d";
 
 export interface SceneItem {
   kind: "rm" | "proxy";
@@ -65,8 +66,11 @@ export interface SpaceSceneOptions {
 
 interface Drawn {
   item: SceneItem;
-  /** what was drawn: a mesh, a contour, or only a label */
-  as: "mesh" | "contour" | "label" | "pending";
+  /** what was drawn: a mesh, a contour, or only a label — MICRO-3DTILES: a
+   *  tileset */
+  as: "mesh" | "contour" | "label" | "pending" | "tiles";
+  /** the file actually drawn (a tileset) */
+  url?: string;
 }
 
 export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): SpaceSceneHandle {
@@ -81,8 +85,11 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
     __space?: () => unknown;
     __spaceScreenOf?: (id: string) => { x: number; y: number } | null;
     __spaceCamera?: () => number[];
+    __spaceTiles?: () => unknown;
+    __spaceTileScreenOf?: (uri: string) => { x: number; y: number } | null;
   };
-  probe.__space = () => [...drawn.values()].map((d) => ({ kind: d.item.kind, id: d.item.id, state: d.item.state, as: d.as }));
+  probe.__space = () => [...drawn.values()].map((d) => ({ kind: d.item.kind, id: d.item.id, state: d.item.state, as: d.as,
+    ...(d.url ? { url: d.url } : {}) }));
 
   const status = document.createElement("div");
   status.className = "scn-status";
@@ -131,9 +138,56 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
       const pickables: any[] = [];
       const unitCentres = new Map<string, any>();
 
+      // MICRO-3DTILES · the tilesets of the scene (one layer per tileset url,
+      // kept across rebuilds: a tileset is not re-fetched when a toggle flips)
+      type Live = { layer: TilesLayer; bar: ReturnType<typeof tilesBar>; ready: Promise<void>; itemId: string };
+      const layers = new Map<string, Live>();
+      const strips = document.createElement("div");
+      strips.className = "scn-strips";
+      let T: any = null;
+      const liveLayers = () => [...layers.values()].filter((l) => l.layer.object.parent === content);
+      const ensureLayer = async (url: string, itemId: string): Promise<Live | null> => {
+        let live = layers.get(url);
+        if (live) { live.itemId = itemId; return live; }
+        try { T = T ?? await tilesEngine(); } catch { return null; }
+        const layer = createTilesLayer(E, T, url, camera, renderer, {});
+        const bar = tilesBar(layer, tilesBarTexts());
+        // ready = the root's first tile, or its failure (the frame waits for it)
+        const ready = new Promise<void>((res) => {
+          const t0 = setTimeout(res, 8000);
+          // the root's volume is enough to frame and to label: the tiles come after
+          layer.onChange(() => { const st = layer.status(); if (layer.rootReady() || st.failed) { clearTimeout(t0); res(); } });
+        });
+        live = { layer, bar, ready, itemId };
+        layers.set(url, live);
+        return live;
+      };
+      probe.__spaceTiles = () => liveLayers().map((l) => ({ id: l.itemId, files: l.layer.loadedFiles(), status: l.layer.status() }));
+      probe.__spaceTileScreenOf = (uri: string) => {
+        for (const l of liveLayers()) {
+          const c = l.layer.centreOf(uri);
+          if (!c) continue;
+          const v = c.clone().project(camera);
+          const r = renderer.domElement.getBoundingClientRect();
+          return { x: r.left + ((v.x + 1) / 2) * r.width, y: r.top + ((1 - v.y) / 2) * r.height };
+        }
+        return null;
+      };
+      const stripOf = (item: SceneItem): HTMLElement => {
+        const el = document.createElement("div");
+        el.className = "v3d-strip";
+        el.dataset.id = item.id;
+        const b = document.createElement("b");
+        b.textContent = item.label;
+        el.appendChild(b);
+        strips.appendChild(el);
+        return el;
+      };
+
       const extent = (): any => {
         const b = new THREE.Box3();
-        for (const c of content.children) if (!c.userData.contour) b.expandByObject(c);
+        for (const c of content.children) if (!c.userData.contour && !c.userData.tiles) b.expandByObject(c);
+        for (const l of liveLayers()) { const lb = l.layer.bounds(); if (lb) b.union(lb); }
         return b.isEmpty() ? new THREE.Box3(new THREE.Vector3(-0.5, 0, -0.5), new THREE.Vector3(0.5, 1, 0.5)) : b;
       };
       const addLabel = (text: string, at: any, cls: string, id?: string) => {
@@ -189,9 +243,34 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
         pickables.length = 0;
         unitCentres.clear();
         drawn.clear();
+        strips.textContent = "";
         const pending: Promise<void>[] = [];
         const later: SceneItem[] = [];      // contours and labels: after the meshes, around them
+        const used = new Set<string>();
         for (const item of items) {
+          const key = `${item.kind}:${item.id}`;
+          // MICRO-3DTILES · a tileset
+          const tsUrl = item.state === "resident" && item.url && isTilesetUrl(item.url) ? item.url : null;
+          if (tsUrl) {
+            used.add(tsUrl);
+            drawn.set(key, { item, as: "pending", url: tsUrl });
+            const el = stripOf(item);
+            pending.push(ensureLayer(tsUrl, item.id).then(async (live) => {
+              if (gen !== generation || disposed) return;
+              if (!live) { drawn.set(key, { item: { ...item, state: "missing" }, as: "label" }); later.push({ ...item, state: "missing" }); return; }
+              live.layer.object.userData.tiles = true;
+              live.layer.object.traverse((o: any) => { o.userData.rmId = item.id; });
+              content.add(live.layer.object);
+              el.appendChild(live.bar.el);
+              live.bar.refresh();
+              await live.ready;
+              if (gen !== generation || disposed) return;
+              const bb = live.layer.bounds();
+              if (bb) addLabel(item.label, new THREE.Vector3((bb.min.x + bb.max.x) / 2, bb.max.y, (bb.min.z + bb.max.z) / 2), "rm", item.id);
+              drawn.set(key, { item, as: "tiles", url: tsUrl });
+            }));
+            continue;
+          }
           if (item.state === "resident" && item.url) {
             drawn.set(`${item.kind}:${item.id}`, { item, as: "pending" });
             pending.push(load(item.url).then((root) => {
@@ -240,6 +319,7 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
             drawn.set(`${item.kind}:${item.id}`, { item, as: "mesh" });
           } else later.push(item);
         }
+        for (const [u, l] of layers) if (!used.has(u)) { l.layer.dispose(); layers.delete(u); }
         void Promise.all(pending).then(() => {
           if (gen !== generation || disposed) return;
           const b = extent();
@@ -293,10 +373,14 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
       };
       probe.__spaceCamera = () => [...camera.position.toArray(), ...controls.target.toArray()].map((x: number) => Math.round(x * 1000) / 1000);
       let raf = 0;
+      let frames = 0;
       const tick = () => {
         if (disposed) return;
         raf = requestAnimationFrame(tick);
         controls.update();
+        const live = liveLayers();
+        for (const l of live) l.layer.update();
+        if (live.length && ++frames % 20 === 0) for (const l of live) l.bar.refresh();
         renderer.render(scene, camera);
         place();
       };
@@ -310,7 +394,16 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
         if (moved) return;
         const r = renderer.domElement.getBoundingClientRect();
         ray.setFromCamera(new THREE.Vector2(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1), camera);
-        const hits = ray.intersectObjects(pickables, false);
+        // MICRO-3DTILES · «Più dettaglio qui» armed on a tileset: the click is its
+        const armed = liveLayers().find((l) => l.bar.armed());
+        if (armed) {
+          const th = ray.intersectObject(armed.layer.object, true)[0];
+          armed.bar.picked(th ? armed.layer.refineAt(th.object) : "none");
+          return;
+        }
+        const tileHits = liveLayers().flatMap((l) => ray.intersectObject(l.layer.object, true)
+          .map((h: any) => ({ ...h, object: { ...h.object, userData: { rmId: l.itemId } } })));
+        const hits = [...ray.intersectObjects(pickables, false), ...tileHits].sort((a: any, b: any) => a.distance - b.distance);
         // a proxy wins over the model it sits in: that is what a click means here
         const hit = hits.find((x: any) => x.object.userData.unitId) ?? hits[0];
         if (!hit) return;
@@ -324,13 +417,18 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
         renderer.setSize(w, h);
         camera.aspect = w / h;
         camera.updateProjectionMatrix();
+        for (const l of layers.values()) l.layer.resize();
       });
       ro.observe(host);
       status.remove();
       host.prepend(renderer.domElement);
       host.appendChild(labels);
+      host.appendChild(strips);
       cleanup = () => {
         cancelAnimationFrame(raf);
+        for (const l of layers.values()) l.layer.dispose();
+        layers.clear();
+        strips.remove();
         ro.disconnect();
         controls.dispose();
         renderer.dispose();

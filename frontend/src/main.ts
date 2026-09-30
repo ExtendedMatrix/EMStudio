@@ -212,6 +212,7 @@ import { openReadingBubble, type BubbleUnit } from "./reading-bubble";
 import { renderChronology, type ChronoEpoch, type ChronologyData } from "./chronology";
 import { buildSpace, type Space } from "./space";
 import { mountSpaceScene, type SceneItem } from "./scene3d";
+import { isTilesetUrl } from "./tiles3d";
 import { KEYMAP, filterKeymap, keysText } from "./keymap";
 import { ReadingFiles } from "./reading-files";
 import * as aiv from "./ai-validation";
@@ -430,6 +431,7 @@ import {
   collectionFromFolder,
   collectionFromUrl,
   fsFileUrl,
+  fsTreeUrl,
   fsList,
   isDecodable,
   kindOfExt,
@@ -1595,6 +1597,8 @@ window.__EM_SCENE__ = () => {
     return g?.regionId && store ? chain.measureOf(store.doc, g.regionId) : null;
   },
   measureRegion: (id: string) => (store ? chain.measureOf(store.doc, id) : null),
+  /** MICRO-3DTILES · a document asked for, as «Apri» asks: the Doc that shows it */
+  openDoc: (docId: string) => requestDoc(docId, { from: activeWin(), reading: null })?.id ?? null,
   /** SPAZIO · a Doc split by hand (the corner gesture's split), its new id */
   splitDoc: (winId: string) => {
     const made = splitWindow(winId, "row", activeWorkspace(), 0.5, "b");
@@ -14802,10 +14806,17 @@ function docMediaUrl(d: EmNode): string | null {
     .map((e) => viewerSourceOf(st.node(e.target) ?? null)).find(Boolean) ?? null;
   const src = own ?? linked;
   if (!src) return null;
+  return docSrcUrl(src);
+}
+
+/** A locator → a URL the page can fetch (cached; a repaint follows). A
+ *  TILESET on disk goes through `/fs/at/` so its tiles resolve beside it. */
+function docSrcUrl(src: string): string | null {
   if (viewerIsFetchable(src) || src.startsWith("/em/") || src.startsWith("./")) return src;
   if (docUrlCache.has(src)) return docUrlCache.get(src) ?? null;
   docUrlCache.set(src, null);
-  void fsFileUrl(src).then((u) => { docUrlCache.set(src, u); renderDocView(); }).catch(() => { /* unreachable: stays null */ });
+  void (isTilesetUrl(src) ? fsTreeUrl(src) : fsFileUrl(src))
+    .then((u) => { docUrlCache.set(src, u); renderDocView(); }).catch(() => { /* unreachable: stays null */ });
   return null;
 }
 

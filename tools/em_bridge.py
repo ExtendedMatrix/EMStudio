@@ -49,6 +49,8 @@ Endpoints:
                              ⚠ ALL `/fs/*` need an allowed `Origin` or
                              `Sec-Fetch-Site: same-origin` — stricter than the
                              other routes, because these read the disk.
+    GET  /fs/at/<path>        → the same bytes, the path IN the URL path, so a
+                             tileset's relative tiles resolve (MICRO-3DTILES)
     GET  /fs/file?path=<file> → the BYTES, with the right Content-Type
                              (W1 — a browser cannot read a disk path: served over
                              http, `/Users/…/x.jpg` resolves against the origin and
@@ -169,6 +171,7 @@ import io
 import json
 import os
 import pathlib
+import re
 import sys
 import threading
 import time
@@ -185,6 +188,18 @@ _ALLOWED_EXTRA_ORIGINS = {
     o.strip() for o in os.environ.get("EM_BRIDGE_ALLOW_ORIGIN", "").split(",")
     if o.strip()
 }
+
+
+def _fs_at_path(url_path):
+    """MICRO-3DTILES · `/fs/at/<path>` → the path it names.
+
+    `/fs/at/Users/x/t/tileset.json` is `/Users/x/t/tileset.json`; a `~` or a
+    drive letter (`C:/…`) first stays as it is. Percent-decoded once. The gate
+    is `_fs_resolve`'s, the same as `/fs/file`: realpath inside the roots."""
+    raw = urllib.parse.unquote(url_path[len("/fs/at/"):])
+    if raw.startswith("~") or re.match(r"^[A-Za-z]:", raw):
+        return raw
+    return "/" + raw
 
 
 #: Directories `/fs/list` and `/fs/file` may reach (W1), from `--fs-root`
@@ -601,6 +616,13 @@ def make_handler(api):
                     return
                 q = urllib.parse.parse_qs(parsed.query)
                 self._fs_file((q.get("path") or [""])[0], body=body)
+            elif route.startswith("/fs/at/"):
+                # MICRO-3DTILES · the same bytes as /fs/file, the path IN the
+                # URL's path, so what a file names relatively resolves beside
+                # it (a tileset's tiles, a .gltf's .bin)
+                if not self._fs_gate():
+                    return
+                self._fs_file(_fs_at_path(parsed.path), body=body)
             elif route == "/fs/checksum":
                 if not self._fs_gate():
                     return
@@ -641,8 +663,12 @@ def make_handler(api):
                     return
                 q = urllib.parse.parse_qs(parsed.query)
                 self._fs_file((q.get("path") or [""])[0], body=False)
+            elif parsed.path.startswith("/fs/at/"):
+                if not self._fs_gate():
+                    return
+                self._fs_file(_fs_at_path(parsed.path), body=False)
             else:
-                self.send_error(405, "HEAD is served only for /fs/file")
+                self.send_error(405, "HEAD is served only for /fs/file and /fs/at/")
 
         def do_POST(self):
             if not self._gate():

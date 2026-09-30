@@ -8475,3 +8475,26 @@ button.shelf-badge { cursor: pointer; font: inherit; font-size: 10.5px; }
   #workspace-bar .ws-tab, #workspace-bar > * { padding-left: 6px; padding-right: 6px; gap: 4px; }
   #toolbar .dd-toggle { padding-left: 6px; padding-right: 6px; }
 }
+
+/* MICRO-3DTILES · the strip of a tileset (its controls): the 3D stage's own
+   header, above the canvas */
+.v3d-strip { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 5px 38px 5px 8px;
+  border-bottom: 1px solid var(--border); background: var(--bg-panel); font-size: 0.78rem; }
+.v3d-strip.hidden { display: none; }
+.tl-bar { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; min-width: 0; }
+.tl-seg { display: inline-flex; border: 1px solid var(--border-strong); border-radius: var(--radius-sm); overflow: hidden; }
+.tl-seg button { border: 0; border-right: 1px solid var(--border); background: var(--bg-panel); color: var(--text);
+  font: inherit; padding: 2px 9px; cursor: pointer; }
+.tl-seg button:last-child { border-right: 0; }
+.tl-seg button[aria-pressed="true"] { background: var(--accent); color: var(--on-accent); }
+.tl-more, .tl-less { border: 1px solid var(--border-strong); background: var(--bg-panel); color: var(--text);
+  border-radius: var(--radius-sm); padding: 2px 8px; font: inherit; cursor: pointer; }
+.tl-more[aria-pressed="true"] { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); background: var(--bg-accent-soft); }
+.tl-more:disabled, .tl-less:disabled { opacity: 0.45; cursor: default; }
+.tl-status { color: var(--text-muted); font-variant-numeric: tabular-nums; }
+.tl-status.bad { color: var(--danger); }
+.rd-3d-host:has(.tl-bar.armed) canvas, .scn-host:has(.tl-bar.armed) canvas { cursor: crosshair; }
+/* the Scena 3D: one strip per tileset, under its bar */
+.scn-strips { position: absolute; left: 8px; right: 8px; bottom: 8px; z-index: 3; display: flex; flex-direction: column; gap: 4px; pointer-events: none; }
+.scn-strips .v3d-strip { pointer-events: auto; border: 1px solid var(--border); border-radius: var(--radius-sm); padding-right: 8px; }
+.scn-strips .v3d-strip b { font-weight: 600; }

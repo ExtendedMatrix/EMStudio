@@ -1,0 +1,188 @@
+{
+  "header": {
+    "format": "em.json",
+    "version": "1.0",
+    "datamodel_versions": {
+      "connections": "1.6.29",
+      "nodes": "1.6.15",
+      "qualia": "1.6.2"
+    },
+    "ontology_versions": {}
+  },
+  "graph": {
+    "graph_id": "tiles-prova",
+    "name": "Tile e LOD (MICRO-3DTILES-LOD)",
+    "description": "fixture: un tileset 3DSC-like, una nuvola in tile",
+    "nodes": [
+      {
+        "id": "EP_MOD",
+        "node_type": "EpochNode",
+        "name": "Età moderna",
+        "description": "",
+        "data": {
+          "end_time": 2026,
+          "start_time": 1900
+        }
+      },
+      {
+        "id": "US1",
+        "node_type": "US",
+        "name": "US 1",
+        "description": "Crollo del muro",
+        "data": {}
+      },
+      {
+        "id": "D1",
+        "node_type": "document",
+        "name": "D.1",
+        "description": "Rilievo 3D in tile (3DSC)",
+        "data": {
+          "geometry": "reality_based"
+        }
+      },
+      {
+        "id": "RM1",
+        "node_type": "representation_model",
+        "name": "Rilievo in tile",
+        "description": "",
+        "data": {}
+      },
+      {
+        "id": "RES_TS",
+        "node_type": "resource",
+        "name": "tiles-prova",
+        "description": "",
+        "data": {
+          "checksum": "sha256:71c3e661f6ca682b93f1090f97f850dd224c07ef2eac97a16322e4d65cb49a92",
+          "checksum_of": "entry-point",
+          "packaging": "directory",
+          "residency": "resident",
+          "tier": "distribution",
+          "url": "/em/studio/testdata/tiles-prova/tileset.json",
+          "url_type": "3d_model"
+        }
+      },
+      {
+        "id": "D4",
+        "node_type": "document",
+        "name": "D.4",
+        "description": "Nuvola di punti in tile",
+        "data": {
+          "geometry": "reality_based"
+        }
+      },
+      {
+        "id": "RES_PTS",
+        "node_type": "resource",
+        "name": "tiles-punti",
+        "description": "",
+        "data": {
+          "checksum": "sha256:3160d3ff71f87b30fe073906ae368b326a52d3ca3d67d18182d33a3ba9d93196",
+          "checksum_of": "entry-point",
+          "packaging": "directory",
+          "residency": "resident",
+          "url": "/em/studio/testdata/tiles-punti/tileset.json",
+          "url_type": "3d_model"
+        }
+      }
+    ],
+    "edges": [
+      {
+        "id": "US1__has_first_epoch__EP_MOD",
+        "edge_type": "has_first_epoch",
+        "source": "US1",
+        "target": "EP_MOD"
+      },
+      {
+        "id": "D1__has_linked_resource__RES_TS",
+        "edge_type": "has_linked_resource",
+        "source": "D1",
+        "target": "RES_TS"
+      },
+      {
+        "id": "D1__has_representation_model__RM1",
+        "edge_type": "has_representation_model",
+        "source": "D1",
+        "target": "RM1"
+      },
+      {
+        "id": "EP_MOD__has_representation_model__RM1",
+        "edge_type": "has_representation_model",
+        "source": "EP_MOD",
+        "target": "RM1"
+      },
+      {
+        "id": "RM1__has_linked_resource__RES_TS",
+        "edge_type": "has_linked_resource",
+        "source": "RM1",
+        "target": "RES_TS"
+      },
+      {
+        "id": "D4__has_linked_resource__RES_PTS",
+        "edge_type": "has_linked_resource",
+        "source": "D4",
+        "target": "RES_PTS"
+      }
+    ],
+    "data": {}
+  },
+  "layout": {
+    "canvas": {
+      "title": "Tile e LOD (MICRO-3DTILES-LOD)",
+      "width": 210.0,
+      "height": 260.0
+    },
+    "swimlanes": [
+      {
+        "epoch_id": "EP_MOD",
+        "order": 0,
+        "y": 0.0,
+        "height": 80.0
+      }
+    ],
+    "sectors": [],
+    "positions": {
+      "D1": {
+        "x": 0.0,
+        "y": 104.0,
+        "w": 24.96,
+        "h": 32.0
+      },
+      "D4": {
+        "x": 54.96,
+        "y": 104.0,
+        "w": 24.96,
+        "h": 32.0
+      },
+      "RES_PTS": {
+        "x": 120.0,
+        "y": 154.0,
+        "w": 90.0,
+        "h": 32.0
+      },
+      "RES_TS": {
+        "x": 0.0,
+        "y": 204.0,
+        "w": 90.0,
+        "h": 32.0
+      },
+      "RM1": {
+        "x": 0.0,
+        "y": 154.0,
+        "w": 90.0,
+        "h": 32.0
+      },
+      "US1": {
+        "x": 60.0,
+        "y": 24.0,
+        "w": 90.0,
+        "h": 32.0
+      }
+    },
+    "folded_groups": [],
+    "group_spaces": {},
+    "edge_routes": {},
+    "pinned": [],
+    "anchors": []
+  }
+}

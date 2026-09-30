@@ -1,0 +1,54 @@
+{
+  "asset": {
+    "version": "1.0",
+    "generator": "EMStudio make-tiles-fixture"
+  },
+  "geometricError": 8,
+  "root": {
+    "boundingVolume": {
+      "box": [
+        2,
+        2,
+        0.25,
+        2,
+        0,
+        0,
+        0,
+        2,
+        0,
+        0,
+        0,
+        0.25
+      ]
+    },
+    "geometricError": 2,
+    "refine": "ADD",
+    "content": {
+      "uri": "punti.pnts"
+    },
+    "children": [
+      {
+        "boundingVolume": {
+          "box": [
+            2,
+            2,
+            0.25,
+            2,
+            0,
+            0,
+            0,
+            2,
+            0,
+            0,
+            0,
+            0.25
+          ]
+        },
+        "geometricError": 0,
+        "content": {
+          "uri": "punti-fini.glb"
+        }
+      }
+    ]
+  }
+}

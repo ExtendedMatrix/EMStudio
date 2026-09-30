@@ -12,7 +12,8 @@
     "build:all": "npm run build && npm run build:reader",
     "build:reader": "EM_ENTRY=reader vite build",
     "build:engine3d": "EM_ENTRY=engine3d vite build",
-    "build:web": "EM_LAZY_3D=1 npm run build && npm run build:engine3d && npm run build:reader"
+    "build:web": "EM_LAZY_3D=1 npm run build && npm run build:engine3d && npm run build:tiles3d && npm run build:reader",
+    "build:tiles3d": "EM_ENTRY=tiles3d vite build"
   },
   "devDependencies": {
     "linkedom": "^0.18.13",
@@ -26,6 +27,7 @@
     "@tauri-apps/plugin-dialog": "^2.7.1",
     "@tauri-apps/plugin-fs": "^2.5.1",
     "@types/three": "^0.185.4",
+    "3d-tiles-renderer": "0.5.3",
     "three": "^0.185.1"
   }
 }

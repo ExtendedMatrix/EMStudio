@@ -51,7 +51,11 @@ const versionFollowsPackageJson = (): Plugin => ({
 // narrative renderer, the embeds, the palette — so the viewer is a second ENTRY,
 // never a second implementation.
 const entry = process.env.EM_ENTRY === "reader" ? "reader"
-  : process.env.EM_ENTRY === "engine3d" ? "engine3d" : "index";
+  : process.env.EM_ENTRY === "engine3d" ? "engine3d"
+  : process.env.EM_ENTRY === "tiles3d" ? "tiles3d" : "index";
+// MICRO-3DTILES · `tiles3d.js` takes three from `engine3d.js`, beside it: one
+// three on the page (see `engine3d-entry.ts`)
+const THREE_EXTERNAL = /^three($|\/)/;
 // RIFINITURE · the web build of the editor leaves three.js out of the single
 // file and fetches `engine3d.js` when a model opens (`npm run build:web`)
 const lazy3d = process.env.EM_LAZY_3D === "1";
@@ -84,9 +88,14 @@ const devBase = process.env.EM_DEV_BASE || "/em/studio/";
 function minifyWholeChunk(): Plugin {
   return {
     name: "em-minify-engine3d",
-    async renderChunk(code, chunk) {
-      const r = await transformWithEsbuild(code, chunk.fileName, { minify: true, format: "esm" });
-      return { code: r.code, map: null };
+    // MICRO-3DTILES · AFTER Vite's own lib-mode pass, which puts the whitespace
+    // back (measured: engine3d.js had 20 657 lines, tiles3d.js 1 918)
+    enforce: "post",
+    async generateBundle(_opts, bundle) {
+      for (const chunk of Object.values(bundle)) {
+        if (chunk.type !== "chunk") continue;
+        chunk.code = (await transformWithEsbuild(chunk.code, chunk.fileName, { minify: true, format: "esm" })).code;
+      }
     },
   };
 }
@@ -142,13 +151,19 @@ export default defineConfig(({ command }) => {
   // `/@vite/client` beside it. There is nothing to inline in a dev server, so the
   // plugin belongs to the build alone.
   plugins: command === "serve" ? [versionFollowsPackageJson()]
-    : entry === "reader" ? [] : entry === "engine3d" ? [minifyWholeChunk()] : [viteSingleFile()],
+    : entry === "reader" ? [] : entry === "engine3d" || entry === "tiles3d" ? [minifyWholeChunk()] : [viteSingleFile()],
   build: {
     outDir: "dist",
     // RIFINITURE · the engine is a library build: ONE self-contained ES module
     ...(entry === "engine3d" ? { lib: { entry: new URL("./src/engine3d-entry.ts", import.meta.url).pathname,
                                         formats: ["es" as const], fileName: () => "engine3d.js" } } : {}),
-    rollupOptions: entry === "engine3d" ? {} : {
+    // MICRO-3DTILES · the tiles renderer is a library build too, three left out
+    ...(entry === "tiles3d" ? { lib: { entry: new URL("./src/tiles3d-entry.ts", import.meta.url).pathname,
+                                       formats: ["es" as const], fileName: () => "tiles3d.js" } } : {}),
+    rollupOptions: entry === "engine3d" ? {} : entry === "tiles3d" ? {
+      external: (id: string) => THREE_EXTERNAL.test(id),
+      output: { paths: (id: string) => (THREE_EXTERNAL.test(id) ? "./engine3d.js" : id) },
+    } : {
       input: new URL(`./${entry}.html`, import.meta.url).pathname,
     },
     // single-file output: nothing stale can linger, and unlink is not

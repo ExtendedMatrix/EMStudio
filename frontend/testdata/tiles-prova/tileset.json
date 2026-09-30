@@ -1,0 +1,243 @@
+{
+  "asset": {
+    "version": "1.1",
+    "generator": "EMStudio make-tiles-fixture (3DSC frame: Z-up volumes, Y-up glb)"
+  },
+  "geometricError": 16,
+  "root": {
+    "boundingVolume": {
+      "box": [
+        2,
+        2,
+        0.5,
+        2,
+        0,
+        0,
+        0,
+        2,
+        0,
+        0,
+        0,
+        0.5
+      ]
+    },
+    "geometricError": 4,
+    "refine": "REPLACE",
+    "content": {
+      "uri": "tiles/root.glb"
+    },
+    "children": [
+      {
+        "boundingVolume": {
+          "box": [
+            1,
+            1,
+            0.5,
+            1,
+            0,
+            0,
+            0,
+            1,
+            0,
+            0,
+            0,
+            0.5
+          ]
+        },
+        "geometricError": 0.5,
+        "refine": "REPLACE",
+        "content": {
+          "uri": "tiles/c0.glb"
+        },
+        "children": [
+          {
+            "boundingVolume": {
+              "box": [
+                0.5,
+                0.5,
+                0.5,
+                0.5,
+                0,
+                0,
+                0,
+                0.5,
+                0,
+                0,
+                0,
+                0.5
+              ]
+            },
+            "geometricError": 0,
+            "refine": "REPLACE",
+            "content": {
+              "uri": "tiles/c0_0.glb"
+            }
+          },
+          {
+            "boundingVolume": {
+              "box": [
+                1.5,
+                0.5,
+                0.5,
+                0.5,
+                0,
+                0,
+                0,
+                0.5,
+                0,
+                0,
+                0,
+                0.5
+              ]
+            },
+            "geometricError": 0,
+            "refine": "REPLACE",
+            "content": {
+              "uri": "tiles/c0_1.glb"
+            }
+          },
+          {
+            "boundingVolume": {
+              "box": [
+                0.5,
+                1.5,
+                0.5,
+                0.5,
+                0,
+                0,
+                0,
+                0.5,
+                0,
+                0,
+                0,
+                0.5
+              ]
+            },
+            "geometricError": 0,
+            "refine": "REPLACE",
+            "content": {
+              "uri": "tiles/c0_2.glb"
+            }
+          },
+          {
+            "boundingVolume": {
+              "box": [
+                1.5,
+                1.5,
+                0.5,
+                0.5,
+                0,
+                0,
+                0,
+                0.5,
+                0,
+                0,
+                0,
+                0.5
+              ]
+            },
+            "geometricError": 0,
+            "refine": "REPLACE",
+            "content": {
+              "uri": "tiles/c0_3.glb"
+            }
+          }
+        ]
+      },
+      {
+        "boundingVolume": {
+          "box": [
+            3,
+            1,
+            0.5,
+            1,
+            0,
+            0,
+            0,
+            1,
+            0,
+            0,
+            0,
+            0.5
+          ]
+        },
+        "geometricError": 0.5,
+        "refine": "REPLACE",
+        "content": {
+          "uri": "tiles/c1.glb"
+        },
+        "children": [
+          {
+            "boundingVolume": {
+              "box": [
+                3,
+                1,
+                0.5,
+                1,
+                0,
+                0,
+                0,
+                1,
+                0,
+                0,
+                0,
+                0.5
+              ]
+            },
+            "geometricError": 0,
+            "refine": "REPLACE",
+            "content": {
+              "uri": "tiles/mancante/c1_0.glb"
+            }
+          }
+        ]
+      },
+      {
+        "boundingVolume": {
+          "box": [
+            1,
+            3,
+            0.5,
+            1,
+            0,
+            0,
+            0,
+            1,
+            0,
+            0,
+            0,
+            0.5
+          ]
+        },
+        "geometricError": 0,
+        "refine": "REPLACE",
+        "content": {
+          "uri": "tiles/c2.glb"
+        }
+      },
+      {
+        "boundingVolume": {
+          "box": [
+            3,
+            3,
+            0.5,
+            1,
+            0,
+            0,
+            0,
+            1,
+            0,
+            0,
+            0,
+            0.5
+          ]
+        },
+        "geometricError": 0,
+        "refine": "REPLACE",
+        "content": {
+          "uri": "tiles/c3.glb"
+        }
+      }
+    ]
+  }
+}

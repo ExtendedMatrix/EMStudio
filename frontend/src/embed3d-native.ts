@@ -33,6 +33,8 @@
 
 import { t } from "./i18n";
 import { onFirstVisible } from "./lazy";
+import { createTilesLayer, formatBytes, isTilesetUrl, tilesBar, tilesEngine,
+         type RefineMode, type TilesBarTexts, type TilesLayer } from "./tiles3d";
 
 /** Loaded once per session, on the first 3D embed a reader actually looks at. */
 let enginePromise: Promise<any> | null = null;
@@ -116,10 +118,19 @@ export interface Viewer3DOptions {
    *  vertex, and a marker under it (a line is a wide target) does not take it */
   tracing?: () => boolean;
   markers?: Marker3D[];
+  /** MICRO-3DTILES · a tileset's refinement and memory */
+  model?: ModelOptions;
+}
+
+/** MICRO-3DTILES · what the viewer is told about a big asset. */
+export interface ModelOptions {
+  /** the tileset's refinement and memory */
+  tiles?: { mode?: RefineMode; memoryMB?: number };
 }
 
 /**
- * Mount an orbitable view of one glTF into `host`.
+ * Mount an orbitable view of one glTF — or, MICRO-3DTILES, of a 3D Tiles
+ * tileset — into `host`.
  *
  * Nothing loads until the reader is looking at it (`lazy.ts`), for the same
  * reason the iframe does not: a chapter with six models must not fetch six
@@ -134,11 +145,16 @@ export function mount3dViewer(host: HTMLElement, url: string,
   let frameModel: (() => void) | null = null;
   let draft: { vertices: [number, number, number][]; note: string } | null = null;
   let applyDraft: (() => void) | null = null;
+  const mo = opts.model ?? {};
 
   const status = document.createElement("div");
   status.className = "nv-embed-note";
   status.textContent = "modello 3D — si carica quando lo guardi";
   host.appendChild(status);
+  // MICRO-3DTILES · the strip of a tileset: its controls — above the canvas,
+  // in the stage's own header
+  const strip = document.createElement("div");
+  strip.className = "v3d-strip hidden";
 
   const fail = (why: string) => {
     // An asset that has gone away says so. A black box would let a reader
@@ -151,9 +167,10 @@ export function mount3dViewer(host: HTMLElement, url: string,
     if (disposed) return;
     status.textContent = "carico il modello…";
     void (async () => {
-      let THREE: any, GLTFLoader: any, OrbitControls: any;
+      let E: any, THREE: any, GLTFLoader: any, OrbitControls: any;
       try {
-        ({ THREE, GLTFLoader, OrbitControls } = await engine());
+        E = await engine();
+        ({ THREE, GLTFLoader, OrbitControls } = E);
       } catch {
         fail(t("em3d.noEngine"));
         return;
@@ -181,6 +198,9 @@ export function mount3dViewer(host: HTMLElement, url: string,
 
       const controls = new OrbitControls(camera, renderer.domElement);
       controls.enableDamping = true;
+      // what is seen: a glb, or a tileset's group — one at a time
+      const content = new THREE.Group();
+      scene.add(content);
 
       // CATENA · the readings' points: a sphere each, and a label that follows
       // it on screen (HTML, so it reads at any zoom and takes the theme)
@@ -265,11 +285,21 @@ export function mount3dViewer(host: HTMLElement, url: string,
           draftLabel.style.display = v.z < 1 && draft.note ? "" : "none";
         } else draftLabel.style.display = "none";
       };
+
+      // MICRO-3DTILES · a tileset in the scene, and its bar
+      let layer: TilesLayer | null = null;
+      let bar: ReturnType<typeof tilesBar> | null = null;
+      let frames = 0;
       let frame = 0;
       const tick = () => {
         if (disposed) return;
         frame = requestAnimationFrame(tick);
         controls.update();
+        if (layer) {
+          layer.update();
+          // the status line reads the bytes, which change without an event
+          if (++frames % 20 === 0) bar?.refresh();
+        }
         renderer.render(scene, camera);
         placeLabels();
       };
@@ -280,17 +310,23 @@ export function mount3dViewer(host: HTMLElement, url: string,
       const onUp = (e: PointerEvent) => {
         const moved = !down || Math.hypot(e.clientX - down.x, e.clientY - down.y) > 4;
         down = null;
-        if (moved || (!opts.onPick && !opts.onMarker)) return;
+        const armed = !!bar?.armed();
+        if (moved || (!opts.onPick && !opts.onMarker && !armed)) return;
         const r = renderer.domElement.getBoundingClientRect();
         ray.setFromCamera(new THREE.Vector2(((e.clientX - r.left) / r.width) * 2 - 1,
           -((e.clientY - r.top) / r.height) * 2 + 1), camera);
+        // «Più dettaglio qui»: the click is for the tile under it, nothing else
+        if (armed && layer) {
+          const hit = ray.intersectObject(layer.object, true)[0];
+          bar!.picked(hit ? layer.refineAt(hit.object) : "none");
+          return;
+        }
         // a line is hit within a marker's radius, not the default metre; and
         // while a trace is being drawn every click is a vertex, never a marker
         ray.params.Line = { threshold: markerRadius };
         const hitM = draft || opts.tracing?.() ? undefined : ray.intersectObjects(markerGroup.children, false)[0];
         if (hitM && opts.onMarker) { opts.onMarker(String(hitM.object.userData.markerId)); return; }
-        const targets = scene.children.filter((o: any) => o !== markerGroup && o !== draftGroup);
-        const hit = ray.intersectObjects(targets, true)[0];
+        const hit = ray.intersectObject(content, true)[0];
         if (!hit || !opts.onPick) return;
         const round = (v: number) => Math.round(v * 1000) / 1000;
         opts.onPick([round(hit.point.x), round(hit.point.y), round(hit.point.z)],
@@ -301,56 +337,132 @@ export function mount3dViewer(host: HTMLElement, url: string,
       if (opts.onDoubleClick)
         renderer.domElement.addEventListener("dblclick", (e: MouseEvent) => { e.preventDefault(); opts.onDoubleClick!(); });
 
-      new GLTFLoader().load(
-        url,
-        (gltf: any) => {
-          if (disposed) return;
-          scene.add(gltf.scene);
-          // Frame whatever arrived: a study model may be a metre or a hillside,
-          // and a fixed camera would show an empty screen for one of the two.
-          // RIFINITURE · ONLY here (the model opens) and on the explicit ⤢.
-          const box = new THREE.Box3().setFromObject(gltf.scene);
-          const size = box.getSize(new THREE.Vector3());
-          const centre = box.getCenter(new THREE.Vector3());
-          const span = Math.max(size.x, size.y, size.z) || 1;
-          frameModel = () => {
-            controls.target.copy(centre);
-            camera.position.copy(centre).add(
-              new THREE.Vector3(span * 1.4, span * 0.9, span * 1.6));
-            camera.near = span / 100;
-            camera.far = span * 100;
-            camera.updateProjectionMatrix();
-            controls.update();
-          };
-          frameModel();
-          markerRadius = span / 80;
-          applyMarkers?.();
-          applyDraft?.();
+      // Frame whatever arrived: a study model may be a metre or a hillside,
+      // and a fixed camera would show an empty screen for one of the two.
+      // RIFINITURE · ONLY when the model opens and on the explicit ⤢.
+      const frameBox = (box: any) => {
+        const size = box.getSize(new THREE.Vector3());
+        const centre = box.getCenter(new THREE.Vector3());
+        const span = Math.max(size.x, size.y, size.z) || 1;
+        frameModel = () => {
+          controls.target.copy(centre);
+          camera.position.copy(centre).add(
+            new THREE.Vector3(span * 1.4, span * 0.9, span * 1.6));
+          camera.near = span / 100;
+          camera.far = span * 100;
+          camera.updateProjectionMatrix();
+          controls.update();
+        };
+        frameModel();
+        markerRadius = span / 80;
+        applyMarkers?.();
+        applyDraft?.();
+      };
+      let shown = false;
+      const show = () => {
+        if (shown) return;
+        shown = true;
+        status.remove();
+        host.appendChild(renderer.domElement);
+        host.appendChild(labels);
+        host.dataset.ready = "1";
+        // the probes' seam: where the camera is (position, then target)
+        (host as unknown as { __v3dCamera?: () => number[] }).__v3dCamera =
+          () => [...camera.position.toArray(), ...controls.target.toArray()];
+        const hint = document.createElement("div");
+        hint.className = "nv-embed-note";
+        hint.textContent = t("em3d.dragHint");
+        host.appendChild(hint);
+        tick();
+      };
+      const unreachable = () => fail("il modello non è raggiungibile: "
+                                     + "il riferimento è valido, l'asset non risponde");
 
-          status.remove();
-          host.appendChild(renderer.domElement);
-          host.appendChild(labels);
-          host.dataset.ready = "1";
-          // the probes' seam: where the camera is (position, then target)
-          (host as unknown as { __v3dCamera?: () => number[] }).__v3dCamera =
-            () => [...camera.position.toArray(), ...controls.target.toArray()];
-          const hint = document.createElement("div");
-          hint.className = "nv-embed-note";
-          hint.textContent = t("em3d.dragHint");
-          host.appendChild(hint);
-          tick();
-        },
-        undefined,
-        () => fail("il modello non è raggiungibile: "
-                   + "il riferimento è valido, l'asset non risponde"),
-      );
+      const clearContent = () => {
+        layer?.dispose();
+        layer = null;
+        bar = null;
+        content.clear();
+      };
+
+      // ── a glb (or one level of a LOD set) ──────────────────────────────────
+      let framed = false;
+      let glbGen = 0;
+      const openGlb = (u: string, onDone?: () => void) => {
+        const gen = ++glbGen;
+        new GLTFLoader().load(
+          u,
+          (gltf: any) => {
+            if (disposed || gen !== glbGen) return;
+            clearContent();
+            content.add(gltf.scene);
+            host.dataset.model = u;
+            if (!framed) { framed = true; frameBox(new THREE.Box3().setFromObject(gltf.scene)); }
+            show();
+            onDone?.();
+          },
+          undefined,
+          () => { if (gen === glbGen) { if (shown) strip.dataset.error = u; else unreachable(); } },
+        );
+      };
+
+      // ── a tileset ──────────────────────────────────────────────────────────
+      const openTiles = async (u: string) => {
+        let T: any;
+        try { T = await tilesEngine(); } catch { fail(t("tl.noEngine")); return; }
+        if (disposed) return;
+        clearContent();
+        strip.textContent = "";
+        strip.classList.remove("hidden");
+        if (!strip.isConnected) host.prepend(strip);
+        const l = createTilesLayer(E, T, u, camera, renderer, mo.tiles ?? {});
+        layer = l;
+        content.add(l.object);
+        host.dataset.model = u;
+        host.dataset.tileset = "1";
+        bar = tilesBar(l, tilesBarTexts());
+        strip.appendChild(bar.el);
+        // the probes' seam: the tile files loaded now, and the status
+        (host as unknown as Record<string, unknown>).__tiles = () => {
+          const box = l.contentBox();
+          return { files: l.loadedFiles(), status: l.status(),
+                   boxOf: (u: string) => { const b = l.boxOf(u); return b ? [...b.min.toArray(), ...b.max.toArray()] : null; },
+                   box: box ? [...box.min.toArray(), ...box.max.toArray()] : null,
+                   points: (() => { let n = 0; l.object.traverse((o: any) => { if (o.isPoints) n++; }); return n; })() };
+        };
+        (host as unknown as Record<string, unknown>).__tilesScreenOf = (uri: string) => {
+          const c = l.centreOf(uri);
+          if (!c) return null;
+          const v = c.clone().project(camera);
+          const r = renderer.domElement.getBoundingClientRect();
+          return { x: r.left + ((v.x + 1) / 2) * r.width, y: r.top + ((1 - v.y) / 2) * r.height };
+        };
+        let waiting = true;
+        l.onChange(() => {
+          const st = l.status();
+          if (st.failed && !shown) { fail(t("tl.failed", { x: st.failed })); return; }
+          // framed on the ROOT'S VOLUME as soon as it is known, before a tile:
+          // what the camera does not see, the renderer never asks for
+          if (!waiting || !l.rootReady()) return;
+          const b = l.bounds();
+          if (!b) return;
+          waiting = false;
+          if (!framed) { framed = true; frameBox(b); }
+          show();
+        });
+        show();         // the canvas at once: the root arrives into it
+      };
 
       cleanup = () => {
         cancelAnimationFrame(frame);
+        layer?.dispose();
         controls.dispose();
         renderer.dispose();
         renderer.domElement.remove();
       };
+
+      if (isTilesetUrl(url)) { await openTiles(url); return; }
+      openGlb(url);
     })();
   });
 
@@ -369,6 +481,24 @@ export function mount3dViewer(host: HTMLElement, url: string,
     setDraft(vertices, note) {
       draft = vertices?.length ? { vertices, note: note ?? "" } : null;
       applyDraft?.();
+    },
+  };
+}
+
+/** The tileset bar's words (i18n), one place for the Doc and the Scena 3D. */
+export function tilesBarTexts(): TilesBarTexts {
+  return {
+    manual: t("tl.manual"), auto: t("tl.auto"), modeTitle: t("tl.modeTitle"),
+    more: t("tl.more"), moreTitle: t("tl.moreTitle"), less: t("tl.less"), lessTitle: t("tl.lessTitle"),
+    leaf: t("tl.leaf"), noTile: t("tl.noTile"),
+    status: (s) => {
+      const lv = !s.level ? t("tl.noLevel") : s.level[0] === s.level[1]
+        ? t("tl.level", { n: String(s.level[0]) }) : t("tl.levels", { a: String(s.level[0]), b: String(s.level[1]) });
+      const parts = [lv, t("tl.loaded", { n: String(s.loaded) }), formatBytes(s.bytes)];
+      if (s.busy) parts.push(t("tl.busy"));
+      if (s.failed) parts.push(t("tl.failed", { x: s.failed }));
+      if (s.missing.length) parts.push(t("tl.missing", { n: String(s.missing.length), x: s.missing.slice(0, 2).join(", ") }));
+      return parts.join(" · ");
     },
   };
 }

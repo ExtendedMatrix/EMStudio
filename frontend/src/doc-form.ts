@@ -33,6 +33,8 @@ const MEDIUM_BY_EXT: Record<string, Medium> = {
   pdf: "text", txt: "text", md: "text", doc: "text", docx: "text", odt: "text", csv: "text",
 };
 export function mediumOfFile(filename: string | undefined): Medium {
+  // MICRO-3DTILES · a tileset's entry point is a .json, and it is a 3D model
+  if (/(^|\/)tileset\.json$/i.test(filename ?? "")) return "3d";
   const ext = (filename ?? "").split(".").pop()?.toLowerCase() ?? "";
   return MEDIUM_BY_EXT[ext] ?? "image";
 }

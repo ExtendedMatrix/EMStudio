@@ -1969,6 +1969,200 @@ test("U4.lanemenu", "TempluMare: clic destro sull'intestazione di corsia (fermo,
   return { pass: !base.startsWith("none") && !moved.length && items.some((t) => /cronologia/i.test(t)), detail: { base, moved, items } };
 });
 
+// ── MICRO-3DTILES-LOD · parte 1 · i 3D Tiles nel visualizzatore ──────────────
+/** open a document of `tiles.em.json` in a Doc (the Fonti space), and wait for
+ *  its 3D stage; `fetched()` lists every file the page asked for under testdata/ or /fs/at/ */
+async function openTilesDoc(docId, { doc = "tiles", mutate } = {}) {
+  let d = fixture(doc);
+  if (mutate) d = mutate(d);
+  const o = await open({ doc: d, ws: "provenance" });
+  const win = await o.p.evaluate((id) => window.__EM_DRAG__.openDoc(id), docId);
+  await o.p.waitForFunction((w) => {
+    const h = document.querySelector(`[data-win="${w}"] .rd-3d-host`);
+    return h && (h.dataset.ready === "1" || h.dataset.gated === "1");
+  }, win, { timeout: 20000 });
+  // what the page fetched under testdata/ or /fs/at/: the Resource Timing entries
+  // (Playwright's request events do not reach this headless shell's fetches)
+  // (`bodies`: only the requests that brought a body — a HEAD brings none)
+  return { ...o, win, fetched: (bodies = false) => o.p.evaluate((b) => performance.getEntriesByType("resource")
+    .filter((e) => !b || e.encodedBodySize > 0).map((e) => e.name)
+    .filter((u) => /testdata\/|\/fs\/at\//.test(u)).map((u) => decodeURIComponent(u.replace(/^.*?(testdata\/|\/fs\/at\/)/, ""))), bodies) };
+}
+const tilesState = (p, win) => p.evaluate((w) => {
+  const h = document.querySelector(`[data-win="${w}"] .rd-3d-host`);
+  const t = h?.__tiles?.();
+  return { tileset: h?.dataset.tileset === "1", model: h?.dataset.model ?? null, lod: h?.dataset.lod ?? null,
+    files: t?.files ?? null, status: t?.status ?? null, box: t?.box ?? null, points: t?.points ?? null,
+    line: h?.querySelector(".tl-status")?.textContent ?? null, gate: h?.querySelector(".v3d-gate")?.textContent ?? null,
+    options: [...(h?.querySelectorAll(".lod-pick option") ?? [])].map((o) => o.textContent) };
+}, win);
+/** wait until the loaded tile files are exactly `want` (or until time runs out) */
+const tilesSettle = async (p, win, pred, ms = 10000) => {
+  const t0 = Date.now();
+  let st = await tilesState(p, win);
+  while (Date.now() - t0 < ms) {
+    if (pred(st) && !st.status?.busy) break;
+    await p.waitForTimeout(250);
+    st = await tilesState(p, win);
+  }
+  await p.waitForTimeout(400);
+  return tilesState(p, win);
+};
+/** «Più dettaglio qui» armed, then a click on the tile whose content is `uri` */
+async function moreHere(p, win, uri) {
+  const at = await p.evaluate(([w, u]) => document.querySelector(`[data-win="${w}"] .rd-3d-host`).__tilesScreenOf(u), [win, uri]);
+  const armed = await p.evaluate((w) => document.querySelector(`[data-win="${w}"] .tl-more`)?.getAttribute("aria-pressed"), win);
+  if (armed !== "true") await p.click(`[data-win="${win}"] .tl-more`);
+  if (at) await p.mouse.click(at.x, at.y);
+  return at;
+}
+const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+
+test("T1.root", "3D Tiles · una risorsa `packaging: directory` con porta tileset.json si apre nella Doc, e mostra la radice", async () => {
+  const { p, ctx, errors, win, fetched } = await openTilesDoc("D1");
+  const st = await tilesSettle(p, win, (s) => (s.files ?? []).length >= 1);
+  await p.screenshot({ path: `${process.env.SHOTS ?? "."}/t1-radice.png` }).catch(() => {});
+  const requests = await fetched();
+  await ctx.close();
+  const glbs = requests.filter((r) => /\.glb$/.test(r));
+  return { pass: st.tileset && same(st.files, ["tiles/root.glb"]) && same(st.status?.level, [0, 0])
+      && same(glbs, ["tiles-prova/tiles/root.glb"])
+      && /livello 0/.test(st.line ?? "") && /1 tile caricati/.test(st.line ?? "") && !errors.length,
+    detail: { st, requests, errors } };
+});
+
+test("T1.refine", "3D Tiles · in manuale «Più dettaglio qui» carica i figli di QUEL tile e non gli altri; «Meno dettaglio» torna indietro", async () => {
+  const { p, ctx, errors, win, fetched } = await openTilesDoc("D1");
+  const s0 = await tilesSettle(p, win, (s) => (s.files ?? []).length >= 1);
+  // a click on the root: its four children
+  await moreHere(p, win, "tiles/root.glb");
+  const kids = ["tiles/c0.glb", "tiles/c1.glb", "tiles/c2.glb", "tiles/c3.glb"];
+  const s1 = await tilesSettle(p, win, (s) => kids.every((k) => s.files?.includes(k)));
+  // a click on c0: c0's four, and NOT c1's child
+  await moreHere(p, win, "tiles/c0.glb");
+  const g = [0, 1, 2, 3].map((j) => `tiles/c0_${j}.glb`);
+  const s2 = await tilesSettle(p, win, (s) => g.every((k) => s.files?.includes(k)));
+  await p.screenshot({ path: `${process.env.SHOTS ?? "."}/t1-piu-dettaglio.png` }).catch(() => {});
+  const asked = [...new Set((await fetched()).filter((r) => /\.glb$/.test(r)))].sort();
+  // «Meno dettaglio» twice: back to the root
+  await p.click(`[data-win="${win}"] .tl-less`);
+  const s3 = await tilesSettle(p, win, (s) => same(s.status?.level, [0, 1]) || same(s.status?.level, [1, 1]));
+  await p.click(`[data-win="${win}"] .tl-less`);
+  const s4 = await tilesSettle(p, win, (s) => same(s.status?.level, [0, 0]));
+  await ctx.close();
+  const vis = (s) => s.status?.visible;
+  return { pass: same(s0.files, ["tiles/root.glb"])
+      && kids.every((k) => s1.files.includes(k)) && !s1.files.some((f) => /c0_|c1_0/.test(f)) && same(s1.status?.level, [1, 1])
+      && g.every((k) => s2.files.includes(k)) && same(s2.status?.level, [1, 2])
+      // fetched: the root, its four, c0's four — and nothing of c1's (the missing one)
+      && same(asked, ["root", ...kids, ...g].map((f) => `tiles-prova/${f === "root" ? "tiles/root.glb" : f}`).sort())
+      && same(s4.status?.level, [0, 0]) && vis(s4) === 1 && !errors.length,
+    detail: { s0: s0.files, s1: [s1.files, s1.status?.level], s2: [s2.files, s2.status?.level], asked,
+      s3: [s3.status?.level, vis(s3)], s4: [s4.status?.level, vis(s4)], errors } };
+});
+test("T1.empty", "3D Tiles · una radice senza contenuto (3DSC senza LOD: contenuto solo alle foglie) scende da sé al primo livello che ha qualcosa da mostrare", async () => {
+  const { p, ctx, errors, win } = await openTilesDoc("D1", { mutate: (d) => {
+    for (const n of d.graph.nodes) if (n.id === "RES_TS") n.data.url = "/em/studio/testdata/tiles-cava/tileset.json";
+    return d;
+  } });
+  const st = await tilesSettle(p, win, (s) => (s.files ?? []).length >= 2);
+  await ctx.close();
+  return { pass: same(st.files, ["../tiles-prova/tiles/c2.glb", "../tiles-prova/tiles/c3.glb"]) && same(st.status?.level, [0, 0])
+      && st.status?.asked === 0 && !errors.length, detail: { st, errors } };
+});
+test("T1.missing", "3D Tiles · un tile il cui file non c'è: la riga di stato lo dice, con il nome del file", async () => {
+  const { p, ctx, errors, win } = await openTilesDoc("D1");
+  await tilesSettle(p, win, (s) => (s.files ?? []).length >= 1);
+  await moreHere(p, win, "tiles/root.glb");
+  await tilesSettle(p, win, (s) => (s.files ?? []).includes("tiles/c1.glb"));
+  await moreHere(p, win, "tiles/c1.glb");
+  const st = await tilesSettle(p, win, (s) => (s.status?.missing ?? []).length > 0);
+  await ctx.close();
+  return { pass: same(st.status?.missing, ["tiles/mancante/c1_0.glb"]) && /1 tile non trovati \(tiles\/mancante\/c1_0\.glb\)/.test(st.line ?? "")
+      && !errors.filter((e) => !/c1_0/.test(e)).length,
+    detail: { status: st.status, line: st.line, errors } };
+});
+test("T1.frame", "3D Tiles · il frame: il tile della radice nel tileset (Z-up, girato di −90° su X) cade dove cade il suo glb aperto come glTF (Y-up)", async () => {
+  const { p, ctx, errors, win } = await openTilesDoc("D1");
+  const st = await tilesSettle(p, win, (s) => (s.files ?? []).length >= 1);
+  // the same glb, as a glTF: GLTFLoader in the page, the box of what it reads
+  const gltf = await p.evaluate(async () => {
+    const m = await import("/em/studio/src/embed3d-native.ts");
+    const { THREE, GLTFLoader } = await m.engine();
+    const g = await new GLTFLoader().loadAsync("/em/studio/testdata/tiles-prova/tiles/root.glb");
+    const b = new THREE.Box3().setFromObject(g.scene);
+    return [...b.min.toArray(), ...b.max.toArray()];
+  });
+  await ctx.close();
+  const r = (a) => (a ?? []).map((x) => Math.round(x * 1e4) / 1e4);
+  // Blender Z-up [0,4]×[0,4]×[0,0.6] → Y-up x∈[0,4] y∈[0,0.6] z∈[−4,0]
+  return { pass: same(r(st.box), r(gltf)) && same(r(gltf), [0, 0, -4, 4, 0.6, 0]) && !errors.length,
+    detail: { tiles: r(st.box), gltf: r(gltf), errors } };
+});
+test("T1.points", "3D Tiles · una nuvola in tile (pnts, e glTF POINTS nel figlio) si vede come punti", async () => {
+  const { p, ctx, errors, win } = await openTilesDoc("D4");
+  const s0 = await tilesSettle(p, win, (s) => (s.files ?? []).length >= 1);
+  await moreHere(p, win, "punti.pnts");
+  const s1 = await tilesSettle(p, win, (s) => (s.files ?? []).includes("punti-fini.glb"));
+  await p.screenshot({ path: `${process.env.SHOTS ?? "."}/t1-nuvola.png` }).catch(() => {});
+  await ctx.close();
+  return { pass: same(s0.files, ["punti.pnts"]) && s0.points === 1 && same(s1.files, ["punti-fini.glb", "punti.pnts"]) && s1.points === 2
+      && !errors.length, detail: { s0: [s0.files, s0.points], s1: [s1.files, s1.points, s1.box], errors } };
+});
+test("T1.auto", "3D Tiles · «Automatico» raffina da sé (errore sullo schermo); tornando a «Manuale» si resta al livello caricato", async () => {
+  const { p, ctx, errors, win } = await openTilesDoc("D1");
+  await tilesSettle(p, win, (s) => (s.files ?? []).length >= 1);
+  await p.click(`[data-win="${win}"] .tl-seg [data-mode="auto"]`);
+  const a = await tilesSettle(p, win, (s) => (s.files ?? []).includes("tiles/c0_0.glb"));
+  await p.click(`[data-win="${win}"] .tl-seg [data-mode="manual"]`);
+  await p.waitForTimeout(800);
+  const m = await tilesState(p, win);
+  await ctx.close();
+  return { pass: a.files.includes("tiles/c0_0.glb") && a.status.mode === "auto" && m.status.mode === "manual"
+      && same(m.status.level, a.status.level) && m.status.asked > 0 && !errors.filter((e) => !/c1_0/.test(e)).length,
+    detail: { auto: [a.files, a.status.level], manual: [m.files, m.status.level, m.status.asked], errors } };
+});
+test("T1.disk", "3D Tiles · un tileset su disco passa dal bridge per percorso (`/fs/at/`): i tile relativi si risolvono accanto", async () => {
+  const root = FS_ROOT ?? (await rootPath());
+  const path = `${root}/tileset-disco/tileset.json`;
+  const { p, ctx, errors, win, fetched } = await openTilesDoc("D1", { mutate: (d) => {
+    for (const n of d.graph.nodes) if (n.id === "RES_TS") n.data.url = path;
+    return d;
+  } });
+  const st = await tilesSettle(p, win, (s) => (s.files ?? []).length >= 1);
+  const requests = await fetched();
+  await ctx.close();
+  return { pass: same(st.files, ["tiles/root.glb"]) && requests.some((r) => r.endsWith("tileset-disco/tiles/root.glb"))
+      && /\/fs\/at\//.test(st.model ?? "") && !errors.length, detail: { model: st.model, requests, errors } };
+});
+
+test("T1.space", "3D Tiles · nella Scena 3D dello Spazio: il tileset dell'RM si apre alla radice e si raffina", async () => {
+  const { p, ctx, errors } = await open({ doc: "tiles", ws: "space" });
+  await p.waitForFunction(() => document.querySelector(".scn-host")?.dataset.ready === "1", null, { timeout: 20000 });
+  const sc = () => p.evaluate(() => {
+    const h = document.querySelector(".scn-host");
+    return { items: h.__space(), tiles: h.__spaceTiles?.() ?? [] };
+  });
+  const settle = async (pred, ms = 10000) => {
+    const t0 = Date.now(); let s = await sc();
+    while (Date.now() - t0 < ms && !pred(s)) { await p.waitForTimeout(250); s = await sc(); }
+    await p.waitForTimeout(300);
+    return sc();
+  };
+  const f = (s, id) => s.tiles.find((t) => t.id === id)?.files ?? [];
+  const s0 = await settle((s) => s.items.find((i) => i.id === "RM1")?.as === "tiles" && f(s, "RM1").length);
+  await p.screenshot({ path: `${process.env.SHOTS ?? "."}/t1-spazio.png` }).catch(() => {});
+  await p.click('.scn-strips .v3d-strip[data-id="RM1"] .tl-more');
+  const at = await p.evaluate(() => document.querySelector(".scn-host").__spaceTileScreenOf("tiles/root.glb"));
+  if (at) await p.mouse.click(at.x, at.y);
+  const s1 = await settle((s) => f(s, "RM1").includes("tiles/c3.glb"));
+  await ctx.close();
+  return { pass: same(f(s0, "RM1"), ["tiles/root.glb"])
+      && same(f(s1, "RM1"), ["tiles/c0.glb", "tiles/c1.glb", "tiles/c2.glb", "tiles/c3.glb", "tiles/root.glb"])
+      && !errors.filter((e) => !/c1_0/.test(e)).length,
+    detail: { s0: [s0.items, s0.tiles], s1: s1.tiles, at, errors } };
+});
+
 // ── run ─────────────────────────────────────────────────────────────────────
 const chosen = cases.filter((c) => !only.length || only.includes(c.id) || only.some((o) => c.id.startsWith(o + ".")));
 for (const c of chosen) {

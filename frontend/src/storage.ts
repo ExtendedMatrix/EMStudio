@@ -65,6 +65,16 @@ export async function fsFileUrl(path: string): Promise<string> {
   return `${await base()}/fs/file?path=${encodeURIComponent(path)}`;
 }
 
+/** MICRO-3DTILES · the same file, with its path IN the URL's path
+ *  (`/fs/at/<path>`), so that what it names relatively resolves beside it: a
+ *  tileset's `tiles/0/0/0.glb`, a .gltf's .bin. The query form cannot do that —
+ *  a relative URI resolved against `/fs/file?path=…` lands on `/fs/tiles/…`. */
+export async function fsTreeUrl(path: string): Promise<string> {
+  const p = path.replace(/\\/g, "/");
+  const rest = p.startsWith("/") ? p.slice(1) : p;
+  return `${await base()}/fs/at/${rest.split("/").map(encodeURIComponent).join("/")}`;
+}
+
 /** List a directory — or, with no path, the roots the bridge was started with. */
 export async function fsList(path?: string): Promise<FsListing> {
   const url = `${await base()}/fs/list${path ? `?path=${encodeURIComponent(path)}` : ""}`;

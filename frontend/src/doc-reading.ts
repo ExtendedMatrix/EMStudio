@@ -34,7 +34,7 @@ import {
 import { polylineLength, pyFixed, type GlbKind, type Vec3 } from "./reading-glb";
 import { measureText } from "./paradata-chain";
 import { geometryBadge } from "./paradata-inspector";
-import { mount3dViewer, type ViewerHandle } from "./embed3d-native";
+import { mount3dViewer, type ModelOptions, type ViewerHandle } from "./embed3d-native";
 import { ViewerKeeper } from "./viewer-keep";
 import type { Medium } from "./doc-form";
 
@@ -62,6 +62,8 @@ export interface ReadingStageCtx {
   current: string | null;
   imageUrl: string | null;
   modelUrl: string | null;
+  /** MICRO-3DTILES · a big asset: its threshold, its tileset, its LOD set */
+  model?: ModelOptions;
   /** the text, inline or fetched; null = not readable here (a PDF) */
   text: () => Promise<string | null>;
   onTrace: (extractorId: string, g: TraceGeometry) => void;
@@ -559,6 +561,7 @@ function modelStage(ctx: ReadingStageCtx, reads: string[], owner: HTMLElement, s
       onPick: (p) => hooks.add(p),
       onDoubleClick: () => hooks.dbl(),
       tracing: () => tracing3d(ref.cur),
+      model: ctx.model,
     });
     return { v, extra: { el: host, ctx: ref, hooks } };
   });
