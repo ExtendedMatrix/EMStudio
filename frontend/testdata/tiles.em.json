@@ -12,7 +12,7 @@
   "graph": {
     "graph_id": "tiles-prova",
     "name": "Tile e LOD (MICRO-3DTILES-LOD)",
-    "description": "fixture: un tileset 3DSC-like, una nuvola in tile",
+    "description": "fixture: un tileset 3DSC-like, un set LOD, un file oltre soglia, una nuvola in tile",
     "nodes": [
       {
         "id": "EP_MOD",
@@ -63,6 +63,66 @@
         }
       },
       {
+        "id": "D2",
+        "node_type": "document",
+        "name": "D.2",
+        "description": "Muro, set LOD (LODgenerator)",
+        "data": {
+          "geometry": "reality_based"
+        }
+      },
+      {
+        "id": "RES_LOD",
+        "node_type": "resource",
+        "name": "muro_LOD0.glb",
+        "description": "",
+        "data": {
+          "checksum": "sha256:0f0755a6f37077fb583839a99d1a5f0d36f0da7a20c4bdc2c078723b63f0e11a",
+          "residency": "resident",
+          "url": "/em/studio/testdata/lod/muro_LOD0.glb",
+          "url_type": "3d_model"
+        }
+      },
+      {
+        "id": "D3",
+        "node_type": "document",
+        "name": "D.3",
+        "description": "Rilievo intero, oltre la soglia",
+        "data": {
+          "geometry": "reality_based"
+        }
+      },
+      {
+        "id": "RES_BIG",
+        "node_type": "resource",
+        "name": "rilievo_intero.gltf",
+        "description": "",
+        "data": {
+          "checksum": "sha256:3d3904d724f139e511822268e346d9cfa33d6d3855433f860eb1f39d3f292b6a",
+          "packaging": "file",
+          "residency": "resident",
+          "size_bytes": 900000000,
+          "tier": "distribution",
+          "url": "/em/studio/testdata/catena-muro.gltf",
+          "url_type": "3d_model"
+        }
+      },
+      {
+        "id": "RES_BIG_TS",
+        "node_type": "resource",
+        "name": "rilievo_intero tileset (punti)",
+        "description": "",
+        "data": {
+          "checksum": "sha256:3160d3ff71f87b30fe073906ae368b326a52d3ca3d67d18182d33a3ba9d93196",
+          "checksum_of": "entry-point",
+          "packaging": "directory",
+          "residency": "resident",
+          "tier": "distribution",
+          "url": "/em/studio/testdata/tiles-punti/tileset.json",
+          "url_type": "3d_model"
+        }
+      },
+      {
         "id": "D4",
         "node_type": "document",
         "name": "D.4",
@@ -84,6 +144,20 @@
           "url": "/em/studio/testdata/tiles-punti/tileset.json",
           "url_type": "3d_model"
         }
+      },
+      {
+        "id": "RM2",
+        "node_type": "representation_model",
+        "name": "Muro (LOD)",
+        "description": "",
+        "data": {}
+      },
+      {
+        "id": "RM3",
+        "node_type": "representation_model",
+        "name": "Rilievo intero",
+        "description": "",
+        "data": {}
       }
     ],
     "edges": [
@@ -118,10 +192,70 @@
         "target": "RES_TS"
       },
       {
+        "id": "D2__has_linked_resource__RES_LOD",
+        "edge_type": "has_linked_resource",
+        "source": "D2",
+        "target": "RES_LOD"
+      },
+      {
+        "id": "D3__has_linked_resource__RES_BIG",
+        "edge_type": "has_linked_resource",
+        "source": "D3",
+        "target": "RES_BIG"
+      },
+      {
+        "id": "D3__has_linked_resource__RES_BIG_TS",
+        "edge_type": "has_linked_resource",
+        "source": "D3",
+        "target": "RES_BIG_TS"
+      },
+      {
         "id": "D4__has_linked_resource__RES_PTS",
         "edge_type": "has_linked_resource",
         "source": "D4",
         "target": "RES_PTS"
+      },
+      {
+        "id": "EP_MOD__has_representation_model__RM2",
+        "edge_type": "has_representation_model",
+        "source": "EP_MOD",
+        "target": "RM2"
+      },
+      {
+        "id": "D2__has_representation_model__RM2",
+        "edge_type": "has_representation_model",
+        "source": "D2",
+        "target": "RM2"
+      },
+      {
+        "id": "RM2__has_linked_resource__RES_LOD",
+        "edge_type": "has_linked_resource",
+        "source": "RM2",
+        "target": "RES_LOD"
+      },
+      {
+        "id": "EP_MOD__has_representation_model__RM3",
+        "edge_type": "has_representation_model",
+        "source": "EP_MOD",
+        "target": "RM3"
+      },
+      {
+        "id": "D3__has_representation_model__RM3",
+        "edge_type": "has_representation_model",
+        "source": "D3",
+        "target": "RM3"
+      },
+      {
+        "id": "RM3__has_linked_resource__RES_BIG",
+        "edge_type": "has_linked_resource",
+        "source": "RM3",
+        "target": "RES_BIG"
+      },
+      {
+        "id": "RM3__has_linked_resource__RES_BIG_TS",
+        "edge_type": "has_linked_resource",
+        "source": "RM3",
+        "target": "RES_BIG_TS"
       }
     ],
     "data": {}
@@ -129,7 +263,7 @@
   "layout": {
     "canvas": {
       "title": "Tile e LOD (MICRO-3DTILES-LOD)",
-      "width": 210.0,
+      "width": 582.36,
       "height": 260.0
     },
     "swimlanes": [
@@ -148,14 +282,44 @@
         "w": 24.96,
         "h": 32.0
       },
-      "D4": {
+      "D2": {
         "x": 54.96,
         "y": 104.0,
         "w": 24.96,
         "h": 32.0
       },
+      "D3": {
+        "x": 109.92,
+        "y": 104.0,
+        "w": 24.96,
+        "h": 32.0
+      },
+      "D4": {
+        "x": 164.88,
+        "y": 104.0,
+        "w": 24.96,
+        "h": 32.0
+      },
+      "RES_BIG": {
+        "x": 372.36,
+        "y": 204.0,
+        "w": 90.0,
+        "h": 32.0
+      },
+      "RES_BIG_TS": {
+        "x": 492.36,
+        "y": 204.0,
+        "w": 90.0,
+        "h": 32.0
+      },
+      "RES_LOD": {
+        "x": 252.36,
+        "y": 204.0,
+        "w": 90.0,
+        "h": 32.0
+      },
       "RES_PTS": {
-        "x": 120.0,
+        "x": 132.35999999999999,
         "y": 154.0,
         "w": 90.0,
         "h": 32.0
@@ -172,8 +336,20 @@
         "w": 90.0,
         "h": 32.0
       },
+      "RM2": {
+        "x": 252.35999999999999,
+        "y": 154.0,
+        "w": 90.0,
+        "h": 32.0
+      },
+      "RM3": {
+        "x": 372.36,
+        "y": 154.0,
+        "w": 90.0,
+        "h": 32.0
+      },
       "US1": {
-        "x": 60.0,
+        "x": 246.18,
         "y": 24.0,
         "w": 90.0,
         "h": 32.0

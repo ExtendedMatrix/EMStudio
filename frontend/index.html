@@ -671,6 +671,29 @@
             </p>
           </section>
 
+          <section data-settings-tab="viewers" class="settings-sect" id="settings-sect-big3d">
+            <h4 data-i18n="settings.big3d">Big 3D assets</h4>
+            <p class="settings-hint" data-i18n="settings.big3dHint">
+              EMStudio's own 3D viewer (to annotate and check an asset). A whole glb
+              or cloud over the threshold does not load by itself: the viewer asks,
+              and proposes the tileset when the model has one. A tileset opens at its
+              root and refines on request; in automatic mode it stays under the
+              memory ceiling.
+            </p>
+            <label
+              ><span data-i18n="settings.lodLimitMB">Threshold for a whole file (MB)</span>
+              <input id="set-lod-limit-mb" type="number" min="1" step="1" />
+            </label>
+            <label
+              ><span data-i18n="settings.lodLimitPoints">Threshold for a whole cloud (points)</span>
+              <input id="set-lod-limit-points" type="number" min="1000" step="1000000" />
+            </label>
+            <label
+              ><span data-i18n="settings.tilesMemoryMB">Tileset memory ceiling, automatic mode (MB)</span>
+              <input id="set-tiles-memory-mb" type="number" min="64" step="16" />
+            </label>
+          </section>
+
           <section data-settings-tab="viewers" class="settings-sect" id="settings-sect-iiif">
             <h4 data-i18n="settings.iiif">Images (IIIF)</h4>
             <p class="settings-hint" data-i18n="settings.iiifHint">

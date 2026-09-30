@@ -213,6 +213,7 @@ import { renderChronology, type ChronoEpoch, type ChronologyData } from "./chron
 import { buildSpace, type Space } from "./space";
 import { mountSpaceScene, type SceneItem } from "./scene3d";
 import { isTilesetUrl } from "./tiles3d";
+import type { ModelOptions } from "./embed3d-native";
 import { KEYMAP, filterKeymap, keysText } from "./keymap";
 import { ReadingFiles } from "./reading-files";
 import * as aiv from "./ai-validation";
@@ -327,8 +328,11 @@ import {
   getSettings,
   getSyncUrl,
   iiifBase,
+  LOD_LIMIT_MB,
+  LOD_LIMIT_POINTS,
   saveSettings,
   SYNC_TOOLS,
+  TILES_MEMORY_MB,
   type Settings,
 } from "./settings";
 import { envelope as wireEnvelope } from "./wire";
@@ -9970,6 +9974,12 @@ function openSettings(section?: string): void {
   setAiKey.value = "";
   setAtonBase.value = s.viewer.atonBase;
   setHeriverseApp.value = s.viewer.heriverseApp;
+  // MICRO-3DTILES · the big assets' threshold and the tiles' memory
+  const numIn = (id: string) => document.getElementById(id) as HTMLInputElement | null;
+  const lm = numIn("set-lod-limit-mb"), lp = numIn("set-lod-limit-points"), tm = numIn("set-tiles-memory-mb");
+  if (lm) lm.value = String(s.viewer.lodLimitMB);
+  if (lp) lp.value = String(s.viewer.lodLimitPoints);
+  if (tm) tm.value = String(s.viewer.tilesMemoryMB);
   const iiifInput = document.getElementById("set-iiif-base") as HTMLInputElement | null;
   if (iiifInput) iiifInput.value = s.iiif.base;
   void refreshAiKeyState();
@@ -10227,6 +10237,11 @@ settingsModal.addEventListener("click", (e) => {
     65535,
     Math.max(1, parseInt(setPortInp.value, 10) || 8788),
   );
+  // MICRO-3DTILES · a number field, positive, else its default
+  const posNum = (id: string, dflt: number): number => {
+    const v = Number((document.getElementById(id) as HTMLInputElement | null)?.value);
+    return Number.isFinite(v) && v > 0 ? v : dflt;
+  };
   const next: Settings = {
     sync: {
       tool: setToolSel.value,
@@ -10256,6 +10271,9 @@ settingsModal.addEventListener("click", (e) => {
       atonBase: setAtonBase.value.trim().replace(/\/+$/, ""),
       heriverseApp:
         setHeriverseApp.value.trim().replace(/^\/+|\/+$/g, "") || "a/heriverse",
+      lodLimitMB: posNum("set-lod-limit-mb", LOD_LIMIT_MB),
+      lodLimitPoints: posNum("set-lod-limit-points", LOD_LIMIT_POINTS),
+      tilesMemoryMB: Math.max(64, posNum("set-tiles-memory-mb", TILES_MEMORY_MB)),
     },
     iiif: {
       base: (document.getElementById("set-iiif-base") as HTMLInputElement)
@@ -14820,6 +14838,38 @@ function docSrcUrl(src: string): string | null {
   return null;
 }
 
+/** MICRO-3DTILES · what the Doc's 3D viewer is told about a big asset: the
+ *  threshold (Preferences), what the graph knows of the file (`size_bytes`,
+ *  `primitives.points`), and the TILESET of the same model — a resource of the
+ *  document, or of the RM it records, with `packaging: directory` or a
+ *  `tileset.json` locator (the `_link` distribution EMtools writes). */
+function docModelOptions(d: EmNode): ModelOptions {
+  const st = store;
+  const v = getSettings().viewer;
+  const opts: ModelOptions = {
+    limit: { bytes: v.lodLimitMB * 1024 * 1024, points: v.lodLimitPoints },
+    tiles: { memoryMB: v.tilesMemoryMB },
+  };
+  if (!st) return opts;
+  const linked = (id: string) => st.liveEdges()
+    .filter((e) => e.source === id && e.edge_type === "has_linked_resource").map((e) => st.node(e.target)).filter(Boolean) as EmNode[];
+  const rms = st.liveEdges().filter((e) => e.source === d.id && e.edge_type === "has_representation_model").map((e) => e.target);
+  const resources = [...linked(d.id), ...rms.flatMap(linked)];
+  const own = viewerSourceOf(d);
+  const primary = resources.find((r) => viewerSourceOf(r) === own) ?? (own ? null : resources[0] ?? null);
+  const data = (primary?.data ?? {}) as Record<string, unknown>;
+  const num = (x: unknown) => (typeof x === "number" && Number.isFinite(x) ? x : null);
+  const prims = (data.primitives ?? {}) as Record<string, unknown>;
+  opts.known = { bytes: num(data.size_bytes), points: num(prims.points) };
+  const ts = resources.find((r) => {
+    const rd = (r.data ?? {}) as Record<string, unknown>;
+    return r !== primary && (rd.packaging === "directory" || isTilesetUrl(viewerSourceOf(r)));
+  });
+  const tsSrc = ts ? viewerSourceOf(ts) : null;
+  opts.tileset = tsSrc ? docSrcUrl(tsSrc) : null;
+  return opts;
+}
+
 async function docText(d: EmNode): Promise<string | null> {
   const data = (d.data ?? {}) as Record<string, unknown>;
   if (typeof data.text === "string" && data.text) return data.text;
@@ -14870,6 +14920,7 @@ function renderDocReadingStage(win: Win, detail: HTMLElement, d: EmNode): void {
     current: armed ?? selectedReading,
     imageUrl: medium === "image" ? url : null,
     modelUrl: medium === "3d" ? url : null,
+    model: medium === "3d" ? docModelOptions(d) : undefined,
     text: () => docText(d),
     onTrace: (x, g) => traceReading(win, x, d.id, g),
     tool: docToolOf(win),
@@ -15555,7 +15606,13 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
       loading: t("space.loading"), noEngine: t("em3d.noEngine"),
       referenceOnly: (name) => t("space.refOnly", { x: name }),
       missing: (name) => t("space.fileMissing", { x: name }),
+      overLimit: (name, size, lim) => t("space.overLimit", { x: name, size, lim }),
+      openTileset: t("lod.openTileset"), loadAnyway: t("lod.loadAnyway"),
+      lodNote: (n) => t("lod.note", { n: String(n) }),
     },
+    // MICRO-3DTILES · the threshold and the tiles' memory (Preferences)
+    limit: { bytes: getSettings().viewer.lodLimitMB * 1024 * 1024, points: getSettings().viewer.lodLimitPoints },
+    tilesMemoryMB: getSettings().viewer.tilesMemoryMB,
     onPickUnit: (id) => { select(id); refreshInspector(); },
     onPickRm: (id) => {
       select(id);
@@ -15664,7 +15721,10 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
       for (const r of sum.rms)
         items.push({ kind: "rm", id: r.id, label: r.name, state: r.resource?.state ?? "missing",
           url: r.resource?.url || undefined, resourceId: r.resource?.id,
-          edge: placementColour(r.genre) ?? undefined, selected: sel === r.id });
+          edge: placementColour(r.genre) ?? undefined, selected: sel === r.id,
+          // MICRO-3DTILES · the tileset of the same model, and the weight
+          tileset: r.tileset?.state === "resident" ? r.tileset.url || undefined : undefined,
+          bytes: r.resource?.bytes ?? null, points: r.resource?.points ?? null });
     if (spaceToggle(win, "px"))
       for (const u of sum.withProxy) {
         const px = sp.proxies.get(u)!;

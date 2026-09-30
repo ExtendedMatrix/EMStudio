@@ -8476,8 +8476,8 @@ button.shelf-badge { cursor: pointer; font: inherit; font-size: 10.5px; }
   #toolbar .dd-toggle { padding-left: 6px; padding-right: 6px; }
 }
 
-/* MICRO-3DTILES · the strip of a tileset (its controls): the 3D stage's own
-   header, above the canvas */
+/* MICRO-3DTILES · the strip of a big asset (a tileset's controls, a LOD set's
+   selector): the 3D stage's own header, above the canvas */
 .v3d-strip { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 5px 38px 5px 8px;
   border-bottom: 1px solid var(--border); background: var(--bg-panel); font-size: 0.78rem; }
 .v3d-strip.hidden { display: none; }
@@ -8494,7 +8494,13 @@ button.shelf-badge { cursor: pointer; font: inherit; font-size: 10.5px; }
 .tl-status { color: var(--text-muted); font-variant-numeric: tabular-nums; }
 .tl-status.bad { color: var(--danger); }
 .rd-3d-host:has(.tl-bar.armed) canvas, .scn-host:has(.tl-bar.armed) canvas { cursor: crosshair; }
-/* the Scena 3D: one strip per tileset, under its bar */
+.lod-pick { font: inherit; padding: 1px 4px; border: 1px solid var(--border-strong); border-radius: var(--radius-sm);
+  background: var(--bg-panel); color: var(--text); }
+.lod-note { color: var(--text-muted); }
+.v3d-gate { display: flex; flex-direction: column; gap: 8px; padding: 14px; }
+.v3d-gate p { margin: 0; }
+.v3d-gate-row { display: flex; gap: 8px; flex-wrap: wrap; }
+/* the Scena 3D: one strip per tileset or LOD set, under its bar */
 .scn-strips { position: absolute; left: 8px; right: 8px; bottom: 8px; z-index: 3; display: flex; flex-direction: column; gap: 4px; pointer-events: none; }
 .scn-strips .v3d-strip { pointer-events: auto; border: 1px solid var(--border); border-radius: var(--radius-sm); padding-right: 8px; }
 .scn-strips .v3d-strip b { font-weight: 600; }

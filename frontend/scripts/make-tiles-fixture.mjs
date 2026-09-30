@@ -1,6 +1,6 @@
 // MICRO-3DTILES-LOD · the small tilesets the checks open, written by hand.
 //
-//   node scripts/make-tiles-fixture.mjs        # rewrites testdata/{tiles-prova,tiles-punti,tiles-cava}
+//   node scripts/make-tiles-fixture.mjs        # rewrites testdata/{tiles-prova,tiles-punti,lod}
 //
 // They have the SHAPE of what 3D Survey Collection writes (`cesium_exporter/
 // native_export.py`): bounding volumes in Blender's frame (Z-up), glb content
@@ -16,6 +16,7 @@
 //                  shape of a 3DSC tileset without LODs (content at the leaves
 //                  only, `sarcofago_v3_baseline`): the root of what is seen is
 //                  the first level with content
+//   lod/           muro_LOD0..3.glb — a `LODgenerator` set (LOD0 the heaviest)
 //
 // Deterministic: the same bytes every run (no clock, no random).
 import { mkdirSync, writeFileSync } from "node:fs";
@@ -183,6 +184,23 @@ function tilesPunti() {
   writeFileSync(`${dir}tileset.json`, JSON.stringify(ts, null, 2) + "\n");
 }
 
+// ── lod ──────────────────────────────────────────────────────────────────────
+/** A wall 4 m × 2 m as a grid of k×k quads: LOD0 the finest. */
+function wall(k) {
+  const tris = [];
+  const p = (i, j) => [(i / k) * 4, 0.3 * Math.sin(i * 0.7) * 0.1, (j / k) * 2];
+  for (let i = 0; i < k; i++) for (let j = 0; j < k; j++) {
+    tris.push([p(i, j), p(i + 1, j), p(i + 1, j + 1)], [p(i, j), p(i + 1, j + 1), p(i, j + 1)]);
+  }
+  return tris;
+}
+function lod() {
+  const dir = `${TD}lod/`;
+  mkdirSync(dir, { recursive: true });
+  [64, 32, 16, 4].forEach((k, level) =>
+    writeFileSync(`${dir}muro_LOD${level}.glb`, meshGlb(wall(k), [0.72, 0.62, 0.5, 1], `muro_LOD${level}`)));
+}
+
 function tilesCava() {
   const dir = `${TD}tiles-cava/`;
   mkdirSync(dir, { recursive: true });
@@ -199,4 +217,5 @@ function tilesCava() {
 tilesProva();
 tilesPunti();
 tilesCava();
-console.log("written: testdata/tiles-prova, testdata/tiles-punti, testdata/tiles-cava");
+lod();
+console.log("written: testdata/tiles-prova, testdata/tiles-punti, testdata/tiles-cava, testdata/lod");

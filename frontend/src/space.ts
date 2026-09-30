@@ -41,6 +41,12 @@ export interface SpaceResource {
   url: string;
   checksum: string;
   state: FileState;
+  /** MICRO-3DTILES · what the resource declares: `file` | `directory` (a
+   *  tileset tree, the `_link` EMtools writes) | `archive`; its weight and, for
+   *  a cloud, its points (`size_bytes`, `primitives.points`) */
+  packaging: string;
+  bytes: number | null;
+  points: number | null;
 }
 
 export interface SpaceRM {
@@ -54,6 +60,9 @@ export interface SpaceRM {
    *  reality_based = a survey, em_based = a source-based reconstruction… */
   genre: string | null;
   resource: SpaceResource | null;
+  /** MICRO-3DTILES · the TILESET of the same model, when its first resource is
+   *  not one (proposed instead of a glb over the threshold) */
+  tileset: SpaceResource | null;
 }
 
 export type ProxyGeometry = "glb" | "convex" | "spheres" | "empty";
@@ -164,16 +173,27 @@ export function buildSpace(
     .map((n) => ({ id: n.id, name: str(n.name) || n.id, start: num(dataOf(n).start_time), end: num(dataOf(n).end_time) }))
     .sort((a, b) => (b.start ?? -Infinity) - (a.start ?? -Infinity));
 
-  const resourceOf = (id: string): SpaceResource | null => {
-    const rid = outOf(id, "has_linked_resource").find((x) => byId.get(x)?.node_type === "resource");
-    const r = rid ? byId.get(rid) : undefined;
-    if (!r) return null;
+  const asResource = (r: EmNode): SpaceResource => {
     const d = dataOf(r);
     let state: FileState = opts.resident ? (opts.resident.has(r.id) ? "resident"
       : recordedState(r) === "reference" ? "reference" : "missing") : recordedState(r);
     if (state === "resident" && opts.notFound?.has(r.id)) state = "missing";
+    const prims = (d.primitives ?? {}) as Record<string, unknown>;
     return { id: r.id, name: str(r.name) || str(d.url).split("/").pop() || r.id, url: str(d.url),
-             checksum: str(d.checksum), state };
+             checksum: str(d.checksum), state, packaging: str(d.packaging),
+             bytes: num(d.size_bytes), points: num(prims.points) };
+  };
+  const resourcesOf = (id: string): EmNode[] => outOf(id, "has_linked_resource")
+    .map((x) => byId.get(x)).filter((r): r is EmNode => r?.node_type === "resource");
+  const resourceOf = (id: string): SpaceResource | null => {
+    const r = resourcesOf(id)[0];
+    return r ? asResource(r) : null;
+  };
+  /** a tileset: `packaging: directory`, or a `tileset.json` locator */
+  const isTileset = (r: SpaceResource) => r.packaging === "directory" || /(^|\/)tileset\.json(\?|#|$)/i.test(r.url);
+  const tilesetOf = (id: string): SpaceResource | null => {
+    const all = resourcesOf(id).map(asResource);
+    return all.length > 1 && !isTileset(all[0]) ? all.slice(1).find(isTileset) ?? null : null;
   };
 
   // representation models
@@ -189,7 +209,8 @@ export function buildSpace(
     const dd = dataOf(documentId ? byId.get(documentId) : undefined);
     const own = dataOf(rm);
     const genre = str(own.geometry ?? own.certainty_class ?? dd.geometry ?? dd.certainty_class).trim() || null;
-    return { id: rm.id, name: str(rm.name) || rm.id, epochs: [...eps], documentId, genre, resource: resourceOf(rm.id) };
+    return { id: rm.id, name: str(rm.name) || rm.id, epochs: [...eps], documentId, genre, resource: resourceOf(rm.id),
+             tileset: tilesetOf(rm.id) };
   });
 
   // proxies: unit → property(geometry) → shape (→ resource)

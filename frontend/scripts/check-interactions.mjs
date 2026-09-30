@@ -2136,12 +2136,14 @@ test("T1.disk", "3D Tiles · un tileset su disco passa dal bridge per percorso (
       && /\/fs\/at\//.test(st.model ?? "") && !errors.length, detail: { model: st.model, requests, errors } };
 });
 
-test("T1.space", "3D Tiles · nella Scena 3D dello Spazio: il tileset dell'RM si apre alla radice e si raffina", async () => {
+test("T1.space", "3D Tiles · nella Scena 3D dello Spazio: il tileset dell'RM si apre alla radice e si raffina; il set LOD al più leggero, col selettore; il glb oltre la soglia chiede e propone il tileset", async () => {
   const { p, ctx, errors } = await open({ doc: "tiles", ws: "space" });
   await p.waitForFunction(() => document.querySelector(".scn-host")?.dataset.ready === "1", null, { timeout: 20000 });
   const sc = () => p.evaluate(() => {
     const h = document.querySelector(".scn-host");
-    return { items: h.__space(), tiles: h.__spaceTiles?.() ?? [] };
+    return { items: h.__space(), tiles: h.__spaceTiles?.() ?? [],
+      strips: [...h.querySelectorAll(".scn-strips .v3d-strip")].map((s) => ({ id: s.dataset.id, text: s.textContent })),
+      labels: [...h.querySelectorAll(".scn-label")].map((l) => l.textContent) };
   });
   const settle = async (pred, ms = 10000) => {
     const t0 = Date.now(); let s = await sc();
@@ -2149,18 +2151,77 @@ test("T1.space", "3D Tiles · nella Scena 3D dello Spazio: il tileset dell'RM si
     await p.waitForTimeout(300);
     return sc();
   };
-  const f = (s, id) => s.tiles.find((t) => t.id === id)?.files ?? [];
-  const s0 = await settle((s) => s.items.find((i) => i.id === "RM1")?.as === "tiles" && f(s, "RM1").length);
+  const by = (s, id) => s.items.find((i) => i.id === id);
+  const s0 = await settle((s) => by(s, "RM1")?.as === "tiles" && by(s, "RM2")?.as === "mesh" && by(s, "RM3")?.as === "gated"
+    && s.tiles.some((t) => t.files.length));
   await p.screenshot({ path: `${process.env.SHOTS ?? "."}/t1-spazio.png` }).catch(() => {});
+  // «Più dettaglio qui» on RM1's strip, then a click on its root
   await p.click('.scn-strips .v3d-strip[data-id="RM1"] .tl-more');
   const at = await p.evaluate(() => document.querySelector(".scn-host").__spaceTileScreenOf("tiles/root.glb"));
   if (at) await p.mouse.click(at.x, at.y);
-  const s1 = await settle((s) => f(s, "RM1").includes("tiles/c3.glb"));
+  const s1 = await settle((s) => (s.tiles.find((t) => t.id === "RM1")?.files ?? []).includes("tiles/c3.glb"));
+  // RM2: the selector to LOD 1; RM3: «Apri il tileset»
+  await p.selectOption('.scn-strips .v3d-strip[data-id="RM2"] .lod-pick', "1");
+  await p.click('.scn-strips .v3d-strip[data-id="RM3"] [data-gate="tileset"]');
+  const s2 = await settle((s) => /muro_LOD1/.test(by(s, "RM2")?.url ?? "") && by(s, "RM3")?.as === "tiles");
+  await p.screenshot({ path: `${process.env.SHOTS ?? "."}/t1-spazio-dopo.png` }).catch(() => {});
   await ctx.close();
-  return { pass: same(f(s0, "RM1"), ["tiles/root.glb"])
+  const f = (s, id) => s.tiles.find((t) => t.id === id)?.files ?? [];
+  return { pass: same(f(s0, "RM1"), ["tiles/root.glb"]) && /muro_LOD3\.glb$/.test(by(s0, "RM2")?.url ?? "")
+      && s0.labels.some((l) => /Rilievo intero: oltre la soglia \(858\.3 MB > 200\.0 MB\)/.test(l))
       && same(f(s1, "RM1"), ["tiles/c0.glb", "tiles/c1.glb", "tiles/c2.glb", "tiles/c3.glb", "tiles/root.glb"])
+      && /muro_LOD1\.glb$/.test(by(s2, "RM2")?.url ?? "") && by(s2, "RM3")?.as === "tiles" && same(f(s2, "RM3"), ["punti.pnts"])
       && !errors.filter((e) => !/c1_0/.test(e)).length,
-    detail: { s0: [s0.items, s0.tiles], s1: s1.tiles, at, errors } };
+    detail: { s0: [s0.items, s0.tiles, s0.labels], s1: s1.tiles, s2: [s2.items, s2.tiles], at, errors } };
+});
+
+// ── MICRO-3DTILES-LOD · parte 2 · il LOD più leggero, poi il dettaglio su richiesta
+test("T2.lod", "LOD · un set `<base>_LOD0…N` (non un tileset) si apre al LOD più alto, il più leggero; il selettore passa a un altro glb", async () => {
+  const { p, ctx, errors, win, fetched } = await openTilesDoc("D2");
+  await p.waitForTimeout(600);
+  const a = await tilesState(p, win);
+  await p.selectOption(`[data-win="${win}"] .lod-pick`, "1");
+  await p.waitForFunction((w) => /muro_LOD1\.glb$/.test(document.querySelector(`[data-win="${w}"] .rd-3d-host`)?.dataset.model ?? ""), win, { timeout: 10000 });
+  const b = await tilesState(p, win);
+  await p.screenshot({ path: `${process.env.SHOTS ?? "."}/t2-lod.png` }).catch(() => {});
+  const glbs = (await fetched(true)).filter((r) => /^lod\/.*\.glb$/.test(r));
+  await ctx.close();
+  // the whole glbs fetched: LOD3 at the opening, LOD1 on the selector — never LOD0 or LOD2
+  return { pass: /muro_LOD3\.glb$/.test(a.model ?? "") && a.lod === "3"
+      && same(a.options.map((o) => o.split(" · ")[0]), ["LOD 0", "LOD 1", "LOD 2", "LOD 3"])
+      && /muro_LOD1\.glb$/.test(b.model ?? "") && b.lod === "1"
+      && same([...new Set(glbs)].sort(), ["lod/muro_LOD1.glb", "lod/muro_LOD3.glb"]) && !errors.length,
+    detail: { a: [a.model, a.lod, a.options], b: [b.model, b.lod], glbs, errors } };
+});
+test("T2.gate", "Soglia · un glb oltre la soglia (le Preferenze) non si carica da solo: si chiede, e si propone il tileset dello stesso modello", async () => {
+  const { p, ctx, errors, win, fetched } = await openTilesDoc("D3");
+  const g = await tilesState(p, win);
+  // (the Fonti Doc showed D.1 before D.3 was asked for: only D.3's glb counts)
+  const before = (await fetched()).filter((r) => /catena-muro/.test(r));
+  await p.screenshot({ path: `${process.env.SHOTS ?? "."}/t2-soglia.png` }).catch(() => {});
+  await p.click(`[data-win="${win}"] [data-gate="tileset"]`);
+  const t = await tilesSettle(p, win, (s) => (s.files ?? []).length >= 1);
+  await ctx.close();
+  return { pass: /858\.3 MB, oltre la soglia di 200\.0 MB/.test(g.gate ?? "") && /Apri il tileset/.test(g.gate ?? "")
+      && /Caricalo comunque/.test(g.gate ?? "") && !before.length
+      && t.tileset && same(t.files, ["punti.pnts"]) && !errors.length,
+    detail: { gate: g.gate, before, after: t.files, errors } };
+});
+test("T2.gateLoad", "Soglia · «Caricalo comunque» carica il glb; sotto la soglia (Preferenze alzate) si apre da solo", async () => {
+  const a = await openTilesDoc("D3");
+  await a.p.click(`[data-win="${a.win}"] [data-gate="load"]`);
+  await a.p.waitForFunction((w) => document.querySelector(`[data-win="${w}"] .rd-3d-host`)?.dataset.ready === "1", a.win, { timeout: 10000 });
+  const loaded = await tilesState(a.p, a.win);
+  await a.ctx.close();
+  const settings = JSON.stringify({ viewer: { lodLimitMB: 2000 } });
+  let d = fixture("tiles");
+  const o = await open({ doc: d, ws: "provenance", init: { "emstudio.settings": settings } });
+  const win = await o.p.evaluate(() => window.__EM_DRAG__.openDoc("D3"));
+  await o.p.waitForFunction((w) => { const h = document.querySelector(`[data-win="${w}"] .rd-3d-host`); return h && (h.dataset.ready === "1" || h.dataset.gated === "1"); }, win, { timeout: 15000 });
+  const high = await tilesState(o.p, win);
+  await o.ctx.close();
+  return { pass: /catena-muro\.gltf$/.test(loaded.model ?? "") && !loaded.gate && /catena-muro\.gltf$/.test(high.model ?? "") && !high.gate
+      && !a.errors.length && !o.errors.length, detail: { loaded: loaded.model, high: [high.model, high.gate], errors: [...a.errors, ...o.errors] } };
 });
 
 // ── run ─────────────────────────────────────────────────────────────────────

@@ -104,7 +104,25 @@ export interface ViewerSettings {
   atonBase: string;
   /** Where the Heriverse wapp is mounted under it (ATON wapps live at /a/…). */
   heriverseApp: string;
+  /** MICRO-3DTILES · a whole glb over this many MB is not loaded by itself:
+   *  the viewer asks, and proposes the tileset when there is one */
+  lodLimitMB: number;
+  /** …and a whole cloud over this many points */
+  lodLimitPoints: number;
+  /** the memory ceiling of a tileset's automatic refinement, MB */
+  tilesMemoryMB: number;
 }
+
+/** MICRO-3DTILES · the defaults of the three, MEASURED (the MICRO's report,
+ *  `misura-soglia.txt`). A whole glb costs THREE TIMES its size in the page's
+ *  memory (50–800 MB, constant): 200 MB → 600 MB, the most a tab carries
+ *  comfortably next to the rest of the editor — and ~80 s on a 20 Mbit/s line.
+ *  A cloud of the same cost is ~13 M points (16 B each: 10 M → 458 MB, 20 M →
+ *  916 MB), so the round number below it. The tiles' ceiling is
+ *  3DTilesRendererJS's own default (`LRUCache.maxBytesSize`, 0.4 GB). */
+export const LOD_LIMIT_MB = 200;
+export const LOD_LIMIT_POINTS = 10_000_000;
+export const TILES_MEMORY_MB = 400;
 
 export interface Settings {
   sync: SyncSettings;
@@ -125,7 +143,8 @@ const DEFAULTS: Settings = {
   ai: { provider: "claude", model: "" },
   // No default host on purpose: a wrong one would look like a broken viewer.
   // The Heriverse deployment guide mounts the wapp at /a/heriverse.
-  viewer: { atonBase: "", heriverseApp: "a/heriverse" },
+  viewer: { atonBase: "", heriverseApp: "a/heriverse",
+            lodLimitMB: LOD_LIMIT_MB, lodLimitPoints: LOD_LIMIT_POINTS, tilesMemoryMB: TILES_MEMORY_MB },
   // No default base, for the same reason the ATON one has none: a wrong host
   // would look like a broken image service rather than an unconfigured one.
   iiif: { base: "", mirador: "https://projectmirador.org/embed/" },

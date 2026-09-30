@@ -118,19 +118,81 @@ export interface Viewer3DOptions {
    *  vertex, and a marker under it (a line is a wide target) does not take it */
   tracing?: () => boolean;
   markers?: Marker3D[];
-  /** MICRO-3DTILES · a tileset's refinement and memory */
+  /** MICRO-3DTILES · big assets: the threshold, the tileset, the LOD set */
   model?: ModelOptions;
 }
 
 /** MICRO-3DTILES · what the viewer is told about a big asset. */
 export interface ModelOptions {
-  /** the tileset's refinement and memory */
+  /** what the graph already knows of the file (the resource's `size_bytes`,
+   *  `primitives.points`): it saves asking the server */
+  known?: { bytes?: number | null; points?: number | null };
+  /** over this a glb is not loaded by itself (the preferences) */
+  limit?: { bytes: number; points: number };
+  /** the tileset of the same model, proposed when the glb is over the limit */
+  tileset?: string | null;
+  /** the tileset's refinement and memory (the preferences) */
   tiles?: { mode?: RefineMode; memoryMB?: number };
+  /** look for the `<base>_LOD0…N` siblings of a glb (default: yes) */
+  lods?: boolean;
+}
+
+/** MICRO-3DTILES · the `_LOD<n>` of a glb's locator — in its path or in the
+ *  `path=` of the bridge's `/fs/file?path=…`, where `_` and `.` stay literal. */
+const LOD_RE = /_LOD(\d+)(\.(?:glb|gltf))(?=$|[?#&])/i;
+/** EMtools' range (`rm_manager/operators.py`: LOD_MIN_LEVEL 0, LOD_MAX_LEVEL 4) */
+export const LOD_LEVELS = [0, 1, 2, 3, 4];
+
+export function lodLevelOf(url: string): number | null {
+  const m = LOD_RE.exec(url);
+  return m ? Number(m[1]) : null;
+}
+
+export function withLod(url: string, level: number): string {
+  return url.replace(LOD_RE, (_m, _n, ext) => `_LOD${level}${ext}`);
+}
+
+/** The bytes of a file, asked with a HEAD; null when the server does not say. */
+export async function headBytes(url: string): Promise<number | null> {
+  try {
+    const r = await fetch(url, { method: "HEAD" });
+    if (!r.ok) return null;
+    const n = Number(r.headers.get("content-length"));
+    return Number.isFinite(n) && n > 0 ? n : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The LOD set a glb belongs to, as `rm_manager.detect_lod_variants` of EMtools
+ * reads it: `<base>_LOD<n>`, sorted by n. EMtools has the objects in the scene;
+ * here the siblings are ASKED for (a HEAD each, 0…4), so a set works from the
+ * bridge, the dev server or any web store alike. `[]` when the name has no
+ * `_LOD<n>` or only one level answers.
+ */
+export async function probeLods(url: string): Promise<Array<{ level: number; url: string; bytes: number | null }>> {
+  if (lodLevelOf(url) == null) return [];
+  const found = await Promise.all(LOD_LEVELS.map(async (level) => {
+    const u = withLod(url, level);
+    try {
+      const r = await fetch(u, { method: "HEAD" });
+      // a page is not a model: a dev server (Vite) or an SPA host answers 200
+      // with its index.html for a file that is not there — measured on :5211
+      if (!r.ok || /^text\/html/i.test(r.headers.get("content-type") ?? "")) return null;
+      const n = Number(r.headers.get("content-length"));
+      return { level, url: u, bytes: Number.isFinite(n) && n > 0 ? n : null };
+    } catch {
+      return null;
+    }
+  }));
+  const ok = found.filter((x): x is { level: number; url: string; bytes: number | null } => !!x);
+  return ok.length > 1 ? ok : [];
 }
 
 /**
  * Mount an orbitable view of one glTF — or, MICRO-3DTILES, of a 3D Tiles
- * tileset — into `host`.
+ * tileset, or of a `_LOD` set — into `host`.
  *
  * Nothing loads until the reader is looking at it (`lazy.ts`), for the same
  * reason the iframe does not: a chapter with six models must not fetch six
@@ -151,8 +213,8 @@ export function mount3dViewer(host: HTMLElement, url: string,
   status.className = "nv-embed-note";
   status.textContent = "modello 3D — si carica quando lo guardi";
   host.appendChild(status);
-  // MICRO-3DTILES · the strip of a tileset: its controls — above the canvas,
-  // in the stage's own header
+  // MICRO-3DTILES · the strip of a big asset: the tileset's controls, or the
+  // LOD selector — above the canvas, in the stage's own header
   const strip = document.createElement("div");
   strip.className = "v3d-strip hidden";
 
@@ -453,6 +515,80 @@ export function mount3dViewer(host: HTMLElement, url: string,
         show();         // the canvas at once: the root arrives into it
       };
 
+      // ── the threshold: a big glb is asked about, not loaded ────────────────
+      const gate = (u: string, bytes: number | null, points: number | null) => {
+        status.className = "nv-embed-note v3d-gate";
+        status.textContent = "";
+        const lim = mo.limit!;
+        const p = document.createElement("p");
+        p.textContent = bytes != null && bytes > lim.bytes
+          ? t("lod.tooBig", { x: formatBytes(bytes), lim: formatBytes(lim.bytes) })
+          : t("lod.tooManyPoints", { x: fmtCount(points ?? 0), lim: fmtCount(lim.points) });
+        status.appendChild(p);
+        const row = document.createElement("div");
+        row.className = "v3d-gate-row";
+        if (mo.tileset) {
+          const b = document.createElement("button");
+          b.type = "button";
+          b.className = "insp-btn primary";
+          b.dataset.gate = "tileset";
+          b.textContent = t("lod.openTileset");
+          b.addEventListener("click", () => { status.textContent = t("tl.loading"); void openTiles(mo.tileset!); });
+          row.appendChild(b);
+        }
+        const go = document.createElement("button");
+        go.type = "button";
+        go.className = "insp-btn";
+        go.dataset.gate = "load";
+        go.textContent = t("lod.loadAnyway");
+        go.addEventListener("click", () => { status.className = "nv-embed-note"; status.textContent = "carico il modello…"; openGlb(u); });
+        row.appendChild(go);
+        status.appendChild(row);
+        host.dataset.gated = "1";
+      };
+      const guardedGlb = async (u: string) => {
+        const lim = mo.limit;
+        if (!lim) { openGlb(u); return; }
+        const known = mo.known ?? {};
+        const bytes = known.bytes ?? await headBytes(u);
+        const points = known.points ?? null;
+        if (disposed) return;
+        if ((bytes != null && bytes > lim.bytes) || (points != null && points > lim.points)) gate(u, bytes, points);
+        else openGlb(u);
+      };
+
+      // ── a LOD set: the highest (the lightest) first, a selector for the rest
+      const lodPicker = (set: Array<{ level: number; url: string; bytes: number | null }>, current: number) => {
+        strip.textContent = "";
+        strip.classList.remove("hidden");
+        if (!strip.isConnected) host.prepend(strip);
+        const lab = document.createElement("label");
+        lab.className = "lod-lbl";
+        const sel = document.createElement("select");
+        sel.className = "lod-pick";
+        sel.title = t("lod.pickTitle");
+        for (const v of set) {
+          const o = document.createElement("option");
+          o.value = String(v.level);
+          o.textContent = `LOD ${v.level}${v.bytes != null ? ` · ${formatBytes(v.bytes)}` : ""}`;
+          o.selected = v.level === current;
+          sel.appendChild(o);
+        }
+        const note = document.createElement("span");
+        note.className = "lod-note";
+        note.textContent = t("lod.note", { n: String(set.length) });
+        sel.addEventListener("change", () => {
+          const v = set.find((x) => String(x.level) === sel.value);
+          if (!v) return;
+          note.textContent = t("tl.loading");
+          host.dataset.lod = sel.value;
+          openGlb(v.url, () => { note.textContent = t("lod.note", { n: String(set.length) }); });
+        });
+        lab.append(sel);
+        strip.append(lab, note);
+        host.dataset.lod = String(current);
+      };
+
       cleanup = () => {
         cancelAnimationFrame(frame);
         layer?.dispose();
@@ -462,7 +598,15 @@ export function mount3dViewer(host: HTMLElement, url: string,
       };
 
       if (isTilesetUrl(url)) { await openTiles(url); return; }
-      openGlb(url);
+      const set = mo.lods === false ? [] : await probeLods(url);
+      if (disposed) return;
+      if (set.length) {
+        const top = set[set.length - 1];
+        lodPicker(set, top.level);
+        // the lightest is never over the threshold by being the lightest: it is
+        // guarded all the same, a LOD4 of a hillside can still be huge
+        await guardedGlb(top.url);
+      } else await guardedGlb(url);
     })();
   });
 
@@ -484,6 +628,8 @@ export function mount3dViewer(host: HTMLElement, url: string,
     },
   };
 }
+
+const fmtCount = (n: number): string => n >= 1e6 ? `${(n / 1e6).toFixed(1)} M` : n >= 1e3 ? `${Math.round(n / 1e3)} k` : String(n);
 
 /** The tileset bar's words (i18n), one place for the Doc and the Scena 3D. */
 export function tilesBarTexts(): TilesBarTexts {

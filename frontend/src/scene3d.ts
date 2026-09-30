@@ -21,9 +21,9 @@
  * never on an epoch change or a toggle: the reader's point of view is theirs
  * (MICRO-RIFINITURE). three.js is the lazy engine of `embed3d-native.ts`.
  */
-import { engine, tilesBarTexts } from "./embed3d-native";
+import { engine, headBytes, lodLevelOf, probeLods, tilesBarTexts } from "./embed3d-native";
 import { onFirstVisible } from "./lazy";
-import { createTilesLayer, isTilesetUrl, tilesBar, tilesEngine, type TilesLayer } from "./tiles3d";
+import { createTilesLayer, formatBytes, isTilesetUrl, tilesBar, tilesEngine, type TilesLayer } from "./tiles3d";
 
 export interface SceneItem {
   kind: "rm" | "proxy";
@@ -41,6 +41,11 @@ export interface SceneItem {
   convexshapes?: number[][];
   spheres?: number[][];
   selected?: boolean;
+  /** MICRO-3DTILES · the tileset of the same model (proposed over the threshold) */
+  tileset?: string;
+  /** what the graph knows of the file: `size_bytes`, `primitives.points` */
+  bytes?: number | null;
+  points?: number | null;
 }
 
 export interface SceneTexts {
@@ -48,6 +53,11 @@ export interface SceneTexts {
   noEngine: string;
   referenceOnly: (name: string) => string;
   missing: (name: string) => string;
+  /** MICRO-3DTILES · a glb over the threshold, and the two ways on */
+  overLimit: (name: string, size: string, limit: string) => string;
+  openTileset: string;
+  loadAnyway: string;
+  lodNote: (n: number) => string;
 }
 
 export interface SpaceSceneHandle {
@@ -62,14 +72,17 @@ export interface SpaceSceneOptions {
   onPickRm?: (rmId: string) => void;
   /** a resident file did not answer: the caller marks it missing */
   onNotFound?: (resourceId: string) => void;
+  /** MICRO-3DTILES · the threshold and the tiles' memory (the Preferences) */
+  limit?: { bytes: number; points: number };
+  tilesMemoryMB?: number;
 }
 
 interface Drawn {
   item: SceneItem;
   /** what was drawn: a mesh, a contour, or only a label — MICRO-3DTILES: a
-   *  tileset */
-  as: "mesh" | "contour" | "label" | "pending" | "tiles";
-  /** the file actually drawn (a tileset) */
+   *  tileset, or a glb held back by the threshold */
+  as: "mesh" | "contour" | "label" | "pending" | "tiles" | "gated";
+  /** the file actually drawn (a LOD set's chosen level, a tileset) */
   url?: string;
 }
 
@@ -139,9 +152,14 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
       const unitCentres = new Map<string, any>();
 
       // MICRO-3DTILES · the tilesets of the scene (one layer per tileset url,
-      // kept across rebuilds: a tileset is not re-fetched when a toggle flips)
+      // kept across rebuilds: a tileset is not re-fetched when a toggle
+      // flips), the LOD sets asked for once, and what the reader chose
       type Live = { layer: TilesLayer; bar: ReturnType<typeof tilesBar>; ready: Promise<void>; itemId: string };
       const layers = new Map<string, Live>();
+      const lodSets = new Map<string, Promise<Array<{ level: number; url: string; bytes: number | null }>>>();
+      const lodChoice = new Map<string, number>();
+      const forced = new Set<string>();
+      const useTileset = new Set<string>();
       const strips = document.createElement("div");
       strips.className = "scn-strips";
       let T: any = null;
@@ -150,7 +168,7 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
         let live = layers.get(url);
         if (live) { live.itemId = itemId; return live; }
         try { T = T ?? await tilesEngine(); } catch { return null; }
-        const layer = createTilesLayer(E, T, url, camera, renderer, {});
+        const layer = createTilesLayer(E, T, url, camera, renderer, { memoryMB: opts.tilesMemoryMB });
         const bar = tilesBar(layer, tilesBarTexts());
         // ready = the root's first tile, or its failure (the frame waits for it)
         const ready = new Promise<void>((res) => {
@@ -249,8 +267,10 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
         const used = new Set<string>();
         for (const item of items) {
           const key = `${item.kind}:${item.id}`;
-          // MICRO-3DTILES · a tileset
-          const tsUrl = item.state === "resident" && item.url && isTilesetUrl(item.url) ? item.url : null;
+          // MICRO-3DTILES · a tileset (the item's own, or the one chosen over
+          // a glb past the threshold)
+          const tsUrl = item.state === "resident" && item.url
+            ? (isTilesetUrl(item.url) ? item.url : useTileset.has(key) && item.tileset ? item.tileset : null) : null;
           if (tsUrl) {
             used.add(tsUrl);
             drawn.set(key, { item, as: "pending", url: tsUrl });
@@ -269,6 +289,78 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
               if (bb) addLabel(item.label, new THREE.Vector3((bb.min.x + bb.max.x) / 2, bb.max.y, (bb.min.z + bb.max.z) / 2), "rm", item.id);
               drawn.set(key, { item, as: "tiles", url: tsUrl });
             }));
+            continue;
+          }
+          if (item.state === "resident" && item.url && item.kind === "rm") {
+            // a LOD set: the lightest level, or the one chosen; and the threshold
+            const base = item.url;
+            if (lodLevelOf(base) != null && !lodSets.has(base)) lodSets.set(base, probeLods(base));
+            const el = lodLevelOf(base) != null || opts.limit ? stripOf(item) : null;
+            drawn.set(key, { item, as: "pending" });
+            pending.push((async () => {
+              const set = lodLevelOf(base) != null ? await lodSets.get(base)! : [];
+              const lvl = lodChoice.get(key) ?? set[set.length - 1]?.level;
+              const chosen = set.find((x) => x.level === lvl);
+              const u = chosen?.url ?? base;
+              if (gen !== generation || disposed) return;
+              if (set.length && el) {
+                const sel = document.createElement("select");
+                sel.className = "lod-pick";
+                for (const v of set) {
+                  const o = document.createElement("option");
+                  o.value = String(v.level);
+                  o.textContent = `LOD ${v.level}${v.bytes != null ? ` · ${formatBytes(v.bytes)}` : ""}`;
+                  o.selected = v.level === lvl;
+                  sel.appendChild(o);
+                }
+                sel.addEventListener("change", () => { lodChoice.set(key, Number(sel.value)); rebuild?.(); });
+                const note = document.createElement("span");
+                note.className = "lod-note";
+                note.textContent = opts.texts.lodNote(set.length);
+                el.append(sel, note);
+              }
+              // the threshold: what the graph knows, else a HEAD
+              const lim = opts.limit;
+              if (lim && !forced.has(u)) {
+                const bytes = (u === base ? item.bytes : null) ?? chosen?.bytes ?? await headBytes(u);
+                const pts = u === base ? item.points ?? null : null;
+                if (gen !== generation || disposed) return;
+                if ((bytes != null && bytes > lim.bytes) || (pts != null && pts > lim.points)) {
+                  drawn.set(key, { item, as: "gated", url: u });
+                  later.push({ ...item, state: "missing", label: opts.texts.overLimit(item.label, formatBytes(bytes ?? 0), formatBytes(lim.bytes)) });
+                  if (el) {
+                    if (item.tileset) {
+                      const b = document.createElement("button");
+                      b.type = "button"; b.className = "scn-tg"; b.dataset.gate = "tileset";
+                      b.textContent = opts.texts.openTileset;
+                      b.addEventListener("click", () => { useTileset.add(key); rebuild?.(); });
+                      el.appendChild(b);
+                    }
+                    const g = document.createElement("button");
+                    g.type = "button"; g.className = "scn-tg"; g.dataset.gate = "load";
+                    g.textContent = opts.texts.loadAnyway;
+                    g.addEventListener("click", () => { forced.add(u); rebuild?.(); });
+                    el.appendChild(g);
+                  }
+                  return;
+                }
+              }
+              if (el && !el.querySelector("select")) el.remove();
+              const root = await load(u);
+              if (gen !== generation || disposed) return;
+              if (!root) {
+                drawn.set(key, { item: { ...item, state: "missing" }, as: "label" });
+                later.push({ ...item, state: "missing" });
+                if (item.resourceId) opts.onNotFound?.(item.resourceId);
+                return;
+              }
+              const obj = root.clone(true);
+              if (item.selected) content.add(new THREE.Box3Helper(new THREE.Box3().setFromObject(obj), 0xbf9000));
+              tag(obj, item);
+              content.add(obj);
+              addLabel(item.label, topOf(obj), "rm", item.id);
+              drawn.set(key, { item, as: "mesh", url: u });
+            })());
             continue;
           }
           if (item.state === "resident" && item.url) {
@@ -345,8 +437,10 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
             } else {
               const at = b.getCenter(new THREE.Vector3());
               at.y = b.max.y + 0.2 + 0.25 * k++;
-              addLabel(opts.texts.missing(item.label), at, "miss", item.id);
-              drawn.set(key, { item, as: "label" });
+              // MICRO-3DTILES · held back by the threshold: its label says so
+              const gated = drawn.get(key)?.as === "gated";
+              addLabel(gated ? item.label : opts.texts.missing(item.label), at, gated ? "miss gated" : "miss", item.id);
+              if (!gated) drawn.set(key, { item, as: "label" });
             }
           }
           if (!framed && content.children.length) { framed = true; frameIt?.(); }
