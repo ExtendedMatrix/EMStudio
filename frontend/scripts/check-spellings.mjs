@@ -160,8 +160,9 @@ for (const [old, canon] of PAIRS) {
   for (const t of ["US", "USVs", "USVn", "SF", "VSF", "USM", "USN", "USD", "SE", "BR"]) {
     const els = R.nodeElements(t);
     if (R.classOf(t) === "Node") continue; // not a registered type in this build
-    // node datamodel 1.6.12: the US also carries its genre (`stratigraphic_kind`)
-    const def = els.filter((r) => r.field !== "stratigraphic_kind");
+    // node datamodel 1.6.12: the US also carries its genre (`stratigraphic_kind`);
+    // 1.6.13: and the code it came in with (`source_code`, USS for a coating…)
+    const def = els.filter((r) => r.field !== "stratigraphic_kind" && r.field !== "source_code");
     eq(def.map((r) => r.field), ["definition"], `${t} carries definition`);
     eq(def[0].value, "concept", `${t}.definition is a concept`);
     eq(def[0].em_json, "data.definition", `${t}.definition lives in data.definition`);
@@ -171,6 +172,8 @@ for (const [old, canon] of PAIRS) {
     ok(!!kind, "a US carries stratigraphic_kind (1.6.12)");
     eq(kind?.value, "enum", "stratigraphic_kind is an enum");
     eq(kind?.em_json, "data.stratigraphic_kind", "it lives in data.stratigraphic_kind");
+    const code = R.nodeElements("US").find((r) => r.field === "source_code");
+    eq([code?.value, code?.em_json], ["string", "data.source_code"], "a US carries source_code in data.source_code (1.6.13)");
   }
   eq(fields("EpochNode"), [], "an epoch has no definition");
   eq(fields("property"), [], "a PropertyNode has no definition");
