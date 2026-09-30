@@ -319,6 +319,7 @@ import { buildCommand, type CommandVerb } from "./commands";
 import { addResource, fileCounts, foldFiles, movePointers, replaceFile, resourceLabel, storeGraph } from "./resources";
 import { askWhichPointersMove } from "./resource-panel";
 import { addressMap, chooseModel, needsChoice, startResources, type ModelChoice } from "./representation";
+import { foldForms, landPack, packTileset } from "./pack3tz";
 import {
   type AwarenessNote, emptyPresence, type HubOp, noteForRemoteOp, noteForStale,
   opsForLocalChange, peerSelections, planRejoin, stampForResend,
@@ -1514,6 +1515,9 @@ window.__EM_SCENE__ = () => {
   selected: () => [...selectedIds],
   /** CATENA · the live edges of one type (read-only), and the node by id */
   edgesOf: (type: string) => (store?.liveEdges() ?? []).filter((e) => e.edge_type === type),
+  // RISORSA-FILE · «Impacchetta un tileset in .3tz», the flow the desktop's
+  // button runs (the web's button is off and says «nella desktop»)
+  packTileset: (folder: string) => packTilesetFlow(folder),
   // RISORSA-FILE · …of whichever member holds it (the corpus too)
   node: (id: string) => storeOfNode(id)?.node(id) ?? store?.node(id) ?? null,
 
@@ -3005,11 +3009,15 @@ async function sha256Of(bytes: ArrayBuffer): Promise<string> {
 /** «▸ OB_PODIO_LOD1 · 3 file» on every box of a resource of several files. */
 function labelResources(scene: Scene | null | undefined, counts: Map<string, number>): void {
   if (!scene) return;
+  const forms = store ? foldForms(store.liveNodes(), store.liveEdges(), new Set()).forms : new Map<string, number>();
   for (const sn of scene.nodes) {
     if (sn.node.node_type !== "resource" || sn.instanceOf) continue;
     const k = counts.get(sn.node.id) ?? 0;
     if (k > 1) sn.label = resourceLabel(String(sn.node.name || sn.id), k,
       openResourceFiles.has(sn.node.id), t("res.files"));
+    const f = forms.get(sn.node.id) ?? 0;
+    if (f > 1) sn.label = resourceLabel(String(sn.node.name || sn.id), f,
+      openResourceFiles.has(sn.node.id), t("res.forms"));
   }
 }
 
@@ -3045,6 +3053,9 @@ function filteredView(opts: { wholeGraph?: boolean;
   // the files of a closed resource are folded away here, where every
   // projection reads what is on screen (the document keeps them)
   ({ nodes: vNodes, edges: vEdges } = foldFiles(vNodes, vEdges, openResourceFiles));
+  // …and ONE content in two forms (a folder and its .3tz: equal content_digest)
+  // is one resource until it is opened
+  ({ nodes: vNodes, edges: vEdges } = foldForms(vNodes, vEdges, openResourceFiles));
   // ALWAYS drop HDT-O-profile nodes (and any node the panel tagged with
   // data.hdto_role) + their incident edges, so graph-level HDT-O metadata never
   // clutters the stratigraphic canvas. The nodes remain in em.json (single
@@ -17604,6 +17615,9 @@ function renderStorageInto(host: StorageHost): void {
         body.appendChild(composeButtons(entry, listing));
       else if (!listing.roots)
         body.appendChild(composeFolderButton(listing));
+      // RISORSA-FILE · a TILESET folder: pack it into a .3tz beside it (desktop)
+      if (!listing.roots && listing.entries.some((e) => e.type === "file" && e.name === "tileset.json"))
+        body.appendChild(pack3tzButton(listing.path));
     }
     // DTCEMS1 · il referto delle tre classi su QUESTA cartella, quando qualcuno
     // l'ha chiesto. Sopra l'elenco perché è una frase sull'elenco.
@@ -18106,6 +18120,66 @@ async function doStamp(win: Win): Promise<void> {
     stampEmitting = false;
     renderStorage();
     redrawNeighbourhood();
+  }
+}
+
+/** RISORSA-FILE · «Impacchetta un tileset in .3tz». The desktop writes it (the
+ *  bridge beside it, 3DSC's writer, the canonical profile); the web reads a
+ *  .3tz and does not write one, and says where it is done. */
+function pack3tzButton(folder: string): HTMLElement {
+  const box = document.createElement("div");
+  box.className = "stamp-report-ask";
+  const b = document.createElement("button");
+  b.className = "ghost";
+  b.dataset.action = "pack-3tz";
+  b.textContent = t("pack3tz.button");
+  const here = isTauri();
+  b.disabled = !here || pack3tzBusy;
+  b.title = here ? t("pack3tz.hint") : t("pack3tz.desktopOnly");
+  b.onclick = () => { void packTilesetFlow(folder); };
+  box.appendChild(b);
+  if (!here) {
+    const why = document.createElement("span");
+    why.className = "stamp-compose-note";
+    why.dataset.pack = "desktop-only";
+    why.textContent = t("pack3tz.desktopOnly");
+    box.appendChild(why);
+  }
+  return box;
+}
+
+let pack3tzBusy = false;
+/** Pack, then the graph: the folder and the archive as two FORMS of one
+ *  content (equal `content_digest`), the archive derived from the folder.
+ *  Locators beside the em.json are written relative to it. */
+async function packTilesetFlow(folder: string): Promise<import("./pack3tz").PackResult | null> {
+  if (pack3tzBusy) return null;
+  pack3tzBusy = true;
+  renderStorage();
+  toast(t("pack3tz.working", { name: baseName(folder) }));
+  try {
+    const out = await packTileset(await bridgeUrl(), folder);
+    if (!out.ok) { toast(t("pack3tz.failed", { detail: out.error ?? "" })); return out; }
+    const canon = out.canonical?.canonical === true;
+    const msg = t(out.state === "same" ? "pack3tz.same" : "pack3tz.done", {
+      name: baseName(out.path ?? ""), sha: (out.sha256 ?? "").slice(0, 19),
+      cd: (out.content_digest?.digest ?? "").slice(0, 19), n: String(out.content_digest?.files ?? 0),
+      s: String(out.seconds ?? 0) });
+    toast(canon ? msg : `${msg} — ${t("pack3tz.notCanonical")}`);
+    logInfo(msg);
+    if (store) {
+      const rel = (abs: string) => {
+        const dir = currentFilePath ? currentFilePath.replace(/[^/\\]*$/, "") : "";
+        return dir && abs.startsWith(dir) ? abs.slice(dir.length) : abs;
+      };
+      const ids = landPack(storeGraph(store), rel(folder), { ...out, path: rel(out.path!) },
+        { folder: baseName(folder), archive: baseName(out.path!) });
+      select(ids.archiveId);
+    }
+    return out;
+  } finally {
+    pack3tzBusy = false;
+    renderStorage();
   }
 }
 

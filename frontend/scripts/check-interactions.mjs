@@ -22,6 +22,7 @@
 // TempluMare, epochs48, PortaMarina-lite — plus `chronology-overlaps.em.json`
 // (one epoch inside another, one that overhangs its neighbour by 20 years).
 import { createRequire } from "node:module";
+import { execFileSync } from "node:child_process";
 import { readFileSync, writeFileSync, existsSync, mkdirSync, copyFileSync } from "node:fs";
 
 const require = createRequire(import.meta.url);
@@ -2603,6 +2604,41 @@ test("R3.3tz", "visualizzatore · TempluMare_cesium.3tz si apre senza estrarlo e
   return { pass: same(folder.first, archive.first) && same(folder.more, archive.more) && (archive.more ?? []).length > 1
       && round(folder.box) === round(archive.box) && !folder.errors.length && !archive.errors.length,
     detail: { folder, archive } };
+});
+
+// ── NIGHT-RISORSA-FILE · parte 4: impacchettare un tileset ─────────────────
+test("R4.pack", "impacchettare · nel web il pulsante dice «nella desktop»; il flusso (quello della desktop) scrive il .3tz e il grafo ha UNA risorsa con due forme", async () => {
+  const root = await rootPath();
+  const copy = `${root}/pack-test/TempluMare_cesium`;
+  // a fresh copy (APFS clone): the archive is really written beside it
+  execFileSync("rm", ["-rf", copy, `${copy}.3tz`]);
+  execFileSync("cp", ["-cR", `${root}/base/RM/TempluMare_cesium`, copy]);
+  const { p, ctx, errors } = await open({ doc: "catena" });
+  await workspace(p, "assets");
+  await storageInto(p, [root.split("/").pop(), "pack-test", "TempluMare_cesium"]);
+  const web = await p.evaluate(() => ({
+    disabled: document.querySelector('[data-action="pack-3tz"]')?.disabled ?? null,
+    note: document.querySelector('[data-pack="desktop-only"]')?.textContent ?? "" }));
+  await p.screenshot({ path: SHOT("r4-web-nella-desktop") }).catch(() => {});
+  const out = await p.evaluate((f) => window.__EM_DRAG__.packTileset(f), copy);
+  await p.waitForTimeout(600);
+  const graph = await p.evaluate(() => {
+    const res = window.__EM_DRAG__.idsOfType("resource");
+    return res.map((id) => window.__EM_DRAG__.node(id)).filter(Boolean)
+      .map((n) => ({ id: n.id, name: n.name, packaging: n.data?.packaging, cd: n.data?.content_digest?.digest ?? null }));
+  });
+  await workspace(p, "provenance");
+  const archiveId = graph.find((n) => n.packaging === "archive")?.id;
+  if (archiveId) await pick(p, archiveId);
+  const insp = await p.evaluate(() => [...document.querySelectorAll('[data-win$="inspector"] .res-forms [data-form]')].map((b) => b.dataset.form));
+  await p.screenshot({ path: SHOT("r4-due-forme") }).catch(() => {});
+  await ctx.close();
+  const forms = graph.filter((n) => n.cd === "sha256:8aa6fbd3e5847e9f8c2e219fb4305d9a3ad52e41135120e79bb8c3d18b67caed");
+  return { pass: web.disabled === true && /desktop/.test(web.note) && out?.ok && out.state === "written"
+      && out.sha256 === "sha256:232dfcbc148f30e52098fef9c83606a3e1638a106fc0678563e909cde1db0c17"
+      && forms.length === 2 && forms.some((n) => n.packaging === "directory") && forms.some((n) => n.packaging === "archive")
+      && insp.length === 2 && !errors.length,
+    detail: { web, out: out && { state: out.state, sha256: out.sha256, cd: out.content_digest }, forms, insp, errors } };
 });
 
 // ── run ─────────────────────────────────────────────────────────────────────

@@ -5,6 +5,7 @@
 // `resourceSummary` is PURE (it reads a ResourceGraph and answers data), so
 // `check-resources.mjs` asks it directly; `renderResourcePanel` only draws it.
 import { t } from "./i18n";
+import { contentDigestOf, formsOf } from "./pack3tz";
 import type { DocumentStore } from "./model";
 import {
   EDGE_DERIVED_FROM,
@@ -143,6 +144,25 @@ export function renderResourcePanel(store: DocumentStore, id: string, h: Resourc
       t("declared.onlyBlender", { file: `${blend[0].split("/").pop()} · ${blend[2]}` }));
     line.dataset.blend = blend[0];
     panel.appendChild(line);
+  }
+  // ── the FORMS: the same content in another packaging (equal content_digest)
+  const forms = formsOf(g, id);
+  if (forms.length > 1) {
+    panel.appendChild(el("h3", "insp-sect", t("res.formsTitle", { n: String(forms.length) })));
+    const fl = el("div", "res-forms");
+    for (const f of forms) {
+      const fd = (f.data ?? {}) as Record<string, unknown>;
+      const b = el("button", `insp-btn${f.id === id ? " is-current" : ""}`,
+        `${String(f.name ?? f.id)} · ${String(fd.packaging ?? "")}`) as HTMLButtonElement;
+      b.dataset.form = String(fd.packaging ?? "");
+      if (typeof fd.checksum === "string") b.title = fd.checksum;
+      if (f.id === id) b.disabled = true;
+      b.addEventListener("click", () => h.onJump(f.id));
+      fl.appendChild(b);
+    }
+    const cd = contentDigestOf(g.node(id));
+    fl.appendChild(el("div", "insp-hint", t("res.formsHint", { cd: (cd ?? "").slice(0, 19) })));
+    panel.appendChild(fl);
   }
   // ── the files ────────────────────────────────────────────────────────────
   panel.appendChild(el("h3", "insp-sect", t("res.filesTitle", { n: String(s.files.length) })));
