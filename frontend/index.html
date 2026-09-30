@@ -36,7 +36,8 @@
           </g>
         </svg>
         <span class="brand-word">EMStudio</span>
-        <span id="app-version" class="app-ver" title="EMStudio build version"></span>
+        <!-- NIGHT-SPAZIO · the version left the bar: it is in the tooltip of
+             this mark, in the status bar and in Aiuto ▸ Informazioni -->
       </span>
       <!-- MENU1 · leader bar: File · Modifica · Mode · Help. The generic
            .dropdown/.dd-toggle/.dd-menu wiring (main.ts) auto-attaches; items
@@ -390,6 +391,7 @@
         </svg>
         <b>Extended Matrix</b>
         <button id="em-version" title="Version breakdown (config files + CIDOC-CRM)"></button>
+        <span id="footer-app-version" class="footer-app-ver"></span>
       </span>
       <span id="mode-indicator" title="Standalone: editing a local .em.json. Sidecar: live-synced to a host (EMtools/Blender).">Standalone mode</span>
       <!-- MODES1 · what this client does on the live channel: off / send /

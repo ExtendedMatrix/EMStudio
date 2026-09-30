@@ -1592,6 +1592,44 @@ test("S6.datings", "Tabella · «Datazioni» (già «Cronologia») ha i dati di 
     detail: { ...r, sameAsBefore: before ? JSON.stringify(before.rows) === JSON.stringify(r.rows) : "not measured", errors } };
 });
 
+// ── NIGHT-SPAZIO · parte 7 · la barra ───────────────────────────────────────
+/** the master bar as drawn: its rows (tops of the visible children), overflow,
+ *  and where the version is */
+const barState = (p) => p.evaluate(() => {
+  const bar = document.getElementById("toolbar");
+  const kids = [...bar.children].filter((c) => c.offsetParent !== null && getComputedStyle(c).display !== "none");
+  // one row = the children's vertical centres agree (heights differ: the mark, a tab)
+  const mids = kids.map((c) => { const r = c.getBoundingClientRect(); return r.top + r.height / 2; });
+  const tops = mids.filter((m, i) => !mids.slice(0, i).some((x) => Math.abs(x - m) < 6));
+  // …and nothing is cut: every workspace tab (and «+») ends inside the window
+  const cut = [...bar.querySelectorAll("#workspace-bar > *")].filter((e) => e.getBoundingClientRect().right > innerWidth + 0.5
+    || e.getBoundingClientRect().right > bar.getBoundingClientRect().right + 0.5).map((e) => e.textContent.trim());
+  const brand = document.getElementById("brand");
+  const verInBar = [...bar.querySelectorAll("*")].filter((e) => e.offsetParent !== null && /\d+\.\d+\.\d+/.test(e.childNodes.length === 1 ? e.textContent : ""))
+    .map((e) => e.id || e.className);
+  const wb = document.getElementById("workspace-bar");
+  return { h: Math.round(bar.getBoundingClientRect().height), rows: tops.length, cut,
+    overflow: Math.max(bar.scrollWidth - bar.clientWidth, wb ? wb.scrollWidth - wb.clientWidth : 0),
+    verInBar, brandTitle: brand?.title ?? null, status: document.getElementById("footer-brand")?.innerText.replace(/\s+/g, " ").trim() ?? null };
+});
+test("S7.bar", "la barra: la versione esce (tooltip del marchio, barra di stato, Informazioni); a 1024 px una riga sola, come a 1600", async () => {
+  const out = {};
+  for (const w of [1024, 1600]) {
+    const { p, ctx, errors } = await open({ doc: "catena", w, h: 800 });
+    out[w] = { ...(await barState(p)), errors };
+    await p.screenshot({ path: `${process.env.SHOTS ?? "."}/s7-barra-${w}.png`, clip: { x: 0, y: 0, width: w, height: 110 } }).catch(() => {});
+    if (w === 1600) {
+      await p.evaluate(() => document.getElementById("btn-help-about")?.click());
+      await p.waitForTimeout(300);
+      out.about = await p.evaluate(() => document.getElementById("help-pop")?.innerText ?? "");
+    }
+    await ctx.close();
+  }
+  const good = (b) => b.rows === 1 && b.overflow <= 0 && !b.cut.length && !b.verInBar.length && /EMStudio 1\.6/.test(b.brandTitle ?? "")
+    && /Extended Matrix 1\.6/.test(b.brandTitle ?? "") && /Extended Matrix 1\.6 · EMStudio 1\.6/.test(b.status ?? "") && !b.errors.length;
+  return { pass: good(out[1024]) && good(out[1600]) && out[1024].h === out[1600].h && /1\.6\.0/.test(out.about ?? ""), detail: out };
+});
+
 // ── MICRO-UN-POSTO · parte 1 · importare con una mappatura: una porta sola ───
 const TAB = () => `${FS_ROOT}/tabelle`;
 /** the editor as the door leaves it: who filled it, and its three questions */

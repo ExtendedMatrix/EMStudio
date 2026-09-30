@@ -826,12 +826,15 @@ const verBtn = document.getElementById("em-version")!;
 // "Extended Matrix 1.6" — the version alone, no redundant "EM" prefix.
 verBtn.textContent = EM_VERSION;
 
-// EMStudio app/build version (distinct from the EM language version above) —
-// shown next to the header wordmark so testers know which build they're on.
-const appVerEl = document.getElementById("app-version");
-if (appVerEl) {
-  appVerEl.textContent = __EMSTUDIO_VERSION__;
-  appVerEl.title = `EMStudio ${__EMSTUDIO_VERSION__} — EM language ${EM_VERSION}`;
+// EMStudio app/build version (distinct from the EM language version above).
+// NIGHT-SPAZIO · it left the bar (at 1024 px the bar went on two rows): it is
+// the tooltip of the mark, the status bar («Extended Matrix 1.6 · EMStudio
+// 1.6.0-dev.12») and Aiuto ▸ Informazioni.
+{
+  const brandEl = document.getElementById("brand");
+  if (brandEl) brandEl.title = `EMStudio ${__EMSTUDIO_VERSION__} · Extended Matrix ${EM_VERSION}`;
+  const footVer = document.getElementById("footer-app-version");
+  if (footVer) footVer.textContent = `· EMStudio ${__EMSTUDIO_VERSION__}`;
 }
 
 // Footer word for the current authoring mode (ADR-002): Standalone = editing a
