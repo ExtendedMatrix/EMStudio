@@ -476,7 +476,7 @@ function modelStage(ctx: ReadingStageCtx, reads: string[], owner: HTMLElement, s
     wrap.appendChild(el("p", "chain-note", t("rd.no3d")));
     return wrap;
   }
-  // the markers read their vertices from the glb, not from the node
+  // the markers read their vertices from the node (`data.coords`)
   const markers = reads.flatMap((x) => {
     const g = geometryOf(ctx.store.doc, x);
     if (!g || !isGlbKind(g.kind)) return [];

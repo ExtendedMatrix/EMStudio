@@ -1,49 +1,32 @@
 /**
- * LUOGO · the `.glb` of a reading's point, line or polyline — the client twin of
- * s3Dgraphy's `geometry/reading_glb.py`, written to give the SAME BYTES.
+ * LUOGO · the `.glb` a reading's point, line or polyline was written to from 7 to
+ * 11 ott — READ ONLY. Since node datamodel 1.6.15 the vertices are the region's
+ * `data.coords` and nothing here writes a file (the writer, `glbBytes`, went with
+ * the SPAZIO night); this parser is what the migration of an old file uses
+ * (`reading-files.ts`), the client twin of s3Dgraphy's `reading_glb.read_glb`.
  *
- *     point     → mode 0  POINTS
- *     line      → mode 1  LINES       (exactly two vertices: one segment)
- *     polyline  → mode 3  LINE_STRIP  (an open chain)
+ *     mode 0  POINTS → point · mode 1  LINES → line · mode 3  LINE_STRIP → polyline
  *
- * One float32 VEC3 accessor with min/max, a JSON chunk padded with spaces, a BIN
- * chunk padded with zeros. Coordinates VERBATIM, in the frame of the model the
- * reading is on (glTF, Y-up, local, metres): nothing is converted here, as in
- * Python — a conversion on one side only is how a point ends up a metre off.
- *
- * Byte parity needs Python's number spelling in the JSON chunk (`json.dumps`
- * writes `1.0`, `1e-05`, where JavaScript writes `1`, `0.00001`): `pyFloat`.
- * `scripts/check-paradata-chain.mjs` compares these bytes with s3Dgraphy's.
+ * Also here, because the measure is compared with s3Dgraphy's strings: the
+ * chain length and Python's `f"{x:.nf}"` (`pyFixed`).
  */
 
 export type GlbKind = "point" | "line" | "polyline";
 export type Vec3 = [number, number, number];
 
-export const GLB_MODES: Record<GlbKind, number> = { point: 0, line: 1, polyline: 3 };
 const KIND_OF_MODE: Record<number, GlbKind> = { 0: "point", 1: "line", 3: "polyline" };
 
 const MAGIC = 0x46546c67;      // "glTF"
 const CHUNK_JSON = 0x4e4f534a;
 const CHUNK_BIN = 0x004e4942;
 const FLOAT = 5126;
-const ARRAY_BUFFER = 34962;
-
 export class ReadingGlbError extends Error {}
 
-function check(kind: GlbKind, vertices: ReadonlyArray<ReadonlyArray<number>>): Vec3[] {
-  if (!(kind in GLB_MODES)) throw new ReadingGlbError(`geometry_kind must be point, line or polyline, got ${kind}`);
-  const pts = (vertices ?? []).map((p, i) => {
-    if (!Array.isArray(p) || p.length !== 3 || p.some((v) => typeof v !== "number" || !Number.isFinite(v)))
-      throw new ReadingGlbError(`vertex ${i}: expected [x, y, z]`);
-    return [p[0], p[1], p[2]] as Vec3;
-  });
-  const least = kind === "point" ? 1 : 2;
-  if (pts.length < least) throw new ReadingGlbError(`a ${kind} needs at least ${least} vertices, got ${pts.length}`);
-  if (kind === "line" && pts.length !== 2) throw new ReadingGlbError(`a line has exactly 2 vertices, got ${pts.length}`);
-  return pts;
-}
-
-/** Sum of the segments of an OPEN chain — s3Dgraphy `polyline_length`. */
+/** Sum of the segments of an OPEN chain — s3Dgraphy `chain_length`
+ *  (`math.dist`). The two may differ in the LAST BIT of a double (`math.dist` is
+ *  nearly correctly rounded, `Math.hypot` and a plain `sqrt` each differ from it
+ *  on some inputs — measured in `check-paradata-chain`); the length is a cache of
+ *  the coords, recomputed by whoever reads them, and its value (`.3f`) agrees. */
 export function polylineLength(vertices: ReadonlyArray<ReadonlyArray<number>>): number {
   let total = 0;
   for (let i = 1; i < vertices.length; i++) {
@@ -53,31 +36,7 @@ export function polylineLength(vertices: ReadonlyArray<ReadonlyArray<number>>): 
   return total;
 }
 
-// ── Python's spelling of a float ─────────────────────────────────────────────
-
-/** `repr(float)` — what `json.dumps` writes for a float. The digits are the
- *  shortest round-trip ones in both languages; only the layout differs. */
-export function pyFloat(x: number): string {
-  if (Number.isNaN(x)) return "NaN";
-  if (!Number.isFinite(x)) return x > 0 ? "Infinity" : "-Infinity";
-  if (x === 0) return Object.is(x, -0) ? "-0.0" : "0.0";
-  const [mant, expS] = x.toExponential().split("e");
-  const exp = Number(expS);
-  const neg = mant.startsWith("-");
-  const digits = mant.replace("-", "").replace(".", "");
-  let body: string;
-  if (exp < -4 || exp >= 16) {
-    const m = digits.length > 1 ? `${digits[0]}.${digits.slice(1)}` : digits;
-    body = `${m}e${exp < 0 ? "-" : "+"}${String(Math.abs(exp)).padStart(2, "0")}`;
-  } else if (exp < 0) {
-    body = `0.${"0".repeat(-exp - 1)}${digits}`;
-  } else if (digits.length <= exp + 1) {
-    body = `${digits}${"0".repeat(exp + 1 - digits.length)}.0`;
-  } else {
-    body = `${digits.slice(0, exp + 1)}.${digits.slice(exp + 1)}`;
-  }
-  return neg ? `-${body}` : body;
-}
+// ── Python's spelling of a measure ───────────────────────────────────────────
 
 /** `f"{x:.{n}f}"` — the EXACT value of the double rounded half-to-even, as
  *  Python does (JavaScript's `toFixed` rounds an exact tie up: 0.0078125 →
@@ -108,88 +67,9 @@ export function pyFixed(x: number, n: number): string {
   return neg ? `-${s}` : s;
 }
 
-/** `json.dumps(doc, separators=(",", ":"))` for the glb's JSON: numbers that
- *  are floats in Python are marked by the caller (`F`), the rest are ints. */
-class F { constructor(readonly v: number) {} }
-function pyJson(v: unknown): string {
-  if (v instanceof F) return pyFloat(v.v);
-  if (typeof v === "number") return String(v);
-  if (typeof v === "string") return pyString(v);
-  if (Array.isArray(v)) return `[${v.map(pyJson).join(",")}]`;
-  if (v && typeof v === "object")
-    return `{${Object.entries(v as Record<string, unknown>).map(([k, x]) => `${pyString(k)}:${pyJson(x)}`).join(",")}}`;
-  if (v === null) return "null";
-  return String(v);
-}
-/** ensure_ascii=True: every non-ASCII code unit as \uXXXX, like Python. */
-function pyString(s: string): string {
-  let out = '"';
-  for (const ch of s) {
-    for (let i = 0; i < ch.length; i++) {
-      const c = ch.charCodeAt(i);
-      if (c === 0x22) out += '\\"';
-      else if (c === 0x5c) out += "\\\\";
-      else if (c === 0x0a) out += "\\n";
-      else if (c === 0x0d) out += "\\r";
-      else if (c === 0x09) out += "\\t";
-      else if (c === 0x08) out += "\\b";
-      else if (c === 0x0c) out += "\\f";
-      else if (c < 0x20 || c > 0x7e) out += `\\u${c.toString(16).padStart(4, "0")}`;
-      else out += ch[i];
-    }
-  }
-  return `${out}"`;
-}
-
-/** Python's `min`/`max`: the FIRST of equal items wins (so `min(0.0, -0.0)` is
- *  `0.0`, where `Math.min` gives `-0`). */
-const pyMin = (xs: number[]) => xs.reduce((a, b) => (b < a ? b : a));
-const pyMax = (xs: number[]) => xs.reduce((a, b) => (b > a ? b : a));
-
-const pad4 = (n: number) => (4 - (n % 4)) % 4;
-
-/** The GLB for one reading: one node, one mesh, one primitive — the bytes
- *  s3Dgraphy's `glb_bytes(kind, vertices, name=)` writes. */
-export function glbBytes(kind: GlbKind, vertices: ReadonlyArray<ReadonlyArray<number>>, name = "reading"): Uint8Array {
-  const pts = check(kind, vertices);
-  const stored = new Float32Array(pts.flat());
-  const cols = [0, 1, 2].map((c) => pts.map((_, i) => stored[i * 3 + c]));
-  const byteLength = stored.byteLength;
-  const doc = {
-    asset: { version: "2.0", generator: "s3dgraphy reading_glb" },
-    scene: 0,
-    scenes: [{ nodes: [0] }],
-    nodes: [{ mesh: 0, name }],
-    meshes: [{ name, primitives: [{ attributes: { POSITION: 0 }, mode: GLB_MODES[kind] }] }],
-    accessors: [{ bufferView: 0, componentType: FLOAT, count: pts.length, type: "VEC3",
-                  min: cols.map((c) => new F(pyMin(c))), max: cols.map((c) => new F(pyMax(c))) }],
-    bufferViews: [{ buffer: 0, byteOffset: 0, byteLength, target: ARRAY_BUFFER }],
-    buffers: [{ byteLength }],
-    extras: { s3dgraphy: { geometry_kind: kind } },
-  };
-  const json = new TextEncoder().encode(pyJson(doc));
-  const jsonLen = json.length + pad4(json.length);
-  const binLen = byteLength + pad4(byteLength);
-  const total = 12 + 8 + jsonLen + 8 + binLen;
-  const out = new Uint8Array(total);
-  const dv = new DataView(out.buffer);
-  dv.setUint32(0, MAGIC, true);
-  dv.setUint32(4, 2, true);
-  dv.setUint32(8, total, true);
-  dv.setUint32(12, jsonLen, true);
-  dv.setUint32(16, CHUNK_JSON, true);
-  out.set(json, 20);
-  out.fill(0x20, 20 + json.length, 20 + jsonLen);
-  const b = 20 + jsonLen;
-  dv.setUint32(b, binLen, true);
-  dv.setUint32(b + 4, CHUNK_BIN, true);
-  out.set(new Uint8Array(stored.buffer), b + 8);
-  return out;
-}
-
-/** GLB bytes → `{geometry_kind, vertices}` — the inverse of `glbBytes`, and
- *  of s3Dgraphy's writer (any GLB whose first primitive is POINTS, LINES or
- *  LINE_STRIP with a float VEC3 POSITION). */
+/** GLB bytes → `{geometry_kind, vertices}` — what s3Dgraphy's writer (and this
+ *  client until 11 ott) wrote: any GLB whose first primitive is POINTS, LINES or
+ *  LINE_STRIP with a float VEC3 POSITION. */
 export function parseGlb(bytes: Uint8Array): { geometry_kind: GlbKind; vertices: Vec3[] } {
   if (bytes.length < 20) throw new ReadingGlbError("not a GLB: too short");
   const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);

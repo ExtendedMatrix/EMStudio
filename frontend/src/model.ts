@@ -987,6 +987,18 @@ export class DocumentStore {
     return { pdgId, startId, endId };
   }
 
+  /** A load-time migration that needs I/O, so it lands after the load (the
+   *  glbs of the readings of 7–11 ott): the same silence as
+   *  `ensureAllEpochParadata` — NO checkpoint, NO op, and `dirty` untouched —
+   *  but the views are told, since they have drawn the document already.
+   *  `fn` mutates the document and says whether it changed anything. */
+  migrateSilently(fn: (doc: EmDocument) => boolean): void {
+    if (!fn(this.doc)) return;
+    const dirty = this.dirty;
+    this.emit();
+    this.dirty = dirty;
+  }
+
   /** Ensure EVERY epoch has its temporal ParadataNodeGroup — a SILENT
    *  load-time completion: pushes nodes/edges/positions straight onto the doc,
    *  with NO checkpoint, NO op emission and NO change event (so it neither

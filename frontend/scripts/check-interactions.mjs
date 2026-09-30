@@ -22,7 +22,7 @@
 // TempluMare, epochs48, PortaMarina-lite — plus `chronology-overlaps.em.json`
 // (one epoch inside another, one that overhangs its neighbour by 20 years).
 import { createRequire } from "node:module";
-import { readFileSync, writeFileSync, existsSync } from "node:fs";
+import { readFileSync, writeFileSync, existsSync, mkdirSync, copyFileSync } from "node:fs";
 
 const require = createRequire(import.meta.url);
 const TD = new URL("../testdata/", import.meta.url).pathname;
@@ -1159,6 +1159,117 @@ test("S1.decorator", "Matrix e Graph: «R» nell'angolo in basso a destra della 
       && r.box.w === u.box.w && r.box.h === u.box.h && s.box.w === u.box.w && w.box.w === u.box.w;
   };
   return { pass: ok(matrix) && ok(graph) && matrix.mode !== graph.mode && !errors.length, detail: { border, matrix, graph, errors } };
+});
+
+// ── NIGHT-SPAZIO · parte 2 · le letture nei dati del nodo ────────────────────
+/** the place of a reading, as the graph holds it */
+const placeOf = (p, x) => p.evaluate((id) => {
+  const d = window.__EM_DRAG__;
+  const e = d.edgesOf("extracted_from").find((ed) => ed.source === id && d.node(ed.target)?.node_type === "annotation_region");
+  if (!e) return null;
+  const r = d.node(e.target);
+  return { id: r.id, data: r.data, shapes: d.edgesOf("has_semantic_shape").filter((ed) => ed.source === r.id).length };
+}, x);
+/** a reading on P_H read from D.2 (the model), in the Provenance space */
+async function readingOnModel(p) {
+  await pick(p, "USM101");
+  await p.locator('[data-add-reading="P_H"]').first().click();
+  await p.waitForTimeout(300);
+  await p.locator(".addm-item", { hasText: "D.2 ·" }).first().click();
+  await p.waitForTimeout(900);
+  await p.waitForFunction(() => document.querySelector(".rd-3d-host")?.dataset.ready === "1", null, { timeout: 15000 });
+  return (await p.evaluate(() => window.__EM_DRAG__.selected()))[0];
+}
+const modelCanvas = (p) => p.evaluate(() => { const cv = document.querySelector(".rd-3d-host canvas"); const r = cv.getBoundingClientRect(); return { x: r.x, y: r.y, w: r.width, h: r.height }; });
+const markerLabels = (p) => p.evaluate(() => [...document.querySelectorAll(".rd-3d-host .v3d-label")].filter((l) => !l.classList.contains("draft")).map((l) => l.textContent));
+test("S2.trace", "punto, linea e polilinea tracciati: i vertici in data.coords, nessuna forma né glb; salvato e riaperto misura uguale", async () => {
+  const { p, ctx, errors } = await open({ doc: "catena" });
+  const glbCalls = [];
+  p.on("request", (r) => { if (/place-reading|\.glb(\?|$)|fs\/(write|stage)/.test(r.url())) glbCalls.push(r.url().replace(/^.*\/\/[^/]+/, "")); });
+  await workspace(p, "provenance");
+  const at = (c, fx, fy) => [c.x + c.w * fx, c.y + c.h * fy];
+  const xs = {};
+  xs.polyline = await readingOnModel(p);
+  await p.click('.rd-tool[data-tool="polyline"]');
+  let c = await modelCanvas(p);
+  for (const [fx, fy] of [[0.42, 0.45], [0.52, 0.47], [0.58, 0.56]]) { await p.mouse.click(...at(c, fx, fy)); await p.waitForTimeout(250); }
+  await p.keyboard.press("Enter");
+  await p.waitForTimeout(900);
+  xs.line = await readingOnModel(p);
+  await p.click('.rd-tool[data-tool="line"]');
+  c = await modelCanvas(p);
+  await p.mouse.click(...at(c, 0.45, 0.5)); await p.waitForTimeout(250);
+  await p.mouse.click(...at(c, 0.6, 0.5)); await p.waitForTimeout(900);
+  xs.point = await readingOnModel(p);
+  await p.click('.rd-tool[data-tool="point"]');
+  c = await modelCanvas(p);
+  await p.mouse.click(...at(c, 0.5, 0.5)); await p.waitForTimeout(900);
+  const places = {};
+  for (const [k, x] of Object.entries(xs)) places[k] = await placeOf(p, x);
+  const measures = await p.evaluate((ids) => Object.fromEntries(Object.entries(ids).map(([k, x]) => [k, window.__EM_DRAG__.measure?.(x) ?? null])), xs);
+  const pending = await p.evaluate(() => [...document.querySelectorAll(".toast")].map((t) => t.textContent).filter((t) => /glb/i.test(t)));
+  const saved = await p.evaluate(() => window.__EM_DRAG__.docJson ? JSON.parse(window.__EM_DRAG__.docJson()) : { graph: JSON.parse(window.__EM_DRAG__.graphJson()) });
+  const shapesInDoc = await p.evaluate(() => JSON.parse(window.__EM_DRAG__.graphJson()).nodes.filter((n) => n.node_type === "semantic_shape").length);
+  const markers = await markerLabels(p);
+  await ctx.close();
+  // «salva, riapri»: the saved document in a fresh page
+  const again = await open({ doc: saved });
+  const measures2 = await again.p.evaluate((ids) => Object.fromEntries(Object.entries(ids).map(([k, x]) => [k, window.__EM_DRAG__.measure?.(x) ?? null])), xs);
+  await workspace(again.p, "provenance");
+  await pick(again.p, "D2");
+  await again.p.waitForFunction(() => document.querySelector(".rd-3d-host")?.dataset.ready === "1", null, { timeout: 15000 }).catch(() => {});
+  await again.p.waitForTimeout(800);
+  const markers2 = await markerLabels(again.p);
+  await again.ctx.close();
+  const coordsOk = places.polyline?.data?.coords?.length === 3 && places.line?.data?.coords?.length === 2 && places.point?.data?.coords?.length === 1
+    && Object.values(places).every((q) => q && q.shapes === 0 && q.data.crs === "local" && q.data.vertex_count === q.data.coords.length);
+  return { pass: coordsOk && !shapesInDoc && !glbCalls.length && !pending.length
+      && JSON.stringify(measures) === JSON.stringify(measures2) && !!measures.polyline && !!measures.line
+      && JSON.stringify(markers2) === JSON.stringify(markers) && !errors.length && !again.errors.length,
+    detail: { places, measures, measures2, glbCalls, pending, shapesInDoc, markers, markers2, errors: [...errors, ...again.errors] } };
+});
+
+/** the 7-ott em.json in the bridge's folder, with its readings/ (copied fresh) */
+function lettureFolder() {
+  const dir = `${FS_ROOT}/letture`;
+  rmSync(dir, { recursive: true, force: true });
+  mkdirSync(`${dir}/readings`, { recursive: true });
+  for (const f of readdirSync(`${TD}letture-7ott/readings`)) copyFileSync(`${TD}letture-7ott/readings/${f}`, `${dir}/readings/${f}`);
+  copyFileSync(`${TD}letture-7ott/letture-7ott.em.json`, `${dir}/letture-7ott.em.json`);
+  return dir;
+}
+const regionsOf = (p) => p.evaluate(() => JSON.parse(window.__EM_DRAG__.graphJson()).nodes
+  .filter((n) => n.node_type === "annotation_region")
+  .map((n) => ({ id: n.id, kind: n.data.geometry_kind, coords: n.data.coords?.length ?? 0, length: n.data.length ?? null,
+                 value: window.__EM_DRAG__.measureRegion?.(n.id)?.value ?? null })));
+test("S2.legacy", "un em.json del 7 ott (vertici nei glb) si apre con le coords nel nodo e le misure uguali; i file restano; senza cartella resta com'era e lo dice", async () => {
+  const dir = lettureFolder();
+  const doc = fixture("letture-7ott/letture-7ott");
+  const was = doc.graph.nodes.filter((n) => n.node_type === "annotation_region")
+    .map((n) => ({ id: n.id, kind: n.data.geometry_kind, length: n.data.length ?? null }));
+  // with its folder: opened from the file it is
+  const { p, ctx, errors } = await open({ doc: null });
+  await p.evaluate(([d, path]) => window.__EM_DRAG__.openAt(d, path), [doc, `${dir}/letture-7ott.em.json`]);
+  await p.waitForFunction(() => window.__EM_SCENE__?.()?.nodes?.length > 0, null, { timeout: 20000 });
+  await p.waitForTimeout(2500);
+  const now = await regionsOf(p);
+  const shapes = await p.evaluate(() => JSON.parse(window.__EM_DRAG__.graphJson()).nodes.filter((n) => n.node_type === "semantic_shape").length);
+  const dirty = await p.evaluate(() => window.__EM_DRAG__.dirty());
+  await ctx.close();
+  const files = readdirSync(`${dir}/readings`).length;
+  // without a folder: the old form stays (the glb is the only road), and a warning says so
+  const b = await open({ doc });
+  await b.p.waitForTimeout(1500);
+  const bare = await regionsOf(b.p);
+  const warned = await b.p.evaluate(() => (window.__EM_DRAG__.log?.() ?? [])
+    .filter((e) => e.level === "warn" && /readings\//.test(e.message)).length);
+  const bareShapes = await b.p.evaluate(() => JSON.parse(window.__EM_DRAG__.graphJson()).nodes.filter((n) => n.node_type === "semantic_shape").length);
+  await b.ctx.close();
+  const same = was.every((w) => { const n = now.find((x) => x.id === w.id);
+    return n && n.coords === ({ point: 1, line: 2, polyline: 4 })[w.kind]
+      && (w.length == null || (n.length != null && n.length.toFixed(3) === w.length.toFixed(3))); });
+  return { pass: same && !shapes && files === 3 && bareShapes === 3 && warned > 0 && !errors.length && !b.errors.length,
+    detail: { was, now, shapes, dirty, files, bare, bareShapes, warned, errors: [...errors, ...b.errors] } };
 });
 
 // ── MICRO-UN-POSTO · parte 1 · importare con una mappatura: una porta sola ───

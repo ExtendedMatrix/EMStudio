@@ -44,6 +44,7 @@ const bundle = await esbuild.build({
       export { ViewerKeeper } from "./viewer-keep";
       export * as rglb from "./reading-glb";
       export { ReadingFiles } from "./reading-files";
+      export * as LEGACY from "./reading-files";
     `,
     resolveDir: SRC,
     loader: "ts",
@@ -65,7 +66,7 @@ const M = await import(
   "data:text/javascript;base64," + Buffer.from(bundle.outputFiles[0].text).toString("base64")
 );
 const { chain, DocumentStore, naming, isStratigraphicType, handleEdgeTypes, existingLinks, aiv, issues,
-        receipts, tropy, shelf, ViewerKeeper, rglb, ReadingFiles } = M;
+        receipts, tropy, shelf, ViewerKeeper, rglb, ReadingFiles, LEGACY } = M;
 const S3D = new URL("../../../s3Dgraphy/", import.meta.url).pathname;
 const PY = `${S3D}.venv/bin/python`;
 /** ask s3Dgraphy (when its venv is there) a question about a document */
@@ -411,9 +412,9 @@ print(json.dumps(api.validate(g)["info"]))`;
 
 // ── LUOGO · the place of a reading is a node, for every medium ──────────────
 // region, passage, point, line, polyline: the node s3Dgraphy's
-// `api.place_reading` makes (same uuid5 id, same data), its edges, and for the
-// three 3D kinds the glb — byte-identical to `reading_glb.glb_bytes`, re-read by
-// s3Dgraphy with the same coordinates.
+// `api.place_reading` makes (same uuid5 id, same data key for key), its edges.
+// SPAZIO (node datamodel 1.6.15): the three 3D kinds carry their vertices in
+// `data.coords` — no shape, no glb.
 const pyRun = (payload, body) => {
   if (!existsSync(PY)) return undefined;
   const script = `
@@ -429,15 +430,17 @@ const pyPlace = (doc, x, on, geometry) => pyRun({ doc, x, on, geometry }, `
 g, w = api.load_emjson(a["doc"])
 r = api.place_reading(g, a["x"], a["on"], a["geometry"])
 n = g.find_node_by_id(r.region_id)
-sh = g.find_node_by_id(r.shape_id) if r.shape_id else None
 m = api.measure(g, r.region_id)
-print(json.dumps({"region_id": r.region_id, "shape_id": r.shape_id, "glb_url": r.glb_url,
-  "data": n.data, "name": n.name, "shape_data": sh.data if sh else None, "value": m["value"],
+print(json.dumps({"region_id": r.region_id, "glb_url": r.glb_url,
+  "data": n.data, "name": n.name, "value": m["value"],
   "edges": sorted([e.edge_type for e in g.edges if r.region_id in (e.edge_source, e.edge_target)])}))`);
-const pyGlb = (kind, vertices, name) => pyRun({ kind, vertices, name }, `
-from s3dgraphy.geometry.reading_glb import glb_bytes
-print(json.dumps(glb_bytes(a["kind"], a["vertices"], name=a["name"]).hex()))`);
-const hex = (u8) => Buffer.from(u8).toString("hex");
+/** data key for key; `length` to 1e-12 (math.dist vs Math.hypot: the last bit) */
+const sameData = (a, b, what) => {
+  const { length: la, ...ra } = a, { length: lb, ...rb } = b;
+  eq(ra, rb, what);
+  ok((la == null && lb == null) || Math.abs(la - lb) <= 1e-12 * Math.max(1, Math.abs(lb)),
+     `${what} — length ${la} ≈ ${lb}`);
+};
 const withModel = (st) => {
   st.addNode({ id: "M1", node_type: "document", name: "D.9", description: "rilievo di USM101",
                data: { url: "rilievo_USM101.glb" } });
@@ -469,28 +472,21 @@ for (const [kind, on, trace, pyGeomIn] of PLACES) {
   eq(chain.readingsOfDocument(st.doc, on).filter((x) => x === r.extractorId).length, 1, `${kind} · ${on} lists the reading once`);
   const is3d = chain.isGlbKind(kind);
   if (is3d) {
-    ok(!("vertices" in region.data) && !JSON.stringify(region.data).includes(String(trace.vertices[0][0] + 0.0001)),
-       `${kind} · no coordinates in the em.json node`);
-    eq(region.data.vertex_count, trace.vertices.length, `${kind} · vertex_count`);
-    const shape = N(st, placed.shapeId);
-    eq([shape.node_type, shape.data.type, shape.data.url], ["semantic_shape", "generic", `readings/${region.id}.glb`],
-       `${kind} · a generic semantic_shape whose url is readings/<region>.glb`);
-    ok(E(st, "has_semantic_shape").some((e) => e.source === region.id && e.target === shape.id), `${kind} · has_semantic_shape region → shape`);
-    eq(rglb.parseGlb(placed.glb), { geometry_kind: kind, vertices: trace.vertices.map((p) => p.map(Math.fround)) },
-       `${kind} · the glb holds the vertices (float32)`);
-  } else eq(placed.glb, null, `${kind} · no glb for a 2D place`);
+    eq(region.data.coords, trace.vertices, `${kind} · the vertices are the node's data.coords, verbatim`);
+    eq([region.data.vertex_count, region.data.crs], [trace.vertices.length, "local"], `${kind} · vertex_count and crs local`);
+    eq(chain.geometryOf(st.doc, r.extractorId).vertices, trace.vertices, `${kind} · the markers read them from the node`);
+    eq(E(st, "has_semantic_shape").filter((e) => e.source === region.id).length, 0, `${kind} · no semantic_shape, no glb`);
+    eq(st.doc.graph.nodes.filter((n) => n.node_type === "semantic_shape").length, 0, `${kind} · no shape in the graph`);
+    ok(!("glb" in placed) && !("glbUrl" in placed), `${kind} · nothing to write outside the undo step`);
+  }
   const pyr = pyGeomIn || is3d ? pyPlace(pre, r.extractorId, on,
     pyGeomIn ?? { geometry_kind: kind, vertices: trace.vertices }) : undefined;
   if (pyr) {
     eq(region.id, pyr.region_id, `${kind} · the region id is s3Dgraphy's uuid5`);
     const unstamped = (d) => Object.fromEntries(Object.entries(d).filter(([k]) => !/^(created|modified)_(at|by)$/.test(k)));
-    eq(unstamped(region.data), pyr.data, `${kind} · …and so is its data (the store's stamps aside)`);
+    sameData(unstamped(region.data), pyr.data, `${kind} · …and so is its data (the store's stamps aside)`);
     eq(region.name, pyr.name, `${kind} · …and its name`);
-    if (is3d) {
-      eq([placed.shapeId, placed.glbUrl, N(st, placed.shapeId).data.url], [pyr.shape_id, pyr.glb_url, pyr.shape_data.url],
-         `${kind} · shape id and url as s3Dgraphy's`);
-      eq(hex(placed.glb), pyGlb(kind, trace.vertices, region.id), `${kind} · the glb bytes are s3Dgraphy's, byte for byte`);
-    }
+    if (is3d) eq(pyr.glb_url, null, `${kind} · s3Dgraphy writes no glb either (≤ inline_max_vertices)`);
     const mine = chain.measureOf(st.doc, region.id);
     eq(mine.value, pyr.value, `${kind} · measureOf = api.measure (${pyr.value})`);
   }
@@ -499,78 +495,62 @@ for (const [kind, on, trace, pyGeomIn] of PLACES) {
     const p = chain.useAsValue(st, r.extractorId);
     eq([p, chain.propertyValue(N(st, "P_H"))], ["P_H", "3.234 m"], "polyline · «Usa come valore» writes the measure into the property");
   }
+  if (kind === "point") eq(chain.resultOf(st.doc, r.extractorId), "z -0.38 m", "point · its height is read from its coords");
   if (kind === "line") {
-    // tracing again MOVES the reading; the old region nobody reads goes, with its shape
-    const old = placed.regionId, oldShape = placed.shapeId;
+    // tracing again MOVES the reading; the old region nobody reads goes
+    const old = placed.regionId;
     const again = chain.setReadingGeometry(st, r.extractorId, on, { kind: "line", vertices: [[0, 0, 0], [0, 3, 0]] });
-    ok(again.regionId !== old && !N(st, old) && !N(st, oldShape), "line · traced again: the old place and its shape go");
+    ok(again.regionId !== old && !N(st, old), "line · traced again: the old place goes");
     eq(chain.measureOf(st.doc, again.regionId).value, "3.000 m", "line · …the new one measures 3.000 m");
     st.undo();
     ok(N(st, old) && chain.geometryOf(st.doc, r.extractorId).regionId === old, "line · undo brings the old place back");
   }
 }
 if (!existsSync(PY)) console.log("  (s3Dgraphy venv not found: the comparison with api.place_reading is skipped)");
-
-// the glb's files: pending without a folder, written by the desktop fs, by the bridge
 {
-  const dir = realpathSync(mkdtempSync(`${tmpdir()}/luogo-`));
+  // more than the datamodel's threshold is not a trace: refused, said
   const st = withModel(fresh());
   const r = chain.addReading(st, "P_H", { kind: "document", id: "M1" });
-  const trace = { kind: "polyline", vertices: [[0.5, 1, 2], [1.5, 1, 2], [1.5, 1.25, 2.75]] };
-  const placed = chain.setReadingGeometry(st, r.extractorId, "M1", trace);
-  let root = null;
-  const written = new Map();
-  const files = new ReadingFiles({ projectRoot: () => root, bridge: async () => null,
-    writeFile: async (path, bytes) => { written.set(path, bytes); } });
-  const o1 = await files.place(placed, st.doc, trace);
-  eq(o1, { where: "pending", why: "no-folder" }, "no project folder: the glb is PENDING (said, not dropped)");
-  eq(files.vertices(placed.glbUrl), trace.vertices.map((p) => p.map(Math.fround)), "…and the markers still read its vertices");
-  root = dir;
-  const fl = await files.flush(st.doc);
-  eq([fl.written, fl.left], [[placed.glbUrl], []], "a Save with a folder writes the pending glb");
-  eq(hex(written.get(`${dir}/${placed.glbUrl}`)), hex(placed.glb), "…the same bytes, at <folder>/readings/<region>.glb");
-  // the bridge: api.place_reading with the project folder writes the file
+  const many = Array.from({ length: chain.inlineMaxVertices() + 1 }, (_, i) => [i / 100, 0, 0]);
+  eq(chain.inlineMaxVertices(), 500, "coords.inline_max_vertices is read from the node datamodel (500)");
+  let why = "";
+  try { chain.setReadingGeometry(st, r.extractorId, "M1", { kind: "polyline", vertices: many }); } catch (e) { why = String(e.message); }
+  ok(/inline_max_vertices \(500\)/.test(why), `${many.length} vertices are refused: «${why}»`);
+}
+
+// SPAZIO · an em.json of 7–11 ott (vertices in readings/<id>.glb): the client
+// migrates it as s3Dgraphy's `migrate_reading_glbs` does — the same data
+{
+  const FIX = new URL("../testdata/letture-7ott/", import.meta.url).pathname;
+  const doc = JSON.parse(readF(`${FIX}letture-7ott.em.json`, "utf8"));
+  const legacy = LEGACY.legacyReadingGlbs(doc);
+  eq(legacy.map((l) => l.kind).sort(), ["line", "point", "polyline"], "7 ott · three regions whose vertices are in a glb");
+  const was = Object.fromEntries(doc.graph.nodes.filter((n) => n.node_type === "annotation_region")
+    .map((n) => [n.id, chain.measureOf(doc, n.id).value]));
+  const bare = await new ReadingFiles({ projectRoot: () => null, bridge: async () => null })
+    .migrate(JSON.parse(JSON.stringify(doc)), () => { throw new Error("nothing to write without a folder"); });
+  eq([bare.migrated.length, bare.pending.map((q) => q.why)], [0, ["no-folder", "no-folder", "no-folder"]],
+     "7 ott · without a folder nothing moves, and each one says why");
+  const files = new ReadingFiles({ projectRoot: () => FIX.replace(/\/$/, ""), bridge: async () => null,
+    readFile: async (path) => new Uint8Array(readF(path)) });
+  const mine = JSON.parse(JSON.stringify(doc));
+  const res = await files.migrate(mine, (w) => w());
+  eq([res.migrated.length, res.pending.length], [3, 0], "7 ott · with its folder the three are migrated");
+  eq(LEGACY.legacyReadingGlbs(mine).length, 0, "…idempotent: nothing left to migrate");
+  eq(mine.graph.nodes.filter((n) => n.node_type === "semantic_shape").length, 0, "…the shapes left the graph");
+  eq(Object.fromEntries(mine.graph.nodes.filter((n) => n.node_type === "annotation_region")
+    .map((n) => [n.id, chain.measureOf(mine, n.id).value])), was, "…and the measures are the ones of 7 ott");
   if (existsSync(PY)) {
-    const BR = new URL("../../tools/em_bridge.py", import.meta.url).pathname;
-    const port = await new Promise((res) => { const srv = createServer(); srv.listen(0, () => {
-      const pt = srv.address().port; srv.close(() => res(pt)); }); });
-    const proc = spawn(PY, [BR, "--port", String(port), "--s3dgraphy", `${S3D}src`, "--fs-root", dir],
-                       { stdio: "ignore", env: { ...process.env, PYTHONPATH: `${S3D}src` } });
-    const base = `http://127.0.0.1:${port}`;
-    const nodeFetch = globalThis.fetch;
-    const originFetch = (u, init = {}) => nodeFetch(u, { ...init,
-      headers: { ...(init.headers ?? {}), Origin: "http://localhost:5173" } });
-    try {
-      for (let i = 0; i < 80; i++) {
-        try { if ((await nodeFetch(`${base}/health`)).ok) break; } catch { /* not yet */ }
-        await new Promise((res) => setTimeout(res, 150));
-      }
-      const st2 = withModel(fresh());
-      const r2 = chain.addReading(st2, "P_H", { kind: "document", id: "M1" });
-      const t2 = { kind: "line", vertices: [[0.1, 0.2, 0.3], [0.4, 0.6, 0.3]] };
-      const p2 = chain.setReadingGeometry(st2, r2.extractorId, "M1", t2);
-      const viaBridge = new ReadingFiles({ projectRoot: () => dir, bridge: async () => base, fetch: originFetch });
-      const o2 = await viaBridge.place(p2, st2.doc, t2);
-      eq([o2.where, o2.path, o2.agrees], ["bridge", `${dir}/readings/${p2.regionId}.glb`, true],
-         "bridge · api.place_reading wrote the glb in the project, and api.measure agrees with the node");
-      eq(hex(readF(o2.path)), hex(p2.glb), "bridge · the file s3Dgraphy wrote is the client's bytes");
-      const back = pyRun({ path: o2.path }, `
-from s3dgraphy.geometry.reading_glb import read_glb
-print(json.dumps(read_glb(a["path"])))`);
-      eq(back, { geometry_kind: "line", vertices: t2.vertices.map((p) => p.map(Math.fround)) },
-         "bridge · s3Dgraphy re-reads the same coordinates");
-      const cold = new ReadingFiles({ projectRoot: () => dir, bridge: async () => base, fetch: originFetch,
-        onLoaded: () => {} });
-      eq(cold.vertices(p2.glbUrl), null, "a glb not in memory is fetched…");
-      for (let i = 0; i < 40 && !cold.vertices(p2.glbUrl); i++) await new Promise((res) => setTimeout(res, 50));
-      eq(cold.vertices(p2.glbUrl), back.vertices, "…through the bridge's /fs/file, and parsed: the markers' vertices");
-      const n0 = st2.doc.graph.nodes.length;
-      const again = await viaBridge.place(p2, st2.doc, t2);
-      eq([again.where, again.path, st2.doc.graph.nodes.length], ["bridge", o2.path, n0],
-         "bridge · placing twice is idempotent: same file, no node added");
-    } finally {
-      proc.kill();
-    }
+    const py = pyRun({ doc, root: FIX }, `
+from s3dgraphy.annotation.migrate_reading import migrate_reading_glbs
+g, w = api.load_emjson(a["doc"])
+rep = migrate_reading_glbs(g, project_root=a["root"])
+print(json.dumps({"migrated": len(rep["migrated"]), "regions": {n.node_id: n.data for n in g.nodes if n.node_type == "annotation_region"},
+  "shapes": len([n for n in g.nodes if n.node_type == "semantic_shape"])}))`);
+    const unstamped = (d) => Object.fromEntries(Object.entries(d).filter(([k]) => !/^(created|modified)_(at|by)$/.test(k)));
+    eq(py.migrated, 3, "7 ott · s3Dgraphy migrates the same three");
+    for (const n of mine.graph.nodes.filter((x) => x.node_type === "annotation_region"))
+      sameData(unstamped(n.data), unstamped(py.regions[n.id]), `7 ott · ${n.data.geometry_kind}: the client's data is s3Dgraphy's, key for key`);
   }
 }
 
@@ -591,12 +571,11 @@ g, w = api.load_emjson_file(a["path"])
 print(json.dumps(api.graph_to_emjson(g)))`);
     const st2 = new DocumentStore(migrated);
     const g2 = chain.geometryOf(st2.doc, xp);
-    ok(g2.kind === "point" && g2.regionId && g2.url === `readings/${g2.regionId}.glb`,
-       "opened by s3Dgraphy: the point is a region with its glb");
+    ok(g2.kind === "point" && g2.regionId && !g2.url,
+       "opened by s3Dgraphy: the point is a region, with no glb");
     eq(st2.node(xp).data?.geometry, undefined, "…and data.geometry left the extractor");
     eq(st2.node(g2.regionId).data.resource_id, "M1", "…on the model the extractor read");
-    eq(rglb.parseGlb(new Uint8Array(readF(`${dir}/${g2.url}`))).vertices, [[0.25, 1.5, -2]],
-       "…the glb beside the file holds the point");
+    eq(g2.vertices, [[0.25, 1.5, -2]], "…its coords are the point");
     const x1 = chain.geometryOf(st2.doc, "X1");
     ok(x1.kind === "passage" && x1.regionId && x1.text.startsWith("Il capitello nord"),
        "the fixture's legacy passage became a passage region too");

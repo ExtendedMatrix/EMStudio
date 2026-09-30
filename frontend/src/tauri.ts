@@ -5,7 +5,7 @@
 // place; nothing here executes at import time, so bundling into the
 // browser single-file build is harmless.
 import { open, save } from "@tauri-apps/plugin-dialog";
-import { mkdir, readFile, readTextFile, writeFile, writeTextFile } from "@tauri-apps/plugin-fs";
+import { readFile, readTextFile, writeTextFile } from "@tauri-apps/plugin-fs";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { invoke } from "@tauri-apps/api/core";
 
@@ -60,13 +60,8 @@ export async function writeEmJson(path: string, text: string): Promise<void> {
   await writeTextFile(path, text);
 }
 
-/** LUOGO · a reading's glb, beside the em.json (`readings/<region>.glb`): the
- *  folder is made as needed. Bytes, not text — the fs plugin's binary pair. */
-export async function writeBinaryFile(path: string, bytes: Uint8Array): Promise<void> {
-  const dir = path.replace(/[\\/][^\\/]*$/, "");
-  if (dir && dir !== path) await mkdir(dir, { recursive: true }).catch(() => { /* exists */ });
-  await writeFile(path, bytes);
-}
+/** SPAZIO · the bytes of a file beside the em.json — the glb of a reading of
+ *  7–11 ott, read once to migrate it (nothing writes one any more). */
 export async function readBinaryFile(path: string): Promise<Uint8Array> {
   return await readFile(path);
 }

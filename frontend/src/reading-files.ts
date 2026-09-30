@@ -1,25 +1,32 @@
 /**
- * LUOGO · where a reading's glb goes, and where its vertices come back from.
+ * SPAZIO · a reading's vertices, from the glb of 7–11 ott into its node.
  *
- * The nodes of a placed reading are made in the client, in ONE undo step
- * (`paradata-chain.setReadingGeometry`). The FILE is not undoable and needs a
- * folder, so it is written here, after, by the first of:
+ * From 7 to 11 ott a point, line or polyline traced on a model was
  *
- *   1. the bridge — `POST /place-reading`, i.e. `api.place_reading` with the
- *      project folder: s3Dgraphy writes `<project>/readings/<region>.glb`
- *      (the same ids, so the replay finds the nodes the client made);
- *   2. the desktop's own fs (Tauri), the same bytes (`reading-glb.glbBytes`,
- *      byte-identical to s3Dgraphy's writer);
- *   3. nowhere yet: no project folder (a browser, a document never saved). The
- *      bytes stay PENDING in memory — the markers still draw from them — and a
- *      Save to a folder writes them. Said, never silent: the node points at a
- *      file that does not exist until then.
+ *     AnnotationRegion ──has_semantic_shape──▶ SemanticShape(generic, url readings/<id>.glb)
  *
- * The markers read the vertices FROM THE GLB (the node has only vertex_count):
- * pending bytes, else the file through the bridge's /fs/file or the desktop fs.
+ * with the vertices in the file and only `vertex_count` / `length` in the node.
+ * Since node datamodel 1.6.15 they are the region's `data.coords` (E.D. 30 set:
+ * the geometry of whoever argues is data of the node), and nothing writes a glb
+ * any more. EMStudio opens an em.json itself — it does not pass through
+ * s3Dgraphy — so the migration s3Dgraphy does on opening
+ * (`annotation.migrate_reading.migrate_reading_glbs`) is done here too, with the
+ * same rules:
+ *
+ *   · the glb is read (the desktop's fs, else the bridge's `/fs/file`, under the
+ *     em.json's folder) and its vertices become `data.coords`, count and length
+ *     recomputed from them; the shape and its edge leave the graph;
+ *   · **the file stays where it is** — nothing here deletes a file; once
+ *     migrated nothing in the graph points at it;
+ *   · without a folder, without the file, with a file that is not this reading's
+ *     glb, or with more vertices than `coords.inline_max_vertices`: the old form
+ *     STAYS (it is the only road to the vertices) and the caller says why.
+ *
+ * Idempotent: a migrated region has no shape left to find.
  */
-import { parseGlb, type Vec3 } from "./reading-glb";
-import type { PlacedReading, TraceGeometry } from "./paradata-chain";
+import { DEFAULT_CRS, DEFAULT_UNIT, HAS_SEMANTIC_SHAPE, MEASURE_KINDS, coordsOf, inlineMaxVertices, isGlbKind }
+  from "./paradata-chain";
+import { parseGlb, polylineLength, type GlbKind, type Vec3 } from "./reading-glb";
 import type { EmDocument } from "./types";
 
 export interface ReadingFilesDeps {
@@ -28,132 +35,116 @@ export interface ReadingFilesDeps {
   /** the bridge's base url, or null when it is not answering */
   bridge(): Promise<string | null>;
   /** the desktop's fs (absent in a browser) */
-  writeFile?(absPath: string, bytes: Uint8Array): Promise<void>;
   readFile?(absPath: string): Promise<Uint8Array>;
   fetch?: typeof fetch;
-  /** vertices arrived for a url that was being loaded: repaint */
-  onLoaded?(url: string): void;
 }
 
-export type PlaceOutcome =
-  | { where: "bridge"; path: string; agrees: boolean | null }
-  | { where: "desktop"; path: string }
-  | { where: "pending"; why: string }
-  | { where: "none" };
+/** A region of 7–11 ott: its vertices are still behind a shape. */
+export interface LegacyReading {
+  regionId: string;
+  shapeId: string;
+  kind: GlbKind;
+  url: string;
+}
+
+export interface ReadingMigration {
+  migrated: Array<{ regionId: string; url: string; vertex_count: number }>;
+  pending: Array<{ regionId: string; url: string; why: "no-folder" | "no-file" | "not-a-reading" | "too-many" }>;
+}
 
 const join = (root: string, url: string) => `${root.replace(/[\\/]+$/, "")}/${url}`;
 
-export class ReadingFiles {
-  /** url → bytes not on disk yet */
-  readonly pending = new Map<string, Uint8Array>();
-  /** url → vertices; null = asked and not (yet) readable */
-  private readonly vertexCache = new Map<string, Vec3[] | null>();
-  private readonly loading = new Set<string>();
+/** The 3D regions of a document whose vertices are in a glb, not in the node. */
+export function legacyReadingGlbs(doc: EmDocument): LegacyReading[] {
+  const nodes = new Map(doc.graph.nodes.map((n) => [n.id, n]));
+  const out: LegacyReading[] = [];
+  for (const r of doc.graph.nodes) {
+    if (r.node_type !== "annotation_region") continue;
+    const d = (r.data ?? {}) as Record<string, unknown>;
+    const kind = String(d.geometry_kind ?? "region2d");
+    if (!isGlbKind(kind) || coordsOf(d)) continue;
+    for (const e of doc.graph.edges) {
+      if (e.source !== r.id || e.edge_type !== HAS_SEMANTIC_SHAPE) continue;
+      const sh = nodes.get(e.target);
+      const url = String(((sh?.data ?? {}) as Record<string, unknown>).url ?? "").trim();
+      if (sh?.node_type === "semantic_shape" && url) out.push({ regionId: r.id, shapeId: sh.id, kind, url });
+    }
+  }
+  return out;
+}
 
+/** Write the vertices into the region and take the shape (and its edge) away —
+ *  in place, on the document: the caller decides how silent that is. */
+export function applyReadingCoords(doc: EmDocument, lr: LegacyReading, vertices: Vec3[]): void {
+  const g = doc.graph;
+  const r = g.nodes.find((n) => n.id === lr.regionId);
+  if (!r) return;
+  const { geometry_kind: _k, coords: _c, vertex_count: _n, length: _l, unit, crs, ...rest } =
+    (r.data ?? {}) as Record<string, unknown>;
+  const coords = vertices.map((p) => [p[0], p[1], p[2]] as Vec3);
+  r.data = {
+    geometry_kind: lr.kind, coords, vertex_count: coords.length,
+    ...(MEASURE_KINDS.includes(lr.kind) ? { length: polylineLength(coords), unit: unit ?? DEFAULT_UNIT } : {}),
+    crs: crs ?? DEFAULT_CRS,
+    ...rest,
+  };
+  g.edges = g.edges.filter((e) => !(e.source === lr.regionId && e.target === lr.shapeId && e.edge_type === HAS_SEMANTIC_SHAPE));
+  // the shape was only the carrier of the path: it goes, unless something else hangs on it
+  if (!g.edges.some((e) => e.source === lr.shapeId || e.target === lr.shapeId)) {
+    g.nodes = g.nodes.filter((n) => n.id !== lr.shapeId);
+    if (doc.layout?.positions) delete doc.layout.positions[lr.shapeId];
+  }
+}
+
+export class ReadingFiles {
   constructor(private readonly deps: ReadingFilesDeps) {}
 
   private get fetch(): typeof fetch { return this.deps.fetch ?? globalThis.fetch.bind(globalThis); }
 
-  /** Write the glb of a reading just placed. Never throws: the outcome says. */
-  async place(placed: PlacedReading | null, doc: EmDocument, trace: TraceGeometry): Promise<PlaceOutcome> {
-    if (!placed?.glb || !placed.glbUrl) return { where: "none" };
-    const url = placed.glbUrl;
-    this.vertexCache.set(url, placed.vertices);
-    this.pending.set(url, placed.glb);
+  /** The bytes of a project-relative file: the desktop's fs, else the bridge. */
+  async read(url: string): Promise<Uint8Array | null> {
     const root = this.deps.projectRoot();
-    if (!root) return { where: "pending", why: "no-folder" };
-    const base = await this.deps.bridge().catch(() => null);
-    if (base) {
-      try {
-        const r = await this.fetch(`${base}/place-reading`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ doc, extractor_id: placed.extractorId, on_id: placed.onId,
-                                 geometry: { geometry_kind: placed.geometry_kind,
-                                             vertices: "vertices" in trace ? trace.vertices : placed.vertices },
-                                 project_root: root }),
-        });
-        const j = await r.json().catch(() => ({}));
-        if (r.ok && j.ok && j.region_id === placed.regionId && j.glb_path) {
-          this.pending.delete(url);
-          return { where: "bridge", path: String(j.glb_path), agrees: j.measure?.glb?.agrees ?? null };
-        }
-      } catch { /* the bridge went away: the desktop, or pending */ }
-    }
-    if (this.deps.writeFile) {
-      try {
-        const path = join(root, url);
-        await this.deps.writeFile(path, placed.glb);
-        this.pending.delete(url);
-        return { where: "desktop", path };
-      } catch { /* fall through: pending */ }
-    }
-    return { where: "pending", why: "not-written" };
-  }
-
-  /** Write the pending glbs THIS document points at under its project folder
-   *  (a Save found one). Another document's pending files are not its to write. */
-  async flush(doc: EmDocument): Promise<{ written: string[]; left: string[] }> {
-    const root = this.deps.projectRoot();
-    const written: string[] = [];
-    const mine = new Set(doc.graph.nodes.map((n) => ((n.data ?? {}) as Record<string, unknown>).url)
-      .filter((u): u is string => typeof u === "string"));
-    if (root && this.deps.writeFile) {
-      for (const [url, bytes] of [...this.pending]) {
-        if (!mine.has(url)) continue;
-        try {
-          await this.deps.writeFile(join(root, url), bytes);
-          this.pending.delete(url);
-          written.push(url);
-        } catch { /* stays pending */ }
-      }
-    }
-    return { written, left: [...this.pending.keys()].filter((u) => mine.has(u)) };
-  }
-
-  /** The vertices of a glb, now if known; else null, and they are fetched (the
-   *  caller is told through `onLoaded`). */
-  vertices(url: string | null | undefined): Vec3[] | null {
-    if (!url) return null;
-    const known = this.vertexCache.get(url);
-    if (known) return known;
-    const bytes = this.pending.get(url);
-    if (bytes) {
-      const v = parseGlb(bytes).vertices;
-      this.vertexCache.set(url, v);
-      return v;
-    }
-    if (!this.vertexCache.has(url) && !this.loading.has(url)) void this.load(url);
-    return null;
-  }
-
-  private async load(url: string): Promise<void> {
-    const root = this.deps.projectRoot();
-    if (!root) { this.vertexCache.set(url, null); return; }
-    this.loading.add(url);
-    let bytes: Uint8Array | null = null;
+    if (!root) return null;
     try {
-      if (this.deps.readFile) bytes = await this.deps.readFile(join(root, url));
-    } catch { bytes = null; }
-    if (!bytes) {
-      const base = await this.deps.bridge().catch(() => null);
-      if (base) {
-        try {
-          const r = await this.fetch(`${base}/fs/file?path=${encodeURIComponent(join(root, url))}`);
-          if (r.ok) bytes = new Uint8Array(await r.arrayBuffer());
-        } catch { bytes = null; }
-      }
+      if (this.deps.readFile) return await this.deps.readFile(join(root, url));
+    } catch { /* the bridge, then */ }
+    const base = await this.deps.bridge().catch(() => null);
+    if (!base) return null;
+    try {
+      const r = await this.fetch(`${base}/fs/file?path=${encodeURIComponent(join(root, url))}`);
+      return r.ok ? new Uint8Array(await r.arrayBuffer()) : null;
+    } catch {
+      return null;
     }
-    this.loading.delete(url);
-    let v: Vec3[] | null = null;
-    try { v = bytes ? parseGlb(bytes).vertices : null; } catch { v = null; }
-    this.vertexCache.set(url, v);
-    if (v) this.deps.onLoaded?.(url);
   }
 
-  /** Forget what was read (another document opened). Pending bytes stay. */
-  reset(): void {
-    this.vertexCache.clear();
-    for (const [url, b] of this.pending) this.vertexCache.set(url, parseGlb(b).vertices);
+  /** Migrate every region of 7–11 ott of `doc`. `apply` writes (the caller
+   *  wraps it: silent, like the other load-time migrations). */
+  async migrate(doc: EmDocument, apply: (write: () => void) => void): Promise<ReadingMigration> {
+    const out: ReadingMigration = { migrated: [], pending: [] };
+    const todo = legacyReadingGlbs(doc);
+    if (!todo.length) return out;
+    const root = this.deps.projectRoot();
+    for (const lr of todo) {
+      if (!root) { out.pending.push({ regionId: lr.regionId, url: lr.url, why: "no-folder" }); continue; }
+      const bytes = await this.read(lr.url);
+      if (!bytes) { out.pending.push({ regionId: lr.regionId, url: lr.url, why: "no-file" }); continue; }
+      let v: Vec3[];
+      try {
+        const g = parseGlb(bytes);
+        if (g.geometry_kind !== lr.kind) throw new Error("kind");
+        v = g.vertices;
+      } catch {
+        out.pending.push({ regionId: lr.regionId, url: lr.url, why: "not-a-reading" });
+        continue;
+      }
+      if (v.length > inlineMaxVertices()) {
+        out.pending.push({ regionId: lr.regionId, url: lr.url, why: "too-many" });
+        continue;
+      }
+      apply(() => applyReadingCoords(doc, lr, v));
+      out.migrated.push({ regionId: lr.regionId, url: lr.url, vertex_count: v.length });
+    }
+    return out;
   }
 }

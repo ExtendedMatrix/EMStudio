@@ -211,7 +211,7 @@ import { DOC_TOOLS, renderReadingStage, selectedPassage, type DocTool,
 import { openReadingBubble, type BubbleUnit } from "./reading-bubble";
 import { renderChronology, type ChronoEpoch, type ChronologyData } from "./chronology";
 import { KEYMAP, filterKeymap, keysText } from "./keymap";
-import { ReadingFiles, type PlaceOutcome } from "./reading-files";
+import { ReadingFiles } from "./reading-files";
 import * as aiv from "./ai-validation";
 import { checkReceipt, receiptOf, receiptsOfEmission, refreshedCopies, type ReceiptCheck } from "./receipt";
 import { parseTropy, promoteToDocument, tropyOf, tropyShelfInputs } from "./tropy";
@@ -275,7 +275,6 @@ import {
   pickFolder,
   pickSourceFile,
   pickXlsx,
-  writeBinaryFile,
   readBinaryFile,
 } from "./tauri";
 import {
@@ -1580,6 +1579,18 @@ window.__EM_SCENE__ = () => {
   dirty: () => !!store?.dirty,
   /** the graph as it stands — two reads equal = nothing was written between */
   graphJson: () => JSON.stringify(store?.doc.graph ?? null),
+  /** SPAZIO · the whole document as Save writes it, and a document opened FROM
+   *  a path (the bridge's folder in a browser), as Open would */
+  docJson: () => (store ? projectDocumentText() : "null"),
+  openAt: (d: EmDocument, path: string) => loadDocument(d, baseName(path), path),
+  /** SPAZIO · `api.measure` of an extractor's place, and of a region */
+  measure: (x: string) => {
+    const g = store ? chain.geometryOf(store.doc, x) : null;
+    return g?.regionId && store ? chain.measureOf(store.doc, g.regionId) : null;
+  },
+  measureRegion: (id: string) => (store ? chain.measureOf(store.doc, id) : null),
+  /** the activity log, as the Log drawer lists it */
+  log: () => logEntries().map((e) => ({ level: e.level, message: e.message, ids: e.ids ?? [] })),
   /** AUDIT N5 · the lane chips and phase labels as last drawn (screen) */
   labels: () => drawnLabelRects(),
   /** MICRO-UN-POSTO · a window turned into another type, as its header's type
@@ -4120,6 +4131,9 @@ function loadDocument(
   // a sync host nor lands on the undo stack.
   loaded.ensureAllEpochParadata();
   wireStore(loaded);
+  // SPAZIO · a file of 7–11 ott: its readings' vertices from their glbs (async:
+  // the files are read under the em.json's folder)
+  void migrateReadingGlbs(loaded);
   // ET1: the document becomes a SLOT in the workspace, and `add` activates it.
   // Every entry point — Open, New, a drop, GraphML import, Blender sync,
   // StratiMiner — already came through here, so all of them get a slot from this
@@ -5711,7 +5725,6 @@ async function saveDocument(): Promise<void> {
       store.dirty = false;
       info.textContent = `saved ${baseName(currentFilePath)}`;
       updateToolbar();
-      await flushReadingGlbs();
     } catch (e) {
       toast(t("l.saveFailed", { why: String(e instanceof Error ? e.message : e) }));
     }
@@ -5734,7 +5747,6 @@ async function saveAsDocument(): Promise<void> {
       store.dirty = false;
       info.textContent = `saved ${baseName(path)}`;
       updateToolbar();
-      await flushReadingGlbs();
     } catch (e) {
       toast(t("l.saveFailed", { why: String(e instanceof Error ? e.message : e) }));
     }
@@ -8370,9 +8382,10 @@ async function bridgeUrl(): Promise<string> {
     "http://localhost:8765";
   return _bridgeUrl;
 }
-/** LUOGO · the glbs of the readings' points, lines and polylines: written by the
- *  bridge (`api.place_reading`) or the desktop fs under the em.json's folder,
- *  pending in memory where there is no folder (a browser) — `reading-files.ts`. */
+/** SPAZIO · the readings of 7–11 ott whose vertices are still in
+ *  `readings/<region>.glb`: read once when the document opens, under its folder
+ *  (`reading-files.ts`). Nothing writes a glb any more — the vertices of a
+ *  reading are the region's `data.coords`. */
 const readingFiles = new ReadingFiles({
   projectRoot: () => (currentFilePath ? currentFilePath.replace(/[\\/][^\\/]*$/, "") || null : null),
   bridge: async () => {
@@ -8384,24 +8397,18 @@ const readingFiles = new ReadingFiles({
       return null;
     }
   },
-  ...(isTauri() ? { writeFile: writeBinaryFile, readFile: readBinaryFile } : {}),
-  onLoaded: () => renderDocView(),
+  ...(isTauri() ? { readFile: readBinaryFile } : {}),
 });
-/** Say where a reading's glb went — pending is a warning, never silent. */
-function reportPlace(o: PlaceOutcome, name: string, ids: string[]): void {
-  if (o.where === "bridge" || o.where === "desktop") logInfo(t("rd.glbWritten", { x: name, path: o.path }), ids);
-  else if (o.where === "pending") {
-    const msg = t("rd.glbPending", { x: name });
-    logWarn(msg, ids);
-    toast(msg);
-  }
-}
-/** Save found a folder: the pending glbs of this document go beside it. */
-async function flushReadingGlbs(): Promise<void> {
-  if (!store || !readingFiles.pending.size) return;
-  const r = await readingFiles.flush(store.doc);
-  if (r.written.length) logInfo(t("rd.glbFlushed", { n: String(r.written.length) }));
-  if (r.left.length) logWarn(t("rd.glbLeft", { n: String(r.left.length) }));
+/** Bring the vertices of the old readings into their nodes, silently (a
+ *  load-time migration, like s3Dgraphy's on opening: no undo step, no op). What
+ *  could not be read stays as it was, and the log says why. */
+async function migrateReadingGlbs(st: DocumentStore): Promise<void> {
+  const r = await readingFiles.migrate(st.doc, (write) => st.migrateSilently(() => { write(); return true; }));
+  if (st !== store) return;
+  if (r.migrated.length) logInfo(t("rd.migrated", { n: String(r.migrated.length) }), r.migrated.map((m) => m.regionId));
+  for (const q of r.pending)
+    logWarn(t(`rd.migratePending.${q.why}`, { url: q.url }), [q.regionId]);
+  if (r.migrated.length) renderDocView();
 }
 
 const BRIDGE_UNREACHABLE =
@@ -14857,11 +14864,11 @@ function renderDocReadingStage(win: Win, detail: HTMLElement, d: EmNode): void {
   if (strip) fillDocTools(win, strip);
 }
 
-/** LUOGO · the vertices of a 3D place: a legacy point's own, else its glb's. */
+/** LUOGO · the vertices of a 3D place: its `data.coords` (or a legacy point's
+ *  own). A region of 7–11 ott not migrated (no folder, no file) has none. */
 function readingVertices(g: chain.Geometry): [number, number, number][] | null {
   if (!chain.isGlbKind(g.kind)) return null;
-  const gg = g as Extract<chain.Geometry, { kind: "point" | "line" | "polyline" }>;
-  return gg.vertices ?? readingFiles.vertices(gg.url);
+  return (g as Extract<chain.Geometry, { kind: "point" | "line" | "polyline" }>).vertices ?? null;
 }
 function readingVerticesById(regionId: string): [number, number, number][] | null {
   const r = store?.node(regionId);
@@ -14881,8 +14888,6 @@ function traceReading(win: Win, x: string, docId: string, g: TraceGeometry): voi
   const msg = t(TRACE_DONE[g.kind] ?? "rd.pointDone", { x: name, m: measure ?? "" });
   logInfo(msg, [x, docId]);
   toastUndo(msg, st);
-  // the file after the undo step: bridge, desktop, or pending (said)
-  if (placed?.glb) void readingFiles.place(placed, st.doc, g).then((o) => reportPlace(o, name, [x, placed.regionId]));
   select(x);
   refreshInspector();
   renderDocView();
@@ -15116,7 +15121,6 @@ function readingFromDocument(win: Win, docId: string, g: TraceGeometry, property
   const msg = t("bubble.done", { x: name });
   logInfo(msg, [made.x, docId]);
   toastUndo(msg, st);
-  if (made.placed?.glb) void readingFiles.place(made.placed, st.doc, g).then((o) => reportPlace(o, name, [made.x, made.placed!.regionId]));
   setWinCurrent(win, "doc.tool", docToolOf(win));   // the tool stays: trace the next
   select(made.x);
   refreshInspector();
