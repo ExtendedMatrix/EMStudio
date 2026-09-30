@@ -38,6 +38,7 @@
  * restano i tre veri del substrato.
  */
 
+import { declaredId, declaredResource, type DeclaredLevel } from "../declared";
 import type { Chain, IdentityWord, Stamp, StampParent } from "../stamp";
 import type { EmEdge, EmNode } from "../types";
 
@@ -193,6 +194,54 @@ export function adaptChain(
   return { nodes: [...nodes.values()], edges, missing: missing.size };
 }
 
+/**
+ * RISORSA-FILE · a parent the stamp names and the disk cannot find is not
+ * always MISSING: it may be DECLARED — an object of a .blend, the photographs
+ * of a model — and then the documentation (the corpus) knows it, with the chain
+ * above it. Such a `?` is replaced by the corpus's node (drawn with the dashed
+ * frame of «declared, not stamped») and the chain is walked up from there: the
+ * act that made it (`dtc_had_output` into it), what that act consumed, and so
+ * on. Pure; the corpus is passed in.
+ */
+export function withDeclaredAncestors(scene: StampScene, corpusNodes: EmNode[], corpusEdges: EmEdge[]): StampScene {
+  const byId = new Map(corpusNodes.map((n) => [n.id, n]));
+  const nodes = new Map(scene.nodes.map((n) => [n.id, n]));
+  const edges = [...scene.edges];
+  let missing = scene.missing;
+  const queue: string[] = [];
+  for (const n of scene.nodes) {
+    const rid = (n.data as { unresolved?: boolean; resource_id?: string } | undefined);
+    if (!rid?.unresolved || !rid.resource_id) continue;
+    const known = byId.get(rid.resource_id);
+    if (!(known?.data as { declared_only?: boolean } | undefined)?.declared_only) continue;
+    nodes.delete(n.id);
+    nodes.set(known!.id, known!);
+    missing--;
+    for (const e of edges) if (e.target === n.id) e.target = known!.id;
+    queue.push(known!.id);
+  }
+  const seen = new Set(queue);
+  while (queue.length) {
+    const id = queue.shift()!;
+    for (const e of corpusEdges) {
+      if (e.edge_type !== EDGE_HAD_OUTPUT || e.target !== id) continue;
+      const proc = byId.get(e.source);
+      if (!proc) continue;
+      nodes.set(proc.id, proc);
+      edges.push(edge(proc.id, id, EDGE_HAD_OUTPUT));
+      for (const i of corpusEdges) {
+        if (i.edge_type !== EDGE_HAD_INPUT || i.source !== proc.id) continue;
+        const up = byId.get(i.target);
+        if (!up) continue;
+        nodes.set(up.id, up);
+        edges.push(edge(proc.id, up.id, EDGE_HAD_INPUT));
+        if (!seen.has(up.id)) { seen.add(up.id); queue.push(up.id); }
+      }
+    }
+  }
+  return { nodes: [...nodes.values()], edges, missing };
+}
+
 /** The stamp's own title first (`self.label`, dtcstamp 46b3b78 — dtcstamp's
  *  `stamp_title` rule: not when it merely repeats the id), then the file's name,
  *  then the id. */
@@ -236,8 +285,11 @@ export function missingDigests(chain: Chain): string[] {
  * si deve vedere che l'atto c'è.
  */
 export function adaptDraft(draft: {
-  outputs: Array<{ path: string; name: string; size: number; digest?: string }>;
+  outputs: Array<{ path: string; name: string; size: number; digest?: string;
+                   members?: Array<{ path: string }> }>;
   inputs: Array<{ resource_id: string; digest: string; label: string }>;
+  /** RISORSA-FILE · the declared chain, already filled for the first output */
+  declaredChain?: DeclaredLevel[];
   origin: boolean;
   kind: string;
   technique: string;
@@ -269,9 +321,13 @@ export function adaptDraft(draft: {
   } as unknown as EmNode);
 
   for (const out of draft.outputs) {
-    nodes.push(resourceNode(out.path, out.name, {
+    // a door with members is ONE resource of N files, and says so
+    const label = out.members && out.members.length > 1
+      ? `${out.name} · ${out.members.length} file` : out.name;
+    nodes.push(resourceNode(out.path, label, {
       draft: true,
       checksum: out.digest,
+      ...(out.members && out.members.length > 1 ? { packaging: "file_set" } : {}),
       _stampSummary: [`${out.size} bytes`,
                       out.digest ? short(out.digest) : "digest not computed yet"]
         .join(" · "),
@@ -285,5 +341,26 @@ export function adaptDraft(draft: {
     }));
     edges.push(edge(stepId, inp.resource_id, EDGE_HAD_INPUT, { draft: true }));
   }
+  // RISORSA-FILE · the DECLARED parents, level by level going up: drawn with
+  // their own border (declared_only), each level above made by its own act
+  let below = [stepId];
+  (draft.declaredChain ?? []).forEach((lv, i) => {
+    const ids = lv.parents.map((p) => {
+      const id = declaredId(p);
+      if (!nodes.some((n) => n.id === id))
+        nodes.push({ ...declaredResource(null, p), id } as EmNode);
+      return id;
+    });
+    if (i === 0) {
+      for (const id of ids) edges.push(edge(stepId, id, EDGE_HAD_INPUT, { draft: true }));
+    } else {
+      const pid = `draft:declared-step:${i}`;
+      nodes.push({ id: pid, node_type: "dtc_process", name: lv.technique || lv.dtc_kind || "step",
+                   data: { dtc_kind: lv.dtc_kind || "transformation", declared_only: true } } as unknown as EmNode);
+      for (const b of below) edges.push(edge(pid, b, EDGE_HAD_OUTPUT, { draft: true }));
+      for (const id of ids) edges.push(edge(pid, id, EDGE_HAD_INPUT, { draft: true }));
+    }
+    below = ids;
+  });
   return { nodes, edges, missing: 0 };
 }

@@ -37,6 +37,10 @@
  * timbrabile, e `readyToStamp` dice perché.
  */
 
+import {
+  bundleOutputs, chainIsTemplate, declaredId, instantiateChain, parentLabel, stemOf,
+  type DeclaredLevel, type FollowedSet, type Member,
+} from "./declared";
 import type { FsEntry } from "./storage";
 
 /** Un'uscita della bozza: un file selezionato che non è ancora timbrato. */
@@ -48,6 +52,12 @@ export interface DraftOutput {
   /** calcolata quando serve; l'impronta la fa il bridge, mai la pagina */
   digest?: string;
   media_type?: string;
+  /** RISORSA-FILE · the members of the file set this file is the door of
+   *  (dtcstamp `follow_references`), when it calls other files; its `digest`
+   *  is then the MEMBERS digest */
+  members?: Member[];
+  /** the warnings of the walk (an absolute path, a file that is not there) */
+  memberWarnings?: string[];
 }
 
 /** Un ingresso: **deve essere timbrato**, perché un figlio timbrato non può
@@ -89,6 +99,15 @@ export interface Draft {
   /** CATENA · la DESCRIZIONE facoltativa (`self.description`), la stessa per
    *  ogni uscita di un timbro di gruppo: breve, una riga o due */
   description: string;
+  /** RISORSA-FILE · the files as they were PICKED, before the handle */
+  picked: DraftOutput[];
+  /** …the file sets their doors open (by path), from the bridge */
+  sets: Record<string, FollowedSet>;
+  /** «Una risorsa, N file» (true, the default when files call each other) or
+   *  «N uscite» (false) */
+  bundle: boolean;
+  /** the parents DECLARED and not stamped, level 0 first (see declared.ts) */
+  declared: DeclaredLevel[];
 }
 
 export function newDraft(outputs: DraftOutput[]): Draft {
@@ -114,8 +133,43 @@ export function newDraft(outputs: DraftOutput[]): Draft {
     at: "",
     title: "",
     description: "",
+    picked: outputs.slice(),
+    sets: {},
+    bundle: true,
+    declared: [],
   };
 }
+
+/** Do some of the picked files call each other? Then the handle has a
+ *  question to ask («Una risorsa, N file» or «N uscite»). */
+export const hasFileSets = (draft: Draft): boolean =>
+  Object.values(draft.sets).some((s) => !s.error && s.members.length > 1);
+
+/** The outputs, as the handle says: with `bundle`, one per door (its members
+ *  and members digest on it) and the files it calls absorbed; without, every
+ *  file picked. Called after the sets arrive and on every change of the choice. */
+export function applyHandle(draft: Draft): void {
+  if (!draft.bundle || !hasFileSets(draft)) {
+    draft.outputs = draft.picked.map((o) => ({ ...o, members: undefined, memberWarnings: undefined,
+      digest: o.members ? undefined : o.digest }));
+    return;
+  }
+  const sets = new Map(Object.entries(draft.sets));
+  const { resources } = bundleOutputs(draft.picked, sets);
+  draft.outputs = resources.map(({ file, set }) => set
+    ? { ...file, members: set.members, digest: set.digest, memberWarnings: set.warnings ?? [],
+        size: set.members.reduce((a, m) => a + m.size_bytes, 0) }
+    : { ...file, members: undefined });
+}
+
+/** The declared chain for each output: `{name}` / `{base}` filled from ITS name. */
+export function chainsFor(draft: Draft): DeclaredLevel[][] {
+  return draft.outputs.map((o) => instantiateChain(draft.declared, stemOf(o.name)));
+}
+
+/** The number of parents a step names, stamped or declared. */
+export const parentCount = (draft: Draft): number =>
+  draft.inputs.length + (draft.declared[0]?.parents.length ?? 0);
 
 /** Il conto dei gesti, dichiarato come dato e non come promessa.
  *
@@ -149,7 +203,9 @@ export function missingFields(draft: Draft): StampField[] {
   return requiredFields(draft).filter((f) => {
     switch (f) {
       case "kind": return !draft.kind;
-      case "inputs": return !draft.inputs.length;
+      // RISORSA-FILE · a DECLARED parent is a parent: an object of a .blend is
+      // what the export came from even though nobody stamped it
+      case "inputs": return !parentCount(draft);
       case "software": return !draft.software.some((s) => s.name.trim());
       case "operator": return !draft.operator.id.trim() && !draft.operator.label.trim();
       case "at": return !draft.at.trim();
@@ -207,6 +263,8 @@ export interface EmitResult {
   warnings: string[];
   /** la frase del bridge quando ha rifiutato tutto */
   error?: string;
+  /** RISORSA-FILE · the acts, one per output when the chain says {name}/{base} */
+  processes?: Array<{ process_id: string; outputs: string[]; chain: DeclaredLevel[] }>;
 }
 
 /**
@@ -237,6 +295,31 @@ export interface EmitResult {
 export async function emitDraft(
   draft: Draft, registry: { graph_id?: string; revision?: number; room?: string } = {},
 ): Promise<EmitResult> {
+  // RISORSA-FILE · a declared chain that says {name}/{base} names a DIFFERENT parent
+  // for every output (OB_PODIO_LOD1, OB_PRATO_LOD1…): one act per output, each
+  // with its own parents. Without it the outputs share the act, as before.
+  const chains = chainsFor(draft);
+  const perOutput = draft.outputs.length > 1 && chainIsTemplate(draft.declared);
+  if (perOutput) {
+    const all: EmitResult = { ok: true, stamps: [], written: [], refused: [], warnings: [], processes: [] };
+    for (const [i, out] of draft.outputs.entries()) {
+      const one = await emitOne({ ...draft, outputs: [out] }, chains[i], registry);
+      all.ok = all.ok && one.ok;
+      all.stamps.push(...one.stamps); all.written.push(...one.written);
+      all.refused.push(...one.refused); all.warnings.push(...one.warnings);
+      all.processes!.push({ process_id: one.process_id ?? "", outputs: [out.path], chain: chains[i] });
+      if (one.error) all.error = one.error;
+    }
+    return all;
+  }
+  const one = await emitOne(draft, chains[0] ?? [], registry);
+  return { ...one, processes: [{ process_id: one.process_id ?? "", outputs: draft.outputs.map((o) => o.path),
+                                 chain: chains[0] ?? [] }] };
+}
+
+async function emitOne(
+  draft: Draft, chain: DeclaredLevel[], registry: { graph_id?: string; revision?: number; room?: string },
+): Promise<EmitResult> {
   // …e NON si rovesciano più qui dentro i fatti della campagna: hanno la loro
   // casa in `how.acquisition`, e questo blocco vuol dire un'altra cosa.
   const parameters: Record<string, unknown> = { ...draft.parameters };
@@ -248,15 +331,27 @@ export async function emitDraft(
       // the title names ONE file; a group keeps each file's own name
       name: (draft.outputs.length === 1 && draft.title.trim()) || o.name,
       description: draft.description.trim() || undefined,
-      media_type: o.media_type,
-      packaging: "file",
+      media_type: o.members ? undefined : o.media_type,
+      // RISORSA-FILE · a door with members is a FILE SET: its digest is the
+      // members digest (dtcstamp), its files travel with it
+      packaging: o.members ? "file_set" : "file",
       tier: draft.origin ? "master" : "distribution",
       size_bytes: o.size,
+      ...(o.members ? { files: o.members.map((m) => ({ path: m.path, digest: m.digest,
+        size_bytes: m.size_bytes, role: m.role })) } : {}),
     })),
-    inputs: draft.inputs.map((i) => ({
-      resource_id: i.resource_id, digest: i.digest, label: i.label,
-      size_bytes: i.size_bytes,
-    })),
+    inputs: [
+      ...draft.inputs.map((i) => ({
+        resource_id: i.resource_id, digest: i.digest, label: i.label,
+        size_bytes: i.size_bytes,
+      })),
+      // the DECLARED parents: named by id and label, the rest for the graph
+      // (the stamp's `from` carries no path — the bridge sees to it)
+      ...(chain[0]?.parents ?? []).map((p) => ({
+        resource_id: declaredId(p), label: parentLabel(p), declared: p,
+        ...(p.size_bytes ? { size_bytes: p.size_bytes } : {}),
+      })),
+    ],
     act: {
       dtc_kind: draft.kind,
       technique: draft.technique || undefined,
@@ -307,6 +402,22 @@ export async function retitleStamp(path: string, label: string, description: str
     ok?: boolean; stamp?: unknown; receipt?: StampReceipt | null; changed?: boolean; error?: string };
   return { ok: res.ok && !!answer.ok, stamp: answer.stamp, receipt: answer.receipt ?? null,
            changed: answer.changed, error: answer.error ?? (res.ok ? undefined : `bridge ${res.status}`) };
+}
+
+/** RISORSA-FILE · the file sets the picked doors open, asked of the bridge
+ *  (dtcstamp `follow_references`). Only a file that can CALL others is asked
+ *  (obj, gltf): an image or an mtl picked on its own is a set of one. */
+export const DOOR_EXT = /\.(obj|gltf)$/i;
+export async function fetchSets(paths: string[]): Promise<Record<string, FollowedSet>> {
+  const doors = paths.filter((p) => DOOR_EXT.test(p));
+  if (!doors.length) return {};
+  const res = await fetch(`${await bridge()}/stamp/members`, {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ paths: doors }),
+  });
+  if (!res.ok) return {};
+  const answer = (await res.json().catch(() => ({}))) as { sets?: Record<string, FollowedSet> };
+  return answer.sets ?? {};
 }
 
 /** Una voce di directory → un'uscita della bozza. */

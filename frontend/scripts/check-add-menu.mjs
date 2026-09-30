@@ -341,6 +341,63 @@ function doc() {
   M.closeAddMenu();
 }
 
+// ── RISORSA-FILE · a menu proposes only what the datamodel gives words to ────
+// `was_revision_of` (connections 1.6.31) has NO ui_phrase on purpose: a revision
+// is made by `replaceFile`, and s3Dgraphy says no menu proposes it. Measured after
+// the sync: it doubled every resource entry of the DTC maniglia («mesh via
+// was_revision_of»), 20 entries of the maniglia and 10 of «Collega». Of the 23
+// edges without a phrase it was the only one any menu offered.
+{
+  const { readFileSync } = await import("node:fs");
+  const C = JSON.parse(readFileSync(new URL("../src/assets/s3Dgraphy_connections_datamodel.json", import.meta.url), "utf8")).edge_types;
+  const mute = new Set(Object.entries(C).filter(([, v]) => !v.ui_phrase).map(([k]) => k));
+  const offered = [];
+  for (const ctx of ["matrix", "graph", "dtc", "multigraph"]) {
+    const types = [...new Set(M.addCategories(ctx).flatMap((c) => c.items.map((i) => i.nodeType)))];
+    for (const ty of types) {
+      for (const dir of ["up", "down"]) for (const i of M.handleItems(ctx, ty, dir)) if (mute.has(i.edgeType)) offered.push(`${ctx} ${dir} ${ty}→${i.nodeType} ${i.edgeType}`);
+      for (const i of M.connectItems(ctx, ty)) if (mute.has(i.edgeType)) offered.push(`${ctx} connect ${ty}→${i.nodeType} ${i.edgeType}`);
+      for (const i of M.linkedItems(ctx, ty)) if (mute.has(i.edgeType)) offered.push(`${ctx} linked ${ty}→${i.nodeType} ${i.edgeType}`);
+    }
+  }
+  eq(offered.length, 0, `no menu offers an edge without a ui_phrase (${offered.slice(0, 3).join("; ")}…)`);
+  ok(M.handleItems("dtc", "resource", "up").some((i) => i.edgeType === "dtc_derived_from"),
+    "…and the DTC maniglia still offers «derived from» between resources");
+}
+
+// ── RISORSA-FILE · the DTC maniglia reads the DTC's own direction ───────────
+// The DTC draws `dtc_had_input` and `dtc_derived_from` REVERSED (views/dtc.ts:
+// the resource a process consumed is above it; the source of a derivation is
+// above what was derived). Measured before: «Sopra» on a mesh offered a process
+// via dtc_had_input (the new process would be drawn BELOW) and a resource via
+// dtc_derived_from new→X (the new one derived from X: below too).
+{
+  const up = M.handleItems("dtc", "resource", "up");
+  const down = M.handleItems("dtc", "resource", "down");
+  const bad = up.filter((i) => (i.nodeType === "dtc_process" && i.edgeType === "dtc_had_input")
+    || (i.nodeType === "resource" && i.edgeType === "dtc_derived_from" && i.dir === "in"));
+  eq(bad.map((i) => `${i.nodeType} ${i.edgeType} ${i.dir}`), [], "DTC «Sopra» a mesh: nothing that would be drawn below it");
+  ok(up.some((i) => i.nodeType === "resource" && i.edgeType === "dtc_derived_from" && i.dir === "out"),
+    "…a resource above: the mesh derived FROM it (X → new)");
+  ok(up.some((i) => i.nodeType === "dtc_process" && i.edgeType === "dtc_had_output"),
+    "…a process above: the act that produced it");
+  ok(down.some((i) => i.nodeType === "dtc_process" && i.edgeType === "dtc_had_input"),
+    "DTC «Sotto»: the act that consumed it");
+  // the types E.D. did not find above a mesh (30 Sep): a set of photographs, a
+  // mesh, a textured mesh, a Blender object — as DECLARED parents, from the
+  // existing vocabulary (dtc_kinds) and packaging, each with its glyph kind
+  const declared = up.filter((i) => i.category === "declared");
+  eq(declared.map((i) => i.preset?.data?.declared_kind), ["sources", "datablock", "file", "file"],
+    "«Sopra» offers the declared parents: photographs, Blender object, mesh, textured mesh");
+  ok(declared.every((i) => i.edgeType === "dtc_derived_from" && i.dir === "out" && i.preset?.data?.declared_only),
+    "…each one a parent (X derived from it), declared and not stamped");
+  eq(declared.map((i) => i.kind), ["photo", "mesh", "mesh", "mesh"], "…with the glyphs there are (photo, mesh)");
+  eq(declared.find((i) => i.preset?.data?.declared_kind === "datablock")?.preset?.data?.packaging, "datablock",
+    "the Blender object is packaging: datablock");
+  eq(declared.map((i) => i.preset?.data?.packaging), ["directory", "datablock", "file", "file_set"],
+    "…the photographs a directory, the textured mesh a file_set");
+}
+
 // `ADD_TABLE=1 node scripts/check-add-menu.mjs` prints the context × type table
 // as Markdown, for the night's report (generated, never written by hand)
 if (process.env.ADD_TABLE) {

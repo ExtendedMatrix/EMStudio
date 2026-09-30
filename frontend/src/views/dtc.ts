@@ -42,6 +42,13 @@ import type { EmEdge, EmNode } from "../types";
  *  the story. */
 const BRIDGE_EDGE = "has_linked_resource";
 
+/** The relations the DTC draws REVERSED: their TARGET sits above their source
+ *  (a process is below what it consumed, a derived resource below its source,
+ *  an EM node below the resource it cites). One set, read by the flow below and
+ *  by the maniglia of the add menu, so «Sopra» means above IN THIS PICTURE. */
+export const DTC_REVERSED_EDGES: ReadonlySet<string> =
+  new Set(["dtc_had_input", "dtc_derived_from", BRIDGE_EDGE]);
+
 /** The chain relations of the substrate — asked of the DATAMODEL, which marks
  *  them, and never derived from the name.
  *
@@ -156,10 +163,9 @@ export function buildDtcScene(
     flow.get(from)!.push(to);
   };
   for (const e of chain) {
-    if (e.edge_type === "dtc_had_input") addFlow(e.target, e.source); // resource → process
-    else if (e.edge_type === "dtc_had_output") addFlow(e.source, e.target); // process → resource
-    else if (e.edge_type === "dtc_derived_from") addFlow(e.target, e.source);
-    else addFlow(e.source, e.target);
+    // dtc_had_input: resource → process; dtc_derived_from: source → derived
+    if (DTC_REVERSED_EDGES.has(String(e.edge_type))) addFlow(e.target, e.source);
+    else addFlow(e.source, e.target); // dtc_had_output: process → resource
   }
   for (const e of bridges) addFlow(e.target, e.source); // resource → the EM node citing it
 

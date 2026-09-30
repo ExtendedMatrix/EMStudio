@@ -945,6 +945,22 @@ export function render(
         // "contain" fit of the viewBox into the rect the hit test uses; the
         // stroke widths are viewBox units, so they scale with the glyph
         drawGlyph(ctx, pathGlyph, ix, iy, iw, ih, glyphInk());
+        // RISORSA-FILE · a parent DECLARED and not stamped (an object of a
+        // .blend, the photographs of a model): the same glyph inside a DASHED
+        // frame, where a stamped resource has none — «there, and nobody took
+        // its fingerprint». The dash is the language the graph already uses for
+        // a parent it cannot see (the unresolved `?`), the frame keeps it apart.
+        if ((n.node.data as { declared_only?: boolean } | undefined)?.declared_only) {
+          const pad = 3 / Math.sqrt(vp.scale);
+          ctx.save();
+          ctx.setLineDash([4 / vp.scale, 3 / vp.scale]);
+          ctx.strokeStyle = canvasTheme().labelInk;
+          ctx.lineWidth = 1.1 / vp.scale;
+          ctx.beginPath();
+          ctx.roundRect(ix - pad, iy - pad, iw + 2 * pad, ih + 2 * pad, 4 / vp.scale);
+          ctx.stroke();
+          ctx.restore();
+        }
       } else if (icon) {
         // PELLE · a bitmap rasterised at the size it occupies on the device
         // (drawn size × dpr × zoom band), not the SVG's 23 px natural size scaled up
@@ -1046,8 +1062,10 @@ export function render(
     // NAME: dashed border, so it reads as "there was one and I do not have it"
     // rather than as a fault. Same species as the funnel-inherited badge below
     // — attenuation for something that is drawn without being in the graph.
-    const absent = !!(n.node.data as { unresolved?: boolean } | undefined)
-      ?.unresolved;
+    // …and a DECLARED parent drawn as a box (no glyph for its kind) reads the
+    // same way: dashed, there and not fingerprinted
+    const absent = !!(n.node.data as { unresolved?: boolean; declared_only?: boolean } | undefined)
+      ?.unresolved || !!(n.node.data as { declared_only?: boolean } | undefined)?.declared_only;
     // …e lo stesso per un nodo della bozza: si vede che c'è e si vede che non
     // è ancora stato emesso.
     const draft = !!(n.node.data as { draft?: boolean } | undefined)?.draft;

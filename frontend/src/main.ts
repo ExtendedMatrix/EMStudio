@@ -502,15 +502,18 @@ import {
   type Stamp,
   type StampParent,
 } from "./stamp";
-import { adaptChain, missingDigests, type StampScene } from "./views/stamps";
+import { adaptChain, missingDigests, withDeclaredAncestors, type StampScene } from "./views/stamps";
 import { hintsPathFor, readHints, recordFound, setHintsBridgeResolver } from "./stamp-hints";
 // DTCEMS2 · comporre un passo e timbrarlo. La BOZZA sta qui, l'emissione passa
 // da s3Dgraphy attraverso il bridge: `stamp-compose.ts` non costruisce mai un
 // timbro, lo chiede.
 import {
-  emitDraft, missingFields, newDraft, outputFrom, requiredFields, retitleStamp, roadFor,
-  setComposeBridgeResolver, type Draft, type DraftInput,
+  applyHandle, chainsFor, emitDraft, fetchSets, hasFileSets, missingFields, newDraft, outputFrom,
+  requiredFields, retitleStamp, roadFor, setComposeBridgeResolver, type Draft, type DraftInput,
 } from "./stamp-compose";
+import {
+  DECLARED_KINDS, landStep, parentLabel, type DeclaredKind, type DeclaredLevel,
+} from "./declared";
 import { adaptDraft } from "./views/stamps";
 import { dtcFamiliesOf, dtcKindsFor } from "./rules";
 import { digestOf, isStampPath, stampPathFor } from "./stamp";
@@ -1510,7 +1513,8 @@ window.__EM_SCENE__ = () => {
   selected: () => [...selectedIds],
   /** CATENA · the live edges of one type (read-only), and the node by id */
   edgesOf: (type: string) => (store?.liveEdges() ?? []).filter((e) => e.edge_type === type),
-  node: (id: string) => store?.node(id) ?? null,
+  // RISORSA-FILE · …of whichever member holds it (the corpus too)
+  node: (id: string) => storeOfNode(id)?.node(id) ?? store?.node(id) ?? null,
 
   epochOf: (id: string) =>
     store?.doc.graph.edges.find(
@@ -1600,7 +1604,11 @@ window.__EM_SCENE__ = () => {
   /** SPAZIO · the whole document as Save writes it, and a document opened FROM
    *  a path (the bridge's folder in a browser), as Open would */
   docJson: () => (store ? projectDocumentText() : "null"),
-  openAt: (d: EmDocument, path: string) => loadDocument(d, baseName(path), path),
+  // RISORSA-FILE · a PROJECT (`{graphs}`, with its corpus and shelf) goes
+  // through the container's door, as a file does — the seam used to hand every
+  // document to `loadDocument` and lose the corpus of a project on the way
+  openAt: (d: EmDocument, path: string) => (d as unknown as { graphs?: unknown }).graphs
+    ? loadContainerDocument(d, baseName(path), path) : loadDocument(d, baseName(path), path),
   /** SPAZIO · `api.measure` of an extractor's place, and of a region */
   measure: (x: string) => {
     const g = store ? chain.geometryOf(store.doc, x) : null;
@@ -3376,7 +3384,8 @@ function buildScenesNow(): void {
   // cosa su cui si sta agendo. Non è una gerarchia di verità — la bozza non è
   // vera per niente, e il renderer la disegna attenuata: è che chi compone deve
   // vedere quello che sta componendo.
-  const draftScene = stampDraft ? adaptDraft(stampDraft) : null;
+  const draftScene = stampDraft
+    ? adaptDraft({ ...stampDraft, declaredChain: chainsFor(stampDraft)[0] ?? [] }) : null;
   const dtcSource = draftScene ? "stamps" : fromDisk ? "stamps"
     : neighbour ? "neighbourhood"
     : corpusNodes.length ? "corpus" : "study";
@@ -3389,7 +3398,12 @@ function buildScenesNow(): void {
   scenes.dtc = draftScene
     ? dtcOf(draftScene.nodes, draftScene.edges)
     : fromDisk
-    ? dtcOf(fromDisk.nodes, fromDisk.edges)
+    ? (() => {
+        // RISORSA-FILE · a declared parent the disk cannot find is the corpus's
+        const d = corpusNodes.length
+          ? withDeclaredAncestors(fromDisk, corpusNodes, corpusForView!.liveEdges()) : fromDisk;
+        return dtcOf(d.nodes, d.edges);
+      })()
     : neighbour
     ? dtcOf(neighbour.nodes, neighbour.edges)
     : corpusNodes.length
@@ -6875,7 +6889,16 @@ async function typeBox(node: EmNode): Promise<{ w: number; h: number }> {
 function menuNode(type: string, id: string, name: string, description: string, spec: AddSpec): EmNode {
   const data: Record<string, unknown> | undefined = spec.kind
     ? { dtc_kind: spec.kind, ...(spec.isResource ? { resource_type: spec.kind } : {}) } : undefined;
-  if (type === "resource") return addResource(null, { resourceId: id, name, description, data });
+  if (type === "resource") {
+    // a DECLARED parent from «Sopra»: its packaging (and tier) where
+    // addResource puts them, the rest (declared_only…) as data
+    const pd = { ...(spec.preset?.data ?? {}) } as Record<string, unknown>;
+    const packaging = typeof pd.packaging === "string" ? pd.packaging : undefined;
+    const tier = typeof pd.tier === "string" ? pd.tier : undefined;
+    delete pd.packaging; delete pd.tier;
+    return addResource(null, { resourceId: id, name, description, data: { ...data, ...pd },
+      ...(packaging ? { packaging } : {}), ...(tier ? { tier } : {}) });
+  }
   const node: EmNode = { id, name, node_type: type, description };
   if (data) node.data = data;
   return node;
@@ -6915,7 +6938,7 @@ async function addNodeFromMenu(spec: AddSpec, wx: number, wy: number, alt: boole
   const name = spec.preset?.name
     ?? initialName(st.doc, type) ?? nextFreeName(st.doc, type) ?? st.freshLabel(type);
   const node: EmNode = menuNode(type, id, name, spec.preset?.description ?? "", spec);
-  if (spec.preset?.data) node.data = { ...(node.data ?? {}), ...spec.preset.data };
+  if (spec.preset?.data && type !== "resource") node.data = { ...(node.data ?? {}), ...spec.preset.data };
   const box = await typeBox(node);
   if (store !== st) return null; // another document arrived while em-core answered
   const rect = { x: wx - box.w / 2, y: wy - box.h / 2, w: box.w, h: box.h };
@@ -7006,7 +7029,8 @@ function addEntry(
     alias: it.alias,
     icon: () => typeIconElement(it.nodeType, it.kind),
     run: () => {
-      const spec: AddSpec = { nodeType: it.nodeType, kind: it.kind, isResource: it.isResource, link };
+      const spec: AddSpec = { nodeType: it.nodeType, kind: it.kind, isResource: it.isResource, link,
+                              ...(it.preset ? { preset: it.preset } : {}) };
       // COLLEGARE · a new document is a decision: the form first, then the node
       if (it.nodeType === "document" && store && !canvasWritesToCorpus()) {
         askNewDocument(addMenuPoint.x, addMenuPoint.y, {}, (v) =>
@@ -17561,9 +17585,40 @@ function openDraft(outputs: FsEntry[], nearby: FsEntry[] = []): void {
       label: [me.name, me.surname].filter(Boolean).join(" "),
     };
   }
-  void fillDraftDigests();
+  // RISORSA-FILE · the last declared chain comes back: written once, reused
+  // for the other tiles (the names say {name} / {base})
+  stampDraft.declared = lastDeclaredChain();
+  void fillDraftSets();
   renderStorage();
   redrawNeighbourhood();
+}
+
+/** RISORSA-FILE · the file sets of the picked doors (the bridge asks dtcstamp),
+ *  then the handle: «Una risorsa, N file» is the default when files call each
+ *  other, and the outputs become one per door. Then the digests of what is left. */
+async function fillDraftSets(): Promise<void> {
+  const draft = stampDraft;
+  if (!draft) return;
+  try {
+    draft.sets = await fetchSets(draft.picked.map((o) => o.path));
+  } catch { draft.sets = {}; }
+  if (stampDraft !== draft) return;
+  applyHandle(draft);
+  renderStorage();
+  redrawNeighbourhood();
+  await fillDraftDigests();
+}
+
+const DECLARED_CHAIN_KEY = "emstudio.declaredChain";
+function lastDeclaredChain(): DeclaredLevel[] {
+  try {
+    const raw = localStorage.getItem(DECLARED_CHAIN_KEY);
+    const v = raw ? JSON.parse(raw) : [];
+    return Array.isArray(v) ? v as DeclaredLevel[] : [];
+  } catch { return []; }
+}
+function rememberDeclaredChain(levels: DeclaredLevel[]): void {
+  try { localStorage.setItem(DECLARED_CHAIN_KEY, JSON.stringify(levels)); } catch { /* private mode */ }
 }
 
 function closeDraft(): void {
@@ -17611,6 +17666,7 @@ function stampComposeBox(win: Win, entries: FsEntry[]): HTMLElement {
   head.className = "stamp-compose-head";
   head.textContent = t("compose.head", { n: String(draft.outputs.length) });
   box.appendChild(head);
+  if (hasFileSets(draft)) box.appendChild(handleChoice(draft));
 
   // ── 1 · LA DOMANDA: «Da dove viene?» ─────────────────────────────────────
   const ask = document.createElement("div");
@@ -17766,6 +17822,8 @@ function stampComposeBox(win: Win, entries: FsEntry[]): HTMLElement {
       list.appendChild(b);
     }
     fields.appendChild(wrap(t("stamp2.inputs"), list, "inputs", false, true));
+    // RISORSA-FILE · …or a parent DECLARED and not stamped
+    fields.appendChild(declaredEditor(draft));
     const sw = draft.software[0] ?? { name: "", version: "", commit: "" };
     const setSw = (patch: Partial<typeof sw>): void => {
       Object.assign(sw, patch);
@@ -17958,6 +18016,7 @@ async function doStamp(win: Win): Promise<void> {
       toast(t("compose.done", { n: String(out.written.length), s: seconds }));
       // CATENA · every written stamp files its RECEIPT on the shelf (a copy;
       // the sidecar stays the truth)
+      landEmission(draft, out);
       const recs = receiptsOfEmission(out.stamps.filter((st) => out.written.includes(st.stamp_path)));
       for (const r of recs) addToShelf(r);
       if (recs.length) {
@@ -17977,6 +18036,193 @@ async function doStamp(win: Win): Promise<void> {
     renderStorage();
     redrawNeighbourhood();
   }
+}
+
+/** RISORSA-FILE · the step just stamped, into the DOCUMENTATION (the corpus):
+ *  the outputs (a file set with its files), the act, and the declared chain
+ *  above it. That is what the DTC reads, what the em.json saves, and where a
+ *  declared parent lives — no stamp holds it. */
+function landEmission(draft: Draft, out: Awaited<ReturnType<typeof emitDraft>>): void {
+  if (draft.origin) return;
+  const corpus = documentationCorpus({ create: true });
+  if (!corpus) return;
+  const g = storeGraph(corpus);
+  corpus.batch(() => {
+    for (const proc of out.processes ?? []) {
+      if (!proc.process_id) continue;
+      const outputs = proc.outputs.map((path) => {
+        const o = draft.outputs.find((x) => x.path === path)!;
+        const st = out.stamps.find((x) => x.path === path);
+        const self = ((st?.stamp ?? {}) as { self?: { resource_id?: string } }).self;
+        return { resourceId: self?.resource_id ?? `res:${(o.digest ?? "").slice(7, 19)}`,
+                 name: (draft.outputs.length === 1 && draft.title.trim()) || o.name.replace(/\.[^.]+$/, ""),
+                 members: o.members, digest: o.digest, path: o.path, receipt: st?.receipt ?? undefined };
+      });
+      if (!out.stamps.some((x) => proc.outputs.includes(x.path))) continue;
+      // the act is named by its technique, or by its KIND's label (never the key)
+      const kindLabel = (k?: string) => dtcKindsFor("process").find((x) => x.kind === k)?.label;
+      landStep(g, { processId: proc.process_id, dtcKind: draft.kind,
+        technique: draft.technique || kindLabel(draft.kind) || undefined,
+        outputs, stampedInputs: draft.inputs,
+        levels: proc.chain.map((lv) => ({ ...lv, technique: lv.technique || kindLabel(lv.dtc_kind) })) });
+    }
+  });
+  if (draft.declared.length) rememberDeclaredChain(draft.declared);
+}
+
+/** RISORSA-FILE · «Una risorsa, N file» beside «N uscite»: the files picked
+ *  call each other (obj → mtl → textures), and the default is the resource. */
+function handleChoice(draft: Draft): HTMLElement {
+  const box = document.createElement("div");
+  box.className = "stamp-handle";
+  box.dataset.handle = draft.bundle ? "resource" : "outputs";
+  const doors = Object.values(draft.sets).filter((x) => !x.error && x.members.length > 1);
+  const files = doors.reduce((a, x) => a + x.members.length, 0);
+  const choice = (bundle: boolean): HTMLButtonElement => {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "stamp-road" + (draft.bundle === bundle ? " on" : "");
+    b.dataset.handleChoice = bundle ? "resource" : "outputs";
+    b.setAttribute("aria-pressed", String(draft.bundle === bundle));
+    const strong = document.createElement("b");
+    strong.textContent = bundle
+      ? (doors.length === 1 ? t("handle2.oneResource", { n: String(files) })
+                            : t("handle2.resources", { n: String(doors.length), f: String(files) }))
+      : draft.picked.length === 1 ? t("handle2.output1") : t("handle2.outputs", { n: String(draft.picked.length) });
+    const sub = document.createElement("span");
+    sub.textContent = bundle ? t("handle2.resourceSub") : t("handle2.outputsSub");
+    b.append(strong, sub);
+    b.onclick = () => {
+      if (draft.bundle === bundle) return;
+      draft.bundle = bundle;
+      applyHandle(draft);
+      renderStorage();
+      redrawDraftPicture();
+      void fillDraftDigests();
+    };
+    return b;
+  };
+  const modes = document.createElement("div");
+  modes.className = "stamp-compose-modes";
+  modes.append(choice(true), choice(false));
+  box.appendChild(modes);
+  if (draft.bundle) {
+    const list = document.createElement("ul");
+    list.className = "stamp-handle-members";
+    for (const o of draft.outputs.filter((x) => x.members)) {
+      const li = document.createElement("li");
+      li.dataset.door = o.name;
+      li.textContent = `${o.name} · ${o.members!.length} ${t("res.files")}: `
+        + o.members!.filter((m) => m.role !== "entry_point").map((m) => m.path).join(", ");
+      for (const w of o.memberWarnings ?? []) {
+        const warn = document.createElement("div");
+        warn.className = "stamp-err";
+        warn.textContent = `⚠ ${w}`;
+        li.appendChild(warn);
+      }
+      list.appendChild(li);
+    }
+    box.appendChild(list);
+  }
+  return box;
+}
+
+/** RISORSA-FILE · the parents DECLARED and not stamped, in levels going up: an
+ *  object of a .blend, a file nobody stamped, a set of sources. A name may say
+ *  {name} / {base}: composing a folder fills them per tile, and the chain is remembered
+ *  for the next batch. */
+function declaredEditor(draft: Draft): HTMLElement {
+  const box = document.createElement("div");
+  box.className = "stamp-declared";
+  box.dataset.field = "declared";
+  const title = document.createElement("div");
+  title.className = "stamp-declared-title";
+  title.textContent = t("declared.title");
+  const hint = document.createElement("div");
+  hint.className = "stamp-compose-why-road";
+  hint.textContent = t("declared.hint");
+  box.append(title, hint);
+  const redraw = () => { renderStorage(); redrawDraftPicture(); };
+  const input = (value: string, placeholder: string, key: string, onInput: (v: string) => void): HTMLInputElement => {
+    const i = document.createElement("input");
+    i.type = "text";
+    i.value = value;
+    i.placeholder = t("stamp2.eg", { x: placeholder });
+    i.dataset.declared = key;
+    i.oninput = () => { onInput(i.value); redrawDraftPicture(); };
+    return i;
+  };
+  draft.declared.forEach((lv, li) => {
+    const level = document.createElement("div");
+    level.className = "stamp-declared-level";
+    level.dataset.level = String(li);
+    const lh = document.createElement("div");
+    lh.className = "stamp-declared-level-head";
+    lh.textContent = li === 0 ? t("declared.level0") : t("declared.levelN", { n: String(li) });
+    level.appendChild(lh);
+    if (li > 0) {
+      // the act that made the level below from this one
+      const kind = document.createElement("select");
+      kind.dataset.declared = "kind";
+      const none = document.createElement("option");
+      none.value = ""; none.textContent = t("stamp2.pick");
+      kind.appendChild(none);
+      for (const k of dtcKindsFor("process")) {
+        const o = document.createElement("option");
+        o.value = k.kind; o.textContent = k.label;
+        kind.appendChild(o);
+      }
+      kind.value = lv.dtc_kind ?? "";
+      kind.onchange = () => { lv.dtc_kind = kind.value || undefined; redrawDraftPicture(); };
+      level.append(kind, input(lv.technique ?? "", "LODgenerator 3DSC", "technique", (v) => { lv.technique = v; }));
+    }
+    lv.parents.forEach((p, pi) => {
+      const row = document.createElement("div");
+      row.className = "stamp-declared-parent";
+      row.dataset.parent = `${li}.${pi}`;
+      const kind = document.createElement("select");
+      kind.dataset.declared = "parent-kind";
+      for (const k of DECLARED_KINDS) {
+        const o = document.createElement("option");
+        o.value = k; o.textContent = t(`declared.kind.${k}`);
+        kind.appendChild(o);
+      }
+      kind.value = p.kind;
+      kind.onchange = () => { p.kind = kind.value as DeclaredKind; redraw(); };
+      row.appendChild(kind);
+      if (p.kind === "datablock") {
+        row.append(input(p.blend_file ?? "", "RB/TempluMare_2021.blend", "blend", (v) => { p.blend_file = v; }),
+                   input(p.datablock ?? "", "{name}", "datablock", (v) => { p.datablock = v; }));
+      } else {
+        row.append(input(p.path ?? "", p.kind === "file" ? "rilievo/mesh.ply" : "foto/", "path", (v) => { p.path = v; }));
+      }
+      row.append(input(p.label, p.kind === "sources" ? "foto TempluMare" : parentLabel(p), "label", (v) => { p.label = v; }));
+      const rm = document.createElement("button");
+      rm.type = "button"; rm.className = "ghost"; rm.textContent = "×";
+      rm.title = t("declared.remove");
+      rm.onclick = () => {
+        lv.parents.splice(pi, 1);
+        if (!lv.parents.length) draft.declared.splice(li);
+        redraw();
+      };
+      row.appendChild(rm);
+      level.appendChild(row);
+    });
+    const add = document.createElement("button");
+    add.type = "button"; add.className = "ghost";
+    add.dataset.action = "declared-add-parent";
+    add.textContent = t("declared.addParent");
+    add.onclick = () => { lv.parents.push({ kind: "datablock", label: "" }); redraw(); };
+    level.appendChild(add);
+    box.appendChild(level);
+  });
+  const up = document.createElement("button");
+  up.type = "button"; up.className = "ghost";
+  up.dataset.action = "declared-add-level";
+  up.textContent = draft.declared.length ? t("declared.addLevel") : t("declared.addFirst");
+  up.onclick = () => { draft.declared.push({ parents: [{ kind: "datablock", label: "" }] }); redraw(); };
+  box.appendChild(up);
+  return box;
 }
 
 // ── i mattoncini del modulo ─────────────────────────────────────────────────

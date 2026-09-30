@@ -2368,6 +2368,137 @@ test("R1.replace", "«Sostituisci…» sulla texture: una revisione nuova, la do
     detail: { dialog, r, newer, older, errors } };
 });
 
+// ── NIGHT-RISORSA-FILE · parte 2: la maniglia e il padre dichiarato ────────
+const TILES = ["base", "RM", "TempluMare_tiles"];
+async function cleanTileStamps() {
+  const root = await rootPath();
+  for (const lod of ["LOD0", "LOD1", "LOD2"]) {
+    const dir = `${root}/base/RM/TempluMare_tiles/${lod}`;
+    if (!existsSync(dir)) continue;
+    for (const n of readdirSync(dir)) if (n.endsWith(".stamp.json")) rmSync(`${dir}/${n}`);
+  }
+  return root;
+}
+const handleOf = (p) => p.evaluate(() => ({
+  pressed: document.querySelector(".stamp-handle [aria-pressed=true]")?.dataset.handleChoice ?? null,
+  labels: [...document.querySelectorAll(".stamp-handle [data-handle-choice] b")].map((b) => b.textContent),
+  head: document.querySelector(".stamp-compose-head")?.textContent ?? "",
+  doors: [...document.querySelectorAll(".stamp-handle-members li")].map((l) => l.dataset.door),
+}));
+test("R2.lod0", "maniglia · l'obj del LOD0 dà UNA risorsa di 6 file, e «Una risorsa, 6 file» è la scelta di partenza", async () => {
+  const root = await cleanTileStamps();
+  const { p, ctx, errors } = await open({ doc: "catena" });
+  await workspace(p, "assets");
+  await storageInto(p, [root.split("/").pop(), ...TILES, "LOD0"]);
+  await storageClick(p, "OB_PODIO_LOD0.obj");
+  await p.click("button[data-action=compose-one]");
+  await p.waitForSelector(".stamp-handle", { timeout: 30000 });
+  const h = await handleOf(p);
+  await p.screenshot({ path: SHOT("r2-una-risorsa-6-file") }).catch(() => {});
+  await ctx.close();
+  return { pass: h.pressed === "resource" && h.labels[0] === "Una risorsa, 6 file" && /1/.test(h.head)
+      && h.doors.length === 1 && h.doors[0] === "OB_PODIO_LOD0.obj" && !errors.length, detail: { ...h, errors } };
+});
+test("R2.folder", "maniglia · la cartella LOD1/ dà 11 risorse (non 22 uscite), e «22 uscite» resta possibile", async () => {
+  const root = await cleanTileStamps();
+  const { p, ctx, errors } = await open({ doc: "catena" });
+  await workspace(p, "assets");
+  await storageInto(p, [root.split("/").pop(), ...TILES, "LOD1"]);
+  await p.click("button[data-action=compose-folder]");
+  await p.waitForSelector(".stamp-handle", { timeout: 60000 });
+  const h = await handleOf(p);
+  await p.screenshot({ path: SHOT("r2-cartella-11-risorse") }).catch(() => {});
+  await p.click('.stamp-handle [data-handle-choice="outputs"]');
+  await p.waitForTimeout(600);
+  const n = await handleOf(p);
+  await ctx.close();
+  return { pass: h.pressed === "resource" && h.labels[0] === "11 risorse, 33 file" && h.doors.length === 11
+      && /11/.test(h.head) && n.pressed === "outputs" && /22/.test(n.head) && n.labels[1] === "22 uscite" && !errors.length,
+    detail: { first: h, then: n, errors } };
+});
+test("R2.declared", "padre dichiarato · una tile timbrata col padre datablock (e la catena fino alle foto) si salva, si riapre, e il DTC mostra la catena", async () => {
+  const root = await cleanTileStamps();
+  const { p, ctx, errors } = await open({ doc: "catena" });
+  await workspace(p, "assets");
+  await storageInto(p, [root.split("/").pop(), ...TILES, "LOD1"]);
+  await storageClick(p, "OB_PODIO_LOD1.obj");
+  await p.click("button[data-action=compose-one]");
+  await p.waitForSelector(".stamp-handle", { timeout: 30000 });
+  // «viene da»: the road of a derived file, with nothing stamped nearby
+  await p.click('.stamp-road[data-mode="derived"]');
+  await p.waitForTimeout(300);
+  const fillIn = async (sel, v) => { await p.fill(sel, v); await p.waitForTimeout(80); };
+  // level 0: the object of the .blend
+  await p.click('[data-action="declared-add-level"]');
+  await fillIn('[data-parent="0.0"] input[data-declared="blend"]', "RB/TempluMare_2021.blend");
+  await fillIn('[data-parent="0.0"] input[data-declared="datablock"]', "{name}");
+  // level 1: LOD0, by the LODgenerator
+  await p.click('[data-action="declared-add-level"]');
+  await p.selectOption('[data-level="1"] select[data-declared="kind"]', "decimation");
+  await fillIn('[data-level="1"] input[data-declared="technique"]', "LODgenerator 3DSC");
+  await fillIn('[data-parent="1.0"] input[data-declared="blend"]', "RB/TempluMare_2021.blend");
+  await fillIn('[data-parent="1.0"] input[data-declared="datablock"]', "{base}_LOD0");
+  // level 2: the segmented tile and the photographs, by 3DSC4Metashape
+  await p.click('[data-action="declared-add-level"]');
+  await p.selectOption('[data-level="2"] select[data-declared="kind"]', "photogrammetry");
+  await fillIn('[data-level="2"] input[data-declared="technique"]', "3DSC4Metashape");
+  await fillIn('[data-parent="2.0"] input[data-declared="blend"]', "RB/TempluMare_2021.blend");
+  await fillIn('[data-parent="2.0"] input[data-declared="datablock"]', "{base}");
+  await p.click('[data-level="2"] [data-action="declared-add-parent"]');
+  await p.selectOption('[data-parent="2.1"] select[data-declared="parent-kind"]', "sources");
+  await fillIn('[data-parent="2.1"] input[data-declared="label"]', "foto TempluMare (Metashape)");
+  await p.screenshot({ path: SHOT("r2-compositore-padre-dichiarato") }).catch(() => {});
+  await p.selectOption('.stamp-compose select[data-field="kind"]', "format_conversion");
+  await p.fill('.stamp-compose input[data-field="software"]', "Blender 2.92");
+  await p.fill('.stamp-compose input[data-field="operator"]', "Mario Rossi");
+  await p.click('.stamp-compose button[data-field="today"]');
+  await p.click('.stamp-compose button[data-action="stamp"]');
+  await p.waitForTimeout(4000);
+  const sidecar = `${root}/base/RM/TempluMare_tiles/LOD1/OB_PODIO_LOD1.obj.stamp.json`;
+  const stamp = existsSync(sidecar) ? JSON.parse(readFileSync(sidecar, "utf8")) : null;
+  // saved, and reopened
+  const saved = await p.evaluate(() => window.__EM_DRAG__.docJson());
+  if (process.env.SHOTS) writeFileSync(`${process.env.SHOTS}/../dbg/saved-declared.em.json`, saved);
+  const toasts = await p.evaluate(() => [...document.querySelectorAll(".toast, #toast, [data-toast]")].map((x) => x.textContent).slice(-4));
+  const savedKeys = (() => { try { const d = JSON.parse(saved); return { graphs: Object.keys(d.graphs ?? {}), declared: saved.includes("declared_only") }; } catch { return null; } })();
+  await ctx.close();
+  const b = await open({ doc: "catena" });
+  await b.p.evaluate((d) => window.__EM_DRAG__.openAt(JSON.parse(d), "/tmp/tile.em.json"), saved);
+  await b.p.waitForTimeout(800);
+  await b.p.click(`#workspace-bar .ws-tab[data-ws="provenance"]`);
+  await b.p.waitForTimeout(600);
+  await b.p.locator('button[aria-pressed]', { hasText: /^DTC$/ }).first().click();
+  await b.p.waitForTimeout(900);
+  const dtc = await b.p.evaluate(() => {
+    const w = window.__EM_DRAG__.wins().find((x) => x.type === "graph").id;
+    const s = window.__EM_DRAG__.winScene(w);
+    return { names: s.boxes.map((b) => (b.label ?? "") + "|" + (window.__EM_DRAG__.node(b.id)?.name ?? b.id)),
+             boxes: s.boxes.length, mode: s.mode, ids: s.boxes.map((b) => b.id) };
+  });
+  await b.p.screenshot({ path: SHOT("r2-dtc-padre-datablock") }).catch(() => {});
+  // the inspector of the declared parent says so
+  const blendId = dtc.ids.find((id) => id.startsWith("declared:")
+    && dtc.names[dtc.ids.indexOf(id)].endsWith("|OB_PODIO_LOD1"));
+  await pick(b.p, blendId);
+  const insp = await b.p.evaluate(() => ({
+    declared: document.querySelector('[data-win$="inspector"] .res-declared')?.textContent ?? "",
+    blend: document.querySelector('[data-win$="inspector"] .res-blend')?.textContent ?? "" }));
+  await b.p.screenshot({ path: SHOT("r2-ispettore-dichiarato") }).catch(() => {});
+  await b.ctx.close();
+  const from = stamp?.from ?? [];
+  const want = ["|OB_PODIO_LOD1", "|Trasformazione di formato", "|LODgenerator 3DSC", "|OB_PODIO_LOD0", "|3DSC4Metashape",
+    "|OB_PODIO", "|foto TempluMare (Metashape)", "▸ OB_PODIO_LOD1 · 3 file"];
+  return { pass: stamp?.self?.packaging === "file_set" && stamp.self.digest_covers === "members"
+      && stamp.self.members?.length === 3 && from.length === 1 && from[0].label === "OB_PODIO_LOD1"
+      && !from[0].digest && !JSON.stringify(from).includes("blend://")
+      && dtc.mode === "dtc" && want.every((w) => dtc.names.some((n) => n.includes(w)))
+      && dtc.names.some((n) => n.endsWith("|foto TempluMare (Metashape)")) && dtc.names.some((n) => n.endsWith("|OB_PODIO_LOD0"))
+      && /dichiarato, non timbrato/.test(insp.declared) && /solo in Blender · TempluMare_2021\.blend · OB_PODIO_LOD1/.test(insp.blend)
+      && !errors.length && !b.errors.length,
+    detail: { self: stamp?.self && { packaging: stamp.self.packaging, covers: stamp.self.digest_covers, members: stamp.self.members?.length },
+              from, dtc, insp, savedKeys, toasts, errors, errorsB: b.errors } };
+});
+
 // ── run ─────────────────────────────────────────────────────────────────────
 const chosen = cases.filter((c) => !only.length || only.includes(c.id) || only.some((o) => c.id.startsWith(o + ".")));
 for (const c of chosen) {

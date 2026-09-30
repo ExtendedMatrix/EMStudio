@@ -361,6 +361,31 @@ def _compose_resources(targets, inputs):
     for inp in inputs:
         if scratch.find_node_by_id(inp["resource_id"]) is not None:
             continue
+        declared = inp.get("declared")
+        if isinstance(declared, dict):
+            # RISORSA-FILE · a parent DECLARED and not stamped: an object of a
+            # .blend (packaging datablock, a blend:// locator), a file nobody
+            # stamped, a set of sources (a folder, or only a label). It enters
+            # the graph so the step can name it; the stamp names it by id and
+            # label only (`from` carries no path: the locator is private).
+            kind = declared.get("kind")
+            files, kw = [], {}
+            if kind == "datablock" and declared.get("blend_file") and declared.get("datablock"):
+                files = [{"blend_file": declared["blend_file"],
+                          "datablock": declared["datablock"]}]
+                kw = {"packaging": "datablock", "tier": "master"}
+            elif kind == "file" and declared.get("path"):
+                files = [{"path": declared["path"]}]
+                kw = {"packaging": "file"}
+            elif kind == "sources":
+                if declared.get("path"):
+                    files = [{"path": str(declared["path"]).rstrip("/") + "/"}]
+                kw = {"packaging": "directory"}
+            api.add_resource(scratch, resource_id=inp["resource_id"],
+                             name=inp.get("label") or inp["resource_id"],
+                             size_bytes=inp.get("size_bytes") or declared.get("size_bytes"),
+                             files=files, data={"declared_only": True}, **kw)
+            continue
         api.add_resource(scratch, resource_id=inp["resource_id"],
                          name=inp.get("label") or inp["resource_id"],
                          size_bytes=inp.get("size_bytes"),
@@ -902,6 +927,20 @@ def make_handler(api):
                     self._fail(400, f"invalid JSON body: {exc}")
                     return
                 self._stamp_emit(body)
+            elif route == "/stamp/members":
+                # RISORSA-FILE · the members of a file set, found by following
+                # the references of its entry point (dtcstamp
+                # `follow_references`: obj → mtllib → map_*, gltf → buffers,
+                # images). The folder does not delimit the asset: what the door
+                # calls does. Read-only, on the served folders.
+                if not self._fs_gate():
+                    return
+                try:
+                    body = json.loads(raw.decode("utf-8")) if raw else {}
+                except Exception as exc:
+                    self._fail(400, f"invalid JSON body: {exc}")
+                    return
+                self._stamp_members(body)
             elif route == "/stamp/retitle":
                 # RIFINITURE · the stamp's TITLE and DESCRIPTION, rewritten in
                 # its sidecar. They are a courtesy, not substance (dtcstamp
@@ -983,6 +1022,34 @@ def make_handler(api):
                 out[text] = ask({"stamp": 1,
                                  "self": {"resource_id": "ask", "digest": text}})
             self._json({"ok": True, "identities": out})
+
+        def _stamp_members(self, body):
+            """``{"paths": [...]}`` → ``{"sets": {path: {members, digest,
+            warnings, missing, outside}}}``. A path that calls nothing is a set
+            of one (itself); a path dtcstamp cannot read answers ``error``."""
+            try:
+                import dtcstamp
+            except Exception as exc:
+                self._fail(501, f"dtcstamp is not importable here: {exc}")
+                return
+            out = {}
+            for path in (body.get("paths") or [])[:512]:
+                full = os.path.abspath(os.path.expanduser(str(path)))
+                if not _fs_inside_roots(full):
+                    out[path] = {"error": "outside the folders this bridge serves"}
+                    continue
+                try:
+                    followed = dtcstamp.follow_references(full)
+                    members = followed["members"]
+                    out[path] = {"members": members,
+                                 "digest": dtcstamp.members_digest(members),
+                                 "warnings": followed["warnings"],
+                                 "missing": followed["missing"],
+                                 "outside": followed["outside"],
+                                 "ceiling": dtcstamp.MAX_FILE_SET_MEMBERS}
+                except Exception as exc:
+                    out[path] = {"error": str(exc)}
+            self._json({"ok": True, "sets": out})
 
         def _stamp_emit(self, body):
             """Compone un passo e ne emette i timbri — **via s3Dgraphy, sempre**.
@@ -1207,6 +1274,32 @@ def make_handler(api):
                     continue
                 clean = {k: v for k, v in stamp.items() if not str(k).startswith("_")}
                 notes = list(stamp.get("_notes") or [])
+                # RISORSA-FILE · a FILE SET is stamped by dtcstamp, on the blocks
+                # s3Dgraphy emitted (`from`, `how`, `by`, …): `self` carries
+                # `packaging: file_set`, `digest_covers: members`, the members
+                # digest and the list. The members are followed AGAIN here, from
+                # the door on disk, and must be the ones the person composed:
+                # a texture changed in between is a refusal, not a silent swap.
+                if out.get("files") and out.get("packaging") == "file_set" and _full:
+                    try:
+                        import dtcstamp
+                        blocks = {k: v for k, v in clean.items() if k != "self"}
+                        own = {k: clean["self"][k] for k in ("label", "description",
+                                                             "tier", "media_type")
+                               if k in (clean.get("self") or {})}
+                        fs = dtcstamp.new_file_set_stamp(_full, out["resource_id"],
+                                                         self=own, **blocks)
+                    except Exception as exc:
+                        refused.append({"path": out.get("path"), "why": f"file set: {exc}"})
+                        continue
+                    followed = fs.pop("_followed", {}) or {}
+                    if out.get("digest") and fs["self"].get("digest") != out["digest"]:
+                        refused.append({"path": out.get("path"),
+                                        "why": "the members changed since the step was "
+                                               "composed: compose it again"})
+                        continue
+                    notes.extend(followed.get("warnings") or [])
+                    clean = {k: v for k, v in fs.items() if not str(k).startswith("_")}
                 # AUDIT N3 · an operator known BY NAME only (the form takes «a
                 # name or an ORCID»): no author node can carry it without an id
                 # (`_author_of` would fall back to the node id as a label), so

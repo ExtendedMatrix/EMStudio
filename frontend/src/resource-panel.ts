@@ -9,6 +9,7 @@ import type { DocumentStore } from "./model";
 import {
   EDGE_DERIVED_FROM,
   RevisionFork,
+  parseBlendLocator,
   resourceFiles,
   resourcesOfFile,
   revisionsOf,
@@ -128,6 +129,20 @@ export function renderResourcePanel(store: DocumentStore, id: string, h: Resourc
       panel.appendChild(b);
     }
     return panel;
+  }
+  // ── declared, not stamped ────────────────────────────────────────────────
+  const d = (g.node(id)?.data ?? {}) as Record<string, unknown>;
+  if (d.declared_only) {
+    const line = el("div", "insp-hint res-declared", `◌ ${t("declared.notStamped")}`);
+    line.dataset.declared = String(d.declared_kind ?? "");
+    panel.appendChild(line);
+  }
+  const blend = typeof d.url === "string" ? parseBlendLocator(d.url) : null;
+  if (blend) {
+    const line = el("div", "insp-hint res-blend",
+      t("declared.onlyBlender", { file: `${blend[0].split("/").pop()} · ${blend[2]}` }));
+    line.dataset.blend = blend[0];
+    panel.appendChild(line);
   }
   // ── the files ────────────────────────────────────────────────────────────
   panel.appendChild(el("h3", "insp-sect", t("res.filesTitle", { n: String(s.files.length) })));

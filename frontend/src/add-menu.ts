@@ -20,6 +20,22 @@ import type { DocumentStore } from "./model";
 import { renameOnAttach } from "./naming";
 import type { Scene } from "./scene";
 import type { EmDocument } from "./types";
+import connections from "./assets/s3Dgraphy_connections_datamodel.json";
+import { t } from "./i18n";
+import { DTC_REVERSED_EDGES } from "./views/dtc";
+
+/** RISORSA-FILE · the edges a MENU may propose between two types: those the
+ *  datamodel allows AND gives words to (`ui_phrase`). An edge with no phrase is
+ *  made by an act, not by a menu — `was_revision_of` (connections 1.6.31) is
+ *  written by `replaceFile`, and s3Dgraphy leaves its phrase out for that
+ *  reason. Validation still reads `allowedEdgeTypes`: an edge a menu does not
+ *  offer is not an illegal one. */
+const PHRASED = new Set(Object.entries(
+  (connections as { edge_types: Record<string, { ui_phrase?: unknown }> }).edge_types)
+  .filter(([, v]) => !!v.ui_phrase).map(([k]) => k));
+function menuEdgeTypes(from: string | undefined, to: string | undefined): string[] {
+  return allowedEdgeTypes(from, to).filter((e) => PHRASED.has(e));
+}
 import {
   allowedEdgeTypes,
   connectValidity,
@@ -78,6 +94,8 @@ export interface AddItem {
   description: string;
   /** also found by: the datamodel's own (English) label, whatever the locale */
   alias?: string;
+  /** RISORSA-FILE · what the node is born with (a declared parent's packaging) */
+  preset?: { name?: string; description?: string; data?: Record<string, unknown> };
 }
 
 /**
@@ -216,7 +234,7 @@ export function linkedItems(ctx: AddContext, selType: string | undefined): Linke
       const tStrat = isStratigraphicType(t);
       if (tStrat && selStrat && t !== selType) continue;
       // X → new
-      const eo = allowedEdgeTypes(selType, t)[0];
+      const eo = menuEdgeTypes(selType, t)[0];
       if (eo && !(tStrat && !selStrat))
         out.push({
           ...it,
@@ -225,7 +243,7 @@ export function linkedItems(ctx: AddContext, selType: string | undefined): Linke
           relation: tStrat && selStrat && !isSymmetricEdgeType(eo) ? "below" : "for",
         });
       // new → X
-      const ei = allowedEdgeTypes(t, selType)[0];
+      const ei = menuEdgeTypes(t, selType)[0];
       if (ei && (!tStrat || selStrat) && !(tStrat && selStrat && isSymmetricEdgeType(ei)))
         if (!(eo && !tStrat && ei === eo))
           out.push({
@@ -253,7 +271,7 @@ export function connectItems(ctx: AddContext, srcType: string | undefined): Link
   for (const c of cats)
     for (const it of c.items) {
       if (connectValidity(srcType, it.nodeType) !== "valid") continue;
-      for (const e of allowedEdgeTypes(srcType, it.nodeType))
+      for (const e of menuEdgeTypes(srcType, it.nodeType))
         out.push({ ...it, dir: "out", edgeType: e, relation: "for" });
     }
   return out;
@@ -276,7 +294,7 @@ export type HandleDir = "up" | "down";
  */
 export function handleEdgeTypes(selfType: string | undefined, otherType: string | undefined,
                                 dir: HandleDir): string[] {
-  const list = dir === "down" ? allowedEdgeTypes(selfType, otherType) : allowedEdgeTypes(otherType, selfType);
+  const list = dir === "down" ? menuEdgeTypes(selfType, otherType) : menuEdgeTypes(otherType, selfType);
   return list.filter((e) => !isSymmetricEdgeType(e));
 }
 
@@ -284,6 +302,7 @@ export function handleEdgeTypes(selfType: string | undefined, otherType: string 
  *  every addable type the datamodel lets sit above (up) or below (down) X, one
  *  entry per edge — the same shape as `connectItems`. */
 export function handleItems(ctx: AddContext, selType: string | undefined, dir: HandleDir): LinkedItem[] {
+  if (ctx === "dtc") return dtcHandleItems(selType, dir);
   const out: LinkedItem[] = [];
   const selStrat = isStratigraphicType(selType);
   for (const c of addCategories(ctx).filter((k) => k.state !== "off"))
@@ -296,6 +315,65 @@ export function handleItems(ctx: AddContext, selType: string | undefined, dir: H
     }
   return out;
 }
+
+/**
+ * RISORSA-FILE · the maniglia in the DTC: «Sopra» is above IN THE DTC PICTURE.
+ *
+ * The DTC reverses `dtc_had_input` / `dtc_derived_from` (DTC_REVERSED_EDGES:
+ * the target sits above), so the stratigraphic rule «source above target» put
+ * half of the entries on the wrong side — measured: «Sopra» a mesh offered a
+ * process via dtc_had_input, which the picture then drew BELOW. Here both
+ * directions of every allowed edge are tried and kept when the new node lands
+ * on the side asked for.
+ *
+ * Above a resource come also the DECLARED parents E.D. did not find on 30 Sep:
+ * a set of photographs, a Blender object, a mesh, a textured mesh — not new
+ * vocabulary (that is s3Dgraphy's), but the existing kinds (`photo`, `mesh`)
+ * with a declared packaging, each drawn with its kind's glyph and the dashed
+ * frame of «declared, not stamped».
+ */
+function dtcHandleItems(selType: string | undefined, dir: HandleDir): LinkedItem[] {
+  const out: LinkedItem[] = [];
+  const wantAbove = dir === "up";
+  for (const c of addCategories("dtc").filter((k) => k.state !== "off"))
+    for (const it of c.items) {
+      if (isGroupType(it.nodeType)) continue;
+      // new → X: the new node is the source
+      for (const e of menuEdgeTypes(it.nodeType, selType)) {
+        if (isSymmetricEdgeType(e)) continue;
+        const newAbove = !DTC_REVERSED_EDGES.has(e);
+        if (newAbove === wantAbove) out.push({ ...it, dir: "in", edgeType: e, relation: "for" });
+      }
+      // X → new: the new node is the target
+      for (const e of menuEdgeTypes(selType, it.nodeType)) {
+        if (isSymmetricEdgeType(e)) continue;
+        const newAbove = DTC_REVERSED_EDGES.has(e);
+        if (newAbove === wantAbove) out.push({ ...it, dir: "out", edgeType: e, relation: "for" });
+      }
+    }
+  if (wantAbove && selType === "resource" && menuEdgeTypes("resource", "resource").includes("dtc_derived_from"))
+    for (const p of DECLARED_PARENT_PRESETS)
+      out.push({ nodeType: "resource", kind: p.kind, isResource: true, category: "declared",
+        label: t(p.label), description: t("declared.menuHint"), alias: p.alias,
+        preset: { data: { declared_only: true, declared_kind: p.declared, packaging: p.packaging,
+                          ...(p.tier ? { tier: p.tier } : {}) } },
+        dir: "out", edgeType: "dtc_derived_from", relation: "for" });
+  return out;
+}
+
+/** The declared parents of «Sopra»: EXISTING kinds (dtc_kinds: `photo` of the
+ *  acquisition axis, `mesh` of the output axis — their glyphs) with a declared
+ *  packaging (s3Dgraphy ResourceNode.PACKAGINGS). A textured mesh has no kind of
+ *  its own in the vocabulary: it is a mesh whose packaging is a file_set (obj +
+ *  mtl + textures), and the report says so. */
+const DECLARED_PARENT_PRESETS: Array<{ label: string; alias: string; kind: string;
+    declared: "sources" | "datablock" | "file"; packaging: string; tier?: string }> = [
+  { label: "declared.menu.photos", alias: "photo set images", kind: "photo", declared: "sources", packaging: "directory" },
+  { label: "declared.menu.blender", alias: "blender object datablock", kind: "mesh", declared: "datablock",
+    packaging: "datablock", tier: "master" },
+  { label: "declared.menu.mesh", alias: "mesh", kind: "mesh", declared: "file", packaging: "file" },
+  { label: "declared.menu.textured", alias: "textured mesh obj mtl", kind: "mesh", declared: "file", packaging: "file_set" },
+];
 
 // ── COLLEGARE · linking to what already exists ────────────────────────────────
 
@@ -378,13 +456,13 @@ export function existingLinks(
     const tStrat = isStratigraphicType(n.node_type);
     if (opts.anchor) {
       if (connectValidity(selType, n.node_type) !== "valid") continue;
-      for (const e of allowedEdgeTypes(selType, n.node_type))
+      for (const e of menuEdgeTypes(selType, n.node_type))
         if (!joined(selId, n.id, e)) out.push({ ...base, edgeType: e, dir: "out", relation: "for" });
       continue;
     }
     const pair = tStrat && selStrat;
     const firstOf = (from: string | undefined, to: string | undefined): string | undefined =>
-      allowedEdgeTypes(from, to).find((e) => !(pair && isSymmetricEdgeType(e)));
+      menuEdgeTypes(from, to).find((e) => !(pair && isSymmetricEdgeType(e)));
     const eo = firstOf(selType, n.node_type);
     if (eo && !joined(selId, n.id, eo))
       out.push({ ...base, edgeType: eo, dir: "out", relation: pair ? "below" : "for" });

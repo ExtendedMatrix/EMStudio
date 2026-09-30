@@ -347,8 +347,11 @@ function scrittureDi(src) {
 // fuori dalla `substance` di dtcstamp — e il bridge rifiuta (409) un timbro
 // riscritto che non dica la stessa cosa (`stamps_agree`). Il client manda il
 // percorso del FILE, mai quello del timbro: la seconda metà della guardia resta.
+// RISORSA-FILE · `/stamp/members` is a READ in POST (a list of paths in the
+// body; the bridge follows the references with dtcstamp and writes nothing), the
+// same kind of entry as `/stamp/identity`
 const ROTTE_DI_SCRITTURA = new Set(["/stamp/hints", "/stamp/identity",
-                                    "/stamp/emit", "/stamp/retitle"]);
+                                    "/stamp/emit", "/stamp/retitle", "/stamp/members"]);
 
 function nessunaScritturaDiTimbri(src, dove) {
   const errori = [];
