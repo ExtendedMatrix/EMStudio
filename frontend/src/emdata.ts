@@ -184,6 +184,21 @@ export function setTableView(win: Win, view: "rows" | "cards"): void {
   renderEmData();
 }
 
+/** NIGHT-SPAZIO · how many rows a sheet shows, unfiltered — the number beside
+ *  its name in the sheet menu. The SAME builders the drawing uses. */
+export function sheetRowCount(sheet: TableView): number | null {
+  const store = getStore();
+  const ctx = getCtx();
+  if (!store || !ctx) return null;
+  if (sheet === "Chron") return chronRows(ctx, indexOf(ctx), null).length;
+  if (sheet === "Issues") return ctx.issues.length;
+  if (sheet === "Models") {
+    const sp = getSpace();
+    return sp ? modelsTableHtml(sp.space, sp.units, sp.ctx, () => true).count : null;
+  }
+  return buildTable(store, sheet as SheetKey, volatileProvider).rows.length;
+}
+
 /** Add a row to the sheet on screen — the `Righe ▸` menu's own path. */
 export function addEmDataRow(store: DocumentStore, win?: Win): string | null {
   const sheet = stateOf(win).sheet;

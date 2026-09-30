@@ -2,9 +2,10 @@
  * STRUTTURA · what the TABLE window shows, sheet by sheet, as data.
  *
  * Two groups (scrivania v5, E.D. 28 set):
- *  · «Fogli EMdb» — Units, Epochs, Claims, Authors, Documents (+ the US view):
+ *  · «Schede» — Units, Epochs, Documents, Claims, Authors (+ the US view):
  *    the em_data sheets, EDITABLE, built by `em-data.ts`;
- *  · «Viste calcolate» — Chronology and Warnings: read-only, computed here.
+ *  · «Viste calcolate» — Datazioni (the per-unit chronology: TPQ, TAQ, datings),
+ *    Warnings, and Models and proxies (`models-sheet.ts`): read-only.
  *
  * For every sheet this module says which FACETS it has and what each row
  * carries for them (`facets.ts` does the filtering), and builds the CARDS of the
@@ -28,7 +29,10 @@ export type EmdbSheet = "US" | "Units" | "Epochs" | "Authors" | "Documents" | "C
 export type ComputedView = "Chron" | "Issues" | "Models";
 export type TableView = EmdbSheet | ComputedView;
 
-export const EMDB_SHEETS: EmdbSheet[] = ["Units", "US", "Epochs", "Claims", "Authors", "Documents"];
+// NIGHT-SPAZIO · «Schede» (they are edited) in the order of the scrivania v11b,
+// the US view last: it is the Units with one column of its own (the first
+// epoch, edited here) — kept, and said in the night's report
+export const EMDB_SHEETS: EmdbSheet[] = ["Units", "Epochs", "Documents", "Claims", "Authors", "US"];
 export const COMPUTED_VIEWS: ComputedView[] = ["Chron", "Issues", "Models"];
 /** the sheets that ALSO have a card view; the others are rows only */
 export const CARD_VIEWS: TableView[] = ["Units", "Documents", "Chron"];

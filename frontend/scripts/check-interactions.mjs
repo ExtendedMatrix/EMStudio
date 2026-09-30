@@ -1522,6 +1522,76 @@ test("S5.doors", "«Elimina e travasa…» anche nel menu della corsia e nell'is
     detail: { inInsp, opened, lane, laneItem, spill, preset, errors } };
 });
 
+// ── NIGHT-SPAZIO · parte 6 · i fogli della Tabella ──────────────────────────
+/** the sheet menu of the first Table window: groups, labels, counts, notes */
+async function sheetMenu(p) {
+  const bar = p.locator('[data-win] .tile-bar', { has: p.locator(".win-mode-toggle") }).filter({ hasText: /Tabular|Tabella/ }).first();
+  const open = () => p.evaluate(() => [...document.querySelectorAll(".dd-menu:not(.hidden)")].some((m) => m.querySelector("[data-sheet]")));
+  if (!(await open())) await bar.locator(".win-mode-toggle").click();
+  await p.waitForTimeout(250);
+  if (!(await open())) { await bar.locator(".win-mode-toggle").click(); await p.waitForTimeout(250); }
+  const items = await p.evaluate(() => {
+    const m = [...document.querySelectorAll(".dd-menu:not(.hidden)")].pop();
+    const out = [];
+    let group = null;
+    for (const c of m?.children ?? []) {
+      if (c.classList.contains("dd-group")) { group = c.textContent; continue; }
+      if (c.tagName !== "BUTTON") continue;
+      out.push({ group, label: c.querySelector(".dd-label")?.textContent ?? c.textContent,
+        count: c.querySelector(".dd-count")?.textContent ?? null, note: c.querySelector(".dd-note")?.textContent ?? null,
+        sheet: c.dataset.sheet ?? null });
+    }
+    return out;
+  });
+  return { bar, items };
+}
+test("S6.sheets", "Tabella · due gruppi (Schede, Viste calcolate), ogni voce con il conteggio e una riga che dice cosa contiene; i conteggi coincidono con le righe", async () => {
+  const { p, ctx, errors } = await open({ doc: "spazio" });
+  const { items } = await sheetMenu(p);
+  await p.screenshot({ path: `${process.env.SHOTS ?? "."}/s6-menu-fogli.png` }).catch(() => {});
+  await p.keyboard.press("Escape");
+  const shown = {};
+  for (const it of items) {
+    if (!it.sheet) continue;
+    await sheetMenu(p);
+    await p.locator(`.dd-menu:not(.hidden) button[data-sheet="${it.sheet}"]`).first().click({ timeout: 4000 });
+    await p.waitForTimeout(500);
+    shown[it.sheet] = await p.evaluate(() => {
+      const f = [...document.querySelectorAll(".tile-tablebody .fcount")].map((x) => x.textContent)[0] ?? null;
+      return f ? Number((/\d+/.exec(f) ?? ["-1"])[0]) : null;
+    });
+  }
+  await ctx.close();
+  const groups = [...new Set(items.map((i) => i.group))];
+  const sheets = items.filter((i) => i.group === "Schede").map((i) => i.label);
+  const views = items.filter((i) => i.group === "Viste calcolate").map((i) => i.label);
+  const counted = items.every((i) => i.count != null && i.note && Number(i.count) === shown[i.sheet]);
+  return { pass: groups.join() === "Schede,Viste calcolate" && ["Unità", "Epoche", "Documenti", "Claims", "Autori"].every((x) => sheets.includes(x))
+      && views.join() === "Datazioni,Avvisi,Modelli e proxy" && !items.some((i) => i.label === "Cronologia") && counted && !errors.length,
+    detail: { items, shown, errors } };
+});
+test("S6.datings", "Tabella · «Datazioni» (già «Cronologia») ha i dati di prima: una riga per unità, TPQ/TAQ e datazioni", async () => {
+  const { p, ctx, errors } = await open({ doc: "catena" });
+  const { bar } = await sheetMenu(p);
+  await p.locator(".dd-menu:not(.hidden) button", { hasText: /^(Datazioni|Cronologia)/ }).first().click();
+  await p.waitForTimeout(1500);
+  const r = await p.evaluate(() => {
+    const b = document.querySelector(".tile-tablebody");
+    return { head: [...(b?.querySelectorAll("thead th") ?? [])].map((x) => x.textContent.trim()),
+      rows: [...(b?.querySelectorAll("tbody tr") ?? [])].map((x) => x.innerText.replace(/\s+/g, " ").trim()),
+      label: document.querySelector('[data-win] .win-mode-label')?.textContent ?? null };
+  });
+  await ctx.close();
+  // «i dati di prima»: the rows the «Cronologia» sheet drew before the rename,
+  // measured on the tree of 8b275ee and kept beside the report (DATINGS_BEFORE)
+  const beforeAt = process.env.DATINGS_BEFORE;
+  const before = beforeAt && existsSync(beforeAt) ? JSON.parse(readFileSync(beforeAt, "utf8")) : null;
+  if (process.env.DATINGS_WRITE) writeFileSync(process.env.DATINGS_WRITE, JSON.stringify(r, null, 1));
+  return { pass: r.label === "Datazioni" && r.rows.length === 5 && ["Scritta", "Dai reperti", "Propagata"].every((h) => r.head.includes(h))
+      && (!before || JSON.stringify(before.rows) === JSON.stringify(r.rows)) && !errors.length,
+    detail: { ...r, sameAsBefore: before ? JSON.stringify(before.rows) === JSON.stringify(r.rows) : "not measured", errors } };
+});
+
 // ── MICRO-UN-POSTO · parte 1 · importare con una mappatura: una porta sola ───
 const TAB = () => `${FS_ROOT}/tabelle`;
 /** the editor as the door leaves it: who filled it, and its three questions */

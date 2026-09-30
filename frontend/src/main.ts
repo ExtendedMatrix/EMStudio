@@ -369,6 +369,7 @@ import {
   toggleEmDataClaimForm,
   removeEmDataHost,
   currentSheetKey,
+  sheetRowCount,
   initEmData,
   renderEmData,
   setSheet,
@@ -20831,7 +20832,30 @@ function buildAreaHeader(win: Win): DocumentFragment {
         modeMenu.appendChild(g);
       }
       const b = document.createElement("button");
-      b.textContent = m.label;
+      if (m.note !== undefined || m.count !== undefined) {
+        // NIGHT-SPAZIO · «Unità · 7» and, below, what the sheet holds
+        b.classList.add("dd-rich");
+        if (m.key) b.dataset.sheet = m.key;
+        const top = document.createElement("span");
+        top.className = "dd-top";
+        const lab = document.createElement("span");
+        lab.className = "dd-label";
+        lab.textContent = m.label;
+        top.appendChild(lab);
+        if (m.count != null) {
+          const c = document.createElement("span");
+          c.className = "dd-count";
+          c.textContent = String(m.count);
+          top.appendChild(c);
+        }
+        b.appendChild(top);
+        if (m.note) {
+          const n = document.createElement("span");
+          n.className = "dd-note";
+          n.textContent = m.note;
+          b.appendChild(n);
+        }
+      } else b.textContent = m.label;
       b.classList.toggle("active", m.current);
       if (m.disabled) {
         // AUDIT N11 · visibly unavailable, clickable, and the click says WHY
@@ -20845,7 +20869,15 @@ function buildAreaHeader(win: Win): DocumentFragment {
       }
       modeMenu.appendChild(b);
     }
-    wireBarDropdown(modeTog, modeMenu);
+    // NIGHT-SPAZIO · the counts are read when the menu OPENS: the header is
+    // built once, the rows change under it (the warnings are computed later)
+    wireBarDropdown(modeTog, modeMenu, () => {
+      for (const b of modeMenu.querySelectorAll<HTMLElement>("button[data-sheet]")) {
+        const c = b.querySelector(".dd-count");
+        const n = sheetRowCount(b.dataset.sheet as TableView);
+        if (c && n != null) c.textContent = String(n);
+      }
+    });
     modeDd.append(modeTog, modeMenu);
     frag.appendChild(modeDd);
   }
@@ -21139,7 +21171,9 @@ function transformWindowOf(win: Win, type: WindowType): void {
 function headerModesOf(win: Win): {
   currentLabel: string;
   items: { label: string; current: boolean; run: () => void;
-           disabled?: string; group?: string }[];
+           disabled?: string; group?: string;
+           /** NIGHT-SPAZIO · a sheet's rows, and the line that says what it holds */
+           count?: number | null; note?: string; key?: string }[];
 } | null {
   if (win.type === "graph") {
     const cur = winMode(win);
@@ -21188,6 +21222,10 @@ function headerModesOf(win: Win): {
       label: t(`table.sheet.${k}`),
       current: k === cur,
       group,
+      // NIGHT-SPAZIO · the rows it shows, and what it holds, in one line
+      count: sheetRowCount(k),
+      note: t(`table.note.${k}`),
+      key: k,
       run: () =>
         focusThen(win, () => {
           setSheet(k, win);
