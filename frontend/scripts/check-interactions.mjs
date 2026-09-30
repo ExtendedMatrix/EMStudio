@@ -1272,6 +1272,113 @@ test("S2.legacy", "un em.json del 7 ott (vertici nei glb) si apre con le coords 
     detail: { was, now, shapes, dirty, files, bare, bareShapes, warned, errors: [...errors, ...b.errors] } };
 });
 
+// ── NIGHT-SPAZIO · parte 3 · lo spazio di lavoro «Spazio» ────────────────────
+// `testdata/spazio.em.json` = catena + two RMs in Età moderna (the survey,
+// resident; a reconstruction, reference only) and the proxies of Medioevo (a
+// glb, convex hulls, a reference, a declared file that is not there, a unit
+// without one); Età imperiale holds a unit and no 3D. Spheres for US102.
+const sceneState = (p) => p.evaluate(() => {
+  const h = document.querySelector(".scn-host");
+  return { ready: h?.dataset.ready ?? null, items: h?.__space?.() ?? null,
+    epoch: document.querySelector('.scn-seg button[aria-pressed="true"]')?.dataset.epoch ?? null,
+    overlay: document.querySelector(".scn-ov:not(.hidden)")?.textContent ?? null,
+    empty: document.querySelector(".scn-empty:not(.hidden)")?.textContent ?? null,
+    labels: [...document.querySelectorAll(".scn-label")].map((l) => ({ t: l.textContent, cls: l.className })),
+    camera: h?.__spaceCamera?.() ?? null };
+});
+async function spaceOn(p, epoch) {
+  await p.click(`.scn-seg button[data-epoch="${epoch}"]`);
+  await p.waitForTimeout(1800);
+  return sceneState(p);
+}
+test("S3.layers", "Spazio · l'epoca con RM mostra i due livelli (RM e proxy), e gli interruttori li tolgono uno per volta", async () => {
+  const { p, ctx, errors } = await open({ doc: "spazio", ws: "space" });
+  await p.waitForFunction(() => document.querySelector(".scn-host")?.dataset.ready === "1", null, { timeout: 20000 });
+  const both = await spaceOn(p, "EP_MOD");
+  await p.click('.scn-tg[data-toggle="rm"]'); await p.waitForTimeout(900);
+  const noRm = await sceneState(p);
+  await p.click('.scn-tg[data-toggle="rm"]'); await p.click('.scn-tg[data-toggle="px"]'); await p.waitForTimeout(900);
+  const noPx = await sceneState(p);
+  await p.click('.scn-tg[data-toggle="px"]'); await p.waitForTimeout(900);
+  await p.screenshot({ path: `${process.env.SHOTS ?? "."}/s3-spazio-eta-moderna.png` }).catch(() => {});
+  await ctx.close();
+  const kinds = (st) => [...new Set((st.items ?? []).map((i) => i.kind))].sort().join();
+  const rm01 = both.items?.find((i) => i.id === "RM01");
+  return { pass: kinds(both) === "proxy,rm" && rm01?.as === "mesh" && kinds(noRm) === "proxy" && kinds(noPx) === "rm"
+      && /RM Rilievo 2026/.test(both.overlay ?? "") && !errors.length,
+    detail: { both: both.items, overlay: both.overlay, noRm: noRm.items, noPx: noPx.items, errors } };
+});
+test("S3.empty", "Spazio · l'epoca senza nulla mostra lo stato vuoto, che dice come aggiungere (sync con Blender, un glb)", async () => {
+  const { p, ctx, errors } = await open({ doc: "spazio", ws: "space" });
+  await p.waitForFunction(() => document.querySelector(".scn-host")?.dataset.ready === "1", null, { timeout: 20000 });
+  const st = await spaceOn(p, "EP_ROM");
+  await p.screenshot({ path: `${process.env.SHOTS ?? "."}/s3-spazio-eta-imperiale-vuota.png` }).catch(() => {});
+  await ctx.close();
+  return { pass: /Nessun 3D per Età imperiale/.test(st.empty ?? "") && /Blender/.test(st.empty ?? "") && /glb/.test(st.empty ?? "")
+      && !(st.items ?? []).length && /senza: SF100/.test(st.overlay ?? "") && !errors.length, detail: { ...st, errors } };
+});
+test("S3.pick", "Spazio · un clic su un proxy seleziona l'unità: Ispettore e Matrix la seguono", async () => {
+  const { p, ctx, errors } = await open({ doc: "spazio", ws: "space" });
+  await p.waitForFunction(() => document.querySelector(".scn-host")?.dataset.ready === "1", null, { timeout: 20000 });
+  const st = await spaceOn(p, "EP_MED");
+  await p.screenshot({ path: `${process.env.SHOTS ?? "."}/s3-spazio-medioevo-soli-proxy.png` }).catch(() => {});
+  const at = await p.evaluate(() => document.querySelector(".scn-host").__spaceScreenOf("USM101"));
+  const cam0 = st.camera;
+  if (at) await p.mouse.click(at.x, at.y + 20);
+  await p.waitForTimeout(700);
+  const selected = await p.evaluate(() => window.__EM_DRAG__.selected()[0] ?? null);
+  const insp = await p.evaluate(() => document.querySelector(".insp-name-input")?.value ?? null);
+  const after = await sceneState(p);
+  await ctx.close();
+  return { pass: !!at && selected === "USM101" && insp === "USM101" && after.labels.some((l) => l.t === "USM101" && /sel/.test(l.cls))
+      && JSON.stringify(cam0) === JSON.stringify(after.camera) && !errors.length,
+    detail: { at, selected, insp, labels: after.labels, cam0, cam1: after.camera, errors } };
+});
+test("S3.files", "Spazio · un file solo referenziato è un contorno con l'etichetta; uno dichiarato e assente, l'etichetta; il riepilogo li conta", async () => {
+  const { p, ctx, errors } = await open({ doc: "spazio", ws: "space" });
+  await p.waitForFunction(() => document.querySelector(".scn-host")?.dataset.ready === "1", null, { timeout: 20000 });
+  const med = await spaceOn(p, "EP_MED");
+  const mod = await spaceOn(p, "EP_MOD");
+  await ctx.close();
+  const by = (st, id) => st.items?.find((i) => i.id === id);
+  return { pass: by(med, "RSF100b")?.as === "contour" && by(med, "US103")?.as === "label" && by(med, "USV106")?.as === "mesh"
+      && by(med, "USM101")?.as === "mesh" && by(mod, "RM02")?.as === "contour" && by(mod, "US102")?.as === "mesh"
+      && med.labels.some((l) => /RSF100b: file solo referenziato/.test(l.t) && /ref/.test(l.cls))
+      && med.labels.some((l) => /US103: dichiarato, file assente/.test(l.t))
+      && /senza: US104/.test(med.overlay) && /file mancante: US103/.test(med.overlay) && /solo referenziato: RSF100b/.test(med.overlay)
+      && !errors.length,
+    detail: { med: med.items, mod: mod.items, overlay: med.overlay, labels: med.labels, errors } };
+});
+test("S3.shared", "Spazio · l'epoca è condivisa con la Cronologia: sceglierla in una la sceglie nell'altra; ⤢ reinquadra, cambiare epoca no", async () => {
+  const { p, ctx, errors } = await open({ doc: "spazio", ws: "space" });
+  await p.waitForFunction(() => document.querySelector(".scn-host")?.dataset.ready === "1", null, { timeout: 20000 });
+  // the epoch's Inspector opens the Chronology (one of its four doors)
+  await spaceOn(p, "EP_MOD");
+  await p.click('.insp-chrono [data-action="check-chronology"]');
+  await p.waitForTimeout(900);
+  await spaceOn(p, "EP_MED");
+  const chrMarks = await p.evaluate(() => [...document.querySelectorAll(".chr-row.sel")].map((g) => g.dataset.chsel));
+  // a click on the epoch's bar in the Chronology (the bar, not the row's empty box)
+  await p.click('g[data-chsel="EP_ROM"] rect');
+  await p.waitForTimeout(900);
+  const sceneEpoch = (await sceneState(p)).epoch;
+  const cam0 = (await sceneState(p)).camera;
+  await spaceOn(p, "EP_MOD");
+  const cam1 = (await sceneState(p)).camera;
+  // orbit a little, then ⤢
+  const r = await p.evaluate(() => { const c = document.querySelector(".scn-host canvas").getBoundingClientRect(); return { x: c.x + c.width / 2, y: c.y + c.height / 2 }; });
+  await p.mouse.move(r.x, r.y); await p.mouse.down(); await p.mouse.move(r.x + 120, r.y + 30, { steps: 6 }); await p.mouse.up();
+  await p.waitForTimeout(400);
+  const moved = (await sceneState(p)).camera;
+  await p.click('.scn-tg[data-frame]'); await p.waitForTimeout(500);
+  const framed = (await sceneState(p)).camera;
+  await ctx.close();
+  return { pass: chrMarks.includes("EP_MED") && sceneEpoch === "EP_ROM" && JSON.stringify(cam0) === JSON.stringify(cam1)
+      && JSON.stringify(moved) !== JSON.stringify(cam1)
+      && JSON.stringify(framed) !== JSON.stringify(moved) && !errors.length,
+    detail: { chrMarks, sceneEpoch, cam0, cam1, moved, framed, errors } };
+});
+
 // ── MICRO-UN-POSTO · parte 1 · importare con una mappatura: una porta sola ───
 const TAB = () => `${FS_ROOT}/tabelle`;
 /** the editor as the door leaves it: who filled it, and its three questions */

@@ -25,11 +25,11 @@ import { epochSpan, epochStart } from "./outline";
 import type { ChronEntry } from "./chron-bridge";
 
 export type EmdbSheet = "US" | "Units" | "Epochs" | "Authors" | "Documents" | "Claims";
-export type ComputedView = "Chron" | "Issues";
+export type ComputedView = "Chron" | "Issues" | "Models";
 export type TableView = EmdbSheet | ComputedView;
 
 export const EMDB_SHEETS: EmdbSheet[] = ["Units", "US", "Epochs", "Claims", "Authors", "Documents"];
-export const COMPUTED_VIEWS: ComputedView[] = ["Chron", "Issues"];
+export const COMPUTED_VIEWS: ComputedView[] = ["Chron", "Issues", "Models"];
 /** the sheets that ALSO have a card view; the others are rows only */
 export const CARD_VIEWS: TableView[] = ["Units", "Documents", "Chron"];
 

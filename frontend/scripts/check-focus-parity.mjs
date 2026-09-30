@@ -76,6 +76,9 @@ const CONVERTED = {
   "narrative-index": ["narrative-index-view"],
   // 8 ott 2026 (AUDIT N5) · the Chronology check, born converted like the Index
   chronology: ["chronology-view"],
+  // 30 set 2026 (NIGHT-SPAZIO) · the Scena 3D, born converted: one WebGL
+  // canvas per window, built once in its own body
+  scene: ["scene-view"],
   // 13 set 2026 · the two HOSTED types. Their singletons were of two kinds and
   // both are listed: the surface they were mounted into (`#panel-view`) and the
   // four PANELS themselves, which were elements taken from the document at boot

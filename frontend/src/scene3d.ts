@@ -1,0 +1,356 @@
+/**
+ * SPAZIO · the Scena 3D — the representation models of an epoch and the proxies
+ * of its units, in one orbitable scene (scrivania v11b).
+ *
+ * What it draws is decided elsewhere (`space.ts` reads the graph, `main.ts`
+ * turns an epoch into items); this module only renders the items it is handed,
+ * each as its file state allows:
+ *
+ *   · `resident` — the glb is fetched and drawn: an RM as it is, a proxy
+ *     translucent in the colour of its unit's type (`em_visual_rules`
+ *     `material.rgba_color`, linear, as Blender paints it);
+ *   · `json` — convex hulls and spheres drawn as they are, from the shape's data;
+ *   · `reference` — a file only referenced (somebody's disk), which cannot be
+ *     fetched: a dashed CONTOUR with its label. Nothing says how big the file's
+ *     content is, so the contour is the room of what is drawn around it (the
+ *     scene's extent, or a metre when it is alone) — a place, not a shape;
+ *   · `missing` — declared and absent (not in the store, or not found when
+ *     fetched): its label only, where it would be.
+ *
+ * The camera frames the content when it first arrives and on ⤢ (`frame`),
+ * never on an epoch change or a toggle: the reader's point of view is theirs
+ * (MICRO-RIFINITURE). three.js is the lazy engine of `embed3d-native.ts`.
+ */
+import { engine } from "./embed3d-native";
+import { onFirstVisible } from "./lazy";
+
+export interface SceneItem {
+  kind: "rm" | "proxy";
+  /** the RM, or the UNIT a proxy belongs to (a click selects it) */
+  id: string;
+  label: string;
+  state: "resident" | "reference" | "missing" | "json";
+  /** the glb to fetch, for `resident` */
+  url?: string;
+  resourceId?: string;
+  /** linear rgb of the unit's type, for a proxy */
+  rgb?: [number, number, number];
+  /** the outline's colour (hex), e.g. the RM's placement axis */
+  edge?: string;
+  convexshapes?: number[][];
+  spheres?: number[][];
+  selected?: boolean;
+}
+
+export interface SceneTexts {
+  loading: string;
+  noEngine: string;
+  referenceOnly: (name: string) => string;
+  missing: (name: string) => string;
+}
+
+export interface SpaceSceneHandle {
+  update(items: SceneItem[]): void;
+  frame(): void;
+  dispose(): void;
+}
+
+export interface SpaceSceneOptions {
+  texts: SceneTexts;
+  onPickUnit?: (unitId: string) => void;
+  onPickRm?: (rmId: string) => void;
+  /** a resident file did not answer: the caller marks it missing */
+  onNotFound?: (resourceId: string) => void;
+}
+
+interface Drawn {
+  item: SceneItem;
+  /** what was drawn: a mesh, a contour, or only a label */
+  as: "mesh" | "contour" | "label" | "pending";
+}
+
+export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): SpaceSceneHandle {
+  let items: SceneItem[] = [];
+  let disposed = false;
+  let rebuild: (() => void) | null = null;
+  let frameIt: (() => void) | null = null;
+  let cleanup: (() => void) | null = null;
+  const drawn = new Map<string, Drawn>();
+  // the probes' seam: what the scene holds, and where a unit sits on screen
+  const probe = host as unknown as {
+    __space?: () => unknown;
+    __spaceScreenOf?: (id: string) => { x: number; y: number } | null;
+    __spaceCamera?: () => number[];
+  };
+  probe.__space = () => [...drawn.values()].map((d) => ({ kind: d.item.kind, id: d.item.id, state: d.item.state, as: d.as }));
+
+  const status = document.createElement("div");
+  status.className = "scn-status";
+  status.textContent = opts.texts.loading;
+  host.appendChild(status);
+
+  onFirstVisible(host, () => {
+    if (disposed) return;
+    void (async () => {
+      let E: any;
+      try { E = await engine(); } catch { status.textContent = opts.texts.noEngine; return; }
+      if (disposed) return;
+      const { THREE, GLTFLoader, OrbitControls, ConvexGeometry } = E;
+      const size = () => ({ w: Math.max(200, host.clientWidth || 600), h: Math.max(160, host.clientHeight || 360) });
+      let { w, h } = size();
+      const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+      renderer.setPixelRatio(Math.min(globalThis.devicePixelRatio || 1, 2));
+      renderer.setSize(w, h);
+      renderer.domElement.className = "scn-canvas";
+      const scene = new THREE.Scene();
+      const camera = new THREE.PerspectiveCamera(40, w / h, 0.01, 2000);
+      camera.position.set(6, 5, 9);
+      scene.add(new THREE.HemisphereLight(0xffffff, 0x8a7a60, 2.2));
+      const key = new THREE.DirectionalLight(0xffffff, 1.2);
+      key.position.set(4, 8, 6);
+      scene.add(key);
+      const controls = new OrbitControls(camera, renderer.domElement);
+      controls.enableDamping = true;
+      const content = new THREE.Group();
+      scene.add(content);
+      const labels = document.createElement("div");
+      labels.className = "v3d-labels scn-labels";
+      const loader = new GLTFLoader();
+      const cache = new Map<string, Promise<any | null>>();
+      const load = (url: string): Promise<any | null> => {
+        let p = cache.get(url);
+        if (!p) {
+          p = new Promise((res) => loader.load(url, (g: any) => res(g.scene), undefined, () => res(null)));
+          cache.set(url, p);
+        }
+        return p;
+      };
+      let framed = false;
+      let generation = 0;
+      const anchors: Array<{ el: HTMLElement; p: any }> = [];
+      const pickables: any[] = [];
+      const unitCentres = new Map<string, any>();
+
+      const extent = (): any => {
+        const b = new THREE.Box3();
+        for (const c of content.children) if (!c.userData.contour) b.expandByObject(c);
+        return b.isEmpty() ? new THREE.Box3(new THREE.Vector3(-0.5, 0, -0.5), new THREE.Vector3(0.5, 1, 0.5)) : b;
+      };
+      const addLabel = (text: string, at: any, cls: string, id?: string) => {
+        const el = document.createElement("span");
+        el.className = `v3d-label scn-label ${cls}`;
+        el.textContent = text;
+        if (id) el.dataset.id = id;
+        labels.appendChild(el);
+        anchors.push({ el, p: at.clone() });
+      };
+      const translucent = (item: SceneItem) => {
+        const c = new THREE.Color();
+        const [r, g, b] = item.rgb ?? [0.328, 0.033, 0.033];
+        c.setRGB(r, g, b, THREE.LinearSRGBColorSpace);
+        return new THREE.MeshLambertMaterial({ color: c, transparent: true, opacity: 0.42, depthWrite: false });
+      };
+      const outline = (geom: any, item: SceneItem, at?: any) => {
+        const col = item.selected ? 0xbf9000 : new THREE.Color(item.edge ?? "#555555");
+        const e = new THREE.LineSegments(new THREE.EdgesGeometry(geom), new THREE.LineBasicMaterial({ color: col }));
+        if (at) e.position.copy(at);
+        return e;
+      };
+      const tag = (obj: any, item: SceneItem) => {
+        obj.traverse((o: any) => {
+          if (item.kind === "proxy") o.userData.unitId = item.id; else o.userData.rmId = item.id;
+          if (o.isMesh) pickables.push(o);
+        });
+      };
+      const centreOf = (obj: any) => new THREE.Box3().setFromObject(obj).getCenter(new THREE.Vector3());
+      const topOf = (obj: any) => {
+        const b = new THREE.Box3().setFromObject(obj);
+        return new THREE.Vector3((b.min.x + b.max.x) / 2, b.max.y, (b.min.z + b.max.z) / 2);
+      };
+
+      frameIt = () => {
+        const b = extent();
+        const c = b.getCenter(new THREE.Vector3());
+        const s = b.getSize(new THREE.Vector3());
+        const span = Math.max(s.x, s.y, s.z) || 1;
+        controls.target.copy(c);
+        camera.position.copy(c).add(new THREE.Vector3(span * 0.9, span * 0.7, span * 1.5));
+        camera.near = span / 200;
+        camera.far = span * 200;
+        camera.updateProjectionMatrix();
+        controls.update();
+      };
+
+      rebuild = () => {
+        const gen = ++generation;
+        content.clear();
+        labels.textContent = "";
+        anchors.length = 0;
+        pickables.length = 0;
+        unitCentres.clear();
+        drawn.clear();
+        const pending: Promise<void>[] = [];
+        const later: SceneItem[] = [];      // contours and labels: after the meshes, around them
+        for (const item of items) {
+          if (item.state === "resident" && item.url) {
+            drawn.set(`${item.kind}:${item.id}`, { item, as: "pending" });
+            pending.push(load(item.url).then((root) => {
+              if (gen !== generation || disposed) return;
+              if (!root) {
+                drawn.set(`${item.kind}:${item.id}`, { item: { ...item, state: "missing" }, as: "label" });
+                later.push({ ...item, state: "missing" });
+                if (item.resourceId) opts.onNotFound?.(item.resourceId);
+                return;
+              }
+              const obj = root.clone(true);
+              if (item.kind === "proxy") {
+                obj.traverse((o: any) => { if (o.isMesh) o.material = translucent(item); });
+                obj.traverse((o: any) => { if (o.isMesh) o.add(outline(o.geometry, item)); });
+              } else if (item.selected) {
+                content.add(new THREE.Box3Helper(new THREE.Box3().setFromObject(obj), 0xbf9000));
+              }
+              tag(obj, item);
+              content.add(obj);
+              if (item.kind === "proxy") unitCentres.set(item.id, centreOf(obj));
+              addLabel(item.label, topOf(obj), item.kind === "proxy" ? `u${item.selected ? " sel" : ""}` : "rm", item.id);
+              drawn.set(`${item.kind}:${item.id}`, { item, as: "mesh" });
+            }));
+          } else if (item.state === "json") {
+            const group = new THREE.Group();
+            for (const flat of item.convexshapes ?? []) {
+              const pts = [];
+              for (let i = 0; i + 2 < flat.length; i += 3) pts.push(new THREE.Vector3(flat[i], flat[i + 1], flat[i + 2]));
+              if (pts.length < 4) continue;
+              const g = new ConvexGeometry(pts);
+              const m = new THREE.Mesh(g, translucent(item));
+              m.add(outline(g, item));
+              group.add(m);
+            }
+            for (const [x, y, z, r] of item.spheres ?? []) {
+              const g = new THREE.SphereGeometry(r, 24, 16);
+              const m = new THREE.Mesh(g, translucent(item));
+              m.position.set(x, y, z);
+              group.add(m);
+            }
+            if (!group.children.length) continue;
+            tag(group, item);
+            content.add(group);
+            unitCentres.set(item.id, centreOf(group));
+            addLabel(item.label, topOf(group), `u${item.selected ? " sel" : ""}`, item.id);
+            drawn.set(`${item.kind}:${item.id}`, { item, as: "mesh" });
+          } else later.push(item);
+        }
+        void Promise.all(pending).then(() => {
+          if (gen !== generation || disposed) return;
+          const b = extent();
+          let k = 0;
+          for (const item of later) {
+            const key = `${item.kind}:${item.id}`;
+            if (item.state === "reference") {
+              // a place, not a shape: the room of what is drawn, a little larger
+              const box = b.clone().expandByScalar(0.08 + 0.04 * k++);
+              const s = box.getSize(new THREE.Vector3());
+              const g = new THREE.BoxGeometry(s.x, s.y, s.z);
+              const c = new THREE.LineSegments(new THREE.EdgesGeometry(g),
+                new THREE.LineDashedMaterial({ color: new THREE.Color(item.edge ?? "#8a5a00"), dashSize: 0.12, gapSize: 0.08 }));
+              c.computeLineDistances();
+              c.position.copy(box.getCenter(new THREE.Vector3()));
+              c.userData.contour = true;
+              tag(c, item);
+              content.add(c);
+              // at the right-hand top corner: the summary sits top-left
+              addLabel(opts.texts.referenceOnly(item.label),
+                new THREE.Vector3(box.max.x, box.max.y + 0.15 * k, box.max.z), "ref", item.id);
+              drawn.set(key, { item, as: "contour" });
+            } else {
+              const at = b.getCenter(new THREE.Vector3());
+              at.y = b.max.y + 0.2 + 0.25 * k++;
+              addLabel(opts.texts.missing(item.label), at, "miss", item.id);
+              drawn.set(key, { item, as: "label" });
+            }
+          }
+          if (!framed && content.children.length) { framed = true; frameIt?.(); }
+          host.dataset.ready = "1";
+          host.dataset.items = String(drawn.size);
+        });
+      };
+
+      const place = () => {
+        const W = renderer.domElement.clientWidth || w, H = renderer.domElement.clientHeight || h;
+        for (const a of anchors) {
+          const v = a.p.clone().project(camera);
+          a.el.style.left = `${((v.x + 1) / 2) * W}px`;
+          a.el.style.top = `${((1 - v.y) / 2) * H}px`;
+          a.el.style.display = v.z < 1 ? "" : "none";
+        }
+      };
+      probe.__spaceScreenOf = (id: string) => {
+        const c = unitCentres.get(id);
+        if (!c) return null;
+        const v = c.clone().project(camera);
+        const r = renderer.domElement.getBoundingClientRect();
+        return { x: r.left + ((v.x + 1) / 2) * r.width, y: r.top + ((1 - v.y) / 2) * r.height };
+      };
+      probe.__spaceCamera = () => [...camera.position.toArray(), ...controls.target.toArray()].map((x: number) => Math.round(x * 1000) / 1000);
+      let raf = 0;
+      const tick = () => {
+        if (disposed) return;
+        raf = requestAnimationFrame(tick);
+        controls.update();
+        renderer.render(scene, camera);
+        place();
+      };
+      // a CLICK is a press and a release without a drag — a drag orbits
+      let down: { x: number; y: number } | null = null;
+      const ray = new THREE.Raycaster();
+      const onDown = (e: PointerEvent) => { down = { x: e.clientX, y: e.clientY }; };
+      const onUp = (e: PointerEvent) => {
+        const moved = !down || Math.hypot(e.clientX - down.x, e.clientY - down.y) > 4;
+        down = null;
+        if (moved) return;
+        const r = renderer.domElement.getBoundingClientRect();
+        ray.setFromCamera(new THREE.Vector2(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1), camera);
+        const hits = ray.intersectObjects(pickables, false);
+        // a proxy wins over the model it sits in: that is what a click means here
+        const hit = hits.find((x: any) => x.object.userData.unitId) ?? hits[0];
+        if (!hit) return;
+        if (hit.object.userData.unitId) opts.onPickUnit?.(String(hit.object.userData.unitId));
+        else if (hit.object.userData.rmId) opts.onPickRm?.(String(hit.object.userData.rmId));
+      };
+      renderer.domElement.addEventListener("pointerdown", onDown);
+      renderer.domElement.addEventListener("pointerup", onUp);
+      const ro = new ResizeObserver(() => {
+        ({ w, h } = size());
+        renderer.setSize(w, h);
+        camera.aspect = w / h;
+        camera.updateProjectionMatrix();
+      });
+      ro.observe(host);
+      status.remove();
+      host.prepend(renderer.domElement);
+      host.appendChild(labels);
+      cleanup = () => {
+        cancelAnimationFrame(raf);
+        ro.disconnect();
+        controls.dispose();
+        renderer.dispose();
+        renderer.domElement.remove();
+        labels.remove();
+      };
+      rebuild();
+      tick();
+    })();
+  });
+
+  return {
+    update(next) {
+      items = next;
+      rebuild?.();
+    },
+    frame() { frameIt?.(); },
+    dispose() {
+      disposed = true;
+      cleanup?.();
+    },
+  };
+}

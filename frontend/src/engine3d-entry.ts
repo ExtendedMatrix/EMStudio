@@ -12,3 +12,5 @@
 export * as THREE from "three";
 export { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 export { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
+// SPAZIO · the proxies' convex hulls (the Scena 3D draws them as they are)
+export { ConvexGeometry } from "three/examples/jsm/geometries/ConvexGeometry.js";

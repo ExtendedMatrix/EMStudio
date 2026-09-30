@@ -658,6 +658,10 @@ def make_handler(api):
                 self._export_ttl(raw)
             elif route == "/chronology":
                 self._chronology(raw)
+            elif route == "/geometry-summary":
+                # SPAZIO · what of the graph's 3D can be fetched, asked of the
+                # library that owns the rule (`store_backed.geometry_summary`)
+                self._geometry_summary(raw)
             elif route == "/narrative-report":
                 # COLLEGARE · the coverage the Index shows, asked of the library
                 # that owns the rules (`s3dgraphy.narrative.query`): derived now,
@@ -3610,6 +3614,28 @@ def make_handler(api):
                 import traceback
                 traceback.print_exc()
                 self._fail(500, f"chronology failed: {exc}")
+                return
+            self._json(out)
+
+        def _geometry_summary(self, raw):
+            try:
+                doc = json.loads(raw.decode("utf-8"))
+            except Exception as exc:
+                self._fail(400, f"invalid JSON body: {exc}")
+                return
+            if not hasattr(api, "geometry_summary"):
+                self._fail(501, "this s3dgraphy has no `geometry_summary` on its "
+                                "access API — point the bridge at a newer s3Dgraphy")
+                return
+            try:
+                graph, warnings = api.load_emjson(doc)
+                for w in warnings:
+                    sys.stderr.write(f"  [bridge] warning: {w}\n")
+                out = api.geometry_summary(graph)
+            except Exception as exc:  # pragma: no cover — surface to the UI
+                import traceback
+                traceback.print_exc()
+                self._fail(500, f"geometry summary failed: {exc}")
                 return
             self._json(out)
 

@@ -8398,3 +8398,51 @@ button.shelf-badge { cursor: pointer; font: inherit; font-size: 10.5px; }
   .tile-area > .tile-bar { flex-wrap: wrap; height: auto; row-gap: 4px; overflow-x: hidden; }
   .win-strip { flex-shrink: 0; overflow: visible; }
 }
+
+/* ── SPAZIO · la Scena 3D (scrivania v11b) ───────────────────────────────── */
+.tile-scenebody { height: 100%; min-height: 0; }
+.scn { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+.scn-bar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 6px 10px; border-bottom: 1px solid var(--border); background: var(--bg-panel); font-size: 0.78rem; }
+.scn-lbl { color: var(--text-muted); font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.06em; }
+.scn-seg { display: inline-flex; border: 1px solid var(--border-strong); border-radius: var(--radius-sm); overflow: hidden; }
+.scn-seg button { border: 0; border-right: 1px solid var(--border); background: var(--bg-panel); color: var(--text); font: inherit; padding: 2px 9px; cursor: pointer; }
+.scn-seg button:last-child { border-right: 0; }
+.scn-seg button[aria-pressed="true"] { background: var(--accent); color: var(--on-accent); }
+.scn-tg { border: 1px solid var(--border-strong); background: var(--bg-panel); color: var(--text); border-radius: var(--radius-sm); padding: 2px 8px; font: inherit; cursor: pointer; }
+.scn-tg[aria-pressed="true"] { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+.scn-host { position: relative; flex: 1; min-height: 200px; overflow: hidden; background: linear-gradient(#e9eef3, #d9dfe6); }
+.scn-host .scn-canvas { display: block; width: 100%; height: 100%; cursor: grab; }
+.scn-status { position: absolute; inset: 0; display: grid; place-content: center; color: #334; font-size: 0.8rem; }
+.scn-ov { position: absolute; left: 10px; top: 10px; max-width: min(380px, 72%); background: rgba(255, 255, 255, 0.92); color: #1d1d1b; border: 1px solid #c5ccd5; border-radius: 8px; padding: 7px 10px; font-size: 0.76rem; line-height: 1.45; z-index: 2; }
+.scn-ov b { font-weight: 600; }
+.scn-ov .miss { color: #a33; }
+.scn-ov .ref { color: #8a5a00; }
+.scn-ov .ok { color: #2e6b32; }
+.scn-ov .link { border: 0; background: none; padding: 0; color: #04486b; border-bottom: 1px dotted currentColor; cursor: pointer; font: inherit; }
+.scn-empty { position: absolute; inset: 0; display: grid; place-content: center; justify-items: center; text-align: center; gap: 8px; color: #334; padding: 24px; z-index: 1; background: linear-gradient(#e9eef3, #d9dfe6); }
+.scn-empty b { font-size: 0.95rem; }
+.scn-empty p { margin: 0; max-width: 46ch; font-size: 0.82rem; }
+.scn-labels { position: absolute; inset: 0; pointer-events: none; }
+.scn-label.u { background: rgba(255, 255, 255, 0.9); }
+.scn-label.u.sel { background: #bf9000; color: #fff; }
+.scn-label.ref { background: #fff4db; color: #8a5a00; border: 1px dashed #8a5a00; }
+.scn-label.miss { background: #fde8e8; color: #a33; }
+/* ── SPAZIO · «Modelli e proxy» ── */
+.mdl { padding: 10px 14px 18px; display: grid; gap: 12px; font-size: 0.8rem; }
+.mdl .sum { display: flex; gap: 8px; flex-wrap: wrap; }
+.mdl .chip { border: 1px solid var(--border-strong); border-radius: 999px; padding: 2px 10px; background: var(--bg-panel); }
+.mdl .chip b { font-family: var(--font-mono); }
+.mdl h4 { margin: 4px 0 0; font-size: 0.7rem; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-muted); }
+.mdl table { width: 100%; border-collapse: collapse; }
+.mdl th { text-align: left; font-weight: 600; color: var(--text-muted); font-size: 0.68rem; letter-spacing: 0.04em; text-transform: uppercase; padding: 4px 6px; border-bottom: 1px solid var(--border); }
+.mdl td { padding: 4px 6px; border-bottom: 1px solid var(--border); vertical-align: top; }
+.mdl .d { color: var(--text-muted); }
+.mdl .num { font-family: var(--font-mono); font-size: 0.72rem; }
+.mdl .link { border: 0; background: none; padding: 0; color: var(--accent-ink, var(--accent)); cursor: pointer; font: inherit; text-align: left; }
+.mdl .note2 { color: var(--text-muted); font-size: 0.76rem; border-left: 3px solid var(--border-strong); padding-left: 8px; margin: 0; }
+.mdl .st { font-size: 0.7rem; font-weight: 600; border-radius: 4px; padding: 0 6px; border: 1px solid currentColor; white-space: nowrap; }
+.mdl .st.resident { color: var(--ok-ink); }
+.mdl .st.reference { color: var(--warn-ink); }
+.mdl .st.missing { color: var(--danger); }
+.mdl .st.none { color: var(--text-faint); border-style: dashed; }
+.mdl .st.json { color: #04486b; }

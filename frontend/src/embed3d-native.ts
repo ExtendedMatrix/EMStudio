@@ -37,7 +37,8 @@ import { onFirstVisible } from "./lazy";
 /** Loaded once per session, on the first 3D embed a reader actually looks at. */
 let enginePromise: Promise<any> | null = null;
 
-async function engine(): Promise<any> {
+/** The engine, loaded once: also the Scena 3D's (`scene3d.ts`). */
+export async function engine(): Promise<any> {
   if (!enginePromise) {
     // RIFINITURE · the web build fetches the engine beside the page, once, on
     // the first model opened. A CONSTANT condition, so the other arm — three
@@ -45,13 +46,14 @@ async function engine(): Promise<any> {
     enginePromise = __EM_LAZY_3D__
       ? import(/* @vite-ignore */ new URL("./engine3d.js", document.baseURI).href)
       : (async () => {
-          const [THREE, loaderMod, controlsMod] = await Promise.all([
+          const [THREE, loaderMod, controlsMod, convexMod] = await Promise.all([
             import("three"),
             import("three/examples/jsm/loaders/GLTFLoader.js"),
             import("three/examples/jsm/controls/OrbitControls.js"),
+            import("three/examples/jsm/geometries/ConvexGeometry.js"),
           ]);
           return { THREE, GLTFLoader: loaderMod.GLTFLoader,
-                   OrbitControls: controlsMod.OrbitControls };
+                   OrbitControls: controlsMod.OrbitControls, ConvexGeometry: convexMod.ConvexGeometry };
         })();
   }
   return enginePromise;

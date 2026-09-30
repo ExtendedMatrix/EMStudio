@@ -165,7 +165,7 @@ import { issues as computeIssues, unitOfIssue, type Issue } from "./issues";
 import { CARD_VIEWS, COMPUTED_VIEWS, EMDB_SHEETS, type TableView, type ViewCtx } from "./table-views";
 import { iconUrlFor } from "./icons";
 import { buildOverview, type OverviewApi } from "./overview";
-import { edgeStyle } from "./palette";
+import { edgeStyle, nodeMaterialRgb, nodeStyle, placementColour } from "./palette";
 import { glyphMarkupFor, typeIconElement } from "./type-icons";
 import { buildLegendPanel, legendContent, showLegendModal } from "./legend";
 import { datamodelPhraseBook, linkedPhrase, phraseDirFor } from "./phrases";
@@ -210,6 +210,8 @@ import { DOC_TOOLS, renderReadingStage, selectedPassage, type DocTool,
          type TraceAnchor, type TraceGeometry } from "./doc-reading";
 import { openReadingBubble, type BubbleUnit } from "./reading-bubble";
 import { renderChronology, type ChronoEpoch, type ChronologyData } from "./chronology";
+import { buildSpace, type Space } from "./space";
+import { mountSpaceScene, type SceneItem } from "./scene3d";
 import { KEYMAP, filterKeymap, keysText } from "./keymap";
 import { ReadingFiles } from "./reading-files";
 import * as aiv from "./ai-validation";
@@ -2008,6 +2010,14 @@ function select(nodeId: string | null): void {
   selectedId = nodeId;
   selectedIds = new Set(nodeId ? [nodeId] : []);
   selectedEdge = null; // node and connector selection are mutually exclusive
+  // SPAZIO · an epoch selected anywhere is the scene's epoch (a phase: its
+  // epoch), and the scene marks the unit selected; the Chronology marks the row
+  if (nodeId && store?.node(nodeId)?.node_type === "EpochNode") {
+    const top = currentSpace()?.topOf(nodeId);
+    if (top) spaceEpochId = top;
+  }
+  if (windowsOf().some((w) => w.type === "scene" || w.type === "chronology"))
+    queueMicrotask(() => { refreshSurfaces("scene"); refreshSurfaces("chronology"); });
   refreshInspector();
   nodeList.setSelected(nodeId);
   draw();
@@ -3563,6 +3573,7 @@ function wireStore(s: DocumentStore): void {
     // next frame: three writes in a gesture are one rebuild, not three
     perfCount("onChange");
     scenesDirty = true;
+    spaceVersion++;           // SPAZIO · what is resident is asked again
     aiMarksCache = null; // CATENA · the AI chips are read again on the next draw
     if (changeQueued) return;
     changeQueued = true;
@@ -14630,6 +14641,7 @@ const TRANSFORM_TYPES: WindowType[] = [
   // AUDIT N4 · no "annotator": the Doc window is the one tracer
   "shelf",
   "chronology",
+  "scene",
   "study",
   "narrative-index",
 ];
@@ -15278,6 +15290,215 @@ function openChronology(epochId?: string): void {
   const area = winAreas.get(win.id);
   area?.classList.add("flash");
   setTimeout(() => area?.classList.remove("flash"), 1100);
+}
+
+// ── SPAZIO · LA SCENA 3D ────────────────────────────────────────────────────
+//
+// «Dove sta, e che forma ha in ogni epoca?» The RMs of the epoch and the proxies
+// of its units (`space.ts` reads them from the edges), drawn by `scene3d.ts`.
+// THE EPOCH IS SHARED WITH THE CHRONOLOGY through the one selection: picking an
+// epoch in the scene selects it (the Chronology marks it, the Inspector shows
+// it), and an epoch selected anywhere — a row of the Chronology, a lane of the
+// Matrix — becomes the scene's. A unit picked in the scene is selected too.
+
+/** the scene's epoch (a top epoch), kept while units are selected */
+let spaceEpochId: string | null = null;
+/** what s3Dgraphy says is resident (the bridge), for the document it was asked
+ *  about; null = not asked yet or offline, and the recorded state decides */
+let spaceResident: { version: number; ids: Set<string> } | null = null;
+let spaceVersion = 0;
+let spaceAsking = false;
+/** resident files the scene fetched and did not find */
+const spaceNotFound = new Set<string>();
+
+function currentSpace(): Space | null {
+  if (!store) return null;
+  return buildSpace(store.doc, { isUnit: isStratigraphicType,
+    resident: spaceResident?.version === spaceVersion ? spaceResident.ids : null, notFound: spaceNotFound });
+}
+
+/** Ask s3Dgraphy what can be fetched (`geometry_summary`), once per version of
+ *  the document. Offline, nothing is asked and the resources' own state is read. */
+function askResident(): void {
+  if (!store || spaceAsking || spaceResident?.version === spaceVersion) return;
+  const st = store;
+  const version = spaceVersion;
+  spaceAsking = true;
+  void (async () => {
+    try {
+      const base = await bridgeUrl();
+      const r = await fetch(`${base}/geometry-summary`, { method: "POST",
+        headers: { "Content-Type": "application/json" }, body: st.toJSON() });
+      if (!r.ok) throw new Error(String(r.status));
+      const j = await r.json() as { resident?: Array<{ resource_id: string }> };
+      if (st !== store) return;
+      spaceResident = { version, ids: new Set((j.resident ?? []).map((x) => x.resource_id)) };
+      refreshSurfaces("scene");
+      renderEmData();
+    } catch {
+      /* offline: the recorded state stands */
+    } finally {
+      spaceAsking = false;
+    }
+  })();
+}
+
+/** The scene's epoch: the one chosen, else the first (newest) top epoch. */
+function spaceEpochOf(sp: Space): string | null {
+  if (spaceEpochId && sp.epochs.some((e) => e.id === spaceEpochId)) return spaceEpochId;
+  return sp.epochs[0]?.id ?? null;
+}
+
+function spaceGenre(key: string | null): string {
+  if (!key) return t("space.genre.none");
+  const k = `space.genre.${key}`;
+  return t(k) === k ? key.replace(/_/g, " ") : t(k);
+}
+
+/** The window's toggles: «Modelli (RM)» and «Proxy», both on by default. */
+function spaceToggle(win: Win, which: "rm" | "px"): boolean {
+  return winCurrent(win, `space.${which}`) !== false;
+}
+
+function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): void } {
+  body.textContent = "";
+  const wrap = document.createElement("div");
+  wrap.className = "scn";
+  const bar = document.createElement("div");
+  bar.className = "scn-bar";
+  const host = document.createElement("div");
+  host.className = "scn-host";
+  host.dataset.scn = win.id;
+  const overlay = document.createElement("div");
+  overlay.className = "scn-ov";
+  const empty = document.createElement("div");
+  empty.className = "scn-empty hidden";
+  host.append(overlay, empty);
+  wrap.append(bar, host);
+  body.appendChild(wrap);
+  const handle = mountSpaceScene(host, {
+    texts: {
+      loading: t("space.loading"), noEngine: t("em3d.noEngine"),
+      referenceOnly: (name) => t("space.refOnly", { x: name }),
+      missing: (name) => t("space.fileMissing", { x: name }),
+    },
+    onPickUnit: (id) => { select(id); refreshInspector(); },
+    onPickRm: (id) => { select(id); refreshInspector(); },
+    onNotFound: (rid) => {
+      if (spaceNotFound.has(rid)) return;
+      spaceNotFound.add(rid);
+      queueMicrotask(() => { refreshSurfaces("scene"); renderEmData(); });
+    },
+  });
+  const onBar = (e: Event) => {
+    const b = (e.target as HTMLElement).closest<HTMLElement>("[data-epoch],[data-toggle],[data-frame]");
+    if (!b) return;
+    e.stopPropagation();
+    if (b.dataset.epoch) {
+      spaceEpochId = b.dataset.epoch;
+      select(b.dataset.epoch);              // the Chronology and the Inspector follow
+      refreshInspector();
+    } else if (b.dataset.toggle) {
+      const w = b.dataset.toggle as "rm" | "px";
+      setWinCurrent(win, `space.${w}`, spaceToggle(win, w) ? false : null);
+    } else if (b.dataset.frame) {
+      handle.frame();
+      return;
+    }
+    refresh();
+  };
+  bar.addEventListener("click", onBar);
+  const refresh = (): void => {
+    askResident();
+    const sp = currentSpace();
+    const epochId = sp ? spaceEpochOf(sp) : null;
+    const sum = sp && epochId ? sp.summary(epochId) : null;
+    // the bar: the epochs, the two layers, ⤢, and the colours of the language
+    bar.innerHTML = "";
+    const lab = document.createElement("span");
+    lab.className = "scn-lbl";
+    lab.textContent = t("space.epoch");
+    const seg = document.createElement("span");
+    seg.className = "scn-seg";
+    seg.setAttribute("role", "group");
+    seg.setAttribute("aria-label", t("space.epoch"));
+    for (const e of sp?.epochs ?? []) {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.dataset.epoch = e.id;
+      b.textContent = e.name;
+      b.setAttribute("aria-pressed", String(e.id === epochId));
+      seg.appendChild(b);
+    }
+    const tog = (which: "rm" | "px", key: string) => {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "scn-tg";
+      b.dataset.toggle = which;
+      b.textContent = t(key);
+      b.setAttribute("aria-pressed", String(spaceToggle(win, which)));
+      return b;
+    };
+    const fr = document.createElement("button");
+    fr.type = "button";
+    fr.className = "scn-tg";
+    fr.dataset.frame = "1";
+    fr.textContent = "⤢";
+    fr.title = t("space.frame");
+    bar.append(lab, seg, tog("rm", "space.layerRm"), tog("px", "space.layerPx"), fr);
+    if (!store || !sp || !sum) {
+      overlay.textContent = "";
+      overlay.classList.add("hidden");
+      empty.classList.remove("hidden");
+      empty.innerHTML = `<b>${escapeHtml(t(store ? "space.noEpochs" : "menu.noGraph"))}</b>`;
+      handle.update([]);
+      return;
+    }
+    const st = store;
+    const nm = (id: string) => String(st.node(id)?.name ?? id);
+    const list = (ids: string[]) => ids.map((id) => `<button type="button" class="link" data-go="${escapeHtml(id)}">${escapeHtml(nm(id))}</button>`).join(", ");
+    // the summary: RMs present, n proxies of m units, what is without, missing, referenced
+    const rmPart = sum.rms.length
+      ? sum.rms.map((r) => `RM <button type="button" class="link" data-go="${escapeHtml(r.id)}">${escapeHtml(r.name)}</button>`
+          + ` <span class="${r.resource?.state === "resident" ? "ok" : r.resource?.state === "reference" ? "ref" : "miss"}">(${escapeHtml(t(`space.st.${r.resource?.state ?? "none"}`))})</span>`).join(", ")
+      : `<span class="miss">${escapeHtml(t("space.noRm"))}</span>`;
+    overlay.classList.remove("hidden");
+    overlay.innerHTML = `<b>${escapeHtml(sum.epoch.name)}</b> · ${rmPart}<br>`
+      + `${escapeHtml(t("space.proxies", { n: String(sum.withProxy.length), m: String(sum.units.length) }))}`
+      + (sum.without.length ? ` · <span class="miss" data-sum="without">${escapeHtml(t("space.without"))}: ${list(sum.without)}</span>` : "")
+      + (sum.missing.length ? ` · <span class="miss" data-sum="missing">${escapeHtml(t("space.missingFiles"))}: ${list(sum.missing)}</span>` : "")
+      + (sum.reference.length ? ` · <span class="ref" data-sum="reference">${escapeHtml(t("space.referenceOnly"))}: ${list(sum.reference)}</span>` : "");
+    overlay.querySelectorAll<HTMLElement>("[data-go]").forEach((b) => b.addEventListener("click", (e) => {
+      e.stopPropagation(); select(b.dataset.go!); refreshInspector();
+    }));
+    const nothing = !sum.rms.length && !sum.withProxy.length;
+    empty.classList.toggle("hidden", !nothing);
+    if (nothing) {
+      empty.innerHTML = `<b>${escapeHtml(t("space.emptyTitle", { x: sum.epoch.name }))}</b>`
+        + `<p>${escapeHtml(t("space.emptyBody", { n: String(sum.units.length) }))}</p>`;
+      handle.update([]);
+      return;
+    }
+    const sel = selectedId;
+    const items: SceneItem[] = [];
+    if (spaceToggle(win, "rm"))
+      for (const r of sum.rms)
+        items.push({ kind: "rm", id: r.id, label: r.name, state: r.resource?.state ?? "missing",
+          url: r.resource?.url || undefined, resourceId: r.resource?.id,
+          edge: placementColour(r.genre) ?? undefined, selected: sel === r.id });
+    if (spaceToggle(win, "px"))
+      for (const u of sum.withProxy) {
+        const px = sp.proxies.get(u)!;
+        const type = st.node(u)?.node_type;
+        const common = { kind: "proxy" as const, id: u, label: nm(u), rgb: nodeMaterialRgb(type) ?? nodeMaterialRgb("US") ?? undefined,
+          edge: nodeStyle(type).border, selected: sel === u };
+        if (px.resource) items.push({ ...common, state: px.resource.state, url: px.resource.url || undefined, resourceId: px.resource.id });
+        else items.push({ ...common, state: "json", convexshapes: px.convexshapes, spheres: px.spheres });
+      }
+    handle.update(items);
+  };
+  refresh();
+  return { refresh, destroy: () => { bar.removeEventListener("click", onBar); handle.dispose(); } };
 }
 
 /** The epoch's Inspector: its chronology problems, and the tool. */
@@ -21241,6 +21462,7 @@ const WINDOW_MENUS: Record<WindowType, WinMenu[]> = {
   study: [],
   "narrative-index": [],
   chronology: [],
+  scene: [],
   // SHELF · HDR2 · the list's own verbs, now that `#shelf-bar` is gone. Open and
   // Save are here rather than in the header for one reason: they are punctuation
   // — once when you sit down, once when you get up — while the name, the count
@@ -23391,6 +23613,7 @@ registerBuiltinSurfaces({
   renderStudyInto,
   renderNarrativeIndexInto,
   renderChronologyInto,
+  mountScene,
   // …and the two the hosted panels need: which tab this window shows, and how a
   // panel gets built into a host. `shell/` draws none of them — it only knows
   // that a panel can be repainted, told the selection moved, and taken down.
@@ -23454,6 +23677,16 @@ initEmData({
   // makes this a two-line hook rather than a lookup table.
   onRowPicked: (id) => revealFromTable(id),
   setCurrentRow: (id) => setCurrentRowId(id),
+  // SPAZIO · «Modelli e proxy»: the space the Scena 3D draws, read once
+  getSpace: () => {
+    const sp = currentSpace();
+    if (!sp || !store) return null;
+    askResident();
+    const st = store;
+    return { space: sp, units: st.liveNodes().filter((n) => isStratigraphicType(n.node_type)).map((n) => n.id),
+             ctx: { node: (id) => st.node(id), t, genre: spaceGenre } };
+  },
+  onOpenDoc: (docId) => { select(docId); refreshInspector(); renderDocView(); },
 });
 // AUX2: the EM-Data table paints a row blue iff its node is volatile — the SAME
 // marker the canvas overlay reads, so table and graph never disagree.

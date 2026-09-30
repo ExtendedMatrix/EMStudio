@@ -15,6 +15,8 @@
 //  · cards for Units (the provenance chain), Documents (master and instances)
 //    and Chronology.
 
+import { modelsTableHtml, type ModelsCtx } from "./models-sheet";
+import type { Space } from "./space";
 import type { DocumentStore } from "./model";
 import type { Win } from "./workspace";
 import { winCurrent, setWinCurrent } from "./workspace";
@@ -114,7 +116,7 @@ interface TableState extends FacetSelection {
 }
 
 const VIEWS: TableView[] = ["Units", "US", "Epochs", "Claims", "Authors", "Documents",
-                            "Chron", "Issues"];
+                            "Chron", "Issues", "Models"];
 const noWin: TableState = { sheet: "Units", view: "rows", q: "", f: {} };
 
 function stateOf(win?: Win): TableState {
@@ -185,7 +187,7 @@ export function setTableView(win: Win, view: "rows" | "cards"): void {
 /** Add a row to the sheet on screen — the `Righe ▸` menu's own path. */
 export function addEmDataRow(store: DocumentStore, win?: Win): string | null {
   const sheet = stateOf(win).sheet;
-  if (sheet === "Chron" || sheet === "Issues") return null;
+  if (sheet === "Chron" || sheet === "Issues" || sheet === "Models") return null;
   const id = addRow(store, sheet);
   if (id) renderEmData();
   return id;
@@ -199,6 +201,9 @@ export function toggleEmDataClaimForm(store: DocumentStore, win?: Win): boolean 
 }
 
 let onDeleted: ((name: string, store: DocumentStore) => void) | null = null;
+/** SPAZIO · the «Modelli e proxy» view: the graph's 3D, read by `space.ts` */
+let getSpace: () => { space: Space; units: string[]; ctx: ModelsCtx } | null = () => null;
+let onOpenDoc: (docId: string, from: HTMLElement) => void = () => {};
 export function initEmData(opts: {
   getStore: () => DocumentStore | null;
   getCtx?: () => ViewCtx | null;
@@ -210,8 +215,14 @@ export function initEmData(opts: {
   runIssueBulk?: (key: string, nodes: string[]) => void;
   /** AUDIT N11 · a row went: say which, and give it back («Annulla») */
   onDeleted?: (name: string, store: DocumentStore) => void;
+  /** SPAZIO · the space of the graph, for «Modelli e proxy» */
+  getSpace?: () => { space: Space; units: string[]; ctx: ModelsCtx } | null;
+  /** SPAZIO · «Apri» on an RM: its document, in the service window */
+  onOpenDoc?: (docId: string, from: HTMLElement) => void;
 }): void {
   if (opts.onDeleted) onDeleted = opts.onDeleted;
+  if (opts.getSpace) getSpace = opts.getSpace;
+  if (opts.onOpenDoc) onOpenDoc = opts.onOpenDoc;
   getStore = opts.getStore;
   if (opts.getCtx) getCtx = opts.getCtx;
   if (opts.currentRow) currentRowOf = opts.currentRow;
@@ -427,6 +438,13 @@ function renderEmDataInto(host: EmDataHost): void {
       .filter((r) => passes(r.node.id, String(r.node.name)));
     count = rows.length;
     content = cards ? chronCardsHtml(rows, cs) : chronTableHtml(rows, cs);
+  } else if (st.sheet === "Models") {
+    const sp = getSpace();
+    if (sp) {
+      const r = modelsTableHtml(sp.space, sp.units, sp.ctx, (id, text) => passes(id, text));
+      count = r.count;
+      content = r.html;
+    }
   } else if (st.sheet === "Issues") {
     const rows = ctx.issues.filter((i) => passes(i.id, i.txt));
     count = rows.length;
@@ -674,6 +692,8 @@ function wireBody(host: EmDataHost, store: DocumentStore, st: TableState): void 
   // a node named anywhere in a view (a card, a link, a computed row) is a pick
   body.querySelectorAll<HTMLElement>("[data-go]").forEach((el) =>
     el.addEventListener("click", (e) => { e.stopPropagation(); onRowPicked(el.dataset.go!); }));
+  body.querySelectorAll<HTMLElement>("[data-open-doc]").forEach((el) =>
+    el.addEventListener("click", (e) => { e.stopPropagation(); onOpenDoc(el.dataset.openDoc!, el); }));
   body.querySelectorAll<HTMLElement>("[data-id]").forEach((el) =>
     el.addEventListener("click", () => {
       setCurrentRow(el.dataset.id!);

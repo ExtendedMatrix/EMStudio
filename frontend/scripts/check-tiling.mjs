@@ -317,8 +317,9 @@ const eq = (got, want, what) => {
 // ── COLLEGARE · four spaces, one per activity; what a saved one becomes ─────
 {
   const ids = W.WORKSPACES.filter((w) => w.builtin).map((w) => w.id);
-  eq(ids, ["canvas", "provenance", "assets", "narrative"],
-     "the four spaces, with the ids every saved arrangement is keyed by");
+  // NIGHT-SPAZIO (30 set 2026) · the fifth space, «Spazio» (scrivania v11b)
+  eq(ids, ["canvas", "provenance", "assets", "narrative", "space"],
+     "the five spaces, with the ids every saved arrangement is keyed by");
   eq(W.PARKED_WORKSPACES.map((w) => w.id), ["dtc", "comparisons", "annotator"], "the rest stay parked");
   const sig = (id) => W.arrangementSignature(W.WORKSPACES.find((w) => w.id === id).arrangement);
   eq(sig("canvas"), "row(outliner,row(col(graph:matrix,table),inspector))",
@@ -327,6 +328,10 @@ const eq = (got, want, what) => {
      "Fonti: Documents · Document above the graph · Inspector");
   eq(sig("assets"), "row(col(emtree,shelf),row(storage,graph:dtc))",
      "Contenuti: EMTree above the Shelf · Storage · DTC — and no Inspector");
+  eq(sig("space"), "row(col(scene,table),row(graph:matrix,inspector))",
+     "Spazio: the Scena 3D above the Table (Modelli e proxy) · Matrix · Inspector");
+  eq(W.WORKSPACES.find((w) => w.id === "space").arrangement.wins.find((w) => w.type === "table").state["current.table.sheet"],
+     "Models", "…and the Table opens on «Modelli e proxy»");
   eq(sig("narrative"), "row(narrative-index,row(narrative,col(graph:matrix,inspector)))",
      "Narrativa: Index · the page · Matrix above the Inspector");
   const canvas = W.WORKSPACES.find((w) => w.id === "canvas").arrangement;

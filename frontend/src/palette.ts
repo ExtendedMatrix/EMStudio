@@ -129,6 +129,23 @@ export function styledEdgeTypes(): string[] {
   return Object.keys(edgeStyles ?? {});
 }
 
+/** SPAZIO · the 3D colour of a node type: `material.rgba_color` of its style
+ *  (LINEAR rgb, as Blender paints it), or null when the rules give none. */
+export function nodeMaterialRgb(nodeType?: string): [number, number, number] | null {
+  const key = nodeType ?? "unknown";
+  const raw = nodeStyles[NODE_ALIAS[key] ?? key] as { style?: { material?: { rgba_color?: { r: number; g: number; b: number } } } } | undefined;
+  const c = raw?.style?.material?.rgba_color;
+  return c ? [c.r, c.g, c.b] : null;
+}
+
+/** SPAZIO · the colour of a rung of the placement axis
+ *  (`document_variant_styles.<key>.border_color`): the RM's contour. */
+export function placementColour(key: string | null | undefined): string | null {
+  const styles = (rules as unknown as { document_variant_styles?: Record<string, { border_color?: string }> })
+    .document_variant_styles ?? {};
+  return (key && styles[key]?.border_color) || null;
+}
+
 export function nodeStyle(nodeType?: string): NodeStyle {
   const key = nodeType ?? "unknown";
   const hit = nodeCache.get(key);

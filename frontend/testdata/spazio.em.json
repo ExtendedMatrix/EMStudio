@@ -1,0 +1,885 @@
+{
+  "header": {
+    "format": "em.json",
+    "version": "1.0",
+    "datamodel_versions": {
+      "connections": "1.6.26",
+      "nodes": "1.6.9",
+      "qualia": "1.6.2"
+    },
+    "ontology_versions": {}
+  },
+  "graph": {
+    "graph_id": "catena",
+    "name": "Spazio (catena + modelli e proxy)",
+    "description": null,
+    "nodes": [
+      {
+        "id": "EP_MOD",
+        "node_type": "EpochNode",
+        "name": "Età moderna",
+        "description": "",
+        "data": {
+          "end_time": 2026,
+          "start_time": 1900
+        }
+      },
+      {
+        "id": "EP_MED",
+        "node_type": "EpochNode",
+        "name": "Medioevo",
+        "description": "",
+        "data": {
+          "end_time": 1300,
+          "start_time": 900
+        }
+      },
+      {
+        "id": "EP_ROM",
+        "node_type": "EpochNode",
+        "name": "Età imperiale",
+        "description": "",
+        "data": {
+          "end_time": 300,
+          "start_time": 1
+        }
+      },
+      {
+        "id": "USM101",
+        "node_type": "US",
+        "name": "USM101",
+        "description": "Muro medievale con capitelli di reimpiego",
+        "data": {}
+      },
+      {
+        "id": "USV106",
+        "node_type": "USVs",
+        "name": "USV106",
+        "description": "Ricostruzione della cresta del muro",
+        "data": {}
+      },
+      {
+        "id": "US102",
+        "node_type": "US",
+        "name": "US102",
+        "description": "Strato di crollo",
+        "data": {}
+      },
+      {
+        "id": "RSF100b",
+        "node_type": "RSF",
+        "name": "RSF100b",
+        "description": "Capitello nord reimpiegato",
+        "data": {}
+      },
+      {
+        "id": "SF100",
+        "node_type": "SF",
+        "name": "SF100",
+        "description": "Capitello corinzio",
+        "data": {}
+      },
+      {
+        "id": "PD_USM101",
+        "node_type": "ParadataNodeGroup",
+        "name": "PD_USM101",
+        "description": "",
+        "data": {}
+      },
+      {
+        "id": "P_MAT",
+        "node_type": "property",
+        "name": "material",
+        "description": "calcare e laterizi",
+        "data": {
+          "property_type": "material"
+        }
+      },
+      {
+        "id": "P_H",
+        "node_type": "property",
+        "name": "height",
+        "description": "",
+        "data": {
+          "property_type": "height"
+        }
+      },
+      {
+        "id": "P_DAT",
+        "node_type": "property",
+        "name": "absolute_time_start",
+        "description": "1150",
+        "data": {
+          "property_type": "absolute_time_start"
+        }
+      },
+      {
+        "id": "P_CAPH",
+        "node_type": "property",
+        "name": "height",
+        "description": "",
+        "data": {
+          "property_type": "height"
+        }
+      },
+      {
+        "id": "D1",
+        "node_type": "document",
+        "name": "D.1",
+        "description": "Scheda dei capitelli reimpiegati",
+        "data": {
+          "filename": "scheda_capitelli_USM101.txt",
+          "text": "Scheda dei capitelli reimpiegati nel muro USM101, campagna 2026.\n\nIl capitello nord (RSF100b) è un corinzio ad acanto spinoso, databile su base stilistica alla fine del II secolo d.C.\n\nIl capitello sud (RSF101b) presenta la stessa lavorazione e proviene con ogni probabilità dalla stessa officina.\n\nEntrambi mostrano la rilavorazione dell’abaco per l’alloggiamento nella muratura medievale.\n\nL’altezza conservata dei capitelli è di 0,48 m; il diametro di base è di 0,42 m."
+        }
+      },
+      {
+        "id": "D2",
+        "node_type": "document",
+        "name": "D.2",
+        "description": "Rilievo 3D di USM101, 2026",
+        "data": {
+          "geometry": "reality_based",
+          "url": "/em/studio/testdata/catena-muro.gltf"
+        }
+      },
+      {
+        "id": "D3",
+        "node_type": "document",
+        "name": "D.3",
+        "description": "Foto del prospetto nord di USM101",
+        "data": {
+          "url": "/em/studio/testdata/catena-prospetto.jpg"
+        }
+      },
+      {
+        "id": "X1",
+        "node_type": "extractor",
+        "name": "D.1.1",
+        "description": "datazione stilistica del capitello nord",
+        "data": {
+          "geometry": {
+            "end": 183,
+            "kind": "passage",
+            "start": 66,
+            "text": "Il capitello nord (RSF100b) è un corinzio ad acanto spinoso, databile su base stilistica alla fine del II secolo d.C."
+          }
+        }
+      },
+      {
+        "id": "D4",
+        "node_type": "document",
+        "name": "D.4",
+        "description": "Ricostruzione del muro medievale, 2026",
+        "data": {
+          "geometry": "em_based"
+        }
+      },
+      {
+        "id": "RM01",
+        "node_type": "representation_model",
+        "name": "Rilievo 2026 · prospetto N",
+        "description": "",
+        "data": {}
+      },
+      {
+        "id": "RES01",
+        "node_type": "resource",
+        "name": "catena-muro.gltf",
+        "description": "",
+        "data": {
+          "checksum": "sha256:3d3904d724f139e511822268e346d9cfa33d6d3855433f860eb1f39d3f292b6a",
+          "residency": "resident",
+          "url": "/em/studio/testdata/catena-muro.gltf",
+          "url_type": "3d_model"
+        }
+      },
+      {
+        "id": "RM02",
+        "node_type": "representation_model",
+        "name": "Ricostruzione del muro medievale",
+        "description": "",
+        "data": {}
+      },
+      {
+        "id": "RES02",
+        "node_type": "resource",
+        "name": "pancia_ricostruzione_medievale.glb",
+        "description": "",
+        "data": {
+          "residency": "reference",
+          "url": "~/Blender/pancia/pancia_ricostruzione_medievale.glb",
+          "url_type": "3d_model"
+        }
+      },
+      {
+        "id": "US103",
+        "node_type": "US",
+        "name": "US103",
+        "description": "riempimento della fossa",
+        "data": {}
+      },
+      {
+        "id": "US104",
+        "node_type": "US",
+        "name": "US104",
+        "description": "piano di calpestio",
+        "data": {}
+      },
+      {
+        "id": "PX_USM101",
+        "node_type": "property",
+        "name": "proxy",
+        "description": "",
+        "data": {
+          "property_type": "geometry"
+        }
+      },
+      {
+        "id": "SH_USM101",
+        "node_type": "semantic_shape",
+        "name": "USM101_shape",
+        "description": "",
+        "data": {
+          "type": "generic"
+        }
+      },
+      {
+        "id": "RP_USM101",
+        "node_type": "resource",
+        "name": "proxy_USM101.gltf",
+        "description": "",
+        "data": {
+          "checksum": "sha256:917beb2c6e11bb04c23e5fd3d59a67dd864d5ed5ee7af014393b67f03275b8c3",
+          "residency": "resident",
+          "url": "/em/studio/testdata/spazio/proxy_USM101.gltf",
+          "url_type": "proxy_model"
+        }
+      },
+      {
+        "id": "PX_USV106",
+        "node_type": "property",
+        "name": "proxy",
+        "description": "",
+        "data": {
+          "property_type": "geometry"
+        }
+      },
+      {
+        "id": "SH_USV106",
+        "node_type": "semantic_shape",
+        "name": "USV106_shape",
+        "description": "",
+        "data": {
+          "convexshapes": [
+            [
+              -3,
+              2.55,
+              -0.3,
+              3,
+              2.55,
+              -0.3,
+              3,
+              3.55,
+              -0.3,
+              -3,
+              3.55,
+              -0.3,
+              -3,
+              2.55,
+              0.3,
+              3,
+              2.55,
+              0.3,
+              3,
+              3.55,
+              0.3,
+              -3,
+              3.55,
+              0.3
+            ]
+          ],
+          "type": "proxy"
+        }
+      },
+      {
+        "id": "PX_RSF100b",
+        "node_type": "property",
+        "name": "proxy",
+        "description": "",
+        "data": {
+          "property_type": "geometry"
+        }
+      },
+      {
+        "id": "SH_RSF100b",
+        "node_type": "semantic_shape",
+        "name": "RSF100b_shape",
+        "description": "",
+        "data": {
+          "type": "generic"
+        }
+      },
+      {
+        "id": "RP_RSF100b",
+        "node_type": "resource",
+        "name": "RSF100b.glb",
+        "description": "",
+        "data": {
+          "residency": "reference",
+          "url": "~/Blender/pancia/proxy/RSF100b.glb",
+          "url_type": "proxy_model"
+        }
+      },
+      {
+        "id": "PX_US103",
+        "node_type": "property",
+        "name": "proxy",
+        "description": "",
+        "data": {
+          "property_type": "geometry"
+        }
+      },
+      {
+        "id": "SH_US103",
+        "node_type": "semantic_shape",
+        "name": "US103_shape",
+        "description": "",
+        "data": {
+          "type": "generic"
+        }
+      },
+      {
+        "id": "RP_US103",
+        "node_type": "resource",
+        "name": "proxy_US103.gltf",
+        "description": "",
+        "data": {
+          "checksum": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+          "residency": "resident",
+          "url": "/em/studio/testdata/spazio/proxy_US103.gltf",
+          "url_type": "proxy_model"
+        }
+      },
+      {
+        "id": "PX_US102",
+        "node_type": "property",
+        "name": "proxy",
+        "description": "",
+        "data": {
+          "property_type": "geometry"
+        }
+      },
+      {
+        "id": "SH_US102",
+        "node_type": "semantic_shape",
+        "name": "US102_shape",
+        "description": "",
+        "data": {
+          "spheres": [
+            [
+              -1.2,
+              0.2,
+              0.9,
+              0.45
+            ],
+            [
+              1.1,
+              0.2,
+              0.9,
+              0.35
+            ]
+          ],
+          "type": "proxy"
+        }
+      }
+    ],
+    "edges": [
+      {
+        "id": "USM101__has_first_epoch__EP_MED",
+        "edge_type": "has_first_epoch",
+        "source": "USM101",
+        "target": "EP_MED"
+      },
+      {
+        "id": "USV106__has_first_epoch__EP_MED",
+        "edge_type": "has_first_epoch",
+        "source": "USV106",
+        "target": "EP_MED"
+      },
+      {
+        "id": "US102__has_first_epoch__EP_MOD",
+        "edge_type": "has_first_epoch",
+        "source": "US102",
+        "target": "EP_MOD"
+      },
+      {
+        "id": "RSF100b__has_first_epoch__EP_MED",
+        "edge_type": "has_first_epoch",
+        "source": "RSF100b",
+        "target": "EP_MED"
+      },
+      {
+        "id": "SF100__has_first_epoch__EP_ROM",
+        "edge_type": "has_first_epoch",
+        "source": "SF100",
+        "target": "EP_ROM"
+      },
+      {
+        "id": "US102__is_after__USM101",
+        "edge_type": "is_after",
+        "source": "US102",
+        "target": "USM101"
+      },
+      {
+        "id": "USV106__is_after__USM101",
+        "edge_type": "is_after",
+        "source": "USV106",
+        "target": "USM101"
+      },
+      {
+        "id": "RSF100b__is_part_of__USM101",
+        "edge_type": "is_part_of",
+        "source": "RSF100b",
+        "target": "USM101"
+      },
+      {
+        "id": "RSF100b__changed_from__SF100",
+        "edge_type": "changed_from",
+        "source": "RSF100b",
+        "target": "SF100"
+      },
+      {
+        "id": "USM101__has_paradata_nodegroup__PD_USM101",
+        "edge_type": "has_paradata_nodegroup",
+        "source": "USM101",
+        "target": "PD_USM101"
+      },
+      {
+        "id": "USM101__has_property__P_MAT",
+        "edge_type": "has_property",
+        "source": "USM101",
+        "target": "P_MAT"
+      },
+      {
+        "id": "USM101__has_property__P_H",
+        "edge_type": "has_property",
+        "source": "USM101",
+        "target": "P_H"
+      },
+      {
+        "id": "USM101__has_property__P_DAT",
+        "edge_type": "has_property",
+        "source": "USM101",
+        "target": "P_DAT"
+      },
+      {
+        "id": "RSF100b__has_property__P_CAPH",
+        "edge_type": "has_property",
+        "source": "RSF100b",
+        "target": "P_CAPH"
+      },
+      {
+        "id": "P_MAT__is_in_paradata_nodegroup__PD_USM101",
+        "edge_type": "is_in_paradata_nodegroup",
+        "source": "P_MAT",
+        "target": "PD_USM101"
+      },
+      {
+        "id": "P_H__is_in_paradata_nodegroup__PD_USM101",
+        "edge_type": "is_in_paradata_nodegroup",
+        "source": "P_H",
+        "target": "PD_USM101"
+      },
+      {
+        "id": "P_DAT__is_in_paradata_nodegroup__PD_USM101",
+        "edge_type": "is_in_paradata_nodegroup",
+        "source": "P_DAT",
+        "target": "PD_USM101"
+      },
+      {
+        "id": "X1__is_in_paradata_nodegroup__PD_USM101",
+        "edge_type": "is_in_paradata_nodegroup",
+        "source": "X1",
+        "target": "PD_USM101"
+      },
+      {
+        "id": "P_DAT__has_data_provenance__X1",
+        "edge_type": "has_data_provenance",
+        "source": "P_DAT",
+        "target": "X1"
+      },
+      {
+        "id": "X1__extracted_from__D1",
+        "edge_type": "extracted_from",
+        "source": "X1",
+        "target": "D1"
+      },
+      {
+        "id": "EP_MOD__has_representation_model__RM01",
+        "edge_type": "has_representation_model",
+        "source": "EP_MOD",
+        "target": "RM01"
+      },
+      {
+        "id": "D2__has_representation_model__RM01",
+        "edge_type": "has_representation_model",
+        "source": "D2",
+        "target": "RM01"
+      },
+      {
+        "id": "EP_MOD__has_representation_model__RM02",
+        "edge_type": "has_representation_model",
+        "source": "EP_MOD",
+        "target": "RM02"
+      },
+      {
+        "id": "D4__has_representation_model__RM02",
+        "edge_type": "has_representation_model",
+        "source": "D4",
+        "target": "RM02"
+      },
+      {
+        "id": "RM01__has_linked_resource__RES01",
+        "edge_type": "has_linked_resource",
+        "source": "RM01",
+        "target": "RES01"
+      },
+      {
+        "id": "RM02__has_linked_resource__RES02",
+        "edge_type": "has_linked_resource",
+        "source": "RM02",
+        "target": "RES02"
+      },
+      {
+        "id": "US103__has_first_epoch__EP_MED",
+        "edge_type": "has_first_epoch",
+        "source": "US103",
+        "target": "EP_MED"
+      },
+      {
+        "id": "US104__has_first_epoch__EP_MED",
+        "edge_type": "has_first_epoch",
+        "source": "US104",
+        "target": "EP_MED"
+      },
+      {
+        "id": "USM101__has_property__PX_USM101",
+        "edge_type": "has_property",
+        "source": "USM101",
+        "target": "PX_USM101"
+      },
+      {
+        "id": "PX_USM101__has_semantic_shape__SH_USM101",
+        "edge_type": "has_semantic_shape",
+        "source": "PX_USM101",
+        "target": "SH_USM101"
+      },
+      {
+        "id": "SH_USM101__has_linked_resource__RP_USM101",
+        "edge_type": "has_linked_resource",
+        "source": "SH_USM101",
+        "target": "RP_USM101"
+      },
+      {
+        "id": "USV106__has_property__PX_USV106",
+        "edge_type": "has_property",
+        "source": "USV106",
+        "target": "PX_USV106"
+      },
+      {
+        "id": "PX_USV106__has_semantic_shape__SH_USV106",
+        "edge_type": "has_semantic_shape",
+        "source": "PX_USV106",
+        "target": "SH_USV106"
+      },
+      {
+        "id": "RSF100b__has_property__PX_RSF100b",
+        "edge_type": "has_property",
+        "source": "RSF100b",
+        "target": "PX_RSF100b"
+      },
+      {
+        "id": "PX_RSF100b__has_semantic_shape__SH_RSF100b",
+        "edge_type": "has_semantic_shape",
+        "source": "PX_RSF100b",
+        "target": "SH_RSF100b"
+      },
+      {
+        "id": "SH_RSF100b__has_linked_resource__RP_RSF100b",
+        "edge_type": "has_linked_resource",
+        "source": "SH_RSF100b",
+        "target": "RP_RSF100b"
+      },
+      {
+        "id": "US103__has_property__PX_US103",
+        "edge_type": "has_property",
+        "source": "US103",
+        "target": "PX_US103"
+      },
+      {
+        "id": "PX_US103__has_semantic_shape__SH_US103",
+        "edge_type": "has_semantic_shape",
+        "source": "PX_US103",
+        "target": "SH_US103"
+      },
+      {
+        "id": "SH_US103__has_linked_resource__RP_US103",
+        "edge_type": "has_linked_resource",
+        "source": "SH_US103",
+        "target": "RP_US103"
+      },
+      {
+        "id": "US102__has_property__PX_US102",
+        "edge_type": "has_property",
+        "source": "US102",
+        "target": "PX_US102"
+      },
+      {
+        "id": "PX_US102__has_semantic_shape__SH_US102",
+        "edge_type": "has_semantic_shape",
+        "source": "PX_US102",
+        "target": "SH_US102"
+      }
+    ],
+    "data": {}
+  },
+  "layout": {
+    "canvas": {
+      "title": "Spazio (catena + modelli e proxy)",
+      "width": 734.88,
+      "height": 770.0
+    },
+    "swimlanes": [
+      {
+        "epoch_id": "EP_MOD",
+        "order": 0,
+        "y": 0.0,
+        "height": 130.0
+      },
+      {
+        "epoch_id": "EP_MED",
+        "order": 1,
+        "y": 130.0,
+        "height": 380.0
+      },
+      {
+        "epoch_id": "EP_ROM",
+        "order": 2,
+        "y": 510.0,
+        "height": 80.0
+      }
+    ],
+    "sectors": [],
+    "positions": {
+      "D1": {
+        "x": 174.96,
+        "y": 454.0,
+        "w": 24.96,
+        "h": 32.0
+      },
+      "D2": {
+        "x": 0.0,
+        "y": 614.0,
+        "w": 24.96,
+        "h": 32.0
+      },
+      "D3": {
+        "x": 54.96,
+        "y": 614.0,
+        "w": 24.96,
+        "h": 32.0
+      },
+      "D4": {
+        "x": 109.92,
+        "y": 614.0,
+        "w": 24.96,
+        "h": 32.0
+      },
+      "PD_USM101": {
+        "x": 8.439999999999998,
+        "y": 304.0,
+        "w": 358.0,
+        "h": 118.0
+      },
+      "PX_RSF100b": {
+        "x": 636.44,
+        "y": 304.0,
+        "w": 90.0,
+        "h": 32.0
+      },
+      "PX_US102": {
+        "x": 322.44,
+        "y": 74.0,
+        "w": 90.0,
+        "h": 32.0
+      },
+      "PX_US103": {
+        "x": 276.44,
+        "y": 204.0,
+        "w": 90.0,
+        "h": 32.0
+      },
+      "PX_USM101": {
+        "x": 516.44,
+        "y": 304.0,
+        "w": 90.0,
+        "h": 32.0
+      },
+      "PX_USV106": {
+        "x": 8.439999999999998,
+        "y": 204.0,
+        "w": 90.0,
+        "h": 32.0
+      },
+      "P_CAPH": {
+        "x": 396.44,
+        "y": 304.0,
+        "w": 90.0,
+        "h": 32.0
+      },
+      "P_DAT": {
+        "x": 142.44,
+        "y": 326.0,
+        "w": 90.0,
+        "h": 32.0
+      },
+      "P_H": {
+        "x": 262.44,
+        "y": 326.0,
+        "w": 90.0,
+        "h": 32.0
+      },
+      "P_MAT": {
+        "x": 22.439999999999998,
+        "y": 326.0,
+        "w": 90.0,
+        "h": 32.0
+      },
+      "RES01": {
+        "x": 0.0,
+        "y": 714.0,
+        "w": 90.0,
+        "h": 32.0
+      },
+      "RES02": {
+        "x": 120.0,
+        "y": 714.0,
+        "w": 90.0,
+        "h": 32.0
+      },
+      "RM01": {
+        "x": 0.0,
+        "y": 664.0,
+        "w": 90.0,
+        "h": 32.0
+      },
+      "RM02": {
+        "x": 120.0,
+        "y": 664.0,
+        "w": 90.0,
+        "h": 32.0
+      },
+      "RP_RSF100b": {
+        "x": 360.0,
+        "y": 664.0,
+        "w": 90.0,
+        "h": 32.0
+      },
+      "RP_US103": {
+        "x": 480.0,
+        "y": 664.0,
+        "w": 90.0,
+        "h": 32.0
+      },
+      "RP_USM101": {
+        "x": 240.0,
+        "y": 664.0,
+        "w": 90.0,
+        "h": 32.0
+      },
+      "RSF100b": {
+        "x": 142.44,
+        "y": 226.0,
+        "w": 90.0,
+        "h": 32.0
+      },
+      "SF100": {
+        "x": 322.44,
+        "y": 534.0,
+        "w": 90.0,
+        "h": 32.0
+      },
+      "SH_RSF100b": {
+        "x": 284.88,
+        "y": 614.0,
+        "w": 90.0,
+        "h": 32.0
+      },
+      "SH_US102": {
+        "x": 644.88,
+        "y": 614.0,
+        "w": 90.0,
+        "h": 32.0
+      },
+      "SH_US103": {
+        "x": 404.88,
+        "y": 614.0,
+        "w": 90.0,
+        "h": 32.0
+      },
+      "SH_USM101": {
+        "x": 164.88,
+        "y": 614.0,
+        "w": 90.0,
+        "h": 32.0
+      },
+      "SH_USV106": {
+        "x": 524.88,
+        "y": 614.0,
+        "w": 90.0,
+        "h": 32.0
+      },
+      "US102": {
+        "x": 322.44,
+        "y": 24.0,
+        "w": 90.0,
+        "h": 32.0
+      },
+      "US103": {
+        "x": 128.44,
+        "y": 154.0,
+        "w": 90.0,
+        "h": 32.0
+      },
+      "US104": {
+        "x": 248.44,
+        "y": 154.0,
+        "w": 90.0,
+        "h": 32.0
+      },
+      "USM101": {
+        "x": 128.44,
+        "y": 204.0,
+        "w": 118.0,
+        "h": 68.0
+      },
+      "USV106": {
+        "x": 8.439999999999998,
+        "y": 154.0,
+        "w": 90.0,
+        "h": 32.0
+      },
+      "X1": {
+        "x": 171.44,
+        "y": 376.0,
+        "w": 32.0,
+        "h": 32.0
+      }
+    },
+    "folded_groups": [],
+    "group_spaces": {},
+    "edge_routes": {},
+    "pinned": [],
+    "anchors": []
+  }
+}

@@ -82,6 +82,10 @@ export interface SurfaceDeps {
   renderNarrativeIndexInto(body: HTMLElement, win: Win): void;
   /** AUDIT N5 · the chronology check, into any body. */
   renderChronologyInto(body: HTMLElement, win: Win): void;
+  /** SPAZIO · the Scena 3D of THIS window: built once into its body (a WebGL
+   *  canvas is not rebuilt on a repaint), refreshed with the epoch and the
+   *  toggles, taken down with the window. */
+  mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): void };
   /** Which of its tabs this hosted window is showing (per WINDOW, never per
    *  type — two Inspector windows can sit on different tabs, and that is what
    *  makes the second one a view of its own instead of a duplicate). */
@@ -375,6 +379,29 @@ export function registerBuiltinSurfaces(deps: SurfaceDeps): void {
         },
         setFocused(on) { markFocus(body, on); },
         destroy() { body?.remove(); body = null; win = null; },
+      };
+    },
+  });
+
+  // ── SPAZIO · THE SCENA 3D · the RMs and proxies of an epoch ─────────────
+  registerSurfaceType({
+    id: "scene",
+    create(): Surface {
+      let body: HTMLElement | null = null;
+      let mounted: { refresh(): void; destroy(): void } | null = null;
+      return {
+        mount(area, w) {
+          body = document.createElement("div");
+          body.className = "tile-scenebody";
+          area.appendChild(body);
+          mounted = deps.mountScene(body, w);
+        },
+        refresh() {
+          if (!body || !body.isConnected) return;
+          mounted?.refresh();
+        },
+        setFocused(on) { markFocus(body, on); },
+        destroy() { mounted?.destroy(); mounted = null; body?.remove(); body = null; },
       };
     },
   });

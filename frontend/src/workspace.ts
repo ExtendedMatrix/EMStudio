@@ -70,7 +70,11 @@ export type WindowType =
   // offers remedies per overlap, and it is opened from four places (Tools, the
   // lane menu, the epoch's Inspector, the chronology warnings) next to the
   // Matrix it corrects.
-  | "chronology";
+  | "chronology"
+  // SPAZIO · THE SCENA 3D: the representation models of an epoch and the
+  // proxies of its units, in one orbitable scene, with the epoch selector it
+  // shares with the Chronology (scrivania v11b, 30 set 2026).
+  | "scene";
 
 /** A single window instance — its own id + type + type-specific state. */
 export interface Win {
@@ -300,6 +304,26 @@ const BUILTIN_WORKSPACES: WorkspacePreset[] = [
                      b: { dir: "col", ratio: 0.5, a: { win: "canvas" }, b: { win: "inspector" } } } },
     },
   },
+  // SPAZIO · «Dove sta, e che forma ha in ogni epoca?» (scrivania v11b, 30 set
+  // 2026). The Scena 3D above the Table on the sheet «Modelli e proxy» — what
+  // is there and what is missing — then the Matrix and the Inspector: a unit
+  // picked in the scene is the unit of all four.
+  {
+    id: "space", labelKey: "ws.space", hintKey: "ws.qSpace",
+    icon: "◈", windowType: "scene", builtin: true,
+    arrangement: {
+      wins: [
+        { name: "scene", type: "scene" },
+        { name: "models", type: "table", state: { "current.table.sheet": "Models" } },
+        { name: "canvas", type: "graph", state: { mode: "matrix" } },
+        { name: "inspector", type: "inspector" },
+      ],
+      active: "scene",
+      layout: { dir: "row", ratio: 0.62,
+                a: { dir: "col", ratio: 0.6, a: { win: "scene" }, b: { win: "models" } },
+                b: { dir: "row", ratio: 0.52, a: { win: "canvas" }, b: { win: "inspector" } } },
+    },
+  },
 ];
 
 /**
@@ -520,6 +544,7 @@ export const WINDOW_TYPE_META: Record<WindowType, { icon: string; labelKey: stri
   study: { icon: windowIcon("study"), labelKey: "win.study" },
   "narrative-index": { icon: windowIcon("narrative-index"), labelKey: "win.narrativeIndex" },
   chronology: { icon: windowIcon("chronology"), labelKey: "win.chronology" },
+  scene: { icon: windowIcon("scene"), labelKey: "win.scene" },
 };
 
 /** The window type the active workspace currently shows — the ACTIVE window's

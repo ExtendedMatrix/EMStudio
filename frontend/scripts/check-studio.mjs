@@ -40,8 +40,9 @@ const eq = (got, want, what) => {
   mem.set("emstudio.windows", JSON.stringify(saved));
   const W = await load("workspace.ts");
   // COLLEGARE (29 set 2026, E.D.) · four spaces, one per activity
-  eq(W.WORKSPACES.map((w) => w.id), ["canvas", "provenance", "assets", "narrative"],
-     "the bar holds the four spaces");
+  // NIGHT-SPAZIO (30 set 2026) · and the fifth, «Spazio»
+  eq(W.WORKSPACES.map((w) => w.id), ["canvas", "provenance", "assets", "narrative", "space"],
+     "the bar holds the five spaces");
   eq(W.WORKSPACES[0].labelKey, "ws.stratigraphy", "…the first called Stratigrafia");
   eq(W.PARKED_WORKSPACES.map((w) => w.id), ["dtc", "comparisons", "annotator"],
      "the three others are parked with their ids unchanged");
