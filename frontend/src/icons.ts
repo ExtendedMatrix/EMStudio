@@ -29,7 +29,15 @@ const STYLE_KEY: Record<string, string> = {
   epoch: "EP",
   author: "AUTH",
   author_ai: "AUTH_AI",
+  // MIG1 renamed the node_type `link` → `resource` (model.ts migrates it at
+  // load), and this table kept the old name: every resource read no style
+  // entry, so the declaration of LINK was never the one that won. `link` stays
+  // for whatever reads a file before the migration runs.
+  resource: "LINK",
   link: "LINK",
+  // s3Dgraphy 1.6.17: the file of a resource, drawn from its own glyph
+  // (`node_styles.FILE.2d_file_vect` = src/2D/resource_file.svg, rules 1.6.27)
+  resource_file: "FILE",
   geo_position: "GEO",
   semantic_shape: "SS",
   representation_model: "RM",
@@ -77,6 +85,11 @@ function asset(basename: string, rasterFirst = false): string | null {
 function preferRaster(nodeType: string): boolean {
   const entry = styleEntries[STYLE_KEY[nodeType] ?? nodeType];
   return entry?.["2d_icon_prefer"] === "raster";
+}
+
+/** The `em_visual_rules.node_styles` key a node_type reads. */
+export function styleKeyFor(nodeType: string): string {
+  return STYLE_KEY[nodeType] ?? nodeType;
 }
 
 const styleEntries = (rules as unknown as {

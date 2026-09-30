@@ -80,7 +80,11 @@ const NODE_ALIAS: Record<string, string> = {
   // the legacy ANG/GRAPH aliases stay only for other consumers.
   author: "AUTH",
   author_ai: "AUTH_AI",
+  // `resource` FIRST: it is the node_type since MIG1 (the legend lists a key by
+  // its first alias), `link` is the name before it (icons.ts, same table)
+  resource: "LINK",
   link: "LINK",
+  resource_file: "FILE",
   geo_position: "GEO",
   semantic_shape: "SS",
   representation_model: "RM",
