@@ -131,7 +131,16 @@ export interface TextSettings {
   displayLang: string;
 }
 
+/** IDENTITÀ · ORCID's own sign-in: the client registered at ORCID. The id is
+ *  PUBLIC (it travels in the address bar); there is no secret, by design. */
+export interface IdentitySettings {
+  orcidClientId: string;
+  /** https://orcid.org, or https://sandbox.orcid.org */
+  orcidBase: string;
+}
+
 export interface Settings {
+  identity: IdentitySettings;
   texts: TextSettings;
   sync: SyncSettings;
   developer: DeveloperSettings;
@@ -144,6 +153,7 @@ export interface Settings {
 const KEY = "emstudio.settings";
 
 const DEFAULTS: Settings = {
+  identity: { orcidClientId: "", orcidBase: "https://orcid.org" },
   texts: { displayLang: "" },
   sync: { protocol: "ws", host: "localhost", port: 8788, tool: "blender",
           accept: "everything", hubUrl: "", hubRoom: "" },
@@ -181,6 +191,7 @@ function clone(s: Settings): Settings {
   return {
     sync: { ...s.sync },
     developer: { ...s.developer },
+    identity: { ...s.identity },
     texts: { ...s.texts },
     interaction: { ...s.interaction },
     ai: { ...s.ai },
@@ -223,6 +234,7 @@ function load(): Settings {
     const parsed = JSON.parse(raw) as Partial<Settings>;
     // merge onto defaults so a missing/renamed field never breaks startup
     return {
+      identity: { ...DEFAULTS.identity, ...(parsed.identity ?? {}) },
       texts: { ...DEFAULTS.texts, ...(parsed.texts ?? {}) },
       sync: { ...DEFAULTS.sync, ...migrateSync(parsed.sync) },
       developer: { ...DEFAULTS.developer, ...(parsed.developer ?? {}) },

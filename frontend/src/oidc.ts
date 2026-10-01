@@ -129,7 +129,7 @@ export function redirectUri(): string {
  *  refuse it outright). */
 export async function authorizeUrl(
   config: AuthConfig,
-  opts: { returnTo?: string; silent?: boolean } = {},
+  opts: { returnTo?: string; silent?: boolean; idpHint?: string } = {},
 ): Promise<string> {
   const verifier = randomVerifier();
   const state = randomVerifier();
@@ -153,6 +153,10 @@ export async function authorizeUrl(
   // responsible for trying it only once, because a redirect loop is worse than
   // a refusal.
   if (opts.silent) url.searchParams.set("prompt", "none");
+  // IDENTITÀ · straight to an identity provider the realm brokers (`orcid`):
+  // Keycloak skips its own login page for it — and ignores the hint when the
+  // realm has no provider of that alias (measured on em-dev, 1 Oct 2026)
+  if (opts.idpHint) url.searchParams.set("kc_idp_hint", opts.idpHint);
   return url.toString();
 }
 

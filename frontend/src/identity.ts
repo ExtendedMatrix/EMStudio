@@ -44,6 +44,9 @@ export interface Identity {
   verified: boolean;
   /** when the verification happened (ISO), for the UI to show "last checked" */
   verifiedAt?: string;
+  /** IDENTITÀ · WHO witnessed it: a StratiGraph node (its host, through its
+   *  Keycloak) or `orcid.org` (ORCID's own sign-in). Absent for the mock. */
+  verifiedBy?: string;
 }
 
 // ── the iD itself ───────────────────────────────────────────────────────────
@@ -260,6 +263,8 @@ export interface VerificationResult {
   orcid: string;
   /** display name from the provider, when it gives one */
   name?: string;
+  /** who witnessed it (a node's host, `orcid.org`) — kept on the identity */
+  witness?: string;
 }
 
 /**
@@ -286,6 +291,18 @@ export class MockIdentityProvider implements IdentityProvider {
   async verify(): Promise<VerificationResult> {
     if (this.answer instanceof Error) throw this.answer;
     return this.answer;
+  }
+}
+
+/** A claim somebody ELSE already established — a StratiGraph node's
+ *  `/v1/whoami` after its Keycloak, or ORCID's signed id_token — handed to the
+ *  same comparison as every provider (`verifyCurrentIdentity`). It carries the
+ *  witness, never a token. */
+export class WitnessedClaim implements IdentityProvider {
+  readonly id = "witness";
+  constructor(private readonly claim: VerificationResult) {}
+  async verify(): Promise<VerificationResult> {
+    return this.claim;
   }
 }
 
@@ -324,6 +341,8 @@ export async function verifyCurrentIdentity(
   if (found) {
     found.verified = true;
     found.verifiedAt = new Date().toISOString();
+    if (result.witness) found.verifiedBy = result.witness;
+    else delete found.verifiedBy;
     if (result.name && !found.name) found.name = result.name;
     writeStore(store);
     return { status: "verified", identity: found };
@@ -333,12 +352,13 @@ export async function verifyCurrentIdentity(
 
 /** Adopt the iD the provider verified, REPLACING the declared one. Only ever
  *  called after the user has been shown both and has chosen — never silently. */
-export function adoptVerifiedIdentity(orcid: string, name?: string): Identity {
+export function adoptVerifiedIdentity(orcid: string, name?: string, witness?: string): Identity {
   const id = normalizeOrcid(orcid);
   const store = readStore();
   const identity: Identity = store.known.find((i) => i.orcid === id) ?? { orcid: id, verified: false };
   identity.verified = true;
   identity.verifiedAt = new Date().toISOString();
+  if (witness) identity.verifiedBy = witness;
   if (name && !identity.name) identity.name = name;
   store.known = [identity, ...store.known.filter((i) => i.orcid !== id)];
   store.current = id;

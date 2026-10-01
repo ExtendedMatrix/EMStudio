@@ -73,6 +73,8 @@ import {
   publishGate,
   useIdentity,
   verifyCurrentIdentity,
+  adoptVerifiedIdentity,
+  WitnessedClaim,
   type IdentityProvider,
 } from "./identity";
 import { renderInspector } from "./inspector";
@@ -219,6 +221,7 @@ import { ReadingFiles } from "./reading-files";
 import * as aiv from "./ai-validation";
 import * as trx from "./translation";
 import * as trui from "./translation-ui";
+import * as orcidIn from "./orcid-signin";
 import {
   checkReceipt, coversMoreThanTheFile, receiptOf, receiptsOfEmission, refreshedCopies, verdictChanged,
   type ReceiptCheck, type StampVerdict,
@@ -5083,6 +5086,11 @@ async function bootSession(): Promise<void> {
 
 /** At boot: a handoff on the URL, or a sign-in coming back from one. */
 async function followHandoff(): Promise<void> {
+  // IDENTITÀ · back from ORCID's own sign-in (an id_token in the fragment)
+  if (orcidIn.returningFromOrcid()) {
+    await completeOrcidReturn();
+    return;
+  }
   if (returningFromIdp()) {
     const handoff = recallHandoff();
     // only a ROOM is ever remembered across a sign-in: the study path does not
@@ -9658,6 +9666,9 @@ interface PendingNodeSignIn {
   returnTo?: string;
   /** `prompt=none` — a failed one is not a failure, and must not be shouted */
   silent?: boolean;
+  /** IDENTITÀ · started from the identity panel: what the node confirms
+   *  VERIFIES the identity (the node as witness) */
+  intent?: "identity";
 }
 
 /**
@@ -9669,7 +9680,7 @@ interface PendingNodeSignIn {
  * only thing remembered across the round trip is WHICH NODE — a place, not a
  * permission, and the rule the whole handoff contract is built on.
  */
-async function signIntoNode(opts: { silent?: boolean } = {}): Promise<boolean> {
+async function signIntoNode(opts: { silent?: boolean; idpHint?: string; intent?: "identity" } = {}): Promise<boolean> {
   const server = servingNode();
   logInfo(`identity: signing in against ${server}`
           + (opts.silent ? " (silently)" : ""));
@@ -9683,6 +9694,7 @@ async function signIntoNode(opts: { silent?: boolean } = {}): Promise<boolean> {
   }
   const pending: PendingNodeSignIn = {
     server, returnTo: window.location.href, silent: opts.silent || undefined,
+    intent: opts.intent,
   };
   try {
     sessionStorage.setItem(SIGNIN_KEY, JSON.stringify(pending));
@@ -9695,7 +9707,7 @@ async function signIntoNode(opts: { silent?: boolean } = {}): Promise<boolean> {
   // in Chrome on 5 September: the study vanished and re-opening it from the door
   // produced a fresh tab with no session. A ring.
   window.location.assign(await authorizeUrl(config, {
-    returnTo: window.location.href, silent: opts.silent,
+    returnTo: window.location.href, silent: opts.silent, idpHint: opts.idpHint,
   }));
   return true;
 }
@@ -9749,6 +9761,7 @@ async function completeNodeSignIn(): Promise<boolean> {
   // — with a session sitting right there that would have carried it.
   forgetSilentSignInAttempts();
   await askNodeWhoIAm(remembered.server);
+  if (remembered.intent === "identity") await witnessIdentityFromNode();
   return true;
 }
 
@@ -9963,7 +9976,8 @@ function identityChipClicked(): void {
   logInfo(`identity: chip clicked at rung «${identityRung()}»`);
   switch (identityRung()) {
     case "none":
-      openSettings("settings-sect-identity");
+      // IDENTITÀ · the panel: three ways to say who you are, in their order
+      openIdentityPanel();
       return;
     case "signature":
       // …unless the node has already answered with a different person: signing in
@@ -9976,7 +9990,9 @@ function identityChipClicked(): void {
         openSettings("settings-sect-identity");
         return;
       }
-      void signIntoNode();
+      // a declared signature: the panel, where it is verified (a node, ORCID)
+      // or re-declared
+      openIdentityPanel();
       return;
     case "identity":
       toast(t("ident.nextJoin"));
@@ -10133,7 +10149,7 @@ function requireVerifiedIdentity(): boolean {
   } else {
     toast(t("identity.gateNotVerified", { orcid: gate.orcid }));
   }
-  openSettings("settings-sect-identity");
+  openIdentityPanel();
   return false;
 }
 
@@ -10172,6 +10188,10 @@ function openSettings(section?: string): void {
   if (tm) tm.value = String(s.viewer.tilesMemoryMB);
   const iiifInput = document.getElementById("set-iiif-base") as HTMLInputElement | null;
   if (iiifInput) iiifInput.value = s.iiif.base;
+  const orcidClient = document.getElementById("set-orcid-client") as HTMLInputElement | null;
+  if (orcidClient) orcidClient.value = s.identity.orcidClientId;
+  const orcidBase = document.getElementById("set-orcid-base") as HTMLSelectElement | null;
+  if (orcidBase) orcidBase.value = s.identity.orcidBase;
   void refreshAiKeyState();
   refreshIdentityPanel();
   refreshSyncUrlPreview();
@@ -10433,6 +10453,11 @@ settingsModal.addEventListener("click", (e) => {
     return Number.isFinite(v) && v > 0 ? v : dflt;
   };
   const next: Settings = {
+    // IDENTITÀ · the PUBLIC client id of ORCID's own sign-in (not a secret)
+    identity: {
+      orcidClientId: (document.getElementById("set-orcid-client") as HTMLInputElement | null)?.value.trim() ?? "",
+      orcidBase: (document.getElementById("set-orcid-base") as HTMLSelectElement | null)?.value || "https://orcid.org",
+    },
     // TRADUZIONI · "" = the interface language
     texts: { displayLang: (document.getElementById("set-text-lang") as HTMLSelectElement | null)?.value ?? "" },
     sync: {
@@ -10481,7 +10506,7 @@ settingsModal.addEventListener("click", (e) => {
   const changed: string[] = [];
   if (was && getLocale() !== was.locale) changed.push(t("settings.w.language"));
   if (was && storedMode() !== was.theme) changed.push(t("settings.w.theme"));
-  for (const k of ["texts", "sync", "interaction", "viewer", "iiif", "ai", "developer"] as const)
+  for (const k of ["identity", "texts", "sync", "interaction", "viewer", "iiif", "ai", "developer"] as const)
     if (JSON.stringify(before[k]) !== JSON.stringify(next[k])) changed.push(t(`settings.w.${k}`));
   saveSettings(next);
   settingsOpenedWith = null;          // saved: nothing to put back
@@ -13341,12 +13366,229 @@ function identityRef(): { orcid: string; label: string } | null {
 /** The action waiting for an identity, run once one exists. */
 let identityThen: (() => void) | null = null;
 
-/** Open where an identity is declared (or verified), keeping what asked for it:
- *  `then` runs once an identity exists. */
+// ── IDENTITÀ · the panel at the bottom: three ways, in this order ───────────
+//
+//   1. «Sign in to StratiGraph with ORCID» — when a StratiGraph node answers
+//      (`/v1/health`, also on a local network with no internet): the node's
+//      Keycloak (PKCE, `kc_idp_hint=orcid`), and `/v1/whoami` says the iD. The
+//      identity becomes VERIFIED with the node as its witness.
+//   2. «Sign in with ORCID» — internet and no node: ORCID's own sign-in
+//      (`orcid-signin.ts`, an id_token whose signature is checked against
+//      ORCID's keys); the iD is read, nobody has to remember it.
+//   3. «Declare your ORCID iD» — no network: typed, with the check digit. It
+//      stays DECLARED until it is verified.
+//
+// It replaces the round through Settings ▸ Identity, which stays for managing
+// the identities of this machine. No token is kept by any of the three beyond
+// what `oidc.ts` already holds in memory for the node's session.
+
+/** Is a StratiGraph node there to sign in through, and why not when it is not. */
+async function probeStratiGraphNode(): Promise<{ ok: boolean; server: string; why?: string }> {
+  const server = servingNode();
+  const ctl = new AbortController();
+  const timer = setTimeout(() => ctl.abort(), 3500);
+  try {
+    const r = await fetch(`${server}/v1/health`, { signal: ctl.signal, cache: "no-store" });
+    const j = r.ok ? await r.json().catch(() => null) as { service?: string; auth?: string } | null : null;
+    if (!j || j.service !== "stratigraph-server") return { ok: false, server, why: t("idp.noNode", { server }) };
+    if (j.auth !== "keycloak") return { ok: false, server, why: t("ident.nodeOpen", { server }) };
+    return { ok: true, server };
+  } catch {
+    return { ok: false, server, why: t("idp.noNode", { server }) };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/** ORCID's own sign-in needs a client registered at ORCID (public id): none
+ *  configured → the way is shown, disabled, with the reason. */
+function orcidConfig(): orcidIn.OrcidConfig | null {
+  const s = getSettings().identity;
+  return s.orcidClientId.trim() ? { clientId: s.orcidClientId.trim(), base: s.orcidBase || "https://orcid.org" } : null;
+}
+
+function closeIdentityPanel(): void {
+  document.querySelector(".idpanel")?.remove();
+  document.getElementById("footer-identity")?.setAttribute("aria-expanded", "false");
+}
+
+/** Open the identity panel, keeping what asked for it: `then` runs once an
+ *  identity exists (declared or verified). */
 function openIdentityPanel(then?: () => void): void {
-  identityThen = then ?? null;
-  toast(t("tr.needIdentity"));
-  openSettings("settings-sect-identity");
+  if (then) identityThen = then;
+  closeIdentityPanel();
+  const chip = document.getElementById("footer-identity");
+  chip?.setAttribute("aria-expanded", "true");
+  const box = document.createElement("div");
+  box.className = "idpanel";
+  box.setAttribute("role", "dialog");
+  box.setAttribute("aria-label", t("idp.title"));
+  const el = <K extends keyof HTMLElementTagNameMap>(tag: K, cls?: string, text?: string): HTMLElementTagNameMap[K] => {
+    const e = document.createElement(tag);
+    if (cls) e.className = cls;
+    if (text !== undefined) e.textContent = text;
+    return e;
+  };
+  const me = currentIdentity();
+  box.appendChild(el("h4", undefined, t("idp.title")));
+  const who = me ? `${[me.name, me.surname].filter(Boolean).join(" ") || me.orcid}` : "";
+  const state = el("div", "idp-state", !me ? t("idp.stateNone")
+    : me.verified ? t("idp.stateVerified", { who, orcid: me.orcid, by: me.verifiedBy ?? "ORCID" })
+    : t("idp.stateDeclared", { who, orcid: me.orcid }));
+  state.dataset.idpState = !me ? "none" : me.verified ? "verified" : "declared";
+  box.appendChild(state);
+
+  const way = (key: string, title: string, desc: string): { row: HTMLElement; desc: HTMLElement } => {
+    const row = el("div", "idp-way");
+    row.dataset.idpWay = key;
+    row.appendChild(el("b", undefined, title));
+    const d = el("span", "idp-d", desc);
+    row.appendChild(d);
+    box.appendChild(row);
+    return { row, desc: d };
+  };
+
+  // 1 · through a StratiGraph node
+  const w1 = way("stratigraph", t("idp.way1"), t("idp.probing"));
+  const b1 = el("button", "primary", t("idp.way1Btn"));
+  b1.type = "button";
+  b1.disabled = true;
+  b1.addEventListener("click", () => { closeIdentityPanel(); void signIntoNode({ idpHint: "orcid", intent: "identity" }); });
+  w1.row.appendChild(b1);
+  void probeStratiGraphNode().then((pr) => {
+    if (!box.isConnected) return;
+    w1.desc.textContent = pr.ok ? t("idp.way1Desc", { node: new URL(pr.server).host }) : (pr.why ?? "");
+    b1.disabled = !pr.ok;
+    w1.row.classList.toggle("off", !pr.ok);
+    w1.row.dataset.idpReady = String(pr.ok);
+  });
+
+  // 2 · ORCID itself
+  const cfg = orcidConfig();
+  const w2 = way("orcid", t("idp.way2"), cfg ? t("idp.probing") : t("idp.noClient"));
+  const b2 = el("button", "ghost", t("idp.way2Btn"));
+  b2.type = "button";
+  b2.disabled = true;
+  b2.addEventListener("click", () => { if (cfg) window.location.assign(orcidIn.orcidAuthorizeUrl(cfg)); });
+  w2.row.appendChild(b2);
+  if (!cfg) { w2.row.classList.add("off"); w2.row.dataset.idpReady = "false"; }
+  else void orcidIn.orcidReachable(cfg.base).then((up) => {
+    if (!box.isConnected) return;
+    w2.desc.textContent = up ? t("idp.way2Desc", { base: new URL(cfg.base).host }) : t("idp.offline");
+    b2.disabled = !up;
+    w2.row.classList.toggle("off", !up);
+    w2.row.dataset.idpReady = String(up);
+  });
+
+  // 3 · declared, offline
+  const w3 = way("declare", t("idp.way3"), t("idp.way3Desc"));
+  w3.row.dataset.idpReady = "true";
+  const line = el("div", "idp-line");
+  const inp = el("input");
+  inp.dataset.idpOrcid = "1";
+  inp.placeholder = "0000-0000-0000-000X";
+  inp.autocomplete = "off";
+  inp.spellcheck = false;
+  inp.setAttribute("aria-label", "ORCID iD");
+  if (me && !me.verified) inp.value = me.orcid;
+  const nameIn = el("input");
+  nameIn.dataset.idpName = "1";
+  nameIn.placeholder = t("idp.namePh");
+  nameIn.setAttribute("aria-label", t("idp.namePh"));
+  if (me?.name || me?.surname) nameIn.value = [me.name, me.surname].filter(Boolean).join(" ");
+  const b3 = el("button", "ghost", t("idp.way3Btn"));
+  b3.type = "button";
+  b3.dataset.idpDeclare = "1";
+  const err = el("div", "idp-err");
+  const declare = (): void => {
+    const full = nameIn.value.trim();
+    const sp = full.lastIndexOf(" ");
+    const res = declareIdentity(inp.value, sp > 0 ? { name: full.slice(0, sp), surname: full.slice(sp + 1) } : { name: full });
+    if (!res.ok) { err.textContent = t(`identity.problem.${res.problem}`); inp.focus(); return; }
+    applyIdentityToDocument();
+    refreshIdentityPanel();
+    refreshIdentityChip();
+    toast(t("identity.declared", { orcid: res.identity.orcid }));
+    closeIdentityPanel();
+    resumeIdentityThen();
+  };
+  b3.addEventListener("click", declare);
+  inp.addEventListener("keydown", (e) => { if (e.key === "Enter") declare(); });
+  line.append(inp, nameIn, b3);
+  w3.row.append(line, err);
+
+  const foot = el("div", "idp-foot");
+  const manage = el("button", "link", t("idp.manage"));
+  manage.type = "button";
+  manage.addEventListener("click", () => { closeIdentityPanel(); openSettings("settings-sect-identity"); });
+  const cl = el("button", "link", t("tr.close"));
+  cl.type = "button";
+  cl.dataset.idpClose = "1";
+  cl.addEventListener("click", closeIdentityPanel);
+  foot.append(manage, cl);
+  box.appendChild(foot);
+  document.body.appendChild(box);
+  const onKey = (e: KeyboardEvent): void => {
+    if (e.key !== "Escape" || !box.isConnected) { if (!box.isConnected) document.removeEventListener("keydown", onKey, true); return; }
+    e.stopPropagation();
+    closeIdentityPanel();
+    document.removeEventListener("keydown", onKey, true);
+  };
+  document.addEventListener("keydown", onKey, true);
+  inp.focus();
+}
+
+/** A node confirmed who signed in: the identity is VERIFIED with the node as
+ *  its witness — adopted when none was declared (the iD is read, not typed),
+ *  confirmed when it is the declared one, and never replaced silently when it
+ *  is another person (the chip already says so; the panel lets them choose). */
+async function witnessIdentityFromNode(): Promise<void> {
+  if (!nodeIdentity?.orcid) return;
+  const node = nodeIdentity.node;
+  const me = currentIdentity();
+  if (!me) {
+    adoptVerifiedIdentity(nodeIdentity.orcid, nodeIdentity.name ?? undefined, node);
+    applyIdentityToDocument();
+    toast(t("idp.verifiedBy", { orcid: nodeIdentity.orcid, by: node }));
+  } else if (sameSignature(me.orcid, nodeIdentity.orcid)) {
+    await verifyCurrentIdentity(new WitnessedClaim({ orcid: nodeIdentity.orcid, name: nodeIdentity.name ?? undefined, witness: node }));
+    toast(t("idp.verifiedBy", { orcid: me.orcid, by: node }));
+  } else {
+    toast(t("ident.otherPersonNext", { them: nodeIdentity.name || nodeIdentity.orcid }));
+    return;
+  }
+  refreshIdentityPanel();
+  refreshIdentityChip();
+  resumeIdentityThen();
+}
+
+/** Back from ORCID: verify the id_token, and adopt or confirm the iD. */
+async function completeOrcidReturn(): Promise<void> {
+  const r = await orcidIn.completeOrcidSignIn();
+  try {
+    const back = new URL(r.returnTo ?? window.location.href, window.location.href);
+    back.hash = "";
+    window.history.replaceState({}, "", back.toString());
+  } catch { window.history.replaceState({}, "", window.location.pathname + window.location.search); }
+  if (!r.ok) {
+    logWarn(`identity: ORCID sign-in failed — ${r.error}`);
+    toast(t("idp.orcidFailed", { why: r.error }));
+    return;
+  }
+  const by = new URL(r.base).host;
+  const me = currentIdentity();
+  if (!me) adoptVerifiedIdentity(r.orcid, r.name, by);
+  else if (sameSignature(me.orcid, r.orcid)) await verifyCurrentIdentity(new WitnessedClaim({ orcid: r.orcid, name: r.name, witness: by }));
+  else {
+    // two people: say both, change nothing
+    toast(t("idp.orcidOther", { declared: me.orcid, verified: r.orcid }));
+    logWarn(`identity: ORCID signed in ${r.orcid}, the declared iD is ${me.orcid} — nothing changed`);
+    return;
+  }
+  logInfo(`identity: ${r.orcid} verified by ${by}`);
+  toast(t("idp.verifiedBy", { orcid: r.orcid, by }));
+  applyIdentityToDocument();
+  refreshIdentityChip();
 }
 
 /** …and run it when the identity arrives. */
@@ -13359,7 +13601,7 @@ function resumeIdentityThen(): void {
 function requireIdentity(): boolean {
   if (currentIdentity()) return true;
   toast(t("ninsp.needIdentity"));
-  openSettings("settings-sect-identity");
+  openIdentityPanel();
   return false;
 }
 

@@ -8684,3 +8684,29 @@ input.storage-path:focus { border-color: var(--accent); background: var(--bg-pan
 .tv-tabs button { border: 0; background: transparent; color: var(--text-muted); padding: 3px 12px; font: .78rem var(--font-sans); cursor: pointer; }
 .tv-tabs button[aria-pressed="true"] { background: var(--accent); color: var(--on-accent); }
 .tv-verified a[data-orcid] { color: var(--ok); }
+
+/* ── IDENTITÀ · the panel at the bottom (NIGHT 30 ott) ─────────────────────── */
+.idpanel { position: fixed; left: 12px; bottom: 40px; z-index: 8000; box-sizing: border-box;
+  width: min(420px, calc(100vw - 24px)); max-height: calc(100vh - 80px); overflow: auto;
+  background: var(--bg-elevated); color: var(--text); border: 1px solid var(--border); border-radius: 12px;
+  box-shadow: 0 18px 44px rgba(0, 0, 0, .3); padding: 14px 16px 10px; font-size: .84rem; }
+.idpanel h4 { margin: 0 0 4px; font-size: 1rem; font-weight: 600; }
+.idp-state { color: var(--text-muted); margin-bottom: 10px; line-height: 1.4; }
+.idp-state[data-idp-state="verified"] { color: var(--ok); }
+.idp-way { display: grid; gap: 4px; padding: 9px 10px; border: 1px solid var(--border); border-radius: var(--radius);
+  margin-bottom: 8px; background: var(--bg-panel); }
+.idp-way.off { opacity: .62; }
+.idp-way > button { justify-self: start; }
+.idp-d { color: var(--text-faint); line-height: 1.4; }
+.idp-line { display: flex; gap: 6px; flex-wrap: wrap; }
+.idp-line input { flex: 1 1 9rem; min-width: 0; font: .84rem var(--font-mono); padding: 3px 6px; }
+.idp-line input[data-idp-name] { font-family: var(--font-sans); }
+.idp-err { color: var(--danger); font-size: .78rem; min-height: 1em; }
+.idp-foot { display: flex; justify-content: space-between; margin-top: 4px; }
+.idpanel button, .ff-card button { font: 500 .8rem var(--font-sans); border-radius: var(--radius-sm); padding: 4px 12px; cursor: pointer;
+  border: 1px solid var(--border-strong); background: var(--bg-panel); color: var(--text); }
+.idpanel button.primary, .ff-card button.primary { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+.idpanel button.link, .ff-card button.link { border: 0; background: transparent; padding: 2px 0; color: var(--accent); text-decoration: underline; }
+.idpanel button:disabled, .ff-card button:disabled { opacity: .5; cursor: default; }
+.ff-card .seg button { border: 0; border-radius: 0; }
+.ff-card .seg button[aria-pressed="true"] { background: var(--accent); color: var(--on-accent); }

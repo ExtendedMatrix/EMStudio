@@ -649,6 +649,23 @@
             </p>
             <p class="settings-hint" id="set-orcid-state"></p>
             <div id="set-orcid-known"></div>
+            <!-- IDENTITÀ · «Sign in with ORCID» needs a client registered at
+                 ORCID. Its id is public; there is no secret anywhere. -->
+            <h4 data-i18n="idp.clientTitle">Sign in with ORCID</h4>
+            <p class="settings-hint" data-i18n="idp.clientHint">
+              ORCID's own sign-in needs a client registered at ORCID, with this page as its redirect.
+            </p>
+            <label
+              ><span data-i18n="idp.clientId">ORCID client id (public)</span>
+              <input id="set-orcid-client" type="text" autocomplete="off" spellcheck="false" placeholder="APP-XXXXXXXXXXXXXXXX" />
+            </label>
+            <label
+              ><span data-i18n="idp.clientBase">ORCID</span>
+              <select id="set-orcid-base">
+                <option value="https://orcid.org">orcid.org</option>
+                <option value="https://sandbox.orcid.org">sandbox.orcid.org</option>
+              </select>
+            </label>
           </section>
           <section data-settings-tab="viewers" class="settings-sect">
             <h4 data-i18n="settings.viewer">3D viewer</h4>
