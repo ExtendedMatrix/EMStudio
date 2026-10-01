@@ -158,13 +158,20 @@ export function isAnotherCopy(existing: EmNode | null | undefined, locator: stri
  *  — the absolute path ends with it on a segment boundary: the same file seen
  *  from the disk is not «another copy». */
 export function sameLocator(known: string, locator: string): boolean {
-  const a = (known ?? "").trim().replace(/\\/g, "/");
-  const b = (locator ?? "").trim().replace(/\\/g, "/");
+  const a = systemAlias((known ?? "").trim().replace(/\\/g, "/"));
+  const b = systemAlias((locator ?? "").trim().replace(/\\/g, "/"));
   if (!a || !b) return false;
   if (a === b) return true;
   if (addressKind(a) !== "disk" || a.startsWith("/") || /^[A-Za-z]:\//.test(a)) return false;
   const rel = a.replace(/^\.\//, "");
   return b.endsWith("/" + rel);
+}
+
+/** macOS links /tmp, /var and /etc to /private/…, and the bridge lists the
+ *  REAL path (measured: `/fs/list?path=/tmp/dev28` answers `/private/tmp/dev28`)
+ *  while a resource keeps the path it was given: the two spell one place. */
+function systemAlias(path: string): string {
+  return path.replace(/^\/private\/(tmp|var|etc)(?=\/|$)/, "/$1");
 }
 
 /** dev28 · the Storage OUTSIDE a room (E.D., decision 14): which resources of

@@ -18664,8 +18664,13 @@ function openDraft(outputs: FsEntry[], listing: FsListing): void {
     ? t("stamp2.whyDerived", { n: String(stamped) })
     : t("stamp2.whyOrigin");
   // dev28 · a LOD or a .3tz proposes its kind, with the reason beside it
+  // (kept for the «comes from» road: a LOD with no stamped parent beside it
+  // opens on the origin road, and the proposal lands when it is switched)
   const proposed = suggestedKind(outputs.map((o) => o.path), dtcKindsFor("process").map((k) => k.kind));
-  if (proposed && !stampDraft.origin) { stampDraft.kind = proposed.kind; stampDraft.kindWhy = proposed; }
+  if (proposed) {
+    stampDraft.kindWhy = proposed;
+    if (!stampDraft.origin) stampDraft.kind = proposed.kind;
+  }
   // L'OPERATORE È CHI STA LAVORANDO, e non un default inventato:
   // `currentIdentity()` è l'identità che questa sessione ha dichiarato
   // (`identity.ts`, claim-now/verify-later). Resta modificabile, e assente resta
@@ -18793,7 +18798,8 @@ function stampComposeBox(win: Win, listing: FsListing): HTMLElement {
       if (draft.origin === isOrigin) return;
       draft.origin = isOrigin;
       draft.originDeclared = isOrigin;
-      draft.kind = "";
+      // dev28 · «comes from»: the kind proposed for these files, with its reason
+      draft.kind = !isOrigin && draft.kindWhy ? draft.kindWhy.kind : "";
       draft.why = "";
       renderStorage();
       redrawDraftPicture();
@@ -19022,6 +19028,7 @@ function stampComposeBox(win: Win, listing: FsListing): HTMLElement {
   cancel.type = "button";
   cancel.className = "ghost";
   cancel.textContent = t("compose.cancel");
+  cancel.dataset.action = "compose-cancel";
   cancel.onclick = closeDraft;
   const note = document.createElement("span");
   note.className = "stamp-compose-note";

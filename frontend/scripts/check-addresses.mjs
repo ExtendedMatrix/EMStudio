@@ -82,7 +82,9 @@ const doc = () => ({ graph: { graph_id: "g", name: "g", data: {}, nodes: [
       M.isAnotherCopy(st.node("scan"), "/Users/x/studio/oldscans/vitruvio.pdf"),
       M.sameLocator("scans/vitruvio.pdf", "/a/scans/vitruvio.pdf"),
       M.sameLocator("scans/vitruvio.pdf", "/a/myscans/vitruvio.pdf"),
-      M.sameLocator("/abs/x.pdf", "/other/abs/x.pdf")], [false, true, true, false, false],
+      M.sameLocator("/abs/x.pdf", "/other/abs/x.pdf"),
+      M.sameLocator("/tmp/dev28/a.obj", "/private/tmp/dev28/a.obj"),
+      M.sameLocator("/tmp/dev28/a.obj", "/private/tmpx/dev28/a.obj")], [false, true, true, false, false, true, false],
      "a relative address names the file at the end of an absolute path, on a segment boundary only");
 }
 
