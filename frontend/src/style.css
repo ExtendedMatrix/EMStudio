@@ -8557,3 +8557,44 @@ button.shelf-badge { cursor: pointer; font: inherit; font-size: 10.5px; }
    preview, said in the Scene's bar and closable */
 .scn-preview { display: inline-flex; align-items: center; gap: 6px; margin-left: 8px; padding: 1px 4px 1px 8px;
   border: 1px dashed var(--border-strong); border-radius: var(--radius-sm); font-size: 12px; color: var(--text); }
+
+/* CAMPAGNA · IL SIGILLO (scrivania v18). The wax is the language of the seal,
+   the same red in both themes; the card around it takes the theme. */
+.seal-veil { position: fixed; inset: 0; z-index: 9000; display: grid; place-items: center;
+  background: color-mix(in srgb, #000 38%, transparent); animation: seal-in .25s ease; }
+@keyframes seal-in { from { opacity: 0 } to { opacity: 1 } }
+.seal-card { box-sizing: border-box; width: min(540px, calc(100vw - 32px)); max-height: calc(100vh - 48px); overflow: auto;
+  background: var(--bg-elevated); color: var(--text); border: 1px solid var(--border); border-radius: 14px;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, .35); padding: 26px 26px 18px; text-align: left; outline: none; }
+.seal-paper { display: grid; grid-template-columns: 132px 1fr; gap: 20px; align-items: center; }
+.seal-svg { filter: drop-shadow(0 6px 8px rgba(80, 10, 5, .35)); }
+.seal-press { animation: seal-press .55s cubic-bezier(.2, 1.4, .4, 1) both; }
+@keyframes seal-press { 0% { transform: scale(1.6) rotate(-14deg); opacity: 0 } 55% { transform: scale(.94) rotate(2deg); opacity: 1 } 100% { transform: scale(1) rotate(0) } }
+@media (prefers-reduced-motion: reduce) { .seal-veil, .seal-press { animation: none; } }
+.seal-card h3 { font-size: 1.15rem; font-weight: 600; margin: 0 0 4px; }
+.seal-what { color: var(--text-faint); font-size: .86rem; line-height: 1.45; }
+.seal-who { margin-top: 10px; font-size: .84rem; }
+.seal-who b { font-weight: 600; }
+.seal-note { margin-top: 8px; color: var(--text-faint); font-size: .8rem; }
+.seal-tech { margin-top: 18px; border-top: 1px solid var(--border); padding-top: 10px; }
+.seal-tech summary { cursor: pointer; list-style: none; display: flex; align-items: center; gap: 8px; font-size: .8rem;
+  color: var(--text-faint); user-select: none; }
+.seal-tech summary::-webkit-details-marker { display: none; }
+.seal-tech .tri { display: inline-block; width: 0; height: 0; border-left: 6px solid currentColor;
+  border-top: 4.5px solid transparent; border-bottom: 4.5px solid transparent; transition: transform .18s; }
+.seal-tech[open] .tri { transform: rotate(90deg); }
+@media (prefers-reduced-motion: reduce) { .seal-tech .tri { transition: none; } }
+.seal-tech .tech { min-width: 0; word-break: break-all; margin-top: 10px; font: 400 .74rem var(--font-mono); display: grid; gap: 8px; }
+.seal-tech .k { color: var(--text-faint); }
+.seal-tech pre { box-sizing: border-box; max-width: 100%; margin: 0; white-space: pre-wrap; word-break: break-all;
+  background: var(--bg-panel); border: 1px solid var(--border); border-radius: 8px; padding: 8px; max-height: 220px; overflow: auto; }
+.seal-acts { display: flex; gap: 8px; justify-content: flex-end; margin-top: 16px; }
+.seal-mini { display: inline-flex; align-items: center; justify-content: center; width: 17px; height: 17px; padding: 0;
+  margin-right: 4px; border: 0; background: none; cursor: pointer; vertical-align: -3px; flex: 0 0 auto; }
+span.seal-mini { cursor: default; }
+@media (max-width: 480px) { .seal-paper { grid-template-columns: 1fr; justify-items: center; } }
+.seal-acts button { padding: 6px 14px; border-radius: var(--radius); border: 1px solid var(--border);
+  background: var(--bg-panel); color: var(--text); cursor: pointer; font-size: 13px; }
+.seal-acts button.primary { background: var(--accent); color: var(--on-accent); border-color: var(--accent); font-weight: 600; }
+.seal-acts button:hover { filter: brightness(0.97); }
+.seal-acts button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }

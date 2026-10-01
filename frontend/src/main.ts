@@ -520,6 +520,7 @@ import {
   type Draft, type DraftInput,
 } from "./stamp-compose";
 import { setTreeBridgeResolver, TREE_EXT, treeOf, verifyStamp, type TreeInfo } from "./stamp-tree";
+import { openSealCard, sealMini, type SealStamp } from "./seal";
 import {
   DECLARED_KINDS, landStep, parentLabel, type DeclaredKind, type DeclaredLevel,
 } from "./declared";
@@ -16674,6 +16675,10 @@ function receiptLine(entry: ShelfEntry, rec: NonNullable<ReturnType<typeof recei
   const bits = [`${t("receipt.label")} · ${rec.id}`, rec.checksum ? `⌗ ${rec.checksum.slice(7, 15)}` : "",
     t("receipt.version", { v: String(rec.stamp) }),
     rec.parents.length ? t("receipt.parents", { n: String(rec.parents.length), first: rec.parents[0].resource_id }) : t("receipt.origin")];
+  // CAMPAGNA · the little seal in place of the word: it opens the card (the
+  // sidecar beside the file, when it is reachable)
+  if (rec.checksum) line.appendChild(sealMini(rec.checksum, /^\//.test(entry.locator)
+    ? () => { void showSealOf(entry.locator); } : undefined));
   line.appendChild(document.createTextNode(bits.filter(Boolean).join(" · ")));
   if (rec.title || rec.description) {
     const w = document.createElement("div");
@@ -17632,10 +17637,11 @@ function documentCard(): HTMLElement | null {
     n.textContent = String(fd.filename ?? fd.locator ?? f.name ?? f.id).split("/").pop() ?? f.id;
     fl.appendChild(n);
     if (fd.checksum || fd.sha256) {
-      const ok = document.createElement("span");
-      ok.className = "dcard-tag ok";
-      ok.textContent = t("dcard.stamped");
-      fl.appendChild(ok);
+      // CAMPAGNA · the little seal takes the place of the word «stamped»
+      const loc = String(fd.url ?? fd.locator ?? "");
+      const mini = sealMini(String(fd.checksum ?? fd.sha256), /^\//.test(loc) ? () => { void showSealOf(loc); } : undefined);
+      mini.title = `${t("dcard.stamped")} · ${mini.title}`;
+      fl.appendChild(mini);
     }
   }
   const rd = document.createElement("div");
@@ -18287,6 +18293,10 @@ async function doStamp(win: Win): Promise<void> {
         renderShelf();
       }
       stampDraft = null;
+      // CAMPAGNA · the stamp closes with its SEAL: the card says, in words,
+      // what was stamped; the code is under «Dettagli tecnici»
+      const written = out.stamps.filter((st) => out.written.includes(st.stamp_path));
+      if (written.length) showSeal(written[0].stamp, written[0].stamp_path, written.slice(1).map((x) => x.stamp));
       // …e si rilegge il disco: adesso quel file HA un timbro, e la vista deve
       // mostrare il verbale invece della bozza.
       void askStamps(storageSelected(win));
@@ -18806,7 +18816,8 @@ function stampedBox(path: string, stamp: Stamp): HTMLElement {
   box.className = "stamp-emitted";
   const head = document.createElement("div");
   head.className = "stamp-emitted-head";
-  head.textContent = t("compose.emittedHead", { name: baseName(path) });
+  head.append(sealMini(stamp.self?.digest, () => showSeal(stamp, stampPathFor(path))),
+              document.createTextNode(t("compose.emittedHead", { name: baseName(path) })));
   box.appendChild(head);
 
   box.appendChild(stampWordsBox(path, stamp));
@@ -18980,6 +18991,30 @@ async function saveStampWords(path: string, title: string, description: string):
   void askStamps(path);
   renderShelf();
   renderStorage();
+}
+
+/** CAMPAGNA · the label of a DTC kind, from the datamodel (process or capture). */
+function dtcKindLabel(kind: string): string {
+  for (const axis of ["process", "acquisition"] as const)
+    for (const k of dtcKindsFor(axis)) if (k.kind === kind) return k.label;
+  return kind.replace(/_/g, " ");
+}
+
+/** CAMPAGNA · the seal's card for a stamp, opened from a stamp in hand. */
+function showSeal(stamp: unknown, stampPath?: string, others: unknown[] = []): void {
+  openSealCard(stamp as SealStamp, {
+    stampPath, others: others as SealStamp[], kindLabel: dtcKindLabel,
+    onCopied: (ok) => toast(t(ok ? "seal.copied" : "seal.copyFailed")),
+  });
+}
+
+/** …and from a path: its sidecar is read (the truth is beside the file). */
+async function showSealOf(path: string): Promise<void> {
+  const sp = isStampPath(path) ? path : stampPathFor(path.replace(/\/+$/, ""));
+  let st: Stamp | null = null;
+  try { st = await readStamp(sp); } catch { st = null; }
+  if (!st) { toast(t("seal.unreadable", { name: baseName(path) })); return; }
+  showSeal(st, sp);
 }
 
 /** «Componi un passo DA questo»: l'artefatto timbrato diventa l'ingresso di una
@@ -20774,6 +20809,13 @@ function storageRow(win: Win, entry: FsEntry, cover?: FolderCover): HTMLElement 
     ? ""
     : `${formatBytes(entry.size)} · ${new Date(entry.mtime * 1000).toLocaleDateString()}`;
   row.append(icon, name, meta);
+  // CAMPAGNA · a stamped file (or folder) carries the little seal, which opens
+  // the card; the sidecar row stays the plain file it is
+  const own = cover?.selves.get(stampPathFor(entry.path));
+  if (own && !isStampPath(entry.path)) {
+    name.prepend(sealMini(typeof own.digest === "string" ? own.digest : "", () => { void showSealOf(entry.path); }));
+    row.dataset.stamped = "1";
+  }
   // CAMPAGNA · a member of a file set is IN a stamp, not unstamped: said here
   const door = cover?.memberOf.get(entry.path);
   if (door && door !== entry.path) {

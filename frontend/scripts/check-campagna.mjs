@@ -45,6 +45,7 @@ const bundle = await esbuild.build({
       export * as naming from "./naming";
       export { DocumentStore } from "./model";
       export { CALLS_OTHERS } from "./storage";
+      export * as seal from "./seal";
     `,
     resolveDir: SRC, loader: "ts",
   },
@@ -59,7 +60,7 @@ const bundle = await esbuild.build({
   }],
 });
 const M = await import("data:text/javascript;base64," + Buffer.from(bundle.outputFiles[0].text).toString("base64"));
-const { receipts, compose, tree, tropy, naming, DocumentStore, CALLS_OTHERS } = M;
+const { receipts, compose, tree, tropy, naming, DocumentStore, CALLS_OTHERS, seal } = M;
 
 // ── 1 · the receipt of a file set, judged by its members ───────────────────
 {
@@ -120,6 +121,32 @@ const { receipts, compose, tree, tropy, naming, DocumentStore, CALLS_OTHERS } = 
     ok(CALLS_OTHERS.test(f), `5 · ${f} calls other files: /fs/at/<path>`);
   for (const f of ["a.jpg", "b.pdf", "c.glb", "d.3tz", "tileset.json.bak"])
     ok(!CALLS_OTHERS.test(f), `5 · ${f} does not: /fs/file?path= stays`);
+}
+
+// ── 3 · the seal ─────────────────────────────────────────────────────────────
+{
+  const d1 = "sha256:57a693d553e8c28fcafd59fa17b1c88c6419efe73890a657d6f244366b688d91";
+  const d2 = "sha256:8aa6fbd3e5847e9f8c2e219fb4305d9a3ad52e41135120e79bb8c3d18b67caed";
+  eq(seal.hexOf(d1).slice(0, 6), "57a693", "3 · the seal says the first six hex of the digest");
+  eq(seal.sealEdge(seal.hexOf(d1)), seal.sealEdge(seal.hexOf(d1)), "3 · the edge is deterministic: same digest, same wax");
+  ok(seal.sealEdge(seal.hexOf(d1)) !== seal.sealEdge(seal.hexOf(d2)), "3 · …and another digest runs another way");
+  ok(/^M[\d.,L]+Z$/.test(seal.sealEdge(seal.hexOf(d1))), "3 · the edge is a closed path of 28 points");
+  eq(seal.canonicalMembers([{ role: "member", path: "textures/T.jpg", digest: "sha256:c" },
+                            { role: "entry_point", path: "OB.obj", digest: "sha256:a" },
+                            { role: "member", path: "OB.mtl", digest: "sha256:b" }]),
+     "member ␀ OB.mtl ␀ sha256:b\nentry_point ␀ OB.obj ␀ sha256:a\nmember ␀ textures/T.jpg ␀ sha256:c",
+     "3 · the canonical list in path order (role ␀ path ␀ digest)");
+  eq(seal.canonicalMembers([{ path: "é.jpg", digest: "x" }, { path: "z.jpg", digest: "y" }, { path: "B.jpg", digest: "w" }])
+       .split("\n").map((l) => l.split(" ␀ ")[1]),
+     ["B.jpg", "z.jpg", "é.jpg"], "3 · …ordered by the UTF-8 BYTES of the path, as dtcstamp does");
+  const w = seal.sealWords({ self: { digest: d1, packaging: "file_set", label: "OB_PODIO_LOD1.obj", members: [
+    { role: "member", path: "OB_PODIO_LOD1.mtl" }, { role: "entry_point", path: "OB_PODIO_LOD1.obj" },
+    { role: "member", path: "textures/T_OB_PODIO_LOD1.jpg" }] },
+    from: [{ resource_id: "declared:x", label: "OB_PODIO" }], how: { dtc_kind: "format_conversion", software: [{ name: "Blender 5.2" }] },
+    by: { at: "2026-10-01", operator: { label: "Emanuel Demetrescu", id: "https://orcid.org/0000-0002-5065-7970" } } });
+  ok(/3/.test(w.what) && /OB_PODIO_LOD1\.obj/.test(w.what) && /T_OB_PODIO_LOD1\.jpg/.test(w.what), "3 · in words: one resource, 3 files, its door and what it calls");
+  eq([w.who, w.when, w.withWhat], ["Emanuel Demetrescu · 0000-0002-5065-7970", "2026-10-01", "Blender 5.2"], "3 · who, when, with what");
+  ok(/OB_PODIO/.test(w.from), "3 · where it comes from");
 }
 
 // ── the bridge of this check ────────────────────────────────────────────────
