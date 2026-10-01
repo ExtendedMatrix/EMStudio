@@ -369,6 +369,7 @@ import {
   hitGroupToggle,
   hitHandle,
   hitTest,
+  firstViewBounds,
   sceneBounds,
   Viewport,
   visibleBoxOf,
@@ -1809,12 +1810,14 @@ function paintGraphWindow(p: GraphPaint): void {
   // a speck in the corner: technically live, in practice an empty area.
   const key = viewportKey(p.winId, p.mode);
   const size = `${Math.round(w)}x${Math.round(h)}`;
+  // CAMPAGNA · a Matrix opens on its first epoch with nodes, not on the whole
+  // graph (`firstViewBounds`); «0» and ⤢ still frame everything
   if (!framedViews.has(key)) {
     framedViews.add(key);
-    vp.fit(sceneBounds(s), w, h);
+    vp.fit(p.mode === "matrix" ? firstViewBounds(s) : sceneBounds(s), w, h);
     framedSizes.set(key, size);
   } else if (framedSizes.get(key) !== size && !touchedViews.has(key)) {
-    vp.fit(sceneBounds(s), w, h);
+    vp.fit(p.mode === "matrix" ? firstViewBounds(s) : sceneBounds(s), w, h);
     framedSizes.set(key, size);
   }
   const selectedEdgeIdx = selectedEdge
@@ -2014,6 +2017,15 @@ function fit(): void {
   if (!s) return;
   const { w, h } = viewSize();
   viewport().fit(sceneBounds(s), w, h);
+  draw();
+}
+
+/** The frame a document OPENS on: the first epoch with nodes in the Matrix. */
+function fitFirstView(): void {
+  const s = scene();
+  if (!s) return;
+  const { w, h } = viewSize();
+  viewport().fit(view === "matrix" ? firstViewBounds(s) : sceneBounds(s), w, h);
   draw();
 }
 
@@ -4284,6 +4296,7 @@ function loadDocument(
     return;
   }
   currentFilePath = path; // desktop: enables in-place Save; null in browser
+  void storageFollowDocument(path);
   // QOL1 · remember this open (path for desktop reopen, name otherwise).
   addRecent({ path, name: path ? baseName(path) : sourceName }, Date.now());
   // Does the INCOMING doc already carry node positions? Capture this BEFORE
@@ -4362,7 +4375,7 @@ function loadDocument(
       .then(() => {
         resetWindowCameras(); // frame the FINISHED layout, not the empty scene
         setViewOnLoad("matrix");
-        fit();
+        fitFirstView();
       })
       .catch((e) => {
         const msg = e instanceof Error ? e.message : String(e);
@@ -4436,7 +4449,15 @@ function confirmLeaveSidecar(action: string): Promise<boolean> {
   });
 }
 
+/** CAMPAGNA · «File ▸ Apri…» with a GraphML: the import, not a JSON error. By
+ *  the name or, failing that, by the first character (a GraphML is XML). */
+const isGraphmlFile = (name: string, text: string): boolean =>
+  /\.graphml$/i.test(name) || (/\.xml$/i.test(name) && /<graphml/i.test(text.slice(0, 2000)))
+  || (!/\.(json|emj)$/i.test(name) && /^\s*</.test(text.slice(0, 200)));
+
 async function loadFile(file: File): Promise<void> {
+  const head = await file.slice(0, 2048).text();
+  if (isGraphmlFile(file.name, head)) { await importGraphmlText(await file.text(), file.name); return; }
   if (!(await confirmLeaveSidecar("Opening a file"))) return;
   try {
     const t = await file.text();
@@ -5966,6 +5987,7 @@ async function openDocument(): Promise<void> {
     try {
       const res = await openEmJson();
       if (!res) return; // cancelled
+      if (isGraphmlFile(res.path, res.text)) { await importGraphmlText(res.text, baseName(res.path)); return; }
       if (!(await confirmLeaveSidecar("Opening a file"))) return;
       // through the container reader, like the browser's <input type=file>:
       // calling `loadDocument` here refused every `{graphs:{…}}` file with
@@ -8332,6 +8354,7 @@ async function applyImportDoor(): Promise<boolean> {
           : kind === "file" ? { mapping_path: s.mappingPath ?? "" }
           : { mapping_name: s.mappingName ?? "" };
         const answer = await applyMapping({ path, ...spec,
+          ...(kind === "authored" && (s.headerRow ?? 1) > 1 ? { header_row: s.headerRow } : {}),
           mode: landing === "volatile" ? "volatile" : "bake" });
         doc = answer?.graph;
         report = auxReportOf(answer?.report);
@@ -11514,9 +11537,23 @@ async function readMappingSource(): Promise<void> {
     path,
     table: meState.table,
     record_path: meState.recordPath,
+    ...(meState.headerRow ? { header_row: meState.headerRow } : {}),
   });
   meState.busy = "";
   if (answer) {
+    // CAMPAGNA · the header row the bridge proposes: taken at the first read
+    // (said in the note), changed by the person afterwards
+    meState.headerPreview = (answer.header_preview as string[][] | undefined) ?? undefined;
+    meState.headerProposal = typeof answer.header_proposal === "number" ? answer.header_proposal : undefined;
+    if (meState.headerRow === undefined && (meState.headerProposal ?? 1) > 1) {
+      meState.headerRow = meState.headerProposal;
+      meState.note = t("me.headerAuto", { n: String(meState.headerRow) });
+      await readMappingSource();
+      meState.note = t("me.headerAuto", { n: String(meState.headerRow) });
+      refreshMappingEditor();
+      return;
+    }
+    meState.headerRow ??= typeof answer.header_row === "number" ? answer.header_row : undefined;
     meState.format = String(answer.format ?? "");
     meState.fields = (answer.fields as MappingEditorState["fields"]) ?? [];
     meState.tables = (answer.tables as string[] | undefined) ?? undefined;
@@ -11716,11 +11753,7 @@ async function stageMappingFile(file: File): Promise<void> {
  *  window uses (DS4): one folder, named by a person, remembered on disk. */
 async function addMappingRoot(path: string): Promise<void> {
   try {
-    const res = await fetch(`${await bridgeUrl()}/fs/roots`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ action: "add", path }),
-    });
+    const res = await postFsRoot(path);
     const answer = (await res.json().catch(() => null)) as
       { ok?: boolean; error?: string } | null;
     if (!res.ok || !answer?.ok) {
@@ -11791,10 +11824,18 @@ const meHandlers: MappingEditorHandlers = {
     meState.relations = [];
     meState.table = undefined;
     meState.recordPath = undefined;
+    meState.headerRow = undefined;
+    meState.headerPreview = undefined;
+    meState.headerProposal = undefined;
     refreshMappingEditor();
   },
   setTable: (table) => {
     meState.table = table;
+    meState.headerRow = undefined;
+    void readMappingSource();
+  },
+  setHeaderRow: (row) => {
+    meState.headerRow = row;
     void readMappingSource();
   },
   setRecordPath: (path) => {
@@ -16264,12 +16305,41 @@ function renderShelfInto(win: Win, body: HTMLElement,
       body.appendChild(empty);
       return;
     }
+    // CAMPAGNA (difetto 14) · the receipts of the ACTIVE study (`registry.
+    // graph_id` of their stamps), and the others said, one click away
+    const active = store ? String((store.doc.graph as Record<string, unknown>).graph_id ?? "") : "";
+    const all = !active || winCurrent(win, "shelf.studies") === "all";
+    for (const e of entries) if (receiptOf(e) && /^\//.test(e.locator) && !receiptChecks.has(e.id))
+      void runReceiptCheck(e.id, e.locator, receiptOf(e)!);
+    const shown = all ? entries : entries.filter((e) => !receiptOf(e) || receiptStudy.get(e.id) === active);
+    const other = entries.filter((e) => receiptOf(e) && receiptStudy.has(e.id) && receiptStudy.get(e.id) !== active).length;
+    const unknown = entries.filter((e) => receiptOf(e) && !receiptStudy.has(e.id)).length;
+    if (active && (other || unknown || all)) {
+      const note = document.createElement("div");
+      note.className = "shelf-studies";
+      note.dataset.other = String(other);
+      note.dataset.unknown = String(unknown);
+      note.textContent = all ? t("shelf.allStudies", { n: String(entries.length) })
+        : t("shelf.thisStudy", { n: String(shown.length), o: String(other), u: String(unknown) });
+      const b = document.createElement("button");
+      b.className = "ghost";
+      b.dataset.action = "shelf-studies";
+      b.textContent = all ? t("shelf.showThisStudy") : t("shelf.showAllStudies");
+      b.onclick = () => { setWinCurrent(win, "shelf.studies", all ? null : "all"); renderShelf(); };
+      note.append(" ", b);
+      body.appendChild(note);
+    }
     const list = document.createElement("div");
     list.className = "shelf-list";
-    for (const entry of entries) list.appendChild(shelfRow(entry));
+    for (const entry of shown) list.appendChild(shelfRow(entry));
     body.appendChild(list);
   });
 }
+
+/** CAMPAGNA · the study each receipt belongs to — its stamp's
+ *  `registry.graph_id`, read from the sidecar (the truth; the receipt does not
+ *  carry it), or taken from the stamp at emission. Absent = not known here. */
+const receiptStudy = new Map<string, string | null>();
 
 // ── SHELF-B · THE TABLE, and why it comes from the library ─────────────────
 //
@@ -16769,6 +16839,10 @@ async function runReceiptCheck(id: string, path: string, rec: NonNullable<Return
   let digest: string | null = null;
   let verdict: StampVerdict | null = null;
   try { sidecar = await readStamp(stampPathFor(path)); } catch { sidecar = null; }
+  if (sidecar) {
+    const g = (sidecar as unknown as { registry?: { graph_id?: string } }).registry?.graph_id;
+    receiptStudy.set(id, typeof g === "string" && g ? g : null);
+  }
   // CAMPAGNA · a stamp of several files (a file set, a tree) is judged by its
   // members, asked of dtcstamp — the door's own sha256 is not its digest
   if (coversMoreThanTheFile(sidecar as never)) {
@@ -17727,6 +17801,41 @@ function documentCard(): HTMLElement | null {
   return box;
 }
 
+async function suspendedRootsNote(body: HTMLElement, win: Win): Promise<void> {
+  let held: string[] = [];
+  try {
+    const r = await fetch(`${await bridgeUrl()}/fs/roots`);
+    held = ((await r.json()) as { suspended?: string[] }).suspended ?? [];
+  } catch { return; }
+  if (!held.length || !body.isConnected) return;
+  const box = document.createElement("div");
+  box.className = "storage-held";
+  box.dataset.suspended = held.join("|");
+  box.textContent = t("storage.wholeDiskHeld", { path: held.join(", ") }) + " ";
+  const b = document.createElement("button");
+  b.className = "ghost";
+  b.textContent = t("storage.wholeDiskServe");
+  b.onclick = () => { void addStorageRootPath(held[0], win); };
+  box.appendChild(b);
+  body.prepend(box);
+}
+
+/** The Storage's crumb: a label (the object store) or the path FIELD — whose
+ *  value is not overwritten while somebody is typing in it. */
+function setCrumb(crumb: HTMLElement | null, text: string, path: string): void {
+  if (!crumb) return;
+  if (crumb instanceof HTMLInputElement) {
+    crumb.dataset.path = path;
+    if (document.activeElement !== crumb) {
+      crumb.value = path;
+      crumb.placeholder = path ? t("storage.pathPh") : text;
+      crumb.scrollLeft = crumb.scrollWidth;
+    }
+    return;
+  }
+  crumb.textContent = text;
+}
+
 function renderStorageInto(host: StorageHost): void {
   const { win, body, crumb, up } = host;
   if (win.type !== "storage") return;
@@ -17757,6 +17866,8 @@ function renderStorageInto(host: StorageHost): void {
 
   up?.classList.remove("hidden");
   const path = storagePath(win);
+  // CAMPAGNA · the path field says where the window is going at once
+  setCrumb(crumb, path ?? t("storage.roots"), path ?? "");
   // the listing is rebuilt from scratch on every render (including a focus
   // change), and on a focus change the BODY ITSELF is a new element — so the
   // position is remembered per WINDOW and not per element.
@@ -17784,7 +17895,7 @@ function renderStorageInto(host: StorageHost): void {
       }
       body.appendChild(box);
       withCard();
-      if (crumb) crumb.textContent = down ? "" : (path ?? "");
+      setCrumb(host.crumb, down ? "" : (path ?? ""), path ?? "");
       return;
     }
     // The area may have moved on (another folder clicked, the tree rebuilt)
@@ -17794,7 +17905,9 @@ function renderStorageInto(host: StorageHost): void {
     // secondary one is a legitimate place for an answer to land.
     if (!body.isConnected || storagePath(win) !== path) return;
 
-    if (crumb) crumb.textContent = listing.roots ? t("storage.roots") : listing.path;
+    // the strip may have been REBUILT while the listing was in flight: the crumb
+    // is asked of the host again, never the element captured at the start
+    setCrumb(host.crumb, listing.roots ? t("storage.roots") : listing.path, listing.roots ? "" : listing.path);
     // Up from a ROOT is the list of roots — not "nothing". The bridge says
     // `parent: null` there because there is no parent INSIDE the fence, and
     // reading that as "the button is dead" is what stranded the first version:
@@ -17810,6 +17923,9 @@ function renderStorageInto(host: StorageHost): void {
 
     body.textContent = "";
     withCard();
+    // CAMPAGNA · the roots list says what is saved and NOT served: a whole disk
+    // nobody confirmed (the «/» of a one-click «Macintosh HD»)
+    if (listing.roots) void suspendedRootsNote(body, win);
     if (!listing.entries.length) {
       body.appendChild(storageEmpty(t("storage.emptyFolder")));
       return;
@@ -18350,7 +18466,12 @@ async function doStamp(win: Win): Promise<void> {
       // the sidecar stays the truth)
       landEmission(draft, out);
       const recs = receiptsOfEmission(out.stamps.filter((st) => out.written.includes(st.stamp_path)));
-      for (const r of recs) addToShelf(r);
+      for (const r of recs) {
+        const e = addToShelf(r);
+        // the study the stamp was emitted for, known here without asking the disk
+        const st = out.stamps.find((x) => x.path === r.locator)?.stamp as { registry?: { graph_id?: string } } | undefined;
+        if (st?.registry?.graph_id) receiptStudy.set(e.id, st.registry.graph_id);
+      }
       if (recs.length) {
         logInfo(t("receipt.filed", { n: String(recs.length) }));
         renderShelf();
@@ -18796,7 +18917,53 @@ function composeButtons(entry: FsEntry, listing: FsListing): HTMLElement {
   box.appendChild(composeFolderButton(listing, true));
   // CAMPAGNA · a tileset — its .3tz or its tileset.json — opens in the Scene
   if (TREE_EXT.test(entry.name) || entry.name === "tileset.json") box.appendChild(openInSceneButton(entry.path));
+  // …and a document opens in EMStudio FROM HERE, with its path: the Storage
+  // then starts from its folder, and its relative locators resolve beside it
+  if (/\.(em\.json|emj|graphml)$/i.test(entry.name)) {
+    const o = document.createElement("button");
+    o.className = "ghost";
+    o.dataset.action = "open-doc-here";
+    o.textContent = t("storage.openDoc", { name: entry.name });
+    o.onclick = () => { void openFromStorage(entry.path); };
+    box.appendChild(o);
+  }
   return box;
+}
+
+/** CAMPAGNA · open an em.json (or import a GraphML) that the Storage shows. */
+async function openFromStorage(path: string): Promise<void> {
+  let text: string;
+  try {
+    const res = await fetch(await fsFileUrl(path));
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    text = await res.text();
+  } catch (e) {
+    toast(t("storage.openFailed", { name: baseName(path), why: String((e as Error).message) }));
+    return;
+  }
+  if (isGraphmlFile(path, text)) { await importGraphmlText(text, baseName(path)); return; }
+  if (!(await confirmLeaveSidecar("Opening a file"))) return;
+  try {
+    loadContainerDocument(JSON.parse(text), baseName(path), path);
+  } catch (e) {
+    info.textContent = `parse error: ${e}`;
+  }
+}
+
+/** CAMPAGNA (difetto 10) · the Storage STARTS from the folder of the em.json
+ *  just opened — when its path is known (the desktop, «Apri» from the Storage,
+ *  a recent file) and the bridge serves that folder. Asked once per open; what
+ *  the person navigates to afterwards stays theirs. */
+async function storageFollowDocument(path: string | null): Promise<void> {
+  if (!path) return;
+  const dir = path.replace(/[\\/][^\\/]*$/, "");
+  if (!dir) return;
+  try { await fsList(dir); } catch { return; }   // not served here: nothing to start from
+  if (currentFilePath !== path) return;
+  for (const ws of WORKSPACES)
+    for (const w of windowsOf(ws.id).filter((x) => x.type === "storage" && winModeOf(x) === "filesystem"))
+      setWinCurrent(w, "fsPath", dir);
+  renderStorage();
 }
 
 /** «Apri in Scena» for a tileset on disk (a .3tz, a tileset.json, a folder). */
@@ -21084,15 +21251,26 @@ async function addStorageRoot(win: Win): Promise<void> {
   await addStorageRootPath(path.trim(), win);
 }
 
+/** CAMPAGNA (difetto 10) · grant a folder; the WHOLE DISK only when the person
+ *  confirms it (the bridge answers 409 `whole-disk` and remembers the yes). */
+async function postFsRoot(path: string): Promise<Response> {
+  const base = await bridgeUrl();
+  const send = (confirm: boolean) => fetch(`${base}/fs/roots`, {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ action: "add", path, ...(confirm ? { confirm_whole_disk: true } : {}) }),
+  });
+  const first = await send(false);
+  if (first.status !== 409) return first;
+  const j = (await first.clone().json().catch(() => null)) as { code?: string } | null;
+  if (j?.code !== "whole-disk" || !window.confirm(t("storage.wholeDiskConfirm", { path }))) return first;
+  return await send(true);
+}
+
 async function addStorageRootPath(path: string, win: Win): Promise<void> {
   try {
-    const res = await fetch(`${await bridgeUrl()}/fs/roots`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ action: "add", path }),
-    });
+    const res = await postFsRoot(path);
     const payload = (await res.json().catch(() => null)) as
-      | { ok?: boolean; error?: string; roots?: string[] } | null;
+      | { ok?: boolean; error?: string; code?: string; roots?: string[] } | null;
     if (!res.ok || !payload?.ok) {
       toast(t("storage.rootFailed", { detail: payload?.error ?? `HTTP ${res.status}` }));
       return;
@@ -22356,8 +22534,29 @@ function buildHeaderStrip(win: Win): HTMLElement {
     up.className = "win-act win-strip-up";
     up.textContent = "↑";
     up.title = t("storage.up");
-    const crumb = document.createElement("div");
-    crumb.className = "win-strip-crumb storage-crumb";
+    // CAMPAGNA (difetto 11) · the path is WRITTEN and pasted, not only walked:
+    // eight clicks to a deep folder become one paste and Enter
+    const crumb = document.createElement("input");
+    crumb.type = "text";
+    crumb.className = "win-strip-crumb storage-crumb storage-path";
+    crumb.spellcheck = false;
+    crumb.setAttribute("aria-label", t("storage.pathLabel"));
+    crumb.placeholder = t("storage.pathPh");
+    crumb.addEventListener("pointerdown", (e) => e.stopPropagation());
+    crumb.addEventListener("click", (e) => e.stopPropagation());
+    crumb.addEventListener("keydown", (e) => {
+      e.stopPropagation();
+      if (e.key === "Enter") {
+        e.preventDefault();
+        const v = crumb.value.trim().replace(/\/+$/, "") || null;
+        crumb.blur();
+        focusThen(win, () => setStoragePath(win, v));
+      } else if (e.key === "Escape") {
+        crumb.value = crumb.dataset.path ?? "";
+        crumb.blur();
+      }
+    });
+    crumb.addEventListener("blur", () => { crumb.value = crumb.dataset.path ?? crumb.value; crumb.scrollLeft = crumb.scrollWidth; });
     const root = document.createElement("button");
     root.className = "win-act win-strip-root";
     root.textContent = "+ 📁";

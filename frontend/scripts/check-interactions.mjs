@@ -520,6 +520,10 @@ async function stampHere(p, kindLabel, { inputs = [], software = "", operator = 
   await p.click('.stamp-compose button[data-field="today"]');
   await p.click('.stamp-compose button[data-action="stamp"]');
   await p.waitForTimeout(2500);
+  // CAMPAGNA · a stamp that worked closes with its SEAL (a card over the
+  // window): the person closes it, Esc as the card says, and goes on
+  stampHere.sealed = await p.locator(".seal-veil").count() > 0;
+  if (stampHere.sealed) { await p.keyboard.press("Escape"); await p.waitForTimeout(300); }
 }
 test("4.origin", "una cartella senza timbri apre su «È un'origine», e dice perché", async () => {
   await resetFolders();
@@ -1636,8 +1640,16 @@ test("S7.bar", "la barra: la versione esce (tooltip del marchio, barra di stato,
 test("S4.graph", "Stratigrafia · un doppio clic su un documento nel Matrix lo apre nella finestra di servizio, accanto al grafo", async () => {
   const { p, ctx, errors } = await open({ doc: "catena" });
   const win = await winOf(p, "graph");
-  const ws = await p.evaluate((w) => window.__EM_DRAG__.winScene(w), win);
-  const box = ws.boxes.find((b) => b.id === "D3" || b.id.startsWith("D3"));
+  let ws = await p.evaluate((w) => window.__EM_DRAG__.winScene(w), win);
+  let box = ws.boxes.find((b) => b.id === "D3" || b.id.startsWith("D3"));
+  // CAMPAGNA · the Matrix opens on its FIRST epoch with nodes now (difetto 13):
+  // a document further down is brought on screen as a person would, with «0»
+  if (box && box.y + box.h > 1000) {
+    await p.keyboard.press("0");
+    await p.waitForTimeout(500);
+    ws = await p.evaluate((w) => window.__EM_DRAG__.winScene(w), win);
+    box = ws.boxes.find((b) => b.id === "D3" || b.id.startsWith("D3"));
+  }
   if (box) await p.mouse.dblclick(box.x + box.w / 2, box.y + box.h / 2);
   await p.waitForTimeout(1200);
   const docs = await docWins(p);

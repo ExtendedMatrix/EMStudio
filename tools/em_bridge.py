@@ -310,6 +310,67 @@ def _listdir_safe(path: str) -> list:
         return []
 
 
+# ── CAMPAGNA · the header row of a spreadsheet ──────────────────────────────
+
+def _is_sheet(path: str) -> bool:
+    return str(path).lower().endswith((".xlsx", ".xlsm", ".xls"))
+
+
+def _sheet_header(path: str, sheet=None, scan: int = 20) -> dict:
+    """The first rows of a sheet and the PROPOSED header: the first row whose
+    every column (every column with a value somewhere in the first `scan` rows)
+    is filled. 1-based, as a person counts rows."""
+    import pandas as pd                            # lazy: the xlsx extra
+    book = pd.ExcelFile(path)
+    chosen = sheet if sheet in book.sheet_names else book.sheet_names[0]
+    frame = book.parse(chosen, header=None, nrows=scan)
+    filled = lambda v: v is not None and str(v).strip() not in ("", "nan", "NaT")
+    cols = [c for c in frame.columns if any(filled(v) for v in frame[c].values)]
+    proposal = 1
+    for i in range(len(frame)):
+        if cols and all(filled(frame.at[i, c]) for c in cols):
+            proposal = i + 1
+            break
+    preview = [[("" if not filled(frame.at[i, c]) else str(frame.at[i, c]))[:40] for c in cols]
+               for i in range(min(len(frame), 8))]
+    return {"header_proposal": proposal, "header_preview": preview, "header_columns": len(cols)}
+
+
+def _sheet_fields(path: str, sheet, header_row: int, samples: int) -> dict:
+    """The fields of a sheet whose header is on `header_row` — s3Dgraphy's own
+    field form (`_field`), read from that row instead of the first."""
+    import pandas as pd
+    from s3dgraphy.mappings.authoring import _field
+    book = pd.ExcelFile(path)
+    sheets = list(book.sheet_names)
+    chosen = sheet if sheet in sheets else sheets[0]
+    frame = book.parse(chosen, header=header_row - 1, nrows=samples)
+    frame = frame.loc[:, [c for c in frame.columns if not str(c).startswith("Unnamed:")
+                          or frame[c].notna().any()]]
+    return {"format": "xlsx", "source": path, "table": chosen, "tables": sheets,
+            # an empty cell is empty, not the word «nan»
+            "fields": [_field(str(c), [None if pd.isna(v) else v for v in frame[c].values])
+                       for c in frame.columns]}
+
+
+def _sheet_from_row(path: str, sheet, header_row: int) -> str:
+    """A COPY of the workbook in the stage folder whose sheet starts at
+    `header_row` (the rows above dropped); the other sheets as they are."""
+    import pandas as pd
+    book = pd.ExcelFile(path)
+    chosen = sheet if sheet in book.sheet_names else book.sheet_names[0]
+    stage = _stage_dir()
+    stage.mkdir(parents=True, exist_ok=True)
+    out = stage / f"{pathlib.Path(path).stem}.header{header_row}.xlsx"
+    with pd.ExcelWriter(out) as writer:
+        for name in book.sheet_names:
+            if name == chosen:
+                book.parse(name, header=header_row - 1).to_excel(writer, sheet_name=name, index=False)
+            else:
+                book.parse(name, header=None).to_excel(writer, sheet_name=name, index=False, header=False)
+    return str(out)
+
+
 def _compose_resources(targets, inputs):
     """The outputs and the declared inputs of a composed step as em.json nodes
     and edges, each resource made by ``api.add_resource`` (RISORSA-FILE).
@@ -441,10 +502,46 @@ def _fs_roots_persisted() -> list:
         return []
 
 
-def _write_fs_roots_persisted(roots) -> None:
+def _is_whole_disk(path: str) -> bool:
+    """CAMPAGNA (difetto 10) · `/` or a drive root (`C:\\`): the whole disk."""
+    p = str(path).rstrip("/\\")
+    return p == "" or bool(re.match(r"^[A-Za-z]:$", p))
+
+
+def _fs_whole_disk_confirmed() -> list:
+    """The whole-disk roots a person CONFIRMED from the interface (a second
+    list in the same file). A `/` in `roots` without its confirmation — the
+    «Macintosh HD» row of the places menu, one click, before tonight — is kept
+    in the file and NOT served: the whole disk is never served by accident."""
+    try:
+        with open(_FS_ROOTS_FILE, encoding="utf-8") as fh:
+            data = json.load(fh)
+        got = data.get("whole_disk") if isinstance(data, dict) else None
+        return [str(r) for r in got if isinstance(r, str)] if isinstance(got, list) else []
+    except Exception:
+        return []
+
+
+def _fs_roots_servable(persisted) -> list:
+    """The persisted roots that are served: all of them, but a whole disk only
+    when it was confirmed."""
+    ok = {os.path.realpath(os.path.expanduser(p)) for p in _fs_whole_disk_confirmed()}
+    return [p for p in persisted
+            if not _is_whole_disk(os.path.realpath(os.path.expanduser(p)))
+            or os.path.realpath(os.path.expanduser(p)) in ok]
+
+
+def _fs_roots_suspended() -> list:
+    persisted = _fs_roots_persisted()
+    served = set(_fs_roots_servable(persisted))
+    return [p for p in persisted if p not in served]
+
+
+def _write_fs_roots_persisted(roots, whole_disk=None) -> None:
     _FS_ROOTS_FILE.parent.mkdir(parents=True, exist_ok=True)
+    keep = _fs_whole_disk_confirmed() if whole_disk is None else list(whole_disk)
     with open(_FS_ROOTS_FILE, "w", encoding="utf-8") as fh:
-        json.dump({"roots": list(roots)}, fh, indent=1)
+        json.dump({"roots": list(roots), **({"whole_disk": keep} if keep else {})}, fh, indent=1)
 
 
 def _set_fs_roots(paths) -> None:
@@ -736,7 +833,8 @@ def make_handler(api):
                 if not self._fs_gate():
                     return
                 self._json({"ok": True, "roots": _FS_ROOTS,
-                            "persisted": _fs_roots_persisted()})
+                            "persisted": _fs_roots_persisted(),
+                            "suspended": _fs_roots_suspended()})
             else:
                 self.send_error(404, "unknown endpoint")
 
@@ -1774,11 +1872,23 @@ def make_handler(api):
                     if not os.path.isfile(path):
                         self._fail(404, f"no such file: {path}")
                         return
-                    payload = {"ok": True, **api.mapping_source_fields(
-                        path, format_type=body.get("format_type"),
-                        table=body.get("table"),
-                        record_path=body.get("record_path"),
-                        samples=int(body.get("samples") or 3))}
+                    header_row = int(body.get("header_row") or 0)
+                    if _is_sheet(path) and header_row > 1:
+                        payload = {"ok": True, **_sheet_fields(
+                            path, body.get("table"), header_row,
+                            int(body.get("samples") or 3))}
+                    else:
+                        payload = {"ok": True, **api.mapping_source_fields(
+                            path, format_type=body.get("format_type"),
+                            table=body.get("table"),
+                            record_path=body.get("record_path"),
+                            samples=int(body.get("samples") or 3))}
+                    # CAMPAGNA (difetto 15) · WHICH ROW is the header, proposed:
+                    # the first row whose every column is filled (San Pietro:
+                    # row 1 is the title «San Pietro», row 2 the header)
+                    if _is_sheet(path):
+                        payload.update(_sheet_header(path, payload.get("table") or body.get("table")))
+                        payload["header_row"] = header_row or 1
                 elif route == "/mapping-catalog":
                     payload = {"ok": True,
                                "catalog": api.mapping_target_catalog(),
@@ -1985,9 +2095,28 @@ def make_handler(api):
             injector = str(body.get("injector") or "").strip()
             if injector:
                 extra["injector"] = injector
+            # CAMPAGNA · a header that is not on row 1: s3Dgraphy's table
+            # importer reads row 1 as the header (mapped_xlsx_importer, header=0),
+            # so the importer is handed a COPY whose first row is the one chosen.
+            # Declared in the report; the original file is not touched.
+            header_row = int(body.get("header_row") or 0)
+            notes = []
+            if _is_sheet(path) and header_row > 1:
+                try:
+                    path = _sheet_from_row(path, body.get("table"), header_row)
+                    notes.append(f"header read from row {header_row}: the importer was given "
+                                 f"a copy whose first row is that one ({os.path.basename(path)})")
+                except Exception as exc:               # noqa: BLE001
+                    self._fail(400, f"the header row {header_row} could not be used: {exc}")
+                    return None
             report = api.mapping_apply(mapping, path, mode=mode, graph=host,
                                        mapping_name=body.get("mapping_name"),
                                        **extra)
+            if notes:
+                if not isinstance(report.get("notes"), list):
+                    report["notes"] = []
+                report["notes"].extend(notes)
+                report["header_row"] = header_row
             graph = report.pop("graph", None)
             out = {"ok": bool(report.get("ok")), "report": report}
             if graph is not None and report.get("ok"):
@@ -2354,28 +2483,38 @@ def make_handler(api):
                 return
             full = os.path.realpath(os.path.expanduser(raw))
             persisted = _fs_roots_persisted()
+            whole = _fs_whole_disk_confirmed()
             if action == "add":
                 if not os.path.isdir(full):
                     self._fail(400, "that path is not a directory")
                     return
+                # CAMPAGNA · the WHOLE DISK is a choice said twice: the person
+                # confirms it, and the confirmation is written beside it
+                if _is_whole_disk(full) and not body.get("confirm_whole_disk"):
+                    self._json({"ok": False, "code": "whole-disk",
+                                "error": "this is the whole disk: confirm it to serve it"}, status=409)
+                    return
                 if full not in persisted:
                     persisted.append(full)
+                if _is_whole_disk(full) and full not in whole:
+                    whole.append(full)
             elif action == "remove":
                 persisted = [p for p in persisted
                              if os.path.realpath(os.path.expanduser(p)) != full]
+                whole = [p for p in whole if os.path.realpath(os.path.expanduser(p)) != full]
             else:
                 self._fail(400, "action must be 'add' or 'remove'")
                 return
             try:
-                _write_fs_roots_persisted(persisted)
+                _write_fs_roots_persisted(persisted, whole)
             except OSError as exc:
                 self._fail(500, f"cannot save the roots: {exc.strerror}")
                 return
             # Re-resolve the live set from the same three sources as at startup,
             # so what /fs serves and what was saved can never drift apart.
-            _set_fs_roots(list(_FS_ROOTS_STARTUP) + persisted)
+            _set_fs_roots(list(_FS_ROOTS_STARTUP) + _fs_roots_servable(persisted))
             self._json({"ok": True, "roots": _FS_ROOTS, "persisted": persisted,
-                        "scope": _fs_scope()})
+                        "suspended": _fs_roots_suspended(), "scope": _fs_scope()})
 
         # ── W1 · the filesystem as two routes ──────────────────────────────
         #
@@ -4173,7 +4312,10 @@ def main() -> int:
                          or [pathlib.Path(__file__).resolve().parent.parent])
     ]
     # The live set is the startup roots PLUS whatever the UI has saved (DS4).
-    _set_fs_roots(_FS_ROOTS_STARTUP + _fs_roots_persisted())
+    _set_fs_roots(_FS_ROOTS_STARTUP + _fs_roots_servable(_fs_roots_persisted()))
+    for held in _fs_roots_suspended():
+        print(f"  [bridge] fs root {held!r} is the whole disk and was never "
+              f"confirmed: kept in {_FS_ROOTS_FILE}, not served", file=sys.stderr)
 
     # …and the SCOPE. Said out loud, because "this process can read my whole
     # disk" is not a thing to learn from a 200.

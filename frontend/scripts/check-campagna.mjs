@@ -49,6 +49,7 @@ const bundle = await esbuild.build({
       export { issues } from "./issues";
       export { ancestorsOf, allowedEdgeTypes, isStratigraphicType } from "./rules";
       export { documentDiagnostics } from "./logpanel";
+      export { firstViewBounds, sceneBounds } from "./scene";
     `,
     resolveDir: SRC, loader: "ts",
   },
@@ -64,7 +65,7 @@ const bundle = await esbuild.build({
 });
 const M = await import("data:text/javascript;base64," + Buffer.from(bundle.outputFiles[0].text).toString("base64"));
 const { receipts, compose, tree, tropy, naming, DocumentStore, CALLS_OTHERS, seal, issues, ancestorsOf,
-        allowedEdgeTypes, isStratigraphicType, documentDiagnostics } = M;
+        allowedEdgeTypes, isStratigraphicType, documentDiagnostics, firstViewBounds, sceneBounds } = M;
 
 // ── 1 · the receipt of a file set, judged by its members ───────────────────
 {
@@ -211,6 +212,18 @@ const { receipts, compose, tree, tropy, naming, DocumentStore, CALLS_OTHERS, sea
   ok(by("epoch").some((i) => i.node === unit.id), "12 · epoch: one undo brings it back");
 }
 
+// ── 5 · the small ones: the first view of the Matrix ───────────────────────
+{
+  const n = (id, x, y) => ({ id, x, y, w: 60, h: 30 });
+  const sc = { nodes: [n("a", 100, 220), n("b", 400, 240), n("c", 50, 900), n("d", 3000, 1500)],
+               lanes: [{ id: "new", y: 0, height: 180 }, { id: "mid", y: 180, height: 200 }, { id: "old", y: 380, height: 1400 }] };
+  const b = firstViewBounds(sc);
+  eq([b.y, b.h], [180, 200], "13 · the Matrix opens on the first lane (top) that HAS nodes — the empty newest one is skipped");
+  ok(b.x < 100 && b.x + b.w > 460 && b.w < 1000, "13 · …from the left of its nodes to their right, not the whole graph");
+  eq(firstViewBounds({ nodes: sc.nodes, lanes: [] }), sceneBounds({ nodes: sc.nodes, lanes: [] }),
+     "13 · a scene without lanes (Graph, DTC) opens on all of it");
+}
+
 // ── the bridge of this check ────────────────────────────────────────────────
 const S3D = new URL("../../../s3Dgraphy/", import.meta.url).pathname;
 const PY = `${S3D}.venv/bin/python`;
@@ -316,6 +329,20 @@ try {
        "8 · …with the proposal (archive + the content digest)");
     ok(JSON.parse(readFileSync(`${dir}/old.3tz.stamp.json`, "utf8")).self.packaging === "file",
        "8 · …and the stamp is NOT rewritten");
+    // ── 5 · the header row of a sheet, and the whole disk ────────────────────
+    execFileSync(PY, ["-c", `import pandas as pd
+pd.DataFrame([["San Pietro", None, None], ["Nome", "Descrizione", "Url"], ["D.01", "Rilievo", None], ["D.02", "Incisione", "x"]]).to_excel(${JSON.stringify(`${dir}/sources.xlsx`)}, header=False, index=False)`]);
+    const f1 = await post("/mapping-fields", { path: `${dir}/sources.xlsx` });
+    eq([f1.header_proposal, f1.fields.map((x) => x.name)[0]], [2, "San Pietro"],
+       "15 · /mapping-fields proposes row 2 (the first with every column filled); row 1 is still what s3Dgraphy reads by itself");
+    const f2 = await post("/mapping-fields", { path: `${dir}/sources.xlsx`, header_row: 2 });
+    eq([f2.header_row, f2.fields.map((x) => x.name)], [2, ["Nome", "Descrizione", "Url"]], "15 · …and from row 2 the fields are the real ones");
+    eq(f2.fields.find((x) => x.name === "Url").samples, ["", "x"], "15 · …an empty cell is empty, not «nan»");
+    const r0 = await fetch(`${base}/fs/roots`, { method: "POST", headers: H, body: JSON.stringify({ action: "add", path: "/" }) });
+    eq([r0.status, (await r0.json()).code], [409, "whole-disk"], "10 · the whole disk is not served on one click: 409 whole-disk");
+    const rr = await (await fetch(`${base}/fs/roots`, { headers: H })).json();
+    ok(!rr.roots.includes("/"), "10 · …and «/» is not among the served folders");
+
   }
 } finally {
   proc?.kill();

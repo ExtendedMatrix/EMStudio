@@ -126,6 +126,12 @@ export interface MappingEditorState {
   /** tables/sheets (a table source) — which one, and which exist */
   table?: string;
   tables?: string[];
+  /** CAMPAGNA · a spreadsheet: the row that holds the header (1-based), the
+   *  row the bridge PROPOSES (the first with every column filled), and the
+   *  first rows, for the choice */
+  headerRow?: number;
+  headerProposal?: number;
+  headerPreview?: string[][];
   /** XML: which element is one RECORD, and the candidates the library found */
   recordPath?: string;
   recordPaths?: Array<{ path: string; count: number }>;
@@ -285,6 +291,8 @@ export interface MappingEditorHandlers {
   setPickerSort(sort: "name" | "date" | "size"): void;
   setPath(path: string): void;
   setTable(table: string): void;
+  /** CAMPAGNA · the header is on this row (1-based) */
+  setHeaderRow(row: number): void;
   setRecordPath(path: string): void;
   setName(name: string): void;
   setChoice(field: string, choice: FieldChoice): void;
@@ -421,6 +429,10 @@ export function renderMappingEditor(host: HTMLElement,
                                     handlers: MappingEditorHandlers): void {
   const busy = state.busy !== "";
   host.textContent = "";
+  // CAMPAGNA (difetto 15) · the sections are numbered in the order they are
+  // DRAWN: the numbers lived in the strings, and «How it is read» and «the
+  // fields» were both «2» (measured on the San Pietro sourcelist)
+  boxNumber = 0;
   const panel = document.createElement("div");
   panel.className = "me-panel";
 
@@ -448,11 +460,13 @@ export function renderMappingEditor(host: HTMLElement,
   host.appendChild(panel);
 }
 
+let boxNumber = 0;
 function box(titleKey: string): HTMLElement {
   const section = document.createElement("section");
   section.className = "me-box";
   const head = document.createElement("h4");
-  head.textContent = t(titleKey);
+  head.textContent = `${++boxNumber} · ${t(titleKey)}`;
+  section.dataset.box = String(boxNumber);
   section.appendChild(head);
   return section;
 }
@@ -504,12 +518,34 @@ function sourceBox(state: MappingEditorState, h: MappingEditorHandlers,
   section.appendChild(row);
   if (state.picker) section.appendChild(pickerBox(state, h, busy));
 
+  // CAMPAGNA (difetto 15) · a sign while the source is being read: a 9 MB
+  // workbook took its time and the first «Read the fields» said nothing
+  if (state.busy === "read" || state.busy === "stage") {
+    const reading = document.createElement("p");
+    reading.className = "me-reading";
+    reading.dataset.reading = state.busy;
+    reading.setAttribute("role", "status");
+    reading.textContent = t(state.busy === "stage" ? "me.staging2" : "me.reading",
+                            { name: state.path.split(/[\\/]/).pop() ?? "" });
+    section.appendChild(reading);
+  }
   if (state.format) {
     const what = document.createElement("p");
     what.className = "me-muted";
     what.textContent = t("me.readAs", { format: state.format,
                                         n: String(state.fields.length) });
     section.appendChild(what);
+  }
+  // …and WHICH ROW is the header: proposed (the first row with every column
+  // filled), chosen by the person, each row named by its first cells
+  if (state.headerPreview?.length) {
+    const rows = state.headerPreview.map((cells, i) => ({
+      value: String(i + 1),
+      label: `${t("me.headerRowN", { n: String(i + 1) })} · ${cells.filter(Boolean).slice(0, 3).join(" · ").slice(0, 60) || "—"}`
+        + (state.headerProposal === i + 1 ? ` ${t("me.headerProposed")}` : ""),
+    }));
+    section.appendChild(pickerRow(t("me.headerRow"), rows, String(state.headerRow ?? 1),
+                                  (value) => h.setHeaderRow(Number(value)), busy));
   }
   // WHICH table, or WHICH element is a record — the one question a reader
   // cannot answer for the author (see `mapping_source_fields`)

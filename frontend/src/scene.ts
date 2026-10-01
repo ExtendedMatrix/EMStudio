@@ -160,6 +160,28 @@ export interface Bounds {
   h: number;
 }
 
+/**
+ * CAMPAGNA (difetto 13) · where a Matrix OPENS: the first epoch on screen (the
+ * top lane, the newest) that holds nodes — its lane, from the left of its
+ * nodes to their right — not the whole graph, which on TempluMare opened as a
+ * speck. A scene without lanes (the Graph, the DTC) opens on all of it.
+ */
+export function firstViewBounds(scene: Scene): Bounds {
+  const lanes = [...scene.lanes].sort((a, b) => a.y - b.y);
+  for (const l of lanes) {
+    const inside = scene.nodes.filter((n) => {
+      const cy = n.y + n.h / 2;
+      return cy >= l.y && cy <= l.y + l.height && n.h <= l.height;
+    });
+    if (!inside.length) continue;
+    const minX = Math.min(...inside.map((n) => n.x));
+    const maxX = Math.max(...inside.map((n) => n.x + n.w));
+    const pad = 40;
+    return { x: minX - pad, y: l.y, w: maxX - minX + pad * 2, h: l.height };
+  }
+  return sceneBounds(scene);
+}
+
 export function sceneBounds(scene: Scene): Bounds {
   if (!scene.nodes.length) return { x: 0, y: 0, w: 100, h: 100 };
   let minX = Infinity,

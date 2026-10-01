@@ -52,6 +52,7 @@ export function buildOverview(
   });
 
   root.addEventListener("pointerdown", (e) => {
+    if (e.button !== 0) return;   // a right-click is not a move of the view
     dragging = true;
     root.setPointerCapture(e.pointerId);
     const r = root.getBoundingClientRect();
@@ -66,11 +67,45 @@ export function buildOverview(
   });
   root.addEventListener("pointerup", () => (dragging = false));
 
+  /** CAMPAGNA (difetto 13) · the minimap does not sit ON the drawing: it takes
+   *  the first corner where it covers no node (bottom right, top right), and
+   *  when both would cover one it hides — the drawing is the work, the minimap
+   *  only a way around it. Never the LEFT side: that is the strip of the lane
+   *  headers, where a right-click opens the lane's menu (measured: a minimap
+   *  moved bottom-left took that right-click as a move, U4.lanemenu). Not
+   *  while dragged. */
+  const place = (scene: Scene, vp: Viewport, viewW: number, viewH: number): void => {
+    if (dragging) return;
+    const M = 10;
+    const area = root.parentElement;
+    const canvas = area?.querySelector<HTMLCanvasElement>("canvas:not(.win-overview)") ?? null;
+    const top0 = canvas ? canvas.offsetTop : 0;
+    const left0 = canvas ? canvas.offsetLeft : 0;
+    const rects = scene.nodes.map((n) => ({ x: n.x * vp.scale + vp.x, y: n.y * vp.scale + vp.y,
+                                            w: n.w * vp.scale, h: n.h * vp.scale }));
+    const free = (x: number, y: number): boolean => !rects.some((r) =>
+      r.x < x + W + M && r.x + r.w > x - M && r.y < y + H + M && r.y + r.h > y - M);
+    // the top corners leave room for the canvas's own buttons (the filter ⏚)
+    const T = 44;
+    const corners: Array<[string, number, number]> = [
+      ["br", viewW - W - M, viewH - H - M], ["tr", viewW - W - M, T]];
+    const pick = viewW > W * 2 && viewH > H * 1.5 ? corners.find(([, x, y]) => free(x, y)) : undefined;
+    root.classList.toggle("covering", !pick);
+    if (!pick) { root.dataset.corner = "none"; return; }
+    const [corner, x, y] = pick;
+    root.dataset.corner = corner;
+    root.style.right = "auto";
+    root.style.bottom = "auto";
+    root.style.left = `${left0 + x}px`;
+    root.style.top = `${top0 + y}px`;
+  };
+
   return {
     update(scene, vp, viewW, viewH): void {
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       ctx.clearRect(0, 0, W, H);
       if (!scene || !scene.nodes.length) return;
+      place(scene, vp, viewW, viewH);
       const b = sceneBounds(scene);
       scale = Math.min((W - PAD * 2) / b.w, (H - PAD * 2) / b.h);
       ox = PAD - b.x * scale + (W - PAD * 2 - b.w * scale) / 2;
