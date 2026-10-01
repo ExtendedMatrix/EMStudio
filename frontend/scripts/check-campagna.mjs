@@ -1,0 +1,198 @@
+// NIGHT-CAMPAGNA-1-OTT · the defects of the test campaign of 1 Oct 2026
+// (`.claude/wip/reports/2026-10-01-campagna/REFERTO.md`), one case per promise.
+//
+//   node scripts/check-campagna.mjs
+//
+// Pure modules through esbuild, and a bridge of its own (`tools/em_bridge.py`
+// on a free port, `--fs-root` a temporary folder) for what only dtcstamp can
+// say. Parte 1: the stamp of several files from A to Z —
+//   · a receipt of a FILE SET is judged by its members, never by the door's
+//     sha256 (difetto 1: the false «the file changed» right after the stamp);
+//   · `/stamp/verify` says it member by member, `/stamp/tree` says what a
+//     tileset folder and its .3tz are (one content digest for the two);
+//   · `/stamp/emit` stamps a folder as `directory` and a .3tz as `archive` with
+//     its `content_digest`; a .3tz stamped as `file` is «to update».
+import * as esbuild from "esbuild";
+import assert from "node:assert/strict";
+import { spawn, execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync, appendFileSync } from "node:fs";
+import { createServer } from "node:net";
+import { tmpdir } from "node:os";
+
+let checks = 0;
+const fails = [];
+const ok = (c, what) => { checks++; if (!c) fails.push(what); };
+const eq = (a, b, what) => {
+  checks++;
+  try { assert.deepStrictEqual(a, b); } catch { fails.push(`${what}\n      got ${JSON.stringify(a)}\n      want ${JSON.stringify(b)}`); }
+};
+const sha = (b) => "sha256:" + createHash("sha256").update(b).digest("hex");
+
+const mem = new Map();
+globalThis.localStorage = { getItem: (k) => (mem.has(k) ? mem.get(k) : null),
+  setItem: (k, v) => mem.set(k, String(v)), removeItem: (k) => mem.delete(k) };
+
+const SRC = new URL("../src/", import.meta.url).pathname;
+const TOOLS = new URL("../../tools/", import.meta.url).pathname;
+const bundle = await esbuild.build({
+  stdin: {
+    contents: `
+      export * as receipts from "./receipt";
+      export * as compose from "./stamp-compose";
+      export * as tree from "./stamp-tree";
+    `,
+    resolveDir: SRC, loader: "ts",
+  },
+  bundle: true, format: "esm", write: false,
+  plugins: [{
+    name: "stub-icons",
+    setup(build) {
+      build.onResolve({ filter: /\.\/icons$/ }, () => ({ path: "icons-stub", namespace: "stub" }));
+      build.onLoad({ filter: /.*/, namespace: "stub" }, () => ({
+        contents: `export const ICON_NODE_TYPES = new Set(["extractor", "combiner"]);`, loader: "ts" }));
+    },
+  }],
+});
+const M = await import("data:text/javascript;base64," + Buffer.from(bundle.outputFiles[0].text).toString("base64"));
+const { receipts, compose, tree } = M;
+
+// ── 1 · the receipt of a file set, judged by its members ───────────────────
+{
+  const rec = { id: "res:57a693d553e8", checksum: "sha256:57a6", stamp: 1, parents: [] };
+  const fileSet = { self: { resource_id: "res:57a693d553e8", digest: "sha256:57a6", digest_covers: "members", packaging: "file_set" } };
+  const door = "sha256:7aec";   // the obj's own sha256: NEVER the stamp's digest
+  eq(receipts.coversMoreThanTheFile(fileSet), true, "1 · a file_set stamp covers more than its door");
+  eq(receipts.coversMoreThanTheFile({ self: { digest_covers: "artifact", packaging: "file" } }), false,
+     "1 · a stamp of one file does not");
+  eq(receipts.coversMoreThanTheFile({ self: { packaging: "directory" } }), true, "1 · a directory does");
+  eq(receipts.checkReceipt(rec, fileSet, door, { kind: "members", result: { ok: true } }), "ok",
+     "1 · difetto 1: the members hold → «matches», whatever the door's sha256 is");
+  eq(receipts.checkReceipt(rec, fileSet, door, null), "unreachable",
+     "1 · no verdict from dtcstamp → nothing claimed (not «changed»)");
+  eq(receipts.checkReceipt(rec, fileSet, null, { kind: "members", result: { ok: false, changed: ["textures/T.jpg"] } }),
+     "file-changed", "1 · a member changed → «the file changed»");
+  eq(receipts.verdictChanged({ kind: "members", result: { ok: false, changed: ["a.mtl"], missing: ["t.jpg"] } }),
+     ["a.mtl", "t.jpg ✕"], "1 · …and the words name which member");
+  eq(receipts.checkReceipt({ ...rec, checksum: "sha256:other" }, fileSet, null, { kind: "members", result: { ok: true } }),
+     "sidecar-differs", "1 · a receipt that is not the sidecar's is still said so");
+  eq(receipts.checkReceipt({ id: "r", checksum: "sha256:aa", stamp: 1, parents: [] },
+     { self: { resource_id: "r", digest: "sha256:aa" } }, "sha256:bb"), "file-changed",
+     "1 · one file: the sha256 is still compared (unchanged rule)");
+}
+
+// ── the bridge of this check ────────────────────────────────────────────────
+const S3D = new URL("../../../s3Dgraphy/", import.meta.url).pathname;
+const PY = `${S3D}.venv/bin/python`;
+const DTC = new URL("../../../dtcstamp/", import.meta.url).pathname;
+const dir = realpathSync(mkdtempSync(`${tmpdir()}/campagna-`));
+let proc = null;
+let base = null;
+if (!existsSync(PY)) console.log("  (s3Dgraphy venv not found: the bridge cases are skipped)");
+else {
+  const port = await new Promise((res) => { const srv = createServer(); srv.listen(0, () => {
+    const pt = srv.address().port; srv.close(() => res(pt)); }); });
+  proc = spawn(PY, [`${TOOLS}em_bridge.py`, "--port", String(port), "--s3dgraphy", `${S3D}src`, "--fs-root", dir],
+    { stdio: "ignore", env: { ...process.env, PYTHONPATH: `${S3D}src:${DTC}`, EM_BRIDGE_STATE_DIR: `${dir}/.state` } });
+  base = `http://127.0.0.1:${port}`;
+  for (let i = 0; i < 100; i++) {
+    try { if ((await fetch(`${base}/health`)).ok) break; } catch { /* not yet */ }
+    await new Promise((r) => setTimeout(r, 150));
+  }
+}
+const H = { Origin: "http://localhost:5173", "content-type": "application/json" };
+const post = async (route, body) => (await fetch(`${base}${route}`, { method: "POST", headers: H, body: JSON.stringify(body) })).json();
+
+try {
+  if (base) {
+    compose.setComposeBridgeResolver(async () => base);
+    tree.setTreeBridgeResolver(async () => base);
+    const nodeFetch = globalThis.fetch;
+    globalThis.fetch = (u, init = {}) => nodeFetch(u, { ...init, headers: { ...(init.headers ?? {}), Origin: H.Origin } });
+
+    // a tile: obj → mtl → texture
+    mkdirSync(`${dir}/tile/textures`, { recursive: true });
+    writeFileSync(`${dir}/tile/T.obj`, "mtllib T.mtl\nv 0 0 0\nv 1 0 0\nv 0 1 0\nusemtl m\nf 1 2 3\n");
+    writeFileSync(`${dir}/tile/T.mtl`, "newmtl m\nmap_Kd textures/T.jpg\n");
+    writeFileSync(`${dir}/tile/textures/T.jpg`, "not really a jpeg");
+    const sets = await compose.fetchSets([`${dir}/tile/T.obj`]);
+    const set = sets[`${dir}/tile/T.obj`];
+    eq(set?.members?.length, 3, "1 · the door calls 2 files: a set of 3");
+
+    // stamp it as a file set, through the composer and the bridge
+    const draft = compose.newDraft([{ path: `${dir}/tile/T.obj`, name: "T.obj", size: 10, mtime: 0 }]);
+    draft.sets = sets;
+    compose.applyHandle(draft);
+    Object.assign(draft, { origin: true, originDeclared: true, campaign: "prova", kind: "photo", at: "2026-10-01",
+      operator: { id: "", label: "Prova" } });
+    const res = await compose.emitDraft(draft, { graph_id: "campagna" });
+    eq(res.written.length, 1, "1 · one sidecar, beside the door");
+    const v1 = await tree.verifyStamp(`${dir}/tile/T.obj`);
+    eq([v1?.kind, v1?.result?.ok], ["members", true], "1 · /stamp/verify: the members hold");
+    const side = JSON.parse(readFileSync(`${dir}/tile/T.obj.stamp.json`, "utf8"));
+    const rec = res.stamps[0].receipt;
+    ok(rec.checksum === side.self.digest && rec.checksum !== sha(readFileSync(`${dir}/tile/T.obj`)),
+       "1 · the receipt's checksum is the members digest, not the obj's sha256");
+    eq(receipts.checkReceipt(rec, side, sha(readFileSync(`${dir}/tile/T.obj`)), v1), "ok",
+       "1 · difetto 1 end to end: the shelf says «matches» right after the stamp");
+    appendFileSync(`${dir}/tile/textures/T.jpg`, " retouched");
+    const v2 = await tree.verifyStamp(`${dir}/tile/T.obj`);
+    eq(v2?.result?.changed, ["textures/T.jpg"], "1 · a retouched texture is named by /stamp/verify");
+    eq(receipts.checkReceipt(rec, side, null, v2), "file-changed", "1 · …and the receipt says the file changed");
+
+    // a tileset, and its .3tz
+    mkdirSync(`${dir}/ts/Data`, { recursive: true });
+    writeFileSync(`${dir}/ts/tileset.json`, JSON.stringify({ asset: { version: "1.0" }, geometricError: 1,
+      root: { boundingVolume: { box: [0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1] }, geometricError: 0, content: { uri: "Data/a.b3dm" } } }));
+    writeFileSync(`${dir}/ts/Data/a.b3dm`, "b3dm bytes");
+    execFileSync("python3", ["-c", "import sys; sys.path.insert(0, sys.argv[1]); import archive_3tz; archive_3tz.write_3tz(sys.argv[2], sys.argv[3])",
+      TOOLS, `${dir}/ts`, `${dir}/ts.3tz`]);
+    const tf = await post("/stamp/tree", { path: `${dir}/ts` });
+    const ta = await post("/stamp/tree", { path: `${dir}/ts.3tz` });
+    eq([tf.packaging, tf.digest_covers, ta.packaging, ta.digest_covers], ["directory", "members", "archive", "artifact"],
+       "8 · /stamp/tree: a tileset folder is a directory, a .3tz an archive");
+    eq(tf.content_digest.digest, ta.content_digest.digest, "8 · …the two forms of one tileset share the content digest");
+    eq(tf.digest, tf.content_digest.digest, "8 · a folder's digest IS its content digest");
+    eq(ta.digest, sha(readFileSync(`${dir}/ts.3tz`)), "8 · an archive's digest is its file's sha256");
+    eq((await post("/stamp/tree", { path: `${dir}/tile` })).ok, false, "8 · a folder without tileset.json is not a tree");
+
+    // emit the folder and the archive
+    for (const [path, packaging] of [[`${dir}/ts`, "directory"], [`${dir}/ts.3tz`, "archive"]]) {
+      const tr = await tree.treeOf(path);
+      const d = compose.newDraft([{ path: packaging === "directory" ? `${path}/tileset.json` : path,
+        name: packaging === "directory" ? "tileset.json" : "ts.3tz", size: 1, mtime: 0 }]);
+      d.tree = tr;
+      compose.applyHandle(d);
+      eq([d.outputs.length, d.outputs[0].path, d.outputs[0].tree?.packaging], [1, path, packaging],
+         `8 · the handle makes ONE output of the ${packaging}, its path the ${packaging === "directory" ? "folder" : "file"}`);
+      Object.assign(d, { origin: true, originDeclared: true, campaign: "prova", kind: "photo", at: "2026-10-01",
+        operator: { id: "", label: "Prova" } });
+      const r = await compose.emitDraft(d, { graph_id: "campagna" });
+      const st = existsSync(`${path}.stamp.json`) ? JSON.parse(readFileSync(`${path}.stamp.json`, "utf8")) : null;
+      eq([st?.self?.packaging, st?.self?.content_digest?.digest], [packaging, tf.content_digest.digest],
+         `8 · /stamp/emit writes a ${packaging} stamp with the content digest (${r.refused.map((x) => x.why).join("; ")})`);
+      const v = await tree.verifyStamp(path);
+      eq([v?.kind, v?.result?.ok], ["tree", true], `8 · /stamp/verify checks the ${packaging} by its content`);
+    }
+    // E.D.'s case: a .3tz stamped as one file, before the profile
+    execFileSync("cp", [`${dir}/ts.3tz`, `${dir}/old.3tz`]);
+    writeFileSync(`${dir}/old.3tz.stamp.json`, JSON.stringify({ stamp: 1, self: { resource_id: "res:x",
+      digest: sha(readFileSync(`${dir}/old.3tz`)), digest_covers: "artifact", packaging: "file" },
+      how: { dtc_kind: "transformation" }, from: [{ resource_id: "declared:x" }] }));
+    const old = await post("/stamp/tree", { path: `${dir}/old.3tz`, stamp: true });
+    eq([old.stamp?.stale, old.stamp?.why?.map((w) => w.code)], [true, ["packaging", "no-content-digest"]],
+       "8 · a .3tz stamped as `file` is «to update»: the packaging, and no content digest");
+    eq([old.proposed_self.packaging, old.proposed_self.content_digest.digest], ["archive", tf.content_digest.digest],
+       "8 · …with the proposal (archive + the content digest)");
+    ok(JSON.parse(readFileSync(`${dir}/old.3tz.stamp.json`, "utf8")).self.packaging === "file",
+       "8 · …and the stamp is NOT rewritten");
+  }
+} finally {
+  proc?.kill();
+}
+
+if (fails.length) {
+  console.error(`campagna: ${fails.length} of ${checks} checks FAILED:\n  - ${fails.join("\n  - ")}`);
+  process.exit(1);
+}
+console.log(`campagna: ${checks} checks passed`);

@@ -43,22 +43,63 @@ export type ReceiptCheck =
   | "sidecar-differs"  // the sidecar names other bytes (or another id) than the receipt
   | "unreachable";     // nothing to compare with here (no bridge, no file)
 
+/** CAMPAGNA · what the bridge says of a stamp checked by the KIND of thing it
+ *  stamped (`/stamp/verify`, dtcstamp `verify_members` / `verify_tree`): a file
+ *  set's members one by one, a tree's content digest. */
+export interface StampVerdict {
+  kind: "members" | "tree" | "file" | "missing";
+  result: { ok: boolean; missing?: string[]; changed?: string[]; extra?: string[];
+            list_consistent?: boolean; content?: boolean; file?: boolean | null };
+}
+
+/** Does this stamp cover more than the bytes of the file it sits beside? Then
+ *  the file's own sha256 is NOT its digest: a file set is its members, a folder
+ *  its content, and only dtcstamp can say whether they still hold. */
+export function coversMoreThanTheFile(
+  sidecar: { self?: { digest_covers?: string; packaging?: string; content_digest?: unknown } } | null | undefined,
+): boolean {
+  const self = sidecar?.self;
+  return !!self && (self.digest_covers === "members" || self.packaging === "file_set"
+    || self.packaging === "directory" || self.packaging === "archive" || !!self.content_digest);
+}
+
 /**
  * Compare a receipt with what is reachable: the sidecar's `self` and the bytes'
  * current digest (either may be missing). The sidecar is the truth: when it
  * disagrees with the receipt the receipt is the stale one.
+ *
+ * CAMPAGNA (1 ott, difetto 1) · a stamp of SEVERAL files — `digest_covers:
+ * members` — has the members digest as its `self.digest`, so the door's sha256
+ * never equals it, and comparing the two said «the file changed» right after
+ * the stamp. For such a stamp the bytes are judged by `verdict` (the members,
+ * each sha256 against its file; a tree's content), never by `fileDigest`.
  */
 export function checkReceipt(
   receipt: StampReceipt,
-  sidecar: { self?: { resource_id?: string; digest?: string } } | null | undefined,
+  sidecar: { self?: { resource_id?: string; digest?: string; digest_covers?: string;
+                      packaging?: string; content_digest?: unknown } } | null | undefined,
   fileDigest: string | null | undefined,
+  verdict?: StampVerdict | null,
 ): ReceiptCheck {
-  if (!sidecar && !fileDigest) return "unreachable";
-  if (fileDigest && receipt.checksum && fileDigest !== receipt.checksum) return "file-changed";
+  const byMembers = coversMoreThanTheFile(sidecar);
+  if (byMembers) {
+    if (!verdict) return "unreachable";
+    if (!verdict.result.ok) return "file-changed";
+  } else {
+    if (!sidecar && !fileDigest) return "unreachable";
+    if (fileDigest && receipt.checksum && fileDigest !== receipt.checksum) return "file-changed";
+  }
   const self = sidecar?.self;
   if (self && ((self.resource_id && self.resource_id !== receipt.id)
       || (self.digest && receipt.checksum && self.digest !== receipt.checksum))) return "sidecar-differs";
   return "ok";
+}
+
+/** The words for what changed under a file set's stamp: the members missing or
+ *  changed, by path — so «the file changed» can name WHICH file. */
+export function verdictChanged(verdict: StampVerdict | null | undefined): string[] {
+  const r = verdict?.result;
+  return r ? [...(r.changed ?? []), ...(r.missing ?? []).map((m) => `${m} ✕`)] : [];
 }
 
 /**

@@ -5545,7 +5545,7 @@ object.viewer-media {
 }
 .storage-row {
   display: grid;
-  grid-template-columns: 22px 1fr auto;
+  grid-template-columns: 22px 1fr auto auto;
   align-items: center;
   gap: 8px;
   padding: 4px 8px;
@@ -5570,6 +5570,15 @@ object.viewer-media {
   font-size: 11px;
   color: var(--text-faint);
   font-variant-numeric: tabular-nums;
+}
+/* CAMPAGNA · a member of a file set: inside a stamp, said quietly */
+.storage-member {
+  font-size: 10.5px;
+  color: var(--text-faint);
+  white-space: nowrap;
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 /* listed, because it IS in the folder — but it will be refused, and it says so
    before you click rather than after */
@@ -8536,3 +8545,9 @@ button.shelf-badge { cursor: pointer; font: inherit; font-size: 10.5px; }
 .stamp-declared-parent input { flex: 1 1 120px; min-width: 0; }
 .stamp-declared-level > select, .stamp-declared-level > input { max-width: 100%; }
 .res-declared, .res-blend { font-style: italic; }
+
+/* CAMPAGNA · a stamp older than the profile it should follow: said, with the
+   proposal, and nothing rewritten */
+.stamp-stale { margin: 8px 0; padding: 8px 10px; border: 1px solid var(--warn-border); background: var(--warn-soft);
+  color: var(--warn-ink); border-radius: var(--radius); font-size: 12px; }
+.stamp-stale ul { margin: 4px 0 6px 16px; padding: 0; }

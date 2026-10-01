@@ -217,7 +217,10 @@ import type { ModelOptions } from "./embed3d-native";
 import { KEYMAP, filterKeymap, keysText } from "./keymap";
 import { ReadingFiles } from "./reading-files";
 import * as aiv from "./ai-validation";
-import { checkReceipt, receiptOf, receiptsOfEmission, refreshedCopies, type ReceiptCheck } from "./receipt";
+import {
+  checkReceipt, coversMoreThanTheFile, receiptOf, receiptsOfEmission, refreshedCopies, verdictChanged,
+  type ReceiptCheck, type StampVerdict,
+} from "./receipt";
 import { parseTropy, promoteToDocument, tropyOf, tropyShelfInputs } from "./tropy";
 import {
   closeAddMenu,
@@ -512,8 +515,10 @@ import { hintsPathFor, readHints, recordFound, setHintsBridgeResolver } from "./
 // timbro, lo chiede.
 import {
   applyHandle, chainsFor, emitDraft, fetchSets, hasFileSets, missingFields, newDraft, outputFrom,
-  requiredFields, retitleStamp, roadFor, setComposeBridgeResolver, type Draft, type DraftInput,
+  DOOR_EXT, requiredFields, retitleStamp, roadFor, setComposeBridgeResolver,
+  type Draft, type DraftInput,
 } from "./stamp-compose";
+import { setTreeBridgeResolver, TREE_EXT, treeOf, verifyStamp, type TreeInfo } from "./stamp-tree";
 import {
   DECLARED_KINDS, landStep, parentLabel, type DeclaredKind, type DeclaredLevel,
 } from "./declared";
@@ -8589,6 +8594,7 @@ setStorageBridgeResolver(bridgeUrl);
 setStampBridgeResolver(bridgeUrl);
 setHintsBridgeResolver(bridgeUrl);
 setComposeBridgeResolver(bridgeUrl);
+setTreeBridgeResolver(bridgeUrl);
 // MICRO-cronologia · the Chronology view asks s3Dgraphy for the propagated
 // chronology through the same bridge, by the same rule.
 setChronologyBridgeResolver(bridgeUrl);
@@ -16563,12 +16569,21 @@ async function runReceiptCheck(id: string, path: string, rec: NonNullable<Return
   receiptChecks.set(id, "checking");
   let sidecar = null;
   let digest: string | null = null;
+  let verdict: StampVerdict | null = null;
   try { sidecar = await readStamp(stampPathFor(path)); } catch { sidecar = null; }
-  try { digest = await digestOf(path, 0, Date.now()); } catch { digest = null; }
-  const res = checkReceipt(rec, sidecar as never, digest);
+  // CAMPAGNA · a stamp of several files (a file set, a tree) is judged by its
+  // members, asked of dtcstamp — the door's own sha256 is not its digest
+  if (coversMoreThanTheFile(sidecar as never)) {
+    try { verdict = await verifyStamp(path); } catch { verdict = null; }
+  } else {
+    try { digest = await digestOf(path, 0, Date.now()); } catch { digest = null; }
+  }
+  const res = checkReceipt(rec, sidecar as never, digest, verdict);
   receiptChecks.set(id, res);
-  if (res === "file-changed" || res === "sidecar-differs")
-    logInfo(t(`receipt.check.${res}`) + ` · ${path}`);
+  if (res === "file-changed" || res === "sidecar-differs") {
+    const which = verdictChanged(verdict);
+    logInfo(t(`receipt.check.${res}`) + ` · ${path}` + (which.length ? ` · ${which.join(", ")}` : ""));
+  }
   renderShelf();
 }
 
@@ -17602,8 +17617,12 @@ function renderStorageInto(host: StorageHost): void {
     }
     // DTCEMS2 · la BOZZA in composizione, oppure — su un asset già timbrato —
     // IL TIMBRO, che non è un modulo da compilare.
+    // CAMPAGNA · what the stamps here cover (members of a file set are not
+    // unstamped files), read once per listing before anything counts them
+    await ensureFolderCover(listing);
+    if (!body.isConnected || storagePath(win) !== path) return;
     if (stampDraft) {
-      body.appendChild(stampComposeBox(win, listing.entries));
+      body.appendChild(stampComposeBox(win, listing));
     } else if (diskStamps.status === "stamped"
                && diskStamps.path === storageSelected(win)) {
       body.appendChild(stampedBox(diskStamps.path, diskStamps.chain.root));
@@ -17621,7 +17640,7 @@ function renderStorageInto(host: StorageHost): void {
         b.className = "primary";
         b.dataset.action = "compose-group";
         b.textContent = t("compose.openGroup", { n: String(picked.length) });
-        b.onclick = () => openDraft(picked, listing.entries);
+        b.onclick = () => openDraft(picked, listing);
         const clear = document.createElement("button");
         clear.className = "ghost";
         clear.textContent = t("compose.clearPick");
@@ -17645,8 +17664,9 @@ function renderStorageInto(host: StorageHost): void {
     }
     const list = document.createElement("div");
     list.className = "storage-list";
+    const cover = folderCover(listing);
     for (const entry of listing.entries) {
-      list.appendChild(storageRow(win, entry));
+      list.appendChild(storageRow(win, entry, cover));
     }
     body.appendChild(list);
     // …and put it back where it was: a folder you had scrolled through does not
@@ -17663,13 +17683,12 @@ function renderStorageInto(host: StorageHost): void {
 // la stessa macchina di scene di tutto il resto — comporre e leggere devono
 // somigliarsi, perché sono la stessa cosa vista prima e dopo.
 
-function openDraft(outputs: FsEntry[], nearby: FsEntry[] = []): void {
+function openDraft(outputs: FsEntry[], listing: FsListing): void {
   stampDraft = newDraft(outputs.map(outputFrom));
   // AUDIT N3 · THE ROAD FROM THE DATA: «viene da altri file» only when stamped
-  // files that can be its inputs are there, and the form says why
-  const stamped = nearby.filter((e) => e.type === "file" && !isStampPath(e.path)
-    && !outputs.some((o) => o.path === e.path)
-    && nearby.some((x) => x.path === stampPathFor(e.path))).length;
+  // files that can be its inputs are there, and the form says why. CAMPAGNA ·
+  // a stamped TILE beside the tiles is a peer, not a parent (difetto 3)
+  const stamped = inputCandidates(listing, outputs).length;
   stampDraft.origin = roadFor(stamped);
   stampDraft.originDeclared = stampDraft.origin;
   stampDraft.why = stamped
@@ -17704,6 +17723,13 @@ async function fillDraftSets(): Promise<void> {
   try {
     draft.sets = await fetchSets(draft.picked.map((o) => o.path));
   } catch { draft.sets = {}; }
+  // CAMPAGNA · a tileset.json is the door of its FOLDER, and a .3tz is an
+  // archive: one resource either way, with its content digest (difetto 8)
+  const one = draft.picked.length === 1 ? draft.picked[0] : null;
+  if (one && (one.name === "tileset.json" || TREE_EXT.test(one.name))) {
+    const at = one.name === "tileset.json" ? one.path.slice(0, one.path.lastIndexOf("/")) : one.path;
+    try { draft.tree = await treeOf(at); } catch { draft.tree = null; }
+  }
   if (stampDraft !== draft) return;
   applyHandle(draft);
   renderStorage();
@@ -17758,7 +17784,7 @@ async function fillDraftDigests(): Promise<void> {
  * settimana sarebbe tutto un'origine finta e il timbro smetterebbe di dire
  * qualcosa. `check-stamps.mjs` misura i due numeri.
  */
-function stampComposeBox(win: Win, entries: FsEntry[]): HTMLElement {
+function stampComposeBox(win: Win, listing: FsListing): HTMLElement {
   const draft = stampDraft as Draft;
   const box = document.createElement("div");
   box.className = "stamp-compose";
@@ -17768,7 +17794,8 @@ function stampComposeBox(win: Win, entries: FsEntry[]): HTMLElement {
   head.className = "stamp-compose-head";
   head.textContent = t("compose.head", { n: String(draft.outputs.length) });
   box.appendChild(head);
-  if (hasFileSets(draft)) box.appendChild(handleChoice(draft));
+  if (draft.tree) box.appendChild(treeChoice(draft));
+  else if (hasFileSets(draft)) box.appendChild(handleChoice(draft));
 
   // ── 1 · LA DOMANDA: «Da dove viene?» ─────────────────────────────────────
   const ask = document.createElement("div");
@@ -17898,10 +17925,7 @@ function stampComposeBox(win: Win, entries: FsEntry[]): HTMLElement {
       null, true));
   } else {
     // Da quali file — the stamped files next to these, each a toggle
-    const stamped = entries.filter((e) =>
-      e.type === "file" && !isStampPath(e.path)
-      && !draft.outputs.some((o) => o.path === e.path)
-      && entries.some((x) => x.path === stampPathFor(e.path)));
+    const stamped = inputCandidates(listing, draft.picked, draft.inputs.map((i) => i.path ?? ""));
     const list = document.createElement("div");
     list.className = "stamp-compose-inputs";
     list.dataset.field = "inputs";
@@ -18289,6 +18313,57 @@ function handleChoice(draft: Draft): HTMLElement {
   return box;
 }
 
+/** CAMPAGNA · a TREE is one resource: «the folder, one resource (directory)»
+ *  for a tileset.json, «the archive (archive)» for a .3tz — with its content
+ *  digest, the same for the two forms of one tileset. For a tileset.json the
+ *  file alone stays one click away. */
+function treeChoice(draft: Draft): HTMLElement {
+  const tr = draft.tree as TreeInfo;
+  const box = document.createElement("div");
+  box.className = "stamp-handle stamp-tree";
+  box.dataset.tree = tr.packaging;
+  const folderName = (tr.path.split("/").pop() || tr.path) + (tr.packaging === "directory" ? "/" : "");
+  const choice = (asTree: boolean): HTMLButtonElement => {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "stamp-road" + (draft.asTree === asTree ? " on" : "");
+    b.dataset.treeChoice = asTree ? "tree" : "file";
+    b.setAttribute("aria-pressed", String(draft.asTree === asTree));
+    const strong = document.createElement("b");
+    strong.textContent = asTree
+      ? t(tr.packaging === "directory" ? "tree.folder" : "tree.archive", { name: folderName, n: String(tr.files) })
+      : t("tree.fileOnly", { name: draft.picked[0]?.name ?? "" });
+    const sub = document.createElement("span");
+    sub.textContent = asTree
+      ? t(tr.packaging === "directory" ? "tree.folderSub" : "tree.archiveSub")
+      : t("tree.fileOnlySub");
+    b.append(strong, sub);
+    b.onclick = () => {
+      if (draft.asTree === asTree) return;
+      draft.asTree = asTree;
+      applyHandle(draft);
+      renderStorage();
+      redrawDraftPicture();
+      void fillDraftDigests();
+    };
+    return b;
+  };
+  const modes = document.createElement("div");
+  modes.className = "stamp-compose-modes";
+  modes.appendChild(choice(true));
+  if (tr.packaging === "directory") modes.appendChild(choice(false));
+  box.appendChild(modes);
+  const facts = document.createElement("div");
+  facts.className = "stamp-compose-why-road";
+  facts.dataset.contentDigest = tr.content_digest.digest;
+  facts.textContent = t("tree.facts", {
+    n: String(tr.files), size: formatBytes(tr.size_bytes),
+    digest: tr.content_digest.digest.slice(7, 15) + "…" + tr.content_digest.digest.slice(-4),
+  }) + (tr.packaging === "archive" && tr.canonical === false ? " · " + t("tree.notCanonical") : "");
+  box.appendChild(facts);
+  return box;
+}
+
 /** RISORSA-FILE · the parents DECLARED and not stamped, in levels going up: an
  *  object of a .blend, a file nobody stamped, a set of sources. A name may say
  *  {name} / {base}: composing a folder fills them per tile, and the chain is remembered
@@ -18412,6 +18487,91 @@ function field(text: string, value: string, onInput: (v: string) => void,
   return wrap;
 }
 
+// ── CAMPAGNA · what the stamps of a folder COVER ───────────────────────────
+//
+// A stamp of several files sits beside its door only (`OB_PODIO_LOD1.obj.
+// stamp.json`), and its mtl and texture have no sidecar of their own: counted
+// by «is there a `<file>.stamp.json`?» they were unstamped files (difetto 2,
+// 22 → 21 after a stamp covering 3), and the folder act made products of them.
+// So the sidecars of a folder are READ once per listing (keyed on their names
+// and mtimes) and their members kept: a member is not unstamped, it is IN a
+// stamp — said on its row, and never proposed again.
+
+interface FolderCover {
+  /** path of a member (door included) → the door whose stamp lists it */
+  memberOf: Map<string, string>;
+  /** doors whose stamp is a file set */
+  doors: Set<string>;
+  /** sidecar path → its stamp's self (for the seal on the row) */
+  selves: Map<string, Record<string, unknown>>;
+}
+const folderCovers = new Map<string, { key: string; cover: FolderCover }>();
+const emptyCover = (): FolderCover => ({ memberOf: new Map(), doors: new Set(), selves: new Map() });
+const coverKey = (listing: FsListing): string =>
+  listing.entries.filter((e) => isStampPath(e.path)).map((e) => `${e.name}@${e.mtime}`).join("|");
+
+/** The cover of a listing as far as it is known (empty until read). */
+function folderCover(listing: FsListing): FolderCover {
+  const c = folderCovers.get(listing.path);
+  return c && c.key === coverKey(listing) ? c.cover : emptyCover();
+}
+
+/** Read the sidecars of a listing and keep what they cover. */
+async function ensureFolderCover(listing: FsListing): Promise<FolderCover> {
+  const key = coverKey(listing);
+  const had = folderCovers.get(listing.path);
+  if (had && had.key === key) return had.cover;
+  const cover = emptyCover();
+  const dir = listing.path.replace(/\/+$/, "");
+  for (const e of listing.entries.filter((x) => x.type === "file" && isStampPath(x.path))) {
+    let st: Stamp | null = null;
+    try { st = await readStamp(e.path); } catch { st = null; }
+    const self = (st as unknown as { self?: Record<string, unknown> } | null)?.self;
+    if (!self) continue;
+    cover.selves.set(e.path, self);
+    const door = e.path.replace(/\.stamp\.json$/, "");
+    const members = Array.isArray(self.members) ? self.members as Array<{ path?: string }> : [];
+    if (self.packaging === "file_set" && members.length) {
+      cover.doors.add(door);
+      for (const m of members) if (m.path) cover.memberOf.set(`${dir}/${m.path}`, door);
+    }
+  }
+  folderCovers.set(listing.path, { key, cover });
+  return cover;
+}
+
+/** Is this file stamped — by its own sidecar, or as a member of a file set? */
+function isCovered(listing: FsListing, path: string): boolean {
+  return listing.entries.some((s) => s.path === stampPathFor(path)) || folderCover(listing).memberOf.has(path);
+}
+
+/** The files of a folder an act can still make: not a stamp, not reachable
+ *  only from outside, not stamped, not a member of a stamp. */
+function unstampedOf(listing: FsListing, except?: string): FsEntry[] {
+  return listing.entries.filter((e) =>
+    e.type === "file" && !isStampPath(e.path) && !e.outside && e.path !== except
+    && !isCovered(listing, e.path));
+}
+
+/** A stamped sibling that is a PEER of the outputs, not their parent: another
+ *  door of the same kind (a tile beside the tiles), stamped as a file set.
+ *  Proposing it as the input of the others was difetto 3. */
+function isPeerDoor(listing: FsListing, e: FsEntry, outputs: Array<{ path: string; name: string }>): boolean {
+  const ext = (n: string): string => (/\.([^./]+)$/.exec(n)?.[1] ?? "").toLowerCase();
+  return folderCover(listing).doors.has(e.path) && DOOR_EXT.test(e.name)
+    && outputs.some((o) => DOOR_EXT.test(o.name) && ext(o.name) === ext(e.name));
+}
+
+/** The stamped files next to these outputs that can be their inputs. */
+function inputCandidates(listing: FsListing, outputs: Array<{ path: string; name: string }>,
+                         chosen: string[] = []): FsEntry[] {
+  return listing.entries.filter((e) =>
+    e.type === "file" && !isStampPath(e.path)
+    && !outputs.some((o) => o.path === e.path)
+    && listing.entries.some((x) => x.path === stampPathFor(e.path))
+    && (chosen.includes(e.path) || !isPeerDoor(listing, e, outputs)));
+}
+
 /** I due ingressi alla composizione: questo file, o tutti i file non timbrati
  *  della cartella. **Il secondo è il gesto dei quattrocento scatti.** */
 function composeButtons(entry: FsEntry, listing: FsListing): HTMLElement {
@@ -18421,7 +18581,7 @@ function composeButtons(entry: FsEntry, listing: FsListing): HTMLElement {
   one.className = "ghost";
   one.dataset.action = "compose-one";
   one.textContent = t("compose.open", { name: entry.name });
-  one.onclick = () => openDraft([entry], listing.entries);
+  one.onclick = () => openDraft([entry], listing);
   box.appendChild(one);
   box.appendChild(composeFolderButton(listing, true));
   return box;
@@ -18443,15 +18603,25 @@ function composeButtons(entry: FsEntry, listing: FsListing): HTMLElement {
  * bridge rifiuterà uno per uno.
  */
 function composeFolderButton(listing: FsListing, inline = false): HTMLElement {
-  const stampable = listing.entries.filter((e) =>
-    e.type === "file" && !isStampPath(e.path) && !e.outside
-    && !listing.entries.some((s) => s.path === stampPathFor(e.path)));
+  const stampable = unstampedOf(listing);
   const b = document.createElement("button");
   b.className = "ghost";
   b.dataset.action = "compose-folder";
+  // CAMPAGNA · a TILESET folder is one resource (packaging: directory): the act
+  // is on the folder, never on its tileset.json alone (difetto 8)
+  const tileset = listing.entries.find((e) => e.type === "file" && e.name === "tileset.json");
+  if (tileset) {
+    b.textContent = t("compose.openTileset", { name: (listing.path.split("/").pop() || listing.path) + "/" });
+    b.onclick = () => openDraft([tileset], listing);
+    if (inline) return b;
+    const box = document.createElement("div");
+    box.className = "stamp-report-ask";
+    box.appendChild(b);
+    return box;
+  }
   b.textContent = t("compose.openFolder", { n: String(stampable.length) });
   b.disabled = !stampable.length;
-  b.onclick = () => openDraft(stampable, listing.entries);
+  b.onclick = () => openDraft(stampable, listing);
   if (inline) return b;
   const box = document.createElement("div");
   box.className = "stamp-report-ask";
@@ -18501,6 +18671,10 @@ function stampedBox(path: string, stamp: Stamp): HTMLElement {
   note.className = "stamp-emitted-note";
   note.textContent = t("compose.erratum");
   box.appendChild(note);
+  // CAMPAGNA · a .3tz stamped before the 3tz profile (packaging: file, no
+  // content digest) is recognised as «to update», with the stamp it would be.
+  // Nothing is rewritten: a stamp is not modified, a correction is a new act.
+  if (TREE_EXT.test(path)) box.appendChild(treeStaleBox(path));
 
   const forward = document.createElement("button");
   forward.className = "ghost";
@@ -18509,6 +18683,51 @@ function stampedBox(path: string, stamp: Stamp): HTMLElement {
   forward.title = t("compose.fromThisHint");
   forward.onclick = () => { void composeFromStamped(path, stamp); };
   box.appendChild(forward);
+  return box;
+}
+
+/** CAMPAGNA · «da aggiornare»: the stamp beside a .3tz says less than the 3tz
+ *  profile — what it lacks, and the `self` it would carry, to copy into the
+ *  erratum. Filled when the bridge answers; silent when the stamp is current. */
+function treeStaleBox(path: string): HTMLElement {
+  const box = document.createElement("div");
+  box.className = "stamp-stale";
+  box.hidden = true;
+  void (async () => {
+    let tr: TreeInfo | null = null;
+    try { tr = await treeOf(path, true); } catch { tr = null; }
+    if (!tr?.stamp?.stale || !box.isConnected) return;
+    box.hidden = false;
+    box.dataset.stale = "1";
+    const head = document.createElement("b");
+    head.textContent = t("tree.staleHead");
+    const why = document.createElement("ul");
+    for (const w of tr.stamp.why) {
+      const li = document.createElement("li");
+      li.textContent = t(`tree.stale.${w.code}`, { have: String(w.have ?? "—"), want: String(w.want ?? "") });
+      li.dataset.code = w.code;
+      why.appendChild(li);
+    }
+    const prop = document.createElement("div");
+    prop.className = "stamp-compose-why-road";
+    prop.textContent = t("tree.staleProposal", {
+      packaging: tr.packaging, digest: tr.content_digest.digest.slice(7, 15) + "…" + tr.content_digest.digest.slice(-4),
+    });
+    const pre = document.createElement("pre");
+    pre.className = "stamp-emitted-body";
+    pre.dataset.proposed = "self";
+    const proposed = { ...tr.stamp.self, ...tr.proposed_self };
+    pre.textContent = JSON.stringify({ self: proposed }, null, 1);
+    const copy = document.createElement("button");
+    copy.className = "ghost";
+    copy.dataset.action = "copy-proposed-stamp";
+    copy.textContent = t("tree.copyProposal");
+    copy.onclick = () => {
+      void navigator.clipboard?.writeText(JSON.stringify({ self: proposed }, null, 1));
+      toast(t("tree.copied"));
+    };
+    box.append(head, why, prop, pre, copy);
+  })();
   return box;
 }
 
@@ -18624,14 +18843,13 @@ async function composeFromStamped(path: string, stamp: Stamp): Promise<void> {
     toast(t("storage.bridgeDown"));
     return;
   }
-  const stampable = listing.entries.filter((e) =>
-    e.type === "file" && !isStampPath(e.path) && e.path !== path
-    && !listing.entries.some((s) => s.path === stampPathFor(e.path)));
+  await ensureFolderCover(listing);
+  const stampable = unstampedOf(listing, path);
   if (!stampable.length) {
     toast(t("compose.nothingToMake"));
     return;
   }
-  openDraft(stampable, listing.entries);
+  openDraft(stampable, listing);
   if (stampDraft) {
     stampDraft.origin = false;
     stampDraft.originDeclared = false;
@@ -20387,7 +20605,7 @@ function ingestTrail(): HTMLElement {
   return box;
 }
 
-function storageRow(win: Win, entry: FsEntry): HTMLElement {
+function storageRow(win: Win, entry: FsEntry, cover?: FolderCover): HTMLElement {
   const row = document.createElement("div");
   row.className = "storage-row" + (entry.outside ? " storage-outside" : "");
   row.dataset.path = entry.path;
@@ -20405,6 +20623,16 @@ function storageRow(win: Win, entry: FsEntry): HTMLElement {
     ? ""
     : `${formatBytes(entry.size)} · ${new Date(entry.mtime * 1000).toLocaleDateString()}`;
   row.append(icon, name, meta);
+  // CAMPAGNA · a member of a file set is IN a stamp, not unstamped: said here
+  const door = cover?.memberOf.get(entry.path);
+  if (door && door !== entry.path) {
+    const tag = document.createElement("span");
+    tag.className = "storage-member";
+    tag.dataset.memberOf = door;
+    tag.textContent = t("storage.memberOf", { door: baseName(door) });
+    tag.title = t("storage.memberOfHint", { door: baseName(door) });
+    row.appendChild(tag);
+  }
 
   if (entry.outside) {
     // The bridge already told us this one will be refused (a symlink out of the

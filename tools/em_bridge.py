@@ -945,6 +945,18 @@ def make_handler(api):
                     self._fail(400, f"invalid JSON body: {exc}")
                     return
                 self._stamp_members(body)
+            elif route in ("/stamp/verify", "/stamp/tree"):
+                # CAMPAGNA · a stamp checked against its bytes by the kind of
+                # thing it stamped (members, a tree, a file), and a tree — a
+                # tileset folder or a .3tz — as one resource. Read-only.
+                if not self._fs_gate():
+                    return
+                try:
+                    body = json.loads(raw.decode("utf-8")) if raw else {}
+                except Exception as exc:
+                    self._fail(400, f"invalid JSON body: {exc}")
+                    return
+                (self._stamp_verify if route == "/stamp/verify" else self._stamp_tree)(body)
             elif route == "/fs/pack-3tz":
                 # RISORSA-FILE · «Impacchetta un tileset in .3tz» (the desktop):
                 # the folder's tileset, written BESIDE it under the same name, in
@@ -1127,6 +1139,129 @@ def make_handler(api):
                 except Exception as exc:
                     out[path] = {"error": str(exc)}
             self._json({"ok": True, "sets": out})
+
+        def _stamp_verify(self, body):
+            """CAMPAGNA · ``{"path"}`` → is the stamp beside these bytes still
+            true of them? Asked of dtcstamp, by the kind of thing it stamped:
+
+            * a FILE SET (``digest_covers: members``, a door with its mtl and
+              textures): :func:`dtcstamp.verify_members` — every member's sha256
+              against its file, the list against ``self.digest``. The door's own
+              sha256 is NOT the stamp's digest, and comparing the two was the
+              false «the file changed» of the campaign (1 Oct, difetto 1);
+            * a TREE (``packaging: directory`` or ``archive``):
+              :func:`dtcstamp.verify_tree` — the content digest recomputed;
+            * one file: its sha256 against ``self.digest``.
+
+            ``{ok, kind, stamp_path, digest, result: {ok, missing, changed, …}}``;
+            ``ok: false`` with ``error`` when there is no stamp to verify."""
+            try:
+                import dtcstamp
+            except Exception as exc:
+                self._fail(501, f"dtcstamp is not importable here: {exc}")
+                return
+            full = os.path.abspath(os.path.expanduser(str(body.get("path") or "")))
+            if not _fs_inside_roots(full):
+                self._fail(403, "outside the folders this bridge serves")
+                return
+            stamp_path = full.rstrip("/") + ".stamp.json"
+            if not os.path.isfile(stamp_path):
+                self._json({"ok": False, "error": "no stamp beside this path"})
+                return
+            try:
+                stamp = dtcstamp.read_stamp(stamp_path)
+            except Exception as exc:
+                self._json({"ok": False, "error": f"unreadable stamp: {exc}"})
+                return
+            itself = stamp.get("self") or {}
+            packaging = itself.get("packaging")
+            try:
+                if itself.get("digest_covers") == "members" and packaging == "file_set":
+                    kind, result = "members", dtcstamp.verify_members(stamp, full)
+                elif packaging in ("directory", "archive") or itself.get("content_digest"):
+                    kind, result = "tree", dtcstamp.verify_tree(stamp, full)
+                elif os.path.isfile(full):
+                    now = dtcstamp.file_digest(full)
+                    kind, result = "file", {"ok": now == itself.get("digest"),
+                                            "digest": now}
+                else:
+                    kind, result = "missing", {"ok": False, "missing": [full]}
+            except Exception as exc:
+                self._json({"ok": False, "error": str(exc)})
+                return
+            self._json({"ok": True, "kind": kind, "stamp_path": stamp_path,
+                        "digest": itself.get("digest"), "packaging": packaging,
+                        "digest_covers": itself.get("digest_covers"),
+                        "result": result})
+
+        def _stamp_tree(self, body):
+            """CAMPAGNA · ``{"path"}`` → a TREE as one resource: a folder with a
+            ``tileset.json`` (``packaging: directory``) or a ``.3tz``
+            (``packaging: archive``). ``{packaging, digest, digest_covers,
+            content_digest, files, size_bytes, canonical?}`` — the ``self`` the
+            stamp would carry (dtcstamp :func:`new_tree_stamp`, nothing written).
+
+            With ``stamp: true`` and a stamp beside it, also whether that stamp
+            already says so: an archive stamped as ``packaging: file`` with no
+            ``content_digest`` (stamped before the 3tz profile) is ``stale`` and
+            the answer carries the proposed ``self`` — the stamp is never
+            rewritten here: a correction is a new act."""
+            try:
+                import dtcstamp
+            except Exception as exc:
+                self._fail(501, f"dtcstamp is not importable here: {exc}")
+                return
+            full = os.path.abspath(os.path.expanduser(str(body.get("path") or ""))).rstrip("/")
+            if not _fs_inside_roots(full):
+                self._fail(403, "outside the folders this bridge serves")
+                return
+            is_dir = os.path.isdir(full)
+            if is_dir and not os.path.isfile(os.path.join(full, "tileset.json")):
+                self._json({"ok": False, "error": "a folder is one resource here only when it is a tileset (tileset.json at its root)"})
+                return
+            if not is_dir and not full.lower().endswith(".3tz"):
+                self._json({"ok": False, "error": "not a tileset folder nor a .3tz"})
+                return
+            try:
+                proposed = dtcstamp.new_tree_stamp(full, "res:tree")["self"]
+                proposed.pop("resource_id", None)
+                members = (proposed.get("content_digest") or {}).get("files")
+                if not isinstance(members, int):
+                    members = len(dtcstamp.tree_members(full))
+                files = members
+                size = (proposed.get("measures") or {}).get("size_bytes")
+                if size is None:
+                    size = sum(os.path.getsize(os.path.join(d, n)) for d, _s, ns in os.walk(full) for n in ns)
+                out = {"ok": True, "path": full, "packaging": proposed["packaging"],
+                       "digest": proposed["digest"], "digest_covers": proposed["digest_covers"],
+                       "content_digest": proposed["content_digest"], "files": files,
+                       "size_bytes": size, "proposed_self": proposed}
+                if not is_dir:
+                    canon = dtcstamp.is_canonical_3tz(full)
+                    out["canonical"] = bool(canon.get("canonical"))
+                    out["canonical_reasons"] = canon.get("reasons") or []
+            except Exception as exc:
+                self._json({"ok": False, "error": str(exc)})
+                return
+            sp = full + ".stamp.json"
+            if body.get("stamp") and os.path.isfile(sp):
+                try:
+                    have = dtcstamp.read_stamp(sp).get("self") or {}
+                except Exception as exc:
+                    have = {}
+                    out["stamp_error"] = str(exc)
+                # codes, not sentences: the interface says them in its language
+                why = []
+                if have.get("packaging") != proposed["packaging"]:
+                    why.append({"code": "packaging", "have": have.get("packaging"),
+                                "want": proposed["packaging"]})
+                if not (have.get("content_digest") or {}).get("digest") and proposed["packaging"] == "archive":
+                    why.append({"code": "no-content-digest"})
+                if have.get("digest") and have.get("digest") != proposed["digest"]:
+                    why.append({"code": "digest"})
+                out["stamp"] = {"path": sp, "stale": bool(why), "why": why,
+                                "self": have}
+            self._json(out)
 
         def _stamp_emit(self, body):
             """Compone un passo e ne emette i timbri — **via s3Dgraphy, sempre**.
@@ -1377,6 +1512,30 @@ def make_handler(api):
                         continue
                     notes.extend(followed.get("warnings") or [])
                     clean = {k: v for k, v in fs.items() if not str(k).startswith("_")}
+                # CAMPAGNA · a TREE — a tileset folder (`packaging: directory`)
+                # or a .3tz (`packaging: archive`) — is stamped by dtcstamp on the
+                # same blocks: `new_tree_stamp` writes the content digest, the
+                # same for the two forms of one tileset (difetto 8). The digest
+                # the person composed must still be the one on disk.
+                elif out.get("packaging") in ("directory", "archive") and _full:
+                    try:
+                        import dtcstamp
+                        blocks = {k: v for k, v in clean.items() if k != "self"}
+                        own = {k: clean["self"][k] for k in ("label", "description", "tier")
+                               if k in (clean.get("self") or {})}
+                        tree = dtcstamp.new_tree_stamp(_full, out["resource_id"], self=own, **blocks)
+                    except Exception as exc:
+                        refused.append({"path": out.get("path"), "why": f"tree: {exc}"})
+                        continue
+                    if tree["self"].get("packaging") != out["packaging"]:
+                        refused.append({"path": out.get("path"),
+                                        "why": f"this is a {tree['self'].get('packaging')}, not a {out['packaging']}"})
+                        continue
+                    if out.get("digest") and tree["self"].get("digest") != out["digest"]:
+                        refused.append({"path": out.get("path"),
+                                        "why": "the tree changed since the step was composed: compose it again"})
+                        continue
+                    clean = {k: v for k, v in tree.items() if not str(k).startswith("_")}
                 # AUDIT N3 · an operator known BY NAME only (the form takes «a
                 # name or an ORCID»): no author node can carry it without an id
                 # (`_author_of` would fall back to the node id as a label), so

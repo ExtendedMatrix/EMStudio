@@ -42,6 +42,7 @@ import {
   type DeclaredLevel, type FollowedSet, type Member,
 } from "./declared";
 import type { FsEntry } from "./storage";
+import type { TreeInfo } from "./stamp-tree";
 
 /** Un'uscita della bozza: un file selezionato che non è ancora timbrato. */
 export interface DraftOutput {
@@ -58,6 +59,10 @@ export interface DraftOutput {
   members?: Member[];
   /** the warnings of the walk (an absolute path, a file that is not there) */
   memberWarnings?: string[];
+  /** CAMPAGNA · a TREE stamped as one resource: a tileset folder
+   *  (`packaging: directory`, its digest the content digest) or a `.3tz`
+   *  (`packaging: archive`, its digest the file's, the content digest beside) */
+  tree?: TreeInfo;
 }
 
 /** Un ingresso: **deve essere timbrato**, perché un figlio timbrato non può
@@ -108,6 +113,11 @@ export interface Draft {
   bundle: boolean;
   /** the parents DECLARED and not stamped, level 0 first (see declared.ts) */
   declared: DeclaredLevel[];
+  /** CAMPAGNA · the tree the picked file belongs to or is (a tileset folder
+   *  for its `tileset.json`, the `.3tz` itself), from the bridge */
+  tree: TreeInfo | null;
+  /** «La cartella, una risorsa» (true, the default) or «solo tileset.json» */
+  asTree: boolean;
 }
 
 export function newDraft(outputs: DraftOutput[]): Draft {
@@ -137,6 +147,8 @@ export function newDraft(outputs: DraftOutput[]): Draft {
     sets: {},
     bundle: true,
     declared: [],
+    tree: null,
+    asTree: true,
   };
 }
 
@@ -149,6 +161,16 @@ export const hasFileSets = (draft: Draft): boolean =>
  *  and members digest on it) and the files it calls absorbed; without, every
  *  file picked. Called after the sets arrive and on every change of the choice. */
 export function applyHandle(draft: Draft): void {
+  // CAMPAGNA · a tree is ONE resource: the folder (not its tileset.json), or the
+  // .3tz as an archive with its content digest
+  if (draft.tree && draft.asTree && draft.picked.length === 1) {
+    const tr = draft.tree;
+    const name = tr.path.split("/").pop() || tr.path;
+    draft.outputs = [{ path: tr.path, name, size: tr.size_bytes, mtime: draft.picked[0].mtime,
+                       digest: tr.digest, tree: tr,
+                       media_type: tr.packaging === "archive" ? "application/vnd.maxar.archive.3tz+zip" : undefined }];
+    return;
+  }
   if (!draft.bundle || !hasFileSets(draft)) {
     draft.outputs = draft.picked.map((o) => ({ ...o, members: undefined, memberWarnings: undefined,
       digest: o.members ? undefined : o.digest }));
@@ -333,8 +355,9 @@ async function emitOne(
       description: draft.description.trim() || undefined,
       media_type: o.members ? undefined : o.media_type,
       // RISORSA-FILE · a door with members is a FILE SET: its digest is the
-      // members digest (dtcstamp), its files travel with it
-      packaging: o.members ? "file_set" : "file",
+      // members digest (dtcstamp), its files travel with it. CAMPAGNA · a tree
+      // is a `directory` or an `archive`: dtcstamp writes its content digest
+      packaging: o.tree ? o.tree.packaging : o.members ? "file_set" : "file",
       tier: draft.origin ? "master" : "distribution",
       size_bytes: o.size,
       ...(o.members ? { files: o.members.map((m) => ({ path: m.path, digest: m.digest,
@@ -442,3 +465,4 @@ export function mediaTypeOf(ext: string): string | undefined {
     pdf: "application/pdf", zip: "application/zip",
   } as Record<string, string>)[e];
 }
+
