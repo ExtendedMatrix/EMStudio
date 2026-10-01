@@ -2598,6 +2598,18 @@ const EN: Dict = {
   "idp.clientId": "ORCID client id (public)",
   "idp.clientBase": "ORCID",
   "settings.w.identity": "ORCID sign-in",
+  // ── TRADUZIONI parte 5 ──
+  "me.sourceLang": "Language of the source",
+  "me.langAsStudy": "as the study ({lang})",
+  "me.langUndeclared": "— not declared —",
+  "me.langDiff": "Different from the study ({study}): every node this import creates is born with the language «{lang}» (data.lang).",
+  "me.langSame": "As the study ({lang}): the nodes take it from the study.",
+  "me.langNone": "none declared",
+  "me.langNoneNote": "Neither the source nor the study declares a language: the texts will have none until one is declared.",
+  "storage.docDir": "The em.json's folder",
+  "storage.docDirNoGraph": "no graph is open",
+  "storage.docDirNoFile": "the graph does not come from a file with a known path (opened in the browser, or new)",
+  "storage.docDirNotServed": "{dir} is not served by the bridge: add it with «+ 📁»",
 };
 
 // ── Italiano: complete, because E.D. works in it ───────────────────────────────
@@ -5071,6 +5083,18 @@ const IT: Dict = {
   "idp.clientId": "Client ORCID (pubblico)",
   "idp.clientBase": "ORCID",
   "settings.w.identity": "accesso con ORCID",
+  // ── TRADUZIONI parte 5 ──
+  "me.sourceLang": "Lingua della fonte",
+  "me.langAsStudy": "come lo studio ({lang})",
+  "me.langUndeclared": "— non dichiarata —",
+  "me.langDiff": "Diversa dallo studio ({study}): ogni nodo che questa importazione crea nasce con la lingua «{lang}» (data.lang).",
+  "me.langSame": "Come lo studio ({lang}): i nodi la prendono dallo studio.",
+  "me.langNone": "nessuna dichiarata",
+  "me.langNoneNote": "Né la fonte né lo studio dichiarano una lingua: i testi non ne avranno finché non la si dichiara.",
+  "storage.docDir": "La cartella dell'em.json",
+  "storage.docDirNoGraph": "nessun grafo aperto",
+  "storage.docDirNoFile": "il grafo non viene da un file con un percorso noto (aperto nel browser, o nuovo)",
+  "storage.docDirNotServed": "{dir} non è servita dal bridge: aggiungila con «+ 📁»",
 };
 
 // ── The six other project languages: AI DRAFTS, awaiting validation ───────────

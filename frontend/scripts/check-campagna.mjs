@@ -338,6 +338,16 @@ pd.DataFrame([["San Pietro", None, None], ["Nome", "Descrizione", "Url"], ["D.01
     const f2 = await post("/mapping-fields", { path: `${dir}/sources.xlsx`, header_row: 2 });
     eq([f2.header_row, f2.fields.map((x) => x.name)], [2, ["Nome", "Descrizione", "Url"]], "15 · …and from row 2 the fields are the real ones");
     eq(f2.fields.find((x) => x.name === "Url").samples, ["", "x"], "15 · …an empty cell is empty, not «nan»");
+    // TRADUZIONI · the header row and the language GO TO s3Dgraphy (dev26): no
+    // copy of the sheet; an authored mapping over a sheet arrives (it did not)
+    const mapping = { name: "sources", version: "1.0", source_settings: { format_type: "xlsx" },
+      column_mappings: { Nome: { cidoc: "E31 Document", is_id: true },
+                         Descrizione: { cidoc: "E31 Document", is_description: true, target_id_column: "Nome" } } };
+    const ap = await post("/mapping-apply", { path: `${dir}/sources.xlsx`, mapping, header_row: 2, source_lang: "it", mode: "bake" });
+    const docs = (ap.graph?.graph?.nodes ?? []).filter((n) => n.node_type === "document");
+    eq([ap.ok, ap.report?.header?.header_row, ap.report?.source_lang_written, docs.map((n) => [n.name, n.description, n.data?.lang])],
+       [true, 2, 2, [["D.01", "Rilievo", "it"], ["D.02", "Incisione", "it"]]],
+       "dev26 · an authored mapping over a sheet: header from row 2, the nodes born with data.lang «it»");
     const r0 = await fetch(`${base}/fs/roots`, { method: "POST", headers: H, body: JSON.stringify({ action: "add", path: "/" }) });
     eq([r0.status, (await r0.json()).code], [409, "whole-disk"], "10 · the whole disk is not served on one click: 409 whole-disk");
     const rr = await (await fetch(`${base}/fs/roots`, { headers: H })).json();

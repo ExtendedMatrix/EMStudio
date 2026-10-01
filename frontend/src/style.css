@@ -174,10 +174,24 @@
      (ΔRGB 35 and 177), so they keep their own pair. */
   --border-faint: #eef1f4;
   --danger-border: #e4b6b4;
+  /* the Scene 3D (and the tiles drawn in it): the renderer is transparent, the
+     floor of the view is this gradient — light here, dark in the dark theme */
+  --scene-bg-top: #e9eef3;
+  --scene-bg-bottom: #d9dfe6;
+  --scene-ink: #334;
+  --scene-ov-bg: rgba(255, 255, 255, 0.92);
+  --scene-ov-ink: #1d1d1b;
+  --scene-ov-border: #c5ccd5;
 }
 
 [data-theme="dark"] {
   color-scheme: dark;
+  --scene-bg-top: #1b2430;
+  --scene-bg-bottom: #0e141c;
+  --scene-ink: #c9d3df;
+  --scene-ov-bg: rgba(23, 30, 40, 0.92);
+  --scene-ov-ink: #e8edf4;
+  --scene-ov-border: #34404f;
   --brand: #0c2036;
   --on-brand: #e8edf4;
   --accent: #e3b43a;
@@ -8087,6 +8101,12 @@ body.gesturing-resize * {
   --brand-ink: #073763;
   --border-faint: #eef1f4;
   --danger-border: #e4b6b4;
+  --scene-bg-top: #e9eef3;
+  --scene-bg-bottom: #d9dfe6;
+  --scene-ink: #334;
+  --scene-ov-bg: rgba(255, 255, 255, 0.92);
+  --scene-ov-ink: #1d1d1b;
+  --scene-ov-border: #c5ccd5;
   background: var(--bg-panel);
   color: var(--text);
 }
@@ -8419,16 +8439,16 @@ button.shelf-badge { cursor: pointer; font: inherit; font-size: 10.5px; }
 .scn-seg button[aria-pressed="true"] { background: var(--accent); color: var(--on-accent); }
 .scn-tg { border: 1px solid var(--border-strong); background: var(--bg-panel); color: var(--text); border-radius: var(--radius-sm); padding: 2px 8px; font: inherit; cursor: pointer; }
 .scn-tg[aria-pressed="true"] { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
-.scn-host { position: relative; flex: 1; min-height: 200px; overflow: hidden; background: linear-gradient(#e9eef3, #d9dfe6); }
+.scn-host { position: relative; flex: 1; min-height: 200px; overflow: hidden; background: linear-gradient(var(--scene-bg-top), var(--scene-bg-bottom)); }
 .scn-host .scn-canvas { display: block; width: 100%; height: 100%; cursor: grab; }
-.scn-status { position: absolute; inset: 0; display: grid; place-content: center; color: #334; font-size: 0.8rem; }
-.scn-ov { position: absolute; left: 10px; top: 10px; max-width: min(380px, 72%); background: rgba(255, 255, 255, 0.92); color: #1d1d1b; border: 1px solid #c5ccd5; border-radius: 8px; padding: 7px 10px; font-size: 0.76rem; line-height: 1.45; z-index: 2; }
+.scn-status { position: absolute; inset: 0; display: grid; place-content: center; color: var(--scene-ink); font-size: 0.8rem; }
+.scn-ov { position: absolute; left: 10px; top: 10px; max-width: min(380px, 72%); background: var(--scene-ov-bg); color: var(--scene-ov-ink); border: 1px solid var(--scene-ov-border); border-radius: 8px; padding: 7px 10px; font-size: 0.76rem; line-height: 1.45; z-index: 2; }
 .scn-ov b { font-weight: 600; }
-.scn-ov .miss { color: #a33; }
-.scn-ov .ref { color: #8a5a00; }
-.scn-ov .ok { color: #2e6b32; }
-.scn-ov .link { border: 0; background: none; padding: 0; color: #04486b; border-bottom: 1px dotted currentColor; cursor: pointer; font: inherit; }
-.scn-empty { position: absolute; inset: 0; display: grid; place-content: center; justify-items: center; text-align: center; gap: 8px; color: #334; padding: 24px; z-index: 1; background: linear-gradient(#e9eef3, #d9dfe6); }
+.scn-ov .miss { color: var(--danger); }
+.scn-ov .ref { color: var(--warn); }
+.scn-ov .ok { color: var(--ok); }
+.scn-ov .link { border: 0; background: none; padding: 0; color: var(--info-ink); border-bottom: 1px dotted currentColor; cursor: pointer; font: inherit; }
+.scn-empty { position: absolute; inset: 0; display: grid; place-content: center; justify-items: center; text-align: center; gap: 8px; color: var(--scene-ink); padding: 24px; z-index: 1; background: linear-gradient(var(--scene-bg-top), var(--scene-bg-bottom)); }
 .scn-empty b { font-size: 0.95rem; }
 .scn-empty p { margin: 0; max-width: 46ch; font-size: 0.82rem; }
 .scn-labels { position: absolute; inset: 0; pointer-events: none; }

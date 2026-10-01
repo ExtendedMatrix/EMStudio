@@ -132,6 +132,13 @@ export interface MappingEditorState {
   headerRow?: number;
   headerProposal?: number;
   headerPreview?: string[][];
+  /** TRADUZIONI · the language the source is written in (a BCP 47 tag; "" = as
+   *  the study), and the study's own — when they differ, the nodes are born
+   *  with `data.lang` (s3Dgraphy `source_lang`) */
+  sourceLang?: string;
+  studyLang?: string | null;
+  /** the languages offered, with their names, from the caller */
+  languages?: Array<{ value: string; label: string }>;
   /** XML: which element is one RECORD, and the candidates the library found */
   recordPath?: string;
   recordPaths?: Array<{ path: string; count: number }>;
@@ -293,6 +300,8 @@ export interface MappingEditorHandlers {
   setTable(table: string): void;
   /** CAMPAGNA · the header is on this row (1-based) */
   setHeaderRow(row: number): void;
+  /** TRADUZIONI · the source is written in this language ("" = as the study) */
+  setSourceLang(lang: string): void;
   setRecordPath(path: string): void;
   setName(name: string): void;
   setChoice(field: string, choice: FieldChoice): void;
@@ -546,6 +555,24 @@ function sourceBox(state: MappingEditorState, h: MappingEditorHandlers,
     }));
     section.appendChild(pickerRow(t("me.headerRow"), rows, String(state.headerRow ?? 1),
                                   (value) => h.setHeaderRow(Number(value)), busy));
+  }
+  // TRADUZIONI · …and in WHICH LANGUAGE the source is written: it starts from
+  // the study's; a different one is written on every node the import creates
+  if (state.format && state.languages?.length) {
+    const study = state.studyLang ?? "";
+    const opts = [{ value: "", label: study ? t("me.langAsStudy", { lang: study }) : t("me.langUndeclared") },
+                  ...state.languages.filter((o) => o.value !== study)];
+    const row = pickerRow(t("me.sourceLang"), opts, state.sourceLang ?? "", (value) => h.setSourceLang(value), busy);
+    row.dataset.meSourceLang = "1";
+    section.appendChild(row);
+    const chosen = state.sourceLang ?? "";
+    const note = document.createElement("p");
+    note.className = "me-muted";
+    note.dataset.meLangNote = chosen ? "diff" : "same";
+    note.textContent = chosen
+      ? t("me.langDiff", { lang: chosen, study: study || t("me.langNone") })
+      : study ? t("me.langSame", { lang: study }) : t("me.langNoneNote");
+    section.appendChild(note);
   }
   // WHICH table, or WHICH element is a record — the one question a reader
   // cannot answer for the author (see `mapping_source_fields`)

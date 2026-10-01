@@ -2095,8 +2095,31 @@ def make_handler(api):
                 extra["header_row"] = header_row
             if source_lang and "source_lang" in params:
                 extra["source_lang"] = source_lang
+            # A mapping WRITTEN in the editor, over a sheet: s3Dgraphy's table
+            # importers load their mapping from the registry BY NAME
+            # (`apply_mapping`: «a xlsx source needs mapping_name»), and the
+            # editor holds an object. Measured 1 Oct 2026 on San Pietro: an
+            # authored mapping over an xlsx never reached the importer, saved or
+            # not. The object is filed in the stage's own registry folder, under
+            # its name, and applied by that name — the same object, nothing
+            # rewritten.
+            mapping_name = str(body.get("mapping_name") or "").strip() or None
+            if mapping_name is None and _is_sheet(path) and isinstance(mapping, dict):
+                try:
+                    from s3dgraphy.mappings import mapping_registry
+                    folder = _stage_dir() / "mappings"
+                    folder.mkdir(parents=True, exist_ok=True)
+                    raw_name = str(mapping.get("name") or "editor")
+                    safe = "".join(c if (c.isalnum() or c in "-_") else "_" for c in raw_name) or "editor"
+                    mapping_name = f"{safe}_mapping"
+                    with open(folder / f"{mapping_name}.json", "w", encoding="utf-8") as handle:
+                        json.dump(mapping, handle, ensure_ascii=False, indent=1)
+                    mapping_registry.add_mapping_directory("generic", str(folder))
+                except Exception as exc:               # noqa: BLE001
+                    self._fail(500, f"the mapping could not be filed for the sheet importer: {exc}")
+                    return None
             report = api.mapping_apply(mapping, path, mode=mode, graph=host,
-                                       mapping_name=body.get("mapping_name"),
+                                       mapping_name=mapping_name,
                                        **extra)
             graph = report.pop("graph", None)
             out = {"ok": bool(report.get("ok")), "report": report}

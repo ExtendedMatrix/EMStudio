@@ -8204,6 +8204,8 @@ async function readMappedSource(
                                : { mapping_name: mappingName }),
       mode: "volatile",
       attach_only: true,
+      ...(Number(o.headerRow) > 1 ? { header_row: Number(o.headerRow) } : {}),
+      ...(typeof o.sourceLang === "string" && o.sourceLang ? { source_lang: o.sourceLang } : {}),
       // the host graph travels in the body: the bridge holds no documents, so
       // "this graph" is said by sending it
       doc: store.doc,
@@ -8260,6 +8262,11 @@ function openImportDoor(fill: Partial<MappingEditorState> = {}): void {
     choices: {}, relations: [], edgeOptions: {},
     hostLabel: slot ? slotLabel(slot) : undefined,
     target: slot && fill.from?.kind === "aux" ? "this" : "new",
+    // TRADUZIONI · the language of the source starts from the study's
+    studyLang: store ? trx.workingLanguage(store.doc) : null,
+    sourceLang: "",
+    languages: trx.COMMON_LANGUAGES.filter((x) => x !== "und")
+      .map((tag) => ({ value: tag, label: `${tag} · ${trx.languageName(tag, getLocale())}` })),
     ...fill,
   };
   openFloatingTool("mapping-editor", t("me.tool"));
@@ -8303,7 +8310,10 @@ function auxSpecOfEditor(): Pick<AuxiliaryFile, "name" | "locator" | "fileType" 
   switch (s.mappingKind ?? "authored") {
     case "authored":
       return { name, locator, fileType: "mapped_source" as AuxFileType,
-               options: { mapping: buildMapping(s) } };
+               options: { mapping: buildMapping(s),
+                          // the header row and the language travel with the row
+                          ...((s.headerRow ?? 1) > 1 ? { headerRow: s.headerRow } : {}),
+                          ...(s.sourceLang ? { sourceLang: s.sourceLang } : {}) } };
     case "file":
       return { name, locator, fileType: "mapped_source" as AuxFileType,
                options: { mappingPath: s.mappingPath ?? "" } };
@@ -8369,6 +8379,10 @@ async function applyImportDoor(): Promise<boolean> {
           : { mapping_name: s.mappingName ?? "" };
         const answer = await applyMapping({ path, ...spec,
           ...(kind === "authored" && (s.headerRow ?? 1) > 1 ? { header_row: s.headerRow } : {}),
+          // a NEW graph has no working language of its own: «as the study» is
+          // then the open study's, written on the nodes, or they would be born
+          // with none
+          ...((s.sourceLang || s.studyLang) ? { source_lang: s.sourceLang || s.studyLang } : {}),
           mode: landing === "volatile" ? "volatile" : "bake" });
         doc = answer?.graph;
         report = auxReportOf(answer?.report);
@@ -11941,6 +11955,10 @@ const meHandlers: MappingEditorHandlers = {
   setHeaderRow: (row) => {
     meState.headerRow = row;
     void readMappingSource();
+  },
+  setSourceLang: (lang) => {
+    meState.sourceLang = lang;
+    refreshMappingEditor();
   },
   setRecordPath: (path) => {
     meState.recordPath = path;
@@ -18168,6 +18186,7 @@ function storageHostsNow(): StorageHost[] {
 
 /** Paint every Storage surface on screen. */
 function renderStorage(): void {
+  refreshDocFolderButtons();
   for (const host of storageHostsNow()) {
     // AUDIT N0 · the delivery form's text fields rebuild the panel on commit;
     // while the focus is in one of its fields that waits for the blur
@@ -19417,6 +19436,34 @@ async function storageFollowDocument(path: string | null): Promise<void> {
     for (const w of windowsOf(ws.id).filter((x) => x.type === "storage" && winModeOf(x) === "filesystem"))
       setWinCurrent(w, "fsPath", dir);
   renderStorage();
+}
+
+/** TRADUZIONI parte 5 · the folder of the open em.json, or null with why. */
+function documentFolder(): { dir: string } | { why: string } {
+  if (!store) return { why: t("storage.docDirNoGraph") };
+  if (!currentFilePath) return { why: t("storage.docDirNoFile") };
+  const dir = currentFilePath.replace(/[\\/][^\\/]*$/, "");
+  return dir ? { dir } : { why: t("storage.docDirNoFile") };
+}
+
+/** The «📍» of a Storage header: its state follows the open document. */
+function refreshDocFolderButton(b: HTMLButtonElement): void {
+  const f = documentFolder();
+  b.disabled = "why" in f;
+  b.title = "why" in f ? `${t("storage.docDir")} — ${f.why}` : `${t("storage.docDir")} · ${f.dir}`;
+  b.setAttribute("aria-label", t("storage.docDir"));
+}
+function refreshDocFolderButtons(): void {
+  document.querySelectorAll<HTMLButtonElement>(".win-strip-docdir").forEach(refreshDocFolderButton);
+}
+
+/** Go there — when the bridge serves it; otherwise say so (and how to). */
+async function storageToDocumentFolder(win: Win): Promise<void> {
+  const f = documentFolder();
+  if ("why" in f) { toast(f.why); return; }
+  try { await fsList(f.dir); }
+  catch { toast(t("storage.docDirNotServed", { dir: f.dir })); return; }
+  setStoragePath(win, f.dir);
 }
 
 /** «Apri in Scena» for a tileset on disk (a .3tz, a tileset.json, a folder). */
@@ -23018,7 +23065,18 @@ function buildHeaderStrip(win: Win): HTMLElement {
       e.stopPropagation();
       focusThen(win, () => void openStoragePlaces(win, root));
     });
-    strip.append(up, crumb, root);
+    // TRADUZIONI parte 5 · «📍 the em.json's folder»: back to the folder of the
+    // open file from wherever the Storage is; disabled, with the reason, when
+    // the graph does not come from a file with a known path
+    const home = document.createElement("button");
+    home.className = "win-act win-strip-docdir";
+    home.textContent = "📍";
+    home.addEventListener("click", (e) => {
+      e.stopPropagation();
+      focusThen(win, () => void storageToDocumentFolder(win));
+    });
+    refreshDocFolderButton(home);
+    strip.append(up, crumb, home, root);
     return strip;
   }
 
