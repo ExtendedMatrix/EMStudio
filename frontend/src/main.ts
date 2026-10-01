@@ -223,6 +223,7 @@ import type { ModelOptions } from "./embed3d-native";
 import { KEYMAP, filterKeymap, keysText } from "./keymap";
 import { ReadingFiles } from "./reading-files";
 import * as aiv from "./ai-validation";
+import * as addrs from "./addresses";
 import { passagesOf } from "./passages";
 import * as trx from "./translation";
 import * as trui from "./translation-ui";
@@ -2312,6 +2313,7 @@ function renderInspectorInto(host: HTMLElement): void {
       onToggleResourceFiles: (id) => toggleResourceFiles(id),
       onReplaceFile: (resId, fileId) => { void replaceFileFlow(resId, fileId); },
       onOpenInScene: (resId) => { void openResourceInScene(resId); },
+      onCheckAddress: (resId, locator) => { void checkResourceAddress(resId, locator); },
       // TRADUZIONI · the row of languages under every natural-language text
       renderTextLanguages: (box, nodeId, field) => trui.renderLanguageRow(box, translationUi, nodeId, field),
       onOpenFacing: (tid) => openFacingFor(tid),
@@ -20101,6 +20103,9 @@ interface IngestItem {
   digest?: string;
   nodeId?: string;
   note?: string;
+  /** dev27 · the bytes are a resource the graph has already, at another
+   *  address: the row proposes adding this one as an address of it */
+  copyOf?: { id: string; name: string; locator: string; residency: string; digest: string; added?: boolean };
 }
 
 /** What the batch says about itself, before any of it is published. Kept across
@@ -20809,6 +20814,27 @@ function ingestQueue(): HTMLElement {
     });
 
     row.append(name, kind, use, stampChip(item), state, drop);
+    if (item.copyOf) {
+      const c = item.copyOf;
+      const offer = document.createElement("button");
+      offer.className = "insp-btn ing-copyof";
+      offer.dataset.copyOf = c.id;
+      offer.disabled = !!c.added;
+      offer.textContent = c.added ? t("assets.copyOfAdded", { name: c.name }) : t("assets.copyOf", { name: c.name });
+      offer.title = t("assets.copyOfHint", { loc: c.locator });
+      offer.addEventListener("click", () => {
+        const st = storeOfNode(c.id) ?? store;
+        if (!st) return;
+        try {
+          addrs.addAddress(st, c.id, c.locator, { checksum: c.digest, residency: c.residency });
+          c.added = true;
+          toast(t("assets.copyOfAdded", { name: c.name }));
+          refreshInspector();
+        } catch (e) { toast(String((e as Error).message)); }
+        renderStorage();
+      });
+      row.appendChild(offer);
+    }
     if (item.nodeId) {
       row.addEventListener("dblclick", () => select(item.nodeId!));
       row.title = t("assets.openInspector");
@@ -21459,6 +21485,14 @@ function writeResourceNode(
 ): string {
   const existing = digest ? findResource(doc, digest) : null;
   const opts = ingestResourceOptions(item, digest, url, ingestDraft, doc.newId());
+  // dev27 · the SAME bytes somewhere else: not a new resource, and not a
+  // silent overwrite of the address it had — a PROPOSAL, on the row: «è
+  // un'altra copia di R: aggiungilo come indirizzo» (addresses.addAddress)
+  if (existing && addrs.isAnotherCopy(existing, url)) {
+    item.copyOf = { id: existing.id, name: String(existing.name ?? existing.id), locator: url,
+                    residency: ingestDraft.residency, digest: digest ?? "" };
+    return existing.id;
+  }
   if (existing) {
     // found by digest: the same bytes, filled in (never a second resource)
     const fresh = addResource(null, opts).data as Record<string, unknown>;
@@ -21469,6 +21503,38 @@ function writeResourceNode(
     return existing.id;
   }
   return addResource(storeGraph(doc), opts).id;
+}
+
+/**
+ * dev27 · «controlla» an address of a resource: does it answer, and with the
+ * same bytes? A path on the disk is asked of the bridge (`/fs/checksum`: it
+ * must exist AND have the resource's digest); an http(s) URL is fetched (`HEAD`,
+ * `no-cors`: an answer is all a page may know); anything else (s3://, blend://)
+ * cannot be checked from here and is left «non controllato». The result is
+ * recorded on the resource (`checkAddress`), dated; a dead address stays.
+ */
+async function checkResourceAddress(resId: string, locator: string): Promise<void> {
+  const st = storeOfNode(resId) ?? store;
+  const n = st?.node(resId);
+  if (!st || !n) return;
+  const kind = addrs.addressKind(locator);
+  let ok: boolean | null = null;
+  if (kind === "disk") {
+    const sum = await bridgeChecksum(locator);
+    const own = String(((n.data ?? {}) as Record<string, unknown>).checksum ?? "");
+    ok = sum !== null && (!own || sum === own);
+  } else if (kind === "http") {
+    const ctl = new AbortController();
+    const timer = setTimeout(() => ctl.abort(), 6000);
+    try { await fetch(locator, { method: "HEAD", mode: "no-cors", cache: "no-store", signal: ctl.signal }); ok = true; }
+    catch { ok = false; }
+    finally { clearTimeout(timer); }
+  }
+  if (ok === null) { toast(t("res.addrCannotCheck", { loc: locator })); return; }
+  const r = addrs.checkAddress(st, resId, locator, ok);
+  toast(ok ? t("res.addrOkToast", { loc: locator })
+    : r.warning === "none-alive" ? t("res.addrNoneAlive") : t("res.addrDeadToast", { loc: locator, live: String(r.live) }));
+  refreshInspector();
 }
 
 /** The bridge holds the bytes of a file on disk — the page may not read it. *//** The bridge holds the bytes of a file on disk — the page may not read it. */

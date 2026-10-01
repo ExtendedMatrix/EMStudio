@@ -68,6 +68,8 @@ export interface InspectorCallbacks {
   onToggleResourceFiles?: (resId: string) => void;
   /** …and replacing one of them makes a revision (absent = no bytes to read) */
   onReplaceFile?: (resId: string, fileId: string | null) => void;
+  /** dev27 · «controlla» an address of a resource */
+  onCheckAddress?: (resId: string, locator: string) => void;
   /** CAMPAGNA · a tileset resource opened in a Scene window */
   onOpenInScene?: (resId: string) => void;
   /** TRADUZIONI · draw the row of languages under a natural-language text
@@ -880,6 +882,7 @@ export function renderInspector(
       onToggleFiles: (id) => cb.onToggleResourceFiles?.(id),
       onReplaceFile: cb.onReplaceFile,
       onOpenInScene: cb.onOpenInScene,
+      onCheckAddress: cb.onCheckAddress,
     });
     if (panel) root.appendChild(panel);
   }

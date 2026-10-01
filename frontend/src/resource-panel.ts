@@ -5,6 +5,7 @@
 // `resourceSummary` is PURE (it reads a ResourceGraph and answers data), so
 // `check-resources.mjs` asks it directly; `renderResourcePanel` only draws it.
 import { t } from "./i18n";
+import { addresses } from "./addresses";
 import { COMMON_LANGUAGES, contentLanguages, contentLanguagesValue, isLanguageTag } from "./translation";
 import { contentDigestOf, formsOf } from "./pack3tz";
 import type { DocumentStore } from "./model";
@@ -97,6 +98,9 @@ export interface ResourcePanelHooks {
   onReplaceFile?(resId: string, fileId: string | null): void;
   /** CAMPAGNA · a tileset (folder or .3tz) opened in a Scene window */
   onOpenInScene?(resId: string): void;
+  /** dev27 · «controlla»: whether an address answers (the caller fetches, or
+   *  asks the bridge, and records it with `checkAddress`) */
+  onCheckAddress?(resId: string, locator: string): void;
 }
 
 function el(tag: string, cls?: string, text?: string): HTMLElement {
@@ -139,6 +143,8 @@ export function renderResourcePanel(store: DocumentStore, id: string, h: Resourc
   // ── dev27 · the language of the CONTENT (data.lang on a resource: one tag or
   //    a sorted list, «latino e italiano a fronte»), seen and declared here ──
   panel.appendChild(contentLanguageSection(store, id));
+  // ── dev27 · the ADDRESSES of this one resource (same bytes, several places)
+  panel.appendChild(addressSection(store, id, h));
   if (d.declared_only) {
     const line = el("div", "insp-hint res-declared", `◌ ${t("declared.notStamped")}`);
     line.dataset.declared = String(d.declared_kind ?? "");
@@ -364,5 +370,44 @@ function contentLanguageSection(store: DocumentStore, id: string): HTMLElement {
   row.appendChild(sel);
   box.appendChild(row);
   box.appendChild(el("div", "insp-hint", t("res.contentLangHint")));
+  return box;
+}
+
+/** dev27 · «Indirizzi»: every place the same bytes are, with its state —
+ *  reachable / dead / not checked — and «controlla». A dead address is a
+ *  WARNING while a live one remains, never a removal. */
+function addressSection(store: DocumentStore, id: string, h: ResourcePanelHooks): HTMLElement {
+  const box = el("div", "res-addresses");
+  box.dataset.resAddresses = "1";
+  const list = addresses(store.node(id));
+  box.appendChild(el("h3", "insp-sect", t("res.addresses", { n: String(list.length) })));
+  if (!list.length) { box.appendChild(el("div", "insp-hint", t("res.addressesNone"))); return box; }
+  for (const a of list) {
+    const row = el("div", "res-addr");
+    row.dataset.addr = a.locator;
+    row.dataset.addrState = a.ok === true ? "ok" : a.ok === false ? "dead" : "unchecked";
+    row.appendChild(el("span", "res-addr-loc", a.locator));
+    if (a.residency) row.appendChild(el("span", "res-addr-res", t(`assets.residency.${a.residency}`)));
+    const when = a.checked_at ? ` · ${a.checked_at.slice(0, 16).replace("T", " ")}` : "";
+    row.appendChild(el("span", `res-addr-state st-${row.dataset.addrState}`,
+      a.ok === true ? `✓ ${t("res.addrOk")}${when}` : a.ok === false ? `✗ ${t("res.addrDead")}${when}` : `◌ ${t("res.addrUnchecked")}`));
+    if (h.onCheckAddress) {
+      const b = el("button", "insp-btn", t("res.addrCheck")) as HTMLButtonElement;
+      b.type = "button";
+      b.dataset.addrCheck = a.locator;
+      b.addEventListener("click", () => h.onCheckAddress!(id, a.locator));
+      row.appendChild(b);
+    }
+    box.appendChild(row);
+  }
+  const dead = list.filter((a) => a.ok === false).length;
+  const live = list.length - dead;
+  if (dead) {
+    const w = el("div", live ? "insp-hint res-addr-warn" : "insp-hint res-addr-warn none", live
+      ? t("res.addrWarn", { dead: String(dead), live: String(live) })
+      : t("res.addrNoneAlive"));
+    w.dataset.addrWarning = live ? "dead" : "none-alive";
+    box.appendChild(w);
+  }
   return box;
 }

@@ -8745,6 +8745,17 @@ input.storage-path:focus { border-color: var(--accent); background: var(--bg-pan
   border-color: var(--accent, var(--border));
 }
 
+/* dev27 · the addresses of one resource, and the language of its content */
+.res-addresses .res-addr { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; padding: 3px 0;
+  border-bottom: 1px dashed var(--border); font-size: .8rem; }
+.res-addr-loc { font-family: var(--mono, monospace); word-break: break-all; flex: 1 1 100%; }
+.res-addr-res { color: var(--text-muted); }
+.res-addr-state.st-ok { color: var(--ok); }
+.res-addr-state.st-dead { color: var(--warn, var(--danger)); }
+.res-addr-state.st-unchecked { color: var(--text-muted); }
+.res-addr-warn { color: var(--warn, var(--text)); }
+.res-addr-warn.none { color: var(--danger); }
+.ing-copyof { margin-left: 6px; }
 /* dev27 · the passage beside the resource it comes from, in the Doc window */
 .doc-passages { margin-top: 10px; display: grid; gap: 8px; }
 .doc-passage { border: 1px solid var(--border); border-radius: var(--radius); padding: 8px 10px; display: grid; gap: 4px; }
