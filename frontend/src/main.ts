@@ -337,7 +337,7 @@ import { addressMap, chooseModel, needsChoice, startResources, type ModelChoice 
 import { foldForms, landPack, packTileset } from "./pack3tz";
 import {
   type AwarenessNote, emptyPresence, type HubOp, noteForRemoteOp, noteForStale,
-  opsForLocalChange, peerSelections, planRejoin, stampForResend,
+  opsForLocalChange, peerSelections, planRejoin, stampForResend, withOpLanguage,
   type PresenceState,
   reducePresence,
 } from "./hub";
@@ -4661,8 +4661,11 @@ function hubSendLocal(op: GraphOp): void {
   // dev27 · the op says how its hand had entered (s3Dgraphy crdt `auth`):
   // `created_auth` / `modified_auth` on the other side, beside the author
   const how = signatureAuth(currentIdentity());
+  // dev28 (decision 12) · …and the language a node is born in travels IN THE
+  // OP, decided here once: the node's, else the study's, else `und`.
   for (const hubOp of ops) {
     if (how && (hubOp.op === "add_node" || hubOp.op === "update_field")) hubOp.auth = how;
+    if (hubOp.op === "add_node") withOpLanguage(hubOp, store?.doc.graph ?? null);
     hubUnconfirmed.set(hubKey(hubOp), hubOp);
     sync.sendCommand(wireEnvelope("op", hubOp as unknown as Record<string, unknown>));
   }

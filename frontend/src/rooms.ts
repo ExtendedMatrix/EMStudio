@@ -19,7 +19,7 @@
  */
 
 import type { EmNode } from "./types";
-import type { HubOp } from "./hub";
+import { withOpLanguage, type HubOp } from "./hub";
 
 /**
  * The room id a name produces.
@@ -90,12 +90,13 @@ export function seedOpsForContainer(
     if (!node?.id) continue;
     const data = (node.data ?? {}) as Record<string, unknown>;
     const stamp = (data.modified_at as string) || (data.created_at as string) || undefined;
-    ops.push({
+    // dev28 · the seed is a producer too: the language in the op
+    ops.push(withOpLanguage({
       op: "add_node",
       node: node as unknown as Record<string, unknown>,
       id: node.id,
       ts: stamp,
-    });
+    }, graph as never));
   }
   for (const edge of graph.edges ?? []) {
     const id = String(edge.id ?? "");

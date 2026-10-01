@@ -234,6 +234,7 @@ eq(M.textDigest(LATIN), G["digest of the Latin"], "1 · the digest of the Latin"
 // translations, the graph-self node and places are not stamped.
 {
   const C = await load(`export * from "./crdt";`);
+  const H = await load(`export { withOpLanguage } from "./hub";`);
   const doc = () => ({ graph: { graph_id: "g5", name: "Nascita", data: {}, nodes: [
     { id: "root", node_type: "graph", name: "Graph", description: "", data: { language: "it" } }], edges: [] } });
   const store = new M.DocumentStore(doc());
@@ -255,18 +256,43 @@ eq(M.textDigest(LATIN), G["digest of the Latin"], "1 · the digest of the Latin"
                              { id: "v2", node_type: "document", name: "D.02", description: "planta", data: { lang: "es" } }], []);
   eq([store.node("v1").data.lang, store.node("v2").data.lang], ["en", "es"],
      "E5 · an import's nodes are born in the study's language, or keep the source's");
-  // a peer's add_node (crdt.ts = crdt.py)
+  // a peer's add_node (crdt.ts = crdt.py). dev28: an op WITHOUT data.lang is an OLD op
+  // (makeOp refuses to build one now): applied with the study's language, and said
+  const oldOp = (fields) => ({ op: "add_node", ...fields });
   const section = { nodes: [{ id: "root", node_type: "graph", name: "Graph", data: { language: "la" } }], edges: [] };
-  C.applyOp(section, C.makeOp("add_node", { ts: AT, author: ORCID, node: { id: "p1", node_type: "US", name: "P 1" } }));
-  eq(section.nodes.find((n) => n.id === "p1").data.lang, "la", "E5 · the CRDT: a new node is born in the section's study language");
-  C.applyOp(section, C.makeOp("add_node", { ts: AT, node: { id: "p2", node_type: "translation", name: "t" } }));
-  ok(!("lang" in (section.nodes.find((n) => n.id === "p2").data ?? {})), "E5 · …a translation is not");
+  const r1 = C.applyOp(section, oldOp({ ts: AT, author: ORCID, node: { id: "p1", node_type: "US", name: "P 1" } }));
+  eq(section.nodes.find((n) => n.id === "p1").data.lang, "la", "E5 · the CRDT: an old op's node is born in the section's study language");
+  eq(r1.language, "study_fallback", "dev28 · …and the result says it was the fallback");
+  const r2 = C.applyOp(section, C.makeOp("add_node", { ts: AT, node: { id: "p2", node_type: "translation", name: "t" } }));
+  ok(!("lang" in (section.nodes.find((n) => n.id === "p2").data ?? {})) && r2.language === undefined, "E5 · …a translation is not");
   section.nodes.push({ id: "p3", node_type: "US", name: "P 3", data: { created_at: AT } });
-  C.applyOp(section, C.makeOp("add_node", { ts: "2026-10-02T00:00:00Z", node: { id: "p3", node_type: "US", name: "P 3" } }));
+  C.applyOp(section, oldOp({ ts: "2026-10-02T00:00:00Z", node: { id: "p3", node_type: "US", name: "P 3" } }));
   ok(!("lang" in section.nodes.find((n) => n.id === "p3").data), "E5 · …and a merge never writes it");
+  // dev28 · the language IN THE OP: two copies with two studies write the same
+  const itCopy = { nodes: [{ id: "root", node_type: "graph", name: "G", data: { language: "it" } }], edges: [] };
+  const enCopy = { nodes: [{ id: "root", node_type: "graph", name: "G", data: { language: "en" } }], edges: [] };
+  const born = C.makeOp("add_node", { ts: AT, author: ORCID, node: { id: "q1", node_type: "US", name: "Q 1", data: { lang: "la" } } });
+  const ri = C.applyOp(itCopy, JSON.parse(JSON.stringify(born)));
+  C.applyOp(enCopy, JSON.parse(JSON.stringify(born)));
+  eq([itCopy.nodes[1].data.lang, enCopy.nodes[1].data.lang, ri.language], ["la", "la", "op"],
+     "dev28 · the op's language, the same in both copies");
+  let refusedBuild = "";
+  try { C.makeOp("add_node", { ts: AT, node: { id: "q2", node_type: "US", name: "Q 2" } }); } catch (e) { refusedBuild = String(e.message); }
+  ok(refusedBuild.includes("data.lang in the op"), "dev28 · makeOp refuses an add_node of a text without data.lang");
+  eq(C.languageFallbacks([r1, ri, { language: "none" }]), { study_fallback: 1, none: 1 }, "dev28 · the fallbacks, counted");
+  // dev28 · the producer: withOpLanguage (the node's, else the study's, else und), on a COPY
+  const storeNode = { id: "w1", node_type: "US", name: "W", data: {} };
+  const w = H.withOpLanguage({ op: "add_node", id: "w1", node: storeNode }, itCopy);
+  eq([w.node.data.lang, "lang" in storeNode.data], ["it", false], "dev28 · the study's language goes in the op, not in the store's node");
+  eq(H.withOpLanguage({ op: "add_node", node: { id: "w2", node_type: "US", data: {} } }, { nodes: [] }).node.data.lang, "und",
+     "dev28 · no study language: und, never guessed");
+  eq(H.withOpLanguage({ op: "add_node", node: { id: "w3", node_type: "US", data: { lang: "el" } } }, itCopy).node.data.lang, "el",
+     "dev28 · the node's own language wins");
+  ok(!("lang" in (H.withOpLanguage({ op: "add_node", node: { id: "w4", node_type: "resource", data: {} } }, itCopy).node.data)),
+     "dev28 · a resource is not a text");
   // the access mode of an op (crdt.py parity)
   C.applyOp(section, C.makeOp("add_node", { ts: AT, author: ORCID, auth: { mode: "node_password", attested_by: "fcn" },
-    node: { id: "p4", node_type: "US", name: "P 4" } }));
+    node: { id: "p4", node_type: "US", name: "P 4", data: { lang: "it" } } }));
   eq(section.nodes.find((n) => n.id === "p4").data.created_auth, { mode: "node_password", attested_by: "fcn" },
      "E1 · an op's access mode is written beside its hand");
   const bad = C.applyOp(section, C.makeOp("update_field", { ts: "2026-10-03T00:00:00Z", author: ORCID, auth: "password",

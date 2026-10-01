@@ -27,6 +27,7 @@
  */
 
 import type { EmNode } from "./types";
+import { isTextNode, sectionLanguage } from "./crdt";
 
 /** A CRDT operation as the relay understands it (`s3dgraphy.crdt`). */
 export interface HubOp {
@@ -126,6 +127,27 @@ export function stampForResend(pending: Iterable<HubOp>, now: string): HubOp[] {
 }
 
 // ── translating a local edit into operations the relay understands ───────────
+
+/**
+ * dev28 (E.D., 1 Oct 2026, decision 12) · the language a node is born in
+ * travels IN THE OP, and the producer puts it there once: the node's own
+ * `data.lang`, else the study's working language as the section declares it,
+ * else `und` («not known», never guessed). Every copy of the room then writes
+ * the same — read at arrival from each copy's study, two copies with two
+ * studies wrote two languages (s3Dgraphy `crdt.make_op`). A COPY of the
+ * payload: the op must not write into the store's own node object.
+ */
+export function withOpLanguage(op: HubOp, section: { nodes?: unknown[]; data?: unknown } | null): HubOp {
+  if (op.op !== "add_node") return op;
+  const payload = (op.node ?? op.data) as Record<string, unknown> | undefined;
+  if (!payload || !isTextNode(payload)) return op;
+  const data = { ...((payload.data ?? {}) as Record<string, unknown>) };
+  if (typeof data.lang === "string" && data.lang.trim()) return op;
+  data.lang = (section ? sectionLanguage(section as never) : null) ?? "und";
+  const key = op.node ? "node" : "data";
+  op[key] = { ...payload, data };
+  return op;
+}
 
 /**
  * A local `update_node` becomes ONE `update_field` per field that changed.

@@ -503,12 +503,51 @@ export interface OpResult {
   reason: string;
   nodeId?: string;
   fields: FieldOutcome[];
+  /** dev28 · where the language of a node BORN by this op came from — `op`,
+   *  `study_fallback` (an old op without data.lang), `none`; absent for
+   *  anything that is not a text being born (s3Dgraphy `OpResult.language`) */
+  language?: "op" | "study_fallback" | "none";
+}
+
+/** dev28 · a node payload carries a text whose language `data.lang` is: every
+ *  type but the exempt ones; a payload with no type is a text (crdt.py
+ *  `is_text_node`). */
+export function isTextNode(payload: unknown): boolean {
+  if (!payload || typeof payload !== "object") return false;
+  const p = payload as Payload;
+  return !BIRTH_EXEMPT.has(String(p.node_type ?? p.type ?? ""));
+}
+
+/** dev28 · the `data.lang` an add_node op carries, when it is a tag. */
+export function opLanguage(op: CrdtOp): string | null {
+  const payload = (op.node ?? op.data ?? {}) as Payload;
+  const lang = ((payload.data ?? {}) as Record<string, unknown>).lang;
+  return isTag(lang) ? lang.trim() : null;
+}
+
+/** dev28 · how many nodes old ops bore, and where their language came from. */
+export function languageFallbacks(results: OpResult[]): { study_fallback: number; none: number } {
+  const out = { study_fallback: 0, none: 0 };
+  for (const r of results) if (r.language === "study_fallback" || r.language === "none") out[r.language]++;
+  return out;
 }
 
 export function makeOp(kind: OpKind, fields: Record<string, unknown> = {}): CrdtOp {
   if (!(OPS as readonly string[]).includes(kind))
     throw new Error(`unknown operation '${kind}'`);
-  return { op: kind, ...fields } as CrdtOp;
+  const op = { op: kind, ...fields } as CrdtOp;
+  if (kind === "add_node") {
+    // dev28 (decision 12, crdt.py make_op): the producer puts the language in
+    // the op, once — `und` when nobody knows — so every copy writes the same.
+    // ABSENT is refused here; an invalid tag is applyOp's refusal.
+    const payload = (op.node ?? op.data ?? {}) as Payload;
+    const declared = ((payload.data ?? {}) as Record<string, unknown>).lang;
+    if (isTextNode(payload) && (declared === undefined || declared === null || declared === ""))
+      throw new Error(`add_node of '${String(payload.id ?? op.id ?? "")}': a node with a text is born ` +
+        `with data.lang in the op (a BCP 47 tag; 'und' when nobody knows) — the producer decides it ` +
+        `once, so that every copy writes the same`);
+  }
+  return op;
 }
 
 function opClock(op: CrdtOp): Clock {
@@ -605,12 +644,20 @@ export function applyOp(section: Section, op: CrdtOp): OpResult {
       // dev27 · rule A1 (s3Dgraphy crdt `_section_language`): a node born here
       // carries the language it is born in — the op's own, else the study's as
       // this section declares it, else none; a merge never rewrites it
-      const lang = sectionLanguage(section);
-      const type = String(payload.node_type ?? payload.type ?? "");
-      const data = (payload.data ??= {}) as Record<string, unknown>;
-      if (lang && !BIRTH_EXEMPT.has(type) && !isTag(data.lang)) data.lang = lang;
+      // dev28 (decision 12): the language is IN THE OP; an op without it is
+      // an OLD op, applied with the study's language, said and counted
+      let language: OpResult["language"];
+      if (isTextNode(payload)) {
+        if (opLanguage(op) !== null) language = "op";
+        else {
+          const lang = sectionLanguage(section);
+          const data = (payload.data ??= {}) as Record<string, unknown>;
+          if (lang && !isTag(data.lang)) { data.lang = lang; language = "study_fallback"; }
+          else language = "none";
+        }
+      }
       nodes.push(payload);
-      return { applied: true, reason: "added", nodeId, fields: [] };
+      return { applied: true, reason: "added", nodeId, fields: [], ...(language ? { language } : {}) };
     }
     const outcome = mergePayloads(existing, payload);
     const i = nodes.findIndex((n) => String(n.id) === nodeId);
