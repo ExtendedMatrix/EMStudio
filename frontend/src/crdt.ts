@@ -577,13 +577,15 @@ export function sectionLanguage(section: Section): string | null {
 /** dev27 · an op's access mode (`auth`: "orcid" or {mode, attested_by}),
  *  normalised as s3Dgraphy `editorial.normalize_auth` does; null for none;
  *  `false` for one that is not valid (the op is refused). */
-export function opAuth(op: CrdtOp): { mode: "orcid" | "node_password"; attested_by?: string } | null | false {
+export function opAuth(op: CrdtOp): { mode: "orcid" | "node_password" | "declared"; attested_by?: string } | null | false {
   let a = op.auth as unknown;
   if (a === undefined || a === null || a === "" ) return null;
   if (typeof a === "string") a = { mode: a };
   if (typeof a !== "object") return false;
   const o = a as Record<string, unknown>;
   if (o.mode === "orcid") return o.attested_by ? false : { mode: "orcid" };
+  // dev28 · a declared iD: attested by nobody
+  if (o.mode === "declared") return o.attested_by ? false : { mode: "declared" };
   if (o.mode === "node_password") {
     const node = String(o.attested_by ?? "").trim();
     return node ? { mode: "node_password", attested_by: node } : false;
@@ -636,7 +638,7 @@ export function applyOp(section: Section, op: CrdtOp): OpResult {
     payload.id = nodeId;
     const auth = opAuth(op);
     if (auth === false)
-      return { applied: false, reason: "the op's access mode is not orcid or node_password with its node: nothing was written",
+      return { applied: false, reason: "the op's access mode is not orcid, node_password with its node, or declared: nothing was written",
                nodeId, fields: [] };
     stampPayload(payload, clock, true, auth);
     const existing = byId.get(nodeId);

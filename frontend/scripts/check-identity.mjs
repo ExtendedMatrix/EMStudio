@@ -238,11 +238,11 @@ const reset = () => mem.clear();
   const A = "0000-0002-1825-0097";
   const B = "0000-0001-5109-3700";
 
-  // declared: no mode in the signature, no publication
+  // declared: the mode says so (dev28, s3Dgraphy `declared`), no publication
   reset();
   I.declareIdentity(A);
   eq(I.identityState(I.currentIdentity()), "declared", "a typed iD is declared");
-  eq(I.signatureAuth(I.currentIdentity()), null, "a declared iD signs with no access mode");
+  eq(I.signatureAuth(I.currentIdentity()), { mode: "declared" }, "dev28 · a declared iD signs as declared, not with no mode");
   eq(I.publishGate(), { allowed: false, reason: "not-verified", orcid: A }, "…and does not publish");
 
   // attested by the node, accredited: signs as node_password, publishes

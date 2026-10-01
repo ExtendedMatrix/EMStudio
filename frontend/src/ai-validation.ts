@@ -220,7 +220,7 @@ export interface VerifiedRow {
   byName: string;
   at: string;
   /** dev27 · how the signer had entered (`validated_auth`), null when unsaid */
-  auth?: { mode: "orcid" | "node_password"; attested_by?: string } | null;
+  auth?: { mode: "orcid" | "node_password" | "declared"; attested_by?: string } | null;
 }
 
 /** The words for a signature's access mode — «verificata da ORCID», «attestata
@@ -230,6 +230,7 @@ export function authWords(auth: { mode?: string; attested_by?: string } | null |
   if (!auth?.mode) return "";
   if (auth.mode === "node_password") return t("sig.auth.node_password", { node: auth.attested_by ?? "" });
   if (auth.mode === "orcid") return t("sig.auth.orcid");
+  if (auth.mode === "declared") return t("sig.auth.declared");
   return "";
 }
 
@@ -252,7 +253,7 @@ export function verifiedRows(doc: EmDocument): VerifiedRow[] {
     out.push({ node: n.id, name: String(n.name ?? ""), node_type: n.node_type, what, by,
                orcid: a ? (String(dataOf(a).orcid ?? "") || null) : null,
                byName: String(a?.name ?? by), at: String(d[VALIDATED_AT] ?? ""),
-               auth: how && (how.mode === "orcid" || how.mode === "node_password")
+               auth: how && (how.mode === "orcid" || how.mode === "node_password" || how.mode === "declared")
                  ? { mode: how.mode, attested_by: how.attested_by } : null });
   }
   return out.sort((a, b) => b.at.localeCompare(a.at) || a.name.localeCompare(b.name));

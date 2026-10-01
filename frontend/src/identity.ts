@@ -60,8 +60,9 @@ export interface Identity {
   accredited?: boolean;
 }
 
-/** How a person entered: verified by ORCID, or attested by a node's password. */
-export type AuthMode = "orcid" | "node_password";
+/** How a person entered: verified by ORCID, attested by a node's password, or
+ *  (dev28, s3Dgraphy `declared`) an iD typed here and checked by nobody. */
+export type AuthMode = "orcid" | "node_password" | "declared";
 
 /** The access mode a SIGNATURE carries (s3Dgraphy dev27 `created_auth`,
  *  `modified_auth`, `validated_auth`: `{mode, attested_by?}`). */
@@ -83,12 +84,17 @@ export function identityState(identity: Identity | null | undefined): IdentitySt
 
 /** What a signature made NOW records about how its hand entered: the last
  *  sign-in's mode — `{mode: "node_password", attested_by}` for an attested
- *  session, `{mode: "orcid"}` for a verified one — or null for a declared iD
- *  (it entered nowhere, and inventing a mode would be a false record). */
+ *  session, `{mode: "orcid"}` for a verified one — and, since dev28, `{mode:
+ *  "declared"}` for a declared iD: s3Dgraphy has the word for it now
+ *  (`editorial.AUTH_MODES`), so the record says what it is instead of saying
+ *  nothing. Null with no identity. In a ROOM the relay writes the mode from
+ *  the token over whatever this says (`crdt.stamp_auth`): this is the local
+ *  signature. */
 export function signatureAuth(identity: Identity | null | undefined): SignatureAuth | null {
   const state = identityState(identity);
   if (state === "attested") return { mode: "node_password", attested_by: identity!.attestedBy! };
   if (state === "verified") return { mode: "orcid" };
+  if (state === "declared") return { mode: "declared" };
   return null;
 }
 

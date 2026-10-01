@@ -293,6 +293,9 @@ eq(M.textDigest(LATIN), G["digest of the Latin"], "1 · the digest of the Latin"
   // the access mode of an op (crdt.py parity)
   C.applyOp(section, C.makeOp("add_node", { ts: AT, author: ORCID, auth: { mode: "node_password", attested_by: "fcn" },
     node: { id: "p4", node_type: "US", name: "P 4", data: { lang: "it" } } }));
+  C.applyOp(section, C.makeOp("add_node", { ts: AT, author: ORCID, auth: "declared",
+    node: { id: "p5", node_type: "US", name: "P 5", data: { lang: "it" } } }));
+  eq(section.nodes.find((n) => n.id === "p5").data.created_auth, { mode: "declared" }, "dev28 · a declared iD signs as declared");
   eq(section.nodes.find((n) => n.id === "p4").data.created_auth, { mode: "node_password", attested_by: "fcn" },
      "E1 · an op's access mode is written beside its hand");
   const bad = C.applyOp(section, C.makeOp("update_field", { ts: "2026-10-03T00:00:00Z", author: ORCID, auth: "password",

@@ -4658,13 +4658,13 @@ function hubSendLocal(op: GraphOp): void {
   // the server already declared at the door.
   if (!sync.canWrite) return;
   const ops = opsForLocalChange(op as Parameters<typeof opsForLocalChange>[0]);
-  // dev27 · the op says how its hand had entered (s3Dgraphy crdt `auth`):
-  // `created_auth` / `modified_auth` on the other side, beside the author
-  const how = signatureAuth(currentIdentity());
+  // dev28 (decision 13) · the access mode of an op that goes through the relay
+  // is the RELAY's, read from the token like the author (`crdt.stamp_auth`):
+  // this client does not declare one any more. Locally the store still signs
+  // with this identity's mode (model.ts `stampNew` / `stampEdit`).
   // dev28 (decision 12) · …and the language a node is born in travels IN THE
   // OP, decided here once: the node's, else the study's, else `und`.
   for (const hubOp of ops) {
-    if (how && (hubOp.op === "add_node" || hubOp.op === "update_field")) hubOp.auth = how;
     if (hubOp.op === "add_node") withOpLanguage(hubOp, store?.doc.graph ?? null);
     hubUnconfirmed.set(hubKey(hubOp), hubOp);
     sync.sendCommand(wireEnvelope("op", hubOp as unknown as Record<string, unknown>));
