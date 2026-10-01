@@ -90,6 +90,9 @@ export interface Draft {
    *  che appartengono all'EVENTO e non si ripetono su quattrocento file */
   campaignMetadata: Record<string, string>;
   kind: string;
+  /** dev28 · why `kind` was PROPOSED (a LOD folder, a .3tz), shown beside it;
+   *  absent when the person chose it or nothing was proposed */
+  kindWhy?: { kind: string; because: "lod" | "packing"; level?: number };
   /** AUDIT N3 · why the form opened on this road — said under the question */
   why: string;
   technique: string;
@@ -464,5 +467,28 @@ export function mediaTypeOf(ext: string): string | undefined {
     las: "application/octet-stream", e57: "application/octet-stream",
     pdf: "application/pdf", zip: "application/zip",
   } as Record<string, string>)[e];
+}
+
+/**
+ * dev28 (E.D., 1 Oct 2026) · the kind the compositor PROPOSES for what was
+ * picked, from what the files say about themselves — never chosen in silence:
+ * the proposal is shown with its reason and stays a choice. A file in a
+ * `LOD<n>` folder (or named `…_LOD<n>`) with n ≥ 1 is a level baked from the
+ * master — `lod_generation`, not the «format conversion» people had to pick
+ * when the vocabulary lacked it; a `.3tz` is a tree packed into an archive —
+ * `packing`. Only kinds the vocabulary has (`known`) are proposed: the list is
+ * the datamodel's. LOD 0 is the master's own export, proposed nothing.
+ */
+export function suggestedKind(paths: string[], known: string[]):
+    { kind: string; because: "lod" | "packing"; level?: number } | null {
+  const has = (k: string) => known.includes(k);
+  for (const p of paths) {
+    const m = /(?:^|[\/_])LOD(\d+)(?=[\/_.]|$)/i.exec(p ?? "");
+    if (m && Number(m[1]) >= 1 && has("lod_generation"))
+      return { kind: "lod_generation", because: "lod", level: Number(m[1]) };
+  }
+  if (paths.length && paths.every((p) => /\.3tz$/i.test(p ?? "")) && has("packing"))
+    return { kind: "packing", because: "packing" };
+  return null;
 }
 

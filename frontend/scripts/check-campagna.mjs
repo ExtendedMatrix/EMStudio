@@ -358,6 +358,23 @@ pd.DataFrame([["San Pietro", None, None], ["Nome", "Descrizione", "Url"], ["D.01
   proc?.kill();
 }
 
+// ── dev28 · the compositor PROPOSES the kind of a LOD or a .3tz, with its reason
+{
+  const kinds = ["format_conversion", "export", "lod_generation", "tiling", "packing", "decimation"];
+  const lod1 = compose.suggestedKind(["/t/TempluMare_tiles/LOD1/OB_PODIO_LOD1.obj"], kinds);
+  ok(lod1?.kind === "lod_generation" && lod1.because === "lod" && lod1.level === 1,
+     "dev28 · a tile of LOD1 proposes lod_generation, not format_conversion");
+  ok(compose.suggestedKind(["/t/x/OB_PODIO_LOD2.glb"], kinds)?.level === 2, "dev28 · …named _LOD2 too");
+  ok(compose.suggestedKind(["/t/TempluMare_tiles/LOD0/OB_PODIO.obj"], kinds) === null,
+     "dev28 · LOD 0 is the master's own export: nothing proposed");
+  ok(compose.suggestedKind(["/t/RM/TempluMare_cesium.3tz"], kinds)?.kind === "packing", "dev28 · a .3tz proposes packing");
+  ok(compose.suggestedKind(["/t/MELODIA/a.obj"], kinds) === null, "dev28 · «LOD» inside a word is not a level");
+  ok(compose.suggestedKind(["/t/LOD1/a.obj"], ["format_conversion"]) === null,
+     "dev28 · a vocabulary without the kind proposes nothing (the list is the datamodel's)");
+  ok(compose.newDraft([{ path: "/t/LOD1/a.obj", name: "a.obj", size: 1, mtime: 0 }]).kind === "",
+     "dev28 · the draft itself still starts empty: the proposal is openDraft's, shown with its reason");
+}
+
 if (fails.length) {
   console.error(`campagna: ${fails.length} of ${checks} checks FAILED:\n  - ${fails.join("\n  - ")}`);
   process.exit(1);

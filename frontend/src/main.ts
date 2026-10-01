@@ -527,7 +527,7 @@ import { hintsPathFor, readHints, recordFound, setHintsBridgeResolver } from "./
 // da s3Dgraphy attraverso il bridge: `stamp-compose.ts` non costruisce mai un
 // timbro, lo chiede.
 import {
-  applyHandle, chainsFor, emitDraft, fetchSets, hasFileSets, missingFields, newDraft, outputFrom,
+  applyHandle, chainsFor, emitDraft, fetchSets, hasFileSets, missingFields, newDraft, outputFrom, suggestedKind,
   DOOR_EXT, requiredFields, retitleStamp, roadFor, setComposeBridgeResolver,
   type Draft, type DraftInput,
 } from "./stamp-compose";
@@ -18663,6 +18663,9 @@ function openDraft(outputs: FsEntry[], listing: FsListing): void {
   stampDraft.why = stamped
     ? t("stamp2.whyDerived", { n: String(stamped) })
     : t("stamp2.whyOrigin");
+  // dev28 · a LOD or a .3tz proposes its kind, with the reason beside it
+  const proposed = suggestedKind(outputs.map((o) => o.path), dtcKindsFor("process").map((k) => k.kind));
+  if (proposed && !stampDraft.origin) { stampDraft.kind = proposed.kind; stampDraft.kindWhy = proposed; }
   // L'OPERATORE È CHI STA LAVORANDO, e non un default inventato:
   // `currentIdentity()` è l'identità che questa sessione ha dichiarato
   // (`identity.ts`, claim-now/verify-later). Resta modificabile, e assente resta
@@ -18881,11 +18884,22 @@ function stampComposeBox(win: Win, listing: FsListing): HTMLElement {
   select.value = draft.kind;
   select.onchange = () => {
     draft.kind = select.value;
+    delete draft.kindWhy;          // chosen now: no longer a proposal
     checkField(box, "kind");
     redrawDraftPicture();
   };
   select.onblur = () => checkField(box, "kind");
   fields.appendChild(wrap(t("stamp2.kind"), select, "kind"));
+  if (draft.kindWhy && draft.kindWhy.kind === draft.kind) {
+    // dev28 · the proposal says why, so it is a choice and not a default
+    const why = document.createElement("div");
+    why.className = "stamp-compose-why";
+    why.dataset.proposed = draft.kind;
+    why.textContent = draft.kindWhy.because === "lod"
+      ? t("stamp2.kindWhyLod", { n: String(draft.kindWhy.level ?? 1) })
+      : t("stamp2.kindWhyPacking");
+    fields.appendChild(why);
+  }
 
   if (draft.origin) {
     fields.appendChild(wrap(t("stamp2.instrument"),
