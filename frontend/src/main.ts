@@ -161,7 +161,7 @@ import {
   type ThemeMode,
 } from "./theme";
 import { buildNodeList, type NodeListCallbacks } from "./nodelist";
-import { issues as computeIssues, unitOfIssue, type Issue, type IssueFixers } from "./issues";
+import { issues as computeIssues, unitOfIssue, type Issue, type IssueFixers, type IssueSources } from "./issues";
 import { CARD_VIEWS, COMPUTED_VIEWS, EMDB_SHEETS, type TableView, type ViewCtx } from "./table-views";
 import { iconUrlFor } from "./icons";
 import { buildOverview, type OverviewApi } from "./overview";
@@ -2374,7 +2374,7 @@ function renderInspectorIssues(host: HTMLElement): void {
   }
   // CATENA · «Verifica» in bulk from here: every AI datum of this node (and of
   // its paradata chain), or of the whole selection when several are selected
-  const aiIds = [...new Set(mine.filter((i) => i.rule === "ai" && i.bulk).map((i) => i.node))];
+  const aiIds = [...new Set(mine.filter((i) => i.rule === "verify" && i.bulk).map((i) => i.node))];
   const selAi = selectedIds.size > 1
     ? [...selectedIds].filter((id) => store && aiv.isUnvalidatedAi(store.doc, id)) : [];
   if (aiIds.length > 1 || selAi.length > 1) {
@@ -11244,9 +11244,12 @@ function refreshIssues(): void {
       allowedEdgeTypes(st, dt).map(canonicalEdgeType).includes(canonicalEdgeType(et)),
     names: nameStatus,
     sourceHints: chain.extractionSourceHints(s.doc, isStratigraphicType),
-    aiNodes: aiv.unvalidatedAi(s.doc),
+    // TRADUZIONI · ONE view of what waits for a person (the AI nodes are in it)
+    review: aiv.toReview(s.doc),
     verifyAi: { label: t("ai.verify"), bulkLabel: (n) => t("ai.verifyAll", { n: String(n) }),
                 run: (ids) => verifyAiNodes(ids) },
+    openFacing: { label: t("issues.facing"), run: (tid) => openFacingFor(tid) },
+    untagged: untaggedTexts(s),
     renameRule: { label: t("naming.renameRule"), bulkLabel: (n) => t("naming.renameRuleAll", { n: String(n) }),
                   run: (ids) => renameExtractorsByRule(ids) },
     fixers: issueFixers(s),
@@ -11257,6 +11260,32 @@ function refreshIssues(): void {
   issueUnitOf = unitOfIssue(s.doc, isStratigraphicType, nodes);
   warnedNodes = new Set(currentIssues.filter((i) => i.sev === "warn" && i.node).map((i) => i.node));
   renderWarningsPill();
+}
+
+/** TIPS · the texts with no language at all (no `data.lang`, and a study that
+ *  declares none), and the correction: declare the study's language. Counted
+ *  where the datamodel marks a natural-language text, with a text in it. */
+function untaggedTexts(st: DocumentStore): IssueSources["untagged"] {
+  if (trx.workingLanguage(st.doc)) return undefined;
+  let count = 0;
+  for (const n of st.liveNodes()) {
+    if (trx.nodeLanguage(n)) continue;
+    for (const f of trx.naturalFields(n)) if ((trx.fieldText(n, f) ?? "").trim()) count++;
+  }
+  const ui = getLocale();
+  return {
+    count, placeholder: t("issues.untaggedFix"),
+    options: trx.COMMON_LANGUAGES.filter((x) => x !== "und").map((tag) => ({ value: tag, label: `${tag} · ${trx.languageName(tag, ui)}` })),
+    run: (lang: string) => {
+      trx.declareStudyLanguage(st, lang);
+      const msg = t("study.langDeclared", { lang: `${lang} · ${trx.languageName(lang, ui)}` });
+      logInfo(msg, []);
+      toastUndo(msg, st);
+      refreshIssues();
+      refreshInspector();
+      draw();
+    },
+  };
 }
 
 /** CAMPAGNA · the corrections of the Warnings view, one per rule, each one
@@ -11336,8 +11365,22 @@ function tableCtx(): ViewCtx | null {
     isUnit: isStratigraphicType,
     issues: allIssues(),
     unitOfIssue: (id) => issueUnitOf(id),
+    verified: verifiedForTable(store),
     t: (k, v) => t(k, v),
   };
+}
+
+/** TRADUZIONI · the «Verificati» rows in the interface's words. */
+function verifiedForTable(st: DocumentStore): NonNullable<ViewCtx["verified"]> {
+  return aiv.verifiedRows(st.doc).map((r) => {
+    const n = st.node(r.node);
+    const d = (n?.data ?? {}) as Record<string, unknown>;
+    const of = n?.node_type === trx.TRANSLATION_TYPE ? trx.originalOf(st.doc, n) : undefined;
+    const what = of
+      ? t("issues.what.tr", { lang: String(d.lang ?? ""), method: t(`tr.m.${String(d.method ?? "manual")}`) })
+      : r.what.map((w) => t(w === "ai" ? "issues.what.ai" : "issues.what.review")).join(" · ");
+    return { node: r.node, name: String(of?.name ?? r.name), what, by: r.byName, orcid: r.orcid, at: r.at, of: of?.id };
+  });
 }
 
 /** The last graph was closed: back to the empty canvas, without a stale view. */

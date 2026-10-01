@@ -470,9 +470,23 @@ function renderEmDataInto(host: EmDataHost): void {
       content = r.html;
     }
   } else if (st.sheet === "Issues") {
-    const rows = ctx.issues.filter((i) => passes(i.id, i.txt));
-    count = rows.length;
-    content = issuesTableHtml(rows, ctx, ix);
+    // TRADUZIONI · two tabs: «To do» (with how many wait to be verified) and
+    // «Verified» (what, by whom, when)
+    const tab = host.win && winCurrent(host.win, "table.issuesTab") === "done" ? "done" : "todo";
+    const toVerify = ctx.issues.filter((i) => i.rule === "verify").length;
+    const verified = ctx.verified ?? [];
+    const tabs = `<div class="tv-tabs seg" role="group">` +
+      `<button type="button" data-issues-tab="todo" aria-pressed="${tab === "todo"}">${escapeHtml(toVerify ? t("issues.tab.todoN", { n: String(toVerify) }) : t("issues.tab.todo"))}</button>` +
+      `<button type="button" data-issues-tab="done" aria-pressed="${tab === "done"}">${escapeHtml(t("issues.tab.done", { n: String(verified.length) }))}</button></div>`;
+    if (tab === "done") {
+      const rows = verified.filter((r) => passes(r.node, `${r.name} ${r.what} ${r.by} ${r.orcid ?? ""}`));
+      count = rows.length;
+      content = verifiedTableHtml(rows, tabs);
+    } else {
+      const rows = ctx.issues.filter((i) => passes(i.id, i.txt));
+      count = rows.length;
+      content = issuesTableHtml(rows, ctx, ix, tabs);
+    }
   } else if (cards && st.sheet === "Units") {
     const ids = new Set([...facts.keys()].filter((id) => passes(id, id)));
     const cs = unitCards(ctx, ix, ids);
@@ -679,7 +693,22 @@ function fixHtml(i: ViewCtx["issues"][number]): string {
   return `<span class="wfix"><button class="tv-act" type="button" data-issue-fixbtn="${id}">${escapeHtml(f.label)}</button></span>`;
 }
 
-function issuesTableHtml(rows: ViewCtx["issues"], ctx: ViewCtx, ix: ReturnType<typeof indexOf>): string {
+/** TRADUZIONI · «Verificati»: the signatures, newest first. A row picks the
+ *  node (for a translation, the node it translates). */
+function verifiedTableHtml(rows: NonNullable<ViewCtx["verified"]>, tabs: string): string {
+  return `<div class="tv-pad">${tabs}<p class="tv-lead">${escapeHtml(t("issues.doneLead"))}</p>` +
+    `<table class="emdata-table tv-table tv-verified"><thead><tr><th>${escapeHtml(t("table.col.node"))}</th>` +
+    `<th>${escapeHtml(t("issues.col.what"))}</th><th>${escapeHtml(t("issues.col.by"))}</th><th>${escapeHtml(t("issues.col.at"))}</th></tr></thead><tbody>` +
+    (rows.length ? rows.map((r) =>
+      `<tr class="tv-issue" data-id="${escapeAttr(r.of ?? r.node)}" data-verified="${escapeAttr(r.node)}">` +
+      `<td class="tv-id">${escapeHtml(r.name)}</td><td>${escapeHtml(r.what)}</td>` +
+      `<td class="tv-num">${escapeHtml(r.by)}${r.orcid ? ` <a href="https://orcid.org/${escapeAttr(r.orcid)}" target="_blank" rel="noreferrer noopener" data-orcid>${escapeHtml(r.orcid)}</a>` : ""}</td>` +
+      `<td class="tv-num">${escapeHtml(r.at.slice(0, 16).replace("T", " "))}</td></tr>`).join("")
+      : `<tr><td colspan="4" class="tv-ok">${escapeHtml(t("issues.doneNone"))}</td></tr>`) +
+    `</tbody></table></div>`;
+}
+
+function issuesTableHtml(rows: ViewCtx["issues"], ctx: ViewCtx, ix: ReturnType<typeof indexOf>, tabs = ""): string {
   void ctx;
   const ico = (s: string): string => (s === "warn" ? "▲" : "●");
   // CATENA · «Verifica tutti» over the rows ON SCREEN (the filters decide which)
@@ -690,7 +719,7 @@ function issuesTableHtml(rows: ViewCtx["issues"], ctx: ViewCtx, ix: ReturnType<t
     const nodes = [...new Set(rs.map((i) => i.node))].join(" ");
     return rs.length > 1 ? `<button class="tv-act" type="button" data-issue-bulk="${escapeAttr(k)}" data-nodes="${escapeAttr(nodes)}">${escapeHtml(rs[0].bulk!.label(rs.length))}</button>` : "";
   }).join(" ");
-  return `<div class="tv-pad"><p class="tv-lead">${escapeHtml(t("issues.lead"))} ${bulkBtns}</p>` +
+  return `<div class="tv-pad">${tabs}<p class="tv-lead">${escapeHtml(t("issues.lead"))} ${bulkBtns}</p>` +
     `<table class="emdata-table tv-table"><thead><tr><th>${escapeHtml(t("table.fx.sev"))}</th>` +
     `<th>${escapeHtml(t("table.fx.rule"))}</th><th>${escapeHtml(t("table.col.node"))}</th>` +
     `<th>${escapeHtml(t("table.col.msg"))}</th><th>${escapeHtml(t("issues.fixCol"))}</th></tr></thead><tbody>` +
@@ -743,6 +772,14 @@ function wireBody(host: EmDataHost, store: DocumentStore, st: TableState): void 
       setCurrentRow(el.dataset.id!);
       onRowPicked(el.dataset.id!);
     }));
+  body.querySelectorAll<HTMLButtonElement>("[data-issues-tab]").forEach((b) =>
+    b.addEventListener("click", (e) => {
+      e.stopPropagation();
+      if (win) setWinCurrent(win, "table.issuesTab", b.dataset.issuesTab === "done" ? "done" : null);
+      renderEmData();
+    }));
+  body.querySelectorAll<HTMLAnchorElement>("a[data-orcid]").forEach((a) =>
+    a.addEventListener("click", (e) => e.stopPropagation()));
   body.querySelectorAll<HTMLButtonElement>("[data-issue-act]").forEach((b) =>
     b.addEventListener("click", (e) => { e.stopPropagation(); runIssueAction(b.dataset.issueAct!); }));
   // CAMPAGNA · the Fix column: its controls are not a pick of the row

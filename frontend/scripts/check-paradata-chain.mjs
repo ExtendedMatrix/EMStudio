@@ -296,7 +296,7 @@ print(json.dumps(api.validate(g)["info"]))`;
   });
   eq(N(st, st.node(x).data.ai_assisted.by).node_type, "author_ai", "ai_assisted.by names an AuthorAINode");
   const warn = () => issues({ doc: st.doc, nodes: st.doc.graph.nodes, isUnit: isStratigraphicType,
-    aiNodes: aiv.unvalidatedAi(st.doc), t: (k) => k }).filter((i) => i.rule === "ai" && i.node === x);
+    aiNodes: aiv.unvalidatedAi(st.doc), t: (k) => k }).filter((i) => i.rule === "verify" && i.node === x);
   eq(warn().map((i) => i.sev), ["warn"], "the AI reading is a warning (rule ai)");
   const libRows = py(st.doc, "[r['node'] for r in api.unvalidated_ai(g)]");
   if (libRows) eq(libRows, [x], "s3Dgraphy's api.unvalidated_ai lists the same node");

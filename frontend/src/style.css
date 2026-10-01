@@ -8680,3 +8680,7 @@ input.storage-path:focus { border-color: var(--accent); background: var(--bg-pan
   background: color-mix(in srgb, var(--warn) 12%, transparent); color: var(--text); }
 .ff-d { color: var(--text-faint); font-size: .8rem; margin-top: 8px; }
 .ff-acts { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
+.tv-tabs { display: inline-flex; border: 1px solid var(--border); border-radius: 999px; overflow: hidden; margin: 0 0 8px; }
+.tv-tabs button { border: 0; background: transparent; color: var(--text-muted); padding: 3px 12px; font: .78rem var(--font-sans); cursor: pointer; }
+.tv-tabs button[aria-pressed="true"] { background: var(--accent); color: var(--on-accent); }
+.tv-verified a[data-orcid] { color: var(--ok); }

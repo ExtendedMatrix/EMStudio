@@ -106,8 +106,30 @@ export interface IssueSources {
    *  and the verification that clears them */
   aiNodes?: Array<{ node: string; name: string; via: "marker" | "has_author"; fields: string[] | null }>;
   verifyAi?: { label: string; bulkLabel: (n: number) => string; run: (nodes: string[]) => void };
+  /** TRADUZIONI · everything that waits for a person (`ai-validation.toReview`,
+   *  the library's `to_review`): AI content, a review asked for, a translation
+   *  to realign. ONE rule, «verify», for all three — the AI nodes above arrive
+   *  here too (given `review`, `aiNodes` is not read: one view, one vocabulary). */
+  review?: ReviewIssueRow[];
+  /** «Testo a fronte» on a translation (or on the node it translates) */
+  openFacing?: { label: string; run: (translationId: string) => void };
+  /** TIPS · texts with no language while the study declares none, and the
+   *  correction «declare the study's language» (the options are tags) */
+  untagged?: { count: number; options: Array<{ value: string; label: string }>;
+               placeholder: string; run: (lang: string) => void };
   /** i18n for the hint texts */
   t: (key: string, vars?: Record<string, string>) => string;
+}
+
+/** One row of `to_review`, as the warnings read it. */
+export interface ReviewIssueRow {
+  node: string;
+  name: string;
+  node_type: string;
+  reasons: Array<"ai" | "review_requested" | "stale">;
+  of?: string;
+  lang?: string;
+  via?: "marker" | "has_author";
 }
 
 /** Edge types the socket check never judges: membership and bookkeeping that
@@ -251,14 +273,35 @@ export function issues(src: IssueSources): Issue[] {
     push({ node: h.extractor, sev: "info", rule: "paradata",
            txt: t("issues.sourceHint", { x: h.extractor_name, u: h.unit_name, p: h.property_name }) });
 
-  // ── CATENA · a node made with AI support (or by an AI author) that no person
-  //    verified: a warning, until somebody verifies it with their identity ──
-  for (const a of src.aiNodes ?? []) {
+  // ── TRADUZIONI · what waits for a person, and why — ONE rule «verify» for
+  //    AI content, a requested review, and a translation to realign. The fix
+  //    of a translation is the facing text; «✓ Verify» signs what a signature
+  //    can close (AI, review) — never «da riallineare», which only an updated
+  //    translation closes.
+  const review: ReviewIssueRow[] = src.review ?? (src.aiNodes ?? []).map((a): ReviewIssueRow => ({
+    node: a.node, name: a.name, node_type: "", reasons: ["ai"], via: a.via }));
+  for (const r of review) {
     const v = src.verifyAi;
-    push({ node: a.node, sev: "warn", rule: "ai",
-           txt: t(a.via === "has_author" ? "issues.aiAuthor" : "issues.aiNode", { n: a.name || a.node }),
-           ...(v ? { action: { label: v.label, run: () => v.run([a.node]) },
-                     bulk: { key: "ai", label: v.bulkLabel, run: v.run } } : {}) });
+    const signable = r.reasons.includes("ai") || r.reasons.includes("review_requested");
+    const isTr = !!r.of;
+    const of = isTr ? name(r.of!) : (r.name || r.node);
+    const lang = r.lang ?? "";
+    const why = r.reasons.includes("stale") ? (isTr ? "issues.trStale" : "")
+      : r.reasons.includes("ai") ? (isTr ? "issues.trAi" : r.via === "has_author" ? "issues.aiAuthor" : "issues.aiNode")
+      : (isTr ? "issues.trReview" : "issues.review");
+    push({ node: isTr ? r.of! : r.node, sev: r.reasons.includes("review_requested") && r.reasons.length === 1 ? "info" : "warn",
+           rule: "verify", txt: t(why || "issues.aiNode", { n: of, lang }),
+           ...(v && signable ? { action: { label: v.label, run: () => v.run([r.node]) },
+                                 bulk: { key: "verify", label: v.bulkLabel, run: v.run } } : {}),
+           ...(isTr && src.openFacing ? { fix: { kind: "button" as const, label: src.openFacing.label,
+                                                  run: () => src.openFacing!.run(r.node) } } : {}) });
+  }
+
+  // ── TIPS · texts with no language at all: the study does not declare one ──
+  if (src.untagged && src.untagged.count > 0) {
+    const u = src.untagged;
+    push({ node: "", sev: "info", rule: "language", txt: t("issues.untagged", { k: String(u.count) }),
+           fix: { kind: "pick", placeholder: u.placeholder, options: u.options, run: u.run } });
   }
 
   // ── COLLEGARE · the story: an AI paragraph no person validated is a warning
@@ -270,7 +313,7 @@ export function issues(src: IssueSources): Issue[] {
     chapters.forEach((c) => {
       const k = (c.blocks ?? []).filter((b) =>
         (b.block_type ?? "prose") === "prose" && b.ai_generated && !b.validated_by).length;
-      if (k) push({ node: n.id, sev: "warn", rule: "ai",
+      if (k) push({ node: n.id, sev: "warn", rule: "verify",
                     txt: t("issues.aiProse", { n: name(n.id), ch: String(c.title ?? ""), k: String(k) }) });
     });
   }

@@ -199,7 +199,7 @@ const is3d = (n) => /\.(glb|gltf)$/i.test(String(n.data?.filename ?? n.data?.url
 {
   const st = new M.DocumentStore(fixture());
   const aiWarnings = () => M.issues({ doc: st.doc, nodes: st.doc.graph.nodes, isUnit: isStrat, t: (k) => k })
-    .filter((i) => i.rule === "ai");
+    .filter((i) => i.rule === "verify");
   eq(aiWarnings().length, 1, "verifica · il paragrafo AI è negli avvisi (regola ai)");
   eq(AU.verifyAs(st, "NR1", 1, 0, null), "needs-identity", "verifica · senza identità non firma: si apre l'identità");
   ok(!chaptersOf(st)[1].blocks[0].validated_by && !st.canUndo, "verifica · …e non scrive niente");

@@ -45,6 +45,10 @@ export interface ViewCtx {
   issues: Issue[];
   /** the unit an issue belongs to (outliner/table marks) */
   unitOfIssue: (nodeId: string) => string | null;
+  /** TRADUZIONI · «Verificati»: what was verified, by whom (ORCID), when.
+   *  `what` already in the interface's words; `of` = the node a translation
+   *  translates (the row picks that one) */
+  verified?: Array<{ node: string; name: string; what: string; by: string; orcid: string | null; at: string; of?: string }>;
   t: (key: string, vars?: Record<string, string>) => string;
 }
 
