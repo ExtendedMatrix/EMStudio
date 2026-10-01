@@ -74,6 +74,10 @@ import {
   useIdentity,
   verifyCurrentIdentity,
   adoptVerifiedIdentity,
+  attestIdentity,
+  normalizeOrcid,
+  identityState,
+  signatureAuth,
   WitnessedClaim,
   type IdentityProvider,
 } from "./identity";
@@ -4651,7 +4655,11 @@ function hubSendLocal(op: GraphOp): void {
   // the server already declared at the door.
   if (!sync.canWrite) return;
   const ops = opsForLocalChange(op as Parameters<typeof opsForLocalChange>[0]);
+  // dev27 · the op says how its hand had entered (s3Dgraphy crdt `auth`):
+  // `created_auth` / `modified_auth` on the other side, beside the author
+  const how = signatureAuth(currentIdentity());
   for (const hubOp of ops) {
+    if (how && (hubOp.op === "add_node" || hubOp.op === "update_field")) hubOp.auth = how;
     hubUnconfirmed.set(hubKey(hubOp), hubOp);
     sync.sendCommand(wireEnvelope("op", hubOp as unknown as Record<string, unknown>));
   }
@@ -9588,7 +9596,11 @@ function identityProvider(): IdentityProvider {
  *  In memory, deliberately — like every token in this codebase. A verification
  *  that survived a reload would be a claim nobody re-checked. */
 let nodeIdentity: { orcid: string | null; name: string | null;
-                    node: string } | null = null;
+                    node: string;
+                    /** dev27 · `/v1/whoami`: how this session entered, who
+                     *  attests it, whether the iD is accredited on the node */
+                    authMode?: "orcid" | "node_password" | null;
+                    attestedBy?: string | null; accredited?: boolean } | null = null;
 
 /** …and the last thing the node said when asked, when it stopped saying yes.
  *  Shown, because A SILENT DEGRADATION IS THE LIE: falling back to Firma is a
@@ -9694,7 +9706,7 @@ interface PendingNodeSignIn {
  * only thing remembered across the round trip is WHICH NODE — a place, not a
  * permission, and the rule the whole handoff contract is built on.
  */
-async function signIntoNode(opts: { silent?: boolean; idpHint?: string; intent?: "identity" } = {}): Promise<boolean> {
+async function signIntoNode(opts: { silent?: boolean; idpHint?: string; loginHint?: string; intent?: "identity" } = {}): Promise<boolean> {
   const server = servingNode();
   logInfo(`identity: signing in against ${server}`
           + (opts.silent ? " (silently)" : ""));
@@ -9722,6 +9734,7 @@ async function signIntoNode(opts: { silent?: boolean; idpHint?: string; intent?:
   // produced a fresh tab with no session. A ring.
   window.location.assign(await authorizeUrl(config, {
     returnTo: window.location.href, silent: opts.silent, idpHint: opts.idpHint,
+    loginHint: opts.loginHint,
   }));
   return true;
 }
@@ -9848,10 +9861,16 @@ async function askNodeWhoIAm(server: string): Promise<void> {
       return;
     }
     const who = await answer.json() as
-      { orcid?: string | null; name?: string | null; enforcing?: boolean };
+      { orcid?: string | null; name?: string | null; enforcing?: boolean;
+        auth_mode?: string | null; attested_by?: string | null; accredited?: boolean };
     nodeIdentity = {
       orcid: who.orcid ?? null, name: who.name ?? null,
       node: new URL(base).host,
+      // dev27: a node before the field access says none of these — absent, not
+      // guessed (an old node's sign-in reads as before: a witnessed ORCID)
+      authMode: who.auth_mode === "orcid" || who.auth_mode === "node_password" ? who.auth_mode : null,
+      attestedBy: who.attested_by ?? null,
+      accredited: who.accredited === true,
     };
     nodeIdentityLost = null;
     logInfo(`identity: ${nodeIdentity.node} confirms `
@@ -9913,6 +9932,16 @@ function refreshIdentityChip(): void {
 
   if (rung === "identity") {
     chip.classList.add("id-identity");
+    // dev27 · a session the node ATTESTS (its password, offline) says so in ONE
+    // word; the node and how are in the title and in the panel
+    if (nodeIdentity!.authMode === "node_password") {
+      chip.classList.add("id-attested");
+      chip.dataset.identityState = "attested";
+      chip.textContent = `${who} · ${t("idp.attestedWord")}`;
+      chip.title = t("idp.attestedTitle", { who, node: nodeIdentity!.attestedBy || nodeIdentity!.node });
+      return;
+    }
+    chip.dataset.identityState = "verified";
     chip.textContent = `${who} · ${nodeIdentity!.node}`;
     chip.title = t("ident.identityTitle", { who, node: nodeIdentity!.node });
     return;
@@ -9924,7 +9953,12 @@ function refreshIdentityChip(): void {
   // statement.
   chip.classList.add("id-signature");
   if (nodeIdentityLost) chip.classList.add("id-lost");
-  chip.textContent = `◌ ${who}`;
+  // dev27 · an identity a node attested stays attested when the node is out of
+  // reach (it was the person, then): the word stays, the outline is dashed
+  const attested = identityState(identity) === "attested";
+  chip.dataset.identityState = attested ? "attested" : identityState(identity) ?? "none";
+  chip.classList.toggle("id-attested", attested);
+  chip.textContent = attested ? `◌ ${who} · ${t("idp.attestedWord")}` : `◌ ${who}`;
   // A DEGRADATION IS SAID, and «the node knows you as somebody else» is one. A
   // chip that simply stayed dashed would be right and mute, and a mute
   // degradation is the failure that looks like a success.
@@ -9938,7 +9972,9 @@ function refreshIdentityChip(): void {
       })
     : nodeIdentityLost
       ? t("ident.lostTitle", { who, why: nodeIdentityLost })
-      : t("ident.signatureTitle", { who, orcid: identity?.orcid ?? "" });
+      : attested
+        ? t("idp.attestedTitle", { who, node: identity?.attestedBy ?? "" })
+        : t("ident.signatureTitle", { who, orcid: identity?.orcid ?? "" });
 }
 
 /**
@@ -13401,7 +13437,8 @@ let identityThen: (() => void) | null = null;
 // what `oidc.ts` already holds in memory for the node's session.
 
 /** Is a StratiGraph node there to sign in through, and why not when it is not. */
-async function probeStratiGraphNode(): Promise<{ ok: boolean; server: string; why?: string }> {
+async function probeStratiGraphNode(): Promise<{ ok: boolean; server: string; why?: string;
+                                               nodeName?: string; orcidIdp?: string }> {
   const server = servingNode();
   const ctl = new AbortController();
   const timer = setTimeout(() => ctl.abort(), 3500);
@@ -13410,7 +13447,11 @@ async function probeStratiGraphNode(): Promise<{ ok: boolean; server: string; wh
     const j = r.ok ? await r.json().catch(() => null) as { service?: string; auth?: string } | null : null;
     if (!j || j.service !== "stratigraph-server") return { ok: false, server, why: t("idp.noNode", { server }) };
     if (j.auth !== "keycloak") return { ok: false, server, why: t("ident.nodeOpen", { server }) };
-    return { ok: true, server };
+    // dev27 · the node's name (the one that attests a password sign-in) and
+    // the alias of its ORCID provider — `/v1/auth-config`, absent on an old node
+    const cfg = await loadAuthConfig(server).catch(() => null);
+    return { ok: true, server, nodeName: cfg?.node_name ?? undefined,
+             orcidIdp: cfg?.orcid_idp ?? undefined };
   } catch {
     return { ok: false, server, why: t("idp.noNode", { server }) };
   } finally {
@@ -13450,11 +13491,22 @@ function openIdentityPanel(then?: () => void): void {
   const me = currentIdentity();
   box.appendChild(el("h4", undefined, t("idp.title")));
   const who = me ? `${[me.name, me.surname].filter(Boolean).join(" ") || me.orcid}` : "";
+  const meState = identityState(me);
   const state = el("div", "idp-state", !me ? t("idp.stateNone")
+    : meState === "attested" ? t("idp.stateAttested", { who, orcid: me.orcid, node: me.attestedBy ?? "" })
+      + (me.accredited ? ` ${t("idp.accredited")}` : "")
     : me.verified ? t("idp.stateVerified", { who, orcid: me.orcid, by: me.verifiedBy ?? "ORCID" })
     : t("idp.stateDeclared", { who, orcid: me.orcid }));
-  state.dataset.idpState = !me ? "none" : me.verified ? "verified" : "declared";
+  state.dataset.idpState = meState ?? "none";
   box.appendChild(state);
+  // dev27 · back online with an attested identity: confirming it with ORCID is
+  // OFFERED, never required — the attestation stays valid either way
+  const confirming = meState === "attested" && !me?.verified;
+  if (confirming) {
+    const hint = el("div", "idp-hint", t("idp.confirmHint"));
+    hint.dataset.idpConfirm = "1";
+    box.appendChild(hint);
+  }
 
   const way = (key: string, title: string, desc: string): { row: HTMLElement; desc: HTMLElement } => {
     const row = el("div", "idp-way");
@@ -13468,23 +13520,56 @@ function openIdentityPanel(then?: () => void): void {
 
   // 1 · through a StratiGraph node
   const w1 = way("stratigraph", t("idp.way1"), t("idp.probing"));
-  const b1 = el("button", "primary", t("idp.way1Btn"));
+  const b1 = el("button", "primary", confirming ? t("idp.confirmBtn") : t("idp.way1Btn"));
   b1.type = "button";
   b1.disabled = true;
-  b1.addEventListener("click", () => { closeIdentityPanel(); void signIntoNode({ idpHint: "orcid", intent: "identity" }); });
+  let idpHint = "orcid";
+  b1.addEventListener("click", () => { closeIdentityPanel(); void signIntoNode({ idpHint, intent: "identity" }); });
   w1.row.appendChild(b1);
-  void probeStratiGraphNode().then((pr) => {
+
+  // 1b · dev27 · L'ACCESSO SUL CAMPO: the iD and the node's password — shown
+  // when a node answers and ORCID does not (no internet, a local network). The
+  // node's Keycloak, its own login form, the iD as the user name; the result
+  // is an identity ATTESTED by the node, not verified by ORCID.
+  const wp = way("nodepw", t("idp.wayNodePw"), t("idp.probing"));
+  wp.row.hidden = true;
+  wp.row.dataset.idpReady = "false";
+  const bp = el("button", "primary", t("idp.wayNodePwBtn"));
+  bp.type = "button";
+  bp.disabled = true;
+  bp.addEventListener("click", () => {
+    const typed = (box.querySelector("[data-idp-orcid]") as HTMLInputElement | null)?.value ?? "";
+    const iD = orcidProblem(typed) ? (me?.orcid ?? "") : normalizeOrcid(typed);
+    closeIdentityPanel();
+    void signIntoNode({ intent: "identity", loginHint: iD || undefined });
+  });
+  wp.row.appendChild(bp);
+
+  const orcidBase = getSettings().identity.orcidBase || "https://orcid.org";
+  void Promise.all([probeStratiGraphNode(), orcidIn.orcidReachable(orcidBase, 2500)]).then(([pr, orcidUp]) => {
     if (!box.isConnected) return;
-    w1.desc.textContent = pr.ok ? t("idp.way1Desc", { node: new URL(pr.server).host }) : (pr.why ?? "");
-    b1.disabled = !pr.ok;
-    w1.row.classList.toggle("off", !pr.ok);
-    w1.row.dataset.idpReady = String(pr.ok);
+    if (pr.orcidIdp) idpHint = pr.orcidIdp;
+    const host = pr.ok ? new URL(pr.server).host : "";
+    const node = pr.nodeName || host;
+    const viaOrcid = pr.ok && orcidUp;
+    w1.desc.textContent = !pr.ok ? (pr.why ?? "")
+      : orcidUp ? t("idp.way1Desc", { node: host }) : t("idp.orcidDown", { base: new URL(orcidBase).host });
+    b1.disabled = !viaOrcid;
+    w1.row.classList.toggle("off", !viaOrcid);
+    w1.row.dataset.idpReady = String(viaOrcid);
+    // the field way: a node, and no ORCID
+    const field = pr.ok && !orcidUp;
+    wp.row.hidden = !field;
+    wp.desc.textContent = field ? t("idp.wayNodePwDesc", { node }) : "";
+    bp.disabled = !field;
+    wp.row.dataset.idpReady = String(field);
+    wp.row.dataset.idpNode = node;
   });
 
   // 2 · ORCID itself
   const cfg = orcidConfig();
   const w2 = way("orcid", t("idp.way2"), cfg ? t("idp.probing") : t("idp.noClient"));
-  const b2 = el("button", "ghost", t("idp.way2Btn"));
+  const b2 = el("button", "ghost", confirming ? t("idp.confirmBtn") : t("idp.way2Btn"));
   b2.type = "button";
   b2.disabled = true;
   b2.addEventListener("click", () => { if (cfg) window.location.assign(orcidIn.orcidAuthorizeUrl(cfg)); });
@@ -13564,12 +13649,30 @@ async function witnessIdentityFromNode(): Promise<void> {
   if (!nodeIdentity?.orcid) return;
   const node = nodeIdentity.node;
   const me = currentIdentity();
+  // dev27 · L'ACCESSO SUL CAMPO: the iD and the node's password — the node
+  // ATTESTS (it does not verify): «attestata dal nodo», never «verificata»
+  if (nodeIdentity.authMode === "node_password") {
+    const by = nodeIdentity.attestedBy || node;
+    const r = attestIdentity(nodeIdentity.orcid, {
+      node: by, name: nodeIdentity.name ?? undefined, accredited: nodeIdentity.accredited === true });
+    if (r.status === "mismatch") {
+      toast(t("ident.otherPersonNext", { them: nodeIdentity.name || nodeIdentity.orcid }));
+      return;
+    }
+    applyIdentityToDocument();
+    toast(t("idp.attestedBy", { orcid: nodeIdentity.orcid, by }));
+    refreshIdentityPanel();
+    refreshIdentityChip();
+    resumeIdentityThen();
+    return;
+  }
   if (!me) {
     adoptVerifiedIdentity(nodeIdentity.orcid, nodeIdentity.name ?? undefined, node);
     applyIdentityToDocument();
     toast(t("idp.verifiedBy", { orcid: nodeIdentity.orcid, by: node }));
   } else if (sameSignature(me.orcid, nodeIdentity.orcid)) {
-    await verifyCurrentIdentity(new WitnessedClaim({ orcid: nodeIdentity.orcid, name: nodeIdentity.name ?? undefined, witness: node }));
+    await verifyCurrentIdentity(new WitnessedClaim({ orcid: nodeIdentity.orcid, name: nodeIdentity.name ?? undefined, witness: node,
+      accredited: nodeIdentity.accredited }));
     toast(t("idp.verifiedBy", { orcid: me.orcid, by: node }));
   } else {
     toast(t("ident.otherPersonNext", { them: nodeIdentity.name || nodeIdentity.orcid }));
@@ -13625,7 +13728,8 @@ function requireIdentity(): boolean {
 
 function identityForSigning(): nauth.SignerIdentity | null {
   const me = identityRef();
-  return me ? { ...me, verified: !!currentIdentity()?.verified } : null;
+  return me ? { ...me, verified: !!currentIdentity()?.verified,
+                auth: signatureAuth(currentIdentity()) } : null;
 }
 
 function verifyBlock(narrativeId: string, c: number, b: number): void {
@@ -15651,8 +15755,11 @@ function renderReviewLine(host: HTMLElement, id: string): void {
     const v = document.createElement("div");
     v.className = "insp-review-ok";
     v.dataset.verifiedBy = verified.orcid ?? "";
+    const how = aiv.authWords(verified.auth, t);
+    v.dataset.auth = verified.auth?.mode ?? "";
     v.textContent = t("insp.verifiedBy", { who: `${verified.byName}${verified.orcid ? ` (${verified.orcid})` : ""}`,
-                                          at: verified.at.slice(0, 16).replace("T", " ") });
+                                          at: verified.at.slice(0, 16).replace("T", " ") })
+      + (how ? ` · ${how}` : "");
     box.appendChild(v);
   }
   if (reasons.length) {

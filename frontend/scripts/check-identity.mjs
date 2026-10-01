@@ -228,4 +228,64 @@ const reset = () => mem.clear();
      "…and it is not a confirmation either");
 }
 
+// ── dev27 · L'ACCESSO SUL CAMPO: three modes, and the word each one says ────
+//
+// Verified by ORCID, attested by a node's password, declared. A signature
+// carries the mode it was made in; publishing asks for an iD verified by ORCID
+// once — an attested iD passes when the node says it is accredited, because the
+// accreditation was online.
+{
+  const A = "0000-0002-1825-0097";
+  const B = "0000-0001-5109-3700";
+
+  // declared: no mode in the signature, no publication
+  reset();
+  I.declareIdentity(A);
+  eq(I.identityState(I.currentIdentity()), "declared", "a typed iD is declared");
+  eq(I.signatureAuth(I.currentIdentity()), null, "a declared iD signs with no access mode");
+  eq(I.publishGate(), { allowed: false, reason: "not-verified", orcid: A }, "…and does not publish");
+
+  // attested by the node, accredited: signs as node_password, publishes
+  const r = I.attestIdentity(A, { node: "fcn-segni", name: "Emanuel Demetrescu", accredited: true });
+  eq(r.status, "attested", "the node attests the declared iD");
+  eq(I.identityState(I.currentIdentity()), "attested", "the state is attested");
+  eq(I.currentIdentity().verified, false, "an attestation is not a verification");
+  eq(I.signatureAuth(I.currentIdentity()), { mode: "node_password", attested_by: "fcn-segni" },
+     "the signature names the mode and the node");
+  eq(I.publishGate(), { allowed: true, via: "accreditation" },
+     "an attested and accredited iD publishes: the accreditation was online");
+
+  // attested but not accredited: works, does not publish
+  reset();
+  I.attestIdentity(A, { node: "fcn-segni", accredited: false });
+  eq(I.publishGate().allowed, false, "an attested iD the node does not list does not publish");
+  eq(I.currentIdentity().orcid, A, "an attestation with no identity declared adopts the iD (read, not typed)");
+
+  // never another person
+  reset();
+  I.declareIdentity(B);
+  const m = I.attestIdentity(A, { node: "fcn-segni", accredited: true });
+  eq(m, { status: "mismatch", declared: B, attested: A }, "a node attesting another person changes nothing");
+  eq(I.currentIdentity().orcid, B, "…the declared identity stays");
+  eq(I.identityState(I.currentIdentity()), "declared", "…and stays declared");
+
+  // the network comes back: confirmed with ORCID, and the mode follows
+  reset();
+  I.attestIdentity(A, { node: "fcn-segni", accredited: true });
+  const v = await I.verifyCurrentIdentity(new I.MockIdentityProvider({ orcid: A, witness: "orcid.org" }));
+  eq(v.status, "verified", "an attested identity is confirmed with ORCID when the network is back");
+  eq(I.identityState(I.currentIdentity()), "verified", "the state is verified");
+  eq(I.signatureAuth(I.currentIdentity()), { mode: "orcid" }, "and a signature made now says orcid");
+  eq(I.currentIdentity().attestedBy, "fcn-segni", "the attestation stays on record");
+  eq(I.publishGate(), { allowed: true }, "it publishes through ORCID");
+
+  // a tampered store cannot promote an attestation
+  mem.set("emstudio.identities", JSON.stringify({ current: A, known: [
+    { orcid: A, verified: "true", authMode: "node_password", attestedBy: "x", accredited: "true" }] }));
+  eq(I.publishGate().allowed, false, "«true» as a string promotes nothing");
+  mem.set("emstudio.identities", JSON.stringify({ current: A, known: [
+    { orcid: A, verified: false, authMode: "password" }] }));
+  eq(I.identityState(I.currentIdentity()), "declared", "an unknown mode is dropped on the way in");
+}
+
 console.log(`identity: ${checks} checks passed`);

@@ -8713,6 +8713,10 @@ input.storage-path:focus { border-color: var(--accent); background: var(--bg-pan
 .idpanel h4 { margin: 0 0 4px; font-size: 1rem; font-weight: 600; }
 .idp-state { color: var(--text-muted); margin-bottom: 10px; line-height: 1.4; }
 .idp-state[data-idp-state="verified"] { color: var(--ok); }
+/* dev27 · attested by a node (its password, offline): its own colour, not the
+   verified green — two facts, two marks */
+.idp-state[data-idp-state="attested"] { color: var(--accent, var(--text)); }
+.idp-hint { font-size: .8rem; color: var(--text-muted); margin: -4px 0 10px; line-height: 1.4; }
 .idp-way { display: grid; gap: 4px; padding: 9px 10px; border: 1px solid var(--border); border-radius: var(--radius);
   margin-bottom: 8px; background: var(--bg-panel); }
 .idp-way.off { opacity: .62; }
@@ -8730,3 +8734,13 @@ input.storage-path:focus { border-color: var(--accent); background: var(--bg-pan
 .idpanel button:disabled, .ff-card button:disabled { opacity: .5; cursor: default; }
 .ff-card .seg button { border: 0; border-radius: 0; }
 .ff-card .seg button[aria-pressed="true"] { background: var(--accent); color: var(--on-accent); }
+
+/* dev27 · L'ACCESSO SUL CAMPO — an identity ATTESTED by a node (its password,
+   offline): the chip says «attestata» in one word, and its outline is the
+   accent, not the verified green; dashed when the node is out of reach. */
+.footer-chip.id-identity.id-attested {
+  border-color: var(--accent, var(--border-strong));
+}
+.footer-chip.id-signature.id-attested {
+  border-color: var(--accent, var(--border));
+}

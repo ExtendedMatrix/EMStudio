@@ -16,7 +16,7 @@ import { paradataGroupName } from "./naming";
 import { edgeTypeFor, nodeTypeForClass, planUniformSpellings } from "./rules";
 import type { SpellingPlan } from "./rules";
 import { VOLATILE_KEY } from "./volatile";
-import { currentIdentity } from "./identity";
+import { currentIdentity, signatureAuth } from "./identity";
 import { resolveNodePair } from "./container";
 import type { Conflict } from "./container";
 import {
@@ -616,16 +616,28 @@ export class DocumentStore {
     if (this.suppressOp) return;
     const data = ((node as Record<string, unknown>).data ??= {}) as Record<string, unknown>;
     const who = this.editorOrcid();
-    if (who && !data.created_by) data.created_by = who;
+    if (who && !data.created_by) {
+      data.created_by = who;
+      // dev27 · how that hand had entered (ORCID, or attested by a node's
+      // password) — s3Dgraphy `created_auth`; nothing for a declared iD
+      const how = signatureAuth(currentIdentity());
+      if (how) data.created_auth = how;
+    }
     if (!data.created_at) data.created_at = new Date().toISOString().replace(/\.\d+Z$/, "Z");
   }
 
-  /** Stamp an edit. Overwrites — this is a stamp, not a log. */
+  /** Stamp an edit. Overwrites — this is a stamp, not a log. The access mode
+   *  follows the last hand: written with it, removed when the hand has none. */
   private stampEdit(node: EmNode): void {
     if (this.suppressOp) return;
     const data = ((node as Record<string, unknown>).data ??= {}) as Record<string, unknown>;
     const who = this.editorOrcid();
-    if (who) data.modified_by = who;
+    if (who) {
+      data.modified_by = who;
+      const how = signatureAuth(currentIdentity());
+      if (how) data.modified_auth = how;
+      else delete data.modified_auth;
+    }
     data.modified_at = new Date().toISOString().replace(/\.\d+Z$/, "Z");
   }
 

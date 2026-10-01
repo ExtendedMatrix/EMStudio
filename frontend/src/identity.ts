@@ -47,6 +47,49 @@ export interface Identity {
   /** IDENTITÀ · WHO witnessed it: a StratiGraph node (its host, through its
    *  Keycloak) or `orcid.org` (ORCID's own sign-in). Absent for the mock. */
   verifiedBy?: string;
+  /** dev27 · L'ACCESSO SUL CAMPO (E.D. 2026-10-01). How this identity entered
+   *  LAST: `orcid` (ORCID, directly or brokered by a node's Keycloak) or
+   *  `node_password` (the iD and a password of a StratiGraph node, offline: the
+   *  node ATTESTS it). Absent for a declared iD, which entered nowhere. */
+  authMode?: AuthMode;
+  /** the node that attested it (`/v1/whoami` `attested_by`), with the instant */
+  attestedBy?: string;
+  attestedAt?: string;
+  /** the node said the iD is in its list of accredited iDs (`/v1/whoami`
+   *  `accredited`): it was verified by ORCID once, at the accreditation */
+  accredited?: boolean;
+}
+
+/** How a person entered: verified by ORCID, or attested by a node's password. */
+export type AuthMode = "orcid" | "node_password";
+
+/** The access mode a SIGNATURE carries (s3Dgraphy dev27 `created_auth`,
+ *  `modified_auth`, `validated_auth`: `{mode, attested_by?}`). */
+export interface SignatureAuth {
+  mode: AuthMode;
+  attested_by?: string;
+}
+
+/** The three states an identity can be in, as the chip and the panel say them:
+ *  `verified` (ORCID), `attested` (a node, by its password), `declared`. */
+export type IdentityState = "verified" | "attested" | "declared";
+
+export function identityState(identity: Identity | null | undefined): IdentityState | null {
+  if (!identity) return null;
+  if (identity.authMode === "node_password" && identity.attestedBy) return "attested";
+  if (identity.verified === true) return "verified";
+  return identity.attestedBy ? "attested" : "declared";
+}
+
+/** What a signature made NOW records about how its hand entered: the last
+ *  sign-in's mode — `{mode: "node_password", attested_by}` for an attested
+ *  session, `{mode: "orcid"}` for a verified one — or null for a declared iD
+ *  (it entered nowhere, and inventing a mode would be a false record). */
+export function signatureAuth(identity: Identity | null | undefined): SignatureAuth | null {
+  const state = identityState(identity);
+  if (state === "attested") return { mode: "node_password", attested_by: identity!.attestedBy! };
+  if (state === "verified") return { mode: "orcid" };
+  return null;
 }
 
 // ── the iD itself ───────────────────────────────────────────────────────────
@@ -162,7 +205,13 @@ function readStore(): IdentityStore {
     // hand-edited localStorage must not be able to promote an identity by
     // holding the string "true" — the value that gates publication only ever
     // comes back as a real boolean.
-    for (const i of known) i.verified = i.verified === true;
+    for (const i of known) {
+      i.verified = i.verified === true;
+      // the same strictness for what the field attestation can unlock
+      if (i.accredited !== undefined) i.accredited = i.accredited === true;
+      if (i.authMode !== undefined && i.authMode !== "orcid" && i.authMode !== "node_password")
+        delete i.authMode;
+    }
     return { current: typeof parsed.current === "string" ? parsed.current : null, known };
   } catch {
     return { current: null, known: [] };
@@ -236,7 +285,7 @@ export function forgetIdentity(orcid: string): void {
 // ── the publication gate ────────────────────────────────────────────────────
 
 export type PublishGate =
-  | { allowed: true }
+  | { allowed: true; via?: "accreditation" }
   | { allowed: false; reason: "no-identity" }
   | { allowed: false; reason: "not-verified"; orcid: string };
 
@@ -251,9 +300,13 @@ export type PublishGate =
 export function publishGate(): PublishGate {
   const identity = currentIdentity();
   if (!identity) return { allowed: false, reason: "no-identity" };
-  if (identity.verified !== true)
-    return { allowed: false, reason: "not-verified", orcid: identity.orcid };
-  return { allowed: true };
+  if (identity.verified === true) return { allowed: true };
+  // dev27 · an identity ATTESTED by a node passes when the node says the iD is
+  // accredited: the accreditation was online, through ORCID, so the iD was
+  // verified once — the field attestation only says it is the same person now.
+  if (identity.attestedBy && identity.accredited === true)
+    return { allowed: true, via: "accreditation" };
+  return { allowed: false, reason: "not-verified", orcid: identity.orcid };
 }
 
 // ── verification: the seam ──────────────────────────────────────────────────
@@ -265,6 +318,8 @@ export interface VerificationResult {
   name?: string;
   /** who witnessed it (a node's host, `orcid.org`) — kept on the identity */
   witness?: string;
+  /** dev27 · the node's `/v1/whoami` `accredited` */
+  accredited?: boolean;
 }
 
 /**
@@ -341,6 +396,8 @@ export async function verifyCurrentIdentity(
   if (found) {
     found.verified = true;
     found.verifiedAt = new Date().toISOString();
+    found.authMode = "orcid";
+    if (result.accredited !== undefined) found.accredited = result.accredited === true;
     if (result.witness) found.verifiedBy = result.witness;
     else delete found.verifiedBy;
     if (result.name && !found.name) found.name = result.name;
@@ -358,10 +415,51 @@ export function adoptVerifiedIdentity(orcid: string, name?: string, witness?: st
   const identity: Identity = store.known.find((i) => i.orcid === id) ?? { orcid: id, verified: false };
   identity.verified = true;
   identity.verifiedAt = new Date().toISOString();
+  identity.authMode = "orcid";
   if (witness) identity.verifiedBy = witness;
   if (name && !identity.name) identity.name = name;
   store.known = [identity, ...store.known.filter((i) => i.orcid !== id)];
   store.current = id;
   writeStore(store);
   return identity;
+}
+
+export type AttestOutcome =
+  | { status: "attested"; identity: Identity }
+  | { status: "mismatch"; declared: string; attested: string };
+
+/**
+ * dev27 · L'ACCESSO SUL CAMPO — a StratiGraph node ATTESTS the identity: the
+ * person entered with their iD and the node's password, offline, and the node
+ * (`/v1/whoami` → `auth_mode: node_password`, `attested_by`) says it is them.
+ *
+ * Adopted when no identity was declared (the iD is read, not typed), recorded
+ * on the declared one when it is the same, and NEVER put in the place of
+ * another person's (the same rule as a verification). An attestation does not
+ * make an identity `verified`: «attestata dal nodo» and «verificata da ORCID»
+ * are two facts, and one that was verified before stays verified.
+ */
+export function attestIdentity(orcid: string, opts: {
+  node: string; name?: string; accredited?: boolean; at?: string;
+}): AttestOutcome {
+  const id = normalizeOrcid(orcid);
+  const store = readStore();
+  const current = store.current ? store.known.find((i) => i.orcid === store.current) : undefined;
+  if (current && current.orcid !== id)
+    return { status: "mismatch", declared: current.orcid, attested: id };
+  const identity: Identity = current ?? store.known.find((i) => i.orcid === id) ?? { orcid: id, verified: false };
+  identity.authMode = "node_password";
+  identity.attestedBy = opts.node;
+  identity.attestedAt = opts.at ?? new Date().toISOString();
+  if (opts.accredited !== undefined) identity.accredited = opts.accredited === true;
+  if (opts.name && !identity.name) {
+    const full = opts.name.trim();
+    const sp = full.lastIndexOf(" ");
+    if (sp > 0) { identity.name = full.slice(0, sp); identity.surname ??= full.slice(sp + 1); }
+    else identity.name = full;
+  }
+  store.known = [identity, ...store.known.filter((i) => i.orcid !== id)];
+  store.current = id;
+  writeStore(store);
+  return { status: "attested", identity };
 }

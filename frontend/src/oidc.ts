@@ -34,6 +34,11 @@ export interface AuthConfig {
   scope?: string;
   /** false on a node running open (dev): there is nobody to be */
   enforcing?: boolean;
+  /** dev27 · the alias of the ORCID identity provider the realm brokers
+   *  (`kc_idp_hint`), and the node's name — the one that attests a sign-in
+   *  made with its password (stratigraph-server `/v1/auth-config`) */
+  orcid_idp?: string | null;
+  node_name?: string | null;
 }
 
 export interface SignInResult {
@@ -129,7 +134,7 @@ export function redirectUri(): string {
  *  refuse it outright). */
 export async function authorizeUrl(
   config: AuthConfig,
-  opts: { returnTo?: string; silent?: boolean; idpHint?: string } = {},
+  opts: { returnTo?: string; silent?: boolean; idpHint?: string; loginHint?: string } = {},
 ): Promise<string> {
   const verifier = randomVerifier();
   const state = randomVerifier();
@@ -157,6 +162,9 @@ export async function authorizeUrl(
   // Keycloak skips its own login page for it — and ignores the hint when the
   // realm has no provider of that alias (measured on em-dev, 1 Oct 2026)
   if (opts.idpHint) url.searchParams.set("kc_idp_hint", opts.idpHint);
+  // dev27 · L'ACCESSO SUL CAMPO: the iD as the user name of the node's own
+  // login form (iD + the node's password), so nobody types it twice
+  if (opts.loginHint) url.searchParams.set("login_hint", opts.loginHint);
   return url.toString();
 }
 

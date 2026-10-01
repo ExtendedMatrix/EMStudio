@@ -25,6 +25,8 @@ export const AI_ASSISTED = "ai_assisted";
 export const AI_GENERATED_ALIAS = "ai_generated";
 export const VALIDATED_BY = "validated_by";
 export const VALIDATED_AT = "validated_at";
+/** dev27 · `{mode: orcid | node_password, attested_by?}` beside `validated_by` */
+export const VALIDATED_AUTH = "validated_auth";
 export const AI_AUTHOR_TYPE = "author_ai";
 export const HUMAN_AUTHOR_TYPE = "author";
 
@@ -214,6 +216,18 @@ export interface VerifiedRow {
   orcid: string | null;
   byName: string;
   at: string;
+  /** dev27 · how the signer had entered (`validated_auth`), null when unsaid */
+  auth?: { mode: "orcid" | "node_password"; attested_by?: string } | null;
+}
+
+/** The words for a signature's access mode — «verificata da ORCID», «attestata
+ *  dal nodo fcn» — or "" when the signature says none. `t` is the caller's. */
+export function authWords(auth: { mode?: string; attested_by?: string } | null | undefined,
+                          t: (k: string, v?: Record<string, string>) => string): string {
+  if (!auth?.mode) return "";
+  if (auth.mode === "node_password") return t("sig.auth.node_password", { node: auth.attested_by ?? "" });
+  if (auth.mode === "orcid") return t("sig.auth.orcid");
+  return "";
 }
 
 /** What has been verified, by whom (ORCID) and when — the «Verificati» tab.
@@ -231,9 +245,12 @@ export function verifiedRows(doc: EmDocument): VerifiedRow[] {
     if (!what.length) continue;
     const by = String(d[VALIDATED_BY]);
     const a = nodes.get(by);
+    const how = d[VALIDATED_AUTH] as { mode?: string; attested_by?: string } | undefined;
     out.push({ node: n.id, name: String(n.name ?? ""), node_type: n.node_type, what, by,
                orcid: a ? (String(dataOf(a).orcid ?? "") || null) : null,
-               byName: String(a?.name ?? by), at: String(d[VALIDATED_AT] ?? "") });
+               byName: String(a?.name ?? by), at: String(d[VALIDATED_AT] ?? ""),
+               auth: how && (how.mode === "orcid" || how.mode === "node_password")
+                 ? { mode: how.mode, attested_by: how.attested_by } : null });
   }
   return out.sort((a, b) => b.at.localeCompare(a.at) || a.name.localeCompare(b.name));
 }
@@ -258,7 +275,12 @@ export function verifyNodesAs(store: DocumentStore, ids: string[], me: SignerIde
     for (const id of todo) {
       const n = store.node(id);
       if (!n) continue;
-      store.updateNode(id, { data: { ...dataOf(n), [VALIDATED_BY]: author, [VALIDATED_AT]: at } });
+      // dev27 · the access mode beside the signature (s3Dgraphy `validated_auth`);
+      // a re-signature without one drops the previous signer's
+      const data: Record<string, unknown> = { ...dataOf(n), [VALIDATED_BY]: author, [VALIDATED_AT]: at };
+      if (me.auth) data[VALIDATED_AUTH] = { ...me.auth };
+      else delete data[VALIDATED_AUTH];
+      store.updateNode(id, { data });
     }
   });
   return { verified: todo };

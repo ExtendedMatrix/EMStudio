@@ -333,6 +333,8 @@ export interface SignerIdentity {
   orcid: string;
   label: string;
   verified?: boolean;
+  /** dev27 · how the signer had entered: `validated_auth` beside the signature */
+  auth?: { mode: "orcid" | "node_password"; attested_by?: string } | null;
 }
 
 /**

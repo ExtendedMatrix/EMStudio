@@ -27,7 +27,7 @@ import { t } from "./i18n";
 import type { DocumentStore } from "./model";
 import type { EmNode } from "./types";
 import type { SignerIdentity } from "./narrative-authorship";
-import { markAiAssisted, needsReview, type ReviewReason } from "./ai-validation";
+import { authWords, markAiAssisted, needsReview, type ReviewReason } from "./ai-validation";
 import {
   addTranslation, checkTranslation, COMMON_LANGUAGES, declareNodeLanguage, editionOf, fieldText, isLanguageTag,
   languageName, originalLanguage, originalOf, sameLanguage, textDigest, textIn, TranslationError,
@@ -425,9 +425,13 @@ export function openFacingText(ui: TranslationUi, nodeId: string, field: string,
     if (current && dataOf(current).validated_by) {
       const vb = st.node(String(dataOf(current).validated_by));
       const orcid = String(dataOf(vb).orcid ?? "");
+      const auth = dataOf(current).validated_auth as { mode?: string; attested_by?: string } | undefined;
+      const how = authWords(auth, t);
       const v = el("span", "ff-verified", t("tr.verifiedBy", { who: `${String(vb?.name ?? "")}${orcid ? ` (${orcid})` : ""}`,
-                                                              at: String(dataOf(current).validated_at ?? "").slice(0, 16).replace("T", " ") }));
+                                                              at: String(dataOf(current).validated_at ?? "").slice(0, 16).replace("T", " ") })
+        + (how ? ` · ${how}` : ""));
       v.dataset.ffVerified = orcid;
+      v.dataset.auth = auth?.mode ?? "";
       who.appendChild(v);
     }
     card.appendChild(who);

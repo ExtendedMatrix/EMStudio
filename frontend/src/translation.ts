@@ -70,10 +70,37 @@ export const sameLanguage = (a: unknown, b: unknown): boolean =>
   typeof a === "string" && typeof b === "string" && !!a && !!b
   && a.trim().toLowerCase() === b.trim().toLowerCase();
 
-/** What the node itself declares (`data.lang`), or null. Not a tag → none. */
+/** dev27 (s3Dgraphy `language.NOT_TEXT_LANGUAGE_TYPES`): node types whose
+ *  `data.lang` is not the language of their own text — a resource's is the
+ *  language of its CONTENT, a translation's its language of arrival — or that
+ *  are not texts (the graph-self node, places and shapes). They are not born
+ *  with a language, and a resource's does not enter the cascade. */
+export const NOT_TEXT_LANGUAGE_TYPES = new Set(["resource", "resource_file", "translation", "graph",
+  "annotation_region", "semantic_shape", "geo_position"]);
+
+/** What the node itself declares (`data.lang`), or null. Not a tag → none. A
+ *  resource's `data.lang` is its content's (`contentLanguages`), not read here. */
 export function nodeLanguage(n: EmNode | undefined): string | null {
+  if (n && (n.node_type === "resource" || n.node_type === "resource_file")) return null;
   const v = dataOf(n)[NODE_LANG_KEY];
   return isLanguageTag(v) ? v.trim() : null;
+}
+
+/** dev27 · the languages of a resource's CONTENT (`data.lang`: one tag or a
+ *  sorted list — «latino e italiano a fronte» = ["it", "la"]); [] if none. */
+export function contentLanguages(n: EmNode | undefined): string[] {
+  const v = dataOf(n)[NODE_LANG_KEY];
+  const all = Array.isArray(v) ? v : [v];
+  return all.filter(isLanguageTag).map((t) => (t as string).trim());
+}
+
+/** The canonical value for `data.lang` of a resource: one tag as a string,
+ *  more as a sorted list without repeats, none as undefined (the key goes) —
+ *  s3Dgraphy `set_content_languages`. Throws on a value that is not a tag. */
+export function contentLanguagesValue(tags: string[]): string | string[] | undefined {
+  for (const t of tags) if (!isLanguageTag(t)) throw new Error(`'${t}' is not a language tag`);
+  const uniq = [...new Set(tags.map((t) => t.trim()))].sort();
+  return uniq.length === 0 ? undefined : uniq.length === 1 ? uniq[0] : uniq;
 }
 
 /** The graph-self node (node_type `graph`). */

@@ -515,16 +515,41 @@ function opClock(op: CrdtOp): Clock {
   return clockOf(op.ts as string, op.author as string);
 }
 
-function stampPayload(payload: Payload, clock: Clock, creation: boolean): void {
+/** dev27 · an op's access mode (`auth`: "orcid" or {mode, attested_by}),
+ *  normalised as s3Dgraphy `editorial.normalize_auth` does; null for none;
+ *  `false` for one that is not valid (the op is refused). */
+export function opAuth(op: CrdtOp): { mode: "orcid" | "node_password"; attested_by?: string } | null | false {
+  let a = op.auth as unknown;
+  if (a === undefined || a === null || a === "" ) return null;
+  if (typeof a === "string") a = { mode: a };
+  if (typeof a !== "object") return false;
+  const o = a as Record<string, unknown>;
+  if (o.mode === "orcid") return o.attested_by ? false : { mode: "orcid" };
+  if (o.mode === "node_password") {
+    const node = String(o.attested_by ?? "").trim();
+    return node ? { mode: "node_password", attested_by: node } : false;
+  }
+  return Object.keys(o).length === 0 ? null : false;
+}
+
+function stampPayload(payload: Payload, clock: Clock, creation: boolean,
+                      auth: { mode: string; attested_by?: string } | null = null): void {
   if (!isStamped(clock)) return;
   const data = (payload.data ??= {}) as Record<string, unknown>;
   if (creation && !data.created_at) {
     data.created_at = clock.ts;
-    if (clock.by) data.created_by = clock.by;
+    if (clock.by) {
+      data.created_by = clock.by;
+      if (auth) data.created_auth = { ...auth };
+    }
   }
   if (clockOrder(clock, nodeStamp(payload)) >= 0) {
     data.modified_at = clock.ts;
-    if (clock.by) data.modified_by = clock.by;
+    if (clock.by) {
+      data.modified_by = clock.by;
+      if (auth) data.modified_auth = { ...auth };
+      else delete data.modified_auth;
+    }
   }
 }
 
@@ -550,7 +575,11 @@ export function applyOp(section: Section, op: CrdtOp): OpResult {
     const nodeId = String(op.id ?? payload.id ?? "");
     if (!nodeId) return { applied: false, reason: "add_node without an id", fields: [] };
     payload.id = nodeId;
-    stampPayload(payload, clock, true);
+    const auth = opAuth(op);
+    if (auth === false)
+      return { applied: false, reason: "the op's access mode is not orcid or node_password with its node: nothing was written",
+               nodeId, fields: [] };
+    stampPayload(payload, clock, true, auth);
     const existing = byId.get(nodeId);
     if (!existing) {
       nodes.push(payload);
@@ -571,6 +600,9 @@ export function applyOp(section: Section, op: CrdtOp): OpResult {
     if (!name || (name !== "name" && name !== "description" && !name.startsWith("data.")))
       return { applied: false, reason: `'${name}' is not an addressable field`,
                nodeId, fields: [] };
+    if (opAuth(op) === false)
+      return { applied: false, reason: "the op's access mode is not orcid or node_password with its node: nothing was written",
+               nodeId, fields: [] };
     const current = fieldClock(existing, name);
     const [order, reason] = compareClocks(clock, current);
     const gone = fieldTombstone(existing, name) !== null;
@@ -585,7 +617,7 @@ export function applyOp(section: Section, op: CrdtOp): OpResult {
     // emptying with its tombstone (`remove: true`).
     if (wantsGone) clearField(existing, name, clock);
     else writeField(existing, name, op.value, clock);
-    stampPayload(existing, clock, false);
+    stampPayload(existing, clock, false, opAuth(op) || null);
     return {
       applied: true, reason: "set", nodeId,
       fields: [{
