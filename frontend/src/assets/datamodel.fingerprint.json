@@ -24,6 +24,6 @@
     "qualia": "em_qualia_types.json",
     "translations": "datamodel_translations.json"
   },
-  "s3dgraphy": "1.6.0.dev26",
+  "s3dgraphy": "1.6.0.dev27",
   "_note": "written by scripts/sync-datamodels.sh; checked by scripts/check-datamodel.mjs. Never edit by hand."
 }
