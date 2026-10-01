@@ -230,8 +230,10 @@ export function openFacingText(ui: TranslationUi, nodeId: string, field: string,
   document.querySelector(".ff-veil")?.remove();
   const before = document.activeElement as HTMLElement | null;
 
-  const existing = tid ? store.node(tid) : undefined;
+  // the draft is read from the translation SHOWN NOW — after «Add» that is the
+  // one just made, not the empty one the window was opened for
   const first = (): Draft => {
+    const existing = tid ? ui.store()?.node(tid) : undefined;
     if (existing) {
       const d = dataOf(existing);
       return { lang: String(d.lang ?? ""), text: String(d.text ?? ""), method: (d.method as TranslationMethod) ?? "manual",
@@ -242,7 +244,7 @@ export function openFacingText(ui: TranslationUi, nodeId: string, field: string,
     return { lang, text: "", method: "manual", edition: "", review: false };
   };
   let draft = first();
-  let current = existing;
+  let current = tid ? store.node(tid) : undefined;
 
   const veil = el("div", "ff-veil");
   const card = el("div", "ff-card");
