@@ -217,6 +217,8 @@ import type { ModelOptions } from "./embed3d-native";
 import { KEYMAP, filterKeymap, keysText } from "./keymap";
 import { ReadingFiles } from "./reading-files";
 import * as aiv from "./ai-validation";
+import * as trx from "./translation";
+import * as trui from "./translation-ui";
 import {
   checkReceipt, coversMoreThanTheFile, receiptOf, receiptsOfEmission, refreshedCopies, verdictChanged,
   type ReceiptCheck, type StampVerdict,
@@ -2302,6 +2304,9 @@ function renderInspectorInto(host: HTMLElement): void {
       onToggleResourceFiles: (id) => toggleResourceFiles(id),
       onReplaceFile: (resId, fileId) => { void replaceFileFlow(resId, fileId); },
       onOpenInScene: (resId) => { void openResourceInScene(resId); },
+      // TRADUZIONI · the row of languages under every natural-language text
+      renderTextLanguages: (box, nodeId, field) => trui.renderLanguageRow(box, translationUi, nodeId, field),
+      onOpenFacing: (tid) => openFacingFor(tid),
       onClearField: (nodeId, field) => {
         (storeOfNode(nodeId) ?? store!).clearField(nodeId, field);
         refreshInspector();
@@ -2315,6 +2320,7 @@ function renderInspectorInto(host: HTMLElement): void {
     renderChainSection(host, chainUi(owning), selectedId); // CATENA
     const chip = aiChipFor(selectedId);
     if (chip) host.querySelector(".insp-head .insp-chip")?.after(chip);
+    renderReviewLine(host, selectedId);   // TRADUZIONI · waits for / verified by
   }
   renderInspectorChronology(host);
   renderInspectorIssues(host);
@@ -10049,6 +10055,7 @@ function declareIdentityFromPanel(): void {
   refreshIdentityPanel();
   refreshIdentityChip();
   toast(t("identity.declared", { orcid: res.identity.orcid }));
+  resumeIdentityThen();
 }
 
 /**
@@ -10426,6 +10433,8 @@ settingsModal.addEventListener("click", (e) => {
     return Number.isFinite(v) && v > 0 ? v : dflt;
   };
   const next: Settings = {
+    // TRADUZIONI · "" = the interface language
+    texts: { displayLang: (document.getElementById("set-text-lang") as HTMLSelectElement | null)?.value ?? "" },
     sync: {
       tool: setToolSel.value,
       protocol: setProtoSel.value === "wss" ? "wss" : "ws",
@@ -10472,7 +10481,7 @@ settingsModal.addEventListener("click", (e) => {
   const changed: string[] = [];
   if (was && getLocale() !== was.locale) changed.push(t("settings.w.language"));
   if (was && storedMode() !== was.theme) changed.push(t("settings.w.theme"));
-  for (const k of ["sync", "interaction", "viewer", "iiif", "ai", "developer"] as const)
+  for (const k of ["texts", "sync", "interaction", "viewer", "iiif", "ai", "developer"] as const)
     if (JSON.stringify(before[k]) !== JSON.stringify(next[k])) changed.push(t(`settings.w.${k}`));
   saveSettings(next);
   settingsOpenedWith = null;          // saved: nothing to put back
@@ -11395,6 +11404,33 @@ function populateLanguageSelect(): void {
   }).join("");
   select.value = getLocale();
   refreshValidateToggle();
+  populateTextLanguageSelect();
+}
+
+/** TRADUZIONI · «show the texts in…»: the interface language first (the
+ *  default), then the languages a translation can be in. */
+function populateTextLanguageSelect(): void {
+  const sel = document.getElementById("set-text-lang") as HTMLSelectElement | null;
+  if (!sel) return;
+  const ui = getLocale();
+  sel.textContent = "";
+  const first = document.createElement("option");
+  first.value = "";
+  first.textContent = t("tr.settingsUi", { lang: `${ui} · ${trx.languageName(ui, ui)}` });
+  sel.appendChild(first);
+  for (const tag of trx.COMMON_LANGUAGES.filter((x) => x !== "und")) {
+    const o = document.createElement("option");
+    o.value = tag;
+    o.textContent = `${tag} · ${trx.languageName(tag, ui)}`;
+    sel.appendChild(o);
+  }
+  sel.value = getSettings().texts.displayLang;
+}
+
+/** The language the graph's texts are shown in: the setting, else the
+ *  interface's. */
+function displayLanguage(): string {
+  return getSettings().texts.displayLang || getLocale();
 }
 
 /**
@@ -13259,6 +13295,24 @@ function identityRef(): { orcid: string; label: string } | null {
   return { orcid: me.orcid, label: [me.name, me.surname].filter(Boolean).join(" ") || me.orcid };
 }
 
+/** The action waiting for an identity, run once one exists. */
+let identityThen: (() => void) | null = null;
+
+/** Open where an identity is declared (or verified), keeping what asked for it:
+ *  `then` runs once an identity exists. */
+function openIdentityPanel(then?: () => void): void {
+  identityThen = then ?? null;
+  toast(t("tr.needIdentity"));
+  openSettings("settings-sect-identity");
+}
+
+/** …and run it when the identity arrives. */
+function resumeIdentityThen(): void {
+  const run = identityThen;
+  identityThen = null;
+  if (run && currentIdentity()) run();
+}
+
 function requireIdentity(): boolean {
   if (currentIdentity()) return true;
   toast(t("ninsp.needIdentity"));
@@ -15058,6 +15112,23 @@ function renderDocViewInto(
   field(t("doc.description"), current.description ?? "", (v) =>
     store?.updateNode(current.id, { description: v }),
   );
+  // TRADUZIONI · the languages of the description, and the facing text
+  if (store && trx.isNaturalLanguage(current, "description")) {
+    const langs = document.createElement("div");
+    langs.className = "doc-langs";
+    trui.renderLanguageRow(langs, translationUi, current.id, "description");
+    const facing = document.createElement("button");
+    facing.className = "insp-btn";
+    facing.dataset.docFacing = "1";
+    facing.textContent = t("tr.fromDoc");
+    facing.title = t("tr.fromDocTitle");
+    facing.addEventListener("click", () => {
+      const first = trx.translationsOf(store!.doc, current.id, "description")[0];
+      trui.openFacingText(translationUi, current.id, "description", first?.id ?? null);
+    });
+    langs.appendChild(facing);
+    detail.appendChild(langs);
+  }
 
   // what hangs off this document — the reason a source is in the graph at all
   const extractors = (store?.doc.graph.edges ?? []).filter(
@@ -15210,6 +15281,103 @@ async function docText(d: EmNode): Promise<string | null> {
   } catch {
     return null;
   }
+}
+
+// ── TRADUZIONI · the row of languages and the facing text ───────────────────
+
+/** What the two surfaces of a translation need from the app. The act of
+ *  verifying is the one «Verifica» there is (`verifyAiNodes`); the AI is the
+ *  channel the readings already use (the bridge, the provider of the
+ *  preferences); the translator is the identity, and without one the identity
+ *  opens. */
+const translationUi: trui.TranslationUi = {
+  store: () => store,
+  locale: () => getLocale(),
+  displayLang: () => displayLanguage(),
+  me: () => identityForSigning(),
+  openIdentity: (then) => openIdentityPanel(then),
+  aiReady: () => aiConfigured(),
+  askAiThen: (run) => askForAiThen(run),
+  proposeAi: async (text, from, to) => {
+    const ai = getSettings().ai;
+    try {
+      const r = await fetch(`${await bridgeUrl()}/propose-translation`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text, from_lang: from, to_lang: to, provider: ai.provider, model: ai.model }),
+      });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok || !j.ok) return { ok: false, why: String(j?.error ?? r.status) };
+      return { ok: true, text: String(j.text), provider: String(j.provider || ai.provider), model: String(j.model || ai.model) };
+    } catch (err) {
+      logInfo(String(err));
+      return { ok: false, why: t("rd.aiNoBridge") };
+    }
+  },
+  aiAuthorFor: (st, provider, model) =>
+    aiv.aiAuthorFor(st, provider || getSettings().ai.provider, model || getSettings().ai.model),
+  authorFor: (st, me) => nauth.authorForIdentity(st, me),
+  verify: (ids) => verifyAiNodes(ids),
+  done: (msg, ids) => {
+    if (msg && store) { logInfo(msg, ids); toastUndo(msg, store); }
+    refreshIssues();
+    refreshInspector();
+    renderDocView();
+    draw();
+  },
+  pastValues: (id, field) => store?.pastFieldValues(id, field) ?? [],
+};
+
+/** «Testo a fronte» from anywhere that has only the translation's id. */
+function openFacingFor(tid: string): void {
+  if (!trui.openFacingForTranslation(translationUi, tid)) toast(t("tr.err.node"));
+}
+
+/** INSPECTOR · what a node waits for, and who verified it — the «Verificati»
+ *  row of the warnings, on the node itself. */
+function renderReviewLine(host: HTMLElement, id: string): void {
+  if (!store) return;
+  const n = store.node(id);
+  if (!n) return;
+  const reasons = aiv.needsReview(store.doc, id);
+  const verified = aiv.verifiedRows(store.doc).find((r) => r.node === id);
+  if (!reasons.length && !verified) return;
+  const box = document.createElement("div");
+  box.className = "insp-review";
+  if (verified) {
+    const v = document.createElement("div");
+    v.className = "insp-review-ok";
+    v.dataset.verifiedBy = verified.orcid ?? "";
+    v.textContent = t("insp.verifiedBy", { who: `${verified.byName}${verified.orcid ? ` (${verified.orcid})` : ""}`,
+                                          at: verified.at.slice(0, 16).replace("T", " ") });
+    box.appendChild(v);
+  }
+  if (reasons.length) {
+    const w = document.createElement("div");
+    w.className = "insp-review-wait";
+    w.dataset.reasons = reasons.join(" ");
+    w.textContent = t("insp.waitsFor", { why: reasons.map((r) => t(r === "ai" ? "tr.st.ai" : r === "stale" ? "tr.st.stale" : "tr.st.review")).join(" · ") });
+    box.appendChild(w);
+    const acts = document.createElement("div");
+    acts.className = "insp-actions";
+    if (n.node_type === trx.TRANSLATION_TYPE) {
+      const f = document.createElement("button");
+      f.className = "insp-btn";
+      f.textContent = t("issues.facing");
+      f.addEventListener("click", () => openFacingFor(id));
+      acts.appendChild(f);
+    }
+    if (reasons.some((r) => r === "ai" || r === "review_requested")) {
+      const b = document.createElement("button");
+      b.className = "insp-btn";
+      b.textContent = t("tr.verifySign");
+      b.addEventListener("click", () => verifyAiNodes([id]));
+      acts.appendChild(b);
+    }
+    box.appendChild(acts);
+  }
+  const head = host.querySelector(".insp-name-row");
+  if (head) head.after(box); else host.appendChild(box);
 }
 
 /** The AI chip of a node: dashed until a person verifies it, then ✓ and the

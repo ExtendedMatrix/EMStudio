@@ -26,6 +26,9 @@ export interface Qualia {
    *  thing the vocabulary can say, and saying it beats saying nothing. */
   mappings?: Record<string, string>;
   expectedExtractors?: string[];
+  /** qualia 1.6.4 · the value is TEXT IN A NATURAL LANGUAGE (it leaves in RDF
+   *  with its language tag, and can be translated) — the datamodel's marker */
+  naturalLanguage?: boolean;
 }
 
 interface RawQ {
@@ -39,6 +42,7 @@ interface RawQ {
   values?: string[];
   mappings?: Record<string, string>;
   expected_extractors?: string[];
+  natural_language?: boolean;
 }
 interface RawSub {
   name?: string;
@@ -80,6 +84,7 @@ for (const c of doc.qualia_categories ?? []) {
         values: q.values,
         mappings: q.mappings,
         expectedExtractors: q.expected_extractors,
+        naturalLanguage: q.natural_language === true,
       });
     }
   }

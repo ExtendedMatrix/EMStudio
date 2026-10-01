@@ -942,6 +942,13 @@ def make_handler(api):
                     self._fail(400, f"invalid JSON body: {exc}")
                     return
                 self._propose_reading(body)
+            elif route == "/propose-translation":
+                try:
+                    body = json.loads(raw.decode("utf-8")) if raw else {}
+                except Exception as exc:
+                    self._fail(400, f"invalid JSON body: {exc}")
+                    return
+                self._propose_translation(body)
             elif route == "/place-reading":
                 # LUOGO · a reading's place, and for a point, a line or a
                 # polyline its glb WRITTEN in the project: it touches the disk,
@@ -2964,6 +2971,49 @@ def make_handler(api):
                 self._fail(502, f"reading proposal failed: {exc}")
                 return
             self._json({"ok": True, **out,
+                        "provider": getattr(provider, "name", ""),
+                        "model": getattr(provider, "model", "")})
+
+        def _propose_translation(self, body):
+            """TRADUZIONI · «Proponi con l'AI» in the facing-text window: body
+            {text, from_lang, to_lang, provider?, model?} → {ok, text, provider,
+            model}. Nothing is written here: the frontend makes the proposal a
+            TranslationNode with method «ai» and the ai_assisted marker, signed
+            by the person, among the warnings until somebody verifies it."""
+            text = str(body.get("text") or "")
+            src = str(body.get("from_lang") or "").strip()
+            dst = str(body.get("to_lang") or "").strip()
+            if not text.strip() or not src or not dst:
+                self._fail(400, "/propose-translation needs 'text', 'from_lang' and 'to_lang'")
+                return
+            try:
+                _here = str(pathlib.Path(__file__).resolve().parent)
+                if _here not in sys.path:
+                    sys.path.insert(0, _here)
+                from llm_provider import (LLMError, TRANSLATION_SYSTEM_PROMPT,
+                                          build_translation_prompt, get_provider)
+            except ImportError as exc:
+                self._fail(501, f"LLM seam unavailable: {exc}")
+                return
+            job = {"text": text, "from_lang": src, "to_lang": dst}
+            try:
+                opts = {}
+                if (body.get("model") or "").strip():
+                    opts["model"] = body["model"].strip()
+                provider = get_provider(body.get("provider"), **opts)
+                reply = provider.generate(TRANSLATION_SYSTEM_PROMPT,
+                                          build_translation_prompt(job),
+                                          {"translation": job}).strip()
+            except LLMError as exc:
+                self._fail(exc.status, str(exc))
+                return
+            except Exception as exc:                   # noqa: BLE001
+                self._fail(502, f"translation proposal failed: {exc}")
+                return
+            if not reply:
+                self._fail(502, "the model answered with an empty translation")
+                return
+            self._json({"ok": True, "text": reply,
                         "provider": getattr(provider, "name", ""),
                         "model": getattr(provider, "model", "")})
 

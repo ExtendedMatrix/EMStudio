@@ -504,6 +504,33 @@ export class DocumentStore {
     }
   }
 
+  /**
+   * TRADUZIONI · the values a field of a node had in the snapshots this session
+   * still holds (the undo stack), newest first, distinct, the current one
+   * excluded. What «da riallineare» shows as «the original that was
+   * translated» — found by its digest; absent when the session does not reach
+   * that far back, and then the window says so.
+   */
+  pastFieldValues(nodeId: string, field: string): string[] {
+    const out: string[] = [];
+    const key = field === "description" ? "description" : field.replace(/^data\./, "");
+    const now = this.node(nodeId);
+    const cur = field === "description" ? now?.description
+      : ((now?.data ?? {}) as Record<string, unknown>)[key];
+    for (let i = this.undoStack.length - 1; i >= 0; i--) {
+      const snap = this.undoStack[i].graph;
+      if (!snap.includes(nodeId)) continue;
+      try {
+        const g = JSON.parse(snap) as { nodes?: EmNode[] };
+        const n = g.nodes?.find((x) => x.id === nodeId);
+        const v = field === "description" ? n?.description
+          : ((n?.data ?? {}) as Record<string, unknown>)[key];
+        if (typeof v === "string" && v !== cur && !out.includes(v)) out.push(v);
+      } catch { /* a snapshot that does not parse holds nothing to show */ }
+    }
+    return out;
+  }
+
   /** how many undo steps are held — a probe for «one gesture, one step» */
   get undoDepth(): number {
     return this.undoStack.length;

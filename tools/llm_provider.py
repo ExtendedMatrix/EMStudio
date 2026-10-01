@@ -278,6 +278,8 @@ class EchoProvider(LLMProvider):
             return self._echo_table(context)
         if context.get("reading"):
             return self._echo_reading(context["reading"])
+        if context.get("translation"):
+            return self._echo_translation(context["translation"])
         activity = (context.get("activity") or {}).get("name", "questa attività")
         actions = [a.get("name", "?") for a in context.get("actions") or []]
         epochs = [e.get("name", "?") for e in context.get("epochs") or []]
@@ -287,6 +289,14 @@ class EchoProvider(LLMProvider):
         if epochs:
             bits.append("collocata in " + ", ".join(epochs))
         return "; ".join(bits) + "."
+
+    @staticmethod
+    def _echo_translation(job: Dict[str, Any]) -> str:
+        """«Proponi con l'AI» with no model: the original, marked with the
+        language it was asked into — obviously machine-made, so nobody takes
+        it for a translation, and it still crosses the whole path (proposal →
+        TranslationNode with ai_assisted → among the warnings → verified)."""
+        return f"[{job.get('to_lang', '?')} · echo] {job.get('text', '')}"
 
     @staticmethod
     def _echo_table(context: Dict[str, Any]) -> str:
@@ -338,6 +348,23 @@ READING_SYSTEM_PROMPT = (
     "with JSON: {\"quote\": \"...\", \"value\": \"...\", \"why\": \"...\"}. "
     "If the text says nothing about it, answer {\"quote\": \"\", \"value\": \"\", "
     "\"why\": \"not in this text\"}. Never invent a quote.")
+
+
+TRANSLATION_SYSTEM_PROMPT = (
+    "You help an archaeologist TRANSLATE one text of an Extended Matrix graph "
+    "(a source, an extractor, a combiner, a description). Translate it from the "
+    "language given into the language asked, faithfully: keep names, sigla "
+    "(US 3014, D.04), numbers and measures as they are, keep uncertainty as "
+    "uncertainty, add nothing, explain nothing. Answer with the translation "
+    "only, no quotes and no preamble. It will be marked as made with AI and "
+    "stay among the warnings until a named person verifies it.")
+
+
+def build_translation_prompt(job: Dict[str, Any]) -> str:
+    """The user message of «Proponi con l'AI» for a translation."""
+    return (f"From: {job.get('from_lang', '')}\n"
+            f"Into: {job.get('to_lang', '')}\n"
+            f"--- TEXT ---\n{job.get('text', '')}")
 
 
 def build_reading_prompt(reading: Dict[str, Any]) -> str:

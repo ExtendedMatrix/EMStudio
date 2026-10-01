@@ -1,0 +1,264 @@
+{
+ "ns": "03b7ed68-c392-55c2-879c-87d1f47eda59",
+ "steps": [
+  {
+   "step": "digest of the same text composed two ways",
+   "value": [
+    "sha256:850f7dc43910ff890f8879c0ed26fe697c93a067ad93a7d50f466a7028a9bf4e",
+    "sha256:850f7dc43910ff890f8879c0ed26fe697c93a067ad93a7d50f466a7028a9bf4e"
+   ]
+  },
+  {
+   "step": "digest of the Latin",
+   "value": "sha256:cbd2b7d0c41a2bbbdf050c92c656709cb54772a451ffc812cd11b4a12fb94d25"
+  },
+  {
+   "step": "italian from the edition",
+   "value": {
+    "id": "e6f31767-3049-52be-be54-5cb08706146b",
+    "node_type": "translation",
+    "name": "D.04@it",
+    "data": {
+     "lang": "it",
+     "from_lang": "la",
+     "field": "description",
+     "text": "Questa sarà invece la composizione del diastilo: quando possiamo interporre nell'intercolumnio lo spessore di tre colonne.",
+     "method": "edition",
+     "source_digest": "sha256:cbd2b7d0c41a2bbbdf050c92c656709cb54772a451ffc812cd11b4a12fb94d25"
+    },
+    "edges": [
+     [
+      "d04",
+      "e6f31767-3049-52be-be54-5cb08706146b",
+      "has_translation"
+     ],
+     [
+      "e6f31767-3049-52be-be54-5cb08706146b",
+      "ed",
+      "extracted_from"
+     ],
+     [
+      "e6f31767-3049-52be-be54-5cb08706146b",
+      "ed_au",
+      "has_author"
+     ]
+    ]
+   }
+  },
+  {
+   "step": "the same translation twice is one node",
+   "value": [
+    true,
+    1
+   ]
+  },
+  {
+   "step": "english with AI",
+   "value": {
+    "id": "675fb08d-fa24-5ccc-865f-befbefda4aa4",
+    "node_type": "translation",
+    "name": "D.04@en",
+    "data": {
+     "lang": "en",
+     "from_lang": "la",
+     "field": "description",
+     "text": "The diastyle will be composed in this way: when we can put the thickness of three columns into the intercolumniation.",
+     "method": "ai",
+     "source_digest": "sha256:cbd2b7d0c41a2bbbdf050c92c656709cb54772a451ffc812cd11b4a12fb94d25",
+     "ai_assisted": {
+      "by": "ai1",
+      "model": "claude"
+     }
+    },
+    "edges": [
+     [
+      "675fb08d-fa24-5ccc-865f-befbefda4aa4",
+      "ed_au",
+      "has_author"
+     ],
+     [
+      "d04",
+      "675fb08d-fa24-5ccc-865f-befbefda4aa4",
+      "has_translation"
+     ]
+    ]
+   }
+  },
+  {
+   "step": "to review after the two",
+   "value": [
+    {
+     "node": "675fb08d-fa24-5ccc-865f-befbefda4aa4",
+     "reasons": [
+      "ai"
+     ],
+     "of": "d04",
+     "field": "description",
+     "lang": "en",
+     "method": "ai"
+    }
+   ]
+  },
+  {
+   "step": "text in en (AI, waiting)",
+   "value": {
+    "text": "The diastyle will be composed in this way: when we can put the thickness of three columns into the intercolumniation.",
+    "lang": "en",
+    "original": false,
+    "translation": "675fb08d-fa24-5ccc-865f-befbefda4aa4",
+    "reasons": [
+     "ai"
+    ]
+   }
+  },
+  {
+   "step": "text in it",
+   "value": {
+    "text": "Questa sarà invece la composizione del diastilo: quando possiamo interporre nell'intercolumnio lo spessore di tre colonne.",
+    "lang": "it",
+    "original": false,
+    "translation": "e6f31767-3049-52be-be54-5cb08706146b",
+    "reasons": []
+   }
+  },
+  {
+   "step": "text in la (the original)",
+   "value": {
+    "text": "Diastyli autem haec erit compositio, cum trium columnarum crassitudinem intercolumnio interponere possumus.",
+    "lang": "la",
+    "original": true,
+    "translation": null,
+    "reasons": []
+   }
+  },
+  {
+   "step": "text in fr (none: the original)",
+   "value": {
+    "text": "Diastyli autem haec erit compositio, cum trium columnarum crassitudinem intercolumnio interponere possumus.",
+    "lang": "la",
+    "original": true,
+    "translation": null,
+    "reasons": []
+   }
+  },
+  {
+   "step": "english verified",
+   "value": {
+    "validated_by": "ed_au",
+    "validated_at": "2026-10-01T22:00:00Z"
+   }
+  },
+  {
+   "step": "to review after the verification",
+   "value": []
+  },
+  {
+   "step": "verify what waits for nothing",
+   "value": "refused"
+  },
+  {
+   "step": "a manual translation asking for a review",
+   "value": {
+    "id": "44e68b68-90a4-5ecf-b6d5-4be826c1add9",
+    "node_type": "translation",
+    "name": "D.04.01@it",
+    "data": {
+     "lang": "it",
+     "from_lang": "en",
+     "field": "description",
+     "text": "L'intercolumnio diastilo o areostilo può dare un architrave di legno",
+     "method": "manual",
+     "source_digest": "sha256:d4f5701be1be2a9114f8ecedca6bb4ddab489892173a987c61b4506991d4df23",
+     "review_requested": true
+    },
+    "edges": [
+     [
+      "44e68b68-90a4-5ecf-b6d5-4be826c1add9",
+      "ed_au",
+      "has_author"
+     ],
+     [
+      "x0401",
+      "44e68b68-90a4-5ecf-b6d5-4be826c1add9",
+      "has_translation"
+     ]
+    ]
+   }
+  },
+  {
+   "step": "to review with the review asked",
+   "value": [
+    {
+     "node": "44e68b68-90a4-5ecf-b6d5-4be826c1add9",
+     "reasons": [
+      "review_requested"
+     ],
+     "of": "x0401",
+     "field": "description",
+     "lang": "it",
+     "method": "manual"
+    }
+   ]
+  },
+  {
+   "step": "to review after the original changed",
+   "value": [
+    {
+     "node": "44e68b68-90a4-5ecf-b6d5-4be826c1add9",
+     "reasons": [
+      "review_requested"
+     ],
+     "of": "x0401",
+     "field": "description",
+     "lang": "it",
+     "method": "manual"
+    },
+    {
+     "node": "675fb08d-fa24-5ccc-865f-befbefda4aa4",
+     "reasons": [
+      "stale"
+     ],
+     "of": "d04",
+     "field": "description",
+     "lang": "en",
+     "method": "ai"
+    },
+    {
+     "node": "e6f31767-3049-52be-be54-5cb08706146b",
+     "reasons": [
+      "stale"
+     ],
+     "of": "d04",
+     "field": "description",
+     "lang": "it",
+     "method": "edition"
+    }
+   ]
+  },
+  {
+   "step": "text in it after the change",
+   "value": {
+    "text": "Questa sarà invece la composizione del diastilo: quando possiamo interporre nell'intercolumnio lo spessore di tre colonne.",
+    "lang": "it",
+    "original": false,
+    "translation": "e6f31767-3049-52be-be54-5cb08706146b",
+    "reasons": [
+     "stale"
+    ]
+   }
+  },
+  {
+   "step": "refusals",
+   "value": {
+    "name": "refused",
+    "same language": "refused",
+    "no source language": "refused",
+    "empty": "refused",
+    "bad tag": "refused",
+    "edition not a document": "refused",
+    "ai without its model": "refused",
+    "unknown author": "refused"
+   }
+  }
+ ]
+}

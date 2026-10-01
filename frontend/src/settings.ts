@@ -124,7 +124,15 @@ export const LOD_LIMIT_MB = 200;
 export const LOD_LIMIT_POINTS = 10_000_000;
 export const TILES_MEMORY_MB = 400;
 
+/** TRADUZIONI · «show the texts in…»: the language the texts of the GRAPH are
+ *  shown in where a translation exists. "" = the interface language (the
+ *  default: it starts from there). The originals are never changed by it. */
+export interface TextSettings {
+  displayLang: string;
+}
+
 export interface Settings {
+  texts: TextSettings;
   sync: SyncSettings;
   developer: DeveloperSettings;
   interaction: InteractionSettings;
@@ -136,6 +144,7 @@ export interface Settings {
 const KEY = "emstudio.settings";
 
 const DEFAULTS: Settings = {
+  texts: { displayLang: "" },
   sync: { protocol: "ws", host: "localhost", port: 8788, tool: "blender",
           accept: "everything", hubUrl: "", hubRoom: "" },
   developer: { showNodeIds: false },
@@ -172,6 +181,7 @@ function clone(s: Settings): Settings {
   return {
     sync: { ...s.sync },
     developer: { ...s.developer },
+    texts: { ...s.texts },
     interaction: { ...s.interaction },
     ai: { ...s.ai },
     viewer: { ...s.viewer },
@@ -213,6 +223,7 @@ function load(): Settings {
     const parsed = JSON.parse(raw) as Partial<Settings>;
     // merge onto defaults so a missing/renamed field never breaks startup
     return {
+      texts: { ...DEFAULTS.texts, ...(parsed.texts ?? {}) },
       sync: { ...DEFAULTS.sync, ...migrateSync(parsed.sync) },
       developer: { ...DEFAULTS.developer, ...(parsed.developer ?? {}) },
       interaction: { ...DEFAULTS.interaction, ...(parsed.interaction ?? {}) },

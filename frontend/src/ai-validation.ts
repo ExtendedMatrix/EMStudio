@@ -19,6 +19,7 @@
 import type { DocumentStore } from "./model";
 import type { EmDocument, EmNode } from "./types";
 import { authorForIdentity, type SignerIdentity } from "./narrative-authorship";
+import { isStale, originalOf, reviewRequested, TRANSLATION_TYPE } from "./translation";
 
 export const AI_ASSISTED = "ai_assisted";
 export const AI_GENERATED_ALIAS = "ai_generated";
@@ -139,18 +140,118 @@ export function markAiAssisted(store: DocumentStore, nodeId: string, m: AiMarker
   store.updateNode(nodeId, { data });
 }
 
+// ── TRADUZIONI · what waits for a person, and why (dev26 `needs_review`) ────
+//
+// ONE vocabulary for every node, the library's: `ai` (AI content nobody
+// verified), `review_requested` («da rivedere», asked by whoever made it, not
+// signed yet), `stale` (a translation whose original changed: «da riallineare»,
+// which NO signature closes — only a translation of the new text).
+
+export type ReviewReason = "ai" | "review_requested" | "stale";
+
+/** Why `id` waits for a person — `[]` when it does not. */
+export function needsReview(doc: EmDocument, id: string): ReviewReason[] {
+  const n = doc.graph.nodes.find((x) => x.id === id);
+  if (!n || dataOf(n).removed) return [];
+  const out: ReviewReason[] = [];
+  if (isUnvalidatedAi(doc, id)) out.push("ai");
+  if (reviewRequested(n) && !isValidated(n)) out.push("review_requested");
+  if (n.node_type === TRANSLATION_TYPE && isStale(doc, n)) out.push("stale");
+  return out;
+}
+
+export interface ReviewRow {
+  node: string;
+  name: string;
+  node_type: string;
+  reasons: ReviewReason[];
+  /** a translation: the translated node, its field, the language, the method */
+  of?: string;
+  field?: string;
+  lang?: string;
+  method?: string;
+  /** AI: the AuthorAINode and the model, and how it is known (the marker, or
+   *  an extractor `has_author` an AuthorAINode — StratiMiner) */
+  by?: string | null;
+  model?: string | null;
+  via?: "marker" | "has_author";
+}
+
+/** Everything that waits for a person — `api.to_review(graph)`, and the
+ *  AI-authored extractors of `unvalidatedAi` (E.D.'s rule) with them. */
+export function toReview(doc: EmDocument): ReviewRow[] {
+  const out: ReviewRow[] = [];
+  for (const n of doc.graph.nodes) {
+    const reasons = needsReview(doc, n.id);
+    if (!reasons.length) continue;
+    const row: ReviewRow = { node: n.id, name: String(n.name ?? ""), node_type: n.node_type, reasons };
+    if (n.node_type === TRANSLATION_TYPE) {
+      const d = dataOf(n);
+      row.of = originalOf(doc, n)?.id;
+      row.field = String(d.field ?? "");
+      row.lang = String(d.lang ?? "");
+      row.method = String(d.method ?? "");
+    }
+    if (reasons.includes("ai")) {
+      const m = aiMarker(n);
+      row.by = m?.by ?? aiAuthorOf(doc, n.id);
+      row.model = m?.model ?? null;
+      row.via = m ? "marker" : "has_author";
+    }
+    out.push(row);
+  }
+  return out;
+}
+
+export interface VerifiedRow {
+  node: string;
+  name: string;
+  node_type: string;
+  /** what was verified: `ai` content, a requested `review`, or both */
+  what: Array<"ai" | "review">;
+  /** the AuthorNode that signed, and its ORCID iD */
+  by: string;
+  orcid: string | null;
+  byName: string;
+  at: string;
+}
+
+/** What has been verified, by whom (ORCID) and when — the «Verificati» tab.
+ *  Only what WAITED for somebody: a `validated_by` on a node that was never AI
+ *  nor under review is not a verification this view can explain. */
+export function verifiedRows(doc: EmDocument): VerifiedRow[] {
+  const nodes = new Map(doc.graph.nodes.map((n) => [n.id, n]));
+  const out: VerifiedRow[] = [];
+  for (const n of doc.graph.nodes) {
+    const d = dataOf(n);
+    if (d.removed || !d[VALIDATED_BY]) continue;
+    const what: Array<"ai" | "review"> = [];
+    if (aiMarker(n) || aiAuthorOf(doc, n.id)) what.push("ai");
+    if (reviewRequested(n)) what.push("review");
+    if (!what.length) continue;
+    const by = String(d[VALIDATED_BY]);
+    const a = nodes.get(by);
+    out.push({ node: n.id, name: String(n.name ?? ""), node_type: n.node_type, what, by,
+               orcid: a ? (String(dataOf(a).orcid ?? "") || null) : null,
+               byName: String(a?.name ?? by), at: String(d[VALIDATED_AT] ?? "") });
+  }
+  return out.sort((a, b) => b.at.localeCompare(a.at) || a.name.localeCompare(b.name));
+}
+
 /**
- * «Verifica» — a person verifies AI nodes: `validated_by` (their AuthorNode,
- * found or created from the identity, with its ORCID) and `validated_at`. ONE
- * undo step for the whole lot (a node, a chapter, a selection). A node that is
- * not AI-touched is left alone (a verification of nothing reads as a statement).
- * Without an identity nothing is written: the caller opens the identity.
+ * «Verifica» — a person signs what waited for them: AI content or a requested
+ * review (`api.verify`): `validated_by` (their AuthorNode, found or created from
+ * the identity, with its ORCID) and `validated_at`. ONE undo step for the whole
+ * lot (a node, a chapter, a selection). A node that waits for neither is left
+ * alone — and «da riallineare» is not closed by a signature: a node that waits
+ * ONLY for that is not signed. Without an identity nothing is written: the
+ * caller opens the identity.
  */
 export function verifyNodesAs(store: DocumentStore, ids: string[], me: SignerIdentity | null,
                               at: string = new Date().toISOString().replace(/\.\d+Z$/, "Z")):
   { verified: string[] } | "needs-identity" {
   if (!me?.orcid) return "needs-identity";
-  const todo = ids.filter((id) => isUnvalidatedAi(store.doc, id));
+  const todo = ids.filter((id) => needsReview(store.doc, id).some((r) => r === "ai" || r === "review_requested"));
   if (!todo.length) return { verified: [] };
   store.batch(() => {
     const author = authorForIdentity(store, me);

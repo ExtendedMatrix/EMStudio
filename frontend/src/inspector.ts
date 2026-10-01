@@ -11,6 +11,7 @@ import { acquisitionMembers, derivationChain, resourceUsages } from "./ingest";
 import { renderResourcePanel } from "./resource-panel";
 import type { TwinSearchResult } from "./twins";
 import { renderSitePosition } from "./study-panel";
+import { naturalFields, TRANSLATION_TYPE } from "./translation";
 
 export interface InspectorCallbacks {
   onJump: (nodeId: string) => void;
@@ -69,6 +70,11 @@ export interface InspectorCallbacks {
   onReplaceFile?: (resId: string, fileId: string | null) => void;
   /** CAMPAGNA · a tileset resource opened in a Scene window */
   onOpenInScene?: (resId: string) => void;
+  /** TRADUZIONI · draw the row of languages under a natural-language text
+   *  (the marker of the datamodel decides which; `translation.naturalFields`) */
+  renderTextLanguages?: (host: HTMLElement, nodeId: string, field: string) => void;
+  /** …and a translation node opens its facing text */
+  onOpenFacing?: (translationId: string) => void;
 }
 
 function el(tag: string, cls?: string, text?: string): HTMLElement {
@@ -295,6 +301,16 @@ export function renderInspector(
       store.updateNode(nodeId, { description: desc.value }),
     );
     root.appendChild(desc);
+    if (cb.renderTextLanguages && naturalFields(node).includes("description"))
+      cb.renderTextLanguages(root, nodeId, "description");
+  }
+  // TRADUZIONI · a translation is read and changed in its facing text
+  if (node.node_type === TRANSLATION_TYPE && cb.onOpenFacing) {
+    const bar = el("div", "insp-actions");
+    const b = el("button", "insp-btn", t("issues.facing"));
+    b.addEventListener("click", () => cb.onOpenFacing!(nodeId));
+    bar.appendChild(b);
+    root.appendChild(bar);
   }
 
   // 1.6.9 · the ELEMENTS OF THE NODE the datamodel declares beside name and
@@ -351,6 +367,9 @@ export function renderInspector(
       store.setPropertyValue(nodeId, valIn.value),
     );
     root.appendChild(valIn);
+    // the value of a property IS its description in em.json: its languages
+    if (cb.renderTextLanguages && naturalFields(node).includes("description"))
+      cb.renderTextLanguages(root, nodeId, "description");
   }
 
   // position lock: pin/unpin so the layout engine can't move this node.
