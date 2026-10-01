@@ -316,24 +316,20 @@ def _is_sheet(path: str) -> bool:
     return str(path).lower().endswith((".xlsx", ".xlsm", ".xls"))
 
 
-def _sheet_header(path: str, sheet=None, scan: int = 20) -> dict:
-    """The first rows of a sheet and the PROPOSED header: the first row whose
-    every column (every column with a value somewhere in the first `scan` rows)
-    is filled. 1-based, as a person counts rows."""
-    import pandas as pd                            # lazy: the xlsx extra
-    book = pd.ExcelFile(path)
-    chosen = sheet if sheet in book.sheet_names else book.sheet_names[0]
-    frame = book.parse(chosen, header=None, nrows=scan)
-    filled = lambda v: v is not None and str(v).strip() not in ("", "nan", "NaT")
-    cols = [c for c in frame.columns if any(filled(v) for v in frame[c].values)]
-    proposal = 1
-    for i in range(len(frame)):
-        if cols and all(filled(frame.at[i, c]) for c in cols):
-            proposal = i + 1
-            break
-    preview = [[("" if not filled(frame.at[i, c]) else str(frame.at[i, c]))[:40] for c in cols]
-               for i in range(min(len(frame), 8))]
-    return {"header_proposal": proposal, "header_preview": preview, "header_columns": len(cols)}
+def _sheet_header(api, path: str, sheet=None) -> dict:
+    """The PROPOSED header row of a sheet, and its first rows — s3Dgraphy's
+    `api.sheet_header` (dev26: the rule the bridge used to compute here, moved
+    into the library with a guard on the expected names), in the wire shape
+    the mapping editor already reads."""
+    if hasattr(api, "sheet_header"):
+        r = api.sheet_header(path, sheet)
+        preview = [[str(v)[:40] for v in row] for row in (r.get("preview") or [])[:8]]
+        return {"header_proposal": int(r.get("proposal") or r.get("header_row") or 1),
+                "header_preview": preview,
+                "header_columns": max((len(row) for row in preview), default=0),
+                "header_reason": r.get("reason") or ""}
+    return {"header_proposal": 1, "header_preview": [], "header_columns": 0,
+            "header_reason": "this s3dgraphy has no api.sheet_header"}
 
 
 def _sheet_fields(path: str, sheet, header_row: int, samples: int) -> dict:
@@ -351,24 +347,6 @@ def _sheet_fields(path: str, sheet, header_row: int, samples: int) -> dict:
             # an empty cell is empty, not the word «nan»
             "fields": [_field(str(c), [None if pd.isna(v) else v for v in frame[c].values])
                        for c in frame.columns]}
-
-
-def _sheet_from_row(path: str, sheet, header_row: int) -> str:
-    """A COPY of the workbook in the stage folder whose sheet starts at
-    `header_row` (the rows above dropped); the other sheets as they are."""
-    import pandas as pd
-    book = pd.ExcelFile(path)
-    chosen = sheet if sheet in book.sheet_names else book.sheet_names[0]
-    stage = _stage_dir()
-    stage.mkdir(parents=True, exist_ok=True)
-    out = stage / f"{pathlib.Path(path).stem}.header{header_row}.xlsx"
-    with pd.ExcelWriter(out) as writer:
-        for name in book.sheet_names:
-            if name == chosen:
-                book.parse(name, header=header_row - 1).to_excel(writer, sheet_name=name, index=False)
-            else:
-                book.parse(name, header=None).to_excel(writer, sheet_name=name, index=False, header=False)
-    return str(out)
 
 
 def _compose_resources(targets, inputs):
@@ -1887,7 +1865,7 @@ def make_handler(api):
                     # the first row whose every column is filled (San Pietro:
                     # row 1 is the title «San Pietro», row 2 the header)
                     if _is_sheet(path):
-                        payload.update(_sheet_header(path, payload.get("table") or body.get("table")))
+                        payload.update(_sheet_header(api, path, payload.get("table") or body.get("table")))
                         payload["header_row"] = header_row or 1
                 elif route == "/mapping-catalog":
                     payload = {"ok": True,
@@ -2095,28 +2073,24 @@ def make_handler(api):
             injector = str(body.get("injector") or "").strip()
             if injector:
                 extra["injector"] = injector
-            # CAMPAGNA · a header that is not on row 1: s3Dgraphy's table
-            # importer reads row 1 as the header (mapped_xlsx_importer, header=0),
-            # so the importer is handed a COPY whose first row is the one chosen.
-            # Declared in the report; the original file is not touched.
-            header_row = int(body.get("header_row") or 0)
-            notes = []
-            if _is_sheet(path) and header_row > 1:
-                try:
-                    path = _sheet_from_row(path, body.get("table"), header_row)
-                    notes.append(f"header read from row {header_row}: the importer was given "
-                                 f"a copy whose first row is that one ({os.path.basename(path)})")
-                except Exception as exc:               # noqa: BLE001
-                    self._fail(400, f"the header row {header_row} could not be used: {exc}")
-                    return None
+            # The header row and the language of the source go to s3Dgraphy
+            # (dev26: `mapping_apply(header_row=, source_lang=)`). Until dev25
+            # the bridge handed the importer a COPY of the workbook starting at
+            # the chosen row; the copy is gone, the file is read where it is.
+            header_row = int(body.get("header_row") or 0) or None
+            source_lang = str(body.get("source_lang") or "").strip() or None
+            params = inspect.signature(api.mapping_apply).parameters
+            if header_row and header_row > 1 and "header_row" not in params:
+                self._fail(501, "a header that is not on row 1 needs s3dgraphy "
+                                ">= 1.6.0.dev26 (api.mapping_apply has no header_row)")
+                return None
+            if header_row and "header_row" in params:
+                extra["header_row"] = header_row
+            if source_lang and "source_lang" in params:
+                extra["source_lang"] = source_lang
             report = api.mapping_apply(mapping, path, mode=mode, graph=host,
                                        mapping_name=body.get("mapping_name"),
                                        **extra)
-            if notes:
-                if not isinstance(report.get("notes"), list):
-                    report["notes"] = []
-                report["notes"].extend(notes)
-                report["header_row"] = header_row
             graph = report.pop("graph", None)
             out = {"ok": bool(report.get("ok")), "report": report}
             if graph is not None and report.get("ok"):
