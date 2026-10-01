@@ -571,7 +571,7 @@ function sourceBox(state: MappingEditorState, h: MappingEditorHandlers,
     note.dataset.meLangNote = chosen ? "diff" : "same";
     note.textContent = chosen
       ? t("me.langDiff", { lang: chosen, study: study || t("me.langNone") })
-      : study ? t("me.langSame", { lang: study }) : t("me.langNoneNote");
+      : study ? t(state.target === "new" ? "me.langNewGraph" : "me.langSame", { lang: study }) : t("me.langNoneNote");
     section.appendChild(note);
   }
   // WHICH table, or WHICH element is a record — the one question a reader
