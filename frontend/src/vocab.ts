@@ -29,6 +29,12 @@ export interface Qualia {
   /** qualia 1.6.4 · the value is TEXT IN A NATURAL LANGUAGE (it leaves in RDF
    *  with its language tag, and can be translated) — the datamodel's marker */
   naturalLanguage?: boolean;
+  /** qualia 1.6.6 · an OBJECT value's fields (`schema`: name → what it holds,
+   *  e.g. attribution's `attributed_to`, `attribution_type`, `confidence`,
+   *  `note`), and which of them are text in a natural language
+   *  (`natural_language_fields`: attribution's `note`) */
+  schema?: Record<string, string>;
+  naturalLanguageFields?: string[];
 }
 
 interface RawQ {
@@ -43,6 +49,8 @@ interface RawQ {
   mappings?: Record<string, string>;
   expected_extractors?: string[];
   natural_language?: boolean;
+  schema?: Record<string, string>;
+  natural_language_fields?: string[];
 }
 interface RawSub {
   name?: string;
@@ -85,6 +93,8 @@ for (const c of doc.qualia_categories ?? []) {
         mappings: q.mappings,
         expectedExtractors: q.expected_extractors,
         naturalLanguage: q.natural_language === true,
+        ...(q.schema && typeof q.schema === "object" ? { schema: q.schema } : {}),
+        ...(Array.isArray(q.natural_language_fields) ? { naturalLanguageFields: q.natural_language_fields } : {}),
       });
     }
   }

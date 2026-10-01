@@ -180,6 +180,16 @@ eq(M.textDigest(LATIN), G["digest of the Latin"], "1 · the digest of the Latin"
   ok(!M.isNaturalLanguage({ id: "x", node_type: "translation" }, "description"), "2 · a translation is not translated");
   ok(M.isNaturalLanguage({ id: "x", node_type: "property", name: "intervention_history", data: { property_type: "intervention_history" } }, "value"), "2 · the value of intervention_history is (qualia 1.6.5)");
   ok(!M.isNaturalLanguage({ id: "x", node_type: "property", name: "inventory_number", data: { property_type: "inventory_number" } }, "value"), "2 · inventory_number is a code");
+  // dev28 · attribution is an OBJECT quale: only its note is text, held as data.note
+  const attr = { id: "a1", node_type: "property", name: "attribution", description: "attributed to Phidias",
+                 data: { property_type: "attribution", attributed_to: "Phidias", note: "secondo Pausania" } };
+  ok(M.isNaturalLanguage(attr, "data.note"), "dev28 · attribution's note is text in a natural language");
+  ok(!M.isNaturalLanguage(attr, "data.attributed_to") && !M.isNaturalLanguage(attr, "value"),
+     "dev28 · …its reference and its value are not");
+  eq(M.naturalFields(attr), ["description", "data.note"], "dev28 · a language row under the note too (description is every node's, as in the library)");
+  eq(M.fieldText(attr, "data.note"), "secondo Pausania", "dev28 · and the note is read where the library reads data.<key>");
+  eq(Object.keys(M.qualeOf(attr)?.schema ?? {}), ["attributed_to", "attribution_type", "confidence", "note"],
+     "dev28 · the Inspector's fields are the datamodel's schema");
   ok(M.unreconciledVocabulary({ id: "p", node_type: "property", name: "material_type", data: { property_type: "material_type" } }), "2 · a material_type label without an exact authority is unreconciled");
   ok(!M.unreconciledVocabulary({ id: "p", node_type: "property", name: "material_type", data: { property_type: "material_type", authority_refs: [{ uri: "http://vocab.getty.edu/aat/300011176", match: "exact" }] } }), "2 · …and reconciled with skos:exactMatch");
   ok(!M.unreconciledVocabulary({ id: "p", node_type: "property", name: "Dimension.height", data: { property_type: "string" } }), "2 · a measure is not a vocabulary");

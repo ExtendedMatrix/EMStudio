@@ -11,7 +11,7 @@ import { acquisitionMembers, derivationChain, resourceUsages } from "./ingest";
 import { renderResourcePanel } from "./resource-panel";
 import type { TwinSearchResult } from "./twins";
 import { renderSitePosition } from "./study-panel";
-import { naturalFields, TRANSLATION_TYPE } from "./translation";
+import { naturalFields, qualeOf, TRANSLATION_TYPE } from "./translation";
 
 export interface InspectorCallbacks {
   onJump: (nodeId: string) => void;
@@ -372,6 +372,8 @@ export function renderInspector(
     // the value of a property IS its description in em.json: its languages
     if (cb.renderTextLanguages && naturalFields(node).includes("description"))
       cb.renderTextLanguages(root, nodeId, "description");
+    // dev28 · an OBJECT quale (attribution) is compiled here, field by field
+    renderQualeObject(root, store, node, cb);
   }
 
   // position lock: pin/unpin so the layout engine can't move this node.
@@ -1070,4 +1072,81 @@ export function renderInspector(
     danger.appendChild(delNode);
     root.appendChild(danger);
   }
+}
+
+/**
+ * dev28 (E.D., 1 Oct 2026, decision 16) · the fields of an OBJECT quale, read
+ * from the datamodel (`schema`, qualia 1.6.6) — today `attribution`:
+ * `attributed_to`, `attribution_type`, `confidence`, `note`. Whoever compiles
+ * the attribution writes its note, and this is where EMStudio compiles it.
+ *
+ * Where it lives, measured: s3Dgraphy's `translation.field_text` (and its twin
+ * here) reads `data.<key>` one level deep, and no writer stored the object
+ * anywhere. So the fields sit on the property's own `data` under their schema
+ * names: the note is `data.note`, translatable and tagged like every free text
+ * (`natural_language_fields`), with the pills of the language row under it.
+ * The kinds of input come from the schema's own words: `a | b | c` is a closed
+ * list, `float 0-1` a number between 0 and 1, the rest a line of text.
+ */
+function renderQualeObject(root: HTMLElement, store: DocumentStore, node: EmNode, cb: InspectorCallbacks): void {
+  const q = qualeOf(node);
+  if (!q?.schema || !Object.keys(q.schema).length) return;
+  const data = (node.data ?? {}) as Record<string, unknown>;
+  const texts = new Set(q.naturalLanguageFields ?? []);
+  const box = el("div", "insp-quale-object");
+  box.dataset.quale = q.id;
+  box.appendChild(el("div", "insp-field-label", t("insp.qualeObject", { name: q.name })));
+  for (const [key, what] of Object.entries(q.schema)) {
+    const label = el("label", "insp-field-label", key.replace(/_/g, " "));
+    label.title = what;
+    box.appendChild(label);
+    const write = (v: unknown): void => {
+      if (v === "" || v === null || v === undefined) store.clearField(node.id, `data.${key}`);
+      else store.setField(node.id, `data.${key}`, v);
+    };
+    const current = data[key];
+    const choices = / \| /.test(what) ? what.split("|").map((s) => s.trim()).filter(Boolean) : null;
+    if (texts.has(key)) {
+      const area = document.createElement("textarea");
+      area.className = "insp-desc-input";
+      area.dataset.field = `data.${key}`;
+      area.value = typeof current === "string" ? current : "";
+      area.placeholder = what;
+      area.addEventListener("change", () => write(area.value.trim()));
+      box.appendChild(area);
+      if (cb.renderTextLanguages) cb.renderTextLanguages(box, node.id, `data.${key}`);
+    } else if (choices) {
+      const sel = document.createElement("select");
+      sel.className = "insp-name-input";
+      sel.dataset.field = `data.${key}`;
+      for (const c of ["", ...choices]) {
+        const o = document.createElement("option");
+        o.value = c; o.textContent = c || "—";
+        sel.appendChild(o);
+      }
+      sel.value = typeof current === "string" && choices.includes(current) ? current : "";
+      sel.addEventListener("change", () => write(sel.value));
+      box.appendChild(sel);
+    } else if (/^float 0-1/.test(what)) {
+      const num = document.createElement("input");
+      num.type = "number"; num.min = "0"; num.max = "1"; num.step = "0.05";
+      num.className = "insp-name-input";
+      num.dataset.field = `data.${key}`;
+      num.value = typeof current === "number" ? String(current) : "";
+      num.addEventListener("change", () => {
+        const v = num.value === "" ? null : Math.min(1, Math.max(0, Number(num.value)));
+        write(v === null || Number.isNaN(v) ? null : v);
+      });
+      box.appendChild(num);
+    } else {
+      const inp = document.createElement("input");
+      inp.className = "insp-name-input";
+      inp.dataset.field = `data.${key}`;
+      inp.value = typeof current === "string" ? current : "";
+      inp.placeholder = what;
+      inp.addEventListener("change", () => write(inp.value.trim()));
+      box.appendChild(inp);
+    }
+  }
+  root.appendChild(box);
 }

@@ -200,6 +200,9 @@ export function isNaturalLanguage(n: EmNode | undefined, field: string): boolean
   if (prop === "value" && n.node_type === "property") {
     return qualeOf(n)?.naturalLanguage === true;
   }
+  // dev28 · a field of an OBJECT quale that the datamodel marks as text
+  // (qualia 1.6.6: attribution's `note`), held on the property's data
+  if (n.node_type === "property" && (qualeOf(n)?.naturalLanguageFields ?? []).includes(prop)) return true;
   for (const cls of ancestorsOf(n.node_type)) {
     const rule = CLASS_INDEX[cls]?.properties?.[prop];
     if (rule && typeof rule === "object" && "natural_language" in (rule as object))
@@ -212,7 +215,11 @@ export function isNaturalLanguage(n: EmNode | undefined, field: string): boolean
  *  sits on `description` alone (and on the value of six qualia, which in em.json
  *  IS the description). */
 export function naturalFields(n: EmNode | undefined): string[] {
-  return isNaturalLanguage(n, "description") ? ["description"] : [];
+  const out = isNaturalLanguage(n, "description") ? ["description"] : [];
+  // dev28 · and the text fields of an object quale (attribution → data.note)
+  if (n?.node_type === "property")
+    for (const f of qualeOf(n)?.naturalLanguageFields ?? []) out.push(`data.${f}`);
+  return out;
 }
 
 /** The quale a PropertyNode names, as the exporter resolves it (exact, last
