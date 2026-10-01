@@ -31,7 +31,7 @@ import { authWords, markAiAssisted, needsReview, type ReviewReason } from "./ai-
 import {
   addTranslation, checkTranslation, COMMON_LANGUAGES, declareNodeLanguage, editionOf, fieldText, isLanguageTag,
   languageName, originalLanguage, originalOf, sameLanguage, textDigest, textIn, TranslationError,
-  translationState, translationsOf, translatorsOf, unreconciledVocabulary, updateTranslation,
+  translationState, translationsOf, translatorsOf, unreconciledVocabulary, updateTranslation, realignTranslation,
   type TranslationMethod, type TranslationState,
 } from "./translation";
 
@@ -61,7 +61,7 @@ export interface TranslationUi {
   pastValues: (nodeId: string, field: string) => string[];
 }
 
-const STATE_ICON: Record<TranslationState, string> = { verified: "✓", review: "◐", ai: "✦", stale: "↻", plain: "" };
+const STATE_ICON: Record<TranslationState, string> = { verified: "✓", review: "◐", ai: "✦", stale: "↻", plain: "", superseded: "" };
 
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, cls?: string, text?: string): HTMLElementTagNameMap[K] {
   const e = document.createElement(tag);
@@ -159,6 +159,8 @@ export function renderLanguageRow(host: HTMLElement, ui: TranslationUi, nodeId: 
   // one pill per translation
   for (const tr of translationsOf(doc, nodeId, field)) {
     const s = translationState(doc, tr);
+    // dev27 · a realigned translation is history: its successor speaks for it
+    if (s === "superseded") continue;
     const d = dataOf(tr);
     const pill = el("button", `tr-pill st-${s}`);
     pill.type = "button";
@@ -171,6 +173,16 @@ export function renderLanguageRow(host: HTMLElement, ui: TranslationUi, nodeId: 
                                      method: methodLabel(String(d.method ?? "")), who: who || "—" });
     pill.addEventListener("click", () => openFacingText(ui, nodeId, field, tr.id));
     row.appendChild(pill);
+    // dev27 · «Riallinea»: the facing text with the new original beside the old
+    // translation to touch up; saving makes the new translation (was_revision_of)
+    if (s === "stale") {
+      const re = el("button", "tr-pill realign", `↻ ${t("tr.realignBtn")}`);
+      re.type = "button";
+      re.dataset.trRealign = String(d.lang ?? "");
+      re.title = t("tr.realignTitle");
+      re.addEventListener("click", () => openFacingText(ui, nodeId, field, tr.id));
+      row.appendChild(re);
+    }
   }
 
   const add = el("button", "tr-pill add", t("tr.translate"));
@@ -492,11 +504,29 @@ export function openFacingText(ui: TranslationUi, nodeId: string, field: string,
     try {
       if (current) {
         const wasStale = translationState(st.doc, current) === "stale";
-        st.batch(() => {
-          const author = ui.authorFor(st, me);
-          updateTranslation(st, current!.id, draft.text, { review: draft.method === "ai" ? undefined : draft.review, by: author });
-        });
-        ui.done(t(wasStale ? "tr.realigned" : "tr.updated", { n: String(n?.name ?? nodeId), lang: draft.lang }), [nodeId, current.id]);
+        if (wasStale) {
+          // dev27 · REALIGN, not overwrite: a new translation of today's text,
+          // `was_revision_of` the old one, which stays with its author and its
+          // signature (s3Dgraphy `realign_translation`)
+          let made = "";
+          st.batch(() => {
+            const author = ui.authorFor(st, me);
+            const ai = draft.method === "ai" ? ui.aiAuthorFor(st, draft.provider ?? "", draft.model ?? "") : undefined;
+            made = realignTranslation(st, current!.id, draft.text, {
+              by: author, method: draft.method, review: draft.method === "ai" ? false : draft.review,
+              ai, model: draft.model || undefined,
+              edition: draft.method === "edition" ? draft.edition || undefined : undefined,
+            }, markAiAssisted);
+          });
+          tid = made;
+          ui.done(t("tr.realigned", { n: String(n?.name ?? nodeId), lang: draft.lang }), [nodeId, made, current.id]);
+        } else {
+          st.batch(() => {
+            const author = ui.authorFor(st, me);
+            updateTranslation(st, current!.id, draft.text, { review: draft.method === "ai" ? undefined : draft.review, by: author });
+          });
+          ui.done(t("tr.updated", { n: String(n?.name ?? nodeId), lang: draft.lang }), [nodeId, current.id]);
+        }
       } else {
         if (!draft.lang) throw new TranslationError("lang", "no language");
         // asked BEFORE the batch: a refusal must not leave the translator's

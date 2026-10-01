@@ -130,12 +130,28 @@ eq(M.textDigest(LATIN), G["digest of the Latin"], "1 · the digest of the Latin"
   // «da riallineare» is NOT closed by a signature…
   M.verifyNodesAs(store, [it], me, AT);
   ok(M.needsReview(store.doc, it).includes("stale"), "1 · a signature does not close «da riallineare»");
-  // …only by bringing the translation in line with the new text
-  M.updateTranslation(store, it, ITALIAN + " Ora si spieghi la regola dell'eustilo.", { by: "ed_au" });
-  eq(M.needsReview(store.doc, it), [], "1 · updating the translation closes «da riallineare»");
-  eq(store.node(it).data.source_digest, M.textDigest(store.node("d04").description), "1 · the digest is the original's of today");
-  M.updateTranslation(store, en, ENGLISH + " Now the rule of the eustyle.", {});
-  eq(M.needsReview(store.doc, en), ["ai"], "1 · an edited AI translation waits again: the signature was on another text");
+  // …and not by editing it in place (dev27): a stale translation is REALIGNED
+  ok(refused(() => M.updateTranslation(store, it, "x", { by: "ed_au" })) === "refused",
+     "1 · dev27 · a stale translation is not edited in place");
+  // …only by a translation of the new text: `api.realign_translation`, the golden's
+  const NEW_IT = ITALIAN + " Ora va spiegata la ragione dell'eustilo.";
+  const reIt = M.realignTranslation(store, it, NEW_IT, { by: "ed_au" }, M.markAiAssisted);
+  eq(tnode(store, reIt), G["italian realigned"], "1 · dev27 · the realigned italian: id, data, edges — was_revision_of the old one");
+  const oldEdges = store.doc.graph.edges.filter((e) => e.source === it || e.target === it)
+    .map((e) => [e.source, e.target, e.edge_type]).sort((a, b) => JSON.stringify(a) < JSON.stringify(b) ? -1 : 1);
+  eq({ "still there": !!store.node(it), edges: oldEdges }, G["the old italian after the realignment"],
+     "1 · dev27 · the old italian stays, with its edges, and is the target of the revision");
+  eq(review(store.doc), G["to review after the realignment"], "1 · dev27 · to_review after the realignment: the old one waits for nobody");
+  eq(text(store.doc, "d04", "it"), G["text in it after the realignment"], "1 · dev27 · text it gives the realigned one");
+  eq({ "not stale": refused(() => M.realignTranslation(store, reIt, "x", { by: "ed_au" })),
+       "already realigned": refused(() => M.realignTranslation(store, it, "x", { by: "ed_au" })),
+       "not a translation": refused(() => M.realignTranslation(store, "d04", "x", { by: "ed_au" })) },
+     G["realign refusals"], "1 · dev27 · the realignment refusals are the library's");
+  eq(M.translationState(store.doc, store.node(it)), "superseded", "1 · dev27 · the old one reads «superseded»");
+  // an ALIGNED translation is still edited in place (a typo), and an edited AI
+  // one waits again: the signature was on another text
+  M.updateTranslation(store, reIt, NEW_IT + " ", { by: "ed_au" });
+  eq(store.node(reIt).data.source_digest, M.textDigest(store.node("d04").description), "1 · the digest is the original's of today");
 }
 {
   const store = new M.DocumentStore(scenario());

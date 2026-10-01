@@ -1,4 +1,4 @@
-"""The golden of the translations, written BY s3Dgraphy (dev26).
+"""The golden of the translations, written BY s3Dgraphy (dev26; dev27 adds the realignment).
 
     python tools/translations_golden.py [path/to/site-packages-or-s3Dgraphy]
         # → frontend/testdata/translations-golden.json
@@ -124,6 +124,23 @@ d04 = g.find_node_by_id("d04")
 d04.description = LATIN + " Eustyli autem est explicanda ratio."
 step("to review after the original changed", review(g))
 step("text in it after the change", text(g, "d04", "it"))
+
+# dev27 · the realignment (`api.realign_translation`): a new node of today's
+# text, was_revision_of the old one, which stays and waits for nobody
+NEW_IT = ITALIAN + " Ora va spiegata la ragione dell'eustilo."
+re_it = api.realign_translation(g, it.node_id, NEW_IT, by="ed_au", at=AT)
+step("italian realigned", tnode(g, re_it.node_id))
+step("the old italian after the realignment", {
+    "still there": g.find_node_by_id(it.node_id) is not None,
+    "edges": sorted([e.edge_source, e.edge_target, e.edge_type] for e in g.edges
+                    if it.node_id in (e.edge_source, e.edge_target))})
+step("to review after the realignment", review(g))
+step("text in it after the realignment", text(g, "d04", "it"))
+step("realign refusals", {
+    "not stale": refused(lambda: api.realign_translation(g, re_it.node_id, "x", by="ed_au")),
+    "already realigned": refused(lambda: api.realign_translation(g, it.node_id, "x", by="ed_au")),
+    "not a translation": refused(lambda: api.realign_translation(g, "d04", "x", by="ed_au")),
+})
 
 g2 = graph()
 step("refusals", {

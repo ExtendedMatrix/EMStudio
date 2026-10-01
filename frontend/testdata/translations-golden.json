@@ -248,6 +248,115 @@
    }
   },
   {
+   "step": "italian realigned",
+   "value": {
+    "id": "d1b5c317-8173-51c8-8a17-f898058fa9ff",
+    "node_type": "translation",
+    "name": "D.04@it",
+    "data": {
+     "lang": "it",
+     "from_lang": "la",
+     "field": "description",
+     "text": "Questa sarà invece la composizione del diastilo: quando possiamo interporre nell'intercolumnio lo spessore di tre colonne. Ora va spiegata la ragione dell'eustilo.",
+     "method": "edition",
+     "source_digest": "sha256:f5707431c98680d286f58949c8cc9c19b189486a7e42b4f5eb785622d6a22ae9"
+    },
+    "edges": [
+     [
+      "d04",
+      "d1b5c317-8173-51c8-8a17-f898058fa9ff",
+      "has_translation"
+     ],
+     [
+      "d1b5c317-8173-51c8-8a17-f898058fa9ff",
+      "e6f31767-3049-52be-be54-5cb08706146b",
+      "was_revision_of"
+     ],
+     [
+      "d1b5c317-8173-51c8-8a17-f898058fa9ff",
+      "ed",
+      "extracted_from"
+     ],
+     [
+      "d1b5c317-8173-51c8-8a17-f898058fa9ff",
+      "ed_au",
+      "has_author"
+     ]
+    ]
+   }
+  },
+  {
+   "step": "the old italian after the realignment",
+   "value": {
+    "still there": true,
+    "edges": [
+     [
+      "d04",
+      "e6f31767-3049-52be-be54-5cb08706146b",
+      "has_translation"
+     ],
+     [
+      "d1b5c317-8173-51c8-8a17-f898058fa9ff",
+      "e6f31767-3049-52be-be54-5cb08706146b",
+      "was_revision_of"
+     ],
+     [
+      "e6f31767-3049-52be-be54-5cb08706146b",
+      "ed",
+      "extracted_from"
+     ],
+     [
+      "e6f31767-3049-52be-be54-5cb08706146b",
+      "ed_au",
+      "has_author"
+     ]
+    ]
+   }
+  },
+  {
+   "step": "to review after the realignment",
+   "value": [
+    {
+     "node": "44e68b68-90a4-5ecf-b6d5-4be826c1add9",
+     "reasons": [
+      "review_requested"
+     ],
+     "of": "x0401",
+     "field": "description",
+     "lang": "it",
+     "method": "manual"
+    },
+    {
+     "node": "675fb08d-fa24-5ccc-865f-befbefda4aa4",
+     "reasons": [
+      "stale"
+     ],
+     "of": "d04",
+     "field": "description",
+     "lang": "en",
+     "method": "ai"
+    }
+   ]
+  },
+  {
+   "step": "text in it after the realignment",
+   "value": {
+    "text": "Questa sarà invece la composizione del diastilo: quando possiamo interporre nell'intercolumnio lo spessore di tre colonne. Ora va spiegata la ragione dell'eustilo.",
+    "lang": "it",
+    "original": false,
+    "translation": "d1b5c317-8173-51c8-8a17-f898058fa9ff",
+    "reasons": []
+   }
+  },
+  {
+   "step": "realign refusals",
+   "value": {
+    "not stale": "refused",
+    "already realigned": "refused",
+    "not a translation": "refused"
+   }
+  },
+  {
    "step": "refusals",
    "value": {
     "name": "refused",

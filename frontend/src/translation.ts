@@ -339,8 +339,9 @@ export function textIn(doc: EmDocument, nodeId: string, field: string, lang: str
 
 /** The state of one translation, for its pill: ✓ verified · ◐ to review ·
  *  ✦ AI to verify · ↻ to realign (stale wins: no signature closes it). */
-export type TranslationState = "verified" | "review" | "ai" | "stale" | "plain";
+export type TranslationState = "verified" | "review" | "ai" | "stale" | "plain" | "superseded";
 export function translationState(doc: EmDocument, t: EmNode): TranslationState {
+  if (isSuperseded(doc, t)) return "superseded";
   const r = needsReview(doc, t.id);
   if (r.includes("stale")) return "stale";
   if (r.includes("ai")) return "ai";
@@ -445,10 +446,79 @@ export function addTranslation(store: DocumentStore, nodeId: string, field: stri
  * and a verification is dropped: it was a signature on another text. NOT in
  * s3Dgraphy's api (dev26 has no update of a translation): said in the report.
  */
+// ── dev27 · the realignment (s3Dgraphy `realign_translation`) ───────────────
+
+export const EDGE_REVISION = "was_revision_of";
+
+/** The translation that realigned this one (source of a `was_revision_of`
+ *  that targets it), or undefined. */
+export function successorOf(doc: EmDocument, t: EmNode | string): EmNode | undefined {
+  const id = typeof t === "string" ? t : t.id;
+  for (const e of doc.graph.edges) {
+    if (e.edge_type !== EDGE_REVISION || e.target !== id || removed(e)) continue;
+    const n = doc.graph.nodes.find((x) => x.id === e.source);
+    if (n && n.node_type === TRANSLATION_TYPE) return n;
+  }
+  return undefined;
+}
+
+/** The translation this one realigned (target of its `was_revision_of`). */
+export function predecessorOf(doc: EmDocument, t: EmNode | string): EmNode | undefined {
+  const id = typeof t === "string" ? t : t.id;
+  for (const e of doc.graph.edges) {
+    if (e.edge_type !== EDGE_REVISION || e.source !== id || removed(e)) continue;
+    const n = doc.graph.nodes.find((x) => x.id === e.target);
+    if (n && n.node_type === TRANSLATION_TYPE) return n;
+  }
+  return undefined;
+}
+
+/** A newer translation realigned this one: it is history now — kept, with who
+ *  made it and who verified it — and waits for nobody. */
+export const isSuperseded = (doc: EmDocument, t: EmNode | string): boolean => !!successorOf(doc, t);
+
+/**
+ * Realign a translation «da riallineare» — `api.realign_translation`, the same
+ * act (E.D. 2026-10-01): a NEW translation of the original's CURRENT text (so its
+ * `source_digest` is today's), same node, field and language, tied to the old one
+ * with `was_revision_of` (newer → older). The old one stays as it was, with its
+ * author and its verification; it is no longer a literal of the original, and
+ * waits for nobody. `method` defaults to the old one's (an edition is found on
+ * its `extracted_from`). Refused (TranslationError): not a translation, already
+ * realigned, not stale. Returns the new id. ONE undo step.
+ */
+export function realignTranslation(store: DocumentStore, tid: string, text: string,
+                                   opts: Omit<AddTranslationOptions, "fromLang"> & { method?: TranslationMethod },
+                                   markAi?: (store: DocumentStore, id: string, m: { by: string; model?: string }) => void): string {
+  const old = store.node(tid);
+  if (!old || old.node_type !== TRANSLATION_TYPE) throw new TranslationError("node", `${tid} is not a translation`);
+  const later = successorOf(store.doc, old);
+  if (later) throw new TranslationError("realigned", `${tid} was already realigned by ${later.id}: realign that one`);
+  if (!isStale(store.doc, old)) throw new TranslationError("aligned", `${tid} still translates the text of its original: there is nothing to realign`);
+  const original = originalOf(store.doc, old);
+  if (!original) throw new TranslationError("node", `${tid} translates nothing in this graph`);
+  const d = dataOf(old);
+  const method = (opts.method ?? (d.method as TranslationMethod) ?? "manual") as TranslationMethod;
+  const edition = opts.edition ?? (method === "edition" ? editionOf(store.doc, old)?.id : undefined);
+  let made = "";
+  store.batch(() => {
+    made = addTranslation(store, original.id, String(d.field ?? ""), String(d.lang ?? ""), text,
+      { ...opts, method, edition, fromLang: typeof d.from_lang === "string" ? d.from_lang : undefined }, markAi);
+    if (made === old.id) throw new TranslationError("node", "the realigned translation is the old one");
+    if (!store.hasEdge(made, old.id, EDGE_REVISION)) store.addEdge(made, old.id, EDGE_REVISION);
+  });
+  return made;
+}
+
+/** Edit an ALIGNED translation in place (a typo, a better word): the same text
+ *  of the same original. A translation «da riallineare» is not edited in place
+ *  any more (dev27): it is realigned, `realignTranslation`. */
 export function updateTranslation(store: DocumentStore, tid: string, text: string,
                                   opts: { review?: boolean; by?: string } = {}): void {
   const t = store.node(tid);
   if (!t || t.node_type !== TRANSLATION_TYPE) throw new TranslationError("node", `${tid} is not a translation`);
+  if (isStale(store.doc, t))
+    throw new TranslationError("stale", `${tid} is to realign: a new translation of the current text, realignTranslation`);
   if (!text.trim()) throw new TranslationError("empty", "the translation is empty");
   const original = originalOf(store.doc, t);
   const now = original ? fieldText(original, String(dataOf(t).field ?? "")) : null;

@@ -19,7 +19,7 @@
 import type { DocumentStore } from "./model";
 import type { EmDocument, EmNode } from "./types";
 import { authorForIdentity, type SignerIdentity } from "./narrative-authorship";
-import { isStale, originalOf, reviewRequested, TRANSLATION_TYPE } from "./translation";
+import { isStale, isSuperseded, originalOf, reviewRequested, TRANSLATION_TYPE } from "./translation";
 
 export const AI_ASSISTED = "ai_assisted";
 export const AI_GENERATED_ALIAS = "ai_generated";
@@ -155,6 +155,9 @@ export type ReviewReason = "ai" | "review_requested" | "stale";
 export function needsReview(doc: EmDocument, id: string): ReviewReason[] {
   const n = doc.graph.nodes.find((x) => x.id === id);
   if (!n || dataOf(n).removed) return [];
+  // dev27 · a translation a newer one REALIGNED (`was_revision_of`) waits for
+  // nobody: it is history, with its author and its verification
+  if (n.node_type === TRANSLATION_TYPE && isSuperseded(doc, n)) return [];
   const out: ReviewReason[] = [];
   if (isUnvalidatedAi(doc, id)) out.push("ai");
   if (reviewRequested(n) && !isValidated(n)) out.push("review_requested");
