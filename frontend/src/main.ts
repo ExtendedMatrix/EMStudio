@@ -18604,9 +18604,11 @@ function renderStorageInto(host: StorageHost): void {
         clear.onclick = () => setStoragePicked(win, []);
         box.append(b, clear);
         body.appendChild(box);
-      } else if (entry && !isStampPath(entry.path))
+      } else if (entry && !isStampPath(entry.path)) {
         body.appendChild(composeButtons(entry, listing));
-      else if (!listing.roots)
+        // dev28 · «è un'altra copia di R» also OUTSIDE a room (decision 14)
+        if (entry.type === "file" && !entry.outside) storageCopyOffer(body, win, entry);
+      } else if (!listing.roots)
         body.appendChild(composeFolderButton(listing));
       // RISORSA-FILE · a TILESET folder: pack it into a .3tz beside it (desktop)
       if (!listing.roots && listing.entries.some((e) => e.type === "file" && e.name === "tileset.json")) {
@@ -21535,6 +21537,57 @@ async function checkResourceAddress(resId: string, locator: string): Promise<voi
   toast(ok ? t("res.addrOkToast", { loc: locator })
     : r.warning === "none-alive" ? t("res.addrNoneAlive") : t("res.addrDeadToast", { loc: locator, live: String(r.live) }));
   refreshInspector();
+}
+
+/** dev28 · the checksums the Storage asked the bridge for, by path · size ·
+ *  mtime — the cache the stamp format names, so a re-render does not re-hash. */
+const storageDigests = new Map<string, string | null>();
+
+/**
+ * dev28 (E.D., 1 Oct 2026, decision 14) · the proposal «è un'altra copia di R:
+ * aggiungilo come indirizzo» OUTSIDE a room too. A file picked in the Storage
+ * of the disk whose bytes are those of a resource of the open graph — found by
+ * digest, never by name — and whose path is not one of its addresses is
+ * offered as another address of that resource (`addresses.addAddress`, the TS
+ * twin of `api.add_address`). Before a byte is read the candidates are
+ * filtered (`copyCandidates`: a digest to match, a size that agrees), so the
+ * bridge hashes only when one remains.
+ */
+function storageCopyOffer(body: HTMLElement, win: Win, entry: FsEntry): void {
+  const st = store;
+  if (!st) return;
+  const candidates = addrs.copyCandidates(st.liveNodes(), entry.size);
+  if (!candidates.length) return;
+  const slot = document.createElement("div");
+  slot.className = "stamp-report-ask storage-copyof";
+  body.appendChild(slot);
+  const key = `${entry.path}\u0000${entry.size}\u0000${entry.mtime}`;
+  void (async () => {
+    let sum = storageDigests.get(key);
+    if (sum === undefined) {
+      sum = await bridgeChecksum(entry.path);
+      storageDigests.set(key, sum);
+    }
+    if (!slot.isConnected || storageSelected(win) !== entry.path) return;
+    const found = addrs.resourceWithDigest(candidates, sum);
+    if (!found || !addrs.isAnotherCopy(found, entry.path)) { slot.remove(); return; }
+    const name = String(found.name ?? found.id);
+    const offer = document.createElement("button");
+    offer.className = "insp-btn ing-copyof";
+    offer.dataset.action = "storage-copyof";
+    offer.dataset.copyOf = found.id;
+    offer.textContent = t("assets.copyOf", { name });
+    offer.title = t("assets.copyOfHint", { loc: entry.path });
+    offer.addEventListener("click", () => {
+      try {
+        addrs.addAddress(st, found.id, entry.path, { checksum: sum, residency: "reference" });
+        toast(t("assets.copyOfAdded", { name }));
+        refreshInspector();
+      } catch (e) { toast(String((e as Error).message)); }
+      renderStorage();
+    });
+    slot.appendChild(offer);
+  })();
 }
 
 /** The bridge holds the bytes of a file on disk — the page may not read it. *//** The bridge holds the bytes of a file on disk — the page may not read it. */

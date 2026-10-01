@@ -77,6 +77,30 @@ const doc = () => ({ graph: { graph_id: "g", name: "g", data: {}, nodes: [
      "another copy at a new place is proposed as an address; the known one, none, or no locator are not");
   eq([M.addressKind("https://x"), M.addressKind("s3://b/k"), M.addressKind("/a/b.pdf"), M.addressKind("rel/b.pdf")],
      ["http", "other", "disk", "disk"], "how an address is reached");
+  // dev28 · the Storage OUTSIDE a room: the same file seen from the disk is not another copy
+  eq([M.isAnotherCopy(st.node("scan"), "/Users/x/studio/scans/vitruvio.pdf"),
+      M.isAnotherCopy(st.node("scan"), "/Users/x/studio/oldscans/vitruvio.pdf"),
+      M.sameLocator("scans/vitruvio.pdf", "/a/scans/vitruvio.pdf"),
+      M.sameLocator("scans/vitruvio.pdf", "/a/myscans/vitruvio.pdf"),
+      M.sameLocator("/abs/x.pdf", "/other/abs/x.pdf")], [false, true, true, false, false],
+     "a relative address names the file at the end of an absolute path, on a segment boundary only");
+}
+
+// ── dev28 · which resources a file could be another copy of, before a byte is read
+{
+  const D2 = "sha256:" + "c".repeat(64);
+  const nodes = [
+    { id: "a", node_type: "resource", data: { checksum: D, size_bytes: 120 } },
+    { id: "b", node_type: "resource", data: { checksum: D2 } },
+    { id: "c", node_type: "resource", data: { url: "x" } },
+    { id: "d", node_type: "US", data: { checksum: D } },
+    { id: "e", node_type: "resource", data: { checksum: D, size: 999 } },
+  ];
+  eq(M.copyCandidates(nodes, 120).map((n) => n.id), ["a", "b"],
+     "a digest to match and a size that agrees (or none declared): the rest is not hashed for");
+  eq(M.copyCandidates(nodes, 5).map((n) => n.id), ["b"], "another size: only who declares none");
+  eq(M.copyCandidates(nodes, null).map((n) => n.id), ["a", "b", "e"], "a file of unknown size is compared with every digest");
+  eq(M.copyCandidates([], 1), [], "an open graph with no resource: nothing to propose, nothing hashed");
 }
 
 // ── the language of the content (A3) ────────────────────────────────────────

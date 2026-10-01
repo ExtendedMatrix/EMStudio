@@ -149,5 +149,36 @@ export function addressKind(locator: string): "http" | "disk" | "other" {
 export function isAnotherCopy(existing: EmNode | null | undefined, locator: string | null | undefined): boolean {
   if (!existing || !locator) return false;
   const known = addresses(existing).map((a) => a.locator);
-  return known.length > 0 && !known.includes(locator);
+  return known.length > 0 && !known.some((k) => sameLocator(k, locator));
+}
+
+/** dev28 · whether a known address and a path on the disk name the same place.
+ *  Equal, or — for an address written RELATIVE to the study (`RM/LOD1/x.obj`:
+ *  TempluMare's resources are absolute, measured, but a relative one is legal)
+ *  — the absolute path ends with it on a segment boundary: the same file seen
+ *  from the disk is not «another copy». */
+export function sameLocator(known: string, locator: string): boolean {
+  const a = (known ?? "").trim().replace(/\\/g, "/");
+  const b = (locator ?? "").trim().replace(/\\/g, "/");
+  if (!a || !b) return false;
+  if (a === b) return true;
+  if (addressKind(a) !== "disk" || a.startsWith("/") || /^[A-Za-z]:\//.test(a)) return false;
+  const rel = a.replace(/^\.\//, "");
+  return b.endsWith("/" + rel);
+}
+
+/** dev28 · the Storage OUTSIDE a room (E.D., decision 14): which resources of
+ *  the open graph a file on the disk could be another copy of, BEFORE reading
+ *  a byte. The three filters of the stamp format in cascade: only a resource
+ *  with a digest can be matched at all, and one that declares a size other
+ *  than the file's is not it — so the bridge hashes only when a candidate
+ *  remains. */
+export function copyCandidates(nodes: EmNode[], size: number | null | undefined): EmNode[] {
+  return nodes.filter((n) => {
+    if (n.node_type !== "resource" || !digestOf(dataOf(n).checksum)) return false;
+    const d = dataOf(n);
+    const declared = typeof d.size_bytes === "number" ? d.size_bytes
+      : typeof d.size === "number" ? d.size : null;
+    return declared === null || size == null || declared === size;
+  });
 }
