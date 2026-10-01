@@ -8551,3 +8551,9 @@ button.shelf-badge { cursor: pointer; font: inherit; font-size: 10.5px; }
 .stamp-stale { margin: 8px 0; padding: 8px 10px; border: 1px solid var(--warn-border); background: var(--warn-soft);
   color: var(--warn-ink); border-radius: var(--radius); font-size: 12px; }
 .stamp-stale ul { margin: 4px 0 6px 16px; padding: 0; }
+.stamp-stale pre { max-height: 180px; overflow: auto; }
+
+/* CAMPAGNA · a tileset opened from the Storage, the shelf or a resource: a
+   preview, said in the Scene's bar and closable */
+.scn-preview { display: inline-flex; align-items: center; gap: 6px; margin-left: 8px; padding: 1px 4px 1px 8px;
+  border: 1px dashed var(--border-strong); border-radius: var(--radius-sm); font-size: 12px; color: var(--text); }

@@ -41,6 +41,10 @@ const bundle = await esbuild.build({
       export * as receipts from "./receipt";
       export * as compose from "./stamp-compose";
       export * as tree from "./stamp-tree";
+      export * as tropy from "./tropy";
+      export * as naming from "./naming";
+      export { DocumentStore } from "./model";
+      export { CALLS_OTHERS } from "./storage";
     `,
     resolveDir: SRC, loader: "ts",
   },
@@ -55,7 +59,7 @@ const bundle = await esbuild.build({
   }],
 });
 const M = await import("data:text/javascript;base64," + Buffer.from(bundle.outputFiles[0].text).toString("base64"));
-const { receipts, compose, tree } = M;
+const { receipts, compose, tree, tropy, naming, DocumentStore, CALLS_OTHERS } = M;
 
 // ── 1 · the receipt of a file set, judged by its members ───────────────────
 {
@@ -79,6 +83,43 @@ const { receipts, compose, tree } = M;
   eq(receipts.checkReceipt({ id: "r", checksum: "sha256:aa", stamp: 1, parents: [] },
      { self: { resource_id: "r", digest: "sha256:aa" } }, "sha256:bb"), "file-changed",
      "1 · one file: the sha256 is still compared (unchanged rule)");
+}
+
+// ── 2 · from the receipt to the document, and the 3D that shows ────────────
+{
+  const TEMPLU = JSON.parse(readFileSync(new URL("../testdata/TempluMare.em.json", import.meta.url), "utf8"));
+  const docs = (names) => ({ graph: { nodes: names.map((n, i) => ({ id: `d${i}`, node_type: "document", name: n })), edges: [] } });
+  eq(naming.nextDocumentName(docs(["D.01", "D.02", "D.03", "D.04", "D.05", "D.06", "D.07", "D.08", "D.11", "D.20", "D.1000"])),
+     "D.09", "4 · the graph's spelling: after D.01…D.08 comes D.09, not D.9 (TempluMare)");
+  eq(naming.nextDocumentName(docs(["D.1", "D.3"])), "D.2", "4 · a graph without zero padding keeps D.2");
+  eq(naming.nextDocumentName(docs(["D.001"])), "D.002", "4 · …and three digits stay three");
+  const st = new DocumentStore(TEMPLU);
+  const n0 = st.doc.graph.nodes.length, e0 = st.doc.graph.edges.length;
+  const dir = "/data/RM/TempluMare_tiles/LOD1";
+  const entry = { id: "e1", name: "OB_PODIO_LOD1.obj", locator: `${dir}/OB_PODIO_LOD1.obj`, checksum: "sha256:" + "5".repeat(64) };
+  const r = tropy.promoteToDocument(st, entry, { packaging: "file_set", checksum: "sha256:" + "5".repeat(64), files: [
+    { path: "OB_PODIO_LOD1.obj", url: `${dir}/OB_PODIO_LOD1.obj`, checksum: "sha256:" + "a".repeat(64), size_bytes: 10, role: "entry_point" },
+    { path: "OB_PODIO_LOD1.mtl", url: `${dir}/OB_PODIO_LOD1.mtl`, checksum: "sha256:" + "b".repeat(64), size_bytes: 2, role: "member" },
+    { path: "textures/T_OB_PODIO_LOD1.jpg", url: `${dir}/textures/T_OB_PODIO_LOD1.jpg`, checksum: "sha256:" + "c".repeat(64), size_bytes: 3, role: "member" }] });
+  const doc = st.node(r.documentId);
+  eq([doc.node_type, doc.data?.url, doc.data?.checksum], ["document", undefined, undefined],
+     "4 · «Promote to document»: a DocumentNode with NO url and NO checksum");
+  const links = st.doc.graph.edges.filter((e) => e.source === r.documentId);
+  eq(links.map((e) => e.edge_type), ["has_linked_resource"], "4 · …linked to its resource by has_linked_resource");
+  const res = st.node(links[0].target);
+  eq([res.node_type, res.data.packaging, res.data.url, res.data.checksum], ["resource", "file_set", "", "sha256:" + "5".repeat(64)],
+     "4 · …a ResourceNode, packaging file_set, the members digest as its checksum, no url of its own");
+  const files = st.doc.graph.edges.filter((e) => e.source === res.id && e.edge_type === "has_file");
+  eq(files.map((e) => [e.attributes?.role, e.attributes?.path, st.node(e.target)?.node_type]),
+     [["entry_point", "OB_PODIO_LOD1.obj", "resource_file"], ["member", "OB_PODIO_LOD1.mtl", "resource_file"],
+      ["member", "textures/T_OB_PODIO_LOD1.jpg", "resource_file"]], "4 · …and three ResourceFileNodes by has_file, the door first");
+  eq([st.doc.graph.nodes.length - n0, st.doc.graph.edges.length - e0], [5, 4], "4 · 5 nodes and 4 edges (the campaign measured 0 edges)");
+  st.undo();
+  eq([st.doc.graph.nodes.length, st.doc.graph.edges.length], [n0, e0], "4 · one undo step takes it all back");
+  for (const f of ["a/OB.obj", "a/OB.mtl", "m.gltf", "t/tileset.json"])
+    ok(CALLS_OTHERS.test(f), `5 · ${f} calls other files: /fs/at/<path>`);
+  for (const f of ["a.jpg", "b.pdf", "c.glb", "d.3tz", "tileset.json.bak"])
+    ok(!CALLS_OTHERS.test(f), `5 · ${f} does not: /fs/file?path= stays`);
 }
 
 // ── the bridge of this check ────────────────────────────────────────────────

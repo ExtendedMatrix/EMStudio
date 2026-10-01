@@ -94,6 +94,8 @@ export interface ResourcePanelHooks {
   onToggleFiles(id: string): void;
   /** absent = this build cannot read new bytes (the button is not drawn) */
   onReplaceFile?(resId: string, fileId: string | null): void;
+  /** CAMPAGNA · a tileset (folder or .3tz) opened in a Scene window */
+  onOpenInScene?(resId: string): void;
 }
 
 function el(tag: string, cls?: string, text?: string): HTMLElement {
@@ -163,6 +165,16 @@ export function renderResourcePanel(store: DocumentStore, id: string, h: Resourc
     const cd = contentDigestOf(g.node(id));
     fl.appendChild(el("div", "insp-hint", t("res.formsHint", { cd: (cd ?? "").slice(0, 19) })));
     panel.appendChild(fl);
+  }
+  // ── CAMPAGNA · a TREE opens in the Scene: the root first, the tiles asked
+  //    as the camera needs them (never the whole archive)
+  if (h.onOpenInScene && (d.packaging === "archive" || d.packaging === "directory"
+      || /(\.3tz|(^|\/)tileset\.json)$/i.test(String(d.url ?? "")))) {
+    const b = el("button", "insp-btn", t("scene.openHere")) as HTMLButtonElement;
+    b.dataset.action = "open-in-scene";
+    b.title = t("scene.openHereHint");
+    b.addEventListener("click", () => h.onOpenInScene!(id));
+    panel.appendChild(b);
   }
   // ── the files ────────────────────────────────────────────────────────────
   panel.appendChild(el("h3", "insp-sect", t("res.filesTitle", { n: String(s.files.length) })));

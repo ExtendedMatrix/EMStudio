@@ -67,6 +67,8 @@ export interface InspectorCallbacks {
   onToggleResourceFiles?: (resId: string) => void;
   /** …and replacing one of them makes a revision (absent = no bytes to read) */
   onReplaceFile?: (resId: string, fileId: string | null) => void;
+  /** CAMPAGNA · a tileset resource opened in a Scene window */
+  onOpenInScene?: (resId: string) => void;
 }
 
 function el(tag: string, cls?: string, text?: string): HTMLElement {
@@ -858,6 +860,7 @@ export function renderInspector(
       isOpen: (id) => cb.isResourceOpen?.(id) ?? false,
       onToggleFiles: (id) => cb.onToggleResourceFiles?.(id),
       onReplaceFile: cb.onReplaceFile,
+      onOpenInScene: cb.onOpenInScene,
     });
     if (panel) root.appendChild(panel);
   }

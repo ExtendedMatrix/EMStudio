@@ -448,8 +448,24 @@ export function mount3dViewer(host: HTMLElement, url: string,
         host.appendChild(hint);
         tick();
       };
-      const unreachable = () => fail("il modello non è raggiungibile: "
-                                     + "il riferimento è valido, l'asset non risponde");
+      // CAMPAGNA (1 ott, difetto 6) · the sentence NAMES the file that did not
+      // come: measured, the obj arrived (44,8 MB) and its mtl did not, and the
+      // old words said «the asset does not answer» — in Italian, in an English
+      // interface. Every loader goes through `manager`, which hears each miss.
+      const missed: string[] = [];
+      const fileOf = (u: string): string => {
+        try {
+          const url = new URL(u, location.href);
+          const p = url.searchParams.get("path") ?? decodeURIComponent(url.pathname);
+          return p.split("/").filter(Boolean).pop() ?? u;
+        } catch { return u.split("/").pop() ?? u; }
+      };
+      const unreachable = () => {
+        const which = [...new Set(missed.map(fileOf))];
+        fail(which.length
+          ? t("em3d.missing", { files: which.join(", "), n: String(which.length) })
+          : t("em3d.unreachable"));
+      };
 
       const clearContent = () => {
         layer?.dispose();
@@ -462,6 +478,7 @@ export function mount3dViewer(host: HTMLElement, url: string,
       // resource of several files are resolved from its `has_file` edges
       const manager = new THREE.LoadingManager();
       if (mo.urlModifier) manager.setURLModifier(mo.urlModifier);
+      manager.onError = (u: string) => { missed.push(u); host.dataset.missing = missed.map(fileOf).join("|"); };
       (host as unknown as { __v3dResolved?: () => Array<[string, string]> }).__v3dResolved =
         () => mo.resolved?.() ?? [];
 

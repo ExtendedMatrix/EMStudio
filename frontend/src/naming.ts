@@ -337,11 +337,18 @@ export function deriveCombinerName(doc: NamingDoc): string {
 /** Next free `D.<n>`. */
 export function nextDocumentName(doc: NamingDoc): string {
   const used = new Set<number>();
+  // CAMPAGNA (1 ott, difetto 4) · the GRAPH's spelling: TempluMare writes D.01…
+  // D.08, and the next one is D.09, not D.9. The width is the widest number
+  // written with a leading zero (D.1000 or D.20 say nothing about padding); a
+  // graph with no zero-padded document keeps D.1, D.2…
+  let pad = 0;
   for (const n of doc.graph.nodes) {
     const m = DOC_RE.exec(nameOf(n));
-    if (m) used.add(Number(m[1]));
+    if (!m) continue;
+    used.add(Number(m[1]));
+    if (m[1].length > 1 && m[1].startsWith("0")) pad = Math.max(pad, m[1].length);
   }
-  return `D.${firstFree(used)}`;
+  return `D.${String(firstFree(used)).padStart(pad, "0")}`;
 }
 
 /** Next free `Temp<n>` — an extractor that has no document yet. */

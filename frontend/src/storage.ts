@@ -75,6 +75,16 @@ export async function fsTreeUrl(path: string): Promise<string> {
   return `${await base()}/fs/at/${rest.split("/").map(encodeURIComponent).join("/")}`;
 }
 
+/** CAMPAGNA (1 ott, difetto 5) · a file that CALLS other files by a relative
+ *  path — an obj (its `mtllib`), an mtl (its `map_*`), a gltf (its buffers and
+ *  images), a tileset (its tiles) — must be fetched with its path in the URL's
+ *  path, or what it names lands on `/fs/<name>`: measured, the Doc window asked
+ *  `/fs/OB_PODIO_LOD1.mtl`. Everything else keeps `/fs/file?path=`. */
+export const CALLS_OTHERS = /(\.(obj|mtl|gltf)|(^|\/)tileset\.json)$/i;
+export async function fsUrlFor(path: string): Promise<string> {
+  return CALLS_OTHERS.test(path) ? fsTreeUrl(path) : fsFileUrl(path);
+}
+
 /** List a directory — or, with no path, the roots the bridge was started with. */
 export async function fsList(path?: string): Promise<FsListing> {
   const url = `${await base()}/fs/list${path ? `?path=${encodeURIComponent(path)}` : ""}`;

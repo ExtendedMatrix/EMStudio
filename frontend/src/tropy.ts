@@ -19,6 +19,7 @@ import type { EmNode } from "./types";
 import { nextDocumentName, initialName, renameOnAttach } from "./naming";
 import { setReadingGeometry } from "./paradata-chain";
 import type { ShelfEntry } from "./shelf";
+import { addResource, leaf, storeGraph, type FileSpec } from "./resources";
 
 export interface TropySelection { id: string; rect: [number, number, number, number]; note: string }
 export interface TropyPhoto {
@@ -114,26 +115,59 @@ export function tropyOf(e: ShelfEntry | undefined): {
 }
 
 /**
- * «Promuovi a documento»: the DocumentNode (named `D.<n>`, the item's title as
- * its description, the file as `data.url`, the Tropy item id kept), and one
- * extractor per selection with the selection's REGION as its geometry and its
- * note as the reading's description. ONE undo step.
+ * «Promuovi a documento»: the DocumentNode (named `D.<n>` in the graph's own
+ * spelling, the item's title as its description, the Tropy item id kept), and
+ * one extractor per selection with the selection's REGION as its geometry and
+ * its note as the reading's description. ONE undo step.
+ *
+ * CAMPAGNA (1 ott, difetto 4) · the document carries NO `url` and NO
+ * `checksum`: the bytes are a RESOURCE of it (datamodel 1.6.18) —
+ * DocumentNode ──has_linked_resource──▶ ResourceNode ──has_file──▶
+ * ResourceFileNode, made by `addResource` (the one constructor, s3Dgraphy's
+ * mirror). One file is the implicit form (the url on the resource); a stamped
+ * FILE SET passes its members (`files`, the door first), with
+ * `packaging: file_set` and the members digest as the resource's checksum; a
+ * tree passes `packaging: directory | archive`.
  *
  * The extractors' names follow NAME1 as it is written in `naming.ts`: the region
  * is ON the new document, so each reading has a source and is named
  * `D.<n>.<k>`, not `Temp<n>` (Temp is for an extractor with no source yet).
  */
-export function promoteToDocument(store: DocumentStore, e: ShelfEntry): { documentId: string; extractors: string[] } {
+export interface PromoteBytes {
+  /** the files of the resource; absent = the entry's locator, one file */
+  files?: FileSpec[];
+  packaging?: string;
+  /** the resource's own digest when it is not one file's (members, content) */
+  checksum?: string;
+  /** extra `data` on the resource (the stamp's receipt, a content digest…) */
+  data?: Record<string, unknown>;
+}
+
+export function promoteToDocument(store: DocumentStore, e: ShelfEntry, bytes: PromoteBytes = {}):
+  { documentId: string; extractors: string[]; resourceId: string | null } {
   const tr = tropyOf(e);
   return store.batch(() => {
     const docId = store.newId();
-    const url = e.locator;
-    const data: Record<string, unknown> = /^(https?:|s3:|\/)/.test(url) ? { url } : { filename: url };
+    const data: Record<string, unknown> = {};
     if (tr) data.tropy = tr.item;
-    if (e.checksum) data.checksum = e.checksum;
     const notes = tr?.notes?.length ? ` — ${tr.notes.join(" · ")}` : "";
     store.addNode({ id: docId, node_type: "document", name: nextDocumentName(store.doc),
                     description: `${tr?.title || e.name}${notes}` , data } as EmNode);
+    // the bytes: a resource of the document, never fields on it
+    const files: FileSpec[] = bytes.files ?? (e.locator
+      ? [{ path: leaf(e.locator), url: e.locator, ...(e.checksum ? { checksum: e.checksum } : {}) }] : []);
+    let resourceId: string | null = null;
+    if (files.length) {
+      const extra: Record<string, unknown> = { ...(bytes.data ?? {}) };
+      if (bytes.checksum) extra.checksum = bytes.checksum;
+      const res = addResource(storeGraph(store), {
+        name: e.name, kind: "", files, resourceId: store.newId(),
+        ...(bytes.packaging ? { packaging: bytes.packaging } : {}),
+        ...(Object.keys(extra).length ? { data: extra } : {}),
+      });
+      resourceId = res.id;
+      store.addEdge(docId, res.id, "has_linked_resource");
+    }
     const extractors: string[] = [];
     for (const s of tr?.selections ?? []) {
       const x = store.newId();
@@ -149,6 +183,6 @@ export function promoteToDocument(store: DocumentStore, e: ShelfEntry): { docume
       }
       extractors.push(x);
     }
-    return { documentId: docId, extractors };
+    return { documentId: docId, extractors, resourceId };
   });
 }

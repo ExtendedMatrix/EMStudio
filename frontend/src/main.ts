@@ -221,7 +221,7 @@ import {
   checkReceipt, coversMoreThanTheFile, receiptOf, receiptsOfEmission, refreshedCopies, verdictChanged,
   type ReceiptCheck, type StampVerdict,
 } from "./receipt";
-import { parseTropy, promoteToDocument, tropyOf, tropyShelfInputs } from "./tropy";
+import { parseTropy, promoteToDocument, tropyOf, tropyShelfInputs, type PromoteBytes } from "./tropy";
 import {
   closeAddMenu,
   showAddMenu,
@@ -320,7 +320,7 @@ import { type HostInfo, SyncClient, SYNC_ACCEPTS, type SyncAccept } from "./sync
 import * as alignment from "./alignment";
 import type { GraphOp } from "./model";
 import { buildCommand, type CommandVerb } from "./commands";
-import { addResource, fileCounts, foldFiles, movePointers, replaceFile, resourceLabel, storeGraph } from "./resources";
+import { addResource, fileCounts, foldFiles, movePointers, replaceFile, resourceFiles, resourceLabel, storeGraph } from "./resources";
 import { askWhichPointersMove } from "./resource-panel";
 import { addressMap, chooseModel, needsChoice, startResources, type ModelChoice } from "./representation";
 import { foldForms, landPack, packTileset } from "./pack3tz";
@@ -445,6 +445,7 @@ import {
   collectionFromUrl,
   fsFileUrl,
   fsTreeUrl,
+  fsUrlFor,
   fsList,
   isDecodable,
   kindOfExt,
@@ -2287,6 +2288,7 @@ function renderInspectorInto(host: HTMLElement): void {
       isResourceOpen: (id) => openResourceFiles.has(id),
       onToggleResourceFiles: (id) => toggleResourceFiles(id),
       onReplaceFile: (resId, fileId) => { void replaceFileFlow(resId, fileId); },
+      onOpenInScene: (resId) => { void openResourceInScene(resId); },
       onClearField: (nodeId, field) => {
         (storeOfNode(nodeId) ?? store!).clearField(nodeId, field);
         refreshInspector();
@@ -9378,7 +9380,7 @@ async function postSessionKey(key: string | null): Promise<string | null> {
     const j = await res.json().catch(() => null);
     return (j as { error?: string } | null)?.error ?? `bridge error ${res.status}`;
   } catch {
-    return "em-bridge non raggiungibile";
+    return t("bridge.unreachable");
   }
 }
 
@@ -12783,9 +12785,7 @@ async function generateChapterDraft(narrativeId: string,
     // is not running — so say that, and keep the real message for failures that
     // happened AFTER we had an answer.
     toast(!reached
-      ? "em-bridge non raggiungibile: la generazione passa da lì (è anche " +
-        "dove sta la key, mai nel frontend). Avvialo con ./dev.sh, oppure " +
-        "punta EM_TRANSFORMER_URL a un server."
+      ? t("bridge.unreachableGen")
       : t("toast.genFailed",
             { why: e instanceof Error ? e.message : String(e) }));
   } finally {
@@ -14846,6 +14846,16 @@ function documentsInGraph(): EmNode[] {
   return (store?.doc.graph.nodes ?? []).filter((n) => n.node_type === "document");
 }
 
+/** CAMPAGNA (1 ott, difetto 16) · the document a Doc window SHOWS — one
+ *  answer for its selector, its tools and its body. The body fell back to the
+ *  first document when the window's own one was gone (an undo removed it) while
+ *  the selector said «—»: two answers to one question. */
+function docShownIn(win: Win): EmNode | null {
+  const docs = documentsInGraph();
+  const id = currentDocId(win);
+  return docs.find((d) => d.id === id) ?? docs[0] ?? null;
+}
+
 /** The focused Doc window's surface. WIN7 split the rendering out (below) so a
  *  SECONDARY Doc area can paint the same thing into its own two boxes. */
 function renderDocView(): void {
@@ -14878,8 +14888,7 @@ function renderDocViewInto(
   // SPAZIO · which document a Doc shows is ITS OWN (`current.doc`): a document
   // selected elsewhere reaches the service window or the space's Doc through
   // `select` → `followDocSelection`, never a Doc opened or kept by hand
-  const currentId = winCurrent(win, "doc");
-  const current = docs.find((d) => d.id === currentId) ?? docs[0];
+  const current = docShownIn(win) ?? docs[0];
   const repaint = (): void => renderDocViewInto(win, list, detail);
   // AUDIT N8 · ONE SELECTION: the Doc shows the document selected anywhere
   // (the Documents table, the graph, the Outliner); picking one here selects it
@@ -15044,7 +15053,7 @@ function docSrcUrl(src: string): string | null {
   if (viewerIsFetchable(src) || src.startsWith("/em/") || src.startsWith("./")) return src;
   if (docUrlCache.has(src)) return docUrlCache.get(src) ?? null;
   docUrlCache.set(src, null);
-  void (isTilesetUrl(src) ? fsTreeUrl(src) : fsFileUrl(src))
+  void (isTilesetUrl(src) ? fsTreeUrl(src) : fsUrlFor(src))
     .then((u) => { docUrlCache.set(src, u); renderDocView(); }).catch(() => { /* unreachable: stays null */ });
   return null;
 }
@@ -15381,7 +15390,7 @@ function requestDoc(docId: string, opts: { from?: Win | null; reading?: string |
 
 function fillDocTools(win: Win, strip: HTMLElement): void {
   strip.textContent = "";
-  const d = store ? store.node(currentDocId(win) ?? "") : undefined;
+  const d = docShownIn(win) ?? undefined;
   // SPAZIO · the window's OWN document: changing it here changes only this one
   const docs = documentsInGraph();
   if (docs.length) {
@@ -15799,6 +15808,49 @@ function spaceGenre(key: string | null): string {
   return t(k) === k ? key.replace(/_/g, " ") : t(k);
 }
 
+/** CAMPAGNA · a TILESET shown in the Scene from where the person sees it — the
+ *  Storage, the shelf, a resource — not from the graph's epochs: a PREVIEW, one
+ *  per Scene window, said as such in the bar and closed with ✕. A .3tz is read
+ *  by ranges (the root and the index first, the tiles as the camera asks), a
+ *  folder through `/fs/at/` so its tiles resolve beside it. */
+interface ScenePreview { label: string; url: string; path?: string; resourceId?: string }
+function scenePreviewOf(win: Win): ScenePreview | null {
+  const v = winCurrent(win, "space.preview") as ScenePreview | null | undefined;
+  return v && typeof v === "object" && typeof v.url === "string" ? v : null;
+}
+
+/** «Apri in Scena» for a path on disk: a .3tz, a tileset.json, or a tileset folder. */
+async function openPathInScene(path: string, resourceId?: string): Promise<void> {
+  const p = path.replace(/\/+$/, "");
+  const isArchive = /\.3tz$/i.test(p);
+  const entry = isArchive || /(^|\/)tileset\.json$/i.test(p) ? p : `${p}/tileset.json`;
+  let url: string;
+  try { url = isArchive ? await fsFileUrl(entry) : await fsTreeUrl(entry); } catch { toast(t("storage.bridgeDown")); return; }
+  const label = (isArchive ? p : entry.replace(/\/tileset\.json$/i, "")).split("/").pop() ?? p;
+  let win = windowsOf().find((w) => w.type === "scene");
+  if (!win) { setWorkspace("space"); win = windowsOf().find((w) => w.type === "scene"); }
+  if (!win) { toast(t("scene.noScene")); return; }
+  setWinCurrent(win, "space.preview", { label, url, path: entry, ...(resourceId ? { resourceId } : {}) });
+  selectWindow(win.id);
+  refreshSurfaces("scene");
+  logInfo(t("scene.previewOpened", { name: label }));
+}
+
+/** «Apri in Scena» for a resource of the graph (a promoted .3tz, a tileset). */
+async function openResourceInScene(resId: string): Promise<void> {
+  const st = store;
+  if (!st) return;
+  const g = storeGraph(st);
+  const files = resourceFiles(g, resId);
+  const entry = files.find((f) => f.role === "entry_point") ?? files[0];
+  const d = (st.node(resId)?.data ?? {}) as Record<string, unknown>;
+  const loc = String(((entry?.node.data ?? {}) as Record<string, unknown>).url ?? d.url ?? "");
+  if (!loc) { toast(t("scene.noLocator")); return; }
+  const baseDir = currentFilePath ? currentFilePath.replace(/[^/\\]*$/, "") : "";
+  const abs = loc.startsWith("/") || !baseDir ? loc : `${baseDir}${loc}`;
+  await openPathInScene(abs, resId);
+}
+
 /** The window's toggles: «Modelli (RM)» and «Proxy», both on by default. */
 function spaceToggle(win: Win, which: "rm" | "px"): boolean {
   return winCurrent(win, `space.${which}`) !== false;
@@ -15846,10 +15898,12 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
     },
   });
   const onBar = (e: Event) => {
-    const b = (e.target as HTMLElement).closest<HTMLElement>("[data-epoch],[data-toggle],[data-frame]");
+    const b = (e.target as HTMLElement).closest<HTMLElement>("[data-epoch],[data-toggle],[data-frame],[data-preview-close]");
     if (!b) return;
     e.stopPropagation();
-    if (b.dataset.epoch) {
+    if (b.dataset.previewClose) {
+      setWinCurrent(win, "space.preview", null);
+    } else if (b.dataset.epoch) {
       spaceEpochId = b.dataset.epoch;
       select(b.dataset.epoch);              // the Chronology and the Inspector follow
       refreshInspector();
@@ -15901,6 +15955,34 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
     fr.textContent = "⤢";
     fr.title = t("space.frame");
     bar.append(lab, seg, tog("rm", "space.layerRm"), tog("px", "space.layerPx"), fr);
+    // CAMPAGNA · the preview, said in the bar and closable; drawn whatever the
+    // graph says (a tileset opened from the Storage needs no epoch)
+    const preview = scenePreviewOf(win);
+    const previewItem: SceneItem | null = preview ? {
+      kind: "rm", id: `preview:${preview.resourceId ?? preview.url}`, label: preview.label, state: "resident",
+      url: preview.url, resourceId: preview.resourceId } : null;
+    if (preview) {
+      const chip = document.createElement("span");
+      chip.className = "scn-preview";
+      chip.dataset.preview = preview.path ?? preview.url;
+      chip.textContent = t("scene.previewChip", { name: preview.label });
+      chip.title = t("scene.previewHint");
+      const x = document.createElement("button");
+      x.type = "button";
+      x.className = "scn-tg";
+      x.dataset.previewClose = "1";
+      x.textContent = "✕";
+      x.title = t("scene.previewClose");
+      chip.appendChild(x);
+      bar.appendChild(chip);
+    }
+    if (previewItem && (!store || !sp || !sum)) {
+      overlay.textContent = "";
+      overlay.classList.add("hidden");
+      empty.classList.add("hidden");
+      handle.update([previewItem]);
+      return;
+    }
     if (!store || !sp || !sum) {
       overlay.textContent = "";
       overlay.classList.add("hidden");
@@ -15926,7 +16008,7 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
     overlay.querySelectorAll<HTMLElement>("[data-go]").forEach((b) => b.addEventListener("click", (e) => {
       e.stopPropagation(); select(b.dataset.go!); refreshInspector();
     }));
-    const nothing = !sum.rms.length && !sum.withProxy.length;
+    const nothing = !sum.rms.length && !sum.withProxy.length && !previewItem;
     empty.classList.toggle("hidden", !nothing);
     if (nothing) {
       empty.innerHTML = `<b>${escapeHtml(t("space.emptyTitle", { x: sum.epoch.name }))}</b>`
@@ -15953,6 +16035,7 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
         if (px.resource) items.push({ ...common, state: px.resource.state, url: px.resource.url || undefined, resourceId: px.resource.id });
         else items.push({ ...common, state: "json", convexshapes: px.convexshapes, spheres: px.spheres });
       }
+    if (previewItem) items.unshift(previewItem);
     handle.update(items);
   };
   refresh();
@@ -16433,7 +16516,7 @@ function shelfRow(entry: ShelfEntry): HTMLElement {
     pr.textContent = t("tropy.promote");
     pr.title = t("tropy.promoteHint");
     pr.dataset.promote = entry.id;
-    pr.addEventListener("click", () => promoteShelfEntry(entry));
+    pr.addEventListener("click", () => { void promoteShelfEntry(entry); });
     actions.appendChild(pr);
   }
   // RIFINITURE · the description is written IN THE STAMP: the shelf shows the
@@ -16448,6 +16531,16 @@ function shelfRow(entry: ShelfEntry): HTMLElement {
     ed.dataset.editStamp = entry.id;
     ed.addEventListener("click", () => openStampEditor(entry.locator));
     actions.appendChild(ed);
+  }
+  // CAMPAGNA · a tileset on the shelf (a .3tz, a tileset folder) opens in the Scene
+  if (/^\//.test(entry.locator) && (/\.3tz$/i.test(entry.locator) || /(^|\/)tileset\.json$/i.test(entry.locator)
+      || (receiptOf(entry) && !/\.[A-Za-z0-9]{1,5}$/.test(entry.locator)))) {
+    const sc = document.createElement("button");
+    sc.textContent = t("scene.openHere");
+    sc.title = t("scene.openHereHint");
+    sc.dataset.openScene = entry.id;
+    sc.addEventListener("click", () => { void openPathInScene(entry.locator); });
+    actions.appendChild(sc);
   }
   if (isAnnotatable(entry)) {
     const annotate = document.createElement("button");
@@ -16513,11 +16606,48 @@ function importTropy(txt: string, fileName: string): number {
   return inputs.length;
 }
 
+/** CAMPAGNA (difetto 4) · the bytes a shelf entry promotes: for a STAMPED path
+ *  the sidecar says what they are — a file set's members (the door first, each
+ *  with its digest), a tileset folder, a .3tz — and the resource is made in that
+ *  form; anything else is the entry's locator, one file. */
+async function promoteBytesOf(entry: ShelfEntry): Promise<PromoteBytes> {
+  if (!receiptOf(entry) || !/^\//.test(entry.locator)) return {};
+  let st: Stamp | null = null;
+  try { st = await readStamp(stampPathFor(entry.locator)); } catch { st = null; }
+  const self = (st as unknown as { self?: Record<string, unknown> } | null)?.self;
+  if (!self) return {};
+  const loc = entry.locator.replace(/\/+$/, "");
+  const dir = loc.slice(0, loc.lastIndexOf("/"));
+  const digest = typeof self.digest === "string" ? self.digest : undefined;
+  const content = self.content_digest ? { content_digest: self.content_digest } : {};
+  if (self.packaging === "file_set" && Array.isArray(self.members)) {
+    const members = (self.members as Array<{ path: string; digest?: string; size_bytes?: number; role?: string }>)
+      .slice().sort((a, b) => (a.role === "entry_point" ? -1 : b.role === "entry_point" ? 1 : 0));
+    return {
+      packaging: "file_set", checksum: digest,
+      files: members.map((m) => ({ path: m.path, url: `${dir}/${m.path}`,
+        ...(m.digest ? { checksum: m.digest } : {}),
+        ...(typeof m.size_bytes === "number" ? { size_bytes: m.size_bytes } : {}),
+        role: m.role === "entry_point" ? "entry_point" as const : "member" as const })),
+    };
+  }
+  if (self.packaging === "directory")
+    return { packaging: "directory", checksum: digest, data: content,
+             files: [{ path: "tileset.json", url: `${loc}/tileset.json` }] };
+  if (self.packaging === "archive")
+    return { packaging: "archive", data: content,
+             files: [{ path: loc.split("/").pop() ?? loc, url: loc, ...(digest ? { checksum: digest } : {}),
+                       media_type: "application/vnd.maxar.archive.3tz+zip" }] };
+  return {};
+}
+
 /** «Promuovi a documento»: the DocumentNode and one reading per selection. */
-function promoteShelfEntry(entry: ShelfEntry, opts: { quiet?: boolean } = {}): string | null {
+async function promoteShelfEntry(entry: ShelfEntry, opts: { quiet?: boolean } = {}): Promise<string | null> {
   if (!store) return null;
   const st = store;
-  const r = promoteToDocument(st, entry);
+  const bytes = await promoteBytesOf(entry);
+  if (store !== st) return null;
+  const r = promoteToDocument(st, entry, bytes);
   updateShelfEntry(entry.id, { extra: { ...(entry.extra ?? {}), promoted_to: r.documentId } });
   const d = String(st.node(r.documentId)?.name ?? r.documentId);
   const msg = t("tropy.promotedMsg", { d, n: String(r.extractors.length) });
@@ -16993,13 +17123,13 @@ function openShelfFile(): void {
 
 /** Send a shelf resource to the Annotator — the gesture that makes the
  *  annotator usable: "select a resource" now has somewhere to select FROM. */
-function annotateShelfEntry(entry: ShelfEntry): void {
+async function annotateShelfEntry(entry: ShelfEntry): Promise<void> {
   // AUDIT N4 · «Annota» opens THE tracer — the Doc window — on this resource,
   // in the current space if it has a Doc window, else in Fonti. A resource that
   // is not a document yet becomes one first (the same «Promote to document»,
   // one undo step): a reading reads a document.
   if (!store) { toast(t("menu.noGraph")); return; }
-  const docId = documentOfShelfEntry(entry) ?? promoteShelfEntry(entry, { quiet: true });
+  const docId = documentOfShelfEntry(entry) ?? await promoteShelfEntry(entry, { quiet: true });
   if (!docId) return;
   // SPAZIO · the shelf asks the service window (or the space's Doc)
   const win = requestDoc(docId, { reading: null });
@@ -17652,8 +17782,15 @@ function renderStorageInto(host: StorageHost): void {
       else if (!listing.roots)
         body.appendChild(composeFolderButton(listing));
       // RISORSA-FILE · a TILESET folder: pack it into a .3tz beside it (desktop)
-      if (!listing.roots && listing.entries.some((e) => e.type === "file" && e.name === "tileset.json"))
+      if (!listing.roots && listing.entries.some((e) => e.type === "file" && e.name === "tileset.json")) {
         body.appendChild(pack3tzButton(listing.path));
+        if (!entry) {
+          const box = document.createElement("div");
+          box.className = "stamp-report-ask";
+          box.appendChild(openInSceneButton(listing.path));
+          body.appendChild(box);
+        }
+      }
     }
     // DTCEMS1 · il referto delle tre classi su QUESTA cartella, quando qualcuno
     // l'ha chiesto. Sopra l'elenco perché è una frase sull'elenco.
@@ -18584,7 +18721,20 @@ function composeButtons(entry: FsEntry, listing: FsListing): HTMLElement {
   one.onclick = () => openDraft([entry], listing);
   box.appendChild(one);
   box.appendChild(composeFolderButton(listing, true));
+  // CAMPAGNA · a tileset — its .3tz or its tileset.json — opens in the Scene
+  if (TREE_EXT.test(entry.name) || entry.name === "tileset.json") box.appendChild(openInSceneButton(entry.path));
   return box;
+}
+
+/** «Apri in Scena» for a tileset on disk (a .3tz, a tileset.json, a folder). */
+function openInSceneButton(path: string): HTMLButtonElement {
+  const b = document.createElement("button");
+  b.className = "ghost";
+  b.dataset.action = "open-in-scene";
+  b.textContent = t("scene.openHere");
+  b.title = t("scene.openHereHint");
+  b.onclick = () => { void openPathInScene(path); };
+  return b;
 }
 
 /**
@@ -18675,6 +18825,7 @@ function stampedBox(path: string, stamp: Stamp): HTMLElement {
   // content digest) is recognised as «to update», with the stamp it would be.
   // Nothing is rewritten: a stamp is not modified, a correction is a new act.
   if (TREE_EXT.test(path)) box.appendChild(treeStaleBox(path));
+  if (TREE_EXT.test(path) || /(^|\/)tileset\.json$/i.test(path)) box.appendChild(openInSceneButton(path));
 
   const forward = document.createElement("button");
   forward.className = "ghost";

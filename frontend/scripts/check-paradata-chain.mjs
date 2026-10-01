@@ -609,8 +609,12 @@ print(json.dumps(api.graph_to_emjson(g)))`);
   const r = tropy.promoteToDocument(st, entry);
   eq(undoDepth(st) - before, 1, "«Promuovi a documento» is one undo step");
   const d = N(st, r.documentId);
-  eq([d.node_type, d.name, d.data.tropy, d.data.url], ["document", "D.4", "tropy:item/2144", "/archivio/foto_USM101_1932.jpg"],
-     "…a DocumentNode D.<n>, the Tropy item kept, the file as its url");
+  eq([d.node_type, d.name, d.data.tropy, d.data.url, d.data.checksum], ["document", "D.4", "tropy:item/2144", undefined, undefined],
+     "…a DocumentNode D.<n>, the Tropy item kept, and NO url or checksum on it (CAMPAGNA, difetto 4)");
+  const link = st.doc.graph.edges.find((e) => e.source === r.documentId && e.edge_type === "has_linked_resource");
+  const res = link && N(st, link.target);
+  eq([res?.node_type, res?.id === r.resourceId, res?.data?.url], ["resource", true, "/archivio/foto_USM101_1932.jpg"],
+     "…the file is a RESOURCE of it (has_linked_resource), made by addResource in the implicit form");
   eq(r.extractors.map((x) => N(st, x).name), ["D.4.01", "D.4.02"],
      "…one extractor per selection, named by NAME1 from the document its region is on (not Temp<n>)");
   const g = chain.geometryOf(st.doc, r.extractors[0]);
