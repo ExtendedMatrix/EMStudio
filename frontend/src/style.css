@@ -8744,3 +8744,10 @@ input.storage-path:focus { border-color: var(--accent); background: var(--bg-pan
 .footer-chip.id-signature.id-attested {
   border-color: var(--accent, var(--border));
 }
+
+/* dev27 · the passage beside the resource it comes from, in the Doc window */
+.doc-passages { margin-top: 10px; display: grid; gap: 8px; }
+.doc-passage { border: 1px solid var(--border); border-radius: var(--radius); padding: 8px 10px; display: grid; gap: 4px; }
+.doc-passage-where { font-size: .78rem; color: var(--text-muted); }
+.doc-passage-text { font-family: var(--serif, Georgia, serif); line-height: 1.45; }
+.doc-passage-text[lang] { font-style: italic; }

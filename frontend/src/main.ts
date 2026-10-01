@@ -223,6 +223,7 @@ import type { ModelOptions } from "./embed3d-native";
 import { KEYMAP, filterKeymap, keysText } from "./keymap";
 import { ReadingFiles } from "./reading-files";
 import * as aiv from "./ai-validation";
+import { passagesOf } from "./passages";
 import * as trx from "./translation";
 import * as trui from "./translation-ui";
 import * as orcidIn from "./orcid-signin";
@@ -15529,12 +15530,72 @@ function renderDocViewInto(
     facing.dataset.docFacing = "1";
     facing.textContent = t("tr.fromDoc");
     facing.title = t("tr.fromDocTitle");
+    // dev27 · the facing text opens on the EXTRACTOR, with the passage it
+    // selected: the document is the work, and its own facing text is for its
+    // descriptive fields only (the language row above)
+    const passages0 = passagesOf(store.doc, current.id);
+    if (passages0.length) {
+      facing.textContent = t("tr.fromDocPassage", { n: String(passages0[0].extractor.name ?? "") });
+      facing.title = t("tr.fromDocPassageTitle");
+      facing.dataset.docFacing = passages0[0].extractor.id;
+    }
     facing.addEventListener("click", () => {
-      const first = trx.translationsOf(store!.doc, current.id, "description")[0];
-      trui.openFacingText(translationUi, current.id, "description", first?.id ?? null);
+      const target = passages0.length ? passages0[0].extractor.id : current.id;
+      const first = trx.translationsOf(store!.doc, target, "description")[0];
+      trui.openFacingText(translationUi, target, "description", first?.id ?? null);
     });
     langs.appendChild(facing);
     detail.appendChild(langs);
+  }
+
+  // dev27 · THE PASSAGES: each extractor that reads this document — directly,
+  // or through a page/box of one of its resources — with its words in their
+  // language, beside the resource (and the page) they come from
+  if (store) {
+    const ps = passagesOf(store.doc, current.id);
+    if (ps.length) {
+      const box = document.createElement("div");
+      box.className = "doc-passages";
+      box.dataset.docPassages = String(ps.length);
+      const h = document.createElement("div");
+      h.className = "doc-links";
+      h.textContent = t("doc.passages", { n: String(ps.length) });
+      box.appendChild(h);
+      for (const p of ps) {
+        const card = document.createElement("div");
+        card.className = "doc-passage";
+        card.dataset.passage = p.extractor.id;
+        const where = document.createElement("div");
+        where.className = "doc-passage-where";
+        const onName = p.on && p.on.id !== current.id ? String(p.on.name ?? p.on.id) : t("doc.passageHere");
+        const langs = p.on?.node_type === "resource" ? trx.contentLanguages(p.on) : [];
+        where.textContent = [String(p.extractor.name ?? p.extractor.id), onName,
+          p.page !== null ? t("doc.passagePage", { p: String(p.page) }) : (p.geometry === "passage" ? t("doc.passageText") : ""),
+          langs.length ? `(${langs.join(", ")})` : ""].filter(Boolean).join(" · ");
+        const text = document.createElement("div");
+        text.className = "doc-passage-text";
+        if (p.lang) text.lang = p.lang;
+        text.textContent = p.text ? `«${p.text}»${p.lang ? ` — ${p.lang}` : ""}` : t("doc.passageEmpty");
+        const open = document.createElement("button");
+        open.className = "insp-btn";
+        open.dataset.passageFacing = p.extractor.id;
+        open.textContent = t("tr.fromDoc");
+        open.addEventListener("click", () => {
+          const first = trx.translationsOf(store!.doc, p.extractor.id, "description")[0];
+          trui.openFacingText(translationUi, p.extractor.id, "description", first?.id ?? null);
+        });
+        const go = document.createElement("button");
+        go.className = "insp-btn";
+        go.textContent = t("doc.passageSelect");
+        go.addEventListener("click", () => select(p.extractor.id));
+        const btns = document.createElement("div");
+        btns.className = "insp-actions";
+        btns.append(open, go);
+        card.append(where, text, btns);
+        box.appendChild(card);
+      }
+      detail.appendChild(box);
+    }
   }
 
   // what hangs off this document — the reason a source is in the graph at all
@@ -21410,7 +21471,7 @@ function writeResourceNode(
   return addResource(storeGraph(doc), opts).id;
 }
 
-/** The bridge holds the bytes of a file on disk — the page may not read it. */
+/** The bridge holds the bytes of a file on disk — the page may not read it. *//** The bridge holds the bytes of a file on disk — the page may not read it. */
 async function bridgeBytes(path: string): Promise<ArrayBuffer> {
   const res = await fetch(await fsFileUrl(path));
   if (!res.ok) throw new Error(`bridge ${res.status}`);

@@ -5,6 +5,7 @@
 // `resourceSummary` is PURE (it reads a ResourceGraph and answers data), so
 // `check-resources.mjs` asks it directly; `renderResourcePanel` only draws it.
 import { t } from "./i18n";
+import { COMMON_LANGUAGES, contentLanguages, contentLanguagesValue, isLanguageTag } from "./translation";
 import { contentDigestOf, formsOf } from "./pack3tz";
 import type { DocumentStore } from "./model";
 import {
@@ -135,6 +136,9 @@ export function renderResourcePanel(store: DocumentStore, id: string, h: Resourc
   }
   // ── declared, not stamped ────────────────────────────────────────────────
   const d = (g.node(id)?.data ?? {}) as Record<string, unknown>;
+  // ── dev27 · the language of the CONTENT (data.lang on a resource: one tag or
+  //    a sorted list, «latino e italiano a fronte»), seen and declared here ──
+  panel.appendChild(contentLanguageSection(store, id));
   if (d.declared_only) {
     const line = el("div", "insp-hint res-declared", `◌ ${t("declared.notStamped")}`);
     line.dataset.declared = String(d.declared_kind ?? "");
@@ -307,4 +311,58 @@ export function askWhichPointersMove(g: ResourceGraph, name: string, pointers: P
     document.body.appendChild(back);
     (box.querySelector("button") as HTMLButtonElement | null)?.focus();
   });
+}
+
+
+/** dev27 · «Lingua del contenuto»: a pill per language of the file, × to take
+ *  one away, and a menu to add one. The language of the resource's own
+ *  description is another thing: it is in the cascade, this is not. */
+function contentLanguageSection(store: DocumentStore, id: string): HTMLElement {
+  const box = el("div", "res-langs");
+  box.dataset.resLangs = "1";
+  box.appendChild(el("h3", "insp-sect", t("res.contentLang")));
+  const now = contentLanguages(store.node(id));
+  const row = el("div", "tr-row");
+  const write = (tags: string[]): void => {
+    const n = store.node(id);
+    if (!n) return;
+    const data = { ...((n.data ?? {}) as Record<string, unknown>) };
+    const v = contentLanguagesValue(tags);
+    if (v === undefined) delete data.lang; else data.lang = v;
+    store.updateNode(id, { data } as Partial<import("./types").EmNode>);
+  };
+  for (const tag of now) {
+    const pill = el("button", "tr-pill orig", `${tag} ×`) as HTMLButtonElement;
+    pill.type = "button";
+    pill.dataset.resLang = tag;
+    pill.title = t("res.contentLangRemove", { lang: tag });
+    pill.addEventListener("click", () => write(now.filter((x) => x !== tag)));
+    row.appendChild(pill);
+  }
+  const sel = document.createElement("select");
+  sel.className = "ing-select";
+  sel.dataset.resLangAdd = "1";
+  sel.setAttribute("aria-label", t("res.contentLangAdd"));
+  const head = document.createElement("option");
+  head.value = ""; head.textContent = now.length ? t("res.contentLangAdd") : t("res.contentLangNone");
+  sel.appendChild(head);
+  for (const l of COMMON_LANGUAGES.filter((x) => !now.includes(x))) {
+    const o = document.createElement("option");
+    o.value = l; o.textContent = l;
+    sel.appendChild(o);
+  }
+  const other = document.createElement("option");
+  other.value = "__other__"; other.textContent = t("res.contentLangOther");
+  sel.appendChild(other);
+  sel.addEventListener("change", () => {
+    let v = sel.value;
+    if (v === "__other__") v = (window.prompt(t("res.contentLangOther")) ?? "").trim();
+    if (!v) return;
+    if (!isLanguageTag(v)) { window.alert(t("tr.err.lang")); return; }
+    write([...now, v]);
+  });
+  row.appendChild(sel);
+  box.appendChild(row);
+  box.appendChild(el("div", "insp-hint", t("res.contentLangHint")));
+  return box;
 }
