@@ -36,6 +36,34 @@ export interface Issue {
   /** CATENA · the same fix for MANY rows at once (the table's «Verifica tutti»):
    *  rows with the same `key` are fixed together, with the nodes they are about */
   bulk?: { key: string; label: (n: number) => string; run: (nodes: string[]) => void };
+  /** CAMPAGNA · the CORRECTION of the row, in its own column: a menu (an epoch,
+   *  a relation the datamodel admits between the two types), a field and a
+   *  button (a new name), or one button («It's me», «+ property»). Data, not
+   *  DOM: the table draws it, the caller's `run` writes through the store, so
+   *  every correction is one undo step. */
+  fix?: IssueFix;
+}
+
+export type IssueFix =
+  | { kind: "pick"; placeholder: string; options: Array<{ value: string; label: string; group?: string }>;
+      run: (value: string) => void }
+  | { kind: "rename"; value: string; label: string; run: (value: string) => void }
+  | { kind: "button"; label: string; run: () => void };
+
+/** What the corrections are made with — the caller binds them to the store. */
+export interface IssueFixers {
+  /** `unit ──has_first_epoch──▶ epoch` */
+  assignEpoch?: (unitId: string, epochId: string) => void;
+  /** the signing identity as the extractor's author; null when none is declared
+   *  (the button then opens the identity) */
+  itsMe?: { label: string; run: (extractorId: string) => void };
+  rename?: { label: string; run: (nodeId: string, name: string) => void };
+  /** a degraded edge → the relation chosen (`reverse`: the arrow turned) */
+  retype?: (edgeId: string, edgeType: string, reverse: boolean) => void;
+  /** «+ property» for a unit with none */
+  addProperty?: { label: string; run: (unitId: string) => void };
+  /** the label of a relation (its datamodel name, in the interface language) */
+  edgeLabel?: (edgeType: string) => string;
 }
 
 export interface IssueSources {
@@ -54,8 +82,15 @@ export interface IssueSources {
    *  coherence row — the window that checks the deltas and corrects them */
   checkChronology?: { label: string; run: () => void };
   laneOrderText?: string;
-  /** `documentDiagnostics` records, flattened */
-  diagnostics?: Array<{ kind: string; nodeId: string; message: string }>;
+  /** `documentDiagnostics` records, flattened — a degraded edge carries its
+   *  id, its target and the relations the datamodel admits (`candidates`) */
+  diagnostics?: Array<{ kind: string; nodeId: string; message: string; edgeId?: string; targetId?: string;
+                        candidates?: string[]; reverse?: string[]; origin?: string }>;
+  /** CAMPAGNA · the corrections, one per rule */
+  fixers?: IssueFixers;
+  /** CAMPAGNA · a node whose NAME is given by construction, not by a person (a
+   *  continuity node is «continuity_node» wherever it is): no «duplicate name» */
+  namedByConstruction?: (nodeType: string | undefined) => boolean;
   /** the socket check: is this edge type allowed between these node types? */
   edgeAllowed?: (edgeType: string, sourceType: string, targetType: string) => boolean | null;
   /** NAME1 statuses */
@@ -104,9 +139,29 @@ export function issues(src: IssueSources): Issue[] {
           push({ node: n.id, sev: "warn", rule: "chronology", txt: `${name(n.id)}: ${w}`,
                  ...(src.checkChronology ? { action: src.checkChronology } : {}) });
 
+  const fx = src.fixers ?? {};
+  const label = fx.edgeLabel ?? ((e: string) => e);
   // ── the datamodel: diagnostics already computed, and the socket check ─────
-  for (const d of src.diagnostics ?? [])
+  for (const d of src.diagnostics ?? []) {
+    // CAMPAGNA · a connection degraded to generic_connection: said with where it
+    // came from (the GraphML edge, when the em.json kept its id), and corrected
+    // with a relation the datamodel admits between the two types — either way
+    // round, since a yEd arrow is only a line style
+    if (d.edgeId && d.targetId && (d.candidates || d.reverse)) {
+      const options = [
+        ...(d.candidates ?? []).map((e) => ({ value: `${e}|`, label: label(e), group: t("issues.fixSameWay") })),
+        ...(d.reverse ?? []).map((e) => ({ value: `${e}|rev`, label: `← ${label(e)}`, group: t("issues.fixReverse") })),
+      ];
+      const edgeId = d.edgeId;
+      push({ node: d.nodeId, sev: "warn", rule: "datamodel",
+             txt: t(d.origin ? "issues.degradedFrom" : "issues.degraded",
+                    { s: name(d.nodeId), d: name(d.targetId), origin: d.origin ?? "" }),
+             ...(fx.retype && options.length ? { fix: { kind: "pick" as const, placeholder: t("issues.fixRelation"), options,
+                 run: (v: string) => { const [e, rev] = v.split("|"); fx.retype!(edgeId, e, rev === "rev"); } } } : {}) });
+      continue;
+    }
     push({ node: d.nodeId, sev: "warn", rule: "datamodel", txt: d.message });
+  }
   if (src.edgeAllowed)
     for (const e of doc.graph.edges ?? []) {
       const et = e.edge_type ?? "";
@@ -119,9 +174,36 @@ export function issues(src: IssueSources): Issue[] {
                txt: t("issues.socket", { s: name(s.id), e: et, d: name(d.id), dt: d.node_type }) });
     }
 
+  // ── CAMPAGNA · the same `type` and `name` twice: units, documents and
+  //    extractors. Properties are left out — they carry the same name BY
+  //    CONSTRUCTION («Material» 55 times in TempluMare). The fix is a new name.
+  const twins = new Map<string, string[]>();
+  for (const n of nodes) {
+    const nm = String(n.name ?? "").trim();
+    if (!nm || !(src.isUnit(n.node_type) || n.node_type === "document" || n.node_type === "extractor")) continue;
+    if (src.namedByConstruction?.(n.node_type)) continue;
+    const k = `${n.node_type}\u0000${nm}`;
+    (twins.get(k) ?? twins.set(k, []).get(k)!).push(n.id);
+  }
+  const dupNamed = new Set<string>();
+  for (const ids of twins.values()) {
+    if (ids.length < 2) continue;
+    for (const id of ids) {
+      dupNamed.add(id);
+      const n = byId.get(id)!;
+      push({ node: id, sev: "warn", rule: "dupname",
+             txt: t("issues.dupName", { n: name(id), k: String(ids.length - 1), type: n.node_type,
+                                        d: String(n.description ?? "").slice(0, 60) }),
+             ...(fx.rename ? { fix: { kind: "rename" as const, value: String(n.name ?? ""), label: fx.rename.label,
+                                      run: (v: string) => fx.rename!.run(id, v) } } : {}) });
+    }
+  }
+
   // ── naming (NAME1): a duplicate is a warning, a malformed name a hint ─────
   for (const [id, st] of src.names ?? []) {
     if (!byId.has(id) || st.status === "ok") continue;
+    // the same type AND name is said once, by the rule above (with its fix)
+    if (st.status === "dup" && dupNamed.has(id)) continue;
     // RIFINITURE · an extractor named before the rule: information, with the
     // rename one click away — never applied on its own
     if (st.outOfRule && st.status === "warn") {
@@ -144,16 +226,24 @@ export function issues(src: IssueSources): Issue[] {
     set.add(e.edge_type ?? "");
     hasOut.set(e.source, set);
   }
+  const epochs = nodes.filter((n) => n.node_type === "EpochNode")
+    .map((n) => ({ value: n.id, label: name(n.id) }));
   for (const n of nodes) {
     if (src.isUnit(n.node_type) && !hasOut.get(n.id)?.has("has_first_epoch"))
       push({ node: n.id, sev: "warn", rule: "epoch",
-             txt: t("issues.noEpoch", { n: name(n.id) }) });
+             txt: t("issues.noEpoch", { n: name(n.id) }),
+             ...(fx.assignEpoch && epochs.length ? { fix: { kind: "pick" as const, placeholder: t("issues.fixEpoch"),
+                 options: epochs, run: (v: string) => fx.assignEpoch!(n.id, v) } } : {}) });
     if (src.isUnit(n.node_type) && !hasOut.get(n.id)?.has("has_property"))
       push({ node: n.id, sev: "info", rule: "paradata",
-             txt: t("issues.noProps", { n: name(n.id) }) });
+             txt: t("issues.noProps", { n: name(n.id) }),
+             ...(fx.addProperty ? { fix: { kind: "button" as const, label: fx.addProperty.label,
+                                           run: () => fx.addProperty!.run(n.id) } } : {}) });
     if (n.node_type === "extractor" && !hasOut.get(n.id)?.has("has_author"))
       push({ node: n.id, sev: "info", rule: "author",
-             txt: t("issues.noAuthor", { n: name(n.id) }) });
+             txt: t("issues.noAuthor", { n: name(n.id) }),
+             ...(fx.itsMe ? { fix: { kind: "button" as const, label: fx.itsMe.label,
+                                     run: () => fx.itsMe!.run(n.id) } } : {}) });
   }
 
   // ── CATENA · reading from a unit: a hint when the unit lacks the property ──

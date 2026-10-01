@@ -103,9 +103,14 @@ export interface DiagnosticRecord {
   edgeId?: string;
   targetId?: string;
   /** For a degraded edge: the relations the datamodel WOULD allow between its
-   *  endpoints. Shown in the tooltip as information — re-typing an edge is the
-   *  author's decision, made in the source graph, not a click here. */
+   *  endpoints. Re-typing stays the author's decision: CAMPAGNA (1 ott, E.D.)
+   *  offers them as a MENU in the Warnings view — nothing is chosen for them,
+   *  and the choice is one undo step. */
   candidates?: string[];
+  /** …and the other way round (target → source) */
+  reverse?: string[];
+  /** the edge's id in the GraphML it came from, when the em.json kept it */
+  origin?: string;
 }
 
 export interface DiagnosticGroup {
@@ -190,6 +195,11 @@ export function documentDiagnostics(doc: EmDocument | null): DiagnosticGroup[] {
       edgeId: e.id,
       targetId: e.target,
       candidates: allowedEdgeTypes(s?.node_type, t?.node_type),
+      // CAMPAGNA · the other way round (a yEd arrow is only a line style), and
+      // where the edge came from when the em.json kept it (the GraphML edge id)
+      reverse: allowedEdgeTypes(t?.node_type, s?.node_type),
+      ...(typeof (e as { attributes?: Record<string, unknown> }).attributes?.original_edge_id === "string"
+        ? { origin: String((e as { attributes?: Record<string, unknown> }).attributes!.original_edge_id) } : {}),
       message:
         `${nameOf(e.source, s?.name)} → ${nameOf(e.target, t?.name)} — ` +
         `degraded to ${GENERIC_EDGE}`,

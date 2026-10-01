@@ -161,7 +161,7 @@ import {
   type ThemeMode,
 } from "./theme";
 import { buildNodeList, type NodeListCallbacks } from "./nodelist";
-import { issues as computeIssues, unitOfIssue, type Issue } from "./issues";
+import { issues as computeIssues, unitOfIssue, type Issue, type IssueFixers } from "./issues";
 import { CARD_VIEWS, COMPUTED_VIEWS, EMDB_SHEETS, type TableView, type ViewCtx } from "./table-views";
 import { iconUrlFor } from "./icons";
 import { buildOverview, type OverviewApi } from "./overview";
@@ -525,7 +525,7 @@ import {
   DECLARED_KINDS, landStep, parentLabel, type DeclaredKind, type DeclaredLevel,
 } from "./declared";
 import { adaptDraft } from "./views/stamps";
-import { dtcFamiliesOf, dtcKindsFor } from "./rules";
+import { ancestorsOf, dtcFamiliesOf, dtcKindsFor } from "./rules";
 import { digestOf, isStampPath, stampPathFor } from "./stamp";
 // DTCEMS3 · il verbale d'ingestione: niente entra nello store senza che si
 // sappia chi ce l'ha messo. La forma dell'atto sta qui; il verbale lo emette
@@ -7533,6 +7533,8 @@ function openAddMenu(
     reflowAll?: boolean;
     /** CATENA · the maniglia released in the void: only this direction */
     dir?: HandleDir;
+    /** CAMPAGNA · «+ property» of a warning: only the links to these node types */
+    onlyTypes?: string[];
   } = {},
 ): void {
   if (!store) {
@@ -7609,7 +7611,8 @@ function openAddMenu(
   const selId = selectedIds.size <= 1 ? selectedId : null;
   const sel = selId ? storeOfNode(selId)?.node(selId) : undefined;
   const otherName = sel ? String(sel.name ?? sel.id) : "";
-  const links = sel ? linkedItems(ctx, sel.node_type) : [];
+  const links = (sel ? linkedItems(ctx, sel.node_type) : [])
+    .filter((i) => !opts.onlyTypes || opts.onlyTypes.includes(i.nodeType));
   const linkEntry = (i: LinkedItem): AddMenuEntry =>
     addEntry(i, wp.x, wp.y, alt, linkedLabel(i, otherName), edgeLabel(i.edgeType), sel!.id);
   // COLLEGARE · «Collega a un esistente…», in the «Collegato a X» group: the
@@ -11214,11 +11217,71 @@ function refreshIssues(): void {
                 run: (ids) => verifyAiNodes(ids) },
     renameRule: { label: t("naming.renameRule"), bulkLabel: (n) => t("naming.renameRuleAll", { n: String(n) }),
                   run: (ids) => renameExtractorsByRule(ids) },
+    fixers: issueFixers(s),
+    // the continuity node's name is the importer's, the same for every one
+    namedByConstruction: (nt) => ancestorsOf(nt).includes("ContinuityNode"),
     t: (k, v) => t(k, v),
   });
   issueUnitOf = unitOfIssue(s.doc, isStratigraphicType, nodes);
   warnedNodes = new Set(currentIssues.filter((i) => i.sev === "warn" && i.node).map((i) => i.node));
   renderWarningsPill();
+}
+
+/** CAMPAGNA · the corrections of the Warnings view, one per rule, each one
+ *  undo step through the store (and a line in the log that names it). */
+function issueFixers(st: DocumentStore): IssueFixers {
+  const nm = (id: string) => String(st.node(id)?.name ?? id);
+  const done = (msg: string, ids: string[]) => { logInfo(msg, ids); toastUndo(msg, st); };
+  return {
+    edgeLabel: (e) => edgeLabel(e),
+    assignEpoch: (unit, epoch) => {
+      st.addEdge(unit, epoch, "has_first_epoch");
+      done(t("fix.epochDone", { n: nm(unit), e: nm(epoch) }), [unit, epoch]);
+    },
+    itsMe: {
+      label: identityForSigning() ? t("fix.itsMe") : t("fix.sayWho"),
+      run: (x) => {
+        const me = identityForSigning();
+        if (!me) { requireIdentity(); return; }
+        st.batch(() => {
+          const author = nauth.authorForIdentity(st, me);
+          if (!st.hasEdge(x, author, "has_author")) st.addEdge(x, author, "has_author");
+        });
+        done(t("fix.authorDone", { n: nm(x), who: me.label }), [x]);
+      },
+    },
+    rename: {
+      label: t("fix.rename"),
+      run: (id, name) => {
+        const v = name.trim();
+        if (!v || v === String(st.node(id)?.name ?? "")) return;
+        const was = nm(id);
+        st.updateNode(id, { name: v });
+        done(t("fix.renameDone", { a: was, b: v }), [id]);
+      },
+    },
+    retype: (edgeId, edgeType, reverse) => {
+      const e = st.liveEdges().find((x) => x.id === edgeId);
+      if (!e) return;
+      const [s0, d0] = reverse ? [e.target, e.source] : [e.source, e.target];
+      st.batch(() => {
+        st.deleteEdge(e);
+        st.addEdge(s0, d0, edgeType, (e as { attributes?: Record<string, unknown> }).attributes);
+      });
+      done(t("fix.retypeDone", { s: nm(s0), e: edgeLabel(edgeType), d: nm(d0) }), [s0, d0]);
+    },
+    addProperty: {
+      label: t("fix.addProperty"),
+      run: (unit) => {
+        select(unit);
+        const g = windowsOf().find((w) => w.type === "graph");
+        const area = g ? winAreas.get(g.id) : null;
+        const r = area?.getBoundingClientRect();
+        if (!g || !r) { toast(t("fix.noCanvas")); return; }
+        openAddMenu(g, r.left + r.width / 2, r.top + r.height / 3, { linkedOnly: true, onlyTypes: ["property"] });
+      },
+    },
+  };
 }
 
 /** «Ordina lane per data» — the chronology banner's one fix, now the `action`
@@ -24897,6 +24960,11 @@ initEmData({
   getStore: () => store,
   getCtx: tableCtx,
   runIssueAction: (id) => allIssues().find((i) => i.id === id)?.action?.run(),
+  runIssueFix: (id, value) => {
+    const f = allIssues().find((i) => i.id === id)?.fix;
+    if (!f) return;
+    if (f.kind === "button") f.run(); else f.run(value);
+  },
   runIssueBulk: (key, nodes) => allIssues().find((i) => i.bulk?.key === key)?.bulk?.run(nodes),
   // CURRENT-ELEMENT · the row lives on the window, not in the table module
   currentRow: () => currentRowId(),

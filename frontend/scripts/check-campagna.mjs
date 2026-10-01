@@ -46,6 +46,9 @@ const bundle = await esbuild.build({
       export { DocumentStore } from "./model";
       export { CALLS_OTHERS } from "./storage";
       export * as seal from "./seal";
+      export { issues } from "./issues";
+      export { ancestorsOf, allowedEdgeTypes, isStratigraphicType } from "./rules";
+      export { documentDiagnostics } from "./logpanel";
     `,
     resolveDir: SRC, loader: "ts",
   },
@@ -60,7 +63,8 @@ const bundle = await esbuild.build({
   }],
 });
 const M = await import("data:text/javascript;base64," + Buffer.from(bundle.outputFiles[0].text).toString("base64"));
-const { receipts, compose, tree, tropy, naming, DocumentStore, CALLS_OTHERS, seal } = M;
+const { receipts, compose, tree, tropy, naming, DocumentStore, CALLS_OTHERS, seal, issues, ancestorsOf,
+        allowedEdgeTypes, isStratigraphicType, documentDiagnostics } = M;
 
 // ── 1 · the receipt of a file set, judged by its members ───────────────────
 {
@@ -147,6 +151,64 @@ const { receipts, compose, tree, tropy, naming, DocumentStore, CALLS_OTHERS, sea
   ok(/3/.test(w.what) && /OB_PODIO_LOD1\.obj/.test(w.what) && /T_OB_PODIO_LOD1\.jpg/.test(w.what), "3 · in words: one resource, 3 files, its door and what it calls");
   eq([w.who, w.when, w.withWhat], ["Emanuel Demetrescu · 0000-0002-5065-7970", "2026-10-01", "Blender 5.2"], "3 · who, when, with what");
   ok(/OB_PODIO/.test(w.from), "3 · where it comes from");
+}
+
+// ── 4 · the warnings that correct ───────────────────────────────────────────
+{
+  const TEMPLU = JSON.parse(readFileSync(new URL("../testdata/TempluMare.em.json", import.meta.url), "utf8"));
+  const st = new DocumentStore(TEMPLU);
+  const tt = (k, v) => `${k}${v ? JSON.stringify(v) : ""}`;
+  const fixers = {
+    assignEpoch: (u, e) => st.addEdge(u, e, "has_first_epoch"),
+    itsMe: { label: "me", run: (x) => st.batch(() => { const a = "author:test"; if (!st.node(a)) st.addNode({ id: a, node_type: "author", name: "Prova" }); st.addEdge(x, a, "has_author"); }) },
+    rename: { label: "Rename", run: (id, v) => st.updateNode(id, { name: v }) },
+    retype: (edgeId, et, rev) => { const e = st.liveEdges().find((x) => x.id === edgeId); st.batch(() => { st.deleteEdge(e);
+      st.addEdge(rev ? e.target : e.source, rev ? e.source : e.target, et); }); },
+    addProperty: { label: "+", run: (u) => st.batch(() => { const p = st.newId(); st.addNode({ id: p, node_type: "property", name: "Material" }); st.addEdge(u, p, "has_property"); }) },
+  };
+  const run = () => issues({ doc: st.doc, nodes: st.liveNodes(), isUnit: isStratigraphicType, t: tt, fixers,
+    diagnostics: documentDiagnostics(st.doc).flatMap((g) => g.records),
+    namedByConstruction: (nt) => ancestorsOf(nt).includes("ContinuityNode") });
+  const by = (rule) => run().filter((i) => i.rule === rule);
+  const dups = by("dupname").map((i) => st.node(i.node).name).sort();
+  ok(["T25", "T26", "T44"].every((n) => dups.filter((x) => x === n).length === 2),
+     `12 · «nome doppio» finds T25, T26 and T44 twice each (${[...new Set(dups)].join(", ")})`);
+  ok(!run().some((i) => i.rule === "dupname" && st.node(i.node).node_type === "property"), "12 · …never a property (same name by construction)");
+  ok(!run().some((i) => i.rule === "dupname" && st.node(i.node).node_type === "BR"), "12 · …nor a continuity node (its name is the importer's)");
+  const degraded = by("datamodel").filter((i) => i.fix);
+  ok(degraded.length > 0 && degraded.every((i) => i.fix.kind === "pick" && i.fix.options.length > 0),
+     "12 · every generic_connection offers the relations the datamodel admits");
+  const one = degraded[0];
+  const e0 = st.liveEdges().find((e) => e.edge_type === "generic_connection" && e.source === one.node);
+  const want = [...allowedEdgeTypes(st.node(e0.source).node_type, st.node(e0.target).node_type).map((e) => `${e}|`),
+                ...allowedEdgeTypes(st.node(e0.target).node_type, st.node(e0.source).node_type).map((e) => `${e}|rev`)];
+  eq(one.fix.options.map((o) => o.value), want, "12 · …computed by allowedEdgeTypes, both ways round (never listed by hand)");
+  // one correction per rule: the warning goes, the undo brings it back
+  const cases = [
+    ["datamodel", (i) => i.fix.run(i.fix.options[0].value)],
+    ["dupname", (i) => i.fix.run(`${st.node(i.node).name}-b`)],
+    ["author", (i) => i.fix.run()],
+    ["paradata", (i) => i.fix.run()],
+  ];
+  for (const [rule, apply] of cases) {
+    const before = by(rule).length;
+    const i = by(rule).find((x) => x.fix);
+    apply(i);
+    const after = by(rule).length;
+    ok(after < before && !by(rule).some((x) => x.node === i.node && x.txt === i.txt), `12 · ${rule}: the fix removes the warning (${before} → ${after})`);
+    st.undo();
+    eq(by(rule).length, before, `12 · ${rule}: one undo brings it back`);
+  }
+  // epoch: a unit without has_first_epoch
+  const unit = st.liveNodes().find((n) => isStratigraphicType(n.node_type) && n.node_type !== "BR");
+  const he = st.liveEdges().find((e) => e.source === unit.id && e.edge_type === "has_first_epoch");
+  st.deleteEdge(he);
+  const ep = by("epoch").find((i) => i.node === unit.id);
+  ok(ep?.fix?.kind === "pick" && ep.fix.options.some((o) => o.value === he.target), "12 · epoch: the menu lists the epochs");
+  ep.fix.run(he.target);
+  ok(!by("epoch").some((i) => i.node === unit.id), "12 · epoch: assigning it removes the warning");
+  st.undo();
+  ok(by("epoch").some((i) => i.node === unit.id), "12 · epoch: one undo brings it back");
 }
 
 // ── the bridge of this check ────────────────────────────────────────────────

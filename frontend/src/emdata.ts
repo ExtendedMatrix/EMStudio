@@ -79,6 +79,8 @@ let setCurrentRow: (id: string | null) => void = () => {};
 let onRowPicked: (id: string) => void = () => {};
 /** a warning's one-click fix, run from the Warnings view */
 let runIssueAction: (issueId: string) => void = () => {};
+/** CAMPAGNA · a warning's CORRECTION (its `fix`), with the value chosen */
+let runIssueFix: (issueId: string, value: string) => void = () => {};
 let runIssueBulk: (key: string, nodes: string[]) => void = () => {};
 
 /**
@@ -230,6 +232,7 @@ export function initEmData(opts: {
   setCurrentRow?: (id: string | null) => void;
   onRowPicked?: (id: string) => void;
   runIssueAction?: (issueId: string) => void;
+  runIssueFix?: (issueId: string, value: string) => void;
   /** CATENA · the bulk fix of the rows on screen */
   runIssueBulk?: (key: string, nodes: string[]) => void;
   /** AUDIT N11 · a row went: say which, and give it back («Annulla») */
@@ -248,6 +251,7 @@ export function initEmData(opts: {
   if (opts.setCurrentRow) setCurrentRow = opts.setCurrentRow;
   if (opts.onRowPicked) onRowPicked = opts.onRowPicked;
   if (opts.runIssueAction) runIssueAction = opts.runIssueAction;
+  if (opts.runIssueFix) runIssueFix = opts.runIssueFix;
   if (opts.runIssueBulk) runIssueBulk = opts.runIssueBulk;
   // MICRO-cronologia · an answer from the bridge redraws the tables
   onChronologyUpdate(() => renderEmData());
@@ -655,6 +659,26 @@ function docCardsHtml(cs: ReturnType<typeof docCards>): string {
       `</div>`).join("") + `</div></div>`;
 }
 
+/** CAMPAGNA · the correction of one warning, as the issue describes it: a menu,
+ *  a field with its button, or one button. Its controls never pick the row. */
+function fixHtml(i: ViewCtx["issues"][number]): string {
+  const f = i.fix;
+  if (!f) return "";
+  const id = escapeAttr(i.id);
+  if (f.kind === "pick") {
+    const groups = [...new Set(f.options.map((o) => o.group ?? ""))];
+    const opt = (o: { value: string; label: string }) => `<option value="${escapeAttr(o.value)}">${escapeHtml(o.label)}</option>`;
+    const body = groups.length > 1 || groups[0]
+      ? groups.map((g) => `<optgroup label="${escapeAttr(g)}">${f.options.filter((o) => (o.group ?? "") === g).map(opt).join("")}</optgroup>`).join("")
+      : f.options.map(opt).join("");
+    return `<span class="wfix"><select data-issue-fix="${id}"><option value="">${escapeHtml(f.placeholder)}</option>${body}</select></span>`;
+  }
+  if (f.kind === "rename")
+    return `<span class="wfix"><input data-issue-fixin="${id}" value="${escapeAttr(f.value)}" aria-label="${escapeAttr(t("issues.fixNewName"))}">` +
+      `<button class="tv-act" type="button" data-issue-fixbtn="${id}">${escapeHtml(f.label)}</button></span>`;
+  return `<span class="wfix"><button class="tv-act" type="button" data-issue-fixbtn="${id}">${escapeHtml(f.label)}</button></span>`;
+}
+
 function issuesTableHtml(rows: ViewCtx["issues"], ctx: ViewCtx, ix: ReturnType<typeof indexOf>): string {
   void ctx;
   const ico = (s: string): string => (s === "warn" ? "▲" : "●");
@@ -669,14 +693,14 @@ function issuesTableHtml(rows: ViewCtx["issues"], ctx: ViewCtx, ix: ReturnType<t
   return `<div class="tv-pad"><p class="tv-lead">${escapeHtml(t("issues.lead"))} ${bulkBtns}</p>` +
     `<table class="emdata-table tv-table"><thead><tr><th>${escapeHtml(t("table.fx.sev"))}</th>` +
     `<th>${escapeHtml(t("table.fx.rule"))}</th><th>${escapeHtml(t("table.col.node"))}</th>` +
-    `<th>${escapeHtml(t("table.col.msg"))}</th><th></th></tr></thead><tbody>` +
+    `<th>${escapeHtml(t("table.col.msg"))}</th><th>${escapeHtml(t("issues.fixCol"))}</th></tr></thead><tbody>` +
     (rows.length ? rows.map((i) =>
-      `<tr${i.node ? ` data-id="${escapeAttr(i.node)}"` : ""}>` +
+      `<tr class="tv-issue"${i.node ? ` data-id="${escapeAttr(i.node)}"` : ""} data-rule="${escapeAttr(i.rule)}">` +
       `<td><span class="sevtag ${i.sev}">${ico(i.sev)} ${escapeHtml(t(`issues.sev.${i.sev}`))}</span></td>` +
-      `<td class="tv-num">${escapeHtml(i.rule)}</td>` +
+      `<td class="tv-num">${escapeHtml(t(`issues.rule.${i.rule}`) === `issues.rule.${i.rule}` ? i.rule : t(`issues.rule.${i.rule}`))}</td>` +
       `<td class="tv-id">${i.node ? escapeHtml(nm(ix.byId.get(i.node))) : "—"}</td>` +
       `<td>${escapeHtml(i.txt)}</td>` +
-      `<td>${i.action ? `<button class="tv-act" type="button" data-issue-act="${escapeAttr(i.id)}">${escapeHtml(i.action.label)}</button>` : ""}</td></tr>`).join("")
+      `<td class="tv-fix">${i.action ? `<button class="tv-act" type="button" data-issue-act="${escapeAttr(i.id)}">${escapeHtml(i.action.label)}</button>` : ""}${fixHtml(i)}</td></tr>`).join("")
       : `<tr><td colspan="5" class="tv-ok">${escapeHtml(t("issues.none"))}</td></tr>`) +
     `</tbody></table></div>`;
 }
@@ -721,6 +745,24 @@ function wireBody(host: EmDataHost, store: DocumentStore, st: TableState): void 
     }));
   body.querySelectorAll<HTMLButtonElement>("[data-issue-act]").forEach((b) =>
     b.addEventListener("click", (e) => { e.stopPropagation(); runIssueAction(b.dataset.issueAct!); }));
+  // CAMPAGNA · the Fix column: its controls are not a pick of the row
+  body.querySelectorAll<HTMLElement>(".wfix").forEach((el) => {
+    el.addEventListener("click", (e) => e.stopPropagation());
+    el.addEventListener("pointerdown", (e) => e.stopPropagation());
+  });
+  body.querySelectorAll<HTMLSelectElement>("select[data-issue-fix]").forEach((sel) =>
+    sel.addEventListener("change", () => { if (sel.value) runIssueFix(sel.dataset.issueFix!, sel.value); }));
+  body.querySelectorAll<HTMLButtonElement>("[data-issue-fixbtn]").forEach((b) =>
+    b.addEventListener("click", () => {
+      const id = b.dataset.issueFixbtn!;
+      const input = body.querySelector<HTMLInputElement>(`input[data-issue-fixin="${CSS.escape(id)}"]`);
+      runIssueFix(id, input ? input.value : "");
+    }));
+  body.querySelectorAll<HTMLInputElement>("input[data-issue-fixin]").forEach((inp) =>
+    inp.addEventListener("keydown", (e) => {
+      e.stopPropagation();
+      if (e.key === "Enter") { e.preventDefault(); runIssueFix(inp.dataset.issueFixin!, inp.value); }
+    }));
   body.querySelectorAll<HTMLButtonElement>("[data-issue-bulk]").forEach((b) =>
     b.addEventListener("click", (e) => {
       e.stopPropagation();
