@@ -209,6 +209,55 @@ eq(M.textDigest(LATIN), G["digest of the Latin"], "1 · the digest of the Latin"
      [{ node: en, what: ["ai"], orcid: ORCID, at: AT }], "5 · what, by whom (ORCID), when");
 }
 
+// ── dev27 · E5 · data.lang at birth (s3Dgraphy rule A1) ─────────────────────
+//
+// A node with free text born in EMStudio — the store, an import's volatile
+// nodes, a peer's CRDT add_node — carries data.lang: the study's at that
+// moment (or the one it already declares), also when equal to the study's.
+// Unknown → nothing. Resources (their data.lang is their content's),
+// translations, the graph-self node and places are not stamped.
+{
+  const C = await load(`export * from "./crdt";`);
+  const doc = () => ({ graph: { graph_id: "g5", name: "Nascita", data: {}, nodes: [
+    { id: "root", node_type: "graph", name: "Graph", description: "", data: { language: "it" } }], edges: [] } });
+  const store = new M.DocumentStore(doc());
+  const us = store.addNode({ id: "us1", node_type: "US", name: "US 1", description: "strato", data: {} });
+  eq(store.node(us.id).data.lang, "it", "E5 · a node born in an it study is born it");
+  const res = store.addNode({ id: "r1", node_type: "resource", name: "scan.pdf", description: "", data: { url: "scan.pdf" } });
+  ok(!("lang" in store.node(res.id).data), "E5 · a resource is not born in the study's language (its data.lang is its content's)");
+  const own = store.addNode({ id: "us2", node_type: "US", name: "US 2", description: "layer", data: { lang: "en" } });
+  eq(store.node(own.id).data.lang, "en", "E5 · a node that declares its language keeps it");
+  store.updateNode("root", { data: { language: "en" } });
+  const us3 = store.addNode({ id: "us3", node_type: "US", name: "US 3", description: "collapse", data: {} });
+  eq([store.node("us1").data.lang, store.node(us3.id).data.lang], ["it", "en"],
+     "E5 · the study becomes en: what was born it stays it, the new one is born en");
+  const bare = new M.DocumentStore({ graph: { graph_id: "g6", name: "x", data: {}, nodes: [], edges: [] } });
+  const u = bare.addNode({ id: "u", node_type: "US", name: "U", description: "", data: {} });
+  ok(!("lang" in bare.node(u.id).data), "E5 · no study language, none declared: nothing is invented");
+  // an import's volatile nodes
+  store.mapVolatile("aux1", [{ id: "v1", node_type: "document", name: "D.01", description: "pianta", data: {} },
+                             { id: "v2", node_type: "document", name: "D.02", description: "planta", data: { lang: "es" } }], []);
+  eq([store.node("v1").data.lang, store.node("v2").data.lang], ["en", "es"],
+     "E5 · an import's nodes are born in the study's language, or keep the source's");
+  // a peer's add_node (crdt.ts = crdt.py)
+  const section = { nodes: [{ id: "root", node_type: "graph", name: "Graph", data: { language: "la" } }], edges: [] };
+  C.applyOp(section, C.makeOp("add_node", { ts: AT, author: ORCID, node: { id: "p1", node_type: "US", name: "P 1" } }));
+  eq(section.nodes.find((n) => n.id === "p1").data.lang, "la", "E5 · the CRDT: a new node is born in the section's study language");
+  C.applyOp(section, C.makeOp("add_node", { ts: AT, node: { id: "p2", node_type: "translation", name: "t" } }));
+  ok(!("lang" in (section.nodes.find((n) => n.id === "p2").data ?? {})), "E5 · …a translation is not");
+  section.nodes.push({ id: "p3", node_type: "US", name: "P 3", data: { created_at: AT } });
+  C.applyOp(section, C.makeOp("add_node", { ts: "2026-10-02T00:00:00Z", node: { id: "p3", node_type: "US", name: "P 3" } }));
+  ok(!("lang" in section.nodes.find((n) => n.id === "p3").data), "E5 · …and a merge never writes it");
+  // the access mode of an op (crdt.py parity)
+  C.applyOp(section, C.makeOp("add_node", { ts: AT, author: ORCID, auth: { mode: "node_password", attested_by: "fcn" },
+    node: { id: "p4", node_type: "US", name: "P 4" } }));
+  eq(section.nodes.find((n) => n.id === "p4").data.created_auth, { mode: "node_password", attested_by: "fcn" },
+     "E1 · an op's access mode is written beside its hand");
+  const bad = C.applyOp(section, C.makeOp("update_field", { ts: "2026-10-03T00:00:00Z", author: ORCID, auth: "password",
+    node_id: "p4", field: "description", value: "x" }));
+  ok(!bad.applied && !section.nodes.find((n) => n.id === "p4").description, "E1 · an invalid access mode refuses the op");
+}
+
 if (fails.length) {
   console.error(`translations: ${fails.length} of ${checks} checks FAILED`);
   for (const f of fails) console.error("  ✗ " + f);

@@ -515,6 +515,26 @@ function opClock(op: CrdtOp): Clock {
   return clockOf(op.ts as string, op.author as string);
 }
 
+// dev27 · the birth language, as s3Dgraphy's crdt reads it (no import of
+// translation.ts: this module stays the pure mirror of crdt.py)
+const BIRTH_EXEMPT = new Set(["resource", "resource_file", "translation", "graph",
+  "annotation_region", "semantic_shape", "geo_position"]);
+const TAG = /^[A-Za-z]{2,3}(?:-[A-Za-z]{4})?(?:-(?:[A-Za-z]{2}|[0-9]{3}))?(?:-(?:[A-Za-z0-9]{5,8}|[0-9][A-Za-z0-9]{3}))*$/;
+const isTag = (v: unknown): v is string => typeof v === "string" && TAG.test(v.trim());
+
+/** The study's working language as an em.json section declares it: the
+ *  graph-self node's `data.language`, else the section's own. */
+export function sectionLanguage(section: Section): string | null {
+  for (const n of ((section.nodes ?? []) as Payload[])) {
+    if ((n.node_type ?? n.type) === "graph") {
+      const v = ((n.data ?? {}) as Record<string, unknown>).language;
+      if (isTag(v)) return v.trim();
+    }
+  }
+  const v = ((section as Record<string, unknown>).data as Record<string, unknown> | undefined)?.language;
+  return isTag(v) ? v.trim() : null;
+}
+
 /** dev27 · an op's access mode (`auth`: "orcid" or {mode, attested_by}),
  *  normalised as s3Dgraphy `editorial.normalize_auth` does; null for none;
  *  `false` for one that is not valid (the op is refused). */
@@ -582,6 +602,13 @@ export function applyOp(section: Section, op: CrdtOp): OpResult {
     stampPayload(payload, clock, true, auth);
     const existing = byId.get(nodeId);
     if (!existing) {
+      // dev27 · rule A1 (s3Dgraphy crdt `_section_language`): a node born here
+      // carries the language it is born in — the op's own, else the study's as
+      // this section declares it, else none; a merge never rewrites it
+      const lang = sectionLanguage(section);
+      const type = String(payload.node_type ?? payload.type ?? "");
+      const data = (payload.data ??= {}) as Record<string, unknown>;
+      if (lang && !BIRTH_EXEMPT.has(type) && !isTag(data.lang)) data.lang = lang;
       nodes.push(payload);
       return { applied: true, reason: "added", nodeId, fields: [] };
     }

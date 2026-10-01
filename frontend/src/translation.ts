@@ -103,6 +103,17 @@ export function contentLanguagesValue(tags: string[]): string | string[] | undef
   return uniq.length === 0 ? undefined : uniq.length === 1 ? uniq[0] : uniq;
 }
 
+/** dev27 · rule A1: the language a node is BORN in — the declared one, else the
+ *  study's at this moment, else null (never invented); null for the types that
+ *  are not texts. */
+export function birthLanguage(doc: EmDocument | null | undefined, n: EmNode,
+                              declared?: string | null): string | null {
+  if (NOT_TEXT_LANGUAGE_TYPES.has(String(n.node_type))) return null;
+  if (isLanguageTag(dataOf(n)[NODE_LANG_KEY])) return null;
+  if (declared && isLanguageTag(declared)) return declared.trim();
+  return doc ? workingLanguage(doc) : null;
+}
+
 /** The graph-self node (node_type `graph`). */
 export function graphSelf(doc: EmDocument): EmNode | undefined {
   const nt = nodeTypeForClass("GraphNode") ?? "graph";

@@ -17,6 +17,7 @@ import { edgeTypeFor, nodeTypeForClass, planUniformSpellings } from "./rules";
 import type { SpellingPlan } from "./rules";
 import { VOLATILE_KEY } from "./volatile";
 import { currentIdentity, signatureAuth } from "./identity";
+import { birthLanguage } from "./translation";
 import { resolveNodePair } from "./container";
 import type { Conflict } from "./container";
 import {
@@ -624,6 +625,10 @@ export class DocumentStore {
       if (how) data.created_auth = how;
     }
     if (!data.created_at) data.created_at = new Date().toISOString().replace(/\.\d+Z$/, "Z");
+    // dev27 · rule A1: a node is BORN in a language — the study's at this
+    // moment when it says none — and keeps it when the study's changes
+    const lang = birthLanguage(this.doc, node);
+    if (lang) data.lang = lang;
   }
 
   /** Stamp an edit. Overwrites — this is a stamp, not a log. The access mode
@@ -3050,6 +3055,10 @@ export class DocumentStore {
     for (const n of nodes) {
       if (have.has(n.id)) continue;
       (n.data ??= {} as Record<string, unknown>)[VOLATILE_KEY] = auxId;
+      // dev27 · rule A1: what an import makes is BORN in this study — the
+      // language the source declared (already on the node), else the study's
+      const lang = birthLanguage(this.doc, n);
+      if (lang) (n.data as Record<string, unknown>).lang = lang;
       this.doc.graph.nodes.push(n);
       have.add(n.id);
       added++;
