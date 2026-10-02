@@ -2269,25 +2269,7 @@ function renderInspectorInto(host: HTMLElement): void {
           toast(t("tst.movedTo", { name: String(store!.node(epochId)?.name ?? t("tst.anEpoch")) }));
         });
       },
-      onTogglePin: (nodeId) => {
-        const pinning = !store!.isPinned(nodeId);
-        // freeze the node's CURRENT scene position so the engine has an exact
-        // Rect to hold, then pin.
-        if (pinning) {
-          const sn = scenes.matrix?.byId.get(nodeId);
-          if (sn) {
-            const layout = (store!.doc.layout ??= {});
-            (layout.positions ??= {})[nodeId] = {
-              x: sn.x,
-              y: sn.y,
-              w: sn.w,
-              h: sn.h,
-            };
-          }
-        }
-        store!.setPinned([nodeId], pinning);
-        toast(pinning ? "position locked" : "position unlocked");
-      },
+      onTogglePin: (nodeId) => togglePin([nodeId]),
       isPinned: (nodeId) => store!.isPinned(nodeId),
       resolveAuthority: resolveAuthority,
       // «does a twin already exist for this?» — asked of the Catalog's twin
@@ -24693,6 +24675,21 @@ btnLayout.addEventListener("click", (ev) => {
   void layoutAll((ev as MouseEvent).altKey);
 });
 
+/** Pin (or release) nodes where they are drawn: the engine gets an exact Rect
+ *  to hold (`layout.rs` pinned), one undo step. DEV30 U3: from the node's menu. */
+function togglePin(ids: string[], pinning = !ids.every((id) => store!.isPinned(id))): void {
+  if (!store) return;
+  if (pinning) {
+    const layout = (store.doc.layout ??= {});
+    for (const id of ids) {
+      const sn = scenes.matrix?.byId.get(id);
+      if (sn) (layout.positions ??= {})[id] = { x: sn.x, y: sn.y, w: sn.w, h: sn.h };
+    }
+  }
+  store.setPinned(ids, pinning);
+  toast(t(pinning ? "ctx.positionLocked" : "ctx.positionUnlocked", { n: String(ids.length) }));
+}
+
 /**
  * SHIFT-A fase 3 · «Riordina questo nodo» / «Riordina la corsia»: forget the
  * manual position of `ids` and let the layout put them back — ONE From-Sketch
@@ -26094,6 +26091,16 @@ function showContextMenu(clientX: number, clientY: number, win?: Win): void {
     });
   }
   item(t("ctx.reflowNode"), () => void reflowNodes(ids));
+  // DEV30 U3 · «Lock position» lives where the layout is made. Measured on San
+  // Pietro (dev.15): USM05 dragged 30 px and pinned stays at 30 through Layout,
+  // unpinned it goes back to 0 — the lock works, for the nodes the Matrix lets
+  // you place. A DOCUMENT is not one: its master is drawn by instancing and does
+  // not move (D.02: 444.5 → 444.5 with or without the lock), so it is not offered.
+  const placeable = ids.filter((id) => store!.node(id)?.node_type !== "document");
+  if (view === "matrix" && !inContext() && placeable.length) {
+    const allPinned = placeable.every((id) => store!.isPinned(id));
+    item(t(allPinned ? "ctx.unlockPosition" : "ctx.lockPosition"), () => togglePin(placeable, !allPinned));
+  }
   const mm = buildMembership(store.doc);
   const members = [...new Set(ids.flatMap((id) => mm.childrenOf.get(id) ?? []))];
   if (members.length)

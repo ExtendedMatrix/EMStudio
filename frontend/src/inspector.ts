@@ -381,22 +381,9 @@ export function renderInspector(
     renderQualeObject(root, store, node, cb);
   }
 
-  // position lock: pin/unpin so the layout engine can't move this node.
-  {
-    const pinned = cb.isPinned(nodeId);
-    const bar = el("div", "insp-actions");
-    const lock = el(
-      "button",
-      "insp-btn",
-      pinned ? "🔒 Unlock position" : "🔓 Lock position",
-    ) as HTMLButtonElement;
-    lock.title = pinned
-      ? "Let the layout engine move this node again"
-      : "Freeze this node's position (immovable by Layout)";
-    lock.addEventListener("click", () => cb.onTogglePin(nodeId));
-    bar.appendChild(lock);
-    root.appendChild(bar);
-  }
+  // DEV30 U3 · «Lock position» moved to the node's menu on the canvas, where
+  // the layout is made (`togglePin` in main.ts): in the Inspector it read as a
+  // property of the document, where it changed nothing.
 
   // epoch controls: reorder its swimlane + temporal bounds (start/end).
   // Bounds are EpochNode attributes (CIDOC P82a/P82b); the labels borrow the

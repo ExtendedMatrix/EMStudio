@@ -2328,6 +2328,10 @@ const EN: Dict = {
   // ── SHIFT-A fase 3 · the canvas context menus ──
   "ctx.addLinked": "Add linked",
   "ctx.reflowNode": "Reorder this node",
+  "ctx.positionUnlocked": "Position unlocked ({n})",
+  "ctx.positionLocked": "Position locked ({n})",
+  "ctx.unlockPosition": "Unlock position",
+  "ctx.lockPosition": "Lock position (Layout keeps it here)",
   "ctx.selectMembers": "Select the members ({n})",
   "ctx.delete": "Delete",
   "ctx.reflowLane": "Reorder the lane",
@@ -4921,6 +4925,10 @@ const IT: Dict = {
   // ── SHIFT-A fase 3 · the canvas context menus ──
   "ctx.addLinked": "Aggiungi collegato",
   "ctx.reflowNode": "Riordina questo nodo",
+  "ctx.positionUnlocked": "Posizione sbloccata ({n})",
+  "ctx.positionLocked": "Posizione bloccata ({n})",
+  "ctx.unlockPosition": "Sblocca la posizione",
+  "ctx.lockPosition": "Blocca la posizione (il Layout la tiene qui)",
   "ctx.selectMembers": "Seleziona i membri ({n})",
   "ctx.delete": "Elimina",
   "ctx.reflowLane": "Riordina la corsia",
@@ -6794,6 +6802,10 @@ const DE: Dict = {
   // ── SHIFT-A fase 3 · the canvas context menus ──
   "ctx.addLinked": "Verknüpft hinzufügen",
   "ctx.reflowNode": "Diesen Knoten neu anordnen",
+  "ctx.positionUnlocked": "Position entsperrt ({n})",
+  "ctx.positionLocked": "Position gesperrt ({n})",
+  "ctx.unlockPosition": "Position entsperren",
+  "ctx.lockPosition": "Position sperren (das Layout behält sie)",
   "ctx.delete": "Löschen",
   "ctx.reflowLane": "Bahn neu anordnen",
   "ctx.epochAbove": "Neue Epoche darüber",
