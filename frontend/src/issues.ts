@@ -341,8 +341,6 @@ export function issues(src: IssueSources): Issue[] {
     push({ node: "", sev: "info", rule: "language", txt: t("issues.untagged", { k: String(u.count) }),
            fix: { kind: "pick", placeholder: u.placeholder, options: u.options, run: u.run } });
   }
-  for (const w of src.library ?? [])
-    push({ node: w.node, sev: "warn", rule: "library", txt: w.txt });
   if (src.recognised && src.recognised.count > 0) {
     const r = src.recognised;
     push({ node: "", sev: "info", rule: "language", txt: t("issues.langRecognised", { k: String(r.count), s: r.summary }),
@@ -362,6 +360,11 @@ export function issues(src: IssueSources): Issue[] {
                     txt: t("issues.aiProse", { n: name(n.id), ch: String(c.title ?? ""), k: String(k) }) });
     });
   }
+  // DEV30 D6 · the library's rows LAST: they arrive later (the bridge answers
+  // after the first render), and pushed earlier they would renumber the ids
+  // of the rows already on screen — a Fix button then names a row that moved
+  for (const w of src.library ?? [])
+    push({ node: w.node, sev: "warn", rule: "library", txt: w.txt });
   return out;
 }
 
