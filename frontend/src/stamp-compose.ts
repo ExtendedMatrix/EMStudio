@@ -95,6 +95,12 @@ export interface Draft {
   /** DEV29 B5 · «from where?» of a retrieval (a download): a DOI or a URL,
    *  written in the stamp as `how.acquisition.retrieved_from` */
   source?: string;
+  /** DEV30 D1 · the kind is of the `retrieval` family (the vocabulary's, set by
+   *  the form): «from where?» is then REQUIRED (E.D., 2 Oct 2026). The FORMAT
+   *  keeps it optional — `validate` warns «download without origin» — so an old
+   *  stamp stays readable; it is the compositor that does not write a new one
+   *  without it. */
+  retrieval?: boolean;
   /** i fatti rappresentativi del lotto — macchina, obiettivo, cartella —
    *  che appartengono all'EVENTO e non si ripetono su quattrocento file */
   campaignMetadata: Record<string, string>;
@@ -235,8 +241,11 @@ export function requiredFields(draft: Draft): StampField[] {
   // with 11 process_ids; the drone lot of 29 Sep, named, had one)
   // (a declared chain that says {name}/{base} is one act PER output: no name
   // for the lot, each act is its own — `emitDraft`)
-  return draft.outputs.length > 1 && !chainIsTemplate(draft.declared)
+  const withName: StampField[] = draft.outputs.length > 1 && !chainIsTemplate(draft.declared)
     ? [...base.slice(0, 1), "campaign", ...base.slice(1)] : base;
+  // DEV30 D1 · a retrieval says where from, right after its kind
+  return draft.origin && draft.retrieval
+    ? [withName[0], "source", ...withName.slice(1)] : withName;
 }
 
 /** DEV29 B5 · a DOI or a URL as the stamp writes it: a DOI (`10.5281/…`,
@@ -266,14 +275,18 @@ export function doiFromName(name: string): string | null {
   return m ? `10.5281/zenodo.${m[1]}` : null;
 }
 
-/** DEV29 B5 · the act's name the compositor PROPOSES for N outputs: «<kind>
- *  <source>» when the source is known (`Download 10.5281/zenodo.7463211`), else
- *  «<kind> · <folder>». Empty for one output (one file needs no act's name). */
+/** DEV29 B5 · the act's name the compositor PROPOSES for N outputs.
+ *  DEV30 D2 (E.D., 2 Oct 2026) · «<kind> <source>» for a retrieval
+ *  (`Download 10.5281/zenodo.7463211`); «<technique> <origin>» for the other
+ *  kinds — the technique written in the form, else the kind; the origin is
+ *  where the lot comes from: its source when known, else its folder. Empty for
+ *  one output (one file needs no act's name, and it stays optional). */
 export function proposeActName(draft: Draft, kindLabel: string, folder: string): string {
   if (draft.outputs.length <= 1 || !kindLabel) return "";
   const src = normalizeSource(draft.source ?? "");
-  if (src && "uri" in src) return `${kindLabel} ${sourceShort(src.uri)}`;
-  return folder ? `${kindLabel} · ${folder}` : kindLabel;
+  const origin = src && "uri" in src ? sourceShort(src.uri) : folder;
+  const what = draft.retrieval ? kindLabel : (draft.technique.trim() || kindLabel);
+  return origin ? `${what} ${origin}` : what;
 }
 
 /** The fields still missing, in the form's order. */
@@ -288,7 +301,7 @@ export function missingFields(draft: Draft): StampField[] {
       case "operator": return !draft.operator.id.trim() && !draft.operator.label.trim();
       case "at": return !draft.at.trim();
       case "campaign": return !draft.campaign.trim();
-      case "source": return false;
+      case "source": { const n = normalizeSource(draft.source ?? ""); return !n || "error" in n; }
     }
   });
 }

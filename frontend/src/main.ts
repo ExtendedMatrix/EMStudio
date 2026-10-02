@@ -19464,6 +19464,10 @@ function stampComposeBox(win: Win, listing: FsListing): HTMLElement {
     renderStorage();
     redrawDraftPicture();
   };
+  // DEV30 D1 · for a retrieval «from where?» is REQUIRED (E.D., 2 Oct), and
+  // filled when it can be read: the DOI a Zenodo folder carries in its name,
+  // else the one address the stamps already in this folder declare
+  draft.retrieval = retrieval;
   select.onblur = () => checkField(box, "kind");
   fields.appendChild(wrap(t("stamp2.kind"), select, "kind"));
   if (draft.kindWhy && draft.kindWhy.kind === draft.kind) {
@@ -19484,7 +19488,8 @@ function stampComposeBox(win: Win, listing: FsListing): HTMLElement {
   const folderName = listing.path.split("/").filter(Boolean).pop() ?? "";
   const retrieval = draft.origin && !!draft.kind && dtcKindFamily(draft.kind, "acquisition") === "retrieval";
   if (retrieval) {
-    if (draft.source == null) draft.source = doiFromName(folderName) ?? "";
+    const declared = [...(folderCover(listing).retrieved ?? [])];
+    if (draft.source == null) draft.source = doiFromName(folderName) ?? (declared.length === 1 ? declared[0] : "");
     const srcInput = text("source", draft.source, t("stamp2.sourceEg"), (v) => {
       draft.source = v;
       const n = normalizeSource(v);
@@ -19626,15 +19631,8 @@ function stampComposeBox(win: Win, listing: FsListing): HTMLElement {
       box.querySelector<HTMLElement>(`[data-field="${missing[0]}"]`)?.focus();
       return;
     }
-    // DEV29 B5 · a retrieval says where from — or the person says it does not
-    if (retrieval) {
-      const n = normalizeSource(draft.source ?? "");
-      if (n && "error" in n) { box.querySelector<HTMLElement>('[data-field="source"]')?.focus(); return; }
-      if (!n && !window.confirm(t("stamp2.sourceNone"))) {
-        box.querySelector<HTMLElement>('[data-field="source"]')?.focus();
-        return;
-      }
-    }
+    // DEV30 D1 · a retrieval says where from: required, so `missingFields`
+    // already stopped an empty or malformed one above (no «stamp anyway?»)
     void doStamp(win);
   };
   const cancel = document.createElement("button");
@@ -20102,6 +20100,8 @@ function field(text: string, value: string, onInput: (v: string) => void,
   const wrap = labelled(text, input);
   if (opts.small) wrap.classList.add("small");
   return wrap;
+  /** DEV30 D1 · where the stamps here say their bytes were retrieved from */
+  retrieved?: Set<string>;
 }
 
 // ── CAMPAGNA · what the stamps of a folder COVER ───────────────────────────
@@ -20127,6 +20127,8 @@ const emptyCover = (): FolderCover => ({ memberOf: new Map(), doors: new Set(), 
 const coverKey = (listing: FsListing): string =>
   listing.entries.filter((e) => isStampPath(e.path)).map((e) => `${e.name}@${e.mtime}`).join("|");
 
+    const rf = (st as unknown as { how?: { acquisition?: { retrieved_from?: unknown } } }).how?.acquisition?.retrieved_from;
+    if (typeof rf === "string" && rf.trim()) (cover.retrieved ??= new Set()).add(rf.trim());
 /** The cover of a listing as far as it is known (empty until read). */
 function folderCover(listing: FsListing): FolderCover {
   const c = folderCovers.get(listing.path);
