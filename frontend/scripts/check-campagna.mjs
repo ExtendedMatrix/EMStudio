@@ -150,7 +150,8 @@ const { receipts, compose, tree, tropy, naming, DocumentStore, CALLS_OTHERS, sea
     from: [{ resource_id: "declared:x", label: "OB_PODIO" }], how: { dtc_kind: "format_conversion", software: [{ name: "Blender 5.2" }] },
     by: { at: "2026-10-01", operator: { label: "Emanuel Demetrescu", id: "https://orcid.org/0000-0002-5065-7970" } } });
   ok(/3/.test(w.what) && /OB_PODIO_LOD1\.obj/.test(w.what) && /T_OB_PODIO_LOD1\.jpg/.test(w.what), "3 · in words: one resource, 3 files, its door and what it calls");
-  eq([w.who, w.when, w.withWhat], ["Emanuel Demetrescu · 0000-0002-5065-7970", "2026-10-01", "Blender 5.2"], "3 · who, when, with what");
+  // DEV30 V1 · the date in the interface's language (English here)
+  eq([w.who, w.when, w.withWhat], ["Emanuel Demetrescu · 0000-0002-5065-7970", "Oct 1, 2026", "Blender 5.2"], "3 · who, when, with what");
   ok(/OB_PODIO/.test(w.from), "3 · where it comes from");
 }
 

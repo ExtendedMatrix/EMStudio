@@ -332,7 +332,8 @@ const eq = (got, want, what) => {
   const sig = (id) => W.arrangementSignature(W.WORKSPACES.find((w) => w.id === id).arrangement);
   eq(sig("canvas"), "row(outliner,row(col(graph:matrix,table),inspector))",
      "Stratigrafia: Outliner · Matrix above the table · Inspector — complete from the start");
-  eq(sig("provenance"), "row(table,row(col(doc,graph:graph),inspector))",
+  // DEV30 U6 · the graph window of Fonti opens on the Matrix, the standard view
+  eq(sig("provenance"), "row(table,row(col(doc,graph:matrix),inspector))",
      "Fonti: Documents · Document above the graph · Inspector");
   eq(sig("assets"), "row(col(emtree,shelf),row(storage,graph:dtc))",
      "Contenuti: EMTree above the Shelf · Storage · DTC — and no Inspector");
