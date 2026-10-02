@@ -1575,7 +1575,7 @@ window.__EM_SCENE__ = () => {
   wins: () => windowsOf().map((w) => ({ id: w.id, type: w.type, state: w.state })),
   closeWin: (id: string) => { if (closeWindow(id)) renderTiles(); },
   data: (id: string) => JSON.parse(JSON.stringify(store?.node(id)?.data ?? null)),
-  issues: () => allIssues().map((i) => ({ rule: i.rule, node: i.node, txt: i.txt })),
+  issues: () => allIssues().map((i) => ({ rule: i.rule, node: i.node, txt: i.txt, sev: i.sev })),
   /** SHIFT-A · what a node IS, read-only: type, name and its edges */
   nodeInfo: (id: string) => {
     const n = store?.node(id);

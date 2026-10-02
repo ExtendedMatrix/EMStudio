@@ -7593,6 +7593,11 @@ body.gesturing-resize * {
 }
 .nl-epoch { flex-wrap: nowrap; }
 .tv-table th, .tv-table td { padding: 6px 10px; text-align: left; border-bottom: 1px solid var(--border); }
+/* DEV29 B8 · the MESSAGE of a warning never goes below ~18 characters a line:
+   in a narrow column (measured by Cowork on 1 Oct, the left column) it wrapped
+   letter by letter. The table scrolls sideways instead, and the words stay whole. */
+.tv-table td.tv-msg { min-width: 18ch; overflow-wrap: normal; word-break: normal; }
+.tv-pad:has(> .tv-table) { overflow-x: auto; }
 .tv-table th {
   font-size: 10.5px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase;
   color: var(--text-muted); background: var(--bg-sunken);

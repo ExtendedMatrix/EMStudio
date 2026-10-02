@@ -728,7 +728,7 @@ function issuesTableHtml(rows: ViewCtx["issues"], ctx: ViewCtx, ix: ReturnType<t
       `<td><span class="sevtag ${i.sev}">${ico(i.sev)} ${escapeHtml(t(`issues.sev.${i.sev}`))}</span></td>` +
       `<td class="tv-num">${escapeHtml(t(`issues.rule.${i.rule}`) === `issues.rule.${i.rule}` ? i.rule : t(`issues.rule.${i.rule}`))}</td>` +
       `<td class="tv-id">${i.node ? escapeHtml(nm(ix.byId.get(i.node))) : "—"}</td>` +
-      `<td>${escapeHtml(i.txt)}</td>` +
+      `<td class="tv-msg">${escapeHtml(i.txt)}</td>` +
       `<td class="tv-fix">${i.action ? `<button class="tv-act" type="button" data-issue-act="${escapeAttr(i.id)}">${escapeHtml(i.action.label)}</button>` : ""}${fixHtml(i)}</td></tr>`).join("")
       : `<tr><td colspan="5" class="tv-ok">${escapeHtml(t("issues.none"))}</td></tr>`) +
     `</tbody></table></div>`;

@@ -2762,6 +2762,41 @@ test("V5.oneact", "«un atto per N file»: il nome dell'atto è proposto («Down
     detail: { before, src, name, pids, from, errors } };
 });
 
+test("V8.warnings", "avvisi nuovi: due documenti sullo stesso file, un url con //, il grafo non georiferito (con «Leggi uno SHIFT.txt…»), una risorsa dichiarata mancante; il messaggio non va a capo per lettera", async () => {
+  const shift = `${FS_ROOT ?? "/tmp"}/SHIFT-dev29.txt`;
+  writeFileSync(shift, "EPSG::3004 2355500 4617500 0\n");
+  const can = await fetch(`${BRIDGE}/read-shift`, { method: "POST", headers: { "content-type": "application/json" },
+    body: JSON.stringify({ text: "EPSG::3004 2355500 4617500 0" }) }).then((r) => r.status).catch(() => 0);
+  const { p, ctx, errors } = await open({ doc: "dev29-segni-lite", locale: "en" });
+  const rows = await p.evaluate(() => window.__EM_DRAG__.issues().map((i) => ({ rule: i.rule, node: i.node, sev: i.sev })));
+  const has = (rule, node) => rows.some((r) => r.rule === rule && (!node || r.node === node));
+  await p.click("#footer-warnings");
+  await p.waitForTimeout(800);
+  const msgMin = await p.evaluate(() => {
+    const td = document.querySelector("table.tv-table td.tv-msg");
+    if (!td) return 0;
+    const cs = getComputedStyle(td);
+    const c = document.createElement("canvas").getContext("2d");
+    c.font = cs.font;
+    return parseFloat(cs.minWidth) / c.measureText("0").width;   // in ch
+  });
+  await p.screenshot({ path: SHOT("v8-avvisi") }).catch(() => {});
+  const btn = p.locator('tr.tv-issue[data-rule="georef"] .tv-fix button').first();
+  const [chooser] = await Promise.all([p.waitForEvent("filechooser", { timeout: 5000 }).catch(() => null), btn.click()]);
+  if (chooser) await chooser.setFiles(shift);
+  await p.waitForTimeout(1500);
+  const geo = await p.evaluate(() => window.__EM_DRAG__.node("geo_imported_graph")?.data ?? null);
+  const after = await p.evaluate(() => window.__EM_DRAG__.issues().filter((i) => i.rule === "georef").length);
+  const toast = await p.evaluate(() => [...document.querySelectorAll("#toast, .toast")].map((t) => t.textContent).join(" | "));
+  await ctx.close();
+  const declared = can === 200 ? geo?.epsg === 3004 && geo.shift_x === 2355500 && after === 0
+                               : /dev29|read_shift/.test(toast) && geo?.epsg === 4326;
+  return { pass: has("address", "d02") && has("address", "d32") && has("address", "d33") && !has("address", "d33_link")
+      && rows.some((r) => r.rule === "georef" && r.sev === "warn") && has("missing", "res:pano")
+      && msgMin >= 17.9 && !!chooser && declared && !errors.length,
+    detail: { rows: rows.filter((r) => ["address", "georef", "missing"].includes(r.rule)), msgMin, chooser: !!chooser, bridgeReadShift: can, geo, after, toast: toast.slice(0, 200), errors } };
+});
+
 // ── run ─────────────────────────────────────────────────────────────────────
 const chosen = cases.filter((c) => !only.length || only.includes(c.id) || only.some((o) => c.id.startsWith(o + ".")));
 for (const c of chosen) {
