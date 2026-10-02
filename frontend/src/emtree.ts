@@ -213,6 +213,45 @@ export function emptyViewState(view: ViewKind = "matrix"): SlotViewState {
   };
 }
 
+/**
+ * F2 · One open FILE — the unit Save writes.
+ *
+ * A list BESIDE the slots, not deduced from `slot.path`: until today the only
+ * trace of "which file does this graph come from" was a path on the slot, and
+ * Save ignored it — it wrote every open graph into the active slot's file, so two
+ * files opened together became two copies of one project. Now each slot names
+ * its file (`GraphSlot.fileId`) and Save writes a file with ITS graphs.
+ */
+export interface OpenFile {
+  id: string;
+  /** absolute path on the desktop; null for a browser drop (it still has a name) */
+  path: string | null;
+  /** the file name shown in the tree */
+  name: string;
+  /** P3 · the revision this file is, per file (two files, two histories) */
+  version: unknown;
+  /** a change of WHICH graphs the file holds (a graph moved in or out): the
+   *  graphs' own stores are not dirty, the file is */
+  dirty: boolean;
+  /**
+   * The sections of graphs that are in the file but no longer open — written back
+   * as they were. Closing a graph is not deleting it from its file: without this,
+   * closing one graph of a two-graph project and saving would erase it on disk.
+   * Keyed by graph id; `section` already carries its own `layout` (F4).
+   */
+  retained: Record<string, Record<string, unknown>>;
+  /** the sections as last read or written, so a close can retain the ON-DISK
+   *  version (closing discards unsaved edits, after asking) */
+  onDisk: Record<string, Record<string, unknown>>;
+}
+
+/** The tail of a path a row can show: the last two folders and the name. */
+export function pathTail(path: string | null, keep = 3): string {
+  if (!path) return "";
+  const parts = path.split(/[\\/]/).filter(Boolean);
+  return (parts.length > keep ? "…/" : "/") + parts.slice(-keep).join("/");
+}
+
 /** One open graph. */
 export interface GraphSlot {
   id: string;
@@ -229,8 +268,13 @@ export interface GraphSlot {
    * whichever of the two places they happen to be looking at.
    */
   fallbackName: string;
-  /** Absolute path on desktop; null for a browser drop or a new graph. */
+  /** Absolute path on desktop; null for a browser drop or a new graph.
+   *  F2 · a MIRROR of its file's path, kept in step by `EMTree.assign`: the truth
+   *  of which file a graph belongs to is `fileId`. */
   path: string | null;
+  /** F2 · the open file this graph is saved into; null = «Senza file» (a new
+   *  graph, a GraphML/StratiMiner/Blender import) until a Save As gives it one */
+  fileId: string | null;
   /** DEV30 U1 · the folder the graph came from when it is not yet a file of its
    *  own (a GraphML imported on the desktop): its relative paths are read there. */
   sourceDir?: string | null;
@@ -265,7 +309,75 @@ export function slotLabel(slot: GraphSlot): string {
 /** The workspace. Pure state + queries; it renders nothing and touches no DOM. */
 export class EMTree {
   slots: GraphSlot[] = [];
+  /** F2 · the open files, in the order they were opened */
+  files: OpenFile[] = [];
   private _activeId: string | null = null;
+
+  // ── F2 · files ──────────────────────────────────────────────────────────────
+
+  /** Register an open file (no graph yet: `assign` puts graphs in it). */
+  addFile(path: string | null, name: string): OpenFile {
+    const file: OpenFile = {
+      id: crypto.randomUUID(), path, name: name || "untitled.em.json",
+      version: null, dirty: false, retained: {}, onDisk: {},
+    };
+    this.files.push(file);
+    return file;
+  }
+
+  file(id: string | null | undefined): OpenFile | null {
+    return id ? this.files.find((f) => f.id === id) ?? null : null;
+  }
+
+  fileOf(slot: GraphSlot | null | undefined): OpenFile | null {
+    return slot ? this.file(slot.fileId) : null;
+  }
+
+  /** The file ⌘S writes: the active graph's (null when it has none yet). */
+  activeFile(): OpenFile | null {
+    return this.fileOf(this.active());
+  }
+
+  /** The open graphs of a file (null = «Senza file»), in tree order. */
+  slotsOf(fileId: string | null): GraphSlot[] {
+    return this.slots.filter((s) => s.fileId === fileId);
+  }
+
+  /** Put a graph in a file (or in «Senza file» with null). The slot's `path`
+   *  mirror follows. Moving between two files dirties BOTH files: each has a
+   *  different set of graphs to write now. */
+  assign(slotId: string, fileId: string | null): void {
+    const slot = this.get(slotId);
+    if (!slot) return;
+    const from = this.file(slot.fileId);
+    const to = this.file(fileId);
+    if (from && from.id !== fileId) from.dirty = true;
+    if (to && slot.fileId !== fileId) to.dirty = true;
+    slot.fileId = to ? to.id : null;
+    slot.path = to ? to.path : null;
+  }
+
+  /** A file got a (new) path — Save As. Its graphs' mirrors follow. */
+  setFilePath(fileId: string, path: string, name: string): void {
+    const file = this.file(fileId);
+    if (!file) return;
+    file.path = path;
+    file.name = name;
+    for (const s of this.slotsOf(fileId)) s.path = path;
+  }
+
+  /** Close a file: its graphs and the file go. Returns the id active afterwards. */
+  removeFile(fileId: string): string | null {
+    for (const s of this.slotsOf(fileId)) this.remove(s.id);
+    this.files = this.files.filter((f) => f.id !== fileId);
+    return this._activeId;
+  }
+
+  /** Unsaved: a graph of the file is dirty, or the file's set of graphs changed. */
+  fileDirty(fileId: string | null): boolean {
+    const file = this.file(fileId);
+    return (!!file && file.dirty) || this.slotsOf(fileId).some((s) => s.store.dirty);
+  }
 
   get activeId(): string | null {
     return this._activeId;
@@ -292,11 +404,14 @@ export class EMTree {
    * background add would be a second way to be surprised by which document is on
    * screen.
    */
-  add(store: DocumentStore, name: string, path: string | null = null): GraphSlot {
+  add(store: DocumentStore, name: string, path: string | null = null,
+      fileId: string | null = null): GraphSlot {
+    const file = this.file(fileId);
     const slot: GraphSlot = {
       id: crypto.randomUUID(),
       fallbackName: name || "untitled",
-      path,
+      path: file ? file.path : path,
+      fileId: file ? file.id : null,
       store,
       auxiliaryFiles: [],
       viewState: emptyViewState(),
@@ -352,7 +467,7 @@ export class EMTree {
 
   /** Any slot with unsaved changes? Used before a destructive action. */
   anyDirty(): boolean {
-    return this.slots.some((s) => s.store.dirty);
+    return this.slots.some((s) => s.store.dirty) || this.files.some((f) => f.dirty);
   }
 }
 
@@ -382,6 +497,12 @@ export interface EMTreeHandlers {
   onAuxOption?(auxId: string, key: string, value: string | boolean): void;
   /** AUDIT C · a story row opens that story (it was drawn and did nothing) */
   onOpenStory?(slotId: string, narrativeId: string): void;
+  /** F2 · «Sposta in…»: carry a graph to another open file, or a new one */
+  onMoveGraph?(slotId: string, anchor: HTMLElement): void;
+  /** F2 · save ONE file with its graphs */
+  onSaveFile?(fileId: string): void;
+  /** F2 · close a file and its graphs (asks if it has unsaved work) */
+  onCloseFile?(fileId: string): void;
 }
 
 function esc(s: string): string {
@@ -689,7 +810,8 @@ export function renderEMTree(host: HTMLElement, tree: EMTree,
     return `${label} (${n})`;
   });
 
-  const rows = tree.slots.map((slot, i) => {
+  const slotRow = (slot: GraphSlot): string => {
+    const i = tree.slots.indexOf(slot);
     const isActive = slot.id === tree.activeId;
     const nodes = slot.store.doc.graph?.nodes?.length ?? 0;
     const edges = slot.store.doc.graph?.edges?.length ?? 0;
@@ -708,6 +830,8 @@ export function renderEMTree(host: HTMLElement, tree: EMTree,
           <span class="et-name">${esc(displayNames[i])}${slot.store.dirty ? " •" : ""}</span>
           <span class="et-meta">${nodes} ${labels("emtree.nodes")} · ${edges} ${labels("emtree.edges")}</span>
         </button>
+        <button class="et-move" data-move="${esc(slot.id)}"
+                title="${esc(labels("emtree.moveTitle"))}">⇄</button>
         <button class="et-close" data-close="${esc(slot.id)}"
                 title="${esc(labels("emtree.close"))}">×</button>
         <!-- Aux files: the STUB. Shown as a count so the place is visible in the
@@ -718,7 +842,48 @@ export function renderEMTree(host: HTMLElement, tree: EMTree,
           ? labels("emtree.noAux")
           : `${aux} ${labels("emtree.auxFiles")}`}</div>
       </li>`;
-  }).join("");
+  };
+
+  // F1 · TWO LEVELS: each open file is a group (its name, the tail of its path,
+  // whether it has unsaved work), its graphs under it; the graphs that have no
+  // file yet sit in «Senza file». The ACTIVE graph's file is marked: it is the
+  // one ⌘S writes, and until today nothing on screen said which that was.
+  const activeFileId = tree.active()?.fileId ?? null;
+  const known = new Set(tree.files.map((f) => f.id));
+  const groups = tree.files.map((file) => {
+    const members = tree.slotsOf(file.id);
+    const kept = Object.keys(file.retained).length;
+    const isTarget = !!tree.active() && activeFileId === file.id;
+    return `
+      <li class="et-file${isTarget ? " et-file-active" : ""}" data-file="${esc(file.id)}">
+        <div class="et-file-head" title="${esc(file.path ?? labels("emtree.fileNoPath"))}">
+          <span class="et-file-icon">▤</span>
+          <span class="et-file-name">${esc(file.name)}${tree.fileDirty(file.id) ? " •" : ""}</span>
+          <span class="et-file-tail">${esc(file.path ? pathTail(file.path) : labels("emtree.fileNoPath"))}</span>
+          ${isTarget ? `<span class="et-file-target" title="${esc(labels("emtree.saveTargetTitle"))}">${esc(labels("emtree.saveTarget"))}</span>` : ""}
+          <button class="et-file-save" data-save-file="${esc(file.id)}"
+                  title="${esc(labels("emtree.saveFileTitle"))}">${esc(labels("emtree.saveFile"))}</button>
+          <button class="et-file-close" data-close-file="${esc(file.id)}"
+                  title="${esc(labels("emtree.closeFileTitle"))}">×</button>
+        </div>
+        <ul class="et-slots">${members.map(slotRow).join("")}</ul>
+        ${kept ? `<p class="et-retained">${esc(labels("emtree.retained").replace("{n}", String(kept)))}</p>` : ""}
+      </li>`;
+  });
+  const loose = tree.slots.filter((s) => !s.fileId || !known.has(s.fileId));
+  if (loose.length) {
+    const isTarget = !!tree.active() && !activeFileId;
+    groups.push(`
+      <li class="et-file et-nofile${isTarget ? " et-file-active" : ""}" data-file="">
+        <div class="et-file-head" title="${esc(labels("emtree.noFileGroupTitle"))}">
+          <span class="et-file-icon">◌</span>
+          <span class="et-file-name">${esc(labels("emtree.noFileGroup"))}</span>
+          ${isTarget ? `<span class="et-file-target" title="${esc(labels("emtree.saveTargetNoneTitle"))}">${esc(labels("emtree.saveTargetNone"))}</span>` : ""}
+        </div>
+        <ul class="et-slots">${loose.map(slotRow).join("")}</ul>
+      </li>`);
+  }
+  const rows = `<ul class="et-files">${groups.join("")}</ul>`;
 
   // OVR1 · a segmented toggle chooses the LIST (slots + aux) or the OVERVIEW
   // dashboard (cards from the graph-scope nodes). The overview only shows with
@@ -737,7 +902,7 @@ export function renderEMTree(host: HTMLElement, tree: EMTree,
   const body = overviewMode
     ? overviewSection(tree, labels)
     : `${tree.slots.length
-        ? `<ul class="et-slots">${rows}</ul>`
+        ? rows
         : `<p class="et-empty">${esc(labels("emtree.empty"))}</p>`}
        ${auxSection(tree, labels)}
        <p class="et-todo">${esc(labels("emtree.auxNote"))}</p>`;
@@ -893,6 +1058,26 @@ export function renderEMTree(host: HTMLElement, tree: EMTree,
     el.addEventListener("change", commit);
   });
 
+  // F2 · per-graph «Sposta in…», per-file Save and close
+  host.querySelectorAll<HTMLButtonElement>(".et-move").forEach((button) => {
+    button.addEventListener("click", (event) => {
+      event.stopPropagation();
+      const id = button.dataset.move;
+      if (id) handlers.onMoveGraph?.(id, button);
+    });
+  });
+  host.querySelectorAll<HTMLButtonElement>("[data-save-file]").forEach((button) => {
+    button.addEventListener("click", (event) => {
+      event.stopPropagation();
+      handlers.onSaveFile?.(button.dataset.saveFile!);
+    });
+  });
+  host.querySelectorAll<HTMLButtonElement>("[data-close-file]").forEach((button) => {
+    button.addEventListener("click", (event) => {
+      event.stopPropagation();
+      handlers.onCloseFile?.(button.dataset.closeFile!);
+    });
+  });
   host.querySelectorAll<HTMLButtonElement>(".et-close").forEach((button) => {
     button.addEventListener("click", (event) => {
       // The row is a button too; without this the close also re-activates.

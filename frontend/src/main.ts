@@ -6,6 +6,8 @@ import type { PlacedScene } from "./geo";
 import {
   buildContainer,
   corpusAcceptsNodeType,
+  isCorpusSection,
+  isShelfSection,
   newCorpusSection,
   bumpVersion,
   mergeContainers,
@@ -307,9 +309,9 @@ import {
   renderStratiMiner,
   unreadWarnings,
 } from "./stratiminer";
-import { EMTree, renderEMTree, slotLabel } from "./emtree";
+import { EMTree, pathTail, renderEMTree, slotLabel } from "./emtree";
 import type {
-  AuxFileType, AuxiliaryFile, AuxMapReport, EMTreeHandlers, GraphSlot, SlotViewState,
+  AuxFileType, AuxiliaryFile, AuxMapReport, EMTreeHandlers, GraphSlot, OpenFile, SlotViewState,
 } from "./emtree";
 import {
   coverage,
@@ -1641,8 +1643,8 @@ window.__EM_SCENE__ = () => {
   // RISORSA-FILE · a PROJECT (`{graphs}`, with its corpus and shelf) goes
   // through the container's door, as a file does — the seam used to hand every
   // document to `loadDocument` and lose the corpus of a project on the way
-  openAt: (d: EmDocument, path: string) => (d as unknown as { graphs?: unknown }).graphs
-    ? loadContainerDocument(d, baseName(path), path) : loadDocument(d, baseName(path), path),
+  // F2 · …and a single graph too: a path is a FILE, and only that door makes one
+  openAt: (d: EmDocument, path: string) => loadContainerDocument(d, baseName(path), path),
   /** SPAZIO · `api.measure` of an extractor's place, and of a region */
   measure: (x: string) => {
     const g = store ? chain.geometryOf(store.doc, x) : null;
@@ -3828,6 +3830,9 @@ function activateSlot(id: string, opts: { rebuildOnly?: boolean } = {}): void {
 
   store = target.store;
   currentFilePath = target.path; // desktop: Save writes back to THIS slot's file
+  // F2 · the version shown is the active graph's FILE's
+  projectVersion = (emtree.fileOf(target)?.version as ProjectVersion | null) ?? null;
+  updateVersionIndicator();
 
   // Transient state that belongs to the app, not to a graph: a selection or a
   // hypergraph breadcrumb from another document means nothing here.
@@ -4120,11 +4125,16 @@ function loadContainerDocument(
     // nodes (we mutated the very document the store owns), so it only has to be
     // told to redraw.
     for (const slot of emtree.slots) slot.store.touch();
+    // F3 · «Integra in questo file»: the graphs that arrive go into the ACTIVE
+    // graph's file (or stay without one when it has none) — the file that ⌘S
+    // writes, which is the only "this file" the person can see
+    const into = emtree.activeFile();
     for (const member of mine.members) {
       if (before.has(member.id)) continue;
-      adoptMemberAsSlot(member, sourceName, null);
+      adoptMemberAsSlot(member, sourceName, into?.path ?? null, into?.id ?? null);
     }
-    if (mine.shelf) adoptProjectShelf(mine.shelf);
+    if (into) into.dirty = true;
+    if (mine.shelf) { adoptProjectShelf(mine.shelf); if (into && !shelfHomeFileId) shelfHomeFileId = into.id; }
     toast(t("container.merged", {
       added: String(report.addedGraphs.length),
       merged: String(report.mergedGraphs.length),
@@ -4145,10 +4155,10 @@ function loadContainerDocument(
     } else {
       showConflictPanel([]);
     }
-    // integrating somebody else's graphs is a new version of the project
+    // integrating somebody else's graphs is a new version of the file
     refreshEMTree();
     draw();
-    projectContainer();        // settles the new version and shows it
+    if (into) fileContainer(into);   // settles the new version and shows it
     return;
   }
 
@@ -4156,21 +4166,52 @@ function loadContainerDocument(
   logInfo(`container: ${sourceName} — ${parsed.members.length} member(s), `
           + `active ${parsed.activeGraphId ?? "(none)"}, `
           + `${emtree.slots.length} slot(s) already open`);
-  // P3 · and its version comes with it. Only on a full open: integrating
-  // somebody else's project does NOT adopt their revision number — the history
-  // being counted is this project's, not theirs.
-  projectVersion = parsed.version;
-  updateVersionIndicator();
+  // F2 · the file is a thing of its own, beside the slots: its graphs are
+  // assigned to it, and Save writes it with them and no others
+  const file = emtree.addFile(path, path ? baseName(path) : sourceName);
+  // P3 · and its version comes with it — per FILE: two files, two histories.
+  // Integrating somebody else's project does NOT adopt their revision number.
+  file.version = parsed.version;
+  for (const member of parsed.members) {
+    file.onDisk[member.id] = {
+      ...(member.doc.graph as unknown as Record<string, unknown>),
+      ...(member.doc.layout ? { layout: member.doc.layout } : {}),
+    };
+  }
+  if (parsed.freshLayouts.length) {
+    // F4 · said once: which graphs of an old file had no arrangement of their own
+    logWarn(t("layout.fresh", { n: String(parsed.freshLayouts.length),
+                                 ids: parsed.freshLayouts.join(", ") }));
+  }
   showConflictPanel([]);       // a new project, not the last one's conflicts
   let activeSlotId: string | null = null;
   for (const member of parsed.members) {
-    const slot = adoptMemberAsSlot(member, sourceName, path);
+    const slot = adoptMemberAsSlot(member, sourceName, path, file.id);
     if (member.id === parsed.activeGraphId) activeSlotId = slot.id;
   }
-  if (parsed.shelf) adoptProjectShelf(parsed.shelf);
-  // the documentation travels with the project, like the shelf
-  corpusStore = null;
-  if (parsed.corpus) adoptProjectCorpus(parsed.corpus);
+  // The shelf and the DTC corpus are ONE per workspace. They belong to the file
+  // that brought them (their HOME), and only that file writes them. A second
+  // file's own shelf/corpus is RETAINED in it, untouched — until today opening a
+  // second file replaced the first one's corpus in memory, and saving the first
+  // then wrote the second's documentation into it.
+  if (parsed.shelf) {
+    if (shelfHomeFileId && emtree.file(shelfHomeFileId) && shelfEntries().length) {
+      file.retained[String(parsed.shelf.graph_id ?? "shelf")] = parsed.shelf;
+    } else {
+      adoptProjectShelf(parsed.shelf);
+      shelfHomeFileId = file.id;
+    }
+  }
+  if (parsed.corpus) {
+    if (corpusHomeFileId && emtree.file(corpusHomeFileId) && projectCorpusSection()) {
+      file.retained[String(parsed.corpus.graph_id ?? "dtc")] = parsed.corpus;
+    } else {
+      adoptProjectCorpus(parsed.corpus);
+      corpusHomeFileId = file.id;
+    }
+  } else if (!emtree.files.some((f) => f.id !== file.id)) {
+    corpusStore = null;        // the first file of a fresh workspace: nothing to keep
+  }
   if (activeSlotId) activateSlot(activeSlotId, { rebuildOnly: false });
   if (parsed.members.length > 1) {
     toast(t("container.opened", { n: String(parsed.members.length) }));
@@ -4304,8 +4345,9 @@ function adoptMemberAsSlot(
   member: { id: string; doc: EmDocument },
   sourceName: string,
   path: string | null,
+  fileId: string | null = null,
 ) {
-  loadDocument(member.doc, member.id || sourceName, path);
+  loadDocument(member.doc, member.id || sourceName, path, fileId);
   return emtree.active()!;
 }
 
@@ -4313,6 +4355,7 @@ function loadDocument(
   d: EmDocument,
   sourceName: string,
   path: string | null = null,
+  fileId: string | null = null,
 ): void {
   if (!d?.graph?.nodes) {
     info.textContent = `${sourceName}: not an .em.json document (missing graph.nodes)`;
@@ -4351,7 +4394,7 @@ function loadDocument(
   // at 16:20 (the status bar said 91 nodes).
   const seed = emtree.active();
   const replaceSeed = !!seed && isUntouchedSeed(seed);
-  const slot = emtree.add(loaded, slotNameFor(d, sourceName), path);
+  const slot = emtree.add(loaded, slotNameFor(d, sourceName), path, fileId);
   if (replaceSeed && seed) emtree.remove(seed.id);
   activateSlot(slot.id, { rebuildOnly: true });
   dropHint.classList.add("hidden");
@@ -4610,38 +4653,100 @@ function seedSignature(st: DocumentStore): string {
   return JSON.stringify([g["name"] ?? "", nodes]);
 }
 
-function projectContainer(): ReturnType<typeof buildContainer> {
-  // Each member goes through its own `store.toJSON()` and is parsed back.
-  // That round trip is NOT waste: toJSON is where the save rules live — it
-  // stamps `last_editor` and, crucially, DROPS the volatile (mapped-but-not-baked)
-  // nodes (AUX2). Reading `store.doc` directly would have written them into the
-  // project file, which is exactly what that rule exists to prevent.
-  // DEV30 V3 · a seed nobody touched is not saved: it is nobody's graph. The
-  // active one is kept when it is the only one (saving a fresh New is a choice).
-  const kept = emtree.slots.filter((slot) => !isUntouchedSeed(slot) || (emtree.slots.length === 1));
+/** F2 · the graphs Save writes into `file` — its open graphs, in tree order.
+ *  DEV30 V3 · a seed nobody touched is not saved: it is nobody's graph (kept
+ *  when it is the file's only graph: saving a fresh New is a choice). */
+function fileSlots(file: OpenFile | null): GraphSlot[] {
+  const members = emtree.slotsOf(file ? file.id : null);
+  return members.filter((slot) => !isUntouchedSeed(slot) || members.length === 1);
+}
+
+/**
+ * F2 · THE DOCUMENT OF ONE FILE: its graphs and no others.
+ *
+ * Until today Save built the container from EVERY open slot and wrote it into
+ * the active slot's file, so two files opened together became two copies of the
+ * same project, and nothing said so. Now a file is written with the graphs
+ * assigned to it (`slot.fileId`), plus the ones it holds but that are closed
+ * (`file.retained`, written back unchanged), plus the shelf and the corpus only
+ * when this file is their home.
+ *
+ * Each member goes through its own `store.toJSON()` and is parsed back. That
+ * round trip is NOT waste: toJSON is where the save rules live — it stamps
+ * `last_editor` and DROPS the volatile (mapped-but-not-baked) nodes (AUX2).
+ *
+ * P3 · building the file is also the moment its VERSION is settled, so the two
+ * can never disagree. Per file: `file.version`.
+ */
+function fileContainer(file: OpenFile | null, opts: { bump?: boolean } = {}): ReturnType<typeof buildContainer> {
+  const kept = fileSlots(file);
   const graphs = kept.map((slot) => ({
     id: String((slot.store.doc.graph as Record<string, unknown>).graph_id ?? slot.id),
     doc: JSON.parse(slot.store.toJSON()) as EmDocument,
   }));
-  const activeSlot = kept.includes(emtree.active()!) ? emtree.active() : kept[0];
+  // the closed graphs of this file, as they were on disk (F4: with their layout)
+  const open = new Set(graphs.map((g) => g.id));
+  let retainedShelf: Record<string, unknown> | null = null;
+  let retainedCorpus: Record<string, unknown> | null = null;
+  for (const [gid, section] of Object.entries(file?.retained ?? {})) {
+    if (open.has(gid)) continue;
+    if (isShelfSection(section)) { retainedShelf = section; continue; }
+    if (isCorpusSection(section)) { retainedCorpus = section; continue; }
+    const { layout, ...graph } = section as Record<string, unknown>;
+    graphs.push({ id: gid, doc: { graph, ...(layout ? { layout } : {}) } as unknown as EmDocument });
+  }
+  const active = emtree.active();
+  const activeSlot = active && kept.includes(active) ? active : kept[0];
+  // the shelf and the corpus: written by their HOME file (a file saved first
+  // claims a shelf/corpus nobody's file brought)
+  const fid = file ? file.id : null;
+  if (fid && !shelfHomeFileId && shelfEntries().length) shelfHomeFileId = fid;
+  if (fid && !corpusHomeFileId && projectCorpusSection()) corpusHomeFileId = fid;
   const container = buildContainer({
     graphs,
-    shelf: projectShelfSection(),
-    corpus: projectCorpusSection(),
+    shelf: fid && fid === shelfHomeFileId ? projectShelfSection() : retainedShelf,
+    corpus: fid && fid === corpusHomeFileId ? projectCorpusSection() : retainedCorpus,
     activeGraphId: activeSlot
       ? String((activeSlot.store.doc.graph as Record<string, unknown>).graph_id ?? activeSlot.id)
       : null,
   });
-  // P3 · a save that CHANGES THE CONTENT is a new version of the project. The
-  // digest decides, so pressing ⌘S on an unchanged project does not invent a
-  // revision — the counter measures the work, not the keystrokes.
-  projectVersion = bumpVersion(container, projectVersion);
-  updateVersionIndicator();
+  if (opts.bump === false) return container;
+  // P3 · a save that CHANGES THE CONTENT is a new version of the file. The digest
+  // decides, so ⌘S on an unchanged file does not invent a revision.
+  const version = bumpVersion(container, (file?.version as ProjectVersion | null) ?? null);
+  if (file) file.version = version;
+  if (!file || file === emtree.activeFile()) {
+    projectVersion = version;
+    updateVersionIndicator();
+  }
   return container;
+}
+
+/** The active graph's file, as Save would write it (what `api.docJson` reads). */
+function projectContainer(): ReturnType<typeof buildContainer> {
+  const file = emtree.activeFile();
+  if (file) return fileContainer(file);
+  // a graph with no file yet: the document Save As would write for it
+  return fileContainer(null);
+}
+
+/** F2 · after a write: the file's graphs are clean, and what is on disk is known. */
+function markFileSaved(file: OpenFile, doc: ReturnType<typeof buildContainer>): void {
+  for (const slot of emtree.slotsOf(file.id)) slot.store.dirty = false;
+  file.dirty = false;
+  file.onDisk = {};
+  for (const [gid, section] of Object.entries(doc.graphs)) {
+    if (!isShelfSection(section) && !isCorpusSection(section)) file.onDisk[gid] = section;
+  }
 }
 
 function projectDocumentText(): string {
   return JSON.stringify(projectContainer(), null, 1);
+}
+
+/** The download name for a file in the browser: its own when it looks like one. */
+function downloadNameFor(file: OpenFile | null): string {
+  return file && /\.(em\.json|json|emj)$/i.test(file.name) ? file.name : defaultFileName();
 }
 
 
@@ -5798,6 +5903,11 @@ function applyCommandResult(res: {
 // store: a DocumentStore holds ONE graph, and the version is a fact about all of
 // them together.
 let projectVersion: ProjectVersion | null = null;
+/** F2 · the file whose save writes the workspace's shelf / DTC corpus — the one
+ *  that brought them (or the first saved, for ones made here). Only it writes
+ *  them; another file keeps its own, retained. */
+let shelfHomeFileId: string | null = null;
+let corpusHomeFileId: string | null = null;
 /** The conflicts of the last integration, kept so the panel can be reopened. */
 let lastMergeConflicts: Conflict[] = [];
 
@@ -5985,54 +6095,121 @@ function revertToLoser(c: Conflict): boolean {
   return false;
 }
 
+/**
+ * F2 · ⌘S writes the ACTIVE graph's file, with that file's graphs only.
+ *
+ * A graph with no file yet («Senza file») has nowhere to be written: Save is
+ * Save As for it. On the desktop the file is written in place; in a browser it
+ * is downloaded under its own name.
+ */
 async function saveDocument(): Promise<void> {
   if (!store) return;
-  if (isTauri()) {
-    // DEV30 U8 · «Save» writes on the open file: the slot's path is the truth
-    currentFilePath = emtree.active()?.path ?? currentFilePath;
-    if (!currentFilePath) return saveAsDocument();
-    try {
-      await writeEmJson(currentFilePath, projectDocumentText());
-      store.dirty = false;
-      info.textContent = `saved ${baseName(currentFilePath)}`;
-      updateToolbar();
-    } catch (e) {
-      toast(t("l.saveFailed", { why: String(e instanceof Error ? e.message : e) }));
-    }
-    return;
-  }
-  browserDownload(projectDocumentText(), defaultFileName());
-  store.dirty = false;
-  updateToolbar();
+  const file = emtree.activeFile();
+  if (!file) return saveAsDocument();
+  await saveFile(file);
 }
 
-// Save As: on desktop prompt for a path and remember it; in a browser this
-// is the same as Save (a download with a fresh name).
-async function saveAsDocument(): Promise<void> {
-  if (!store) return;
+/** Write ONE file. Returns false when nothing was written (cancelled, failed). */
+async function saveFile(file: OpenFile): Promise<boolean> {
   if (isTauri()) {
+    if (!file.path) {
+      // a file that came from a browser drop or a room has no place on disk yet
+      return saveFileAs(file);
+    }
     try {
-      const path = await saveAsEmJson(projectDocumentText(), defaultFileName());
-      if (!path) return; // user cancelled
-      currentFilePath = path;
-      // DEV30 U8 · the SLOT is told too. Measured: Save As wrote only
-      // `currentFilePath`, and the next slot activation (any click in the
-      // EMTree, a second graph opened) set it back to `slot.path` — null for an
-      // imported GraphML — so the next «Save» opened «Save As» again.
-      const slot = emtree.active();
-      if (slot) { slot.path = path; slot.seedSig = undefined; }
-      addRecent({ path, name: baseName(path) }, Date.now());
-      store.dirty = false;
-      info.textContent = `saved ${baseName(path)}`;
+      const doc = fileContainer(file);
+      await writeEmJson(file.path, JSON.stringify(doc, null, 1));
+      markFileSaved(file, doc);
+      currentFilePath = emtree.active()?.path ?? currentFilePath;
+      info.textContent = `saved ${baseName(file.path)}`;
+      logInfo(t("save.fileWritten", { file: file.name, n: String(Object.keys(doc.graphs).length) }));
       updateToolbar();
+      refreshEMTree();
+      return true;
     } catch (e) {
       toast(t("l.saveFailed", { why: String(e instanceof Error ? e.message : e) }));
+      return false;
     }
-    return;
   }
-  browserDownload(store.toJSON(), defaultFileName());
-  store.dirty = false;
+  const doc = fileContainer(file);
+  browserDownload(JSON.stringify(doc, null, 1), downloadNameFor(file));
+  markFileSaved(file, doc);
   updateToolbar();
+  refreshEMTree();
+  return true;
+}
+
+/** Save a file under a new path (desktop) — the file's path changes, and its
+ *  graphs follow. In a browser it is a download with a fresh name. */
+async function saveFileAs(file: OpenFile): Promise<boolean> {
+  const doc = fileContainer(file);
+  const text = JSON.stringify(doc, null, 1);
+  if (isTauri()) {
+    try {
+      const path = await saveAsEmJson(text, downloadNameFor(file));
+      if (!path) return false; // user cancelled
+      emtree.setFilePath(file.id, path, baseName(path));
+      for (const slot of emtree.slotsOf(file.id)) slot.seedSig = undefined;
+      currentFilePath = emtree.active()?.path ?? path;
+      addRecent({ path, name: baseName(path) }, Date.now());
+      markFileSaved(file, doc);
+      info.textContent = `saved ${baseName(path)}`;
+      updateToolbar();
+      refreshEMTree();
+      return true;
+    } catch (e) {
+      toast(t("l.saveFailed", { why: String(e instanceof Error ? e.message : e) }));
+      return false;
+    }
+  }
+  browserDownload(text, downloadNameFor(file));
+  markFileSaved(file, doc);
+  updateToolbar();
+  refreshEMTree();
+  return true;
+}
+
+/**
+ * Save As. On a graph that HAS a file: that file, under a new path. On a graph
+ * of «Senza file»: it GETS a file — a new one holding that graph alone.
+ *
+ * DEV30 U8 · the SLOT learns its path too (through its file now): the next
+ * activation used to set `currentFilePath` back to null for an imported GraphML,
+ * so the next «Save» opened «Save As» again.
+ */
+async function saveAsDocument(): Promise<void> {
+  if (!store) return;
+  const slot = emtree.active();
+  if (!slot) return;
+  const existing = emtree.fileOf(slot);
+  if (existing) { await saveFileAs(existing); return; }
+  const file = emtree.addFile(null, defaultFileName());
+  emtree.assign(slot.id, file.id);
+  const ok = await saveFileAs(file);
+  if (!ok) {
+    // cancelled: the graph goes back to «Senza file», and the file never existed
+    emtree.assign(slot.id, null);
+    emtree.files = emtree.files.filter((f) => f.id !== file.id);
+    if (shelfHomeFileId === file.id) shelfHomeFileId = null;
+    if (corpusHomeFileId === file.id) corpusHomeFileId = null;
+  }
+  refreshEMTree();
+}
+
+/** F2 · «Salva tutto»: every file with unsaved work. A graph with no file is
+ *  named, not guessed into one. */
+async function saveAllDocuments(): Promise<void> {
+  const saved: string[] = [];
+  for (const file of [...emtree.files]) {
+    if (!emtree.fileDirty(file.id)) continue;
+    if (await saveFile(file)) saved.push(file.name);
+  }
+  const loose = emtree.slotsOf(null).filter((s) => s.store.dirty && !isUntouchedSeed(s));
+  if (loose.length) toast(t("save.looseLeft", { n: String(loose.length) }));
+  toast(saved.length
+    ? t("save.allDone", { n: String(saved.length), names: saved.join(", ") })
+    : t("save.nothingDirty"));
+  refreshEMTree();
 }
 
 function browserDownload(text: string, filename: string): void {
@@ -6089,6 +6266,54 @@ async function openDocument(): Promise<void> {
     return;
   }
   fileInput.click();
+}
+
+/**
+ * F3 · «Sostituisci»: open a file IN PLACE of the open ones. The file is chosen
+ * FIRST — a cancelled dialog closes nothing — then every open file (and every
+ * graph without one) is closed, asking for each that has unsaved work; one «no»
+ * stops the whole gesture and nothing is closed.
+ */
+async function openReplacing(): Promise<void> {
+  if (isTauri()) {
+    try {
+      const res = await openEmJson();
+      if (!res) return;
+      if (!closeEverythingAsking()) return;
+      if (isGraphmlFile(res.path, res.text)) { await importGraphmlText(res.text, baseName(res.path), res.path); return; }
+      if (!(await confirmLeaveSidecar("Opening a file"))) return;
+      loadContainerDocument(JSON.parse(res.text), baseName(res.path), res.path);
+    } catch (e) {
+      info.textContent = `open failed: ${e instanceof Error ? e.message : e}`;
+    }
+    return;
+  }
+  const input = document.createElement("input");
+  input.type = "file";
+  input.accept = ".json,.em.json,.emj,.graphml,.xml";
+  input.addEventListener("change", () => {
+    const f = input.files?.[0];
+    if (!f) return;
+    if (!closeEverythingAsking()) return;
+    void loadFile(f);
+  });
+  input.click();
+}
+
+/** F3 · every file and every loose graph closed — after asking for the unsaved
+ *  ones, all questions first. Returns false (and closes nothing) on a «no». */
+function closeEverythingAsking(): boolean {
+  for (const file of emtree.files) {
+    if (emtree.fileDirty(file.id) && !confirm(t("emtree.closeFileUnsaved", { name: file.name }))) return false;
+  }
+  for (const slot of emtree.slotsOf(null)) {
+    if (slot.store.dirty && !isUntouchedSeed(slot)
+        && !confirm(t("emtree.unsaved", { name: slotLabel(slot) }))) return false;
+  }
+  for (const slot of [...emtree.slots]) slot.store.dirty = false;  // asked: nothing more to ask
+  for (const file of [...emtree.files]) closeFile(file.id);
+  for (const slot of [...emtree.slots]) closeSlot(slot.id);
+  return true;
 }
 
 // GONE (1 ott 2026, SHIFT-A) · the node palette: `buildPaletteForMode`,
@@ -8697,6 +8922,9 @@ document
 document
   .getElementById("btn-save-as")!
   .addEventListener("click", () => void saveAsDocument());
+// F2 / F3 · the two new gestures of the file menu
+document.getElementById("btn-save-all")?.addEventListener("click", () => void saveAllDocuments());
+document.getElementById("btn-open-replace")?.addEventListener("click", () => void openReplacing());
 document
   .getElementById("btn-pin-version")
   ?.addEventListener("click", () => pinProjectVersion());
@@ -11439,6 +11667,124 @@ function openEMTree(): void {
   renderTiles();   // the one structural entry: it mounts and re-heads too
 }
 
+/** Close one slot and activate its neighbour (or empty the workspace). */
+function closeSlot(id: string): void {
+  const nextId = emtree.remove(id);
+  if (nextId) {
+    // The neighbour becomes active. `activateSlot` refuses a no-op switch, so
+    // force the swap by clearing our idea of "current" first — remove() has
+    // already moved `activeId`, and the store still points at the closed slot.
+    store = null;
+    activateSlot(nextId);
+  } else {
+    closeWorkspace();
+  }
+  refreshEMTree();
+}
+
+/** F2 · close a file and every graph of it (the caller has asked about unsaved work). */
+function closeFile(fileId: string): void {
+  const wasActive = emtree.activeFile()?.id === fileId;
+  emtree.removeFile(fileId);
+  if (shelfHomeFileId === fileId) shelfHomeFileId = null;
+  if (corpusHomeFileId === fileId) {
+    corpusHomeFileId = null;
+    corpusStore = null;   // its documentation goes with it, written or not
+  }
+  const next = emtree.activeId;
+  if (next && wasActive) { store = null; activateSlot(next); }
+  else if (!next) closeWorkspace();
+  refreshEMTree();
+}
+
+/**
+ * F2 · «Sposta in…» — carry a graph from its file to another open file, to a
+ * NEW file, or back to «Senza file». An explicit gesture: Save never moves a
+ * graph any more. Both files become dirty (each has a different set of graphs
+ * to write), and the graph's section is NOT retained by the file it left — it
+ * left on purpose.
+ */
+function openMoveMenu(slotId: string, anchor: HTMLElement): void {
+  const slot = emtree.get(slotId);
+  if (!slot) return;
+  document.querySelector(".et-move-menu")?.remove();
+  const menu = document.createElement("div");
+  menu.className = "et-move-menu";
+  const title = document.createElement("div");
+  title.className = "edge-menu-title";
+  title.textContent = t("emtree.moveMenuHead", { name: slotLabel(slot) });
+  menu.appendChild(title);
+  const close = (): void => { menu.remove(); document.removeEventListener("pointerdown", away, true); };
+  const away = (e: Event): void => { if (!menu.contains(e.target as Node)) close(); };
+  const item = (label: string, tail: string, run: () => void): void => {
+    const b = document.createElement("button");
+    b.textContent = label;
+    if (tail) {
+      const sp = document.createElement("span");
+      sp.className = "et-move-tail";
+      sp.textContent = tail;
+      b.appendChild(sp);
+    }
+    b.addEventListener("click", () => { close(); run(); });
+    menu.appendChild(b);
+  };
+  for (const file of emtree.files) {
+    if (file.id === slot.fileId) continue;
+    item(file.name, pathTail(file.path), () => moveGraph(slotId, file.id));
+  }
+  item(t("emtree.moveNewFile"), "", () => void moveGraphToNewFile(slotId));
+  if (slot.fileId) item(t("emtree.moveNoFile"), "", () => moveGraph(slotId, null));
+  const cancel = document.createElement("button");
+  cancel.className = "edge-menu-cancel";
+  cancel.textContent = t("l.cancel");
+  cancel.addEventListener("click", close);
+  menu.appendChild(cancel);
+  document.body.appendChild(menu);
+  const r = anchor.getBoundingClientRect();
+  const mw = menu.offsetWidth || 220;
+  menu.style.left = `${Math.round(Math.max(4, Math.min(r.left, window.innerWidth - mw - 4)))}px`;
+  menu.style.top = `${Math.round(r.bottom + 2)}px`;
+  setTimeout(() => document.addEventListener("pointerdown", away, true), 0);
+}
+
+function moveGraph(slotId: string, toFileId: string | null): void {
+  const slot = emtree.get(slotId);
+  if (!slot) return;
+  const from = emtree.fileOf(slot);
+  const gid = String((slot.store.doc.graph as Record<string, unknown>).graph_id ?? slot.id);
+  const to = emtree.file(toFileId);
+  if (to && (emtree.slotsOf(to.id).some((s) =>
+        String((s.store.doc.graph as Record<string, unknown>).graph_id ?? s.id) === gid) || to.retained[gid])) {
+    // two graphs with one id in one file: the second would overwrite the first
+    toast(t("emtree.moveSameId", { file: to.name }));
+    return;
+  }
+  if (from) delete from.retained[gid];
+  emtree.assign(slotId, toFileId);
+  if (slot.id === emtree.activeId) currentFilePath = slot.path;
+  logInfo(t("emtree.moved", { name: slotLabel(slot), file: to ? to.name : t("emtree.noFileGroup") }));
+  toast(t("emtree.moved", { name: slotLabel(slot), file: to ? to.name : t("emtree.noFileGroup") }));
+  projectVersion = (emtree.activeFile()?.version as ProjectVersion | null) ?? null;
+  updateVersionIndicator();
+  updateToolbar();
+  refreshEMTree();
+}
+
+async function moveGraphToNewFile(slotId: string): Promise<void> {
+  const slot = emtree.get(slotId);
+  if (!slot) return;
+  const previous = slot.fileId;
+  const file = emtree.addFile(null, `${String(slotLabel(slot)).replace(/[^\w.-]+/g, "_")}.em.json`);
+  moveGraph(slotId, file.id);
+  // a new file is born on disk: Save As for it right away (the browser downloads)
+  const ok = await saveFileAs(file);
+  if (!ok) {
+    emtree.assign(slotId, previous);
+    emtree.files = emtree.files.filter((f) => f.id !== file.id);
+    refreshEMTree();
+  }
+}
+
 const emtreeHandlers: EMTreeHandlers = {
   // AUDIT C · a story in the EMtree opens it: the graph becomes active and the
   // Narrativa space shows that story
@@ -11461,17 +11807,23 @@ const emtreeHandlers: EMTreeHandlers = {
         && !confirm(t("emtree.unsaved", { name: slotLabel(slot) }))) {
       return;
     }
-    const nextId = emtree.remove(id);
-    if (nextId) {
-      // The neighbour becomes active. `activateSlot` refuses a no-op switch, so
-      // force the swap by clearing our idea of "current" first — remove() has
-      // already moved `activeId`, and the store still points at the closed slot.
-      store = null;
-      activateSlot(nextId);
-    } else {
-      closeWorkspace();
-    }
-    refreshEMTree();
+    // F2 · closing a graph is not deleting it from its file: the version on
+    // disk stays in the file and is written back by the next Save of that file
+    const file = emtree.fileOf(slot);
+    const gid = String((slot.store.doc.graph as Record<string, unknown>).graph_id ?? slot.id);
+    if (file && file.onDisk[gid]) file.retained[gid] = file.onDisk[gid];
+    closeSlot(id);
+  },
+  onMoveGraph: (slotId, anchor) => openMoveMenu(slotId, anchor),
+  onSaveFile: (fileId) => {
+    const file = emtree.file(fileId);
+    if (file) void saveFile(file);
+  },
+  onCloseFile: (fileId) => {
+    const file = emtree.file(fileId);
+    if (!file) return;
+    if (emtree.fileDirty(fileId) && !confirm(t("emtree.closeFileUnsaved", { name: file.name }))) return;
+    closeFile(fileId);
   },
   onOpen: () => void openDocument(),
   onNew: () => newDocument(),
@@ -26555,7 +26907,9 @@ window.addEventListener("keydown", (e) => {
   const inField = scope === "field";
   if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "s") {
     e.preventDefault();
-    if (e.shiftKey) void saveAsDocument();
+    // F2 · ⌥⌘S saves every file with unsaved work
+    if (e.altKey) void saveAllDocuments();
+    else if (e.shiftKey) void saveAsDocument();
     else void saveDocument();
     return;
   }

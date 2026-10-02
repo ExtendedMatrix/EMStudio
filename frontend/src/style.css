@@ -4587,9 +4587,9 @@ body.sync-active #footer-brand #em-version {
 
 .et-slot {
   display: grid;
-  /* row button takes the space, close button keeps its own column, aux note
-     spans both underneath */
-  grid-template-columns: 1fr auto;
+  /* row button takes the space, move + close keep their own columns, aux note
+     spans them underneath */
+  grid-template-columns: 1fr auto auto;
   align-items: center;
   border: 1px solid var(--border);
   border-left: 3px solid transparent;
@@ -4649,6 +4649,76 @@ body.sync-active #footer-brand #em-version {
 .et-close:hover {
   color: var(--danger);
   background: var(--bg-danger-soft);
+}
+
+/* F1 · the two levels: a file is a group, its graphs under it */
+.et-files {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.et-file {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 4px 4px 6px;
+}
+.et-file.et-file-active {
+  /* the file ⌘S writes */
+  border-color: var(--accent);
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+.et-file-head {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 2px 2px 5px 4px;
+  min-width: 0;
+}
+.et-file-icon { color: var(--text-dim); }
+.et-file-name {
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.et-file-tail {
+  flex: 1;
+  min-width: 0;
+  font-size: 10px;
+  color: var(--text-faint);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  direction: rtl;               /* the END of a long path is the part that says where */
+  text-align: left;
+}
+.et-file-target {
+  font-size: 9.5px;
+  padding: 0 5px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-accent-soft);
+  color: var(--accent-ink);
+  white-space: nowrap;
+}
+.et-nofile .et-file-name { font-style: italic; font-weight: 600; }
+.et-file-save, .et-file-close, .et-move {
+  padding: 1px 6px;
+  border: none;
+  background: none;
+  color: var(--text-dim);
+  font-size: 11px;
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+}
+.et-file-close { font-size: 14px; line-height: 1; }
+.et-file-save:hover, .et-move:hover { color: var(--accent-ink); background: var(--bg-accent-soft); }
+.et-file-close:hover { color: var(--danger); background: var(--bg-danger-soft); }
+.et-retained {
+  margin: 4px 4px 0;
+  font-size: 10px;
+  color: var(--text-faint);
 }
 
 .et-aux {
@@ -8788,3 +8858,29 @@ input.storage-path:focus { border-color: var(--accent); background: var(--bg-pan
 .tile-storagebody.storage-split > .storage-detail { flex: 0 1 auto; max-height: 55%; overflow-y: auto;
   border-top: 1px solid var(--border); background: var(--bg-panel); padding: 6px 2px 8px; }
 .storage-sidecars { align-self: flex-start; margin: 4px 8px; font-size: 11px; }
+
+/* F2 · «Sposta in…» — the same look as the edge menu, fixed to the viewport */
+.et-move-menu {
+  position: fixed;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
+  padding: 6px;
+  z-index: 60;
+  min-width: 210px;
+}
+.et-move-menu button {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: none;
+  border-radius: var(--radius);
+  padding: 5px 8px;
+  font-size: 12.5px;
+  cursor: pointer;
+  color: var(--text);
+}
+.et-move-menu button:hover { background: var(--bg-hover); }
+.et-move-menu .et-move-tail { color: var(--text-faint); font-size: 10.5px; margin-left: 6px; }
