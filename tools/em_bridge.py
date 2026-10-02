@@ -449,11 +449,21 @@ def _scan_notes(api, folder: str) -> dict:
     DosCo convention ignores — measured: it vanished from the scan of San
     Pietro), and the ids carried by more than one file (D.04, D.11). The id is
     read with s3Dgraphy's own DosCo prefix (`resources.fs_backend`), never a
-    second rule here; an s3dgraphy without it says nothing."""
+    second rule here; an s3dgraphy without it says nothing.
+
+    DEV30 A2 · through the public `s3dgraphy.resources.em_id_of` (dev30); an
+    s3dgraphy older than that still has the private prefix it wraps."""
     try:
-        from s3dgraphy.resources.fs_backend import _EM_ID_PREFIX
+        from s3dgraphy.resources import em_id_of
     except Exception:
-        return {}
+        try:
+            from s3dgraphy.resources.fs_backend import _EM_ID_PREFIX
+        except Exception:
+            return {}
+
+        def em_id_of(name):
+            m = _EM_ID_PREFIX.match(name or "")
+            return m.group(1) if m else None
     by_id: dict = {}
     no_id: list = []
     try:
@@ -465,11 +475,11 @@ def _scan_notes(api, folder: str) -> dict:
         name = str(e.get("name") or file)
         if not file or file.startswith(".") or e.get("present") is False:
             continue
-        m = _EM_ID_PREFIX.match(name)      # the same field the orphan scan reads
-        if not m:
+        em_id = em_id_of(name)             # the same field the orphan scan reads
+        if not em_id:
             no_id.append(file)
         else:
-            by_id.setdefault(m.group(1), []).append(file)
+            by_id.setdefault(em_id, []).append(file)
     dup = {k: sorted(v) for k, v in sorted(by_id.items()) if len(v) > 1}
     return {"no_id": sorted(no_id), "duplicate_ids": dup}
 
@@ -3816,20 +3826,10 @@ def make_handler(api):
                         return
                     for w in warnings:
                         sys.stderr.write(f"  [bridge] warning: {w}\n")
+                    # DEV30 A1 · a DOCUMENT answers through the same seam
+                    # (s3dgraphy dev30 reads its url as the locator): the bridge
+                    # no longer reads a document's url by itself
                     loc = api.resolve_resource(graph, rid) or {}
-                    if not loc:
-                        # DEV29 B6 · a DOCUMENT carries its file in data.url
-                        # (the GraphML's «/DosCo/D.02.jpg») and resolve_resource
-                        # answers only for ResourceNodes: read it as a locator
-                        node = graph.find_node_by_id(rid)
-                        url = "" if node is None else str(getattr(node, "url", None)
-                                                          or (getattr(node, "data", None) or {}).get("url") or "")
-                        if url:
-                            try:
-                                from s3dgraphy.resources import classify_locator
-                                loc = {"kind": classify_locator(url), "value": url}
-                            except Exception:  # an s3dgraphy without the classifier
-                                loc = {"kind": "local_path", "value": url}
                     kind, value = loc.get("kind"), loc.get("value") or ""
                     if kind == "http_url":
                         # Remote already: hand back the URL and let the browser
