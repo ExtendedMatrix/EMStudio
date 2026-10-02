@@ -2888,6 +2888,33 @@ test("V4.storage", "Storage: il percorso si legge (la coda, e intero al passaggi
     detail: { held, selection, crumb, card, errors } };
 });
 
+test("V6.resources", "Strumenti ▸ Risorse: due file con lo stesso id (D.04) avvisano, un file senza id è nominato, e i documenti «/DosCo/…» non restano «assenti» dopo lo scan della cartella", async () => {
+  const root = FS_ROOT ?? (await rootPath());
+  const dir = `${root}/dev29/DosCo`;
+  mkdirSync(dir, { recursive: true });
+  // a 1×1 JPEG: the thumbnail decodes, the test is about RESOLVING the file
+  const jpg = Buffer.from("/9j/4AAQSkZJRgABAQEASABIAAD/2wBDAP//////////////////////////////////////////////////////////////////////////////////////wgALCAABAAEBAREA/8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQABPxA=", "base64");
+  for (const f of ["D.02.jpg", "D.33.jpg", "D.04_Frammento.JPG", "D.04_Pilastrino.JPG", "photo_2022-02-07_11-47-54.jpg"]) writeFileSync(`${dir}/${f}`, jpg);
+  const { p, ctx, errors } = await open({ doc: "dev29-segni-lite", locale: "en" });
+  await p.evaluate(() => document.getElementById("btn-resources").click());
+  await p.fill("#res-folder", dir);
+  await p.click("#res-scan");
+  await p.waitForTimeout(2500);
+  const notes = await p.evaluate(() => [...document.querySelectorAll("#res-shelf .res-note")].map((n) => ({ dup: n.dataset.dupId ?? null, noId: n.dataset.noId ?? null, txt: n.textContent })));
+  // the Documents section re-asks its previews with the folder now set
+  await p.evaluate(() => { document.getElementById("resources-done").click(); document.getElementById("btn-resources").click(); });
+  await p.waitForTimeout(500);
+  await p.evaluate(() => document.getElementById("res-docs")?.scrollIntoView());
+  await p.waitForTimeout(2500);
+  const docs = await p.evaluate(() => [...document.querySelectorAll("#res-docs .res-row")].map((r) => ({ name: r.querySelector(".res-row-title")?.textContent, missing: !!r.querySelector(".rp-missing") })));
+  await p.screenshot({ path: SHOT("v6-risorse-dosco") }).catch(() => {});
+  await ctx.close();
+  return { pass: notes.some((n) => n.dup === "D.04" && /D\.04_Frammento/.test(n.txt) && /D\.04_Pilastrino/.test(n.txt))
+      && notes.some((n) => n.noId === "1" && /photo_2022-02-07_11-47-54\.jpg/.test(n.txt))
+      && docs.length === 3 && docs.every((d) => !d.missing) && !errors.length,
+    detail: { notes, docs, errors } };
+});
+
 // ── run ─────────────────────────────────────────────────────────────────────
 const chosen = cases.filter((c) => !only.length || only.includes(c.id) || only.some((o) => c.id.startsWith(o + ".")));
 for (const c of chosen) {

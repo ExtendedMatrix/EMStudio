@@ -439,6 +439,58 @@ def _compose_resources(targets, inputs):
     return nodes, list(em["edges"])
 
 
+def _scan_notes(api, folder: str) -> dict:
+    """DEV29 B6 · what the orphan scan leaves out, said instead of dropped: the
+    files whose name carries NO EM id (`photo_2022-02-07_11-47-54.jpg`, which the
+    DosCo convention ignores — measured: it vanished from the scan of San
+    Pietro), and the ids carried by more than one file (D.04, D.11). The id is
+    read with s3Dgraphy's own DosCo prefix (`resources.fs_backend`), never a
+    second rule here; an s3dgraphy without it says nothing."""
+    try:
+        from s3dgraphy.resources.fs_backend import _EM_ID_PREFIX
+    except Exception:
+        return {}
+    by_id: dict = {}
+    no_id: list = []
+    try:
+        entries = api.scan_fs_resources(folder)
+    except Exception:
+        return {}
+    for e in entries:
+        file = os.path.basename(str(e.get("rel_path") or "")) or str(e.get("name") or "")
+        name = str(e.get("name") or file)
+        if not file or file.startswith(".") or e.get("present") is False:
+            continue
+        m = _EM_ID_PREFIX.match(name)      # the same field the orphan scan reads
+        if not m:
+            no_id.append(file)
+        else:
+            by_id.setdefault(m.group(1), []).append(file)
+    dup = {k: sorted(v) for k, v in sorted(by_id.items()) if len(v) > 1}
+    return {"no_id": sorted(no_id), "duplicate_ids": dup}
+
+
+def _resolve_on_folder(locator: str, folder: str):
+    """DEV29 B6 · a study-relative locator (`/DosCo/D.02.jpg`, `DosCo\\D.02.jpg`,
+    `D.02.jpg`) resolved on an indexed folder: the folder may BE `DosCo` (then
+    the part after it), contain it, or hold the file by its name. None when no
+    candidate is a file. A double slash reads as one (`//DosCo/D.33.jpg`)."""
+    parts = [p for p in re.split(r"[\\/]+", str(locator or "")) if p and p != "."]
+    if not parts or not folder:
+        return None
+    base = os.path.abspath(os.path.expanduser(folder))
+    name = os.path.basename(base.rstrip(os.sep))
+    cands = []
+    if name in parts:
+        cands.append(os.path.join(base, *parts[parts.index(name) + 1:]))
+    cands.append(os.path.join(base, *parts))
+    cands.append(os.path.join(base, parts[-1]))
+    for c in cands:
+        if os.path.isfile(c):
+            return c
+    return None
+
+
 def _fs_inside_roots(full: str) -> bool:
     """Is this path reachable right now? True everywhere in whole-disk mode."""
     if _FS_ALL:
@@ -3448,7 +3500,8 @@ def make_handler(api):
                     shelf = api.shelf_resources(
                         body.get("doc"), folder,
                         graph_code=body.get("graph_code"))
-                    payload = {"ok": True, "folder": folder, "shelf": shelf}
+                    payload = {"ok": True, "folder": folder, "shelf": shelf,
+                               **_scan_notes(api, folder)}
                 else:
                     doc = body.get("doc")
                     if doc is None:
@@ -3756,6 +3809,19 @@ def make_handler(api):
                     for w in warnings:
                         sys.stderr.write(f"  [bridge] warning: {w}\n")
                     loc = api.resolve_resource(graph, rid) or {}
+                    if not loc:
+                        # DEV29 B6 · a DOCUMENT carries its file in data.url
+                        # (the GraphML's «/DosCo/D.02.jpg») and resolve_resource
+                        # answers only for ResourceNodes: read it as a locator
+                        node = graph.find_node_by_id(rid)
+                        url = "" if node is None else str(getattr(node, "url", None)
+                                                          or (getattr(node, "data", None) or {}).get("url") or "")
+                        if url:
+                            try:
+                                from s3dgraphy.resources import classify_locator
+                                loc = {"kind": classify_locator(url), "value": url}
+                            except Exception:  # an s3dgraphy without the classifier
+                                loc = {"kind": "local_path", "value": url}
                     kind, value = loc.get("kind"), loc.get("value") or ""
                     if kind == "http_url":
                         # Remote already: hand back the URL and let the browser
@@ -3777,6 +3843,12 @@ def make_handler(api):
                         return
                     if kind in ("local_path", "file_uri") and value:
                         path = value[7:] if value.startswith("file://") else value
+                        if not os.path.isfile(path) and folder:
+                            # DEV29 B6 · «/DosCo/D.02.jpg» is a path of the
+                            # STUDY'S folder, not of the disk: resolved on the
+                            # folder just indexed (measured: the documents stayed
+                            # «absent» after the scan of the folder holding them)
+                            path = _resolve_on_folder(path, folder) or path
                         if os.path.isfile(path):
                             local = path
                             payload["filename"] = os.path.basename(path)

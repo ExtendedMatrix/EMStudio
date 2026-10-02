@@ -8772,3 +8772,7 @@ input.storage-path:focus { border-color: var(--accent); background: var(--bg-pan
 .doc-passage-where { font-size: .78rem; color: var(--text-muted); }
 .doc-passage-text { font-family: var(--serif, Georgia, serif); line-height: 1.45; }
 .doc-passage-text[lang] { font-style: italic; }
+/* DEV29 B6 · what the scan leaves out, said */
+.res-notes { margin: 4px 0 8px; font-size: 12px; display: grid; gap: 3px; }
+.res-note { color: var(--text-muted); overflow-wrap: anywhere; }
+.res-note.warn { color: var(--warn-ink); }

@@ -10658,6 +10658,9 @@ const resDocsCount = document.getElementById("res-docs-count")!;
 const resLinks = document.getElementById("res-links")!;
 const resLinksCount = document.getElementById("res-links-count")!;
 let resLastShelf: OrphanEntry[] = [];
+/** DEV29 B6 · what the scan does NOT put on the Shelf, said: files without an
+ *  EM id (the DosCo convention ignores them) and ids carried by two files */
+let resLastNotes: { noId: string[]; dup: Record<string, string[]> } = { noId: [], dup: {} };
 
 function openResources(): void {
   if (!store) {
@@ -10749,8 +10752,29 @@ function renderResShelf(): void {
   resShelfCount.textContent = resLastShelf.length
     ? `(${resLastShelf.length})`
     : "";
+  // DEV29 B6 · the two things the scan used to drop in silence
+  const dups = Object.entries(resLastNotes.dup);
+  if (dups.length || resLastNotes.noId.length) {
+    const notes = document.createElement("div");
+    notes.className = "res-notes";
+    for (const [id, files] of dups) {
+      const d = document.createElement("div");
+      d.className = "res-note warn";
+      d.dataset.dupId = id;
+      d.textContent = t("res.dupId", { id, n: String(files.length), files: files.join(" · ") });
+      notes.appendChild(d);
+    }
+    if (resLastNotes.noId.length) {
+      const d = document.createElement("div");
+      d.className = "res-note";
+      d.dataset.noId = String(resLastNotes.noId.length);
+      d.textContent = t("res.noId", { n: String(resLastNotes.noId.length), files: resLastNotes.noId.join(" · ") });
+      notes.appendChild(d);
+    }
+    resShelf.appendChild(notes);
+  }
   if (!resLastShelf.length) {
-    resShelf.innerHTML = `<div class="res-empty">${escapeHtml(t("res.shelfEmpty"))}</div>`;
+    resShelf.insertAdjacentHTML("beforeend", `<div class="res-empty">${escapeHtml(t("res.shelfEmpty"))}</div>`);
     return;
   }
   for (const e of resLastShelf) {
@@ -10800,6 +10824,7 @@ async function scanResources(): Promise<void> {
     }
     const j = await res.json();
     resLastShelf = (j.shelf ?? []) as OrphanEntry[];
+    resLastNotes = { noId: (j.no_id ?? []) as string[], dup: (j.duplicate_ids ?? {}) as Record<string, string[]> };
     renderResShelf();
     resStatus.textContent = t("res.indexed", { n: String(resLastShelf.length) });
   } catch {
