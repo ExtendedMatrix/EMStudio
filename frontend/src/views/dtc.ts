@@ -140,6 +140,15 @@ export function processLabel(n: EmNode): string | undefined {
   return kind ? dtcKindLabel(kind) : undefined;
 }
 
+/** DEV30 D3 · the day of an event's act: `data.date`, else `at`, else the day
+ *  the node was made (a stamp's event: the day of its stamps). */
+function actDay(n: EmNode): string {
+  const d = (n.data ?? {}) as Record<string, unknown>;
+  for (const k of ["date", "at", "when", "start", "created_at"])
+    if (typeof d[k] === "string" && (d[k] as string).trim()) return (d[k] as string).trim().slice(0, 10);
+  return "";
+}
+
 /** «71 photos» / «12 files»: images are photos, anything else is files. */
 function setLabel(members: EmNode[], open: boolean): string {
   const images = members.every((m) => /^image\//.test(String(((m.data ?? {}) as Record<string, unknown>).media_type ?? ""))
@@ -210,10 +219,21 @@ export function buildDtcScene(
   // acquisition. Two events that produced the same lot (the stamps' and the
   // declared one, San Pietro) each get their own block.
   const byIdAll = new Map(members.map((n) => [n.id, n]));
+  // DEV30 D3 · an event that CITES another (`dtc_had_input` acquisition →
+  // acquisition: the download of 2026 citing the capture of 2018) is not a
+  // step of making: the two are two rows of the acquisitions' lane, with their
+  // dates, and the lot they share is ONE block, the earlier event's
+  const isAcq = (id: string) => byIdAll.get(id)?.node_type === "dtc_acquisition";
+  const citesOf = new Map<string, string[]>();   // later event → the events it cites
+  for (const e of chain)
+    if (e.edge_type === "dtc_had_input" && isAcq(e.source) && isAcq(e.target) && e.source !== e.target)
+      (citesOf.get(e.source) ?? citesOf.set(e.source, []).get(e.source)!).push(e.target);
+  const citeEdge = (e: EmEdge) => e.edge_type === "dtc_had_input" && isAcq(e.source) && isAcq(e.target);
   const touched = new Map<string, number>();       // member → chain edges that are NOT acquisition→member outputs
   const producers = new Map<string, string[]>();   // member → acquisitions that output it
   for (const e of [...chain, ...bridges]) {
     const src = byIdAll.get(e.source);
+    if (citeEdge(e)) continue;
     if (e.edge_type === "dtc_had_output" && src?.node_type === "dtc_acquisition") {
       (producers.get(e.target) ?? producers.set(e.target, []).get(e.target)!).push(e.source);
       continue;
@@ -222,9 +242,15 @@ export function buildDtcScene(
     touched.set(e.target, (touched.get(e.target) ?? 0) + 1);
   }
   const foldedInto = new Map<string, string[]>();  // acquisition → its folded members
+  const alsoBy = new Map<string, Set<string>>();     // root acquisition → the later events citing it that share its lot
   for (const [m, acqs] of producers) {
     if (touched.get(m) || byIdAll.get(m)?.node_type === "dtc_acquisition") continue;
-    for (const a of acqs) (foldedInto.get(a) ?? foldedInto.set(a, []).get(a)!).push(m);
+    // DEV30 D3 · among events that cite one another, the lot folds into the
+    // one cited (the earliest); the citing ones point to that block
+    const roots = acqs.filter((a) => !(citesOf.get(a) ?? []).some((b) => acqs.includes(b)));
+    for (const a of roots) (foldedInto.get(a) ?? foldedInto.set(a, []).get(a)!).push(m);
+    for (const a of acqs) if (!roots.includes(a))
+      for (const r of roots) (alsoBy.get(r) ?? alsoBy.set(r, new Set()).get(r)!).add(a);
   }
   const hiddenMembers = new Set<string>();
   const setNodes: EmNode[] = [];
@@ -238,6 +264,8 @@ export function buildDtcScene(
                     data: { dtc_set_of: a, member_count: ms.length,
                             dtc_kind: ((byIdAll.get(a)?.data ?? {}) as Record<string, unknown>).dtc_kind } } as unknown as EmNode);
     chain.push({ id: `${dtcSetId(a)}::out`, source: a, target: dtcSetId(a), edge_type: "dtc_had_output" } as EmEdge);
+    for (const later of alsoBy.get(a) ?? [])
+      chain.push({ id: `${dtcSetId(a)}::out::${later}`, source: later, target: dtcSetId(a), edge_type: "dtc_had_output" } as EmEdge);
   }
   // a member drawn by ANOTHER acquisition still open stays; one folded by all
   // its acquisitions goes
@@ -263,6 +291,7 @@ export function buildDtcScene(
     flow.get(from)!.push(to);
   };
   for (const e of chain) {
+    if (citeEdge(e)) continue;   // DEV30 D3 · a citation is not a rank down
     // dtc_had_input: resource → process; dtc_derived_from: source → derived
     if (DTC_REVERSED_EDGES.has(String(e.edge_type))) addFlow(e.target, e.source);
     else addFlow(e.source, e.target); // dtc_had_output: process → resource
@@ -293,7 +322,7 @@ export function buildDtcScene(
     if (e.edge_type === "dtc_had_output") isOutput.add(e.target);
   const isConsumed = new Set<string>();
   for (const e of chain)
-    if (e.edge_type === "dtc_had_input") isConsumed.add(e.target);
+    if (e.edge_type === "dtc_had_input" && !citeEdge(e)) isConsumed.add(e.target);
   const roleOf = (n: EmNode): Role => {
     if (n.node_type === "dtc_acquisition") return "acquisition";
     if (isDtcNodeType(n.node_type)) return "process";
@@ -359,6 +388,7 @@ export function buildDtcScene(
       preds.get(to)!.push(from);
     }
 
+  const inCitation = new Set<string>([...citesOf.keys(), ...[...citesOf.values()].flat()]);
   const laneH = NODE_H + LANE_PAD * 2;
   const placedX = new Map<string, number>();
   ranks.forEach((r, i) => {
@@ -403,6 +433,11 @@ export function buildDtcScene(
         if (pl) sn.label = pl;
       }
       if (dtcSetOwner(n.id)) sn.label = String(n.name);
+      // DEV30 D3 · the two events of one lot say their dates
+      if (n.node_type === "dtc_acquisition" && inCitation.has(n.id)) {
+        const when = actDay(n);
+        if (when) sn.label = `${String(n.name || n.id)} · ${when}`;
+      }
       scene.nodes.push(sn);
       scene.byId.set(sn.id, sn);
     });
@@ -465,6 +500,39 @@ export function buildDtcScene(
       color: style.color,
     };
   });
+
+  // DEV30 D3 · a citing event in the rank of the event it cites goes on a
+  // SECOND ROW of that lane, under it (the lane grows by one row, the lanes
+  // below move down): «two rows of the same lane of acquisitions»
+  {
+    const ROW = NODE_H + 18;
+    const extra = new Array(ranks.length).fill(0);
+    const laneIdx = (id: string) => ranks.indexOf(rank.get(id) ?? 0);
+    const moved: Array<[SceneNode, number]> = [];
+    for (const [later, cited] of citesOf) {
+      const a = scene.byId.get(later);
+      const b = cited.map((c) => scene.byId.get(c)).find((x) => !!x && laneIdx(x.id) === laneIdx(later));
+      if (!a || !b) continue;
+      const li = laneIdx(later);
+      a.x = b.x;
+      moved.push([a, ROW]);
+      extra[li] = Math.max(extra[li], ROW);
+    }
+    if (moved.length) {
+      const shift: number[] = [];
+      let acc = 0;
+      for (let i = 0; i < ranks.length; i++) { shift.push(acc); acc += extra[i]; }
+      for (const sn of scene.nodes) sn.y += shift[Math.max(0, laneIdx(sn.id))];
+      for (const [sn, dy] of moved) sn.y += dy;
+      scene.lanes.forEach((ln, i) => { ln.y += shift[i]; ln.height += extra[i]; });
+      // nothing else may sit where the second row went: nodes of that lane
+      // whose x collides move right
+      for (const [sn] of moved)
+        for (const o of scene.nodes)
+          if (o !== sn && Math.abs(o.y - sn.y) < NODE_H && o.x < sn.x + NODE_W + H_GAP && o.x + NODE_W > sn.x)
+            o.x = sn.x + NODE_W + H_GAP;
+    }
+  }
 
   for (const e of [...chain, ...bridges])
     if (scene.byId.has(e.source) && scene.byId.has(e.target))

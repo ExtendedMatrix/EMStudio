@@ -11766,33 +11766,14 @@ function issueFixers(st: DocumentStore): IssueFixers {
     // DEV29 B8 · «Read a SHIFT.txt…»: s3Dgraphy reads it (bridge /read-shift),
     // the GeoPositionNode takes the CRS and the shift, one undo step
     readShift: { label: t("issues.readShift"), run: () => readShiftInto(st) },
-    // DEV29 B2 · the same lot, two events → ONE: `keep` (there first, the id the
-    // stamps cite) takes the name and the facts of `drop`, and every edge of
-    // `drop` that it has not already; `drop` goes. One undo step.
-    mergeEvents: {
-      label: t("issues.twinMerge", { b: "" }),
-      run: (keep, drop) => {
-        const k = st.node(keep), d = st.node(drop);
-        if (!k || !d) return;
-        const was = nm(drop);
-        st.batch(() => {
-          const kd = (k.data ?? {}) as Record<string, unknown>;
-          const dd = (d.data ?? {}) as Record<string, unknown>;
-          const generic = /^Acquisition( of \d+ file\(s\))?$/.test(String(k.name ?? ""));
-          st.updateNode(keep, { ...(generic && d.name ? { name: d.name } : {}),
-                                ...(!k.description && d.description ? { description: d.description } : {}),
-                                // the kept event's own facts win (its kind is what its stamps
-                                // say); the declared one fills what it lacks
-                                data: { ...dd, ...kd } });
-          for (const e of st.liveEdges().filter((x) => x.source === drop || x.target === drop)) {
-            const s0 = e.source === drop ? keep : e.source;
-            const t0 = e.target === drop ? keep : e.target;
-            if (s0 !== t0 && !st.hasEdge(s0, t0, String(e.edge_type)))
-              st.addEdge(s0, t0, String(e.edge_type), (e as { attributes?: Record<string, unknown> }).attributes);
-          }
-          st.deleteNode(drop);
-        });
-        done(t("issues.twinMerged", { a: was, b: nm(keep) }), [keep]);
+    // DEV30 D3 · the same lot, two events, LINKED: the later cites the earlier
+    // (`dtc_had_input` event → event). Nothing is merged (E.D., 2 Oct 2026:
+    // the capture of 2018 and the download of 2026 are two acts). One undo step.
+    linkEvents: {
+      run: (later, earlier) => {
+        if (!st.node(later) || !st.node(earlier) || st.hasEdge(later, earlier, "dtc_had_input")) return;
+        st.addEdge(later, earlier, "dtc_had_input");
+        done(t("issues.twinLinked", { a: nm(later), b: nm(earlier) }), [later, earlier]);
       },
     },
     assignEpoch: (unit, epoch) => {
@@ -19464,10 +19445,6 @@ function stampComposeBox(win: Win, listing: FsListing): HTMLElement {
     renderStorage();
     redrawDraftPicture();
   };
-  // DEV30 D1 · for a retrieval «from where?» is REQUIRED (E.D., 2 Oct), and
-  // filled when it can be read: the DOI a Zenodo folder carries in its name,
-  // else the one address the stamps already in this folder declare
-  draft.retrieval = retrieval;
   select.onblur = () => checkField(box, "kind");
   fields.appendChild(wrap(t("stamp2.kind"), select, "kind"));
   if (draft.kindWhy && draft.kindWhy.kind === draft.kind) {
@@ -19487,6 +19464,10 @@ function stampComposeBox(win: Win, listing: FsListing): HTMLElement {
   // folder named after a Zenodo record proposes its DOI.
   const folderName = listing.path.split("/").filter(Boolean).pop() ?? "";
   const retrieval = draft.origin && !!draft.kind && dtcKindFamily(draft.kind, "acquisition") === "retrieval";
+  // DEV30 D1 · for a retrieval «from where?» is REQUIRED (E.D., 2 Oct), and
+  // filled when it can be read: the DOI a Zenodo folder carries in its name,
+  // else the one address the stamps already in this folder declare
+  draft.retrieval = retrieval;
   if (retrieval) {
     const declared = [...(folderCover(listing).retrieved ?? [])];
     if (draft.source == null) draft.source = doiFromName(folderName) ?? (declared.length === 1 ? declared[0] : "");
@@ -20100,8 +20081,6 @@ function field(text: string, value: string, onInput: (v: string) => void,
   const wrap = labelled(text, input);
   if (opts.small) wrap.classList.add("small");
   return wrap;
-  /** DEV30 D1 · where the stamps here say their bytes were retrieved from */
-  retrieved?: Set<string>;
 }
 
 // ── CAMPAGNA · what the stamps of a folder COVER ───────────────────────────
@@ -20121,14 +20100,14 @@ interface FolderCover {
   doors: Set<string>;
   /** sidecar path → its stamp's self (for the seal on the row) */
   selves: Map<string, Record<string, unknown>>;
+  /** DEV30 D1 · where the stamps here say their bytes were retrieved from */
+  retrieved?: Set<string>;
 }
 const folderCovers = new Map<string, { key: string; cover: FolderCover }>();
 const emptyCover = (): FolderCover => ({ memberOf: new Map(), doors: new Set(), selves: new Map() });
 const coverKey = (listing: FsListing): string =>
   listing.entries.filter((e) => isStampPath(e.path)).map((e) => `${e.name}@${e.mtime}`).join("|");
 
-    const rf = (st as unknown as { how?: { acquisition?: { retrieved_from?: unknown } } }).how?.acquisition?.retrieved_from;
-    if (typeof rf === "string" && rf.trim()) (cover.retrieved ??= new Set()).add(rf.trim());
 /** The cover of a listing as far as it is known (empty until read). */
 function folderCover(listing: FsListing): FolderCover {
   const c = folderCovers.get(listing.path);
@@ -20148,6 +20127,8 @@ async function ensureFolderCover(listing: FsListing): Promise<FolderCover> {
     const self = (st as unknown as { self?: Record<string, unknown> } | null)?.self;
     if (!self) continue;
     cover.selves.set(e.path, self);
+    const rf = (st as unknown as { how?: { acquisition?: { retrieved_from?: unknown } } }).how?.acquisition?.retrieved_from;
+    if (typeof rf === "string" && rf.trim()) (cover.retrieved ??= new Set()).add(rf.trim());
     const door = e.path.replace(/\.stamp\.json$/, "");
     const members = Array.isArray(self.members) ? self.members as Array<{ path?: string }> : [];
     if (self.packaging === "file_set" && members.length) {

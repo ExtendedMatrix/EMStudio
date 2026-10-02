@@ -70,7 +70,9 @@ export interface IssueFixers {
   readShift?: { label: string; run: () => void };
   /** DEV29 B2 · two acquisition events for the same files → one (`keep` stays,
    *  with the name and the facts of `drop`, which goes) */
-  mergeEvents?: { label: string; run: (keep: string, drop: string) => void };
+  /** DEV30 D3 · two events of one lot, linked: the later one CITES the
+   *  earlier (`dtc_had_input` event → event) — never merged */
+  linkEvents?: { run: (later: string, earlier: string) => void };
 }
 
 export interface IssueSources {
@@ -282,13 +284,13 @@ export function issues(src: IssueSources): Issue[] {
                                      run: () => fx.itsMe!.run(n.id) } } : {}) });
   }
 
-  // ── DEV29 B2 · the same lot, two events ─────────────────────────────────
+  // ── DEV29 B2 → DEV30 D3 · the same lot, two events NOT linked ───────────
   for (const tw of twinAcquisitions(nodes, doc.graph.edges ?? [])) {
-    const m = fx.mergeEvents;
-    push({ node: tw.drop, sev: "warn", rule: "twin",
-           txt: t("issues.twinEvents", { a: name(tw.drop), b: name(tw.keep), n: String(tw.members) }),
-           ...(m ? { fix: { kind: "button" as const, label: t("issues.twinMerge", { b: name(tw.keep) }),
-                            run: () => m.run(tw.keep, tw.drop) } } : {}) });
+    const m = fx.linkEvents;
+    push({ node: tw.later, sev: "warn", rule: "twin",
+           txt: t("issues.twinEvents", { a: name(tw.later), b: name(tw.earlier), n: String(tw.members) }),
+           ...(m ? { fix: { kind: "button" as const, label: t("issues.twinLink", { a: name(tw.later), b: name(tw.earlier) }),
+                            run: () => m.run(tw.later, tw.earlier) } } : {}) });
   }
 
   // ── DEV29 B8 · the addresses, the georeference, what is declared missing ──
@@ -360,31 +362,48 @@ export function issues(src: IssueSources): Issue[] {
 
 /**
  * DEV29 B2 · two acquisitions that produced EXACTLY the same files are one lot
- * with two events — measured on San Pietro: the drone's 71 stamps (29 Sep) had
- * made their event («Acquisition», id = the stamps' process_id), and the event
- * declared on 1 Oct («Volo drone San Pietro») produced the same 71 files beside
- * it. The event that was THERE FIRST stays (its id is the one the stamps cite,
- * so re-reading them lands on it — s3Dgraphy's `bucket_acquisition` does the
- * same from dev29); the later one gives it its name and its facts, and goes.
+ * with two events — measured on San Pietro: the drone's 71 stamps (download,
+ * 29 Sep 2026) had made their event («Acquisition», id = the stamps'
+ * process_id), and the event declared on 1 Oct («Volo drone San Pietro», the
+ * photos of 17 Feb 2018) produced the same 71 files beside it.
+ *
+ * DEV30 D3 (E.D., 2 Oct 2026) · they STAY TWO: two acts at two times, the
+ * capture and the retrieval. What is wrong is only that they say nothing of
+ * each other, so a pair is reported while neither cites the other, and the fix
+ * writes the link — the LATER event cites the EARLIER (`dtc_had_input`, target
+ * a DTCNode, which the datamodel admits). The act's date decides (`data.date`,
+ * else `at`, else when the node was made); a tie, the id.
  */
+export function actDateOf(n: EmNode | undefined): string {
+  const d = (n?.data ?? {}) as Record<string, unknown>;
+  for (const k of ["date", "at", "when", "start", "created_at"])
+    if (typeof d[k] === "string" && (d[k] as string).trim()) return (d[k] as string).trim();
+  return "\uffff";
+}
 export function twinAcquisitions(nodes: EmNode[], edges: Array<{ source: string; target: string; edge_type?: string }>):
-    Array<{ keep: string; drop: string; members: number }> {
+    Array<{ later: string; earlier: string; members: number }> {
   const acq = new Map(nodes.filter((n) => n.node_type === "dtc_acquisition").map((n) => [n.id, n]));
   const outs = new Map<string, string[]>();
-  for (const e of edges)
+  const cites = new Set<string>();
+  for (const e of edges) {
     if (e.edge_type === "dtc_had_output" && acq.has(e.source))
       (outs.get(e.source) ?? outs.set(e.source, []).get(e.source)!).push(e.target);
+    if (e.edge_type === "dtc_had_input" && acq.has(e.source) && acq.has(e.target))
+      cites.add(`${e.source}\u0000${e.target}`).add(`${e.target}\u0000${e.source}`);
+  }
   const bySet = new Map<string, string[]>();
   for (const [a, ts] of outs) {
     const k = [...new Set(ts)].sort().join("\u0000");
     (bySet.get(k) ?? bySet.set(k, []).get(k)!).push(a);
   }
-  const at = (id: string): string => String(((acq.get(id)?.data ?? {}) as Record<string, unknown>).created_at ?? "\uffff");
-  const out: Array<{ keep: string; drop: string; members: number }> = [];
+  const out: Array<{ later: string; earlier: string; members: number }> = [];
   for (const [k, ids] of bySet) {
     if (ids.length < 2) continue;
-    const sorted = [...ids].sort((a, b) => at(a).localeCompare(at(b)) || a.localeCompare(b));
-    for (const d of sorted.slice(1)) out.push({ keep: sorted[0], drop: d, members: k.split("\u0000").length });
+    const sorted = [...ids].sort((a, b) => actDateOf(acq.get(a)).localeCompare(actDateOf(acq.get(b))) || a.localeCompare(b));
+    // each later event to the one before it: a chain, not a star
+    for (let i = 1; i < sorted.length; i++)
+      if (!cites.has(`${sorted[i]}\u0000${sorted[i - 1]}`))
+        out.push({ later: sorted[i], earlier: sorted[i - 1], members: k.split("\u0000").length });
   }
   return out;
 }
