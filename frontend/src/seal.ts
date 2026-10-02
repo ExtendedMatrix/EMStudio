@@ -32,7 +32,8 @@ export interface SealStamp {
     measures?: { size_bytes?: number; files?: number };
   };
   from?: Array<{ resource_id?: string; label?: string }>;
-  how?: { dtc_kind?: string; software?: Array<{ name?: string; version?: string }>; acquisition?: { name?: string } };
+  how?: { dtc_kind?: string; technique?: string; process_id?: string; software?: Array<{ name?: string; version?: string }>;
+          acquisition?: { name?: string; retrieved_from?: string } };
   by?: { at?: string; operator?: { id?: string; label?: string } };
 }
 
@@ -142,7 +143,9 @@ export function sealWords(st: SealStamp, kindLabel: (k: string) => string = (k) 
   const kind = st.how?.dtc_kind ? kindLabel(st.how.dtc_kind) : "";
   const from = parents.length
     ? t("seal.from", { parents: parents.join(", "), kind })
-    : t("seal.origin", { campaign: st.how?.acquisition?.name || kind || "—" });
+    : t("seal.origin", { campaign: st.how?.acquisition?.name || kind || "—" })
+      // DEV29 B5 · a retrieval says where the bytes were taken from
+      + (st.how?.acquisition?.retrieved_from ? ` · ${t("seal.retrievedFrom", { src: st.how.acquisition.retrieved_from })}` : "");
   const op = st.by?.operator;
   const orcid = op?.id ? op.id.replace(/^https?:\/\/orcid\.org\//, "") : "";
   const who = op?.label ? (orcid ? `${op.label} · ${orcid}` : op.label) : orcid || t("seal.nobody");

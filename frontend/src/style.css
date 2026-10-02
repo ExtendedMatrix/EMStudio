@@ -8636,6 +8636,11 @@ input.storage-path { direction: ltr; min-width: 16ch; width: 42ch; max-width: 50
   color: var(--text); background: transparent; border: 1px solid transparent; border-radius: var(--radius-sm); padding: 1px 4px; }
 input.storage-path:hover { border-color: var(--border); }
 input.storage-path:focus { border-color: var(--accent); background: var(--bg-panel); outline: none; }
+/* DEV29 B4 · the micro-card of a stamped file; the JSON behind a triangle */
+.stamp-card { display: grid; grid-template-columns: max-content 1fr; gap: 3px 10px; margin: 8px 0; font-size: 12px; }
+.stamp-card dt { color: var(--text-muted); }
+.stamp-card dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+.stamp-json > summary { cursor: pointer; color: var(--text-muted); font-size: 12px; margin: 4px 0; }
 .storage-held { margin: 6px 8px; padding: 6px 8px; font-size: 12px; color: var(--text-faint);
   border: 1px dashed var(--border-strong); border-radius: var(--radius); }
 .shelf-studies { margin: 4px 8px 6px; font-size: 11.5px; color: var(--text-faint); }

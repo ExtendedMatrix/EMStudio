@@ -2852,6 +2852,42 @@ test("V3.inspector", "ispettore della risorsa: un file_set dice «File set» (ch
       && r.produced && !errors.length, detail: { ...r, errors } };
 });
 
+test("V4.storage", "Storage: il percorso si legge (la coda, e intero al passaggio), un file timbrato apre la microscheda (chi, quando, atto, da dove, sigillo) col JSON chiuso, la radice sospesa è detta una volta, il doppio clic non seleziona il testo", async () => {
+  const root = FS_ROOT ?? (await rootPath());
+  const { p, ctx, errors } = await open({ doc: "catena", locale: "en", w: 1280,
+    route: { pattern: "**/fs/roots", handler: async (r) => {
+      const res = await r.fetch(); const j = await res.json();
+      await r.fulfill({ response: res, json: { ...j, suspended: ["/", "/", "/"] } });
+    } } });
+  await workspace(p, "assets");
+  const held = await p.evaluate(() => [...document.querySelectorAll(".storage-held")].map((x) => x.textContent));
+  await storageInto(p, [root.split("/").pop()]);
+  const row = p.locator(".storage-row", { has: p.locator(".storage-name", { hasText: /^zenodo-1234567$/ }) }).first();
+  await row.dblclick();
+  await p.waitForTimeout(700);
+  const selection = await p.evaluate(() => String(window.getSelection() ?? ""));
+  const crumb = await p.evaluate(() => { const c = document.querySelector("input.storage-path"); return c && { title: c.title, value: c.value,
+    tail: c.scrollLeft + c.clientWidth >= c.scrollWidth - 2, long: c.scrollWidth > c.clientWidth }; });
+  const file = p.locator(".storage-row", { has: p.locator(".storage-name", { hasText: /^a\.xlsx$/ }) }).first();
+  await file.click();
+  await p.waitForTimeout(1500);
+  const card = await p.evaluate(() => {
+    const c = document.querySelector(".stamp-card");
+    const det = document.querySelector("details.stamp-json");
+    return { rows: c ? [...c.querySelectorAll("dd")].map((d) => d.dataset.card) : [],
+             from: c?.querySelector('[data-card="from"]')?.textContent ?? "",
+             jsonClosed: !!det && !det.open && !!det.querySelector("pre.stamp-emitted-body"),
+             jsonVisible: !!det?.querySelector("pre")?.checkVisibility?.({ contentVisibilityAuto: true }) };
+  });
+  await p.screenshot({ path: SHOT("v4-storage-microscheda") }).catch(() => {});
+  await ctx.close();
+  return { pass: held.length === 1 && (held[0].match(/saved list/g) ?? []).length === 1
+      && selection === "" && !!crumb && crumb.title.includes(crumb.value) && crumb.title.includes("zenodo-1234567") && (!crumb.long || crumb.tail)
+      && ["who", "when", "act", "from", "seal"].every((k) => card.rows.includes(k)) && /zenodo\.1234567/.test(card.from)
+      && card.jsonClosed && !card.jsonVisible && !errors.length,
+    detail: { held, selection, crumb, card, errors } };
+});
+
 // ── run ─────────────────────────────────────────────────────────────────────
 const chosen = cases.filter((c) => !only.length || only.includes(c.id) || only.some((o) => c.id.startsWith(o + ".")));
 for (const c of chosen) {

@@ -533,7 +533,7 @@ import {
   type Draft, type DraftInput,
 } from "./stamp-compose";
 import { setTreeBridgeResolver, TREE_EXT, treeOf, verifyStamp, type TreeInfo } from "./stamp-tree";
-import { openSealCard, sealMini, type SealStamp } from "./seal";
+import { openSealCard, sealMini, sealWords, type SealStamp } from "./seal";
 import {
   DECLARED_KINDS, landStep, parentLabel, type DeclaredKind, type DeclaredLevel,
 } from "./declared";
@@ -18580,7 +18580,12 @@ async function suspendedRootsNote(body: HTMLElement, win: Win): Promise<void> {
     const r = await fetch(`${await bridgeUrl()}/fs/roots`);
     held = ((await r.json()) as { suspended?: string[] }).suspended ?? [];
   } catch { return; }
+  // DEV29 B4 · ONE note, said once: the same root was in the list three times
+  // (the saved list repeats it), and two renders racing each other each
+  // prepended their own copy — measured: three identical lines
+  held = [...new Set(held)];
   if (!held.length || !body.isConnected) return;
+  body.querySelectorAll(":scope > .storage-held").forEach((x) => x.remove());
   const box = document.createElement("div");
   box.className = "storage-held";
   box.dataset.suspended = held.join("|");
@@ -18599,10 +18604,18 @@ function setCrumb(crumb: HTMLElement | null, text: string, path: string): void {
   if (!crumb) return;
   if (crumb instanceof HTMLInputElement) {
     crumb.dataset.path = path;
+    // DEV29 B4 · the whole path on hover, and the field shows its TAIL (where
+    // you are), not «/Users/…» cut after a few letters: the scroll to the end
+    // waits for the field to be laid out (measured: set at render, before the
+    // field had a width, it stayed at 0 and showed the head)
+    crumb.title = path ? t("storage.pathTitle", { path }) : "";
     if (document.activeElement !== crumb) {
       crumb.value = path;
       crumb.placeholder = path ? t("storage.pathPh") : text;
       crumb.scrollLeft = crumb.scrollWidth;
+      requestAnimationFrame(() => {
+        if (document.activeElement !== crumb) crumb.scrollLeft = crumb.scrollWidth;
+      });
     }
     return;
   }
@@ -18612,6 +18625,15 @@ function setCrumb(crumb: HTMLElement | null, text: string, path: string): void {
 function renderStorageInto(host: StorageHost): void {
   const { win, body, crumb, up } = host;
   if (win.type !== "storage") return;
+  // DEV29 B4 · a double click on a folder opens it (the first click already
+  // did) and must not select the panel's text: the second click lands on the
+  // NEW listing, so the guard is the panel's, not the row's. Fields keep theirs.
+  if (!body.dataset.noDblSelect) {
+    body.dataset.noDblSelect = "1";
+    body.addEventListener("mousedown", (e) => {
+      if (e.detail > 1 && !(e.target as HTMLElement).closest?.("input, textarea, pre, [contenteditable]")) e.preventDefault();
+    });
+  }
   // COLLEGARE · the document card stays on top whatever the listing does
   const withCard = (): void => {
     body.querySelector(":scope > .dcard")?.remove();
@@ -19927,11 +19949,20 @@ function stampedBox(path: string, stamp: Stamp): HTMLElement {
 
   box.appendChild(stampWordsBox(path, stamp));
 
+  // DEV29 B4 · a stamped file opens on a MICRO-CARD that reads — who, when,
+  // which act, from where, the seal — and the JSON stays behind a triangle
+  // (E.D.'s «issue #1»: the JSON came first, and nobody reads a JSON first)
+  box.appendChild(stampCard(stamp));
+  const det = document.createElement("details");
+  det.className = "stamp-json";
+  const sum = document.createElement("summary");
+  sum.textContent = t("stamp.jsonToggle");
   const pre = document.createElement("pre");
   pre.className = "stamp-emitted-body";
   pre.dataset.readonly = "stamp";
   pre.textContent = JSON.stringify(stamp, null, 1);
-  box.appendChild(pre);
+  det.append(sum, pre);
+  box.appendChild(det);
 
   const note = document.createElement("i");
   note.className = "stamp-emitted-note";
@@ -19951,6 +19982,38 @@ function stampedBox(path: string, stamp: Stamp): HTMLElement {
   forward.onclick = () => { void composeFromStamped(path, stamp); };
   box.appendChild(forward);
   return box;
+}
+
+/** DEV29 B4 · the micro-card of a stamp: the seal's own words (`sealWords`),
+ *  plus the act (kind and technique) and the seal's digest, short. */
+function stampCard(stamp: Stamp): HTMLElement {
+  const st = stamp as unknown as SealStamp;
+  const kindOf = (k: string): string => {
+    for (const axis of ["acquisition", "process"])
+      for (const x of dtcKindsFor(axis)) if (x.kind === k) return x.label;
+    return k;
+  };
+  const w = sealWords(st, kindOf);
+  const act = [st.how?.dtc_kind ? kindOf(st.how.dtc_kind) : "", st.how?.technique ?? ""].filter(Boolean).join(" · ");
+  const digest = String(st.self?.digest ?? "");
+  const card = document.createElement("dl");
+  card.className = "stamp-card";
+  const row = (k: string, v: string, key: string): void => {
+    if (!v) return;
+    const dt = document.createElement("dt");
+    dt.textContent = t(k);
+    const dd = document.createElement("dd");
+    dd.textContent = v;
+    dd.dataset.card = key;
+    card.append(dt, dd);
+  };
+  row("stamp.card.what", w.what, "what");
+  row("stamp.card.who", w.who, "who");
+  row("stamp.card.when", w.when, "when");
+  row("stamp.card.act", act + (w.withWhat ? ` · ${w.withWhat}` : ""), "act");
+  row("stamp.card.from", w.from, "from");
+  row("stamp.card.seal", digest ? `${digest.slice(0, 15)}…${digest.slice(-6)}${st.self?.digest_covers ? ` · ${st.self.digest_covers}` : ""}` : "", "seal");
+  return card;
 }
 
 /** CAMPAGNA · «da aggiornare»: the stamp beside a .3tz says less than the 3tz
@@ -22015,6 +22078,8 @@ function storageRow(win: Win, entry: FsEntry, cover?: FolderCover): HTMLElement 
   const row = document.createElement("div");
   row.className = "storage-row" + (entry.outside ? " storage-outside" : "");
   row.dataset.path = entry.path;
+  // DEV29 B4 · a double click opens, it does not select the panel's text
+  row.addEventListener("mousedown", (e) => { if (e.detail > 1) e.preventDefault(); });
 
   const icon = document.createElement("span");
   icon.className = "storage-icon";
