@@ -2915,6 +2915,47 @@ test("V6.resources", "Strumenti ▸ Risorse: due file con lo stesso id (D.04) av
     detail: { notes, docs, errors } };
 });
 
+test("V7.mapping", "Mapping editor: il primo clic su «Leggi i campi» funziona; il template sourcelist di EM è riconosciuto (em_sourcelist_it, riga 2); «Una mappa registrata» mostra l'elenco; l'errore si legge nella finestra; il primo clic su «Applica» funziona", async () => {
+  mkdirSync(TAB(), { recursive: true });
+  copyFileSync(`${TD}dev29-em-sourcelist-lite.xlsx`, `${TAB()}/dev29-em-sourcelist-lite.xlsx`);
+  const { p, ctx, errors } = await open({ doc: "catena", locale: "en" });
+  await fileMenuDoor(p);
+  await p.waitForTimeout(500);
+  // type the path and click «Read the fields» ONCE, without leaving the field first
+  await p.click('#mapping-editor [data-field="source-path"]');
+  await p.keyboard.type(`${TAB()}/dev29-em-sourcelist-lite.xlsx`);
+  await p.click('#mapping-editor [data-action="read-fields"]');
+  await p.waitForFunction(() => document.querySelector("#mapping-editor .me-recognised, #mapping-editor .me-muted"), null, { timeout: 15000 }).catch(() => {});
+  await p.waitForTimeout(1500);
+  const read = await p.evaluate(() => ({
+    format: [...document.querySelectorAll("#mapping-editor .me-muted")].map((x) => x.textContent).find((x) => /read as/.test(x)) ?? null,
+    recognised: document.querySelector("#mapping-editor .me-recognised")?.dataset.recognised ?? null,
+    mapping: document.querySelector("#mapping-editor input[name=me-mapping]:checked")?.value ?? null,
+    ref: document.querySelector('#mapping-editor [data-field="mapping-ref"]')?.value ?? null,
+    registered: [...document.querySelectorAll("#mapping-editor .me-registered [data-mapping]")].map((b) => b.dataset.mapping),
+  }));
+  await p.screenshot({ path: SHOT("v7-mapping-riconosciuto") }).catch(() => {});
+  // the error: a name the registry does not know, then ONE click on Apply
+  await p.click('#mapping-editor [data-field="mapping-ref"]', { clickCount: 3 });
+  await p.keyboard.type("no_such_mapping");
+  await p.click('#mapping-editor [data-action="apply"]');
+  await p.waitForTimeout(2500);
+  const note = await p.evaluate(() => document.querySelector("#mapping-editor .me-note, #mapping-editor [class*=note]")?.textContent ?? "");
+  // …and the good one, one click: a new graph with the three documents
+  await p.click('#mapping-editor .me-registered [data-mapping="em_sourcelist_it"]');
+  await p.waitForTimeout(300);
+  const slotsBefore = await p.evaluate(() => window.__EM_DRAG__.slots().length);
+  await p.click('#mapping-editor [data-action="apply"]');
+  await p.waitForFunction((n) => window.__EM_DRAG__.slots().length > n, slotsBefore, { timeout: 15000 }).catch(() => {});
+  const docs = await p.evaluate(() => window.__EM_DRAG__.idsOfType("document").length);
+  await ctx.close();
+  return { pass: !!read.format && read.recognised === "em_sourcelist_it" && read.mapping === "registry" && read.ref === "em_sourcelist_it"
+      && read.registered.includes("em_sourcelist_it") && read.registered.length >= 2
+      && /no_such_mapping|not|unknown|non/i.test(note) && note !== "It did not work — the message says why."
+      && docs === 3 && !errors.length,
+    detail: { read, note: note.slice(0, 200), docs, errors } };
+});
+
 // ── run ─────────────────────────────────────────────────────────────────────
 const chosen = cases.filter((c) => !only.length || only.includes(c.id) || only.some((o) => c.id.startsWith(o + ".")));
 for (const c of chosen) {

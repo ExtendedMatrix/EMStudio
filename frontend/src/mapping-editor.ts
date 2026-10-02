@@ -122,6 +122,11 @@ export interface RelationDraft {
 export interface MappingEditorState {
   /** the source on screen */
   path: string;
+  /** DEV29 B7 · the mappings s3Dgraphy's registry knows (`api.registered_mappings`) */
+  registered?: Array<{ name: string; display_name?: string; description?: string; format?: string; sheet?: string; type?: string }>;
+  /** DEV29 B7 · the registered mappings this source looks like, best first
+   *  (`api.recognise_mapping`, via `sheet_header`'s `recognised`) */
+  recognised?: Array<{ name: string; display_name?: string; header_row?: number; matched?: number; of?: number }>;
   format: string;
   /** tables/sheets (a table source) — which one, and which exist */
   table?: string;
@@ -490,7 +495,17 @@ function sourceBox(state: MappingEditorState, h: MappingEditorHandlers,
   input.value = state.path;
   input.dataset.field = "source-path";
   input.placeholder = t("me.pathPlaceholder");
-  input.addEventListener("change", () => h.setPath(input.value));
+  // DEV29 B7 · the FIRST click on «Read the fields» works: the field's change
+  // used to redraw the editor on blur — i.e. on the button's mousedown — so the
+  // button the click was meant for was gone by mouseup (measured by Cowork: the
+  // second click worked). Typing enables the button in place; the change does
+  // not redraw when the focus goes to one of this row's buttons, whose own
+  // handler reads the field.
+  input.addEventListener("input", () => { pick.disabled = busy || !input.value.trim(); });
+  input.addEventListener("focusout", (e) => {
+    if ((e.relatedTarget as HTMLElement | null)?.closest?.(".me-row") === row) return;
+    if (input.value !== state.path) h.setPath(input.value);
+  });
   // TWO WAYS IN, and they are complementary rather than alternatives:
   //
   //  · Open…  — the SYSTEM dialog. Reaches anything on the machine, and what it
@@ -522,7 +537,8 @@ function sourceBox(state: MappingEditorState, h: MappingEditorHandlers,
   const pick = document.createElement("button");
   pick.textContent = t("me.read");
   pick.disabled = busy || !state.path.trim();
-  pick.addEventListener("click", () => h.chooseFile(state.path.trim()));
+  pick.dataset.action = "read-fields";
+  pick.addEventListener("click", () => h.chooseFile(input.value.trim()));
   row.append(input, open, browse, pick, fileInput);
   section.appendChild(row);
   if (state.picker) section.appendChild(pickerBox(state, h, busy));
@@ -1192,8 +1208,47 @@ function mappingBox(state: MappingEditorState, h: MappingEditorHandlers,
     input.dataset.field = "mapping-ref";
     input.value = (kind === "file" ? state.mappingPath : state.mappingName) ?? "";
     input.placeholder = t(kind === "file" ? "impmap.mappingFileHint" : "impmap.mappingRegistryHint");
-    input.addEventListener("change", () => h.setMappingRef(input.value));
+    // DEV29 B7 · the value is the state's AS IT IS TYPED (no redraw), so «Apply»
+    // is enabled before the click that wants it; the redraw waits for a blur
+    // that does not go to a button
+    input.addEventListener("input", () => {
+      if (kind === "file") state.mappingPath = input.value; else state.mappingName = input.value;
+      const apply = document.querySelector<HTMLButtonElement>('.me-box [data-action="apply"]');
+      if (apply) apply.disabled = apply.dataset.otherBlock === "1" || !input.value.trim();
+    });
+    input.addEventListener("focusout", (e) => {
+      if ((e.relatedTarget as HTMLElement | null)?.closest?.("button")) return;
+      h.setMappingRef(input.value);
+    });
     ref.appendChild(input);
+    // DEV29 B7 · «A registered mapping» SHOWS the registry: the names
+    // s3Dgraphy knows (`api.registered_mappings`), one click each
+    if (kind === "registry" && state.registered?.length) {
+      const list = document.createElement("div");
+      list.className = "me-registered";
+      list.dataset.registered = String(state.registered.length);
+      for (const m of state.registered) {
+        const b = document.createElement("button");
+        b.type = "button";
+        b.className = "ghost" + (m.name === state.mappingName ? " on" : "");
+        b.dataset.mapping = m.name;
+        b.textContent = m.display_name || m.name;
+        b.title = [m.name, m.description, m.format, m.sheet ? `sheet: ${m.sheet}` : ""].filter(Boolean).join(" · ");
+        b.disabled = busy;
+        b.addEventListener("click", () => h.setMappingRef(m.name));
+        list.appendChild(b);
+      }
+      section.appendChild(ref);
+      section.appendChild(list);
+    }
+    if (kind === "registry" && state.recognised?.length) {
+      const r = state.recognised[0];
+      const p = document.createElement("p");
+      p.className = "me-recognised";
+      p.dataset.recognised = r.name;
+      p.textContent = t("me.recognised", { name: r.display_name || r.name, matched: String(r.matched ?? ""), of: String(r.of ?? "") });
+      section.appendChild(p);
+    }
     if (kind === "file") {
       const choose = document.createElement("button");
       choose.textContent = t("impmap.choose");
@@ -1201,7 +1256,7 @@ function mappingBox(state: MappingEditorState, h: MappingEditorHandlers,
       choose.addEventListener("click", () => h.pickMappingFile());
       ref.appendChild(choose);
     }
-    section.appendChild(ref);
+    if (!ref.isConnected) section.insertBefore(ref, section.querySelector(".me-registered, .me-recognised"));
   } else if (kind === "authored" && !state.fields.length) {
     hint.textContent = t("me.mapping.authoredEmpty");
   }
@@ -1247,8 +1302,12 @@ function landingBox(state: MappingEditorState, h: MappingEditorHandlers,
   apply.dataset.action = "apply";
   apply.textContent = t("me.applyOne");
   const kind = state.mappingKind ?? "authored";
-  apply.disabled = busy || !!refused || !state.path.trim()
-    || (kind === "authored" && (!state.fields.length || state.verdict?.ok === false))
+  const otherBlock = busy || !!refused || !state.path.trim()
+    || (kind === "authored" && (!state.fields.length || state.verdict?.ok === false));
+  // DEV29 B7 · what blocks Apply OTHER than the mapping's name/path, so typing
+  // the name can enable it in place (the first click then works)
+  apply.dataset.otherBlock = otherBlock ? "1" : "";
+  apply.disabled = otherBlock
     || (kind === "file" && !state.mappingPath?.trim())
     || (kind === "registry" && !state.mappingName?.trim());
   apply.addEventListener("click", () => h.apply());

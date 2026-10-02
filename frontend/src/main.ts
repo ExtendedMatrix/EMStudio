@@ -8271,8 +8271,10 @@ async function readMappedSource(
       report: auxReportOf(answer.report),
     };
   } catch (e) {
-    toast(t("impmap.failed",
-            { detail: e instanceof Error ? e.message : String(e) }));
+    const msg = t("impmap.failed", { detail: e instanceof Error ? e.message : String(e) });
+    toast(msg);
+    // DEV29 B7 · the message is said IN the editor too, where the person looks
+    meState.note = msg;
     return null;
   }
 }
@@ -8438,7 +8440,11 @@ async function applyImportDoor(): Promise<boolean> {
       }
       if (!doc) throw new Error("no graph in response");
     } catch (e) {
-      toast(t("impmap.failed", { detail: e instanceof Error ? e.message : String(e) }));
+      const msg = t("impmap.failed", { detail: e instanceof Error ? e.message : String(e) });
+      toast(msg);
+      // DEV29 B7 · «It did not work — the message says why» pointed at a toast
+      // already gone: the message itself goes in the window
+      s.note = msg;
       return false;
     }
     loadDocument(doc, s.from?.kind === "stratiminer" ? name : `${s.name || name}`, null);
@@ -11830,6 +11836,7 @@ async function ensureMappingCatalog(): Promise<void> {
   meState.propertyType = (answer.property_type as string | undefined) ?? undefined;
   meState.extensions =
     (answer.extensions as Record<string, string> | undefined) ?? undefined;
+  meState.registered = (answer.registered as MappingEditorState["registered"]) ?? undefined;
 }
 
 /** Read a source: its fields, its samples, and the one question only a person
@@ -11857,6 +11864,15 @@ async function readMappingSource(): Promise<void> {
     // (said in the note), changed by the person afterwards
     meState.headerPreview = (answer.header_preview as string[][] | undefined) ?? undefined;
     meState.headerProposal = typeof answer.header_proposal === "number" ? answer.header_proposal : undefined;
+    // DEV29 B7 · a source that LOOKS LIKE a registered mapping (the EM
+    // sourcelist template, `em_sourcelist_it`) is recognised: the mapping is
+    // proposed — chosen, with its name — while nothing has been mapped by hand
+    meState.recognised = (answer.header_recognised as MappingEditorState["recognised"]) ?? undefined;
+    const best = meState.recognised?.[0];
+    if (best && (meState.mappingKind ?? "authored") === "authored" && !Object.keys(meState.choices).length) {
+      meState.mappingKind = "registry";
+      meState.mappingName = best.name;
+    }
     if (meState.headerRow === undefined && (meState.headerProposal ?? 1) > 1) {
       meState.headerRow = meState.headerProposal;
       meState.note = t("me.headerAuto", { n: String(meState.headerRow) });

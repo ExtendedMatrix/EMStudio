@@ -329,7 +329,11 @@ def _sheet_header(api, path: str, sheet=None) -> dict:
         return {"header_proposal": int(r.get("proposal") or r.get("header_row") or 1),
                 "header_preview": preview,
                 "header_columns": max((len(row) for row in preview), default=0),
-                "header_reason": r.get("reason") or ""}
+                "header_reason": r.get("reason") or "",
+                # DEV29 B7 · the registered mappings this sheet looks like
+                # (s3Dgraphy dev29 A7: sheet_header tries them when nothing is
+                # expected), best first — the editor proposes the first
+                "header_recognised": list(r.get("recognised") or [])}
     return {"header_proposal": 1, "header_preview": [], "header_columns": 0,
             "header_reason": "this s3dgraphy has no api.sheet_header"}
 
@@ -1989,7 +1993,11 @@ def make_handler(api):
                                    api.mapping_property_node_type()
                                    if hasattr(api, "mapping_property_node_type")
                                    else None),
-                               "schema_version": api.mapping_schema_version()}
+                               "schema_version": api.mapping_schema_version(),
+                               # DEV29 B7 · «A registered mapping» lists them
+                               "registered": (api.registered_mappings()
+                                              if hasattr(api, "registered_mappings")
+                                              else [])}
                 elif route == "/mapping-edges":
                     payload = {"ok": True,
                                "edges": api.mapping_allowed_edges(
