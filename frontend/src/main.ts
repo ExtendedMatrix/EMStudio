@@ -18928,6 +18928,30 @@ async function suspendedRootsNote(body: HTMLElement, win: Win): Promise<void> {
 
 /** The Storage's crumb: a label (the object store) or the path FIELD — whose
  *  value is not overwritten while somebody is typing in it. */
+/** DEV30 U11 · the end of a path that fits the field, cut at a «/» and led by
+ *  «…/»; the whole path when it fits (or before the field has a width). */
+function fitPathTail(field: HTMLInputElement, path: string): string {
+  const cs = getComputedStyle(field);
+  const room = field.clientWidth - parseFloat(cs.paddingLeft || "0") - parseFloat(cs.paddingRight || "0") - 4;
+  if (!path || room <= 0) return path;
+  const c = (fitPathTail as unknown as { ctx?: CanvasRenderingContext2D }).ctx
+    ??= document.createElement("canvas").getContext("2d")!;
+  c.font = cs.font;
+  if (c.measureText(path).width <= room) return path;
+  const parts = path.split("/");
+  for (let k = 1; k < parts.length; k++) {
+    const tail = `…/${parts.slice(k).join("/")}`;
+    if (c.measureText(tail).width <= room) return tail;
+  }
+  // even the last name does not fit: its end, character by character
+  const last = parts[parts.length - 1] || path;
+  for (let k = 1; k < last.length; k++) {
+    const tail = `…${last.slice(k)}`;
+    if (c.measureText(tail).width <= room) return tail;
+  }
+  return `…${last.slice(-1)}`;
+}
+
 function setCrumb(crumb: HTMLElement | null, text: string, path: string): void {
   if (!crumb) return;
   if (crumb instanceof HTMLInputElement) {
@@ -18938,11 +18962,14 @@ function setCrumb(crumb: HTMLElement | null, text: string, path: string): void {
     // field had a width, it stayed at 0 and showed the head)
     crumb.title = path ? t("storage.pathTitle", { path }) : "";
     if (document.activeElement !== crumb) {
-      crumb.value = path;
       crumb.placeholder = path ? t("storage.pathPh") : text;
-      crumb.scrollLeft = crumb.scrollWidth;
+      // DEV30 U11 · the TAIL is written in the field («…/caso-di-studio-EM/EM»),
+      // not scrolled to: measured on the desktop (WebKit) the scroll to the end
+      // did not hold and the field showed «/Users/emanueldemetrescu/Docum…».
+      // The whole path comes back on focus (to edit or paste) and in the tooltip.
+      crumb.value = fitPathTail(crumb, path);
       requestAnimationFrame(() => {
-        if (document.activeElement !== crumb) crumb.scrollLeft = crumb.scrollWidth;
+        if (document.activeElement !== crumb) crumb.value = fitPathTail(crumb, crumb.dataset.path ?? path);
       });
     }
     return;
@@ -18994,8 +19021,11 @@ function renderStorageInto(host: StorageHost): void {
   // the listing is rebuilt from scratch on every render (including a focus
   // change), and on a focus change the BODY ITSELF is a new element — so the
   // position is remembered per WINDOW and not per element.
-  const wasAt = rememberSurfaceScroll(win, body);
+  // DEV30 U12 · the LIST scrolls (the detail pane stays put): its place is kept
+  const oldList = body.querySelector<HTMLElement>(":scope > .storage-list");
+  const wasAt = rememberSurfaceScroll(win, oldList ?? body);
   body.textContent = "";
+  body.classList.remove("storage-split");
   body.appendChild(storageEmpty(t("storage.loading")));
   withCard();
 
@@ -19059,11 +19089,18 @@ function renderStorageInto(host: StorageHost): void {
     // unstamped files), read once per listing before anything counts them
     await ensureFolderCover(listing);
     if (!body.isConnected || storagePath(win) !== path) return;
+    // DEV30 U10/U12 · THE DETAIL IS A PANE OF ITS OWN: the micro-card of the
+    // stamp, the draft, and the commands on the selection sit in a fixed box
+    // under the list, which scrolls alone. Measured on dev.15: the card and the
+    // buttons were appended ABOVE the rows in the same scroller, so with a file
+    // picked low in a folder of 142 rows they scrolled out of reach.
+    const detail = document.createElement("div");
+    detail.className = "storage-detail";
     if (stampDraft) {
-      body.appendChild(stampComposeBox(win, listing));
+      detail.appendChild(stampComposeBox(win, listing));
     } else if (diskStamps.status === "stamped"
                && diskStamps.path === storageSelected(win)) {
-      body.appendChild(stampedBox(diskStamps.path, diskStamps.chain.root));
+      detail.appendChild(stampedBox(diskStamps.path, diskStamps.chain.root));
     } else {
       const selected = storageSelected(win);
       const entry = selected
@@ -19084,41 +19121,60 @@ function renderStorageInto(host: StorageHost): void {
         clear.textContent = t("compose.clearPick");
         clear.onclick = () => setStoragePicked(win, []);
         box.append(b, clear);
-        body.appendChild(box);
+        detail.appendChild(box);
       } else if (entry && !isStampPath(entry.path)) {
-        body.appendChild(composeButtons(entry, listing));
+        detail.appendChild(composeButtons(entry, listing));
         // dev28 · «è un'altra copia di R» also OUTSIDE a room (decision 14)
-        if (entry.type === "file" && !entry.outside) storageCopyOffer(body, win, entry);
+        if (entry.type === "file" && !entry.outside) storageCopyOffer(detail, win, entry);
       } else if (!listing.roots)
-        body.appendChild(composeFolderButton(listing));
+        detail.appendChild(composeFolderButton(listing));
       // RISORSA-FILE · a TILESET folder: pack it into a .3tz beside it (desktop)
       if (!listing.roots && listing.entries.some((e) => e.type === "file" && e.name === "tileset.json")) {
-        body.appendChild(pack3tzButton(listing.path));
+        detail.appendChild(pack3tzButton(listing.path));
         if (!entry) {
           const box = document.createElement("div");
           box.className = "stamp-report-ask";
           box.appendChild(openInSceneButton(listing.path));
-          body.appendChild(box);
+          detail.appendChild(box);
         }
       }
     }
     // DTCEMS1 · il referto delle tre classi su QUESTA cartella, quando qualcuno
     // l'ha chiesto. Sopra l'elenco perché è una frase sull'elenco.
     if (folderReport && folderReport.folder === listing.path) {
-      body.appendChild(stampReportBox(folderReport));
+      detail.appendChild(stampReportBox(folderReport));
     } else if (!listing.roots) {
-      body.appendChild(stampReportButton(listing.path));
+      detail.appendChild(stampReportButton(listing.path));
     }
     const list = document.createElement("div");
     list.className = "storage-list";
     const cover = folderCover(listing);
+    // DEV30 V2 · the `*.stamp.json` beside each file are hidden by default:
+    // the seal on the file's icon already says it is stamped, and 71 photos
+    // listed as 142 rows hid the photos. One line says how many, and shows them.
+    const showStamps = winCurrent(win, "storage.showStamps") === "1";
+    const sidecars = listing.entries.filter((e) => e.type === "file" && isStampPath(e.path)
+      && listing.entries.some((x) => x.path === e.path.replace(/\.stamp\.json$/i, "")));
+    const hidden = new Set(showStamps ? [] : sidecars.map((e) => e.path));
     for (const entry of listing.entries) {
+      if (hidden.has(entry.path)) continue;
       list.appendChild(storageRow(win, entry, cover));
     }
+    if (sidecars.length) {
+      const tog = document.createElement("button");
+      tog.type = "button";
+      tog.className = "ghost storage-sidecars";
+      tog.dataset.action = "toggle-stamp-files";
+      tog.textContent = t(showStamps ? "storage.stampsShown" : "storage.stampsHidden", { n: String(sidecars.length) });
+      tog.onclick = () => { setWinCurrent(win, "storage.showStamps", showStamps ? null : "1"); renderStorage(); };
+      list.appendChild(tog);
+    }
+    body.classList.add("storage-split");
     body.appendChild(list);
+    if (detail.childNodes.length) body.appendChild(detail);
     // …and put it back where it was: a folder you had scrolled through does not
     // jump to the top because the pointer crossed a divider
-    restoreSurfaceScroll(win, body, wasAt);
+    restoreSurfaceScroll(win, body.querySelector<HTMLElement>(":scope > .storage-list") ?? body, wasAt);
   })();
 }
 
@@ -20138,7 +20194,7 @@ async function openFromStorage(path: string): Promise<void> {
     toast(t("storage.openFailed", { name: baseName(path), why: String((e as Error).message) }));
     return;
   }
-  if (isGraphmlFile(path, text)) { await importGraphmlText(text, baseName(path)); return; }
+  if (isGraphmlFile(path, text)) { await importGraphmlText(text, baseName(path), path); return; }
   if (!(await confirmLeaveSidecar("Opening a file"))) return;
   try {
     loadContainerDocument(JSON.parse(text), baseName(path), path);
@@ -20266,6 +20322,19 @@ function composeFolderButton(listing: FsListing, inline = false): HTMLElement {
  * timbri per lo stesso digest siano una correzione invece che una scoperta
  * (s3Dgraphy li tratta come un disaccordo, e non sceglie un vincitore).
  */
+/** DEV30 U10 · the graph's node of a stamped file: its resource id, or a node
+ *  carrying its digest (checksum / content digest). */
+function graphNodeOfStamp(stamp: Stamp): EmNode | null {
+  if (!store) return null;
+  const self = (stamp as unknown as SealStamp).self ?? {};
+  const rid = String((self as { resource_id?: string }).resource_id ?? "");
+  const dig = String((self as { digest?: string }).digest ?? "");
+  return store.liveNodes().find((n) => n.id === rid || (!!dig && (() => {
+    const d = (n.data ?? {}) as Record<string, unknown>;
+    return d.checksum === dig || d.content_digest === dig || (d.content_digest as { digest?: string } | undefined)?.digest === dig;
+  })())) ?? null;
+}
+
 function stampedBox(path: string, stamp: Stamp): HTMLElement {
   const box = document.createElement("div");
   box.className = "stamp-emitted";
@@ -20302,13 +20371,27 @@ function stampedBox(path: string, stamp: Stamp): HTMLElement {
   if (TREE_EXT.test(path)) box.appendChild(treeStaleBox(path));
   if (TREE_EXT.test(path) || /(^|\/)tileset\.json$/i.test(path)) box.appendChild(openInSceneButton(path));
 
+  // DEV30 U10 · the commands on the selection, in ONE bar at the top of the
+  // detail pane: compose a step from it, show it in the graph
   const forward = document.createElement("button");
   forward.className = "ghost";
   forward.dataset.action = "compose-from";
   forward.textContent = t("compose.fromThis");
   forward.title = t("compose.fromThisHint");
   forward.onclick = () => { void composeFromStamped(path, stamp); };
-  box.appendChild(forward);
+  const bar = document.createElement("div");
+  bar.className = "stamp-report-ask storage-commands";
+  bar.appendChild(forward);
+  const node = graphNodeOfStamp(stamp);
+  const show = document.createElement("button");
+  show.className = "ghost";
+  show.dataset.action = "show-in-graph";
+  show.textContent = t("storage.showInGraph");
+  show.disabled = !node;
+  show.title = node ? String(node.name ?? node.id) : t("storage.notInGraph");
+  show.onclick = () => { if (node) revealFromTable(node.id); };
+  bar.appendChild(show);
+  head.after(bar);
   return box;
 }
 
@@ -23939,7 +24022,9 @@ function buildHeaderStrip(win: Win): HTMLElement {
         crumb.blur();
       }
     });
-    crumb.addEventListener("blur", () => { crumb.value = crumb.dataset.path ?? crumb.value; crumb.scrollLeft = crumb.scrollWidth; });
+    // DEV30 U11 · focus: the whole path, to edit; blur: its tail again
+    crumb.addEventListener("focus", () => { crumb.value = crumb.dataset.path ?? crumb.value; crumb.scrollLeft = crumb.scrollWidth; });
+    crumb.addEventListener("blur", () => { crumb.value = fitPathTail(crumb, crumb.dataset.path ?? crumb.value); });
     const root = document.createElement("button");
     root.className = "win-act win-strip-root";
     root.textContent = "+ 📁";
