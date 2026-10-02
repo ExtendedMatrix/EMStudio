@@ -482,4 +482,42 @@ const freshReport = () => ({ addedGraphs: [], mergedGraphs: [], mergedNodes: 0,
   }
 }
 
+// ── F4 · one layout per graph — the SAME cases as s3Dgraphy ─────────────────
+const { readFileSync, existsSync } = await import("node:fs");
+// `testdata/container-layout-parity.json` is a byte copy of
+// `s3Dgraphy/tests/fixtures/container-layout-parity.json`; the Python test reads
+// the original. One rule, two implementations, the same answers case by case.
+{
+  const FIX = new URL("../testdata/container-layout-parity.json", import.meta.url);
+  const text = readFileSync(FIX, "utf8");
+  const sibling = new URL("../../../s3Dgraphy/tests/fixtures/container-layout-parity.json", import.meta.url);
+  if (existsSync(sibling)) {
+    eq(readFileSync(sibling, "utf8") === text, true,
+       "testdata/container-layout-parity.json is a byte copy of s3Dgraphy's");
+  }
+  for (const c of JSON.parse(text).cases) {
+    const parsed = C.parseContainer(JSON.parse(JSON.stringify(c.doc)));
+    const got = {};
+    for (const m of parsed.members) if (m.doc.layout) got[m.id] = m.doc.layout;
+    eq(got, c.expect.layouts, `F4 read · ${c.name}`);
+    eq(parsed.freshLayouts, c.expect.fresh, `F4 fresh · ${c.name}`);
+    const said = parsed.warnings.filter((w) => w.includes("laid out afresh"));
+    eq(said.length, c.expect.fresh.length ? 1 : 0, `F4 said once · ${c.name}`);
+    const built = C.buildContainer({ graphs: parsed.members, activeGraphId: parsed.activeGraphId });
+    for (const [gid, want] of Object.entries(c.built.members)) {
+      eq(built.graphs[gid].layout ?? null, want, `F4 write · ${c.name} · ${gid}`);
+    }
+    eq(built.layout ?? null, c.built.layout, `F4 file-level copy · ${c.name}`);
+    const again = C.parseContainer(JSON.parse(JSON.stringify(built)));
+    eq(again.freshLayouts, [], `F4 round trip says nothing · ${c.name}`);
+  }
+  // moving a box inside one member is not a new version
+  const c = JSON.parse(text).cases.find((x) => x.name.startsWith("new container"));
+  const a = C.parseContainer(JSON.parse(JSON.stringify(c.doc)));
+  const before = C.contentDigest(C.buildContainer({ graphs: a.members, activeGraphId: a.activeGraphId }));
+  a.members[0].doc.layout = { positions: { US1: { x: 500, y: 9, w: 90, h: 30 } } };
+  eq(C.contentDigest(C.buildContainer({ graphs: a.members, activeGraphId: a.activeGraphId })), before,
+     "F4 · a member's own layout is not content");
+}
+
 console.log(`container: ${checks} checks passed`);

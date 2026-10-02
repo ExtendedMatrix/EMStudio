@@ -20,6 +20,15 @@
  * Reading accepts both shapes, always: every file written before today is a
  * single-graph document, and none of them may break.
  *
+ * **One layout per graph (2026-10-02).** Each member keeps its arrangement in its
+ * own section, `graphs.<id>.layout`; the file-level `layout` is still written, as
+ * a COPY of the active graph's, for whoever reads only that (Heriverse, old
+ * files). Reading: a member's own layout if it has one; else the file-level one
+ * for the ACTIVE graph only (or the only graph); the other graphs of an old file
+ * are laid out afresh, said once. Same rule as `s3dgraphy/container.py`
+ * (`resolve_layouts`), held equal by `testdata/container-layout-parity.json`, a
+ * byte copy of s3Dgraphy's `tests/fixtures/` file.
+ *
  * Pure module: no DOM, no store. It maps between container documents and the
  * per-graph `EmDocument` the DocumentStore already knows how to hold.
  */
@@ -46,6 +55,8 @@ export const DTC_CORPUS_MEMBER_ID = "dtc";
 /** P3 · where the project's revision travels. Deliberately NOT in `header`:
  *  the header describes the FORMAT, this describes the WORK. */
 export const VERSION_KEY = "version";
+/** Where a member keeps its own arrangement: `graphs.<id>.layout`. */
+export const LAYOUT_KEY = "layout";
 
 type GraphSection = Record<string, unknown>;
 
@@ -88,7 +99,55 @@ export interface ParsedContainer {
   wasLegacy: boolean;
   /** P3 · the revision this file claims to be, when it says */
   version: ProjectVersion | null;
+  /** F4 · the graphs of an OLD file that got no layout and are laid out afresh */
+  freshLayouts: string[];
   warnings: string[];
+}
+
+type LayoutObj = Record<string, unknown>;
+
+/** A layout worth writing: an object with something in it. */
+function hasLayout(l: unknown): l is LayoutObj {
+  return !!l && typeof l === "object" && !Array.isArray(l) && Object.keys(l as object).length > 0;
+}
+
+/**
+ * Which layout each graph of a file gets, and which ones get none — THE reading
+ * rule, the same as `s3dgraphy.container.resolve_layouts`:
+ *
+ * 1. a member that carries `graphs.<id>.layout` keeps its own;
+ * 2. otherwise the file-level `layout` goes to the ACTIVE graph — or the only one
+ *    — and to no other: in an old file it was ONE graph's arrangement, and handing
+ *    it to the rest was the bug (San Pietro: the seed's layout, the real graph
+ *    with no positions);
+ * 3. the rest get nothing. They are `fresh` only in an OLD file (a file-level
+ *    layout and no member with its own), where positions may have been lost to
+ *    another graph — worth saying, once.
+ */
+export function resolveLayouts(
+  graphIds: string[],
+  own: Record<string, LayoutObj>,
+  fileLayout: LayoutObj | null,
+  activeGraphId: string | null,
+): { layouts: Record<string, LayoutObj>; fresh: string[] } {
+  const layouts: Record<string, LayoutObj> = {};
+  const fresh: string[] = [];
+  const file = hasLayout(fileLayout) ? fileLayout : null;
+  const anyOwn = Object.keys(own).length > 0;
+  let heir = activeGraphId && graphIds.includes(activeGraphId) ? activeGraphId : graphIds[0] ?? null;
+  if (graphIds.length === 1) heir = graphIds[0];
+  for (const gid of graphIds) {
+    if (gid in own) layouts[gid] = own[gid];
+    else if (gid === heir && file) layouts[gid] = file;
+    else if (file && !anyOwn) fresh.push(gid);
+  }
+  return { layouts, fresh };
+}
+
+/** The one sentence about the graphs of an old file that had no layout. */
+export function layoutFreshWarning(fresh: string[]): string {
+  return `${fresh.length} graph(s) of this file carry no layout of their own ` +
+    `(written before per-graph layouts): laid out afresh — ${fresh.join(", ")}`;
 }
 
 /** P3 · read a version block defensively — a file may carry anything. */
@@ -177,18 +236,19 @@ export function parseContainer(doc: unknown): ParsedContainer {
     const single = doc as EmDocument | null;
     if (!single?.graph?.nodes) {
       return { members: [], shelf: null, corpus: null, activeGraphId: null,
-               wasLegacy: true, version: null,
+               wasLegacy: true, version: null, freshLayouts: [],
                warnings: ["not an .em.json document (missing graph.nodes)"] };
     }
     const id = String(single.graph.graph_id ?? "graph");
     return { members: [{ id, doc: single }], shelf: null, corpus: null,
              activeGraphId: id, wasLegacy: true,
              version: readVersion((single as unknown as ContainerDoc).version),
-             warnings };
+             freshLayouts: [], warnings };
   }
 
   const header = doc.header ?? { format: "em.json", version: "1.0" };
   const members: ContainerMember[] = [];
+  const own: Record<string, LayoutObj> = {};
   let shelf: GraphSection | null = null;
   let corpus: GraphSection | null = null;
   for (const [memberId, section] of Object.entries(doc.graphs)) {
@@ -205,15 +265,14 @@ export function parseContainer(doc: unknown): ParsedContainer {
       corpus = section;
       continue;
     }
-    const graph = { ...section, graph_id: section.graph_id ?? memberId };
-    members.push({
-      id: String(graph.graph_id),
-      // The layout is a CONTAINER-level field in the file; each member document
-      // gets it so a store that has positions keeps them. Per-member layouts are
-      // a later refinement — today one project has one arrangement, and saying
-      // that is better than pretending each graph has its own.
-      doc: { header, graph, layout: doc.layout } as unknown as EmDocument,
-    });
+    const { [LAYOUT_KEY]: ownLayout, ...rest } = section;
+    const graph = { ...rest, graph_id: rest.graph_id ?? memberId };
+    const id = String(graph.graph_id);
+    if (ownLayout && typeof ownLayout === "object" && !Array.isArray(ownLayout)) {
+      own[id] = ownLayout as LayoutObj;
+    }
+    // the layout is decided below, once every member and the active id are known
+    members.push({ id, doc: { header, graph } as unknown as EmDocument });
   }
 
   let activeGraphId = typeof doc.active_graph_id === "string" ? doc.active_graph_id : null;
@@ -226,6 +285,14 @@ export function parseContainer(doc: unknown): ParsedContainer {
   }
   if (!activeGraphId) activeGraphId = members[0]?.id ?? null;
 
+  // F4 · one layout per graph: its own, or the file's for the active one only
+  const { layouts, fresh } = resolveLayouts(
+    members.map((m) => m.id), own, (doc.layout as LayoutObj | undefined) ?? null, activeGraphId);
+  for (const m of members) {
+    if (layouts[m.id]) (m.doc as unknown as { layout?: LayoutObj }).layout = layouts[m.id];
+  }
+  if (fresh.length) warnings.push(layoutFreshWarning(fresh));
+
   if (!members.length && (shelf || corpus)) {
     const held = [shelf ? "a shelf" : "", corpus ? "a DTC corpus" : ""]
       .filter(Boolean).join(" and ");
@@ -235,7 +302,7 @@ export function parseContainer(doc: unknown): ParsedContainer {
     );
   }
   return { members, shelf, corpus, activeGraphId, wasLegacy: false,
-           version: readVersion(doc.version), warnings };
+           version: readVersion(doc.version), freshLayouts: fresh, warnings };
 }
 
 /**
@@ -255,6 +322,9 @@ export function buildContainer(input: {
   for (const { id, doc } of input.graphs) {
     const section = { ...(doc.graph as unknown as GraphSection) };
     section.graph_id = section.graph_id ?? id;
+    // F4 · each graph's arrangement travels in its own section
+    delete section[LAYOUT_KEY];
+    if (hasLayout(doc.layout)) section[LAYOUT_KEY] = doc.layout;
     graphs[id] = section;
   }
   if (input.shelf) {
@@ -286,9 +356,11 @@ export function buildContainer(input: {
   const out: ContainerDoc = { header, graphs };
   const active = input.activeGraphId ?? input.graphs[0]?.id ?? null;
   if (active) out.active_graph_id = active;
-  // One project, one arrangement (see the note in `parseContainer`).
-  const layout = input.graphs.find((g) => g.doc.layout)?.doc.layout;
-  if (layout) out.layout = layout as Record<string, unknown>;
+  // F4 · the file-level layout is a COPY of the ACTIVE graph's, for whoever
+  // reads only that (Heriverse, old readers). Until today it was the first
+  // graph's that had one — on San Pietro, an empty seed's.
+  const activeLayout = input.graphs.find((g) => g.id === active)?.doc.layout;
+  if (hasLayout(activeLayout)) out.layout = activeLayout as Record<string, unknown>;
   return out;
 }
 
@@ -322,8 +394,16 @@ function canonicalJson(value: unknown): string {
  * revisions.
  */
 export function contentDigest(doc: ContainerDoc): string {
+  // a member's own layout is arrangement, not content (F4)
+  const graphs: Record<string, unknown> = {};
+  for (const [gid, section] of Object.entries(doc.graphs ?? {})) {
+    if (section && typeof section === "object") {
+      const { [LAYOUT_KEY]: _layout, ...rest } = section;
+      graphs[gid] = rest;
+    } else graphs[gid] = section;
+  }
   const payload = {
-    graphs: doc.graphs ?? {},
+    graphs,
     active_graph_id: doc.active_graph_id ?? null,
   };
   return `sha256:${sha256Hex(canonicalJson(payload)).slice(0, 12)}`;
