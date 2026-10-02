@@ -8776,3 +8776,7 @@ input.storage-path:focus { border-color: var(--accent); background: var(--bg-pan
 .res-notes { margin: 4px 0 8px; font-size: 12px; display: grid; gap: 3px; }
 .res-note { color: var(--text-muted); overflow-wrap: anywhere; }
 .res-note.warn { color: var(--warn-ink); }
+
+/* DEV30 U5 · the recognised languages, one group per line */
+.lang-rec-row { display: block; margin: 6px 0; line-height: 1.4; }
+.lang-rec-row .insp-hint { display: block; margin-left: 22px; }

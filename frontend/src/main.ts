@@ -178,6 +178,7 @@ import { datamodelPhraseBook, linkedPhrase, phraseDirFor } from "./phrases";
 import connectionsDatamodel from "./assets/s3Dgraphy_connections_datamodel.json";
 import datamodelTranslations from "./assets/datamodel_translations.json";
 import { createResourceThumb } from "./resource-preview";
+import { proposeLanguages, type LanguageProposal } from "./lang-guess";
 import {
   addCategories,
   addableItems,
@@ -11520,6 +11521,7 @@ function refreshIssues(): void {
                 run: (ids) => verifyAiNodes(ids) },
     openFacing: { label: t("issues.facing"), run: (tid) => openFacingFor(tid) },
     untagged: untaggedTexts(s),
+    recognised: recognisedLanguages(s),
     renameRule: { label: t("naming.renameRule"), bulkLabel: (n) => t("naming.renameRuleAll", { n: String(n) }),
                   run: (ids) => renameExtractorsByRule(ids) },
     fixers: issueFixers(s),
@@ -11539,7 +11541,7 @@ function untaggedTexts(st: DocumentStore): IssueSources["untagged"] {
   if (trx.workingLanguage(st.doc)) return undefined;
   let count = 0;
   for (const n of st.liveNodes()) {
-    if (trx.nodeLanguage(n)) continue;
+    if (trx.nodeLanguage(n) || n.node_type === "BR") continue;   // DEV30 U5 · a marker, not a text
     for (const f of trx.naturalFields(n)) if ((trx.fieldText(n, f) ?? "").trim()) count++;
   }
   const ui = getLocale();
@@ -11556,6 +11558,109 @@ function untaggedTexts(st: DocumentStore): IssueSources["untagged"] {
       draw();
     },
   };
+}
+
+/** DEV30 U5 · the nodes whose texts have no language (none on the node, none
+ *  on the study), with the language `lang-guess` proposes for each. */
+function languageProposals(st: DocumentStore): LanguageProposal[] {
+  if (trx.workingLanguage(st.doc)) return [];
+  const texts: Array<{ id: string; text: string }> = [];
+  for (const n of st.liveNodes()) {
+    // a continuity node's «_continuity» is a marker, not a text (DEV29 A9b)
+    if (trx.nodeLanguage(n) || n.node_type === "BR") continue;
+    const text = trx.naturalFields(n).map((f) => trx.fieldText(n, f) ?? "").join(" \n").trim();
+    if (text) texts.push({ id: n.id, text });
+  }
+  return proposeLanguages(texts);
+}
+function recognisedLanguages(st: DocumentStore): IssueSources["recognised"] {
+  const props = languageProposals(st);
+  if (!props.length) return undefined;
+  const by = new Map<string, number>();
+  for (const x of props) by.set(x.tag, (by.get(x.tag) ?? 0) + 1);
+  const summary = [...by.entries()].sort((a, b) => b[1] - a[1]).map(([tag, n]) => `${tag} ${n}`).join(" · ");
+  return { count: props.length, summary, label: t("issues.langRecogniseFix"), run: () => confirmRecognisedLanguages(st) };
+}
+/**
+ * DEV30 U5 · the light confirmation: the proposals by language, each group a
+ * checkbox (on), the texts named; «Apply» writes `data.lang` on the checked ones
+ * — ONE undo step, and NOTHING ELSE. The explicit exception to the AI marker
+ * (E.D., 2 Oct 2026): a recognised language is cleaning, not provenance — no
+ * `ai_assisted`, no `validated_by`, no record in the graph's register. Do not
+ * route this through `ai-validation.ts`.
+ */
+function confirmRecognisedLanguages(st: DocumentStore): void {
+  const props = languageProposals(st);
+  if (!props.length) return;
+  const ui = getLocale();
+  const groups = new Map<string, LanguageProposal[]>();
+  for (const x of props) groups.set(x.tag, [...(groups.get(x.tag) ?? []), x]);
+  const modal = document.createElement("div");
+  modal.className = "modal";
+  modal.dataset.role = "lang-recognise";
+  const card = document.createElement("div");
+  card.className = "modal-card";
+  const head = document.createElement("div");
+  head.className = "modal-head";
+  head.textContent = t("lang.recogniseTitle", { n: String(props.length) });
+  const body = document.createElement("div");
+  body.className = "modal-body";
+  const lead = document.createElement("p");
+  lead.textContent = t("lang.recogniseLead");
+  body.appendChild(lead);
+  const boxes: Array<[HTMLInputElement, LanguageProposal[]]> = [];
+  for (const [tag, xs] of [...groups.entries()].sort((a, b) => b[1].length - a[1].length)) {
+    const row = document.createElement("label");
+    row.className = "lang-rec-row";
+    const cb = document.createElement("input");
+    cb.type = "checkbox";
+    cb.checked = true;
+    cb.dataset.lang = tag;
+    const others = xs.filter((x) => x.by === "others").length;
+    const names = xs.map((x) => String(st.node(x.id)?.name ?? x.id)).join(", ");
+    const b = document.createElement("b");
+    b.textContent = `${tag} · ${trx.languageName(tag, ui)} — ${xs.length}`;
+    const small = document.createElement("span");
+    small.className = "insp-hint";
+    small.textContent = ` ${others ? t("lang.recogniseOthers", { n: String(others) }) + " · " : ""}${names}`;
+    row.append(cb, " ", b, small);
+    body.appendChild(row);
+    boxes.push([cb, xs]);
+  }
+  const foot = document.createElement("div");
+  foot.className = "modal-foot";
+  const close = () => { modal.remove(); document.removeEventListener("keydown", onKey, true); };
+  const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") { e.stopPropagation(); close(); } };
+  const cancel = document.createElement("button");
+  cancel.textContent = t("l.cancel");
+  cancel.onclick = close;
+  const ok = document.createElement("button");
+  ok.className = "primary";
+  ok.dataset.action = "apply-languages";
+  ok.textContent = t("lang.recogniseApply");
+  ok.onclick = () => {
+    const chosen = boxes.filter(([cb]) => cb.checked).flatMap(([, xs]) => xs);
+    close();
+    if (!chosen.length) return;
+    st.batch(() => {
+      for (const x of chosen) {
+        // ONLY `data.lang` (U5): no ai_assisted, no register entry
+        const data = { ...((st.node(x.id)?.data ?? {}) as Record<string, unknown>), lang: x.tag };
+        st.updateNode(x.id, { data } as Partial<EmNode>);
+      }
+    });
+    const msg = t("lang.recognisedApplied", { n: String(chosen.length) });
+    toastUndo(msg, st);
+    refreshIssues();
+    refreshInspector();
+    draw();
+  };
+  foot.append(cancel, ok);
+  card.append(head, body, foot);
+  modal.appendChild(card);
+  modal.addEventListener("click", (e) => { if (e.target === modal) close(); });
+  document.addEventListener("keydown", onKey, true);
+  document.body.appendChild(modal);
 }
 
 /** DEV29 B8 · pick a SHIFT.txt, have s3Dgraphy read it, declare it on the

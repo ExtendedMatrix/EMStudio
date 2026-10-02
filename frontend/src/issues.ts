@@ -124,6 +124,9 @@ export interface IssueSources {
    *  correction «declare the study's language» (the options are tags) */
   untagged?: { count: number; options: Array<{ value: string; label: string }>;
                placeholder: string; run: (lang: string) => void };
+  /** DEV30 U5 · the languages EMStudio can RECOGNISE in those texts: a proposal
+   *  (`lang-guess.ts`) confirmed with one gesture, written as `data.lang` only */
+  recognised?: { count: number; summary: string; label: string; run: () => void };
   /** i18n for the hint texts */
   t: (key: string, vars?: Record<string, string>) => string;
 }
@@ -332,6 +335,11 @@ export function issues(src: IssueSources): Issue[] {
     const u = src.untagged;
     push({ node: "", sev: "info", rule: "language", txt: t("issues.untagged", { k: String(u.count) }),
            fix: { kind: "pick", placeholder: u.placeholder, options: u.options, run: u.run } });
+  }
+  if (src.recognised && src.recognised.count > 0) {
+    const r = src.recognised;
+    push({ node: "", sev: "info", rule: "language", txt: t("issues.langRecognised", { k: String(r.count), s: r.summary }),
+           fix: { kind: "button", label: r.label, run: r.run } });
   }
 
   // ── COLLEGARE · the story: an AI paragraph no person validated is a warning
