@@ -4509,6 +4509,7 @@ const isGraphmlFile = (name: string, text: string): boolean =>
 function confirmOpenOverUnsaved(incoming: string): boolean {
   const slot = emtree.active();
   if (!slot?.store.dirty) return true;
+  if (isUntouchedSeed(slot)) return true;   // DEV30 V3 · nobody's graph: nothing to lose
   return window.confirm(t("open.overUnsaved", { name: slotLabel(slot), file: incoming }));
 }
 
@@ -4557,7 +4558,7 @@ function newDocument(): void {
   }
   // DEV30 V3 · …and the graph stays a SEED until a hand changes it
   const born = emtree.active();
-  if (born && store) born.seedDepth = store.undoDepth;
+  if (born && store) born.seedSig = seedSignature(store);
   info.textContent = t("l.newEmptyGraph");
 }
 
@@ -4609,7 +4610,19 @@ function defaultFileName(): string {
  */
 /** DEV30 V3 · a graph New made and nobody touched (see `newDocument`). */
 function isUntouchedSeed(slot: GraphSlot): boolean {
-  return slot.seedDepth !== undefined && !slot.path && slot.store.undoDepth === slot.seedDepth;
+  return slot.seedSig !== undefined && !slot.path && seedSignature(slot.store) === slot.seedSig;
+}
+/** What a hand would change in a seed: the graph's name and every node but the
+ *  epoch's own paradata box and its still-empty dates (made, and laid out,
+ *  after `newDocument` returns — the undo depth grows by itself for a while,
+ *  measured 7 → 8, so it cannot be the test). */
+function seedSignature(st: DocumentStore): string {
+  const g = st.doc.graph as Record<string, unknown>;
+  const nodes = st.liveNodes()
+    .filter((n) => n.node_type !== "ParadataNodeGroup"
+      && !(n.node_type === "property" && !String(n.description ?? "").trim()))
+    .map((n) => [n.id, n.node_type, n.name, n.description ?? ""]);
+  return JSON.stringify([g["name"] ?? "", nodes]);
 }
 
 function projectContainer(): ReturnType<typeof buildContainer> {
@@ -6021,7 +6034,7 @@ async function saveAsDocument(): Promise<void> {
       // EMTree, a second graph opened) set it back to `slot.path` — null for an
       // imported GraphML — so the next «Save» opened «Save As» again.
       const slot = emtree.active();
-      if (slot) { slot.path = path; slot.seedDepth = undefined; }
+      if (slot) { slot.path = path; slot.seedSig = undefined; }
       addRecent({ path, name: baseName(path) }, Date.now());
       store.dirty = false;
       info.textContent = `saved ${baseName(path)}`;

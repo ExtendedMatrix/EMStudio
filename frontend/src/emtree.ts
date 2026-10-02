@@ -235,9 +235,9 @@ export interface GraphSlot {
    *  own (a GraphML imported on the desktop): its relative paths are read there. */
   sourceDir?: string | null;
   /** DEV30 V3 · a NEW graph as New made it (the «Epoch 1» seed, no hand on it
-   *  yet): the undo depth it was born at. While the store is still at that
-   *  depth the slot is a seed — replaced by the next open, never saved. */
-  seedDepth?: number;
+   *  yet): its signature at birth (`seedSignature` in main.ts). While it still
+   *  matches, the slot is a seed — replaced by the next open, never saved. */
+  seedSig?: string;
   /**
    * The slot's own store — **with its own undo stack**. This is what makes the
    * workspace more than "reopen the file": edits and history survive a switch.
