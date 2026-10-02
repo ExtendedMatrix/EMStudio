@@ -688,7 +688,7 @@ def _load_s3dgraphy(s3dgraphy_src: "pathlib.Path | None"):
 #: the editor depends on is added; the editor names an older bridge for what it
 #: is instead of failing with WebKit's «Load failed». 30 = /read-shift and the
 #: JSON+CORS answer of an unknown route.
-BRIDGE_LEVEL = 30
+BRIDGE_LEVEL = 30   # 30 also = /validate
 _STARTED_AT = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
 
 
@@ -971,6 +971,23 @@ def make_handler(api):
                 # SPAZIO · what of the graph's 3D can be fetched, asked of the
                 # library that owns the rule (`store_backed.geometry_summary`)
                 self._geometry_summary(raw)
+            elif route == "/validate":
+                # DEV30 D6 · the library's own warnings on the document the
+                # editor holds (`api.validate`): «license name and type
+                # disagree», «download without origin», «georeferenced only by
+                # camera GPS» and whatever s3Dgraphy adds — read here, never
+                # rewritten in TypeScript
+                try:
+                    body = json.loads(raw.decode("utf-8")) if raw else {}
+                    doc = body.get("doc") if isinstance(body, dict) and "doc" in body else body
+                    graph, load_warnings = api.load_emjson(doc)
+                    out = api.validate(graph)
+                    self._json({"ok": True, "warnings": list(out.get("warnings") or []),
+                                "issues": list(out.get("issues") or []),
+                                "info": list(out.get("info") or []),
+                                "load_warnings": list(load_warnings or [])})
+                except Exception as exc:  # pragma: no cover — surface to the UI
+                    self._fail(400, f"validate failed: {exc}")
             elif route == "/narrative-report":
                 # COLLEGARE · the coverage the Index shows, asked of the library
                 # that owns the rules (`s3dgraphy.narrative.query`): derived now,

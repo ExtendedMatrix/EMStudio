@@ -129,6 +129,9 @@ export interface IssueSources {
   /** DEV30 U5 · the languages EMStudio can RECOGNISE in those texts: a proposal
    *  (`lang-guess.ts`) confirmed with one gesture, written as `data.lang` only */
   recognised?: { count: number; summary: string; label: string; run: () => void };
+  /** DEV30 D6 · the library's own warnings (`api.validate` via the bridge),
+   *  each with the node its message names, when it names one */
+  library?: Array<{ txt: string; node: string }>;
   /** i18n for the hint texts */
   t: (key: string, vars?: Record<string, string>) => string;
 }
@@ -338,6 +341,8 @@ export function issues(src: IssueSources): Issue[] {
     push({ node: "", sev: "info", rule: "language", txt: t("issues.untagged", { k: String(u.count) }),
            fix: { kind: "pick", placeholder: u.placeholder, options: u.options, run: u.run } });
   }
+  for (const w of src.library ?? [])
+    push({ node: w.node, sev: "warn", rule: "library", txt: w.txt });
   if (src.recognised && src.recognised.count > 0) {
     const r = src.recognised;
     push({ node: "", sev: "info", rule: "language", txt: t("issues.langRecognised", { k: String(r.count), s: r.summary }),

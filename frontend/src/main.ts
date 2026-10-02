@@ -11549,6 +11549,7 @@ function refreshIssues(): void {
     openFacing: { label: t("issues.facing"), run: (tid) => openFacingFor(tid) },
     untagged: untaggedTexts(s),
     recognised: recognisedLanguages(s),
+    library: libraryWarningsOf(s),
     renameRule: { label: t("naming.renameRule"), bulkLabel: (n) => t("naming.renameRuleAll", { n: String(n) }),
                   run: (ids) => renameExtractorsByRule(ids) },
     fixers: issueFixers(s),
@@ -11585,6 +11586,50 @@ function untaggedTexts(st: DocumentStore): IssueSources["untagged"] {
       draw();
     },
   };
+}
+
+/**
+ * DEV30 D6 · the LIBRARY's warnings on this document (`api.validate`, through
+ * the bridge's /validate): «license name and type disagree», «download without
+ * origin», «georeferenced only by camera GPS», and what s3Dgraphy adds later —
+ * shown, never re-implemented here. Asked a moment after the document stops
+ * changing (one request per state), and dropped when the bridge does not answer.
+ * The georeference warning is the one the Warnings view already has in its own
+ * words, with its Fix («Read a SHIFT.txt…»), so the library's is not repeated.
+ */
+const libraryWarnings = new WeakMap<DocumentStore, { key: string; rows: Array<{ txt: string; node: string }> }>();
+let libraryTimer: ReturnType<typeof setTimeout> | null = null;
+function libraryKey(st: DocumentStore): string {
+  return `${st.undoDepth}:${st.liveNodes().length}:${st.liveEdges().length}:${st.dirty ? 1 : 0}`;
+}
+function libraryWarningsOf(st: DocumentStore): Array<{ txt: string; node: string }> {
+  const key = libraryKey(st);
+  const had = libraryWarnings.get(st);
+  if (!had || had.key !== key) scheduleLibraryValidate(st, key);
+  return had?.rows ?? [];
+}
+function scheduleLibraryValidate(st: DocumentStore, key: string): void {
+  if (libraryTimer) clearTimeout(libraryTimer);
+  libraryTimer = setTimeout(async () => {
+    libraryTimer = null;
+    if (libraryKey(st) !== key) return;
+    let rows: Array<{ txt: string; node: string }> = libraryWarnings.get(st)?.rows ?? [];
+    try {
+      const r = await fetch(`${await bridgeUrl()}/validate`, {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ doc: JSON.parse(st.toJSON()) }),
+      });
+      if (r.ok) {
+        const j = await r.json() as { warnings?: string[] };
+        const ids = new Set(st.liveNodes().map((n) => n.id));
+        rows = (j.warnings ?? [])
+          .filter((w) => !/EPSG:4326 with a zero shift/.test(w))
+          .map((w) => ({ txt: w, node: [...w.matchAll(/\(([^()\s]+)\)/g)].map((m) => m[1]).find((id) => ids.has(id)) ?? "" }));
+      }
+    } catch { /* no bridge: the library's words are not there, and nothing pretends they are */ }
+    const before = JSON.stringify(libraryWarnings.get(st)?.rows ?? []);
+    libraryWarnings.set(st, { key, rows });
+    if (st === store && JSON.stringify(rows) !== before) refreshIssues();
+  }, 900);
 }
 
 /** DEV30 U5 · the nodes whose texts have no language (none on the node, none
