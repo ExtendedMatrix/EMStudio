@@ -436,7 +436,9 @@ export function buildDtcScene(
       // DEV30 D3 · the two events of one lot say their dates
       if (n.node_type === "dtc_acquisition" && inCitation.has(n.id)) {
         const when = actDay(n);
-        if (when) sn.label = `${String(n.name || n.id)} · ${when}`;
+        // the date FIRST: a box cuts a long label at its end, and the date is
+        // what tells the two rows apart
+        if (when) sn.label = `${when} · ${String(n.name || n.id)}`;
       }
       scene.nodes.push(sn);
       scene.byId.set(sn.id, sn);
