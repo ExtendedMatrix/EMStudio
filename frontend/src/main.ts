@@ -67,6 +67,7 @@ import {
   declareIdentity,
   orcidProblem,
   forgetIdentity,
+  useNoIdentity,
   knownIdentities,
   MockIdentityProvider,
   sameSignature,
@@ -79,6 +80,7 @@ import {
   identityState,
   signatureAuth,
   WitnessedClaim,
+  type Identity,
   type IdentityProvider,
 } from "./identity";
 import { renderInspector } from "./inspector";
@@ -534,7 +536,7 @@ import {
   type Draft, type DraftInput,
 } from "./stamp-compose";
 import { setTreeBridgeResolver, TREE_EXT, treeOf, verifyStamp, type TreeInfo } from "./stamp-tree";
-import { openSealCard, sealMini, sealWords, type SealStamp } from "./seal";
+import { openSealCard, readableWhen, sealMini, sealWords, type SealStamp } from "./seal";
 import {
   DECLARED_KINDS, landStep, parentLabel, type DeclaredKind, type DeclaredLevel,
 } from "./declared";
@@ -5431,6 +5433,7 @@ async function createRoomHere(seed: boolean): Promise<void> {
   if (!name) return;
   const roomId = roomIdFromName(name);
   const server = servingNode();
+  if (!server) { toast(t("idw.noNode")); openSettings("settings-sect-sync"); return; }   // DEV30 U14
 
   // CAPTURED BEFORE CONNECTING, and the order is the whole repair. Measured on
   // the dev stack: a room created a second ago still SENDS a snapshot — a
@@ -9827,6 +9830,11 @@ function identityRung(): IdentityRung {
 function servingNode(): string {
   const configured = getSettings().sync.hubUrl?.replace(/\/+$/, "");
   if (configured) return configured;
+  // DEV30 U14 · the desktop's page is served by its shell (`tauri://localhost`,
+  // `http://tauri.localhost`), which is not a node: with none configured there
+  // IS no node, and that is what is said («no node configured», with the way to
+  // Settings › Sync) — never «no node answers at tauri://localhost»
+  if (isTauri() || !/^https?:$/.test(window.location.protocol) || /(^|\.)tauri\.localhost$/.test(window.location.hostname)) return "";
   // `/em/studio/` is served by the node at `/em`; the API is one level up from
   // the page. Derived from the document's own URL, so nothing is written down
   // twice — the same rule the field assistant's page follows.
@@ -9879,6 +9887,10 @@ interface PendingNodeSignIn {
  */
 async function signIntoNode(opts: { silent?: boolean; idpHint?: string; loginHint?: string; intent?: "identity" } = {}): Promise<boolean> {
   const server = servingNode();
+  if (!server) {   // DEV30 U14 · no node configured: say it, and where to name one
+    if (!opts.silent) { toast(t("idw.noNode")); openSettings("settings-sect-sync"); }
+    return false;
+  }
   logInfo(`identity: signing in against ${server}`
           + (opts.silent ? " (silently)" : ""));
   const config = await loadAuthConfig(server);
@@ -10067,6 +10079,26 @@ async function askNodeWhoIAm(server: string): Promise<void> {
  *
  * Clicking always offers THE NEXT RUNG, and never more than the next one.
  */
+/**
+ * DEV30 U13 · ONE TRUTH about who is working, read from ONE place
+ * (`currentIdentity()` + `identityState()`) and said with the SAME sentence in
+ * the status bar's tooltip, in «Who you are» and in Settings › Identity:
+ * declared; or verified, with its witness and its date; or attested by a node.
+ * Measured on dev.15: the tooltip said «NOT verified. You declared this
+ * yourself» for an identity the two panels said was «Verified … witnessed by
+ * ORCID» — the chip read the rung of the node session, the panels the identity.
+ */
+function identitySentence(me: Identity | null = currentIdentity()): string {
+  if (!me) return t("identity.stateNone");
+  const who = [me.name, me.surname].filter(Boolean).join(" ") || me.orcid;
+  const when = (iso?: string) => (iso ? readableWhen(iso) : t("idw.whenUnknown"));
+  switch (identityState(me)) {
+    case "attested": return t("idw.attested", { who, orcid: me.orcid, node: me.attestedBy ?? "?", at: when(me.attestedAt) });
+    case "verified": return t("idw.verified", { who, orcid: me.orcid, by: me.verifiedBy ?? "ORCID", at: when(me.verifiedAt) });
+    default: return t("idw.declared", { who, orcid: me.orcid });
+  }
+}
+
 function refreshIdentityChip(): void {
   const chip = document.getElementById("footer-identity");
   if (!chip) return;
@@ -10129,7 +10161,13 @@ function refreshIdentityChip(): void {
   const attested = identityState(identity) === "attested";
   chip.dataset.identityState = attested ? "attested" : identityState(identity) ?? "none";
   chip.classList.toggle("id-attested", attested);
-  chip.textContent = attested ? `◌ ${who} · ${t("idp.attestedWord")}` : `◌ ${who}`;
+  // DEV30 U13 · a VERIFIED identity is not shown as a mere signature: the
+  // word says it, and the tooltip is the one sentence (`identitySentence`)
+  const verifiedId = identityState(identity) === "verified";
+  chip.classList.toggle("verified", verifiedId);
+  chip.dataset.identityState = verifiedId ? "verified" : chip.dataset.identityState;
+  chip.textContent = attested ? `◌ ${who} · ${t("idp.attestedWord")}`
+    : verifiedId ? `✓ ${who} · ${t("idw.verifiedWord")}` : `◌ ${who}`;
   // A DEGRADATION IS SAID, and «the node knows you as somebody else» is one. A
   // chip that simply stayed dashed would be right and mute, and a mute
   // degradation is the failure that looks like a success.
@@ -10143,9 +10181,7 @@ function refreshIdentityChip(): void {
       })
     : nodeIdentityLost
       ? t("ident.lostTitle", { who, why: nodeIdentityLost })
-      : attested
-        ? t("idp.attestedTitle", { who, node: identity?.attestedBy ?? "" })
-        : t("ident.signatureTitle", { who, orcid: identity?.orcid ?? "" });
+      : identitySentence(identity) + (identityState(identity) === "declared" ? ` ${t("idw.clickToVerify")}` : "");
 }
 
 /**
@@ -10227,6 +10263,23 @@ function identityChipClicked(): void {
   }
 }
 
+/** DEV30 U15 · «Sign out · forget this identity»: the iD leaves this
+ *  machine's list and nobody is current; the node's session (in memory) goes
+ *  too. What is already signed stays signed — a signature is history. */
+function signOutIdentity(): void {
+  const me = currentIdentity();
+  if (!me) return;
+  if (!window.confirm(t("idw.signOutAsk", { who: [me.name, me.surname].filter(Boolean).join(" ") || me.orcid, orcid: me.orcid }))) return;
+  forgetIdentity(me.orcid);
+  useNoIdentity();
+  hubToken = null;
+  nodeIdentity = null;
+  nodeIdentityLost = null;
+  refreshIdentityPanel();
+  refreshIdentityChip();
+  toast(t("idw.signedOut", { orcid: me.orcid }));
+}
+
 /** The Settings section: declare, switch, verify. */
 function refreshIdentityPanel(): void {
   const state = document.getElementById("set-orcid-state");
@@ -10234,12 +10287,20 @@ function refreshIdentityPanel(): void {
   const verifyBtn = document.getElementById("set-orcid-verify") as HTMLButtonElement | null;
   if (!state || !known || !verifyBtn) return;
   const identity = currentIdentity();
-  state.textContent = identity
-    ? identity.verified
-      ? t("identity.stateVerified", { orcid: identity.orcid })
-      : t("identity.stateClaimed", { orcid: identity.orcid })
-    : t("identity.stateNone");
+  state.textContent = identitySentence(identity);
   verifyBtn.disabled = !identity || identity.verified;
+  // DEV30 U16 · the form is filled from the identity saved on this machine
+  // (measured on dev.15: the fields stayed empty while the line under them said
+  // «0000-0002-5065-7970 — verified»); a field being written is left alone
+  const fill = (id: string, v: string) => {
+    const f = document.getElementById(id) as HTMLInputElement | null;
+    if (f && document.activeElement !== f) f.value = v;
+  };
+  fill("set-orcid", identity?.orcid ?? "");
+  fill("set-orcid-name", identity?.name ?? "");
+  fill("set-orcid-surname", identity?.surname ?? "");
+  const outBtn = document.getElementById("set-orcid-signout") as HTMLButtonElement | null;
+  if (outBtn) outBtn.hidden = !identity;
 
   known.textContent = "";
   const others = knownIdentities();
@@ -10578,6 +10639,8 @@ document.getElementById("set-orcid-declare")?.addEventListener(
   "click", () => declareIdentityFromPanel());
 document.getElementById("set-orcid-verify")?.addEventListener(
   "click", () => void verifyIdentityFlow());
+document.getElementById("set-orcid-signout")?.addEventListener(
+  "click", () => signOutIdentity());
 // Enter in the iD field declares: typing an identifier and pressing return is
 // the gesture, and making people reach for a button afterwards is friction with
 // no purpose.
@@ -13899,8 +13962,9 @@ let identityThen: (() => void) | null = null;
 
 /** Is a StratiGraph node there to sign in through, and why not when it is not. */
 async function probeStratiGraphNode(): Promise<{ ok: boolean; server: string; why?: string;
-                                               nodeName?: string; orcidIdp?: string }> {
+                                               nodeName?: string; orcidIdp?: string; noNode?: boolean }> {
   const server = servingNode();
+  if (!server) return { ok: false, server, why: t("idw.noNode"), noNode: true };
   const ctl = new AbortController();
   const timer = setTimeout(() => ctl.abort(), 3500);
   try {
@@ -13951,13 +14015,11 @@ function openIdentityPanel(then?: () => void): void {
   };
   const me = currentIdentity();
   box.appendChild(el("h4", undefined, t("idp.title")));
-  const who = me ? `${[me.name, me.surname].filter(Boolean).join(" ") || me.orcid}` : "";
   const meState = identityState(me);
+  // DEV30 U13 · the one sentence, then what it allows
   const state = el("div", "idp-state", !me ? t("idp.stateNone")
-    : meState === "attested" ? t("idp.stateAttested", { who, orcid: me.orcid, node: me.attestedBy ?? "" })
-      + (me.accredited ? ` ${t("idp.accredited")}` : "")
-    : me.verified ? t("idp.stateVerified", { who, orcid: me.orcid, by: me.verifiedBy ?? "ORCID" })
-    : t("idp.stateDeclared", { who, orcid: me.orcid }));
+    : identitySentence(me) + " " + (meState === "attested" ? (me.accredited ? t("idp.accredited") : "")
+      : me.verified ? t("idw.canPublish") : t("idw.canWork")));
   state.dataset.idpState = meState ?? "none";
   box.appendChild(state);
   // dev27 · back online with an attested identity: confirming it with ORCID is
@@ -14018,6 +14080,14 @@ function openIdentityPanel(then?: () => void): void {
     b1.disabled = !viaOrcid;
     w1.row.classList.toggle("off", !viaOrcid);
     w1.row.dataset.idpReady = String(viaOrcid);
+    // DEV30 U14 · no node configured: the way to configure one, at hand
+    if (pr.noNode) {
+      const cfgBtn = el("button", "link", t("idw.configureNode"));
+      cfgBtn.type = "button";
+      cfgBtn.dataset.idpConfigure = "1";
+      cfgBtn.addEventListener("click", () => { closeIdentityPanel(); openSettings("settings-sect-sync"); });
+      w1.row.appendChild(cfgBtn);
+    }
     // the field way: a node, and no ORCID
     const field = pr.ok && !orcidUp;
     wp.row.hidden = !field;
@@ -14089,7 +14159,18 @@ function openIdentityPanel(then?: () => void): void {
   cl.type = "button";
   cl.dataset.idpClose = "1";
   cl.addEventListener("click", closeIdentityPanel);
-  foot.append(manage, cl);
+  foot.append(manage);
+  // DEV30 U15 · leave: forget this identity on this machine, and the node's
+  // session with it (nothing is deleted anywhere else)
+  if (me) {
+    const out = el("button", "link", t("idw.signOut"));
+    out.type = "button";
+    out.dataset.idpSignout = "1";
+    out.title = t("idw.signOutHint", { orcid: me.orcid });
+    out.addEventListener("click", () => { closeIdentityPanel(); signOutIdentity(); });
+    foot.appendChild(out);
+  }
+  foot.appendChild(cl);
   box.appendChild(foot);
   document.body.appendChild(box);
   const onKey = (e: KeyboardEvent): void => {

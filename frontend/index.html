@@ -614,16 +614,13 @@
                papers) and lives in localStorage in clear text, while the tokens
                that verify it are secrets and never touch this window. -->
           <section data-settings-tab="identity" class="settings-sect" id="settings-sect-identity">
-            <h4>Identità (ORCID)</h4>
-            <p class="settings-hint">
-              L'<b>ORCID iD è l'identità</b>: quello che crei e modifichi porta
-              la firma dell'autore corrente. Puoi dichiararlo <b>senza rete</b>,
-              sullo scavo, e lavorare subito — la preparazione dei dati non
-              aspetta nessun login. Alla prima connessione lo
-              <b>verifichi</b>, e solo allora si sblocca la
-              <b>pubblicazione come quella persona</b>: dentro il tuo documento
-              un'attribuzione sbagliata si corregge, pubblicata diventa la
-              bibliografia di qualcun altro.
+            <!-- DEV30 U16 · in the interface's language (data-i18n), like the
+                 rest of Settings: the section was written in Italian -->
+            <h4 data-i18n="idw.setTitle">Identity (ORCID)</h4>
+            <p class="settings-hint" data-i18n="idw.setHint">
+              The ORCID iD is the identity: what you create and change carries the
+              signature of the current author. You can declare it offline and work at
+              once; verifying it is what unlocks publishing as that person.
             </p>
             <label
               >ORCID iD
@@ -636,16 +633,17 @@
               />
             </label>
             <label
-              >Nome (facoltativo)
+              ><span data-i18n="idw.setName">Name (optional)</span>
               <input id="set-orcid-name" type="text" autocomplete="off" />
             </label>
             <label
-              >Cognome (facoltativo)
+              ><span data-i18n="idw.setSurname">Surname (optional)</span>
               <input id="set-orcid-surname" type="text" autocomplete="off" />
             </label>
             <p class="settings-url">
-              <button id="set-orcid-declare" type="button">Dichiara</button>
-              <button id="set-orcid-verify" type="button">Verifica con ORCID</button>
+              <button id="set-orcid-declare" type="button" data-i18n="idw.setDeclare">Declare</button>
+              <button id="set-orcid-verify" type="button" data-i18n="idw.setVerify">Verify with ORCID</button>
+              <button id="set-orcid-signout" type="button" data-i18n="idw.signOut" hidden>Sign out · forget this identity</button>
             </p>
             <p class="settings-hint" id="set-orcid-state"></p>
             <div id="set-orcid-known"></div>

@@ -279,6 +279,13 @@ export function useIdentity(orcid: string): Identity | null {
   return found;
 }
 
+/** DEV30 U15 · nobody is authoring: the known list stays, none is current. */
+export function useNoIdentity(): void {
+  const store = readStore();
+  store.current = null;
+  writeStore(store);
+}
+
 /** Forget an identity on this machine (it is not deleted anywhere else). */
 export function forgetIdentity(orcid: string): void {
   const store = readStore();
