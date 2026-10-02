@@ -67,12 +67,12 @@ env:
 jobs:
   # ── 1 · the gate: is the pinned s3dgraphy published? ──────────────────────
   gate:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     outputs:
       pin: ${{ steps.pin.outputs.version }}
       app_version: ${{ steps.pin.outputs.app_version }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           # THE TAG, not the run's context — and this is a bug fix, not tidying.
           #
@@ -93,7 +93,7 @@ jobs:
           # build derives its version from `package.json`).
           ref: ${{ env.EM_TAG }}
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
 
@@ -175,10 +175,10 @@ jobs:
   # override. No commit, no dispatch, no token in the doc repo — and the built
   # HTML carries the app's version because `-D version=` says so.
   manual:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     needs: gate
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           # IL PROPRIETARIO SI LEGGE, NON SI SCRIVE. Qui c'era
           # `<vecchio-proprietario>/EMStudio-doc`, ed è sopravvissuta al
@@ -193,7 +193,7 @@ jobs:
           ref: "1.6"
           path: doc
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
 
@@ -207,19 +207,19 @@ jobs:
             -D "release=${{ needs.gate.outputs.app_version }}" \
             doc/docs doc/docs/_build/check
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           name: manual-html
           path: doc/docs/_build/check
 
   # ── 3 · the Release, as a draft, so three jobs can fill it ────────────────
   draft:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     needs: gate
     outputs:
       release_id: ${{ steps.create.outputs.result }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           # THE TAG, not the run's context — and this is a bug fix, not tidying.
           #
@@ -242,7 +242,7 @@ jobs:
 
       - name: Create (or reuse) the draft release for this tag
         id: create
-        uses: actions/github-script@v7
+        uses: actions/github-script@v8
         env:
           PIN: ${{ needs.gate.outputs.pin }}
         with:
@@ -296,7 +296,7 @@ jobs:
           - { os: ubuntu-22.04, target: x86_64-unknown-linux-gnu, label: linux-x64 }
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           # THE TAG, not the run's context — and this is a bug fix, not tidying.
           #
@@ -317,7 +317,7 @@ jobs:
           # build derives its version from `package.json`).
           ref: ${{ env.EM_TAG }}
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: "20"
 
@@ -329,7 +329,7 @@ jobs:
         with:
           workspaces: apps/desktop/src-tauri -> target
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
 
@@ -444,7 +444,7 @@ jobs:
       # A copy of the installers as a plain artifact too: a draft release is
       # visible only to people with write access, and a tester on the team
       # should not need that to try a nightly.
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           name: emstudio-${{ matrix.label }}
           path: |
@@ -458,7 +458,7 @@ jobs:
 
   # ── 5 · publish, once all three are in ───────────────────────────────────
   publish:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     # The binaries are the release. The `manual` job is an INFORMATIONAL doc
     # check (EMStudio-doc is a separate repo, not shipped in these installers),
     # so a doc hiccup must never hold the binaries hostage — it runs, it is
@@ -466,7 +466,7 @@ jobs:
     needs: [desktop]
     steps:
       - name: Undraft the release
-        uses: actions/github-script@v7
+        uses: actions/github-script@v8
         with:
           script: |
             const tag = process.env.EM_TAG;

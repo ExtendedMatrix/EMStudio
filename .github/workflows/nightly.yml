@@ -83,22 +83,22 @@ jobs:
     # Se una guardia dovesse tornare, va scritta con `github.repository_owner`
     # confrontato con qualcosa che il repo dichiara — mai con una stringa
     # battuta a mano, che il giorno del trasloco nessuno cerca.
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     outputs:
       built: ${{ steps.devrel.outputs.built }}
       tag: ${{ steps.devrel.outputs.tag }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           # the whole history and every tag: `--if-changed` counts commits since
           # the last v* tag, and a shallow clone has no tags to count from
           fetch-depth: 0
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: "20"
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
 
