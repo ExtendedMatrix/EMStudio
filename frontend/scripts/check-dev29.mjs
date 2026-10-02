@@ -28,7 +28,7 @@ const SRC = new URL("../src/", import.meta.url).pathname;
 const bundle = await esbuild.build({
   stdin: {
     contents: `
-      export { issues, doubleSlashFix, georeferenceState } from "./issues";
+      export { issues, doubleSlashFix, georeferenceState, twinAcquisitions } from "./issues";
       export { ancestorsOf, isStratigraphicType } from "./rules";
       export { DocumentStore } from "./model";
       export { setLocale, t } from "./i18n";
@@ -36,6 +36,7 @@ const bundle = await esbuild.build({
       export { adaptDraft } from "./views/stamps";
       export { dtcKindFamily } from "./rules";
       export { geoOf } from "./geo";
+      export { buildDtcScene, dtcSetId, processLabel } from "./views/dtc";
     `,
     resolveDir: SRC, loader: "ts",
   },
@@ -50,7 +51,7 @@ const bundle = await esbuild.build({
   }],
 });
 const M = await import("data:text/javascript;base64," + Buffer.from(bundle.outputFiles[0].text).toString("base64"));
-const { geoOf, compose, adaptDraft, dtcKindFamily, doubleSlashFix, georeferenceState, issues, ancestorsOf, isStratigraphicType, DocumentStore, setLocale, t } = M;
+const { twinAcquisitions, buildDtcScene, dtcSetId, processLabel, geoOf, compose, adaptDraft, dtcKindFamily, doubleSlashFix, georeferenceState, issues, ancestorsOf, isStratigraphicType, DocumentStore, setLocale, t } = M;
 const tt = (k, v) => `${k}${v ? JSON.stringify(v) : ""}`;
 const doc = (nodes, edges = []) => ({ header: {}, graph: { id: "g", nodes, edges } });
 
@@ -156,6 +157,52 @@ const doc = (nodes, edges = []) => ({ header: {}, graph: { id: "g", nodes, edges
   const d = doc([{ id: "geo", node_type: "geo_position", data: { shift_x: 0, shift_y: 0, shift_z: 0 } }, { id: "u", node_type: "US", name: "US1" }]);
   const g = issues({ doc: d, nodes: d.graph.nodes, isUnit: isStratigraphicType, t: tt }).filter((i) => i.rule === "georef");
   eq(g.map((i) => [i.sev, i.txt]), [["info", "issues.georefNone"]], "A6 · a GeoPositionNode without epsg (dev29 import): «not georeferenced», information");
+}
+
+// ── B2 · the DTC that reads ────────────────────────────────────────────────
+{
+  const FX = JSON.parse(readFileSync(new URL("../testdata/dev29-segni-lite.em.json", import.meta.url), "utf8"));
+  const g = FX.graph;
+  const sc = buildDtcScene(g.nodes, g.edges);
+  const ids = sc.nodes.map((n) => n.id);
+  ok(!ids.some((id) => id.startsWith("res:dji")), "B2 · the 8 drone photos are not 8 boxes…");
+  const blocks = sc.nodes.filter((n) => n.id.endsWith("::set"));
+  eq(blocks.map((b) => [b.id, b.label]).sort(), [["acq-drone::set", "▸ 8 photos"], ["c1eef313-29e1-5361-ad19-ca01930832e7::set", "▸ 8 photos"]],
+     "B2 · …but one block «▸ 8 photos» per acquisition event");
+  const opened = buildDtcScene(g.nodes, g.edges, undefined, { openSets: new Set(["acq-drone"]) });
+  eq(opened.nodes.filter((n) => n.id.startsWith("res:dji")).length, 8, "B2 · opening the block shows the 8 files");
+  const lab = (id) => sc.nodes.find((n) => n.id === id)?.label;
+  eq([lab("proc-align"), lab("proc-lod2"), lab("proc-lod0")], ["allineamento", "export: OBJ decimato", "export: OBJ 12 materiali"],
+     "B2 · a process says its technique, not «derivation of …»");
+  eq(processLabel({ id: "x", node_type: "dtc_process", name: "Allineamento Metashape", data: { technique: "t" } }), undefined,
+     "B2 · a name a person gave stays");
+  const lanes = sc.lanes.map((l) => l.label);
+  console.log("  lanes (fixture):", JSON.stringify(lanes));
+  ok(!lanes.some((l) => /\(\d\)/.test(l)), "B2 · no lane is «Products (2)» / «Processes (2)»");
+  ok(lanes.some((l) => /allineamento/.test(l)) && lanes.some((l) => /Products of .*export/.test(l)),
+     "B2 · the lanes say the step (allineamento; products of the export)");
+  // the same lot, two events: the one there first stays (the stamps' id)
+  eq(twinAcquisitions(g.nodes, g.edges), [{ keep: "c1eef313-29e1-5361-ad19-ca01930832e7", drop: "acq-drone", members: 8 }],
+     "B2 · two events for the same 8 files are found; the stamps' event (there first) is the one kept");
+  const st = new DocumentStore(JSON.parse(JSON.stringify(FX)));
+  let merge = null;
+  const iss = issues({ doc: st.doc, nodes: st.liveNodes(), isUnit: isStratigraphicType, t: tt,
+    fixers: { mergeEvents: { label: "m", run: (k, d) => { merge = [k, d]; } } } }).filter((i) => i.rule === "twin");
+  ok(iss.length === 1 && iss[0].node === "acq-drone" && iss[0].fix?.kind === "button", "B2 · a warning on the second event, with «Merge into …»");
+  iss[0].fix.run();
+  eq(merge, ["c1eef313-29e1-5361-ad19-ca01930832e7", "acq-drone"], "B2 · …which merges the declared event into the stamps' one");
+  const SP = process.env.DEV29_SP_DTC;   // optional: SanPietro_DTC.em.json (a copy in /tmp)
+  if (SP) {
+    const sp = JSON.parse(readFileSync(SP, "utf8")).graph;
+    const before = sp.nodes.length;
+    const s2 = buildDtcScene(sp.nodes, sp.edges);
+    const widest = Math.max(...s2.lanes.map((l) => s2.nodes.filter((n) => n.y >= l.y && n.y < l.y + l.height).length));
+    console.log("  San Pietro DTC:", JSON.stringify({ boxes: s2.nodes.length, widestLane: widest, lanes: s2.lanes.map((l) => l.label),
+      processes: s2.nodes.filter((n) => n.node.node_type === "dtc_process").map((n) => n.label ?? n.node.name) }));
+    ok(widest < 20, `B2 · San Pietro: no lane of 71 boxes (widest ${widest})`);
+    eq(twinAcquisitions(sp.nodes, sp.edges).map((x) => [sp.nodes.find((n) => n.id === x.keep).name, sp.nodes.find((n) => n.id === x.drop).name, x.members]),
+       [["Acquisition", "Volo drone San Pietro (FC300X)", 71]], "B2 · San Pietro: «Acquisition» (the stamps') and «Volo drone» are one lot of 71");
+  }
 }
 
 // ── B9a · the default name of a phase is in the interface language ─────────

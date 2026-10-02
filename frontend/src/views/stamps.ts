@@ -41,6 +41,7 @@
 import { declaredId, declaredResource, type DeclaredLevel } from "../declared";
 import type { Chain, IdentityWord, Stamp, StampParent } from "../stamp";
 import type { EmEdge, EmNode } from "../types";
+import { dtcKindLabel } from "../rules";
 
 /** I tre archi veri del substrato. Nominati qui perché questo file COSTRUISCE
  *  una catena sintetica, e deve usare gli stessi nomi che la libreria usa — non
@@ -75,7 +76,9 @@ function processNode(stamp: Stamp): EmNode {
   return {
     id,
     node_type: "dtc_process",
-    name: how.technique || how.dtc_kind || "step",
+    // DEV29 B2 · the kind's LABEL when there is no technique, never its id (D5
+    // of dev28: the step read «format_conversion» in the mini-graph)
+    name: how.technique || (how.dtc_kind ? dtcKindLabel(how.dtc_kind) : "") || "step",
     data: {
       dtc_kind: how.dtc_kind ?? "transformation",
       technique: how.technique,

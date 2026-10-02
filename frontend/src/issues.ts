@@ -68,6 +68,9 @@ export interface IssueFixers {
   setUrl?: { label: string; run: (from: string, to: string) => void };
   /** DEV29 B8 · «Read a SHIFT.txt…»: declares the graph's CRS and shift */
   readShift?: { label: string; run: () => void };
+  /** DEV29 B2 · two acquisition events for the same files → one (`keep` stays,
+   *  with the name and the facts of `drop`, which goes) */
+  mergeEvents?: { label: string; run: (keep: string, drop: string) => void };
 }
 
 export interface IssueSources {
@@ -276,6 +279,15 @@ export function issues(src: IssueSources): Issue[] {
                                      run: () => fx.itsMe!.run(n.id) } } : {}) });
   }
 
+  // ── DEV29 B2 · the same lot, two events ─────────────────────────────────
+  for (const tw of twinAcquisitions(nodes, doc.graph.edges ?? [])) {
+    const m = fx.mergeEvents;
+    push({ node: tw.drop, sev: "warn", rule: "twin",
+           txt: t("issues.twinEvents", { a: name(tw.drop), b: name(tw.keep), n: String(tw.members) }),
+           ...(m ? { fix: { kind: "button" as const, label: t("issues.twinMerge", { b: name(tw.keep) }),
+                            run: () => m.run(tw.keep, tw.drop) } } : {}) });
+  }
+
   // ── DEV29 B8 · the addresses, the georeference, what is declared missing ──
   for (const i of addressIssues(nodes, t, fx.setUrl)) push(i);
   const geo = georeferenceIssue(nodes, t, fx.readShift);
@@ -334,6 +346,37 @@ export function issues(src: IssueSources): Issue[] {
       if (k) push({ node: n.id, sev: "warn", rule: "verify",
                     txt: t("issues.aiProse", { n: name(n.id), ch: String(c.title ?? ""), k: String(k) }) });
     });
+  }
+  return out;
+}
+
+/**
+ * DEV29 B2 · two acquisitions that produced EXACTLY the same files are one lot
+ * with two events — measured on San Pietro: the drone's 71 stamps (29 Sep) had
+ * made their event («Acquisition», id = the stamps' process_id), and the event
+ * declared on 1 Oct («Volo drone San Pietro») produced the same 71 files beside
+ * it. The event that was THERE FIRST stays (its id is the one the stamps cite,
+ * so re-reading them lands on it — s3Dgraphy's `bucket_acquisition` does the
+ * same from dev29); the later one gives it its name and its facts, and goes.
+ */
+export function twinAcquisitions(nodes: EmNode[], edges: Array<{ source: string; target: string; edge_type?: string }>):
+    Array<{ keep: string; drop: string; members: number }> {
+  const acq = new Map(nodes.filter((n) => n.node_type === "dtc_acquisition").map((n) => [n.id, n]));
+  const outs = new Map<string, string[]>();
+  for (const e of edges)
+    if (e.edge_type === "dtc_had_output" && acq.has(e.source))
+      (outs.get(e.source) ?? outs.set(e.source, []).get(e.source)!).push(e.target);
+  const bySet = new Map<string, string[]>();
+  for (const [a, ts] of outs) {
+    const k = [...new Set(ts)].sort().join("\u0000");
+    (bySet.get(k) ?? bySet.set(k, []).get(k)!).push(a);
+  }
+  const at = (id: string): string => String(((acq.get(id)?.data ?? {}) as Record<string, unknown>).created_at ?? "\uffff");
+  const out: Array<{ keep: string; drop: string; members: number }> = [];
+  for (const [k, ids] of bySet) {
+    if (ids.length < 2) continue;
+    const sorted = [...ids].sort((a, b) => at(a).localeCompare(at(b)) || a.localeCompare(b));
+    for (const d of sorted.slice(1)) out.push({ keep: sorted[0], drop: d, members: k.split("\u0000").length });
   }
   return out;
 }

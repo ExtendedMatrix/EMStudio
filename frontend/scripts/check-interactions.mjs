@@ -2797,6 +2797,41 @@ test("V8.warnings", "avvisi nuovi: due documenti sullo stesso file, un url con /
     detail: { rows: rows.filter((r) => ["address", "georef", "missing"].includes(r.rule)), msgMin, chooser: !!chooser, bridgeReadShift: can, geo, after, toast: toast.slice(0, 200), errors } };
 });
 
+test("V2.dtc", "il DTC che si legge: un'acquisizione di N foto è UN blocco («▸ 8 photos») che si apre col clic, i processi dicono la tecnica, le corsie il passo, le etichette ci sono alla scala di adattamento; i due eventi dello stesso lotto si uniscono in uno", async () => {
+  const { p, ctx, errors } = await open({ doc: "dev29-segni-lite", locale: "en", ws: "provenance" });
+  await p.locator('button[aria-pressed]', { hasText: /^DTC$/ }).first().click();
+  await p.waitForTimeout(900);
+  const win = await winOf(p, "graph");
+  const sc = await p.evaluate((w) => window.__EM_DRAG__.winScene(w), win);
+  const blocks = sc.boxes.filter((b) => b.id.endsWith("::set")).map((b) => b.label);
+  const photos = sc.boxes.filter((b) => b.id.startsWith("res:dji")).length;
+  const label = (id) => sc.boxes.find((b) => b.id === id)?.label;
+  await p.screenshot({ path: SHOT("v2-dtc-blocchi") }).catch(() => {});
+  const blk = sc.boxes.find((b) => b.id === "acq-drone::set");
+  await p.mouse.click(blk.x + blk.w / 2, blk.y + blk.h / 2);
+  await p.waitForTimeout(800);
+  const sc2 = await p.evaluate((w) => window.__EM_DRAG__.winScene(w), win);
+  const opened = sc2.boxes.filter((b) => b.id.startsWith("res:dji")).length;
+  const sel = await p.evaluate(() => window.__EM_DRAG__.selected());
+  // the twin events: the warning's fix merges them
+  const before = await p.evaluate(() => window.__EM_DRAG__.idsOfType("dtc_acquisition").length);
+  await p.click("#footer-warnings");
+  await p.waitForTimeout(700);
+  await p.locator('tr.tv-issue[data-rule="twin"] .tv-fix button').first().click();
+  await p.waitForTimeout(700);
+  const after = await p.evaluate(() => window.__EM_DRAG__.idsOfType("dtc_acquisition"));
+  const kept = await p.evaluate(() => window.__EM_DRAG__.node("c1eef313-29e1-5361-ad19-ca01930832e7"));
+  const inputs = await p.evaluate(() => window.__EM_DRAG__.edgesOf("dtc_had_input").filter((e) => e.source === "proc-align").map((e) => e.target).sort());
+  await ctx.close();
+  return { pass: JSON.stringify(blocks.sort()) === JSON.stringify(["▸ 8 photos", "▸ 8 photos"]) && photos === 0
+      && label("proc-align") === "allineamento" && label("proc-lod2") === "export: OBJ decimato"
+      && !sc.lanes.some((l) => /\(\d\)/.test(l)) && sc.lanes.some((l) => /allineamento/.test(l))
+      && sc.scale > 0.35 && opened === 8 && sel[0] === "acq-drone"
+      && before === 4 && after.length === 3 && !after.includes("acq-drone") && kept?.name === "Volo drone San Pietro (FC300X)"
+      && inputs.includes("c1eef313-29e1-5361-ad19-ca01930832e7") && !errors.length,
+    detail: { blocks, photos, align: label("proc-align"), lanes: sc.lanes, scale: sc.scale, opened, sel, before, after, kept: kept?.name, inputs, errors } };
+});
+
 // ── run ─────────────────────────────────────────────────────────────────────
 const chosen = cases.filter((c) => !only.length || only.includes(c.id) || only.some((o) => c.id.startsWith(o + ".")));
 for (const c of chosen) {

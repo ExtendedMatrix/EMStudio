@@ -32,7 +32,7 @@
 // Arrows still point DOWN (invariant 3): a process is below what it consumed
 // and above what it produced.
 import { t } from "../i18n";
-import { isDtcChainEdge, isDtcNodeType } from "../rules";
+import { dtcKindLabel, isDtcChainEdge, isDtcNodeType } from "../rules";
 import type { Lane, Scene, SceneNode } from "../scene";
 import type { EmEdge, EmNode } from "../types";
 
@@ -107,6 +107,46 @@ export function dtcRoleColour(node: { node_type: string; data?: Record<string, u
   return ROLE_STYLE.output.color;
 }
 
+// ── DEV29 B2 · the DTC that reads ───────────────────────────────────────────
+
+/** An acquisition's members are drawn as ONE block when there are at least
+ *  this many («71 foto ▸»), until the block is opened. */
+export const DTC_SET_MIN = 4;
+/** The id of the block of an acquisition's members. */
+export const DTC_SET_SUFFIX = "::set";
+export const dtcSetId = (acqId: string): string => `${acqId}${DTC_SET_SUFFIX}`;
+/** The acquisition a block id stands for, or null. */
+export function dtcSetOwner(id: string | null | undefined): string | null {
+  return id && id.endsWith(DTC_SET_SUFFIX) ? id.slice(0, -DTC_SET_SUFFIX.length) : null;
+}
+
+/** The name s3Dgraphy gives a process nobody named (`declare_derivation`:
+ *  «derivation of <output>»). Such a name says the output again and hides the
+ *  act — measured on San Pietro and on the Ninfeo, where every process read
+ *  «derivation of …» while its technique («allineamento», «export: OBJ
+ *  decimato») was declared and unseen. */
+const AUTO_PROCESS_NAME = /^derivation of\b/i;
+
+/** What a process box SAYS: its declared technique when its name is the
+ *  automatic one (or absent), else its kind's label; a name a person gave
+ *  stays. The D5 of dev28. */
+export function processLabel(n: EmNode): string | undefined {
+  const d = (n.data ?? {}) as Record<string, unknown>;
+  const name = String(n.name ?? "").trim();
+  if (name && !AUTO_PROCESS_NAME.test(name)) return undefined;
+  const technique = String(d.technique ?? "").trim();
+  if (technique) return technique;
+  const kind = String(d.dtc_kind ?? "").trim();
+  return kind ? dtcKindLabel(kind) : undefined;
+}
+
+/** «71 photos» / «12 files»: images are photos, anything else is files. */
+function setLabel(members: EmNode[], open: boolean): string {
+  const images = members.every((m) => /^image\//.test(String(((m.data ?? {}) as Record<string, unknown>).media_type ?? ""))
+    || /\.(jpe?g|png|tiff?|dng|cr2|nef|arw)$/i.test(String(m.name ?? "")));
+  return `${open ? "▾" : "▸"} ${t(images ? "dtc.setPhotos" : "dtc.setFiles", { n: String(members.length) })}`;
+}
+
 /** Deterministic order: by name, then id — the same document must always draw
  *  the same picture (invariant 7 in spirit). */
 function byName(a: EmNode, b: EmNode): number {
@@ -127,7 +167,9 @@ export function buildDtcScene(
   nodes: EmNode[],
   edges: EmEdge[],
   overrides?: Map<string, { x: number; y: number }>,
-  opts: { openResources?: ReadonlySet<string>; allNodes?: readonly EmNode[] } = {},
+  opts: { openResources?: ReadonlySet<string>; allNodes?: readonly EmNode[];
+          /** DEV29 B2 · the acquisitions whose members are shown one by one */
+          openSets?: ReadonlySet<string> } = {},
 ): Scene {
   const present = new Set(nodes.map((n) => n.id));
   const keep = new Set<string>();
@@ -155,9 +197,58 @@ export function buildDtcScene(
     keep.add(e.target);
   }
 
-  const members = nodes.filter((n) => keep.has(n.id));
+  let members = nodes.filter((n) => keep.has(n.id));
   const scene: Scene = { nodes: [], byId: new Map(), edges: [], lanes: [] };
   if (!members.length) return scene;
+
+  // ── DEV29 B2 · an acquisition of many files is ONE block («71 foto ▸») ────
+  //
+  // A member folds into its acquisition's block when the acquisition is its
+  // ONLY kind of producer and nothing else in the chain names it one by one
+  // (no process consumes it alone, nothing derives from it, no EM node cites
+  // it). A process that consumed the acquisition still hangs from the
+  // acquisition. Two events that produced the same lot (the stamps' and the
+  // declared one, San Pietro) each get their own block.
+  const byIdAll = new Map(members.map((n) => [n.id, n]));
+  const touched = new Map<string, number>();       // member → chain edges that are NOT acquisition→member outputs
+  const producers = new Map<string, string[]>();   // member → acquisitions that output it
+  for (const e of [...chain, ...bridges]) {
+    const src = byIdAll.get(e.source);
+    if (e.edge_type === "dtc_had_output" && src?.node_type === "dtc_acquisition") {
+      (producers.get(e.target) ?? producers.set(e.target, []).get(e.target)!).push(e.source);
+      continue;
+    }
+    touched.set(e.source, (touched.get(e.source) ?? 0) + 1);
+    touched.set(e.target, (touched.get(e.target) ?? 0) + 1);
+  }
+  const foldedInto = new Map<string, string[]>();  // acquisition → its folded members
+  for (const [m, acqs] of producers) {
+    if (touched.get(m) || byIdAll.get(m)?.node_type === "dtc_acquisition") continue;
+    for (const a of acqs) (foldedInto.get(a) ?? foldedInto.set(a, []).get(a)!).push(m);
+  }
+  const hiddenMembers = new Set<string>();
+  const setNodes: EmNode[] = [];
+  for (const [a, ms] of foldedInto) {
+    if (ms.length < DTC_SET_MIN) continue;
+    const open = !!opts.openSets?.has(a);
+    const list = ms.map((m) => byIdAll.get(m)!).sort(byName);
+    if (open) continue;
+    for (const m of ms) hiddenMembers.add(m);
+    setNodes.push({ id: dtcSetId(a), node_type: "resource", name: setLabel(list, false),
+                    data: { dtc_set_of: a, member_count: ms.length,
+                            dtc_kind: ((byIdAll.get(a)?.data ?? {}) as Record<string, unknown>).dtc_kind } } as unknown as EmNode);
+    chain.push({ id: `${dtcSetId(a)}::out`, source: a, target: dtcSetId(a), edge_type: "dtc_had_output" } as EmEdge);
+  }
+  // a member drawn by ANOTHER acquisition still open stays; one folded by all
+  // its acquisitions goes
+  for (const [a, ms] of foldedInto)
+    if (ms.length < DTC_SET_MIN || opts.openSets?.has(a)) for (const m of ms) hiddenMembers.delete(m);
+  if (hiddenMembers.size || setNodes.length) {
+    members = [...members.filter((n) => !hiddenMembers.has(n.id)), ...setNodes];
+    for (let i = chain.length - 1; i >= 0; i--)
+      if (hiddenMembers.has(chain[i].source) || hiddenMembers.has(chain[i].target)) chain.splice(i, 1);
+  }
+
 
   // ── RANKS · how far down the chain each node sits ─────────────────────────
   //
@@ -306,6 +397,12 @@ export function buildDtcScene(
         h: NODE_H,
         node: n,
       };
+      // DEV29 B2 · a process says its technique, not «derivation of …»
+      if (isDtcNodeType(n.node_type) && n.node_type !== "dtc_acquisition") {
+        const pl = processLabel(n);
+        if (pl) sn.label = pl;
+      }
+      if (dtcSetOwner(n.id)) sn.label = String(n.name);
       scene.nodes.push(sn);
       scene.byId.set(sn.id, sn);
     });
@@ -331,12 +428,32 @@ export function buildDtcScene(
     // honest, and topologically necessary. Measured on a corpus, that lane said
     // "Prodotti · 5" over four images AND a process. So a mixed lane names what
     // it holds: `Prodotti · 4 + Processi · 1`.
+    // DEV29 B2 · a lane says the STEP, not «Products (2)» / «Processes (2)»:
+    // a lane of processes is named by what they did (their techniques, else
+    // their kinds), a lane of products by what made them. The ordinal stays
+    // only when no step can be named.
+    const stepOf = (n: EmNode): string => processLabel(n) ?? String(n.name || n.id);
+    const steps = (ns: EmNode[]): string => {
+      const all = [...new Set(ns.map(stepOf))].sort();
+      return all.slice(0, 2).join(" · ") + (all.length > 2 ? ` +${all.length - 2}` : "");
+    };
+    const roleWords = (rl: Role, first: boolean): string => {
+      const ofRole = row.filter((n) => roleOf(n) === rl);
+      if (rl === "process") {
+        const ps = ofRole.filter((n) => n.node_type !== "dtc_acquisition");
+        if (ps.length) return steps(ps);
+      }
+      if (rl === "output") {
+        const makers = [...new Set(ofRole.flatMap((n) => preds.get(n.id) ?? []))]
+          .map((id) => byIdAll.get(id)).filter((m): m is EmNode => !!m && isDtcNodeType(m.node_type));
+        const procs = makers.filter((m) => m.node_type !== "dtc_acquisition");
+        if (procs.length) return t("dtc.laneProductsOf", { what: steps(procs) });
+        if (makers.length) return t("dtc.laneAcquired");
+      }
+      return `${t(ROLE_STYLE[rl].labelKey)}${first && nth > 1 ? ` (${nth})` : ""}`;
+    };
     const composition = ordered
-      .map(([rl, count], i) =>
-        i === 0
-          ? `${t(ROLE_STYLE[rl].labelKey)}${nth > 1 ? ` (${nth})` : ""} · ${count}`
-          : `${t(ROLE_STYLE[rl].labelKey)} · ${count}`,
-      )
+      .map(([rl, count], i) => `${roleWords(rl, i === 0)} · ${count}`)
       .join(" + ");
     return {
       id: `dtc-lane-${r}`,

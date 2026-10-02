@@ -501,7 +501,7 @@ import {
   type AuthConfig,
 } from "./oidc";
 import { buildDtcGenesisScene, buildGroupScene } from "./views/context";
-import { buildDtcScene } from "./views/dtc";
+import { buildDtcScene, dtcSetOwner } from "./views/dtc";
 import { adaptNeighbourhood } from "./views/neighbourhood";
 import type { NeighbourhoodAnswer } from "./views/neighbourhood";
 // DTCEMS1 · il timbro, letto dal disco. `stamp.ts` risolve (per impronta, mai
@@ -1618,6 +1618,9 @@ window.__EM_SCENE__ = () => {
         // RISORSA-FILE · what the box SAYS when it is not the node's name
         ...(n.label ? { label: n.label } : {}), ...(n.instanceOf ? { instanceOf: n.instanceOf } : {}),
       })),
+      // DEV29 · the scale it is drawn at, and what its lanes say
+      scale: vp.scale,
+      lanes: (s?.lanes ?? []).map((l) => l.label),
     };
   },
   /** AUDIT · a change that arrives from ELSEWHERE (a peer, another window): one
@@ -2066,6 +2069,14 @@ function sameEdge(a: EmEdge, b: EmEdge): boolean {
 }
 
 function select(nodeId: string | null): void {
+  // DEV29 B2 · a click on an acquisition's block opens it (or closes it) and
+  // selects the acquisition: the block is a drawing, not a node of the graph
+  const setOf = dtcSetOwner(nodeId);
+  if (setOf) {
+    if (openDtcSets.has(setOf)) openDtcSets.delete(setOf); else openDtcSets.add(setOf);
+    nodeId = setOf;
+    queueMicrotask(() => { buildScenes(); draw(); });
+  }
   // COLLEGARE · a pick on the graph gives the Inspector back to the node
   if (nvFocus) {
     nvFocus = false;
@@ -3008,6 +3019,9 @@ function updateInfo(): void {
 /** RISORSA-FILE · the resources whose files are shown (the drawing only: a
  *  resource of several files opens CLOSED). */
 const openResourceFiles = new Set<string>();
+/** DEV29 B2 · the acquisitions whose members the DTC shows one by one (closed:
+ *  one block «71 foto ▸»). The drawing only. */
+const openDtcSets = new Set<string>();
 function toggleResourceFiles(resId: string): void {
   if (openResourceFiles.has(resId)) openResourceFiles.delete(resId); else openResourceFiles.add(resId);
   buildScenes();
@@ -3457,7 +3471,7 @@ function buildScenesNow(): void {
   // resources the same way the study view does
   const dtcOf = (ns: EmNode[], es: EmEdge[]): Scene => {
     const f = foldFiles(ns, es, openResourceFiles);
-    return buildDtcScene(f.nodes, f.edges, dtcOverrides, { openResources: openResourceFiles });
+    return buildDtcScene(f.nodes, f.edges, dtcOverrides, { openResources: openResourceFiles, openSets: openDtcSets });
   };
   scenes.dtc = draftScene
     ? dtcOf(draftScene.nodes, draftScene.edges)
@@ -3472,7 +3486,7 @@ function buildScenesNow(): void {
     ? dtcOf(neighbour.nodes, neighbour.edges)
     : corpusNodes.length
     ? dtcOf(corpusNodes, corpusForView!.liveEdges())
-    : buildDtcScene(viewFor("dtc").nodes, viewFor("dtc").edges, dtcOverrides, { openResources: openResourceFiles });
+    : buildDtcScene(viewFor("dtc").nodes, viewFor("dtc").edges, dtcOverrides, { openResources: openResourceFiles, openSets: openDtcSets });
   {
     const counts = fileCounts([...doc.graph.edges, ...(corpusForView?.liveEdges() ?? []),
       ...(draftScene?.edges ?? []), ...(fromDisk?.edges ?? [])]);
@@ -11460,6 +11474,35 @@ function issueFixers(st: DocumentStore): IssueFixers {
     // DEV29 B8 · «Read a SHIFT.txt…»: s3Dgraphy reads it (bridge /read-shift),
     // the GeoPositionNode takes the CRS and the shift, one undo step
     readShift: { label: t("issues.readShift"), run: () => readShiftInto(st) },
+    // DEV29 B2 · the same lot, two events → ONE: `keep` (there first, the id the
+    // stamps cite) takes the name and the facts of `drop`, and every edge of
+    // `drop` that it has not already; `drop` goes. One undo step.
+    mergeEvents: {
+      label: t("issues.twinMerge", { b: "" }),
+      run: (keep, drop) => {
+        const k = st.node(keep), d = st.node(drop);
+        if (!k || !d) return;
+        const was = nm(drop);
+        st.batch(() => {
+          const kd = (k.data ?? {}) as Record<string, unknown>;
+          const dd = (d.data ?? {}) as Record<string, unknown>;
+          const generic = /^Acquisition( of \d+ file\(s\))?$/.test(String(k.name ?? ""));
+          st.updateNode(keep, { ...(generic && d.name ? { name: d.name } : {}),
+                                ...(!k.description && d.description ? { description: d.description } : {}),
+                                // the kept event's own facts win (its kind is what its stamps
+                                // say); the declared one fills what it lacks
+                                data: { ...dd, ...kd } });
+          for (const e of st.liveEdges().filter((x) => x.source === drop || x.target === drop)) {
+            const s0 = e.source === drop ? keep : e.source;
+            const t0 = e.target === drop ? keep : e.target;
+            if (s0 !== t0 && !st.hasEdge(s0, t0, String(e.edge_type)))
+              st.addEdge(s0, t0, String(e.edge_type), (e as { attributes?: Record<string, unknown> }).attributes);
+          }
+          st.deleteNode(drop);
+        });
+        done(t("issues.twinMerged", { a: was, b: nm(keep) }), [keep]);
+      },
+    },
     assignEpoch: (unit, epoch) => {
       st.addEdge(unit, epoch, "has_first_epoch");
       done(t("fix.epochDone", { n: nm(unit), e: nm(epoch) }), [unit, epoch]);
