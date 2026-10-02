@@ -84,7 +84,11 @@ export function geoOf(data: Record<string, unknown>): GeoRef {
   if (lat !== null && lon !== null && (lat !== 0 || lon !== 0))
     return { ok: true, lat, lon, epsg: 4326, rotation };
 
-  const epsg = num(data.epsg) ?? 4326;
+  // DEV29 · an ABSENT epsg is «not georeferenced» (s3Dgraphy dev29 A6: new
+  // graphs and imported GraphML carry a GeoPositionNode without one), never
+  // «WGS84 at the shift»: shifts in an undeclared frame place nothing
+  const epsg = num(data.epsg);
+  if (epsg === null) return { ok: false, reason: "no-coordinates" };
   const x = num(data.shift_x);
   const y = num(data.shift_y);
   const z = num(data.shift_z) ?? 0;

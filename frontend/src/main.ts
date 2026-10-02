@@ -14131,7 +14131,8 @@ renderMapEmbedSection = (host: HTMLElement, _node: EmNode): void => {
   row("site_position", sp ? `${sp.lat.toFixed(5)}, ${sp.lon.toFixed(5)} (${sp.crs})` : t("nv.notPlaced"));
   // the same fields `geo.ts` `geoOf` reads: epsg, shift_x, shift_y
   row(t("nv.anchor3d"), geoNode
-    ? (gd.shift_x != null ? `EPSG:${gd.epsg ?? 4326} · ${gd.shift_x}, ${gd.shift_y}` : String(geoNode.name ?? geoNode.id))
+    ? (gd.epsg == null || gd.epsg === "" ? t("nv.geoUndeclared")
+       : gd.shift_x != null ? `EPSG:${gd.epsg} · ${gd.shift_x}, ${gd.shift_y}` : String(geoNode.name ?? geoNode.id))
     : "—");
   const b = document.createElement("button");
   b.className = "insp-btn site-set";

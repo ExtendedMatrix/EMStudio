@@ -35,6 +35,7 @@ const bundle = await esbuild.build({
       export * as compose from "./stamp-compose";
       export { adaptDraft } from "./views/stamps";
       export { dtcKindFamily } from "./rules";
+      export { geoOf } from "./geo";
     `,
     resolveDir: SRC, loader: "ts",
   },
@@ -49,7 +50,7 @@ const bundle = await esbuild.build({
   }],
 });
 const M = await import("data:text/javascript;base64," + Buffer.from(bundle.outputFiles[0].text).toString("base64"));
-const { compose, adaptDraft, dtcKindFamily, doubleSlashFix, georeferenceState, issues, ancestorsOf, isStratigraphicType, DocumentStore, setLocale, t } = M;
+const { geoOf, compose, adaptDraft, dtcKindFamily, doubleSlashFix, georeferenceState, issues, ancestorsOf, isStratigraphicType, DocumentStore, setLocale, t } = M;
 const tt = (k, v) => `${k}${v ? JSON.stringify(v) : ""}`;
 const doc = (nodes, edges = []) => ({ header: {}, graph: { id: "g", nodes, edges } });
 
@@ -145,6 +146,16 @@ const doc = (nodes, edges = []) => ({ header: {}, graph: { id: "g", nodes, edges
   const step = pic.nodes.find((n) => n.id === "draft:step");
   eq([step.node_type, step.name], ["dtc_acquisition", "Download 10.5281/zenodo.7463211"], "B5 · the preview of an origin draws an acquisition with the act's name");
   ok(!pic.edges.some((e) => e.edge_type === "dtc_had_input"), "B5 · …and no input lane");
+}
+
+// ── A6 → B8 · an absent epsg places nothing (never «WGS84 at the shift») ───────
+{
+  eq(geoOf({ shift_x: 13.02, shift_y: 41.69 }).ok, false, "A6 · no epsg: not georeferenced, even with a shift");
+  eq(geoOf({ epsg: 4326, shift_x: 13.02, shift_y: 41.69 }).ok, true, "A6 · EPSG:4326 declared: placed");
+  eq(geoOf({ epsg: 3004, shift_x: 2355500, shift_y: 4617500 }).reason, "needs-reprojection", "A6 · EPSG:3004: asks PROJ");
+  const d = doc([{ id: "geo", node_type: "geo_position", data: { shift_x: 0, shift_y: 0, shift_z: 0 } }, { id: "u", node_type: "US", name: "US1" }]);
+  const g = issues({ doc: d, nodes: d.graph.nodes, isUnit: isStratigraphicType, t: tt }).filter((i) => i.rule === "georef");
+  eq(g.map((i) => [i.sev, i.txt]), [["info", "issues.georefNone"]], "A6 · a GeoPositionNode without epsg (dev29 import): «not georeferenced», information");
 }
 
 // ── B9a · the default name of a phase is in the interface language ─────────
