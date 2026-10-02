@@ -41,7 +41,7 @@
 #                                for this machine only.
 #   ./em.sh devrel [--dry-run] [--yes] [--if-changed]
 #                                A dev release: gate → inc → commit → tag → push.
-#                                GitHub Actions then builds the four installers.
+#                                GitHub Actions then builds the three installers.
 #   ./em.sh ghrelease <x.y.z>    A stable release at an exact version.
 #   ./em.sh help
 #
@@ -269,7 +269,7 @@ bounded() {
 #: and its bytes are served" rather than "pip can resolve and download it". That is
 #: the NECESSARY condition a packager needs, which is what a gate is for; the
 #: sufficient one — `pip install` of the pin with its extras — is exercised for
-#: real in CI, on all four runners, by the step that freezes the sidecar from that
+#: real in CI, on all three runners, by the step that freezes the sidecar from that
 #: very pin.
 #:
 #: `PIP_INDEX_URL` is honoured: a corporate mirror is exactly the case where "is
@@ -712,7 +712,7 @@ do_devrel() {
   require_clean_tree
 
   if [[ "$assume_yes" -eq 0 ]]; then
-    printf 'Push %s and start the four builds? (y/N): ' "$tag"
+    printf 'Push %s and start the three builds? (y/N): ' "$tag"
     read -r reply
     [[ "$reply" =~ ^[Yy]$ ]] || { log "cancelled"; return 0; }
   fi

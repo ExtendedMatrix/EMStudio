@@ -1,15 +1,15 @@
-# The desktop app, built for the four targets people actually run it on, and
+# The desktop app, built for the three targets people actually run it on, and
 # attached to the Release of the tag that started it.
 #
 # Triggered by a tag, which is what `./em.sh devrel` pushes. The whole flow:
 #
-#   ./em.sh devrel   →   v1.6.0-dev.N   →   this workflow   →   4 installers
+#   ./em.sh devrel   →   v1.6.0-dev.N   →   this workflow   →   3 installers
 #
 # ── the order that matters ───────────────────────────────────────────────────
 # The app ships a FROZEN Python sidecar (`em-bridge`) built from the s3dgraphy
 # version PINNED in `tools/requirements.txt`. So the very first job asks PyPI
 # whether that pin exists, and nothing else starts if it does not: a 40-minute
-# matrix that fails on all four runners for a missing wheel is a bad way to be
+# matrix that fails on all three runners for a missing wheel is a bad way to be
 # told something a single HTTP request knows. `./em.sh devrel` refuses locally for
 # the same reason — this is the same gate, on the other side of the push, because
 # a tag can also be pushed by hand.
@@ -212,7 +212,7 @@ jobs:
           name: manual-html
           path: doc/docs/_build/check
 
-  # ── 3 · the Release, as a draft, so four jobs can fill it ─────────────────
+  # ── 3 · the Release, as a draft, so three jobs can fill it ────────────────
   draft:
     runs-on: ubuntu-latest
     needs: gate
@@ -275,7 +275,7 @@ jobs:
             return made.data.id;
           result-encoding: string
 
-  # ── 4 · the four builds ───────────────────────────────────────────────────
+  # ── 4 · the three builds ──────────────────────────────────────────────────
   desktop:
     needs: [gate, draft]
     strategy:
@@ -454,13 +454,13 @@ jobs:
             apps/desktop/src-tauri/target/${{ matrix.target }}/release/bundle/**/*.AppImage
           if-no-files-found: warn
 
-  # ── 5 · publish, once all four are in ────────────────────────────────────
+  # ── 5 · publish, once all three are in ───────────────────────────────────
   publish:
     runs-on: ubuntu-latest
     # The binaries are the release. The `manual` job is an INFORMATIONAL doc
     # check (EMStudio-doc is a separate repo, not shipped in these installers),
     # so a doc hiccup must never hold the binaries hostage — it runs, it is
-    # visible if red, but it does not gate the publish. Only the four builds do.
+    # visible if red, but it does not gate the publish. Only the three builds do.
     needs: [desktop]
     steps:
       - name: Undraft the release

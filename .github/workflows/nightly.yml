@@ -128,7 +128,7 @@ jobs:
             echo "nothing to release tonight (no commits since the last tag)"
           fi
 
-  # The four installers, the manual check and the Release — the release workflow
+  # The three installers, the manual check and the Release — the release workflow
   # itself, called rather than copied.
   build:
     needs: prepare

@@ -7,6 +7,7 @@
 import * as esbuild from "esbuild";
 import assert from "node:assert/strict";
 import { parseHTML } from "linkedom";
+import { readFileSync } from "node:fs";
 
 let checks = 0;
 const fails = [];
@@ -72,6 +73,21 @@ const doc = (nodes, edges = []) => ({ header: {}, graph: { id: "g", nodes, edges
   eq(t("l.phaseCreated", { name: p2.name }), "fase Fase 2 creata", "B9a · …and the toast says «fase Fase 2 creata»");
   setLocale("en");
   eq(t("l.phaseDefault", { n: 3 }), "Phase 3", "B9a · in English «Phase 3»");
+}
+
+// ── B9d · devrel announces as many installers as release.yml builds ─────────
+{
+  const ROOT = new URL("../../", import.meta.url).pathname;
+  const yml = readFileSync(`${ROOT}.github/workflows/release.yml`, "utf8");
+  const builds = (yml.match(/^\s*- \{ os: /gm) ?? []).length;
+  eq(builds, 3, "B9d · release.yml builds three installers (macOS Intel retired)");
+  const words = ["", "one", "two", "three", "four", "five"];
+  for (const f of ["em.sh", "docs/DEVELOPMENT.md", ".github/workflows/release.yml", ".github/workflows/nightly.yml"]) {
+    const txt = readFileSync(`${ROOT}${f}`, "utf8");
+    const wrong = [...txt.matchAll(/\b(one|two|three|four|five)\s+(installers|builds|runners|targets)\b/gi)]
+      .filter((m) => words.indexOf(m[1].toLowerCase()) !== builds).map((m) => m[0]);
+    eq(wrong, [], `B9d · ${f} counts the installers as release.yml does`);
+  }
 }
 
 if (fails.length) {

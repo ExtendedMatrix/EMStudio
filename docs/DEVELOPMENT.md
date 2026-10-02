@@ -240,7 +240,7 @@ curl -s -X POST http://localhost:8799/resource-preview -H 'Content-Type: applica
 Then kill it (`lsof -ti tcp:8799 | xargs kill`) before launching the app, or the
 app's own sidecar finds the port taken.
 
-## Releasing (the dev channel, and the four installers)
+## Releasing (the dev channel, and the three installers)
 
 One command, the same ergonomics as EMtools:
 
@@ -250,9 +250,10 @@ One command, the same ergonomics as EMtools:
 ```
 
 The push of the tag is the whole trigger: `.github/workflows/release.yml` then
-builds the desktop app on **four** runners — macOS arm64 (`macos-14`), macOS
-Intel (`macos-13`), Windows and Linux (`ubuntu-22.04`) — and attaches the
-installers (`.dmg` · `.msi`/NSIS · `.deb`/`.AppImage`) to the Release of that tag.
+builds the desktop app on **three** runners — macOS arm64 (`macos-14`), Windows
+and Linux (`ubuntu-22.04`) — and attaches the installers (`.dmg` ·
+`.msi`/NSIS · `.deb`/`.AppImage`) to the Release of that tag. macOS Intel was
+retired on 2026-09-16 (see the matrix in `release.yml`).
 Public binaries are an **autumn 2026** target; the dev channel runs now.
 
 ### s3dgraphy first. Always.
@@ -313,7 +314,7 @@ each of these bit for real:
 output at all, for `s3dgraphy` and for `six` alike, while `curl` answered the same
 index in 0.5 s. What the gate now proves is the NECESSARY condition (the file is
 there and its bytes are served); the sufficient one — `pip install` of the pin,
-with its extras — is exercised for real by the sidecar step, on all four runners.
+with its extras — is exercised for real by the sidecar step, on all three runners.
 
 ### CI builds the sidecar from the published wheel
 
