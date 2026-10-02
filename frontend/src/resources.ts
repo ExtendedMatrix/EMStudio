@@ -1,4 +1,4 @@
-import { t } from "./i18n";
+import { packagingName } from "./rules";
 // NIGHT-RISORSA-FILE · the resource and its files — one way to make a
 // resource, one way to read it. The TypeScript MIRROR of s3Dgraphy's
 // `resources/files.py` (`api.add_resource` & co., s3Dgraphy 1.6.17 /
@@ -792,7 +792,5 @@ export function packagingLabel(n: { node_type?: string; data?: unknown } | null 
   if (!n || n.node_type !== "resource") return null;
   const p = String(((n.data ?? {}) as Record<string, unknown>).packaging ?? "");
   if (!p || p === "file") return null;
-  const k = `res.pack.${p}`;
-  const w = t(k);
-  return w === k ? p : w;
+  return packagingName(p);   // DEV30 A3 · the datamodel's word, in the locale
 }

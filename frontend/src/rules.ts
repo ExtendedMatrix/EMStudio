@@ -935,6 +935,32 @@ const _KIND_TRANSLATIONS = (
   }
 ).stratigraphic_kinds ?? {};
 
+// DEV30 A3 · the PACKAGINGS of a resource (file, file_set, directory, archive,
+// datablock): their vocabulary is the datamodel's (`ResourceNode.properties.
+// packaging` values/labels, node datamodel 1.6.24) and their names in each
+// language are the translations' (section `packagings`), read like the
+// stratigraphic kinds — never words of this interface.
+const _PACKAGING_RULE: { values?: Record<string, string>; labels?: Record<string, string> } = ((nodeDatamodel as unknown as {
+  reference_nodes?: { ResourceNode?: { properties?: { packaging?: { values?: Record<string, string>; labels?: Record<string, string> } } } };
+}).reference_nodes?.ResourceNode?.properties?.packaging) ?? {};
+const _PACKAGING_TRANSLATIONS = (
+  datamodelTranslations as { packagings?: Record<string, { label?: Record<string, string | boolean> }> }
+).packagings ?? {};
+
+/** The packagings the datamodel declares, in its order. */
+export function packagings(): string[] {
+  return Object.keys(_PACKAGING_RULE.values ?? {});
+}
+
+/** A packaging's name in the active locale (translations, `packagings`), then
+ *  the datamodel's English label, then the value itself. */
+export function packagingName(p: string): string {
+  const loc = _PACKAGING_TRANSLATIONS[p]?.label?.[getLocale()];
+  if (typeof loc === "string" && loc.trim()) return loc;
+  const en = _PACKAGING_TRANSLATIONS[p]?.label?.en;
+  return _PACKAGING_RULE.labels?.[p] ?? (typeof en === "string" ? en : p);
+}
+
 /** The genres the datamodel declares for a US, in its order. */
 export function stratigraphicKinds(): string[] {
   return Object.keys(_US_KIND_RULE.values ?? {});
