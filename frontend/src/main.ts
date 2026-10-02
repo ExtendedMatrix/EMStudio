@@ -4625,7 +4625,7 @@ function projectContainer(): ReturnType<typeof buildContainer> {
     id: String((slot.store.doc.graph as Record<string, unknown>).graph_id ?? slot.id),
     doc: JSON.parse(slot.store.toJSON()) as EmDocument,
   }));
-  const activeSlot = emtree.active();
+  const activeSlot = kept.includes(emtree.active()!) ? emtree.active() : kept[0];
   const container = buildContainer({
     graphs,
     shelf: projectShelfSection(),
@@ -7357,18 +7357,21 @@ function renderDocumentDating(st: DocumentStore, host: HTMLElement, docId: strin
     const msg = v ? t("chain.datedIn", { d: String(d.name ?? docId), e: String(st.node(v)?.name ?? v) })
                   : t("chain.undated", { d: String(d.name ?? docId) });
     logInfo(msg, [docId]);
-    void runLayout(false).then(() => { select(docId); toastUndo(msg, st); });
-  });
+    void runLayout(false).then(() => { select(docId); refreshInspector(); toastUndo(msg, st); });
+  };
+  sel.addEventListener("change", () => dateIn(sel.value));
   const year = document.createElement("input");
   year.className = "chain-value chain-year";
   year.inputMode = "numeric";
   year.placeholder = t("chain.yearPh");
   year.dataset.docYear = docId;
-  year.value = String(((d.data ?? {}) as Record<string, unknown>).year ?? "");
-  year.addEventListener("keydown", (e) => { e.stopPropagation(); if (e.key === "Enter") year.blur(); });
-  year.addEventListener("change", () => {
-    const data = { ...((st.node(docId)?.data ?? {}) as Record<string, unknown>) };
+  const stored = () => String(((st.node(docId)?.data ?? {}) as Record<string, unknown>).year ?? "");
+  year.value = stored();
+  /** the year in the field, written when it differs (inside `dateIn`'s batch too) */
+  function writeYear(): boolean {
     const v = year.value.trim();
+    if (v === stored()) return false;
+    const data = { ...((st.node(docId)?.data ?? {}) as Record<string, unknown>) };
     if (v) data.year = /^-?\d+$/.test(v) ? Number(v) : v;
     else delete data.year;
     st.updateNode(docId, { data });
