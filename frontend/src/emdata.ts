@@ -225,6 +225,7 @@ let onDeleted: ((name: string, store: DocumentStore) => void) | null = null;
 /** SPAZIO · the «Modelli e proxy» view: the graph's 3D, read by `space.ts` */
 let getSpace: () => { space: Space; units: string[]; ctx: ModelsCtx } | null = () => null;
 let onOpenDoc: (docId: string, from: HTMLElement) => void = () => {};
+let onShowInMatrix: (id: string) => void = () => {};
 export function initEmData(opts: {
   getStore: () => DocumentStore | null;
   getCtx?: () => ViewCtx | null;
@@ -241,7 +242,10 @@ export function initEmData(opts: {
   getSpace?: () => { space: Space; units: string[]; ctx: ModelsCtx } | null;
   /** SPAZIO · «Apri» on an RM: its document, in the service window */
   onOpenDoc?: (docId: string, from: HTMLElement) => void;
+  /** DEV30 U4 · «Show in the Matrix» on a document's card */
+  onShowInMatrix?: (id: string) => void;
 }): void {
+  if (opts.onShowInMatrix) onShowInMatrix = opts.onShowInMatrix;
   if (opts.onDeleted) onDeleted = opts.onDeleted;
   if (opts.getSpace) getSpace = opts.getSpace;
   if (opts.onOpenDoc) onOpenDoc = opts.onOpenDoc;
@@ -668,6 +672,8 @@ function docCardsHtml(cs: ReturnType<typeof docCards>): string {
       `<span class="tv-tag">${escapeHtml(t("table.master"))}</span></h3>` +
       `<p class="tv-desc">${escapeHtml(String(c.node.description ?? ""))}</p>` +
       `<div class="tv-eyebrow">${escapeHtml(t("table.uses", { n: String(c.uses) }))}</div>` +
+      // DEV30 U4 · from the card to the node: select it and centre it in the Matrix
+      `<button class="tv-act" type="button" data-show-matrix="${escapeAttr(c.node.id)}">${escapeHtml(t("table.showInMatrix"))}</button>` +
       c.owners.map((o, i) => `<div class="tv-chain"><div><span class="tv-tag">${escapeHtml(t("table.instance", { n: String(i + 1) }))}</span>` +
         `${link(o.unit)} <span class="tv-d">· ${escapeHtml(o.extractors.map(nm).join(", "))}</span></div></div>`).join("") +
       `</div>`).join("") + `</div></div>`;
@@ -765,6 +771,8 @@ function wireBody(host: EmDataHost, store: DocumentStore, st: TableState): void 
   // a node named anywhere in a view (a card, a link, a computed row) is a pick
   body.querySelectorAll<HTMLElement>("[data-go]").forEach((el) =>
     el.addEventListener("click", (e) => { e.stopPropagation(); onRowPicked(el.dataset.go!); }));
+  body.querySelectorAll<HTMLElement>("[data-show-matrix]").forEach((el) =>
+    el.addEventListener("click", (e) => { e.stopPropagation(); onShowInMatrix(el.dataset.showMatrix!); }));
   body.querySelectorAll<HTMLElement>("[data-open-doc]").forEach((el) =>
     el.addEventListener("click", (e) => { e.stopPropagation(); onOpenDoc(el.dataset.openDoc!, el); }));
   body.querySelectorAll<HTMLElement>("[data-id]").forEach((el) =>

@@ -15621,6 +15621,25 @@ function revealFromTable(nodeId: string): void {
   draw();
 }
 
+/** DEV30 U4 · «Show in the Matrix»: select the node and centre it in a graph
+ *  window on the Matrix — the first one already showing it, else the first
+ *  graph window, switched to the Matrix (the standard view). */
+function showInMatrix(nodeId: string): void {
+  if (!store || !store.node(nodeId)) return;
+  select(nodeId);
+  const graphs = windowsOf().filter((w) => w.type === "graph");
+  const win = graphs.find((w) => winMode(w) === "matrix") ?? graphs[0];
+  if (!win) { refreshInspector(); return; }
+  setActiveWin(win.id);
+  if (winMode(win) !== "matrix") setWindowMode(win, "matrix");
+  requestAnimationFrame(() => {
+    if (scene()?.byId.has(nodeId)) centerOn(nodeId);
+    else toast(t("toast.selectedNotVisible"));
+    refreshInspector();
+    draw();
+  });
+}
+
 /** The narrative this window is showing (the selected one, else the first). */
 function activeNarrative(): { id: string; chapters: unknown[] } | null {
   if (!store) return null;
@@ -26477,6 +26496,7 @@ initEmData({
              ctx: { node: (id) => st.node(id), t, genre: spaceGenre } };
   },
   onOpenDoc: (docId) => { requestDoc(docId, { reading: null }); select(docId); refreshInspector(); },
+  onShowInMatrix: (id) => showInMatrix(id),
 });
 // AUX2: the EM-Data table paints a row blue iff its node is volatile — the SAME
 // marker the canvas overlay reads, so table and graph never disagree.
