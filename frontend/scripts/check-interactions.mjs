@@ -2797,7 +2797,7 @@ test("V8.warnings", "avvisi nuovi: due documenti sullo stesso file, un url con /
     detail: { rows: rows.filter((r) => ["address", "georef", "missing"].includes(r.rule)), msgMin, chooser: !!chooser, bridgeReadShift: can, geo, after, toast: toast.slice(0, 200), errors } };
 });
 
-test("V2.dtc", "il DTC che si legge: un'acquisizione di N foto è UN blocco («▸ 8 photos») che si apre col clic, i processi dicono la tecnica, le corsie il passo, le etichette ci sono alla scala di adattamento; i due eventi dello stesso lotto si uniscono in uno", async () => {
+test("V2.dtc", "il DTC che si legge: un'acquisizione di N foto è UN blocco («▸ 8 photos») che si apre col clic, i processi dicono la tecnica, le corsie il passo, le etichette ci sono alla scala di adattamento; i due eventi dello stesso lotto (DEV30 D3) si collegano e restano due", async () => {
   const { p, ctx, errors } = await open({ doc: "dev29-segni-lite", locale: "en", ws: "provenance" });
   await p.locator('button[aria-pressed]', { hasText: /^DTC$/ }).first().click();
   await p.waitForTimeout(900);
@@ -2813,22 +2813,23 @@ test("V2.dtc", "il DTC che si legge: un'acquisizione di N foto è UN blocco («�
   const sc2 = await p.evaluate((w) => window.__EM_DRAG__.winScene(w), win);
   const opened = sc2.boxes.filter((b) => b.id.startsWith("res:dji")).length;
   const sel = await p.evaluate(() => window.__EM_DRAG__.selected());
-  // the twin events: the warning's fix merges them
+  // the twin events: DEV30 D3 · the warning's fix LINKS them (W14 measures it
+  // on the canvas); they stay two
   const before = await p.evaluate(() => window.__EM_DRAG__.idsOfType("dtc_acquisition").length);
   await p.click("#footer-warnings");
   await p.waitForTimeout(700);
   await p.locator('tr.tv-issue[data-rule="twin"] .tv-fix button').first().click();
   await p.waitForTimeout(700);
   const after = await p.evaluate(() => window.__EM_DRAG__.idsOfType("dtc_acquisition"));
-  const kept = await p.evaluate(() => window.__EM_DRAG__.node("c1eef313-29e1-5361-ad19-ca01930832e7"));
-  const inputs = await p.evaluate(() => window.__EM_DRAG__.edgesOf("dtc_had_input").filter((e) => e.source === "proc-align").map((e) => e.target).sort());
+  const kept = await p.evaluate(() => window.__EM_DRAG__.node("acq-drone"));
+  const inputs = await p.evaluate(() => window.__EM_DRAG__.edgesOf("dtc_had_input").filter((e) => e.source === "c1eef313-29e1-5361-ad19-ca01930832e7").map((e) => e.target).sort());
   await ctx.close();
   return { pass: JSON.stringify(blocks.sort()) === JSON.stringify(["▸ 8 photos", "▸ 8 photos"]) && photos === 0
       && label("proc-align") === "allineamento" && label("proc-lod2") === "export: OBJ decimato"
       && !sc.lanes.some((l) => /\(\d\)/.test(l)) && sc.lanes.some((l) => /allineamento/.test(l))
       && sc.scale > 0.35 && opened === 8 && sel[0] === "acq-drone"
-      && before === 4 && after.length === 3 && !after.includes("acq-drone") && kept?.name === "Volo drone San Pietro (FC300X)"
-      && inputs.includes("c1eef313-29e1-5361-ad19-ca01930832e7") && !errors.length,
+      && before === 4 && after.length === 4 && kept?.name === "Volo drone San Pietro (FC300X)"
+      && inputs.includes("acq-drone") && !errors.length,
     detail: { blocks, photos, align: label("proc-align"), lanes: sc.lanes, scale: sc.scale, opened, sel, before, after, kept: kept?.name, inputs, errors } };
 });
 
@@ -2882,7 +2883,7 @@ test("V4.storage", "Storage: il percorso si legge (la coda, e intero al passaggi
   await p.screenshot({ path: SHOT("v4-storage-microscheda") }).catch(() => {});
   await ctx.close();
   return { pass: held.length === 1 && (held[0].match(/saved list/g) ?? []).length === 1
-      && selection === "" && !!crumb && crumb.title.includes(crumb.value) && crumb.title.includes("zenodo-1234567") && (!crumb.long || crumb.tail)
+      && selection === "" && !!crumb && crumb.title.includes(crumb.value.replace(/^…/, "")) && crumb.title.includes("zenodo-1234567") && /zenodo-1234567$/.test(crumb.value)
       && ["who", "when", "act", "from", "seal"].every((k) => card.rows.includes(k)) && /zenodo\.1234567/.test(card.from)
       && card.jsonClosed && !card.jsonVisible && !errors.length,
     detail: { held, selection, crumb, card, errors } };
@@ -2975,6 +2976,340 @@ test("V1.addlinked", "DTC: tasto destro su un'acquisizione ▸ «Add linked» of
   await ctx.close();
   return { pass: menu.items.length > 5 && !/0 types allowed/.test(menu.foot) && !/No node type/.test(menu.foot) && !errors.length,
     detail: { n: menu.items.length, first: menu.items.slice(0, 8), foot: menu.foot, errors } };
+});
+
+// ── MICRO-LE-DECISIONI-DELLA-DEV29 · parte B: E.D. on the desktop dev.15 (2 ott) ──
+const PNG1 = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==", "base64");
+const LITE = () => fixture("dev29-segni-lite");
+const wsWin = (p, type) => p.evaluate((ty) => window.__EM_DRAG__.wins().find((w) => w.type === ty) ?? null, type);
+/** a Tauri shell, enough for the save and the identity paths: every call answered, the writes recorded */
+const tauriHook = (savePath) => (() => {
+  window.__CALLS__ = [];
+  window.__TAURI_INTERNALS__ = {
+    metadata: { currentWindow: { label: "main" }, currentWebview: { label: "main", windowLabel: "main" } },
+    transformCallback: () => 1, unregisterCallback: () => {}, convertFileSrc: (x) => x,
+    invoke: async (cmd, args, opts) => {
+      window.__CALLS__.push({ cmd, path: opts?.headers?.path ?? args?.path ?? null });
+      if (cmd === "transformer_url") return window.__BRIDGE__;
+      if (cmd === "plugin:dialog|save") return window.__SAVE_PATH__;
+      if (cmd === "llm_key_status") return { available: false, set: false, detail: "test" };
+      return null;
+    },
+  };
+});
+
+test("W01.docimage", "U1 · il documento D.02 (url «/DosCo/D.02.jpg») si vede nella Doc: il percorso si legge nella cartella dello studio, e l'immagine arriva come blob (l'<img> diretto il /fs lo rifiuta)", async () => {
+  const dir = `${FS_ROOT}/dev30/u1`;
+  mkdirSync(`${dir}/DosCo`, { recursive: true });
+  writeFileSync(`${dir}/DosCo/D.02.jpg`, PNG1);
+  const { p, ctx, errors } = await open({ doc: "catena", locale: "en", ws: "provenance" });
+  await p.evaluate(([d, path]) => window.__EM_DRAG__.openAt(d, path), [LITE(), `${dir}/study.em.json`]);
+  await p.waitForTimeout(1500);
+  await p.evaluate(() => window.__EM_DRAG__.openDoc("d02"));
+  await p.waitForFunction(() => document.querySelector(".rd-img img")?.complete && document.querySelector(".rd-img img").naturalWidth > 0, null, { timeout: 10000 }).catch(() => {});
+  const img = await p.evaluate(() => { const i = document.querySelector(".rd-img img"); return i && { blob: i.src.startsWith("blob:"), w: i.naturalWidth }; });
+  await p.screenshot({ path: SHOT("w01-documento-immagine") }).catch(() => {});
+  await ctx.close();
+  return { pass: !!img && img.blob && img.w === 1 && !errors.length, detail: { img, errors } };
+});
+
+test("W02.dating", "U2 · l'anno propone l'epoca che lo contiene (un bottone la conferma); un clic sul menu mentre l'anno è ancora nel campo non si perde; scegliere l'epoca data il documento e la selezione resta sul documento", async () => {
+  const { p, ctx, errors } = await open({ doc: LITE(), locale: "en" });
+  await pick(p, "d02");
+  await p.click("input[data-doc-year]");
+  await p.keyboard.type("150");
+  await p.click("select[data-doc-epoch]");     // the click that dev.15 lost
+  await p.waitForTimeout(600);
+  const r1 = await p.evaluate(() => ({ year: window.__EM_DRAG__.node("d02").data.year, focus: document.activeElement?.dataset?.docEpoch ?? null,
+    hint: document.querySelector("[data-doc-year-hint]")?.textContent ?? "" }));
+  await p.click('[data-action="date-in-proposed"]');
+  await p.waitForTimeout(1200);
+  const r2 = await p.evaluate(() => ({ ep: window.__EM_DRAG__.epochOf("d02"), sel: window.__EM_DRAG__.selected() }));
+  await p.screenshot({ path: SHOT("w02-datazione-proposta") }).catch(() => {});
+  // no epoch with dates: it says so, and offers to write them
+  const noDates = LITE();
+  for (const n of noDates.graph.nodes) if (n.node_type === "EpochNode") n.data = {};
+  const { p: q, ctx: c2 } = await open({ doc: noDates, locale: "en" });
+  await pick(q, "d02");
+  await q.fill("input[data-doc-year]", "1834");
+  await q.press("input[data-doc-year]", "Enter");
+  await q.waitForTimeout(600);
+  const r3 = await q.evaluate(() => ({ hint: document.querySelector("[data-doc-year-hint]")?.textContent ?? "", btn: !!document.querySelector('[data-action="write-epoch-dates"]') }));
+  await c2.close();
+  await ctx.close();
+  return { pass: r1.year === 150 && /falls in Età romana/.test(r1.hint) && r2.ep === "ep1" && r2.sel[0] === "d02"
+      && /No epoch has its dates/.test(r3.hint) && r3.btn && !errors.length, detail: { r1, r2, r3, errors } };
+});
+
+test("W03.lock", "U3 · «Blocca la posizione» è nel menu del nodo sulla Matrix (e il Layout la tiene); l'Ispettore del documento non lo ha più", async () => {
+  const { p, ctx, errors } = await open({ doc: LITE(), locale: "en" });
+  await pick(p, "d02");
+  const inInspector = await p.evaluate(() => [...document.querySelectorAll(".insp-btn")].some((b) => /Lock position/.test(b.textContent)));
+  await pick(p, "us1");
+  const win = await winOf(p, "graph");
+  const box = await p.evaluate((w) => window.__EM_DRAG__.winScene(w).boxes.find((b) => b.id === "us1"), win);
+  await p.mouse.click(box.x + box.w / 2, box.y + box.h / 2, { button: "right" });
+  await p.waitForTimeout(300);
+  const items = await p.evaluate(() => [...document.querySelectorAll(".ctx-menu button")].map((b) => b.textContent));
+  await p.screenshot({ path: SHOT("w03-blocca-nel-menu") }).catch(() => {});
+  await p.locator(".ctx-menu button", { hasText: /^Lock position/ }).first().click();
+  await p.waitForTimeout(300);
+  const pinned = await p.evaluate(() => (JSON.parse(window.__EM_DRAG__.docJson()).layout?.pinned ?? []).includes("us1"));
+  await ctx.close();
+  return { pass: !inInspector && items.some((x) => /^Lock position/.test(x)) && pinned && !errors.length, detail: { inInspector, items: items.slice(0, 5), pinned, errors } };
+});
+
+test("W04.showmatrix", "U4 · dalla scheda del documento «Mostra nella Matrix»: lo seleziona e la finestra del grafo passa alla Matrix", async () => {
+  const { p, ctx, errors } = await open({ doc: LITE(), locale: "en", ws: "provenance" });
+  const has = await p.locator('[data-show-matrix="d02"]').count();
+  if (has) await p.click('[data-show-matrix="d02"]');
+  await p.waitForTimeout(900);
+  const r = await p.evaluate(() => ({ sel: window.__EM_DRAG__.selected(), mode: window.__EM_DRAG__.wins().find((w) => w.type === "graph")?.state?.mode }));
+  await p.screenshot({ path: SHOT("w04-mostra-nella-matrix") }).catch(() => {});
+  await ctx.close();
+  return { pass: has === 1 && r.sel[0] === "d02" && r.mode === "matrix" && !errors.length, detail: { has, r, errors } };
+});
+
+test("W05.lang", "U5 · «Riconosci le lingue…»: proposta per gruppo, un gesto la conferma, e si scrive SOLO data.lang (niente ai_assisted, niente registro)", async () => {
+  const d = LITE();
+  for (const n of d.graph.nodes) if (n.id === "us1") n.description = "Fondazione del tempio";
+    else if (n.id === "us2") n.description = "I recognize a wall made of three levels of stone";
+  const { p, ctx, errors } = await open({ doc: d, locale: "en" });
+  const btn = p.locator('tr.tv-issue[data-rule="language"] .tv-fix button');
+  await p.click("#footer-warnings");
+  await p.waitForTimeout(700);
+  const n = await btn.count();
+  if (n) await p.evaluate(() => document.querySelector('tr.tv-issue[data-rule="language"] .tv-fix button')?.click());
+  await p.waitForTimeout(400);
+  const groups = await p.evaluate(() => [...document.querySelectorAll('[data-role="lang-recognise"] .lang-rec-row b')].map((b) => b.textContent));
+  await p.screenshot({ path: SHOT("w05-lingue-riconosciute") }).catch(() => {});
+  if (n) await p.click('[data-action="apply-languages"]');
+  await p.waitForTimeout(500);
+  const after = await p.evaluate(() => ["us1", "us2"].map((id) => window.__EM_DRAG__.data(id)));
+  const graphData = await p.evaluate(() => JSON.parse(window.__EM_DRAG__.graphJson()).data ?? {});
+  await ctx.close();
+  const markers = after.some((x) => x && ("ai_assisted" in x || "ai_generated" in x || "validated_by" in x));
+  return { pass: n >= 1 && after[0]?.lang === "it" && after[1]?.lang === "en" && !markers && !JSON.stringify(graphData).includes("lang")
+      && groups.length >= 2 && !errors.length, detail: { n, groups, after, errors } };
+});
+
+test("W06.sources", "U6 · la finestra del grafo di Fonti si apre sulla Matrix, la vista standard", async () => {
+  const { p, ctx, errors } = await open({ doc: LITE(), locale: "en", ws: "provenance" });
+  const mode = await p.evaluate(() => window.__EM_DRAG__.wins().find((w) => w.type === "graph")?.state?.mode);
+  await ctx.close();
+  return { pass: mode === "matrix" && !errors.length, detail: { mode, errors } };
+});
+
+test("W07.scan", "U7 · «Scansiona come DosCo…» è sulla cartella dello Storage e sullo shelf vuoto, e apre le Risorse con la scansione fatta", async () => {
+  const root = FS_ROOT ?? (await rootPath());
+  const dir = `${root}/dev30/DosCo`;
+  mkdirSync(dir, { recursive: true });
+  for (const f of ["D.02.jpg", "D.04_a.JPG", "D.04_b.JPG"]) writeFileSync(`${dir}/${f}`, PNG1);
+  const { p, ctx, errors } = await open({ doc: LITE(), locale: "en", ws: "assets" });
+  await storageInto(p, [root.split("/").pop(), "dev30", "DosCo"]);
+  const onShelf = await p.locator('.viewer-empty [data-action="scan-dosco"]').count();
+  await p.locator('.storage-detail [data-action="scan-dosco"]').first().click();
+  await p.waitForTimeout(2500);
+  const r = await p.evaluate(() => ({ open: !document.getElementById("resources-modal")?.classList.contains("hidden"),
+    folder: document.getElementById("res-folder").value, dup: [...document.querySelectorAll("#res-shelf .res-note")].some((n) => n.dataset.dupId === "D.04") }));
+  await p.screenshot({ path: SHOT("w07-scansiona-dosco") }).catch(() => {});
+  await ctx.close();
+  return { pass: onShelf === 1 && r.open && r.folder === dir && r.dup && !errors.length, detail: { onShelf, r, errors } };
+});
+
+test("W08.save", "U8 · nel desktop, dopo «Salva come» e un cambio di grafo, «Salva» scrive sul file aperto senza riaprire il dialogo", async () => {
+  const { p, ctx, errors } = await open({ doc: LITE(), locale: "en", hook: tauriHook(),
+    init: undefined });
+  await p.evaluate(([b, sp]) => { window.__BRIDGE__ = b; window.__SAVE_PATH__ = sp; }, [BRIDGE, "/tmp/dev30-u8/study.em.json"]);
+  await p.keyboard.press("Meta+s");
+  await p.waitForTimeout(700);
+  await p.setInputFiles("#file-input", `${TD}TempluMare.em.json`);
+  await p.waitForTimeout(2000);
+  await workspace(p, "assets");
+  await p.locator(".et-pick, .ov-pick").first().click();
+  await p.waitForTimeout(700);
+  await p.evaluate(() => { window.__CALLS__.length = 0; });
+  await p.keyboard.press("Meta+s");
+  await p.waitForTimeout(700);
+  const calls = await p.evaluate(() => window.__CALLS__.filter((c) => /dialog\|save|write_text_file/.test(c.cmd)).map((c) => c.cmd));
+  await ctx.close();
+  return { pass: calls.length === 1 && calls[0] === "plugin:fs|write_text_file" && !errors.length, detail: { calls, errors } };
+});
+
+test("W09.shift", "U9 · «Leggi uno SHIFT.txt…» contro un bridge più vecchio (404 senza CORS) dice quale bridge e perché, non «Load failed»", async () => {
+  const { p, ctx, errors } = await open({ doc: LITE(), locale: "en",
+    route: { pattern: "**/read-shift", handler: (r) => r.request().method() === "OPTIONS" ? r.fulfill({ status: 204, headers: { "access-control-allow-origin": "*", "access-control-allow-headers": "content-type", "access-control-allow-methods": "POST" } }) : r.fulfill({ status: 404, contentType: "text/html", body: "<html>Error code: 404</html>" }) } });
+  await ctx.route("**/health", async (r) => r.fulfill({ status: 200, headers: { "access-control-allow-origin": "*" }, json: { ok: true, service: "em_bridge" } }));
+  const shift = `${FS_ROOT ?? "/tmp"}/SHIFT-dev30.txt`;
+  writeFileSync(shift, "EPSG::3004 2355500 4617500 0\r\n");
+  await p.click("#footer-warnings");
+  await p.waitForTimeout(700);
+  const [chooser] = await Promise.all([p.waitForEvent("filechooser", { timeout: 5000 }).catch(() => null),
+    p.locator('tr.tv-issue[data-rule="georef"] .tv-fix button').first().click()]);
+  if (chooser) await chooser.setFiles(shift);
+  await p.waitForTimeout(1500);
+  const toast = await p.evaluate(() => [...document.querySelectorAll("#toast, .toast")].map((t) => t.textContent).join(" | "));
+  await p.screenshot({ path: SHOT("w09-bridge-vecchio") }).catch(() => {});
+  await ctx.close();
+  return { pass: /older than this EMStudio/.test(toast) && /\/read-shift/.test(toast) && !/Load failed|Failed to fetch/.test(toast) && !errors.length,
+    detail: { toast: toast.slice(0, 240), errors } };
+});
+
+test("W10.storage", "U10–U12, V1, V2 · Storage: il dettaglio è un riquadro fisso fuori dalla lista (che scorre da sola), con i comandi sulla selezione; il percorso scrive la coda; i .stamp.json sono nascosti; «Quando» si legge, «Da dove» è retrieved_from", async () => {
+  const root = FS_ROOT ?? (await rootPath());
+  const dir = `${root}/zenodo-1234567`;
+  const { p, ctx, errors } = await open({ doc: "catena", locale: "en", w: 1280 });
+  await workspace(p, "assets");
+  await storageInto(p, [root.split("/").pop(), "zenodo-1234567"]);
+  const names = await p.evaluate(() => [...document.querySelectorAll(".storage-row .storage-name")].map((x) => x.textContent));
+  await storageClick(p, "a.xlsx");
+  await p.waitForTimeout(1200);
+  const r = await p.evaluate(() => {
+    const list = document.querySelector(".storage-list"), det = document.querySelector(".storage-detail");
+    const crumb = document.querySelector("input.storage-path");
+    return { apart: !!list && !!det && !list.contains(det) && det.contains(document.querySelector(".stamp-card")),
+             listScrolls: list && getComputedStyle(list).overflowY, cmds: [...(det?.querySelectorAll(".storage-commands button") ?? [])].map((b) => b.dataset.action),
+             crumb: crumb?.value, title: crumb?.title, when: document.querySelector('.stamp-card [data-card="when"]')?.textContent,
+             from: document.querySelector('.stamp-card [data-card="from"]')?.textContent, sidecars: document.querySelector('[data-action="toggle-stamp-files"]')?.textContent };
+  });
+  await p.screenshot({ path: SHOT("w10-storage-dettaglio") }).catch(() => {});
+  await ctx.close();
+  return { pass: r.apart && r.listScrolls === "auto" && r.cmds.includes("compose-from") && r.cmds.includes("show-in-graph")
+      && /zenodo-1234567$/.test(r.crumb ?? "") && (r.title ?? "").includes(dir.replace(/^\/tmp\//, "")) && !/T\d\d:/.test(r.when ?? "T00:")
+      && r.from === "https://doi.org/10.5281/zenodo.1234567" && !names.some((n) => /\.stamp\.json$/.test(n)) && /3 stamp files/.test(r.sidecars ?? "")
+      && !errors.length, detail: { names, ...r, errors } };
+});
+
+test("W11.seed", "V3 · un grafo nuovo che nessuno ha toccato (New / «Prima unità» e Esc) cede il posto al GraphML importato e non si salva; uno toccato resta", async () => {
+  const { p, ctx, errors } = await open({ doc: null, locale: "en" });
+  const dialogs = [];
+  p.on("dialog", async (d) => { dialogs.push(d.message().slice(0, 60)); await d.accept(); });
+  await p.evaluate(() => document.getElementById("btn-new").click());
+  await p.waitForTimeout(700);
+  await p.setInputFiles("#file-input", `${TD}TempluMare.em.json`);
+  await p.waitForFunction(() => window.__EM_DRAG__.nodeCount() > 20, null, { timeout: 30000 }).catch(() => {});
+  await p.waitForTimeout(500);
+  const slots = await p.evaluate(() => window.__EM_DRAG__.slots().map((s) => s.name));
+  const graphs = await p.evaluate(() => Object.values(JSON.parse(window.__EM_DRAG__.docJson()).graphs ?? {}).map((g) => g.name ?? g.graph_id));
+  // a seed somebody renamed is a graph of theirs: it stays
+  await p.evaluate(() => document.getElementById("btn-new").click());
+  await p.waitForTimeout(700);
+  await p.evaluate(() => { const ep = window.__EM_DRAG__.idsOfType("EpochNode")[0]; window.__EM_DRAG__.edit(ep, { name: "Età del ferro" }); });
+  await p.setInputFiles("#file-input", `${TD}TempluMare.em.json`);
+  await p.waitForTimeout(2500);
+  const slots2 = await p.evaluate(() => window.__EM_DRAG__.slots().length);
+  await ctx.close();
+  return { pass: slots.length === 1 && graphs.length === 1 && !graphs.some((g) => /untitled/.test(String(g))) && dialogs.length === 1 && slots2 === 3 && !errors.length,
+    detail: { slots, graphs, dialogs, slots2, errors } };
+});
+
+test("W12.editor", "V4 · header.last_editor dice la versione vera di EMStudio", async () => {
+  const { p, ctx, errors } = await open({ doc: LITE(), locale: "en" });
+  const r = await p.evaluate(() => ({ ed: JSON.parse(window.__EM_DRAG__.docJson()).header?.last_editor, brand: document.querySelector(".brand, #brand")?.title ?? "" }));
+  await ctx.close();
+  const pkg = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")).version;
+  return { pass: r.ed === `EMStudio ${pkg}` && !errors.length, detail: { ...r, pkg, errors } };
+});
+
+test("W13.compose", "D1/D2 · il compositore: per un Download «da dove» è obbligatorio e già riempito (cartella zenodo), il nome dell'atto è obbligatorio con 32 uscite e proposto «Download <DOI>»; i 32 timbri hanno UN process_id; con un'uscita il nome non c'è", async () => {
+  const root = FS_ROOT ?? (await rootPath());
+  const dir = `${root}/zenodo-7654321`;
+  mkdirSync(dir, { recursive: true });
+  const files = Array.from({ length: 32 }, (_, i) => `f${String(i).padStart(2, "0")}.txt`);
+  for (const f of files) { writeFileSync(`${dir}/${f}`, `dev30 ${f}\n`); try { execFileSync("rm", ["-f", `${dir}/${f}.stamp.json`]); } catch { /* none */ } }
+  const { p, ctx, errors } = await open({ doc: "catena", locale: "en" });
+  await workspace(p, "assets");
+  await storageInto(p, [root.split("/").pop(), "zenodo-7654321"]);
+  await p.click("button[data-action=compose-folder]");
+  await p.waitForSelector(".stamp-compose", { timeout: 30000 });
+  await p.selectOption('.stamp-compose select[data-field="kind"]', "download");
+  await p.waitForTimeout(500);
+  const src = await p.inputValue('.stamp-compose input[data-field="source"]').catch(() => null);
+  const name = await p.inputValue('.stamp-compose input[data-field="campaign"]').catch(() => null);
+  await p.fill('.stamp-compose input[data-field="operator"]', "0000-0002-5065-7970");
+  await p.click('.stamp-compose button[data-field="today"]');
+  // emptied, the origin stops the stamp (no «stamp anyway?»)
+  const dialogs = [];
+  p.on("dialog", async (d) => { dialogs.push(d.message()); await d.dismiss(); });
+  await p.fill('.stamp-compose input[data-field="source"]', "");
+  await p.click('.stamp-compose button[data-action="stamp"]');
+  await p.waitForTimeout(500);
+  const blocked = await p.evaluate(() => ({ focus: document.activeElement?.dataset?.field ?? null, err: document.querySelector('.stamp-compose [data-err="source"]')?.textContent ?? "" }));
+  const none = existsSync(`${dir}/${files[0]}.stamp.json`);
+  await p.fill('.stamp-compose input[data-field="source"]', "10.5281/zenodo.7654321");
+  await p.screenshot({ path: SHOT("w13-compositore-download") }).catch(() => {});
+  await p.click('.stamp-compose button[data-action="stamp"]');
+  await p.waitForTimeout(6000);
+  if (await p.locator(".seal-veil").count()) await p.keyboard.press("Escape");
+  const stamps = files.map((f) => existsSync(`${dir}/${f}.stamp.json`) ? JSON.parse(readFileSync(`${dir}/${f}.stamp.json`, "utf8")) : null);
+  const pids = [...new Set(stamps.map((x) => x?.how?.process_id))];
+  const from = [...new Set(stamps.map((x) => x?.how?.acquisition?.retrieved_from))];
+  // one output: no act's name
+  await storageClick(p, files[0]);
+  const one = await p.evaluate(() => !!document.querySelector('.stamp-compose input[data-field="campaign"]'));
+  await ctx.close();
+  return { pass: src === "10.5281/zenodo.7654321" && name === "Download 10.5281/zenodo.7654321"
+      && blocked.focus === "source" && !!blocked.err && !none && !dialogs.length
+      && stamps.every(Boolean) && pids.length === 1 && !!pids[0] && from.length === 1 && from[0] === "https://doi.org/10.5281/zenodo.7654321"
+      && !one && !errors.length,
+    detail: { src, name, blocked, none, dialogs, stamped: stamps.filter(Boolean).length, pids, from, one, errors } };
+});
+
+test("W14.lot", "D3 · i due eventi dello stesso lotto: l'avviso dice che non si citano, il Fix li collega (il download cita la cattura), restano due, e il DTC li mostra come due righe della corsia delle acquisizioni con le date, sopra UN blocco", async () => {
+  const { p, ctx, errors } = await open({ doc: LITE(), locale: "en", ws: "provenance" });
+  await p.click("#footer-warnings");
+  await p.waitForTimeout(700);
+  const fix = p.locator('tr.tv-issue[data-rule="twin"] .tv-fix button').first();
+  const label = (await fix.count()) ? await fix.textContent() : null;
+  if (label) await fix.click();
+  await p.waitForTimeout(800);
+  await p.locator('button[aria-pressed]', { hasText: /^DTC$/ }).first().click();
+  await p.waitForTimeout(900);
+  const win = await winOf(p, "graph");
+  const sc = await p.evaluate((w) => window.__EM_DRAG__.winScene(w), win);
+  const DL = "c1eef313-29e1-5361-ad19-ca01930832e7";
+  const a = sc.boxes.find((b) => b.id === "acq-drone"), b = sc.boxes.find((x) => x.id === DL);
+  const r = await p.evaluate((dl) => ({ acq: window.__EM_DRAG__.idsOfType("dtc_acquisition").length,
+    cite: window.__EM_DRAG__.edgesOf("dtc_had_input").some((e) => e.source === dl && e.target === "acq-drone"),
+    twins: window.__EM_DRAG__.issues().filter((i) => i.rule === "twin").length }), DL);
+  await p.screenshot({ path: SHOT("w14-due-eventi-un-blocco") }).catch(() => {});
+  await ctx.close();
+  const blocks = sc.boxes.filter((x) => x.id.endsWith("::set")).map((x) => x.id);
+  return { pass: /cites/.test(label ?? "") && r.acq === 4 && r.cite && r.twins === 0 && JSON.stringify(blocks) === JSON.stringify(["acq-drone::set"])
+      && !!a && !!b && b.y > a.y && /2018-02-17/.test(a.label ?? "") && /2026-09-29/.test(b.label ?? "") && !errors.length,
+    detail: { label, r, blocks, a: a && { y: a.y, label: a.label }, b: b && { y: b.y, label: b.label }, errors } };
+});
+
+test("W15.library", "D6 · gli avvisi della libreria (api.validate via /validate) sono nella vista Avvisi: «download without origin» sull'evento degli stamp", async () => {
+  const { p, ctx, errors } = await open({ doc: LITE(), locale: "en" });
+  await p.waitForFunction(() => window.__EM_DRAG__.issues().some((i) => i.rule === "library"), null, { timeout: 8000 }).catch(() => {});
+  const rows = await p.evaluate(() => window.__EM_DRAG__.issues().filter((i) => i.rule === "library").map((i) => ({ node: i.node, txt: i.txt.slice(0, 60) })));
+  await ctx.close();
+  return { pass: rows.some((x) => /download without origin/.test(x.txt) && x.node === "c1eef313-29e1-5361-ad19-ca01930832e7") && !errors.length, detail: { rows, errors } };
+});
+
+test("W16.identity", "U13–U16 · una sola verità sull'identità (barra, «Chi sei», Impostazioni dicono la stessa frase, verificata con testimone e data); sul desktop senza nodo «nessun nodo configurato» con il gesto per configurarlo; «Esci · dimentica»; Impostazioni ▸ Identità piena e in inglese", async () => {
+  const ids = JSON.stringify({ current: "0000-0002-5065-7970", known: [{ orcid: "0000-0002-5065-7970", name: "Emanuel", surname: "Demetrescu",
+    verified: true, verifiedAt: "2026-10-02T14:10:00Z", verifiedBy: "orcid.org", authMode: "orcid" }] });
+  const { p, ctx, errors } = await open({ doc: LITE(), locale: "en", init: { "emstudio.identities": ids }, hook: tauriHook() });
+  await p.evaluate((b) => { window.__BRIDGE__ = b; }, BRIDGE);
+  const chip = await p.evaluate(() => document.getElementById("footer-identity").title);
+  await p.click("#footer-identity");
+  await p.waitForTimeout(1500);
+  const panel = await p.evaluate(() => ({ state: document.querySelector(".idpanel .idp-state")?.textContent ?? "",
+    way1: document.querySelector('.idpanel [data-idp-way="stratigraph"] .idp-d')?.textContent ?? "",
+    configure: !!document.querySelector("[data-idp-configure]"), out: !!document.querySelector("[data-idp-signout]") }));
+  await p.screenshot({ path: SHOT("w16-chi-sei") }).catch(() => {});
+  await p.evaluate(() => [...document.querySelectorAll(".idpanel button")].find((b) => /Manage the identities/.test(b.textContent))?.click());
+  await p.waitForTimeout(600);
+  const set = await p.evaluate(() => ({ orcid: document.getElementById("set-orcid").value, name: document.getElementById("set-orcid-name").value,
+    state: document.getElementById("set-orcid-state").textContent, h: document.querySelector("#settings-sect-identity h4").textContent }));
+  await ctx.close();
+  const sentence = "Verified: Emanuel Demetrescu (0000-0002-5065-7970), witnessed by orcid.org on";
+  return { pass: chip.startsWith(sentence) && panel.state.startsWith(sentence) && set.state.startsWith(sentence)
+      && /No StratiGraph node configured/.test(panel.way1) && !/tauri:\/\//.test(panel.way1) && panel.configure && panel.out
+      && set.orcid === "0000-0002-5065-7970" && set.name === "Emanuel" && set.h === "Identity (ORCID)" && !errors.length,
+    detail: { chip, panel, set, errors } };
 });
 
 // ── run ─────────────────────────────────────────────────────────────────────
