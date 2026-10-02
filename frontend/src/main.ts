@@ -4706,10 +4706,15 @@ function fileContainer(file: OpenFile | null, opts: { bump?: boolean } = {}): Re
   const fid = file ? file.id : null;
   if (fid && !shelfHomeFileId && shelfEntries().length) shelfHomeFileId = fid;
   if (fid && !corpusHomeFileId && projectCorpusSection()) corpusHomeFileId = fid;
+  // …and a graph with no file yet writes them when no open file is their home:
+  // that document is what Save As gives the graph, and it must not lose them
+  const homeless = (home: string | null): boolean => !home || !emtree.file(home);
+  const writesShelf = fid ? fid === shelfHomeFileId : homeless(shelfHomeFileId);
+  const writesCorpus = fid ? fid === corpusHomeFileId : homeless(corpusHomeFileId);
   const container = buildContainer({
     graphs,
-    shelf: fid && fid === shelfHomeFileId ? projectShelfSection() : retainedShelf,
-    corpus: fid && fid === corpusHomeFileId ? projectCorpusSection() : retainedCorpus,
+    shelf: writesShelf ? projectShelfSection() : retainedShelf,
+    corpus: writesCorpus ? projectCorpusSection() : retainedCorpus,
     activeGraphId: activeSlot
       ? String((activeSlot.store.doc.graph as Record<string, unknown>).graph_id ?? activeSlot.id)
       : null,
