@@ -3312,6 +3312,177 @@ test("W16.identity", "U13–U16 · una sola verità sull'identità (barra, «Chi
     detail: { chip, panel, set, errors } };
 });
 
+// ── MICRO-OGNI-FILE-I-SUOI-GRAFI (2 ott) · F1–F4 on the canvas ───────────────
+/** a Tauri shell that RECORDS what is written: path and text of every write */
+const tauriWrites = () => (() => {
+  window.__WRITES__ = [];
+  window.__TAURI_INTERNALS__ = {
+    metadata: { currentWindow: { label: "main" }, currentWebview: { label: "main", windowLabel: "main" } },
+    transformCallback: () => 1, unregisterCallback: () => {}, convertFileSrc: (x) => x,
+    invoke: async (cmd, args, opts) => {
+      if (cmd === "plugin:fs|write_text_file") {
+        const raw = opts?.headers?.path ?? args?.path ?? "";
+        const text = args instanceof Uint8Array ? new TextDecoder().decode(args) : String(args?.data ?? "");
+        window.__WRITES__.push({ path: decodeURIComponent(raw), text });
+        return null;
+      }
+      if (cmd === "transformer_url") return window.__BRIDGE__ ?? null;
+      if (cmd === "plugin:dialog|save") return window.__SAVE_PATH__ ?? null;
+      if (cmd === "llm_key_status") return { available: false, set: false, detail: "test" };
+      return null;
+    },
+  };
+});
+const OF_GRAPH = (id, units, x0) => ({
+  graph_id: id, name: `grafo ${id}`,
+  nodes: units.map((u) => ({ id: u, node_type: "US", name: u })),
+  edges: units.slice(1).map((u, i) => ({ id: `${units[i]}_${u}`, source: units[i], target: u, edge_type: "is_after" })),
+  layout: { positions: Object.fromEntries(units.map((u, i) => [u, { x: x0 + i * 37, y: 100 + i * 61, w: 90, h: 30 }])) },
+});
+/** the two files of the case: A with two graphs (each its own layout), B with one */
+const OF_FILES = () => ({
+  A: { header: { format: "em.json", version: "1.0" }, active_graph_id: "gA1",
+       graphs: { gA1: OF_GRAPH("gA1", ["A1", "A2"], 11), gA2: OF_GRAPH("gA2", ["A3", "A4", "A5"], 503) } },
+  B: { header: { format: "em.json", version: "1.0" }, active_graph_id: "gB1",
+       graphs: { gB1: OF_GRAPH("gB1", ["B1", "B2"], 1207) } },
+});
+const ofContent = (section) => JSON.stringify((section.nodes ?? []).map((n) => [n.id, n.node_type, n.name, n.description ?? ""])
+  .concat((section.edges ?? []).map((e) => [e.source, e.edge_type, e.target])));
+const ofPositions = (section) => Object.fromEntries(Object.entries(section.layout?.positions ?? {})
+  .filter(([id]) => (section.nodes ?? []).some((n) => n.id === id && n.node_type === "US"))
+  .map(([id, r]) => [id, [Math.round(r.x), Math.round(r.y)]]));
+
+test("F1.files", "F1–F4 · due file, tre grafi: l'EMTree li mostra per file; ⌘S scrive il file del grafo attivo con i soli suoi grafi; riaperti, ogni grafo ha le sue posizioni", async () => {
+  const files = OF_FILES();
+  const want = Object.fromEntries(Object.values(files).flatMap((f) => Object.entries(f.graphs)).map(([g, s]) => [g, ofPositions(s)]));
+  const { p, ctx, errors } = await open({ doc: null, locale: "en", hook: tauriWrites() });
+  await p.waitForFunction(() => !!window.__EM_DRAG__, null, { timeout: 20000 });
+  await p.evaluate(([b]) => { window.__BRIDGE__ = b; }, [BRIDGE]);
+  await p.evaluate(([a]) => window.__EM_DRAG__.openAt(a, "/tmp/of/A.em.json"), [files.A]);
+  await p.waitForTimeout(1500);
+  await p.evaluate(([b]) => window.__EM_DRAG__.openAt(b, "/tmp/of/B.em.json"), [files.B]);
+  await p.waitForTimeout(1500);
+  await workspace(p, "assets");
+  const tree = await p.evaluate(() => [...document.querySelectorAll(".et-file")].map((f) => ({
+    name: f.querySelector(".et-file-name")?.textContent, target: f.classList.contains("et-file-active"),
+    graphs: [...f.querySelectorAll(".et-slot .et-name")].map((x) => x.textContent) })));
+  await p.screenshot({ path: SHOT("f1-emtree-due-file") }).catch(() => {});
+  // an edit in B's graph (active), then ⌘S
+  await p.evaluate(() => window.__EM_DRAG__.edit("B1", { description: "scritto in B" }));
+  await p.keyboard.press("Meta+s");
+  await p.waitForTimeout(800);
+  // to A's second graph, an edit, ⌘S
+  await p.locator(".et-pick", { hasText: "grafo gA2" }).first().click();
+  await p.waitForTimeout(800);
+  await p.evaluate(() => window.__EM_DRAG__.edit("A4", { description: "scritto in A" }));
+  await p.keyboard.press("Meta+s");
+  await p.waitForTimeout(800);
+  const writes = await p.evaluate(() => window.__WRITES__);
+  await ctx.close();
+  const docs = writes.map((w) => ({ path: w.path, doc: JSON.parse(w.text) }));
+  const byPath = Object.fromEntries(docs.map((d) => [d.path, d.doc]));
+  const A = byPath["/tmp/of/A.em.json"], B = byPath["/tmp/of/B.em.json"];
+  const keysOf = (d) => Object.keys(d?.graphs ?? {}).sort();
+  // the digest per graph: an untouched graph is the same content; an edited
+  // one differs in its edited node only
+  const same = A && ofContent(A.graphs.gA1) === ofContent(files.A.graphs.gA1);
+  const editedA = A && JSON.stringify(A.graphs.gA2.nodes.find((n) => n.id === "A4")?.description) === '"scritto in A"'
+    && ofContent({ ...A.graphs.gA2, nodes: A.graphs.gA2.nodes.filter((n) => n.id !== "A4") })
+      === ofContent({ ...files.A.graphs.gA2, nodes: files.A.graphs.gA2.nodes.filter((n) => n.id !== "A4") });
+  const posWritten = docs.length === 2 && Object.fromEntries([...Object.entries(A.graphs), ...Object.entries(B.graphs)]
+    .map(([g, s]) => [g, ofPositions(s)]));
+  // reopen both files from what was written: every graph has ITS positions
+  const r = await open({ doc: null, locale: "en", hook: tauriWrites() });
+  await r.p.waitForFunction(() => !!window.__EM_DRAG__, null, { timeout: 20000 });
+  const reopened = {};
+  if (A && B) {
+    await r.p.evaluate(([a]) => window.__EM_DRAG__.openAt(a, "/tmp/of/A.em.json"), [A]);
+    await r.p.waitForTimeout(1500);
+    await r.p.evaluate(([b]) => window.__EM_DRAG__.openAt(b, "/tmp/of/B.em.json"), [B]);
+    await r.p.waitForTimeout(1500);
+    await workspace(r.p, "assets");
+    for (const name of ["grafo gA1", "grafo gA2", "grafo gB1"]) {
+      await r.p.locator(".et-pick", { hasText: name }).first().click();
+      await r.p.waitForTimeout(900);
+      const doc = JSON.parse(await r.p.evaluate(() => window.__EM_DRAG__.docJson()));
+      const gid = name.split(" ")[1];
+      reopened[gid] = ofPositions(doc.graphs[gid]);
+      reopened[`${gid}.top`] = ofPositions({ ...doc.graphs[gid], layout: doc.layout });
+    }
+  }
+  const log = await r.p.evaluate(() => (window.__EM_DRAG__.log?.() ?? []).map((x) => x.message).join("\n")).catch(() => "");
+  await r.ctx.close();
+  const pass = tree.length === 2 && tree[0].graphs.length === 2 && tree[1].graphs.length === 1 && tree[1].target && !tree[0].target
+    && docs.length === 2 && JSON.stringify(keysOf(B)) === '["gB1"]' && JSON.stringify(keysOf(A)) === '["gA1","gA2"]'
+    && same && editedA
+    && JSON.stringify(posWritten) === JSON.stringify(want)
+    && JSON.stringify(ofPositions({ ...A.graphs.gA2, layout: A.layout })) === JSON.stringify(want.gA2)
+    && ["gA1", "gA2", "gB1"].every((g) => JSON.stringify(reopened[g]) === JSON.stringify(want[g])
+                                        && JSON.stringify(reopened[`${g}.top`]) === JSON.stringify(want[g]))
+    && !/laid out afresh/.test(log) && !errors.length && !r.errors.length;
+  return { pass, detail: { tree, paths: docs.map((d) => [d.path, keysOf(d.doc)]), same, editedA, posWritten, want, reopened,
+                           errors: [...errors, ...r.errors] } };
+});
+
+test("F2.saveas", "F2 · un grafo importato sta in «Senza file»; ⌘S è «Salva come», e gli dà un file suo con lui solo", async () => {
+  const files = OF_FILES();
+  const { p, ctx, errors } = await open({ doc: null, locale: "en", hook: tauriWrites() });
+  await p.waitForFunction(() => !!window.__EM_DRAG__, null, { timeout: 20000 });
+  await p.evaluate(([b, sp]) => { window.__BRIDGE__ = b; window.__SAVE_PATH__ = sp; }, [BRIDGE, "/tmp/of/nuovo.em.json"]);
+  await p.evaluate(([a]) => window.__EM_DRAG__.openAt(a, "/tmp/of/A.em.json"), [files.A]);
+  await p.waitForTimeout(1500);
+  await p.setInputFiles("#file-input", `${TD}catena.em.json`);   // a drop: a file without a path (browser-like)
+  await p.waitForTimeout(1500);
+  await p.evaluate(() => document.getElementById("btn-new")?.click());   // New: a graph with no file
+  await p.waitForTimeout(1200);
+  await workspace(p, "assets");
+  const before = await p.evaluate(() => [...document.querySelectorAll(".et-file")].map((f) => ({
+    nofile: f.classList.contains("et-nofile"), n: f.querySelectorAll(".et-slot").length, target: f.classList.contains("et-file-active") })));
+  await p.keyboard.press("Meta+s");
+  await p.waitForTimeout(1000);
+  const writes = await p.evaluate(() => window.__WRITES__.map((w) => ({ path: w.path, graphs: Object.keys(JSON.parse(w.text).graphs) })));
+  const after = await p.evaluate(() => [...document.querySelectorAll(".et-file")].map((f) => ({
+    name: f.querySelector(".et-file-name")?.textContent, nofile: f.classList.contains("et-nofile"), n: f.querySelectorAll(".et-slot").length })));
+  await p.screenshot({ path: SHOT("f2-salva-come-da-senza-file") }).catch(() => {});
+  await ctx.close();
+  const loose = before.find((g) => g.nofile);
+  return { pass: !!loose && loose.target && writes.length === 1 && writes[0].path === "/tmp/of/nuovo.em.json"
+      && writes[0].graphs.length === 1 && after.some((g) => g.name?.startsWith("nuovo.em.json") && g.n === 1) && !errors.length,
+    detail: { before, writes, after, errors } };
+});
+
+test("F4.oldfile", "F4 · un file VECCHIO (un solo layout, del grafo attivo): il grafo attivo tiene le sue posizioni, l'altro si dispone da capo e lo si dice una volta; al Salva ciascuno scrive il suo", async () => {
+  const gX = OF_GRAPH("gX", ["X1", "X2"], 301);
+  const gY = OF_GRAPH("gY", ["Y1", "Y2", "Y3"], 0);
+  const top = gX.layout; delete gX.layout; delete gY.layout;
+  // as San Pietro was: the other graph FIRST in the file, the real one active
+  const old = { header: { format: "em.json", version: "1.0" }, active_graph_id: "gX", graphs: { gY, gX }, layout: top };
+  const { p, ctx, errors } = await open({ doc: null, locale: "en", hook: tauriWrites() });
+  await p.waitForFunction(() => !!window.__EM_DRAG__, null, { timeout: 20000 });
+  await p.evaluate(([d]) => window.__EM_DRAG__.openAt(d, "/tmp/of/vecchio.em.json"), [old]);
+  await p.waitForTimeout(2500);
+  await workspace(p, "assets");
+  await p.locator(".et-pick", { hasText: "grafo gY" }).first().click();
+  await p.waitForTimeout(2000);
+  const ySeen = await p.evaluate(() => window.__EM_SCENE__?.()?.nodes ?? []);
+  await p.evaluate(() => window.__EM_DRAG__.edit("Y1", { description: "toccato" }));
+  await p.keyboard.press("Meta+s");
+  await p.waitForTimeout(900);
+  const writes = await p.evaluate(() => window.__WRITES__);
+  const log = await p.evaluate(() => (window.__EM_DRAG__.log?.() ?? []).map((x) => x.message));
+  await ctx.close();
+  const doc = writes[0] ? JSON.parse(writes[0].text) : null;
+  const xPos = doc && ofPositions(doc.graphs.gX), yPos = doc && ofPositions(doc.graphs.gY);
+  const said = log.filter((m) => /laid out afresh/.test(m));
+  const want = ofPositions({ ...OF_GRAPH("gX", ["X1", "X2"], 301) });
+  return { pass: writes.length === 1 && JSON.stringify(xPos) === JSON.stringify(want)
+      && Object.keys(yPos ?? {}).sort().join() === "Y1,Y2,Y3" && JSON.stringify(yPos) !== JSON.stringify(xPos)
+      && ["Y1", "Y2", "Y3"].every((id) => ySeen.includes(id))
+      && JSON.stringify(ofPositions({ ...doc.graphs.gY, layout: doc.layout })) === JSON.stringify(yPos)
+      && said.length === 1 && !errors.length,
+    detail: { xPos, yPos, want, ySeen, said, top: doc && Object.keys(doc.layout?.positions ?? {}), errors } };
+});
+
 // ── run ─────────────────────────────────────────────────────────────────────
 const chosen = cases.filter((c) => !only.length || only.includes(c.id) || only.some((o) => c.id.startsWith(o + ".")));
 for (const c of chosen) {
