@@ -306,7 +306,7 @@ import {
 } from "./stratiminer";
 import { EMTree, renderEMTree, slotLabel } from "./emtree";
 import type {
-  AuxFileType, AuxiliaryFile, AuxMapReport, EMTreeHandlers, SlotViewState,
+  AuxFileType, AuxiliaryFile, AuxMapReport, EMTreeHandlers, GraphSlot, SlotViewState,
 } from "./emtree";
 import {
   coverage,
@@ -4359,7 +4359,15 @@ function loadDocument(
   // StratiMiner — already came through here, so all of them get a slot from this
   // one line. (That closes the TODO SM1 left behind: a StratiMiner graph is now a
   // workspace slot rather than a document that replaced whatever was open.)
+  // DEV30 V3 · a seed graph nobody touched gives its place to what is opened:
+  // measured on E.D.'s Tempio_Giunone_Moneta.em.json (2 Oct) — an «untitled
+  // graph» of 4 nodes (Epoch 1, its PD group, its two dates) born of New / the
+  // empty canvas's «first unit» at 16:17, then saved beside the GraphML imported
+  // at 16:20 (the status bar said 91 nodes).
+  const seed = emtree.active();
+  const replaceSeed = !!seed && isUntouchedSeed(seed);
   const slot = emtree.add(loaded, slotNameFor(d, sourceName), path);
+  if (replaceSeed && seed) emtree.remove(seed.id);
   activateSlot(slot.id, { rebuildOnly: true });
   dropHint.classList.add("hidden");
   updateBreadcrumb();
@@ -4547,6 +4555,9 @@ function newDocument(): void {
   if (store && view === "matrix" && store.topEpochIds().length === 0) {
     addEpochEmMode();
   }
+  // DEV30 V3 · …and the graph stays a SEED until a hand changes it
+  const born = emtree.active();
+  if (born && store) born.seedDepth = store.undoDepth;
   info.textContent = t("l.newEmptyGraph");
 }
 
@@ -4596,13 +4607,21 @@ function defaultFileName(): string {
  * two can never disagree: there is no path that writes a file without deciding
  * which revision that file is.
  */
+/** DEV30 V3 · a graph New made and nobody touched (see `newDocument`). */
+function isUntouchedSeed(slot: GraphSlot): boolean {
+  return slot.seedDepth !== undefined && !slot.path && slot.store.undoDepth === slot.seedDepth;
+}
+
 function projectContainer(): ReturnType<typeof buildContainer> {
   // Each member goes through its own `store.toJSON()` and is parsed back.
   // That round trip is NOT waste: toJSON is where the save rules live — it
   // stamps `last_editor` and, crucially, DROPS the volatile (mapped-but-not-baked)
   // nodes (AUX2). Reading `store.doc` directly would have written them into the
   // project file, which is exactly what that rule exists to prevent.
-  const graphs = emtree.slots.map((slot) => ({
+  // DEV30 V3 · a seed nobody touched is not saved: it is nobody's graph. The
+  // active one is kept when it is the only one (saving a fresh New is a choice).
+  const kept = emtree.slots.filter((slot) => !isUntouchedSeed(slot) || (emtree.slots.length === 1));
+  const graphs = kept.map((slot) => ({
     id: String((slot.store.doc.graph as Record<string, unknown>).graph_id ?? slot.id),
     doc: JSON.parse(slot.store.toJSON()) as EmDocument,
   }));
@@ -5970,6 +5989,8 @@ function revertToLoser(c: Conflict): boolean {
 async function saveDocument(): Promise<void> {
   if (!store) return;
   if (isTauri()) {
+    // DEV30 U8 · «Save» writes on the open file: the slot's path is the truth
+    currentFilePath = emtree.active()?.path ?? currentFilePath;
     if (!currentFilePath) return saveAsDocument();
     try {
       await writeEmJson(currentFilePath, projectDocumentText());
@@ -5995,6 +6016,13 @@ async function saveAsDocument(): Promise<void> {
       const path = await saveAsEmJson(projectDocumentText(), defaultFileName());
       if (!path) return; // user cancelled
       currentFilePath = path;
+      // DEV30 U8 · the SLOT is told too. Measured: Save As wrote only
+      // `currentFilePath`, and the next slot activation (any click in the
+      // EMTree, a second graph opened) set it back to `slot.path` — null for an
+      // imported GraphML — so the next «Save» opened «Save As» again.
+      const slot = emtree.active();
+      if (slot) { slot.path = path; slot.seedDepth = undefined; }
+      addRecent({ path, name: baseName(path) }, Date.now());
       store.dirty = false;
       info.textContent = `saved ${baseName(path)}`;
       updateToolbar();
@@ -7311,9 +7339,15 @@ function renderDocumentDating(st: DocumentStore, host: HTMLElement, docId: strin
     const phase = !!st.parentEpoch(id);
     sel.appendChild(new Option(`${phase ? "· " : ""}${String(ep.name ?? id)}`, id, false, id === cur));
   }
-  sel.addEventListener("change", () => {
-    const v = sel.value;
+  // DEV30 U2 · dating the document IS the gesture: one undo step for the epoch
+  // (and the year still in the field), then the selection stays on the
+  // DOCUMENT. Measured on the desktop dev.15: the year was committed on the blur
+  // the click on this menu caused, the inspector was rebuilt under the click,
+  // and the menu that opened belonged to a removed element — the choice went
+  // nowhere (D.02 saved with `data.year` and no `has_first_epoch`).
+  const dateIn = (v: string) => {
     st.batch(() => {
+      writeYear();
       if (v) st.setFirstEpoch([docId], v);
       else {
         const e = st.liveEdges().find((x) => x.source === docId && x.edge_type === "has_first_epoch");
@@ -7338,9 +7372,73 @@ function renderDocumentDating(st: DocumentStore, host: HTMLElement, docId: strin
     if (v) data.year = /^-?\d+$/.test(v) ? Number(v) : v;
     else delete data.year;
     st.updateNode(docId, { data });
+    return true;
+  }
+  // a press on the menu while the year is still unwritten: the year is written
+  // first (its proposal follows) and the menu reopens on the rebuilt inspector,
+  // instead of opening on an element the rebuild is about to remove
+  sel.addEventListener("pointerdown", (e) => {
+    if (year.value.trim() === stored()) return;
+    e.preventDefault();
+    year.blur();          // → change → writeYear → the inspector is rebuilt
+    writeYear();
+    refreshInspector();
+    requestAnimationFrame(() => document.querySelector<HTMLSelectElement>(`select[data-doc-epoch="${CSS.escape(docId)}"]`)?.focus());
   });
+  year.addEventListener("keydown", (e) => { e.stopPropagation(); if (e.key === "Enter") year.blur(); });
+  year.addEventListener("change", () => { writeYear(); });
   row.append(sel, year);
   host.appendChild(row);
+  // DEV30 U2 · the year PROPOSES the epoch whose bounds hold it, with a
+  // confirmation (one button); without any dated epoch it says so and offers to
+  // write the dates (the Chronology window)
+  const y = Number(stored());
+  if (stored() && Number.isFinite(y)) {
+    const proposal = documentEpochFor(st, y);
+    const note = document.createElement("div");
+    note.className = "chain-dating-hint insp-hint";
+    note.dataset.docYearHint = docId;
+    if (proposal.kind === "epoch" && proposal.id !== cur) {
+      const ep = st.node(proposal.id);
+      note.append(t("chain.yearFalls", { y: String(y), e: String(ep?.name ?? proposal.id), s: String(proposal.start), en: String(proposal.end) }), " ");
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "tv-act";
+      b.dataset.action = "date-in-proposed";
+      b.textContent = t("chain.dateThere", { e: String(ep?.name ?? proposal.id) });
+      b.addEventListener("click", () => dateIn(proposal.id));
+      note.appendChild(b);
+      host.appendChild(note);
+    } else if (proposal.kind === "none") {
+      note.append(t(proposal.dated ? "chain.yearNoEpoch" : "chain.noEpochDated", { y: String(y) }), " ");
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "tv-act";
+      b.dataset.action = "write-epoch-dates";
+      b.textContent = t("chain.writeEpochDates");
+      b.addEventListener("click", () => openChronology());
+      note.appendChild(b);
+      host.appendChild(note);
+    }
+  }
+}
+
+/** DEV30 U2 · the epoch (or phase: the narrowest) whose bounds hold a year. */
+function documentEpochFor(st: DocumentStore, year: number):
+    { kind: "epoch"; id: string; start: number; end: number } | { kind: "none"; dated: boolean } {
+  const ids = st.topEpochIds().flatMap((id) => [id, ...st.epochPhases(id)]);
+  let best: { id: string; start: number; end: number } | null = null;
+  let dated = false;
+  for (const id of ids) {
+    const data = (st.node(id)?.data ?? {}) as Record<string, unknown>;
+    const s = Number(data.start_time), e = Number(data.end_time);
+    if (data.start_time == null || data.end_time == null || !Number.isFinite(s) || !Number.isFinite(e)) continue;
+    dated = true;
+    const lo = Math.min(s, e), hi = Math.max(s, e);
+    if (year < lo || year > hi) continue;
+    if (!best || hi - lo < best.end - best.start) best = { id, start: lo, end: hi };
+  }
+  return best ? { kind: "epoch", ...best } : { kind: "none", dated };
 }
 
 /**
@@ -17242,7 +17340,10 @@ const receiptStudy = new Map<string, string | null>();
  * members, same shelf, no bump.
  */
 function shelfContainerDoc(): Record<string, unknown> {
-  const graphs = emtree.slots.map((slot) => ({
+  // DEV30 V3 · a seed nobody touched is not saved: it is nobody's graph. The
+  // active one is kept when it is the only one (saving a fresh New is a choice).
+  const kept = emtree.slots.filter((slot) => !isUntouchedSeed(slot) || (emtree.slots.length === 1));
+  const graphs = kept.map((slot) => ({
     id: String((slot.store.doc.graph as Record<string, unknown>).graph_id ?? slot.id),
     doc: JSON.parse(slot.store.toJSON()) as EmDocument,
   }));
