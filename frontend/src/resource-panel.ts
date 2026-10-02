@@ -381,7 +381,13 @@ function addressSection(store: DocumentStore, id: string, h: ResourcePanelHooks)
   box.dataset.resAddresses = "1";
   const list = addresses(store.node(id));
   box.appendChild(el("h3", "insp-sect", t("res.addresses", { n: String(list.length) })));
-  if (!list.length) { box.appendChild(el("div", "insp-hint", t("res.addressesNone"))); return box; }
+  if (!list.length) {
+    // DEV29 B3 · a file set whose files are known does not «point nowhere»:
+    // its files are listed below, each with its digest
+    const files = store.liveEdges().filter((e) => e.source === id && e.edge_type === "has_file").length;
+    box.appendChild(el("div", "insp-hint", files ? t("res.addressesFiles", { n: String(files) }) : t("res.addressesNone")));
+    return box;
+  }
   for (const a of list) {
     const row = el("div", "res-addr");
     row.dataset.addr = a.locator;

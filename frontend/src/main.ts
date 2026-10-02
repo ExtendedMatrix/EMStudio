@@ -331,7 +331,7 @@ import { type HostInfo, SyncClient, SYNC_ACCEPTS, type SyncAccept } from "./sync
 import * as alignment from "./alignment";
 import type { GraphOp } from "./model";
 import { buildCommand, type CommandVerb } from "./commands";
-import { addResource, fileCounts, foldFiles, movePointers, replaceFile, resourceFiles, resourceLabel, storeGraph } from "./resources";
+import { addResource, fileCounts, foldFiles, movePointers, packagingLabel, replaceFile, resourceFiles, resourceLabel, storeGraph } from "./resources";
 import { askWhichPointersMove } from "./resource-panel";
 import { addressMap, chooseModel, needsChoice, startResources, type ModelChoice } from "./representation";
 import { foldForms, landPack, packTileset } from "./pack3tz";
@@ -2484,7 +2484,7 @@ function renderNameStrip(): void {
   const name = (id: string | undefined): string =>
     id ? String(store!.node(id)?.name || id) : "";
   ctx.textContent = [
-    nodeLabel(n.node_type),
+    packagingLabel(n) ?? nodeLabel(n.node_type),
     ep ? name(ep.target) : "",
     part ? t("strip.partOf", { x: name(part.target) }) : "",
   ].filter(Boolean).join(" · ");

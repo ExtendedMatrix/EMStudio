@@ -37,6 +37,7 @@ const bundle = await esbuild.build({
       export { dtcKindFamily } from "./rules";
       export { geoOf } from "./geo";
       export { buildDtcScene, dtcSetId, processLabel } from "./views/dtc";
+      export { packagingLabel } from "./resources";
     `,
     resolveDir: SRC, loader: "ts",
   },
@@ -51,7 +52,7 @@ const bundle = await esbuild.build({
   }],
 });
 const M = await import("data:text/javascript;base64," + Buffer.from(bundle.outputFiles[0].text).toString("base64"));
-const { twinAcquisitions, buildDtcScene, dtcSetId, processLabel, geoOf, compose, adaptDraft, dtcKindFamily, doubleSlashFix, georeferenceState, issues, ancestorsOf, isStratigraphicType, DocumentStore, setLocale, t } = M;
+const { packagingLabel, twinAcquisitions, buildDtcScene, dtcSetId, processLabel, geoOf, compose, adaptDraft, dtcKindFamily, doubleSlashFix, georeferenceState, issues, ancestorsOf, isStratigraphicType, DocumentStore, setLocale, t } = M;
 const tt = (k, v) => `${k}${v ? JSON.stringify(v) : ""}`;
 const doc = (nodes, edges = []) => ({ header: {}, graph: { id: "g", nodes, edges } });
 
@@ -203,6 +204,19 @@ const doc = (nodes, edges = []) => ({ header: {}, graph: { id: "g", nodes, edges
     eq(twinAcquisitions(sp.nodes, sp.edges).map((x) => [sp.nodes.find((n) => n.id === x.keep).name, sp.nodes.find((n) => n.id === x.drop).name, x.members]),
        [["Acquisition", "Volo drone San Pietro (FC300X)", 71]], "B2 · San Pietro: «Acquisition» (the stamps') and «Volo drone» are one lot of 71");
   }
+}
+
+// ── B3 · a resource says what it is ────────────────────────────────────────
+{
+  eq(packagingLabel({ node_type: "resource", data: { packaging: "file_set" } }), "File set", "B3 · a file_set is «File set»");
+  eq(packagingLabel({ node_type: "resource", data: { packaging: "directory" } }), "Folder", "B3 · a directory is «Folder»");
+  eq(packagingLabel({ node_type: "resource", data: { packaging: "file" } }), null, "B3 · a plain file keeps the type's label");
+  eq(packagingLabel({ node_type: "US", data: { packaging: "file_set" } }), null, "B3 · only resources");
+  setLocale("it");
+  eq(packagingLabel({ node_type: "resource", data: { packaging: "file_set" } }), "Insieme di file", "B3 · …in the interface language");
+  eq([t("insp.embargoUntil"), t("insp.embargoReason")], ["Embargo fino al", "Motivo dell'embargo"], "B3 · the embargo's words are the dictionary's (Italian in Italian)");
+  setLocale("en");
+  eq([t("insp.embargoUntil"), t("insp.embargoReason")], ["Embargo until", "Reason for the embargo"], "B3 · …and English in English");
 }
 
 // ── B9a · the default name of a phase is in the interface language ─────────

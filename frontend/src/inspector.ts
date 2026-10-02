@@ -9,6 +9,8 @@ import { getSettings } from "./settings";
 import { currentIdentity, orcidProblem } from "./identity";
 import { acquisitionMembers, derivationChain, resourceUsages } from "./ingest";
 import { renderResourcePanel } from "./resource-panel";
+import { packagingLabel } from "./resources";
+import { processLabel } from "./views/dtc";
 import type { TwinSearchResult } from "./twins";
 import { renderSitePosition } from "./study-panel";
 import { naturalFields, qualeOf, TRANSLATION_TYPE } from "./translation";
@@ -215,8 +217,11 @@ export function renderInspector(
   // from the translations' `stratigraphic_kinds`. The type and its glyph stay
   // the US's.
   const kindOf = stratigraphicKindOf(node);
+  // DEV29 B3 · a resource says what it IS by its packaging — «File set», not
+  // «resource» (and the name strip says it too)
+  const pack = packagingLabel(node);
   const chip = el("span", "insp-chip",
-    kindOf ? `${node.node_type} · ${stratigraphicKindLabel(kindOf)}` : node.node_type);
+    kindOf ? `${node.node_type} · ${stratigraphicKindLabel(kindOf)}` : pack ?? node.node_type);
   chip.style.background = st.fill;
   chip.style.color = st.textColor;
   chip.style.borderColor = st.border;
@@ -714,21 +719,29 @@ export function renderInspector(
       return input;
     };
 
-    field(t("insp.licence"), rights.license, "CC-BY-SA-4.0",
+    // DEV29 B3 · the proposal is the GRAPH's licence when it declares one
+    // (San Pietro: CC-BY-ND, and the button said «Apply CC-BY-SA-4.0»); the
+    // default only when the graph says nothing
+    const graphLicence = store.readGraphScope().license.trim();
+    const proposed = graphLicence || "CC-BY-SA-4.0";
+    field(t("insp.licence"), rights.license, proposed,
           (v) => store.setNodeRights(nodeId, { license: v }));
     if (!rights.license) {
       const suggest = el("button", "insp-btn",
-                         t("insp.applyDefaultLicence")) as HTMLButtonElement;
-      suggest.title = t("insp.applyDefaultLicenceTitle");
+                         graphLicence ? t("insp.applyGraphLicence", { lic: proposed })
+                                      : t("insp.applyDefaultLicence")) as HTMLButtonElement;
+      suggest.dataset.action = "apply-licence";
+      suggest.dataset.licence = proposed;
+      suggest.title = graphLicence ? t("insp.applyGraphLicenceTitle") : t("insp.applyDefaultLicenceTitle");
       suggest.addEventListener("click", () =>
-        store.setNodeRights(nodeId, { license: "CC-BY-SA-4.0" }));
+        store.setNodeRights(nodeId, { license: proposed }));
       panel.appendChild(suggest);
     }
 
-    const embargo = field("Embargo fino al", rights.embargo, "2027-01-01",
+    const embargo = field(t("insp.embargoUntil"), rights.embargo, "2027-01-01",
                           (v) => store.setNodeRights(nodeId, { embargo: v }),
                           "date");
-    field("Motivo dell'embargo", rights.reason, "in corso di studio",
+    field(t("insp.embargoReason"), rights.reason, t("insp.embargoReasonEg"),
           (v) => store.setNodeRights(nodeId, { reason: v, embargo: embargo.value }));
 
     // ── AUTORE ≠ ATTRIBUTORE ───────────────────────────────────────────────
@@ -840,8 +853,11 @@ export function renderInspector(
       if (chain.madeBy.length) {
         panel.appendChild(el("div", "insp-hint", t("insp.producedBy")));
         for (const event of chain.madeBy) {
+          // DEV29 B2 · the act by its technique, not «derivation of …»
+          const evNode = store.node(event.id);
+          const evName = (evNode && processLabel(evNode)) || event.name;
           const b = el("button", "insp-btn",
-            `${event.tool ? `${event.name} · ${event.tool}` : event.name}`) as HTMLButtonElement;
+            `${event.tool ? `${evName} · ${event.tool}` : evName}`) as HTMLButtonElement;
           b.title = event.type === "dtc_acquisition"
             ? t("insp.theAcquisition") : t("insp.theDtcEvent");
           b.addEventListener("click", () => cb.onJump(event.id));
@@ -852,7 +868,7 @@ export function renderInspector(
       const cited = usages.filter((u) => u.role === "reference" || u.role === "annotation");
       if (cited.length) {
         panel.appendChild(el("div", "insp-hint",
-          `Citata da ${cited.length} ${cited.length === 1 ? "nodo" : "nodi"}:`));
+          t(cited.length === 1 ? "insp.citedByOne" : "insp.citedBy", { n: String(cited.length) })));
         for (const use of cited) {
           const b = el("button", "insp-btn",
             `${use.name} — ${use.edgeType}`) as HTMLButtonElement;
@@ -964,6 +980,9 @@ export function renderInspector(
       // P4.1b · the field clocks and the tombstones are machinery, not content:
       // they belong to the merge, and showing them here would bury the data
       if (k === "field_clocks" || k === "removed") continue;
+      // DEV29 B3 · a file set's members digest IS its checksum (s3Dgraphy dev29
+      // A1 writes only `checksum`): the same sha256 twice is said once
+      if (k === "members_digest" && v === (data as Record<string, unknown>).checksum) continue;
       dl.appendChild(el("dt", undefined, k));
       const dd = el("dd");
       dd.appendChild(document.createTextNode(

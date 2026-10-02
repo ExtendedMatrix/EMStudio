@@ -2832,6 +2832,26 @@ test("V2.dtc", "il DTC che si legge: un'acquisizione di N foto è UN blocco («�
     detail: { blocks, photos, align: label("proc-align"), lanes: sc.lanes, scale: sc.scale, opened, sel, before, after, kept: kept?.name, inputs, errors } };
 });
 
+test("V3.inspector", "ispettore della risorsa: un file_set dice «File set» (chip e barra del nome), l'embargo è in inglese, la licenza proposta è quella del grafo (CC-BY-ND), members_digest = checksum una volta sola, gli indirizzi dicono i file", async () => {
+  const { p, ctx, errors } = await open({ doc: "dev29-segni-lite", locale: "en", ws: "provenance" });
+  await pick(p, "res:lod0");
+  await p.waitForTimeout(500);
+  const r = await p.evaluate(() => {
+    const insp = document.querySelector('[data-win$="inspector"]');
+    const txt = insp?.innerText ?? "";
+    const dts = [...(insp?.querySelectorAll(".insp-data dt") ?? [])].map((d) => d.textContent);
+    return { chip: insp?.querySelector(".insp-chip")?.textContent, strip: document.getElementById("ns-ctx")?.textContent,
+             apply: insp?.querySelector('[data-action="apply-licence"]')?.textContent,
+             italian: /fino al|Motivo dell|Citata da/.test(txt), dts,
+             addr: insp?.querySelector("[data-res-addresses] .insp-hint")?.textContent, produced: /export: OBJ 12 materiali/.test(txt) };
+  });
+  await p.screenshot({ path: SHOT("v3-ispettore-file-set") }).catch(() => {});
+  await ctx.close();
+  return { pass: r.chip === "File set" && /^File set/.test(r.strip ?? "") && r.apply === "Apply CC-BY-ND — the graph's licence"
+      && !r.italian && r.dts.includes("checksum") && !r.dts.includes("members_digest") && /3 files/.test(r.addr ?? "")
+      && r.produced && !errors.length, detail: { ...r, errors } };
+});
+
 // ── run ─────────────────────────────────────────────────────────────────────
 const chosen = cases.filter((c) => !only.length || only.includes(c.id) || only.some((o) => c.id.startsWith(o + ".")));
 for (const c of chosen) {

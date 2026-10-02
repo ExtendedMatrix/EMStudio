@@ -1,3 +1,4 @@
+import { t } from "./i18n";
 // NIGHT-RISORSA-FILE · the resource and its files — one way to make a
 // resource, one way to read it. The TypeScript MIRROR of s3Dgraphy's
 // `resources/files.py` (`api.add_resource` & co., s3Dgraphy 1.6.17 /
@@ -781,4 +782,17 @@ export function foldFiles<N extends EmNode, E extends EmEdge>(nodes: N[], edges:
  *  ▾ open. `files` is the word in the reader's language. */
 export function resourceLabel(name: string, count: number, open: boolean, files: string): string {
   return `${open ? "▾" : "▸"} ${name} · ${count} ${files}`;
+}
+
+/** DEV29 B3 · what a resource IS, by its packaging (s3Dgraphy ResourceNode
+ *  PACKAGINGS): «File set», «Folder», «Archive», «Blender object» — said by the
+ *  inspector's chip and the name strip instead of «resource» / «Link». Null for
+ *  a plain file or any other node (the type's own label stays). */
+export function packagingLabel(n: { node_type?: string; data?: unknown } | null | undefined): string | null {
+  if (!n || n.node_type !== "resource") return null;
+  const p = String(((n.data ?? {}) as Record<string, unknown>).packaging ?? "");
+  if (!p || p === "file") return null;
+  const k = `res.pack.${p}`;
+  const w = t(k);
+  return w === k ? p : w;
 }
