@@ -21,7 +21,7 @@
  * card (light and dark), `prefers-reduced-motion` drops the press and keeps
  * the seal, Esc closes, the focus goes to «Done» and comes back.
  */
-import { t } from "./i18n";
+import { getLocale, t } from "./i18n";
 
 export interface SealStamp {
   stamp?: number;
@@ -123,6 +123,19 @@ export interface SealWords {
   withWhat: string;
 }
 
+/** DEV30 V1 · an instant of a stamp in the interface's language and the
+ *  machine's time zone («29 set 2026, 21:24» for 2026-09-29T19:24:39Z in
+ *  Rome); a date alone stays a date. What is not a date is shown as written. */
+export function readableWhen(at: string, locale: string = getLocale()): string {
+  if (!at) return "";
+  const dateOnly = /^\d{4}-\d{2}-\d{2}$/.test(at);
+  const d = new Date(dateOnly ? `${at}T12:00:00` : at);
+  if (Number.isNaN(d.getTime())) return at;
+  try {
+    return new Intl.DateTimeFormat(locale, dateOnly ? { dateStyle: "medium" } : { dateStyle: "medium", timeStyle: "short" }).format(d);
+  } catch { return at; }
+}
+
 /** The words of the card, from the stamp alone (and the label of its kind). */
 export function sealWords(st: SealStamp, kindLabel: (k: string) => string = (k) => k): SealWords {
   const self = st.self ?? {};
@@ -141,16 +154,21 @@ export function sealWords(st: SealStamp, kindLabel: (k: string) => string = (k) 
   }
   const parents = (st.from ?? []).map((p) => p.label || p.resource_id || "").filter(Boolean);
   const kind = st.how?.dtc_kind ? kindLabel(st.how.dtc_kind) : "";
+  // DEV30 V1 · «From» says WHERE FROM: the address a retrieval took the bytes
+  // from (`how.acquisition.retrieved_from`, D1) when the stamp has one; else the
+  // campaign that is the origin; else that the stamp does not say. «Origin:
+  // Download» (the kind repeated) said nothing.
+  const src = st.how?.acquisition?.retrieved_from;
   const from = parents.length
     ? t("seal.from", { parents: parents.join(", "), kind })
-    : t("seal.origin", { campaign: st.how?.acquisition?.name || kind || "—" })
-      // DEV29 B5 · a retrieval says where the bytes were taken from
-      + (st.how?.acquisition?.retrieved_from ? ` · ${t("seal.retrievedFrom", { src: st.how.acquisition.retrieved_from })}` : "");
+    : src ? String(src)
+    : st.how?.acquisition?.name ? t("seal.origin", { campaign: st.how.acquisition.name })
+    : t("seal.originUndeclared", { kind: kind || "—" });
   const op = st.by?.operator;
   const orcid = op?.id ? op.id.replace(/^https?:\/\/orcid\.org\//, "") : "";
   const who = op?.label ? (orcid ? `${op.label} · ${orcid}` : op.label) : orcid || t("seal.nobody");
   const sw = (st.how?.software ?? []).map((s) => [s.name, s.version].filter(Boolean).join(" ")).filter(Boolean);
-  return { what, from, who, when: st.by?.at ?? "", withWhat: sw.join(", ") };
+  return { what, from, who, when: readableWhen(st.by?.at ?? ""), withWhat: sw.join(", ") };
 }
 
 function escapeHtml(s: string): string {
