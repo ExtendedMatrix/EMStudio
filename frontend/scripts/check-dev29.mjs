@@ -28,7 +28,7 @@ const SRC = new URL("../src/", import.meta.url).pathname;
 const bundle = await esbuild.build({
   stdin: {
     contents: `
-      export { issues } from "./issues";
+      export { issues, doubleSlashFix, georeferenceState } from "./issues";
       export { ancestorsOf, isStratigraphicType } from "./rules";
       export { DocumentStore } from "./model";
       export { setLocale, t } from "./i18n";
@@ -46,7 +46,7 @@ const bundle = await esbuild.build({
   }],
 });
 const M = await import("data:text/javascript;base64," + Buffer.from(bundle.outputFiles[0].text).toString("base64"));
-const { issues, ancestorsOf, isStratigraphicType, DocumentStore, setLocale, t } = M;
+const { doubleSlashFix, georeferenceState, issues, ancestorsOf, isStratigraphicType, DocumentStore, setLocale, t } = M;
 const tt = (k, v) => `${k}${v ? JSON.stringify(v) : ""}`;
 const doc = (nodes, edges = []) => ({ header: {}, graph: { id: "g", nodes, edges } });
 
@@ -61,6 +61,51 @@ const doc = (nodes, edges = []) => ({ header: {}, graph: { id: "g", nodes, edges
     namedByConstruction: (nt) => ancestorsOf(nt).includes("ContinuityNode") });
   const para = iss.filter((i) => i.rule === "paradata").map((i) => i.node);
   eq(para, ["u1"], "A9b · «no documented property» for the US, never for a continuity node");
+}
+
+// ── B8 · the new warnings ───────────────────────────────────────────────────
+{
+  eq(doubleSlashFix("//DosCo/D.33.jpg"), "/DosCo/D.33.jpg", "B8 · `//DosCo/…` → `/DosCo/…`");
+  eq(doubleSlashFix("https://zenodo.org/record//7463211"), "https://zenodo.org/record/7463211", "B8 · inside a path, after a scheme");
+  eq(doubleSlashFix("https://zenodo.org/record/7463211"), null, "B8 · the scheme's // is not a double slash");
+  eq(doubleSlashFix("/DosCo/D.02.jpg"), null, "B8 · an ordinary path");
+  const geo = (data) => [{ id: "g", node_type: "geo_position", data }];
+  eq(georeferenceState(geo({ epsg: 4326, shift_x: 0, shift_y: 0, shift_z: 0 })), "legacy_default", "B8 · 4326 + zero shift = legacy_default");
+  eq(georeferenceState(geo({ shift_x: 0 })), "undeclared", "B8 · no epsg = undeclared");
+  eq(georeferenceState([]), "undeclared", "B8 · no GeoPositionNode = undeclared");
+  eq(georeferenceState(geo({ epsg: 3004, shift_x: 2355500, shift_y: 4617500, shift_z: 0 })), "declared", "B8 · EPSG:3004 + SHIFT = declared");
+  const d = doc([
+    { id: "geo", node_type: "geo_position", data: { epsg: 4326, shift_x: 0, shift_y: 0, shift_z: 0 } },
+    { id: "d02", node_type: "document", name: "D.02", data: { url: "/DosCo/D.02.jpg" } },
+    { id: "d32", node_type: "document", name: "D.32", data: { url: "/DosCo/D.02.jpg" } },
+    { id: "d33", node_type: "document", name: "D.33", data: { url: "//DosCo/D.33.jpg" } },
+    { id: "d33_link", node_type: "resource", name: "Link to D.33", data: { url: "//DosCo/D.33.jpg" } },
+    { id: "pano", node_type: "resource", name: "pano8k.rar", data: { packaging: "archive", missing: true } },
+  ]);
+  let fixedTo = null, shiftAsked = 0;
+  const iss = issues({ doc: d, nodes: d.graph.nodes, isUnit: isStratigraphicType, t: tt,
+    fixers: { setUrl: { label: "fix", run: (a, b) => { fixedTo = [a, b]; } }, readShift: { label: "SHIFT", run: () => shiftAsked++ } } });
+  const by = (r) => iss.filter((i) => i.rule === r);
+  eq(by("address").filter((i) => i.txt.startsWith("issues.sameFile")).map((i) => i.node).sort(), ["d02", "d32"],
+     "B8 · D.32 and D.02 point to the same file: both rows");
+  const ds = by("address").filter((i) => i.txt.startsWith("issues.doubleSlash"));
+  eq(ds.map((i) => i.node), ["d33"], "B8 · the double slash is said once, on the document");
+  ds[0].fix.run();
+  eq(fixedTo, ["//DosCo/D.33.jpg", "/DosCo/D.33.jpg"], "B8 · its fix corrects that address");
+  const g = by("georef");
+  ok(g.length === 1 && g[0].sev === "warn" && g[0].fix?.label === "SHIFT", "B8 · not georeferenced (WGS84 at 0,0): a warning with «Read a SHIFT.txt…»");
+  g[0].fix.run();
+  eq(shiftAsked, 1, "B8 · …which asks for the file");
+  eq(by("missing").map((i) => i.node), ["pano"], "B8 · a resource declared missing");
+  const SP = process.env.DEV29_SP_PRIMA;   // optional: San Pietro before the 2 Oct correction (a copy in /tmp)
+  if (SP) {
+    const sp = JSON.parse(readFileSync(SP, "utf8"));
+    const r = issues({ doc: sp, nodes: sp.graph.nodes, isUnit: isStratigraphicType, t: tt });
+    const names = (rule, prefix) => r.filter((i) => i.rule === rule && i.txt.startsWith(prefix)).map((i) => sp.graph.nodes.find((n) => n.id === i.node)?.name).sort();
+    console.log("  San Pietro (prima):", JSON.stringify({ same: names("address", "issues.sameFile"), dbl: names("address", "issues.doubleSlash"), geo: r.filter((i) => i.rule === "georef").map((i) => i.sev) }));
+    eq([names("address", "issues.sameFile"), names("address", "issues.doubleSlash"), r.filter((i) => i.rule === "georef").length],
+       [["D.02", "D.32"], ["D.33"], 1], "B8 · San Pietro before the correction: D.32/D.02, D.33, not georeferenced");
+  }
 }
 
 // ── B9a · the default name of a phase is in the interface language ─────────

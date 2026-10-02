@@ -64,6 +64,10 @@ export interface IssueFixers {
   addProperty?: { label: string; run: (unitId: string) => void };
   /** the label of a relation (its datamodel name, in the interface language) */
   edgeLabel?: (edgeType: string) => string;
+  /** DEV29 B8 · an address corrected: every node that carries `from` gets `to` */
+  setUrl?: { label: string; run: (from: string, to: string) => void };
+  /** DEV29 B8 · «Read a SHIFT.txt…»: declares the graph's CRS and shift */
+  readShift?: { label: string; run: () => void };
 }
 
 export interface IssueSources {
@@ -272,6 +276,16 @@ export function issues(src: IssueSources): Issue[] {
                                      run: () => fx.itsMe!.run(n.id) } } : {}) });
   }
 
+  // ── DEV29 B8 · the addresses, the georeference, what is declared missing ──
+  for (const i of addressIssues(nodes, t, fx.setUrl)) push(i);
+  const geo = georeferenceIssue(nodes, t, fx.readShift);
+  if (geo) push(geo);
+  for (const n of nodes) {
+    const d = (n.data ?? {}) as Record<string, unknown>;
+    if (d.missing === true || d.missing === "true")
+      push({ node: n.id, sev: "warn", rule: "missing", txt: t("issues.missing", { n: name(n.id) }) });
+  }
+
   // ── CATENA · reading from a unit: a hint when the unit lacks the property ──
   for (const h of src.sourceHints ?? [])
     push({ node: h.extractor, sev: "info", rule: "paradata",
@@ -322,6 +336,96 @@ export function issues(src: IssueSources): Issue[] {
     });
   }
   return out;
+}
+
+/** The address a node carries (`data.url`, or a top-level `url`), trimmed. */
+function urlOf(n: EmNode): string {
+  const d = (n.data ?? {}) as Record<string, unknown>;
+  return String(d.url ?? (n as unknown as Record<string, unknown>).url ?? "").trim();
+}
+
+/** A path with `//` where one `/` was meant: at the start (`//DosCo/D.33.jpg`,
+ *  measured on San Pietro) or inside the path — never the `//` of a scheme
+ *  (`https://`, `file://`). Returns the corrected address, or null. */
+export function doubleSlashFix(url: string): string | null {
+  if (!url.includes("//")) return null;
+  const m = /^([a-z][a-z0-9+.-]*:\/\/[^/]*)?(.*)$/i.exec(url);
+  const head = m?.[1] ?? "";
+  const rest = m?.[2] ?? url;
+  if (!rest.includes("//")) return null;
+  return head + rest.replace(/\/{2,}/g, "/");
+}
+
+/**
+ * DEV29 B8 · two rules about addresses, both measured on the San Pietro GraphML
+ * (1 Oct): D.32 pointed to `/DosCo/D.02.jpg` — the file of D.02 — and D.33 to
+ * `//DosCo/D.33.jpg`. Documents only for «the same file»: the `_link` resource
+ * the GraphML importer writes beside every document carries the same address by
+ * construction. The double slash is said once per address, on the document when
+ * there is one, and its fix corrects every node that carries it.
+ */
+export function addressIssues(nodes: EmNode[], t: IssueSources["t"],
+                              setUrl?: IssueFixers["setUrl"]): Omit<Issue, "id">[] {
+  const out: Omit<Issue, "id">[] = [];
+  const nm = (n: EmNode): string => String(n.name || n.id);
+  const byUrl = new Map<string, EmNode[]>();
+  for (const n of nodes) {
+    if (n.node_type !== "document") continue;
+    const u = urlOf(n);
+    if (!u) continue;
+    const k = (doubleSlashFix(u) ?? u).toLowerCase();
+    (byUrl.get(k) ?? byUrl.set(k, []).get(k)!).push(n);
+  }
+  for (const [, docs] of byUrl) {
+    if (docs.length < 2) continue;
+    for (const d of docs) {
+      const others = docs.filter((x) => x !== d).map(nm).join(", ");
+      out.push({ node: d.id, sev: "warn", rule: "address",
+                 txt: t("issues.sameFile", { n: nm(d), o: others, u: urlOf(d) }) });
+    }
+  }
+  const said = new Set<string>();
+  const ordered = [...nodes.filter((n) => n.node_type === "document"), ...nodes.filter((n) => n.node_type !== "document")];
+  for (const n of ordered) {
+    const u = urlOf(n);
+    const fixed = u ? doubleSlashFix(u) : null;
+    if (!fixed || said.has(u)) continue;
+    said.add(u);
+    out.push({ node: n.id, sev: "warn", rule: "address",
+               txt: t("issues.doubleSlash", { n: nm(n), u, f: fixed }),
+               ...(setUrl ? { fix: { kind: "button" as const, label: t("issues.doubleSlashFix", { f: fixed }),
+                                     run: () => setUrl.run(u, fixed) } } : {}) });
+  }
+  return out;
+}
+
+/** The georeference the graph declares, read off its GeoPositionNode as
+ *  s3Dgraphy's `api.georeference_state` reads it (dev29 A6): `undeclared` (no
+ *  node, or no epsg), `legacy_default` (EPSG:4326 with a zero shift — what every
+ *  new graph and every imported GraphML carried, i.e. «WGS84 at 0,0»), else
+ *  `declared`. */
+export function georeferenceState(nodes: EmNode[]): "undeclared" | "declared" | "legacy_default" {
+  const g = nodes.find((n) => n.node_type === "geo_position");
+  if (!g) return "undeclared";
+  const d = (g.data ?? {}) as Record<string, unknown>;
+  const epsg = d.epsg == null || d.epsg === "" ? null : Number(String(d.epsg).replace(/^EPSG:+/i, ""));
+  if (epsg == null || !Number.isFinite(epsg)) return "undeclared";
+  const zero = ["shift_x", "shift_y", "shift_z"].every((k) => !Number(d[k] ?? 0));
+  return epsg === 4326 && zero ? "legacy_default" : "declared";
+}
+
+/** DEV29 B8 · «Grafo non georiferito», with «Read a SHIFT.txt…» as its fix.
+ *  `legacy_default` is a WARNING (it asserts WGS84 at 0,0, which is false);
+ *  `undeclared` is information (an honest absence). Nothing is rewritten. */
+export function georeferenceIssue(nodes: EmNode[], t: IssueSources["t"],
+                                  readShift?: IssueFixers["readShift"]): Omit<Issue, "id"> | null {
+  if (!nodes.some((n) => n.node_type !== "geo_position" && n.node_type !== "graph")) return null;
+  const st = georeferenceState(nodes);
+  if (st === "declared") return null;
+  const g = nodes.find((n) => n.node_type === "geo_position");
+  return { node: g?.id ?? "", sev: st === "legacy_default" ? "warn" : "info", rule: "georef",
+           txt: t(st === "legacy_default" ? "issues.georefLegacy" : "issues.georefNone"),
+           ...(readShift ? { fix: { kind: "button" as const, label: readShift.label, run: readShift.run } } : {}) };
 }
 
 /**

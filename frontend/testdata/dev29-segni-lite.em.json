@@ -1,0 +1,565 @@
+{
+ "header": {
+  "format": "em.json",
+  "version": "1.0",
+  "schema_version": 2,
+  "generator": {
+   "tool": "make-dev29-fixture.mjs"
+  }
+ },
+ "graph": {
+  "graph_id": "dev29-segni-lite",
+  "name": "Segni lite (dev29)",
+  "nodes": [
+   {
+    "id": "dev29-segni-lite_graphroot",
+    "node_type": "graph",
+    "name": "Graph",
+    "data": {
+     "em_id": "SSP"
+    }
+   },
+   {
+    "id": "dev29-segni-lite_graph_paradata",
+    "node_type": "ParadataNodeGroup",
+    "name": "Graph paradata",
+    "data": {}
+   },
+   {
+    "id": "dev29-segni-lite_graph_license",
+    "node_type": "license",
+    "name": "CC-BY-ND",
+    "data": {
+     "license_type": "CC-BY-ND-4.0",
+     "url": ""
+    }
+   },
+   {
+    "id": "geo_imported_graph",
+    "node_type": "geo_position",
+    "name": "geo_position",
+    "data": {
+     "epsg": 4326,
+     "shift_x": 0,
+     "shift_y": 0,
+     "shift_z": 0,
+     "rotation": 0
+    }
+   },
+   {
+    "id": "ep1",
+    "node_type": "EpochNode",
+    "name": "Età romana",
+    "data": {
+     "start_time": -100,
+     "end_time": 300
+    }
+   },
+   {
+    "id": "us1",
+    "node_type": "US",
+    "name": "US1",
+    "data": {},
+    "description": "muro"
+   },
+   {
+    "id": "us2",
+    "node_type": "US",
+    "name": "US2",
+    "data": {},
+    "description": "crollo"
+   },
+   {
+    "id": "d02",
+    "node_type": "document",
+    "name": "D.02",
+    "data": {
+     "url": "/DosCo/D.02.jpg"
+    },
+    "description": "incisione di Dodwell"
+   },
+   {
+    "id": "d32",
+    "node_type": "document",
+    "name": "D.32",
+    "data": {
+     "url": "/DosCo/D.02.jpg"
+    }
+   },
+   {
+    "id": "d33",
+    "node_type": "document",
+    "name": "D.33",
+    "data": {
+     "url": "//DosCo/D.33.jpg"
+    }
+   },
+   {
+    "id": "d33_link",
+    "node_type": "resource",
+    "name": "Link to D.33",
+    "data": {
+     "url": "//DosCo/D.33.jpg",
+     "url_type": "External link"
+    }
+   },
+   {
+    "id": "c1eef313-29e1-5361-ad19-ca01930832e7",
+    "node_type": "dtc_acquisition",
+    "name": "Acquisition",
+    "data": {
+     "dtc_kind": "download",
+     "created_at": "2026-09-29T19:24:39Z"
+    }
+   },
+   {
+    "id": "acq-drone",
+    "node_type": "dtc_acquisition",
+    "name": "Volo drone San Pietro (FC300X)",
+    "data": {
+     "dtc_kind": "photo",
+     "device": "DJI FC300X",
+     "date": "2018-02-17",
+     "member_count": 8
+    }
+   },
+   {
+    "id": "res:dji0",
+    "node_type": "resource",
+    "name": "DJI_0166.JPG",
+    "data": {
+     "packaging": "file",
+     "tier": "master",
+     "media_type": "image/jpeg",
+     "checksum": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+    }
+   },
+   {
+    "id": "res:dji1",
+    "node_type": "resource",
+    "name": "DJI_0167.JPG",
+    "data": {
+     "packaging": "file",
+     "tier": "master",
+     "media_type": "image/jpeg",
+     "checksum": "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+    }
+   },
+   {
+    "id": "res:dji2",
+    "node_type": "resource",
+    "name": "DJI_0168.JPG",
+    "data": {
+     "packaging": "file",
+     "tier": "master",
+     "media_type": "image/jpeg",
+     "checksum": "sha256:2222222222222222222222222222222222222222222222222222222222222222"
+    }
+   },
+   {
+    "id": "res:dji3",
+    "node_type": "resource",
+    "name": "DJI_0169.JPG",
+    "data": {
+     "packaging": "file",
+     "tier": "master",
+     "media_type": "image/jpeg",
+     "checksum": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+    }
+   },
+   {
+    "id": "res:dji4",
+    "node_type": "resource",
+    "name": "DJI_0170.JPG",
+    "data": {
+     "packaging": "file",
+     "tier": "master",
+     "media_type": "image/jpeg",
+     "checksum": "sha256:4444444444444444444444444444444444444444444444444444444444444444"
+    }
+   },
+   {
+    "id": "res:dji5",
+    "node_type": "resource",
+    "name": "DJI_0171.JPG",
+    "data": {
+     "packaging": "file",
+     "tier": "master",
+     "media_type": "image/jpeg",
+     "checksum": "sha256:5555555555555555555555555555555555555555555555555555555555555555"
+    }
+   },
+   {
+    "id": "res:dji6",
+    "node_type": "resource",
+    "name": "DJI_0172.JPG",
+    "data": {
+     "packaging": "file",
+     "tier": "master",
+     "media_type": "image/jpeg",
+     "checksum": "sha256:6666666666666666666666666666666666666666666666666666666666666666"
+    }
+   },
+   {
+    "id": "res:dji7",
+    "node_type": "resource",
+    "name": "DJI_0173.JPG",
+    "data": {
+     "packaging": "file",
+     "tier": "master",
+     "media_type": "image/jpeg",
+     "checksum": "sha256:7777777777777777777777777777777777777777777777777777777777777777"
+    }
+   },
+   {
+    "id": "acq-canon",
+    "node_type": "dtc_acquisition",
+    "name": "Canon 6D 24mm, 17 maggio 2021",
+    "data": {
+     "dtc_kind": "photo",
+     "member_count": 1
+    }
+   },
+   {
+    "id": "res:canon",
+    "node_type": "resource",
+    "name": "Canon 6D 24mm (204 foto)",
+    "data": {
+     "packaging": "directory"
+    }
+   },
+   {
+    "id": "acq-pano",
+    "node_type": "dtc_acquisition",
+    "name": "Panorami Insta360 Pro2",
+    "data": {
+     "dtc_kind": "photo"
+    }
+   },
+   {
+    "id": "res:pano",
+    "node_type": "resource",
+    "name": "Segni_Acropoli_pano8k.rar (assente)",
+    "data": {
+     "packaging": "archive",
+     "missing": true
+    }
+   },
+   {
+    "id": "proc-align",
+    "node_type": "dtc_process",
+    "name": "derivation of Soluzione fotogrammetrica (Metashape xml)",
+    "data": {
+     "dtc_kind": "photogrammetry",
+     "technique": "allineamento",
+     "software": [
+      {
+       "name": "Agisoft Metashape",
+       "version": "1.8.1"
+      }
+     ]
+    }
+   },
+   {
+    "id": "res:xml",
+    "node_type": "resource",
+    "name": "Soluzione fotogrammetrica (Metashape xml)",
+    "data": {
+     "packaging": "file"
+    }
+   },
+   {
+    "id": "proc-lod0",
+    "node_type": "dtc_process",
+    "name": "derivation of San Pietro LOD0 (Zenodo, 12 texture)",
+    "data": {
+     "dtc_kind": "transformation",
+     "technique": "export: OBJ 12 materiali",
+     "software": [
+      {
+       "name": "Blender",
+       "version": "3.4.0"
+      }
+     ]
+    }
+   },
+   {
+    "id": "res:lod0",
+    "node_type": "resource",
+    "name": "San Pietro LOD0 (Zenodo, 12 texture)",
+    "data": {
+     "url_type": "3d_model",
+     "tier": "distribution",
+     "packaging": "file_set",
+     "members_digest": "sha256:621651165913f4815be600cd3871d2c77618c0f1521c721b634ce73d8e220f02",
+     "checksum": "sha256:621651165913f4815be600cd3871d2c77618c0f1521c721b634ce73d8e220f02"
+    }
+   },
+   {
+    "id": "file:lod0-obj",
+    "node_type": "resource_file",
+    "name": "OB_SPietro_Temp_LOD0.obj",
+    "data": {
+     "url": "OB_SPietro_Temp_LOD0.obj",
+     "checksum": "sha256:obj0000000000000000000000000000000000000000000000000000000000000",
+     "size_bytes": 100
+    }
+   },
+   {
+    "id": "file:lod0-mtl",
+    "node_type": "resource_file",
+    "name": "OB_SPietro_Temp_LOD0.mtl",
+    "data": {
+     "url": "OB_SPietro_Temp_LOD0.mtl",
+     "checksum": "sha256:mtl0000000000000000000000000000000000000000000000000000000000000",
+     "size_bytes": 100
+    }
+   },
+   {
+    "id": "file:lod0-tex",
+    "node_type": "resource_file",
+    "name": "SPietro_Temp.jpg",
+    "data": {
+     "url": "textures/SPietro_Temp.jpg",
+     "checksum": "sha256:tex0000000000000000000000000000000000000000000000000000000000000",
+     "size_bytes": 100
+    }
+   },
+   {
+    "id": "proc-lod2",
+    "node_type": "dtc_process",
+    "name": "derivation of San Pietro LOD2",
+    "data": {
+     "dtc_kind": "transformation",
+     "technique": "export: OBJ decimato"
+    }
+   },
+   {
+    "id": "res:lod2",
+    "node_type": "resource",
+    "name": "San Pietro LOD2",
+    "data": {
+     "packaging": "file"
+    }
+   }
+  ],
+  "edges": [
+   {
+    "id": "dev29-segni-lite_graphroot__has_paradata_nodegroup__dev29-segni-lite_graph_paradata",
+    "edge_type": "has_paradata_nodegroup",
+    "source": "dev29-segni-lite_graphroot",
+    "target": "dev29-segni-lite_graph_paradata"
+   },
+   {
+    "id": "dev29-segni-lite_graph_license__is_in_paradata_nodegroup__dev29-segni-lite_graph_paradata",
+    "edge_type": "is_in_paradata_nodegroup",
+    "source": "dev29-segni-lite_graph_license",
+    "target": "dev29-segni-lite_graph_paradata"
+   },
+   {
+    "id": "us1__has_first_epoch__ep1",
+    "edge_type": "has_first_epoch",
+    "source": "us1",
+    "target": "ep1"
+   },
+   {
+    "id": "us2__has_first_epoch__ep1",
+    "edge_type": "has_first_epoch",
+    "source": "us2",
+    "target": "ep1"
+   },
+   {
+    "id": "us2__is_after__us1",
+    "edge_type": "is_after",
+    "source": "us2",
+    "target": "us1"
+   },
+   {
+    "id": "c1eef313-29e1-5361-ad19-ca01930832e7__dtc_had_output__res:dji0",
+    "edge_type": "dtc_had_output",
+    "source": "c1eef313-29e1-5361-ad19-ca01930832e7",
+    "target": "res:dji0"
+   },
+   {
+    "id": "acq-drone__dtc_had_output__res:dji0",
+    "edge_type": "dtc_had_output",
+    "source": "acq-drone",
+    "target": "res:dji0"
+   },
+   {
+    "id": "c1eef313-29e1-5361-ad19-ca01930832e7__dtc_had_output__res:dji1",
+    "edge_type": "dtc_had_output",
+    "source": "c1eef313-29e1-5361-ad19-ca01930832e7",
+    "target": "res:dji1"
+   },
+   {
+    "id": "acq-drone__dtc_had_output__res:dji1",
+    "edge_type": "dtc_had_output",
+    "source": "acq-drone",
+    "target": "res:dji1"
+   },
+   {
+    "id": "c1eef313-29e1-5361-ad19-ca01930832e7__dtc_had_output__res:dji2",
+    "edge_type": "dtc_had_output",
+    "source": "c1eef313-29e1-5361-ad19-ca01930832e7",
+    "target": "res:dji2"
+   },
+   {
+    "id": "acq-drone__dtc_had_output__res:dji2",
+    "edge_type": "dtc_had_output",
+    "source": "acq-drone",
+    "target": "res:dji2"
+   },
+   {
+    "id": "c1eef313-29e1-5361-ad19-ca01930832e7__dtc_had_output__res:dji3",
+    "edge_type": "dtc_had_output",
+    "source": "c1eef313-29e1-5361-ad19-ca01930832e7",
+    "target": "res:dji3"
+   },
+   {
+    "id": "acq-drone__dtc_had_output__res:dji3",
+    "edge_type": "dtc_had_output",
+    "source": "acq-drone",
+    "target": "res:dji3"
+   },
+   {
+    "id": "c1eef313-29e1-5361-ad19-ca01930832e7__dtc_had_output__res:dji4",
+    "edge_type": "dtc_had_output",
+    "source": "c1eef313-29e1-5361-ad19-ca01930832e7",
+    "target": "res:dji4"
+   },
+   {
+    "id": "acq-drone__dtc_had_output__res:dji4",
+    "edge_type": "dtc_had_output",
+    "source": "acq-drone",
+    "target": "res:dji4"
+   },
+   {
+    "id": "c1eef313-29e1-5361-ad19-ca01930832e7__dtc_had_output__res:dji5",
+    "edge_type": "dtc_had_output",
+    "source": "c1eef313-29e1-5361-ad19-ca01930832e7",
+    "target": "res:dji5"
+   },
+   {
+    "id": "acq-drone__dtc_had_output__res:dji5",
+    "edge_type": "dtc_had_output",
+    "source": "acq-drone",
+    "target": "res:dji5"
+   },
+   {
+    "id": "c1eef313-29e1-5361-ad19-ca01930832e7__dtc_had_output__res:dji6",
+    "edge_type": "dtc_had_output",
+    "source": "c1eef313-29e1-5361-ad19-ca01930832e7",
+    "target": "res:dji6"
+   },
+   {
+    "id": "acq-drone__dtc_had_output__res:dji6",
+    "edge_type": "dtc_had_output",
+    "source": "acq-drone",
+    "target": "res:dji6"
+   },
+   {
+    "id": "c1eef313-29e1-5361-ad19-ca01930832e7__dtc_had_output__res:dji7",
+    "edge_type": "dtc_had_output",
+    "source": "c1eef313-29e1-5361-ad19-ca01930832e7",
+    "target": "res:dji7"
+   },
+   {
+    "id": "acq-drone__dtc_had_output__res:dji7",
+    "edge_type": "dtc_had_output",
+    "source": "acq-drone",
+    "target": "res:dji7"
+   },
+   {
+    "id": "acq-canon__dtc_had_output__res:canon",
+    "edge_type": "dtc_had_output",
+    "source": "acq-canon",
+    "target": "res:canon"
+   },
+   {
+    "id": "acq-pano__dtc_had_output__res:pano",
+    "edge_type": "dtc_had_output",
+    "source": "acq-pano",
+    "target": "res:pano"
+   },
+   {
+    "id": "proc-align__dtc_had_input__acq-drone",
+    "edge_type": "dtc_had_input",
+    "source": "proc-align",
+    "target": "acq-drone"
+   },
+   {
+    "id": "proc-align__dtc_had_input__acq-canon",
+    "edge_type": "dtc_had_input",
+    "source": "proc-align",
+    "target": "acq-canon"
+   },
+   {
+    "id": "proc-align__dtc_had_output__res:xml",
+    "edge_type": "dtc_had_output",
+    "source": "proc-align",
+    "target": "res:xml"
+   },
+   {
+    "id": "proc-lod0__dtc_had_input__res:xml",
+    "edge_type": "dtc_had_input",
+    "source": "proc-lod0",
+    "target": "res:xml"
+   },
+   {
+    "id": "proc-lod0__dtc_had_output__res:lod0",
+    "edge_type": "dtc_had_output",
+    "source": "proc-lod0",
+    "target": "res:lod0"
+   },
+   {
+    "id": "res:lod0__has_file__file:lod0-obj",
+    "edge_type": "has_file",
+    "source": "res:lod0",
+    "target": "file:lod0-obj",
+    "attributes": {
+     "role": "entry_point",
+     "path": "OB_SPietro_Temp_LOD0.obj"
+    }
+   },
+   {
+    "id": "res:lod0__has_file__file:lod0-mtl",
+    "edge_type": "has_file",
+    "source": "res:lod0",
+    "target": "file:lod0-mtl",
+    "attributes": {
+     "role": "member",
+     "path": "OB_SPietro_Temp_LOD0.mtl"
+    }
+   },
+   {
+    "id": "res:lod0__has_file__file:lod0-tex",
+    "edge_type": "has_file",
+    "source": "res:lod0",
+    "target": "file:lod0-tex",
+    "attributes": {
+     "role": "member",
+     "path": "textures/SPietro_Temp.jpg"
+    }
+   },
+   {
+    "id": "proc-lod2__dtc_had_input__res:xml",
+    "edge_type": "dtc_had_input",
+    "source": "proc-lod2",
+    "target": "res:xml"
+   },
+   {
+    "id": "proc-lod2__dtc_had_output__res:lod2",
+    "edge_type": "dtc_had_output",
+    "source": "proc-lod2",
+    "target": "res:lod2"
+   },
+   {
+    "id": "us1__has_linked_resource__res:lod0",
+    "edge_type": "has_linked_resource",
+    "source": "us1",
+    "target": "res:lod0"
+   }
+  ]
+ }
+}

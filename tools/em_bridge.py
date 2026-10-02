@@ -78,6 +78,8 @@ Endpoints:
     POST /resolve-resource ← {doc, resource_id} → {location: {kind,value,exists}}
                              (Resource layer — s3Dgraphy resources; R0/R1/R5;
                              501 if the active s3dgraphy predates it)
+    POST /read-shift       ← {text}  → {epsg, shift_x, shift_y, shift_z}
+                             (dev29 · s3Dgraphy api.read_shift on a SHIFT.txt)
     POST /reproject        ← {x, y, epsg_source, epsg_target?}  → {lon, lat}
                            ← {points: [[x,y], …], epsg_source, …} → {points: […]}
                              (G1 — EPSG → WGS84 via s3Dgraphy api.reproject, i.e.
@@ -914,6 +916,13 @@ def make_handler(api):
                     self._fail(400, f"invalid JSON body: {exc}")
                     return
                 self._reproject(body)
+            elif route == "/read-shift":
+                try:
+                    body = json.loads(raw.decode("utf-8")) if raw else {}
+                except Exception as exc:
+                    self._fail(400, f"invalid JSON body: {exc}")
+                    return
+                self._read_shift(body)
             elif route == "/georeference-scene":
                 try:
                     body = json.loads(raw.decode("utf-8")) if raw else {}
@@ -3459,6 +3468,25 @@ def make_handler(api):
         # Two shapes, one op: a single point, or a batch (a footprint is four
         # corners plus a centroid, and one transformer serves them all). 501 when
         # the [geo] extra is absent, which the map turns into an honest refusal.
+        # DEV29 B8 · «Read a SHIFT.txt…»: the text of a SHIFT.txt
+        # (`EPSG::3004 2355500 4617500 0`) → {epsg, shift_x, shift_y, shift_z},
+        # read by s3Dgraphy's api.read_shift (dev29 A6) — the format has one
+        # reader, and it is not in TypeScript. 501 when s3dgraphy predates it.
+        def _read_shift(self, body):
+            if not hasattr(api, "read_shift"):
+                self._fail(501, "reading a SHIFT.txt needs s3dgraphy 1.6.0.dev29 (api.read_shift)")
+                return
+            text = body.get("text") if isinstance(body, dict) else None
+            if not isinstance(text, str) or not text.strip():
+                self._fail(400, "read-shift needs {text: <the SHIFT.txt content>}")
+                return
+            try:
+                out = api.read_shift(text)
+            except Exception as exc:  # noqa: BLE001 — the reader says why
+                self._fail(400, f"not a SHIFT.txt: {exc}")
+                return
+            self._json(out)
+
         def _reproject(self, body):
             if not hasattr(api, "reproject_many"):
                 self._fail(501, "reprojection unavailable — s3dgraphy is out of date")

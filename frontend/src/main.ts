@@ -11389,6 +11389,48 @@ function untaggedTexts(st: DocumentStore): IssueSources["untagged"] {
   };
 }
 
+/** DEV29 B8 · pick a SHIFT.txt, have s3Dgraphy read it, declare it on the
+ *  graph's GeoPositionNode (created when there is none). The file chooser is
+ *  the browser's, in the desktop too (a .txt is read, never written). */
+function readShiftInto(st: DocumentStore, file?: File): void {
+  const go = async (f: File): Promise<void> => {
+    const text = await f.text();
+    try {
+      const r = await fetch(`${await bridgeUrl()}/read-shift`, {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text }),
+      });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(String((j as { error?: string }).error ?? `HTTP ${r.status}`));
+      const { epsg, shift_x, shift_y, shift_z } = j as { epsg: number; shift_x: number; shift_y: number; shift_z: number };
+      const geo = st.liveNodes().find((n) => n.node_type === "geo_position");
+      st.batch(() => {
+        const data = { ...((geo?.data ?? {}) as Record<string, unknown>), epsg, shift_x, shift_y, shift_z };
+        if (geo) st.updateNode(geo.id, { data });
+        else st.addNode({ id: st.newId(), node_type: "geo_position", name: "geo_position", data: { rotation: 0, ...data } } as EmNode);
+      });
+      const msg = t("issues.shiftRead", { f: f.name, epsg: String(epsg), x: String(shift_x), y: String(shift_y), z: String(shift_z) });
+      logInfo(msg, []);
+      toastUndo(msg, st);
+      refreshIssues();
+      refreshInspector();
+      draw();
+    } catch (e) {
+      const msg = t("issues.shiftFailed", { f: f.name, why: e instanceof Error ? e.message : String(e) });
+      logWarn(msg);
+      toast(msg);
+    }
+  };
+  if (file) { void go(file); return; }
+  const input = document.createElement("input");
+  input.type = "file";
+  input.accept = ".txt,text/plain";
+  input.dataset.role = "read-shift";
+  input.style.display = "none";
+  input.onchange = () => { const f = input.files?.[0]; input.remove(); if (f) void go(f); };
+  document.body.appendChild(input);
+  input.click();
+}
+
 /** CAMPAGNA · the corrections of the Warnings view, one per rule, each one
  *  undo step through the store (and a line in the log that names it). */
 function issueFixers(st: DocumentStore): IssueFixers {
@@ -11396,6 +11438,27 @@ function issueFixers(st: DocumentStore): IssueFixers {
   const done = (msg: string, ids: string[]) => { logInfo(msg, ids); toastUndo(msg, st); };
   return {
     edgeLabel: (e) => edgeLabel(e),
+    // DEV29 B8 · a double slash corrected on every node that carries it
+    setUrl: {
+      label: t("issues.doubleSlashFix", { f: "" }),
+      run: (from, to) => {
+        const ids = st.liveNodes().filter((n) => {
+          const d = (n.data ?? {}) as Record<string, unknown>;
+          return String(d.url ?? "").trim() === from;
+        }).map((n) => n.id);
+        if (!ids.length) return;
+        st.batch(() => {
+          for (const id of ids) {
+            const n = st.node(id)!;
+            st.updateNode(id, { data: { ...((n.data ?? {}) as Record<string, unknown>), url: to } });
+          }
+        });
+        done(t("issues.doubleSlashFix", { f: to }), ids);
+      },
+    },
+    // DEV29 B8 · «Read a SHIFT.txt…»: s3Dgraphy reads it (bridge /read-shift),
+    // the GeoPositionNode takes the CRS and the shift, one undo step
+    readShift: { label: t("issues.readShift"), run: () => readShiftInto(st) },
     assignEpoch: (unit, epoch) => {
       st.addEdge(unit, epoch, "has_first_epoch");
       done(t("fix.epochDone", { n: nm(unit), e: nm(epoch) }), [unit, epoch]);
