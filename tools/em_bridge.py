@@ -1508,8 +1508,12 @@ def make_handler(api):
             out_ids = [o["resource_id"] for o, _f, _s in targets]
             if origin:
                 acq = act.get("acquisition") or {}
+                # DEV29 B5 · the act's name (`act.name`, the compositor's
+                # required field for N outputs) names the lot when the
+                # acquisition block does not
                 report = api.bucket_acquisition(
-                    graph, out_ids, name=acq.get("name") or None,
+                    graph, out_ids,
+                    name=acq.get("name") or str(act.get("name") or "").strip() or None,
                     dtc_kind=kind, metadata=acq.get("metadata") or None,
                     author=orcid, at=at)
                 process_id = report.get("acquisition_id")
@@ -1524,13 +1528,33 @@ def make_handler(api):
                                "opposite of «born here».")
                     return
                 process_id = str(act.get("process_id") or "").strip() or None
-                for out_id in out_ids:
+                act_name = str(act.get("name") or "").strip() or None
+                import inspect
+                if "outputs" in inspect.signature(api.declare_derivation).parameters:
+                    # DEV29 B5 · ONE act, N outputs (s3Dgraphy dev29 A2): one
+                    # call, one DTCProcessNode with N dtc_had_output, its id
+                    # derived from the act's name (graph-scoped) — so the same
+                    # act declared again lands on the same event, and the N
+                    # stamps share one how.process_id by construction
                     report = api.declare_derivation(
-                        graph, out_id, inputs, process_id=process_id,
-                        name=act.get("technique") or None, author=orcid, at=at)
-                    # …e da qui in poi TUTTE le uscite citano lo stesso processo
+                        graph, inputs=inputs, outputs=out_ids, act_name=act_name,
+                        process_id=process_id, dtc_kind=kind,
+                        technique=act.get("technique") or None,
+                        parameters=act.get("parameters") or None,
+                        software=act.get("software") or None,
+                        name=act.get("technique") or act_name, author=orcid, at=at)
                     process_id = report["process_id"]
                     warnings.extend(report.get("warnings") or [])
+                else:
+                    # an s3dgraphy before dev29: one call per output, the same
+                    # process_id imposed on every call
+                    for out_id in out_ids:
+                        report = api.declare_derivation(
+                            graph, out_id, inputs, process_id=process_id,
+                            name=act.get("technique") or None, author=orcid, at=at)
+                        # …e da qui in poi TUTTE le uscite citano lo stesso processo
+                        process_id = report["process_id"]
+                        warnings.extend(report.get("warnings") or [])
 
             # ── i campi dell'atto che `api` non sa ancora portare ────────────
             #

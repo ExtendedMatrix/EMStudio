@@ -529,6 +529,7 @@ import { hintsPathFor, readHints, recordFound, setHintsBridgeResolver } from "./
 import {
   applyHandle, chainsFor, emitDraft, fetchSets, hasFileSets, missingFields, newDraft, outputFrom, suggestedKind,
   DOOR_EXT, requiredFields, retitleStamp, roadFor, setComposeBridgeResolver,
+  doiFromName, normalizeSource, proposeActName,
   type Draft, type DraftInput,
 } from "./stamp-compose";
 import { setTreeBridgeResolver, TREE_EXT, treeOf, verifyStamp, type TreeInfo } from "./stamp-tree";
@@ -537,7 +538,7 @@ import {
   DECLARED_KINDS, landStep, parentLabel, type DeclaredKind, type DeclaredLevel,
 } from "./declared";
 import { adaptDraft } from "./views/stamps";
-import { ancestorsOf, dtcFamiliesOf, dtcKindsFor } from "./rules";
+import { ancestorsOf, dtcFamiliesOf, dtcKindFamily, dtcKindsFor } from "./rules";
 import { digestOf, isStampPath, stampPathFor } from "./stamp";
 // DTCEMS3 · il verbale d'ingestione: niente entra nello store senza che si
 // sappia chi ce l'ha messo. La forma dell'atto sta qui; il verbale lo emette
@@ -18975,6 +18976,9 @@ function stampComposeBox(win: Win, listing: FsListing): HTMLElement {
     draft.kind = select.value;
     delete draft.kindWhy;          // chosen now: no longer a proposal
     checkField(box, "kind");
+    // DEV29 B5 · the kind decides whether «from where?» is asked and what the
+    // act's name proposes: the form is drawn again (a select, not a key)
+    renderStorage();
     redrawDraftPicture();
   };
   select.onblur = () => checkField(box, "kind");
@@ -18988,6 +18992,40 @@ function stampComposeBox(win: Win, listing: FsListing): HTMLElement {
       ? t("stamp2.kindWhyLod", { n: String(draft.kindWhy.level ?? 1) })
       : t("stamp2.kindWhyPacking");
     fields.appendChild(why);
+  }
+
+  // DEV29 B5 · «from where?» of a retrieval (download, URI reference…): a DOI
+  // or a URL, written in the stamp (`how.acquisition.retrieved_from`). The
+  // family is the vocabulary's (`retrieval`), never a list written here. A
+  // folder named after a Zenodo record proposes its DOI.
+  const folderName = listing.path.split("/").filter(Boolean).pop() ?? "";
+  const retrieval = draft.origin && !!draft.kind && dtcKindFamily(draft.kind, "acquisition") === "retrieval";
+  if (retrieval) {
+    if (draft.source == null) draft.source = doiFromName(folderName) ?? "";
+    const srcInput = text("source", draft.source, t("stamp2.sourceEg"), (v) => {
+      draft.source = v;
+      const n = normalizeSource(v);
+      const line = box.querySelector<HTMLElement>('[data-err="source"]');
+      if (line) line.textContent = n && "error" in n ? t(n.error === "path" ? "stamp2.sourcePath" : "stamp2.sourceForm") : "";
+      if (!draft.campaignEdited) {
+        draft.campaign = proposeActName(draft, kindLabelOf(draft), folderName);
+        const c = box.querySelector<HTMLInputElement>('input[data-field="campaign"]');
+        if (c) c.value = draft.campaign;
+      }
+      redrawDraftPicture();
+    });
+    fields.appendChild(wrap(t("stamp2.source"), srcInput, "source", false, true));
+  }
+  // DEV29 B5 · N outputs, ONE act: its name, proposed and required — one name,
+  // one process_id for every stamp of the lot
+  if (requiredFields(draft).includes("campaign")) {
+    if (!draft.campaignEdited) draft.campaign = proposeActName(draft, kindLabelOf(draft), folderName);
+    const c = text("campaign", draft.campaign, t("stamp2.campaignEg"), (v) => {
+      draft.campaign = v;
+      draft.campaignEdited = true;
+      redrawDraftPicture();
+    });
+    fields.appendChild(wrap(t("stamp2.campaign", { n: String(draft.outputs.length) }), c, "campaign", false, true));
   }
 
   if (draft.origin) {
@@ -19105,6 +19143,15 @@ function stampComposeBox(win: Win, listing: FsListing): HTMLElement {
       box.querySelector<HTMLElement>(`[data-field="${missing[0]}"]`)?.focus();
       return;
     }
+    // DEV29 B5 · a retrieval says where from — or the person says it does not
+    if (retrieval) {
+      const n = normalizeSource(draft.source ?? "");
+      if (n && "error" in n) { box.querySelector<HTMLElement>('[data-field="source"]')?.focus(); return; }
+      if (!n && !window.confirm(t("stamp2.sourceNone"))) {
+        box.querySelector<HTMLElement>('[data-field="source"]')?.focus();
+        return;
+      }
+    }
     void doStamp(win);
   };
   const cancel = document.createElement("button");
@@ -19119,6 +19166,11 @@ function stampComposeBox(win: Win, listing: FsListing): HTMLElement {
   feet.append(stampBtn, cancel, note);
   box.appendChild(feet);
   return box;
+}
+
+/** The label of the draft's kind, in the axis of its road (the datamodel's). */
+function kindLabelOf(draft: Draft): string {
+  return dtcKindsFor(draft.origin ? "acquisition" : "process").find((k) => k.kind === draft.kind)?.label ?? "";
 }
 
 /** AUDIT N3 · the check of ONE field, written next to it */

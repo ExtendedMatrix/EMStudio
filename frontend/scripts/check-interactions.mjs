@@ -2726,6 +2726,42 @@ test("V9b.open", "aprire un em.json sopra un grafo con modifiche non salvate CHI
     detail: { dialogs, afterCancel, afterOk, errors } };
 });
 
+test("V5.oneact", "«un atto per N file»: il nome dell'atto è proposto («Download 10.5281/zenodo.1234567») e chiesto, il Download chiede da dove, e gli N timbri hanno UN process_id e la provenienza", async () => {
+  const root = FS_ROOT ?? (await rootPath());
+  const dir = `${root}/zenodo-1234567`;
+  mkdirSync(dir, { recursive: true });
+  for (const f of ["a.xlsx", "b.txt", "c.ply"]) {
+    writeFileSync(`${dir}/${f}`, `dev29 ${f}\n`);
+    try { execFileSync("rm", ["-f", `${dir}/${f}.stamp.json`]); } catch { /* none */ }
+  }
+  const { p, ctx, errors } = await open({ doc: "catena", locale: "en" });
+  await workspace(p, "assets");
+  await storageInto(p, [root.split("/").pop(), "zenodo-1234567"]);
+  await p.click("button[data-action=compose-folder]");
+  await p.waitForSelector(".stamp-compose", { timeout: 30000 });
+  const before = await p.evaluate(() => [...document.querySelectorAll(".stamp-compose [data-field]")].map((x) => x.dataset.field));
+  await p.selectOption('.stamp-compose select[data-field="kind"]', "download");
+  await p.waitForTimeout(500);
+  const src = await p.inputValue('.stamp-compose input[data-field="source"]').catch(() => null);
+  const name = await p.inputValue('.stamp-compose input[data-field="campaign"]').catch(() => null);
+  await p.fill('.stamp-compose input[data-field="operator"]', "0000-0002-5065-7970");
+  await p.click('.stamp-compose button[data-field="today"]');
+  await p.screenshot({ path: SHOT("v5-un-atto-da-dove") }).catch(() => {});
+  await p.click('.stamp-compose button[data-action="stamp"]');
+  await p.waitForTimeout(3000);
+  if (await p.locator(".seal-veil").count()) await p.keyboard.press("Escape");
+  const stamps = ["a.xlsx", "b.txt", "c.ply"].map((f) => existsSync(`${dir}/${f}.stamp.json`)
+    ? JSON.parse(readFileSync(`${dir}/${f}.stamp.json`, "utf8")) : null);
+  const pids = [...new Set(stamps.map((x) => x?.how?.process_id))];
+  const from = [...new Set(stamps.map((x) => x?.how?.acquisition?.retrieved_from))];
+  await ctx.close();
+  return { pass: before.includes("campaign") && src === "10.5281/zenodo.1234567" && name === "Download 10.5281/zenodo.1234567"
+      && stamps.every(Boolean) && pids.length === 1 && !!pids[0]
+      && from.length === 1 && from[0] === "https://doi.org/10.5281/zenodo.1234567"
+      && stamps.every((x) => Array.isArray(x.from) && x.from.length === 0) && !errors.length,
+    detail: { before, src, name, pids, from, errors } };
+});
+
 // ── run ─────────────────────────────────────────────────────────────────────
 const chosen = cases.filter((c) => !only.length || only.includes(c.id) || only.some((o) => c.id.startsWith(o + ".")));
 for (const c of chosen) {

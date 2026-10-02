@@ -303,10 +303,13 @@ export function adaptDraft(draft: {
   const label = draft.origin
     ? (draft.campaign.trim() || draft.kind || "origin")
     : (draft.technique.trim() || draft.kind || "step");
+  // DEV29 B5 · an ORIGIN's act is an acquisition — where material enters the
+  // study — and is drawn in the acquisitions' lane, not as «Processes · 1»
+  // above its files; with no kind chosen yet it says nothing of its kind
   nodes.push({
-    id: stepId, node_type: "dtc_process", name: label,
+    id: stepId, node_type: draft.origin ? "dtc_acquisition" : "dtc_process", name: label,
     data: {
-      dtc_kind: draft.kind || "transformation",
+      dtc_kind: draft.kind || (draft.origin ? undefined : "transformation"),
       draft: true,
       technique: draft.technique || undefined,
       created_at: draft.at || undefined,

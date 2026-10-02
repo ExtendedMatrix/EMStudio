@@ -32,6 +32,9 @@ const bundle = await esbuild.build({
       export { ancestorsOf, isStratigraphicType } from "./rules";
       export { DocumentStore } from "./model";
       export { setLocale, t } from "./i18n";
+      export * as compose from "./stamp-compose";
+      export { adaptDraft } from "./views/stamps";
+      export { dtcKindFamily } from "./rules";
     `,
     resolveDir: SRC, loader: "ts",
   },
@@ -46,7 +49,7 @@ const bundle = await esbuild.build({
   }],
 });
 const M = await import("data:text/javascript;base64," + Buffer.from(bundle.outputFiles[0].text).toString("base64"));
-const { doubleSlashFix, georeferenceState, issues, ancestorsOf, isStratigraphicType, DocumentStore, setLocale, t } = M;
+const { compose, adaptDraft, dtcKindFamily, doubleSlashFix, georeferenceState, issues, ancestorsOf, isStratigraphicType, DocumentStore, setLocale, t } = M;
 const tt = (k, v) => `${k}${v ? JSON.stringify(v) : ""}`;
 const doc = (nodes, edges = []) => ({ header: {}, graph: { id: "g", nodes, edges } });
 
@@ -106,6 +109,42 @@ const doc = (nodes, edges = []) => ({ header: {}, graph: { id: "g", nodes, edges
     eq([names("address", "issues.sameFile"), names("address", "issues.doubleSlash"), r.filter((i) => i.rule === "georef").length],
        [["D.02", "D.32"], ["D.33"], 1], "B8 · San Pietro before the correction: D.32/D.02, D.33, not georeferenced");
   }
+}
+
+// ── B5 · the compositor: one act is one act ────────────────────────────────
+{
+  const C = compose;
+  const outs = (n) => Array.from({ length: n }, (_, i) => ({ path: `/z/f${i}`, name: `f${i}`, size: 1, mtime: 0 }));
+  const d1 = C.newDraft(outs(1)); d1.origin = true;
+  const d11 = C.newDraft(outs(11)); d11.origin = true;
+  ok(!C.requiredFields(d1).includes("campaign"), "B5 · one file needs no act's name");
+  ok(C.requiredFields(d11).includes("campaign"), "B5 · eleven files, one act: its name is required");
+  d11.kind = "download"; d11.at = "2026-10-02"; d11.operator = { id: "https://orcid.org/0000-0002-5065-7970", label: "" };
+  eq(C.readyToStamp(d11), "campaign", "B5 · …and «Stamp» stops on it");
+  const der = C.newDraft(outs(3));
+  ok(C.requiredFields(der).includes("campaign"), "B5 · a derivation with N outputs too (one process, N dtc_had_output)");
+  eq(C.normalizeSource("10.5281/zenodo.7463211"), { uri: "https://doi.org/10.5281/zenodo.7463211" }, "B5 · a DOI → its resolver");
+  eq(C.normalizeSource("doi:10.5281/zenodo.7463211"), { uri: "https://doi.org/10.5281/zenodo.7463211" }, "B5 · doi: form");
+  eq(C.normalizeSource("https://zenodo.org/records/7463211"), { uri: "https://zenodo.org/records/7463211" }, "B5 · a URL stays");
+  eq(C.normalizeSource("/Users/ed/Downloads/x"), { error: "path" }, "B5 · a path is refused (a stamp never carries one)");
+  eq(C.normalizeSource("boh"), { error: "form" }, "B5 · neither DOI nor URL");
+  eq(C.normalizeSource("  "), null, "B5 · empty is nothing");
+  eq(C.doiFromName("zenodo-7463211"), "10.5281/zenodo.7463211", "B5 · a folder named after a Zenodo record proposes its DOI");
+  eq(C.doiFromName("10.5281_zenodo.7463211_RA.xlsx"), "10.5281/zenodo.7463211", "B5 · …a file name too");
+  eq(C.doiFromName("DosCo"), null, "B5 · …and nothing else does");
+  d11.source = "10.5281/zenodo.7463211";
+  eq(C.proposeActName(d11, "Download", "zenodo-7463211"), "Download 10.5281/zenodo.7463211", "B5 · the proposed name: «Download 10.5281/zenodo.7463211»");
+  d11.source = "";
+  eq(C.proposeActName(d11, "Download", "zenodo-7463211"), "Download · zenodo-7463211", "B5 · without a source: kind · folder");
+  eq(C.proposeActName(d1, "Download", "x"), "", "B5 · one file: nothing proposed");
+  d11.source = "https://doi.org/10.5281/zenodo.7463211";
+  eq(C.actMetadata(d11), { retrieved_from: "https://doi.org/10.5281/zenodo.7463211" }, "B5 · the source travels as how.acquisition.retrieved_from");
+  eq(dtcKindFamily("download", "acquisition"), "retrieval", "B5 · «from where?» is asked by the family the vocabulary gives (retrieval)");
+  eq(dtcKindFamily("photo", "acquisition"), "capture", "B5 · …not for a capture");
+  const pic = adaptDraft({ outputs: outs(2), inputs: [], origin: true, kind: "download", technique: "", at: "", operator: { id: "", label: "" }, campaign: "Download 10.5281/zenodo.7463211" });
+  const step = pic.nodes.find((n) => n.id === "draft:step");
+  eq([step.node_type, step.name], ["dtc_acquisition", "Download 10.5281/zenodo.7463211"], "B5 · the preview of an origin draws an acquisition with the act's name");
+  ok(!pic.edges.some((e) => e.edge_type === "dtc_had_input"), "B5 · …and no input lane");
 }
 
 // ── B9a · the default name of a phase is in the interface language ─────────

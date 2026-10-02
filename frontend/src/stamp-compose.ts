@@ -84,8 +84,17 @@ export interface Draft {
   origin: boolean;
   /** A2 · la dichiarazione esplicita, che è il gesto in più */
   originDeclared: boolean;
-  /** il nome della campagna: senza, un'origine è un'asserzione nuda */
+  /** il nome della campagna: senza, un'origine è un'asserzione nuda.
+   *  DEV29 B5 · with more than one output it is the ACT's name, required for
+   *  either road: one name = one act = one process_id, the same id for all N
+   *  stamps (s3Dgraphy derives it from the name, graph-scoped) */
   campaign: string;
+  /** DEV29 B5 · the person wrote the act's name (a proposal follows the kind
+   *  and the source only until somebody types) */
+  campaignEdited?: boolean;
+  /** DEV29 B5 · «from where?» of a retrieval (a download): a DOI or a URL,
+   *  written in the stamp as `how.acquisition.retrieved_from` */
+  source?: string;
   /** i fatti rappresentativi del lotto — macchina, obiettivo, cartella —
    *  che appartengono all'EVENTO e non si ripetono su quattrocento file */
   campaignMetadata: Record<string, string>;
@@ -215,12 +224,56 @@ export const parentCount = (draft: Draft): number =>
  * The required fields, per road, in the order the form shows them — the first
  * missing one is where «Timbra» puts the focus.
  */
-export type StampField = "kind" | "inputs" | "software" | "operator" | "at";
+export type StampField = "kind" | "inputs" | "software" | "operator" | "at" | "campaign" | "source";
 
 export function requiredFields(draft: Draft): StampField[] {
-  return draft.origin
+  const base: StampField[] = draft.origin
     ? ["kind", "operator", "at"]
     : ["kind", "inputs", "software", "operator", "at"];
+  // DEV29 B5 · N outputs, one act: the act has a name, or it is not one act
+  // (measured on 1 Oct: «One act for the 11 unstamped files» wrote 11 stamps
+  // with 11 process_ids; the drone lot of 29 Sep, named, had one)
+  // (a declared chain that says {name}/{base} is one act PER output: no name
+  // for the lot, each act is its own — `emitDraft`)
+  return draft.outputs.length > 1 && !chainIsTemplate(draft.declared)
+    ? [...base.slice(0, 1), "campaign", ...base.slice(1)] : base;
+}
+
+/** DEV29 B5 · a DOI or a URL as the stamp writes it: a DOI (`10.5281/…`,
+ *  `doi:10.5281/…`, `https://doi.org/10.5281/…`) becomes its resolver URL, a
+ *  http(s) URL stays itself. A path is refused: a stamp never carries one (the
+ *  format's rule — a local address is private and useless to anybody else). */
+export function normalizeSource(raw: string): { uri: string } | { error: "path" | "form" } | null {
+  const v = raw.trim();
+  if (!v) return null;
+  const doi = /^(?:doi:|https?:\/\/(?:dx\.)?doi\.org\/)?(10\.\d{4,9}\/\S+)$/i.exec(v);
+  if (doi) return { uri: `https://doi.org/${doi[1]}` };
+  if (/^https?:\/\/[^\s/]+\.[^\s]+$/i.test(v)) return { uri: v };
+  if (/^(\/|~|[a-z]:[\\/]|file:)/i.test(v)) return { error: "path" };
+  return { error: "form" };
+}
+
+/** The short form of a source, for a name: the DOI itself, or the URL without
+ *  its scheme. */
+export function sourceShort(uri: string): string {
+  return uri.replace(/^https?:\/\/(?:dx\.)?doi\.org\//i, "").replace(/^https?:\/\//i, "").replace(/\/$/, "");
+}
+
+/** DEV29 B5 · a folder that carries a Zenodo record's number (`zenodo-7463211`,
+ *  `10.5281_zenodo.7463211`) proposes its DOI. A proposal, never written alone. */
+export function doiFromName(name: string): string | null {
+  const m = /zenodo[._-]?(\d{5,9})/i.exec(name);
+  return m ? `10.5281/zenodo.${m[1]}` : null;
+}
+
+/** DEV29 B5 · the act's name the compositor PROPOSES for N outputs: «<kind>
+ *  <source>» when the source is known (`Download 10.5281/zenodo.7463211`), else
+ *  «<kind> · <folder>». Empty for one output (one file needs no act's name). */
+export function proposeActName(draft: Draft, kindLabel: string, folder: string): string {
+  if (draft.outputs.length <= 1 || !kindLabel) return "";
+  const src = normalizeSource(draft.source ?? "");
+  if (src && "uri" in src) return `${kindLabel} ${sourceShort(src.uri)}`;
+  return folder ? `${kindLabel} · ${folder}` : kindLabel;
 }
 
 /** The fields still missing, in the form's order. */
@@ -234,6 +287,8 @@ export function missingFields(draft: Draft): StampField[] {
       case "software": return !draft.software.some((s) => s.name.trim());
       case "operator": return !draft.operator.id.trim() && !draft.operator.label.trim();
       case "at": return !draft.at.trim();
+      case "campaign": return !draft.campaign.trim();
+      case "source": return false;
     }
   });
 }
@@ -328,7 +383,9 @@ export async function emitDraft(
   if (perOutput) {
     const all: EmitResult = { ok: true, stamps: [], written: [], refused: [], warnings: [], processes: [] };
     for (const [i, out] of draft.outputs.entries()) {
-      const one = await emitOne({ ...draft, outputs: [out] }, chains[i], registry);
+      // one act per output: a shared act's name would make them ONE process
+      const one = await emitOne({ ...draft, outputs: [out],
+        campaign: draft.campaign.trim() ? `${draft.campaign.trim()} · ${out.name}` : "" }, chains[i], registry);
       all.ok = all.ok && one.ok;
       all.stamps.push(...one.stamps); all.written.push(...one.written);
       all.refused.push(...one.refused); all.warnings.push(...one.warnings);
@@ -340,6 +397,13 @@ export async function emitDraft(
   const one = await emitOne(draft, chains[0] ?? [], registry);
   return { ...one, processes: [{ process_id: one.process_id ?? "", outputs: draft.outputs.map((o) => o.path),
                                  chain: chains[0] ?? [] }] };
+}
+
+/** The facts of the act that travel on the event (`how.acquisition`): the
+ *  campaign's metadata, and — DEV29 B5 — where a retrieval came from. */
+export function actMetadata(draft: Draft): Record<string, string> {
+  const src = normalizeSource(draft.source ?? "");
+  return { ...draft.campaignMetadata, ...(src && "uri" in src ? { retrieved_from: src.uri } : {}) };
 }
 
 async function emitOne(
@@ -385,8 +449,12 @@ async function emitOne(
       software: draft.software.length ? draft.software : undefined,
       at: draft.at,
       origin: draft.origin,
+      // DEV29 B5 · the act's name, for either road: the bridge hands it to
+      // s3Dgraphy (`bucket_acquisition(name=…)`, `declare_derivation(act_name=…)`)
+      // and the process_id is derived from it — one name, one act, N stamps
+      ...(draft.campaign.trim() ? { name: draft.campaign.trim() } : {}),
       acquisition: draft.origin
-        ? { name: draft.campaign.trim(), metadata: draft.campaignMetadata }
+        ? { name: draft.campaign.trim(), metadata: actMetadata(draft) }
         : undefined,
     },
     operator: draft.operator.id || draft.operator.label ? draft.operator : undefined,
