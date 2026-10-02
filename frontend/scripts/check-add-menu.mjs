@@ -131,6 +131,21 @@ const eq = (got, want, what) => {
   ok(L("graph", "property").includes("for:extractor:out:has_data_provenance"),
      "on a property: «Estrattore per X» (has_data_provenance)");
   eq(L("dtc", "US"), [], "DTC links nothing from a study unit");
+  // DEV29 B1 · «Aggiungi collegato» on an acquisition / a resource in the DTC
+  // said «0 types allowed» while the «+» offered 35: the two doors now read
+  // the same linked list, the maniglia's two halves.
+  const acq = M.linkedItems("dtc", "dtc_acquisition");
+  console.log("  dtc_acquisition linked:", [...new Set(acq.map((i) => `${i.nodeType}:${i.kind ?? ""}:${i.edgeType}`))].length);
+  ok(acq.some((i) => i.nodeType === "resource" && i.edgeType === "dtc_had_output"),
+     "from an acquisition: a resource it produced (dtc_had_output)");
+  ok(acq.some((i) => i.nodeType === "dtc_process"), "from an acquisition: a process");
+  const res = M.linkedItems("dtc", "resource");
+  ok(res.length > 0 && res.some((i) => i.nodeType === "dtc_process" && i.edgeType === "dtc_had_input"),
+     "from a resource: a process that takes it as input");
+  ok(!res.some((i) => i.category === "declared"), "the declared parents stay with the maniglia «Sopra»");
+  const both = [...M.handleItems("dtc", "dtc_acquisition", "up"), ...M.handleItems("dtc", "dtc_acquisition", "down")];
+  ok(acq.every((i) => both.some((h) => h.nodeType === i.nodeType && h.edgeType === i.edgeType && h.dir === i.dir)),
+     "every linked entry is one the maniglia offers (one answer, two doors)");
   // the anchor drag: every addable target the datamodel allows from the source
   const c = M.connectItems("graph", "extractor");
   ok(c.every((i) => i.dir === "out") && c.some((i) => i.nodeType === "document" && i.edgeType === "extracted_from"),

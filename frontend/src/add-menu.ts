@@ -220,7 +220,12 @@ export interface LinkedItem extends AddItem {
  *    unit → unit, where incoming is «sopra».
  */
 export function linkedItems(ctx: AddContext, selType: string | undefined): LinkedItem[] {
-  if (!selType || ctx === "dtc") return [];
+  if (!selType) return [];
+  // DEV29 B1 · the DTC is read with its own arrows (DTC_REVERSED_EDGES): the
+  // «Collegato a X» of a DTC node is what the maniglia offers above AND below
+  // it — the same answer the «+» of the bar gives for this selection, instead
+  // of the «0 types allowed» measured on an acquisition and on a resource.
+  if (ctx === "dtc") return dtcLinkedItems(selType);
   const selStrat = isStratigraphicType(selType);
   const out: LinkedItem[] = [];
   const seen = new Set<string>();
@@ -358,6 +363,25 @@ function dtcHandleItems(selType: string | undefined, dir: HandleDir): LinkedItem
         preset: { data: { declared_only: true, declared_kind: p.declared, packaging: p.packaging,
                           ...(p.tier ? { tier: p.tier } : {}) } },
         dir: "out", edgeType: "dtc_derived_from", relation: "for" });
+  return out;
+}
+
+/** DEV29 B1 · «Collegato a X» in the DTC: the maniglia's two halves, one entry
+ *  per (kind, edge, direction). A study unit has none (the DTC chunks do not
+ *  hang from the matrix); the declared parents of a resource stay with the
+ *  maniglia «Sopra», where they are a choice of packaging, not a link. */
+function dtcLinkedItems(selType: string): LinkedItem[] {
+  if (isStratigraphicType(selType)) return [];
+  const out: LinkedItem[] = [];
+  const seen = new Set<string>();
+  for (const dir of ["up", "down"] as HandleDir[])
+    for (const it of dtcHandleItems(selType, dir)) {
+      if (it.category === "declared") continue;
+      const k = `${it.nodeType}|${it.kind ?? ""}|${it.dir}|${it.edgeType}`;
+      if (seen.has(k)) continue;
+      seen.add(k);
+      out.push(it);
+    }
   return out;
 }
 
