@@ -231,6 +231,13 @@ export interface GraphSlot {
   fallbackName: string;
   /** Absolute path on desktop; null for a browser drop or a new graph. */
   path: string | null;
+  /** DEV30 U1 · the folder the graph came from when it is not yet a file of its
+   *  own (a GraphML imported on the desktop): its relative paths are read there. */
+  sourceDir?: string | null;
+  /** DEV30 V3 · a NEW graph as New made it (the «Epoch 1» seed, no hand on it
+   *  yet): the undo depth it was born at. While the store is still at that
+   *  depth the slot is a seed — replaced by the next open, never saved. */
+  seedDepth?: number;
   /**
    * The slot's own store — **with its own undo stack**. This is what makes the
    * workspace more than "reopen the file": edits and history survive a switch.

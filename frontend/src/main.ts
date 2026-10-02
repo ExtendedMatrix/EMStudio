@@ -6050,7 +6050,7 @@ async function openDocument(): Promise<void> {
       const res = await openEmJson();
       if (!res) return; // cancelled
       if (!confirmOpenOverUnsaved(baseName(res.path))) return;
-      if (isGraphmlFile(res.path, res.text)) { await importGraphmlText(res.text, baseName(res.path)); return; }
+      if (isGraphmlFile(res.path, res.text)) { await importGraphmlText(res.text, baseName(res.path), res.path); return; }
       if (!(await confirmLeaveSidecar("Opening a file"))) return;
       // through the container reader, like the browser's <input type=file>:
       // calling `loadDocument` here refused every `{graphs:{…}}` file with
@@ -9118,7 +9118,7 @@ document.getElementById("btn-ttl")!.addEventListener("click", async () => {
 
 // Import a yEd GraphML file → em.json via the transformer (s3Dgraphy
 // importer), then load it. Same endpoint/constraint as export (invariant 2).
-async function importGraphmlText(text: string, srcName: string): Promise<void> {
+async function importGraphmlText(text: string, srcName: string, srcPath: string | null = null): Promise<void> {
   if (!(await confirmLeaveSidecar("Importing GraphML"))) return;
   toast(t("io.importing", { fmt: "GraphML" }));
   try {
@@ -9140,6 +9140,10 @@ async function importGraphmlText(text: string, srcName: string): Promise<void> {
     }
     const doc = (await res.json()) as EmDocument;
     loadDocument(doc, srcName); // no layout → auto fresh-layout on load
+    // DEV30 U1 · the folder of the GraphML is the study's until it is saved:
+    // its documents' «/DosCo/…» are read there
+    const slot = emtree.active();
+    if (slot && srcPath) slot.sourceDir = srcPath.replace(/[\\/][^\\/]*$/, "") || null;
     toast(t("io.imported", { name: srcName }));
   } catch {
     toast(BRIDGE_UNREACHABLE);
@@ -9159,7 +9163,7 @@ document
     if (isTauri()) {
       const picked = await openGraphml();
       if (!picked) return; // cancelled
-      await importGraphmlText(picked.text, baseName(picked.path));
+      await importGraphmlText(picked.text, baseName(picked.path), picked.path);
       return;
     }
     const inp = document.createElement("input");
@@ -15894,13 +15898,44 @@ function docMediaUrl(d: EmNode): string | null {
   return docSrcUrl(src);
 }
 
+/** DEV30 U1 · the folder a study's relative paths are read from: the open
+ *  em.json's, else the GraphML's it was imported from (desktop), else none. */
+function studyDir(): string | null {
+  if (currentFilePath) return currentFilePath.replace(/[\\/][^\\/]*$/, "") || null;
+  return emtree.active()?.sourceDir ?? null;
+}
+/**
+ * DEV30 U1 · a document's `/DosCo/D.02.jpg` is a path of the STUDY, not of the
+ * disk. Measured on the desktop dev.15: D.02 showed a «?» in the Doc because
+ * the viewer asked the bridge for `/DosCo/D.02.jpg` at the root of the disk,
+ * while the file is `EM/DosCo/D.02.jpg` beside the graph. A path that starts
+ * with its DosCo folder (one slash, two, or none) or a plain relative one is
+ * read under the study's folder; an absolute path elsewhere stays as written.
+ */
+function studyLocalPath(src: string): string | null {
+  const base = studyDir();
+  if (!base || /^[a-z][a-z0-9+.-]*:\/\//i.test(src) || /^[A-Za-z]:[\\/]/.test(src)) return null;
+  const parts = src.split(/[\\/]+/).filter((x) => x && x !== ".");
+  if (!parts.length) return null;
+  const rooted = /^[\\/]/.test(src);
+  if (rooted && !/^dosco$/i.test(parts[0])) return null;
+  return `${base}/${parts.join("/")}`;
+}
+
 /** A locator → a URL the page can fetch (cached; a repaint follows). A
  *  TILESET on disk goes through `/fs/at/` so its tiles resolve beside it. */
 function docSrcUrl(src: string): string | null {
   if (viewerIsFetchable(src) || src.startsWith("/em/") || src.startsWith("./")) return src;
+  src = studyLocalPath(src) ?? src;
   if (docUrlCache.has(src)) return docUrlCache.get(src) ?? null;
   docUrlCache.set(src, null);
+  // DEV30 U1 · an IMAGE goes to its <img> as a blob: the /fs gate refuses an
+  // <img src> (no Origin; `Sec-Fetch-Site: same-site` from :5199, cross-site
+  // from tauri://localhost) — measured 403, the «?» of D.02 — and serves the
+  // same bytes to a fetch, as the Storage viewer already does (`bridgeBlobUrl`)
+  const image = /\.(jpe?g|png|gif|webp|tiff?|bmp|svg)$/i.test(src);
   void (isTilesetUrl(src) ? fsTreeUrl(src) : fsUrlFor(src))
+    .then((u) => (image ? bridgeBlobUrl(u) : u))
     .then((u) => { docUrlCache.set(src, u); renderDocView(); }).catch(() => { /* unreachable: stays null */ });
   return null;
 }
