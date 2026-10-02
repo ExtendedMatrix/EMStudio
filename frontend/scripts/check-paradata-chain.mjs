@@ -202,7 +202,10 @@ from s3dgraphy import api
 g, w = api.load_emjson(json.loads(sys.stdin.read()))
 print(json.dumps(api.validate(g)["info"]))`;
     const got = JSON.parse(execFileSync(PY, ["-c", script], { input: JSON.stringify(HINT_DOC),
-      env: { ...process.env, PYTHONPATH: `${S3D}src` } }).toString().trim().split("\n").pop());
+      env: { ...process.env, PYTHONPATH: `${S3D}src` } }).toString().trim().split("\n").pop())
+      // dev29 · s3Dgraphy's validate also says, as info, that a graph declares no
+      // CRS (A6): a different rule — this comparison is about the extraction hint
+      .filter((x) => !/not georeferenced/.test(x));
     eq(got.length, 1, "s3Dgraphy's api.validate lists the same ONE info");
     ok(got[0].includes("USV106.01") && got[0].includes("USV106") && got[0].includes("height"),
        "…about the same extractor, unit and property");
