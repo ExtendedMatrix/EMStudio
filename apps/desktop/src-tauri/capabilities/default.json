@@ -35,6 +35,14 @@
       "allow": [{ "name": "binaries/em-bridge", "sidecar": true, "args": true }]
     },
     "shell:allow-kill",
-    "deep-link:default"
+    "deep-link:default",
+    {
+      "identifier": "opener:allow-open-url",
+      "allow": [
+        { "url": "https://*" },
+        { "url": "http://localhost:*" },
+        { "url": "http://127.0.0.1:*" }
+      ]
+    }
   ]
 }

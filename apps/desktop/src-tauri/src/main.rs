@@ -286,6 +286,19 @@ fn restart_bridge(app: &tauri::AppHandle) {
 
 fn main() {
     tauri::Builder::default()
+        // FIRST, as the plugin requires. On Windows and Linux the OS answers a
+        // deep link by starting the app AGAIN; this hands the link to the
+        // instance already open (feature `deep-link`: it arrives there through
+        // `onOpenUrl`) and brings its window forward. That instance is the one
+        // holding the sign-in's nonce and PKCE verifier — a second one would
+        // have neither and could only refuse the answer.
+        .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
+            use tauri::Manager;
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.unminimize();
+                let _ = window.set_focus();
+            }
+        }))
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_shell::init())
@@ -300,6 +313,9 @@ fn main() {
         // likely to test the feature is the one for whom it silently does not
         // work.
         .plugin(tauri_plugin_deep_link::init())
+        // SIGN-IN in the system browser (ORCID, the node's Keycloak): the
+        // webview never shows a login page. Scope in capabilities/default.json.
+        .plugin(tauri_plugin_opener::init())
         .manage(BridgeChild(Mutex::new(None)))
         .invoke_handler(tauri::generate_handler![
             transformer_url,
@@ -318,7 +334,8 @@ fn main() {
                 // start.
                 if let Err(error) = app.deep_link().register_all() {
                     eprintln!("deep-link: could not register stratigraph:// \
-                               at runtime ({error}); the installed bundle's \
+                               and org.extendedmatrix.emstudio: at runtime \
+                               ({error}); the installed bundle's \
                                registration still applies");
                 }
             }

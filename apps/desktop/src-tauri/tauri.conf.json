@@ -55,10 +55,11 @@
   },
   "plugins": {
     "deep-link": {
-      "//": "THE HANDOFF SCHEME. `stratigraph://open?server=&room=` is the ecosystem's, not this app's: the Catalog opens a STUDY on it and StratiGraph Server's room browser opens a ROOM (see stratigraph-server/app/handoff.py). Registering it here is what makes 'open in EMStudio' a click instead of three fields and a pasted token. The link carries NO credential — the app signs in by itself (frontend/src/oidc.ts). | Moved here from `bundle.deepLinkProtocols` on 2026-09-16: that key is not in the Tauri 2 schema and `bundle` refuses what it does not know, which is what failed the four release builds. The schemes belong to tauri-plugin-deep-link (Cargo.toml), so this is where they are read. NB the plugin registers them on Windows and Linux; on macOS the scheme reaches the app through CFBundleURLTypes in Info.plist — TEST THE HANDOFF ON macOS before calling it intact.",
+      "//": "THE HANDOFF SCHEME. `stratigraph://open?server=&room=` is the ecosystem's, not this app's: the Catalog opens a STUDY on it and StratiGraph Server's room browser opens a ROOM (see stratigraph-server/app/handoff.py). Registering it here is what makes 'open in EMStudio' a click instead of three fields and a pasted token. The link carries NO credential — the app signs in by itself (frontend/src/oidc.ts). | Moved here from `bundle.deepLinkProtocols` on 2026-09-16: that key is not in the Tauri 2 schema and `bundle` refuses what it does not know, which is what failed the four release builds. The schemes belong to tauri-plugin-deep-link (Cargo.toml), so this is where they are read. NB the plugin registers them on Windows and Linux; on macOS the scheme reaches the app through CFBundleURLTypes in Info.plist — TEST THE HANDOFF ON macOS before calling it intact. | 3 Oct 2026: `org.extendedmatrix.emstudio` (the identifier, reverse-DNS, RFC 8252 §7.1) is THIS app's own scheme, for the answers of a sign-in: `…:/orcid-return#id_token=…` (from https://extendedmatrix.org/orcid/callback/) and `…:/oidc-return?code=…` (straight from a node's Keycloak). Not `stratigraph://`: an authentication answer must come back to this app only, and that scheme is shared by the ecosystem's tools.",
       "desktop": {
         "schemes": [
-          "stratigraph"
+          "stratigraph",
+          "org.extendedmatrix.emstudio"
         ]
       }
     }

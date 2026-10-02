@@ -23,6 +23,15 @@ tauri-plugin-shell = "2"
 # way in (the same parameters on its own URL) — which is why the frontend
 # resolves this plugin at runtime and carries on without it.
 tauri-plugin-deep-link = "2"
+# SIGN-IN FROM THE DESKTOP (3 Oct 2026). The sign-in pages open in the SYSTEM
+# browser, never in the webview (an embedded webview is a phishing surface, and
+# several IdPs refuse it): `opener` is Tauri 2's way to do it (`shell.open` is
+# deprecated). The answer comes back on `org.extendedmatrix.emstudio:` — and on
+# Windows and Linux a deep link STARTS A SECOND INSTANCE, which does not hold
+# the round trip's nonce: `single-instance` with `deep-link` hands the URL to
+# the window already open. Registered FIRST in main.rs, as its docs require.
+tauri-plugin-opener = "2"
+tauri-plugin-single-instance = { version = "2", features = ["deep-link"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 
