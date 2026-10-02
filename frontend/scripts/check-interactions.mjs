@@ -3483,6 +3483,39 @@ test("F4.oldfile", "F4 · un file VECCHIO (un solo layout, del grafo attivo): il
     detail: { xPos, yPos, want, ySeen, said, top: doc && Object.keys(doc.layout?.positions ?? {}), errors } };
 });
 
+test("F8.node", "F8 (U17) · Impostazioni › Sync: «Il tuo nodo StratiGraph» prima e a parte da Blender; il campo vuoto dice «per esempio …»; il rimando di «Chi sei» porta dritto al campo; «Prova» dice raggiungibile, versione e modi d'accesso; la stanza sta col nodo, nella lingua dell'interfaccia", async () => {
+  const { p, ctx, errors } = await open({ doc: LITE(), locale: "en", hook: tauriHook(),
+    route: { pattern: "https://nodo.test/**", handler: (r) => {
+      const u = r.request().url();
+      const h = { "access-control-allow-origin": "*" };
+      if (u.endsWith("/v1/health")) return r.fulfill({ status: 200, headers: h, json: { service: "stratigraph-server", version: "0.9.1", s3dgraphy: "1.6.0.dev30", auth: "keycloak" } });
+      if (u.endsWith("/v1/auth-config")) return r.fulfill({ status: 200, headers: h, json: { issuer: "https://nodo.test/realms/sg", client_id: "emstudio", authorization_endpoint: "https://nodo.test/a", token_endpoint: "https://nodo.test/t", enforcing: true, orcid_idp: "orcid", node_name: "Nodo di prova" } });
+      return r.fulfill({ status: 404, headers: h, body: "" });
+    } } });
+  await p.click("#footer-identity");
+  await p.waitForTimeout(600);
+  await p.click("[data-idp-configure]");
+  await p.waitForTimeout(600);
+  const r = await p.evaluate(() => {
+    const node = document.getElementById("settings-sect-node"), sync = document.getElementById("settings-sect-sync");
+    const url = document.getElementById("set-hub-url");
+    return { focus: document.activeElement?.id ?? null, nodeH: node?.querySelector("h4")?.textContent,
+      syncH: sync?.querySelector("h4")?.textContent, order: !!node && !!sync && !!(node.compareDocumentPosition(sync) & Node.DOCUMENT_POSITION_FOLLOWING),
+      ph: url?.placeholder, value: url?.value, room: node?.querySelector("#set-hub-room")?.closest("label")?.textContent.trim(),
+      roomInNode: !!node?.querySelector("#set-hub-room"), signin: !!node?.querySelector("#set-node-signin") };
+  });
+  await p.fill("#set-hub-url", "https://nodo.test");
+  await p.click("#set-node-test");
+  await p.waitForFunction(() => /Reachable|does not answer|not a/.test(document.getElementById("set-node-result")?.textContent ?? ""), null, { timeout: 8000 }).catch(() => {});
+  const result = await p.evaluate(() => document.getElementById("set-node-result")?.textContent ?? "");
+  await p.screenshot({ path: SHOT("f8-impostazioni-nodo") }).catch(() => {});
+  await ctx.close();
+  return { pass: r.focus === "set-hub-url" && r.nodeH === "Your StratiGraph node" && r.syncH === "Sync with Blender / EMtools" && r.order
+      && r.ph === "for example https://em.localhost:8443" && r.value === "" && r.roomInNode && r.room === "Room" && r.signin
+      && /Reachable: https:\/\/nodo\.test · StratiGraph Server 0\.9\.1/.test(result) && /ORCID, through the node/.test(result) && !errors.length,
+    detail: { r, result, errors } };
+});
+
 // ── run ─────────────────────────────────────────────────────────────────────
 const chosen = cases.filter((c) => !only.length || only.includes(c.id) || only.some((o) => c.id.startsWith(o + ".")));
 for (const c of chosen) {

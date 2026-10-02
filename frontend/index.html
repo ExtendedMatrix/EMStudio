@@ -517,30 +517,56 @@
               <select id="set-text-lang"></select>
             </label>
           </section>
-          <section data-settings-tab="sync" class="settings-sect" id="settings-sect-sync">
-            <h4 data-i18n="settings.liveSync">Live sync</h4>
-            <p class="settings-hint">
-              Where EMStudio connects for live sync (ADR-002). The chosen tool
-              is the <b>host</b> and runs the WebSocket server; EMStudio is the
-              client.
+          <!-- F8 (U17) · TWO sections with their own names. Signing in has
+               nothing to do with Blender: the node comes first, with its
+               address, «Test» (reachable, server version, ways in) and «Sign
+               in» right there; the room belongs to the node. -->
+          <section data-settings-tab="sync" class="settings-sect" id="settings-sect-node">
+            <h4 data-i18n="settings.nodeTitle">Your StratiGraph node</h4>
+            <p class="settings-hint" data-i18n="settings.nodeHint">
+              The StratiGraph server you sign in to and share rooms on. The
+              access token is asked for when you connect and is never saved.
             </p>
             <label
-              >Sync with
+              ><span data-i18n="settings.nodeAddress">Address</span>
+              <input id="set-hub-url" type="url" data-i18n-placeholder="settings.nodeAddressPh"
+                     placeholder="for example https://em.localhost:8443" />
+            </label>
+            <div class="settings-node-actions">
+              <button type="button" id="set-node-test" data-i18n="settings.nodeTest">Test</button>
+              <button type="button" id="set-node-signin" data-i18n="settings.nodeSignIn">Sign in</button>
+            </div>
+            <p class="settings-hint" id="set-node-result" aria-live="polite"></p>
+            <label
+              ><span data-i18n="settings.nodeRoom">Room</span>
+              <input id="set-hub-room" type="text" data-i18n-placeholder="settings.nodeRoomPh"
+                     placeholder="for example scavo-2026" />
+            </label>
+          </section>
+          <section data-settings-tab="sync" class="settings-sect" id="settings-sect-sync">
+            <h4 data-i18n="settings.blenderTitle">Sync with Blender / EMtools</h4>
+            <p class="settings-hint" data-i18n="settings.blenderHint">
+              Live sync with a tool on this machine or your network (ADR-002):
+              the chosen tool is the host and runs the WebSocket server;
+              EMStudio is the client.
+            </p>
+            <label
+              ><span data-i18n="settings.syncWith">Sync with</span>
               <select id="set-sync-tool"></select>
             </label>
             <label
-              >Protocol
+              ><span data-i18n="settings.syncProtocol">Protocol</span>
               <select id="set-sync-protocol">
                 <option value="ws">ws:// (local)</option>
                 <option value="wss">wss:// (secure)</option>
               </select>
             </label>
             <label
-              >Host / IP
+              ><span data-i18n="settings.syncHost">Host / IP</span>
               <input id="set-sync-host" type="text" placeholder="localhost" />
             </label>
             <label
-              >Port
+              ><span data-i18n="settings.syncPort">Port</span>
               <input
                 id="set-sync-port"
                 type="number"
@@ -552,23 +578,6 @@
             <p class="settings-url">
               Endpoint: <code id="set-sync-url"></code>
             </p>
-            <!-- P4.3 · the HUB is a different kind of destination: not a
-                 laptop pairing but a ROOM on an StratiGraph Server, where several people
-                 meet. Endpoint and room are configuration; the TOKEN is asked
-                 for at connection time and kept in memory only. -->
-            <h4 data-i18n="settings.hub">Hub (StratiGraph Server)</h4>
-            <p class="settings-hint" data-i18n="settings.hubHint">
-              A room on an StratiGraph Server: several people on the same study, live.
-              The access token is asked for when you connect and is never saved.
-            </p>
-            <label
-              >URL
-              <input id="set-hub-url" type="text" placeholder="https://em.example.org" />
-            </label>
-            <label
-              >Stanza
-              <input id="set-hub-room" type="text" placeholder="scavo-2026" />
-            </label>
           </section>
           <!-- DARK1: the theme, first after the language — both change every
                other label in this dialog, so they belong together at the top. -->

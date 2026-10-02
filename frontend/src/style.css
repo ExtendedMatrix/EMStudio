@@ -4690,9 +4690,7 @@ body.sync-active #footer-brand #em-version {
   color: var(--text-faint);
   white-space: nowrap;
   overflow: hidden;
-  text-overflow: ellipsis;
-  direction: rtl;               /* the END of a long path is the part that says where */
-  text-align: left;
+  text-overflow: ellipsis;      /* `pathTail` already keeps the END, the part that says where */
 }
 .et-file-target {
   font-size: 9.5px;
@@ -8884,3 +8882,9 @@ input.storage-path:focus { border-color: var(--accent); background: var(--bg-pan
 }
 .et-move-menu button:hover { background: var(--bg-hover); }
 .et-move-menu .et-move-tail { color: var(--text-faint); font-size: 10.5px; margin-left: 6px; }
+
+/* F8 · the node's «Test» / «Sign in» and what Test found */
+.settings-node-actions { display: flex; gap: 8px; margin: 2px 0 4px; }
+#set-node-result:empty { display: none; }
+#set-node-result[data-state="ok"] { color: var(--accent-ink); }
+#set-node-result[data-state="no"] { color: var(--danger); }

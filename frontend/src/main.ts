@@ -5542,7 +5542,7 @@ async function createRoomHere(seed: boolean): Promise<void> {
   if (!name) return;
   const roomId = roomIdFromName(name);
   const server = servingNode();
-  if (!server) { toast(t("idw.noNode")); openSettings("settings-sect-sync"); return; }   // DEV30 U14
+  if (!server) { toast(t("idw.noNode")); openNodeSettings(); return; }   // DEV30 U14
 
   // CAPTURED BEFORE CONNECTING, and the order is the whole repair. Measured on
   // the dev stack: a room created a second ago still SENDS a snapshot — a
@@ -9625,7 +9625,7 @@ document.getElementById("btn-mode-hub")?.addEventListener("click", () => {
   const s = getSettings().sync;
   if (!s.hubUrl || !s.hubRoom) {
     toast(t("hub.needsConfig"));
-    openSettings("settings-sect-sync");
+    openNodeSettings();
     return;
   }
   if (sync.room === s.hubRoom && sync.connected) return;   // already there
@@ -10125,7 +10125,7 @@ interface PendingNodeSignIn {
 async function signIntoNode(opts: { silent?: boolean; idpHint?: string; loginHint?: string; intent?: "identity" } = {}): Promise<boolean> {
   const server = servingNode();
   if (!server) {   // DEV30 U14 · no node configured: say it, and where to name one
-    if (!opts.silent) { toast(t("idw.noNode")); openSettings("settings-sect-sync"); }
+    if (!opts.silent) { toast(t("idw.noNode")); openNodeSettings(); }
     return false;
   }
   logInfo(`identity: signing in against ${server}`
@@ -10490,7 +10490,7 @@ function identityChipClicked(): void {
       return;
     case "identity":
       toast(t("ident.nextJoin"));
-      openSettings("settings-sect-sync");
+      openNodeSettings();
       return;
     case "presence":
       toast(t("ident.presenceNow", {
@@ -10679,6 +10679,66 @@ function requireVerifiedIdentity(): boolean {
  *  AI key are not settings but ACTS with their own buttons (Dichiara, Salva
  *  key), and stay so. */
 let settingsOpenedWith: { locale: Locale; theme: ThemeMode; settings: string } | null = null;
+
+/** F8 (U17) · «Who you are» and every «no node configured» lead HERE: the
+ *  node's section, with the cursor in its address field. */
+function openNodeSettings(): void {
+  openSettings("settings-sect-node");
+  const field = document.getElementById("set-hub-url") as HTMLInputElement | null;
+  setTimeout(() => field?.focus(), 0);
+}
+
+/** F8 · what «Test» found at an address: reachable, the server's version, and
+ *  the ways in it offers — read, never guessed. */
+async function probeNodeAt(address: string): Promise<{ ok: boolean; text: string }> {
+  const base = address.trim().replace(/\/+$/, "");
+  if (!base) return { ok: false, text: t("settings.nodeEmpty") };
+  if (!/^https?:\/\//.test(base)) return { ok: false, text: t("settings.nodeNotUrl", { url: base }) };
+  const ctl = new AbortController();
+  const timer = setTimeout(() => ctl.abort(), 4000);
+  try {
+    const r = await fetch(`${base}/v1/health`, { signal: ctl.signal, cache: "no-store" });
+    const j = r.ok ? await r.json().catch(() => null) as
+      { service?: string; version?: string; s3dgraphy?: string; auth?: string } | null : null;
+    if (!j || j.service !== "stratigraph-server")
+      return { ok: false, text: t("settings.nodeNotNode", { url: base, status: String(r.status) }) };
+    const ways: string[] = [];
+    if (j.auth === "keycloak") {
+      const cfg = await loadAuthConfig(base).catch(() => null);
+      if (cfg?.orcid_idp) ways.push(t("settings.nodeWayOrcid"));
+      ways.push(cfg?.node_name ? t("settings.nodeWayPasswordOf", { node: cfg.node_name }) : t("settings.nodeWayPassword"));
+    } else {
+      ways.push(t("settings.nodeWayOpen"));
+    }
+    return { ok: true, text: t("settings.nodeReachable", {
+      url: base, version: j.version ?? "?", s3d: j.s3dgraphy ?? "?", ways: ways.join(" · ") }) };
+  } catch {
+    return { ok: false, text: t("settings.nodeUnreachable", { url: base }) };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+document.getElementById("set-node-test")?.addEventListener("click", async () => {
+  const out = document.getElementById("set-node-result");
+  const field = document.getElementById("set-hub-url") as HTMLInputElement | null;
+  if (!out || !field) return;
+  out.textContent = t("settings.nodeTesting");
+  out.dataset.state = "";
+  const r = await probeNodeAt(field.value);
+  out.textContent = r.text;
+  out.dataset.state = r.ok ? "ok" : "no";
+});
+document.getElementById("set-node-signin")?.addEventListener("click", () => {
+  const field = document.getElementById("set-hub-url") as HTMLInputElement | null;
+  const address = field?.value.trim().replace(/\/+$/, "") ?? "";
+  if (!address) { openNodeSettings(); toast(t("settings.nodeEmpty")); return; }
+  // the address typed IS the node to sign in to: kept first, so the sign-in's
+  // return finds it (it reads the saved settings, never this field)
+  const s = getSettings();
+  if (s.sync.hubUrl !== address) saveSettings({ ...s, sync: { ...s.sync, hubUrl: address } });
+  void signIntoNode({ intent: "identity" });
+});
 
 function openSettings(section?: string): void {
   const s = getSettings();
@@ -14446,7 +14506,7 @@ function openIdentityPanel(then?: () => void): void {
       const cfgBtn = el("button", "link", t("idw.configureNode"));
       cfgBtn.type = "button";
       cfgBtn.dataset.idpConfigure = "1";
-      cfgBtn.addEventListener("click", () => { closeIdentityPanel(); openSettings("settings-sect-sync"); });
+      cfgBtn.addEventListener("click", () => { closeIdentityPanel(); openNodeSettings(); });
       w1.row.appendChild(cfgBtn);
     }
     // the field way: a node, and no ORCID
