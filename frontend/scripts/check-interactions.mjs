@@ -2956,6 +2956,27 @@ test("V7.mapping", "Mapping editor: il primo clic su «Leggi i campi» funziona;
     detail: { read, note: note.slice(0, 200), docs, errors } };
 });
 
+test("V1.addlinked", "DTC: tasto destro su un'acquisizione ▸ «Add linked» offre risorse e processi (non «0 types allowed»), e la stessa risposta del «+» col nodo selezionato", async () => {
+  const { p, ctx, errors } = await open({ doc: "dev29-segni-lite", locale: "en", ws: "provenance" });
+  await p.locator('button[aria-pressed]', { hasText: /^DTC$/ }).first().click();
+  await p.waitForTimeout(800);
+  const win = await winOf(p, "graph");
+  const sc = await p.evaluate((w) => window.__EM_DRAG__.winScene(w), win);
+  const acq = sc.boxes.find((b) => b.id === "acq-canon");
+  await pick(p, "acq-canon");
+  await p.mouse.click(acq.x + acq.w / 2, acq.y + acq.h / 2, { button: "right" });
+  await p.waitForTimeout(300);
+  await p.locator(".ctx-menu button", { hasText: /^Add linked/ }).first().click();
+  await p.waitForTimeout(400);
+  const menu = await p.evaluate(() => ({ items: [...document.querySelectorAll(".addm .addm-item")].map((b) => b.textContent.trim()),
+    foot: document.querySelector(".addm-foot")?.textContent ?? "" }));
+  await p.screenshot({ path: SHOT("v1-add-linked-acquisizione") }).catch(() => {});
+  await p.keyboard.press("Escape");
+  await ctx.close();
+  return { pass: menu.items.length > 5 && !/0 types allowed/.test(menu.foot) && !/No node type/.test(menu.foot) && !errors.length,
+    detail: { n: menu.items.length, first: menu.items.slice(0, 8), foot: menu.foot, errors } };
+});
+
 // ── run ─────────────────────────────────────────────────────────────────────
 const chosen = cases.filter((c) => !only.length || only.includes(c.id) || only.some((o) => c.id.startsWith(o + ".")));
 for (const c of chosen) {
