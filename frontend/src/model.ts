@@ -910,6 +910,9 @@ export class DocumentStore {
           e++;
         }
       }
+    // F5 · …and the has_property that makes each date the EPOCH's
+    for (const x of edges)
+      if (x.edge_type === "has_property" && epochs.has(x.source) && props.has(x.target)) e++;
     return { nodes: pdgs.size + props.size, edges: e };
   }
 
@@ -988,12 +991,24 @@ export class DocumentStore {
     return null;
   }
 
-  /** Ensure an epoch has a ParadataNodeGroup holding absolute_time_start /
-   *  absolute_time_end PropertyNodes, seeding each value from the epoch's
-   *  start_time/end_time. Idempotent — returns the group + property ids. */
+  /**
+   * F5 · an epoch's date is BORN WHEN IT IS WRITTEN.
+   *
+   * Ensure the epoch's absolute_time_* PropertyNode for each bound that HAS a
+   * value (or for `only`, the bound being written now) — inside the epoch's
+   * ParadataNodeGroup AND with `has_property` from the epoch, which is the
+   * s3Dgraphy rule (`diagnostics.paradata_group_incoherences`: a property in X's
+   * group is X's `has_property`; the group gathers, the edge says whose).
+   *
+   * Until 2 Oct it created BOTH properties for every epoch, empty, and without
+   * `has_property`: on San Pietro, 8 epochs → 16 empty properties, 16 «issues»
+   * from `validate`. No bound to write → nothing is made, not even the group.
+   * Idempotent — returns the group + property ids made or found.
+   */
   ensureEpochTemporalParadata(
     epochId: string,
-  ): { pdgId: string; startId: string; endId: string } | null {
+    only?: "start" | "end",
+  ): { pdgId: string; startId: string | null; endId: string | null } | null {
     const epoch = this.node(epochId);
     if (!epoch || epoch.node_type !== "EpochNode") return null;
     // A phase (sub-epoch) is an EpochNode too, and gets its own temporal PDG —
@@ -1002,6 +1017,12 @@ export class DocumentStore {
     // phase bands are off. Epochs keep the portable em-core bottom-left anchor.
     const isPhase = this.parentEpoch(epochId) != null;
     const ed = (epoch.data ?? {}) as Record<string, unknown>;
+    const has = (k: string): boolean => ed[k] != null && String(ed[k]).trim() !== "";
+    const wanted: Array<["absolute_time_start" | "absolute_time_end", string]> = [];
+    if (only ? only === "start" : has("start_time")) wanted.push(["absolute_time_start", "start_time"]);
+    if (only ? only === "end" : has("end_time")) wanted.push(["absolute_time_end", "end_time"]);
+    let pdgId = this.epochParadataGroup(epochId);
+    if (!wanted.length && !pdgId) return null;
     // A stored position matters: Matrix skips nodes without one, so a
     // freshly-created group/property would be invisible. Seed positions in the
     // epoch's lane; the matrix anchoring pass then tucks them bottom-left.
@@ -1009,7 +1030,6 @@ export class DocumentStore {
     const laneY = lane?.y ?? 0;
     const laneH = lane?.height ?? 200;
     const baseY = laneY + Math.max(0, laneH - 46);
-    let pdgId = this.epochParadataGroup(epochId);
     if (!pdgId) {
       const g = this.addNode(
         {
@@ -1023,21 +1043,22 @@ export class DocumentStore {
       pdgId = g.id;
       this.addEdge(epochId, pdgId, "has_paradata_nodegroup");
     }
-    let slot = 0;
+    const slotOf = (propType: string): number => (propType === "absolute_time_start" ? 0 : 1);
     const ensureProp = (propType: string, boundKey: string): string => {
+      const s = slotOf(propType);
       const existing = this.propInGroup(pdgId!, propType);
       if (existing) {
         // keep its system anchor current even for a pre-existing prop (epochs
         // only — phases are placed view-side against their sub-band)
-        if (!isPhase) this.setAnchor(existing.id, epochId, "bl", slot++ * 100, 8);
-        else slot++;
+        if (!isPhase) this.setAnchor(existing.id, epochId, "bl", s * 100, 8);
+        if (!this.hasEdge(epochId, existing.id, "has_property"))
+          this.addEdge(epochId, existing.id, "has_property");
         return existing.id;
       }
       const seed = ed[boundKey] != null ? String(ed[boundKey]) : "";
       // A PropertyNode's VALUE lives in `description` (the EM convention: real
       // graphml-imported properties carry the value there, `value` stays null).
       // property_type is the only thing we keep in data.
-      const s = slot++;
       const p = this.addNode(
         {
           id: this.newId(),
@@ -1049,15 +1070,38 @@ export class DocumentStore {
         { x: 20 + s * 100, y: baseY, w: 90, h: 30 },
       );
       this.addEdge(p.id, pdgId!, "is_in_paradata_nodegroup");
+      this.addEdge(epochId, p.id, "has_property");
       // system anchor: the box sits bottom-left of the epoch (rule pin, so a
       // Layout run keeps it there — resolved by em-core, portable to Heriverse).
       // Phases get no anchor: they're placed view-side against their sub-band.
       if (!isPhase) this.setAnchor(p.id, epochId, "bl", s * 100, 8);
       return p.id;
     };
-    const startId = ensureProp("absolute_time_start", "start_time");
-    const endId = ensureProp("absolute_time_end", "end_time");
+    let startId: string | null = null;
+    let endId: string | null = null;
+    for (const [pt, bk] of wanted) {
+      const id = ensureProp(pt, bk);
+      if (pt === "absolute_time_start") startId = id; else endId = id;
+    }
     return { pdgId, startId, endId };
+  }
+
+  /**
+   * F5 · an EMPTY epoch-date placeholder: an absolute_time_* property with no
+   * value, whose only tie is its membership of an epoch's paradata group (no
+   * `has_property`, no provenance chain, nothing else pointing at it or from it).
+   * That is exactly what EMStudio wrote until 2 Oct, and nothing a person did.
+   */
+  private isEmptyEpochDatePlaceholder(propId: string, pdgId: string): boolean {
+    const p = this.node(propId);
+    if (!p || p.node_type !== "property") return false;
+    const pt = String(((p.data ?? {}) as Record<string, unknown>).property_type ?? "");
+    if (pt !== "absolute_time_start" && pt !== "absolute_time_end") return false;
+    const value = ((p.data ?? {}) as Record<string, unknown>).value;
+    if (String(p.description ?? "").trim() !== "" || (value != null && String(value).trim() !== "")) return false;
+    return this.doc.graph.edges.every((e) =>
+      (e.source !== propId && e.target !== propId)
+      || (e.source === propId && e.target === pdgId && e.edge_type === "is_in_paradata_nodegroup"));
   }
 
   /** A load-time migration that needs I/O, so it lands after the load (the
@@ -1072,88 +1116,112 @@ export class DocumentStore {
     this.dirty = dirty;
   }
 
-  /** Ensure EVERY epoch has its temporal ParadataNodeGroup — a SILENT
-   *  load-time completion: pushes nodes/edges/positions straight onto the doc,
-   *  with NO checkpoint, NO op emission and NO change event (so it neither
-   *  pollutes undo nor pushes structural additions to a sync host). */
-  ensureAllEpochParadata(): void {
+  /**
+   * The epochs' dates at load — a SILENT completion and cleaning: straight onto
+   * the doc, with NO checkpoint, NO op emission and NO change event (so it
+   * neither pollutes undo nor pushes structural additions to a sync host).
+   *
+   * F5 · three things, in this order:
+   * 1. the EMPTY placeholders of files saved before 2 Oct are taken out (with
+   *    their edges, positions and anchors; a group left with no member and no
+   *    other tie goes too) — returned as a count, which the caller logs;
+   * 2. a date that IS there (a value in the property) gets the `has_property`
+   *    from its epoch that it lacked;
+   * 3. an epoch with a start/end in its data and no property for it gets one —
+   *    group, property, `is_in_paradata_nodegroup`, `has_property`. An epoch
+   *    with no date gets nothing: the date is born when it is written.
+   */
+  ensureAllEpochParadata(): { placeholdersRemoved: number } {
     const g = this.doc.graph;
     const layout = (this.doc.layout ??= {});
     const positions = (layout.positions ??= {});
-    // phases (has_sub_epoch targets) also get their temporal box, but with NO
-    // em-core anchor — they have no swimlane, so matrix.ts places their box at
-    // the phase sub-band's bottom-left and hides it when phase bands are off.
+    // phases (has_sub_epoch targets) carry NO em-core anchor — they have no
+    // swimlane, so matrix.ts places their box at the phase sub-band's
+    // bottom-left and hides it when phase bands are off.
     const phaseIds = new Set<string>();
     for (const e of g.edges)
       if (e.edge_type === "has_sub_epoch") phaseIds.add(e.target);
+    const order = ["absolute_time_start", "absolute_time_end"];
+    const membersOf = (pdgId: string): EmNode[] =>
+      g.edges
+        .filter((e) => e.edge_type === "is_in_paradata_nodegroup" && e.target === pdgId)
+        .map((e) => this.node(e.source))
+        .filter((n): n is EmNode => !!n);
+    const dropNodes = (ids: Set<string>): void => {
+      if (!ids.size) return;
+      g.nodes = g.nodes.filter((n) => !ids.has(n.id));
+      g.edges = g.edges.filter((e) => !ids.has(e.source) && !ids.has(e.target));
+      for (const id of ids) delete positions[id];
+      if (layout.anchors) layout.anchors = layout.anchors.filter((a) => !ids.has(a.node));
+    };
+    let removed = 0;
+    for (const epoch of g.nodes.filter((n) => n.node_type === "EpochNode")) {
+      const pdg = this.epochParadataGroup(epoch.id);
+      if (!pdg) continue;
+      // 1 · the empty placeholders out
+      const gone = new Set(membersOf(pdg).map((n) => n.id)
+        .filter((id) => this.isEmptyEpochDatePlaceholder(id, pdg)));
+      removed += gone.size;
+      dropNodes(gone);
+      // …and the group they were the only reason for
+      if (gone.size && !membersOf(pdg).length
+          && g.edges.every((e) => (e.source !== pdg && e.target !== pdg)
+            || (e.edge_type === "has_paradata_nodegroup" && e.source === epoch.id && e.target === pdg))) {
+        dropNodes(new Set([pdg]));
+      }
+    }
     for (const epoch of [...g.nodes]) {
       if (epoch.node_type !== "EpochNode") continue;
-      // every EpochNode (top-level epoch OR phase) gets a box. NOTE: do NOT gate
-      // on having a swimlane — a Blender sync snapshot has NO swimlanes at load
-      // (em-core computes them after), yet those epochs still need their box.
       const isPhase = phaseIds.has(epoch.id);
-      const existingPdg = this.epochParadataGroup(epoch.id);
-      if (existingPdg) {
-        // PDG already present (e.g. a Blender sync snapshot, or an earlier
-        // session): don't recreate it. For epochs, STILL ensure the bottom-left
-        // system anchor exists (setAnchor is idempotent) so a Layout run
-        // positions it; phases carry no anchor (placed view-side), so skip.
-        if (isPhase) continue;
-        const order = ["absolute_time_start", "absolute_time_end"];
-        g.edges
-          .filter(
-            (e) =>
-              e.edge_type === "is_in_paradata_nodegroup" && e.target === existingPdg,
-          )
-          .map((e) => this.node(e.source))
-          .filter(
-            (n): n is EmNode =>
-              !!n &&
-              n.node_type === "property" &&
-              order.includes(
-                String((n.data as Record<string, unknown> | undefined)?.property_type),
-              ),
-          )
-          .sort(
-            (a, b) =>
-              order.indexOf(String((a.data as Record<string, unknown>).property_type)) -
-              order.indexOf(String((b.data as Record<string, unknown>).property_type)),
-          )
-          .forEach((p, s) => this.setAnchor(p.id, epoch.id, "bl", s * 100, 8));
-        continue;
-      }
       const ed = (epoch.data ?? {}) as Record<string, unknown>;
+      let pdgId = this.epochParadataGroup(epoch.id);
+      const props = pdgId
+        ? membersOf(pdgId).filter((n) => n.node_type === "property"
+            && order.includes(String(((n.data ?? {}) as Record<string, unknown>).property_type)))
+        : [];
+      // 2 · the dates already there: anchored, and the EPOCH's (has_property)
+      for (const p of props) {
+        const s = order.indexOf(String(((p.data ?? {}) as Record<string, unknown>).property_type));
+        if (!isPhase) this.setAnchor(p.id, epoch.id, "bl", s * 100, 8);
+        if (!g.edges.some((e) => e.source === epoch.id && e.target === p.id && e.edge_type === "has_property")) {
+          g.edges.push({ id: `${epoch.id}__has_property__${p.id}`, source: epoch.id,
+                         target: p.id, edge_type: "has_property" });
+        }
+      }
+      // 3 · a bound written in the epoch's data with no property for it
+      const missing = ([["absolute_time_start", "start_time"], ["absolute_time_end", "end_time"]] as const)
+        .filter(([pt, bk]) => ed[bk] != null && String(ed[bk]).trim() !== ""
+          && !props.some((p) => ((p.data ?? {}) as Record<string, unknown>).property_type === pt));
+      if (!missing.length) continue;
       const lane = layout.swimlanes?.find((l) => l.epoch_id === epoch.id);
       const baseY = (lane?.y ?? 0) + Math.max(0, (lane?.height ?? 200) - 46);
-      const pdgId = this.newId();
-      g.nodes.push({
-        id: pdgId,
-        name: paradataGroupName(epoch.name),
-        node_type: "ParadataNodeGroup",
-        description: "",
-      });
-      positions[pdgId] = { x: 10, y: baseY - 4, w: 200, h: 44 };
-      g.edges.push({
-        id: `${epoch.id}__has_paradata_nodegroup__${pdgId}`,
-        source: epoch.id,
-        target: pdgId,
-        edge_type: "has_paradata_nodegroup",
-      });
-      let slot = 0;
-      for (const [pt, bk] of [
-        ["absolute_time_start", "start_time"],
-        ["absolute_time_end", "end_time"],
-      ] as const) {
+      if (!pdgId) {
+        pdgId = this.newId();
+        g.nodes.push({
+          id: pdgId,
+          name: paradataGroupName(epoch.name),
+          node_type: "ParadataNodeGroup",
+          description: "",
+        });
+        positions[pdgId] = { x: 10, y: baseY - 4, w: 200, h: 44 };
+        g.edges.push({
+          id: `${epoch.id}__has_paradata_nodegroup__${pdgId}`,
+          source: epoch.id,
+          target: pdgId,
+          edge_type: "has_paradata_nodegroup",
+        });
+      }
+      for (const [pt, bk] of missing) {
+        const s = order.indexOf(pt);
         const pid = this.newId();
         g.nodes.push({
           id: pid,
           name: pt,
           node_type: "property",
           // value lives in description (uniform with real EM property data)
-          description: ed[bk] != null ? String(ed[bk]) : "",
+          description: String(ed[bk]),
           data: { property_type: pt },
         });
-        const s = slot++;
         positions[pid] = { x: 20 + s * 100, y: baseY, w: 90, h: 30 };
         g.edges.push({
           id: `${pid}__is_in_paradata_nodegroup__${pdgId}`,
@@ -1161,18 +1229,15 @@ export class DocumentStore {
           target: pdgId,
           edge_type: "is_in_paradata_nodegroup",
         });
+        g.edges.push({ id: `${epoch.id}__has_property__${pid}`, source: epoch.id,
+                       target: pid, edge_type: "has_property" });
         // system anchor: epoch bottom-left (resolved by em-core on layout).
         // Phases carry no anchor — matrix.ts places their box view-side.
         if (!isPhase)
-          (layout.anchors ??= []).push({
-            node: pid,
-            to: epoch.id,
-            corner: "bl",
-            dx: s * 100,
-            dy: 8,
-          });
+          (layout.anchors ??= []).push({ node: pid, to: epoch.id, corner: "bl", dx: s * 100, dy: 8 });
       }
     }
+    return { placeholdersRemoved: removed };
   }
 
   // ---- Phases (sub-epochs, EM 1.6 periodisation) -----------------------
@@ -1644,6 +1709,10 @@ export class DocumentStore {
       d[boundKey] = Number.isFinite(n) && v !== "" ? n : v;
     }
     this.updateNode(epochId, { data: d });
+    // F5 · writing a bound is what gives the epoch its date property (group,
+    // property, has_property) — erasing one leaves the property, emptied: it is
+    // the person's, and may carry a provenance chain
+    if (v !== "") this.ensureEpochTemporalParadata(epochId, which);
     const pdgId = this.epochParadataGroup(epochId);
     if (pdgId) {
       const p = this.propInGroup(pdgId, propType);

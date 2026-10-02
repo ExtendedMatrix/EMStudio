@@ -4374,10 +4374,11 @@ function loadDocument(
   const hadStoredPositions =
     Object.keys(d.layout?.positions ?? {}).length > 0;
   const loaded = new DocumentStore(d);
-  // every epoch always carries its temporal ParadataNodeGroup — ensure it now,
+  // an epoch's written dates get their temporal ParadataNodeGroup — ensured now,
   // silently (before the change/op listeners are wired) so it neither pushes to
   // a sync host nor lands on the undo stack.
-  loaded.ensureAllEpochParadata();
+  // F5 · …and the EMPTY date placeholders of files saved before 2 Oct go, said
+  const { placeholdersRemoved } = loaded.ensureAllEpochParadata();
   wireStore(loaded);
   // SPAZIO · a file of 7–11 ott: its readings' vertices from their glbs (async:
   // the files are read under the em.json's folder)
@@ -4405,6 +4406,7 @@ function loadDocument(
   // compute a fresh layout via em-core so the Matrix renders, then show it.
   // S6 — the load is the anchor of the activity log: what came in, from where,
   // which language version it declares, and what the document leaves unresolved.
+  if (placeholdersRemoved) logInfo(t("epoch.emptyDatesRemoved", { n: String(placeholdersRemoved) }));
   const declared = versionBanner(d);
   logInfo(
     `loaded "${sourceName}" — ${d.graph.nodes.length} nodes, ` +

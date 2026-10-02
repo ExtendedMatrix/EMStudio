@@ -252,7 +252,8 @@ const doc = (nodes, edges = []) => ({ header: {}, graph: { id: "g", nodes, edges
   const before = [st.liveNodes().length, st.liveEdges().length];
   st.ensureAllEpochParadata();
   const c = st.epochDateCounts();
-  eq(c, { nodes: 6, edges: 6 }, "B9c · two epochs → 2 groups + 4 absolute_time properties, 6 edges");
+  // F5 (2 Oct) · each date is also the epoch's has_property: 2 + 4 + 4 = 10 edges
+  eq(c, { nodes: 6, edges: 10 }, "B9c · two dated epochs → 2 groups + 4 absolute_time properties, 10 edges (has_property included)");
   eq([st.liveNodes().length - c.nodes, st.liveEdges().length - c.edges], before,
      "B9c · count minus the epochs' dates = the file's count (s3Dgraphy's)");
   ok(t("info.epochDates", { n: 24, e: 24 }).includes("24"), "B9c · the bar's words carry both numbers");
@@ -263,8 +264,9 @@ const doc = (nodes, edges = []) => ({ header: {}, graph: { id: "g", nodes, edges
     sp.ensureAllEpochParadata();
     const k = sp.epochDateCounts();
     console.log(`  San Pietro: file ${raw.join("/")}, after load ${sp.liveNodes().length}/${sp.liveEdges().length}, epoch dates ${k.nodes}/${k.edges}`);
-    eq([raw, [sp.liveNodes().length, sp.liveEdges().length], [k.nodes, k.edges]], [[66, 142], [90, 166], [24, 24]],
-       "B9c · San Pietro: 66/142 in the file, 90/166 after load, 24/24 of them the epochs' dates");
+    // F5 · San Pietro's epochs carry no date: nothing is made for them any more
+    eq([raw, [sp.liveNodes().length, sp.liveEdges().length], [k.nodes, k.edges]], [[66, 142], [66, 142], [0, 0]],
+       "B9c · San Pietro: 66/142 in the file and after load — no empty date placeholders");
   }
 }
 

@@ -474,9 +474,8 @@ export function renderInspector(
       inp.value = cur[key] != null ? String(cur[key]) : "";
       inp.placeholder = "e.g. -27  (negative = BCE)";
       inp.addEventListener("change", () => {
-        // authoring a bound sets up the temporal paradata so the value also
-        // lives on its absolute_time_* PropertyNode (two-way synced)
-        store.ensureEpochTemporalParadata(nodeId);
+        // authoring a bound is what makes its absolute_time_* PropertyNode
+        // (F5: in the epoch's group, with has_property) — one undo step
         store.setEpochBound(nodeId, which, inp.value);
       });
       root.appendChild(inp);
@@ -490,8 +489,8 @@ export function renderInspector(
     mkField("End", "end", "end_time", "absolute_time_end");
 
     // Temporal paradata: the absolute_time_start / absolute_time_end
-    // PropertyNodes live in the epoch's ParadataNodeGroup (created by default —
-    // ensured on epoch creation / load). Double-click the box in the lane to
+    // PropertyNodes live in the epoch's ParadataNodeGroup (F5: made when a
+    // bound is written, with has_property from the epoch). Double-click the box in the lane to
     // open the group and attach a provenance chain to either bound.
     root.appendChild(el("h3", "insp-sect", "Temporal paradata"));
     const pdgId = store.epochParadataGroup(nodeId);
