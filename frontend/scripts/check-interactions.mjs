@@ -2704,6 +2704,28 @@ test("R5.statusbar", "in Standalone la barra di stato dice «Standalone · nessu
     detail: { bar, errors } };
 });
 
+// ── VLONG-DEV29 · parte B: what Cowork saw on the Segni records (1 ott) ──────
+test("V9b.open", "aprire un em.json sopra un grafo con modifiche non salvate CHIEDE; «Annulla» lascia tutto com'era, «OK» lo apre accanto (il primo resta nell'EMTree, ancora da salvare)", async () => {
+  const { p, ctx, errors } = await open({ doc: "catena", locale: "en" });
+  const first = await p.evaluate(() => window.__EM_DRAG__.idsOfType("US")[0]);
+  await p.evaluate((id) => window.__EM_DRAG__.edit(id, { description: "edited, not saved" }), first);
+  const dialogs = [];
+  let answer = false;
+  p.on("dialog", async (d) => { dialogs.push(d.message()); answer ? await d.accept() : await d.dismiss(); });
+  await p.setInputFiles("#file-input", `${TD}TempluMare.em.json`);
+  await p.waitForTimeout(1200);
+  const afterCancel = await p.evaluate(() => window.__EM_DRAG__.slots());
+  answer = true;
+  await p.setInputFiles("#file-input", `${TD}TempluMare.em.json`);
+  await p.waitForFunction(() => window.__EM_DRAG__.slots().length === 2, null, { timeout: 30000 }).catch(() => {});
+  const afterOk = await p.evaluate(() => window.__EM_DRAG__.slots());
+  await ctx.close();
+  return { pass: dialogs.length === 2 && /unsaved changes/.test(dialogs[0])
+      && afterCancel.length === 1 && afterCancel[0].dirty
+      && afterOk.length === 2 && afterOk[0].dirty && afterOk[1].active && !errors.length,
+    detail: { dialogs, afterCancel, afterOk, errors } };
+});
+
 // ── run ─────────────────────────────────────────────────────────────────────
 const chosen = cases.filter((c) => !only.length || only.includes(c.id) || only.some((o) => c.id.startsWith(o + ".")));
 for (const c of chosen) {

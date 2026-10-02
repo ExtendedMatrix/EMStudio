@@ -1624,6 +1624,8 @@ window.__EM_SCENE__ = () => {
   edit: (id: string, patch: Record<string, unknown>) => store?.updateNode(id, patch),
   nodeCount: () => store?.liveNodes().length ?? 0,
   dirty: () => !!store?.dirty,
+  /** DEV29 · the EMTree's graphs, in order: name, dirty, active */
+  slots: () => emtree.slots.map((sl) => ({ name: slotLabel(sl), dirty: !!sl.store.dirty, active: sl === emtree.active() })),
   /** the graph as it stands — two reads equal = nothing was written between */
   graphJson: () => JSON.stringify(store?.doc.graph ?? null),
   /** SPAZIO · the whole document as Save writes it, and a document opened FROM
@@ -4477,7 +4479,18 @@ const isGraphmlFile = (name: string, text: string): boolean =>
   /\.graphml$/i.test(name) || (/\.xml$/i.test(name) && /<graphml/i.test(text.slice(0, 2000)))
   || (!/\.(json|emj)$/i.test(name) && /^\s*</.test(text.slice(0, 200)));
 
+/** DEV29 B9b · opening a file while the active graph has unsaved changes
+ *  ASKS. Nothing is thrown away — the open graph stays a slot of the EMTree —
+ *  but the canvas changes under the hand, and measured on 1 Oct an open over
+ *  an edited graph read as «replaced without asking». */
+function confirmOpenOverUnsaved(incoming: string): boolean {
+  const slot = emtree.active();
+  if (!slot?.store.dirty) return true;
+  return window.confirm(t("open.overUnsaved", { name: slotLabel(slot), file: incoming }));
+}
+
 async function loadFile(file: File): Promise<void> {
+  if (!confirmOpenOverUnsaved(file.name)) return;
   const head = await file.slice(0, 2048).text();
   if (isGraphmlFile(file.name, head)) { await importGraphmlText(await file.text(), file.name); return; }
   if (!(await confirmLeaveSidecar("Opening a file"))) return;
@@ -6021,6 +6034,7 @@ async function openDocument(): Promise<void> {
     try {
       const res = await openEmJson();
       if (!res) return; // cancelled
+      if (!confirmOpenOverUnsaved(baseName(res.path))) return;
       if (isGraphmlFile(res.path, res.text)) { await importGraphmlText(res.text, baseName(res.path)); return; }
       if (!(await confirmLeaveSidecar("Opening a file"))) return;
       // through the container reader, like the browser's <input type=file>:

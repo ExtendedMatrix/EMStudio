@@ -1990,6 +1990,7 @@ const EN: Dict = {
     "VOLATILE: they never enter the em.json unless you bake them. Mapping, " +
     "baking and the remote catalogues are still to come.",
   "emtree.unsaved": "\"{name}\" has unsaved changes. Close it anyway?",
+  "open.overUnsaved": "\"{name}\" has unsaved changes. Open \"{file}\" beside it? It stays in the EMTree, still unsaved.",
 
   // settings
   "room.denied": "The room refused that operation.",
@@ -4530,6 +4531,7 @@ const IT: Dict = {
     "sono VOLATILI: non entrano nell'em.json se non le si fa il bake. Mapping, " +
     "bake e cataloghi remoti sono ancora da fare.",
   "emtree.unsaved": "«{name}» ha modifiche non salvate. Chiuderlo comunque?",
+  "open.overUnsaved": "«{name}» ha modifiche non salvate. Aprire «{file}» accanto? Resta nell'EMTree, ancora da salvare.",
 
   "room.denied": "La stanza ha rifiutato questa operazione.",
   "room.readOnly": "sola lettura",
@@ -5981,6 +5983,7 @@ const DE: Dict = {
   "l.phaseCreated": "Phase {name} angelegt",
   "l.phaseDefault": "Phase {n}",
   "info.epochDates": "(davon {n} Knoten · {e} Kanten: die Daten der Epochen)",
+  "open.overUnsaved": "„{name}“ hat ungespeicherte Änderungen. „{file}“ daneben öffnen? Es bleibt im EMTree, weiterhin ungespeichert.",
   "l.cancel": "Abbrechen",
   "l.deleteEpoch": "Epoche löschen",
   "l.newEmptyGraph": "neuer leerer Graph",
