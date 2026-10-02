@@ -38,6 +38,7 @@ const bundle = await esbuild.build({
       export { geoOf } from "./geo";
       export { buildDtcScene, dtcSetId, processLabel } from "./views/dtc";
       export { packagingLabel } from "./resources";
+      export { languageName } from "./translation";
     `,
     resolveDir: SRC, loader: "ts",
   },
@@ -52,7 +53,7 @@ const bundle = await esbuild.build({
   }],
 });
 const M = await import("data:text/javascript;base64," + Buffer.from(bundle.outputFiles[0].text).toString("base64"));
-const { packagingLabel, twinAcquisitions, buildDtcScene, dtcSetId, processLabel, geoOf, compose, adaptDraft, dtcKindFamily, doubleSlashFix, georeferenceState, issues, ancestorsOf, isStratigraphicType, DocumentStore, setLocale, t } = M;
+const { languageName, packagingLabel, twinAcquisitions, buildDtcScene, dtcSetId, processLabel, geoOf, compose, adaptDraft, dtcKindFamily, doubleSlashFix, georeferenceState, issues, ancestorsOf, isStratigraphicType, DocumentStore, setLocale, t } = M;
 const tt = (k, v) => `${k}${v ? JSON.stringify(v) : ""}`;
 const doc = (nodes, edges = []) => ({ header: {}, graph: { id: "g", nodes, edges } });
 
@@ -217,6 +218,18 @@ const doc = (nodes, edges = []) => ({ header: {}, graph: { id: "g", nodes, edges
   eq([t("insp.embargoUntil"), t("insp.embargoReason")], ["Embargo fino al", "Motivo dell'embargo"], "B3 · the embargo's words are the dictionary's (Italian in Italian)");
   setLocale("en");
   eq([t("insp.embargoUntil"), t("insp.embargoReason")], ["Embargo until", "Reason for the embargo"], "B3 · …and English in English");
+}
+
+// ── A9c · «grc · grc»: a tag the browser's ICU does not name ───────────────
+{
+  const RealDN = Intl.DisplayNames;
+  // the browser's trimmed ICU, as measured in Chromium: grc comes back as «grc»
+  Intl.DisplayNames = class { constructor(l, o) { this.d = new RealDN(l, o); } of(x) { return x === "grc" ? "grc" : this.d.of(x); } };
+  try {
+    eq([languageName("grc", "en"), languageName("grc", "it"), languageName("grc", "de")],
+       ["Ancient Greek", "greco antico", "Altgriechisch"], "A9c · grc has a name even when the ICU has none");
+    eq(languageName("la", "it"), "latino", "A9c · …and the ICU's names stay");
+  } finally { Intl.DisplayNames = RealDN; }
 }
 
 // ── B9a · the default name of a phase is in the interface language ─────────

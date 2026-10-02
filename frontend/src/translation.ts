@@ -571,8 +571,26 @@ export const COMMON_LANGUAGES = ["it", "en", "la", "ro", "fr", "de", "es", "el",
 /** The language's name in the interface language, from the platform. */
 export function languageName(tag: string, uiLocale: string): string {
   if (tag === UNDETERMINED) return uiLocale.startsWith("it") ? "sconosciuta" : "unknown";
+  let name = tag;
   try {
     const dn = new Intl.DisplayNames([uiLocale], { type: "language" });
-    return dn.of(tag) ?? tag;
-  } catch { return tag; }
+    name = dn.of(tag) ?? tag;
+  } catch { /* the table below */ }
+  // DEV29 A9c · a tag the browser's ICU does not name comes back as itself —
+  // measured in Chromium: «grc · grc» in the language menu, where node's ICU
+  // says «Ancient Greek». The tags of COMMON_LANGUAGES it may miss have a name
+  // here, in the interface languages.
+  if (name === tag || name.toLowerCase() === tag.toLowerCase()) {
+    const k = KNOWN_NAMES[tag.toLowerCase()];
+    const loc = uiLocale.toLowerCase().split(/[-_]/)[0];
+    if (k) return k[loc] ?? k.en;
+  }
+  return name;
 }
+
+/** Names for language tags the browser's ICU data may lack (trimmed ICU in
+ *  Chromium and WebKit), in the interface's locales. */
+const KNOWN_NAMES: Record<string, Record<string, string>> = {
+  grc: { en: "Ancient Greek", it: "greco antico", de: "Altgriechisch", el: "Αρχαία Ελληνικά", he: "יוונית עתיקה",
+         es: "griego antiguo", pl: "starogrecki", ro: "greacă veche", fr: "grec ancien" },
+};
