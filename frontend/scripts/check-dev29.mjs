@@ -6,6 +6,7 @@
 //   node scripts/check-dev29.mjs
 import * as esbuild from "esbuild";
 import assert from "node:assert/strict";
+import { parseHTML } from "linkedom";
 
 let checks = 0;
 const fails = [];
@@ -15,6 +16,9 @@ const eq = (a, b, what) => {
   try { assert.deepStrictEqual(a, b); } catch { fails.push(`${what}\n      got ${JSON.stringify(a)}\n      want ${JSON.stringify(b)}`); }
 };
 
+const { window, document } = parseHTML(`<!doctype html><html><body></body></html>`);
+globalThis.window = window;
+globalThis.document = document;
 const mem = new Map();
 globalThis.localStorage = { getItem: (k) => (mem.has(k) ? mem.get(k) : null),
   setItem: (k, v) => mem.set(k, String(v)), removeItem: (k) => mem.delete(k) };
@@ -41,7 +45,7 @@ const bundle = await esbuild.build({
   }],
 });
 const M = await import("data:text/javascript;base64," + Buffer.from(bundle.outputFiles[0].text).toString("base64"));
-const { issues, ancestorsOf, isStratigraphicType } = M;
+const { issues, ancestorsOf, isStratigraphicType, DocumentStore, setLocale, t } = M;
 const tt = (k, v) => `${k}${v ? JSON.stringify(v) : ""}`;
 const doc = (nodes, edges = []) => ({ header: {}, graph: { id: "g", nodes, edges } });
 
@@ -56,6 +60,18 @@ const doc = (nodes, edges = []) => ({ header: {}, graph: { id: "g", nodes, edges
     namedByConstruction: (nt) => ancestorsOf(nt).includes("ContinuityNode") });
   const para = iss.filter((i) => i.rule === "paradata").map((i) => i.node);
   eq(para, ["u1"], "A9b · «no documented property» for the US, never for a continuity node");
+}
+
+// ── B9a · the default name of a phase is in the interface language ─────────
+{
+  setLocale("it");
+  const st = new DocumentStore(doc([{ id: "ep1", node_type: "EpochNode", name: "Età romana", data: { start_time: -100, end_time: 300 } }]));
+  const p1 = st.addPhase("ep1", (n) => t("l.phaseDefault", { n }));
+  const p2 = st.addPhase("ep1", (n) => t("l.phaseDefault", { n }));
+  eq([p1.name, p2.name], ["Fase 1", "Fase 2"], "B9a · in Italian the phases are «Fase 1», «Fase 2»");
+  eq(t("l.phaseCreated", { name: p2.name }), "fase Fase 2 creata", "B9a · …and the toast says «fase Fase 2 creata»");
+  setLocale("en");
+  eq(t("l.phaseDefault", { n: 3 }), "Phase 3", "B9a · in English «Phase 3»");
 }
 
 if (fails.length) {

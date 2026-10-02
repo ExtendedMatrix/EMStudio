@@ -1185,7 +1185,7 @@ export class DocumentStore {
 
   /** Create a phase (sub-epoch) under an epoch: an EpochNode joined by
    *  has_sub_epoch. No swimlane (rendering as a lane sub-band comes later). */
-  addPhase(epochId: string, name?: string, pos?: LayoutRect): EmNode {
+  addPhase(epochId: string, name?: string | ((n: number) => string), pos?: LayoutRect): EmNode {
     this.checkpoint();
     // the FIRST phase of a top-level epoch absorbs all the epoch's directly
     // attributed units, so there is no confusing "unphased" residual; the user
@@ -1196,7 +1196,9 @@ export class DocumentStore {
     const n = this.epochPhases(epochId).length + 1;
     const node: EmNode = {
       id,
-      name: name ?? `Phase ${n}`,
+      // DEV29 B9a · the default name is the caller's, in the interface
+      // language («fase Fase 2 creata», never «fase Phase 2 creata»)
+      name: typeof name === "function" ? name(n) : name ?? `Phase ${n}`,
       node_type: "EpochNode",
       description: "",
     };

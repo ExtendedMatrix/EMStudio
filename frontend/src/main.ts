@@ -2216,7 +2216,7 @@ function renderInspectorInto(host: HTMLElement): void {
       onToggleFold: (gid) => requestFold(gid),
       onEnterGroup: enterGroup,
       onAddPhase: (epochId) => {
-        const ph = store!.addPhase(epochId);
+        const ph = store!.addPhase(epochId, (n) => t("l.phaseDefault", { n }));
         select(ph.id);
         toast(t("l.phaseCreated", { name: String(ph.name) }));
       },
@@ -25030,7 +25030,7 @@ function wireGraphCanvas(canvas: HTMLCanvasElement, winId: string): void {
       const epochId = addPhasePending;
       addPhasePending = null;
       if (!moved && store && hitAddPhase(rx, ry) === epochId) {
-        const ph = store.addPhase(epochId);
+        const ph = store.addPhase(epochId, (n) => t("l.phaseDefault", { n }));
         select(ph.id);
         toast(t("l.phaseCreated", { name: String(ph.name) }));
       }
