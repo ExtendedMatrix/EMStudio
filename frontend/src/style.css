@@ -4672,20 +4672,27 @@ body.sync-active #footer-brand #em-version {
 }
 .et-file-head {
   display: flex;
+  flex-wrap: wrap;              /* the path tail takes its own line */
   align-items: baseline;
-  gap: 6px;
+  gap: 2px 6px;
   padding: 2px 2px 5px 4px;
   min-width: 0;
 }
 .et-file-icon { color: var(--text-dim); }
 .et-file-name {
+  flex: 1;
+  min-width: 0;
   font-size: 12px;
   font-weight: 700;
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .et-file-tail {
-  flex: 1;
+  order: 10;
+  flex: 1 0 100%;
   min-width: 0;
+  padding-left: 18px;           /* under the name, past the icon */
   font-size: 10px;
   color: var(--text-faint);
   white-space: nowrap;
