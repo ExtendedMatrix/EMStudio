@@ -3189,7 +3189,11 @@ export class DocumentStore {
 
   toJSON(): string {
     const header = { ...(this.doc.header ?? {}) };
-    header["last_editor"] = "EMStudio 0.1.0";
+    // DEV30 V4 · the editor says the version that wrote the file (package.json,
+    // inlined by Vite), not the «0.1.0» of July: a file written by
+    // 1.6.0-dev.15 said «EMStudio 0.1.0». Outside a Vite build (the node checks)
+    // the constant does not exist, and the header says so rather than guess.
+    header["last_editor"] = `EMStudio ${typeof __EMSTUDIO_VERSION__ === "string" ? __EMSTUDIO_VERSION__ : "unbuilt"}`;
     // AUX2: volatile (mapped-but-not-baked) nodes NEVER travel with the saved
     // document. Drop them and any edge incident to one — the canvas/table keep
     // showing them (they read the live graph), but the file, sync and bridge
