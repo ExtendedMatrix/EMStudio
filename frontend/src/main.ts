@@ -233,6 +233,7 @@ import { passagesOf } from "./passages";
 import * as trx from "./translation";
 import * as trui from "./translation-ui";
 import * as orcidIn from "./orcid-signin";
+import { isAppReturn, NODE_DESKTOP_RETURN, ORCID_DESKTOP_RETURN, readReturn } from "./desktop-return";
 import {
   checkReceipt, coversMoreThanTheFile, receiptOf, receiptsOfEmission, refreshedCopies, verdictChanged,
   type ReceiptCheck, type StampVerdict,
@@ -5300,6 +5301,47 @@ async function followHandoff(): Promise<void> {
   await openHandoff(handoff);
 }
 
+/** ENTRARE DAL DESKTOP · a sign-in page, in the SYSTEM browser — never in the
+ *  webview, which would be a login form inside an app that could read it (and
+ *  several identity providers refuse it outright). `tauri-plugin-opener`,
+ *  scoped to http(s) in `capabilities/default.json`. */
+async function openInSystemBrowser(url: string): Promise<boolean> {
+  try {
+    const opener = await import("@tauri-apps/plugin-opener") as { openUrl: (u: string) => Promise<void> };
+    await opener.openUrl(url);
+    return true;
+  } catch (error) {
+    const why = String((error as Error)?.message ?? error);
+    logWarn(`identity: the system browser did not open — ${why}`);
+    toast(t("idp.browserFailed", { why }));
+    return false;
+  }
+}
+
+/** ENTRARE DAL DESKTOP · the answer of a sign-in started from the desktop,
+ *  delivered by the OS (`link`) or pasted from the page that shows it
+ *  (`paste`). The same verification either way: what decides is the nonce,
+ *  the state and the verifier only this window holds. */
+async function followDesktopReturn(text: string, how: "link" | "paste"): Promise<boolean> {
+  const answer = readReturn(text);
+  if (!answer) {
+    if (how === "paste") toast(t("idp.pasteNotAnswer"));
+    logWarn(`identity: not a sign-in answer (${how}) — ${text.slice(0, 60)}`);
+    return false;
+  }
+  if (document.querySelector(".idpanel[data-idp-waiting]")) closeIdentityPanel();
+  if (answer.kind === "orcid") {
+    await completeOrcidReturn(answer.hash);
+    return true;
+  }
+  const ours = await completeNodeSignIn(answer.search);
+  if (!ours) {
+    toast(t("idp.noNodeSignIn"));
+    logWarn("identity: a node's answer arrived, and no sign-in to a node was started from here");
+  }
+  return ours;
+}
+
 /** The DESKTOP way in: the OS hands the app a `stratigraph://` URL.
  *
  *  Wired defensively because the plugin is a desktop-only dependency: on the web
@@ -5321,6 +5363,13 @@ async function wireDesktopDeepLink(): Promise<void> {
     };
     const follow = (urls: string[] | null | undefined) => {
       for (const url of urls || []) {
+        // ENTRARE DAL DESKTOP · OUR scheme first: the answer of a sign-in this
+        // window started (ORCID through the public page, a node straight), not
+        // a handoff — `parseHandoff` would refuse it as a foreign link
+        if (isAppReturn(url)) {
+          void followDesktopReturn(url, "link");
+          return;
+        }
         try {
           void openHandoff(parseHandoff(url));
           return;
@@ -10143,6 +10192,10 @@ async function signIntoNode(opts: { silent?: boolean; idpHint?: string; loginHin
     if (!opts.silent) toast(t("ident.nodeOpen", { server }));
     return false;
   }
+  // ENTRARE DAL DESKTOP · a SILENT round needs a page that navigates and comes
+  // back unseen; the desktop opens the system browser, which is never silent.
+  // So there is none: the desktop asks when the person asks.
+  if (isTauri() && opts.silent) return false;
   const pending: PendingNodeSignIn = {
     server, returnTo: window.location.href, silent: opts.silent || undefined,
     intent: opts.intent,
@@ -10151,6 +10204,25 @@ async function signIntoNode(opts: { silent?: boolean; idpHint?: string; loginHin
     sessionStorage.setItem(SIGNIN_KEY, JSON.stringify(pending));
   } catch { /* a private window: the sign-in simply cannot be resumed */ }
   handoffAuth = config;
+  // ENTRARE DAL DESKTOP (3 Oct 2026) · the realm's login opens in the SYSTEM
+  // browser and comes back STRAIGHT to the app, on its own scheme
+  // (`org.extendedmatrix.emstudio:/oidc-return`, `desktop-return.ts`) — not
+  // through a page on the internet, since the node's password is the way in
+  // without one. The client must list that redirect (the dev realm does since
+  // 3 Oct; on a real node it is a line for the realm's owner).
+  if (isTauri()) {
+    const url = await authorizeUrl(config, {
+      returnTo: window.location.href, idpHint: opts.idpHint,
+      loginHint: opts.loginHint, redirectUri: NODE_DESKTOP_RETURN,
+    });
+    if (!(await openInSystemBrowser(url))) {
+      try { sessionStorage.removeItem(SIGNIN_KEY); } catch { /* nothing kept */ }
+      return false;
+    }
+    logInfo(`identity: the sign-in at ${server} is open in the browser — waiting for its answer`);
+    openIdentityPanel(undefined, { waiting: "node", node: new URL(server).host });
+    return true;
+  }
   // THE ADDRESS COMES WITH US. Somebody who signs in from a page that was
   // opening something has to come back to that page with the something still on
   // it — the realm's return replaces the query string, so `?study=` would
@@ -10164,8 +10236,15 @@ async function signIntoNode(opts: { silent?: boolean; idpHint?: string; loginHin
   return true;
 }
 
-/** Finish a sign-in this page started, if it did. Returns whether it was ours. */
-async function completeNodeSignIn(): Promise<boolean> {
+/** Is a sign-in to a node waiting for its answer in this window? */
+function nodeSignInPending(): boolean {
+  try { return !!sessionStorage.getItem(SIGNIN_KEY); } catch { return false; }
+}
+
+/** Finish a sign-in this page started, if it did. Returns whether it was ours.
+ *  `search`: the answer's query when it did not arrive on this page's address —
+ *  the desktop's deep link, or what a person pasted. */
+async function completeNodeSignIn(search?: string): Promise<boolean> {
   let remembered: PendingNodeSignIn | null = null;
   try {
     const raw = sessionStorage.getItem(SIGNIN_KEY);
@@ -10175,14 +10254,17 @@ async function completeNodeSignIn(): Promise<boolean> {
   if (!remembered?.server) return false;
   const config = await loadAuthConfig(remembered.server);
   const result = config
-    ? await completeSignIn(config)
+    ? await completeSignIn(config, search)
     : { ok: false, error: "that node no longer offers a sign-in" };
-  clearHandoffFromLocation();
   // …and the address comes back BEFORE anything reads it, so whatever this page
   // was doing is on the URL again. OUR copy first: it is the one that does not
   // depend on the PKCE record having survived, and the two are the same value
-  // written by the same line.
-  restoreAfterSignIn(remembered.returnTo ?? result.returnTo);
+  // written by the same line. (Not when the answer came by deep link: this
+  // page's address never left, and holds no leftovers.)
+  if (search === undefined) {
+    clearHandoffFromLocation();
+    restoreAfterSignIn(remembered.returnTo ?? result.returnTo);
+  }
   // a SILENT round is one we started silently — read from our own record, so it
   // is known even when `completeSignIn` could not tell us
   const wasSilent = remembered.silent || result.silent;
@@ -10694,23 +10776,54 @@ function openNodeSettings(): void {
 }
 
 /** F8 · what «Test» found at an address: reachable, the server's version, and
- *  the ways in it offers — read, never guessed. */
-async function probeNodeAt(address: string): Promise<{ ok: boolean; text: string }> {
+ *  the ways in it offers — read, never guessed.
+ *
+ *  ENTRARE DAL DESKTOP (E4) · on the dev stack the node is at
+ *  `https://em.localhost:8443/em` (Caddy, `handle_path /em/*`), and the bare
+ *  origin answers with the SITE in front of it. So when the address is not a
+ *  node, `<address>/em` is tried too, and if a node answers there it is
+ *  PROPOSED (`suggest`), never silently adopted; when only a site answers,
+ *  that is what is said. */
+async function probeNodeAt(address: string): Promise<{ ok: boolean; text: string; suggest?: string }> {
   const base = address.trim().replace(/\/+$/, "");
   if (!base) return { ok: false, text: t("settings.nodeEmpty") };
   if (!/^https?:\/\//.test(base)) return { ok: false, text: t("settings.nodeNotUrl", { url: base }) };
-  const ctl = new AbortController();
-  const timer = setTimeout(() => ctl.abort(), 4000);
+  type Health = { service?: string; version?: string; s3dgraphy?: string; auth?: string };
+  const ask = async (at: string): Promise<{ status: number | null; health: Health | null }> => {
+    const ctl = new AbortController();
+    const timer = setTimeout(() => ctl.abort(), 4000);
+    try {
+      const r = await fetch(`${at}/v1/health`, { signal: ctl.signal, cache: "no-store" });
+      const j = r.ok ? await r.json().catch(() => null) as Health | null : null;
+      return { status: r.status, health: j && j.service === "stratigraph-server" ? j : null };
+    } catch {
+      return { status: null, health: null };
+    } finally {
+      clearTimeout(timer);
+    }
+  };
+  const here = await ask(base);
+  if (!here.health) {
+    if (!/\/em$/.test(base)) {
+      const under = await ask(`${base}/em`);
+      if (under.health) return { ok: false, suggest: `${base}/em`,
+        text: t("settings.nodeUnderEm", { url: base, node: `${base}/em`, version: under.health.version ?? "?" }) };
+    }
+    if (here.status !== null) return { ok: false, text: t("settings.nodeNotNode", { url: base, status: String(here.status) }) };
+    // no readable answer — but a SITE that sends no CORS header answers all the
+    // same, and from a page that is indistinguishable from silence. An opaque
+    // (no-cors) answer is an answer: then it is a site, not a node, and that is
+    // what is said; only a network error is «does not answer»
+    const answers = await fetch(base, { mode: "no-cors", credentials: "omit", cache: "no-store" }).then(() => true, () => false);
+    return { ok: false, text: answers ? t("settings.nodeIsSite", { url: base }) : t("settings.nodeUnreachable", { url: base }) };
+  }
   try {
-    const r = await fetch(`${base}/v1/health`, { signal: ctl.signal, cache: "no-store" });
-    const j = r.ok ? await r.json().catch(() => null) as
-      { service?: string; version?: string; s3dgraphy?: string; auth?: string } | null : null;
-    if (!j || j.service !== "stratigraph-server")
-      return { ok: false, text: t("settings.nodeNotNode", { url: base, status: String(r.status) }) };
+    const j = here.health;
     const ways: string[] = [];
     if (j.auth === "keycloak") {
       const cfg = await loadAuthConfig(base).catch(() => null);
-      if (cfg?.orcid_idp) ways.push(t("settings.nodeWayOrcid"));
+      if (cfg?.orcid_idp) ways.push(cfg.orcid_idp_ready === false
+        ? t("settings.nodeWayOrcidClosed", { why: cfg.orcid_idp_why || "" }) : t("settings.nodeWayOrcid"));
       ways.push(cfg?.node_name ? t("settings.nodeWayPasswordOf", { node: cfg.node_name }) : t("settings.nodeWayPassword"));
     } else {
       ways.push(t("settings.nodeWayOpen"));
@@ -10719,8 +10832,6 @@ async function probeNodeAt(address: string): Promise<{ ok: boolean; text: string
       url: base, version: j.version ?? "?", s3d: j.s3dgraphy ?? "?", ways: ways.join(" · ") }) };
   } catch {
     return { ok: false, text: t("settings.nodeUnreachable", { url: base }) };
-  } finally {
-    clearTimeout(timer);
   }
 }
 
@@ -10732,7 +10843,20 @@ document.getElementById("set-node-test")?.addEventListener("click", async () => 
   out.dataset.state = "";
   const r = await probeNodeAt(field.value);
   out.textContent = r.text;
-  out.dataset.state = r.ok ? "ok" : "no";
+  out.dataset.state = r.ok ? "ok" : r.suggest ? "suggest" : "no";
+  // E4 · the right address, one click away (and «Test» again, to see it answer)
+  if (r.suggest) {
+    const use = document.createElement("button");
+    use.type = "button";
+    use.className = "link";
+    use.dataset.nodeSuggest = r.suggest;
+    use.textContent = t("settings.nodeUseSuggested", { url: r.suggest });
+    use.addEventListener("click", () => {
+      field.value = r.suggest!;
+      document.getElementById("set-node-test")?.click();
+    });
+    out.append(" ", use);
+  }
 });
 document.getElementById("set-node-signin")?.addEventListener("click", () => {
   const field = document.getElementById("set-hub-url") as HTMLInputElement | null;
@@ -14388,7 +14512,8 @@ let identityThen: (() => void) | null = null;
 
 /** Is a StratiGraph node there to sign in through, and why not when it is not. */
 async function probeStratiGraphNode(): Promise<{ ok: boolean; server: string; why?: string;
-                                               nodeName?: string; orcidIdp?: string; noNode?: boolean }> {
+                                               nodeName?: string; orcidIdp?: string; noNode?: boolean;
+                                               orcidReady?: boolean | null; orcidWhy?: string }> {
   const server = servingNode();
   if (!server) return { ok: false, server, why: t("idw.noNode"), noNode: true };
   const ctl = new AbortController();
@@ -14401,8 +14526,12 @@ async function probeStratiGraphNode(): Promise<{ ok: boolean; server: string; wh
     // dev27 · the node's name (the one that attests a password sign-in) and
     // the alias of its ORCID provider — `/v1/auth-config`, absent on an old node
     const cfg = await loadAuthConfig(server).catch(() => null);
+    // ENTRARE DAL DESKTOP · whether the realm's ORCID provider HAS a client,
+    // measured by the node (`orcid_idp_ready`, stratigraph-server 3 Oct 2026):
+    // false → the node's ORCID way is shown closed, with the node's reason
     return { ok: true, server, nodeName: cfg?.node_name ?? undefined,
-             orcidIdp: cfg?.orcid_idp ?? undefined };
+             orcidIdp: cfg?.orcid_idp ?? undefined,
+             orcidReady: cfg?.orcid_idp_ready ?? null, orcidWhy: cfg?.orcid_idp_why ?? "" };
   } catch {
     return { ok: false, server, why: t("idp.noNode", { server }) };
   } finally {
@@ -14412,9 +14541,11 @@ async function probeStratiGraphNode(): Promise<{ ok: boolean; server: string; wh
 
 /** ORCID's own sign-in needs a client registered at ORCID (public id): none
  *  configured → the way is shown, disabled, with the reason. */
-function orcidConfig(): orcidIn.OrcidConfig | null {
+function orcidConfig(): (orcidIn.OrcidConfig & { isDefault: boolean }) | null {
   const s = getSettings().identity;
-  return s.orcidClientId.trim() ? { clientId: s.orcidClientId.trim(), base: s.orcidBase || "https://orcid.org" } : null;
+  const base = s.orcidBase || orcidIn.ORCID_PRODUCTION;
+  const client = orcidIn.orcidClientFor(s.orcidClientId, base);
+  return client ? { clientId: client.clientId, base, isDefault: client.isDefault } : null;
 }
 
 function closeIdentityPanel(): void {
@@ -14424,7 +14555,8 @@ function closeIdentityPanel(): void {
 
 /** Open the identity panel, keeping what asked for it: `then` runs once an
  *  identity exists (declared or verified). */
-function openIdentityPanel(then?: () => void): void {
+function openIdentityPanel(then?: () => void,
+                           opts: { waiting?: "orcid" | "node"; node?: string } = {}): void {
   if (then) identityThen = then;
   closeIdentityPanel();
   const chip = document.getElementById("footer-identity");
@@ -14455,6 +14587,36 @@ function openIdentityPanel(then?: () => void): void {
     const hint = el("div", "idp-hint", t("idp.confirmHint"));
     hint.dataset.idpConfirm = "1";
     box.appendChild(hint);
+  }
+
+  // ENTRARE DAL DESKTOP · a sign-in is open in the browser: say so, and offer
+  // the way back by hand — the page shows the answer as a code when the app's
+  // scheme does not open by itself
+  const waitingFor = opts.waiting
+    ?? (isTauri() ? (orcidIn.orcidPending() ? "orcid" : nodeSignInPending() ? "node" : undefined) : undefined);
+  if (opts.waiting) box.dataset.idpWaiting = opts.waiting;
+  if (waitingFor) {
+    const row = el("div", "idp-way idp-paste");
+    row.dataset.idpPaste = waitingFor;
+    row.appendChild(el("b", undefined, t(waitingFor === "orcid" ? "idp.pasteOrcid" : "idp.pasteNode")));
+    row.appendChild(el("span", "idp-d", waitingFor === "orcid" ? t("idp.waitingOrcid")
+      : t("idp.waitingNode", { node: opts.node ?? "" })));
+    const pasteLine = el("div", "idp-line");
+    const pasteIn = el("input");
+    pasteIn.dataset.idpPasteInput = "1";
+    pasteIn.placeholder = waitingFor === "orcid" ? "#id_token=…&state=…" : "org.extendedmatrix.emstudio:/oidc-return?…";
+    pasteIn.autocomplete = "off";
+    pasteIn.spellcheck = false;
+    pasteIn.setAttribute("aria-label", t(waitingFor === "orcid" ? "idp.pasteOrcid" : "idp.pasteNode"));
+    const pasteGo = el("button", "primary", t("idp.pasteBtn"));
+    pasteGo.type = "button";
+    pasteGo.dataset.idpPasteGo = "1";
+    const go = (): void => { const v = pasteIn.value; if (v.trim()) void followDesktopReturn(v, "paste"); };
+    pasteGo.addEventListener("click", go);
+    pasteIn.addEventListener("keydown", (e) => { if (e.key === "Enter") go(); });
+    pasteLine.append(pasteIn, pasteGo);
+    row.appendChild(pasteLine);
+    box.appendChild(row);
   }
 
   const way = (key: string, title: string, desc: string): { row: HTMLElement; desc: HTMLElement } => {
@@ -14500,9 +14662,15 @@ function openIdentityPanel(then?: () => void): void {
     if (pr.orcidIdp) idpHint = pr.orcidIdp;
     const host = pr.ok ? new URL(pr.server).host : "";
     const node = pr.nodeName || host;
-    const viaOrcid = pr.ok && orcidUp;
+    // ENTRARE DAL DESKTOP (E3) · the node says its ORCID provider has no
+    // client: the way is CLOSED, with the node's reason — it used to be offered
+    // and fail at ORCID with «invalid client»
+    const nodeOrcidClosed = pr.ok && pr.orcidReady === false;
+    const viaOrcid = pr.ok && orcidUp && !nodeOrcidClosed;
     w1.desc.textContent = !pr.ok ? (pr.why ?? "")
+      : nodeOrcidClosed ? t("idp.nodeOrcidClosed", { node: host, why: pr.orcidWhy || "" })
       : orcidUp ? t("idp.way1Desc", { node: host }) : t("idp.orcidDown", { base: new URL(orcidBase).host });
+    if (nodeOrcidClosed) w1.row.dataset.idpClosed = "no-client";
     b1.disabled = !viaOrcid;
     w1.row.classList.toggle("off", !viaOrcid);
     w1.row.dataset.idpReady = String(viaOrcid);
@@ -14514,10 +14682,10 @@ function openIdentityPanel(then?: () => void): void {
       cfgBtn.addEventListener("click", () => { closeIdentityPanel(); openNodeSettings(); });
       w1.row.appendChild(cfgBtn);
     }
-    // the field way: a node, and no ORCID
-    const field = pr.ok && !orcidUp;
+    // the field way: a node, and no ORCID — nor ORCID through the node
+    const field = pr.ok && (!orcidUp || nodeOrcidClosed);
     wp.row.hidden = !field;
-    wp.desc.textContent = field ? t("idp.wayNodePwDesc", { node }) : "";
+    wp.desc.textContent = !field ? "" : orcidUp ? t("idp.wayNodePwDescClosed", { node }) : t("idp.wayNodePwDesc", { node });
     bp.disabled = !field;
     wp.row.dataset.idpReady = String(field);
     wp.row.dataset.idpNode = node;
@@ -14525,13 +14693,27 @@ function openIdentityPanel(then?: () => void): void {
 
   // 2 · ORCID itself
   const cfg = orcidConfig();
-  const w2 = way("orcid", t("idp.way2"), cfg ? t("idp.probing") : t("idp.noClient"));
+  // ENTRARE DAL DESKTOP · EMStudio's client on orcid.org knows ONE return, the
+  // desktop's public page: a web build on a node would derive its own page as
+  // the redirect, and ORCID would refuse it. The web needs a client of its own
+  // (Settings ▸ Identity), registered with its page — or the node's way.
+  const webOnDefault = !!cfg && cfg.isDefault && !isTauri();
+  const w2 = way("orcid", t("idp.way2"), !cfg ? t("idp.noClient") : webOnDefault ? t("idp.orcidWebNeedsClient") : t("idp.probing"));
   const b2 = el("button", "ghost", confirming ? t("idp.confirmBtn") : t("idp.way2Btn"));
   b2.type = "button";
   b2.disabled = true;
-  b2.addEventListener("click", () => { if (cfg) window.location.assign(orcidIn.orcidAuthorizeUrl(cfg)); });
+  b2.addEventListener("click", () => {
+    if (!cfg) return;
+    if (!isTauri()) { window.location.assign(orcidIn.orcidAuthorizeUrl(cfg)); return; }
+    // the desktop: ORCID in the system browser, back through the public page
+    const url = orcidIn.orcidAuthorizeUrl(cfg, window.location.href, ORCID_DESKTOP_RETURN);
+    closeIdentityPanel();
+    void openInSystemBrowser(url).then((opened) => {
+      if (opened) { logInfo("identity: ORCID is open in the browser — waiting for its answer"); openIdentityPanel(undefined, { waiting: "orcid" }); }
+    });
+  });
   w2.row.appendChild(b2);
-  if (!cfg) { w2.row.classList.add("off"); w2.row.dataset.idpReady = "false"; }
+  if (!cfg || webOnDefault) { w2.row.classList.add("off"); w2.row.dataset.idpReady = "false"; }
   else void orcidIn.orcidReachable(cfg.base).then((up) => {
     if (!box.isConnected) return;
     w2.desc.textContent = up ? t("idp.way2Desc", { base: new URL(cfg.base).host }) : t("idp.offline");
@@ -14652,9 +14834,11 @@ async function witnessIdentityFromNode(): Promise<void> {
 }
 
 /** Back from ORCID: verify the id_token, and adopt or confirm the iD. */
-async function completeOrcidReturn(): Promise<void> {
-  const r = await orcidIn.completeOrcidSignIn();
-  try {
+async function completeOrcidReturn(hash?: string): Promise<void> {
+  const r = await orcidIn.completeOrcidSignIn(hash);
+  // the web: the answer is on this page's address, and comes off it. The
+  // desktop (`hash` given, by deep link or pasted): the address never left.
+  if (hash === undefined) try {
     const back = new URL(r.returnTo ?? window.location.href, window.location.href);
     back.hash = "";
     window.history.replaceState({}, "", back.toString());
@@ -14677,7 +14861,9 @@ async function completeOrcidReturn(): Promise<void> {
   logInfo(`identity: ${r.orcid} verified by ${by}`);
   toast(t("idp.verifiedBy", { orcid: r.orcid, by }));
   applyIdentityToDocument();
+  refreshIdentityPanel();
   refreshIdentityChip();
+  resumeIdentityThen();
 }
 
 /** …and run it when the identity arrives. */

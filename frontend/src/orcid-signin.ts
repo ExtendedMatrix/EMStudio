@@ -24,7 +24,32 @@
  * What it NEEDS and this code cannot invent: a client registered at ORCID
  * (`client_id`, public), with this page's address as a redirect URI. Without
  * one the mode is shown disabled, with the reason — see the night's report.
+ *
+ * ENTRARE DAL DESKTOP (3 Oct 2026). The client exists: E.D. registered
+ * `APP-DBYSPGP676HKN8OE` on orcid.org (production, Public API), with ONE
+ * redirect, `https://extendedmatrix.org/orcid/callback/`. The desktop's page is
+ * `tauri://localhost`, which ORCID will never accept, so the desktop sends
+ * ORCID's answer to that page (`desktop-return.ts`), and the page hands it to
+ * the app on `org.extendedmatrix.emstudio:/orcid-return#…`. The redirect used
+ * is therefore a PARAMETER, remembered in the pending record — the one ORCID
+ * was asked for is the one that came back. And the pending record lives in
+ * memory as well as in sessionStorage: the webview does not navigate any more,
+ * so the module variable outlives the round trip (never localStorage: a nonce
+ * on disk outlives the reason it was made — `oidc.ts`'s rule).
  */
+
+/** EMStudio's client on orcid.org (public: it travels in the address bar). */
+export const DEFAULT_ORCID_CLIENT_ID = "APP-DBYSPGP676HKN8OE";
+export const ORCID_PRODUCTION = "https://orcid.org";
+
+/** The client to use for a base: the one written, else EMStudio's on
+ *  orcid.org. The sandbox is another registry with other ids: none by default. */
+export function orcidClientFor(written: string, base: string): { clientId: string; isDefault: boolean } | null {
+  const id = written.trim();
+  if (id) return { clientId: id, isDefault: id === DEFAULT_ORCID_CLIENT_ID };
+  if (base.replace(/\/+$/, "") === ORCID_PRODUCTION) return { clientId: DEFAULT_ORCID_CLIENT_ID, isDefault: true };
+  return null;
+}
 
 export interface OrcidConfig {
   /** the public client id registered at ORCID (APP-…) */
@@ -35,7 +60,12 @@ export interface OrcidConfig {
 
 const PENDING_KEY = "emstudio.orcid.pending";
 
-interface Pending { nonce: string; state: string; returnTo: string; base: string; clientId: string }
+interface Pending { nonce: string; state: string; returnTo: string; base: string; clientId: string;
+                   /** the redirect ORCID was asked to use (desktop: the public page) */
+                   redirectUri?: string }
+
+/** The round trip of THIS window, in memory too (see the header). */
+let memoryPending: Pending | null = null;
 
 function random(): string {
   const bytes = new Uint8Array(24);
@@ -48,16 +78,19 @@ export function orcidRedirectUri(): string {
   return `${window.location.origin}${window.location.pathname}`;
 }
 
-/** Build the authorization URL and remember (sessionStorage, one round trip)
- *  the nonce and where to come back to. */
-export function orcidAuthorizeUrl(cfg: OrcidConfig, returnTo: string = window.location.href): string {
-  const pending: Pending = { nonce: random(), state: random(), returnTo, base: cfg.base, clientId: cfg.clientId };
-  sessionStorage.setItem(PENDING_KEY, JSON.stringify(pending));
+/** Build the authorization URL and remember (sessionStorage and memory, one
+ *  round trip) the nonce and where to come back to. `redirectUri`: this page on
+ *  the web, the public return page on the desktop. */
+export function orcidAuthorizeUrl(cfg: OrcidConfig, returnTo: string = window.location.href,
+                                  redirectUri: string = orcidRedirectUri()): string {
+  const pending: Pending = { nonce: random(), state: random(), returnTo, base: cfg.base, clientId: cfg.clientId, redirectUri };
+  memoryPending = pending;
+  try { sessionStorage.setItem(PENDING_KEY, JSON.stringify(pending)); } catch { /* memory holds it */ }
   const url = new URL(`${cfg.base.replace(/\/+$/, "")}/oauth/authorize`);
   url.searchParams.set("client_id", cfg.clientId);
   url.searchParams.set("response_type", "id_token");
   url.searchParams.set("scope", "openid");
-  url.searchParams.set("redirect_uri", orcidRedirectUri());
+  url.searchParams.set("redirect_uri", redirectUri);
   url.searchParams.set("nonce", pending.nonce);
   url.searchParams.set("state", pending.state);
   return url.toString();
@@ -67,6 +100,12 @@ export function orcidAuthorizeUrl(cfg: OrcidConfig, returnTo: string = window.lo
  *  and a round trip this tab started) */
 export function returningFromOrcid(hash: string = window.location.hash): boolean {
   if (!/(^|[#&])(id_token|error)=/.test(hash)) return false;
+  return orcidPending();
+}
+
+/** Is a round trip to ORCID waiting for its answer in this window? */
+export function orcidPending(): boolean {
+  if (memoryPending) return true;
   try { return !!sessionStorage.getItem(PENDING_KEY); } catch { return false; }
 }
 
@@ -101,7 +140,10 @@ export async function completeOrcidSignIn(
     sessionStorage.removeItem(PENDING_KEY);
     pending = raw ? JSON.parse(raw) as Pending : null;
   } catch { pending = null; }
-  if (!pending) return { ok: false, error: "no sign-in was started from this tab" };
+  // deleted on read, both copies, whatever the outcome
+  pending = pending ?? memoryPending;
+  memoryPending = null;
+  if (!pending) return { ok: false, error: "no sign-in to ORCID was started from here (was EMStudio closed in the meantime?) — start it again from EMStudio" };
   const params = new URLSearchParams(hash.replace(/^#/, ""));
   const back = pending.returnTo;
   if (params.get("error")) return { ok: false, error: params.get("error_description") || params.get("error")!, returnTo: back };

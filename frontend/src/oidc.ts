@@ -39,6 +39,10 @@ export interface AuthConfig {
    *  made with its password (stratigraph-server `/v1/auth-config`) */
   orcid_idp?: string | null;
   node_name?: string | null;
+  /** 3 Oct 2026 · whether that provider HAS an ORCID client, measured by the
+   *  node (true · false with `orcid_idp_why` · null/absent: not known) */
+  orcid_idp_ready?: boolean | null;
+  orcid_idp_why?: string | null;
 }
 
 export interface SignInResult {
@@ -79,6 +83,11 @@ interface PendingSignIn {
   state: string;
   returnTo?: string;
   silent?: boolean;
+  /** ENTRARE DAL DESKTOP · the redirect the realm was asked for — the code
+   *  exchange must name the SAME one. On the web it is this page's directory
+   *  (derived); on the desktop the app's own scheme
+   *  (`org.extendedmatrix.emstudio:/oidc-return`, `desktop-return.ts`). */
+  redirectUri?: string;
 }
 
 const VERIFIER_KEY = "emstudio.pkce";
@@ -134,19 +143,21 @@ export function redirectUri(): string {
  *  refuse it outright). */
 export async function authorizeUrl(
   config: AuthConfig,
-  opts: { returnTo?: string; silent?: boolean; idpHint?: string; loginHint?: string } = {},
+  opts: { returnTo?: string; silent?: boolean; idpHint?: string; loginHint?: string; redirectUri?: string } = {},
 ): Promise<string> {
   const verifier = randomVerifier();
   const state = randomVerifier();
+  const redirect = opts.redirectUri ?? redirectUri();
   const pending: PendingSignIn = {
     verifier, state,
     returnTo: opts.returnTo, silent: opts.silent || undefined,
+    redirectUri: opts.redirectUri,
   };
   sessionStorage.setItem(VERIFIER_KEY, JSON.stringify(pending));
   const url = new URL(config.authorization_endpoint);
   url.searchParams.set("response_type", "code");
   url.searchParams.set("client_id", config.client_id);
-  url.searchParams.set("redirect_uri", redirectUri());
+  url.searchParams.set("redirect_uri", redirect);
   url.searchParams.set("scope", config.scope || "openid profile email");
   url.searchParams.set("code_challenge", await challengeFor(verifier));
   url.searchParams.set("code_challenge_method", "S256");
@@ -223,7 +234,7 @@ export async function completeSignIn(
   const result = await exchange(config, {
     grant_type: "authorization_code",
     code,
-    redirect_uri: redirectUri(),
+    redirect_uri: saved.redirectUri ?? redirectUri(),
     code_verifier: saved.verifier,
   });
   return { ...result, ...where };

@@ -8808,6 +8808,9 @@ input.storage-path:focus { border-color: var(--accent); background: var(--bg-pan
 .idp-way > button { justify-self: start; }
 .idp-d { color: var(--text-faint); line-height: 1.4; }
 .idp-line { display: flex; gap: 6px; flex-wrap: wrap; }
+/* ENTRARE DAL DESKTOP · a sign-in open in the browser: the way back by hand */
+.idp-paste { border-color: var(--accent-ink); }
+.idp-paste input { flex: 1 1 14em; min-width: 0; font-family: var(--font-mono, ui-monospace, monospace); font-size: 11px; }
 .idp-line input { flex: 1 1 9rem; min-width: 0; font: .84rem var(--font-mono); padding: 3px 6px; }
 .idp-line input[data-idp-name] { font-family: var(--font-sans); }
 .idp-err { color: var(--danger); font-size: .78rem; min-height: 1em; }

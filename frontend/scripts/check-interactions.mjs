@@ -3516,6 +3516,307 @@ test("F8.node", "F8 (U17) · Impostazioni › Sync: «Il tuo nodo StratiGraph» 
     detail: { r, result, errors } };
 });
 
+// ── MICRO-ENTRARE-DAL-DESKTOP (3 ott) · E1–E5 ────────────────────────────────
+/** a Tauri shell that RECORDS the URLs opened in the system browser and can
+ *  DELIVER a deep link the way the OS does (`deep-link://new-url` → onOpenUrl) */
+const tauriDesktop = () => (() => {
+  window.__OPENED__ = [];
+  window.__WRITES__ = [];
+  const callbacks = new Map();
+  const listeners = [];
+  let next = 1;
+  window.__TAURI_INTERNALS__ = {
+    metadata: { currentWindow: { label: "main" }, currentWebview: { label: "main", windowLabel: "main" } },
+    transformCallback: (cb) => { const id = next++; callbacks.set(id, cb); return id; },
+    unregisterCallback: (id) => callbacks.delete(id), convertFileSrc: (x) => x,
+    invoke: async (cmd, args, opts) => {
+      if (cmd === "plugin:opener|open_url") { window.__OPENED__.push(String(args?.url ?? "")); return null; }
+      if (cmd === "plugin:event|listen") { listeners.push({ event: args.event, handler: args.handler }); return listeners.length; }
+      if (cmd === "plugin:deep-link|get_current") return null;
+      if (cmd === "plugin:fs|write_text_file") {
+        const raw = opts?.headers?.path ?? args?.path ?? "";
+        const text = args instanceof Uint8Array ? new TextDecoder().decode(args) : String(args?.data ?? "");
+        window.__WRITES__.push({ path: decodeURIComponent(raw), text });
+        return null;
+      }
+      if (cmd === "transformer_url") return window.__BRIDGE__ ?? null;
+      if (cmd === "plugin:dialog|save") return window.__SAVE_PATH__ ?? null;
+      if (cmd === "llm_key_status") return { available: false, set: false, detail: "test" };
+      return null;
+    },
+  };
+  // ORCID reachable: the panel's probe is a no-cors fetch of ORCID's favicon,
+  // and Playwright cannot fulfil an intercepted no-cors request (measured: it
+  // always fails, whatever the answer) — so the probe alone is answered here
+  const realFetch = window.fetch.bind(window);
+  window.fetch = (input, init) => {
+    const u = typeof input === "string" ? input : input?.url ?? "";
+    if (init?.mode === "no-cors" && /^https:\/\/(sandbox\.)?orcid\.org\/favicon\.ico$/.test(u)) return Promise.resolve(new Response(null, { status: 200 }));
+    return realFetch(input, init);
+  };
+  /** the OS hands the app a URL */
+  window.__DEEPLINK__ = (url) => {
+    for (const l of listeners) if (l.event === "deep-link://new-url") callbacks.get(l.handler)?.({ event: l.event, id: 1, payload: [url] });
+  };
+});
+const ORCID_ID = "0000-0002-1825-0097";
+/** a key that plays ORCID: it signs id_tokens, and its public half is served as ORCID's JWKS */
+const fakeOrcid = async () => {
+  const subtle = globalThis.crypto.subtle;
+  const key = await subtle.generateKey({ name: "RSASSA-PKCS1-v1_5", modulusLength: 2048, publicExponent: new Uint8Array([1, 0, 1]), hash: "SHA-256" }, true, ["sign", "verify"]);
+  const jwk = { ...(await subtle.exportKey("jwk", key.publicKey)), kid: "bench-orcid", use: "sig" };
+  const b64u = (buf) => Buffer.from(buf).toString("base64").replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+  const token = async (claims) => {
+    const h = b64u(JSON.stringify({ alg: "RS256", kid: jwk.kid })), q = b64u(JSON.stringify(claims));
+    const sig = await subtle.sign("RSASSA-PKCS1-v1_5", key.privateKey, new TextEncoder().encode(`${h}.${q}`));
+    return `${h}.${q}.${b64u(sig)}`;
+  };
+  const route = { pattern: "https://orcid.org/**", handler: (r) => {
+    const u = r.request().url(), h = { "access-control-allow-origin": "*" };
+    if (u.endsWith("/oauth/jwks")) return r.fulfill({ status: 200, headers: h, json: { keys: [jwk] } });
+    return r.fulfill({ status: 200, headers: h, body: "" });         // the favicon: ORCID is reachable
+  } };
+  return { token, route };
+};
+const idPanel = (p) => p.evaluate(() => ({
+  state: document.querySelector(".idpanel .idp-state")?.dataset.idpState ?? null,
+  stateText: document.querySelector(".idpanel .idp-state")?.textContent ?? "",
+  paste: document.querySelector(".idpanel [data-idp-paste]")?.dataset.idpPaste ?? null,
+  ways: Object.fromEntries([...document.querySelectorAll(".idpanel [data-idp-way]")].map((w) => [w.dataset.idpWay,
+    { ready: w.dataset.idpReady, hidden: w.hidden, closed: w.dataset.idpClosed ?? null, desc: w.querySelector(".idp-d")?.textContent ?? "" }])),
+}));
+
+test("E1.orcid", "E1 · «Sign in with ORCID» sul desktop: ORCID si apre nel BROWSER DI SISTEMA (mai nella webview) col client di EMStudio e il ritorno https://extendedmatrix.org/orcid/callback/; la risposta torna per deep link org.extendedmatrix.emstudio:/orcid-return#…, è verificata (firma, nonce) e l'iD diventa verificato da orcid.org", async () => {
+  const orcid = await fakeOrcid();
+  const { p, ctx, errors } = await open({ doc: LITE(), locale: "en", hook: tauriDesktop(), route: orcid.route });
+  await p.click("#footer-identity");
+  await p.waitForFunction(() => document.querySelector('.idpanel [data-idp-way="orcid"]')?.dataset.idpReady === "true", null, { timeout: 8000 }).catch(() => {});
+  const before = await idPanel(p);
+  const href0 = await p.evaluate(() => location.href);
+  await p.locator('.idpanel [data-idp-way="orcid"] button').click();
+  await p.waitForTimeout(800);
+  const opened = await p.evaluate(() => window.__OPENED__.slice());
+  const waiting = await idPanel(p);
+  const url = opened[0] ? new URL(opened[0]) : null;
+  const q = (k) => url?.searchParams.get(k) ?? null;
+  let after = null, chip = "";
+  if (url) {
+    const tk = await orcid.token({ iss: "https://orcid.org", aud: q("client_id"), sub: ORCID_ID, nonce: q("nonce"), exp: Math.floor(Date.now() / 1000) + 600, given_name: "Emanuel", family_name: "Demetrescu" });
+    await p.evaluate((u) => window.__DEEPLINK__(u), `org.extendedmatrix.emstudio:/orcid-return#id_token=${tk}&state=${q("state")}`);
+    await p.waitForTimeout(1200);
+    chip = await p.evaluate(() => document.getElementById("footer-identity")?.title ?? "");
+    await p.click("#footer-identity");
+    await p.waitForTimeout(500);
+    after = await idPanel(p);
+  }
+  const href1 = await p.evaluate(() => location.href);
+  await p.screenshot({ path: SHOT("e1-orcid-desktop") }).catch(() => {});
+  await ctx.close();
+  return { pass: before.ways.orcid?.ready === "true" && opened.length === 1 && url?.origin === "https://orcid.org"
+      && q("client_id") === "APP-DBYSPGP676HKN8OE" && q("redirect_uri") === "https://extendedmatrix.org/orcid/callback/"
+      && q("response_type") === "id_token" && waiting.paste === "orcid" && href1 === href0
+      && after?.state === "verified" && /0000-0002-1825-0097/.test(after?.stateText ?? "") && /orcid\.org/.test(after?.stateText ?? "") && !errors.length,
+    detail: { before: before.ways.orcid, opened, waiting: waiting.paste, after, chip, href0, href1, errors } };
+});
+
+test("E1.paste", "E1 · il ripiego: se lo schema non si apre, la pagina mostra la risposta come codice; «Incolla la risposta di ORCID» la prende e la verifica uguale; un token di un altro giro (altro nonce) è rifiutato e l'identità resta com'era", async () => {
+  const orcid = await fakeOrcid();
+  const { p, ctx, errors } = await open({ doc: LITE(), locale: "en", hook: tauriDesktop(), route: orcid.route });
+  const start = async () => {
+    await p.click("#footer-identity");
+    await p.waitForFunction(() => document.querySelector('.idpanel [data-idp-way="orcid"]')?.dataset.idpReady === "true", null, { timeout: 8000 }).catch(() => {});
+    await p.locator('.idpanel [data-idp-way="orcid"] button').click();
+    await p.waitForTimeout(700);
+    return new URL(await p.evaluate(() => window.__OPENED__.at(-1)));
+  };
+  const paste = async (text) => {
+    await p.fill(".idpanel [data-idp-paste-input]", text);
+    await p.click(".idpanel [data-idp-paste-go]");
+    await p.waitForTimeout(1200);
+  };
+  // 1 · a token minted for ANOTHER round trip: refused
+  let url = await start();
+  const exp = Math.floor(Date.now() / 1000) + 600;
+  const wrong = await orcid.token({ iss: "https://orcid.org", aud: url.searchParams.get("client_id"), sub: ORCID_ID, nonce: "0".repeat(48), exp });
+  await paste(`#id_token=${wrong}&state=${url.searchParams.get("state")}`);
+  const refused = await p.evaluate(() => ({ toast: [...document.querySelectorAll(".toast, #toast")].map((x) => x.textContent).join(" | "),
+    chip: document.getElementById("footer-identity")?.dataset.state ?? document.getElementById("footer-identity")?.className ?? "" }));
+  const log1 = await p.evaluate(() => (window.__EM_DRAG__.log?.() ?? []).map((x) => x.message).filter((m) => /identity/.test(m)).join("\n"));
+  // 2 · the right one, pasted the way the page shows it
+  url = await start();
+  const right = await orcid.token({ iss: "https://orcid.org", aud: url.searchParams.get("client_id"), sub: ORCID_ID, nonce: url.searchParams.get("nonce"), exp });
+  await paste(`  #id_token=${right}&state=${url.searchParams.get("state")}  `);
+  await p.click("#footer-identity");
+  await p.waitForTimeout(500);
+  const after = await idPanel(p);
+  await p.screenshot({ path: SHOT("e1-incolla") }).catch(() => {});
+  await ctx.close();
+  return { pass: /nonce/.test(log1) && after.state === "verified" && /0000-0002-1825-0097/.test(after.stateText) && !errors.length,
+    detail: { refused, log1, after, errors } };
+});
+
+/** a node at https://nodo.test whose realm has an ORCID provider WITHOUT a client
+ *  (`orcid_idp_ready: false`), a token endpoint that checks the exchange, and a
+ *  whoami that says «the node's password» */
+const fakeNode = (seen) => ({ pattern: "https://nodo.test/**", handler: async (r) => {
+  const u = r.request().url();
+  const h = { "access-control-allow-origin": "*", "access-control-allow-headers": "*" };
+  if (r.request().method() === "OPTIONS") return r.fulfill({ status: 204, headers: h });
+  if (u.endsWith("/v1/health")) return r.fulfill({ status: 200, headers: h, json: { service: "stratigraph-server", version: "0.9.2", s3dgraphy: "1.6.0.dev31", auth: "keycloak" } });
+  if (u.endsWith("/v1/auth-config")) return r.fulfill({ status: 200, headers: h, json: { issuer: "https://nodo.test/realms/em-dev", client_id: "em-console",
+    authorization_endpoint: "https://nodo.test/realms/em-dev/protocol/openid-connect/auth", token_endpoint: "https://nodo.test/realms/em-dev/protocol/openid-connect/token",
+    enforcing: true, orcid_idp: "orcid", orcid_idp_ready: false, orcid_idp_why: "the realm's «orcid» provider has no ORCID client (client id: orcid-client-not-registered)", node_name: "Nodo di prova" } });
+  if (u.endsWith("/protocol/openid-connect/token")) {
+    const body = Object.fromEntries(new URLSearchParams(r.request().postData() ?? ""));
+    seen.exchange = body;
+    const good = body.code === "C0DE" && body.redirect_uri === "org.extendedmatrix.emstudio:/oidc-return" && !!body.code_verifier && !body.client_secret;
+    return r.fulfill({ status: good ? 200 : 400, headers: h, json: good ? { access_token: "AT-nodo", refresh_token: "RT", expires_in: 900 } : { error: "invalid_grant" } });
+  }
+  if (u.endsWith("/v1/whoami")) {
+    seen.whoamiAuth = r.request().headers().authorization ?? null;
+    return r.fulfill({ status: 200, headers: h, json: { orcid: ORCID_ID, name: "Dev", enforcing: true, auth_mode: "node_password", attested_by: "Nodo di prova" } });
+  }
+  return r.fulfill({ status: 404, headers: h, body: "" });
+} });
+
+test("E2.nodepw", "E2+E3 · dal desktop, «iD and the node's password»: il nodo dice che il suo ORCID non ha client e «Chi sei» chiude quella via col perché; la password del nodo apre il login nel browser di sistema col redirect org.extendedmatrix.emstudio:/oidc-return; il codice torna per deep link, lo scambio nomina lo stesso redirect (PKCE, niente segreto) e l'identità è attestata dal nodo", async () => {
+  const seen = {};
+  const orcid = await fakeOrcid();
+  const { p, ctx, errors } = await open({ doc: LITE(), locale: "en", hook: tauriDesktop(), route: fakeNode(seen),
+    init: { "emstudio.settings": JSON.stringify({ sync: { hubUrl: "https://nodo.test" } }) } });
+  await p.route(orcid.route.pattern, orcid.route.handler);
+  await p.click("#footer-identity");
+  await p.waitForFunction(() => document.querySelector('.idpanel [data-idp-way="nodepw"]')?.dataset.idpReady === "true", null, { timeout: 8000 }).catch(() => {});
+  const before = await idPanel(p);
+  await p.fill(".idpanel [data-idp-orcid]", ORCID_ID);
+  await p.locator('.idpanel [data-idp-way="nodepw"] button').click();
+  await p.waitForTimeout(900);
+  const opened = await p.evaluate(() => window.__OPENED__.slice());
+  const waiting = await idPanel(p);
+  const url = opened[0] ? new URL(opened[0]) : null;
+  if (url) {
+    await p.evaluate((u) => window.__DEEPLINK__(u), `org.extendedmatrix.emstudio:/oidc-return?state=${url.searchParams.get("state")}&session_state=x&iss=https%3A%2F%2Fnodo.test&code=C0DE`);
+    await p.waitForTimeout(1500);
+  }
+  seen.panelAfterReturn = await p.evaluate(() => ({ open: !!document.querySelector(".idpanel"), expanded: document.getElementById("footer-identity")?.getAttribute("aria-expanded"),
+    log: (window.__EM_DRAG__.log?.() ?? []).map((x) => x.message).filter((m) => /identity/.test(m)).slice(-4) }));
+  // signed in to the node, the chip leads to the node's settings (rung «identity»):
+  // the identity is read where it is said — the chip and Settings › Identity
+  const after = await p.evaluate(() => ({ chip: document.getElementById("footer-identity")?.title ?? "" }));
+  await p.evaluate(() => window.__EM_DRAG__.openSettings?.("settings-sect-identity"));
+  await p.waitForTimeout(400);
+  after.set = await p.evaluate(() => document.getElementById("set-orcid-state")?.textContent ?? "");
+  await p.screenshot({ path: SHOT("e2-password-del-nodo") }).catch(() => {});
+  await ctx.close();
+  const w1 = before.ways.stratigraph ?? {};
+  return { pass: w1.ready === "false" && w1.closed === "no-client" && /no ORCID client/.test(w1.desc)
+      && before.ways.nodepw?.ready === "true" && !before.ways.nodepw?.hidden
+      && opened.length === 1 && url?.searchParams.get("redirect_uri") === "org.extendedmatrix.emstudio:/oidc-return"
+      && url?.searchParams.get("login_hint") === ORCID_ID && url?.searchParams.get("code_challenge_method") === "S256"
+      && waiting.paste === "node"
+      && seen.exchange?.redirect_uri === "org.extendedmatrix.emstudio:/oidc-return" && seen.whoamiAuth === "Bearer AT-nodo"
+      && /attested by the node Nodo di prova/.test(after.chip) && /Attested by the node Nodo di prova: Dev \(0000-0002-1825-0097\)/.test(after.set) && !errors.length,
+    detail: { w1, nodepw: before.ways.nodepw, opened, waiting: waiting.paste, exchange: seen.exchange && { ...seen.exchange, code_verifier: "…" }, whoami: seen.whoamiAuth, panelAfterReturn: seen.panelAfterReturn, after, errors } };
+});
+
+/** the realm's login form, filled the way a person fills it, with curl: the
+ *  authorize URL the app opened → the form → user and password → the 302 that
+ *  Keycloak sends towards the app's scheme. Returns that Location. */
+const keycloakLogin = (authorizeUrl, user, password) => {
+  const jar = `${process.env.TMPDIR ?? "/tmp"}/e2-live-cookies-${process.pid}`;
+  const html = execFileSync("curl", ["-sk", "-c", jar, "-b", jar, authorizeUrl], { encoding: "utf8" });
+  const action = (html.match(/action="([^"]+)"/)?.[1] ?? "").replace(/&amp;/g, "&");
+  if (!action) throw new Error("no login form at the realm");
+  const head = execFileSync("curl", ["-sk", "-c", jar, "-b", jar, "-o", "/dev/null", "-D", "-",
+    "--data-urlencode", `username=${user}`, "--data-urlencode", `password=${password}`, action], { encoding: "utf8" });
+  return head.match(/^location:\s*(\S+)/im)?.[1] ?? null;
+};
+
+// LIVE: only with LIVE_NODE (e.g. https://em.localhost:8443/em) — the dev stack's
+// real Keycloak (realm em-dev, client em-console with the desktop's redirect)
+// and the real StratiGraph Server. The page is served from localhost:5199, not
+// tauri://localhost, so this browser runs without CORS: the realm's answer to
+// `Origin: tauri://localhost` is measured with curl in the night's report.
+if (process.env.LIVE_NODE) test("E2.live", "E2 dal vivo · il nodo del dev stack: «iD and the node's password» con l'utente dev del realm em-dev — il login vero di Keycloak torna per org.extendedmatrix.emstudio:/oidc-return, lo scambio del codice passa, /v1/whoami dice dev e l'identità è attestata dal nodo", async () => {
+  const node = process.env.LIVE_NODE.replace(/\/+$/, "");
+  const live = await chromium.launch({ executablePath: existsSync(CHR) ? CHR : undefined, args: ["--disable-web-security"] });
+  const ctx = await live.newContext({ viewport: { width: 1600, height: 1000 }, ignoreHTTPSErrors: true });
+  const p = await ctx.newPage();
+  const errors = [];
+  p.on("pageerror", (e) => errors.push(String(e).slice(0, 300)));
+  await p.addInitScript(([settings]) => {
+    if (!sessionStorage.getItem("probe")) { localStorage.clear(); localStorage.setItem("emstudio.locale", "en"); localStorage.setItem("emstudio.settings", settings); sessionStorage.setItem("probe", "1"); }
+  }, [JSON.stringify({ sync: { hubUrl: node } })]);
+  await p.addInitScript(tauriDesktop());
+  await p.goto(`http://localhost:${PORT}/em/studio/?bridge=${encodeURIComponent(BRIDGE)}`);
+  await p.waitForFunction(() => !!window.__EM_DRAG__, null, { timeout: 30000 });
+  await p.click("#footer-identity");
+  await p.waitForFunction(() => document.querySelector('.idpanel [data-idp-way="nodepw"]')?.dataset.idpReady === "true", null, { timeout: 15000 }).catch(() => {});
+  const before = await idPanel(p);
+  await p.fill(".idpanel [data-idp-orcid]", ORCID_ID);           // dev's iD in the realm
+  await p.locator('.idpanel [data-idp-way="nodepw"] button').click({ timeout: 5000 }).catch(() => {});
+  await p.waitForTimeout(1200);
+  const opened = await p.evaluate(() => window.__OPENED__.slice());
+  let location = null;
+  if (opened[0]) {
+    location = keycloakLogin(opened[0], process.env.LIVE_USER ?? "dev", process.env.LIVE_PASSWORD ?? "dev");
+    if (location) await p.evaluate((u) => window.__DEEPLINK__(u), location);
+    await p.waitForTimeout(2500);
+  }
+  const chip = await p.evaluate(() => document.getElementById("footer-identity")?.title ?? "");
+  await p.evaluate(() => window.__EM_DRAG__.openSettings?.("settings-sect-identity"));
+  await p.waitForTimeout(400);
+  const set = await p.evaluate(() => document.getElementById("set-orcid-state")?.textContent ?? "");
+  const log = await p.evaluate(() => (window.__EM_DRAG__.log?.() ?? []).map((x) => x.message).filter((m) => /identity/.test(m)).slice(-5));
+  await p.screenshot({ path: SHOT("e2-dal-vivo") }).catch(() => {});
+  await live.close();
+  const u = opened[0] ? new URL(opened[0]) : null;
+  return { pass: !!u && u.searchParams.get("redirect_uri") === "org.extendedmatrix.emstudio:/oidc-return"
+      && /^org\.extendedmatrix\.emstudio:\/oidc-return\?.*code=/.test(location ?? "")
+      && /attested by the node/.test(chip) && /0000-0002-1825-0097/.test(set) && !errors.length,
+    detail: { ways: before.ways, opened: u && u.origin + u.pathname, location: location && location.replace(/code=[^&]+/, "code=…"), chip, set, log, errors } };
+});
+
+test("E4.em", "E4 · Impostazioni › Sync, «Prova» su https://sito.test (il sito davanti al nodo): prova anche /em, dice dove risponde il nodo e lo propone; «Usa» lo mette nel campo e la prova riparte, raggiungibile. Su un indirizzo dove risponde solo un sito, lo dice", async () => {
+  const health = { service: "stratigraph-server", version: "0.9.2", s3dgraphy: "1.6.0.dev31", auth: "open" };
+  const { p, ctx, errors } = await open({ doc: LITE(), locale: "en", hook: tauriHook(),
+    route: { pattern: /https:\/\/(sito|solosito)\.test\/.*/, handler: (r) => {
+      const u = r.request().url();
+      if (u === "https://sito.test/em/v1/health") return r.fulfill({ status: 200, headers: { "access-control-allow-origin": "*" }, json: health });
+      // the site in front: html, and NO CORS header — from a page, that looks like silence
+      if (u.startsWith("https://sito.test/") || u.startsWith("https://solosito.test/")) return r.fulfill({ status: u.endsWith("/v1/health") ? 404 : 200, contentType: "text/html", body: "<!doctype html><title>site</title>" });
+      return r.fulfill({ status: 404, body: "" });
+    } } });
+  await p.click("#footer-identity");
+  await p.waitForTimeout(500);
+  await p.click("[data-idp-configure]");
+  await p.waitForTimeout(500);
+  const test = async (addr) => {
+    await p.fill("#set-hub-url", addr);
+    await p.click("#set-node-test");
+    await p.waitForFunction(() => !/Testing|Provo/.test(document.getElementById("set-node-result")?.textContent ?? "") && (document.getElementById("set-node-result")?.textContent ?? "").length > 3, null, { timeout: 12000 }).catch(() => {});
+    await p.waitForTimeout(300);
+    return p.evaluate(() => ({ text: document.getElementById("set-node-result")?.textContent ?? "", state: document.getElementById("set-node-result")?.dataset.state,
+      suggest: document.querySelector("#set-node-result [data-node-suggest]")?.dataset.nodeSuggest ?? null }));
+  };
+  const a = await test("https://sito.test");
+  let b = null;
+  if (a.suggest) {
+    await p.click("#set-node-result [data-node-suggest]");
+    await p.waitForFunction(() => /Reachable/.test(document.getElementById("set-node-result")?.textContent ?? ""), null, { timeout: 12000 }).catch(() => {});
+    b = await p.evaluate(() => ({ field: document.getElementById("set-hub-url").value, text: document.getElementById("set-node-result")?.textContent ?? "" }));
+  }
+  const c = await test("https://solosito.test");
+  await p.screenshot({ path: SHOT("e4-indirizzo-em") }).catch(() => {});
+  await ctx.close();
+  return { pass: a.suggest === "https://sito.test/em" && /the node answers at https:\/\/sito\.test\/em/.test(a.text)
+      && b?.field === "https://sito.test/em" && /Reachable: https:\/\/sito\.test\/em/.test(b?.text ?? "")
+      // a site with no CORS header is «a site, not a node»; one whose status a page CAN
+      // read (Playwright's fulfilled answers are readable) is «answers (404), not a node»
+      && /https:\/\/solosito\.test answers.*(it is a site|not a StratiGraph node)/.test(c.text) && !c.suggest && !errors.length,
+    detail: { a, b, c, errors } };
+});
+
 // ── run ─────────────────────────────────────────────────────────────────────
 const chosen = cases.filter((c) => !only.length || only.includes(c.id) || only.some((o) => c.id.startsWith(o + ".")));
 for (const c of chosen) {

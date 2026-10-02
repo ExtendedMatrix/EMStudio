@@ -132,7 +132,11 @@ export interface TextSettings {
 }
 
 /** IDENTITÀ · ORCID's own sign-in: the client registered at ORCID. The id is
- *  PUBLIC (it travels in the address bar); there is no secret, by design. */
+ *  PUBLIC (it travels in the address bar); there is no secret, by design.
+ *  ENTRARE DAL DESKTOP (3 Oct 2026): the default is EMStudio's client on
+ *  orcid.org (`DEFAULT_ORCID_CLIENT_ID`, `orcid-signin.ts`); an EMPTY field
+ *  means that default on orcid.org, and no client on the sandbox (a sandbox
+ *  client is another registration, with another id). */
 export interface IdentitySettings {
   orcidClientId: string;
   /** https://orcid.org, or https://sandbox.orcid.org */
@@ -153,7 +157,7 @@ export interface Settings {
 const KEY = "emstudio.settings";
 
 const DEFAULTS: Settings = {
-  identity: { orcidClientId: "", orcidBase: "https://orcid.org" },
+  identity: { orcidClientId: "APP-DBYSPGP676HKN8OE", orcidBase: "https://orcid.org" },
   texts: { displayLang: "" },
   sync: { protocol: "ws", host: "localhost", port: 8788, tool: "blender",
           accept: "everything", hubUrl: "", hubRoom: "" },

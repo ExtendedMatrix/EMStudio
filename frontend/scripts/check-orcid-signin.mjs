@@ -80,6 +80,35 @@ await refused("no iD in sub", (c) => ({ ...c, sub: "dev" }));
 }
 eq(M.returningFromOrcid("#id_token=x"), false, "no pending round trip: not ours");
 
+// ── ENTRARE DAL DESKTOP (3 Oct 2026) ─────────────────────────────────────────
+// The desktop asks ORCID to return to the PUBLIC page, the redirect registered
+// for EMStudio's client; the answer comes back by deep link (or pasted) to the
+// same window, which still holds the nonce — in memory as well as in
+// sessionStorage, since the webview no longer navigates.
+const DESKTOP = "https://extendedmatrix.org/orcid/callback/";
+{
+  const url = new URL(M.orcidAuthorizeUrl({ clientId: M.DEFAULT_ORCID_CLIENT_ID, base: "https://orcid.org" }, "tauri://localhost/", DESKTOP));
+  eq([url.searchParams.get("redirect_uri"), url.searchParams.get("client_id")], [DESKTOP, "APP-DBYSPGP676HKN8OE"],
+     "desktop: ORCID is asked to return to the public page, with EMStudio's client");
+  eq(JSON.parse(store.get("emstudio.orcid.pending")).redirectUri, DESKTOP, "the redirect asked for is remembered in the pending record");
+  ok(M.orcidPending(), "a round trip is pending");
+  // the window's sessionStorage is gone (a webview that dropped it): memory still holds the round trip
+  store.clear();
+  ok(M.orcidPending(), "…and still pending from memory");
+  const claims = { iss: "https://orcid.org", aud: M.DEFAULT_ORCID_CLIENT_ID, sub: ID, nonce: url.searchParams.get("nonce"), exp: NOW + 600 };
+  const r = await M.completeOrcidSignIn(`#id_token=${await token(claims)}&state=${url.searchParams.get("state")}`, jwks, NOW);
+  eq([r.ok, r.orcid], [true, ID], "the answer delivered to the same window is verified (from memory)");
+  ok(!M.orcidPending() && store.size === 0, "…and nothing is kept, in memory or in storage");
+}
+{
+  const r = await M.completeOrcidSignIn("#id_token=a.b.c&state=s", jwks, NOW);
+  ok(r.ok === false && /start it again from EMStudio/.test(r.error), `an answer to a window that started nothing (the app was closed): «start it again» (${r.error})`);
+}
+// the client: EMStudio's on orcid.org by default; the sandbox has its own registry
+eq(M.orcidClientFor("", "https://orcid.org"), { clientId: "APP-DBYSPGP676HKN8OE", isDefault: true }, "empty field on orcid.org: EMStudio's client");
+eq(M.orcidClientFor("", "https://sandbox.orcid.org"), null, "empty field on the sandbox: no client (another registry, another id)");
+eq(M.orcidClientFor(" APP-0000000000000001 ", "https://sandbox.orcid.org"), { clientId: "APP-0000000000000001", isDefault: false }, "a written client wins");
+
 if (fails.length) {
   console.error(`orcid-signin: ${fails.length} of ${checks} checks FAILED`);
   for (const f of fails) console.error("  ✗ " + f);
