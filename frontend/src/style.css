@@ -4725,6 +4725,28 @@ body.sync-active #footer-brand #em-version {
   font-size: 10px;
   color: var(--text-faint);
 }
+/* E5 · the file's DTC corpus, under its file: shown, or kept with «Show» */
+.et-corpus {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  margin: 4px 4px 0 14px;
+  font-size: 11px;
+  color: var(--text-dim);
+}
+.et-corpus .et-meta { color: var(--text-faint); font-size: 10px; }
+.et-corpus[data-corpus-state="kept"] .et-name { font-style: italic; }
+.et-corpus-show {
+  margin-left: auto;
+  padding: 1px 6px;
+  border: none;
+  background: none;
+  color: var(--accent-ink);
+  font-size: 11px;
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+}
+.et-corpus-show:hover { background: var(--bg-accent-soft); }
 
 .et-aux {
   grid-column: 1 / -1;

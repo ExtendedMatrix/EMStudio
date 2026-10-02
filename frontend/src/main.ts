@@ -254,6 +254,8 @@ import {
   drawnLabelRects,
   hitPdDecorator,
   hitPdTag,
+  hitDateInvite,
+  drawnDateInvites,
   invalidateRoutes,
   render,
   type ConnectDrag,
@@ -1664,6 +1666,12 @@ window.__EM_SCENE__ = () => {
   log: () => logEntries().map((e) => ({ level: e.level, message: e.message, ids: e.ids ?? [] })),
   /** AUDIT N5 · the lane chips and phase labels as last drawn (screen) */
   labels: () => drawnLabelRects(),
+  /** E5 · the «add» of the undated epochs' invitations to date them, client px */
+  dateInvites: () => {
+    const cv = [...graphWindows.values()].map((m) => m.cv).find((c) => c.offsetParent);
+    const r = cv?.getBoundingClientRect();
+    return r ? drawnDateInvites().map((h) => ({ id: h.id, x: r.left + h.x + h.w / 2, y: r.top + h.y + h.h / 2 })) : [];
+  },
   /** RISORSA-FILE · the «+ phase» buttons on the epochs' rails, client px */
   addPhaseButtons: () => {
     const cv = [...graphWindows.values()].map((m) => m.cv).find((c) => c.offsetParent);
@@ -1870,6 +1878,8 @@ function paintGraphWindow(p: GraphPaint): void {
       aiNodes: aiMarks(),
       peerSelections: hubPeerSelections,   // P4.3 · awareness, never a lock
       highlightEdgeType: p.highlightEdgeType ?? null,
+      // E5 · an undated epoch's lane invites to date it — drawn, never saved
+      dateInvite: p.mode === "matrix" ? { text: t("epoch.inviteDate"), add: t("epoch.inviteAdd") } : null,
     },
     w,
     h,
@@ -4320,7 +4330,12 @@ function projectCorpusSection(): Record<string, unknown> | null {
   return graph;
 }
 
+/** E5 · the corpus as it was adopted (from its file), to tell whether it was
+ *  edited since: a corpus put back into its file with edits makes that file dirty */
+let corpusAdoptedJson: string | null = null;
+
 function adoptProjectCorpus(section: Record<string, unknown>): void {
+  corpusAdoptedJson = JSON.stringify(section);
   corpusStore = new DocumentStore({
     header: { format: "em.json", version: "1.0" },
     graph: section as unknown as EmDocument["graph"],
@@ -11983,7 +11998,69 @@ async function moveGraphToNewFile(slotId: string): Promise<void> {
   }
 }
 
+/**
+ * E5 · TWO FILES, TWO CORPORA, ONE SHOWN AT A TIME — and now you can see which.
+ *
+ * The workspace draws one DTC corpus (`corpusStore`): the one of its HOME file
+ * (F2). A second file's own corpus was kept intact in its file (`retained`) and
+ * written back unchanged, but nothing showed it was there, and there was no way
+ * to look at it while the first file was open. Now each file says its corpus
+ * under its name in the EMTree, and a kept one can be SHOWN: it becomes the
+ * corpus drawn (its file becomes its home), and the one shown until then goes
+ * back into ITS file as it is now — edits included, so they are written with
+ * that file, which is marked to save if there were any.
+ */
+function corpusSectionOf(file: OpenFile): [string, Record<string, unknown>] | null {
+  for (const [gid, section] of Object.entries(file.retained)) {
+    if (isCorpusSection(section)) return [gid, section];
+  }
+  return null;
+}
+
+function showFileCorpus(fileId: string): void {
+  const file = emtree.file(fileId);
+  const kept = file ? corpusSectionOf(file) : null;
+  if (!file || !kept) return;
+  const current = projectCorpusSection();
+  const home = corpusHomeFileId ? emtree.file(corpusHomeFileId) : null;
+  if (current && !home) {
+    // a corpus made here with no file yet: putting it away would lose it
+    toast(t("emtree.corpusHomeless"));
+    return;
+  }
+  if (current && home) {
+    const back = JSON.parse(JSON.stringify(current)) as Record<string, unknown>;
+    home.retained[String(back.graph_id ?? "dtc")] = back;
+    if (JSON.stringify(current) !== corpusAdoptedJson) home.dirty = true;
+  }
+  delete file.retained[kept[0]];
+  if (lastTouchedStore === corpusStore) lastTouchedStore = null;
+  adoptProjectCorpus(kept[1]);
+  corpusHomeFileId = file.id;
+  logInfo(t("emtree.corpusSwitched", { file: file.name, from: home?.name ?? "—" }));
+  buildScenes();
+  renderStorage();
+  refreshInspector();
+  draw();
+  refreshEMTree();
+}
+
 const emtreeHandlers: EMTreeHandlers = {
+  corpusOf: (fileId) => {
+    const file = emtree.file(fileId);
+    if (!file) return null;
+    if (fileId === corpusHomeFileId) {
+      const shown = projectCorpusSection();
+      if (shown) return { state: "shown", nodes: ((shown.nodes as unknown[] | undefined) ?? []).length };
+    }
+    const kept = corpusSectionOf(file);
+    return kept ? { state: "kept", nodes: ((kept[1].nodes as unknown[] | undefined) ?? []).length } : null;
+  },
+  keptGraphsOf: (fileId) => {
+    const file = emtree.file(fileId);
+    return file ? Object.values(file.retained).filter((s) => !isShelfSection(s) && !isCorpusSection(s)).length : 0;
+  },
+  onShowCorpus: (fileId) => showFileCorpus(fileId),
   // AUDIT C · a story in the EMtree opens it: the graph becomes active and the
   // Narrativa space shows that story
   onOpenStory: (slotId, narrativeId) => {
@@ -17670,6 +17747,19 @@ async function restructureEpochs(change: (s: DocumentStore) => void, msg: string
   });
   reflowMatrix();
   toastUndo(msg, st);
+}
+
+/** E5 · «date: — · add» on an undated epoch's lane: the writing of its date —
+ *  the Chronology, on that epoch, with the cursor in its start. The date is
+ *  born when it is written (`setEpochBound`, F5: in the epoch's group, with
+ *  has_property); the invitation itself never was anything in the document. */
+function openEpochDating(epochId: string): void {
+  openChronology(epochId);
+  queueMicrotask(() => {
+    const input = document.querySelector<HTMLInputElement>(`input[data-chnum="${CSS.escape(epochId)}|start"]`);
+    input?.focus();
+    input?.select();
+  });
 }
 
 /** Open (or bring forward) the Chronology window, split off the graph window. */
@@ -25984,6 +26074,7 @@ function wireGraphCanvas(canvas: HTMLCanvasElement, winId: string): void {
     insertPending = null;
     pdTagPending = null;
     addPhasePending = null;
+    dateInvitePending = null;
     bandSelectPending = null;
     adornmentPending = null;
     pdDecoratorPending = null;
@@ -26000,6 +26091,13 @@ function wireGraphCanvas(canvas: HTMLCanvasElement, winId: string): void {
       const ib = insertBoundaryAt(lx, ly);
       if (ib != null) {
         insertPending = ib;
+        armChip();
+        return;
+      }
+      // E5 · «add» of an undated epoch's invitation: opens the date's writing
+      const di = hitDateInvite(lx, ly);
+      if (di) {
+        dateInvitePending = di;
         armChip();
         return;
       }
@@ -26454,6 +26552,12 @@ function wireGraphCanvas(canvas: HTMLCanvasElement, winId: string): void {
       return;
     }
     // epoch "+" button click → add a phase to that epoch
+    if (dateInvitePending) {
+      const epochId = dateInvitePending;
+      dateInvitePending = null;
+      if (!moved && store && hitDateInvite(rx, ry) === epochId) openEpochDating(epochId);
+      return;
+    }
     if (addPhasePending) {
       const epochId = addPhasePending;
       addPhasePending = null;
@@ -26748,6 +26852,7 @@ let adornmentPending: string | null = null; // ornament badge pressed → select
 let pdDecoratorPending: string | null = null; // PD tablet pressed → select group on click
 let bandSelectPending: string | null = null; // phase band label pressed → select on click
 let addPhasePending: string | null = null; // epoch "+" button pressed → add phase on click
+let dateInvitePending: string | null = null; // E5 · an undated epoch's «add» pressed
 let hoverInsertBoundary: number | null = null; // EM-mode insert-epoch: hovered lane boundary
 let insertPending: number | null = null; // insert boundary pressed → add epoch on click
 

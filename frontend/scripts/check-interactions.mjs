@@ -3817,6 +3817,108 @@ test("E4.em", "E4 · Impostazioni › Sync, «Prova» su https://sito.test (il s
     detail: { a, b, c, errors } };
 });
 
+/** two files, each with its OWN DTC corpus (one acquisition each) */
+const corpusOf = (id, name) => ({ graph_id: "dtc", name: "Documentation (DTC)", data: { em_collection: "DTCCorpus" },
+  nodes: [{ id, node_type: "AcquisitionNode", name }], edges: [] });
+const CORPUS_FILES = () => ({
+  A: { header: { format: "em.json", version: "1.0" }, active_graph_id: "gA1", graphs: { gA1: OF_GRAPH("gA1", ["A1", "A2"], 11), dtc: corpusOf("acqA", "Rilievo di A") } },
+  B: { header: { format: "em.json", version: "1.0" }, active_graph_id: "gB1", graphs: { gB1: OF_GRAPH("gB1", ["B1", "B2"], 1207), dtc: corpusOf("acqB", "Rilievo di B") } },
+});
+
+test("E5.corpus", "E5 · due file col proprio corpus DTC: ognuno lo dice sotto il suo nome nell'EMTree (mostrato / tenuto nel file); «Mostra» porta quello del secondo nel DTC e il primo torna nel suo file; salvati, ognuno scrive il suo corpus", async () => {
+  const files = CORPUS_FILES();
+  const { p, ctx, errors } = await open({ doc: null, locale: "en", hook: tauriWrites() });
+  await p.waitForFunction(() => !!window.__EM_DRAG__, null, { timeout: 20000 });
+  await p.evaluate(([a]) => window.__EM_DRAG__.openAt(a, "/tmp/e5/A.em.json"), [files.A]);
+  await p.waitForTimeout(1500);
+  await p.evaluate(([b]) => window.__EM_DRAG__.openAt(b, "/tmp/e5/B.em.json"), [files.B]);
+  await p.waitForTimeout(1500);
+  await workspace(p, "assets");
+  const rows = () => p.evaluate(() => [...document.querySelectorAll(".et-file")].map((f) => ({ file: f.querySelector(".et-file-name")?.textContent?.replace(" •", ""),
+    corpus: f.querySelector(".et-corpus")?.dataset.corpusState ?? null, meta: f.querySelector(".et-corpus .et-meta")?.textContent ?? "",
+    retained: f.querySelector(".et-retained")?.textContent ?? "" })));
+  const first = await rows();
+  const shown1 = await p.evaluate(() => JSON.parse(window.__EM_DRAG__.docJson()).graphs?.dtc?.nodes?.map((n) => n.id) ?? null);
+  await p.locator('.et-file:has(.et-file-name:text("B.em.json")) [data-show-corpus]').click().catch(() => {});
+  await p.waitForTimeout(800);
+  const second = await rows();
+  await p.screenshot({ path: SHOT("e5-corpus-per-file") }).catch(() => {});
+  // save both files: each writes its own corpus
+  for (const name of ["grafo gA1", "grafo gB1"]) {
+    await p.locator(".et-pick", { hasText: name }).first().click();
+    await p.waitForTimeout(700);
+    await p.keyboard.press("Meta+s");
+    await p.waitForTimeout(700);
+  }
+  const writes = await p.evaluate(() => window.__WRITES__);
+  await ctx.close();
+  const byPath = Object.fromEntries(writes.map((w) => [w.path, JSON.parse(w.text)]));
+  const corpusIn = (d) => (d?.graphs?.dtc?.nodes ?? []).map((n) => n.id).join(",");
+  return { pass: first.length === 2 && first[0].corpus === "shown" && first[1].corpus === "kept" && !first[1].retained
+      && second[0].corpus === "kept" && second[1].corpus === "shown"
+      && corpusIn(byPath["/tmp/e5/A.em.json"]) === "acqA" && corpusIn(byPath["/tmp/e5/B.em.json"]) === "acqB" && !errors.length,
+    detail: { first, shown1, second, written: Object.fromEntries(Object.entries(byPath).map(([k, d]) => [k, corpusIn(d)])), errors } };
+});
+
+/** one epoch with dates, one WITHOUT */
+const UNDATED = () => ({ header: { format: "em.json", version: "1.0" }, graph: { graph_id: "gE5", name: "epoche",
+  nodes: [{ id: "epA", node_type: "EpochNode", name: "Età romana", data: { start_time: -100, end_time: 300 } },
+          { id: "epB", node_type: "EpochNode", name: "Età ignota", data: {} },
+          { id: "u1", node_type: "US", name: "US1" }, { id: "u2", node_type: "US", name: "US2" }],
+  edges: [{ id: "u1__has_first_epoch__epA", edge_type: "has_first_epoch", source: "u1", target: "epA" },
+          { id: "u2__has_first_epoch__epB", edge_type: "has_first_epoch", source: "u2", target: "epB" },
+          { id: "u2__is_after__u1", edge_type: "is_after", source: "u2", target: "u1" }] } });
+
+test("E5.date", "E5 · un'epoca senza date ha nella sua corsia l'invito «date: — · add», disegnato dalla vista: salvato, il file non ha né nodi né archi né posizioni per lui; riaperto, l'invito c'è; «add» apre la Cronologia col cursore nell'inizio, e la data scritta nasce con has_property (l'invito sparisce)", async () => {
+  const { p, ctx, errors } = await open({ doc: UNDATED(), locale: "en", hook: tauriWrites() });
+  await p.evaluate(() => { window.__SAVE_PATH__ = "/tmp/e5/epoche.em.json"; });
+  await p.waitForTimeout(800);
+  const inv1 = await p.evaluate(() => window.__EM_DRAG__.dateInvites());
+  await p.keyboard.press("Meta+s");
+  await p.waitForTimeout(1000);
+  const writes = await p.evaluate(() => window.__WRITES__);
+  const saved = writes.length ? JSON.parse(writes.at(-1).text) : null;
+  const g = saved?.graph ?? (saved?.graphs ? Object.values(saved.graphs).find((x) => (x.nodes ?? []).some((n) => n.id === "epB")) : null);
+  const ids = new Set((g?.nodes ?? []).map((n) => n.id));
+  // nothing of the invitation in the file: no edge from the undated epoch, no
+  // group named for it, no position of anything that is not a node, no text
+  const savedClean = !!g && !(g.edges ?? []).some((e) => e.source === "epB")
+    && !(g.nodes ?? []).some((n) => /Età ignota/.test(String(n.name)) && n.id !== "epB")
+    && Object.keys({ ...(saved.layout?.positions ?? {}), ...(g.layout?.positions ?? {}) }).every((id) => ids.has(id))
+    && !/date: —|"add"/.test(JSON.stringify(saved));
+  await ctx.close();
+  // reopened from what was written
+  const seen5 = {};
+  const r = await open({ doc: saved, locale: "en", hook: tauriWrites() });
+  await r.p.waitForTimeout(800);
+  const inv2 = await r.p.evaluate(() => window.__EM_DRAG__.dateInvites());
+  let focus = null, after = null, edges = null;
+  const target = inv2.find((x) => x.id === "epB");
+  await r.p.screenshot({ path: SHOT("e5-invito-prima") }).catch(() => {});
+  if (target) {
+    await r.p.mouse.click(target.x, target.y);
+    await r.p.waitForTimeout(900);
+    focus = await r.p.evaluate(() => document.activeElement?.dataset?.chnum ?? null);
+    await r.p.keyboard.type("500");
+    await r.p.keyboard.press("Enter");
+    await r.p.waitForTimeout(800);
+    after = await r.p.evaluate(() => window.__EM_DRAG__.dateInvites().map((x) => x.id));
+    const doc = JSON.parse(await r.p.evaluate(() => window.__EM_DRAG__.docJson()));
+    const gg = doc.graph ?? Object.values(doc.graphs ?? {})[0];
+    seen5.dump = gg.nodes.filter((n) => !["US", "EpochNode"].includes(n.node_type)).map((n) => [n.id.slice(0, 6), n.node_type, n.name, JSON.stringify(n.data ?? {}).slice(0, 80)]);
+    seen5.edges = gg.edges.filter((e) => e.source === "epB" || e.target === "epB").map((e) => [e.source.slice(0, 6), e.edge_type, e.target.slice(0, 6)]);
+    seen5.epB = gg.nodes.find((n) => n.id === "epB")?.data;
+    const prop = gg.nodes.find((n) => gg.edges.some((e) => e.edge_type === "has_property" && e.source === "epB" && e.target === n.id)
+      && /absolute_time_start/.test(String(n.name)));
+    edges = { prop: prop?.id ?? null, has_property: !!prop, start: gg.nodes.find((n) => n.id === "epB")?.data?.start_time ?? null };
+  }
+  await r.p.screenshot({ path: SHOT("e5-invito-a-datare") }).catch(() => {});
+  await r.ctx.close();
+  return { pass: inv1.map((x) => x.id).join() === "epB" && savedClean && inv2.map((x) => x.id).join() === "epB"
+      && focus === "epB|start" && Array.isArray(after) && !after.includes("epB") && edges?.has_property && edges.start === 500 && !errors.length && !r.errors.length,
+    detail: { inv1, savedClean, nodes: g?.nodes?.map((n) => n.id), inv2, focus, after, edges, seen5, errors, rerrors: r.errors } };
+});
+
 // ── run ─────────────────────────────────────────────────────────────────────
 const chosen = cases.filter((c) => !only.length || only.includes(c.id) || only.some((o) => c.id.startsWith(o + ".")));
 for (const c of chosen) {

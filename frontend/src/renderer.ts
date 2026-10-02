@@ -54,6 +54,10 @@ export interface ConnectDrag {
 }
 
 export interface RenderState {
+  /** E5 · the invitation to date an epoch that has no dates, in the reader's
+   *  language («date: —», «add»). Drawn by the view, never saved: no node, no
+   *  edge, no position. Absent → no invitation. */
+  dateInvite?: { text: string; add: string } | null;
   hoverId: string | null;
   selectedId: string | null;
   /** multi-selection set (D3); the primary is still `selectedId` */
@@ -296,6 +300,17 @@ let bandLabelHits: { id: string; x: number; y: number; w: number; h: number }[] 
 /** AUDIT N5 · the lane chips as drawn (screen), so a phase label never covers
  *  one — and so a check can measure that it does not */
 let laneChipHits: { id: string; x: number; y: number; w: number; h: number }[] = [];
+/** E5 · the «add» of an epoch's invitation to date it → the epoch id (screen) */
+let dateInviteHits: { id: string; x: number; y: number; w: number; h: number }[] = [];
+export function hitDateInvite(sx: number, sy: number): string | null {
+  for (const t of dateInviteHits)
+    if (sx >= t.x && sx <= t.x + t.w && sy >= t.y && sy <= t.y + t.h) return t.id;
+  return null;
+}
+/** for the checks: the invitations as drawn */
+export function drawnDateInvites(): { id: string; x: number; y: number; w: number; h: number }[] {
+  return dateInviteHits.map((r) => ({ ...r }));
+}
 export function drawnLabelRects(): { lanes: typeof laneChipHits; bands: typeof bandLabelHits } {
   return { lanes: laneChipHits.map((r) => ({ ...r })), bands: bandLabelHits.map((r) => ({ ...r })) };
 }
@@ -1566,6 +1581,7 @@ export function render(
   };
   laneChipHits = [];
   bandLabelHits = [];
+  dateInviteHits = [];
   for (const lane of scene.lanes) {
     const sy = lane.y * vp.scale + vp.y;
     const sh = lane.height * vp.scale;
@@ -1582,13 +1598,21 @@ export function render(
     // start–end collapses out when the lane is too short to fit two lines
     const boundsText =
       lane.start || lane.end ? `${lane.start ?? "?"} – ${lane.end ?? "?"}` : "";
-    const showBounds = !!boundsText && sh > 36;
+    // E5 · an epoch with NO dates (none in its data, no temporal group) shows,
+    // where the bounds would be, an invitation to date it: «date: — · add».
+    // The view draws it; nothing of it is in the document.
+    const invite = !boundsText && !lane.paradataGroupId && state.dateInvite && state.editable !== false
+      ? state.dateInvite : null;
+    const inviteText = invite ? `${invite.text} · ` : "";
+    const showBounds = (!!boundsText || !!invite) && sh > 36;
     // The chip now carries the epoch's own colour, so there is no separate
     // colour dot: the whole pastille IS the colour swatch (DARK2).
     ctx.font = canvasFont(CANVAS_TYPE.laneLabel.weight, CANVAS_TYPE.laneLabel.px);
     const nameW = ctx.measureText(lane.label).width;
     ctx.font = canvasFont(CANVAS_TYPE.laneDates.weight, CANVAS_TYPE.laneDates.px, { mono: true });
-    const boundsW = showBounds ? ctx.measureText(boundsText).width : 0;
+    const inviteTextW = invite ? ctx.measureText(inviteText).width : 0;
+    const inviteAddW = invite ? ctx.measureText(invite.add).width : 0;
+    const boundsW = !showBounds ? 0 : invite ? inviteTextW + inviteAddW : ctx.measureText(boundsText).width;
     const hasPd = !!lane.paradataGroupId;
     const tagSpace = hasPd ? PD_TAG_W + 6 : 0;
     const hasWarn = !!lane.warn;
@@ -1622,7 +1646,20 @@ export function render(
     ctx.fillStyle = chipInk;
     ctx.font = canvasFont(CANVAS_TYPE.laneLabel.weight, CANVAS_TYPE.laneLabel.px);
     ctx.fillText(lane.label, textX, ty);
-    if (showBounds) {
+    if (showBounds && invite) {
+      // the invitation: «date: —» softened, and «add» underlined — a link
+      ctx.save();
+      ctx.font = canvasFont(CANVAS_TYPE.laneDates.weight, CANVAS_TYPE.laneDates.px, { mono: true });
+      ctx.fillStyle = chipInk;
+      ctx.globalAlpha = 0.6;
+      ctx.fillText(inviteText, textX, ty + 16);
+      ctx.globalAlpha = 0.95;
+      const ax = textX + inviteTextW;
+      ctx.fillText(invite.add, ax, ty + 16);
+      ctx.fillRect(ax, ty + 16 + CANVAS_TYPE.laneDates.px + 1, inviteAddW, 1);
+      ctx.restore();
+      dateInviteHits.push({ id: lane.id, x: ax - 2, y: ty + 13, w: inviteAddW + 4, h: CANVAS_TYPE.laneDates.px + 6 });
+    } else if (showBounds) {
       // the bounds line is the same ink, softened — still derived from the fill
       ctx.save();
       ctx.globalAlpha = 0.72;

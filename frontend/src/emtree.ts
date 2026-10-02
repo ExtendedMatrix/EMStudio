@@ -503,6 +503,13 @@ export interface EMTreeHandlers {
   onSaveFile?(fileId: string): void;
   /** F2 · close a file and its graphs (asks if it has unsaved work) */
   onCloseFile?(fileId: string): void;
+  /** E5 · the DTC corpus a file holds: the one SHOWN (the DTC canvas draws it,
+   *  this file writes it) or one KEPT in the file while another is shown. */
+  corpusOf?(fileId: string): { state: "shown" | "kept"; nodes: number } | null;
+  /** E5 · how many of a file's kept sections are GRAPHS (not its shelf/corpus) */
+  keptGraphsOf?(fileId: string): number;
+  /** E5 · show this file's kept corpus (the one shown goes back to its file) */
+  onShowCorpus?(fileId: string): void;
 }
 
 function esc(s: string): string {
@@ -852,7 +859,17 @@ export function renderEMTree(host: HTMLElement, tree: EMTree,
   const known = new Set(tree.files.map((f) => f.id));
   const groups = tree.files.map((file) => {
     const members = tree.slotsOf(file.id);
-    const kept = Object.keys(file.retained).length;
+    const kept = handlers.keptGraphsOf ? handlers.keptGraphsOf(file.id) : Object.keys(file.retained).length;
+    // E5 · the file's DTC corpus, under its file: shown, or kept with a way to show it
+    const corpus = handlers.corpusOf?.(file.id) ?? null;
+    const corpusRow = !corpus ? "" : `
+        <div class="et-corpus" data-corpus-file="${esc(file.id)}" data-corpus-state="${corpus.state}">
+          <span class="et-file-icon">◇</span>
+          <span class="et-name">${esc(labels("emtree.corpus"))}</span>
+          <span class="et-meta">${corpus.nodes} ${esc(labels("emtree.nodes"))} · ${esc(labels(corpus.state === "shown" ? "emtree.corpusShown" : "emtree.corpusKept"))}</span>
+          ${corpus.state === "kept" ? `<button class="et-corpus-show" data-show-corpus="${esc(file.id)}"
+                  title="${esc(labels("emtree.corpusShowTitle"))}">${esc(labels("emtree.corpusShow"))}</button>` : ""}
+        </div>`;
     const isTarget = !!tree.active() && activeFileId === file.id;
     return `
       <li class="et-file${isTarget ? " et-file-active" : ""}" data-file="${esc(file.id)}">
@@ -867,6 +884,7 @@ export function renderEMTree(host: HTMLElement, tree: EMTree,
                   title="${esc(labels("emtree.closeFileTitle"))}">×</button>
         </div>
         <ul class="et-slots">${members.map(slotRow).join("")}</ul>
+        ${corpusRow}
         ${kept ? `<p class="et-retained">${esc(labels("emtree.retained").replace("{n}", String(kept)))}</p>` : ""}
       </li>`;
   });
@@ -1076,6 +1094,12 @@ export function renderEMTree(host: HTMLElement, tree: EMTree,
     button.addEventListener("click", (event) => {
       event.stopPropagation();
       handlers.onCloseFile?.(button.dataset.closeFile!);
+    });
+  });
+  host.querySelectorAll<HTMLButtonElement>("[data-show-corpus]").forEach((button) => {
+    button.addEventListener("click", (event) => {
+      event.stopPropagation();
+      handlers.onShowCorpus?.(button.dataset.showCorpus!);
     });
   });
   host.querySelectorAll<HTMLButtonElement>(".et-close").forEach((button) => {
