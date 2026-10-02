@@ -28,7 +28,8 @@ side by side under one parent directory:
 
 ```bash
 # 1. s3Dgraphy venv (the GraphML bridge + em2graphml import it; pandas+lxml
-#    are needed by the importer, sqlalchemy only for its own test suite)
+#    are needed by the importer; [sync] is the room/database layer, which the
+#    GraphML import no longer needs from s3dgraphy dev29)
 cd s3Dgraphy
 python3 -m venv .venv
 .venv/bin/pip install -e '.[sync,docx]' pandas lxml

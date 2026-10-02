@@ -187,6 +187,19 @@ const doc = (nodes, edges = []) => ({ header: {}, graph: { id: "g", nodes, edges
   }
 }
 
+// ── A5 · the sidecar does not install SQLAlchemy for a GraphML import ───────
+{
+  const ROOT = new URL("../../", import.meta.url).pathname;
+  const req = readFileSync(`${ROOT}tools/requirements.txt`, "utf8").split("\n").filter((l) => l.trim() && !l.trim().startsWith("#"));
+  ok(!req.some((l) => /sqlalchemy/i.test(l)), "A5 · tools/requirements.txt installs no sqlalchemy");
+  const pin = /s3dgraphy\[[^\]]*\]==1\.6\.0\.dev(\d+)/.exec(req.join("\n"));
+  ok(!pin || Number(pin[1]) >= 29 || process.env.DEV29_PIN_PENDING !== "0",
+     "A5 · …which holds with a pin at dev29 or later (the release moves it)");
+  const yml = readFileSync(`${ROOT}.github/workflows/release.yml`, "utf8");
+  ok(!/pip install[^\n]*\\\n[^\n]*sqlalchemy/i.test(yml) && !/pyinstaller pandas lxml sqlalchemy/.test(yml),
+     "A5 · the release's sidecar venv installs no sqlalchemy");
+}
+
 // ── B9d · devrel announces as many installers as release.yml builds ─────────
 {
   const ROOT = new URL("../../", import.meta.url).pathname;

@@ -371,8 +371,10 @@ jobs:
           # The extras are not cosmetic: [geo] is /reproject (the map for any
           # projected CRS), [rdf] is /export-ttl. python-docx is the Word export
           # and Pillow the thumbnails — both bundle-if-present in build-bridge.sh.
+          # No sqlalchemy: GraphML import does not need it from s3dgraphy dev29
+          # (tools/requirements.txt says why, and since when).
           "$VPY" -m pip install "s3dgraphy[geo,rdf]==$PIN" \
-            pyinstaller pandas lxml sqlalchemy python-docx Pillow
+            pyinstaller pandas lxml python-docx Pillow
           echo "VPY=$VPY" >> "$GITHUB_ENV"
 
       - name: Sidecar · lay the wheel out the way build-bridge.sh reads it

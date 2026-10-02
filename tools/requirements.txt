@@ -26,10 +26,13 @@ s3dgraphy[geo,rdf]==1.6.0.dev28
 # Hard runtime deps of the s3Dgraphy importer/exporter used by the tools.
 lxml>=4.9
 pandas>=1.3
-# GraphMLImporter.parse() (used by graphml2em.py and the bridge's
-# /import-graphml) pulls in s3dgraphy.sync.rapporti, which requires SQLAlchemy
-# — it's the s3dgraphy [sync] extra, now a hard dep for GraphML *import*.
-sqlalchemy>=2.0
+# SQLAlchemy is GONE from here (dev29, 2 Oct 2026): GraphMLImporter.parse() used
+# to pull in s3dgraphy.sync.rapporti, and sync/__init__ wanted the database. From
+# s3dgraphy 1.6.0.dev29 the rapporti parser is `s3dgraphy.rapporti`, outside
+# `sync` — measured in a venv WITHOUT SQLAlchemy: graphml2em.py and the bridge's
+# /import-graphml on San Pietro give 66 nodes / 142 edges. Nothing else in
+# tools/ imports it. It holds only with the pin above at dev29 or later: with
+# dev28 or older, GraphML import needs `sqlalchemy>=2.0` back.
 
 # ── figures in the narrative exports (20 Aug 2026) ───────────────────────────
 # The CLIENT renders the visual embeds (a matrix is drawn by the layout engine,
