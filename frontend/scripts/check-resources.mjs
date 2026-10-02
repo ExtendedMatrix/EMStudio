@@ -78,6 +78,8 @@ const eq = (a, b, what) => {
 const ALLOWED = [
   { file: "src/resources.ts", why: "the constructor" },
   { file: "src/views/stamps.ts", why: "a scene of the stamp viewer: drawn, never saved" },
+  { file: "src/views/dtc.ts", text: "setNodes.push({ id: dtcSetId(a)",
+    why: "dev29 B2 · the block of an acquisition's members in the DTC picture: drawn, never saved" },
   { file: "src/main.ts", text: 'iiifThumbnailUrl({ id: entry.id, node_type: "resource"',
     why: "a descriptor handed to the IIIF helper, not a node" },
 ];
