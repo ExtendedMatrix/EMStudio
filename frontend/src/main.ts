@@ -4437,7 +4437,8 @@ function loadDocument(
     //
     // Silent and non-blocking: nothing moves, so there is nothing to explain, and
     // a failure leaves the document exactly as it was on disk.
-    void reassertSizes().finally(() => {
+    void reassertSizes(loaded).finally(() => {
+      if (store !== loaded) return;   // another graph is in front now: its own load frames it
       // BUGS-UI · the geometry is only FINAL here (sizes re-asserted / layout
       // computed). Any camera framed earlier in the load framed a half-built
       // scene, so forget them: the first entry into each mode now frames the
@@ -4448,8 +4449,9 @@ function loadDocument(
     });
   } else {
     logInfo("no stored positions — computing a fresh layout via em-core");
-    void runLayout(true)
+    void runLayout(true, loaded)
       .then(() => {
+        if (store !== loaded) return;   // laid out in its own store; the front is another graph's
         resetWindowCameras(); // frame the FINISHED layout, not the empty scene
         setViewOnLoad("matrix");
         fitFirstView();
@@ -6459,22 +6461,27 @@ document.getElementById("btn-tool-add")?.addEventListener("click", () => {
  * as the ordinary layout change it is; skipped silently when nothing is stale, so
  * opening an up-to-date document does not mark it dirty.
  */
-async function reassertSizes(): Promise<void> {
-  if (!store) return;
-  const sketch = store.doc.layout;
+async function reassertSizes(target: DocumentStore | null = store): Promise<void> {
+  // F4 · THE store it was asked for, held across the await: a file with several
+  // graphs opens them one after the other, and by the time the WASM answers the
+  // active store is the NEXT graph — measured: the first graph's sizes and
+  // positions were computed on, and written into, the second
+  const st = target;
+  if (!st) return;
+  const sketch = st.doc.layout;
   if (!sketch || !Object.keys(sketch.positions ?? {}).length) return;
   try {
     // lazily imported like the other two em-core call sites: the WASM is fetched
     // on first use, and opening a document must not wait for it
     const { computeLayout } = await import("./emcore");
-    const fixed = await computeLayout(store.doc.graph, sketch, { sizesOnly: true });
+    const fixed = await computeLayout(st.doc.graph, sketch, { sizesOnly: true });
     const changed = Object.entries(fixed.positions ?? {}).filter(([id, rect]) => {
       const before = sketch.positions?.[id];
       const r = rect as { w: number; h: number };
       return before && (before.w !== r.w || before.h !== r.h);
     });
     if (!changed.length) return;
-    store.setLayout(fixed);
+    st.setLayout(fixed);
     logInfo(
       `${changed.length} node size(s) re-asserted from their type ` +
         `(a stored size never wins over the type's geometry)`,
@@ -25320,13 +25327,15 @@ btnLayout.title =
 // Compute a layout via em-core and apply it to the store. `fresh` ignores the
 // existing sketch. Shared by the Layout button and the auto-layout on loading
 // a layout-less document (e.g. a live snapshot).
-async function runLayout(fresh: boolean): Promise<void> {
-  if (!store) return;
+async function runLayout(fresh: boolean, target: DocumentStore | null = store): Promise<void> {
+  // F4 · the store asked for, held across the awaits (see `reassertSizes`)
+  const st = target;
+  if (!st) return;
   // TOCCARE · a layout is the explicit «Riordina» (and what structural edits
   // ask for): the remembered re-stack is recomputed from the new positions
-  reflowMatrix();
+  if (st === store) reflowMatrix();
   const { computeLayout } = await import("./emcore");
-  const prev = store.doc.layout;
+  const prev = st.doc.layout;
   // Pins & anchors are INTENT, not computed geometry — they must survive every
   // Layout, including a fresh (Alt) one. On fresh we drop the manual position
   // arrangement but still pass pins/anchors so em-core resolves them (a rule
@@ -25336,9 +25345,9 @@ async function runLayout(fresh: boolean): Promise<void> {
     ? { pinned: prev?.pinned, anchors: prev?.anchors }
     : prev;
   const layout = await perfTimeAsync("runLayout", () =>
-    computeLayout(store!.doc.graph, sketch),
+    computeLayout(st.doc.graph, sketch),
   );
-  store.setLayout(layout);
+  st.setLayout(layout);
 }
 
 /**
