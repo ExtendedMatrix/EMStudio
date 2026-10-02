@@ -615,7 +615,7 @@
   },
   "GCPSetNode": {
    "description": {
-    "en": "The set of ground control points a registration was (or will be) solved from. data.points is a list of {id, world:[x,y,z], observations:[{image, pixel:[x,y]}], uncertainty?}; data.crs names the frame the world coordinates are in (null = a site-local grid, which is a different statement from absent). Minimum 3 observed non-collinear points for a similarity to be determined — reported by `solvable`, enforced by the runner, never at construction (a set being assembled in the field is legitimately incomplete).",
+    "en": "The set of ground control points a registration was (or will be) solved from. data.points is a list of {id, world:[x,y,z], observations:[{image, pixel:[x,y]}], uncertainty?}; data.crs names the frame the world coordinates are in (null = a site-local grid, which is a different statement from absent). Minimum 3 observed non-collinear points for a similarity to be determined — reported by `solvable`, enforced by the runner, never at construction (a set being assembled in the field is legitimately incomplete). 1.6.24 (dev30, decided by E.D. 2 Oct 2026, D7): data.control says WHAT the points are — ground_control_points (default, not written) or camera_positions: the GPS positions of the cameras themselves, each point {id, world, image, uncertainty?} with no pixel observation (the camera is where the photograph was taken from, not something seen in it), solvable with three; data.accuracy_m is the accuracy the project records for the cameras. A chunk referenced only by its cameras' GPS is placed absolute with such a set, and validate warns «georeferenced only by camera GPS»: absolute without the control said would claim more than the data.",
     "validated_it": false,
     "validated_el": false,
     "validated_he": false,
@@ -8089,6 +8089,113 @@
     "pl": "murowana",
     "ro": "de zidărie",
     "fr": "maçonnée"
+   }
+  }
+ },
+ "packagings": {
+  "archive": {
+   "label": {
+    "en": "Archive",
+    "validated_it": false,
+    "validated_el": false,
+    "validated_he": false,
+    "validated_es": false,
+    "validated_pl": false,
+    "validated_ro": false,
+    "validated_fr": false,
+    "validated_de": false,
+    "it": "Archivio",
+    "el": "Αρχειοθήκη",
+    "he": "ארכיון",
+    "es": "Archivo comprimido",
+    "pl": "Archiwum",
+    "ro": "Arhivă",
+    "fr": "Archive",
+    "de": "Archiv"
+   }
+  },
+  "datablock": {
+   "label": {
+    "en": "Blender object",
+    "validated_it": false,
+    "validated_el": false,
+    "validated_he": false,
+    "validated_es": false,
+    "validated_pl": false,
+    "validated_ro": false,
+    "validated_fr": false,
+    "validated_de": false,
+    "it": "Oggetto Blender",
+    "el": "Αντικείμενο Blender",
+    "he": "אובייקט Blender",
+    "es": "Objeto de Blender",
+    "pl": "Obiekt Blendera",
+    "ro": "Obiect Blender",
+    "fr": "Objet Blender",
+    "de": "Blender-Objekt"
+   }
+  },
+  "directory": {
+   "label": {
+    "en": "Folder",
+    "validated_it": false,
+    "validated_el": false,
+    "validated_he": false,
+    "validated_es": false,
+    "validated_pl": false,
+    "validated_ro": false,
+    "validated_fr": false,
+    "validated_de": false,
+    "it": "Cartella",
+    "el": "Φάκελος",
+    "he": "תיקייה",
+    "es": "Carpeta",
+    "pl": "Folder",
+    "ro": "Dosar",
+    "fr": "Dossier",
+    "de": "Ordner"
+   }
+  },
+  "file": {
+   "label": {
+    "en": "File",
+    "validated_it": false,
+    "validated_el": false,
+    "validated_he": false,
+    "validated_es": false,
+    "validated_pl": false,
+    "validated_ro": false,
+    "validated_fr": false,
+    "validated_de": false,
+    "it": "File",
+    "el": "Αρχείο",
+    "he": "קובץ",
+    "es": "Archivo",
+    "pl": "Plik",
+    "ro": "Fișier",
+    "fr": "Fichier",
+    "de": "Datei"
+   }
+  },
+  "file_set": {
+   "label": {
+    "en": "File set",
+    "validated_it": false,
+    "validated_el": false,
+    "validated_he": false,
+    "validated_es": false,
+    "validated_pl": false,
+    "validated_ro": false,
+    "validated_fr": false,
+    "validated_de": false,
+    "it": "Insieme di file",
+    "el": "Σύνολο αρχείων",
+    "he": "ערכת קבצים",
+    "es": "Conjunto de archivos",
+    "pl": "Zestaw plików",
+    "ro": "Set de fișiere",
+    "fr": "Ensemble de fichiers",
+    "de": "Dateigruppe"
    }
   }
  }
