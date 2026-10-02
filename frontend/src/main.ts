@@ -10792,6 +10792,33 @@ let resLastShelf: OrphanEntry[] = [];
  *  EM id (the DosCo convention ignores them) and ids carried by two files */
 let resLastNotes: { noId: string[]; dup: Record<string, string[]> } = { noId: [], dup: {} };
 
+/**
+ * DEV30 U7 · «Scan as DosCo»: the Resources panel, with the folder filled in and
+ * the scan already running. Measured on dev.15: the scan (DEV29 B6) lived only
+ * in Tools ▸ Resources, and E.D. looked for it on the DosCo folder in the
+ * Storage and in the shelf of resources — neither said it existed.
+ */
+function scanDoscoButton(folder: string | null): HTMLElement {
+  const box = document.createElement("div");
+  box.className = "stamp-report-ask";
+  const b = document.createElement("button");
+  b.className = "ghost";
+  b.dataset.action = "scan-dosco";
+  b.textContent = t("res.scanHere");
+  b.title = folder ? t("res.scanHereHint", { folder }) : t("res.scanPick");
+  b.onclick = () => scanDosco(folder);
+  box.appendChild(b);
+  return box;
+}
+function scanDosco(folder: string | null): void {
+  openResources();
+  if (!store) return;
+  if (folder) {
+    resFolderInp.value = folder;
+    void scanResources();
+  } else resFolderInp.focus();
+}
+
 function openResources(): void {
   if (!store) {
     toast("Open a document first");
@@ -17399,6 +17426,9 @@ function renderShelfInto(win: Win, body: HTMLElement,
       const p = document.createElement("p");
       p.textContent = t("shelf.empty");
       empty.appendChild(p);
+      // DEV30 U7 · …and the scan of a DosCo, reachable from the shelf too
+      const dir = studyDir();
+      empty.appendChild(scanDoscoButton(dir ? `${dir}/DosCo` : null));
       body.appendChild(empty);
       return;
     }
@@ -19126,8 +19156,11 @@ function renderStorageInto(host: StorageHost): void {
         detail.appendChild(composeButtons(entry, listing));
         // dev28 · «è un'altra copia di R» also OUTSIDE a room (decision 14)
         if (entry.type === "file" && !entry.outside) storageCopyOffer(detail, win, entry);
-      } else if (!listing.roots)
+      } else if (!listing.roots) {
         detail.appendChild(composeFolderButton(listing));
+        // DEV30 U7 · «Scan DosCo» where E.D. looked for it: on the folder
+        detail.appendChild(scanDoscoButton(listing.path));
+      }
       // RISORSA-FILE · a TILESET folder: pack it into a .3tz beside it (desktop)
       if (!listing.roots && listing.entries.some((e) => e.type === "file" && e.name === "tileset.json")) {
         detail.appendChild(pack3tzButton(listing.path));
