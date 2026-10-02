@@ -139,7 +139,7 @@ const doc = (nodes, edges = []) => ({ header: {}, graph: { id: "g", nodes, edges
   d11.source = "10.5281/zenodo.7463211";
   eq(C.proposeActName(d11, "Download", "zenodo-7463211"), "Download 10.5281/zenodo.7463211", "B5 · the proposed name: «Download 10.5281/zenodo.7463211»");
   d11.source = "";
-  eq(C.proposeActName(d11, "Download", "zenodo-7463211"), "Download · zenodo-7463211", "B5 · without a source: kind · folder");
+  eq(C.proposeActName(d11, "Download", "zenodo-7463211"), "Download zenodo-7463211", "B5 · without a source: kind · folder (DEV30 D2: «<technique> <origin>», no dot)");
   eq(C.proposeActName(d1, "Download", "x"), "", "B5 · one file: nothing proposed");
   d11.source = "https://doi.org/10.5281/zenodo.7463211";
   eq(C.actMetadata(d11), { retrieved_from: "https://doi.org/10.5281/zenodo.7463211" }, "B5 · the source travels as how.acquisition.retrieved_from");
@@ -183,16 +183,12 @@ const doc = (nodes, edges = []) => ({ header: {}, graph: { id: "g", nodes, edges
   ok(!lanes.some((l) => /\(\d\)/.test(l)), "B2 · no lane is «Products (2)» / «Processes (2)»");
   ok(lanes.some((l) => /allineamento/.test(l)) && lanes.some((l) => /Products of .*export/.test(l)),
      "B2 · the lanes say the step (allineamento; products of the export)");
-  // the same lot, two events: the one there first stays (the stamps' id)
-  eq(twinAcquisitions(g.nodes, g.edges), [{ keep: "c1eef313-29e1-5361-ad19-ca01930832e7", drop: "acq-drone", members: 8 }],
-     "B2 · two events for the same 8 files are found; the stamps' event (there first) is the one kept");
-  const st = new DocumentStore(JSON.parse(JSON.stringify(FX)));
-  let merge = null;
-  const iss = issues({ doc: st.doc, nodes: st.liveNodes(), isUnit: isStratigraphicType, t: tt,
-    fixers: { mergeEvents: { label: "m", run: (k, d) => { merge = [k, d]; } } } }).filter((i) => i.rule === "twin");
-  ok(iss.length === 1 && iss[0].node === "acq-drone" && iss[0].fix?.kind === "button", "B2 · a warning on the second event, with «Merge into …»");
-  iss[0].fix.run();
-  eq(merge, ["c1eef313-29e1-5361-ad19-ca01930832e7", "acq-drone"], "B2 · …which merges the declared event into the stamps' one");
+  // the same lot, two events — DEV30 D3 superseded the merge of B2: they stay
+  // two, and the warning's fix LINKS them (the later cites the earlier). The
+  // dev30 checks (`check-dev30.mjs`) hold the new promise; here, only that the
+  // pair is still found.
+  eq(twinAcquisitions(g.nodes, g.edges).map((x) => [x.later, x.earlier].sort()), [["acq-drone", "c1eef313-29e1-5361-ad19-ca01930832e7"].sort()],
+     "B2 · two events for the same 8 files are found (D3: to be linked, not merged)");
   const SP = process.env.DEV29_SP_DTC;   // optional: SanPietro_DTC.em.json (a copy in /tmp)
   if (SP) {
     const sp = JSON.parse(readFileSync(SP, "utf8")).graph;
