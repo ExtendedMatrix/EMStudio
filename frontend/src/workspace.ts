@@ -256,7 +256,9 @@ const BUILTIN_WORKSPACES: WorkspacePreset[] = [
         { name: "doc", type: "doc" },
         { name: "docs", type: "table",
           state: { "current.table.sheet": "Documents", "current.table.view": "cards" } },
-        { name: "graph", type: "graph", state: { mode: "graph" } },
+        // DEV30 U6 · the standard view of every graph window is the Matrix
+        // (E.D., 2 Oct): Fonti's opened in Graph, the only one that did
+        { name: "graph", type: "graph", state: { mode: "matrix" } },
         { name: "inspector", type: "inspector" },
       ],
       active: "doc",
@@ -771,7 +773,7 @@ export const LEGACY_SIGNATURES: Record<string, string[]> = {
   assets: ["row(storage,row(storage,col(graph:dtc,inspector)))"],
   narrative: ["row(narrative,viewer)"],
 };
-export const WORKSPACES_REV = 2;
+export const WORKSPACES_REV = 3;
 const REV_KEY = "emstudio.workspaces.rev";
 
 export function migrateSavedArrangements(
@@ -788,6 +790,13 @@ export function migrateSavedArrangements(
       delete out[ws];
       reseeded.push(ws);
     }
+  }
+  // DEV30 U6 (rev 3) · a saved Fonti whose graph window still shows the Graph
+  // view of the old seed opens on the Matrix, the standard view
+  const prov = out.provenance as Partial<WorkspaceWindows> | undefined;
+  if (prov && Array.isArray(prov.wins)) {
+    out.provenance = { ...prov, wins: (prov.wins as Win[]).map((w) =>
+      w?.type === "graph" && (w.state ?? {}).mode === "graph" ? { ...w, state: { ...w.state, mode: "matrix" } } : w) };
   }
   return { parsed: out, reseeded };
 }
