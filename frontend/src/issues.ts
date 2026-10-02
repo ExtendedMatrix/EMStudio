@@ -256,7 +256,11 @@ export function issues(src: IssueSources): Issue[] {
              txt: t("issues.noEpoch", { n: name(n.id) }),
              ...(fx.assignEpoch && epochs.length ? { fix: { kind: "pick" as const, placeholder: t("issues.fixEpoch"),
                  options: epochs, run: (v: string) => fx.assignEpoch!(n.id, v) } } : {}) });
-    if (src.isUnit(n.node_type) && !hasOut.get(n.id)?.has("has_property"))
+    // DEV29 A9b · a continuity node (BR) marks where a unit's life ends: it has
+    // no properties to document, so «no documented property» was 8 false
+    // positives on San Pietro, all named «continuity_node»
+    if (src.isUnit(n.node_type) && !src.namedByConstruction?.(n.node_type)
+        && !hasOut.get(n.id)?.has("has_property"))
       push({ node: n.id, sev: "info", rule: "paradata",
              txt: t("issues.noProps", { n: name(n.id) }),
              ...(fx.addProperty ? { fix: { kind: "button" as const, label: fx.addProperty.label,
