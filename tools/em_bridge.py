@@ -684,8 +684,46 @@ def _load_s3dgraphy(s3dgraphy_src: "pathlib.Path | None"):
     return api
 
 
+#: DEV30 U9 · the level of the routes this bridge serves. Raise it when a route
+#: the editor depends on is added; the editor names an older bridge for what it
+#: is instead of failing with WebKit's «Load failed». 30 = /read-shift and the
+#: JSON+CORS answer of an unknown route.
+BRIDGE_LEVEL = 30
+_STARTED_AT = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+
+
+def _s3dgraphy_identity() -> dict:
+    """Which s3dgraphy this process imported: its version and its folder."""
+    try:
+        import s3dgraphy
+        return {"version": getattr(s3dgraphy, "__version__", None),
+                "path": os.path.dirname(getattr(s3dgraphy, "__file__", "") or "")}
+    except Exception:  # noqa: BLE001
+        return {}
+
+
 def make_handler(api):
     class Handler(BaseHTTPRequestHandler):
+        def send_error(self, code, message=None, explain=None):
+            """DEV30 U9 · an unknown route answers JSON, WITH the CORS headers.
+
+            The stock `send_error` writes an HTML page and no
+            `Access-Control-Allow-Origin`, so a page on another origin (the
+            desktop's `tauri://localhost`) never sees the 404: WebKit rejects the
+            fetch with «Load failed» and the reason is lost. Measured on the
+            desktop dev.15: «Read a SHIFT.txt…» against a bridge without
+            /read-shift said exactly that."""
+            body = json.dumps({"ok": False, "error": message or "error",
+                               "bridge_level": BRIDGE_LEVEL}).encode()
+            self.send_response(code, message)
+            self._cors()
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Connection", "close")
+            self.end_headers()
+            if self.command != "HEAD":
+                self.wfile.write(body)
+
         # Per-process id → MinIO object_key map, populated by /ingest-minio so a
         # later /presign can accept the stable {id} (transport-layer convenience;
         # callers may also presign an {object_key} directly, statelessly).
@@ -827,8 +865,17 @@ def make_handler(api):
             if route == "/health":
                 # the SCOPE travels with the health probe: "can this bridge see
                 # my whole disk?" must be answerable without reading its argv
+                # DEV30 U9 · …and WHICH bridge this is. Measured on 2 Oct: the
+                # desktop dev.15 talked to a `./dev.sh` bridge started the night
+                # before /read-shift existed, and the page could not tell. The
+                # level says what routes it has, `s3dgraphy` which library it
+                # imported (the working tree in dev: `--s3dgraphy` / the sibling
+                # checkout go first on sys.path), `started_at` since when.
                 body = json.dumps({"ok": True, "service": "em_bridge",
-                                   "fs_scope": _fs_scope()}).encode()
+                                   "fs_scope": _fs_scope(),
+                                   "bridge_level": BRIDGE_LEVEL,
+                                   "started_at": _STARTED_AT,
+                                   "s3dgraphy": _s3dgraphy_identity()}).encode()
                 self.send_response(200)
                 self._cors()
                 self.send_header("Content-Type", "application/json")

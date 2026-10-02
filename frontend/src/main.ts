@@ -8663,6 +8663,29 @@ async function bridgeUrl(): Promise<string> {
     "http://localhost:8765";
   return _bridgeUrl;
 }
+/** The bridge level this editor expects (`BRIDGE_LEVEL` in tools/em_bridge.py). */
+const BRIDGE_LEVEL_WANTED = 30;
+/**
+ * DEV30 U9 · WHY a call to the bridge failed, in words.
+ *
+ * Measured on the desktop dev.15 (2 Oct): «Read a SHIFT.txt…» said «Load
+ * failed». The file was read fine (`File.text()`); the fetch was not. The
+ * desktop's port 8765 was held by a `./dev.sh` bridge started the night before
+ * /read-shift existed — the shell then talks to that one — and its 404 came
+ * as an HTML page WITHOUT the CORS header, which WebKit turns into a bare
+ * «Load failed». The bridge now answers an unknown route in JSON with CORS and
+ * says its level in /health; this reads both, so an older bridge is named.
+ */
+async function bridgeWhy(route: string, e: unknown, status?: number): Promise<string> {
+  const base = await bridgeUrl();
+  const health = await fetch(`${base}/health`).then((r) => (r.ok ? r.json() : null)).catch(() => null) as
+    { bridge_level?: number; started_at?: string } | null;
+  if (!health) return t("bridge.whyDown", { url: base });
+  const level = typeof health.bridge_level === "number" ? health.bridge_level : 0;
+  if (status === 404 || level < BRIDGE_LEVEL_WANTED)
+    return t("bridge.whyOlder", { url: base, route, since: health.started_at ?? t("bridge.sinceUnknown") });
+  return e instanceof Error ? e.message : String(e);
+}
 /** SPAZIO · the readings of 7–11 ott whose vertices are still in
  *  `readings/<region>.glb`: read once when the document opens, under its folder
  *  (`reading-files.ts`). Nothing writes a glb any more — the vertices of a
@@ -11446,7 +11469,10 @@ function readShiftInto(st: DocumentStore, file?: File): void {
         method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text }),
       });
       const j = await r.json().catch(() => ({}));
-      if (!r.ok) throw new Error(String((j as { error?: string }).error ?? `HTTP ${r.status}`));
+      if (!r.ok) {
+        if (r.status === 404) throw new Error(await bridgeWhy("/read-shift", null, 404));
+        throw new Error(String((j as { error?: string }).error ?? `HTTP ${r.status}`));
+      }
       const { epsg, shift_x, shift_y, shift_z } = j as { epsg: number; shift_x: number; shift_y: number; shift_z: number };
       const geo = st.liveNodes().find((n) => n.node_type === "geo_position");
       st.batch(() => {
@@ -11461,7 +11487,10 @@ function readShiftInto(st: DocumentStore, file?: File): void {
       refreshInspector();
       draw();
     } catch (e) {
-      const msg = t("issues.shiftFailed", { f: f.name, why: e instanceof Error ? e.message : String(e) });
+      // DEV30 U9 · a fetch that fails outright (WebKit's «Load failed») says
+      // which bridge and why, not the browser's two words
+      const why = e instanceof TypeError ? await bridgeWhy("/read-shift", e) : e instanceof Error ? e.message : String(e);
+      const msg = t("issues.shiftFailed", { f: f.name, why });
       logWarn(msg);
       toast(msg);
     }
