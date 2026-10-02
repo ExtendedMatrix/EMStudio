@@ -884,6 +884,35 @@ export class DocumentStore {
     return null;
   }
 
+  /** DEV29 B9c · the nodes and edges that hold the epochs' DATES — each
+   *  epoch's ParadataNodeGroup and its absolute_time_* properties, which
+   *  `ensureAllEpochParadata` completes at load. They are why the same GraphML
+   *  counts 90 / 166 here and 66 / 142 in `convert_graphml_to_emjson`: the
+   *  status bar names them instead of hiding the difference. Live only. */
+  epochDateCounts(): { nodes: number; edges: number } {
+    const live = new Set(this.liveNodes().map((n) => n.id));
+    const epochs = new Set(this.liveNodes().filter((n) => n.node_type === "EpochNode").map((n) => n.id));
+    const pdgs = new Set<string>();
+    const edges = this.liveEdges();
+    let e = 0;
+    for (const x of edges)
+      if (x.edge_type === "has_paradata_nodegroup" && epochs.has(x.source) && live.has(x.target)) {
+        pdgs.add(x.target);
+        e++;
+      }
+    const props = new Set<string>();
+    for (const x of edges)
+      if (x.edge_type === "is_in_paradata_nodegroup" && pdgs.has(x.target)) {
+        const p = this.node(x.source);
+        const pt = String(((p?.data ?? {}) as Record<string, unknown>).property_type ?? p?.name ?? "");
+        if (p && live.has(p.id) && pt.startsWith("absolute_time_")) {
+          props.add(p.id);
+          e++;
+        }
+      }
+    return { nodes: pdgs.size + props.size, edges: e };
+  }
+
   /** The ParadataNodeGroup attached to ANY node via has_paradata_nodegroup, or
    *  null — the same edge the epochs use, node-agnostic (a US carries its
    *  paradata the same way an epoch carries its chronology). */

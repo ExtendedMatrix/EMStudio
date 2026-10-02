@@ -75,6 +75,34 @@ const doc = (nodes, edges = []) => ({ header: {}, graph: { id: "g", nodes, edges
   eq(t("l.phaseDefault", { n: 3 }), "Phase 3", "B9a · in English «Phase 3»");
 }
 
+// ── B9c · the status bar says how many nodes are the epochs' dates ──────────
+{
+  const d = doc([
+    { id: "ep1", node_type: "EpochNode", name: "A", data: { start_time: 0, end_time: 100 } },
+    { id: "ep2", node_type: "EpochNode", name: "B", data: { start_time: 100, end_time: 200 } },
+    { id: "u1", node_type: "US", name: "US1" },
+  ], [{ id: "e1", source: "u1", target: "ep1", edge_type: "has_first_epoch" }]);
+  const st = new DocumentStore(d);
+  eq(st.epochDateCounts(), { nodes: 0, edges: 0 }, "B9c · as imported: no epoch dates yet");
+  const before = [st.liveNodes().length, st.liveEdges().length];
+  st.ensureAllEpochParadata();
+  const c = st.epochDateCounts();
+  eq(c, { nodes: 6, edges: 6 }, "B9c · two epochs → 2 groups + 4 absolute_time properties, 6 edges");
+  eq([st.liveNodes().length - c.nodes, st.liveEdges().length - c.edges], before,
+     "B9c · count minus the epochs' dates = the file's count (s3Dgraphy's)");
+  ok(t("info.epochDates", { n: 24, e: 24 }).includes("24"), "B9c · the bar's words carry both numbers");
+  const SP = process.env.DEV29_SP_CONVERTED;   // optional: the San Pietro GraphML, converted (a copy in /tmp)
+  if (SP) {
+    const sp = new DocumentStore(JSON.parse(readFileSync(SP, "utf8")));
+    const raw = [sp.liveNodes().length, sp.liveEdges().length];
+    sp.ensureAllEpochParadata();
+    const k = sp.epochDateCounts();
+    console.log(`  San Pietro: file ${raw.join("/")}, after load ${sp.liveNodes().length}/${sp.liveEdges().length}, epoch dates ${k.nodes}/${k.edges}`);
+    eq([raw, [sp.liveNodes().length, sp.liveEdges().length], [k.nodes, k.edges]], [[66, 142], [90, 166], [24, 24]],
+       "B9c · San Pietro: 66/142 in the file, 90/166 after load, 24/24 of them the epochs' dates");
+  }
+}
+
 // ── B9d · devrel announces as many installers as release.yml builds ─────────
 {
   const ROOT = new URL("../../", import.meta.url).pathname;

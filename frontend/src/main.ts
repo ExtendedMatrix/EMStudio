@@ -2979,10 +2979,16 @@ function updateInfo(): void {
   const liveNodeCount = store.liveNodes().length;
   const liveEdgeCount = store.liveEdges().length;
   const buried = g.nodes.length - liveNodeCount;
+  // DEV29 B9c · the epochs' dates are nodes EMStudio completes at load: the
+  // bar says how many of the count they are, so 90 / 166 here and 66 / 142 in
+  // s3Dgraphy's convert_graphml_to_emjson read as the same file
+  const dates = store.epochDateCounts();
   info.textContent =
     `${title} — ${liveNodeCount} nodes, ${liveEdgeCount} edges` +
     (lanes ? `, ${lanes} epochs` : "") +
+    (dates.nodes ? ` ${t("info.epochDates", { n: dates.nodes, e: dates.edges })}` : "") +
     (buried > 0 ? ` (+${buried} deleted)` : "");
+  info.dataset.epochDates = dates.nodes ? `${dates.nodes}/${dates.edges}` : "";
   renderNameStrip();
 }
 
