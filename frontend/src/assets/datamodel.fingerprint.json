@@ -1,5 +1,5 @@
 {
-  "digest": "sha256:45c185335677bb061b54636a60f00ad4f54388593262f6ab5f6b6672a315bf41",
+  "digest": "sha256:027b2eead5a2b9986f83b81ff75c81aa2c27272e5539b83cb733595c956795cb",
   "versions": {
     "nodes": "1.6.23",
     "node_registry": "1.6.23",
@@ -12,7 +12,7 @@
     "nodes": "sha256:294c150032938487250e2b4ed98242a9f83cc23c2ca00853777ff47f0bd3f5cf",
     "node_registry": "sha256:107ed2c2324c1979d8966fcd603ce5681a04a7c1a6c2ebc0b6672b081c285d6b",
     "connections": "sha256:fc7e8b27646e9cb0d0591a35873f8da9d153079beb947cd740356927aa1d7556",
-    "visual_rules": "sha256:dbda467611174a6d7676c4945c5446cc0248f9d1471db596e4e1dfefa763d1cd",
+    "visual_rules": "sha256:f0dbb71ad0c9432a0b68759e99580f6d4720fd4544ade907af00e5dd3ba8e05d",
     "qualia": "sha256:f69c1ca287729791e8969f01425b10b8d342284c691bc81c4f9d1b9fa078e41b",
     "translations": "sha256:e006291f14ece97c155262e7c87de3233a451f1026f1cd1c044d4e773e7b57e1"
   },
