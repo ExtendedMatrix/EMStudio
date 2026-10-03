@@ -6015,6 +6015,12 @@ async function probeInventory(cands: InvCandidate[], baseDir: string | null, bas
   return out;
 }
 
+/** U1 · the upload queue is paused: the loop stops BETWEEN pieces (never in
+ *  the middle of one) and goes on from the server's offset when resumed */
+let uploadPaused = false;
+const waitWhilePaused = async (): Promise<void> => {
+  while (uploadPaused) await new Promise((r) => setTimeout(r, 250));
+};
 /** Bigger than this, a file goes up in resumable pieces (U1) */
 const UPLOAD_PIECE = 8 * 1024 * 1024;
 
@@ -6050,6 +6056,12 @@ async function sendToRoom(base: string, room: string, it: InvItem,
   let offset = up.offset ?? 0;
   const fileUrl = await fsFileUrl(it.path!);
   for (let tries = 0; offset < size && tries < 8;) {
+    if (uploadPaused) {
+      await waitWhilePaused();
+      // where is the server now? (another client, a restart: it decides)
+      const h = await fetch(`${roomUrl}/uploads/${encodeURIComponent(up.upload_id)}`, { method: "HEAD", headers: auth }).catch(() => null);
+      offset = Number(h?.headers.get("Upload-Offset") ?? offset);
+    }
     const end = Math.min(size, offset + UPLOAD_PIECE) - 1;
     const piece = await fetch(fileUrl, { headers: { Range: `bytes=${offset}-${end}` } });
     if (piece.status !== 206 && piece.status !== 200) return { id: it.id, ok: false, sent: false, bytes: 0, why: `bridge ${piece.status}` };
@@ -6221,11 +6233,27 @@ function paintInventory(body: HTMLElement, inv: Inventory, base: string, room: s
     const want = toUpload(inv).bytes;
     let moved = 0;
     const outcomes: InvOutcome[] = [];
+    const pause = el("button", "conn-btn inv-pause", t("inv.pause")) as HTMLButtonElement;
+    pause.type = "button";
+    uploadPaused = false;
+    pause.addEventListener("click", () => {
+      uploadPaused = !uploadPaused;
+      pause.textContent = t(uploadPaused ? "inv.resume" : "inv.pause");
+      logInfo(t(uploadPaused ? "inv.paused" : "inv.resumed"));
+    });
+    acts.appendChild(pause);
     for (const [k, it] of work.entries()) {
+      await waitWhilePaused();
       progress.textContent = t("inv.sending", { k: String(k + 1), n: String(work.length), name: it.name,
         done: humanBytes(moved), size: humanBytes(want) });
       let o: InvOutcome;
-      try { o = await sendToRoom(base, room, it, (n) => { moved += n; }); }
+      try {
+        o = await sendToRoom(base, room, it, (n) => {
+          moved += n;     // per piece: a long file shows it moving, and a pause shows it stopped
+          progress.textContent = t("inv.sending", { k: String(k + 1), n: String(work.length), name: it.name,
+            done: humanBytes(moved), size: humanBytes(want) });
+        });
+      }
       catch (exc) { o = { id: it.id, ok: false, sent: false, bytes: 0, why: String(exc) }; }
       outcomes.push(o);
       if (o.ok) storeBack(it, base, room);
@@ -6257,6 +6285,7 @@ function paintInventory(body: HTMLElement, inv: Inventory, base: string, room: s
         metadata: { ingested_at: new Date().toISOString(), source: "EMStudio · bring into a room" } });
       logInfo(`inventory: lot «${lot.name}» → ${made.acquisitionId} (${made.count} file)`);
     }
+    pause.remove();
     if (outcomes.some((o) => o.ok)) sync.sendRequestSave();
     const rep = inventoryReport(inv, outcomes);
     const door = await nodeApi(base, () => hubToken).door(room).catch(() => ({ web: null, scheme: null }));

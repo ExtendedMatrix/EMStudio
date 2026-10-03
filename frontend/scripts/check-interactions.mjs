@@ -3594,6 +3594,7 @@ const kToken = (user) => {
   return JSON.parse(out).access_token;
 };
 const kGet = (path, tok) => JSON.parse(execFileSync("curl", ["-sk", `${K_NODE}/v1${path}`, "-H", `Authorization: Bearer ${tok}`], { encoding: "utf8" }));
+const TEMPLU_DIR = () => (process.env.TEMPLU ?? "").replace(/\/EM\/[^/]+$/, "");
 const K_SETTINGS = () => ({ "emstudio.settings": JSON.stringify({ sync: { hubUrl: K_NODE, hubRoom: "cantiere-demo" } }) });
 if (K_NODE) test("TK1.live", "T-K1 dal vivo · nodo del dev stack, utente dev in «cantiere-demo»: la voce di stato dice nodo, accesso e nome della stanza; spento il nodo (le richieste cadono), dice «nodo non raggiungibile» entro 30 s", async () => {
   const { p, ctx, errors } = await open({ doc: null, locale: "en", init: K_SETTINGS() });
@@ -4749,6 +4750,47 @@ if (K_NODE && process.env.TEMPLU) test("TP2.live", "T-P2 dal vivo · Templu Mare
       && !!tz && /TempluMare_cesium\.3tz$/.test(tz.origin) && /^Found on this computer · 0/.test(groups2.on_disk)
       && /· 19/.test(groups2.in_store) && /· 2$/.test(groups2.external) && state.nodes > 200 && second.uploaded === 0 && second.bytes === 0 && !errors.length,
     detail: { state, name, room, groups, lots, secs, first, groups2, second, tz, sample: up.slice(0, 2), log, errors } };
+});
+
+
+if (K_NODE && process.env.TEMPLU) test("TU1.pause", "T-U1 (client) · un file nuovo da 48 MB sale a pezzi ripristinabili: «Pausa» ferma la coda fra due pezzi (l'avanzamento non si muove), «Riprendi» la fa continuare dall'offset del server, e il file arriva intero (sha256 dal server)", async () => {
+  const dir = TEMPLU_DIR();
+  const file = `${dir}/u1-pausa-${Date.now()}.bin`;
+  execFileSync("dd", ["if=/dev/urandom", `of=${file}`, "bs=1m", "count=48"], { stdio: "ignore" });
+  const doc = { header: { format: "em.json", version: "1.0" }, active_graph_id: "g-u1", graphs: {
+    "g-u1": { graph_id: "g-u1", name: "U1", nodes: [{ id: "us1", node_type: "US", name: "US 1" }], edges: [] },
+    shelf: { graph_id: "shelf", name: "Shelf", data: { em_collection: "ShelfGraph" }, edges: [],
+      nodes: [{ id: "big-1", name: "u1.bin", node_type: "resource", data: { url: file, media_type: "application/octet-stream" } }] } } };
+  const { p, ctx, errors } = await open({ doc: null, locale: "en", init: {
+    "emstudio.settings": JSON.stringify({ sync: { hubUrl: K_NODE } }),
+    "emstudio.identities": JSON.stringify({ current: "0000-0002-1825-0097",
+      known: [{ orcid: "0000-0002-1825-0097", name: "Dev", surname: "User", verified: false }] }) } });
+  await p.evaluate(([d, pa]) => window.__EM_DRAG__.openAt(d, pa), [doc, `${dir}/u1.em.json`]);
+  await p.waitForTimeout(1500);
+  await p.evaluate((tk) => window.__EM_DRAG__.useToken(tk), kToken("dev"));
+  await p.evaluate(() => window.__EM_DRAG__.bringIntoRoom());
+  await p.waitForSelector("#room-name", { timeout: 10000 });
+  await p.fill("#room-name", `u1 pausa ${Date.now() % 100000}`);
+  await p.click('.modal-foot button[data-a="ok"]');
+  await p.waitForSelector("#inv-pop .inv-go", { timeout: 60000 });
+  await p.click("#inv-pop .inv-go");
+  await p.waitForSelector("#inv-pop .inv-pause", { timeout: 10000 });
+  await p.click("#inv-pop .inv-pause");
+  await p.waitForTimeout(2500);
+  const a = await p.evaluate(() => document.querySelector("#inv-pop .inv-line:last-of-type")?.textContent ?? "");
+  const moved1 = await p.evaluate(() => window.__EM_DRAG__.log().filter((l) => /upload paused/.test(l.message)).length);
+  await p.waitForTimeout(2500);
+  const b = await p.evaluate(() => document.querySelector("#inv-pop .inv-line:last-of-type")?.textContent ?? "");
+  await p.click("#inv-pop .inv-pause");
+  await p.waitForSelector("#inv-pop .inv-link", { timeout: 120000 });
+  const rep = await p.evaluate(() => window.__EM_DRAG__.inventoryReport());
+  const shelf = await p.evaluate(() => window.__EM_DRAG__.shelf());
+  await ctx.close();
+  const local = "sha256:" + execFileSync("shasum", ["-a", "256", file], { encoding: "utf8" }).split(" ")[0];
+  execFileSync("rm", ["-f", file]);
+  const e = shelf.find((x) => x.id === "big-1");
+  return { pass: moved1 === 1 && a === b && /Sending 1\/1 · u1\.bin · [1-9]/.test(a) && !/48\.0 MB of/.test(a) && rep.uploaded === 1 && rep.bytes === 48 * 1024 * 1024 && e?.checksum === local && !errors.length,
+    detail: { a, b, rep, local, entry: e, errors } };
 });
 
 // ── run ─────────────────────────────────────────────────────────────────────
