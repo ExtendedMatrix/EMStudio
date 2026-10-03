@@ -4793,6 +4793,106 @@ if (K_NODE && process.env.TEMPLU) test("TU1.pause", "T-U1 (client) · un file nu
     detail: { a, b, rep, local, entry: e, errors } };
 });
 
+// ── F1 · L1 (MICRO-ASSET-VERSIONI) · one home per file, the lot rule ────────
+//   LIVE_NODE=https://em.localhost:8443/em F1_DIR=/tmp/micro-asset-versioni/f1l1 \
+//   BRIDGE=http://localhost:8769 node scripts/check-interactions.mjs TF1 TL1
+// (F1_DIR under the bridge's --fs-root; TL1 reads the fixture of
+// `make_fixture.py` there, and the DosCo copy beside it)
+const DEV_ORCID_ID = () => JSON.stringify({ current: "0000-0002-1825-0097",
+  known: [{ orcid: "0000-0002-1825-0097", name: "Dev", surname: "User", verified: false }] });
+if (K_NODE && process.env.F1_DIR) test("TF1.live", "T-F1 dal vivo · un file a casa nella stanza A (caricato lì, citato dal grafo di A); «Porta in stanza» B lo trova «a casa in un'altra stanza» e propone «Sposta qui»; la conferma elenca A (lascia, e lì diventa riferimento); dopo il sì la casa è B sul server (un record, una casa) e nessun byte è stato rimandato", async () => {
+  const dir = process.env.F1_DIR;
+  const stamp = Date.now() % 1000000;
+  const file = `${dir}/f1-podio-${stamp}.bin`;
+  execFileSync("dd", ["if=/dev/urandom", `of=${file}`, "bs=1k", "count=64"], { stdio: "ignore" });
+  const tok = kToken("dev");
+  const auth = ["-H", `Authorization: Bearer ${tok}`];
+  const roomA = `f1-casa-a-${stamp}`;
+  execFileSync("curl", ["-sk", "-X", "POST", `${K_NODE}/v1/rooms`, ...auth, "-H", "Content-Type: application/json",
+    "-d", JSON.stringify({ room_id: roomA })]);
+  const put = JSON.parse(execFileSync("curl", ["-sk", "-X", "PUT", `${K_NODE}/v1/rooms/${roomA}/asset?media_type=application/octet-stream`,
+    ...auth, "--data-binary", `@${file}`], { encoding: "utf8" }));
+  execFileSync("curl", ["-sk", "-X", "POST", `${K_NODE}/v1/rooms/${roomA}/ops`, ...auth, "-H", "Content-Type: application/json",
+    "-d", JSON.stringify({ ops: [{ op: "add_node", id: "podio", node: { id: "podio", node_type: "resource", name: "podio",
+      data: { checksum: put.ref, url: `${K_NODE}/v1/rooms/${roomA}/asset/${put.ref}`, residency: "resident" } } }] })]);
+  const doc = { header: { format: "em.json", version: "1.0" }, active_graph_id: "g-f1", graphs: {
+    "g-f1": { graph_id: "g-f1", name: "F1", nodes: [{ id: "us1", node_type: "US", name: "US 1" }], edges: [] },
+    shelf: { graph_id: "shelf", name: "Shelf", data: { em_collection: "ShelfGraph" }, edges: [],
+      nodes: [{ id: "podio-b", name: "podio.bin", node_type: "resource", data: { url: file, media_type: "application/octet-stream" } }] } } };
+  const { p, ctx, errors } = await open({ doc: null, locale: "en", init: {
+    "emstudio.settings": JSON.stringify({ sync: { hubUrl: K_NODE } }), "emstudio.identities": DEV_ORCID_ID() } });
+  await p.evaluate(([d, pa]) => window.__EM_DRAG__.openAt(d, pa), [doc, `${dir}/f1-${stamp}.em.json`]);
+  await p.waitForTimeout(1500);
+  await p.evaluate((tk) => window.__EM_DRAG__.useToken(tk), tok);
+  await p.evaluate(() => window.__EM_DRAG__.bringIntoRoom());
+  await p.waitForSelector("#room-name", { timeout: 10000 });
+  await p.fill("#room-name", `f1 casa b ${stamp}`);
+  await p.click('.modal-foot button[data-a="ok"]');
+  await p.waitForSelector("#inv-pop .inv-go", { timeout: 60000 });
+  const groups = await p.evaluate(() => Object.fromEntries([...document.querySelectorAll("#inv-pop .inv-group")]
+    .map((g) => [g.dataset.group, g.querySelector("h5").textContent])));
+  const proposal = await p.evaluate(() => document.querySelector('#inv-pop .inv-group[data-group="elsewhere"] select')?.value ?? null);
+  await p.click("#inv-pop .inv-go");
+  await p.waitForSelector("#inv-pop .inv-move-ask", { timeout: 30000 });
+  const ask = await p.evaluate(() => document.querySelector("#inv-pop .inv-move-ask")?.innerText ?? "");
+  await p.screenshot({ path: SHOT("tf1-sposta-qui") }).catch(() => {});
+  await p.click("#inv-pop .inv-move-yes");
+  await p.waitForSelector("#inv-pop .inv-link", { timeout: 60000 });
+  const rep = await p.evaluate(() => window.__EM_DRAG__.inventoryReport());
+  const shelf = await p.evaluate(() => window.__EM_DRAG__.shelf());
+  const roomB = await p.evaluate(() => window.__EM_DRAG__.files().find((f) => f.room)?.room?.id ?? null);
+  await ctx.close();
+  const view = kGet(`/rooms/${roomB}/asset-home/${put.ref}`, tok);
+  const hex = put.sha256;
+  const record = JSON.parse(execFileSync("docker", ["exec", "em-dev-server", "cat",
+    `/srv/em-data/snapshots/asset-homes/${hex.slice(0, 2)}/${hex}.json`], { encoding: "utf8" }));
+  const entry = shelf.find((e) => e.id === "podio-b");
+  execFileSync("rm", ["-f", file]);
+  return { pass: put.home === roomA && /^At home in another room · 1/.test(groups.elsewhere) && /^Found on this computer · 0/.test(groups.on_disk)
+      && proposal === "move" && ask.includes(roomA) && /become «in another room»/.test(ask)
+      && rep.moved === 1 && rep.uploaded === 0 && rep.bytes === 0
+      && view.home === roomB && view.here === true && (view.references ?? []).includes(roomA)
+      && record.home === roomB && typeof record.home === "string" && (record.moves ?? []).length === 1
+      && entry?.locator?.includes(`/rooms/${encodeURIComponent(roomB)}/asset/`) && !errors.length,
+    detail: { roomA, roomB, groups, proposal, ask, rep, view: { home: view.home, references: view.references }, record, entry, errors } };
+});
+
+if (process.env.F1_DIR) test("TL1.live", "T-L1 dal vivo · il bridge legge l'EXIF: il DosCo di Templu Mare (copia) non diventa lotto, nemmeno D.07.0x con l'EXIF di una sola fotocamera; le foto di una sessione (stessa fotocamera, ≤ 30 min) sono UN lotto proposto, non confermato", async () => {
+  const dir = process.env.F1_DIR;
+  const dosco = `${dir.replace(/\/f1l1$/, "")}/DosCo`;
+  const pick = (folder) => execFileSync("ls", [folder], { encoding: "utf8" }).split("\n").filter((f) => f && !f.startsWith("."))
+    .map((f) => `${folder}/${f}`);
+  const files = [...pick(dosco), ...pick(`${dir}/DosCo`), ...pick(`${dir}/session`), ...pick(`${dir}/noexif`)];
+  const doc = { header: { format: "em.json", version: "1.0" }, active_graph_id: "g-l1", graphs: {
+    "g-l1": { graph_id: "g-l1", name: "L1", nodes: [{ id: "us1", node_type: "US", name: "US 1" }], edges: [] },
+    shelf: { graph_id: "shelf", name: "Shelf", data: { em_collection: "ShelfGraph" }, edges: [],
+      nodes: files.map((f, i) => ({ id: `l1-${i}`, name: f.split("/").pop(), node_type: "resource", data: { url: f } })) } } };
+  const { p, ctx, errors } = await open({ doc: null, locale: "en", init: K_NODE ? {
+    "emstudio.settings": JSON.stringify({ sync: { hubUrl: K_NODE } }), "emstudio.identities": DEV_ORCID_ID() } : undefined });
+  await p.evaluate(([d, pa]) => window.__EM_DRAG__.openAt(d, pa), [doc, `${dir}/l1.em.json`]);
+  await p.waitForTimeout(1500);
+  await p.evaluate((tk) => window.__EM_DRAG__.useToken(tk), kToken("dev"));
+  await p.evaluate(() => window.__EM_DRAG__.bringIntoRoom());
+  await p.waitForSelector("#room-name", { timeout: 10000 });
+  await p.fill("#room-name", `l1 lotto ${Date.now() % 100000}`);
+  await p.click('.modal-foot button[data-a="ok"]');
+  await p.waitForSelector("#inv-pop .inv-go", { timeout: 120000 });
+  const lots = await p.evaluate(() => [...document.querySelectorAll("#inv-pop .inv-lot")].map((r) => ({
+    text: r.querySelector("span")?.textContent ?? "", proposal: !!r.querySelector(".inv-lot-yes input"),
+    checked: r.querySelector(".inv-lot-yes input")?.checked ?? null })));
+  // the DosCo copy may already be on the node (T-P2 uploaded it): then it is
+  // «already in the storage» or «at home in another room» — never a lot either way
+  const groups = await p.evaluate(() => Object.fromEntries([...document.querySelectorAll("#inv-pop .inv-group")]
+    .map((g) => [g.dataset.group, g.querySelector("h5").textContent])));
+  const n = (h) => Number(/· (\d+)/.exec(h ?? "")?.[1] ?? 0);
+  await p.screenshot({ path: SHOT("tl1-lotto-proposto") }).catch(() => {});
+  await ctx.close();
+  return { pass: lots.length === 1 && /^Proposed lot «Canon EOS R5 #012345 · 2026-09-30 10:00–10:03» · 13 photos/.test(lots[0].text)
+      && lots[0].proposal && lots[0].checked === false
+      && n(groups.on_disk) + n(groups.in_store) + n(groups.elsewhere) === files.length && !errors.length,
+    detail: { files: files.length, groups, lots, errors } };
+});
+
 // ── run ─────────────────────────────────────────────────────────────────────
 const chosen = cases.filter((c) => !only.length || only.includes(c.id) || only.some((o) => c.id.startsWith(o + ".")));
 for (const c of chosen) {

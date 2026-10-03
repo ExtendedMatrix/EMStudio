@@ -337,9 +337,9 @@ import type {
   PromptResult,
   StratiMinerHandlers,
 } from "./stratiminer";
-import { buildInventory, candidatesOf, choose, digestInLocator, humanBytes, INV_GROUPS, inventoryReport,
-  locatorKind, normDigest, resolveLocal, toUpload, type InvCandidate, type InvChoice, type InvItem,
-  type InvOutcome, type InvProbe, type Inventory } from "./room-inventory";
+import { buildInventory, candidatesOf, choose, confirmLot, digestInLocator, humanBytes, INV_GROUPS, inventoryReport,
+  locatorKind, movePlan, normDigest, resolveLocal, toMove, toUpload, type HomeView, type InvCandidate, type InvChoice,
+  type InvItem, type InvOutcome, type InvProbe, type Inventory, type PhotoExif } from "./room-inventory";
 import { type HostInfo, SyncClient, SYNC_ACCEPTS, type SyncAccept } from "./sync";
 import { type Access, type ConnectionState, type Reach, nodeApi, renderConnectionPanel,
   renderRoomPanel, shortNode, whereDetails, whereHealth, wherePhrase } from "./connection";
@@ -5955,12 +5955,12 @@ async function bringIntoRoom(): Promise<void> {
   pendingInventory = { room: seated, ...before };
 }
 /** P2 · the inventory waiting for its room to be seated (see `seatSeededContainer`) */
-let pendingInventory: { room: string; graphs: InvGraph[]; baseDir: string | null } | null = null;
+let pendingInventory: { room: string; graphs: InvGraph[]; baseDir: string | null; doscoDirs: string[] } | null = null;
 type InvGraph = { id: string; nodes: EmNode[]; edges: EmEdge[] };
 
 /** P2 · what the inventory reads: the open graph, and the shelf (the project's
  *  raw material — the drone photos of a survey live there) */
-function inventorySources(): { graphs: InvGraph[]; baseDir: string | null } {
+function inventorySources(): { graphs: InvGraph[]; baseDir: string | null; doscoDirs: string[] } {
   const graphs: InvGraph[] = [];
   if (store) graphs.push({ id: "study", nodes: store.doc.graph.nodes, edges: store.doc.graph.edges ?? [] });
   const shelf = shelfEntries();
@@ -5968,16 +5968,34 @@ function inventorySources(): { graphs: InvGraph[]; baseDir: string | null } {
     id: e.id, name: e.name, node_type: "resource",
     data: { url: e.locator, ...(e.checksum ? { checksum: e.checksum } : {}) } }) as unknown as EmNode) });
   const path = emtree.activeFile()?.path ?? currentFilePath;
-  return { graphs, baseDir: path ? path.replace(/[\\/][^\\/]*$/, "") : null };
+  const baseDir = path ? path.replace(/[\\/][^\\/]*$/, "") : null;
+  // L1 · the DosCo folders this file declares: documentation, never a lot
+  const doscoDirs = emtree.slotsOf(emtree.activeFile()?.id ?? null).flatMap((sl) => sl.auxiliaryFiles ?? [])
+    .filter((f) => f.fileType === "dosco" && f.locator).map((f) => resolveLocal(f.locator, baseDir));
+  return { graphs, baseDir, doscoDirs };
 }
 
 /** HEAD on the room's store: does it hold these bytes already? */
 async function roomHasDigest(base: string, room: string, digest: string): Promise<boolean> {
+  return (await roomAssetHead(base, room, digest)).ok;
+}
+/** F1 · …and in which room they LIVE (`X-EM-Home-Room`): bytes the node has
+ *  but that are at home in another room are not this room's — «Move here». */
+async function roomAssetHead(base: string, room: string, digest: string): Promise<{ ok: boolean; home: string | null }> {
   try {
     const r = await fetch(`${base}/v1/rooms/${encodeURIComponent(room)}/asset/${encodeURIComponent(digest)}`,
       { method: "HEAD", headers: hubToken ? { Authorization: `Bearer ${hubToken}` } : {}, cache: "no-store" });
-    return r.ok;
-  } catch { return false; }
+    return { ok: r.ok, home: r.ok ? r.headers.get("X-EM-Home-Room") : null };
+  } catch { return { ok: false, home: null }; }
+}
+/** F1 · the node's answer about one file's home: where, who cites it, may I */
+async function assetHomeView(base: string, room: string, digest: string): Promise<HomeView | { error: string }> {
+  try {
+    const r = await fetch(`${base}/v1/rooms/${encodeURIComponent(room)}/asset-home/${encodeURIComponent(digest)}`,
+      { headers: hubToken ? { Authorization: `Bearer ${hubToken}` } : {}, cache: "no-store" });
+    const j = await r.json().catch(() => ({})) as HomeView & { detail?: string };
+    return r.ok ? j : { error: `${r.status} ${j.detail ?? ""}`.trim() };
+  } catch (exc) { return { error: String(exc) }; }
 }
 
 /** P2 · probe every candidate: the bridge for a disk path (it hashes and
@@ -5991,19 +6009,25 @@ async function probeInventory(cands: InvCandidate[], baseDir: string | null, bas
     if (kind === "external") { out.set(c.id, { group: "external", size: null, sha256: c.checksum }); return; }
     if (kind === "store") {
       const d = c.checksum ?? digestInLocator(c.locator);
-      out.set(c.id, d && await roomHasDigest(base, room, d)
-        ? { group: "in_store", size: null, sha256: d }
-        : { group: "missing", size: null, sha256: d, why: "not in this room's storage" });
+      const h = d ? await roomAssetHead(base, room, d) : { ok: false, home: null };
+      out.set(c.id, !h.ok ? { group: "missing", size: null, sha256: d, why: "not in this room's storage" }
+        : h.home && h.home !== room ? { group: "elsewhere", size: null, sha256: d, home: h.home }
+        : { group: "in_store", size: null, sha256: d });
       return;
     }
     const path = resolveLocal(c.locator, baseDir);
     try {
       const r = await fetch(`${await bridgeUrl()}/fs/checksum?path=${encodeURIComponent(path)}`);
       if (!r.ok) { out.set(c.id, { group: "missing", size: null, sha256: c.checksum, path, why: `bridge ${r.status}` }); return; }
-      const j = await r.json() as { checksum?: string; bytes?: number };
+      const j = await r.json() as { checksum?: string; bytes?: number; exif?: PhotoExif | null };
       const sha = normDigest(j.checksum) ?? c.checksum;
-      const there = sha ? await roomHasDigest(base, room, sha) : false;
-      out.set(c.id, { group: there ? "in_store" : "on_disk", size: j.bytes ?? null, sha256: sha, path });
+      const h = sha ? await roomAssetHead(base, room, sha) : { ok: false, home: null };
+      // L1 · the bridge reads a photo's EXIF with the digest (camera, time): an
+      // older bridge says nothing, and then no session is proposed
+      const exif = j.exif ?? null;
+      out.set(c.id, h.ok && h.home && h.home !== room
+        ? { group: "elsewhere", size: j.bytes ?? null, sha256: sha, path, home: h.home, exif }
+        : { group: h.ok ? "in_store" : "on_disk", size: j.bytes ?? null, sha256: sha, path, exif });
     } catch (exc) {
       out.set(c.id, { group: "missing", size: null, sha256: c.checksum, path, why: String(exc) });
     }
@@ -6096,12 +6120,13 @@ async function sendToRoom(base: string, room: string, it: InvItem,
  * disk path stays as a second address of the same bytes (`addresses.ts`). A
  * shelf entry keeps it in `extra.original_locator`.
  */
-function storeBack(it: InvItem, base: string, room: string): void {
+function storeBack(it: InvItem, base: string, room: string,
+                   residency: "resident" | "reference" = "resident"): void {
   const sha = it.sha256!;
   const url = `${base}/v1/rooms/${encodeURIComponent(room)}/asset/${encodeURIComponent(sha)}`;
   if (it.graphId === "shelf") {
     const entry = shelfEntries().find((e) => e.id === it.id);
-    if (entry && entry.locator !== url) updateShelfEntry(it.id, { locator: url, checksum: sha, residency: "resident",
+    if (entry && entry.locator !== url) updateShelfEntry(it.id, { locator: url, checksum: sha, residency,
       extra: { ...(entry.extra ?? {}), original_locator: entry.locator } });
     return;
   }
@@ -6111,7 +6136,7 @@ function storeBack(it: InvItem, base: string, room: string): void {
   const d = (n.data ?? {}) as Record<string, unknown>;
   if (d.url === url) return;
   const origin = String(d.url ?? d.path ?? it.locator);
-  st.updateNode(it.id, { data: { ...d, url, checksum: sha, residency: "resident",
+  st.updateNode(it.id, { data: { ...d, url, checksum: sha, residency,
     ...(it.size != null ? { size_bytes: it.size } : {}),
     ...(n.node_type === "resource_file" && !d.path ? { path: origin } : {}) } } as Partial<EmNode>);
   if (n.node_type === "resource") {
@@ -6152,7 +6177,7 @@ async function openResourceInventory(room: string, src = inventorySources()): Pr
   say.textContent = t("inv.probing", { n: String(cands.length), done: "0" });
   const probes = await probeInventory(cands, src.baseDir, base, room,
     (done) => { say.textContent = t("inv.probing", { n: String(cands.length), done: String(done) }); });
-  const inv = buildInventory(cands, probes);
+  const inv = buildInventory(cands, probes, { doscoDirs: src.doscoDirs });
   logInfo(`inventory «${room}»: ` + INV_GROUPS.map((g) => `${g} ${inv.groups[g].count} (${humanBytes(inv.groups[g].bytes)})`).join(" · "));
   paintInventory(body, inv, base, room, close);
 }
@@ -6165,9 +6190,10 @@ function paintInventory(body: HTMLElement, inv: Inventory, base: string, room: s
     if (text !== undefined) e.textContent = text;
     return e;
   };
-  const choiceSel = (value: InvChoice, onPick: (c: InvChoice) => void): HTMLSelectElement => {
+  const choiceSel = (value: InvChoice, onPick: (c: InvChoice) => void,
+                     options: InvChoice[] = ["upload", "reference", "skip"]): HTMLSelectElement => {
     const sel = el("select", "conn-input");
-    for (const c of ["upload", "reference", "skip"] as InvChoice[]) sel.appendChild(new Option(t(`inv.choice.${c}`), c));
+    for (const c of options) sel.appendChild(new Option(t(`inv.choice.${c}`), c));
     sel.value = value;
     sel.addEventListener("change", () => onPick(sel.value as InvChoice));
     return sel;
@@ -6175,7 +6201,9 @@ function paintInventory(body: HTMLElement, inv: Inventory, base: string, room: s
   const total = el("p", "inv-total");
   const refreshTotal = (): void => {
     const up = toUpload(inv);
-    total.textContent = t("inv.toUpload", { n: String(up.count), size: humanBytes(up.bytes) });
+    const mv = toMove(inv).length;
+    total.textContent = t("inv.toUpload", { n: String(up.count), size: humanBytes(up.bytes) })
+      + (mv ? ` · ${t("inv.toMove", { n: String(mv) })}` : "");
     go.disabled = false;
   };
   body.appendChild(el("p", "inv-line conn-dim", t("inv.rights")));
@@ -6193,10 +6221,30 @@ function paintInventory(body: HTMLElement, inv: Inventory, base: string, room: s
         const r = el("div", "inv-row inv-lot");
         r.dataset.lot = lot.key;
         const first = items.find((i) => i.lotKey === lot.key);
-        r.append(el("span", "", t("inv.lot", { name: lot.name, n: String(lot.ids.length), size: humanBytes(lot.bytes) })),
+        r.append(el("span", "", t(lot.proposed ? "inv.lotProposed" : "inv.lot",
+            { name: lot.name, n: String(lot.ids.length), size: humanBytes(lot.bytes) })),
           choiceSel(first?.choice ?? "upload", (c) => { choose(inv, { lot: lot.key }, c); refreshTotal(); }));
+        if (lot.proposed) {
+          // L1 · a PROPOSAL: one acquisition only when the person says so
+          const lab = el("label", "inv-lot-yes");
+          const box = el("input") as HTMLInputElement;
+          box.type = "checkbox";
+          box.checked = lot.confirmed;
+          box.addEventListener("change", () => confirmLot(inv, lot.key, box.checked));
+          lab.append(box, document.createTextNode(` ${t("inv.lotConfirm")}`));
+          r.appendChild(lab);
+        }
         sect.appendChild(r);
       }
+    }
+    if (g === "elsewhere" && items.length) {
+      // F1 · the proposal: «Move here». Nothing moves before the confirmation
+      // that names the rooms citing these files (on «Upload», below)
+      sect.appendChild(el("p", "inv-line conn-dim", t("inv.elsewhereHint")));
+      const row = el("div", "inv-row");
+      row.append(el("span", "", t("inv.allOfGroup")), choiceSel("move", (c) => { choose(inv, { group: g }, c); paintInventory(body, inv, base, room, close); },
+        ["move", "reference"]));
+      sect.appendChild(row);
     }
     const loose = items.filter((i) => g !== "on_disk" || !i.lotKey);
     if (loose.length) {
@@ -6209,7 +6257,9 @@ function paintInventory(body: HTMLElement, inv: Inventory, base: string, room: s
         label.title = `${it.locator}${it.why ? ` — ${it.why}` : ""}`;
         r.appendChild(label);
         if (it.size != null) r.appendChild(el("span", "conn-dim", humanBytes(it.size)));
+        if (g === "elsewhere" && it.home) r.appendChild(el("span", "conn-dim", t("inv.homeIn", { room: it.home })));
         if (g === "on_disk") r.appendChild(choiceSel(it.choice, (c) => { it.choice = c; refreshTotal(); }));
+        if (g === "elsewhere") r.appendChild(choiceSel(it.choice, (c) => { it.choice = c; refreshTotal(); }, ["move", "reference"]));
         det.appendChild(r);
       }
       sect.appendChild(det);
@@ -6229,10 +6279,43 @@ function paintInventory(body: HTMLElement, inv: Inventory, base: string, room: s
   body.appendChild(progress);
   go.addEventListener("click", async () => {
     go.disabled = true;
+    const outcomes: InvOutcome[] = [];
+    // F1 · «Move here», confirmed: first the node says, per file, where it
+    // lives, which rooms' graphs cite it and whether you may move it; the
+    // person reads that and says yes or no. Only then the homes change.
+    const moving = toMove(inv);
+    if (moving.length) {
+      progress.textContent = t("inv.moveAsking", { n: String(moving.length) });
+      const views = new Map<string, HomeView | { error: string }>();
+      for (const it of moving) views.set(it.id, await assetHomeView(base, room, it.sha256!));
+      const plan = movePlan(moving, views);
+      const yes = await askMoveHere(body, plan, room);
+      for (const it of plan.movable) {
+        if (!yes) { it.choice = "reference"; continue; }
+        const v = views.get(it.id) as HomeView;
+        try {
+          const r = await fetch(`${base}/v1/rooms/${encodeURIComponent(room)}/asset-home/${encodeURIComponent(it.sha256!)}`, {
+            method: "POST", headers: { ...(hubToken ? { Authorization: `Bearer ${hubToken}` } : {}), "Content-Type": "application/json" },
+            body: JSON.stringify({ from_room: v.home, confirm: true }) });
+          const j = await r.json().catch(() => ({})) as { home?: string; detail?: string };
+          if (r.ok && j.home === room) {
+            outcomes.push({ id: it.id, ok: true, sent: false, bytes: 0, moved: true, home: room });
+            it.home = room;
+            storeBack(it, base, room);
+            logInfo(`inventory: ${it.name} moved here from ${v.home ?? "?"} — references now in ${(v.references ?? []).join(", ") || "no other room"}`);
+          } else {
+            outcomes.push({ id: it.id, ok: false, sent: false, bytes: 0, why: `${r.status} ${j.detail ?? ""}`.slice(0, 160) });
+          }
+        } catch (exc) { outcomes.push({ id: it.id, ok: false, sent: false, bytes: 0, why: String(exc) }); }
+      }
+      for (const b of plan.blocked) { b.item.choice = "reference"; logWarn(`inventory: ${b.item.name} stays in ${b.item.home ?? "?"} — ${b.why}`); }
+    }
+    // F1 · what stays at home elsewhere is a REFERENCE to the bytes there
+    for (const it of inv.items.filter((i) => i.group === "elsewhere" && i.choice === "reference" && i.home && i.sha256))
+      storeBack(it, base, it.home!, "reference");
     const work = inv.items.filter((i) => i.group === "on_disk" && i.choice === "upload");
     const want = toUpload(inv).bytes;
     let moved = 0;
-    const outcomes: InvOutcome[] = [];
     const pause = el("button", "conn-btn inv-pause", t("inv.pause")) as HTMLButtonElement;
     pause.type = "button";
     uploadPaused = false;
@@ -6269,7 +6352,7 @@ function paintInventory(body: HTMLElement, inv: Inventory, base: string, room: s
     }
     // RAW PHOTOS AS A LOT: one acquisition in the documentation, not N rows
     const corpus = documentationCorpus();
-    for (const lot of inv.lots) {
+    for (const lot of inv.lots.filter((l) => l.confirmed)) {
       const ok = lot.ids.filter((id) => outcomes.some((o) => o.id === id && o.ok)
         || inv.items.some((i) => i.id === id && i.group === "in_store"));
       if (!corpus || !ok.length) continue;
@@ -6292,6 +6375,7 @@ function paintInventory(body: HTMLElement, inv: Inventory, base: string, room: s
     const link = door.web || `${base}/work/?room=${encodeURIComponent(room)}`;
     const sentence = t("inv.report", { n: String(rep.uploaded), size: humanBytes(rep.bytes),
       a: String(rep.already), m: String(rep.references), k: String(rep.missing) })
+      + (rep.moved ? ` · ${t("inv.moved", { n: String(rep.moved) })}` : "")
       + (rep.failed ? ` · ${t("inv.failed", { n: String(rep.failed) })}` : "");
     logInfo(`${sentence} — ${link}`);
     info.textContent = sentence;
@@ -6304,6 +6388,48 @@ function paintInventory(body: HTMLElement, inv: Inventory, base: string, room: s
 }
 /** P2 · the last report, for the checks */
 let lastInventoryReport: Record<string, unknown> | null = null;
+
+/**
+ * F1 · the explicit yes, inside the panel (not a browser `confirm`): which
+ * rooms the files leave, which rooms' graphs will hold a REFERENCE, and that
+ * whoever is not a participant of this room will not see the bytes. Files the
+ * node will not let you move are named with its reason and stay references.
+ */
+function askMoveHere(body: HTMLElement, plan: ReturnType<typeof movePlan>, room: string): Promise<boolean> {
+  return new Promise((resolve) => {
+    const box = document.createElement("section");
+    box.className = "inv-group inv-move-ask";
+    const line = (text: string, cls = "inv-line"): void => {
+      const p = document.createElement("p"); p.className = cls; p.textContent = text; box.appendChild(p);
+    };
+    const h = document.createElement("h5");
+    h.textContent = t("inv.moveTitle", { n: String(plan.movable.length), room: roomRef(room).title });
+    box.appendChild(h);
+    if (plan.movable.length) {
+      line(t("inv.moveLeave", { rooms: plan.leave.join(", ") || "—" }));
+      line(plan.references.length ? t("inv.moveRefs", { rooms: plan.references.join(", ") }) : t("inv.moveNoRefs"));
+      line(t("inv.moveRights", { room: roomRef(room).title }), "inv-line conn-dim");
+    }
+    for (const b of plan.blocked) line(t("inv.moveBlocked", { name: b.item.name, why: b.why }), "inv-line conn-dim");
+    const acts = document.createElement("div");
+    acts.className = "conn-acts";
+    const done = (yes: boolean): void => { box.remove(); resolve(yes); };
+    if (plan.movable.length) {
+      const yes = document.createElement("button");
+      yes.type = "button"; yes.className = "conn-btn inv-move-yes"; yes.textContent = t("inv.moveYes");
+      yes.addEventListener("click", () => done(true));
+      acts.appendChild(yes);
+    }
+    const no = document.createElement("button");
+    no.type = "button"; no.className = "conn-btn inv-move-no";
+    no.textContent = t(plan.movable.length ? "inv.moveNo" : "inv.moveOk");
+    no.addEventListener("click", () => done(false));
+    acts.appendChild(no);
+    box.appendChild(acts);
+    body.appendChild(box);
+    box.scrollIntoView?.({ block: "nearest" });
+  });
+}
 
 /** R1 · enter a room picked from the list: it becomes the session's room */
 function enterRoom(roomId: string): void {
