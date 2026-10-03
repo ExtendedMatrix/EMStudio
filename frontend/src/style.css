@@ -9071,3 +9071,94 @@ input.storage-path:focus { border-color: var(--accent); background: var(--bg-pan
 .tv-issues td.tv-id { padding-left: 6px; }
 .tv-issue-group td { background: var(--bg-subtle); }
 .tv-group-toggle { background: none; border: 0; padding: 0; color: var(--text); cursor: pointer; font: inherit; text-align: left; }
+
+/* ── MICRO-LA-BARRA · the bar in four zones ─────────────────────────────────
+   One thing per zone, and the zone gives the room to its one thing: the phrase
+   of zone 1 and the name of zone 2 are never cut into codes («TOO · Ε · ROO»,
+   «✓ Em…»); the message takes what is left and is the one that ellipsises. */
+#statusbar .sb-zone {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  flex: 0 0 auto;
+}
+#statusbar .sb-message {
+  flex: 1 1 auto;
+  overflow: hidden;
+  justify-content: flex-end;
+}
+#statusbar .sb-message #info {
+  margin-left: 0;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-family: inherit;
+  font-size: 11.5px;
+}
+#statusbar .sb-who .footer-chip { max-width: 34ch; }
+/* zone 1: the dot is an element now, coloured by health (not by reach) */
+#mode-indicator::before { content: none; display: none; }
+#mode-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 40vw;
+}
+#mode-indicator .where-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.where-dot {
+  flex: 0 0 auto;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--ok);
+}
+.where-dot[data-health="warn"] { background: var(--warn, #d9a43a); }
+.where-dot[data-health="bad"] { background: var(--danger); }
+body.sync-active #mode-indicator::before { content: none; }
+/* the parts that left the bar, inside the Connection panel */
+#conn-parts { display: none; }
+.conn-panel .conn-where { display: flex; align-items: center; gap: 7px; font-size: 13px; }
+.conn-panel .conn-warn { color: var(--warn-ink, #8a5a00); }
+.conn-panel #sidecar-detail {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 10px;
+  white-space: normal;
+  color: var(--text);
+  font-size: 12px;
+}
+.conn-panel #sidecar-detail .sd-seg::before { content: none; }
+.conn-panel #sidecar-detail .sd-k { opacity: 0.7; text-transform: none; letter-spacing: 0; font-size: 11px; margin-right: 3px; }
+.conn-panel #sync-control { display: flex; flex-wrap: wrap; gap: 4px; }
+.conn-panel #hub-roster { max-width: none; }
+.conn-rooms { list-style: none; margin: 0; padding: 0; max-height: 210px; overflow: auto; }
+.conn-rooms li { display: flex; align-items: center; gap: 8px; padding: 1px 0; }
+.conn-room-pick {
+  flex: 1 1 auto;
+  min-width: 0;
+  text-align: left;
+  background: none;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  padding: 2px 6px;
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.conn-room-pick:hover { border-color: var(--border); background: var(--bg-subtle); }
+.conn-room-pick.on { border-color: var(--ok); font-weight: 600; }
+.conn-rooms-filter { width: 100%; margin-bottom: 4px; }
+/* zone 2 on the live (green) bar: the name must read, whatever its rung */
+body.sync-active #statusbar .sb-who .footer-chip,
+body.sync-active #statusbar .sb-who .footer-chip.id-presence,
+body.sync-active #statusbar .sb-who .footer-chip.id-identity,
+body.sync-active #statusbar .sb-who .footer-chip.id-signature {
+  color: #eafff4;
+  border-color: rgba(215, 245, 232, 0.45);
+  background: rgba(255, 255, 255, 0.06);
+  opacity: 1;
+}

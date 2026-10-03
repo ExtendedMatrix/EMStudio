@@ -113,6 +113,16 @@ export interface SnapshotPayload {
   gc_watermark?: string | null;
 }
 
+/** B1 · `snapshot_unavailable`: why the host could not send its graph. */
+export interface SnapshotUnavailablePayload {
+  /** `no_graph_loaded` today; an unknown code is shown with the host's message */
+  reason?: string;
+  message?: string;
+  /** the graphs the host lists without having them loaded */
+  graphs?: string[];
+  host?: HostInfo;
+}
+
 export interface CommandResultPayload {
   cmd_id: string;
   ok: boolean;
@@ -154,6 +164,14 @@ export interface SyncCallbacks {
   onSnapshot: (doc: EmDocument) => void;
   /** the host reported what it is editing (tool / file / database) */
   onHostInfo?: (info: HostInfo) => void;
+  /**
+   * B1 · the host was ASKED for its graph and has none to give — Blender with
+   * the graph listed in its EM panel but not loaded. It used to answer nothing
+   * (`request_snapshot` fell through every branch), and an empty canvas with a
+   * green connection reads as a broken app. `reason` is a code this client
+   * turns into a sentence in its own language; `message` is the host's.
+   */
+  onSnapshotUnavailable?: (info: SnapshotUnavailablePayload) => void;
   /** P4.3 · the room roster / awareness changed (relay only) */
   onPresence?: (message: Record<string, unknown>) => void;
   /** P4.3 · SOMEBODY ELSE selected something. Awareness, never my selection. */
@@ -438,6 +456,11 @@ export class SyncClient {
         const body = payload as unknown as SnapshotPayload;
         this.cb?.onSnapshot(body.doc);
         if (body.host) this.cb?.onHostInfo?.(body.host);
+      } else if (type === "snapshot_unavailable") {
+        const body = payload as unknown as SnapshotUnavailablePayload;
+        // the host first: the sentence names it («No graph loaded in Blender»)
+        if (body.host) this.cb?.onHostInfo?.(body.host);
+        this.cb?.onSnapshotUnavailable?.(body);
       } else if (type === "host_info") {
         this.cb?.onHostInfo?.(payload as HostInfo);
       } else if (type === "presence") {

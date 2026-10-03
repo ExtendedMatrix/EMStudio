@@ -133,7 +133,7 @@
                has a NAME in the interface, and clicking it says plainly that
                there is no StratiGraph Server to connect to yet. A disabled button would
                have said "later" without saying what it is. -->
-          <button id="btn-mode-hub" data-i18n-title="mode.hubTitle" title="Join Room: StratiGraph Server multi-user session (coming later)"><span data-i18n="toolbar.modeHub">Join Room</span></button>
+          <button id="btn-mode-hub" data-i18n-title="mode.hubTitle" title="Join a room on a StratiGraph node"><span data-i18n="toolbar.modeHub">Join Room</span></button>
           <div class="dd-sep"></div>
           <!-- ROUND-TRIP · the same room, in the other editor. Not a file
                transfer: the document lives in the room, so changing surface is
@@ -395,36 +395,42 @@
         <button id="em-version" title="Version breakdown (config files + CIDOC-CRM)"></button>
         <span id="footer-app-version" class="footer-app-ver"></span>
       </span>
-      <span id="mode-indicator" title="Standalone: editing a local .em.json. Sidecar: live-synced to a host (EMtools/Blender).">Standalone mode</span>
-      <!-- MODES1 · what this client does on the live channel: off / send /
-           receive / both. Beside the mode because it only means anything when
-           there IS a channel — it appears with the connection and goes with it. -->
-      <span id="sync-control" class="hidden"></span>
-      <span id="sidecar-detail" class="hidden"></span>
-      <div id="breadcrumb" class="hidden"></div>
-      <!-- IDENTITY · who is authoring, where the mode already is. A claimed iD
-           and a verified one look different on purpose: the difference decides
-           whether this person may publish, so it must be readable without
-           opening a dialog. -->
-      <button id="footer-identity" class="footer-chip" title="">—</button>
-      <!-- P3 · the project's revision. Discreet: it is a record, not a badge —
-           and it only appears once the project has been written, because a
-           version nobody has saved is a number about nothing. -->
-      <span id="project-version" class="hidden"></span>
-      <button id="conflict-reopen" class="footer-chip hidden" title=""></button>
-      <!-- P4.3 · who else is in the room. A chip, not a panel: presence is a
-           background fact, and the names + what they are looking at live in the
-           tooltip rather than taking space from the work. -->
-      <button id="hub-roster" class="footer-chip hidden" title=""></button>
-      <span id="info">open or drop an .em.json file</span>
-      <!-- PELLE · the warnings pill, as on the desk: amber when the Log owes
-           somebody a warning or an error, a green outline when it owes nothing. -->
-      <!-- STRUTTURA · counted in ONE place: «▲ n · ● m» from `issues()`, and
-           a click opens them grouped by severity (`renderWarningsPopover`). -->
-      <!-- SHIFT-A · the LOG, «what happened», opened from here: a drawer at
-           the bottom, not a tab of the Inspector (four windows, four questions). -->
-      <button id="footer-log" class="footer-log" type="button" aria-expanded="false" aria-controls="log-drawer">Log · 0</button>
-      <button id="footer-warnings" class="warn-pill ok" type="button" aria-expanded="false" aria-haspopup="dialog">0</button>
+      <!-- MICRO-LA-BARRA · FOUR ZONES, one thing each, one click → one panel.
+           Only state lives here: no settings («Take from…» went to the
+           Connection panel), no terminal commands (they go to the Log), no
+           truncated codes (the TOOL · DOC · AT segments went to the panel too). -->
+      <!-- 1 · WHERE YOU WORK: one phrase and a health dot → the Connection panel -->
+      <div class="sb-zone sb-where" data-zone="where">
+        <button id="mode-indicator" type="button" aria-haspopup="dialog"><span class="where-dot"></span><span class="where-text">On this computer</span></button>
+      </div>
+      <!-- 2 · WHO YOU ARE: «Name ✓» (+ the role in a room) → the Identity panel.
+           A claimed iD and a verified one look different on purpose: the
+           difference decides whether this person may publish. -->
+      <div class="sb-zone sb-who" data-zone="who">
+        <button id="footer-identity" class="footer-chip" title="">—</button>
+      </div>
+      <!-- 3 · THE MESSAGE: the last useful sentence for a person. The context
+           breadcrumb, the project's revision and the conflict chip are messages
+           too: they say something about what is on screen. -->
+      <div class="sb-zone sb-message" data-zone="message">
+        <div id="breadcrumb" class="hidden"></div>
+        <span id="info">open or drop an .em.json file</span>
+        <span id="project-version" class="hidden"></span>
+        <button id="conflict-reopen" class="footer-chip hidden" title=""></button>
+      </div>
+      <!-- 4 · LOG AND WARNINGS: «what happened» (a drawer) and «what is wrong
+           now», counted in ONE place from `issues()`. -->
+      <div class="sb-zone sb-log" data-zone="log">
+        <button id="footer-log" class="footer-log" type="button" aria-expanded="false" aria-controls="log-drawer">Log · 0</button>
+        <button id="footer-warnings" class="warn-pill ok" type="button" aria-expanded="false" aria-haspopup="dialog">0</button>
+      </div>
+      <!-- Z · what LEFT the bar, kept as live elements the code goes on drawing:
+           the Connection panel places them in its sections when it opens. -->
+      <div id="conn-parts" hidden>
+        <span id="sync-control" class="hidden"></span>
+        <span id="sidecar-detail" class="hidden"></span>
+        <button id="hub-roster" class="footer-chip hidden" title=""></button>
+      </div>
     </footer>
     <section id="log-drawer" class="log-drawer hidden" role="region" aria-label="Log">
       <div class="log-drawer-grip" title="Drag to resize"></div>

@@ -3597,19 +3597,22 @@ const kGet = (path, tok) => JSON.parse(execFileSync("curl", ["-sk", `${K_NODE}/v
 const K_SETTINGS = () => ({ "emstudio.settings": JSON.stringify({ sync: { hubUrl: K_NODE, hubRoom: "cantiere-demo" } }) });
 if (K_NODE) test("TK1.live", "T-K1 dal vivo · nodo del dev stack, utente dev in «cantiere-demo»: la voce di stato dice nodo, accesso e nome della stanza; spento il nodo (le richieste cadono), dice «nodo non raggiungibile» entro 30 s", async () => {
   const { p, ctx, errors } = await open({ doc: null, locale: "en", init: K_SETTINGS() });
-  await p.waitForFunction(() => /node reachable/.test(window.__EM_DRAG__.statusLine()), null, { timeout: 15000 }).catch(() => {});
-  const first = await p.evaluate(() => window.__EM_DRAG__.statusLine());
+  // MICRO-LA-BARRA · the line is zone 1's ONE phrase now; node and reach are
+  // its tooltip (and the panel), read here as the person would by hovering
+  const line = () => p.evaluate(() => `${window.__EM_DRAG__.statusLine()} | ${document.getElementById("mode-indicator").title}`);
+  await p.waitForFunction(() => /node reachable/.test(document.getElementById("mode-indicator").title), null, { timeout: 15000 }).catch(() => {});
+  const first = await line();
   await p.evaluate(([u, tok]) => window.__EM_DRAG__.joinRoom(u, "cantiere-demo", tok), [K_NODE, kToken("dev")]);
   await p.waitForFunction(() => /Cantiere · demo/.test(window.__EM_DRAG__.statusLine()), null, { timeout: 15000 }).catch(() => {});
-  const inRoom = await p.evaluate(() => window.__EM_DRAG__.statusLine());
+  const inRoom = await line();
   await ctx.route(`${K_NODE}/**`, (r) => r.abort());
   const t0 = Date.now();
-  await p.waitForFunction(() => /node not reachable/.test(window.__EM_DRAG__.statusLine()), null, { timeout: 30000 }).catch(() => {});
-  const off = await p.evaluate(() => window.__EM_DRAG__.statusLine());
+  await p.waitForFunction(() => /node not reachable/.test(document.getElementById("mode-indicator").title), null, { timeout: 30000 }).catch(() => {});
+  const off = await line();
   const secs = Math.round((Date.now() - t0) / 1000);
   await ctx.close();
   return { pass: /em\.localhost:8443/.test(first) && /node reachable/.test(first)
-      && /em\.localhost:8443/.test(inRoom) && /Cantiere · demo/.test(inRoom) && !/not signed in/.test(inRoom)
+      && /em\.localhost/.test(inRoom) && /^Room Cantiere · demo \(due container\) · em\.localhost \|/.test(inRoom) && !/not signed in/.test(inRoom)
       && /node not reachable/.test(off) && secs <= 30 && !errors.length,
     detail: { first, inRoom, off, secs, errors } };
 });
@@ -3667,7 +3670,7 @@ test("Y1.wait", "Y1 · Sidecar senza Blender: la voce di stato dice «in attesa 
       ws.onMessage(() => {});
     } } });
   await p.click("#dd-mode .dd-toggle");
-  await p.click("#btn-mode-sidecar");
+  await p.click('#conn-pop .conn-mode[data-mode="sidecar"]');
   await p.waitForTimeout(1200);
   const waiting = await p.evaluate(() => window.__EM_DRAG__.statusLine());
   await p.waitForTimeout(3500);
@@ -3675,13 +3678,13 @@ test("Y1.wait", "Y1 · Sidecar senza Blender: la voce di stato dice «in attesa 
   await p.waitForFunction(() => document.body.classList.contains("sync-active"), null, { timeout: 9000 }).catch(() => {});
   const back = await p.evaluate(() => ({ line: window.__EM_DRAG__.statusLine(), active: document.body.classList.contains("sync-active") }));
   await p.click("#dd-mode .dd-toggle");
-  await p.click("#btn-mode-standalone");
+  await p.click('#conn-pop .conn-mode[data-mode="standalone"]');
   await p.waitForTimeout(400);
   const off = await p.evaluate(() => window.__EM_DRAG__.statusLine());
   const log = await p.evaluate(() => window.__EM_DRAG__.log().map((l) => l.message));
   await ctx.close();
-  return { pass: /Sidecar · waiting for Blender/.test(waiting) && back.active && opened >= 1 && !/waiting/.test(back.line)
-      && /^Standalone/.test(off) && log.some((m) => /Blender is back/.test(m)) && !errors.length,
+  return { pass: /^Waiting for Blender…$/.test(waiting) && back.active && opened >= 1 && !/Waiting/.test(back.line)
+      && /^On this computer$/.test(off) && log.some((m) => /Blender is back/.test(m)) && !errors.length,
     detail: { waiting, back, opened, tries, off, errors } };
 });
 
@@ -3701,7 +3704,7 @@ test("Y2.blender", "Y2 · un file «Temple» (EM 1.6.16) aperto, poi Sidecar: il
   await p.evaluate(([d]) => window.__EM_DRAG__.openAt(d, "/tmp/y2/Temple.em.json"), [temple("1.6.16", ["SU001"])]);
   await p.waitForTimeout(1500);
   await p.click("#dd-mode .dd-toggle");
-  await p.click("#btn-mode-sidecar");
+  await p.click('#conn-pop .conn-mode[data-mode="sidecar"]');
   await p.waitForTimeout(2500);
   const r = await p.evaluate(() => ({ slots: window.__EM_DRAG__.slots(), strip: document.getElementById("ns-title")?.textContent,
     log: window.__EM_DRAG__.log().map((l) => l.message) }));
@@ -4552,6 +4555,149 @@ test("E5.date", "E5 · un'epoca senza date ha nella sua corsia l'invito «date: 
   return { pass: inv1.map((x) => x.id).join() === "epB" && savedClean && inv2.map((x) => x.id).join() === "epB"
       && focus === "epB|start" && Array.isArray(after) && !after.includes("epB") && edges?.has_property && edges.start === 500 && !errors.length && !r.errors.length,
     detail: { inv1, savedClean, nodes: g?.nodes?.map((n) => n.id), inv2, focus, after, edges, seen5, errors, rerrors: r.errors } };
+});
+
+
+// ── MICRO-LA-BARRA-E-LE-STANZE · the bar in four zones, the rooms ───────────
+/** the bar as a person reads it: its zones, and each zone's visible text */
+const barOf = (p) => p.evaluate(() => {
+  const bar = document.getElementById("statusbar");
+  const visible = (e) => !!e && e.offsetParent !== null && getComputedStyle(e).visibility !== "hidden";
+  const zones = [...bar.querySelectorAll(":scope > .sb-zone")].map((z) => ({
+    zone: z.dataset.zone,
+    text: [...z.querySelectorAll("*")].filter((e) => visible(e) && !e.children.length).map((e) => e.textContent.trim()).filter(Boolean).join(" ") }));
+  const all = [...bar.querySelectorAll("*")].filter((e) => visible(e) && !e.children.length).map((e) => e.textContent).join(" ");
+  const cut = [...bar.querySelectorAll(".sb-zone button, .sb-zone .where-text")].filter((e) => visible(e) && e.scrollWidth > e.clientWidth + 1).map((e) => e.id || e.className);
+  return { zones, all, cut, health: document.getElementById("mode-indicator").dataset.health };
+});
+const barOk = (b) => JSON.stringify(b.zones.map((z) => z.zone)) === JSON.stringify(["where", "who", "message", "log"])
+  && !/run:|NOT WIRED|Take from|Prendo da|TOOL|\bAT\b/.test(b.all) && !b.cut.length;
+
+test("TZ.standalone", "T-Z · Su questo computer: la barra ha esattamente quattro zone (dove · chi · messaggio · log), nessun «run:», «NOT WIRED» o «Take from…», niente tagliato; la zona 1 dice «On this computer» e il clic apre il pannello Connessione; il menu Mode apre lo stesso pannello", async () => {
+  const { p, ctx, errors } = await open({ doc: "TempluMare", locale: "en" });
+  await p.evaluate(() => window.__EM_DRAG__.setView?.("matrix"));
+  const bar = await barOf(p);
+  await p.screenshot({ path: SHOT("tz-barra-standalone"), clip: { x: 0, y: 960, width: 1600, height: 40 } }).catch(() => {});
+  await p.click("#mode-indicator");
+  await p.waitForTimeout(300);
+  const panel = await p.evaluate(() => ({ open: !document.getElementById("conn-pop")?.classList.contains("hidden"),
+    modes: [...document.querySelectorAll("#conn-pop .conn-mode")].map((b) => b.textContent),
+    sects: [...document.querySelectorAll("#conn-pop .conn-sect")].map((s) => s.dataset.sect ?? "modes") }));
+  await p.keyboard.press("Escape");
+  await p.click("#dd-mode .dd-toggle");
+  await p.waitForTimeout(300);
+  const fromMenu = await p.evaluate(() => !document.getElementById("conn-pop")?.classList.contains("hidden")
+    && !!document.querySelector("#conn-pop .conn-mode") && document.querySelector("#dd-mode .dd-menu").classList.contains("hidden"));
+  const hubTitle = await p.evaluate(() => document.querySelector('#conn-pop .conn-mode[data-mode="hub"]')?.title ?? "");
+  await ctx.close();
+  return { pass: barOk(bar) && bar.zones[0].text === "On this computer" && bar.health === "ok" && panel.open
+      && JSON.stringify(panel.modes) === JSON.stringify(["On this computer", "With Blender", "In a room"])
+      && fromMenu && !/NOT WIRED|[Hh]ub/.test(hubTitle) && !errors.length,
+    detail: { bar, panel, fromMenu, hubTitle, errors } };
+});
+
+test("TZ.sidecar", "T-Z + T-B1 (lato EMStudio) · Con Blender: quattro zone, zona 1 «With Blender (GreatTemple….blend)», nessun nodo nella barra né nel pannello; «Take from…» è nel pannello («What you accept from Blender»); Blender risponde snapshot_unavailable → la frase «No graph loaded in Blender» nel messaggio, nel Log e nel pannello, pallino ambra; poi lo snapshot arriva da sé (senza riconnettere) e il pallino torna verde", async () => {
+  const port = 8897;
+  let sock = null, connects = 0;
+  const doc = { header: { format: "em.json", version: "1.0" },
+    graph: { graph_id: "gt-1", name: "GreatTemple", nodes: [{ id: "SU001", node_type: "US", name: "SU001" }], edges: [] } };
+  const host = { tool: "Blender", file: "GreatTemple_2026_v3.blend" };
+  const { p, ctx, errors } = await open({ doc: null, locale: "en",
+    init: { "emstudio.settings": JSON.stringify({ sync: { protocol: "ws", host: "localhost", port, hubUrl: "https://em.localhost:8443/em" } }) },
+    wsRoute: { pattern: new RegExp(`localhost:${port}`), handler: (ws) => {
+      sock = ws; connects++;
+      ws.onMessage((m) => {
+        const msg = JSON.parse(String(m));
+        if (msg.type === "request_snapshot") ws.send(JSON.stringify({ v: 2, type: "snapshot_unavailable", source: "emtools",
+          payload: { reason: "no_graph_loaded", message: "No graph loaded in Blender: load it from the EM panel", graphs: ["GreatTemple"], host } }));
+      });
+    } } });
+  await p.click("#dd-mode .dd-toggle");
+  await p.click('#conn-pop .conn-mode[data-mode="sidecar"]');
+  await p.waitForFunction(() => document.body.classList.contains("sync-active"), null, { timeout: 9000 }).catch(() => {});
+  await p.waitForTimeout(800);
+  const empty = await barOf(p);
+  const log1 = await p.evaluate(() => window.__EM_DRAG__.log().map((l) => l.message));
+  await p.screenshot({ path: SHOT("tz-barra-sidecar-senza-grafo"), clip: { x: 0, y: 960, width: 1600, height: 40 } }).catch(() => {});
+  await p.click("#mode-indicator");
+  await p.waitForTimeout(300);
+  const panel = await p.evaluate(() => {
+    const pop = document.getElementById("conn-pop");
+    return { text: pop.textContent, sects: [...pop.querySelectorAll(".conn-sect")].map((s) => s.dataset.sect ?? "modes"),
+      accept: !!pop.querySelector("#sync-control .sync-ctl-btn"), head: pop.querySelector(".conn-where")?.textContent };
+  });
+  await p.screenshot({ path: SHOT("tz-pannello-sidecar") }).catch(() => {});
+  await p.keyboard.press("Escape");
+  // the graph gets loaded in Blender: the snapshot comes unasked
+  sock.send(JSON.stringify({ v: 2, type: "snapshot", source: "emtools", payload: { doc, host } }));
+  await p.waitForTimeout(1500);
+  const loaded = await barOf(p);
+  const slots = await p.evaluate(() => window.__EM_DRAG__.slots());
+  // …and again (Blender re-sends it): still ONE slot from Blender
+  sock.send(JSON.stringify({ v: 2, type: "snapshot", source: "emtools", payload: { doc, host } }));
+  await p.waitForTimeout(1200);
+  const slots2 = await p.evaluate(() => window.__EM_DRAG__.slots());
+  await p.screenshot({ path: SHOT("tz-barra-sidecar"), clip: { x: 0, y: 960, width: 1600, height: 40 } }).catch(() => {});
+  await ctx.close();
+  return { pass: barOk(empty) && empty.zones[0].text === "With Blender (GreatTemple_2026_v3.blend)" && empty.health === "warn"
+      && /No graph loaded in Blender \(GreatTemple is listed but not loaded\)/.test(empty.zones[2].text)
+      && log1.some((m) => /No graph loaded in Blender/.test(m))
+      && /No graph loaded in Blender/.test(panel.text) && panel.accept && /What you accept from Blender/.test(panel.text)
+      && !panel.sects.includes("node") && !/em\.localhost/.test(panel.text) && !/em\.localhost/.test(empty.all)
+      && barOk(loaded) && loaded.health === "ok" && slots.length === 1 && slots2.length === 1 && connects === 1 && !errors.length,
+    detail: { empty, panel, loaded, slots, slots2, connects, log1: log1.slice(-4), errors } };
+});
+
+if (K_NODE) test("TZ.room", "T-Z + T-B2 dal vivo · in stanza: quattro zone, zona 1 «Room Cantiere · demo · em.localhost», zona 2 nome + ruolo; una seconda istantanea della stessa stanza NON apre un secondo file; il file dice «in the room … on em.localhost:8443», mai «opened in the browser»", async () => {
+  const { p, ctx, errors } = await open({ doc: null, locale: "en", init: K_SETTINGS() });
+  const tok = kToken("dev");
+  await p.evaluate(([u, tk]) => window.__EM_DRAG__.joinRoom(u, "cantiere-demo", tk), [K_NODE, tok]);
+  await p.waitForFunction(() => /^Room /.test(window.__EM_DRAG__.statusLine()), null, { timeout: 15000 }).catch(() => {});
+  await p.waitForTimeout(2500);
+  const bar = await barOf(p);
+  const files1 = await p.evaluate(() => window.__EM_DRAG__.files());
+  await p.screenshot({ path: SHOT("tz-barra-stanza"), clip: { x: 0, y: 960, width: 1600, height: 40 } }).catch(() => {});
+  // a second join of the same room = a second snapshot (a reconnection, a restore)
+  await p.evaluate(([u, tk]) => window.__EM_DRAG__.joinRoom(u, "cantiere-demo", tk), [K_NODE, tok]);
+  await p.waitForTimeout(3000);
+  const files2 = await p.evaluate(() => window.__EM_DRAG__.files());
+  await workspace(p, "assets");
+  const tails = await p.evaluate(() => [...document.querySelectorAll(".et-file-tail")].map((e) => e.textContent));
+  await ctx.close();
+  const roomFiles = (fs) => fs.filter((f) => f.room?.id === "cantiere-demo");
+  return { pass: barOk(bar) && /^Room Cantiere · demo \(due container\) · em\.localhost$/.test(bar.zones[0].text)
+      && /^Dev User( ✓)? · owner$/.test(bar.zones[1].text)
+      && roomFiles(files1).length === 1 && roomFiles(files2).length === 1
+      && tails.some((x) => /in the room Cantiere · demo \(due container\) on em\.localhost:8443/.test(x)) && !tails.some((x) => /browser/.test(x))
+      && !errors.length,
+    detail: { bar, files1, files2, tails, errors } };
+});
+
+if (K_NODE) test("TR1.live", "T-R1 dal vivo · il pannello Connessione chiede GET /v1/rooms: dev vede «Your rooms» con le sue stanze (e scavo-2026 se il nodo la elenca), viewer vede «cantiere-demo» in «Shared with you» col ruolo viewer; un clic entra nella stanza", async () => {
+  const run = async (user) => {
+    const { p, ctx, errors } = await open({ doc: null, locale: "en", init: K_SETTINGS() });
+    const tok = kToken(user);
+    await p.evaluate(([u, tk]) => window.__EM_DRAG__.joinRoom(u, "cantiere-demo", tk), [K_NODE, tok]);
+    await p.waitForFunction(() => /^Room /.test(window.__EM_DRAG__.statusLine()), null, { timeout: 15000 }).catch(() => {});
+    await p.click("#mode-indicator");
+    await p.waitForFunction(() => !!document.querySelector('#conn-pop .conn-rooms[data-group="mine"]'), null, { timeout: 15000 }).catch(() => {});
+    const r = await p.evaluate(() => {
+      const g = (k) => [...document.querySelectorAll(`#conn-pop .conn-rooms[data-group="${k}"] li[data-room]`)]
+        .map((li) => [li.dataset.room, li.querySelector(".conn-role")?.textContent ?? ""]);
+      return { mine: g("mine"), shared: g("shared"), heads: [...document.querySelectorAll("#conn-pop h5")].map((h) => h.textContent),
+        filter: !!document.querySelector("#conn-pop .conn-rooms-filter") };
+    });
+    await p.screenshot({ path: SHOT(`tr1-stanze-${user}`) }).catch(() => {});
+    await ctx.close();
+    return { ...r, errors };
+  };
+  const dev = await run("dev"), viewer = await run("viewer");
+  const truth = kGet("/rooms", kToken("viewer"));
+  return { pass: dev.mine.some(([r]) => r === "cantiere-demo") && dev.heads.some((h) => /^Your rooms · \d+/.test(h)) && dev.filter
+      && viewer.shared.some(([r, role]) => r === "cantiere-demo" && role === "viewer")
+      && viewer.shared.length === truth.filter((x) => x.your_role !== "owner" && !x.archived_at).length
+      && !dev.errors.length && !viewer.errors.length,
+    detail: { dev: { mine: dev.mine.length, scavo: dev.mine.find(([r]) => r === "scavo-2026") ?? null, heads: dev.heads }, viewer, nTruth: truth.length } };
 });
 
 // ── run ─────────────────────────────────────────────────────────────────────

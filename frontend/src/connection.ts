@@ -36,6 +36,16 @@ export interface ConnectionState {
   roomTitle?: string | null;
   /** Y1 · a sidecar pairing waiting for its host */
   waiting?: boolean;
+  /** Z · the host of a sidecar, as it named itself («Blender») */
+  hostTool?: string | null;
+  /** Z · the file the host has open (`host_info.file`), or its graph's name */
+  hostFile?: string | null;
+  /** B1 · what the host said it cannot do («no graph loaded in Blender») */
+  notice?: string | null;
+  /** C1 · the two ends are on different documents: the sentence, or null */
+  misaligned?: string | null;
+  /** a room's socket dropped and is being asked again */
+  reconnecting?: boolean;
 }
 
 /** `https://em.localhost:8443/em` → `em.localhost:8443` (the short address) */
@@ -43,19 +53,66 @@ export function shortNode(url: string): string {
   return url.replace(/^https?:\/\//, "").replace(/\/+$/, "").replace(/\/em$/, "");
 }
 
-/** The status line: «Standalone · em.localhost:8443 · node's password · reachable · no room». */
-export function statusParts(s: ConnectionState): string[] {
-  const parts = [t(`mode.${s.mode}`)];
-  if (s.waiting) parts.push(t("sync.waitingHostShort"));
-  if (!s.node) {
-    parts.push(t("conn.noNode"));
-    return parts;
+/** `em.localhost:8443` → `em.localhost`: the bar says WHICH node, not its port */
+export function nodeName(url: string): string {
+  return shortNode(url).replace(/:\d+$/, "");
+}
+
+/**
+ * MICRO-LA-BARRA · ZONE 1, «where you work» — ONE phrase, never a list.
+ *
+ * It replaced «mode · node · access · reach · room» (dev.17), which said the node
+ * in a Sidecar where the node has nothing to do with anything, and the access
+ * («node's password») beside an ORCID tick as if they were two identities. What
+ * is not about WHERE goes to the panel behind the click.
+ */
+export function wherePhrase(s: ConnectionState): string {
+  if (s.mode === "sidecar") {
+    const tool = s.hostTool || "Blender";
+    if (s.waiting) return t("where.sidecarWaiting", { tool });
+    return s.hostFile ? t("where.sidecarFile", { tool, file: s.hostFile })
+      : t("where.sidecar", { tool });
   }
-  parts.push(shortNode(s.node));
-  parts.push(t(`conn.access.${s.access}`));
-  parts.push(t(`conn.reach.${s.reach}`));
-  parts.push(s.room ? (s.roomTitle || s.room) : t("conn.noRoom"));
-  return parts;
+  if (s.mode === "hub" && s.room) {
+    return t("where.room", { room: s.roomTitle || s.room, node: nodeName(s.node) });
+  }
+  return t("where.local");
+}
+
+export type Health = "ok" | "warn" | "bad";
+
+/**
+ * The dot beside the phrase: green, amber, red.
+ *
+ * Amber is «it works, and there is something to read in the panel» — a host
+ * waited for, a host with no graph loaded, two different documents, a room
+ * reconnecting. Red is «it does not work»: the node of the room does not answer.
+ * On this computer nothing can fail, so it is green.
+ */
+export function whereHealth(s: ConnectionState): Health {
+  if (s.mode === "sidecar") {
+    return s.waiting || s.notice || s.misaligned ? "warn" : "ok";
+  }
+  if (s.mode === "hub") {
+    if (s.reach === "unreachable") return "bad";
+    return s.reconnecting || s.notice ? "warn" : "ok";
+  }
+  return "ok";
+}
+
+/**
+ * The details the old line carried, for the tooltip of zone 1: still one hover
+ * away, never on the bar. In a Sidecar the node is not mentioned at all.
+ */
+export function whereDetails(s: ConnectionState): string[] {
+  const out = [wherePhrase(s)];
+  if (s.notice) out.push(s.notice);
+  if (s.misaligned) out.push(s.misaligned);
+  if (s.mode !== "sidecar" && s.node) {
+    out.push(`${shortNode(s.node)} · ${t(`conn.reach.${s.reach}`)}`);
+    if (s.mode === "hub") out.push(t("conn.enteredWith", { how: t(`conn.access.${s.access}`) }));
+  }
+  return out;
 }
 
 // ── the room, as the node answers it ─────────────────────────────────────────
@@ -66,6 +123,23 @@ export interface RoomInfo {
   owner?: string | null;
   members?: { orcid: string; role: string }[];
   your_role?: string | null;
+  /** a room nobody declared (opened by name), listed because its ACL names you */
+  implicit?: boolean;
+  archived_at?: string | null;
+}
+
+/**
+ * R1 · `GET /v1/rooms`, split the way a person reads it: «Your rooms» (you own
+ * them) and «Shared with you» (with the role somebody gave you). The node says
+ * both in `your_role` — MEASURED for `dev` (owner everywhere) and `viewer`
+ * (viewer/editor on rooms of dev's): no ORCID is compared here. Archived rooms
+ * are not offered; the order is by title, as a person looks for a name.
+ */
+export function splitRooms(rooms: RoomInfo[]): { mine: RoomInfo[]; shared: RoomInfo[] } {
+  const live = rooms.filter((r) => !r.archived_at)
+    .sort((a, b) => (a.title || a.room_id).localeCompare(b.title || b.room_id));
+  return { mine: live.filter((r) => r.your_role === "owner"),
+           shared: live.filter((r) => r.your_role !== "owner") };
 }
 export interface MembersInfo {
   owner?: string | null;
@@ -77,6 +151,8 @@ export interface MembersInfo {
 /** The calls the room panel makes — `GET /rooms/{id}`, `…/members`, `PUT`/`DELETE
  *  …/members/{orcid}`, `POST …/invites`, `GET …/open` — and nothing else. */
 export interface NodeApi {
+  /** R1 · the rooms this caller has a grant in */
+  rooms(): Promise<RoomInfo[]>;
   room(id: string): Promise<RoomInfo>;
   members(id: string): Promise<MembersInfo>;
   setMember(id: string, orcid: string, role: string): Promise<MembersInfo>;
@@ -101,6 +177,7 @@ export function nodeApi(base: string, token: () => string | null): NodeApi {
   };
   const room = (id: string) => `/rooms/${encodeURIComponent(id)}`;
   return {
+    rooms: () => call("GET", "/rooms"),
     room: (id) => call("GET", room(id)),
     members: (id) => call("GET", `${room(id)}/members`),
     setMember: (id, orcid, role) => call("PUT", `${room(id)}/members/${encodeURIComponent(orcid)}`, { role }),
@@ -134,7 +211,7 @@ function btn(text: string, cls = "conn-btn"): HTMLButtonElement {
   return b;
 }
 
-// ── the connection panel (X2 + K1) ───────────────────────────────────────────
+// ── the connection panel (X2 + K1, redrawn by MICRO-LA-BARRA) ─────────────
 
 export interface ConnectionGestures {
   setMode(mode: SessionMode): void;
@@ -142,17 +219,94 @@ export interface ConnectionGestures {
   openRoomSettings(): void;
   openOnNode(): void;
   leaveRoom(): void;
+  /** R1 · the node's rooms for this caller (`GET /v1/rooms`) */
+  listRooms?(): Promise<RoomInfo[]>;
+  /** R1 · enter one of them */
+  joinRoom?(roomId: string): void;
+  /** R1 · «+ New room» (empty) */
+  newRoom?(): void;
+  /** P1 · «Bring into a room…»: the graph on screen becomes a new room's */
+  bringIntoRoom?(): void;
 }
 
-/** The panel the status line opens: the three modes, the node, the room. */
-export function renderConnectionPanel(host: HTMLElement, s: ConnectionState, g: ConnectionGestures): void {
+/**
+ * Z · what moved OUT of the bar and into the panel, handed in as live elements
+ * the caller keeps drawing: the host's facts (what it has open, where), «what you
+ * accept from the other end» (it was «Take from…» in the bar), and who is in the
+ * room. The panel places them; it does not know how they are made.
+ */
+export interface ConnectionParts {
+  host?: HTMLElement | null;
+  accept?: HTMLElement | null;
+  roster?: HTMLElement | null;
+}
+
+/** The rooms list (R1): two groups, a filter when the list is long, a click joins. */
+export function renderRoomList(host: HTMLElement, rooms: RoomInfo[], current: string | null,
+                               join: (roomId: string) => void): void {
+  host.textContent = "";
+  const { mine, shared } = splitRooms(rooms);
+  let filter = "";
+  const lists = el("div", "conn-rooms-lists");
+  const paint = (): void => {
+    lists.textContent = "";
+    const q = filter.trim().toLowerCase();
+    const keep = (r: RoomInfo): boolean => !q
+      || (r.title || "").toLowerCase().includes(q) || r.room_id.toLowerCase().includes(q);
+    const group = (key: "mine" | "shared", items: RoomInfo[]): void => {
+      const shown = items.filter(keep);
+      const h = el("h5", "", `${t(`rooms.${key}`)} · ${shown.length}`);
+      lists.appendChild(h);
+      const ul = el("ul", "conn-rooms");
+      ul.dataset.group = key;
+      if (!shown.length) ul.appendChild(el("li", "conn-dim", t(`rooms.${key}None`)));
+      for (const r of shown) {
+        const li = el("li");
+        li.dataset.room = r.room_id;
+        const b = btn(r.title || r.room_id, "conn-room-pick" + (r.room_id === current ? " on" : ""));
+        b.title = r.room_id + (r.implicit ? ` · ${t("rooms.implicit")}` : "");
+        b.addEventListener("click", () => join(r.room_id));
+        li.appendChild(b);
+        if (key === "shared") li.appendChild(el("span", "conn-role", t(`room.role.${r.your_role ?? "none"}`)));
+        if (r.room_id === current) li.appendChild(el("span", "conn-dim", t("rooms.here")));
+        ul.appendChild(li);
+      }
+      lists.appendChild(ul);
+    };
+    group("mine", mine);
+    group("shared", shared);
+  };
+  if (mine.length + shared.length > 8) {
+    const f = el("input", "conn-input conn-rooms-filter");
+    f.type = "search";
+    f.placeholder = t("rooms.filter");
+    f.setAttribute("aria-label", t("rooms.filter"));
+    f.addEventListener("input", () => { filter = f.value; paint(); });
+    host.appendChild(f);
+  }
+  host.appendChild(lists);
+  paint();
+}
+
+/** The panel zone 1 opens: where you are, the three ways of working, and — only
+ *  when they matter — the host, the node, the room and the rooms you can enter. */
+export function renderConnectionPanel(host: HTMLElement, s: ConnectionState, g: ConnectionGestures,
+                                      parts: ConnectionParts = {}): void {
   host.textContent = "";
   host.className = "conn-panel";
   host.setAttribute("role", "dialog");
   host.setAttribute("aria-label", t("conn.title"));
 
+  const head = el("h4", "conn-where");
+  const dot = el("span", "where-dot");
+  dot.dataset.health = whereHealth(s);
+  head.append(dot, document.createTextNode(wherePhrase(s)));
+  host.appendChild(head);
+  if (s.notice) host.appendChild(el("p", "conn-line conn-warn", s.notice));
+  if (s.misaligned) host.appendChild(el("p", "conn-line conn-warn", s.misaligned));
+
   const modes = el("div", "conn-sect");
-  modes.appendChild(el("h4", "", t("conn.modeHead")));
+  modes.appendChild(el("h5", "", t("conn.modeHead")));
   const row = el("div", "conn-modes");
   for (const m of ["standalone", "sidecar", "hub"] as SessionMode[]) {
     const b = btn(t(`conn.modeChoice.${m}`), "conn-btn conn-mode" + (s.mode === m ? " on" : ""));
@@ -165,21 +319,58 @@ export function renderConnectionPanel(host: HTMLElement, s: ConnectionState, g: 
   modes.appendChild(row);
   host.appendChild(modes);
 
+  // the other end, when it is a host on this computer: no node here (D-B)
+  if (s.mode === "sidecar") {
+    const side = el("div", "conn-sect");
+    side.dataset.sect = "host";
+    side.appendChild(el("h5", "", s.hostTool || "Blender"));
+    if (parts.host) side.appendChild(parts.host);
+    if (parts.accept) {
+      side.appendChild(el("h5", "", t("conn.acceptHead", { tool: s.hostTool || "Blender" })));
+      side.appendChild(parts.accept);
+    }
+    host.appendChild(side);
+    return;
+  }
+
+  if (s.mode === "hub" && s.room) {
+    const room = el("div", "conn-sect");
+    room.dataset.sect = "room";
+    room.appendChild(el("h5", "", t("conn.roomHead")));
+    room.appendChild(el("p", "conn-line", t("conn.inRoom", { room: s.roomTitle || s.room })));
+    if (parts.roster) room.appendChild(parts.roster);
+    if (parts.accept) {
+      room.appendChild(el("h5", "", t("conn.acceptHead", { tool: t("conn.theRoom") })));
+      room.appendChild(parts.accept);
+    }
+    const acts = el("div", "conn-acts");
+    const rs = btn(t("conn.roomSettings"));
+    rs.dataset.act = "room-settings";
+    rs.addEventListener("click", () => g.openRoomSettings());
+    const on = btn(t("conn.openOnNode"));
+    on.addEventListener("click", () => g.openOnNode());
+    const leave = btn(t("conn.leaveRoom"));
+    leave.addEventListener("click", () => g.leaveRoom());
+    acts.append(rs, on, leave);
+    room.appendChild(acts);
+    host.appendChild(room);
+  }
+
   const node = el("div", "conn-sect");
-  node.appendChild(el("h4", "", t("conn.nodeHead")));
+  node.dataset.sect = "node";
+  node.appendChild(el("h5", "", t("conn.nodeHead")));
   if (!s.node) {
     node.appendChild(el("p", "conn-line", t("conn.noNodeLong")));
   } else {
     const dl = el("dl", "conn-facts");
     const fact = (k: string, v: string, cls = ""): void => {
       dl.appendChild(el("dt", "", k));
-      const dd = el("dd", cls, v);
-      dl.appendChild(dd);
+      dl.appendChild(el("dd", cls, v));
     };
-    fact(t("conn.k.node"), s.node);
-    fact(t("conn.k.access"), t(`conn.access.${s.access}`));
+    fact(t("conn.k.node"), shortNode(s.node));
     fact(t("conn.k.reach"), t(`conn.reach.${s.reach}`), `conn-reach-${s.reach}`);
-    fact(t("conn.k.network"), t("conn.networkUnknown"), "conn-dim");
+    // the access is a DETAIL OF THE LINK TO THE NODE, not a second identity
+    fact(t("conn.k.access"), t("conn.enteredWith", { how: t(`conn.access.${s.access}`) }));
     node.appendChild(dl);
   }
   const nodeActs = el("div", "conn-acts");
@@ -189,32 +380,37 @@ export function renderConnectionPanel(host: HTMLElement, s: ConnectionState, g: 
   node.appendChild(nodeActs);
   host.appendChild(node);
 
-  const room = el("div", "conn-sect");
-  room.appendChild(el("h4", "", t("conn.roomHead")));
-  room.appendChild(el("p", "conn-line", s.room
-    ? t("conn.inRoom", { room: s.roomTitle || s.room })
-    : t("conn.noRoomLong")));
-  const acts = el("div", "conn-acts");
-  if (s.room) {
-    const rs = btn(t("conn.roomSettings"));
-    rs.dataset.act = "room-settings";
-    rs.addEventListener("click", () => g.openRoomSettings());
-    const on = btn(t("conn.openOnNode"));
-    on.addEventListener("click", () => g.openOnNode());
-    const leave = btn(t("conn.leaveRoom"));
-    leave.addEventListener("click", () => g.leaveRoom());
-    const change = btn(t("conn.changeRoom"));
-    change.addEventListener("click", () => g.openNodeSettings());
-    acts.append(rs, on, change, leave);
-  } else if (s.node) {
-    const join = btn(t("conn.joinRoom"));
-    join.addEventListener("click", () => g.setMode("hub"));
-    const change = btn(t("conn.chooseRoom"));
-    change.addEventListener("click", () => g.openNodeSettings());
-    acts.append(join, change);
+  // R1 · the rooms, asked of the node with this session's access
+  if (s.node && g.listRooms) {
+    const rooms = el("div", "conn-sect");
+    rooms.dataset.sect = "rooms";
+    rooms.appendChild(el("h5", "", t("rooms.head")));
+    const body = el("div", "conn-rooms-body");
+    body.appendChild(el("p", "conn-line conn-dim", t("rooms.loading")));
+    rooms.appendChild(body);
+    const acts = el("div", "conn-acts");
+    if (g.newRoom) {
+      const nw = btn(t("rooms.new"));
+      nw.dataset.act = "new-room";
+      nw.addEventListener("click", () => g.newRoom!());
+      acts.appendChild(nw);
+    }
+    if (g.bringIntoRoom) {
+      const br = btn(t("rooms.bring"));
+      br.dataset.act = "bring-into-room";
+      br.title = t("rooms.bringTitle");
+      br.addEventListener("click", () => g.bringIntoRoom!());
+      acts.appendChild(br);
+    }
+    rooms.appendChild(acts);
+    host.appendChild(rooms);
+    void g.listRooms().then(
+      (list) => renderRoomList(body, list, s.room, (id) => g.joinRoom?.(id)),
+      (error) => {
+        body.textContent = "";
+        body.appendChild(el("p", "conn-line conn-err", t("rooms.cannotList", { why: (error as Error).message })));
+      });
   }
-  room.appendChild(acts);
-  host.appendChild(room);
 }
 
 // ── the room's settings (K2) ─────────────────────────────────────────────────

@@ -243,6 +243,21 @@ export interface OpenFile {
   /** the sections as last read or written, so a close can retain the ON-DISK
    *  version (closing discards unsaved edits, after asking) */
   onDisk: Record<string, Record<string, unknown>>;
+  /**
+   * B2 · the ROOM this file is the live copy of, when it came from one.
+   *
+   * A room's snapshot has no path, and the tree used to call it «not on disk
+   * (opened in the browser)» — on the desktop too, where it is false twice. A
+   * file that knows its room is ONE per room: a second snapshot of the same room
+   * (a reconnection, a restore) replaces it instead of opening a twin.
+   */
+  room?: { id: string; title: string; node: string } | null;
+}
+
+/** Inside the desktop shell (Tauri), read as `tauri.ts::isTauri` does — not
+ *  imported from there, because this module is loaded by the node checks too. */
+function onDesktop(): boolean {
+  return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 }
 
 /** The tail of a path a row can show: the last two folders and the name. */
@@ -810,7 +825,7 @@ function auxDetail(f: AuxiliaryFile, labels: (key: string) => string): string {
  */
 export function renderEMTree(host: HTMLElement, tree: EMTree,
                              handlers: EMTreeHandlers,
-                             labels: (key: string) => string): void {
+                             labels: (key: string, vars?: Record<string, string>) => string): void {
   // Two graphs can legitimately carry the same name (two copies of one dataset,
   // or two "untitled graph" from two News). The list still has to be a list, so
   // the ambiguity is resolved HERE, at draw time, and never stored: a suffix
@@ -879,13 +894,20 @@ export function renderEMTree(host: HTMLElement, tree: EMTree,
           ${corpus.state === "kept" ? `<button class="et-corpus-show" data-show-corpus="${esc(file.id)}"
                   title="${esc(labels("emtree.corpusShowTitle"))}">${esc(labels("emtree.corpusShow"))}</button>` : ""}
         </div>`;
+    // B2 · where a file with no path lives, said truly: in its room, or — on
+    // the desktop — simply not saved yet («opened in the browser» was the web's
+    // sentence, and the desktop showed it too)
+    const where = file.room
+      ? labels("emtree.fileInRoom", { room: file.room.title || file.room.id,
+                                      node: file.room.node })
+      : labels(onDesktop() ? "emtree.fileNotSaved" : "emtree.fileNoPath");
     const isTarget = !!tree.active() && activeFileId === file.id;
     return `
       <li class="et-file${isTarget ? " et-file-active" : ""}" data-file="${esc(file.id)}">
-        <div class="et-file-head" title="${esc(file.path ?? labels("emtree.fileNoPath"))}">
+        <div class="et-file-head" title="${esc(file.path ?? where)}">
           <span class="et-file-icon">▤</span>
           <span class="et-file-name">${esc(file.name)}${tree.fileDirty(file.id) ? " •" : ""}</span>
-          <span class="et-file-tail">${esc(file.path ? pathTail(file.path) : labels("emtree.fileNoPath"))}</span>
+          <span class="et-file-tail">${esc(file.path ? pathTail(file.path) : where)}</span>
           ${isTarget ? `<span class="et-file-target" title="${esc(labels("emtree.saveTargetTitle"))}">${esc(labels("emtree.saveTarget"))}</span>` : ""}
           <button class="et-file-save" data-save-file="${esc(file.id)}"
                   title="${esc(labels("emtree.saveFileTitle"))}">${esc(labels("emtree.saveFile"))}</button>

@@ -339,7 +339,7 @@ import type {
 } from "./stratiminer";
 import { type HostInfo, SyncClient, SYNC_ACCEPTS, type SyncAccept } from "./sync";
 import { type Access, type ConnectionState, type Reach, nodeApi, renderConnectionPanel,
-  renderRoomPanel, statusParts } from "./connection";
+  renderRoomPanel, shortNode, whereDetails, whereHealth, wherePhrase } from "./connection";
 import * as alignment from "./alignment";
 import type { GraphOp } from "./model";
 import { buildCommand, type CommandVerb } from "./commands";
@@ -889,10 +889,15 @@ verBtn.textContent = EM_VERSION;
 // local .em.json; Sidecar = live-synced to a host. Driven by the sync socket.
 const modeIndicator = document.getElementById("mode-indicator")!;
 const sidecarDetail = document.getElementById("sidecar-detail")!;
+// Z · who is in the room: it left the bar for the Connection panel (zone 1)
+const hubRosterEl = document.getElementById("hub-roster")!;
 // What the connected host is editing (tool / file / database / endpoint). Tool
 // + endpoint are known locally from settings; file/database arrive from the
 // host's `host_info` (or a snapshot's `host`). Reset when we disconnect.
 let hostInfo: HostInfo = {};
+/** B1 · what the host said it cannot do (no graph loaded), until a snapshot
+ *  arrives or the connection ends — shown in the Connection panel */
+let hostNotice: string | null = null;
 //: C1 · the last misalignment SAID, so the log does not repeat one sentence
 //: every time a `host_info` arrives. A warning repeated is a warning ignored.
 let lastMisalignment = "";
@@ -1125,12 +1130,14 @@ function setModeIndicator(mode: SessionMode | boolean): void {
   const m: SessionMode =
     typeof mode === "boolean" ? (mode ? "sidecar" : "standalone") : mode;
   sessionMode = m;
+  if (m === "standalone") hubReconnecting = false;
   const connected = m !== "standalone";
   renderStatusLine();
   sidecarDetail.classList.toggle("hidden", !connected);
   if (connected) renderSidecarDetail();
   else {
     hostInfo = {};
+    hostNotice = null;      // B1 · that sentence was about the host that left
     lastMisalignment = "";  // C1 · that sentence was about a session that ended
     connectors.clear();     // nothing is announced when nothing is connected
     sidecarDetail.innerHTML = "";
@@ -1152,7 +1159,19 @@ function setModeIndicator(mode: SessionMode | boolean): void {
 let nodeReach: Reach = "unknown";
 /** Y1 · a sidecar pairing waiting for its host */
 let sidecarWaiting = false;
+function snapshotUnavailableSentence(why: { reason?: string; message?: string; graphs?: string[] }): string {
+  const tool = hostToolName();
+  if (why.reason === "no_graph_loaded") {
+    const listed = (why.graphs ?? []).filter(Boolean);
+    return listed.length
+      ? t("sync.noGraphLoadedListed", { tool, graphs: listed.join(", ") })
+      : t("sync.noGraphLoaded", { tool });
+  }
+  return t("sync.snapshotUnavailable", { tool, why: why.message || why.reason || "?" });
+}
 let roomTitleOf: { room: string; title: string } | null = null;
+/** a room's socket dropped and is asked again (zone 1 goes amber) */
+let hubReconnecting = false;
 function connectionAccess(): Access {
   // the first status line is drawn at boot, before the identity module's
   // `let`s exist: «none» until they do
@@ -1165,15 +1184,37 @@ function connectionAccess(): Access {
   }
 }
 function connectionState(): ConnectionState {
-  const room = sync.connected ? sync.room : null;
-  return { mode: sidecarWaiting ? "sidecar" : sessionMode, waiting: sidecarWaiting,
+  const room = sync.connected || hubReconnecting ? sync.room : null;
+  const mode: SessionMode = sidecarWaiting ? "sidecar" : sessionMode;
+  let misaligned: string | null = null;
+  if (mode === "sidecar" && sync.connected) {
+    try { const a = documentAlignment(); misaligned = a.aligned ? null : a.sentence; } catch { /* boot */ }
+  }
+  return { mode, waiting: sidecarWaiting,
     node: getSettings().sync.hubUrl.trim(), access: connectionAccess(),
-    reach: nodeReach, room, roomTitle: room && roomTitleOf?.room === room ? roomTitleOf.title : null };
+    reach: nodeReach, room, roomTitle: room && roomTitleOf?.room === room ? roomTitleOf.title : null,
+    hostTool: hostToolName(),
+    hostFile: hostInfo.file || hostInfo.database || hostInfo.label || null,
+    notice: hostNotice, misaligned, reconnecting: hubReconnecting };
 }
+/**
+ * Z · ZONE 1 of the bar, «where you work»: a dot and ONE phrase. The details the
+ * old line strung together (node, access, reach) are in the tooltip and in the
+ * panel the click opens; in a Sidecar the node is not mentioned at all.
+ */
 function renderStatusLine(): void {
   const st = connectionState();
-  modeIndicator.textContent = statusParts(st).join(" · ");
-  modeIndicator.title = `${t(`mode.${st.mode}Title`)}\n${t("conn.statusTitle")}`;
+  modeIndicator.textContent = "";
+  const dot = document.createElement("span");
+  dot.className = "where-dot";
+  dot.dataset.health = whereHealth(st);
+  const text = document.createElement("span");
+  text.className = "where-text";
+  text.textContent = wherePhrase(st);
+  modeIndicator.append(dot, text);
+  modeIndicator.dataset.health = dot.dataset.health;
+  modeIndicator.dataset.mode = st.mode;
+  modeIndicator.title = [...whereDetails(st), t("conn.statusTitle")].join("\n");
   modeIndicator.dataset.reach = st.reach;
   modeIndicator.setAttribute("role", "button");
   modeIndicator.tabIndex = 0;
@@ -1229,7 +1270,7 @@ function connectionPop(): HTMLElement {
       const p = document.getElementById("conn-pop");
       if (!p || p.classList.contains("hidden")) return;
       const tg = e.target as Node;
-      if (p.contains(tg) || modeIndicator.contains(tg)) return;
+      if (p.contains(tg) || modeIndicator.contains(tg) || connPopAnchor?.contains(tg)) return;
       p.classList.add("hidden");
     });
     document.addEventListener("keydown", (e) => {
@@ -1238,10 +1279,19 @@ function connectionPop(): HTMLElement {
   }
   return pop;
 }
+/** Z · the panel opens from zone 1 (above it) or from the Mode menu (below it) */
+let connPopAnchor: HTMLElement | null = null;
 function placeConnectionPop(pop: HTMLElement): void {
-  const r = modeIndicator.getBoundingClientRect();
+  const anchor = connPopAnchor ?? modeIndicator;
+  const r = anchor.getBoundingClientRect();
   pop.style.left = `${Math.max(8, Math.min(r.left, innerWidth - 380))}px`;
-  pop.style.bottom = `${Math.max(8, innerHeight - r.top + 6)}px`;
+  if (anchor === modeIndicator) {
+    pop.style.top = "";
+    pop.style.bottom = `${Math.max(8, innerHeight - r.top + 6)}px`;
+  } else {
+    pop.style.bottom = "";
+    pop.style.top = `${Math.round(r.bottom + 4)}px`;
+  }
 }
 function paintConnectionPanel(pop: HTMLElement): void {
   pop.dataset.view = "conn";
@@ -1254,12 +1304,18 @@ function paintConnectionPanel(pop: HTMLElement): void {
     openRoomSettings: () => openRoomPanel(),
     openOnNode: () => { pop.classList.add("hidden"); shareThisRoom(); },
     leaveRoom: () => { pop.classList.add("hidden"); if (sync.connected) btnSync.click(); },
-  });
+    // R1 · the node's rooms, with this session's access
+    listRooms: () => nodeApi(getSettings().sync.hubUrl.trim(), () => hubToken).rooms(),
+    joinRoom: (id) => { pop.classList.add("hidden"); enterRoom(id); },
+    newRoom: () => { pop.classList.add("hidden"); void createRoomHere(false); },
+    bringIntoRoom: () => { pop.classList.add("hidden"); void bringIntoRoom(); },
+  }, { host: sidecarDetail, accept: syncControlEl, roster: hubRosterEl });
   placeConnectionPop(pop);
 }
-function toggleConnectionPanel(): void {
+function toggleConnectionPanel(anchor: HTMLElement | null = null): void {
   const pop = connectionPop();
-  if (!pop.classList.contains("hidden")) { pop.classList.add("hidden"); return; }
+  if (!pop.classList.contains("hidden") && connPopAnchor === anchor) { pop.classList.add("hidden"); return; }
+  connPopAnchor = anchor;
   pop.classList.remove("hidden");
   paintConnectionPanel(pop);
   void pollNodeReach();
@@ -1379,14 +1435,11 @@ function renderSyncControl(): void {
     });
     syncControlEl.appendChild(badge);
   }
-  const label = document.createElement("span");
-  label.className = "sync-ctl-label";
-  // Y3 · words, not glyphs: «Accept ⊘» read as nothing at all (dev.17)
-  label.textContent = t("sync.acceptLabel", { tool: hostInfo.tool || syncToolLabel() || t("sync.theHost") });
+  // Z · the label is the Connection panel's heading now («What you accept from
+  // Blender»): this control left the bar for the panel, where a SETTING belongs.
   // The hint is the whole reason the gate is here and not on the way out, so it
   // travels with the control instead of living in a manual nobody opens.
-  label.title = t("sync.acceptHint");
-  syncControlEl.appendChild(label);
+  syncControlEl.title = t("sync.acceptHint");
   for (const what of SYNC_ACCEPTS) {
     const b = document.createElement("button");
     b.className = "sync-ctl-btn" + (what === active ? " on" : "");
@@ -1836,6 +1889,9 @@ window.__EM_SCENE__ = () => {
     void askNodeWhoIAm(url).then(() => connectToHub(url, room, token));
   },
   statusLine: () => modeIndicator.textContent,
+  /** B2 · the open files, with the room each one is the copy of */
+  files: () => emtree.files.map((f) => ({ name: f.name, path: f.path, room: f.room ?? null,
+    graphs: emtree.slotsOf(f.id).length })),
   roomPanel: (room?: string) => openRoomPanel(room),
   /** Y5 · a host's answer to a command, as the sync channel delivers it */
   commandResult: (res: Parameters<typeof applyCommandResult>[0]) => applyCommandResult(res),
@@ -3852,8 +3908,9 @@ function applyCanvasView(v: ViewKind): void {
   }
   info.title = "";
   if (scenes[v] === null && v === "matrix") {
-    info.textContent =
-      "no layout section — run: emstudio layout file.em.json -o out.em.json";
+    // Z · the bar speaks to a person; the command line is for the Log
+    info.textContent = t("info.noMatrixLayout");
+    logInfo(t("info.noMatrixLayoutLog"));
   } else if (v === "dtc" && diskStamps.status !== "idle"
              && diskStamps.status !== "unstamped") {
     // DTCEMS1 · LE CINQUE FRASI DEL DISCO, e sono cinque perché sono cinque
@@ -4327,7 +4384,7 @@ function loadContainerDocument(
   doc: unknown,
   sourceName: string,
   path: string | null = null,
-  opts: { additive?: boolean } = {},
+  opts: { additive?: boolean; room?: { id: string; title: string; node: string } } = {},
 ): void {
   const parsed = parseContainer(doc);
   if (!parsed.members.length && !parsed.shelf) {
@@ -4401,7 +4458,20 @@ function loadContainerDocument(
           + `${emtree.slots.length} slot(s) already open`);
   // F2 · the file is a thing of its own, beside the slots: its graphs are
   // assigned to it, and Save writes it with them and no others
+  // B2 · ONE FILE PER ROOM. A room sends its snapshot at every (re)connection,
+  // and each one used to open a new «<room> (hub)» file beside the last: the
+  // desktop, restoring a session, showed two. The snapshot is the room's truth
+  // (work not yet confirmed is re-sent by `replayAfterResync`), so the earlier
+  // copy of the SAME room on the SAME node is replaced, not kept as a twin.
+  if (opts.room) {
+    const same = opts.room;
+    for (const old of emtree.files.filter((f) => f.room?.id === same.id && f.room?.node === same.node)) {
+      logInfo(t("room.snapshotReplaces", { room: same.title || same.id }));
+      closeFile(old.id);
+    }
+  }
   const file = emtree.addFile(path, path ? baseName(path) : sourceName);
+  if (opts.room) file.room = { ...opts.room };
   // P3 · and its version comes with it — per FILE: two files, two histories.
   // Integrating somebody else's project does NOT adopt their revision number.
   file.version = parsed.version;
@@ -4739,6 +4809,10 @@ function loadDocument(
 // Sidecar (sync) ↔ Standalone. Opening/importing a file replaces the live view,
 // so if we are in Sidecar mode warn first and offer to ask the host to persist
 // its em.json (the host owns the canonical data — ADR-002 §4).
+/** Z · the host's name for a person: «Blender», not the menu's «Blender · EMtools» */
+function hostToolName(): string {
+  return hostInfo.tool || syncToolLabel().split(" · ")[0] || "Blender";
+}
 function syncToolLabel(): string {
   const t = getSettings().sync.tool;
   return SYNC_TOOLS.find((x) => x.value === t)?.label ?? t;
@@ -5730,8 +5804,7 @@ function renderHubRoster(): void {
   // connect/disconnect, which is exactly when "am I in a room" changes.
   reflectRoundTrip();
   hubPeerSelections = peerSelections(hubPresence);
-  const chip = document.getElementById("hub-roster");
-  if (!chip) return;
+  const chip = hubRosterEl;
   const others = hubPresence.members.filter((m) => m.id !== hubPresence.me);
   const inRoom = hubPresence.members.length;
   chip.classList.toggle("hidden", !sync.room);
@@ -5844,6 +5917,22 @@ function askRoomName(seeding: boolean): Promise<string | null> {
  * would do, which is the point: one ladder, not a second login prompt bolted to
  * a menu item.
  */
+/** P1 · «Bring into a room…»: a new room, you its owner, this graph in it —
+ *  and then its resources (P2, `openResourceInventory`) */
+async function bringIntoRoom(): Promise<void> {
+  await createRoomHere(true);
+}
+
+/** R1 · enter a room picked from the list: it becomes the session's room */
+function enterRoom(roomId: string): void {
+  const s = getSettings();
+  saveSettings({ ...s, sync: { ...s.sync, hubRoom: roomId } });
+  if (sync.connected && sync.room === roomId) return;
+  if (sync.connected || sync.retrying) sync.disconnect();
+  hubReconnecting = false;
+  document.getElementById("btn-mode-hub")?.click();
+}
+
 async function createRoomHere(seed: boolean): Promise<void> {
   // THE CHEAP, LOCAL, CERTAIN REFUSAL FIRST. Measured in the browser: with a
   // declared-but-unconfirmed signature and no document open, this sent the
@@ -5946,7 +6035,7 @@ function seatSeededContainer(room: string): boolean {
   const { container } = seedingRoom;
   seedingRoom = null;
 
-  loadContainerDocument(container, `${room} (hub)`);
+  loadContainerDocument(container, roomFileName(room), null, { room: roomRef(room) });
   const graphs = (container.graphs ?? {}) as Record<string, { nodes?: unknown[] }>;
   const ids = Object.keys(graphs);
   const activeId = String(container.active_graph_id ?? ids[0] ?? "");
@@ -5996,7 +6085,20 @@ function seatSeededContainer(room: string): boolean {
   return true;
 }
 
+/** B2 · the node this session's room is on, as `connectToHub` was given it */
+let hubNodeUrl = "";
+/** B2 · the room a snapshot belongs to: its id, its title when the node said it,
+ *  and the node's short address — what the tree says instead of «not on disk» */
+function roomRef(room: string): { id: string; title: string; node: string } {
+  const title = roomTitleOf?.room === room ? roomTitleOf.title : room;
+  return { id: room, title, node: shortNode(hubNodeUrl || getSettings().sync.hubUrl) };
+}
+function roomFileName(room: string): string {
+  return roomRef(room).title || room;
+}
+
 function connectToHub(url: string, room: string, token: string | null): void {
+  hubNodeUrl = url;
   sync.connectHub({ url, room, token, since: hubBase }, {
     // In a room a peer's selection is AWARENESS: it marks their node, it does
     // not move mine. (`onSelect` stays for the sidecar mirror, where following
@@ -6023,7 +6125,7 @@ function connectToHub(url: string, room: string, token: string | null): void {
       // one em.json), so it is opened by the door that reads containers. Handing
       // it to the single-graph loader was the first thing that broke here — the
       // document arrived and nothing appeared, because it had no `.graph`.
-      loadContainerDocument(doc, `${room} (hub)`);
+      loadContainerDocument(doc, roomFileName(room), null, { room: roomRef(room) });
       info.textContent = t("hub.joined", { room });
       // ASSETS · the object-store panel is gated on being IN a room, and joining
       // one is exactly the event that opens the gate. Measured live: the Assets
@@ -6122,12 +6224,16 @@ function connectToHub(url: string, room: string, token: string | null): void {
       noteHub(noteForStale(op, node?.name ? String(node.name) : null));
     },
     onReconnect: (attempt, delay) => {
+      hubReconnecting = true;
       info.textContent = t("hub.reconnecting",
                            { n: String(attempt), s: String(Math.round(delay / 1000)) });
+      renderStatusLine();
     },
     onStatus: (state) => {
       document.body.classList.toggle("sync-active", state === "open");
-      setModeIndicator(state === "open" ? "hub" : "standalone");
+      // Z · a room being asked again is still the room (amber), not «this computer»
+      if (state === "open") hubReconnecting = false;
+      setModeIndicator(state === "open" || (hubReconnecting && sync.retrying) ? "hub" : "standalone");
       if (state === "open") info.textContent = t("hub.connected", { room });
       else if (state === "closed") {
         hubPresence = emptyPresence();
@@ -8683,6 +8789,13 @@ document.querySelectorAll<HTMLElement>(".dropdown").forEach((dd) => {
   const menu = dd.querySelector<HTMLElement>(".dd-menu")!;
   toggle.addEventListener("click", (e) => {
     e.stopPropagation();
+    if (dd.id === "dd-mode") {
+      // Z · the Mode menu is a shortcut to the SAME Connection panel zone 1
+      // opens: one place for the mode, the node and the room
+      closeAllDropdowns();
+      toggleConnectionPanel(toggle);
+      return;
+    }
     const willOpen = menu.classList.contains("hidden");
     closeAllDropdowns();
     if (!willOpen) return;
@@ -9889,6 +10002,15 @@ btnSync.addEventListener("click", () => {
     onSnapshot: (doc) => {
       // the host sent its full graph on connect → become a live view of it
       // (ADR-002: "sync mode = see the host's data"). Replaces the document.
+      // B1 · a snapshot now also arrives UNASKED (Blender sends it when the
+      // graph gets loaded, or loaded again): the copy from Blender of the SAME
+      // graph gives its place, instead of a twin slot per snapshot
+      if (hostNotice) { hostNotice = null; renderStatusLine(); }
+      const incomingId = String((doc.graph as { graph_id?: string }).graph_id ?? "");
+      for (const old of emtree.slots.filter((x) => x.originSuffix === t("sync.fromBlender")
+        && String((x.store.doc.graph as { graph_id?: string }).graph_id ?? "") === incomingId)) {
+        closeSlot(old.id);
+      }
       loadDocument(doc, "Blender (sync)");
       info.textContent = t("sync.loadedHost");
       // Y2 · the graph from Blender says so after its name (EMTree, window
@@ -9920,6 +10042,15 @@ btnSync.addEventListener("click", () => {
           renderSidecarDetail();
         }
       }
+    },
+    // B1 · Blender was asked for its graph and has none loaded: SAID, in the
+    // message zone, in the Log and in the Connection panel — and when the graph
+    // is loaded there, the snapshot arrives by itself (no reconnection)
+    onSnapshotUnavailable: (why) => {
+      hostNotice = snapshotUnavailableSentence(why);
+      logWarn(hostNotice);
+      info.textContent = hostNotice;
+      renderStatusLine();
     },
     onHostInfo: (info2) => {
       // the host told us what it is editing (tool / file / database) → show it
@@ -9964,7 +10095,8 @@ btnSync.addEventListener("click", () => {
       document.body.classList.toggle("sync-active", state === "open");
       setModeIndicator(state === "open");
       btnSync.textContent = state === "open" ? "Sync ●" : "Sync";
-      if (state === "open") info.textContent = `sync: connected to ${syncUrl}`;
+      if (state === "open") info.textContent = t("sync.connectedToHost", { tool: hostToolName() });
+      if (state === "open") logInfo(`sync: connected to ${syncUrl}`);
       else if (state === "closed")
         info.textContent = sync.retrying ? t("sync.waitingHost") : t("sync.disconnectedHost");
     },
@@ -10772,9 +10904,14 @@ function refreshIdentityChip(): void {
     // guessed, and absent rather than invented when the room said nothing (the
     // chip shows a permission it was told about, and never negotiates one)
     const said = hostInfo.role ?? null;
-    const role = said ? ` — ${said}` : "";
+    // Z · ZONE 2, «who you are»: the name, ✓ when ORCID stands behind it, and
+    // the role IN this room. The room itself is zone 1's; the node's password is
+    // a detail of the link to the node (the Connection panel), not a second
+    // identity beside the tick.
+    const tick = nodeIdentity?.authMode !== "node_password"
+      || identityState(identity) === "verified" ? " ✓" : "";
     chip.classList.add("id-presence");
-    chip.textContent = `${who} · ${sync.room}${role}`;
+    chip.textContent = `${who}${tick}` + (said ? ` · ${t(`room.role.${said}`)}` : "");
     chip.title = t("ident.presenceTitle", { who, room: String(sync.room),
                                             node: nodeIdentity!.node });
     return;
@@ -10787,12 +10924,12 @@ function refreshIdentityChip(): void {
     if (nodeIdentity!.authMode === "node_password") {
       chip.classList.add("id-attested");
       chip.dataset.identityState = "attested";
-      chip.textContent = `${who} · ${t("idp.attestedWord")}`;
+      chip.textContent = identityState(identity) === "verified" ? `${who} ✓` : who;
       chip.title = t("idp.attestedTitle", { who, node: nodeIdentity!.attestedBy || nodeIdentity!.node });
       return;
     }
     chip.dataset.identityState = "verified";
-    chip.textContent = `${who} · ${nodeIdentity!.node}`;
+    chip.textContent = `${who} ✓`;
     chip.title = t("ident.identityTitle", { who, node: nodeIdentity!.node });
     return;
   }
@@ -10813,8 +10950,7 @@ function refreshIdentityChip(): void {
   const verifiedId = identityState(identity) === "verified";
   chip.classList.toggle("verified", verifiedId);
   chip.dataset.identityState = verifiedId ? "verified" : chip.dataset.identityState;
-  chip.textContent = attested ? `◌ ${who} · ${t("idp.attestedWord")}`
-    : verifiedId ? `✓ ${who} · ${t("idw.verifiedWord")}` : `◌ ${who}`;
+  chip.textContent = attested ? who : verifiedId ? `${who} ✓` : `◌ ${who}`;
   // A DEGRADATION IS SAID, and «the node knows you as somebody else» is one. A
   // chip that simply stayed dashed would be right and mute, and a mute
   // degradation is the failure that looks like a success.
