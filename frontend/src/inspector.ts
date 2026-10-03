@@ -56,6 +56,8 @@ export interface InspectorCallbacks {
    *  reason they cannot be, shown in the tooltip of the disabled button. An
    *  action that is offered and then refused is worse than one greyed out. */
   commandsBlocked?: () => string | null;
+  /** I6 · «Open with…»: the tools that know this node, off ones with why */
+  openWith?: (nodeId: string) => { key: string; label: string; ok: boolean; why?: string; run: () => void }[];
   /** X1 · the gesture that lifts the block, when there is one here (connect) */
   commandsFix?: () => { label: string; run: () => void } | null;
   /** P4.1b · empty ONE field, through the act that leaves its tombstone. */
@@ -698,6 +700,25 @@ export function renderInspector(
         root.appendChild(why);
       }
     }
+  }
+
+  // I6 · «Open with…» — the same entries as the node's context menu
+  const tools = nodeId && cb.openWith ? cb.openWith(nodeId) : [];
+  if (tools.length) {
+    root.appendChild(el("h3", "insp-sect", t("openWith.head")));
+    const box = el("div", "insp-openwith");
+    for (const x of tools) {
+      const row = el("div", "insp-openwith-row");
+      const b = el("button", "insp-btn" + (x.ok ? "" : " insp-btn-off"), x.label) as HTMLButtonElement;
+      b.dataset.openwith = x.key;
+      b.disabled = !x.ok;
+      b.setAttribute("aria-disabled", String(!x.ok));
+      b.addEventListener("click", () => x.run());
+      row.appendChild(b);
+      if (!x.ok && x.why) row.appendChild(el("span", "insp-openwith-why", x.why));
+      box.appendChild(row);
+    }
+    root.appendChild(box);
   }
 
   // ── DTC · the rights of THIS resource (licence / embargo / author) ─────────

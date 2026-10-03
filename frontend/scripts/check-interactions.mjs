@@ -3778,6 +3778,33 @@ test("TT1.undated", "T-T1 · Tempio (copia, nessuna epoca con date): «Check the
     detail: { ...r, focus, errors } };
 });
 
+test("I6.openwith", "I6 · «Open with…» nell'Inspector e nel menu contestuale del nodo: StratiField · scheda US, Blender, Heriverse; in Standalone senza stanza né scena tutte spente, ognuna col motivo in una riga", async () => {
+  const { p, ctx, errors } = await open({ doc: "catena", locale: "en" });
+  await pick(p, "USM101");
+  const insp = await p.evaluate(() => [...document.querySelectorAll(".insp-openwith-row")].map((r) => ({
+    key: r.querySelector("button")?.dataset.openwith, off: r.querySelector("button")?.disabled, why: r.querySelector(".insp-openwith-why")?.textContent ?? "" })));
+  // the context menu: right-click on the selected node
+  const win = await winOf(p, "graph");
+  const ws = await p.evaluate((w) => window.__EM_DRAG__.winScene(w), win);
+  const inside = (b) => b.x > ws.rect.x + 5 && b.y > ws.rect.y + 5
+    && b.x + b.w < ws.rect.x + ws.rect.w - 5 && b.y + b.h < ws.rect.y + ws.rect.h - 5 && b.w > 20;
+  const bx = ws.boxes.find((b) => b.id === "USM101" && inside(b)) ?? ws.boxes.find(inside);
+  const at = bx ? { x: bx.x + bx.w / 2, y: bx.y + bx.h / 2 } : null;
+  if (bx && bx.id !== "USM101") await pick(p, bx.id);
+  let menu = null;
+  if (at) {
+    await p.mouse.click(at.x, at.y, { button: "right" });
+    await p.waitForTimeout(300);
+    menu = await p.evaluate(() => ({ head: document.querySelector(".ctx-menu .ctx-sub")?.textContent,
+      items: [...document.querySelectorAll(".ctx-menu [data-openwith]")].map((b) => [b.dataset.openwith, b.disabled]),
+      whys: [...document.querySelectorAll(".ctx-menu .ctx-why")].length }));
+  }
+  await ctx.close();
+  return { pass: insp.map((x) => x.key).join() === "stratifield,blender,heriverse" && insp.every((x) => x.off && x.why.length > 10)
+      && !!at && menu?.head === "Open with…" && menu.items.length === 3 && menu.whys >= 1 && !errors.length,
+    detail: { insp, menu, at, picked: bx?.id, errors } };
+});
+
 test("F8.node", "F8 (U17) · Impostazioni › Sync: «Il tuo nodo StratiGraph» prima e a parte da Blender; il campo vuoto dice «per esempio …»; il rimando di «Chi sei» porta dritto al campo; «Prova» dice raggiungibile, versione e modi d'accesso; la stanza sta col nodo, nella lingua dell'interfaccia", async () => {
   const { p, ctx, errors } = await open({ doc: LITE(), locale: "en", hook: tauriHook(),
     route: { pattern: "https://nodo.test/**", handler: (r) => {

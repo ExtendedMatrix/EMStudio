@@ -225,6 +225,7 @@ import { buildSpace, type Space } from "./space";
 import { mountSpaceScene, type SceneItem } from "./scene3d";
 import { isTilesetUrl } from "./tiles3d";
 import type { ModelOptions } from "./embed3d-native";
+import { isRef3D, resolve3d } from "./embed3d";
 import { KEYMAP, filterKeymap, keysText } from "./keymap";
 import { ReadingFiles } from "./reading-files";
 import * as aiv from "./ai-validation";
@@ -2477,6 +2478,7 @@ function renderInspectorInto(host: HTMLElement): void {
           (e) => (digest && e.checksum === digest) || e.name === node.name);
       },
       commandsBlocked: commandsBlockedReason,
+      openWith: (id) => openWithTools(id),
       commandsFix: () => (sync.connected ? null
         : { label: t("cmd.connect"), run: () => { if (!sync.connected) btnSync.click(); } }),
       isResourceOpen: (id) => openResourceFiles.has(id),
@@ -27412,6 +27414,68 @@ function deleteSelectedNodes(): void {
 /** the names of the nodes about to go, read before they are gone */
 const nodeLabelBeforeDelete = new Map<string, string>();
 
+// ── I6 · «Open with…»: the tools that know a node ─────────────────────────────
+// One entry point, in the node's context menu and in the Inspector. Only the
+// links that already exist: StratiField opens the unit's sheet in the ROOM it
+// writes into (the node's own handoff gives its address), Blender selects the
+// unit over the sidecar, Heriverse opens the scene a resource of the node names.
+// A tool that cannot be reached here is offered OFF, with why in one line.
+interface OpenWith { key: string; label: string; ok: boolean; why?: string; run: () => void }
+function openWithTools(nodeId: string): OpenWith[] {
+  const st = store;
+  const node = st?.node(nodeId);
+  if (!st || !node) return [];
+  const out: OpenWith[] = [];
+  const unit = isStratigraphicType(node.node_type);
+  const base = getSettings().sync.hubUrl.trim();
+  const room = sync.connected ? sync.room : null;
+  out.push({
+    key: "stratifield", label: t("openWith.stratifield"),
+    ok: unit && !!base && !!room,
+    why: !unit ? t("openWith.sfNotUnit") : !base || !room ? t("openWith.sfNoRoom") : undefined,
+    run: () => void (async () => {
+      try {
+        const h = await roomHandoff(base, room!, hubToken);
+        const path = h.tools?.chatbot?.browser;
+        if (!path) { toast(t("openWith.sfNotOnNode")); return; }
+        const u = new URL(path, new URL(base).origin);
+        u.hash = new URLSearchParams({ scheda: "iccd-us-2021", us: String(node.name ?? "") }).toString();
+        logInfo(t("openWith.opening", { tool: "StratiField", url: u.toString() }), [nodeId]);
+        if (isTauri()) await openInSystemBrowser(u.toString());
+        else window.open(u.toString(), "_blank", "noopener");
+      } catch (error) {
+        toast(String((error as Error).message ?? error));
+      }
+    })(),
+  });
+  const blender = sync.connected && !sync.room;
+  out.push({
+    key: "blender", label: t("openWith.blender"),
+    ok: blender,
+    why: blender ? undefined : t("cmd.blocked.disconnected"),
+    run: () => {
+      sync.sendSelect(nodeId, [nodeId]);
+      const msg = t("openWith.blenderSelected", { name: String(node.name ?? nodeId) });
+      toast(msg);
+      logInfo(msg, [nodeId]);
+    },
+  });
+  const r3d = resolve3d(node, st.doc);
+  const scene = isRef3D(r3d) && r3d.via === "heriverse-scene" ? r3d : null;
+  out.push({
+    key: "heriverse", label: t("openWith.heriverse"),
+    ok: !!scene,
+    why: scene ? undefined : !isRef3D(r3d) && r3d.reason === "unconfigured" ? r3d.hint : t("openWith.noScene"),
+    run: () => {
+      if (!scene) return;
+      logInfo(t("openWith.opening", { tool: "Heriverse", url: scene.url }), [nodeId]);
+      if (isTauri()) void openInSystemBrowser(scene.url);
+      else window.open(scene.url, "_blank", "noopener");
+    },
+  });
+  return out;
+}
+
 /** `win`: the graph window the right-click happened in — captured when the menu
  *  opens, never re-read when an item is clicked (the focus may have moved). */
 function showContextMenu(clientX: number, clientY: number, win?: Win): void {
@@ -27450,6 +27514,31 @@ function showContextMenu(clientX: number, clientY: number, win?: Win): void {
         at: sn ? { x: sn.x + sn.w + 80, y: sn.y + sn.h / 2 } : undefined,
       });
     });
+  }
+  if (ids.length === 1) {
+    // I6 · «Open with…»: the tools that know this node, the unreachable ones off
+    const tools = openWithTools(ids[0]);
+    if (tools.length) {
+      const head = document.createElement("div");
+      head.className = "ctx-sub";
+      head.textContent = t("openWith.head");
+      menu.appendChild(head);
+      for (const x of tools) {
+        const b = item(`  ${x.label}`, x.run, "ctx-openwith");
+        b.dataset.openwith = x.key;
+        if (!x.ok) {
+          b.disabled = true;
+          b.title = x.why ?? "";
+          const why = document.createElement("div");
+          why.className = "ctx-why";
+          why.textContent = x.why ?? "";
+          menu.appendChild(why);
+        }
+      }
+      const sep = document.createElement("div");
+      sep.className = "ctx-sep";
+      menu.appendChild(sep);
+    }
   }
   item(t("ctx.reflowNode"), () => void reflowNodes(ids));
   // DEV30 U3 · «Lock position» lives where the layout is made. Measured on San
