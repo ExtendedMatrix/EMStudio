@@ -59,6 +59,20 @@ const isUnit = (t) => UNITS.has(t);
   eq(sp2.summary("EP_MED").missing, ["US103"], "a resident file the scene did not find is «missing»");
 }
 
+// ── MICRO-IL-GIRO-DELLA-DEV17 · P2 and Y6 ───────────────────────────────────
+{
+  const d = JSON.parse(JSON.stringify(doc));
+  d.graph.nodes.push({ id: "BR1", node_type: "BR", name: "continuity_node" });
+  d.graph.edges.push({ id: "BR1_ep", source: "BR1", target: "EP_MED", edge_type: "has_first_epoch" });
+  const isUnitBR = (t) => UNITS.has(t) || t === "BR";
+  const med = M.buildSpace(d, { isUnit: isUnitBR }).summary("EP_MED");
+  ok(!med.units.includes("BR1") && !med.without.includes("BR1"),
+     "P2 · a continuity node is neither counted as a unit nor listed without a proxy");
+  const sc = M.buildSpace(d, { isUnit: isUnitBR, sceneProxies: new Set(["US104"]) }).summary("EP_MED");
+  eq([sc.withProxy.includes("US104"), sc.inScene, sc.without], [true, ["US104"], []],
+     "Y6 · a proxy in the connected scene counts, and is said to be the scene's");
+}
+
 // ── the rule is s3Dgraphy's: geometry_summary through the same fixture ─────
 {
   const S3D = new URL("../../../s3Dgraphy/", import.meta.url).pathname;

@@ -281,6 +281,7 @@ import {
   nodeTypeForClass,
   nodeLabel,
   resourceTypeOfLocator,
+  is3dResourceType,
   // (the datamodel version exports are read by `versions.ts` for the footer's
   // breakdown popover — MENU-AUDIT removed this module's second, hardcoded copy)
 } from "./rules";
@@ -1282,6 +1283,12 @@ function openRoomPanel(roomId?: string): void {
   placeConnectionPop(pop);
 }
 modeIndicator.addEventListener("click", () => toggleConnectionPanel());
+// T2 · the desktop's app menu: «Settings…» (⌘,)
+if (isTauri()) {
+  void import("@tauri-apps/api/event")
+    .then(({ listen }) => listen("open-settings", () => openSettings()))
+    .catch(() => { /* an older shell: Edit › Settings… still opens it */ });
+}
 modeIndicator.addEventListener("keydown", (e) => {
   if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggleConnectionPanel(); }
 });
@@ -1525,6 +1532,25 @@ function toastUndoWith(msg: string, undo: () => void): void {
   toastTimer = window.setTimeout(() => toastEl.classList.add("hidden"), 5000);
 }
 
+/** G5 · a toast that ASKS: the message and its answers, each one a button;
+ *  left alone it goes after `ms` and nothing is done */
+function toastAsk(msg: string, answers: { label: string; run: () => void }[], ms = 15000): void {
+  toast(msg);
+  for (const a of answers) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "toast-action";
+    btn.textContent = a.label;
+    btn.addEventListener("click", () => {
+      toastEl.classList.add("hidden");
+      a.run();
+    });
+    toastEl.append(" ", btn);
+  }
+  window.clearTimeout(toastTimer);
+  toastTimer = window.setTimeout(() => toastEl.classList.add("hidden"), ms);
+}
+
 function toastUndo(msg: string, st: DocumentStore): void {
   toast(msg);
   const btn = document.createElement("button");
@@ -1640,6 +1666,8 @@ window.__EM_SCENE__ = () => {
     // the DTC view exists to answer correctly
     source: ids.length && ids.every((id) => corpusIds.has(id)) ? "corpus" : "study",
     nodes: ids,
+    // G4 · the lanes as labelled
+    lanes: (s.lanes ?? []).map((l) => ({ id: l.id, label: l.label, unnamed: !!l.unnamed })),
     // a SceneEdge is `{source, target, edge}` — the relation type lives on the
     // document edge it carries, not on the scene edge itself (measured: reading
     // `edge_type` off the scene edge gave every relation the empty string)
@@ -2231,6 +2259,25 @@ function centerOn(nodeId: string): void {
   draw();
 }
 
+/** S6 · «Show in the Matrix»: frame the node WITH its group, a margin around,
+ *  instead of forcing a 0.8 zoom — in the low window under the Doc viewer that
+ *  zoom cut the neighbours' boxes and labels at the top edge (dev.17, D.02). */
+function frameNodeInContext(nodeId: string): void {
+  const s = scene();
+  const n = s?.byId.get(nodeId);
+  if (!s || !n) return;
+  const gid = s.memberOf?.get(nodeId);
+  const g = gid ? s.groupsById?.get(gid) : undefined;
+  const r = g ? { x: g.x, y: g.y, w: g.w, h: g.h } : { x: n.x, y: n.y, w: n.w, h: n.h };
+  const vp = viewport();
+  const { w, h } = viewSize();
+  const M = 56;   // room for the labels drawn above and below the boxes
+  vp.scale = Math.max(0.3, Math.min(1, (w - 2 * M) / Math.max(1, r.w), (h - 2 * M) / Math.max(1, r.h)));
+  vp.x = w / 2 - (r.x + r.w / 2) * vp.scale;
+  vp.y = h / 2 - (r.y + r.h / 2) * vp.scale;
+  draw();
+}
+
 /** Same document edge? Prefer id, else the (source, type, target) triple. */
 function sameEdge(a: EmEdge, b: EmEdge): boolean {
   if (a.id && b.id) return a.id === b.id;
@@ -2535,6 +2582,7 @@ function renderInspectorIssues(host: HTMLElement): void {
     ico.className = "ico";
     ico.textContent = i.sev === "warn" ? "▲" : "●";
     const txt = document.createElement("span");
+    txt.className = "insp-issue-txt";
     if (i.node && i.node !== selectedId && store?.node(i.node)) {
       const a = document.createElement("button");
       a.className = "tv-link";
@@ -4010,7 +4058,11 @@ function activateSlot(id: string, opts: { rebuildOnly?: boolean } = {}): void {
   emtree.setActive(id);
 
   store = target.store;
+  // C1 · the Storage follows the ACTIVE graph's folder: dev.17 stayed on the
+  // folder of the file opened last while the graph in front lived elsewhere
+  const folderChanged = (outgoing?.path ?? null) !== target.path;
   currentFilePath = target.path; // desktop: Save writes back to THIS slot's file
+  if (folderChanged && target.path) void storageFollowDocument(target.path);
   // F2 · the version shown is the active graph's FILE's
   projectVersion = (emtree.fileOf(target)?.version as ProjectVersion | null) ?? null;
   updateVersionIndicator();
@@ -4398,6 +4450,33 @@ function loadContainerDocument(
     toast(t("container.opened", { n: String(parsed.members.length) }));
   }
   refreshEMTree();
+  // G5 · a graph that a «New graph» left empty and somebody saved beside the
+  // real one (San Pietro's «untitled graph»): proposed for removal, asked —
+  // never removed in silence, and never when it is the file's only graph
+  const mine = emtree.slotsOf(file.id);
+  const empty = mine.filter((sl) => isEmptyGraph(sl.store));
+  if (empty.length && empty.length < mine.length) {
+    const sl = empty[0];
+    const name = slotLabel(sl);
+    logWarn(t("open.emptyGraph", { name, file: file.name }));
+    toastAsk(t("open.emptyGraph", { name, file: file.name }), [
+      { label: t("open.emptyRemove"), run: () => {
+        if (!emtree.get(sl.id)) return;
+        file.dirty = true;     // the file loses a graph: its next Save writes that
+        closeSlot(sl.id);      // …and it is NOT retained, unlike a plain close
+        logInfo(t("open.emptyRemoved", { name, file: file.name }));
+      } },
+      { label: t("open.emptyKeep"), run: () => logInfo(t("open.emptyKept", { name })) },
+    ]);
+  }
+}
+
+/** G5 · nothing in it but what New makes: at most one epoch, its paradata box
+ *  and its still-empty dates — no unit, no document, no text */
+function isEmptyGraph(st: DocumentStore): boolean {
+  const rest = st.liveNodes().filter((n) => n.node_type !== "ParadataNodeGroup"
+    && !(n.node_type === "property" && !String(n.description ?? "").trim()));
+  return rest.length <= 1 && rest.every((n) => n.node_type === "EpochNode");
 }
 
 /**
@@ -10028,7 +10107,9 @@ const setAtonSceneUrl = document.getElementById("set-aton-scene-url")!;
 for (const p of AI_PROVIDERS) {
   const o = document.createElement("option");
   o.value = p.value;
-  o.textContent = p.label;
+  // Z2 · a provider's label in the interface's language when the dictionary has one
+  o.dataset.i18n = `settings.aiProvider.${p.value}`;
+  o.textContent = t(`settings.aiProvider.${p.value}`, undefined, p.label);
   setAiProvider.appendChild(o);
 }
 
@@ -10095,13 +10176,13 @@ async function refreshAiKeyState(): Promise<void> {
   setAiKeyClear.disabled = !set || busy || source === "env";
 
   if (!usable) setAiKeyState.textContent = isTauri()
-    ? "portachiavi non disponibile"
+    ? t("ai.noKeychain")
     : t("bridge.unreachable");
   else if (!set) setAiKeyState.textContent = t("ai.noKey");
-  else if (mode === "keychain") setAiKeyState.textContent = "✓ key impostata";
+  else if (mode === "keychain") setAiKeyState.textContent = t("ai.keySet");
   else setAiKeyState.textContent = source === "env"
-    ? "✓ key dall'ambiente"
-    : "✓ key di sessione — non salvata";
+    ? t("ai.keyFromEnv")
+    : t("ai.keySession");
   setAiKeyState.className = usable && set ? "ai-key-set" : "ai-key-unset";
 
   // K2 — the field is always EMPTY on reopen, because the key is not readable
@@ -10110,9 +10191,7 @@ async function refreshAiKeyState(): Promise<void> {
   // user pastes it again. So the PLACEHOLDER carries the state: a fixed run of
   // dots and a sentence. It is a placeholder, not a value — `setAiKey.value`
   // stays empty, nothing is read from anywhere, and typing behaves as before.
-  setAiKey.placeholder = usable && set
-    ? "•••••••••••• — impostata (incolla per sostituire)"
-    : "Incolla qui la key";
+  setAiKey.placeholder = usable && set ? t("settings.aiKeySetPh") : t("settings.aiKeyPh");
 
   if (busy) {
     setAiKeyHint.textContent = t("ai.busySaving");
@@ -10991,7 +11070,7 @@ async function verifyIdentityFlow(): Promise<void> {
  * an error at the user: it explains what is missing and opens the place where
  * it is fixed. Refusing an action is a moment to help, not to scold.
  */
-function requireVerifiedIdentity(): boolean {
+function requireVerifiedIdentity(anchor: HTMLElement | null = null): boolean {
   const gate = publishGate();
   if (gate.allowed) return true;
   if (gate.reason === "no-identity") {
@@ -10999,7 +11078,7 @@ function requireVerifiedIdentity(): boolean {
   } else {
     toast(t("identity.gateNotVerified", { orcid: gate.orcid }));
   }
-  openIdentityPanel();
+  openIdentityPanel(undefined, { anchor });
   return false;
 }
 
@@ -11135,9 +11214,11 @@ function openSettings(section?: string): void {
   // MICRO-3DTILES · the big assets' threshold and the tiles' memory
   const numIn = (id: string) => document.getElementById(id) as HTMLInputElement | null;
   const lm = numIn("set-lod-limit-mb"), lp = numIn("set-lod-limit-points"), tm = numIn("set-tiles-memory-mb");
-  if (lm) lm.value = String(s.viewer.lodLimitMB);
-  if (lp) lp.value = String(s.viewer.lodLimitPoints);
-  if (tm) tm.value = String(s.viewer.tilesMemoryMB);
+  // Z6 · long numbers with the thousands separator of the interface's language
+  const grouped = (n: number): string => n.toLocaleString(getLocale());
+  if (lm) lm.value = grouped(s.viewer.lodLimitMB);
+  if (lp) lp.value = grouped(s.viewer.lodLimitPoints);
+  if (tm) tm.value = grouped(s.viewer.tilesMemoryMB);
   const iiifInput = document.getElementById("set-iiif-base") as HTMLInputElement | null;
   if (iiifInput) iiifInput.value = s.iiif.base;
   const orcidClient = document.getElementById("set-orcid-client") as HTMLInputElement | null;
@@ -11378,7 +11459,8 @@ document.getElementById("shelf-promote-x")?.addEventListener(
 // useless exactly where it is most needed, in a trench with no network.
 /** AUDIT N9 · «Pubblica…», the one place of the verb (the name strip) */
 function publishToStratiGraph(): void {
-  if (!requireVerifiedIdentity()) return;
+  // B1 · «Who you are» opens beside the button that asked for it
+  if (!requireVerifiedIdentity(document.getElementById("ns-publish"))) return;
   // Verified, and still nothing to publish TO: the StratiGraph delivery
   // endpoint is phase 2. Saying so is the honest end of this path — the gate is
   // real and measurable today, the destination is not there yet.
@@ -11403,7 +11485,9 @@ settingsModal.addEventListener("click", (e) => {
   );
   // MICRO-3DTILES · a number field, positive, else its default
   const posNum = (id: string, dflt: number): number => {
-    const v = Number((document.getElementById(id) as HTMLInputElement | null)?.value);
+    // Z6 · read through the separators the field is shown with (10 000 000, 10.000.000)
+    const raw = (document.getElementById(id) as HTMLInputElement | null)?.value ?? "";
+    const v = Number(raw.replace(/[\s\u00a0\u202f.,'’]/g, ""));
     return Number.isFinite(v) && v > 0 ? v : dflt;
   };
   const next: Settings = {
@@ -11621,7 +11705,10 @@ function renderResDocuments(): void {
     const label = String(d.name || d.id.slice(0, 8));
     const thumb = createResourceThumb({
       resourceId: d.id,
-      folder: previewFolder(),
+      // C3 · ONE base for a document's path: the folder the Doc viewer reads it
+      // in (the study's), unless a folder was scanned. dev.17 answered «absent»
+      // here for D.32 while Doc showed the file beside it.
+      folder: previewFolder() ?? studyDir() ?? undefined,
       doc: docJson,
       bridge: bridgeUrl,
       // IIIF · a document that IS a published image gets its thumbnail from the
@@ -14920,7 +15007,7 @@ function closeIdentityPanel(): void {
 /** Open the identity panel, keeping what asked for it: `then` runs once an
  *  identity exists (declared or verified). */
 function openIdentityPanel(then?: () => void,
-                           opts: { waiting?: "orcid" | "node"; node?: string } = {}): void {
+                           opts: { waiting?: "orcid" | "node"; node?: string; anchor?: HTMLElement | null } = {}): void {
   if (then) identityThen = then;
   closeIdentityPanel();
   const chip = document.getElementById("footer-identity");
@@ -15145,6 +15232,18 @@ function openIdentityPanel(then?: () => void,
   foot.appendChild(cl);
   box.appendChild(foot);
   document.body.appendChild(box);
+  // B1 · asked by a button (Publish…, top right): open under it, right-aligned,
+  // so neither the button nor the notice at the bottom is covered (dev.17 put
+  // it bottom-left, over the toast that explained why it opened)
+  if (opts.anchor?.isConnected) {
+    const r = opts.anchor.getBoundingClientRect();
+    box.style.left = "auto";
+    box.style.bottom = "auto";
+    box.style.top = `${Math.round(r.bottom + 6)}px`;
+    box.style.right = `${Math.max(8, Math.round(innerWidth - r.right))}px`;
+    box.style.maxHeight = `calc(100vh - ${Math.round(r.bottom + 6 + 48)}px)`;
+    box.dataset.anchored = "1";
+  }
   const onKey = (e: KeyboardEvent): void => {
     if (e.key !== "Escape" || !box.isConnected) { if (!box.isConnected) document.removeEventListener("keydown", onKey, true); return; }
     e.stopPropagation();
@@ -16848,7 +16947,7 @@ function showInMatrix(nodeId: string): void {
   setActiveWin(win.id);
   if (winMode(win) !== "matrix") setWindowMode(win, "matrix");
   requestAnimationFrame(() => {
-    if (scene()?.byId.has(nodeId)) centerOn(nodeId);
+    if (scene()?.byId.has(nodeId)) frameNodeInContext(nodeId);
     else toast(t("toast.selectedNotVisible"));
     refreshInspector();
     draw();
@@ -18091,8 +18190,12 @@ const spaceNotFound = new Set<string>();
 
 function currentSpace(): Space | null {
   if (!store) return null;
+  // Y6 · the proxies the connected host has in its scene count too
+  const sceneProxies = sync.connected && Array.isArray(hostInfo.scene_proxies)
+    ? new Set(hostInfo.scene_proxies.map(String)) : null;
   return buildSpace(store.doc, { isUnit: isStratigraphicType,
-    resident: spaceResident?.version === spaceVersion ? spaceResident.ids : null, notFound: spaceNotFound });
+    resident: spaceResident?.version === spaceVersion ? spaceResident.ids : null, notFound: spaceNotFound,
+    sceneProxies });
 }
 
 /** Ask s3Dgraphy what can be fetched (`geometry_summary`), once per version of
@@ -18179,6 +18282,112 @@ async function openResourceInScene(resId: string): Promise<void> {
 /** The window's toggles: «Modelli (RM)» and «Proxy», both on by default. */
 function spaceToggle(win: Win, which: "rm" | "px"): boolean {
   return winCurrent(win, `space.${which}`) !== false;
+}
+
+// ── P1 · the proxies of `3d_obj/`, by name (EM convention) ──────────────────
+// Beside the em.json a `3d_obj/` folder whose files carry the units' names
+// (USM02.obj, USD200.obj…) IS the proxies of those units by convention.
+// EMStudio offers to bind them: a preview of the pairs, a confirmation, and the
+// chains written by s3Dgraphy (`create_geometry_proxy` through the bridge),
+// merged as one undo step.
+let proxyFolder: { dir: string; files: { name: string; path: string }[] } | null = null;
+let proxyFolderAsked = "";
+const PROXY_DIR = "3d_obj";
+function proxyFolderPairs(units: string[]): { unit: string; name: string; file: string }[] {
+  const st = store;
+  if (!st || !proxyFolder) return [];
+  const byName = new Map(proxyFolder.files.map((f) => [f.name.replace(/\.[^.]+$/, "").toLowerCase(), f]));
+  const out: { unit: string; name: string; file: string }[] = [];
+  for (const u of units) {
+    const name = String(st.node(u)?.name ?? "");
+    const f = name ? byName.get(name.toLowerCase()) : undefined;
+    if (f) out.push({ unit: u, name, file: f.name });
+  }
+  return out;
+}
+function proxyFolderOffer(units: string[]): string {
+  const dir = studyDir();
+  if (!dir || !units.length) return "";
+  const where = `${dir}/${PROXY_DIR}`;
+  if (proxyFolderAsked !== where) {
+    proxyFolderAsked = where;
+    proxyFolder = null;
+    void fsList(where).then((l) => {
+      const files = (l.entries ?? []).filter((e) => e.type === "file" && is3dResourceType(resourceTypeOfLocator(e.name)))
+        .map((e) => ({ name: e.name, path: e.path }));
+      proxyFolder = { dir: where, files };
+      refreshSurfaces("scene");
+    }).catch(() => { proxyFolder = { dir: where, files: [] }; });
+    return "";
+  }
+  const pairs = proxyFolderPairs(units);
+  if (!pairs.length) return "";
+  return ` · <button type="button" class="link" data-action="link-3dobj">${escapeHtml(t("space.link3dobj", { n: String(pairs.length), dir: PROXY_DIR }))}</button>`;
+}
+function openProxyFolderPreview(units: string[]): void {
+  const st = store;
+  const pairs = proxyFolderPairs(units);
+  if (!st || !pairs.length) return;
+  document.querySelector(".p1-preview")?.remove();
+  const box = document.createElement("div");
+  box.className = "conn-panel p1-preview";
+  box.setAttribute("role", "dialog");
+  const h = document.createElement("h4");
+  h.textContent = t("space.link3dobjHead", { n: String(pairs.length), dir: PROXY_DIR });
+  box.appendChild(h);
+  const ul = document.createElement("ul");
+  ul.className = "conn-members";
+  for (const p of pairs) {
+    const li = document.createElement("li");
+    li.dataset.unit = p.unit;
+    li.textContent = `${p.name} ← ${PROXY_DIR}/${p.file}`;
+    ul.appendChild(li);
+  }
+  box.appendChild(ul);
+  const acts = document.createElement("div");
+  acts.className = "conn-acts";
+  const go = document.createElement("button");
+  go.type = "button";
+  go.className = "conn-btn";
+  go.dataset.action = "link-3dobj-go";
+  go.textContent = t("space.link3dobjGo");
+  const no = document.createElement("button");
+  no.type = "button";
+  no.className = "conn-btn";
+  no.textContent = t("settings.cancel");
+  no.addEventListener("click", () => box.remove());
+  go.addEventListener("click", async () => {
+    go.disabled = true;
+    try {
+      const res = await fetch(`${await bridgeUrl()}/geometry-proxies`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ doc: JSON.parse(st.toJSON()),
+          items: pairs.map((p) => ({ unit_id: p.unit, url: `${PROXY_DIR}/${p.file}` })) }),
+      });
+      const j = await res.json() as { ok?: boolean; nodes?: EmNode[]; edges?: EmEdge[]; error?: string };
+      if (!res.ok || !j.ok) throw new Error(j.error ?? `HTTP ${res.status}`);
+      const added = st.addSubgraph(j.nodes ?? [], j.edges ?? []);
+      const msg = t("space.link3dobjDone", { n: String(pairs.length), nodes: String(added.nodes), edges: String(added.edges) });
+      logInfo(msg, pairs.map((p) => p.unit));
+      toastUndo(msg, st);
+      box.remove();
+      buildScenes();
+      draw();
+      refreshSurfaces("scene");
+    } catch (error) {
+      go.disabled = false;
+      toast(t("space.link3dobjFailed", { why: String((error as Error).message ?? error) }));
+    }
+  });
+  acts.append(go, no);
+  box.appendChild(acts);
+  box.style.position = "fixed";
+  box.style.left = "50%";
+  box.style.top = "18%";
+  box.style.transform = "translateX(-50%)";
+  box.style.zIndex = "70";
+  box.style.width = "min(420px, calc(100vw - 32px))";
+  document.body.appendChild(box);
 }
 
 function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): void } {
@@ -18327,12 +18536,18 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
     overlay.classList.remove("hidden");
     overlay.innerHTML = `<b>${escapeHtml(sum.epoch.name)}</b> · ${rmPart}<br>`
       + `${escapeHtml(t("space.proxies", { n: String(sum.withProxy.length), m: String(sum.units.length) }))}`
+      + (sum.inScene.length ? ` <span class="ref" data-sum="inScene">${escapeHtml(t("space.inScene", { n: String(sum.inScene.length) }))}</span>` : "")
       + (sum.without.length ? ` · <span class="miss" data-sum="without">${escapeHtml(t("space.without"))}: ${list(sum.without)}</span>` : "")
       + (sum.missing.length ? ` · <span class="miss" data-sum="missing">${escapeHtml(t("space.missingFiles"))}: ${list(sum.missing)}</span>` : "")
-      + (sum.reference.length ? ` · <span class="ref" data-sum="reference">${escapeHtml(t("space.referenceOnly"))}: ${list(sum.reference)}</span>` : "");
+      + (sum.reference.length ? ` · <span class="ref" data-sum="reference">${escapeHtml(t("space.referenceOnly"))}: ${list(sum.reference)}</span>` : "")
+      + proxyFolderOffer(sum.without);
     overlay.querySelectorAll<HTMLElement>("[data-go]").forEach((b) => b.addEventListener("click", (e) => {
       e.stopPropagation(); select(b.dataset.go!); refreshInspector();
     }));
+    overlay.querySelector<HTMLButtonElement>("[data-action=link-3dobj]")?.addEventListener("click", (e) => {
+      e.stopPropagation();
+      openProxyFolderPreview(sum.without);
+    });
     const nothing = !sum.rms.length && !sum.withProxy.length && !previewItem;
     empty.classList.toggle("hidden", !nothing);
     if (nothing) {
@@ -26948,6 +27163,15 @@ function wireGraphCanvas(canvas: HTMLCanvasElement, winId: string): void {
         });
         if (lane) {
           select(lane.id);
+          // G4 · an unnamed epoch: the click is the gesture that names it
+          if (lane.unnamed) {
+            refreshInspector();
+            requestAnimationFrame(() => {
+              const inp = document.querySelector<HTMLInputElement>(".insp-name-input");
+              inp?.focus();
+              inp?.select();
+            });
+          }
           return;
         }
       }
@@ -27658,6 +27882,13 @@ window.addEventListener("keydown", (e) => {
     if (e.altKey) void saveAllDocuments();
     else if (e.shiftKey) void saveAsDocument();
     else void saveDocument();
+    return;
+  }
+  // T2 · ⌘, opens Settings (the macOS convention; the desktop's app menu
+  // carries the same entry and sends `open-settings`)
+  if ((e.metaKey || e.ctrlKey) && e.key === ",") {
+    e.preventDefault();
+    openSettings();
     return;
   }
   if (inField) return;

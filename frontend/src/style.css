@@ -2433,6 +2433,11 @@ body.sync-active #footer-brand #em-version {
   font-size: 12px;
   font-weight: 600;
   margin-bottom: 2px;
+  /* I2 · AA on both themes: the text is the text colour, the relation's colour
+     is the bar (dark blue/red labels were near-invisible on the dark panel) */
+  color: var(--text);
+  border-left: 3px solid var(--rel, var(--border));
+  padding-left: 6px;
 }
 
 .insp-link {
@@ -4940,8 +4945,9 @@ body.sync-active #footer-brand #em-version {
 }
 .insp-prop-row {
   display: flex;
+  flex-wrap: wrap;           /* I4 · the licence reads whole, the source wraps under it */
   align-items: baseline;
-  gap: 8px;
+  gap: 2px 8px;
   padding: 3px 0;
   font-size: 12px;
 }
@@ -4955,9 +4961,7 @@ body.sync-active #footer-brand #em-version {
   color: var(--text);
   font-weight: 600;
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;   /* I4 · never «CC-…» */
 }
 .insp-prop-source {
   flex: 0 0 auto;
@@ -7856,8 +7860,13 @@ body.gesturing-resize * {
   font-size: 10.5px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase;
   color: var(--text-muted); margin-bottom: 4px;
 }
-.insp-issue { display: flex; gap: 8px; align-items: baseline; font-size: 12.5px; margin: 4px 0; }
+.insp-issue { display: flex; flex-wrap: wrap; gap: 2px 8px; align-items: baseline; font-size: 12.5px; margin: 4px 0; }
 .insp-issue .ico { flex: none; }
+/* Y8 · the sentence keeps its width; a button that does not fit goes under it
+   (dev.17: «Rename by the rule» squeezed the text to one word per line) */
+.insp-issue .insp-issue-txt { flex: 1 1 12em; min-width: 0; }
+.insp-issue > .tv-act { flex: none; margin-left: auto; }
+.insp-issues > .tv-act { display: block; margin: 6px 0 2px; white-space: normal; text-align: left; }
 .insp-issue.warn .ico { color: var(--warn-ink); }
 .insp-issue.info .ico { color: var(--info-ink); }
 .insp-issues-open { margin-top: 4px; font-size: 12px; }
@@ -9022,7 +9031,7 @@ input.storage-path:focus { border-color: var(--accent); background: var(--bg-pan
 /* F8 · the node's «Test» / «Sign in» and what Test found */
 .settings-node-actions { display: flex; gap: 8px; margin: 2px 0 4px; }
 #set-node-result:empty { display: none; }
-#set-node-result[data-state="ok"] { color: var(--accent-ink); }
+#set-node-result[data-state="ok"] { color: var(--ok-ink); }   /* Z1 · success reads green, not as a warning */
 #set-node-result[data-state="no"] { color: var(--danger); }
 
 /* I3/S5 · the technical fields, closed by default */
@@ -9048,3 +9057,17 @@ input.storage-path:focus { border-color: var(--accent); background: var(--bg-pan
 .ctx-menu .ctx-sub { padding: 4px 10px 2px; font-size: 11px; color: var(--text-muted); }
 .ctx-menu .ctx-why { padding: 0 10px 4px 22px; font-size: 11px; color: var(--text-dim); max-width: 260px; }
 .ctx-menu button:disabled { color: var(--text-dim); cursor: not-allowed; }
+
+/* Z5 · a placeholder reads as an example, never as a value */
+.modal input::placeholder,
+.modal textarea::placeholder {
+  color: var(--text-dim);
+  opacity: 0.75;
+  font-style: italic;
+}
+
+/* W2 · W3 · the Warnings table: a group row, and RULE apart from NODE */
+.tv-issues td.tv-rule { padding-right: 14px; white-space: nowrap; color: var(--text-muted); }
+.tv-issues td.tv-id { padding-left: 6px; }
+.tv-issue-group td { background: var(--bg-subtle); }
+.tv-group-toggle { background: none; border: 0; padding: 0; color: var(--text); cursor: pointer; font: inherit; text-align: left; }

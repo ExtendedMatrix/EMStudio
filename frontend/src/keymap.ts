@@ -20,6 +20,7 @@ export const KEYMAP: KeyRow[] = [
   // the app, wherever the focus is (a field keeps its letters)
   { id: "save", keys: "⌘S", scope: "app" },
   { id: "saveAs", keys: "⇧⌘S", scope: "app" },
+  { id: "settings", keys: "⌘,", scope: "app" },
   { id: "undo", keys: "⌘Z", scope: "app" },
   { id: "redo", keys: "⇧⌘Z", scope: "app" },
   { id: "add", keys: "⇧A", scope: "app" },

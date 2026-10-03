@@ -206,7 +206,9 @@ export function renderInspector(
     const panel = el("div", "insp-canvas");
     panel.appendChild(el("div", "insp-section-title", "Connector"));
     const t = el("div", "insp-group-title", es.label);
-    t.style.color = es.color;
+    // I2 · the relation's colour is a bar beside the words, never the ink of
+    // them: dark relation colours fell under AA on the dark theme
+    t.style.setProperty("--rel", es.color);
     panel.appendChild(t);
     panel.appendChild(el("label", "insp-field-label", "From"));
     const from = el("button", "insp-link", `→ ${nm(selEdge.source)}`);
@@ -1108,7 +1110,7 @@ export function renderInspector(
         "insp-group-title",
         `${es.label} (${list.length})`,
       );
-      title.style.color = es.color;
+      title.style.setProperty("--rel", es.color);   // I2 · a bar, not the ink
       g.appendChild(title);
       for (const { edge, otherId, out } of list) {
         const row = el("div", "insp-link-row");

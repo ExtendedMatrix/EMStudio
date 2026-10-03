@@ -714,6 +714,19 @@ function verifiedTableHtml(rows: NonNullable<ViewCtx["verified"]>, tabs: string)
     `</tbody></table></div>`;
 }
 
+/** W2 · the groups the reader has opened (rule + message), kept across redraws */
+const openIssueGroups = new Set<string>();
+/** W2 · a row's message with its node's name taken out: «USM05: no documented
+ *  property» and «USM07: no documented property» are the same sentence */
+function issueSentence(i: ViewCtx["issues"][number], ix: ReturnType<typeof indexOf>): string {
+  const name = i.node ? nm(ix.byId.get(i.node)) : "";
+  let txt = i.txt;
+  if (name && name !== "—") txt = txt.split(name).join("…");
+  return txt.replace(/^…\s*[:·—-]\s*/, "").trim();
+}
+/** W2 · rows that say the same thing under the same rule, grouped from this many */
+const GROUP_FROM = 3;
+
 function issuesTableHtml(rows: ViewCtx["issues"], ctx: ViewCtx, ix: ReturnType<typeof indexOf>, tabs = ""): string {
   void ctx;
   const ico = (s: string): string => (s === "warn" ? "▲" : "●");
@@ -725,17 +738,52 @@ function issuesTableHtml(rows: ViewCtx["issues"], ctx: ViewCtx, ix: ReturnType<t
     const nodes = [...new Set(rs.map((i) => i.node))].join(" ");
     return rs.length > 1 ? `<button class="tv-act" type="button" data-issue-bulk="${escapeAttr(k)}" data-nodes="${escapeAttr(nodes)}">${escapeHtml(rs[0].bulk!.label(rs.length))}</button>` : "";
   }).join(" ");
+  // W1 · the warnings first, then the hints (stable inside each severity)
+  const rank = (s: string): number => (s === "warn" ? 0 : 1);
+  const sorted = rows.map((r, k) => ({ r, k })).sort((a, b) => rank(a.r.sev) - rank(b.r.sev) || a.k - b.k).map((x) => x.r);
+  const ruleLabel = (rule: string): string =>
+    t(`issues.rule.${rule}`) === `issues.rule.${rule}` ? rule : t(`issues.rule.${rule}`);
+  const rowHtml = (i: ViewCtx["issues"][number], group = ""): string =>
+    `<tr class="tv-issue${group ? " tv-grouped" : ""}"${i.node ? ` data-id="${escapeAttr(i.node)}"` : ""} data-rule="${escapeAttr(i.rule)}"` +
+    `${group ? ` data-group="${escapeAttr(group)}"${openIssueGroups.has(group) ? "" : " hidden"}` : ""}>` +
+    `<td><span class="sevtag ${i.sev}">${ico(i.sev)} ${escapeHtml(t(`issues.sev.${i.sev}`))}</span></td>` +
+    `<td class="tv-rule">${escapeHtml(ruleLabel(i.rule))}</td>` +
+    `<td class="tv-id">${i.node ? escapeHtml(nm(ix.byId.get(i.node))) : "—"}</td>` +
+    `<td class="tv-msg">${escapeHtml(i.txt)}</td>` +
+    `<td class="tv-fix">${i.action ? `<button class="tv-act" type="button" data-issue-act="${escapeAttr(i.id)}">${escapeHtml(i.action.label)}</button>` : ""}${fixHtml(i)}</td></tr>`;
+  // W2 · the same sentence under the same rule, many times: ONE row that says
+  // how many, opened on request, with the one gesture for all when there is one
+  const groups = new Map<string, ViewCtx["issues"]>();
+  for (const i of sorted) {
+    const key = `${i.sev}|${i.rule}|${issueSentence(i, ix)}`;
+    groups.set(key, [...(groups.get(key) ?? []), i]);
+  }
+  const done = new Set<string>();
+  const body: string[] = [];
+  for (const i of sorted) {
+    const key = `${i.sev}|${i.rule}|${issueSentence(i, ix)}`;
+    const g = groups.get(key)!;
+    if (g.length < GROUP_FROM) { body.push(rowHtml(i)); continue; }
+    if (done.has(key)) continue;
+    done.add(key);
+    const open = openIssueGroups.has(key);
+    const bulk = g.filter((x) => x.bulk && x.node);
+    const all = bulk.length > 1
+      ? ` <button class="tv-act" type="button" data-issue-bulk="${escapeAttr(bulk[0].bulk!.key)}" data-nodes="${escapeAttr([...new Set(bulk.map((x) => x.node))].join(" "))}">${escapeHtml(bulk[0].bulk!.label(bulk.length))}</button>`
+      : "";
+    body.push(`<tr class="tv-issue-group" data-group="${escapeAttr(key)}">` +
+      `<td><span class="sevtag ${i.sev}">${ico(i.sev)} ${escapeHtml(t(`issues.sev.${i.sev}`))}</span></td>` +
+      `<td class="tv-rule">${escapeHtml(ruleLabel(i.rule))}</td>` +
+      `<td class="tv-id" colspan="2"><button class="tv-group-toggle" type="button" data-issue-group="${escapeAttr(key)}" aria-expanded="${open}">` +
+      `${open ? "▾" : "▸"} ${escapeHtml(t("issues.groupOf", { n: String(g.length), what: issueSentence(i, ix) }))}</button></td>` +
+      `<td class="tv-fix">${all}</td></tr>`);
+    for (const x of g) body.push(rowHtml(x, key));
+  }
   return `<div class="tv-pad">${tabs}<p class="tv-lead">${escapeHtml(t("issues.lead"))} ${bulkBtns}</p>` +
-    `<table class="emdata-table tv-table"><thead><tr><th>${escapeHtml(t("table.fx.sev"))}</th>` +
+    `<table class="emdata-table tv-table tv-issues"><thead><tr><th>${escapeHtml(t("table.fx.sev"))}</th>` +
     `<th>${escapeHtml(t("table.fx.rule"))}</th><th>${escapeHtml(t("table.col.node"))}</th>` +
     `<th>${escapeHtml(t("table.col.msg"))}</th><th>${escapeHtml(t("issues.fixCol"))}</th></tr></thead><tbody>` +
-    (rows.length ? rows.map((i) =>
-      `<tr class="tv-issue"${i.node ? ` data-id="${escapeAttr(i.node)}"` : ""} data-rule="${escapeAttr(i.rule)}">` +
-      `<td><span class="sevtag ${i.sev}">${ico(i.sev)} ${escapeHtml(t(`issues.sev.${i.sev}`))}</span></td>` +
-      `<td class="tv-num">${escapeHtml(t(`issues.rule.${i.rule}`) === `issues.rule.${i.rule}` ? i.rule : t(`issues.rule.${i.rule}`))}</td>` +
-      `<td class="tv-id">${i.node ? escapeHtml(nm(ix.byId.get(i.node))) : "—"}</td>` +
-      `<td class="tv-msg">${escapeHtml(i.txt)}</td>` +
-      `<td class="tv-fix">${i.action ? `<button class="tv-act" type="button" data-issue-act="${escapeAttr(i.id)}">${escapeHtml(i.action.label)}</button>` : ""}${fixHtml(i)}</td></tr>`).join("")
+    (rows.length ? body.join("")
       : `<tr><td colspan="5" class="tv-ok">${escapeHtml(t("issues.none"))}</td></tr>`) +
     `</tbody></table></div>`;
 }
@@ -807,6 +855,14 @@ function wireBody(host: EmDataHost, store: DocumentStore, st: TableState): void 
     inp.addEventListener("keydown", (e) => {
       e.stopPropagation();
       if (e.key === "Enter") { e.preventDefault(); runIssueFix(inp.dataset.issueFixin!, inp.value); }
+    }));
+  // W2 · open / close a group of the same sentence
+  body.querySelectorAll<HTMLButtonElement>("[data-issue-group]").forEach((b) =>
+    b.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const key = b.dataset.issueGroup!;
+      if (openIssueGroups.has(key)) openIssueGroups.delete(key); else openIssueGroups.add(key);
+      renderEmData();
     }));
   body.querySelectorAll<HTMLButtonElement>("[data-issue-bulk]").forEach((b) =>
     b.addEventListener("click", (e) => {

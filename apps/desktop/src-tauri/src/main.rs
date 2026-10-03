@@ -339,6 +339,26 @@ fn main() {
                                registration still applies");
                 }
             }
+            // T2 · «Settings…» (⌘,) in the app's own menu, where a Mac user
+            // looks for it; it opens the same Settings as Edit › Settings….
+            #[cfg(target_os = "macos")]
+            {
+                use tauri::menu::{Menu, MenuItem, MenuItemKind, PredefinedMenuItem};
+                let handle = app.handle();
+                let menu = Menu::default(handle)?;
+                if let Some(MenuItemKind::Submenu(app_menu)) = menu.items()?.into_iter().next() {
+                    let settings = MenuItem::with_id(handle, "settings", "Settings…", true,
+                                                     Some("CmdOrCtrl+,"))?;
+                    let sep = PredefinedMenuItem::separator(handle)?;
+                    app_menu.insert_items(&[&sep, &settings], 1)?;
+                }
+                app.set_menu(menu)?;
+                app.on_menu_event(|app, event| {
+                    if event.id() == "settings" {
+                        let _ = app.emit("open-settings", ());
+                    }
+                });
+            }
             // A remote transformer is configured → nothing to start locally.
             if std::env::var("EM_TRANSFORMER_URL").is_ok() {
                 return Ok(());

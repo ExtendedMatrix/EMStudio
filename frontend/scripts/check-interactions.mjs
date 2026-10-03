@@ -3805,6 +3805,319 @@ test("I6.openwith", "I6 · «Open with…» nell'Inspector e nel menu contestual
     detail: { insp, menu, at, picked: bx?.id, errors } };
 });
 
+test("I5.click", "I5 · Tempio (copia), Matrix: un clic sinistro sul riquadro di un'unità la seleziona anche se il dito si sposta di qualche pixel tra pressione e rilascio (trackpad)", async () => {
+  if (!existsSync(TEMPIO)) return { pass: false, detail: { missing: TEMPIO } };
+  const { p, ctx, errors } = await open({ doc: null, locale: "en" });
+  await p.waitForFunction(() => !!window.__EM_DRAG__, null, { timeout: 20000 });
+  await p.evaluate(([d]) => window.__EM_DRAG__.openAt(d, "/tmp/dev33-banco/tempio.em.json"), [JSON.parse(readFileSync(TEMPIO, "utf8"))]);
+  await p.waitForTimeout(3500);
+  const win = await winOf(p, "graph");
+  const ws = await p.evaluate((w) => window.__EM_DRAG__.winScene(w), win);
+  const names = await p.evaluate(() => Object.fromEntries(JSON.parse(window.__EM_DRAG__.graphJson()).nodes.map((n) => [n.id, [n.name, n.node_type]])));
+  const inside = (b) => b.x > ws.rect.x + 5 && b.y > ws.rect.y + 5 && b.x + b.w < ws.rect.x + ws.rect.w - 5
+    && b.y + b.h < ws.rect.y + ws.rect.h - 5 && b.w > 20;
+  const units = ws.boxes.filter((b) => inside(b) && /^US/.test(names[b.id]?.[1] ?? "") ).slice(0, 6);
+  const out = [];
+  for (const b of units) {
+    await p.evaluate(() => window.__EM_DRAG__.select(null));
+    await p.mouse.move(b.x + b.w / 2, b.y + b.h / 2);
+    await p.waitForTimeout(80);
+    // a trackpad click: the finger moves a few pixels between press and release
+    const jitter = Number(process.env.I5_JITTER ?? 4);
+    await p.mouse.down();
+    await p.mouse.move(b.x + b.w / 2 + jitter, b.y + b.h / 2 + 1, { steps: 2 });
+    await p.mouse.up();
+    await p.waitForTimeout(250);
+    const sel = await p.evaluate(() => window.__EM_DRAG__.selected());
+    out.push({ name: names[b.id]?.[0], ok: sel.includes(b.id), sel: sel.map((x) => names[x]?.[0] ?? x), box: [Math.round(b.x), Math.round(b.y), Math.round(b.w), Math.round(b.h)] });
+  }
+  await ctx.close();
+  return { pass: out.length >= 3 && out.every((x) => x.ok) && !errors.length, detail: { out, errors } };
+});
+
+/** the text of every Settings tab, tab by tab */
+async function settingsText(p) {
+  await p.keyboard.press("Meta+,");
+  await p.waitForSelector("#settings-modal:not(.hidden)", { timeout: 5000 });
+  const tabs = await p.evaluate(() => [...document.querySelectorAll("#settings-tabs [role=tab], #settings-tabs button")].map((b) => b.dataset.tab ?? b.textContent));
+  const out = {};
+  for (let i = 0; i < tabs.length; i++) {
+    await p.evaluate((k) => [...document.querySelectorAll("#settings-tabs [role=tab], #settings-tabs button")][k].click(), i);
+    await p.waitForTimeout(150);
+    out[tabs[i]] = await p.evaluate(() => {
+      const body = document.querySelector("#settings-modal .modal-body");
+      const shown = [...body.querySelectorAll(".settings-sect")].filter((x) => x.offsetParent !== null);
+      return shown.map((x) => x.innerText + " " + [...x.querySelectorAll("input[placeholder]")].map((i) => i.placeholder).join(" ")).join("\n");
+    });
+  }
+  return out;
+}
+const IT_WORDS = /\b(nessun[ao]?|finestra|perché|della|delle|degli|il tema|tema|chiaro|scuro|salva|incolla|modello|rimuovi|segue il sistema|consigliato|sconsigliato|dove vive|montata|scena:|server ATON|fornitore|chiave|accesso|indirizzo|stanza|per esempio)\b/i;
+const EN_WORDS = /\b(the|show|save|paste|remove|recommended|follows the system|where the 3D|for example|address:|provider|key|room|theme|light|dark)\b/i;
+test("TZ2.onelang", "T-Z2 · Settings aperto con ⌘, : interfaccia in English, nessuna stringa italiana nelle schede; in italiano, nessuna inglese nelle schede General, Viewers, Advanced", async () => {
+  const en = await (async () => { const { p, ctx } = await open({ doc: "catena", locale: "en" }); const r = await settingsText(p); await ctx.close(); return r; })();
+  const it = await (async () => { const { p, ctx } = await open({ doc: "catena", locale: "it" }); const r = await settingsText(p); await ctx.close(); return r; })();
+  const hits = (texts, re) => Object.fromEntries(Object.entries(texts).map(([k, v]) => [k, v.split("\n").filter((l) => re.test(l)).slice(0, 6)]).filter(([, v]) => v.length));
+  const enIt = hits(en, IT_WORDS);
+  const itEn = hits(Object.fromEntries(Object.entries(it).filter(([k]) => /general|viewers|advanced|generale|visual|avanzate/i.test(k))), EN_WORDS);
+  return { pass: Object.keys(en).length >= 5 && !Object.keys(enIt).length && !Object.keys(itEn).length, detail: { tabs: Object.keys(en), enIt, itEn } };
+});
+
+test("TI2.contrast", "T-I2 · Tempio (copia), Inspector di USM01b e di USM05: ogni etichetta di relazione ha contrasto ≥ 4.5:1 sul suo fondo, nel tema scuro e nel chiaro", async () => {
+  if (!existsSync(TEMPIO)) return { pass: false, detail: { missing: TEMPIO } };
+  const run = async (theme) => {
+    const { p, ctx, errors } = await open({ doc: null, locale: "en", init: { "emstudio.theme": theme } });
+    await p.waitForFunction(() => !!window.__EM_DRAG__, null, { timeout: 20000 });
+    await p.evaluate(([d]) => window.__EM_DRAG__.openAt(d, "/tmp/dev33-banco/tempio.em.json"), [JSON.parse(readFileSync(TEMPIO, "utf8"))]);
+    await p.waitForTimeout(3000);
+    const ids = await p.evaluate(() => JSON.parse(window.__EM_DRAG__.graphJson()).nodes.filter((n) => ["USM01b", "USM05"].includes(n.name)).map((n) => n.id));
+    const rows = [];
+    for (const id of ids) {
+      await pick(p, id);
+      rows.push(...await p.evaluate(() => {
+        const rgb = (c) => (c.match(/[\d.]+/g) ?? []).map(Number);
+        const lum = ([r, g, b]) => [r, g, b].map((v) => { v /= 255; return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4; })
+          .reduce((a, v, i) => a + v * [0.2126, 0.7152, 0.0722][i], 0);
+        const bgOf = (el) => { for (let e = el; e; e = e.parentElement) { const c = rgb(getComputedStyle(e).backgroundColor); if (c.length >= 3 && (c[3] ?? 1) > 0.5) return c; } return [255, 255, 255]; };
+        return [...document.querySelectorAll(".insp-group-title")].map((el) => {
+          const fg = rgb(getComputedStyle(el).color), bg = bgOf(el);
+          const [a, b] = [lum(fg), lum(bg)].sort((x, y) => y - x);
+          return { label: el.textContent, ratio: Math.round(((a + 0.05) / (b + 0.05)) * 100) / 100 };
+        });
+      }));
+    }
+    await ctx.close();
+    return { rows, errors };
+  };
+  const dark = await run("dark"), light = await run("light");
+  const low = [...dark.rows.map((r) => ({ ...r, theme: "dark" })), ...light.rows.map((r) => ({ ...r, theme: "light" }))].filter((r) => r.ratio < 4.5);
+  return { pass: dark.rows.length > 2 && light.rows.length > 2 && !low.length && !dark.errors.length && !light.errors.length,
+    detail: { low, dark: dark.rows.slice(0, 8), light: light.rows.slice(0, 4) } };
+});
+
+test("TW1.order", "T-W1/W2/W3 · Tempio (copia), Warnings: la prima riga è l'avviso (▲), poi gli hint; le righe con la stessa frase sotto la stessa regola stanno in un gruppo («n × …») che si apre; RULE ha spazio prima di NODE", async () => {
+  if (!existsSync(TEMPIO)) return { pass: false, detail: { missing: TEMPIO } };
+  const { p, ctx, errors } = await open({ doc: null, locale: "en" });
+  await p.waitForFunction(() => !!window.__EM_DRAG__, null, { timeout: 20000 });
+  await p.evaluate(([d]) => window.__EM_DRAG__.openAt(d, "/tmp/dev33-banco/tempio.em.json"), [JSON.parse(readFileSync(TEMPIO, "utf8"))]);
+  await p.waitForTimeout(3000);
+  await p.click("#footer-warnings");
+  await p.waitForTimeout(300);
+  const more = p.locator(".warn-pop button, #warnings-pop button", { hasText: /table|Open|all/i }).first();
+  if (await more.count()) await more.click(); else await p.evaluate(() => document.querySelector("[data-open-issues], .warn-open-table")?.click());
+  await p.waitForSelector(".tv-issues", { timeout: 8000 }).catch(() => {});
+  const r = await p.evaluate(() => {
+    const rows = [...document.querySelectorAll(".tv-issues tbody tr:not([hidden])")];
+    const first = rows[0]?.querySelector(".sevtag")?.textContent ?? "";
+    const sevs = rows.map((x) => x.querySelector(".sevtag")?.classList.contains("warn") ? "w" : "i").join("");
+    const groups = [...document.querySelectorAll(".tv-group-toggle")].map((b) => b.textContent);
+    const rule = document.querySelector(".tv-issues td.tv-rule"), node = rule?.nextElementSibling;
+    const textBox = (el) => { const r = document.createRange(); r.selectNodeContents(el); return r.getBoundingClientRect(); };
+    const gap = rule && node ? Math.round(textBox(node).left - textBox(rule).right) : null;
+    return { first, sevs, groups, gap, n: rows.length };
+  });
+  let opened = null;
+  if (r.groups.length) {
+    await p.click(".tv-group-toggle");
+    await p.waitForTimeout(300);
+    opened = await p.evaluate(() => document.querySelectorAll(".tv-issues tr.tv-grouped:not([hidden])").length);
+  }
+  await ctx.close();
+  return { pass: /▲/.test(r.first) && !/iw/.test(r.sevs) && r.groups.some((g) => /^▸ \d+ × /.test(g)) && opened > 2 && r.gap >= 8 && !errors.length,
+    detail: { ...r, opened, errors } };
+});
+
+test("G4.lanes", "G4 · San Pietro come la dev.17 l'aveva salvato (A_sanpietro, copia): nessuna corsia ha per nome un id; un'epoca senza nome è «Unnamed epoch · click to name it» e il clic sulla sua etichetta porta al campo del nome", async () => {
+  const at = "/tmp/dev33-banco/A_sanpietro.em.json";
+  if (!existsSync(at)) return { pass: false, detail: { missing: at } };
+  const { p, ctx, errors } = await open({ doc: null, locale: "en" });
+  await p.waitForFunction(() => !!window.__EM_DRAG__, null, { timeout: 20000 });
+  await p.evaluate(([d, path]) => window.__EM_DRAG__.openAt(d, path), [JSON.parse(readFileSync(at, "utf8")), at]);
+  await p.waitForTimeout(3500);
+  const sp = await p.evaluate(() => window.__EM_SCENE__?.()?.lanes ?? []);
+  await ctx.close();
+  const unnamedDoc = { header: { format: "em.json", version: "1.0" }, graph: { graph_id: "g4", name: "g4",
+    nodes: [{ id: "E1", node_type: "EpochNode", name: "" }, { id: "U1", node_type: "US", name: "US1" }],
+    edges: [{ id: "U1_E1", source: "U1", target: "E1", edge_type: "has_first_epoch" }] } };
+  const o = await open({ doc: unnamedDoc, locale: "en" });
+  const lanes = await o.p.evaluate(() => window.__EM_SCENE__?.()?.lanes ?? []);
+  const chip = await o.p.evaluate(() => window.__EM_DRAG__.labels().lanes.find((l) => l.id === "E1") ?? null);
+  const win = await winOf(o.p, "graph");
+  const ws = await o.p.evaluate((w) => window.__EM_DRAG__.winScene(w), win);
+  if (chip) await o.p.mouse.click(ws.rect.x + 40, ws.rect.y + chip.y + chip.h / 2);
+  await o.p.waitForTimeout(500);
+  const focus = await o.p.evaluate(() => ({ cls: document.activeElement?.className ?? "", sel: window.__EM_DRAG__.selected() }));
+  await o.ctx.close();
+  return { pass: sp.length > 0 && !sp.some((l) => /^[0-9a-f]{8}-[0-9a-f]{4}-/.test(l.label))
+      && lanes.some((l) => l.id === "E1" && l.unnamed && /^Unnamed epoch · click to name it$/.test(l.label))
+      && focus.sel.includes("E1") && /insp-name-input/.test(focus.cls) && !errors.length && !o.errors.length,
+    detail: { sp, lanes, chip, focus, errors } };
+});
+
+test("G5.empty", "G5 · San Pietro com'era (copia): all'apertura l'«untitled graph» vuoto è proposto per la rimozione con una domanda (Log + «Remove it»/«Keep it»), mai tolto da solo; «Remove it» e ⌘S: il file ha solo il Tempio", async () => {
+  const at = process.env.G3_FILE ?? "/tmp/dev33-banco/G3-sanpietro.em.json";
+  if (!existsSync(at)) return { pass: false, detail: { missing: at } };
+  const doc = JSON.parse(readFileSync(at, "utf8"));
+  const { p, ctx, errors } = await open({ doc: null, locale: "en", hook: tauriWrites() });
+  await p.waitForFunction(() => !!window.__EM_DRAG__, null, { timeout: 20000 });
+  await p.evaluate(([d, path]) => window.__EM_DRAG__.openAt(d, path), [doc, at]);
+  await p.waitForTimeout(3500);
+  const asked = await p.evaluate(() => ({ toast: document.getElementById("toast")?.textContent ?? "",
+    buttons: [...document.querySelectorAll("#toast .toast-action")].map((b) => b.textContent),
+    slots: window.__EM_DRAG__.slots().map((x) => x.name),
+    log: window.__EM_DRAG__.log().map((l) => l.message).filter((m) => /empty graph/.test(m)) }));
+  await p.evaluate(() => [...document.querySelectorAll("#toast .toast-action")].find((b) => /Remove it/.test(b.textContent))?.click());
+  await p.waitForTimeout(600);
+  const after = await p.evaluate(() => window.__EM_DRAG__.slots().map((x) => x.name));
+  await p.keyboard.press("Meta+s");
+  await p.waitForTimeout(1500);
+  const writes = await p.evaluate(() => window.__WRITES__);
+  await ctx.close();
+  const out = writes[0] ? JSON.parse(writes[0].text) : null;
+  const graphsOut = out ? Object.values(out.graphs ?? {}).filter((g) => !/shelf|dtc/i.test(String(g.graph_id ?? ""))).map((g) => g.name) : null;
+  return { pass: asked.slots.length === 2 && asked.log.length === 1 && asked.buttons.includes("Remove it") && asked.buttons.includes("Keep it")
+      && after.length === 1 && writes.length === 1 && JSON.stringify(graphsOut) === JSON.stringify(["Tempio Giunone Moneta"]) && !errors.length,
+    detail: { asked, after, graphsOut, errors } };
+});
+
+test("TC1.storage", "T-C1 · due file aperti in cartelle diverse: lo Storage mostra la cartella del grafo ATTIVO (si sposta quando si attiva il grafo dell'altro file)", async () => {
+  if (!FS_ROOT) return { pass: false, detail: { why: "FS_ROOT not set" } };
+  const a = `${FS_ROOT}/dev33/c1/scavoA`, b = `${FS_ROOT}/dev33/c1/scavoB`;
+  mkdirSync(a, { recursive: true }); mkdirSync(b, { recursive: true });
+  const one = (id, u) => ({ header: { format: "em.json", version: "1.0" }, graph: { graph_id: id, name: id, nodes: [{ id: u, node_type: "US", name: u }], edges: [] } });
+  const { p, ctx, errors } = await open({ doc: null, locale: "en", ws: "assets" });
+  await p.waitForFunction(() => !!window.__EM_DRAG__, null, { timeout: 20000 });
+  await p.evaluate(([d, at]) => window.__EM_DRAG__.openAt(d, at), [one("gA", "UA1"), `${a}/A.em.json`]);
+  await p.waitForTimeout(1500);
+  await p.evaluate(([d, at]) => window.__EM_DRAG__.openAt(d, at), [one("gB", "UB1"), `${b}/B.em.json`]);
+  await p.waitForTimeout(1500);
+  const fsPath = () => p.evaluate(() => window.__EM_DRAG__.wins().filter((w) => w.type === "storage").map((w) => w.state["current.fsPath"] ?? null));
+  const afterB = await fsPath();
+  await p.locator(".et-pick", { hasText: "gA" }).first().click();
+  await p.waitForTimeout(1500);
+  const afterA = await fsPath();
+  await ctx.close();
+  const real = (x) => (x ?? "").replace(/^\/private/, "");
+  return { pass: afterB.some((x) => real(x) === real(b)) && afterA.some((x) => real(x) === real(a)) && !errors.length,
+    detail: { afterB, afterA, a, b, errors } };
+});
+
+test("B1.near", "B1 · «Publish…» da dichiarato: «Who you are» compare sotto il bottone, allineato a destra, e non copre l'avviso in basso", async () => {
+  const { p, ctx, errors } = await open({ doc: "catena", locale: "en" });
+  await p.click("#ns-publish");
+  await p.waitForTimeout(500);
+  const r = await p.evaluate(() => {
+    const b = document.getElementById("ns-publish").getBoundingClientRect();
+    const box = document.querySelector(".idpanel")?.getBoundingClientRect();
+    const toast = document.getElementById("toast");
+    const tr = toast && !toast.classList.contains("hidden") ? toast.getBoundingClientRect() : null;
+    const over = (x, y) => x && y && !(x.right <= y.left || y.right <= x.left || x.bottom <= y.top || y.bottom <= x.top);
+    return { btn: [b.left, b.bottom, b.right], box: box && [box.left, box.top, box.right, box.bottom], coversToast: tr ? over(box, tr) : null,
+      coversBtn: over(box, b) };
+  });
+  await ctx.close();
+  return { pass: !!r.box && Math.abs(r.box[1] - r.btn[1]) < 20 && Math.abs(r.box[2] - r.btn[2]) < 4 && !r.coversToast && !r.coversBtn && !errors.length,
+    detail: { r, errors } };
+});
+
+test("TC2.scan", "T-C2 · Tempio (copia sotto la radice del bridge), scan di EM/DosCo: ID doppi D.04 e D.11, un file senza ID; Documents: D.02, D.32 e D.33 tutti presenti (nessun «absent»), con la miniatura; ogni orfano ha la miniatura, o dice «empty copy» se i suoi byte sono zeri", async () => {
+  if (!FS_ROOT) return { pass: false, detail: { why: "FS_ROOT not set" } };
+  const em = `${FS_ROOT}/dev33/tempio/EM`;
+  if (!existsSync(`${em}/Tempio_Giunone_Moneta.em.json`)) return { pass: false, detail: { missing: em } };
+  const { p, ctx, errors } = await open({ doc: null, locale: "en", ws: "assets" });
+  await p.waitForFunction(() => !!window.__EM_DRAG__, null, { timeout: 20000 });
+  await p.evaluate(([d, at]) => window.__EM_DRAG__.openAt(d, at), [JSON.parse(readFileSync(`${em}/Tempio_Giunone_Moneta.em.json`, "utf8")), `${em}/Tempio_Giunone_Moneta.em.json`]);
+  await p.waitForTimeout(2500);
+  await p.evaluate(() => document.getElementById("btn-resources").click());
+  await p.waitForTimeout(500);
+  await p.fill("#res-folder", `${em}/DosCo`);
+  await p.click("#res-scan");
+  await p.waitForFunction(() => document.querySelectorAll("#res-shelf .res-row").length > 0, null, { timeout: 30000 }).catch(() => {});
+  await p.waitForTimeout(6000);
+  const r = await p.evaluate(() => ({
+    dups: [...document.querySelectorAll("#res-shelf .res-note[data-dup-id]")].map((n) => n.dataset.dupId).sort(),
+    noId: Number(document.querySelector("#res-shelf .res-note[data-no-id]")?.dataset.noId ?? 0),
+    docs: [...document.querySelectorAll("#res-docs .res-row")].map((row) => ({ name: row.querySelector(".res-row-main")?.textContent.trim().split(/\s/)[0],
+      missing: !!row.querySelector(".rp-missing"), img: !!row.querySelector("img.rp-img") })),
+    orphans: [...document.querySelectorAll("#res-shelf .res-row")].length,
+    orphanImgs: [...document.querySelectorAll("#res-shelf .res-row img.rp-img")].length,
+    orphanBoxes: [...document.querySelectorAll("#res-shelf .res-row")].slice(0, 10).map((row) => {
+      const th = row.firstElementChild;
+      return { img: !!th?.querySelector("img.rp-img"), text: th?.textContent ?? "", title: th?.title ?? "" };
+    }),
+  }));
+  await ctx.close();
+  return { pass: JSON.stringify(r.dups) === JSON.stringify(["D.04", "D.11"]) && r.noId === 1 && r.docs.length === 3
+      && r.docs.every((d) => !d.missing && d.img) && r.orphanImgs > 0
+      && r.orphanBoxes.every((b) => b.img || /empty copy/.test(b.text)) && !r.orphanBoxes.some((b) => /does not decode/.test(b.title)) && !errors.length,
+    detail: { ...r, errors } };
+});
+
+test("S6.frame", "S6 · Tempio (copia), Fonti › «Show in the Matrix» su D.02: nella finestra bassa sotto il visore il documento e i nodi del suo gruppo (D.02.01, «existence») stanno dentro il riquadro, con margine per le etichette", async () => {
+  if (!FS_ROOT) return { pass: false, detail: { why: "FS_ROOT not set" } };
+  const em = `${FS_ROOT}/dev33/tempio/EM`;
+  const { p, ctx, errors } = await open({ doc: null, locale: "en" });
+  await p.waitForFunction(() => !!window.__EM_DRAG__, null, { timeout: 20000 });
+  await p.evaluate(([d, at]) => window.__EM_DRAG__.openAt(d, at), [JSON.parse(readFileSync(`${em}/Tempio_Giunone_Moneta.em.json`, "utf8")), `${em}/Tempio_Giunone_Moneta.em.json`]);
+  await p.waitForTimeout(2500);
+  await workspace(p, "provenance");
+  const names = await p.evaluate(() => Object.fromEntries(JSON.parse(window.__EM_DRAG__.graphJson()).nodes.map((n) => [n.id, n.name])));
+  const d02 = Object.keys(names).find((k) => names[k] === "D.02");
+  await p.click(`[data-show-matrix="${d02}"]`);
+  await p.waitForTimeout(1500);
+  const win = await winOf(p, "graph");
+  const ws = await p.evaluate((w) => window.__EM_DRAG__.winScene(w), win);
+  const want = ws.boxes.filter((b) => ["D.02.01"].includes(names[b.id]) || b.id === d02 || (b.instanceOf ?? "") === d02);
+  // …and the «existence» box of its group, the one right above D.02.01 (cut at the top on dev.17)
+  const r1 = want.find((b) => names[b.id] === "D.02.01");
+  const above = r1 && ws.boxes.filter((b) => names[b.id] === "existence" && b.y < r1.y && r1.y - b.y < 140
+    && b.x < r1.x + r1.w && b.x + b.w > r1.x).sort((a, b) => b.y - a.y)[0];
+  if (above) want.push(above);
+  else if (r1) want.push({ id: "existence?", x: -1, y: -1, w: 0, h: 0 });
+  const inside = (b) => b.x >= ws.rect.x && b.y >= ws.rect.y + 20 && b.x + b.w <= ws.rect.x + ws.rect.w && b.y + b.h <= ws.rect.y + ws.rect.h - 20;
+  await p.screenshot({ path: SHOT("s6-mostra-nella-matrix"), clip: { x: ws.rect.x, y: ws.rect.y, width: ws.rect.w, height: ws.rect.h } }).catch(() => {});
+  await ctx.close();
+  return { pass: want.length >= 1 && want.every(inside) && !errors.length,
+    detail: { rect: ws.rect, want: want.map((b) => [names[b.id] ?? b.id, Math.round(b.x), Math.round(b.y), Math.round(b.w), Math.round(b.h)]), errors } };
+});
+
+test("P1.3dobj", "P1 · Tempio (copia con 3d_obj/ accanto), Spazio: «Link n proxies from 3d_obj/ by name…» per le unità senza proxy, l'anteprima elenca le coppie unità ← file, «Link them» scrive le catene (s3Dgraphy, via bridge) in un passo annullabile, e lo dice nel Log", async () => {
+  if (!FS_ROOT) return { pass: false, detail: { why: "FS_ROOT not set" } };
+  const em = `${FS_ROOT}/dev33/tempio/EM`;
+  const { p, ctx, errors } = await open({ doc: null, locale: "en" });
+  await p.waitForFunction(() => !!window.__EM_DRAG__, null, { timeout: 20000 });
+  await p.evaluate(([d, at]) => window.__EM_DRAG__.openAt(d, at), [JSON.parse(readFileSync(`${em}/Tempio_Giunone_Moneta.em.json`, "utf8")), `${em}/Tempio_Giunone_Moneta.em.json`]);
+  await p.waitForTimeout(2500);
+  await workspace(p, "space");
+  // the epoch whose units are the masonry ones (USM02…): try every epoch until the offer shows
+  const epochs = await p.evaluate(() => [...document.querySelectorAll(".scn-seg button[data-epoch]")].map((b) => b.dataset.epoch));
+  let offer = null;
+  for (const ep of epochs) {
+    await p.click(`.scn-seg button[data-epoch="${ep}"]`);
+    await p.waitForTimeout(1500);
+    offer = await p.evaluate(() => document.querySelector("[data-action=link-3dobj]")?.textContent ?? null);
+    if (offer) break;
+  }
+  if (!offer) { await ctx.close(); return { pass: false, detail: { epochs, offer } }; }
+  const before = await p.evaluate(() => JSON.parse(window.__EM_DRAG__.graphJson()).nodes.length);
+  await p.click("[data-action=link-3dobj]");
+  await p.waitForTimeout(300);
+  const pairs = await p.evaluate(() => [...document.querySelectorAll(".p1-preview li")].map((li) => li.textContent));
+  await p.click("[data-action=link-3dobj-go]");
+  await p.waitForTimeout(2500);
+  const after = await p.evaluate(() => JSON.parse(window.__EM_DRAG__.graphJson()));
+  const log = await p.evaluate(() => window.__EM_DRAG__.log().map((l) => l.message).filter((m) => /linked from 3d_obj/.test(m)));
+  const geo = after.nodes.filter((n) => n.node_type === "property" && (n.data?.property_type === "geometry")).length;
+  const res = after.nodes.filter((n) => n.node_type === "resource" && /3d_obj\//.test(String(n.data?.url ?? n.url ?? ""))).length;
+  await p.evaluate(() => window.__EM_DRAG__.undo());
+  await p.waitForTimeout(400);
+  const undone = await p.evaluate(() => JSON.parse(window.__EM_DRAG__.graphJson()).nodes.length);
+  await ctx.close();
+  return { pass: /^Link \d+ proxies from 3d_obj\/ by name/.test(offer) && pairs.length > 0 && pairs.every((x) => / ← 3d_obj\//.test(x))
+      && after.nodes.length > before && geo >= pairs.length && res >= 1 && log.length === 1 && undone === before && !errors.length,
+    detail: { offer, pairs: pairs.slice(0, 5), n: pairs.length, before, after: after.nodes.length, geo, res, log, undone, errors } };
+});
+
 test("F8.node", "F8 (U17) · Impostazioni › Sync: «Il tuo nodo StratiGraph» prima e a parte da Blender; il campo vuoto dice «per esempio …»; il rimando di «Chi sei» porta dritto al campo; «Prova» dice raggiungibile, versione e modi d'accesso; la stanza sta col nodo, nella lingua dell'interfaccia", async () => {
   const { p, ctx, errors } = await open({ doc: LITE(), locale: "en", hook: tauriHook(),
     route: { pattern: "https://nodo.test/**", handler: (r) => {

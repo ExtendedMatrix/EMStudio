@@ -90,6 +90,8 @@ export interface HostInfo {
    * same from here, which is the failure the rearrangement was against.
    */
   accept?: string;
+  /** Y6 · the units whose proxy object is in the host's 3D scene (EMtools) */
+  scene_proxies?: string[];
 }
 
 /** The BODY of each message type. The envelope (`v`, `type`, `source`) is

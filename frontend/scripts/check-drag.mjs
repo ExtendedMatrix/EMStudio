@@ -74,10 +74,10 @@ const near = (a, b, what, eps = 1e-6) => ok(Math.abs(a - b) <= eps, `${what} —
   }
   near(x, 8, "slow drag (1 px/event × 8) moves the node by the whole 8 px");
   const g2 = new M.DragGate(0, 0);
-  ok(g2.move(2, 0) === null, "2 px is still a click");
-  const d3 = g2.move(3, 0);
-  ok(d3 && d3.dx === 3, "at 3 px the drag starts and catches up the whole 3 px (a 3 px nudge moves)");
-  ok(M.DRAG_START_PX === 3, "the threshold is the declared 3 px");
+  ok(g2.move(5, 0) === null, "5 px is still a click (I5: a trackpad click travels a few px)");
+  const d3 = g2.move(6, 0);
+  ok(d3 && d3.dx === 6, "at 6 px the drag starts and catches up the whole 6 px");
+  ok(M.DRAG_START_PX === 6, "the threshold is the declared 6 px");
 }
 
 // ── a two-lane matrix: epoch A on top (with two phases), epoch B below ─────────

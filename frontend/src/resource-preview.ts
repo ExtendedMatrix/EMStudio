@@ -58,6 +58,8 @@ export interface PreviewAnswer {
   too_large?: boolean;
   /** the id resolves to nothing we can read */
   unresolved?: boolean;
+  /** C3 · the file is there and its bytes are zeros (an incomplete copy) */
+  zeroed?: boolean;
   hint?: string;
   error?: string;
 }
@@ -265,6 +267,13 @@ function fill(box: HTMLElement, a: PreviewAnswer, opts: ThumbOptions): void {
     box.appendChild(typedMark(type,
       a.needs_presign ? "3D · MinIO" : t("rp.localThreeD")));
     box.title = a.needs_presign ? t("rp.cannotSign") : t("rp.notAddressable");
+    return;
+  }
+
+  if (a.zeroed) {
+    box.classList.add("rp-missing");
+    box.appendChild(typedMark(type, t("rp.zeroed")));
+    box.title = `${label} — ${t("rp.zeroedHint")}`;
     return;
   }
 

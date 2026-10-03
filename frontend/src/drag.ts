@@ -10,8 +10,13 @@
 import type { Scene, SceneGroup, SubBand } from "./scene";
 
 /** Screen pixels the pointer must travel, CUMULATIVELY from pointerdown, before
- *  a press becomes a drag. Below it the gesture is a click. */
-export const DRAG_START_PX = 3;
+ *  a press becomes a drag. Below it the gesture is a click.
+ *
+ *  I5 · 6, not 3: a trackpad click moves the finger a few pixels between press
+ *  and release. Measured on the dev.17 Tempio: a click with 4 px of travel
+ *  became a 4 px move of the unit, and the unit was not selected («the plain
+ *  click does not select, the right click does»). */
+export const DRAG_START_PX = 6;
 
 /**
  * The start threshold of a drag, measured from where the press began.

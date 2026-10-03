@@ -967,6 +967,10 @@ def make_handler(api):
                 self._export_ttl(raw)
             elif route == "/chronology":
                 self._chronology(raw)
+            elif route == "/geometry-proxies":
+                # P1 · bind proxy files to units, each chain written by the
+                # library (`api.create_geometry_proxy`) and sent back as a DELTA
+                self._geometry_proxies(raw)
             elif route == "/geometry-summary":
                 # SPAZIO · what of the graph's 3D can be fetched, asked of the
                 # library that owns the rule (`store_backed.geometry_summary`)
@@ -3938,6 +3942,21 @@ def make_handler(api):
                 payload["media_type"] = media or "application/octet-stream"
                 size = os.path.getsize(local)
                 payload["bytes"] = size
+                # C3 · a file whose bytes are all zeros is not «an image the
+                # browser cannot decode»: it is an incomplete copy, and that is
+                # what is said (measured: 22 of the 35 files of San Pietro's
+                # DosCo begin with 4 KiB of zeros — the size is right, the
+                # content is not there)
+                if size:
+                    with open(local, "rb") as fh:
+                        head = fh.read(4096)
+                    if not any(head):
+                        payload["zeroed"] = True
+                        payload["hint"] = ("the file's bytes are zeros: an incomplete "
+                                           "copy (a cloud placeholder, an interrupted "
+                                           "transfer) — copy it again from the original")
+                        self._json(payload)
+                        return
                 thumb_px = int(body.get("thumb_px") or Handler._THUMB_PX)
 
                 if (media or "").startswith("image/"):
@@ -4434,6 +4453,39 @@ def make_handler(api):
                 self._fail(500, f"chronology failed: {exc}")
                 return
             self._json(out)
+
+        def _geometry_proxies(self, raw):
+            """P1 · ``{doc, items: [{unit_id, url}]}`` → ``{nodes, edges}``: the
+            nodes and edges `create_geometry_proxy` adds, as em.json, for the
+            editor to merge (`addSubgraph`). Nothing of the chain is written in
+            TypeScript: the ids are the library's (uuid5 of unit and payload)."""
+            try:
+                body = json.loads(raw.decode("utf-8"))
+            except Exception as exc:
+                self._fail(400, f"invalid JSON body: {exc}")
+                return
+            try:
+                graph, _warnings = api.load_emjson(body.get("doc") or {})
+                before_n = {n.node_id for n in graph.nodes}
+                before_e = {e.edge_id for e in graph.edges}
+                done, warnings = [], []
+                for item in body.get("items") or []:
+                    uid, url = str(item.get("unit_id") or ""), str(item.get("url") or "")
+                    if not uid or not url:
+                        continue
+                    out = api.create_geometry_proxy(graph, uid, {"url": url})
+                    warnings.extend(getattr(out, "warnings", []) or [])
+                    done.append(uid)
+                em = api.graph_to_emjson(graph)["graph"]
+                nodes = [n for n in em.get("nodes", []) if n.get("id") not in before_n]
+                edges = [e for e in em.get("edges", []) if e.get("id") not in before_e]
+            except Exception as exc:  # pragma: no cover — surface to the UI
+                import traceback
+                traceback.print_exc()
+                self._fail(500, f"geometry proxies failed: {exc}")
+                return
+            self._json({"ok": True, "units": done, "nodes": nodes, "edges": edges,
+                        "warnings": warnings})
 
         def _geometry_summary(self, raw):
             try:

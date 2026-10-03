@@ -75,6 +75,8 @@ export interface Lane {
   paradataGroupId?: string;
   /** chronology-coherence conflict → a warning marker next to the name */
   warn?: boolean;
+  /** G4 · the epoch has no name: the label says so and a click asks for one */
+  unnamed?: boolean;
 }
 
 /** Vertical gap (world units) stacked between adjacent phase sub-bands. The

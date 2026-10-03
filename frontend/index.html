@@ -197,7 +197,7 @@
       </div>
       <!-- sync stays in the DOM (hidden) so its existing handler is reused;
            the Mode menu drives connect/disconnect. -->
-      <button id="btn-sync" class="hidden" title="Connect to Blender/EMtools for live selection sync (ADR-002)" data-i18n="toolbar.sync">Sync</button>
+      <button id="btn-sync" class="hidden" title="Connect to Blender/EMtools for live selection sync" data-i18n="toolbar.sync">Sync</button>
       <!-- MENU-AUDIT · Risorse moved into the Strumenti menu (see above). -->
       <span id="dirty-dot" class="hidden" data-i18n-title="menu.dirtyTitle" title="unsaved changes">●</span>
       <span class="tb-sep"></span>
@@ -576,25 +576,22 @@
               />
             </label>
             <p class="settings-url">
-              Endpoint: <code id="set-sync-url"></code>
+              <span data-i18n="settings.endpoint">Address:</span> <code id="set-sync-url"></code>
             </p>
           </section>
           <!-- DARK1: the theme, first after the language — both change every
                other label in this dialog, so they belong together at the top. -->
           <section data-settings-tab="general" class="settings-sect">
-            <h4>Tema</h4>
-            <p class="settings-hint">
-              Il tema cambia lo <b>chrome</b> e il canvas. I colori dei nodi
-              stratigrafici NO: vengono dalle regole visive del linguaggio EM
-              (s3Dgraphy) e restano identici nei due temi, altrimenti due
-              screenshot dello stesso grafo direbbero cose diverse.
+            <h4 data-i18n="settings.theme">Theme</h4>
+            <p class="settings-hint" data-i18n="settings.themeHint">
+              The theme changes the interface and the canvas.
             </p>
             <label
-              ><span>Tema</span>
+              ><span data-i18n="settings.theme">Theme</span>
               <select id="set-theme">
-                <option value="auto">Auto (segue il sistema)</option>
-                <option value="light">Chiaro</option>
-                <option value="dark">Scuro</option>
+                <option value="auto" data-i18n="settings.themeAuto">Auto (follows the system)</option>
+                <option value="light" data-i18n="settings.themeLight">Light</option>
+                <option value="dark" data-i18n="settings.themeDark">Dark</option>
               </select>
             </label>
           </section>
@@ -602,21 +599,17 @@
             <h4 data-i18n="settings.interaction">Interaction</h4>
             <label class="settings-check">
               <input id="set-edge-tooltips" type="checkbox" />
-              Show connector tooltip on hover — on by default
+              <span data-i18n="settings.edgeTooltips">Show connector tooltip on hover — on by default</span>
             </label>
             <!-- NAME1: the naming convention of the paradata chain. ON by
                  default; relaxing it is allowed but discouraged, and the label
                  says so instead of hiding it in a tooltip. -->
             <label class="settings-check">
               <input id="set-strict-doc-names" type="checkbox" />
-              Naming documenti rigido (<code>D.&lt;n&gt;</code>) — consigliato
+              <span data-i18n="settings.strictNames">Strict document naming (D.n) — recommended</span>
             </label>
-            <p class="settings-hint">
-              Un documento si chiama <code>D.1</code>, <code>D.10</code>… e da lì
-              derivano i nomi degli extractor (<code>D.10.1</code>,
-              <code>D.10.2</code>). Togliendo il vincolo il nome del documento è
-              libero — resta unico e non vuoto, ma smette di leggersi come un
-              riferimento: <b>sconsigliato</b>.
+            <p class="settings-hint" data-i18n="settings.strictNamesHint">
+              A document is called D.1, D.10…
             </p>
           </section>
           <!-- IDENTITY · who is working. The ORCID iD is the identity itself;
@@ -678,34 +671,31 @@
           </section>
           <section data-settings-tab="viewers" class="settings-sect">
             <h4 data-i18n="settings.viewer">3D viewer</h4>
-            <p class="settings-hint">
-              Dove vive il 3D. EMStudio non incorpora un motore 3D: le scene
-              sono di <b>ATON</b>, e <b>Heriverse</b> è la web-app ATON che
-              legge questo stesso grafo. Serve solo l'indirizzo del server —
-              il riferimento (id di scena o risorsa) sta nel grafo. Lasciato
-              vuoto, un blocco <code>epoch3d</code> lo dice invece di restare
-              muto.
+            <p class="settings-hint" data-i18n="settings.viewerHint">
+              Where the 3D lives.
             </p>
             <label
-              >Server ATON
+              ><span data-i18n="settings.atonServer">ATON server</span>
               <input
                 id="set-aton-base"
                 type="text"
                 spellcheck="false"
-                placeholder="https://localhost:8083"
+                data-i18n-placeholder="settings.atonServerPh"
+                placeholder="for example https://localhost:8083"
               />
             </label>
             <label
-              >App Heriverse (montata sotto il server)
+              ><span data-i18n="settings.heriverseApp">Heriverse app (under the server)</span>
               <input
                 id="set-heriverse-app"
                 type="text"
                 spellcheck="false"
-                placeholder="a/heriverse"
+                data-i18n-placeholder="settings.heriverseAppPh"
+                placeholder="for example a/heriverse"
               />
             </label>
             <p class="settings-url">
-              Scena: <code id="set-aton-scene-url"></code>
+              <span data-i18n="settings.sceneUrl">Scene:</span> <code id="set-aton-scene-url"></code>
             </p>
           </section>
 
@@ -720,15 +710,15 @@
             </p>
             <label
               ><span data-i18n="settings.lodLimitMB">Threshold for a whole file (MB)</span>
-              <input id="set-lod-limit-mb" type="number" min="1" step="1" />
+              <input id="set-lod-limit-mb" type="text" inputmode="numeric" />
             </label>
             <label
               ><span data-i18n="settings.lodLimitPoints">Threshold for a whole cloud (points)</span>
-              <input id="set-lod-limit-points" type="number" min="1000" step="1000000" />
+              <input id="set-lod-limit-points" type="text" inputmode="numeric" />
             </label>
             <label
               ><span data-i18n="settings.tilesMemoryMB">Tileset memory ceiling, automatic mode (MB)</span>
-              <input id="set-tiles-memory-mb" type="number" min="64" step="16" />
+              <input id="set-tiles-memory-mb" type="text" inputmode="numeric" />
             </label>
           </section>
 
@@ -757,41 +747,37 @@
           <section data-settings-tab="advanced" class="settings-sect" id="settings-sect-ai">
             <h4 data-i18n="settings.aiProvider">AI provider</h4>
             <p class="settings-why" id="set-ai-why" hidden></p>
-            <p class="settings-hint">
-              Chi scrive le bozze narrative. La chiave non viene <b>mai</b>
-              salvata dal frontend: nell'app desktop finisce nel
-              <b>portachiavi di sistema</b>, in sviluppo resta nella
-              <b>memoria di em-bridge</b> per questa sessione. In entrambi i
-              casi è em-bridge a leggerla al momento della chiamata. Non entra
-              in em.json, nel localStorage, nei log, né in questa finestra dopo
-              il salvataggio — e non esiste modo di rileggerla da qui.
+            <p class="settings-hint" data-i18n="settings.aiHint">
+              Who writes the narrative drafts.
             </p>
             <label
-              >Provider
+              ><span data-i18n="settings.aiProviderLabel">Provider</span>
               <select id="set-ai-provider"></select>
             </label>
             <label
-              >Modello (vuoto = default del provider)
+              ><span data-i18n="settings.aiModel">Model (empty = the provider's default)</span>
               <input
                 id="set-ai-model"
                 type="text"
-                placeholder="claude-sonnet-5"
+                data-i18n-placeholder="settings.aiModelPh"
+                placeholder="for example claude-sonnet-5-5"
               />
             </label>
             <label
-              >API key
+              ><span data-i18n="settings.aiKey">API key</span>
               <input
                 id="set-ai-key"
                 type="password"
                 autocomplete="off"
                 spellcheck="false"
-                placeholder="Incolla qui la key"
+                data-i18n-placeholder="settings.aiKeyPh"
+                placeholder="Paste the key here"
               />
             </label>
             <p class="settings-url">
               <span id="set-ai-key-state"></span>
-              <button id="set-ai-key-save" type="button">Salva key</button>
-              <button id="set-ai-key-clear" type="button">Rimuovi</button>
+              <button id="set-ai-key-save" type="button" data-i18n="settings.aiKeySave">Save key</button>
+              <button id="set-ai-key-clear" type="button" data-i18n="settings.aiKeyClear">Remove</button>
             </p>
             <p class="settings-hint" id="set-ai-key-hint"></p>
           </section>
@@ -799,7 +785,7 @@
             <h4 data-i18n="settings.developer">Developer</h4>
             <label class="settings-check">
               <input id="set-dev-uuid" type="checkbox" />
-              Show node UUIDs (inspector) — off by default
+              <span data-i18n="settings.showIds">Show node UUIDs (inspector) — off by default</span>
             </label>
           </section>
         </div>

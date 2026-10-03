@@ -25,6 +25,7 @@
  * `scripts/check-space.mjs` exercises this file in node.
  */
 import type { EmDocument, EmEdge, EmNode } from "./types";
+import { classOf } from "./rules";
 
 /** What becomes of a resource in the scene. */
 export type FileState =
@@ -92,6 +93,8 @@ export interface EpochSummary {
   /** the units alive in the epoch (stratigraphic nodes) */
   units: string[];
   withProxy: string[];
+  /** Y6 · of `withProxy`, the ones whose proxy is in the connected 3D scene only */
+  inScene: string[];
   without: string[];
   /** proxies whose file is declared and not there */
   missing: string[];
@@ -143,6 +146,8 @@ export function buildSpace(
     resident?: Set<string> | null;
     /** resources the scene tried and did not find */
     notFound?: Set<string>;
+    /** Y6 · units whose proxy object the connected host has in its scene */
+    sceneProxies?: Set<string> | null;
   },
 ): Space {
   const nodes = (doc?.graph.nodes ?? []).filter(alive);
@@ -237,7 +242,9 @@ export function buildSpace(
   const unitsIn = (epochId: string): string[] => {
     const out2: string[] = [];
     for (const u of nodes) {
-      if (!opts.isUnit(u.node_type)) continue;
+      // P2 · a continuity node says how long a unit lives; it is not a unit
+      // to model, so it is neither counted nor listed without a proxy
+      if (!opts.isUnit(u.node_type) || classOf(u.node_type) === "ContinuityNode") continue;
       const eps = EPOCH_LINKS.flatMap((l) => outOf(u.id, l));
       if (eps.some((e) => topOf(e) === epochId)) out2.push(u.id);
     }
@@ -251,11 +258,14 @@ export function buildSpace(
       if (!epoch) return null;
       const mine = rms.filter((r) => r.epochs.includes(epochId));
       const units = unitsIn(epochId);
-      const withProxy = units.filter((u) => proxies.has(u));
+      const scene = opts.sceneProxies ?? null;
+      const has = (u: string): boolean => proxies.has(u) || !!scene?.has(u);
+      const withProxy = units.filter(has);
       const st = (u: string) => proxies.get(u)?.resource?.state;
       return {
         epoch, rms: mine, units, withProxy,
-        without: units.filter((u) => !proxies.has(u)),
+        inScene: withProxy.filter((u) => !proxies.has(u)),
+        without: units.filter((u) => !has(u)),
         missing: withProxy.filter((u) => st(u) === "missing"),
         reference: withProxy.filter((u) => st(u) === "reference"),
         rmMissing: mine.filter((r) => !r.resource || r.resource.state === "missing").map((r) => r.id),

@@ -13,6 +13,7 @@ import { buildMembership, type FoldedView } from "../folding";
 import { BAND_GAP } from "../scene";
 import type { Scene, SceneGroup, SceneNode, SubBand } from "../scene";
 import type { EmDocument } from "../types";
+import { t } from "../i18n";
 
 /**
  * TOCCARE · the re-stack, remembered.
@@ -129,13 +130,20 @@ export function buildMatrixScene(
   for (const lane of [...(layout.swimlanes ?? [])].sort((a, b) => a.y - b.y)) {
     if (phaseIds.has(lane.epoch_id)) continue; // sub-epoch, not a top-level lane
     const epoch = nodeById.get(lane.epoch_id);
+    // G4 · a lane whose epoch is not in this graph is another graph's (an old
+    // file's layout given to the wrong graph, dev.17): it is not drawn, and its
+    // id never becomes a label
+    if (!epoch) continue;
     const ed = (epoch?.data as Record<string, unknown> | undefined) ?? {};
     const ecolor = ed.color;
     const asText = (v: unknown): string | undefined =>
       v != null && v !== "" ? String(v) : undefined;
+    // G4 · an epoch with no name is «Unnamed epoch», never its id
+    const ename = String(epoch?.name ?? "").trim();
     scene.lanes.push({
       id: lane.epoch_id,
-      label: epoch?.name ?? lane.epoch_id,
+      label: ename || t("lane.unnamed"),
+      unnamed: !ename,
       y: lane.y,
       height: lane.height,
       color: typeof ecolor === "string" && ecolor ? ecolor : undefined,
@@ -750,8 +758,8 @@ export function buildMatrixScene(
           laneId: lane.id,
           phaseId: key,
           label: isResidual
-            ? `${lane.label} (senza fase)`
-            : (nodeById.get(key)?.name ?? key),
+            ? t("lane.noPhase", { lane: lane.label })
+            : (String(nodeById.get(key)?.name ?? "").trim() || t("lane.unnamedPhase")),
           color:
             typeof nodeById.get(key)?.data?.color === "string"
               ? (nodeById.get(key)!.data!.color as string)
