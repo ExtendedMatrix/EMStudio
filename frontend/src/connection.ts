@@ -1,0 +1,362 @@
+/**
+ * MICRO-IL-GIRO-DELLA-DEV17 · K1, K2, X2 — where this session is connected, said
+ * in one line, and the panels behind it.
+ *
+ * The footer said «Standalone» and nothing else: which node, how you entered it,
+ * whether it answers, which room — none of it was on screen (E.D., 3 Oct). The
+ * line is now ONE status item, «mode · node · access · reach · room», and it is
+ * a button: the click opens the connection panel (the Mode menu's three choices
+ * plus the node and the room, with their gestures), and from there the room's
+ * settings (members, roles, invitations — the node's own API, nothing new).
+ *
+ * «The network» (online with the StratiGraph network / isolated) has nothing to
+ * read on the server yet: what is shown is what can be measured, the NODE
+ * reachable or not, and the panel says that the network is not reported.
+ *
+ * Pure in the sense that matters: no store, no sync client. The caller hands in
+ * the state and the gestures, and every request to the node goes through the
+ * `NodeApi` it supplies (so the bench can point it anywhere).
+ */
+
+import { t } from "./i18n";
+
+export type Reach = "unknown" | "reachable" | "unreachable";
+export type Access = "orcid_node" | "node_password" | "declared" | "none";
+export type SessionMode = "standalone" | "sidecar" | "hub";
+
+export interface ConnectionState {
+  mode: SessionMode;
+  /** the node's address as written in Settings, or "" */
+  node: string;
+  access: Access;
+  reach: Reach;
+  /** the room this session is in (connected), or null */
+  room: string | null;
+  /** the room's title when the node told us */
+  roomTitle?: string | null;
+  /** Y1 · a sidecar pairing waiting for its host */
+  waiting?: boolean;
+}
+
+/** `https://em.localhost:8443/em` → `em.localhost:8443` (the short address) */
+export function shortNode(url: string): string {
+  return url.replace(/^https?:\/\//, "").replace(/\/+$/, "").replace(/\/em$/, "");
+}
+
+/** The status line: «Standalone · em.localhost:8443 · node's password · reachable · no room». */
+export function statusParts(s: ConnectionState): string[] {
+  const parts = [t(`mode.${s.mode}`)];
+  if (s.waiting) parts.push(t("sync.waitingHostShort"));
+  if (!s.node) {
+    parts.push(t("conn.noNode"));
+    return parts;
+  }
+  parts.push(shortNode(s.node));
+  parts.push(t(`conn.access.${s.access}`));
+  parts.push(t(`conn.reach.${s.reach}`));
+  parts.push(s.room ? (s.roomTitle || s.room) : t("conn.noRoom"));
+  return parts;
+}
+
+// ── the room, as the node answers it ─────────────────────────────────────────
+
+export interface RoomInfo {
+  room_id: string;
+  title: string;
+  owner?: string | null;
+  members?: { orcid: string; role: string }[];
+  your_role?: string | null;
+}
+export interface MembersInfo {
+  owner?: string | null;
+  members: { orcid: string; role: string }[];
+  groups?: { group_id: string; role: string; name?: string | null }[];
+  your_role?: string | null;
+}
+
+/** The calls the room panel makes — `GET /rooms/{id}`, `…/members`, `PUT`/`DELETE
+ *  …/members/{orcid}`, `POST …/invites`, `GET …/open` — and nothing else. */
+export interface NodeApi {
+  room(id: string): Promise<RoomInfo>;
+  members(id: string): Promise<MembersInfo>;
+  setMember(id: string, orcid: string, role: string): Promise<MembersInfo>;
+  removeMember(id: string, orcid: string): Promise<MembersInfo>;
+  invite(id: string, role: string): Promise<{ token?: string | null }>;
+  door(id: string): Promise<{ web?: string | null; scheme?: string | null }>;
+}
+
+/** A `NodeApi` over `fetch`, with the session's bearer when there is one. */
+export function nodeApi(base: string, token: () => string | null): NodeApi {
+  const root = base.replace(/\/+$/, "");
+  const call = async <T>(method: string, path: string, body?: unknown): Promise<T> => {
+    const h: Record<string, string> = {};
+    const tok = token();
+    if (tok) h.Authorization = `Bearer ${tok}`;
+    if (body !== undefined) h["Content-Type"] = "application/json";
+    const r = await fetch(`${root}/v1${path}`, { method, headers: h, cache: "no-store",
+      ...(body !== undefined ? { body: JSON.stringify(body) } : {}) });
+    const j = await r.json().catch(() => null) as (T & { detail?: string }) | null;
+    if (!r.ok) throw new Error(j?.detail ? String(j.detail) : `HTTP ${r.status}`);
+    return j as T;
+  };
+  const room = (id: string) => `/rooms/${encodeURIComponent(id)}`;
+  return {
+    room: (id) => call("GET", room(id)),
+    members: (id) => call("GET", `${room(id)}/members`),
+    setMember: (id, orcid, role) => call("PUT", `${room(id)}/members/${encodeURIComponent(orcid)}`, { role }),
+    removeMember: (id, orcid) => call("DELETE", `${room(id)}/members/${encodeURIComponent(orcid)}`),
+    invite: (id, role) => call("POST", `${room(id)}/invites`, { role }),
+    door: (id) => call("GET", `${room(id)}/open`),
+  };
+}
+
+/** «yours» when the node says you own it; else «of <owner>». */
+export function ownership(info: Pick<RoomInfo, "owner" | "your_role">): { mine: boolean; text: string } {
+  if (info.your_role === "owner") return { mine: true, text: t("room.yours") };
+  return { mine: false, text: t("room.ofOwner", { owner: info.owner || "?" }) };
+}
+
+/** The roles a manager may hand out by hand (`MemberIn`) and by link (`InviteIn`). */
+export const MEMBER_ROLES = ["viewer", "editor", "admin"] as const;
+export const LINK_ROLES = ["viewer", "editor"] as const;
+
+const ORCID_RE = /^\d{4}-\d{4}-\d{4}-\d{3}[\dX]$/;
+
+function el<K extends keyof HTMLElementTagNameMap>(tag: K, cls?: string, text?: string): HTMLElementTagNameMap[K] {
+  const e = document.createElement(tag);
+  if (cls) e.className = cls;
+  if (text !== undefined) e.textContent = text;
+  return e;
+}
+function btn(text: string, cls = "conn-btn"): HTMLButtonElement {
+  const b = el("button", cls, text);
+  b.type = "button";
+  return b;
+}
+
+// ── the connection panel (X2 + K1) ───────────────────────────────────────────
+
+export interface ConnectionGestures {
+  setMode(mode: SessionMode): void;
+  openNodeSettings(): void;
+  openRoomSettings(): void;
+  openOnNode(): void;
+  leaveRoom(): void;
+}
+
+/** The panel the status line opens: the three modes, the node, the room. */
+export function renderConnectionPanel(host: HTMLElement, s: ConnectionState, g: ConnectionGestures): void {
+  host.textContent = "";
+  host.className = "conn-panel";
+  host.setAttribute("role", "dialog");
+  host.setAttribute("aria-label", t("conn.title"));
+
+  const modes = el("div", "conn-sect");
+  modes.appendChild(el("h4", "", t("conn.modeHead")));
+  const row = el("div", "conn-modes");
+  for (const m of ["standalone", "sidecar", "hub"] as SessionMode[]) {
+    const b = btn(t(`conn.modeChoice.${m}`), "conn-btn conn-mode" + (s.mode === m ? " on" : ""));
+    b.dataset.mode = m;
+    b.title = t(`mode.${m}Title`);
+    b.setAttribute("aria-pressed", String(s.mode === m));
+    b.addEventListener("click", () => g.setMode(m));
+    row.appendChild(b);
+  }
+  modes.appendChild(row);
+  host.appendChild(modes);
+
+  const node = el("div", "conn-sect");
+  node.appendChild(el("h4", "", t("conn.nodeHead")));
+  if (!s.node) {
+    node.appendChild(el("p", "conn-line", t("conn.noNodeLong")));
+  } else {
+    const dl = el("dl", "conn-facts");
+    const fact = (k: string, v: string, cls = ""): void => {
+      dl.appendChild(el("dt", "", k));
+      const dd = el("dd", cls, v);
+      dl.appendChild(dd);
+    };
+    fact(t("conn.k.node"), s.node);
+    fact(t("conn.k.access"), t(`conn.access.${s.access}`));
+    fact(t("conn.k.reach"), t(`conn.reach.${s.reach}`), `conn-reach-${s.reach}`);
+    fact(t("conn.k.network"), t("conn.networkUnknown"), "conn-dim");
+    node.appendChild(dl);
+  }
+  const nodeActs = el("div", "conn-acts");
+  const set = btn(t("conn.nodeSettings"));
+  set.addEventListener("click", () => g.openNodeSettings());
+  nodeActs.appendChild(set);
+  node.appendChild(nodeActs);
+  host.appendChild(node);
+
+  const room = el("div", "conn-sect");
+  room.appendChild(el("h4", "", t("conn.roomHead")));
+  room.appendChild(el("p", "conn-line", s.room
+    ? t("conn.inRoom", { room: s.roomTitle || s.room })
+    : t("conn.noRoomLong")));
+  const acts = el("div", "conn-acts");
+  if (s.room) {
+    const rs = btn(t("conn.roomSettings"));
+    rs.dataset.act = "room-settings";
+    rs.addEventListener("click", () => g.openRoomSettings());
+    const on = btn(t("conn.openOnNode"));
+    on.addEventListener("click", () => g.openOnNode());
+    const leave = btn(t("conn.leaveRoom"));
+    leave.addEventListener("click", () => g.leaveRoom());
+    const change = btn(t("conn.changeRoom"));
+    change.addEventListener("click", () => g.openNodeSettings());
+    acts.append(rs, on, change, leave);
+  } else if (s.node) {
+    const join = btn(t("conn.joinRoom"));
+    join.addEventListener("click", () => g.setMode("hub"));
+    const change = btn(t("conn.chooseRoom"));
+    change.addEventListener("click", () => g.openNodeSettings());
+    acts.append(join, change);
+  }
+  room.appendChild(acts);
+  host.appendChild(room);
+}
+
+// ── the room's settings (K2) ─────────────────────────────────────────────────
+
+export interface RoomPanelHooks {
+  api: NodeApi;
+  roomId: string;
+  /** the ORCID of this session, to say «you» on its own row */
+  me: string | null;
+  openOnNode(): void;
+  leaveRoom(): void;
+  copy(text: string): void;
+}
+
+/** Render the room panel: «yours» → members, roles, remove, invite by ORCID or
+ *  link, «Open on the node»; «of <owner>» → owner, your role, leave. */
+export async function renderRoomPanel(host: HTMLElement, h: RoomPanelHooks): Promise<void> {
+  host.textContent = "";
+  host.className = "conn-panel conn-room";
+  host.appendChild(el("p", "conn-line conn-dim", t("room.loading")));
+  let info: RoomInfo;
+  try {
+    info = await h.api.room(h.roomId);
+  } catch (error) {
+    host.textContent = "";
+    host.appendChild(el("p", "conn-line conn-err", t("room.cannotRead", { why: (error as Error).message })));
+    return;
+  }
+  const own = ownership(info);
+  const manager = info.your_role === "owner" || info.your_role === "admin";
+  host.textContent = "";
+  host.dataset.mine = String(own.mine);
+  host.dataset.role = String(info.your_role ?? "");
+  const head = el("h4", "", `${info.title || info.room_id} · ${own.text}`);
+  head.dataset.own = own.mine ? "yours" : "theirs";
+  host.appendChild(head);
+  host.appendChild(el("p", "conn-line", t("room.yourRole", { role: t(`room.role.${info.your_role ?? "none"}`) })));
+  if (!own.mine) host.appendChild(el("p", "conn-line", t("room.ownerIs", { owner: info.owner || "?" })));
+
+  const note = el("p", "conn-line conn-note");
+  const say = (text: string, bad = false): void => {
+    note.textContent = text;
+    note.classList.toggle("conn-err", bad);
+  };
+
+  if (manager) {
+    const list = el("ul", "conn-members");
+    const paint = (m: MembersInfo): void => {
+      list.textContent = "";
+      const rows = [{ orcid: m.owner || info.owner || "", role: "owner" }, ...m.members]
+        .filter((r) => r.orcid);
+      for (const r of rows) {
+        const li = el("li");
+        li.dataset.orcid = r.orcid;
+        li.appendChild(el("span", "conn-orcid", r.orcid + (r.orcid === h.me ? ` (${t("room.you")})` : "")));
+        li.appendChild(el("span", "conn-role", t(`room.role.${r.role}`)));
+        if (r.role !== "owner") {
+          const x = btn("×", "conn-btn conn-x");
+          x.title = t("room.remove", { who: r.orcid });
+          x.setAttribute("aria-label", x.title);
+          x.addEventListener("click", async () => {
+            try { paint(await h.api.removeMember(h.roomId, r.orcid)); say(t("room.removed", { who: r.orcid })); }
+            catch (error) { say((error as Error).message, true); }
+          });
+          li.appendChild(x);
+        }
+        list.appendChild(li);
+      }
+      for (const g of m.groups ?? []) {
+        const li = el("li", "conn-group");
+        li.appendChild(el("span", "conn-orcid", g.name || g.group_id));
+        li.appendChild(el("span", "conn-role", t(`room.role.${g.role}`)));
+        list.appendChild(li);
+      }
+    };
+    host.appendChild(el("h5", "", t("room.members")));
+    host.appendChild(list);
+    try { paint(await h.api.members(h.roomId)); }
+    catch (error) { say((error as Error).message, true); }
+
+    // invite by ORCID: the role is written into the ACL at once
+    const add = el("div", "conn-add");
+    const who = el("input", "conn-input");
+    who.placeholder = t("room.orcidPlaceholder");
+    who.setAttribute("aria-label", t("room.orcidLabel"));
+    const role = el("select", "conn-input");
+    for (const r of MEMBER_ROLES) role.appendChild(new Option(t(`room.role.${r}`), r));
+    role.value = "editor";
+    const go = btn(t("room.add"));
+    go.addEventListener("click", async () => {
+      const orcid = who.value.trim();
+      if (!ORCID_RE.test(orcid)) { say(t("room.badOrcid"), true); return; }
+      try { paint(await h.api.setMember(h.roomId, orcid, role.value)); who.value = ""; say(t("room.added", { who: orcid })); }
+      catch (error) { say((error as Error).message, true); }
+    });
+    add.append(who, role, go);
+    host.appendChild(el("h5", "", t("room.inviteOrcid")));
+    host.appendChild(add);
+
+    // or a link: the node keeps a sha256, so the link is shown once
+    const link = el("div", "conn-add");
+    const lrole = el("select", "conn-input");
+    for (const r of LINK_ROLES) lrole.appendChild(new Option(t(`room.role.${r}`), r));
+    lrole.value = "editor";
+    const mk = btn(t("room.newLink"));
+    const out = el("div", "conn-link");
+    mk.addEventListener("click", async () => {
+      try {
+        const made = await h.api.invite(h.roomId, lrole.value);
+        const doors = await h.api.door(h.roomId).catch(() => ({ web: null, scheme: null }));
+        const door = doors.web || doors.scheme || "";
+        let text = made.token ?? "";
+        if (door && made.token) {
+          const u = new URL(door);
+          u.searchParams.set("join", made.token);
+          text = u.toString();
+        }
+        out.textContent = "";
+        const code = el("code", "", text);
+        const cp = btn(t("room.copy"));
+        cp.addEventListener("click", () => h.copy(text));
+        out.append(code, cp);
+        say(t("room.linkOnce"));
+      } catch (error) { say((error as Error).message, true); }
+    });
+    link.append(lrole, mk);
+    host.appendChild(el("h5", "", t("room.inviteLink")));
+    host.appendChild(link);
+    host.appendChild(out);
+  }
+
+  const acts = el("div", "conn-acts");
+  if (manager) {
+    const on = btn(t("conn.openOnNode"));
+    on.title = t("room.openOnNodeHint");
+    on.addEventListener("click", () => h.openOnNode());
+    acts.appendChild(on);
+  } else {
+    const leave = btn(t("conn.leaveRoom"));
+    leave.addEventListener("click", () => h.leaveRoom());
+    acts.appendChild(leave);
+  }
+  host.appendChild(acts);
+  host.appendChild(note);
+}

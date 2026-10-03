@@ -282,6 +282,10 @@ export interface GraphSlot {
    *  yet): its signature at birth (`seedSignature` in main.ts). While it still
    *  matches, the slot is a seed — replaced by the next open, never saved. */
   seedSig?: string;
+  /** Y2 · where the graph came from when that is not a file: «· from Blender
+   *  (sync)» (translated by the caller) is said after its name everywhere the
+   *  name is shown, so two «Temple» are never the same word */
+  originSuffix?: string;
   /**
    * The slot's own store — **with its own undo stack**. This is what makes the
    * workspace more than "reopen the file": edits and history survive a switch.
@@ -300,6 +304,11 @@ export interface GraphSlot {
  * second place to forget to update.
  */
 export function slotLabel(slot: GraphSlot): string {
+  return slotName(slot) + (slot.originSuffix ? ` · ${slot.originSuffix}` : "");
+}
+
+/** The graph's own name, without where it came from — what a rename edits. */
+export function slotName(slot: GraphSlot): string {
   const declared = String(
     (slot.store.doc.graph as Record<string, unknown>)["name"] ?? "",
   ).trim();
@@ -460,7 +469,7 @@ export class EMTree {
     const slot = this.get(id);
     if (!slot) return;
     const next = name.trim();
-    if (!next || next === slotLabel(slot)) return;
+    if (!next || next === slotName(slot)) return;
     slot.fallbackName = next; // stays in step for a doc that declares no name
     slot.store.updateGraphMeta({ name: next });
   }
@@ -1013,7 +1022,7 @@ export function renderEMTree(host: HTMLElement, tree: EMTree,
       // the GRAPH's name, not the disambiguated display name: editing a field
       // pre-filled with "untitled graph (2)" would write that suffix into the
       // document, and the suffix is a fact about the list, not about the graph
-      input.value = slotLabel(slot);
+      input.value = slotName(slot);
       label.replaceWith(input);
       input.focus();
       input.select();
@@ -1025,7 +1034,7 @@ export function renderEMTree(host: HTMLElement, tree: EMTree,
         // Escape passes the CURRENT name back: `rename` no-ops on an unchanged
         // name, so the round trip only re-renders the row (restoring the label
         // element) without checkpointing or dirtying the document.
-        handlers.onRename(slotId, keep ? input.value : slotLabel(slot));
+        handlers.onRename(slotId, keep ? input.value : slotName(slot));
       };
       input.addEventListener("keydown", (keyEvent) => {
         if (keyEvent.key === "Enter") commit(true);

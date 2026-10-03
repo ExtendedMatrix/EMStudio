@@ -226,9 +226,25 @@ export function renderChronology(host: HTMLElement, data: ChronologyData, h: Chr
     card.appendChild(acts);
     cards.appendChild(card);
   }
-  if (!data.overlaps.length && !data.others.length) {
+  const dated = data.epochs.filter((e) => e.start !== null || e.end !== null).length;
+  if (!dated) {
+    // T1 · nothing to compare is not «no overlap»: with no dates the check has
+    // not happened, and the sentence says so, with the gesture that makes it
+    // possible (dev.17 said «No overlap» on a graph with no dates at all)
+    const none = el("div", "chr-card none");
+    none.dataset.state = "undated";
+    none.append(el("b", "", t("chr.noDates")), el("span", "chr-why", t("chr.noDatesWhy")));
+    const acts = el("div", "chr-acts");
+    acts.appendChild(btn(t("chain.writeEpochDates"), () => {
+      host.querySelector<HTMLInputElement>('input[data-chnum$="|start"]')?.focus();
+    }));
+    none.appendChild(acts);
+    cards.appendChild(none);
+  } else if (!data.overlaps.length && !data.others.length) {
     const ok = el("div", "chr-card ok");
-    ok.append(el("b", "", t("chr.noOverlap")), el("span", "chr-why", t("chr.noOverlapWhy")));
+    ok.append(el("b", "", t("chr.noOverlap")), el("span", "chr-why",
+      dated < data.epochs.length ? t("chr.noOverlapSome", { n: String(dated), of: String(data.epochs.length) })
+        : t("chr.noOverlapWhy")));
     cards.appendChild(ok);
   }
   root.appendChild(cards);

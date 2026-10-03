@@ -56,11 +56,14 @@ const { chromium } = await playwright();
 const browser = await chromium.launch({ executablePath: existsSync(CHR) ? CHR : undefined });
 
 /** A fresh page on a fixture, in a language, with an optional workspace. */
-async function open({ doc = "catena", locale = "it", w = 1600, h = 1000, ws, init, hook, query = "", route } = {}) {
+async function open({ doc = "catena", locale = "it", w = 1600, h = 1000, ws, init, hook, query = "", route, wsRoute } = {}) {
   const d = doc ? (typeof doc === "string" ? fixture(doc) : doc) : null;
-  const ctx = await browser.newContext({ viewport: { width: w, height: h } });
+  const ctx = await browser.newContext({ viewport: { width: w, height: h }, ignoreHTTPSErrors: true });
   // RISORSA-FILE · a simulated store, answered before the network
   if (route) await ctx.route(route.pattern, route.handler);
+  // Y1 · a fake host on a WebSocket: registered BEFORE the page loads, or the
+  // page's sockets are not routed
+  if (wsRoute) await ctx.routeWebSocket(wsRoute.pattern, wsRoute.handler);
   const p = await ctx.newPage();
   const errors = [];
   p.on("pageerror", (e) => errors.push(String(e).slice(0, 300)));
@@ -3481,6 +3484,298 @@ test("F4.oldfile", "F4 · un file VECCHIO (un solo layout, del grafo attivo): il
       && JSON.stringify(ofPositions({ ...doc.graphs.gY, layout: doc.layout })) === JSON.stringify(yPos)
       && said.length === 1 && !errors.length,
     detail: { xPos, yPos, want, ySeen, said, top: doc && Object.keys(doc.layout?.positions ?? {}), errors } };
+});
+
+// ── MICRO-IL-GIRO-DELLA-DEV17 (3 ott) ─────────────────────────────────────────
+/** every graph's section places only its own nodes; returns {gid: [placed, own-of-placed, units, unitsPlaced]} */
+const g3Sections = (doc) => Object.fromEntries(Object.entries(doc?.graphs ?? {}).map(([gid, g]) => {
+  const ids = new Set((g.nodes ?? []).map((n) => n.id));
+  const placed = Object.keys(g.layout?.positions ?? {});
+  const units = (g.nodes ?? []).filter((n) => /^(US|USV|USM|USD|SF|VSF|serSU|serUSD|USVs|USVn|US_|unit)/i.test(String(n.node_type)));
+  return [gid, { placed: placed.length, foreign: placed.filter((id) => !ids.has(id)).length,
+    units: units.length, unitsPlaced: units.filter((n) => placed.includes(n.id)).length,
+    lanes: (g.layout?.swimlanes ?? []).length }];
+}));
+async function g3Save(doc, path) {
+  const { p, ctx, errors } = await open({ doc: null, locale: "en", hook: tauriWrites() });
+  await p.waitForFunction(() => !!window.__EM_DRAG__, null, { timeout: 20000 });
+  await p.evaluate(([d, at]) => window.__EM_DRAG__.openAt(d, at), [doc, path]);
+  await p.waitForTimeout(4000);
+  await p.keyboard.press("Meta+s");
+  await p.waitForTimeout(1500);
+  const writes = await p.evaluate(() => window.__WRITES__);
+  const log = await p.evaluate(() => (window.__EM_DRAG__.log?.() ?? []).map((x) => x.message));
+  await ctx.close();
+  return { writes, log, errors, out: writes[0] ? JSON.parse(writes[0].text) : null };
+}
+
+test("G3.seed", "G3 · un file VECCHIO il cui layout è del SEME, non del grafo attivo: al Salva il grafo vero ha le posizioni dei suoi nodi, il seme le sue, nessuna sezione ha posizioni d'altri", async () => {
+  const seme = OF_GRAPH("seme", ["S1"], 0), vero = OF_GRAPH("vero", ["V1", "V2", "V3"], 400);
+  const top = seme.layout; delete seme.layout; delete vero.layout;
+  const old = { header: { format: "em.json", version: "1.0" }, active_graph_id: "vero", graphs: { seme, vero }, layout: top };
+  const { writes, log, errors, out } = await g3Save(old, "/tmp/g3/seme.em.json");
+  const sec = g3Sections(out);
+  const said = log.filter((m) => /laid out afresh/.test(m));
+  return { pass: writes.length === 1 && sec.vero?.foreign === 0 && sec.vero?.unitsPlaced === 3
+      && sec.seme?.foreign === 0 && sec.seme?.unitsPlaced === 1
+      && JSON.stringify(ofPositions(out.graphs.seme)) === JSON.stringify(ofPositions(OF_GRAPH("seme", ["S1"], 0)))
+      && said.length === 1 && /vero/.test(said[0]) && !errors.length,
+    detail: { sec, said, errors } };
+});
+
+test("G3.real", "G3 · San Pietro com'era (copia di Tempio_Giunone_Moneta.em.json prima della pulizia), ⌘S: ogni grafo ha nella sua sezione le posizioni dei SUOI nodi; il Tempio le ha tutte", async () => {
+  const at = process.env.G3_FILE ?? "/tmp/dev33-banco/G3-sanpietro.em.json";
+  if (!existsSync(at)) return { pass: false, detail: { missing: at } };
+  const doc = JSON.parse(readFileSync(at, "utf8"));
+  const { writes, errors, log, out } = await g3Save(doc, at);
+  const sec = g3Sections(out);
+  const tempio = sec["3ba146db-9e6a-541c-877e-8e4d85fed6a3"];
+  return { pass: writes.length === 1 && Object.values(sec).every((s) => s.foreign === 0)
+      && tempio?.units > 0 && tempio.unitsPlaced === tempio.units && tempio.lanes >= 8 && !errors.length,
+    detail: { sec, fresh: log.filter((m) => /laid out afresh/.test(m)), errors } };
+});
+
+/** catena with a reading on the PICTURE D3 (X9 · D.3.1), as D.02.01 on D.02 */
+const catenaReadingOnImage = () => {
+  const d = fixture("catena");
+  d.graph.nodes.push({ id: "X9", node_type: "extractor", name: "D.3.1" });
+  d.graph.edges.push({ id: "X9_D3", source: "X9", target: "D3", edge_type: "extracted_from" });
+  return d;
+};
+test("TS4.noregion", "T-S4 (a) · Doc aperto su una lettura (D.3.1 su D.3): trascinare o cliccare sull'immagine non crea nessun nodo finché non si preme «Region»; la barra dice di sceglierlo", async () => {
+  const { p, ctx, errors } = await open({ doc: catenaReadingOnImage(), locale: "en" });
+  await p.evaluate(() => window.__EM_DRAG__.openReading("X9"));
+  await p.waitForSelector(".rd-img img", { timeout: 8000 });
+  await p.waitForFunction(() => document.querySelector(".rd-img img")?.complete, null, { timeout: 8000 });
+  await p.waitForTimeout(300);
+  const before = await p.evaluate(() => JSON.parse(window.__EM_DRAG__.graphJson()).nodes.length);
+  const img = await p.evaluate(() => { const r = document.querySelector(".rd-img svg").getBoundingClientRect(); return { x: r.x, y: r.y, w: r.width, h: r.height }; });
+  const armedClass = await p.evaluate(() => document.querySelector(".rd-img").classList.contains("armed"));
+  const bar = await p.evaluate(() => document.querySelector(".rd-armed")?.textContent ?? "");
+  await p.mouse.click(img.x + img.w * 0.4, img.y + img.h * 0.4);
+  await p.mouse.move(img.x + img.w * 0.3, img.y + img.h * 0.3); await p.mouse.down();
+  await p.mouse.move(img.x + img.w * 0.5, img.y + img.h * 0.5, { steps: 4 }); await p.mouse.up();
+  await p.waitForTimeout(400);
+  const after = await p.evaluate(() => JSON.parse(window.__EM_DRAG__.graphJson()).nodes.length);
+  const bubble = await p.evaluate(() => !!document.querySelector(".rd-bubble"));
+  await ctx.close();
+  return { pass: after === before && !armedClass && !bubble && /Region or Polygon/.test(bar) && !errors.length,
+    detail: { before, after, armedClass, bubble, bar, errors } };
+});
+test("TS4.logged", "T-S4 (b) · una regione fatta col gesto «Region» crea nodi e il Log ne ha una riga («Edit: …», con i nodi)", async () => {
+  const { p, ctx, errors } = await open({ doc: catenaReadingOnImage(), locale: "en" });
+  await p.evaluate(() => window.__EM_DRAG__.openReading("X9"));
+  await p.waitForSelector(".rd-img img", { timeout: 8000 });
+  await p.waitForFunction(() => document.querySelector(".rd-img img")?.complete, null, { timeout: 8000 });
+  await p.waitForTimeout(300);
+  const before = await p.evaluate(() => JSON.parse(window.__EM_DRAG__.graphJson()).nodes.length);
+  const logBefore = await p.evaluate(() => window.__EM_DRAG__.log().length);
+  await p.click('.rd-tools [data-tool="rect"]');
+  await p.waitForTimeout(200);
+  const img = await p.evaluate(() => { const r = document.querySelector(".rd-img svg").getBoundingClientRect(); return { x: r.x, y: r.y, w: r.width, h: r.height }; });
+  await p.mouse.move(img.x + img.w * 0.3, img.y + img.h * 0.3); await p.mouse.down();
+  await p.mouse.move(img.x + img.w * 0.5, img.y + img.h * 0.5, { steps: 4 }); await p.mouse.up();
+  await p.waitForTimeout(600);
+  const after = await p.evaluate(() => JSON.parse(window.__EM_DRAG__.graphJson()).nodes.length);
+  const lines = await p.evaluate((n) => window.__EM_DRAG__.log().slice(n), logBefore);
+  const edit = lines.filter((l) => /^Edit: /.test(l.message));
+  await ctx.close();
+  return { pass: after > before && edit.length >= 1 && edit.some((l) => l.ids.length > 0 && /created/.test(l.message)) && !errors.length,
+    detail: { before, after, edit, errors } };
+});
+
+// ── K1 · K2 · the status line and the room, on the dev stack's node (LIVE) ──
+const K_NODE = (process.env.LIVE_NODE ?? "").replace(/\/+$/, "");
+const kToken = (user) => {
+  const out = execFileSync("curl", ["-sk", "-X", "POST",
+    K_NODE.replace(/\/em$/, "") + "/auth/realms/em-dev/protocol/openid-connect/token",
+    "-d", "grant_type=password", "-d", "client_id=em-server", "-d", "client_secret=em-dev-secret",
+    "-d", `username=${user}`, "-d", `password=${user}`], { encoding: "utf8" });
+  return JSON.parse(out).access_token;
+};
+const kGet = (path, tok) => JSON.parse(execFileSync("curl", ["-sk", `${K_NODE}/v1${path}`, "-H", `Authorization: Bearer ${tok}`], { encoding: "utf8" }));
+const K_SETTINGS = () => ({ "emstudio.settings": JSON.stringify({ sync: { hubUrl: K_NODE, hubRoom: "cantiere-demo" } }) });
+if (K_NODE) test("TK1.live", "T-K1 dal vivo · nodo del dev stack, utente dev in «cantiere-demo»: la voce di stato dice nodo, accesso e nome della stanza; spento il nodo (le richieste cadono), dice «nodo non raggiungibile» entro 30 s", async () => {
+  const { p, ctx, errors } = await open({ doc: null, locale: "en", init: K_SETTINGS() });
+  await p.waitForFunction(() => /node reachable/.test(window.__EM_DRAG__.statusLine()), null, { timeout: 15000 }).catch(() => {});
+  const first = await p.evaluate(() => window.__EM_DRAG__.statusLine());
+  await p.evaluate(([u, tok]) => window.__EM_DRAG__.joinRoom(u, "cantiere-demo", tok), [K_NODE, kToken("dev")]);
+  await p.waitForFunction(() => /Cantiere · demo/.test(window.__EM_DRAG__.statusLine()), null, { timeout: 15000 }).catch(() => {});
+  const inRoom = await p.evaluate(() => window.__EM_DRAG__.statusLine());
+  await ctx.route(`${K_NODE}/**`, (r) => r.abort());
+  const t0 = Date.now();
+  await p.waitForFunction(() => /node not reachable/.test(window.__EM_DRAG__.statusLine()), null, { timeout: 30000 }).catch(() => {});
+  const off = await p.evaluate(() => window.__EM_DRAG__.statusLine());
+  const secs = Math.round((Date.now() - t0) / 1000);
+  await ctx.close();
+  return { pass: /em\.localhost:8443/.test(first) && /node reachable/.test(first)
+      && /em\.localhost:8443/.test(inRoom) && /Cantiere · demo/.test(inRoom) && !/not signed in/.test(inRoom)
+      && /node not reachable/.test(off) && secs <= 30 && !errors.length,
+    detail: { first, inRoom, off, secs, errors } };
+});
+if (K_NODE) test("TK2.live", "T-K2 dal vivo · stanza «cantiere-demo» di dev: il pannello dice «yours» e i membri sono quelli di GET /v1/rooms/{id}/members; con viewer dice «of <dev>», nessun gesto d'invito, «Leave the room»", async () => {
+  const run = async (user) => {
+    const { p, ctx, errors } = await open({ doc: null, locale: "en", init: K_SETTINGS() });
+    const tok = kToken(user);
+    await p.evaluate(([u, tk]) => window.__EM_DRAG__.joinRoom(u, "cantiere-demo", tk), [K_NODE, tok]);
+    await p.waitForTimeout(1500);
+    await p.evaluate(() => window.__EM_DRAG__.roomPanel("cantiere-demo"));
+    await p.waitForFunction(() => !!document.querySelector("#conn-pop.conn-room h4"), null, { timeout: 10000 }).catch(() => {});
+    await p.waitForTimeout(800);
+    const r = await p.evaluate(() => {
+      const pop = document.getElementById("conn-pop");
+      return { head: pop?.querySelector("h4")?.textContent ?? "", own: pop?.querySelector("h4")?.dataset.own,
+        rows: [...(pop?.querySelectorAll(".conn-members li[data-orcid]") ?? [])].map((li) => [li.dataset.orcid, li.querySelector(".conn-role")?.textContent]),
+        invite: !!pop?.querySelector(".conn-add"), leave: [...(pop?.querySelectorAll(".conn-btn") ?? [])].some((b) => /Leave the room/.test(b.textContent)),
+        onNode: [...(pop?.querySelectorAll(".conn-btn") ?? [])].some((b) => /Open on the node/.test(b.textContent)) };
+    });
+    await p.screenshot({ path: SHOT(`tk2-stanza-${user}`) }).catch(() => {});
+    await ctx.close();
+    return { ...r, errors, tok };
+  };
+  const dev = await run("dev"), viewer = await run("viewer");
+  const truth = kGet("/rooms/cantiere-demo/members", dev.tok);
+  const want = [[truth.owner, "owner"], ...truth.members.map((m) => [m.orcid, m.role])];
+  return { pass: dev.own === "yours" && /· yours$/.test(dev.head) && JSON.stringify(dev.rows) === JSON.stringify(want) && dev.invite && dev.onNode
+      && viewer.own === "theirs" && /of 0000-0002-1825-0097/.test(viewer.head) && !viewer.invite && !viewer.rows.length && viewer.leave
+      && !dev.errors.length && !viewer.errors.length,
+    detail: { dev: { ...dev, tok: undefined }, viewer: { ...viewer, tok: undefined }, want } };
+});
+
+test("TY5.already", "T-Y5 (lato EMStudio) · Blender risponde «il proxy c'è già» (delta vuoto, info.already): nessun nodo aggiunto, il messaggio lo dice con l'oggetto selezionato, e il Log ne ha la riga", async () => {
+  const { p, ctx, errors } = await open({ doc: "catena", locale: "en" });
+  const before = await p.evaluate(() => JSON.parse(window.__EM_DRAG__.graphJson()).nodes.length);
+  await p.evaluate(() => window.__EM_DRAG__.commandResult({ cmd_id: "c1", ok: true, delta: { nodes: [], edges: [] },
+    info: { proxy_object: "GT16.SU002", reused_object: true, already: true } }));
+  await p.waitForTimeout(300);
+  const after = await p.evaluate(() => JSON.parse(window.__EM_DRAG__.graphJson()).nodes.length);
+  const log = await p.evaluate(() => window.__EM_DRAG__.log().map((l) => l.message));
+  await ctx.close();
+  const line = log.find((m) => /already there \(GT16\.SU002\): selected in Blender, nothing added/.test(m));
+  return { pass: after === before && !!line && !errors.length, detail: { before, after, line, errors } };
+});
+
+test("Y1.wait", "Y1 · Sidecar senza Blender: la voce di stato dice «in attesa di Blender…» e riprova da sola; quando Blender apre il server, si collega senza rifare Mode › Sidecar; Standalone smette di aspettare", async () => {
+  const port = 8899;
+  let blender = false, opened = 0, tries = 0;
+  const { p, ctx, errors } = await open({ doc: "catena", locale: "en",
+    init: { "emstudio.settings": JSON.stringify({ sync: { protocol: "ws", host: "localhost", port } }) },
+    wsRoute: { pattern: new RegExp(`localhost:${port}`), handler: (ws) => {
+      tries++;
+      if (!blender) { ws.close(); return; }
+      opened++;
+      ws.onMessage(() => {});
+    } } });
+  await p.click("#dd-mode .dd-toggle");
+  await p.click("#btn-mode-sidecar");
+  await p.waitForTimeout(1200);
+  const waiting = await p.evaluate(() => window.__EM_DRAG__.statusLine());
+  await p.waitForTimeout(3500);
+  blender = true;
+  await p.waitForFunction(() => document.body.classList.contains("sync-active"), null, { timeout: 9000 }).catch(() => {});
+  const back = await p.evaluate(() => ({ line: window.__EM_DRAG__.statusLine(), active: document.body.classList.contains("sync-active") }));
+  await p.click("#dd-mode .dd-toggle");
+  await p.click("#btn-mode-standalone");
+  await p.waitForTimeout(400);
+  const off = await p.evaluate(() => window.__EM_DRAG__.statusLine());
+  const log = await p.evaluate(() => window.__EM_DRAG__.log().map((l) => l.message));
+  await ctx.close();
+  return { pass: /Sidecar · waiting for Blender/.test(waiting) && back.active && opened >= 1 && !/waiting/.test(back.line)
+      && /^Standalone/.test(off) && log.some((m) => /Blender is back/.test(m)) && !errors.length,
+    detail: { waiting, back, opened, tries, off, errors } };
+});
+
+test("Y2.blender", "Y2 · un file «Temple» (EM 1.6.16) aperto, poi Sidecar: il grafo di Blender «Temple» (EM 1.6.24) si chiama «Temple · from Blender (sync)» nell'EMTree e nella striscia del nome, una riga dice che è attivo, e le versioni EM diverse sono dette", async () => {
+  const temple = (em, units) => ({ header: { format: "em.json", version: "1.0", datamodel_versions: { nodes: em } },
+    graph: { graph_id: `t-${em}`, name: "Temple", nodes: units.map((u) => ({ id: u, node_type: "US", name: u })), edges: [] } });
+  const fromBlender = temple("1.6.24", ["SU001", "SU002"]);
+  const { p, ctx, errors } = await open({ doc: null, locale: "en",
+    init: { "emstudio.settings": JSON.stringify({ sync: { protocol: "ws", host: "localhost", port: 8898 } }) },
+    wsRoute: { pattern: /localhost:8898/, handler: (ws) => {
+      ws.onMessage((m) => {
+        const msg = JSON.parse(String(m));
+        if (msg.type === "request_snapshot") ws.send(JSON.stringify({ v: 2, type: "snapshot", source: "blender", payload: { doc: fromBlender, host: { tool: "Blender" } } }));
+      });
+    } } });
+  await p.waitForFunction(() => !!window.__EM_DRAG__, null, { timeout: 20000 });
+  await p.evaluate(([d]) => window.__EM_DRAG__.openAt(d, "/tmp/y2/Temple.em.json"), [temple("1.6.16", ["SU001"])]);
+  await p.waitForTimeout(1500);
+  await p.click("#dd-mode .dd-toggle");
+  await p.click("#btn-mode-sidecar");
+  await p.waitForTimeout(2500);
+  const r = await p.evaluate(() => ({ slots: window.__EM_DRAG__.slots(), strip: document.getElementById("ns-title")?.textContent,
+    log: window.__EM_DRAG__.log().map((l) => l.message) }));
+  await workspace(p, "assets");
+  const tree = await p.evaluate(() => [...document.querySelectorAll(".et-pick")].map((e) => e.textContent.trim()));
+  await ctx.close();
+  const active = r.slots.find((x) => x.active);
+  return { pass: active?.name === "Temple · from Blender (sync)" && /Temple · from Blender \(sync\)/.test(r.strip ?? "")
+      && tree.some((x) => /Temple · from Blender \(sync\)/.test(x))
+      && r.log.some((m) => /active graph is now «Temple · from Blender \(sync\)», EM 1\.6\.24/.test(m))
+      && r.log.some((m) => /EM 1\.6\.24, the open file with EM 1\.6\.16/.test(m)) && !errors.length,
+    detail: { slots: r.slots, strip: r.strip, tree, log: r.log.filter((m) => /Blender|EM 1/.test(m)), errors } };
+});
+
+test("X1.blocked", "X1 · in Standalone, Inspector di un'unità: «Model the proxy in Blender» è spento in modo visibile (tratteggiato, aria-disabled) e accanto c'è la frase «connect (Mode › Sidecar)» col gesto «Connect to Blender»", async () => {
+  const { p, ctx, errors } = await open({ doc: "catena", locale: "en" });
+  await pick(p, "USM101");
+  const r = await p.evaluate(() => {
+    const b = [...document.querySelectorAll(".insp-btn")].find((x) => /Model the proxy in Blender/.test(x.textContent));
+    const why = document.querySelector(".insp-blocked");
+    return b && { disabled: b.disabled, aria: b.getAttribute("aria-disabled"), cls: b.className,
+      border: getComputedStyle(b).borderStyle, why: why?.querySelector("span")?.textContent ?? null,
+      fix: why?.querySelector(".insp-blocked-fix")?.textContent ?? null };
+  });
+  await ctx.close();
+  return { pass: !!r && r.disabled && r.aria === "true" && r.border === "dashed" && /Mode › Sidecar/.test(r.why ?? "")
+      && r.fix === "Connect to Blender" && !errors.length, detail: { r, errors } };
+});
+
+const TEMPIO = process.env.TEMPIO_FILE ?? "/tmp/dev33-banco/tempio.em.json";
+test("TI3.ids", "T-I3 · Tempio (copia), Inspector di USM01b: con «Show node UUIDs» spento nessun graph_id né original_id, la grafica yEd dietro «Technical details» chiuso, niente label né stratigraphic_kind doppi; acceso, gli id ci sono (dentro «Technical details»)", async () => {
+  if (!existsSync(TEMPIO)) return { pass: false, detail: { missing: TEMPIO } };
+  const run = async (showIds) => {
+    const { p, ctx, errors } = await open({ doc: null, locale: "en",
+      init: { "emstudio.settings": JSON.stringify({ developer: { showNodeIds: showIds } }) } });
+    await p.waitForFunction(() => !!window.__EM_DRAG__, null, { timeout: 20000 });
+    await p.evaluate(([d]) => window.__EM_DRAG__.openAt(d, "/tmp/dev33-banco/tempio.em.json"), [JSON.parse(readFileSync(TEMPIO, "utf8"))]);
+    await p.waitForTimeout(3000);
+    await pick(p, "698e2c22-2e87-4773-97d4-c3107fc63fe9");
+    const r = await p.evaluate(() => {
+      const root = document.querySelector(".insp-data")?.closest("#inspector, .insp-root, [data-surface], .tile-area") ?? document;
+      const keys = (sel) => [...root.querySelectorAll(sel)].map((d) => d.textContent);
+      const tech = root.querySelector("details.insp-tech");
+      return { main: keys(":scope .insp-data:not(details .insp-data) dt"), tech: tech ? [...tech.querySelectorAll("dt")].map((d) => d.textContent) : [],
+        open: tech?.open ?? null, text: root.textContent };
+    });
+    await ctx.close();
+    return { ...r, errors };
+  };
+  const off = await run(false), on = await run(true);
+  const noIds = (x) => !x.main.includes("graph_id") && !x.main.includes("original_id") && !x.tech.includes("graph_id") && !x.tech.includes("original_id");
+  return { pass: noIds(off) && off.open === false && ["shape", "y_pos", "fill_color", "border_style", "symbol"].every((k) => off.tech.includes(k))
+      && !off.main.includes("label") && !off.main.includes("stratigraphic_kind")
+      && on.tech.includes("graph_id") && on.tech.includes("original_id") && !on.main.includes("graph_id") && !off.errors.length && !on.errors.length,
+    detail: { off: { main: off.main, tech: off.tech, open: off.open }, on: { main: on.main, tech: on.tech } } };
+});
+
+test("TT1.undated", "T-T1 · Tempio (copia, nessuna epoca con date): «Check the chronology…» dice «No epoch has dates: nothing to check» col gesto «Write the epochs' dates…», mai «No overlap»", async () => {
+  if (!existsSync(TEMPIO)) return { pass: false, detail: { missing: TEMPIO } };
+  const { p, ctx, errors } = await open({ doc: null, locale: "en" });
+  await p.waitForFunction(() => !!window.__EM_DRAG__, null, { timeout: 20000 });
+  await p.evaluate(([d]) => window.__EM_DRAG__.openAt(d, "/tmp/dev33-banco/tempio.em.json"), [JSON.parse(readFileSync(TEMPIO, "utf8"))]);
+  await p.waitForTimeout(3000);
+  await openChrono(p);
+  await p.waitForTimeout(600);
+  const r = await p.evaluate(() => ({ cards: [...document.querySelectorAll(".chr-card")].map((c) => c.textContent),
+    gesture: [...document.querySelectorAll(".chr-card.none button")].map((b) => b.textContent) }));
+  if (r.gesture.length) await p.click(".chr-card.none button");
+  await p.waitForTimeout(200);
+  const focus = await p.evaluate(() => document.activeElement?.dataset?.chnum ?? null);
+  await ctx.close();
+  return { pass: r.cards.some((c) => /No epoch has dates: nothing to check/.test(c)) && !r.cards.some((c) => /No overlap/.test(c))
+      && r.gesture.includes("Write the epochs' dates…") && /\|start$/.test(focus ?? "") && !errors.length,
+    detail: { ...r, focus, errors } };
 });
 
 test("F8.node", "F8 (U17) · Impostazioni › Sync: «Il tuo nodo StratiGraph» prima e a parte da Blender; il campo vuoto dice «per esempio …»; il rimando di «Chi sei» porta dritto al campo; «Prova» dice raggiungibile, versione e modi d'accesso; la stanza sta col nodo, nella lingua dell'interfaccia", async () => {

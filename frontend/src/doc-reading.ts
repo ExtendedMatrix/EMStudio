@@ -208,7 +208,11 @@ if (typeof document !== "undefined") {
 }
 
 function imageStage(ctx: ReadingStageCtx, reads: string[], owner: HTMLElement, stageEl: HTMLElement): HTMLElement {
-  const tool: DocTool | null = ctx.tool ?? (ctx.armed ? "rect" : null);
+  // S4 · the image never traces on its own: an armed reading says WHOSE the next
+  // trace is, the gesture «Region»/«Polygon» says that there is one. Armed alone
+  // used to mean «rect», so opening Doc on a reading turned the first drag meant
+  // to move the picture into a region (dev.17, D.02.01).
+  const tool: DocTool | null = ctx.tool ?? null;
   const tracing = tool === "rect" || tool === "polygon";
   const wrap = el("div", "rd-img" + (tracing ? " armed" : ""));
   if (!ctx.imageUrl) {
@@ -344,7 +348,10 @@ function imageStage(ctx: ReadingStageCtx, reads: string[], owner: HTMLElement, s
       svg.removeEventListener("pointermove", move);
       svg.removeEventListener("pointerup", up);
       const w = Math.abs(b[0] - a[0]), h = Math.abs(b[1] - a[1]);
-      if (w < 0.005 || h < 0.005) return;   // a click, not a region
+      // a click, not a region — measured in SCREEN pixels: 0.5 % of a large
+      // picture is a hand's tremor
+      const r = svg.getBoundingClientRect();
+      if (w * r.width < 6 || h * r.height < 6) return;
       const rect = [q(Math.min(a[0], b[0])), q(Math.min(a[1], b[1])), q(w), q(h)];
       deliver({ kind: "region2d", shape_kind: "rect", rect }, anchorOf(rect[0], rect[1], rect[2], rect[3]));
     };

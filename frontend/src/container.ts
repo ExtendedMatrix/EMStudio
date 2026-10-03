@@ -24,7 +24,7 @@
  * own section, `graphs.<id>.layout`; the file-level `layout` is still written, as
  * a COPY of the active graph's, for whoever reads only that (Heriverse, old
  * files). Reading: a member's own layout if it has one; else the file-level one
- * for the ACTIVE graph only (or the only graph); the other graphs of an old file
+ * for ONE graph — the one whose nodes it positions, else the active one; the other graphs of an old file
  * are laid out afresh, said once. Same rule as `s3dgraphy/container.py`
  * (`resolve_layouts`), held equal by `testdata/container-layout-parity.json`, a
  * byte copy of s3Dgraphy's `tests/fixtures/` file.
@@ -116,10 +116,14 @@ function hasLayout(l: unknown): l is LayoutObj {
  * rule, the same as `s3dgraphy.container.resolve_layouts`:
  *
  * 1. a member that carries `graphs.<id>.layout` keeps its own;
- * 2. otherwise the file-level `layout` goes to the ACTIVE graph — or the only one
- *    — and to no other: in an old file it was ONE graph's arrangement, and handing
- *    it to the rest was the bug (San Pietro: the seed's layout, the real graph
- *    with no positions);
+ * 2. otherwise the file-level `layout` goes to ONE graph and to no other: in an
+ *    old file it was ONE graph's arrangement, and handing it to the rest was the
+ *    bug. That graph is the one whose nodes the layout positions (`nodeIds`, most
+ *    positions wins) — not simply the active one: an old file kept the layout of
+ *    the graph laid out LAST, which may be a seed (San Pietro, dev.17: the seed's
+ *    three positions went to the real graph, which saved them as its own and was
+ *    never laid out). Ties, no positions, no `nodeIds` → the ACTIVE graph, or the
+ *    only one;
  * 3. the rest get nothing. They are `fresh` only in an OLD file (a file-level
  *    layout and no member with its own), where positions may have been lost to
  *    another graph — worth saying, once.
@@ -129,6 +133,7 @@ export function resolveLayouts(
   own: Record<string, LayoutObj>,
   fileLayout: LayoutObj | null,
   activeGraphId: string | null,
+  nodeIds?: Record<string, string[]>,
 ): { layouts: Record<string, LayoutObj>; fresh: string[] } {
   const layouts: Record<string, LayoutObj> = {};
   const fresh: string[] = [];
@@ -136,6 +141,18 @@ export function resolveLayouts(
   const anyOwn = Object.keys(own).length > 0;
   let heir = activeGraphId && graphIds.includes(activeGraphId) ? activeGraphId : graphIds[0] ?? null;
   if (graphIds.length === 1) heir = graphIds[0];
+  else if (file && nodeIds) {
+    const placed = new Set(Object.keys((file.positions as Record<string, unknown> | undefined) ?? {}));
+    const counts: Record<string, number> = {};
+    for (const gid of graphIds) {
+      if (gid in own) continue;
+      counts[gid] = (nodeIds[gid] ?? []).filter((n) => placed.has(n)).length;
+    }
+    const best = Math.max(0, ...Object.values(counts));
+    if (best > 0 && (counts[heir ?? ""] ?? 0) < best) {
+      heir = graphIds.find((gid) => counts[gid] === best) ?? heir;
+    }
+  }
   for (const gid of graphIds) {
     if (gid in own) layouts[gid] = own[gid];
     else if (gid === heir && file) layouts[gid] = file;
@@ -249,6 +266,7 @@ export function parseContainer(doc: unknown): ParsedContainer {
   const header = doc.header ?? { format: "em.json", version: "1.0" };
   const members: ContainerMember[] = [];
   const own: Record<string, LayoutObj> = {};
+  const nodeIds: Record<string, string[]> = {};
   let shelf: GraphSection | null = null;
   let corpus: GraphSection | null = null;
   for (const [memberId, section] of Object.entries(doc.graphs)) {
@@ -272,6 +290,10 @@ export function parseContainer(doc: unknown): ParsedContainer {
       own[id] = ownLayout as LayoutObj;
     }
     // the layout is decided below, once every member and the active id are known
+    const rawNodes = (rest as { nodes?: unknown }).nodes;
+    nodeIds[id] = (Array.isArray(rawNodes) ? rawNodes : [])
+      .filter((n: unknown) => !!n && typeof n === "object" && (n as { id?: unknown }).id != null)
+      .map((n: unknown) => String((n as { id: unknown }).id));
     members.push({ id, doc: { header, graph } as unknown as EmDocument });
   }
 
@@ -285,9 +307,10 @@ export function parseContainer(doc: unknown): ParsedContainer {
   }
   if (!activeGraphId) activeGraphId = members[0]?.id ?? null;
 
-  // F4 · one layout per graph: its own, or the file's for the active one only
+  // F4 · one layout per graph: its own, or the file's for the graph it places
   const { layouts, fresh } = resolveLayouts(
-    members.map((m) => m.id), own, (doc.layout as LayoutObj | undefined) ?? null, activeGraphId);
+    members.map((m) => m.id), own, (doc.layout as LayoutObj | undefined) ?? null, activeGraphId,
+    nodeIds);
   for (const m of members) {
     if (layouts[m.id]) (m.doc as unknown as { layout?: LayoutObj }).layout = layouts[m.id];
   }

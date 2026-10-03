@@ -231,6 +231,9 @@ export const SYNC_ACCEPTS: SyncAccept[] = ["nothing", "selection", "everything"]
 // `SOURCE` now lives in `wire.ts` beside the envelope it belongs to: one
 // spelling of "who is speaking", used by both the builder and the echo guard.
 
+/** Y1 · how often a sidecar asks again for a host that is not there */
+export const SIDECAR_RETRY_MS = 3000;
+
 export class SyncClient {
   private ws: WebSocket | null = null;
   private url = "";
@@ -258,6 +261,10 @@ export class SyncClient {
   //: not: a dropped Wi-Fi must not end a session, and coming back is where the
   //: rebase check belongs.
   private hub: HubOptions | null = null;
+  //: Y1 · a SIDECAR pairing wanted by the person: it is tried again, every few
+  //: seconds, while the host is not there (Blender reopening a file stops its
+  //: bridge, and dev.17 stayed disconnected until Mode › Sidecar was chosen again)
+  private sidecar = false;
   private attempt = 0;
   private retryTimer: number | null = null;
 
@@ -297,7 +304,8 @@ export class SyncClient {
     this.disconnect();
     this.url = url;
     this.cb = cb;
-    this.hub = null;              // a sidecar pairing: no room, no reconnect
+    this.hub = null;              // a sidecar pairing: no room, a short retry (Y1)
+    this.sidecar = true;
     this.manualClose = false;
     this.attempt = 0;
     this.open();
@@ -313,6 +321,7 @@ export class SyncClient {
    */
   connectHub(options: HubOptions, cb: SyncCallbacks): void {
     this.disconnect();
+    this.sidecar = false;
     this.hub = { ...options };
     this.cb = cb;
     this.manualClose = false;
@@ -360,7 +369,21 @@ export class SyncClient {
     };
     ws.onclose = () => {
       this.cb?.onStatus("closed");
-      if (this.manualClose || !this.hub) return;
+      if (this.manualClose) return;
+      if (!this.hub) {
+        if (!this.sidecar) return;
+        // Y1 · the host is not there (yet, or any more): ask again, at a short
+        // fixed interval — a laptop pairing has nobody to hammer
+        this.attempt += 1;
+        const delay = SIDECAR_RETRY_MS;
+        this.cb?.onReconnect?.(this.attempt, delay);
+        this.retryTimer = window.setTimeout(() => {
+          this.retryTimer = null;
+          if (this.manualClose || !this.sidecar) return;
+          this.open();
+        }, delay);
+        return;
+      }
       // P4.3 · a room reconnects. Backoff so a server that is down is not
       // hammered, capped so a session that comes back is not left waiting for
       // minutes; every attempt re-opens with the CURRENT `since`, which is what
@@ -525,9 +548,15 @@ export class SyncClient {
     }
   }
 
+  /** Y1 · a sidecar pairing is waiting for its host (closed, retry pending) */
+  get retrying(): boolean {
+    return this.sidecar && !this.manualClose && !this.connected;
+  }
+
   disconnect(): void {
     this.manualClose = true;
     this.hub = null;
+    this.sidecar = false;
     if (this.retryTimer !== null) {
       window.clearTimeout(this.retryTimer);
       this.retryTimer = null;

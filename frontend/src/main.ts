@@ -336,6 +336,8 @@ import type {
   StratiMinerHandlers,
 } from "./stratiminer";
 import { type HostInfo, SyncClient, SYNC_ACCEPTS, type SyncAccept } from "./sync";
+import { type Access, type ConnectionState, type Reach, nodeApi, renderConnectionPanel,
+  renderRoomPanel, statusParts } from "./connection";
 import * as alignment from "./alignment";
 import type { GraphOp } from "./model";
 import { buildCommand, type CommandVerb } from "./commands";
@@ -1122,8 +1124,7 @@ function setModeIndicator(mode: SessionMode | boolean): void {
     typeof mode === "boolean" ? (mode ? "sidecar" : "standalone") : mode;
   sessionMode = m;
   const connected = m !== "standalone";
-  modeIndicator.textContent = t(`mode.${m}`);
-  modeIndicator.title = t(`mode.${m}Title`);
+  renderStatusLine();
   sidecarDetail.classList.toggle("hidden", !connected);
   if (connected) renderSidecarDetail();
   else {
@@ -1141,6 +1142,148 @@ function setModeIndicator(mode: SessionMode | boolean): void {
     ?.classList.toggle("mode-active", m === "hub");
   renderSyncControl();
 }
+
+// ── K1 · X2 · the status line: mode · node · access · reach · room ──────────
+// One button in the footer. The line says where this session is connected; the
+// click opens the connection panel (the Mode menu's three choices, the node,
+// the room and their gestures). See `connection.ts`.
+let nodeReach: Reach = "unknown";
+/** Y1 · a sidecar pairing waiting for its host */
+let sidecarWaiting = false;
+let roomTitleOf: { room: string; title: string } | null = null;
+function connectionAccess(): Access {
+  // the first status line is drawn at boot, before the identity module's
+  // `let`s exist: «none» until they do
+  try {
+    if (nodeIdentity?.authMode === "node_password") return "node_password";
+    if (nodeIdentity) return "orcid_node";
+    return currentIdentity() ? "declared" : "none";
+  } catch {
+    return "none";
+  }
+}
+function connectionState(): ConnectionState {
+  const room = sync.connected ? sync.room : null;
+  return { mode: sidecarWaiting ? "sidecar" : sessionMode, waiting: sidecarWaiting,
+    node: getSettings().sync.hubUrl.trim(), access: connectionAccess(),
+    reach: nodeReach, room, roomTitle: room && roomTitleOf?.room === room ? roomTitleOf.title : null };
+}
+function renderStatusLine(): void {
+  const st = connectionState();
+  modeIndicator.textContent = statusParts(st).join(" · ");
+  modeIndicator.title = `${t(`mode.${st.mode}Title`)}\n${t("conn.statusTitle")}`;
+  modeIndicator.dataset.reach = st.reach;
+  modeIndicator.setAttribute("role", "button");
+  modeIndicator.tabIndex = 0;
+  if (st.room && roomTitleOf?.room !== st.room) void fetchRoomTitle(st.room);
+  const pop = document.getElementById("conn-pop");
+  if (pop && !pop.classList.contains("hidden") && pop.dataset.view === "conn") paintConnectionPanel(pop);
+}
+async function fetchRoomTitle(room: string): Promise<void> {
+  const base = getSettings().sync.hubUrl.trim();
+  if (!base) return;
+  roomTitleOf = { room, title: room };   // asked once per room
+  try {
+    const r = await nodeApi(base, () => hubToken).room(room);
+    roomTitleOf = { room, title: r.title || room };
+    renderStatusLine();
+  } catch { /* the id stands in: the line still says which room */ }
+}
+/** K1 · the node is asked every 10 s while one is set: «not reachable» within
+ *  the 30 s the request asks for, and back as soon as it answers again */
+async function pollNodeReach(): Promise<void> {
+  const base = getSettings().sync.hubUrl.trim().replace(/\/+$/, "");
+  let next: Reach = "unknown";
+  if (base) {
+    const ctl = new AbortController();
+    const timer = setTimeout(() => ctl.abort(), 5000);
+    try {
+      const r = await fetch(`${base}/v1/health`, { signal: ctl.signal, cache: "no-store" });
+      const j = r.ok ? await r.json().catch(() => null) as { service?: string } | null : null;
+      next = j?.service === "stratigraph-server" ? "reachable" : "unreachable";
+    } catch {
+      next = "unreachable";
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+  if (next !== nodeReach) {
+    if (base && nodeReach !== "unknown") (next === "reachable" ? logInfo : logWarn)(t(`conn.reach.${next}`) + ` — ${base}`);
+    nodeReach = next;
+    renderStatusLine();
+  }
+}
+setTimeout(() => void pollNodeReach(), 1500);
+setInterval(() => void pollNodeReach(), 10000);
+
+function connectionPop(): HTMLElement {
+  let pop = document.getElementById("conn-pop");
+  if (!pop) {
+    pop = document.createElement("div");
+    pop.id = "conn-pop";
+    pop.className = "hidden";
+    document.body.appendChild(pop);
+    document.addEventListener("pointerdown", (e) => {
+      const p = document.getElementById("conn-pop");
+      if (!p || p.classList.contains("hidden")) return;
+      const tg = e.target as Node;
+      if (p.contains(tg) || modeIndicator.contains(tg)) return;
+      p.classList.add("hidden");
+    });
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "Escape") document.getElementById("conn-pop")?.classList.add("hidden");
+    });
+  }
+  return pop;
+}
+function placeConnectionPop(pop: HTMLElement): void {
+  const r = modeIndicator.getBoundingClientRect();
+  pop.style.left = `${Math.max(8, Math.min(r.left, innerWidth - 380))}px`;
+  pop.style.bottom = `${Math.max(8, innerHeight - r.top + 6)}px`;
+}
+function paintConnectionPanel(pop: HTMLElement): void {
+  pop.dataset.view = "conn";
+  renderConnectionPanel(pop, connectionState(), {
+    setMode: (m) => {
+      pop.classList.add("hidden");
+      document.getElementById(`btn-mode-${m}`)?.click();
+    },
+    openNodeSettings: () => { pop.classList.add("hidden"); openNodeSettings(); },
+    openRoomSettings: () => openRoomPanel(),
+    openOnNode: () => { pop.classList.add("hidden"); shareThisRoom(); },
+    leaveRoom: () => { pop.classList.add("hidden"); if (sync.connected) btnSync.click(); },
+  });
+  placeConnectionPop(pop);
+}
+function toggleConnectionPanel(): void {
+  const pop = connectionPop();
+  if (!pop.classList.contains("hidden")) { pop.classList.add("hidden"); return; }
+  pop.classList.remove("hidden");
+  paintConnectionPanel(pop);
+  void pollNodeReach();
+}
+/** K2 · the room's settings, in the same popover: the node's own API */
+function openRoomPanel(roomId?: string): void {
+  const base = getSettings().sync.hubUrl.trim();
+  const room = roomId ?? (sync.connected ? sync.room : null) ?? getSettings().sync.hubRoom;
+  if (!base || !room) { toast(t("share.noRoom")); return; }
+  const pop = connectionPop();
+  pop.classList.remove("hidden");
+  pop.dataset.view = "room";
+  void renderRoomPanel(pop, {
+    api: nodeApi(base, () => hubToken),
+    roomId: room,
+    me: nodeIdentity?.orcid ?? currentIdentity()?.orcid ?? null,
+    openOnNode: () => { pop.classList.add("hidden"); shareThisRoom(); },
+    leaveRoom: () => { pop.classList.add("hidden"); if (sync.connected) btnSync.click(); },
+    copy: (text) => { void navigator.clipboard?.writeText(text).then(() => toast(t("room.copied")), () => {}); },
+  }).then(() => placeConnectionPop(pop));
+  placeConnectionPop(pop);
+}
+modeIndicator.addEventListener("click", () => toggleConnectionPanel());
+modeIndicator.addEventListener("keydown", (e) => {
+  if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggleConnectionPanel(); }
+});
 
 // ── MODES1 · the sync control ───────────────────────────────────────────────
 //
@@ -1230,7 +1373,8 @@ function renderSyncControl(): void {
   }
   const label = document.createElement("span");
   label.className = "sync-ctl-label";
-  label.textContent = t("sync.acceptLabel");
+  // Y3 · words, not glyphs: «Accept ⊘» read as nothing at all (dev.17)
+  label.textContent = t("sync.acceptLabel", { tool: hostInfo.tool || syncToolLabel() || t("sync.theHost") });
   // The hint is the whole reason the gate is here and not on the way out, so it
   // travels with the control instead of living in a manual nobody opens.
   label.title = t("sync.acceptHint");
@@ -1238,7 +1382,7 @@ function renderSyncControl(): void {
   for (const what of SYNC_ACCEPTS) {
     const b = document.createElement("button");
     b.className = "sync-ctl-btn" + (what === active ? " on" : "");
-    b.textContent = SYNC_GLYPHS[what];
+    b.textContent = `${SYNC_GLYPHS[what]} ${t(`sync.acceptShort.${what}`)}`;
     b.title = `${t(`sync.accept.${what}`)} — ${t(`sync.acceptTitle.${what}`)}`;
     b.dataset.accept = what;
     b.addEventListener("click", () => setSyncAccept(what));
@@ -1656,6 +1800,18 @@ window.__EM_SCENE__ = () => {
   measureRegion: (id: string) => (store ? chain.measureOf(store.doc, id) : null),
   /** MICRO-3DTILES · a document asked for, as «Apri» asks: the Doc that shows it */
   openDoc: (docId: string) => requestDoc(docId, { from: activeWin(), reading: null })?.id ?? null,
+  /** K1/K2 · join a room with a token (as the sign-in would), the status line,
+   *  and the room's settings panel */
+  joinRoom: (url: string, room: string, token: string | null) => {
+    hubToken = token;
+    void askNodeWhoIAm(url).then(() => connectToHub(url, room, token));
+  },
+  statusLine: () => modeIndicator.textContent,
+  roomPanel: (room?: string) => openRoomPanel(room),
+  /** Y5 · a host's answer to a command, as the sync channel delivers it */
+  commandResult: (res: Parameters<typeof applyCommandResult>[0]) => applyCommandResult(res),
+  /** CATENA · «Read» on a reading: its document's window, the reading armed */
+  openReading: (x: string) => openReading(x),
   /** SPAZIO · a Doc split by hand (the corner gesture's split), its new id */
   splitDoc: (winId: string) => {
     const made = splitWindow(winId, "row", activeWorkspace(), 0.5, "b");
@@ -2321,6 +2477,8 @@ function renderInspectorInto(host: HTMLElement): void {
           (e) => (digest && e.checksum === digest) || e.name === node.name);
       },
       commandsBlocked: commandsBlockedReason,
+      commandsFix: () => (sync.connected ? null
+        : { label: t("cmd.connect"), run: () => { if (!sync.connected) btnSync.click(); } }),
       isResourceOpen: (id) => openResourceFiles.has(id),
       onToggleResourceFiles: (id) => toggleResourceFiles(id),
       onReplaceFile: (resId, fileId) => { void replaceFileFlow(resId, fileId); },
@@ -2446,6 +2604,13 @@ function refreshInspector(): void {
   if (logDrawer.open && logDrawer.onlySel) renderLogDrawer();
 }
 
+/** Y2 · the EM datamodel a document says it was written with («1.6.24»), or "" */
+function emOfDoc(d: EmDocument): string {
+  const h = (d.header ?? {}) as Record<string, unknown>;
+  const dm = h["datamodel_versions"] as Record<string, unknown> | undefined;
+  return String(dm?.["nodes"] ?? h["em_version"] ?? "").trim();
+}
+
 /** AUDIT N6 · a graph's title: its name, else «Senza titolo» — never the UUID
  *  (TempluMare showed «a210d21b-fddc-…», its graph_id). */
 function graphTitle(st: DocumentStore): string {
@@ -2471,7 +2636,8 @@ function renderNameStrip(): void {
     return;
   }
   if (!n) {
-    title.textContent = graphTitle(store);
+    const slot = emtree.active();
+    title.textContent = graphTitle(store) + (slot?.originSuffix ? ` · ${slot.originSuffix}` : "");
     ctx.textContent = t("strip.graphCtx", { n: String(store.liveNodes().length) });
     return;
   }
@@ -2877,9 +3043,10 @@ function updateWindowTitle(): void {
   let title = "EMStudio";
   if (store) {
     const g = store.doc.graph;
+    const slot = emtree.active();
     const name = currentFilePath
       ? baseName(currentFilePath)
-      : String(g["name"] ?? g.graph_id ?? "untitled");
+      : slot ? slotLabel(slot) : String(g["name"] ?? g.graph_id ?? "untitled");
     title = `${name}${store.dirty ? " ●" : ""} — EMStudio`;
   }
   void setWindowTitle(title);
@@ -3790,6 +3957,7 @@ function wireStore(s: DocumentStore): void {
   s.onOp((op) => {
     if (s !== store) return;
     traceOp(op); // SHIFT-A · the node history reads this session's own ops
+    queueOpLog(s, op); // C4 · …and the Log says what the hand changed
     // P4.3 · a ROOM speaks per-field CRDT operations; a sidecar speaks the
     // store's own op shape. One writing path, two vocabularies at the door —
     // and the translation happens once, where the door is.
@@ -4387,8 +4555,12 @@ function loadDocument(
   // otherwise those few positions make the doc look "already laid out" and we
   // skip the em-core auto-layout, leaving every position-less node (e.g. a
   // whole Blender sync snapshot) unrendered. Only the boxes would show.
+  // G3 · …and positions of THIS graph's nodes: a layout that places none of them
+  // is another graph's (an old two-graph file gave the seed's to the real graph,
+  // which then saved three foreign positions as its own and never got laid out)
+  const ownIds = new Set(d.graph.nodes.map((n) => String(n.id)));
   const hadStoredPositions =
-    Object.keys(d.layout?.positions ?? {}).length > 0;
+    Object.keys(d.layout?.positions ?? {}).some((id) => ownIds.has(id));
   const loaded = new DocumentStore(d);
   // an epoch's written dates get their temporal ParadataNodeGroup — ensured now,
   // silently (before the change/op listeners are wired) so it neither pushes to
@@ -5917,7 +6089,7 @@ function sendHostCommand(verb: string, target: string): void {
     return;
   }
   pendingCommands.set(msg.payload.cmd_id, { verb, target });
-  logInfo(t("cmd.sent", { verb, target: nodeLabelFor(target) ?? target }));
+  logInfo(t("cmd.sent", { verb, target: nodeLabelFor(target) ?? target }), [target]);
   info.textContent = t("cmd.sent", { verb, target: nodeLabelFor(target) ?? target });
 }
 
@@ -5940,7 +6112,16 @@ function applyCommandResult(res: {
   const what = asked ? `${asked.verb} · ${nodeLabelFor(asked.target) ?? asked.target}` : res.cmd_id;
   if (!res.ok) {
     toast(t("cmd.failed", { what, error: res.error ?? "?" }));
-    logError(t("cmd.failed", { what, error: res.error ?? "?" }));
+    logError(t("cmd.failed", { what, error: res.error ?? "?" }), asked ? [asked.target] : []);
+    return;
+  }
+  // Y5 · the unit's proxy is already in the scene: the host selected it and
+  // wrote nothing — said in those words, not as «0 nodes came back»
+  if (res.info?.already) {
+    const msg = t("cmd.already", { what, object: String(res.info.proxy_object ?? "?") });
+    toast(msg);
+    logInfo(msg, asked ? [asked.target] : []);
+    info.textContent = msg;
     return;
   }
   const nodes = (res.delta?.nodes ?? []) as EmNode[];
@@ -5966,7 +6147,8 @@ function applyCommandResult(res: {
     what, nodes: String(added.nodes), edges: String(added.edges),
   });
   toast(msg);
-  logInfo(msg);
+  // Y7 · about the unit asked for and what came back, so «selection only» keeps it
+  logInfo(msg, [...(asked ? [asked.target] : []), ...nodes.map((n) => String(n.id))]);
   info.textContent = msg;
 }
 
@@ -6931,8 +7113,8 @@ function commitNodeDrag(wx: number, wy: number, alt: boolean): void {
   const st = store;
   const s = scene();
   if (!st || !s || !dragMoving || !dragNodeId) return;
-  const t = liveDropTarget(wx, wy, alt);
-  const reassign = t && !sameTarget(t, dragStartTarget) ? t : null;
+  const drop = liveDropTarget(wx, wy, alt);
+  const reassign = drop && !sameTarget(drop, dragStartTarget) ? drop : null;
   const dropped = new Map<string, { x: number; y: number }>();
   for (const id of dragMoving.nodes.keys()) {
     const n = s.byId.get(id);
@@ -6967,6 +7149,10 @@ function commitNodeDrag(wx: number, wy: number, alt: boolean): void {
     slideSuppressed--;
   }
   if (message) toastUndo(message, st);
+  // C4 · ONE line for the drop: where it went, or that it moved
+  dropOpLog();
+  logInfo(message ? `${t("log.edit.prefix")}: ${message}`
+    : `${t("log.edit.prefix")}: ${t("log.edit.moved", { names: opLogList(ids.map((id) => opLogName(st, id))) })}`, ids);
 }
 
 /** Forget the drag in flight (after a commit, or instead of one). */
@@ -9586,6 +9772,14 @@ document
 // Sync toggle: connect/disconnect the live selection bridge (ADR-002).
 const btnSync = document.getElementById("btn-sync") as HTMLButtonElement;
 btnSync.addEventListener("click", () => {
+  if (sync.retrying && !sync.room) {
+    // Y1 · waiting for Blender: the click stops waiting
+    sync.disconnect();
+    sidecarWaiting = false;
+    renderStatusLine();
+    info.textContent = t("sync.stoppedWaiting");
+    return;
+  }
   if (sync.connected) {
     sync.disconnect();
     clearDocument(); // the synced graph is the host's — don't leave it lingering
@@ -9616,6 +9810,26 @@ btnSync.addEventListener("click", () => {
       // (ADR-002: "sync mode = see the host's data"). Replaces the document.
       loadDocument(doc, "Blender (sync)");
       info.textContent = t("sync.loadedHost");
+      // Y2 · the graph from Blender says so after its name (EMTree, window
+      // title, name strip), the switch to it is a line, and a datamodel that is
+      // not the open file's is said — dev.17 opened «Temple» (EM 1.6.24) over a
+      // file's «Temple» (EM 1.6.16), active and unannounced
+      const fromBlender = emtree.active();
+      if (fromBlender) {
+        fromBlender.originSuffix = t("sync.fromBlender");
+        const theirs = emOfDoc(doc);
+        const mine = [...new Set(emtree.slots.filter((x) => x !== fromBlender && x.fileId)
+          .map((x) => emOfDoc(x.store.doc)).filter(Boolean))];
+        logInfo(t("sync.blenderActive", { name: slotLabel(fromBlender), em: theirs || "?" }));
+        if (theirs && mine.length && mine.some((v) => v !== theirs)) {
+          const said = t("sync.blenderOtherEm", { theirs, mine: mine.join(", ") });
+          logWarn(said);
+          toast(said);
+        }
+        refreshEMTree();
+        renderNameStrip();
+        updateWindowTitle();
+      }
       // provisional document label from the graph name, until the host reports
       // its actual file/database via host_info
       if (!hostInfo.file && !hostInfo.database) {
@@ -9651,7 +9865,19 @@ btnSync.addEventListener("click", () => {
       logInfo(reason);
       toast(t("sync.wireMismatch"));
     },
+    // Y1 · the host went away (or is not there yet): EMStudio asks again by
+    // itself, and says it is waiting — in the status line and the info bar
+    onReconnect: (attempt) => {
+      sidecarWaiting = true;
+      info.textContent = t("sync.waitingHost");
+      if (attempt === 1) logInfo(t("sync.waitingHost"));
+      renderStatusLine();
+    },
     onStatus: (state) => {
+      if (state === "open") {
+        if (sidecarWaiting) logInfo(t("sync.hostBack"));
+        sidecarWaiting = false;
+      }
       btnSync.classList.toggle("active", state === "open");
       // clear, high-visibility signal that we are in live-sync mode
       document.body.classList.toggle("sync-active", state === "open");
@@ -9659,7 +9885,7 @@ btnSync.addEventListener("click", () => {
       btnSync.textContent = state === "open" ? "Sync ●" : "Sync";
       if (state === "open") info.textContent = `sync: connected to ${syncUrl}`;
       else if (state === "closed")
-        info.textContent = t("sync.disconnectedHost");
+        info.textContent = sync.retrying ? t("sync.waitingHost") : t("sync.disconnectedHost");
     },
   });
 });
@@ -9669,10 +9895,10 @@ btnSync.addEventListener("click", () => {
 // Sidecar connects if not connected, Standalone disconnects if connected. Hub
 // is disabled (StratiGraph Server, later). The active mode's ✓ is set by setModeIndicator.
 document.getElementById("btn-mode-standalone")?.addEventListener("click", () => {
-  if (sync.connected) btnSync.click(); // disconnect → back to local document
+  if (sync.connected || sync.retrying) btnSync.click(); // disconnect → back to local document
 });
 document.getElementById("btn-mode-sidecar")?.addEventListener("click", () => {
-  if (!sync.connected) btnSync.click(); // connect → live-synced to the host
+  if (!sync.connected && !sync.retrying) btnSync.click(); // connect → live-synced to the host
 });
 // P4.3 · Hub is now a real mode with a real server behind it (StratiGraph Server, P4.2).
 // The endpoint and the room live in Settings; the TOKEN is asked for and kept in
@@ -10439,6 +10665,7 @@ function identitySentence(me: Identity | null = currentIdentity()): string {
 }
 
 function refreshIdentityChip(): void {
+  queueMicrotask(renderStatusLine);   // K1 · the access in the status line follows
   const chip = document.getElementById("footer-identity");
   if (!chip) return;
   const identity = currentIdentity();
@@ -13780,6 +14007,64 @@ const opTrail: OpTrace[] = [];
 function traceOp(op: import("./model").GraphOp): void {
   opTrail.push({ wall: Date.now(), op });
   if (opTrail.length > 500) opTrail.splice(0, opTrail.length - 500);
+}
+
+// ── C4 · the Log says what the hand changed ─────────────────────────────────
+// Until dev.17 «what happened» listed loads and reading warnings only: a region
+// created by a stray click on a picture (S4) changed the graph with no line at
+// all. Every local op of the active graph now lands here, ONE line per gesture
+// (the ops of one synchronous gesture are gathered and said together in a
+// microtask), with the nodes it is about. Remote ops do not emit, so a room's
+// traffic is not mistaken for the hand's.
+let opLogPending: { st: DocumentStore; op: import("./model").GraphOp; names: string[] }[] = [];
+function opLogName(st: DocumentStore, id: string): string {
+  const n = st.node(id) ?? (st.doc.graph.nodes as EmNode[]).find((x) => x.id === id);
+  return String(n?.name || id.slice(0, 8));
+}
+function queueOpLog(st: DocumentStore, op: import("./model").GraphOp): void {
+  const o = op as unknown as { node?: EmNode; node_id?: string; edge?: EmEdge };
+  const names = o.node ? [String(o.node.name || o.node.id.slice(0, 8))]
+    : o.node_id ? [opLogName(st, o.node_id)]
+    : o.edge ? [opLogName(st, o.edge.source), opLogName(st, o.edge.target)] : [];
+  if (!opLogPending.length) queueMicrotask(flushOpLog);
+  opLogPending.push({ st, op, names });
+}
+/** a gesture that says itself (a drop into a group, onto a lane) */
+function dropOpLog(): void { opLogPending = []; }
+function opLogList(names: string[]): string {
+  const uniq = [...new Set(names)];
+  return uniq.length <= 3 ? uniq.join(", ")
+    : t("log.edit.more", { shown: uniq.slice(0, 3).join(", "), n: String(uniq.length - 3) });
+}
+function flushOpLog(): void {
+  const batch = opLogPending;
+  opLogPending = [];
+  if (!batch.length) return;
+  const created: string[] = [], deleted: string[] = [], parts: string[] = [], ids = new Set<string>();
+  const edited = new Map<string, Set<string>>();
+  for (const { op, names } of batch) {
+    for (const id of opIds(op)) ids.add(id);
+    const o = op as unknown as { edge?: EmEdge; fields?: { field?: string }[]; patch?: Record<string, unknown> };
+    if (op.op === "add_node") created.push(names[0]);
+    else if (op.op === "delete_node") deleted.push(names[0]);
+    else if (op.op === "update_node") {
+      const f = edited.get(names[0]) ?? new Set<string>();
+      for (const x of o.fields?.map((y) => y.field).filter(Boolean) ?? Object.keys(o.patch ?? {})) f.add(String(x));
+      edited.set(names[0], f);
+    } else if (o.edge) {
+      parts.push(t(op.op === "add_edge" ? "log.edit.linked" : "log.edit.unlinked",
+        { a: names[0], b: names[1], rel: edgeTypeLabel(String(o.edge.edge_type ?? "")) }));
+    }
+  }
+  const out: string[] = [];
+  if (created.length) out.push(t("log.edit.created", { names: opLogList(created) }));
+  if (deleted.length) out.push(t("log.edit.deleted", { names: opLogList(deleted) }));
+  if (parts.length <= 3) out.push(...parts);
+  else out.push(...parts.slice(0, 3), t("log.edit.more", { shown: "…", n: String(parts.length - 3) }));
+  for (const [name, f] of [...edited].slice(0, 3)) {
+    out.push(t("log.edit.edited", { name, fields: [...f].join(", ") || "—" }));
+  }
+  logInfo(`${t("log.edit.prefix")}: ${out.join(" · ")}`, [...ids]);
 }
 
 /** The ids an op touches (the node it edits, or the two ends of its edge). */
@@ -18103,7 +18388,13 @@ function renderInspectorChronology(host: HTMLElement): void {
   if (!mine.length) {
     const p = document.createElement("p");
     p.className = "insp-hint";
-    p.textContent = t("chr.noOverlap");
+    // T1 · with no dates anywhere there is nothing to check, not «no overlap»
+    const anyDated = st.liveNodes().some((n) => n.node_type === "EpochNode"
+      && ["start_time", "end_time"].some((k) => {
+        const v = (n.data as Record<string, unknown> | undefined)?.[k];
+        return v !== undefined && v !== null && v !== "";
+      }));
+    p.textContent = anyDated ? t("chr.noOverlap") : t("chr.noDates");
     sec.appendChild(p);
   }
   const b = document.createElement("button");

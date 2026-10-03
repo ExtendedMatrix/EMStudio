@@ -56,6 +56,8 @@ export interface InspectorCallbacks {
    *  reason they cannot be, shown in the tooltip of the disabled button. An
    *  action that is offered and then refused is worse than one greyed out. */
   commandsBlocked?: () => string | null;
+  /** X1 · the gesture that lifts the block, when there is one here (connect) */
+  commandsFix?: () => { label: string; run: () => void } | null;
   /** P4.1b · empty ONE field, through the act that leaves its tombstone. */
   onClearField?: (nodeId: string, field: string) => void;
   /** DOCUMENTATION · put this asset on the shelf — the study's explicit
@@ -107,7 +109,26 @@ function toHexColor(v: unknown): string | null {
 }
 
 /** AUDIT1 · the four editorial fields, in the order a reader wants them. */
-const EDITORIAL_FIELDS = ["created_by", "created_at", "modified_by", "modified_at"];
+const EDITORIAL_FIELDS = ["created_by", "created_at", "modified_by", "modified_at",
+  "created_auth", "modified_auth"];
+
+/** I3/S5 · identifiers: shown ONLY with Advanced › «Show node UUIDs», and then
+ *  behind «Technical details» */
+const ID_FIELDS = new Set(["graph_id", "original_id", "original_emid", "emid", "uuid", "node_id"]);
+/** I3/S5 · machinery and the drawing inherited from yEd: behind «Technical
+ *  details», closed — an archaeologist reads the unit, not its y_pos */
+const TECH_FIELDS = new Set(["is_canonical", "y_pos", "x_pos", "shape", "fill_color", "border_style",
+  "border_color", "border_width", "symbol", "width", "height", "font_family", "font_size",
+  "font_style", "text_color", "label_color", "geometry", "yed_id", "graphml_id"]);
+
+/** S5 · how the last hand had entered, as a phrase — never `{"mode":"orcid"}` */
+function authPhrase(v: unknown): string {
+  const o = (v && typeof v === "object" ? v : { mode: v }) as { mode?: unknown; attested_by?: unknown };
+  if (o.mode === "orcid") return t("insp.authOrcid");
+  if (o.mode === "node_password") return o.attested_by
+    ? t("insp.authNodeBy", { node: String(o.attested_by) }) : t("insp.authNode");
+  return o.mode ? String(o.mode) : "";
+}
 
 /**
  * AUDIT1 · the last hand on this node — created/modified, by whom and when.
@@ -130,10 +151,11 @@ function renderEditorialStamps(root: HTMLElement, node: EmNode): void {
     const d = new Date(String(v));
     return Number.isNaN(d.getTime()) ? String(v) : d.toLocaleString();
   };
-  const line = (label: string, byKey: string, atKey: string): HTMLElement | null => {
+  const line = (label: string, byKey: string, atKey: string, authKey: string): HTMLElement | null => {
     const at = data[atKey];
     const by = data[byKey];
     if (!at && !by) return null;
+    const how = data[authKey] ? authPhrase(data[authKey]) : "";
     const row = el("div", "insp-stamp-row");
     row.appendChild(el("span", "insp-stamp-label", label));
     row.appendChild(el("span", "insp-stamp-when", at ? when(at) : "—"));
@@ -147,12 +169,13 @@ function renderEditorialStamps(root: HTMLElement, node: EmNode): void {
       a.title = "ORCID iD of the editor (automatic — not the interpretive author)";
       row.appendChild(a);
     }
+    if (how) row.appendChild(el("span", "insp-stamp-how", how));
     return row;
   };
 
   const rows = [
-    line("Created", "created_by", "created_at"),
-    line("Modified", "modified_by", "modified_at"),
+    line("Created", "created_by", "created_at", "created_auth"),
+    line("Modified", "modified_by", "modified_at", "modified_auth"),
   ].filter(Boolean) as HTMLElement[];
   if (!rows.length) return;
   root.appendChild(el("h3", "insp-sect", "Last hand (editorial)"));
@@ -325,10 +348,12 @@ export function renderInspector(
   // stratigraphic subtype). Read, not edited: the value is a CONCEPT of a
   // controlled vocabulary and EMStudio has no concept source to pick it from —
   // a free-text box would write labels without concepts, or invent URIs.
+  const shownAbove = new Set<string>(kindOf ? ["stratigraphic_kind"] : []);
   for (const rule of nodeElements(node.node_type)) {
     const key = (rule.em_json ?? `data.${rule.field}`).replace(/^data\./, "");
     const raw = ((node.data ?? {}) as Record<string, unknown>)[key];
     if (raw === undefined || raw === null || raw === "") continue;
+    shownAbove.add(key);
     const labelKey = `insp.el.${rule.field}`;
     const title = t(labelKey);
     root.appendChild(el("div", "insp-field-label", title === labelKey ? rule.field : title));
@@ -649,18 +674,29 @@ export function renderInspector(
       const blocked = cb.commandsBlocked?.() ?? null;
       const bar = el("div", "insp-actions");
       const b = document.createElement("button");
-      b.className = "insp-btn";
-      b.textContent = verb === "create_proxy_for_unit"
-        ? "Model the proxy in Blender"
-        : "Import geometry in Blender";
-      b.title = blocked
-        ? blocked
-        : "Ask the connected host to do this in its 3D scene; what it creates "
-          + "comes back into this graph.";
+      b.className = "insp-btn" + (blocked ? " insp-btn-off" : "");
+      b.textContent = verb === "create_proxy_for_unit" ? t("cmd.modelProxy") : t("cmd.importGeometry");
+      b.title = blocked ? blocked : t("cmd.hint");
       b.disabled = !!blocked;
+      b.setAttribute("aria-disabled", String(!!blocked));
       b.addEventListener("click", () => cb.onCommand!(verb, nodeId));
       bar.appendChild(b);
       root.appendChild(bar);
+      // X1/Y3 · a button that cannot be pressed says WHY beside it, in words,
+      // and offers the gesture that lifts the block when there is one here: the
+      // reason used to live only in the tooltip, and the off button looked on
+      // («the click does nothing, no message» — dev.17).
+      if (blocked) {
+        const why = el("div", "insp-blocked");
+        why.appendChild(el("span", "", blocked));
+        const fix = cb.commandsFix?.() ?? null;
+        if (fix) {
+          const go = el("button", "insp-btn insp-blocked-fix", fix.label) as HTMLButtonElement;
+          go.addEventListener("click", () => fix.run());
+          why.appendChild(go);
+        }
+        root.appendChild(why);
+      }
     }
   }
 
@@ -958,8 +994,19 @@ export function renderInspector(
   const data = (node as EmNode).data;
   if (data && Object.keys(data).length) {
     const dl = el("dl", "insp-data");
+    const tech = el("dl", "insp-data");
+    const showIds = getSettings().developer.showNodeIds;
+    const typeLabel = String(node.node_type);
     for (const [k, v] of Object.entries(data)) {
       if (v === null || v === "" || v === undefined) continue;
+      // I3 · said once: the genre is the chip and its element row above, and a
+      // `label` that repeats the type or the name is not a second fact
+      if (shownAbove.has(k)) continue;
+      if (k === "label" && (String(v) === String(node.name ?? "") || /US \(or SU\)/.test(String(v))
+          || String(v).toLowerCase() === typeLabel.toLowerCase())) continue;
+      // I3 · an identifier exists for the developer only, and then out of the way
+      if (ID_FIELDS.has(k) && !showIds) continue;
+      const into = ID_FIELDS.has(k) || TECH_FIELDS.has(k) ? tech : dl;
       // AUDIT1 · the editorial stamps have their own block below — four raw
       // keys in the technical dump is not "shown", it is buried.
       if (EDITORIAL_FIELDS.includes(k)) continue;
@@ -969,7 +1016,7 @@ export function renderInspector(
       // DEV29 B3 · a file set's members digest IS its checksum (s3Dgraphy dev29
       // A1 writes only `checksum`): the same sha256 twice is said once
       if (k === "members_digest" && v === (data as Record<string, unknown>).checksum) continue;
-      dl.appendChild(el("dt", undefined, k));
+      into.appendChild(el("dt", undefined, k));
       const dd = el("dd");
       dd.appendChild(document.createTextNode(
         typeof v === "object" ? JSON.stringify(v) : String(v)));
@@ -985,11 +1032,18 @@ export function renderInspector(
         x.addEventListener("click", () => cb.onClearField!(nodeId!, `data.${k}`));
         dd.appendChild(x);
       }
-      dl.appendChild(dd);
+      into.appendChild(dd);
     }
     if (dl.childElementCount) {
       root.appendChild(el("h3", "insp-sect", t("insp.dataSect")));
       root.appendChild(dl);
+    }
+    if (tech.childElementCount) {
+      const det = document.createElement("details");
+      det.className = "insp-tech";
+      det.appendChild(el("summary", "", t("insp.techDetails", { n: String(tech.childElementCount / 2) })));
+      det.appendChild(tech);
+      root.appendChild(det);
     }
   }
 
