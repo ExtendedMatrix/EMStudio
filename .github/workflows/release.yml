@@ -373,7 +373,10 @@ jobs:
           # and Pillow the thumbnails — both bundle-if-present in build-bridge.sh.
           # No sqlalchemy: GraphML import does not need it from s3dgraphy dev29
           # (tools/requirements.txt says why, and since when).
-          "$VPY" -m pip install "s3dgraphy[geo,rdf]==$PIN" \
+          # A runner's index can lag the gate's by a minute (dev.19, macOS
+          # arm64): the script waits and retries, one log line per attempt,
+          # before it calls the pin absent.
+          PIN_ATTEMPTS=10 PIN_DELAY=30 scripts/pip-install-pinned.sh "$VPY" "$PIN" \
             pyinstaller pandas lxml python-docx Pillow
           echo "VPY=$VPY" >> "$GITHUB_ENV"
 
