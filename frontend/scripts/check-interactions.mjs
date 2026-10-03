@@ -4700,6 +4700,57 @@ if (K_NODE) test("TR1.live", "T-R1 dal vivo · il pannello Connessione chiede GE
     detail: { dev: { mine: dev.mine.length, scavo: dev.mine.find(([r]) => r === "scavo-2026") ?? null, heads: dev.heads }, viewer, nTruth: truth.length } };
 });
 
+
+if (K_NODE && process.env.TEMPLU) test("TP2.live", "T-P2 dal vivo · Templu Mare (copia) portato in una stanza nuova del nodo di sviluppo: inventario in quattro gruppi (trovate · già nello storage · esterni · mancanti), le trovate salgono (il .3tz da 190 MB a pezzi ripristinabili), i nodi caricati hanno sha256 e il percorso d'origine; un secondo giro non ricarica niente", async () => {
+  const path = process.env.TEMPLU;
+  const doc = JSON.parse(readFileSync(path, "utf8"));
+  const name = `Templu prova ${Date.now() % 100000}`;
+  const { p, ctx, errors } = await open({ doc: null, locale: "en", w: 1600, h: 1000, init: {
+    "emstudio.settings": JSON.stringify({ sync: { hubUrl: K_NODE } }),
+    "emstudio.identities": JSON.stringify({ current: "0000-0002-1825-0097",
+      known: [{ orcid: "0000-0002-1825-0097", name: "Dev", surname: "User", verified: false }] }) } });
+  await p.evaluate(([d, pa]) => window.__EM_DRAG__.openAt(d, pa), [doc, path]);
+  await p.waitForTimeout(2500);
+  await p.evaluate((tk) => window.__EM_DRAG__.useToken(tk), kToken("dev"));
+  await p.evaluate(() => window.__EM_DRAG__.bringIntoRoom());
+  await p.waitForSelector("#room-name", { timeout: 10000 });
+  await p.fill("#room-name", name);
+  await p.click('.modal-foot button[data-a="ok"]');
+  await p.waitForSelector("#inv-pop .inv-go", { timeout: 120000 });
+  const groups = await p.evaluate(() => Object.fromEntries([...document.querySelectorAll("#inv-pop .inv-group")]
+    .map((g) => [g.dataset.group, g.querySelector("h5").textContent])));
+  const lots = await p.evaluate(() => [...document.querySelectorAll("#inv-pop .inv-lot")].map((r) => r.textContent));
+  await p.screenshot({ path: SHOT("tp2-inventario") }).catch(() => {});
+  const t0 = Date.now();
+  await p.click("#inv-pop .inv-go");
+  await p.waitForSelector("#inv-pop .inv-link", { timeout: 600000 });
+  const secs = Math.round((Date.now() - t0) / 1000);
+  const first = await p.evaluate(() => window.__EM_DRAG__.inventoryReport());
+  const shelf = await p.evaluate(() => window.__EM_DRAG__.shelf());
+  await p.screenshot({ path: SHOT("tp2-referto") }).catch(() => {});
+  const room = await p.evaluate(() => window.__EM_DRAG__.files().find((f) => f.room)?.room?.id ?? null);
+  const state = await p.evaluate(() => ({ nodes: window.__EM_DRAG__.nodeCount(), files: window.__EM_DRAG__.files(), slots: window.__EM_DRAG__.slots() }));
+  // the second pass: everything is in the store now
+  await p.evaluate(() => { document.getElementById("inv-pop")?.classList.add("hidden"); window.__EM_DRAG__.inventory(); });
+  await p.waitForFunction(() => /Already in the room's storage · [1-9]/.test(document.querySelector('#inv-pop .inv-group[data-group="in_store"] h5')?.textContent ?? ""), null, { timeout: 120000 }).catch(() => {});
+  const groups2 = await p.evaluate(() => Object.fromEntries([...document.querySelectorAll("#inv-pop .inv-group")]
+    .map((g) => [g.dataset.group, g.querySelector("h5").textContent])));
+  await p.click("#inv-pop .inv-go");
+  await p.waitForSelector("#inv-pop .inv-link", { timeout: 120000 });
+  const second = await p.evaluate(() => window.__EM_DRAG__.inventoryReport());
+  const log = await p.evaluate(() => window.__EM_DRAG__.log().map((l) => l.message).filter((m) => /inventory|Uploaded|room|snapshot|seat|container/.test(m)));
+  await ctx.close();
+  const up = shelf.filter((e) => /\/v1\/rooms\/.+\/asset\/sha256(:|%3A)[0-9a-f]{64}$/.test(e.locator));
+  const tz = shelf.find((e) => e.name === "TempluMare_cesium.3tz");
+  const n = (h) => Number(/· (\d+)/.exec(h ?? "")?.[1] ?? -1);
+  return { pass: n(groups.on_disk) + n(groups.in_store) === 19 && /^External references \(NAS, URL\) · 2/.test(groups.external)
+      && /^Missing · 71/.test(groups.missing) && first.uploaded + first.already === 19 && first.missing === 71
+      && up.length === 19 && up.every((e) => /^sha256:[0-9a-f]{64}$/.test(e.checksum) && e.origin && e.residency === "resident")
+      && !!tz && /TempluMare_cesium\.3tz$/.test(tz.origin) && /^Found on this computer · 0/.test(groups2.on_disk)
+      && /· 19/.test(groups2.in_store) && /· 2$/.test(groups2.external) && state.nodes > 200 && second.uploaded === 0 && second.bytes === 0 && !errors.length,
+    detail: { state, name, room, groups, lots, secs, first, groups2, second, tz, sample: up.slice(0, 2), log, errors } };
+});
+
 // ── run ─────────────────────────────────────────────────────────────────────
 const chosen = cases.filter((c) => !only.length || only.includes(c.id) || only.some((o) => c.id.startsWith(o + ".")));
 for (const c of chosen) {

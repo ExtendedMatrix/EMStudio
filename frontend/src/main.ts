@@ -337,6 +337,9 @@ import type {
   PromptResult,
   StratiMinerHandlers,
 } from "./stratiminer";
+import { buildInventory, candidatesOf, choose, digestInLocator, humanBytes, INV_GROUPS, inventoryReport,
+  locatorKind, normDigest, resolveLocal, toUpload, type InvCandidate, type InvChoice, type InvItem,
+  type InvOutcome, type InvProbe, type Inventory } from "./room-inventory";
 import { type HostInfo, SyncClient, SYNC_ACCEPTS, type SyncAccept } from "./sync";
 import { type Access, type ConnectionState, type Reach, nodeApi, renderConnectionPanel,
   renderRoomPanel, shortNode, whereDetails, whereHealth, wherePhrase } from "./connection";
@@ -1309,6 +1312,7 @@ function paintConnectionPanel(pop: HTMLElement): void {
     joinRoom: (id) => { pop.classList.add("hidden"); enterRoom(id); },
     newRoom: () => { pop.classList.add("hidden"); void createRoomHere(false); },
     bringIntoRoom: () => { pop.classList.add("hidden"); void bringIntoRoom(); },
+    roomResources: () => { pop.classList.add("hidden"); if (sync.room) void openResourceInventory(sync.room); },
   }, { host: sidecarDetail, accept: syncControlEl, roster: hubRosterEl });
   placeConnectionPop(pop);
 }
@@ -1889,6 +1893,15 @@ window.__EM_SCENE__ = () => {
     void askNodeWhoIAm(url).then(() => connectToHub(url, room, token));
   },
   statusLine: () => modeIndicator.textContent,
+  /** P2 · the session's node token (what a sign-in would set), «Bring into a
+   *  room…» itself, and the shelf as it stands */
+  useToken: (tok: string | null) => { hubToken = tok; },
+  bringIntoRoom: () => void bringIntoRoom(),
+  shelf: () => shelfEntries().map((e) => ({ id: e.id, name: e.name, locator: e.locator, checksum: e.checksum ?? null,
+    residency: e.residency ?? null, origin: (e.extra as Record<string, unknown> | undefined)?.original_locator ?? null })),
+  /** P2 · the inventory of the room this session is in, and its last report */
+  inventory: (room?: string) => openResourceInventory(room ?? sync.room ?? ""),
+  inventoryReport: () => lastInventoryReport,
   /** B2 · the open files, with the room each one is the copy of */
   files: () => emtree.files.map((f) => ({ name: f.name, path: f.path, room: f.room ?? null,
     graphs: emtree.slotsOf(f.id).length })),
@@ -4465,7 +4478,21 @@ function loadContainerDocument(
   // copy of the SAME room on the SAME node is replaced, not kept as a twin.
   if (opts.room) {
     const same = opts.room;
-    for (const old of emtree.files.filter((f) => f.room?.id === same.id && f.room?.node === same.node)) {
+    const twins = emtree.files.filter((f) => f.room?.id === same.id && f.room?.node === same.node);
+    // …BUT AN EMPTY SNAPSHOT DOES NOT REPLACE A FULL COPY. Measured carrying
+    // Templu Mare into a new room: the room answered a `request_snapshot` with
+    // its document as it was BEFORE it had applied the 946 operations of the
+    // seeding, and the seeded copy on screen was replaced by an empty graph —
+    // while the room's log held every node. The relay does not echo our own
+    // operations back, so nothing would ever have refilled it.
+    const incoming = parsed.members.reduce((n, m) => n + (m.doc.graph.nodes?.length ?? 0), 0);
+    const open = twins.reduce((n, f) => n + emtree.slotsOf(f.id)
+      .reduce((k, sl) => k + sl.store.doc.graph.nodes.length, 0), 0);
+    if (twins.length && incoming === 0 && open > 0) {
+      logInfo(t("room.emptySnapshotKept", { room: same.title || same.id, n: String(open) }));
+      return;
+    }
+    for (const old of twins) {
       logInfo(t("room.snapshotReplaces", { room: same.title || same.id }));
       closeFile(old.id);
     }
@@ -5918,10 +5945,336 @@ function askRoomName(seeding: boolean): Promise<string | null> {
  * a menu item.
  */
 /** P1 · «Bring into a room…»: a new room, you its owner, this graph in it —
- *  and then its resources (P2, `openResourceInventory`) */
+ *  and then its resources (P2). The candidates and the folder their relative
+ *  paths start from are taken NOW: once seated, the graph is the room's copy
+ *  and has no folder of its own. */
 async function bringIntoRoom(): Promise<void> {
-  await createRoomHere(true);
+  const before = inventorySources();
+  const seated = await createRoomHere(true);
+  if (!seated) return;
+  pendingInventory = { room: seated, ...before };
 }
+/** P2 · the inventory waiting for its room to be seated (see `seatSeededContainer`) */
+let pendingInventory: { room: string; graphs: InvGraph[]; baseDir: string | null } | null = null;
+type InvGraph = { id: string; nodes: EmNode[]; edges: EmEdge[] };
+
+/** P2 · what the inventory reads: the open graph, and the shelf (the project's
+ *  raw material — the drone photos of a survey live there) */
+function inventorySources(): { graphs: InvGraph[]; baseDir: string | null } {
+  const graphs: InvGraph[] = [];
+  if (store) graphs.push({ id: "study", nodes: store.doc.graph.nodes, edges: store.doc.graph.edges ?? [] });
+  const shelf = shelfEntries();
+  if (shelf.length) graphs.push({ id: "shelf", edges: [], nodes: shelf.map((e) => ({
+    id: e.id, name: e.name, node_type: "resource",
+    data: { url: e.locator, ...(e.checksum ? { checksum: e.checksum } : {}) } }) as unknown as EmNode) });
+  const path = emtree.activeFile()?.path ?? currentFilePath;
+  return { graphs, baseDir: path ? path.replace(/[\\/][^\\/]*$/, "") : null };
+}
+
+/** HEAD on the room's store: does it hold these bytes already? */
+async function roomHasDigest(base: string, room: string, digest: string): Promise<boolean> {
+  try {
+    const r = await fetch(`${base}/v1/rooms/${encodeURIComponent(room)}/asset/${encodeURIComponent(digest)}`,
+      { method: "HEAD", headers: hubToken ? { Authorization: `Bearer ${hubToken}` } : {}, cache: "no-store" });
+    return r.ok;
+  } catch { return false; }
+}
+
+/** P2 · probe every candidate: the bridge for a disk path (it hashes and
+ *  weighs), HEAD by sha256 for the store, nothing for an external reference */
+async function probeInventory(cands: InvCandidate[], baseDir: string | null, base: string, room: string,
+                              onStep: (done: number) => void): Promise<Map<string, InvProbe>> {
+  const out = new Map<string, InvProbe>();
+  let done = 0;
+  const one = async (c: InvCandidate): Promise<void> => {
+    const kind = locatorKind(c.locator);
+    if (kind === "external") { out.set(c.id, { group: "external", size: null, sha256: c.checksum }); return; }
+    if (kind === "store") {
+      const d = c.checksum ?? digestInLocator(c.locator);
+      out.set(c.id, d && await roomHasDigest(base, room, d)
+        ? { group: "in_store", size: null, sha256: d }
+        : { group: "missing", size: null, sha256: d, why: "not in this room's storage" });
+      return;
+    }
+    const path = resolveLocal(c.locator, baseDir);
+    try {
+      const r = await fetch(`${await bridgeUrl()}/fs/checksum?path=${encodeURIComponent(path)}`);
+      if (!r.ok) { out.set(c.id, { group: "missing", size: null, sha256: c.checksum, path, why: `bridge ${r.status}` }); return; }
+      const j = await r.json() as { checksum?: string; bytes?: number };
+      const sha = normDigest(j.checksum) ?? c.checksum;
+      const there = sha ? await roomHasDigest(base, room, sha) : false;
+      out.set(c.id, { group: there ? "in_store" : "on_disk", size: j.bytes ?? null, sha256: sha, path });
+    } catch (exc) {
+      out.set(c.id, { group: "missing", size: null, sha256: c.checksum, path, why: String(exc) });
+    }
+  };
+  const queue = [...cands];
+  await Promise.all(Array.from({ length: 4 }, async () => {
+    for (let c = queue.shift(); c; c = queue.shift()) { await one(c); onStep(++done); }
+  }));
+  return out;
+}
+
+/** Bigger than this, a file goes up in resumable pieces (U1) */
+const UPLOAD_PIECE = 8 * 1024 * 1024;
+
+/**
+ * P2/U1 · send one file from the disk (through the bridge) to the room's store.
+ * HEAD first — bytes the store has are not sent again. A small file is one
+ * PUT; a big one is a resumable upload: pieces read with `Range` from the
+ * bridge and PATCHed at the offset the SERVER says it has, so an interruption
+ * resumes where the bytes stopped (a 409 hands the offset back).
+ */
+async function sendToRoom(base: string, room: string, it: InvItem,
+                          onBytes: (n: number) => void): Promise<InvOutcome> {
+  const auth: Record<string, string> = hubToken ? { Authorization: `Bearer ${hubToken}` } : {};
+  const sha = it.sha256;
+  if (sha && await roomHasDigest(base, room, sha)) return { id: it.id, ok: true, sent: false, bytes: 0 };
+  const media = it.mediaType || "application/octet-stream";
+  const size = it.size ?? 0;
+  const roomUrl = `${base}/v1/rooms/${encodeURIComponent(room)}`;
+  if (size <= UPLOAD_PIECE) {
+    const bytes = await bridgeBytes(it.path!);
+    const r = await fetch(`${roomUrl}/asset?media_type=${encodeURIComponent(media)}`,
+      { method: "PUT", headers: auth, body: bytes });
+    if (!r.ok) return { id: it.id, ok: false, sent: false, bytes: 0, why: `${r.status} ${(await r.text()).slice(0, 120)}` };
+    const info = await r.json() as { created?: boolean; size?: number };
+    onBytes(bytes.byteLength);
+    return { id: it.id, ok: true, sent: info.created !== false, bytes: bytes.byteLength };
+  }
+  const start = await fetch(`${roomUrl}/uploads`, { method: "POST",
+    headers: { ...auth, "Content-Type": "application/json" },
+    body: JSON.stringify({ size, sha256: sha, media_type: media }) });
+  if (!start.ok) return { id: it.id, ok: false, sent: false, bytes: 0, why: `${start.status} ${(await start.text()).slice(0, 120)}` };
+  const up = await start.json() as { upload_id: string; offset: number };
+  let offset = up.offset ?? 0;
+  const fileUrl = await fsFileUrl(it.path!);
+  for (let tries = 0; offset < size && tries < 8;) {
+    const end = Math.min(size, offset + UPLOAD_PIECE) - 1;
+    const piece = await fetch(fileUrl, { headers: { Range: `bytes=${offset}-${end}` } });
+    if (piece.status !== 206 && piece.status !== 200) return { id: it.id, ok: false, sent: false, bytes: 0, why: `bridge ${piece.status}` };
+    const chunk = piece.status === 206 ? await piece.arrayBuffer()
+      : (await piece.arrayBuffer()).slice(offset, end + 1);
+    let r: Response;
+    try {
+      r = await fetch(`${roomUrl}/uploads/${encodeURIComponent(up.upload_id)}`, { method: "PATCH",
+        headers: { ...auth, "Upload-Offset": String(offset), "Content-Type": "application/offset+octet-stream" },
+        body: chunk });
+    } catch {
+      // the link dropped mid-piece: ask the server where it is, and go on from there
+      tries++;
+      const h = await fetch(`${roomUrl}/uploads/${encodeURIComponent(up.upload_id)}`, { method: "HEAD", headers: auth }).catch(() => null);
+      offset = Number(h?.headers.get("Upload-Offset") ?? offset);
+      continue;
+    }
+    const j = await r.json().catch(() => ({})) as { offset?: number; complete?: boolean; detail?: string };
+    if (r.status === 409) { tries++; offset = Number(j.offset ?? r.headers.get("Upload-Offset") ?? offset); continue; }
+    if (!r.ok) return { id: it.id, ok: false, sent: false, bytes: 0, why: `${r.status} ${j.detail ?? ""}`.slice(0, 160) };
+    onBytes((j.offset ?? end + 1) - offset);
+    offset = j.offset ?? end + 1;
+    if (j.complete) break;
+  }
+  return offset >= size ? { id: it.id, ok: true, sent: true, bytes: size }
+    : { id: it.id, ok: false, sent: false, bytes: 0, why: `stopped at ${offset} of ${size} bytes` };
+}
+
+/**
+ * P2 · the node becomes STORE-BACKED without losing where it came from: `url`
+ * is the room's asset, `checksum` the digest, residency `resident` — and the
+ * disk path stays as a second address of the same bytes (`addresses.ts`). A
+ * shelf entry keeps it in `extra.original_locator`.
+ */
+function storeBack(it: InvItem, base: string, room: string): void {
+  const sha = it.sha256!;
+  const url = `${base}/v1/rooms/${encodeURIComponent(room)}/asset/${encodeURIComponent(sha)}`;
+  if (it.graphId === "shelf") {
+    const entry = shelfEntries().find((e) => e.id === it.id);
+    if (entry && entry.locator !== url) updateShelfEntry(it.id, { locator: url, checksum: sha, residency: "resident",
+      extra: { ...(entry.extra ?? {}), original_locator: entry.locator } });
+    return;
+  }
+  const st = storeOfNode(it.id);
+  const n = st?.node(it.id);
+  if (!st || !n) return;
+  const d = (n.data ?? {}) as Record<string, unknown>;
+  if (d.url === url) return;
+  const origin = String(d.url ?? d.path ?? it.locator);
+  st.updateNode(it.id, { data: { ...d, url, checksum: sha, residency: "resident",
+    ...(it.size != null ? { size_bytes: it.size } : {}),
+    ...(n.node_type === "resource_file" && !d.path ? { path: origin } : {}) } } as Partial<EmNode>);
+  if (n.node_type === "resource") {
+    try { addrs.addAddress(st, it.id, origin, { checksum: sha, residency: "reference" }); }
+    catch (exc) { logWarn(`inventory: ${it.name}: the origin ${origin} not kept as an address — ${String(exc)}`); }
+  }
+}
+
+/** P2 · the inventory panel for a room: four groups, choices, the upload, the report */
+async function openResourceInventory(room: string, src = inventorySources()): Promise<void> {
+  const base = (hubNodeUrl || getSettings().sync.hubUrl).trim().replace(/\/+$/, "");
+  if (!base || !room) { toast(t("share.noRoom")); return; }
+  let pop = document.getElementById("inv-pop");
+  if (!pop) {
+    pop = document.createElement("div");
+    pop.id = "inv-pop";
+    pop.className = "modal";
+    document.body.appendChild(pop);
+  }
+  pop.classList.remove("hidden");
+  const card = document.createElement("div");
+  card.className = "modal-card inv-card";
+  pop.replaceChildren(card);
+  const close = (): void => pop!.classList.add("hidden");
+  const head = document.createElement("div");
+  head.className = "modal-head";
+  head.innerHTML = `<span></span><button class="modal-x" aria-label="Close">✕</button>`;
+  head.querySelector("span")!.textContent = t("inv.title", { room: roomRef(room).title });
+  head.querySelector("button")!.addEventListener("click", close);
+  card.appendChild(head);
+  const body = document.createElement("div");
+  body.className = "inv-body";
+  card.appendChild(body);
+  const cands = candidatesOf(src.graphs);
+  const say = document.createElement("p");
+  say.className = "inv-line";
+  body.appendChild(say);
+  say.textContent = t("inv.probing", { n: String(cands.length), done: "0" });
+  const probes = await probeInventory(cands, src.baseDir, base, room,
+    (done) => { say.textContent = t("inv.probing", { n: String(cands.length), done: String(done) }); });
+  const inv = buildInventory(cands, probes);
+  logInfo(`inventory «${room}»: ` + INV_GROUPS.map((g) => `${g} ${inv.groups[g].count} (${humanBytes(inv.groups[g].bytes)})`).join(" · "));
+  paintInventory(body, inv, base, room, close);
+}
+
+function paintInventory(body: HTMLElement, inv: Inventory, base: string, room: string, close: () => void): void {
+  body.replaceChildren();
+  const el = <K extends keyof HTMLElementTagNameMap>(tag: K, cls = "", text?: string): HTMLElementTagNameMap[K] => {
+    const e = document.createElement(tag);
+    if (cls) e.className = cls;
+    if (text !== undefined) e.textContent = text;
+    return e;
+  };
+  const choiceSel = (value: InvChoice, onPick: (c: InvChoice) => void): HTMLSelectElement => {
+    const sel = el("select", "conn-input");
+    for (const c of ["upload", "reference", "skip"] as InvChoice[]) sel.appendChild(new Option(t(`inv.choice.${c}`), c));
+    sel.value = value;
+    sel.addEventListener("change", () => onPick(sel.value as InvChoice));
+    return sel;
+  };
+  const total = el("p", "inv-total");
+  const refreshTotal = (): void => {
+    const up = toUpload(inv);
+    total.textContent = t("inv.toUpload", { n: String(up.count), size: humanBytes(up.bytes) });
+    go.disabled = false;
+  };
+  body.appendChild(el("p", "inv-line conn-dim", t("inv.rights")));
+  for (const g of INV_GROUPS) {
+    const sect = el("section", "inv-group");
+    sect.dataset.group = g;
+    const h = el("h5", "", `${t(`inv.group.${g}`)} · ${inv.groups[g].count}` + (inv.groups[g].bytes ? ` · ${humanBytes(inv.groups[g].bytes)}` : ""));
+    sect.appendChild(h);
+    const items = inv.items.filter((i) => i.group === g);
+    if (g === "on_disk" && items.length) {
+      const row = el("div", "inv-row");
+      row.append(el("span", "", t("inv.allOfGroup")), choiceSel("upload", (c) => { choose(inv, { group: g }, c); paintInventory(body, inv, base, room, close); }));
+      sect.appendChild(row);
+      for (const lot of inv.lots.filter((l) => l.ids.some((id) => items.some((i) => i.id === id)))) {
+        const r = el("div", "inv-row inv-lot");
+        r.dataset.lot = lot.key;
+        const first = items.find((i) => i.lotKey === lot.key);
+        r.append(el("span", "", t("inv.lot", { name: lot.name, n: String(lot.ids.length), size: humanBytes(lot.bytes) })),
+          choiceSel(first?.choice ?? "upload", (c) => { choose(inv, { lot: lot.key }, c); refreshTotal(); }));
+        sect.appendChild(r);
+      }
+    }
+    const loose = items.filter((i) => g !== "on_disk" || !i.lotKey);
+    if (loose.length) {
+      const det = el("details", "inv-items");
+      det.appendChild(el("summary", "", t("inv.items", { n: String(loose.length) })));
+      for (const it of loose.slice(0, 300)) {
+        const r = el("div", "inv-row");
+        r.dataset.id = it.id;
+        const label = el("span", "inv-name", it.name);
+        label.title = `${it.locator}${it.why ? ` — ${it.why}` : ""}`;
+        r.appendChild(label);
+        if (it.size != null) r.appendChild(el("span", "conn-dim", humanBytes(it.size)));
+        if (g === "on_disk") r.appendChild(choiceSel(it.choice, (c) => { it.choice = c; refreshTotal(); }));
+        det.appendChild(r);
+      }
+      sect.appendChild(det);
+    }
+    body.appendChild(sect);
+  }
+  const acts = el("div", "conn-acts");
+  const go = el("button", "conn-btn inv-go", t("inv.go")) as HTMLButtonElement;
+  go.type = "button";
+  const skip = el("button", "conn-btn", t("inv.later")) as HTMLButtonElement;
+  skip.type = "button";
+  skip.addEventListener("click", close);
+  acts.append(go, skip);
+  body.append(total, acts);
+  refreshTotal();
+  const progress = el("p", "inv-line");
+  body.appendChild(progress);
+  go.addEventListener("click", async () => {
+    go.disabled = true;
+    const work = inv.items.filter((i) => i.group === "on_disk" && i.choice === "upload");
+    const want = toUpload(inv).bytes;
+    let moved = 0;
+    const outcomes: InvOutcome[] = [];
+    for (const [k, it] of work.entries()) {
+      progress.textContent = t("inv.sending", { k: String(k + 1), n: String(work.length), name: it.name,
+        done: humanBytes(moved), size: humanBytes(want) });
+      let o: InvOutcome;
+      try { o = await sendToRoom(base, room, it, (n) => { moved += n; }); }
+      catch (exc) { o = { id: it.id, ok: false, sent: false, bytes: 0, why: String(exc) }; }
+      outcomes.push(o);
+      if (o.ok) storeBack(it, base, room);
+      else logWarn(`inventory: ${it.name} not uploaded — ${o.why ?? "?"}`);
+    }
+    // the nodes already in the store become store-backed too (nothing is sent)
+    for (const it of inv.items) if (it.group === "in_store" && it.sha256) storeBack(it, base, room);
+    // a reference stays where it is, and says so
+    for (const it of inv.items.filter((i) => i.group === "on_disk" && i.choice === "reference")) {
+      const st = storeOfNode(it.id); const n = st?.node(it.id);
+      if (st && n) st.updateNode(it.id, { data: { ...(n.data as Record<string, unknown>), residency: "reference",
+        ...(it.sha256 ? { checksum: it.sha256 } : {}) } } as Partial<EmNode>);
+    }
+    // RAW PHOTOS AS A LOT: one acquisition in the documentation, not N rows
+    const corpus = documentationCorpus();
+    for (const lot of inv.lots) {
+      const ok = lot.ids.filter((id) => outcomes.some((o) => o.id === id && o.ok)
+        || inv.items.some((i) => i.id === id && i.group === "in_store"));
+      if (!corpus || !ok.length) continue;
+      for (const id of ok) { const n = storeOfNode(id)?.node(id); if (n) mirrorIntoCorpus(corpus, n); }
+      const shelfIds = ok.filter((id) => !storeOfNode(id)?.node(id));
+      for (const id of shelfIds) {
+        const e = shelfEntries().find((x) => x.id === id);
+        if (e) mirrorIntoCorpus(corpus, { id, name: e.name, node_type: "resource",
+          data: { url: e.locator, checksum: e.checksum, residency: e.residency } } as unknown as EmNode);
+      }
+      const made = bucketAcquisition(corpus, { acquisitionId: lot.acquisition ?? undefined, resources: ok,
+        name: lot.acquisition ? undefined : t("inv.lotName", { name: lot.name }),
+        metadata: { ingested_at: new Date().toISOString(), source: "EMStudio · bring into a room" } });
+      logInfo(`inventory: lot «${lot.name}» → ${made.acquisitionId} (${made.count} file)`);
+    }
+    if (outcomes.some((o) => o.ok)) sync.sendRequestSave();
+    const rep = inventoryReport(inv, outcomes);
+    const door = await nodeApi(base, () => hubToken).door(room).catch(() => ({ web: null, scheme: null }));
+    const link = door.web || `${base}/work/?room=${encodeURIComponent(room)}`;
+    const sentence = t("inv.report", { n: String(rep.uploaded), size: humanBytes(rep.bytes),
+      a: String(rep.already), m: String(rep.references), k: String(rep.missing) })
+      + (rep.failed ? ` · ${t("inv.failed", { n: String(rep.failed) })}` : "");
+    logInfo(`${sentence} — ${link}`);
+    info.textContent = sentence;
+    progress.textContent = sentence;
+    const a = el("a", "inv-link", link) as HTMLAnchorElement;
+    a.href = link; a.target = "_blank"; a.rel = "noopener";
+    body.appendChild(a);
+    lastInventoryReport = { ...rep, link };
+  });
+}
+/** P2 · the last report, for the checks */
+let lastInventoryReport: Record<string, unknown> | null = null;
 
 /** R1 · enter a room picked from the list: it becomes the session's room */
 function enterRoom(roomId: string): void {
@@ -5933,27 +6286,27 @@ function enterRoom(roomId: string): void {
   document.getElementById("btn-mode-hub")?.click();
 }
 
-async function createRoomHere(seed: boolean): Promise<void> {
+async function createRoomHere(seed: boolean): Promise<string | null> {
   // THE CHEAP, LOCAL, CERTAIN REFUSAL FIRST. Measured in the browser: with a
   // declared-but-unconfirmed signature and no document open, this sent the
   // person through a whole sign-in against the realm — and would have greeted
   // them on the way back with «there is no graph open to put on a table».
   // A round trip through an identity provider to learn something that was true
   // before it started.
-  if (seed && !store) { toast(t("room.bringNeedsDocument")); return; }
+  if (seed && !store) { toast(t("room.bringNeedsDocument")); return null; }
 
   const blocked = whatBlocksTheGesture(Boolean(currentIdentity()), Boolean(hubToken));
   if (blocked) {
     toast(nextRungInvitation());
     identityChipClicked();          // declare a signature, or sign in — its rung
-    return;
+    return null;
   }
 
   const name = await askRoomName(seed);
-  if (!name) return;
+  if (!name) return null;
   const roomId = roomIdFromName(name);
   const server = servingNode();
-  if (!server) { toast(t("idw.noNode")); openNodeSettings(); return; }   // DEV30 U14
+  if (!server) { toast(t("idw.noNode")); openNodeSettings(); return null; }   // DEV30 U14
 
   // CAPTURED BEFORE CONNECTING, and the order is the whole repair. Measured on
   // the dev stack: a room created a second ago still SENDS a snapshot — a
@@ -5981,12 +6334,12 @@ async function createRoomHere(seed: boolean): Promise<void> {
                                      why: String(detail?.detail ?? "") }));
       logWarn(`room: ${server} refused «${roomId}» — ${answer.status} `
               + String(detail?.detail ?? ""));
-      return;
+      return null;
     }
     created = await answer.json() as Record<string, unknown>;
   } catch (exc) {
     toast(t("room.createUnreachable", { server, why: String(exc) }));
-    return;
+    return null;
   }
   logInfo(`room: created «${roomId}» on ${server} as `
           + String(created.your_role ?? "?"));
@@ -6004,11 +6357,12 @@ async function createRoomHere(seed: boolean): Promise<void> {
     if (!empty) {
       toast(t("room.alreadyHasAGraph", { room: name }));
       logWarn(`room: «${roomId}» already holds a graph — not seeding it`);
-      return;                       // the room exists; it is not seeded
+      return null;                  // the room exists; it is not seeded
     }
     seedingRoom = { room: roomId, container };
   }
   connectToHub(server, roomId, hubToken);
+  return roomId;
 }
 
 /**
@@ -6076,6 +6430,12 @@ function seatSeededContainer(room: string): boolean {
   // the live copy is the node's. Saying it later, or not at all, is how somebody
   // keeps editing what they think is their file.
   toast(t("room.livesOnTheNodeNow", { room }));
+  // P2 · …and now its resources: the inventory taken before the graph left its file
+  if (pendingInventory?.room === room) {
+    const src = pendingInventory;
+    pendingInventory = null;
+    setTimeout(() => void openResourceInventory(room, src), 400);
+  }
   if (ids.length > 1) {
     // not a silent truncation: a room holds one graph, and this project had more
     toast(t("room.onlyOneGraph", { n: String(ids.length - 1), graph: activeId }));
@@ -10127,7 +10487,7 @@ document.getElementById("btn-share-room")
 document.getElementById("btn-create-room")
   ?.addEventListener("click", () => void createRoomHere(false));
 document.getElementById("btn-bring-into-room")
-  ?.addEventListener("click", () => void createRoomHere(true));
+  ?.addEventListener("click", () => void bringIntoRoom());
 
 document.getElementById("btn-mode-hub")?.addEventListener("click", () => {
   const s = getSettings().sync;

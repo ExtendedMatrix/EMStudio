@@ -227,6 +227,8 @@ export interface ConnectionGestures {
   newRoom?(): void;
   /** P1 · «Bring into a room…»: the graph on screen becomes a new room's */
   bringIntoRoom?(): void;
+  /** P2 · the room's resources: inventory, upload, report */
+  roomResources?(): void;
 }
 
 /**
@@ -351,7 +353,14 @@ export function renderConnectionPanel(host: HTMLElement, s: ConnectionState, g: 
     on.addEventListener("click", () => g.openOnNode());
     const leave = btn(t("conn.leaveRoom"));
     leave.addEventListener("click", () => g.leaveRoom());
-    acts.append(rs, on, leave);
+    acts.append(rs, on);
+    if (g.roomResources) {
+      const res = btn(t("rooms.resources"));
+      res.dataset.act = "room-resources";
+      res.addEventListener("click", () => g.roomResources!());
+      acts.appendChild(res);
+    }
+    acts.appendChild(leave);
     room.appendChild(acts);
     host.appendChild(room);
   }

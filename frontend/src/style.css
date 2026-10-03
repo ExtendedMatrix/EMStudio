@@ -9162,3 +9162,15 @@ body.sync-active #statusbar .sb-who .footer-chip.id-signature {
   background: rgba(255, 255, 255, 0.06);
   opacity: 1;
 }
+/* P2 · the resource inventory of a room */
+.inv-card { width: min(560px, calc(100vw - 24px)); max-height: 82vh; display: flex; flex-direction: column; }
+.inv-body { overflow: auto; padding: 4px 14px 12px; font-size: 12px; }
+.inv-group { margin-top: 8px; padding-top: 6px; border-top: 1px solid var(--border); }
+.inv-group h5 { margin: 0 0 4px; font-size: 12px; }
+.inv-row { display: flex; align-items: center; gap: 8px; padding: 1px 0; }
+.inv-row .inv-name, .inv-row > span:first-child { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.inv-lot { font-weight: 600; }
+.inv-items summary { cursor: pointer; color: var(--text-muted); margin: 2px 0; }
+.inv-total { font-weight: 600; margin: 10px 0 4px; }
+.inv-line { margin: 4px 0; }
+.inv-link { display: block; margin-top: 6px; overflow-wrap: anywhere; }
