@@ -564,6 +564,91 @@ def _scan_notes(api, folder: str) -> dict:
     return {"no_id": sorted(no_id), "duplicate_ids": dup}
 
 
+def _room_probe(room):
+    """``on_node(hex)`` for a room ``{base, room_id, token}`` — the store's HEAD —
+    or None when no room was given. The token stays in this call."""
+    if not room or not room.get("base") or not room.get("room_id"):
+        return None
+    import urllib.request
+    base = str(room["base"]).rstrip("/")
+    rid = urllib.parse.quote(str(room["room_id"]), safe="")
+    headers = {"Authorization": f"Bearer {room['token']}"} if room.get("token") else {}
+
+    def on_node(hexd):
+        req = urllib.request.Request(f"{base}/v1/rooms/{rid}/asset/sha256:{hexd}",
+                                     method="HEAD", headers=headers)
+        try:
+            with urllib.request.urlopen(req, timeout=10):
+                return True
+        except Exception:  # noqa: BLE001 — 404, refused or down: not there for us
+            return False
+    return on_node
+
+
+def _files_route(route, body):
+    """R1/R2/C1 · the bridge's half of the files: the library answers, the
+    bridge only carries the question (the page never sees a filesystem path it
+    did not already name)."""
+    from s3dgraphy import api
+    from s3dgraphy.project_tree import find_project_root, reorder_plan, apply_plan
+    if route == "/files-state":
+        graph, _w = api.load_emjson(body["doc"])
+        folders = [os.path.abspath(os.path.expanduser(f)) for f in body.get("folders") or [] if f]
+        root = body.get("project_root") or next(
+            (r for r in (find_project_root(f) for f in folders) if r), None)
+        results = api.resolve_files(graph, project_root=root, base_dirs=folders,
+                                    cache_dirs=[d for d in body.get("cache_dirs") or [] if d],
+                                    on_node=_room_probe(body.get("room")),
+                                    hasher=lambda path: hashlib.sha256(
+                                        pathlib.Path(path).read_bytes()).hexdigest()
+                                    if os.path.getsize(path) <= 512 * 1024 * 1024 else "")
+        from s3dgraphy.resources.locate import summary
+        return {"ok": True, "project_root": root or "", "results": results,
+                "summary": summary(results)}
+    if route == "/project-new":
+        return {"ok": True, **api.create_em_project(body["parent"], body["name"])}
+    if route == "/project-reorder":
+        root = os.path.abspath(os.path.expanduser(body["root"]))
+        plan = body.get("plan") if body.get("apply") else reorder_plan(root)
+        if body.get("apply"):
+            return {"ok": True, "done": apply_plan(root, plan or [],
+                                                   confirmed=body.get("confirm") is True)}
+        return {"ok": True, "root": root, "plan": plan}
+    if route == "/file-reveal":
+        import subprocess
+        path = os.path.abspath(os.path.expanduser(body["path"]))
+        if not os.path.exists(path):
+            raise ValueError(f"not here any more: {path}")
+        if sys.platform == "darwin":
+            subprocess.Popen(["open", "-R", path])
+        elif os.name == "nt":
+            subprocess.Popen(["explorer", "/select,", path])
+        else:
+            subprocess.Popen(["xdg-open", os.path.dirname(path)])
+        return {"ok": True, "path": path}
+    if route == "/file-keep":
+        # «Keep it on the disk too»: the node's bytes copied into the project's
+        # tree, checked against their sha256 before they are kept
+        import urllib.request
+        room, hexd = body.get("room") or {}, str(body["sha256"]).split(":")[-1].lower()
+        dest = os.path.abspath(os.path.expanduser(body["dest"]))
+        if os.path.exists(dest):
+            raise FileExistsError(f"{dest} exists: nothing is overwritten")
+        base = str(room["base"]).rstrip("/")
+        rid = urllib.parse.quote(str(room["room_id"]), safe="")
+        headers = {"Authorization": f"Bearer {room['token']}"} if room.get("token") else {}
+        req = urllib.request.Request(f"{base}/v1/rooms/{rid}/asset/sha256:{hexd}", headers=headers)
+        with urllib.request.urlopen(req, timeout=600) as answer:
+            data = answer.read()
+        if hashlib.sha256(data).hexdigest() != hexd:
+            raise ValueError("the bytes from the node are not the ones the graph names")
+        os.makedirs(os.path.dirname(dest), exist_ok=True)
+        with open(dest, "wb") as fh:
+            fh.write(data)
+        return {"ok": True, "path": dest, "bytes": len(data)}
+    raise ValueError(f"unknown route {route}")
+
+
 def _resolve_on_folder(locator: str, folder: str):
     """DEV29 B6 · a study-relative locator (`/DosCo/D.02.jpg`, `DosCo\\D.02.jpg`,
     `D.02.jpg`) resolved on an indexed folder: the folder may BE `DosCo` (then
@@ -1116,6 +1201,21 @@ def make_handler(api):
                     self._fail(400, f"invalid JSON body: {exc}")
                     return
                 self._annotate(body)
+            elif route in ("/files-state", "/project-new", "/project-reorder",
+                           "/file-reveal", "/file-keep"):
+                # R1/R2/C1 (E.D., 4 Oct 2026) · where each file is, with
+                # s3dgraphy's ONE resolver; the standard tree of a project
+                try:
+                    body = json.loads(raw.decode("utf-8")) if raw else {}
+                except Exception as exc:
+                    self._fail(400, f"invalid JSON body: {exc}")
+                    return
+                try:
+                    self._json(_files_route(route, body))
+                except (ValueError, FileExistsError, PermissionError) as exc:
+                    self._fail(400, str(exc))
+                except Exception as exc:  # noqa: BLE001
+                    self._fail(500, f"{type(exc).__name__}: {exc}")
             elif route == "/resource-preview":
                 try:
                     body = json.loads(raw.decode("utf-8")) if raw else {}
@@ -4004,10 +4104,19 @@ def make_handler(api):
                         path = value[7:] if value.startswith("file://") else value
                         if not os.path.isfile(path) and folder:
                             # DEV29 B6 · «/DosCo/D.02.jpg» is a path of the
-                            # STUDY'S folder, not of the disk: resolved on the
-                            # folder just indexed (measured: the documents stayed
-                            # «absent» after the scan of the folder holding them)
-                            path = _resolve_on_folder(path, folder) or path
+                            # STUDY'S folder, not of the disk. R1 (4 Oct 2026):
+                            # read by s3dgraphy's ONE resolver, the same reading
+                            # EMtools and StratiField make
+                            try:
+                                from s3dgraphy.resources.locate import local_candidates
+                                from s3dgraphy.project_tree import (find_project_root,
+                                                                    search_bases)
+                                root = find_project_root(folder)
+                                bases = (search_bases(root) if root else []) + [folder]
+                                path = next((c for c in local_candidates(path, bases)
+                                             if os.path.isfile(c)), path)
+                            except ImportError:
+                                path = _resolve_on_folder(path, folder) or path
                         if os.path.isfile(path):
                             local = path
                             payload["filename"] = os.path.basename(path)

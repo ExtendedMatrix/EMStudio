@@ -9174,3 +9174,25 @@ body.sync-active #statusbar .sb-who .footer-chip.id-signature {
 .inv-total { font-weight: 600; margin: 10px 0 4px; }
 .inv-line { margin: 4px 0; }
 .inv-link { display: block; margin-top: 6px; overflow-wrap: anywhere; }
+
+/* ── R2/I1 (4 Oct 2026) · the state of the files, with the common signs ──── */
+.state-badge { display: inline-flex; gap: 4px; align-items: center; font-size: 11px; padding: 1px 6px;
+  border-radius: 9px; border: 1px solid var(--border); white-space: nowrap; }
+.state-badge.st-ok { color: var(--ok); border-color: var(--ok); }
+.state-badge.st-info { color: var(--accent); border-color: var(--accent); }
+.state-badge.st-warn { color: var(--warn); border-color: var(--warn); }
+.state-badge.st-bad { color: var(--danger); border-color: var(--danger); }
+.state-badge.st-muted { color: var(--fg-dim, #777); }
+.fs-section { margin: 6px 8px 8px; padding: 8px 10px; border: 1px solid var(--border); border-radius: var(--radius);
+  background: var(--bg-elevated); font-size: 12px; }
+.fs-head { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin-bottom: 6px; }
+.fs-head b { margin-right: auto; }
+.fs-chips, .fs-group { display: flex; gap: 4px; flex-wrap: wrap; margin-bottom: 6px; }
+.fs-chip { font-size: 11px; padding: 2px 8px; border-radius: 9px; border: 1px solid var(--border); background: none; cursor: pointer; }
+.fs-chip.is-on { background: var(--accent); color: #fff; }
+.fs-list { max-height: 260px; overflow: auto; }
+.fs-row, .fs-line { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; padding: 2px 0; }
+.fs-name { overflow: hidden; text-overflow: ellipsis; max-width: 260px; }
+.fs-gestures { display: inline-flex; gap: 2px; margin-left: auto; }
+.fs-act { font-size: 11px; padding: 1px 6px; }
+.fs-note { flex-basis: 100%; }

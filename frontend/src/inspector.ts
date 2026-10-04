@@ -76,6 +76,8 @@ export interface InspectorCallbacks {
   onReplaceFile?: (resId: string, fileId: string | null) => void;
   /** dev27 · «controlla» an address of a resource */
   onCheckAddress?: (resId: string, locator: string) => void;
+  /** R2 · where this resource's bytes are (the one resolver), with its gestures */
+  fileStateLine?: (resId: string) => HTMLElement | null;
   /** CAMPAGNA · a tileset resource opened in a Scene window */
   onOpenInScene?: (resId: string) => void;
   /** TRADUZIONI · draw the row of languages under a natural-language text
@@ -948,6 +950,8 @@ export function renderInspector(
       onCheckAddress: cb.onCheckAddress,
     });
     if (panel) root.appendChild(panel);
+    const where = cb.fileStateLine?.(nodeId);
+    if (where) root.appendChild(where);
   }
 
   // ── il LOTTO · un'acquisizione, con i suoi membri ─────────────────────────

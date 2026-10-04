@@ -182,6 +182,9 @@ import { datamodelPhraseBook, linkedPhrase, phraseDirFor } from "./phrases";
 import connectionsDatamodel from "./assets/s3Dgraphy_connections_datamodel.json";
 import datamodelTranslations from "./assets/datamodel_translations.json";
 import { createResourceThumb } from "./resource-preview";
+import { keepOnDisk, newEmProject, refreshFileStates, reorderApply, reorderPreview, revealFile,
+         fileProjectRoot, type FileState } from "./file-states";
+import { filesSection, fileStateLine, type FileHooks } from "./file-states-ui";
 import { proposeLanguages, type LanguageProposal } from "./lang-guess";
 import {
   addCategories,
@@ -2602,6 +2605,7 @@ function renderInspectorInto(host: HTMLElement): void {
       onReplaceFile: (resId, fileId) => { void replaceFileFlow(resId, fileId); },
       onOpenInScene: (resId) => { void openResourceInScene(resId); },
       onCheckAddress: (resId, locator) => { void checkResourceAddress(resId, locator); },
+      fileStateLine: (resId) => fileStateLine(resId, fileHooks()),
       // TRADUZIONI · the row of languages under every natural-language text
       renderTextLanguages: (box, nodeId, field) => trui.renderLanguageRow(box, translationUi, nodeId, field),
       onOpenFacing: (tid) => openFacingFor(tid),
@@ -20942,6 +20946,8 @@ function documentCard(): HTMLElement | null {
     const n = document.createElement("code");
     n.textContent = String(fd.filename ?? fd.locator ?? f.name ?? f.id).split("/").pop() ?? f.id;
     fl.appendChild(n);
+    const where = fileStateLine(f.id, fileHooks());   // R2 · its state and gestures
+    if (where) fl.appendChild(where);
     if (fd.checksum || fd.sha256) {
       // CAMPAGNA · the little seal takes the place of the word «stamped»
       const loc = String(fd.url ?? fd.locator ?? "");
@@ -20968,6 +20974,117 @@ function documentCard(): HTMLElement | null {
   rd.appendChild(go);
   box.append(eyebrow, head, fl, rd);
   return box;
+}
+
+// ── R1/R2 (E.D., 4 Oct 2026) · where the files are, with the ONE resolver ──
+let filesChecking = false;
+
+function filesRefresh(): void { renderStorage(); refreshInspector(); }
+
+function fileRoom(): { base: string; room_id: string; token?: string | null } | null {
+  const base = (hubNodeUrl || getSettings().sync.hubUrl).trim().replace(/\/+$/, "");
+  return sync.room && base ? { base, room_id: sync.room, token: hubToken } : null;
+}
+
+async function checkFiles(): Promise<void> {
+  if (!store || filesChecking) return;
+  filesChecking = true;
+  filesRefresh();
+  const src = inventorySources();
+  // the em.json's folder, its DosCo, and the folders the Storage windows are
+  // looking at (in the browser a document has no path of its own)
+  const browsing = windowsOf().filter((w) => w.type === "storage").map((w) => storagePath(w));
+  const folders = [src.baseDir, ...src.doscoDirs, ...browsing].filter((x): x is string => !!x);
+  const r = await refreshFileStates(await bridgeUrl(), store.doc, { folders, room: fileRoom() });
+  filesChecking = false;
+  if (!r.ok) logWarn(`files: ${r.error}`);
+  else if (!fileProjectRoot()) logInfo(t("fs.noProject"));
+  filesRefresh();
+}
+
+function fileHooks(): FileHooks {
+  return {
+    checking: filesChecking,
+    inRoom: !!fileRoom(),
+    onCheck: () => { void checkFiles(); },
+    onJump: (id) => { select(id); },
+    onRefilter: filesRefresh,
+    onReveal: (f) => { void bridgeUrl().then((b) => revealFile(b, f.path)).catch((e) => toast(String(e.message ?? e))); },
+    onRelink: (f) => {
+      // «Find here…»: the resource now points at where it is on this computer
+      const path = window.prompt(t("fs.findPrompt", { name: f.name || f.id }), "");
+      const st = storeOfNode(f.id);
+      const n = st?.node(f.id);
+      if (!path || !st || !n) return;
+      const d = (n.data ?? {}) as Record<string, unknown>;
+      st.updateNode(f.id, { data: { ...d, url: path.trim() } } as Partial<EmNode>);
+      logInfo(`${f.name}: ${t("fs.findHere")} → ${path.trim()}`);
+      void checkFiles();
+    },
+    onUpload: (fs) => { void uploadFiles(fs); },
+    onKeep: (fs) => { void keepFiles(fs); },
+    onNewProject: () => { void newProjectGesture(); },
+    onReorder: () => { void reorderGesture(); },
+  };
+}
+
+async function uploadFiles(fs: FileState[]): Promise<void> {
+  const room = fileRoom();
+  if (!room) { toast(t("share.noRoom")); return; }
+  for (const f of fs) {
+    if (!f.path) continue;
+    const it = { id: f.id, name: f.name, path: f.path, sha256: f.sha256 || null, size: null,
+                 mediaType: "", locator: f.path, graphId: "study" } as unknown as InvItem;
+    const out = await sendToRoom(room.base, room.room_id, it, () => {});
+    if (out.ok) logInfo(`${f.name}: ${t("fs.upload")} · ${out.sent ? "sent" : "already there"}`);
+    else logWarn(`${f.name}: ${t("fs.upload")} — ${out.why ?? "failed"}`);
+  }
+  void checkFiles();
+}
+
+async function keepFiles(fs: FileState[]): Promise<void> {
+  const room = fileRoom();
+  const root = fileProjectRoot();
+  if (!room) { toast(t("share.noRoom")); return; }
+  if (!root) { toast(t("fs.noProject")); return; }
+  const bridge = await bridgeUrl();
+  for (const f of fs) {
+    if (!f.sha256) continue;
+    const leaf = (f.name || f.id).replace(/[\\/:*?"<>|]+/g, "_");
+    const dest = `${root}/EM/DosCo/${leaf}`;
+    try {
+      await keepOnDisk(bridge, room, f.sha256, dest);
+      logInfo(`${f.name}: ${t("fs.keep")} → ${dest}`);
+    } catch (e) { logWarn(`${f.name}: ${t("fs.keep")} — ${(e as Error).message}`); }
+  }
+  void checkFiles();
+}
+
+/** C1 · «New EM project…» and «Reorder by the EM standard…» (through the bridge) */
+async function newProjectGesture(): Promise<void> {
+  const parent = window.prompt(t("fs.newProjectParent"), "");
+  if (!parent) return;
+  const name = window.prompt(t("fs.newProjectName"), "Scavo");
+  if (!name) return;
+  try {
+    const out = await newEmProject(await bridgeUrl(), parent.trim(), name.trim());
+    logInfo(`${t("fs.newProject")} ${String(out.root)}: ${(out.made as string[]).join(", ")}`);
+  } catch (e) { toast((e as Error).message); }
+}
+
+async function reorderGesture(): Promise<void> {
+  const root = fileProjectRoot() || (inventorySources().baseDir ?? "");
+  if (!root) { toast(t("fs.noProject")); return; }
+  const bridge = await bridgeUrl();
+  try {
+    const prev = await reorderPreview(bridge, root);
+    const plan = (prev.plan as Array<{ action: string; from?: string; to: string }>) ?? [];
+    if (!plan.length) { toast(t("fs.reorderNothing")); return; }
+    const lines = plan.map((p) => p.action === "mkdir" ? `+ ${p.to}/` : `${p.from} → ${p.to}`).join("\n");
+    if (!window.confirm(t("fs.reorderAsk", { plan: lines }))) return;   // never without a yes
+    const done = await reorderApply(bridge, root, plan);
+    logInfo((done.done as string[]).join("; "));
+  } catch (e) { toast((e as Error).message); }
 }
 
 async function suspendedRootsNote(body: HTMLElement, win: Win): Promise<void> {
@@ -21060,6 +21177,9 @@ function renderStorageInto(host: StorageHost): void {
   // COLLEGARE · the document card stays on top whatever the listing does
   const withCard = (): void => {
     body.querySelector(":scope > .dcard")?.remove();
+    body.querySelector(":scope > .fs-section")?.remove();
+    // R2 · where the files of the graph are, at the head of Contents
+    if (store) body.prepend(filesSection(fileHooks()));
     const c = documentCard();
     if (c) body.prepend(c);
   };
