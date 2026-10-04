@@ -123,6 +123,23 @@ export async function pickSourceFile(extensions: string[]): Promise<string | nul
     : (typeof picked === "string" ? picked : null);
 }
 
+/** Native picker for ONE file on this computer → its path, or null.
+ *
+ * «Find here…» (relink a resource that is missing or an empty copy): the
+ * resource's `url` becomes the chosen path, so only the PATH is wanted — like
+ * `pickSourceFile`, and for the same reason a browser `<input type=file>`
+ * cannot stand in (it withholds the path). No filter: the file may have been
+ * renamed or converted; `defaultPath` opens where the project lives when it is
+ * known. Returns null outside Tauri (the browser types the path) and on cancel.
+ */
+export async function pickFile(title: string, defaultPath?: string): Promise<string | null> {
+  if (!isTauri()) return null;
+  const picked = await open({ multiple: false, directory: false, title,
+    ...(defaultPath ? { defaultPath } : {}) });
+  return Array.isArray(picked) ? (picked[0] ?? null)
+    : (typeof picked === "string" ? picked : null);
+}
+
 /** Native "Open…" dialog for a .graphml file → picked path + contents. */
 export async function openGraphml(): Promise<
   { path: string; text: string } | null

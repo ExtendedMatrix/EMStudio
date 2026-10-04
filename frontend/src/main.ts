@@ -307,6 +307,7 @@ import {
   clearLlmKey,
   onForeignBridge,
   pickFolder,
+  pickFile,
   pickSourceFile,
   pickXlsx,
   readBinaryFile,
@@ -21101,22 +21102,38 @@ function fileHooks(): FileHooks {
     describe: (id, f) => describeFile((storeOfNode(id) ?? store)?.doc.graph ?? { nodes: [], edges: [] }, id, f),
     onRefilter: filesRefresh,
     onReveal: (f) => { void bridgeUrl().then((b) => revealFile(b, f.path)).catch((e) => toast(String(e.message ?? e))); },
-    onRelink: (f) => {
-      // «Find here…»: the resource now points at where it is on this computer
-      const path = window.prompt(t("fs.findPrompt", { name: fileHooks().describe!(f.id, f).file }), "");
-      const st = storeOfNode(f.id);
-      const n = st?.node(f.id);
-      if (!path || !st || !n) return;
-      const d = (n.data ?? {}) as Record<string, unknown>;
-      st.updateNode(f.id, { data: { ...d, url: path.trim() } } as Partial<EmNode>);
-      logInfo(`${f.name}: ${t("fs.findHere")} → ${path.trim()}`);
-      void checkFiles();
-    },
+    onRelink: (f) => { void relinkFile(f); },
     onUpload: (fs) => { void uploadFiles(fs); },
     onKeep: (fs) => { void keepFiles(fs); },
     onNewProject: () => { void newProjectGesture(); },
     onReorder: () => { void reorderGesture(); },
   };
+}
+
+/** «Find here…»: the resource now points at where it is on this computer.
+ * The desktop app asks with the native file dialog (opened in the project's
+ * folder when it is known); the browser, which has no path to give, keeps the
+ * typed prompt. Cancel changes nothing. */
+async function relinkFile(f: FileState): Promise<void> {
+  const ask = t("fs.findPrompt", { name: fileHooks().describe!(f.id, f).file });
+  let path: string | null;
+  if (isTauri()) {
+    try {
+      path = await pickFile(ask, fileProjectRoot() || inventorySources().baseDir || undefined);
+    } catch (e) {
+      toast(String((e as Error)?.message ?? e));
+      return;
+    }
+  } else {
+    path = window.prompt(ask, "");
+  }
+  const st = storeOfNode(f.id);
+  const n = st?.node(f.id);
+  if (!path || !path.trim() || !st || !n) return;
+  const d = (n.data ?? {}) as Record<string, unknown>;
+  st.updateNode(f.id, { data: { ...d, url: path.trim() } } as Partial<EmNode>);
+  logInfo(`${f.name}: ${t("fs.findHere")} → ${path.trim()}`);
+  void checkFiles();
 }
 
 async function uploadFiles(fs: FileState[]): Promise<void> {

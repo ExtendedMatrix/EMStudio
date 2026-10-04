@@ -102,4 +102,16 @@ for (const id of ["sync.conflict", "room.read_only"])
   assert.ok(main.includes(`stateSign("${id}")`), `main.ts draws ${id} from the list`);
 assert.ok(/roleStateId\(said\)/.test(main), "the identity chip draws the role from the list");
 checks += 4;
+// «Find here…» on a missing file: the desktop asks with the native file dialog
+// (the same @tauri-apps/plugin-dialog `open` as the other pickers), the browser
+// keeps the typed prompt — it has no path to give.
+const tauri = readFileSync(`${SRC}tauri.ts`, "utf8");
+const pick = tauri.slice(tauri.indexOf("export async function pickFile("));
+assert.ok(/if \(!isTauri\(\)\) return null;\s*const picked = await open\(\{ multiple: false, directory: false/.test(pick),
+  "pickFile opens the native dialog for one file, and only in the desktop");
+const relink = main.slice(main.indexOf("async function relinkFile("), main.indexOf("async function uploadFiles("));
+assert.ok(/if \(isTauri\(\)\)[\s\S]*await pickFile\(ask,[\s\S]*\} else \{\s*path = window\.prompt\(ask/.test(relink),
+  "«Find here…»: native dialog in the desktop, the prompt in the browser");
+assert.ok(/onRelink: \(f\) => \{ void relinkFile\(f\); \}/.test(main), "the gesture calls relinkFile");
+checks += 3;
 console.log(`state-symbols: ${checks} checks passed`);
