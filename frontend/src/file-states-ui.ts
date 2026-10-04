@@ -19,6 +19,8 @@ export interface FileHooks {
   onReveal(f: FileState): void;
   onJump(id: string): void;
   onRefilter(): void;
+  /** R2 · what a row says of a file: its name and its document's title */
+  describe?(id: string, f?: FileState): { file: string; doc: string };
   /** C1 · the standard tree of an EM project */
   onNewProject?(): void;
   onReorder?(): void;
@@ -50,16 +52,19 @@ export function fileGestures(f: FileState, h: FileHooks): HTMLElement {
   return box;
 }
 
-/** one line: badge, name, gestures */
-export function fileRow(f: FileState, h: FileHooks): HTMLElement {
+/** one line: badge, the file's name and its document's title, gestures
+ *  (`withDoc` false where the document is already the page: the Doc viewer) */
+export function fileRow(f: FileState, h: FileHooks, withDoc = true): HTMLElement {
   const row = el("div", "fs-row");
   row.dataset.state = f.state;
   row.dataset.id = f.id;
   row.appendChild(stateBadge(`file.${f.state}`));
-  const name = el("button", "ghost fs-name", f.name || f.id) as HTMLButtonElement;
+  const said = h.describe?.(f.id, f) ?? { file: f.name || f.id, doc: "" };
+  const name = el("button", "ghost fs-name", said.file) as HTMLButtonElement;
   name.title = f.path || f.note || f.id;
   name.addEventListener("click", () => h.onJump(f.id));
   row.appendChild(name);
+  if (withDoc && said.doc) row.appendChild(el("span", "fs-doc", said.doc));
   row.appendChild(fileGestures(f, h));
   if (f.note) row.appendChild(el("div", "insp-hint fs-note", f.note));
   return row;
@@ -142,4 +147,66 @@ export function fileStateLine(id: string, h: FileHooks): HTMLElement | null {
   line.appendChild(fileGestures(f, h));
   if (f.note) line.appendChild(el("div", "insp-hint fs-note", f.note));
   return line;
+}
+
+// ── R2 rimasto (E.D., 4 Oct 2026) · the Doc viewer and the Documents table ──
+
+/** the files of ONE document, in the Doc viewer: each with its sign and its
+ *  gestures; a file not asked about yet says so, and «Check files» is here */
+export function docFilesBox(ids: string[], h: FileHooks): HTMLElement {
+  const box = el("div", "fs-docfiles");
+  box.dataset.docFiles = String(ids.length);
+  const head = el("div", "doc-links", t("fs.docFiles", { n: String(ids.length) }));
+  box.appendChild(head);
+  if (!ids.length) {
+    box.appendChild(el("div", "insp-hint", t("dcard.nofile")));
+    return box;
+  }
+  let unknown = 0;
+  for (const id of ids) {
+    const f = fileStateOf(id);
+    if (f) { box.appendChild(fileRow(f, h, false)); continue; }
+    unknown++;
+    const row = el("div", "fs-row");
+    row.dataset.id = id;
+    row.dataset.state = "";
+    row.appendChild(el("span", "state-badge st-muted", t("fs.notCheckedShort")));
+    row.appendChild(el("span", "fs-name", h.describe?.(id).file ?? id));
+    box.appendChild(row);
+  }
+  if (unknown) {
+    const b = el("button", "ghost", h.checking ? t("fs.checking") : t("fs.check")) as HTMLButtonElement;
+    b.disabled = h.checking;
+    b.dataset.act = "check";
+    b.addEventListener("click", () => h.onCheck());
+    box.appendChild(b);
+  }
+  return box;
+}
+
+const esc = (s: string): string => s.replace(/[&<>"']/g, (c) =>
+  ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
+
+/** the same, as the HTML of a cell or a card of the Documents table (no
+ *  gestures: they are in Contents and in the Doc viewer) */
+export function docFilesHtml(ids: string[], describe: (id: string) => { file: string }): string {
+  return ids.map((id) => {
+    const f = fileStateOf(id);
+    const file = esc(describe(id).file);
+    if (!f) return `<span class="fs-cell" data-file="${esc(id)}"><span class="fs-file">${file}</span></span>`;
+    const s = stateSign(`file.${f.state}`);
+    return `<span class="fs-cell" data-file="${esc(id)}" data-state="${esc(f.state)}">` +
+      `<span class="state-badge st-${s.tone}" data-state="file.${esc(f.state)}" title="${esc(s.meaning)}">${esc(s.glyph)}</span> ` +
+      `<span class="fs-file" title="${esc(f.path || f.note || "")}">${file}</span></span>`;
+  }).join(" ");
+}
+
+/** the signs of a document's files, for its line in a list: one glyph per state
+ *  present; null when none was asked about */
+export function docFilesGlyphs(ids: string[]): HTMLElement | null {
+  const states = [...new Set(ids.map((id) => fileStateOf(id)?.state).filter((s): s is string => !!s))];
+  if (!states.length) return null;
+  const span = el("span", "fs-glyphs");
+  for (const s of FILE_STATES.filter((x) => states.includes(x))) span.appendChild(stateBadge(`file.${s}`, false));
+  return span;
 }

@@ -183,8 +183,8 @@ import connectionsDatamodel from "./assets/s3Dgraphy_connections_datamodel.json"
 import datamodelTranslations from "./assets/datamodel_translations.json";
 import { createResourceThumb } from "./resource-preview";
 import { keepOnDisk, newEmProject, refreshFileStates, reorderApply, reorderPreview, revealFile,
-         fileProjectRoot, type FileState } from "./file-states";
-import { filesSection, fileStateLine, type FileHooks } from "./file-states-ui";
+         fileProjectRoot, describeFile, filesOfDocument, fileStateOf, type FileState } from "./file-states";
+import { docFilesBox, docFilesGlyphs, filesSection, fileStateLine, type FileHooks } from "./file-states-ui";
 import { paintChooser } from "./node-chooser";
 import { proposeLanguages, type LanguageProposal } from "./lang-guess";
 import {
@@ -346,7 +346,8 @@ import { buildInventory, candidatesOf, choose, confirmLot, digestInLocator, huma
   type InvItem, type InvOutcome, type InvProbe, type Inventory, type PhotoExif } from "./room-inventory";
 import { type HostInfo, SyncClient, SYNC_ACCEPTS, type SyncAccept } from "./sync";
 import { type Access, type ConnectionState, type Reach, nodeApi, renderConnectionPanel,
-  renderRoomPanel, shortNode, whereDetails, whereHealth, wherePhrase } from "./connection";
+  renderRoomPanel, roleStateId, roomStateId, shortNode, whereDetails, whereHealth, wherePhrase } from "./connection";
+import { stateBadge, stateSign } from "./state-symbols";
 import * as alignment from "./alignment";
 import { buildCommand, type CommandVerb } from "./commands";
 import { addResource, fileCounts, foldFiles, movePointers, packagingLabel, replaceFile, resourceFiles, resourceLabel, storeGraph } from "./resources";
@@ -1202,7 +1203,31 @@ function connectionState(): ConnectionState {
     reach: nodeReach, room, roomTitle: room && roomTitleOf?.room === room ? roomTitleOf.title : null,
     hostTool: hostToolName(),
     hostFile: hostInfo.file || hostInfo.database || hostInfo.label || null,
-    notice: hostNotice, misaligned, reconnecting: hubReconnecting };
+    notice: hostNotice, misaligned, reconnecting: hubReconnecting,
+    readOnly: hubReadOnly(), role: hostInfo.role ?? null, sync: room ? roomSyncState() : null };
+}
+/** I1 · where this session's edits are with the room: a conflict of the last
+ *  integration, operations sent and not confirmed (or waiting to be re-sent),
+ *  or aligned. Read at boot before its `let`s exist: «aligned» until they do. */
+function roomSyncState(): "aligned" | "pending" | "conflict" {
+  try {
+    if (lastMergeConflicts.length) return "conflict";
+    if (hubUnconfirmed.size || hubResyncPending.length) return "pending";
+  } catch { /* boot */ }
+  return "aligned";
+}
+/** I1 · the sync sign follows every operation sent and confirmed: one repaint
+ *  of the line per task, however many operations moved */
+let syncSignQueued = false;
+let syncSignShown: string | null = null;
+function noteSyncState(): void {
+  if (syncSignQueued) return;
+  syncSignQueued = true;
+  queueMicrotask(() => {
+    syncSignQueued = false;
+    // only when the state CHANGED: the line repaints the open panel too
+    if (roomSyncState() !== syncSignShown) renderStatusLine();
+  });
 }
 /**
  * Z · ZONE 1 of the bar, «where you work»: a dot and ONE phrase. The details the
@@ -1218,7 +1243,18 @@ function renderStatusLine(): void {
   const text = document.createElement("span");
   text.className = "where-text";
   text.textContent = wherePhrase(st);
-  modeIndicator.append(dot, text);
+  modeIndicator.append(dot);
+  // I1 · in a room the line carries the room's sign and the sync's, from the
+  // one list; on this computer and with Blender the phrase says it alone
+  if (st.mode === "hub" && st.room) {
+    const signs = document.createElement("span");
+    signs.className = "where-signs";
+    signs.appendChild(stateBadge(roomStateId(st), false));
+    if (st.sync) signs.appendChild(stateBadge(`sync.${st.sync}`, false));
+    syncSignShown = st.sync ?? null;
+    modeIndicator.append(signs);
+  }
+  modeIndicator.append(text);
   modeIndicator.dataset.health = dot.dataset.health;
   modeIndicator.dataset.mode = st.mode;
   modeIndicator.title = [...whereDetails(st), t("conn.statusTitle")].join("\n");
@@ -1467,7 +1503,8 @@ function renderSyncControl(): void {
     // event that happened.
     const badge = document.createElement("span");
     badge.className = "sync-readonly";
-    badge.textContent = t("room.readOnly");
+    badge.dataset.state = "room.read_only";   // I1 · the list's sign
+    badge.textContent = `${stateSign("room.read_only").glyph} ${t("room.readOnly")}`;
     badge.title = t("room.readOnlyHint", {
       role: hostInfo.role ?? t("room.roleUnknown"),
     });
@@ -1926,7 +1963,8 @@ window.__EM_SCENE__ = () => {
     hubToken = token;
     void askNodeWhoIAm(url).then(() => connectToHub(url, room, token));
   },
-  statusLine: () => modeIndicator.textContent,
+  // the PHRASE of zone 1 (I1: the signs beside it are not words)
+  statusLine: () => modeIndicator.querySelector(".where-text")?.textContent ?? modeIndicator.textContent,
   /** P2 · the session's node token (what a sign-in would set), «Bring into a
    *  room…» itself, and the shelf as it stands */
   useToken: (tok: string | null) => { hubToken = tok; },
@@ -5245,6 +5283,7 @@ function hubSendLocal(ops: HubOp[]): void {
   for (const hubOp of ops) {
     if (hubOp.op === "add_node") withOpLanguage(hubOp, store?.doc.graph ?? null);
     hubUnconfirmed.set(hubKey(hubOp), hubOp);
+    noteSyncState();
     sync.sendCommand(wireEnvelope("op", hubOp as unknown as Record<string, unknown>));
   }
 }
@@ -5436,6 +5475,7 @@ function replayAfterResync(): void {
   for (const op of pending) {
     if (hubWriteFieldLocally(op)) reapplied += 1;
     hubUnconfirmed.set(hubKey(op), op);
+    noteSyncState();
     sync.sendCommand(wireEnvelope("op", op as unknown as Record<string, unknown>));
   }
   if (reapplied < pending.length) {
@@ -6644,6 +6684,7 @@ function seatSeededContainer(room: string): boolean {
   const ops = seedOpsForContainer(active ?? null);
   for (const op of ops) {
     hubUnconfirmed.set(hubKey(op), op);
+    noteSyncState();
     sync.sendCommand(wireEnvelope("op", op as unknown as Record<string, unknown>));
   }
   logInfo(`room: seated ${ops.length} operation(s) on «${room}»`);
@@ -6787,6 +6828,7 @@ function connectToHub(url: string, room: string, token: string | null): void {
         const now = new Date().toISOString().replace(/\.\d+Z$/, "Z");
         hubResyncPending = stampForResend(hubUnconfirmed.values(), now);
         hubUnconfirmed.clear();
+        noteSyncState();
         hubBase = null;
         sync.setSince(null);
         noteHub({ kind: "resync", at: now,
@@ -6820,6 +6862,7 @@ function connectToHub(url: string, room: string, token: string | null): void {
     onOpResult: (message) => {
       const op = (message.op ?? {}) as HubOp;
       hubUnconfirmed.delete(hubKey(op));
+      noteSyncState();
       if (message.applied) {
         hubBase = String(op.ts ?? hubBase ?? "");
         sync.setSince(hubBase);
@@ -7039,11 +7082,14 @@ function showConflictPanel(conflicts: Conflict[]): void {
   const host = document.getElementById("conflict-panel");
   if (!host) return;
   lastMergeConflicts = conflicts;
+  noteSyncState();
   const chip = document.getElementById("conflict-reopen");
   if (chip) {
     chip.classList.toggle("hidden", !conflicts.length);
+    // I1 · the sign of the list (≠), not a flag of its own
+    chip.dataset.state = "sync.conflict";
     chip.textContent = conflicts.length
-      ? t("conflict.chip", { n: String(conflicts.length) })
+      ? `${stateSign("sync.conflict").glyph} ${t("conflict.chip", { n: String(conflicts.length) })}`
       : "";
     chip.title = t("conflict.chipTitle");
   }
@@ -11527,7 +11573,10 @@ function refreshIdentityChip(): void {
     const tick = nodeIdentity?.authMode !== "node_password"
       || identityState(identity) === "verified" ? " ✓" : "";
     chip.classList.add("id-presence");
-    chip.textContent = `${who}${tick}` + (said ? ` · ${t(`room.role.${said}`)}` : "");
+    // I1 · the role with the list's sign (none for a role the list lacks)
+    const roleId = roleStateId(said);
+    const sign = roleId ? `${stateSign(roleId).glyph} ` : "";
+    chip.textContent = `${who}${tick}` + (said ? ` · ${sign}${t(`room.role.${said}`)}` : "");
     chip.title = t("ident.presenceTitle", { who, room: String(sync.room),
                                             node: nodeIdentity!.node });
     return;
@@ -17864,6 +17913,9 @@ function renderDocViewInto(
     b.innerHTML =
       `${escapeHtml(d.name || d.id)}` +
       (sub ? `<span class="doc-sub">${escapeHtml(sub)}</span>` : "");
+    // R2 · the signs of its files, once they were asked about
+    const signs = store ? docFilesGlyphs(filesOfDocument(store.doc.graph, d.id)) : null;
+    if (signs) b.appendChild(signs);
     b.addEventListener("click", () => {
       setWinCurrent(win, "doc", d.id);
       setWinCurrent(win, "reading", null);
@@ -17912,6 +17964,8 @@ function renderDocViewInto(
   field(t("doc.description"), current.description ?? "", (v) =>
     store?.updateNode(current.id, { description: v }),
   );
+  // R2 · where its files are, with the common signs and their gestures
+  if (store) detail.appendChild(docFilesBox(filesOfDocument(store.doc.graph, current.id), fileHooks()));
   // TRADUZIONI · the languages of the description, and the facing text
   if (store && trx.isNaturalLanguage(current, "description")) {
     const langs = document.createElement("div");
@@ -18075,6 +18129,11 @@ function docMediaUrl(d: EmNode): string | null {
   const chosen = docModelOf(d);
   if (chosen) return chosen.url;
   const st = store;
+  // R2 · where the ONE resolver found its file on this computer comes first:
+  // `/DosCo/D.32.jpg` is a path of the study, and the resolver has read it so
+  const found = st ? filesOfDocument(st.doc.graph, d.id).map((id) => fileStateOf(id))
+    .find((f) => f && f.path && (f.state === "on_disk" || f.state === "both")) : undefined;
+  if (found && viewerSourceOf(st!.node(found.id) ?? null)) return docSrcUrl(found.path);
   const own = viewerSourceOf(d);
   const linked = st?.liveEdges().filter((e) => e.source === d.id && e.edge_type === "has_linked_resource")
     .map((e) => viewerSourceOf(st.node(e.target) ?? null)).find(Boolean) ?? null;
@@ -21010,7 +21069,7 @@ function documentCard(): HTMLElement | null {
 // ── R1/R2 (E.D., 4 Oct 2026) · where the files are, with the ONE resolver ──
 let filesChecking = false;
 
-function filesRefresh(): void { renderStorage(); refreshInspector(); }
+function filesRefresh(): void { renderStorage(); refreshInspector(); renderDocView(); renderEmData(); }
 
 function fileRoom(): { base: string; room_id: string; token?: string | null } | null {
   const base = (hubNodeUrl || getSettings().sync.hubUrl).trim().replace(/\/+$/, "");
@@ -21039,11 +21098,12 @@ function fileHooks(): FileHooks {
     inRoom: !!fileRoom(),
     onCheck: () => { void checkFiles(); },
     onJump: (id) => { select(id); },
+    describe: (id, f) => describeFile((storeOfNode(id) ?? store)?.doc.graph ?? { nodes: [], edges: [] }, id, f),
     onRefilter: filesRefresh,
     onReveal: (f) => { void bridgeUrl().then((b) => revealFile(b, f.path)).catch((e) => toast(String(e.message ?? e))); },
     onRelink: (f) => {
       // «Find here…»: the resource now points at where it is on this computer
-      const path = window.prompt(t("fs.findPrompt", { name: f.name || f.id }), "");
+      const path = window.prompt(t("fs.findPrompt", { name: fileHooks().describe!(f.id, f).file }), "");
       const st = storeOfNode(f.id);
       const n = st?.node(f.id);
       if (!path || !st || !n) return;

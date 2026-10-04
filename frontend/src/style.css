@@ -9196,6 +9196,19 @@ body.sync-active #statusbar .sb-who .footer-chip.id-signature {
 .fs-gestures { display: inline-flex; gap: 2px; margin-left: auto; }
 .fs-act { font-size: 11px; padding: 1px 6px; }
 .fs-note { flex-basis: 100%; }
+/* R2 rimasto · the file's name and its document's title; the Doc viewer and the Documents table */
+.fs-doc { flex: 1 1 0; min-width: 0; color: var(--text-muted); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fs-docfiles { margin: 10px 0 6px; font-size: 12px; }
+.fs-glyphs { display: inline-flex; gap: 2px; margin-left: 6px; vertical-align: middle; }
+.fs-glyphs .state-badge, .fs-cell .state-badge { padding: 0 4px; }
+.fs-cell { display: inline-flex; gap: 3px; align-items: center; white-space: nowrap; margin-right: 6px; }
+.fs-file { font-family: var(--mono, ui-monospace, monospace); font-size: 11px; }
+/* I1 rimasto · the room, the role and the sync with the signs of the one list */
+.where-signs { display: inline-flex; gap: 2px; margin-right: 4px; }
+.where-signs .state-badge, .conn-where .state-badge, .conn-role-wrap .state-badge { border: 0; padding: 0 2px; font-size: 12px; }
+.conn-where .state-badge { margin-right: 4px; }
+.conn-signs { display: flex; gap: 4px; flex-wrap: wrap; margin: 4px 0 6px; }
+.conn-role-wrap { display: inline-flex; gap: 2px; align-items: center; }
 
 /* ── N1/N2 (4 Oct 2026) · «Choose the node» ─────────────────────────────── */
 .nc-say { margin: 4px 0 8px; font-weight: 600; }

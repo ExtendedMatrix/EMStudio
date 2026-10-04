@@ -19,6 +19,7 @@
  */
 
 import { t } from "./i18n";
+import { stateBadge, stateIds } from "./state-symbols";
 
 export type Reach = "unknown" | "reachable" | "unreachable";
 export type Access = "orcid_node" | "node_password" | "declared" | "none";
@@ -46,6 +47,39 @@ export interface ConnectionState {
   misaligned?: string | null;
   /** a room's socket dropped and is being asked again */
   reconnecting?: boolean;
+  /** I1 · the room said this session may not write */
+  readOnly?: boolean;
+  /** I1 · the role the room resolved for this session, when it said one */
+  role?: string | null;
+  /** I1 · where this session's edits are with the room */
+  sync?: "aligned" | "pending" | "conflict" | null;
+}
+
+// ── I1 rimasto (E.D., 4 Oct 2026) · the room, the role and the sync with the
+// signs of the ONE list (s3Dgraphy `em_state_symbols.json`, state-symbols.ts),
+// the same the files (file.*) and the node finder (node.*) already draw. A
+// state the list does not have (the role «admin», «none») keeps its word and
+// gets no sign: none is invented here.
+
+/** the room state of a session: inside, inside but read-only, or outside */
+export function roomStateId(s: Pick<ConnectionState, "mode" | "room" | "readOnly">): string {
+  if (s.mode === "hub" && s.room) return s.readOnly ? "room.read_only" : "room.inside";
+  return "room.outside";
+}
+
+/** `role.owner` / `role.editor` / `role.viewer`, or null for a role the list lacks */
+export function roleStateId(role: string | null | undefined): string | null {
+  const id = `role.${role ?? ""}`;
+  return role && stateIds().includes(id) ? id : null;
+}
+
+/** the role's sign (glyph only, its meaning as the tooltip) beside its word */
+export function roleBadge(role: string | null | undefined): HTMLElement {
+  const box = el("span", "conn-role-wrap");
+  const id = roleStateId(role);
+  if (id) box.appendChild(stateBadge(id, false));
+  box.appendChild(el("span", "conn-role", t(`room.role.${role ?? "none"}`)));
+  return box;
 }
 
 /** `https://em.localhost:8443/em` → `em.localhost:8443` (the short address) */
@@ -271,7 +305,7 @@ export function renderRoomList(host: HTMLElement, rooms: RoomInfo[], current: st
         b.title = r.room_id + (r.implicit ? ` · ${t("rooms.implicit")}` : "");
         b.addEventListener("click", () => join(r.room_id));
         li.appendChild(b);
-        if (key === "shared") li.appendChild(el("span", "conn-role", t(`room.role.${r.your_role ?? "none"}`)));
+        if (key === "shared") li.appendChild(roleBadge(r.your_role));
         if (r.room_id === current) li.appendChild(el("span", "conn-dim", t("rooms.here")));
         ul.appendChild(li);
       }
@@ -304,7 +338,7 @@ export function renderConnectionPanel(host: HTMLElement, s: ConnectionState, g: 
   const head = el("h4", "conn-where");
   const dot = el("span", "where-dot");
   dot.dataset.health = whereHealth(s);
-  head.append(dot, document.createTextNode(wherePhrase(s)));
+  head.append(dot, stateBadge(roomStateId(s), false), document.createTextNode(wherePhrase(s)));
   host.appendChild(head);
   if (s.notice) host.appendChild(el("p", "conn-line conn-warn", s.notice));
   if (s.misaligned) host.appendChild(el("p", "conn-line conn-warn", s.misaligned));
@@ -342,6 +376,14 @@ export function renderConnectionPanel(host: HTMLElement, s: ConnectionState, g: 
     room.dataset.sect = "room";
     room.appendChild(el("h5", "", t("conn.roomHead")));
     room.appendChild(el("p", "conn-line", t("conn.inRoom", { room: s.roomTitle || s.room })));
+    // I1 · the room, the role and the sync, each with its sign and its word
+    const signs = el("div", "conn-signs");
+    signs.dataset.sect = "signs";
+    signs.appendChild(stateBadge(roomStateId(s)));
+    const role = roleStateId(s.role);
+    if (role) signs.appendChild(stateBadge(role));
+    if (s.sync) signs.appendChild(stateBadge(`sync.${s.sync}`));
+    room.appendChild(signs);
     if (parts.roster) room.appendChild(parts.roster);
     if (parts.accept) {
       room.appendChild(el("h5", "", t("conn.acceptHead", { tool: t("conn.theRoom") })));
@@ -464,7 +506,9 @@ export async function renderRoomPanel(host: HTMLElement, h: RoomPanelHooks): Pro
   const head = el("h4", "", `${info.title || info.room_id} · ${own.text}`);
   head.dataset.own = own.mine ? "yours" : "theirs";
   host.appendChild(head);
-  host.appendChild(el("p", "conn-line", t("room.yourRole", { role: t(`room.role.${info.your_role ?? "none"}`) })));
+  const yours = el("p", "conn-line", t("room.yourRole", { role: "" }).replace(/\s*$/, " "));
+  yours.appendChild(roleBadge(info.your_role));
+  host.appendChild(yours);
   if (!own.mine) host.appendChild(el("p", "conn-line", t("room.ownerIs", { owner: info.owner || "?" })));
 
   const note = el("p", "conn-line conn-note");
@@ -483,7 +527,7 @@ export async function renderRoomPanel(host: HTMLElement, h: RoomPanelHooks): Pro
         const li = el("li");
         li.dataset.orcid = r.orcid;
         li.appendChild(el("span", "conn-orcid", r.orcid + (r.orcid === h.me ? ` (${t("room.you")})` : "")));
-        li.appendChild(el("span", "conn-role", t(`room.role.${r.role}`)));
+        li.appendChild(roleBadge(r.role));
         if (r.role !== "owner") {
           const x = btn("×", "conn-btn conn-x");
           x.title = t("room.remove", { who: r.orcid });
@@ -499,7 +543,7 @@ export async function renderRoomPanel(host: HTMLElement, h: RoomPanelHooks): Pro
       for (const g of m.groups ?? []) {
         const li = el("li", "conn-group");
         li.appendChild(el("span", "conn-orcid", g.name || g.group_id));
-        li.appendChild(el("span", "conn-role", t(`room.role.${g.role}`)));
+        li.appendChild(roleBadge(g.role));
         list.appendChild(li);
       }
     };

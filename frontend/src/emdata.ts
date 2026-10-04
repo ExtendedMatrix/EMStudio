@@ -53,6 +53,8 @@ import {
   type FacetSelection,
 } from "./facets";
 import { t } from "./i18n";
+import { describeFile, filesOfDocument } from "./file-states";
+import { docFilesHtml } from "./file-states-ui";
 import { chronologyFor, onChronologyUpdate, type ChronEntry, type ChronRule,
          type ChronState } from "./chron-bridge";
 
@@ -501,7 +503,7 @@ function renderEmDataInto(host: EmDataHost): void {
       passes(n.id, [n.name, n.id, n.description].join(" "))).map((n) => n.id));
     const cs = docCards(ctx, ix, ids);
     count = cs.length;
-    content = docCardsHtml(cs);
+    content = docCardsHtml(cs, store.doc.graph);
   } else {
     const r = emdbTableHtml(store, st.sheet as SheetKey, passes);
     count = r.count;
@@ -527,8 +529,15 @@ function emdbTableHtml(store: DocumentStore, sheet: SheetKey,
   const rows = table.rows.filter((r) =>
     passes(r.id, [r.id, ...Object.values(r.cells)].join(" ")));
   const claimForm = sheet === "Claims" ? '<div class="emdata-claimform-slot"></div>' : "";
+  // R2 · the Documents sheet shows where each document's files are: a column of
+  // the VIEW, read from the one resolver's answers — not a column of the sheet
+  const g = store.doc.graph;
+  const files = sheet === "Documents"
+    ? (id: string): string => `<td class="emdata-ro fs-files-cell">${docFilesHtml(filesOfDocument(g, id), (x) => describeFile(g, x))}</td>`
+    : null;
   const head = `<tr><th class="emdata-gutter-head" title="${escapeAttr(t("table.pickHint"))}"></th>` +
-    table.columns.map((c) => `<th>${escapeHtml(c.label)}</th>`).join("") + `<th></th></tr>`;
+    table.columns.map((c) => `<th>${escapeHtml(c.label)}</th>`).join("") +
+    (files ? `<th>${escapeHtml(t("dcard.files"))}</th>` : "") + `<th></th></tr>`;
   const rowsHtml = rows.map((row) => {
     const cells = table.columns.map((col, ci) =>
       renderCell(row.readonly ? { ...col, editor: { kind: "readonly" } } : col,
@@ -539,7 +548,7 @@ function emdbTableHtml(store: DocumentStore, sheet: SheetKey,
     const gutter = `<td class="emdata-gutter"><button class="emdata-pick" data-pick="${escapeAttr(
       row.id)}" title="${escapeAttr(t("table.pickRow"))}" tabindex="-1">▸</button></td>`;
     return `<tr class="${row.volatile ? "emdata-vol" : ""}${row.readonly ? " emdata-ro-row" : ""}${cur}" ` +
-      `data-row="${escapeAttr(row.id)}">${gutter}${cells}${del}</tr>`;
+      `data-row="${escapeAttr(row.id)}">${gutter}${cells}${files ? files(row.id) : ""}${del}</tr>`;
   }).join("");
   return {
     count: rows.length,
@@ -666,11 +675,17 @@ function unitCardsHtml(cs: ReturnType<typeof unitCards>): string {
     `</div></div>`;
 }
 
-function docCardsHtml(cs: ReturnType<typeof docCards>): string {
+function docCardsHtml(cs: ReturnType<typeof docCards>, g: DocumentStore["doc"]["graph"]): string {
+  // R2 · each card says where its document's files are, file by file
+  const files = (id: string): string => {
+    const ids = filesOfDocument(g, id);
+    return ids.length ? `<div class="tv-f fs-files-card"><span>${escapeHtml(t("dcard.files"))}</span>` +
+      `<span>${docFilesHtml(ids, (x) => describeFile(g, x))}</span></div>` : "";
+  };
   return `<div class="tv-pad"><p class="tv-lead">${escapeHtml(t("table.docsLead"))}</p><div class="tv-cols">` +
     cs.map((c) => `<div class="tv-card" data-id="${escapeAttr(c.node.id)}"><h3>${escapeHtml(nm(c.node))} ` +
       `<span class="tv-tag">${escapeHtml(t("table.master"))}</span></h3>` +
-      `<p class="tv-desc">${escapeHtml(String(c.node.description ?? ""))}</p>` +
+      `<p class="tv-desc">${escapeHtml(String(c.node.description ?? ""))}</p>` + files(c.node.id) +
       `<div class="tv-eyebrow">${escapeHtml(t("table.uses", { n: String(c.uses) }))}</div>` +
       // DEV30 U4 · from the card to the node: select it and centre it in the Matrix
       `<button class="tv-act" type="button" data-show-matrix="${escapeAttr(c.node.id)}">${escapeHtml(t("table.showInMatrix"))}</button>` +

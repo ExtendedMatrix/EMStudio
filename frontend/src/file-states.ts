@@ -67,3 +67,66 @@ export const reorderPreview = (bridge: string, root: string) =>
   post(bridge, "/project-reorder", { root });
 export const reorderApply = (bridge: string, root: string, plan: unknown) =>
   post(bridge, "/project-reorder", { root, plan, apply: true, confirm: true });
+
+// ── R2 rimasto (E.D., 4 Oct 2026) · what a row SAYS of a file ────────────────
+// The rows said «Link to D.32»: the name the GraphML importer gives every link
+// (s3Dgraphy `import_graphml`), the same for every file of every document. A
+// row now says the FILE's name — the last segment of where it is, or of where
+// the graph says it is — and the TITLE of the document it belongs to.
+interface GraphLike {
+  nodes: Array<{ id: string; name?: unknown; node_type?: string; description?: unknown; data?: unknown }>;
+  edges: Array<{ source: string; target: string; edge_type?: string }>;
+}
+
+const dataOf = (n: { data?: unknown } | undefined): Record<string, unknown> =>
+  (n?.data && typeof n.data === "object" ? n.data : {}) as Record<string, unknown>;
+
+/** `/DosCo/D.32.jpg`, `C:\x\D.32.jpg`, `https://h/x/P01%5Bext%5D.jpeg?v=2` → the last segment */
+export function lastSegment(where: string): string {
+  const s = where.trim().replace(/[?#].*$/, "").replace(/[\\/]+$/, "");
+  const seg = s.split(/[\\/]/).pop() ?? "";
+  try { return decodeURIComponent(seg); } catch { return seg; }
+}
+
+/** the files a document hangs (`has_linked_resource`), and the files of each set
+ *  (`has_file`): the ids the resolver answers for */
+export function filesOfDocument(g: GraphLike, docId: string): string[] {
+  const out: string[] = [];
+  for (const e of g.edges) {
+    if (e.source !== docId || e.edge_type !== "has_linked_resource") continue;
+    out.push(e.target);
+    for (const f of g.edges) if (f.source === e.target && f.edge_type === "has_file") out.push(f.target);
+  }
+  return [...new Set(out)];
+}
+
+/** the node a resource belongs to: the one that links it (a document, or an
+ *  extractor), through its set when it is one file of a set */
+function ownerOf(g: GraphLike, id: string, seen = new Set<string>()): GraphLike["nodes"][number] | null {
+  if (seen.has(id)) return null;
+  seen.add(id);
+  const byId = (x: string) => g.nodes.find((n) => n.id === x);
+  const link = g.edges.find((e) => e.target === id && e.edge_type === "has_linked_resource");
+  if (link) return byId(link.source) ?? null;
+  const set = g.edges.find((e) => e.target === id && e.edge_type === "has_file");
+  return set ? ownerOf(g, set.source, seen) : null;
+}
+
+/** «D.32.jpg» and «D.32 · <title>» for one resource id (and its state, when known) */
+export function describeFile(g: GraphLike, id: string, f?: FileState): { file: string; doc: string; docId: string | null } {
+  const n = g.nodes.find((x) => x.id === id);
+  const d = dataOf(n);
+  const where = [f?.path, d.url, d.filename, d.path, d.locator]
+    .map((v) => (typeof v === "string" ? v : "")).find((v) => v && !/^sha256:/i.test(v)) ?? "";
+  const name = String(n?.name ?? f?.name ?? "");
+  const file = lastSegment(where) || (name && !/^Link to /.test(name) ? name : "") || name || id;
+  const owner = ownerOf(g, id);
+  let doc = "";
+  if (owner) {
+    const od = dataOf(owner);
+    const title = String(od.title ?? owner.description ?? "").trim();
+    const oname = String(owner.name ?? owner.id);
+    doc = title && title !== oname ? `${oname} · ${title}` : oname;
+  }
+  return { file, doc, docId: owner?.id ?? null };
+}
