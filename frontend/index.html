@@ -95,7 +95,8 @@
             </button>
             <div class="dd-sub-menu hidden">
               <button id="btn-svg" data-i18n-title="menu.svgTitle" title="Export current view as SVG">SVG</button>
-              <button id="btn-graphml" data-i18n-title="menu.graphmlTitle" title="Export as yEd GraphML (needs the local dev bridge — see dev.sh)">GraphML</button>
+              <!-- GraphML is not exported any more (E.D., 4 Oct 2026): it is read
+                   once into an em.json (File ▸ Importa ▸ GraphML) and never written. -->
               <button id="btn-ttl" data-i18n-title="menu.ttlTitle" title="Export as RDF/CIDOC Turtle (.ttl) via the s3Dgraphy projection">Turtle (.ttl)</button>
               <!-- AUDIT N9 · the narrative's four files (HTML, Word, LaTeX,
                    Jupyter) are exported from the narrative window's «Esporta ▾»,

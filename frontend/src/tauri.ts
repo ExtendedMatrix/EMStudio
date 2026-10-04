@@ -16,6 +16,8 @@ const EM_FILTERS = [
   { name: "Extended Matrix", extensions: ["emj", "em.json", "json"] },
 ];
 
+// GraphML is only OPENED (E.D., 4 Oct 2026: read once into an em.json, never
+// written again), so this filter belongs to `openGraphml` alone.
 const GRAPHML_FILTERS = [
   { name: "yEd GraphML", extensions: ["graphml", "xml"] },
 ];
@@ -66,12 +68,14 @@ export async function readBinaryFile(path: string): Promise<Uint8Array> {
   return await readFile(path);
 }
 
-/** Native "Save As…" dialog → the chosen path (already written), or null. */
+/** Native "Save As…" dialog → the chosen path (already written), or null.
+ *  `defaultPath` is a bare file name, or a whole path when the dialog should
+ *  open in a folder (the em.json proposed beside the GraphML it was read from). */
 export async function saveAsEmJson(
   text: string,
-  defaultName: string,
+  defaultPath: string,
 ): Promise<string | null> {
-  const path = await save({ defaultPath: defaultName, filters: EM_FILTERS });
+  const path = await save({ defaultPath, filters: EM_FILTERS });
   if (!path) return null;
   await writeTextFile(path, text);
   return path;
@@ -149,18 +153,6 @@ export async function openGraphml(): Promise<
   if (!path || typeof path !== "string") return null;
   const text = await readTextFile(path);
   return { path, text };
-}
-
-/** Native "Save As…" dialog for GraphML → the chosen path (already written),
- *  or null if cancelled. */
-export async function saveGraphml(
-  text: string,
-  defaultName: string,
-): Promise<string | null> {
-  const path = await save({ defaultPath: defaultName, filters: GRAPHML_FILTERS });
-  if (!path) return null;
-  await writeTextFile(path, text);
-  return path;
 }
 
 /** Native "Save As…" dialog for a .ttl file → the chosen path (already

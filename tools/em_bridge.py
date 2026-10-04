@@ -4359,6 +4359,7 @@ def make_handler(api):
                 return None
 
         # em.json (JSON body) → GraphML (yEd), downloadable
+        # No EMStudio gesture calls this any more (GraphML deprecated 4 Oct 2026); kept for a possible explicit compatibility export, to be decided.
         def _export_graphml(self, raw):
             try:
                 doc = json.loads(raw.decode("utf-8"))

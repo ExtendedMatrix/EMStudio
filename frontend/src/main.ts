@@ -297,7 +297,6 @@ import {
   writeEmJson,
   saveAsEmJson,
   openGraphml,
-  saveGraphml,
   saveTtl,
   setWindowTitle,
   baseName,
@@ -7244,13 +7243,14 @@ async function saveFile(file: OpenFile): Promise<boolean> {
 }
 
 /** Save a file under a new path (desktop) — the file's path changes, and its
- *  graphs follow. In a browser it is a download with a fresh name. */
-async function saveFileAs(file: OpenFile): Promise<boolean> {
+ *  graphs follow. In a browser it is a download with a fresh name.
+ *  `defaultPath`: where the desktop dialog proposes it (a GraphML's folder). */
+async function saveFileAs(file: OpenFile, defaultPath: string | null = null): Promise<boolean> {
   const doc = fileContainer(file);
   const text = JSON.stringify(doc, null, 1);
   if (isTauri()) {
     try {
-      const path = await saveAsEmJson(text, downloadNameFor(file));
+      const path = await saveAsEmJson(text, defaultPath ?? downloadNameFor(file));
       if (!path) return false; // user cancelled
       emtree.setFilePath(file.id, path, baseName(path));
       for (const slot of emtree.slotsOf(file.id)) slot.seedSig = undefined;
@@ -7290,14 +7290,17 @@ async function saveAsDocument(): Promise<void> {
   const file = emtree.addFile(null, defaultFileName());
   emtree.assign(slot.id, file.id);
   const ok = await saveFileAs(file);
-  if (!ok) {
-    // cancelled: the graph goes back to «Senza file», and the file never existed
-    emtree.assign(slot.id, null);
-    emtree.files = emtree.files.filter((f) => f.id !== file.id);
-    if (shelfHomeFileId === file.id) shelfHomeFileId = null;
-    if (corpusHomeFileId === file.id) corpusHomeFileId = null;
-  }
+  if (!ok) forgetUnwrittenFile(slot, file);
   refreshEMTree();
+}
+
+/** A file given to a graph and never written (Save As cancelled): the graph
+ *  goes back to «Senza file», and the file never existed. */
+function forgetUnwrittenFile(slot: GraphSlot, file: OpenFile): void {
+  emtree.assign(slot.id, null);
+  emtree.files = emtree.files.filter((f) => f.id !== file.id);
+  if (shelfHomeFileId === file.id) shelfHomeFileId = null;
+  if (corpusHomeFileId === file.id) corpusHomeFileId = null;
 }
 
 /** F2 · «Salva tutto»: every file with unsaved work. A graph with no file is
@@ -10181,51 +10184,6 @@ setTreeBridgeResolver(bridgeUrl);
 // MICRO-cronologia · the Chronology view asks s3Dgraphy for the propagated
 // chronology through the same bridge, by the same rule.
 setChronologyBridgeResolver(bridgeUrl);
-document.getElementById("btn-graphml")!.addEventListener("click", async () => {
-  if (!store) {
-    toast("Open a document first");
-    return;
-  }
-  const g = store.doc.graph;
-  const name = String(g["name"] ?? g.graph_id ?? "graph");
-  toast(t("io.exporting", { fmt: "GraphML" }));
-  try {
-    const res = await fetch(`${await bridgeUrl()}/graphml`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: store.toJSON(),
-    });
-    if (!res.ok) {
-      let msg = `bridge error ${res.status}`;
-      try {
-        const j = await res.json();
-        if (j?.error) msg = j.error;
-      } catch {
-        /* non-JSON error body */
-      }
-      toast(t("io.exportFailed", { fmt: "GraphML", msg }));
-      return;
-    }
-    const xml = await res.text();
-    const filename = `${name.replace(/[^\w.-]+/g, "_")}.graphml`;
-    if (isTauri()) {
-      // Native "Save As…" dialog — the webview has no browser download UI.
-      const path = await saveGraphml(xml, filename);
-      if (!path) return; // cancelled
-      toast(t("io.exportedTo", { fmt: "GraphML", name: baseName(path) }));
-    } else {
-      const a = document.createElement("a");
-      a.href = URL.createObjectURL(new Blob([xml], { type: "application/xml" }));
-      a.download = filename;
-      a.click();
-      URL.revokeObjectURL(a.href);
-      toast(t("io.exported", { fmt: "GraphML" }));
-    }
-  } catch {
-    toast(BRIDGE_UNREACHABLE);
-  }
-});
-
 // DP-79 P1 · export the NARRATIVE — LaTeX, Word, HTML.
 //
 // Same shape as the Turtle button below and for the same reason (invariant 2):
@@ -10565,7 +10523,11 @@ document.getElementById("btn-ttl")!.addEventListener("click", async () => {
 });
 
 // Import a yEd GraphML file → em.json via the transformer (s3Dgraphy
-// importer), then load it. Same endpoint/constraint as export (invariant 2).
+// importer), then load it (invariant 2: the importer lives in s3Dgraphy).
+//
+// E.D., 4 Oct 2026: GraphML is DEPRECATED — read once, never written again. The
+// imported graph becomes an em.json at once (`keepGraphmlAsEmJson`), and from
+// then on Save writes that file; nothing in EMStudio exports a GraphML.
 async function importGraphmlText(text: string, srcName: string, srcPath: string | null = null): Promise<void> {
   if (!(await confirmLeaveSidecar("Importing GraphML"))) return;
   toast(t("io.importing", { fmt: "GraphML" }));
@@ -10587,15 +10549,53 @@ async function importGraphmlText(text: string, srcName: string, srcPath: string 
       return;
     }
     const doc = (await res.json()) as EmDocument;
+    const before = emtree.activeId;
     loadDocument(doc, srcName); // no layout → auto fresh-layout on load
+    const slot = emtree.active();
+    if (!slot || slot.id === before) return;   // refused by loadDocument, which said why
     // DEV30 U1 · the folder of the GraphML is the study's until it is saved:
     // its documents' «/DosCo/…» are read there
-    const slot = emtree.active();
-    if (slot && srcPath) slot.sourceDir = srcPath.replace(/[\\/][^\\/]*$/, "") || null;
+    if (srcPath) slot.sourceDir = srcPath.replace(/[\\/][^\\/]*$/, "") || null;
     toast(t("io.imported", { name: srcName }));
+    await keepGraphmlAsEmJson(slot, srcName, srcPath);
   } catch {
     toast(BRIDGE_UNREACHABLE);
   }
+}
+
+/**
+ * GraphML read once: the graph gets its em.json NOW, not at the first Save.
+ *
+ * Desktop with the GraphML's path: `<its folder>/<stem>.em.json` proposed in the
+ * native Save dialog (which asks itself before replacing a file — nothing is
+ * overwritten silently). Browser: the name is asked, then the em.json is
+ * downloaded under it. Either way the slot then belongs to that file, so Save
+ * writes the em.json. Cancelled: the graph stays loaded without a file, as an
+ * import always was, and the status line says it is not an em.json yet.
+ */
+async function keepGraphmlAsEmJson(slot: GraphSlot, srcName: string, srcPath: string | null): Promise<void> {
+  const proposed = `${srcName.replace(/\.(graphml|xml)$/i, "")}.em.json`;
+  const file = emtree.addFile(null, proposed);
+  emtree.assign(slot.id, file.id);
+  let ok = false;
+  if (isTauri()) {
+    const dir = srcPath ? srcPath.replace(/[\\/][^\\/]*$/, "") : "";
+    const sep = srcPath?.includes("\\") && !srcPath.includes("/") ? "\\" : "/";
+    ok = await saveFileAs(file, dir ? `${dir}${sep}${proposed}` : proposed);
+  } else {
+    const typed = window.prompt(t("graphml.emjsonPrompt"), proposed)?.trim();
+    if (typed) {
+      file.name = /\.(em\.json|emj|json)$/i.test(typed) ? typed : `${typed}.em.json`;
+      ok = await saveFile(file);
+    }
+  }
+  if (!ok) {
+    forgetUnwrittenFile(slot, file);
+    info.textContent = t("graphml.notEmJsonYet", { name: srcName });
+    refreshEMTree();
+    return;
+  }
+  toast(t("graphml.readOnce", { name: emtree.fileOf(slot)?.name ?? file.name }));
 }
 
 // MICRO-UN-POSTO · the one door: File ▸ Importa ▸ Tabella con mappatura…
