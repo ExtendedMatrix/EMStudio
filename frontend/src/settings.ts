@@ -58,6 +58,11 @@ export interface InteractionSettings {
    * either way.
    */
   strictDocumentNames: boolean;
+  /** D3 (E.D., 4 Oct 2026) · photos of one camera further apart than this
+   *  (minutes) are two sessions — two lots. 30 by default. */
+  lotGapMinutes: number;
+  /** D3 · fewer photos than this are files, not a lot worth proposing. 5. */
+  lotMinPhotos: number;
 }
 
 /**
@@ -162,7 +167,8 @@ const DEFAULTS: Settings = {
   sync: { protocol: "ws", host: "localhost", port: 8788, tool: "blender",
           accept: "everything", hubUrl: "", hubRoom: "" },
   developer: { showNodeIds: false },
-  interaction: { edgeTooltips: true, strictDocumentNames: true },
+  interaction: { edgeTooltips: true, strictDocumentNames: true,
+                 lotGapMinutes: 30, lotMinPhotos: 5 },
   ai: { provider: "claude", model: "" },
   // No default host on purpose: a wrong one would look like a broken viewer.
   // The Heriverse deployment guide mounts the wapp at /a/heriverse.
@@ -302,4 +308,15 @@ export function atonPreviewUrl(item: string): string | null {
   const root = atonBase();
   if (!root || !item) return null;
   return `${root}/preview/?i=${encodeURIComponent(item)}`;
+}
+
+/** D3 · the lot thresholds as `sessionLots` takes them, from the settings
+ *  (a value that is not a positive number falls back to the default). The lot
+ *  stays a PROPOSAL to confirm whatever the thresholds are. */
+export function lotThresholds(): { gapSeconds: number; minPhotos: number } {
+  const i = current.interaction;
+  const gap = Number(i.lotGapMinutes);
+  const min = Math.round(Number(i.lotMinPhotos));
+  return { gapSeconds: (Number.isFinite(gap) && gap > 0 ? gap : 30) * 60,
+           minPhotos: Number.isFinite(min) && min >= 2 ? min : 5 };
 }

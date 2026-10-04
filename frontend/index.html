@@ -617,6 +617,18 @@
             <p class="settings-hint" data-i18n="settings.strictNamesHint">
               A document is called D.1, D.10…
             </p>
+            <!-- D3 · the photo lot: thresholds of the PROPOSAL (always confirmed) -->
+            <label>
+              <span data-i18n="settings.lotGap">Photo lot: a new session after (minutes)</span>
+              <input id="set-lot-gap" type="text" inputmode="numeric" />
+            </label>
+            <label>
+              <span data-i18n="settings.lotMin">Photo lot: at least (photos)</span>
+              <input id="set-lot-min" type="text" inputmode="numeric" />
+            </label>
+            <p class="settings-hint" data-i18n="settings.lotHint">
+              Photos of one camera close in time are proposed as one lot; the lot is always confirmed by whoever uploads.
+            </p>
           </section>
           <!-- IDENTITY · who is working. The ORCID iD is the identity itself;
                everything else here is for humans to read. Note the contrast with

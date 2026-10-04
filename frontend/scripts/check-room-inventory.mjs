@@ -177,4 +177,26 @@ eq(I.sessionLots(twoBodies).map((l) => l.ids.length), [6, 6], "two bodies of one
 eq(I.sessionLots(shots.filter((x) => x.id.startsWith("dosco") || x.id.startsWith("nx"))).length, 0,
    "T-L1 · Templu Mare's DosCo (D.nn, in a DosCo) and photos without EXIF: no lot");
 
+// D3 (E.D., 4 Oct 2026) · 30 minutes and 5 photos are the DEFAULTS, changeable
+// in Settings: the thresholds reach the proposal, which stays unconfirmed
+{
+  const mem = new Map();
+  globalThis.localStorage = { getItem: (k) => mem.get(k) ?? null, setItem: (k, v) => mem.set(k, String(v)),
+                              removeItem: (k) => mem.delete(k) };
+  const sb = await esbuild.build({ entryPoints: [`${SRC}settings.ts`], bundle: true, format: "esm", write: false });
+  const S = await import("data:text/javascript;base64," + Buffer.from(sb.outputFiles[0].text).toString("base64"));
+  eq(S.lotThresholds(), { gapSeconds: 1800, minPhotos: 5 }, "D3 · the defaults: 30 minutes, 5 photos");
+  const s = S.getSettings();
+  s.interaction.lotGapMinutes = 45; s.interaction.lotMinPhotos = 3;
+  S.saveSettings(s);
+  const th = S.lotThresholds();
+  eq(th, { gapSeconds: 2700, minPhotos: 3 }, "D3 · changed in Settings, read back");
+  const wide = Array.from({ length: 3 }, (_, i) => ({ id: `w${i}`, path: `/w/${i}.jpg`, exif: { camera: "X", takenAt: at(2400 * i) } }));
+  eq(I.sessionLots(wide).length, 0, "D3 · with the defaults, 3 shots 40 min apart are no lot");
+  eq(I.sessionLots(wide, th).map((l) => l.ids.length), [3], "D3 · with 45 min / 3 photos they are one, proposed");
+  s.interaction.lotGapMinutes = -1; s.interaction.lotMinPhotos = "x";
+  S.saveSettings(s);
+  eq(S.lotThresholds(), { gapSeconds: 1800, minPhotos: 5 }, "D3 · a value that is not a number falls back to the default");
+}
+
 console.log(`\nroom-inventory: ${checks} checks passed`);

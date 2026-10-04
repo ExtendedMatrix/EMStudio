@@ -364,6 +364,7 @@ import {
   iiifBase,
   LOD_LIMIT_MB,
   LOD_LIMIT_POINTS,
+  lotThresholds,
   saveSettings,
   SYNC_TOOLS,
   TILES_MEMORY_MB,
@@ -6231,7 +6232,7 @@ async function openResourceInventory(room: string, src = inventorySources()): Pr
   say.textContent = t("inv.probing", { n: String(cands.length), done: "0" });
   const probes = await probeInventory(cands, src.baseDir, base, room,
     (done) => { say.textContent = t("inv.probing", { n: String(cands.length), done: String(done) }); });
-  const inv = buildInventory(cands, probes, { doscoDirs: src.doscoDirs });
+  const inv = buildInventory(cands, probes, { doscoDirs: src.doscoDirs, ...lotThresholds() });
   logInfo(`inventory «${room}»: ` + INV_GROUPS.map((g) => `${g} ${inv.groups[g].count} (${humanBytes(inv.groups[g].bytes)})`).join(" · "));
   paintInventory(body, inv, base, room, close);
 }
@@ -11922,6 +11923,8 @@ function openSettings(section?: string): void {
   setDevUuid.checked = s.developer.showNodeIds;
   setEdgeTips.checked = s.interaction.edgeTooltips;
   setStrictDocNames.checked = s.interaction.strictDocumentNames;
+  (document.getElementById("set-lot-gap") as HTMLInputElement).value = String(s.interaction.lotGapMinutes);
+  (document.getElementById("set-lot-min") as HTMLInputElement).value = String(s.interaction.lotMinPhotos);
   setAiProvider.value = s.ai.provider;
   setAiModel.value = s.ai.model;
   setAiKey.value = "";
@@ -12232,6 +12235,8 @@ settingsModal.addEventListener("click", (e) => {
     interaction: {
       edgeTooltips: setEdgeTips.checked,
       strictDocumentNames: setStrictDocNames.checked,
+      lotGapMinutes: Number((document.getElementById("set-lot-gap") as HTMLInputElement)?.value) || 30,
+      lotMinPhotos: Number((document.getElementById("set-lot-min") as HTMLInputElement)?.value) || 5,
     },
     // provider + model only — the key is never part of what gets persisted
     ai: {
