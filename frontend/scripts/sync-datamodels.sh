@@ -77,6 +77,9 @@ cp "$CFG/em_qualia_types.json" "$DST/"
 # en = source, other langs + validated_<lang> flags). rules.ts reads the active
 # locale from it with an English fallback. Optional (older s3Dgraphy has none).
 [ -f "$CFG/datamodel_translations.json" ] && cp "$CFG/datamodel_translations.json" "$DST/"
+# I1 (4 Oct 2026) · the ONE list of the states and their symbols, which
+# state-symbols.ts draws in its own way (check-state-symbols.mjs)
+[ -f "$CFG/em_state_symbols.json" ] && cp "$CFG/em_state_symbols.json" "$DST/"
 mkdir -p "$DST/icons2d"
 # BOTH raster and vector. Only `*.png` was copied here, which is why EMStudio drew
 # no SVG icons even after 28 of them shipped in s3Dgraphy: the renderer prefers
