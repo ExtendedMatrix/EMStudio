@@ -216,6 +216,8 @@ function btn(text: string, cls = "conn-btn"): HTMLButtonElement {
 export interface ConnectionGestures {
   setMode(mode: SessionMode): void;
   openNodeSettings(): void;
+  /** N1 · «Choose the node…»: this computer, the local network, saved, typed */
+  chooseNode?(): void;
   openRoomSettings(): void;
   openOnNode(): void;
   leaveRoom(): void;
@@ -386,6 +388,12 @@ export function renderConnectionPanel(host: HTMLElement, s: ConnectionState, g: 
   const set = btn(t("conn.nodeSettings"));
   set.addEventListener("click", () => g.openNodeSettings());
   nodeActs.appendChild(set);
+  if (g.chooseNode) {
+    const choose = btn(t("nodes.choose"));
+    choose.dataset.act = "choose-node";
+    choose.addEventListener("click", () => g.chooseNode!());
+    nodeActs.appendChild(choose);
+  }
   node.appendChild(nodeActs);
   host.appendChild(node);
 

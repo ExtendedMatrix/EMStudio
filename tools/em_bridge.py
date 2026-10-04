@@ -666,7 +666,45 @@ def _files_route(route, body):
         with open(dest, "wb") as fh:
             fh.write(data)
         return {"ok": True, "path": dest, "bytes": len(data)}
+    if route == "/nodes":
+        # N1 · the same finder EM Tools asks (s3dgraphy tools.node_finder)
+        from s3dgraphy.tools.node_finder import find_nodes
+        return {"ok": True, **find_nodes(saved=body.get("saved") or [],
+                                          typed=str(body.get("typed") or ""),
+                                          lang=str(body.get("lang") or "en"))}
+    if route == "/node/personal":
+        return _personal_node(body)
     raise ValueError(f"unknown route {route}")
+
+
+def _personal_node(body):
+    """N2 · «Turn on a node on this computer»: the server's own launcher
+    (`stratigraph-server/scripts/personal_node.py`), found next door, run with
+    the server's interpreter. One JSON line back."""
+    import subprocess
+    here = pathlib.Path(__file__).resolve().parents[2]
+    server = pathlib.Path(os.environ.get("EM_SERVER_CHECKOUT") or here / "stratigraph-server")
+    script = server / "scripts" / "personal_node.py"
+    if not script.is_file():
+        raise ValueError(f"no StratiGraph server next door ({server}): install one to turn "
+                         f"on a node on this computer")
+    py = server / ".venv" / "bin" / "python"
+    py = str(py) if py.is_file() else sys.executable
+    action = str(body.get("action") or "status")
+    if action not in ("start", "stop", "status"):
+        raise ValueError(f"unknown action {action}")
+    cmd = [py, str(script), action]
+    if action == "start":
+        root = str(body.get("root") or "").strip()
+        if not root:
+            raise ValueError("which project? a personal node references the files of "
+                             "one project tree (open the em.json from its project)")
+        cmd += ["--root", root] + (["--lan"] if body.get("lan") else [])
+    done = subprocess.run(cmd, capture_output=True, text=True, timeout=90)
+    try:
+        return json.loads(done.stdout.strip().splitlines()[-1])
+    except (ValueError, IndexError):
+        raise ValueError(f"the launcher said: {(done.stderr or done.stdout)[-300:]}") from None
 
 
 def _resolve_on_folder(locator: str, folder: str):
@@ -1222,7 +1260,7 @@ def make_handler(api):
                     return
                 self._annotate(body)
             elif route in ("/files-state", "/project-new", "/project-reorder",
-                           "/file-reveal", "/file-keep"):
+                           "/file-reveal", "/file-keep", "/nodes", "/node/personal"):
                 # R1/R2/C1 (E.D., 4 Oct 2026) · where each file is, with
                 # s3dgraphy's ONE resolver; the standard tree of a project
                 try:

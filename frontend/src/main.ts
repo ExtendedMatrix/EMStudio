@@ -185,6 +185,7 @@ import { createResourceThumb } from "./resource-preview";
 import { keepOnDisk, newEmProject, refreshFileStates, reorderApply, reorderPreview, revealFile,
          fileProjectRoot, type FileState } from "./file-states";
 import { filesSection, fileStateLine, type FileHooks } from "./file-states-ui";
+import { paintChooser } from "./node-chooser";
 import { proposeLanguages, type LanguageProposal } from "./lang-guess";
 import {
   addCategories,
@@ -1240,6 +1241,8 @@ async function fetchRoomTitle(room: string): Promise<void> {
 }
 /** K1 · the node is asked every 10 s while one is set: «not reachable» within
  *  the 30 s the request asks for, and back as soon as it answers again */
+/** N2 · the node in use is a personal one (its `/health` says `profile`) */
+let nodePersonal = false;
 async function pollNodeReach(): Promise<void> {
   const base = getSettings().sync.hubUrl.trim().replace(/\/+$/, "");
   let next: Reach = "unknown";
@@ -1248,8 +1251,14 @@ async function pollNodeReach(): Promise<void> {
     const timer = setTimeout(() => ctl.abort(), 5000);
     try {
       const r = await fetch(`${base}/v1/health`, { signal: ctl.signal, cache: "no-store" });
-      const j = r.ok ? await r.json().catch(() => null) as { service?: string } | null : null;
+      const j = r.ok ? await r.json().catch(() => null) as { service?: string; profile?: string } | null : null;
       next = j?.service === "stratigraph-server" ? "reachable" : "unreachable";
+      // N2 · a personal node keeps no copy of the files: the bar says it
+      const personal = j?.profile === "personal";
+      if (personal !== nodePersonal) {
+        nodePersonal = personal;
+        if (personal) { logInfo(t("fs.personalNode")); info.textContent = t("fs.personalNode"); }
+      }
     } catch {
       next = "unreachable";
     } finally {
@@ -1307,6 +1316,7 @@ function paintConnectionPanel(pop: HTMLElement): void {
       document.getElementById(`btn-mode-${m}`)?.click();
     },
     openNodeSettings: () => { pop.classList.add("hidden"); openNodeSettings(); },
+    chooseNode: () => { void openNodeChooser(pop); },
     openRoomSettings: () => openRoomPanel(),
     openOnNode: () => { pop.classList.add("hidden"); shareThisRoom(); },
     leaveRoom: () => { pop.classList.add("hidden"); if (sync.connected) btnSync.click(); },
@@ -1317,6 +1327,27 @@ function paintConnectionPanel(pop: HTMLElement): void {
     bringIntoRoom: () => { pop.classList.add("hidden"); void bringIntoRoom(); },
     roomResources: () => { pop.classList.add("hidden"); if (sync.room) void openResourceInventory(sync.room); },
   }, { host: sidecarDetail, accept: syncControlEl, roster: hubRosterEl });
+  placeConnectionPop(pop);
+}
+/** N1/N2 · «Choose the node» in the connection popover */
+async function openNodeChooser(pop: HTMLElement): Promise<void> {
+  pop.dataset.view = "nodes";
+  const bridge = await bridgeUrl();
+  const s = getSettings();
+  await paintChooser(pop, {
+    bridge,
+    saved: [s.sync.hubUrl].filter(Boolean),
+    current: () => getSettings().sync.hubUrl.trim().replace(/\/+$/, ""),
+    projectRoot: fileProjectRoot() || (inventorySources().baseDir ?? ""),
+    use: (url) => {
+      const next = getSettings();
+      next.sync.hubUrl = url;
+      saveSettings(next);
+      logInfo(`${t("nodes.use")}: ${url}`);
+      void pollNodeReach();
+    },
+    log: (line) => logInfo(line),
+  });
   placeConnectionPop(pop);
 }
 function toggleConnectionPanel(anchor: HTMLElement | null = null): void {
@@ -21033,6 +21064,17 @@ async function uploadFiles(fs: FileState[]): Promise<void> {
   if (!room) { toast(t("share.noRoom")); return; }
   for (const f of fs) {
     if (!f.path) continue;
+    if (nodePersonal) {
+      // N2 · on a personal node a file of the tree goes BY REFERENCE: no byte
+      // is copied, the folders keep it
+      const r = await fetch(`${room.base}/v1/rooms/${encodeURIComponent(room.room_id)}/asset-reference`, {
+        method: "POST", headers: { "Content-Type": "application/json",
+                                   ...(room.token ? { Authorization: `Bearer ${room.token}` } : {}) },
+        body: JSON.stringify({ path: f.path, sha256: f.sha256 || undefined }) }).catch(() => null);
+      if (r?.ok) { logInfo(`${f.name}: ${t("fs.upload")} · ${t("fs.personalNode")}`); continue; }
+      logWarn(`${f.name}: ${t("fs.upload")} — ${r ? `${r.status} ${(await r.text()).slice(0, 120)}` : "no answer"}`);
+      continue;
+    }
     const it = { id: f.id, name: f.name, path: f.path, sha256: f.sha256 || null, size: null,
                  mediaType: "", locator: f.path, graphId: "study" } as unknown as InvItem;
     const out = await sendToRoom(room.base, room.room_id, it, () => {});

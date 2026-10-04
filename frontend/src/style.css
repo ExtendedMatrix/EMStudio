@@ -9196,3 +9196,12 @@ body.sync-active #statusbar .sb-who .footer-chip.id-signature {
 .fs-gestures { display: inline-flex; gap: 2px; margin-left: auto; }
 .fs-act { font-size: 11px; padding: 1px 6px; }
 .fs-note { flex-basis: 100%; }
+
+/* ── N1/N2 (4 Oct 2026) · «Choose the node» ─────────────────────────────── */
+.nc-say { margin: 4px 0 8px; font-weight: 600; }
+.nc-group { margin: 6px 0; }
+.nc-head { font-size: 11px; text-transform: uppercase; letter-spacing: .04em; opacity: .7; margin-bottom: 2px; }
+.nc-row { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; padding: 2px 0; }
+.nc-acts { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin: 4px 0 8px; }
+.nc-custody { flex-basis: 100%; font-size: 11px; color: var(--warn); }
+.nc-real { margin-top: 8px; }
