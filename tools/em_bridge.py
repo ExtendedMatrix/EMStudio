@@ -592,16 +592,23 @@ def _files_route(route, body):
     from s3dgraphy import api
     from s3dgraphy.project_tree import find_project_root, reorder_plan, apply_plan
     if route == "/files-state":
-        graph, _w = api.load_emjson(body["doc"])
+        doc = body["doc"]
+        # a container holds several graphs: every one of them is resolved
+        sections = (list((doc.get("graphs") or {}).values())
+                    if isinstance(doc, dict) and doc.get("graphs") else None)
+        graphs = ([api.load_emjson({"header": doc.get("header") or {}, "graph": sec})[0]
+                   for sec in sections] if sections else [api.load_emjson(doc)[0]])
         folders = [os.path.abspath(os.path.expanduser(f)) for f in body.get("folders") or [] if f]
         root = body.get("project_root") or next(
             (r for r in (find_project_root(f) for f in folders) if r), None)
-        results = api.resolve_files(graph, project_root=root, base_dirs=folders,
-                                    cache_dirs=[d for d in body.get("cache_dirs") or [] if d],
-                                    on_node=_room_probe(body.get("room")),
-                                    hasher=lambda path: hashlib.sha256(
-                                        pathlib.Path(path).read_bytes()).hexdigest()
-                                    if os.path.getsize(path) <= 512 * 1024 * 1024 else "")
+        results = []
+        for graph in graphs:
+            results += api.resolve_files(graph, project_root=root, base_dirs=folders,
+                                         cache_dirs=[d for d in body.get("cache_dirs") or [] if d],
+                                         on_node=_room_probe(body.get("room")),
+                                         hasher=lambda path: hashlib.sha256(
+                                             pathlib.Path(path).read_bytes()).hexdigest()
+                                         if os.path.getsize(path) <= 512 * 1024 * 1024 else "")
         from s3dgraphy.resources.locate import summary
         return {"ok": True, "project_root": root or "", "results": results,
                 "summary": summary(results)}
