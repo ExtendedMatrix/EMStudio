@@ -601,10 +601,14 @@ def _files_route(route, body):
         folders = [os.path.abspath(os.path.expanduser(f)) for f in body.get("folders") or [] if f]
         root = body.get("project_root") or next(
             (r for r in (find_project_root(f) for f in folders) if r), None)
+        # R3 · what «Keep on this computer» copied: the project's cache, by sha256
+        caches = [d for d in body.get("cache_dirs") or [] if d]
+        if root and os.path.isdir(os.path.join(root, ".em_cache")):
+            caches.append(os.path.join(root, ".em_cache"))
         results = []
         for graph in graphs:
             results += api.resolve_files(graph, project_root=root, base_dirs=folders,
-                                         cache_dirs=[d for d in body.get("cache_dirs") or [] if d],
+                                         cache_dirs=caches,
                                          on_node=_room_probe(body.get("room")),
                                          hasher=lambda path: hashlib.sha256(
                                              pathlib.Path(path).read_bytes()).hexdigest()
@@ -638,7 +642,16 @@ def _files_route(route, body):
         # tree, checked against their sha256 before they are kept
         import urllib.request
         room, hexd = body.get("room") or {}, str(body["sha256"]).split(":")[-1].lower()
-        dest = os.path.abspath(os.path.expanduser(body["dest"]))
+        if body.get("project_root"):
+            # R3 · into the project's cache, named by the sha256 (the resolver
+            # tries the cache first), the extension kept for whoever opens it
+            ext = os.path.splitext(str(body.get("name") or ""))[1][:8]
+            dest = os.path.join(os.path.abspath(os.path.expanduser(body["project_root"])),
+                                ".em_cache", hexd[:2], hexd + ext)
+            if os.path.exists(dest):
+                return {"ok": True, "path": dest, "bytes": os.path.getsize(dest), "already": True}
+        else:
+            dest = os.path.abspath(os.path.expanduser(body["dest"]))
         if os.path.exists(dest):
             raise FileExistsError(f"{dest} exists: nothing is overwritten")
         base = str(room["base"]).rstrip("/")

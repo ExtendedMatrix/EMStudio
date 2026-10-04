@@ -55,9 +55,10 @@ async function post(bridge: string, route: string, body: unknown): Promise<Recor
 
 /** «Open where it is» */
 export const revealFile = (bridge: string, path: string) => post(bridge, "/file-reveal", { path });
-/** «Keep it on the disk too»: the node's bytes into the project's tree */
-export const keepOnDisk = (bridge: string, room: RoomRef, sha256: string, dest: string) =>
-  post(bridge, "/file-keep", { room, sha256, dest });
+/** «Keep on the disk too» (R3): the node's bytes into the project's cache,
+ *  named by their sha256 — the first place the resolver looks */
+export const keepOnDisk = (bridge: string, room: RoomRef, sha256: string, projectRoot: string, name: string) =>
+  post(bridge, "/file-keep", { room, sha256, project_root: projectRoot, name });
 /** «New EM project…» */
 export const newEmProject = (bridge: string, parent: string, name: string) =>
   post(bridge, "/project-new", { parent, name });

@@ -21050,11 +21050,9 @@ async function keepFiles(fs: FileState[]): Promise<void> {
   const bridge = await bridgeUrl();
   for (const f of fs) {
     if (!f.sha256) continue;
-    const leaf = (f.name || f.id).replace(/[\\/:*?"<>|]+/g, "_");
-    const dest = `${root}/EM/DosCo/${leaf}`;
     try {
-      await keepOnDisk(bridge, room, f.sha256, dest);
-      logInfo(`${f.name}: ${t("fs.keep")} → ${dest}`);
+      const out = await keepOnDisk(bridge, room, f.sha256, root, f.name || f.id);
+      logInfo(`${f.name}: ${t("fs.keep")} → ${String(out.path)}`);
     } catch (e) { logWarn(`${f.name}: ${t("fs.keep")} — ${(e as Error).message}`); }
   }
   void checkFiles();
