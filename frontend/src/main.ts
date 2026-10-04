@@ -344,7 +344,6 @@ import { type HostInfo, SyncClient, SYNC_ACCEPTS, type SyncAccept } from "./sync
 import { type Access, type ConnectionState, type Reach, nodeApi, renderConnectionPanel,
   renderRoomPanel, shortNode, whereDetails, whereHealth, wherePhrase } from "./connection";
 import * as alignment from "./alignment";
-import type { GraphOp } from "./model";
 import { buildCommand, type CommandVerb } from "./commands";
 import { addResource, fileCounts, foldFiles, movePointers, packagingLabel, replaceFile, resourceFiles, resourceLabel, storeGraph } from "./resources";
 import { askWhichPointersMove } from "./resource-panel";
@@ -352,12 +351,12 @@ import { addressMap, chooseModel, needsChoice, startResources, type ModelChoice 
 import { foldForms, landPack, packTileset } from "./pack3tz";
 import {
   type AwarenessNote, emptyPresence, type HubOp, noteForRemoteOp, noteForStale,
-  opsForLocalChange, peerSelections, planRejoin, stampForResend, withOpLanguage,
+  opsForLocalChange, peerSelections, planRejoin, refusalIsNews, stampForResend, withOpLanguage,
   type PresenceState,
   reducePresence,
 } from "./hub";
 import { clearField as crdtClearField, writeField as crdtWriteField } from "./crdt";
-import { isRemoved } from "./crdt";
+import { isRemoved, sectionLanguage } from "./crdt";
 import {
   AI_PROVIDERS,
   getSettings,
@@ -4078,11 +4077,20 @@ function wireStore(s: DocumentStore): void {
     if (s !== store) return;
     traceOp(op); // SHIFT-A · the node history reads this session's own ops
     queueOpLog(s, op); // C4 · …and the Log says what the hand changed
-    // P4.3 · a ROOM speaks per-field CRDT operations; a sidecar speaks the
-    // store's own op shape. One writing path, two vocabularies at the door —
-    // and the translation happens once, where the door is.
-    if (sync.room) hubSendLocal(op);
-    else sync.sendOp(op);
+    // V1 · ONE vocabulary at the door (decision of E.D., 4 Oct 2026): the
+    // room AND the Sidecar speak `crdt.OPS`. The store keeps `update_node` for
+    // itself (undo, listeners); what leaves is translated once, here, by the
+    // twin of s3Dgraphy's `ops_for_local_change` (scripts/check-ops.mjs).
+    let wireOps: HubOp[];
+    try {
+      wireOps = opsForLocalChange(op as Parameters<typeof opsForLocalChange>[0],
+                                  s.doc.graph ? sectionLanguage(s.doc.graph as never) : null);
+    } catch (e) {
+      opRefused(t("ops.notSent", { why: (e as Error).message }));
+      return;
+    }
+    if (sync.room) hubSendLocal(wireOps);
+    else for (const w of wireOps) sync.sendOp(w);
   });
 }
 
@@ -5177,7 +5185,7 @@ function noteHub(note: AwarenessNote): void {
 /** Send one local change to the room, as the per-field operations the relay
  *  understands. The fields (and their clocks) come from the store, which
  *  stamped them — nothing is re-derived here. */
-function hubSendLocal(op: GraphOp): void {
+function hubSendLocal(ops: HubOp[]): void {
   // C2 · THE THIRD OUTBOUND POINT, and finding it changed what C2 found.
   //
   // A room's operations do not go through `sendOp`: they are translated into
@@ -5192,7 +5200,6 @@ function hubSendLocal(op: GraphOp): void {
   // preference — no preference holds anything back any more — but the refusal
   // the server already declared at the door.
   if (!sync.canWrite) return;
-  const ops = opsForLocalChange(op as Parameters<typeof opsForLocalChange>[0]);
   // dev28 (decision 13) · the access mode of an op that goes through the relay
   // is the RELAY's, read from the token like the author (`crdt.stamp_auth`):
   // this client does not declare one any more. Locally the store still signs
@@ -5237,6 +5244,53 @@ function hubWriteFieldLocally(op: HubOp): boolean {
              data: payload.data } as Partial<EmNode>,
   });
   return true;
+}
+
+/**
+ * V1 · an operation that did not happen, said where the person looks: the Log
+ * and the status bar (and a toast, for the moment it happens).
+ */
+function opRefused(sentence: string): void {
+  logWarn(sentence);
+  info.textContent = sentence;
+  toast(sentence);
+}
+
+/**
+ * V1 · what arrives from the SIDECAR, through the one translation. A peer
+ * that speaks `crdt.OPS` (EMtools from V1) and one that still speaks the
+ * store's verbs (`update_node{patch}`, a nested `edge`) land the same way:
+ * `update_field` through the field writer with ITS clock, the structural verbs
+ * through the same CRDT algebra the room uses. A refusal is a sentence.
+ */
+function applyWireOp(message: Record<string, unknown>): void {
+  if (!store) return;
+  let ops: HubOp[];
+  try {
+    ops = opsForLocalChange(message as Parameters<typeof opsForLocalChange>[0]);
+  } catch (e) {
+    opRefused(t("ops.notApplied", { what: String(message.op ?? "op"),
+                                    why: (e as Error).message }));
+    return;
+  }
+  for (const op of ops) {
+    if (op.op === "update_field") {
+      if (!hubWriteFieldLocally(op)) {
+        opRefused(t("ops.notApplied", { what: `update_field ${String(op.field ?? "")}`,
+                                        why: `node '${String(op.node_id ?? op.id ?? "")}' is not here` }));
+      }
+    } else {
+      const result = store.applyCrdtOp(op as unknown as Record<string, unknown>);
+      if (!result.applied && refusalIsNews(String(result.reason ?? ""))) {
+        opRefused(t("ops.notApplied", { what: op.op, why: String(result.reason) }));
+      }
+    }
+  }
+  buildScenes();
+  draw();
+  refreshInspector();
+  nodeList.refresh();
+  refreshEMTree();
 }
 
 /**
@@ -6718,7 +6772,8 @@ function connectToHub(url: string, room: string, token: string | null): void {
       // The room refused an operation, and said why. Told out loud: a refusal
       // that arrives and is dropped is indistinguishable from a message that
       // never arrived — the edit vanishes and the room looks broken.
-      toast(String(info?.reason || t("room.denied")));
+      opRefused(t("ops.denied", { verb: String(info?.verb ?? "op"),
+                                  why: String(info?.reason || t("room.denied")) }));
       if (info?.can_write === false) {
         // and if this is the first news that the room is read-only here, make
         // the session match rather than letting the next edit be refused too
@@ -6736,6 +6791,15 @@ function connectToHub(url: string, room: string, token: string | null): void {
       }
       if (message.reason === "idempotent") return;   // nothing to say
       const node = store?.node(String(op.node_id ?? ""));
+      if (refusalIsNews(String(message.reason ?? ""))) {
+        // V1 · not «somebody was later»: the room did NOT apply this edit
+        // (an unknown verb, a node it does not have…). A sentence, not a note.
+        opRefused(t("ops.notApplied", {
+          what: `${op.op ?? "op"}${op.field ? " " + String(op.field) : ""}`
+                + (node?.name ? ` · ${String(node.name)}` : ""),
+          why: String(message.reason) }));
+        return;
+      }
       noteHub(noteForStale(op, node?.name ? String(node.name) : null));
     },
     onReconnect: (attempt, delay) => {
@@ -10510,9 +10574,10 @@ btnSync.addEventListener("click", () => {
       applyingRemoteSelect = false;
     },
     onOp: (op) => {
-      // a graph mutation arrived from the peer/host → apply to our replica
-      // (DocumentStore.applyRemoteOp suppresses re-emission, no echo)
-      store?.applyRemoteOp(op);
+      // a graph mutation arrived from the peer/host → apply to our replica,
+      // through the ONE apply path (V1: the Sidecar speaks `crdt.OPS`; an
+      // EMtools before V1 still sends `update_node`, translated at the door)
+      applyWireOp(op as unknown as Record<string, unknown>);
     },
     onSnapshot: (doc) => {
       // the host sent its full graph on connect → become a live view of it

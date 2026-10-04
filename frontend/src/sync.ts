@@ -524,7 +524,7 @@ export class SyncClient {
   }
 
   /** Send a graph mutation to the peer/host (no-op when disconnected). */
-  sendOp(op: GraphOp): void {
+  sendOp(op: GraphOp | Record<string, unknown>): void {
     // C2 · no preference gate here either (see `sendSelect`). What DOES stop an
     // op is the room having said this client may not write: that is not a
     // choice made at this end, it is a refusal already declared at the other,

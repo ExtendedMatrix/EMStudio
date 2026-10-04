@@ -1,0 +1,384 @@
+{
+  "_note": "written by tools/ops_golden.py from s3Dgraphy; do not edit",
+  "cases": [
+    {
+      "name": "blender description (EMtools patch)",
+      "local": {
+        "type": "op",
+        "op": "update_node",
+        "node_id": "US1",
+        "patch": {
+          "description": "muro in opera quadrata"
+        },
+        "ts": "2026-10-04T09:00:00Z"
+      },
+      "study_language": null,
+      "ops": [
+        {
+          "op": "update_field",
+          "node_id": "US1",
+          "field": "description",
+          "ts": "2026-10-04T09:00:00Z",
+          "value": "muro in opera quadrata"
+        }
+      ]
+    },
+    {
+      "name": "studio fields, one emptied (EMStudio)",
+      "local": {
+        "op": "update_node",
+        "node_id": "US2",
+        "fields": [
+          {
+            "field": "name",
+            "value": "US 2",
+            "ts": "2026-10-04T09:01:00Z",
+            "by": "ed"
+          },
+          {
+            "field": "data.dating",
+            "value": null,
+            "ts": "2026-10-04T09:01:00Z",
+            "removed": true
+          }
+        ]
+      },
+      "study_language": null,
+      "ops": [
+        {
+          "op": "update_field",
+          "node_id": "US2",
+          "field": "name",
+          "ts": "2026-10-04T09:01:00Z",
+          "value": "US 2"
+        },
+        {
+          "op": "update_field",
+          "node_id": "US2",
+          "field": "data.dating",
+          "ts": "2026-10-04T09:01:00Z",
+          "remove": true
+        }
+      ]
+    },
+    {
+      "name": "patch with data and a null",
+      "local": {
+        "op": "update_node",
+        "node_id": "US3",
+        "patch": {
+          "data": {
+            "url": "D.32.pdf",
+            "dating": null
+          }
+        }
+      },
+      "study_language": null,
+      "ops": [
+        {
+          "op": "update_field",
+          "node_id": "US3",
+          "field": "data.url",
+          "value": "D.32.pdf"
+        },
+        {
+          "op": "update_field",
+          "node_id": "US3",
+          "field": "data.dating",
+          "remove": true
+        }
+      ]
+    },
+    {
+      "name": "a patch key that is structure is refused by name",
+      "local": {
+        "op": "update_node",
+        "node_id": "US3",
+        "patch": {
+          "node_type": "USV"
+        }
+      },
+      "study_language": null,
+      "error": "'node_type' is not an addressable field"
+    },
+    {
+      "name": "new US (EMtools, no language)",
+      "local": {
+        "type": "op",
+        "op": "add_node",
+        "node": {
+          "id": "US9",
+          "name": "US 9",
+          "node_type": "US",
+          "description": ""
+        }
+      },
+      "study_language": "it",
+      "ops": [
+        {
+          "op": "add_node",
+          "id": "US9",
+          "node": {
+            "id": "US9",
+            "name": "US 9",
+            "node_type": "US",
+            "description": "",
+            "data": {
+              "lang": "it"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "new node with its own language and stamp",
+      "local": {
+        "op": "add_node",
+        "node": {
+          "id": "D1",
+          "node_type": "document",
+          "name": "D.1",
+          "data": {
+            "lang": "en",
+            "created_at": "2026-10-04T09:02:00Z"
+          }
+        }
+      },
+      "study_language": null,
+      "ops": [
+        {
+          "op": "add_node",
+          "id": "D1",
+          "node": {
+            "id": "D1",
+            "node_type": "document",
+            "name": "D.1",
+            "data": {
+              "lang": "en",
+              "created_at": "2026-10-04T09:02:00Z"
+            }
+          },
+          "ts": "2026-10-04T09:02:00Z"
+        }
+      ]
+    },
+    {
+      "name": "new node, no study language: und",
+      "local": {
+        "op": "add_node",
+        "node": {
+          "id": "US10",
+          "node_type": "US"
+        }
+      },
+      "study_language": null,
+      "ops": [
+        {
+          "op": "add_node",
+          "id": "US10",
+          "node": {
+            "id": "US10",
+            "node_type": "US",
+            "data": {
+              "lang": "und"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "delete a node",
+      "local": {
+        "op": "delete_node",
+        "node_id": "US9"
+      },
+      "study_language": null,
+      "ops": [
+        {
+          "op": "remove_node",
+          "id": "US9"
+        }
+      ]
+    },
+    {
+      "name": "the Sidecar's nested edge reaches the room with its endpoints",
+      "local": {
+        "type": "op",
+        "op": "add_edge",
+        "edge": {
+          "id": "US9_is_after_US1",
+          "source": "US9",
+          "target": "US1",
+          "edge_type": "is_after"
+        }
+      },
+      "study_language": null,
+      "ops": [
+        {
+          "op": "add_edge",
+          "id": "US9_is_after_US1",
+          "source": "US9",
+          "target": "US1",
+          "edge_type": "is_after"
+        }
+      ]
+    },
+    {
+      "name": "an heir's declared attribute travels, the clock keys do not",
+      "local": {
+        "op": "add_edge",
+        "edge": {
+          "id": "e1",
+          "source": "US1",
+          "target": "P1",
+          "edge_type": "has_property",
+          "attributes": {
+            "inherited": true,
+            "created_at": "x",
+            "removed": {
+              "ts": "y"
+            }
+          }
+        }
+      },
+      "study_language": null,
+      "ops": [
+        {
+          "op": "add_edge",
+          "id": "e1",
+          "source": "US1",
+          "target": "P1",
+          "edge_type": "has_property",
+          "attributes": {
+            "inherited": true
+          }
+        }
+      ]
+    },
+    {
+      "name": "delete an edge",
+      "local": {
+        "op": "delete_edge",
+        "edge": {
+          "id": "e1",
+          "source": "US1",
+          "target": "P1",
+          "edge_type": "has_property"
+        }
+      },
+      "study_language": null,
+      "ops": [
+        {
+          "op": "remove_edge",
+          "id": "e1",
+          "source": "US1",
+          "target": "P1",
+          "edge_type": "has_property"
+        }
+      ]
+    },
+    {
+      "name": "a wire operation passes as it is",
+      "local": {
+        "op": "update_field",
+        "node_id": "US1",
+        "field": "data.lang",
+        "value": "it",
+        "ts": "2026-10-04T09:03:00Z"
+      },
+      "study_language": null,
+      "ops": [
+        {
+          "op": "update_field",
+          "node_id": "US1",
+          "field": "data.lang",
+          "value": "it",
+          "ts": "2026-10-04T09:03:00Z"
+        }
+      ]
+    },
+    {
+      "name": "an edge without endpoints is refused, not sent",
+      "local": {
+        "op": "add_edge",
+        "edge": {
+          "id": "e2"
+        }
+      },
+      "study_language": null,
+      "error": "add_edge without source, target, edge_type"
+    },
+    {
+      "name": "a verb nobody speaks",
+      "local": {
+        "op": "rename_node",
+        "node_id": "US1"
+      },
+      "study_language": null,
+      "error": "unknown operation 'rename_node' (known: add_node, update_field, remove_node, add_edge, remove_edge)"
+    }
+  ],
+  "validate": [
+    {
+      "op": {
+        "op": "update_node",
+        "node_id": "a",
+        "patch": {}
+      },
+      "reason": "unknown operation 'update_node' (a store's own verb: translate it with ops_for_local_change; known: add_node, update_field, remove_node, add_edge, remove_edge)"
+    },
+    {
+      "op": {
+        "op": "update_field",
+        "node_id": "a",
+        "field": "data.x"
+      },
+      "reason": "update_field of 'data.x' without a value (an emptying says remove: true)"
+    },
+    {
+      "op": {
+        "op": "update_field",
+        "node_id": "a",
+        "field": "node_type",
+        "value": 1
+      },
+      "reason": "'node_type' is not an addressable field"
+    },
+    {
+      "op": {
+        "op": "remove_edge"
+      },
+      "reason": "remove_edge without an id or its source, edge_type and target"
+    },
+    {
+      "op": {
+        "op": "remove_edge",
+        "source": "a",
+        "target": "b",
+        "edge_type": "is_after"
+      },
+      "reason": null
+    },
+    {
+      "op": {
+        "op": "add_node",
+        "node": {
+          "id": "x"
+        }
+      },
+      "reason": null
+    },
+    {
+      "op": {
+        "op": "add_edge",
+        "source": "a"
+      },
+      "reason": "add_edge without target, edge_type"
+    }
+  ],
+  "not_news": [
+    "stale",
+    "idempotent",
+    "already removed, not older"
+  ]
+}

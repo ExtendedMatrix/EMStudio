@@ -149,61 +149,169 @@ export function withOpLanguage(op: HubOp, section: { nodes?: unknown[]; data?: u
   return op;
 }
 
+// ── V1 · one vocabulary on every wire ───────────────────────────────────────
+//
+// The twin of s3Dgraphy `crdt.ops_for_local_change` / `crdt.validate_op`,
+// answered on the SAME cases: `tools/ops_golden.py` writes them, with the
+// library's answers, to `testdata/ops-golden.json`, and `scripts/check-ops.mjs`
+// asks this file the same. Decision of E.D. (4 Oct 2026): the Sidecar and the
+// room speak the same operations; the store keeps `update_node` for itself
+// (its undo, its listeners) and nothing else travels.
+
+/** The operations a wire carries (`s3dgraphy.crdt.OPS`). */
+export const OPS = ["add_node", "update_field", "remove_node", "add_edge", "remove_edge"] as const;
+/** The verbs of a local store: they never travel. */
+export const LOCAL_VERBS = ["update_node", "add_node", "delete_node", "add_edge", "delete_edge"] as const;
+
+/** The fields an `update_field` may address. */
+export function isAddressableField(name: string): boolean {
+  return name === "name" || name === "description" || (name.startsWith("data.") && name.length > 5);
+}
+
+/** Why `op` is not an operation a wire carries, or null when it is (the SHAPE
+ *  only; whether the node is there is the section's to say). */
+export function validateOp(op: unknown): string | null {
+  if (!op || typeof op !== "object" || Array.isArray(op)) return "an operation is an object";
+  const o = op as Record<string, unknown>;
+  const kind = String(o.op ?? "");
+  if (!(OPS as readonly string[]).includes(kind)) {
+    if ((LOCAL_VERBS as readonly string[]).includes(kind)) {
+      return `unknown operation '${kind}' (a store's own verb: translate it with ` +
+             `ops_for_local_change; known: ${OPS.join(", ")})`;
+    }
+    return `unknown operation '${kind}' (known: ${OPS.join(", ")})`;
+  }
+  if (kind === "add_node") {
+    const payload = (o.node ?? o.data) as Record<string, unknown> | undefined;
+    if (!payload || typeof payload !== "object") return "add_node without a node";
+    if (!(o.id || payload.id)) return "add_node without an id";
+    return null;
+  }
+  if (kind === "update_field") {
+    if (!(o.node_id || o.id)) return "update_field without a node_id";
+    const name = String(o.field ?? "");
+    if (!isAddressableField(name)) return `'${name}' is not an addressable field`;
+    if (!("value" in o) && o.remove !== true) {
+      return `update_field of '${name}' without a value (an emptying says remove: true)`;
+    }
+    return null;
+  }
+  if (kind === "remove_node") return (o.id || o.node_id) ? null : "remove_node without an id";
+  if (kind === "add_edge") {
+    const missing = ["source", "target", "edge_type"].filter((k) => !o[k]);
+    return missing.length ? `add_edge without ${missing.join(", ")}` : null;
+  }
+  if (o.id || (o.source && o.target && o.edge_type)) return null;
+  return "remove_edge without an id or its source, edge_type and target";
+}
+
+/** What a refusal is called when the state simply already knew (P4.1). */
+export const NOT_NEWS = ["stale", "idempotent", "already removed, not older"];
+/** Whether an `op_result` with `applied: false` must reach the person. */
+export function refusalIsNews(reason: string): boolean {
+  return !!reason && !NOT_NEWS.includes(reason);
+}
+
+const EDGE_CLOCK_KEYS = new Set(["removed", "created_at", "created_by"]);
+
 /**
- * A local `update_node` becomes ONE `update_field` per field that changed.
+ * The wire operations for one change of a local store — or for an operation
+ * already in `OPS`, copied as it is. Throws `Error(<the sentence>)` for a verb
+ * nobody speaks and for a result that is not a valid operation.
  *
- * The store already knows which fields changed and when — it stamped them
- * (P4.1b) — so the list travels with the local op and is not re-derived here.
- * Re-deriving it would mean diffing without a "before", which is exactly the
- * guesswork the stamping exists to remove.
- *
- * A field the editor EMPTIED travels as a removal (`remove: true`), because
- * emptying is an act and the other end must be able to tell it from "I do not
- * have that".
+ * * `update_node` → ONE `update_field` per field: `fields` (the store stamped
+ *   them, P4.1b) or a `patch` (an older peer); an emptied field travels as a
+ *   REMOVAL (`remove: true`), because emptying is an act.
+ * * `add_node` → with its id; a text node with no `data.lang` is born with the
+ *   study's language, else `und` (dev28, decision 12).
+ * * `delete_node` → `remove_node`; `add_edge`/`delete_edge` → the endpoints
+ *   FLAT, the declared attributes only (the clock keys are the relay's).
  */
 export function opsForLocalChange(
-  local: { op: string; node_id?: string; node?: EmNode; edge?: unknown;
+  local: { op: string; node_id?: string; id?: string; node?: EmNode; edge?: unknown;
+           ts?: string; patch?: Record<string, unknown>;
            fields?: Array<{ field: string; value: unknown; ts: string;
-                            by?: string | null; removed?: boolean }> },
+                            by?: string | null; removed?: boolean }>;
+           [key: string]: unknown },
+  studyLanguage: string | null = null,
 ): HubOp[] {
-  if (local.op === "update_node") {
-    const nodeId = String(local.node_id ?? "");
-    if (!nodeId || !local.fields?.length) return [];
-    return local.fields.map((f) => {
-      const op: HubOp = { op: "update_field", node_id: nodeId, field: f.field,
-                          ts: f.ts };
-      if (f.removed) op.remove = true;
-      else op.value = f.value;
+  if (!local || typeof local !== "object") throw new Error("an operation is an object");
+  const kind = String(local.op ?? "");
+  const ts = (local.ts as string) || undefined;
+  let out: HubOp[] = [];
+  if (kind === "update_field" || kind === "remove_node" || kind === "remove_edge"
+      || (kind === "add_edge" && !("edge" in local))) {
+    const copy = { ...local } as Record<string, unknown>;
+    delete copy.type;
+    out = [copy as HubOp];
+  } else if (kind === "update_node") {
+    const nodeId = String(local.node_id ?? local.id ?? "");
+    const pairs: Array<[string, unknown, string | undefined, boolean]> = [];
+    if (Array.isArray(local.fields)) {
+      for (const f of local.fields) {
+        if (f && typeof f === "object") {
+          pairs.push([String(f.field ?? ""), f.value, f.ts || ts, f.removed === true]);
+        }
+      }
+    } else {
+      for (const [k, v] of Object.entries(local.patch ?? {})) {
+        if (k === "data" && v && typeof v === "object" && !Array.isArray(v)) {
+          for (const [dk, dv] of Object.entries(v as Record<string, unknown>)) {
+            pairs.push([`data.${dk}`, dv, ts, dv === null]);
+          }
+        } else {
+          pairs.push([k, v, ts, v === null]);
+        }
+      }
+    }
+    out = pairs.map(([field, value, clock, removed]) => {
+      const op: HubOp = { op: "update_field", node_id: nodeId, field } as HubOp;
+      if (clock) op.ts = clock;
+      if (removed) op.remove = true;
+      else op.value = value;
       return op;
     });
+  } else if (kind === "add_node") {
+    // the store's verb and the wire's share the name: one shape out of both
+    const node = { ...((local.node ?? local.data ?? {}) as Record<string, unknown>) };
+    const data = { ...((node.data ?? {}) as Record<string, unknown>) };
+    if (isTextNode(node) && !(typeof data.lang === "string" && data.lang.trim())) {
+      data.lang = studyLanguage || "und";
+      node.data = data;
+    }
+    const op: HubOp = { op: "add_node", id: String(node.id ?? local.id ?? ""), node } as HubOp;
+    const stamp = ts || nodeStampOf(node as unknown as EmNode);
+    if (stamp) op.ts = stamp;
+    out = [op];
+  } else if (kind === "delete_node") {
+    const op: HubOp = { op: "remove_node", id: String(local.node_id ?? local.id ?? "") } as HubOp;
+    if (ts) op.ts = ts;
+    out = [op];
+  } else if (kind === "add_edge" || kind === "delete_edge") {
+    const e = (local.edge ?? {}) as Record<string, unknown>;
+    const op: HubOp = { op: kind === "add_edge" ? "add_edge" : "remove_edge",
+                        id: String(e.id ?? local.id ?? ""), source: e.source,
+                        target: e.target, edge_type: e.edge_type } as HubOp;
+    if (kind === "add_edge") {
+      const raw = (e.attributes ?? {}) as Record<string, unknown>;
+      const attrs: Record<string, unknown> = {};
+      for (const k of Object.keys(raw).sort()) if (!EDGE_CLOCK_KEYS.has(k)) attrs[k] = raw[k];
+      if (Object.keys(attrs).length) op.attributes = attrs;
+    }
+    if (ts) op.ts = ts;
+    out = [op];
+  } else {
+    throw new Error(validateOp(local) ?? `unknown operation '${kind}'`);
   }
-  if (local.op === "add_node" && local.node) {
-    return [{ op: "add_node", node: local.node as unknown as Record<string, unknown>,
-              id: local.node.id,
-              ts: nodeStampOf(local.node) ?? undefined }];
+  for (const op of out) {
+    const why = validateOp(op);
+    if (why) throw new Error(why);
   }
-  if (local.op === "delete_node") {
-    return [{ op: "remove_node", id: String(local.node_id ?? "") }];
-  }
-  if (local.op === "add_edge" && local.edge) {
-    const e = local.edge as Record<string, unknown>;
-    // the relation's DECLARED attributes travel (an heir's `inherited`); the
-    // clock keys are the relay's to stamp, and crdt drops them if sent
-    const attrs = { ...((e.attributes ?? {}) as Record<string, unknown>) };
-    for (const k of ["created_at", "created_by", "removed"]) delete attrs[k];
-    return [{ op: "add_edge", id: String(e.id ?? ""), source: e.source,
-              target: e.target, edge_type: e.edge_type,
-              ...(Object.keys(attrs).length ? { attributes: attrs } : {}) }];
-  }
-  if (local.op === "delete_edge" && local.edge) {
-    const e = local.edge as Record<string, unknown>;
-    return [{ op: "remove_edge", id: String(e.id ?? ""), source: e.source,
-              target: e.target, edge_type: e.edge_type }];
-  }
-  return [];
+  return out;
 }
 
 function nodeStampOf(node: EmNode): string | null {
+  if (!node || typeof node !== "object") return null;
   const data = (node.data ?? {}) as Record<string, unknown>;
   return (data.modified_at as string) || (data.created_at as string) || null;
 }

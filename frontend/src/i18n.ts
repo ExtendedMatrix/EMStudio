@@ -2272,6 +2272,9 @@ const EN: Dict = {
 
   // settings
   "room.denied": "The room refused that operation.",
+  "ops.notSent": "This edit was not sent: {why}",
+  "ops.notApplied": "Not applied — {what}: {why}",
+  "ops.denied": "The room refused {verb}: {why}",
   "room.readOnly": "read-only",
   "room.readOnlyHint": "This room gives you the role “{role}”: you can read and "
     + "be seen, and the server refuses edits from here.",
@@ -5197,6 +5200,9 @@ const IT: Dict = {
   "open.overUnsaved": "«{name}» ha modifiche non salvate. Aprire «{file}» accanto? Resta nell'EMTree, ancora da salvare.",
 
   "room.denied": "La stanza ha rifiutato questa operazione.",
+  "ops.notSent": "Questa modifica non è partita: {why}",
+  "ops.notApplied": "Non applicata — {what}: {why}",
+  "ops.denied": "La stanza ha rifiutato {verb}: {why}",
   "room.readOnly": "sola lettura",
   "room.readOnlyHint": "In questa stanza hai il ruolo «{role}»: puoi leggere ed "
     + "essere visto, e il server rifiuta le modifiche fatte da qui.",
