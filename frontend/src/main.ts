@@ -2397,6 +2397,15 @@ function centerOn(nodeId: string): void {
   vp.scale = Math.max(vp.scale, 0.8);
   vp.x = w / 2 - (n.x + n.w / 2) * vp.scale;
   vp.y = h / 2 - (n.y + n.h / 2) * vp.scale;
+  // E4 · an aimed camera, not one to frame: on a document that has just
+  // arrived the first draw framed the whole graph over this (measured live,
+  // 5 Oct 2026: a link's node selected and out of view)
+  if (!inContext()) {
+    const key = viewportKey(activeWin().id, view);
+    framedViews.add(key);
+    framedSizes.set(key, `${Math.round(w)}x${Math.round(h)}`);
+    touchedViews.add(key);
+  }
   draw();
 }
 
@@ -2459,6 +2468,8 @@ function select(nodeId: string | null): void {
   if (docAfter && nodeId && !docPickFrom) followDocSelection(nodeId);
   selectedId = nodeId;
   selectedIds = new Set(nodeId ? [nodeId] : []);
+  // E4 · somebody picked another node (a document closing selects null: not a pick)
+  if (nodeId && nodeId !== handoffLanded) handoffLanded = null;
   selectedEdge = null; // node and connector selection are mutually exclusive
   // SPAZIO · an epoch selected anywhere is the scene's epoch (a phase: its
   // epoch), and the scene marks the unit selected; the Chronology marks the row
@@ -4225,6 +4236,7 @@ function activateSlot(id: string, opts: { rebuildOnly?: boolean } = {}): void {
   contextScene = null;
   hoverId = null;
   selectedId = null;
+  selectedIds = new Set(); // E4 · both halves of the selection, not one
   matrixViewLayout = null; // derived from filters; recomputed for this document
   resetWindowCameras(); // every window re-frames on the incoming document
 
@@ -5576,11 +5588,13 @@ function recallHandoff(): Handoff | null {
  */
 export async function openHandoff(handoff: Handoff): Promise<void> {
   if (handoff.kind === "study") {
+    pendingHandoffNode = handoff.node ?? null;
     await openStudyFromLink({
       url: `${handoff.catalog.replace(/\/+$/, "")}`
            + `/catalog/study/${encodeURIComponent(handoff.study)}/emjson`,
       study: handoff.study, narrative: null, token: null,
     });
+    landOnHandoffNode();
     return;
   }
   handoffAuth = await loadAuthConfig(handoff.server);
@@ -5596,10 +5610,63 @@ export async function openHandoff(handoff: Handoff): Promise<void> {
   window.location.assign(await authorizeUrl(handoffAuth));
 }
 
-function joinFromHandoff(handoff: { server: string; room: string },
+/** E4 · the node a handoff (`&node=`) asked to land on, until its graph is
+ *  open: the room's snapshot, or the study, arrives after the link. */
+let pendingHandoffNode: string | null = null;
+/** …and the node it landed on, while nobody has picked anything else. A room
+ *  may send its snapshot twice right after the join (the re-sync), and loading
+ *  a document clears the selection: measured live on 5 Oct 2026, the unit was
+ *  selected by the first snapshot and unselected by the second. */
+let handoffLanded: string | null = null;
+
+/** Land on the handoff's node, in whichever graph of the document holds it:
+ *  that graph made active, the node selected — the Inspector shows it — and
+ *  the view centred on it. Nothing pending → nothing. Pending but in no graph
+ *  of what opened → said, and forgotten (a link to a node that is not there
+ *  is not kept waiting for the next document). */
+/** Centre on a node once the scene drawing it exists: a document that has just
+ *  arrived builds its scene a little later (measured live, 5 Oct 2026:
+ *  `centerOn` found no node and left the view on the whole graph). */
+function centerWhenDrawn(id: string, tries = 100): void {
+  if (scene()?.byId.get(id)) { centerOn(id); return; }
+  // a timer and not a frame: a window in the background gets no frames
+  if (tries > 0) setTimeout(() => centerWhenDrawn(id, tries - 1), 50);
+}
+
+function landOnHandoffNode(): void {
+  // the same room sent its document again: back on the unit, if nobody moved
+  if (!pendingHandoffNode && handoffLanded && !selectedIds.size
+      && emtree.slots.some((s) => !!s.store.node(handoffLanded as string))) {
+    const again = handoffLanded;
+    const slot = emtree.slots.find((s) => !!s.store.node(again))!;
+    if (emtree.activeId !== slot.id) activateSlot(slot.id);
+    select(again);
+    handoffLanded = again;
+    centerWhenDrawn(again);
+    return;
+  }
+  const id = pendingHandoffNode;
+  if (!id) return;
+  pendingHandoffNode = null;
+  const slot = emtree.slots.find((s) => !!s.store.node(id));
+  if (!slot) {
+    toast(t("handoff.nodeMissing", { node: id }));
+    logWarn(t("handoff.nodeMissing", { node: id }));
+    return;
+  }
+  if (emtree.activeId !== slot.id) activateSlot(slot.id);
+  select(id);
+  handoffLanded = id;
+  centerWhenDrawn(id);
+  logInfo(t("handoff.nodeLanded", { node: store?.node(id)?.name || id }));
+}
+
+function joinFromHandoff(handoff: { server: string; room: string; node?: string },
                         token: string | null,
                         session?: { refresh_token?: string;
                                     config?: AuthConfig | null }): void {
+  pendingHandoffNode = handoff.node ?? null;
+  handoffLanded = null;
   // The settings are UPDATED from the link, not consulted: the whole point is
   // that nobody types them. They are still written down so the next launch
   // reconnects without the link.
@@ -6773,6 +6840,8 @@ function connectToHub(url: string, room: string, token: string | null): void {
       // document arrived and nothing appeared, because it had no `.graph`.
       loadContainerDocument(doc, roomFileName(room), null, { room: roomRef(room) });
       info.textContent = t("hub.joined", { room });
+      // E4 · a link with `&node=` lands on its unit once the room is here
+      landOnHandoffNode();
       // ASSETS · the object-store panel is gated on being IN a room, and joining
       // one is exactly the event that opens the gate. Measured live: the Assets
       // tab went on saying "standalone: there is no store to publish to" after

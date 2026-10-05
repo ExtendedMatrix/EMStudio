@@ -166,7 +166,40 @@ console.log("\n6b · the bar keeps nothing from the round trip");
 }
 
 console.log("\n7 · the app signs in ITSELF — the link cannot");
+// ── E4 · `&node=`: the unit to land on (E.D., 4 October 2026) ─────────────
+console.log("\n2c · a link may name the NODE to land on");
+{
+  const room = H.parseHandoff(scheme + "&node=6f1c-us10");
+  ok(room.kind === "room" && room.node === "6f1c-us10",
+     "a room link carries its node", JSON.stringify(room));
+  ok(H.parseHandoff(web + "&node=6f1c-us10").node === "6f1c-us10",
+     "…in the web form too");
+  ok(!("node" in H.parseHandoff(scheme)), "no node → no node key (the old links unchanged)");
+  ok(H.parseHandoff(scheme + "&node=").node === undefined, "an empty node is no node");
+  const study = H.parseHandoff(
+    "stratigraph://open?study=s1&catalog=https%3A%2F%2Fem.example.org&node=n7");
+  ok(study.kind === "study" && study.node === "n7", "a study link carries its node too",
+     JSON.stringify(study));
+  const back = H.parseHandoff(H.buildHandoff({ kind: "room", server: "https://em.example.org",
+                                               room: "saggio-b", node: "6f1c-us10" }));
+  ok(back.node === "6f1c-us10" && back.room === "saggio-b", "build ↔ parse keep the node",
+     JSON.stringify(back));
+  let refused = false;
+  try { H.parseHandoff(scheme + "&node=" + "x".repeat(201)); } catch { refused = true; }
+  ok(refused, "a node longer than any id is refused, not carried");
+  const loc = H.handoffFromLocation("?server=https%3A%2F%2Fem.example.org&room=r&node=n1");
+  ok(loc && loc.node === "n1", "the web page's own query carries the node", JSON.stringify(loc));
+}
+
 const main = readFileSync(join(SRC, "main.ts"), "utf8");
+ok(/pendingHandoffNode = handoff\.node/.test(main),
+   "E4 · the node of the link is kept until its document is open");
+ok(/loadContainerDocument\(doc, roomFileName\(room\)[\s\S]{0,200}landOnHandoffNode\(\)/.test(main),
+   "…and landed on when the room's snapshot is loaded");
+ok(/function landOnHandoffNode[\s\S]{0,1600}activateSlot\(slot\.id\);\s*select\(id\);[\s\S]{0,60}centerWhenDrawn\(id\)/.test(main),
+   "…its graph made active, the node selected (Inspector) and centred once drawn");
+ok(/if \(nodeId && nodeId !== handoffLanded\) handoffLanded = null/.test(main),
+   "…and a room's re-sync puts it back, unless somebody picked another node");
 ok(/function\s+joinFromHandoff/.test(main),
    "the join path exists and is fed by the link");
 ok(/connectToHub\(handoff\.server, handoff\.room, token\)/.test(main),

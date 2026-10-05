@@ -46,8 +46,21 @@
  *  link names no room» — into `logWarn`, i.e. the app's console, not in front of
  *  whoever had pressed the button. Measured in Chrome on 4 September. */
 export type Handoff =
-  | { kind: "room"; server: string; room: string }
-  | { kind: "study"; catalog: string; study: string };
+  | { kind: "room"; server: string; room: string; node?: string }
+  | { kind: "study"; catalog: string; study: string; node?: string };
+
+/** E4 · `&node=<id>`: the unit to land on once the room or the study is open —
+ *  selected, in the Inspector, the view centred on it (E.D., 4 Oct 2026). It
+ *  names a node of the graph, never a permission; an unknown id is said, not
+ *  guessed. `focus=` was the name these comments kept free for it. */
+export function nodeOf(url: URL): string | undefined {
+  const node = (url.searchParams.get("node") || "").trim();
+  if (!node) return undefined;
+  if (node.length > 200 || /[\u0000-\u001f]/.test(node)) {
+    throw new HandoffError("the node of this link is not a node id");
+  }
+  return node;
+}
 
 /** A room handoff, when that is what it is — for the callers that only join. */
 export function asRoom(handoff: Handoff): { server: string; room: string } | null {
@@ -136,7 +149,8 @@ export function parseHandoff(link: string): Handoff {
         + `(${SCHEME}://${ACTION}?study=…&catalog=…) and it comes from that `
         + "deployment's configuration, never from whoever built the link.");
     }
-    return { kind: "study", catalog, study };
+    const node = nodeOf(url);
+    return node ? { kind: "study", catalog, study, node } : { kind: "study", catalog, study };
   }
 
   // A ROOM.
@@ -152,7 +166,8 @@ export function parseHandoff(link: string): Handoff {
     if (scheme === "http" || scheme === "https") server = url.origin;
     else throw new HandoffError("the link names no server");
   }
-  return { kind: "room", server, room };
+  const node = nodeOf(url);
+  return node ? { kind: "room", server, room, node } : { kind: "room", server, room };
 }
 
 /** A handoff on THIS page's URL, if there is one.
@@ -173,9 +188,11 @@ export function handoffFromLocation(search?: string): Handoff | null {
   // not be mistaken for a handoff: that one arrives with `?join=<token>` and
   // means something else entirely.
   if (!room || !server || params.has("join")) return null;
+  const node = (params.get("node") || "").trim();
   try {
     return parseHandoff(`${SCHEME}://${ACTION}?server=`
-      + `${encodeURIComponent(server)}&room=${encodeURIComponent(room)}`);
+      + `${encodeURIComponent(server)}&room=${encodeURIComponent(room)}`
+      + (node ? `&node=${encodeURIComponent(node)}` : ""));
   } catch {
     return null;
   }
@@ -203,7 +220,7 @@ export function clearHandoffFromLocation(): void {
   // credential-shaped things out of an address that gets copied into chats and
   // screenshots. A spent code is not a live credential; it still does not belong
   // there.
-  for (const key of ["handoff", "server", "room",
+  for (const key of ["handoff", "server", "room", "node",
                      "code", "state", "session_state", "iss",
                      "error", "error_description"]) {
     url.searchParams.delete(key);
@@ -220,6 +237,7 @@ export function buildHandoff(handoff: Handoff): string {
     const query = new URLSearchParams({
       study: handoff.study, catalog: handoff.catalog.replace(/\/+$/, ""),
     });
+    if (handoff.node) query.set("node", handoff.node);
     return `${SCHEME}://${ACTION}?${query.toString()}`;
   }
   if (!handoff.room) throw new HandoffError("a handoff needs a room");
@@ -227,5 +245,6 @@ export function buildHandoff(handoff: Handoff): string {
   const query = new URLSearchParams({
     server: handoff.server.replace(/\/+$/, ""), room: handoff.room,
   });
+  if (handoff.node) query.set("node", handoff.node);
   return `${SCHEME}://${ACTION}?${query.toString()}`;
 }
