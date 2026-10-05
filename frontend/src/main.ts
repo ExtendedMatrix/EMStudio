@@ -380,6 +380,7 @@ import {
   imageService as iiifImageService,
   regionToWebAnnotation,
   thumbnailUrl as iiifThumbnailUrl,
+  isImageResource,
 } from "./iiif";
 import {
   ADORNMENT_EDGE_TYPES,
@@ -2699,6 +2700,7 @@ function renderInspectorInto(host: HTMLElement): void {
     selectedEdge,
   );
   if (selectedId) {
+    renderUnitImages(host, owning, selectedId);          // E5 · its images
     renderChainSection(host, chainUi(owning), selectedId); // CATENA
     const chip = aiChipFor(selectedId);
     if (chip) host.querySelector(".insp-head .insp-chip")?.after(chip);
@@ -2708,6 +2710,72 @@ function renderInspectorInto(host: HTMLElement): void {
   renderInspectorIssues(host);
   renderNodeHistory(host);
   citeSectionFor(host); // COLLEGARE · «Cita in «capitolo»», with the story open
+}
+
+/** E5 · «Images of the unit» in the Inspector, with their thumbnails — the
+ *  section EM Tools' Stratigraphy Manager has (U5): the image resources a unit
+ *  links (`has_linked_resource`, and their files). The thumbnail is a SIZE
+ *  REQUEST to the node's image service when the image has a digest and the node
+ *  has one (IIIF, `!128,128`), else the file where the one resolver found it on
+ *  this computer; nothing is generated or stored here. A click opens the image
+ *  in the Inspector. Not drawn for a node that links no image. */
+function renderUnitImages(host: HTMLElement, st: DocumentStore, nodeId: string): void {
+  const n = st.node(nodeId);
+  if (!n || ["resource", "document", "file", "extractor", "combiner"].includes(String(n.node_type))) return;
+  const seen = new Set<string>();
+  const images = filesOfDocument(st.doc.graph, nodeId)
+    .map((id) => st.node(id)).filter((x): x is EmNode => !!x && isImageResource(x))
+    .filter((x) => {
+      const key = String(((x.data ?? {}) as Record<string, unknown>).checksum ?? x.id);
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  if (!images.length) return;
+  const sect = document.createElement("div");
+  sect.className = "insp-unit-images";
+  const h = document.createElement("h3");
+  h.className = "insp-sect";
+  h.textContent = t("insp.unitImages", { n: String(images.length) });
+  sect.appendChild(h);
+  const row = document.createElement("div");
+  row.style.cssText = "display:flex;flex-wrap:wrap;gap:6px;margin:4px 0 8px";
+  for (const img of images) {
+    const fig = document.createElement("button");
+    fig.type = "button";
+    fig.className = "insp-unit-image";
+    fig.title = String(img.name || img.id);
+    fig.style.cssText = "width:72px;padding:2px;border:1px solid var(--border, #ccc);"
+      + "background:none;cursor:pointer;text-align:center;font-size:10px";
+    const pic = document.createElement("img");
+    pic.alt = String(img.name || "");
+    pic.style.cssText = "width:64px;height:64px;object-fit:cover;display:block;margin:0 auto";
+    const cap = document.createElement("div");
+    cap.textContent = String(img.name || img.id);
+    cap.style.cssText = "overflow:hidden;text-overflow:ellipsis;white-space:nowrap";
+    fig.append(pic, cap);
+    fig.addEventListener("click", () => { select(img.id); });
+    row.appendChild(fig);
+    const local = (): void => {
+      const f = fileStateOf(img.id);
+      const src = f && f.path && (f.state === "on_disk" || f.state === "both") ? f.path : viewerSourceOf(img);
+      if (!src) return;
+      if (viewerIsFetchable(src)) { pic.src = src; return; }
+      void fsUrlFor(studyLocalPath(src) ?? src).then(bridgeBlobUrl)
+        .then((u) => { pic.src = u; }).catch(() => { /* no file here: the name stays */ });
+    };
+    const iiif = iiifBase() ? iiifThumbnailUrl(img, iiifBase(), 128) : null;
+    if (iiif) {
+      pic.onerror = () => { pic.onerror = null; local(); };
+      pic.src = iiif;
+    } else {
+      local();
+    }
+  }
+  sect.appendChild(row);
+  // before the chain: what the unit looks like, then where it comes from
+  const head = host.querySelector(".insp-head");
+  if (head?.nextSibling) host.insertBefore(sect, head.nextSibling); else host.appendChild(sect);
 }
 
 /**

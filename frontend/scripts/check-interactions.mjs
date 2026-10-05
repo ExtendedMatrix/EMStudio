@@ -173,6 +173,38 @@ test("A1", "timbro: «Volo» resta «Volo» e il focus nel campo", async () => {
   return { pass: value === "Volo" && focus.includes("[operator]"), detail: { value, focus, loading } };
 });
 
+// E5 · «Images of the unit» in the Inspector, with their thumbnails (decisioni
+// della sera, 5 ott 2026): a unit that links two images (has_linked_resource)
+// shows both, each with its picture; a click opens the image; a unit with no
+// image draws no section
+test("E5.thumb", "ispettore: le immagini dell'unità con la miniatura, il clic apre l'immagine, nessuna sezione senza immagini", async () => {
+  const doc = fixture("catena");
+  const g = doc.graph ?? doc;
+  // a 2×2 PNG, inline: the thumbnail path that needs no bridge and no node
+  const png = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAFklEQVQIW2P8z8DwnwEIGBkYGBgYAAAdBQIA7mYc5wAAAABJRU5ErkJggg==";
+  for (const [id, name] of [["IMG_1", "USM101_north.png"], ["IMG_2", "USM101_detail.png"]]) {
+    g.nodes.push({ id, name, node_type: "resource", data: { kind: "image", media_type: "image/png", url: png } });
+    g.edges.push({ id: `USM101_has_linked_resource_${id}`, source: "USM101", target: id, edge_type: "has_linked_resource" });
+  }
+  const { p, ctx, errors } = await open({ doc });
+  await pick(p, "USM101");
+  await p.waitForTimeout(500);
+  const seen = await p.evaluate(() => {
+    const sect = document.querySelector(".insp-unit-images");
+    const imgs = [...(sect?.querySelectorAll("img") ?? [])];
+    return { title: sect?.querySelector("h3")?.textContent ?? "", n: imgs.length,
+             drawn: imgs.filter((i) => i.complete && i.naturalWidth > 0).length };
+  });
+  await p.locator(".insp-unit-image").first().click();
+  await p.waitForTimeout(350);
+  const opened = await p.evaluate(() => window.__EM_DRAG__.selected());
+  await pick(p, "US102");
+  const none = await p.evaluate(() => !document.querySelector(".insp-unit-images"));
+  await ctx.close();
+  return { pass: seen.n === 2 && seen.drawn === 2 && /· 2/.test(seen.title) && opened[0] === "IMG_1" && none
+                 && !errors.length, detail: { seen, opened, none, errors } };
+});
+
 // A2 · Inspector: name → Tab → the focus is in the description
 test("A2", "ispettore: nome → Tab → il focus è nella descrizione", async () => {
   const { p, ctx } = await open({ doc: "catena" });
