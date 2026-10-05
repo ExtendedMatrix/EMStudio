@@ -63,6 +63,10 @@ export interface InteractionSettings {
   lotGapMinutes: number;
   /** D3 · fewer photos than this are files, not a lot worth proposing. 5. */
   lotMinPhotos: number;
+  /** «Zoom to selection» (E.D., 5 Oct 2026): a node selected in another window
+   *  (Inspector, lists, outline, search, DTC…) is framed in the graph window; a
+   *  click on the graph itself never moves the view. On by default. */
+  zoomToSelection: boolean;
 }
 
 /**
@@ -168,7 +172,7 @@ const DEFAULTS: Settings = {
           accept: "everything", hubUrl: "", hubRoom: "" },
   developer: { showNodeIds: false },
   interaction: { edgeTooltips: true, strictDocumentNames: true,
-                 lotGapMinutes: 30, lotMinPhotos: 5 },
+                 lotGapMinutes: 30, lotMinPhotos: 5, zoomToSelection: true },
   ai: { provider: "claude", model: "" },
   // No default host on purpose: a wrong one would look like a broken viewer.
   // The Heriverse deployment guide mounts the wapp at /a/heriverse.

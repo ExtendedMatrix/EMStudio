@@ -346,7 +346,7 @@ import { buildInventory, candidatesOf, choose, confirmLot, digestInLocator, huma
   locatorKind, movePlan, normDigest, resolveLocal, toMove, toUpload, type HomeView, type InvCandidate, type InvChoice,
   type InvItem, type InvOutcome, type InvProbe, type Inventory, type PhotoExif } from "./room-inventory";
 import { type HostInfo, SyncClient, SYNC_ACCEPTS, type SyncAccept } from "./sync";
-import { type Access, type ConnectionState, type Reach, nodeApi, renderConnectionPanel,
+import { type Access, type ConnectionState, type NodeApi, type Reach, nodeApi, renderConnectionPanel,
   renderRoomPanel, roleStateId, roomStateId, shortNode, whereDetails, whereHealth, wherePhrase } from "./connection";
 import { stateBadge, stateSign } from "./state-symbols";
 import * as alignment from "./alignment";
@@ -1187,6 +1187,8 @@ function connectionAccess(): Access {
   // the first status line is drawn at boot, before the identity module's
   // `let`s exist: «none» until they do
   try {
+    // A3 · the truth first: a token the node refused and nobody can renew
+    if (hubAccessExpired()) return "expired";
     if (nodeIdentity?.authMode === "node_password") return "node_password";
     if (nodeIdentity) return "orcid_node";
     return currentIdentity() ? "declared" : "none";
@@ -1273,7 +1275,7 @@ async function fetchRoomTitle(room: string): Promise<void> {
   if (!base) return;
   roomTitleOf = { room, title: room };   // asked once per room
   try {
-    const r = await nodeApi(base, () => hubToken).room(room);
+    const r = await nodeHttp(base).room(room);
     roomTitleOf = { room, title: r.title || room };
     renderStatusLine();
   } catch { /* the id stands in: the line still says which room */ }
@@ -1360,7 +1362,10 @@ function paintConnectionPanel(pop: HTMLElement): void {
     openOnNode: () => { pop.classList.add("hidden"); shareThisRoom(); },
     leaveRoom: () => { pop.classList.add("hidden"); if (sync.connected) btnSync.click(); },
     // R1 · the node's rooms, with this session's access
-    listRooms: () => nodeApi(getSettings().sync.hubUrl.trim(), () => hubToken).rooms(),
+    listRooms: () => nodeHttp(getSettings().sync.hubUrl.trim()).rooms(),
+    // A2 · the same sign-in as Node settings › Sign in, straight away; on the
+    // way back this panel opens again and asks the rooms again
+    signInAgain: () => { pop.classList.add("hidden"); void signIntoNode({ intent: "identity", then: "rooms" }); },
     joinRoom: (id) => { pop.classList.add("hidden"); enterRoom(id); },
     newRoom: () => { pop.classList.add("hidden"); void createRoomHere(false); },
     bringIntoRoom: () => { pop.classList.add("hidden"); void bringIntoRoom(); },
@@ -1406,7 +1411,7 @@ function openRoomPanel(roomId?: string): void {
   pop.classList.remove("hidden");
   pop.dataset.view = "room";
   void renderRoomPanel(pop, {
-    api: nodeApi(base, () => hubToken),
+    api: nodeHttp(base),
     roomId: room,
     me: nodeIdentity?.orcid ?? currentIdentity()?.orcid ?? null,
     openOnNode: () => { pop.classList.add("hidden"); shareThisRoom(); },
@@ -1971,6 +1976,22 @@ window.__EM_SCENE__ = () => {
   /** P2 · the session's node token (what a sign-in would set), «Bring into a
    *  room…» itself, and the shelf as it stands */
   useToken: (tok: string | null) => { hubToken = tok; },
+  /** MICRO accesso · the session's access as the panel reads it — never the token */
+  access: () => {
+    const exp = tokenExpiry(hubToken);
+    return { token: !!hubToken, refresh: !!hubRefreshToken, expired: hubAccessExpired(),
+             secondsLeft: exp === null ? null : Math.round(exp - Date.now() / 1000) };
+  },
+  /** …a session whose refresh token is gone (the node's password, a spent one) */
+  forgetRefresh: () => { hubRefreshToken = null; },
+  openNodeSettings: () => openNodeSettings(),
+  /** «Zoom to selection» · the focused graph window's camera, and whether a node
+   *  is wholly on screen in it */
+  viewOf: (id?: string) => {
+    const vp = viewport();
+    return { x: Math.round(vp.x), y: Math.round(vp.y), scale: +vp.scale.toFixed(3), win: activeWin().id,
+             inView: id ? nodeWhollyInView(id) : null };
+  },
   bringIntoRoom: () => void bringIntoRoom(),
   shelf: () => shelfEntries().map((e) => ({ id: e.id, name: e.name, locator: e.locator, checksum: e.checksum ?? null,
     residency: e.residency ?? null, origin: (e.extra as Record<string, unknown> | undefined)?.original_locator ?? null })),
@@ -2412,6 +2433,48 @@ function centerOn(nodeId: string): void {
   draw();
 }
 
+//: «Zoom to selection» (E.D., 5 Oct 2026) · raised while one of a graph
+//: canvas's own pointer events is being handled: a pick made ON the graph never
+//: moves the view (it would jump under the mouse). Cleared after the event.
+let pickOnCanvas = false;
+
+/** Is the node wholly inside the focused graph window? null: not in its scene. */
+function nodeWhollyInView(nodeId: string): boolean | null {
+  const n = scene()?.byId.get(nodeId);
+  if (!n) return null;
+  const vp = viewport();
+  const { w, h } = viewSize();
+  const x0 = n.x * vp.scale + vp.x, y0 = n.y * vp.scale + vp.y;
+  return x0 >= 0 && y0 >= 0 && x0 + n.w * vp.scale <= w && y0 + n.h * vp.scale <= h;
+}
+
+/**
+ * «Zoom to selection» · B2 · a node selected in ANOTHER window (Inspector, the
+ * lists, the outline, the search, the DTC, the Chronology, the Doc…) is framed
+ * in the graph window — the focused one when it is a graph, else the graph
+ * window last focused, whose mode `view` still is. `centerOn` does it, as the
+ * places that used to call it by hand did; a node already wholly on screen is
+ * left where it is (it is framed), and a node this view does not draw (folded,
+ * filtered, another projection) is no error and no move. Off (B3): selection
+ * only. ONE rule, in `select()` — B4: nobody calls `centerOn` after a pick any
+ * more.
+ */
+function frameSelection(nodeId: string): void {
+  if (!getSettings().interaction.zoomToSelection) return;
+  const here = activeWin();
+  const target = here.type === "graph" ? here.id
+    : lastGraphWinId && winAreas.has(lastGraphWinId) ? lastGraphWinId
+    : windowsOf().find((w) => w.type === "graph" && winAreas.has(w.id))?.id;
+  if (!target) return;                      // no graph on screen: the pick is enough
+  if (target !== here.id) setActiveWin(target);
+  try {
+    if (nodeWhollyInView(nodeId) === false) centerOn(nodeId);
+  } finally {
+    if (target !== here.id) setActiveWin(here.id);
+  }
+  draw();
+}
+
 /** S6 · «Show in the Matrix»: frame the node WITH its group, a margin around,
  *  instead of forcing a 0.8 zoom — in the low window under the Doc viewer that
  *  zoom cut the neighbours' boxes and labels at the top edge (dev.17, D.02). */
@@ -2485,6 +2548,15 @@ function select(nodeId: string | null): void {
   refreshInspector();
   nodeList.setSelected(nodeId);
   draw();
+  // «Zoom to selection» · a pick from another window frames the node — after
+  // the scenes this pick may rebuild (a DTC set opening, a jump that rebuilds)
+  if (nodeId && !pickOnCanvas) {
+    const id = nodeId;
+    queueMicrotask(() => {
+      // at boot the window registry's `let`s may not exist yet: nothing to frame
+      try { if (selectedId === id) frameSelection(id); } catch { /* boot */ }
+    });
+  }
   // mirror the selection to a connected peer (Blender), unless this
   // selection just arrived FROM the peer (avoid the echo loop)
   if (!applyingRemoteSelect) sync.sendSelect(nodeId, [...selectedIds]);
@@ -2579,10 +2651,7 @@ function renderInspectorInto(host: HTMLElement): void {
     owning,
     selectedId,
     {
-      onJump: (id) => {
-        select(id);
-        centerOn(id);
-      },
+      onJump: (id) => select(id),     // «Zoom to selection» frames it
       onSetSitePosition: () => openSitePickerOnGraph(),
       onClose: () => select(null),
       // DAG · act on the document the thing LIVES in: an acquisition deleted
@@ -2750,7 +2819,7 @@ function renderAltLabels(host: HTMLElement, st: DocumentStore, nodeId: string): 
       const a = document.createElement("a");
       a.href = "#";
       a.textContent = d.name;
-      a.addEventListener("click", (ev) => { ev.preventDefault(); select(d.id); centerOn(d.id); });
+      a.addEventListener("click", (ev) => { ev.preventDefault(); select(d.id); });
       src.appendChild(a);
     });
     row.appendChild(src);
@@ -4461,10 +4530,9 @@ async function openStudyFromLink(link: StudyLink): Promise<void> {
     // The link's own token wins when there is one: it was minted for this
     // document (the Catalog's reading page hands one out), and it is more
     // specific than the session.
-    const bearer = link.token || hubToken;
-    answer = await fetch(link.url, {
-      headers: bearer ? { Authorization: `Bearer ${bearer}` } : {},
-    });
+    answer = link.token
+      ? await fetch(link.url, { headers: { Authorization: `Bearer ${link.token}` } })
+      : await nodeAuthFetch(link.url);
   } catch (exc) {
     // The one that bit: a cross-origin fetch the browser refuses looks exactly
     // like a service that is down, and the sentence has to name the real
@@ -6357,16 +6425,16 @@ async function roomHasDigest(base: string, room: string, digest: string): Promis
  *  but that are at home in another room are not this room's — «Move here». */
 async function roomAssetHead(base: string, room: string, digest: string): Promise<{ ok: boolean; home: string | null }> {
   try {
-    const r = await fetch(`${base}/v1/rooms/${encodeURIComponent(room)}/asset/${encodeURIComponent(digest)}`,
-      { method: "HEAD", headers: hubToken ? { Authorization: `Bearer ${hubToken}` } : {}, cache: "no-store" });
+    const r = await nodeAuthFetch(`${base}/v1/rooms/${encodeURIComponent(room)}/asset/${encodeURIComponent(digest)}`,
+      { method: "HEAD", cache: "no-store" });
     return { ok: r.ok, home: r.ok ? r.headers.get("X-EM-Home-Room") : null };
   } catch { return { ok: false, home: null }; }
 }
 /** F1 · the node's answer about one file's home: where, who cites it, may I */
 async function assetHomeView(base: string, room: string, digest: string): Promise<HomeView | { error: string }> {
   try {
-    const r = await fetch(`${base}/v1/rooms/${encodeURIComponent(room)}/asset-home/${encodeURIComponent(digest)}`,
-      { headers: hubToken ? { Authorization: `Bearer ${hubToken}` } : {}, cache: "no-store" });
+    const r = await nodeAuthFetch(`${base}/v1/rooms/${encodeURIComponent(room)}/asset-home/${encodeURIComponent(digest)}`,
+      { cache: "no-store" });
     const j = await r.json().catch(() => ({})) as HomeView & { detail?: string };
     return r.ok ? j : { error: `${r.status} ${j.detail ?? ""}`.trim() };
   } catch (exc) { return { error: String(exc) }; }
@@ -6431,7 +6499,8 @@ const UPLOAD_PIECE = 8 * 1024 * 1024;
  */
 async function sendToRoom(base: string, room: string, it: InvItem,
                           onBytes: (n: number) => void): Promise<InvOutcome> {
-  const auth: Record<string, string> = hubToken ? { Authorization: `Bearer ${hubToken}` } : {};
+  // the bearer is added by `nodeAuthFetch`, the one road (it renews)
+  const auth: Record<string, string> = {};
   const sha = it.sha256;
   if (sha && await roomHasDigest(base, room, sha)) return { id: it.id, ok: true, sent: false, bytes: 0 };
   const media = it.mediaType || "application/octet-stream";
@@ -6439,14 +6508,14 @@ async function sendToRoom(base: string, room: string, it: InvItem,
   const roomUrl = `${base}/v1/rooms/${encodeURIComponent(room)}`;
   if (size <= UPLOAD_PIECE) {
     const bytes = await bridgeBytes(it.path!);
-    const r = await fetch(`${roomUrl}/asset?media_type=${encodeURIComponent(media)}`,
+    const r = await nodeAuthFetch(`${roomUrl}/asset?media_type=${encodeURIComponent(media)}`,
       { method: "PUT", headers: auth, body: bytes });
     if (!r.ok) return { id: it.id, ok: false, sent: false, bytes: 0, why: `${r.status} ${(await r.text()).slice(0, 120)}` };
     const info = await r.json() as { created?: boolean; size?: number };
     onBytes(bytes.byteLength);
     return { id: it.id, ok: true, sent: info.created !== false, bytes: bytes.byteLength };
   }
-  const start = await fetch(`${roomUrl}/uploads`, { method: "POST",
+  const start = await nodeAuthFetch(`${roomUrl}/uploads`, { method: "POST",
     headers: { ...auth, "Content-Type": "application/json" },
     body: JSON.stringify({ size, sha256: sha, media_type: media }) });
   if (!start.ok) return { id: it.id, ok: false, sent: false, bytes: 0, why: `${start.status} ${(await start.text()).slice(0, 120)}` };
@@ -6457,7 +6526,7 @@ async function sendToRoom(base: string, room: string, it: InvItem,
     if (uploadPaused) {
       await waitWhilePaused();
       // where is the server now? (another client, a restart: it decides)
-      const h = await fetch(`${roomUrl}/uploads/${encodeURIComponent(up.upload_id)}`, { method: "HEAD", headers: auth }).catch(() => null);
+      const h = await nodeAuthFetch(`${roomUrl}/uploads/${encodeURIComponent(up.upload_id)}`, { method: "HEAD", headers: auth }).catch(() => null);
       offset = Number(h?.headers.get("Upload-Offset") ?? offset);
     }
     const end = Math.min(size, offset + UPLOAD_PIECE) - 1;
@@ -6467,13 +6536,13 @@ async function sendToRoom(base: string, room: string, it: InvItem,
       : (await piece.arrayBuffer()).slice(offset, end + 1);
     let r: Response;
     try {
-      r = await fetch(`${roomUrl}/uploads/${encodeURIComponent(up.upload_id)}`, { method: "PATCH",
+      r = await nodeAuthFetch(`${roomUrl}/uploads/${encodeURIComponent(up.upload_id)}`, { method: "PATCH",
         headers: { ...auth, "Upload-Offset": String(offset), "Content-Type": "application/offset+octet-stream" },
         body: chunk });
     } catch {
       // the link dropped mid-piece: ask the server where it is, and go on from there
       tries++;
-      const h = await fetch(`${roomUrl}/uploads/${encodeURIComponent(up.upload_id)}`, { method: "HEAD", headers: auth }).catch(() => null);
+      const h = await nodeAuthFetch(`${roomUrl}/uploads/${encodeURIComponent(up.upload_id)}`, { method: "HEAD", headers: auth }).catch(() => null);
       offset = Number(h?.headers.get("Upload-Offset") ?? offset);
       continue;
     }
@@ -6668,8 +6737,8 @@ function paintInventory(body: HTMLElement, inv: Inventory, base: string, room: s
         if (!yes) { it.choice = "reference"; continue; }
         const v = views.get(it.id) as HomeView;
         try {
-          const r = await fetch(`${base}/v1/rooms/${encodeURIComponent(room)}/asset-home/${encodeURIComponent(it.sha256!)}`, {
-            method: "POST", headers: { ...(hubToken ? { Authorization: `Bearer ${hubToken}` } : {}), "Content-Type": "application/json" },
+          const r = await nodeAuthFetch(`${base}/v1/rooms/${encodeURIComponent(room)}/asset-home/${encodeURIComponent(it.sha256!)}`, {
+            method: "POST", headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ from_room: v.home, confirm: true }) });
           const j = await r.json().catch(() => ({})) as { home?: string; detail?: string };
           if (r.ok && j.home === room) {
@@ -6745,7 +6814,7 @@ function paintInventory(body: HTMLElement, inv: Inventory, base: string, room: s
     pause.remove();
     if (outcomes.some((o) => o.ok)) sync.sendRequestSave();
     const rep = inventoryReport(inv, outcomes);
-    const door = await nodeApi(base, () => hubToken).door(room).catch(() => ({ web: null, scheme: null }));
+    const door = await nodeHttp(base).door(room).catch(() => ({ web: null, scheme: null }));
     const link = door.web || `${base}/work/?room=${encodeURIComponent(room)}`;
     const sentence = t("inv.report", { n: String(rep.uploaded), size: humanBytes(rep.bytes),
       a: String(rep.already), m: String(rep.references), k: String(rep.missing) })
@@ -6850,10 +6919,9 @@ async function createRoomHere(seed: boolean): Promise<string | null> {
 
   let created: Record<string, unknown>;
   try {
-    const answer = await fetch(`${server}/v1/rooms`, {
+    const answer = await nodeAuthFetch(`${server}/v1/rooms`, {
       method: "POST",
-      headers: { "Content-Type": "application/json",
-                 Authorization: `Bearer ${hubToken}` },
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ room_id: roomId, title: name,
                              ...(birth ? { graphs: birth.graphs,
                                            active_graph_id: birth.active_graph_id } : {}) }),
@@ -7920,8 +7988,7 @@ function pickFromOutliner(id: string): void {
     contextStack = [];
     rebuildContext();
   }
-  select(id);
-  centerOn(id);
+  select(id);                     // «Zoom to selection» frames it
 }
 
 const outlinerCallbacks: NodeListCallbacks = {
@@ -8893,8 +8960,7 @@ function chainUi(st: DocumentStore): ChainUi {
     isUnit: isStratigraphicType,
     canOwnProperty: (nt) => !!nt && allowedEdgeTypes(nt, "property").includes("has_property"),
     jump: (id) => {
-      select(id);
-      centerOn(id);
+      select(id);                   // «Zoom to selection» frames it, after the rebuild
       buildScenes();
       draw();
     },
@@ -10923,9 +10989,8 @@ btnSync.addEventListener("click", () => {
         const others = ids.filter((x) => x !== id);
         selectMany(id ? [...others, id] : others);
       } else {
-        select(id || null);
+        select(id || null);         // «Zoom to selection» frames it
       }
-      if (id) centerOn(id);
       applyingRemoteSelect = false;
     },
     onOp: (op) => {
@@ -11064,7 +11129,22 @@ document.getElementById("btn-create-room")
 document.getElementById("btn-bring-into-room")
   ?.addEventListener("click", () => void bringIntoRoom());
 
-document.getElementById("btn-mode-hub")?.addEventListener("click", () => {
+// «Zoom to selection» · the toolbar's switch: on by default, remembered
+const zoomSelBtn = document.getElementById("btn-zoom-sel");
+function paintZoomSelection(): void {
+  zoomSelBtn?.setAttribute("aria-pressed", String(getSettings().interaction.zoomToSelection));
+  zoomSelBtn?.setAttribute("aria-label", t("view.zoomToSel"));
+}
+zoomSelBtn?.addEventListener("click", () => {
+  const s = getSettings();
+  const on = !s.interaction.zoomToSelection;
+  saveSettings({ ...s, interaction: { ...s.interaction, zoomToSelection: on } });
+  paintZoomSelection();
+  logInfo(`${t("view.zoomToSel")}: ${on ? "on" : "off"}`);
+});
+paintZoomSelection();
+
+document.getElementById("btn-mode-hub")?.addEventListener("click", async () => {
   const s = getSettings().sync;
   if (!s.hubUrl || !s.hubRoom) {
     toast(t("hub.needsConfig"));
@@ -11072,6 +11152,8 @@ document.getElementById("btn-mode-hub")?.addEventListener("click", () => {
     return;
   }
   if (sync.room === s.hubRoom && sync.connected) return;   // already there
+  // A4 · the room's socket is opened with the token: a fresh one, if it can be
+  await renewIfDueSoon();
   const token = hubToken ?? window.prompt(t("hub.tokenPrompt")) ?? "";
   hubToken = token || null;
   connectToHub(s.hubUrl, s.hubRoom, hubToken);
@@ -11090,6 +11172,96 @@ let hubRefreshToken: string | null = null;
 //: the node's sign-in configuration, kept from the handoff so a refresh has a
 //: token endpoint to go to without asking the node twice
 let hubAuthConfig: AuthConfig | null = null;
+//: A3 · the access token the node REFUSED and that could not be renewed: the
+//: access is «expired» while it is still the session's token, and stops being
+//: so the moment a sign-in puts another one there — no flag to forget to clear.
+let hubTokenRefused: string | null = null;
+
+/** When the session's token stops being good (`exp`, seconds), read from the
+ *  token itself — decoded, not verified: the node is the one that checks. */
+function tokenExpiry(token: string | null): number | null {
+  const part = token?.split(".")[1];
+  if (!part) return null;
+  try {
+    const json = atob(part.replace(/-/g, "+").replace(/_/g, "/") + "=".repeat(-part.length & 3));
+    const exp = (JSON.parse(json) as { exp?: unknown }).exp;
+    return typeof exp === "number" ? exp : null;
+  } catch { return null; }
+}
+
+/** A3 · has this session's access to the node run out, with no way to renew it? */
+function hubAccessExpired(): boolean {
+  if (!hubToken) return false;
+  if (hubTokenRefused === hubToken) return true;
+  const exp = tokenExpiry(hubToken);
+  return exp !== null && exp * 1000 <= Date.now() && !(hubRefreshToken && hubAuthConfig);
+}
+
+//: one renewal at a time: two calls that find the token expired together must
+//: not spend the same refresh token twice (the realm rotates it)
+let hubRenewing: Promise<boolean> | null = null;
+/** Ask the realm for a new access token with the refresh token. Silent. */
+function renewHubToken(): Promise<boolean> {
+  if (!hubRefreshToken || !hubAuthConfig) return Promise.resolve(false);
+  hubRenewing ??= (async () => {
+    try {
+      const renewed = await refreshSession(hubAuthConfig!, hubRefreshToken!);
+      if (!renewed.ok || !renewed.token) {
+        logWarn(`node: the access could not be renewed — ${renewed.error ?? "?"}`);
+        // a refresh token the realm refused is spent: asking again with it would
+        // only ask again. (Not when the realm could not be reached at all.)
+        if (!/^cannot reach/.test(renewed.error ?? "")) hubRefreshToken = null;
+        return false;
+      }
+      hubToken = renewed.token;
+      hubRefreshToken = renewed.refresh_token || hubRefreshToken;
+      logInfo("node: access renewed");
+      return true;
+    } finally { hubRenewing = null; }
+  })();
+  return hubRenewing;
+}
+
+/** A4 · renew BEFORE calling when the token ends within 60 s and it can be. */
+async function renewIfDueSoon(): Promise<void> {
+  const exp = tokenExpiry(hubToken);
+  if (exp === null || !hubRefreshToken || !hubAuthConfig) return;
+  if (exp * 1000 - Date.now() < 60_000) await renewHubToken();
+}
+
+/**
+ * A1 · THE ONE ROAD to the node, signed: every authenticated call goes through
+ * here, so the token renews in one place and not in each caller.
+ *
+ * The bearer is the session's `hubToken`, written at each send (so the retry
+ * carries the new one), in the header and never in the URL. A token about to
+ * end is renewed first (A4); a 401 is retried once after a renewal; a 401 that
+ * cannot be renewed marks the access expired (A3) and is handed back as it is
+ * — what a refusal MEANS stays the caller's to say.
+ */
+async function nodeAuthFetch(url: string, init: RequestInit = {}): Promise<Response> {
+  await renewIfDueSoon();
+  const send = (): Promise<Response> => {
+    const headers = new Headers(init.headers);
+    if (hubToken) headers.set("Authorization", `Bearer ${hubToken}`);
+    else headers.delete("Authorization");
+    return fetch(url, { ...init, headers });
+  };
+  const answer = await send();
+  if (answer.status !== 401 || !hubToken) return answer;
+  // …the one retry. Silent on purpose: somebody whose token turned over while
+  // they were reading should see nothing at all.
+  if (await renewHubToken()) return await send();
+  if (hubTokenRefused !== hubToken) {
+    hubTokenRefused = hubToken;
+    renderStatusLine();
+  }
+  return answer;
+}
+/** `nodeApi` over the one road */
+function nodeHttp(base: string): NodeApi {
+  return nodeApi(base, () => hubToken, nodeAuthFetch);
+}
 
 // ---------- MENU1 · Help menu (About / Updates / Ontology models) ----------
 const RELEASES_URL = "https://github.com/EmanuelDemetrescu/EMStudio/releases";
@@ -11554,6 +11726,9 @@ interface PendingNodeSignIn {
   /** IDENTITÀ · started from the identity panel: what the node confirms
    *  VERIFIES the identity (the node as witness) */
   intent?: "identity";
+  /** A2 · started from «Sign in again» in the connection panel: it opens again
+   *  on the way back, with the rooms asked anew */
+  then?: "rooms";
 }
 
 /**
@@ -11565,7 +11740,8 @@ interface PendingNodeSignIn {
  * only thing remembered across the round trip is WHICH NODE — a place, not a
  * permission, and the rule the whole handoff contract is built on.
  */
-async function signIntoNode(opts: { silent?: boolean; idpHint?: string; loginHint?: string; intent?: "identity" } = {}): Promise<boolean> {
+async function signIntoNode(opts: { silent?: boolean; idpHint?: string; loginHint?: string; intent?: "identity";
+                                    then?: "rooms" } = {}): Promise<boolean> {
   const server = servingNode();
   if (!server) {   // DEV30 U14 · no node configured: say it, and where to name one
     if (!opts.silent) { toast(t("idw.noNode")); openNodeSettings(); }
@@ -11587,7 +11763,7 @@ async function signIntoNode(opts: { silent?: boolean; idpHint?: string; loginHin
   if (isTauri() && opts.silent) return false;
   const pending: PendingNodeSignIn = {
     server, returnTo: window.location.href, silent: opts.silent || undefined,
-    intent: opts.intent,
+    intent: opts.intent, then: opts.then,
   };
   try {
     sessionStorage.setItem(SIGNIN_KEY, JSON.stringify(pending));
@@ -11685,6 +11861,9 @@ async function completeNodeSignIn(search?: string): Promise<boolean> {
   forgetSilentSignInAttempts();
   await askNodeWhoIAm(remembered.server);
   if (remembered.intent === "identity") await witnessIdentityFromNode();
+  renderStatusLine();
+  // A2 · back where «Sign in again» was pressed: the panel, the rooms asked anew
+  if (remembered.then === "rooms") toggleConnectionPanel();
   return true;
 }
 
@@ -11746,9 +11925,7 @@ function restoreAfterSignIn(returnTo?: string): void {
 async function askNodeWhoIAm(server: string): Promise<void> {
   const base = server.replace(/\/+$/, "");
   try {
-    const answer = await fetch(`${base}/v1/whoami`, {
-      headers: hubToken ? { Authorization: `Bearer ${hubToken}` } : {},
-    });
+    const answer = await nodeAuthFetch(`${base}/v1/whoami`);
     if (!answer.ok) {
       nodeIdentity = null;
       nodeIdentityLost = `${answer.status}`;
@@ -12594,6 +12771,8 @@ settingsModal.addEventListener("click", (e) => {
       strictDocumentNames: setStrictDocNames.checked,
       lotGapMinutes: Number((document.getElementById("set-lot-gap") as HTMLInputElement)?.value) || 30,
       lotMinPhotos: Number((document.getElementById("set-lot-min") as HTMLInputElement)?.value) || 5,
+      // the toolbar's switch, not edited here: carried through
+      zoomToSelection: getSettings().interaction.zoomToSelection,
     },
     // provider + model only — the key is never part of what gets persisted
     ai: {
@@ -14977,9 +15156,8 @@ function revealFromWarning(nodeId: string): void {
     toast("that node is no longer in the document");
     return;
   }
-  select(nodeId);
-  if (scene()?.byId.has(nodeId)) centerOn(nodeId);
-  else toast("selected — not visible in this view (folded, or filtered out)");
+  select(nodeId);                 // «Zoom to selection» frames it
+  if (!scene()?.byId.has(nodeId)) toast("selected — not visible in this view (folded, or filtered out)");
 }
 
 /** Redraw the Log tab — only when it is the visible one; there is no point
@@ -15943,7 +16121,7 @@ function renderCoverageInto(host: HTMLElement, narrativeId: string): void {
     b.dataset.go = id;
     b.textContent = name(id);
     b.title = t("nidx.chipTitle");
-    b.addEventListener("click", () => { select(id); centerOn(id); });
+    b.addEventListener("click", () => { select(id); });
     return b;
   };
   const eyebrow = document.createElement("div");
@@ -17056,7 +17234,7 @@ function exportWithCheck(format: string): void {
       const a = document.createElement("button");
       a.className = "link";
       a.textContent = r.name || r.node;
-      a.addEventListener("click", () => { close(); select(r.node); centerOn(r.node); refreshInspector(); draw(); });
+      a.addEventListener("click", () => { close(); select(r.node); refreshInspector(); draw(); });
       li.appendChild(a);
     });
     ul2.appendChild(li);
@@ -18002,14 +18180,12 @@ function revealFromTable(nodeId: string): void {
   select(nodeId);                              // selection is a fact about the document
   const graphWin = windowsOf().find((w) => w.type === "graph");
   if (!graphWin) return;                       // no canvas open: the selection is enough
+  // «Zoom to selection» frames it (B4: the one rule); the focus stays on the
+  // table — you were reading a list, and the pick was a question about one row
   const previous = activeWin().id;
   setActiveWin(graphWin.id);
-  if (scene()?.byId.has(nodeId)) centerOn(nodeId);
-  else toast(t("toast.selectedNotVisible"));
-  // the focus goes back to the table: you were reading a list, and the pick was
-  // a question about one row, not a decision to leave
+  if (!scene()?.byId.has(nodeId)) toast(t("toast.selectedNotVisible"));
   setActiveWin(previous);
-  draw();
   draw();
 }
 
@@ -19182,7 +19358,7 @@ function renderChronologyInto(body: HTMLElement, _win: Win): void {
   const st = store;
   const name = (id: string) => String(st.node(id)?.name ?? id);
   renderChronology(body, data, {
-    onSelect: (id) => { select(id); centerOn(id); },
+    onSelect: (id) => { select(id); },    // «Zoom to selection» frames it
     onSetBound: (id, which, v) => {
       st.setEpochBound(id, which, v);
       toastUndo(t(which === "start" ? "chr.didStart" : "chr.didEnd", { a: name(id), y: v }), st);
@@ -21016,10 +21192,9 @@ let neighbourhoodSeq = 0;
  *  and putting a token in a query string right here would contradict that inside
  *  the same codebase. A check reads this file to keep it so.
  *
- *  AND IT REFRESHES, once. `completeSignIn` has always returned a refresh token
- *  and `joinFromHandoff` used to drop it on the floor; it is kept beside the
- *  access token now (same place, one more field) and a 401 is retried after
- *  asking the realm for a new one. An expired token is not a reason to make
+ *  AND IT REFRESHES, once — through `nodeAuthFetch`, the one road every call to
+ *  the node takes now (MICRO accesso, 5 Oct 2026: the rooms list did not, and
+ *  said «the token has expired»). An expired token is not a reason to make
  *  somebody sign in again — it is the one failure the protocol has an answer for.
  *
  *  Returns the Response whatever it says, and `null` when no node is configured.
@@ -21029,19 +21204,7 @@ let neighbourhoodSeq = 0;
 async function nodeFetch(path: string): Promise<Response | null> {
   const base = (getSettings().sync.hubUrl || "").replace(/\/+$/, "");
   if (!base) return null;
-  const url = `${base}/v1${path}`;
-  const send = (): Promise<Response> => fetch(url, {
-    headers: hubToken ? { Authorization: `Bearer ${hubToken}` } : {},
-  });
-  let answer = await send();
-  if (answer.status !== 401 || !hubRefreshToken || !hubAuthConfig) return answer;
-  // …the one retry. Silent on purpose: somebody whose token turned over while
-  // they were reading should see nothing at all.
-  const renewed = await refreshSession(hubAuthConfig, hubRefreshToken);
-  if (!renewed.ok || !renewed.token) return answer;
-  hubToken = renewed.token;
-  hubRefreshToken = renewed.refresh_token || hubRefreshToken;
-  return await send();
+  return await nodeAuthFetch(`${base}/v1${path}`);
 }
 
 /**
@@ -24240,11 +24403,7 @@ async function publishQueue(): Promise<void> {
         : await bridgeBytes(item.path!);
       const url = `${base}/v1/rooms/${encodeURIComponent(room)}/asset`
         + `?media_type=${encodeURIComponent(item.mediaType)}`;
-      const answer = await fetch(url, {
-        method: "PUT",
-        headers: hubToken ? { Authorization: `Bearer ${hubToken}` } : {},
-        body: bytes,
-      });
+      const answer = await nodeAuthFetch(url, { method: "PUT", body: bytes });
       if (!answer.ok) {
         item.status = "failed";
         item.note = `${answer.status} ${await answer.text()}`.slice(0, 120);
@@ -24360,12 +24519,10 @@ async function putIntoStore(bytes: BodyInit, mediaType: string):
   const base = getSettings().sync.hubUrl?.replace(/\/+$/, "") ?? "";
   const room = sync.room;
   if (!base || !room) return null;
-  const answer = await fetch(
+  const answer = await nodeAuthFetch(
     `${base}/v1/rooms/${encodeURIComponent(room)}/asset`
     + `?media_type=${encodeURIComponent(mediaType)}`,
-    { method: "PUT",
-      headers: hubToken ? { Authorization: `Bearer ${hubToken}` } : {},
-      body: bytes });
+    { method: "PUT", body: bytes });
   if (!answer.ok) return null;
   const info = await answer.json() as { ref: string; created?: boolean };
   return { ref: info.ref, created: info.created !== false };
@@ -24561,12 +24718,9 @@ async function registerAppend(act: string, body: Record<string, unknown>):
   const base = registerBase();
   if (!base) return { ok: false, detail: "standalone" };
   try {
-    const answer = await fetch(`${base}/v1/corpus/append`, {
+    const answer = await nodeAuthFetch(`${base}/v1/corpus/append`, {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        ...(hubToken ? { Authorization: `Bearer ${hubToken}` } : {}),
-      },
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ act, ...body }),
     });
     if (!answer.ok) {
@@ -24685,9 +24839,7 @@ async function pullResidentCorpus(): Promise<{ nodes: number; edges: number } | 
   if (!digests.length) return { nodes: 0, edges: 0 };
   try {
     const url = `${base}/v1/corpus?sha256=${encodeURIComponent(digests.join(","))}`;
-    const answer = await fetch(url, {
-      headers: hubToken ? { Authorization: `Bearer ${hubToken}` } : {},
-    });
+    const answer = await nodeAuthFetch(url);
     if (!answer.ok) {
       ingestLog(t("assets.registerFailed", {
         detail: `${answer.status} ${(await answer.text()).slice(0, 140)}`,
@@ -27664,7 +27816,7 @@ setupSearch(
       contextStack = [];
       rebuildContext();
     }
-    revealFromTable(id);   // selects, and centres it in a graph window if one is open
+    revealFromTable(id);   // selects; «Zoom to selection» frames it in a graph window
   },
   t("strip.noResults"),
   (nt) => glyphMarkupFor(nt) ?? iconUrlFor(nt),
@@ -27745,6 +27897,15 @@ function wireGraphCanvas(canvas: HTMLCanvasElement, winId: string): void {
   function worldPos(e: MouseEvent): { x: number; y: number } {
     const rect = canvas.getBoundingClientRect();
     return viewport().toWorld(e.clientX - rect.left, e.clientY - rect.top);
+  }
+  // «Zoom to selection» · what this canvas's own events select is a pick ON the
+  // graph: the flag goes up before the handlers below (capture runs first at the
+  // target) and down once the event is over
+  for (const type of ["pointerdown", "pointerup", "click", "dblclick", "contextmenu"] as const) {
+    canvas.addEventListener(type, () => {
+      pickOnCanvas = true;
+      setTimeout(() => { pickOnCanvas = false; }, 0);
+    }, { capture: true });
   }
   // SHIFT-A · the tablet's right-click: a press held 500 ms on empty space opens
   // «Aggiungi» there. A finger that moves is a pan, a press on a node is the

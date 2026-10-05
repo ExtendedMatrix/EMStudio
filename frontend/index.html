@@ -248,6 +248,21 @@
         <input id="search" type="search" placeholder="Search the graph…" data-i18n-placeholder="strip.search" autocomplete="off" aria-label="Search the graph" />
         <div id="search-results" class="hidden" role="listbox"></div>
       </div>
+      <!-- «Zoom to selection» (E.D., 5 Oct 2026): on, a node selected in another
+           window is framed in the graph window; a click on the graph itself
+           never moves the view. Persisted (interaction.zoomToSelection). Here,
+           beside the search, and not in the master bar: the bar has no width
+           to spare at 1024 px (S7.bar), and this strip is the selection's. -->
+      <button id="btn-zoom-sel" class="ns-btn" type="button" aria-pressed="true"
+              data-i18n-title="view.zoomToSelTitle"
+              title="Zoom to selection" aria-label="Zoom to selection">
+        <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" fill="none"
+             stroke="currentColor" stroke-width="1.4" stroke-linecap="round">
+          <path d="M1.5 5V2.5a1 1 0 0 1 1-1H5M11 1.5h2.5a1 1 0 0 1 1 1V5M14.5 11v2.5a1 1 0 0 1-1 1H11M5 14.5H2.5a1 1 0 0 1-1-1V11" />
+          <circle cx="8" cy="8" r="2.6" />
+          <path d="M8 3.6v1.6M8 10.8v1.6M3.6 8h1.6M10.8 8h1.6" />
+        </svg>
+      </button>
       <span class="ns-grow"></span>
       <div class="ns-actions">
         <button id="ns-save" class="ns-btn" type="button" data-i18n="strip.save">em.json</button>

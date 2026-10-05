@@ -9218,3 +9218,17 @@ body.sync-active #statusbar .sb-who .footer-chip.id-signature {
 .nc-acts { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin: 4px 0 8px; }
 .nc-custody { flex-basis: 100%; font-size: 11px; color: var(--warn); }
 .nc-real { margin-top: 8px; }
+
+/* «Zoom to selection» (5 Oct 2026) · the switch beside the search: lit when on */
+#name-strip #btn-zoom-sel {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 7px;
+  color: var(--text-muted, var(--text));
+}
+#name-strip #btn-zoom-sel[aria-pressed="true"] {
+  background: var(--accent-soft, var(--bg-hover));
+  border-color: var(--accent);
+  color: var(--accent);
+}

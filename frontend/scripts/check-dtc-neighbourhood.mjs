@@ -112,10 +112,25 @@ const eq = (got, want, what) => {
   const main = await readFile(`${SRC}main.ts`, "utf8");
   const code = main.replace(/\/\*[\s\S]*?\*\/|\/\/[^\n]*/g, "");
 
-  const road = code.slice(code.indexOf("async function nodeFetch("));
-  const body = road.slice(0, road.indexOf("\n}\n"));
-  ok(body.includes("Authorization: `Bearer ${hubToken}`"),
+  const fnBody = (head) => {
+    const at = code.indexOf(head);
+    ok(at >= 0, `${head} is in main.ts`);
+    const from = code.slice(at);
+    return from.slice(0, from.indexOf("\n}\n"));
+  };
+  // MICRO accesso (5 Oct 2026) · `nodeFetch` takes THE ONE ROAD, `nodeAuthFetch`,
+  // which every authenticated call to the node takes: the header and the renewal
+  // are read there
+  ok(fnBody("async function nodeFetch(").includes("nodeAuthFetch("),
+    "nodeFetch goes by the one road to the node");
+  const body = fnBody("async function nodeAuthFetch(");
+  ok(/Authorization["']?\s*[,:]\s*`Bearer \$\{hubToken\}`/.test(body),
     "the node is called with the token in the Authorization header");
+  // …and NO OTHER road: a bearer of the session written anywhere else is a call
+  // that does not renew (the rooms list did not, and said «the token has expired»)
+  const outside = code.replace(body, "");
+  ok(!/Bearer \$\{hubToken\}/.test(outside),
+    "the session's bearer is written only by nodeAuthFetch");
   ok(!/sha256=\$\{[^}]*[Tt]oken/.test(body) && !/[?&](access_)?token=/.test(body),
     "…and never in the URL");
 
@@ -133,7 +148,7 @@ const eq = (got, want, what) => {
   }
 
   // …and the refresh is tried before anybody is asked to sign in again
-  ok(body.includes("refreshSession("),
+  ok(body.includes("renewHubToken(") && fnBody("function renewHubToken(").includes("refreshSession("),
     "a 401 asks the realm for a new token before giving up: an expired token is " +
       "the one failure the protocol has an answer for");
   ok(code.includes('status: "unauthorised"'),

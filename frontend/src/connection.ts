@@ -22,7 +22,14 @@ import { t } from "./i18n";
 import { stateBadge, stateIds } from "./state-symbols";
 
 export type Reach = "unknown" | "reachable" | "unreachable";
-export type Access = "orcid_node" | "node_password" | "declared" | "none";
+export type Access = "orcid_node" | "node_password" | "declared" | "none" | "expired";
+
+/** A3 · the access as the panel says it: «entered with …», or, when the node's
+ *  token has run out and cannot be renewed, «expired — sign in again». */
+export function accessLine(access: Access): string {
+  return access === "expired" ? t("conn.accessExpired")
+    : t("conn.enteredWith", { how: t(`conn.access.${access}`) });
+}
 export type SessionMode = "standalone" | "sidecar" | "hub";
 
 export interface ConnectionState {
@@ -146,7 +153,7 @@ export function whereDetails(s: ConnectionState): string[] {
   if (s.misaligned) out.push(s.misaligned);
   if (s.mode !== "sidecar" && s.node) {
     out.push(`${shortNode(s.node)} · ${t(`conn.reach.${s.reach}`)}`);
-    if (s.mode === "hub") out.push(t("conn.enteredWith", { how: t(`conn.access.${s.access}`) }));
+    if (s.mode === "hub") out.push(accessLine(s.access));
   }
   return out;
 }
@@ -197,18 +204,27 @@ export interface NodeApi {
   door(id: string): Promise<{ web?: string | null; scheme?: string | null }>;
 }
 
-/** A `NodeApi` over `fetch`, with the session's bearer when there is one. */
-export function nodeApi(base: string, token: () => string | null): NodeApi {
+/** A refusal of the node, with its status: a 401 is «your access has expired»,
+ *  which has a gesture (sign in again), and every other one is just said. */
+export class NodeError extends Error {
+  constructor(message: string, readonly status: number) { super(message); }
+}
+
+/** A `NodeApi` over `fetch`, with the session's bearer when there is one.
+ *  `send` is the transport: the app hands in its own, the one that renews the
+ *  token (MICRO accesso, 5 Oct 2026), so every call here renews the same way. */
+export function nodeApi(base: string, token: () => string | null,
+                        send: (url: string, init: RequestInit) => Promise<Response> = fetch): NodeApi {
   const root = base.replace(/\/+$/, "");
   const call = async <T>(method: string, path: string, body?: unknown): Promise<T> => {
     const h: Record<string, string> = {};
     const tok = token();
     if (tok) h.Authorization = `Bearer ${tok}`;
     if (body !== undefined) h["Content-Type"] = "application/json";
-    const r = await fetch(`${root}/v1${path}`, { method, headers: h, cache: "no-store",
+    const r = await send(`${root}/v1${path}`, { method, headers: h, cache: "no-store",
       ...(body !== undefined ? { body: JSON.stringify(body) } : {}) });
     const j = await r.json().catch(() => null) as (T & { detail?: string }) | null;
-    if (!r.ok) throw new Error(j?.detail ? String(j.detail) : `HTTP ${r.status}`);
+    if (!r.ok) throw new NodeError(j?.detail ? String(j.detail) : `HTTP ${r.status}`, r.status);
     return j as T;
   };
   const room = (id: string) => `/rooms/${encodeURIComponent(id)}`;
@@ -259,6 +275,9 @@ export interface ConnectionGestures {
   leaveRoom(): void;
   /** R1 · the node's rooms for this caller (`GET /v1/rooms`) */
   listRooms?(): Promise<RoomInfo[]>;
+  /** A2 · the node's sign-in, straight away, when the access has expired; the
+   *  rooms are asked again on the way back */
+  signInAgain?(): void;
   /** R1 · enter one of them */
   joinRoom?(roomId: string): void;
   /** R1 · «+ New room» (empty) */
@@ -425,7 +444,7 @@ export function renderConnectionPanel(host: HTMLElement, s: ConnectionState, g: 
     fact(t("conn.k.node"), shortNode(s.node));
     fact(t("conn.k.reach"), t(`conn.reach.${s.reach}`), `conn-reach-${s.reach}`);
     // the access is a DETAIL OF THE LINK TO THE NODE, not a second identity
-    fact(t("conn.k.access"), t("conn.enteredWith", { how: t(`conn.access.${s.access}`) }));
+    fact(t("conn.k.access"), accessLine(s.access), s.access === "expired" ? "conn-access-expired" : "");
     node.appendChild(dl);
   }
   const nodeActs = el("div", "conn-acts");
@@ -469,6 +488,16 @@ export function renderConnectionPanel(host: HTMLElement, s: ConnectionState, g: 
       (list) => renderRoomList(body, list, s.room, (id) => g.joinRoom?.(id)),
       (error) => {
         body.textContent = "";
+        // A2 · an expired access is not a fault to read: it has a gesture
+        if (error instanceof NodeError && error.status === 401 && g.signInAgain) {
+          const line = el("p", "conn-line conn-err conn-expired", t("rooms.accessExpired"));
+          const again = btn(t("rooms.signInAgain"));
+          again.dataset.act = "sign-in-again";
+          again.addEventListener("click", () => g.signInAgain!());
+          line.append(" ", again);
+          body.appendChild(line);
+          return;
+        }
         body.appendChild(el("p", "conn-line conn-err", t("rooms.cannotList", { why: (error as Error).message })));
       });
   }

@@ -206,7 +206,9 @@ console.log("\n6 · THE RING IS BROKEN — the link survives the login");
      "…and the marker is in sessionStorage, because it has to survive the very "
      + "redirect it guards against — a flag in memory would loop for ever");
   // …and the sign-in has to CHANGE something, or it was a sign-in for nothing
-  ok(/const bearer = link\.token \|\| hubToken/.test(main),
+  // (MICRO accesso, 5 Oct 2026: the session's token goes by `nodeAuthFetch`, the
+  // one road to the node, which writes the bearer and renews it)
+  ok(/link\.token\s*\?[\s\S]{0,160}:\s*await nodeAuthFetch\(link\.url\)/.test(main),
      "the study fetch sends the SESSION's token when the link carries none. "
      + "Without it the silent attempt worked, the chip firmed up to «confirmed» "
      + "and the study still said «is not published» — measured, and it made "
