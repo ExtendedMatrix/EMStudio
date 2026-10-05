@@ -382,6 +382,7 @@ import {
   thumbnailUrl as iiifThumbnailUrl,
   isImageResource,
 } from "./iiif";
+import { altLabelsOf } from "./altlabels";
 import {
   ADORNMENT_EDGE_TYPES,
   CIRCLES,
@@ -2701,6 +2702,7 @@ function renderInspectorInto(host: HTMLElement): void {
   );
   if (selectedId) {
     renderUnitImages(host, owning, selectedId);          // E5 · its images
+    renderAltLabels(host, owning, selectedId);           // A1 · its other labels
     renderChainSection(host, chainUi(owning), selectedId); // CATENA
     const chip = aiChipFor(selectedId);
     if (chip) host.querySelector(".insp-head .insp-chip")?.after(chip);
@@ -2710,6 +2712,51 @@ function renderInspectorInto(host: HTMLElement): void {
   renderInspectorIssues(host);
   renderNodeHistory(host);
   citeSectionFor(host); // COLLEGARE · «Cita in «capitolo»», with the story open
+}
+
+/** A1 · «Also known as» in the Inspector: the alternative labels of the node
+ *  (quale `alternative_label`, one PropertyNode each), with the numbering they
+ *  belong to and the documents that use them — a document is a click away. The
+ *  node's own label stays the one above. Not drawn for a node with none. */
+function renderAltLabels(host: HTMLElement, st: DocumentStore, nodeId: string): void {
+  const labels = altLabelsOf(st.doc.graph as never, nodeId);
+  if (!labels.length) return;
+  const sect = document.createElement("div");
+  sect.className = "insp-alt-labels";
+  const h = document.createElement("h3");
+  h.className = "insp-sect";
+  h.textContent = t("insp.altLabels", { n: String(labels.length) });
+  sect.appendChild(h);
+  for (const l of labels) {
+    const row = document.createElement("div");
+    row.className = "insp-alt-label";
+    row.style.cssText = "margin:2px 0 4px";
+    const name = document.createElement("strong");
+    name.textContent = l.label;
+    row.appendChild(name);
+    if (l.scheme) {
+      const sch = document.createElement("span");
+      sch.className = "muted";
+      sch.textContent = ` · ${l.scheme}`;
+      row.appendChild(sch);
+    }
+    const src = document.createElement("div");
+    src.className = "muted";
+    src.style.cssText = "font-size:11px";
+    if (!l.sources.length) src.textContent = t("insp.altLabelNoSource");
+    l.sources.forEach((d, i) => {
+      if (i) src.append(", ");
+      const a = document.createElement("a");
+      a.href = "#";
+      a.textContent = d.name;
+      a.addEventListener("click", (ev) => { ev.preventDefault(); select(d.id); centerOn(d.id); });
+      src.appendChild(a);
+    });
+    row.appendChild(src);
+    sect.appendChild(row);
+  }
+  const head = host.querySelector(".insp-head");
+  if (head?.nextSibling) host.insertBefore(sect, head.nextSibling); else host.appendChild(sect);
 }
 
 /** E5 · «Images of the unit» in the Inspector, with their thumbnails — the

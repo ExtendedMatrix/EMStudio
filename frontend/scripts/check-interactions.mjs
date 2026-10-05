@@ -205,6 +205,26 @@ test("E5.thumb", "ispettore: le immagini dell'unità con la miniatura, il clic a
                  && !errors.length, detail: { seen, opened, none, errors } };
 });
 
+// A1 · «Also known as» in the Inspector: the alternative labels of a unit,
+// their numbering and their documents (s3Dgraphy's golden)
+test("A1.alt", "ispettore: «Detta anche» con le etichette alternative, lo schema e i documenti; il clic su un documento lo apre", async () => {
+  const { p, ctx, errors } = await open({ doc: "alternative_labels", locale: "en" });
+  await pick(p, "us10");
+  const seen = await p.evaluate(() => {
+    const sect = document.querySelector(".insp-alt-labels");
+    return { title: sect?.querySelector("h3")?.textContent ?? "",
+             rows: [...(sect?.querySelectorAll(".insp-alt-label") ?? [])].map((r) => r.innerText.replace(/\s+/g, " ")) };
+  });
+  await p.locator(".insp-alt-labels a", { hasText: "D.TESI" }).first().click();
+  await p.waitForTimeout(350);
+  const opened = await p.evaluate(() => window.__EM_DRAG__.selected());
+  await ctx.close();
+  const text = seen.rows.join(" | ");
+  return { pass: /Also known as · 3/.test(seen.title) && /US 1004 · scavo 2013 D\.2013/.test(text)
+                 && /A\.12 · tesi Demetrescu/.test(text) && /Muro del podio .*D\.1931.*D\.2013/.test(text)
+                 && opened[0] === "dtesi" && !errors.length, detail: { seen, opened, errors } };
+});
+
 // A2 · Inspector: name → Tab → the focus is in the description
 test("A2", "ispettore: nome → Tab → il focus è nella descrizione", async () => {
   const { p, ctx } = await open({ doc: "catena" });

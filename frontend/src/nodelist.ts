@@ -1,6 +1,7 @@
 // Node list view (outliner): the node groups on top — with inline
 // fold/unfold and explode (isolate) controls — then the filterable table of
 // every node (name / type / description); click selects and centres.
+import { altLabelIndex } from "./altlabels";
 import { nodeStyle } from "./palette";
 import { isGroupType, isStratigraphicType } from "./rules";
 import type { EmDocument, EmNode } from "./types";
@@ -198,8 +199,11 @@ export function buildNodeList(
       String(s ?? "")
         .toLowerCase()
         .includes(q);
+    // A1 · a unit is also found by its alternative labels («US 1004», «A.12»)
+    const alts = q ? altLabelIndex(doc as never) : new Map<string, string[]>();
     const matches = (n: (typeof doc.graph.nodes)[number]): boolean =>
-      !q || match(n.name) || match(n.id) || match(n.node_type) || match(n.description);
+      !q || match(n.name) || match(n.id) || match(n.node_type) || match(n.description)
+      || (alts.get(n.id) ?? []).some(match);
 
     // ---- STUDIO · the units BY EPOCH (newest on top), containers indented ----
     //

@@ -1,6 +1,7 @@
 import type { EmDocument, EmNode } from "./types";
 
 import { liveNodes } from "./crdt";
+import { isAltLabel, altLabelText } from "./altlabels";
 
 /**
  * STRUTTURA · FULL-TEXT search over the graph — the name, the description, the
@@ -63,12 +64,19 @@ export function searchGraph(doc: EmDocument | null, query: string, limit = 14,
                   ep ? str(ep.name) : ""];
     const text = bits.join(" ").toLowerCase();
     if (!toks.every((t) => text.includes(t))) continue;
-    const lname = name.toLowerCase(), q = toks.join(" ");
-    const rank = lname === q ? 0 : lname.startsWith(q) ? 1
-      : toks.every((t) => lname.includes(t)) ? 2 : 3;
+    const q = toks.join(" ");
+    // A1 · an alternative label names the unit as much as its own label does:
+    // it ranks like the name (else «US 1004» found first the extractor that
+    // cites it, and the unit after)
+    const alts = ps.filter((p) => isAltLabel(p)).map((p) => altLabelText(p));
+    const rankOf = (label: string): number => {
+      const l = label.toLowerCase();
+      return l === q ? 0 : l.startsWith(q) ? 1 : toks.every((t) => l.includes(t)) ? 2 : 3;
+    };
+    const rank = Math.min(rankOf(name), ...alts.map(rankOf));
     const excerpt = [valueOf(n) !== str(n.description) ? valueOf(n) : "",
                      str(n.description),
-                     ...ps.map((p) => `${str(p.name)} ${valueOf(p)}`.trim())
+                     ...ps.map((p) => isAltLabel(p) ? `«${valueOf(p)}»` : `${str(p.name)} ${valueOf(p)}`.trim())
                        .filter((x) => toks.some((t) => x.toLowerCase().includes(t))),
                      ep ? str(ep.name) : ""]
       .filter(Boolean).join(" · ").slice(0, 110);
