@@ -16,7 +16,8 @@ import {
 } from "./container";
 import type { Conflict, ProjectVersion } from "./container";
 import {
-  nameIsUsable, roomIdFromName, seedOpsForContainer, whatBlocksTheGesture,
+  nameIsUsable, roomIdFromName, seedOpsForContainer, seedOpsForStudy, studySections,
+  whatBlocksTheGesture,
 } from "./rooms";
 import {
   addToShelf,
@@ -4289,7 +4290,7 @@ function wireStore(s: DocumentStore): void {
       opRefused(t("ops.notSent", { why: (e as Error).message }));
       return;
     }
-    if (sync.room) hubSendLocal(wireOps);
+    if (sync.room) hubSendLocal(wireOps, String((s.doc.graph as Record<string, unknown>).graph_id ?? ""));
     else for (const w of wireOps) sync.sendOp(w);
   });
 }
@@ -5372,6 +5373,52 @@ let hubResyncPending: HubOp[] = [];
 /** The last few awareness notes ("B updated dating after you"). */
 const hubNotes: AwarenessNote[] = [];
 
+/** G1 · the graphs the ROOM's study holds — from its snapshot, or from the
+ *  sections it was born with. An operation names its graph only when the room
+ *  has it: a room born before 5 Oct 2026 holds one graph under the room's id,
+ *  and naming the local id there would be refused (B1) where today's ops land. */
+let hubRoomGraphs = new Set<string>();
+
+function noteRoomGraphs(doc: unknown): void {
+  const graphs = ((doc as { graphs?: Record<string, Record<string, unknown>> } | null)
+    ?.graphs) ?? {};
+  hubRoomGraphs = new Set(Object.entries(graphs)
+    .filter(([, sec]) => sec && !isCorpusSection(sec))
+    .map(([key, sec]) => String(sec.graph_id ?? key)));
+}
+
+/**
+ * G1 · ONE place where a room operation leaves, and the graph it is for goes
+ * into the ENVELOPE (I-2: the room holds the study, the op names the graph).
+ * In this client the op carries it as `graph_id` while it waits to be
+ * confirmed or re-sent; on the wire it is the envelope's word, never the body's.
+ */
+function sendHubOp(op: HubOp): void {
+  const { graph_id: graphId, ...body } = op as HubOp & { graph_id?: string };
+  const named = graphId && hubRoomGraphs.has(String(graphId)) ? String(graphId) : undefined;
+  sync.sendCommand(wireEnvelope("op", body as unknown as Record<string, unknown>,
+                                { graph_id: named }));
+}
+
+/**
+ * G1 · the store an operation from the room is for: the graph the envelope
+ * names, among the graphs of the room's file — not the active one. No name (a
+ * peer that does not name graphs, D-A) is the active graph; so is a name this
+ * client does not have when the room holds one graph only (a room born before
+ * the graphs were named). Otherwise null: the caller says so.
+ */
+function hubStoreFor(graphId: string | undefined): DocumentStore | null {
+  if (!graphId || !store) return store;
+  const own = (st: DocumentStore): string =>
+    String((st.doc.graph as Record<string, unknown>).graph_id ?? "");
+  if (own(store) === graphId) return store;
+  const roomFile = emtree.files.find((f) => f.room?.id === sync.room);
+  const slots = roomFile ? emtree.slotsOf(roomFile.id) : emtree.slots;
+  const hit = slots.find((sl) => own(sl.store) === graphId);
+  if (hit) return hit.store;
+  return hubRoomGraphs.size <= 1 ? store : null;
+}
+
 function hubKey(op: HubOp): string {
   return `${op.op}|${String(op.node_id ?? op.id ?? "")}|${String(op.field ?? "")}|${String(op.ts ?? "")}`;
 }
@@ -5386,7 +5433,7 @@ function noteHub(note: AwarenessNote): void {
 /** Send one local change to the room, as the per-field operations the relay
  *  understands. The fields (and their clocks) come from the store, which
  *  stamped them — nothing is re-derived here. */
-function hubSendLocal(ops: HubOp[]): void {
+function hubSendLocal(ops: HubOp[], graphId = ""): void {
   // C2 · THE THIRD OUTBOUND POINT, and finding it changed what C2 found.
   //
   // A room's operations do not go through `sendOp`: they are translated into
@@ -5409,9 +5456,12 @@ function hubSendLocal(ops: HubOp[]): void {
   // OP, decided here once: the node's, else the study's, else `und`.
   for (const hubOp of ops) {
     if (hubOp.op === "add_node") withOpLanguage(hubOp, store?.doc.graph ?? null);
+    // G1 · the graph of the store that changed, kept with the op so a re-send
+    // after a re-sync goes to the same graph
+    if (graphId) (hubOp as HubOp & { graph_id?: string }).graph_id = graphId;
     hubUnconfirmed.set(hubKey(hubOp), hubOp);
     noteSyncState();
-    sync.sendCommand(wireEnvelope("op", hubOp as unknown as Record<string, unknown>));
+    sendHubOp(hubOp);
   }
 }
 
@@ -5429,10 +5479,10 @@ function hubSendLocal(ops: HubOp[]): void {
  * says "I never had that" — which the merge is designed to overrule with the
  * other side's value. That is the resurrection this function exists to prevent.
  */
-function hubWriteFieldLocally(op: HubOp): boolean {
-  if (!store || op.op !== "update_field") return false;
+function hubWriteFieldLocally(op: HubOp, target: DocumentStore | null = store): boolean {
+  if (!target || op.op !== "update_field") return false;
   const nodeId = String(op.node_id ?? op.id ?? "");
-  const node = store.node(nodeId);
+  const node = target.node(nodeId);
   const field = String(op.field ?? "");
   if (!node || !field) return false;
   // through the store's remote path: `applyRemoteOp` does not re-stamp, so the
@@ -5440,7 +5490,7 @@ function hubWriteFieldLocally(op: HubOp): boolean {
   const payload = JSON.parse(JSON.stringify(node)) as Record<string, unknown>;
   if (op.remove === true) crdtClearField(payload, field, { ts: op.ts, by: op.author });
   else crdtWriteField(payload, field, op.value, { ts: op.ts, by: op.author });
-  store.applyRemoteOp({
+  target.applyRemoteOp({
     op: "update_node", node_id: nodeId,
     patch: { name: payload.name, description: payload.description,
              data: payload.data } as Partial<EmNode>,
@@ -5511,14 +5561,20 @@ function applyWireOp(message: Record<string, unknown>): void {
  * algebra the relay and the library run — including the part that matters most:
  * a removal writes a TOMBSTONE, not a missing key.
  */
-function hubApplyRemote(message: Record<string, unknown>): void {
+function hubApplyRemote(message: Record<string, unknown>, graphId?: string): void {
   if (!store) return;
+  // G1 · the graph the envelope names, not the one in front
+  const target = hubStoreFor(graphId);
+  if (!target) {
+    opRefused(t("room.graphNotHere", { graph: String(graphId) }));
+    return;
+  }
   const op = message as unknown as HubOp;
   const kind = String(op.op ?? "");
 
   if (kind === "update_field") {
-    const node = store.node(String(op.node_id ?? op.id ?? ""));
-    if (!hubWriteFieldLocally(op)) return;
+    const node = target.node(String(op.node_id ?? op.id ?? ""));
+    if (!hubWriteFieldLocally(op, target)) return;
     const who = hubPresence.members.find((m) => m.author === op.author)?.display
       ?? (op.author as string | null);
     noteHub(noteForRemoteOp(op, who, node?.name ? String(node.name) : null));
@@ -5526,8 +5582,8 @@ function hubApplyRemote(message: Record<string, unknown>): void {
              || kind === "add_edge" || kind === "remove_edge") {
     // the name BEFORE the operation: after a `remove_node` there is a tombstone
     // and the note would have nothing to point at
-    const subject = structuralSubject(op);
-    const result = store.applyCrdtOp(message);
+    const subject = structuralSubject(op, target);
+    const result = target.applyCrdtOp(message);
     if (!result.applied) {
       // not news: the room already knew, or this is older than what is here.
       // Said in the log rather than silently dropped, because "nothing
@@ -5542,17 +5598,18 @@ function hubApplyRemote(message: Record<string, unknown>): void {
 
   hubBase = String(op.ts ?? hubBase ?? "");
   sync.setSince(hubBase);
+  refreshEMTree();          // the node/edge counts are part of "it arrived"
+  if (target !== store) return;   // another graph: its canvas is drawn when shown
   buildScenes();
   draw();
   refreshInspector();
   nodeList.refresh();
-  refreshEMTree();          // the node/edge counts are part of "it arrived"
 }
 
 /** What a structural operation is ABOUT, for the awareness feed. */
-function structuralSubject(op: HubOp): string {
+function structuralSubject(op: HubOp, target: DocumentStore | null = store): string {
   const nodeId = String(op.id ?? op.node_id ?? "");
-  const named = store?.node(nodeId);
+  const named = target?.node(nodeId);
   if (named?.name) return String(named.name);
   if (op.op === "add_node") {
     const node = (op as unknown as { node?: { name?: string; id?: string } }).node;
@@ -5560,8 +5617,8 @@ function structuralSubject(op: HubOp): string {
     if (node?.id) return String(node.id);
   }
   if (op.op === "add_edge" || op.op === "remove_edge") {
-    const from = store?.node(String(op.source ?? ""))?.name ?? String(op.source ?? "");
-    const to = store?.node(String(op.target ?? ""))?.name ?? String(op.target ?? "");
+    const from = target?.node(String(op.source ?? ""))?.name ?? String(op.source ?? "");
+    const to = target?.node(String(op.target ?? ""))?.name ?? String(op.target ?? "");
     return `${from} → ${to}`;
   }
   return nodeId;
@@ -5600,10 +5657,11 @@ function replayAfterResync(): void {
   hubResyncPending = [];
   let reapplied = 0;
   for (const op of pending) {
-    if (hubWriteFieldLocally(op)) reapplied += 1;
+    const target = hubStoreFor((op as HubOp & { graph_id?: string }).graph_id);
+    if (hubWriteFieldLocally(op, target)) reapplied += 1;
     hubUnconfirmed.set(hubKey(op), op);
     noteSyncState();
-    sync.sendCommand(wireEnvelope("op", op as unknown as Record<string, unknown>));
+    sendHubOp(op);
   }
   if (reapplied < pending.length) {
     noteHub({ kind: "resync", at: new Date().toISOString(),
@@ -6191,7 +6249,11 @@ function renderHubRoster(): void {
  */
 
 /** The document waiting to be seated on a table it does not know about yet. */
-let seedingRoom: { room: string; container: Record<string, unknown> } | null = null;
+let seedingRoom: { room: string; container: Record<string, unknown>;
+                   /** G2 · the sections the node says the room was born with;
+                    *  empty on a node that does not know the field (then: the
+                    *  active graph alone, as before) */
+                   born: string[] } | null = null;
 
 /** One field, and the verb it is for. Reuses the modal the sidecar warning uses
  *  rather than a second idea of what a dialog looks like. */
@@ -6781,7 +6843,10 @@ async function createRoomHere(seed: boolean): Promise<string | null> {
   // `loadContainerDocument` with nothing in it and the document on screen would
   // be gone. Same class as the bug STEP 4 fixed in the other direction: the
   // snapshot arriving after the re-send overwrote it.
-  const container = seed ? shelfContainerDoc() : null;
+  const container = seed ? studyContainerDoc() : null;
+  // G2 · the room is born with the study's sections — every graph and the
+  // shelf, empty — so each seeding operation can name its graph (I-2)
+  const birth = container ? studySections(container) : null;
 
   let created: Record<string, unknown>;
   try {
@@ -6789,7 +6854,9 @@ async function createRoomHere(seed: boolean): Promise<string | null> {
       method: "POST",
       headers: { "Content-Type": "application/json",
                  Authorization: `Bearer ${hubToken}` },
-      body: JSON.stringify({ room_id: roomId, title: name }),
+      body: JSON.stringify({ room_id: roomId, title: name,
+                             ...(birth ? { graphs: birth.graphs,
+                                           active_graph_id: birth.active_graph_id } : {}) }),
     });
     if (!answer.ok) {
       // THE NODE'S OWN SENTENCE. A 409 («already declared») and a 401 send
@@ -6826,7 +6893,8 @@ async function createRoomHere(seed: boolean): Promise<string | null> {
       logWarn(`room: «${roomId}» already holds a graph — not seeding it`);
       return null;                  // the room exists; it is not seeded
     }
-    seedingRoom = { room: roomId, container };
+    seedingRoom = { room: roomId, container,
+                    born: ((created.born_with as string[] | undefined) ?? []).map(String) };
   }
   connectToHub(server, roomId, hubToken);
   return roomId;
@@ -6847,29 +6915,43 @@ async function createRoomHere(seed: boolean): Promise<string | null> {
  * gets the operations and this screen gets the document, and both are the same
  * container — read once, from the copy taken before the socket opened.
  *
- * ONE GRAPH, DECLARED. An operation does not name a graph, so a room holds one
- * (P4.2). A project with several graphs cannot be seated whole, and this says so
- * rather than dropping the rest quietly.
+ * THE WHOLE STUDY (G2, I-2). The room was born with the study's sections —
+ * every graph and the shelf — and each operation names its graph. A node that
+ * does not know `graphs` at birth answers without `born_with`: there the
+ * active graph alone is seated, unnamed, and the rest is said to stay here.
  */
 function seatSeededContainer(room: string): boolean {
   if (!seedingRoom || seedingRoom.room !== room) return false;
-  const { container } = seedingRoom;
+  const { container, born } = seedingRoom;
   seedingRoom = null;
 
   loadContainerDocument(container, roomFileName(room), null, { room: roomRef(room) });
   const graphs = (container.graphs ?? {}) as Record<string, { nodes?: unknown[] }>;
-  const ids = Object.keys(graphs);
+  const ids = Object.keys(graphs).filter((id) => !isCorpusSection(graphs[id]));
   const activeId = String(container.active_graph_id ?? ids[0] ?? "");
-  const active = graphs[activeId] as
-    { nodes?: EmNode[]; edges?: Array<Record<string, unknown>> } | undefined;
+  const whole = ids.length > 0 && ids.every((id) => born.includes(
+    String((graphs[id] as Record<string, unknown>).graph_id ?? id)));
 
-  const ops = seedOpsForContainer(active ?? null);
+  let ops: HubOp[];
+  if (whole) {
+    hubRoomGraphs = new Set(born);
+    ops = seedOpsForStudy(container);
+  } else {
+    noteRoomGraphs(null);
+    const active = graphs[activeId] as
+      { nodes?: EmNode[]; edges?: Array<Record<string, unknown>> } | undefined;
+    ops = seedOpsForContainer(active ?? null);
+  }
   for (const op of ops) {
     hubUnconfirmed.set(hubKey(op), op);
     noteSyncState();
-    sync.sendCommand(wireEnvelope("op", op as unknown as Record<string, unknown>));
+    sendHubOp(op);
   }
-  logInfo(`room: seated ${ops.length} operation(s) on «${room}»`);
+  logInfo(`room: seated ${ops.length} operation(s) on «${room}»`
+          + (whole ? ` in ${born.length} section(s): ${born.join(", ")}` : ""));
+  if (Object.keys(graphs).some((id) => isCorpusSection(graphs[id]))) {
+    logInfo(t("room.corpusStaysTheNodes"));
+  }
 
   // …AND ASK THE ROOM TO WRITE IT, because seating is not keeping.
   //
@@ -6904,8 +6986,8 @@ function seatSeededContainer(room: string): boolean {
     pendingInventory = null;
     setTimeout(() => void openResourceInventory(room, src), 400);
   }
-  if (ids.length > 1) {
-    // not a silent truncation: a room holds one graph, and this project had more
+  if (!whole && ids.length > 1) {
+    // not a silent truncation: this node seats one graph, and the study had more
     toast(t("room.onlyOneGraph", { n: String(ids.length - 1), graph: activeId }));
     logWarn(`room: «${room}» holds ONE graph — ${ids.length - 1} other(s) `
             + "stayed in the local project");
@@ -6937,7 +7019,7 @@ function connectToHub(url: string, room: string, token: string | null): void {
       renderHubRoster();
       draw();
     },
-    onOp: (op) => hubApplyRemote(op as unknown as Record<string, unknown>),
+    onOp: (op, graphId) => hubApplyRemote(op as unknown as Record<string, unknown>, graphId),
     onSnapshot: (doc) => {
       // SEEDING COMES FIRST, because this snapshot is the thing it has to
       // survive. A room created a second ago still sends one — a container with
@@ -6953,6 +7035,7 @@ function connectToHub(url: string, room: string, token: string | null): void {
       // one em.json), so it is opened by the door that reads containers. Handing
       // it to the single-graph loader was the first thing that broke here — the
       // document arrived and nothing appeared, because it had no `.graph`.
+      noteRoomGraphs(doc);       // G1 · the graphs an op may name here
       loadContainerDocument(doc, roomFileName(room), null, { room: roomRef(room) });
       info.textContent = t("hub.joined", { room });
       // E4 · a link with `&node=` lands on its unit once the room is here
@@ -7053,6 +7136,11 @@ function connectToHub(url: string, room: string, token: string | null): void {
         return;
       }
       if (message.reason === "idempotent") return;   // nothing to say
+      if (message.code === "unknown_graph") {
+        // B1 · the room refused a graph its study does not have, by name
+        opRefused(t("room.unknownGraph", { graph: String(message.graph_id ?? "") }));
+        return;
+      }
       const node = store?.node(String(op.node_id ?? ""));
       if (refusalIsNews(String(message.reason ?? ""))) {
         // V1 · not «somebody was later»: the room did NOT apply this edit
@@ -19824,6 +19912,30 @@ function shelfContainerDoc(): Record<string, unknown> {
     activeGraphId: activeSlot
       ? String((activeSlot.store.doc.graph as Record<string, unknown>).graph_id
                ?? activeSlot.id)
+      : null,
+  }) as unknown as Record<string, unknown>;
+}
+
+/**
+ * G2 · THE STUDY that «Bring into a room…» carries: the graphs of the active
+ * graph's FILE (an em.json is a study, I-1) with the shelf — not every graph
+ * open in the workspace, which may be several studies. A graph with no file
+ * yet is a study of its own.
+ */
+function studyContainerDoc(): Record<string, unknown> {
+  const activeSlot = emtree.active();
+  const file = emtree.activeFile();
+  const mine = file ? emtree.slotsOf(file.id) : (activeSlot ? [activeSlot] : []);
+  const kept = mine.filter((slot) => !isUntouchedSeed(slot) || mine.length === 1);
+  return buildContainer({
+    graphs: kept.map((slot) => ({
+      id: String((slot.store.doc.graph as Record<string, unknown>).graph_id ?? slot.id),
+      doc: JSON.parse(slot.store.toJSON()) as EmDocument,
+    })),
+    shelf: projectShelfSection(),
+    corpus: projectCorpusSection(),
+    activeGraphId: activeSlot
+      ? String((activeSlot.store.doc.graph as Record<string, unknown>).graph_id ?? activeSlot.id)
       : null,
   }) as unknown as Record<string, unknown>;
 }

@@ -157,8 +157,11 @@ export interface HubOptions {
 
 export interface SyncCallbacks {
   onSelect: (nodeId: string, nodeIds?: string[]) => void;
-  /** a graph mutation arrived from the peer (ADR-002 phase 2 op-log) */
-  onOp: (op: GraphOp) => void;
+  /** a graph mutation arrived from the peer (ADR-002 phase 2 op-log).
+   *  `graphId` is the graph of the study it is for, as the envelope names it
+   *  (I-2: a room holds the whole study); absent from a peer that does not
+   *  name graphs. */
+  onOp: (op: GraphOp, graphId?: string) => void;
   /** the host sent its full graph as an .em.json doc (ADR-002 snapshot-READ):
    * "sync mode = see the host's data". Replaces the local document. */
   onSnapshot: (doc: EmDocument) => void;
@@ -435,7 +438,7 @@ export class SyncClient {
         this.cb?.onWireMismatch?.(answer.error);
         return;
       }
-      const { type, payload, source } = answer.message;
+      const { type, payload, source, graph_id: graphId } = answer.message;
       if (source === SOURCE) return; // ignore our own echo
 
       if (type === "select") {
@@ -478,7 +481,7 @@ export class SyncClient {
         // C2 · a stronger refusal than the selection's, and separately chosen:
         // this one would CHANGE THIS DOCUMENT.
         if (!this.acceptsOps) return;
-        this.cb?.onOp(payload as unknown as GraphOp);
+        this.cb?.onOp(payload as unknown as GraphOp, graphId);
       } else if (type === "denied") {
         // NOT gated by the sync direction: this is the answer to something this
         // user did, and swallowing it would leave them staring at an edit that

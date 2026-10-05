@@ -20,6 +20,7 @@
 
 import type { EmNode } from "./types";
 import { withOpLanguage, type HubOp } from "./hub";
+import { isCorpusSection } from "./container";
 
 /**
  * The room id a name produces.
@@ -107,6 +108,65 @@ export function seedOpsForContainer(
     });
   }
   return ops;
+}
+
+/** G2 · one section a room is born with: EMPTY, its content comes as ops. */
+export interface BirthSection {
+  graph_id: string;
+  name: string;
+  data?: Record<string, unknown>;
+}
+
+/**
+ * G2 · THE WHOLE STUDY, not its active graph (I-2: a room writes one study).
+ *
+ * What `POST /v1/rooms` is told to be born with: every graph of the container
+ * and its shelf, each as an empty section with its id, its name and its header
+ * (the shelf's marker is in its header). The DTC corpus stays out: on a node
+ * the documentation register is the node's own, resident beside the rooms, and
+ * a study's copy of it is not seeded into one room.
+ */
+export function studySections(container: Record<string, unknown> | null): {
+  graphs: BirthSection[];
+  active_graph_id: string | null;
+  corpus: boolean;
+} {
+  const graphs: BirthSection[] = [];
+  let corpus = false;
+  const members = (container?.graphs ?? {}) as Record<string, Record<string, unknown>>;
+  for (const [key, section] of Object.entries(members)) {
+    if (!section || typeof section !== "object") continue;
+    if (isCorpusSection(section)) { corpus = true; continue; }
+    const gid = String(section.graph_id ?? key);
+    const out: BirthSection = { graph_id: gid, name: String(section.name ?? gid) };
+    if (section.data && typeof section.data === "object") {
+      out.data = { ...(section.data as Record<string, unknown>) };
+    }
+    graphs.push(out);
+  }
+  const active = String(container?.active_graph_id ?? "");
+  return { graphs,
+           active_graph_id: graphs.some((g) => g.graph_id === active) ? active
+             : (graphs[0]?.graph_id ?? null),
+           corpus };
+}
+
+/**
+ * G2 · the operations that seat a whole study: for each section of
+ * `studySections`, its nodes then its edges (`seedOpsForContainer`), each op
+ * carrying the graph it is for in `graph_id` — the envelope's word, taken out
+ * of the body where it leaves (`sendHubOp` in main.ts).
+ */
+export function seedOpsForStudy(container: Record<string, unknown> | null):
+    Array<HubOp & { graph_id: string }> {
+  const members = (container?.graphs ?? {}) as Record<string, Record<string, unknown>>;
+  const out: Array<HubOp & { graph_id: string }> = [];
+  for (const [key, section] of Object.entries(members)) {
+    if (!section || typeof section !== "object" || isCorpusSection(section)) continue;
+    const gid = String(section.graph_id ?? key);
+    for (const op of seedOpsForContainer(section as never)) out.push({ ...op, graph_id: gid });
+  }
+  return out;
 }
 
 /**

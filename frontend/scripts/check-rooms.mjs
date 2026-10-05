@@ -194,4 +194,43 @@ console.log("\n6 · THE CHEAP REFUSAL COMES FIRST");
      + "that was already going to refuse");
 }
 
+// ── 7 · THE WHOLE STUDY · every graph and the shelf, each op naming its graph ─
+//
+// G2 (MICRO-LO-STUDIO-IN-STANZA-NOMINA-IL-GRAFO, 5 Oct 2026): «Bring into a
+// room…» seated the active graph only. A room writes one study (I-2): it is
+// born with the study's sections, empty, and the seeding ops name their graph.
+console.log("7 · THE WHOLE STUDY");
+{
+  const unit = (id) => ({ id, node_type: "US", name: id, data: { created_at: "2026-10-05T10:00:00Z" } });
+  const study = {
+    header: { format: "em.json", version: "1.0" },
+    graphs: {
+      tempio: { graph_id: "tempio", name: "Tempio Giunone Moneta", data: { language: "it" },
+                nodes: [unit("US1"), unit("US2")],
+                edges: [{ id: "e1", source: "US1", target: "US2", edge_type: "is_after" }] },
+      saggio: { graph_id: "saggio", name: "Saggio", nodes: [unit("US9")], edges: [] },
+      shelf: { graph_id: "shelf", name: "Shelf", data: { em_collection: "ShelfGraph" },
+               nodes: [{ id: "r1", node_type: "link", name: "podio.glb", data: {} }], edges: [] },
+      dtc: { graph_id: "dtc", name: "DTC", data: { em_collection: "DTCCorpus" },
+             nodes: [unit("D1")], edges: [] },
+    },
+    active_graph_id: "saggio",
+  };
+  const born = R.studySections(study);
+  eq(born.graphs.map((g) => g.graph_id), ["tempio", "saggio", "shelf"],
+     "every graph and the shelf, and not the DTC corpus (the node's own)");
+  eq(born.active_graph_id, "saggio", "the graph in front stays in front");
+  ok(born.corpus === true, "…and the corpus that stayed out is said");
+  eq(born.graphs[0], { graph_id: "tempio", name: "Tempio Giunone Moneta", data: { language: "it" } },
+     "a section is born EMPTY: id, name and header, no nodes and no edges");
+  ok(born.graphs.every((g) => !("nodes" in g) && !("edges" in g)), "no content at birth");
+
+  const ops = R.seedOpsForStudy(study);
+  eq(ops.map((o) => `${o.graph_id}:${o.op}:${o.id}`),
+     ["tempio:add_node:US1", "tempio:add_node:US2", "tempio:add_edge:e1",
+      "saggio:add_node:US9", "shelf:add_node:r1"],
+     "each op names its graph, nodes before the edges of the same graph");
+  ok(!ops.some((o) => o.graph_id === "dtc"), "the corpus is not seeded");
+}
+
 console.log(`\nrooms: ${checks} checks passed`);
