@@ -23,6 +23,7 @@ export const TONES: Record<string, Tone> = {
   "node.local_only": "muted",
   "room.inside": "info",
   "room.outside": "muted",
+  "room.paired": "info",
   "room.read_only": "warn",
   "sync.aligned": "ok",
   "sync.pending": "warn",

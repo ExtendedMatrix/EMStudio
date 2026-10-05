@@ -61,9 +61,11 @@ export interface ConnectionState {
 // state the list does not have (the role «admin», «none») keeps its word and
 // gets no sign: none is invented here.
 
-/** the room state of a session: inside, inside but read-only, or outside */
+/** the room state of a session: inside, inside but read-only, with the other
+ *  app on this computer (Q2, E.D. 5 Oct 2026: «⇄» is in the list), or outside */
 export function roomStateId(s: Pick<ConnectionState, "mode" | "room" | "readOnly">): string {
   if (s.mode === "hub" && s.room) return s.readOnly ? "room.read_only" : "room.inside";
+  if (s.mode === "sidecar") return "room.paired";
   return "room.outside";
 }
 

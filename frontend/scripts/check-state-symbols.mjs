@@ -90,7 +90,8 @@ checks += 3;
 eq(S.roomStateId({ mode: "hub", room: "r", readOnly: false }), "room.inside", "in a room");
 eq(S.roomStateId({ mode: "hub", room: "r", readOnly: true }), "room.read_only", "in a room, read-only");
 eq(S.roomStateId({ mode: "standalone", room: null }), "room.outside", "on this computer");
-eq(S.roomStateId({ mode: "sidecar", room: null }), "room.outside", "with Blender");
+eq(S.roomStateId({ mode: "sidecar", room: null }), "room.paired", "with Blender: ⇄ (Q2)");
+eq(S.stateSign("room.paired").glyph, "⇄", "⇄ is the list's");
 for (const r of ["owner", "editor", "viewer"]) eq(S.roleStateId(r), `role.${r}`, `role ${r} has its sign`);
 for (const r of ["admin", "none", null, undefined]) eq(S.roleStateId(r), null, `role ${r}: not in the list, no sign invented`);
 for (const s of ["aligned", "pending", "conflict"]) { assert.ok(list[`sync.${s}`], `sync.${s} in the list`); checks++; }
