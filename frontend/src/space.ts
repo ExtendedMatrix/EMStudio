@@ -26,6 +26,7 @@
  */
 import type { EmDocument, EmEdge, EmNode } from "./types";
 import { classOf } from "./rules";
+import { SCENE_USES, assetOf, chooseVersion, versionsOf, type VersionChoice, type VersionGraph } from "./asset-versions";
 
 /** What becomes of a resource in the scene. */
 export type FileState =
@@ -61,6 +62,10 @@ export interface SpaceRM {
    *  reality_based = a survey, em_based = a source-based reconstruction… */
   genre: string | null;
   resource: SpaceResource | null;
+  /** the version the scene loads, by the rule of s3Dgraphy's `version_for`
+   *  with the uses of a scene (web, realtime, heriverse, aton) — null when the
+   *  model has no versions (its first resource is shown, as before) */
+  choice?: VersionChoice | null;
   /** MICRO-3DTILES · the TILESET of the same model, when its first resource is
    *  not one (proposed instead of a glb over the threshold) */
   tileset: SpaceResource | null;
@@ -201,6 +206,25 @@ export function buildSpace(
     return all.length > 1 && !isTileset(all[0]) ? all.slice(1).find(isTileset) ?? null : null;
   };
 
+  // TEMPLU MARE v2 · the version a scene loads. A model whose resources have
+  // VERSIONS (an asset and its lod_generation chain) shows the one the rule of
+  // `version_for` picks for SCENE_USES among those a glTF loader opens — not its
+  // first resource, which for a study made with the tools is the master (a
+  // .blend datablock, or a set of OBJ files). No versions: as before.
+  const vg: VersionGraph = { node: (id) => byId.get(id), out: outOf, into: inOf };
+  const opensGltf = (d: Record<string, unknown>): boolean =>
+    /\.(glb|gltf)(\?|#|$)/i.test(str(d.url)) || /^model\/gltf/i.test(str(d.media_type));
+  const chosenOf = (rmId: string): { resource: SpaceResource; choice: VersionChoice } | null => {
+    const linked = resourcesOf(rmId);
+    const models = linked.filter((r) => str(dataOf(r).url_type) === "3d_model");
+    const assets = [...new Set((models.length ? models : linked).map((r) => assetOf(vg, r.id)))].sort();
+    const entries = assets.flatMap((a) => versionsOf(vg, a));
+    if (!entries.some((e) => !e.master)) return null;
+    const choice = chooseVersion(entries.filter((e) => opensGltf(e.data ?? {})), SCENE_USES);
+    const node = choice?.entry ? byId.get(choice.entry.id) : undefined;
+    return node && choice ? { resource: asResource(node), choice } : null;
+  };
+
   // representation models
   const rms: SpaceRM[] = nodes.filter((n) => RM_TYPES.has(n.node_type)).map((rm) => {
     const from = inOf(rm.id, "has_representation_model");
@@ -214,7 +238,9 @@ export function buildSpace(
     const dd = dataOf(documentId ? byId.get(documentId) : undefined);
     const own = dataOf(rm);
     const genre = str(own.geometry ?? own.certainty_class ?? dd.geometry ?? dd.certainty_class).trim() || null;
-    return { id: rm.id, name: str(rm.name) || rm.id, epochs: [...eps], documentId, genre, resource: resourceOf(rm.id),
+    const chosen = chosenOf(rm.id);
+    return { id: rm.id, name: str(rm.name) || rm.id, epochs: [...eps], documentId, genre,
+             resource: chosen ? chosen.resource : resourceOf(rm.id), choice: chosen?.choice ?? null,
              tileset: tilesetOf(rm.id) };
   });
 

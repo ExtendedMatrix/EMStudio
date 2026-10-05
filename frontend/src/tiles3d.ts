@@ -134,7 +134,9 @@ export interface TilesOptions {
 }
 
 let draco: any = null;
-function dracoFor(E: any, T: any): any {
+/** The one Draco decoder (wasm, the files bundled with three): tilesets, and
+ *  the Space's glb models (a web version is Draco-compressed). */
+export function dracoFor(E: any, T: any): any {
   if (draco) return draco;
   const manager = new E.THREE.LoadingManager();
   manager.setURLModifier((u: string) => T.DRACO_FILES[String(u).split("/").pop() ?? ""] ?? u);

@@ -19452,6 +19452,35 @@ let spaceAsking = false;
 /** resident files the scene fetched and did not find */
 const spaceNotFound = new Set<string>();
 
+/** TEMPLU MARE v2 · where the scene fetches a resource's bytes — the same
+ *  addresses as the document viewer (`docModelOf`): in a room, the store by
+ *  the digest; offline, the path beside the em.json through the bridge
+ *  (`/fs/at/`, a relative `../RB/versions/x.glb` included); a web locator as
+ *  it is. Until the bridge has answered, the locator as written. */
+function spaceFileUrl(res: { url: string; checksum: string } | null | undefined): string | undefined {
+  const u = res?.url ?? "";
+  if (!u) return undefined;
+  if (/^(https?|blob|data):/i.test(u)) return u;
+  const store0 = assetStoreBase();
+  if (store0 && res?.checksum) return `${store0}${encodeURIComponent(res.checksum)}`;
+  // a document not opened from the disk has no folder: its locators are what
+  // they always were (relative to the page, as the test data are)
+  if (!currentFilePath) return u;
+  if (!bridgeBaseNow) {
+    // not a relative path handed to the loader: it would fail, and the file be
+    // counted «not found» for the session; the scene is drawn again on the answer
+    void bridgeUrl().then((b) => { if (b && !bridgeBaseNow) { bridgeBaseNow = b; refreshSurfaces("scene"); } });
+    return /^\//.test(u) ? u : undefined;
+  }
+  const baseDir = currentFilePath ? currentFilePath.replace(/[^/\\]*$/, "") : "";
+  const parts: string[] = [];
+  for (const p of (u.startsWith("/") || !baseDir ? u : `${baseDir}${u}`).split("/")) {
+    if (p === "..") parts.pop(); else if (p !== "." && (p || !parts.length)) parts.push(p);
+  }
+  const abs = parts.join("/");
+  return `${bridgeBaseNow}/fs/at/${abs.replace(/^\/+/, "").split("/").map(encodeURIComponent).join("/")}`;
+}
+
 function currentSpace(): Space | null {
   if (!store) return null;
   // Y6 · the proxies the connected host has in its scene count too
@@ -19825,7 +19854,7 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
     if (spaceToggle(win, "rm"))
       for (const r of sum.rms)
         items.push({ kind: "rm", id: r.id, label: r.name, state: r.resource?.state ?? "missing",
-          url: r.resource?.url || undefined, resourceId: r.resource?.id,
+          url: spaceFileUrl(r.resource), resourceId: r.resource?.id,
           edge: placementColour(r.genre) ?? undefined, selected: sel === r.id,
           // MICRO-3DTILES · the tileset of the same model, and the weight
           tileset: r.tileset?.state === "resident" ? r.tileset.url || undefined : undefined,
@@ -19836,7 +19865,7 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
         const type = st.node(u)?.node_type;
         const common = { kind: "proxy" as const, id: u, label: nm(u), rgb: nodeMaterialRgb(type) ?? nodeMaterialRgb("US") ?? undefined,
           edge: nodeStyle(type).border, selected: sel === u };
-        if (px.resource) items.push({ ...common, state: px.resource.state, url: px.resource.url || undefined, resourceId: px.resource.id });
+        if (px.resource) items.push({ ...common, state: px.resource.state, url: spaceFileUrl(px.resource), resourceId: px.resource.id });
         else items.push({ ...common, state: "json", convexshapes: px.convexshapes, spheres: px.spheres });
       }
     if (previewItem) items.unshift(previewItem);

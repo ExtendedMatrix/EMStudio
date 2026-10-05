@@ -23,7 +23,7 @@
  */
 import { engine, headBytes, lodLevelOf, probeLods, tilesBarTexts } from "./embed3d-native";
 import { onFirstVisible } from "./lazy";
-import { createTilesLayer, formatBytes, isTilesetUrl, tilesBar, tilesEngine, type TilesLayer } from "./tiles3d";
+import { createTilesLayer, dracoFor, formatBytes, isTilesetUrl, tilesBar, tilesEngine, type TilesLayer } from "./tiles3d";
 
 export interface SceneItem {
   kind: "rm" | "proxy";
@@ -136,11 +136,16 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
       const labels = document.createElement("div");
       labels.className = "v3d-labels scn-labels";
       const loader = new GLTFLoader();
+      // TEMPLU MARE v2 · a web version of a model is Draco-compressed («Prepare
+      // for a use…»): the decoder the tilesets use, set once before the first load
+      let dracoSet: Promise<void> | null = null;
+      const withDraco = (): Promise<void> => (dracoSet ??= tilesEngine()
+        .then((T) => { loader.setDRACOLoader(dracoFor(E, T)); }).catch(() => undefined));
       const cache = new Map<string, Promise<any | null>>();
       const load = (url: string): Promise<any | null> => {
         let p = cache.get(url);
         if (!p) {
-          p = new Promise((res) => loader.load(url, (g: any) => res(g.scene), undefined, () => res(null)));
+          p = withDraco().then(() => new Promise((res) => loader.load(url, (g: any) => res(g.scene), undefined, () => res(null))));
           cache.set(url, p);
         }
         return p;
