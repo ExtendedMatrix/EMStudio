@@ -97,6 +97,43 @@ print(json.dumps({"resident": sorted(r["resource_id"] for r in s["resident"]), "
   } else console.log("  (s3Dgraphy venv not found: the comparison with geometry_summary is skipped)");
 }
 
+// ── TEMPLU MARE v2 · C1 · a TILESET version: the folder from the disk, its .3tz
+// from a node (the graph of XX_tileset in the v2 em.json, as the tools wrote it) ──
+{
+  const res = (id, data) => ({ id, node_type: "resource", name: id, data: { url_type: "3d_model", ...data } });
+  const d = { graph: { nodes: [
+    { id: "EP", node_type: "EpochNode", name: "XX sec", data: { start_time: 1801, end_time: 2013 } },
+    { id: "RM", node_type: "representation_model", name: "XX_tileset", data: {} },
+    res("ZIP", { url: "../RB/cesium/TempluMare.zip", packaging: "archive", tier: "master", media_type: "application/zip",
+                 checksum: "sha256:" + "a".repeat(64), residency: "resident" }),
+    res("DIR", { url: "../RB/cesium/TempluMare/tileset.json", packaging: "directory", tier: "distribution",
+                 media_type: "application/json", use: ["web", "realtime"], checksum: "sha256:" + "b".repeat(64), residency: "resident" }),
+    res("TZ", { url: "../RB/cesium/TempluMare.3tz", packaging: "archive", tier: "distribution", preferred: true,
+                media_type: "application/vnd.maxar.archive.3tz+zip", checksum: "sha256:" + "c".repeat(64), residency: "resident" }),
+    { id: "P", node_type: "dtc_process", name: "lod", data: { dtc_kind: "lod_generation" } },
+  ], edges: [
+    { id: "e1", source: "EP", target: "RM", edge_type: "has_representation_model" },
+    { id: "e2", source: "RM", target: "ZIP", edge_type: "has_linked_resource" },
+    { id: "e3", source: "P", target: "ZIP", edge_type: "dtc_had_input" },
+    { id: "e4", source: "P", target: "DIR", edge_type: "dtc_had_output" },
+    { id: "e5", source: "DIR", target: "ZIP", edge_type: "dtc_derived_from" },
+    { id: "e6", source: "TZ", target: "DIR", edge_type: "dtc_derived_from" },
+  ] } };
+  eq([M.tilesKindOf(d.graph.nodes[3].data), M.tilesKindOf(d.graph.nodes[4].data), M.tilesKindOf(d.graph.nodes[2].data)],
+     ["directory", "3tz", ""], "a folder, a .3tz, and a plain zip that is not a tileset");
+  eq(M.tilesKindOf({ url: "https://n/v1/rooms/r/asset/sha256:" + "c".repeat(64), media_type: "application/vnd.maxar.archive.3tz+zip" }),
+     "3tz", "…a .3tz by digest, said by its media type");
+  const disk = M.buildSpace(d, { isUnit }).rms.find((r) => r.id === "RM");
+  eq([disk.resource?.id, disk.resource?.tiles, disk.choice?.use], ["DIR", "directory", "web"],
+     "from the disk: the version the rule picks is the folder, drawn as tiles (not the zip master)");
+  const node = M.buildSpace(d, { isUnit, fromStore: true }).rms.find((r) => r.id === "RM");
+  eq([node.resource?.id, node.resource?.tiles, node.resource?.checksum.slice(-4)], ["TZ", "3tz", "cccc"],
+     "from a node: the folder's .3tz, the representation a store serves by its digest");
+  const noTz = { graph: { nodes: d.graph.nodes.filter((n) => n.id !== "TZ"), edges: d.graph.edges.filter((e) => e.id !== "e6") } };
+  eq(M.buildSpace(noTz, { isUnit, fromStore: true }).rms.find((r) => r.id === "RM").resource?.id, "DIR",
+     "…and without a .3tz the folder stays (and the scene says it is not there): never the zip");
+}
+
 // ── «Modelli e proxy»: the count is the rows on screen ─────────────────────
 {
   const sp = M.buildSpace(doc, { isUnit });

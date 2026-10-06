@@ -27,6 +27,22 @@
 import type { EmDocument, EmEdge, EmNode } from "./types";
 import { classOf } from "./rules";
 import { SCENE_USES, assetOf, chooseVersion, versionsOf, type VersionChoice, type VersionGraph } from "./asset-versions";
+import { pickRepresentation, plainGraph } from "./resources";
+
+/** The media type of a 3D Tiles archive (s3Dgraphy `MEDIA_TYPE_3TZ`). */
+const MEDIA_3TZ = "application/vnd.maxar.archive.3tz+zip";
+
+/** TEMPLU MARE v2 · C1 · what a resource is for the tiles reader, read from
+ *  what it DECLARES and not only from its locator — a store URL
+ *  (`…/asset/sha256:…`) says nothing: `3tz` (an archive the reader opens from
+ *  its end), `directory` (a tree served as it lies: `packaging: directory`, or
+ *  a `tileset.json` locator), or `""` (not a tileset; a plain zip is not one). */
+export function tilesKindOf(d: Record<string, unknown>): "" | "directory" | "3tz" {
+  const url = String(d.url ?? "");
+  if (/\.3tz(\?|#|$)/i.test(url) || d.media_type === MEDIA_3TZ) return "3tz";
+  if (d.packaging === "directory" || /(^|\/)tileset\.json(\?|#|$)/i.test(url)) return "directory";
+  return "";
+}
 
 /** What becomes of a resource in the scene. */
 export type FileState =
@@ -49,6 +65,8 @@ export interface SpaceResource {
   packaging: string;
   bytes: number | null;
   points: number | null;
+  /** TEMPLU MARE v2 · C1 · a tileset, and in which form (`tilesKindOf`) */
+  tiles: "" | "directory" | "3tz";
 }
 
 export interface SpaceRM {
@@ -153,6 +171,9 @@ export function buildSpace(
     notFound?: Set<string>;
     /** Y6 · units whose proxy object the connected host has in its scene */
     sceneProxies?: Set<string> | null;
+    /** TEMPLU MARE v2 · C1 · the bytes come from a node's store, one file per
+     *  digest: a tileset FOLDER cannot be served from there, its archive can */
+    fromStore?: boolean;
   },
 ): Space {
   const nodes = (doc?.graph.nodes ?? []).filter(alive);
@@ -191,7 +212,7 @@ export function buildSpace(
     const prims = (d.primitives ?? {}) as Record<string, unknown>;
     return { id: r.id, name: str(r.name) || str(d.url).split("/").pop() || r.id, url: str(d.url),
              checksum: str(d.checksum), state, packaging: str(d.packaging),
-             bytes: num(d.size_bytes), points: num(prims.points) };
+             bytes: num(d.size_bytes), points: num(prims.points), tiles: tilesKindOf(d) };
   };
   const resourcesOf = (id: string): EmNode[] => outOf(id, "has_linked_resource")
     .map((x) => byId.get(x)).filter((r): r is EmNode => r?.node_type === "resource");
@@ -212,8 +233,20 @@ export function buildSpace(
   // first resource, which for a study made with the tools is the master (a
   // .blend datablock, or a set of OBJ files). No versions: as before.
   const vg: VersionGraph = { node: (id) => byId.get(id), out: outOf, into: inOf };
+  // C1 · a TILESET version too (a folder or a .3tz): the scene draws it as tiles
   const opensGltf = (d: Record<string, unknown>): boolean =>
-    /\.(glb|gltf)(\?|#|$)/i.test(str(d.url)) || /^model\/gltf/i.test(str(d.media_type));
+    /\.(glb|gltf)(\?|#|$)/i.test(str(d.url)) || /^model\/gltf/i.test(str(d.media_type)) || tilesKindOf(d) !== "";
+  // C1 · the version's REPRESENTATION a store can serve: a tileset folder is
+  // thousands of files and the store holds one per digest, so from a node the
+  // scene reads the folder's archive (`dtc_derived_from`, the `preferred` one
+  // first — s3Dgraphy's pick_representation); a plain zip is not a tileset
+  const rg = plainGraph({ nodes, edges });
+  const servable = (node: EmNode): EmNode => {
+    if (!opts.fromStore || tilesKindOf(dataOf(node)) !== "directory") return node;
+    const pick = pickRepresentation(rg, node.id, ["archive"]);
+    const alt = pick.picked ? byId.get(pick.picked.id) : undefined;
+    return alt && tilesKindOf(dataOf(alt)) === "3tz" ? alt : node;
+  };
   const chosenOf = (rmId: string): { resource: SpaceResource; choice: VersionChoice } | null => {
     const linked = resourcesOf(rmId);
     const models = linked.filter((r) => str(dataOf(r).url_type) === "3d_model");
@@ -222,7 +255,7 @@ export function buildSpace(
     if (!entries.some((e) => !e.master)) return null;
     const choice = chooseVersion(entries.filter((e) => opensGltf(e.data ?? {})), SCENE_USES);
     const node = choice?.entry ? byId.get(choice.entry.id) : undefined;
-    return node && choice ? { resource: asResource(node), choice } : null;
+    return node && choice ? { resource: asResource(servable(node)), choice } : null;
   };
 
   // representation models

@@ -131,6 +131,9 @@ export interface TilesOptions {
   mode?: RefineMode;
   /** the memory ceiling of the automatic mode, MB (the preferences) */
   memoryMB?: number;
+  /** TEMPLU MARE v2 · C1 · `url` is a `.3tz` though it does not say so (a
+   *  store URL: the archive's digest); the graph declared it */
+  archive?: boolean;
 }
 
 let draco: any = null;
@@ -165,7 +168,7 @@ export function createTilesLayer(E: any, T: any, url: string, camera: any, rende
   // and the plugin answers every file of it from the archive — opened from its
   // end (the index), then each tile at its offset (tiles3tz.ts)
   let archivePlugin: any = null;
-  if (isArchive3tzUrl(url) && T.Tiles3tzPlugin) {
+  if ((opts.archive || isArchive3tzUrl(url)) && T.Tiles3tzPlugin) {
     const base = T.archiveBase();
     const archive = T.sourceFor(url).then((src: any) => T.Archive3tz.open(src));
     archivePlugin = new T.Tiles3tzPlugin(archive, base);

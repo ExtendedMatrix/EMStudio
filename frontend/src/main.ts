@@ -19534,7 +19534,7 @@ function currentSpace(): Space | null {
     ? new Set(hostInfo.scene_proxies.map(String)) : null;
   return buildSpace(store.doc, { isUnit: isStratigraphicType,
     resident: spaceResident?.version === spaceVersion ? spaceResident.ids : null, notFound: spaceNotFound,
-    sceneProxies });
+    sceneProxies, fromStore: !!assetStoreBase() });
 }
 
 /** Ask s3Dgraphy what can be fetched (`geometry_summary`), once per version of
@@ -19900,7 +19900,7 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
     if (spaceToggle(win, "rm"))
       for (const r of sum.rms)
         items.push({ kind: "rm", id: r.id, label: r.name, state: r.resource?.state ?? "missing",
-          url: spaceFileUrl(r.resource), resourceId: r.resource?.id,
+          url: spaceFileUrl(r.resource), resourceId: r.resource?.id, tiles: r.resource?.tiles || undefined,
           edge: placementColour(r.genre) ?? undefined, selected: sel === r.id,
           // MICRO-3DTILES · the tileset of the same model, and the weight
           tileset: r.tileset?.state === "resident" ? r.tileset.url || undefined : undefined,

@@ -43,6 +43,9 @@ export interface SceneItem {
   selected?: boolean;
   /** MICRO-3DTILES · the tileset of the same model (proposed over the threshold) */
   tileset?: string;
+  /** TEMPLU MARE v2 · C1 · `url` IS a tileset, in this form, whatever it ends
+   *  with: a store URL (`…/asset/sha256:…`) names no `.3tz` */
+  tiles?: "directory" | "3tz";
   /** what the graph knows of the file: `size_bytes`, `primitives.points` */
   bytes?: number | null;
   points?: number | null;
@@ -100,6 +103,9 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
     __spaceCamera?: () => number[];
     __spaceTiles?: () => unknown;
     __spaceTileScreenOf?: (uri: string) => { x: number; y: number } | null;
+    /** TEMPLU MARE v2 · C1 · the world box of what an item drew (a model's
+     *  meshes, a tileset's loaded tiles): [minx, miny, minz, maxx, maxy, maxz] */
+    __spaceBoxOf?: (id: string) => number[] | null;
   };
   probe.__space = () => [...drawn.values()].map((d) => ({ kind: d.item.kind, id: d.item.id, state: d.item.state, as: d.as,
     ...(d.url ? { url: d.url } : {}) }));
@@ -169,11 +175,11 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
       strips.className = "scn-strips";
       let T: any = null;
       const liveLayers = () => [...layers.values()].filter((l) => l.layer.object.parent === content);
-      const ensureLayer = async (url: string, itemId: string): Promise<Live | null> => {
+      const ensureLayer = async (url: string, itemId: string, archive = false): Promise<Live | null> => {
         let live = layers.get(url);
         if (live) { live.itemId = itemId; return live; }
         try { T = T ?? await tilesEngine(); } catch { return null; }
-        const layer = createTilesLayer(E, T, url, camera, renderer, { memoryMB: opts.tilesMemoryMB });
+        const layer = createTilesLayer(E, T, url, camera, renderer, { memoryMB: opts.tilesMemoryMB, archive });
         const bar = tilesBar(layer, tilesBarTexts());
         // ready = the root's first tile, or its failure (the frame waits for it)
         const ready = new Promise<void>((res) => {
@@ -275,12 +281,12 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
           // MICRO-3DTILES · a tileset (the item's own, or the one chosen over
           // a glb past the threshold)
           const tsUrl = item.state === "resident" && item.url
-            ? (isTilesetUrl(item.url) ? item.url : useTileset.has(key) && item.tileset ? item.tileset : null) : null;
+            ? (isTilesetUrl(item.url) || item.tiles ? item.url : useTileset.has(key) && item.tileset ? item.tileset : null) : null;
           if (tsUrl) {
             used.add(tsUrl);
             drawn.set(key, { item, as: "pending", url: tsUrl });
             const el = stripOf(item);
-            pending.push(ensureLayer(tsUrl, item.id).then(async (live) => {
+            pending.push(ensureLayer(tsUrl, item.id, tsUrl === item.url && item.tiles === "3tz").then(async (live) => {
               if (gen !== generation || disposed) return;
               if (!live) { drawn.set(key, { item: { ...item, state: "missing" }, as: "label" }); later.push({ ...item, state: "missing" }); return; }
               live.layer.object.userData.tiles = true;
@@ -471,6 +477,17 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
         return { x: r.left + ((v.x + 1) / 2) * r.width, y: r.top + ((1 - v.y) / 2) * r.height };
       };
       probe.__spaceCamera = () => [...camera.position.toArray(), ...controls.target.toArray()].map((x: number) => Math.round(x * 1000) / 1000);
+      probe.__spaceBoxOf = (id: string) => {
+        const live = liveLayers().find((l) => l.itemId === id);
+        let b = live ? live.layer.contentBox() : null;
+        if (!live) {
+          content.updateMatrixWorld(true);
+          const bb = new THREE.Box3();
+          content.traverse((o: any) => { if (o.isMesh && o.userData.rmId === id) bb.expandByObject(o); });
+          b = bb.isEmpty() ? null : bb;
+        }
+        return b ? [...b.min.toArray(), ...b.max.toArray()].map((x: number) => Math.round(x * 1000) / 1000) : null;
+      };
       let raf = 0;
       let frames = 0;
       const tick = () => {
