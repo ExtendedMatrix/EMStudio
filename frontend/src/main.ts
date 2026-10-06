@@ -93,6 +93,7 @@ import {
   refreshSurfaces,
   selectInSurfaces,
   surfaceOf,
+  mountedWinIs,
   unmountSurface,
 } from "./shell/surface";
 import { duringStoreFlush, keepFocusAcross, heldBy } from "./shell/hold";
@@ -4380,13 +4381,35 @@ function wireStore(s: DocumentStore): void {
  * layout decision afterwards; a plain switch does neither.
  */
 function activateSlot(id: string, opts: { rebuildOnly?: boolean } = {}): void {
-  const outgoing = emtree.active();
   const target = emtree.get(id);
   if (!target) return;
+  showDocument(target, opts);
+}
+
+/**
+ * THE ONE DOOR OF A DOCUMENT CHANGE (MICRO 6 ott 2026, T1).
+ *
+ * Every way the document in front changes comes through here: a switch in the
+ * EMTree, a load (`loadDocument` → `activateSlot`), closing a graph or a file,
+ * and leaving a room or the Sidecar (`leaveHostDocuments`). `target` null is
+ * the empty workspace.
+ *
+ * There were three of these and each forgot something different. Measured on
+ * 5 Oct (E.D., room templu-mare-prova-claude, 412 nodes): «Leave the room» went
+ * through a `clearDocument`, which set `store` to null and left the room's graph
+ * in the EMTree, the name strip on «graph · 412 nodes», the warnings pill on
+ * ▲ 23 · ● 129 and every window it did not name as it was. `closeWorkspace`
+ * kept the version indicator of the file that had gone. Now the state is
+ * forgotten in one place (`forgetDocumentState`) and every window of the space
+ * is repainted in one place (`repaintForDocument`); the windows of the other
+ * spaces are mounted afresh when their space is shown, from the same state.
+ */
+function showDocument(target: GraphSlot | null, opts: { rebuildOnly?: boolean } = {}): void {
+  const outgoing = emtree.active();
 
   // Park the outgoing slot's view state — unless the outgoing slot IS the target
   // (loadDocument's first activation, where `add` already made it active).
-  if (outgoing && outgoing.id !== id) {
+  if (outgoing && outgoing !== target && store === outgoing.store) {
     // The cameras parked here are the ACTIVE window's (WIN2b): the other windows
     // re-frame on arrival, which is what they would need anyway on a document of
     // a different size. Only projections actually shown have one.
@@ -4403,60 +4426,36 @@ function activateSlot(id: string, opts: { rebuildOnly?: boolean } = {}): void {
       camera,
     };
   }
-  emtree.setActive(id);
+  if (target) emtree.setActive(target.id);
 
-  store = target.store;
+  store = target ? target.store : null;
   // C1 · the Storage follows the ACTIVE graph's folder: dev.17 stayed on the
   // folder of the file opened last while the graph in front lived elsewhere
-  const folderChanged = (outgoing?.path ?? null) !== target.path;
-  currentFilePath = target.path; // desktop: Save writes back to THIS slot's file
-  if (folderChanged && target.path) void storageFollowDocument(target.path);
+  const folderChanged = (outgoing?.path ?? null) !== (target?.path ?? null);
+  currentFilePath = target ? target.path : null; // desktop: Save writes back to THIS slot's file
+  if (folderChanged && target?.path) void storageFollowDocument(target.path);
   // F2 · the version shown is the active graph's FILE's
-  projectVersion = (emtree.fileOf(target)?.version as ProjectVersion | null) ?? null;
-  updateVersionIndicator();
+  projectVersion = target ? (emtree.fileOf(target)?.version as ProjectVersion | null) ?? null : null;
 
-  // Transient state that belongs to the app, not to a graph: a selection or a
-  // hypergraph breadcrumb from another document means nothing here.
-  contextStack = [];
-  contextScene = null;
-  hoverId = null;
-  selectedId = null;
-  selectedIds = new Set(); // E4 · both halves of the selection, not one
-  matrixViewLayout = null; // derived from filters; recomputed for this document
-  resetWindowCameras(); // every window re-frames on the incoming document
-
-  graphOverrides.clear();
-  for (const [nodeId, position] of target.viewState.graphOverrides) {
-    graphOverrides.set(nodeId, position);
+  forgetDocumentState();
+  if (target) {
+    for (const [nodeId, position] of target.viewState.graphOverrides) {
+      graphOverrides.set(nodeId, position);
+    }
+    for (const epoch of target.viewState.phasesCollapsed) {
+      phasesCollapsed.add(epoch);
+    }
+    recomputeHiddenFromCircles(); // derive hidden types for this document
+    buildScenes();
+  } else {
+    scenes.matrix = null;
+    scenes.graph = null;
+    scenes.dtc = null;
+    scenes.multigraph = null;
   }
-  // DTC / multigraph drags are not parked per slot (yet): another document's
-  // substrate has other node ids, so carrying them over would place nothing and
-  // confuse much.
-  dtcOverrides.clear();
-  multigraphOverrides.clear();
-  phasesCollapsed.clear();
-  for (const epoch of target.viewState.phasesCollapsed) {
-    phasesCollapsed.add(epoch);
-  }
-
-  recomputeHiddenFromCircles(); // derive hidden types for this document
-  buildScenes();
   select(null);
-  nodeList.refresh();
-  updateToolbar();
-  refreshInspector();
-  refreshNarrativeView();
-  refreshEMTree();
-  // STUDY · the study window describes THIS document, so a different document
-  // makes its answer stale — measured: with the window open, loading a second
-  // study left the previous study's name in the field. Refreshed here, on the
-  // DOCUMENT change, and deliberately not in `refreshInspector`: that runs on
-  // every selection, and this panel is made of text inputs somebody may be
-  // typing in. (It guards on its own surface, so it costs nothing when the
-  // window is not showing.)
-  renderStudyWindow();
-  selectedNarrativeId = null; // a chapter selection belongs to its document
-  if (!opts.rebuildOnly) {
+  repaintForDocument();
+  if (target && !opts.rebuildOnly) {
     // A switch restores the view the slot was left in; a load lets
     // `loadDocument` decide (it may need a fresh em-core layout first).
     setViewOnLoad(target.viewState.view);
@@ -4483,6 +4482,70 @@ function activateSlot(id: string, opts: { rebuildOnly?: boolean } = {}): void {
   // switching document while the channel stays up, which is precisely what a
   // descriptor captured at connect time cannot see.
   announceOpenDocument();
+}
+
+/** Transient state that belongs to the document in front, not to the app: a
+ *  selection, a hypergraph breadcrumb, a drag, the manual positions of another
+ *  document mean nothing for the next one. (Per-slot view state is restored by
+ *  `showDocument` after this.) */
+function forgetDocumentState(): void {
+  contextStack = [];
+  contextScene = null;
+  hoverId = null;
+  selectedId = null;
+  selectedIds = new Set(); // E4 · both halves of the selection, not one
+  selectedNarrativeId = null; // a chapter selection belongs to its document
+  marquee = null;
+  matrixViewLayout = null; // derived from filters; recomputed for this document
+  resetWindowCameras(); // every window re-frames on the incoming document
+  graphOverrides.clear();
+  // DTC / multigraph drags are not parked per slot (yet): another document's
+  // substrate has other node ids, so carrying them over would place nothing and
+  // confuse much.
+  dtcOverrides.clear();
+  multigraphOverrides.clear();
+  phasesCollapsed.clear();
+}
+
+/**
+ * Repaint EVERY window of the space and the chrome around them for the document
+ * now in front (or for none). What a window shows is a function of the state;
+ * this is the call that says the state changed — every live mount through its
+ * surface (`refreshSurfaces`), and the parts that are not windows: the name
+ * strip, the window title, the status line, the warnings pill, the area headers
+ * (a sheet's row count), the EMTree.
+ */
+function repaintForDocument(): void {
+  dropHint.classList.add("hidden");   // AUDIT N6 · each empty window says it now
+  updateInfo();                       // the issues (and the pill) and the info line
+  if (!store) {
+    info.textContent = t("toast.openOrDrop");
+    renderNameStrip();
+  }
+  updateVersionIndicator();
+  updateWindowTitle();
+  updateToolbar();
+  updateBreadcrumb();
+  nodeList.refresh();
+  refreshInspector();
+  refreshNarrativeView();
+  refreshEMTree();
+  // STUDY · the study window describes THIS document, so a different document
+  // makes its answer stale — measured: with the window open, loading a second
+  // study left the previous study's name in the field. Refreshed here, on the
+  // DOCUMENT change, and deliberately not in `refreshInspector`: that runs on
+  // every selection, and this panel is made of text inputs somebody may be
+  // typing in. (It guards on its own surface, so it costs nothing when the
+  // window is not showing.)
+  renderStudyWindow();
+  renderViewer();
+  renderEmData();
+  renderStorage();
+  refreshSurfaces(undefined, ["graph", "table"]);
+  renderAreaHeaders();
+  renderStatusLine();
+  renderHubRoster();
+  draw();
 }
 
 /**
@@ -5152,7 +5215,7 @@ function confirmLeaveSidecar(action: string): Promise<boolean> {
           sync.sendRequestSave();
           toast("Asked the host (EMtools) to save its em.json");
         }
-        sync.disconnect(); // → Standalone; the new document replaces the view
+        leaveHostDocuments(); // → Standalone; the new document replaces the view
       }
       resolve(proceed);
     };
@@ -5242,27 +5305,32 @@ function newDocument(): void {
   info.textContent = t("l.newEmptyGraph");
 }
 
-// Tear the document down to an empty canvas (used when Sync is turned off — the
-// synced graph is the host's, so it should not linger locally).
-function clearDocument(): void {
-  store = null;
-  currentFilePath = null;
-  scenes.matrix = null;
-  scenes.graph = null;
-  contextStack = [];
-  contextScene = null;
-  hoverId = null;
-  selectedId = null;
-  selectedIds = new Set();
-  marquee = null;
-  // AUDIT N6 · each empty window says it now (`fillGraphEmpty`)
-  dropHint.classList.add("hidden");
-  info.textContent = t("toast.openOrDrop");
-  updateToolbar();
-  updateBreadcrumb();
-  nodeList.refresh();
-  draw();
-  announceOpenDocument();   // C1 · nothing open here any more, and it is said
+/**
+ * Leave the host — the room, or Blender in the Sidecar — and take its graphs
+ * away with it (MICRO 6 ott 2026, T1). The synced graph is the host's: it must
+ * not linger here as if it were a local document. What goes is what the host
+ * gave: the room's files (`file.room`, never on disk: their path is null) and
+ * the graphs that came from Blender. A file opened from the disk before or
+ * during the session stays, and becomes the graph in front.
+ *
+ * Every route out comes here: «Leave the room», the Mode menu's Standalone,
+ * entering another room, opening a file while connected. Then `closeFile` /
+ * `closeSlot` → `showDocument`, the one door — so after leaving, no window
+ * shows the room's data.
+ */
+function leaveHostDocuments(): void {
+  if (sync.connected || sync.retrying) sync.disconnect();
+  hostInfo = {};
+  hostNotice = null;
+  renderSidecarDetail();
+  const roomFiles = emtree.files.filter((f) => f.room);
+  const fromBlender = t("sync.fromBlender");
+  const blenderSlots = emtree.slots.filter((x) => x.originSuffix === fromBlender);
+  for (const file of roomFiles) closeFile(file.id);
+  for (const slot of blenderSlots) if (emtree.get(slot.id)) closeSlot(slot.id);
+  // nothing of the host's was open (a Sidecar that never sent its graph): the
+  // document in front is unchanged, and the chrome still says the host is gone
+  if (!roomFiles.length && !blenderSlots.length) repaintForDocument();
 }
 
 function defaultFileName(): string {
@@ -6879,7 +6947,8 @@ function enterRoom(roomId: string): void {
   const s = getSettings();
   saveSettings({ ...s, sync: { ...s.sync, hubRoom: roomId } });
   if (sync.connected && sync.room === roomId) return;
-  if (sync.connected || sync.retrying) sync.disconnect();
+  // T1 · changing room is leaving one: its graphs go, through the one door
+  if (sync.connected || sync.retrying) leaveHostDocuments();
   hubReconnecting = false;
   document.getElementById("btn-mode-hub")?.click();
 }
@@ -10975,8 +11044,7 @@ btnSync.addEventListener("click", () => {
     return;
   }
   if (sync.connected) {
-    sync.disconnect();
-    clearDocument(); // the synced graph is the host's — don't leave it lingering
+    leaveHostDocuments(); // the synced graph is the host's — don't leave it lingering
     return;
   }
   const syncUrl = getSyncUrl();
@@ -13784,6 +13852,7 @@ function refreshIssues(): void {
   if (!store) {
     currentIssues = [];
     issueUnitOf = () => null;
+    warnedNodes = new Set();   // T1 · no «!» of a graph that is gone
     renderWarningsPill();
     return;
   }
@@ -14174,33 +14243,7 @@ function verifiedForTable(st: DocumentStore): NonNullable<ViewCtx["verified"]> {
 
 /** The last graph was closed: back to the empty canvas, without a stale view. */
 function closeWorkspace(): void {
-  store = null;
-  currentFilePath = null;
-  contextStack = [];
-  contextScene = null;
-  hoverId = null;
-  selectedId = null;
-  selectedIds = new Set();
-  selectedNarrativeId = null;
-  matrixViewLayout = null;
-  graphOverrides.clear();
-  dtcOverrides.clear();
-  multigraphOverrides.clear();
-  resetWindowCameras();
-  phasesCollapsed.clear();
-  scenes.matrix = null;
-  scenes.graph = null;
-  scenes.dtc = null;
-  scenes.multigraph = null;
-  dropHint.classList.add("hidden");   // AUDIT N6 · the windows say it
-  info.textContent = t("toast.openOrDrop");
-  select(null);
-  nodeList.refresh();
-  updateToolbar();
-  updateBreadcrumb();
-  refreshInspector();
-  refreshNarrativeView();
-  draw();
+  showDocument(null);
   logInfo(t("toast.workspaceEmpty"));
 }
 
@@ -17800,7 +17843,10 @@ function areaFor(win: Win): HTMLElement {
 /** Give an area the surface of its window's type — and REBUILD it only when
  *  that type actually changed. A focus change never reaches here. */
 function syncAreaContent(area: HTMLElement, win: Win): void {
-  if (area.dataset.surfaceType === win.type) return;
+  // the type AND the window object (MICRO T2): «↺» re-makes the windows of a
+  // space under the same ids, and a surface left on the old object draws a
+  // sheet nobody can choose any more (`mountedWinIs`)
+  if (area.dataset.surfaceType === win.type && mountedWinIs(win.id, win)) return;
   clearAreaContent(area, win.id);
   area.dataset.surfaceType = win.type;
   // ONE constructor, for every type and every area, focused or not

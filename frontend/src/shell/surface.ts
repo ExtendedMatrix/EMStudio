@@ -98,7 +98,8 @@ export function mountSurface(win: Win, host: HTMLElement): Surface | null {
   const type = surfaceTypeOf(win.type);
   if (!type) return null;
   const live = mounted.get(win.id);
-  if (live && live.host === host && live.win.type === win.type) return live.surface;
+  // the SAME window object, not only the same id: see `mountedWinIs`
+  if (live && live.host === host && live.win === win && live.win.type === win.type) return live.surface;
   if (live) {
     live.surface.destroy();
     mounted.delete(win.id);
@@ -114,6 +115,22 @@ export function unmountSurface(winId: string): void {
   if (!live) return;
   live.surface.destroy();
   mounted.delete(winId);
+}
+
+/**
+ * Is the surface of this id mounted on THIS window object?
+ *
+ * A surface keeps the `Win` it was mounted with and reads its state from it (a
+ * table its sheet, a storage its folder). «↺», which puts a space back to its
+ * arrangement (`applyArrangement`), makes NEW window objects under the SAME ids,
+ * and the area — keyed by id, never re-parented — kept its surface on the old
+ * one. Measured on 6 Oct (MICRO T2): after ↺ the Tabular's header followed the
+ * sheet menu (it reads the new object) and its rows stayed on the sheet of the
+ * old one, in every direction. A window that is a different object is a
+ * different mount.
+ */
+export function mountedWinIs(winId: string, win: Win): boolean {
+  return mounted.get(winId)?.win === win;
 }
 
 export function surfaceOf(winId: string): Surface | null {

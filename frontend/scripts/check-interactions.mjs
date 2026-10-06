@@ -4945,6 +4945,178 @@ if (process.env.F1_DIR) test("TL1.live", "T-L1 dal vivo · il bridge legge l'EXI
     detail: { files: files.length, groups, lots, errors } };
 });
 
+// ── MICRO 6 ott 2026 · uscire dalla stanza svuota tutto, e il Tabular mostra il
+// foglio scelto (report: s3Dgraphy/.claude/wip/reports/2026-10-06-emstudio-stanza-e-tabular)
+const SPACES = ["canvas", "provenance", "assets", "narrative", "space"];
+/** What every window of every space, the name strip, the status bar and the
+ *  warnings pill SAY — as text, with the values of the fields. The EMTree's
+ *  «Recent files» is left out: it is the app's history, not a document. */
+async function everyWindowSays(p) {
+  const out = [];
+  for (const ws of SPACES) {
+    await workspace(p, ws);
+    out.push(...await p.evaluate((ws) => {
+      const said = (el) => {
+        if (!el) return "";
+        const c = el.cloneNode(true);
+        c.querySelectorAll(".et-recents").forEach((x) => x.remove());
+        const vals = [...el.querySelectorAll("input, textarea")].map((e) => e.value).filter(Boolean).join(" ");
+        return `${c.textContent} ${vals}`.replace(/\s+/g, " ");
+      };
+      // a graph window DRAWS on a canvas: what it shows is its scene's boxes
+      const rows = [...document.querySelectorAll(".tile-area")].filter((a) => a.offsetWidth > 0)
+        .map((a) => ({ ws, where: a.dataset.win, text: said(a),
+                       boxes: window.__EM_DRAG__.winScene(a.dataset.win)?.boxes.length ?? 0 }));
+      rows.push({ ws, where: "name-strip", text: said(document.getElementById("name-strip")) },
+                { ws, where: "statusbar", text: said(document.getElementById("statusbar")) });
+      return rows;
+    }, ws));
+  }
+  return out;
+}
+/** The words of the document in front that the empty app never says: its
+ *  title, «N nodes», the names of its units, the warnings pill's count. */
+async function wordsOfTheDocument(p) {
+  return p.evaluate(() => {
+    const d = JSON.parse(window.__EM_DRAG__.graphJson());
+    const units = (d?.nodes ?? []).map((n) => String(n.name ?? "")).filter((x) => x.length >= 5);
+    return { title: document.getElementById("ns-title")?.textContent ?? "",
+             nodes: `${window.__EM_DRAG__.nodeCount()} nodes`,
+             pill: document.getElementById("footer-warnings")?.textContent ?? "",
+             units: [...new Set(units)].slice(0, 40) };
+  });
+}
+function leftoversOf(says, words, baseline) {
+  const all = [words.title, words.nodes, words.pill, ...words.units]
+    .filter((w) => w && !baseline.some((b) => b.text.includes(w)));
+  const found = [];
+  for (const row of says) for (const w of all) if (row.text.includes(w)) found.push(`${row.ws}/${row.where}: «${w}»`);
+  for (const row of says) if (row.boxes) found.push(`${row.ws}/${row.where}: ${row.boxes} boxes drawn`);
+  return { checked: all.length, found };
+}
+
+// T2 · the sheet chosen in a Tabular window is the sheet it SHOWS — in the three
+// spaces that have one, on arrival and after «↺» (which re-makes the windows of
+// a space under the same ids: the surface stayed on the old window object and
+// went on drawing its sheet while the header followed the menu)
+test("TT2.sheets", "MICRO T2 · Tabular: ogni foglio scelto dal menu mostra il SUO contenuto (Warnings → Units → Documents → Warnings e ritorno), nelle finestre Tabular di Stratigrafia, Fonti e Spazio, all'arrivo e dopo «↺»", async () => {
+  const { p, ctx, errors } = await open({ doc: "TempluMare", locale: "en" });
+  p.on("dialog", (d) => d.accept());
+  const read = (win) => p.evaluate((w) => {
+    const a = document.querySelector(`.tile-area[data-win="${w}"]`);
+    const body = a?.querySelector(".tile-tablebody");
+    return { head: a?.querySelector(".win-mode .dd-toggle")?.textContent.replace("▾", "").trim() ?? "",
+             issues: !!body?.querySelector("[data-issues-tab]"),
+             th: [...(body?.querySelectorAll("thead th") ?? [])].map((x) => x.textContent.trim()).filter(Boolean).slice(0, 2).join("|") };
+  }, win);
+  // what each sheet's OWN content looks like (the first two column heads)
+  const own = { Warnings: (r) => r.issues && r.th === "Severity|Rule",
+                Units: (r) => !r.issues && r.th === "ID|Type",
+                Documents: (r) => !r.issues && r.th === "ID|Filename" };
+  const pick = async (win, label) => {
+    await p.click(`.tile-area[data-win="${win}"] .win-mode .dd-toggle`);
+    await p.waitForTimeout(200);
+    await p.locator(`.tile-area[data-win="${win}"] .win-mode .dd-menu button`, { hasText: label }).first().click();
+    await p.waitForTimeout(400);
+  };
+  const tour = ["Warnings", "Units", "Documents", "Warnings", "Documents", "Units", "Warnings"];
+  const wrong = [];
+  let steps = 0;
+  const walk = async (ws, when) => {
+    const win = await p.evaluate(() => window.__EM_DRAG__.wins().find((x) => x.type === "table")?.id);
+    if (!win) { wrong.push(`${ws}/${when}: no Tabular`); return; }
+    for (const sheet of tour) {
+      await pick(win, sheet);
+      const r = await read(win);
+      steps++;
+      if (r.head !== sheet || !own[sheet](r)) wrong.push(`${ws}/${when}: ${sheet} → ${JSON.stringify(r)}`);
+    }
+  };
+  for (const ws of ["canvas", "provenance", "space"]) {
+    await workspace(p, ws);
+    await walk(ws, "arrival");
+    // reshape the space (a graph window to DTC), then «↺» puts it back
+    const g = await p.evaluate(() => window.__EM_DRAG__.wins().find((x) => x.type === "graph")?.id);
+    await p.locator(`.tile-area[data-win="${g}"] button`, { hasText: /^DTC$/ }).first().click();
+    await p.waitForTimeout(400);
+    const reset = p.locator(`#workspace-bar .ws-tab[data-ws="${ws}"] .ws-reset`);
+    if (!(await reset.count())) { wrong.push(`${ws}: no ↺ after the reshape`); continue; }
+    await reset.click();
+    await p.waitForTimeout(700);
+    await walk(ws, "after ↺");
+  }
+  await p.screenshot({ path: SHOT("tt2-tabular-dopo-reset") }).catch(() => {});
+  await ctx.close();
+  return { pass: steps === 42 && !wrong.length && !errors.length, detail: { steps, wrong: wrong.slice(0, 6), errors } };
+});
+
+// T1 · leaving the host empties EVERY window: here the Sidecar, with a Blender
+// that is a WebSocket of this check (the room is TT1.live, on the node)
+test("TT1.sidecar", "MICRO T1 · Con Blender: arriva il grafo, poi «On this computer» — dopo l'uscita nessuna finestra di nessuno spazio, né la testata, né la barra di stato, né la pillola degli avvisi mostra dati del grafo di Blender, e l'EMTree non lo tiene", async () => {
+  const port = 8899;
+  const doc = fixture("TempluMare");
+  doc.graph.name = "TempluMareDaBlender";
+  const host = { tool: "Blender", file: "TempluMare.blend" };
+  const { p, ctx, errors } = await open({ doc: null, locale: "en",
+    init: { "emstudio.settings": JSON.stringify({ sync: { protocol: "ws", host: "localhost", port } }) },
+    wsRoute: { pattern: new RegExp(`localhost:${port}`), handler: (ws) => {
+      ws.onMessage((m) => {
+        const msg = JSON.parse(String(m));
+        if (msg.type === "request_snapshot") ws.send(JSON.stringify({ v: 2, type: "snapshot", source: "emtools", payload: { doc, host } }));
+      });
+    } } });
+  const baseline = await everyWindowSays(p);
+  await workspace(p, "canvas");
+  await p.click("#dd-mode .dd-toggle");
+  await p.click('#conn-pop .conn-mode[data-mode="sidecar"]');
+  await p.waitForFunction(() => window.__EM_DRAG__.nodeCount() > 0, null, { timeout: 15000 }).catch(() => {});
+  await p.waitForTimeout(1500);
+  for (const ws of SPACES) await workspace(p, ws);   // every space mounted on the graph
+  await workspace(p, "canvas");
+  const words = await wordsOfTheDocument(p);
+  const before = leftoversOf(await everyWindowSays(p), words, baseline);
+  await workspace(p, "canvas");
+  await p.click("#dd-mode .dd-toggle");
+  await p.click('#conn-pop .conn-mode[data-mode="standalone"]');
+  await p.waitForTimeout(1200);
+  await p.screenshot({ path: SHOT("tt1-sidecar-dopo-uscita") }).catch(() => {});
+  const after = leftoversOf(await everyWindowSays(p), words, baseline);
+  const slots = await p.evaluate(() => window.__EM_DRAG__.slots());
+  await ctx.close();
+  return { pass: words.units.length > 10 && before.found.length > 0 && after.checked > 10 && !after.found.length
+      && slots.length === 0 && !errors.length,
+    detail: { words: { title: words.title, nodes: words.nodes, pill: words.pill, units: words.units.length },
+              inside: before.found.length, after, slots, errors } };
+});
+
+if (K_NODE) test("TT1.live", "MICRO T1 dal vivo · utente dev in una stanza del nodo (LEAVE_ROOM, di base templu-mare-prova-claude), «Leave the room» dal pannello: nessuna finestra di nessuno spazio, né la testata, né la barra di stato, né la pillola mostra dati della stanza; l'EMTree non tiene il suo file", async () => {
+  const room = process.env.LEAVE_ROOM ?? "templu-mare-prova-claude";
+  const { p, ctx, errors } = await open({ doc: null, locale: "en",
+    init: { "emstudio.settings": JSON.stringify({ sync: { hubUrl: K_NODE, hubRoom: room } }) } });
+  const baseline = await everyWindowSays(p);
+  await workspace(p, "canvas");
+  await p.evaluate(([u, r, tk]) => window.__EM_DRAG__.joinRoom(u, r, tk), [K_NODE, room, kToken("dev")]);
+  await p.waitForFunction(() => window.__EM_DRAG__.nodeCount() > 0, null, { timeout: 60000 }).catch(() => {});
+  await p.waitForTimeout(2500);
+  for (const ws of SPACES) await workspace(p, ws);
+  await workspace(p, "canvas");
+  const words = await wordsOfTheDocument(p);
+  const before = leftoversOf(await everyWindowSays(p), words, baseline);
+  await workspace(p, "canvas");
+  await p.click("#mode-indicator");
+  await p.waitForTimeout(500);
+  await p.locator("#conn-pop button", { hasText: "Leave the room" }).first().click();
+  await p.waitForTimeout(1500);
+  await p.screenshot({ path: SHOT("tt1-stanza-dopo-uscita") }).catch(() => {});
+  const after = leftoversOf(await everyWindowSays(p), words, baseline);
+  const files = await p.evaluate(() => window.__EM_DRAG__.slots());
+  await ctx.close();
+  return { pass: words.units.length > 10 && before.found.length > 0 && after.checked > 10 && !after.found.length
+      && files.length === 0 && !errors.length,
+    detail: { room, words: { title: words.title, nodes: words.nodes, pill: words.pill, units: words.units.length },
+              inside: before.found.length, after, files, errors } };
+});
+
 // ── run ─────────────────────────────────────────────────────────────────────
 const chosen = cases.filter((c) => !only.length || only.includes(c.id) || only.some((o) => c.id.startsWith(o + ".")));
 for (const c of chosen) {
