@@ -260,26 +260,32 @@ export function traceRoute(
   ctx: CanvasRenderingContext2D,
   r: EdgeRoute,
   bridgeRadius: number,
+  /** GRAFO REATTIVO · G8 · the world rect on screen [x0, y0, x1, y1]: a bump
+   *  outside it is not drawn (a long edge of the layered Graph crosses hundreds
+   *  of verticals, and its bumps off screen were the paint at 1:1) */
+  view?: readonly [number, number, number, number],
 ): void {
   const pts = r.pts;
   ctx.moveTo(pts[0].x, pts[0].y);
   for (let s = 0; s < pts.length - 1; s++) {
     const p = pts[s];
     const q = pts[s + 1];
-    const xsOn = bridgeRadius > 0 ? (r.bridges[s] ?? []) : [];
+    let xsOn = bridgeRadius > 0 ? (r.bridges[s] ?? []) : [];
+    if (view && xsOn.length) {
+      xsOn = p.y < view[1] || p.y > view[3] ? [] : xsOn.filter((bx) => bx >= view[0] && bx <= view[2]);
+    }
     if (!xsOn.length || Math.abs(p.y - q.y) > EPS) {
       ctx.lineTo(q.x, q.y);
       continue;
     }
     const ltr = p.x <= q.x;
+    // the bump: one quadratic whose apex is `bridgeRadius` above the line, as
+    // the half circle's was (G8: an arc per crossing was the dearest call of a
+    // dense paint; the curve is one segment and reads the same at this size)
     for (const bx of xsOn) {
-      if (ltr) {
-        ctx.lineTo(bx - bridgeRadius, p.y);
-        ctx.arc(bx, p.y, bridgeRadius, Math.PI, 0, false);
-      } else {
-        ctx.lineTo(bx + bridgeRadius, p.y);
-        ctx.arc(bx, p.y, bridgeRadius, 0, Math.PI, true);
-      }
+      const r = ltr ? bridgeRadius : -bridgeRadius;
+      ctx.lineTo(bx - r, p.y);
+      ctx.quadraticCurveTo(bx, p.y - 2 * bridgeRadius, bx + r, p.y);
     }
     ctx.lineTo(q.x, q.y);
   }

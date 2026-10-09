@@ -557,6 +557,7 @@ export function strokeEdges(
   o: EdgeStrokeOpts,
   bridges: boolean,
   arrows: boolean,
+  view?: readonly [number, number, number, number],
 ): void {
   if (!routes.length) return;
   const st = edgeStyle(edgeType);
@@ -578,12 +579,17 @@ export function strokeEdges(
       : st.dash.map((d) => d * o.k));
   }
   ctx.beginPath();
-  for (const route of routes) traceRoute(ctx, route, bridges ? o.bridgeR : 0);
+  for (const route of routes) traceRoute(ctx, route, bridges ? o.bridgeR : 0, view);
   ctx.stroke();
   ctx.setLineDash([]);
   if (arrows && !SYMMETRIC_EDGES.has(edgeType ?? "")) {
     ctx.beginPath();
-    for (const route of routes) arrowheadPath(ctx, route, o.emphasis ? o.arrowSize * 1.4 : o.arrowSize);
+    for (const route of routes) {
+      // an arrowhead whose tip is off screen is not drawn (G8)
+      const tip = route.pts[route.pts.length - 1];
+      if (view && tip && (tip.x < view[0] || tip.x > view[2] || tip.y < view[1] || tip.y > view[3])) continue;
+      arrowheadPath(ctx, route, o.emphasis ? o.arrowSize * 1.4 : o.arrowSize);
+    }
     ctx.fillStyle = col;
     ctx.fill();
   }
@@ -755,7 +761,8 @@ export function render(
   }
   // the conflicts last, so a red edge is never under a grey one
   const order = [...batches.values()].sort((a, b) => +!!a.o.conflict - +!!b.o.conflict);
-  for (const b of order) strokeEdges(ctx, b.routes, b.type, b.o, lodBridges, lodArrows);
+  const viewRect = [wx0, wy0, wx1, wy1] as const;
+  for (const b of order) strokeEdges(ctx, b.routes, b.type, b.o, lodBridges, lodArrows, viewRect);
   for (const i of litIdx) {
     const e = scene.edges[i];
     // the ochre halo of a picked connector under it (the selection's signal),
