@@ -13,8 +13,8 @@
  * switch). Culling: a disc or an edge off screen is not drawn.
  */
 import { drawGlyph, type GlyphInk } from "./glyphs";
-import { stratigraphicKindLetter, stratigraphicKindOf } from "./rules";
 import { drawPdChips } from "./pd-chip";
+import { propertyLabel, stratigraphicKindLetter, stratigraphicKindOf } from "./rules";
 import { FAMILY_COLOR, discVisibility, type Disc, type LiquidExtra, type LiquidFilter } from "./views/liquid";
 import type { Scene } from "./scene";
 import { canvasFont, canvasTheme, activeTheme } from "./theme";
@@ -197,7 +197,7 @@ export function renderLiquid(
   ctx.lineJoin = "round";
   for (const l of labels) {
     const n = scene.byId.get(l.id)!;
-    const text = String(n.node.name || n.id);
+    const text = n.node.node_type === "property" ? (propertyLabel(n.node).label || n.id) : String(n.node.name || n.id);
     const t = text.length > 28 ? text.slice(0, 27) + "…" : text;
     ctx.globalAlpha = l.a;
     ctx.lineWidth = 3 / k;

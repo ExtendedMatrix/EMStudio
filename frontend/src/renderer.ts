@@ -3,7 +3,7 @@
 // metadata (palette.ts ← em_visual_rules.json). Edges are routed
 // orthogonally with crossing bridges (routing.ts), yEd-style.
 import { crispImage, dtcGlyphUrl, ICON_NODE_TYPES, imageFor, imageForUrl } from "./icons";
-import { dtcGlyphName, reasoningText, stratigraphicKindLetter, stratigraphicKindOf } from "./rules";
+import { dtcGlyphName, propertyLabel, reasoningText, stratigraphicKindLetter, stratigraphicKindOf } from "./rules";
 import { documentVariant, edgeInk, edgeStyle, nodeStyle } from "./palette";
 import {
   arrowheadPath,
@@ -249,6 +249,15 @@ const LANE_COLORS = (): [string, string] => {
   const t = canvasTheme();
   return [t.laneA, t.laneB];
 };
+/** What a box says: its own label (a resource of several files), else — a
+ *  property — its readable label (MICRO-BADGE-PD · `rules.propertyLabel`; the
+ *  technical name is in the tooltip), else its name. */
+export function nodeText(n: { label?: string; id: string; node: { name?: string | null; node_type?: string; data?: unknown } }): string {
+  if (n.label) return n.label;
+  if (n.node.node_type === "property") return propertyLabel(n.node).label || n.id;
+  return String(n.node.name || n.id);
+}
+
 const accentColor = (): string => canvasTheme().accent;
 /** PELLE · the fixed size of the desk's scale, stepped down to 10px only when
  *  the box is too short to hold it (a label never scales with the box height
@@ -986,7 +995,7 @@ export function render(
       ctx.lineWidth = 0.9 / Math.sqrt(vp.scale);
       ctx.stroke();
       if (drawLabels) {
-        const label = (n.label ?? String(n.node.name || n.id));
+        const label = nodeText(n);
         ctx.font = canvasFont(CANVAS_TYPE.nodeLabel.weight, CANVAS_TYPE.minPx);
         // ON the sheet, whose fill is white paper from the datamodel: the ink
         // follows the FILL, not the theme (`labelOn`). Using the canvas ink here
@@ -1044,7 +1053,7 @@ export function render(
       ctx.lineWidth = 1.1 / Math.sqrt(vp.scale);
       ctx.stroke();
       if (drawLabels) {
-        const label = (n.label ?? String(n.node.name || n.id));
+        const label = nodeText(n);
         ctx.font = canvasFont(500, fitPx(CANVAS_TYPE.nodeLabel.px, n.h));
         // the annotation draws its own pale field (st.fill): ink from the fill
         ctx.fillStyle = labelInk(
@@ -1138,7 +1147,7 @@ export function render(
         ctx.drawImage(crispImage(icon, iw, ih, dpr * vp.scale), ix, iy, iw, ih);
       }
       if (drawLabels) {
-        const label = (n.label ?? String(n.node.name || n.id));
+        const label = nodeText(n);
         ctx.font = canvasFont(CANVAS_TYPE.nodeLabel.weight, CANVAS_TYPE.minPx);
         ctx.fillStyle = labelInk(state, n.node.id ?? n.id, canvasTheme().labelInk);
         if (st.labelPosition === "top_left") {
@@ -1248,7 +1257,7 @@ export function render(
     }
 
     if (drawLabels) {
-      const label = (n.label ?? String(n.node.name || n.id));
+      const label = nodeText(n);
       ctx.font = canvasFont(CANVAS_TYPE.nodeLabel.weight, fitPx(CANVAS_TYPE.nodeLabel.px, n.h));
       // A SHRUNKEN shape (BR) cannot hold its own name: `textColor` is computed
       // from the fill, so over BR's black square it is near-white — and the name

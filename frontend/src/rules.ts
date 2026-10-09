@@ -1019,3 +1019,55 @@ export function reasoningText(word: string, field: "label" | "description" = "la
   for (const [k, v] of Object.entries(vars)) s = s.split(`{${k}}`).join(v);
   return s;
 }
+
+// MICRO-BADGE-PD · the LABEL of a property: a readable name in the interface
+// language («Data di inizio», «Materiale», «Altezza») beside its technical name
+// (`absolute_time_start`, `material`, `height`). The words are the datamodel's:
+// the qualia of `em_qualia_types.json` (section `qualia` of the translations)
+// and the EM property names in use that are not a quale (`property_names`,
+// em_qualia_types 1.6.8 — `definition`, `material`). A name is matched as
+// s3Dgraphy's RDF exporter matches it to a quale (`get_qualia_crm_iri`): as
+// written, its last segment after a dot («Dimension.height»), lower case; and
+// spaces read as underscores. Its `property_type` first, when it is a term. A
+// name outside the vocabulary («Riser depth», «step_dimensions») is shown as
+// it is.
+type _LabelTr = Record<string, { label?: Record<string, string | boolean> }>;
+const _PROP_TR = datamodelTranslations as unknown as { qualia?: _LabelTr; property_names?: _LabelTr };
+
+export interface PropertyLabel {
+  /** what to show: the term's label in the active locale, else the name */
+  label: string;
+  /** the name as written (the technical name) */
+  technical: string;
+  /** the term of the vocabulary it was matched to, null when none */
+  term: string | null;
+}
+
+function vocabularyTerm(s: string): { section: "qualia" | "property_names"; key: string } | null {
+  const raw = s.trim();
+  if (!raw) return null;
+  const tail = raw.includes(".") ? raw.slice(raw.lastIndexOf(".") + 1) : raw;
+  const variants = [raw, tail, raw.toLowerCase(), tail.toLowerCase(),
+                    raw.toLowerCase().replace(/\s+/g, "_"), tail.toLowerCase().replace(/\s+/g, "_")];
+  for (const v of variants) {
+    if (_PROP_TR.qualia?.[v]) return { section: "qualia", key: v };
+    if (_PROP_TR.property_names?.[v]) return { section: "property_names", key: v };
+  }
+  return null;
+}
+
+export function propertyLabel(p: { name?: string | null; data?: unknown } | null | undefined): PropertyLabel {
+  const name = String(p?.name ?? "").trim();
+  const ptype = String(((p?.data ?? {}) as Record<string, unknown>).property_type ?? "").trim();
+  const technical = name || ptype;
+  for (const cand of [ptype, name]) {
+    const hit = cand ? vocabularyTerm(cand) : null;
+    if (!hit) continue;
+    const field = _PROP_TR[hit.section]?.[hit.key]?.label ?? {};
+    const loc = field[getLocale()];
+    const en = field.en;
+    const label = typeof loc === "string" && loc.trim() ? loc : typeof en === "string" && en.trim() ? en : technical;
+    return { label, technical, term: hit.key };
+  }
+  return { label: technical, technical, term: null };
+}

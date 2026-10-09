@@ -2,6 +2,7 @@ import type { EmDocument, EmNode } from "./types";
 
 import { liveNodes } from "./crdt";
 import { isAltLabel, altLabelText } from "./altlabels";
+import { propertyLabel } from "./rules";
 
 /**
  * STRUTTURA · FULL-TEXT search over the graph — the name, the description, the
@@ -71,10 +72,14 @@ export function searchGraph(doc: EmDocument | null, query: string, limit = 14,
   for (const n of nodes) {
     const unit = n.node_type === "property" ? ownerOf.get(n.id) : undefined;
     const name = unit ? `${str(unit.name || unit.id)} · ${str(n.name || n.id)}` : str(n.name || n.id);
+    // MICRO-BADGE-PD · a property is found by its readable label too
+    // («Altezza» finds `height`), and the hit says both
+    const plab = n.node_type === "property" ? propertyLabel(n) : null;
+    const readable = plab && plab.term && plab.label !== plab.technical ? plab.label : "";
     const ps = props.get(n.id) ?? [];
     const ep = epoch.get(n.id);
-    const bits = [name, n.id, n.node_type, str(n.description), valueOf(n),
-                  ...ps.flatMap((p) => [str(p.name), valueOf(p)]),
+    const bits = [name, readable, n.id, n.node_type, str(n.description), valueOf(n),
+                  ...ps.flatMap((p) => [str(p.name), propertyLabel(p).label, valueOf(p)]),
                   ep ? str(ep.name) : ""];
     const text = bits.join(" ").toLowerCase();
     if (!toks.every((t) => text.includes(t))) continue;
@@ -87,14 +92,15 @@ export function searchGraph(doc: EmDocument | null, query: string, limit = 14,
       const l = label.toLowerCase();
       return l === q ? 0 : l.startsWith(q) ? 1 : toks.every((t) => l.includes(t)) ? 2 : 3;
     };
-    const rank = Math.min(rankOf(name), rankOf(str(n.name || n.id)), ...alts.map(rankOf));
+    const rank = Math.min(rankOf(name), rankOf(str(n.name || n.id)), ...(readable ? [rankOf(readable)] : []),
+                          ...alts.map(rankOf));
     const excerpt = [valueOf(n) !== str(n.description) ? valueOf(n) : "",
                      str(n.description),
                      ...ps.map((p) => isAltLabel(p) ? `«${valueOf(p)}»` : `${str(p.name)} ${valueOf(p)}`.trim())
                        .filter((x) => toks.some((t) => x.toLowerCase().includes(t))),
                      ep ? str(ep.name) : ""]
       .filter(Boolean).join(" · ").slice(0, 110);
-    hits.push({ node: n, label: name, excerpt, rank, kind: kindRank(n.node_type) });
+    hits.push({ node: n, label: readable ? `${name} — ${readable}` : name, excerpt, rank, kind: kindRank(n.node_type) });
   }
   hits.sort((a, b) => a.rank - b.rank || a.kind - b.kind ||
     a.label.localeCompare(b.label, undefined, { numeric: true }));

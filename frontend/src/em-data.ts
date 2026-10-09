@@ -17,7 +17,7 @@
 
 import type { DocumentStore } from "./model";
 import type { EmEdge, EmNode } from "./types";
-import { isStratigraphicType, nodeLabel, typesOfClass } from "./rules";
+import { isStratigraphicType, nodeLabel, propertyLabel, typesOfClass } from "./rules";
 import { RELATION_CLAIMS } from "./table-views";
 
 // ── deterministic identity (mirror of UnifiedXLSXImporter._mint) ────────────
@@ -444,6 +444,10 @@ export function buildTable(
     // STRUTTURA · what KIND of statement the row is: a qualia (a property), an
     // epoch membership, a relation — the desk's «Genere»
     { key: "KIND", label: "Kind", editor: { kind: "readonly" } },
+    // MICRO-BADGE-PD · the readable label of the property (the vocabulary's,
+    // in the interface language) beside its technical name, which stays the
+    // editable cell (`rules.propertyLabel`; a free name: the name as it is)
+    { key: "PROPERTY_LABEL", label: "Label", editor: { kind: "readonly" } },
     { key: "PROPERTY_TYPE", label: "Property", editor: { kind: "text" } },
     { key: "VALUE", label: "Value", editor: { kind: "text" } },
     { key: "UNITS", label: "Units", editor: { kind: "text" } },
@@ -459,6 +463,7 @@ export function buildTable(
       cells: {
         TARGET_ID: tgt ? str(tgt.name) || tgt.id : "—",
         KIND: "qualia",
+        PROPERTY_LABEL: propertyLabel(p).label,
         PROPERTY_TYPE: str(
           (p as Record<string, unknown>).property_type ?? d.property_type ?? p.name ?? "",
         ),
@@ -491,7 +496,7 @@ export function buildTable(
     if (!kind) return;
     rows.push({
       id: `claim:${e.id ?? i}`,
-      cells: { TARGET_ID: str(s.name) || s.id, KIND: kind, PROPERTY_TYPE: et,
+      cells: { TARGET_ID: str(s.name) || s.id, KIND: kind, PROPERTY_LABEL: "", PROPERTY_TYPE: et,
                VALUE: str(d.name) || d.id, UNITS: "", COMBINER_REASONING: "", PROVENANCE: "" },
       volatile: false,
       readonly: true,

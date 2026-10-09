@@ -3,7 +3,7 @@ import type { DocumentStore } from "./model";
 import { edgeStyle, nodeStyle } from "./palette";
 import { dataGlyphLabel, glyphFor, glyphSvg } from "./glyphs";
 import { activeTheme, canvasTheme } from "./theme";
-import { classOf, conceptParts, isGroupType, isStratigraphicType, nodeElements, stratigraphicKindLabel, stratigraphicKindOf } from "./rules";
+import { classOf, conceptParts, isGroupType, isStratigraphicType, nodeElements, propertyLabel, stratigraphicKindLabel, stratigraphicKindOf } from "./rules";
 import { BADGE_RULES, resolveEffective, sourceLabel } from "./funnel";
 import type { AuthorityCandidate, EmEdge, EmNode } from "./types";
 import { qualiaList } from "./vocab";
@@ -342,6 +342,17 @@ export function renderInspector(
     nameRow.appendChild(nameInput);
   }
   root.appendChild(nameRow);
+  // MICRO-BADGE-PD · a property: its readable label over the technical name
+  // the field above edits (`rules.propertyLabel`; a free name has none)
+  if (node.node_type === "property") {
+    const pl = propertyLabel(node);
+    if (pl.term && pl.label !== pl.technical) {
+      const lab = el("div", "insp-prop-label", pl.label);
+      lab.appendChild(el("small", "prop-tech", pl.technical));
+      lab.title = t("insp.propLabelTitle", { term: pl.term });
+      root.appendChild(lab);
+    }
+  }
   // node UUID is developer-only noise — hidden unless the Developer setting is on
   if (getSettings().developer.showNodeIds)
     root.appendChild(el("div", "insp-id", node.id));

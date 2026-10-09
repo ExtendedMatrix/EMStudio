@@ -15,6 +15,7 @@
  * draws and calls back.
  */
 import { t } from "./i18n";
+import { propertyLabel } from "./rules";
 import type { DocumentStore } from "./model";
 import {
   extractorsOfProperty,
@@ -102,9 +103,13 @@ export function geometryBadge(g: Geometry | null): HTMLElement {
 
 function linkBtn(ui: ChainUi, id: string, cls = ""): HTMLButtonElement {
   const n = ui.store.node(id);
-  const b = el("button", `tv-link chain-link ${cls}`.trim(), String(n?.name || id));
+  // MICRO-BADGE-PD · a property says its readable label, and its technical
+  // name beside it, smaller (`rules.propertyLabel`)
+  const pl = n?.node_type === "property" ? propertyLabel(n) : null;
+  const b = el("button", `tv-link chain-link ${cls}`.trim(), pl ? pl.label : String(n?.name || id));
+  if (pl && pl.term && pl.label !== pl.technical) b.appendChild(el("small", "prop-tech", pl.technical));
   b.type = "button";
-  b.title = `${n?.node_type ?? ""}`;
+  b.title = pl ? `${n?.node_type ?? ""} · ${pl.technical}` : `${n?.node_type ?? ""}`;
   b.addEventListener("click", () => ui.jump(id));
   return b;
 }

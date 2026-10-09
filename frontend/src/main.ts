@@ -579,7 +579,7 @@ import {
   DECLARED_KINDS, landStep, parentLabel, type DeclaredKind, type DeclaredLevel,
 } from "./declared";
 import { adaptDraft } from "./views/stamps";
-import { ancestorsOf, dtcFamiliesOf, dtcKindFamily, dtcKindsFor } from "./rules";
+import { ancestorsOf, dtcFamiliesOf, dtcKindFamily, dtcKindsFor, propertyLabel } from "./rules";
 import { digestOf, isStampPath, stampPathFor } from "./stamp";
 // DTCEMS3 · il verbale d'ingestione: niente entra nello store senza che si
 // sappia chi ce l'ha messo. La forma dell'atto sta qui; il verbale lo emette
@@ -29361,14 +29361,18 @@ function wireGraphCanvas(canvas: HTMLCanvasElement, winId: string): void {
       tooltip.innerHTML = `<b></b> <span class="tt-type"></span><br><span class="tt-desc"></span>`;
       // FONTE · a property is named with its unit, «US 12 · essenza» — the
       // more so when it is an instance drawn in another group
+      // MICRO-BADGE-PD · …and its technical name beside the type: the box says
+      // the readable label, the tooltip says what is written
+      const plab = hit.node.node_type === "property" ? propertyLabel(hit.node) : null;
       (tooltip.children[0] as HTMLElement).textContent = hit.node.node_type === "property" && store
         ? composedPropertyName(store.doc, hit.node.id)
           + (hit.instanceBadge ? ` · ${reasoningText("instance", "label")}` : "")
         : String(hit.node.name || (showId ? hit.id : hit.node.node_type))
           + (hit.instanceBadge ? ` · ${reasoningText("instance", "label")}` : "");
+      if (plab && plab.label !== plab.technical) (tooltip.children[0] as HTMLElement).textContent += ` — ${plab.label}`;
       (tooltip.children[1] as HTMLElement).textContent = showId
         ? `[${hit.node.node_type}] ${hit.id}`
-        : `[${hit.node.node_type}]`;
+        : `[${hit.node.node_type}${plab ? ` · ${plab.technical}` : ""}]`;
       (tooltip.children[3] as HTMLElement).textContent = String(
         hit.node.description ?? "",
       ).slice(0, 220);

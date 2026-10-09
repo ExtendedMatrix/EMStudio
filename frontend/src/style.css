@@ -8459,6 +8459,12 @@ body.gesturing-resize * {
 .chain-row.comb { font-weight: 600; }
 .chain-ar { color: var(--text-faint); }
 .chain-link { font-size: 12px; }
+/* MICRO-BADGE-PD · a property's readable label in the Inspector, and its
+   technical name beside it */
+.insp-prop-label { font-size: 13px; font-weight: 600; margin: 2px 0 6px; }
+/* MICRO-BADGE-PD · a property's technical name, beside its readable label */
+.prop-tech { font-family: var(--font-mono); font-size: 10px; font-weight: 400;
+  color: var(--text-dim); margin-left: 6px; text-decoration: none; display: inline-block; }
 .chain-geo, .chain-medium, .chain-ai { font-size: 10.5px; padding: 0 5px; border-radius: 8px; border: 1px solid var(--border);
   color: var(--text-muted); white-space: nowrap; }
 .chain-geo.none { border-style: dotted; }
