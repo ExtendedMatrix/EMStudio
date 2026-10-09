@@ -44,6 +44,10 @@ export interface ChainUi {
   inherit: (ownerId: string, anchor: HTMLElement) => void;
   /** «+ lettura» — from where, then the document's window */
   addReading?: (propertyId: string, anchor: HTMLElement) => void;
+  /** FONTE · «Prendi da un'altra proprietà…» — the unit, then its property */
+  takeFromProperty?: (propertyId: string, anchor: HTMLElement) => void;
+  /** FONTE · «US 12 · essenza»: a property named with its unit */
+  composedName?: (propertyId: string) => string;
   /** open the document's window on this reading */
   openReading?: (extractorId: string) => void;
   /** LUOGO · open the document on the reading's place (shown, not re-armed) */
@@ -143,6 +147,14 @@ function readingRow(ui: ChainUi, x: string, depth: number, withProperty = false)
         b.addEventListener("click", () => ui.openPlace!(x));
         row.appendChild(b);
       } else row.appendChild(badge);
+    } else if (src.kind === "property") {
+      // FONTE · the reading of another unit's property: the master, named
+      // with its unit, and what was read (a click on it reaches the master)
+      const link = row.lastElementChild as HTMLElement | null;
+      if (link && ui.composedName) link.textContent = ui.composedName(src.id);
+      const read = (ui.store.node(x)?.data as Record<string, unknown> | undefined)?.read_value;
+      row.appendChild(el("span", "chain-medium unit", read == null ? t("fonte.fromProperty")
+        : t("fonte.readAs", { v: String(read) })));
     } else row.appendChild(el("span", "chain-medium unit", t("chain.fromUnit")));
   } else row.appendChild(el("span", "chain-nosrc", t("chain.noSource")));
   row.append(el("span", "chain-ar", "→"), linkBtn(ui, x, "x"));
@@ -247,6 +259,14 @@ export function propertyCard(ui: ChainUi, propertyId: string, ownerId: string | 
     b.dataset.addReading = propertyId;
     b.addEventListener("click", () => ui.addReading!(propertyId, b));
     acts.appendChild(b);
+    if (ui.takeFromProperty) {
+      const tb = el("button", "insp-btn", t("fonte.take"));
+      tb.type = "button";
+      tb.dataset.takeFrom = propertyId;
+      tb.title = t("fonte.takeHint");
+      tb.addEventListener("click", () => ui.takeFromProperty!(propertyId, tb));
+      acts.appendChild(tb);
+    }
     card.appendChild(acts);
     if (prov.direct.length && !prov.combiners.length)
       card.appendChild(el("p", "chain-note", t("chain.combinerHint")));

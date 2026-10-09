@@ -1751,7 +1751,14 @@ export class DocumentStore {
     if (!p) return;
     const v = value.trim();
     // the value lives in `description` (uniform with real EM property data)
-    this.updateNode(propId, { description: v });
+    // AND in `data.value`, where s3Dgraphy reads it (`PropertyNode.value`):
+    // FONTE · measured 9 Oct 2026, the library's `source_changed` compares the
+    // value an extractor read with `data.value` only, so a value written in
+    // the description alone was «None» to it — both, always, together
+    const pd = { ...((p.data ?? {}) as Record<string, unknown>) };
+    if (v === "") delete pd.value;
+    else pd.value = v;
+    this.updateNode(propId, { description: v, data: pd });
     const propType = ((p.data ?? {}) as Record<string, unknown>).property_type;
     if (propType === "absolute_time_start" || propType === "absolute_time_end") {
       const epochId = this.epochOfTemporalProperty(propId);

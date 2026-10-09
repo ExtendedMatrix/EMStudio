@@ -226,6 +226,7 @@ import * as chain from "./paradata-chain";
 import { carriedPropertyEdges, compactableUnits, compactProperties, dissolveGroups, drawnEdgeKey,
          duplicateForEachOwner, propertyBadges, undeclaredOwners } from "./compact";
 import { viewIndex, viewInstances } from "./paradata-view";
+import { libraryValue, readFromProperty } from "./property-source";
 import { mediumOf as mediumOfDoc, renderChainSection, type ChainUi } from "./paradata-inspector";
 import { DOC_TOOLS, renderReadingStage, selectedPassage, type DocTool,
          type TraceAnchor, type TraceGeometry } from "./doc-reading";
@@ -9244,11 +9245,8 @@ function chainUi(st: DocumentStore): ChainUi {
     store: st,
     isUnit: isStratigraphicType,
     canOwnProperty: (nt) => !!nt && allowedEdgeTypes(nt, "property").includes("has_property"),
-    jump: (id) => {
-      select(id);                   // «Zoom to selection» frames it, after the rebuild
-      buildScenes();
-      draw();
-    },
+    // FONTE · a link of the chain is a jump: «Indietro» comes back
+    jump: (id) => jumpTo(id),
     inherit: (ownerId, anchor) => {
       const r = anchor.getBoundingClientRect();
       openInheritMenu(ownerId, r.left, r.bottom);
@@ -9257,6 +9255,12 @@ function chainUi(st: DocumentStore): ChainUi {
       const r = anchor.getBoundingClientRect();
       openReadingSourceMenu(propertyId, r.left, r.bottom);
     },
+    // FONTE · «Prendi da un'altra proprietà…»
+    takeFromProperty: (propertyId, anchor) => {
+      const r = anchor.getBoundingClientRect();
+      openTakeFromPropertyMenu(propertyId, r.left, r.bottom);
+    },
+    composedName: (id) => composedPropertyName(st.doc, id),
     openReading,
     openPlace,
     // AUDIT N8 · «Leggi» opens the Doc of THIS space; when the space has none it
@@ -9585,6 +9589,121 @@ function openReadingSourceMenu(propertyId: string, clientX: number, clientY: num
     searchable: [...docEntries, ...unitEntries, newDoc],
     matches: (e, q) => [e.label, e.description ?? "", e.alias ?? ""].some((x) => x.toLowerCase().includes(q.trim().toLowerCase())),
     count: t("link.count", { n: docEntries.length + unitEntries.length }),
+    noResults: t("add.noResults"),
+    keysHint: t("add.keys"),
+  }, clientX, clientY);
+}
+
+/**
+ * FONTE · «Prendi da un'altra proprietà…» — the unit first (a US or a USV,
+ * with the search; those that have a property of the same name on top), then
+ * its property, «materiale: tufo». The pick is ONE undo step
+ * (`property-source.readFromProperty`: the group made when missing, the
+ * extractor in it `extracted_from` the master with the value read, the
+ * `has_data_provenance`, the combiner when this is a second source). Then the
+ * group opens, the view shows the computed instance with its badge, and the
+ * reasoning's field (the extractor's description) takes the caret.
+ */
+function openTakeFromPropertyMenu(propertyId: string, clientX: number, clientY: number): void {
+  if (!store) return;
+  const st = store;
+  const prop = st.node(propertyId);
+  const key = chain.propertyKey(prop);
+  const owners = new Set(chain.ownersOf(st.doc, propertyId).map((o) => o.owner));
+  const already = chain.extractorsOfProperty(st.doc, propertyId).length;
+  const ownProps = (u: string): string[] => chain.propertiesOf(st.doc, u)
+    .filter((p) => p !== propertyId && st.node(p)?.node_type === "property");
+  const units = st.liveNodes().filter((n) => isStratigraphicType(n.node_type) && !owners.has(n.id)
+    && ownProps(n.id).length);
+  const same = (u: EmNode): boolean => ownProps(u.id).some((p) => chain.propertyKey(st.node(p)) === key);
+  units.sort((a, b) => Number(same(b)) - Number(same(a))
+    || String(a.name ?? "").localeCompare(String(b.name ?? ""), undefined, { numeric: true }));
+  const finish = (masterId: string): void => {
+    let r: ReturnType<typeof readFromProperty>;
+    try { r = readFromProperty(st, propertyId, masterId); }
+    catch (err) { toast(String((err as Error).message ?? err)); return; }
+    const name = composedPropertyName(st.doc, masterId);
+    const msg = r.reread
+      ? t("fonte.reread", { m: name, v: String(libraryValue(st.node(masterId)) ?? "—") })
+      : t("fonte.taken", { p: composedPropertyName(st.doc, propertyId), m: name,
+                           v: String(libraryValue(st.node(masterId)) ?? "—") })
+        + (r.combinerCreated ? " · " + t("chain.combinerMade", { c: String(st.node(r.combinerCreated)?.name ?? ""),
+                                                                 n: String((r.moved?.length ?? 0) + 1) }) : "");
+    logInfo(msg, [r.extractorId, propertyId, masterId]);
+    toastUndo(msg, st);
+    // the instance is drawn in an OPEN group: open it, show the reading
+    if (r.group && st.isFolded(r.group)) st.setFolded(r.group, false);
+    buildScenes();
+    jumpTo(propertyId);
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      const f = document.querySelector<HTMLElement>(`[data-xdesc="${CSS.escape(r.extractorId)}"]`);
+      if (f) { f.focus(); f.scrollIntoView({ block: "nearest" }); }
+    }));
+  };
+  const showProps = (u: EmNode): void => {
+    const entries: AddMenuEntry[] = ownProps(u.id).map((p) => {
+      const pn = st.node(p)!;
+      const v = libraryValue(pn) ?? "—";
+      return {
+        key: `tp|prop|${p}`,
+        label: `${String(pn.name ?? p)}: ${v}`,
+        detail: chain.propertyKey(pn) === key ? t("fonte.sameName") : "",
+        nodeType: "property",
+        description: String(pn.description ?? ""),
+        alias: composedPropertyName(st.doc, p),
+        icon: () => typeIconElement("property"),
+        run: () => finish(p),
+      };
+    });
+    entries.sort((a, b) => Number(!!b.detail) - Number(!!a.detail));
+    showAddMenu({
+      title: t("fonte.takeWhich", { u: String(u.name ?? u.id) }),
+      context: composedPropertyName(st.doc, propertyId),
+      placeholder: t("link.q"),
+      linked: [], recent: [], categories: [],
+      existing: {
+        header: already ? t("fonte.takeCombiner", { n: String(already) }) : t("fonte.takeNote"),
+        groups: [{ label: String(u.name ?? u.id), entries }],
+        perGroup: EXISTING_PER_GROUP,
+        more: (n) => t("link.more", { n }),
+        none: t("link.none"),
+      },
+      extra: [],
+      searchable: entries,
+      matches: (e, q) => [e.label, e.description ?? ""].some((x) => x.toLowerCase().includes(q.trim().toLowerCase())),
+      count: t("link.count", { n: entries.length }),
+      noResults: t("add.noResults"),
+      keysHint: t("add.keys"),
+    }, clientX, clientY);
+  };
+  const unitEntries: AddMenuEntry[] = units.map((u) => ({
+    key: `tp|unit|${u.id}`,
+    label: String(u.name ?? u.id),
+    detail: same(u) ? t("chain.alsoHas", { prop: String(prop?.name ?? "") }) : t("fonte.nProps", { n: String(ownProps(u.id).length) }),
+    nodeType: u.node_type,
+    description: String(u.description ?? ""),
+    alias: String(u.name ?? ""),
+    icon: () => typeIconElement(u.node_type),
+    run: () => showProps(u),
+  }));
+  addMenuPoint.x = clientX;
+  addMenuPoint.y = clientY;
+  showAddMenu({
+    title: t("fonte.takeTitle"),
+    context: composedPropertyName(st.doc, propertyId),
+    placeholder: t("link.q"),
+    linked: [], recent: [], categories: [],
+    existing: {
+      header: t("fonte.takeUnit"),
+      groups: [{ label: t("chain.fromUnitGroup"), entries: unitEntries }],
+      perGroup: EXISTING_PER_GROUP,
+      more: (n) => t("link.more", { n }),
+      none: t("fonte.takeNone"),
+    },
+    extra: [],
+    searchable: unitEntries,
+    matches: (e, q) => [e.label, e.description ?? "", e.alias ?? ""].some((x) => x.toLowerCase().includes(q.trim().toLowerCase())),
+    count: t("link.count", { n: unitEntries.length }),
     noResults: t("add.noResults"),
     keysHint: t("add.keys"),
   }, clientX, clientY);
