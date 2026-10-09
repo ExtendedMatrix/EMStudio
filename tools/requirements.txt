@@ -21,7 +21,7 @@
 #   [rdf] → rdflib, for /export-ttl.
 # Without them those endpoints answer 501 (honestly, but uselessly). dev12 is
 # the first release that declares [geo]; dev11 and older silently ignored it.
-s3dgraphy[geo,rdf]==1.6.0.dev40
+s3dgraphy[geo,rdf]==1.6.0.dev41
 
 # Hard runtime deps of the s3Dgraphy importer/exporter used by the tools.
 lxml>=4.9
