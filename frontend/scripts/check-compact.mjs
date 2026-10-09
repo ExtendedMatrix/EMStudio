@@ -145,5 +145,135 @@ const report = {};
   ok(drawn(st, "USV10", "P1A"), "USV10 → P1A, the declared heir: its (dashed) thread is drawn");
 }
 
+// ── Parte 2 · «Compact the properties» on the whole fixture ──────────────────
+{
+  const st = fresh();
+  const start = graphOf(st);
+  const before = numbers(st);
+  const v0 = validate(st.doc);
+  const d0 = undoDepth(st);
+  const ops = [];
+  st.onOp((op) => ops.push(op));
+  const r = C.compactProperties(st);
+  eq(undoDepth(st) - d0, 1, "Compact is ONE undo step");
+  eq(r.skipped.map((x) => [x.property, x.owners]), [["P_MULTI", ["US1", "US3"]]],
+     "the property with two undeclared owners is left out, and said");
+  eq(r.units, 2, "two units compacted (US1, US2); US3 has only P_MULTI, USV10 only an inheritance");
+  eq(r.groupsCreated, 1, "one group made (PD_US1); PD_US2 was there");
+  eq(r.instances, 0, "no document instance written (no form for it in the graph — see the report)");
+  const g1 = st.paradataGroupOf("US1");
+  eq(st.node(g1).name, "PD_US1", "the new group is PD_US1, joined by has_paradata_nodegroup");
+  for (const p of ["P1A", "P1B", "P1C"]) ok(member(st, p, g1), `${p} is in PD_US1`);
+  for (const x of ["C1", "E1", "E2", "E3"]) ok(member(st, x, g1), `${x} (first collected by US1) is in PD_US1, the original`);
+  ok(member(st, "P2A", "PDG2") && member(st, "P2B", "PDG2"), "US2's two properties are in PD_US2");
+  eq(r.duplicates, 4, "four copies for PD_US2: the shared extractor (D.01.02), the shared combiner and its two extractors");
+  const provP2A = E(st, "has_data_provenance").filter((e) => e.source === "P2A").map((e) => e.target);
+  ok(provP2A.length === 1 && provP2A[0] !== "E3" && member(st, provP2A[0], "PDG2"), "P2A now reads a copy of D.01.02, in PD_US2");
+  const e3c = st.node(provP2A[0]);
+  eq([e3c.description, e3c.name], ["pianta rettangolare", "D.01.03"], "the copy has the same data and the next name of D.01");
+  ok(st.hasEdge(e3c.id, "D.01", "extracted_from"), "…and reads the same master document");
+  const provP2B = E(st, "has_data_provenance").filter((e) => e.source === "P2B").map((e) => e.target);
+  const c1c = provP2B[0];
+  ok(c1c !== "C1" && st.node(c1c).node_type === "combiner" && member(st, c1c, "PDG2"), "P2B reads a copy of the combiner, in PD_US2");
+  const under = E(st, "combines").filter((e) => e.source === c1c).map((e) => e.target);
+  ok(under.length === 2 && under.every((x) => !["E1", "E2"].includes(x) && member(st, x, "PDG2")),
+     "the combiner's copy combines copies of its two extractors, in PD_US2");
+  ok(!E(st, "has_data_provenance").some((e) => e.source === "P1A" && e.target !== "C1"), "US1's chain is untouched");
+  for (const d of ["D.01", "D.02"]) ok(!st.doc.graph.edges.some((e) => e.source === d && e.edge_type === "is_in_paradata_nodegroup"),
+     `${d} stays out of the groups (documents: no instance form)`);
+  ok(st.hasEdge("D.01", "EP_ROM", "has_first_epoch"), "the master stays in its epoch");
+  ok(!member(st, "P_MULTI", g1), "P_MULTI stays direct");
+  eq(st.doc.layout.folded_groups.filter((g) => [g1, "PDG2"].includes(g)).sort(), [g1, "PDG2"].sort(), "the groups touched are closed");
+  // the threads after
+  for (const p of ["P1A", "P1B", "P1C"]) ok(!drawn(st, "US1", p), `US1 → ${p}: carried by the group now`);
+  ok(drawn(st, "USV10", "P1A"), "the heir keeps its thread");
+  ok(drawn(st, "US1", "P_MULTI") && drawn(st, "US3", "P_MULTI"), "the two-owner property keeps both threads");
+  // the badge
+  const badges = C.propertyBadges(st.doc);
+  eq(badges.get("US1"), { group: g1, count: 3 }, "US1's badge: PD_US1, 3 properties");
+  eq(badges.get("US2"), { group: "PDG2", count: 2 }, "US2's badge: PD_US2, 2 properties");
+  ok(!badges.has("US3") && !badges.has("USV10"), "no badge without a group");
+  // ops: what the room receives — every change, in one burst
+  ok(ops.length > 0 && ops.every((o) => ["add_node", "add_edge", "delete_edge", "update_node"].includes(o.op)),
+     `the room receives the command as ${ops.length} ops of the closed vocabulary`);
+  // s3Dgraphy
+  const v1 = validate(st.doc);
+  if (v1) {
+    eq(v1.incoherences, 0, "no paradata_group_incoherences after Compact");
+    eq(v1.issues.filter((x) => !v0.issues.includes(x)), [], "s3Dgraphy validate: no new issue");
+  }
+  // round trip em.json → EMStudio → em.json
+  const once = st.toJSON();
+  const again = new DocumentStore(JSON.parse(once)).toJSON();
+  eq(again, once, "em.json → EMStudio → em.json is stable after Compact");
+  // undo / redo
+  st.undo();
+  eq(graphOf(st), start, "undo gives the graph back as it was, in one step");
+  st.redo();
+  // dissolve
+  const d1 = undoDepth(st);
+  const dr = C.dissolveGroups(st, ["US1", "US2"]);
+  eq(undoDepth(st) - d1, 1, "Dissolve is ONE undo step");
+  eq([dr.units, dr.groupsRemoved], [2, 2], "both groups dissolved and removed (left empty)");
+  ok(!st.paradataGroupOf("US1") && !st.paradataGroupOf("US2"), "no group left on US1 / US2");
+  for (const p of ["P1A", "P1B", "P1C", "P2A", "P2B"]) ok(drawn(st, p.startsWith("P1") ? "US1" : "US2", p), `${p} is direct again`);
+  // back to the start but for the copies (and their rewiring) and PD_US2,
+  // which held P2A before and goes with the dissolve
+  const s0 = JSON.parse(start);
+  const ids0 = new Set(s0.nodes.map((n) => n.id));
+  eq(st.doc.graph.nodes.filter((n) => !ids0.has(n.id)).map((n) => n.node_type).sort(),
+     ["combiner", "extractor", "extractor", "extractor"], "after Compact + Dissolve the new nodes are the four copies");
+  eq(s0.nodes.filter((n) => !st.node(n.id)).map((n) => n.id), ["PDG2"], "…and the only node gone is PD_US2 (it held P2A before)");
+  const v2 = validate(st.doc);
+  if (v2) eq(v2.issues.filter((x) => !v0.issues.includes(x)), [], "s3Dgraphy validate after Dissolve: no new issue");
+  report.fixture = { before, after_compact: numbers((() => { const x = fresh(); C.compactProperties(x); return x; })()),
+                     after_dissolve: numbers(st), result: { ...r, skipped: r.skipped.length } };
+}
+
+// ── Compact on a selection, then on the rest: the same final shape ───────────
+{
+  const st = fresh();
+  C.compactProperties(st, ["US2"]);
+  ok(member(st, "C1", "PDG2") && member(st, "E3", "PDG2"), "US2 alone: the shared elements go to the first group, PD_US2");
+  C.compactProperties(st, ["US1"]);
+  const g1 = st.paradataGroupOf("US1");
+  ok(!member(st, "C1", g1) && !member(st, "E3", g1), "then US1 gets copies, the originals stay in PD_US2");
+  const v = validate(st.doc);
+  if (v) eq(v.incoherences, 0, "no paradata_group_incoherences either way");
+}
+
+// ── a room: templu-mare-v2 ───────────────────────────────────────────────────
+const ROOM = process.argv[2];
+if (ROOM) {
+  const raw = JSON.parse(readFileSync(ROOM, "utf8"));
+  const single = raw.graph ? raw : { header: raw.header, graph: Array.isArray(raw.graphs) ? raw.graphs[0] : Object.values(raw.graphs)[0], layout: raw.layout };
+  const st = new DocumentStore(JSON.parse(JSON.stringify(single)));
+  const start = graphOf(st);
+  const before = numbers(st);
+  const v0 = validate(st.doc);
+  const t0 = performance.now();
+  const r = C.compactProperties(st);
+  const ms = performance.now() - t0;
+  const after = numbers(st);
+  const v1 = validate(st.doc);
+  ok(r.units > 0, `templu-mare-v2: ${r.units} units compacted in ${ms.toFixed(0)} ms`);
+  if (v1) {
+    eq(v1.incoherences, 0, "templu-mare-v2: no paradata_group_incoherences after Compact");
+    eq(v1.issues.filter((x) => !v0.issues.includes(x)), [], "templu-mare-v2: s3Dgraphy validate, no new issue");
+  }
+  const once = st.toJSON();
+  eq(new DocumentStore(JSON.parse(once)).toJSON(), once, "templu-mare-v2: em.json → EMStudio → em.json stable");
+  const units = Object.keys(Object.fromEntries(C.propertyBadges(st.doc)));
+  const dr = C.dissolveGroups(st, units);
+  const back = numbers(st);
+  st.undo();
+  st.undo();
+  eq(graphOf(st), start, "templu-mare-v2: two undos (Dissolve, Compact) give the start back");
+  report.room = { file: ROOM, before, after_compact: after, after_dissolve: back,
+                  compact: { ...r, skipped: r.skipped }, dissolve: dr, ms: Math.round(ms),
+                  validate_before: v0 && { ok: v0.ok, issues: v0.issues.length, incoherences: v0.incoherences },
+                  validate_after: v1 && { ok: v1.ok, issues: v1.issues.length, incoherences: v1.incoherences } };
+}
+
 if (process.env.NUMBERS) writeFileSync(process.env.NUMBERS, JSON.stringify(report, null, 1));
 console.log(`compact: ${checks} checks passed${existsSync(PY) ? "" : " (s3Dgraphy venv absent: validate skipped)"}`);

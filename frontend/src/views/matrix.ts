@@ -483,6 +483,9 @@ export function buildMatrixScene(
       const doc = docId ? nodeById.get(docId) : undefined;
       if (!doc || !docId) continue;
       if (!scene.byId.has(e.source) || !scene.byId.has(docId)) continue;
+      // PROPRIETA · a reading inside a closed group is not on the canvas: its
+      // instance of the document is not drawn either (it would float alone)
+      if (isCollapsedTablet(e.source)) continue;
       if (counted.has(`${e.source}|${docId}`)) continue;
       counted.add(`${e.source}|${docId}`);
       const key = e.id ?? `${e.source}→${e.target}`;
@@ -882,16 +885,28 @@ export function buildMatrixScene(
       if (ref) ref.pdCollapsed = pdg;
     }
 
-  for (const e of edges) {
-    if (!scene.byId.has(e.source) || !scene.byId.has(e.target)) continue;
+  for (const e0 of edges) {
+    if (!scene.byId.has(e0.source) || !scene.byId.has(e0.target)) continue;
     // BUGFIX-PDG · a PDG collapsed to a tablet has no box to point at: drop the
     // has_paradata_nodegroup line (referent → PDG) AND any is_in_paradata_nodegroup
     // (member → PDG), so no connector dangles to where the box used to be.
     if (
-      (e.edge_type === "has_paradata_nodegroup" && isCollapsedTablet(e.target)) ||
-      (e.edge_type === "is_in_paradata_nodegroup" && isCollapsedTablet(e.target))
+      (e0.edge_type === "has_paradata_nodegroup" && isCollapsedTablet(e0.target)) ||
+      (e0.edge_type === "is_in_paradata_nodegroup" && isCollapsedTablet(e0.target))
     )
       continue;
+    // PROPRIETA · an heir's `has_property` the folding re-attached to a closed
+    // group (its property is inside) ends on the group's referent, where the
+    // chip is — not on the empty place of a box that is not drawn. Only this
+    // edge: a chain element read from outside the group would end on the unit
+    // and read as an upward (red) arrow, which it is not
+    const e = e0.edge_type === "has_property" && isCollapsedTablet(e0.target)
+      ? { ...e0, target: pdReferentNode.get(e0.target)! } : e0;
+    if (e.source === e.target) continue;
+    // …and every other line the folding hung on a closed group goes with the
+    // box, as its membership lines already do (BUGFIX-PDG): a reading's
+    // `extracted_from` would otherwise start from an empty place
+    if (isCollapsedTablet(e.source) || isCollapsedTablet(e.target)) continue;
     // containment already expresses membership: hide the member→own-container
     // edge when the container is drawn open (yEd semantics)
     if (

@@ -25,6 +25,12 @@ export interface AdornmentBadge {
   /** FUNNEL1 · true when the value is INHERITED (activity/epoch/canvas), drawn
    *  attenuated/outline. Absent/false for the node's own (explicit) ornament. */
   inherited?: boolean;
+  /** PROPRIETA · the chip of a unit's paradata group (kind `property`): the
+   *  group it opens and closes, the number of properties it holds, and whether
+   *  it is open now. `ornamentId` is the group's id. */
+  group?: string;
+  count?: number;
+  open?: boolean;
 }
 
 // stable badge order on a referent: attribution first, then rights, then embargo

@@ -222,7 +222,8 @@ import { chapterCitedIds, interpretiveCoverage, storyCoverage } from "./narrativ
 import { setSitePicker, type NarrativeSelection, type Reading } from "./narrative";
 import { openSitePicker } from "./site-picker";
 import * as chain from "./paradata-chain";
-import { carriedPropertyEdges, drawnEdgeKey } from "./compact";
+import { carriedPropertyEdges, compactableUnits, compactProperties, dissolveGroups, drawnEdgeKey,
+         propertyBadges } from "./compact";
 import { mediumOf as mediumOfDoc, renderChainSection, type ChainUi } from "./paradata-inspector";
 import { DOC_TOOLS, renderReadingStage, selectedPassage, type DocTool,
          type TraceAnchor, type TraceGeometry } from "./doc-reading";
@@ -1882,6 +1883,11 @@ window.__EM_SCENE__ = () => {
       target: e.target,
       type: String(e.edge.edge_type ?? ""),
     })),
+    // PROPRIETA · the chips on the nodes (BADGE1), the group's among them
+    badges: s.nodes.filter((n) => n.adornments?.length).map((n) => ({
+      id: n.id,
+      chips: n.adornments!.map((b) => ({ kind: b.kind, ...(b.group ? { group: b.group, count: b.count, open: !!b.open } : {}) })),
+    })),
     boxes: (() => {
       const vp = viewport();
       return s.nodes.map((n) => ({
@@ -2755,6 +2761,15 @@ function renderInspectorInto(host: HTMLElement): void {
       },
       onToggleFold: (gid) => requestFold(gid),
       onEnterGroup: enterGroup,
+      propertyGroupActions: (id) => {
+        if (!store) return [];
+        const acts: Array<{ cmd: string; label: string; run: () => void }> = [];
+        if (compactableUnits(store.doc).includes(id))
+          acts.push({ cmd: "compact", label: t("compact.cmd"), run: () => runCompact([id]) });
+        if (store.paradataGroupOf(id))
+          acts.push({ cmd: "dissolve", label: t("compact.dissolve"), run: () => runDissolve([id]) });
+        return acts;
+      },
       onAddPhase: (epochId) => {
         const ph = store!.addPhase(epochId, (n) => t("l.phaseDefault", { n }));
         select(ph.id);
@@ -3564,6 +3579,27 @@ function updateBreadcrumb(): void {
   breadcrumb.classList.remove("hidden");
 }
 
+/** PROPRIETA · «Compact the properties»: the units given (every unit with a
+ *  direct property when none) — ONE undo step, the groups closed after. */
+function runCompact(units?: string[]): void {
+  if (!store) return;
+  const r = compactProperties(store, units);
+  const nameOf = (id: string): string => String(store!.node(id)?.name || id);
+  if (!r.units) toast(t("compact.none"));
+  else toast(t("compact.done", { units: String(r.units), props: String(r.properties),
+                                 groups: String(r.groupsCreated), dups: String(r.duplicates) }));
+  if (r.skipped.length)
+    toast(t("compact.skipped", { n: String(r.skipped.length),
+      names: r.skipped.map((x) => `${nameOf(x.property)} (${x.owners.map(nameOf).join(", ")})`).join("; ") }));
+}
+
+/** PROPRIETA · «Dissolve the group» of each unit given — ONE undo step. */
+function runDissolve(units: string[]): void {
+  if (!store) return;
+  const r = dissolveGroups(store, units);
+  toast(t("compact.dissolved", { units: String(r.units), m: String(r.memberships), g: String(r.groupsRemoved) }));
+}
+
 function enterGroup(groupId: string): void {
   // a context entered from another window replaces that one's (one stack)
   if (contextWinId !== activeWin().id) contextStack = [];
@@ -3876,6 +3912,20 @@ function filteredView(opts: { wholeGraph?: boolean;
   if (vEdges.some((e) => e.edge_type === "has_property")) {
     const carried = carriedPropertyEdges(doc);
     if (carried.size) vEdges = vEdges.filter((e) => e.edge_type !== "has_property" || !carried.has(drawnEdgeKey(e)));
+  }
+  // PROPRIETA · the badge of a unit's group: the property glyph with the number
+  // of properties in it, on the unit, whether the group is open or closed — a
+  // click opens it, a second click closes it (BADGE1's chip, `group` set). Shown
+  // while the group itself is in the view (the "Paradata nodes" ring).
+  {
+    const shownIds = new Set(vNodes.map((n) => n.id));
+    for (const [unit, b] of propertyBadges(doc)) {
+      if (!shownIds.has(unit) || !shownIds.has(b.group)) continue;
+      const arr = adornments.get(unit) ?? [];
+      arr.unshift({ ornamentId: b.group, kind: "property", label: t("compact.badge", { n: String(b.count) }),
+                    group: b.group, count: b.count, open: !folded.has(b.group) });
+      adornments.set(unit, arr);
+    }
   }
   return {
     nodes: vNodes,
@@ -27391,6 +27441,13 @@ const WINDOW_MENUS: Record<WindowType, WinMenu[]> = {
                 ? null
                 : t("menu.noOldSpellings"),
         },
+        {
+          // PROPRIETA · every unit's direct properties into its group, one step
+          label: "compact.cmdAll",
+          run: () => runCompact(),
+          disabledReason: () =>
+            !store ? t("menu.noGraph") : compactableUnits(store.doc).length ? null : t("compact.none"),
+        },
       ],
     },
   ],
@@ -28829,7 +28886,11 @@ function wireGraphCanvas(canvas: HTMLCanvasElement, winId: string): void {
     if (adornmentPending) {
       const id = adornmentPending;
       adornmentPending = null;
-      if (!moved && hitAdornmentBadge(rx, ry) === id) select(id);
+      if (!moved && hitAdornmentBadge(rx, ry) === id) {
+        // PROPRIETA · the property chip of a unit opens and closes its group
+        if (store?.node(id)?.node_type === "ParadataNodeGroup") requestFold(id);
+        else select(id);
+      }
       return;
     }
     // PD tablet single click → select the collapsed group (Inspector); the double
@@ -29642,6 +29703,15 @@ function showContextMenu(clientX: number, clientY: number, win?: Win): void {
   const members = [...new Set(ids.flatMap((id) => mm.childrenOf.get(id) ?? []))];
   if (members.length)
     item(t("ctx.selectMembers", { n: members.length }), () => selectMany(members));
+  // PROPRIETA · the units of the selection: their properties into their groups
+  // (one gesture, one undo step), and back
+  const units = ids.filter((id) => isStratigraphicType(store!.node(id)?.node_type));
+  if (units.length) {
+    if (compactableUnits(store.doc).some((u) => units.includes(u)))
+      item(t("compact.cmd"), () => runCompact(units)).dataset.cmd = "compact";
+    if (units.some((u) => !!store!.paradataGroupOf(u)))
+      item(t("compact.dissolve"), () => runDissolve(units)).dataset.cmd = "dissolve";
+  }
   const sepTop = document.createElement("div");
   sepTop.className = "ctx-sep";
   menu.appendChild(sepTop);

@@ -1582,6 +1582,26 @@ export function render(
         ctx.setLineDash([]);
         continue; // no hit rect for an inherited badge
       }
+      // PROPRIETA · the chip of the unit's paradata group: the number of its
+      // properties on a disc at the lower right, and an accent frame while the
+      // group is open (the click toggles it — main.ts)
+      if (b.group && b.count != null) {
+        const r0 = badgePx * 0.34;
+        const cx = bx + badgePx - r0 * 0.35;
+        const cy = topY + badgePx - r0 * 0.35;
+        ctx.beginPath();
+        ctx.arc(cx, cy, r0, 0, Math.PI * 2);
+        ctx.fillStyle = canvasTheme().accent;
+        ctx.fill();
+        ctx.fillStyle = labelOn(canvasTheme().accent);
+        ctx.font = canvasFont(700, Math.max(6, Math.round(r0 * 1.35)));
+        ctx.fillText(String(b.count), cx, cy + 0.5);
+        if (b.open) {
+          ctx.strokeStyle = canvasTheme().accent;
+          ctx.lineWidth = 1.5;
+          ctx.strokeRect(bx - 0.5, topY - 0.5, badgePx + 1, badgePx + 1);
+        }
+      }
       if (b.ornamentId === state.selectedId) {
         ctx.strokeStyle = accentColor();
         ctx.lineWidth = 2;
@@ -1607,6 +1627,8 @@ export function render(
   for (const ref of scene.nodes) {
     const pdgId = ref.pdCollapsed;
     if (!pdgId) continue;
+    // PROPRIETA · a group shown by its property chip needs no «PD» tablet too
+    if (ref.adornments?.some((b) => b.group === pdgId)) continue;
     const r = nodeScreenRect(ref, vp);
     if (r.x + r.w < 0 || r.x - PD_W > viewW || r.y > viewH || r.y + r.h < 0)
       continue;

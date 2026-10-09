@@ -19,6 +19,9 @@ import { naturalFields, qualeOf, TRANSLATION_TYPE } from "./translation";
 
 export interface InspectorCallbacks {
   onJump: (nodeId: string) => void;
+  /** PROPRIETA · the verbs of a unit on its paradata group («Compact the
+   *  properties», «Dissolve the group») that apply to it now */
+  propertyGroupActions?: (nodeId: string) => Array<{ cmd: string; label: string; run: () => void }>;
   /** MICRO-UN-POSTO · open the site selector on the graph node */
   onSetSitePosition?: () => void;
   onClose: () => void;
@@ -678,6 +681,21 @@ export function renderInspector(
     enter.addEventListener("click", () => cb.onEnterGroup(nodeId));
     bar.appendChild(enter);
     root.appendChild(bar);
+  }
+
+  // PROPRIETA · a unit's properties into its paradata group, and back
+  if (nodeId && cb.propertyGroupActions && isStratigraphicType(node.node_type)) {
+    const acts = cb.propertyGroupActions(nodeId);
+    if (acts.length) {
+      const bar = el("div", "insp-actions");
+      for (const a of acts) {
+        const b = el("button", "insp-btn", a.label) as HTMLButtonElement;
+        b.dataset.cmd = a.cmd;
+        b.addEventListener("click", () => a.run());
+        bar.appendChild(b);
+      }
+      root.appendChild(bar);
+    }
   }
 
   // CMD1 · the 3D arm. On a stratigraphic unit: model its proxy in Blender. On
