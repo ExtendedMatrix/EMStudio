@@ -279,6 +279,35 @@ export async function onForeignBridge(
   }
 }
 
+/**
+ * B2/B3 (s3Dgraphy#25) · what the shell kept for the page: files the OS or the
+ * command line gave the app (`emstudio file.em.json`, a double click, «Open
+ * With», `open -a EMStudio file.em.json`) and the bridge's launch notices (the
+ * port taken, the one used). They arrive before the page listens, so the shell
+ * KEEPS them and the page takes them when it is ready; the call empties the
+ * queue. Empty in a browser.
+ */
+export async function takeDesktopQueue(): Promise<{ files: string[]; notices: string[] }> {
+  if (!isTauri()) return { files: [], notices: [] };
+  try {
+    return await invoke<{ files: string[]; notices: string[] }>("take_desktop_queue");
+  } catch {
+    return { files: [], notices: [] };   // an older shell: nothing kept
+  }
+}
+
+/** …and the nudge the shell sends when something is queued later (a file opened
+ *  from Finder while the app runs, a second launch on Windows/Linux). */
+export async function onDesktopQueue(handler: () => void): Promise<void> {
+  if (!isTauri()) return;
+  try {
+    const { listen } = await import("@tauri-apps/api/event");
+    await listen("desktop-queue", () => handler());
+  } catch {
+    // no event API: the queue is still taken once at boot
+  }
+}
+
 /** Basename of an absolute path, for the window title / info bar. */
 export function baseName(path: string): string {
   const parts = path.split(/[\\/]/);

@@ -307,6 +307,8 @@ import {
   setLlmKey,
   clearLlmKey,
   onForeignBridge,
+  takeDesktopQueue,
+  onDesktopQueue,
   pickFolder,
   pickFile,
   pickSourceFile,
@@ -7856,6 +7858,38 @@ async function openRecentFile(r: RecentFile): Promise<void> {
     toast("Il file recente non è più leggibile — rimosso dai recenti.");
     refreshEMTree();   // every live EMtree window: the list is one shorter
   }
+}
+
+// B2 (s3Dgraphy#25) · a file the OS or the command line gave the desktop app
+// opens through the door «Open an em.json» uses: the same questions (unsaved
+// work, a sidecar left open), GraphML to the importer, everything else through
+// the container reader.
+async function openPathFromDesktop(path: string): Promise<void> {
+  try {
+    const res = await readEmJsonPath(path);
+    if (!res) return;
+    if (!confirmOpenOverUnsaved(baseName(res.path))) return;
+    if (isGraphmlFile(res.path, res.text)) { await importGraphmlText(res.text, baseName(res.path), res.path); return; }
+    if (!(await confirmLeaveSidecar("Opening a file"))) return;
+    loadContainerDocument(JSON.parse(res.text), baseName(res.path), res.path);
+  } catch (e) {
+    const msg = `open failed: ${baseName(path)}: ${e instanceof Error ? e.message : e}`;
+    info.textContent = msg;
+    logWarn(msg);
+  }
+}
+
+/** B2/B3 · take what the shell kept (files to open, the bridge's notices) now,
+ *  and again whenever it says something new arrived. One drain at a time, so a
+ *  nudge during an open waits for it instead of racing it. */
+let desktopDrain: Promise<void> = Promise.resolve();
+function drainDesktopQueue(): Promise<void> {
+  desktopDrain = desktopDrain.then(async () => {
+    const q = await takeDesktopQueue();
+    for (const m of q.notices) { logWarn(m); toast(m); }
+    for (const f of q.files) await openPathFromDesktop(f);
+  });
+  return desktopDrain;
 }
 
 // Open: native dialog on desktop, <input type=file> in a browser.
@@ -29997,3 +30031,6 @@ if (window.__EM_TEST_DATA__) {
     loadContainerDocument(window.__EM_TEST_DATA__, "embedded test data");
   else loadDocument(window.__EM_TEST_DATA__, "embedded test data");
 }
+// B2/B3 · LAST, once the app can open a document: the files this launch was
+// given (argv, the macOS open event) and the bridge's launch notices
+if (isTauri()) void onDesktopQueue(() => void drainDesktopQueue()).then(() => drainDesktopQueue());

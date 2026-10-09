@@ -1,0 +1,21 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "bundle": {
+    "fileAssociations": [
+      {
+        "ext": ["emj"],
+        "name": "Extended Matrix document",
+        "description": "Extended Matrix graph (em.json)",
+        "role": "Editor"
+      },
+      {
+        "ext": ["json"],
+        "contentTypes": ["public.json"],
+        "name": "Extended Matrix graph (em.json)",
+        "description": "Extended Matrix graph (em.json)",
+        "role": "Editor",
+        "rank": "Alternate"
+      }
+    ]
+  }
+}

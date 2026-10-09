@@ -14,6 +14,7 @@
 // The frontend asks which URL to use via the `transformer_url` command.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+use std::sync::atomic::{AtomicU16, Ordering};
 use std::sync::Mutex;
 use tauri::{Emitter, Manager};
 use tauri_plugin_shell::process::CommandChild;
@@ -21,7 +22,18 @@ use tauri_plugin_shell::ShellExt;
 
 /// Port the local sidecar listens on (matches the frontend browser-dev
 /// default, so `?bridge=`/`EM_BRIDGE` overrides still line up).
-const BRIDGE_PORT: &str = "8765";
+const BRIDGE_PORT_DEFAULT: u16 = 8765;
+/// B3 (s3Dgraphy#25, Enzo Cocca) · how many ports after the default are tried
+/// when the default belongs to ANOTHER program (not an em-bridge).
+const BRIDGE_PORT_TRIES: u16 = 10;
+/// The port the bridge actually uses. Decided once at launch; the frontend
+/// reads it through `transformer_url`, as it always did, so moving the bridge
+/// to 8766 changes nothing on its side.
+static BRIDGE_PORT: AtomicU16 = AtomicU16::new(BRIDGE_PORT_DEFAULT);
+
+fn bridge_port() -> u16 {
+    BRIDGE_PORT.load(Ordering::Relaxed)
+}
 
 /// Holds the spawned sidecar so we can kill it when the app exits.
 struct BridgeChild(Mutex<Option<CommandChild>>);
@@ -153,7 +165,72 @@ fn clear_llm_key(app: tauri::AppHandle) -> Result<bool, String> {
 #[tauri::command]
 fn transformer_url() -> String {
     std::env::var("EM_TRANSFORMER_URL")
-        .unwrap_or_else(|_| format!("http://localhost:{BRIDGE_PORT}"))
+        .unwrap_or_else(|_| format!("http://localhost:{}", bridge_port()))
+}
+
+// ── what waits for the page: files to open, things to say ──────────────────
+//
+// B2 (s3Dgraphy#25, Enzo Cocca, 7 Oct 2026) · a file given to the app — on the
+// command line (`emstudio file.em.json`, Windows/Linux and a terminal on any OS),
+// by macOS (double click, «Open With», `open -a EMStudio file.em.json`, which
+// arrive as an Apple event, never in argv) or to a second launch on Windows and
+// Linux (handed to this instance by single-instance) — opens as «Open an
+// em.json» would. They arrive BEFORE the page can listen (argv and the launch
+// event come during setup), and an event emitted to nobody is lost: so they
+// wait here, the page takes them when it is ready (`take_desktop_queue`), and
+// a later arrival only nudges it (`desktop-queue`). The bridge's launch-time
+// notices (B3) travel the same way, for the same reason: emitted from `setup`
+// they reached stderr only.
+
+#[derive(Default, serde::Serialize)]
+struct DesktopQueue {
+    files: Vec<String>,
+    notices: Vec<String>,
+}
+
+struct Pending(Mutex<DesktopQueue>);
+
+/// What the page has not taken yet; emptied by the call.
+#[tauri::command]
+fn take_desktop_queue(state: tauri::State<Pending>) -> DesktopQueue {
+    std::mem::take(&mut *state.0.lock().unwrap())
+}
+
+/// The files among command-line arguments: existing files, made absolute
+/// against `cwd` (a second instance's arguments are relative to ITS directory).
+/// Flags (`-psn_…` from an old Finder, `--…`) and URLs (a deep link) are not files.
+fn files_in_args<I: IntoIterator<Item = String>>(args: I, cwd: &std::path::Path) -> Vec<String> {
+    args.into_iter()
+        .filter(|a| !a.starts_with('-') && !a.contains("://"))
+        .map(|a| {
+            let p = std::path::PathBuf::from(&a);
+            if p.is_absolute() { p } else { cwd.join(p) }
+        })
+        .filter(|p| p.is_file())
+        .map(|p| p.to_string_lossy().into_owned())
+        .collect()
+}
+
+/// Queue files to open and nudge the page (which may not be listening yet:
+/// then it finds them when it asks).
+fn queue_files(app: &tauri::AppHandle, files: Vec<String>) {
+    if files.is_empty() {
+        return;
+    }
+    app.state::<Pending>().0.lock().unwrap().files.extend(files);
+    let _ = app.emit("desktop-queue", ());
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.unminimize();
+        let _ = window.set_focus();
+    }
+}
+
+/// Queue a notice for the page (shown as a toast and logged there) and print
+/// it, so a terminal launch sees it too.
+fn queue_notice(app: &tauri::AppHandle, message: String) {
+    eprintln!("[emstudio] {message}");
+    app.state::<Pending>().0.lock().unwrap().notices.push(message);
+    let _ = app.emit("desktop-queue", ());
 }
 
 /// Spawn the bundled bridge, injecting the stored API key into its environment.
@@ -173,7 +250,7 @@ fn spawn_bridge(app: &tauri::AppHandle) {
         env.insert("ANTHROPIC_API_KEY".to_string(), key);
     }
     match cmd
-        .args(["--port", BRIDGE_PORT, "--exit-with-parent"])
+        .args(["--port", &bridge_port().to_string(), "--exit-with-parent"])
         .envs(env)
         .spawn()
     {
@@ -197,9 +274,77 @@ fn spawn_bridge(app: &tauri::AppHandle) {
 /// A connect attempt, not a bind attempt: binding would briefly occupy the port
 /// ourselves and race with the very thing we are trying to observe.
 fn bridge_port_busy() -> bool {
+    port_busy(bridge_port())
+}
+
+fn port_busy(port: u16) -> bool {
     use std::net::{SocketAddr, TcpStream};
-    let addr: SocketAddr = format!("127.0.0.1:{BRIDGE_PORT}").parse().unwrap();
+    let addr: SocketAddr = format!("127.0.0.1:{port}").parse().unwrap();
     TcpStream::connect_timeout(&addr, std::time::Duration::from_millis(150)).is_ok()
+}
+
+/// Who holds a port: nobody, an em-bridge (`./dev.sh`, a leftover sidecar), or
+/// something else — another program, or a bridge that no longer answers (the
+/// orphan of a killed app keeps the socket bound and answers nothing: measured
+/// on 9 Oct 2026, it is not a bridge anyone can use).
+#[derive(Debug, PartialEq)]
+enum PortHolder {
+    Free,
+    Bridge,
+    Other,
+}
+
+/// Ask the port who it is: an em-bridge answers `GET /health` with
+/// `"service": "em_bridge"` (tools/em_bridge.py). Anything else — no answer,
+/// another protocol, another HTTP server — is another program.
+fn port_holder(port: u16) -> PortHolder {
+    use std::io::{Read, Write};
+    use std::net::{SocketAddr, TcpStream};
+    use std::time::Duration;
+    let addr: SocketAddr = format!("127.0.0.1:{port}").parse().unwrap();
+    let Ok(mut stream) = TcpStream::connect_timeout(&addr, Duration::from_millis(150)) else {
+        return PortHolder::Free;
+    };
+    let _ = stream.set_read_timeout(Some(Duration::from_millis(800)));
+    let _ = stream.set_write_timeout(Some(Duration::from_millis(300)));
+    if stream
+        .write_all(b"GET /health HTTP/1.0\r\nHost: 127.0.0.1\r\n\r\n")
+        .is_err()
+    {
+        return PortHolder::Other;
+    }
+    let mut buf = Vec::new();
+    let _ = stream.take(16 * 1024).read_to_end(&mut buf);
+    if String::from_utf8_lossy(&buf).contains("em_bridge") {
+        PortHolder::Bridge
+    } else {
+        PortHolder::Other
+    }
+}
+
+/// B3 · the first free port after `start`, among the next `tries`.
+fn next_free_port(start: u16, tries: u16) -> Option<u16> {
+    (1..=tries)
+        .filter_map(|k| start.checked_add(k))
+        .find(|&p| !port_busy(p))
+}
+
+/// What to say when the default port belongs to another program — the port,
+/// and what the app did about it. Not a word about the keychain: the key has
+/// nothing to do with it.
+fn port_taken_message(taken: u16, used: Option<u16>) -> String {
+    match used {
+        Some(p) => format!(
+            "La porta {taken} è occupata da un processo che non risponde come \
+             il bridge di EMStudio: il bridge locale usa la porta {p}."
+        ),
+        None => format!(
+            "Le porte da {taken} a {} sono occupate da altri processi: il bridge \
+             locale non è partito (import/export GraphML e generazione non \
+             disponibili). Libera la porta {taken} e riavvia l'app.",
+            taken.saturating_add(BRIDGE_PORT_TRIES)
+        ),
+    }
 }
 
 /// Wait until nothing answers on the bridge port. Returns false on timeout.
@@ -230,13 +375,18 @@ fn wait_for_bridge_port_free(timeout: std::time::Duration) -> bool {
 /// Tell the frontend that the bridge on :8765 is not ours, so the key cannot
 /// reach it. Emitted instead of logging-and-carrying-on, because "silently talks
 /// to a bridge without the key" is the failure mode that cost an evening.
-fn warn_foreign_bridge(app: &tauri::AppHandle) {
-    let message = format!(
-        "Un altro bridge è già in ascolto sulla porta {BRIDGE_PORT} e non è stato \
+fn foreign_bridge_message() -> String {
+    format!(
+        "Un altro bridge è già in ascolto sulla porta {} e non è stato \
          avviato dall'app: la key del portachiavi non lo raggiunge. Chiudi quel \
          processo (tipicamente ./dev.sh) e riavvia l'app, oppure esporta \
-         ANTHROPIC_API_KEY nell'ambiente di quel bridge."
-    );
+         ANTHROPIC_API_KEY nell'ambiente di quel bridge.",
+        bridge_port()
+    )
+}
+
+fn warn_foreign_bridge(app: &tauri::AppHandle) {
+    let message = foreign_bridge_message();
     eprintln!("[emstudio] {message}");
     // Best effort: if the webview is not up yet the event is simply lost, and the
     // stderr line above remains.
@@ -292,12 +442,17 @@ fn main() {
         // `onOpenUrl`) and brings its window forward. That instance is the one
         // holding the sign-in's nonce and PKCE verifier — a second one would
         // have neither and could only refuse the answer.
-        .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
+        .plugin(tauri_plugin_single_instance::init(|app, argv, cwd| {
             use tauri::Manager;
             if let Some(window) = app.get_webview_window("main") {
                 let _ = window.unminimize();
                 let _ = window.set_focus();
             }
+            // B2 · `emstudio other.em.json` while EMStudio is open (and a
+            // double click on Windows/Linux, which is the same thing): the
+            // file opens HERE
+            let files = files_in_args(argv.into_iter().skip(1), std::path::Path::new(&cwd));
+            queue_files(app, files);
         }))
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
@@ -317,8 +472,10 @@ fn main() {
         // webview never shows a login page. Scope in capabilities/default.json.
         .plugin(tauri_plugin_opener::init())
         .manage(BridgeChild(Mutex::new(None)))
+        .manage(Pending(Mutex::new(DesktopQueue::default())))
         .invoke_handler(tauri::generate_handler![
             transformer_url,
+            take_desktop_queue,
             llm_key_status,
             set_llm_key,
             clear_llm_key
@@ -359,6 +516,11 @@ fn main() {
                     }
                 });
             }
+            // B2 · the files this launch was given on the command line
+            if let Ok(cwd) = std::env::current_dir() {
+                let files = files_in_args(std::env::args().skip(1), &cwd);
+                app.state::<Pending>().0.lock().unwrap().files.extend(files);
+            }
             // A remote transformer is configured → nothing to start locally.
             if std::env::var("EM_TRANSFORMER_URL").is_ok() {
                 return Ok(());
@@ -371,20 +533,118 @@ fn main() {
             // (./dev.sh, or a leftover). GraphML through it still works, so the
             // app carries on — but the keychain key does NOT reach it, and that is
             // now said out loud rather than discovered later as "no API key".
-            if bridge_port_busy() {
-                warn_foreign_bridge(app.handle());
-            } else {
-                spawn_bridge(app.handle());
+            //
+            // B3 · …and if it is ANOTHER program (not an em-bridge), the bridge
+            // moves to the next free port and the message says which port is
+            // taken and which one is used — before, it spoke of the keychain.
+            match port_holder(BRIDGE_PORT_DEFAULT) {
+                PortHolder::Free => spawn_bridge(app.handle()),
+                PortHolder::Bridge => queue_notice(app.handle(), foreign_bridge_message()),
+                PortHolder::Other => {
+                    let next = next_free_port(BRIDGE_PORT_DEFAULT, BRIDGE_PORT_TRIES);
+                    queue_notice(app.handle(), port_taken_message(BRIDGE_PORT_DEFAULT, next));
+                    if let Some(p) = next {
+                        BRIDGE_PORT.store(p, Ordering::Relaxed);
+                        spawn_bridge(app.handle());
+                    }
+                }
             }
             Ok(())
         })
         .build(tauri::generate_context!())
         .expect("error while building EMStudio")
-        .run(|app, event| {
-            if let tauri::RunEvent::Exit = event {
+        .run(|app, event| match event {
+            tauri::RunEvent::Exit => {
                 if let Some(child) = app.state::<BridgeChild>().0.lock().unwrap().take() {
                     let _ = child.kill();
                 }
             }
+            // B2 · macOS hands files over as an Apple event (double click,
+            // «Open With», `open -a EMStudio file.em.json`), at launch or while
+            // the app runs. Deep links come this way too: only `file:` URLs
+            // are files.
+            #[cfg(target_os = "macos")]
+            tauri::RunEvent::Opened { urls } => {
+                let files: Vec<String> = urls
+                    .iter()
+                    .filter(|u| u.scheme() == "file")
+                    .filter_map(|u| u.to_file_path().ok())
+                    .map(|p| p.to_string_lossy().into_owned())
+                    .collect();
+                queue_files(app, files);
+            }
+            _ => {}
         });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn files_in_args_keeps_existing_files_and_makes_them_absolute() {
+        let dir = std::env::temp_dir().join(format!("emstudio-args-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let doc = dir.join("scavo.em.json");
+        std::fs::write(&doc, "{}").unwrap();
+        let got = files_in_args(
+            vec![
+                "scavo.em.json".to_string(),          // relative to cwd
+                doc.to_string_lossy().into_owned(),   // absolute
+                "-psn_0_12345".to_string(),           // an old Finder's flag
+                "--verbose".to_string(),
+                "stratigraph://open?room=x".to_string(), // a deep link
+                "missing.em.json".to_string(),        // not there
+            ],
+            &dir,
+        );
+        let want = doc.to_string_lossy().into_owned();
+        assert_eq!(got, vec![want.clone(), want]);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn a_port_held_by_another_program_is_other_and_the_next_is_used() {
+        use std::io::{Read, Write};
+        // another program: answers anything with a non-bridge body
+        let other = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = other.local_addr().unwrap().port();
+        std::thread::spawn(move || {
+            for s in other.incoming().take(1) {
+                let mut s = s.unwrap();
+                let mut b = [0u8; 512];
+                let _ = s.read(&mut b);
+                let _ = s.write_all(b"HTTP/1.0 200 OK\r\n\r\n{\"service\": \"jupyter\"}");
+            }
+        });
+        assert_eq!(port_holder(port), PortHolder::Other);
+        // an em-bridge: its /health names the service
+        let bridge = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let bport = bridge.local_addr().unwrap().port();
+        std::thread::spawn(move || {
+            for s in bridge.incoming().take(1) {
+                let mut s = s.unwrap();
+                let mut b = [0u8; 512];
+                let _ = s.read(&mut b);
+                let _ = s.write_all(b"HTTP/1.0 200 OK\r\n\r\n{\"ok\": true, \"service\": \"em_bridge\"}");
+            }
+        });
+        assert_eq!(port_holder(bport), PortHolder::Bridge);
+        // a free port
+        let free = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let fport = free.local_addr().unwrap().port();
+        drop(free);
+        assert_eq!(port_holder(fport), PortHolder::Free);
+        // the message names the taken port and the one used, not the keychain
+        let m = port_taken_message(8765, Some(8766));
+        assert!(m.contains("8765") && m.contains("8766") && !m.contains("portachiavi"), "{m}");
+        // …and the page reads the port it moved to, as it always read it
+        if std::env::var("EM_TRANSFORMER_URL").is_err() {
+            BRIDGE_PORT.store(8771, Ordering::Relaxed);
+            assert_eq!(transformer_url(), "http://localhost:8771");
+            BRIDGE_PORT.store(BRIDGE_PORT_DEFAULT, Ordering::Relaxed);
+        }
+        let none = port_taken_message(8765, None);
+        assert!(none.contains("8765") && none.contains("8775") && !none.contains("portachiavi"), "{none}");
+    }
 }
