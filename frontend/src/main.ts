@@ -2040,7 +2040,14 @@ window.__EM_SCENE__ = () => {
   jumpTo: (id: string) => jumpTo(id),
   folded: () => [...(store?.doc.layout?.folded_groups ?? [])],
   setValue: (id: string, v: string) => store?.setPropertyValue(id, v),
-  viewNow: () => { const v = captureView(); return v ? { ...v, doc: undefined } : null; },
+  compactAll: () => runCompact(),
+  viewNow: () => {
+    const g = windowsOf().find((w) => w.type === "graph" && winAreas.has(w.id));
+    const prev = activeWin().id;
+    if (g && g.id !== prev) setActiveWin(g.id);
+    try { const v = captureView(); return v ? { ...v, doc: undefined } : null; }
+    finally { if (g && g.id !== prev) setActiveWin(prev); }
+  },
   dirty: () => !!store?.dirty,
   /** DEV29 · the EMTree's graphs, in order: name, dirty, active */
   slots: () => emtree.slots.map((sl) => ({ name: slotLabel(sl), dirty: !!sl.store.dirty, active: sl === emtree.active() })),
@@ -3633,7 +3640,7 @@ async function runDuplicateForOwners(propertyId: string): Promise<void> {
     const r = await askLibrary<{ copies: unknown[]; duplicates: number }>(await bridgeUrl(), JSON.parse(st.toJSON()),
                                                                           "duplicate", { property: propertyId });
     if (st !== store) return;
-    if (r.delta) applyDelta(st, r.delta);
+    if (r.delta) applyDelta(st, r.delta, { renameCopies: true });
     toastUndo(t("compact.duplicated", { p, n: String(r.result.copies.length), dups: String(r.result.duplicates) }), st);
     scheduleLibraryValidate(st, libraryKey(st));
   } catch (e) {

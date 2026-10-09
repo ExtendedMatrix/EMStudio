@@ -20,6 +20,7 @@ import type { EmEdge, EmNode } from "./types";
 import { addReading, extractorsOfProperty, ownersOf, IS_IN_PARADATA_NODEGROUP,
          type NewReading } from "./paradata-chain";
 import { ensureGroup } from "./compact";
+import { deriveCombinerName, documentOfExtractor, nextExtractorOrdinal, ordinalTag } from "./naming";
 
 export const READ_VALUE = "read_value";
 export const READ_AT = "read_at";
@@ -198,7 +199,8 @@ export async function askLibrary<T = unknown>(base: string, doc: unknown, op: Li
  * adds gets a place in the Matrix beside the first node it is tied to (a copy
  * beside its original's owner…), a paradata group over its members.
  */
-export function applyDelta(store: DocumentStore, delta: LibraryDelta): { nodes: number; edges: number } {
+export function applyDelta(store: DocumentStore, delta: LibraryDelta,
+                           opts: { renameCopies?: boolean } = {}): { nodes: number; edges: number } {
   let nodes = 0, edges = 0;
   store.batch(() => {
     const has = (e: EmEdge) => store.doc.graph.edges.find((x) => (e.id && x.id === e.id)
@@ -235,8 +237,32 @@ export function applyDelta(store: DocumentStore, delta: LibraryDelta): { nodes: 
       store.setEdgeAttributes(ea.edge, patch);
     }
     placeNew(store, delta.add_nodes.map((n) => n.id));
+    if (opts.renameCopies) renameCopies(store, delta.add_nodes.map((n) => n.id));
   });
   return { nodes, edges };
+}
+
+/**
+ * The copies of combiners and extractors the library made carry the original's
+ * NAME (s3Dgraphy `duplicate_per_owner` copies the data as it is): two
+ * extractors «D.1.02» are a «duplicate name» warning here. They take the name
+ * NAME1 gives a new one — the next free ordinal of their source, `C.<n>` for a
+ * combiner — in the same step, as EMStudio's own copies always did.
+ */
+function renameCopies(store: DocumentStore, ids: string[]): void {
+  for (const id of ids) {
+    const n = store.node(id);
+    if (!n) continue;
+    if (n.node_type === "combiner") {
+      const others = store.doc.graph.nodes.filter((x) => x.id !== id && x.node_type === "combiner" && x.name === n.name);
+      if (others.length) store.updateNode(id, { name: deriveCombinerName(store.doc) });
+    } else if (n.node_type === "extractor") {
+      const others = store.doc.graph.nodes.filter((x) => x.id !== id && x.node_type === "extractor" && x.name === n.name);
+      const src = documentOfExtractor(store.doc, id);
+      if (others.length && src?.name)
+        store.updateNode(id, { name: `${src.name}.${ordinalTag(nextExtractorOrdinal(store.doc, String(src.name), id))}` });
+    }
+  }
 }
 
 /** A place for the nodes the library made: a group over its members, any

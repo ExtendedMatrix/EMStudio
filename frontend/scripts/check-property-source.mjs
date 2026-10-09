@@ -213,8 +213,10 @@ if (existsSync(PY)) {
      "Dichiara l'eredità: US 13 → conservazione inherited");
   const dup = libraryOp(json(), "duplicate", { property: "PF" });
   const before = s7.doc.graph.nodes.length;
-  PS.applyDelta(s7, dup.delta);
+  PS.applyDelta(s7, dup.delta, { renameCopies: true });
   eq(s7.doc.graph.nodes.length - before, 2, "Duplica: the copy of finitura and of its extractor");
+  const names = s7.doc.graph.nodes.filter((n) => n.node_type === "extractor").map((n) => n.name);
+  eq(names.length, new Set(names).size, "…the copied extractor renamed by NAME1 (no duplicate name)");
   ok(dup.delta.add_nodes.every((n) => s7.doc.layout.positions[n.id]), "…placed in the Matrix");
   L = library(json());
   eq(L.diagnose.filter((d) => d.code === "undeclared_owners"), [], "s3Dgraphy: no owners undeclared any more");
