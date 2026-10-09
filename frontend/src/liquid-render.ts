@@ -13,7 +13,8 @@
  * switch). Culling: a disc or an edge off screen is not drawn.
  */
 import { drawGlyph, type GlyphInk } from "./glyphs";
-import { drawPdChips } from "./pd-chip";
+import { markOverlay, overlayShown, type OverlayState } from "./overlays";
+import { drawnPdChips, drawPdChips } from "./pd-chip";
 import { propertyLabel, stratigraphicKindLetter, stratigraphicKindOf } from "./rules";
 import { FAMILY_COLOR, discVisibility, type Disc, type LiquidExtra, type LiquidFilter } from "./views/liquid";
 import type { Scene } from "./scene";
@@ -36,6 +37,9 @@ export function renderLiquid(
   st: LiquidState,
   viewW: number,
   viewH: number,
+  /** MICRO-SOVRAPPOSIZIONI · the overlays of the Graph view (genre letter,
+   *  paradata chip): one switched off is not drawn */
+  overlays?: OverlayState | null,
 ): void {
   const dpr = window.devicePixelRatio || 1;
   const th = canvasTheme();
@@ -164,10 +168,11 @@ export function renderLiquid(
     }
     // the genre of a unit (USR, USS, USM…: `data.stratigraphic_kind`) keeps its
     // letter, as in the Matrix: inside the disc, lower right, in the ring's ink
-    if (px >= 14) {
+    if (px >= 14 && overlayShown(overlays, "genre")) {
       const kind = stratigraphicKindOf(n.node);
       const letter = kind ? stratigraphicKindLetter(kind) : "";
       if (letter) {
+        markOverlay("genre");
         ctx.font = canvasFont(700, c.r * 0.62);
         ctx.textAlign = "center";
         ctx.textBaseline = "middle";
@@ -211,8 +216,10 @@ export function renderLiquid(
   //    disc — the Matrix's chip, by the same function; from the medium level
   //    of detail (a disc ≥ 9 px across), on the discs that are shown
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  const withChip = scene.nodes.filter((n) => n.adornments?.length && vis.get(n.id) !== "hide" && n.w * k >= 9);
+  const withChip = !overlayShown(overlays, "pd_chip") ? []
+    : scene.nodes.filter((n) => n.adornments?.length && vis.get(n.id) !== "hide" && n.w * k >= 9);
   drawPdChips(ctx, withChip, vp, viewW, viewH, st.selectedId);
+  for (let i = drawnPdChips().length; i > 0; i--) markOverlay("pd_chip");
 }
 
 /** The rings of a specialisation, inside the disc's rim. */

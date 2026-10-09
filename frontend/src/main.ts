@@ -409,6 +409,10 @@ import {
 } from "./filters";
 import { adornmentBadges, type AdornmentBadge } from "./adornments";
 import { drawnPdChips, hitPdChip } from "./pd-chip";
+import {
+  defaultOverlays, drawnOverlayCounts, loadOverlays, NOBODY, OVERLAY_GROUPS, overlayItemsFor, overlaysHideSomething,
+  saveOverlays, withGroup, withOverlay, type OverlayKey, type OverlayState, type OverlayView,
+} from "./overlays";
 import { PD_CELL } from "./views/pd-arrange";
 import { documentDating, topEpochOf } from "./doc-dating";
 import { BADGE_RULES, funnelIndex, resolveEffective, sourceLabel } from "./funnel";
@@ -2043,6 +2047,18 @@ window.__EM_SCENE__ = () => {
   jumpTo: (id: string) => jumpTo(id),
   // MICRO-BADGE-PD · the groups' chips as drawn (canvas-relative), the context
   pdChips: () => drawnPdChips(),
+  /** MICRO-SOVRAPPOSIZIONI · the overlays of a view (default: the focused
+   *  one), and set them; the menu's view */
+  overlays: (v?: OverlayView) => {
+    const vv = v ?? focusedOverlayView();
+    const st = overlaysOf(vv);
+    return { view: vv, master: st.master, off: [...st.off] };
+  },
+  overlaysDrawn: () => drawnOverlayCounts(),
+  setOverlays: (v: OverlayView, st: { master?: boolean; off?: OverlayKey[] }) => {
+    const cur = overlaysOf(v);
+    setOverlays(v, { master: st.master ?? cur.master, off: st.off ? [...st.off] : [...cur.off] });
+  },
   /** a world rect framed in the focused graph window (the probes' camera) */
   frameWorld: (x: number, y: number, w: number, h: number, pad = 30) => {
     const cv = graphWindows.get(activeWin().id)?.cv;
@@ -2356,6 +2372,8 @@ function paintGraphWindow(p: GraphPaint): void {
         local: localNeighbourhood(s, selectedIds.size ? selectedIds : selectedId ? [selectedId] : [], localDepth),
         epochOf: (id: string) => liquidEpochOf.get(id) ?? [],
       } : undefined,
+      // MICRO-SOVRAPPOSIZIONI · the overlays of this window's view
+      overlays: overlaysOf(overlayViewOf(p.winId, p.mode)),
       // E5 · an undated epoch's lane invites to date it — drawn, never saved
       dateInvite: p.mode === "matrix" ? { text: t("epoch.inviteDate"), add: t("epoch.inviteAdd") } : null,
     },
@@ -3505,6 +3523,8 @@ function setLegendOpen(win: Win, open: boolean): void {
   if (!open) legendHighlight.delete(win.id);
   // G4 · the legend and the filter are alternatives: opening one closes the other
   if (open && filterPanelOpen()) closeFilterPanel();
+  // MICRO-SOVRAPPOSIZIONI · …and the overlays are a third
+  if (open && overlayPanelOpen()) closeOverlayPanel();
   renderAreaHeaders();
   draw();
 }
@@ -13769,6 +13789,7 @@ function filterPanelOpen(): boolean {
 // corner: opening hides the gear button, the panel's × restores it.
 function openFilterPanel(): void {
   renderCirclesPanel();
+  closeOverlayPanel();   // MICRO-SOVRAPPOSIZIONI · alternatives, like the legend
   filterPanel.classList.remove("hidden");
   btnViewProps.classList.add("hidden");
   // G4 · the filter and the legend are alternatives: the focused window's
@@ -13791,8 +13812,11 @@ function closeFilterPanel(): void {
 function refreshFunnel(): void {
   const anchored = activeWindowType() === "graph"
     || (!!lastGraphWinId && winAreas.has(lastGraphWinId));
-  const belongs = !!store && anchored && !filterPanelOpen();
+  const belongs = !!store && anchored && !filterPanelOpen() && !overlayPanelOpen();
   btnViewProps.classList.toggle("hidden", !belongs);
+  // MICRO-SOVRAPPOSIZIONI · the overlays' glyph, beside the funnel, by the same rule
+  btnOverlays.classList.toggle("hidden", !belongs);
+  refreshOverlayDot();
 }
 // Monochrome (B/W) display toggle — every node draws black-bordered + white
 // (shapes disambiguate). A pure presentation option (not a filter), so it lives
@@ -14010,6 +14034,196 @@ btnViewProps.addEventListener("click", () => {
   if (filterPanel.classList.contains("hidden")) openFilterPanel();
   else closeFilterPanel();
 });
+
+// ── MICRO-SOVRAPPOSIZIONI · the Overlays menu ─────────────────────────────────
+// The badges and marks drawn over a node (overlays.ts): a menu of their own,
+// apart from the filter of the nodes, like the Overlays of Blender's viewport.
+// A floating glyph beside the funnel, in the same corner and by the same rule
+// (`refreshFunnel`); its panel opens in the funnel's place, and the filter, the
+// legend and the overlays are alternatives (one open closes the others). The
+// state is the focused window's VIEW's — Matrix, Graph, DTC, multigraph, or the
+// soloing when the window is in a group's hypergraph — remembered per person
+// and per view in the local preferences, never in the em.json or the room.
+// Switching an overlay redraws (no scene, no layout).
+/** the identity working on this machine: re-read only when its store changes
+ *  (the paint asks for it every frame) — identity.ts keeps it under this key */
+let overlayPersonRaw: string | null | undefined;
+let overlayPersonId = NOBODY;
+function overlayPerson(): string {
+  let raw: string | null = null;
+  try { raw = localStorage.getItem("emstudio.identities"); } catch { /* private mode */ }
+  if (raw !== overlayPersonRaw) {
+    overlayPersonRaw = raw;
+    overlayPersonId = currentIdentity()?.orcid ?? NOBODY;
+  }
+  return overlayPersonId;
+}
+const overlayMemo = new Map<string, OverlayState>();
+function overlaysOf(v: OverlayView): OverlayState {
+  const k = `${overlayPerson()}|${v}`;
+  let st = overlayMemo.get(k);
+  if (!st) {
+    st = loadOverlays(overlayPerson(), v);
+    overlayMemo.set(k, st);
+  }
+  return st;
+}
+function setOverlays(v: OverlayView, st: OverlayState): void {
+  overlayMemo.set(`${overlayPerson()}|${v}`, st);
+  saveOverlays(overlayPerson(), v, st);
+  draw();
+  if (overlayPanelOpen()) renderOverlayPanel();
+  refreshOverlayDot();
+}
+/** the view whose overlays a window draws: the soloing when it is in context */
+function overlayViewOf(winId: string, mode: ViewKind): OverlayView {
+  return contextIn(winId) ? "soloing" : mode;
+}
+/** the view the menu edits: the focused graph window's, else the last one's */
+function focusedOverlayView(): OverlayView {
+  const here = activeWin();
+  const id = here.type === "graph" ? here.id
+    : lastGraphWinId && winAreas.has(lastGraphWinId) ? lastGraphWinId : null;
+  return id ? overlayViewOf(id, graphModeOf(id)) : view;
+}
+const btnOverlays = document.createElement("button");
+btnOverlays.id = "btn-overlays";
+btnOverlays.type = "button";
+btnOverlays.className = "hidden";
+// two overlapping circles: Blender's Overlays glyph
+btnOverlays.innerHTML = `<svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><circle cx="6" cy="8" r="4.2"/><circle cx="10" cy="8" r="4.2"/></svg><span class="ov-dot" aria-hidden="true"></span>`;
+btnViewProps.parentElement?.insertBefore(btnOverlays, btnViewProps);
+const overlayPanel = document.createElement("div");
+overlayPanel.id = "overlay-panel";
+overlayPanel.className = "hidden";
+btnViewProps.parentElement?.insertBefore(overlayPanel, filterPanel.nextSibling);
+for (const ev of ["pointerdown", "wheel", "dblclick", "contextmenu"])
+  overlayPanel.addEventListener(ev, (e) => e.stopPropagation());
+function overlayPanelOpen(): boolean {
+  return !overlayPanel.classList.contains("hidden");
+}
+function openOverlayPanel(): void {
+  if (filterPanelOpen()) closeFilterPanel();
+  const w = activeWin();
+  if (w.type === "graph" && legendOpen(w)) setLegendOpen(w, false);
+  overlayPanel.classList.remove("hidden");
+  renderOverlayPanel();
+  refreshFunnel();
+}
+function closeOverlayPanel(): void {
+  if (!overlayPanelOpen()) return;
+  overlayPanel.classList.add("hidden");
+  overlayPanel.dataset.key = "";
+  refreshFunnel();
+}
+/** the dot on the glyph: something this view can draw is switched off */
+function refreshOverlayDot(): void {
+  const v = focusedOverlayView();
+  // the panel follows the focus: another window, or the soloing entered or left
+  if (overlayPanelOpen() && overlayPanel.dataset.view !== v) renderOverlayPanel();
+  const off = overlaysHideSomething(overlaysOf(v), v);
+  btnOverlays.classList.toggle("ov-off", off);
+  const tip = t(off ? "ov.btnOff" : "ov.btn");
+  if (btnOverlays.title !== tip) {
+    btnOverlays.title = tip;
+    btnOverlays.setAttribute("aria-label", tip);
+  }
+}
+btnOverlays.addEventListener("click", (e) => {
+  e.stopPropagation();
+  if (overlayPanelOpen()) closeOverlayPanel();
+  else openOverlayPanel();
+});
+function overlayViewName(v: OverlayView): string {
+  return v === "soloing" ? t("ov.view.soloing") : t(`mode.${v}`);
+}
+function renderOverlayPanel(): void {
+  const v = focusedOverlayView();
+  const st = overlaysOf(v);
+  overlayPanel.textContent = "";
+  overlayPanel.dataset.view = v;
+  overlayPanel.classList.toggle("ov-master-off", !st.master);
+  const head = document.createElement("div");
+  head.className = "fp-head";
+  const title = document.createElement("span");
+  title.className = "fp-hint";
+  title.textContent = t("ov.title", { view: overlayViewName(v) });
+  const x = document.createElement("button");
+  x.type = "button";
+  x.className = "fp-close";
+  x.textContent = "×";
+  x.title = t("common.close", undefined, "Close");
+  x.addEventListener("click", () => closeOverlayPanel());
+  head.append(title, x);
+  overlayPanel.appendChild(head);
+  // the general switch, as in Blender
+  const master = document.createElement("label");
+  master.className = "ov-master";
+  const mcb = document.createElement("input");
+  mcb.type = "checkbox";
+  mcb.checked = st.master;
+  mcb.dataset.ov = "master";
+  mcb.addEventListener("change", () => setOverlays(v, { master: mcb.checked, off: [...overlaysOf(v).off] }));
+  master.append(mcb, document.createTextNode(" " + t("ov.master")));
+  overlayPanel.appendChild(master);
+  const can = new Set(overlayItemsFor(v).map((i) => i.key));
+  for (const g of OVERLAY_GROUPS) {
+    const items = g.items.filter((i) => can.has(i.key));
+    if (!items.length) continue;
+    const sec = document.createElement("div");
+    sec.className = "ov-group";
+    sec.dataset.group = g.key;
+    const gh = document.createElement("div");
+    gh.className = "ov-group-head";
+    const gl = document.createElement("span");
+    gl.textContent = t(`ov.group.${g.key}`);
+    const allB = document.createElement("button");
+    allB.type = "button";
+    allB.className = "ov-link";
+    allB.dataset.ovAll = g.key;
+    allB.textContent = t("ov.all");
+    allB.addEventListener("click", () => setOverlays(v, withGroup(overlaysOf(v), g.key, true, v)));
+    const noneB = document.createElement("button");
+    noneB.type = "button";
+    noneB.className = "ov-link";
+    noneB.dataset.ovNone = g.key;
+    noneB.textContent = t("ov.none");
+    noneB.addEventListener("click", () => setOverlays(v, withGroup(overlaysOf(v), g.key, false, v)));
+    gh.append(gl, allB, noneB);
+    sec.appendChild(gh);
+    for (const it of items) {
+      const row = document.createElement("label");
+      row.className = "ov-row";
+      const cb = document.createElement("input");
+      cb.type = "checkbox";
+      cb.checked = !st.off.includes(it.key);
+      cb.dataset.ov = it.key;
+      cb.addEventListener("change", () => setOverlays(v, withOverlay(overlaysOf(v), it.key as OverlayKey, cb.checked)));
+      const ic = document.createElement("span");
+      ic.className = "ov-glyph";
+      if (it.kind) ic.appendChild(typeIconElement(it.kind));
+      else {
+        ic.classList.add(`ov-glyph-${it.key}`);
+        ic.textContent = it.text ?? "";
+      }
+      const lab = document.createElement("span");
+      lab.textContent = t(`ov.item.${it.key}`);
+      row.append(cb, ic, lab);
+      sec.appendChild(row);
+    }
+    overlayPanel.appendChild(sec);
+  }
+  const note = document.createElement("div");
+  note.className = "ov-note";
+  note.textContent = t("ov.note");
+  overlayPanel.appendChild(note);
+  const reset = document.createElement("button");
+  reset.type = "button";
+  reset.className = "fp-reset";
+  reset.textContent = t("ov.reset");
+  reset.addEventListener("click", () => setOverlays(v, defaultOverlays(v)));
+  overlayPanel.appendChild(reset);
+}
 
 // WIN-FIX1 · the side-panel TABS are gone with the aside they belonged to.
 //
@@ -18201,6 +18415,7 @@ function mountGraphCanvas(cv: HTMLCanvasElement, mini: HTMLCanvasElement,
         overview,
       });
       syncLegend(legendHost, windowsOf().find((w) => w.id === winId), shown, legendBtn);
+      refreshOverlayDot();   // MICRO-SOVRAPPOSIZIONI · the focus or the context may have moved
     },
   };
   graphWindows.set(winId, mount);

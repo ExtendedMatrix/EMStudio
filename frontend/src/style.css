@@ -2081,6 +2081,123 @@ body.sync-active #mode-indicator::before {
   background: var(--bg-panel);
   border-color: var(--border-strong);
 }
+/* MICRO-SOVRAPPOSIZIONI · the Overlays glyph: the funnel's twin, beside it on
+   its left; a dot when something is switched off in the focused view */
+#btn-overlays {
+  position: absolute;
+  top: calc(var(--live-y, 0px) + var(--winbar-h, 0px) + 10px);
+  left: calc(var(--live-x, 0px) + var(--live-w, 100%) - 76px);
+  z-index: 21;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
+  cursor: pointer;
+  color: var(--text);
+}
+#btn-overlays:hover { background: var(--bg-panel); border-color: var(--border-strong); }
+#btn-overlays.hidden { display: none; }
+#btn-overlays .ov-dot {
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 0 1.5px var(--bg-elevated);
+  display: none;
+}
+#btn-overlays.ov-off .ov-dot { display: block; }
+#overlay-panel {
+  position: absolute;
+  top: calc(var(--live-y, 0px) + var(--winbar-h, 0px) + 10px);
+  left: calc(var(--live-x, 0px) + var(--live-w, 100%) - 10px);
+  transform: translateX(-100%);
+  width: 300px;
+  max-height: 70vh;
+  overflow-y: auto;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.15);
+  padding: 10px 12px;
+  z-index: 22;
+  font-size: 12.5px;
+}
+#overlay-panel.hidden { display: none; }
+#overlay-panel .ov-master {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-weight: 600;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 4px;
+}
+#overlay-panel .ov-group { margin: 6px 0 2px; }
+#overlay-panel.ov-master-off .ov-group { opacity: 0.45; }
+#overlay-panel .ov-group-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: .05em;
+  margin-bottom: 2px;
+}
+#overlay-panel .ov-group-head span { margin-right: auto; }
+#overlay-panel .ov-link {
+  border: none;
+  background: transparent;
+  color: var(--accent);
+  font-size: 11px;
+  padding: 0 2px;
+  cursor: pointer;
+  text-transform: none;
+  letter-spacing: 0;
+}
+#overlay-panel .ov-link:hover { text-decoration: underline; }
+#overlay-panel .ov-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 1px 0;
+  cursor: pointer;
+}
+#overlay-panel .ov-glyph {
+  flex: 0 0 auto;
+  min-width: 18px;
+  height: 16px;
+  padding: 0 3px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 9.5px;
+  font-weight: 700;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  background: var(--bg-panel);
+  color: var(--text);
+  line-height: 1;
+}
+#overlay-panel .ov-glyph svg, #overlay-panel .ov-glyph img, #overlay-panel .ov-glyph canvas { width: 14px; height: 14px; }
+#overlay-panel .ov-glyph-warning, #overlay-panel .ov-glyph-lane_warning { background: #e3b43a; color: #1d1d1b; border-color: #c99a22; }
+#overlay-panel .ov-glyph-pd_chip, #overlay-panel .ov-glyph-pd_tablet, #overlay-panel .ov-glyph-lane_pd_tag { background: #FFCC99; color: #5a3200; }
+#overlay-panel .ov-glyph-ai_chip { color: var(--ai-ink, #7a4fc4); border-color: var(--ai-ink, #7a4fc4); border-radius: 8px; }
+#overlay-panel .ov-glyph-instance_badge { border-color: var(--accent); border-radius: 8px; }
+#overlay-panel .ov-glyph-fold_count { background: var(--accent); color: var(--on-accent, #fff); border-radius: 8px; }
+#overlay-panel .ov-glyph-name_status { color: #C77700; }
+#overlay-panel .ov-glyph-inherited { border-style: dashed; border-color: var(--accent); opacity: 0.7; }
+#overlay-panel .ov-note { margin: 8px 0 6px; font-size: 11px; color: var(--text-muted); }
+
 /* panel header row: title + close × */
 .fp-head {
   display: flex;

@@ -19,7 +19,8 @@ import {
   shapePath } from "./shape-geom";
 import { activeTheme, CANVAS_TYPE, canvasFont, canvasTheme, labelOn } from "./theme";
 import { drawGlyph, glyphFor, type GlyphInk } from "./glyphs";
-import { drawPdChips } from "./pd-chip";
+import { adornmentShown, beginOverlayFrame, markOverlay, overlayShown, type OverlayKey, type OverlayState } from "./overlays";
+import { drawnPdChips, drawPdChips } from "./pd-chip";
 
 /** SHIFT-A fase 6b · the theme colours the RECOLOURABLE roles of a glyph take
  *  (`2d_glyphs._roles`): ink → the canvas ink, paper → the canvas ground, halo
@@ -114,6 +115,10 @@ export interface RenderState {
   /** LEGENDA · the edge type picked in this window's legend: drawn on top at
    *  full strength, the others faded. Per window, never in the document. */
   highlightEdgeType?: string | null;
+  /** MICRO-SOVRAPPOSIZIONI · the overlays of this window's view (badges and
+   *  decorators): one switched off is not drawn and has no hit rect. Nothing
+   *  else changes — no layout, no scene. Absent → all drawn. */
+  overlays?: OverlayState | null;
 }
 
 /** Label ink for a node: default, ORANGE when its name has a problem, RED when
@@ -130,7 +135,9 @@ function labelInk(
   nodeId: string,
   fallback: string,
 ): string {
+  if (!overlayShown(state.overlays, "name_status")) return fallback;
   const st = state.nameStatus?.get(nodeId)?.status;
+  if (st === "dup" || st === "warn") markOverlay("name_status");
   if (st === "dup") return "#C62828"; // red — two nodes claim one name
   if (st === "warn") return "#C77700"; // orange — malformed or inconsistent
   return fallback;
@@ -654,11 +661,14 @@ export function render(
   viewW: number,
   viewH: number,
 ): void {
+  beginOverlayFrame();
   // G3 · the liquid Graph draws itself (discs, halos, straight edges)
   if (isLiquid(scene) && state.liquid) {
-    renderLiquid(ctx, scene, vp, state.liquid, viewW, viewH);
+    renderLiquid(ctx, scene, vp, state.liquid, viewW, viewH, state.overlays);
     return;
   }
+  // MICRO-SOVRAPPOSIZIONI · is this overlay drawn in this window's view?
+  const ov = (k: OverlayKey): boolean => overlayShown(state.overlays, k);
   const dpr = window.devicePixelRatio || 1;
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.clearRect(0, 0, viewW, viewH);
@@ -909,7 +919,7 @@ export function render(
         borderCol,
         headerFillFor(n.node.node_type, st.border, st.labelBackground),
         vp.scale,
-        n.badge,
+        ov("fold_count") && n.badge ? (markOverlay("fold_count"), n.badge) : undefined,
         drawLabels,
         glyphFor(n.node.node_type, n.node.data as Record<string, unknown> | undefined),
       );
@@ -1005,8 +1015,9 @@ export function render(
         ctx.textBaseline = "middle";
         ctx.fillText(label, n.x + n.w / 2, y0 + ih * 0.62);
       }
-      if (n.useCount) {
+      if (n.useCount && ov("doc_uses")) {
         // BUGS-UI · world-constant, like every other node decorator
+        markOverlay("doc_uses");
         const r = 6.5;
         const bx = x0 + iw + 1;
         const by = y0 + ih + 1;
@@ -1108,9 +1119,10 @@ export function render(
         drawGlyph(ctx, pathGlyph, ix, iy, iw, ih, glyphInk(), Math.min(iw, ih) * vp.scale);
         // G9 · the format of a VERSION is not in its glyph (one drawing for
         // every glTF): the canvas writes it, when the glyph is big enough
-        if (pathGlyph.key.startsWith("version:") && Math.min(iw, ih) * vp.scale >= 40) {
+        if (pathGlyph.key.startsWith("version:") && Math.min(iw, ih) * vp.scale >= 40 && ov("version_format")) {
           const ac = formatAcronym(n.node.data as Record<string, unknown> | undefined);
           if (ac) {
+            markOverlay("version_format");
             const fpx = Math.max(7, ih * 0.2);
             ctx.save();
             ctx.font = canvasFont(700, fpx);
@@ -1296,8 +1308,9 @@ export function render(
     // PD tablet bottom-left, the AI chip just outside bottom-right, the handle on
     // the right edge at mid-height).
     {
-      const letter = genreLetterOf(n);
+      const letter = ov("genre") ? genreLetterOf(n) : "";
       if (letter) {
+        markOverlay("genre");
         const gs = genreSize(sh);
         ctx.font = canvasFont(700, gs);
         ctx.fillStyle = borderCol;
@@ -1309,7 +1322,8 @@ export function render(
     }
 
     // folded-group badge (count of hidden nodes)
-    if (n.badge) {
+    if (n.badge && ov("fold_count")) {
+      markOverlay("fold_count");
       // BUGS-UI · a world-constant radius: the count badge scales with the node
       // exactly like the ornament chips (it used to grow as 1/sqrt(scale),
       // a half-measure that made it swell on a zoomed-out canvas).
@@ -1379,7 +1393,8 @@ export function render(
   }
   // pinned badge: a small lock at the top-right corner of every locked node
   for (const n of shown) {
-    if (!n.pinned || n.collapsed) continue;
+    if (!n.pinned || n.collapsed || !ov("lock")) continue;
+    markOverlay("lock");
     const s = 12 / vp.scale;
     ctx.font = canvasFont(400, s);
     ctx.textAlign = "center";
@@ -1390,10 +1405,11 @@ export function render(
   // STRUTTURA · the WARNING badge: an ochre disc with «!», on the top-left
   // corner (the top-right one is the lock's and the use-count's). World-space
   // like the lock, a constant screen size; chrome, never a node's own style.
-  if (state.warnIds?.size) {
+  if (state.warnIds?.size && ov("warning")) {
     const r = 7 / vp.scale;
     for (const n of shown) {
       if (!state.warnIds.has(n.id)) continue;
+      markOverlay("warning");
       const cx = n.x;
       const cy = n.y;
       ctx.beginPath();
@@ -1425,7 +1441,7 @@ export function render(
     ctx.restore();
   }
 
-  if (state.aiNodes?.size) {
+  if (state.aiNodes?.size && ov("ai_chip")) {
     ctx.save();
     const css = getComputedStyle(document.documentElement);
     const ink = css.getPropertyValue("--ai-ink").trim() || "#7a4fc4";
@@ -1436,6 +1452,7 @@ export function render(
     for (const n of shown) {
       const st = state.aiNodes.get(n.instanceOf ?? n.id);
       if (!st) continue;
+      markOverlay("ai_chip");
       const label = st === "verified" ? "AI ✓" : "AI";
       const w = ctx.measureText(label).width + h * 0.7;
       const vb = visibleBoxOf(n);
@@ -1542,7 +1559,7 @@ export function render(
   for (const n of shown) {
     // MICRO-BADGE-PD · the group's chip is not of this row: bottom-right, drawn
     // by `drawPdChips` below
-    const ads = n.adornments?.filter((b) => !b.group);
+    const ads = n.adornments?.filter((b) => !b.group && adornmentShown(state.overlays, b));
     if (!ads || !ads.length) continue;
     const r = nodeScreenRect(n, vp);
     if (r.x + r.w < -badgePx || r.x > viewW || r.y + r.h < -badgePx || r.y > viewH)
@@ -1575,6 +1592,8 @@ export function render(
         continue;
       }
       const b = ads[i];
+      if ((["author", "author_ai", "license", "embargo"] as string[]).includes(b.kind)) markOverlay(b.kind as OverlayKey);
+      if (b.inherited) markOverlay("inherited");
       // FUNNEL1 · an INHERITED value (from activity/epoch/canvas) is drawn
       // attenuated (dimmed, dashed outline) and is NOT a click target — it has
       // no ornament node on this referent. The node's own value is a full badge.
@@ -1647,7 +1666,9 @@ export function render(
     }
   }
   // ── MICRO-BADGE-PD · the chip of a unit's paradata group, bottom-right ──────
-  drawPdChips(ctx, shown, vp, viewW, viewH, state.selectedId ?? null);
+  // (switched off, it is drawn on no node, so it has no hit rect either)
+  drawPdChips(ctx, ov("pd_chip") ? shown : [], vp, viewW, viewH, state.selectedId ?? null);
+  for (let i = drawnPdChips().length; i > 0; i--) markOverlay("pd_chip");
 
   // ── FONTE · the badge of an INSTANCE, top left: «from US 12», «from
   //    Medioevo» — where its master comes from (`paradata_instances`). Screen
@@ -1656,13 +1677,14 @@ export function render(
   instanceBadgeHits = [];
   ctx.textAlign = "left";
   ctx.textBaseline = "middle";
+  const ovInstance = ov("instance_badge"), ovTrace = ov("trace");
   for (const n of shown) {
-    if (!n.instanceBadge && !n.trace) continue;
+    if (!(n.instanceBadge && ovInstance) && !(n.trace && ovTrace)) continue;
     const r = nodeScreenRect(n, vp);
     if (r.x + r.w < 0 || r.x > viewW || r.y + r.h < -badgePx || r.y > viewH + badgePx) continue;
     const fpx = Math.max(7, Math.round(badgePx * 0.5));
     ctx.font = canvasFont(600, fpx);
-    if (n.instanceBadge?.ownerName) {
+    if (n.instanceBadge?.ownerName && ovInstance) {
       const text = reasoningText("instance_badge", "label", { owner: n.instanceBadge.ownerName });
       const w = ctx.measureText(text).width + fpx * 1.1;
       const h = Math.max(badgePx * 0.8, fpx * 1.5);
@@ -1678,9 +1700,11 @@ export function render(
       ctx.stroke();
       ctx.fillStyle = labelOn(canvasTheme().handleFill);
       ctx.fillText(text, bx + fpx * 0.55, by + h / 2 + 0.5);
+      markOverlay("instance_badge");
       instanceBadgeHits.push({ instance: n.id, master: n.instanceOf ?? n.id, x: bx, y: by, w, h });
     }
-    if (n.trace) {
+    if (n.trace && ovTrace) {
+      markOverlay("trace");
       ctx.fillStyle = canvasTheme().labelMuted;
       ctx.fillText(`✕ ${reasoningText("source_removed")}`, r.x, r.y + r.h + fpx);
     }
@@ -1699,7 +1723,7 @@ export function render(
   const pdFill = nodeStyle("ParadataNodeGroup").labelBackground || groupHeaderFill();
   // BUGFIX-PDG · drawn from the REFERENT node (`pdCollapsed` = the PDG id), so the
   // collapsed PDG needs no SceneGroup — nothing draws a phantom box behind it.
-  for (const ref of scene.nodes) {
+  for (const ref of ov("pd_tablet") ? scene.nodes : []) {
     const pdgId = ref.pdCollapsed;
     if (!pdgId) continue;
     // PROPRIETA · a group shown by its property chip needs no «PD» tablet too
@@ -1727,6 +1751,7 @@ export function render(
       ctx.lineWidth = 2;
       ctx.strokeRect(tx - 1, ty - 1, PD_W + 2, badgePx + 2);
     }
+    markOverlay("pd_tablet");
     pdDecoratorHits.push({ pdgId, x: tx, y: ty, w: PD_W, h: badgePx });
   }
   ctx.textAlign = "left";
@@ -1768,11 +1793,13 @@ export function render(
     ctx.textBaseline = "middle";
     ctx.fillText("PD", x + PD_TAG_W / 2, y + PD_TAG_H / 2 + 0.5);
     ctx.restore();
+    markOverlay("lane_pd_tag");
     pdTagHits.push({ pdgId, x, y, w: PD_TAG_W, h: PD_TAG_H });
   };
   // amber warning triangle (chronology-coherence conflict), centred at (x, cy)
   const WARN_W = 13;
   const drawWarn = (x: number, cy: number): void => {
+    markOverlay("lane_warning");
     ctx.save();
     const h = 11;
     ctx.beginPath();
@@ -1817,7 +1844,7 @@ export function render(
     // where the bounds would be, an invitation to date it: «date: — · add».
     // The view draws it; nothing of it is in the document.
     const invite = !boundsText && !lane.paradataGroupId && state.dateInvite && state.editable !== false
-      ? state.dateInvite : null;
+      && ov("date_invite") ? state.dateInvite : null;
     const inviteText = invite ? `${invite.text} · ` : "";
     const showBounds = (!!boundsText || !!invite) && sh > 36;
     // The chip now carries the epoch's own colour, so there is no separate
@@ -1828,9 +1855,9 @@ export function render(
     const inviteTextW = invite ? ctx.measureText(inviteText).width : 0;
     const inviteAddW = invite ? ctx.measureText(invite.add).width : 0;
     const boundsW = !showBounds ? 0 : invite ? inviteTextW + inviteAddW : ctx.measureText(boundsText).width;
-    const hasPd = !!lane.paradataGroupId;
+    const hasPd = !!lane.paradataGroupId && ov("lane_pd_tag");
     const tagSpace = hasPd ? PD_TAG_W + 6 : 0;
-    const hasWarn = !!lane.warn;
+    const hasWarn = !!lane.warn && ov("lane_warning");
     const warnSpace = hasWarn ? WARN_W + 4 : 0;
     const chipX = RAIL + 4;
     const chipW = 8 + Math.max(nameW, boundsW) + warnSpace + tagSpace + 8;
@@ -1873,6 +1900,7 @@ export function render(
       ctx.fillText(invite.add, ax, ty + 16);
       ctx.fillRect(ax, ty + 16 + CANVAS_TYPE.laneDates.px + 1, inviteAddW, 1);
       ctx.restore();
+      markOverlay("date_invite");
       dateInviteHits.push({ id: lane.id, x: ax - 2, y: ty + 13, w: inviteAddW + 4, h: CANVAS_TYPE.laneDates.px + 6 });
     } else if (showBounds) {
       // the bounds line is the same ink, softened — still derived from the fill
@@ -2022,9 +2050,9 @@ export function render(
       const boundsW = hasBounds ? ctx.measureText(boundsText).width : 0;
       // indent deeper (sub-phase) bands so the hierarchy reads at a glance
       let chipX = RAIL + 14 + (sb.depth ?? 0) * 16;
-      const hasPd = !!sb.paradataGroupId;
+      const hasPd = !!sb.paradataGroupId && ov("lane_pd_tag");
       const tagSpace = hasPd ? PD_TAG_W + 5 : 0;
-      const hasWarn = !!sb.warn;
+      const hasWarn = !!sb.warn && ov("lane_warning");
       const warnSpace = hasWarn ? WARN_W + 4 : 0;
       const chipW = 7 + 5 + Math.max(nameW, boundsW) + warnSpace + tagSpace + 8;
       const chipH = hasBounds ? 30 : 17;
