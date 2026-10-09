@@ -242,6 +242,35 @@ const report = {};
   if (v) eq(v.incoherences, 0, "no paradata_group_incoherences either way");
 }
 
+// ── Parte 3 · the warning, and «Duplicate for each owner» ────────────────────
+{
+  const st = fresh();
+  const t = (k, v) => `${k}${JSON.stringify(v ?? {})}`;
+  const rows = () => issues({ doc: st.doc, nodes: st.liveNodes(), isUnit: () => true, t,
+                              sharedOwners: C.undeclaredOwners(st.doc),
+                              duplicateForOwners: { label: "dup", run: (id) => C.duplicateForEachOwner(st, id) } })
+    .filter((i) => i.rule === "owners");
+  const w = rows();
+  eq(w.length, 1, "one warning: the property with two owners");
+  ok(w[0].node === "P_MULTI" && w[0].txt.includes("US1, US3"), "…on P_MULTI, naming both owners");
+  ok(!rows().some((i) => i.node === "P1A"), "the declared heir (USV10 → P1A) is no warning");
+  const d0 = undoDepth(st);
+  w[0].fix.run();
+  eq(undoDepth(st) - d0, 1, "Duplicate for each owner is ONE undo step");
+  eq(rows().length, 0, "after Duplicate: no warning");
+  const p3 = E(st, "has_property").filter((e) => e.source === "US3").map((e) => e.target);
+  ok(p3.length === 1 && p3[0] !== "P_MULTI", "US3 owns a copy, US1 keeps the node");
+  ok(st.hasEdge("US1", "P_MULTI", "has_property"), "US1 → P_MULTI is still there");
+  eq(st.node(p3[0]).description, st.node("P_MULTI").description, "two properties with the same value");
+  const ch = (p) => E(st, "has_data_provenance").filter((e) => e.source === p).map((e) => e.target);
+  ok(ch("P_MULTI")[0] === "E4" && ch(p3[0]).length === 1 && ch(p3[0])[0] !== "E4", "…and distinct chains");
+  ok(st.hasEdge(ch(p3[0])[0], "D.02", "extracted_from"), "the copied extractor reads the same document");
+  const v = validate(st.doc);
+  if (v) eq(v.incoherences, 0, "no paradata_group_incoherences after Duplicate");
+  // and now nothing is skipped
+  eq(C.compactProperties(st).skipped, [], "after Duplicate, Compact skips nothing");
+}
+
 // ── a room: templu-mare-v2 ───────────────────────────────────────────────────
 const ROOM = process.argv[2];
 if (ROOM) {

@@ -132,6 +132,10 @@ export interface IssueSources {
   /** DEV30 D6 · the library's own warnings (`api.validate` via the bridge),
    *  each with the node its message names, when it names one */
   library?: Array<{ txt: string; node: string }>;
+  /** PROPRIETA · the properties with two or more `has_property` not declared
+   *  `inherited` (`compact.undeclaredOwners`), and their cure */
+  sharedOwners?: Array<{ property: string; owners: string[] }>;
+  duplicateForOwners?: { label: string; run: (propertyId: string) => void };
   /** i18n for the hint texts */
   t: (key: string, vars?: Record<string, string>) => string;
 }
@@ -314,6 +318,17 @@ export function issues(src: IssueSources): Issue[] {
     const d = (n.data ?? {}) as Record<string, unknown>;
     if (d.missing === true || d.missing === "true")
       push({ node: n.id, sev: "warn", rule: "missing", txt: t("issues.missing", { n: name(n.id) }) });
+  }
+
+  // ── PROPRIETA · one property, one owner (E.D., 9 Oct 2026): a property with
+  //    more than one owner, none declared an heir, is a warning; the cure is
+  //    «Duplicate for each owner». A declared heir (`inherited`) is no owner.
+  for (const x of src.sharedOwners ?? []) {
+    const d = src.duplicateForOwners;
+    push({ node: x.property, sev: "warn", rule: "owners",
+           txt: t("compact.owners", { p: name(x.property), n: String(x.owners.length),
+                                      owners: x.owners.map(name).join(", ") }),
+           ...(d ? { fix: { kind: "button" as const, label: d.label, run: () => d.run(x.property) } } : {}) });
   }
 
   // ── CATENA · reading from a unit: a hint when the unit lacks the property ──

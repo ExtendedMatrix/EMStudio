@@ -223,7 +223,7 @@ import { setSitePicker, type NarrativeSelection, type Reading } from "./narrativ
 import { openSitePicker } from "./site-picker";
 import * as chain from "./paradata-chain";
 import { carriedPropertyEdges, compactableUnits, compactProperties, dissolveGroups, drawnEdgeKey,
-         propertyBadges } from "./compact";
+         duplicateForEachOwner, propertyBadges, undeclaredOwners } from "./compact";
 import { mediumOf as mediumOfDoc, renderChainSection, type ChainUi } from "./paradata-inspector";
 import { DOC_TOOLS, renderReadingStage, selectedPassage, type DocTool,
          type TraceAnchor, type TraceGeometry } from "./doc-reading";
@@ -3598,6 +3598,14 @@ function runDissolve(units: string[]): void {
   if (!store) return;
   const r = dissolveGroups(store, units);
   toast(t("compact.dissolved", { units: String(r.units), m: String(r.memberships), g: String(r.groupsRemoved) }));
+}
+
+/** PROPRIETA · «Duplicate for each owner» of one property — ONE undo step. */
+function runDuplicateForOwners(propertyId: string): void {
+  if (!store) return;
+  const p = String(store.node(propertyId)?.name || propertyId);
+  const r = duplicateForEachOwner(store, propertyId);
+  toast(t("compact.duplicated", { p, n: String(r.copies.length), dups: String(r.duplicates) }));
 }
 
 function enterGroup(groupId: string): void {
@@ -14158,6 +14166,8 @@ function refreshIssues(): void {
       allowedEdgeTypes(st, dt).map(canonicalEdgeType).includes(canonicalEdgeType(et)),
     names: nameStatus,
     sourceHints: chain.extractionSourceHints(s.doc, isStratigraphicType),
+    sharedOwners: undeclaredOwners(s.doc),
+    duplicateForOwners: { label: t("compact.duplicate"), run: (id) => runDuplicateForOwners(id) },
     // TRADUZIONI · ONE view of what waits for a person (the AI nodes are in it)
     review: aiv.toReview(s.doc),
     verifyAi: { label: t("ai.verify"), bulkLabel: (n) => t("ai.verifyAll", { n: String(n) }),
