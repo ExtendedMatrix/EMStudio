@@ -22,3 +22,13 @@ fn core_rules_are_the_frontend_rules_without_the_glyph_paths() {
         .remove("2d_glyphs");
     assert_eq!(frontend, core, "the two copies differ outside 2d_glyphs — re-run sync-datamodels.sh");
 }
+
+const FRONTEND_REGISTRY: &str = include_str!("../../../frontend/src/assets/node_registry.generated.json");
+const CORE_REGISTRY: &str = include_str!("../assets/node_registry.generated.json");
+
+/// G1 · the class hierarchy em-core classifies node types with is the one the
+/// frontend's rings read (`filters.ts nodeCircle`), byte for byte.
+#[test]
+fn core_registry_is_the_frontend_registry() {
+    assert_eq!(FRONTEND_REGISTRY, CORE_REGISTRY, "node_registry differs — re-run sync-datamodels.sh");
+}

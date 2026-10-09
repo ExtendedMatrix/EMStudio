@@ -35,7 +35,9 @@ July 2026; this file is the handoff map — read it before touching anything.
    inside its container; chronologically earlier = lower on screen.
    Symmetric connectors (`has_same_time`, `equals`, `is_physically_equal_to`,
    `bonded_to`, `is_bonded_to`, `contrasts_with`) sit side by side.
-   `layout::upward_edges()` reports residual violations as data warnings.
+   `layout::upward_edges()` reports residual violations as data warnings;
+   since v5 the only residual ones are the data's own contradictions (a
+   cycle, an edge towards a newer epoch).
 4. **Epochs are swimlanes**, not nodes, in Matrix view (they are nodes only
    in Graph view). Lane order: newest on top.
 5. **Containment is a relation, not a node type.** yEd US/USD/VSF
@@ -61,13 +63,22 @@ July 2026; this file is the handoff map — read it before touching anything.
 
 ## Architecture map
 
-- `crates/em-core` — model, em.json I/O, validation, **layout engine v4**:
-  recursive group layout (`layout_container`): every group is laid out as
-  its own hierarchic subgraph (local topological layering with edges
-  projected onto member representatives, local barycenter, width-aware row
-  wrapping, median X alignment with column reservation) and becomes a rigid
-  macro-block in its parent. Key rule: `layer[v] >= layer[u] + span(u)` —
-  successors of a tall block go BELOW it. Lane assignment is semantic
+- `crates/em-core` — model, em.json I/O, validation, **layout engine v5**
+  (`layered.rs`, MICRO grafo reattivo, Oct 2026): every lane is ONE compound
+  layered graph — leaf ranks and group top/bottom ranks are global to the
+  lane (containment and edges as constraints; `has_same_time` & co. merged
+  to one rank unless a chain of edges orders the two units), cycles broken
+  by dropping an edge constraint (reported: `issues.ts` rule `cycle`), ranks
+  by longest path + network simplex, dummies + 8 compound barycenter sweeps
+  (a group is a contiguous column with one order among its siblings), x per
+  container bottom-up (compaction + median relaxation inside the compact
+  envelope), y from one table per lane with room for the group headers.
+  Disconnected components are packed on shelves; the outer ring the Matrix
+  hides by default (`geometry::is_outer_ring`, the class hierarchy vendored
+  from `node_registry.generated.json`) is a band of its own below the lane.
+  v4 laid every group out as a rigid block with its own layering: a unit
+  between two members of an activity became a cycle at the parent level and
+  one of its edges was drawn upwards. Lane assignment is semantic
   (`has_first_epoch` + chain + membership inheritance in both directions).
 - `crates/em-wasm` — manual-ABI cdylib (no wasm-bindgen): `em_alloc` /
   `em_layout` / `em_free` / `em_free_result`; input `{graph, layout?}`
@@ -225,14 +236,13 @@ that loads anything on boot.
    warnings). `sectors` + `edge_routes` now PERSIST across a re-layout —
    `compute_with_sketch` carries them from the sketch instead of clobbering
    to empty (the engine still doesn't synthesise them; test
-   `sectors_and_edge_routes_persist_across_relayout`, 9/9 green). The
-   upward alignment sweep stays DISABLED: re-enabling keeps tests green and
-   deterministic but blows the TempluMare canvas from ~3213 wide to ~28223
-   (9x) — the documented "unstable with column reservation" regression;
-   proper re-enable needs a fix to the multi-layer block-reservation
-   interaction, not just the extra sweep (see the comment at the sweep
-   loop). Still open: persist `folded_groups` on output (currently reset to
-   empty in the returned Layout).
+   `sectors_and_edge_routes_persist_across_relayout`, 9/9 green). The v4
+   recursive block layout (and its disabled upward alignment sweep) is gone
+   since v5 (`layered.rs`): measured on Templu Mare v2 after a fresh Layout,
+   0 upward edges instead of 3 and the Matrix 13318 → 10984 wide; on the
+   small TempluMare fixture 3104 × 3142 → 5044 × 1856 (wider, much lower).
+   Still open: persist `folded_groups` on output (currently reset to empty
+   in the returned Layout).
 
 ## Gotchas
 

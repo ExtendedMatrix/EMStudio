@@ -287,6 +287,16 @@ export function issues(src: IssueSources): Issue[] {
                                      run: () => fx.itsMe!.run(n.id) } } : {}) });
   }
 
+  // ── G1 · cycles: the order of the Matrix cannot be drawn ─────────────────
+  for (const c of orderContradictions(nodes, doc.graph.edges ?? [])) {
+    if (c.kind === "cycle")
+      push({ node: c.nodes[0], sev: "warn", rule: "cycle",
+             txt: t("issues.cycle", { path: [...c.nodes, c.nodes[0]].map(name).join(" → "), k: String(c.nodes.length) }) });
+    else
+      push({ node: c.nodes[0], sev: "warn", rule: "cycle",
+             txt: t("issues.sameTimeOrdered", { a: name(c.nodes[0]), b: name(c.nodes[1]) }) });
+  }
+
   // ── DEV29 B2 → DEV30 D3 · the same lot, two events NOT linked ───────────
   for (const tw of twinAcquisitions(nodes, doc.graph.edges ?? [])) {
     const m = fx.linkEvents;
@@ -528,4 +538,118 @@ export function unitOfIssue(doc: EmDocument, isUnit: (t: string | undefined) => 
     const u = g ? groupOwner.get(g) : undefined;
     return u && isUnit(byId.get(u)?.node_type) ? u : null;
   };
+}
+
+
+/** The relations that are not an ORDER: membership, contemporaneity, and the
+ *  attribution to an epoch (the lane). Every other edge between two nodes says
+ *  «the source above the target» in the Matrix — em-core's `down`. */
+const NOT_AN_ORDER = new Set([
+  "is_in_activity", "is_in_paradata_nodegroup", "is_in_location", "is_in_timebranch", "is_part_of",
+  "has_first_epoch", "survive_in_epoch", "has_sub_epoch",
+]);
+const SAME_LEVEL = new Set([
+  "has_same_time", "is_physically_equal_to", "equals", "bonded_to", "is_bonded_to", "contrasts_with",
+]);
+
+/**
+ * G1 · what makes «every arrow points down» impossible, read off the data: a
+ * CYCLE of relations (A after B after … after A — one of them is wrong, and the
+ * Matrix draws the one that closes it upwards, in red), and a CONTEMPORANEITY
+ * contradicted by an order (A same time as B, and A after … after B). The
+ * layout engine breaks both the same way (`layered.rs`); this says so where a
+ * person can correct it. Strongly connected components (Tarjan), deterministic:
+ * a cycle is listed in node order, from its first node.
+ */
+export function orderContradictions(
+  nodes: readonly EmNode[],
+  edges: readonly { source: string; target: string; edge_type?: string; attributes?: unknown }[],
+): Array<{ kind: "cycle" | "same_time"; nodes: string[] }> {
+  const live = new Map(nodes.map((n, i) => [n.id, i]));
+  const isEpoch = (id: string): boolean => nodes[live.get(id)!]?.node_type === "EpochNode";
+  const adj: number[][] = nodes.map(() => []);
+  const same: Array<[number, number]> = [];
+  for (const e of edges) {
+    if (((e.attributes ?? {}) as Record<string, unknown>).removed) continue;
+    const a = live.get(e.source), b = live.get(e.target);
+    if (a === undefined || b === undefined || a === b || isEpoch(e.source) || isEpoch(e.target)) continue;
+    const ty = e.edge_type ?? "";
+    if (NOT_AN_ORDER.has(ty)) continue;
+    if (SAME_LEVEL.has(ty)) same.push([a, b]);
+    else adj[a].push(b);
+  }
+  const out: Array<{ kind: "cycle" | "same_time"; nodes: string[] }> = [];
+  // Tarjan, iterative
+  const n = nodes.length;
+  const index = new Int32Array(n).fill(-1), low = new Int32Array(n), onStack = new Uint8Array(n);
+  const stack: number[] = [];
+  let next = 0;
+  const comp = new Int32Array(n).fill(-1);
+  let ncomp = 0;
+  for (let root = 0; root < n; root++) {
+    if (index[root] !== -1) continue;
+    const work: Array<[number, number]> = [[root, 0]];
+    index[root] = low[root] = next++;
+    stack.push(root);
+    onStack[root] = 1;
+    while (work.length) {
+      const top = work[work.length - 1];
+      const [v, i] = top;
+      if (i < adj[v].length) {
+        top[1]++;
+        const w = adj[v][i];
+        if (index[w] === -1) {
+          index[w] = low[w] = next++;
+          stack.push(w);
+          onStack[w] = 1;
+          work.push([w, 0]);
+        } else if (onStack[w]) low[v] = Math.min(low[v], index[w]);
+      } else {
+        work.pop();
+        if (work.length) { const p = work[work.length - 1][0]; low[p] = Math.min(low[p], low[v]); }
+        if (low[v] === index[v]) {
+          const members: number[] = [];
+          let w: number;
+          do { w = stack.pop()!; onStack[w] = 0; comp[w] = ncomp; members.push(w); } while (w !== v);
+          if (members.length > 1) {
+            members.sort((x, y) => x - y);
+            // one cycle through the component, from its first node (a BFS path back)
+            const inComp = new Set(members);
+            const start = members[0];
+            const prev = new Map<number, number>();
+            const q = [start];
+            let end = -1;
+            for (let qi = 0; qi < q.length && end < 0; qi++)
+              for (const x of adj[q[qi]]) {
+                if (!inComp.has(x)) continue;
+                if (x === start) { end = q[qi]; break; }
+                if (!prev.has(x)) { prev.set(x, q[qi]); q.push(x); }
+              }
+            const path: number[] = [];
+            for (let x = end; x !== start && x >= 0; x = prev.get(x) ?? -1) path.push(x);
+            path.push(start);
+            path.reverse();
+            out.push({ kind: "cycle", nodes: path.map((k) => nodes[k].id) });
+          }
+          ncomp++;
+        }
+      }
+    }
+  }
+  // a contemporaneity whose two ends are ordered by a chain of relations
+  const reach = (from: number, to: number): boolean => {
+    const seen = new Uint8Array(n);
+    const st = [from];
+    seen[from] = 1;
+    while (st.length) {
+      const u = st.pop()!;
+      if (u === to) return true;
+      for (const v of adj[u]) if (!seen[v]) { seen[v] = 1; st.push(v); }
+    }
+    return false;
+  };
+  for (const [a, b] of same)
+    if (comp[a] !== comp[b] && (reach(a, b) || reach(b, a)))
+      out.push({ kind: "same_time", nodes: [nodes[a].id, nodes[b].id] });
+  return out;
 }

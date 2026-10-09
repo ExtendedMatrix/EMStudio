@@ -72,6 +72,11 @@ cp "$CFG/s3Dgraphy_node_datamodel.json" "$DST/"
 # vendor both: the datamodel (hand-authored semantics/CIDOC) and the registry
 # (generated parent/node_type hierarchy that rules.ts reads).
 cp "$CFG/node_registry.generated.json" "$DST/"
+# …and em-core reads it too (G1, `geometry::is_outer_ring`): the layout lays the
+# ring the Matrix hides by default (links, resources, DTC, representations) in a
+# band of its own below each lane. Same file, byte for byte —
+# `crates/em-core/tests/visual_rules_core.rs` asserts it.
+cp "$CFG/node_registry.generated.json" "$FRONTEND/../crates/em-core/assets/"
 cp "$CFG/em_qualia_types.json" "$DST/"
 # TRAD1 · multilingual datamodel descriptions/labels (sidecar keyed by class;
 # en = source, other langs + validated_<lang> flags). rules.ts reads the active

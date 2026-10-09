@@ -438,3 +438,47 @@ mod tests {
         assert!(!t.contains_key("X"), "a zero scale would collapse the node to nothing");
     }
 }
+
+/// G1 · the class hierarchy of the node types (`node_registry.generated.json`,
+/// vendored like the visual rules and for the same reason: one table, compiled in).
+const NODE_REGISTRY_JSON: &str = include_str!("../assets/node_registry.generated.json");
+
+/// node_type → its class ancestry (the class itself first), from the registry.
+fn ancestry_table() -> &'static BTreeMap<String, Vec<String>> {
+    static TABLE: std::sync::OnceLock<BTreeMap<String, Vec<String>>> = std::sync::OnceLock::new();
+    TABLE.get_or_init(|| {
+        let mut out = BTreeMap::new();
+        let Ok(doc) = serde_json::from_str::<serde_json::Value>(NODE_REGISTRY_JSON) else { return out };
+        let Some(types) = doc.get("node_types").and_then(|v| v.as_object()) else { return out };
+        for (class, entry) in types {
+            let Some(nt) = entry.get("node_type").and_then(|v| v.as_str()) else { continue };
+            let mut chain = Vec::new();
+            let mut cur = Some(class.clone());
+            while let Some(c) = cur {
+                if chain.len() > 20 {
+                    break;
+                }
+                cur = types.get(&c).and_then(|e| e.get("parent")).and_then(|p| p.as_str()).map(String::from);
+                chain.push(c);
+            }
+            out.insert(nt.to_string(), chain);
+        }
+        out
+    })
+}
+
+/// G1 · is a node type in the OUTER ring of the Matrix — the «Links & other»
+/// ring the Matrix hides by default (`filters.ts nodeCircle` → `links_other`):
+/// everything that is not a stratigraphic unit, a paradata node, a group, an
+/// author / licence / embargo or an epoch. An unknown type is outer, as there.
+pub fn is_outer_ring(node_type: &str) -> bool {
+    let Some(chain) = ancestry_table().get(node_type) else {
+        return node_type != "epoch";
+    };
+    !chain.iter().any(|c| {
+        matches!(
+            c.as_str(),
+            "StratigraphicNode" | "ParadataNode" | "GroupNode" | "AuthorNode" | "LicenseNode" | "EmbargoNode" | "EpochNode"
+        )
+    })
+}

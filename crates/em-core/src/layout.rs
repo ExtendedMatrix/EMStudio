@@ -54,8 +54,13 @@ pub struct LayoutOptions {
     /// three deliveries (CLI, WASM, desktop) compute the same boxes — the
     /// determinism contract does not survive a table each caller supplies.
     pub type_boxes: crate::geometry::TypeBoxes,
-    // Crossing-minimisation sweeps
+    // Crossing-minimisation sweeps (v5: down and up alternately, the best kept)
     pub barycenter_sweeps: u32,
+    /// v5 · a row of leaves wider than this folds onto rows inserted below it;
+    /// 0 = automatic, from the area of the lane (≈ 1.9 · √area, at least 1600)
+    pub wrap_width: f64,
+    /// v5 · network simplex weight of a group's height (1 = an edge's)
+    pub group_weight: i64,
 }
 
 impl Default for LayoutOptions {
@@ -81,7 +86,9 @@ impl Default for LayoutOptions {
             default_node_w: 90.0,
             default_node_h: 32.0,
             type_boxes: crate::geometry::type_boxes(),
-            barycenter_sweeps: 4,
+            barycenter_sweeps: 8,
+            wrap_width: 0.0,
+            group_weight: 1,
         }
     }
 }
@@ -461,9 +468,11 @@ pub fn compute_with_sketch(
     let node_h = opts.default_node_h;
     let gap_x = opts.node_to_node;
     let sub_gap = opts.layer_to_layer * 0.45;
-    let pitch = node_h + sub_gap;
     let group_pad = 14.0f64;
-    let group_header = 22.0f64;
+    // the room a group's title bar takes above its first row: the Matrix draws
+    // the outline 26 units above its highest member (views/matrix.ts), so the
+    // engine keeps 28 — a nested group opening on the same row stacks another
+    let group_header = 28.0f64;
     let closed_w = 150.0f64;
     let closed_h = 40.0f64;
     let sketching = opts.use_sketch && sketch.is_some();
@@ -474,483 +483,51 @@ pub fn compute_with_sketch(
             .unwrap_or(f64::MAX)
     };
 
-    struct Block {
-        w: f64,
-        h: f64,
-        /// absolute-in-block rects for every descendant node (leafs AND
-        /// group nodes, the latter spanning their whole box)
-        places: Vec<(usize, f64, f64, f64, f64)>,
-    }
-
-    // context for the recursion (plain fn to allow recursion)
-    struct Ctx<'a> {
-        down: &'a [Vec<usize>],
-        sym_pairs: &'a [(usize, usize)],
-        direct_of: &'a [Option<usize>],
-        children_of: &'a [Vec<usize>],
-        hidden: &'a [bool],
-        folded: &'a std::collections::BTreeSet<usize>,
-        node_w: f64,
-        node_h: f64,
-        /// Per-type box departures (EM1). Read via `geometry::box_for`, so a type
-        /// that declares nothing keeps `node_w × node_h` exactly as before.
-        type_boxes: &'a crate::geometry::TypeBoxes,
-        /// node index → node_type, to look the table up without the Graph
-        node_types: &'a [String],
-        /// node index → "this node draws a glyph of its own" (EM2): the DTC
-        /// profile picks a glyph per node from `data.dtc_kind`, so glyph-ness is
-        /// not always a property of the type.
-        glyph_by_data: &'a [Option<String>],
-        gap_x: f64,
-        pitch: f64,
-        group_pad: f64,
-        group_header: f64,
-        closed_w: f64,
-        closed_h: f64,
-        sketching: bool,
-        barycenter_sweeps: u32,
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    fn layout_container(
-        ctx: &Ctx,
-        members: &[usize],
-        sketch_x: &dyn Fn(usize) -> f64,
-    ) -> Block {
-        // 1. resolve item dimensions (leafs, open groups → recursive block,
-        //    folded groups → closed tab)
-        let mut item_dims: Vec<(usize, f64, f64, Option<Block>)> = Vec::new();
-        for &m in members {
-            let kids: Vec<usize> = ctx.children_of[m]
-                .iter()
-                .copied()
-                .filter(|&c| !ctx.hidden[c])
-                .collect();
-            if ctx.folded.contains(&m) {
-                item_dims.push((m, ctx.closed_w, ctx.closed_h, None));
-            } else if !kids.is_empty() {
-                let inner = layout_container(ctx, &kids, sketch_x);
-                item_dims.push((
-                    m,
-                    inner.w + ctx.group_pad * 2.0,
-                    inner.h + ctx.group_header + ctx.group_pad,
-                    Some(inner),
-                ));
-            } else {
-                // EM1/EM2 · a LEAF takes its type's box, or the square glyph box
-                // when the NODE itself carries a glyph (DTC `data.dtc_kind`). A
-                // group keeps the box its contents need (above): shrinking a
-                // container would clip the members the engine just placed inside.
-                let (bw, bh) = crate::geometry::box_for_node(
-                    ctx.type_boxes,
-                    ctx.node_types[m].as_str(),
-                    ctx.glyph_by_data[m].as_deref(),
-                    ctx.node_w,
-                    ctx.node_h,
-                );
-                item_dims.push((m, bw, bh, None));
-            }
-        }
-        let index_of: std::collections::HashMap<usize, usize> = item_dims
-            .iter()
-            .enumerate()
-            .map(|(k, (m, ..))| (*m, k))
-            .collect();
-
-        // 2. project global relations onto the local items: a descendant is
-        //    represented by the member that contains it
-        let member_set: std::collections::HashSet<usize> =
-            members.iter().copied().collect();
-        let project = |mut x: usize| -> Option<usize> {
-            for _ in 0..12 {
-                if member_set.contains(&x) {
-                    return Some(x);
-                }
-                match ctx.direct_of[x] {
-                    Some(p) if p != x => x = p,
-                    _ => return None,
-                }
-            }
-            None
-        };
-        let k = item_dims.len();
-        let mut local_down: Vec<Vec<usize>> = vec![Vec::new(); k];
-        for (s, outs) in ctx.down.iter().enumerate() {
-            let Some(ps) = project(s) else { continue };
-            for &t in outs {
-                let Some(pt) = project(t) else { continue };
-                if ps != pt {
-                    local_down[index_of[&ps]].push(index_of[&pt]);
-                }
-            }
-        }
-        let mut local_syms: Vec<(usize, usize)> = Vec::new();
-        for &(a, b) in ctx.sym_pairs {
-            if let (Some(pa), Some(pb)) = (project(a), project(b)) {
-                if pa != pb {
-                    local_syms.push((index_of[&pa], index_of[&pb]));
-                }
-            }
-        }
-
-        // 3. local layering: DAG-ify (skip back edges) + longest path,
-        //    symmetric endpoints pulled level (with repair)
-        let mut dag: Vec<Vec<usize>> = vec![Vec::new(); k];
-        {
-            let mut color = vec![0u8; k];
-            let mut stack: Vec<(usize, usize)> = Vec::new();
-            for root in 0..k {
-                if color[root] != 0 {
-                    continue;
-                }
-                color[root] = 1;
-                stack.push((root, 0));
-                while let Some(top) = stack.last_mut() {
-                    let u = top.0;
-                    if top.1 < local_down[u].len() {
-                        let v = local_down[u][top.1];
-                        top.1 += 1;
-                        if color[v] == 1 {
-                            continue;
-                        }
-                        dag[u].push(v);
-                        if color[v] == 0 {
-                            color[v] = 1;
-                            stack.push((v, 0));
-                        }
-                    } else {
-                        color[u] = 2;
-                        stack.pop();
-                    }
-                }
-            }
-        }
-        // items spanning several layers (tall blocks) push their
-        // successors BELOW the whole block, not beside it
-        let span_of = |i: usize| -> u32 {
-            ((item_dims[i].2 / ctx.pitch).ceil() as u32).max(1)
-        };
-        let mut indeg = vec![0usize; k];
-        for u in 0..k {
-            for &v in &dag[u] {
-                indeg[v] += 1;
-            }
-        }
-        let mut layer = vec![0u32; k];
-        let mut topo: Vec<usize> = (0..k).filter(|&i| indeg[i] == 0).collect();
-        let mut qi = 0;
-        while qi < topo.len() {
-            let u = topo[qi];
-            qi += 1;
-            for kk in 0..dag[u].len() {
-                let v = dag[u][kk];
-                if layer[v] < layer[u] + span_of(u) {
-                    layer[v] = layer[u] + span_of(u);
-                }
-                indeg[v] -= 1;
-                if indeg[v] == 0 {
-                    topo.push(v);
-                }
-            }
-        }
-        for _ in 0..2 {
-            for &(a, b) in &local_syms {
-                let m = layer[a].max(layer[b]);
-                layer[a] = m;
-                layer[b] = m;
-            }
-            let mut guard = 0;
-            loop {
-                let mut changed = false;
-                for u in 0..k {
-                    for kk in 0..dag[u].len() {
-                        let v = dag[u][kk];
-                        if layer[v] < layer[u] + span_of(u) {
-                            layer[v] = layer[u] + span_of(u);
-                            changed = true;
-                        }
-                    }
-                }
-                guard += 1;
-                if !changed || guard > 12 {
-                    break;
-                }
-            }
-        }
-        let n_layers = item_dims
-            .iter()
-            .enumerate()
-            .map(|(i, _)| layer[i] + 1)
-            .max()
-            .unwrap_or(1) as usize;
-        let mut rows: Vec<Vec<usize>> = vec![Vec::new(); n_layers];
-        for i in 0..k {
-            rows[layer[i] as usize].push(i);
-        }
-
-        // 4. in-layer order: sketch order when sketching, else barycenter
-        let mut pos_in: Vec<usize> = vec![0; k];
-        let refresh = |rows: &Vec<Vec<usize>>, pos: &mut Vec<usize>| {
-            for row in rows {
-                for (p, &i) in row.iter().enumerate() {
-                    pos[i] = p;
-                }
-            }
-        };
-        for row in rows.iter_mut() {
-            row.sort_by(|&a, &b| {
-                let (ma, mb) = (item_dims[a].0, item_dims[b].0);
-                if ctx.sketching {
-                    sketch_x(ma)
-                        .partial_cmp(&sketch_x(mb))
-                        .unwrap_or(std::cmp::Ordering::Equal)
-                        .then(ma.cmp(&mb))
-                } else {
-                    ma.cmp(&mb)
-                }
-            });
-        }
-        refresh(&rows, &mut pos_in);
-        if !ctx.sketching {
-            // undirected adjacency for the barycenter
-            let mut adj: Vec<Vec<usize>> = vec![Vec::new(); k];
-            for u in 0..k {
-                for &v in &local_down[u] {
-                    adj[u].push(v);
-                    adj[v].push(u);
-                }
-            }
-            for &(a, b) in &local_syms {
-                adj[a].push(b);
-                adj[b].push(a);
-            }
-            for _ in 0..ctx.barycenter_sweeps {
-                for row in rows.iter_mut() {
-                    let mut scored: Vec<(f64, usize, usize)> = row
-                        .iter()
-                        .map(|&i| {
-                            let neigh: Vec<f64> = adj[i]
-                                .iter()
-                                .filter(|&&j| layer[j] != layer[i])
-                                .map(|&j| pos_in[j] as f64)
-                                .collect();
-                            let bc = if neigh.is_empty() {
-                                pos_in[i] as f64
-                            } else {
-                                neigh.iter().sum::<f64>() / neigh.len() as f64
-                            };
-                            (bc, pos_in[i], i)
-                        })
-                        .collect();
-                    scored.sort_by(|x, y| {
-                        x.0.partial_cmp(&y.0)
-                            .unwrap_or(std::cmp::Ordering::Equal)
-                            .then(x.1.cmp(&y.1))
-                    });
-                    *row = scored.into_iter().map(|(_, _, i)| i).collect();
-                }
-                refresh(&rows, &mut pos_in);
-            }
-        }
-
-        // 4b. wrap over-wide rows (top-down aspect, like the global cap of
-        // v2/v3): rows longer than ~2·√k split into sub-rows; every later
-        // row shifts down accordingly, so vertical constraints still hold
-        {
-            // width-aware: aim at a roughly landscape block (area-based)
-            let total_area: f64 = item_dims.iter().map(|(_, w, h, _)| w * h).sum();
-            let target_w = (total_area.sqrt() * 1.9).max(1400.0);
-            let needs_wrap = rows.iter().any(|r| {
-                r.iter().map(|&i| item_dims[i].1 + ctx.gap_x).sum::<f64>() > target_w
-            });
-            if needs_wrap {
-                let mut new_rows: Vec<Vec<usize>> = Vec::new();
-                for row in rows.iter() {
-                    let mut cur: Vec<usize> = Vec::new();
-                    let mut wsum = 0.0f64;
-                    for &i in row {
-                        let w = item_dims[i].1 + ctx.gap_x;
-                        if !cur.is_empty() && wsum + w > target_w {
-                            new_rows.push(std::mem::take(&mut cur));
-                            wsum = 0.0;
-                        }
-                        cur.push(i);
-                        wsum += w;
-                    }
-                    if !cur.is_empty() {
-                        new_rows.push(cur);
-                    }
-                }
-                rows = new_rows;
-                for (li, row) in rows.iter().enumerate() {
-                    for &i in row {
-                        layer[i] = li as u32;
-                    }
-                }
-                refresh(&rows, &mut pos_in);
-            }
-        }
-
-        // 5. X assignment: init sequential, then median alignment sweeps
-        //    with a scanline that respects blocks spanning multiple layers
-        let span = |i: usize| -> usize { span_of(i) as usize };
-        let mut x = vec![0.0f64; k];
-        let place_row = |row: &[usize],
-                         desired: &dyn Fn(usize) -> f64,
-                         x: &mut Vec<f64>,
-                         active: &mut Vec<(f64, f64, usize)>,
-                         li: usize,
-                         gap: f64,
-                         dims: &[(usize, f64, f64, Option<Block>)]| {
-            active.retain(|&(_, _, until)| until >= li);
-            active.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
-            let mut cursor = 0.0f64;
-            for &i in row {
-                let w = dims[i].1;
-                let mut xi = desired(i).max(cursor);
-                // single forward pass over the (sorted) active block columns
-                for &(bx0, bx1, _) in active.iter() {
-                    if xi < bx1 && xi + w > bx0 {
-                        xi = bx1 + gap;
-                    }
-                }
-                x[i] = xi;
-                cursor = xi + w + gap;
-            }
-        };
-        // init pass
-        {
-            let mut active: Vec<(f64, f64, usize)> = Vec::new();
-            for (li, row) in rows.iter().enumerate() {
-                let des = |_: usize| 0.0f64;
-                place_row(row, &des, &mut x, &mut active, li, gap_x_of(ctx), &item_dims);
-                for &i in row {
-                    if span(i) > 1 {
-                        active.push((x[i], x[i] + item_dims[i].1, li + span(i) - 1));
-                    }
-                }
-            }
-        }
-        // one downward median-alignment sweep only. The upward pass is
-        // deliberately disabled: although it keeps the 8 contract tests
-        // green and stays deterministic, on real graphs with multi-layer
-        // block reservations (containers/series spanning layers, e.g.
-        // TempluMare) it blows the canvas width up ~9x (28k px vs the
-        // ~3.2k near-square target) — the "unstable with column
-        // reservation" regression. Re-enabling needs a real fix to the
-        // block-reservation interaction, not just the extra sweep.
-        for sweep in 0..1 {
-            let downward = sweep % 2 == 0;
-            let mut active: Vec<(f64, f64, usize)> = Vec::new();
-            let order: Vec<usize> = if downward {
-                (0..rows.len()).collect()
-            } else {
-                (0..rows.len()).rev().collect()
-            };
-            for li in order {
-                let row = &rows[li];
-                let xs = x.clone();
-                let des = |i: usize| -> f64 {
-                    let mut refs: Vec<f64> = Vec::new();
-                    if downward {
-                        for u in 0..k {
-                            if local_down[u].contains(&i) && layer[u] < layer[i] {
-                                refs.push(xs[u] + item_dims[u].1 / 2.0);
-                            }
-                        }
-                    } else {
-                        for &v in &local_down[i] {
-                            if layer[v] > layer[i] {
-                                refs.push(xs[v] + item_dims[v].1 / 2.0);
-                            }
-                        }
-                    }
-                    if refs.is_empty() {
-                        xs[i]
-                    } else {
-                        refs.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
-                        refs[refs.len() / 2] - item_dims[i].1 / 2.0
-                    }
-                };
-                place_row(row, &des, &mut x, &mut active, li, gap_x_of(ctx), &item_dims);
-                for &i in row {
-                    if span(i) > 1 {
-                        active.push((x[i], x[i] + item_dims[i].1, li + span(i) - 1));
-                    }
-                }
-            }
-        }
-        // normalise to x >= 0
-        let min_x = (0..k).map(|i| x[i]).fold(f64::INFINITY, f64::min).min(0.0);
-        for xi in x.iter_mut() {
-            *xi -= min_x;
-        }
-
-        // 6. assemble the block
-        let mut places: Vec<(usize, f64, f64, f64, f64)> = Vec::new();
-        let mut w_max = 0.0f64;
-        let mut h_max = 0.0f64;
-        for (i, (m, w, h, inner)) in item_dims.iter().enumerate() {
-            let y = layer[i] as f64 * ctx.pitch;
-            w_max = w_max.max(x[i] + w);
-            h_max = h_max.max(y + h);
-            places.push((*m, x[i], y, *w, *h));
-            if let Some(b) = inner {
-                for &(d, dx, dy, dw, dh) in &b.places {
-                    places.push((
-                        d,
-                        x[i] + ctx.group_pad + dx,
-                        y + ctx.group_header + dy,
-                        dw,
-                        dh,
-                    ));
-                }
-            }
-        }
-        Block {
-            w: w_max.max(ctx.node_w),
-            h: h_max.max(ctx.node_h),
-            places,
-        }
-    }
-
-    fn gap_x_of(ctx: &Ctx) -> f64 {
-        ctx.gap_x
-    }
-
-    // node_type per index, for the per-type box lookup (EM1)
-    let node_types: Vec<String> =
-        graph.nodes.iter().map(|n| n.node_type.clone()).collect();
-    // …and per index whether the NODE itself draws a glyph (EM2, DTC profile)
-    let glyph_by_data: Vec<Option<String>> = graph
+    // node index → the box it is drawn with as a LEAF (its type's geometry, or
+    // the square glyph box when the node draws a glyph of its own: EM1/EM2)
+    let leaf_box: Vec<(f64, f64)> = graph
         .nodes
         .iter()
-        .map(|n| {
-            n.data
+        .map(|nd| {
+            let kind = nd
+                .data
                 .get(crate::geometry::GLYPH_BY_DATA_KEY)
-                .map(|v| v.as_str().unwrap_or_default().to_string())
+                .map(|v| v.as_str().unwrap_or_default().to_string());
+            crate::geometry::box_for_node(
+                &opts.type_boxes,
+                nd.node_type.as_str(),
+                kind.as_deref(),
+                node_w,
+                node_h,
+            )
         })
         .collect();
-    let ctx = Ctx {
+    let outer: Vec<bool> = graph
+        .nodes
+        .iter()
+        .map(|nd| crate::geometry::is_outer_ring(nd.node_type.as_str()))
+        .collect();
+    // ── 3. every lane as ONE compound layered graph (v5, `layered.rs`) ─────
+    let lane_ctx = crate::layered::LaneCtx {
         down: &down,
         sym_pairs: &sym_pairs,
-        direct_of: &direct_of,
         children_of: &children_of,
+        direct_of: &direct_of,
         hidden: &hidden,
         folded: &folded_ix,
-        node_w,
-        node_h,
-        type_boxes: &opts.type_boxes,
-        node_types: &node_types,
-        glyph_by_data: &glyph_by_data,
+        leaf_box: &leaf_box,
         gap_x,
-        pitch,
+        sub_gap,
+        node_h,
         group_pad,
         group_header,
         closed_w,
         closed_h,
         sketching,
-        barycenter_sweeps: opts.barycenter_sweeps,
+        sweeps: opts.barycenter_sweeps,
+        wrap_w: opts.wrap_width,
+        outer: &outer,
+        group_weight: opts.group_weight,
     };
 
     // top-level members per lane: alive nodes whose primary parent is
@@ -975,15 +552,21 @@ pub fn compute_with_sketch(
         std::collections::BTreeMap::new();
     let mut lane_y = vec![0.0f64; lane_count];
     let mut lane_h = vec![0.0f64; lane_count];
-    let mut lane_blocks: Vec<Option<Block>> = Vec::new();
+    let mut lane_blocks: Vec<Option<crate::layered::Block>> = Vec::new();
+    let mut cycle_edges: Vec<(usize, usize)> = Vec::new();
     let mut max_w = node_w;
+    // v5 · lanes are centred on what the Matrix draws by default (a lane's
+    // outer band, hidden there, would push every other lane off to the right)
+    let mut max_main_w = node_w;
     for l in 0..lane_count {
         if top_of_lane[l].is_empty() {
             lane_blocks.push(None);
             continue;
         }
-        let block = layout_container(&ctx, &top_of_lane[l], &sketch_x);
+        let block = crate::layered::layout_lane(&lane_ctx, &top_of_lane[l], &sketch_x);
+        cycle_edges.extend(block.cycle_edges.iter().copied());
         max_w = max_w.max(block.w);
+        max_main_w = max_main_w.max(block.w_main);
         lane_blocks.push(Some(block));
     }
     let mut y_cursor = 0.0f64;
@@ -999,7 +582,7 @@ pub fn compute_with_sketch(
     for l in 0..lane_count {
         let Some(block) = &lane_blocks[l] else { continue };
         let x0 = if opts.symmetric_placement {
-            (max_w - block.w) / 2.0
+            ((max_main_w - block.w_main) / 2.0).max(0.0)
         } else {
             0.0
         };
@@ -1531,6 +1114,99 @@ mod tests {
                 }
             }
         }
+    }
+
+    /// G1 (MICRO grafo reattivo) · the v4 failure, measured on Templu Mare v2: a
+    /// unit X OUTSIDE an activity sits between two of its members (M2 → X → M1).
+    /// v4 laid the activity out as one rigid block, saw the cycle ACT ⇄ X at the
+    /// lane's level and drew one of the two edges upwards. v5 ranks the lane as
+    /// one graph: every edge points down, the activity's box spans the rows of
+    /// its members and X sits beside it.
+    #[test]
+    fn a_unit_between_two_members_of_a_group_keeps_every_arrow_down() {
+        let g = Graph {
+            graph_id: "g".into(),
+            name: None,
+            description: None,
+            nodes: vec![
+                epoch("EP1", 100.0),
+                node("ACT", "ActivityNodeGroup"),
+                node("M1", "US"),
+                node("M2", "US"),
+                node("X", "US"),
+                node("Y", "US"),
+            ],
+            edges: vec![
+                edge("e1", "has_first_epoch", "M1", "EP1"),
+                edge("e2", "has_first_epoch", "M2", "EP1"),
+                edge("e3", "has_first_epoch", "X", "EP1"),
+                edge("e4", "has_first_epoch", "Y", "EP1"),
+                edge("m1", "is_in_activity", "M1", "ACT"),
+                edge("m2", "is_in_activity", "M2", "ACT"),
+                edge("a1", "is_after", "M2", "X"),
+                edge("a2", "is_after", "X", "M1"),
+                edge("a3", "is_after", "Y", "ACT"),
+            ],
+            data: std::collections::BTreeMap::new(),
+        };
+        let l = compute(&g, &LayoutOptions::default());
+        assert!(upward_edges(&g, &l.positions).is_empty(), "{:?}", upward_edges(&g, &l.positions));
+        let (m1, m2, x, act, y) = (&l.positions["M1"], &l.positions["M2"], &l.positions["X"], &l.positions["ACT"], &l.positions["Y"]);
+        assert!(m2.y < x.y && x.y < m1.y, "X between the two members");
+        // the box holds both members, and X is not inside it
+        assert!(act.y < m2.y && act.y + act.h >= m1.y + m1.h && act.x <= m1.x.min(m2.x));
+        assert!(x.x + x.w <= act.x || x.x >= act.x + act.w, "X beside the activity, not in it");
+        // an edge INTO a group goes to its box: its source is above the box
+        assert!(y.y + y.h < act.y);
+    }
+
+    /// G1 · a cycle cannot be drawn downwards: exactly one edge of it is
+    /// dropped (and points up), deterministically, and the rest point down.
+    #[test]
+    fn a_cycle_leaves_one_edge_up_and_the_others_down() {
+        let g = Graph {
+            graph_id: "g".into(),
+            name: None,
+            description: None,
+            nodes: vec![epoch("EP1", 100.0), node("A", "US"), node("B", "US"), node("C", "US")],
+            edges: vec![
+                edge("e1", "has_first_epoch", "A", "EP1"),
+                edge("e2", "has_first_epoch", "B", "EP1"),
+                edge("e3", "has_first_epoch", "C", "EP1"),
+                edge("a1", "is_after", "A", "B"),
+                edge("a2", "is_after", "B", "C"),
+                edge("a3", "is_after", "C", "A"),
+            ],
+            data: std::collections::BTreeMap::new(),
+        };
+        let l = compute(&g, &LayoutOptions::default());
+        assert_eq!(upward_edges(&g, &l.positions).len(), 1);
+        let again = compute(&g, &LayoutOptions::default());
+        assert_eq!(serde_json::to_string(&l).unwrap(), serde_json::to_string(&again).unwrap());
+    }
+
+    /// G1 · «same time» and «after» between the same two units: the order wins
+    /// (a contemporaneity has no direction to point up), no edge goes up.
+    #[test]
+    fn an_order_wins_over_a_contradicting_contemporaneity() {
+        let g = Graph {
+            graph_id: "g".into(),
+            name: None,
+            description: None,
+            nodes: vec![epoch("EP1", 100.0), node("A", "US"), node("B", "US"), node("C", "US")],
+            edges: vec![
+                edge("e1", "has_first_epoch", "A", "EP1"),
+                edge("e2", "has_first_epoch", "B", "EP1"),
+                edge("e3", "has_first_epoch", "C", "EP1"),
+                edge("a1", "is_after", "A", "B"),
+                edge("a2", "is_after", "B", "C"),
+                edge("s1", "has_same_time", "A", "C"),
+            ],
+            data: std::collections::BTreeMap::new(),
+        };
+        let l = compute(&g, &LayoutOptions::default());
+        assert!(upward_edges(&g, &l.positions).is_empty());
+        assert!(l.positions["A"].y < l.positions["B"].y && l.positions["B"].y < l.positions["C"].y);
     }
 
     #[test]
