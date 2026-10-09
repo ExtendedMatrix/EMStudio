@@ -36,7 +36,11 @@ const LIB = ["THREE.WebGLRenderer:", "THREE.GLTFLoader:"];
 ok(LIB.every((k) => inline.includes(k)), "inline build · three.js is in the file (desktop, file://)");
 ok(LIB.every((k) => !lazy.includes(k)), "web build · three.js is NOT in the page");
 ok(lazy.includes("engine3d.js"), "web build · …it asks for engine3d.js instead");
-ok(lazy.length < inline.length / 3, `web build · the module is a fraction of the inline one (${lazy.length} vs ${inline.length} bytes)`);
+// MICRO-SOVRAPPOSIZIONI · what three costs, not a ratio: «a third of the inline
+// one» was 1.7 kB from its limit on d814aaf (485738 vs 1462383 bytes) and any
+// 5 kB of the editor's own (strings, a module) crossed it with three still out.
+// The inline build carries three, measured +800 kB in RIFINITURE parte 7.
+ok(inline.length - lazy.length > 800_000, `web build · three's ~800 kB are out of the module (${lazy.length} vs ${inline.length} bytes)`);
 const pkg = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
 ok(/EM_LAZY_3D=1/.test(pkg.scripts["build:web"]) && /build:engine3d/.test(pkg.scripts["build:web"]),
    "build:web · lazy editor + engine3d.js + reader");
