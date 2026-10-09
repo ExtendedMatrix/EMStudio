@@ -26,6 +26,8 @@ import { nodeStyle } from "./palette";
 import { edgeLabel, stratigraphicKindLabel, stratigraphicKindLetter, stratigraphicKindOf, stratigraphicKinds, typeLabel } from "./rules";
 import type { Scene } from "./scene";
 import { typeIconElement } from "./type-icons";
+import { discSwatch } from "./liquid-render";
+import { isLiquid, type Disc } from "./views/liquid";
 
 export interface LegendEntry {
   /** edge_type, or node_type */
@@ -355,4 +357,90 @@ export function showLegendModal(): void {
   document.addEventListener("keydown", onKey, true);
   document.body.appendChild(modal);
   search.focus();
+}
+
+
+/** G4 · what the liquid Graph shows: its families and its rings, with counts,
+ *  and its halos — read off the scene, like the Matrix's legend. */
+export interface DiscLegendContent {
+  families: Array<{ family: Disc["family"]; count: number }>;
+  rings: Array<{ ring: Disc["ring"]; family: Disc["family"]; count: number }>;
+  halos: number;
+}
+
+export function discLegendContent(scene: Scene | null): DiscLegendContent | null {
+  if (!isLiquid(scene)) return null;
+  const fam = new Map<Disc["family"], number>();
+  const rings = new Map<string, { ring: Disc["ring"]; family: Disc["family"]; count: number }>();
+  for (const d of scene.liquid.discs.values()) {
+    fam.set(d.family, (fam.get(d.family) ?? 0) + 1);
+    if (d.ring !== "none") {
+      const k = `${d.family}|${d.ring}`;
+      const e = rings.get(k) ?? { ring: d.ring, family: d.family, count: 0 };
+      e.count++;
+      rings.set(k, e);
+    }
+  }
+  const order: Disc["family"][] = ["real", "virtual", "continuity", "paradata", "object", "ornament", "other"];
+  return {
+    families: order.filter((f) => fam.has(f)).map((f) => ({ family: f, count: fam.get(f)! })),
+    rings: [...rings.values()],
+    halos: scene.liquid.halos.length,
+  };
+}
+
+export function buildDiscLegend(c: DiscLegendContent, onClose: () => void): HTMLElement {
+  const box = document.createElement("div");
+  box.className = "graph-legend";
+  box.setAttribute("role", "region");
+  box.setAttribute("aria-label", t("legend.title"));
+  const head = document.createElement("div");
+  head.className = "gl-head";
+  const title = document.createElement("span");
+  title.className = "gl-title";
+  title.textContent = t("legend.families");
+  const close = document.createElement("button");
+  close.type = "button";
+  close.className = "gl-close";
+  close.textContent = "×";
+  close.title = t("legend.close");
+  close.addEventListener("click", (e) => {
+    e.stopPropagation();
+    onClose();
+  });
+  head.append(title, close);
+  box.appendChild(head);
+  const list = document.createElement("div");
+  list.className = "gl-list";
+  const row = (sw: HTMLElement, label: string, n: number): void => {
+    const r = document.createElement("div");
+    r.className = "gl-row gl-disc";
+    const ic = document.createElement("span");
+    ic.className = "gl-icon";
+    ic.appendChild(sw);
+    const lb = document.createElement("span");
+    lb.className = "gl-label";
+    lb.textContent = label;
+    const ct = document.createElement("span");
+    ct.className = "gl-count";
+    ct.textContent = String(n);
+    r.append(ic, lb, ct);
+    list.appendChild(r);
+  };
+  for (const f of c.families) row(discSwatch(f.family, "none"), t(`legend.fam.${f.family}`), f.count);
+  if (c.rings.length) {
+    const h = document.createElement("div");
+    h.className = "gl-sub";
+    h.textContent = t("legend.rings");
+    list.appendChild(h);
+    for (const r of c.rings) row(discSwatch(r.family, r.ring), t(`legend.ring.${r.ring}`), r.count);
+  }
+  if (c.halos) {
+    const h = document.createElement("div");
+    h.className = "gl-note";
+    h.textContent = t("legend.halos", { n: String(c.halos) });
+    list.appendChild(h);
+  }
+  box.appendChild(list);
+  return box;
 }

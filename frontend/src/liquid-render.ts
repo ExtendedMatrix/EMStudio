@@ -229,3 +229,25 @@ function ring(ctx: CanvasRenderingContext2D, x: number, y: number, r: number, ki
   }
   ctx.restore();
 }
+
+/** G4 · one disc, as the canvas draws it, on its own canvas (the legend's
+ *  swatch): the family's fill and the specialisation's rings. */
+export function discSwatch(family: Disc["family"], ringKind: Disc["ring"], px = 22): HTMLCanvasElement {
+  const c = document.createElement("canvas");
+  const dpr = window.devicePixelRatio || 1;
+  c.width = px * dpr;
+  c.height = px * dpr;
+  c.style.width = `${px}px`;
+  c.style.height = `${px}px`;
+  const ctx = c.getContext("2d");
+  if (!ctx) return c;
+  const dark = activeTheme() === "dark";
+  ctx.scale(dpr, dpr);
+  const r = px / 2 - 1;
+  ctx.beginPath();
+  ctx.arc(px / 2, px / 2, r, 0, Math.PI * 2);
+  ctx.fillStyle = dark ? FAMILY_COLOR[family].dark : FAMILY_COLOR[family].fill;
+  ctx.fill();
+  ring(ctx, px / 2, px / 2, r, ringKind, dark ? "#E8ECF2" : "#20252C", 1);
+  return c;
+}

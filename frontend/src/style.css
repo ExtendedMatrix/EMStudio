@@ -8038,6 +8038,33 @@ body.gesturing-resize * {
    box in the bottom-left corner of its canvas, over the drawing and inside the
    window, with the design system's radius and shadow (the minimap's sibling in
    the opposite corner). Only what the window shows; a click picks a relation. */
+/* G4 · the legend's floating opener: the filter's twin (#btn-view-props), in the
+   bottom-left corner where the legend opens */
+.graph-legend-btn {
+  position: absolute;
+  left: 10px;
+  bottom: 10px;
+  z-index: 15;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
+  cursor: pointer;
+  color: var(--text);
+}
+.graph-legend-btn:hover { background: var(--bg-panel); border-color: var(--border-strong); }
+.graph-legend-btn.hidden { display: none; }
+.gl-row.gl-disc { display: flex; align-items: center; gap: 7px; padding: 2px 0; }
+.gl-row.gl-disc .gl-icon canvas { display: block; }
+.gl-row.gl-disc .gl-count { margin-left: auto; padding-left: 10px; color: var(--text-muted); font-variant-numeric: tabular-nums; }
+.graph-legend .gl-sub { margin: 6px 0 2px; font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: .05em; }
+.graph-legend .gl-note { margin-top: 6px; font-size: 11px; color: var(--text-muted); }
 .graph-legend-host {
   position: absolute;
   left: 10px;

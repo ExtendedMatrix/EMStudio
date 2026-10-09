@@ -179,7 +179,7 @@ import { iconUrlFor } from "./icons";
 import { buildOverview, type OverviewApi } from "./overview";
 import { edgeStyle, nodeMaterialRgb, nodeStyle, placementColour } from "./palette";
 import { glyphMarkupFor, typeIconElement } from "./type-icons";
-import { buildLegendPanel, legendContent, showLegendModal } from "./legend";
+import { buildDiscLegend, buildLegendPanel, discLegendContent, legendContent, showLegendModal } from "./legend";
 import { datamodelPhraseBook, linkedPhrase, phraseDirFor } from "./phrases";
 import connectionsDatamodel from "./assets/s3Dgraphy_connections_datamodel.json";
 import datamodelTranslations from "./assets/datamodel_translations.json";
@@ -3439,6 +3439,8 @@ function legendOpen(win: Win): boolean {
 function setLegendOpen(win: Win, open: boolean): void {
   setWinCurrent(win, "legend", open ? true : null);
   if (!open) legendHighlight.delete(win.id);
+  // G4 · the legend and the filter are alternatives: opening one closes the other
+  if (open && filterPanelOpen()) closeFilterPanel();
   renderAreaHeaders();
   draw();
 }
@@ -3455,11 +3457,24 @@ function toggleLegendHighlight(winId: string, edgeType: string): void {
  * Rebuilt only when what it would show changed — the content, the pick, the
  * fold, the language or the theme — because `paint` runs on every hover.
  */
-function syncLegend(host: HTMLElement, win: Win | undefined, shown: Scene | null): void {
+function syncLegend(host: HTMLElement, win: Win | undefined, shown: Scene | null, opener?: HTMLElement): void {
+  // G4 · the floating opener stands where the legend opens, when it is closed
+  opener?.classList.toggle("hidden", !win || !store || legendOpen(win) || !shown?.nodes.length);
   if (!win || !legendOpen(win) || !store) {
     if (host.childElementCount) host.textContent = "";
     host.dataset.key = "";
     host.classList.add("hidden");
+    return;
+  }
+  // G4 · the legend follows the view: the liquid Graph's families and rings
+  const discs = discLegendContent(shown);
+  if (discs) {
+    const dkey = JSON.stringify(["disc", discs, getLocale(), activeTheme()]);
+    host.classList.remove("hidden");
+    if (host.dataset.key === dkey) return;
+    host.dataset.key = dkey;
+    host.textContent = "";
+    host.appendChild(buildDiscLegend(discs, () => setLegendOpen(win, false)));
     return;
   }
   const content = legendContent(shown, edgeVisible);
@@ -13392,6 +13407,10 @@ function openFilterPanel(): void {
   renderCirclesPanel();
   filterPanel.classList.remove("hidden");
   btnViewProps.classList.add("hidden");
+  // G4 · the filter and the legend are alternatives: the focused window's
+  // legend closes when the filter opens
+  const w = activeWin();
+  if (w.type === "graph" && legendOpen(w)) setLegendOpen(w, false);
 }
 function closeFilterPanel(): void {
   filterPanel.classList.add("hidden");
@@ -17570,6 +17589,20 @@ function mountGraphCanvas(cv: HTMLCanvasElement, mini: HTMLCanvasElement,
   const legendHost = document.createElement("div");
   legendHost.className = "graph-legend-host hidden";
   cv.parentElement?.appendChild(legendHost);
+  // G4 · …and its opener: a floating glyph, the filter's twin, in the corner
+  // where the legend opens (the «⇢» of the header is gone)
+  const legendBtn = document.createElement("button");
+  legendBtn.type = "button";
+  legendBtn.className = "graph-legend-btn hidden";
+  legendBtn.title = t("legend.btn");
+  legendBtn.setAttribute("aria-label", t("legend.btn"));
+  legendBtn.innerHTML = `<svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><circle cx="3.5" cy="4" r="1.4" fill="currentColor" stroke="none"/><path d="M6.5 4 H13.5"/><circle cx="3.5" cy="8" r="1.4"/><path d="M6.5 8 H13.5" stroke-dasharray="2 1.6"/><path d="M2 12 H5"/><path d="M6.5 12 H13.5"/></svg>`;
+  legendBtn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    const w = windowsOf().find((x) => x.id === winId);
+    if (w) setLegendOpen(w, true);
+  });
+  cv.parentElement?.appendChild(legendBtn);
   const mount: GraphMount = {
     winId,
     cv,
@@ -17595,7 +17628,7 @@ function mountGraphCanvas(cv: HTMLCanvasElement, mini: HTMLCanvasElement,
         live,
         overview,
       });
-      syncLegend(legendHost, windowsOf().find((w) => w.id === winId), shown);
+      syncLegend(legendHost, windowsOf().find((w) => w.id === winId), shown, legendBtn);
     },
   };
   graphWindows.set(winId, mount);
@@ -26676,8 +26709,7 @@ function buildAreaHeader(win: Win): DocumentFragment {
       const r = cv.getBoundingClientRect();
       openAddMenu(win, r.left + r.width / 2, r.top + r.height / 2);
     });
-    // LEGENDA · what the lines on THIS canvas mean, in its bottom-left corner
-    act("⇢", t("legend.btn"), legendOpen(win), () => setLegendOpen(win, !legendOpen(win)));
+    // G4 · the legend's opener is a floating glyph in the canvas's corner now
     act("⤢", t("win.fitTitle"), false, () => {
       focusThen(win, () => fit());
     });
