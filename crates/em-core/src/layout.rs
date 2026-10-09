@@ -303,6 +303,71 @@ pub fn compute_with_sketch(
             }
         }
     }
+    // MICRO-BADGE-PD-CRONOLOGIA · a DOCUMENT stands in the epoch of its DATE:
+    // `absolute_time_start` — the property (`has_property`), else the node's own
+    // `data.absolute_time_start` — when an epoch's bounds hold it (the narrowest),
+    // else its `has_first_epoch` (set just above). The canonical document is in
+    // the epoch where it is born (F5 · an epoch's date is born when it is
+    // written). A dated document is NOT moved into another lane by a group it
+    // belongs to (below: the propagation and the containment skip it); the
+    // membership stays an edge, and the client says the disagreement.
+    let dated_doc: Vec<bool> = {
+        let year_of = |v: &serde_json::Value| -> Option<f64> {
+            v.as_f64().or_else(|| v.as_str().and_then(|s| s.trim().parse::<f64>().ok()))
+        };
+        let bounds: Vec<(usize, f64, f64)> = epochs_decl
+            .iter()
+            .filter_map(|&(i, _)| {
+                let d = &graph.nodes[i].data;
+                let (a, b) = (year_of(d.get("start_time")?)?, year_of(d.get("end_time")?)?);
+                Some((i, a.min(b), a.max(b)))
+            })
+            .collect();
+        let mut prop_year: HashMap<usize, f64> = HashMap::new();
+        for e in &graph.edges {
+            if e.edge_type != "has_property" {
+                continue;
+            }
+            let (Some(&s), Some(&t)) = (node_ix.get(e.source.as_str()), node_ix.get(e.target.as_str())) else {
+                continue;
+            };
+            let p = &graph.nodes[t];
+            let is_start = p.name.as_deref() == Some("absolute_time_start")
+                || p.data.get("property_type").and_then(|v| v.as_str()) == Some("absolute_time_start");
+            if !is_start {
+                continue;
+            }
+            let v = p
+                .description
+                .as_deref()
+                .and_then(|d| d.trim().parse::<f64>().ok())
+                .or_else(|| p.data.get("value").and_then(year_of));
+            if let Some(y) = v {
+                prop_year.entry(s).or_insert(y);
+            }
+        }
+        let mut out = vec![false; n];
+        for (i, node) in graph.nodes.iter().enumerate() {
+            if node.node_type != "document" {
+                continue;
+            }
+            let year = prop_year
+                .get(&i)
+                .copied()
+                .or_else(|| node.data.get("absolute_time_start").and_then(year_of));
+            if let Some(y) = year {
+                let best = bounds
+                    .iter()
+                    .filter(|(_, lo, hi)| y >= *lo && y <= *hi)
+                    .min_by(|a, b| (a.2 - a.1).partial_cmp(&(b.2 - b.1)).unwrap_or(std::cmp::Ordering::Equal));
+                if let Some(l) = best.and_then(|(ix, _, _)| lane_of_epoch.get(ix)) {
+                    lane[i] = Some(*l);
+                }
+            }
+            out[i] = lane[i].is_some();
+        }
+        out
+    };
     // Chain inheritance: propagate source lane to target along chain edges;
     // membership edges propagate in BOTH directions (a dangling paradata
     // node with only its is_in_* edge inherits the lane of its group, and a
@@ -333,7 +398,8 @@ pub fn compute_with_sketch(
             if let (Some(&s), Some(&t)) =
                 (node_ix.get(e.source.as_str()), node_ix.get(e.target.as_str()))
             {
-                if lane[t].is_none() && lane[s].is_some() {
+                // a dated document does not give its lane to its group
+                if lane[t].is_none() && lane[s].is_some() && !(member && dated_doc[s]) {
                     lane[t] = lane[s];
                     changed = true;
                 }
@@ -427,6 +493,11 @@ pub fn compute_with_sketch(
             if let (Some(&s), Some(&t)) =
                 (node_ix.get(e.source.as_str()), node_ix.get(e.target.as_str()))
             {
+                // a dated document stays in its epoch: a group in another lane
+                // does not contain it (the membership is drawn as an edge)
+                if dated_doc[s] && lane[s] != lane[t] {
+                    continue;
+                }
                 let cand = (prio(et), t);
                 if best[s].is_none() || cand < best[s].unwrap() {
                     best[s] = Some(cand);
@@ -839,6 +910,54 @@ mod tests {
             ],
             data: std::collections::BTreeMap::new(),
         }
+    }
+
+    // MICRO-BADGE-PD-CRONOLOGIA · a document stands in the epoch of its date
+    // (`absolute_time_start`, the property before the node's own field, else
+    // `has_first_epoch`); an activity of another epoch it belongs to does not
+    // pull it into its lane nor contain it.
+    #[test]
+    fn a_dated_document_stays_in_its_epoch_outside_a_group_of_another() {
+        let mut modern = epoch("EP_modern", 1801.0);
+        modern.data.insert("end_time".into(), serde_json::json!(2013));
+        let mut roman = epoch("EP_roman", 100.0);
+        roman.data.insert("end_time".into(), serde_json::json!(199));
+        let mut p = node("P70", "property");
+        p.name = Some("absolute_time_start".into());
+        p.description = Some("1870".into());
+        let mut d71 = node("D71", "document");
+        d71.data.insert("absolute_time_start".into(), serde_json::json!("150"));
+        let g = Graph {
+            graph_id: "g".into(),
+            name: None,
+            description: None,
+            nodes: vec![modern, roman, node("ACT", "ActivityNodeGroup"), node("US1", "US"),
+                        node("D70", "document"), p, d71, node("D72", "document")],
+            edges: vec![
+                edge("e1", "has_first_epoch", "ACT", "EP_roman"),
+                edge("e2", "is_in_activity", "US1", "ACT"),
+                edge("e3", "is_in_activity", "D70", "ACT"),
+                edge("e4", "has_property", "D70", "P70"),
+                edge("e5", "is_in_activity", "D71", "ACT"),
+                edge("e6", "has_first_epoch", "D72", "EP_modern"),
+                edge("e7", "is_in_activity", "D72", "ACT"),
+            ],
+            data: std::collections::BTreeMap::new(),
+        };
+        let l = compute(&g, &LayoutOptions::default());
+        let lane_of = |id: &str| {
+            let r = &l.positions[id];
+            let cy = r.y + r.h / 2.0;
+            l.swimlanes.iter().find(|s| cy >= s.y && cy < s.y + s.height).map(|s| s.epoch_id.clone())
+        };
+        assert_eq!(lane_of("US1").as_deref(), Some("EP_roman"));
+        // the property's 1870 → the modern epoch, whatever the group says
+        assert_eq!(lane_of("D70").as_deref(), Some("EP_modern"));
+        // the node's own field when there is no property: 150 → roman, contained
+        assert_eq!(lane_of("D71").as_deref(), Some("EP_roman"));
+        // no date: has_first_epoch
+        assert_eq!(lane_of("D72").as_deref(), Some("EP_modern"));
+        assert_eq!(lane_of("ACT").as_deref(), Some("EP_roman"));
     }
 
     #[test]

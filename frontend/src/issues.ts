@@ -20,6 +20,7 @@
  */
 import type { EmDocument, EmNode } from "./types";
 import { composedPropertyName } from "./naming";
+import { documentDating, epochBounds, topEpochOf } from "./doc-dating";
 
 export type IssueSeverity = "warn" | "info";
 
@@ -74,6 +75,12 @@ export interface IssueFixers {
   /** DEV30 D3 · two events of one lot, linked: the later one CITES the
    *  earlier (`dtc_had_input` event → event) — never merged */
   linkEvents?: { run: (later: string, earlier: string) => void };
+  /** MICRO-BADGE-PD-CRONOLOGIA · a member out of a group (its membership edge) */
+  leaveGroup?: { label: string; run: (memberId: string, groupId: string) => void };
+  /** …a document's `data.absolute_time_start` aligned to its property */
+  alignDocDate?: { label: string; run: (docId: string, value: string) => void };
+  /** …a document's `has_first_epoch` replaced by the epoch that holds its year */
+  redate?: (docId: string, epochId: string) => void;
 }
 
 export interface IssueSources {
@@ -143,6 +150,11 @@ export interface IssueSources {
   reasoningCures?: ReasoningCures;
   /** the EM words: `rules.reasoningText` */
   reasoningWord?: (word: string, field?: "label" | "description", vars?: Record<string, string>) => string;
+  /** MICRO-BADGE-PD-CRONOLOGIA · the (top-level) epoch whose lane a node is
+   *  drawn in, in the Matrix; null when it is not drawn there */
+  drawnLane?: (id: string) => string | null;
+  /** …and «Layout» (from the sketch): em-core places the documents again */
+  relayout?: { label: string; run: () => void };
   /** i18n for the hint texts */
   t: (key: string, vars?: Record<string, string>) => string;
 }
@@ -234,6 +246,59 @@ export function issues(src: IssueSources): Issue[] {
 
   const fx = src.fixers ?? {};
   const label = fx.edgeLabel ?? ((e: string) => e);
+  // ── MICRO-BADGE-PD-CRONOLOGIA · the dating of the documents ───────────────
+  // A document stands in the epoch of its date (`doc-dating.ts`, em-core's
+  // reading): three disagreements are said, each with its cure.
+  {
+    const bounds = epochBounds(doc);
+    const bnd = new Map(bounds.map((b) => [b.id, b]));
+    const fe = new Map<string, string>();
+    for (const e of doc.graph.edges)
+      if (e.edge_type === "has_first_epoch" && !fe.has(e.source)) fe.set(e.source, e.target);
+    for (const n of nodes) {
+      if (n.node_type !== "document") continue;
+      const dd = documentDating(doc, n.id, bounds);
+      // 1 · the property and the node's own field say two years
+      if (dd.propertyValue && dd.dataValue && dd.propertyValue !== dd.dataValue
+          && Number(dd.propertyValue) !== Number(dd.dataValue))
+        push({ node: n.id, sev: "warn", rule: "chronology",
+               txt: t("issues.docDateMismatch", { d: name(n.id), p: dd.propertyValue, v: dd.dataValue }),
+               ...(fx.alignDocDate ? { fix: { kind: "button" as const, label: fx.alignDocDate.label,
+                   run: () => fx.alignDocDate!.run(n.id, dd.propertyValue) } } : {}) });
+      // 2 · the year is outside the epoch it declares
+      const de = dd.declaredEpoch ? bnd.get(dd.declaredEpoch) : undefined;
+      if (dd.year != null && de && (dd.year < de.lo || dd.year > de.hi)) {
+        const options = bounds.filter((b) => dd.year! >= b.lo && dd.year! <= b.hi)
+          .map((b) => ({ value: b.id, label: `${name(b.id)} (${b.lo}–${b.hi})` }));
+        push({ node: n.id, sev: "warn", rule: "chronology",
+               txt: t("issues.docYearOutside", { d: name(n.id), y: String(dd.year), e: name(de.id),
+                                                 lo: String(de.lo), hi: String(de.hi) }),
+               ...(fx.redate && options.length ? { fix: { kind: "pick" as const,
+                   placeholder: t("issues.fixDateIn"), options, run: (v: string) => fx.redate!(n.id, v) } } : {}) });
+      }
+      // 3 · its activity group stands in another epoch: the document stays in
+      //     its own, the membership is drawn as an edge
+      if (!dd.epoch) continue;
+      const mine = topEpochOf(doc, dd.epoch);
+      for (const e of doc.graph.edges) {
+        if (e.source !== n.id || e.edge_type !== "is_in_activity") continue;
+        const ge = fe.get(e.target);
+        if (!ge || topEpochOf(doc, ge) === mine) continue;
+        const group = e.target;
+        // a drawing saved by the old rule still has it in the group's lane: the
+        // positions are intent and are not moved on opening (a Layout moves
+        // every one of them, measured) — the cure is the Layout, which places it
+        const drawn = src.drawnLane?.(n.id);
+        const stale = !!drawn && drawn !== mine;
+        push({ node: n.id, sev: "warn", rule: "chronology",
+               txt: t(stale ? "issues.docGroupEpochStale" : "issues.docGroupEpoch",
+                      { d: name(n.id), e: name(dd.epoch), g: name(group), ge: name(ge) }),
+               ...(stale && src.relayout ? { fix: { kind: "button" as const, label: src.relayout.label, run: src.relayout.run } }
+                 : fx.leaveGroup ? { fix: { kind: "button" as const, label: fx.leaveGroup.label,
+                   run: () => fx.leaveGroup!.run(n.id, group) } } : {}) });
+      }
+    }
+  }
   // ── the datamodel: diagnostics already computed, and the socket check ─────
   for (const d of src.diagnostics ?? []) {
     // CAMPAGNA · a connection degraded to generic_connection: said with where it

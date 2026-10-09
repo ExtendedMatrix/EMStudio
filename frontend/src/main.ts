@@ -410,6 +410,7 @@ import {
 import { adornmentBadges, type AdornmentBadge } from "./adornments";
 import { drawnPdChips, hitPdChip } from "./pd-chip";
 import { PD_CELL } from "./views/pd-arrange";
+import { documentDating, topEpochOf } from "./doc-dating";
 import { BADGE_RULES, funnelIndex, resolveEffective, sourceLabel } from "./funnel";
 import { type Qualia, vocabularyFor } from "./vocab";
 import { versionBreakdown } from "./versions";
@@ -9367,9 +9368,18 @@ function chainUi(st: DocumentStore): ChainUi {
 
 /**
  * CATENA · dating a document: its EPOCH (`has_first_epoch`, which the datamodel
- * admits for a DocumentNode) and its YEAR (`data.year`, the Doc window's own
- * field). A dated document is the MASTER in its epoch's lane of the Matrix, with
- * a thick border; its instances sit in the paradata groups that read it.
+ * admits for a DocumentNode) and its YEAR. A dated document is the MASTER in its
+ * epoch's lane of the Matrix, with a thick border; its instances sit in the
+ * paradata groups that read it.
+ *
+ * MICRO-BADGE-PD-CRONOLOGIA · the YEAR is the document's `absolute_time_start`:
+ * read from where it is written — the property (`has_property`), as s3Dgraphy's
+ * GraphML importer makes it and em-core reads it to choose the lane — and
+ * written there (the property, created when there is none, and the node's own
+ * `data.absolute_time_start` beside it, the copy the importer keeps). It used to
+ * be `data.year`, which a GraphML document never has: D.70, «1870» in its data
+ * and in its property, showed an empty year. `data.year` (the Doc window's year)
+ * is still shown when nothing else is written, and left as it is.
  */
 function renderDocumentDating(st: DocumentStore, host: HTMLElement, docId: string): void {
   const d = st.node(docId);
@@ -9418,16 +9428,27 @@ function renderDocumentDating(st: DocumentStore, host: HTMLElement, docId: strin
   year.inputMode = "numeric";
   year.placeholder = t("chain.yearPh");
   year.dataset.docYear = docId;
-  const stored = () => String(((st.node(docId)?.data ?? {}) as Record<string, unknown>).year ?? "");
+  const stored = () => documentYear(st, docId);
   year.value = stored();
   /** the year in the field, written when it differs (inside `dateIn`'s batch too) */
   function writeYear(): boolean {
     const v = year.value.trim();
     if (v === stored()) return false;
-    const data = { ...((st.node(docId)?.data ?? {}) as Record<string, unknown>) };
-    if (v) data.year = /^-?\d+$/.test(v) ? Number(v) : v;
-    else delete data.year;
-    st.updateNode(docId, { data });
+    st.batch(() => {
+      const p = documentStartProperty(st, docId);
+      if (p) st.setPropertyValue(p, v);
+      else if (v) {
+        const at = st.doc.layout?.positions?.[docId];
+        const np = st.addNode({ id: st.newId(), name: "absolute_time_start", node_type: "property", description: v,
+                                data: { property_type: "absolute_time_start", value: v } },
+                              at ? { x: at.x, y: at.y + at.h + 40, w: 90, h: 30 } : undefined);
+        st.addEdge(docId, np.id, "has_property");
+      }
+      const data = { ...((st.node(docId)?.data ?? {}) as Record<string, unknown>) };
+      if (v) data.absolute_time_start = v;
+      else delete data.absolute_time_start;
+      st.updateNode(docId, { data });
+    });
     return true;
   }
   // a press on the menu while the year is still unwritten: the year is written
@@ -9477,6 +9498,19 @@ function renderDocumentDating(st: DocumentStore, host: HTMLElement, docId: strin
       host.appendChild(note);
     }
   }
+}
+
+/** MICRO-BADGE-PD-CRONOLOGIA · the document's `absolute_time_start` property */
+function documentStartProperty(st: DocumentStore, docId: string): string | null {
+  return documentDating(st.doc, docId).property;
+}
+
+/** …and its year: the property, else the node's own field (`doc-dating.ts`,
+ *  em-core's reading), else the Doc window's year */
+function documentYear(st: DocumentStore, docId: string): string {
+  const dd = documentDating(st.doc, docId);
+  if (dd.propertyValue || dd.dataValue) return dd.propertyValue || dd.dataValue;
+  return String(((st.node(docId)?.data ?? {}) as Record<string, unknown>).year ?? "");
 }
 
 /** DEV30 U2 · the epoch (or phase: the narrowest) whose bounds hold a year. */
@@ -14417,6 +14451,18 @@ function refreshIssues(): void {
     renameRule: { label: t("naming.renameRule"), bulkLabel: (n) => t("naming.renameRuleAll", { n: String(n) }),
                   run: (ids) => renameExtractorsByRule(ids) },
     fixers: issueFixers(s),
+    // MICRO-BADGE-PD-CRONOLOGIA · the lane a node is drawn in, in the Matrix
+    // (read from the engine's layout — the stored position in its swimlanes —
+    // not from the scene, which is rebuilt after the issues)
+    drawnLane: (id) => {
+      const L = s.doc.layout;
+      const r = L?.positions?.[id];
+      if (!r) return null;
+      const cy = r.y + r.h / 2;
+      const lane = (L?.swimlanes ?? []).find((l) => cy >= l.y && cy < l.y + l.height);
+      return lane ? topEpochOf(s.doc, lane.epoch_id) : null;
+    },
+    relayout: { label: t("issues.fixRelayout"), run: () => void runLayout(false) },
     // the continuity node's name is the importer's, the same for every one
     namedByConstruction: (nt) => ancestorsOf(nt).includes("ContinuityNode"),
     t: (k, v) => t(k, v),
@@ -14704,6 +14750,25 @@ function issueFixers(st: DocumentStore): IssueFixers {
     assignEpoch: (unit, epoch) => {
       st.addEdge(unit, epoch, "has_first_epoch");
       done(t("fix.epochDone", { n: nm(unit), e: nm(epoch) }), [unit, epoch]);
+    },
+    // MICRO-BADGE-PD-CRONOLOGIA · the cures of a document's dating
+    redate: (d, epoch) => {
+      st.setFirstEpoch([d], epoch);
+      done(t("chain.datedIn", { d: nm(d), e: nm(epoch) }), [d, epoch]);
+    },
+    alignDocDate: {
+      label: t("issues.fixAlignDate"),
+      run: (d, value) => {
+        st.updateNode(d, { data: { ...((st.node(d)?.data ?? {}) as Record<string, unknown>), absolute_time_start: value } });
+        done(t("issues.alignedDate", { d: nm(d), v: value }), [d]);
+      },
+    },
+    leaveGroup: {
+      label: t("issues.fixLeaveGroup"),
+      run: (m, g) => {
+        st.removeFromGroup(m, g);
+        done(t("issues.leftGroup", { d: nm(m), g: nm(g) }), [m, g]);
+      },
     },
     itsMe: {
       label: identityForSigning() ? t("fix.itsMe") : t("fix.sayWho"),

@@ -128,7 +128,11 @@ const ID_FIELDS = new Set(["graph_id", "original_id", "original_emid", "emid", "
  *  details», closed — an archaeologist reads the unit, not its y_pos */
 const TECH_FIELDS = new Set(["is_canonical", "y_pos", "x_pos", "shape", "fill_color", "border_style",
   "border_color", "border_width", "symbol", "width", "height", "font_family", "font_size",
-  "font_style", "text_color", "label_color", "geometry", "yed_id", "graphml_id"]);
+  "font_style", "text_color", "label_color", "geometry", "yed_id", "graphml_id",
+  // MICRO-BADGE-PD-CRONOLOGIA · the yEd records the GraphML importer folded into
+  // one document (`original_id`, `y_pos`…): the importer's memory, not a datum
+  // anybody reads — the instances a reader sees are the view's (`paradata_instances`)
+  "instances"]);
 
 /** S5 · how the last hand had entered, as a phrase — never `{"mode":"orcid"}` */
 function authPhrase(v: unknown): string {

@@ -664,9 +664,24 @@ export function buildMatrixScene(
       g.h = CLOSED_H;
       continue;
     }
-    const memberIds = (membership.childrenOf.get(g.id) ?? []).filter(
+    let memberIds = (membership.childrenOf.get(g.id) ?? []).filter(
       (m) => m !== g.id && scene.byId.has(m),
     );
+    // MICRO-BADGE-PD-CRONOLOGIA · a dated document stands in the epoch of its
+    // date (em-core): when that is not its group's lane, the group does not
+    // wrap it across the lanes — the membership is drawn as an edge
+    const laneOfSn = (id: string): number => {
+      const sn = scene.byId.get(id)!;
+      return laneOf.get(id) ?? laneIdxOfY(sn.y + sn.h / 2);
+    };
+    const docs = memberIds.filter((m) => scene.byId.get(m)!.node.node_type === "document");
+    if (docs.length && docs.length < memberIds.length) {
+      const tally = new Map<number, number>();
+      for (const m of memberIds)
+        if (!docs.includes(m)) tally.set(laneOfSn(m), (tally.get(laneOfSn(m)) ?? 0) + 1);
+      const home = [...tally].sort((a, b) => b[1] - a[1] || a[0] - b[0])[0]?.[0];
+      if (home != null) memberIds = memberIds.filter((m) => !docs.includes(m) || laneOfSn(m) === home);
+    }
     // document instances drawn inside this group count as members
     for (const inst of instancesByGroup.get(g.id) ?? []) memberIds.push(inst.id);
     if (!memberIds.length) {
