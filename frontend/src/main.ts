@@ -568,7 +568,9 @@ import { digestOf, isStampPath, stampPathFor } from "./stamp";
 // sappia chi ce l'ha messo. La forma dell'atto sta qui; il verbale lo emette
 // s3Dgraphy attraverso il bridge, come per la composizione.
 import { ingestionAct, storeLocator } from "./stamp-ingest";
-import { buildGraphScene, type GraphAlgorithm } from "./views/graph";
+import { buildGraphScene, graphCentres, type GraphAlgorithm } from "./views/graph";
+import { buildLiquidScene, isLiquid, LiquidSim, localNeighbourhood, type LiquidFilter } from "./views/liquid";
+import ForceWorker from "./force-worker.ts?worker&inline";
 import { buildMatrixScene } from "./views/matrix";
 import { renderStudyPanel } from "./study-panel";
 import { perfCount, perfRelease, perfSettled, perfTime, perfTimeAsync } from "./perf";
@@ -660,7 +662,59 @@ const CENTRAL_MODES: CentralMode[] = [
 // Graph-view layout: chosen algorithm + manual position overrides (drags /
 // liquid clustering). Overrides persist across rebuilds in-session and are
 // cleared on a fresh Layout, an algorithm change, or a new/loaded document.
-let graphAlgorithm: GraphAlgorithm = "layered";
+// G2 · the Graph's default is the live force simulation (in a worker); the
+// layered and radial layouts stay in the selector, and place the same discs
+let graphAlgorithm: GraphAlgorithm = "force";
+/** G3 · the liquid Graph's filter (the panel): epochs, text, dim or hide */
+const liquidFilter: LiquidFilter = { epochs: null, text: "", hide: false };
+/** G3 · the «local graph»: the selection and N steps from it (0 = off) */
+let localDepth = 0;
+/** G3 · node → the epochs it is in (has_first_epoch / survive_in_epoch) */
+let liquidEpochOf = new Map<string, string[]>();
+/** G2 · the force simulation of the Graph, in a worker; its frames move the
+ *  discs of the current scene in place and ask for one paint */
+const liquidSim = new LiquidSim(() => {
+  const s = scenes.graph;
+  if (!isLiquid(s) || graphAlgorithm !== "force") return;
+  for (const n of s.nodes) {
+    const p = liquidSim.pos.get(n.id);
+    if (p) {
+      n.x = p.x - n.w / 2;
+      n.y = p.y - n.h / 2;
+    }
+  }
+  requestDraw();
+}, () => {
+  try {
+    return new ForceWorker();
+  } catch {
+    return null; // no worker (a test page): the discs stay at their seeds
+  }
+});
+
+/** G3 · the Graph projection as discs: at the simulation's positions (force),
+ *  or at the centres of the layered / radial layout, a drag kept as override. */
+function buildGraphLiquid(doc: EmDocument, v: ReturnType<typeof filteredView>): Scene {
+  const seeds = graphCentres(v.nodes, v.edges, "layered");
+  const pos = graphAlgorithm === "force" ? liquidSim.pos
+    : graphCentres(v.nodes, v.edges, graphAlgorithm === "radial" ? "radial" : "layered");
+  const sc = buildLiquidScene(doc, v, pos, (id) => seeds.get(id) ?? { x: 0, y: 0 });
+  if (graphAlgorithm === "force") liquidSim.start(sc);
+  else
+    for (const sn of sc.nodes) {
+      const o = graphOverrides.get(sn.id);
+      if (o) {
+        sn.x = o.x;
+        sn.y = o.y;
+      }
+    }
+  // the epochs of every node, for the panel's epoch filter
+  liquidEpochOf = new Map();
+  for (const e of doc.graph.edges)
+    if (e.edge_type === "has_first_epoch" || e.edge_type === "survive_in_epoch")
+      (liquidEpochOf.get(e.source) ?? liquidEpochOf.set(e.source, []).get(e.source)!).push(e.target);
+  return sc;
+}
 const graphOverrides = new Map<string, { x: number; y: number }>();
 // WIN2 · the DTC projection keeps its OWN drag overrides: the same node sits at
 // different places in the two projections, so one shared map would teleport a
@@ -1861,6 +1915,11 @@ window.__EM_SCENE__ = () => {
 // Read-only like `__EM_SCENE__`; `check-drag`'s browser twin reads it.
 (window as unknown as { __EM_DRAG__?: unknown }).__EM_DRAG__ = {
   selected: () => [...selectedIds],
+  /** G2/G3 · the liquid Graph: is the simulation settled, how many discs it
+   *  moves, the local graph's depth (and set it), the panel's filter */
+  liquid: () => ({ settled: liquidSim.settled, discs: liquidSim.pos.size, depth: localDepth,
+                   algorithm: graphAlgorithm, filter: { ...liquidFilter, epochs: liquidFilter.epochs ? [...liquidFilter.epochs] : null } }),
+  setLocalDepth: (d: number) => { localDepth = d; draw(); },
   /** CATENA · the live edges of one type (read-only), and the node by id */
   edgesOf: (type: string) => (store?.liveEdges() ?? []).filter((e) => e.edge_type === type),
   // RISORSA-FILE · «Impacchetta un tileset in .3tz», the flow the desktop's
@@ -2238,6 +2297,13 @@ function paintGraphWindow(p: GraphPaint): void {
       aiNodes: aiMarks(),
       peerSelections: hubPeerSelections,   // P4.3 · awareness, never a lock
       highlightEdgeType: p.highlightEdgeType ?? null,
+      // G3 · the liquid Graph: hover, selection, the panel's filter, the local graph
+      liquid: p.mode === "graph" ? {
+        hoverId: live?.hoverId ?? null, selectedId, selectedIds,
+        filter: liquidFilter,
+        local: localNeighbourhood(s, selectedIds.size ? selectedIds : selectedId ? [selectedId] : [], localDepth),
+        epochOf: (id: string) => liquidEpochOf.get(id) ?? [],
+      } : undefined,
       // E5 · an undated epoch's lane invites to date it — drawn, never saved
       dateInvite: p.mode === "matrix" ? { text: t("epoch.inviteDate"), add: t("epoch.inviteAdd") } : null,
     },
@@ -3986,10 +4052,7 @@ function buildScenesNow(): void {
     restackMemo,
     restackKey(doc, fview, phasesVisible),
   );
-  scenes.graph = buildGraphScene(doc, viewFor("graph"), {
-    algorithm: graphAlgorithm,
-    overrides: graphOverrides,
-  });
+  scenes.graph = buildGraphLiquid(doc, viewFor("graph"));
   // DAG · the DTC projection reads the **corpus** — the documentation member —
   // and not the study graph.
   //
@@ -4069,7 +4132,10 @@ function buildScenesNow(): void {
   // embargo and the site position are visible and selectable (and therefore
   // editable in the Inspector) instead of living only in a side panel.
   scenes.multigraph = buildGraphScene(doc, viewFor("multigraph", true), {
-    algorithm: graphAlgorithm,
+    // G2 · «force» is the Graph's live simulation (a worker); the Full graph,
+    // which keeps the EM shapes, keeps a static layout instead of the old
+    // O(n²) force on the main thread (6 s on 5000 units, measured)
+    algorithm: graphAlgorithm === "force" ? "layered" : graphAlgorithm,
     overrides: multigraphOverrides,
   });
   labelResources(scenes.multigraph, fileCounts(doc.graph.edges));
@@ -13447,6 +13513,82 @@ function renderCirclesPanel(): void {
   };
   addSection("Nodes", "node");
   addSection("Edges", "edge");
+
+  // G3 · the liquid Graph's own filters: the local graph, the epochs, a text,
+  // and whether what they exclude is dimmed or hidden
+  if (view === "graph") {
+    const gh = document.createElement("div");
+    gh.className = "fp-sect";
+    gh.textContent = t("liq.section");
+    filterPanel.appendChild(gh);
+    const localRow = document.createElement("label");
+    localRow.className = "fp-row";
+    const localSel = document.createElement("select");
+    localSel.dataset.liq = "local";
+    for (const d of [0, 1, 2, 3]) {
+      const o = document.createElement("option");
+      o.value = String(d);
+      o.textContent = d ? t("liq.localSteps", { n: String(d) }) : t("liq.localOff");
+      if (d === localDepth) o.selected = true;
+      localSel.appendChild(o);
+    }
+    localSel.addEventListener("change", () => {
+      localDepth = Number(localSel.value);
+      draw();
+    });
+    localRow.append(document.createTextNode(`${t("liq.local")} `), localSel);
+    filterPanel.appendChild(localRow);
+    const textRow = document.createElement("label");
+    textRow.className = "fp-row";
+    const textIn = document.createElement("input");
+    textIn.type = "search";
+    textIn.dataset.liq = "text";
+    textIn.placeholder = t("liq.textPh");
+    textIn.value = liquidFilter.text;
+    textIn.addEventListener("input", () => {
+      liquidFilter.text = textIn.value.trim();
+      draw();
+    });
+    textRow.append(textIn);
+    filterPanel.appendChild(textRow);
+    const epochs = store.doc.graph.nodes.filter((n) => n.node_type === "EpochNode");
+    if (epochs.length) {
+      const eh = document.createElement("div");
+      eh.className = "fp-hint";
+      eh.textContent = t("liq.epochs");
+      filterPanel.appendChild(eh);
+      for (const ep of epochs) {
+        const row = document.createElement("label");
+        row.className = "fp-row";
+        const cb = document.createElement("input");
+        cb.type = "checkbox";
+        cb.dataset.liqEpoch = ep.id;
+        cb.checked = !liquidFilter.epochs || liquidFilter.epochs.has(ep.id);
+        cb.addEventListener("change", () => {
+          const all = new Set(epochs.map((x) => x.id));
+          const cur = liquidFilter.epochs ?? new Set(all);
+          if (cb.checked) cur.add(ep.id);
+          else cur.delete(ep.id);
+          liquidFilter.epochs = cur.size === all.size ? null : cur;
+          draw();
+        });
+        row.append(cb, document.createTextNode(` ${String(ep.name || ep.id)}`));
+        filterPanel.appendChild(row);
+      }
+    }
+    const hideRow = document.createElement("label");
+    hideRow.className = "fp-row";
+    const hideCb = document.createElement("input");
+    hideCb.type = "checkbox";
+    hideCb.dataset.liq = "hide";
+    hideCb.checked = liquidFilter.hide;
+    hideCb.addEventListener("change", () => {
+      liquidFilter.hide = hideCb.checked;
+      draw();
+    });
+    hideRow.append(hideCb, document.createTextNode(` ${t("liq.hide")}`));
+    filterPanel.appendChild(hideRow);
+  }
 
   // Display options (presentation, not a filter): monochrome overrides every
   // node to a black border + white fill — the pre-EM-1.3 shape-only look.
@@ -27120,12 +27262,10 @@ const WINDOW_MENUS: Record<WindowType, WinMenu[]> = {
               sel.dispatchEvent(new Event("change"));
             },
             checked: () => graphAlgorithm === a,
-            disabledReason: () =>
-              mode === "matrix"
-                ? t("menu.algoGraphOnly")
-                : null,
           }),
         );
+        // G2 · the Matrix has ONE layout (em-core v5): the choice of algorithm
+        // is the Graph's, and it is not even offered elsewhere
         return [
           {
             label: "menu.relayout",
@@ -27135,7 +27275,7 @@ const WINDOW_MENUS: Record<WindowType, WinMenu[]> = {
                 ? null
                 : t("menu.relayoutByAlgo"),
           },
-          ...algoItems,
+          ...(mode === "graph" ? algoItems : []),
         ];
       },
     },
@@ -28411,13 +28551,17 @@ function wireGraphCanvas(canvas: HTMLCanvasElement, winId: string): void {
         }
       }
       const overrides = canvasOverrides() ?? graphOverrides;
+      const live = isLiquid(s) && view === "graph" && graphAlgorithm === "force";
       for (const id of targets) {
         const sn = s?.byId.get(id);
         const base = overrides.get(id) ?? (sn ? { x: sn.x, y: sn.y } : null);
-        if (base) overrides.set(id, { x: base.x + ddx, y: base.y + ddy });
+        if (base && !live) overrides.set(id, { x: base.x + ddx, y: base.y + ddy });
         if (sn) {
           sn.x += ddx;
           sn.y += ddy;
+          // G2 · the simulation holds the dragged disc where the hand is, and
+          // the rest of the graph follows it
+          if (live) liquidSim.drag(id, sn.x + sn.w / 2, sn.y + sn.h / 2);
         }
       }
       if (s) invalidateRoutes(s);
@@ -28636,6 +28780,15 @@ function wireGraphCanvas(canvas: HTMLCanvasElement, winId: string): void {
       return;
     }
     if (mode === "graphnode") {
+      // G2 · a released disc goes back to the simulation (it settles from there)
+      if (isLiquid(scene()) && view === "graph" && graphAlgorithm === "force" && dragNodeId) {
+        liquidSim.release(dragNodeId);
+        if (graphLiquid && store)
+          for (const ed of store.doc.graph.edges) {
+            if (ed.source === dragNodeId) liquidSim.release(ed.target);
+            else if (ed.target === dragNodeId) liquidSim.release(ed.source);
+          }
+      }
       if (!moved && dragNodeId) select(dragNodeId); // click (no drag) = select
       else if (moved) {
         // the overrides were written during the drag; ONE rebuild settles the

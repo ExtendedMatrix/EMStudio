@@ -277,6 +277,21 @@ export function hitTest(
   wy: number,
   tol = 0,
 ): SceneNode | null {
+  // G3 · a liquid scene's nodes are DISCS: touched within their circle
+  if ("liquid" in scene && (scene as { liquid?: unknown }).liquid) {
+    let best: SceneNode | null = null;
+    let bestD = Infinity;
+    for (const n of scene.nodes) {
+      const r = n.w / 2;
+      const dx = wx - (n.x + r), dy = wy - (n.y + r);
+      const d = Math.hypot(dx, dy);
+      if (d <= r + tol && d - r < bestD) {
+        bestD = d - r;
+        best = n;
+      }
+    }
+    return best;
+  }
   for (const t of tol > 0 ? [0, tol] : [0]) {
     for (let i = scene.nodes.length - 1; i >= 0; i--) {
       const n = scene.nodes[i];

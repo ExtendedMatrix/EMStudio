@@ -28,6 +28,8 @@ function glyphInk(): GlyphInk {
   return { ink: th.labelInk, paper: th.canvasBg, dark: activeTheme() === "dark" };
 }
 import type { Scene, Viewport } from "./scene";
+import { isLiquid } from "./views/liquid";
+import { renderLiquid, type LiquidState } from "./liquid-render";
 
 export interface ConnectDrag {
   fromId: string;
@@ -55,6 +57,9 @@ export interface ConnectDrag {
 }
 
 export interface RenderState {
+  /** G3 · the liquid Graph's state (filter, local graph, epochs): a scene that
+   *  is liquid is drawn by `renderLiquid` when this is given */
+  liquid?: LiquidState;
   /** E5 · the invitation to date an epoch that has no dates, in the reader's
    *  language («date: —», «add»). Drawn by the view, never saved: no node, no
    *  edge, no position. Absent → no invitation. */
@@ -629,6 +634,11 @@ export function render(
   viewW: number,
   viewH: number,
 ): void {
+  // G3 · the liquid Graph draws itself (discs, halos, straight edges)
+  if (isLiquid(scene) && state.liquid) {
+    renderLiquid(ctx, scene, vp, state.liquid, viewW, viewH);
+    return;
+  }
   const dpr = window.devicePixelRatio || 1;
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.clearRect(0, 0, viewW, viewH);

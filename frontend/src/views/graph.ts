@@ -20,6 +20,16 @@ const MAX_COLS = 12;
 
 export type GraphAlgorithm = "layered" | "radial" | "force";
 
+/** G3 · the CENTRES of a static layout (layered, radial) — what the liquid
+ *  Graph seeds its discs with, or places them at when the algorithm is not the
+ *  live simulation. Cached on the structure like the boxes. */
+export function graphCentres(nodes: EmNode[], edges: EmEdge[], algo: "layered" | "radial"): Map<string, Pos> {
+  const base = basePositions(byId(nodes), edges, algo);
+  const out = new Map<string, Pos>();
+  for (const [id, p] of base) out.set(id, { x: p.x + NODE_W / 2, y: p.y + NODE_H / 2 });
+  return out;
+}
+
 type Pos = { x: number; y: number };
 
 function byId(inputNodes: EmNode[]): EmNode[] {
