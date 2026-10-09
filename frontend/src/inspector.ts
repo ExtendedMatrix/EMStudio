@@ -1,6 +1,8 @@
 import { t } from "./i18n";
 import type { DocumentStore } from "./model";
 import { edgeStyle, nodeStyle } from "./palette";
+import { dataGlyphLabel, glyphFor, glyphSvg } from "./glyphs";
+import { activeTheme, canvasTheme } from "./theme";
 import { classOf, conceptParts, isGroupType, isStratigraphicType, nodeElements, stratigraphicKindLabel, stratigraphicKindOf } from "./rules";
 import { BADGE_RULES, resolveEffective, sourceLabel } from "./funnel";
 import type { AuthorityCandidate, EmEdge, EmNode } from "./types";
@@ -254,6 +256,19 @@ export function renderInspector(
   chip.style.background = st.fill;
   chip.style.color = st.textColor;
   chip.style.borderColor = st.border;
+  // G9 · the node's glyph, 16 px (frameless under 24), before its type — and
+  // for a node whose glyph comes from its data, the name of that glyph
+  {
+    const g = glyphFor(node.node_type, node.data as Record<string, unknown> | undefined);
+    if (g) {
+      const ic = el("span", "insp-chip-glyph glyph-inline");
+      const th = canvasTheme();
+      ic.innerHTML = glyphSvg(g, { ink: th.labelInk, paper: th.canvasBg, dark: activeTheme() === "dark" }, 16);
+      chip.prepend(ic);
+      const dl = dataGlyphLabel(g.key);
+      if (dl && !kindOf && !pack) chip.lastChild!.textContent = `${node.node_type} · ${dl}`;
+    }
+  }
   head.appendChild(chip);
   const close = el("button", "insp-close", "×");
   close.title = t("l.closeEsc");

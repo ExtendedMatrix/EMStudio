@@ -35,12 +35,16 @@ interface RawLayer {
   line_cap?: string;
   line_join?: string;
   opacity?: number;
+  /** 1.6.32 · a layer of the DTC frame (the circle): skipped below 24 px */
+  frame?: boolean;
 }
 interface RawGlyph {
   viewBox: [number, number, number, number];
   aspect: number;
   layers: RawLayer[];
   source?: string;
+  /** 1.6.32 · the box of every layer but the frame's, in viewBox units */
+  frameless_box?: [number, number, number, number];
 }
 
 export interface GlyphLayer {
@@ -54,6 +58,8 @@ export interface GlyphLayer {
   lineCap?: CanvasLineCap;
   lineJoin?: CanvasLineJoin;
   opacity?: number;
+  /** a layer of the frame (`frame: true` in the datamodel) */
+  frame?: boolean;
   /** built on first draw (the browser's), null where there is no Path2D */
   path?: Path2D | null;
 }
@@ -63,7 +69,13 @@ export interface Glyph {
   viewBox: [number, number, number, number];
   aspect: number;
   layers: GlyphLayer[];
+  /** G9 · what to fit instead of the viewBox when the frame is skipped */
+  frameless?: [number, number, number, number];
 }
+
+/** G9 · under this size on screen (px) a framed glyph is drawn WITHOUT its
+ *  frame, larger: «Disegnare un glifo» §5, the consumer's option. */
+export const FRAMELESS_BELOW_PX = 24;
 
 const BLOCK = (rules as unknown as { "2d_glyphs"?: Record<string, unknown> })["2d_glyphs"] ?? {};
 
@@ -111,7 +123,10 @@ export function glyphByKey(key: string): Glyph | null {
         lineCap: (l.line_cap as CanvasLineCap | undefined) ?? "butt",
         lineJoin: (l.line_join as CanvasLineJoin | undefined) ?? "miter",
         opacity: typeof l.opacity === "number" ? l.opacity : undefined,
+        frame: l.frame === true,
       })),
+      frameless: Array.isArray(raw.frameless_box) && raw.frameless_box.length === 4
+        ? raw.frameless_box : undefined,
     };
   }
   cache.set(key, g);
@@ -127,7 +142,48 @@ export function glyphByKey(key: string): Glyph | null {
 export function glyphFor(nodeType: string, data?: Record<string, unknown> | null): Glyph | null {
   if (GLYPH_TYPES.has(nodeType)) return glyphByKey(nodeType);
   const kind = data?.["dtc_kind"];
-  return typeof kind === "string" ? glyphByKey(`dtc:${kind}`) : null;
+  if (typeof kind === "string") return glyphByKey(`dtc:${kind}`);
+  const dk = dataGlyphKey(nodeType, data);
+  return dk ? glyphByKey(dk) : null;
+}
+
+/**
+ * G9 · the glyph a node takes from its DATA (`2d_render_glyph_types.data_glyphs`,
+ * 1.6.32): the proxy, the tileset, the RM container and the versions
+ * `version:<kind>`. The first entry whose `when` matches — an alternative
+ * matches when every one of its fields has one of its values: `node_type`,
+ * `data.<field>` (a list matches by any item), `url_ext`, `url_name` — as
+ * «Disegnare un glifo» §1 tells a consumer. Null: no entry matches.
+ */
+interface DataGlyphSpec { glyph?: string; label?: string; when?: Array<Record<string, string[]>> }
+const DATA_GLYPHS: Array<[string, DataGlyphSpec]> = Object.entries(
+  ((rules as unknown as { "2d_render_glyph_types"?: { data_glyphs?: Record<string, unknown> } })[
+    "2d_render_glyph_types"]?.data_glyphs ?? {}) as Record<string, DataGlyphSpec>,
+).filter(([k, v]) => !k.startsWith("_") && v && Array.isArray(v.when));
+
+export function dataGlyphKey(nodeType: string, data?: Record<string, unknown> | null): string | null {
+  if (!DATA_GLYPHS.length) return null;
+  const url = String(data?.["url"] ?? "").split("?")[0].replace(/\/+$/, "").toLowerCase();
+  const name = url.slice(url.lastIndexOf("/") + 1);
+  const dot = name.lastIndexOf(".");
+  const ext = dot > 0 ? name.slice(dot) : "";
+  const field = (f: string): string[] => {
+    if (f === "node_type") return [nodeType];
+    if (f === "url_ext") return [ext];
+    if (f === "url_name") return [name];
+    if (!f.startsWith("data.")) return [];
+    const v = data?.[f.slice(5)];
+    return Array.isArray(v) ? v.map(String) : v == null ? [] : [String(v)];
+  };
+  for (const [key, spec] of DATA_GLYPHS)
+    for (const alt of spec.when!)
+      if (Object.entries(alt).every(([f, vals]) => field(f).some((x) => vals.includes(x)))) return key;
+  return null;
+}
+
+/** The label the datamodel gives a data glyph («Version · glTF»), or null. */
+export function dataGlyphLabel(key: string): string | null {
+  return DATA_GLYPHS.find(([k]) => k === key)?.[1].label ?? null;
 }
 
 /** Every key the datamodel draws from paths — for the checks. */
@@ -167,14 +223,19 @@ export function drawGlyph(
   w: number,
   h: number,
   theme?: GlyphInk | null,
+  /** G9 · the size the glyph takes ON SCREEN, in px: under 24 a framed glyph
+   *  drops its frame and fills the box with the drawing (`frameless_box`) */
+  screenPx?: number,
 ): void {
-  const [, , vw, vh] = g.viewBox;
+  const bare = !!g.frameless && screenPx !== undefined && screenPx < FRAMELESS_BELOW_PX;
+  const [bx, by, vw, vh] = bare ? g.frameless! : [0, 0, g.viewBox[2], g.viewBox[3]];
   const s = Math.min(w / vw, h / vh);
   ctx.save();
-  ctx.translate(x + (w - vw * s) / 2, y + (h - vh * s) / 2);
+  ctx.translate(x + (w - vw * s) / 2 - bx * s, y + (h - vh * s) / 2 - by * s);
   ctx.scale(s, s);
   ctx.setLineDash([]);
   for (const l of g.layers) {
+    if (bare && l.frame) continue;
     if (l.path === undefined) l.path = typeof Path2D === "function" ? new Path2D(l.d) : null;
     if (!l.path) continue;
     ctx.globalAlpha = l.opacity ?? 1;
@@ -237,9 +298,11 @@ export function groundLayer(g: Glyph): GlyphLayer | null {
 
 const escAttr = (s: string): string => s.replace(/&/g, "&amp;").replace(/"/g, "&quot;");
 
-/** The layers as SVG `<path>` elements in viewBox units (no `<svg>` wrapper). */
-export function glyphPathsSvg(g: Glyph, theme?: GlyphInk | null): string {
+/** The layers as SVG `<path>` elements in viewBox units (no `<svg>` wrapper);
+ *  `bare` leaves the frame's layers out (G9). */
+export function glyphPathsSvg(g: Glyph, theme?: GlyphInk | null, bare = false): string {
   return g.layers
+    .filter((l) => !(bare && l.frame))
     .map((l) => {
       const c = layerColor(l, theme);
       const op = l.opacity !== undefined ? ` opacity="${l.opacity}"` : "";
@@ -254,9 +317,12 @@ export function glyphPathsSvg(g: Glyph, theme?: GlyphInk | null): string {
     .join("");
 }
 
-/** A standalone inline `<svg>` of the glyph, sized by the caller's CSS. */
-export function glyphSvg(g: Glyph, theme?: GlyphInk | null): string {
-  const [, , vw, vh] = g.viewBox;
-  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${vw} ${vh}" ` +
-    `preserveAspectRatio="xMidYMid meet" aria-hidden="true">${glyphPathsSvg(g, theme)}</svg>`;
+/** A standalone inline `<svg>` of the glyph, sized by the caller's CSS.
+ *  `px` is the size it is shown at: under 24 the frame is left out and the
+ *  viewBox is the drawing's own box (G9, «Disegnare un glifo» §5). */
+export function glyphSvg(g: Glyph, theme?: GlyphInk | null, px?: number): string {
+  const bare = !!g.frameless && px !== undefined && px < FRAMELESS_BELOW_PX;
+  const [bx, by, vw, vh] = bare ? g.frameless! : [0, 0, g.viewBox[2], g.viewBox[3]];
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${bx} ${by} ${vw} ${vh}" ` +
+    `preserveAspectRatio="xMidYMid meet" aria-hidden="true">${glyphPathsSvg(g, theme, bare)}</svg>`;
 }

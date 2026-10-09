@@ -398,6 +398,8 @@ function drawGroupContainer(
   scale: number,
   badge: number | undefined,
   drawLabels: boolean,
+  /** G9 · the group's own glyph (the RM container), drawn in the header */
+  glyph?: import("./glyphs").Glyph | null,
 ): void {
   // body
   ctx.beginPath();
@@ -439,9 +441,14 @@ function drawGroupContainer(
     ctx.fillStyle = labelOn(headerFill);
     ctx.textAlign = "left";
     ctx.textBaseline = "middle";
-    const maxW = g.w - 26;
+    const gw = glyph ? g.headerH : 0;
+    const maxW = g.w - 26 - gw;
     const t = fitText(ctx, g.title, maxW);
-    ctx.fillText(t, g.x + 21, g.y + g.headerH / 2 + 0.5);
+    ctx.fillText(t, g.x + 21 + gw, g.y + g.headerH / 2 + 0.5);
+  }
+  if (glyph) {
+    const side = g.headerH - 2;
+    drawGlyph(ctx, glyph, g.x + 20, g.y + 1, side, side, glyphInk(), side * scale);
   }
   // badge for folded containers
   if (badge) {
@@ -503,6 +510,24 @@ function upwardConflict(scene: Scene, e: Scene["edges"][number]): boolean {
   const tg = scene.byId.get(e.target);
   if (!s || !tg) return false;
   return tg.y + 0.5 < s.y; // target above source → arrow points up → conflict
+}
+
+/** G9 · the acronym of a version's file format, from what the resource
+ *  declares (the rule of `data_glyphs`: media type, then the URL's extension or
+ *  name, then the packaging) — «GLB», «3TZ», «BLEND», «OBJ». Null: none known. */
+export function formatAcronym(d: Record<string, unknown> | undefined): string | null {
+  if (!d) return null;
+  const media = String(d.media_type ?? "");
+  if (media === "application/x-blender" || d.packaging === "datablock") return "BLEND";
+  if (media === "application/vnd.maxar.archive.3tz+zip") return "3TZ";
+  const url = String(d.url ?? "").split("?")[0].replace(/\/+$/, "").toLowerCase();
+  const name = url.slice(url.lastIndexOf("/") + 1);
+  if (name === "tileset.json") return "3D TILES";
+  const dot = name.lastIndexOf(".");
+  const ext = dot > 0 ? name.slice(dot + 1) : "";
+  if (/^[a-z0-9]{2,5}$/.test(ext) && !/^\d+$/.test(ext)) return ext.toUpperCase();
+  if (d.packaging === "file_set") return "SET";
+  return null;
 }
 
 /** How one edge is stroked, beyond its type. */
@@ -854,6 +879,7 @@ export function render(
         vp.scale,
         n.badge,
         drawLabels,
+        glyphFor(n.node.node_type, n.node.data as Record<string, unknown> | undefined),
       );
       if (isSel(n) || n.id === state.hoverId) {
         const active = n.id === state.selectedId || n.instanceOf === state.selectedId;
@@ -1047,7 +1073,25 @@ export function render(
       if (pathGlyph) {
         // "contain" fit of the viewBox into the rect the hit test uses; the
         // stroke widths are viewBox units, so they scale with the glyph
-        drawGlyph(ctx, pathGlyph, ix, iy, iw, ih, glyphInk());
+        drawGlyph(ctx, pathGlyph, ix, iy, iw, ih, glyphInk(), Math.min(iw, ih) * vp.scale);
+        // G9 · the format of a VERSION is not in its glyph (one drawing for
+        // every glTF): the canvas writes it, when the glyph is big enough
+        if (pathGlyph.key.startsWith("version:") && Math.min(iw, ih) * vp.scale >= 40) {
+          const ac = formatAcronym(n.node.data as Record<string, unknown> | undefined);
+          if (ac) {
+            const fpx = Math.max(7, ih * 0.2);
+            ctx.save();
+            ctx.font = canvasFont(700, fpx);
+            ctx.textAlign = "right";
+            ctx.textBaseline = "bottom";
+            ctx.lineWidth = fpx * 0.3;
+            ctx.strokeStyle = canvasTheme().canvasBg;
+            ctx.strokeText(ac, ix + iw, iy + ih);
+            ctx.fillStyle = canvasTheme().labelInk;
+            ctx.fillText(ac, ix + iw, iy + ih);
+            ctx.restore();
+          }
+        }
         // RISORSA-FILE · a parent DECLARED and not stamped (an object of a
         // .blend, the photographs of a model): the same glyph inside a DASHED
         // frame, where a stamped resource has none — «there, and nobody took

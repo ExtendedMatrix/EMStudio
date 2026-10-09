@@ -20,7 +20,8 @@ function rowMark(n: EmNode): HTMLElement {
   if (g) {
     const th = canvasTheme();
     el.className = "nl-dot nl-glyph glyph-inline";
-    el.innerHTML = glyphSvg(g, { ink: th.labelInk, paper: th.canvasBg, dark: activeTheme() === "dark" });
+    // G9 · 16 px: under 24 a framed glyph is drawn without its circle, larger
+    el.innerHTML = glyphSvg(g, { ink: th.labelInk, paper: th.canvasBg, dark: activeTheme() === "dark" }, 16);
     return el;
   }
   const st = nodeStyle(n.node_type);

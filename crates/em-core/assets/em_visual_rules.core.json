@@ -1,6 +1,6 @@
 {
   "formal_language": "EM",
-  "version": "1.6.31",
+  "version": "1.6.32",
   "_note_material_vs_qualia_color": [
     "DUE COSE DIVERSE CHE SI CHIAMANO ENTRAMBE color. Non confonderle: e gia successo.",
     "1) QUI, in node_styles.<tipo>.style.material.rgba_color — il COLORE DEL MATERIALE BLENDER del proxy 3D, in float LINEARI. UNA sola chiave: `rgba_color`. Fino a S8 il file ne usava due (`color` sui 13 tipi stratigrafici, `rgba_color` sugli altri) e get_material_color() ne leggeva una sola, restituendo None per 21 tipi su 38; ora sono unificate e la vecchia `color` e letta solo come tolleranza verso file scritti prima. Un tipo che non diventa mai una mesh NON ha material affatto (i contenitori di gruppo, e da S7 i dieci nodi che rendono per icona): per loro get_material_color() torna None, ed e corretto.",
@@ -9,6 +9,7 @@
     "In breve: qui si decide di che colore DISEGNARE una US; li si registra di che colore ERA."
   ],
   "_changelog": {
+    "1.6.32": "THE GLYPHS OF THE 3D OBJECTS (MICRO «grafo reattivo», G9, 9 Oct 2026; drawings approved by E.D. on 6 Oct, APPROVATE.md). representation_model, representation_model_doc (the checkered picture seen three-quarters, with its frame's depth and a shadow on the ground: an image PLACED in 3D space) and representation_model_sf replace the three identical Font Awesome cubes of src/2D/ and join `2d_render_glyph_types.types`; proxy, tileset, container (the RM container, RepresentationModelNodeGroup) and the four versions version:gltf / version:mesh / version:tiles / version:scene are new files, resolved from the node's DATA by the new table `2d_render_glyph_types.data_glyphs` (keyed like dtc:<kind>; its rule is written in its _comment, measured on Templu Mare v2). All ten in the DTC frame (circle r 41.14, viewBox 87.12) with the 2×2 checker of the EMtools icons: the checker colours are `accent`, never recoloured; black `ink`, white `paper`, the grey of the picture's frame `ground`, the shadow `halo`. NEW in the layer format: `frame: true` marks the layers of the frame circle (its `paper` fill and its `ink` stroke), and the entry's `frameless_box` is the box of everything else — below 24 px a consumer may skip the frame and fit that box instead (docs/drawing-a-glyph.md §5). Additive: no existing glyph changed.",
     "1.6.31": "THE CHOICES OF DEV29, CONFIRMED (E.D., 2 Oct 2026, on the dev29 report, D5). dtc_kinds.process.texturing is projection AND baking of the photographs onto the mesh, one act, one kind; the baking of levels of detail in Blender stays lod_generation, an act of its own. The «until E.D. says otherwise» of 1.6.30 is gone from the description. Text only: no kind, glyph or label changed.",
     "1.6.30": "AN IMAGE SET AND TEXTURING (dev29, 2 Oct 2026, proposed from the measurements on San Pietro and confirmed by E.D. the same day). dtc_kinds.output += image_set (a set of photographs kept and handed on as ONE product, its images the members of one resource), glyph 09_photos reused; dtc_kinds.process += texturing (a model given its colour from images: projection onto a mesh and baking into an atlas, one kind — confirmed in 1.6.31), glyph 03_mesh reused. Labels in the nine languages (not validated); 2d_glyphs regenerated. Like every process kind texturing declares no mapping.",
     "1.6.29": "THE FOUR GESTURES OF WHOEVER EXPORTS (dev28, decision of E.D. 1 Oct 2026 on the dev27 report, part D). dtc_kinds.process += export (an object of a working project written as a file of its own), lod_generation (a level of detail baked from the master), tiling (a mesh divided into a 3D Tiles tree), packing (a tree packed into one archive, the .3tz). Until dev28 EM Tools and 3DSC wrote them format_conversion / decimation / transformation with the gesture in `technique`; those stamps stay true. NO NEW GLYPH: they reuse 17_format_conversion (export, packing), 15_decimation (lod_generation), 00_transformation (tiling) — a mark of their own is an act of EM iconography, left to E.D.; 2d_glyphs regenerated (dtc:<kind> entries). NO MAPPING, measured: no process kind declares one; a step is the crmdig:D7 of DTCProcessNode whatever its kind. Labels in the nine languages in datamodel_translations.json (dtc_kinds).",
@@ -56,12 +57,282 @@
       "license",
       "embargo",
       "narrative",
-      "SE"
+      "SE",
+      "representation_model",
+      "representation_model_doc",
+      "representation_model_sf"
     ],
     "sheet_types": [
       "document"
     ],
     "_sheet_types_comment": "1.6.21 · types that have a `2d_glyphs` entry (drawn from paths, box = height x aspect like every glyph) but are NOT centred icons, because their LABEL is written ON the drawing. Only the document. WHY NOT IN `types`: being in `types` is a promise about the LABEL as well as the drawing, and every consumer reads it that way. EMStudio (measured 2026-10-02, read-only): a `types` member resolves through glyphs.ts GLYPH_TYPES, so svg-export.ts would print its name UNDER the glyph, and the renderer's generic glyph branch clips an 'over' label to the glyph width minus 10 — at 32 x 0.636 = 20.4 units that is ~10 units, an ellipsis. The document's name sits on the sheet (node_styles.DOC.label_position = 'over'; yEd palette: internal label, centred; EMStudio renderer.ts draws it at 62% of the sheet height, unclipped). Listing it in `types` would squash that label to '…', so it gets a list of its own. What the list does NOT change: the layout box (em-core gives `document` the EM3 box from SHEET_TYPES_PENDING and reads `aspect.document`, whichever list it is in).",
+    "data_glyphs": {
+      "_comment": "1.6.32 · glyphs a node takes from its DATA, not from its type: the RM container, the proxy, the tileset and the VERSIONS of a 3D asset (resources/versions.py: the master and the versions derived from it, `data.tier`). Keyed like `dtc:<kind>`: the key is the `2d_glyphs` entry, `glyph` its authored SVG. A consumer resolves a node in this order: its node_type in `types`/`sheet_types` → its `data.dtc_kind` → the FIRST entry of this table whose `when` matches → its shape. `when` is a list of alternatives (any may match); inside one alternative every field must match one of its values. Fields: `node_type`; `data.<field>` (the value as a string, or any item of a list); `url_ext` — the extension of `data.url`, lower case, with its dot, after dropping a query and a trailing slash; `url_name` — the last segment of `data.url`, lower case. MEASURED on Templu Mare v2 (9 Oct 2026, 1555 nodes): no resource carries a `data.format`, so the file's kind comes from `media_type`, the URL's extension and `packaging` — 196 `.glb` distributions → version:gltf, 33 OBJ `file_set` → version:mesh, a `.3tz` and a `tileset.json` → version:tiles, 99 `application/x-blender` datablock masters → version:scene. The format's acronym (GLB, 3TZ, BLEND) is NOT in the glyph: a consumer writes it as text when there is room.",
+      "container": {
+        "glyph": "src/2D/container.svg",
+        "label": "RM container",
+        "when": [
+          {
+            "node_type": [
+              "RepresentationModelNodeGroup"
+            ]
+          }
+        ]
+      },
+      "proxy": {
+        "glyph": "src/2D/proxy.svg",
+        "label": "Proxy",
+        "when": [
+          {
+            "node_type": [
+              "semantic_shape"
+            ]
+          },
+          {
+            "node_type": [
+              "resource"
+            ],
+            "data.url_type": [
+              "proxy_model"
+            ]
+          }
+        ]
+      },
+      "version:tiles": {
+        "glyph": "src/2D/version_tiles.svg",
+        "label": "Version · 3D Tiles",
+        "when": [
+          {
+            "node_type": [
+              "resource"
+            ],
+            "data.tier": [
+              "master",
+              "distribution"
+            ],
+            "data.url_type": [
+              "3d_model"
+            ],
+            "data.media_type": [
+              "application/vnd.maxar.archive.3tz+zip"
+            ]
+          },
+          {
+            "node_type": [
+              "resource"
+            ],
+            "data.tier": [
+              "master",
+              "distribution"
+            ],
+            "data.url_type": [
+              "3d_model"
+            ],
+            "url_ext": [
+              ".3tz"
+            ]
+          },
+          {
+            "node_type": [
+              "resource"
+            ],
+            "data.tier": [
+              "master",
+              "distribution"
+            ],
+            "data.url_type": [
+              "3d_model"
+            ],
+            "url_name": [
+              "tileset.json"
+            ]
+          }
+        ]
+      },
+      "version:gltf": {
+        "glyph": "src/2D/version_gltf.svg",
+        "label": "Version · glTF",
+        "when": [
+          {
+            "node_type": [
+              "resource"
+            ],
+            "data.tier": [
+              "master",
+              "distribution"
+            ],
+            "data.url_type": [
+              "3d_model"
+            ],
+            "url_ext": [
+              ".glb",
+              ".gltf"
+            ]
+          },
+          {
+            "node_type": [
+              "resource"
+            ],
+            "data.tier": [
+              "master",
+              "distribution"
+            ],
+            "data.url_type": [
+              "3d_model"
+            ],
+            "data.media_type": [
+              "model/gltf-binary",
+              "model/gltf+json"
+            ]
+          }
+        ]
+      },
+      "version:scene": {
+        "glyph": "src/2D/version_scene.svg",
+        "label": "Version · scene",
+        "when": [
+          {
+            "node_type": [
+              "resource"
+            ],
+            "data.tier": [
+              "master",
+              "distribution"
+            ],
+            "data.url_type": [
+              "3d_model"
+            ],
+            "data.media_type": [
+              "application/x-blender"
+            ]
+          },
+          {
+            "node_type": [
+              "resource"
+            ],
+            "data.tier": [
+              "master",
+              "distribution"
+            ],
+            "data.url_type": [
+              "3d_model"
+            ],
+            "data.packaging": [
+              "datablock"
+            ]
+          },
+          {
+            "node_type": [
+              "resource"
+            ],
+            "data.tier": [
+              "master",
+              "distribution"
+            ],
+            "data.url_type": [
+              "3d_model"
+            ],
+            "url_ext": [
+              ".blend",
+              ".usd",
+              ".usda",
+              ".usdc",
+              ".usdz"
+            ]
+          }
+        ]
+      },
+      "version:mesh": {
+        "glyph": "src/2D/version_mesh.svg",
+        "label": "Version · mesh",
+        "when": [
+          {
+            "node_type": [
+              "resource"
+            ],
+            "data.tier": [
+              "master",
+              "distribution"
+            ],
+            "data.url_type": [
+              "3d_model"
+            ],
+            "url_ext": [
+              ".obj",
+              ".ply",
+              ".stl",
+              ".fbx",
+              ".off",
+              ".3ds",
+              ".dae",
+              ".abc"
+            ]
+          },
+          {
+            "node_type": [
+              "resource"
+            ],
+            "data.tier": [
+              "master",
+              "distribution"
+            ],
+            "data.url_type": [
+              "3d_model"
+            ],
+            "data.media_type": [
+              "model/obj",
+              "model/stl",
+              "model/ply"
+            ]
+          },
+          {
+            "node_type": [
+              "resource"
+            ],
+            "data.tier": [
+              "master",
+              "distribution"
+            ],
+            "data.url_type": [
+              "3d_model"
+            ],
+            "data.packaging": [
+              "file_set"
+            ]
+          }
+        ]
+      },
+      "tileset": {
+        "glyph": "src/2D/tileset.svg",
+        "label": "Tileset",
+        "when": [
+          {
+            "node_type": [
+              "resource"
+            ],
+            "data.media_type": [
+              "application/vnd.maxar.archive.3tz+zip"
+            ]
+          },
+          {
+            "node_type": [
+              "resource"
+            ],
+            "url_ext": [
+              ".3tz"
+            ]
+          },
+          {
+            "node_type": [
+              "resource"
+            ],
+            "url_name": [
+              "tileset.json"
+            ]
+          }
+        ]
+      }
+    },
     "_aspect_comment": "EM3 - width of a glyph box = its HEIGHT x this aspect (natural width / natural height of the drawing). The height is the engine's node height, so every glyph keeps the same height and only the width differs (E.D.'s rule). Default 1.0 (square) when a type or kind is absent, which is what the eleven DTC glyphs are after the POL4 autocrop and what extractor/combiner are by construction. STATIC ON PURPOSE: these numbers are measured from the assets ONCE, here, and never read from the loaded image at runtime. An aspect taken from naturalWidth would make the layout depend on when a bitmap finishes decoding - the box would jump under the user and two runs of the same document could differ, which is the determinism contract (EMStudio invariant 7). The cost of a static number is that it can go stale if an asset is redrawn: frontend/scripts/sync-datamodels.sh re-measures every vendored file and WARNS when a declaration is more than 2% off, so the staleness is caught where the assets are copied. Values below measured 2026-08-05 from the files each type actually renders (SVG viewBox, PNG header; narrative uses EMNarrative.png because of its 2d_icon_prefer raster).",
     "aspect": {
       "extractor": 1.0,
@@ -72,7 +343,17 @@
       "embargo": 0.992,
       "narrative": 0.981,
       "SE": 1.331,
-      "document": 0.636
+      "document": 0.636,
+      "representation_model": 1.0,
+      "representation_model_doc": 1.0,
+      "representation_model_sf": 1.0,
+      "container": 1.0,
+      "proxy": 1.0,
+      "tileset": 1.0,
+      "version:tiles": 1.0,
+      "version:gltf": 1.0,
+      "version:scene": 1.0,
+      "version:mesh": 1.0
     },
     "_aspect_correction_1_6_18": "author 0.875 → 0.984 (2026-09-30). 0.875 was measured from src/2D/author.svg (448×512), a Font Awesome silhouette that is NOT the palette pictogram; the pictogram (author.png, 126×128, redrawn as src/2D/bozze/author.svg) is 0.984, the same as author_ai. The drawing wins (2d_glyphs rule), and the layout reads this number. Until EMStudio draws 2d_glyphs, sync-datamodels.sh will WARN on author, because icons.ts still resolves the FA author.svg.",
     "_aspect_correction_1_6_21": "document declared for the first time: 0.636, from src/2D/document.svg (16.11 x 25.34) — the drawing wins (2d_glyphs rule). It agrees with the yEd palette's document node (35 x 55 = 0.636) and with document.png (128 x 199 = 0.643, within the 2% sync-datamodels.sh tolerates). EMStudio's 0.78 (em-core geometry.rs SHEET_TYPES_PENDING, shape-geom.ts DOC_SHEET_ASPECT) measured the sheet its renderer drew by hand, 23.4 x 30, which is not the manual's: both read this key when it exists, so the sheet narrows from 24.96 to 20.35 units at the 32-unit node height."

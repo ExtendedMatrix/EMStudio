@@ -270,4 +270,31 @@ const N = (id, node_type, extra = {}) => ({ id, name: id, node_type, description
      "the SVG of a glyph is paths, never an embedded image");
 }
 
+// ── G9 · the glyphs of the 3D objects (visual rules 1.6.32) ──────────────────
+{
+  const dist = { tier: "distribution", url_type: "3d_model" };
+  const key = (t, d) => M.glyphFor(t, d)?.key ?? null;
+  eq(key("representation_model"), "representation_model", "an RM draws its own glyph (a glyph type since 1.6.32)");
+  eq(key("representation_model_doc"), "representation_model_doc", "…the RM of a document too");
+  eq(key("resource", { ...dist, url: "RB/versions/podium_lod1.glb" }), "version:gltf", "a .glb version → version:gltf");
+  eq(key("resource", { ...dist, url: "RB/versions/podium_obj", packaging: "file_set" }), "version:mesh", "an OBJ file set → version:mesh");
+  eq(key("resource", { ...dist, url: "x/survey.3tz", media_type: "application/vnd.maxar.archive.3tz+zip" }), "version:tiles", "a .3tz version → version:tiles");
+  eq(key("resource", { tier: "master", url_type: "3d_model", packaging: "datablock", media_type: "application/x-blender", url: "TM.blend/US001" }),
+     "version:scene", "a .blend master → version:scene");
+  eq(key("resource", { url: "x/tileset.json" }), "tileset", "a tileset that is no version → tileset");
+  eq(key("resource", { url_type: "proxy_model", url: "proxies/US001.glb" }), "proxy", "a proxy file → proxy");
+  eq(key("semantic_shape"), "proxy", "a semantic shape → proxy");
+  eq(key("RepresentationModelNodeGroup"), "container", "the RM container → container");
+  eq(key("resource", { url_type: "External link", url: "a/photo.jpg" }), null, "a photograph keeps its own drawing");
+  eq(key("extractor", { url: "x.glb" }), "extractor", "a glyph TYPE wins over the data");
+  // the frame: under 24 px the circle is left out and the drawing fills the box
+  const rm = M.glyphFor("representation_model");
+  ok(rm.frameless && rm.layers[0].frame && rm.layers[1].frame && !rm.layers[2].frame, "the frame is marked, its box is read");
+  const big = M.glyphSvg(rm, null, 48), small = M.glyphSvg(rm, null, 16);
+  ok(big.includes('viewBox="0 0 ') && (big.match(/<path/g) ?? []).length === rm.layers.length, "at 48 px: the whole glyph, frame included");
+  ok(small.includes(`viewBox="${rm.frameless.join(" ")}"`) && (small.match(/<path/g) ?? []).length === rm.layers.length - 2,
+     "at 16 px: the frame's two layers left out, the viewBox is the drawing's box");
+  ok(M.glyphSvg(M.glyphFor("combiner"), null, 16).includes('viewBox="0 0 '), "a glyph with no frame is whole at every size");
+}
+
 console.log(`check-glyphs: ${checks} checks ✓`);
