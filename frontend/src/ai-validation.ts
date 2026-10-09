@@ -270,12 +270,13 @@ export function authWords(auth: { mode?: string; attested_by?: string } | null |
  *  nor under review is not a verification this view can explain. */
 export function verifiedRows(doc: EmDocument): VerifiedRow[] {
   const nodes = new Map(doc.graph.nodes.map((n) => [n.id, n]));
+  const aiAuthors = aiAuthorIndex(doc); // one pass, not one per row
   const out: VerifiedRow[] = [];
   for (const n of doc.graph.nodes) {
     const d = dataOf(n);
     if (d.removed || !d[VALIDATED_BY]) continue;
     const what: Array<"ai" | "review"> = [];
-    if (aiMarker(n) || aiAuthorOf(doc, n.id)) what.push("ai");
+    if (aiMarker(n) || aiAuthors.has(n.id)) what.push("ai");
     if (reviewRequested(n)) what.push("review");
     if (!what.length) continue;
     const by = String(d[VALIDATED_BY]);
