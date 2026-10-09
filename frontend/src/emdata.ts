@@ -15,7 +15,7 @@
 //  · cards for Units (the provenance chain), Documents (master and instances)
 //    and Chronology.
 
-import { modelsTableHtml, type ModelsCtx } from "./models-sheet";
+import { modelsRows, modelsTableHtml, type ModelsCtx } from "./models-sheet";
 import type { Space } from "./space";
 import type { DocumentStore } from "./model";
 import type { Win } from "./workspace";
@@ -202,7 +202,11 @@ export function sheetRowCount(sheet: TableView): number | null {
   if (sheet === "Issues") return ctx.issues.length;
   if (sheet === "Models") {
     const sp = getSpace();
-    return sp ? modelsTableHtml(sp.space, sp.units, sp.ctx, () => true).count : null;
+    // the rows, not the table: building the HTML to count it was the first cost
+    // of opening a large document (the sheet menu asks at every header repaint)
+    if (!sp) return null;
+    const rows = modelsRows(sp.space, sp.units);
+    return rows.rm.length + rows.proxy.length;
   }
   return buildTable(store, sheet as SheetKey, volatileProvider).rows.length;
 }

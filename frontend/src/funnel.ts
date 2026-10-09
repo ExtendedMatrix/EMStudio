@@ -71,7 +71,9 @@ export function readScopeValue(
   scope: Scope,
   scopeNodeId: string | null,
   ruleId: RuleId,
+  ix?: FunnelIndex,
 ): string | null {
+  if (ix) return readIndexed(ix, scope, scopeNodeId, ruleId);
   const g = doc.graph;
   // canvas: resolve the owner to the graph-self node; every scope then reads
   // its PDG members through the one code path below.
@@ -109,6 +111,66 @@ export function readScopeValue(
   return null;
 }
 
+/**
+ * GRAFO REATTIVO · the edges the funnel reads, indexed ONCE for a pass over many
+ * nodes (the Matrix badges resolve every stratigraphic node × three rules × four
+ * scopes, and each read scanned every edge: 2.5 s of a 5000-unit opening,
+ * measured). The answers are the scan's: the FIRST `has_paradata_nodegroup` of
+ * an owner, the members in edge order. Valid for the document as it was when
+ * built — build one per pass, never keep it.
+ */
+export interface FunnelIndex {
+  byId: Map<string, Node>;
+  graphSelf: string | null;
+  pdgOf: Map<string, string>;
+  members: Map<string, Node[]>;
+  activities: Map<string, string[]>;
+  epoch: Map<string, string>;
+}
+
+export function funnelIndex(doc: EmDocument): FunnelIndex {
+  const g = doc.graph;
+  const byId = new Map(g.nodes.map((n) => [n.id, n]));
+  const pdgOf = new Map<string, string>();
+  const members = new Map<string, Node[]>();
+  const activities = new Map<string, string[]>();
+  const epoch = new Map<string, string>();
+  for (const e of g.edges) {
+    if (e.edge_type === "has_paradata_nodegroup") {
+      if (!pdgOf.has(e.source)) pdgOf.set(e.source, e.target);
+    } else if (e.edge_type === "is_in_paradata_nodegroup") {
+      const m = byId.get(e.source);
+      if (m) (members.get(e.target) ?? members.set(e.target, []).get(e.target)!).push(m);
+    } else if (e.edge_type === "is_in_activity") {
+      (activities.get(e.source) ?? activities.set(e.source, []).get(e.source)!).push(e.target);
+    } else if (e.edge_type === "has_first_epoch") {
+      if (!epoch.has(e.source)) epoch.set(e.source, e.target);
+    }
+  }
+  const graphSelf = g.nodes.find((n) => n.node_type === "graph")?.id ?? null;
+  return { byId, graphSelf, pdgOf, members, activities, epoch };
+}
+
+function readIndexed(ix: FunnelIndex, scope: Scope, scopeNodeId: string | null, ruleId: RuleId): string | null {
+  const ownerId = scope === "canvas" ? ix.graphSelf : scopeNodeId;
+  if (!ownerId) return null;
+  const pdgId = ix.pdgOf.get(ownerId);
+  if (!pdgId) return null;
+  const wantTypes = RULE_NODE_TYPES[ruleId];
+  for (const m of ix.members.get(pdgId) ?? []) {
+    if (wantTypes) {
+      if (wantTypes.includes(m.node_type)) return nodeName(m);
+    } else if (m.node_type === "property") {
+      const pt = (m.data as Record<string, unknown> | undefined)?.property_type;
+      if (pt === ruleId) {
+        const d = m.description;
+        return d != null && String(d).trim() !== "" ? String(d) : nodeName(m);
+      }
+    }
+  }
+  return null;
+}
+
 /** ids of the ActivityNodeGroups that CONTAIN a node (is_in_activity). */
 function activitiesOf(edges: Edge[], nodeId: string): string[] {
   const out: string[] = [];
@@ -136,24 +198,25 @@ export function resolveEffective(
   doc: EmDocument,
   nodeId: string,
   ruleId: RuleId,
+  ix?: FunnelIndex,
 ): Effective {
   const edges = doc.graph.edges;
   // 1 · node
-  const own = readScopeValue(doc, "node", nodeId, ruleId);
+  const own = readScopeValue(doc, "node", nodeId, ruleId, ix);
   if (own != null) return { value: own, source: "node", explicit: true };
   // 2 · activity (a node can be in several; first that declares wins)
-  for (const a of activitiesOf(edges, nodeId)) {
-    const v = readScopeValue(doc, "activity", a, ruleId);
+  for (const a of ix ? (ix.activities.get(nodeId) ?? []) : activitiesOf(edges, nodeId)) {
+    const v = readScopeValue(doc, "activity", a, ruleId, ix);
     if (v != null) return { value: v, source: "activity", explicit: false };
   }
   // 3 · epoch (swimlane)
-  const ep = epochOf(edges, nodeId);
+  const ep = ix ? (ix.epoch.get(nodeId) ?? null) : epochOf(edges, nodeId);
   if (ep) {
-    const v = readScopeValue(doc, "epoch", ep, ruleId);
+    const v = readScopeValue(doc, "epoch", ep, ruleId, ix);
     if (v != null) return { value: v, source: "epoch", explicit: false };
   }
   // 4 · canvas (header)
-  const cv = readScopeValue(doc, "canvas", null, ruleId);
+  const cv = readScopeValue(doc, "canvas", null, ruleId, ix);
   if (cv != null) return { value: cv, source: "canvas", explicit: false };
   return { value: null, source: null, explicit: false };
 }

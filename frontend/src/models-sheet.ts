@@ -87,9 +87,14 @@ export function modelsTableHtml(space: Space, units: string[], ctx: ModelsCtx,
   }
   h += `</tbody></table><h4>${esc(t("space.proxyByUnit"))}</h4><table class="mdl-px"><thead><tr><th>${esc(t("space.col.unit"))}</th>`
     + `<th>${esc(t("space.col.epoch"))}</th><th>${esc(t("space.col.property"))}</th><th>${esc(t("space.col.file"))}</th></tr></thead><tbody>`;
+  // the epochs of each unit, from one summary per epoch (asked per unit, it was
+  // every epoch's summary for every row)
+  const epochsOf = new Map<string, string[]>();
+  for (const e of space.epochs)
+    for (const u of space.summary(e.id)?.units ?? []) (epochsOf.get(u) ?? epochsOf.set(u, []).get(u)!).push(e.name);
   for (const u of pxRows) {
     const px = space.proxies.get(u);
-    const eps = space.epochs.filter((e) => space.summary(e.id)?.units.includes(u)).map((e) => e.name).join(", ");
+    const eps = (epochsOf.get(u) ?? []).join(", ");
     const geo = px ? (px.geometry === "glb" ? "glb" : t(`space.geo.${px.geometry}`)) : "";
     h += `<tr data-row="${esc(u)}"><td><button class="link" data-go="${esc(u)}">${esc(name(u))}</button></td><td>${esc(eps)}</td>`
       + `<td>${px ? `<button class="link d" data-go="${esc(px.propertyId)}">${esc(name(px.propertyId) || "proxy")}</button> · ${esc(geo)}`

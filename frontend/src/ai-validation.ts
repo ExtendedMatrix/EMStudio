@@ -57,6 +57,19 @@ export function aiMarker(n: EmNode | undefined): AiMarker | null {
 
 export const isValidated = (n: EmNode | undefined): boolean => !!dataOf(n)[VALIDATED_BY];
 
+/** GRAFO REATTIVO · node → the AuthorAINode it `has_author`, for every node in
+ *  one pass over the edges (the first such edge, as `aiAuthorOf` finds it): asked
+ *  node by node, each question built a map of every node and scanned every edge. */
+function aiAuthorIndex(doc: EmDocument): Map<string, string> {
+  const types = new Map(doc.graph.nodes.map((n) => [n.id, n.node_type]));
+  const out = new Map<string, string>();
+  for (const x of doc.graph.edges)
+    if (x.edge_type === "has_author" && !out.has(x.source) && types.get(x.target) === AI_AUTHOR_TYPE
+        && !((x.attributes ?? {}) as Record<string, unknown>).removed)
+      out.set(x.source, x.target);
+  return out;
+}
+
 /** The AuthorAINode a node `has_author`, when it has one (StratiMiner). */
 function aiAuthorOf(doc: EmDocument, id: string): string | null {
   const types = new Map(doc.graph.nodes.map((n) => [n.id, n.node_type]));
@@ -82,6 +95,7 @@ export interface UnvalidatedRow {
  *  AI-authored extractors. Narrative blocks are not here (their own rule). */
 export function unvalidatedAi(doc: EmDocument): UnvalidatedRow[] {
   const out: UnvalidatedRow[] = [];
+  const aiAuthors = aiAuthorIndex(doc);
   for (const n of doc.graph.nodes) {
     if (dataOf(n).removed || isValidated(n)) continue;
     const m = aiMarker(n);
@@ -92,7 +106,7 @@ export function unvalidatedAi(doc: EmDocument): UnvalidatedRow[] {
       continue;
     }
     if (n.node_type === "narrative") continue;
-    const ai = aiAuthorOf(doc, n.id);
+    const ai = aiAuthors.get(n.id) ?? null;
     if (ai) out.push({ node: n.id, name: String(n.name ?? ""), node_type: n.node_type,
                        fields: null, by: ai, model: null, via: "has_author" });
   }
@@ -103,6 +117,15 @@ export function isUnvalidatedAi(doc: EmDocument, id: string): boolean {
   const n = doc.graph.nodes.find((x) => x.id === id);
   if (!n || isValidated(n)) return false;
   return !!aiMarker(n) || aiAuthorOf(doc, id) !== null;
+}
+
+/** `aiState` of every node, in one pass: only the AI-touched ones are in the map. */
+export function aiStates(doc: EmDocument): Map<string, "pending" | "verified"> {
+  const aiAuthors = aiAuthorIndex(doc);
+  const out = new Map<string, "pending" | "verified">();
+  for (const n of doc.graph.nodes)
+    if (aiMarker(n) || aiAuthors.has(n.id)) out.set(n.id, isValidated(n) ? "verified" : "pending");
+  return out;
 }
 
 /** Is the node AI-touched at all (validated or not)? For the chip. */
@@ -154,12 +177,18 @@ export type ReviewReason = "ai" | "review_requested" | "stale";
 /** Why `id` waits for a person — `[]` when it does not. */
 export function needsReview(doc: EmDocument, id: string): ReviewReason[] {
   const n = doc.graph.nodes.find((x) => x.id === id);
-  if (!n || dataOf(n).removed) return [];
+  return n ? reasonsOf(doc, n, (x) => aiAuthorOf(doc, x)) : [];
+}
+
+/** `needsReview` of a node in hand, with the AI author read by `aiAuthor` —
+ *  the index when the caller walks every node (`toReview`). */
+function reasonsOf(doc: EmDocument, n: EmNode, aiAuthor: (id: string) => string | null): ReviewReason[] {
+  if (dataOf(n).removed) return [];
   // dev27 · a translation a newer one REALIGNED (`was_revision_of`) waits for
   // nobody: it is history, with its author and its verification
   if (n.node_type === TRANSLATION_TYPE && isSuperseded(doc, n)) return [];
   const out: ReviewReason[] = [];
-  if (isUnvalidatedAi(doc, id)) out.push("ai");
+  if (!isValidated(n) && (!!aiMarker(n) || aiAuthor(n.id) !== null)) out.push("ai");
   if (reviewRequested(n) && !isValidated(n)) out.push("review_requested");
   if (n.node_type === TRANSLATION_TYPE && isStale(doc, n)) out.push("stale");
   return out;
@@ -186,8 +215,10 @@ export interface ReviewRow {
  *  AI-authored extractors of `unvalidatedAi` (E.D.'s rule) with them. */
 export function toReview(doc: EmDocument): ReviewRow[] {
   const out: ReviewRow[] = [];
+  const aiAuthors = aiAuthorIndex(doc);
+  const aiAuthor = (id: string): string | null => aiAuthors.get(id) ?? null;
   for (const n of doc.graph.nodes) {
-    const reasons = needsReview(doc, n.id);
+    const reasons = reasonsOf(doc, n, aiAuthor);
     if (!reasons.length) continue;
     const row: ReviewRow = { node: n.id, name: String(n.name ?? ""), node_type: n.node_type, reasons };
     if (n.node_type === TRANSLATION_TYPE) {
@@ -199,7 +230,7 @@ export function toReview(doc: EmDocument): ReviewRow[] {
     }
     if (reasons.includes("ai")) {
       const m = aiMarker(n);
-      row.by = m?.by ?? aiAuthorOf(doc, n.id);
+      row.by = m?.by ?? aiAuthor(n.id);
       row.model = m?.model ?? null;
       row.via = m ? "marker" : "has_author";
     }

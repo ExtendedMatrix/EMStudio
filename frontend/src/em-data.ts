@@ -211,11 +211,16 @@ export function buildTable(
       .map((e) => ({ value: e.id, label: str(e.name) || e.id })),
   ];
 
+  // the FIRST has_first_epoch of each unit, indexed on first use (asked per row,
+  // each answer scanned every edge)
+  let firstEpoch: Map<string, string> | null = null;
   const firstEpochIdOf = (unitId: string): string => {
-    const e = edges.find(
-      (x) => x.source === unitId && x.edge_type === "has_first_epoch",
-    );
-    return e ? e.target : "";
+    if (!firstEpoch) {
+      firstEpoch = new Map();
+      for (const x of edges)
+        if (x.edge_type === "has_first_epoch" && !firstEpoch.has(x.source)) firstEpoch.set(x.source, x.target);
+    }
+    return firstEpoch.get(unitId) ?? "";
   };
 
   if (sheet === "Units") {

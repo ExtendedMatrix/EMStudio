@@ -563,7 +563,31 @@ export class DocumentStore {
 
   // ---------- lookups ----------
   node(id: string): EmNode | undefined {
-    return this.doc.graph.nodes.find((n) => n.id === id);
+    // GRAFO REATTIVO · an id → position index, checked at every answer: the
+    // position must still hold that id, or the index is rebuilt. Code that
+    // writes `doc.graph.nodes` directly (an undo snapshot, a sync patch) can
+    // never get a stale node back — at worst one rebuild. A miss on an index
+    // that matches the array scans, as `find` did: the answer is the scan's.
+    const arr = this.doc.graph.nodes;
+    let ix = this.nodeIx;
+    if (!ix || ix.arr !== arr) ix = this.indexNodes(arr);
+    let p = ix.pos.get(id);
+    if (p !== undefined && arr[p]?.id === id) return arr[p];
+    if (p !== undefined || ix.len !== arr.length) {
+      ix = this.indexNodes(arr);
+      p = ix.pos.get(id);
+      if (p !== undefined && arr[p]?.id === id) return arr[p];
+    }
+    return arr.find((n) => n.id === id);
+  }
+
+  private nodeIx: { arr: EmNode[]; len: number; pos: Map<string, number> } | null = null;
+
+  private indexNodes(arr: EmNode[]): { arr: EmNode[]; len: number; pos: Map<string, number> } {
+    const pos = new Map<string, number>();
+    for (let i = 0; i < arr.length; i++) if (!pos.has(arr[i].id)) pos.set(arr[i].id, i);
+    this.nodeIx = { arr, len: arr.length, pos };
+    return this.nodeIx;
   }
 
   /** A globally-unique node identity (UUID). New nodes MUST use this so

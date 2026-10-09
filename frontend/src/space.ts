@@ -298,16 +298,23 @@ export function buildSpace(
     }
   }
 
+  // GRAFO REATTIVO · the units of every top epoch, in ONE pass over the nodes and
+  // on first use: asked per epoch it was a pass over every node per question, and
+  // the Models sheet asks once per unit (165 s to open 5000 units, measured)
+  let unitsByTop: Map<string, string[]> | null = null;
   const unitsIn = (epochId: string): string[] => {
-    const out2: string[] = [];
-    for (const u of nodes) {
-      // P2 · a continuity node says how long a unit lives; it is not a unit
-      // to model, so it is neither counted nor listed without a proxy
-      if (!opts.isUnit(u.node_type) || classOf(u.node_type) === "ContinuityNode") continue;
-      const eps = EPOCH_LINKS.flatMap((l) => outOf(u.id, l));
-      if (eps.some((e) => topOf(e) === epochId)) out2.push(u.id);
+    if (!unitsByTop) {
+      unitsByTop = new Map();
+      for (const u of nodes) {
+        // P2 · a continuity node says how long a unit lives; it is not a unit
+        // to model, so it is neither counted nor listed without a proxy
+        if (!opts.isUnit(u.node_type) || classOf(u.node_type) === "ContinuityNode") continue;
+        const tops = new Set<string>();
+        for (const l of EPOCH_LINKS) for (const e of outOf(u.id, l)) { const t = topOf(e); if (t) tops.add(t); }
+        for (const t of tops) (unitsByTop.get(t) ?? unitsByTop.set(t, []).get(t)!).push(u.id);
+      }
     }
-    return out2;
+    return unitsByTop.get(epochId) ?? [];
   };
 
   return {

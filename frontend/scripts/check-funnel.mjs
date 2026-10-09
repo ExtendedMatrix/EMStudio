@@ -15,12 +15,29 @@ const bundle = await esbuild.build({
   format: "esm",
   write: false,
 });
-const F = await import(
+const F0 = await import(
   "data:text/javascript;base64," +
     Buffer.from(bundle.outputFiles[0].text).toString("base64")
 );
 
 let checks = 0;
+// GRAFO REATTIVO · every answer below is asked twice — scanning the edges, and
+// through the one-pass index the Matrix badges use — and the two must agree
+const F = {
+  ...F0,
+  resolveEffective: (d, id, rule) => {
+    const a = F0.resolveEffective(d, id, rule);
+    assert.deepEqual(F0.resolveEffective(d, id, rule, F0.funnelIndex(d)), a, `indexed resolveEffective(${id}, ${rule})`);
+    checks++;
+    return a;
+  },
+  readScopeValue: (d, scope, sid, rule) => {
+    const a = F0.readScopeValue(d, scope, sid, rule);
+    assert.deepEqual(F0.readScopeValue(d, scope, sid, rule, F0.funnelIndex(d)), a, `indexed readScopeValue(${scope}, ${rule})`);
+    checks++;
+    return a;
+  },
+};
 const eq = (got, want, what) => {
   assert.deepEqual(got, want, `${what} — got ${JSON.stringify(got)}`);
   checks++;

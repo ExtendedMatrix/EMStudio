@@ -397,7 +397,7 @@ import {
   TEMPLATES,
 } from "./filters";
 import { adornmentBadges, type AdornmentBadge } from "./adornments";
-import { BADGE_RULES, resolveEffective, sourceLabel } from "./funnel";
+import { BADGE_RULES, funnelIndex, resolveEffective, sourceLabel } from "./funnel";
 import { type Qualia, vocabularyFor } from "./vocab";
 import { versionBreakdown } from "./versions";
 import {
@@ -791,6 +791,15 @@ const logDrawer = {
 let connect: ConnectDrag | null = null;
 /** CATENA · the AI chips of the canvas, read once per change (see `aiMarks`) */
 let aiMarksCache: Map<string, "pending" | "verified"> | null = null;
+/** GRAFO REATTIVO · a counter of the active document's changes, and the
+ *  membership the Outliner reads, kept for one (document, change) */
+let docChangeSeq = 0;
+let membershipMemo: { doc: EmDocument; seq: number; mm: ReturnType<typeof buildMembership> } | null = null;
+function membershipNow(doc: EmDocument): ReturnType<typeof buildMembership> {
+  if (membershipMemo && membershipMemo.doc === doc && membershipMemo.seq === docChangeSeq) return membershipMemo.mm;
+  membershipMemo = { doc, seq: docChangeSeq, mm: buildMembership(doc) };
+  return membershipMemo.mm;
+}
 /** graph-view "liquid" filters: hidden node / edge types */
 // hidden type sets are DERIVED from the visible circles of the CURRENT view
 // (recomputeHiddenFromCircles); they are what buildScenes applies.
@@ -3740,12 +3749,13 @@ function filteredView(opts: { wholeGraph?: boolean;
   // resolves per node — em.json is untouched (nothing materialised).
   const normRule = (kind: string): string =>
     kind === "author_ai" ? "author" : kind;
+  const fix = funnelIndex(doc); // one index for the whole pass (GRAFO REATTIVO)
   for (const n of vNodes) {
     if (!isStratigraphicType(n.node_type)) continue;
     const own = new Set((adornments.get(n.id) ?? []).map((b) => normRule(b.kind)));
     for (const rule of BADGE_RULES) {
       if (own.has(rule)) continue; // declared on the node → explicit badge exists
-      const eff = resolveEffective(doc, n.id, rule);
+      const eff = resolveEffective(doc, n.id, rule, fix);
       if (eff.value == null || eff.explicit) continue;
       const arr = adornments.get(n.id) ?? [];
       arr.push({ ornamentId: "", kind: rule, label: `${eff.value} · ${sourceLabel(eff.source)}`, inherited: true });
@@ -4326,6 +4336,7 @@ function flushChange(): void {
 
 function wireStore(s: DocumentStore): void {
   s.onChange(() => {
+    docChangeSeq++; // any store's change: the memo is keyed by document, not by slot
     // Guard: a background slot must not redraw the canvas. Today only the active
     // store is ever mutated (edits go through the active document), but the sync
     // channel and a future aux bake could touch another one, and the symptom of
@@ -8070,14 +8081,13 @@ const outlinerCallbacks: NodeListCallbacks = {
   onFoldGroups: (ids, folded) => store?.setFoldedMany(ids, folded),
   isContainer: (id) => {
     if (!store) return false;
-    const mm = buildMembership(store.doc);
+    // asked once per row: one membership per document change, not per row
+    const mm = membershipNow(store.doc);
     return (mm.membersOf.get(id)?.filter((m) => m !== id).length ?? 0) > 0;
   },
   // STRUTTURA · MARKED where they are: the WARNINGS of a unit and of what its
   // paradata group holds — hints are not marked, so the list stays quiet
-  warningsOf: (id) =>
-    currentIssues.filter((i) => i.sev === "warn" && (i.node === id || issueUnitOf(i.node) === id))
-      .map((i) => i.txt),
+  warningsOf: (id) => warningsByUnit().get(id) ?? [],
   isTemporalProperty: (id) => !!store?.epochOfTemporalProperty(id),
 };
 
@@ -13844,6 +13854,23 @@ function refreshNameStatus(): void {
 // outliner and the canvas (marked), the inspector (explained) — and by the
 // table's Warnings view and «con avvisi» facet.
 let currentIssues: Issue[] = [];
+/** GRAFO REATTIVO · the Outliner's warnings per row, grouped once per list of
+ *  issues (per row it filtered every issue: O(rows × issues)) — same order */
+let warnsMemo: { issues: Issue[]; unitOf: typeof issueUnitOf; map: Map<string, string[]> } | null = null;
+function warningsByUnit(): Map<string, string[]> {
+  if (warnsMemo && warnsMemo.issues === currentIssues && warnsMemo.unitOf === issueUnitOf) return warnsMemo.map;
+  const map = new Map<string, string[]>();
+  for (const i of currentIssues) {
+    if (i.sev !== "warn") continue;
+    const keys = new Set<string>();
+    keys.add(i.node);
+    const u = issueUnitOf(i.node);
+    if (u !== null) keys.add(u);
+    for (const k of keys) (map.get(k) ?? map.set(k, []).get(k)!).push(i.txt);
+  }
+  warnsMemo = { issues: currentIssues, unitOf: issueUnitOf, map };
+  return map;
+}
 let issueUnitOf: (nodeId: string) => string | null = () => null;
 /** the nodes that carry a warning — the canvas badge reads this */
 let warnedNodes = new Set<string>();
@@ -16038,8 +16065,9 @@ function aiMarks(): Map<string, "pending" | "verified"> | null {
   if (aiMarksCache) return aiMarksCache;
   const m = new Map<string, "pending" | "verified">();
   for (const r of aiv.unvalidatedAi(store.doc)) m.set(r.node, "pending");
+  const states = aiv.aiStates(store.doc);
   for (const n of store.liveNodes())
-    if (!m.has(n.id) && aiv.aiState(store.doc, n.id) === "verified") m.set(n.id, "verified");
+    if (!m.has(n.id) && states.get(n.id) === "verified") m.set(n.id, "verified");
   aiMarksCache = m;
   return m;
 }
