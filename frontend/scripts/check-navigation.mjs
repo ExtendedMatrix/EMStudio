@@ -170,6 +170,26 @@ const wheel = (init) => p.evaluate(([init, pt]) => {
   const sel = await p.evaluate(() => window.__EM_DRAG__.selected().length);
   ok(sel >= 1 && b.x === a.x && b.y === a.y, `a left drag on the background selects (${sel}) and does not pan`);
 }
+// ── G6 · the Outliner from the keyboard ─────────────────────────────────────
+{
+  const rows = await p.evaluate(() => [...document.querySelectorAll("[data-nl-id]")].filter((r) => !r.closest(".hidden")).map((r) => r.dataset.nlId));
+  const at0 = await p.evaluate((id) => window.__EM_DRAG__.sceneOf(id), rows[0]);
+  await p.click(`[data-nl-id="${rows[0]}"]`);
+  await p.waitForTimeout(250);
+  const sel = () => p.evaluate(() => window.__EM_DRAG__.selected()[0] ?? null);
+  await p.keyboard.press("ArrowDown"); await p.waitForTimeout(200);
+  ok(await sel() === rows[1], "↓ selects the next row (the app's selection)");
+  await p.keyboard.press("ArrowUp"); await p.waitForTimeout(200);
+  ok(await sel() === rows[0], "↑ the previous one");
+  await p.keyboard.press("End"); await p.waitForTimeout(200);
+  ok(await sel() === rows[rows.length - 1], "End: the last row");
+  const inView = await p.evaluate(() => { const r = document.querySelector(".nl-rows .selected"), l = document.querySelector(".nl-rows"); const a = r.getBoundingClientRect(), c = l.getBoundingClientRect(); return a.top >= c.top - 1 && a.bottom <= c.bottom + 1; });
+  ok(inView, "…scrolled into view");
+  await p.keyboard.press("Home"); await p.waitForTimeout(200);
+  ok(await sel() === rows[0], "Home: the first row");
+  const at1 = await p.evaluate((id) => window.__EM_DRAG__.sceneOf(id), rows[0]);
+  ok(JSON.stringify(at0) === JSON.stringify(at1), "the arrows move the selection, not the node on the canvas");
+}
 ok(!errors.length, `no page errors${errors.length ? ": " + errors.join(" | ") : ""}`);
 console.log(`check-navigation: ${checks - failed}/${checks} ✓`);
 await browser.close();

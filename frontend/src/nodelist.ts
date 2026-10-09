@@ -181,6 +181,10 @@ export function buildNodeList(
   const rebuild = (): void => {
     listEl.innerHTML = "";
     rows.clear();
+    // G6 · after the rows are made, each says which node it is
+    queueMicrotask(() => {
+      for (const [id, el] of rows) el.dataset.nlId = id;
+    });
     for (const [b, m] of [[byEpochBtn, "epoch"], [azBtn, "az"]] as const) {
       b.classList.toggle("on", mode === m);
       b.setAttribute("aria-pressed", String(mode === m));
@@ -428,6 +432,57 @@ export function buildNodeList(
   };
 
   filter.addEventListener("input", rebuild);
+
+  // G6 · the list from the keyboard: with a row selected, ↑/↓ go to the row
+  // before or after it and make IT the selection (graph, Inspector, 3D — the
+  // app's one `onPick`, whose «Zoom to selection» frames it when that switch is
+  // on), Home/End to the first and the last row, ← folds a group (or closes the
+  // section the row is in), → unfolds it. The row stays in view. The list takes
+  // the keyboard when a row is clicked, so the canvas's arrow nudge — which
+  // answers only to the page and the canvas — never moves a node meanwhile.
+  listEl.tabIndex = 0;
+  listEl.setAttribute("role", "listbox");
+  listEl.setAttribute("aria-label", t("outliner.search"));
+  listEl.addEventListener("click", (e) => {
+    if ((e.target as HTMLElement).closest("[data-nl-id]")) listEl.focus({ preventScroll: true });
+  });
+  const visibleRows = (): HTMLElement[] =>
+    [...listEl.querySelectorAll<HTMLElement>("[data-nl-id]")].filter((r) => !r.closest(".hidden"));
+  listEl.addEventListener("keydown", (e) => {
+    if (e.metaKey || e.ctrlKey || e.altKey) return;
+    const list = visibleRows();
+    if (!list.length) return;
+    const at = list.findIndex((r) => r.dataset.nlId === selected);
+    const go = (i: number): void => {
+      const r = list[Math.max(0, Math.min(list.length - 1, i))];
+      if (r?.dataset.nlId) onPick(r.dataset.nlId);
+    };
+    const cur = at >= 0 ? list[at] : null;
+    switch (e.key) {
+      case "ArrowDown": go(at < 0 ? 0 : at + 1); break;
+      case "ArrowUp": go(at < 0 ? 0 : at - 1); break;
+      case "Home": go(0); break;
+      case "End": go(list.length - 1); break;
+      case "ArrowLeft":
+      case "ArrowRight": {
+        if (!cur?.dataset.nlId) return;
+        const id = cur.dataset.nlId;
+        const isGroup = cur.classList.contains("nl-grow");
+        const fold = e.key === "ArrowLeft";
+        if (isGroup) {
+          if (groupCb.isFolded(id) !== fold) groupCb.onToggleFold(id);
+        } else if (fold) {
+          // a unit: ← closes the section it is in (→ has nothing to open)
+          (cur.closest(".nl-sect-body")?.previousElementSibling?.querySelector(".nl-disc") as HTMLButtonElement | null)?.click();
+        }
+        break;
+      }
+      default:
+        return;
+    }
+    e.preventDefault();
+    e.stopPropagation();
+  });
 
   return {
     refresh: rebuild,
