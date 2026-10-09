@@ -408,6 +408,7 @@ import {
   TEMPLATES,
 } from "./filters";
 import { adornmentBadges, type AdornmentBadge } from "./adornments";
+import { drawnPdChips, hitPdChip } from "./pd-chip";
 import { BADGE_RULES, funnelIndex, resolveEffective, sourceLabel } from "./funnel";
 import { type Qualia, vocabularyFor } from "./vocab";
 import { versionBreakdown } from "./versions";
@@ -2038,6 +2039,9 @@ window.__EM_SCENE__ = () => {
   backDepth: () => viewHistory.length,
   goBack: () => goBack(),
   jumpTo: (id: string) => jumpTo(id),
+  // MICRO-BADGE-PD · the groups' chips as drawn (canvas-relative), the context
+  pdChips: () => drawnPdChips(),
+  context: () => [...contextStack],
   folded: () => [...(store?.doc.layout?.folded_groups ?? [])],
   setValue: (id: string, v: string) => store?.setPropertyValue(id, v),
   compactAll: () => runCompact(),
@@ -28813,6 +28817,7 @@ function wireGraphCanvas(canvas: HTMLCanvasElement, winId: string): void {
     adornmentPending = null;
     pdDecoratorPending = null;
     instanceBadgePending = null;
+    pdChipPending = null;
     const armChip = (): void => {
       dragMode = "none";
       try { canvas.setPointerCapture(e.pointerId); } catch { /* a synthetic event */ }
@@ -28865,6 +28870,13 @@ function wireGraphCanvas(canvas: HTMLCanvasElement, winId: string): void {
       const ibadge = hitInstanceBadge(lx, ly);
       if (ibadge) {
         instanceBadgePending = ibadge.instance;
+        armChip();
+        return;
+      }
+      // MICRO-BADGE-PD · the chip of a unit's paradata group (bottom-right)
+      const pc = hitPdChip(lx, ly);
+      if (pc) {
+        pdChipPending = { group: pc.group, shift: e.shiftKey };
         armChip();
         return;
       }
@@ -29204,6 +29216,23 @@ function wireGraphCanvas(canvas: HTMLCanvasElement, winId: string): void {
     // hover / tooltip
     const s = scene();
     if (!s) return;
+    // MICRO-BADGE-PD · over a group's chip: what it counts and its two gestures
+    {
+      const rect = canvas.getBoundingClientRect();
+      const pc = hitPdChip(e.clientX - rect.left, e.clientY - rect.top);
+      if (pc) {
+        tooltip.innerHTML = `<b></b> <span class="tt-type"></span><br><span class="tt-desc"></span>`;
+        (tooltip.children[0] as HTMLElement).textContent = String(store?.node(pc.group)?.name ?? pc.group);
+        (tooltip.children[1] as HTMLElement).textContent = `[ParadataNodeGroup]`;
+        (tooltip.children[3] as HTMLElement).textContent =
+          `${pc.label} — ${t(pc.open ? "pdchip.actionsOpen" : "pdchip.actions")}`;
+        tooltip.style.left = Math.min(e.clientX + 14, innerWidth - 380) + "px";
+        tooltip.style.top = e.clientY + 14 + "px";
+        tooltip.classList.remove("hidden");
+        canvas.style.cursor = "pointer";
+        return;
+      }
+    }
     const showId = getSettings().developer.showNodeIds;
     const hit = hitTest(s, w.x, w.y, hitTol());
     // A group container's big box shouldn't swallow a connector line running
@@ -29306,6 +29335,19 @@ function wireGraphCanvas(canvas: HTMLCanvasElement, winId: string): void {
       instanceBadgePending = null;
       const hitNow = hitInstanceBadge(rx, ry);
       if (!moved && hitNow?.instance === id) jumpTo(hitNow.master);
+      return;
+    }
+    // MICRO-BADGE-PD · the group's chip: a click SOLOS the group (its own
+    // canvas, the chain of its readings and the computed instances — one more
+    // view on «Indietro», which gives the Matrix back as it was); Shift+click
+    // opens it IN PLACE, a second Shift+click (or its «−») closes it
+    if (pdChipPending) {
+      const { group, shift } = pdChipPending;
+      pdChipPending = null;
+      if (!moved && hitPdChip(rx, ry)?.group === group && store?.node(group)) {
+        if (shift) requestFold(group);
+        else enterGroup(group);
+      }
       return;
     }
     if (adornmentPending) {
@@ -29716,6 +29758,9 @@ function isTrackpadScroll(e: WheelEvent): boolean {
 let pdTagPending: string | null = null; // PD tag pressed → enter on click (pointerup)
 let adornmentPending: string | null = null; // ornament badge pressed → select real node
 let instanceBadgePending: string | null = null; // FONTE · an instance's badge pressed → its master
+// MICRO-BADGE-PD · the chip of a unit's paradata group pressed: the group, and
+// whether Shift was down (Shift+click opens it in place, a click solos it)
+let pdChipPending: { group: string; shift: boolean } | null = null;
 let pdDecoratorPending: string | null = null; // PD tablet pressed → select group on click
 let bandSelectPending: string | null = null; // phase band label pressed → select on click
 let addPhasePending: string | null = null; // epoch "+" button pressed → add phase on click

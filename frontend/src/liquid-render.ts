@@ -14,6 +14,7 @@
  */
 import { drawGlyph, type GlyphInk } from "./glyphs";
 import { stratigraphicKindLetter, stratigraphicKindOf } from "./rules";
+import { drawPdChips } from "./pd-chip";
 import { FAMILY_COLOR, discVisibility, type Disc, type LiquidExtra, type LiquidFilter } from "./views/liquid";
 import type { Scene } from "./scene";
 import { canvasFont, canvasTheme, activeTheme } from "./theme";
@@ -206,6 +207,12 @@ export function renderLiquid(
     ctx.fillText(t, l.x, l.y + 3 / k);
   }
   ctx.globalAlpha = 1;
+  // ── MICRO-BADGE-PD · the chip of a unit's paradata group, bottom-right of its
+  //    disc — the Matrix's chip, by the same function; from the medium level
+  //    of detail (a disc ≥ 9 px across), on the discs that are shown
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  const withChip = scene.nodes.filter((n) => n.adornments?.length && vis.get(n.id) !== "hide" && n.w * k >= 9);
+  drawPdChips(ctx, withChip, vp, viewW, viewH, st.selectedId);
 }
 
 /** The rings of a specialisation, inside the disc's rim. */

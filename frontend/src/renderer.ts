@@ -19,6 +19,7 @@ import {
   shapePath } from "./shape-geom";
 import { activeTheme, CANVAS_TYPE, canvasFont, canvasTheme, labelOn } from "./theme";
 import { drawGlyph, glyphFor, type GlyphInk } from "./glyphs";
+import { drawPdChips } from "./pd-chip";
 
 /** SHIFT-A fase 6b · the theme colours the RECOLOURABLE roles of a glyph take
  *  (`2d_glyphs._roles`): ink → the canvas ink, paper → the canvas ground, halo
@@ -1530,7 +1531,9 @@ export function render(
   const badgePx = BADGE_PX * vp.scale;
   const badgeGap = BADGE_GAP * vp.scale;
   for (const n of shown) {
-    const ads = n.adornments;
+    // MICRO-BADGE-PD · the group's chip is not of this row: bottom-right, drawn
+    // by `drawPdChips` below
+    const ads = n.adornments?.filter((b) => !b.group);
     if (!ads || !ads.length) continue;
     const r = nodeScreenRect(n, vp);
     if (r.x + r.w < -badgePx || r.x > viewW || r.y + r.h < -badgePx || r.y > viewH)
@@ -1634,6 +1637,9 @@ export function render(
       adornmentHits.push({ ornamentId: b.ornamentId, x: bx, y: topY, w: badgePx, h: badgePx });
     }
   }
+  // ── MICRO-BADGE-PD · the chip of a unit's paradata group, bottom-right ──────
+  drawPdChips(ctx, shown, vp, viewW, viewH, state.selectedId ?? null);
+
   // ── FONTE · the badge of an INSTANCE, top left: «from US 12», «from
   //    Medioevo» — where its master comes from (`paradata_instances`). Screen
   //    space and scaled with the node like the ornament badges; a click on it

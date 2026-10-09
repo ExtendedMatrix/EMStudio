@@ -157,7 +157,9 @@ export function buildLiquidScene(
     const r = discRadius(d, st.scale);
     discs.set(n.id, { ...st, r, degree: d });
     const p = pos.get(n.id) ?? seed(n.id);
-    const sn: SceneNode = { id: n.id, x: p.x - r, y: p.y - r, w: 2 * r, h: 2 * r, node: n, badge: view?.badges.get(n.id) };
+    const sn: SceneNode = { id: n.id, x: p.x - r, y: p.y - r, w: 2 * r, h: 2 * r, node: n, badge: view?.badges.get(n.id),
+                         // MICRO-BADGE-PD · the group's chip rides on its unit here too
+                         adornments: view?.adornments?.get(n.id) };
     scene.nodes.push(sn);
     scene.byId.set(n.id, sn);
   }
