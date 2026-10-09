@@ -31,6 +31,9 @@ export interface AdornmentBadge {
   group?: string;
   count?: number;
   open?: boolean;
+  /** FONTE · the instances the group draws when open (`paradata_instances`):
+   *  a closed group counts them on its chip */
+  instances?: number;
 }
 
 // stable badge order on a referent: attribution first, then rights, then embargo

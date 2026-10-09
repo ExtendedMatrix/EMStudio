@@ -9,11 +9,13 @@
  *   1. the group of a unit gathers each property with its chain — the COMBINER
  *      and the EXTRACTOR are DUPLICATED when another unit's property uses them
  *      (no link from the copy to the original: there is no instantiation of the
- *      extractors yet); the DOCUMENT would be INSTANTIATED, but the graph has no
- *      form for an instance as a node pointing at its master (measured: the
- *      only forms are the yEd records of `data.instances` and the Matrix's own
- *      drawing-time re-instancing), so documents stay OUT of the group and the
- *      copies read the same master — the Matrix draws its instance in the group;
+ *      extractors); the DOCUMENT — and another unit's PROPERTY read as a source
+ *      — is never a node of the group: the instance is a VIEW (E.D., 9 Oct
+ *      2026 evening; s3Dgraphy 1.6.37, `em_visual_rules` → `paradata_instances`).
+ *      The graph has no form for an instance and never will: the copies read
+ *      the same master, and the view draws it inside every open group that
+ *      reads it (`paradata-view.ts`). «Compact» brings the documents into the
+ *      group AS A VIEW; in the data nothing changes;
  *   2. one property, one owner: two or more `has_property` without `inherited`
  *      is a warning, cured by «Duplicate for each owner». The declared heir
  *      (`attributes.inherited`) is not a second owner and is left alone;
@@ -273,7 +275,7 @@ function ensureMember(store: DocumentStore, id: string, group: string): boolean 
 /** The unit's group, made when missing — the form of `ensureEpochTemporalParadata`
  *  and `attachAdornmentToParadata`: a ParadataNodeGroup `PD_<unit>`, joined by
  *  `has_paradata_nodegroup`, placed over the members it will hold. */
-function ensureGroup(store: DocumentStore, unitId: string, members: string[]): { id: string; created: boolean } {
+export function ensureGroup(store: DocumentStore, unitId: string, members: string[]): { id: string; created: boolean } {
   const existing = groupOf(index(store.doc), unitId);
   if (existing) return { id: existing, created: false };
   const unit = store.node(unitId)!;

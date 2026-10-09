@@ -1,0 +1,424 @@
+{
+  "header": {
+    "format": "em.json",
+    "version": "1.0"
+  },
+  "graph": {
+    "graph_id": "capriate",
+    "name": "Capriate · la proprietà come fonte",
+    "description": null,
+    "nodes": [
+      {
+        "id": "EP_MED",
+        "node_type": "EpochNode",
+        "name": "Medioevo",
+        "description": "",
+        "data": {
+          "start_time": 1100,
+          "end_time": 1400
+        }
+      },
+      {
+        "id": "US_12",
+        "node_type": "US",
+        "name": "US 12",
+        "description": "Frammenti lignei delle capriate",
+        "data": {}
+      },
+      {
+        "id": "US_13",
+        "node_type": "US",
+        "name": "US 13",
+        "description": "Trave crollata",
+        "data": {}
+      },
+      {
+        "id": "USV_40",
+        "node_type": "USVs",
+        "name": "USV 40",
+        "description": "Le capriate del tetto",
+        "data": {}
+      },
+      {
+        "id": "D1",
+        "node_type": "document",
+        "name": "D.1",
+        "description": "Analisi xilologica dei frammenti",
+        "data": {
+          "is_canonical": true
+        }
+      },
+      {
+        "id": "PD_US_12",
+        "node_type": "ParadataNodeGroup",
+        "name": "PD_US 12",
+        "description": "",
+        "data": {}
+      },
+      {
+        "id": "P12",
+        "node_type": "property",
+        "name": "essenza",
+        "description": "quercia",
+        "data": {
+          "property_type": "essenza",
+          "value": "quercia"
+        }
+      },
+      {
+        "id": "E12",
+        "node_type": "extractor",
+        "name": "D.1.01",
+        "description": "i frammenti sono di quercia",
+        "data": {}
+      },
+      {
+        "id": "PD_USV_40",
+        "node_type": "ParadataNodeGroup",
+        "name": "PD_USV 40",
+        "description": "",
+        "data": {}
+      },
+      {
+        "id": "P40",
+        "node_type": "property",
+        "name": "essenza",
+        "description": "",
+        "data": {
+          "property_type": "essenza"
+        }
+      },
+      {
+        "id": "P40D",
+        "node_type": "property",
+        "name": "datazione",
+        "description": "XIII secolo",
+        "data": {
+          "property_type": "datazione",
+          "value": "XIII secolo"
+        }
+      },
+      {
+        "id": "E40D",
+        "node_type": "extractor",
+        "name": "D.1.03",
+        "description": "la stessa analisi data le travi",
+        "data": {}
+      },
+      {
+        "id": "P13",
+        "node_type": "property",
+        "name": "essenza",
+        "description": "castagno",
+        "data": {
+          "property_type": "essenza",
+          "value": "castagno"
+        }
+      },
+      {
+        "id": "PC",
+        "node_type": "property",
+        "name": "conservazione",
+        "description": "buona",
+        "data": {
+          "property_type": "conservazione",
+          "value": "buona"
+        }
+      },
+      {
+        "id": "PF",
+        "node_type": "property",
+        "name": "finitura",
+        "description": "piallata",
+        "data": {
+          "property_type": "finitura",
+          "value": "piallata"
+        }
+      },
+      {
+        "id": "EF",
+        "node_type": "extractor",
+        "name": "D.1.02",
+        "description": "segni di pialla",
+        "data": {}
+      }
+    ],
+    "edges": [
+      {
+        "id": "US_12__has_first_epoch__EP_MED",
+        "edge_type": "has_first_epoch",
+        "source": "US_12",
+        "target": "EP_MED"
+      },
+      {
+        "id": "US_13__has_first_epoch__EP_MED",
+        "edge_type": "has_first_epoch",
+        "source": "US_13",
+        "target": "EP_MED"
+      },
+      {
+        "id": "USV_40__has_first_epoch__EP_MED",
+        "edge_type": "has_first_epoch",
+        "source": "USV_40",
+        "target": "EP_MED"
+      },
+      {
+        "id": "USV_40__is_after__US_12",
+        "edge_type": "is_after",
+        "source": "USV_40",
+        "target": "US_12"
+      },
+      {
+        "id": "US_13__is_after__US_12",
+        "edge_type": "is_after",
+        "source": "US_13",
+        "target": "US_12"
+      },
+      {
+        "id": "D1__has_first_epoch__EP_MED",
+        "edge_type": "has_first_epoch",
+        "source": "D1",
+        "target": "EP_MED"
+      },
+      {
+        "id": "US_12__has_paradata_nodegroup__PD_US_12",
+        "edge_type": "has_paradata_nodegroup",
+        "source": "US_12",
+        "target": "PD_US_12"
+      },
+      {
+        "id": "US_12__has_property__P12",
+        "edge_type": "has_property",
+        "source": "US_12",
+        "target": "P12"
+      },
+      {
+        "id": "P12__has_data_provenance__E12",
+        "edge_type": "has_data_provenance",
+        "source": "P12",
+        "target": "E12"
+      },
+      {
+        "id": "E12__extracted_from__D1",
+        "edge_type": "extracted_from",
+        "source": "E12",
+        "target": "D1"
+      },
+      {
+        "id": "P12__is_in_paradata_nodegroup__PD_US_12",
+        "edge_type": "is_in_paradata_nodegroup",
+        "source": "P12",
+        "target": "PD_US_12"
+      },
+      {
+        "id": "E12__is_in_paradata_nodegroup__PD_US_12",
+        "edge_type": "is_in_paradata_nodegroup",
+        "source": "E12",
+        "target": "PD_US_12"
+      },
+      {
+        "id": "USV_40__has_paradata_nodegroup__PD_USV_40",
+        "edge_type": "has_paradata_nodegroup",
+        "source": "USV_40",
+        "target": "PD_USV_40"
+      },
+      {
+        "id": "USV_40__has_property__P40",
+        "edge_type": "has_property",
+        "source": "USV_40",
+        "target": "P40"
+      },
+      {
+        "id": "P40__is_in_paradata_nodegroup__PD_USV_40",
+        "edge_type": "is_in_paradata_nodegroup",
+        "source": "P40",
+        "target": "PD_USV_40"
+      },
+      {
+        "id": "USV_40__has_property__P40D",
+        "edge_type": "has_property",
+        "source": "USV_40",
+        "target": "P40D"
+      },
+      {
+        "id": "P40D__has_data_provenance__E40D",
+        "edge_type": "has_data_provenance",
+        "source": "P40D",
+        "target": "E40D"
+      },
+      {
+        "id": "E40D__extracted_from__D1",
+        "edge_type": "extracted_from",
+        "source": "E40D",
+        "target": "D1"
+      },
+      {
+        "id": "P40D__is_in_paradata_nodegroup__PD_USV_40",
+        "edge_type": "is_in_paradata_nodegroup",
+        "source": "P40D",
+        "target": "PD_USV_40"
+      },
+      {
+        "id": "E40D__is_in_paradata_nodegroup__PD_USV_40",
+        "edge_type": "is_in_paradata_nodegroup",
+        "source": "E40D",
+        "target": "PD_USV_40"
+      },
+      {
+        "id": "US_13__has_property__P13",
+        "edge_type": "has_property",
+        "source": "US_13",
+        "target": "P13"
+      },
+      {
+        "id": "US_12__has_property__PC",
+        "edge_type": "has_property",
+        "source": "US_12",
+        "target": "PC"
+      },
+      {
+        "id": "US_13__has_property__PC",
+        "edge_type": "has_property",
+        "source": "US_13",
+        "target": "PC"
+      },
+      {
+        "id": "US_13__has_property__PF",
+        "edge_type": "has_property",
+        "source": "US_13",
+        "target": "PF"
+      },
+      {
+        "id": "USV_40__has_property__PF",
+        "edge_type": "has_property",
+        "source": "USV_40",
+        "target": "PF"
+      },
+      {
+        "id": "PF__has_data_provenance__EF",
+        "edge_type": "has_data_provenance",
+        "source": "PF",
+        "target": "EF"
+      },
+      {
+        "id": "EF__extracted_from__D1",
+        "edge_type": "extracted_from",
+        "source": "EF",
+        "target": "D1"
+      }
+    ]
+  },
+  "layout": {
+    "canvas": {
+      "title": "Capriate · la proprietà come fonte",
+      "width": 598,
+      "height": 444
+    },
+    "swimlanes": [
+      {
+        "epoch_id": "EP_MED",
+        "order": 0,
+        "y": 0,
+        "height": 364
+      }
+    ],
+    "sectors": [],
+    "positions": {
+      "D1": {
+        "x": 230.824,
+        "y": 308,
+        "w": 20.352,
+        "h": 32
+      },
+      "E12": {
+        "x": 225,
+        "y": 244,
+        "w": 32,
+        "h": 32
+      },
+      "E40D": {
+        "x": 523,
+        "y": 180,
+        "w": 32,
+        "h": 32
+      },
+      "EF": {
+        "x": 120,
+        "y": 180,
+        "w": 32,
+        "h": 32
+      },
+      "P12": {
+        "x": 196,
+        "y": 180,
+        "w": 90,
+        "h": 32
+      },
+      "P13": {
+        "x": 0,
+        "y": 102,
+        "w": 90,
+        "h": 32
+      },
+      "P40": {
+        "x": 374,
+        "y": 102,
+        "w": 90,
+        "h": 32
+      },
+      "P40D": {
+        "x": 494,
+        "y": 102,
+        "w": 90,
+        "h": 32
+      },
+      "PC": {
+        "x": 0,
+        "y": 180,
+        "w": 90,
+        "h": 32
+      },
+      "PD_USV_40": {
+        "x": 360,
+        "y": 74,
+        "w": 238,
+        "h": 152
+      },
+      "PD_US_12": {
+        "x": 182,
+        "y": 152,
+        "w": 118,
+        "h": 138
+      },
+      "PF": {
+        "x": 240,
+        "y": 102,
+        "w": 90,
+        "h": 32
+      },
+      "USV_40": {
+        "x": 434,
+        "y": 24,
+        "w": 90,
+        "h": 32
+      },
+      "US_12": {
+        "x": 120,
+        "y": 102,
+        "w": 90,
+        "h": 32
+      },
+      "US_13": {
+        "x": 60,
+        "y": 24,
+        "w": 90,
+        "h": 32
+      }
+    },
+    "folded_groups": [],
+    "group_spaces": {},
+    "edge_routes": {},
+    "pinned": [],
+    "anchors": []
+  }
+}

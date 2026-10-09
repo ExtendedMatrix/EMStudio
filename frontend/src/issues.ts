@@ -19,6 +19,7 @@
  * caller (`IssueSources`), so this module runs in node (`check-studio.mjs`).
  */
 import type { EmDocument, EmNode } from "./types";
+import { composedPropertyName } from "./naming";
 
 export type IssueSeverity = "warn" | "info";
 
@@ -160,7 +161,10 @@ export function issues(src: IssueSources): Issue[] {
   const { doc, nodes, t } = src;
   if (!doc) return out;
   const byId = new Map(nodes.map((n) => [n.id, n]));
-  const name = (id: string): string => String(byId.get(id)?.name || id);
+  // FONTE · a property is named with its unit wherever it is said out of its
+  // group: «US 12 · essenza» (`naming.composedPropertyName`)
+  const name = (id: string): string => byId.get(id)?.node_type === "property"
+    ? composedPropertyName(doc, id) : String(byId.get(id)?.name || id);
   const push = (i: Omit<Issue, "id">): void => {
     out.push({ ...i, id: `${i.rule}:${i.node}:${out.length}` });
   };

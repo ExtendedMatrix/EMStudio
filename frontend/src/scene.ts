@@ -31,6 +31,14 @@ export interface SceneNode {
    * Points to the real node id — selection resolves to it.
    */
   instanceOf?: string;
+  /** FONTE · an instance's badge, top left: where its master comes from — the
+   *  unit of a property, the epoch of a document (`paradata_instances`); a
+   *  click on it reaches the master. `group` is the group it is drawn in. */
+  instanceBadge?: { owner: string | null; ownerName: string | null;
+                    ownerKind: "unit" | "epoch" | null; group: string };
+  /** FONTE · a TRACE: a node removed keeping its trace (`data.removed`), still
+   *  read by a live chain — drawn attenuated, selectable, restorable */
+  trace?: boolean;
   /** how many times this document is used in the scene (corner decorator) */
   useCount?: number;
   /** CATENA · a DATED document (its own has_first_epoch): the master in its

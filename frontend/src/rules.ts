@@ -993,3 +993,29 @@ export function stratigraphicKindOf(node: { data?: unknown } | null | undefined)
   const k = (node?.data as Record<string, unknown> | undefined)?.stratigraphic_kind;
   return typeof k === "string" && k in (_US_KIND_RULE.values ?? {}) ? k : null;
 }
+
+// FONTE · the words of the reasoning between properties (la proprietà come
+// fonte, connections 1.6.37): the block `paradata_reasoning` of the connections
+// datamodel in canonical English (`label`, `description`, placeholders in
+// braces), their translations in the section `reasoning` of
+// `datamodel_translations.json` (1.8). EM language, never words of this
+// interface: «da {owner}», «La fonte è cambiata», «Dichiara l'eredità»…
+const _REASONING = ((connections as unknown as {
+  paradata_reasoning?: Record<string, { label?: string; description?: string } | string>;
+}).paradata_reasoning) ?? {};
+const _REASONING_TR = ((datamodelTranslations as unknown as {
+  reasoning?: Record<string, { label?: Record<string, string | boolean>; description?: Record<string, string | boolean> }>;
+}).reasoning) ?? {};
+
+/** A word of the reasoning (`instance_badge`, `source_changed`…) in the
+ *  active locale, then English, its placeholders filled. */
+export function reasoningText(word: string, field: "label" | "description" = "label",
+                              vars: Record<string, string> = {}): string {
+  const loc = _REASONING_TR[word]?.[field]?.[getLocale()];
+  const def = _REASONING[word];
+  const en = typeof def === "object" ? def?.[field] : undefined;
+  let s = typeof loc === "string" && loc.trim() ? loc
+    : typeof en === "string" ? en : word;
+  for (const [k, v] of Object.entries(vars)) s = s.split(`{${k}}`).join(v);
+  return s;
+}

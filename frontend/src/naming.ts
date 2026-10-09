@@ -39,7 +39,7 @@
 /** The minimum an em.json needs to answer a naming question. */
 export interface NamingDoc {
   graph: {
-    nodes: { id: string; node_type: string; name?: string | null }[];
+    nodes: { id: string; node_type: string; name?: string | null; data?: unknown }[];
     /**
      * `edge_type` is optional because em.json allows an edge without one (the
      * importer's generic fallback). An untyped edge simply is not the
@@ -106,10 +106,12 @@ export const HAS_LINKED_RESOURCE = "has_linked_resource";
 
 /** What an extractor reads FROM, as the name needs it. */
 export interface ExtractorSource {
-  /** the node the name derives from: a document, or a unit */
+  /** the node the name derives from: a document, or a unit — or, for a
+   *  reading of another unit's property (FONTE, connections 1.6.37), the
+   *  MASTER property, named by the unit it belongs to: `US 12.01` reads US 12 */
   id: string;
   name: string;
-  kind: "document" | "unit";
+  kind: "document" | "unit" | "property";
   /** set when the reading goes through an annotation region of that document */
   regionId?: string;
 }
@@ -176,9 +178,41 @@ export function sourceOfExtractor(doc: NamingDoc, extractorId: string): Extracto
       if (d) return { ...d, kind: "document", regionId: target.id };
       continue;
     }
+    if (target.node_type === "property") {
+      const unit = ownerUnitOf(doc, target.id, byId);
+      return { id: target.id, name: unit ? nameOf(unit) : nameOf(target), kind: "property" };
+    }
     return { id: target.id, name: nameOf(target), kind: "unit" };
   }
   return null;
+}
+
+/**
+ * FONTE · the unit a property belongs to, for its NAME: the one `has_property`
+ * not declared `inherited` (the original owner's), else the first in edge
+ * order. The full rule of the original owner (declaration, group, stamp) is
+ * `paradata-chain.ownersOf`; a name needs one answer, always.
+ */
+export function ownerUnitOf(doc: NamingDoc, propertyId: string,
+                            byId = new Map(doc.graph.nodes.map((n) => [n.id, n]))): NamingDoc["graph"]["nodes"][number] | undefined {
+  const es = (doc.graph.edges ?? []).filter((e) => e.edge_type === "has_property" && e.target === propertyId
+    && !((e as { attributes?: Record<string, unknown> }).attributes ?? {}).removed);
+  const own = es.find((e) => !((e as { attributes?: Record<string, unknown> }).attributes ?? {}).inherited) ?? es[0];
+  return own ? byId.get(own.source) : undefined;
+}
+
+/**
+ * FONTE · the COMPOSED name of a property: «US 12 · materiale» — how a property
+ * is named wherever it appears out of its group (a tooltip, the search, a
+ * warning, a menu). Its unit's name, then its own; a property with no owner is
+ * its name alone.
+ */
+export function composedPropertyName(doc: NamingDoc, propertyId: string,
+                                     byId = new Map(doc.graph.nodes.map((n) => [n.id, n]))): string {
+  const p = byId.get(propertyId);
+  const own = p ? nameOf(p) : propertyId;
+  const unit = ownerUnitOf(doc, propertyId, byId);
+  return unit ? `${nameOf(unit)} · ${own}` : own;
 }
 
 /**

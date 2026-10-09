@@ -3,7 +3,7 @@
 // metadata (palette.ts ← em_visual_rules.json). Edges are routed
 // orthogonally with crossing bridges (routing.ts), yEd-style.
 import { crispImage, dtcGlyphUrl, ICON_NODE_TYPES, imageFor, imageForUrl } from "./icons";
-import { dtcGlyphName, stratigraphicKindLetter, stratigraphicKindOf } from "./rules";
+import { dtcGlyphName, reasoningText, stratigraphicKindLetter, stratigraphicKindOf } from "./rules";
 import { documentVariant, edgeInk, edgeStyle, nodeStyle } from "./palette";
 import {
   arrowheadPath,
@@ -323,6 +323,16 @@ export function hitAdornmentBadge(sx: number, sy: number): string | null {
   for (const t of adornmentHits)
     if (sx >= t.x && sx <= t.x + t.w && sy >= t.y && sy <= t.y + t.h)
       return t.ornamentId;
+  return null;
+}
+
+// FONTE · SCREEN-space hit rects of the instances' badges («from US 12») → the
+// master to reach. Screen space like the ornament badges.
+let instanceBadgeHits: { instance: string; master: string; x: number; y: number; w: number; h: number }[] = [];
+export function hitInstanceBadge(sx: number, sy: number): { instance: string; master: string } | null {
+  for (const t of instanceBadgeHits)
+    if (sx >= t.x && sx <= t.x + t.w && sy >= t.y && sy <= t.y + t.h)
+      return { instance: t.instance, master: t.master };
   return null;
 }
 
@@ -867,6 +877,8 @@ export function render(
     (state.selectedIds?.has(n.id) ?? false);
   for (const n of shown) {
     if (n.collapsed) continue; // PD1 · shown as a bottom-left tablet, not a node
+    // FONTE · a TRACE (removed keeping its trace, still read) is attenuated
+    ctx.globalAlpha = n.trace ? 0.38 : 1;
     const st = nodeStyle(n.node.node_type);
     // Monochrome (B/W) mode: EVERY node draws with a black BORDER only — fills,
     // text and container header tints are left untouched (nodes are told apart by
@@ -1503,6 +1515,8 @@ export function render(
     }
   }
 
+  ctx.globalAlpha = 1;
+
   // ── BADGE1 · ornament badges, SCALED WITH THE NODE (BUGS-UI) ────────────────
   // Drawn with the device-pixel transform (not the world one) so the glyphs and
   // text stay crisp and the hit rects are screen space — but every dimension is
@@ -1596,6 +1610,16 @@ export function render(
         ctx.fillStyle = labelOn(canvasTheme().accent);
         ctx.font = canvasFont(700, Math.max(6, Math.round(r0 * 1.35)));
         ctx.fillText(String(b.count), cx, cy + 0.5);
+        // FONTE · a closed group counts its instances on a second, muted disc
+        if (!b.open && b.instances) {
+          const lx = bx + r0 * 0.35;
+          ctx.beginPath();
+          ctx.arc(lx, cy, r0, 0, Math.PI * 2);
+          ctx.fillStyle = canvasTheme().labelMuted;
+          ctx.fill();
+          ctx.fillStyle = labelOn(canvasTheme().labelMuted);
+          ctx.fillText(String(b.instances), lx, cy + 0.5);
+        }
         if (b.open) {
           ctx.strokeStyle = canvasTheme().accent;
           ctx.lineWidth = 1.5;
@@ -1608,6 +1632,42 @@ export function render(
         ctx.strokeRect(bx - 1, topY - 1, badgePx + 2, badgePx + 2);
       }
       adornmentHits.push({ ornamentId: b.ornamentId, x: bx, y: topY, w: badgePx, h: badgePx });
+    }
+  }
+  // ── FONTE · the badge of an INSTANCE, top left: «from US 12», «from
+  //    Medioevo» — where its master comes from (`paradata_instances`). Screen
+  //    space and scaled with the node like the ornament badges; a click on it
+  //    reaches the master (main.ts). A TRACE says it is one, under the node.
+  instanceBadgeHits = [];
+  ctx.textAlign = "left";
+  ctx.textBaseline = "middle";
+  for (const n of shown) {
+    if (!n.instanceBadge && !n.trace) continue;
+    const r = nodeScreenRect(n, vp);
+    if (r.x + r.w < 0 || r.x > viewW || r.y + r.h < -badgePx || r.y > viewH + badgePx) continue;
+    const fpx = Math.max(7, Math.round(badgePx * 0.5));
+    ctx.font = canvasFont(600, fpx);
+    if (n.instanceBadge?.ownerName) {
+      const text = reasoningText("instance_badge", "label", { owner: n.instanceBadge.ownerName });
+      const w = ctx.measureText(text).width + fpx * 1.1;
+      const h = Math.max(badgePx * 0.8, fpx * 1.5);
+      const bx = r.x - badgePx * 0.25;
+      const by = r.y - h * 0.6;
+      ctx.beginPath();
+      if (typeof ctx.roundRect === "function") ctx.roundRect(bx, by, w, h, h / 2);
+      else ctx.rect(bx, by, w, h);
+      ctx.fillStyle = canvasTheme().handleFill;
+      ctx.fill();
+      ctx.lineWidth = 1;
+      ctx.strokeStyle = canvasTheme().accent;
+      ctx.stroke();
+      ctx.fillStyle = labelOn(canvasTheme().handleFill);
+      ctx.fillText(text, bx + fpx * 0.55, by + h / 2 + 0.5);
+      instanceBadgeHits.push({ instance: n.id, master: n.instanceOf ?? n.id, x: bx, y: by, w, h });
+    }
+    if (n.trace) {
+      ctx.fillStyle = canvasTheme().labelMuted;
+      ctx.fillText(`✕ ${reasoningText("source_removed")}`, r.x, r.y + r.h + fpx);
     }
   }
   ctx.textAlign = "left";

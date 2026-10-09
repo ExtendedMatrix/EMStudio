@@ -12,7 +12,8 @@
 import { buildMembership, type FoldedView } from "../folding";
 import { BAND_GAP } from "../scene";
 import type { Scene, SceneGroup, SceneNode, SubBand } from "../scene";
-import type { EmDocument } from "../types";
+import type { EmDocument, EmEdge } from "../types";
+import { viewIndex, viewInstances } from "../paradata-view";
 import { t } from "../i18n";
 import { ancestorsOf } from "../rules";
 
@@ -455,80 +456,78 @@ export function buildMatrixScene(
     for (const m of memberIds) laneOf.set(m, gLane);
   }
 
-  // ---- EM 1.6 Master/Instance documents ----
-  // The graph holds ONE document node (the GraphML importer dedupes the
-  // yEd instances); the DRAWING re-instances it: one visual copy per usage
-  // context (the paradata group of each extractor that references it),
-  // with a corner decorator counting the uses. The master (thick border)
-  // stays at its engine position; instances carry thin borders.
+  // ---- the instances: a view, never data (FONTE, E.D. 9 Oct 2026) ----
+  // The graph holds ONE node per source: the canonical document, the property
+  // in its own unit; an extractor is `extracted_from` that master. The DRAWING
+  // puts, inside every OPEN paradata group, each master outside it that a
+  // reader of the group reaches — `em_visual_rules.json` → `paradata_instances`,
+  // read by `paradata-view.ts` exactly as s3Dgraphy's `view_instances` reads it
+  // (`check-instances.mjs`). One rule for documents and properties: id
+  // `<master>##<group>`, the badge «from <owner>» (the property's unit, the
+  // document's epoch), the reading's `extracted_from` re-attached to it. A
+  // closed group draws none: its chip counts them (main.ts). The master stays
+  // where it is; a document read by some group carries the use count.
   const instanceByEdge = new Map<string, string>(); // edge key → instance id
   const instancesByGroup = new Map<string, SceneNode[]>();
   {
-    const docUsages = new Map<string, { edgeKey: string; extractorId: string }[]>();
-    // CATENA · a reading of an IMAGE reads its region, which is on the document
-    // (`is_on_resource`): that is a use of the document too, counted ONCE per
-    // extractor whichever of the two edges it has
-    // (read off the DOCUMENT's edges: regions are not drawn in the Matrix, so
-    // the view has already dropped their edges)
-    const live = doc.graph.edges.filter((e) => !((e.attributes ?? {}) as Record<string, unknown>).removed);
-    const regionDoc = new Map<string, string>();
-    for (const e of live)
-      if (e.edge_type === "is_on_resource" && nodeById.get(e.source)?.node_type === "annotation_region"
-          && nodeById.get(e.target)?.node_type === "document") regionDoc.set(e.source, e.target);
-    const viaRegion = live.filter((e) => e.edge_type === "extracted_from" && regionDoc.has(e.target));
-    const counted = new Set<string>();
-    for (const e of [...edges, ...viaRegion]) {
-      if (e.edge_type !== "extracted_from") continue;
-      const docId = nodeById.get(e.target)?.node_type === "document" ? e.target : regionDoc.get(e.target);
-      const doc = docId ? nodeById.get(docId) : undefined;
-      if (!doc || !docId) continue;
-      if (!scene.byId.has(e.source) || !scene.byId.has(docId)) continue;
-      // PROPRIETA · a reading inside a closed group is not on the canvas: its
-      // instance of the document is not drawn either (it would float alone)
-      if (isCollapsedTablet(e.source)) continue;
-      if (counted.has(`${e.source}|${docId}`)) continue;
-      counted.add(`${e.source}|${docId}`);
-      const key = e.id ?? `${e.source}→${e.target}`;
-      if (!docUsages.has(docId)) docUsages.set(docId, []);
-      docUsages.get(docId)!.push({ edgeKey: key, extractorId: e.source });
-    }
-    // CATENA · a document DATED by its own has_first_epoch sits in its epoch's
-    // lane as the master, and is re-instanced even for ONE use: the reading is
-    // in a paradata group, the source in its time
-    const dated = new Set(live.filter((e) => e.edge_type === "has_first_epoch"
-      && nodeById.get(e.source)?.node_type === "document").map((e) => e.source));
-    for (const [docId, usages] of docUsages) {
-      if (usages.length < 2 && !dated.has(docId)) continue;
-      const master = scene.byId.get(docId)!;
-      master.useCount = usages.length;
-      if (dated.has(docId)) master.dated = true;
-      const masterCtx = membership.primaryOf.get(docId);
-      let k = 0;
-      for (const u of usages) {
-        const ctx = membership.primaryOf.get(u.extractorId);
-        // the master already serves its own context
-        if (ctx !== undefined && ctx === masterCtx) continue;
-        const ex = scene.byId.get(u.extractorId);
-        if (!ex) continue;
+    const vix = viewIndex(doc);
+    const readEdge = new Map<string, EmEdge[]>(); // extractor → its readings
+    for (const e of vix.edges)
+      if (e.edge_type === "extracted_from")
+        (readEdge.get(e.source) ?? readEdge.set(e.source, []).get(e.source)!).push(e);
+    const uses = new Map<string, number>();       // master → groups drawing it
+    const below = new Map<string, number>();      // reader → instances stacked under it
+    for (const g of doc.graph.nodes) {
+      if (g.node_type !== "ParadataNodeGroup") continue;
+      const gs = scene.byId.get(g.id);
+      if (!gs || folded.has(g.id) || gs.collapsed) continue;
+      for (const r of viewInstances(doc, g.id, vix)) {
+        const reader = r.readers.map((id) => scene.byId.get(id)).find((x) => !!x && !x.collapsed);
+        const masterNode = nodeById.get(r.master);
+        if (!reader || !masterNode) continue;
+        const ms = scene.byId.get(r.master);
+        const pos = positions[r.master];
+        const w = ms?.w ?? pos?.w ?? 120;
+        const h = ms?.h ?? pos?.h ?? 30;
+        const k = below.get(reader.id) ?? 0;
+        below.set(reader.id, k + 1);
         const inst: SceneNode = {
-          id: `${docId}##${k++}`,
-          x: ex.x + ex.w / 2 - master.w / 2,
-          y: ex.y + ex.h + 26,
-          w: master.w,
-          h: master.h,
-          node: master.node,
-          instanceOf: docId,
-          useCount: usages.length,
+          id: r.id,
+          x: reader.x + reader.w / 2 - w / 2,
+          y: reader.y + reader.h + 26 + k * (h + 12),
+          w,
+          h,
+          node: masterNode,
+          instanceOf: r.master,
+          instanceBadge: { owner: r.owner, ownerName: r.owner_name, ownerKind: r.owner_kind, group: g.id },
+          ...(r.removed ? { trace: true } : {}),
         };
         scene.nodes.push(inst);
         scene.byId.set(inst.id, inst);
-        instanceByEdge.set(u.edgeKey, inst.id);
-        if (ctx) {
-          if (!instancesByGroup.has(ctx)) instancesByGroup.set(ctx, []);
-          instancesByGroup.get(ctx)!.push(inst);
-        }
+        scene.memberOf!.set(inst.id, g.id);
+        (instancesByGroup.get(g.id) ?? instancesByGroup.set(g.id, []).get(g.id)!).push(inst);
+        uses.set(r.master, (uses.get(r.master) ?? 0) + 1);
+        for (const x of r.extractors)
+          for (const e of readEdge.get(x) ?? [])
+            if (e.target === r.master || r.through.includes(e.target))
+              instanceByEdge.set(e.id ?? `${e.source}→${e.target}`, inst.id);
       }
     }
+    // the use count on the documents (the corner decorator): the groups that
+    // draw it, the master's own place included when somebody reads it there
+    for (const [m, k] of uses) {
+      if (nodeById.get(m)?.node_type !== "document") continue;
+      const total = k + 1;
+      const master = scene.byId.get(m);
+      if (master) master.useCount = total;
+      for (const insts of instancesByGroup.values())
+        for (const i of insts) if (i.instanceOf === m) i.useCount = total;
+    }
+    for (const e of vix.edges)
+      if (e.edge_type === "has_first_epoch" && nodeById.get(e.source)?.node_type === "document") {
+        const master = scene.byId.get(e.source);
+        if (master) master.dated = true;
+      }
   }
 
   // ---- outline containers: box AROUND engine-placed members ----
@@ -885,7 +884,11 @@ export function buildMatrixScene(
       if (ref) ref.pdCollapsed = pdg;
     }
 
-  for (const e0 of edges) {
+  for (const e00 of edges) {
+    // FONTE · a reading re-attached to its instance: the instance is drawn in
+    // the reader's open group even when the master is folded away or hidden
+    const instTarget = instanceByEdge.get(e00.id ?? `${e00.source}→${e00.target}`);
+    const e0 = instTarget ? { ...e00, target: instTarget } : e00;
     if (!scene.byId.has(e0.source) || !scene.byId.has(e0.target)) continue;
     // BUGFIX-PDG · a PDG collapsed to a tablet has no box to point at: drop the
     // has_paradata_nodegroup line (referent → PDG) AND any is_in_paradata_nodegroup
@@ -916,21 +919,7 @@ export function buildMatrixScene(
       outlineMemberOf.get(e.target) === e.source
     )
       continue;
-    // a document instance inside the group already expresses the secondary
-    // membership — no need for the long edge to the master
-    if (
-      e.edge_type === "is_in_paradata_nodegroup" &&
-      instancesByGroup.get(e.target)?.some((i) => i.instanceOf === e.source)
-    )
-      continue;
-    // extracted_from usages rewire to their local instance
-    const key = e.id ?? `${e.source}→${e.target}`;
-    const instTarget = instanceByEdge.get(key);
-    scene.edges.push({
-      source: e.source,
-      target: instTarget ?? e.target,
-      edge: e,
-    });
+    scene.edges.push({ source: e.source, target: e.target, edge: instTarget ? e00 : e });
   }
   return scene;
 }

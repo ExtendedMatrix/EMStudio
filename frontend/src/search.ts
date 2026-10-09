@@ -14,6 +14,9 @@ import { isAltLabel, altLabelText } from "./altlabels";
  */
 export interface SearchHit {
   node: EmNode;
+  /** FONTE · the name shown: a property out of its group is «US 12 · essenza»
+   *  (its unit, then its name — `naming.composedPropertyName`) */
+  label: string;
   /** the words the node matched on, beyond its name: value · description · epoch */
   excerpt: string;
 }
@@ -46,17 +49,28 @@ export function searchGraph(doc: EmDocument | null, query: string, limit = 14,
   const byId = new Map(nodes.map((n) => [n.id, n]));
   const props = new Map<string, EmNode[]>();
   const epoch = new Map<string, EmNode>();
+  /** FONTE · a property → the unit it is named by (not an heir's) */
+  const ownerOf = new Map<string, EmNode>();
+  const heirNamed = new Set<string>();
   for (const e of doc.graph.edges ?? []) {
     const s = byId.get(e.source);
     const d = byId.get(e.target);
     if (!s || !d) continue;
-    if (e.edge_type === "has_property")
+    if (e.edge_type === "has_property") {
       props.set(s.id, [...(props.get(s.id) ?? []), d]);
+      // the first owner not declared an heir names it; an heir only when alone
+      const inherited = !!((e as { attributes?: Record<string, unknown> }).attributes ?? {}).inherited;
+      if (!ownerOf.has(d.id) || (!inherited && heirNamed.has(d.id))) {
+        ownerOf.set(d.id, s);
+        if (inherited) heirNamed.add(d.id); else heirNamed.delete(d.id);
+      }
+    }
     else if (e.edge_type === "has_first_epoch" && !epoch.has(s.id)) epoch.set(s.id, d);
   }
   const hits: Array<SearchHit & { rank: number; kind: number }> = [];
   for (const n of nodes) {
-    const name = str(n.name || n.id);
+    const unit = n.node_type === "property" ? ownerOf.get(n.id) : undefined;
+    const name = unit ? `${str(unit.name || unit.id)} · ${str(n.name || n.id)}` : str(n.name || n.id);
     const ps = props.get(n.id) ?? [];
     const ep = epoch.get(n.id);
     const bits = [name, n.id, n.node_type, str(n.description), valueOf(n),
@@ -73,19 +87,18 @@ export function searchGraph(doc: EmDocument | null, query: string, limit = 14,
       const l = label.toLowerCase();
       return l === q ? 0 : l.startsWith(q) ? 1 : toks.every((t) => l.includes(t)) ? 2 : 3;
     };
-    const rank = Math.min(rankOf(name), ...alts.map(rankOf));
+    const rank = Math.min(rankOf(name), rankOf(str(n.name || n.id)), ...alts.map(rankOf));
     const excerpt = [valueOf(n) !== str(n.description) ? valueOf(n) : "",
                      str(n.description),
                      ...ps.map((p) => isAltLabel(p) ? `«${valueOf(p)}»` : `${str(p.name)} ${valueOf(p)}`.trim())
                        .filter((x) => toks.some((t) => x.toLowerCase().includes(t))),
                      ep ? str(ep.name) : ""]
       .filter(Boolean).join(" · ").slice(0, 110);
-    hits.push({ node: n, excerpt, rank, kind: kindRank(n.node_type) });
+    hits.push({ node: n, label: name, excerpt, rank, kind: kindRank(n.node_type) });
   }
   hits.sort((a, b) => a.rank - b.rank || a.kind - b.kind ||
-    str(a.node.name || a.node.id).localeCompare(str(b.node.name || b.node.id),
-                                               undefined, { numeric: true }));
-  return hits.slice(0, limit).map(({ node, excerpt }) => ({ node, excerpt }));
+    a.label.localeCompare(b.label, undefined, { numeric: true }));
+  return hits.slice(0, limit).map(({ node, label, excerpt }) => ({ node, label, excerpt }));
 }
 
 const esc = (s: string): string =>
@@ -155,7 +168,7 @@ export function setupSearch(
       resultsBox.classList.remove("hidden");
       return;
     }
-    for (const { node: n, excerpt } of hits) {
+    for (const { node: n, label, excerpt } of hits) {
       const b = document.createElement("button");
       b.className = "search-hit";
       b.setAttribute("role", "option");
@@ -166,7 +179,7 @@ export function setupSearch(
         (icon?.startsWith("<svg") ? `<span class="hit-glyph glyph-inline">${icon}</span>`
           : icon ? `<img class="hit-glyph" src="${esc(icon)}" alt="">`
           : `<span class="hit-glyph"></span>`) +
-        `<b class="hit-name">${highlight(String(n.name || n.id), q)}</b>` +
+        `<b class="hit-name">${highlight(label, q)}</b>` +
         `<span class="hit-ex">${highlight(excerpt, q)}</span>` +
         `<span class="hit-type">${esc(n.node_type)}</span>`;
       b.addEventListener("mousedown", (e) => e.preventDefault());

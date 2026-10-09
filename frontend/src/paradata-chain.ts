@@ -445,6 +445,9 @@ export function inheritProperty(store: DocumentStore, ownerId: string, propertyI
 export type ReadingSource =
   | { kind: "document"; id: string }
   | { kind: "unit"; id: string }
+  /** FONTE · another unit's property, read as a source: the MASTER, in its
+   *  own unit (connections 1.6.37; the view draws its instance) */
+  | { kind: "property"; id: string }
   | { kind: "new-document"; name?: string; description?: string; data?: Record<string, unknown> };
 
 export interface NewReading {

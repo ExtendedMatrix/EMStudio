@@ -159,6 +159,7 @@ import {
   isOutOfRule,
   paradataGroupRenameOnAttach,
   renameOnAttach,
+  composedPropertyName,
   type NameCheck,
 } from "./naming";
 import {
@@ -224,6 +225,7 @@ import { openSitePicker } from "./site-picker";
 import * as chain from "./paradata-chain";
 import { carriedPropertyEdges, compactableUnits, compactProperties, dissolveGroups, drawnEdgeKey,
          duplicateForEachOwner, propertyBadges, undeclaredOwners } from "./compact";
+import { viewIndex, viewInstances } from "./paradata-view";
 import { mediumOf as mediumOfDoc, renderChainSection, type ChainUi } from "./paradata-inspector";
 import { DOC_TOOLS, renderReadingStage, selectedPassage, type DocTool,
          type TraceAnchor, type TraceGeometry } from "./doc-reading";
@@ -258,6 +260,7 @@ import {
   edgeAt,
   hitAddPhase,
   hitAdornmentBadge,
+  hitInstanceBadge,
   hitBandLabel,
   drawnAddPhase,
   drawnLabelRects,
@@ -290,6 +293,7 @@ import {
   nodeLabel,
   resourceTypeOfLocator,
   is3dResourceType,
+  reasoningText,
   // (the datamodel version exports are read by `versions.ts` for the footer's
   // breakdown popover — MENU-AUDIT removed this module's second, hardcoded copy)
 } from "./rules";
@@ -2015,6 +2019,8 @@ window.__EM_SCENE__ = () => {
         w: n.w * vp.scale, h: n.h * vp.scale,
         // RISORSA-FILE · what the box SAYS when it is not the node's name
         ...(n.label ? { label: n.label } : {}), ...(n.instanceOf ? { instanceOf: n.instanceOf } : {}),
+        // FONTE · the badge of an instance, and a trace
+        ...(n.instanceBadge ? { badge: n.instanceBadge.ownerName } : {}), ...(n.trace ? { trace: true } : {}),
       })),
       // DEV29 · the scale it is drawn at, and what its lanes say
       scale: vp.scale,
@@ -3927,11 +3933,18 @@ function filteredView(opts: { wholeGraph?: boolean;
   // while the group itself is in the view (the "Paradata nodes" ring).
   {
     const shownIds = new Set(vNodes.map((n) => n.id));
-    for (const [unit, b] of propertyBadges(doc)) {
+    // FONTE · a CLOSED group counts the instances it would draw open
+    const badges = propertyBadges(doc);
+    const vix = [...badges.values()].some((b) => folded.has(b.group)) ? viewIndex(doc) : null;
+    for (const [unit, b] of badges) {
       if (!shownIds.has(unit) || !shownIds.has(b.group)) continue;
       const arr = adornments.get(unit) ?? [];
-      arr.unshift({ ornamentId: b.group, kind: "property", label: t("compact.badge", { n: String(b.count) }),
-                    group: b.group, count: b.count, open: !folded.has(b.group) });
+      const inst = vix && folded.has(b.group) ? viewInstances(doc, b.group, vix).length : 0;
+      arr.unshift({ ornamentId: b.group, kind: "property",
+                    label: t("compact.badge", { n: String(b.count) })
+                      + (inst ? ` · ${t("fonte.badgeInstances", { n: String(inst) })}` : ""),
+                    group: b.group, count: b.count, open: !folded.has(b.group),
+                    ...(inst ? { instances: inst } : {}) });
       adornments.set(unit, arr);
     }
   }
@@ -15495,6 +15508,48 @@ function revealFromWarning(nodeId: string): void {
   }
   select(nodeId);                 // «Zoom to selection» frames it
   if (!scene()?.byId.has(nodeId)) toast("selected — not visible in this view (folded, or filtered out)");
+}
+
+/**
+ * FONTE · a JUMP to a node: the badge of an instance, a search hit, a warning,
+ * a link of the Inspector. The closed groups that hide it open (the group that
+ * contains it, and the ones around that), it is selected, and the graph frames
+ * it with its group. A node this view cannot draw (filtered, another
+ * projection) is selected and said, never an error.
+ */
+function jumpTo(nodeId: string): void {
+  if (!store) return;
+  if (!store.node(nodeId)) {
+    toast(t("toast.nodeGone"));
+    return;
+  }
+  const closed = closedGroupsAround(nodeId);
+  if (closed.length) store.setFoldedMany(closed, false);
+  select(nodeId);
+  requestAnimationFrame(() => {
+    if (scene()?.byId.has(nodeId)) frameNodeInContext(nodeId);
+    else toast(t("toast.selectedNotVisible"));
+  });
+}
+
+/** The folded groups a node sits in, innermost first (its paradata group and
+ *  every container around it), read from the membership the drawing uses. */
+function closedGroupsAround(nodeId: string): string[] {
+  if (!store) return [];
+  const folded = new Set(store.doc.layout?.folded_groups ?? []);
+  if (!folded.size) return [];
+  const m = buildMembership(store.doc);
+  const out: string[] = [];
+  const seen = new Set<string>();
+  const todo = [...(m.groupsOf.get(nodeId) ?? [])];
+  while (todo.length) {
+    const g = todo.shift()!;
+    if (seen.has(g)) continue;
+    seen.add(g);
+    if (folded.has(g)) out.push(g);
+    todo.push(...(m.groupsOf.get(g) ?? []));
+  }
+  return out;
 }
 
 /** Redraw the Log tab — only when it is the visible one; there is no point
@@ -28416,6 +28471,7 @@ function wireGraphCanvas(canvas: HTMLCanvasElement, winId: string): void {
     bandSelectPending = null;
     adornmentPending = null;
     pdDecoratorPending = null;
+    instanceBadgePending = null;
     const armChip = (): void => {
       dragMode = "none";
       try { canvas.setPointerCapture(e.pointerId); } catch { /* a synthetic event */ }
@@ -28464,6 +28520,13 @@ function wireGraphCanvas(canvas: HTMLCanvasElement, winId: string): void {
       // like the PD tag. A click selects the REAL ornament node (a "+N" overflow
       // chip carries the referent). Checked before the node hit-test: the badge
       // sits on the referent's corner and a click there means "edit the ornament".
+      // FONTE · the badge of an instance («from US 12»): a click reaches the master
+      const ibadge = hitInstanceBadge(lx, ly);
+      if (ibadge) {
+        instanceBadgePending = ibadge.instance;
+        armChip();
+        return;
+      }
       const ab = hitAdornmentBadge(lx, ly);
       if (ab) {
         adornmentPending = ab;
@@ -28848,9 +28911,13 @@ function wireGraphCanvas(canvas: HTMLCanvasElement, winId: string): void {
       // The node id only surfaces when the developer "show node ids" setting is
       // on — otherwise both the title fallback and the type line stay id-free.
       tooltip.innerHTML = `<b></b> <span class="tt-type"></span><br><span class="tt-desc"></span>`;
-      (tooltip.children[0] as HTMLElement).textContent = String(
-        hit.node.name || (showId ? hit.id : hit.node.node_type),
-      );
+      // FONTE · a property is named with its unit, «US 12 · essenza» — the
+      // more so when it is an instance drawn in another group
+      (tooltip.children[0] as HTMLElement).textContent = hit.node.node_type === "property" && store
+        ? composedPropertyName(store.doc, hit.node.id)
+          + (hit.instanceBadge ? ` · ${reasoningText("instance", "label")}` : "")
+        : String(hit.node.name || (showId ? hit.id : hit.node.node_type))
+          + (hit.instanceBadge ? ` · ${reasoningText("instance", "label")}` : "");
       (tooltip.children[1] as HTMLElement).textContent = showId
         ? `[${hit.node.node_type}] ${hit.id}`
         : `[${hit.node.node_type}]`;
@@ -28893,6 +28960,13 @@ function wireGraphCanvas(canvas: HTMLCanvasElement, winId: string): void {
     }
     // ornament badge click → select the real author/license/embargo node so the
     // Inspector edits it (the badge is only its view representation)
+    if (instanceBadgePending) {
+      const id = instanceBadgePending;
+      instanceBadgePending = null;
+      const hitNow = hitInstanceBadge(rx, ry);
+      if (!moved && hitNow?.instance === id) jumpTo(hitNow.master);
+      return;
+    }
     if (adornmentPending) {
       const id = adornmentPending;
       adornmentPending = null;
@@ -29300,6 +29374,7 @@ function isTrackpadScroll(e: WheelEvent): boolean {
 }
 let pdTagPending: string | null = null; // PD tag pressed → enter on click (pointerup)
 let adornmentPending: string | null = null; // ornament badge pressed → select real node
+let instanceBadgePending: string | null = null; // FONTE · an instance's badge pressed → its master
 let pdDecoratorPending: string | null = null; // PD tablet pressed → select group on click
 let bandSelectPending: string | null = null; // phase band label pressed → select on click
 let addPhasePending: string | null = null; // epoch "+" button pressed → add phase on click
