@@ -1,20 +1,20 @@
 {
-  "digest": "sha256:e3e56cbfc283703971620f9ba0d344b6b276ae7a6b3ea712fd1577b2c43e6bbb",
+  "digest": "sha256:ac5ab0ff636a6907f93af5f89c8fbea6e9aca3196772507d68680f4147d705a5",
   "versions": {
     "nodes": "1.6.26",
     "node_registry": "1.6.26",
-    "connections": "1.6.36",
-    "visual_rules": "1.6.32",
+    "connections": "1.6.37",
+    "visual_rules": "1.6.33",
     "qualia": "1.6.7",
-    "translations": "1.7"
+    "translations": "1.8"
   },
   "digests": {
     "nodes": "sha256:6002f34c8a5485eae0068271badcbe18d8d6f8eecf5baba263ee348b5a7772ea",
     "node_registry": "sha256:f8d33c7643d3909254412a33a3622560cec44d8c158e0de7826d5f3466267a93",
-    "connections": "sha256:88c08d42812e3058326ec70e0f39a95769de58db5a65820ceaf9d0c41dbadd88",
-    "visual_rules": "sha256:1d1bbd9873eec9011a5692fafc7150c490b5b20c9d5155ac0f6f92595ff9e247",
+    "connections": "sha256:52730324fd266e3c7c3325dec38bf5e7f1ebbbcc7f63e74f1dc9760b124b88d9",
+    "visual_rules": "sha256:025bfe566a5cdc1239f4f7f727c0a783be9faae8e3b5a93183d59395566a04d9",
     "qualia": "sha256:0f02e26795aa0635d0ee9d6c088110fcef1d6739f7af2500c1c98f80d9c509a9",
-    "translations": "sha256:bf94e721e0f52001c3ab4a092db357fbf97f5995697a904dac7c8ea92f0c1e3a"
+    "translations": "sha256:42e2afb1f25101726a99aa1a4711ac01dae31ee3a0a37b0af1866f9adf330354"
   },
   "files": {
     "nodes": "s3Dgraphy_node_datamodel.json",
