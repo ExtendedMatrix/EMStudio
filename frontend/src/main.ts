@@ -2031,6 +2031,12 @@ window.__EM_SCENE__ = () => {
    *  store write, not typed by anybody on this page */
   edit: (id: string, patch: Record<string, unknown>) => store?.updateNode(id, patch),
   nodeCount: () => store?.liveNodes().length ?? 0,
+  // FONTE · the stack of «Indietro», a jump, the computed instances
+  backDepth: () => viewHistory.length,
+  goBack: () => goBack(),
+  jumpTo: (id: string) => jumpTo(id),
+  folded: () => [...(store?.doc.layout?.folded_groups ?? [])],
+  viewNow: () => { const v = captureView(); return v ? { ...v, doc: undefined } : null; },
   dirty: () => !!store?.dirty,
   /** DEV29 · the EMTree's graphs, in order: name, dirty, active */
   slots: () => emtree.slots.map((sl) => ({ name: slotLabel(sl), dirty: !!sl.store.dirty, active: sl === emtree.active() })),
@@ -2745,7 +2751,7 @@ function renderInspectorInto(host: HTMLElement): void {
     owning,
     selectedId,
     {
-      onJump: (id) => select(id),     // «Zoom to selection» frames it
+      onJump: (id) => jumpTo(id),     // FONTE · a jump: «Indietro» comes back
       onSetSitePosition: () => openSitePickerOnGraph(),
       onClose: () => select(null),
       // DAG · act on the document the thing LIVES in: an acquisition deleted
@@ -3569,6 +3575,7 @@ function updateBreadcrumb(): void {
     const b = document.createElement("button");
     b.textContent = label;
     b.addEventListener("click", () => {
+      pushView();   // FONTE · one stack of views
       contextStack = contextStack.slice(0, depth);
       rebuildContext();
     });
@@ -3615,6 +3622,7 @@ function runDuplicateForOwners(propertyId: string): void {
 }
 
 function enterGroup(groupId: string): void {
+  pushView();   // FONTE · entering a group is a jump: «Indietro» comes back
   // a context entered from another window replaces that one's (one stack)
   if (contextWinId !== activeWin().id) contextStack = [];
   contextWinId = activeWin().id;
@@ -15501,13 +15509,9 @@ const smHandlers: StratiMinerHandlers = {
  * circles of detail, or simply on the other view — and silently doing nothing
  * would read as a broken button, so say what happened instead. */
 function revealFromWarning(nodeId: string): void {
-  if (!store) return;
-  if (!store.node(nodeId)) {
-    toast("that node is no longer in the document");
-    return;
-  }
-  select(nodeId);                 // «Zoom to selection» frames it
-  if (!scene()?.byId.has(nodeId)) toast("selected — not visible in this view (folded, or filtered out)");
+  // FONTE · a click on a warning is a JUMP: the view it leaves is pushed for
+  // «Indietro», and a closed group around the node opens
+  jumpTo(nodeId);
 }
 
 /**
@@ -15523,13 +15527,122 @@ function jumpTo(nodeId: string): void {
     toast(t("toast.nodeGone"));
     return;
   }
+  // the graph window the jump lands in: the focused one, else the last graph
+  const here = activeWin();
+  const target = here.type === "graph" ? here
+    : windowsOf().find((w) => w.id === lastGraphWinId && winAreas.has(w.id))
+      ?? windowsOf().find((w) => w.type === "graph" && winAreas.has(w.id));
+  if (target && target.id !== here.id) setActiveWin(target.id);
+  pushView();                     // «Indietro» comes back here
+  // a node outside the hypergraph the window is in: back to the canvas
+  if (inContext() && !scene()?.byId.has(nodeId)) {
+    contextStack = [];
+    contextWinId = null;
+    contextScene = null;
+    updateBreadcrumb();
+  }
   const closed = closedGroupsAround(nodeId);
   if (closed.length) store.setFoldedMany(closed, false);
-  select(nodeId);
+  pickOnCanvas = true;            // the frame below is the jump's, not «Zoom to selection»'s
+  try { select(nodeId); } finally { pickOnCanvas = false; }
   requestAnimationFrame(() => {
     if (scene()?.byId.has(nodeId)) frameNodeInContext(nodeId);
     else toast(t("toast.selectedNotVisible"));
   });
+}
+
+// ── FONTE · «Indietro»: ONE stack of views ─────────────────────────────────
+//
+// Every JUMP — an instance's badge, a search hit, a click on a warning, a link
+// of the Inspector, entering a group — pushes the view it leaves: the window
+// and its mode, the centre and the zoom, the selection, the groups open, and
+// the hypergraph context (`contextStack`, which was a stack of its own: it is
+// part of a view now, so «Indietro» from inside a group gives back the canvas
+// as it was, not a fit). «Indietro» (the ← of the graph window's bar, ⌘[ ·
+// ⌥←) pops it. Esc still leaves a group one level, as it always did. A view of
+// a document that is not the one open any more is dropped.
+interface SavedView {
+  doc: DocumentStore;
+  win: string;
+  mode: ViewKind;
+  vp: { x: number; y: number; scale: number };
+  selected: string[];
+  selectedId: string | null;
+  folded: string[];
+  context: string[];
+  contextWin: string | null;
+}
+const viewHistory: SavedView[] = [];
+const VIEW_HISTORY_MAX = 60;
+
+function captureView(): SavedView | null {
+  if (!store) return null;
+  const win = activeWin();
+  if (win.type !== "graph") return null;
+  const vp = viewport();
+  return { doc: store, win: win.id, mode: view, vp: { x: vp.x, y: vp.y, scale: vp.scale },
+           selected: [...selectedIds], selectedId, folded: [...(store.doc.layout?.folded_groups ?? [])],
+           context: [...contextStack], contextWin: contextWinId };
+}
+
+function pushView(): void {
+  const v = captureView();
+  if (!v) return;
+  viewHistory.push(v);
+  if (viewHistory.length > VIEW_HISTORY_MAX) viewHistory.shift();
+  renderBackButtons();
+}
+
+function canGoBack(): boolean {
+  while (viewHistory.length && viewHistory[viewHistory.length - 1].doc !== store) viewHistory.pop();
+  return viewHistory.length > 0;
+}
+
+function goBack(): void {
+  if (!store || !canGoBack()) return;
+  const v = viewHistory.pop()!;
+  const win = windowsOf().find((w) => w.id === v.win && winAreas.has(w.id));
+  if (win) {
+    setActiveWin(win.id);
+    if (winMode(win) !== v.mode) setWindowMode(win, v.mode);
+  }
+  // the groups: those the jumps opened close again, and the other way round
+  const now = new Set(store.doc.layout?.folded_groups ?? []);
+  const was = new Set(v.folded.filter((g) => store!.node(g)));
+  const toClose = [...was].filter((g) => !now.has(g));
+  const toOpen = [...now].filter((g) => !was.has(g));
+  if (toClose.length || toOpen.length) {
+    store.batch(() => {
+      if (toClose.length) store!.setFoldedMany(toClose, true);
+      if (toOpen.length) store!.setFoldedMany(toOpen, false);
+    });
+  }
+  contextStack = v.context.filter((g) => store!.node(g));
+  contextWinId = contextStack.length ? v.contextWin : null;
+  contextScene = inContext() ? contextSceneFor(contextStack[contextStack.length - 1]) : null;
+  updateBreadcrumb();
+  buildScenes();
+  const vp = viewport();
+  vp.x = v.vp.x;
+  vp.y = v.vp.y;
+  vp.scale = v.vp.scale;
+  const live = v.selected.filter((id) => store!.node(id));
+  pickOnCanvas = true;            // the view is restored as it was: no framing
+  try {
+    if (live.length > 1) selectMany(live);
+    else select(v.selectedId && store.node(v.selectedId) ? v.selectedId : live[0] ?? null);
+  } finally { pickOnCanvas = false; }
+  renderBackButtons();
+  draw();
+}
+
+/** The ← of every graph window's bar follows the stack. */
+function renderBackButtons(): void {
+  const can = canGoBack();
+  for (const b of document.querySelectorAll<HTMLButtonElement>("button[data-act='back']")) {
+    b.disabled = !can;
+    b.title = can ? t("fonte.backTitle", { n: String(viewHistory.length) }) : t("fonte.backEmpty");
+  }
 }
 
 /** The folded groups a node sits in, innermost first (its paradata group and
@@ -21996,7 +22109,7 @@ function fileHooks(): FileHooks {
     checking: filesChecking,
     inRoom: !!fileRoom(),
     onCheck: () => { void checkFiles(); },
-    onJump: (id) => { select(id); },
+    onJump: (id) => { jumpTo(id); },
     describe: (id, f) => describeFile((storeOfNode(id) ?? store)?.doc.graph ?? { nodes: [], edges: [] }, id, f),
     onRefilter: filesRefresh,
     onReveal: (f) => { void bridgeUrl().then((b) => revealFile(b, f.path)).catch((e) => toast(String(e.message ?? e))); },
@@ -26887,6 +27000,13 @@ function buildAreaHeader(win: Win): DocumentFragment {
       const r = cv.getBoundingClientRect();
       openAddMenu(win, r.left + r.width / 2, r.top + r.height / 2);
     });
+    // FONTE · «Indietro»: always on the bar, off while the stack is empty
+    act("←", t("fonte.backEmpty"), false, () => {
+      focusThen(win, () => goBack());
+    });
+    { const b = frag.lastElementChild as HTMLButtonElement | null;
+      if (b) { b.dataset.act = "back"; b.disabled = !canGoBack();
+               if (b.disabled) b.title = t("fonte.backEmpty"); else b.title = t("fonte.backTitle", { n: String(viewHistory.length) }); } }
     // G4 · the legend's opener is a floating glyph in the canvas's corner now
     act("⤢", t("win.fitTitle"), false, () => {
       focusThen(win, () => fit());
@@ -28271,13 +28391,10 @@ setupSearch(
   document.getElementById("search") as HTMLInputElement,
   document.getElementById("search-results")!,
   () => store?.doc ?? null,
-  (id) => {
-    if (inContext()) {
-      contextStack = [];
-      rebuildContext();
-    }
-    revealFromTable(id);   // selects; «Zoom to selection» frames it in a graph window
-  },
+  // FONTE · a pick is a JUMP (`jumpTo`): the view it leaves is pushed for
+  // «Indietro», a closed group around the hit opens, a context it is not in
+  // is left
+  (id) => jumpTo(id),
   t("strip.noResults"),
   (nt) => glyphMarkupFor(nt) ?? iconUrlFor(nt),
   // AUDIT N7 · at equal rank: the units, then the other nodes, then the groups
@@ -29955,6 +30072,13 @@ window.addEventListener("keydown", (e) => {
   }
   if (e.code === "Space") {
     e.preventDefault(); // swallow auto-repeat without re-running the above
+    return;
+  }
+  // FONTE · «Indietro»: ⌘[ (Ctrl+[) and ⌥← — the view before the last jump
+  if (((e.metaKey || e.ctrlKey) && (e.key === "[" || e.code === "BracketLeft"))
+      || (e.altKey && !e.metaKey && !e.ctrlKey && e.key === "ArrowLeft")) {
+    e.preventDefault();
+    goBack();
     return;
   }
   if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "z") {

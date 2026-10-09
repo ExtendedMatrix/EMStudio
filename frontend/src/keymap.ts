@@ -33,6 +33,7 @@ export const KEYMAP: KeyRow[] = [
   { id: "nudge", keys: "← → ↑ ↓", scope: "graph" },
   { id: "nudge10", keys: "⇧ ← → ↑ ↓", scope: "graph" },
   { id: "fit", keys: "0", scope: "graph" },
+  { id: "back", keys: "⌘[ · ⌥←", scope: "graph" },
   { id: "zoomIn", keys: "+ · =", scope: "graph" },
   { id: "zoomOut", keys: "−", scope: "graph" },
   { id: "pan", keys: "@gesture.spaceDrag", scope: "graph" },
