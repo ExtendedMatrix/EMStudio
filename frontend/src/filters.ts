@@ -9,6 +9,7 @@
 import { MEMBERSHIP_EDGES } from "./folding";
 import {
   ancestorsOf,
+  classIsA,
   classOf,
   edgeEndpointClasses,
   edgeEndpointsRaw,
@@ -190,16 +191,20 @@ export function edgeCircle(edgeType: string | undefined): CircleKey | null {
   const cls = edgeEndpointClasses(t);
   if (cls.has("AuthorNode") || cls.has("LicenseNode") || cls.has("EmbargoNode"))
     return "edges_author";
-  // BUGS-UI · an edge that POINTS AT a paradata group is a paradata edge, tested
-  // before the epoch/resource branch below: `has_paradata_nodegroup` admits
-  // EpochNode as a source, so the epoch rule used to claim it and the "Paradata
-  // edges" ring could neither show nor hide it. Read off the RAW target (not the
-  // endpoint union): `has_first_epoch` also ADMITS a ParadataNodeGroup — as a
-  // source — and is a temporal edge, not a paradata one.
+  // PROPRIETA · the ARRIVAL decides: an edge whose every admitted target is
+  // paradata (ParadataNode and its subclasses — property, extractor, combiner,
+  // document — or a ParadataNodeGroup) is a paradata edge, whatever its sources
+  // admit. The union of the two ends used to decide, and `has_property` admits
+  // EpochNode among its sources, so the epoch rule below sent it to "Other
+  // edges", off in the Matrix: a property of a US was drawn without its thread.
+  // The BUGS-UI test on the raw target (`has_paradata_nodegroup`, which also
+  // admits an epoch as source) is this same rule. Read off the RAW target (not
+  // the union): `has_first_epoch` ADMITS a ParadataNodeGroup — as a source —
+  // and is a temporal edge, not a paradata one.
   const rawTarget = edgeEndpointsRaw(t).target;
   if (
     rawTarget.length > 0 &&
-    rawTarget.every((c) => c === "ParadataNodeGroup" || c === "ParadataNode")
+    rawTarget.every((c) => classIsA(c, "ParadataNode") || classIsA(c, "ParadataNodeGroup"))
   )
     return "edges_paradata";
   // epoch links are structural in the swimlane view (epochs ARE lanes), plus

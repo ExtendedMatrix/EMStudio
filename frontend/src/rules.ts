@@ -804,6 +804,12 @@ export function edgeEndpointsRaw(edgeType: string): {
   return { source: ac?.source ?? [], target: ac?.target ?? [] };
 }
 
+/** True when a datamodel CLASS name (not a node_type) is `ancestor` or one of
+ *  its subclasses — the class hierarchy of the node registry, walked by name. */
+export function classIsA(className: string, ancestor: string): boolean {
+  return classAncestors(className).includes(ancestor);
+}
+
 /** node_types whose class ancestry includes the given class name. */
 export function typesOfClass(className: string): string[] {
   return [...TYPE_TO_CLASS.keys()].filter((t) =>

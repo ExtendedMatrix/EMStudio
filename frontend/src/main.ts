@@ -222,6 +222,7 @@ import { chapterCitedIds, interpretiveCoverage, storyCoverage } from "./narrativ
 import { setSitePicker, type NarrativeSelection, type Reading } from "./narrative";
 import { openSitePicker } from "./site-picker";
 import * as chain from "./paradata-chain";
+import { carriedPropertyEdges, drawnEdgeKey } from "./compact";
 import { mediumOf as mediumOfDoc, renderChainSection, type ChainUi } from "./paradata-inspector";
 import { DOC_TOOLS, renderReadingStage, selectedPassage, type DocTool,
          type TraceAnchor, type TraceGeometry } from "./doc-reading";
@@ -3868,6 +3869,14 @@ function filteredView(opts: { wholeGraph?: boolean;
   // (`bonded_to` + `is_bonded_to`, `equals` + `is_physically_equal_to`) is one
   // bond, drawn once. The document keeps both edges; only the view collapses.
   vEdges = collapseSpellings(vEdges);
+  // PROPRIETA · no duplicate thread: a property inside its owner's own paradata
+  // group is tied to it by the group (`has_paradata_nodegroup`), so its
+  // `has_property` is not drawn a second time. The edge stays in the graph; a
+  // folded group rewrote its ends, so it is recognised by its key.
+  if (vEdges.some((e) => e.edge_type === "has_property")) {
+    const carried = carriedPropertyEdges(doc);
+    if (carried.size) vEdges = vEdges.filter((e) => e.edge_type !== "has_property" || !carried.has(drawnEdgeKey(e)));
+  }
   return {
     nodes: vNodes,
     edges: vEdges,

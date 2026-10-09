@@ -1,0 +1,489 @@
+{
+  "header": {
+    "format": "em.json",
+    "version": "1.0"
+  },
+  "graph": {
+    "graph_id": "proprieta",
+    "name": "Proprietà · compatta nel gruppo dei paradati",
+    "description": null,
+    "nodes": [
+      {
+        "id": "EP_ROM",
+        "node_type": "EpochNode",
+        "name": "Età imperiale",
+        "description": "",
+        "data": {
+          "start_time": 1,
+          "end_time": 300
+        }
+      },
+      {
+        "id": "EP_MED",
+        "node_type": "EpochNode",
+        "name": "Medioevo",
+        "description": "",
+        "data": {
+          "start_time": 900,
+          "end_time": 1300
+        }
+      },
+      {
+        "id": "US1",
+        "node_type": "US",
+        "name": "US1",
+        "description": "Muro in opera quadrata",
+        "data": {}
+      },
+      {
+        "id": "US2",
+        "node_type": "US",
+        "name": "US2",
+        "description": "Pavimento in cocciopesto",
+        "data": {}
+      },
+      {
+        "id": "US3",
+        "node_type": "US",
+        "name": "US3",
+        "description": "Crollo del muro",
+        "data": {}
+      },
+      {
+        "id": "USV10",
+        "node_type": "USVs",
+        "name": "USV10",
+        "description": "Ricostruzione dell'alzato",
+        "data": {}
+      },
+      {
+        "id": "D.01",
+        "node_type": "document",
+        "name": "D.01",
+        "description": "Rilievo 1987",
+        "data": {
+          "is_canonical": true
+        }
+      },
+      {
+        "id": "D.02",
+        "node_type": "document",
+        "name": "D.02",
+        "description": "Fotografia del 1934",
+        "data": {}
+      },
+      {
+        "id": "P1A",
+        "node_type": "property",
+        "name": "material",
+        "description": "tufo",
+        "data": {
+          "property_type": "material"
+        }
+      },
+      {
+        "id": "P1B",
+        "node_type": "property",
+        "name": "shape",
+        "description": "rettangolare",
+        "data": {
+          "property_type": "shape"
+        }
+      },
+      {
+        "id": "P1C",
+        "node_type": "property",
+        "name": "height",
+        "description": "2.40",
+        "data": {
+          "property_type": "height"
+        }
+      },
+      {
+        "id": "C1",
+        "node_type": "combiner",
+        "name": "C.1",
+        "description": "tufo dalle due fonti",
+        "data": {}
+      },
+      {
+        "id": "E1",
+        "node_type": "extractor",
+        "name": "D.01.01",
+        "description": "tufo (rilievo)",
+        "data": {}
+      },
+      {
+        "id": "E2",
+        "node_type": "extractor",
+        "name": "D.02.01",
+        "description": "tufo (foto)",
+        "data": {}
+      },
+      {
+        "id": "E3",
+        "node_type": "extractor",
+        "name": "D.01.02",
+        "description": "pianta rettangolare",
+        "data": {}
+      },
+      {
+        "id": "PDG2",
+        "node_type": "ParadataNodeGroup",
+        "name": "PD_US2",
+        "description": "",
+        "data": {}
+      },
+      {
+        "id": "P2A",
+        "node_type": "property",
+        "name": "material",
+        "description": "cocciopesto",
+        "data": {
+          "property_type": "material"
+        }
+      },
+      {
+        "id": "P2B",
+        "node_type": "property",
+        "name": "colour",
+        "description": "rosso",
+        "data": {
+          "property_type": "colour"
+        }
+      },
+      {
+        "id": "P_MULTI",
+        "node_type": "property",
+        "name": "conservation",
+        "description": "cattivo",
+        "data": {
+          "property_type": "conservation"
+        }
+      },
+      {
+        "id": "E4",
+        "node_type": "extractor",
+        "name": "D.02.02",
+        "description": "stato di conservazione",
+        "data": {}
+      }
+    ],
+    "edges": [
+      {
+        "id": "US1__has_first_epoch__EP_ROM",
+        "edge_type": "has_first_epoch",
+        "source": "US1",
+        "target": "EP_ROM"
+      },
+      {
+        "id": "US2__has_first_epoch__EP_ROM",
+        "edge_type": "has_first_epoch",
+        "source": "US2",
+        "target": "EP_ROM"
+      },
+      {
+        "id": "USV10__has_first_epoch__EP_ROM",
+        "edge_type": "has_first_epoch",
+        "source": "USV10",
+        "target": "EP_ROM"
+      },
+      {
+        "id": "US3__has_first_epoch__EP_MED",
+        "edge_type": "has_first_epoch",
+        "source": "US3",
+        "target": "EP_MED"
+      },
+      {
+        "id": "US3__is_after__US1",
+        "edge_type": "is_after",
+        "source": "US3",
+        "target": "US1"
+      },
+      {
+        "id": "US1__is_after__US2",
+        "edge_type": "is_after",
+        "source": "US1",
+        "target": "US2"
+      },
+      {
+        "id": "USV10__is_after__US1",
+        "edge_type": "is_after",
+        "source": "USV10",
+        "target": "US1"
+      },
+      {
+        "id": "D.01__has_first_epoch__EP_ROM",
+        "edge_type": "has_first_epoch",
+        "source": "D.01",
+        "target": "EP_ROM"
+      },
+      {
+        "id": "US1__has_property__P1A",
+        "edge_type": "has_property",
+        "source": "US1",
+        "target": "P1A"
+      },
+      {
+        "id": "US1__has_property__P1B",
+        "edge_type": "has_property",
+        "source": "US1",
+        "target": "P1B"
+      },
+      {
+        "id": "US1__has_property__P1C",
+        "edge_type": "has_property",
+        "source": "US1",
+        "target": "P1C"
+      },
+      {
+        "id": "P1A__has_data_provenance__C1",
+        "edge_type": "has_data_provenance",
+        "source": "P1A",
+        "target": "C1"
+      },
+      {
+        "id": "C1__combines__E1",
+        "edge_type": "combines",
+        "source": "C1",
+        "target": "E1"
+      },
+      {
+        "id": "C1__combines__E2",
+        "edge_type": "combines",
+        "source": "C1",
+        "target": "E2"
+      },
+      {
+        "id": "E1__extracted_from__D.01",
+        "edge_type": "extracted_from",
+        "source": "E1",
+        "target": "D.01"
+      },
+      {
+        "id": "E2__extracted_from__D.02",
+        "edge_type": "extracted_from",
+        "source": "E2",
+        "target": "D.02"
+      },
+      {
+        "id": "P1B__has_data_provenance__E3",
+        "edge_type": "has_data_provenance",
+        "source": "P1B",
+        "target": "E3"
+      },
+      {
+        "id": "E3__extracted_from__D.01",
+        "edge_type": "extracted_from",
+        "source": "E3",
+        "target": "D.01"
+      },
+      {
+        "id": "US2__has_paradata_nodegroup__PDG2",
+        "edge_type": "has_paradata_nodegroup",
+        "source": "US2",
+        "target": "PDG2"
+      },
+      {
+        "id": "US2__has_property__P2A",
+        "edge_type": "has_property",
+        "source": "US2",
+        "target": "P2A"
+      },
+      {
+        "id": "US2__has_property__P2B",
+        "edge_type": "has_property",
+        "source": "US2",
+        "target": "P2B"
+      },
+      {
+        "id": "P2A__is_in_paradata_nodegroup__PDG2",
+        "edge_type": "is_in_paradata_nodegroup",
+        "source": "P2A",
+        "target": "PDG2"
+      },
+      {
+        "id": "P2A__has_data_provenance__E3",
+        "edge_type": "has_data_provenance",
+        "source": "P2A",
+        "target": "E3"
+      },
+      {
+        "id": "P2B__has_data_provenance__C1",
+        "edge_type": "has_data_provenance",
+        "source": "P2B",
+        "target": "C1"
+      },
+      {
+        "id": "US1__has_property__P_MULTI",
+        "edge_type": "has_property",
+        "source": "US1",
+        "target": "P_MULTI"
+      },
+      {
+        "id": "US3__has_property__P_MULTI",
+        "edge_type": "has_property",
+        "source": "US3",
+        "target": "P_MULTI"
+      },
+      {
+        "id": "P_MULTI__has_data_provenance__E4",
+        "edge_type": "has_data_provenance",
+        "source": "P_MULTI",
+        "target": "E4"
+      },
+      {
+        "id": "E4__extracted_from__D.02",
+        "edge_type": "extracted_from",
+        "source": "E4",
+        "target": "D.02"
+      },
+      {
+        "id": "USV10__has_property__P1A",
+        "edge_type": "has_property",
+        "source": "USV10",
+        "target": "P1A",
+        "attributes": {
+          "inherited": true
+        }
+      }
+    ]
+  },
+  "layout": {
+    "canvas": {
+      "title": "Proprietà · compatta nel gruppo dei paradati",
+      "width": 570,
+      "height": 582
+    },
+    "swimlanes": [
+      {
+        "epoch_id": "EP_MED",
+        "order": 0,
+        "y": 0,
+        "height": 80
+      },
+      {
+        "epoch_id": "EP_ROM",
+        "order": 1,
+        "y": 80,
+        "height": 422
+      }
+    ],
+    "sectors": [],
+    "positions": {
+      "C1": {
+        "x": 29,
+        "y": 346,
+        "w": 32,
+        "h": 32
+      },
+      "D.01": {
+        "x": 46.471999999999994,
+        "y": 446,
+        "w": 20.352,
+        "h": 32
+      },
+      "D.02": {
+        "x": 96.824,
+        "y": 446,
+        "w": 20.352,
+        "h": 32
+      },
+      "E1": {
+        "x": 0,
+        "y": 396,
+        "w": 32,
+        "h": 32
+      },
+      "E2": {
+        "x": 62,
+        "y": 396,
+        "w": 32,
+        "h": 32
+      },
+      "E3": {
+        "x": 225,
+        "y": 346,
+        "w": 32,
+        "h": 32
+      },
+      "E4": {
+        "x": 120,
+        "y": 282,
+        "w": 32,
+        "h": 32
+      },
+      "P1A": {
+        "x": 0,
+        "y": 204,
+        "w": 90,
+        "h": 32
+      },
+      "P1B": {
+        "x": 240,
+        "y": 204,
+        "w": 90,
+        "h": 32
+      },
+      "P1C": {
+        "x": 360,
+        "y": 204,
+        "w": 90,
+        "h": 32
+      },
+      "P2A": {
+        "x": 196,
+        "y": 282,
+        "w": 90,
+        "h": 32
+      },
+      "P2B": {
+        "x": 0,
+        "y": 282,
+        "w": 90,
+        "h": 32
+      },
+      "PDG2": {
+        "x": 182,
+        "y": 254,
+        "w": 118,
+        "h": 74
+      },
+      "P_MULTI": {
+        "x": 480,
+        "y": 204,
+        "w": 90,
+        "h": 32
+      },
+      "US1": {
+        "x": 180,
+        "y": 154,
+        "w": 90,
+        "h": 32
+      },
+      "US2": {
+        "x": 120,
+        "y": 204,
+        "w": 90,
+        "h": 32
+      },
+      "US3": {
+        "x": 240,
+        "y": 24,
+        "w": 90,
+        "h": 32
+      },
+      "USV10": {
+        "x": 90,
+        "y": 104,
+        "w": 90,
+        "h": 32
+      }
+    },
+    "folded_groups": [],
+    "group_spaces": {},
+    "edge_routes": {},
+    "pinned": [],
+    "anchors": []
+  }
+}
