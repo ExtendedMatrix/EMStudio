@@ -154,4 +154,71 @@ checks++;
 st.undo(); st.undo(); st.undo(); st.undo(); st.undo();
 eq(graphOf(st), start, "every step undone: the start");
 
+// ── 7. the library's operations, as the bridge serves them, applied as ONE
+//    step (`applyDelta`): the trace, the cascade, the cycle, the two cures ───
+const TOOLS = new URL("../../tools/", import.meta.url).pathname;
+function libraryOp(doc, op, args) {
+  const script = `
+import json,sys
+sys.path.insert(0, ${JSON.stringify(TOOLS)})
+import em_bridge
+body = json.loads(sys.stdin.read())
+print(json.dumps(em_bridge.property_source_op(body["doc"], body["op"], body["args"]), default=str))`;
+  return JSON.parse(execFileSync(PY, ["-c", script], { input: JSON.stringify({ doc, op, args }), maxBuffer: 1 << 28,
+    env: { ...process.env, PYTHONPATH: `${S3D}src` } }).toString().trim().split("\n").pop());
+}
+if (existsSync(PY)) {
+  const s7 = fresh();
+  const rr = PS.readFromProperty(s7, "P40", "P12");
+  const json = () => JSON.parse(s7.toJSON());
+  // who leans on US 12
+  const deps = libraryOp(json(), "dependents", { node: "US_12" }).result;
+  ok(deps.some((d) => d.id === "P12") && deps.some((d) => d.id === rr.extractorId),
+     "dependents_of US 12: its essenza and the extractor of USV 40 that reads it");
+  // remove keeping the trace
+  const d7 = s7.undoDepth;
+  s7.removeKeepingTrace("US_12");
+  eq(s7.undoDepth - d7, 1, "the trace: one undo step");
+  ok(s7.node("US_12").data.removed?.ts, "data.removed = {ts, by}");
+  ok(s7.hasEdge("US_12", "P12", "has_property"), "its edges stay");
+  ok(!s7.liveNodes().some((n) => n.id === "US_12"), "it is no live node");
+  let L = library(json());
+  const sr = L.diagnose.filter((d) => d.code === "source_removed");
+  eq(sr.map((d) => [d.node, d.source]), [[rr.extractorId, "US_12"]], "s3Dgraphy: «fonte rimossa» on the extractor, source US 12");
+  // restore
+  s7.restoreTrace("US_12");
+  ok(!s7.node("US_12").data?.removed, "Ripristina: data.removed gone");
+  L = library(json());
+  eq(L.diagnose.filter((d) => d.code === "source_removed"), [], "s3Dgraphy: quiet again");
+  // the cascade
+  const c = libraryOp(json(), "cascade", { node: "US_12" });
+  const d8 = s7.undoDepth;
+  PS.applyDelta(s7, c.delta);
+  eq(s7.undoDepth - d8, 1, "the cascade: one undo step");
+  ok(!s7.node("US_12") && !s7.node("P12"), "US 12 and its own essenza go");
+  ok(!!s7.node("P40"), "USV 40's essenza stays (another unit's property)");
+  eq(c.result.removed.includes("P40"), false, "…the library keeps it");
+  s7.undo();
+  ok(s7.node("US_12") && s7.node("P12"), "undo gives US 12 back");
+  // a cycle: US 12's essenza reads USV 40's, which reads US 12's
+  PS.readFromProperty(s7, "P12", "P40");
+  L = library(json());
+  const cyc = L.diagnose.filter((d) => d.code === "reasoning_cycle");
+  eq(cyc.map((d) => [...d.properties].sort()), [["P12", "P40"]], "s3Dgraphy: «ragionamento circolare» P12 ↔ P40");
+  s7.undo();
+  // the two cures of two owners nobody declared
+  const dc = libraryOp(json(), "declare", { property: "PC", owner: "US_12" });
+  PS.applyDelta(s7, dc.delta);
+  ok(s7.doc.graph.edges.find((e) => e.source === "US_13" && e.target === "PC").attributes?.inherited === true,
+     "Dichiara l'eredità: US 13 → conservazione inherited");
+  const dup = libraryOp(json(), "duplicate", { property: "PF" });
+  const before = s7.doc.graph.nodes.length;
+  PS.applyDelta(s7, dup.delta);
+  eq(s7.doc.graph.nodes.length - before, 2, "Duplica: the copy of finitura and of its extractor");
+  ok(dup.delta.add_nodes.every((n) => s7.doc.layout.positions[n.id]), "…placed in the Matrix");
+  L = library(json());
+  eq(L.diagnose.filter((d) => d.code === "undeclared_owners"), [], "s3Dgraphy: no owners undeclared any more");
+  ok(!s7.doc.graph.nodes.some((n) => n.data?.instance_of), "still no instance written");
+}
+
 console.log(`property-source: ${checks} checks passed`);

@@ -8,6 +8,7 @@
 import type { FoldedView } from "../folding";
 import type { Scene, SceneNode } from "../scene";
 import type { EmDocument, EmEdge, EmNode } from "../types";
+import { isRemoved } from "../crdt";
 
 const NODE_W = 120;
 const NODE_H = 34;
@@ -77,6 +78,8 @@ function assemble(
       h: sz?.h ?? NODE_H,
       node: n,
       badge: badges?.get(n.id),
+      // FONTE · a trace the view kept (a live chain still reads it)
+      ...(isRemoved(n as unknown as Record<string, unknown>) ? { trace: true } : {}),
     };
     scene.nodes.push(sn);
     scene.byId.set(sn.id, sn);

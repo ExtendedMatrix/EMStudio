@@ -27,6 +27,7 @@ const bundle = await esbuild.build({
   stdin: {
     contents: `
       export * as C from "./compact";
+      export * as PS from "./property-source";
       export { DocumentStore } from "./model";
       export { edgeCircle, defaultVisibleCircles, TEMPLATES } from "./filters";
       export { issues } from "./issues";
@@ -50,7 +51,7 @@ const bundle = await esbuild.build({
 const M = await import(
   "data:text/javascript;base64," + Buffer.from(bundle.outputFiles[0].text).toString("base64")
 );
-const { C, DocumentStore, edgeCircle, defaultVisibleCircles, TEMPLATES, issues } = M;
+const { C, PS, DocumentStore, edgeCircle, defaultVisibleCircles, TEMPLATES, issues } = M;
 
 const S3D = new URL("../../../s3Dgraphy/", import.meta.url).pathname;
 const PY = `${S3D}.venv/bin/python`;
@@ -65,6 +66,32 @@ g, w = api.load_emjson(json.loads(sys.stdin.read()))
 v = api.validate(g)
 print(json.dumps({"ok": v["ok"], "issues": v["issues"], "incoherences": len(paradata_group_incoherences(g))}))`;
   return JSON.parse(execFileSync(PY, ["-c", script], { input: JSON.stringify(doc), maxBuffer: 1 << 28,
+    env: { ...process.env, PYTHONPATH: `${S3D}src` } }).toString().trim().split("\n").pop());
+}
+
+/** FONTE · s3Dgraphy's `property_source.diagnose` on a document */
+function libDiagnose(doc) {
+  if (!existsSync(PY)) return null;
+  const script = `
+import json,sys
+from s3dgraphy import api
+from s3dgraphy.property_source import diagnose
+g, w = api.load_emjson(json.loads(sys.stdin.read()))
+print(json.dumps(diagnose(g), default=str))`;
+  return JSON.parse(execFileSync(PY, ["-c", script], { input: JSON.stringify(doc), maxBuffer: 1 << 28,
+    env: { ...process.env, PYTHONPATH: `${S3D}src` } }).toString().trim().split("\n").pop());
+}
+/** FONTE · one operation of the bridge's /property-source, run by the same
+ *  function the bridge serves (`tools/em_bridge.property_source_op`) */
+const TOOLS = new URL("../../tools/", import.meta.url).pathname;
+function libraryOp(doc, op, args) {
+  const script = `
+import json,sys
+sys.path.insert(0, ${JSON.stringify(TOOLS)})
+import em_bridge
+body = json.loads(sys.stdin.read())
+print(json.dumps(em_bridge.property_source_op(body["doc"], body["op"], body["args"]), default=str))`;
+  return JSON.parse(execFileSync(PY, ["-c", script], { input: JSON.stringify({ doc, op, args }), maxBuffer: 1 << 28,
     env: { ...process.env, PYTHONPATH: `${S3D}src` } }).toString().trim().split("\n").pop());
 }
 
@@ -103,7 +130,8 @@ function numbers(st) {
     combiners: nodes.filter((n) => n.node_type === "combiner").length,
     extractors: nodes.filter((n) => n.node_type === "extractor").length,
     documents: nodes.filter((n) => n.node_type === "document").length,
-    undeclared_owners: C.undeclaredOwners(doc).length,
+    // FONTE · the library's diagnosis (EMStudio's own was removed, v2 part 4)
+    undeclared_owners: libDiagnose(doc)?.filter((r) => r.code === "undeclared_owners").length ?? null,
   };
 }
 
@@ -243,20 +271,27 @@ const report = {};
 }
 
 // ── Parte 3 · the warning, and «Duplicate for each owner» ────────────────────
-{
+// FONTE (v2, part 4) · ONE diagnosis, the library's: `undeclared_owners` of
+// s3Dgraphy's property_source, and its cure `duplicate_per_owner` applied as
+// the delta the bridge answers (`property-source.applyDelta`)
+if (existsSync(PY)) {
   const st = fresh();
   const t = (k, v) => `${k}${JSON.stringify(v ?? {})}`;
+  const word = (w, f, v) => `${w}${JSON.stringify(v ?? {})}`;
   const rows = () => issues({ doc: st.doc, nodes: st.liveNodes(), isUnit: () => true, t,
-                              sharedOwners: C.undeclaredOwners(st.doc),
-                              duplicateForOwners: { label: "dup", run: (id) => C.duplicateForEachOwner(st, id) } })
-    .filter((i) => i.rule === "owners");
+                              reasoning: libDiagnose(JSON.parse(st.toJSON())), reasoningWord: word,
+                              reasoningCures: { duplicate: { label: "dup", run: (id) =>
+                                PS.applyDelta(st, libraryOp(JSON.parse(st.toJSON()), "duplicate", { property: id }).delta) } } })
+    .filter((i) => i.rule === "reasoning");
   const w = rows();
   eq(w.length, 1, "one warning: the property with two owners");
   ok(w[0].node === "P_MULTI" && w[0].txt.includes("US1, US3"), "…on P_MULTI, naming both owners");
   ok(!rows().some((i) => i.node === "P1A"), "the declared heir (USV10 → P1A) is no warning");
+  ok(!issues({ doc: st.doc, nodes: st.liveNodes(), isUnit: () => true, t }).some((i) => i.rule === "owners"),
+     "EMStudio's own «owners» rule is gone");
   const d0 = undoDepth(st);
-  w[0].fix.run();
-  eq(undoDepth(st) - d0, 1, "Duplicate for each owner is ONE undo step");
+  w[0].action.run();
+  eq(undoDepth(st) - d0, 1, "Duplicate for each owner (the library's) is ONE undo step");
   eq(rows().length, 0, "after Duplicate: no warning");
   const p3 = E(st, "has_property").filter((e) => e.source === "US3").map((e) => e.target);
   ok(p3.length === 1 && p3[0] !== "P_MULTI", "US3 owns a copy, US1 keeps the node");

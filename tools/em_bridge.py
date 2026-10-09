@@ -910,8 +910,96 @@ def _load_s3dgraphy(s3dgraphy_src: "pathlib.Path | None"):
 #: DEV30 U9 · the level of the routes this bridge serves. Raise it when a route
 #: the editor depends on is added; the editor names an older bridge for what it
 #: is instead of failing with WebKit's «Load failed». 30 = /read-shift and the
-#: JSON+CORS answer of an unknown route.
-BRIDGE_LEVEL = 30   # 30 also = /validate
+#: JSON+CORS answer of an unknown route. 31 = /property-source and the
+#: `reasoning` records of /validate (la proprietà come fonte, 9 Oct 2026).
+BRIDGE_LEVEL = 31   # 30 also = /validate
+
+
+# ── FONTE · the rules of «la proprietà come fonte», asked of the library ──────
+#
+# Who leans on a node, what a cascade removes, the two cures of two undeclared
+# owners: s3Dgraphy decides (`s3dgraphy.property_source`), EMStudio applies.
+# The answer of a writing operation is a DELTA of the em.json the editor sent —
+# nodes and edges added and removed, the fields and the edge attributes that
+# changed — computed by serialising the graph before and after with the same
+# exporter, so nothing the operation did not touch can look changed. The editor
+# applies it through its store (one undo step, one burst of CRDT operations).
+
+#: the operations a client may ask, and what each needs
+PROPERTY_SOURCE_OPS = {
+    "dependents": ("node",),
+    "cascade": ("node",),
+    "declare": ("property", "owner"),
+    "duplicate": ("property",),
+}
+
+
+def _emjson_maps(api, graph):
+    em = api.graph_to_emjson(graph)["graph"]
+    nodes = {n["id"]: n for n in em.get("nodes", []) if n.get("id")}
+    edges = {e["id"]: e for e in em.get("edges", []) if e.get("id")}
+    return nodes, edges
+
+
+def _node_field_changes(before: dict, after: dict) -> list:
+    """The fields of one node that changed: `name`, `description`, and every
+    `data.<key>` (a key gone travels as `null`, like an emptied field)."""
+    out = []
+    for k in ("name", "description"):
+        if before.get(k) != after.get(k):
+            out.append({"field": k, "value": after.get(k)})
+    bd, ad = before.get("data") or {}, after.get("data") or {}
+    for k in sorted(set(bd) | set(ad)):
+        if bd.get(k) != ad.get(k):
+            out.append({"field": f"data.{k}", "value": ad.get(k)})
+    return out
+
+
+def property_source_op(doc: dict, op: str, args: dict) -> dict:
+    """``{result, delta}`` of one operation of `s3dgraphy.property_source` on
+    the em.json `doc`. `dependents` is read-only (empty delta)."""
+    from s3dgraphy import api
+    if op not in PROPERTY_SOURCE_OPS:
+        raise ValueError(f"unknown operation {op!r}")
+    for k in PROPERTY_SOURCE_OPS[op]:
+        if not args.get(k):
+            raise ValueError(f"{op} needs {k!r}")
+    graph, _warnings = api.load_emjson(doc)
+    if op == "dependents":
+        return {"result": api.dependents_of(graph, args["node"]), "delta": None}
+    nodes0, edges0 = _emjson_maps(api, graph)
+    if op == "cascade":
+        result = api.remove_cascade(graph, args["node"])
+    elif op == "declare":
+        result = api.declare_inheritance(graph, args["property"], args["owner"])
+    else:
+        result = api.duplicate_per_owner(graph, args["property"])
+    nodes1, edges1 = _emjson_maps(api, graph)
+    delta = {
+        "add_nodes": [nodes1[i] for i in nodes1 if i not in nodes0],
+        "remove_nodes": [i for i in nodes0 if i not in nodes1],
+        "set_fields": [{"node": i, **c} for i in nodes1 if i in nodes0
+                       for c in _node_field_changes(nodes0[i], nodes1[i])],
+        "add_edges": [edges1[i] for i in edges1 if i not in edges0],
+        "remove_edges": [edges0[i] for i in edges0 if i not in edges1],
+        "edge_attributes": [{"edge": edges1[i], "attributes": edges1[i].get("attributes") or {},
+                             "before": edges0[i].get("attributes") or {}}
+                            for i in edges1 if i in edges0
+                            and (edges0[i].get("attributes") or {}) != (edges1[i].get("attributes") or {})],
+    }
+    return {"result": result, "delta": delta}
+
+
+def reasoning_records(graph) -> list:
+    """The library's diagnostics of the reasoning between properties, as
+    records (`code` = the key of their words in the translations), each with
+    the English sentence `api.validate` puts among its warnings — so the
+    editor shows the record once, with its cures, and not its sentence too."""
+    from s3dgraphy import api
+    if not hasattr(api, "reasoning_diagnostics"):
+        return []
+    from s3dgraphy.property_source import message
+    return [{**r, "message": message(r)} for r in api.reasoning_diagnostics(graph)]
 _STARTED_AT = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
 
 
@@ -1212,9 +1300,25 @@ def make_handler(api):
                     self._json({"ok": True, "warnings": list(out.get("warnings") or []),
                                 "issues": list(out.get("issues") or []),
                                 "info": list(out.get("info") or []),
-                                "load_warnings": list(load_warnings or [])})
+                                "load_warnings": list(load_warnings or []),
+                                # FONTE · the same diagnostics as records
+                                "reasoning": reasoning_records(graph)})
                 except Exception as exc:  # pragma: no cover — surface to the UI
                     self._fail(400, f"validate failed: {exc}")
+            elif route == "/property-source":
+                # FONTE · {doc, op, args} → {result, delta}: who leans on a
+                # node, the cascade, the two cures of two undeclared owners —
+                # the library's rules (`property_source_op`), never TypeScript
+                try:
+                    body = json.loads(raw.decode("utf-8")) if raw else {}
+                    self._json({"ok": True, **property_source_op(
+                        body.get("doc") or {}, str(body.get("op") or ""), body.get("args") or {})})
+                except (ValueError, KeyError) as exc:
+                    self._fail(400, f"property-source: {exc}")
+                except Exception as exc:  # pragma: no cover — surface to the UI
+                    import traceback
+                    traceback.print_exc()
+                    self._fail(500, f"property-source failed: {exc}")
             elif route == "/narrative-report":
                 # COLLEGARE · the coverage the Index shows, asked of the library
                 # that owns the rules (`s3dgraphy.narrative.query`): derived now,

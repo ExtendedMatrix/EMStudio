@@ -14,6 +14,7 @@ import { BAND_GAP } from "../scene";
 import type { Scene, SceneGroup, SceneNode, SubBand } from "../scene";
 import type { EmDocument, EmEdge } from "../types";
 import { viewIndex, viewInstances } from "../paradata-view";
+import { isRemoved } from "../crdt";
 import { t } from "../i18n";
 import { ancestorsOf } from "../rules";
 
@@ -270,6 +271,8 @@ export function buildMatrixScene(
       // PD1/BUGFIX-PDG · a folded PDG shown as a bottom-left tablet is never a
       // node: mark it so drawing, the connect handle and hit-testing skip it.
       collapsed: isCollapsedTablet(node.id),
+      // FONTE · a trace the view kept (a live chain still reads it)
+      ...(isRemoved(node as unknown as Record<string, unknown>) ? { trace: true } : {}),
     };
     scene.byId.set(node.id, sn);
     // outline containers: group-type nodes AND any stratigraphic node that

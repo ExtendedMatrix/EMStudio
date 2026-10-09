@@ -133,12 +133,58 @@ export interface IssueSources {
   /** DEV30 D6 · the library's own warnings (`api.validate` via the bridge),
    *  each with the node its message names, when it names one */
   library?: Array<{ txt: string; node: string }>;
-  /** PROPRIETA · the properties with two or more `has_property` not declared
-   *  `inherited` (`compact.undeclaredOwners`), and their cure */
-  sharedOwners?: Array<{ property: string; owners: string[] }>;
-  duplicateForOwners?: { label: string; run: (propertyId: string) => void };
+  /** FONTE · the library's diagnostics of the reasoning between properties
+   *  (`property_source.diagnose`, the `reasoning` records of the bridge's
+   *  /validate): `source_changed`, `source_removed`, `reasoning_cycle`,
+   *  `undeclared_owners` — said in the EM words (`reasoning.<code>`), with their
+   *  cures. They replace EMStudio's own «owners» rule of 9 Oct (one diagnosis,
+   *  the library's). */
+  reasoning?: ReasoningRecord[];
+  reasoningCures?: ReasoningCures;
+  /** the EM words: `rules.reasoningText` */
+  reasoningWord?: (word: string, field?: "label" | "description", vars?: Record<string, string>) => string;
   /** i18n for the hint texts */
   t: (key: string, vars?: Record<string, string>) => string;
+}
+
+/** A record of `s3dgraphy.property_source.diagnose`. */
+export interface ReasoningRecord {
+  code: "source_changed" | "source_removed" | "reasoning_cycle" | "undeclared_owners" | string;
+  /** the English sentence `api.validate` puts among its warnings (the bridge's) */
+  message?: string;
+  node?: string;
+  node_name?: string;
+  master?: string;
+  unit?: string | null;
+  unit_name?: string | null;
+  property_name?: string;
+  read?: unknown;
+  current?: unknown;
+  source?: string;
+  source_name?: string;
+  source_kind?: string;
+  value?: unknown;
+  affects?: string[];
+  properties?: string[];
+  names?: string[];
+  unit_names?: Array<string | null>;
+  property?: string;
+  owners?: string[];
+  owner_names?: string[];
+}
+
+/** The cures of the reasoning's warnings — bound to the store by the caller. */
+export interface ReasoningCures {
+  /** «Riallinea il valore letto»: the extractor reads its master again */
+  reread?: { label: string; run: (extractorId: string) => void };
+  /** «Tieni»: the value read stays, the row goes (for this value of the master) */
+  keep?: { label: string; run: (extractorId: string, master: string, current: string) => void };
+  /** «Vai alla traccia» */
+  goTo?: { label: string; run: (nodeId: string) => void };
+  /** «Duplica per ogni proprietario» (the library's) */
+  duplicate?: { label: string; run: (propertyId: string) => void };
+  /** «Dichiara l'eredità»: the original owner picked */
+  declare?: { label: string; placeholder: string; run: (propertyId: string, ownerId: string) => void };
 }
 
 /** One row of `to_review`, as the warnings read it. */
@@ -163,8 +209,10 @@ export function issues(src: IssueSources): Issue[] {
   const byId = new Map(nodes.map((n) => [n.id, n]));
   // FONTE · a property is named with its unit wherever it is said out of its
   // group: «US 12 · essenza» (`naming.composedPropertyName`)
-  const name = (id: string): string => byId.get(id)?.node_type === "property"
-    ? composedPropertyName(doc, id) : String(byId.get(id)?.name || id);
+  // (a trace — removed, not live — is still named by its name)
+  const anyById = new Map(doc.graph.nodes.map((n) => [n.id, n]));
+  const name = (id: string): string => (byId.get(id) ?? anyById.get(id))?.node_type === "property"
+    ? composedPropertyName(doc, id) : String((byId.get(id) ?? anyById.get(id))?.name || id);
   const push = (i: Omit<Issue, "id">): void => {
     out.push({ ...i, id: `${i.rule}:${i.node}:${out.length}` });
   };
@@ -324,17 +372,6 @@ export function issues(src: IssueSources): Issue[] {
       push({ node: n.id, sev: "warn", rule: "missing", txt: t("issues.missing", { n: name(n.id) }) });
   }
 
-  // ── PROPRIETA · one property, one owner (E.D., 9 Oct 2026): a property with
-  //    more than one owner, none declared an heir, is a warning; the cure is
-  //    «Duplicate for each owner». A declared heir (`inherited`) is no owner.
-  for (const x of src.sharedOwners ?? []) {
-    const d = src.duplicateForOwners;
-    push({ node: x.property, sev: "warn", rule: "owners",
-           txt: t("compact.owners", { p: name(x.property), n: String(x.owners.length),
-                                      owners: x.owners.map(name).join(", ") }),
-           ...(d ? { fix: { kind: "button" as const, label: d.label, run: () => d.run(x.property) } } : {}) });
-  }
-
   // ── CATENA · reading from a unit: a hint when the unit lacks the property ──
   for (const h of src.sourceHints ?? [])
     push({ node: h.extractor, sev: "info", rule: "paradata",
@@ -394,6 +431,53 @@ export function issues(src: IssueSources): Issue[] {
   // of the rows already on screen — a Fix button then names a row that moved
   for (const w of src.library ?? [])
     push({ node: w.node, sev: "warn", rule: "library", txt: w.txt });
+  // FONTE · the reasoning's diagnostics, the library's too (they arrive with it)
+  for (const i of reasoningIssues(src, name)) push(i);
+  return out;
+}
+
+/**
+ * FONTE · the rows of the reasoning between properties: the library's records,
+ * in its words (`reasoning.<code>` of the translations), each on the node a
+ * person acts on — the extractor that read (`source_changed`,
+ * `source_removed`), the first property of a cycle, the property with two
+ * owners — with its cures.
+ */
+function reasoningIssues(src: IssueSources, name: (id: string) => string): Array<Omit<Issue, "id">> {
+  const out: Array<Omit<Issue, "id">> = [];
+  const w = src.reasoningWord ?? ((word: string) => word);
+  const c = src.reasoningCures ?? {};
+  const str = (v: unknown): string => (v === null || v === undefined ? "—" : String(v));
+  for (const r of src.reasoning ?? []) {
+    const head = w(r.code, "label");
+    if (r.code === "source_changed" && r.node) {
+      const unit = r.unit_name ?? "?";
+      out.push({ node: r.node, sev: "warn", rule: "reasoning",
+        txt: `${head}: ${name(r.node)} — ${w("source_changed", "description",
+          { unit, property: str(r.property_name), read: str(r.read), current: str(r.current) })}`,
+        ...(c.keep ? { action: { label: c.keep.label, run: () => c.keep!.run(r.node!, String(r.master ?? ""), str(r.current)) } } : {}),
+        ...(c.reread ? { fix: { kind: "button" as const, label: c.reread.label, run: () => c.reread!.run(r.node!) } } : {}) });
+    } else if (r.code === "source_removed" && r.node) {
+      const source = r.source && r.source_kind === "property" ? name(r.source) : str(r.source_name);
+      out.push({ node: r.node, sev: "warn", rule: "reasoning",
+        txt: `${head}: ${name(r.node)} — ${w("source_removed", "description", { source, value: str(r.value) })}`,
+        ...(c.goTo && r.source ? { fix: { kind: "button" as const, label: c.goTo.label, run: () => c.goTo!.run(r.source!) } } : {}) });
+    } else if (r.code === "reasoning_cycle" && r.properties?.length) {
+      const chain = [...r.properties, r.properties[0]].map(name).join(" → ");
+      out.push({ node: r.properties[0], sev: "warn", rule: "reasoning",
+        txt: `${head}: ${w("reasoning_cycle", "description", { chain })}` });
+    } else if (r.code === "undeclared_owners" && r.property) {
+      const owners = r.owners ?? [];
+      const d = c.declare;
+      out.push({ node: r.property, sev: "warn", rule: "reasoning",
+        txt: `${head}: ${w("undeclared_owners", "description",
+          { property: name(r.property), n: String(owners.length), owners: owners.map(name).join(", ") })}`,
+        ...(c.duplicate ? { action: { label: c.duplicate.label, run: () => c.duplicate!.run(r.property!) } } : {}),
+        ...(d ? { fix: { kind: "pick" as const, placeholder: d.placeholder,
+                         options: owners.map((o) => ({ value: o, label: name(o), group: d.label })),
+                         run: (v: string) => d.run(r.property!, v) } } : {}) });
+    }
+  }
   return out;
 }
 

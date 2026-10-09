@@ -103,22 +103,12 @@ function declaredOwners(ix: Index, propertyId: string): string[] {
   return seen;
 }
 
-/**
- * Rule 2 · every property with two or more `has_property` not marked
- * `inherited`, with its owners in edge order (the first keeps the node when
- * the property is duplicated). s3Dgraphy has `ownership.shared_properties` (a
- * listing, every owner) but no diagnostic: this is the EMStudio one.
- */
-export function undeclaredOwners(doc: EmDocument): Array<{ property: string; owners: string[] }> {
-  const ix = index(doc);
-  const out: Array<{ property: string; owners: string[] }> = [];
-  for (const [id] of ix.node) {
-    if (cls(ix, id) !== "PropertyNode") continue;
-    const owners = declaredOwners(ix, id);
-    if (owners.length > 1) out.push({ property: id, owners });
-  }
-  return out;
-}
+// FONTE (v2, part 4) · rule 2's DIAGNOSIS and its CURES are the library's now:
+// `undeclared_owners`, `duplicate_per_owner` and `declare_inheritance` of
+// s3Dgraphy's property_source, through the bridge (`property-source.ts`). The
+// diagnosis written here on 9 Oct (`undeclaredOwners`) and the local
+// «Duplicate for each owner» (`duplicateForEachOwner`) are gone: one rule, one
+// place. «Compact» still leaves such a property out (`declaredOwners`).
 
 /**
  * The `has_property` edges whose thread the GROUP carries: the property is a
@@ -415,77 +405,6 @@ export function dissolveGroups(store: DocumentStore, unitIds: string[]): Dissolv
         store.deleteNode(g);
         res.groupsRemoved++;
       } else if (store.isFolded(g)) store.setFolded(g, false);
-    }
-  });
-  return res;
-}
-
-export interface DuplicateResult {
-  /** the property copies, one per owner after the first */
-  copies: string[];
-  duplicates: number;
-  instances: number;
-}
-
-/**
- * Rule 2 · «Duplicate for each owner»: the first owner keeps the node; every
- * other owner gets a copy of the property, with its combiners and extractors
- * copied and its documents read as they are (see the head of the file). A
- * membership of the property in an other owner's group moves to that owner's
- * copy, with the chain. ONE undo step.
- */
-export function duplicateForEachOwner(store: DocumentStore, propertyId: string): DuplicateResult {
-  const res: DuplicateResult = { copies: [], duplicates: 0, instances: 0 };
-  const ix0 = index(store.doc);
-  const owners = declaredOwners(ix0, propertyId);
-  if (owners.length < 2) return res;
-  store.batch(() => {
-    for (const owner of owners.slice(1)) {
-      const ix = index(store.doc);
-      const prop = ix.node.get(propertyId)!;
-      const at = rectOf(store, propertyId);
-      const copy = store.addNode(
-        { id: store.newId(), name: prop.name, node_type: prop.node_type,
-          description: prop.description ?? "", data: copyData(prop) },
-        at ? { x: at.x + 24, y: at.y + 24, w: at.w, h: at.h } : undefined,
-      );
-      res.copies.push(copy.id);
-      // the owner's edge moves to its copy, with its attributes
-      for (const e of inOf(ix, propertyId, HAS_PROPERTY))
-        if (e.source === owner && !isInherited(e)) rewire(store, e, copy.id);
-      // the group of THIS owner, if the property sat in it, now holds the copy
-      const g = groupOf(ix, owner);
-      const inGroup = !!g && groupsHolding(ix, propertyId).includes(g);
-      if (g && inGroup) {
-        for (const e of outOf(ix, propertyId, IS_IN_PARADATA_NODEGROUP))
-          if (e.target === g) store.deleteEdge(e);
-        ensureMember(store, copy.id, g);
-      }
-      // the other edges of the property (documentation, visual reference…)
-      for (const e of ix.out.get(propertyId) ?? []) {
-        if (e.edge_type === IS_IN_PARADATA_NODEGROUP || e.edge_type === HAS_DATA_PROVENANCE) continue;
-        store.addEdge(copy.id, e.target, e.edge_type ?? "", freshAttrs(e));
-      }
-      // the chain, copied all the way down (documents excepted)
-      const copyChain = (origId: string, upperSource: string): string => {
-        const kind = cls(index(store.doc), origId);
-        if (kind !== "CombinerNode" && kind !== "ExtractorNode") return origId;
-        const c = copyElement(store, origId, upperSource);
-        res.duplicates++;
-        const ixc = index(store.doc);
-        const og = groupsHolding(ixc, origId);
-        if (g && inGroup && og.includes(g)) {
-          for (const e of outOf(ixc, origId, IS_IN_PARADATA_NODEGROUP))
-            if (e.target === g) store.deleteEdge(e);
-        }
-        if (g && inGroup) ensureMember(store, c, g);
-        if (kind === "CombinerNode")
-          for (const e of outOf(index(store.doc), origId, COMBINES))
-            store.addEdge(c, copyChain(e.target, c), COMBINES, freshAttrs(e));
-        return c;
-      };
-      for (const e of outOf(index(store.doc), propertyId, HAS_DATA_PROVENANCE))
-        store.addEdge(copy.id, copyChain(e.target, copy.id), HAS_DATA_PROVENANCE, freshAttrs(e));
     }
   });
   return res;

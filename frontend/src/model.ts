@@ -48,7 +48,7 @@ export type GraphOp =
   | { op: "update_node"; node_id: string; patch: Partial<EmNode>;
       fields?: ChangedField[] }
   | { op: "add_node"; node: EmNode }
-  | { op: "delete_node"; node_id: string }
+  | { op: "delete_node"; node_id: string; ts?: string }
   | { op: "add_edge"; edge: EmEdge }
   | { op: "delete_edge"; edge: EmEdge };
 
@@ -1824,6 +1824,59 @@ export class DocumentStore {
     }
     this.emit();
     this.emitOp({ op: "delete_node", node_id: id });
+  }
+
+  /**
+   * FONTE · remove a node LEAVING ITS TRACE (s3dgraphy
+   * `property_source.remove_keeping_trace`): the node stays with its id, name
+   * and last value, marked as the CRDT marks a deletion (`data.removed =
+   * {ts, by}`); its edges stay, so the chains that lean on it still read. On
+   * the wire it is the same `remove_node` an ordinary deletion sends — the
+   * relay keeps the edges of a removed node, and so does this store here.
+   * The views draw it as a trace while a live edge reaches it (`main.ts`).
+   */
+  removeKeepingTrace(id: string): void {
+    const n = this.node(id);
+    if (!n) return;
+    this.checkpoint();
+    const ts = new Date().toISOString().replace(/\.\d+Z$/, "Z");
+    const by = this.editorOrcid();
+    ((n.data ??= {}) as Record<string, unknown>).removed = by ? { ts, by } : { ts };
+    this.emit();
+    this.emitOp({ op: "delete_node", node_id: id, ts });
+  }
+
+  /**
+   * FONTE · «Ripristina» a trace: `data.removed` goes. For the other side of a
+   * room the node is written again AFTER its removal (its name, stamped now):
+   * the CRDT's own rule — a tombstone older than an edit is no deletion
+   * (`crdt.isRemoved`, s3dgraphy `crdt.is_removed`) — brings it back there too.
+   */
+  restoreTrace(id: string): void {
+    const n = this.node(id);
+    const d = (n?.data ?? {}) as Record<string, unknown>;
+    if (!n || !d.removed) return;
+    this.batch(() => {
+      this.checkpoint();
+      delete d.removed;
+      this.setField(id, "name", n.name ?? "");
+    });
+  }
+
+  /** FONTE · declare attributes on an edge that exists (an heir's
+   *  `inherited`, s3dgraphy `declare_inheritance`): on the wire an `add_edge`
+   *  of the same relation with them, which the CRDT folds into the edge. */
+  setEdgeAttributes(edge: EmEdge, attributes: Record<string, unknown>): void {
+    const e = this.doc.graph.edges.find((x) => (edge.id && x.id === edge.id) ||
+      (x.source === edge.source && x.target === edge.target && x.edge_type === edge.edge_type));
+    if (!e) return;
+    this.checkpoint();
+    const a = { ...((e.attributes ?? {}) as Record<string, unknown>), ...attributes };
+    for (const [k, v] of Object.entries(attributes)) if (v === undefined || v === null) delete a[k];
+    if (Object.keys(a).length) e.attributes = a;
+    else delete e.attributes;
+    this.emit();
+    this.emitOp({ op: "add_edge", edge: e });
   }
 
   /** Delete several nodes as ONE undo step (multi-selection). */

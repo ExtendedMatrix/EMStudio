@@ -224,9 +224,11 @@ import { setSitePicker, type NarrativeSelection, type Reading } from "./narrativ
 import { openSitePicker } from "./site-picker";
 import * as chain from "./paradata-chain";
 import { carriedPropertyEdges, compactableUnits, compactProperties, dissolveGroups, drawnEdgeKey,
-         duplicateForEachOwner, propertyBadges, undeclaredOwners } from "./compact";
+         propertyBadges } from "./compact";
 import { viewIndex, viewInstances } from "./paradata-view";
-import { libraryValue, readFromProperty } from "./property-source";
+import { applyDelta, askLibrary, libraryValue, readFromProperty, rereadProperty,
+         type Dependent, type LibraryDelta } from "./property-source";
+import type { ReasoningRecord } from "./issues";
 import { mediumOf as mediumOfDoc, renderChainSection, type ChainUi } from "./paradata-inspector";
 import { DOC_TOOLS, renderReadingStage, selectedPassage, type DocTool,
          type TraceAnchor, type TraceGeometry } from "./doc-reading";
@@ -2037,6 +2039,7 @@ window.__EM_SCENE__ = () => {
   goBack: () => goBack(),
   jumpTo: (id: string) => jumpTo(id),
   folded: () => [...(store?.doc.layout?.folded_groups ?? [])],
+  setValue: (id: string, v: string) => store?.setPropertyValue(id, v),
   viewNow: () => { const v = captureView(); return v ? { ...v, doc: undefined } : null; },
   dirty: () => !!store?.dirty,
   /** DEV29 · the EMTree's graphs, in order: name, dirty, active */
@@ -2759,6 +2762,8 @@ function renderInspectorInto(host: HTMLElement): void {
       // from the DTC canvas is deleted from the corpus, and `store!` there would
       // have removed nothing while the panel closed as if it had.
       onDeleteNode: (id) => {
+        // FONTE · a unit, a property, a document: who leans on it, first
+        if ((storeOfNode(id) ?? store) === store && canBeASource(id)) { void deleteWithConfirm(id); return; }
         (storeOfNode(id) ?? store!).deleteNode(id);
         select(null);
       },
@@ -2880,6 +2885,7 @@ function renderInspectorInto(host: HTMLElement): void {
     },
     selectedEdge,
   );
+  if (selectedId) renderTraceBanner(host, owning, selectedId);   // FONTE · a trace, and «Ripristina»
   if (selectedId) {
     renderUnitImages(host, owning, selectedId);          // E5 · its images
     renderAltLabels(host, owning, selectedId);           // A1 · its other labels
@@ -3614,12 +3620,59 @@ function runDissolve(units: string[]): void {
   toast(t("compact.dissolved", { units: String(r.units), m: String(r.memberships), g: String(r.groupsRemoved) }));
 }
 
-/** PROPRIETA · «Duplicate for each owner» of one property — ONE undo step. */
-function runDuplicateForOwners(propertyId: string): void {
+/** PROPRIETA · «Duplicate for each owner» of one property — ONE undo step.
+ *  FONTE · the library's operation (`duplicate_per_owner`, through the bridge):
+ *  combiners and extractors copied, the copies reading the same master — the
+ *  view draws it in the new owner's group. */
+async function runDuplicateForOwners(propertyId: string): Promise<void> {
   if (!store) return;
-  const p = String(store.node(propertyId)?.name || propertyId);
-  const r = duplicateForEachOwner(store, propertyId);
-  toast(t("compact.duplicated", { p, n: String(r.copies.length), dups: String(r.duplicates) }));
+  const st = store;
+  const p = composedPropertyName(st.doc, propertyId);
+  try {
+    const r = await askLibrary<{ copies: unknown[]; duplicates: number }>(await bridgeUrl(), JSON.parse(st.toJSON()),
+                                                                          "duplicate", { property: propertyId });
+    if (st !== store) return;
+    if (r.delta) applyDelta(st, r.delta);
+    toastUndo(t("compact.duplicated", { p, n: String(r.result.copies.length), dups: String(r.result.duplicates) }), st);
+    scheduleLibraryValidate(st, libraryKey(st));
+  } catch (e) {
+    toast(await bridgeWhy("/property-source", e));
+  }
+}
+
+/** FONTE · «Dichiara l'eredità»: `ownerId` is the original owner, the others
+ *  inherit — the library's `declare_inheritance` (the property and the chain
+ *  that serves only it move to the original owner's group). ONE undo step. */
+async function runDeclareInheritance(propertyId: string, ownerId: string): Promise<void> {
+  if (!store) return;
+  const st = store;
+  try {
+    const r = await askLibrary<{ heirs: string[]; moved: string[] }>(await bridgeUrl(), JSON.parse(st.toJSON()),
+                                                                     "declare", { property: propertyId, owner: ownerId });
+    if (st !== store) return;
+    if (r.delta) applyDelta(st, r.delta);
+    toastUndo(t("fonte.declared", { p: composedPropertyName(st.doc, propertyId), o: String(st.node(ownerId)?.name ?? ownerId),
+                                    heirs: r.result.heirs.map((h) => String(st.node(h)?.name ?? h)).join(", ") }), st);
+    scheduleLibraryValidate(st, libraryKey(st));
+  } catch (e) {
+    toast(await bridgeWhy("/property-source", e));
+  }
+}
+
+/** FONTE · «Tieni»: the value read stays; the row goes for THIS value of the
+ *  master (a later change says it again). A choice of this person on this
+ *  machine, not data: the library has no form for it (localStorage). */
+const KEPT_KEY = "emstudio.fonte.kept";
+function keptSet(): Set<string> {
+  try { return new Set(JSON.parse(localStorage.getItem(KEPT_KEY) ?? "[]") as string[]); } catch { return new Set(); }
+}
+function keepReading(extractor: string, master: string, current: string): void {
+  const k = keptSet();
+  k.add(`${extractor}|${master}|${current}`);
+  try { localStorage.setItem(KEPT_KEY, JSON.stringify([...k].slice(-500))); } catch { /* private mode */ }
+}
+function keptReading(r: ReasoningRecord): boolean {
+  return r.code === "source_changed" && keptSet().has(`${r.node}|${r.master}|${r.current === null || r.current === undefined ? "—" : String(r.current)}`);
 }
 
 function enterGroup(groupId: string): void {
@@ -3818,9 +3871,18 @@ function filteredView(opts: { wholeGraph?: boolean;
   // you" are different states), so the hiding happens HERE — at the one place
   // that decides what is on screen — and nowhere else.
   if (vNodes.some((n) => isRemoved(n as unknown as Record<string, unknown>))) {
-    const dead = new Set(
-      vNodes.filter((n) => isRemoved(n as unknown as Record<string, unknown>))
-        .map((n) => n.id));
+    // FONTE · …except a TRACE: a node removed keeping its trace that a live
+    // edge from a live node still reaches (a reading, a property of it) is
+    // drawn, attenuated — `scene.trace` (s3Dgraphy `compact_section` keeps it
+    // the same way)
+    const removedIds = new Set(vNodes.filter((n) => isRemoved(n as unknown as Record<string, unknown>)).map((n) => n.id));
+    const traces = new Set<string>();
+    for (const e of vEdges) {
+      if (((e.attributes ?? {}) as Record<string, unknown>).removed) continue;
+      if (removedIds.has(e.target) && !removedIds.has(e.source)) traces.add(e.target);
+      if (removedIds.has(e.source) && !removedIds.has(e.target)) traces.add(e.source);
+    }
+    const dead = new Set([...removedIds].filter((id) => !traces.has(id)));
     vNodes = vNodes.filter((n) => !dead.has(n.id));
     vEdges = vEdges.filter((e) => !dead.has(e.source) && !dead.has(e.target));
   }
@@ -10857,7 +10919,7 @@ async function bridgeUrl(): Promise<string> {
   return _bridgeUrl;
 }
 /** The bridge level this editor expects (`BRIDGE_LEVEL` in tools/em_bridge.py). */
-const BRIDGE_LEVEL_WANTED = 30;
+const BRIDGE_LEVEL_WANTED = 31;   // FONTE · 31 = /property-source, `reasoning` in /validate
 /**
  * DEV30 U9 · WHY a call to the bridge failed, in words.
  *
@@ -14306,8 +14368,20 @@ function refreshIssues(): void {
       allowedEdgeTypes(st, dt).map(canonicalEdgeType).includes(canonicalEdgeType(et)),
     names: nameStatus,
     sourceHints: chain.extractionSourceHints(s.doc, isStratigraphicType),
-    sharedOwners: undeclaredOwners(s.doc),
-    duplicateForOwners: { label: t("compact.duplicate"), run: (id) => runDuplicateForOwners(id) },
+    // FONTE · the reasoning's diagnostics, the library's (with /validate)
+    reasoning: libraryReasoningOf(s).filter((r) => !keptReading(r)),
+    reasoningWord: (w, f, v) => reasoningText(w, f, v),
+    reasoningCures: {
+      reread: { label: t("fonte.reread.cure"), run: (x) => {
+        const v = rereadProperty(s, x);
+        toastUndo(t("fonte.rereadDone", { x: String(s.node(x)?.name ?? x), v: String(v ?? "—") }), s);
+      } },
+      keep: { label: t("fonte.keep"), run: (x, m, cur) => { keepReading(x, m, cur); refreshIssues(); } },
+      goTo: { label: t("fonte.goToTrace"), run: (id) => jumpTo(id) },
+      duplicate: { label: reasoningText("duplicate_per_owner"), run: (id) => void runDuplicateForOwners(id) },
+      declare: { label: reasoningText("declare_inheritance"), placeholder: t("fonte.declarePick"),
+                 run: (p, o) => void runDeclareInheritance(p, o) },
+    },
     // TRADUZIONI · ONE view of what waits for a person (the AI nodes are in it)
     review: aiv.toReview(s.doc),
     verifyAi: { label: t("ai.verify"), bulkLabel: (n) => t("ai.verifyAll", { n: String(n) }),
@@ -14363,7 +14437,12 @@ function untaggedTexts(st: DocumentStore): IssueSources["untagged"] {
  * The georeference warning is the one the Warnings view already has in its own
  * words, with its Fix («Read a SHIFT.txt…»), so the library's is not repeated.
  */
-const libraryWarnings = new WeakMap<DocumentStore, { key: string; rows: Array<{ txt: string; node: string }> }>();
+const libraryWarnings = new WeakMap<DocumentStore, { key: string; rows: Array<{ txt: string; node: string }>;
+                                                     reasoning?: ReasoningRecord[] }>();
+/** FONTE · the reasoning's records of the last /validate (bridge level 31) */
+function libraryReasoningOf(st: DocumentStore): ReasoningRecord[] {
+  return libraryWarnings.get(st)?.reasoning ?? [];
+}
 let libraryTimer: ReturnType<typeof setTimeout> | null = null;
 function libraryKey(st: DocumentStore): string {
   return `${st.undoDepth}:${st.liveNodes().length}:${st.liveEdges().length}:${st.dirty ? 1 : 0}`;
@@ -14380,21 +14459,32 @@ function scheduleLibraryValidate(st: DocumentStore, key: string): void {
     libraryTimer = null;
     if (libraryKey(st) !== key) return;
     let rows: Array<{ txt: string; node: string }> = libraryWarnings.get(st)?.rows ?? [];
+    let reasoning: ReasoningRecord[] = libraryWarnings.get(st)?.reasoning ?? [];
     try {
       const r = await fetch(`${await bridgeUrl()}/validate`, {
         method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ doc: JSON.parse(st.toJSON()) }),
       });
       if (r.ok) {
-        const j = await r.json() as { warnings?: string[] };
+        const j = await r.json() as { warnings?: string[]; reasoning?: Array<ReasoningRecord & { message?: string }> };
         const ids = new Set(st.liveNodes().map((n) => n.id));
+        // FONTE · the reasoning's records are shown ONCE, as rows with their
+        // cures: their English sentences leave the plain warnings
+        reasoning = j.reasoning ?? [];
+        const said = new Set(reasoning.map((x) => x.message).filter(Boolean));
         rows = (j.warnings ?? [])
+          .filter((w) => !said.has(w))
           .filter((w) => !/EPSG:4326 with a zero shift/.test(w))
           .map((w) => ({ txt: w, node: [...w.matchAll(/\(([^()\s]+)\)/g)].map((m) => m[1]).find((id) => ids.has(id)) ?? "" }));
       }
     } catch { /* no bridge: the library's words are not there, and nothing pretends they are */ }
-    const before = JSON.stringify(libraryWarnings.get(st)?.rows ?? []);
-    libraryWarnings.set(st, { key, rows });
-    if (st === store && JSON.stringify(rows) !== before) refreshIssues();
+    const before = JSON.stringify([libraryWarnings.get(st)?.rows ?? [], libraryWarnings.get(st)?.reasoning ?? []]);
+    libraryWarnings.set(st, { key, rows, reasoning });
+    if (st === store && JSON.stringify([rows, reasoning]) !== before) {
+      refreshIssues();
+      // FONTE · the Warnings table shows what arrived late, without a change
+      if (windowsOf().some((w) => w.type === "table")) renderEmData();
+      draw();
+    }
   }, 900);
 }
 
@@ -18819,8 +18909,15 @@ function setCurrentRowId(id: string | null): void {
  */
 function revealFromTable(nodeId: string): void {
   if (!store || !store.node(nodeId)) return;   // a row without a node: nothing to show
-  select(nodeId);                              // selection is a fact about the document
   const graphWin = windowsOf().find((w) => w.type === "graph");
+  // FONTE · a row picked is a jump too: «Indietro» gives back the graph's view
+  if (graphWin && selectedId !== nodeId) {
+    const previous = activeWin().id;
+    setActiveWin(graphWin.id);
+    pushView();
+    setActiveWin(previous);
+  }
+  select(nodeId);                              // selection is a fact about the document
   if (!graphWin) return;                       // no canvas open: the selection is enough
   // «Zoom to selection» frames it (B4: the one rule); the focus stays on the
   // table — you were reading a list, and the pick was a question about one row
@@ -29837,6 +29934,165 @@ function showMissingParentMenu(
 /** Delete the node selection — the Delete key and the context menu's «Elimina»,
  *  one path. Epochs and phases go through their own flows (swimlane + temporal
  *  PDG cleanup); everything else by the document that owns it. */
+// ── FONTE · before removing, who leans on it; the trace ──────────────────────
+//
+// Removing a unit, a property or a document that something leans on asks
+// first (s3Dgraphy `dependents_of`, through the bridge): Annulla · «Elimina
+// lasciando la traccia» (the default: `data.removed = {ts, by}`, the node and
+// its edges stay, what leans on it still reads and `source_removed` says so) ·
+// «Elimina a cascata» (`remove_cascade`: what depends ONLY on it goes, the
+// other units' properties stay — the list is the library's answer, shown
+// before). Nothing leans on it: removed as always. The bridge down: the
+// dependents are not known, and the dialog says so (the trace or nothing).
+
+/** A node whose removal is asked about: a unit, a property, a document. */
+function canBeASource(id: string): boolean {
+  const n = store?.node(id);
+  return !!n && (isStratigraphicType(n.node_type) || n.node_type === "property" || n.node_type === "document");
+}
+
+/** A dependent named as the dialog lists it: «US 12 · essenza» for a property. */
+function dependentLabel(st: DocumentStore, d: Dependent): string {
+  const nm = st.node(d.id)?.node_type === "property" ? composedPropertyName(st.doc, d.id) : String(d.name || d.id);
+  return `${nm} — ${t(`fonte.kind.${d.kind}`)}`;
+}
+
+async function deleteWithConfirm(id: string): Promise<void> {
+  if (!store) return;
+  const st = store;
+  const name = st.node(id)?.node_type === "property" ? composedPropertyName(st.doc, id) : String(st.node(id)?.name ?? id);
+  const docNow = JSON.parse(st.toJSON());
+  let deps: Dependent[] | null = null;
+  let cascade: { result: { removed: Array<{ id: string; name: string }>; kept: Array<{ id: string; name: string; why: string }>;
+                           orphaned: Array<{ id: string; name: string }> }; delta: LibraryDelta | null } | null = null;
+  let why = "";
+  try {
+    const base = await bridgeUrl();
+    [deps, cascade] = await Promise.all([
+      askLibrary<Dependent[]>(base, docNow, "dependents", { node: id }).then((r) => r.result),
+      askLibrary<{ removed: Array<{ id: string; name: string }>; kept: Array<{ id: string; name: string; why: string }>;
+                   orphaned: Array<{ id: string; name: string }> }>(base, docNow, "cascade", { node: id }),
+    ]);
+  } catch (e) {
+    why = await bridgeWhy("/property-source", e);
+  }
+  if (st !== store || !st.node(id)) return;
+  if (deps && !deps.length) {   // nothing leans on it: as always
+    nodeLabelBeforeDelete.set(id, name);
+    st.deleteNode(id);
+    select(null);
+    toastUndo(t("del.one", { name }), st);
+    return;
+  }
+  const modal = document.createElement("div");
+  modal.className = "modal";
+  modal.dataset.role = "delete-confirm";
+  const card = document.createElement("div");
+  card.className = "modal-card";
+  const head = document.createElement("div");
+  head.className = "modal-head";
+  head.textContent = t("fonte.delTitle", { name });
+  const body = document.createElement("div");
+  body.className = "modal-body";
+  const lead = document.createElement("p");
+  if (deps) {
+    lead.textContent = reasoningText("dependents", "description", { n: String(deps.length), node: name });
+    body.appendChild(lead);
+    const ul = document.createElement("ul");
+    ul.className = "fonte-deps";
+    for (const d of deps) {
+      const li = document.createElement("li");
+      li.style.marginLeft = `${(d.depth - 1) * 14}px`;
+      li.textContent = dependentLabel(st, d);
+      li.dataset.dep = d.id;
+      ul.appendChild(li);
+    }
+    body.appendChild(ul);
+  } else {
+    lead.textContent = t("fonte.delUnknown", { why });
+    body.appendChild(lead);
+  }
+  const foot = document.createElement("div");
+  foot.className = "modal-foot";
+  const close = () => { modal.remove(); document.removeEventListener("keydown", onKey, true); };
+  const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") { e.stopPropagation(); close(); } };
+  const cancel = document.createElement("button");
+  cancel.textContent = t("l.cancel");
+  cancel.dataset.action = "cancel";
+  cancel.onclick = close;
+  const trace = document.createElement("button");
+  trace.className = "primary";
+  trace.dataset.action = "trace";
+  trace.textContent = reasoningText("remove_keeping_trace");
+  trace.title = reasoningText("remove_keeping_trace", "description");
+  trace.onclick = () => {
+    close();
+    st.removeKeepingTrace(id);
+    select(id);
+    toastUndo(t("fonte.traceLeft", { name }), st);
+    refreshIssues();
+    draw();
+  };
+  const casc = document.createElement("button");
+  casc.dataset.action = "cascade";
+  casc.textContent = reasoningText("remove_cascade");
+  if (cascade?.delta) {
+    const goes = cascade.result.removed.map((x) => st.node(x.id)?.node_type === "property"
+      ? composedPropertyName(st.doc, x.id) : String(x.name ?? x.id));
+    casc.title = `${reasoningText("remove_cascade", "description")}\n— ${goes.join(", ")}`;
+    const p2 = document.createElement("p");
+    p2.className = "insp-hint";
+    p2.textContent = t("fonte.cascadeGoes", { n: String(goes.length), names: goes.join(", ") })
+      + (cascade.result.kept.length ? " · " + t("fonte.cascadeKeeps", { names: cascade.result.kept.map((k) =>
+          st.node(k.id)?.node_type === "property" ? composedPropertyName(st.doc, k.id) : k.name).join(", ") }) : "");
+    body.appendChild(p2);
+    const delta = cascade.delta;
+    casc.onclick = () => {
+      close();
+      applyDelta(st, delta);
+      select(null);
+      toastUndo(t("fonte.cascadeDone", { name, n: String(goes.length) }), st);
+      refreshIssues();
+      draw();
+    };
+  } else {
+    casc.disabled = true;
+    casc.title = t("fonte.cascadeNeedsBridge");
+  }
+  foot.append(cancel, casc, trace);
+  card.append(head, body, foot);
+  modal.appendChild(card);
+  modal.addEventListener("click", (e) => { if (e.target === modal) close(); });
+  document.addEventListener("keydown", onKey, true);
+  document.body.appendChild(modal);
+  trace.focus();   // the default
+}
+
+/** FONTE · the Inspector of a TRACE: what it is, and «Ripristina». */
+function renderTraceBanner(host: HTMLElement, st: DocumentStore, id: string): void {
+  const n = st.node(id);
+  if (!n || !isRemoved(n as unknown as Record<string, unknown>)) return;
+  const box = document.createElement("div");
+  box.className = "insp-trace";
+  box.dataset.trace = id;
+  const mark = (n.data as Record<string, unknown>).removed as { ts?: string; by?: string } | undefined;
+  const p = document.createElement("p");
+  p.textContent = t("fonte.traceNote", { when: String(mark?.ts ?? ""), by: String(mark?.by ?? "—") });
+  const b = document.createElement("button");
+  b.className = "insp-btn";
+  b.dataset.action = "restore";
+  b.textContent = t("fonte.restore");
+  b.addEventListener("click", () => {
+    st.restoreTrace(id);
+    toastUndo(t("fonte.restored", { name: String(n.name ?? id) }), st);
+    refreshIssues();
+    refreshInspector();
+    draw();
+  });
+  box.append(p, b);
+  host.querySelector(".insp-head")?.after(box) ?? host.prepend(box);
+}
+
 function deleteSelectedNodes(): void {
   if (!store) return;
   // delete the WHOLE multi-selection, not just the active node
@@ -29852,6 +30108,11 @@ function deleteSelectedNodes(): void {
     return;
   }
   const plain = ids.filter((id) => !isEpochish(id));
+  // FONTE · ONE unit, property or document: who leans on it is asked first
+  if (plain.length === 1 && ids.length === 1 && canBeASource(plain[0])) {
+    void deleteWithConfirm(plain[0]);
+    return;
+  }
   nodeLabelBeforeDelete.clear();
   for (const id of plain) nodeLabelBeforeDelete.set(id, String(storeOfNode(id)?.node(id)?.name || id));
   if (plain.length !== ids.length)
