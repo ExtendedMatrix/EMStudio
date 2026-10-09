@@ -1228,7 +1228,15 @@ test("S1.decorator", "Matrix e Graph: «R» nell'angolo in basso a destra della 
     return deco(r, "R") && deco(s, "R") && deco(w, "M") && u && !u.letters.length && u.name
       && r.box.w === u.box.w && r.box.h === u.box.h && s.box.w === u.box.w && w.box.w === u.box.w;
   };
-  return { pass: ok(matrix) && ok(graph) && matrix.mode !== graph.mode && !errors.length, detail: { border, matrix, graph, errors } };
+  // G3 (MICRO grafo reattivo) · the Graph draws DISCS now: sized by the degree,
+  // named from 26 px, the genre's letter inside the disc (lower right, in the
+  // disc's ink) — the letter is what the Graph must keep; the Matrix keeps it all
+  const okDisc = (m) => {
+    const r = m.out.USR201, s = m.out.USS202, u = m.out.US203, w = m.out.USM204;
+    const deco = (x, L) => x && x.letters.length === 1 && x.letters[0].text === L && x.letters[0].fx > 0.6 && x.letters[0].fy > 0.6;
+    return deco(r, "R") && deco(s, "R") && deco(w, "M") && u && !u.letters.length;
+  };
+  return { pass: ok(matrix) && okDisc(graph) && matrix.mode !== graph.mode && !errors.length, detail: { border, matrix, graph, errors } };
 });
 
 // ── NIGHT-SPAZIO · parte 2 · le letture nei dati del nodo ────────────────────
@@ -2015,11 +2023,18 @@ test("U4.lanemenu", "TempluMare: clic destro sull'intestazione di corsia (fermo,
   const base = await drawn();
   const moved = [];
   let items = [];
+  // G5 (MICRO grafo reattivo) · the RIGHT button held pans now: a right CLICK
+  // (still, or under 4 px) opens the menu and moves nothing; a right DRAG moves
+  // the camera by exactly the drag (the lane label follows: +4 px down for a
+  // 6,4 drag) and nothing moves after it, Esc and a free movement included
+  const yOf = (d) => Number(/@\d+,(\d+)/.exec(d)?.[1] ?? NaN);
+  let expectY = yOf(base);
   for (const fy of [0.15, 0.5, 0.85]) {
     const x = cvr.x + 60, y = cvr.y + cvr.h * fy;
     await p.mouse.move(x, y);
     await p.mouse.click(x, y, { button: "right" });
     await p.waitForTimeout(300);
+    const c = await drawn();
     if (!items.length) items = await p.evaluate(() => [...document.querySelectorAll(".ctx-menu button")].map((b) => b.textContent));
     await p.mouse.move(x + 40, y + 30, { steps: 5 });
     const a = await drawn();
@@ -2033,7 +2048,8 @@ test("U4.lanemenu", "TempluMare: clic destro sull'intestazione di corsia (fermo,
     await p.mouse.move(x + 150, y + 90, { steps: 8 });
     await p.waitForTimeout(250);
     const b = await drawn();
-    if (a !== base || b !== base) moved.push({ fy, a, b });
+    if (yOf(c) !== expectY || yOf(a) !== expectY || yOf(b) !== expectY + 4) moved.push({ fy, c, a, b, expectY });
+    expectY = yOf(b);
   }
   await ctx.close();
   return { pass: !base.startsWith("none") && !moved.length && items.some((t) => /cronologia/i.test(t)), detail: { base, moved, items } };

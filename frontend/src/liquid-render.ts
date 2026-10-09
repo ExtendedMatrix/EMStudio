@@ -13,6 +13,7 @@
  * switch). Culling: a disc or an edge off screen is not drawn.
  */
 import { drawGlyph, type GlyphInk } from "./glyphs";
+import { stratigraphicKindLetter, stratigraphicKindOf } from "./rules";
 import { FAMILY_COLOR, discVisibility, type Disc, type LiquidExtra, type LiquidFilter } from "./views/liquid";
 import type { Scene } from "./scene";
 import { canvasFont, canvasTheme, activeTheme } from "./theme";
@@ -158,6 +159,19 @@ export function renderLiquid(
         ctx.lineWidth = 0.8 / k;
         ctx.strokeStyle = dark ? "#8892A3" : "#9AA3B2";
         ctx.stroke();
+      }
+    }
+    // the genre of a unit (USR, USS, USM…: `data.stratigraphic_kind`) keeps its
+    // letter, as in the Matrix: inside the disc, lower right, in the ring's ink
+    if (px >= 14) {
+      const kind = stratigraphicKindOf(n.node);
+      const letter = kind ? stratigraphicKindLetter(kind) : "";
+      if (letter) {
+        ctx.font = canvasFont(700, c.r * 0.62);
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillStyle = col.ink;
+        ctx.fillText(letter, c.x + c.r * 0.42, c.y + c.r * 0.38);
       }
     }
     if (px >= 26 && disc.glyph) {

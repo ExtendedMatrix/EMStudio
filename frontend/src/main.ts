@@ -28557,6 +28557,12 @@ function wireGraphCanvas(canvas: HTMLCanvasElement, winId: string): void {
       const dx = e.clientX - lastX;
       const dy = e.clientY - lastY;
       if (rightPress) {
+        // the right button let go somewhere the release did not reach: no pan
+        if (!(e.buttons & 2)) {
+          rightPress = null;
+          dragMode = "none";
+          return;
+        }
         if (!rightPress.panned && Math.hypot(e.clientX - rightPress.x, e.clientY - rightPress.y) >= 4) {
           rightPress.panned = true;
           moved = true;
