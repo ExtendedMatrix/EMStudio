@@ -449,7 +449,14 @@ test("2.canvas", "tela + Backspace: il nodo se ne va, il toast dice chi, Annulla
   await p.evaluate(() => document.activeElement?.blur?.());
   const before = await p.evaluate(() => window.__EM_DRAG__.nodeCount());
   await p.keyboard.press("Backspace");
-  await p.waitForTimeout(400);
+  // FONTE (v2, part 4) · a unit something leans on asks first: the dialog's
+  // default, «Elimina lasciando la traccia», is the gesture's removal now
+  await p.waitForTimeout(1500);
+  const asked = await p.evaluate(() => !!document.querySelector("[data-role='delete-confirm']"));
+  if (asked) {
+    await p.click("[data-role='delete-confirm'] button[data-action='trace']");
+    await p.waitForTimeout(400);
+  }
   const gone = await p.evaluate(() => window.__EM_DRAG__.nodeCount());
   const toastText = await p.evaluate(() => document.getElementById("toast")?.innerText ?? "");
   await p.click("#toast .toast-action");
@@ -457,7 +464,7 @@ test("2.canvas", "tela + Backspace: il nodo se ne va, il toast dice chi, Annulla
   const back = await p.evaluate(() => window.__EM_DRAG__.nodeCount());
   await ctx.close();
   return { pass: gone < before && back === before && /USM101/.test(toastText) && /Annulla/.test(toastText),
-           detail: { before, gone, back, toastText } };
+           detail: { before, gone, back, toastText, asked } };
 });
 test("2.space", "Spazio su un pulsante lo attiva (non fa il pan)", async () => {
   const { p, ctx } = await open({ doc: "catena" });
