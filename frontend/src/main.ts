@@ -28065,6 +28065,7 @@ function wireGraphCanvas(canvas: HTMLCanvasElement, winId: string): void {
   });
   canvas.addEventListener("pointerup", endLongPress);
   canvas.addEventListener("pointercancel", endLongPress);
+  canvas.addEventListener("pointercancel", () => { if (rightPress) { rightPress = null; dragMode = "none"; } });
   canvas.addEventListener("pointerdown", (e) => {
     claim();
     finishSlide(); // TOCCARE · grab the node where it is going, not mid-glide
@@ -28081,6 +28082,15 @@ function wireGraphCanvas(canvas: HTMLCanvasElement, winId: string): void {
       markCameraTouched(winId, view);
       canvas.classList.add("panning");
       canvas.setPointerCapture(e.pointerId);
+      e.preventDefault();
+      return;
+    }
+    // G5 · the RIGHT button pans too: a press that moves 4 px is a pan, one
+    // released before that opens the context menu (pointerup)
+    if (e.button === 2 && e.pointerType === "mouse") {
+      dragMode = "pan";
+      rightPress = { x: e.clientX, y: e.clientY, panned: false };
+      try { canvas.setPointerCapture(e.pointerId); } catch { /* a synthetic event */ }
       e.preventDefault();
       return;
     }
@@ -28354,7 +28364,14 @@ function wireGraphCanvas(canvas: HTMLCanvasElement, winId: string): void {
     if (dragMode === "pan") {
       const dx = e.clientX - lastX;
       const dy = e.clientY - lastY;
-      if (Math.abs(dx) + Math.abs(dy) > 3) moved = true;
+      if (rightPress) {
+        if (!rightPress.panned && Math.hypot(e.clientX - rightPress.x, e.clientY - rightPress.y) >= 4) {
+          rightPress.panned = true;
+          moved = true;
+          markCameraTouched(winId, view);
+          canvas.classList.add("panning");
+        }
+      } else if (Math.abs(dx) + Math.abs(dy) > 3) moved = true;
       if (moved) {
         vp.x += dx;
         vp.y += dy;
@@ -28538,6 +28555,14 @@ function wireGraphCanvas(canvas: HTMLCanvasElement, winId: string): void {
   canvas.addEventListener("pointerup", (e) => {
     perfRelease();
     canvas.classList.remove("panning");
+    if (rightPress && e.button === 2) {
+      const still = !rightPress.panned;
+      rightPress = null;
+      dragMode = "none";
+      rightMenuAt = performance.now();
+      if (still) canvasContextMenu(e);
+      return;
+    }
     const mode = dragMode;
     dragMode = "none";
     dragDetachPending = false;
@@ -28769,6 +28794,10 @@ function wireGraphCanvas(canvas: HTMLCanvasElement, winId: string): void {
       draw();
     }
   });
+  // G5 · the wheel: a pinch (ctrlKey, which is how Chrome and Firefox deliver
+  // it) zooms at the fingers, a two-finger trackpad scroll pans, a mouse wheel
+  // zooms at the cursor. One paint per frame (`requestDraw`): a trackpad sends
+  // several events per frame.
   canvas.addEventListener(
     "wheel",
     (e) => {
@@ -28776,18 +28805,56 @@ function wireGraphCanvas(canvas: HTMLCanvasElement, winId: string): void {
       e.preventDefault();
       const rect = canvas.getBoundingClientRect();
       markCameraTouched(winId, view);
-      viewport().zoomAt(
-        e.clientX - rect.left,
-        e.clientY - rect.top,
-        Math.exp(-e.deltaY * 0.0016),
-      );
-      draw();
+      const unit = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? rect.height : 1;
+      if (e.ctrlKey) {
+        // a pinch reports small deltas: a stronger factor than the wheel's
+        viewport().zoomAt(e.clientX - rect.left, e.clientY - rect.top, Math.exp(-e.deltaY * unit * 0.01));
+      } else if (isTrackpadScroll(e)) {
+        const vp = viewport();
+        vp.x -= e.deltaX * unit;
+        vp.y -= e.deltaY * unit;
+        tooltip.classList.add("hidden");
+      } else {
+        viewport().zoomAt(
+          e.clientX - rect.left,
+          e.clientY - rect.top,
+          Math.exp(-e.deltaY * unit * 0.0016),
+        );
+      }
+      requestDraw();
     },
     { passive: false },
   );
-  canvas.addEventListener("contextmenu", (e) => {
-    claim();
+  // G5 · WebKit (Safari, and the desktop app's WKWebView) delivers a pinch as
+  // gesture events, not as a ctrl-wheel: the same zoom at the fingers
+  let gestureScale = 1;
+  canvas.addEventListener("gesturestart", (e) => {
     e.preventDefault();
+    gestureScale = 1;
+  });
+  canvas.addEventListener("gesturechange", (e) => {
+    e.preventDefault();
+    const g = e as Event & { scale?: number; clientX?: number; clientY?: number };
+    const sc = typeof g.scale === "number" && g.scale > 0 ? g.scale : 1;
+    const rect = canvas.getBoundingClientRect();
+    markCameraTouched(winId, view);
+    viewport().zoomAt((g.clientX ?? rect.left + rect.width / 2) - rect.left,
+                      (g.clientY ?? rect.top + rect.height / 2) - rect.top, sc / gestureScale);
+    gestureScale = sc;
+    requestDraw();
+  });
+  canvas.addEventListener("contextmenu", (e) => {
+    e.preventDefault();
+    // G5 · a mouse's right button is handled by the press and the release (pan
+    // or menu); its contextmenu — before the release on macOS, after it on
+    // Windows — is the same click, already answered or about to be
+    if (rightPress || performance.now() - rightMenuAt < 600) return;
+    canvasContextMenu(e);
+  });
+  /** The canvas's context menu at a pointer position (right click, the Menu
+   *  key, a long press) — the body of the old `contextmenu` handler. */
+  function canvasContextMenu(e: MouseEvent): void {
+    claim();
     const wp = worldPos(e);
     const s = scene();
     const hit = s ? hitTest(s, wp.x, wp.y, hitTol()) : null;
@@ -28827,7 +28894,7 @@ function wireGraphCanvas(canvas: HTMLCanvasElement, winId: string): void {
       return;
     }
     showContextMenu(e.clientX, e.clientY, win);
-  });
+  }
 }
 
 
@@ -28882,6 +28949,30 @@ let dragDetachPending = false; // Shift+drag a member → pull it out of its gro
 // nodes to pull out of their groups on shift+drag (whole selection if multi)
 let dragDetachSet: { id: string; container: string }[] = [];
 let spaceHeld = false; // Space → pan-always gesture (see pointerdown)
+/** G5 · a press of the RIGHT button: a pan once it moves 4 px, the context menu
+ *  when it is released before that. `menuAt` silences the browser's own
+ *  `contextmenu` that follows (Windows sends it after the release, macOS on the
+ *  press). */
+let rightPress: { x: number; y: number; panned: boolean } | null = null;
+let rightMenuAt = 0;
+/** G5 · a two-finger trackpad scroll in progress (its wheel events are told from
+ *  a mouse wheel's, and a gesture keeps its kind until it stops for 400 ms) */
+let trackpadUntil = 0;
+/** G5 · is this wheel event a trackpad's two-finger scroll (→ pan) and not a
+ *  mouse wheel (→ zoom at the cursor)? A wheel in lines or pages is a mouse; in
+ *  pixels, a horizontal component, a fractional or small delta, or Chrome's
+ *  legacy `wheelDeltaY` at −3 × deltaY are a trackpad's. Measured in Chrome and
+ *  WebKit on macOS; a mouse with free-spinning smooth scroll can read as a
+ *  trackpad, which pans — the gentler of the two mistakes. */
+function isTrackpadScroll(e: WheelEvent): boolean {
+  const now = performance.now();
+  if (e.deltaMode !== 0) return false;
+  const legacy = (e as WheelEvent & { wheelDeltaY?: number }).wheelDeltaY;
+  const fine = e.deltaX !== 0 || !Number.isInteger(e.deltaY) || Math.abs(e.deltaY) < 50 ||
+    (typeof legacy === "number" && legacy !== 0 && legacy === -3 * e.deltaY);
+  if (fine) trackpadUntil = now + 400;
+  return fine || now < trackpadUntil;
+}
 let pdTagPending: string | null = null; // PD tag pressed → enter on click (pointerup)
 let adornmentPending: string | null = null; // ornament badge pressed → select real node
 let pdDecoratorPending: string | null = null; // PD tablet pressed → select group on click
