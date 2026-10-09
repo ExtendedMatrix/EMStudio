@@ -3617,7 +3617,8 @@ function runCompact(units?: string[]): void {
 function runDissolve(units: string[]): void {
   if (!store) return;
   const r = dissolveGroups(store, units);
-  toast(t("compact.dissolved", { units: String(r.units), m: String(r.memberships), g: String(r.groupsRemoved) }));
+  toast(t("compact.dissolved", { units: String(r.units), m: String(r.memberships), g: String(r.groupsRemoved) })
+        + (r.groupsKept ? " · " + t("compact.dissolveKept", { k: String(r.groupsKept) }) : ""));
 }
 
 /** PROPRIETA · «Duplicate for each owner» of one property — ONE undo step.

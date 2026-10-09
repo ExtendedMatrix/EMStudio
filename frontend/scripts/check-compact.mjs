@@ -242,16 +242,22 @@ const report = {};
   const d1 = undoDepth(st);
   const dr = C.dissolveGroups(st, ["US1", "US2"]);
   eq(undoDepth(st) - d1, 1, "Dissolve is ONE undo step");
-  eq([dr.units, dr.groupsRemoved], [2, 2], "both groups dissolved and removed (left empty)");
-  ok(!st.paradataGroupOf("US1") && !st.paradataGroupOf("US2"), "no group left on US1 / US2");
-  for (const p of ["P1A", "P1B", "P1C", "P2A", "P2B"]) ok(drawn(st, p.startsWith("P1") ? "US1" : "US2", p), `${p} is direct again`);
-  // back to the start but for the copies (and their rewiring) and PD_US2,
-  // which held P2A before and goes with the dissolve
+  // FONTE (v2, part 5) · Dissolve takes back what Compact did: PD_US1 (made
+  // by Compact) goes, PD_US2 (there before, holding P2A) STAYS with P2A
+  eq([dr.units, dr.groupsRemoved, dr.groupsKept], [2, 1, 1], "PD_US1 removed (Compact made it), PD_US2 kept (it was there before)");
+  ok(!st.paradataGroupOf("US1"), "no group left on US1");
+  eq(st.paradataGroupOf("US2"), "PDG2", "US2 keeps PD_US2");
+  ok(member(st, "P2A", "PDG2"), "…with P2A, its member before Compact");
+  ok(!member(st, "P2B", "PDG2"), "…and P2B back out, as it was");
+  ok(st.doc.graph.edges.filter((e) => e.edge_type === "is_in_paradata_nodegroup" && e.target === "PDG2")
+       .every((e) => !e.attributes?.compacted), "what stays in PD_US2 is what was there, unmarked");
+  for (const p of ["P1A", "P1B", "P1C", "P2B"]) ok(drawn(st, p.startsWith("P1") ? "US1" : "US2", p), `${p} is direct again`);
+  // back to the start but for the copies (and their rewiring)
   const s0 = JSON.parse(start);
   const ids0 = new Set(s0.nodes.map((n) => n.id));
   eq(st.doc.graph.nodes.filter((n) => !ids0.has(n.id)).map((n) => n.node_type).sort(),
      ["combiner", "extractor", "extractor", "extractor"], "after Compact + Dissolve the new nodes are the four copies");
-  eq(s0.nodes.filter((n) => !st.node(n.id)).map((n) => n.id), ["PDG2"], "…and the only node gone is PD_US2 (it held P2A before)");
+  eq(s0.nodes.filter((n) => !st.node(n.id)).map((n) => n.id), [], "…and no node of the start is gone (PD_US2 stays)");
   const v2 = validate(st.doc);
   if (v2) eq(v2.issues.filter((x) => !v0.issues.includes(x)), [], "s3Dgraphy validate after Dissolve: no new issue");
   report.fixture = { before, after_compact: numbers((() => { const x = fresh(); C.compactProperties(x); return x; })()),

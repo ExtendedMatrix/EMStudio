@@ -256,9 +256,15 @@ function rewire(store: DocumentStore, edge: EmEdge, newTarget: string): void {
   store.addEdge(edge.source, newTarget, edge.edge_type ?? "", freshAttrs(edge));
 }
 
-function ensureMember(store: DocumentStore, id: string, group: string): boolean {
+/** FONTE (v2, part 5) · the mark of what «Compact» wrote, so that «Dissolve»
+ *  takes back only that: an attribute on the memberships it adds, a data key
+ *  on the groups it makes. A group or a membership without it was there before
+ *  and stays. */
+export const COMPACTED_KEY = "compacted";
+
+function ensureMember(store: DocumentStore, id: string, group: string, mark = false): boolean {
   if (store.hasEdge(id, group, IS_IN_PARADATA_NODEGROUP)) return false;
-  store.addEdge(id, group, IS_IN_PARADATA_NODEGROUP);
+  store.addEdge(id, group, IS_IN_PARADATA_NODEGROUP, mark ? { [COMPACTED_KEY]: true } : undefined);
   return true;
 }
 
@@ -311,7 +317,7 @@ function take(store: DocumentStore, id: string, upper: EmEdge, unitId: string, g
     rewire(store, upper, mine);
     res.duplicates++;
   }
-  ensureMember(store, mine, group);
+  ensureMember(store, mine, group, true);
   if (kind === "CombinerNode") {
     // the extractors under it, from the ORIGINAL (a copy has none yet)
     const below = outOf(index(store.doc), id, COMBINES);
@@ -356,12 +362,15 @@ export function compactProperties(store: DocumentStore, unitIds?: string[]): Com
       }
       if (!props.length) continue;
       const g = ensureGroup(store, unitId, props);
-      if (g.created) res.groupsCreated++;
+      if (g.created) {
+        res.groupsCreated++;
+        store.updateNode(g.id, { data: { ...((store.node(g.id)?.data ?? {}) as Record<string, unknown>), [COMPACTED_KEY]: true } });
+      }
       res.units++;
       res.groups.push(g.id);
       const seen = new Set<string>();
       for (const p of props) {
-        if (ensureMember(store, p, g.id)) res.properties++;
+        if (ensureMember(store, p, g.id, true)) res.properties++;
         for (const e of outOf(index(store.doc), p, HAS_DATA_PROVENANCE))
           take(store, e.target, e, unitId, g.id, res, seen);
       }
@@ -371,40 +380,48 @@ export function compactProperties(store: DocumentStore, unitIds?: string[]): Com
   return res;
 }
 
+const CHAIN_CLASSES = new Set(["PropertyNode", "CombinerNode", "ExtractorNode", "DocumentNode"]);
+
 export interface DissolveResult {
   units: number;
   /** memberships removed */
   memberships: number;
-  /** groups removed because they were left empty */
+  /** groups removed because «Compact» made them and they were left empty */
   groupsRemoved: number;
+  /** groups kept because they were there before «Compact» (or hold more) */
+  groupsKept: number;
 }
 
-const CHAIN_CLASSES = new Set(["PropertyNode", "CombinerNode", "ExtractorNode", "DocumentNode"]);
-
 /**
- * «Dissolve the group»: the properties of the unit go back to direct — their
- * memberships (and their chains') leave the group, and the group goes when
- * nothing else is in it (an author or a licence keeps it). Copies stay: they
- * are data. ONE undo step.
+ * «Dissolve the group»: takes back what «Compact» did — the memberships it
+ * added (marked `compacted`) leave the group, and the group goes when Compact
+ * made it and nothing else is in it. A group that was there BEFORE «Compact»
+ * stays, with the members it had (FONTE, v2 part 5: measured on the fixture,
+ * PD_US2 held P2A before and used to go with the dissolve); it is opened.
+ * Copies stay: they are data. Memberships and groups written before this mark
+ * existed (a «Compact» of 9 Oct) carry none and are kept. ONE undo step.
  */
 export function dissolveGroups(store: DocumentStore, unitIds: string[]): DissolveResult {
-  const res: DissolveResult = { units: 0, memberships: 0, groupsRemoved: 0 };
+  const res: DissolveResult = { units: 0, memberships: 0, groupsRemoved: 0, groupsKept: 0 };
   store.batch(() => {
     for (const unitId of unitIds) {
       const ix = index(store.doc);
       const g = groupOf(ix, unitId);
       if (!g) continue;
       res.units++;
-      const members = inOf(ix, g, IS_IN_PARADATA_NODEGROUP);
-      for (const e of members)
-        if (CHAIN_CLASSES.has(cls(ix, e.source))) {
+      for (const e of inOf(ix, g, IS_IN_PARADATA_NODEGROUP))
+        if (CHAIN_CLASSES.has(cls(ix, e.source)) && attrs(e)[COMPACTED_KEY]) {
           store.deleteEdge(e);
           res.memberships++;
         }
-      if (!inOf(index(store.doc), g, IS_IN_PARADATA_NODEGROUP).length) {
+      const made = !!((ix.node.get(g)?.data ?? {}) as Record<string, unknown>)[COMPACTED_KEY];
+      if (made && !inOf(index(store.doc), g, IS_IN_PARADATA_NODEGROUP).length) {
         store.deleteNode(g);
         res.groupsRemoved++;
-      } else if (store.isFolded(g)) store.setFolded(g, false);
+      } else {
+        res.groupsKept++;
+        if (store.isFolded(g)) store.setFolded(g, false);
+      }
     }
   });
   return res;
