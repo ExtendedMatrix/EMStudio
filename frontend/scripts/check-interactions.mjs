@@ -3098,7 +3098,11 @@ test("W02.dating", "U2 · l'anno propone l'epoca che lo contiene (un bottone la 
   await p.keyboard.type("150");
   await p.click("select[data-doc-epoch]");     // the click that dev.15 lost
   await p.waitForTimeout(600);
-  const r1 = await p.evaluate(() => ({ year: window.__EM_DRAG__.node("d02").data.year, focus: document.activeElement?.dataset?.docEpoch ?? null,
+  // MICRO-BADGE-PD-CRONOLOGIA · the year is the document's absolute_time_start
+  // (its property, and the data copy beside it), no more data.year
+  const r1 = await p.evaluate(() => ({ year: window.__EM_DRAG__.node("d02").data.absolute_time_start,
+    prop: window.__EM_DRAG__.edgesOf("has_property").filter((e) => e.source === "d02").map((e) => window.__EM_DRAG__.node(e.target))
+      .filter((n) => n?.name === "absolute_time_start").map((n) => n.description), focus: document.activeElement?.dataset?.docEpoch ?? null,
     hint: document.querySelector("[data-doc-year-hint]")?.textContent ?? "" }));
   await p.click('[data-action="date-in-proposed"]');
   await p.waitForTimeout(1200);
@@ -3115,7 +3119,7 @@ test("W02.dating", "U2 · l'anno propone l'epoca che lo contiene (un bottone la 
   const r3 = await q.evaluate(() => ({ hint: document.querySelector("[data-doc-year-hint]")?.textContent ?? "", btn: !!document.querySelector('[data-action="write-epoch-dates"]') }));
   await c2.close();
   await ctx.close();
-  return { pass: r1.year === 150 && /falls in Età romana/.test(r1.hint) && r2.ep === "ep1" && r2.sel[0] === "d02"
+  return { pass: r1.year === "150" && r1.prop.join() === "150" && /falls in Età romana/.test(r1.hint) && r2.ep === "ep1" && r2.sel[0] === "d02"
       && /No epoch has its dates/.test(r3.hint) && r3.btn && !errors.length, detail: { r1, r2, r3, errors } };
 });
 
