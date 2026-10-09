@@ -330,8 +330,30 @@ const eq = (got, want, what) => {
      "the five spaces, with the ids every saved arrangement is keyed by");
   eq(W.PARKED_WORKSPACES.map((w) => w.id), ["dtc", "comparisons", "annotator"], "the rest stay parked");
   const sig = (id) => W.arrangementSignature(W.WORKSPACES.find((w) => w.id === id).arrangement);
-  eq(sig("canvas"), "row(outliner,row(col(graph:matrix,table),inspector))",
-     "Stratigrafia: Outliner · Matrix above the table · Inspector — complete from the start");
+  // G7 (MICRO grafo reattivo) · the graphs of the workspace above the Outliner
+  eq(sig("canvas"), "row(col(emtree,outliner),row(col(graph:matrix,table),inspector))",
+     "Stratigrafia: EMTree above the Outliner · Matrix above the table · Inspector — complete from the start");
+  // …a saved Stratigrafia of the rev-3 seed (untouched) is re-seeded at rev 4
+  {
+    const before = W.LEGACY_SIGNATURES.canvas;
+    ok(before.includes("row(outliner,row(col(graph:matrix,table),inspector))") && W.WORKSPACES_REV >= 4,
+       "the rev-3 Stratigrafia seed is a legacy signature: an untouched one opens with the graphs panel");
+  }
+  // …and the panel compresses to its header and comes back
+  {
+    W.applyArrangement("canvas");
+    const ids = W.paneIds(W.layoutOf("canvas"));
+    const graphs = ids[0];
+    const r0 = W.stackedRatio(graphs, "canvas");
+    ok(typeof r0 === "number" && Math.abs(r0 - 0.32) < 1e-9, "the graphs panel is the upper third of the left column");
+    eq(W.toggleCompressed(graphs, 0.04, "canvas"), true, "▾ compresses it");
+    eq(W.stackedRatio(graphs, "canvas"), 0.04, "…to its header's share");
+    ok(W.isCompressed(graphs, "canvas"), "…and the window knows it");
+    eq(W.toggleCompressed(graphs, 0.04, "canvas"), false, "▸ brings it back");
+    eq(W.stackedRatio(graphs, "canvas"), r0, "…to the ratio it had");
+    eq(W.toggleCompressed(ids[1], 0.04, "canvas"), null,
+       "the Outliner, the lower side of the stack, is left alone (null)");
+  }
   // DEV30 U6 · the graph window of Fonti opens on the Matrix, the standard view
   eq(sig("provenance"), "row(table,row(col(doc,graph:matrix),inspector))",
      "Fonti: Documents · Document above the graph · Inspector");

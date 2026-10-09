@@ -234,12 +234,18 @@ const BUILTIN_WORKSPACES: WorkspacePreset[] = [
     arrangement: {
       wins: [
         { name: "canvas", type: "graph", state: { mode: "matrix" } },
+        { name: "graphs", type: "emtree" },
         { name: "outliner", type: "outliner" },
         { name: "issues", type: "table", state: { "current.table.sheet": "Issues" } },
         { name: "inspector", type: "inspector" },
       ],
       active: "canvas",
-      layout: { dir: "row", ratio: 0.16, a: { win: "outliner" },
+      // G7 (MICRO grafo reattivo) · the graphs of the workspace above the
+      // Outliner, in the left column: EMTree, its line, New graph / Open…, the
+      // recent files. A third of the column; resizable by its divider, and
+      // compressed to its header by its ▾ (`toggleCompressed`)
+      layout: { dir: "row", ratio: 0.17,
+                a: { dir: "col", ratio: 0.32, a: { win: "graphs" }, b: { win: "outliner" } },
                 b: { dir: "row", ratio: 0.76,
                      a: { dir: "col", ratio: 0.64, a: { win: "canvas" }, b: { win: "issues" } },
                      b: { win: "inspector" } } },
@@ -768,12 +774,14 @@ export function workspaceModified(ws: WorkspaceId = active): boolean {
  * Runs once (`emstudio.workspaces.rev` < 2), and is pure so the check can run it.
  */
 export const LEGACY_SIGNATURES: Record<string, string[]> = {
-  canvas: ["row(outliner,row(graph:matrix,inspector))", "row(emtree,row(graph:matrix,inspector))"],
+  canvas: ["row(outliner,row(graph:matrix,inspector))", "row(emtree,row(graph:matrix,inspector))",
+           // rev 4 (G7) · the Stratigraphy seed before the graphs panel came in
+           "row(outliner,row(col(graph:matrix,table),inspector))"],
   provenance: ["row(storage,row(graph:dtc,inspector))"],
   assets: ["row(storage,row(storage,col(graph:dtc,inspector)))"],
   narrative: ["row(narrative,viewer)"],
 };
-export const WORKSPACES_REV = 3;
+export const WORKSPACES_REV = 4;
 const REV_KEY = "emstudio.workspaces.rev";
 
 export function migrateSavedArrangements(
@@ -1081,6 +1089,61 @@ export function setSplitRatio(
   };
   registry[ws].layout = walk(layoutOf(ws));
   persistWindows();
+}
+
+/**
+ * G7 · compress a window to its header, and bring it back: the window must be
+ * the FIRST side of a vertical split (a panel above another). `headerRatio` is
+ * the share of the split its header needs; the ratio it had is kept on the
+ * window (`state.compressedFrom`) and restored. Returns whether it is now
+ * compressed, or null when the window is not where this applies.
+ */
+export function toggleCompressed(winId: string, headerRatio: number, ws: WorkspaceId = active): boolean | null {
+  const entry = registry[ws];
+  const win = entry.wins.find((w) => w.id === winId);
+  if (!win) return null;
+  let path: string | null = null;
+  const find = (p: Pane, at: string): void => {
+    if (path !== null || p.kind !== "split") return;
+    if (p.dir === "col" && p.a.kind === "leaf" && p.a.winId === winId) {
+      path = at;
+      return;
+    }
+    find(p.a, at + "a");
+    find(p.b, at + "b");
+  };
+  find(layoutOf(ws), "");
+  if (path === null) return null;
+  const at = paneAt(path, ws);
+  if (!at || at.kind !== "split") return null;
+  const from = win.state["compressedFrom"];
+  const compressed = typeof from === "number";
+  const ratio = compressed ? from : Math.max(0.02, Math.min(0.2, headerRatio));
+  entry.layout = replaceAt(layoutOf(ws), path, (p) => ({ ...p, ratio }) as Pane);
+  if (compressed) delete win.state["compressedFrom"];
+  else win.state["compressedFrom"] = at.ratio;
+  persistWindows();
+  return !compressed;
+}
+
+/** G7 · the ratio of the vertical split whose upper side is `winId`, or null. */
+export function stackedRatio(winId: string, ws: WorkspaceId = active): number | null {
+  let out: number | null = null;
+  const find = (p: Pane): void => {
+    if (out !== null || p.kind !== "split") return;
+    if (p.dir === "col" && p.a.kind === "leaf" && p.a.winId === winId) {
+      out = p.ratio;
+      return;
+    }
+    find(p.a);
+    find(p.b);
+  };
+  find(layoutOf(ws));
+  return out;
+}
+
+export function isCompressed(winId: string, ws: WorkspaceId = active): boolean {
+  return typeof registry[ws].wins.find((w) => w.id === winId)?.state["compressedFrom"] === "number";
 }
 
 /** The pane at a PATH from the root ("" = root, "a"/"b" per level), or null. */

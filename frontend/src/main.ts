@@ -453,6 +453,9 @@ import {
   toggleMaximize,
   paneAt,
   setSplitRatioAt,
+  isCompressed,
+  stackedRatio,
+  toggleCompressed,
   closeSplitSide,
   setActiveWin,
   setActiveWorkspace,
@@ -26701,6 +26704,23 @@ function buildAreaHeader(win: Win): DocumentFragment {
     });
     frag.appendChild(b);
   };
+  // G7 · a panel stacked above another (the graphs above the Outliner) can be
+  // compressed to its header and brought back
+  if (type === "emtree") {
+    const on = isCompressed(win.id);
+    act(on ? "▸" : "▾", t(on ? "win.expand" : "win.compress"), on, () => {
+      const area = winAreas.get(win.id);
+      const col = area?.parentElement?.getBoundingClientRect().height ?? 900;
+      const own = area?.getBoundingClientRect().height ?? 300;
+      const head = area?.querySelector(".tile-bar")?.getBoundingClientRect().height ?? 30;
+      // the split's height is this area's and its sibling's: the header's share
+      const total = own / Math.max(0.02, stackedRatio(win.id) ?? 0.32);
+      if (toggleCompressed(win.id, (head + 2) / Math.max(total, head * 4, col * 0.2)) !== null) {
+        renderTiles();
+        renderAreaHeaders();
+      }
+    });
+  }
   if (type === "graph") {
     // SHIFT-A · the «+» beside the mode: «Aggiungi» at the window's centre
     act("+", t("add.headerBtn"), false, () => {
