@@ -409,6 +409,7 @@ import {
 } from "./filters";
 import { adornmentBadges, type AdornmentBadge } from "./adornments";
 import { drawnPdChips, hitPdChip } from "./pd-chip";
+import { PD_CELL } from "./views/pd-arrange";
 import { BADGE_RULES, funnelIndex, resolveEffective, sourceLabel } from "./funnel";
 import { type Qualia, vocabularyFor } from "./vocab";
 import { versionBreakdown } from "./versions";
@@ -2041,6 +2042,17 @@ window.__EM_SCENE__ = () => {
   jumpTo: (id: string) => jumpTo(id),
   // MICRO-BADGE-PD · the groups' chips as drawn (canvas-relative), the context
   pdChips: () => drawnPdChips(),
+  /** a world rect framed in the focused graph window (the probes' camera) */
+  frameWorld: (x: number, y: number, w: number, h: number, pad = 30) => {
+    const cv = graphWindows.get(activeWin().id)?.cv;
+    if (!cv) return;
+    const r = cv.getBoundingClientRect();
+    const vp = viewport();
+    vp.scale = Math.min((r.width - 2 * pad) / w, (r.height - 2 * pad) / h);
+    vp.x = (r.width - w * vp.scale) / 2 - x * vp.scale;
+    vp.y = (r.height - h * vp.scale) / 2 - y * vp.scale;
+    draw();
+  },
   context: () => [...contextStack],
   folded: () => [...(store?.doc.layout?.folded_groups ?? [])],
   setValue: (id: string, v: string) => store?.setPropertyValue(id, v),
@@ -28922,7 +28934,8 @@ function wireGraphCanvas(canvas: HTMLCanvasElement, winId: string): void {
       return;
     }
     const hit = hitTest(s, w.x, w.y, hitTol());
-    if (hit?.instanceOf && view === "matrix" && !inContext()) {
+    // MICRO-BADGE-PD · the soloing of a paradata group draws its instances too
+    if (hit?.instanceOf && (view === "matrix" || inContext())) {
       // TOCCARE · a document INSTANCE is drawn by the view in its usage context;
       // it has no position of its own to store and no membership of its own to
       // change (a drop used to hand its scene id to moveToGroup, which wrote an
@@ -29834,7 +29847,20 @@ function moveOneByDelta(
   const nx = sn.x + ddx;
   const ny = sn.y + ddy;
   const containerId = s.memberOf?.get(id);
-  if (inContext()) {
+  // MICRO-BADGE-PD · a member of an open paradata group the Matrix arranged as
+  // its soloing: the hand writes where the soloing reads (`group_spaces`, its
+  // context space), so the two stay the same arrangement
+  const arrangedIn = !inContext() ? s.arrangedIn?.get(id) : undefined;
+  const anchor = arrangedIn ? s.pdAnchor?.get(arrangedIn) : undefined;
+  if (arrangedIn && anchor) {
+    const old = store.doc.layout?.group_spaces?.[arrangedIn]?.[id];
+    const cw = old?.w ?? PD_CELL.w, ch = old?.h ?? PD_CELL.h;
+    store.moveInGroupSpace(arrangedIn, id, {
+      x: nx + sn.w / 2 - anchor.x - cw / 2,
+      y: ny + sn.h / 2 - anchor.y - ch / 2,
+      w: cw, h: ch,
+    }, checkpoint);
+  } else if (inContext()) {
     store.moveInGroupSpace(
       contextStack[contextStack.length - 1],
       id,

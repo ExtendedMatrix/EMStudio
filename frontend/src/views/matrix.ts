@@ -12,8 +12,9 @@
 import { buildMembership, type FoldedView } from "../folding";
 import { BAND_GAP } from "../scene";
 import type { Scene, SceneGroup, SceneNode, SubBand } from "../scene";
-import type { EmDocument, EmEdge } from "../types";
-import { viewIndex, viewInstances } from "../paradata-view";
+import type { EmDocument } from "../types";
+import { viewIndex, viewInstances, type ViewInstance } from "../paradata-view";
+import { paradataGroupScene, reattachedReadings } from "./pd-arrange";
 import { isRemoved } from "../crdt";
 import { t } from "../i18n";
 import { ancestorsOf } from "../rules";
@@ -472,12 +473,9 @@ export function buildMatrixScene(
   // where it is; a document read by some group carries the use count.
   const instanceByEdge = new Map<string, string>(); // edge key → instance id
   const instancesByGroup = new Map<string, SceneNode[]>();
+  const recordsByGroup = new Map<string, ViewInstance[]>(); // the instances drawn, per group
+  const vix = viewIndex(doc);
   {
-    const vix = viewIndex(doc);
-    const readEdge = new Map<string, EmEdge[]>(); // extractor → its readings
-    for (const e of vix.edges)
-      if (e.edge_type === "extracted_from")
-        (readEdge.get(e.source) ?? readEdge.set(e.source, []).get(e.source)!).push(e);
     const uses = new Map<string, number>();       // master → groups drawing it
     const below = new Map<string, number>();      // reader → instances stacked under it
     for (const g of doc.graph.nodes) {
@@ -509,12 +507,12 @@ export function buildMatrixScene(
         scene.byId.set(inst.id, inst);
         scene.memberOf!.set(inst.id, g.id);
         (instancesByGroup.get(g.id) ?? instancesByGroup.set(g.id, []).get(g.id)!).push(inst);
+        (recordsByGroup.get(g.id) ?? recordsByGroup.set(g.id, []).get(g.id)!).push(r);
         uses.set(r.master, (uses.get(r.master) ?? 0) + 1);
-        for (const x of r.extractors)
-          for (const e of readEdge.get(x) ?? [])
-            if (e.target === r.master || r.through.includes(e.target))
-              instanceByEdge.set(e.id ?? `${e.source}→${e.target}`, inst.id);
       }
+      // the readings re-attached to the instances: one rule, `pd-arrange.ts`
+      for (const [k, id] of reattachedReadings(vix, recordsByGroup.get(g.id) ?? []))
+        instanceByEdge.set(k, id);
     }
     // the use count on the documents (the corner decorator): the groups that
     // draw it, the master's own place included when somebody reads it there
@@ -531,6 +529,114 @@ export function buildMatrixScene(
         const master = scene.byId.get(e.source);
         if (master) master.dated = true;
       }
+  }
+
+  // ---- MICRO-BADGE-PD · an OPEN paradata group, arranged as its soloing ----
+  // Inside the box the general layout gives way to the group's own arrangement
+  // (`paradataGroupScene`, the function the soloing draws with): properties in
+  // a row on top, combiners and extractors under them, documents and instances
+  // at the bottom, no empty row. The members' stored positions were the lane's
+  // (v5 ranks are global to the lane; «Compact» leaves the group closed and
+  // nothing made room for it): opened in place, USV132_PD on TempluMare_v2 was
+  // a box 7993 × 400 over 51 nodes of other units, measured.
+  //
+  // So the box goes right under its unit, centred on it, and the lane makes
+  // room: every block (a sibling subtree of the group, moved RIGIDLY so its
+  // container stays whole) that starts below the unit moves down by the box's
+  // height, and a block that crosses that line where the box goes moves down
+  // enough to clear it — all by the same amount, so nothing below collides. A
+  // pure view: closed, the pass does not run and every unit is where it was.
+  scene.arrangedIn = new Map();
+  scene.pdAnchor = new Map();
+  const GAP = 24;
+  const outlineSet = new Set(outlineIds);
+  const parentOf = (id: string): string | undefined =>
+    membership.primaryOf.get(id) ?? scene.memberOf!.get(id);
+  const chainOf = (id: string): string[] => {
+    const out: string[] = [];
+    const seen = new Set<string>();
+    for (let cur: string | undefined = id; cur && !seen.has(cur); cur = parentOf(cur)) {
+      seen.add(cur);
+      out.push(cur);
+    }
+    return out;
+  };
+  for (const g of doc.graph.nodes) {
+    if (g.node_type !== "ParadataNodeGroup") continue;
+    const gs = scene.byId.get(g.id);
+    if (!gs || folded.has(g.id) || gs.collapsed || !pdReferentNode.has(g.id)) continue;
+    const members = (membership.childrenOf.get(g.id) ?? []).filter(
+      (m) => m !== g.id && scene.byId.has(m) && !scene.byId.get(m)!.collapsed);
+    // a member that is a container itself keeps the general layout
+    if (members.some((m) => (membership.childrenOf.get(m)?.length ?? 0) > 0)) continue;
+    const drawn = [...members.map((m) => scene.byId.get(m)!), ...(instancesByGroup.get(g.id) ?? [])];
+    if (!drawn.length) continue;
+    // the soloing's input exactly (every member, the ones drawn in another
+    // group's box included), so the two arrangements are the same one
+    const arr = paradataGroupScene(doc, g.id, membership.membersOf.get(g.id) ?? [], vix,
+                                   recordsByGroup.get(g.id) ?? [], Math.max(...drawn.map((sn) => sn.w)));
+    // the arrangement's extent, with the Matrix's own sizes
+    let ax0 = Infinity, ay0 = Infinity, ax1 = -Infinity, ay1 = -Infinity;
+    for (const sn of drawn) {
+      const a = arr.byId.get(sn.id);
+      if (!a) continue;
+      const cx = a.x + a.w / 2, cy = a.y + a.h / 2;
+      ax0 = Math.min(ax0, cx - sn.w / 2); ay0 = Math.min(ay0, cy - sn.h / 2);
+      ax1 = Math.max(ax1, cx + sn.w / 2); ay1 = Math.max(ay1, cy + sn.h / 2);
+    }
+    if (!Number.isFinite(ax0)) continue;
+    const ref = scene.byId.get(pdReferentNode.get(g.id)!);
+    let ox0 = Infinity, oy0 = Infinity;
+    for (const sn of drawn) { ox0 = Math.min(ox0, sn.x); oy0 = Math.min(oy0, sn.y); }
+    // the box: under the unit, centred on it (without one, where the members were)
+    const lineY = ref ? ref.y + ref.h + GAP : oy0 - GROUP_HEADER - 6;
+    const left = ref ? ref.x + ref.w / 2 - (ax1 - ax0) / 2 : ox0;
+    const anchor = { x: left - ax0, y: lineY + GROUP_HEADER + 6 - ay0 };
+    const inGroup = new Set<string>([g.id]);
+    for (const sn of drawn) {
+      inGroup.add(sn.id);
+      const a = arr.byId.get(sn.id);
+      if (!a) continue;
+      sn.x = anchor.x + a.x + a.w / 2 - sn.w / 2;
+      sn.y = anchor.y + a.y + a.h / 2 - sn.h / 2;
+      if (!sn.instanceOf) scene.arrangedIn.set(sn.id, g.id);
+    }
+    scene.pdAnchor.set(g.id, anchor);
+    const box = { x0: left - GROUP_PAD, x1: left + (ax1 - ax0) + GROUP_PAD,
+                  y0: lineY, y1: lineY + GROUP_HEADER + 6 + (ay1 - ay0) + GROUP_PAD };
+    // the blocks of the lane: each node's highest ancestor that is not one of
+    // the group's own (the group's siblings, wherever they nest)
+    const mine = new Set(chainOf(g.id));
+    const gLane = ref ? laneIdxOfY(ref.y + ref.h / 2) : laneIdxOfY(oy0);
+    const blocks = new Map<string, SceneNode[]>();
+    for (const sn of scene.byId.values()) {
+      if (inGroup.has(sn.id) || mine.has(sn.id) || sn.collapsed) continue;
+      if (laneIdxOfY(sn.y + sn.h / 2) !== gLane) continue;
+      const chain = chainOf(sn.id);
+      let top = sn.id;
+      for (const c of chain) {
+        if (mine.has(c)) break;
+        top = c;
+      }
+      (blocks.get(top) ?? blocks.set(top, []).get(top)!).push(sn);
+    }
+    const moving: SceneNode[][] = [];
+    let shift = box.y1 - box.y0 + GAP;
+    for (const kids of blocks.values()) {
+      let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+      for (const sn of kids) {
+        x0 = Math.min(x0, sn.x); y0 = Math.min(y0, sn.y);
+        x1 = Math.max(x1, sn.x + sn.w); y1 = Math.max(y1, sn.y + sn.h);
+      }
+      // a container's header sits above its first member
+      if (kids.some((k) => outlineSet.has(k.id))) y0 -= GROUP_HEADER + 6;
+      if (y0 >= lineY - 0.5) moving.push(kids);
+      else if (y1 > lineY && x0 < box.x1 + GAP && x1 > box.x0 - GAP) {
+        moving.push(kids);
+        shift = Math.max(shift, box.y1 + GAP - y0);
+      }
+    }
+    for (const kids of moving) for (const sn of kids) sn.y += shift;
   }
 
   // ---- outline containers: box AROUND engine-placed members ----

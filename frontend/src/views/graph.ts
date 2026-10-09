@@ -10,8 +10,8 @@ import type { Scene, SceneNode } from "../scene";
 import type { EmDocument, EmEdge, EmNode } from "../types";
 import { isRemoved } from "../crdt";
 
-const NODE_W = 120;
-const NODE_H = 34;
+export const NODE_W = 120;
+export const NODE_H = 34;
 const H_GAP = 26;
 const V_GAP = 70;
 const SUB_V_GAP = 18;
@@ -95,6 +95,9 @@ export function layoutLayered(
   inputNodes: EmNode[],
   inputEdges: EmEdge[],
   badges?: Map<string, number>,
+  /** MICRO-BADGE-PD · nodes that go to the LAST row whatever their depth (a
+   *  paradata group: its documents and instances), the rows left empty dropped */
+  opts?: { bottom?: (id: string) => boolean; cellW?: number },
 ): Scene {
   const nodes = byId(inputNodes);
   const ids = nodes.map((n) => n.id);
@@ -142,9 +145,18 @@ export function layoutLayered(
     }
   }
 
+  if (opts?.bottom) {
+    const sink = ids.map((id) => opts.bottom!(id));
+    // the others keep their depth; the bottom ones share one row below them all
+    let top = -1;
+    for (let i = 0; i < n; i++) if (!sink[i]) top = Math.max(top, layer[i]);
+    for (let i = 0; i < n; i++) if (sink[i]) layer[i] = top + 1;
+  }
   const maxLayer = n ? Math.max(...layer) : 0;
-  const rows: number[][] = Array.from({ length: maxLayer + 1 }, () => []);
-  for (let i = 0; i < n; i++) rows[layer[i]].push(i);
+  const allRows: number[][] = Array.from({ length: maxLayer + 1 }, () => []);
+  for (let i = 0; i < n; i++) allRows[layer[i]].push(i);
+  // no empty row between the levels
+  const rows = allRows.filter((r) => r.length);
 
   const posArr = new Float64Array(n);
   const reindex = (): void =>
@@ -179,9 +191,11 @@ export function layoutLayered(
     for (let i = 0; i < row.length; i += MAX_COLS)
       subRows.push(row.slice(i, i + MAX_COLS));
     subRows.forEach((sub, si) => {
-      const rowW = sub.length * (NODE_W + H_GAP) - H_GAP;
+      // MICRO-BADGE-PD · a caller whose boxes are wider gives its cell width
+      const cw = Math.max(NODE_W, opts?.cellW ?? 0);
+      const rowW = sub.length * (cw + H_GAP) - H_GAP;
       sub.forEach((v, i) => {
-        pos.set(ids[v], { x: i * (NODE_W + H_GAP) - rowW / 2, y });
+        pos.set(ids[v], { x: i * (cw + H_GAP) - rowW / 2 + (cw - NODE_W) / 2, y });
       });
       y += NODE_H + (si < subRows.length - 1 ? SUB_V_GAP : 0);
     });

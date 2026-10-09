@@ -7,6 +7,7 @@ import { isDtcChainEdge } from "../rules";
 import type { Scene } from "../scene";
 import type { EmDocument } from "../types";
 import { layoutLayered } from "./graph";
+import { paradataGroupScene } from "./pd-arrange";
 
 function applyStored(doc: EmDocument, key: string, scene: Scene): Scene {
   const stored = doc.layout?.group_spaces?.[key];
@@ -26,6 +27,10 @@ function applyStored(doc: EmDocument, key: string, scene: Scene): Scene {
 
 export function buildGroupScene(doc: EmDocument, groupId: string): Scene {
   const membership = buildMembership(doc);
+  // MICRO-BADGE-PD · a paradata group: its members AND the instances it draws,
+  // arranged by the one function the Matrix uses when it is open in place
+  if (doc.graph.nodes.find((n) => n.id === groupId)?.node_type === "ParadataNodeGroup")
+    return paradataGroupScene(doc, groupId, membership.membersOf.get(groupId) ?? []);
   const { nodes, edges } = groupMembers(doc, membership, groupId);
   return applyStored(doc, groupId, layoutLayered(nodes, edges));
 }

@@ -139,6 +139,11 @@ export interface SceneGroup {
 export interface Scene {
   nodes: SceneNode[];
   byId: Map<string, SceneNode>;
+  /** MICRO-BADGE-PD · members of an OPEN paradata group the Matrix arranged as
+   *  its soloing (`views/pd-arrange.ts`) → the group; and per group the world
+   *  point its arrangement's origin sits at (a hand move writes back there) */
+  arrangedIn?: Map<string, string>;
+  pdAnchor?: Map<string, { x: number; y: number }>;
   edges: SceneEdge[];
   lanes: Lane[];
   /** phase sub-bands inside epoch lanes (matrix view; when phases are shown) */
