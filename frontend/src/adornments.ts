@@ -43,9 +43,10 @@ const KIND_ORDER = ["author", "author_ai", "license", "embargo"];
  * Badges to draw per referent id, resolved from the FULL document edges (the
  * ornament edges are otherwise hidden by the `edges_author` ring, so resolution
  * cannot use the already-filtered edge list). Only ornament nodes present in
- * `nodes` produce a badge — so the `authors_licenses` ring, which removes those
- * nodes upstream when off, turns the badges off with them. A badge is attached
- * only when its referent resolves to a NON-ornament node that is itself visible.
+ * `nodes` produce a badge (main.ts passes them as they were before the rings:
+ * MICRO-SOVRAPPOSIZIONI, the badges are overlays and the `authors_licenses`
+ * ring no longer turns them off). A badge is attached only when its referent
+ * resolves to a NON-ornament node that is itself visible.
  *
  * `has_embargo` may sit on a LicenseNode (embargo of a licence); the walk then
  * hops through the licence to the licence's own referent, so both the licence

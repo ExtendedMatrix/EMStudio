@@ -3961,6 +3961,9 @@ function filteredView(opts: { wholeGraph?: boolean;
       classOf(byId.get(e.source)?.node_type) === "EpochNode"
     )
       epochPdg.add(e.target);
+  // MICRO-SOVRAPPOSIZIONI · the ornaments before the rings: the badges are
+  // resolved from them whatever the `authors_licenses` ring says (below)
+  const ornamentPool = vNodes.filter((n) => isAdornmentNodeType(n.node_type));
   if (hiddenNodeTypes.size || hiddenEdgeTypes.size) {
     vNodes = vNodes.filter(
       (n) => epochPdg.has(n.id) || !hiddenNodeTypes.has(n.node_type),
@@ -3990,12 +3993,18 @@ function filteredView(opts: { wholeGraph?: boolean;
   // BADGE1 · collapse ornament nodes (author/license/embargo) into badges on
   // their referent. Resolved from the FULL document edges (the ornament edges are
   // hidden by the `edges_author` ring, so the filtered edge list can't resolve
-  // them), but only for ornament nodes still present in vNodes — so the
-  // `authors_licenses` node ring, which drops those nodes above, turns the badges
-  // off with them. The ornament nodes and their edges are then removed from the
-  // VIEW (never a box, never an edge); em.json keeps both.
+  // them). The ornament nodes and their edges are then removed from the VIEW
+  // (never a box, never an edge); em.json keeps both.
+  // MICRO-SOVRAPPOSIZIONI · the `authors_licenses` ring no longer turns the
+  // badges off: it decides whether the ornament NODES exist in the view (those
+  // drawn as nodes — members of a paradata group, every one in the multigraph),
+  // and the badges are the overlays' (overlays.ts, drawn or not by the
+  // renderer). So the badges are resolved from the ornaments as they were
+  // before the rings, on the referents still visible.
   const visibleIds = new Set(vNodes.map((n) => n.id));
-  const adornments = adornmentBadges(vNodes, doc.graph.edges, visibleIds);
+  const ringDropped = ornamentPool.filter((n) => !visibleIds.has(n.id));
+  const adornments = adornmentBadges(ringDropped.length ? [...vNodes, ...ringDropped] : vNodes,
+                                     doc.graph.edges, visibleIds);
   // FUNNEL1 · add an ATTENUATED badge for each author/license/embargo a node does
   // NOT declare itself but INHERITS down the funnel (activity/epoch/canvas). The
   // node's own (explicit) badges are already present from adornmentBadges. This

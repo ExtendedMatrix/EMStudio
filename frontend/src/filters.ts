@@ -52,9 +52,10 @@ export const CIRCLES: Circle[] = [
   { key: "continuity", label: "Continuity (BR)", kind: "node", matrix: true, graph: true },
   { key: "paradata_nodes", label: "Paradata nodes", kind: "node", matrix: true, graph: true },
   // BADGE1 · author/license/embargo are no longer boxes but badges pinned to
-  // their referent, so they are cheap to show in Matrix too — this ring now
-  // toggles the BADGES. Default ON in both views; a small corner miniature does
-  // not crowd the matrix the way a box+edge did (which is why it was matrix:false).
+  // their referent. MICRO-SOVRAPPOSIZIONI · this ring decides whether the
+  // ornament NODES exist in the view (those still drawn as nodes: members of a
+  // paradata group, every one in the multigraph); the BADGES are overlays,
+  // switched in the Overlays menu (overlays.ts). Default ON in every view.
   { key: "authors_licenses", label: "Authors & licenses", kind: "node", matrix: true, graph: true },
   { key: "links_other", label: "Links & other", kind: "node", matrix: false, graph: true },
   { key: "edges_temporal", label: "Temporal edges", kind: "edge", matrix: true, graph: true },
