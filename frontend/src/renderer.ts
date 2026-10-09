@@ -6,6 +6,7 @@ import { crispImage, dtcGlyphUrl, ICON_NODE_TYPES, imageFor, imageForUrl } from 
 import { dtcGlyphName, stratigraphicKindLetter, stratigraphicKindOf } from "./rules";
 import { documentVariant, edgeInk, edgeStyle, nodeStyle } from "./palette";
 import {
+  arrowheadPath,
   drawArrowhead,
   routeScene,
   SYMMETRIC_EDGES,
@@ -134,6 +135,9 @@ interface RouteCache {
   key: string;
   routes: EdgeRoute[];
   visible: boolean[];
+  /** GRAFO REATTIVO · per route its world box [x0, y0, x1, y1] (4 numbers per
+   *  edge): the culling test of a paint, computed once per scene */
+  boxes: Float64Array;
 }
 const routeCaches = new WeakMap<Scene, RouteCache>();
 
@@ -148,9 +152,43 @@ function routesFor(scene: Scene, state: RenderState): RouteCache {
   const hit = routeCaches.get(scene);
   if (hit && hit.key === key) return hit;
   const visible = scene.edges.map((e) => state.edgeVisible(e.edge.edge_type));
-  const cache = { key, routes: routeScene(scene, visible), visible };
+  const routes = routeScene(scene, visible);
+  const boxes = new Float64Array(routes.length * 4);
+  routes.forEach((r, i) => {
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    for (const p of r.pts) {
+      if (p.x < x0) x0 = p.x;
+      if (p.x > x1) x1 = p.x;
+      if (p.y < y0) y0 = p.y;
+      if (p.y > y1) y1 = p.y;
+    }
+    boxes.set([x0, y0, x1, y1], i * 4);
+  });
+  const cache = { key, routes, visible, boxes };
   routeCaches.set(scene, cache);
   return cache;
+}
+
+/**
+ * GRAFO REATTIVO · G8 · the texts of a paint, fitted once. Every paint used to
+ * fit every label again — a `measureText` per character removed until the
+ * ellipsis fitted — and a label does not change between two frames of a pan.
+ * Keyed by font, width (to a tenth of a unit) and text; emptied when it grows
+ * past a few thousand entries.
+ */
+const fitCache = new Map<string, string>();
+function fitText(ctx: CanvasRenderingContext2D, text: string, maxW: number): string {
+  const key = `${ctx.font}|${Math.round(maxW * 10)}|${text}`;
+  const hit = fitCache.get(key);
+  if (hit !== undefined) return hit;
+  let t = text;
+  if (ctx.measureText(t).width > maxW) {
+    while (t.length > 2 && ctx.measureText(t + "…").width > maxW) t = t.slice(0, -1);
+    t += "…";
+  }
+  if (fitCache.size > 8000) fitCache.clear();
+  fitCache.set(key, t);
+  return t;
 }
 
 /** Squared distance from a point to a segment (world space). */
@@ -401,13 +439,8 @@ function drawGroupContainer(
     ctx.fillStyle = labelOn(headerFill);
     ctx.textAlign = "left";
     ctx.textBaseline = "middle";
-    let t = g.title;
     const maxW = g.w - 26;
-    if (ctx.measureText(t).width > maxW) {
-      while (t.length > 2 && ctx.measureText(t + "…").width > maxW)
-        t = t.slice(0, -1);
-      t += "…";
-    }
+    const t = fitText(ctx, g.title, maxW);
     ctx.fillText(t, g.x + 21, g.y + g.headerH / 2 + 0.5);
   }
   // badge for folded containers
@@ -505,6 +538,27 @@ export function strokeEdge(
   edgeType: string | undefined,
   o: EdgeStrokeOpts,
 ): void {
+  strokeEdges(ctx, [route], edgeType, o, true, true);
+}
+
+/**
+ * GRAFO REATTIVO · G8 · many edges of ONE style in one path: one `stroke` and one
+ * `fill` for the arrowheads, instead of one of each per edge (5000 units, 8000
+ * edges: the paint was 8000 strokes). The style is `strokeEdge`'s, unchanged.
+ *
+ * LOD: `bridges` and `arrows` false drop the crossing bumps and the arrowheads —
+ * the caller asks for them only when they are big enough on screen to be seen
+ * (a 3.5-unit bump at 30% zoom is one pixel, and it was half of the paint).
+ */
+export function strokeEdges(
+  ctx: CanvasRenderingContext2D,
+  routes: EdgeRoute[],
+  edgeType: string | undefined,
+  o: EdgeStrokeOpts,
+  bridges: boolean,
+  arrows: boolean,
+): void {
+  if (!routes.length) return;
   const st = edgeStyle(edgeType);
   const conflict = !!o.conflict;
   // CONN-NIGHT: colour from the THEME (edgeInk), dash pattern from edgeStyle.
@@ -524,11 +578,15 @@ export function strokeEdge(
       : st.dash.map((d) => d * o.k));
   }
   ctx.beginPath();
-  traceRoute(ctx, route, o.bridgeR);
+  for (const route of routes) traceRoute(ctx, route, bridges ? o.bridgeR : 0);
   ctx.stroke();
   ctx.setLineDash([]);
-  if (!SYMMETRIC_EDGES.has(edgeType ?? ""))
-    drawArrowhead(ctx, route, o.emphasis ? o.arrowSize * 1.4 : o.arrowSize, col);
+  if (arrows && !SYMMETRIC_EDGES.has(edgeType ?? "")) {
+    ctx.beginPath();
+    for (const route of routes) arrowheadPath(ctx, route, o.emphasis ? o.arrowSize * 1.4 : o.arrowSize);
+    ctx.fillStyle = col;
+    ctx.fill();
+  }
   ctx.globalAlpha = 1;
 }
 
@@ -646,8 +704,19 @@ export function render(
   // strength, every other one faded. A view state, never a document fact.
   const lit = state.highlightEdgeType ?? null;
   const litIdx: number[] = [];
+  // G8 · culling: an edge whose box does not touch the view is not traced
+  const { boxes } = routesFor(scene, state);
+  const cull = 24 / vp.scale;
+  const wx0 = -vp.x / vp.scale - cull, wy0 = -vp.y / vp.scale - cull;
+  const wx1 = (viewW - vp.x) / vp.scale + cull, wy1 = (viewH - vp.y) / vp.scale + cull;
+  // G8 · LOD: the crossing bumps when they are 1.5 px on screen, the arrowheads
+  // when they are 3 px; below that the edge is a line
+  const lodBridges = bridgeR * vp.scale >= 1.5;
+  const lodArrows = arrowSize * vp.scale >= 3;
+  const batches = new Map<string, { type: string | undefined; o: EdgeStrokeOpts; routes: EdgeRoute[] }>();
   for (let i = 0; i < scene.edges.length; i++) {
     if (!visible[i]) continue;
+    if (boxes[i * 4] > wx1 || boxes[i * 4 + 2] < wx0 || boxes[i * 4 + 1] > wy1 || boxes[i * 4 + 3] < wy0) continue;
     const e = scene.edges[i];
     if (focusId && (e.source === focusId || e.target === focusId)) {
       accent.push(i);
@@ -669,19 +738,24 @@ export function render(
     // signal identical to its background.
     const mark = (e.edge as { data?: { unresolved?: boolean; draft?: boolean } })
       .data;
-    strokeEdge(ctx, routes[i], e.edge.edge_type, {
-      k,
-      arrowSize,
-      bridgeR,
-      conflict: upwardConflict(scene, e),
-      unresolved: !!mark?.unresolved,
-      // DTCEMS2 · una BOZZA non è ancora niente: nessuno di questi archi esiste,
-      // né nel documento né sul disco. Attenuata, non colorata — un colore avrebbe
-      // detto «guarda qui», e quello che va detto è «non c'è ancora».
-      draft: !!mark?.draft,
-      faded: !!lit,
-    });
+    const conflict = upwardConflict(scene, e);
+    const unresolved = !!mark?.unresolved;
+    // DTCEMS2 · una BOZZA non è ancora niente: nessuno di questi archi esiste,
+    // né nel documento né sul disco. Attenuata, non colorata — un colore avrebbe
+    // detto «guarda qui», e quello che va detto è «non c'è ancora».
+    const draft = !!mark?.draft;
+    const key = `${type}|${+conflict}|${+unresolved}|${+draft}`;
+    let b = batches.get(key);
+    if (!b) {
+      b = { type: e.edge.edge_type, routes: [],
+            o: { k, arrowSize, bridgeR, conflict, unresolved, draft, faded: !!lit } };
+      batches.set(key, b);
+    }
+    b.routes.push(routes[i]);
   }
+  // the conflicts last, so a red edge is never under a grey one
+  const order = [...batches.values()].sort((a, b) => +!!a.o.conflict - +!!b.o.conflict);
+  for (const b of order) strokeEdges(ctx, b.routes, b.type, b.o, lodBridges, lodArrows);
   for (const i of litIdx) {
     const e = scene.edges[i];
     // the ochre halo of a picked connector under it (the selection's signal),
@@ -735,13 +809,21 @@ export function render(
   pickEdge(state.selectedEdgeIdx, true);
   ctx.globalAlpha = 1;
 
+  // G8 · culling: the nodes whose box (with a margin for the label under a
+  // glyph, the badges and the handles) touches the view. Every per-node pass
+  // below walks THIS list; nothing off screen is drawn or measured.
+  const nm = 90 / vp.scale;
+  const nx0 = -vp.x / vp.scale - nm, ny0 = -vp.y / vp.scale - nm;
+  const nx1 = (viewW - vp.x) / vp.scale + nm, ny1 = (viewH - vp.y) / vp.scale + nm;
+  const shown = scene.nodes.filter((n) => n.x < nx1 && n.x + n.w > nx0 && n.y < ny1 && n.y + n.h > ny0);
+
   // nodes
   const drawLabels = vp.scale > 0.35;
   const isSel = (n: { id: string; instanceOf?: string }): boolean =>
     n.id === state.selectedId ||
     n.instanceOf === state.selectedId ||
     (state.selectedIds?.has(n.id) ?? false);
-  for (const n of scene.nodes) {
+  for (const n of shown) {
     if (n.collapsed) continue; // PD1 · shown as a bottom-left tablet, not a node
     const st = nodeStyle(n.node.node_type);
     // Monochrome (B/W) mode: EVERY node draws with a black BORDER only — fills,
@@ -917,12 +999,7 @@ export function render(
         ctx.textAlign = "center";
         ctx.textBaseline = "middle";
         const maxW = n.w - 10;
-        let text = label;
-        if (ctx.measureText(text).width > maxW) {
-          while (text.length > 2 && ctx.measureText(text + "…").width > maxW)
-            text = text.slice(0, -1);
-          text += "…";
-        }
+        const text = fitText(ctx, label, maxW);
         ctx.fillText(text, n.x + n.w / 2, n.y + n.h / 2);
       }
       if (isSel(n) || n.id === state.hoverId) {
@@ -999,12 +1076,7 @@ export function render(
           ctx.textAlign = "center";
           ctx.textBaseline = "top";
           const maxW = Math.max(n.w, iw + 16) - 4;
-          let text = label;
-          if (ctx.measureText(text).width > maxW) {
-            while (text.length > 2 && ctx.measureText(text + "…").width > maxW)
-              text = text.slice(0, -1);
-            text += "…";
-          }
+          const text = fitText(ctx, label, maxW);
           ctx.fillText(text, n.x + n.w / 2, iy + ih + 2 / Math.sqrt(vp.scale));
         } else if (ctx.measureText(label).width > iw - 10 && n.w > iw + 8) {
           // DAG · a glyph-only node whose name does not fit ON the glyph. The
@@ -1016,24 +1088,14 @@ export function render(
           ctx.textAlign = "center";
           ctx.textBaseline = "top";
           const maxW = n.w - 6;
-          let text = label;
-          if (ctx.measureText(text).width > maxW) {
-            while (text.length > 2 && ctx.measureText(text + "…").width > maxW)
-              text = text.slice(0, -1);
-            text += "…";
-          }
+          const text = fitText(ctx, label, maxW);
           ctx.fillText(text, n.x + n.w / 2, iy + ih + 2);
         } else {
           // "over": centred on the icon (document sheet / property chip)
           ctx.textAlign = "center";
           ctx.textBaseline = "middle";
           const maxW = iw - 10;
-          let text = label;
-          if (ctx.measureText(text).width > maxW) {
-            while (text.length > 2 && ctx.measureText(text + "…").width > maxW)
-              text = text.slice(0, -1);
-            text += "…";
-          }
+          const text = fitText(ctx, label, maxW);
           ctx.fillText(text, n.x + n.w / 2, iy + ih * 0.62);
         }
       }
@@ -1135,12 +1197,7 @@ export function render(
       // centre and gives up the same width on both sides
       const kindLetter = genreLetterOf(n);
       const maxW = n.w - 8 - (kindLetter && !captionOutside ? 2 * genreSize(sh) : 0);
-      let text = label;
-      if (ctx.measureText(text).width > maxW) {
-        while (text.length > 2 && ctx.measureText(text + "…").width > maxW)
-          text = text.slice(0, -1);
-        text += "…";
-      }
+      const text = fitText(ctx, label, maxW);
       ctx.fillText(
         text,
         n.x + n.w / 2,
@@ -1204,7 +1261,7 @@ export function render(
     ctx.setLineDash([6 / vp.scale, 4 / vp.scale]);
     ctx.strokeStyle = canvasTheme().peerAware;
     ctx.lineWidth = 2.2 / vp.scale;
-    for (const n of scene.nodes) {
+    for (const n of shown) {
       if (n.collapsed) continue;
       if (!state.peerSelections.has(n.id)) continue;
       ctx.strokeRect(n.x - 4, n.y - 4, n.w + 8, n.h + 8);
@@ -1219,7 +1276,7 @@ export function render(
   if (state.editable && !state.connect) {
     const active = state.hoverId ?? state.selectedId;
     const showAll = vp.scale > 0.5;
-    for (const n of scene.nodes) {
+    for (const n of shown) {
       if (n.collapsed) continue; // PD1 · no handle on a collapsed-to-tablet node
       const isActive = n.id === active;
       if (!isActive && !showAll) continue;
@@ -1238,7 +1295,7 @@ export function render(
     }
   }
   // pinned badge: a small lock at the top-right corner of every locked node
-  for (const n of scene.nodes) {
+  for (const n of shown) {
     if (!n.pinned || n.collapsed) continue;
     const s = 12 / vp.scale;
     ctx.font = canvasFont(400, s);
@@ -1252,7 +1309,7 @@ export function render(
   // like the lock, a constant screen size; chrome, never a node's own style.
   if (state.warnIds?.size) {
     const r = 7 / vp.scale;
-    for (const n of scene.nodes) {
+    for (const n of shown) {
       if (!state.warnIds.has(n.id)) continue;
       const cx = n.x;
       const cy = n.y;
@@ -1278,7 +1335,7 @@ export function render(
     ctx.lineWidth = 2.2 / vp.scale;
     ctx.setLineDash([5 / vp.scale, 3 / vp.scale]);
     const pad = 4 / vp.scale;
-    for (const n of scene.nodes) {
+    for (const n of shown) {
       if (!state.storyCited.has(n.instanceOf ?? n.id)) continue;
       ctx.strokeRect(n.x - pad, n.y - pad, n.w + pad * 2, n.h + pad * 2);
     }
@@ -1293,7 +1350,7 @@ export function render(
     const h = 13 / Math.sqrt(vp.scale);
     ctx.font = canvasFont(700, h * 0.7);
     ctx.textBaseline = "middle";
-    for (const n of scene.nodes) {
+    for (const n of shown) {
       const st = state.aiNodes.get(n.instanceOf ?? n.id);
       if (!st) continue;
       const label = st === "verified" ? "AI ✓" : "AI";
@@ -1397,7 +1454,7 @@ export function render(
   adornmentHits = [];
   const badgePx = BADGE_PX * vp.scale;
   const badgeGap = BADGE_GAP * vp.scale;
-  for (const n of scene.nodes) {
+  for (const n of shown) {
     const ads = n.adornments;
     if (!ads || !ads.length) continue;
     const r = nodeScreenRect(n, vp);

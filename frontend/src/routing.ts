@@ -266,7 +266,7 @@ export function traceRoute(
   for (let s = 0; s < pts.length - 1; s++) {
     const p = pts[s];
     const q = pts[s + 1];
-    const xsOn = r.bridges[s] ?? [];
+    const xsOn = bridgeRadius > 0 ? (r.bridges[s] ?? []) : [];
     if (!xsOn.length || Math.abs(p.y - q.y) > EPS) {
       ctx.lineTo(q.x, q.y);
       continue;
@@ -283,6 +283,23 @@ export function traceRoute(
     }
     ctx.lineTo(q.x, q.y);
   }
+}
+
+/** The arrowhead's triangle added to the current path (a batch fills once). */
+export function arrowheadPath(ctx: CanvasRenderingContext2D, r: EdgeRoute, size: number): void {
+  const pts = r.pts;
+  const tip = pts[pts.length - 1];
+  const prev = pts[pts.length - 2];
+  if (!tip || !prev) return;
+  const dx = tip.x - prev.x;
+  const dy = tip.y - prev.y;
+  const len = Math.hypot(dx, dy) || 1;
+  const ux = dx / len;
+  const uy = dy / len;
+  ctx.moveTo(tip.x, tip.y);
+  ctx.lineTo(tip.x - ux * size - uy * size * 0.45, tip.y - uy * size + ux * size * 0.45);
+  ctx.lineTo(tip.x - ux * size + uy * size * 0.45, tip.y - uy * size - ux * size * 0.45);
+  ctx.closePath();
 }
 
 /** Filled arrowhead at the route end, pointing along the last segment. */
