@@ -272,6 +272,20 @@ pub fn compute_with_sketch(
     // own lane. Everything else: inherit through the paradata chain (walk
     // reversed CHAIN_EDGES from anchored nodes), else unassigned.
     let n = graph.nodes.len();
+    // B1 (#25) · places are not containers of a time projection: a spatial
+    // group gets no lane and no position, and its `is_in_location` edges are
+    // neither membership nor a path for the lane (one such edge was enough to
+    // pull every unit into the group's lane, Enzo Cocca's bisection).
+    let spatial: Vec<bool> = graph
+        .nodes
+        .iter()
+        .map(|nd| crate::geometry::is_spatial_group(nd.node_type.as_str()))
+        .collect();
+    let spatial_edge = |e: &crate::model::Edge| -> bool {
+        e.edge_type == "is_in_location"
+            || node_ix.get(e.source.as_str()).is_some_and(|&i| spatial[i])
+            || node_ix.get(e.target.as_str()).is_some_and(|&i| spatial[i])
+    };
     let mut lane: Vec<Option<usize>> = vec![None; n];
     for (i, node) in graph.nodes.iter().enumerate() {
         if let Some(l) = lane_of_epoch.get(&i) {
@@ -299,7 +313,6 @@ pub fn compute_with_sketch(
             t,
             "is_in_activity"
                 | "is_in_paradata_nodegroup"
-                | "is_in_location"
                 | "is_in_timebranch"
                 | "is_part_of"
                 | "has_paradata_nodegroup"
@@ -308,6 +321,9 @@ pub fn compute_with_sketch(
     for _ in 0..8 {
         let mut changed = false;
         for e in &graph.edges {
+            if spatial_edge(e) {
+                continue;
+            }
             let et = e.edge_type.as_str();
             let chain = CHAIN_EDGES.contains(&et);
             let member = membership_edge(et);
@@ -377,7 +393,7 @@ pub fn compute_with_sketch(
         else {
             continue;
         };
-        if s == t || is_epoch[s] || is_epoch[t] {
+        if s == t || is_epoch[s] || is_epoch[t] || spatial_edge(e) {
             continue;
         }
         let et = e.edge_type.as_str();
@@ -405,7 +421,7 @@ pub fn compute_with_sketch(
         };
         for e in &graph.edges {
             let et = e.edge_type.as_str();
-            if !membership(et) {
+            if !membership(et) || spatial_edge(e) {
                 continue;
             }
             if let (Some(&s), Some(&t)) =
@@ -536,7 +552,7 @@ pub fn compute_with_sketch(
     let lane_count = unassigned_lane + 1;
     let mut top_of_lane: Vec<Vec<usize>> = vec![Vec::new(); lane_count];
     for i in 0..n {
-        if is_epoch[i] || hidden[i] {
+        if is_epoch[i] || hidden[i] || spatial[i] {
             continue;
         }
         let top = match direct_of[i] {
@@ -1158,6 +1174,76 @@ mod tests {
         assert!(x.x + x.w <= act.x || x.x >= act.x + act.w, "X beside the activity, not in it");
         // an edge INTO a group goes to its box: its source is above the box
         assert!(y.y + y.h < act.y);
+    }
+
+    /// B1 (#25, Enzo Cocca's bisection, 9 Oct 2026) · ONE `is_in_location`
+    /// edge was enough to put every unit in the first lane: the place became
+    /// the units' primary container, a container lives in one lane, and its
+    /// members followed it. A place is not a container of a time projection:
+    /// the units keep the lanes they have without that edge, the place gets no
+    /// position, and an activity is drawn as before.
+    #[test]
+    fn a_place_does_not_pull_units_out_of_their_lanes() {
+        let base = |with_place: bool| {
+            let mut nodes = vec![
+                epoch("OLD", 100.0),
+                epoch("NEW", 200.0),
+                node("ACT", "ActivityNodeGroup"),
+                node("A", "US"),
+                node("B", "US"),
+                node("C", "US"),
+            ];
+            let mut edges = vec![
+                edge("e1", "has_first_epoch", "A", "NEW"),
+                edge("e2", "has_first_epoch", "B", "OLD"),
+                edge("e3", "has_first_epoch", "C", "OLD"),
+                edge("a1", "is_after", "A", "B"),
+                edge("m1", "is_in_activity", "B", "ACT"),
+                edge("m2", "is_in_activity", "C", "ACT"),
+            ];
+            if with_place {
+                nodes.push(node("PLACE", "LocationNodeGroup"));
+                nodes.push(node("TOWN", "LocationNodeGroup"));
+                edges.push(edge("l1", "is_in_location", "B", "PLACE"));
+                edges.push(edge("l2", "is_in_location", "A", "PLACE"));
+                edges.push(edge("l3", "is_in_location", "PLACE", "TOWN"));
+            }
+            Graph {
+                graph_id: "g".into(),
+                name: None,
+                description: None,
+                nodes,
+                edges,
+                data: std::collections::BTreeMap::new(),
+            }
+        };
+        let opts = LayoutOptions::default();
+        let plain = compute(&base(false), &opts);
+        let placed = compute(&base(true), &opts);
+        let lane = |l: &Layout, id: &str| {
+            let p = &l.positions[id];
+            l.swimlanes
+                .iter()
+                .find(|s| s.y <= p.y && p.y < s.y + s.height)
+                .map(|s| s.epoch_id.clone())
+        };
+        for id in ["A", "B", "C"] {
+            assert_eq!(lane(&placed, id), lane(&plain, id), "{id} keeps its lane");
+        }
+        assert_eq!(lane(&placed, "A").as_deref(), Some("NEW"));
+        assert_eq!(lane(&placed, "B").as_deref(), Some("OLD"));
+        for id in ["A", "B", "C", "ACT"] {
+            assert_eq!(
+                serde_json::to_string(&placed.positions[id]).unwrap(),
+                serde_json::to_string(&plain.positions[id]).unwrap(),
+                "{id} placed as without the place"
+            );
+        }
+        assert!(!placed.positions.contains_key("PLACE") && !placed.positions.contains_key("TOWN"));
+        // the activity is still the box around its members
+        let (act, b, c) = (&placed.positions["ACT"], &placed.positions["B"], &placed.positions["C"]);
+        assert!(act.x <= b.x.min(c.x) && act.y < b.y.min(c.y));
+        assert!(act.x + act.w >= (b.x + b.w).max(c.x + c.w));
     }
 
     /// G1 · a cycle cannot be drawn downwards: exactly one edge of it is

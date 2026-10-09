@@ -467,6 +467,19 @@ fn ancestry_table() -> &'static BTreeMap<String, Vec<String>> {
     })
 }
 
+/// B1 (#25, E.D. 9 Oct 2026) · a SPATIAL group: a `LocationNodeGroup` (or a
+/// subclass of it). The swimlane layout is a projection of TIME, and a place
+/// holds units of every epoch — drawn as a container it would have to cross the
+/// lanes, which the Matrix does not allow. So in the Matrix a spatial group is
+/// not laid out and `is_in_location` is not a membership; whether and how to
+/// show places there is a later decision. Read from the class hierarchy.
+pub fn is_spatial_group(node_type: &str) -> bool {
+    match ancestry_table().get(node_type) {
+        Some(chain) => chain.iter().any(|c| c == "LocationNodeGroup"),
+        None => node_type == "LocationNodeGroup",
+    }
+}
+
 /// G1 · is a node type in the OUTER ring of the Matrix — the «Links & other»
 /// ring the Matrix hides by default (`filters.ts nodeCircle` → `links_other`):
 /// everything that is not a stratigraphic unit, a paradata node, a group, an

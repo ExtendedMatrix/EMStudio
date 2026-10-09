@@ -14,6 +14,7 @@ import { BAND_GAP } from "../scene";
 import type { Scene, SceneGroup, SceneNode, SubBand } from "../scene";
 import type { EmDocument } from "../types";
 import { t } from "../i18n";
+import { ancestorsOf } from "../rules";
 
 /**
  * TOCCARE · the re-stack, remembered.
@@ -109,7 +110,8 @@ export function buildMatrixScene(
     v != null && v !== "" ? String(v) : undefined;
   const folded = new Set(layout.folded_groups ?? []);
   const pinnedSet = new Set(doc.layout?.pinned ?? []);
-  const membership = buildMembership(doc);
+  // B1 · a time projection: places are not its containers (em-core agrees)
+  const membership = buildMembership(doc, { temporal: true });
 
   const scene: Scene = {
     nodes: [],
@@ -249,6 +251,9 @@ export function buildMatrixScene(
     // epoch/phase temporal PDGs are represented by a "PD" tag in the label chip,
     // not a box — drop the group + its members here (Matrix-only; Graph keeps them)
     if (hiddenEpochPdg.has(node.id)) continue;
+    // B1 (#25) · a place is not drawn in the time projection, even when a
+    // layout saved before the rule still holds a position for it
+    if (ancestorsOf(node.node_type).includes("LocationNodeGroup")) continue;
     const r = positions[node.id];
     if (!r) continue;
     const sn: SceneNode = {
