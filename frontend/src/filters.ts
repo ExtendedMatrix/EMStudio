@@ -190,7 +190,24 @@ export function edgeCircle(edgeType: string | undefined): CircleKey | null {
   if (MEMBERSHIP_EDGES.has(t)) return null; // container structure
   if (t === GENERIC_EDGE) return "edges_generic";
   const cls = edgeEndpointClasses(t);
-  if (cls.has("AuthorNode") || cls.has("LicenseNode") || cls.has("EmbargoNode"))
+  // MICRO studio-luogo · the ARRIVAL decides here too (the PROPRIETA rule
+  // below). The union of the two ends used to: since s3Dgraphy's 1.6.39
+  // connections an AuthorNode is a spatiotemporal entity and is admitted as a
+  // SOURCE of has_property, is_after, has_same_time, has_first_epoch and
+  // survive_in_epoch — and by the union all five became «author» edges, so the
+  // Matrix, which hides that ring by default, would have stopped drawing the
+  // stratigraphic sequence (measured: 5 edge types moved, `check-compact`).
+  // An author / licence / embargo edge is one that ARRIVES at one of them:
+  // has_author, has_license, has_embargo, validated_by, as before.
+  const rawArrival = edgeEndpointsRaw(t).target;
+  if (
+    rawArrival.length > 0 &&
+    rawArrival.every((c) =>
+      ["AuthorNode", "AuthorAINode", "LicenseNode", "EmbargoNode"].some(
+        (o) => c === o || classIsA(c, o),
+      ),
+    )
+  )
     return "edges_author";
   // PROPRIETA · the ARRIVAL decides: an edge whose every admitted target is
   // paradata (ParadataNode and its subclasses — property, extractor, combiner,
@@ -219,6 +236,14 @@ export function edgeCircle(edgeType: string | undefined): CircleKey | null {
     cls.has("SemanticShapeNode")
   )
     return "edges_other";
+  // MICRO studio-luogo · a relation BETWEEN units (both ends admit one) is the
+  // sequence, whatever else it may join: since 1.6.39 documents and authors are
+  // spatiotemporal entities and is_after / has_same_time admit them too, and the
+  // ParadataNode test below (a document is paradata) took the sequence away
+  // from its ring
+  const raw = edgeEndpointsRaw(t);
+  const unit = (c: string): boolean => classIsA(c, "StratigraphicNode");
+  if (raw.source.some(unit) && raw.target.some(unit)) return "edges_temporal";
   if (cls.has("ParadataNode")) return "edges_paradata";
   if (cls.has("StratigraphicNode")) return "edges_temporal";
   return "edges_other";
