@@ -107,8 +107,12 @@ const eq = (got, want, what) => {
 const fresh = () => new M.DocumentStore({
   graph: { graph_id: "g1", name: "Villa di Aiano", nodes: [], edges: [] },
 });
+//: MICRO studio-luogo · an HC1 exists by the explicit gesture
+//: (`heritageDeclared`), not because the name field is filled: these laps are
+//: the laps of somebody who DID say «this is a recognised heritage asset».
 const FIELDS = {
   studyTitle: "Campagna 2026", studyAuthors: "Rossi", studyDate: "2026",
+  heritageDeclared: true,
   heritageName: "Villa di Aiano", heritageUri: "", heritageAuthorityRef: undefined,
   parentName: "", parentUri: "", parentAuthorityRef: undefined,
   projectName: "", twin: { state: "none", name: "", key: "" },

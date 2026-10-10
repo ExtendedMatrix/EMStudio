@@ -12,6 +12,7 @@
 import type { DocumentStore } from "./model";
 import { narrativesIn } from "./narrative";
 import { t } from "./i18n";
+import { roleNode } from "./hdto";
 import {
   addChapter,
   addEmbed,
@@ -80,6 +81,12 @@ export function scaffoldNarrativeFromGraph(store: DocumentStore): string | null 
     addChapter(store, nid, t("scaffold.intro"));
     toggleCanonical(store, nid, 0); // false → true
     addProse(store, nid, 0, introText(store));
+    // MICRO studio-luogo, part D · where the graph has a study, the intro cites
+    // it: an embed of the study node, which the view draws as the HDT-O chain
+    // (study, place, heritage, twin) read from the graph at render time — a
+    // reference, not text copied. No study, no embed: nothing is made up.
+    const study = roleNode(store.doc, "study");
+    if (study) addEmbed(store, nid, 0, study.id, defaultViewType(study));
     // 1..n · one chapter per epoch, oldest first, anchored + default embed.
     store.topEpochIdsChrono().forEach((eid, i) => {
       addEpochChapterAt(store, nid, eid, i + 1);

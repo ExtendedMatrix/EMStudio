@@ -42,6 +42,8 @@ import type { AuthorityCandidate, AuthorityRef } from "./types";
 import { renderSitePositionLine } from "./site-picker";
 import type { TwinSearchResult } from "./twins";
 import { describeSources } from "./twins";
+import { placesIn, studyKinds } from "./hdto";
+import { studyKindLabel } from "./hdto-card";
 import type { InspectorCallbacks } from "./inspector";
 
 /** What this panel actually asks of its caller — measured, not assumed: two
@@ -476,7 +478,7 @@ export function renderStudyPanel(
   const g = store.doc.graph as Record<string, unknown> & {
     graph_id: string;
   };
-  const panel = el("div", "insp-canvas");
+  let panel = el("div", "insp-canvas");
   panel.appendChild(el("div", "insp-section-title", "Graph · dataset info"));
 
   panel.appendChild(el("label", "insp-field-label", "Name"));
@@ -579,7 +581,8 @@ export function renderStudyPanel(
   // handled below)
   type HdtoTextKey = Exclude<
     keyof HdtoFields,
-    "heritageAuthorityRef" | "parentAuthorityRef" | "twin"
+    | "heritageAuthorityRef" | "parentAuthorityRef" | "twin" | "heritageDeclared"
+    | "studyCode" | "studyKind" | "placeName" | "placeId"
   >;
   const inputs = {} as Record<HdtoTextKey, HTMLInputElement>;
   // the authority candidates the user picked (verbatim uri/authority/label/
@@ -588,11 +591,34 @@ export function renderStudyPanel(
   let pickedParentRef: AuthorityRef | undefined = hdto.parentAuthorityRef;
   // the attribution, held here while the panel is open and written on commit
   let twin: TwinAttribution = { ...hdto.twin };
+  // MICRO studio-luogo · the code, the kind, the place, and the gesture that
+  // says the study is about a recognised heritage asset
+  const codeIn = document.createElement("input");
+  const kindSel = document.createElement("select");
+  const placeIn = document.createElement("input");
+  const declaredCb = document.createElement("input");
+  declaredCb.type = "checkbox";
+  declaredCb.checked = !!hdto.heritageDeclared;
+  const places = placesIn(store.doc);
+  // the id of the place the typed name stands for: a place of the graph with
+  // exactly that name (the first of the toponym chain wins), else none — and
+  // then `applyHdto` finds or makes the site by its deterministic id
+  const placeIdFor = (name: string): string => {
+    const n = name.trim();
+    if (!n) return "";
+    if (hdto.placeId && n === hdto.placeName) return hdto.placeId;
+    return places.find((p) => String(p.name ?? "").trim() === n)?.id ?? "";
+  };
   function commit(): void {
     store.applyHdto({
       studyTitle: inputs.studyTitle.value,
       studyAuthors: inputs.studyAuthors.value,
       studyDate: inputs.studyDate.value,
+      studyCode: codeIn.value,
+      studyKind: kindSel.value,
+      placeName: placeIn.value,
+      placeId: placeIdFor(placeIn.value),
+      heritageDeclared: declaredCb.checked,
       heritageName: inputs.heritageName.value,
       heritageUri: inputs.heritageUri.value,
       heritageAuthorityRef: pickedRef,
@@ -633,10 +659,77 @@ export function renderStudyPanel(
 
   groupTitle(t("insp.hdtStudy"), t("insp.hdtStudyGloss"));
   hfield("studyTitle", t("insp.hdtStudyTitle"), t("insp.hdtStudyTitlePh"));
+  // the code: EMPTY until somebody writes it — no placeholder value, nothing
+  // proposed from the title or the site (E.D., 10 Oct 2026)
+  panel.appendChild(el("label", "insp-field-label", t("insp.hdtStudyCode")));
+  codeIn.className = "insp-name-input";
+  codeIn.dataset.hdto = "code";
+  codeIn.value = hdto.studyCode ?? "";
+  codeIn.addEventListener("change", commit);
+  panel.appendChild(codeIn);
+  panel.appendChild(el("div", "insp-hint", t("insp.hdtStudyCodeHint")));
+  // the kind: the datamodel's values, «not said» first
+  panel.appendChild(el("label", "insp-field-label", t("insp.hdtStudyKind")));
+  kindSel.className = "insp-name-input";
+  kindSel.dataset.hdto = "kind";
+  for (const v of ["", ...studyKinds()]) {
+    const o = document.createElement("option");
+    o.value = v;
+    o.textContent = v ? studyKindLabel(v) : t("insp.hdtStudyKindNone");
+    kindSel.appendChild(o);
+  }
+  kindSel.value = hdto.studyKind ?? "";
+  kindSel.addEventListener("change", commit);
+  panel.appendChild(kindSel);
   hfield("studyAuthors", t("insp.hdtStudyAuthors"), t("insp.hdtStudyAuthorsPh"));
   hfield("studyDate", t("insp.hdtStudyDate"), t("insp.hdtStudyDatePh"));
 
+  // the PLACE — topography, always: the site the study took place at, chosen
+  // among the places the graph already has (a datalist: free text stays
+  // possible), made with s3dgraphy's id when it is not there
+  groupTitle(t("insp.hdtPlace"), t("insp.hdtPlaceGloss"));
+  panel.appendChild(el("label", "insp-field-label", t("insp.hdtPlaceName")));
+  placeIn.className = "insp-name-input";
+  placeIn.dataset.hdto = "place";
+  placeIn.value = hdto.placeName ?? "";
+  placeIn.placeholder = t("insp.hdtPlacePh");
+  const listId = `hdto-places-${Math.random().toString(36).slice(2, 8)}`;
+  const list = document.createElement("datalist");
+  list.id = listId;
+  for (const p of places) {
+    const o = document.createElement("option");
+    o.value = String(p.name ?? "");
+    const level = (p.data as Record<string, unknown> | undefined)?.level;
+    if (level) o.label = `${p.name} · ${level}`;
+    list.appendChild(o);
+  }
+  placeIn.setAttribute("list", listId);
+  placeIn.addEventListener("change", commit);
+  panel.appendChild(placeIn);
+  panel.appendChild(list);
+  panel.appendChild(el("div", "insp-hint",
+    places.length ? t("insp.hdtPlaceHint", { n: String(places.length) })
+                  : t("insp.hdtPlaceHintNone")));
+
   groupTitle(t("insp.hdtEntity"), t("insp.hdtEntityGloss"));
+  // THE GESTURE: an HC1 exists because somebody said «this is a recognised
+  // heritage asset», not because a name field was not empty
+  const declRow = el("label", "insp-check-row");
+  declaredCb.dataset.hdto = "declared";
+  declRow.appendChild(declaredCb);
+  declRow.appendChild(document.createTextNode(` ${t("insp.hdtDeclared")}`));
+  panel.appendChild(declRow);
+  panel.appendChild(el("div", "insp-hint", t("insp.hdtDeclaredHint")));
+  // what only a declared heritage has: its name, its authority, its whole,
+  // its twin — drawn in one box the checkbox shows and hides
+  const heritageBox = el("div", "insp-hdto-heritage");
+  heritageBox.style.display = declaredCb.checked ? "" : "none";
+  const outer = panel;
+  declaredCb.addEventListener("change", () => {
+    heritageBox.style.display = declaredCb.checked ? "" : "none";
+    commit();
+  });
+  panel = heritageBox;
   hfield("heritageName", t("insp.hdtEntityName"), t("insp.hdtEntityNamePh"));
   buildAuthorityField(
     panel,
@@ -674,6 +767,9 @@ export function renderStudyPanel(
     entityName: () => inputs.heritageName.value,
     entityUri: () => inputs.heritageUri.value,
   });
+
+  outer.appendChild(heritageBox);
+  panel = outer;
 
   groupTitle(t("insp.hdtProject"), t("insp.hdtProjectGloss"));
   hfield(

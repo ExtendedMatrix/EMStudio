@@ -12,6 +12,8 @@ import type {
   Swimlane,
 } from "./types";
 import { MEMBERSHIP_EDGES } from "./folding";
+import { makeSitePlace, placeEdgeType, placesIn, sitePlaceId, studyPlace, studyKinds } from "./hdto";
+import type { HdtoRole } from "./hdto";
 import { paradataGroupName } from "./naming";
 import { edgeTypeFor, nodeTypeForClass, planUniformSpellings } from "./rules";
 import type { SpellingPlan } from "./rules";
@@ -241,6 +243,24 @@ export interface HdtoFields {
   studyTitle: string;
   studyAuthors: string;
   studyDate: string;
+  /** MICRO studio-luogo · the study's short code (GT16) — written by the user
+   *  or given by the source, NEVER proposed or derived. `data.code`. Optional
+   *  in the type so a caller written before it (a remote op) leaves it alone. */
+  studyCode?: string;
+  /** `data.study_kind`, one of the datamodel's values (`studyKinds()`), or ""
+   *  for «not said». */
+  studyKind?: string;
+  /** The study's PLACE — the site, topography, a LocationNodeGroup reached by
+   *  `study_took_place_at`. `placeId` picks a place the graph already has (the
+   *  toponym chain, an area); `placeName` alone finds or makes the site with
+   *  s3dgraphy's deterministic id (`sitePlaceId`). Both empty → no place. */
+  placeName?: string;
+  placeId?: string;
+  /** THE EXPLICIT GESTURE (E.D., 10 Oct 2026): «this study is about a
+   *  recognised heritage asset». Without it no HC1 is made, whatever the name
+   *  field says — a site written down is a place, not a heritage entity. A
+   *  document that already has an HC1 reads back `true`, so it stays as it was. */
+  heritageDeclared?: boolean;
   heritageName: string;
   heritageUri: string;
   /** A resolved authority candidate picked from the /resolve-authority
@@ -264,15 +284,8 @@ export interface HdtoFields {
  *  stay idempotent (no duplicates) and the two Heritage Entities — the graph's
  *  subject ("about") and its optional whole ("parent") — are distinguishable.
  *  Internal to EMStudio; the RDF exporter ignores it (it reads specific
- *  attributes only), so it never leaks into the projected Turtle. */
-type HdtoRole =
-  | "proposition_set" // GraphNode (HC16)
-  | "about" // HeritageEntityNode (HC1) — the subject
-  | "parent" // HeritageEntityNode (HC1) — the optional whole
-  | "twin" // HDTNode (HC2)
-  | "study" // StudyNode (HC9)
-  | "project"; // ProjectNode (HC13)
-
+ *  attributes only), so it never leaks into the projected Turtle. The type
+ *  lives in `hdto.ts`, with the chain's reader. */
 /** role → the s3Dgraphy datamodel CLASS whose runtime node_type is resolved
  *  from the vendored registry (never hardcode the wire string). */
 const HDTO_ROLE_CLASS: Record<HdtoRole, string> = {
@@ -2830,10 +2843,16 @@ export class DocumentStore {
     };
     const aboutRef = refOf(about);
     const parentRef = refOf(parent);
+    const place = studyPlace(this.doc);
     return {
       studyTitle: String(study?.name ?? ""),
       studyAuthors: String(sd.authors ?? ""),
       studyDate: String(sd.date ?? ""),
+      studyCode: String(sd.code ?? ""),
+      studyKind: String(sd.study_kind ?? ""),
+      placeName: String(place?.name ?? ""),
+      placeId: place?.id ?? "",
+      heritageDeclared: !!about,
       heritageName: String(about?.name ?? ""),
       heritageUri: aboutRef.uri,
       heritageAuthorityRef: aboutRef.ref,
@@ -2974,11 +2993,30 @@ export class DocumentStore {
           ? "registered"
           : "provisional";
 
-    const hasHeritage = !!(trim(fields.heritageName) || trim(fields.heritageUri));
+    // MICRO studio-luogo · an HC1 only by the explicit gesture. Absent (a caller
+    // that predates it) means «as it is»: an HC1 already in the document stays
+    // declared, and a name alone never makes one.
+    const declared = fields.heritageDeclared ?? !!this.hdtoNode("about");
+    const hasHeritage =
+      declared && !!(trim(fields.heritageName) || trim(fields.heritageUri));
+    // the study's own fields — absent ones (an older caller) are read back
+    // from the study as it is, so they neither create nor clear anything
+    const prevStudy = (this.hdtoNode("study")?.data ?? {}) as Record<string, unknown>;
+    const prevPlace = studyPlace(this.doc);
+    const code = trim(fields.studyCode ?? String(prevStudy.code ?? ""));
+    const kindIn = trim(fields.studyKind ?? String(prevStudy.study_kind ?? ""));
+    // a kind the datamodel does not know is not written (s3dgraphy refuses it)
+    const kind = studyKinds().includes(kindIn) ? kindIn : "";
+    const placeIdIn = trim(fields.placeId ?? (fields.placeName === undefined ? prevPlace?.id ?? "" : ""));
+    const placeName = trim(fields.placeName ?? String(prevPlace?.name ?? ""));
+    const hasPlace = !!(placeIdIn || placeName);
     const hasStudy = !!(
       trim(fields.studyTitle) ||
       trim(fields.studyAuthors) ||
-      trim(fields.studyDate)
+      trim(fields.studyDate) ||
+      code ||
+      kind ||
+      hasPlace
     );
     // the proposition set (HC16) anchors both contains_ and produced_ edges; it
     // is needed as soon as there's any HDT-O content to attach.
@@ -3079,11 +3117,64 @@ export class DocumentStore {
         d.hdto_role = "study";
         d.authors = trim(fields.studyAuthors);
         d.date = trim(fields.studyDate);
+        // the code only when somebody wrote it: never proposed, never derived
+        if (code) d.code = code;
+        else delete d.code;
+        if (kind) d.study_kind = kind;
+        else delete d.study_kind;
         ensureEdge(study, about); // HC9 → HC1 (study_about_heritage)
         ensureEdge(study, set); // HC9 → HC16 (study_produced_proposition_set)
       }
     } else {
       removeRole("study");
+    }
+
+    // MICRO studio-luogo · the PLACE (the site, topography): study ─
+    // study_took_place_at → LocationNodeGroup. A place the graph already has is
+    // reused — by id when one was picked, else s3dgraphy's deterministic id of
+    // the site, else a site of the same name — and made only when missing, with
+    // the id pyArchInit's projector would give it (`sitePlaceId`), so the two
+    // never make two nodes of one site.
+    {
+      const pet = placeEdgeType();
+      const pnt = (): EmNode | undefined => {
+        if (!study || !hasPlace) return undefined;
+        const places = placesIn(this.doc);
+        if (placeIdIn) {
+          const picked = places.find((p) => p.id === placeIdIn);
+          if (picked) return picked;
+        }
+        if (!placeName) return undefined;
+        const wanted = sitePlaceId(placeName);
+        const found =
+          places.find((p) => p.id === wanted) ??
+          places.find((p) => trim(String(p.name ?? "")) === placeName &&
+            (p.data as Record<string, unknown> | undefined)?.level === "sito");
+        if (found) return found;
+        const made = makeSitePlace(placeName);
+        if (!made) return undefined;
+        g.nodes.push(made);
+        addedNodes.push(made);
+        return made;
+      };
+      const target = pnt();
+      // the study's old place, when it changes: the EDGE goes; the place goes
+      // only if nothing else in the graph speaks of it (an orphan this panel
+      // made), never a place of the toponym chain
+      if (study && pet) {
+        g.edges = g.edges.filter((e) => {
+          const drop = e.source === study!.id && e.edge_type === pet && e.target !== target?.id;
+          if (drop) removed.push(e);
+          return !drop;
+        });
+      }
+      if (prevPlace && prevPlace.id !== target?.id &&
+          !g.edges.some((e) => e.source === prevPlace.id || e.target === prevPlace.id)) {
+        g.nodes = g.nodes.filter((x) => x.id !== prevPlace.id);
+        const pos = this.doc.layout?.positions;
+        if (pos) delete pos[prevPlace.id];
+      }
+      ensureEdge(study, target); // HC9 → place (study_took_place_at)
     }
 
     // optional Project (HC13)
@@ -3365,6 +3456,42 @@ export class DocumentStore {
           ),
         }
       : this.doc.graph;
-    return JSON.stringify({ header, graph, layout: this.doc.layout }, null, 1);
+    return JSON.stringify({ header, graph: withoutDrawingKeys(graph), layout: this.doc.layout },
+                          null, 1);
   }
+}
+
+/**
+ * MICRO studio-luogo, part C · `y_pos` and `x_pos` do not travel in the em.json
+ * (E.D., 10 Oct 2026: they are yEd's drawing coordinates, a fossil of the
+ * GraphML) — s3dgraphy's `emjson_exporter.GRAPHML_DRAWING_KEYS`. An old file
+ * still brings them, in a node's `data` and in a Master document's `instances`;
+ * the document in memory keeps them (the inspector's «Technical details» still
+ * shows them), and the SAVE leaves them out. A copy only where there is one to
+ * drop, so a graph without them is written exactly as it was.
+ */
+export const GRAPHML_DRAWING_KEYS = ["y_pos", "x_pos"] as const;
+
+function withoutDrawingKeys<G extends { nodes: EmNode[] }>(graph: G): G {
+  const has = (o: unknown): boolean =>
+    !!o && typeof o === "object" && GRAPHML_DRAWING_KEYS.some((k) => k in (o as object));
+  const strip = (o: Record<string, unknown>): Record<string, unknown> => {
+    const out = { ...o };
+    for (const k of GRAPHML_DRAWING_KEYS) delete out[k];
+    return out;
+  };
+  let changed = false;
+  const nodes = graph.nodes.map((n) => {
+    const d = n.data as Record<string, unknown> | undefined;
+    if (!d) return n;
+    const inst = Array.isArray(d.instances) ? (d.instances as unknown[]) : null;
+    const instDirty = !!inst?.some(has);
+    if (!has(d) && !instDirty) return n;
+    changed = true;
+    const data = strip(d);
+    if (instDirty)
+      data.instances = inst!.map((i) => (has(i) ? strip(i as Record<string, unknown>) : i));
+    return { ...n, data };
+  });
+  return changed ? { ...graph, nodes } : graph;
 }

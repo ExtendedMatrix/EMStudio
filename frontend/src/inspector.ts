@@ -15,6 +15,7 @@ import { packagingLabel } from "./resources";
 import { processLabel } from "./views/dtc";
 import type { TwinSearchResult } from "./twins";
 import { renderSitePosition } from "./study-panel";
+import { chainCard, isChainNode } from "./hdto-card";
 import { naturalFields, qualeOf, TRANSLATION_TYPE } from "./translation";
 
 export interface InspectorCallbacks {
@@ -1123,6 +1124,18 @@ export function renderInspector(
   }
 
   renderEditorialStamps(root, node as EmNode);
+
+  // MICRO studio-luogo, part D · THE CHAIN, on the card of any of its nodes —
+  // the study, its place, the HC1, the twin, the project: from which study, in
+  // which place, of which heritage, with which twin. The same card the
+  // narrative draws (hdto-card.ts); the Study window stays where it is edited.
+  if (isChainNode(doc, node.id)) {
+    const card = chainCard(doc, { focusId: node.id, onJump: cb.onJump });
+    if (card) {
+      root.appendChild(el("h3", "insp-sect", t("hdto.cardTitle")));
+      root.appendChild(card);
+    }
+  }
 
   // MULTIGRAPH · the graph-self node carries the graph-scope facts, and the
   // multigraph mode puts it ON the canvas — so selecting it must offer the site

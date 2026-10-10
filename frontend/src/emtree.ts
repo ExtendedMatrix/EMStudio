@@ -26,6 +26,7 @@
  * bug that shows up as "the wrong document saved over the right one".
  */
 
+import { studyCode, withCode } from "./hdto";
 import type { DocumentStore } from "./model";
 import type { ViewKind } from "./types";
 import { getRecents, type RecentFile } from "./recent";
@@ -574,6 +575,8 @@ function overviewSection(tree: EMTree, labels: (key: string) => string): string 
       seen.set(name, n);
       name = `${name} (${n})`;
     }
+    // MICRO studio-luogo · the study's code beside the name, when it has one
+    name = withCode(name, studyCode(slot.store.doc));
     const field = (label: string, value: string, missing: string): string =>
       `<div class="ov-field"><dt>${esc(label)}</dt><dd${value ? "" : ' class="ov-missing"'}>${
         esc(value || missing)

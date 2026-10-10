@@ -26,6 +26,7 @@ import { onFirstVisible } from "./lazy";
 import { blockStatus, bylineOf, narrativeAuthors } from "./narrative-authorship";
 import type { AuthorRef, BlockStatus } from "./narrative-authorship";
 import { canonicalViewType } from "./narrative-edit";
+import { chainCard, isChainNode } from "./hdto-card";
 import { notebookCells, printItems, type ProjChapter } from "./narrative-projection";
 import {
   certaintyLadder, documentEmbed, existenceCertainty, isRmDoc, matrixEmbed,
@@ -265,6 +266,17 @@ function usCard(node: EmNode, doc?: EmDocument | null): HTMLElement {
   box.appendChild(el("div", "nv-embed-title", String(node.name || node.id)));
   if (node.description)
     box.appendChild(el("div", "nv-embed-note", node.description));
+  // MICRO studio-luogo, part D · an embed of the study (or of its HC1, its
+  // place, its twin) IS the chain, projected from the graph now: study, place,
+  // heritage with its authority, twin with its state — the inspector's card.
+  // A study with no HC1 says so («not yet attributed»); nothing is invented.
+  if (isChainNode(doc, node.id)) {
+    box.classList.add("nv-hdto");
+    head.lastChild!.textContent = t("hdto.cardTitle");
+    const card = chainCard(doc, { focusId: node.id });
+    if (card) box.appendChild(card);
+    return box;
+  }
   // DP-79 P1 · the qualia the design asks for: how sure we are it EXISTED.
   // Drawn as the whole ladder with one rung lit, because "asserted" alone does
   // not tell a reader it is the third of four.

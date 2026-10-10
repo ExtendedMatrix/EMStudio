@@ -9384,3 +9384,57 @@ body.sync-active #statusbar .sb-who .footer-chip.id-signature {
   border-color: var(--accent);
   color: var(--accent);
 }
+
+/* MICRO studio-luogo · the HDT-O chain card (hdto-card.ts): the study in its
+   cultural context, in the inspector and in a narrative embed of the study */
+.insp-check-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  font-size: 12px;
+  margin: 4px 0 2px;
+}
+.hdto-card {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin: 4px 0 8px;
+}
+.hdto-row {
+  display: grid;
+  grid-template-columns: 7.5em 1fr;
+  column-gap: 8px;
+  align-items: baseline;
+  font-size: 12px;
+}
+.hdto-row.hdto-focus .hdto-k {
+  font-weight: 700;
+}
+.hdto-k {
+  color: var(--text-dim, #8a8a8a);
+}
+.hdto-v {
+  text-align: left;
+  background: none;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+}
+button.hdto-v {
+  cursor: pointer;
+  text-decoration: underline dotted;
+}
+.hdto-note,
+.hdto-link {
+  grid-column: 2;
+  font-size: 11px;
+  color: var(--text-dim, #8a8a8a);
+}
+.hdto-link {
+  word-break: break-all;
+}
+.hdto-missing .hdto-v {
+  font-style: italic;
+  color: var(--text-dim, #8a8a8a);
+}

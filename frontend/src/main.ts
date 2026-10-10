@@ -1,4 +1,5 @@
 import "./style.css";
+import { hdtoChain, hdtoDropped, placesIn, studyCode, withCode } from "./hdto";
 import { applyFolding, buildMembership, MEMBERSHIP_EDGES } from "./folding";
 import { geoOf, georeferenceScene, reprojectPoint, setBridgeResolver } from "./geo";
 import { setChronologyBridgeResolver } from "./chron-bridge";
@@ -2055,6 +2056,12 @@ window.__EM_SCENE__ = () => {
     return { view: vv, master: st.master, off: [...st.off] };
   },
   overlaysDrawn: () => drawnOverlayCounts(),
+  /** MICRO studio-luogo · the Graph view's HDT-O layer, read and switched, and
+   *  the ids each view's projection holds (what is on screen, not the file) */
+  hdtoLayer: () => hdtoLayer,
+  setHdtoLayer: (on: boolean) => setHdtoLayer(on),
+  viewNodeIds: (v: "matrix" | "graph") =>
+    (v === "matrix" ? scenes.matrix : scenes.graph)?.nodes.map((n: { id: string }) => n.id) ?? [],
   setOverlays: (v: OverlayView, st: { master?: boolean; off?: OverlayKey[] }) => {
     const cur = overlaysOf(v);
     setOverlays(v, { master: st.master ?? cur.master, off: st.off ? [...st.off] : [...cur.off] });
@@ -3162,7 +3169,9 @@ function emOfDoc(d: EmDocument): string {
 function graphTitle(st: DocumentStore): string {
   const g = st.doc.graph as Record<string, unknown>;
   const name = String(g["name"] ?? (st.doc.header as Record<string, unknown> | undefined)?.["name"] ?? "").trim();
-  return name || t("strip.untitled");
+  // MICRO studio-luogo · the study's code beside the name, when the study has
+  // one (`data.code`) — read, never derived
+  return withCode(name || t("strip.untitled"), studyCode(st.doc));
 }
 
 /**
@@ -3610,7 +3619,7 @@ function updateWindowTitle(): void {
     const name = currentFilePath
       ? baseName(currentFilePath)
       : slot ? slotLabel(slot) : String(g["name"] ?? g.graph_id ?? "untitled");
-    title = `${name}${store.dirty ? " ●" : ""} — EMStudio`;
+    title = `${withCode(name, studyCode(store.doc))}${store.dirty ? " ●" : ""} — EMStudio`;
   }
   void setWindowTitle(title);
 }
@@ -3894,8 +3903,16 @@ function labelResources(scene: Scene | null | undefined, counts: Map<string, num
   }
 }
 
+/** MICRO studio-luogo, part D · the Heritage Digital Twin layer of the Graph
+ *  view: the study, its place, the HC1, the twin, the project and their edges,
+ *  drawn over the graph when it is on. OFF by default and not remembered — a
+ *  layer you switch on to look, like the multigraph's whole view; the Matrix
+ *  never has it. */
+let hdtoLayer = false;
+
 function filteredView(opts: { wholeGraph?: boolean;
-                        hidden?: { nodes: Set<string>; edges: Set<string> } } = {}): {
+                        hidden?: { nodes: Set<string>; edges: Set<string> };
+                        hdtoLayer?: boolean } = {}): {
   nodes: EmDocument["graph"]["nodes"];
   edges: EmDocument["graph"]["edges"];
   badges: Map<string, number>;
@@ -3942,11 +3959,19 @@ function filteredView(opts: { wholeGraph?: boolean;
   // data.hdto_role) + their incident edges, so graph-level HDT-O metadata never
   // clutters the stratigraphic canvas. The nodes remain in em.json (single
   // source of truth) — only rendering is filtered.
-  const isHdto = (n: EmDocument["graph"]["nodes"][number]): boolean =>
-    HDTO_HIDDEN_TYPES.has(n.node_type) ||
-    !!(n.data as Record<string, unknown> | undefined)?.hdto_role;
-  if (!wholeGraph && vNodes.some(isHdto)) {
-    vNodes = vNodes.filter((n) => !isHdto(n));
+  // MICRO studio-luogo · the HDT-O layer (hdto.ts `hdtoDropped`): the profile
+  // types and role-marked nodes, and the study's place when it is a site with
+  // no member of its own — kept, the chain's nodes, when the Graph view's layer
+  // is on.
+  const chainIds = hdtoChain(doc).ids;
+  const isPlaceOfChain = placesIn(doc).some((p) => chainIds.has(p.id));
+  const mmHdto = isPlaceOfChain ? buildMembership(doc) : null;
+  const dropped = !wholeGraph
+    ? hdtoDropped(doc, vNodes, HDTO_HIDDEN_TYPES,
+                  (id) => mmHdto?.childrenOf.get(id)?.length ?? 0, !!opts.hdtoLayer)
+    : new Set<string>();
+  if (dropped.size) {
+    vNodes = vNodes.filter((n) => !dropped.has(n.id));
     const keep = new Set(vNodes.map((n) => n.id));
     vEdges = vEdges.filter((e) => keep.has(e.source) && keep.has(e.target));
   }
@@ -4246,10 +4271,11 @@ function buildScenesNow(): void {
   // AUDIT N2 · each projection with ITS circles; equal circle sets share a view
   const views = new Map<string, ReturnType<typeof filteredView>>();
   const viewFor = (v: ViewKind, whole = false): ReturnType<typeof filteredView> => {
-    const key = `${whole ? "W" : ""}${[...circleState[v]].sort().join(",")}`;
+    const layer = v === "graph" && hdtoLayer;
+    const key = `${whole ? "W" : ""}${layer ? "H" : ""}${[...circleState[v]].sort().join(",")}`;
     let fv = views.get(key);
     if (!fv) {
-      fv = filteredView({ wholeGraph: whole, hidden: hiddenFor(v) });
+      fv = filteredView({ wholeGraph: whole, hidden: hiddenFor(v), hdtoLayer: layer });
       views.set(key, fv);
     }
     return fv;
@@ -14004,6 +14030,30 @@ function renderCirclesPanel(): void {
     });
     hideRow.append(hideCb, document.createTextNode(` ${t("liq.hide")}`));
     filterPanel.appendChild(hideRow);
+
+    // MICRO studio-luogo · the Heritage Digital Twin layer: the study in its
+    // cultural context, over the graph, switched on and off here
+    const hh = document.createElement("div");
+    hh.className = "fp-sect";
+    hh.textContent = t("hdto.layer");
+    filterPanel.appendChild(hh);
+    const chainSize = hdtoChain(store.doc).ids.size;
+    const layerRow = document.createElement("label");
+    layerRow.className = "fp-row";
+    if (!chainSize) layerRow.style.opacity = "0.45";
+    const layerCb = document.createElement("input");
+    layerCb.type = "checkbox";
+    layerCb.dataset.hdtoLayer = "1";
+    layerCb.checked = hdtoLayer;
+    layerCb.addEventListener("change", () => setHdtoLayer(layerCb.checked));
+    layerRow.append(layerCb, document.createTextNode(` ${t("hdto.layerToggle")} (${chainSize})`));
+    filterPanel.appendChild(layerRow);
+    if (!chainSize) {
+      const none = document.createElement("div");
+      none.className = "fp-hint";
+      none.textContent = t("hdto.layerEmpty");
+      filterPanel.appendChild(none);
+    }
   }
 
   // Display options (presentation, not a filter): monochrome overrides every
@@ -14038,6 +14088,13 @@ function renderCirclesPanel(): void {
     else matrixViewLayout = null;
   });
   filterPanel.appendChild(reset);
+}
+/** Switch the Graph view's HDT-O layer (MICRO studio-luogo, part D). */
+function setHdtoLayer(on: boolean): void {
+  if (hdtoLayer === on) return;
+  hdtoLayer = on;
+  buildScenes();
+  draw();
 }
 btnViewProps.addEventListener("click", () => {
   if (filterPanel.classList.contains("hidden")) openFilterPanel();
