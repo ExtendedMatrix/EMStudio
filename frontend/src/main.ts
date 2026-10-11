@@ -591,6 +591,7 @@ import { digestOf, isStampPath, stampPathFor } from "./stamp";
 // sappia chi ce l'ha messo. La forma dell'atto sta qui; il verbale lo emette
 // s3Dgraphy attraverso il bridge, come per la composizione.
 import { ingestionAct, storeLocator } from "./stamp-ingest";
+import { buildGraphsDoc } from "./views/graphs";
 import { buildGraphScene, graphCentres, type GraphAlgorithm } from "./views/graph";
 import { buildLiquidScene, isLiquid, LiquidSim, localNeighbourhood, type LiquidFilter } from "./views/liquid";
 import ForceWorker from "./force-worker.ts?worker&inline";
@@ -759,7 +760,8 @@ function viewPosKey(v: ViewKind, gid: string): string {
   return `emstudio.viewpos.${gid}.${v === "graph" ? `graph:${graphAlgorithm}` : v}`;
 }
 function overridesOf(v: ViewKind): Map<string, { x: number; y: number }> | null {
-  return v === "graph" ? graphOverrides : v === "dtc" ? dtcOverrides : v === "multigraph" ? multigraphOverrides : null;
+  return v === "graph" ? graphOverrides : v === "dtc" ? dtcOverrides : v === "multigraph" ? multigraphOverrides
+    : v === "graphs" ? graphsOverrides : null;
 }
 function persistViewPositions(v: ViewKind = view): void {
   const gid = store?.doc.graph.graph_id;
@@ -788,12 +790,19 @@ const dtcOverrides = new Map<string, { x: number; y: number }>();
 // MULTIGRAPH · its own drag map, for the same reason: the node sits elsewhere in
 // each projection.
 const multigraphOverrides = new Map<string, { x: number; y: number }>();
+// MICRO-AUTORI-LAYOUT p.5 · the Multigraph (one node per open graph): its drags
+const graphsOverrides = new Map<string, { x: number; y: number }>();
+/** the Multigraph's nodes → the slot whose graph holds each */
+let graphsSlotOf = new Map<string, string>();
+/** …and its id in that graph */
+let graphsRealOf = new Map<string, string>();
 /** The manual-drag map of the current canvas projection, or null where drags are
  *  not overrides at all (Matrix stores positions in the document layout). */
 function canvasOverrides(): Map<string, { x: number; y: number }> | null {
   if (view === "graph") return graphOverrides;
   if (view === "dtc") return dtcOverrides;
   if (view === "multigraph") return multigraphOverrides;
+  if (view === "graphs") return graphsOverrides;
   return null;
 }
 // Matrix VIEW layout: an em-core layout of the FILTERED subgraph, so the Matrix
@@ -938,6 +947,7 @@ const circleState: Record<ViewKind, Set<CircleKey>> = {
   graph: defaultVisibleCircles("graph"),
   dtc: defaultVisibleCircles("dtc"),
   multigraph: defaultVisibleCircles("multigraph"),
+  graphs: defaultVisibleCircles("graphs"),
 };
 // Recompute the hidden type sets from the current view's visible circles.
 function recomputeHiddenFromCircles(): void {
@@ -2723,6 +2733,17 @@ function sameEdge(a: EmEdge, b: EmEdge): boolean {
 }
 
 function select(nodeId: string | null): void {
+  // MICRO-AUTORI-LAYOUT p.5 · a node of the Multigraph is a node of ITS graph:
+  // that graph comes in front (the Inspector shows the active graph), then the
+  // node is selected there — the graph's node shows the graph and its paradata
+  if (nodeId && view === "graphs") {
+    const slot = graphsSlotOf.get(nodeId);
+    nodeId = graphsRealOf.get(nodeId) ?? nodeId;
+    if (slot && slot !== emtree.active()?.id) {
+      activateSlot(slot);
+      if (view !== "graphs") setWindowMode(activeWin(), "graphs");
+    }
+  }
   // DEV29 B2 · a click on an acquisition's block opens it (or closes it) and
   // selects the acquisition: the block is a drawing, not a node of the graph
   const setOf = dtcSetOwner(nodeId);
@@ -4145,6 +4166,15 @@ function filteredView(opts: { wholeGraph?: boolean;
   // on a loose referent, a computed instance in a group)
   const authorMasters = authorMastersOf(doc);
   if (!wholeGraph) {
+    // MICRO-AUTORI-LAYOUT p.5 · the graph's own paradata group («Graph
+    // paradata»: its authors, licence, embargo) is not an object of the site:
+    // the time projections do not draw it — a chip on the window's bar opens
+    // the Multigraph, where it hangs from the graph's node
+    const graphPd = graphParadataOf(doc);
+    if (graphPd.size) {
+      vNodes = vNodes.filter((n) => !graphPd.has(n.id));
+      vEdges = vEdges.filter((e) => !graphPd.has(e.source) && !graphPd.has(e.target));
+    }
     vNodes = vNodes.filter(
       (n) => !isAdornmentNodeType(n.node_type) || pdgMembers.has(n.id) || authorMasters.has(n.id),
     );
@@ -4192,6 +4222,22 @@ function filteredView(opts: { wholeGraph?: boolean;
     // a computed instance
     ...(hiddenNodeTypes.has("author") ? { instanceKindsHidden: new Set(["author"]) } : {}),
   };
+}
+
+/** MICRO-AUTORI-LAYOUT p.5 · the graph's own paradata: the group a GraphNode
+ *  has (`has_paradata_nodegroup`) and the members that are only there (an
+ *  author who is a master in its epoch stays) */
+function graphParadataOf(doc: EmDocument): Set<string> {
+  const out = new Set<string>();
+  const byId = new Map(doc.graph.nodes.map((n) => [n.id, n]));
+  for (const e of doc.graph.edges)
+    if (e.edge_type === "has_paradata_nodegroup" && classOf(byId.get(e.source)?.node_type) === "GraphNode")
+      out.add(e.target);
+  if (!out.size) return out;
+  const masters = authorMastersOf(doc);
+  for (const e of doc.graph.edges)
+    if (e.edge_type === "is_in_paradata_nodegroup" && out.has(e.target) && !masters.has(e.source)) out.add(e.source);
+  return out;
 }
 
 /** MICRO-AUTORI-LAYOUT · the authors (human or AI) that have an epoch — their
@@ -4497,6 +4543,13 @@ function buildScenesNow(): void {
     overrides: multigraphOverrides,
   });
   labelResources(scenes.multigraph, fileCounts(doc.graph.edges));
+  // MICRO-AUTORI-LAYOUT p.5 · the Multigraph: every graph open in the
+  // workspace, a node with its own paradata, the rapporti between them
+  const gd = buildGraphsDoc(emtree.slots.map((sl) => ({
+    slotId: sl.id, graphId: String(sl.store.doc.graph.graph_id ?? sl.id), label: slotLabel(sl), doc: sl.store.doc })));
+  graphsSlotOf = gd.slotOf;
+  graphsRealOf = gd.realOf;
+  scenes.graphs = buildGraphScene(gd.doc, undefined, { algorithm: "layered", overrides: graphsOverrides });
 }
 
 /*
@@ -16257,8 +16310,11 @@ function jumpTo(nodeId: string): void {
     }
     // the window the jump started in (captured above), never the one under the pointer now
     const win = target ?? here;
-    if (isAdornmentNodeType(nt ?? "") && view !== "multigraph" && win.type === "graph") {
-      setWindowMode(win, "multigraph");
+    if (isAdornmentNodeType(nt ?? "") && view !== "multigraph" && view !== "graphs" && win.type === "graph") {
+      // the graph's own author / licence / embargo hangs from the graph's node
+      // in the Multigraph; any other in the Full graph
+      const ofGraph = store ? graphParadataOf(store.doc).has(nodeId) : false;
+      setWindowMode(win, ofGraph ? "graphs" : "multigraph");
       requestAnimationFrame(() => {
         select(nodeId);
         if (scene()?.byId.has(nodeId)) frameNodeInContext(nodeId);
@@ -27803,6 +27859,22 @@ function buildAreaHeader(win: Win): DocumentFragment {
           focusThen(win, () => void layoutAll(fresh));
         });
       } }
+    // MICRO-AUTORI-LAYOUT p.5 · the graph's own paradata are not drawn in the
+    // Matrix and the Graph: their badge on the bar opens the Multigraph
+    const wm = graphModeOf(win.id);
+    if ((wm === "matrix" || wm === "graph") && store?.graphParadataGroup()) {
+      const c = document.createElement("button");
+      c.type = "button";
+      c.className = "wi-chip";
+      c.dataset.act = "graph-paradata";
+      c.textContent = `◎ ${t("graphs.badge")}`;
+      c.title = t("graphs.badgeTitle");
+      c.addEventListener("click", (e) => {
+        e.stopPropagation();
+        focusThen(win, () => setWindowMode(win, "graphs"));
+      });
+      frag.appendChild(c);
+    }
   }
   if (type === "narrative") {
     // ✎ · writing IS a mode of a narrative window, so it is a toggle you can see

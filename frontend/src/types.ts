@@ -71,8 +71,11 @@ export interface EmDocument {
  *  "circles of detail". `dtc` (WIN2) reads the same nodes through their
  *  digital-twin-creation relations; `multigraph` (MULTIGRAPH) shows the graph
  *  WITH everything attached to it — paradata, ornaments, graph-scope nodes — so
- *  they can be seen and set. Both are projections, not second models. */
-export type ViewKind = "matrix" | "graph" | "dtc" | "multigraph";
+ *  they can be seen and set. Both are projections, not second models.
+ *  `graphs` (MICRO-AUTORI-LAYOUT p.5, «Multigraph») is the workspace seen from
+ *  above: one node per open graph, its own paradata attached, the rapporti
+ *  between the graphs (`views/graphs.ts`). */
+export type ViewKind = "matrix" | "graph" | "dtc" | "multigraph" | "graphs";
 
 /** DP-82 · the MODE of the central area — what it currently shows. `matrix`,
  *  `graph` and `dtc` are canvas projections (they carry their own viewport/

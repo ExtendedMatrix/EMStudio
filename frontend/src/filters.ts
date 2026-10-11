@@ -255,7 +255,7 @@ export function edgeCircle(edgeType: string | undefined): CircleKey | null {
  *  every ring on: "show me everything attached to this graph" is the whole point
  *  of that mode, and a ring left off would silently hide what it came to find. */
 export function defaultVisibleCircles(view: ViewKind): Set<CircleKey> {
-  if (view === "multigraph") return new Set(CIRCLES.map((c) => c.key));
+  if (view === "multigraph" || view === "graphs") return new Set(CIRCLES.map((c) => c.key));
   const out = new Set<CircleKey>();
   for (const c of CIRCLES) if (view === "matrix" ? c.matrix : c.graph) out.add(c.key);
   return out;

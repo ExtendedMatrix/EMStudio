@@ -15,6 +15,7 @@ import { packagingLabel } from "./resources";
 import { processLabel } from "./views/dtc";
 import type { TwinSearchResult } from "./twins";
 import { renderSitePosition } from "./study-panel";
+import { linksOfGraph } from "./links";
 import { chainCard, isChainNode } from "./hdto-card";
 import { naturalFields, qualeOf, TRANSLATION_TYPE } from "./translation";
 
@@ -1152,8 +1153,34 @@ export function renderInspector(
   // for it. Same renderer as that panel (renderSitePosition).
   // MICRO-UN-POSTO · and this is THE place of it: the other three show it and
   // open the same selector here.
-  if (classOf(node.node_type) === "GraphNode")
+  if (classOf(node.node_type) === "GraphNode") {
+    // MICRO-AUTORI-LAYOUT p.5 · the graph and its own paradata, all in one
+    // place: what the Multigraph's node (or the graph's chip) selects
+    const scope = store.readGraphScope();
+    const g = doc.graph;
+    root.appendChild(el("h3", "insp-sect", t("graphs.inspTitle")));
+    const box = el("div", "insp-group");
+    const links = linksOfGraph(doc);
+    const rows: [string, string][] = [
+      [t("graphs.inspName"), String(g.name ?? "")],
+      [t("graphs.inspCode"), String((g as unknown as { code?: string }).code ?? scope.em_id ?? "")],
+      [t("graphs.inspSize"), t("graphs.inspSizeV", { n: String(g.nodes.length), e: String(g.edges.length) })],
+      [t("graphs.inspAuthor"), scope.author + (scope.orcid ? ` · ${scope.orcid}` : "")],
+      [t("graphs.inspLicense"), scope.license],
+      [t("graphs.inspEmbargo"), scope.embargo],
+      [t("graphs.inspLinks"), links.length ? String(links.length) : ""],
+    ];
+    for (const [k, v] of rows) {
+      if (!v) continue;
+      const row = el("div", "insp-link-row");
+      row.style.gap = "8px";
+      row.appendChild(el("span", "insp-group-title", k));
+      row.appendChild(el("span", "", v));
+      box.appendChild(row);
+    }
+    root.appendChild(box);
     renderSitePosition(root, store, cb.onSetSitePosition, true);
+  }
 
   // connections grouped by edge type and direction, deletable
   const groups = new Map<

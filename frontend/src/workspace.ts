@@ -92,7 +92,7 @@ export type GraphMode = ViewKind;
  *  the menu from it and `winMode` validates against it, so a new projection is
  *  one entry here rather than two lists that can disagree (which is exactly how
  *  `multigraph` first shipped invisible to `winMode`). */
-export const GRAPH_MODES: GraphMode[] = ["matrix", "graph", "dtc", "multigraph"];
+export const GRAPH_MODES: GraphMode[] = ["matrix", "graph", "dtc", "multigraph", "graphs"];
 
 /** The backends a Storage window can show: the disk, and the room's MinIO
  *  (`minioPanel`: delivery, lots, derivation). AUDIT C · it said «NOT connected

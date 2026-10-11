@@ -948,7 +948,9 @@ export function render(
     );
     let icon = pathGlyph
       ? null
-      : ICON_NODE_TYPES.has(n.node.node_type)
+      : ICON_NODE_TYPES.has(n.node.node_type) || n.node.node_type === "graph"
+        // MICRO-AUTORI-LAYOUT p.5 · the graph's pictogram (`graph.svg`): no
+        // `graph` entry in 2d_glyphs yet, so the vendored bitmap draws it
         ? imageFor(n.node.node_type)
         : null;
     if (!icon && !pathGlyph) {
