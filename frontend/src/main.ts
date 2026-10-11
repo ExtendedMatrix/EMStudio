@@ -188,7 +188,8 @@ import connectionsDatamodel from "./assets/s3Dgraphy_connections_datamodel.json"
 import datamodelTranslations from "./assets/datamodel_translations.json";
 import { createResourceThumb } from "./resource-preview";
 import { keepOnDisk, newEmProject, refreshFileStates, reorderApply, reorderPreview, revealFile,
-         fileProjectRoot, describeFile, filesOfDocument, fileStateOf, type FileState } from "./file-states";
+         fileProjectRoot, describeFile, filesOfDocument, fileStateOf, findMovedFiles, movedFiles, dropMoved,
+         type FileState, type MovedFile } from "./file-states";
 import { docFilesBox, docFilesGlyphs, filesSection, fileStateLine, type FileHooks } from "./file-states-ui";
 import { paintChooser } from "./node-chooser";
 import { proposeLanguages, type LanguageProposal } from "./lang-guess";
@@ -22947,7 +22948,52 @@ function fileHooks(): FileHooks {
     onKeep: (fs) => { void keepFiles(fs); },
     onNewProject: () => { void newProjectGesture(); },
     onReorder: () => { void reorderGesture(); },
+    onFindMoved: () => { void findMoved(); },
+    onRelinkMoved: (m, path) => { relinkMoved(m, path); },
   };
+}
+
+/** S1 · «Find moved files…»: the bridge looks, in the project's folders and in
+ * one more the person may name (desktop: the native folder dialog), for the
+ * files that are missing; the candidates are shown, nothing is changed. */
+async function findMoved(): Promise<void> {
+  if (!store) return;
+  const src = inventorySources();
+  const browsing = windowsOf().filter((w) => w.type === "storage").map((w) => storagePath(w));
+  const folders = [src.baseDir, ...src.doscoDirs, ...browsing].filter((x): x is string => !!x);
+  if (isTauri()) {
+    try {
+      const extra = await pickFolder();       // cancel = only the project's folders
+      if (extra) folders.push(extra);
+    } catch { /* the project's folders are enough */ }
+  }
+  try {
+    const found = await findMovedFiles(await bridgeUrl(), store.doc, folders, fileProjectRoot());
+    toast(found.length ? t("fs.movedFound", { n: String(found.length) }) : t("fs.noneMoved"));
+  } catch (e) {
+    toast(String((e as Error)?.message ?? e));
+  }
+  filesRefresh();
+}
+
+/** a file found where it moved: its resource points there now (one, or every
+ * sure one when `m` is null); the state is asked again */
+function relinkMoved(m: MovedFile | null, path: string): void {
+  const sure = new Set(["exact", "exact_renamed"]);
+  const todo = m ? [{ m, path }]
+    : movedFiles().filter((x) => sure.has(x.matches[0].how)).map((x) => ({ m: x, path: x.matches[0].path }));
+  const done: string[] = [];
+  for (const { m: x, path: p } of todo) {
+    const st = storeOfNode(x.id);
+    const n = st?.node(x.id);
+    if (!st || !n) continue;
+    const d = (n.data ?? {}) as Record<string, unknown>;
+    st.updateNode(x.id, { data: { ...d, url: p } } as Partial<EmNode>);
+    logInfo(`${x.name}: ${t("fs.relink")} → ${p}`);
+    done.push(x.id);
+  }
+  dropMoved(done);
+  void checkFiles();
 }
 
 /** «Find here…»: the resource now points at where it is on this computer.

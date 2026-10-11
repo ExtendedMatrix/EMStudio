@@ -605,17 +605,42 @@ def _files_route(route, body):
         caches = [d for d in body.get("cache_dirs") or [] if d]
         if root and os.path.isdir(os.path.join(root, ".em_cache")):
             caches.append(os.path.join(root, ".em_cache"))
-        results = []
+        results, rows = [], []
         for graph in graphs:
-            results += api.resolve_files(graph, project_root=root, base_dirs=folders,
-                                         cache_dirs=caches,
-                                         on_node=_room_probe(body.get("room")),
-                                         hasher=lambda path: hashlib.sha256(
-                                             pathlib.Path(path).read_bytes()).hexdigest()
-                                         if os.path.getsize(path) <= 512 * 1024 * 1024 else "")
+            part = api.resolve_files(graph, project_root=root, base_dirs=folders,
+                                     cache_dirs=caches,
+                                     on_node=_room_probe(body.get("room")),
+                                     hasher=lambda path: hashlib.sha256(
+                                         pathlib.Path(path).read_bytes()).hexdigest()
+                                     if os.path.getsize(path) <= 512 * 1024 * 1024 else "")
+            results += part
+            # S1 · the Storage list: the library groups (asset, versions, uses, RMs);
+            # an older library has no rows and the page shows the plain list
+            if hasattr(api, "storage_rows"):
+                rows += api.storage_rows(graph, part)
         from s3dgraphy.resources.locate import summary
         return {"ok": True, "project_root": root or "", "results": results,
-                "summary": summary(results)}
+                "rows": rows, "summary": summary(results)}
+    if route == "/files-find-moved":
+        # S1 · «Find moved files»: where did the files that are missing go? The
+        # library looks (sha256, then name and size) and proposes; nothing changes
+        doc = body["doc"]
+        sections = (list((doc.get("graphs") or {}).values())
+                    if isinstance(doc, dict) and doc.get("graphs") else None)
+        graphs = ([api.load_emjson({"header": doc.get("header") or {}, "graph": sec})[0]
+                   for sec in sections] if sections else [api.load_emjson(doc)[0]])
+        folders = [os.path.abspath(os.path.expanduser(f)) for f in body.get("folders") or [] if f]
+        if body.get("project_root"):
+            folders.append(os.path.abspath(os.path.expanduser(body["project_root"])))
+        if not hasattr(api, "find_moved_files"):
+            raise ValueError("this s3Dgraphy is too old for «Find moved files»")
+        found = []
+        for graph in graphs:
+            found += api.find_moved_files(
+                graph, body.get("results") or [], list(dict.fromkeys(folders)),
+                hasher=lambda path: hashlib.sha256(pathlib.Path(path).read_bytes()).hexdigest(),
+                max_hash_bytes=2 << 30)
+        return {"ok": True, "found": found, "searched": folders}
     if route == "/project-new":
         return {"ok": True, **api.create_em_project(body["parent"], body["name"])}
     if route == "/project-reorder":
@@ -1363,7 +1388,7 @@ def make_handler(api):
                     self._fail(400, f"invalid JSON body: {exc}")
                     return
                 self._annotate(body)
-            elif route in ("/files-state", "/project-new", "/project-reorder",
+            elif route in ("/files-state", "/files-find-moved", "/project-new", "/project-reorder",
                            "/file-reveal", "/file-keep", "/nodes", "/node/personal"):
                 # R1/R2/C1 (E.D., 4 Oct 2026) · where each file is, with
                 # s3dgraphy's ONE resolver; the standard tree of a project

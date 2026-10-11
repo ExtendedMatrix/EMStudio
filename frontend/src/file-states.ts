@@ -8,7 +8,37 @@ export interface FileState {
   node_type: string;
 }
 
+/** S1 · a row of the Storage list (s3Dgraphy `storage_rows`): what a file IS
+ *  (master, version of an asset, file of a set, link of a document), its level
+ *  and uses, the RMs that use it. The page draws; the library groups. */
+export interface StorageRow {
+  id: string; file: string; doc: string; doc_id: string; asset: string; asset_id: string;
+  kind: "master" | "version" | "file" | "link"; tier: string; level: string; use: string[];
+  state: string; where: string; tag: string; rm: string[]; search: string;
+}
+/** S1 · a missing file and where it may have gone (s3Dgraphy `find_moved`) */
+export interface MovedFile {
+  id: string; name: string; state: string;
+  wanted: { sha256: string; name: string; size: number };
+  matches: Array<{ path: string; how: "exact" | "exact_renamed" | "probable" | "possible"; size: number }>;
+}
+
 const STATES = new Map<string, FileState>();
+let ROWS: StorageRow[] = [];
+let MOVED: MovedFile[] = [];
+export const fileRows = (): StorageRow[] => ROWS;
+export const movedFiles = (): MovedFile[] => MOVED;
+export function dropMoved(ids: string[] | null): void {
+  MOVED = ids === null ? [] : MOVED.filter((m) => !ids.includes(m.id));
+}
+/** the list's own filters (session state, like `fileFilter`) */
+export const listFilter = { query: "", kind: "", use: "", selected: "" };
+/** the rows a filter keeps — the same rule as s3Dgraphy `filter_rows` */
+export function filterRows(rows: StorageRow[], f: { query: string; kind: string; use: string; state: string }): StorageRow[] {
+  const words = f.query.toLowerCase().split(/\s+/).filter(Boolean);
+  return rows.filter((r) => (!f.kind || r.kind === f.kind) && (!f.use || r.use.includes(f.use))
+    && (!f.state || r.state === f.state) && words.every((w) => r.search.includes(w)));
+}
 let lastSummary: Record<string, number> = {};
 let projectRoot = "";
 /** the state shown in Contents; "" = all */
@@ -36,6 +66,8 @@ export async function refreshFileStates(bridge: string, doc: unknown, opts: {
     if (!res.ok || !j.ok) return { ok: false, error: String(j.error ?? `bridge ${res.status}`) };
     STATES.clear();
     for (const r of j.results as FileState[]) STATES.set(r.id, r);
+    ROWS = (j.rows as StorageRow[] | undefined) ?? [];
+    MOVED = MOVED.filter((m) => { const f = STATES.get(m.id); return f && (f.state === "missing" || f.state === "empty_copy"); });
     lastSummary = j.summary ?? {};
     projectRoot = String(j.project_root ?? "");
     return { ok: true };
@@ -51,6 +83,17 @@ async function post(bridge: string, route: string, body: unknown): Promise<Recor
   const j = await res.json().catch(() => ({}));
   if (!res.ok || !j.ok) throw new Error(String(j.error ?? `bridge ${res.status}`));
   return j;
+}
+
+/** «Find moved files…»: the bridge looks in the folders for the files that are
+ *  missing — by sha256, then by name and size — and proposes; nothing changes */
+export async function findMovedFiles(bridge: string, doc: unknown, folders: string[],
+                                     projectRoot: string): Promise<MovedFile[]> {
+  const lost = fileStates().filter((f) => f.state === "missing" || f.state === "empty_copy");
+  const j = await post(bridge, "/files-find-moved",
+                       { doc, folders, project_root: projectRoot, results: lost });
+  MOVED = (j.found as MovedFile[]) ?? [];
+  return MOVED;
 }
 
 /** «Open where it is» */

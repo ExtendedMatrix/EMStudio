@@ -6,8 +6,8 @@
 // one), «Upload to the room», «Keep on the disk too», «Open where it is».
 import { t } from "./i18n";
 import { stateBadge, stateSign } from "./state-symbols";
-import { fileFilter, fileStateOf, fileStates, fileSummary, setFileFilter,
-         type FileState } from "./file-states";
+import { fileFilter, fileRows, fileStateOf, fileStates, fileSummary, filterRows, listFilter,
+         movedFiles, setFileFilter, type FileState, type MovedFile, type StorageRow } from "./file-states";
 
 export interface FileHooks {
   checking: boolean;
@@ -24,6 +24,10 @@ export interface FileHooks {
   /** C1 · the standard tree of an EM project */
   onNewProject?(): void;
   onReorder?(): void;
+  /** S1 · «Find moved files…»: look for the missing ones in the project's folders */
+  onFindMoved?(): void;
+  /** S1 · relink a missing file to where it was found (`path`), or every sure one (null) */
+  onRelinkMoved?(m: MovedFile | null, path: string): void;
 }
 
 const FILE_STATES = ["on_disk", "on_node", "both", "reference_only", "missing", "empty_copy"];
@@ -131,11 +135,150 @@ export function filesSection(h: FileHooks): HTMLElement {
     group.appendChild(b);
   }
   if (group.childElementCount) box.appendChild(group);
+  const lost = all.filter((f) => f.state === "missing" || f.state === "empty_copy");
+  if ((lost.length || movedFiles().length) && h.onFindMoved) box.appendChild(movedBox(lost.length, h));
+  if (fileRows().length) {
+    box.appendChild(rowsList(h));
+    return box;
+  }
   const list = el("div", "fs-list");
   for (const f of shown.slice(0, 200)) list.appendChild(fileRow(f, h));
   if (shown.length > 200) list.appendChild(el("div", "insp-hint", t("insp.andMore", { n: String(shown.length - 200) })));
   box.appendChild(list);
   return box;
+}
+
+const SURE = new Set<string>(["exact", "exact_renamed"]);
+
+/** S1 · the files that are not here, and where they may have gone */
+function movedBox(lostCount: number, h: FileHooks): HTMLElement {
+  const box = el("div", "fs-moved");
+  const head = el("div", "fs-head");
+  head.appendChild(el("span", "", t("fs.notHere", { n: String(lostCount) })));
+  const find = el("button", "ghost", t("fs.findMoved")) as HTMLButtonElement;
+  find.dataset.act = "find-moved";
+  find.title = t("fs.findMovedHint");
+  find.addEventListener("click", () => h.onFindMoved!());
+  head.appendChild(find);
+  box.appendChild(head);
+  const moved = movedFiles();
+  const sure = moved.filter((m) => SURE.has(m.matches[0].how));
+  if (sure.length && h.onRelinkMoved) {
+    const b = el("button", "ghost", t("fs.relinkSure", { n: String(sure.length) })) as HTMLButtonElement;
+    b.dataset.act = "relink-sure";
+    b.addEventListener("click", () => h.onRelinkMoved!(null, ""));
+    box.appendChild(b);
+  }
+  for (const m of moved.slice(0, 20)) {
+    const best = m.matches[0];
+    const row = el("div", "fs-row");
+    row.dataset.id = m.id;
+    row.appendChild(el("span", "fs-name", m.name || m.wanted.name || m.id));
+    row.appendChild(el("span", "insp-hint", `${t("fs.how." + best.how)} · ${best.path}`
+      + (m.matches.length > 1 ? `  (+${m.matches.length - 1})` : "")));
+    if (h.onRelinkMoved) {
+      const b = el("button", "ghost fs-act", t("fs.relink")) as HTMLButtonElement;
+      b.dataset.act = "relink-moved";
+      b.addEventListener("click", () => h.onRelinkMoved!(m, best.path));
+      row.appendChild(b);
+    }
+    box.appendChild(row);
+  }
+  if (moved.length > 20) box.appendChild(el("div", "insp-hint", t("insp.andMore", { n: String(moved.length - 20) })));
+  return box;
+}
+
+/** S1 · the list: a search, a kind and a use, the rows by asset (versions hang
+ *  under their master), the card of the selected row */
+function rowsList(h: FileHooks): HTMLElement {
+  const wrap = el("div", "fs-rows");
+  const tools = el("div", "fs-tools");
+  const q = el("input", "fs-search") as HTMLInputElement;
+  q.type = "search";
+  q.placeholder = t("fs.search");
+  q.value = listFilter.query;
+  q.dataset.role = "files-search";
+  q.addEventListener("input", () => { listFilter.query = q.value; renderRows(); });
+  const kind = el("select", "fs-kind") as HTMLSelectElement;
+  kind.dataset.role = "files-kind";
+  for (const k of ["", "master", "version", "file", "link"])
+    kind.appendChild(new Option(t(k ? `fs.kind.${k}` : "fs.kind.all"), k, false, k === listFilter.kind));
+  kind.addEventListener("change", () => { listFilter.kind = kind.value; renderRows(); });
+  const uses = [...new Set(fileRows().flatMap((r) => r.use))].sort();
+  const use = el("select", "fs-use") as HTMLSelectElement;
+  use.dataset.role = "files-use";
+  use.appendChild(new Option(t("fs.use.all"), "", false, !listFilter.use));
+  for (const u of uses) use.appendChild(new Option(u.replace(/_/g, " "), u, false, u === listFilter.use));
+  use.addEventListener("change", () => { listFilter.use = use.value; renderRows(); });
+  tools.append(q, kind, use);
+  wrap.appendChild(tools);
+  const list = el("div", "fs-list");
+  wrap.appendChild(list);
+
+  function renderRows(): void {
+    list.textContent = "";
+    const rows = filterRows(fileRows(), { ...listFilter, state: fileFilter });
+    for (const r of rows.slice(0, 300)) list.appendChild(rowItem(r, h, renderRows));
+    if (rows.length > 300) list.appendChild(el("div", "insp-hint", t("insp.andMore", { n: String(rows.length - 300) })));
+    if (!rows.length) list.appendChild(el("div", "insp-hint", t("fs.noRows")));
+  }
+  renderRows();
+  return wrap;
+}
+
+function rowItem(r: StorageRow, h: FileHooks, redraw: () => void): HTMLElement {
+  const item = el("div", `fs-item fs-k-${r.kind}${listFilter.selected === r.id ? " is-selected" : ""}`);
+  item.dataset.id = r.id;
+  item.dataset.kind = r.kind;
+  item.dataset.state = r.state;
+  const line = el("div", "fs-row");
+  if (r.kind === "version" || r.kind === "file") line.appendChild(el("span", "fs-indent", "↳"));
+  line.appendChild(stateBadge(`file.${r.state}`));
+  const name = el("button", "ghost fs-name", r.file) as HTMLButtonElement;
+  name.title = r.where || r.id;
+  name.addEventListener("click", () => {
+    listFilter.selected = listFilter.selected === r.id ? "" : r.id;
+    redraw();
+  });
+  line.appendChild(name);
+  line.appendChild(el("span", "fs-tag insp-hint", r.tag));
+  item.appendChild(line);
+  if (listFilter.selected === r.id) item.appendChild(rowCard(r, h, redraw));
+  return item;
+}
+
+/** the card of the selected row: what it is, where it is, its sibling versions */
+function rowCard(r: StorageRow, h: FileHooks, redraw: () => void): HTMLElement {
+  const card = el("div", "fs-card");
+  const add = (k: string, v: string): void => {
+    if (!v) return;
+    const d = el("div", "fs-card-line");
+    d.append(el("b", "", `${t(k)}: `), document.createTextNode(v));
+    card.appendChild(d);
+  };
+  const f = fileStateOf(r.id);
+  const what = r.kind === "master" ? t("fs.is.master")
+    : r.kind === "version" ? t("fs.is.version", { asset: r.asset })
+    : r.kind === "file" ? t("fs.is.file", { asset: r.asset }) : t("fs.is.link");
+  add("fs.card.is", what + (r.level ? ` · ${r.level}` : "") + (r.tier ? ` · tier ${r.tier}` : ""));
+  add("fs.card.doc", r.doc);
+  add("fs.card.use", r.use.map((u) => u.replace(/_/g, " ")).join(", "));
+  add("fs.card.rm", r.rm.join(", "));
+  add("fs.card.where", f?.path || r.where);
+  if (f?.note) add("fs.card.note", f.note);
+  const near = fileRows().filter((x) => x.asset_id === r.asset_id && x.id !== r.id);
+  if (near.length) {
+    const box = el("div", "fs-near");
+    box.appendChild(el("b", "", t("fs.card.near", { n: String(near.length) })));
+    for (const x of near.slice(0, 10)) {
+      const b = el("button", "ghost fs-near-item", `${x.file} (${x.tag})`) as HTMLButtonElement;
+      b.addEventListener("click", () => { listFilter.selected = x.id; redraw(); });
+      box.appendChild(b);
+    }
+    card.appendChild(box);
+  }
+  if (f) card.appendChild(fileGestures(f, h));
+  return card;
 }
 
 /** the line in a resource's Inspector or a document's card */
