@@ -1927,6 +1927,12 @@ body.sync-active #mode-indicator::before {
   width: 30px;
   padding: 0;
 }
+/* MICRO-AUTORI-LAYOUT p.4 · «⊞ Layout» says its name: as wide as it needs */
+.win-header .win-act[data-act="layout"] {
+  width: auto;
+  padding: 0 9px;
+  white-space: nowrap;
+}
 .win-header .win-algo {
   padding: 0 6px;
 }
