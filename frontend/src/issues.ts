@@ -20,7 +20,7 @@
  */
 import type { EmDocument, EmNode } from "./types";
 import { composedPropertyName } from "./naming";
-import { documentDating, epochBounds, topEpochOf } from "./doc-dating";
+import { documentDating, entityEpoch, epochBounds, topEpochOf } from "./doc-dating";
 
 export type IssueSeverity = "warn" | "info";
 
@@ -297,6 +297,23 @@ export function issues(src: IssueSources): Issue[] {
                  : fx.leaveGroup ? { fix: { kind: "button" as const, label: fx.leaveGroup.label,
                    run: () => fx.leaveGroup!.run(n.id, group) } } : {}) });
       }
+    }
+  }
+  // ── MICRO-AUTORI-LAYOUT · an author stands in the epoch of its date ───────
+  // (`doc-dating.entityEpoch`, em-core's lane): a drawing saved before the rule
+  // still has it elsewhere — the positions are intent, the cure is the Layout
+  if (src.drawnLane) {
+    const bounds = epochBounds(doc);
+    const byId = new Map(doc.graph.nodes.map((x) => [x.id, x]));
+    for (const n of nodes) {
+      if (n.node_type !== "author" && n.node_type !== "author_ai") continue;
+      const ee = entityEpoch(doc, n.id, bounds, byId);
+      if (!ee.epoch || ee.rule === "declared") continue;
+      const drawn = src.drawnLane(n.id);
+      if (!drawn || topEpochOf(doc, drawn) === topEpochOf(doc, ee.epoch)) continue;
+      push({ node: n.id, sev: "warn", rule: "chronology",
+             txt: t("issues.authorEpochStale", { a: name(n.id), y: String(ee.year), e: name(ee.epoch), d: name(drawn) }),
+             ...(src.relayout ? { fix: { kind: "button" as const, label: src.relayout.label, run: src.relayout.run } } : {}) });
     }
   }
   // ── the datamodel: diagnostics already computed, and the socket check ─────

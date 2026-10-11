@@ -483,6 +483,7 @@ export function buildMatrixScene(
       const gs = scene.byId.get(g.id);
       if (!gs || folded.has(g.id) || gs.collapsed) continue;
       for (const r of viewInstances(doc, g.id, vix)) {
+        if (view?.instanceKindsHidden?.has(r.kind)) continue;
         const reader = r.readers.map((id) => scene.byId.get(id)).find((x) => !!x && !x.collapsed);
         const masterNode = nodeById.get(r.master);
         if (!reader || !masterNode) continue;
@@ -973,7 +974,15 @@ export function buildMatrixScene(
       if (ref) ref.pdCollapsed = pdg;
     }
 
-  for (const e00 of edges) {
+  // MICRO-AUTORI-LAYOUT · the authorship of an extractor in an open group is
+  // drawn to the author's instance there (elsewhere it is the badge): the
+  // `has_author` the view folded into badges, taken back for those instances
+  const seenEdge = new Set(edges.map((e) => e.id ?? `${e.source}→${e.target}`));
+  const authorLines = instanceByEdge.size
+    ? vix.edges.filter((e) => e.edge_type === "has_author" && !seenEdge.has(e.id ?? `${e.source}→${e.target}`)
+                         && instanceByEdge.has(e.id ?? `${e.source}→${e.target}`))
+    : [];
+  for (const e00 of [...edges, ...authorLines]) {
     // FONTE · a reading re-attached to its instance: the instance is drawn in
     // the reader's open group even when the master is folded away or hidden
     const instTarget = instanceByEdge.get(e00.id ?? `${e00.source}→${e00.target}`);

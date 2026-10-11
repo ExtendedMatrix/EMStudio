@@ -226,6 +226,10 @@ export function drawGlyph(
   /** G9 · the size the glyph takes ON SCREEN, in px: under 24 a framed glyph
    *  drops its frame and fills the box with the drawing (`frameless_box`) */
   screenPx?: number,
+  /** MICRO-AUTORI-LAYOUT · the stroked layers of a MASTER drawn thicker
+   *  (`strokeScale`), of an INSTANCE dashed (`dash`, viewBox units) — the
+   *  canonical document and its instance, said on a glyph */
+  style?: { strokeScale?: number; dash?: number[] },
 ): void {
   const bare = !!g.frameless && screenPx !== undefined && screenPx < FRAMELESS_BELOW_PX;
   const [bx, by, vw, vh] = bare ? g.frameless! : [0, 0, g.viewBox[2], g.viewBox[3]];
@@ -242,10 +246,12 @@ export function drawGlyph(
     const color = layerColor(l, theme);
     if (l.stroke) {
       ctx.strokeStyle = color;
-      ctx.lineWidth = l.strokeWidth ?? 1;
+      ctx.lineWidth = (l.strokeWidth ?? 1) * (style?.strokeScale ?? 1);
       ctx.lineCap = l.lineCap ?? "butt";
       ctx.lineJoin = l.lineJoin ?? "miter";
+      ctx.setLineDash(style?.dash ?? []);
       ctx.stroke(l.path);
+      ctx.setLineDash([]);
     } else {
       ctx.fillStyle = color;
       ctx.fill(l.path, l.fillRule ?? "nonzero");

@@ -303,17 +303,36 @@ pub fn compute_with_sketch(
             }
         }
     }
-    // MICRO-BADGE-PD-CRONOLOGIA · a DOCUMENT stands in the epoch of its DATE:
+    // MICRO-BADGE-PD-CRONOLOGIA · a DOCUMENT stands in the epoch of its DATE,
+    // and since MICRO-AUTORI-LAYOUT (E.D., 11 Oct 2026) EVERY entity with a date
+    // of its own — an author, a unit — does (s3Dgraphy's
+    // `spatiotemporal.entity_epoch`, the same rule): its year is
     // `absolute_time_start` — the property (`has_property`), else the node's own
-    // `data.absolute_time_start` — when an epoch's bounds hold it (the narrowest),
-    // else its `has_first_epoch` (set just above). The canonical document is in
-    // the epoch where it is born (F5 · an epoch's date is born when it is
-    // written). A dated document is NOT moved into another lane by a group it
-    // belongs to (below: the propagation and the containment skip it); the
-    // membership stays an edge, and the client says the disagreement.
+    // `data.absolute_time_start` — else `absolute_time_end` the same way; it
+    // stands in the narrowest epoch whose bounds hold that year, else in its
+    // `has_first_epoch` (set just above), else, a date outside every epoch, in
+    // the NEAREST epoch (Diaconescu, scomparso nel 2021, «XX sec» to 2013:
+    // before, an author had no lane and fell into the trailing one, which the
+    // Matrix draws inside the last epoch). A dated node is NOT moved into
+    // another lane by a group it belongs to (below: the propagation and the
+    // containment skip it); the membership stays an edge.
     let dated_doc: Vec<bool> = {
         let year_of = |v: &serde_json::Value| -> Option<f64> {
-            v.as_f64().or_else(|| v.as_str().and_then(|s| s.trim().parse::<f64>().ok()))
+            v.as_f64().or_else(|| {
+                v.as_str().and_then(|s| {
+                    let s = s.trim();
+                    s.parse::<f64>().ok().or_else(|| {
+                        // a date: its leading year («2021-09-28» → 2021)
+                        let neg = s.starts_with('-');
+                        let digits: String = s
+                            .chars()
+                            .skip(neg as usize)
+                            .take_while(|c| c.is_ascii_digit())
+                            .collect();
+                        digits.parse::<f64>().ok().map(|y| if neg { -y } else { y })
+                    })
+                })
+            })
         };
         let bounds: Vec<(usize, f64, f64)> = epochs_decl
             .iter()
@@ -323,7 +342,8 @@ pub fn compute_with_sketch(
                 Some((i, a.min(b), a.max(b)))
             })
             .collect();
-        let mut prop_year: HashMap<usize, f64> = HashMap::new();
+        // (start, end) of the node's own properties
+        let mut prop_year: HashMap<usize, (Option<f64>, Option<f64>)> = HashMap::new();
         for e in &graph.edges {
             if e.edge_type != "has_property" {
                 continue;
@@ -332,35 +352,62 @@ pub fn compute_with_sketch(
                 continue;
             };
             let p = &graph.nodes[t];
-            let is_start = p.name.as_deref() == Some("absolute_time_start")
-                || p.data.get("property_type").and_then(|v| v.as_str()) == Some("absolute_time_start");
-            if !is_start {
+            let kind = p.data.get("property_type").and_then(|v| v.as_str());
+            let is = |q: &str| p.name.as_deref() == Some(q) || kind == Some(q);
+            let slot = if is("absolute_time_start") {
+                0
+            } else if is("absolute_time_end") {
+                1
+            } else {
                 continue;
-            }
+            };
             let v = p
-                .description
-                .as_deref()
-                .and_then(|d| d.trim().parse::<f64>().ok())
-                .or_else(|| p.data.get("value").and_then(year_of));
+                .data
+                .get("value")
+                .and_then(year_of)
+                .or_else(|| p.description.as_deref().and_then(|d| year_of(&serde_json::Value::from(d))));
             if let Some(y) = v {
-                prop_year.entry(s).or_insert(y);
+                let entry = prop_year.entry(s).or_insert((None, None));
+                if slot == 0 {
+                    entry.0.get_or_insert(y);
+                } else {
+                    entry.1.get_or_insert(y);
+                }
             }
         }
         let mut out = vec![false; n];
         for (i, node) in graph.nodes.iter().enumerate() {
-            if node.node_type != "document" {
+            if node.node_type == "epoch" || node.node_type == "EpochNode" {
                 continue;
             }
-            let year = prop_year
-                .get(&i)
-                .copied()
-                .or_else(|| node.data.get("absolute_time_start").and_then(year_of));
-            if let Some(y) = year {
-                let best = bounds
-                    .iter()
-                    .filter(|(_, lo, hi)| y >= *lo && y <= *hi)
-                    .min_by(|a, b| (a.2 - a.1).partial_cmp(&(b.2 - b.1)).unwrap_or(std::cmp::Ordering::Equal));
-                if let Some(l) = best.and_then(|(ix, _, _)| lane_of_epoch.get(ix)) {
+            let (ps, pe) = prop_year.get(&i).copied().unwrap_or((None, None));
+            let year = ps
+                .or_else(|| node.data.get("absolute_time_start").and_then(year_of))
+                .or(pe)
+                .or_else(|| node.data.get("absolute_time_end").and_then(year_of));
+            let Some(y) = year else {
+                // a document with no date still stands in its has_first_epoch,
+                // not in its group's lane (9 Oct)
+                if node.node_type == "document" {
+                    out[i] = lane[i].is_some();
+                }
+                continue;
+            };
+            let best = bounds
+                .iter()
+                .filter(|(_, lo, hi)| y >= *lo && y <= *hi)
+                .min_by(|a, b| (a.2 - a.1).partial_cmp(&(b.2 - b.1)).unwrap_or(std::cmp::Ordering::Equal));
+            if let Some(l) = best.and_then(|(ix, _, _)| lane_of_epoch.get(ix)) {
+                lane[i] = Some(*l);
+            } else if lane[i].is_none() {
+                let dist = |b: &(usize, f64, f64)| (y - b.1).abs().min((y - b.2).abs());
+                let near = bounds.iter().min_by(|a, b| {
+                    dist(a)
+                        .partial_cmp(&dist(b))
+                        .unwrap_or(std::cmp::Ordering::Equal)
+                        .then((a.2 - a.1).partial_cmp(&(b.2 - b.1)).unwrap_or(std::cmp::Ordering::Equal))
+                });
+                if let Some(l) = near.and_then(|(ix, _, _)| lane_of_epoch.get(ix)) {
                     lane[i] = Some(*l);
                 }
             }
@@ -958,6 +1005,56 @@ mod tests {
         // no date: has_first_epoch
         assert_eq!(lane_of("D72").as_deref(), Some("EP_modern"));
         assert_eq!(lane_of("ACT").as_deref(), Some("EP_roman"));
+    }
+
+    // MICRO-AUTORI-LAYOUT · an author stands in the epoch of its date, and its
+    // paradata (the property, its extractor, the document) with it
+    #[test]
+    fn an_author_stands_in_the_epoch_of_its_date_with_its_paradata() {
+        let mut modern = epoch("EP_modern", 1801.0);
+        modern.data.insert("end_time".into(), serde_json::json!(2013));
+        let mut post = epoch("EP_post", 200.0);
+        post.data.insert("end_time".into(), serde_json::json!(1800));
+        let mut roman = epoch("EP_roman", 100.0);
+        roman.data.insert("end_time".into(), serde_json::json!(199));
+        // Diaconescu: only his death, 2021, out of every epoch → the nearest
+        let mut p = node("PE", "property");
+        p.name = Some("absolute_time_end".into());
+        p.data.insert("value".into(), serde_json::json!(2021));
+        p.data.insert("property_type".into(), serde_json::json!("absolute_time_end"));
+        // another author born in 1700, as a date string
+        let mut q = node("PS", "property");
+        q.name = Some("absolute_time_start".into());
+        q.data.insert("value".into(), serde_json::json!("1700-03-01"));
+        let g = Graph {
+            graph_id: "g".into(),
+            name: None,
+            description: None,
+            nodes: vec![modern, post, roman, node("US1", "US"), node("AD", "author"), p,
+                        node("X", "extractor"), node("D43", "document"),
+                        node("OLD", "author"), q, node("AI", "author_ai")],
+            edges: vec![
+                edge("e1", "has_first_epoch", "US1", "EP_roman"),
+                edge("e2", "has_property", "AD", "PE"),
+                edge("e3", "has_data_provenance", "PE", "X"),
+                edge("e4", "extracted_from", "X", "D43"),
+                edge("e5", "has_property", "OLD", "PS"),
+            ],
+            data: std::collections::BTreeMap::new(),
+        };
+        let l = compute(&g, &LayoutOptions::default());
+        let lane_of = |id: &str| {
+            let r = &l.positions[id];
+            let cy = r.y + r.h / 2.0;
+            l.swimlanes.iter().find(|s| cy >= s.y && cy < s.y + s.height).map(|s| s.epoch_id.clone())
+        };
+        assert_eq!(lane_of("AD").as_deref(), Some("EP_modern"));
+        for id in ["PE", "X", "D43"] {
+            assert_eq!(lane_of(id).as_deref(), Some("EP_modern"), "{id} follows its author");
+        }
+        assert_eq!(lane_of("OLD").as_deref(), Some("EP_post"));
+        // no date, no epoch: the trailing lane, as before
+        assert_eq!(lane_of("AI"), None);
     }
 
     #[test]

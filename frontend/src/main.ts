@@ -416,7 +416,7 @@ import {
   saveOverlays, withGroup, withOverlay, type OverlayKey, type OverlayState, type OverlayView,
 } from "./overlays";
 import { PD_CELL } from "./views/pd-arrange";
-import { documentDating, topEpochOf } from "./doc-dating";
+import { documentDating, entityEpoch, epochBounds, topEpochOf } from "./doc-dating";
 import { BADGE_RULES, funnelIndex, resolveEffective, sourceLabel } from "./funnel";
 import { type Qualia, vocabularyFor } from "./vocab";
 import { versionBreakdown } from "./versions";
@@ -3986,6 +3986,7 @@ function filteredView(opts: { wholeGraph?: boolean;
   edges: EmDocument["graph"]["edges"];
   badges: Map<string, number>;
   adornments: Map<string, AdornmentBadge[]>;
+  instanceKindsHidden?: Set<string>;
 } {
   const doc = store!.doc;
   const wholeGraph = !!opts.wholeGraph;
@@ -4138,9 +4139,14 @@ function filteredView(opts: { wholeGraph?: boolean;
   const pdgMembers = new Set<string>();
   for (const e of doc.graph.edges)
     if (e.edge_type === "is_in_paradata_nodegroup") pdgMembers.add(e.source);
+  // MICRO-AUTORI-LAYOUT · an author with an epoch (its date, else its
+  // has_first_epoch) is an entity in time: its MASTER is drawn in that lane like
+  // a unit, with its own paradata; where it is cited it is an instance (a badge
+  // on a loose referent, a computed instance in a group)
+  const authorMasters = authorMastersOf(doc);
   if (!wholeGraph) {
     vNodes = vNodes.filter(
-      (n) => !isAdornmentNodeType(n.node_type) || pdgMembers.has(n.id),
+      (n) => !isAdornmentNodeType(n.node_type) || pdgMembers.has(n.id) || authorMasters.has(n.id),
     );
     vEdges = vEdges.filter((e) => !ADORNMENT_EDGE_TYPES.has(e.edge_type ?? ""));
   }
@@ -4182,7 +4188,27 @@ function filteredView(opts: { wholeGraph?: boolean;
     edges: vEdges,
     badges: foldedView?.badges ?? new Map<string, number>(),
     adornments,
+    // MICRO-AUTORI-LAYOUT · the authors ring off: no author drawn, not even as
+    // a computed instance
+    ...(hiddenNodeTypes.has("author") ? { instanceKindsHidden: new Set(["author"]) } : {}),
   };
+}
+
+/** MICRO-AUTORI-LAYOUT · the authors (human or AI) that have an epoch — their
+ *  own date, else their has_first_epoch (`doc-dating.entityEpoch`, em-core's
+ *  lane): their master is a node of the time projections. */
+function authorMastersOf(doc: EmDocument): Set<string> {
+  const out = new Set<string>();
+  let bounds: ReturnType<typeof epochBounds> | null = null;
+  let byId: Map<string, EmNode> | null = null;
+  for (const n of doc.graph.nodes) {
+    if (n.node_type !== "author" && n.node_type !== "author_ai") continue;
+    if (isRemoved(n as unknown as Record<string, unknown>)) continue;
+    bounds ??= epochBounds(doc);
+    byId ??= new Map(doc.graph.nodes.map((x) => [x.id, x]));
+    if (entityEpoch(doc, n.id, bounds, byId).epoch) out.add(n.id);
+  }
+  return out;
 }
 
 /** Top-level epochs that have at least one phase in their subtree. */
@@ -8504,11 +8530,9 @@ function addEpochEmMode(index = 0, start?: number, end?: number, name?: string):
 // have to change, and that is the point — they were always asking for "the
 // outliner", and the answer simply stopped being "the one".
 function pickFromOutliner(id: string): void {
-  if (inContext()) {
-    contextStack = [];
-    rebuildContext();
-  }
-  select(id);                     // «Zoom to selection» frames it
+  // MICRO-AUTORI-LAYOUT · a pick in the Outliner is a JUMP: it lands on the
+  // master, opens the groups around it, and «Indietro» comes back
+  jumpTo(id);
 }
 
 const outlinerCallbacks: NodeListCallbacks = {
@@ -14830,7 +14854,11 @@ function refreshIssues(): void {
       const r = L?.positions?.[id];
       if (!r) return null;
       const cy = r.y + r.h / 2;
-      const lane = (L?.swimlanes ?? []).find((l) => cy >= l.y && cy < l.y + l.height);
+      // below every lane is the engine's trailing lane, which the Matrix draws
+      // inside the last epoch (`laneIdxOfY`): that is where it is SEEN
+      const lanes = [...(L?.swimlanes ?? [])].sort((a, b) => a.y - b.y);
+      const lane = lanes.find((l) => cy >= l.y && cy < l.y + l.height)
+        ?? (lanes.length && cy >= lanes[lanes.length - 1].y ? lanes[lanes.length - 1] : undefined);
       return lane ? topEpochOf(s.doc, lane.epoch_id) : null;
     },
     relayout: { label: t("issues.fixRelayout"), run: () => void runLayout(false) },
@@ -16215,8 +16243,30 @@ function jumpTo(nodeId: string): void {
   pickOnCanvas = true;            // the frame below is the jump's, not «Zoom to selection»'s
   try { select(nodeId); } finally { pickOnCanvas = false; }
   requestAnimationFrame(() => {
-    if (scene()?.byId.has(nodeId)) frameNodeInContext(nodeId);
-    else toast(t("toast.selectedNotVisible"));
+    if (scene()?.byId.has(nodeId)) { frameNodeInContext(nodeId); return; }
+    // MICRO-AUTORI-LAYOUT · «not visible» only for a node a ring filters out —
+    // and then the ring is offered; an author, a licence or an embargo this
+    // projection says as a badge has its node in the Full graph: the jump goes on there
+    const nt = store?.node(nodeId)?.node_type;
+    const ring = nodeCircle(nt);
+    if (ring && !circleState[view].has(ring)) {
+      const label = CIRCLES.find((x) => x.key === ring)?.label ?? ring;
+      toastAsk(t("jump.filtered", { name: String(store?.node(nodeId)?.name ?? nodeId), ring: label }),
+               [{ label: t("jump.showRing", { ring: label }), run: () => { ensureCircleVisibleFor(nt); jumpTo(nodeId); } }]);
+      return;
+    }
+    // the window the jump started in (captured above), never the one under the pointer now
+    const win = target ?? here;
+    if (isAdornmentNodeType(nt ?? "") && view !== "multigraph" && win.type === "graph") {
+      setWindowMode(win, "multigraph");
+      requestAnimationFrame(() => {
+        select(nodeId);
+        if (scene()?.byId.has(nodeId)) frameNodeInContext(nodeId);
+        else toast(t("toast.selectedNotVisible"));
+      });
+      return;
+    }
+    toast(t("toast.selectedNotVisible"));
   });
 }
 

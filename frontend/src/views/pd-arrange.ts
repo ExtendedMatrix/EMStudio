@@ -34,6 +34,16 @@ export function reattachedReadings(vix: ViewIndex, instances: ViewInstance[]): M
       for (const e of readEdge.get(x) ?? [])
         if (e.target === r.master || r.through.includes(e.target))
           out.set(edgeKey(e), r.id);
+  // MICRO-AUTORI-LAYOUT · an author's instance: the `has_author` of its readers
+  // (and of the extractors a combiner reaches) ends on it, so it sits right
+  // under the extractor it wrote, as the document it read does
+  for (const r of instances) {
+    if (r.kind !== "author") continue;
+    const by = new Set([...r.readers, ...r.extractors]);
+    for (const e of vix.edges)
+      if (e.edge_type === "has_author" && e.target === r.master && by.has(e.source))
+        out.set(edgeKey(e), r.id);
+  }
   return out;
 }
 

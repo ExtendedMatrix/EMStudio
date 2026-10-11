@@ -20,6 +20,7 @@ import visualRules from "./assets/em_visual_rules.json";
 import { isRemoved } from "./crdt";
 import { ownersOf } from "./paradata-chain";
 import { classIsA, classOf } from "./rules";
+import { entityEpoch, epochBounds, type EpochBounds } from "./doc-dating";
 import type { EmDocument, EmEdge, EmNode } from "./types";
 
 interface MasterSpec { kind?: string; badge?: string }
@@ -30,6 +31,8 @@ interface InstanceRule {
   through?: Record<string, string>;
   masters?: Record<string, MasterSpec | string>;
   id?: string;
+  /** 1.6.34 · the author of a reading is drawn in the group that reads */
+  authorship?: { edge?: string; masters?: Record<string, MasterSpec | string> };
 }
 
 const RULE: InstanceRule =
@@ -40,6 +43,12 @@ const READERS: Record<string, string | null> = RULE.readers ?? { ExtractorNode: 
 const THROUGH: Record<string, string> = RULE.through ?? { AnnotationRegionNode: "is_on_resource" };
 const MASTERS: Record<string, MasterSpec> = Object.fromEntries(
   Object.entries(RULE.masters ?? {}).filter(([k, v]) => !k.startsWith("_") && typeof v === "object"),
+) as Record<string, MasterSpec>;
+// MICRO-AUTORI-LAYOUT · the authorship block (rules 1.6.34), read as
+// `paradata_view.author_of` reads it
+const AUTHOR_EDGE = RULE.authorship?.edge ?? "has_author";
+const AUTHOR_MASTERS: Record<string, MasterSpec> = Object.fromEntries(
+  Object.entries(RULE.authorship?.masters ?? {}).filter(([k, v]) => !k.startsWith("_") && typeof v === "object"),
 ) as Record<string, MasterSpec>;
 
 /** One instance to draw inside a group — the fields of `view_instances`. */
@@ -87,6 +96,8 @@ export interface ViewIndex {
   out: Map<string, EmEdge[]>;
   inn: Map<string, EmEdge[]>;
   edges: EmEdge[];
+  /** the epochs' bounds, read once */
+  bounds: () => EpochBounds[];
 }
 
 export function viewIndex(doc: EmDocument): ViewIndex {
@@ -100,7 +111,8 @@ export function viewIndex(doc: EmDocument): ViewIndex {
     (out.get(e.source) ?? out.set(e.source, []).get(e.source)!).push(e);
     (inn.get(e.target) ?? inn.set(e.target, []).get(e.target)!).push(e);
   }
-  return { node, out, inn, edges };
+  let b: EpochBounds[] | null = null;
+  return { node, out, inn, edges, bounds: () => (b ??= epochBounds(doc)) };
 }
 
 const removed = (n: EmNode | undefined): boolean =>
@@ -128,6 +140,9 @@ export function viewInstances(doc: EmDocument, groupId: string, ix: ViewIndex = 
         !((o.edge.attributes ?? {}) as Record<string, unknown>).removed);
       return own.find((o) => o.original)?.owner ?? null;
     }
+    // MICRO-AUTORI-LAYOUT · the epoch a document or an author stands in: the
+    // one of its own date, else its has_first_epoch (`entity_epoch`)
+    if (spec.badge === "has_first_epoch") return entityEpoch(doc, master.id, ix.bounds(), ix.node).epoch;
     if (spec.badge) for (const e of outOf(master.id, spec.badge)) return e.target;
     return null;
   };
@@ -165,16 +180,42 @@ export function viewInstances(doc: EmDocument, groupId: string, ix: ViewIndex = 
     }
   };
 
+  // MICRO-AUTORI-LAYOUT · `paradata_view.author_of`: the author of a reader (or
+  // of an extractor a combiner reaches) is drawn in the group, badge its epoch
+  const authorOf = (readerId: string, nodeId: string): void => {
+    if (!Object.keys(AUTHOR_MASTERS).length) return;
+    for (const e of outOf(nodeId, AUTHOR_EDGE)) {
+      const author = ix.node.get(e.target);
+      const cls = author ? classIn(author.node_type, AUTHOR_MASTERS) : null;
+      if (!author || !cls || memberSet.has(author.id)) continue;
+      let rec = records.get(author.id);
+      if (!rec) {
+        const owner = badge(author, AUTHOR_MASTERS[cls]);
+        const ownerNode = owner ? ix.node.get(owner) : undefined;
+        rec = {
+          id: instanceId(author.id, groupId), master: author.id, kind: AUTHOR_MASTERS[cls].kind ?? "",
+          node_type: author.node_type, name: String(author.name ?? author.id),
+          owner, owner_kind: owner ? "epoch" : null, owner_name: owner ? String(ownerNode?.name ?? owner) : null,
+          removed: removed(author), readers: [], extractors: [], through: [],
+        };
+        records.set(author.id, rec);
+      }
+      if (!rec.readers.includes(readerId)) rec.readers.push(readerId);
+      if (nodeId !== readerId && !rec.extractors.includes(nodeId)) rec.extractors.push(nodeId);
+    }
+  };
+
   for (const mid of members) {
     const node = ix.node.get(mid);
     if (!node || removed(node)) continue;
     const cls = classIn(node.node_type, READERS);
     if (!cls) continue;
     const via = READERS[cls];
+    authorOf(mid, mid);
     if (!via) { reach(mid, mid); continue; }
     for (const e of outOf(mid, via)) {
       const ext = ix.node.get(e.target);
-      if (ext && !removed(ext)) reach(mid, ext.id);
+      if (ext && !removed(ext)) { reach(mid, ext.id); authorOf(mid, ext.id); }
     }
   }
   return [...records.values()];

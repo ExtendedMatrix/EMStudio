@@ -969,10 +969,11 @@ export function render(
     // legacy spelling, still READ so older em.json files render, never written.
     if (n.node.node_type === "document") {
       const data = (n.node.data ?? {}) as Record<string, unknown>;
-      const isCanonical =
+      // an instance carries its master's node: it is never the canonical one
+      const isCanonical = !n.instanceOf && (
         data["is_canonical"] === true ||
         data["is_master"] === true ||
-        (!n.instanceOf && ((n.useCount ?? 0) > 1 || !!n.dated));
+        (n.useCount ?? 0) > 1 || !!n.dated);
       // WIDTH says canonical/instance, COLOUR says geometry — resolved once,
       // from the datamodel, by the same rule s3Dgraphy uses.
       const variant = documentVariant(data, isCanonical);
@@ -995,7 +996,11 @@ export function render(
       const bw = Math.max(0.9, variant.width * 0.6) / Math.sqrt(vp.scale);
       ctx.strokeStyle = variant.color;
       ctx.lineWidth = bw;
+      // MICRO-AUTORI-LAYOUT · the instance's border is dashed (E.D., 11 Oct
+      // 2026), the canonical one thick: the two read apart at any zoom
+      if (n.instanceOf) ctx.setLineDash([4 / Math.sqrt(vp.scale), 3 / Math.sqrt(vp.scale)]);
       ctx.stroke();
+      ctx.setLineDash([]);
       // fold — always hairline, it is a fold and not a border
       ctx.beginPath();
       ctx.moveTo(x0 + iw - f, y0);
@@ -1116,7 +1121,12 @@ export function render(
       if (pathGlyph) {
         // "contain" fit of the viewBox into the rect the hit test uses; the
         // stroke widths are viewBox units, so they scale with the glyph
-        drawGlyph(ctx, pathGlyph, ix, iy, iw, ih, glyphInk(), Math.min(iw, ih) * vp.scale);
+        // MICRO-AUTORI-LAYOUT · an author's master (the node in its epoch, or a
+        // member of a group) has the thicker ring, its instance a dashed one —
+        // the canonical document and its instance, on the author's glyph
+        const isAuthor = n.node.node_type === "author" || n.node.node_type === "author_ai";
+        drawGlyph(ctx, pathGlyph, ix, iy, iw, ih, glyphInk(), Math.min(iw, ih) * vp.scale,
+                  isAuthor ? (n.instanceOf ? { dash: [11, 7] } : { strokeScale: 1.8 }) : undefined);
         // G9 · the format of a VERSION is not in its glyph (one drawing for
         // every glTF): the canvas writes it, when the glyph is big enough
         if (pathGlyph.key.startsWith("version:") && Math.min(iw, ih) * vp.scale >= 40 && ov("version_format")) {

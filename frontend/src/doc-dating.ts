@@ -97,3 +97,67 @@ export function topEpochOf(doc: EmDocument, id: string): string {
   while (parent.has(cur) && !seen.has(cur)) { seen.add(cur); cur = parent.get(cur)!; }
   return cur;
 }
+
+// ── MICRO-AUTORI-LAYOUT · the epoch of ANY entity with a date of its own ──────
+// E.D., 11 Oct 2026: «il master sta nell'epoca della sua data». The same rule as
+// em-core (`layout.rs`, the lanes) and s3Dgraphy (`spatiotemporal.entity_epoch`,
+// the instances' badge): its year is `absolute_time_start` (the property, else
+// the node's own field), else `absolute_time_end` the same way; its epoch the
+// narrowest holding that year, else `has_first_epoch`, else — a date outside
+// every epoch — the nearest one.
+
+/** a written year: a number, or the leading year of a date («2021-09-28») */
+export function yearOf(v: unknown): number | null {
+  if (typeof v === "number") return Number.isFinite(v) ? v : null;
+  if (v == null) return null;
+  const m = /^\s*(-?\d+(?:\.\d+)?)/.exec(String(v));
+  return m ? Number(m[1]) : null;
+}
+
+export interface EntityEpoch {
+  year: number | null;
+  /** which date gave the year */
+  quale: "absolute_time_start" | "absolute_time_end" | null;
+  epoch: string | null;
+  /** how the epoch was found */
+  rule: "date" | "declared" | "nearest" | null;
+}
+
+export function entityEpoch(doc: EmDocument, id: string, bounds = epochBounds(doc),
+                            byId: Map<string, EmNode> = new Map(doc.graph.nodes.map((n) => [n.id, n]))): EntityEpoch {
+  const node = byId.get(id);
+  const none: EntityEpoch = { year: null, quale: null, epoch: null, rule: null };
+  if (!node || node.node_type === "EpochNode" || node.node_type === "epoch") return none;
+  const props: Record<string, number | null> = { absolute_time_start: null, absolute_time_end: null };
+  let declared: string | null = null;
+  for (const e of doc.graph.edges) {
+    if (e.source !== id || gone(e)) continue;
+    if (e.edge_type === "has_first_epoch" && !declared && byId.has(e.target)) declared = e.target;
+    if (e.edge_type !== "has_property") continue;
+    const p = byId.get(e.target);
+    if (!p || gone(p) || p.node_type !== "property") continue;
+    const pd = (p.data ?? {}) as Record<string, unknown>;
+    for (const q of ["absolute_time_start", "absolute_time_end"] as const) {
+      if (props[q] != null || (p.name !== q && pd.property_type !== q)) continue;
+      props[q] = yearOf(pd.value) ?? yearOf(p.description);
+    }
+  }
+  const own = (node.data ?? {}) as Record<string, unknown>;
+  let year: number | null = null;
+  let quale: EntityEpoch["quale"] = null;
+  for (const q of ["absolute_time_start", "absolute_time_end"] as const) {
+    const y = props[q] ?? yearOf(own[q]);
+    if (y != null) { year = y; quale = q; break; }
+  }
+  if (year != null) {
+    const holding = epochHolding(bounds, year);
+    if (holding) return { year, quale, epoch: holding.id, rule: "date" };
+  }
+  if (declared) return { year, quale, epoch: declared, rule: "declared" };
+  if (year != null && bounds.length) {
+    const dist = (b: EpochBounds): number => Math.min(Math.abs(year! - b.lo), Math.abs(year! - b.hi));
+    const near = [...bounds].sort((a, b) => dist(a) - dist(b) || (a.hi - a.lo) - (b.hi - b.lo))[0];
+    return { year, quale, epoch: near.id, rule: "nearest" };
+  }
+  return { year, quale, epoch: null, rule: null };
+}
