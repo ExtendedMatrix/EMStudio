@@ -17,7 +17,7 @@
  */
 
 import { t } from "./i18n";
-import { hasChain, hdtoChain, withCode } from "./hdto";
+import { hasChain, hdtoChain, shownCode, withCode } from "./hdto";
 import type { HdtoChain } from "./hdto";
 import type { EmDocument } from "./types";
 
@@ -77,7 +77,7 @@ export function chainCard(doc: EmDocument | null | undefined,
                   [c.study.authors, c.study.date].filter(Boolean).join(", ")]
       .filter(Boolean).join(" · ");
     row("study", t("hdto.study"), c.study.id,
-        withCode(c.study.name || t("hdto.untitledStudy"), c.study.code), bits || undefined);
+        withCode(c.study.name || t("hdto.untitledStudy"), shownCode(doc)), bits || undefined);
   } else {
     row("study", t("hdto.study"), null, t("hdto.noStudy"));
   }

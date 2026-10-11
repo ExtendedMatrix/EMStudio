@@ -15,6 +15,16 @@
  * * the study code (GT16) is the source's or the user's, never derived, and it
  *   lives on the study (`data.code`).
  *
+ * Giro dell'11 ottobre (E.D., 11 Oct 2026):
+ *
+ * * the SAGGIO is a study and a place: a `LocationNodeGroup` (kind `study`)
+ *   `is_in_location` the site, the study took place at it;
+ * * a place is TOPOGRAPHY, not Heritage Digital Twin: it is never part of the
+ *   HDT-O layer, and the Matrix draws no place as a box (the nodes and their
+ *   memberships stay in the graph);
+ * * the code is the STUDY's: the graph's «EM-ID» (`GraphNode.data.em_id`) is
+ *   retired, read only to be shown migrated (`emIdMigration`).
+ *
  * This is the reader of what `DocumentStore.applyHdto` writes and of what
  * s3dgraphy's `hdto.declare_hdto` writes — the same roles, the same node types,
  * the same edges (`scripts/check-studio-luogo.mjs` compares the two). Edge and
@@ -153,8 +163,12 @@ export interface HdtoChain {
   parent: ChainHeritage | null;
   twin: { id: string; name: string; state: "provisional" | "registered"; key: string | null } | null;
   project: { id: string; name: string } | null;
-  /** the ids of every node in the chain (the Graph view's layer) */
+  /** the ids of every node in the chain, its place included (the card) */
   ids: Set<string>;
+  /** the HDT-O layer of the Graph view: the chain WITHOUT its place — study,
+   *  HC1, twin, project, proposition set. A place is topography, drawn as
+   *  every place is (E.D., 11 Oct 2026). */
+  layerIds: Set<string>;
 }
 
 function heritage(n: EmNode | undefined): ChainHeritage | null {
@@ -173,11 +187,13 @@ function heritage(n: EmNode | undefined): ChainHeritage | null {
 /** s3dgraphy's `read_hdto`, for a document: whatever is missing is null. */
 export function hdtoChain(doc: EmDocument | null | undefined): HdtoChain {
   const ids = new Set<string>();
+  const layerIds = new Set<string>();
   const empty: HdtoChain = { study: null, place: null, about: null, parent: null,
-                             twin: null, project: null, ids };
+                             twin: null, project: null, ids, layerIds };
   if (!doc?.graph) return empty;
   for (const n of doc.graph.nodes)
     if (HDTO_ROLES.includes(dataOf(n).hdto_role as HdtoRole)) ids.add(n.id);
+  for (const id of ids) layerIds.add(id);
   const study = roleNode(doc, "study");
   const sd = dataOf(study);
   const place = studyPlace(doc);
@@ -217,6 +233,7 @@ export function hdtoChain(doc: EmDocument | null | undefined): HdtoChain {
                    state: key ? "registered" : "provisional", key: key || null } : null,
     project: project ? { id: project.id, name: text(project.name) } : null,
     ids,
+    layerIds,
   };
 }
 
@@ -245,23 +262,116 @@ export function withCode(name: string, code: string | null | undefined): string 
 }
 
 /**
- * What a view leaves out of the HDT-O layer (MICRO studio-luogo, part D): the
- * ids of `nodes` to drop. The stratigraphic views always drop the HDT-O profile
- * types and the role-marked nodes (they live in the em.json, not on the
- * matrix), and with them the study's PLACE when it is the panel's own site with
- * no member — a place of the toponym chain holding units is topography the
- * views already draw, and stays. With `layerOn` (the Graph view's toggle) the
- * chain's own nodes are kept: study, place, HC1, HC2, project, proposition set.
+ * What a view leaves out of the HDT-O layer: the ids of `nodes` to drop. The
+ * stratigraphic views always drop the HDT-O profile types and the role-marked
+ * nodes (they live in the em.json, not on the matrix); with `layerOn` (the
+ * Graph view's toggle) the chain's own nodes are kept — study, HC1, HC2,
+ * project, proposition set. A PLACE is never part of it (E.D., 11 Oct 2026:
+ * «un luogo è topografia, non Heritage Digital Twin»), empty or not: the site
+ * the panel makes is a LocationNodeGroup like the others, and the views treat
+ * it as they treat every place.
  */
 export function hdtoDropped(doc: EmDocument, nodes: EmNode[], hiddenTypes: Set<string>,
-                            memberCount: (id: string) => number,
                             layerOn: boolean): Set<string> {
-  const chain = hdtoChain(doc).ids;
+  const layer = hdtoChain(doc).layerIds;
+  const loc = placeNodeType();
   const drop = new Set<string>();
   for (const n of nodes) {
-    const isHdto = hiddenTypes.has(n.node_type) || !!dataOf(n).hdto_role ||
-      (chain.has(n.id) && memberCount(n.id) === 0);
-    if (isHdto && !(layerOn && chain.has(n.id))) drop.add(n.id);
+    if (n.node_type === loc) continue;
+    const isHdto = hiddenTypes.has(n.node_type) || !!dataOf(n).hdto_role;
+    if (isHdto && !(layerOn && layer.has(n.id))) drop.add(n.id);
   }
   return drop;
+}
+
+// ── the saggio and the site (11 Oct 2026) ───────────────────────────────────
+
+/** A site: the place pyArchInit's projector (or this panel) makes for it,
+ *  `level: sito`. */
+export function isSite(n: EmNode | undefined): boolean {
+  return !!n && n.node_type === placeNodeType() && dataOf(n).level === "sito";
+}
+
+/** The other dimensions of pyArchInit's study plane: places too, but an area
+ *  or a sector is not where a study took place. */
+const NOT_A_SAGGIO = new Set(["area", "settore", "quad_par"]);
+
+/** A saggio (a trench, a sondage). Measured on a projected graph (11 Oct
+ *  2026), pyArchInit gives it in two forms, often both: the importer's place
+ *  `loc::saggio::study::<name>` and the projector's group `group_kind:
+ *  saggio`. A place of the study plane made by hand (`kind: study`, no
+ *  pyArchInit dimension) is one too; an area or a sector is not. */
+export function isSaggio(n: EmNode | undefined): boolean {
+  if (!n || n.node_type !== placeNodeType()) return false;
+  const d = dataOf(n);
+  if (d.group_kind === "saggio" || n.id.startsWith("loc::saggio::")) return true;
+  if (d.kind !== "study") return false;
+  const gk = text(d.group_kind);
+  if (gk && NOT_A_SAGGIO.has(gk)) return false;
+  return !/^loc::(area|settore|quad_par)::/.test(n.id) && !gk;
+}
+
+/** What «Where it took place» proposes: the sites of the graph, then its
+ *  saggi — the other places (comune, region, a functional room) are not where
+ *  a study took place. */
+export function studyPlaceChoices(doc: EmDocument | null | undefined): EmNode[] {
+  const places = placesIn(doc);
+  return [...places.filter(isSite), ...places.filter(isSaggio)];
+}
+
+/** The site a saggio is in, up `is_in_location`, if it is in one. */
+export function siteOf(doc: EmDocument, place: EmNode): EmNode | undefined {
+  const up = withinEdgeType();
+  const seen = new Set([place.id]);
+  let cur: EmNode | undefined = place;
+  while (cur) {
+    const next: EmNode | undefined = outgoing(doc, cur.id, up)
+      .find((n) => n.node_type === place.node_type && !seen.has(n.id));
+    if (!next) return undefined;
+    if (isSite(next)) return next;
+    seen.add(next.id);
+    cur = next;
+  }
+  return undefined;
+}
+
+/** The edge type of «a place is in a place» (`is_in_location`), from the
+ *  datamodel. */
+export function withinType(): string | undefined {
+  return withinEdgeType();
+}
+
+// ── the retired EM-ID (11 Oct 2026) ─────────────────────────────────────────
+
+/** The graph's retired «EM-ID» (`GraphNode.data.em_id`), or null. */
+export function legacyEmId(doc: EmDocument | null | undefined): string | null {
+  const root = (doc?.graph?.nodes ?? []).find((n) => classOf(n.node_type) === "GraphNode");
+  return text(dataOf(root).em_id) || null;
+}
+
+/**
+ * s3dgraphy's `migrate_em_id`, READ — nothing is written here: the em_id goes
+ * to the study's code only when there is a study and it has no code; no study
+ * is made for a code, a code is never overridden. `code` is what the study's
+ * code is, or would be after the migration.
+ */
+export function emIdMigration(doc: EmDocument | null | undefined): {
+  emId: string | null; code: string | null; migrated: boolean;
+  reason: "no em_id" | "no study" | "study has its code" | "study has another code" | "migrated";
+} {
+  const emId = legacyEmId(doc);
+  const study = roleNode(doc, "study");
+  const own = text(dataOf(study).code);
+  if (!emId) return { emId, code: own || null, migrated: false, reason: "no em_id" };
+  if (!study) return { emId, code: null, migrated: false, reason: "no study" };
+  if (own) return { emId, code: own, migrated: false,
+                    reason: own === emId ? "study has its code" : "study has another code" };
+  return { emId, code: emId, migrated: true, reason: "migrated" };
+}
+
+/** The code a view shows: the study's (`studyCode`), or the em_id it migrates
+ *  to (`emIdMigration`). */
+export function shownCode(doc: EmDocument | null | undefined): string | null {
+  const m = emIdMigration(doc);
+  return studyCode(doc) ?? (m.migrated ? m.code : null);
 }

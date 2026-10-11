@@ -25,6 +25,7 @@
 import type { FoldedView } from "../folding";
 import { MEMBERSHIP_EDGES } from "../folding";
 import { glyphFor, type Glyph } from "../glyphs";
+import { placeEdgeType } from "../hdto";
 import { classOf, isGroupType, isParadataType, isStratigraphicType, isVirtualType, isContinuityType, ancestorsOf } from "../rules";
 import type { Scene, SceneNode } from "../scene";
 import type { EmDocument, EmEdge, EmNode } from "../types";
@@ -130,13 +131,18 @@ export function buildLiquidScene(
   const nodes = allNodes.filter((n) => !isHalo(n));
   const ids = new Set(nodes.map((n) => n.id));
   const haloNodes = new Map(allNodes.filter(isHalo).map((n) => [n.id, n]));
+  const placeEdge = placeEdgeType();
   const edges: EmEdge[] = [];
   const degree = new Map<string, number>();
   const members = new Map<string, Set<string>>();
   for (const e of allEdges) {
     const et = e.edge_type ?? "";
     // membership and attribution: the member joins the halo of its group/epoch
-    if ((MEMBERSHIP_EDGES.has(et) || EPOCH_EDGES.has(et)) && ids.has(e.source) && haloNodes.has(e.target)) {
+    // — and a study joins the halo of the place it took place at (11 Oct 2026:
+    // the place is drawn as every place is, a halo; the HDT-O layer's
+    // study_took_place_at is that membership)
+    if ((MEMBERSHIP_EDGES.has(et) || EPOCH_EDGES.has(et) || et === placeEdge) &&
+        ids.has(e.source) && haloNodes.has(e.target)) {
       (members.get(e.target) ?? members.set(e.target, new Set()).get(e.target)!).add(e.source);
       continue;
     }

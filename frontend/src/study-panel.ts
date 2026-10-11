@@ -42,7 +42,7 @@ import type { AuthorityCandidate, AuthorityRef } from "./types";
 import { renderSitePositionLine } from "./site-picker";
 import type { TwinSearchResult } from "./twins";
 import { describeSources } from "./twins";
-import { placesIn, studyKinds } from "./hdto";
+import { emIdMigration, isSaggio, placesIn, studyKinds, studyPlaceChoices } from "./hdto";
 import { studyKindLabel } from "./hdto-card";
 import type { InspectorCallbacks } from "./inspector";
 
@@ -455,6 +455,20 @@ export function renderSitePosition(host: HTMLElement, store: DocumentStore,
   host.appendChild(el("div", "insp-hint", t("site.notTheShift")));
 }
 
+/** Asks before un-ticking «a recognised heritage asset» deletes the HC1, its
+ *  twin and its «part of» (E.D., 11 Oct 2026). `window.confirm`, replaceable
+ *  (`setUndeclareConfirm`) for a test or another dialog. */
+let askUndeclare = (name: string): boolean =>
+  typeof window !== "undefined" && typeof window.confirm === "function"
+    ? window.confirm(t("insp.hdtUndeclareConfirm", { name: name.trim() || "—" }))
+    : false;
+function confirmUndeclare(name: string): boolean {
+  return askUndeclare(name);
+}
+export function setUndeclareConfirm(fn: (name: string) => boolean): void {
+  askUndeclare = fn;
+}
+
 /**
  * The study panel, rendered into `root`.
  *
@@ -510,14 +524,14 @@ export function renderStudyPanel(
   // attenuated ("da Canvas") and the "Propagative metadata" row names the
   // source. DISTINCT from HDT-O "Author(s)" below (the Study's documentary
   // authorship) — this is the propagative default. The EM-ID is the graph's
-  // human-readable site id, stored on the graph-self node (import-key detail
-  // in IMP1). Editing writes REAL nodes via store.setGraphScope.
+  // retired EM-ID now lives as the study's code (11 Oct 2026). Editing writes
+  // REAL nodes via store.setGraphScope.
   panel.appendChild(
     el("h3", "insp-sect", "Graph metadata (global default)"),
   );
   const gscope = store.readGraphScope();
   const gfield = (
-    key: "author" | "license" | "embargo" | "em_id",
+    key: "author" | "license" | "embargo",
     label: string,
     placeholder: string,
     hint: string,
@@ -533,12 +547,10 @@ export function renderStudyPanel(
     panel.appendChild(inp);
     panel.appendChild(el("div", "insp-hint", hint));
   };
-  gfield(
-    "em_id",
-    "EM-ID (site id)",
-    "e.g. TM (Templu Mare)",
-    "Human-readable identifier of this graph / site — the key used across the EM ecosystem (EMtools). Stored on the graph-self node.",
-  );
+  // The «EM-ID (site id)» field is GONE (E.D., 11 Oct 2026): the code of the
+  // graph is the code of its STUDY, written below. A file that has an em_id
+  // keeps it; the study's code field shows it migrated (hdto.ts
+  // `emIdMigration`) and writes it with the study.
   gfield(
     "author",
     "Author (default)",
@@ -599,7 +611,10 @@ export function renderStudyPanel(
   const declaredCb = document.createElement("input");
   declaredCb.type = "checkbox";
   declaredCb.checked = !!hdto.heritageDeclared;
+  // every place of the graph, to resolve a typed name; the sites and the
+  // saggi, to propose (11 Oct 2026)
   const places = placesIn(store.doc);
+  const choices = studyPlaceChoices(store.doc);
   // the id of the place the typed name stands for: a place of the graph with
   // exactly that name (the first of the toponym chain wins), else none — and
   // then `applyHdto` finds or makes the site by its deterministic id
@@ -668,6 +683,17 @@ export function renderStudyPanel(
   codeIn.addEventListener("change", commit);
   panel.appendChild(codeIn);
   panel.appendChild(el("div", "insp-hint", t("insp.hdtStudyCodeHint")));
+  // a file with the retired EM-ID: the code it migrates to is in the field
+  // (readHdto), and the panel says where it came from
+  const mig = emIdMigration(store.doc);
+  if (mig.migrated || mig.reason === "study has another code" || mig.reason === "no study") {
+    const note = el("div", "insp-hint", t(
+      mig.migrated ? "insp.hdtStudyCodeFromEmId"
+        : mig.reason === "no study" ? "insp.hdtEmIdNoStudy" : "insp.hdtEmIdOther",
+      { emid: mig.emId ?? "" }));
+    note.dataset.hdto = "emid-note";
+    panel.appendChild(note);
+  }
   // the kind: the datamodel's values, «not said» first
   panel.appendChild(el("label", "insp-field-label", t("insp.hdtStudyKind")));
   kindSel.className = "insp-name-input";
@@ -696,11 +722,11 @@ export function renderStudyPanel(
   const listId = `hdto-places-${Math.random().toString(36).slice(2, 8)}`;
   const list = document.createElement("datalist");
   list.id = listId;
-  for (const p of places) {
+  for (const p of choices) {
     const o = document.createElement("option");
     o.value = String(p.name ?? "");
-    const level = (p.data as Record<string, unknown> | undefined)?.level;
-    if (level) o.label = `${p.name} · ${level}`;
+    o.dataset.placeId = p.id;
+    o.setAttribute("label", `${p.name} · ${isSaggio(p) ? t("insp.hdtPlaceSaggio") : t("insp.hdtPlaceSite")}`);
     list.appendChild(o);
   }
   placeIn.setAttribute("list", listId);
@@ -708,8 +734,8 @@ export function renderStudyPanel(
   panel.appendChild(placeIn);
   panel.appendChild(list);
   panel.appendChild(el("div", "insp-hint",
-    places.length ? t("insp.hdtPlaceHint", { n: String(places.length) })
-                  : t("insp.hdtPlaceHintNone")));
+    choices.length ? t("insp.hdtPlaceHint", { n: String(choices.length) })
+                   : t("insp.hdtPlaceHintNone")));
 
   groupTitle(t("insp.hdtEntity"), t("insp.hdtEntityGloss"));
   // THE GESTURE: an HC1 exists because somebody said «this is a recognised
@@ -726,6 +752,13 @@ export function renderStudyPanel(
   heritageBox.style.display = declaredCb.checked ? "" : "none";
   const outer = panel;
   declaredCb.addEventListener("change", () => {
+    // un-ticking DELETES the HC1, its twin and its «part of» (E.D., 11 Oct
+    // 2026): asked first, and nothing happens without a yes
+    if (!declaredCb.checked && store.readHdto().heritageDeclared &&
+        !confirmUndeclare(store.readHdto().heritageName)) {
+      declaredCb.checked = true;
+      return;
+    }
     heritageBox.style.display = declaredCb.checked ? "" : "none";
     commit();
   });

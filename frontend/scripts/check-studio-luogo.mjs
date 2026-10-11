@@ -310,11 +310,14 @@ console.log("\nB · the code beside the name, never made up");
   eq(H.withCode("Templu Mare", null), "Templu Mare", "no code → the name as it is");
   eq(H.withCode("Templu Mare (GT16)", "GT16"), "Templu Mare (GT16)", "never twice");
   const src = readFileSync(`${SRC}emtree.ts`, "utf-8");
-  ok(/withCode\(name, studyCode\(slot\.store\.doc\)\)/.test(src), "the EMtree overview card names the graph with its code");
+  // 11 Oct 2026: the code shown is the STUDY's, or the retired EM-ID it
+  // migrates to (`shownCode`); the EMtree card shows it where the EM-ID was
+  ok(/const code = shownCode\(slot\.store\.doc\)/.test(src) && !/gs\.em_id/.test(src),
+     "the EMtree overview card shows the study's code, not the EM-ID");
   const main = readFileSync(`${SRC}main.ts`, "utf-8");
-  ok(/return withCode\(name \|\| t\("strip\.untitled"\), studyCode\(st\.doc\)\)/.test(main),
+  ok(/return withCode\(name \|\| t\("strip\.untitled"\), shownCode\(st\.doc\)\)/.test(main),
      "the name strip (and the status bar, through graphTitle) carry the code");
-  ok(/withCode\(name, studyCode\(store\.doc\)\)/.test(main), "…and the desktop window title");
+  ok(/withCode\(name, shownCode\(store\.doc\)\)/.test(main), "…and the desktop window title");
   // measured, not assumed: no label is built with the study code as a prefix
   // anywhere in the frontend (naming.ts prefixes an extractor with its
   // document's name, a new unit with the most used prefix of its siblings)
@@ -414,8 +417,8 @@ if (existsSync(STUDY)) {
   // the layer: off → no HDT-O node in the view; on → the chain
   const hidden = R.hdtoProfileTypes();
   const nodes = realDoc.graph.nodes;
-  const off = H.hdtoDropped(realDoc, nodes, hidden, () => 0, false);
-  const on = H.hdtoDropped(realDoc, nodes, hidden, () => 0, true);
+  const off = H.hdtoDropped(realDoc, nodes, hidden, false);
+  const on = H.hdtoDropped(realDoc, nodes, hidden, true);
   ok([...chain.ids].every((id) => off.has(id)), "the layer OFF · every node of the chain stays out of the view (Matrix and Graph)");
   ok([...chain.ids].every((id) => !on.has(id)), "the layer ON · every node of the chain is in the Graph view");
   eq(chain.ids.size, 5, "…five: proposition set, HC1, whole, twin, study");
@@ -432,7 +435,7 @@ if (existsSync(STUDY)) {
     { id: "u1", node_type: "US", name: "US1", data: {} },
   ], edges: [{ id: "u1__has_first_epoch__e1", source: "u1", target: "e1", edge_type: "has_first_epoch" }] } };
   doD("a graph without a chain", doc, false);
-  eq(H.hdtoDropped(doc, doc.graph.nodes, R.hdtoProfileTypes(), () => 0, true).size, 0,
+  eq(H.hdtoDropped(doc, doc.graph.nodes, R.hdtoProfileTypes(), true).size, 0,
      "a graph without a chain · the layer on adds and removes nothing");
 }
 {
@@ -446,11 +449,15 @@ if (existsSync(STUDY)) {
   ok(!card.querySelector('[data-hdto-row="twin"]'), "…and no twin row: a twin is of an HC1");
   ok(/Aiano/.test(card.querySelector('[data-hdto-row="place"]').textContent), "…its place is there");
   ok(/Stratigraphic excavation/.test(card.querySelector('[data-hdto-row="study"]').textContent), "…and its kind");
-  // its place, a site with no member, is in the layer and out of the Matrix
-  const dropped = H.hdtoDropped(s.doc, s.doc.graph.nodes, R.hdtoProfileTypes(), () => 0, false);
-  ok(dropped.has(H.sitePlaceId("Aiano")), "the panel's site, empty, stays out of the stratigraphic views");
-  const kept = H.hdtoDropped(s.doc, s.doc.graph.nodes, R.hdtoProfileTypes(), (id) => (id === H.sitePlaceId("Aiano") ? 3 : 0), false);
-  ok(!kept.has(H.sitePlaceId("Aiano")), "…a place holding units is topography the views draw, and stays");
+  // its place, a site with no member, is topography (E.D., 11 Oct 2026): never
+  // in the HDT-O layer, never dropped as HDT-O — the Matrix leaves out every
+  // place alike, the Graph view draws it (check-saggio-sito.mjs)
+  for (const on of [false, true]) {
+    const dropped = H.hdtoDropped(s.doc, s.doc.graph.nodes, R.hdtoProfileTypes(), on);
+    ok(!dropped.has(H.sitePlaceId("Aiano")), `the panel's site, empty, is not treated as HDT-O (layer ${on ? "on" : "off"})`);
+  }
+  ok(!H.hdtoChain(s.doc).layerIds.has(H.sitePlaceId("Aiano")) && H.hdtoChain(s.doc).ids.has(H.sitePlaceId("Aiano")),
+     "…out of the layer, still on the card");
 }
 
 console.log(`\nstudio-luogo: ${checks} checks passed`);

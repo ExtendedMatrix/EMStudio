@@ -1,5 +1,5 @@
 import "./style.css";
-import { hdtoChain, hdtoDropped, placesIn, studyCode, withCode } from "./hdto";
+import { hdtoChain, hdtoDropped, shownCode, withCode } from "./hdto";
 import { applyFolding, buildMembership, MEMBERSHIP_EDGES } from "./folding";
 import { geoOf, georeferenceScene, reprojectPoint, setBridgeResolver } from "./geo";
 import { setChronologyBridgeResolver } from "./chron-bridge";
@@ -1888,6 +1888,9 @@ window.__EM_SCENE__ = () => {
     // the DTC view exists to answer correctly
     source: ids.length && ids.every((id) => corpusIds.has(id)) ? "corpus" : "study",
     nodes: ids,
+    // the Graph view's halos (epochs, groups, places) and their members — a
+    // place is drawn there as a halo, not as a disc (11 Oct 2026)
+    halos: isLiquid(s) ? s.liquid.halos.map((h) => ({ id: h.id, kind: h.kind, members: [...h.members] })) : [],
     // G4 · the lanes as labelled
     lanes: (s.lanes ?? []).map((l) => ({ id: l.id, label: l.label, unnamed: !!l.unnamed })),
     // a SceneEdge is `{source, target, edge}` — the relation type lives on the
@@ -3171,7 +3174,7 @@ function graphTitle(st: DocumentStore): string {
   const name = String(g["name"] ?? (st.doc.header as Record<string, unknown> | undefined)?.["name"] ?? "").trim();
   // MICRO studio-luogo · the study's code beside the name, when the study has
   // one (`data.code`) — read, never derived
-  return withCode(name || t("strip.untitled"), studyCode(st.doc));
+  return withCode(name || t("strip.untitled"), shownCode(st.doc));
 }
 
 /**
@@ -3619,7 +3622,7 @@ function updateWindowTitle(): void {
     const name = currentFilePath
       ? baseName(currentFilePath)
       : slot ? slotLabel(slot) : String(g["name"] ?? g.graph_id ?? "untitled");
-    title = `${withCode(name, studyCode(store.doc))}${store.dirty ? " ●" : ""} — EMStudio`;
+    title = `${withCode(name, shownCode(store.doc))}${store.dirty ? " ●" : ""} — EMStudio`;
   }
   void setWindowTitle(title);
 }
@@ -3912,7 +3915,9 @@ let hdtoLayer = false;
 
 function filteredView(opts: { wholeGraph?: boolean;
                         hidden?: { nodes: Set<string>; edges: Set<string> };
-                        hdtoLayer?: boolean } = {}): {
+                        hdtoLayer?: boolean;
+                        /** the Matrix: no LocationNodeGroup drawn (11 Oct 2026) */
+                        placesUndrawn?: boolean } = {}): {
   nodes: EmDocument["graph"]["nodes"];
   edges: EmDocument["graph"]["edges"];
   badges: Map<string, number>;
@@ -3923,6 +3928,12 @@ function filteredView(opts: { wholeGraph?: boolean;
   const hiddenNodeTypes = opts.hidden?.nodes ?? hiddenNodesNow;
   const hiddenEdgeTypes = opts.hidden?.edges ?? hiddenEdgesNow;
   const folded = new Set(doc.layout?.folded_groups ?? []);
+  // a place the Matrix does not draw cannot be drawn folded either: its
+  // members are shown, unfolded
+  if (opts.placesUndrawn) {
+    const loc = nodeTypeForClass("LocationNodeGroup");
+    for (const n of doc.graph.nodes) if (n.node_type === loc) folded.delete(n.id);
+  }
   const foldedView = folded.size
     ? applyFolding(doc, buildMembership(doc), folded)
     : undefined;
@@ -3960,16 +3971,20 @@ function filteredView(opts: { wholeGraph?: boolean;
   // clutters the stratigraphic canvas. The nodes remain in em.json (single
   // source of truth) — only rendering is filtered.
   // MICRO studio-luogo · the HDT-O layer (hdto.ts `hdtoDropped`): the profile
-  // types and role-marked nodes, and the study's place when it is a site with
-  // no member of its own — kept, the chain's nodes, when the Graph view's layer
-  // is on.
-  const chainIds = hdtoChain(doc).ids;
-  const isPlaceOfChain = placesIn(doc).some((p) => chainIds.has(p.id));
-  const mmHdto = isPlaceOfChain ? buildMembership(doc) : null;
+  // types and role-marked nodes — kept, the chain's nodes, when the Graph
+  // view's layer is on.
+  // A place is never part of it (E.D., 11 Oct 2026): «un luogo è topografia».
   const dropped = !wholeGraph
-    ? hdtoDropped(doc, vNodes, HDTO_HIDDEN_TYPES,
-                  (id) => mmHdto?.childrenOf.get(id)?.length ?? 0, !!opts.hdtoLayer)
+    ? hdtoDropped(doc, vNodes, HDTO_HIDDEN_TYPES, !!opts.hdtoLayer)
     : new Set<string>();
+  // …and the Matrix draws no PLACE as a box (E.D., 11 Oct 2026, «il disegno non
+  // è il dato»): site, area, saggio, toponym — empty or full. The nodes and
+  // their is_in_location memberships stay in the document, intact; only this
+  // picture leaves them out. The Graph view draws them as it draws every node.
+  if (opts.placesUndrawn && !wholeGraph) {
+    const loc = nodeTypeForClass("LocationNodeGroup");
+    for (const n of vNodes) if (n.node_type === loc) dropped.add(n.id);
+  }
   if (dropped.size) {
     vNodes = vNodes.filter((n) => !dropped.has(n.id));
     const keep = new Set(vNodes.map((n) => n.id));
@@ -4272,10 +4287,12 @@ function buildScenesNow(): void {
   const views = new Map<string, ReturnType<typeof filteredView>>();
   const viewFor = (v: ViewKind, whole = false): ReturnType<typeof filteredView> => {
     const layer = v === "graph" && hdtoLayer;
-    const key = `${whole ? "W" : ""}${layer ? "H" : ""}${[...circleState[v]].sort().join(",")}`;
+    const noPlaces = v === "matrix";
+    const key = `${whole ? "W" : ""}${layer ? "H" : ""}${noPlaces ? "P" : ""}${[...circleState[v]].sort().join(",")}`;
     let fv = views.get(key);
     if (!fv) {
-      fv = filteredView({ wholeGraph: whole, hidden: hiddenFor(v), hdtoLayer: layer });
+      fv = filteredView({ wholeGraph: whole, hidden: hiddenFor(v), hdtoLayer: layer,
+                         placesUndrawn: noPlaces });
       views.set(key, fv);
     }
     return fv;
@@ -4423,7 +4440,7 @@ async function refreshMatrixViewLayout(): Promise<void> {
     }
     return;
   }
-  const v = filteredView();
+  const v = filteredView({ placesUndrawn: true });
   const doc = store.doc;
   try {
     const { computeLayout } = await import("./emcore");
@@ -14037,7 +14054,7 @@ function renderCirclesPanel(): void {
     hh.className = "fp-sect";
     hh.textContent = t("hdto.layer");
     filterPanel.appendChild(hh);
-    const chainSize = hdtoChain(store.doc).ids.size;
+    const chainSize = hdtoChain(store.doc).layerIds.size;
     const layerRow = document.createElement("label");
     layerRow.className = "fp-row";
     if (!chainSize) layerRow.style.opacity = "0.45";

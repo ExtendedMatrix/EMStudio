@@ -26,7 +26,7 @@
  * bug that shows up as "the wrong document saved over the right one".
  */
 
-import { studyCode, withCode } from "./hdto";
+import { shownCode } from "./hdto";
 import type { DocumentStore } from "./model";
 import type { ViewKind } from "./types";
 import { getRecents, type RecentFile } from "./recent";
@@ -552,9 +552,10 @@ let overviewMode = false;
 
 /**
  * OVR1 · the overview dashboard: one card per open graph, its high-level data
- * read from the GRAPH-SCOPE NODES (MIG1-A: author/licence/embargo + EM-ID on the
- * GraphNode) and the SITE POSITION (GEO1: `readSitePosition`). One source — the
- * nodes — never `graph.data`. Missing values read honestly (no EM-ID / not
+ * read from the GRAPH-SCOPE NODES (MIG1-A: author/licence/embargo on the
+ * GraphNode), the STUDY's code (11 Oct 2026: it replaces the EM-ID) and the SITE
+ * POSITION (GEO1: `readSitePosition`). One source — the
+ * nodes — never `graph.data`. Missing values read honestly (no code / not
  * positioned — from the dictionary), never a fabricated default. Clicking a card
  * activates that slot.
  */
@@ -575,8 +576,9 @@ function overviewSection(tree: EMTree, labels: (key: string) => string): string 
       seen.set(name, n);
       name = `${name} (${n})`;
     }
-    // MICRO studio-luogo · the study's code beside the name, when it has one
-    name = withCode(name, studyCode(slot.store.doc));
+    // the code of the graph is the STUDY's (E.D., 11 Oct 2026): the retired
+    // EM-ID is shown only as the code it migrates to (hdto.ts `shownCode`)
+    const code = shownCode(slot.store.doc);
     const field = (label: string, value: string, missing: string): string =>
       `<div class="ov-field"><dt>${esc(label)}</dt><dd${value ? "" : ' class="ov-missing"'}>${
         esc(value || missing)
@@ -593,8 +595,8 @@ function overviewSection(tree: EMTree, labels: (key: string) => string): string 
                 title="${esc(slot.path ?? labels("emtree.noFile"))}">
           <div class="ov-head">
             <span class="ov-name">${esc(name)}${slot.store.dirty ? " •" : ""}</span>
-            <span class="ov-emid${gs.em_id ? "" : " ov-missing"}">${
-              esc(gs.em_id || labels("emtree.noEmId"))
+            <span class="ov-emid${code ? "" : " ov-missing"}">${
+              esc(code || labels("emtree.noCode"))
             }</span>
           </div>
           <dl class="ov-fields">

@@ -12,7 +12,7 @@ import type {
   Swimlane,
 } from "./types";
 import { MEMBERSHIP_EDGES } from "./folding";
-import { makeSitePlace, placeEdgeType, placesIn, sitePlaceId, studyPlace, studyKinds } from "./hdto";
+import { emIdMigration, isSaggio, isSite, makeSitePlace, placeEdgeType, placesIn, siteOf, sitePlaceId, studyPlace, studyKinds, withinType } from "./hdto";
 import type { HdtoRole } from "./hdto";
 import { paradataGroupName } from "./naming";
 import { edgeTypeFor, nodeTypeForClass, planUniformSpellings } from "./rules";
@@ -2848,7 +2848,10 @@ export class DocumentStore {
       studyTitle: String(study?.name ?? ""),
       studyAuthors: String(sd.authors ?? ""),
       studyDate: String(sd.date ?? ""),
-      studyCode: String(sd.code ?? ""),
+      // the study's code; a file with the retired EM-ID reads it migrated
+      // (only when the study exists and has no code: `emIdMigration`)
+      studyCode: String(sd.code ?? "") || (emIdMigration(this.doc).migrated
+        ? String(emIdMigration(this.doc).code ?? "") : ""),
       studyKind: String(sd.study_kind ?? ""),
       placeName: String(place?.name ?? ""),
       placeId: place?.id ?? "",
@@ -3175,6 +3178,30 @@ export class DocumentStore {
         if (pos) delete pos[prevPlace.id];
       }
       ensureEdge(study, target); // HC9 → place (study_took_place_at)
+      // a SAGGIO chosen is in its site (E.D., 11 Oct 2026, strada b): when it
+      // is in none, it is hung off the graph's site — the one it names
+      // (pyArchInit's `sito`), else the only site of the graph — with
+      // is_in_location, so the site finds the study going up. Never a second
+      // site: one is made only from the name the saggio carries.
+      const wt = withinType();
+      if (target && wt && isSaggio(target) && !siteOf(this.doc, target)) {
+        const named = trim(String((target.data as Record<string, unknown> | undefined)?.sito ?? ""));
+        const sites = placesIn(this.doc).filter(isSite);
+        let site = named
+          ? sites.find((p) => p.id === sitePlaceId(named)) ??
+            sites.find((p) => trim(String(p.name ?? "")) === named)
+          : sites.length === 1 ? sites[0] : undefined;
+        if (!site && named) {
+          site = makeSitePlace(named);
+          if (site) { g.nodes.push(site); addedNodes.push(site); }
+        }
+        if (site && !g.edges.some((e) => e.source === target.id && e.target === site!.id && e.edge_type === wt)) {
+          const edge: EmEdge = { id: `${target.id}__${wt}__${site.id}`, source: target.id,
+                                 target: site.id, edge_type: wt };
+          g.edges.push(edge);
+          addedEdges.push(edge);
+        }
+      }
     }
 
     // optional Project (HC13)
