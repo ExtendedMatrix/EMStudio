@@ -107,8 +107,10 @@ export const VIEWER_MODES = ["single", "gallery"] as const;
  *  resource, with its thumbnail); the TABLE is the same shelf read back from
  *  s3Dgraphy as rows — with the three columns only the library can answer
  *  (residence, role, mode). One window, two ways of looking, the same shape as
- *  the Storage window's backends: the table is not a second shelf. */
-export const SHELF_MODES = ["list", "table"] as const;
+ *  the Storage window's backends: the table is not a second shelf. The third,
+ *  RESOURCES, is not the shelf at all: one table of the resource nodes of EVERY
+ *  graph of the em.json (file state, tier, level, uses, bucket), with the gestures. */
+export const SHELF_MODES = ["list", "table", "resources"] as const;
 
 /** The modes that are listed but cannot be entered yet, with the reason shown
  *  to whoever tries. Data, not an `if` in the header code. Empty since the

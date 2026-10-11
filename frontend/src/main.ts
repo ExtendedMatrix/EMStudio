@@ -11191,7 +11191,6 @@ let shelfTableBusy = false;
  *  next draw asks again instead of showing a stale answer. */
 let shelfTableAsked = false;
 /** which resource nodes the Shelf TABLE lists: the shelf's own, or every graph of the em.json */
-let shelfScope: "shelf" | "all" = "shelf";
 
 let _bridgeUrl: string | null = null;
 async function bridgeUrl(): Promise<string> {
@@ -21375,6 +21374,13 @@ function renderShelfInto(win: Win, body: HTMLElement,
   // the library's answer about these entries; the LIST is what you drag into and
   // it keeps working with no bridge. Neither is a second shelf: both read the
   // one list that becomes the container's ShelfGraph.
+  if (winModeOf(win) === "resources") {
+    paintSurface(win, body, () => {
+      body.textContent = "";
+      body.appendChild(resourcesTable(fileHooks(), renderShelf));
+    });
+    return;
+  }
   if (winModeOf(win) === "table") {
     if (!shelfTableAsked && !shelfTableBusy) {
       shelfTableAsked = true;
@@ -21554,21 +21560,6 @@ async function refreshShelfTable(): Promise<void> {
  *  gave them — a column added in s3Dgraphy appears here without an edit. */
 function renderShelfTableInto(body: HTMLElement): void {
   body.textContent = "";
-  const scope = document.createElement("div");
-  scope.className = "fs-scope";
-  for (const [v, label] of [["shelf", t("fs.scope.shelf")], ["all", t("fs.scope.all")]] as const) {
-    const b = document.createElement("button");
-    b.className = "ghost fs-scope-b" + (shelfScope === v ? " is-on" : "");
-    b.dataset.scope = v;
-    b.textContent = label;
-    b.addEventListener("click", () => { shelfScope = v; renderShelf(); });
-    scope.appendChild(b);
-  }
-  body.appendChild(scope);
-  if (shelfScope === "all") {
-    body.appendChild(resourcesTable(fileHooks(), renderShelf));
-    return;
-  }
   if (shelfTableNote) {
     const note = document.createElement("div");
     note.className = "shelf-note";
