@@ -509,10 +509,34 @@ fn main() {
                     let sep = PredefinedMenuItem::separator(handle)?;
                     app_menu.insert_items(&[&sep, &settings], 1)?;
                 }
+                // MICRO-AUTORI-LAYOUT p.3 · File › New graph ⌘N, Save ⌘S,
+                // Save As… ⇧⌘S, above the default «Close Window»; the page
+                // runs the same commands as its File menu
+                for item in menu.items()? {
+                    if let MenuItemKind::Submenu(sub) = item {
+                        if sub.text()? != "File" {
+                            continue;
+                        }
+                        let new = MenuItem::with_id(handle, "menu-new", "New Graph", true,
+                                                    Some("CmdOrCtrl+N"))?;
+                        let save = MenuItem::with_id(handle, "menu-save", "Save", true,
+                                                     Some("CmdOrCtrl+S"))?;
+                        let save_as = MenuItem::with_id(handle, "menu-save-as", "Save As…", true,
+                                                        Some("CmdOrCtrl+Shift+S"))?;
+                        let sep = PredefinedMenuItem::separator(handle)?;
+                        sub.insert_items(&[&new, &sep, &save, &save_as], 0)?;
+                        let sep2 = PredefinedMenuItem::separator(handle)?;
+                        sub.insert(&sep2, 4)?;
+                        break;
+                    }
+                }
                 app.set_menu(menu)?;
                 app.on_menu_event(|app, event| {
-                    if event.id() == "settings" {
+                    let id = event.id().as_ref();
+                    if id == "settings" {
                         let _ = app.emit("open-settings", ());
+                    } else if matches!(id, "menu-new" | "menu-save" | "menu-save-as") {
+                        let _ = app.emit(id, ());
                     }
                 });
             }

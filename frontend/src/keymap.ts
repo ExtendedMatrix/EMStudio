@@ -18,6 +18,7 @@ export interface KeyRow {
 
 export const KEYMAP: KeyRow[] = [
   // the app, wherever the focus is (a field keeps its letters)
+  { id: "new", keys: "⌘N", scope: "app" },
   { id: "save", keys: "⌘S", scope: "app" },
   { id: "saveAs", keys: "⇧⌘S", scope: "app" },
   { id: "settings", keys: "⌘,", scope: "app" },

@@ -1555,6 +1555,25 @@ if (isTauri()) {
   void import("@tauri-apps/api/event")
     .then(({ listen }) => listen("open-settings", () => openSettings()))
     .catch(() => { /* an older shell: Edit › Settings… still opens it */ });
+  // MICRO-AUTORI-LAYOUT p.3 · the desktop's File menu: New ⌘N, Save ⌘S, Save As ⇧⌘S
+  void import("@tauri-apps/api/event")
+    .then(({ listen }) => Promise.all((["new", "save", "save-as"] as const)
+      .map((c) => listen(`menu-${c}`, () => fileCommand(c)))))
+    .catch(() => { /* an older shell: the in-app File menu still has them */ });
+}
+/** MICRO-AUTORI-LAYOUT p.3 · New / Save / Save as, from the keyboard or the
+ *  desktop's native menu. One press may arrive twice on the desktop (the
+ *  webview's keydown and the menu's accelerator): the second within 400 ms is
+ *  the same press. */
+const lastFileCommand = { c: "", at: 0 };
+function fileCommand(c: "new" | "save" | "save-as"): void {
+  const now = performance.now();
+  if (lastFileCommand.c === c && now - lastFileCommand.at < 400) return;
+  lastFileCommand.c = c;
+  lastFileCommand.at = now;
+  if (c === "new") document.getElementById("btn-new")?.click();
+  else if (c === "save-as") void saveAsDocument();
+  else void saveDocument();
 }
 modeIndicator.addEventListener("keydown", (e) => {
   if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggleConnectionPanel(); }
@@ -8012,6 +8031,12 @@ async function saveDocument(): Promise<void> {
   if (!store) return;
   const file = emtree.activeFile();
   if (!file) return saveAsDocument();
+  // MICRO-AUTORI-LAYOUT p.3 · a room's graph lives on its node: every change is
+  // already there, Save has nothing to write (Save as… still makes a copy)
+  if (file.room && !file.path) {
+    toast(t("save.inRoom", { room: file.room.title || file.room.id }));
+    return;
+  }
   await saveFile(file);
 }
 
@@ -30961,8 +30986,15 @@ window.addEventListener("keydown", (e) => {
     e.preventDefault();
     // F2 · ⌥⌘S saves every file with unsaved work
     if (e.altKey) void saveAllDocuments();
-    else if (e.shiftKey) void saveAsDocument();
-    else void saveDocument();
+    else if (e.shiftKey) fileCommand("save-as");
+    else fileCommand("save");
+    return;
+  }
+  // MICRO-AUTORI-LAYOUT p.3 · ⌘N a new graph, the File menu's «New» (its
+  // Sidecar check included). A browser keeps ⌘N for a window when it wants to.
+  if ((e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === "n") {
+    e.preventDefault();
+    fileCommand("new");
     return;
   }
   // T2 · ⌘, opens Settings (the macOS convention; the desktop's app menu
