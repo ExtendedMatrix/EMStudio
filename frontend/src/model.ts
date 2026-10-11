@@ -12,7 +12,7 @@ import type {
   Swimlane,
 } from "./types";
 import { MEMBERSHIP_EDGES } from "./folding";
-import { emIdMigration, isSaggio, isSite, makeSitePlace, placeEdgeType, placesIn, siteOf, sitePlaceId, studyPlace, studyKinds, withinType } from "./hdto";
+import { emIdMigration, isCodeProposed, isSaggio, proposalFor, studyCode, isSite, makeSitePlace, placeEdgeType, placesIn, siteOf, sitePlaceId, studyPlace, studyKinds, withinType } from "./hdto";
 import type { HdtoRole } from "./hdto";
 import { paradataGroupName } from "./naming";
 import { edgeTypeFor, nodeTypeForClass, planUniformSpellings } from "./rules";
@@ -243,10 +243,18 @@ export interface HdtoFields {
   studyTitle: string;
   studyAuthors: string;
   studyDate: string;
-  /** MICRO studio-luogo · the study's short code (GT16) — written by the user
-   *  or given by the source, NEVER proposed or derived. `data.code`. Optional
-   *  in the type so a caller written before it (a remote op) leaves it alone. */
+  /** MICRO studio-luogo · the study's short code (GT16), `data.code` — the
+   *  user's, the source's, or (E.D., 11 Oct 2026) the system's PROPOSAL,
+   *  written once when the study is born without one and marked
+   *  `data.code_proposed` until confirmed. Optional in the type so a caller
+   *  written before it (a remote op) leaves it alone. */
   studyCode?: string;
+  /** read back: the code is a proposal nobody confirmed yet */
+  studyCodeProposed?: boolean;
+  /** the user confirms the proposed code (the mark goes, the code stays) */
+  confirmStudyCode?: boolean;
+  /** the codes of the OTHER graphs open beside this one: a proposal avoids them */
+  takenCodes?: string[];
   /** `data.study_kind`, one of the datamodel's values (`studyKinds()`), or ""
    *  for «not said». */
   studyKind?: string;
@@ -2852,6 +2860,7 @@ export class DocumentStore {
       // (only when the study exists and has no code: `emIdMigration`)
       studyCode: String(sd.code ?? "") || (emIdMigration(this.doc).migrated
         ? String(emIdMigration(this.doc).code ?? "") : ""),
+      studyCodeProposed: isCodeProposed(this.doc),
       studyKind: String(sd.study_kind ?? ""),
       placeName: String(place?.name ?? ""),
       placeId: place?.id ?? "",
@@ -3113,6 +3122,11 @@ export class DocumentStore {
 
     // Study (HC9)
     let study: EmNode | undefined;
+    // E.D., 11 Oct 2026: a study born WITHOUT a code gets the system's
+    // proposal — once, at its birth, marked until the user confirms it. A
+    // study that already exists is never given one here: a code cleared by
+    // the user stays cleared (proposed once, then fixed).
+    const born = hasStudy && !this.hdtoNode("study");
     if (hasStudy) {
       study = ensure("study", trim(fields.studyTitle));
       if (study) {
@@ -3120,9 +3134,15 @@ export class DocumentStore {
         d.hdto_role = "study";
         d.authors = trim(fields.studyAuthors);
         d.date = trim(fields.studyDate);
-        // the code only when somebody wrote it: never proposed, never derived
+        // the code: written by somebody, or the proposal made at the birth
+        // (marked); the same code as before keeps its mark unless confirmed,
+        // another code is the user's and is no proposal
+        const wasProposed = prevStudy.code_proposed === true
+          && trim(String(prevStudy.code ?? "")) === code;
         if (code) d.code = code;
         else delete d.code;
+        if (code && wasProposed && !fields.confirmStudyCode) d.code_proposed = true;
+        else delete d.code_proposed;
         if (kind) d.study_kind = kind;
         else delete d.study_kind;
         ensureEdge(study, about); // HC9 → HC1 (study_about_heritage)
@@ -3202,6 +3222,18 @@ export class DocumentStore {
           addedEdges.push(edge);
         }
       }
+    }
+
+    // the proposal, at the study's birth and after its place: the site's
+    // initials and the year (`proposalFor`, s3dgraphy's `proposal_for`)
+    // — unless the file already says one: a GraphML header's code or the
+    // retired em_id is written as it is, not as a proposal (s3dgraphy's
+    // `propose_study_code`)
+    if (born && study && !code) {
+      const d = (study.data ??= {}) as Record<string, unknown>;
+      const given = studyCode(this.doc);
+      d.code = given ?? proposalFor(this.doc, fields.takenCodes ?? []);
+      if (!given) d.code_proposed = true;
     }
 
     // optional Project (HC13)

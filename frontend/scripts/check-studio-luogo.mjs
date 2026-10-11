@@ -192,8 +192,11 @@ console.log("\nA3 · data.code only when written; data.study_kind from the datam
   const s = fresh("GT16 — Tempio Grande");
   s.applyHdto({ ...BASE, studyTitle: "GT16 campaign", placeName: "Sarmizegetusa" });
   const st = () => typed(s, STUDY_T)[0];
-  ok(!("code" in st().data), "a title that LOOKS like a code makes no code: nothing derived");
-  eq(H.studyCode(s.doc), null, "studyCode → null");
+  // E.D., 11 Oct 2026: a study born without a code gets the system's proposal,
+  // marked — the site's initials, never the title that looks like a code
+  eq([st().data.code, st().data.code_proposed, H.isCodeProposed(s.doc)], ["SA", true, true],
+     "a title that LOOKS like a code is not taken: the proposal is the site's initials, marked");
+  eq(H.studyCode(s.doc), "SA", "studyCode → the proposal");
   s.applyHdto({ ...s.readHdto(), studyCode: " GT16 ", studyKind: "stratigraphic_excavation" });
   eq([st().data.code, st().data.study_kind], ["GT16", "stratigraphic_excavation"], "written: code (trimmed) and kind");
   s.applyHdto({ ...s.readHdto(), studyKind: "trincea" });

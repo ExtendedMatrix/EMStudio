@@ -20,6 +20,15 @@ import { naturalFields, qualeOf, TRANSLATION_TYPE } from "./translation";
 
 export interface InspectorCallbacks {
   onJump: (nodeId: string) => void;
+  /** the rapporti of a node with units of OTHER graphs of the same file
+   *  (`links.ts`, E.D. 11 Oct 2026), each with the gesture that goes there */
+  crossGraphLinks?: (nodeId: string) => Array<{
+    edgeType: string; out: boolean; graphName: string; nodeName: string;
+    resolved: boolean; go: () => void;
+  }>;
+  /** the study codes of the other graphs open beside this one: a proposed
+   *  code avoids them */
+  otherStudyCodes?: () => string[];
   /** PROPRIETA · the verbs of a unit on its paradata group («Compact the
    *  properties», «Dissolve the group») that apply to it now */
   propertyGroupActions?: (nodeId: string) => Array<{ cmd: string; label: string; run: () => void }>;
@@ -1195,6 +1204,29 @@ export function renderInspector(
       }
       root.appendChild(g);
     }
+  }
+
+  // the rapporti with units of the OTHER graphs of the same file (s3dgraphy
+  // links, E.D. 11 Oct 2026): shown with the graph they are in, and a click
+  // goes there — the graph comes in front and the unit is selected
+  const across = cb.crossGraphLinks?.(nodeId) ?? [];
+  if (across.length) {
+    root.appendChild(el("h3", "insp-sect", t("insp.crossGraph")));
+    const g = el("div", "insp-group");
+    g.dataset.links = "across";
+    for (const l of across) {
+      const es = edgeStyle(l.edgeType);
+      const row = el("div", "insp-link-row");
+      const b = el("button", "insp-link",
+        `${l.out ? "→" : "←"} ${es.label} · ${l.nodeName} — ${l.graphName}`);
+      b.title = l.resolved ? t("insp.crossGraphGo", { graph: l.graphName })
+        : t("insp.crossGraphMissing", { graph: l.graphName });
+      if (!l.resolved) (b as HTMLButtonElement).disabled = true;
+      else b.addEventListener("click", () => l.go());
+      row.appendChild(b);
+      g.appendChild(row);
+    }
+    root.appendChild(g);
   }
 
   // Delete affordance is node-kind specific so nothing is ever orphaned:

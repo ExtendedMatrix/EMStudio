@@ -1,5 +1,6 @@
 import "./style.css";
-import { hdtoChain, hdtoDropped, shownCode, withCode } from "./hdto";
+import { hdtoChain, hdtoDropped, shownCode, studyCode, withCode } from "./hdto";
+import { linksOf, resolveAddress, type GraphDocs } from "./links";
 import { applyFolding, buildMembership, MEMBERSHIP_EDGES } from "./folding";
 import { geoOf, georeferenceScene, reprojectPoint, setBridgeResolver } from "./geo";
 import { setChronologyBridgeResolver } from "./chron-bridge";
@@ -332,7 +333,7 @@ import {
   renderStratiMiner,
   unreadWarnings,
 } from "./stratiminer";
-import { EMTree, pathTail, renderEMTree, slotLabel } from "./emtree";
+import { EMTree, pathTail, renderEMTree, slotLabel, slotName } from "./emtree";
 import type {
   AuxFileType, AuxiliaryFile, AuxMapReport, EMTreeHandlers, GraphSlot, OpenFile, SlotViewState,
 } from "./emtree";
@@ -2883,6 +2884,8 @@ function renderInspectorInto(host: HTMLElement): void {
       onTogglePin: (nodeId) => togglePin([nodeId]),
       isPinned: (nodeId) => store!.isPinned(nodeId),
       resolveAuthority: resolveAuthority,
+      crossGraphLinks: (nodeId) => crossGraphLinks(nodeId),
+      otherStudyCodes: () => otherStudyCodes(),
       // «does a twin already exist for this?» — asked of the Catalog's twin
       // register. Passed through unchanged: `searchTwins` is already total (any
       // failure resolves to NO_REGISTER), and the panel says «no register
@@ -21109,7 +21112,53 @@ function renderStudyInto(body: HTMLElement): void {
     resolveAuthority: resolveAuthority,
     searchTwins: (term) => searchTwins(term),
     onSetSitePosition: () => openSitePickerOnGraph(),
+    otherStudyCodes: () => otherStudyCodes(),
   });
+}
+
+/** The graphs of the file the active graph is in — its container — by graph
+ *  id; the active graph alone when it has no file yet. */
+function graphsBeside(): { slots: GraphSlot[]; docs: GraphDocs } {
+  const here = emtree.active();
+  if (!here) return { slots: [], docs: [] };
+  const slots = here.fileId ? emtree.slotsOf(here.fileId) : [here];
+  return { slots, docs: slots.map((sl) => ({
+    graphId: String(sl.store.doc.graph.graph_id ?? sl.id), doc: sl.store.doc })) };
+}
+
+/** E.D., 11 Oct 2026 · the rapporti of a unit with units of the OTHER graphs
+ *  of its file (s3dgraphy links), for the Inspector: a click brings that
+ *  graph in front and jumps to the unit. */
+function crossGraphLinks(nodeId: string) {
+  const here = emtree.active();
+  if (!here || !store) return [];
+  const { slots, docs } = graphsBeside();
+  const gid = String(store.doc.graph.graph_id ?? here.id);
+  return linksOf(docs, gid, nodeId).map((l) => {
+    const slot = slots.find((sl) => String(sl.store.doc.graph.graph_id) === l.other.graph_id);
+    const node = resolveAddress(docs, l.other);
+    return {
+      edgeType: l.edge_type, out: l.direction === "out",
+      graphName: slot ? slotName(slot) : l.other.graph_id,
+      nodeName: String(node?.name || l.other.node_id),
+      resolved: !!slot && !!node,
+      go: () => {
+        if (!slot) return;
+        activateSlot(slot.id);
+        jumpTo(l.other.node_id);
+      },
+    };
+  });
+}
+
+/** The study codes of the other graphs of the active graph's file (or of every
+ *  other open graph, for a graph with no file): a proposal avoids them. */
+function otherStudyCodes(): string[] {
+  const here = emtree.active();
+  const pool = here?.fileId ? emtree.slotsOf(here.fileId) : emtree.slots;
+  return pool.filter((sl) => sl !== here)
+    .map((sl) => studyCode(sl.store.doc))
+    .filter((c): c is string => !!c);
 }
 
 /** Paint every Shelf surface on screen. "Ask the surface, not who has the

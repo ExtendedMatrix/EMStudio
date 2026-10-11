@@ -25,6 +25,13 @@
  * * the code is the STUDY's: the graph's «EM-ID» (`GraphNode.data.em_id`) is
  *   retired, read only to be shown migrated (`emIdMigration`).
  *
+ * Giro dell'11 ottobre (2) (E.D., 11 Oct 2026):
+ *
+ * * the code is STABLE — the prefix Blender re-attaches the proxies by — and is
+ *   read from the study, else the GraphML header, else the em_id (`studyCode`);
+ * * a study born without one gets the system's PROPOSAL (`proposalFor`), once,
+ *   marked `data.code_proposed` until the user confirms it (`isCodeProposed`).
+ *
  * This is the reader of what `DocumentStore.applyHdto` writes and of what
  * s3dgraphy's `hdto.declare_hdto` writes — the same roles, the same node types,
  * the same edges (`scripts/check-studio-luogo.mjs` compares the two). Edge and
@@ -243,15 +250,86 @@ export function hasChain(c: HdtoChain): boolean {
 }
 
 /**
- * s3dgraphy's `study_code`: the short name of the study, or null. ONE source,
- * the study's `data.code`; a GraphML header's `graph_code` only when no study
- * says one, and never its `MISSINGCODE` placeholder. Nothing is derived.
+ * s3dgraphy's `study_code`: the short name of the study, or null. STABLE
+ * (E.D., 11 Oct 2026, «il codice di studio è stabile»): it is what Blender
+ * re-attaches the proxies by, so once written it never changes by itself.
+ * Read, in order: the study's `data.code` (a proposal already written
+ * included); a GraphML header's `graph_code` (never its `MISSINGCODE`); the
+ * retired `em_id` of the graph-self node — read only, nothing is written.
  */
 export function studyCode(doc: EmDocument | null | undefined): string | null {
   const own = text(dataOf(roleNode(doc, "study")).code);
   if (own) return own;
   const legacy = text((doc?.graph as Record<string, unknown> | undefined)?.graph_code);
-  return legacy && legacy !== "MISSINGCODE" ? legacy : null;
+  if (legacy && legacy !== "MISSINGCODE") return legacy;
+  return legacyEmId(doc);
+}
+
+/** s3dgraphy's `is_code_proposed`: the study's code is a PROPOSAL of the
+ *  system nobody confirmed yet (`data.code_proposed`). */
+export function isCodeProposed(doc: EmDocument | null | undefined): boolean {
+  const d = dataOf(roleNode(doc, "study"));
+  return !!text(d.code) && d.code_proposed === true;
+}
+
+/** words that are not initials (Grotta di Tiberio → GT) — s3dgraphy's
+ *  `_NOT_INITIALS` */
+const NOT_INITIALS = new Set(["di", "de", "del", "della", "dei", "delle", "degli", "da", // ALLOW-IT: particles, not prose
+  "la", "le", "il", "lo", "gli", "i", "l", "d", "e", "ed", "of", "the", "and", "a", "an",
+  "von", "der", "des", "du"]);
+/** a name nobody gave: no initials (s3dgraphy's `_PLACEHOLDER_WORDS`) */
+const PLACEHOLDER_WORDS = new Set(["untitled", "graph", "grafo", "new", "nuovo", "senza", // ALLOW-IT: default names, not prose
+  "titolo", "empty", "slot", "proposition", "set"]);
+
+function initials(name: string): string {
+  const plain = name.normalize("NFKD").replace(/[\u0300-\u036f]/g, "");
+  let words = plain.split(/[^A-Za-z0-9]+/).filter(Boolean);
+  if (words.length && words.every((w) => PLACEHOLDER_WORDS.has(w.toLowerCase()))) return "";
+  const kept = words.filter((w) => !NOT_INITIALS.has(w.toLowerCase()));
+  words = kept.length ? kept : words;
+  if (!words.length) return "";
+  if (words.length === 1) return words[0].slice(0, 2).toUpperCase();
+  return words.slice(0, 4).map((w) => w[0]).join("").toUpperCase();
+}
+
+/** The name of the site the study took place at (s3dgraphy's `_site_name_of`):
+ *  the first place with level `sito` up the chain, else the place itself. */
+function siteNameOf(doc: EmDocument): string {
+  const place = studyPlace(doc);
+  if (!place) return "";
+  const up = withinEdgeType();
+  const seen = new Set<string>();
+  let cur: EmNode | undefined = place;
+  while (cur && !seen.has(cur.id)) {
+    seen.add(cur.id);
+    if (text(dataOf(cur).level) === "sito" && text(cur.name)) return text(cur.name);
+    cur = outgoing(doc, cur.id, up).find((n) => n.node_type === place.node_type);
+  }
+  return text(place.name);
+}
+
+/**
+ * s3dgraphy's `proposal_for`: the code the system proposes for a study that
+ * has none — computed here, written by `applyHdto` once, when the study is
+ * born, and marked `code_proposed` until the user confirms it. The initials
+ * of the site (else of the study's name, else of the graph's; else `ST`), the
+ * two digits of the study's year, `-2`, `-3`… against `taken` (the codes of
+ * the other graphs, case-insensitive). `scripts/check-codice-stabile.mjs`
+ * keeps it equal to s3dgraphy's.
+ */
+export function proposalFor(doc: EmDocument | null | undefined, taken: Iterable<string> = [],
+                            over: { studyName?: string; date?: string } = {}): string {
+  const study = roleNode(doc, "study");
+  const graphName = text((doc?.graph as Record<string, unknown> | undefined)?.name);
+  const letters = (doc ? initials(siteNameOf(doc)) : "")
+    || initials(over.studyName ?? text(study?.name))
+    || initials(graphName) || "ST";
+  const year = /(1[89]|20)(\d\d)/.exec(over.date ?? text(dataOf(study).date))?.[2] ?? "";
+  const base = `${letters}${year}`;
+  const used = new Set([...taken].map((c) => text(c).toUpperCase()).filter(Boolean));
+  let code = base;
+  for (let n = 2; used.has(code.toUpperCase()); n++) code = `${base}-${n}`;
+  return code;
 }
 
 /** A name with its code beside it, when there is one: «Templu Mare (GT16)». */
@@ -369,9 +447,8 @@ export function emIdMigration(doc: EmDocument | null | undefined): {
   return { emId, code: emId, migrated: true, reason: "migrated" };
 }
 
-/** The code a view shows: the study's (`studyCode`), or the em_id it migrates
- *  to (`emIdMigration`). */
+/** The code a view shows: `studyCode` (which reads a retired em_id as its
+ *  last source, 11 Oct 2026 giro 2). */
 export function shownCode(doc: EmDocument | null | undefined): string | null {
-  const m = emIdMigration(doc);
-  return studyCode(doc) ?? (m.migrated ? m.code : null);
+  return studyCode(doc);
 }

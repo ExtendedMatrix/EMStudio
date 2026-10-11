@@ -64,7 +64,13 @@ const EN: Dict = {
   // MICRO studio-luogo (10 Oct 2026) · the study's code, kind and place, the
   // heritage gesture, the chain card and the Graph view's HDT-O layer
   "insp.hdtStudyCode": "Code",
-  "insp.hdtStudyCodeHint": "The study's short code (e.g. the one the excavation archive uses). Only if you have one: nothing is proposed or derived from the title or the site. Shown beside the name; with a code, unit labels can be prefixed by it.",
+  "insp.hdtStudyCodeHint": "The study's short code (GT16): the prefix Blender re-attaches the proxies by, so once written it does not change by itself. A study born without one gets a proposal (the site's initials and the year), marked until you confirm it or write your own.",
+  "insp.hdtStudyCodeProposed": "proposed",
+  "insp.hdtStudyCodeConfirm": "Confirm",
+  "insp.hdtStudyCodeConfirmHint": "Keep this code: it stops being a proposal. To use another one, write it in the field.",
+  "insp.crossGraph": "Relations with other graphs",
+  "insp.crossGraphGo": "Open the graph {graph} at this unit",
+  "insp.crossGraphMissing": "The graph {graph} is not open beside this one",
   "insp.hdtStudyKind": "Kind of study",
   "insp.hdtStudyKindNone": "— not said —",
   "study.kind.stratigraphic_excavation": "Stratigraphic excavation",
@@ -3288,7 +3294,13 @@ const IT: Dict = {
   // MICRO studio-luogo (10 Oct 2026) · the study's code, kind and place, the
   // heritage gesture, the chain card and the Graph view's HDT-O layer
   "insp.hdtStudyCode": "Codice",
-  "insp.hdtStudyCodeHint": "Il codice breve dello studio (per esempio quello dell'archivio di scavo). Solo se ce l'hai: niente viene proposto o derivato dal titolo o dal sito. Compare accanto al nome; con un codice le etichette delle unità possono prenderlo come prefisso.",
+  "insp.hdtStudyCodeHint": "Il codice breve dello studio (GT16): è il prefisso con cui Blender riaggancia i proxy, quindi una volta scritto non cambia da solo. Uno studio nato senza codice ne riceve una proposta (le iniziali del sito e l'anno), segnata finché non la confermi o non scrivi il tuo.",
+  "insp.hdtStudyCodeProposed": "proposto",
+  "insp.hdtStudyCodeConfirm": "Conferma",
+  "insp.hdtStudyCodeConfirmHint": "Tieni questo codice: smette di essere una proposta. Per usarne un altro, scrivilo nel campo.",
+  "insp.crossGraph": "Rapporti con altri grafi",
+  "insp.crossGraphGo": "Apri il grafo {graph} su questa unità",
+  "insp.crossGraphMissing": "Il grafo {graph} non è aperto accanto a questo",
   "insp.hdtStudyKind": "Tipo di studio",
   "insp.hdtStudyKindNone": "— non detto —",
   "study.kind.stratigraphic_excavation": "Scavo stratigrafico",
@@ -7089,7 +7101,13 @@ const DE: Dict = {
   // MICRO studio-luogo (10 Oct 2026) · the study's code, kind and place, the
   // heritage gesture, the chain card and the Graph view's HDT-O layer
   "insp.hdtStudyCode": "Kürzel",
-  "insp.hdtStudyCodeHint": "Das kurze Kürzel der Studie (etwa das des Grabungsarchivs). Nur wenn Sie eines haben: nichts wird aus dem Titel oder dem Fundort vorgeschlagen oder abgeleitet. Es steht neben dem Namen; mit einem Kürzel können die Bezeichnungen der Einheiten es als Präfix tragen.",
+  "insp.hdtStudyCodeHint": "Das kurze Kürzel der Studie (GT16): das Präfix, mit dem Blender die Proxys wieder zuordnet; einmal geschrieben, ändert es sich nicht von selbst. Eine Studie ohne Kürzel erhält einen Vorschlag (die Initialen des Fundorts und das Jahr), markiert, bis Sie ihn bestätigen oder Ihr eigenes schreiben.",
+  "insp.hdtStudyCodeProposed": "vorgeschlagen",
+  "insp.hdtStudyCodeConfirm": "Bestätigen",
+  "insp.hdtStudyCodeConfirmHint": "Dieses Kürzel behalten: es ist dann kein Vorschlag mehr. Für ein anderes schreiben Sie es ins Feld.",
+  "insp.crossGraph": "Beziehungen zu anderen Graphen",
+  "insp.crossGraphGo": "Den Graphen {graph} bei dieser Einheit öffnen",
+  "insp.crossGraphMissing": "Der Graph {graph} ist nicht neben diesem geöffnet",
   "insp.hdtStudyKind": "Art der Studie",
   "insp.hdtStudyKindNone": "— nicht angegeben —",
   "study.kind.stratigraphic_excavation": "Stratigraphische Grabung",

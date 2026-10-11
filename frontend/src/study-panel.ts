@@ -53,7 +53,7 @@ import type { InspectorCallbacks } from "./inspector";
  *  This is a TYPE narrowing: the bindings that arrive are the same ones. */
 export type StudyPanelCallbacks = Pick<
   InspectorCallbacks,
-  "resolveAuthority" | "searchTwins" | "onSetSitePosition"
+  "resolveAuthority" | "searchTwins" | "onSetSitePosition" | "otherStudyCodes"
 >;
 
 function el(tag: string, cls?: string, text?: string): HTMLElement {
@@ -595,6 +595,7 @@ export function renderStudyPanel(
     keyof HdtoFields,
     | "heritageAuthorityRef" | "parentAuthorityRef" | "twin" | "heritageDeclared"
     | "studyCode" | "studyKind" | "placeName" | "placeId"
+    | "studyCodeProposed" | "confirmStudyCode" | "takenCodes"
   >;
   const inputs = {} as Record<HdtoTextKey, HTMLInputElement>;
   // the authority candidates the user picked (verbatim uri/authority/label/
@@ -624,8 +625,10 @@ export function renderStudyPanel(
     if (hdto.placeId && n === hdto.placeName) return hdto.placeId;
     return places.find((p) => String(p.name ?? "").trim() === n)?.id ?? "";
   };
-  function commit(): void {
+  function commit(confirmStudyCode = false): void {
     store.applyHdto({
+      confirmStudyCode,
+      takenCodes: cb.otherStudyCodes?.() ?? [],
       studyTitle: inputs.studyTitle.value,
       studyAuthors: inputs.studyAuthors.value,
       studyDate: inputs.studyDate.value,
@@ -655,7 +658,7 @@ export function renderStudyPanel(
     inp.className = "insp-name-input";
     inp.value = hdto[key];
     inp.placeholder = placeholder;
-    inp.addEventListener("change", commit);
+    inp.addEventListener("change", () => commit());
     panel.appendChild(inp);
     if (hint) panel.appendChild(el("div", "insp-hint", hint));
     inputs[key] = inp;
@@ -674,14 +677,27 @@ export function renderStudyPanel(
 
   groupTitle(t("insp.hdtStudy"), t("insp.hdtStudyGloss"));
   hfield("studyTitle", t("insp.hdtStudyTitle"), t("insp.hdtStudyTitlePh"));
-  // the code: EMPTY until somebody writes it — no placeholder value, nothing
-  // proposed from the title or the site (E.D., 10 Oct 2026)
+  // the code: the user's, the source's, or the system's PROPOSAL (E.D.,
+  // 11 Oct 2026) — written once when the study is born without one, shown
+  // AS a proposal until the user confirms it or writes another
   panel.appendChild(el("label", "insp-field-label", t("insp.hdtStudyCode")));
   codeIn.className = "insp-name-input";
   codeIn.dataset.hdto = "code";
   codeIn.value = hdto.studyCode ?? "";
-  codeIn.addEventListener("change", commit);
+  codeIn.addEventListener("change", () => commit());
   panel.appendChild(codeIn);
+  if (hdto.studyCodeProposed) {
+    codeIn.classList.add("insp-proposed");
+    const row = el("div", "insp-proposal");
+    row.dataset.hdto = "code-proposed";
+    row.appendChild(el("span", "tag quiet", t("insp.hdtStudyCodeProposed")));
+    const ok = el("button", "insp-btn", t("insp.hdtStudyCodeConfirm"));
+    ok.dataset.hdto = "code-confirm";
+    ok.title = t("insp.hdtStudyCodeConfirmHint");
+    ok.addEventListener("click", () => commit(true));
+    row.appendChild(ok);
+    panel.appendChild(row);
+  }
   panel.appendChild(el("div", "insp-hint", t("insp.hdtStudyCodeHint")));
   // a file with the retired EM-ID: the code it migrates to is in the field
   // (readHdto), and the panel says where it came from
@@ -705,7 +721,7 @@ export function renderStudyPanel(
     kindSel.appendChild(o);
   }
   kindSel.value = hdto.studyKind ?? "";
-  kindSel.addEventListener("change", commit);
+  kindSel.addEventListener("change", () => commit());
   panel.appendChild(kindSel);
   hfield("studyAuthors", t("insp.hdtStudyAuthors"), t("insp.hdtStudyAuthorsPh"));
   hfield("studyDate", t("insp.hdtStudyDate"), t("insp.hdtStudyDatePh"));
@@ -730,7 +746,7 @@ export function renderStudyPanel(
     list.appendChild(o);
   }
   placeIn.setAttribute("list", listId);
-  placeIn.addEventListener("change", commit);
+  placeIn.addEventListener("change", () => commit());
   panel.appendChild(placeIn);
   panel.appendChild(list);
   panel.appendChild(el("div", "insp-hint",
@@ -772,7 +788,7 @@ export function renderStudyPanel(
     {
       get: () => pickedRef,
       set: (r) => (pickedRef = r),
-      commit,
+      commit: () => commit(),
     },
     { field: "heritageUri", facet: "WHERE" },
   );
@@ -785,7 +801,7 @@ export function renderStudyPanel(
     {
       get: () => pickedParentRef,
       set: (r) => (pickedParentRef = r),
-      commit,
+      commit: () => commit(),
     },
     { field: "parentUri", facet: "WHERE" },
   );
@@ -796,7 +812,7 @@ export function renderStudyPanel(
     set: (a) => {
       twin = a;
     },
-    commit,
+    commit: () => commit(),
     entityName: () => inputs.heritageName.value,
     entityUri: () => inputs.heritageUri.value,
   });

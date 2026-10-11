@@ -1555,6 +1555,10 @@ body.sync-active #mode-indicator::before {
   color: var(--text-muted);
   margin: 8px 0 2px;
 }
+/* E.D., 11 Oct 2026 · the study's code proposed by the system, until confirmed */
+.insp-name-input.insp-proposed { font-style: italic; border-style: dashed; }
+.insp-proposal { display: flex; gap: 6px; align-items: center; margin: 4px 0 2px; }
+
 .insp-hint {
   font-size: 10.5px;
   line-height: 1.4;

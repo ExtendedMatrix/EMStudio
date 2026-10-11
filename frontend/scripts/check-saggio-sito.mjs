@@ -210,12 +210,16 @@ console.log("\n3 · the code is the study's; an em_id is shown migrated");
   S.renderStudyPanel(root, s, {});
   ok(![...root.querySelectorAll("label")].some((l) => /EM-ID/.test(l.textContent)),
      "the panel has no «EM-ID (site id)» field");
-  eq([H.emIdMigration(s.doc).reason, s.readHdto().studyCode, H.shownCode(s.doc)], ["no study", "", null],
-     "no study → no code: none is made for the sake of a code");
+  // giro 2 (E.D., 11 Oct 2026): the em_id is the code's last source, READ —
+  // no study is made for it, and the file is not changed
+  eq([H.emIdMigration(s.doc).reason, s.readHdto().studyCode, H.shownCode(s.doc), H.studyCode(s.doc)],
+     ["no study", "", "TM", "TM"], "no study → the em_id is read as the code, no study made for it");
+  ok(!H.roleNode(s.doc, "study"), "…and nothing was written");
   ok(root.querySelector('[data-hdto="emid-note"]'), "…and the panel says the file has a former EM-ID");
   s.applyHdto({ ...BASE, studyTitle: "Templu Mare 2016" });
-  eq([H.emIdMigration(s.doc).reason, s.readHdto().studyCode, H.shownCode(s.doc), H.studyCode(s.doc)],
-     ["migrated", "TM", "TM", null], "a study without code: the em_id shown migrated (studyCode itself never reads it)");
+  eq([H.emIdMigration(s.doc).reason, s.readHdto().studyCode, H.shownCode(s.doc), H.studyCode(s.doc), H.isCodeProposed(s.doc)],
+     ["study has its code", "TM", "TM", "TM", false],
+     "the study born in a file with an em_id takes it as its code — written as it is, not a proposal");
   const root2 = document.createElement("div");
   S.renderStudyPanel(root2, s, {});
   eq(root2.querySelector('[data-hdto="code"]').value, "TM", "the code field holds it");
