@@ -451,3 +451,167 @@ export function docFilesGlyphs(ids: string[]): HTMLElement | null {
   for (const s of FILE_STATES.filter((x) => states.includes(x))) span.appendChild(stateBadge(`file.${s}`, false));
   return span;
 }
+
+
+// ── the table of resource nodes, across EVERY graph of the em.json ───────────
+// (the shelf's graph and the study's: «Shelf» window, Table mode, scope «All
+// graphs»). The rows are the library's (`storage_rows`); this draws them, with
+// the file's state, the bucket sign, the graph each belongs to, and the gestures.
+
+type SortKey = "file" | "kind" | "level" | "use" | "bucket" | "graph" | "doc" | "state" | "size";
+const tableSort: { key: SortKey; dir: 1 | -1 } = { key: "graph", dir: 1 };
+const SORT_COLS: Array<[SortKey, string]> = [
+  ["state", "fs.col.state"], ["file", "fs.col.file"], ["kind", "fs.col.kind"], ["level", "fs.col.level"],
+  ["use", "fs.col.use"], ["bucket", "fs.col.bucket"], ["size", "fs.col.size"], ["graph", "fs.col.graph"],
+  ["doc", "fs.col.doc"],
+];
+
+function sortValue(r: StorageRow, k: SortKey): string | number {
+  switch (k) {
+    case "bucket": return bucketOf(r.id)?.state ?? "~";
+    case "use": return r.use.join(",");
+    case "size": return r.size ?? -1;
+    default: return String(r[k as keyof StorageRow] ?? "").toLowerCase();
+  }
+}
+
+function humanBytes(n: number | null): string {
+  if (n == null) return "";
+  if (n < 1024) return `${n} B`;
+  const u = ["KB", "MB", "GB", "TB"];
+  let v = n / 1024, i = 0;
+  while (v >= 1024 && i < u.length - 1) { v /= 1024; i++; }
+  return `${v.toFixed(v < 10 ? 1 : 0)} ${u[i]}`;
+}
+
+/** the whole resource table: toolbar, moved and bucket boxes, filters, rows */
+export function resourcesTable(h: FileHooks, redraw: () => void): HTMLElement {
+  const wrap = el("div", "fs-restable");
+  const head = el("div", "fs-head");
+  const rows = fileRows();
+  head.appendChild(el("b", "", rows.length ? t("fs.tableTitle", { n: String(rows.length) }) : t("fs.title")));
+  const check = el("button", "ghost", h.checking ? t("fs.checking") : t("fs.check")) as HTMLButtonElement;
+  check.disabled = h.checking; check.dataset.act = "check";
+  check.addEventListener("click", () => h.onCheck());
+  head.appendChild(check);
+  wrap.appendChild(head);
+  if (!rows.length) {
+    wrap.appendChild(el("div", "insp-hint", t("fs.notChecked")));
+    return wrap;
+  }
+  const all = fileStates();
+  const lost = all.filter((f) => f.state === "missing" || f.state === "empty_copy");
+  if ((lost.length || movedFiles().length) && h.onFindMoved) wrap.appendChild(movedBox(lost.length, h));
+  if (h.onBucketCheck) wrap.appendChild(bucketBox(h));
+  // filters: the words, the kind, the use, the graph, the state
+  const tools = el("div", "fs-tools");
+  const q = el("input", "fs-search") as HTMLInputElement;
+  q.type = "search"; q.placeholder = t("fs.search"); q.value = listFilter.query; q.dataset.role = "files-search";
+  const kind = el("select", "fs-kind") as HTMLSelectElement;
+  for (const k of ["", "master", "version", "file", "link"])
+    kind.appendChild(new Option(t(k ? `fs.kind.${k}` : "fs.kind.all"), k, false, k === listFilter.kind));
+  const use = el("select", "fs-use") as HTMLSelectElement;
+  use.appendChild(new Option(t("fs.use.all"), "", false, !listFilter.use));
+  for (const u of [...new Set(rows.flatMap((r) => r.use))].sort())
+    use.appendChild(new Option(u.replace(/_/g, " "), u, false, u === listFilter.use));
+  const graphSel = el("select", "fs-graph") as HTMLSelectElement;
+  graphSel.appendChild(new Option(t("fs.graph.all"), "", false, !listFilter.graph));
+  for (const g of [...new Set(rows.map((r) => r.graph).filter(Boolean))].sort())
+    graphSel.appendChild(new Option(g, g, false, g === listFilter.graph));
+  tools.append(q, kind, use);
+  if (graphSel.options.length > 2) tools.appendChild(graphSel);
+  wrap.appendChild(tools);
+  const chips = el("div", "fs-chips");
+  const counts = fileSummary();
+  for (const s of FILE_STATES) {
+    const n = counts[s] ?? 0;
+    if (!n) continue;
+    const sign = stateSign(`file.${s}`);
+    const c = el("button", `fs-chip st-${sign.tone}${fileFilter === s ? " is-on" : ""}`,
+                 `${sign.glyph} ${n} ${sign.label}`) as HTMLButtonElement;
+    c.dataset.filter = s; c.title = sign.meaning;
+    c.addEventListener("click", () => { setFileFilter(s); redraw(); });
+    chips.appendChild(c);
+  }
+  wrap.appendChild(chips);
+
+  const holder = el("div", "fs-table-holder");
+  wrap.appendChild(holder);
+  const paint = (): void => {
+    holder.textContent = "";
+    const shown = filterRows(rows, { ...listFilter, state: fileFilter })
+      .sort((a, b) => {
+        const x = sortValue(a, tableSort.key), y = sortValue(b, tableSort.key);
+        return (x < y ? -1 : x > y ? 1 : 0) * tableSort.dir;
+      });
+    const table = el("table", "shelf-table fs-table");
+    const thead = el("thead"), hr = el("tr");
+    for (const [key, label] of SORT_COLS) {
+      const th = el("th", `c-${key}${tableSort.key === key ? " is-sorted" : ""}`,
+                    t(label) + (tableSort.key === key ? (tableSort.dir === 1 ? " ▲" : " ▼") : ""));
+      th.addEventListener("click", () => {
+        tableSort.dir = tableSort.key === key ? (tableSort.dir === 1 ? -1 : 1) : 1;
+        tableSort.key = key; paint();
+      });
+      hr.appendChild(th);
+    }
+    hr.appendChild(el("th", "", ""));
+    thead.appendChild(hr);
+    const tbody = el("tbody");
+    for (const r of shown.slice(0, 500)) tbody.appendChild(tableRow(r, h));
+    table.append(thead, tbody);
+    holder.appendChild(table);
+    holder.appendChild(el("div", "insp-hint", t("fs.tableCount", { n: String(shown.length), all: String(rows.length) })));
+  };
+  q.addEventListener("input", () => { listFilter.query = q.value; paint(); });
+  kind.addEventListener("change", () => { listFilter.kind = kind.value; paint(); });
+  use.addEventListener("change", () => { listFilter.use = use.value; paint(); });
+  graphSel.addEventListener("change", () => { listFilter.graph = graphSel.value; paint(); });
+  paint();
+  return wrap;
+}
+
+function tableRow(r: StorageRow, h: FileHooks): HTMLElement {
+  const tr = el("tr", `fs-trow fs-k-${r.kind}`);
+  tr.dataset.id = r.id; tr.dataset.kind = r.kind; tr.dataset.state = r.state;
+  const td = (cls: string, ...kids: Array<Node | string>): HTMLElement => {
+    const c = el("td", `c-${cls}`);
+    for (const k of kids) c.append(k);
+    return c;
+  };
+  tr.appendChild(td("state", stateBadge(`file.${r.state}`)));
+  const name = el("button", "ghost fs-name", r.file) as HTMLButtonElement;
+  name.title = [r.where, r.sha256].filter(Boolean).join("\n");
+  name.addEventListener("click", () => h.onJump(r.id));
+  tr.appendChild(td("file", name));
+  tr.appendChild(td("kind", r.kind === "version" ? "↳ " + t("fs.kind.version") : t("fs.kind." + r.kind)));
+  tr.appendChild(td("level", r.level));
+  tr.appendChild(td("use", r.use.map((u) => u.replace(/_/g, " ")).join(", ")));
+  const bk = bucketOf(r.id);
+  const bc = td("bucket");
+  if (bk) {
+    const g = el("span", `fs-bk st-${bk.state}`, `${BUCKET_SIGN[bk.state]} ${t("fs.b." + bk.state)}`);
+    g.title = (t("fs.bm." + bk.state)) + (bk.note ? " — " + bk.note : "") + (bk.bucket ? "\n" + bk.bucket : "");
+    bc.appendChild(g);
+  }
+  tr.appendChild(bc);
+  tr.appendChild(td("size", humanBytes(r.size ?? bk?.size_disk ?? null)));
+  tr.appendChild(td("graph", r.graph));
+  const docc = td("doc", r.doc);
+  if (r.rm.length) docc.title = t("fs.card.rm") + ": " + r.rm.join(", ");
+  tr.appendChild(docc);
+  const f = fileStateOf(r.id);
+  const acts = td("acts");
+  if (f) {
+    acts.appendChild(fileGestures(f, h));
+    if ((f.state === "on_disk" || f.state === "both") && h.onPromote
+        && !(bk && (bk.state === "aligned" || bk.state === "same_size"))) {
+      const b = el("button", "ghost fs-act", t("fs.toBucket")) as HTMLButtonElement;
+      b.dataset.act = "to-bucket"; b.title = t("fs.toBucketHint");
+      b.addEventListener("click", (e) => { e.stopPropagation(); h.onPromote!(f); });
+      acts.appendChild(b);
+    }
+  }
+  tr.appendChild(acts);
+  return tr;
+}

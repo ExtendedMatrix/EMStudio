@@ -12,7 +12,8 @@ export interface FileState {
  *  (master, version of an asset, file of a set, link of a document), its level
  *  and uses, the RMs that use it. The page draws; the library groups. */
 export interface StorageRow {
-  id: string; file: string; doc: string; doc_id: string; asset: string; asset_id: string;
+  id: string; graph: string; file: string; doc: string; doc_id: string; asset: string; asset_id: string;
+  sha256: string; size: number | null; media_type: string;
   kind: "master" | "version" | "file" | "link"; tier: string; level: string; use: string[];
   state: string; where: string; tag: string; rm: string[]; search: string;
 }
@@ -54,12 +55,12 @@ export function dropMoved(ids: string[] | null): void {
   MOVED = ids === null ? [] : MOVED.filter((m) => !ids.includes(m.id));
 }
 /** the list's own filters (session state, like `fileFilter`) */
-export const listFilter = { query: "", kind: "", use: "", selected: "" };
+export const listFilter = { query: "", kind: "", use: "", graph: "", selected: "" };
 /** the rows a filter keeps — the same rule as s3Dgraphy `filter_rows` */
-export function filterRows(rows: StorageRow[], f: { query: string; kind: string; use: string; state: string }): StorageRow[] {
+export function filterRows(rows: StorageRow[], f: { query: string; kind: string; use: string; state: string; graph?: string }): StorageRow[] {
   const words = f.query.toLowerCase().split(/\s+/).filter(Boolean);
   return rows.filter((r) => (!f.kind || r.kind === f.kind) && (!f.use || r.use.includes(f.use))
-    && (!f.state || r.state === f.state) && words.every((w) => r.search.includes(w)));
+    && (!f.state || r.state === f.state) && (!f.graph || r.graph === f.graph) && words.every((w) => r.search.includes(w)));
 }
 let lastSummary: Record<string, number> = {};
 let projectRoot = "";

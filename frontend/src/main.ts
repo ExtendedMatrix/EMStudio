@@ -191,7 +191,7 @@ import { keepOnDisk, newEmProject, refreshFileStates, reorderApply, reorderPrevi
          fileProjectRoot, describeFile, filesOfDocument, fileStateOf, findMovedFiles, movedFiles, dropMoved, bucketCheck, bucketPromote, dropBucket,
          freePlanOf, freeLocal, freeUi,
          type FileState, type MovedFile } from "./file-states";
-import { docFilesBox, docFilesGlyphs, filesSection, fileStateLine, type FileHooks } from "./file-states-ui";
+import { docFilesBox, docFilesGlyphs, filesSection, fileStateLine, resourcesTable, type FileHooks } from "./file-states-ui";
 import { paintChooser } from "./node-chooser";
 import { proposeLanguages, type LanguageProposal } from "./lang-guess";
 import {
@@ -11190,6 +11190,8 @@ let shelfTableBusy = false;
  *  on first entering Table mode). Cleared whenever the shelf changes, so the
  *  next draw asks again instead of showing a stale answer. */
 let shelfTableAsked = false;
+/** which resource nodes the Shelf TABLE lists: the shelf's own, or every graph of the em.json */
+let shelfScope: "shelf" | "all" = "shelf";
 
 let _bridgeUrl: string | null = null;
 async function bridgeUrl(): Promise<string> {
@@ -21552,6 +21554,21 @@ async function refreshShelfTable(): Promise<void> {
  *  gave them — a column added in s3Dgraphy appears here without an edit. */
 function renderShelfTableInto(body: HTMLElement): void {
   body.textContent = "";
+  const scope = document.createElement("div");
+  scope.className = "fs-scope";
+  for (const [v, label] of [["shelf", t("fs.scope.shelf")], ["all", t("fs.scope.all")]] as const) {
+    const b = document.createElement("button");
+    b.className = "ghost fs-scope-b" + (shelfScope === v ? " is-on" : "");
+    b.dataset.scope = v;
+    b.textContent = label;
+    b.addEventListener("click", () => { shelfScope = v; renderShelf(); });
+    scope.appendChild(b);
+  }
+  body.appendChild(scope);
+  if (shelfScope === "all") {
+    body.appendChild(resourcesTable(fileHooks(), renderShelf));
+    return;
+  }
   if (shelfTableNote) {
     const note = document.createElement("div");
     note.className = "shelf-note";
@@ -22912,7 +22929,7 @@ function documentCard(): HTMLElement | null {
 // ── R1/R2 (E.D., 4 Oct 2026) · where the files are, with the ONE resolver ──
 let filesChecking = false;
 
-function filesRefresh(): void { renderStorage(); refreshInspector(); renderDocView(); renderEmData(); }
+function filesRefresh(): void { renderStorage(); refreshInspector(); renderDocView(); renderEmData(); if (activeWin().type === "shelf") renderShelf(); }
 
 function fileRoom(): { base: string; room_id: string; token?: string | null } | null {
   const base = (hubNodeUrl || getSettings().sync.hubUrl).trim().replace(/\/+$/, "");

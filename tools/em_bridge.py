@@ -585,6 +585,20 @@ def _room_probe(room):
     return on_node
 
 
+def _graph_names(doc):
+    """The name of each graph of a container, in the order of `doc['graphs']`: its
+    own name when it has one, else its key («shelf», or the graph's id)."""
+    out = []
+    for key, sec in (doc.get("graphs") or {}).items():
+        name = sec.get("name") if isinstance(sec, dict) else None
+        if not name and isinstance(sec, dict):
+            name = (sec.get("data") or {}).get("name") if isinstance(sec.get("data"), dict) else None
+        if isinstance(name, dict):
+            name = next(iter(name.values()), "")
+        out.append(str(name or key))
+    return out
+
+
 def _graphs_of(doc):
     from s3dgraphy import api
     sections = (list((doc.get("graphs") or {}).values())
@@ -678,6 +692,7 @@ def _files_route(route, body):
                     if isinstance(doc, dict) and doc.get("graphs") else None)
         graphs = ([api.load_emjson({"header": doc.get("header") or {}, "graph": sec})[0]
                    for sec in sections] if sections else [api.load_emjson(doc)[0]])
+        gnames = _graph_names(doc) if sections else [""]
         folders = [os.path.abspath(os.path.expanduser(f)) for f in body.get("folders") or [] if f]
         root = body.get("project_root") or next(
             (r for r in (find_project_root(f) for f in folders) if r), None)
@@ -686,7 +701,7 @@ def _files_route(route, body):
         if root and os.path.isdir(os.path.join(root, ".em_cache")):
             caches.append(os.path.join(root, ".em_cache"))
         results, rows = [], []
-        for graph in graphs:
+        for graph, gname in zip(graphs, gnames):
             part = api.resolve_files(graph, project_root=root, base_dirs=folders,
                                      cache_dirs=caches,
                                      on_node=_room_probe(body.get("room")),
@@ -697,7 +712,7 @@ def _files_route(route, body):
             # S1 · the Storage list: the library groups (asset, versions, uses, RMs);
             # an older library has no rows and the page shows the plain list
             if hasattr(api, "storage_rows"):
-                rows += api.storage_rows(graph, part)
+                rows += api.storage_rows(graph, part, gname)
         from s3dgraphy.resources.locate import summary
         return {"ok": True, "project_root": root or "", "results": results,
                 "rows": rows, "summary": summary(results)}

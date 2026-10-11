@@ -9470,3 +9470,12 @@ button.hdto-v {
 .fs-free-opt { display: block; margin: 4px 0; }
 .fs-free-act { display: flex; gap: 8px; margin-top: 8px; }
 .fs-danger { border-color: var(--danger, #c0392b); color: var(--danger, #c0392b); }
+
+/* the table of resource nodes across the graphs */
+.fs-scope { display: flex; gap: 6px; margin: 0 0 8px; }
+.fs-scope-b.is-on { font-weight: 600; text-decoration: underline; }
+.fs-table th { cursor: pointer; white-space: nowrap; }
+.fs-table td.c-file { max-width: 280px; overflow: hidden; text-overflow: ellipsis; }
+.fs-table td.c-doc, .fs-table td.c-graph { max-width: 180px; overflow: hidden; text-overflow: ellipsis; }
+.fs-table td.c-size { text-align: right; white-space: nowrap; }
+.fs-table tr.fs-k-version td.c-file { padding-left: 14px; }
