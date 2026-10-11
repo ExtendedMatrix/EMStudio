@@ -81,7 +81,17 @@ def main() -> None:
              for gid, g in container.graphs.items() for n in g.nodes
              if n.node_type == "US"}
     links.update({gid: api.links_of(container, gid) for gid in container.graphs})
+    # the header of every graph (E.D., 11 Oct 2026): a study with its code,
+    # a proposal, and an old graph whose GraphML ID is only graph_code
+    ha = _study("ha", site="Grotta di Tiberio", date="2016", code="GT16")
+    hb = _study("hb", site="Volterra", date="2024")
+    api.propose_study_code(hb)
+    hc = Graph("hc")
+    hc.add_node(StratigraphicUnit("u9", name="USM100"))
+    hc.attributes["graph_code"] = "GT16"
+    headed = Container(graphs={"ha": ha, "hb": hb, "hc": hc}, active_graph_id="ha")
     json.dump({"codes": codes, "container": build_container(container),
+               "headed": build_container(headed),
                "links": links,
                "linked": {gid: api.linked_graphs(container, gid)
                           for gid in container.graphs}}, sys.stdout)

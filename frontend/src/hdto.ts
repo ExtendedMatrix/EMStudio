@@ -255,14 +255,38 @@ export function hasChain(c: HdtoChain): boolean {
  * re-attaches the proxies by, so once written it never changes by itself.
  * Read, in order: the study's `data.code` (a proposal already written
  * included); a GraphML header's `graph_code` (never its `MISSINGCODE`); the
- * retired `em_id` of the graph-self node — read only, nothing is written.
+ * retired `em_id` of the graph-self node — read only, nothing is written;
+ * last, the graph's header `code` (`graphs.<id>.code`, E.D. 11 Oct 2026),
+ * which s3dgraphy writes from the study and, when the study has none, from
+ * one of the above — the only place an old file's GraphML code survives.
  */
 export function studyCode(doc: EmDocument | null | undefined): string | null {
   const own = text(dataOf(roleNode(doc, "study")).code);
   if (own) return own;
-  const legacy = text((doc?.graph as Record<string, unknown> | undefined)?.graph_code);
+  const g = doc?.graph as Record<string, unknown> | undefined;
+  const legacy = text(g?.graph_code);
   if (legacy && legacy !== "MISSINGCODE") return legacy;
-  return legacyEmId(doc);
+  return legacyEmId(doc) ?? (text(g?.code) || null);
+}
+
+/**
+ * On load, the graph's header `code` (s3dgraphy's `_check_header_code`): the
+ * study wins. When the study has its code the header's goes — it is written
+ * again from the study at every save (`DocumentStore.toJSON`) — and a code
+ * cleared later in the Study panel stays cleared; when nothing in the graph
+ * says a code, the header's stays, and `studyCode` reads it. Returns the
+ * divergence, if any, for whoever wants to say it.
+ */
+export function settleHeaderCode(doc: EmDocument | null | undefined): string | null {
+  const g = doc?.graph as Record<string, unknown> | undefined;
+  const header = text(g?.code);
+  if (!g || !header) return null;
+  const own = text(dataOf(roleNode(doc, "study")).code);
+  if (!own) return null;
+  delete g.code;
+  delete g.code_proposed;
+  return own === header ? null
+    : `the header says code '${header}', the study '${own}'; the study's is kept`;
 }
 
 /** s3dgraphy's `is_code_proposed`: the study's code is a PROPOSAL of the

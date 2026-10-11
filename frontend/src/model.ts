@@ -12,7 +12,7 @@ import type {
   Swimlane,
 } from "./types";
 import { MEMBERSHIP_EDGES } from "./folding";
-import { emIdMigration, isCodeProposed, isSaggio, proposalFor, studyCode, isSite, makeSitePlace, placeEdgeType, placesIn, siteOf, sitePlaceId, studyPlace, studyKinds, withinType } from "./hdto";
+import { emIdMigration, isCodeProposed, isSaggio, proposalFor, settleHeaderCode, studyCode, isSite, makeSitePlace, placeEdgeType, placesIn, siteOf, sitePlaceId, studyPlace, studyKinds, withinType } from "./hdto";
 import type { HdtoRole } from "./hdto";
 import { paradataGroupName } from "./naming";
 import { edgeTypeFor, nodeTypeForClass, planUniformSpellings } from "./rules";
@@ -336,6 +336,7 @@ export class DocumentStore {
     this.doc = doc;
     migrateLegacyNodeTypes(doc);
     migrateLegacyGraphScope(doc);
+    settleHeaderCode(doc);
   }
 
   onChange(fn: () => void): void {
@@ -3515,7 +3516,16 @@ export class DocumentStore {
           ),
         }
       : this.doc.graph;
-    return JSON.stringify({ header, graph: withoutDrawingKeys(graph), layout: this.doc.layout },
+    // the graph's HEADER (E.D., 11 Oct 2026): the study's code next to the
+    // graph_id, a MIRROR written at every save — s3dgraphy's `build_emjson`.
+    // Kept as it came, it went stale the moment the Study panel changed the code.
+    const { code: _code, code_proposed: _proposed, ...body } = graph as typeof graph & {
+      code?: unknown; code_proposed?: unknown };
+    const code = studyCode(this.doc);
+    const headed = code
+      ? { ...body, code, ...(isCodeProposed(this.doc) ? { code_proposed: true } : {}) }
+      : body;
+    return JSON.stringify({ header, graph: withoutDrawingKeys(headed), layout: this.doc.layout },
                           null, 1);
   }
 }

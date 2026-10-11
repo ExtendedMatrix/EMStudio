@@ -189,4 +189,35 @@ console.log("\n3 · the rapporti between graphs: read, kept, shown, navigable");
   }
 }
 
+// ── 4 · the header of every graph ───────────────────────────────────────────
+console.log("\n4 · the graph's header: graph_id and the study's code, a mirror written at every save");
+{
+  const parsed = C.parseContainer(structuredClone(py.headed));
+  for (const m of parsed.members) {
+    eq([py.headed.graphs[m.id].graph_id, py.headed.graphs[m.id].code],
+       [m.id, H.studyCode({ graph: py.headed.graphs[m.id] })],
+       `s3dgraphy writes ${m.id}: id and code side by side, the code EMStudio reads`);
+  }
+  eq(py.headed.graphs.hb.code_proposed, true, "a proposal is said in the header");
+  const stores = parsed.members.map((m) => ({ id: m.id, store: new M.DocumentStore(m.doc) }));
+  const save = () => C.buildContainer({
+    graphs: stores.map(({ id, store }) => ({ id, doc: JSON.parse(store.toJSON()) })),
+    activeGraphId: "ha" });
+  const out = save();
+  eq(Object.fromEntries(Object.entries(out.graphs).map(([k, g]) => [k, [g.graph_id, g.code, g.code_proposed ?? null]])),
+     Object.fromEntries(Object.entries(py.headed.graphs).map(([k, g]) => [k, [g.graph_id, g.code, g.code_proposed ?? null]])),
+     "saved by EMStudio, every header is as s3dgraphy wrote it (GT16 of an old graph kept)");
+  const ha = stores.find((s) => s.id === "ha").store;
+  ha.applyHdto({ ...ha.readHdto(), studyCode: "GT17" });
+  eq(save().graphs.ha.code, "GT17", "the Study panel changes the code: the header follows at the next save");
+  const hb = stores.find((s) => s.id === "hb").store;
+  hb.applyHdto({ ...hb.readHdto(), studyCode: "" });
+  hb.applyHdto({ ...hb.readHdto(), studyAuthors: "x" });
+  ok(!("code" in save().graphs.hb), "a code cleared: the header says none (no stale copy from the file)");
+  const odd = JSON.parse(JSON.stringify(py.headed.graphs.ha));
+  odd.code = "XX99";
+  const said = H.settleHeaderCode({ graph: odd });
+  ok(/'XX99'.*'GT16'.*study's is kept/.test(said ?? ""), "a header that diverges: the study wins, and it is said");
+}
+
 console.log(`\ncodice-stabile: ${checks} checks passed`);

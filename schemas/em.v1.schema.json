@@ -56,6 +56,14 @@
         "graph_id": {
           "type": "string"
         },
+        "code": {
+          "type": "string",
+          "description": "The study's code (GT16), a mirror of StudyNode.data.code written at every save; the study wins on read."
+        },
+        "code_proposed": {
+          "type": "boolean",
+          "description": "Present (true) while the code is a proposal nobody confirmed."
+        },
         "name": {
           "type": "string"
         },
