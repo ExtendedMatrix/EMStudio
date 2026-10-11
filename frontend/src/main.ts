@@ -27742,6 +27742,17 @@ function buildAreaHeader(win: Win): DocumentFragment {
         draw();
       });
     });
+    // MICRO-AUTORI-LAYOUT p.4 · «Layout» always on the bar: the one command that
+    // arranges again (nothing else moves a node); Alt drops the manual arrangement
+    act("⊞ " + t("toolbar.layout"), t("win.layoutTitle"), false, () => {});
+    { const b = frag.lastElementChild as HTMLButtonElement | null;
+      if (b) {
+        b.dataset.act = "layout";
+        b.addEventListener("click", (e) => {
+          const fresh = (e as MouseEvent).altKey;
+          focusThen(win, () => void layoutAll(fresh));
+        });
+      } }
   }
   if (type === "narrative") {
     // ✎ · writing IS a mode of a narrative window, so it is a toggle you can see
