@@ -23,11 +23,33 @@ export interface MovedFile {
   matches: Array<{ path: string; how: "exact" | "exact_renamed" | "probable" | "possible"; size: number }>;
 }
 
+/** B1 · how a file's disk copy and bucket copy stand (s3Dgraphy `bucket_alignment`) */
+export interface BucketRow {
+  id: string; name: string; path: string; bucket: string; key: string; tier: string;
+  size_disk: number | null; size_bucket: number | null; sha256: string;
+  state: "aligned" | "same_size" | "differ" | "disk_only" | "bucket_only" | "neither" | "unknown";
+  note: string; verified: boolean;
+}
+/** B1 · a local copy the bucket proves, and may be freed (s3Dgraphy `free_plan`) */
+export interface FreeItem {
+  id: string; name: string; path: string; size: number; level: "safe" | "confirm";
+  warning: string; copies: number; bucket: string; key: string;
+}
+export interface FreeReportItem { id: string; path: string; action: string; reason: string; bytes: number; moved_to: string }
+
+const BUCKET = new Map<string, BucketRow>();
+export const bucketOf = (id: string): BucketRow | undefined => BUCKET.get(id);
+export const bucketRows = (): BucketRow[] => [...BUCKET.values()];
+/** the «free the local copy» panel: session state */
+export const freeUi: { open: boolean; plan: FreeItem[]; masters: boolean; permanent: boolean; busy: boolean } =
+  { open: false, plan: [], masters: false, permanent: false, busy: false };
+
 const STATES = new Map<string, FileState>();
 let ROWS: StorageRow[] = [];
 let MOVED: MovedFile[] = [];
 export const fileRows = (): StorageRow[] => ROWS;
 export const movedFiles = (): MovedFile[] => MOVED;
+export function dropBucket(): void { BUCKET.clear(); }
 export function dropMoved(ids: string[] | null): void {
   MOVED = ids === null ? [] : MOVED.filter((m) => !ids.includes(m.id));
 }
@@ -94,6 +116,39 @@ export async function findMovedFiles(bridge: string, doc: unknown, folders: stri
                        { doc, folders, project_root: projectRoot, results: lost });
   MOVED = (j.found as MovedFile[]) ?? [];
   return MOVED;
+}
+
+/** «Check» / «Verify bytes»: the bridge compares each disk copy with its bucket
+ *  copy (existence and size; with `deep`, the sha256 of the bucket's bytes) */
+export async function bucketCheck(bridge: string, doc: unknown, folders: string[], projectRoot: string,
+                                  deep: boolean): Promise<Record<string, number>> {
+  const j = await post(bridge, "/bucket-check", { doc, folders, project_root: projectRoot, deep });
+  BUCKET.clear();
+  for (const r of j.rows as BucketRow[]) BUCKET.set(r.id, r);
+  return (j.summary as Record<string, number>) ?? {};
+}
+
+/** upload one file, read it back and compare; the answer is what to write on the node */
+export async function bucketPromote(bridge: string, doc: unknown, id: string, path: string):
+  Promise<{ bucket: string; data: Record<string, unknown> }> {
+  const j = await post(bridge, "/bucket-promote", { doc, resource_id: id, path });
+  return { bucket: String(j.bucket), data: j.data as Record<string, unknown> };
+}
+
+/** what may be freed: only the rows verified byte for byte */
+export async function freePlanOf(bridge: string, doc: unknown, projectRoot: string): Promise<FreeItem[]> {
+  const rows = bucketRows().filter((r) => r.state === "aligned");
+  const j = await post(bridge, "/files-free-plan", { doc, rows, project_root: projectRoot });
+  return j.plan as FreeItem[];
+}
+
+/** free them: the bridge compares the bytes AGAIN before each file goes */
+export async function freeLocal(bridge: string, plan: FreeItem[], opts: {
+  projectRoot: string; folders: string[]; masters: boolean; permanent: boolean;
+}): Promise<{ report: FreeReportItem[]; quarantine: string }> {
+  const j = await post(bridge, "/files-free-local", { plan, project_root: opts.projectRoot,
+    folders: opts.folders, confirm_masters: opts.masters, permanent: opts.permanent });
+  return { report: j.report as FreeReportItem[], quarantine: String(j.quarantine ?? "") };
 }
 
 /** «Open where it is» */

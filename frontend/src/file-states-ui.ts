@@ -6,8 +6,8 @@
 // one), «Upload to the room», «Keep on the disk too», «Open where it is».
 import { t } from "./i18n";
 import { stateBadge, stateSign } from "./state-symbols";
-import { fileFilter, fileRows, fileStateOf, fileStates, fileSummary, filterRows, listFilter,
-         movedFiles, setFileFilter, type FileState, type MovedFile, type StorageRow } from "./file-states";
+import { bucketOf, bucketRows, fileFilter, fileRows, fileStateOf, freeUi, fileStates, fileSummary, filterRows, listFilter,
+         movedFiles, setFileFilter, type BucketRow, type FileState, type MovedFile, type StorageRow } from "./file-states";
 
 export interface FileHooks {
   checking: boolean;
@@ -28,6 +28,11 @@ export interface FileHooks {
   onFindMoved?(): void;
   /** S1 · relink a missing file to where it was found (`path`), or every sure one (null) */
   onRelinkMoved?(m: MovedFile | null, path: string): void;
+  /** B1 · the bucket: check it (quick, or byte for byte), free the local copies it proves */
+  onBucketCheck?(deep: boolean): void;
+  onFreeOpen?(): void;
+  onFreeRun?(): void;
+  onPromote?(f: FileState): void;
 }
 
 const FILE_STATES = ["on_disk", "on_node", "both", "reference_only", "missing", "empty_copy"];
@@ -137,6 +142,7 @@ export function filesSection(h: FileHooks): HTMLElement {
   if (group.childElementCount) box.appendChild(group);
   const lost = all.filter((f) => f.state === "missing" || f.state === "empty_copy");
   if ((lost.length || movedFiles().length) && h.onFindMoved) box.appendChild(movedBox(lost.length, h));
+  if (h.onBucketCheck) box.appendChild(bucketBox(h));
   if (fileRows().length) {
     box.appendChild(rowsList(h));
     return box;
@@ -149,6 +155,82 @@ export function filesSection(h: FileHooks): HTMLElement {
 }
 
 const SURE = new Set<string>(["exact", "exact_renamed"]);
+
+/** B1 · the sign beside a file for how its disk and bucket copies stand */
+const BUCKET_SIGN: Record<BucketRow["state"], string> = {
+  aligned: "✓", same_size: "≈", differ: "≠", disk_only: "⌂", bucket_only: "☁", neither: "✕", unknown: "?",
+};
+
+/** B1 · the bucket: check, the tally, and the gesture that frees the disk copies the bucket proves */
+function bucketBox(h: FileHooks): HTMLElement {
+  const box = el("div", "fs-bucket");
+  const head = el("div", "fs-head");
+  head.appendChild(el("b", "", t("fs.bucket")));
+  for (const [deep, label] of [[false, t("fs.bucketCheck")], [true, t("fs.bucketVerify")]] as const) {
+    const b = el("button", "ghost", label) as HTMLButtonElement;
+    b.dataset.act = deep ? "bucket-verify" : "bucket-check";
+    b.title = t(deep ? "fs.bucketVerifyHint" : "fs.bucketCheckHint");
+    b.addEventListener("click", () => h.onBucketCheck!(deep));
+    head.appendChild(b);
+  }
+  box.appendChild(head);
+  const rows = bucketRows();
+  if (!rows.length) { box.appendChild(el("div", "insp-hint", t("fs.bucketNot"))); return box; }
+  const tally = new Map<string, number>();
+  for (const r of rows) tally.set(r.state, (tally.get(r.state) ?? 0) + 1);
+  const chips = el("div", "fs-chips");
+  for (const [state, n] of tally) {
+    const c = el("span", `fs-chip st-${state === "differ" || state === "neither" ? "bad" : "muted"}`,
+                 `${BUCKET_SIGN[state as BucketRow["state"]]} ${n} ${t("fs.b." + state)}`);
+    c.title = t("fs.bm." + state);
+    chips.appendChild(c);
+  }
+  box.appendChild(chips);
+  const aligned = tally.get("aligned") ?? 0;
+  if (aligned && h.onFreeOpen) {
+    const b = el("button", "ghost fs-danger", t("fs.freeLocal", { n: String(aligned) })) as HTMLButtonElement;
+    b.dataset.act = "free-open";
+    b.addEventListener("click", () => h.onFreeOpen!());
+    box.appendChild(b);
+  }
+  if (freeUi.open) box.appendChild(freePanel(h));
+  return box;
+}
+
+/** B1 · the confirmation: a warning first, then what would go, then the yes */
+function freePanel(h: FileHooks): HTMLElement {
+  const p = el("div", "fs-free");
+  p.appendChild(el("div", "fs-free-warn", t("fs.freeWarn")));
+  const safe = freeUi.plan.filter((x) => x.level === "safe");
+  const conf = freeUi.plan.filter((x) => x.level === "confirm");
+  const mb = (xs: typeof safe): string => (xs.reduce((a, x) => a + x.size, 0) / 1e6).toFixed(0);
+  p.appendChild(el("div", "", t("fs.freeSafe", { n: String(safe.length), mb: mb(safe) })));
+  p.appendChild(el("div", "fs-free-bad", t("fs.freeConf", { n: String(conf.length), mb: mb(conf) })));
+  const lonely = conf.filter((x) => x.copies === 0).length;
+  const opt = (key: "masters" | "permanent", label: string): HTMLElement => {
+    const lab = el("label", "fs-free-opt");
+    const cb = el("input") as HTMLInputElement;
+    cb.type = "checkbox"; cb.checked = freeUi[key]; cb.dataset.opt = key;
+    cb.addEventListener("change", () => { freeUi[key] = cb.checked; h.onRefilter(); });
+    lab.append(cb, document.createTextNode(" " + label));
+    return lab;
+  };
+  p.appendChild(opt("masters", t("fs.freeMasters")));
+  if (freeUi.masters && lonely)
+    p.appendChild(el("div", "fs-free-bad", t("fs.freeLonely", { n: String(lonely) })));
+  p.appendChild(opt("permanent", t("fs.freePermanent")));
+  if (freeUi.permanent) p.appendChild(el("div", "fs-free-bad", t("fs.freeNoWayBack")));
+  const row = el("div", "fs-free-act");
+  const go = el("button", "fs-danger", t("fs.freeGo")) as HTMLButtonElement;
+  go.dataset.act = "free-run";
+  go.disabled = freeUi.busy || !(safe.length || (freeUi.masters && conf.length));
+  go.addEventListener("click", () => h.onFreeRun?.());
+  const no = el("button", "ghost", t("fs.freeCancel")) as HTMLButtonElement;
+  no.addEventListener("click", () => { freeUi.open = false; h.onRefilter(); });
+  row.append(go, no);
+  p.appendChild(row);
+  return p;
+}
 
 /** S1 · the files that are not here, and where they may have gone */
 function movedBox(lostCount: number, h: FileHooks): HTMLElement {
@@ -241,6 +323,12 @@ function rowItem(r: StorageRow, h: FileHooks, redraw: () => void): HTMLElement {
     redraw();
   });
   line.appendChild(name);
+  const bk = bucketOf(r.id);
+  if (bk) {
+    const g = el("span", `fs-bk st-${bk.state}`, BUCKET_SIGN[bk.state]);
+    g.title = t("fs.bm." + bk.state);
+    line.appendChild(g);
+  }
   line.appendChild(el("span", "fs-tag insp-hint", r.tag));
   item.appendChild(line);
   if (listFilter.selected === r.id) item.appendChild(rowCard(r, h, redraw));
@@ -266,6 +354,8 @@ function rowCard(r: StorageRow, h: FileHooks, redraw: () => void): HTMLElement {
   add("fs.card.rm", r.rm.join(", "));
   add("fs.card.where", f?.path || r.where);
   if (f?.note) add("fs.card.note", f.note);
+  const bkc = bucketOf(r.id);
+  if (bkc) add("fs.bucket", `${BUCKET_SIGN[bkc.state]} ${t("fs.bm." + bkc.state)}${bkc.note ? " — " + bkc.note : ""}${bkc.bucket ? "\n" + bkc.bucket : ""}`);
   const near = fileRows().filter((x) => x.asset_id === r.asset_id && x.id !== r.id);
   if (near.length) {
     const box = el("div", "fs-near");
@@ -278,6 +368,14 @@ function rowCard(r: StorageRow, h: FileHooks, redraw: () => void): HTMLElement {
     card.appendChild(box);
   }
   if (f) card.appendChild(fileGestures(f, h));
+  if (f && (f.state === "on_disk" || f.state === "both") && h.onPromote
+      && !(bkc && (bkc.state === "aligned" || bkc.state === "same_size"))) {
+    const b = el("button", "ghost fs-act", t("fs.toBucket")) as HTMLButtonElement;
+    b.dataset.act = "to-bucket";
+    b.title = t("fs.toBucketHint");
+    b.addEventListener("click", () => h.onPromote!(f));
+    card.appendChild(b);
+  }
   return card;
 }
 

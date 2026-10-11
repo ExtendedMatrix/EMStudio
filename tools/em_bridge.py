@@ -585,6 +585,86 @@ def _room_probe(room):
     return on_node
 
 
+def _graphs_of(doc):
+    from s3dgraphy import api
+    sections = (list((doc.get("graphs") or {}).values())
+                if isinstance(doc, dict) and doc.get("graphs") else None)
+    return ([api.load_emjson({"header": doc.get("header") or {}, "graph": sec})[0]
+             for sec in sections] if sections else [api.load_emjson(doc)[0]])
+
+
+def _sha256_path(path):
+    h = hashlib.sha256()
+    with open(path, "rb") as fh:
+        for chunk in iter(lambda: fh.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def _object_store():
+    """B1 · the bucket: any S3-compatible store, named by the S3_* environment
+    (the same variables Heriverse uses). The reason it is not there is the answer."""
+    from s3dgraphy import api
+    if not hasattr(api, "open_object_store"):
+        raise ValueError("this s3Dgraphy is too old for the bucket tools")
+    if not (os.environ.get("S3_ENDPOINT") and os.environ.get("S3_BUCKET")):
+        raise ValueError("no bucket configured: the bridge's environment has no S3_ENDPOINT / S3_BUCKET / "
+                         "S3_ACCESS_KEY_ID / S3_SECRET_ACCESS_KEY (the variables Heriverse uses)")
+    return api.open_object_store()
+
+
+def _bucket_route(route, body):
+    """B1 · disk ↔ bucket. The library compares, plans and frees; the bridge
+    carries the question. A free is checked again byte for byte just before each
+    file goes, whatever the page says."""
+    from s3dgraphy import api
+    store = _object_store()
+    if route == "/bucket-check":
+        folders = [os.path.abspath(os.path.expanduser(f)) for f in body.get("folders") or [] if f]
+        root = body.get("project_root") or None
+        rows = []
+        for graph in _graphs_of(body["doc"]):
+            part = api.resolve_files(graph, project_root=root, base_dirs=folders, cache_dirs=[],
+                                     hasher=lambda p: _sha256_path(p) if os.path.getsize(p) <= 512 << 20 else "")
+            rows += api.bucket_alignment(graph, part, store, deep=bool(body.get("deep")),
+                                         hasher=_sha256_path)
+        tally = {}
+        for r in rows:
+            tally[r["state"]] = tally.get(r["state"], 0) + 1
+        return {"ok": True, "rows": rows, "summary": tally}
+    if route == "/bucket-promote":
+        for graph in _graphs_of(body["doc"]):
+            if graph.find_node_by_id(body["resource_id"]) is not None:
+                out = api.promote_to_bucket(graph, body["resource_id"],
+                                            os.path.abspath(os.path.expanduser(body["path"])), store,
+                                            hasher=_sha256_path)
+                data = graph.find_node_by_id(body["resource_id"]).data
+                return {"ok": True, **out, "data": {k: data.get(k) for k in ("url", "addresses", "checksum")}}
+        raise ValueError("no such resource in the document")
+    if route == "/files-free-plan":
+        rows = body.get("rows") or []
+        root = body.get("project_root")
+        protect = [os.path.join(os.path.expanduser(root), ".em_cache")] if root else []
+        plan = []
+        for graph in _graphs_of(body["doc"]):
+            plan += api.plan_free_local(graph, rows, protect=protect)
+        return {"ok": True, "plan": plan}
+    # /files-free-local
+    root = body.get("project_root")
+    allowed = [os.path.abspath(os.path.expanduser(f)) for f in ([root] if root else []) + (body.get("folders") or []) if f]
+    plan = [p for p in body.get("plan") or []
+            if any(os.path.abspath(p["path"]).startswith(a + os.sep) for a in allowed)]
+    if len(plan) != len(body.get("plan") or []):
+        raise ValueError("a file of the plan is outside the project's folders: nothing was freed")
+    import time
+    quarantine = os.path.join(os.path.expanduser(root or allowed[0]), ".em_freed",
+                              time.strftime("%Y-%m-%d_%H%M%S")) if allowed else ""
+    report = api.free_local_copies(plan, store, confirm_masters=body.get("confirm_masters") is True,
+                                   permanent=body.get("permanent") is True, quarantine=quarantine,
+                                   hasher=_sha256_path)
+    return {"ok": True, "report": report, "quarantine": quarantine}
+
+
 def _files_route(route, body):
     """R1/R2/C1 · the bridge's half of the files: the library answers, the
     bridge only carries the question (the page never sees a filesystem path it
@@ -621,6 +701,8 @@ def _files_route(route, body):
         from s3dgraphy.resources.locate import summary
         return {"ok": True, "project_root": root or "", "results": results,
                 "rows": rows, "summary": summary(results)}
+    if route in ("/bucket-check", "/bucket-promote", "/files-free-plan", "/files-free-local"):
+        return _bucket_route(route, body)
     if route == "/files-find-moved":
         # S1 · «Find moved files»: where did the files that are missing go? The
         # library looks (sha256, then name and size) and proposes; nothing changes
@@ -1388,7 +1470,8 @@ def make_handler(api):
                     self._fail(400, f"invalid JSON body: {exc}")
                     return
                 self._annotate(body)
-            elif route in ("/files-state", "/files-find-moved", "/project-new", "/project-reorder",
+            elif route in ("/files-state", "/files-find-moved", "/bucket-check", "/bucket-promote",
+                           "/files-free-plan", "/files-free-local", "/project-new", "/project-reorder",
                            "/file-reveal", "/file-keep", "/nodes", "/node/personal"):
                 # R1/R2/C1 (E.D., 4 Oct 2026) · where each file is, with
                 # s3dgraphy's ONE resolver; the standard tree of a project

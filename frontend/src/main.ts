@@ -188,7 +188,8 @@ import connectionsDatamodel from "./assets/s3Dgraphy_connections_datamodel.json"
 import datamodelTranslations from "./assets/datamodel_translations.json";
 import { createResourceThumb } from "./resource-preview";
 import { keepOnDisk, newEmProject, refreshFileStates, reorderApply, reorderPreview, revealFile,
-         fileProjectRoot, describeFile, filesOfDocument, fileStateOf, findMovedFiles, movedFiles, dropMoved,
+         fileProjectRoot, describeFile, filesOfDocument, fileStateOf, findMovedFiles, movedFiles, dropMoved, bucketCheck, bucketPromote, dropBucket,
+         freePlanOf, freeLocal, freeUi,
          type FileState, type MovedFile } from "./file-states";
 import { docFilesBox, docFilesGlyphs, filesSection, fileStateLine, type FileHooks } from "./file-states-ui";
 import { paintChooser } from "./node-chooser";
@@ -22950,7 +22951,80 @@ function fileHooks(): FileHooks {
     onReorder: () => { void reorderGesture(); },
     onFindMoved: () => { void findMoved(); },
     onRelinkMoved: (m, path) => { relinkMoved(m, path); },
+    onBucketCheck: (deep) => { void bucketGesture(deep); },
+    onFreeOpen: () => { void freeOpen(); },
+    onFreeRun: () => { void freeRun(); },
+    onPromote: (f) => { void promoteGesture(f); },
   };
+}
+
+/** the folders the file tools look in: the em.json's, its DosCo, the Storage windows' */
+function fileFolders(): string[] {
+  const src = inventorySources();
+  const browsing = windowsOf().filter((w) => w.type === "storage").map((w) => storagePath(w));
+  return [src.baseDir, ...src.doscoDirs, ...browsing].filter((x): x is string => !!x);
+}
+
+/** B1 · «Check» / «Verify bytes»: each file's disk copy against its bucket copy */
+async function bucketGesture(deep: boolean): Promise<void> {
+  if (!store) return;
+  try {
+    const tally = await bucketCheck(await bridgeUrl(), store.doc, fileFolders(), fileProjectRoot(), deep);
+    logInfo("bucket: " + Object.entries(tally).map(([k, n]) => `${n} ${k.replace(/_/g, " ")}`).join(", "));
+  } catch (e) {
+    toast(String((e as Error)?.message ?? e));
+  }
+  filesRefresh();
+}
+
+/** «Free the disk copy of N verified files…»: the plan, then the panel with its warning */
+async function freeOpen(): Promise<void> {
+  if (!store) return;
+  try {
+    freeUi.plan = await freePlanOf(await bridgeUrl(), store.doc, fileProjectRoot());
+  } catch (e) { toast(String((e as Error)?.message ?? e)); return; }
+  if (!freeUi.plan.length) { toast(t("fs.freeNothing")); return; }
+  freeUi.open = true; freeUi.masters = false; freeUi.permanent = false;
+  filesRefresh();
+}
+
+/** the yes: the bridge compares the bytes again before each file goes */
+async function freeRun(): Promise<void> {
+  if (!store || freeUi.busy) return;
+  freeUi.busy = true; filesRefresh();
+  try {
+    const r = await freeLocal(await bridgeUrl(), freeUi.plan, {
+      projectRoot: fileProjectRoot(), folders: fileFolders(),
+      masters: freeUi.masters, permanent: freeUi.permanent });
+    const n = (a: string) => r.report.filter((x) => x.action === a).length;
+    const mb = (r.report.reduce((acc, x) => acc + x.bytes, 0) / 1e6).toFixed(0);
+    const done = n("freed") + n("quarantined");
+    toast([t("fs.freed", { n: String(done), mb }),
+           n("quarantined") ? t("fs.freedTo", { path: r.quarantine }) : "",
+           n("refused") ? t("fs.freeRefused", { n: String(n("refused")) }) : "",
+           n("skipped") ? t("fs.freeLeft", { n: String(n("skipped")) }) : ""].filter(Boolean).join(" · "));
+    for (const x of r.report) if (x.action === "refused") logWarn(`free: ${x.path}: ${x.reason}`);
+  } catch (e) { toast(String((e as Error)?.message ?? e)); }
+  freeUi.busy = false; freeUi.open = false; dropBucket();
+  void checkFiles();
+}
+
+/** «To the bucket»: upload, read back, compare; the node then has the bucket as its
+ * main address and keeps the disk path as another */
+async function promoteGesture(f: FileState): Promise<void> {
+  if (!store || !f.path) return;
+  try {
+    const r = await bucketPromote(await bridgeUrl(), store.doc, f.id, f.path);
+    const st = storeOfNode(f.id);
+    const n = st?.node(f.id);
+    if (st && n) {
+      const d = (n.data ?? {}) as Record<string, unknown>;
+      st.updateNode(f.id, { data: { ...d, ...Object.fromEntries(
+        Object.entries(r.data).filter(([, v]) => v != null)) } } as Partial<EmNode>);
+    }
+    toast(t("fs.toBucketDone", { where: r.bucket }));
+    void checkFiles();
+  } catch (e) { toast(String((e as Error)?.message ?? e)); }
 }
 
 /** S1 · «Find moved files…»: the bridge looks, in the project's folders and in

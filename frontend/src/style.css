@@ -9459,3 +9459,14 @@ button.hdto-v {
 .fs-card-line { padding: 1px 0; overflow-wrap: anywhere; }
 .fs-near { margin: 6px 0; display: flex; flex-direction: column; align-items: flex-start; }
 .fs-moved { margin: 8px 0; padding: 6px 8px; border: 1px dashed var(--border); border-radius: 6px; }
+
+/* B1 · the bucket box and the free-the-disk-copies panel */
+.fs-bucket { margin: 8px 0; padding: 6px 8px; border: 1px solid var(--border); border-radius: 6px; }
+.fs-bk { margin-left: 4px; opacity: .8; }
+.fs-bk.st-differ, .fs-bk.st-neither { color: var(--danger, #c0392b); opacity: 1; }
+.fs-free { margin: 8px 0; padding: 8px; border: 2px solid var(--danger, #c0392b); border-radius: 6px; font-size: 12px; }
+.fs-free-warn { font-weight: 600; margin-bottom: 6px; }
+.fs-free-bad { color: var(--danger, #c0392b); }
+.fs-free-opt { display: block; margin: 4px 0; }
+.fs-free-act { display: flex; gap: 8px; margin-top: 8px; }
+.fs-danger { border-color: var(--danger, #c0392b); color: var(--danger, #c0392b); }
