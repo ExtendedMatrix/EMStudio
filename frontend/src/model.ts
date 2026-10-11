@@ -3300,12 +3300,16 @@ export class DocumentStore {
   }
 
   /** Replace the layout (recompute), preserving fold state + group spaces. */
-  setLayout(layout: import("./types").EmLayout): void {
+  setLayout(layout: import("./types").EmLayout, opts: { rearrange?: (groupId: string) => boolean } = {}): void {
     this.checkpoint();
     const old = this.doc.layout;
     if (old?.folded_groups?.length) layout.folded_groups = old.folded_groups;
-    if (old?.group_spaces && Object.keys(old.group_spaces).length)
-      layout.group_spaces = old.group_spaces;
+    if (old?.group_spaces && Object.keys(old.group_spaces).length) {
+      // MICRO-AUTORI-LAYOUT p.2 · «Layout» arranges everything: the groups it
+      // rearranges lose the hand's positions inside them (the rule's order back)
+      const kept = Object.entries(old.group_spaces).filter(([g]) => !opts.rearrange?.(g));
+      if (kept.length) layout.group_spaces = Object.fromEntries(kept);
+    }
     this.doc.layout = layout;
     this.emit();
   }

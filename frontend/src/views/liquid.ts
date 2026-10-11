@@ -270,8 +270,9 @@ export class LiquidSim {
   settled = false;
   constructor(private onFrame: () => void, private makeWorker: () => Worker | null) {}
 
-  /** (Re)start for a scene; nothing happens when the structure is the same. */
-  start(scene: Scene & { liquid: LiquidExtra }): void {
+  /** (Re)start for a scene; nothing happens when the structure is the same.
+   *  `pins`: the centres of the discs the hand placed — they stay there. */
+  start(scene: Scene & { liquid: LiquidExtra }, pins?: Map<string, { x: number; y: number }>): void {
     const key = `${scene.nodes.length}|${scene.edges.length}|${scene.nodes.map((n) => n.id).join(",").length}|` +
       scene.edges.map((e) => e.source + e.target).join("").length;
     if (key === this.key && this.worker) return;
@@ -298,7 +299,15 @@ export class LiquidSim {
     this.settled = false;
     // a structure seen before restarts warm: the discs are already where they go
     const warm = scene.nodes.every((n) => this.pos.has(n.id));
-    this.worker?.postMessage({ type: "init", nodes, links: Int32Array.from(links), clusters, alpha: warm ? 0.3 : 1 });
+    const pinned: number[] = [];
+    for (const [id, c] of pins ?? []) {
+      const i = this.index.get(id);
+      if (i === undefined) continue;
+      pinned.push(i, c.x, c.y);
+      this.pos.set(id, c);
+    }
+    this.worker?.postMessage({ type: "init", nodes, links: Int32Array.from(links), clusters, alpha: warm ? 0.3 : 1,
+                               ...(pinned.length ? { pins: Float64Array.from(pinned) } : {}) });
   }
 
   private receive(m: { type: string; xy?: Float64Array }): void {

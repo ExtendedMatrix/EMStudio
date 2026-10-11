@@ -1,8 +1,10 @@
 // MICRO-BADGE-PD · part 3: the paradata group opened IN PLACE in the Matrix is
 // arranged by the function the soloing draws with (`views/pd-arrange.ts`):
-// properties in a row on top, combiners and extractors under them, documents
-// and instances at the bottom, no empty row; the same order as the soloing;
-// no unit of another group inside its box; closed, every node is where it was.
+// properties in a row on top, combiners and extractors under them, each source
+// right under the extractor that reads it (MICRO-AUTORI-LAYOUT p.2), no empty
+// row; the same order as the soloing; opening it moves nothing outside it
+// (MICRO-AUTORI-LAYOUT p.2: the lane no longer makes room by itself); closed,
+// every node is where it was. And a hand move inside the box stays put.
 //
 //   node scripts/check-pd-arrange.mjs [room.em.json]
 //
@@ -63,11 +65,17 @@ function checkGroup(doc, group, label) {
   ok(rows.length >= 1, `${label}: the open group draws its content`);
   const props = drawn.map((id) => sc.byId.get(id)).filter((n) => n.node.node_type === "property" && !n.instanceOf);
   ok(props.every((p) => cy(p) === cy(rows[0][0])), `${label}: every property in the top row`);
-  const last = rows[rows.length - 1];
+  // MICRO-AUTORI-LAYOUT p.2 · each source right under the extractor that
+  // reads it (one row down), not on a shared last row
+  const rowOf = new Map(); rows.forEach((r, i) => r.forEach((n) => rowOf.set(n.id, i)));
   const sinks = drawn.map((id) => sc.byId.get(id)).filter((n) => n.instanceOf || n.node.node_type === "document");
-  ok(sinks.every((n) => cy(n) === cy(last[0])), `${label}: documents and instances in the bottom row`);
-  ok(rows.slice(1, -1).every((r) => r.every((n) => ["extractor", "combiner"].includes(kind(n)))) || rows.length < 3,
-     `${label}: combiners and extractors in the rows between`);
+  const readers = (id) => sc.edges.filter((e) => e.target === id && rowOf.has(e.source)
+    && ["extractor", "combiner"].includes(sc.byId.get(e.source)?.node.node_type)).map((e) => e.source);
+  const under = sinks.filter((n) => readers(n.id).length);
+  ok(under.every((n) => rowOf.get(n.id) === Math.max(...readers(n.id).map((r) => rowOf.get(r))) + 1),
+     `${label}: every source one row under the extractor that reads it (${under.length})`);
+  ok(rows.slice(1).every((r) => r.every((n) => kind(n) !== "property" || n.instanceOf)),
+     `${label}: no property below the top row`);
   // no empty row: the gaps between rows are all the same
   const gaps = rows.slice(1).map((r, i) => cy(r[0]) - cy(rows[i][0]));
   ok(gaps.every((g) => Math.abs(g - gaps[0]) <= 1), `${label}: no empty row between the levels (${gaps.join(", ")})`);
@@ -75,16 +83,29 @@ function checkGroup(doc, group, label) {
   const solo = M.buildGroupScene(open, group);
   const soloRows = rowsIn(solo, solo.nodes.map((n) => n.id)).map((r) => r.map((n) => n.id).filter((id) => drawn.includes(id)));
   eq(rows.map((r) => r.map((n) => n.id)), soloRows.filter((r) => r.length), `${label}: the same arrangement as the soloing`);
-  // the box: nothing of another group inside
   const g = sc.groupsById.get(group);
   ok(!!g, `${label}: the group box is drawn`);
+  // MICRO-AUTORI-LAYOUT p.2 · opening it moves nothing outside it (the lane
+  // no longer makes room by itself: E.D., 11 Oct 2026, no automatic arrangement)
   const inGroup = new Set([group, ...drawn]);
-  const anc = new Set(); { const m = M.buildMembership(open); let c = m.primaryOf.get(group); while (c && !anc.has(c)) { anc.add(c); c = m.primaryOf.get(c); } }
-  const foreign = sc.nodes.filter((n) => !inGroup.has(n.id) && !anc.has(n.id) && !sc.groupsById.has(n.id) && !n.collapsed
-    && n.x < g.x + g.w && n.x + n.w > g.x && n.y < g.y + g.h && n.y + n.h > g.y).map((n) => n.node.name ?? n.id);
-  eq(foreign, [], `${label}: no unit of another group inside the box`);
-  // closed: every node is where it is with the group closed from the start
   const a = matrix(closed);
+  const pushed = sc.nodes.filter((n) => { const c = a.byId.get(n.id); return c && !inGroup.has(n.id) && !sc.groupsById.has(n.id)
+    && (c.x !== n.x || c.y !== n.y); }).map((n) => n.node.name ?? n.id);
+  eq(pushed, [], `${label}: opened, nothing outside the group moved`);
+  // a hand move inside the box: stored in the group's space, drawn exactly
+  // where it was left — above the top row too (the anchor used to follow the
+  // extent and put it back on the top line)
+  {
+    const mover = drawn.map((id) => sc.byId.get(id)).find((n) => !n.instanceOf);
+    const at = sc.arrangedAt?.get(mover.id);
+    ok(!!at, `${label}: the arranged member knows its place in the group's space`);
+    const moved = structuredClone(open);
+    moved.layout.group_spaces = { ...(moved.layout.group_spaces ?? {}), [group]: { ...(moved.layout.group_spaces?.[group] ?? {}),
+      [mover.id]: { ...at, x: at.x + 37, y: at.y - 140 } } };
+    const m = matrix(moved).byId.get(mover.id);
+    eq([Math.round(m.x - mover.x), Math.round(m.y - mover.y)], [37, -140], `${label}: a member moved by hand is drawn where it was left`);
+  }
+  // closed: every node is where it is with the group closed from the start
   const again = structuredClone(open); again.layout.folded_groups = closed.layout.folded_groups;
   const b = matrix(again);
   const moved = a.nodes.filter((n) => { const m = b.byId.get(n.id); return !m || m.x !== n.x || m.y !== n.y; });

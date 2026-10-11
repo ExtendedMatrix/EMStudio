@@ -722,8 +722,19 @@ function buildGraphLiquid(doc: EmDocument, v: ReturnType<typeof filteredView>): 
   const pos = graphAlgorithm === "force" ? liquidSim.pos
     : graphCentres(v.nodes, v.edges, graphAlgorithm === "radial" ? "radial" : "layered");
   const sc = buildLiquidScene(doc, v, pos, (id) => seeds.get(id) ?? { x: 0, y: 0 });
-  if (graphAlgorithm === "force") liquidSim.start(sc);
-  else
+  if (graphAlgorithm === "force") {
+    // MICRO-AUTORI-LAYOUT p.2 · a disc the hand left stays there: the
+    // simulation holds it (its centre), the others settle around it
+    const pins = new Map<string, { x: number; y: number }>();
+    for (const sn of sc.nodes) {
+      const o = graphOverrides.get(sn.id);
+      if (!o) continue;
+      pins.set(sn.id, { x: o.x + sn.w / 2, y: o.y + sn.h / 2 });
+      sn.x = o.x;
+      sn.y = o.y;
+    }
+    liquidSim.start(sc, pins);
+  } else
     for (const sn of sc.nodes) {
       const o = graphOverrides.get(sn.id);
       if (o) {
@@ -739,6 +750,37 @@ function buildGraphLiquid(doc: EmDocument, v: ReturnType<typeof filteredView>): 
   return sc;
 }
 const graphOverrides = new Map<string, { x: number; y: number }>();
+/** MICRO-AUTORI-LAYOUT p.2 · the hand's positions of the projections that are
+ *  not the Matrix (Graph per algorithm, DTC, Full graph) are VIEW metadata:
+ *  kept on this computer per graph, so a reload, a save, a closed and reopened
+ *  file or another view finds them where they were left. The Matrix's are the
+ *  document's (`layout.positions`, `layout.group_spaces`). */
+function viewPosKey(v: ViewKind, gid: string): string {
+  return `emstudio.viewpos.${gid}.${v === "graph" ? `graph:${graphAlgorithm}` : v}`;
+}
+function overridesOf(v: ViewKind): Map<string, { x: number; y: number }> | null {
+  return v === "graph" ? graphOverrides : v === "dtc" ? dtcOverrides : v === "multigraph" ? multigraphOverrides : null;
+}
+function persistViewPositions(v: ViewKind = view): void {
+  const gid = store?.doc.graph.graph_id;
+  const ov = overridesOf(v);
+  if (!gid || !ov) return;
+  try {
+    if (ov.size) localStorage.setItem(viewPosKey(v, gid), JSON.stringify(Object.fromEntries(ov)));
+    else localStorage.removeItem(viewPosKey(v, gid));
+  } catch { /* storage full or private: the positions live for the session */ }
+}
+function restoreViewPositions(v: ViewKind): void {
+  const gid = store?.doc.graph.graph_id;
+  const ov = overridesOf(v);
+  if (!gid || !ov) return;
+  ov.clear();
+  try {
+    const raw = localStorage.getItem(viewPosKey(v, gid));
+    if (raw) for (const [id, p] of Object.entries(JSON.parse(raw) as Record<string, { x: number; y: number }>))
+      if (Number.isFinite(p?.x) && Number.isFinite(p?.y)) ov.set(id, { x: p.x, y: p.y });
+  } catch { /* a broken entry: no hand positions */ }
+}
 // WIN2 · the DTC projection keeps its OWN drag overrides: the same node sits at
 // different places in the two projections, so one shared map would teleport a
 // node in Graph view because it was arranged in DTC.
@@ -4787,6 +4829,10 @@ function showDocument(target: GraphSlot | null, opts: { rebuildOnly?: boolean } 
 
   forgetDocumentState();
   if (target) {
+    // MICRO-AUTORI-LAYOUT p.2 · the hand's positions of the other projections
+    restoreViewPositions("graph");
+    restoreViewPositions("dtc");
+    restoreViewPositions("multigraph");
     for (const [nodeId, position] of target.viewState.graphOverrides) {
       graphOverrides.set(nodeId, position);
     }
@@ -28814,7 +28860,9 @@ btnLayout.title =
 // Compute a layout via em-core and apply it to the store. `fresh` ignores the
 // existing sketch. Shared by the Layout button and the auto-layout on loading
 // a layout-less document (e.g. a live snapshot).
-async function runLayout(fresh: boolean, target: DocumentStore | null = store): Promise<void> {
+async function runLayout(fresh: boolean, target: DocumentStore | null = store,
+                         /** the user's «Layout»: the paradata groups are rearranged too */
+                         all = false): Promise<void> {
   // F4 · the store asked for, held across the awaits (see `reassertSizes`)
   const st = target;
   if (!st) return;
@@ -28834,7 +28882,7 @@ async function runLayout(fresh: boolean, target: DocumentStore | null = store): 
   const layout = await perfTimeAsync("runLayout", () =>
     computeLayout(st.doc.graph, sketch),
   );
-  st.setLayout(layout);
+  st.setLayout(layout, all ? { rearrange: (g) => st.node(g)?.node_type === "ParadataNodeGroup" } : {});
 }
 
 /**
@@ -28849,20 +28897,27 @@ async function layoutAll(fresh: boolean): Promise<void> {
     // Layout is VIEW-AWARE: recompute the layout of the CURRENT view, never
     // force a switch to Matrix. And do NOT auto-fit afterwards — the user
     // re-fits manually (Fit / "0") so the recompute keeps the current zoom.
-    if (view === "graph" && !inContext()) {
+    if ((view === "graph" || view === "dtc" || view === "multigraph") && !inContext()) {
       // Graph has its own client-side layout (views/graph.ts). "Layout" = a
-      // fresh arrangement in the chosen algorithm → drop manual drags.
-      graphOverrides.clear();
+      // fresh arrangement in the chosen algorithm → drop manual drags (DTC and
+      // Full graph too: their drags are overrides of the same kind)
+      overridesOf(view)?.clear();
+      persistViewPositions(view);
+      // a held disc goes back to the simulation with the others
+      if (view === "graph" && graphAlgorithm === "force") {
+        for (const id of liquidSim.pos.keys()) liquidSim.release(id);
+        liquidSim.reheat(0.5);
+      }
       buildScenes();
       draw();
-      toast(t("tst.graphLayout", { name: graphAlgorithm }));
+      toast(t("tst.graphLayout", { name: view === "graph" ? graphAlgorithm : view }));
     } else if (matrixTighterThanDefault()) {
       // Matrix filtered beyond its default → recompute the VIEW layout on the
       // visible subgraph (recompact), leaving the archival layout untouched.
       await refreshMatrixViewLayout();
       toast("Layout (filtered subgraph)");
     } else {
-      await runLayout(fresh); // store.setLayout → onChange → buildScenes + draw
+      await runLayout(fresh, store, true); // store.setLayout → onChange → buildScenes + draw
       toast(fresh ? "Fresh layout (em-core)" : "Layout from sketch (em-core)");
     }
   } catch (e) {
@@ -29024,7 +29079,9 @@ function showLaneMenu(clientX: number, clientY: number, lane: { id: string; labe
   "change",
   (ev) => {
     graphAlgorithm = (ev.target as HTMLSelectElement).value as GraphAlgorithm;
-    graphOverrides.clear(); // new algorithm = fresh arrangement
+    // new algorithm = its own arrangement: the hand's positions made in it
+    // before (MICRO-AUTORI-LAYOUT p.2), else a fresh one
+    restoreViewPositions("graph");
     if (view === "graph" && !inContext()) {
       buildScenes();
       draw();
@@ -29840,7 +29897,11 @@ function wireGraphCanvas(canvas: HTMLCanvasElement, winId: string): void {
     if (mode === "graphnode") {
       // G2 · a released disc goes back to the simulation (it settles from there)
       if (isLiquid(scene()) && view === "graph" && graphAlgorithm === "force" && dragNodeId) {
-        liquidSim.release(dragNodeId);
+        // MICRO-AUTORI-LAYOUT p.2 · …except the disc the hand placed: it stays
+        // where it was left (the simulation holds it); the neighbours it pulled go back
+        const sn = moved ? scene()?.byId.get(dragNodeId) : undefined;
+        if (sn) graphOverrides.set(dragNodeId, { x: sn.x, y: sn.y });
+        else liquidSim.release(dragNodeId);
         if (graphLiquid && store)
           for (const ed of store.doc.graph.edges) {
             if (ed.source === dragNodeId) liquidSim.release(ed.target);
@@ -29849,6 +29910,7 @@ function wireGraphCanvas(canvas: HTMLCanvasElement, winId: string): void {
       }
       if (!moved && dragNodeId) select(dragNodeId); // click (no drag) = select
       else if (moved) {
+        persistViewPositions();
         // the overrides were written during the drag; ONE rebuild settles the
         // projection on them (edges re-routed, minimap, other windows)
         buildScenes();
@@ -30269,9 +30331,14 @@ function moveOneByDelta(
   const arrangedIn = !inContext() ? s.arrangedIn?.get(id) : undefined;
   const anchor = arrangedIn ? s.pdAnchor?.get(arrangedIn) : undefined;
   if (arrangedIn && anchor) {
-    const old = store.doc.layout?.group_spaces?.[arrangedIn]?.[id];
-    const cw = old?.w ?? PD_CELL.w, ch = old?.h ?? PD_CELL.h;
-    store.moveInGroupSpace(arrangedIn, id, {
+    // MICRO-AUTORI-LAYOUT p.2 · by the delta, from where the member is in the
+    // group's space: the passes after the arrangement (lane re-stack, phase
+    // bands) translate the whole box, so the anchor is not the drawn origin
+    const at = s.arrangedAt?.get(id) ?? store.doc.layout?.group_spaces?.[arrangedIn]?.[id];
+    const cw = at?.w ?? PD_CELL.w, ch = at?.h ?? PD_CELL.h;
+    store.moveInGroupSpace(arrangedIn, id, at ? {
+      x: at.x + ddx, y: at.y + ddy, w: cw, h: ch,
+    } : {
       x: nx + sn.w / 2 - anchor.x - cw / 2,
       y: ny + sn.h / 2 - anchor.y - ch / 2,
       w: cw, h: ch,
@@ -30303,6 +30370,10 @@ function moveOneByDelta(
     // layout.positions, so it compounds and the node runs away (worst on
     // free nodes like extractor/combiner in a lower, shifted lane).
     store.moveNodesBy([id], ddx, ddy, checkpoint);
+    // MICRO-AUTORI-LAYOUT p.2 · a filtered Matrix draws the VIEW layout: the
+    // same move there, or the node went back to it until the filter changed
+    const vr = matrixViewLayout?.positions?.[id];
+    if (vr && view === "matrix") matrixViewLayout!.positions![id] = { ...vr, x: vr.x + ddx, y: vr.y + ddy };
   }
 }
 

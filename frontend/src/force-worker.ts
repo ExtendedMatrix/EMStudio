@@ -30,6 +30,8 @@ interface InitMsg {
   /** member indices per cluster */
   clusters: number[][];
   alpha?: number;
+  /** MICRO-AUTORI-LAYOUT p.2 · index, x, y of each disc held where the hand left it */
+  pins?: Float64Array;
 }
 type InMsg =
   | InitMsg
@@ -335,6 +337,15 @@ self.onmessage = (ev: MessageEvent<InMsg>) => {
     for (let k = 0; k < links.length; k += 2)
       linkStrength[k >> 1] = 1 / Math.max(1, Math.min(degree[links[k]], degree[links[k + 1]]));
     clusters = m.clusters;
+    // MICRO-AUTORI-LAYOUT p.2 · the discs the hand left somewhere stay there
+    if (m.pins)
+      for (let k = 0; k + 2 < m.pins.length; k += 3) {
+        const i = m.pins[k];
+        if (i < 0 || i >= n) continue;
+        fixed[i] = 1;
+        x[i] = m.pins[k + 1];
+        y[i] = m.pins[k + 2];
+      }
     alpha = m.alpha ?? 1;
     start();
   } else if (m.type === "drag") {

@@ -540,27 +540,13 @@ export function buildMatrixScene(
   // nothing made room for it): opened in place, USV132_PD on TempluMare_v2 was
   // a box 7993 × 400 over 51 nodes of other units, measured.
   //
-  // So the box goes right under its unit, centred on it, and the lane makes
-  // room: every block (a sibling subtree of the group, moved RIGIDLY so its
-  // container stays whole) that starts below the unit moves down by the box's
-  // height, and a block that crosses that line where the box goes moves down
-  // enough to clear it — all by the same amount, so nothing below collides. A
-  // pure view: closed, the pass does not run and every unit is where it was.
+  // So the box goes right under its unit, centred on it. Since 11 Oct 2026
+  // (MICRO-AUTORI-LAYOUT p.2) the lane does not make room by itself: nothing
+  // outside the box moves when a group opens or closes.
   scene.arrangedIn = new Map();
+  scene.arrangedAt = new Map();
   scene.pdAnchor = new Map();
   const GAP = 24;
-  const outlineSet = new Set(outlineIds);
-  const parentOf = (id: string): string | undefined =>
-    membership.primaryOf.get(id) ?? scene.memberOf!.get(id);
-  const chainOf = (id: string): string[] => {
-    const out: string[] = [];
-    const seen = new Set<string>();
-    for (let cur: string | undefined = id; cur && !seen.has(cur); cur = parentOf(cur)) {
-      seen.add(cur);
-      out.push(cur);
-    }
-    return out;
-  };
   for (const g of doc.graph.nodes) {
     if (g.node_type !== "ParadataNodeGroup") continue;
     const gs = scene.byId.get(g.id);
@@ -575,14 +561,21 @@ export function buildMatrixScene(
     // group's box included), so the two arrangements are the same one
     const arr = paradataGroupScene(doc, g.id, membership.membersOf.get(g.id) ?? [], vix,
                                    recordsByGroup.get(g.id) ?? [], Math.max(...drawn.map((sn) => sn.w)));
-    // the arrangement's extent, with the Matrix's own sizes
-    let ax0 = Infinity, ay0 = Infinity, ax1 = -Infinity, ay1 = -Infinity;
+    // MICRO-AUTORI-LAYOUT p.2 · the box's place is decided by the arrangement
+    // the rule gives (the stored hand positions left out): a member the hand
+    // moved does not move the anchor, so it stays where it was left (measured:
+    // the anchor followed the extent, and a member dragged above the top row
+    // came back to it)
+    const base = paradataGroupScene(doc, g.id, membership.membersOf.get(g.id) ?? [], vix,
+                                    recordsByGroup.get(g.id) ?? [], Math.max(...drawn.map((sn) => sn.w)),
+                                    false);
+    let ax0 = Infinity, ay0 = Infinity, ax1 = -Infinity;
     for (const sn of drawn) {
-      const a = arr.byId.get(sn.id);
+      const a = base.byId.get(sn.id);
       if (!a) continue;
       const cx = a.x + a.w / 2, cy = a.y + a.h / 2;
       ax0 = Math.min(ax0, cx - sn.w / 2); ay0 = Math.min(ay0, cy - sn.h / 2);
-      ax1 = Math.max(ax1, cx + sn.w / 2); ay1 = Math.max(ay1, cy + sn.h / 2);
+      ax1 = Math.max(ax1, cx + sn.w / 2);
     }
     if (!Number.isFinite(ax0)) continue;
     const ref = scene.byId.get(pdReferentNode.get(g.id)!);
@@ -592,51 +585,23 @@ export function buildMatrixScene(
     const lineY = ref ? ref.y + ref.h + GAP : oy0 - GROUP_HEADER - 6;
     const left = ref ? ref.x + ref.w / 2 - (ax1 - ax0) / 2 : ox0;
     const anchor = { x: left - ax0, y: lineY + GROUP_HEADER + 6 - ay0 };
-    const inGroup = new Set<string>([g.id]);
     for (const sn of drawn) {
-      inGroup.add(sn.id);
       const a = arr.byId.get(sn.id);
       if (!a) continue;
       sn.x = anchor.x + a.x + a.w / 2 - sn.w / 2;
       sn.y = anchor.y + a.y + a.h / 2 - sn.h / 2;
-      if (!sn.instanceOf) scene.arrangedIn.set(sn.id, g.id);
+      if (!sn.instanceOf) {
+        scene.arrangedIn.set(sn.id, g.id);
+        scene.arrangedAt!.set(sn.id, { x: a.x, y: a.y, w: a.w, h: a.h });
+      }
     }
     scene.pdAnchor.set(g.id, anchor);
-    const box = { x0: left - GROUP_PAD, x1: left + (ax1 - ax0) + GROUP_PAD,
-                  y0: lineY, y1: lineY + GROUP_HEADER + 6 + (ay1 - ay0) + GROUP_PAD };
-    // the blocks of the lane: each node's highest ancestor that is not one of
-    // the group's own (the group's siblings, wherever they nest)
-    const mine = new Set(chainOf(g.id));
-    const gLane = ref ? laneIdxOfY(ref.y + ref.h / 2) : laneIdxOfY(oy0);
-    const blocks = new Map<string, SceneNode[]>();
-    for (const sn of scene.byId.values()) {
-      if (inGroup.has(sn.id) || mine.has(sn.id) || sn.collapsed) continue;
-      if (laneIdxOfY(sn.y + sn.h / 2) !== gLane) continue;
-      const chain = chainOf(sn.id);
-      let top = sn.id;
-      for (const c of chain) {
-        if (mine.has(c)) break;
-        top = c;
-      }
-      (blocks.get(top) ?? blocks.set(top, []).get(top)!).push(sn);
-    }
-    const moving: SceneNode[][] = [];
-    let shift = box.y1 - box.y0 + GAP;
-    for (const kids of blocks.values()) {
-      let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
-      for (const sn of kids) {
-        x0 = Math.min(x0, sn.x); y0 = Math.min(y0, sn.y);
-        x1 = Math.max(x1, sn.x + sn.w); y1 = Math.max(y1, sn.y + sn.h);
-      }
-      // a container's header sits above its first member
-      if (kids.some((k) => outlineSet.has(k.id))) y0 -= GROUP_HEADER + 6;
-      if (y0 >= lineY - 0.5) moving.push(kids);
-      else if (y1 > lineY && x0 < box.x1 + GAP && x1 > box.x0 - GAP) {
-        moving.push(kids);
-        shift = Math.max(shift, box.y1 + GAP - y0);
-      }
-    }
-    for (const kids of moving) for (const sn of kids) sn.y += shift;
+    // MICRO-AUTORI-LAYOUT p.2 · the lane no longer «makes room» by moving the
+    // blocks under the box (E.D., 11 Oct 2026: no automatic arrangement, ever):
+    // that push depended on where each node stood, so a node moved by hand
+    // across the box's line jumped by the box's height — D.43.01 on
+    // TempluMare_v3.2, under the open «Graph paradata». What the open box
+    // covers, the hand or «Layout» moves.
   }
 
   // ---- outline containers: box AROUND engine-placed members ----

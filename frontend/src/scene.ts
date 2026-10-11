@@ -144,6 +144,9 @@ export interface Scene {
    *  point its arrangement's origin sits at (a hand move writes back there) */
   arrangedIn?: Map<string, string>;
   pdAnchor?: Map<string, { x: number; y: number }>;
+  /** MICRO-AUTORI-LAYOUT p.2 · where each arranged member is in its group's
+   *  space (the stored hand position, else the rule's), what a drag moves */
+  arrangedAt?: Map<string, { x: number; y: number; w: number; h: number }>;
   edges: SceneEdge[];
   lanes: Lane[];
   /** phase sub-bands inside epoch lanes (matrix view; when phases are shown) */

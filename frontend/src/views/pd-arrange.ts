@@ -10,7 +10,8 @@
 // LAST row whatever their depth, no row left empty between the levels. So the
 // properties are a row on top, the combiners and the extractors the rows under
 // them (the barycentre keeps each under its property), the sources at the
-// bottom. The positions the soloing stored (`layout.group_spaces[group]`) win,
+// bottom. Since 11 Oct 2026 (MICRO-AUTORI-LAYOUT p.2) a source sits right under
+// the extractor that reads it, not on a shared last row. The positions the soloing stored (`layout.group_spaces[group]`) win,
 // as they always did there; the Matrix reads them too, so a hand that arranged
 // the group in one place finds it arranged in the other.
 import type { Scene, SceneNode } from "../scene";
@@ -51,6 +52,8 @@ export function paradataGroupScene(
   instances: ViewInstance[] = viewInstances(doc, groupId, vix),
   /** the widest box the caller draws (the Matrix's sizes are its own) */
   cellW?: number,
+  /** the hand's stored positions applied (false: the rule's arrangement only) */
+  applyStored = true,
 ): Scene {
   const ids = new Set(memberIds);
   const nodes: EmNode[] = doc.graph.nodes.filter((n) => ids.has(n.id));
@@ -69,8 +72,13 @@ export function paradataGroupScene(
     if (ids.has(e.source) && ids.has(target) && e.source !== target)
       edges.push(target === e.target ? e : { ...e, target });
   }
+  // MICRO-AUTORI-LAYOUT p.2 · each source right under what reads it: the
+  // property, under it its extractor, under the extractor its document (or
+  // instance); only a source nobody in the group reads goes to the last row
   const isDoc = (id: string): boolean => vix.node.get(inst.get(id)?.master ?? id)?.node_type === "document";
-  const scene = layoutLayered(nodes, edges, undefined, { bottom: (id) => inst.has(id) || isDoc(id), cellW });
+  const read = new Set(edges.map((e) => e.target));
+  const scene = layoutLayered(nodes, edges, undefined,
+                              { bottom: (id) => (inst.has(id) || isDoc(id)) && !read.has(id), cellW });
   for (const sn of scene.nodes) {
     const r = inst.get(sn.id);
     if (!r) continue;
@@ -79,7 +87,7 @@ export function paradataGroupScene(
     sn.instanceBadge = { owner: r.owner, ownerName: r.owner_name, ownerKind: r.owner_kind, group: groupId };
     if (r.removed) sn.trace = true;
   }
-  const stored = doc.layout?.group_spaces?.[groupId];
+  const stored = applyStored ? doc.layout?.group_spaces?.[groupId] : undefined;
   if (stored)
     for (const sn of scene.nodes) {
       const r = stored[sn.id];
