@@ -607,6 +607,19 @@ export class DocumentStore {
     return this.redoStack.length > 0;
   }
 
+  /**
+   * TAVOLO 6 · return to the state of undo depth `depth`, dropping the steps
+   * above it: no redo, no operation. For a write that must not have happened (a
+   * room that lets this session read) — not an undo a person asked for.
+   */
+  takeBack(depth: number): void {
+    let last: Snapshot | undefined;
+    while (this.undoStack.length > depth) last = this.undoStack.pop();
+    if (!last) return;
+    this.restore(last);
+    this.emit();
+  }
+
   undo(): void {
     const s = this.undoStack.pop();
     if (!s) return;

@@ -22,7 +22,9 @@ import { t } from "./i18n";
 import { stateBadge, stateIds } from "./state-symbols";
 
 export type Reach = "unknown" | "reachable" | "unreachable";
-export type Access = "orcid_node" | "node_password" | "declared" | "none" | "expired";
+/** `room_token` (TAVOLO, 12 Oct 2026): in a room with a token handed at the door
+ *  and no sign-in of this app — the room said who it is (`host_info.author`). */
+export type Access = "orcid_node" | "node_password" | "declared" | "none" | "expired" | "room_token";
 
 /** A3 · the access as the panel says it: «entered with …», or, when the node's
  *  token has run out and cannot be renewed, «expired — sign in again». */

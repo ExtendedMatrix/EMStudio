@@ -259,7 +259,7 @@ import {
 import { parseTropy, promoteToDocument, tropyOf, tropyShelfInputs, type PromoteBytes } from "./tropy";
 import {
   closeAddMenu,
-  showAddMenu,
+  showAddMenu as showAddMenuUi,
   type AddMenuCategory,
   type AddMenuEntry,
 } from "./add-menu-ui";
@@ -1333,6 +1333,9 @@ function connectionAccess(): Access {
     if (hubAccessExpired()) return "expired";
     if (nodeIdentity?.authMode === "node_password") return "node_password";
     if (nodeIdentity) return "orcid_node";
+    // TAVOLO · a token handed at the door, and the room said whose: that IS an
+    // access («entered with not signed in» was said beside the token's ORCID)
+    if (sync.room && hubMyAuthor()) return "room_token";
     return currentIdentity() ? "declared" : "none";
   } catch {
     return "none";
@@ -2916,12 +2919,14 @@ function renderInspectorInto(host: HTMLElement): void {
       // from the DTC canvas is deleted from the corpus, and `store!` there would
       // have removed nothing while the panel closed as if it had.
       onDeleteNode: (id) => {
+        if (refuseReadOnly()) return;
         // FONTE · a unit, a property, a document: who leans on it, first
         if ((storeOfNode(id) ?? store) === store && canBeASource(id)) { void deleteWithConfirm(id); return; }
         (storeOfNode(id) ?? store!).deleteNode(id);
         select(null);
       },
       onDeleteEdge: (edge) => {
+        if (refuseReadOnly()) return;
         // clear first so the store's onChange re-render doesn't paint a panel
         // for the edge we're removing
         if (selectedEdge && sameEdge(selectedEdge, edge)) selectedEdge = null;
@@ -3054,6 +3059,85 @@ function renderInspectorInto(host: HTMLElement): void {
   renderInspectorIssues(host);
   renderNodeHistory(host);
   citeSectionFor(host); // COLLEGARE · «Cita in «capitolo»», with the story open
+  readOnlyFields(host);
+}
+
+/**
+ * TAVOLO 6 · a room that lets this session READ: the fields of the Inspector
+ * are read-only where they are drawn, and say why in their tooltip.
+ *
+ * Measured on 12 Oct 2026: with the role `viewer` the name field took the
+ * typing and Enter, the page showed the new name, the Log said «Edit: edited…»,
+ * and the room stayed as it was — a desk that looked like it wrote and did not.
+ */
+function readOnlyFields(host: HTMLElement): void {
+  const off = !!sync.room && hubReadOnly();
+  host.classList.toggle("room-readonly", off);
+  if (!off) return;
+  const why = readOnlyWhy();
+  for (const el of host.querySelectorAll<HTMLElement>("input, textarea, select, [contenteditable='true']")) {
+    if (el instanceof HTMLInputElement && !["checkbox", "radio", "file", "range", "color"].includes(el.type)) {
+      el.readOnly = true;
+    } else if (el instanceof HTMLTextAreaElement) {
+      el.readOnly = true;
+    } else if (el instanceof HTMLInputElement || el instanceof HTMLSelectElement) {
+      el.disabled = true;
+    } else {
+      el.contentEditable = "false";
+    }
+    el.setAttribute("aria-readonly", "true");
+    el.title = why;
+  }
+}
+
+/** TAVOLO 6 · every «Add» menu — ⇧A, the canvas's right click, «+», a node's
+ *  «add linked», a handle released in the void — opens through here: in a room
+ *  that lets this session read, it does not open, and says why. */
+function showAddMenu(...args: Parameters<typeof showAddMenuUi>): void {
+  if (refuseReadOnly()) return;
+  showAddMenuUi(...args);
+}
+
+/** «read-only: your role in this room is viewer» */
+function readOnlyWhy(): string {
+  return t("room.readOnlyWhy", { role: hostInfo.role ?? t("room.roleUnknown") });
+}
+
+/**
+ * TAVOLO 6 · a gesture that would WRITE, refused where it starts when the room
+ * lets this session read: said with the reason, and nothing touched. True when
+ * refused.
+ */
+function refuseReadOnly(): boolean {
+  if (!sync.room || !hubReadOnly()) return false;
+  const why = readOnlyWhy();
+  info.textContent = why;
+  toast(why);
+  return true;
+}
+
+/**
+ * TAVOLO 6 · the net under the gestures: a write that reached the store anyway
+ * (a gesture nobody guarded, a seam, a script) is TAKEN BACK — the store returns
+ * to the state before it, once per gesture — and the Log says so. The op never
+ * left (`hubSendLocal`), so without this the screen would show what the room
+ * does not have.
+ */
+let readOnlyRevert: { st: DocumentStore; depth: number } | null = null;
+function takeBackReadOnlyWrite(st: DocumentStore): void {
+  if (readOnlyRevert) return;
+  // the store pushed its undo step BEFORE it wrote and emitted: that is the
+  // state to return to
+  readOnlyRevert = { st, depth: Math.max(0, st.undoDepth - 1) };
+  queueMicrotask(() => {
+    const back = readOnlyRevert;
+    readOnlyRevert = null;
+    if (!back) return;
+    back.st.takeBack(back.depth);
+    logWarn(t("room.readOnlyTakenBack", { role: hostInfo.role ?? t("room.roleUnknown") }));
+    info.textContent = readOnlyWhy();
+    refreshInspector();
+  });
 }
 
 /** A1 · «Also known as» in the Inspector: the alternative labels of the node
@@ -4853,6 +4937,11 @@ function wireStore(s: DocumentStore): void {
   // Remote-applied ops don't re-emit (DocumentStore suppresses), so no echo.
   s.onOp((op) => {
     if (s !== store) return;
+    // TAVOLO 6 · a room that lets this session read: the write is taken back
+    if (sync.room && !sync.canWrite) {
+      takeBackReadOnlyWrite(s);
+      return;
+    }
     traceOp(op); // SHIFT-A · the node history reads this session's own ops
     queueOpLog(s, op); // C4 · …and the Log says what the hand changed
     // V1 · ONE vocabulary at the door (decision of E.D., 4 Oct 2026): the
@@ -31152,7 +31241,7 @@ function renderTraceBanner(host: HTMLElement, st: DocumentStore, id: string): vo
 }
 
 function deleteSelectedNodes(): void {
-  if (!store) return;
+  if (!store || refuseReadOnly()) return;
   // delete the WHOLE multi-selection, not just the active node
   const ids = selectedIds.size ? [...selectedIds] : selectedId ? [selectedId] : [];
   // epochs & phases must go through their dedicated flows (swimlane + temporal
@@ -31574,6 +31663,7 @@ window.addEventListener("keydown", (e) => {
   }
   if ((e.key === "Delete" || e.key === "Backspace") && selectedEdge && store) {
     e.preventDefault();
+    if (refuseReadOnly()) return;
     const edge = selectedEdge;
     selectedEdge = null; // clear before the store's onChange re-render
     (storeOfEdge(edge) ?? store).deleteEdge(edge);
