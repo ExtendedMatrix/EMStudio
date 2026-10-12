@@ -126,6 +126,28 @@ export function stampForResend(pending: Iterable<HubOp>, now: string): HubOp[] {
   return [...pending].map((op) => ({ ...op, ts: now }));
 }
 
+/** One unconfirmed operation, as the room's `op_result` will echo it back: the
+ *  verb, the node, the field and the clock (the relay keeps the client's `ts`). */
+export function opKey(op: HubOp): string {
+  return `${op.op}|${String(op.node_id ?? op.id ?? "")}|${String(op.field ?? "")}|${String(op.ts ?? "")}`;
+}
+
+/**
+ * TAVOLO 8 · what to send on THIS socket, after its snapshot has landed.
+ *
+ * Everything still unconfirmed that did not already leave on this socket: the
+ * work done while the network was down (it never left at all), and what left on
+ * a socket that dropped before its answer came (re-sent; the room answers
+ * `idempotent` if it had it). Measured on 12 Oct 2026: the app had only the
+ * RE-SYNC road for this, and a client that came back on a resume sent nothing.
+ * Pure, so `scripts/check-room-offline.mjs` asks it the same question the app does.
+ */
+export function toSendAfterSnapshot(unconfirmed: Iterable<HubOp>,
+                                    sentOn: ReadonlyMap<string, number>,
+                                    socket: number): HubOp[] {
+  return [...unconfirmed].filter((op) => sentOn.get(opKey(op)) !== socket);
+}
+
 // ── translating a local edit into operations the relay understands ───────────
 
 /**

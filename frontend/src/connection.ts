@@ -54,6 +54,8 @@ export interface ConnectionState {
   misaligned?: string | null;
   /** a room's socket dropped and is being asked again */
   reconnecting?: boolean;
+  /** TAVOLO 8 · this session's edits the room has not confirmed yet */
+  waitingOps?: number;
   /** I1 · the room said this session may not write */
   readOnly?: boolean;
   /** I1 · the role the room resolved for this session, when it said one */
@@ -117,6 +119,11 @@ export function wherePhrase(s: ConnectionState): string {
       : t("where.sidecar", { tool });
   }
   if (s.mode === "hub" && s.room) {
+    // TAVOLO 8 · without network the session is still IN the room, and what it
+    // has written in the dark is waiting, counted — not «on this computer»
+    if (s.reconnecting) {
+      return t("where.roomOffline", { room: s.roomTitle || s.room, n: String(s.waitingOps ?? 0) });
+    }
     return t("where.room", { room: s.roomTitle || s.room, node: nodeName(s.node) });
   }
   return t("where.local");

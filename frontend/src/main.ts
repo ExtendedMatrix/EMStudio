@@ -373,8 +373,8 @@ import { addressMap, chooseModel, needsChoice, startResources, type ModelChoice 
 import { foldForms, landPack, packTileset } from "./pack3tz";
 import {
   type AwarenessNote, emptyPresence, type HubOp, noteForRemoteOp, noteForStale,
-  opsForLocalChange, peerSelections, planRejoin, refusalIsNews, stampForResend, withOpLanguage,
-  type PresenceState,
+  opKey, opsForLocalChange, peerSelections, planRejoin, refusalIsNews, stampForResend,
+  toSendAfterSnapshot, withOpLanguage, type PresenceState,
   reducePresence,
 } from "./hub";
 import { clearField as crdtClearField, writeField as crdtWriteField } from "./crdt";
@@ -1350,6 +1350,7 @@ function connectionState(): ConnectionState {
     hostTool: hostToolName(),
     hostFile: hostInfo.file || hostInfo.database || hostInfo.label || null,
     notice: hostNotice, misaligned, reconnecting: hubReconnecting,
+    waitingOps: room ? hubWaitingCount() : 0,
     readOnly: hubReadOnly(), role: hostInfo.role ?? null, sync: room ? roomSyncState() : null };
 }
 /** I1 · where this session's edits are with the room: a conflict of the last
@@ -1362,17 +1363,32 @@ function roomSyncState(): "aligned" | "pending" | "conflict" {
   } catch { /* boot */ }
   return "aligned";
 }
+/** TAVOLO 8 · how many of this session's edits wait for the room's word */
+function hubWaitingCount(): number {
+  try {
+    return hubUnconfirmed.size + hubResyncPending.length;
+  } catch {
+    return 0;   // boot
+  }
+}
 /** I1 · the sync sign follows every operation sent and confirmed: one repaint
  *  of the line per task, however many operations moved */
 let syncSignQueued = false;
 let syncSignShown: string | null = null;
+let waitingShown = -1;
 function noteSyncState(): void {
   if (syncSignQueued) return;
   syncSignQueued = true;
   queueMicrotask(() => {
     syncSignQueued = false;
-    // only when the state CHANGED: the line repaints the open panel too
-    if (roomSyncState() !== syncSignShown) renderStatusLine();
+    // only when the state CHANGED: the line repaints the open panel too. Without
+    // network the line also counts what waits, so the count is a change too
+    const waiting = hubReconnecting ? hubWaitingCount() : -1;
+    if (roomSyncState() !== syncSignShown || waiting !== waitingShown) {
+      waitingShown = waiting;
+      renderStatusLine();
+      if (hubReconnecting) renderHubRoster();
+    }
   });
 }
 /**
@@ -6023,11 +6039,26 @@ function noteRoomGraphs(doc: unknown): void {
  * In this client the op carries it as `graph_id` while it waits to be
  * confirmed or re-sent; on the wire it is the envelope's word, never the body's.
  */
-function sendHubOp(op: HubOp): void {
+function sendHubOp(op: HubOp): boolean {
   const { graph_id: graphId, ...body } = op as HubOp & { graph_id?: string };
   const named = graphId && hubRoomGraphs.has(String(graphId)) ? String(graphId) : undefined;
-  sync.sendCommand(wireEnvelope("op", body as unknown as Record<string, unknown>,
-                                { graph_id: named }));
+  const sent = sync.sendCommand(wireEnvelope("op", body as unknown as Record<string, unknown>,
+                                              { graph_id: named }));
+  // TAVOLO 8 · which socket carried it: an op written with no network stays in
+  // `hubUnconfirmed` UNSENT, and the next socket is the one that sends it
+  if (sent) hubSentOn.set(hubKey(op), hubSocketGen);
+  return sent;
+}
+
+/** TAVOLO 8 · the socket an unconfirmed op last left on (`hubSocketGen`). */
+const hubSentOn = new Map<string, number>();
+/** TAVOLO 8 · one number per socket that opened in this session's room */
+let hubSocketGen = 0;
+
+/** The identity the relay stamps on this session's operations — the token's,
+ *  said at the door (`host_info.author`); null before it has spoken. */
+function hubMyAuthor(): string | null {
+  return ((hostInfo as Record<string, unknown>).author as string | undefined) ?? null;
 }
 
 /**
@@ -6049,9 +6080,7 @@ function hubStoreFor(graphId: string | undefined): DocumentStore | null {
   return hubRoomGraphs.size <= 1 ? store : null;
 }
 
-function hubKey(op: HubOp): string {
-  return `${op.op}|${String(op.node_id ?? op.id ?? "")}|${String(op.field ?? "")}|${String(op.ts ?? "")}`;
-}
+const hubKey = opKey;
 
 function noteHub(note: AwarenessNote): void {
   hubNotes.unshift(note);
@@ -6086,6 +6115,12 @@ function hubSendLocal(ops: HubOp[], graphId = ""): void {
   // OP, decided here once: the node's, else the study's, else `und`.
   for (const hubOp of ops) {
     if (hubOp.op === "add_node") withOpLanguage(hubOp, store?.doc.graph ?? null);
+    // TAVOLO 8 · the clock of an act is the moment it was MADE. A structural op
+    // left without one (a deletion, an edge) was dated by the relay on arrival
+    // — for work done without network, the moment it came back, not the moment
+    // it was done — and its `op_result` never matched the waiting copy, so the
+    // sync sign stayed on «⋯» for good
+    if (!hubOp.ts) hubOp.ts = new Date().toISOString().replace(/\.\d+Z$/, "Z");
     // G1 · the graph of the store that changed, kept with the op so a re-send
     // after a re-sync goes to the same graph
     if (graphId) (hubOp as HubOp & { graph_id?: string }).graph_id = graphId;
@@ -6275,28 +6310,48 @@ function noteForStructuralOp(kind: string, subject: string, who: string | null,
  * 2. **re-send** — as new operations, stamped now, so the room converges to the
  *    same thing rather than to the state it had before this client reconnected.
  *
- * The operations this cannot re-apply locally (a node added while offline, an
- * edge) are still SENT, and counted in the note: the room takes them and the
- * next snapshot brings them back. That is a declared limit, not a silence —
- * `applyRemoteOp` speaks the store's vocabulary and the relay speaks per-field
- * CRDT, and widening that translation is P4.5, not a line here.
+ * TAVOLO 8 (12 Oct 2026) · and not only after a RE-SYNC. Measured on the table:
+ * a client that lost the network for nine seconds came back on a RESUME (its
+ * base was newer than the room's compaction point), so nothing was ever put in
+ * `hubResyncPending`; the snapshot of the door replaced the copy and the three
+ * edits made in the dark vanished from the room and from the screen, while
+ * `hubUnconfirmed` kept them — unsent — and the sync sign stayed on «⋯». So this
+ * runs after EVERY snapshot of the room, on everything still unconfirmed:
+ *
+ * * a RESUME keeps each op's own clock — it is when the hand did it, and the
+ *   room compares it with what others did meanwhile (a later hand wins by its
+ *   clock, not because this one was lost);
+ * * a RE-SYNC has re-stamped them (`stampForResend`), as before;
+ * * an op is sent once per socket (`hubSentOn`): the one written in the dark
+ *   leaves now, the one already sent on this socket is only re-applied here.
+ *
+ * Every verb is re-applied locally — `update_field` through the field writer,
+ * the structural ones through the same CRDT the room runs (idempotent: a node
+ * that is already there merges with itself).
  */
 function replayAfterResync(): void {
-  if (!hubResyncPending.length) return;
-  const pending = hubResyncPending;
+  for (const op of hubResyncPending) hubUnconfirmed.set(hubKey(op), op);
+  const restamped = hubResyncPending.length;
   hubResyncPending = [];
-  let reapplied = 0;
-  for (const op of pending) {
+  if (!hubUnconfirmed.size) return;
+  const me = hubMyAuthor();
+  for (const op of [...hubUnconfirmed.values()]) {
     const target = hubStoreFor((op as HubOp & { graph_id?: string }).graph_id);
-    if (hubWriteFieldLocally(op, target)) reapplied += 1;
-    hubUnconfirmed.set(hubKey(op), op);
-    noteSyncState();
-    sendHubOp(op);
+    // the relay will stamp it with this session's identity: the local copy is
+    // compared with that clock, or the two copies would decide differently
+    const mine = JSON.parse(JSON.stringify({ ...op, author: op.author ?? me })) as HubOp;
+    delete (mine as HubOp & { graph_id?: string }).graph_id;
+    if (mine.op === "update_field") hubWriteFieldLocally(mine, target);
+    else target?.applyCrdtOp(mine as unknown as Record<string, unknown>);
   }
-  if (reapplied < pending.length) {
+  let sent = 0;
+  for (const op of toSendAfterSnapshot(hubUnconfirmed.values(), hubSentOn, hubSocketGen)) {
+    if (sendHubOp(op)) sent += 1;
+  }
+  noteSyncState();
+  if (sent > restamped) {
     noteHub({ kind: "resync", at: new Date().toISOString(),
-              text: t("hub.resent.structural",
-                      { n: String(pending.length - reapplied) }) });
+              text: t("hub.resentWaiting", { n: String(sent - restamped) }) });
   }
   buildScenes();
   draw();
@@ -6835,7 +6890,12 @@ function renderHubRoster(): void {
   const others = hubPresence.members.filter((m) => m.id !== hubPresence.me);
   const inRoom = hubPresence.members.length;
   chip.classList.toggle("hidden", !sync.room);
-  chip.textContent = sync.room ? t("hub.roster", { n: String(inRoom) }) : "";
+  // TAVOLO 8 · without network nobody is known to be here — and «0 in the room»
+  // read as having left it: the chip says it is asking again
+  chip.textContent = !sync.room ? ""
+    : hubReconnecting && !sync.connected
+      ? t("hub.rosterRetrying", { n: String(hubWaitingCount()) })
+      : t("hub.roster", { n: String(inRoom) });
   if (!chip.dataset.membersWired) {
     // wired ONCE: `renderHubRoster` runs on every presence frame, and a listener
     // added per frame is a click that fires eleven times by the afternoon
@@ -7760,6 +7820,7 @@ function connectToHub(url: string, room: string, token: string | null): void {
     onOpResult: (message) => {
       const op = (message.op ?? {}) as HubOp;
       hubUnconfirmed.delete(hubKey(op));
+      hubSentOn.delete(hubKey(op));
       noteSyncState();
       if (message.applied) {
         hubBase = String(op.ts ?? hubBase ?? "");
@@ -7792,9 +7853,17 @@ function connectToHub(url: string, room: string, token: string | null): void {
     },
     onStatus: (state) => {
       document.body.classList.toggle("sync-active", state === "open");
-      // Z · a room being asked again is still the room (amber), not «this computer»
-      if (state === "open") hubReconnecting = false;
-      setModeIndicator(state === "open" || (hubReconnecting && sync.retrying) ? "hub" : "standalone");
+      // Z · a room being asked again is still the room (amber), not «this computer».
+      // TAVOLO 8 · `sync.retrying` is the SIDECAR's word and was always false
+      // here: 1.5 s after a cut the bar said «On this computer» and the roster
+      // «0 in the room», as if the person had left. Only leaving leaves.
+      if (state === "open") {
+        hubReconnecting = false;
+        hubSocketGen += 1;
+      } else if (state === "closed" && sync.inRoom) {
+        hubReconnecting = true;
+      }
+      setModeIndicator(state === "open" || sync.inRoom ? "hub" : "standalone");
       if (state === "open") info.textContent = t("hub.connected", { room });
       else if (state === "closed") {
         hubPresence = emptyPresence();

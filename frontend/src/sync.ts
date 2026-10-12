@@ -363,6 +363,12 @@ export class SyncClient {
     return this.hub?.room ?? null;
   }
 
+  /** Still IN the room — connected, or without network and asking again. Only
+   *  leaving (`disconnect`) ends it: a dropped Wi-Fi is not a door. */
+  get inRoom(): boolean {
+    return !!this.hub && !this.manualClose;
+  }
+
   private open(): void {
     if (!this.url || !this.cb) return;
     this.cb.onStatus("connecting");
@@ -378,10 +384,16 @@ export class SyncClient {
       this.cb?.onStatus("open");
       // ask the host for its current graph — this is what makes "sync mode"
       // show the host's data (ADR-002 snapshot-READ). No-op if it fails.
-      try {
-        ws.send(JSON.stringify(envelope("request_snapshot")));
-      } catch {
-        /* dropped */
+      // NOT in a room: the relay sends its snapshot at the door, always (the
+      // three frames of the join, `app/ws.py`), and a second one asked here
+      // was built BEFORE the work this client re-sends on coming back — it
+      // landed on top of it (measured on the table, 12 Oct 2026).
+      if (!this.hub) {
+        try {
+          ws.send(JSON.stringify(envelope("request_snapshot")));
+        } catch {
+          /* dropped */
+        }
       }
       // C1 · …and say what WE have open, so the comparison can happen at the
       // one moment it is still cheap to fix. `client_info` is the verb the
