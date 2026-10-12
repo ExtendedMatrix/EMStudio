@@ -61,6 +61,21 @@ interface Snapshot {
 
 const MAX_UNDO = 80;
 
+/**
+ * TAVOLO 2 · the hand of this session's edits while it sits in a room: the
+ * identity the RELAY stamps on its operations (the token's, `host_info.author`).
+ *
+ * Measured on the table of 12 Oct 2026: a web session with no declared identity
+ * stamped its edits `by: null`, the relay stamped the same edits with the
+ * token's ORCID, and at the same instant the two copies decided by different
+ * clocks — A showed B's value, B showed A's, the room kept A's. A local clock
+ * must be the clock the room will compare. Null outside a room.
+ */
+let roomAuthor: string | null = null;
+export function setRoomAuthor(orcid: string | null): void {
+  roomAuthor = orcid || null;
+}
+
 /** MIG1 (2026-08-06) one-shot legacy migration: node_type strings renamed in
  *  this release. A legacy em.json still carries the old string; remap it in place
  *  at load so the dataset opens on the new model (LinkNode → ResourceNode →
@@ -429,6 +444,31 @@ export class DocumentStore {
     }
   }
 
+  /**
+   * TAVOLO 2 · take ONE field as the ROOM holds it — its value (or its emptying)
+   * and its clock — after the room refused this session's value for it.
+   *
+   * Not a merge: the room is the state of record, and its answer `stale` says
+   * its clock beats the one this copy holds. A merge here would compare the two
+   * again, and where this machine's clock runs ahead it would keep the value
+   * the room discarded (the divergence measured on 12 Oct 2026). Not an edit
+   * either: nothing is stamped and nothing is sent back.
+   */
+  adoptRoomField(nodeId: string, field: string, value: unknown, clock: { ts?: string | null; by?: string | null },
+                 removed: boolean): void {
+    const node = this.node(nodeId);
+    if (!node) return;
+    this.suppressOp = true;
+    try {
+      this.checkpoint();
+      if (removed) clearField(node as unknown as Payload, field, clock);
+      else writeField(node as unknown as Payload, field, value, clock);
+      this.emit();
+    } finally {
+      this.suppressOp = false;
+    }
+  }
+
   /** Apply an operation that arrived from a peer, WITHOUT re-emitting it. */
   applyRemoteOp(op: GraphOp): void {
     this.suppressOp = true;
@@ -652,9 +692,10 @@ export class DocumentStore {
   // WITH NO IDENTITY DECLARED, `*_by` STAYS EMPTY. The clock is always
   // knowable, so the times are recorded either way; the author is not invented.
 
-  /** The ORCID iD authoring right now, or null when nobody said. */
+  /** The ORCID iD authoring right now, or null when nobody said. In a room it
+   *  is the identity the relay stamps on this session's ops (`setRoomAuthor`). */
   private editorOrcid(): string | null {
-    return currentIdentity()?.orcid ?? null;
+    return roomAuthor ?? currentIdentity()?.orcid ?? null;
   }
 
   /** Stamp a node's creation. No-op for an operation that arrived from a peer:

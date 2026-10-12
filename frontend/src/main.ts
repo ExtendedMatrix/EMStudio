@@ -150,7 +150,7 @@ import {
   renderLogPanel,
   versionBanner,
 } from "./logpanel";
-import { DocumentStore } from "./model";
+import { DocumentStore, setRoomAuthor } from "./model";
 import {
   HAS_PARADATA_NODEGROUP,
   initialName,
@@ -377,7 +377,8 @@ import {
   toSendAfterSnapshot, withOpLanguage, type PresenceState,
   reducePresence,
 } from "./hub";
-import { clearField as crdtClearField, writeField as crdtWriteField } from "./crdt";
+import { applyOp as crdtApplyOp, fieldClock as crdtFieldClock, fieldTombstone as crdtFieldTombstone,
+         getField as crdtGetField, type CrdtOp } from "./crdt";
 import { isRemoved, sectionLanguage } from "./crdt";
 import {
   AI_PROVIDERS,
@@ -6139,28 +6140,39 @@ function hubSendLocal(ops: HubOp[], graphId = ""): void {
  * a second implementation is how "the value came back but the emptying did not"
  * happens.
  *
- * A field that was EMPTIED goes through `crdtClearField`, which leaves the
- * tombstone. Writing `undefined` instead would drop the key, and a dropped key
- * says "I never had that" — which the merge is designed to overrule with the
+ * A field that was EMPTIED (`remove: true`) is emptied by the CRDT, which leaves
+ * the tombstone. Writing `undefined` instead would drop the key, and a dropped
+ * key says "I never had that" — which the merge is designed to overrule with the
  * other side's value. That is the resurrection this function exists to prevent.
+ *
+ * `written`, `kept` (the field here is newer: the op lost the comparison, as it
+ * loses it in the room), `same` (this copy already has it — a replay) or
+ * `missing` (no such node or field here).
  */
-function hubWriteFieldLocally(op: HubOp, target: DocumentStore | null = store): boolean {
-  if (!target || op.op !== "update_field") return false;
+function hubWriteFieldLocally(op: HubOp, target: DocumentStore | null = store):
+    "written" | "kept" | "same" | "missing" {
+  if (!target || op.op !== "update_field") return "missing";
   const nodeId = String(op.node_id ?? op.id ?? "");
   const node = target.node(nodeId);
   const field = String(op.field ?? "");
-  if (!node || !field) return false;
+  if (!node || !field) return "missing";
+  // TAVOLO 2 · THROUGH THE COMPARISON, the room's own (`crdt.applyOp`, the twin
+  // of s3dgraphy `apply_op_to_section`): the op lands only if its clock beats
+  // the field's here. Measured on 12 Oct 2026: written unconditionally, an op
+  // arriving after a newer local edit (or in another order than the room's)
+  // left this copy on a value the room had already discarded, and nobody saw.
+  // The same act, on a copy of the node: what the room would write is written.
+  const payload = JSON.parse(JSON.stringify(node)) as Record<string, unknown>;
+  const verdict = crdtApplyOp({ nodes: [payload], edges: [] }, op as unknown as CrdtOp);
+  if (!verdict.applied) return verdict.reason === "idempotent" ? "same" : "kept";
   // through the store's remote path: `applyRemoteOp` does not re-stamp, so the
   // hand that made this edit stays the hand that made it (AUDIT1)
-  const payload = JSON.parse(JSON.stringify(node)) as Record<string, unknown>;
-  if (op.remove === true) crdtClearField(payload, field, { ts: op.ts, by: op.author });
-  else crdtWriteField(payload, field, op.value, { ts: op.ts, by: op.author });
   target.applyRemoteOp({
     op: "update_node", node_id: nodeId,
     patch: { name: payload.name, description: payload.description,
              data: payload.data } as Partial<EmNode>,
   });
-  return true;
+  return "written";
 }
 
 /**
@@ -6192,7 +6204,7 @@ function applyWireOp(message: Record<string, unknown>): void {
   }
   for (const op of ops) {
     if (op.op === "update_field") {
-      if (!hubWriteFieldLocally(op)) {
+      if (hubWriteFieldLocally(op) === "missing") {
         opRefused(t("ops.notApplied", { what: `update_field ${String(op.field ?? "")}`,
                                         why: `node '${String(op.node_id ?? op.id ?? "")}' is not here` }));
       }
@@ -6239,10 +6251,17 @@ function hubApplyRemote(message: Record<string, unknown>, graphId?: string): voi
 
   if (kind === "update_field") {
     const node = target.node(String(op.node_id ?? op.id ?? ""));
-    if (!hubWriteFieldLocally(op, target)) return;
+    const name = node?.name ? String(node.name) : null;
+    const landed = hubWriteFieldLocally(op, target);
+    if (landed === "missing") return;
     const who = hubPresence.members.find((m) => m.author === op.author)?.display
       ?? (op.author as string | null);
-    noteHub(noteForRemoteOp(op, who, node?.name ? String(node.name) : null));
+    // `kept`: the field here is newer (a hand of this session the room has not
+    // answered yet, or a later one) — the room decides the same way, so the
+    // value stays and the note says the edit arrived and lost, not that it landed
+    if (landed === "written") noteHub(noteForRemoteOp(op, who, name));
+    else if (landed === "kept") logInfo(t("hub.remoteOlder", { who: who || t("hub.somebody"),
+                                        field: String(op.field ?? ""), node: name ?? String(op.node_id ?? "") }));
   } else if (kind === "add_node" || kind === "remove_node"
              || kind === "add_edge" || kind === "remove_edge") {
     // the name BEFORE the operation: after a `remove_node` there is a tombstone
@@ -6357,6 +6376,87 @@ function replayAfterResync(): void {
   draw();
   refreshInspector();
   nodeList.refresh();
+}
+
+/**
+ * TAVOLO 2 · the fields whose value from this session the ROOM refused
+ * (`op_result` `stale`, or `tie-value`), waiting for the room's own value.
+ *
+ * Measured on 12 Oct 2026: B wrote 300 ms after A, the room kept A (at the
+ * second, the smaller ORCID), and B went on showing its own value with a Log
+ * line that said the room «already has a newer one». The `op_result` does not
+ * carry the winning value, so the room is asked for its document — and only the
+ * refused fields are taken from it (`hubRealignFrom`), the rest of this copy
+ * untouched.
+ */
+const hubRealign = new Map<string, HubOp>();
+let hubRealignAsked = false;
+
+function hubAskRealign(op: HubOp): void {
+  hubRealign.set(`${String(op.node_id ?? op.id ?? "")}|${String(op.field ?? "")}`, op);
+  if (hubRealignAsked) return;
+  hubRealignAsked = sync.sendCommand(wireEnvelope("request_snapshot"));
+}
+
+/** The answer to `hubAskRealign`: each refused field takes the room's value and
+ *  clock, the Log says whose change the room kept, and the conflicts chip lights
+ *  — a value of this session was discarded, and it can be reviewed. */
+function hubRealignFrom(doc: unknown): void {
+  hubRealignAsked = false;
+  const graphs = ((doc as { graphs?: Record<string, Record<string, unknown>> } | null)
+    ?.graphs) ?? {};
+  const sections = Object.entries(graphs).filter(([, sec]) => sec && !isCorpusSection(sec));
+  const pending = [...hubRealign.values()];
+  hubRealign.clear();
+  const discarded: Conflict[] = [];
+  for (const op of pending) {
+    const graphId = (op as HubOp & { graph_id?: string }).graph_id;
+    const nodeId = String(op.node_id ?? op.id ?? "");
+    const field = String(op.field ?? "");
+    const section = sections.find(([key, sec]) => String(sec.graph_id ?? key) === graphId)?.[1]
+      ?? (sections.length === 1 ? sections[0][1] : null);
+    const roomNode = ((section?.nodes ?? []) as Array<Record<string, unknown>>)
+      .find((n) => String(n.id) === nodeId);
+    const target = hubStoreFor(graphId);
+    const local = target?.node(nodeId);
+    if (!roomNode || !target || !local) continue;
+    // a later hand of this session on the same field is still on its way: the
+    // room has not answered it yet, and it may well win
+    const later = [...hubUnconfirmed.values()].some((u) => u.op === "update_field"
+      && String(u.node_id ?? "") === nodeId && String(u.field ?? "") === field
+      && String(u.ts ?? "") > String(op.ts ?? ""));
+    if (later) continue;
+    const clock = crdtFieldClock(roomNode, field);
+    const removed = crdtFieldTombstone(roomNode, field) !== null;
+    const before = JSON.parse(JSON.stringify(local)) as Record<string, unknown>;
+    target.adoptRoomField(nodeId, field, crdtGetField(roomNode, field), clock, removed);
+    const who = hubPresence.members.find((m) => m.author === clock.by)?.display
+      ?? clock.by ?? t("hub.somebody");
+    // a rename names the node by its id: its name is the value in question
+    logWarn(t("hub.roomKept", { who, when: hubWhen(clock.ts), field,
+                                node: field === "name" ? nodeId : String(local.name ?? nodeId) }));
+    discarded.push({
+      nodeId, reason: "newer", field, fieldHint: [field],
+      winner: { by: clock.by ?? null, at: clock.ts ?? null, stamp: "field_clock", side: "room" },
+      loser: { by: hubMyAuthor(), at: op.ts ?? null, stamp: "field_clock", side: "mine" },
+      loserValue: op.remove === true ? null : op.value,
+      loserPayload: before,
+    });
+  }
+  if (discarded.length) noteRoomConflicts(discarded);
+  buildScenes();
+  draw();
+  refreshInspector();
+  nodeList.refresh();
+}
+
+/** «12:47:53.400» — the instant of a clock, as a person reads it here. */
+function hubWhen(ts: string | null | undefined): string {
+  const at = ts ? new Date(ts) : null;
+  if (!at || Number.isNaN(at.getTime())) return String(ts ?? "?");
+  const pad = (n: number, w = 2) => String(n).padStart(w, "0");
+  return `${pad(at.getHours())}:${pad(at.getMinutes())}:${pad(at.getSeconds())}`
+    + (/\.\d+Z?$/.test(String(ts)) ? `.${pad(at.getMilliseconds(), 3)}` : "");
 }
 
 /**
@@ -7712,6 +7812,12 @@ function connectToHub(url: string, room: string, token: string | null): void {
     },
     onOp: (op, graphId) => hubApplyRemote(op as unknown as Record<string, unknown>, graphId),
     onSnapshot: (doc) => {
+      // TAVOLO 2 · the snapshot THIS session asked for, to take back the fields
+      // the room refused: only those fields change, the copy is not replaced
+      if (hubRealignAsked) {
+        hubRealignFrom(doc);
+        return;
+      }
       // SEEDING COMES FIRST, because this snapshot is the thing it has to
       // survive. A room created a second ago still sends one — a container with
       // one empty graph — and loading it here would blank the document the
@@ -7757,6 +7863,9 @@ function connectToHub(url: string, room: string, token: string | null): void {
     },
     onHostInfo: (info2) => {
       hostInfo = { ...hostInfo, ...info2 };
+      // TAVOLO 2 · this session's edits are stamped, here too, with the hand the
+      // relay will stamp on them — one clock, compared the same way in both copies
+      setRoomAuthor(hubMyAuthor());
       // the ROLE arrives here, and it is the third rung's second half
       refreshIdentityChip();
       announceConnector(hostInfo, "cloud");   // a room: the connector is remote
@@ -7834,6 +7943,13 @@ function connectToHub(url: string, room: string, token: string | null): void {
         return;
       }
       const node = store?.node(String(op.node_id ?? ""));
+      // TAVOLO 2 · a value of mine the room refused because its own is newer
+      // (or wins the tie): this copy takes the room's, and says whose it kept
+      if (op.op === "update_field"
+          && (message.reason === "stale" || message.reason === "tie-value")) {
+        hubAskRealign(op);
+        return;
+      }
       if (refusalIsNews(String(message.reason ?? ""))) {
         // V1 · not «somebody was later»: the room did NOT apply this edit
         // (an unknown verb, a node it does not have…). A sentence, not a note.
@@ -7860,8 +7976,13 @@ function connectToHub(url: string, room: string, token: string | null): void {
       if (state === "open") {
         hubReconnecting = false;
         hubSocketGen += 1;
+        // a new socket: its first snapshot is the door's, never an answer to a
+        // realignment asked on the socket that dropped
+        hubRealignAsked = false;
       } else if (state === "closed" && sync.inRoom) {
         hubReconnecting = true;
+      } else if (state === "closed") {
+        setRoomAuthor(null);   // out of the room: the hand is this computer's again
       }
       setModeIndicator(state === "open" || sync.inRoom ? "hub" : "standalone");
       if (state === "open") info.textContent = t("hub.connected", { room });
@@ -8036,6 +8157,31 @@ function pinProjectVersion(): void {
   toast(t("version.pinned", { v: String(projectVersion.number), id: projectVersion.id }));
 }
 
+function paintConflictChip(): void {
+  const conflicts = lastMergeConflicts;
+  const chip = document.getElementById("conflict-reopen");
+  if (!chip) return;
+  chip.classList.toggle("hidden", !conflicts.length);
+  // I1 · the sign of the list (≠), not a flag of its own
+  chip.dataset.state = "sync.conflict";
+  chip.textContent = conflicts.length
+    ? `${stateSign("sync.conflict").glyph} ${t("conflict.chip", { n: String(conflicts.length) })}`
+    : "";
+  chip.title = t("conflict.chipTitle");
+}
+
+/**
+ * TAVOLO 2 · values of THIS session the room discarded: they join the list the
+ * chip reopens, and the chip lights — without throwing the panel in the face of
+ * somebody who is typing. «Keep this version» there re-applies the discarded
+ * value as a new edit of mine, which is the honest way to insist.
+ */
+function noteRoomConflicts(conflicts: Conflict[]): void {
+  lastMergeConflicts = [...lastMergeConflicts, ...conflicts];
+  noteSyncState();
+  paintConflictChip();
+}
+
 /**
  * P3 · the conflict panel — what used to be silence.
  *
@@ -8055,16 +8201,7 @@ function showConflictPanel(conflicts: Conflict[]): void {
   if (!host) return;
   lastMergeConflicts = conflicts;
   noteSyncState();
-  const chip = document.getElementById("conflict-reopen");
-  if (chip) {
-    chip.classList.toggle("hidden", !conflicts.length);
-    // I1 · the sign of the list (≠), not a flag of its own
-    chip.dataset.state = "sync.conflict";
-    chip.textContent = conflicts.length
-      ? `${stateSign("sync.conflict").glyph} ${t("conflict.chip", { n: String(conflicts.length) })}`
-      : "";
-    chip.title = t("conflict.chipTitle");
-  }
+  paintConflictChip();
   host.innerHTML = "";
   if (!conflicts.length) {
     host.classList.add("hidden");
