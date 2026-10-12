@@ -24,7 +24,7 @@ import { resolveNodePair } from "./container";
 import type { Conflict } from "./container";
 import {
   applyOp as crdtApplyOp,
-  canonicalValue, clearField, contentFields, getField,
+  canonicalValue, clearField, contentFields, fieldClock as fieldClockOf, getField,
   isRemoved,
   liveEdges as crdtLiveEdges, liveNodes as crdtLiveNodes, nowIso, nowOpIso,
   setFieldClock, unstampedFields, writeField,
@@ -57,6 +57,21 @@ export type GraphOp =
 interface Snapshot {
   graph: string;
   layout: string;
+  /** TAVOLO 2 · in a room (`DocumentStore.liveHistory`): the operations the step
+   *  emitted — what an undo of it has to answer with operations of its own */
+  ops?: GraphOp[];
+}
+
+/** TAVOLO 2 · what an undo or a redo did in a room, for the Log. */
+export interface LiveHistoryNote {
+  kind: "undo" | "redo";
+  /** fields written back (and sent) — node and edge acts counted in `acts` */
+  fields: number;
+  acts: number;
+  /** fields not undone: somebody wrote them after this session did */
+  skipped: Array<{ nodeId: string; field: string }>;
+  /** the step holds an act a room cannot take back as an operation yet */
+  refused?: string;
 }
 
 const MAX_UNDO = 80;
@@ -347,6 +362,28 @@ export class DocumentStore {
   private opFn: ((op: GraphOp) => void) | null = null;
   private suppressOp = false;
 
+  /**
+   * TAVOLO 2 · is this store a ROOM's document right now? Set by the app.
+   *
+   * In a room the history changes meaning (prova 2, 12 Oct 2026: `undo()` put
+   * US6 back on A's screen only — no frame left, B and the room kept the value).
+   * An undo there is an EDIT like any other — the previous value, under a new
+   * clock, sent — and somebody else's operation is not a step of this person's
+   * history. Outside a room nothing changes.
+   */
+  static liveHistory: ((st: DocumentStore) => boolean) | null = null;
+  private recording: Snapshot | null = null;
+  private historyFn: ((note: LiveHistoryNote) => void) | null = null;
+
+  /** TAVOLO 2 · told what an undo / redo did in a room (the Log says it). */
+  onHistory(fn: (note: LiveHistoryNote) => void): void {
+    this.historyFn = fn;
+  }
+
+  private get live(): boolean {
+    return !!DocumentStore.liveHistory?.(this);
+  }
+
   constructor(doc: EmDocument) {
     this.doc = doc;
     migrateLegacyNodeTypes(doc);
@@ -378,7 +415,10 @@ export class DocumentStore {
   }
 
   private emitOp(op: GraphOp): void {
-    if (!this.suppressOp) this.opFn?.(op);
+    if (this.suppressOp) return;
+    // the step being recorded is the one on top of the stack (TAVOLO 2)
+    if (this.recording?.ops) this.recording.ops.push(op);
+    this.opFn?.(op);
   }
 
   /** P3 · conflicts produced by REMOTE operations, in arrival order. The live
@@ -540,9 +580,16 @@ export class DocumentStore {
     // Inside a batch the enclosing call already took the snapshot; taking
     // another would split one user-level change into several undo steps.
     if (this.batchDepth > 0) return;
-    this.undoStack.push(this.take());
+    const live = this.live;
+    // TAVOLO 2 · in a room, an operation from somebody else is not a step of
+    // this person's history: it neither pushes a step nor clears the redo
+    if (live && this.suppressOp) return;
+    const snap = this.take();
+    if (live) snap.ops = [];
+    this.undoStack.push(snap);
     if (this.undoStack.length > MAX_UNDO) this.undoStack.shift();
     this.redoStack = [];
+    this.recording = live ? snap : null;
   }
 
   private batchDepth = 0;
@@ -621,6 +668,10 @@ export class DocumentStore {
   }
 
   undo(): void {
+    if (this.live) {
+      this.liveStep(this.undoStack, this.redoStack, "undo");
+      return;
+    }
     const s = this.undoStack.pop();
     if (!s) return;
     this.redoStack.push(this.take());
@@ -629,11 +680,117 @@ export class DocumentStore {
   }
 
   redo(): void {
+    if (this.live) {
+      this.liveStep(this.redoStack, this.undoStack, "redo");
+      return;
+    }
     const s = this.redoStack.pop();
     if (!s) return;
     this.undoStack.push(this.take());
     this.restore(s);
     this.emit();
+  }
+
+  /**
+   * TAVOLO 2 · an undo (or a redo) in a ROOM: the step's own acts, answered with
+   * operations of their own — never a snapshot put back.
+   *
+   * Restoring the snapshot would also take back what OTHER people wrote since,
+   * and would leave the room on the value this screen just abandoned. Instead:
+   *
+   * * a FIELD the step wrote goes back to the value it had before, under a NEW
+   *   clock (it is a new edit, sent like any other) — but only if this session's
+   *   clock is still the field's: if somebody wrote it after, it is theirs now,
+   *   it is left alone and the Log names it;
+   * * a node or an edge the step CREATED is removed (`remove_node` /
+   *   `remove_edge`), an edge it removed is added again (a later add brings a
+   *   relation back);
+   * * a node the step DELETED cannot come back as an operation yet (the room
+   *   keeps its tombstone): the step stays where it is and the Log says so;
+   * * a step with no operation (a position, a fold — this screen's own) puts
+   *   back its layout, as outside a room.
+   */
+  private liveStep(from: Snapshot[], to: Snapshot[], kind: "undo" | "redo"): void {
+    const s = from.pop();
+    if (!s) return;
+    const ops = s.ops ?? [];
+    if (ops.some((op) => op.op === "delete_node")) {
+      from.push(s);
+      this.historyFn?.({ kind, fields: 0, acts: 0, skipped: [], refused: "delete_node" });
+      return;
+    }
+    const before = JSON.parse(s.graph) as { nodes?: EmNode[] };
+    const was = new Map((before.nodes ?? []).map((n) => [n.id, n]));
+    // the LAST clock each field got in the step, and the order of the acts
+    const clocks = new Map<string, Map<string, { ts: string; by: string | null | undefined }>>();
+    for (const op of ops) {
+      if (op.op !== "update_node") continue;
+      for (const f of op.fields ?? []) {
+        const per = clocks.get(op.node_id) ?? new Map();
+        per.set(f.field, { ts: f.ts, by: f.by });
+        clocks.set(op.node_id, per);
+      }
+    }
+    const back: Snapshot = { ...this.take(), ops: [] };
+    const skipped: LiveHistoryNote["skipped"] = [];
+    let fields = 0;
+    let acts = 0;
+    this.batchDepth++;
+    this.recording = back;
+    try {
+      for (const [nodeId, per] of clocks) {
+        const node = this.node(nodeId);
+        const old = was.get(nodeId);
+        if (!node || !old) continue;     // created by the step: removed below
+        const patch: Record<string, unknown> = {};
+        let data: Record<string, unknown> | null = null;
+        for (const [field, clock] of per) {
+          const now = fieldClockOf(node as unknown as Payload, field);
+          if (now.ts !== clock.ts || (now.by ?? null) !== (clock.by ?? null)) {
+            skipped.push({ nodeId, field });
+            continue;
+          }
+          const value = getField(old as unknown as Payload, field);
+          if (field.startsWith("data.")) {
+            data ??= { ...((node.data ?? {}) as Record<string, unknown>) };
+            if (value === undefined) delete data[field.slice(5)];
+            else data[field.slice(5)] = value;
+          } else {
+            patch[field] = value;
+          }
+          fields += 1;
+        }
+        if (data) patch.data = data;
+        if (Object.keys(patch).length) this.updateNode(nodeId, patch as Partial<EmNode>);
+      }
+      for (const op of [...ops].reverse()) {
+        if (op.op === "add_edge") { this.deleteEdge(op.edge); acts += 1; }
+        else if (op.op === "delete_edge") { this.reAddEdge(op.edge); acts += 1; }
+        else if (op.op === "add_node" && this.node(op.node.id)) { this.deleteNode(op.node.id); acts += 1; }
+      }
+      if (!ops.length) {
+        const layout = JSON.parse(s.layout);
+        if (layout === null) delete this.doc.layout;
+        else this.doc.layout = layout;
+      }
+    } finally {
+      this.batchDepth--;
+      this.recording = null;
+    }
+    to.push(back);
+    this.emit();
+    this.historyFn?.({ kind, fields, acts, skipped });
+  }
+
+  /** TAVOLO 2 · an edge removed by a step, put back by its undo: the same
+   *  relation, sent as an `add_edge` (later than the removal, it brings it back). */
+  private reAddEdge(edge: EmEdge): void {
+    const g = this.doc.graph;
+    if (g.edges.some((e) => e.source === edge.source && e.target === edge.target
+                            && e.edge_type === edge.edge_type)) return;
+    g.edges.push(edge);
+    this.emit();
+    this.emitOp({ op: "add_edge", edge });
   }
 
   // ---------- lookups ----------
@@ -3357,8 +3514,14 @@ export class DocumentStore {
   }
 
   /** Replace the layout (recompute), preserving fold state + group spaces. */
-  setLayout(layout: import("./types").EmLayout, opts: { rearrange?: (groupId: string) => boolean } = {}): void {
-    this.checkpoint();
+  setLayout(layout: import("./types").EmLayout,
+            opts: { rearrange?: (groupId: string) => boolean; initial?: boolean } = {}): void {
+    // TAVOLO 2 · `initial`: the layout computed because a document arrived
+    // without one (a room's snapshot always does). Nobody did anything: no undo
+    // step, and the document is not «changed» (measured: entering a room left
+    // dirty: true and one undo step that undid nothing)
+    const wasDirty = this.dirty;
+    if (!opts.initial) this.checkpoint();
     const old = this.doc.layout;
     if (old?.folded_groups?.length) layout.folded_groups = old.folded_groups;
     if (old?.group_spaces && Object.keys(old.group_spaces).length) {
@@ -3369,6 +3532,7 @@ export class DocumentStore {
     }
     this.doc.layout = layout;
     this.emit();
+    if (opts.initial) this.dirty = wasDirty;
   }
 
   /** Fold/unfold a whole set of groups as ONE undo step. */

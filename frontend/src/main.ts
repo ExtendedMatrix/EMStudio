@@ -4915,6 +4915,23 @@ function flushChange(): void {
 }
 
 function wireStore(s: DocumentStore): void {
+  // TAVOLO 2 · an undo / redo in a room is operations: the Log says what left
+  s.onHistory((note) => {
+    const verb = t(note.kind === "undo" ? "hist.undo" : "hist.redo");
+    if (note.refused) {
+      logWarn(t("hist.roomRefusedDelete", { verb }));
+      toast(t("hist.roomRefusedDelete", { verb }));
+      return;
+    }
+    const n = note.fields + note.acts;
+    if (n) logInfo(t("hist.roomSent", { verb, n: String(n) }));
+    if (note.skipped.length) {
+      const what = note.skipped.map((k) =>
+        `${k.field} · ${String(s.node(k.nodeId)?.name ?? k.nodeId)}`).join(", ");
+      logWarn(t("hist.roomSkipped", { verb, what }));
+      toast(t("hist.roomSkipped", { verb, what }));
+    }
+  });
   s.onChange(() => {
     docChangeSeq++; // any store's change: the memo is keyed by document, not by slot
     // Guard: a background slot must not redraw the canvas. Today only the active
@@ -5756,7 +5773,7 @@ function loadDocument(
     });
   } else {
     logInfo("no stored positions — computing a fresh layout via em-core");
-    void runLayout(true, loaded)
+    void runLayout(true, loaded, false, true)
       .then(() => {
         if (store !== loaded) return;   // laid out in its own store; the front is another graph's
         resetWindowCameras(); // frame the FINISHED layout, not the empty scene
@@ -6171,6 +6188,15 @@ function hubStoreFor(graphId: string | undefined): DocumentStore | null {
 }
 
 const hubKey = opKey;
+
+/** TAVOLO 2 · the stores of the room this session sits in: their history is
+ *  operations (`DocumentStore.liveHistory`). */
+function isRoomStore(st: DocumentStore): boolean {
+  if (!sync.inRoom) return false;
+  const roomFile = emtree.files.find((f) => f.room?.id === sync.room);
+  return !!roomFile && emtree.slotsOf(roomFile.id).some((sl) => sl.store === st);
+}
+DocumentStore.liveHistory = isRoomStore;
 
 function noteHub(note: AwarenessNote): void {
   hubNotes.unshift(note);
@@ -29443,7 +29469,10 @@ btnLayout.title =
 // a layout-less document (e.g. a live snapshot).
 async function runLayout(fresh: boolean, target: DocumentStore | null = store,
                          /** the user's «Layout»: the paradata groups are rearranged too */
-                         all = false): Promise<void> {
+                         all = false,
+                         /** TAVOLO 2 · computed because the document came without
+                          *  one: not a step of anybody's history */
+                         initial = false): Promise<void> {
   // F4 · the store asked for, held across the awaits (see `reassertSizes`)
   const st = target;
   if (!st) return;
@@ -29463,7 +29492,10 @@ async function runLayout(fresh: boolean, target: DocumentStore | null = store,
   const layout = await perfTimeAsync("runLayout", () =>
     computeLayout(st.doc.graph, sketch),
   );
-  st.setLayout(layout, all ? { rearrange: (g) => st.node(g)?.node_type === "ParadataNodeGroup" } : {});
+  st.setLayout(layout, {
+    ...(all ? { rearrange: (g: string) => st.node(g)?.node_type === "ParadataNodeGroup" } : {}),
+    initial,
+  });
 }
 
 /**
