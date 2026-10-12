@@ -64,6 +64,12 @@ export interface ConnectionState {
   role?: string | null;
   /** I1 · where this session's edits are with the room */
   sync?: "aligned" | "pending" | "conflict" | null;
+  /** FIRMA DELLA NASCITA · the person this session entered the node as (the
+   *  room's author, or who `/v1/whoami` confirmed), with the role in the room;
+   *  `local` = this computer's identity when it is SOMEBODY ELSE. Null when
+   *  this session has not entered the node. */
+  who?: { name: string | null; orcid: string | null; role: string | null;
+          local?: string | null } | null;
 }
 
 // ── I1 rimasto (E.D., 4 Oct 2026) · the room, the role and the sync with the
@@ -295,6 +301,48 @@ export interface ConnectionGestures {
   bringIntoRoom?(): void;
   /** P2 · the room's resources: inventory, upload, report */
   roomResources?(): void;
+  /** FIRMA DELLA NASCITA · «Sign out of the node»: the tokens forgotten, the
+   *  node's session ended at its realm, then the room closed */
+  signOutOfNode?(): void;
+  /** …and «Sign in as another user»: the realm asks user and password again
+   *  (`prompt=login`) even with its session still alive in the browser */
+  signInAsOther?(): void;
+}
+
+/** FIRMA DELLA NASCITA · «Who you are» — the person and the role this session
+ *  entered the node with, and the two ways out. ONE place, and the bar's
+ *  person (zone 2) opens it. */
+export function renderWhoSection(s: Pick<ConnectionState, "who" | "access">,
+                                 g: Pick<ConnectionGestures, "signOutOfNode" | "signInAsOther">): HTMLElement | null {
+  if (!s.who) return null;
+  const sect = el("div", "conn-sect");
+  sect.dataset.sect = "who";
+  sect.appendChild(el("h5", "", t("conn.whoHead")));
+  const name = s.who.name || s.who.orcid || "?";
+  const line = el("p", "conn-line conn-who", t("conn.whoAs", { who: name }));
+  line.dataset.orcid = s.who.orcid ?? "";
+  if (s.who.role) { line.append(" · "); line.appendChild(roleBadge(s.who.role)); }
+  sect.appendChild(line);
+  const facts = [s.who.orcid && s.who.name ? s.who.orcid : "", accessLine(s.access)].filter(Boolean);
+  sect.appendChild(el("p", "conn-line conn-dim", facts.join(" · ")));
+  if (s.who.local) sect.appendChild(el("p", "conn-line conn-warn", t("conn.whoLocalOther", { local: s.who.local, who: name })));
+  const acts = el("div", "conn-acts");
+  if (g.signOutOfNode) {
+    const out = btn(t("conn.signOutNode"));
+    out.dataset.act = "sign-out-node";
+    out.title = t("conn.signOutNodeTitle");
+    out.addEventListener("click", () => g.signOutOfNode!());
+    acts.appendChild(out);
+  }
+  if (g.signInAsOther) {
+    const other = btn(t("conn.signInOther"));
+    other.dataset.act = "sign-in-other";
+    other.title = t("conn.signInOtherTitle");
+    other.addEventListener("click", () => g.signInAsOther!());
+    acts.appendChild(other);
+  }
+  sect.appendChild(acts);
+  return sect;
 }
 
 /**
@@ -372,6 +420,12 @@ export function renderConnectionPanel(host: HTMLElement, s: ConnectionState, g: 
   host.appendChild(head);
   if (s.notice) host.appendChild(el("p", "conn-line conn-warn", s.notice));
   if (s.misaligned) host.appendChild(el("p", "conn-line conn-warn", s.misaligned));
+  // the person first: «with whom am I in here» is the question the panel is
+  // opened with from zone 2 — never in a Sidecar, where no node is involved
+  if (s.mode !== "sidecar") {
+    const who = renderWhoSection(s, g);
+    if (who) host.appendChild(who);
+  }
 
   const modes = el("div", "conn-sect");
   modes.appendChild(el("h5", "", t("conn.modeHead")));

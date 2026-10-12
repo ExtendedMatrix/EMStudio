@@ -49,6 +49,8 @@ export interface SignInResult {
   ok: boolean;
   token?: string;
   refresh_token?: string;
+  /** the id_token, for the realm's logout (`id_token_hint`) — in memory only */
+  id_token?: string;
   expires_in?: number;
   error?: string;
   /** WHERE THE SIGN-IN WAS STARTED FROM, handed back so the caller can return
@@ -143,7 +145,10 @@ export function redirectUri(): string {
  *  refuse it outright). */
 export async function authorizeUrl(
   config: AuthConfig,
-  opts: { returnTo?: string; silent?: boolean; idpHint?: string; loginHint?: string; redirectUri?: string } = {},
+  opts: { returnTo?: string; silent?: boolean; idpHint?: string; loginHint?: string; redirectUri?: string;
+          /** FIRMA DELLA NASCITA · `prompt=login`: user and password asked
+           *  again, even with the realm's session alive in the browser */
+          fresh?: boolean } = {},
 ): Promise<string> {
   const verifier = randomVerifier();
   const state = randomVerifier();
@@ -169,6 +174,7 @@ export async function authorizeUrl(
   // responsible for trying it only once, because a redirect loop is worse than
   // a refusal.
   if (opts.silent) url.searchParams.set("prompt", "none");
+  else if (opts.fresh) url.searchParams.set("prompt", "login");
   // IDENTITÀ · straight to an identity provider the realm brokers (`orcid`):
   // Keycloak skips its own login page for it — and ignores the hint when the
   // realm has no provider of that alias (measured on em-dev, 1 Oct 2026)
@@ -274,15 +280,24 @@ async function exchange(
     ok: true,
     token: String(payload.access_token || ""),
     refresh_token: payload.refresh_token ? String(payload.refresh_token) : undefined,
+    id_token: payload.id_token ? String(payload.id_token) : undefined,
     expires_in: Number(payload.expires_in || 0) || undefined,
   };
 }
 
-/** Where to send somebody to end the session at the IdP, if it offers one. */
-export function signOutUrl(config: AuthConfig): string {
+/** Where to send somebody to end the session at the IdP, if it offers one.
+ *
+ *  FIRMA DELLA NASCITA · with `id_token_hint` the realm ends the session
+ *  without asking «do you want to log out?», and goes back to
+ *  `post_logout_redirect_uri` — which the client must list (`em-console`:
+ *  `post.logout.redirect.uris`). Without this the browser kept the realm's
+ *  session, and the next sign-in entered as the last person without asking. */
+export function signOutUrl(config: AuthConfig,
+                           opts: { idTokenHint?: string | null; redirectUri?: string } = {}): string {
   if (!config.end_session_endpoint) return "";
   const url = new URL(config.end_session_endpoint);
-  url.searchParams.set("post_logout_redirect_uri", redirectUri());
+  url.searchParams.set("post_logout_redirect_uri", opts.redirectUri ?? redirectUri());
   url.searchParams.set("client_id", config.client_id);
+  if (opts.idTokenHint) url.searchParams.set("id_token_hint", opts.idTokenHint);
   return url.toString();
 }

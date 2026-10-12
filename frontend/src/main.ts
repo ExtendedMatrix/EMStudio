@@ -87,6 +87,7 @@ import {
   WitnessedClaim,
   type Identity,
   type IdentityProvider,
+  type SignatureAuth,
 } from "./identity";
 import { renderInspector } from "./inspector";
 import { searchTwins } from "./twins";
@@ -251,7 +252,7 @@ import { passagesOf } from "./passages";
 import * as trx from "./translation";
 import * as trui from "./translation-ui";
 import * as orcidIn from "./orcid-signin";
-import { isAppReturn, NODE_DESKTOP_RETURN, ORCID_DESKTOP_RETURN, readReturn } from "./desktop-return";
+import { isAppReturn, NODE_DESKTOP_LOGOUT, NODE_DESKTOP_RETURN, ORCID_DESKTOP_RETURN, readReturn } from "./desktop-return";
 import {
   checkReceipt, coversMoreThanTheFile, receiptOf, receiptsOfEmission, refreshedCopies, verdictChanged,
   type ReceiptCheck, type StampVerdict,
@@ -547,7 +548,7 @@ import {
 } from "./roundtrip";
 import {
   authorizeUrl, completeSignIn, loadAuthConfig, refresh as refreshSession,
-  returningFromIdp,
+  returningFromIdp, signOutUrl,
   type AuthConfig,
 } from "./oidc";
 import { buildDtcGenesisScene, buildGroupScene } from "./views/context";
@@ -1355,7 +1356,19 @@ function connectionState(): ConnectionState {
     hostFile: hostInfo.file || hostInfo.database || hostInfo.label || null,
     notice: hostNotice, misaligned, reconnecting: hubReconnecting,
     waitingOps: room ? hubWaitingCount() : 0,
-    readOnly: hubReadOnly(), role: hostInfo.role ?? null, sync: room ? roomSyncState() : null };
+    readOnly: hubReadOnly(), role: hostInfo.role ?? null, sync: room ? roomSyncState() : null,
+    who: connectionWho() };
+}
+/** FIRMA DELLA NASCITA · the person this session entered the node as, for the
+ *  panel's «Who you are» (read at boot before the identity `let`s exist) */
+function connectionWho(): ConnectionState["who"] {
+  try {
+    const self = nodeSelf();
+    if (!self) return null;
+    return { ...self, local: localIsAnotherPerson() };
+  } catch {
+    return null;
+  }
 }
 /** I1 · where this session's edits are with the room: a conflict of the last
  *  integration, operations sent and not confirmed (or waiting to be re-sent),
@@ -1502,7 +1515,8 @@ function placeConnectionPop(pop: HTMLElement): void {
   const anchor = connPopAnchor ?? modeIndicator;
   const r = anchor.getBoundingClientRect();
   pop.style.left = `${Math.max(8, Math.min(r.left, innerWidth - 380))}px`;
-  if (anchor === modeIndicator) {
+  // the bar's zones (the place, the person) open it ABOVE them
+  if (anchor === modeIndicator || r.top > innerHeight / 2) {
     pop.style.top = "";
     pop.style.bottom = `${Math.max(8, innerHeight - r.top + 6)}px`;
   } else {
@@ -1531,6 +1545,9 @@ function paintConnectionPanel(pop: HTMLElement): void {
     newRoom: () => { pop.classList.add("hidden"); void createRoomHere(false); },
     bringIntoRoom: () => { pop.classList.add("hidden"); void bringIntoRoom(); },
     roomResources: () => { pop.classList.add("hidden"); if (sync.room) void openResourceInventory(sync.room); },
+    // FIRMA DELLA NASCITA · «chi sono, e come esco»
+    signOutOfNode: () => { pop.classList.add("hidden"); void signOutOfNode(); },
+    signInAsOther: () => { pop.classList.add("hidden"); void signInAsOther(); },
   }, { host: sidecarDetail, accept: syncControlEl, roster: hubRosterEl });
   placeConnectionPop(pop);
 }
@@ -2138,6 +2155,10 @@ window.__EM_SCENE__ = () => {
   /** AUDIT · a change that arrives from ELSEWHERE (a peer, another window): one
    *  store write, not typed by anybody on this page */
   edit: (id: string, patch: Record<string, unknown>) => store?.updateNode(id, patch),
+  /** FIRMA DELLA NASCITA · a node born by this session's hand, as the menu
+   *  would make it (the stamps are the store's) */
+  born: (nodeType: string, name: string) =>
+    store ? store.addNode({ id: store.newId(), node_type: nodeType, name } as EmNode) : null,
   nodeCount: () => store?.liveNodes().length ?? 0,
   // FONTE · the stack of «Indietro», a jump, the computed instances
   backDepth: () => viewHistory.length,
@@ -6169,6 +6190,25 @@ function hubMyAuthor(): string | null {
 }
 
 /**
+ * FIRMA DELLA NASCITA · the hand this session's edits carry while it sits in a
+ * room: the room's author (the token's iD, `host_info.author`) and how THAT
+ * person entered, as the node read it (`/v1/whoami`) — never this computer's
+ * identity, which may be somebody else's left over from another session.
+ * Called when the room says who we are and when the node does.
+ */
+function roomHandAuth(author: string): SignatureAuth | null {
+  const node = nodeIdentity;
+  if (!node?.orcid || (node.orcid !== author && sameSignature(node.orcid, author) !== true)) return null;
+  if (node.authMode === "node_password")
+    return { mode: "node_password", attested_by: node.attestedBy || node.node };
+  return node.authMode === "orcid" ? { mode: "orcid" } : null;
+}
+function syncRoomHand(): void {
+  const author = sync.inRoom ? hubMyAuthor() : null;
+  setRoomAuthor(author, author ? roomHandAuth(author) : null);
+}
+
+/**
  * G1 · the store an operation from the room is for: the graph the envelope
  * names, among the graphs of the room's file — not the active one. No name (a
  * peer that does not name graphs, D-A) is the active graph; so is a name this
@@ -6736,7 +6776,7 @@ function landOnHandoffNode(): void {
 
 function joinFromHandoff(handoff: { server: string; room: string; node?: string },
                         token: string | null,
-                        session?: { refresh_token?: string;
+                        session?: { refresh_token?: string; id_token?: string;
                                     config?: AuthConfig | null }): void {
   pendingHandoffNode = handoff.node ?? null;
   handoffLanded = null;
@@ -6748,6 +6788,7 @@ function joinFromHandoff(handoff: { server: string; room: string; node?: string 
                                hubRoom: handoff.room } });
   hubToken = token;
   hubRefreshToken = session?.refresh_token || null;
+  hubIdToken = session?.id_token || null;
   hubAuthConfig = session?.config ?? null;
   logInfo(t("handoff.joining", { room: handoff.room, server: handoff.server }));
   connectToHub(handoff.server, handoff.room, token);
@@ -6905,6 +6946,9 @@ async function bootSession(): Promise<void> {
 
 /** At boot: a handoff on the URL, or a sign-in coming back from one. */
 async function followHandoff(): Promise<void> {
+  // FIRMA DELLA NASCITA · back from the realm's logout: said, or the sign-in
+  // as another person opened
+  if (!isTauri() && await resumeSignOut()) return;
   // IDENTITÀ · back from ORCID's own sign-in (an id_token in the fragment)
   if (orcidIn.returningFromOrcid()) {
     await completeOrcidReturn();
@@ -6926,7 +6970,7 @@ async function followHandoff(): Promise<void> {
         return;
       }
       joinFromHandoff(handoff, result.token || null,
-                      { refresh_token: result.refresh_token, config });
+                      { refresh_token: result.refresh_token, id_token: result.id_token, config });
       return;
     }
   }
@@ -6971,6 +7015,12 @@ async function followDesktopReturn(text: string, how: "link" | "paste"): Promise
   if (document.querySelector(".idpanel[data-idp-waiting]")) closeIdentityPanel();
   if (answer.kind === "orcid") {
     await completeOrcidReturn(answer.hash);
+    return true;
+  }
+  if (answer.kind === "logout") {
+    // FIRMA DELLA NASCITA · the realm ended the session in the browser too
+    logInfo("identity: the node's session is closed in the browser as well");
+    if (!(await resumeSignOut(true))) toast(t("conn.signedOutBrowser"));
     return true;
   }
   const ours = await completeNodeSignIn(answer.search);
@@ -7980,7 +8030,7 @@ function connectToHub(url: string, room: string, token: string | null): void {
       hostInfo = { ...hostInfo, ...info2 };
       // TAVOLO 2 · this session's edits are stamped, here too, with the hand the
       // relay will stamp on them — one clock, compared the same way in both copies
-      setRoomAuthor(hubMyAuthor());
+      syncRoomHand();
       // the ROLE arrives here, and it is the third rung's second half
       refreshIdentityChip();
       announceConnector(hostInfo, "cloud");   // a room: the connector is remote
@@ -12242,6 +12292,10 @@ let hubRefreshToken: string | null = null;
 //: the node's sign-in configuration, kept from the handoff so a refresh has a
 //: token endpoint to go to without asking the node twice
 let hubAuthConfig: AuthConfig | null = null;
+//: FIRMA DELLA NASCITA · the id_token of the same sign-in, in memory like the
+//: others: the realm's logout reads it (`id_token_hint`) to end THAT session
+//: without asking, so «Sign out of the node» really closes it in the browser
+let hubIdToken: string | null = null;
 //: A3 · the access token the node REFUSED and that could not be renewed: the
 //: access is «expired» while it is still the session's token, and stops being
 //: so the moment a sign-in puts another one there — no flag to forget to clear.
@@ -12285,6 +12339,7 @@ function renewHubToken(): Promise<boolean> {
       }
       hubToken = renewed.token;
       hubRefreshToken = renewed.refresh_token || hubRefreshToken;
+      hubIdToken = renewed.id_token || hubIdToken;
       logInfo("node: access renewed");
       return true;
     } finally { hubRenewing = null; }
@@ -12725,6 +12780,34 @@ let nodeIdentityLost: string | null = null;
  * the rung it had, and the tooltip says the confirmation is of the session rather
  * than of the iD.
  */
+/**
+ * FIRMA DELLA NASCITA · who this session IS on the node: seated in a room, the
+ * room's author (the token's iD) — with the name the node gave it, or this
+ * computer's when it is the same iD; otherwise the person the node confirmed.
+ * Null when no node has said anything about us.
+ */
+function nodeSelf(): { orcid: string | null; name: string | null; role: string | null } | null {
+  const author = sync.inRoom ? hubMyAuthor() : null;
+  const role = sync.inRoom ? hostInfo.role ?? null : null;
+  if (author) {
+    const local = knownIdentities().find((i) => i.orcid === author);
+    const localName = local ? [local.name, local.surname].filter(Boolean).join(" ") : "";
+    const name = nodeIdentity?.orcid === author ? nodeIdentity.name : null;
+    return { orcid: author, name: name || localName || null, role };
+  }
+  return nodeIdentity ? { orcid: nodeIdentity.orcid, name: nodeIdentity.name, role } : null;
+}
+
+/** …and this computer's identity, when it is SOMEBODY ELSE than that: the
+ *  sentence the bar says in one line (null when they are the same, or either
+ *  side is missing or is not an ORCID). */
+function localIsAnotherPerson(): string | null {
+  const self = nodeSelf();
+  const me = currentIdentity();
+  if (!self?.orcid || !me || sameSignature(me.orcid, self.orcid) !== false) return null;
+  return [me.name, me.surname].filter(Boolean).join(" ") || me.orcid;
+}
+
 function nodeConfirmsTheSignature(): boolean | null {
   // the comparison itself lives in `identity.ts` (`sameSignature`), where it is a
   // question about two identities rather than about a piece of chrome — and where
@@ -12737,6 +12820,10 @@ function nodeConfirmsTheSignature(): boolean | null {
 type IdentityRung = "none" | "signature" | "identity" | "presence";
 
 function identityRung(): IdentityRung {
+  // FIRMA DELLA NASCITA · seated in a room, the person is the room's: its edits
+  // carry that hand (`syncRoomHand`), so that is who the chip says, whatever
+  // this computer's identity is — the difference is said beside it
+  if (sync.room && sync.connected && nodeSelf()) return "presence";
   // A node that confirmed SOMEBODY ELSE has not confirmed you. Neither rung above
   // Firma is reached — presence contains identity, so it goes with it.
   if (nodeConfirmsTheSignature() === false) {
@@ -12799,6 +12886,9 @@ interface PendingNodeSignIn {
   /** A2 · started from «Sign in again» in the connection panel: it opens again
    *  on the way back, with the rooms asked anew */
   then?: "rooms";
+  /** FIRMA DELLA NASCITA · «Sign in as another user» from inside a room: the
+   *  room is entered again, as the new person, on the way back */
+  rejoin?: string;
 }
 
 /**
@@ -12811,7 +12901,7 @@ interface PendingNodeSignIn {
  * permission, and the rule the whole handoff contract is built on.
  */
 async function signIntoNode(opts: { silent?: boolean; idpHint?: string; loginHint?: string; intent?: "identity";
-                                    then?: "rooms" } = {}): Promise<boolean> {
+                                    then?: "rooms"; fresh?: boolean; rejoin?: string } = {}): Promise<boolean> {
   const server = servingNode();
   if (!server) {   // DEV30 U14 · no node configured: say it, and where to name one
     if (!opts.silent) { toast(t("idw.noNode")); openNodeSettings(); }
@@ -12833,7 +12923,7 @@ async function signIntoNode(opts: { silent?: boolean; idpHint?: string; loginHin
   if (isTauri() && opts.silent) return false;
   const pending: PendingNodeSignIn = {
     server, returnTo: window.location.href, silent: opts.silent || undefined,
-    intent: opts.intent, then: opts.then,
+    intent: opts.intent, then: opts.then, rejoin: opts.rejoin,
   };
   try {
     sessionStorage.setItem(SIGNIN_KEY, JSON.stringify(pending));
@@ -12848,7 +12938,7 @@ async function signIntoNode(opts: { silent?: boolean; idpHint?: string; loginHin
   if (isTauri()) {
     const url = await authorizeUrl(config, {
       returnTo: window.location.href, idpHint: opts.idpHint,
-      loginHint: opts.loginHint, redirectUri: NODE_DESKTOP_RETURN,
+      loginHint: opts.loginHint, redirectUri: NODE_DESKTOP_RETURN, fresh: opts.fresh,
     });
     if (!(await openInSystemBrowser(url))) {
       try { sessionStorage.removeItem(SIGNIN_KEY); } catch { /* nothing kept */ }
@@ -12866,7 +12956,7 @@ async function signIntoNode(opts: { silent?: boolean; idpHint?: string; loginHin
   // produced a fresh tab with no session. A ring.
   window.location.assign(await authorizeUrl(config, {
     returnTo: window.location.href, silent: opts.silent, idpHint: opts.idpHint,
-    loginHint: opts.loginHint,
+    loginHint: opts.loginHint, fresh: opts.fresh,
   }));
   return true;
 }
@@ -12918,6 +13008,7 @@ async function completeNodeSignIn(search?: string): Promise<boolean> {
   }
   hubToken = result.token;
   hubRefreshToken = result.refresh_token || null;
+  hubIdToken = result.id_token || null;
   hubAuthConfig = config ?? null;
   // A MARKER BELONGS TO THE IDENTITY THAT FAILED, and this session has just
   // stopped being that identity.
@@ -12934,6 +13025,8 @@ async function completeNodeSignIn(search?: string): Promise<boolean> {
   renderStatusLine();
   // A2 · back where «Sign in again» was pressed: the panel, the rooms asked anew
   if (remembered.then === "rooms") toggleConnectionPanel();
+  // FIRMA DELLA NASCITA · back in the room that was left to change person
+  if (remembered.rejoin) enterRoom(remembered.rejoin);
   return true;
 }
 
@@ -13018,6 +13111,7 @@ async function askNodeWhoIAm(server: string): Promise<void> {
     nodeIdentityLost = null;
     logInfo(`identity: ${nodeIdentity.node} confirms `
             + `${nodeIdentity.orcid ?? nodeIdentity.name ?? "(a session)"}`);
+    syncRoomHand();   // the access of the room's hand is the node's word
   } catch (error) {
     // THE DESCENT IS SAID. The scale is walked in both directions: a node that
     // stops answering drops this session to Firma, and the chip says the node is
@@ -13067,6 +13161,20 @@ function refreshIdentityChip(): void {
   const rung = identityRung();
   chip.classList.remove("id-signature", "id-identity", "id-presence",
                         "id-lost", "verified");
+  // FIRMA DELLA NASCITA · the node knows this session as somebody else than
+  // this computer's identity: one line beside the chip, never only a tooltip
+  const other = document.getElementById("footer-identity-other");
+  const self = nodeSelf();
+  const otherLocal = self ? localIsAnotherPerson() : null;
+  if (other) {
+    other.classList.toggle("hidden", !otherLocal);
+    other.textContent = !otherLocal ? ""
+      : rung === "presence"
+        ? t("ident.localIsOther", { local: otherLocal })
+        : t("ident.nodeIsOther", { node: self!.name || self!.orcid || "" });
+    other.title = otherLocal ? t("ident.otherLineTitle", {
+      node: self!.name || self!.orcid || "", orcid: self!.orcid ?? "", local: otherLocal }) : "";
+  }
 
   if (rung === "none") {
     chip.textContent = t("identity.none");
@@ -13090,15 +13198,20 @@ function refreshIdentityChip(): void {
     // the role IN this room. The room itself is zone 1's; the node's password is
     // a detail of the link to the node (the Connection panel), not a second
     // identity beside the tick.
-    const tick = nodeIdentity?.authMode !== "node_password"
-      || identityState(identity) === "verified" ? " ✓" : "";
+    // FIRMA DELLA NASCITA · the name is the ROOM's person (the hand that signs),
+    // not this computer's: entered as `editor`, the chip said Dev User
+    const seated = self!.name || self!.orcid || who;
+    const sameAsLocal = sameSignature(identity?.orcid, self!.orcid) === true;
+    const tick = nodeIdentity && nodeIdentity.authMode !== "node_password"
+      || (sameAsLocal && identityState(identity) === "verified") ? " ✓" : "";
     chip.classList.add("id-presence");
     // I1 · the role with the list's sign (none for a role the list lacks)
     const roleId = roleStateId(said);
     const sign = roleId ? `${stateSign(roleId).glyph} ` : "";
-    chip.textContent = `${who}${tick}` + (said ? ` · ${sign}${t(`room.role.${said}`)}` : "");
-    chip.title = t("ident.presenceTitle", { who, room: String(sync.room),
-                                            node: nodeIdentity!.node });
+    chip.textContent = `${seated}${tick}` + (said ? ` · ${sign}${t(`room.role.${said}`)}` : "");
+    chip.title = t("ident.presenceTitle", { who: seated, room: String(sync.room),
+                                            node: nodeIdentity?.node ?? shortNode(getSettings().sync.hubUrl) })
+      + (self!.orcid ? ` (${self!.orcid})` : "") + `\n${t("ident.presenceClick")}`;
     return;
   }
 
@@ -13219,14 +13332,12 @@ function identityChipClicked(): void {
       // or re-declared
       openIdentityPanel();
       return;
+    // FIRMA DELLA NASCITA · «chi sono, e come esco»: the connection panel says
+    // with which person and role this session entered the node, and has «Sign
+    // out of the node» / «Sign in as another user» — one place, from the chip
     case "identity":
-      toast(t("ident.nextJoin"));
-      openNodeSettings();
-      return;
     case "presence":
-      toast(t("ident.presenceNow", {
-        room: String(sync.room), role: hostInfo.role ?? "—",
-      }));
+      toggleConnectionPanel(document.getElementById("footer-identity"));
       return;
   }
 }
@@ -13246,6 +13357,135 @@ function signOutIdentity(): void {
   refreshIdentityPanel();
   refreshIdentityChip();
   toast(t("idw.signedOut", { orcid: me.orcid }));
+}
+
+// ── FIRMA DELLA NASCITA · «chi sono, e come esco» ───────────────────────────
+//
+// E.D. at the desktop, 12 Oct 2026: entered as `editor`, he could not tell with
+// which person he was in, nor how to leave the node and come back as another —
+// and coming back, Safari still held the realm's session and Keycloak let him
+// in as the last person without asking anything. Leaving is now three acts, in
+// this order: the app's tokens forgotten, the realm's session ended where it
+// lives (the browser the sign-in ran in), the room closed.
+
+const SIGNED_OUT_KEY = "emstudio.signedout";
+
+/** Every token of the node this session holds, forgotten — in memory, and what
+ *  a round trip may have left in this window's storage. Nothing of the node's
+ *  is in the keychain (the keychain holds the AI key only). */
+function forgetNodeSession(): void {
+  hubToken = null;
+  hubRefreshToken = null;
+  hubIdToken = null;
+  hubTokenRefused = null;
+  nodeIdentity = null;
+  nodeIdentityLost = null;
+  try {
+    for (const key of ["emstudio.pkce", SIGNIN_KEY]) sessionStorage.removeItem(key);
+  } catch { /* no storage: nothing was kept there */ }
+  forgetSilentSignInAttempts();
+}
+
+/** The room, closed cleanly: its graphs go (`leaveHostDocuments`), and the hand
+ *  that signs is this computer's again. Returns the room that was open. */
+function closeRoomForSignOut(): string | null {
+  const room = sync.inRoom ? sync.room : null;
+  if (sync.inRoom && !sync.connected) sync.disconnect();
+  if (room || sync.connected) leaveHostDocuments();
+  syncRoomHand();
+  return room;
+}
+
+/** What a sign-out still has to do when the realm's logout comes back: say it,
+ *  and — for «Sign in as another user» — open the sign-in, then the room. In
+ *  this window's session storage for the length of the round trip. */
+interface PendingSignOut { who: string; other?: boolean; rejoin?: string }
+
+/** «Sign out of the node» — and, with `other`, the first half of «Sign in as
+ *  another user».
+ *
+ *  MEASURED on the web (dev node, 12 Oct 2026): with the realm's session still
+ *  alive, `prompt=login` alone is a RE-authentication — Keycloak shows «Please
+ *  re-authenticate to continue» with the user name fixed to the last person.
+ *  So changing person is leaving the realm's session first, and only then
+ *  asking (with `prompt=login` too, for a realm that kept anything). */
+async function signOutOfNode(opts: { other?: boolean } = {}): Promise<void> {
+  const server = (getSettings().sync.hubUrl.trim() || servingNode()).replace(/\/+$/, "");
+  const self = nodeSelf();
+  const who = self?.name || self?.orcid || "";
+  const config = hubAuthConfig ?? (server ? await loadAuthConfig(server) : null);
+  const idToken = hubIdToken;
+  // 1 · the tokens: from here on nothing this session sends carries them
+  forgetNodeSession();
+  logInfo(`identity: signed out of ${server || "the node"}`
+          + (self?.orcid ? ` (was ${who})` : ""));
+  // 2 · the realm's session, where it lives
+  const logout = config?.end_session_endpoint
+    ? signOutUrl(config, { idTokenHint: idToken,
+                           redirectUri: isTauri() ? NODE_DESKTOP_LOGOUT : undefined })
+    : "";
+  if (!logout) logWarn("identity: the node offers no logout — its session in the browser stays");
+  const rejoin = sync.inRoom ? sync.room ?? undefined : undefined;
+  const pending: PendingSignOut = { who, other: opts.other || undefined, rejoin: opts.other ? rejoin : undefined };
+  if (isTauri()) {
+    // the sign-in ran in the SYSTEM browser: that is where its cookie is, and
+    // where the logout goes; it comes back by the app's scheme (`oidc-logout`)
+    if (logout) {
+      try { sessionStorage.setItem(SIGNED_OUT_KEY, JSON.stringify(pending)); } catch { /* said now instead */ }
+      await openInSystemBrowser(logout);
+    }
+    // 3 · and only then the room
+    closeRoomForSignOut();
+    refreshIdentityChip();
+    renderStatusLine();
+    if (!logout) await afterSignOut(pending);
+    else if (!opts.other) toast(signedOutSentence(who));
+    return;
+  }
+  // THE WEB: the logout is a navigation of this very page, so the room is
+  // closed BEFORE it (a page that unloads closes nothing cleanly), and the
+  // rest waits for the page that comes back
+  closeRoomForSignOut();
+  refreshIdentityChip();
+  renderStatusLine();
+  if (!logout) { await afterSignOut(pending); return; }
+  try { sessionStorage.setItem(SIGNED_OUT_KEY, JSON.stringify(pending)); } catch { /* the sentence is lost, not the logout */ }
+  window.location.assign(logout);
+}
+
+/** «Sign in as another user»: out of the node (tokens, the realm's session,
+ *  the room), then the sign-in with user and password asked, then the room. */
+async function signInAsOther(): Promise<void> {
+  await signOutOfNode({ other: true });
+}
+
+function signedOutSentence(who: string): string {
+  return who ? t("conn.signedOutNodeWho", { who }) : t("conn.signedOutNode");
+}
+
+/** The second half, once the realm's session is closed. `said`: the sign-out
+ *  was already told (the desktop, whose page never left) — now the browser's. */
+async function afterSignOut(pending: PendingSignOut, said = false): Promise<void> {
+  if (!pending.other) {
+    toast(said ? t("conn.signedOutBrowser") : signedOutSentence(pending.who));
+    return;
+  }
+  await signIntoNode({ fresh: true, rejoin: pending.rejoin });
+}
+
+/** The realm's logout came back (the web page it returned to, the desktop's
+ *  deep link): what the sign-out still had to do. */
+async function resumeSignOut(said = false): Promise<boolean> {
+  let raw: string | null = null;
+  try {
+    raw = sessionStorage.getItem(SIGNED_OUT_KEY);
+    sessionStorage.removeItem(SIGNED_OUT_KEY);
+  } catch { /* nothing to resume */ }
+  if (raw === null) return false;
+  let pending: PendingSignOut;
+  try { pending = JSON.parse(raw) as PendingSignOut; } catch { pending = { who: "" }; }
+  await afterSignOut(pending, said);
+  return true;
 }
 
 /** The Settings section: declare, switch, verify. */

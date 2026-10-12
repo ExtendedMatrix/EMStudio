@@ -31,10 +31,14 @@ export const APP_SCHEME = "org.extendedmatrix.emstudio:";
 export const ORCID_DESKTOP_RETURN = "https://extendedmatrix.org/orcid/callback/";
 /** A node's redirect for the desktop (`em-console` must list it). */
 export const NODE_DESKTOP_RETURN = `${APP_SCHEME}/oidc-return`;
+/** FIRMA DELLA NASCITA · where the realm's LOGOUT comes back to on the desktop
+ *  (`post_logout_redirect_uri`; `em-console` must list it). Carries nothing. */
+export const NODE_DESKTOP_LOGOUT = `${APP_SCHEME}/oidc-logout`;
 
 export type DesktopReturn =
   | { kind: "orcid"; hash: string }
-  | { kind: "node"; search: string };
+  | { kind: "node"; search: string }
+  | { kind: "logout" };
 
 /** Is this URL one of OUR answers (and not a `stratigraph://` handoff)? */
 export function isAppReturn(url: string): boolean {
@@ -60,6 +64,7 @@ export function readReturn(text: string): DesktopReturn | null {
     const path = raw.slice(APP_SCHEME.length).replace(/^\/+/, "/").split(/[?#]/)[0];
     if (path === "/orcid-return" && (has(fragment, "id_token") || has(fragment, "error"))) return { kind: "orcid", hash: `#${fragment}` };
     if (path === "/oidc-return" && (has(query, "code") || has(query, "error"))) return { kind: "node", search: `?${query}` };
+    if (path === "/oidc-logout") return { kind: "logout" };
     return null;
   }
   // pasted: ORCID's answer is a fragment with an id_token (or an error)…

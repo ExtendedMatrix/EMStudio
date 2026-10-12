@@ -71,7 +71,7 @@ globalThis.fetch = async (url, init) => {
   const good = body.get("code") === "C0DE" && body.get("redirect_uri") === R.NODE_DESKTOP_RETURN
     && b64u(createHash("sha256").update(body.get("code_verifier")).digest()) === issued.challenge && !body.has("client_secret");
   return { ok: good, status: good ? 200 : 400, json: async () => good
-    ? { access_token: "AT", refresh_token: "RT", expires_in: 900 } : { error: "invalid_grant", error_description: "Code not valid" } };
+    ? { access_token: "AT", refresh_token: "RT", id_token: "IDT", expires_in: 900 } : { error: "invalid_grant", error_description: "Code not valid" } };
 };
 const issued = {};
 {
@@ -81,7 +81,8 @@ const issued = {};
      [R.NODE_DESKTOP_RETURN, "S256", "0000-0002-1825-0097"], "the realm is asked to return to the app's scheme (PKCE S256, the iD as user name)");
   const state = url.searchParams.get("state");
   const r = await O.completeSignIn(CONFIG, `?state=${state}&session_state=x&code=C0DE`);
-  eq([r.ok, r.token, r.refresh_token], [true, "AT", "RT"], "the code that came back by deep link becomes a token");
+  eq([r.ok, r.token, r.refresh_token, r.id_token], [true, "AT", "RT", "IDT"],
+     "the code that came back by deep link becomes a token (and the id_token the logout needs)");
   eq(posted.at(-1).body.redirect_uri, R.NODE_DESKTOP_RETURN, "…and the exchange names the SAME redirect, not the page's tauri:// address");
   ok(!("client_secret" in posted.at(-1).body), "no secret is sent");
   eq(store.size, 0, "the verifier is gone after one read");
@@ -95,7 +96,24 @@ const issued = {};
 {
   const url = new URL(await O.authorizeUrl(CONFIG, {}));
   eq(url.searchParams.get("redirect_uri"), "tauri://localhost/", "without a redirect given, the page's own (the web build's rule, unchanged)");
+  eq(url.searchParams.get("prompt"), null, "an ordinary sign-in does not force the login form");
   store.clear();
+}
+
+// ── 3 · FIRMA DELLA NASCITA · leaving the node, and entering as another ─────
+{
+  const url = new URL(await O.authorizeUrl(CONFIG, { redirectUri: R.NODE_DESKTOP_RETURN, fresh: true }));
+  eq(url.searchParams.get("prompt"), "login", "«Sign in as another user» asks user and password again (prompt=login)");
+  store.clear();
+  const END = { ...CONFIG, end_session_endpoint: "https://kc.test/realms/em-dev/protocol/openid-connect/logout" };
+  const out = new URL(O.signOutUrl(END, { idTokenHint: "ID.TOK.EN", redirectUri: R.NODE_DESKTOP_LOGOUT }));
+  eq([out.origin + out.pathname, out.searchParams.get("id_token_hint"), out.searchParams.get("post_logout_redirect_uri"),
+      out.searchParams.get("client_id")],
+     [END.end_session_endpoint, "ID.TOK.EN", R.NODE_DESKTOP_LOGOUT, "em-console"],
+     "the realm's logout ends THAT session (id_token_hint) and comes back to the app");
+  eq(O.signOutUrl(CONFIG), "", "a realm with no end_session_endpoint has no logout to call");
+  eq(R.readReturn(R.NODE_DESKTOP_LOGOUT), { kind: "logout" }, "the logout's return is read as such");
+  eq(R.readReturn(R.NODE_DESKTOP_RETURN), null, "…and a bare sign-in return with no code is still nothing");
 }
 
 if (fails.length) {

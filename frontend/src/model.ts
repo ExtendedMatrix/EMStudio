@@ -18,7 +18,7 @@ import { paradataGroupName } from "./naming";
 import { edgeTypeFor, nodeTypeForClass, planUniformSpellings } from "./rules";
 import type { SpellingPlan } from "./rules";
 import { VOLATILE_KEY } from "./volatile";
-import { currentIdentity, signatureAuth } from "./identity";
+import { currentIdentity, signatureAuth, type SignatureAuth } from "./identity";
 import { birthLanguage } from "./translation";
 import { resolveNodePair } from "./container";
 import type { Conflict } from "./container";
@@ -85,10 +85,28 @@ const MAX_UNDO = 80;
  * token's ORCID, and at the same instant the two copies decided by different
  * clocks — A showed B's value, B showed A's, the room kept A's. A local clock
  * must be the clock the room will compare. Null outside a room.
+ *
+ * FIRMA DELLA NASCITA (12 Oct 2026) · and HOW that hand entered goes with it:
+ * the access the node read in the token (`/v1/whoami`), not the one this
+ * computer's identity last had. Measured at the desktop: entered as Editor Uno
+ * with the node's password, a new node was born `created_by` Dev User — the
+ * local identity left over from another session — while its name, a moment
+ * later, was signed Editor Uno. One hand, read from one place (`editorHand`).
  */
 let roomAuthor: string | null = null;
-export function setRoomAuthor(orcid: string | null): void {
+let roomAuth: SignatureAuth | null = null;
+export function setRoomAuthor(orcid: string | null, auth: SignatureAuth | null = null): void {
   roomAuthor = orcid || null;
+  roomAuth = roomAuthor ? auth : null;
+}
+
+/** The hand that signs an edit made now: in a room the session's on the node
+ *  (the token's iD and its access), outside it this computer's identity. The
+ *  ONE source of `created_by`, `modified_by`, the field clocks and `*_auth`. */
+export function editorHand(): { orcid: string | null; auth: SignatureAuth | null } {
+  if (roomAuthor) return { orcid: roomAuthor, auth: roomAuth };
+  const me = currentIdentity();
+  return { orcid: me?.orcid ?? null, auth: signatureAuth(me) };
 }
 
 /** MIG1 (2026-08-06) one-shot legacy migration: node_type strings renamed in
@@ -865,7 +883,7 @@ export class DocumentStore {
   /** The ORCID iD authoring right now, or null when nobody said. In a room it
    *  is the identity the relay stamps on this session's ops (`setRoomAuthor`). */
   private editorOrcid(): string | null {
-    return roomAuthor ?? currentIdentity()?.orcid ?? null;
+    return editorHand().orcid;
   }
 
   /** Stamp a node's creation. No-op for an operation that arrived from a peer:
@@ -873,12 +891,11 @@ export class DocumentStore {
   private stampNew(node: EmNode): void {
     if (this.suppressOp) return;
     const data = ((node as Record<string, unknown>).data ??= {}) as Record<string, unknown>;
-    const who = this.editorOrcid();
+    const { orcid: who, auth: how } = editorHand();
     if (who && !data.created_by) {
       data.created_by = who;
       // dev27 · how that hand had entered (ORCID, or attested by a node's
-      // password) — s3Dgraphy `created_auth`; nothing for a declared iD
-      const how = signatureAuth(currentIdentity());
+      // password) — s3Dgraphy `created_auth`; the SAME hand as `created_by`
       if (how) data.created_auth = how;
     }
     if (!data.created_at) data.created_at = nowIso();
@@ -893,10 +910,9 @@ export class DocumentStore {
   private stampEdit(node: EmNode): void {
     if (this.suppressOp) return;
     const data = ((node as Record<string, unknown>).data ??= {}) as Record<string, unknown>;
-    const who = this.editorOrcid();
+    const { orcid: who, auth: how } = editorHand();
     if (who) {
       data.modified_by = who;
-      const how = signatureAuth(currentIdentity());
       if (how) data.modified_auth = how;
       else delete data.modified_auth;
     }
@@ -2961,7 +2977,7 @@ export class DocumentStore {
         // THE SIGNATURE OF THE ACT. On every statement, including one that only
         // changed value: an attribution somebody revised is theirs now, not
         // still the first person's.
-        const signer = patch.attributor ?? currentIdentity()?.orcid;
+        const signer = patch.attributor ?? this.editorOrcid();
         if (signer) {
           data.attributed_by = signer;
           data.attributed_at = patch.at ?? new Date().toISOString();
