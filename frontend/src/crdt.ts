@@ -34,8 +34,12 @@ export const OPS = ["add_node", "update_field", "remove_node",
                     "add_edge", "remove_edge"] as const;
 export type OpKind = (typeof OPS)[number];
 
-/** Why one side won a field. `unstamped` means the DATE DID NOT DECIDE. */
-export type FieldReason = "newer" | "tie-author" | "unstamped" | "resurrected";
+/** Why one side won a field. `unstamped` means the DATE DID NOT DECIDE.
+ *  `tie-explicit` / `tie-value` (MICRO-pareggio, 12 Oct 2026): the SAME clock on
+ *  two states — the field's own clock beats a node-stamp fallback, and between
+ *  two own clocks the state decides (`tieRank`), never the arrival. */
+export type FieldReason = "newer" | "tie-author" | "unstamped" | "resurrected"
+  | "tie-explicit" | "tie-value";
 
 export interface Clock {
   ts?: string | null;
@@ -94,8 +98,55 @@ export function clockOrder(a: Clock, b: Clock): number {
   return compareClocks(a, b)[0];
 }
 
+/**
+ * The same instant may be spelt two ways — `…:00Z` (a clock at the second) and
+ * `…:00.000Z` (one at the millisecond): ONE spelling, whichever side is asked,
+ * or two copies differ by bytes nobody wrote (crdt.py `newer`).
+ */
 export function newerClock(a: Clock, b: Clock): Clock {
-  return clockOrder(a, b) >= 0 ? a : b;
+  const order = clockOrder(a, b);
+  if (order === 0) {
+    const ka = a.ts ?? "";
+    const kb = b.ts ?? "";
+    if (ka !== kb) return ka > kb ? a : b;
+    return (a.by ?? "") >= (b.by ?? "") ? a : b;
+  }
+  return order > 0 ? a : b;
+}
+
+/**
+ * An instant in its one canonical UTC form, `…THH:MM:SSZ` (s3dgraphy
+ * `editorial.normalize_instant`): the UTC spellings lose their fraction; an
+ * instant with a real offset, a naive one, or something that is not an instant,
+ * is left exactly as written.
+ */
+export function normalizeInstant(value: string): string {
+  const text = String(value).trim();
+  const m = /^(\d{4}-\d{2}-\d{2})[T ](\d{2}:\d{2}:\d{2})(?:\.\d+)?(?:Z|[+-]00:?00)$/i.exec(text);
+  return m ? `${m[1]}T${m[2]}Z` : text;
+}
+
+/**
+ * The clock as an EDITORIAL stamp records it: at the second (crdt.py
+ * `editorial_clock`). Two precisions, one decision (E.D., 12 Oct 2026): the
+ * clock of an operation (`op.ts`, `field_clocks`, tombstones) is to the
+ * millisecond, because it orders two hands; `created_at` / `modified_at` stay at
+ * the second — written so, and compared so.
+ */
+export function editorialClock(clock: Clock): Clock {
+  if (!isStamped(clock)) return clock;
+  return clockOf(normalizeInstant(String(clock.ts)), clock.by);
+}
+
+/** The clock of an OPERATION, now: UTC, `…:SS.mmmZ` (s3dgraphy
+ *  `editorial.now_op_iso`). The editorial stamps stay at the second. */
+export function nowOpIso(): string {
+  return new Date().toISOString();
+}
+
+/** An editorial stamp, now: UTC, `…:SSZ` (s3dgraphy `editorial.now_iso`). */
+export function nowIso(): string {
+  return new Date().toISOString().replace(/\.\d+Z$/, "Z");
 }
 
 // ── reading a payload ────────────────────────────────────────────────────────
@@ -134,15 +185,21 @@ export function creationStamp(payload: Payload): Clock {
  */
 export function fieldClock(payload: Payload, name: string): Clock {
   const clocks = dataOf(payload)[FIELD_CLOCKS_KEY];
+  // the two fallbacks are editorial stamps, read at the second (`editorialClock`)
+  // — as the CRDT writes them since 12 Oct 2026, and when an older tool wrote
+  // one with its milliseconds
   if (clocks && typeof clocks === "object") {
     const map = clocks as Record<string, Clock>;
-    if (name in map) return map[name] ?? {};
+    if (name in map) {
+      const raw = map[name] ?? {};
+      return clockOf(raw.ts, raw.by);
+    }
     if (Object.keys(map).length) {
       const born = creationStamp(payload);
-      if (isStamped(born)) return born;
+      if (isStamped(born)) return editorialClock(born);
     }
   }
-  return nodeStamp(payload);
+  return editorialClock(nodeStamp(payload));
 }
 
 /** The removal mark of ONE field, or null (P4.1b). Same shape as the node's
@@ -302,6 +359,40 @@ export function clearField(payload: Payload, name: string, clock: Clock): void {
   setFieldClock(payload, name, clock, true);
 }
 
+/**
+ * Where a field's state stands when two states carry the SAME clock (crdt.py
+ * `tie_rank`): the greater wins. An emptying ranks BELOW every value; values
+ * rank by the UTF-8 bytes of their canonical JSON, which is code-point order —
+ * not UTF-16 units, which put an emoji before `"\uffff"`.
+ */
+export function tieRank(value: unknown, removed = false): [number, Uint8Array] {
+  if (removed) return [0, new Uint8Array()];
+  return [1, new TextEncoder().encode(canonicalValue(value))];
+}
+
+/** -1 / 0 / 1 between two `tieRank`s. */
+export function compareTieRank(a: [number, Uint8Array], b: [number, Uint8Array]): number {
+  if (a[0] !== b[0]) return a[0] < b[0] ? -1 : 1;
+  const x = a[1];
+  const y = b[1];
+  for (let i = 0; i < Math.min(x.length, y.length); i++) {
+    if (x[i] !== y[i]) return x[i] < y[i] ? -1 : 1;
+  }
+  return x.length === y.length ? 0 : x.length < y.length ? -1 : 1;
+}
+
+/** `[winning side, reason]` for two different states of one field under the
+ *  SAME clock (crdt.py `_settle_tie`): `tie-explicit`, else `tie-value`. */
+function settleTie(mine: Payload, theirs: Payload, name: string, vMine: unknown,
+                   vTheirs: unknown, mineGone: boolean, theirsGone: boolean):
+    ["mine" | "theirs", FieldReason] {
+  const explicitMine = clockSource(mine, name) === "field_clock";
+  const explicitTheirs = clockSource(theirs, name) === "field_clock";
+  if (explicitMine !== explicitTheirs) return [explicitMine ? "mine" : "theirs", "tie-explicit"];
+  return [compareTieRank(tieRank(vMine, mineGone), tieRank(vTheirs, theirsGone)) > 0
+    ? "mine" : "theirs", "tie-value"];
+}
+
 /** The CONTENT of a payload, without clocks or stamps — for asking "did this
  *  change anything?" without a clock counting as a change. */
 export function contentSignature(payload: Payload): string {
@@ -348,10 +439,9 @@ export function mergePayloads(mine: Payload, theirs: Payload): MergeOutcome {
   const nodeId = String(mine.id ?? theirs.id ?? "");
   const merged: Payload = {
     id: nodeId,
-    node_type:
-      (clockOrder(nodeStamp(theirs), nodeStamp(mine)) > 0
-        ? theirs.node_type
-        : mine.node_type) ?? mine.node_type ?? theirs.node_type,
+    // identity is not a register: the newer node stamp decides, and under the
+    // same stamp the greater type name — never which side is mine
+    node_type: mergeType(mine, theirs),
   };
   const outcome: MergeOutcome = { payload: merged, fields: [], removed: false,
                                   resurrected: false };
@@ -400,7 +490,11 @@ export function mergePayloads(mine: Payload, theirs: Payload): MergeOutcome {
     let reason: FieldReason = rawReason;
     let winSide: "mine" | "theirs";
     if (order === 0 && rawReason === "unstamped") winSide = "theirs";
-    else winSide = order >= 0 ? "mine" : "theirs";
+    // the SAME clock on two different states: the state decides, so that the
+    // result does not depend on which side is `mine`
+    else if (order === 0) [winSide, reason] = settleTie(mine, theirs, name, vMine, vTheirs,
+                                                         mineGone, theirsGone);
+    else winSide = order > 0 ? "mine" : "theirs";
     const winClock = winSide === "mine" ? cMine : cTheirs;
     const loseClock = winSide === "mine" ? cTheirs : cMine;
     const winValue = winSide === "mine" ? vMine : vTheirs;
@@ -441,19 +535,25 @@ export function mergePayloads(mine: Payload, theirs: Payload): MergeOutcome {
     }
   }
 
-  // created = the EARLIER creation; modified = the latest clock anywhere
+  // created = the EARLIER creation (under one clock, the one spelling
+  // `newerClock` picks); modified = the latest clock anywhere, at the second
   const cMine = creationStamp(mine);
   const cTheirs = creationStamp(theirs);
   if (isStamped(cMine) || isStamped(cTheirs)) {
-    const first = isStamped(cMine) && (!isStamped(cTheirs) || clockOrder(cMine, cTheirs) <= 0)
-      ? cMine : cTheirs;
+    let first: Clock;
+    if (!isStamped(cTheirs)) first = cMine;
+    else if (!isStamped(cMine)) first = cTheirs;
+    else {
+      const order = clockOrder(cMine, cTheirs);
+      first = order === 0 ? newerClock(cMine, cTheirs) : order < 0 ? cMine : cTheirs;
+    }
     const data = (merged.data ??= {}) as Record<string, unknown>;
     data.created_at = first.ts;
     if (first.by) data.created_by = first.by;
   }
   let last: Clock = {};
   for (const clock of [...Object.values(winning), nodeStamp(mine), nodeStamp(theirs)])
-    last = newerClock(last, clock);
+    last = newerClock(last, editorialClock(clock));
   if (isStamped(last)) {
     const data = (merged.data ??= {}) as Record<string, unknown>;
     data.modified_at = last.ts;
@@ -487,6 +587,15 @@ export function mergePayloads(mine: Payload, theirs: Payload): MergeOutcome {
     }
   }
   return outcome;
+}
+
+function mergeType(mine: Payload, theirs: Payload): unknown {
+  const a = mine.node_type;
+  const b = theirs.node_type;
+  if (!a || !b) return a || b;
+  const order = clockOrder(nodeStamp(theirs), nodeStamp(mine));
+  if (order === 0) return String(a) >= String(b) ? a : b;
+  return order > 0 ? b : a;
 }
 
 // ── operations ───────────────────────────────────────────────────────────────
@@ -593,9 +702,12 @@ export function opAuth(op: CrdtOp): { mode: "orcid" | "node_password" | "declare
   return Object.keys(o).length === 0 ? null : false;
 }
 
-function stampPayload(payload: Payload, clock: Clock, creation: boolean,
+function stampPayload(payload: Payload, opClockIn: Clock, creation: boolean,
                       auth: { mode: string; attested_by?: string } | null = null): void {
-  if (!isStamped(clock)) return;
+  if (!isStamped(opClockIn)) return;
+  // the op's clock is to the millisecond; the stamps it leaves stay at the
+  // second (E.D., 12 Oct 2026), compared as written — at the second
+  const clock = editorialClock(opClockIn);
   const data = (payload.data ??= {}) as Record<string, unknown>;
   if (creation && !data.created_at) {
     data.created_at = clock.ts;
@@ -604,12 +716,16 @@ function stampPayload(payload: Payload, clock: Clock, creation: boolean,
       if (auth) data.created_auth = { ...auth };
     }
   }
-  if (clockOrder(clock, nodeStamp(payload)) >= 0) {
+  if (newerClock(clock, editorialClock(nodeStamp(payload))) === clock) {
     data.modified_at = clock.ts;
     if (clock.by) {
       data.modified_by = clock.by;
       if (auth) data.modified_auth = { ...auth };
       else delete data.modified_auth;
+    } else {
+      // a later hand nobody named: the previous hand is not the last any more
+      delete data.modified_by;
+      delete data.modified_auth;
     }
   }
 }
@@ -680,20 +796,58 @@ export function applyOp(section: Section, op: CrdtOp): OpResult {
       return { applied: false, reason: "the op's access mode is not orcid or node_password with its node: nothing was written",
                nodeId, fields: [] };
     const current = fieldClock(existing, name);
-    const [order, reason] = compareClocks(clock, current);
+    const [order, rawReason] = compareClocks(clock, current);
+    let reason: FieldReason = rawReason;
     const gone = fieldTombstone(existing, name) !== null;
     const wantsGone = op.remove === true;
     const sameValue = gone === wantsGone
       && canonicalValue(getField(existing, name)) === canonicalValue(op.value);
-    if (order < 0 || (order === 0 && sameValue))
+    const explicit = clockSource(existing, name) === "field_clock";
+    const auth = opAuth(op) || null;
+    if (order === 0 && sameValue && reason === "tie-author"
+        && (!explicit || (newerClock(clock, current) === clock && clock.ts !== current.ts))) {
+      // the same value under the same clock: no content moves, but the field
+      // takes its OWN clock — against the node-stamp fallback it is still a
+      // write; or the same instant spelt otherwise, where `newerClock` picks
+      setFieldClock(existing, name, clock, gone);
+    }
+    if (order < 0 || (order === 0 && sameValue)) {
+      // nothing moves… but the last-hand stamp sees this op like every other:
+      // at the second, a stale op can still TIE the stamp, and counting only
+      // the applied ones would make the last hand of that second the arrival's
+      stampPayload(existing, clock, false, auth);
       return { applied: false, reason: order < 0 ? "stale" : "idempotent", nodeId,
                fields: [] };
+    }
+    if (order === 0 && reason === "tie-author") {
+      // the SAME clock (instant and author) on a different state: against a
+      // node-stamp fallback the op's own clock wins; against the field's own
+      // clock the state decides, never the arrival (measured on 12 Oct 2026: a
+      // burst of renames in one millisecond left the room on the last and this
+      // copy on the first)
+      if (!explicit) reason = "tie-explicit";
+      else if (compareTieRank(tieRank(op.value, wantsGone),
+                              tieRank(getField(existing, name), gone)) < 0) {
+        stampPayload(existing, clock, false, auth);
+        return {
+          applied: false, reason: "tie-value", nodeId,
+          fields: [{
+            nodeId, field: name, reason: "tie-value",
+            winner: { by: current.by ?? null, at: current.ts ?? null,
+                      stamp: "field_clock", side: "state", removed: gone },
+            loser: { by: clock.by ?? null, at: clock.ts ?? null,
+                     stamp: "field_clock", side: "op", removed: wantsGone },
+            loserValue: wantsGone ? null : op.value,
+          }],
+        };
+      } else reason = "tie-value";
+    }
     const loserValue = getField(existing, name);
     // ONE act, the same one an editor performs: a value with its clock, or an
     // emptying with its tombstone (`remove: true`).
     if (wantsGone) clearField(existing, name, clock);
     else writeField(existing, name, op.value, clock);
-    stampPayload(existing, clock, false, opAuth(op) || null);
+    stampPayload(existing, clock, false, auth);
     return {
       applied: true, reason: "set", nodeId,
       fields: [{
@@ -735,10 +889,13 @@ export function applyOp(section: Section, op: CrdtOp): OpResult {
       const attrs = ((existing.attributes ??= {}) as Record<string, unknown>);
       let learned = mergeDeclared(attrs, declared);
       // the relation was created by its OLDEST add, whichever arrives first:
-      // without this two adds converge only in one order
-      const born = clockOf(attrs.created_at as string | undefined, attrs.created_by as string | undefined);
-      if (isStamped(clock) && (!isStamped(born) || clockOrder(clock, born) < 0)) {
-        Object.assign(attrs, { created_at: clock.ts, created_by: clock.by });
+      // without this two adds converge only in one order (a stamp, so at the
+      // second: `editorialClock`)
+      const born = editorialClock(clockOf(attrs.created_at as string | undefined,
+                                          attrs.created_by as string | undefined));
+      const stamp = editorialClock(clock);
+      if (isStamped(stamp) && (!isStamped(born) || clockOrder(stamp, born) < 0)) {
+        Object.assign(attrs, { created_at: stamp.ts, created_by: stamp.by });
         learned = true;
       }
       const mark = (attrs[REMOVED_KEY] ?? {}) as Clock;
@@ -751,7 +908,10 @@ export function applyOp(section: Section, op: CrdtOp): OpResult {
                      : { applied: false, reason: "idempotent", fields: [] };
     }
     const attrs: Record<string, unknown> = { ...declared };
-    if (isStamped(clock)) Object.assign(attrs, { created_at: clock.ts, created_by: clock.by });
+    if (isStamped(clock)) {
+      const stamp = editorialClock(clock);
+      Object.assign(attrs, { created_at: stamp.ts, created_by: stamp.by });
+    }
     if (Object.keys(attrs).length) edge.attributes = attrs;
     edges.push(edge);
     return { applied: true, reason: "added", fields: [] };

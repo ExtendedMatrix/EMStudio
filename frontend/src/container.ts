@@ -464,7 +464,8 @@ export function bumpVersion(
 
 /** Why a contested node was resolved the way it was. Mirrors
  *  `s3dgraphy.container.CONFLICT_REASONS`. */
-export type ConflictReason = "newer" | "tie-author" | "unstamped" | "resurrected";
+export type ConflictReason = "newer" | "tie-author" | "unstamped" | "resurrected"
+  | "tie-explicit" | "tie-value";
 
 /** P3 · one node two people edited — who won, who lost, and why. */
 export interface Conflict {

@@ -301,4 +301,83 @@ const digest = (s) => K.contentDigest({ graphs: { [s.graph_id]: s },
      "data · …and what nobody touched is still there");
 }
 
+// ── MICRO-pareggio (12 Oct 2026) · under one clock the state decides ──────────
+// The SAME files as s3Dgraphy/tests/fixtures/crdt-parity-tie.json and
+// crdt-parity-ms.json, and the digests s3dgraphy wrote into them. Measured on
+// the table that morning: a burst of renames in one millisecond left the room on
+// the last and EMStudio on the first; a correction 300 ms after another lost to
+// it at the second, five times out of five.
+{
+  // a deterministic shuffle: the same permutations every run
+  let seed = 1012;
+  const rand = () => ((seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648);
+  const shuffled = (list) => {
+    const out = [...list];
+    for (let i = out.length - 1; i > 0; i--) {
+      const j = Math.floor(rand() * (i + 1));
+      [out[i], out[j]] = [out[j], out[i]];
+    }
+    return out;
+  };
+  for (const name of ["crdt-parity-tie.json", "crdt-parity-ms.json"]) {
+    const fixture = JSON.parse(readFileSync(
+      new URL(`../testdata/${name}`, import.meta.url), "utf8"));
+    const run = (ops) => {
+      const s = structuredClone(fixture.section);
+      C.applyOps(s, structuredClone(ops));
+      return digest(s);
+    };
+    eq(run(fixture.ops), fixture.expected_digest,
+       `pareggio · ${name}: the digest s3dgraphy wrote`);
+    eq(run([...fixture.ops].reverse()), fixture.expected_digest,
+       `pareggio · ${name}: …in the reverse order`);
+    let same = 0;
+    for (let k = 0; k < 200; k++) same += run(shuffled(fixture.ops)) === fixture.expected_digest;
+    eq(same, 200, `pareggio · ${name}: …and in 200 shuffled orders`);
+  }
+
+  const P = "0000-0001-5109-3700";      // the smaller iD
+  const Q = "0000-0002-1825-0097";
+  const base = () => section(node("US6", { created_at: T1, created_by: P,
+    field_clocks: { name: { ts: "2026-10-12T07:00:00.000Z", by: P } } }));
+  const rename = (value, ts = "2026-10-12T07:12:47.455Z", author = Q) =>
+    ({ op: "update_field", node_id: "US6", field: "name", value, ts, author });
+
+  // tie-value: twenty renames in one millisecond, any order, one value
+  const burst = Array.from({ length: 20 }, (_, i) => rename(`US 6 · R${String(i).padStart(2, "0")}`));
+  const a = base(); C.applyOps(a, burst);
+  const b = base(); C.applyOps(b, [...burst].reverse());
+  eq(a.nodes[0].name, "US 6 · R19", "pareggio · 20 renames in one ms: the greater value");
+  eq(b.nodes[0].name, "US 6 · R19", "pareggio · …whatever the order they arrive in");
+  const lost = C.applyOp(a, rename("US 6 · R00"));
+  eq([lost.applied, lost.reason], [false, "tie-value"],
+     "pareggio · the smaller value under the same clock is refused as tie-value");
+
+  // the code-point order, not UTF-16: an emoji ranks above "￿"
+  eq(C.compareTieRank(C.tieRank("😀"), C.tieRank("￿")), 1,
+     "pareggio · values rank by code point (UTF-8 bytes)");
+  eq(C.compareTieRank(C.tieRank(null, true), C.tieRank("")), -1,
+     "pareggio · an emptying ranks below every value");
+
+  // prova 2: 300 ms later wins, even with the GREATER iD
+  const p2 = base();
+  C.applyOps(p2, [rename("US 6 · B", "2026-10-12T07:12:47.400Z", Q),
+                  rename("US 6 · A", "2026-10-12T07:12:47.100Z", P)]);
+  eq(p2.nodes[0].name, "US 6 · B", "ms · 300 ms later wins, even with the greater iD");
+  eq(p2.nodes[0].data.modified_at, "2026-10-12T07:12:47Z",
+     "ms · …and the editorial stamp it leaves stays at the second");
+  eq(p2.nodes[0].data.field_clocks.name.ts, "2026-10-12T07:12:47.400Z",
+     "ms · …while the field's clock keeps the millisecond");
+
+  // one instant, two spellings
+  eq(C.clockOrder({ ts: "2026-10-12T07:12:47Z" }, { ts: "2026-10-12T07:12:47.000Z" }), 0,
+     "ms · «…:47Z» and «…:47.000Z» are the same instant");
+  eq(C.clockOrder({ ts: "2026-10-12T07:12:47Z" }, { ts: "2026-10-12T07:12:47.300Z" }), -1,
+     "ms · …earlier than «…:47.300Z»");
+  eq(C.editorialClock({ ts: "2026-10-12T07:12:47.300Z", by: P }).ts, "2026-10-12T07:12:47Z",
+     "ms · an editorial stamp is the op's clock at the second");
+  ok(/\.\d{3}Z$/.test(C.nowOpIso()) && /:\d{2}Z$/.test(C.nowIso()),
+     "ms · an op's clock now has its milliseconds, a stamp has none");
+}
+
 console.log(`crdt: ${checks} checks passed`);

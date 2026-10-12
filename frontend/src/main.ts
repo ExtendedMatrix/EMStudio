@@ -378,7 +378,7 @@ import {
   reducePresence,
 } from "./hub";
 import { applyOp as crdtApplyOp, fieldClock as crdtFieldClock, fieldTombstone as crdtFieldTombstone,
-         getField as crdtGetField, type CrdtOp } from "./crdt";
+         getField as crdtGetField, nowOpIso, type CrdtOp } from "./crdt";
 import { isRemoved, sectionLanguage } from "./crdt";
 import {
   AI_PROVIDERS,
@@ -6121,7 +6121,7 @@ function hubSendLocal(ops: HubOp[], graphId = ""): void {
     // — for work done without network, the moment it came back, not the moment
     // it was done — and its `op_result` never matched the waiting copy, so the
     // sync sign stayed on «⋯» for good
-    if (!hubOp.ts) hubOp.ts = new Date().toISOString().replace(/\.\d+Z$/, "Z");
+    if (!hubOp.ts) hubOp.ts = nowOpIso();
     // G1 · the graph of the store that changed, kept with the op so a re-send
     // after a re-sync goes to the same graph
     if (graphId) (hubOp as HubOp & { graph_id?: string }).graph_id = graphId;
@@ -6424,7 +6424,7 @@ function hubRealignFrom(doc: unknown): void {
     // room has not answered it yet, and it may well win
     const later = [...hubUnconfirmed.values()].some((u) => u.op === "update_field"
       && String(u.node_id ?? "") === nodeId && String(u.field ?? "") === field
-      && String(u.ts ?? "") > String(op.ts ?? ""));
+      && Date.parse(String(u.ts ?? "")) > Date.parse(String(op.ts ?? "")));
     if (later) continue;
     const clock = crdtFieldClock(roomNode, field);
     const removed = crdtFieldTombstone(roomNode, field) !== null;
@@ -7892,7 +7892,7 @@ function connectToHub(url: string, room: string, token: string | null): void {
         // Held, not sent, until the snapshot has landed: see `replayAfterResync`.
         // Sending here and re-applying later would be two orders for the same
         // facts, and the one the screen shows would be the wrong one.
-        const now = new Date().toISOString().replace(/\.\d+Z$/, "Z");
+        const now = nowOpIso();
         hubResyncPending = stampForResend(hubUnconfirmed.values(), now);
         hubUnconfirmed.clear();
         noteSyncState();

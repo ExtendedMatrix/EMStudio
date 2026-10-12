@@ -26,7 +26,7 @@ import {
   applyOp as crdtApplyOp,
   canonicalValue, clearField, contentFields, getField,
   isRemoved,
-  liveEdges as crdtLiveEdges, liveNodes as crdtLiveNodes,
+  liveEdges as crdtLiveEdges, liveNodes as crdtLiveNodes, nowIso, nowOpIso,
   setFieldClock, unstampedFields, writeField,
 } from "./crdt";
 import type { CrdtOp, OpResult, Payload } from "./crdt";
@@ -711,7 +711,7 @@ export class DocumentStore {
       const how = signatureAuth(currentIdentity());
       if (how) data.created_auth = how;
     }
-    if (!data.created_at) data.created_at = new Date().toISOString().replace(/\.\d+Z$/, "Z");
+    if (!data.created_at) data.created_at = nowIso();
     // dev27 · rule A1: a node is BORN in a language — the study's at this
     // moment when it says none — and keeps it when the study's changes
     const lang = birthLanguage(this.doc, node);
@@ -730,7 +730,7 @@ export class DocumentStore {
       if (how) data.modified_auth = how;
       else delete data.modified_auth;
     }
-    data.modified_at = new Date().toISOString().replace(/\.\d+Z$/, "Z");
+    data.modified_at = nowIso();
   }
 
   /**
@@ -745,7 +745,10 @@ export class DocumentStore {
    */
   private stampFields(node: EmNode, before: Record<string, unknown>): ChangedField[] {
     if (this.suppressOp) return [];
-    const now = new Date().toISOString().replace(/\.\d+Z$/, "Z");
+    // the clock of an OPERATION: to the millisecond (E.D., 12 Oct 2026). At the
+    // second, a correction made 300 ms after another lost to it, five times out
+    // of five on the table; `created_at` / `modified_at` stay at the second
+    const now = nowOpIso();
     const who = this.editorOrcid();
     const after = node as unknown as Record<string, unknown>;
     const payload = after as Payload;
@@ -785,7 +788,7 @@ export class DocumentStore {
     const node = this.node(nodeId);
     if (!node) return;
     this.checkpoint();
-    const now = new Date().toISOString().replace(/\.\d+Z$/, "Z");
+    const now = nowOpIso();
     writeField(node as unknown as Payload, field, value, {
       ts: now, by: this.editorOrcid(),
     });
@@ -806,7 +809,7 @@ export class DocumentStore {
     const node = this.node(nodeId);
     if (!node) return;
     this.checkpoint();
-    const now = new Date().toISOString().replace(/\.\d+Z$/, "Z");
+    const now = nowOpIso();
     clearField(node as unknown as Payload, field, { ts: now, by: this.editorOrcid() });
     this.stampEdit(node);
     this.emit();
@@ -1902,7 +1905,7 @@ export class DocumentStore {
     const n = this.node(id);
     if (!n) return;
     this.checkpoint();
-    const ts = new Date().toISOString().replace(/\.\d+Z$/, "Z");
+    const ts = nowOpIso();
     const by = this.editorOrcid();
     ((n.data ??= {}) as Record<string, unknown>).removed = by ? { ts, by } : { ts };
     this.emit();
