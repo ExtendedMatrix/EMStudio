@@ -153,7 +153,12 @@ const GEOMETRY_PROPERTY_TYPE = "geometry";
 const dataOf = (n: EmNode | undefined): Record<string, unknown> => (n?.data ?? {}) as Record<string, unknown>;
 const str = (v: unknown): string => (v == null ? "" : String(v));
 const num = (v: unknown): number | null => (v == null || v === "" || !Number.isFinite(Number(v)) ? null : Number(v));
-const alive = (x: { data?: unknown }): boolean => !dataOf(x as EmNode).removed;
+/** alive: a node's tombstone is `data.removed`, an EDGE's is
+ *  `attributes.removed` (crdt `liveEdges`). Measured 13 Oct 2026: reading only
+ *  `data` kept every withdrawn citation alive, and the Space drew the first —
+ *  the OLDEST — version of each proxy (US 1–4 at their old place). */
+const alive = (x: { data?: unknown; attributes?: unknown }): boolean =>
+  !dataOf(x as EmNode).removed && !((x.attributes ?? {}) as Record<string, unknown>).removed;
 
 /** Is a URL somewhere else (a web locator), as `effective_residency` reads it? */
 const isRemote = (url: string): boolean => /^[a-z][a-z0-9+.-]*:\/\//i.test(url) && !/^file:/i.test(url);
