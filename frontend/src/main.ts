@@ -1417,8 +1417,10 @@ function noteSyncState(): void {
  */
 function renderStatusLine(): void {
   // MICRO-SPAZIO-FIRMATO · a new token or room: what the scene found refused
-  // or missing before is asked again
-  if (spaceAccessChanged()) queueMicrotask(() => { refreshSurfaces("scene"); renderEmData(); });
+  // or missing before is asked again. Deferred: the bar is first drawn while
+  // the module is still being evaluated, before `hubToken` and `spaceAccess`
+  // exist — reading them here threw and stopped the whole app (dev.36).
+  queueMicrotask(() => { if (spaceAccessChanged()) { refreshSurfaces("scene"); renderEmData(); } });
   const st = connectionState();
   modeIndicator.textContent = "";
   const dot = document.createElement("span");
