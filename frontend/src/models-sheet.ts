@@ -57,6 +57,7 @@ export function modelsTableHtml(space: Space, units: string[], ctx: ModelsCtx,
   const withRm = space.epochs.filter((e) => space.rms.some((r) => r.epochs.includes(e.id))).length;
   const pxs = units.filter((u) => space.proxies.has(u));
   const miss = pxs.filter((u) => space.proxies.get(u)?.resource?.state === "missing").length;
+  const refused = pxs.filter((u) => space.proxies.get(u)?.resource?.state === "refused").length;
   const refs = pxs.filter((u) => space.proxies.get(u)?.resource?.state === "reference").length;
   const json = pxs.filter((u) => !space.proxies.get(u)?.resource).length;
   const chip = (k: string, v: string, id: string) => `<span class="chip" data-count="${id}">${esc(t(k))} <b>${v}</b></span>`;
@@ -64,6 +65,7 @@ export function modelsTableHtml(space: Space, units: string[], ctx: ModelsCtx,
     + chip("space.sumEpochs", `${withRm}/${space.epochs.length}`, "epochs")
     + chip("space.sumUnits", `${pxs.length}/${units.length}`, "units")
     + (miss ? chip("space.sumMissing", String(miss), "missing") : "")
+    + (refused ? chip("space.sumRefused", String(refused), "refused") : "")
     + (refs ? chip("space.sumReference", String(refs), "reference") : "")
     + (json ? chip("space.sumJson", String(json), "json") : "")
     + `</div>`;

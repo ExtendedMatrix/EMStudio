@@ -15,7 +15,12 @@
  *     content is, so the contour is the room of what is drawn around it (the
  *     scene's extent, or a metre when it is alone) — a place, not a shape;
  *   · `missing` — declared and absent (not in the store, or not found when
- *     fetched): its label only, where it would be.
+ *     fetched): its label only, where it would be;
+ *   · `refused` — MICRO-SPAZIO-FIRMATO · the node did not give the file (401/
+ *     403: access, not absence): its label says so, where it would be.
+ *
+ * A file of the room's store is asked through the signed road (`node-road.ts`)
+ * and its bytes are parsed: the loader's own request carries no bearer.
  *
  * The camera frames the content when it first arrives and on ⤢ (`frame`),
  * never on an epoch change or a toggle: the reader's point of view is theirs
@@ -23,6 +28,7 @@
  */
 import { engine, headBytes, lodLevelOf, probeLods, tilesBarTexts } from "./embed3d-native";
 import { onFirstVisible } from "./lazy";
+import { nodeBytes, ownedByNode, RoadError, type FetchFailure } from "./node-road";
 import { createTilesLayer, dracoFor, formatBytes, isTilesetUrl, tilesBar, tilesEngine, type TilesLayer } from "./tiles3d";
 
 export interface SceneItem {
@@ -30,7 +36,7 @@ export interface SceneItem {
   /** the RM, or the UNIT a proxy belongs to (a click selects it) */
   id: string;
   label: string;
-  state: "resident" | "reference" | "missing" | "json";
+  state: "resident" | "reference" | "missing" | "refused" | "json";
   /** the glb to fetch, for `resident` */
   url?: string;
   resourceId?: string;
@@ -56,6 +62,8 @@ export interface SceneTexts {
   noEngine: string;
   referenceOnly: (name: string) => string;
   missing: (name: string) => string;
+  /** MICRO-SPAZIO-FIRMATO · the node refused the file (access) */
+  refused: (name: string) => string;
   /** MICRO-3DTILES · a glb over the threshold, and the two ways on */
   overLimit: (name: string, size: string, limit: string) => string;
   openTileset: string;
@@ -73,8 +81,9 @@ export interface SpaceSceneOptions {
   texts: SceneTexts;
   onPickUnit?: (unitId: string) => void;
   onPickRm?: (rmId: string) => void;
-  /** a resident file did not answer: the caller marks it missing */
-  onNotFound?: (resourceId: string) => void;
+  /** a resident file did not come: the caller marks it missing — or, when
+   *  the node refused it (401/403), refused */
+  onNotFound?: (resourceId: string, why: FetchFailure) => void;
   /** MICRO-3DTILES · the threshold and the tiles' memory (the Preferences) */
   limit?: { bytes: number; points: number };
   tilesMemoryMB?: number;
@@ -147,15 +156,28 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
       let dracoSet: Promise<void> | null = null;
       const withDraco = (): Promise<void> => (dracoSet ??= tilesEngine()
         .then((T) => { loader.setDRACOLoader(dracoFor(E, T)); }).catch(() => undefined));
-      const cache = new Map<string, Promise<any | null>>();
-      const load = (url: string): Promise<any | null> => {
+      // a model, or why it did not come. A failure is not kept: once the
+      // access is granted (or the file uploaded), asking again asks again
+      type Loaded = { root: any } | { fail: FetchFailure };
+      const cache = new Map<string, Promise<Loaded>>();
+      const load = (url: string): Promise<Loaded> => {
         let p = cache.get(url);
         if (!p) {
-          p = withDraco().then(() => new Promise((res) => loader.load(url, (g: any) => res(g.scene), undefined, () => res(null))));
+          p = withDraco().then((): Promise<Loaded> => ownedByNode(url)
+            // the room's store: the bytes through the signed road, then parsed
+            ? nodeBytes(url).then(
+                (buf) => new Promise<Loaded>((res) => loader.parse(buf, "",
+                  (g: any) => res({ root: g.scene }), () => res({ fail: "missing" }))),
+                (e) => ({ fail: e instanceof RoadError ? e.why : "missing" }))
+            : new Promise<Loaded>((res) => loader.load(url, (g: any) => res({ root: g.scene }), undefined,
+                () => res({ fail: "missing" }))));
           cache.set(url, p);
+          const mine = p;
+          void p.then((x) => { if ("fail" in x && cache.get(url) === mine) cache.delete(url); });
         }
         return p;
       };
+      const failed = (item: SceneItem, why: FetchFailure): SceneItem => ({ ...item, state: why });
       let framed = false;
       let generation = 0;
       const anchors: Array<{ el: HTMLElement; p: any }> = [];
@@ -357,15 +379,15 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
                 }
               }
               if (el && !el.querySelector("select")) el.remove();
-              const root = await load(u);
+              const got = await load(u);
               if (gen !== generation || disposed) return;
-              if (!root) {
-                drawn.set(key, { item: { ...item, state: "missing" }, as: "label" });
-                later.push({ ...item, state: "missing" });
-                if (item.resourceId) opts.onNotFound?.(item.resourceId);
+              if ("fail" in got) {
+                drawn.set(key, { item: failed(item, got.fail), as: "label" });
+                later.push(failed(item, got.fail));
+                if (item.resourceId) opts.onNotFound?.(item.resourceId, got.fail);
                 return;
               }
-              const obj = root.clone(true);
+              const obj = got.root.clone(true);
               if (item.selected) content.add(new THREE.Box3Helper(new THREE.Box3().setFromObject(obj), 0xbf9000));
               tag(obj, item);
               content.add(obj);
@@ -376,15 +398,15 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
           }
           if (item.state === "resident" && item.url) {
             drawn.set(`${item.kind}:${item.id}`, { item, as: "pending" });
-            pending.push(load(item.url).then((root) => {
+            pending.push(load(item.url).then((got) => {
               if (gen !== generation || disposed) return;
-              if (!root) {
-                drawn.set(`${item.kind}:${item.id}`, { item: { ...item, state: "missing" }, as: "label" });
-                later.push({ ...item, state: "missing" });
-                if (item.resourceId) opts.onNotFound?.(item.resourceId);
+              if ("fail" in got) {
+                drawn.set(`${item.kind}:${item.id}`, { item: failed(item, got.fail), as: "label" });
+                later.push(failed(item, got.fail));
+                if (item.resourceId) opts.onNotFound?.(item.resourceId, got.fail);
                 return;
               }
-              const obj = root.clone(true);
+              const obj = got.root.clone(true);
               if (item.kind === "proxy") {
                 obj.traverse((o: any) => { if (o.isMesh) o.material = translucent(item); });
                 obj.traverse((o: any) => { if (o.isMesh) o.add(outline(o.geometry, item)); });
@@ -450,7 +472,9 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
               at.y = b.max.y + 0.2 + 0.25 * k++;
               // MICRO-3DTILES · held back by the threshold: its label says so
               const gated = drawn.get(key)?.as === "gated";
-              addLabel(gated ? item.label : opts.texts.missing(item.label), at, gated ? "miss gated" : "miss", item.id);
+              const refused = item.state === "refused";
+              addLabel(gated ? item.label : refused ? opts.texts.refused(item.label) : opts.texts.missing(item.label), at,
+                gated ? "miss gated" : refused ? "miss refused" : "miss", item.id);
               if (!gated) drawn.set(key, { item, as: "label" });
             }
           }

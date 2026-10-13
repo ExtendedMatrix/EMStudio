@@ -338,8 +338,10 @@ export class Tiles3tzPlugin {
 }
 
 /** A source for a locator: a `blob:` (a file on this machine) is sliced, the
- *  rest is asked by `Range`. */
-export async function sourceFor(url: string): Promise<ByteSource> {
+ *  rest is asked by `Range` — with the caller's fetch: the room's store asks
+ *  through the signed road (`node-road.ts`; this module rides in the lazy
+ *  tiles bundle, so the road is handed in, not imported). */
+export async function sourceFor(url: string, fetchFn?: typeof fetch): Promise<ByteSource> {
   if (url.startsWith("blob:")) return blobSource(await (await fetch(url)).blob());
-  return httpSource(url);
+  return httpSource(url, fetchFn);
 }

@@ -243,6 +243,7 @@ import { buildSpace, type Space } from "./space";
 import { mountSpaceScene, type SceneItem } from "./scene3d";
 import { isTilesetUrl } from "./tiles3d";
 import type { ModelOptions } from "./embed3d-native";
+import { nodeBlobReady, nodeBlobUrl, ownedByNode, setNodeRoad, type FetchFailure } from "./node-road";
 import { isRef3D, resolve3d } from "./embed3d";
 import { KEYMAP, filterKeymap, keysText } from "./keymap";
 import { ReadingFiles } from "./reading-files";
@@ -1414,6 +1415,9 @@ function noteSyncState(): void {
  * panel the click opens; in a Sidecar the node is not mentioned at all.
  */
 function renderStatusLine(): void {
+  // MICRO-SPAZIO-FIRMATO · a new token or room: what the scene found refused
+  // or missing before is asked again
+  if (spaceAccessChanged()) queueMicrotask(() => { refreshSurfaces("scene"); renderEmData(); });
   const st = connectionState();
   modeIndicator.textContent = "";
   const dot = document.createElement("span");
@@ -12425,6 +12429,18 @@ function nodeHttp(base: string): NodeApi {
   return nodeApi(base, () => hubToken, nodeAuthFetch);
 }
 
+/** MICRO-SPAZIO-FIRMATO · is a URL the node's store? The room's (`assetStoreBase`,
+ *  `?store=` included), or `…/v1/rooms/<room>/asset/…` of the same node — the
+ *  form EMtools writes in a resource's `url`. */
+function nodeOwnsUrl(url: string): boolean {
+  const store0 = assetStoreBase();
+  if (store0 && url.startsWith(store0)) return true;
+  const hub = getSettings().sync.hubUrl.replace(/\/+$/, "");
+  return !!hub && url.startsWith(`${hub}/v1/rooms/`) && /\/v1\/rooms\/[^/]+\/asset(-home)?\//.test(url);
+}
+// …and the 3D loaders' bytes from it go through the one road (`node-road.ts`)
+setNodeRoad({ fetch: nodeAuthFetch, owns: nodeOwnsUrl });
+
 // ---------- MENU1 · Help menu (About / Updates / Ontology models) ----------
 const RELEASES_URL = "https://github.com/EmanuelDemetrescu/EMStudio/releases";
 function helpPopover(title: string, rows: Array<[string, string]>): void {
@@ -20431,7 +20447,7 @@ function renderDocViewInto(
  *  explicitly). Null when the resource is the plain one-file kind the Doc
  *  always opened by its url. Cached per document, a repaint follows the bridge. */
 interface DocModel { choice: ModelChoice; url: string | null;
-                     modifier?: (u: string) => string; resolved?: () => Array<[string, string]> }
+                     modifier?: (u: string) => string; resolved?: () => Array<[string, string]>; files?: string[] }
 const docModelCache = new Map<string, DocModel | null>();
 let bridgeBaseNow: string | null = null;
 function assetStoreBase(): string | null {
@@ -20472,7 +20488,10 @@ function docModelOf(d: EmNode): DocModel | null {
   // a tileset's door, a .3tz — goes as its real address
   const several = choice.files.length > 1;
   const out: DocModel = several
-    ? { choice, url: map.entryUrl, modifier: map.modifier, resolved: () => [...map.resolved] }
+    ? { choice, url: map.entryUrl, modifier: map.modifier, resolved: () => [...map.resolved],
+        // MICRO-SPAZIO-FIRMATO · online, the set's files by digest: the viewer
+        // fetches them signed before its loaders ask
+        files: store0 ? choice.files.filter((f) => f.checksum).map((f) => `${store0}${encodeURIComponent(f.checksum!)}`) : undefined }
     : { choice, url: map.modifier(map.entryUrl), resolved: () => [...map.resolved] };
   docModelCache.set(key, out);
   return out;
@@ -20540,6 +20559,17 @@ function docSrcUrl(src: string): string | null {
   return null;
 }
 
+/** MICRO-SPAZIO-FIRMATO · an image of the room's store goes to its <img> as
+ *  the blob it was fetched into through the signed road (an <img> sends no
+ *  bearer); until then nothing, and a repaint follows. Any other URL as it is. */
+function signedImageUrl(url: string | null): string | null {
+  if (!url || !ownedByNode(url)) return url;
+  const ready = nodeBlobReady(url);
+  if (ready) return ready;
+  void nodeBlobUrl(url).then(() => renderDocView(), () => { /* refused or absent: the stage says no image */ });
+  return null;
+}
+
 /** MICRO-3DTILES · what the Doc's 3D viewer is told about a big asset: the
  *  threshold (Preferences), what the graph knows of the file (`size_bytes`,
  *  `primitives.points`), and the TILESET of the same model — a resource of the
@@ -20554,6 +20584,7 @@ function docModelOptions(d: EmNode): ModelOptions {
   };
   const chosen = docModelOf(d);
   if (chosen?.modifier) { opts.urlModifier = chosen.modifier; opts.lods = false; }
+  if (chosen?.files) opts.files = chosen.files;
   if (chosen?.resolved) opts.resolved = chosen.resolved;
   if (!st) return opts;
   const linked = (id: string) => st.liveEdges()
@@ -20723,7 +20754,7 @@ function renderDocReadingStage(win: Win, detail: HTMLElement, d: EmNode): void {
     medium,
     armed,
     current: armed ?? selectedReading,
-    imageUrl: medium === "image" ? url : null,
+    imageUrl: medium === "image" ? signedImageUrl(url) : null,
     modelUrl: medium === "3d" ? url : null,
     model: medium === "3d" ? docModelOptions(d) : undefined,
     modelNote: (() => {
@@ -21358,6 +21389,21 @@ let spaceVersion = 0;
 let spaceAsking = false;
 /** resident files the scene fetched and did not find */
 const spaceNotFound = new Set<string>();
+/** MICRO-SPAZIO-FIRMATO · resident files the node refused to the scene (401/
+ *  403): access, not absence — said apart from «file missing» */
+const spaceRefused = new Set<string>();
+/** …both are emptied when the token or the room changes: an attempt that
+ *  failed before the access must not stay marked for the session */
+let spaceAccess = "";
+function spaceAccessChanged(): boolean {
+  const k = `${sync.room ?? ""}\u0000${hubToken ?? ""}`;
+  if (k === spaceAccess) return false;
+  spaceAccess = k;
+  if (!spaceNotFound.size && !spaceRefused.size) return false;
+  spaceNotFound.clear();
+  spaceRefused.clear();
+  return true;
+}
 
 /** TEMPLU MARE v2 · where the scene fetches a resource's bytes — the same
  *  addresses as the document viewer (`docModelOf`): in a room, the store by
@@ -21390,12 +21436,13 @@ function spaceFileUrl(res: { url: string; checksum: string } | null | undefined)
 
 function currentSpace(): Space | null {
   if (!store) return null;
+  spaceAccessChanged();
   // Y6 · the proxies the connected host has in its scene count too
   const sceneProxies = sync.connected && Array.isArray(hostInfo.scene_proxies)
     ? new Set(hostInfo.scene_proxies.map(String)) : null;
   return buildSpace(store.doc, { isUnit: isStratigraphicType,
     resident: spaceResident?.version === spaceVersion ? spaceResident.ids : null, notFound: spaceNotFound,
-    sceneProxies, fromStore: !!assetStoreBase() });
+    refused: spaceRefused, sceneProxies, fromStore: !!assetStoreBase() });
 }
 
 /** Ask s3Dgraphy what can be fetched (`geometry_summary`), once per version of
@@ -21611,6 +21658,7 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
       loading: t("space.loading"), noEngine: t("em3d.noEngine"),
       referenceOnly: (name) => t("space.refOnly", { x: name }),
       missing: (name) => t("space.fileMissing", { x: name }),
+      refused: (name) => t("space.fileRefused", { x: name }),
       overLimit: (name, size, lim) => t("space.overLimit", { x: name, size, lim }),
       openTileset: t("lod.openTileset"), loadAnyway: t("lod.loadAnyway"),
       lodNote: (n) => t("lod.note", { n: String(n) }),
@@ -21625,9 +21673,10 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
       const d = currentSpace()?.rms.find((r) => r.id === id)?.documentId;
       if (d) requestDoc(d, { from: win, reading: null });
     },
-    onNotFound: (rid) => {
-      if (spaceNotFound.has(rid)) return;
-      spaceNotFound.add(rid);
+    onNotFound: (rid, why: FetchFailure) => {
+      const into = why === "refused" ? spaceRefused : spaceNotFound;
+      if (into.has(rid)) return;
+      into.add(rid);
       queueMicrotask(() => { refreshSurfaces("scene"); renderEmData(); });
     },
   });
@@ -21739,6 +21788,7 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
       + (sum.inScene.length ? ` <span class="ref" data-sum="inScene">${escapeHtml(t("space.inScene", { n: String(sum.inScene.length) }))}</span>` : "")
       + (sum.without.length ? ` · <span class="miss" data-sum="without">${escapeHtml(t("space.without"))}: ${list(sum.without)}</span>` : "")
       + (sum.missing.length ? ` · <span class="miss" data-sum="missing">${escapeHtml(t("space.missingFiles"))}: ${list(sum.missing)}</span>` : "")
+      + (sum.refused.length ? ` · <span class="miss" data-sum="refused">${escapeHtml(t("space.refusedFiles"))}: ${list(sum.refused)}</span>` : "")
       + (sum.reference.length ? ` · <span class="ref" data-sum="reference">${escapeHtml(t("space.referenceOnly"))}: ${list(sum.reference)}</span>` : "")
       + proxyFolderOffer(sum.without);
     overlay.querySelectorAll<HTMLElement>("[data-go]").forEach((b) => b.addEventListener("click", (e) => {
@@ -23026,6 +23076,8 @@ async function annotateShelfEntry(entry: ShelfEntry): Promise<void> {
 const bridgeBlobCache = new Map<string, string>();
 
 async function bridgeBlobUrl(url: string): Promise<string> {
+  // MICRO-SPAZIO-FIRMATO · the room's store: the same blob, fetched signed
+  if (ownedByNode(url)) return await nodeBlobUrl(url);
   if (!url.includes("/fs/file?path=")) return url;   // not ours: leave it alone
   const cached = bridgeBlobCache.get(url);
   if (cached) return cached;

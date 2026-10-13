@@ -51,7 +51,10 @@ export type FileState =
   /** somebody's NAS or laptop: a locator nothing here can follow */
   | "reference"
   /** named by the graph, and not in the store (no checksum, or not found) */
-  | "missing";
+  | "missing"
+  /** MICRO-SPAZIO-FIRMATO · in the store, and the node did not give it (401/
+   *  403): access, not absence */
+  | "refused";
 
 export interface SpaceResource {
   id: string;
@@ -121,6 +124,8 @@ export interface EpochSummary {
   without: string[];
   /** proxies whose file is declared and not there */
   missing: string[];
+  /** proxies whose file the node refused (access) */
+  refused: string[];
   /** proxies whose file is only referenced */
   reference: string[];
   /** RMs whose file is declared and not there / only referenced */
@@ -169,6 +174,8 @@ export function buildSpace(
     resident?: Set<string> | null;
     /** resources the scene tried and did not find */
     notFound?: Set<string>;
+    /** resources the node refused to the scene (401/403) */
+    refused?: Set<string>;
     /** Y6 · units whose proxy object the connected host has in its scene */
     sceneProxies?: Set<string> | null;
     /** TEMPLU MARE v2 · C1 · the bytes come from a node's store, one file per
@@ -208,7 +215,8 @@ export function buildSpace(
     const d = dataOf(r);
     let state: FileState = opts.resident ? (opts.resident.has(r.id) ? "resident"
       : recordedState(r) === "reference" ? "reference" : "missing") : recordedState(r);
-    if (state === "resident" && opts.notFound?.has(r.id)) state = "missing";
+    if (state === "resident" && opts.refused?.has(r.id)) state = "refused";
+    else if (state === "resident" && opts.notFound?.has(r.id)) state = "missing";
     const prims = (d.primitives ?? {}) as Record<string, unknown>;
     return { id: r.id, name: str(r.name) || str(d.url).split("/").pop() || r.id, url: str(d.url),
              checksum: str(d.checksum), state, packaging: str(d.packaging),
@@ -333,6 +341,7 @@ export function buildSpace(
         inScene: withProxy.filter((u) => !proxies.has(u)),
         without: units.filter((u) => !has(u)),
         missing: withProxy.filter((u) => st(u) === "missing"),
+        refused: withProxy.filter((u) => st(u) === "refused"),
         reference: withProxy.filter((u) => st(u) === "reference"),
         rmMissing: mine.filter((r) => !r.resource || r.resource.state === "missing").map((r) => r.id),
         rmReference: mine.filter((r) => r.resource?.state === "reference").map((r) => r.id),

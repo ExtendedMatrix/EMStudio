@@ -29,6 +29,7 @@
  *     moment become the asked set.
  */
 import { engine } from "./embed3d-native";
+import { NodeRoadTilesPlugin, roadFetch } from "./node-road";
 
 export type RefineMode = "manual" | "auto";
 
@@ -170,12 +171,15 @@ export function createTilesLayer(E: any, T: any, url: string, camera: any, rende
   let archivePlugin: any = null;
   if ((opts.archive || isArchive3tzUrl(url)) && T.Tiles3tzPlugin) {
     const base = T.archiveBase();
-    const archive = T.sourceFor(url).then((src: any) => T.Archive3tz.open(src));
+    // MICRO-SPAZIO-FIRMATO · a .3tz of the room's store is read signed
+    const archive = T.sourceFor(url, roadFetch as typeof fetch).then((src: any) => T.Archive3tz.open(src));
     archivePlugin = new T.Tiles3tzPlugin(archive, base);
     url = `${base}tileset.json`;
   }
   const tiles = new T.TilesRenderer(url);
   if (archivePlugin) tiles.registerPlugin(archivePlugin);
+  // MICRO-SPAZIO-FIRMATO · a tileset in the room's store: its files signed
+  tiles.registerPlugin(new NodeRoadTilesPlugin());
   tiles.registerPlugin(new T.ImplicitTilingPlugin());
   // RISORSA-FILE · Draco-compressed tiles (TempluMare's b3dm): ONE decoder for
   // the page, its two files served from the engine's own (never a CDN)

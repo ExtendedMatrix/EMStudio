@@ -33,6 +33,7 @@
 
 import { t } from "./i18n";
 import { onFirstVisible } from "./lazy";
+import { nodeBlobReady, nodeBlobUrl, nodeBytes, ownedByNode, roadFetch, RoadError } from "./node-road";
 import { createTilesLayer, formatBytes, isTilesetUrl, tilesBar, tilesEngine,
          type RefineMode, type TilesBarTexts, type TilesLayer } from "./tiles3d";
 
@@ -144,6 +145,10 @@ export interface ModelOptions {
    *  address — offline beside the em.json, online by digest in the store
    *  (`representation.ts addressMap`). three's `LoadingManager.setURLModifier`. */
   urlModifier?: (url: string) => string;
+  /** MICRO-SPAZIO-FIRMATO · the real addresses of those files, when they are
+   *  the room's store: fetched first through the signed road, then handed to
+   *  the loaders as blob URLs (a loader's own request carries no bearer) */
+  files?: string[];
   /** …and what it resolved, for the probes */
   resolved?: () => Array<[string, string]>;
 }
@@ -166,7 +171,7 @@ export function withLod(url: string, level: number): string {
 /** The bytes of a file, asked with a HEAD; null when the server does not say. */
 export async function headBytes(url: string): Promise<number | null> {
   try {
-    const r = await fetch(url, { method: "HEAD" });
+    const r = await roadFetch(url, { method: "HEAD" });
     if (!r.ok) return null;
     const n = Number(r.headers.get("content-length"));
     return Number.isFinite(n) && n > 0 ? n : null;
@@ -187,7 +192,7 @@ export async function probeLods(url: string): Promise<Array<{ level: number; url
   const found = await Promise.all(LOD_LEVELS.map(async (level) => {
     const u = withLod(url, level);
     try {
-      const r = await fetch(u, { method: "HEAD" });
+      const r = await roadFetch(u, { method: "HEAD" });
       // a page is not a model: a dev server (Vite) or an SPA host answers 200
       // with its index.html for a file that is not there — measured on :5211
       if (!r.ok || /^text\/html/i.test(r.headers.get("content-type") ?? "")) return null;
@@ -460,8 +465,12 @@ export function mount3dViewer(host: HTMLElement, url: string,
           return p.split("/").filter(Boolean).pop() ?? u;
         } catch { return u.split("/").pop() ?? u; }
       };
+      // MICRO-SPAZIO-FIRMATO · the node REFUSED a file (401/403): that is access,
+      // not a file that is missing, and the sentence says so
+      let refused = false;
       const unreachable = () => {
         const which = [...new Set(missed.map(fileOf))];
+        if (refused) { host.dataset.refused = "1"; fail(t("em3d.refused")); return; }
         fail(which.length
           ? t("em3d.missing", { files: which.join(", "), n: String(which.length) })
           : t("em3d.unreachable"));
@@ -477,7 +486,12 @@ export function mount3dViewer(host: HTMLElement, url: string,
       // RISORSA-FILE · every loader asks through ONE manager: the files of a
       // resource of several files are resolved from its `has_file` edges
       const manager = new THREE.LoadingManager();
-      if (mo.urlModifier) manager.setURLModifier(mo.urlModifier);
+      // …and a file of the room's store is handed as the blob it was fetched
+      // into, signed (`files`, before the first load)
+      manager.setURLModifier((u: string) => {
+        const r = mo.urlModifier ? mo.urlModifier(u) : u;
+        return ownedByNode(r) ? nodeBlobReady(r) ?? r : r;
+      });
       manager.onError = (u: string) => { missed.push(u); host.dataset.missing = missed.map(fileOf).join("|"); };
       (host as unknown as { __v3dResolved?: () => Array<[string, string]> }).__v3dResolved =
         () => mo.resolved?.() ?? [];
@@ -523,20 +537,27 @@ export function mount3dViewer(host: HTMLElement, url: string,
       let glbGen = 0;
       const openGlb = (u: string, onDone?: () => void) => {
         const gen = ++glbGen;
-        new GLTFLoader(manager).load(
-          u,
-          (gltf: any) => {
-            if (disposed || gen !== glbGen) return;
-            clearContent();
-            content.add(gltf.scene);
-            host.dataset.model = u;
-            if (!framed) { framed = true; frameBox(new THREE.Box3().setFromObject(gltf.scene)); }
-            show();
-            onDone?.();
-          },
-          undefined,
-          () => { if (gen === glbGen) { if (shown) strip.dataset.error = u; else unreachable(); } },
-        );
+        const loaded = (gltf: any) => {
+          if (disposed || gen !== glbGen) return;
+          clearContent();
+          content.add(gltf.scene);
+          host.dataset.model = u;
+          if (!framed) { framed = true; frameBox(new THREE.Box3().setFromObject(gltf.scene)); }
+          show();
+          onDone?.();
+        };
+        const failed = () => { if (gen === glbGen) { if (shown) strip.dataset.error = u; else unreachable(); } };
+        // MICRO-SPAZIO-FIRMATO · the room's store: the bytes through the signed
+        // road, then parsed (the loader's own request would carry no bearer)
+        if (ownedByNode(u)) {
+          void nodeBytes(u).then((buf) => new GLTFLoader(manager).parse(buf, "", loaded, failed), (e) => {
+            if (e instanceof RoadError && e.why === "refused") refused = true;
+            missed.push(u);
+            failed();
+          });
+          return;
+        }
+        new GLTFLoader(manager).load(u, loaded, undefined, failed);
       };
 
       // ── a tileset ──────────────────────────────────────────────────────────
@@ -668,6 +689,14 @@ export function mount3dViewer(host: HTMLElement, url: string,
         renderer.domElement.remove();
       };
 
+      // MICRO-SPAZIO-FIRMATO · a file set in the room's store: every file
+      // fetched first, signed; the manager hands the loaders their blobs
+      const signed = (mo.files ?? []).filter((f) => ownedByNode(f));
+      if (signed.length) {
+        const got = await Promise.allSettled(signed.map((f) => nodeBlobUrl(f)));
+        if (disposed) return;
+        for (const g of got) if (g.status === "rejected" && g.reason instanceof RoadError && g.reason.why === "refused") refused = true;
+      }
       if (isTilesetUrl(url)) { await openTiles(url); return; }
       // RISORSA-FILE · an obj (a file set: obj → mtl → textures)
       if (/\.obj(\?|#|$)/i.test(url)) { await openObj(url); return; }
