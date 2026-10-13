@@ -228,6 +228,56 @@ export function clearHandoffFromLocation(): void {
   window.history.replaceState({}, "", url.toString());
 }
 
+/** APRI IN EMSTUDIO · is `a` the same node as `b`? Two spellings of one address
+ *  — a trailing slash, the case of the host, `localhost` for `127.0.0.1` — are
+ *  one node: Blender writes the room's `base_url` as its own settings spell it,
+ *  and this app as its own do. */
+export function sameNode(a: string | null | undefined, b: string | null | undefined): boolean {
+  const norm = (s: string | null | undefined): string => {
+    const raw = (s || "").trim().replace(/\/+$/, "");
+    if (!raw) return "";
+    try {
+      const u = new URL(raw);
+      const host = ["127.0.0.1", "[::1]", "::1"].includes(u.hostname) ? "localhost" : u.hostname;
+      return `${u.protocol}//${host}${u.port ? `:${u.port}` : ""}${u.pathname.replace(/\/+$/, "")}`.toLowerCase();
+    } catch { return raw.toLowerCase(); }
+  };
+  const x = norm(a);
+  return !!x && x === norm(b);
+}
+
+/** What this session already is, as far as a room link is concerned. */
+export interface RoomSession {
+  /** the node this session talks to (the room's, or the one in Settings) */
+  node: string;
+  /** the room it is in, when it is connected to one */
+  room: string | null;
+  connected: boolean;
+  /** a token of that node is in memory */
+  signedIn: boolean;
+}
+
+/**
+ * APRI IN EMSTUDIO (13 Oct 2026) · what a room link does to a session that may
+ * already be there. Measured on the desktop: EMStudio was IN the room as Editor
+ * Due, Blender's «Open in EMStudio» sent the same room, and the main window went
+ * to the realm's login — a new sign-in nobody needed, with a `redirect_uri`
+ * (`tauri://localhost/`) the realm refuses, and no way back.
+ *
+ *  - `stay`    — already in that room on that node: nothing to join, land on the
+ *                node the link names;
+ *  - `enter`   — on that node with its token: enter the room with the session
+ *                this app has;
+ *  - `sign-in` — anything else: the node's sign-in (on the desktop in the SYSTEM
+ *                browser, never in the main window).
+ */
+export function roomPlan(handoff: { server: string; room: string },
+                         session: RoomSession): "stay" | "enter" | "sign-in" {
+  if (!sameNode(handoff.server, session.node)) return "sign-in";
+  if (session.connected && session.room === handoff.room) return "stay";
+  return session.signedIn ? "enter" : "sign-in";
+}
+
 /** Build one — for a test, and for the day EMStudio hands a room to something
  *  else. The same grammar in both directions is what keeps the reader honest. */
 export function buildHandoff(handoff: Handoff): string {

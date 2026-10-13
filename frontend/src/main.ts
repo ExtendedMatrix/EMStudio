@@ -538,7 +538,7 @@ import {
   ingestResourceOptions,
 } from "./ingest";
 import {
-  clearHandoffFromLocation, handoffFromLocation, parseHandoff, type Handoff,
+  clearHandoffFromLocation, handoffFromLocation, parseHandoff, roomPlan, type Handoff,
 } from "./handoff";
 import {
   clearStudyLinkFromLocation, readStudyLink, type StudyLink,
@@ -6710,6 +6710,29 @@ export async function openHandoff(handoff: Handoff): Promise<void> {
     landOnHandoffNode();
     return;
   }
+  // APRI IN EMSTUDIO (13 Oct 2026) · THE LINK OPENS, IT DOES NOT SIGN IN AGAIN.
+  // Measured on the desktop: in the room as Editor Due, Blender's «Open in
+  // EMStudio» sent the same room and the MAIN WINDOW went to the realm's login,
+  // with `redirect_uri=tauri://localhost/` (refused: «Parametro non valido:
+  // redirect_uri») and no way back. A session that is already there is used.
+  const plan = roomPlan(handoff, {
+    node: hubNodeUrl || getSettings().sync.hubUrl || "",
+    room: sync.room ?? null, connected: sync.connected, signedIn: !!hubToken,
+  });
+  if (plan === "stay") {
+    // the window comes forward in the shell (`main.rs`); here, only the unit
+    logInfo(t("handoff.stay", { room: handoff.room }));
+    pendingHandoffNode = handoff.node ?? null;
+    landOnHandoffNode();
+    return;
+  }
+  if (plan === "enter") {
+    logInfo(t("handoff.enter", { room: handoff.room, server: handoff.server }));
+    pendingHandoffNode = handoff.node ?? null;
+    handoffLanded = null;
+    enterRoom(handoff.room);
+    return;
+  }
   handoffAuth = await loadAuthConfig(handoff.server);
 
   if (!handoffAuth) {
@@ -6717,6 +6740,20 @@ export async function openHandoff(handoff: Handoff): Promise<void> {
     // nobody concludes from a working laptop that the token flow is wired.
     logInfo(t("handoff.noAuth", { server: handoff.server }));
     joinFromHandoff(handoff, null);
+    return;
+  }
+  if (isTauri()) {
+    // THE DESKTOP's way in (ENTRARE DAL DESKTOP): the realm in the SYSTEM
+    // browser, back on `org.extendedmatrix.emstudio:/oidc-return` (or pasted),
+    // then the room is entered — never the main window on the realm's page. The
+    // node becomes this session's node first, as `joinFromHandoff` would make it:
+    // `signIntoNode` signs into the node in Settings.
+    logInfo(t("handoff.signInBrowser", { room: handoff.room, server: handoff.server }));
+    const s = getSettings();
+    saveSettings({ ...s, sync: { ...s.sync, hubUrl: handoff.server } });
+    pendingHandoffNode = handoff.node ?? null;
+    handoffLanded = null;
+    await signIntoNode({ rejoin: handoff.room });
     return;
   }
   rememberHandoff(handoff);

@@ -4251,6 +4251,8 @@ const tauriDesktop = () => (() => {
       if (cmd === "plugin:opener|open_url") { window.__OPENED__.push(String(args?.url ?? "")); return null; }
       if (cmd === "plugin:event|listen") { listeners.push({ event: args.event, handler: args.handler }); return listeners.length; }
       if (cmd === "plugin:deep-link|get_current") return null;
+      // the shell always answers with both lists (`main.rs::DesktopQueue`)
+      if (cmd === "take_desktop_queue") return { files: [], notices: [] };
       if (cmd === "plugin:fs|write_text_file") {
         const raw = opts?.headers?.path ?? args?.path ?? "";
         const text = args instanceof Uint8Array ? new TextDecoder().decode(args) : String(args?.data ?? "");
@@ -4435,6 +4437,67 @@ test("E2.nodepw", "E2+E3 · dal desktop, «iD and the node's password»: il nodo
       && seen.exchange?.redirect_uri === "org.extendedmatrix.emstudio:/oidc-return" && seen.whoamiAuth === "Bearer AT-nodo"
       && /attested by the node Nodo di prova/.test(after.chip) && /Attested by the node Nodo di prova: Dev \(0000-0002-1825-0097\)/.test(after.set) && !errors.length,
     detail: { w1, nodepw: before.ways.nodepw, opened, waiting: waiting.paste, exchange: seen.exchange && { ...seen.exchange, code_verifier: "…" }, whoami: seen.whoamiAuth, panelAfterReturn: seen.panelAfterReturn, after, errors } };
+});
+
+// ── MICRO-APRI-IN-EMSTUDIO (13 ott) · il link apre, non rientra ─────────────
+/** fakeNode, with every URL asked of it written down, and a room's socket that
+ *  opens (and counts how many times it was opened, and for which room) */
+const roomNode = () => {
+  const seen = { urls: [], sockets: [] };
+  const node = fakeNode(seen);
+  return { seen,
+    route: { pattern: node.pattern, handler: (r) => { seen.urls.push(r.request().url()); return node.handler(r); } },
+    wsRoute: { pattern: /nodo\.test/, handler: (ws) => { seen.sockets.push(ws.url()); ws.onMessage(() => {}); } } };
+};
+const ROOM = "tavolo-2026-10-12";
+const APRI = (node = "us1") => `stratigraph://open?server=${encodeURIComponent("https://nodo.test/")}&room=${ROOM}&node=${node}`;
+
+test("AE1.stay", "APRI-IN-EMSTUDIO · desktop già nella stanza tavolo-2026-10-12 su nodo.test: Blender › «Open in EMStudio» consegna stratigraph://open?server=…&room=…&node=us1 — nessuna navigazione della finestra principale, nessun accesso (né auth-config chiesta né browser aperto), stessa stanza sullo stesso socket, us1 selezionato", async () => {
+  const n = roomNode();
+  const { p, ctx, errors } = await open({ doc: LITE(), locale: "en", hook: tauriDesktop(), route: n.route, wsRoute: n.wsRoute,
+    init: { "emstudio.settings": JSON.stringify({ sync: { hubUrl: "https://nodo.test", hubRoom: ROOM } }) } });
+  await p.evaluate(([r]) => window.__EM_DRAG__.joinRoom("https://nodo.test", r, "AT-nodo"), [ROOM]);
+  await p.waitForFunction(() => /nodo\.test/.test(window.__EM_DRAG__.statusLine() ?? "") && !/connecting/i.test(window.__EM_DRAG__.statusLine()), null, { timeout: 8000 }).catch(() => {});
+  await p.waitForTimeout(600);
+  const href0 = await p.evaluate(() => location.href);
+  const asked0 = n.seen.urls.length, sockets0 = n.seen.sockets.length;
+  const navs = [];
+  p.on("framenavigated", (f) => { if (f === p.mainFrame()) navs.push(f.url()); });
+  await p.evaluate((u) => window.__DEEPLINK__(u), APRI());
+  await p.waitForTimeout(1500);
+  const r = await p.evaluate(() => ({ href: location.href, opened: window.__OPENED__.slice(), sel: window.__EM_DRAG__.selected(),
+    line: window.__EM_DRAG__.statusLine(), log: window.__EM_DRAG__.log().map((l) => l.message).filter((m) => /room|link/i.test(m)).slice(-3) }));
+  const askedAfter = n.seen.urls.slice(asked0);
+  await p.screenshot({ path: SHOT("ae1-link-nella-stanza") }).catch(() => {});
+  await ctx.close();
+  return { pass: sockets0 === 1 && r.href === href0 && !navs.length && !r.opened.length
+      && !askedAfter.some((u) => /auth-config|openid-connect/.test(u)) && n.seen.sockets.length === 1
+      && n.seen.sockets[0].includes(ROOM) && r.sel.length === 1 && r.sel[0] === "us1"
+      && r.log.some((m) => /Already in room tavolo-2026-10-12/.test(m)) && !errors.length,
+    detail: { sockets: n.seen.sockets, href0, r, navs, askedAfter, errors } };
+});
+
+test("AE2.signin", "APRI-IN-EMSTUDIO · desktop senza sessione: lo stesso link apre l'accesso del nodo nel BROWSER DI SISTEMA col redirect org.extendedmatrix.emstudio:/oidc-return (mai tauri://localhost/), la finestra principale non si muove; il codice torna per deep link e l'app entra nella stanza del link, su us1", async () => {
+  const n = roomNode();
+  const { p, ctx, errors } = await open({ doc: LITE(), locale: "en", hook: tauriDesktop(), route: n.route, wsRoute: n.wsRoute });
+  const href0 = await p.evaluate(() => location.href);
+  const navs = [];
+  p.on("framenavigated", (f) => { if (f === p.mainFrame()) navs.push(f.url()); });
+  await p.evaluate((u) => window.__DEEPLINK__(u), APRI());
+  await p.waitForTimeout(1200);
+  const opened = await p.evaluate(() => window.__OPENED__.slice());
+  const url = opened[0] ? new URL(opened[0]) : null;
+  if (url) {
+    await p.evaluate((u) => window.__DEEPLINK__(u), `org.extendedmatrix.emstudio:/oidc-return?state=${url.searchParams.get("state")}&session_state=x&iss=https%3A%2F%2Fnodo.test&code=C0DE`);
+    await p.waitForTimeout(2500);
+  }
+  const r = await p.evaluate(() => ({ href: location.href, sel: window.__EM_DRAG__.selected(), line: window.__EM_DRAG__.statusLine() }));
+  await ctx.close();
+  return { pass: opened.length === 1 && url?.origin === "https://nodo.test" && /\/protocol\/openid-connect\/auth$/.test(url?.pathname ?? "")
+      && url?.searchParams.get("redirect_uri") === "org.extendedmatrix.emstudio:/oidc-return"
+      && r.href === href0 && !navs.length && n.seen.exchange?.redirect_uri === "org.extendedmatrix.emstudio:/oidc-return"
+      && n.seen.sockets.length === 1 && n.seen.sockets[0].includes(ROOM) && !errors.length,
+    detail: { opened, href0, r, navs, sockets: n.seen.sockets, exchange: n.seen.exchange && { redirect_uri: n.seen.exchange.redirect_uri }, errors } };
 });
 
 /** the realm's login form, filled the way a person fills it, with curl: the

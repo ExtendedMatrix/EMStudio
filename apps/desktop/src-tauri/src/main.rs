@@ -233,6 +233,129 @@ fn queue_notice(app: &tauri::AppHandle, message: String) {
     let _ = app.emit("desktop-queue", ());
 }
 
+// ── the main window never leaves the app without a way back ────────────────
+//
+// APRI IN EMSTUDIO (13 Oct 2026) · Blender's «Open in EMStudio» sent the room
+// EMStudio was already in, and the MAIN WINDOW went to the realm's login page —
+// «Parametro non valido: redirect_uri», no button, no menu: E.D. got back by
+// pressing ⌫ by chance. Two rules, in this order:
+//
+//   1. a SIGN-IN page (an OAuth authorization request, a logout, the realm's
+//      login actions) is never shown in the main window: it opens in the system
+//      browser — where the sign-in belongs — and the window stays where it was;
+//   2. if the main window shows a page that is not EMStudio anyway (an error
+//      page, a link followed by accident), a bar «Torna a EMStudio» goes on top
+//      of it, and ⌘[ goes back.
+//
+// Only sign-in pages are stopped, not every foreign URL: on macOS the webview
+// asks the same question for an IFRAME (wry does not tell the main frame apart),
+// and the 3D embeds of a chapter are iframes on other origins.
+
+/// Is this one of the app's own pages? The bundle's (`tauri://localhost`,
+/// `http(s)://tauri.localhost`), `tauri dev`'s (`devUrl`, localhost:5173), and
+/// the URLs a page makes for itself.
+fn is_app_url(url: &str) -> bool {
+    let Ok(u) = tauri::Url::parse(url) else { return false };
+    match u.scheme() {
+        "tauri" | "asset" | "about" | "data" | "blob" => true,
+        "http" | "https" => {
+            let host = u.host_str().unwrap_or("");
+            host == "tauri.localhost"
+                || (cfg!(debug_assertions)
+                    && matches!(host, "localhost" | "127.0.0.1")
+                    && u.port() == Some(5173))
+        }
+        _ => false,
+    }
+}
+
+/// Is this a sign-in (or sign-out) page of an identity provider? Recognised by
+/// what makes it one — the OAuth request's own parameters, or Keycloak's
+/// endpoints — not by a list of hosts that would be wrong on the next node.
+fn is_sign_in_page(url: &str) -> bool {
+    let Ok(u) = tauri::Url::parse(url) else { return false };
+    if !matches!(u.scheme(), "http" | "https") || is_app_url(url) {
+        return false;
+    }
+    let path = u.path();
+    if path.contains("/protocol/openid-connect/") || path.contains("/login-actions/") {
+        return true;
+    }
+    let has = |k: &str| u.query_pairs().any(|(key, _)| key == k);
+    (has("client_id") && (has("response_type") || has("redirect_uri")))
+        || has("post_logout_redirect_uri")
+}
+
+/// What goes on top of a page that is not EMStudio: the bar, and ⌘[. `back`
+/// is where the bar goes when the page has no history to go back to.
+fn return_bar_script(back: &str) -> String {
+    let back = serde_json::to_string(back).unwrap_or_else(|_| "\"tauri://localhost/\"".into());
+    format!(
+        r#"(function () {{
+  if (document.getElementById("emstudio-return-bar")) return;
+  var back = {back};
+  function go() {{ if (history.length > 1) history.back(); else location.href = back; }}
+  var bar = document.createElement("div");
+  bar.id = "emstudio-return-bar";
+  bar.setAttribute("style", "position:fixed;top:0;left:0;right:0;z-index:2147483647;display:flex;align-items:center;gap:12px;padding:8px 14px;background:#1f2933;color:#fff;font:14px -apple-system,system-ui,sans-serif;box-shadow:0 1px 4px rgba(0,0,0,.4)");
+  var b = document.createElement("button");
+  b.textContent = "← Torna a EMStudio";
+  b.setAttribute("style", "font:inherit;padding:4px 12px;border-radius:4px;border:0;background:#fff;color:#1f2933;cursor:pointer");
+  b.onclick = go;
+  var s = document.createElement("span");
+  s.textContent = "Questa pagina non è EMStudio (⌘[ per tornare)";
+  bar.appendChild(b); bar.appendChild(s);
+  (document.body || document.documentElement).appendChild(bar);
+  document.addEventListener("keydown", function (e) {{
+    if ((e.metaKey || e.ctrlKey) && e.key === "[") {{ e.preventDefault(); go(); }}
+  }}, true);
+}})();"#
+    )
+}
+
+/// The last app page the main window showed — where «Torna a EMStudio» goes
+/// when there is no history.
+static APP_PAGE: Mutex<Option<String>> = Mutex::new(None);
+
+fn navigation_guard<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R> {
+    tauri::plugin::Builder::new("navigation-guard")
+        .on_navigation(|webview, url| {
+            if !is_sign_in_page(url.as_str()) {
+                return true;
+            }
+            eprintln!("[emstudio] sign-in page sent to the system browser: {}",
+                      url.as_str().split('?').next().unwrap_or(""));
+            use tauri_plugin_opener::OpenerExt;
+            if let Err(e) = webview.app_handle().opener().open_url(url.as_str(), None::<&str>) {
+                eprintln!("[emstudio] the system browser did not open: {e}");
+            }
+            false
+        })
+        .on_page_load(|webview, payload| {
+            if payload.event() != tauri::webview::PageLoadEvent::Finished {
+                return;
+            }
+            let url = payload.url().as_str();
+            if is_app_url(url) {
+                *APP_PAGE.lock().unwrap() = Some(url.to_string());
+                return;
+            }
+            let back = APP_PAGE.lock().unwrap().clone()
+                .unwrap_or_else(|| "tauri://localhost/".to_string());
+            let _ = webview.eval(&return_bar_script(&back));
+        })
+        .build()
+}
+
+/// Bring the main window forward — a deep link was meant for it.
+fn bring_forward(app: &tauri::AppHandle) {
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.unminimize();
+        let _ = window.show();
+        let _ = window.set_focus();
+    }
+}
+
 /// Spawn the bundled bridge, injecting the stored API key into its environment.
 ///
 /// The key is passed as an env var and nowhere else: it is not an argument (a
@@ -471,6 +594,9 @@ fn main() {
         // SIGN-IN in the system browser (ORCID, the node's Keycloak): the
         // webview never shows a login page. Scope in capabilities/default.json.
         .plugin(tauri_plugin_opener::init())
+        // APRI IN EMSTUDIO · sign-in pages go to the system browser; any other
+        // page that is not EMStudio gets «Torna a EMStudio»
+        .plugin(navigation_guard())
         .manage(BridgeChild(Mutex::new(None)))
         .manage(Pending(Mutex::new(DesktopQueue::default())))
         .invoke_handler(tauri::generate_handler![
@@ -589,6 +715,13 @@ fn main() {
             // are files.
             #[cfg(target_os = "macos")]
             tauri::RunEvent::Opened { urls } => {
+                // APRI IN EMSTUDIO · a link (`stratigraph://open?…` from
+                // Blender, a sign-in's answer) is meant for the window that is
+                // open: it comes forward. Windows and Linux do it in
+                // single-instance; files do it in `queue_files`.
+                if urls.iter().any(|u| u.scheme() != "file") {
+                    bring_forward(app);
+                }
                 let files: Vec<String> = urls
                     .iter()
                     .filter(|u| u.scheme() == "file")
@@ -625,6 +758,41 @@ mod tests {
         let want = doc.to_string_lossy().into_owned();
         assert_eq!(got, vec![want.clone(), want]);
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// APRI IN EMSTUDIO · the page measured on 13 Oct 2026 (the realm's login
+    /// with `redirect_uri=tauri://localhost/`) never reaches the main window;
+    /// the app's own pages and a 3D embed's iframe are left alone.
+    #[test]
+    fn sign_in_pages_leave_the_main_window_and_app_pages_stay() {
+        let measured = "https://localhost:8443/auth/realms/em-dev/protocol/openid-connect/auth\
+                        ?response_type=code&client_id=em-console\
+                        &redirect_uri=tauri%3A%2F%2Flocalhost%2F&code_challenge=x&state=y";
+        assert!(is_sign_in_page(measured));
+        assert!(is_sign_in_page(
+            "https://kc.example.org/realms/x/login-actions/authenticate?session_code=1"));
+        assert!(is_sign_in_page(
+            "https://orcid.org/oauth/authorize?client_id=APP-1&response_type=token&redirect_uri=x"));
+        assert!(is_sign_in_page(
+            "https://kc.example.org/logout?post_logout_redirect_uri=x"));
+        // the app, in the bundle and in `tauri dev`
+        for app in ["tauri://localhost/", "http://tauri.localhost/index.html",
+                    "https://tauri.localhost/", "about:blank", "blob:tauri://localhost/1"] {
+            assert!(is_app_url(app), "{app}");
+            assert!(!is_sign_in_page(app), "{app}");
+        }
+        assert_eq!(is_app_url("http://localhost:5173/"), cfg!(debug_assertions));
+        // a 3D embed, a node's page, a study: not sign-in pages, not the app
+        for other in ["https://sketchfab.com/models/abc/embed",
+                      "https://em.example.org/work/?room=r",
+                      "https://em.example.org/catalog/study/s/emjson"] {
+            assert!(!is_sign_in_page(other), "{other}");
+            assert!(!is_app_url(other), "{other}");
+        }
+        // the bar knows its way back, and says where it goes
+        let bar = return_bar_script("tauri://localhost/");
+        assert!(bar.contains("Torna a EMStudio") && bar.contains("\"tauri://localhost/\"")
+                && bar.contains("history.back()") && bar.contains("e.key === \"[\""));
     }
 
     #[test]
