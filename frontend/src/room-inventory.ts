@@ -33,6 +33,7 @@
  */
 
 import type { EmEdge, EmNode } from "./types";
+import { normDigest } from "./store-url";
 
 export type InvGroup = "on_disk" | "in_store" | "elsewhere" | "external" | "missing";
 export type InvChoice = "upload" | "reference" | "skip" | "move";
@@ -200,12 +201,8 @@ export function digestInLocator(locator: string): string | null {
   return m ? `sha256:${m[1].toLowerCase()}` : null;
 }
 
-export function normDigest(d: string | null | undefined): string | null {
-  const s = String(d ?? "").trim().toLowerCase();
-  if (!s) return null;
-  const hex = s.replace(/^sha256:/, "");
-  return /^[0-9a-f]{64}$/.test(hex) ? `sha256:${hex}` : null;
-}
+// the one normalization of a digest (MICRO-STORE-PERCORSO)
+export { normDigest };
 
 const leafOf = (p: string): string => p.replace(/^.*[\\/]/, "");
 

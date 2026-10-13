@@ -244,6 +244,7 @@ import { mountSpaceScene, type SceneItem } from "./scene3d";
 import { isTilesetUrl } from "./tiles3d";
 import type { ModelOptions } from "./embed3d-native";
 import { nodeBlobReady, nodeBlobUrl, ownedByNode, setNodeRoad, type FetchFailure } from "./node-road";
+import { isRoomUrl, rebaseRoomUrl, storeAddress, storeUrlOf } from "./store-url";
 import { isRef3D, resolve3d } from "./embed3d";
 import { KEYMAP, filterKeymap, keysText } from "./keymap";
 import { ReadingFiles } from "./reading-files";
@@ -12431,15 +12432,23 @@ function nodeHttp(base: string): NodeApi {
 
 /** MICRO-SPAZIO-FIRMATO · is a URL the node's store? The room's (`assetStoreBase`,
  *  `?store=` included), or `…/v1/rooms/<room>/asset/…` of the same node — the
- *  form EMtools writes in a resource's `url`. */
+ *  form EMtools writes in a resource's `url`. MICRO-STORE-PERCORSO · a URL of
+ *  THIS room is the node's whatever host wrote it (`localhost:8000`, a
+ *  `.local` name): the road asks it on the current base (`rebaseRoomUrl`), so
+ *  the bearer goes only to the node EMStudio is connected to. */
 function nodeOwnsUrl(url: string): boolean {
   const store0 = assetStoreBase();
   if (store0 && url.startsWith(store0)) return true;
+  if (store0 && isRoomUrl(url, sync.room)) return true;
   const hub = getSettings().sync.hubUrl.replace(/\/+$/, "");
   return !!hub && url.startsWith(`${hub}/v1/rooms/`) && /\/v1\/rooms\/[^/]+\/asset(-home)?\//.test(url);
 }
+/** the URL the road asks: this room's store on the current base */
+function nodeRoadUrl(url: string): string {
+  return rebaseRoomUrl(url, assetStoreBase(), sync.room);
+}
 // …and the 3D loaders' bytes from it go through the one road (`node-road.ts`)
-setNodeRoad({ fetch: nodeAuthFetch, owns: nodeOwnsUrl });
+setNodeRoad({ fetch: (url, init) => nodeAuthFetch(nodeRoadUrl(url), init), owns: nodeOwnsUrl });
 
 // ---------- MENU1 · Help menu (About / Updates / Ontology models) ----------
 const RELEASES_URL = "https://github.com/EmanuelDemetrescu/EMStudio/releases";
@@ -20481,7 +20490,7 @@ function docModelOf(d: EmNode): DocModel | null {
   }
   const baseDir = currentFilePath ? currentFilePath.replace(/[^/\\]*$/, "") : "";
   const map = addressMap(choice, store0
-    ? { mode: "online", assetUrl: (c) => `${store0}${encodeURIComponent(c)}` }
+    ? { mode: "online", assetUrl: (c) => storeUrlOf(store0, c) }
     : { mode: "offline", baseDir,
         fileUrl: (abs) => `${bridgeBaseNow}/fs/at/${abs.replace(/^\/+/, "").split("/").map(encodeURIComponent).join("/")}` });
   // a file SET is handed virtual (its files ask one another); one file — a glb,
@@ -20491,7 +20500,7 @@ function docModelOf(d: EmNode): DocModel | null {
     ? { choice, url: map.entryUrl, modifier: map.modifier, resolved: () => [...map.resolved],
         // MICRO-SPAZIO-FIRMATO · online, the set's files by digest: the viewer
         // fetches them signed before its loaders ask
-        files: store0 ? choice.files.filter((f) => f.checksum).map((f) => `${store0}${encodeURIComponent(f.checksum!)}`) : undefined }
+        files: store0 ? choice.files.filter((f) => f.checksum).map((f) => storeUrlOf(store0, f.checksum!)) : undefined }
     : { choice, url: map.modifier(map.entryUrl), resolved: () => [...map.resolved] };
   docModelCache.set(key, out);
   return out;
@@ -20514,6 +20523,16 @@ function docMediaUrl(d: EmNode): string | null {
     .map((e) => viewerSourceOf(st.node(e.target) ?? null)).find(Boolean) ?? null;
   const src = own ?? linked;
   if (!src) return null;
+  // MICRO-STORE-PERCORSO · in a room a resource with a checksum is read from
+  // the room's store by its digest, whatever host its url names; the medium is
+  // still read from the locator as written (`viewerSourceOf`)
+  const store0 = assetStoreBase();
+  if (store0 && st) {
+    const holder = own ? d : st.liveEdges().filter((e) => e.source === d.id && e.edge_type === "has_linked_resource")
+      .map((e) => st.node(e.target) ?? null).find((n) => viewerSourceOf(n) === src) ?? null;
+    const at = storeAddress((holder?.data ?? null) as Record<string, unknown> | null, store0, sync.room);
+    if (at && at !== src) return at;
+  }
   return docSrcUrl(src);
 }
 
@@ -21410,12 +21429,18 @@ function spaceAccessChanged(): boolean {
  *  the digest; offline, the path beside the em.json through the bridge
  *  (`/fs/at/`, a relative `../RB/versions/x.glb` included); a web locator as
  *  it is. Until the bridge has answered, the locator as written. */
-function spaceFileUrl(res: { url: string; checksum: string } | null | undefined): string | undefined {
+function spaceFileUrl(res: { url: string; checksum: string; residency?: string } | null | undefined): string | undefined {
   const u = res?.url ?? "";
+  // MICRO-STORE-PERCORSO · in a room the checksum decides, BEFORE the url: a
+  // resident resource is read from the room's store by its digest whatever
+  // host its url names (`storeAddress`); a reference keeps its url
+  const store0 = assetStoreBase();
+  if (store0 && res) {
+    const at = storeAddress({ url: u, checksum: res.checksum, residency: res.residency }, store0, sync.room);
+    if (at) return at;
+  }
   if (!u) return undefined;
   if (/^(https?|blob|data):/i.test(u)) return u;
-  const store0 = assetStoreBase();
-  if (store0 && res?.checksum) return `${store0}${encodeURIComponent(res.checksum)}`;
   // a document not opened from the disk has no folder: its locators are what
   // they always were (relative to the page, as the test data are)
   if (!currentFilePath) return u;

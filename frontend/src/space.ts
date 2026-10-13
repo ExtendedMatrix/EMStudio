@@ -61,6 +61,9 @@ export interface SpaceResource {
   name: string;
   url: string;
   checksum: string;
+  /** the residency as recorded (`resident` | `reference` | ""): where the
+   *  bytes are read is decided by it and the checksum (`store-url.ts`) */
+  residency: string;
   state: FileState;
   /** MICRO-3DTILES · what the resource declares: `file` | `directory` (a
    *  tileset tree, the `_link` EMtools writes) | `archive`; its weight and, for
@@ -219,7 +222,7 @@ export function buildSpace(
     else if (state === "resident" && opts.notFound?.has(r.id)) state = "missing";
     const prims = (d.primitives ?? {}) as Record<string, unknown>;
     return { id: r.id, name: str(r.name) || str(d.url).split("/").pop() || r.id, url: str(d.url),
-             checksum: str(d.checksum), state, packaging: str(d.packaging),
+             checksum: str(d.checksum), residency: str(d.residency).trim(), state, packaging: str(d.packaging),
              bytes: num(d.size_bytes), points: num(prims.points), tiles: tilesKindOf(d) };
   };
   const resourcesOf = (id: string): EmNode[] => outOf(id, "has_linked_resource")
