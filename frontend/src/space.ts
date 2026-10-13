@@ -160,6 +160,61 @@ const num = (v: unknown): number | null => (v == null || v === "" || !Number.isF
 const alive = (x: { data?: unknown; attributes?: unknown }): boolean =>
   !dataOf(x as EmNode).removed && !((x.attributes ?? {}) as Record<string, unknown>).removed;
 
+/** MICRO-SCENA-RICHIEDE · the state of the graph the Space's files belong to:
+ *  every live resource (id, checksum, locator, residency) and every live edge
+ *  that touches one — a `has_linked_resource` that cites or drops it, its
+ *  version chain, its representations. A refusal or a «missing» is true of the
+ *  state it was born in: measured 13 Oct 2026, a 403 asked before the room cited
+ *  the digest stayed for the session, though the node answered 200 two minutes
+ *  later. Same state, same key: a refusal is asked again once per state. */
+export function citationKey(doc: EmDocument | null): string {
+  let h = 0x811c9dc5;
+  const mix = (s: string): void => {
+    for (let i = 0; i < s.length; i++) h = Math.imul(h ^ s.charCodeAt(i), 0x01000193);
+    h = Math.imul(h ^ 0x1f, 0x01000193);
+  };
+  const res = new Set<string>();
+  for (const n of doc?.graph.nodes ?? []) {
+    if (n.node_type !== "resource" || !alive(n)) continue;
+    const d = dataOf(n);
+    res.add(n.id);
+    mix(n.id); mix(str(d.checksum)); mix(str(d.url)); mix(str(d.residency));
+  }
+  let edges = 0;
+  for (const e of doc?.graph.edges ?? []) {
+    if (!alive(e as unknown as { data?: unknown }) || (!res.has(e.source) && !res.has(e.target))) continue;
+    mix(str(e.edge_type)); mix(e.source); mix(e.target);
+    edges++;
+  }
+  return `${res.size}.${edges}.${(h >>> 0).toString(36)}`;
+}
+
+/** …and the two marks the scene keeps, bound to a key (the room, the token and
+ *  `citationKey`): when it changes they are emptied and the scene asks again. */
+export class SpaceMarks {
+  /** resident files the scene fetched and did not find */
+  readonly notFound = new Set<string>();
+  /** resident files the node refused to the scene (401/403) */
+  readonly refused = new Set<string>();
+  private key: string | null = null;
+  /** the key of the state now; true when marks were dropped */
+  at(key: string): boolean {
+    if (key === this.key) return false;
+    this.key = key;
+    if (!this.notFound.size && !this.refused.size) return false;
+    this.notFound.clear();
+    this.refused.clear();
+    return true;
+  }
+  /** a failure heard from the scene; true when it is new */
+  mark(resourceId: string, why: "missing" | "refused"): boolean {
+    const into = why === "refused" ? this.refused : this.notFound;
+    if (into.has(resourceId)) return false;
+    into.add(resourceId);
+    return true;
+  }
+}
+
 /** Is a URL somewhere else (a web locator), as `effective_residency` reads it? */
 const isRemote = (url: string): boolean => /^[a-z][a-z0-9+.-]*:\/\//i.test(url) && !/^file:/i.test(url);
 

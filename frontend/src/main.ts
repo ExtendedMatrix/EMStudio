@@ -239,7 +239,7 @@ import { DOC_TOOLS, renderReadingStage, selectedPassage, type DocTool,
          type TraceAnchor, type TraceGeometry } from "./doc-reading";
 import { openReadingBubble, type BubbleUnit } from "./reading-bubble";
 import { renderChronology, type ChronoEpoch, type ChronologyData } from "./chronology";
-import { buildSpace, type Space } from "./space";
+import { buildSpace, citationKey, SpaceMarks, type Space } from "./space";
 import { mountSpaceScene, type SceneItem } from "./scene3d";
 import { isTilesetUrl } from "./tiles3d";
 import type { ModelOptions } from "./embed3d-native";
@@ -1418,7 +1418,7 @@ function noteSyncState(): void {
 function renderStatusLine(): void {
   // MICRO-SPAZIO-FIRMATO · a new token or room: what the scene found refused
   // or missing before is asked again. Deferred: the bar is first drawn while
-  // the module is still being evaluated, before `hubToken` and `spaceAccess`
+  // the module is still being evaluated, before `hubToken` and `spaceMarks`
   // exist — reading them here threw and stopped the whole app (dev.36).
   queueMicrotask(() => { if (spaceAccessChanged()) { refreshSurfaces("scene"); renderEmData(); } });
   const st = connectionState();
@@ -21408,22 +21408,16 @@ let spaceEpochId: string | null = null;
 let spaceResident: { version: number; ids: Set<string> } | null = null;
 let spaceVersion = 0;
 let spaceAsking = false;
-/** resident files the scene fetched and did not find */
-const spaceNotFound = new Set<string>();
-/** MICRO-SPAZIO-FIRMATO · resident files the node refused to the scene (401/
- *  403): access, not absence — said apart from «file missing» */
-const spaceRefused = new Set<string>();
-/** …both are emptied when the token or the room changes: an attempt that
- *  failed before the access must not stay marked for the session */
-let spaceAccess = "";
+/** resident files the scene fetched and did not find, and (MICRO-SPAZIO-
+ *  FIRMATO) those the node refused to it (401/403): access, not absence — said
+ *  apart from «file missing». Both are emptied when the token or the room
+ *  changes, and (MICRO-SCENA-RICHIEDE) when the graph changes what the Space
+ *  cites (`citationKey`): an attempt that failed before the access, or before
+ *  the room cited the digest, must not stay marked for the session — and the
+ *  same refusal on the same state is not asked again */
+const spaceMarks = new SpaceMarks();
 function spaceAccessChanged(): boolean {
-  const k = `${sync.room ?? ""}\u0000${hubToken ?? ""}`;
-  if (k === spaceAccess) return false;
-  spaceAccess = k;
-  if (!spaceNotFound.size && !spaceRefused.size) return false;
-  spaceNotFound.clear();
-  spaceRefused.clear();
-  return true;
+  return spaceMarks.at(`${sync.room ?? ""}\u0000${hubToken ?? ""}\u0000${citationKey(store?.doc ?? null)}`);
 }
 
 /** TEMPLU MARE v2 · where the scene fetches a resource's bytes — the same
@@ -21468,8 +21462,8 @@ function currentSpace(): Space | null {
   const sceneProxies = sync.connected && Array.isArray(hostInfo.scene_proxies)
     ? new Set(hostInfo.scene_proxies.map(String)) : null;
   return buildSpace(store.doc, { isUnit: isStratigraphicType,
-    resident: spaceResident?.version === spaceVersion ? spaceResident.ids : null, notFound: spaceNotFound,
-    refused: spaceRefused, sceneProxies, fromStore: !!assetStoreBase() });
+    resident: spaceResident?.version === spaceVersion ? spaceResident.ids : null, notFound: spaceMarks.notFound,
+    refused: spaceMarks.refused, sceneProxies, fromStore: !!assetStoreBase() });
 }
 
 /** Ask s3Dgraphy what can be fetched (`geometry_summary`), once per version of
@@ -21701,9 +21695,7 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
       if (d) requestDoc(d, { from: win, reading: null });
     },
     onNotFound: (rid, why: FetchFailure) => {
-      const into = why === "refused" ? spaceRefused : spaceNotFound;
-      if (into.has(rid)) return;
-      into.add(rid);
+      if (!spaceMarks.mark(rid, why)) return;
       queueMicrotask(() => { refreshSurfaces("scene"); renderEmData(); });
     },
   });
