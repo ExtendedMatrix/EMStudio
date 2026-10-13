@@ -121,7 +121,14 @@ cargo test                                   # engine contract (11 tests)
 cargo build -p em-cli --release
 ./frontend/scripts/build-wasm.sh             # after touching em-core
 cd frontend && npm run build                 # single-file dist
+./em.sh apertura                             # build + OPEN it in Chromium (devrel's gate)
 ```
+`tsc` and a green build do not prove the app starts (dev.36 shipped a
+ReferenceError thrown while `main.ts` was evaluating): `./em.sh apertura`
+(`frontend/scripts/check-apertura.mjs`) opens the built app and a document in a
+real browser and fails on any `pageerror` / unlisted `console.error`, with the
+`src/` file:line. `devrel`, `ghrelease`, `release.yml` and s3Dgraphy's
+`release.py` step 12 all refuse on it.
 Visual check: load `frontend/dist/index.html` and **drop an .em.json onto
 it**. The app deliberately starts from an EMPTY canvas — it does NOT
 auto-load a fixture (`main.ts`, `// ---------- boot ----------`): starting

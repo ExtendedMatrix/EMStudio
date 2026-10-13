@@ -275,9 +275,44 @@ jobs:
             return made.data.id;
           result-encoding: string
 
+  # ── 3b · the app OPENS, before any installer is built ───────────────────
+  # dev.36 was tagged with every check green and opened as a dead page — a
+  # ReferenceError while `main.ts` was still being evaluated. The same check
+  # `./em.sh devrel` runs in its gate (`frontend/scripts/check-apertura.mjs`):
+  # build, `vite preview`, a real Chromium, the empty app and a document. Here
+  # it is the gate for a tag pushed by hand, and it costs a minute instead of
+  # three installers of a dead app.
+  apertura:
+    needs: gate
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ env.EM_TAG }}   # the tag, not the caller's HEAD (see `gate`)
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "20"
+
+      - name: Frontend dependencies
+        run: npm ci
+        working-directory: frontend
+
+      # playwright-core is NOT a dependency of the app: it is installed for this
+      # job only, with its Chromium (the same version the local runs use)
+      - name: Playwright and its Chromium
+        run: |
+          npm install --no-save playwright-core@1.59.1
+          npx playwright-core install --with-deps chromium
+        working-directory: frontend
+
+      - name: EMStudio opens in a browser
+        run: node scripts/check-apertura.mjs
+        working-directory: frontend
+
   # ── 4 · the three builds ──────────────────────────────────────────────────
   desktop:
-    needs: [gate, draft]
+    needs: [gate, draft, apertura]
     strategy:
       fail-fast: false
       matrix:

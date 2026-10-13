@@ -37,10 +37,14 @@
 #   ./em.sh s3d pin <version>    Move the pin (refuses one that is not on PyPI).
 #   ./em.sh doc    [path]        Build the manual (EMStudio-doc) as a CHECK: -W,
 #                                with the version aligned to this app.
+#   ./em.sh apertura             Build and OPEN the app in a real Chromium: fails
+#                                on a pageerror, a console.error, a missing
+#                                version or menu, a document that does not open.
 #   ./em.sh pack                 Build the desktop app LOCALLY (sidecar + Tauri)
 #                                for this machine only.
 #   ./em.sh devrel [--dry-run] [--yes] [--if-changed]
-#                                A dev release: gate → inc → commit → tag → push.
+#                                A dev release: gates (s3dgraphy pin · the app
+#                                opens) → inc → commit → tag → push.
 #                                GitHub Actions then builds the three installers.
 #   ./em.sh ghrelease <x.y.z>    A stable release at an exact version.
 #   ./em.sh help
@@ -604,6 +608,40 @@ sidecar build has no version to freeze"
   log "gate: s3dgraphy==$S3D_PIN is on PyPI — the sidecar is reproducible"
 }
 
+# ── the app OPENS, in a real browser ─────────────────────────────────────────
+#
+# dev.36 was tagged with every check green and opened as a dead page: a
+# ReferenceError while `main.ts` was still being evaluated (`renderStatusLine`
+# read `hubToken` before its `let`). Per-module scripts, `tsc --noEmit` and
+# `npm run build` cannot see that; only opening the app can. So the release
+# opens it — `frontend/scripts/check-apertura.mjs`, the same script s3Dgraphy's
+# `release.py` (step 12) and `release.yml` run — and refuses on its verdict,
+# which is the first error and the src/ file:line it was thrown at.
+do_apertura() {
+  log "gate: does EMStudio open in a browser? (frontend/scripts/check-apertura.mjs)"
+  if [ ! -d "$FE/node_modules" ]; then
+    log "installing frontend deps (first run)"
+    (cd "$FE" && npm install)
+  fi
+  local errf rc=0
+  errf="$(mktemp)"
+  node "$FE/scripts/check-apertura.mjs" 2>"$errf" || rc=$?
+  if [[ "$rc" -ne 0 ]]; then
+    local why
+    why="$(cat "$errf")"
+    why="${why#✗ }"   #: the check's own mark; `die` draws one
+    rm -f "$errf"
+    #: 1 = the app does not open · 2 = the check could not run (no Playwright,
+    #: no Chromium): a refusal either way — an unchecked app is not tagged
+    [[ "$rc" -eq 2 ]] && fail 2 "$why
+  — nothing is tagged: an app nobody could open is not released. Install
+    playwright-core and its Chromium (or set PLAYWRIGHT_CORE / CHR), then run the release again."
+    die "$why
+  — the app does not open, so nothing is tagged. Fix it, then run the release again."
+  fi
+  rm -f "$errf"
+}
+
 # ── the manual (EMStudio-doc), built as a check ──────────────────────────────
 #
 # The manual lives in its OWN repository ($DOC_URL — the owner comes from this
@@ -674,6 +712,7 @@ do_devrel() {
   echo "  version       $current → $next"
   echo "  tag           $tag"
   echo "  s3dgraphy pin $(pinned_s3dgraphy)"
+  echo "  gates         the pin is on PyPI · the app opens in a browser"
   echo "  files touched frontend/package.json"
   echo "                apps/desktop/src-tauri/Cargo.toml"
   echo "                apps/desktop/src-tauri/tauri.conf.json (numeric core)"
@@ -699,9 +738,11 @@ do_devrel() {
     fi
   fi
 
-  # THE GATE, before anything is written: refusing after the version was bumped
+  # THE GATES, before anything is written: refusing after the version was bumped
   # would leave the tree dirty for a reason that has nothing to do with the tree.
+  # The app is opened on the tree as it is — the bump only touches the version.
   s3d_gate
+  do_apertura
 
   if [[ "$dry" -eq 1 ]]; then
     log "dry run: nothing was written, nothing was tagged, nothing was pushed"
@@ -740,6 +781,7 @@ stable version — a dev release is ./em.sh devrel)"
 x.y.z — a dev build is what ./em.sh devrel is for"
   require_clean_tree
   s3d_gate
+  do_apertura
   log "set the app version to $version"
   node "$ROOT/scripts/set-version.mjs" "$version"
   local branch
@@ -781,6 +823,7 @@ case "$cmd" in
     ;;
   doc) do_doc "$@" ;;
   pack) do_pack ;;
+  apertura) do_apertura ;;
   devrel) do_devrel "$@" ;;
   ghrelease) do_ghrelease "$@" ;;
   help | -h | --help) usage ;;
