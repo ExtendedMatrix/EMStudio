@@ -289,8 +289,9 @@ try {
     writeFileSync(`${dir}/ts/tileset.json`, JSON.stringify({ asset: { version: "1.0" }, geometricError: 1,
       root: { boundingVolume: { box: [0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1] }, geometricError: 0, content: { uri: "Data/a.b3dm" } } }));
     writeFileSync(`${dir}/ts/Data/a.b3dm`, "b3dm bytes");
-    execFileSync("python3", ["-c", "import sys; sys.path.insert(0, sys.argv[1]); import archive_3tz; archive_3tz.write_3tz(sys.argv[2], sys.argv[3])",
-      TOOLS, `${dir}/ts`, `${dir}/ts.3tz`]);
+    // the one writer of the canonical .3tz is dtcstamp's (the copy in tools/ is gone)
+    execFileSync(PY, ["-c", "import sys, dtcstamp; dtcstamp.write_canonical_3tz(sys.argv[1], sys.argv[2])",
+      `${dir}/ts`, `${dir}/ts.3tz`], { env: { ...process.env, PYTHONPATH: `${S3D}src:${DTC}` } });
     const tf = await post("/stamp/tree", { path: `${dir}/ts` });
     const ta = await post("/stamp/tree", { path: `${dir}/ts.3tz` });
     eq([tf.packaging, tf.digest_covers, ta.packaging, ta.digest_covers], ["directory", "members", "archive", "artifact"],

@@ -1,8 +1,9 @@
 // NIGHT-RISORSA-FILE · parte 4 · «Impacchetta un tileset in .3tz» (desktop), and
 // the two FORMS of one content.
 //
-// The writing is the bridge's (`POST /fs/pack-3tz`, 3D Survey Collection's
-// writer vendored byte for byte as `tools/archive_3tz.py`): the one canonical
+// The writing is the bridge's (`POST /fs/pack-3tz`, `dtcstamp.write_canonical_3tz`,
+// taken from 3D Survey Collection's writer — until 16 Oct 2026 vendored here as
+// `tools/archive_3tz.py`): the one canonical
 // profile of dtcstamp, so the sha256 of the archive names its content and not
 // the moment it was packed. Measured on TempluMare: `232dfcbc…`, the same as
 // 3DSC. Why the bridge and not Rust: the report of the night (the `zip` crate

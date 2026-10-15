@@ -1651,8 +1651,8 @@ def make_handler(api):
             elif route == "/fs/pack-3tz":
                 # RISORSA-FILE · «Impacchetta un tileset in .3tz» (the desktop):
                 # the folder's tileset, written BESIDE it under the same name, in
-                # the one canonical profile — 3D Survey Collection's writer,
-                # vendored byte for byte (`tools/archive_3tz.py`).
+                # the one canonical profile — dtcstamp's writer
+                # (`dtcstamp.write_canonical_3tz`, taken from 3D Survey Collection).
                 if not self._fs_gate():
                     return
                 try:
@@ -1746,14 +1746,16 @@ def make_handler(api):
         def _pack_3tz(self, body):
             """``{"folder": <dir with tileset.json>}`` → the ``.3tz`` beside it.
 
-            The writer is 3DSC's (`tools/archive_3tz.py`, the same bytes as
-            `3D-survey-collection/cesium_exporter/archive_3tz.py`): the profile
-            of dtcstamp (`profiles/3tz.md`) — stored, in path order, 1980-01-01,
-            `0o100644`, names NFC with `0x800` only on the non-ASCII ones, the
-            index last — copied in blocks, the `content_digest` hashed from the
-            same blocks. An archive already there is never overwritten: the new
-            one is written aside and compared; the same bytes say «already
-            there», different bytes are a refusal that names both digests."""
+            The writer is dtcstamp's (`dtcstamp.write_canonical_3tz`, taken
+            from 3D Survey Collection's `cesium_exporter/archive_3tz.py`; until
+            16 Oct 2026 a third copy lived here as `tools/archive_3tz.py`): the
+            profile of dtcstamp (`profiles/3tz.md`) — stored, in path order,
+            1980-01-01, `0o100644`, names NFC with `0x800` only on the
+            non-ASCII ones, the index last — and the `content_digest` hashed
+            from the same blocks. An archive already there is never
+            overwritten: the new one is written aside and compared; the same
+            bytes say «already there», different bytes are a refusal that names
+            both digests."""
             folder = os.path.abspath(os.path.expanduser(str(body.get("folder") or "")))
             full, err = self._fs_resolve(folder, want="dir")
             if err:
@@ -1766,42 +1768,41 @@ def make_handler(api):
             if not _fs_inside_roots(target):
                 self._fail(403, f"{target} is outside the folders this bridge serves")
                 return
-            here = os.path.dirname(os.path.abspath(__file__))
-            if here not in sys.path:
-                sys.path.insert(0, here)
-            import archive_3tz
+            try:
+                import dtcstamp
+                write = dtcstamp.write_canonical_3tz
+            except (ImportError, AttributeError) as exc:
+                self._fail(501, f"dtcstamp with write_canonical_3tz (0.1.5) is not importable here: {exc}")
+                return
             aside = target + ".new" if os.path.exists(target) else target
             try:
-                out = archive_3tz.write_3tz(full, aside)
+                out = write(full, aside)
             except Exception as exc:
                 self._fail(400, f"cannot pack {folder}: {exc}")
                 return
+            hexd = str(out["sha256"]).split(":")[-1]
             state = "written"
             if aside != target:
-                before = archive_3tz.sha256_file(target)
-                if before == out["sha256"]:
-                    os.remove(aside)
-                    state = "same"
-                else:
-                    os.remove(aside)
+                before = _sha256_path(target)
+                os.remove(aside)
+                if before != hexd:
                     self._fail(409, f"{os.path.basename(target)} is already there with other "
                                     f"bytes (sha256 {before[:12]}…, the folder packs to "
-                                    f"{out['sha256'][:12]}…): not overwritten")
+                                    f"{hexd[:12]}…): not overwritten")
                     return
-                out["path"] = target
+                state = "same"
             canonical = None
             try:
-                import dtcstamp
                 canonical = dtcstamp.is_canonical_3tz(target)
             except Exception as exc:
                 canonical = {"error": str(exc)}
             self._json({"ok": True, "state": state, "path": target,
-                        "sha256": "sha256:" + out["sha256"], "bytes": out["bytes"],
+                        "sha256": "sha256:" + hexd, "bytes": out["bytes"],
                         "entries": out["entries"], "seconds": out["seconds"],
                         "content_digest": out["content_digest"],
                         "canonical": canonical,
-                        "writer": {"module": "tools/archive_3tz.py",
-                                   "sha256": archive_3tz.sha256_file(os.path.join(here, "archive_3tz.py"))}})
+                        "writer": {"module": "dtcstamp.write_canonical_3tz",
+                                   "version": str(getattr(dtcstamp, "__version__", ""))}})
 
         def _stamp_members(self, body):
             """``{"paths": [...]}`` → ``{"sets": {path: {members, digest,

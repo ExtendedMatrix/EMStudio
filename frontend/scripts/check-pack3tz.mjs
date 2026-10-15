@@ -3,7 +3,9 @@
 //
 //   node scripts/check-pack3tz.mjs
 //
-//   · the writer (`tools/archive_3tz.py`) is 3D Survey Collection's, byte for byte;
+//   · the writer is dtcstamp's (`dtcstamp.write_canonical_3tz`, taken from 3D
+//     Survey Collection; until 16 Oct 2026 a third copy lived in
+//     `tools/archive_3tz.py`), and 3DSC's own gives the same bytes;
 //   · dtcstamp's conformance cases 20 and 23 («EVERY WRITER reproduces this case
 //     byte for byte»): the tree materialised, packed, the sha256 and the
 //     content_digest the case pins — 23 also from the folder written in NFD;
@@ -34,11 +36,12 @@ const eq = (a, b, what) => {
 };
 const sha = (b) => "sha256:" + createHash("sha256").update(b).digest("hex");
 
-// ── the writer is 3DSC's ────────────────────────────────────────────────────
-const PINNED = "sha256:518ca8ffc1c487e2bf6a00828fcbad33df70a1d4fa09eebc201f9be8dc4d7752";
-eq(sha(readFileSync(`${TOOLS}archive_3tz.py`)), PINNED, "tools/archive_3tz.py is the pinned copy (3DSC 11b2ecb)");
-if (existsSync(DSC)) eq(sha(readFileSync(DSC)), sha(readFileSync(`${TOOLS}archive_3tz.py`)),
-  "…and it is byte for byte 3D Survey Collection's own (a change there is a change here)");
+// ── the writer is dtcstamp's ────────────────────────────────────────────────
+const S3D = new URL("../../../s3Dgraphy/", import.meta.url).pathname;
+const DTC = new URL("../../../dtcstamp/", import.meta.url).pathname;
+const PY = process.env.PYTHON ?? (existsSync(`${S3D}.venv/bin/python`) ? `${S3D}.venv/bin/python` : "python3");
+const PYENV = { ...process.env, PYTHONPATH: `${DTC}:${process.env.PYTHONPATH ?? ""}` };
+ok(!existsSync(`${TOOLS}archive_3tz.py`), "tools/archive_3tz.py is gone: dtcstamp.write_canonical_3tz is the one writer");
 
 /** a case's tree into a folder; `form` NFC or NFD for the names */
 function materialise(c, dir, form = "NFC") {
@@ -49,14 +52,20 @@ function materialise(c, dir, form = "NFC") {
     writeFileSync(path, f.base64 !== undefined ? Buffer.from(f.base64, "base64") : Buffer.from(f.text, "utf8"));
   }
 }
-function pack(dir, out) {
-  const r = execFileSync("python3", ["-c", `
-import sys, json
-sys.path.insert(0, sys.argv[1])
-import archive_3tz
-r = archive_3tz.write_3tz(sys.argv[2], sys.argv[3])
-print(json.dumps({"sha256": "sha256:" + r["sha256"], "content_digest": r["content_digest"]["digest"], "files": r["content_digest"]["files"]}))`,
-    TOOLS, dir, out]);
+function pack(dir, out, writer = "dtcstamp") {
+  const r = execFileSync(PY, ["-c", `
+import sys, json, importlib.util
+if sys.argv[1] == "dtcstamp":
+    import dtcstamp
+    r = dtcstamp.write_canonical_3tz(sys.argv[2], sys.argv[3])
+    sha = r["sha256"]
+else:
+    spec = importlib.util.spec_from_file_location("archive_3tz", sys.argv[1])
+    m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+    r = m.write_3tz(sys.argv[2], sys.argv[3])
+    sha = "sha256:" + r["sha256"]
+print(json.dumps({"sha256": sha, "content_digest": r["content_digest"]["digest"], "files": r["content_digest"]["files"]}))`,
+    writer, dir, out], { env: PYENV });
   return JSON.parse(r.toString());
 }
 
@@ -70,7 +79,9 @@ for (const [file, forms] of [["20-tileset-folder-and-3tz.json", ["NFC"]], ["23-t
     materialise(c, dir, form);
     const got = pack(dir, `${dir}.3tz`);
     eq([got.sha256, got.content_digest, got.files], [c.expect.archive_sha256, c.expect.content_digest, c.expect.files],
-      `case ${file.slice(0, 2)} (${form} on disk): EMStudio's writer gives the case's sha256 and content_digest`);
+      `case ${file.slice(0, 2)} (${form} on disk): dtcstamp's writer gives the case's sha256 and content_digest`);
+    if (existsSync(DSC)) eq(pack(dir, `${dir}.dsc.3tz`, DSC).sha256, got.sha256,
+      `case ${file.slice(0, 2)} (${form}): …and 3D Survey Collection's own writer the same bytes`);
   }
 }
 
@@ -108,7 +119,7 @@ if (up && existsSync(REPORT_FS)) {
     eq([r.body?.state, r.body?.sha256, r.body?.content_digest?.digest, r.body?.content_digest?.files, r.body?.canonical?.canonical],
       ["written", "sha256:232dfcbc148f30e52098fef9c83606a3e1638a106fc0678563e909cde1db0c17",
        "sha256:8aa6fbd3e5847e9f8c2e219fb4305d9a3ad52e41135120e79bb8c3d18b67caed", 7302, true],
-      `TempluMare_cesium packed by EMStudio: 3DSC's sha256 (232dfcbc…) and content_digest (${ms} ms, ${r.body?.seconds} s in the writer)`);
+      `TempluMare_cesium packed through the bridge (dtcstamp): 3DSC's sha256 (232dfcbc…) and content_digest (${ms} ms, ${r.body?.seconds} s in the writer)`);
     console.log(`  TempluMare: ${r.body?.bytes} B, ${r.body?.entries} entries, ${r.body?.seconds} s in the writer, ${ms} ms round trip`);
   }
 } else console.log(`  (skipped: no bridge at ${BRIDGE})`);
