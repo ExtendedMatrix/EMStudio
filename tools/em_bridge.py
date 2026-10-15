@@ -178,6 +178,7 @@ import sys
 import threading
 import time
 import urllib.parse
+import uuid
 import zipfile
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -1034,7 +1035,8 @@ def _load_s3dgraphy(s3dgraphy_src: "pathlib.Path | None"):
 #: is instead of failing with WebKit's «Load failed». 30 = /read-shift and the
 #: JSON+CORS answer of an unknown route. 31 = /property-source and the
 #: `reasoning` records of /validate (la proprietà come fonte, 9 Oct 2026).
-BRIDGE_LEVEL = 31   # 30 also = /validate
+#: 32 = /room-import, «Bring into a room…» through s3Dgraphy's engine (16 Oct 2026).
+BRIDGE_LEVEL = 32   # 30 also = /validate
 
 
 # ── FONTE · the rules of «la proprietà come fonte», asked of the library ──────
@@ -1133,6 +1135,348 @@ def _s3dgraphy_identity() -> dict:
                 "path": os.path.dirname(getattr(s3dgraphy, "__file__", "") or "")}
     except Exception:  # noqa: BLE001
         return {}
+
+
+# ── «Bring into a room…» through the ONE engine (MICRO-PORTA-IN-STANZA-DAL-
+# MOTORE, 16 Oct 2026) ─────────────────────────────────────────────────────────
+#
+# Until today EMStudio carried a study into a room by itself, in TypeScript: its
+# own inventory, its own uploads, the graph seated FIRST through the socket. The
+# room importer of s3Dgraphy (`s3dgraphy.room_import`, «un motore, tre porte»)
+# is the one implementation now, and this is EMStudio's door to it: the page
+# sends the study it holds, the folders its paths start from and the session's
+# token; the engine creates (or takes up) the room, makes the plan, and — after
+# the person's choices in the dialog, which stays the page's — sends the files,
+# hosts the resources, seats the graph LAST and sets `study-access`. The page
+# enters the room after, with `connectToHub`.
+#
+# ONE RUN AT A TIME, IN A THREAD: a plan of Templu Mare takes ~11 s and its
+# uploads minutes, longer than a request should wait. The page polls
+# `GET /room-import?job=…&since=…` for the engine's own lines (`[room-import] …`
+# on stderr, teed here), the bytes, the plan and the report.
+#
+# THE TOKEN lives in the job, in memory: it arrives in the body of a request to
+# this LOCAL bridge and is handed to the engine; it is never written to disk
+# (the journal and the report do not carry it), never logged.
+#
+# THE JOURNAL AND THE REPORT go in the bridge's state folder, one per study
+# (`<state>/room-import/<key>/`), not beside the em.json as the command and EM
+# Tools do: EMStudio does not write into a study's folder without a Save, and a
+# delivered dataset is read-only. The journal never decides what the room has
+# (the node's HEAD does): another door's journal only means hashing again.
+
+_RI_LOCK = threading.RLock()
+_RI_JOBS: dict = {}
+_RI_ACTIVE: list = [None]        # the job whose engine lines are being collected
+_RI_KEEP_LINES = 2000
+
+
+class _RoomImportTee:
+    """stderr as it was, plus the engine's `[room-import]` lines for the job
+    that runs. Its workers print too, so it is the stream and not a thread that
+    says whose line it is: one run at a time makes that true."""
+
+    def __init__(self, stream):
+        self.stream = stream
+        self.buf = ""
+
+    def write(self, text):
+        out = self.stream.write(text)
+        with _RI_LOCK:
+            self.buf += text
+            while "\n" in self.buf:
+                line, self.buf = self.buf.split("\n", 1)
+                job = _RI_ACTIVE[0]
+                if job is not None and line.startswith("[room-import]"):
+                    job.say(line[len("[room-import]"):].strip(), echo=False)
+        return out
+
+    def flush(self):
+        self.stream.flush()
+
+    def __getattr__(self, name):
+        return getattr(self.stream, name)
+
+
+def _ri_state_dir() -> pathlib.Path:
+    return (pathlib.Path(os.environ.get("EM_BRIDGE_STATE_DIR")
+                         or (pathlib.Path.home() / ".config" / "emstudio"))
+            / "room-import")
+
+
+#: what the page draws of a row of the plan — no more (no token, no journal)
+_RI_ROW_KEYS = ("id", "graph_id", "name", "locator", "group", "choice", "size",
+                "sha256", "home", "note", "path", "media_type", "tree",
+                "batch_id", "batch_name", "batch_proposed")
+
+
+class _RoomImportJob:
+    def __init__(self, body):
+        self.id = uuid.uuid4().hex[:12]
+        self.state = "planning"          # planning · planned · running · done · failed
+        self.lines = []                  # [(n, text)]
+        self.n = 0
+        self.error = ""
+        self.status = None
+        self.run = None
+        self.lots = []
+        self.plan = None
+        self.report = None
+        self.sent = 0
+        self.total = 0
+        self.go = threading.Event()
+        self.go.set()
+        self.body = body
+        self.started = time.time()
+
+    def say(self, text, echo=True):
+        with _RI_LOCK:
+            self.n += 1
+            self.lines.append((self.n, text))
+            del self.lines[:-_RI_KEEP_LINES]
+        if echo:
+            print(f"[room-import] {text}", file=sys.stderr, flush=True)
+
+    def hold(self):
+        """The page's «Pause»: the engine waits here between two files or two
+        pieces. → True when it waited."""
+        if self.go.is_set():
+            return False
+        self.say("paused")
+        self.go.wait()
+        self.say("resumed")
+        return True
+
+    def view(self, since=0):
+        with _RI_LOCK:
+            out = {"ok": True, "job": self.id, "state": self.state,
+                   "lines": [t for n, t in self.lines if n > since], "next": self.n,
+                   "sent": self.sent, "total": self.total,
+                   "paused": not self.go.is_set(),
+                   "seconds": round(time.time() - self.started, 1)}
+        if self.error:
+            out["error"] = self.error
+            out["status"] = self.status
+        if self.plan is not None and self.state in ("planned", "running", "done"):
+            out["plan"] = self.plan
+        if self.report is not None:
+            out["report"] = self.report
+        return out
+
+
+def _ri_key(body) -> str:
+    """One state folder per study: its em.json's path, or (never saved) its
+    graphs' ids."""
+    doc = body.get("doc") if isinstance(body.get("doc"), dict) else {}
+    seed = str(body.get("em_json") or "") or ",".join(sorted((doc.get("graphs") or {}).keys()))
+    return hashlib.sha256(seed.encode("utf-8")).hexdigest()[:16]
+
+
+def _ri_container(body, folder):
+    """The study the page holds (`doc`, a container), or its em.json (`em_json`).
+    Read without a project root: a load-time migration that writes beside the
+    study (a 3D reading's .glb) must not write into a read-only dataset."""
+    from s3dgraphy.container import load_container_file, parse_container
+    if isinstance(body.get("doc"), dict):
+        container, warnings = parse_container(body["doc"])
+        return container, list(warnings or [])
+    path = str(body.get("em_json") or "")
+    if not path or not os.path.isfile(path):
+        raise ValueError("room-import wants the study: `doc` (the container) or `em_json` (a path)")
+    container, warnings = load_container_file(path)
+    return container, list(warnings or [])
+
+
+def _ri_rows(rows):
+    return [{k: r.get(k) for k in _RI_ROW_KEYS if r.get(k) not in (None, "")} for r in rows]
+
+
+def _ri_plan_view(job, run):
+    from s3dgraphy.room_import import engine, inventory
+    summary = engine.summarise_plan(run["plan"])
+    rows = run["plan"]["rows"]
+    lots = []
+    for lot in job.lots:
+        lots.append({k: lot.get(k) for k in ("key", "name", "ids", "camera", "from", "to",
+                                              "graph_id", "confirmed")})
+    # the lots the GRAPH already declares (an acquisition's outputs): confirmed
+    declared = {}
+    for r in rows:
+        if r.get("batch_id") and not r.get("batch_proposed"):
+            d = declared.setdefault(r["batch_id"], {"key": r["batch_id"], "name": r.get("batch_name") or r["batch_id"],
+                                                    "ids": [], "graph_id": r.get("graph_id"),
+                                                    "confirmed": True, "declared": True})
+            d["ids"].append(r["id"])
+    return {"rows": _ri_rows(rows), "summary": summary, "lots": lots + list(declared.values()),
+            "where": run.get("where") or {}, "room": run["room"], "title": run["title"],
+            "groups": list(inventory.GROUPS), "warnings": list(run.get("warnings") or [])[:20]}
+
+
+def _ri_plan(job, body):
+    from s3dgraphy.room_import import engine, inventory
+    try:
+        node = str(body.get("node") or "").strip().rstrip("/")
+        room = str(body.get("room") or "").strip()
+        if not node or not room:
+            raise ValueError("room-import wants `node` and `room`")
+        folder = _ri_state_dir() / _ri_key(body)
+        folder.mkdir(parents=True, exist_ok=True)
+        bases = [os.path.abspath(os.path.expanduser(str(b))) for b in body.get("base_dirs") or [] if b]
+        bases = [b for b in dict.fromkeys(bases) if os.path.isdir(b) and _fs_inside_roots(b)]
+        container, warnings = _ri_container(body, str(folder))
+        job.say(f"the study: {len(container.graphs)} graph(s)"
+                + (", and the shelf" if container.shelf is not None else "")
+                + f"; its files looked for in {', '.join(bases) or '(no folder)'}")
+        run = engine.prepare(container=container, node=node, room=room,
+                             title=str(body.get("title") or "") or None,
+                             base_dirs=bases or [str(folder)],
+                             token=body.get("token") or None,
+                             dry_run=bool(body.get("dry_run")),
+                             pack_tilesets=body.get("pack_tilesets") or None,
+                             journal_path=str(folder / engine.JOURNAL_NAME),
+                             work_dir=str(folder / "packs"),
+                             workers=int(body.get("workers") or 4))
+        run["warnings"] = list(warnings) + list(run.get("warnings") or [])
+        # L1 · the photo sessions, PROPOSED (one acquisition each only after a
+        # yes in the dialog), read from the EXIF by this bridge's reader
+        lots = []
+        gap = float(body.get("lot_gap_seconds") or inventory.SESSION_GAP_SECONDS)
+        least = int(body.get("lot_min_photos") or inventory.SESSION_MIN_PHOTOS)
+
+        def exif_of(path):
+            got = _photo_exif(path) or {}
+            return {"camera": got.get("camera"), "taken_at": got.get("taken_at")} if got else None
+
+        for gid, _graph in engine._members(container):
+            for lot in inventory.propose_sessions(
+                    [r for r in run["plan"]["rows"] if r.get("graph_id") == gid],
+                    exif_of=exif_of, dosco_dirs=body.get("dosco_dirs") or [],
+                    gap_seconds=gap, min_photos=least):
+                lot["graph_id"] = gid
+                lot["source"] = "EMStudio · bring into a room"
+                lots.append(lot)
+        job.run, job.lots = run, lots
+        job.plan = _ri_plan_view(job, run)
+        s = job.plan["summary"]
+        job.say(f"the plan: {s['resources']} resource(s) — "
+                + ", ".join(f"{g} {n}" for g, n in s["groups"].items())
+                + f"; to send {s['upload']['files']} file(s), {inventory.human_size(s['upload']['bytes'])}")
+        job.state = "planned"
+    except Exception as exc:  # noqa: BLE001 — every failure is the job's answer
+        job.error = str(exc)
+        job.status = getattr(exc, "status", None)
+        job.state = "failed"
+        job.say(f"failed: {exc}")
+    finally:
+        with _RI_LOCK:
+            if _RI_ACTIVE[0] is job:
+                _RI_ACTIVE[0] = None
+
+
+def _ri_execute(job, body):
+    from s3dgraphy.room_import import engine, inventory
+    run = job.run
+    try:
+        if body.get("token"):
+            run["token"] = body["token"]     # the session's, fresh: it may have been renewed
+        engine.apply_choices(run, per_group=body.get("per_group") or None,
+                             per_batch=body.get("per_batch") or None,
+                             per_item=body.get("per_item") or None)
+        todo = [u for u in run["plan"]["units"].values() if not u["present"]]
+        job.total = sum(int(u.get("size") or 0) for u in todo)
+        confirmed = {str(k) for k in body.get("lots") or []}
+        lots = [dict(lot, confirmed=True) for lot in job.lots if lot["key"] in confirmed]
+
+        def on_bytes(n):
+            with _RI_LOCK:
+                job.sent += n
+
+        report = engine.execute(run, visibility=str(body.get("visibility") or "restricted"),
+                                elsewhere=str(body.get("elsewhere") or "host"),
+                                move=[str(x) for x in body.get("move") or []],
+                                lots=lots, report_dir=os.path.dirname(run["journal_path"]),
+                                hold=job.hold, on_bytes=on_bytes)
+        job.report = json.loads(json.dumps(report, default=str))
+        job.say(report.get("sentence") or "done")
+        job.state = "done"
+    except Exception as exc:  # noqa: BLE001 — every failure is the job's answer
+        import traceback
+        traceback.print_exc()
+        job.error = str(exc)
+        job.status = getattr(exc, "status", None)
+        job.state = "failed"
+        job.say(f"failed: {exc}")
+    finally:
+        job.run = None if job.state == "done" else job.run
+        with _RI_LOCK:
+            if _RI_ACTIVE[0] is job:
+                _RI_ACTIVE[0] = None
+
+
+def _ri_start(job, target, body):
+    with _RI_LOCK:
+        if not isinstance(sys.stderr, _RoomImportTee):
+            sys.stderr = _RoomImportTee(sys.stderr)
+        _RI_ACTIVE[0] = job
+    threading.Thread(target=target, args=(job, body), daemon=True,
+                     name=f"room-import-{job.id}").start()
+
+
+def room_import_post(body):
+    """`POST /room-import` → `(status, payload)`. `step`:
+
+    - `plan` — `{node, room, title, token, doc | em_json, base_dirs, dosco_dirs,
+      dry_run, pack_tilesets, lot_gap_seconds, lot_min_photos}`: the room
+      created (or taken up), the plan made, in a thread → `{job}`;
+    - `execute` — `{job, token, per_group, per_batch, per_item, move, lots
+      (the keys the person confirmed), visibility, elsewhere}`;
+    - `pause` · `resume` · `forget` — `{job}`.
+    """
+    step = str(body.get("step") or "plan")
+    with _RI_LOCK:
+        busy = next((j for j in _RI_JOBS.values() if j.state in ("planning", "running")), None)
+        job = _RI_JOBS.get(str(body.get("job") or ""))
+    if step == "plan":
+        if busy is not None:
+            return 409, {"ok": False, "error": f"a room import is running ({busy.id}, {busy.state})"}
+        job = _RoomImportJob({k: v for k, v in body.items() if k not in ("token", "doc")})
+        with _RI_LOCK:
+            for old in [k for k, j in _RI_JOBS.items() if j.state in ("planned", "done", "failed")]:
+                _RI_JOBS.pop(old, None)
+            _RI_JOBS[job.id] = job
+        _ri_start(job, _ri_plan, body)
+        return 202, {"ok": True, "job": job.id}
+    if job is None:
+        return 404, {"ok": False, "error": "no such room import (the bridge was restarted?)"}
+    if step == "execute":
+        if job.state != "planned" or job.run is None:
+            return 409, {"ok": False, "error": f"the room import is {job.state}, not planned"}
+        if job.run.get("dry_run"):
+            return 409, {"ok": False, "error": "a dry run is not executed: plan it again"}
+        job.state = "running"
+        _ri_start(job, _ri_execute, body)
+        return 202, {"ok": True, "job": job.id}
+    if step in ("pause", "resume"):
+        (job.go.clear if step == "pause" else job.go.set)()
+        return 200, job.view()
+    if step == "forget":
+        job.go.set()
+        with _RI_LOCK:
+            if job.state not in ("planning", "running"):
+                _RI_JOBS.pop(job.id, None)
+        return 200, {"ok": True}
+    return 400, {"ok": False, "error": f"unknown step {step!r}"}
+
+
+def room_import_get(query):
+    job = _RI_JOBS.get(str((query.get("job") or [""])[0]))
+    if job is None:
+        return 404, {"ok": False, "error": "no such room import"}
+    try:
+        since = int((query.get("since") or ["0"])[0] or 0)
+    except ValueError:
+        since = 0
+    return 200, job.view(since)
 
 
 def make_handler(api):
@@ -1315,6 +1659,11 @@ def make_handler(api):
                 self.send_header("Content-Length", str(len(body)))
                 self.end_headers()
                 self.wfile.write(body)
+            elif route == "/room-import":
+                # MICRO-PORTA-IN-STANZA-DAL-MOTORE · a room import's lines, bytes,
+                # plan and report, read at intervals by the page
+                status, payload = room_import_get(urllib.parse.parse_qs(parsed.query))
+                self._json(payload, status)
             elif route == "/llm-key-status":
                 self._llm_key_status()
             elif route == "/resolve-authority":
@@ -1648,6 +1997,19 @@ def make_handler(api):
                     self._fail(400, f"invalid JSON body: {exc}")
                     return
                 (self._stamp_verify if route == "/stamp/verify" else self._stamp_tree)(body)
+            elif route == "/room-import":
+                # MICRO-PORTA-IN-STANZA-DAL-MOTORE · «Bring into a room…» is the
+                # ENGINE's (`s3dgraphy.room_import`): plan, the person's choices,
+                # execution — see `room_import_post`. It reads the disk.
+                if not self._fs_gate():
+                    return
+                try:
+                    body = json.loads(raw.decode("utf-8")) if raw else {}
+                except Exception as exc:
+                    self._fail(400, f"invalid JSON body: {exc}")
+                    return
+                status, payload = room_import_post(body if isinstance(body, dict) else {})
+                self._json(payload, status)
             elif route == "/fs/pack-3tz":
                 # RISORSA-FILE · «Impacchetta un tileset in .3tz» (the desktop):
                 # the folder's tileset, written BESIDE it under the same name, in
