@@ -173,6 +173,16 @@ try {
   const again = await post({ folder: tiles }, "/fs/pack-3tz");
   ok(again.ok && again.state === "same" && again.sha256 === pk.sha256, "packed again: the same bytes, said so");
   ok(!existsSync(`${TOOLS}archive_3tz.py`), "tools/archive_3tz.py is gone (dtcstamp's is the one writer)");
+
+  console.log("8 · the Files panel's «Upload»: one file through the engine's door");
+  const one = (path) => post({ step: "upload", node: NODE, room: "r1", token: TOKEN, path });
+  const known = await one(`${emDir}/DosCo/D.01.pdf`);
+  ok(known.ok && known.already === true, `a file the room has: already there (${known.status})`);
+  const { writeFileSync } = await import("node:fs");
+  writeFileSync(`${dir}/new.txt`, `new bytes ${Date.now()}`);
+  const fresh = await one(`${dir}/new.txt`);
+  ok(fresh.ok && fresh.already === false && /^sha256:/.test(fresh.ref ?? ""), `a new file: sent (${fresh.ref?.slice(0, 19)}…)`);
+  ok((await one("/etc/hosts")).status === 403, "a file outside the bridge's folders: refused");
 } catch (exc) {
   fails.push(`threw: ${exc.stack ?? exc}`);
 } finally {

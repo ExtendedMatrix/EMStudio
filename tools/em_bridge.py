@@ -1422,6 +1422,32 @@ def _ri_start(job, target, body):
                      name=f"room-import-{job.id}").start()
 
 
+def _ri_upload(body):
+    """ONE file into a room, through the engine's door (`node.upload_asset`:
+    HEAD by sha256 first, one streamed PUT or the resumable `uploads`, the
+    digest declared and checked) — the Files panel's «Upload». Synchronous."""
+    from s3dgraphy.room_import import inventory, node as nodeio
+    from s3dgraphy.room_import.errors import RoomError
+    node = str(body.get("node") or "").strip().rstrip("/")
+    room = str(body.get("room") or "").strip()
+    path = os.path.abspath(os.path.expanduser(str(body.get("path") or "")))
+    if not node or not room:
+        return 400, {"ok": False, "error": "upload wants `node`, `room` and `path`"}
+    if not _fs_inside_roots(path):
+        return 403, {"ok": False, "error": "outside the folders this bridge serves"}
+    if not os.path.isfile(path):
+        return 404, {"ok": False, "error": f"not a file: {path}"}
+    sha = str(body.get("sha256") or "") or None
+    try:
+        info = nodeio.upload_asset(node, room, path, sha,
+                                   str(body.get("media_type") or "") or inventory.media_type_for(path),
+                                   body.get("token") or None)
+    except RoomError as exc:
+        return int(exc.status or 502), {"ok": False, "error": str(exc)}
+    return 200, {"ok": True, "already": bool(info.get("already")), "ref": info.get("ref"),
+                 "size": info.get("size"), "url": info.get("url")}
+
+
 def room_import_post(body):
     """`POST /room-import` → `(status, payload)`. `step`:
 
@@ -1430,9 +1456,13 @@ def room_import_post(body):
       created (or taken up), the plan made, in a thread → `{job}`;
     - `execute` — `{job, token, per_group, per_batch, per_item, move, lots
       (the keys the person confirmed), visibility, elsewhere}`;
-    - `pause` · `resume` · `forget` — `{job}`.
+    - `pause` · `resume` · `forget` — `{job}`;
+    - `upload` — `{node, room, token, path, sha256, media_type}`: ONE file,
+      now (the Files panel), no job.
     """
     step = str(body.get("step") or "plan")
+    if step == "upload":
+        return _ri_upload(body)
     with _RI_LOCK:
         busy = next((j for j in _RI_JOBS.values() if j.state in ("planning", "running")), None)
         job = _RI_JOBS.get(str(body.get("job") or ""))
