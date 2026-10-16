@@ -372,7 +372,8 @@ import { choose, confirmLot, engineChoices, humanBytes, INV_GROUPS, inventoryFro
   toUpload, type EnginePlan, type EngineReport, type HomeView, type InvChoice, type Inventory } from "./room-inventory";
 import { type HostInfo, SyncClient, SYNC_ACCEPTS, type SyncAccept } from "./sync";
 import { type Access, type ConnectionState, type NodeApi, type Reach, nodeApi, renderConnectionPanel,
-  renderRoomPanel, roleStateId, roomStateId, shortNode, whereDetails, whereHealth, wherePhrase } from "./connection";
+  renderRoomPanel, roleStateId, roomStateId, shortNode, whereDetails, whereHealth, wherePhrase,
+  type OrphanAsset, type RoomInfo } from "./connection";
 import { stateBadge, stateSign } from "./state-symbols";
 import * as alignment from "./alignment";
 import { buildCommand, type CommandVerb } from "./commands";
@@ -1608,9 +1609,152 @@ function openRoomPanel(roomId?: string): void {
     openOnNode: () => { pop.classList.add("hidden"); shareThisRoom(); },
     leaveRoom: () => { pop.classList.add("hidden"); if (sync.connected) btnSync.click(); },
     copy: (text) => { void navigator.clipboard?.writeText(text).then(() => toast(t("room.copied")), () => {}); },
+    deleteRoom: (info) => { pop.classList.add("hidden"); askDeleteRoom(base, info); },
   }).then(() => placeConnectionPop(pop));
   placeConnectionPop(pop);
 }
+// ── MICRO-SPAZIO-3D-2 p.6 · «Elimina stanza…» and the orphan assets ──────────
+/** The window that says what goes and what stays, and asks for the id again
+ *  (the node wants it repeated in the body, `DELETE /v1/rooms/{id}`). */
+function askDeleteRoom(base: string, info: RoomInfo): void {
+  const id = info.room_id;
+  const modal = document.createElement("div");
+  modal.className = "modal";
+  modal.dataset.dialog = "delete-room";
+  const card = document.createElement("div");
+  card.className = "modal-card del-room";
+  const head = document.createElement("div");
+  head.className = "modal-head";
+  head.textContent = t("room.deleteTitle", { x: info.title || id });
+  const body = document.createElement("div");
+  body.className = "modal-body";
+  const p1 = document.createElement("p");
+  p1.textContent = t("room.deleteGoes");
+  const ul = document.createElement("ul");
+  for (const k of ["room.deleteGoesDoc", "room.deleteGoesMembers", "room.deleteGoesInvites", "room.deleteGoesGroups", "room.deleteGoesUploads"]) {
+    const li = document.createElement("li");
+    li.textContent = t(k);
+    ul.appendChild(li);
+  }
+  const p2 = document.createElement("p");
+  p2.textContent = t("room.deleteStays");
+  const p3 = document.createElement("p");
+  p3.textContent = sync.connected && sync.room === id ? t("room.deleteLeaveFirst") : "";
+  const lab = document.createElement("label");
+  lab.textContent = t("room.deleteType", { x: id });
+  const inp = document.createElement("input");
+  inp.type = "text";
+  inp.spellcheck = false;
+  inp.dataset.field = "confirm";
+  lab.appendChild(inp);
+  const say = document.createElement("p");
+  say.className = "conn-line conn-err";
+  body.append(p1, ul, p2, p3, lab, say);
+  const foot = document.createElement("div");
+  foot.className = "modal-foot";
+  const close = () => modal.remove();
+  const cancel = document.createElement("button");
+  cancel.textContent = t("common.cancel");
+  cancel.onclick = close;
+  const go = document.createElement("button");
+  go.className = "danger";
+  go.dataset.act = "delete-room-go";
+  go.textContent = t("room.deleteGo");
+  go.disabled = true;
+  inp.addEventListener("input", () => { go.disabled = inp.value.trim() !== id; });
+  go.onclick = async () => {
+    go.disabled = true;
+    // a session still in the room would write it back: it leaves first (409)
+    if (sync.connected && sync.room === id) btnSync.click();
+    try {
+      const r = await nodeHttp(base).deleteRoom(id);
+      close();
+      const n = r.orphaned?.length ?? 0;
+      const msg = t("room.deleted", { x: id, n: String(n) }) + (r.complete === false ? ` · ${t("room.deletedIncomplete", { why: (r.errors ?? []).join("; ") })}` : "");
+      toast(msg);
+      logInfo(msg);
+    } catch (error) {
+      say.textContent = (error as Error).message;
+      go.disabled = false;
+    }
+  };
+  foot.append(cancel, go);
+  card.append(head, body, foot);
+  modal.appendChild(card);
+  modal.addEventListener("click", (e) => { if (e.target === modal) close(); });
+  document.body.appendChild(modal);
+  setTimeout(() => inp.focus(), 0);
+}
+
+/** The Preferences of the node, for its operator: the orphan assets. */
+async function paintOrphans(): Promise<void> {
+  const sect = document.getElementById("settings-sect-orphans");
+  const list = document.getElementById("set-orph-list");
+  const base = getSettings().sync.hubUrl.trim();
+  if (!sect || !list) return;
+  const api = base ? nodeHttp(base) : null;
+  // the tabs show and hide the sections with `hidden`: the operator's gate is a class of its own
+  if (!api || !(await api.operator())) { sect.classList.add("orph-off"); return; }
+  sect.classList.remove("orph-off");
+  const type = (document.getElementById("set-orph-type") as HTMLSelectElement | null)?.value ?? "";
+  const since = (document.getElementById("set-orph-since") as HTMLInputElement | null)?.value ?? "";
+  list.textContent = t("room.loading");
+  let rows: OrphanAsset[];
+  try { rows = await api.orphans({ type, since }); }
+  catch (error) { list.textContent = (error as Error).message; return; }
+  list.textContent = "";
+  if (!rows.length) { list.textContent = t("settings.orphNone"); return; }
+  const table = document.createElement("table");
+  table.innerHTML = `<thead><tr><th>${escapeHtml(t("settings.orphRef"))}</th><th>${escapeHtml(t("settings.orphType"))}</th>`
+    + `<th>${escapeHtml(t("settings.orphSize"))}</th><th>${escapeHtml(t("settings.orphDate"))}</th><th>${escapeHtml(t("settings.orphRoom"))}</th></tr></thead>`;
+  const tb = document.createElement("tbody");
+  for (const o of rows) {
+    const tr = document.createElement("tr");
+    tr.dataset.ref = o.ref;
+    const td = (text: string, code = false) => { const c = document.createElement("td"); if (code) { const k = document.createElement("code"); k.textContent = text; c.appendChild(k); } else c.textContent = text; tr.appendChild(c); };
+    td(`${o.ref.slice(0, 19)}…`, true);
+    td(o.media_type ?? "—");
+    td(o.size != null ? formatBytes(o.size) : "—");
+    td(o.orphaned_at ? new Date(o.orphaned_at).toLocaleString(getLocale()) : "—");
+    td(o.origin_room ?? "—");
+    // the two gestures under the fingerprint: the row stays within the dialog
+    const acts = document.createElement("div");
+    acts.className = "orph-acts";
+    const dl = document.createElement("button");
+    dl.type = "button";
+    dl.dataset.act = "orph-download";
+    dl.textContent = t("settings.orphDownload");
+    dl.onclick = async () => {
+      try {
+        const blob = await api.assetBytes(o.ref);
+        const a = document.createElement("a");
+        a.href = URL.createObjectURL(blob);
+        a.download = o.ref.replace(":", "-");
+        a.click();
+        setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+      } catch (error) { toast((error as Error).message); }
+    };
+    const del = document.createElement("button");
+    del.type = "button";
+    del.className = "danger";
+    del.dataset.act = "orph-delete";
+    del.textContent = t("settings.orphDelete");
+    del.onclick = async () => {
+      if (!confirm(t("settings.orphDeleteAsk", { x: o.ref, room: o.origin_room ?? "?" }))) return;
+      try { await api.deleteAsset(o.ref); toast(t("settings.orphDeleted", { x: o.ref.slice(0, 19) })); void paintOrphans(); }
+      catch (error) { toast((error as Error).message); }
+    };
+    acts.append(dl, " ", del);
+    tr.firstElementChild?.appendChild(acts);
+    tb.appendChild(tr);
+  }
+  table.appendChild(tb);
+  list.appendChild(table);
+}
+document.getElementById("set-orph-refresh")?.addEventListener("click", () => void paintOrphans());
+document.getElementById("set-orph-type")?.addEventListener("change", () => void paintOrphans());
+document.getElementById("set-orph-since")?.addEventListener("change", () => void paintOrphans());
+
 modeIndicator.addEventListener("click", () => toggleConnectionPanel());
 // T2 · the desktop's app menu: «Settings…» (⌘,)
 if (isTauri()) {
@@ -13737,6 +13881,7 @@ document.getElementById("set-node-signin")?.addEventListener("click", () => {
 
 function openSettings(section?: string): void {
   const s = getSettings();
+  void paintOrphans();
   settingsOpenedWith = { locale: getLocale(), theme: storedMode(), settings: JSON.stringify(s) };
   setToolSel.value = s.sync.tool;
   setProtoSel.value = s.sync.protocol;

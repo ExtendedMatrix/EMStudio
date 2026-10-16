@@ -217,6 +217,38 @@ export interface NodeApi {
   removeMember(id: string, orcid: string): Promise<MembersInfo>;
   invite(id: string, role: string): Promise<{ token?: string | null }>;
   door(id: string): Promise<{ web?: string | null; scheme?: string | null }>;
+  /** MICRO-SPAZIO-3D-2 p.6 · `DELETE /rooms/{id}` with the id repeated (owner, operator) */
+  deleteRoom(id: string): Promise<RoomDeleted>;
+  /** `GET /admin/whoami`: is this session the node's operator */
+  operator(): Promise<boolean>;
+  /** `GET /admin/assets/orphans` (operator) */
+  orphans(q?: { type?: string; since?: string; until?: string }): Promise<OrphanAsset[]>;
+  /** `DELETE /admin/assets/{ref}` (operator): refused (409) while cited */
+  deleteAsset(ref: string): Promise<unknown>;
+  /** `GET /admin/assets/{ref}` (operator): the bytes */
+  assetBytes(ref: string): Promise<Blob>;
+}
+
+/** What a room's deletion answers (stratigraph-server, 16 Oct 2026). */
+export interface RoomDeleted {
+  room_id: string;
+  deleted_at?: string;
+  complete?: boolean;
+  errors?: string[];
+  removed?: Record<string, unknown>;
+  assets?: Array<{ ref: string; orphan: boolean; still_held_by?: string[] }>;
+  orphaned?: string[];
+}
+
+/** An asset no room cites any more: it stays in the store (E.D., 16 Oct 2026). */
+export interface OrphanAsset {
+  ref: string;
+  sha256?: string;
+  media_type?: string | null;
+  size?: number | null;
+  orphaned_at?: string | null;
+  origin_room?: string | null;
+  deleted_by?: string | null;
 }
 
 /** A refusal of the node, with its status: a 401 is «your access has expired»,
@@ -251,6 +283,25 @@ export function nodeApi(base: string, token: () => string | null,
     removeMember: (id, orcid) => call("DELETE", `${room(id)}/members/${encodeURIComponent(orcid)}`),
     invite: (id, role) => call("POST", `${room(id)}/invites`, { role }),
     door: (id) => call("GET", `${room(id)}/open`),
+    deleteRoom: (id) => call("DELETE", room(id), { confirm: id }),
+    operator: async () => {
+      try { return !!(await call<{ operator?: boolean }>("GET", "/admin/whoami")).operator; } catch { return false; }
+    },
+    orphans: (q = {}) => {
+      const u = new URLSearchParams();
+      for (const [k, v] of Object.entries(q)) if (v) u.set(k, v);
+      const qs = u.toString();
+      return call("GET", `/admin/assets/orphans${qs ? `?${qs}` : ""}`);
+    },
+    deleteAsset: (ref) => call("DELETE", `/admin/assets/${encodeURIComponent(ref)}`),
+    assetBytes: async (ref) => {
+      const h: Record<string, string> = {};
+      const tok = token();
+      if (tok) h.Authorization = `Bearer ${tok}`;
+      const r = await send(`${root}/v1/admin/assets/${encodeURIComponent(ref)}`, { method: "GET", headers: h, cache: "no-store" });
+      if (!r.ok) throw new NodeError(`HTTP ${r.status}`, r.status);
+      return r.blob();
+    },
   };
 }
 
@@ -576,6 +627,9 @@ export interface RoomPanelHooks {
   openOnNode(): void;
   leaveRoom(): void;
   copy(text: string): void;
+  /** MICRO-SPAZIO-3D-2 p.6 · «Elimina stanza…»: shown to the owner and to the
+   *  node's operator; the caller asks for the confirmation and deletes */
+  deleteRoom?(info: RoomInfo): void;
 }
 
 /** Render the room panel: «yours» → members, roles, remove, invite by ORCID or
@@ -710,4 +764,16 @@ export async function renderRoomPanel(host: HTMLElement, h: RoomPanelHooks): Pro
   }
   host.appendChild(acts);
   host.appendChild(note);
+  // MICRO-SPAZIO-3D-2 p.6 · only for who can: the owner, or the node's operator
+  if (h.deleteRoom) {
+    const can = info.your_role === "owner" || await h.api.operator();
+    if (can) {
+      const del = btn(t("room.delete"), "conn-btn conn-danger");
+      del.dataset.act = "delete-room";
+      del.addEventListener("click", () => h.deleteRoom!(info));
+      const row = el("div", "conn-acts");
+      row.appendChild(del);
+      host.appendChild(row);
+    }
+  }
 }

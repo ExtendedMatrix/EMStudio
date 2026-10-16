@@ -567,6 +567,27 @@
                      placeholder="for example scavo-2026" />
             </label>
           </section>
+          <!-- MICRO-SPAZIO-3D-2 p.6 · the node's orphan assets, for its operator -->
+          <section data-settings-tab="sync" class="settings-sect orph-off" id="settings-sect-orphans">
+            <h4 data-i18n="settings.orphans">Orphan assets</h4>
+            <p class="settings-hint" data-i18n="settings.orphansHint">
+              Files of the node's store that no room cites any more (their room was deleted). They stay
+              in the store: the same file uploaded again is not stored twice and joins its new room.
+              They are deleted one at a time, here.
+            </p>
+            <div class="orph-filter">
+              <select id="set-orph-type">
+                <option value="" data-i18n="settings.orphAllTypes">Every type</option>
+                <option value="model">model/*</option>
+                <option value="image">image/*</option>
+                <option value="application">application/*</option>
+                <option value="text">text/*</option>
+              </select>
+              <label><span data-i18n="settings.orphSince">since</span> <input id="set-orph-since" type="date" /></label>
+              <button type="button" id="set-orph-refresh" data-i18n="settings.orphRefresh">Refresh</button>
+            </div>
+            <div id="set-orph-list" class="orph-list"></div>
+          </section>
           <section data-settings-tab="sync" class="settings-sect" id="settings-sect-sync">
             <h4 data-i18n="settings.blenderTitle">Sync with Blender / EMtools</h4>
             <p class="settings-hint" data-i18n="settings.blenderHint">

@@ -9524,3 +9524,17 @@ button.hdto-v {
 .fs-table td.c-doc, .fs-table td.c-graph { max-width: 180px; overflow: hidden; text-overflow: ellipsis; }
 .fs-table td.c-size { text-align: right; white-space: nowrap; }
 .fs-table tr.fs-k-version td.c-file { padding-left: 14px; }
+
+/* MICRO-SPAZIO-3D-2 p.6 · the orphan assets, the room's deletion */
+.settings-sect.orph-off { display: none; }
+.orph-list { overflow-x: auto; }
+.orph-acts { display: flex; flex-wrap: wrap; gap: 3px; margin-top: 3px; }
+.orph-acts button { font-size: 0.68rem; padding: 1px 6px; }
+.orph-list td:first-child { max-width: 170px; }
+.orph-filter { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin: 6px 0; }
+.orph-list table { width: 100%; border-collapse: collapse; font-size: 0.76rem; }
+.orph-list td, .orph-list th { padding: 3px 6px; border-bottom: 1px solid var(--border); text-align: left; vertical-align: top; }
+.orph-list code { font-size: 0.72rem; }
+.conn-btn.conn-danger, .modal-foot button.danger { color: var(--danger); border-color: var(--danger); }
+.del-room ul { margin: 4px 0 8px 18px; padding: 0; }
+.del-room input { width: 100%; box-sizing: border-box; font: 0.8rem var(--mono, monospace); }
