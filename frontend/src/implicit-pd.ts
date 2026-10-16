@@ -126,6 +126,12 @@ export function withImplicitGroups(doc: EmDocument, open: ReadonlySet<string> = 
   const gs = implicitGroups(doc);
   if (!gs.length) return doc;
   const byId = new Map(doc.graph.nodes.map((n) => [n.id, n]));
+  // the archival layout has no rect for a group the view makes: it gets the box
+  // of its members (the unit's, when none is placed), with room for a header —
+  // only in the view's copy of the layout
+  const positions0 = doc.layout?.positions;
+  const positions: Record<string, { x: number; y: number; w: number; h: number }> | undefined = positions0 ? { ...positions0 } : undefined;
+  const PAD = 12, HEAD = 20;
   const nodes: EmNode[] = [];
   const edges: EmEdge[] = [];
   const folded: string[] = [];
@@ -137,6 +143,15 @@ export function withImplicitGroups(doc: EmDocument, open: ReadonlySet<string> = 
       edges.push({ id: `${g.group}#has`, source: g.unit, target: g.group, edge_type: HAS_PARADATA_NODEGROUP,
         attributes: { implicit_view: true } } as EmEdge);
       if (!open.has(g.group)) folded.push(g.group);
+      if (positions && !positions[g.group]) {
+        const rs = [...g.properties, ...g.chain].map((m) => positions[m]).filter(Boolean);
+        const base = rs.length ? rs : [positions[g.unit]].filter(Boolean);
+        if (base.length) {
+          const x0 = Math.min(...base.map((r) => r.x)) - PAD, y0 = Math.min(...base.map((r) => r.y)) - PAD - HEAD;
+          const x1 = Math.max(...base.map((r) => r.x + r.w)) + PAD, y1 = Math.max(...base.map((r) => r.y + r.h)) + PAD;
+          positions[g.group] = { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
+        }
+      }
     }
     for (const m of [...g.properties, ...g.chain])
       edges.push({ id: `${g.group}#in#${m}`, source: m, target: g.group, edge_type: IS_IN_PARADATA_NODEGROUP,
@@ -145,7 +160,8 @@ export function withImplicitGroups(doc: EmDocument, open: ReadonlySet<string> = 
   return {
     ...doc,
     graph: { ...doc.graph, nodes: [...doc.graph.nodes, ...nodes], edges: [...doc.graph.edges, ...edges] },
-    layout: { ...(doc.layout ?? {}), folded_groups: [...(doc.layout?.folded_groups ?? []), ...folded] },
+    layout: { ...(doc.layout ?? {}), folded_groups: [...(doc.layout?.folded_groups ?? []), ...folded],
+              ...(positions ? { positions } : {}) },
   } as EmDocument;
 }
 
