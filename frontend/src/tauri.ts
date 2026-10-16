@@ -5,7 +5,7 @@
 // place; nothing here executes at import time, so bundling into the
 // browser single-file build is harmless.
 import { open, save } from "@tauri-apps/plugin-dialog";
-import { readFile, readTextFile, writeTextFile } from "@tauri-apps/plugin-fs";
+import { exists, mkdir, readFile, readTextFile, writeFile, writeTextFile } from "@tauri-apps/plugin-fs";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { invoke } from "@tauri-apps/api/core";
 
@@ -66,6 +66,15 @@ export async function writeEmJson(path: string, text: string): Promise<void> {
  *  7–11 ott, read once to migrate it (nothing writes one any more). */
 export async function readBinaryFile(path: string): Promise<Uint8Array> {
   return await readFile(path);
+}
+
+/** MICRO-SPAZIO-3D · a sketched proxy's glb beside the em.json (`proxies/…`):
+ *  its folder made when missing, an existing file never overwritten. */
+export async function writeBinaryFile(path: string, bytes: Uint8Array): Promise<void> {
+  if (await exists(path)) throw new Error("a file is already there: not overwritten");
+  const dir = path.replace(/[\\/][^\\/]*$/, "");
+  if (dir && !(await exists(dir))) await mkdir(dir, { recursive: true });
+  await writeFile(path, bytes);
 }
 
 /** Native "Save As…" dialog → the chosen path (already written), or null.

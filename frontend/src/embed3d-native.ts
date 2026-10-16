@@ -49,17 +49,21 @@ export async function engine(): Promise<any> {
     enginePromise = __EM_LAZY_3D__
       ? import(/* @vite-ignore */ new URL("./engine3d.js", document.baseURI).href)
       : (async () => {
-          const [THREE, loaderMod, controlsMod, convexMod, objMod, mtlMod] = await Promise.all([
+          const [THREE, loaderMod, controlsMod, convexMod, objMod, mtlMod, gizmoMod, exportMod] = await Promise.all([
             import("three"),
             import("three/examples/jsm/loaders/GLTFLoader.js"),
             import("three/examples/jsm/controls/OrbitControls.js"),
             import("three/examples/jsm/geometries/ConvexGeometry.js"),
             import("three/examples/jsm/loaders/OBJLoader.js"),
             import("three/examples/jsm/loaders/MTLLoader.js"),
+            // MICRO-SPAZIO-3D · the sketches' gizmo and their glb
+            import("three/examples/jsm/controls/TransformControls.js"),
+            import("three/examples/jsm/exporters/GLTFExporter.js"),
           ]);
           return { THREE, GLTFLoader: loaderMod.GLTFLoader,
                    OrbitControls: controlsMod.OrbitControls, ConvexGeometry: convexMod.ConvexGeometry,
-                   OBJLoader: objMod.OBJLoader, MTLLoader: mtlMod.MTLLoader };
+                   OBJLoader: objMod.OBJLoader, MTLLoader: mtlMod.MTLLoader,
+                   TransformControls: gizmoMod.TransformControls, GLTFExporter: exportMod.GLTFExporter };
         })();
   }
   return enginePromise;

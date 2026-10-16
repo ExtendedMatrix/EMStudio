@@ -31,6 +31,10 @@
       "allow": [{ "path": "**" }]
     },
     {
+      "identifier": "fs:allow-exists",
+      "allow": [{ "path": "**" }]
+    },
+    {
       "identifier": "shell:allow-spawn",
       "allow": [{ "name": "binaries/em-bridge", "sidecar": true, "args": true }]
     },

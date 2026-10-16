@@ -3680,27 +3680,36 @@ export class DocumentStore {
    *
    * Returns how many nodes and edges were actually new.
    */
-  addSubgraph(nodes: EmNode[], edges: EmEdge[]): { nodes: number; edges: number } {
+  addSubgraph(nodes: EmNode[], edges: EmEdge[], opts: { share?: boolean } = {}): { nodes: number; edges: number } {
     this.checkpoint();
     const haveNodes = new Set(this.doc.graph.nodes.map((n) => n.id));
     const haveEdges = new Set(this.doc.graph.edges.map((e) => e.id));
-    let addedNodes = 0;
-    let addedEdges = 0;
+    const newNodes: EmNode[] = [];
+    const newEdges: EmEdge[] = [];
     for (const n of nodes) {
       if (!n?.id || haveNodes.has(n.id)) continue;
       this.doc.graph.nodes.push(n);
       haveNodes.add(n.id);
-      addedNodes++;
+      newNodes.push(n);
     }
     for (const e of edges) {
       const id = e.id ?? `${e.source}__${e.edge_type}__${e.target}`;
       if (haveEdges.has(id)) continue;
-      this.doc.graph.edges.push({ ...e, id });
+      const edge = { ...e, id };
+      this.doc.graph.edges.push(edge);
       haveEdges.add(id);
-      addedEdges++;
+      newEdges.push(edge);
     }
-    if (addedNodes || addedEdges) this.emit();
-    return { nodes: addedNodes, edges: addedEdges };
+    if (newNodes.length || newEdges.length) this.emit();
+    // MICRO-SPAZIO-3D · `share`: the subgraph is THIS session's work (a proxy
+    // associated in the Space), so it leaves as operations too — in a room it
+    // reaches the node, in ONE recorded step (its undo takes them back together).
+    // Without it, as before: nodes made elsewhere, merged here only.
+    if (opts.share) {
+      for (const node of newNodes) this.emitOp({ op: "add_node", node });
+      for (const edge of newEdges) this.emitOp({ op: "add_edge", edge });
+    }
+    return { nodes: newNodes.length, edges: newEdges.length };
   }
 
   /** Bake an auxiliary's volatile nodes into the document: clear the marker so

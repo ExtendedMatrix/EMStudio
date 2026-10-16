@@ -1,0 +1,25 @@
+{
+  "version": "1.0",
+  "_comment": "MICRO-SPAZIO-3D p.4 (E.D. 11 Oct 2026) · the base shapes a person sketches a proxy with in the Space. DATA, not code: a new shape is a new entry here. Dimensions in METRES, Y-up (glTF and three.js), each shape born with its base centred on the 3D cursor. Kept in EMStudio and not in s3Dgraphy: it is a palette of the editor, not a term of the EM language — the graph receives only what a proxy always is (a geometry property, its SemanticShape, a proxy_model glb), and EM Tools sketches with Blender's own primitives. If EM Tools wants the same list, the file moves to s3Dgraphy's JSON_config as it is. `primitive` is what `shapes3d.ts` builds: box (size [x, y, z]), cylinder (radius, height, segments), cone (radius, height, segments), sphere (radius), hemisphere (radius), plane (size [x, z]), wedge (size [x, y, z]: a right-angled ramp rising along −z), prism (radius, height, sides), torus (radius, tube), arch (span, ring, depth: a semicircular arch whose intrados has diameter `span`).",
+  "families": [
+    { "id": "geometric", "label": { "en": "Geometric", "it": "Geometriche" } },
+    { "id": "site", "label": { "en": "Site", "it": "Di cantiere" } }
+  ],
+  "shapes": [
+    { "id": "cube", "family": "geometric", "label": { "en": "Cube", "it": "Cubo" }, "primitive": "box", "size": [1, 1, 1] },
+    { "id": "cuboid", "family": "geometric", "label": { "en": "Cuboid", "it": "Parallelepipedo" }, "primitive": "box", "size": [2, 1, 1] },
+    { "id": "cylinder", "family": "geometric", "label": { "en": "Cylinder", "it": "Cilindro" }, "primitive": "cylinder", "radius": 0.5, "height": 1, "segments": 32 },
+    { "id": "cone", "family": "geometric", "label": { "en": "Cone", "it": "Cono" }, "primitive": "cone", "radius": 0.5, "height": 1, "segments": 32 },
+    { "id": "sphere", "family": "geometric", "label": { "en": "Sphere", "it": "Sfera" }, "primitive": "sphere", "radius": 0.5 },
+    { "id": "hemisphere", "family": "geometric", "label": { "en": "Hemisphere", "it": "Semisfera" }, "primitive": "hemisphere", "radius": 0.5 },
+    { "id": "plane", "family": "geometric", "label": { "en": "Plane", "it": "Piano" }, "primitive": "plane", "size": [2, 2] },
+    { "id": "wedge", "family": "geometric", "label": { "en": "Wedge", "it": "Cuneo" }, "primitive": "wedge", "size": [1, 1, 1] },
+    { "id": "prism", "family": "geometric", "label": { "en": "Triangular prism", "it": "Prisma" }, "primitive": "prism", "radius": 0.5, "height": 1, "sides": 3 },
+    { "id": "torus", "family": "geometric", "label": { "en": "Torus", "it": "Toro" }, "primitive": "torus", "radius": 0.5, "tube": 0.15 },
+    { "id": "wall", "family": "site", "label": { "en": "Wall segment", "it": "Tratto di muro" }, "primitive": "box", "size": [3, 2.5, 0.6] },
+    { "id": "column_drum", "family": "site", "label": { "en": "Column drum", "it": "Rocchio di colonna" }, "primitive": "cylinder", "radius": 0.35, "height": 0.6, "segments": 32 },
+    { "id": "slab", "family": "site", "label": { "en": "Slab", "it": "Lastra" }, "primitive": "box", "size": [1.2, 0.08, 0.6] },
+    { "id": "step", "family": "site", "label": { "en": "Step", "it": "Gradino" }, "primitive": "box", "size": [1.5, 0.18, 0.32] },
+    { "id": "round_arch", "family": "site", "label": { "en": "Round arch", "it": "Arco a tutto sesto" }, "primitive": "arch", "span": 2, "ring": 0.4, "depth": 0.6 }
+  ]
+}

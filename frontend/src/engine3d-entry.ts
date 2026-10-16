@@ -15,6 +15,9 @@ export { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 export { OBJLoader } from "three/examples/jsm/loaders/OBJLoader.js";
 export { MTLLoader } from "three/examples/jsm/loaders/MTLLoader.js";
 export { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
+// MICRO-SPAZIO-3D · the gizmo of a sketched proxy, and its glb when it is associated
+export { TransformControls } from "three/examples/jsm/controls/TransformControls.js";
+export { GLTFExporter } from "three/examples/jsm/exporters/GLTFExporter.js";
 // SPAZIO · the proxies' convex hulls (the Scena 3D draws them as they are)
 export { ConvexGeometry } from "three/examples/jsm/geometries/ConvexGeometry.js";
 // MICRO-3DTILES · three's NAMED exports too, and the one helper 3DTilesRendererJS

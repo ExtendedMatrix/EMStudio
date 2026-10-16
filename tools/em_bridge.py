@@ -1036,7 +1036,8 @@ def _load_s3dgraphy(s3dgraphy_src: "pathlib.Path | None"):
 #: JSON+CORS answer of an unknown route. 31 = /property-source and the
 #: `reasoning` records of /validate (la proprietà come fonte, 9 Oct 2026).
 #: 32 = /room-import, «Bring into a room…» through s3Dgraphy's engine (16 Oct 2026).
-BRIDGE_LEVEL = 32   # 30 also = /validate
+#: 33 = /fs/write, a sketched proxy's glb beside the em.json (MICRO-SPAZIO-3D).
+BRIDGE_LEVEL = 33   # 30 also = /validate
 
 
 # ── FONTE · the rules of «la proprietà come fonte», asked of the library ──────
@@ -1661,9 +1662,10 @@ def make_handler(api):
             # from curl worked, which is exactly what an unlisted header looks
             # like from the page's side.
             # RISORSA-FILE · `Range` (a .3tz read from its end, then each tile at
-            # its offset) and the headers a partial answer is read by
+            # its offset) and the headers a partial answer is read by.
+            # MICRO-SPAZIO-3D · `X-EM-Path` / `X-EM-Overwrite` ride with /fs/write
             self.send_header("Access-Control-Allow-Headers",
-                             "Content-Type, X-EM-Filename, Range")
+                             "Content-Type, X-EM-Filename, Range, X-EM-Path, X-EM-Overwrite")
             self.send_header("Access-Control-Expose-Headers",
                              "Content-Range, Accept-Ranges, Content-Length")
 
@@ -1975,6 +1977,14 @@ def make_handler(api):
                     self._fail(400, f"invalid JSON body: {exc}")
                     return
                 self._dtc(route, body)
+            elif route == "/fs/write":
+                # MICRO-SPAZIO-3D · a sketched proxy's glb beside the em.json
+                # (`proxies/<unit>.glb`, EM Tools' rule): the bytes to a path
+                # INSIDE the served roots, never over an existing file unless
+                # asked (`X-EM-Overwrite: 1`)
+                if not self._fs_gate():
+                    return
+                self._fs_write(raw)
             elif route == "/fs/stage":
                 # THE OS DIALOG'S OTHER HALF. A browser file input opens the
                 # system picker — which reaches every corner of the machine —
@@ -2822,6 +2832,28 @@ def make_handler(api):
         # 4 GB database through a browser — over the cap the refusal names the
         # number and points at the two paths that do not copy anything (the
         # desktop app's native dialog, or Browse… on a served folder).
+        def _fs_write(self, raw):
+            target = urllib.parse.unquote(self.headers.get("X-EM-Path") or "").strip()
+            if not target:
+                self._fail(400, "this route needs an X-EM-Path header")
+                return
+            full = os.path.realpath(os.path.expanduser(target))
+            if not _fs_inside_roots(os.path.dirname(full)) and not _fs_inside_roots(full):
+                self._fail(403, "path outside the allowed roots")
+                return
+            if os.path.exists(full) and (self.headers.get("X-EM-Overwrite") or "") != "1":
+                self._fail(409, "a file is already there: not overwritten")
+                return
+            try:
+                os.makedirs(os.path.dirname(full), exist_ok=True)
+                with open(full, "wb") as fh:
+                    fh.write(raw or b"")
+            except OSError as exc:
+                self._fail(500, f"cannot write the file: {exc.strerror}")
+                return
+            self._json({"ok": True, "path": full, "size": len(raw or b""),
+                        "sha256": hashlib.sha256(raw or b"").hexdigest()})
+
         def _fs_stage(self, raw):
             name = urllib.parse.unquote(
                 self.headers.get("X-EM-Filename") or "").strip()
