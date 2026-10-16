@@ -21637,7 +21637,13 @@ let spaceAsking = false;
  *  the room cited the digest, must not stay marked for the session — and the
  *  same refusal on the same state is not asked again */
 const spaceMarks = new SpaceMarks();
+/** MICRO-SPAZIO-3D-3 · the citation key hashes the document: asked once per
+ *  state of it (every change bumps `spaceVersion`), not at every reading */
+let accessMemo: { store: unknown; version: number; room: unknown; token: unknown } | null = null;
 function spaceAccessChanged(): boolean {
+  const m = { store, version: spaceVersion, room: sync.room ?? "", token: hubToken ?? "" };
+  if (accessMemo && accessMemo.store === m.store && accessMemo.version === m.version && accessMemo.room === m.room && accessMemo.token === m.token) return false;
+  accessMemo = m;
   return spaceMarks.at(`${sync.room ?? ""}\u0000${hubToken ?? ""}\u0000${citationKey(store?.doc ?? null)}`);
 }
 
@@ -21676,15 +21682,26 @@ function spaceFileUrl(res: { url: string; checksum: string; residency?: string }
   return `${bridgeBaseNow}/fs/at/${abs.replace(/^\/+/, "").split("/").map(encodeURIComponent).join("/")}`;
 }
 
+/** MICRO-SPAZIO-3D-3 · the Space read once per state of the document: the
+ *  selection, the names, the versions and the alternatives ask for it many
+ *  times per drawing, and building it walks the whole graph (measured: the
+ *  Space's opening went from 0.85 to 1.9 s before this memo). */
+let spaceMemo: { key: unknown[]; sp: Space } | null = null;
 function currentSpace(): Space | null {
   if (!store) return null;
   spaceAccessChanged();
   // Y6 · the proxies the connected host has in its scene count too
-  const sceneProxies = sync.connected && Array.isArray(hostInfo.scene_proxies)
-    ? new Set(hostInfo.scene_proxies.map(String)) : null;
-  return buildSpace(store.doc, { isUnit: isStratigraphicType,
-    resident: spaceResident?.version === spaceVersion ? spaceResident.ids : null, notFound: spaceMarks.notFound,
-    refused: spaceMarks.refused, sceneProxies, fromStore: !!assetStoreBase() });
+  const hostProxies = sync.connected && Array.isArray(hostInfo.scene_proxies) ? hostInfo.scene_proxies : null;
+  const resident = spaceResident?.version === spaceVersion ? spaceResident.ids : null;
+  const fromStore = !!assetStoreBase();
+  const key = [store, store.doc, spaceVersion, resident, spaceMarks.notFound.size, spaceMarks.refused.size, hostProxies, hostProxies?.length, fromStore];
+  if (spaceMemo && spaceMemo.key.length === key.length && spaceMemo.key.every((k, i) => k === key[i])) return spaceMemo.sp;
+  const sceneProxies = hostProxies ? new Set(hostProxies.map(String)) : null;
+  const sp = buildSpace(store.doc, { isUnit: isStratigraphicType,
+    resident, notFound: spaceMarks.notFound,
+    refused: spaceMarks.refused, sceneProxies, fromStore });
+  spaceMemo = { key, sp };
+  return sp;
 }
 
 /** Ask s3Dgraphy what can be fetched (`geometry_summary`), once per version of
@@ -23072,7 +23089,8 @@ function openNewGroup(models: string[]): void {
     + `<label class="s3-rmg-row">${escapeHtml(t("rmg.name"))} <input class="s3-rmg-name" type="text"></label>`
     + `<label class="s3-rmg-row">${escapeHtml(t("rmg.document"))} <select class="s3-rmg-doc"><option value="">${escapeHtml(t("rmg.noDocument"))}</option>`
     + docs.map((d) => { const has = [...sp.rmGroups.values()].find((g) => g.documentId === d.id);
-      return `<option value="${escapeHtml(d.id)}"${d.id === shared && !has ? " selected" : ""}>${escapeHtml(String(d.name ?? d.id))}${has ? escapeHtml(` · ${t("rmg.hasOne", { name: has.name })}`) : ""}</option>`; }).join("")
+      const label = String(d.name ?? d.id) + (has ? " · " + t("rmg.hasOne", { name: has.name }) : "");
+      return `<option value="${escapeHtml(d.id)}"${d.id === shared && !has ? " selected" : ""}>${escapeHtml(label)}</option>`; }).join("")
     + `</select></label><p class="insp-hint">${escapeHtml(t("rmg.newHint"))}</p>`
     + `<div class="conn-acts"><button type="button" class="conn-btn" data-rmg="cancel">${escapeHtml(t("settings.cancel"))}</button>`
     + `<button type="button" class="conn-btn primary" data-rmg="ok">${escapeHtml(t("rmg.create"))}</button></div>`;

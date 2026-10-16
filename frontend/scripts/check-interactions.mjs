@@ -1368,7 +1368,8 @@ const sceneState = (p) => p.evaluate(() => {
     epoch: document.querySelector('.scn-seg button[aria-pressed="true"]')?.dataset.epoch ?? null,
     overlay: document.querySelector(".scn-ov:not(.hidden)")?.textContent ?? null,
     empty: document.querySelector(".scn-empty:not(.hidden)")?.textContent ?? null,
-    labels: [...document.querySelectorAll(".scn-label")].map((l) => ({ t: l.textContent, cls: l.className })),
+    // MICRO-SPAZIO-3D-3 p.14 · a label carries its decorators after the name: its own text is the name
+    labels: [...document.querySelectorAll(".scn-label")].map((l) => ({ t: l.firstChild?.nodeType === 3 ? l.firstChild.textContent : l.textContent, cls: l.className })),
     camera: h?.__spaceCamera?.() ?? null };
 });
 async function spaceOn(p, epoch) {
