@@ -232,3 +232,180 @@ export function allViewInstances(doc: EmDocument): Map<string, ViewInstance[]> {
   }
   return out;
 }
+
+// ── MICRO-SPAZIO-3D · the 3D among the computed instances (rules 1.6.35) ─────
+//
+// `threed_instances`: the proxy of a unit drawn in the paradata group of its
+// geometry property, beside it; a representation model in the paradata group of
+// every epoch that has it (directly or through an epoch property), with the
+// number of its epochs. The client of s3Dgraphy's `paradata_view.threed_instances`,
+// field for field; `scripts/check-threed.mjs` holds it to the library's answer.
+
+interface ThreedRule {
+  proxy?: { kind?: string; owner_edge?: string; property_type?: string; shape_edge?: string;
+            file_edge?: string; file_types?: string[]; membership?: string; group_edge?: string };
+  representation_model?: { kind?: string; holders?: string[]; edge?: string; via_property?: string;
+                           masters?: string[]; group_edge?: string; count_word?: string };
+  id?: string;
+}
+const THREED: ThreedRule = ((visualRules as unknown as { threed_instances?: ThreedRule }).threed_instances) ?? {};
+
+/** One 3D instance — the fields of `threed_instances`. */
+export interface ThreedInstance {
+  id: string;
+  kind: "proxy" | "rm";
+  master: string;
+  node_type: string;
+  name: string;
+  owner: string;
+  owner_kind: "unit" | "epoch";
+  owner_name: string;
+  /** proxy: the geometry property it hangs from */
+  beside?: string;
+  /** rm: the epoch property the link passes through, null when direct */
+  via?: string | null;
+  /** the paradata group it is drawn in, null when the owner has none */
+  group: string | null;
+  /** the group, else the owner */
+  place: string;
+  /** proxy: its `proxy_model` resources; empty: neither file nor hulls */
+  files?: string[];
+  empty?: boolean;
+  /** rm: every epoch it is in, how many, and «×N» when more than one */
+  epochs?: string[];
+  count?: number;
+  count_label?: string | null;
+  removed: boolean;
+}
+
+export function threedInstanceId(master: string, place: string): string {
+  return (THREED.id ?? "{master}##{place}").split("{master}").join(master).split("{place}").join(place);
+}
+
+function propertyType(n: EmNode | undefined): string {
+  const d = (n?.data ?? {}) as Record<string, unknown>;
+  return String((n as unknown as { property_type?: unknown })?.property_type ?? d.property_type ?? "");
+}
+
+const isUnitNode = (n: EmNode): boolean => {
+  const c = classOf(n.node_type);
+  return classIsA(c, "StratigraphicNode") && !classIsA(c, "ContinuityNode") && !removed(n);
+};
+
+function proxyPayload(ix: ViewIndex, shape: EmNode): { files: string[]; hulls: boolean } {
+  const spec = THREED.proxy ?? {};
+  const types = new Set(spec.file_types ?? ["proxy_model"]);
+  const files: string[] = [];
+  for (const e of ix.out.get(shape.id) ?? []) {
+    if (e.edge_type !== (spec.file_edge ?? "has_linked_resource")) continue;
+    const r = ix.node.get(e.target);
+    const d = (r?.data ?? {}) as Record<string, unknown>;
+    if (!r || removed(r) || r.node_type !== "resource") continue;
+    if (types.has(String(d.url_type ?? "")) || types.has(String(d.resource_type ?? ""))) files.push(r.id);
+  }
+  const sd = (shape.data ?? {}) as Record<string, unknown>;
+  const has = (v: unknown) => Array.isArray(v) && v.length > 0;
+  return { files, hulls: has(sd.convexshapes) || has(sd.spheres) };
+}
+
+function placeOf(ix: ViewIndex, owner: string, prop: string | null, membership: string, groupEdge: string): string | null {
+  const live = (id: string) => { const n = ix.node.get(id); return !!n && !removed(n); };
+  if (prop) for (const e of ix.out.get(prop) ?? []) if (e.edge_type === membership && live(e.target)) return e.target;
+  for (const e of ix.out.get(owner) ?? []) if (e.edge_type === groupEdge && live(e.target)) return e.target;
+  return null;
+}
+
+/** The proxies and the representation models as the view draws them. Pure. */
+export function threedInstances(doc: EmDocument, ix: ViewIndex = viewIndex(doc)): ThreedInstance[] {
+  const out: ThreedInstance[] = [];
+  const outOf = (id: string, type: string) => (ix.out.get(id) ?? []).filter((e) => e.edge_type === type).map((e) => e.target);
+  // proxies
+  const ps = THREED.proxy ?? {};
+  const membership = ps.membership ?? "is_in_paradata_nodegroup";
+  const groupEdge = ps.group_edge ?? "has_paradata_nodegroup";
+  const seen = new Set<string>();
+  for (const unit of doc.graph.nodes) {
+    if (!isUnitNode(unit)) continue;
+    for (const pid of outOf(unit.id, ps.owner_edge ?? "has_property")) {
+      const prop = ix.node.get(pid);
+      if (!prop || removed(prop) || propertyType(prop) !== (ps.property_type ?? "geometry")) continue;
+      const owners = ownersOf(doc, pid).filter((o) => !((o.edge.attributes ?? {}) as Record<string, unknown>).removed);
+      const orig = owners.find((o) => o.original)?.owner ?? unit.id;
+      if (orig !== unit.id) continue;
+      for (const sid of outOf(pid, ps.shape_edge ?? "has_semantic_shape")) {
+        const shape = ix.node.get(sid);
+        if (!shape || seen.has(`${pid}|${sid}`)) continue;
+        seen.add(`${pid}|${sid}`);
+        const pay = proxyPayload(ix, shape);
+        const group = placeOf(ix, unit.id, pid, membership, groupEdge);
+        const place = group ?? unit.id;
+        out.push({ id: threedInstanceId(sid, place), kind: "proxy", master: sid, node_type: shape.node_type,
+                   name: String(shape.name ?? sid), owner: unit.id, owner_kind: "unit",
+                   owner_name: String(unit.name ?? unit.id), beside: pid, group, place,
+                   files: pay.files, empty: !pay.files.length && !pay.hulls, removed: removed(shape) });
+      }
+    }
+  }
+  // representation models
+  const rs = THREED.representation_model ?? {};
+  const holders = rs.holders ?? ["EpochNode"];
+  const edge = rs.edge ?? "has_representation_model";
+  const viaProp = rs.via_property ?? "has_property";
+  const masters = rs.masters ?? ["RepresentationModelNode", "RepresentationModelDocNode", "RepresentationModelSpecialFindNode"];
+  const word = rs.count_word ?? "×{n}";
+  const isA = (n: EmNode | undefined, names: string[]) => !!n && names.some((c) => classIsA(classOf(n.node_type), c));
+  const links = new Map<string, Array<{ owner: string; via: string | null }>>();
+  for (const holder of doc.graph.nodes) {
+    if (removed(holder) || !isA(holder, holders)) continue;
+    const reached: Array<[string, string | null]> = outOf(holder.id, edge).map((rm) => [rm, null]);
+    for (const pid of outOf(holder.id, viaProp)) {
+      const p = ix.node.get(pid);
+      if (p && !removed(p)) for (const rm of outOf(pid, edge)) reached.push([rm, pid]);
+    }
+    for (const [rmId, via] of reached) {
+      if (!isA(ix.node.get(rmId), masters)) continue;
+      const mine = links.get(rmId) ?? links.set(rmId, []).get(rmId)!;
+      if (mine.some((x) => x.owner === holder.id)) continue;
+      mine.push({ owner: holder.id, via });
+    }
+  }
+  for (const [rmId, mine] of links) {
+    const rm = ix.node.get(rmId)!;
+    const epochs = mine.map((x) => x.owner);
+    const n = epochs.length;
+    for (const x of mine) {
+      const group = placeOf(ix, x.owner, x.via, membership, rs.group_edge ?? groupEdge);
+      const place = group ?? x.owner;
+      out.push({ id: threedInstanceId(rmId, place), kind: "rm", master: rmId, node_type: rm.node_type,
+                 name: String(rm.name ?? rmId), owner: x.owner, owner_kind: "epoch",
+                 owner_name: String(ix.node.get(x.owner)?.name ?? x.owner), via: x.via, group, place,
+                 epochs: [...epochs], count: n, count_label: n > 1 ? word.split("{n}").join(String(n)) : null,
+                 removed: removed(rm) });
+    }
+  }
+  return out;
+}
+
+/** `units_without_3d`: the units with a proxy, with an empty geometry, with none. */
+export function unitsWithout3d(doc: EmDocument, ix: ViewIndex = viewIndex(doc)):
+    { with: string[]; empty: string[]; none: string[]; without: string[] } {
+  const ps = THREED.proxy ?? {};
+  const res = { with: [] as string[], empty: [] as string[], none: [] as string[], without: [] as string[] };
+  const outOf = (id: string, type: string) => (ix.out.get(id) ?? []).filter((e) => e.edge_type === type).map((e) => e.target);
+  for (const unit of doc.graph.nodes) {
+    if (!isUnitNode(unit)) continue;
+    const props = outOf(unit.id, ps.owner_edge ?? "has_property").map((p) => ix.node.get(p))
+      .filter((p): p is EmNode => !!p && !removed(p) && propertyType(p) === (ps.property_type ?? "geometry"));
+    if (!props.length) { res.none.push(unit.id); continue; }
+    let full = false;
+    for (const p of props) for (const sid of outOf(p.id, ps.shape_edge ?? "has_semantic_shape")) {
+      const shape = ix.node.get(sid);
+      if (!shape || removed(shape)) continue;
+      const pay = proxyPayload(ix, shape);
+      if (pay.files.length || pay.hulls) full = true;
+    }
+    (full ? res.with : res.empty).push(unit.id);
+  }
+  res.without = [...res.empty, ...res.none];
+  return res;
+}
