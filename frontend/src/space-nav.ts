@@ -220,21 +220,56 @@ export type Axis = "x" | "y" | "z";
 export interface ModalState {
   mode: ModalMode;
   axis: Axis | null;
+  /** MICRO-SPAZIO-3D-3 p.4b · Shift + the axis: the PLANE that excludes it
+   *  (Shift+Z: the XY plane), as Blender */
+  plane?: boolean;
+  /** the axis (or the plane) in the object's own frame: the letter pressed twice */
+  local?: boolean;
+  /** the axis was chosen with the middle button (a second click takes it away) */
+  chosen?: boolean;
   /** the number typed so far ("" none) */
   typed: string;
   done: "" | "confirm" | "cancel";
 }
 
 export function startModal(mode: ModalMode): ModalState {
-  return { mode, axis: null, typed: "", done: "" };
+  return { mode, axis: null, plane: false, local: false, typed: "", done: "" };
 }
 
-/** One key of the modal: an axis, a digit, a sign, a point, Backspace, Enter,
- *  Esc. G, R, S switch the mode as in Blender. Unknown keys change nothing. */
-export function modalKey(st: ModalState, key: string): ModalState {
+/**
+ * MICRO-SPAZIO-3D-3 p.4b · an axis key, as Blender cycles it: X = the global
+ * X axis, X again = the local X, X again = no constraint; Shift+X = the plane
+ * without X (YZ), again its local, again none. Another letter (or the other
+ * kind) starts its own cycle from the global. Measured before (16 Oct 2026):
+ * the same letter twice took the constraint away, there was no local and no
+ * plane.
+ */
+export function axisKey(st: ModalState, ax: Axis, shift: boolean): ModalState {
+  const same = st.axis === ax && !!st.plane === shift;
+  if (!same) return { ...st, axis: ax, plane: shift, local: false, chosen: false };
+  if (!st.local) return { ...st, local: true, chosen: false };
+  return { ...st, axis: null, plane: false, local: false, chosen: false };
+}
+
+/** The axes a constraint lets move: one, two (a plane), or the three. */
+export function freeAxes(st: Pick<ModalState, "axis" | "plane">): Axis[] {
+  if (!st.axis) return ["x", "y", "z"];
+  if (!st.plane) return [st.axis];
+  return (["x", "y", "z"] as Axis[]).filter((a) => a !== st.axis);
+}
+
+/** The plane's name, Blender's order: «XY», «YZ», «XZ». */
+export function planeName(ax: Axis): string {
+  return ax === "z" ? "XY" : ax === "x" ? "YZ" : "XZ";
+}
+
+/** One key of the modal: an axis (Shift: its plane), a digit, a sign, a
+ *  point, Backspace, Enter, Esc. G, R, S switch the mode as in Blender.
+ *  Unknown keys change nothing. */
+export function modalKey(st: ModalState, key: string, shift = false): ModalState {
   if (st.done) return st;
   const k = key.length === 1 ? key.toLowerCase() : key;
-  if (k === "x" || k === "y" || k === "z") return { ...st, axis: st.axis === k ? null : k };
+  if (k === "x" || k === "y" || k === "z") return axisKey(st, k, shift);
   if (k === "g") return { ...st, mode: "grab" };
   if (k === "r") return { ...st, mode: "rotate" };
   if (k === "s") return { ...st, mode: "scale" };
@@ -296,7 +331,26 @@ export function applyTyped(start: Pose, st: ModalState): Pose {
 /** What the modal says in the status line, as Blender's header does. */
 export function modalLabel(st: ModalState): string {
   const m = st.mode === "grab" ? "G" : st.mode === "rotate" ? "R" : "S";
-  return `${m}${st.axis ? ` ${st.axis.toUpperCase()}` : ""}${st.typed ? ` ${st.typed}` : ""}`;
+  const c = st.axis ? (st.plane ? ` ⇧${st.axis.toUpperCase()}` : ` ${st.axis.toUpperCase()}`) + (st.local ? " local" : "") : "";
+  return `${m}${c}${st.typed ? ` ${st.typed}` : ""}`;
+}
+
+export interface ModalWords { grab: string; rotate: string; scale: string; plane: string; local: string; free: string }
+export const MODAL_WORDS_EN: ModalWords = { grab: "Move", rotate: "Rotate", scale: "Scale", plane: "plane", local: "local", free: "free" };
+
+/**
+ * MICRO-SPAZIO-3D-3 p.4b · the gesture's header, as Blender's: «Move · plane
+ * XY · D 0.5120 0.1030 0.0000», «Rotate · Z · 45.0°», «Scale · plane XY ·
+ * 1.520 1.520 1.000». `values` are in Blender's axes (Z up): the move's
+ * metres, the angle's degrees (one), the scale's factors.
+ */
+export function modalHeader(st: ModalState, values: number[], w: ModalWords = MODAL_WORDS_EN, fmt = (v: number, d: number) => v.toFixed(d)): string {
+  const what = st.mode === "grab" ? w.grab : st.mode === "rotate" ? w.rotate : w.scale;
+  const c = !st.axis ? w.free : st.plane ? `${w.plane} ${planeName(st.axis)}` : st.axis.toUpperCase();
+  const loc = st.axis && st.local ? ` (${w.local})` : "";
+  const vals = st.mode === "grab" ? `D ${values.map((v) => fmt(v, 4)).join(" ")}`
+    : st.mode === "rotate" ? `${fmt(values[0] ?? 0, 1)}°` : values.map((v) => fmt(v, 3)).join(" ");
+  return `${what} · ${c}${loc} · ${vals}${st.typed ? ` [${st.typed}]` : ""}`;
 }
 
 /**

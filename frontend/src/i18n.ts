@@ -61,6 +61,13 @@ type Dict = Record<string, string>;
 // `emtree.`, `empty.`, `toast.`) so a translator can work a screen at a time and
 // an unused key is findable.
 const EN: Dict = {
+  "s3.mGrab": "Move",
+  "s3.mRotate": "Rotate",
+  "s3.mScale": "Scale",
+  "s3.mPlane": "plane",
+  "s3.mLocal": "local",
+  "s3.mFree": "free",
+  "keys.s3axisPlane": "During G / R / S: the axis; Shift + the axis: the plane without it; twice: local; three times: none; middle click: the nearest axis",
   "settings.navLeftPan": "Pan (for macOS's three-finger drag)",
   "settings.navLeftPanHint": "macOS's three-finger drag (Accessibility) reaches the page as a left drag, the same as one finger's: to pan with three fingers choose «Pan». The orbit then stays with two fingers and the middle button.",
   "gesture.s3RightDrag": "right drag (two fingers pressed on a trackpad)",
@@ -706,7 +713,7 @@ const EN: Dict = {
   "s3.frameCursor": "Frame the 3D cursor",
   "s3.isolate": "Isolate",
   "s3.master": "master",
-  "s3.modalHint": "X Y Z an axis, a number, Enter to confirm, Esc to cancel",
+  "s3.modalHint": "X Y Z an axis (Shift: the plane without it; twice: local), a number, Enter confirms, Esc cancels",
   "s3.noFolder": "the graph has neither a folder nor a room",
   "s3.noGlb": "the sketch could not be turned into a glb",
   "s3.openOutliner": "Open the Outliner (T)",
@@ -3622,6 +3629,13 @@ const EN: Dict = {
 
 // ── Italiano: complete, because E.D. works in it ───────────────────────────────
 const IT: Dict = {
+  "s3.mGrab": "Sposta",
+  "s3.mRotate": "Ruota",
+  "s3.mScale": "Scala",
+  "s3.mPlane": "piano",
+  "s3.mLocal": "locale",
+  "s3.mFree": "libero",
+  "keys.s3axisPlane": "Durante G / R / S: l'asse; Maiusc + l'asse: il piano senza di lui; due volte: locale; tre volte: nessuno; clic centrale: l'asse più vicino",
   "settings.navLeftPan": "Panoramica (per il trascinamento a tre dita di macOS)",
   "settings.navLeftPanHint": "Il trascinamento a tre dita di macOS (Accessibilità) arriva alla pagina come un trascinamento sinistro, uguale a quello di un dito: per la panoramica a tre dita scegli «Panoramica». L'orbita resta allora a due dita e al tasto centrale.",
   "gesture.s3RightDrag": "trascinamento destro (due dita premute sul trackpad)",
@@ -4266,7 +4280,7 @@ const IT: Dict = {
   "s3.frameCursor": "Inquadra il cursore 3D",
   "s3.isolate": "Isola",
   "s3.master": "master",
-  "s3.modalHint": "X Y Z un asse, un numero, Invio conferma, Esc annulla",
+  "s3.modalHint": "X Y Z un asse (Maiusc: il piano senza di lui; due volte: locale), un numero, Invio conferma, Esc annulla",
   "s3.noFolder": "il grafo non ha né una cartella né una stanza",
   "s3.noGlb": "l'abbozzo non è diventato un glb",
   "s3.openOutliner": "Apri l'Outliner (T)",

@@ -22654,6 +22654,9 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
       lodNote: (n) => t("lod.note", { n: String(n) }),
       boxZoom: t("s3.boxZoom"), modalHint: t("s3.modalHint"),
       viewName, centreEmpty: t("s3.centreEmpty"),
+      modalWords: { grab: t("s3.mGrab"), rotate: t("s3.mRotate"), scale: t("s3.mScale"), plane: t("s3.mPlane"),
+        local: t("s3.mLocal"), free: t("s3.mFree") },
+      num: (v, d) => v.toLocaleString(getLocale(), { minimumFractionDigits: d, maximumFractionDigits: d, useGrouping: false }),
     },
     // MICRO-SPAZIO-3D-2 · the navigation's Preferences, read at every press
     nav: () => {
@@ -22678,7 +22681,9 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
     transformTargets: () => {
       const s = spaceSel();
       const sp = currentSpace();
-      return s.keys.filter((k) => k.startsWith("sketch:") || (transformNodeOfKey(k, sp) && !xfNote(k, sp).readOnly));
+      // the active last: its frame is the «local» of a constraint
+      const keys = s.active ? [...s.keys.filter((k) => k !== s.active), s.active] : s.keys;
+      return keys.filter((k) => k.startsWith("sketch:") || (transformNodeOfKey(k, sp) && !xfNote(k, sp).readOnly));
     },
     onTransformMany: (poses) => writePoses(poses),
     onTransform: (key, pose) => {

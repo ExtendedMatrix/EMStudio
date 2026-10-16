@@ -50,7 +50,7 @@ import { nodeBytes, ownedByNode, RoadError, type FetchFailure } from "./node-roa
 import { createTilesLayer, dracoFor, formatBytes, isTilesetUrl, tilesBar, tilesEngine, type TilesLayer } from "./tiles3d";
 import type { OverlayKey } from "./overlays";
 import {
-  alignedView, AXIS_INDEX, AXIS_VECTOR, boxZoom, clipPlanes, detailZoom, DRAG_PX, dragIntent, dragZoomFactor,
+  alignedView, AXIS_INDEX, AXIS_VECTOR, boxZoom, freeAxes, modalHeader, threeToBlender, type ModalWords, clipPlanes, detailZoom, DRAG_PX, dragIntent, dragZoomFactor,
   frameSphere, grabPan, isMacPlatform, keypadAction, modalKey, modalLabel, modalValue, orthoBoxZoom, orthoHalf, orthoZoom,
   pointerIntent, sceneCentre, spaceKeyAction, startModal, wheelFactor, zoomTowards,
   type AlignedView, type Box6, type CamState, type DragIntent, type ModalMode, type ModalState, type Pose,
@@ -107,6 +107,10 @@ export interface SceneTexts {
   /** MICRO-SPAZIO-3D · the box zoom armed, the modal's hint */
   boxZoom?: string;
   modalHint?: string;
+  /** MICRO-SPAZIO-3D-3 p.4b · the header's words (Move, Rotate, Scale, plane,
+   *  local, free) and the numbers in the person's language */
+  modalWords?: ModalWords;
+  num?: (v: number, digits: number) => string;
   /** MICRO-SPAZIO-3D-2 · the view's name, top left («Frontale · Ortometrica») */
   viewName?: (view: AlignedView | null, ortho: boolean) => string;
   /** Shift+C on an empty scene */
@@ -1191,7 +1195,11 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
       };
       const showModal = () => {
         modalEl.classList.toggle("hidden", !modal);
-        if (modal) modalEl.textContent = `${modalLabel(modal.st)}${opts.texts.modalHint ? ` · ${opts.texts.modalHint}` : ""}`;
+        if (modal) {
+          // MICRO-SPAZIO-3D-3 p.4b · «Sposta · piano XY · D …», as Blender's header
+          modalEl.textContent = `${modalHeader(modal.st, headerValues(modalDelta()), opts.texts.modalWords, opts.texts.num)}${opts.texts.modalHint ? ` · ${opts.texts.modalHint}` : ""}`;
+          modalEl.dataset.label = modalLabel(modal.st);
+        }
         drawGuides();
       };
       /** the virtual pointer and the gesture's guides (a dashed line from the
@@ -1226,31 +1234,91 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
           guides.appendChild(l);
         }
       };
+      /** MICRO-SPAZIO-3D-3 p.4b · the constraint's frame: Blender's X Y Z in
+       *  three's axes, global or the ACTIVE object's own (the letter twice) */
+      const AX_COLOUR: Record<"x" | "y" | "z", string> = { x: "#ff3352", y: "#8bdc00", z: "#2890ff" };
+      const refQ = () => (modal ? modal.targets[modal.targets.length - 1].q0 : new THREE.Quaternion());
+      const axVec = (ax: "x" | "y" | "z", local: boolean) => {
+        const a = v3(AXIS_VECTOR[ax]);
+        return local ? a.applyQuaternion(refQ()).normalize() : a;
+      };
       /** the coloured lines of the constrained axes through the pivot (Blender:
-       *  X red, Y green, Z blue) — p.4b fills it */
-      let axisGuides = (): Array<{ a: { x: number; y: number }; b: { x: number; y: number }; colour: string }> => [];
+       *  X red, Y green, Z blue): one axis, or the two of a plane */
+      const axisGuides = (): Array<{ a: { x: number; y: number }; b: { x: number; y: number }; colour: string }> => {
+        if (!modal || !modal.st.axis) return [];
+        const pv = toScreen(modal.pivot);
+        if (!pv) return [];
+        const out: Array<{ a: { x: number; y: number }; b: { x: number; y: number }; colour: string }> = [];
+        for (const ax of freeAxes(modal.st)) {
+          const q = toScreen(modal.pivot.clone().addScaledVector(axVec(ax, !!modal.st.local), Math.max(0.05, pxWorld(modal.pivot) * 40)));
+          if (!q) continue;
+          const dx = q.x - pv.x, dy = q.y - pv.y, l = Math.hypot(dx, dy);
+          if (l < 1e-6) continue;
+          const ux = dx / l, uy = dy / l, L = 4000;
+          out.push({ a: { x: pv.x - ux * L, y: pv.y - uy * L }, b: { x: pv.x + ux * L, y: pv.y + uy * L }, colour: AX_COLOUR[ax] });
+        }
+        return out;
+      };
       /** what the gesture does now, in three's axes: a move, a turn about an
-       *  axis through the pivot, a scale from the pivot */
-      type Delta = { kind: "grab"; d: any } | { kind: "rotate"; axis: any; angle: number } | { kind: "scale"; f: V3 };
-      const axisOf = (st: ModalState, fallback: "x" | "z" | null) => (st.axis ?? fallback);
+       *  axis through the pivot, a scale from the pivot along the frame's axes */
+      type Delta = { kind: "grab"; d: any } | { kind: "rotate"; axis: any; angle: number }
+                 | { kind: "scale"; fb: Record<"x" | "y" | "z", number> };
+      /** a page point's ray, met with the constraint (the line of an axis, the
+       *  plane that excludes one, else the view's plane), through the pivot */
+      const onConstraint = (pt: { x: number; y: number }, st: ModalState, pivot: any): any | null => {
+        ray.setFromCamera(ndcOf(pt.x, pt.y), camera);
+        const O = ray.ray.origin, r = ray.ray.direction;
+        if (st.axis && !st.plane) {
+          const a = axVec(st.axis, !!st.local);
+          const w0 = new THREE.Vector3().subVectors(pivot, O);
+          const b = a.dot(r), d = a.dot(w0), e = r.dot(w0);
+          const den = 1 - b * b;
+          if (Math.abs(den) < 1e-9) return null;
+          return pivot.clone().addScaledVector(a, (b * e - d) / den);
+        }
+        const n = st.axis ? axVec(st.axis, !!st.local) : new THREE.Vector3().subVectors(controls.target, camera.position).normalize();
+        const den = r.dot(n);
+        if (Math.abs(den) < 1e-9) return null;
+        const t = new THREE.Vector3().subVectors(pivot, O).dot(n) / den;
+        return O.clone().addScaledVector(r, t);
+      };
+      /** the move, from the screen's (the view's plane) when a ray grazes the constraint */
+      const viewMove = (pivot: any) => {
+        const dx = modal!.mouse!.x - modal!.mouse0!.x, dy = modal!.mouse!.y - modal!.mouse0!.y;
+        const k = pxWorld(pivot);
+        const right = new THREE.Vector3().setFromMatrixColumn(camera.matrix, 0);
+        const up = new THREE.Vector3().setFromMatrixColumn(camera.matrix, 1);
+        return right.multiplyScalar(dx * k).add(up.multiplyScalar(-dy * k));
+      };
       const modalDelta = (): Delta | null => {
         if (!modal) return null;
         const st = modal.st;
         const v = modalValue(st);
         const pivot = modal.pivot;
+        const local = !!st.local;
         if (st.mode === "grab") {
-          if (v != null) return { kind: "grab", d: v3(AXIS_VECTOR[axisOf(st, "x")!]).multiplyScalar(v) };
+          if (v != null) {
+            // a number: along the axis (X when none), or along both of a plane's
+            const d = new THREE.Vector3();
+            for (const ax of st.axis ? freeAxes(st) : ["x" as const]) d.addScaledVector(axVec(ax, local), v);
+            return { kind: "grab", d };
+          }
           if (!modal.mouse0 || !modal.mouse) return { kind: "grab", d: new THREE.Vector3() };
-          const dx = modal.mouse.x - modal.mouse0.x, dy = modal.mouse.y - modal.mouse0.y;
-          const k = pxWorld(pivot);
-          const right = new THREE.Vector3().setFromMatrixColumn(camera.matrix, 0);
-          const up = new THREE.Vector3().setFromMatrixColumn(camera.matrix, 1);
-          let d = right.multiplyScalar(dx * k).add(up.multiplyScalar(-dy * k));
-          if (st.axis) { const a = v3(AXIS_VECTOR[st.axis]); d = a.multiplyScalar(d.dot(a)); }
+          const p0 = onConstraint(modal.mouse0, st, pivot), p1 = onConstraint(modal.mouse, st, pivot);
+          if (p0 && p1) {
+            const d = p1.sub(p0);
+            // the plane's normal (or the line's) is kept exact: no drift from the ray's sums
+            if (st.axis && st.plane) { const n = axVec(st.axis, local); d.addScaledVector(n, -d.dot(n)); }
+            return { kind: "grab", d };
+          }
+          let d = viewMove(pivot);
+          if (st.axis && !st.plane) { const a = axVec(st.axis, local); d = a.multiplyScalar(d.dot(a)); }
+          else if (st.axis) { const n = axVec(st.axis, local); d.addScaledVector(n, -d.dot(n)); }
           return { kind: "grab", d };
         }
         if (st.mode === "rotate") {
-          const axis = v3(AXIS_VECTOR[axisOf(st, "z")!]);
+          // about the axis — or the normal of the plane that excludes it — Z when none
+          const axis = axVec(st.axis ?? "z", local && !!st.axis);
           if (v != null) return { kind: "rotate", axis, angle: (v * Math.PI) / 180 };
           if (!modal.mouse0 || !modal.mouse) return { kind: "rotate", axis, angle: 0 };
           // the angle summed motion by motion: a wrapped pointer keeps turning
@@ -1265,11 +1333,8 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
             f = Math.hypot(modal.mouse.x - centre.x, modal.mouse.y - centre.y) / r0;
           }
         }
-        const ax = axisOf(st, null);
-        if (!ax) return { kind: "scale", f: [f, f, f] };
-        const out: V3 = [1, 1, 1];
-        out[AXIS_INDEX[ax]] = f;
-        return { kind: "scale", f: out };
+        const free = new Set(freeAxes(st));
+        return { kind: "scale", fb: { x: free.has("x") ? f : 1, y: free.has("y") ? f : 1, z: free.has("z") ? f : 1 } };
       };
       /** a target's pose under the delta, about the pivot */
       const poseUnder = (t: Target, dl: Delta, pivot: any): Pose => {
@@ -1281,9 +1346,22 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
           const e = new THREE.Euler().setFromQuaternion(q.clone().multiply(t.q0), "XYZ");
           return { ...t.start, position: arr(pos), rotation: [e.x, e.y, e.z] };
         }
+        // the place scaled from the pivot along the frame's axes; the object's
+        // own scale by its components (Blender's X Y Z are three's x z y)
+        const local = !!modal?.st.local;
         const rel = p0.sub(pivot);
-        const pos: V3 = [pivot.x + rel.x * dl.f[0], pivot.y + rel.y * dl.f[1], pivot.z + rel.z * dl.f[2]];
-        return { ...t.start, position: pos, scale: [t.start.scale[0] * dl.f[0], t.start.scale[1] * dl.f[1], t.start.scale[2] * dl.f[2]] };
+        const pos = pivot.clone();
+        for (const ax of ["x", "y", "z"] as const) { const b = axVec(ax, local); pos.addScaledVector(b, rel.dot(b) * dl.fb[ax]); }
+        const sc: V3 = [...t.start.scale] as V3;
+        for (const ax of ["x", "y", "z"] as const) sc[AXIS_INDEX[ax]] *= dl.fb[ax];
+        return { ...t.start, position: arr(pos), scale: sc };
+      };
+      /** the header's numbers, in Blender's axes: the move, the angle, the factors */
+      const headerValues = (dl: Delta | null): number[] => {
+        if (!dl) return [0, 0, 0];
+        if (dl.kind === "grab") return threeToBlender(arr(dl.d)).map((x) => x || 0);
+        if (dl.kind === "rotate") return [(dl.angle * 180) / Math.PI];
+        return [dl.fb.x, dl.fb.y, dl.fb.z];
       };
       const modalApply = () => {
         if (!modal) return;
@@ -1353,6 +1431,28 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
         } else syncSketches();
       };
       probe.__spaceModal = () => (modal ? modalLabel(modal.st) : null);
+      /** the axis whose screen direction is nearest to the motion so far */
+      const nearestAxis = () => {
+        if (!modal || !modal.mouse0 || !modal.mouse) return;
+        const mx = modal.mouse.x - modal.mouse0.x, my = modal.mouse.y - modal.mouse0.y;
+        const ml = Math.hypot(mx, my);
+        if (ml < 2) return;
+        const pv = toScreen(modal.pivot);
+        if (!pv) return;
+        let best: "x" | "y" | "z" | null = null, bc = -1;
+        for (const ax of ["x", "y", "z"] as const) {
+          const q = toScreen(modal.pivot.clone().addScaledVector(axVec(ax, false), Math.max(0.05, pxWorld(modal.pivot) * 40)));
+          if (!q) continue;
+          const dx = q.x - pv.x, dy = q.y - pv.y, l = Math.hypot(dx, dy);
+          if (l < 1e-6) continue;
+          const c = Math.abs((dx * mx + dy * my) / (l * ml));
+          if (c > bc) { bc = c; best = ax; }
+        }
+        if (!best) return;
+        modal.st = modal.st.axis === best && !modal.st.plane && modal.st.chosen ? { ...modal.st, axis: null, plane: false, local: false, chosen: false }
+          : { ...modal.st, axis: best, plane: false, local: false, chosen: true };
+        modalApply();
+      };
       /** the probes' view of a continuous gesture: the lock, the virtual pointer, its wraps, the targets' poses */
       (probe as Record<string, unknown>).__spaceModalState = () => (modal ? { label: modalLabel(modal.st), locked: modal.locked,
         lockElement: document.pointerLockElement === renderer.domElement, vp: modal.vp, wraps: modal.wraps, mouse: modal.mouse,
@@ -1425,6 +1525,9 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
         if (modal) {
           e.preventDefault();
           e.stopImmediatePropagation();
+          // MICRO-SPAZIO-3D-3 p.4b · the middle button chooses the axis nearest
+          // to the motion, as Blender (again: none); the orbit is not active here
+          if (e.button === 1) { nearestAxis(); down = null; return; }
           endModal(e.button === 0);
           down = null;
           return;
@@ -1641,7 +1744,7 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
         const stop = () => { e.preventDefault(); e.stopPropagation(); };
         if (modal) {
           stop();
-          const next = modalKey(modal.st, e.key);
+          const next = modalKey(modal.st, e.key, e.shiftKey);
           if (next.done) { modal.st = next; endModal(next.done === "confirm"); return; }
           modal.st = next;
           modalApply();

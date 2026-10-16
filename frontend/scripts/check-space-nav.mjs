@@ -142,7 +142,23 @@ const dist = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]);
   eq(N.applyTyped(start, N.modalKey(N.modalKey(N.startModal("scale"), "x"), "2")).scale, [2, 1, 1], "S X 2");
   eq(N.applyTyped(start, N.modalKey(N.startModal("scale"), "3")).scale, [3, 3, 3], "S 3: all three");
   eq(N.modalValue(N.modalKey(N.modalKey(N.startModal("grab"), "-"), "4")), -4, "a minus");
-  eq(N.modalKey(N.modalKey(N.startModal("grab"), "x"), "x").axis, null, "the same axis twice: none (Blender: local, not here)");
+  // MICRO-SPAZIO-3D-3 p.4b · Blender's cycle (before: the same letter twice took the constraint away)
+  const k2 = (st, ...keys) => keys.reduce((a, [k, sh]) => N.modalKey(a, k, !!sh), st);
+  const cyc = (st) => ({ axis: st.axis, plane: !!st.plane, local: !!st.local });
+  eq(cyc(k2(N.startModal("grab"), ["x"])), { axis: "x", plane: false, local: false }, "X: the global X");
+  eq(cyc(k2(N.startModal("grab"), ["x"], ["x"])), { axis: "x", plane: false, local: true }, "X X: the local X");
+  eq(cyc(k2(N.startModal("grab"), ["x"], ["x"], ["x"])), { axis: null, plane: false, local: false }, "X X X: none");
+  eq(cyc(k2(N.startModal("grab"), ["Z", true])), { axis: "z", plane: true, local: false }, "Shift+Z: the plane XY");
+  eq(cyc(k2(N.startModal("grab"), ["Z", true], ["Z", true])), { axis: "z", plane: true, local: true }, "Shift+Z twice: the local plane");
+  eq(cyc(k2(N.startModal("grab"), ["z"], ["Z", true])), { axis: "z", plane: true, local: false }, "Z then Shift+Z: the plane, from the global");
+  eq(N.freeAxes({ axis: "z", plane: true }), ["x", "y"], "the plane without Z: X and Y move");
+  eq(N.freeAxes({ axis: "x", plane: true }), ["y", "z"], "…without X: Y and Z");
+  eq(N.freeAxes({ axis: "y", plane: false }), ["y"], "an axis: only it");
+  eq([N.planeName("z"), N.planeName("x"), N.planeName("y")], ["XY", "YZ", "XZ"], "the planes' names");
+  eq(N.modalHeader(k2(N.startModal("grab"), ["Z", true]), [0.512, 0.103, 0]), "Move · plane XY · D 0.5120 0.1030 0.0000", "the header: «Move · plane XY» with the values");
+  eq(N.modalHeader(k2(N.startModal("rotate"), ["z"]), [45]), "Rotate · Z · 45.0°", "…«Rotate · Z · 45.0°»");
+  eq(N.modalHeader(k2(N.startModal("scale"), ["x"], ["x"]), [2, 1, 1]), "Scale · X (local) · 2.000 1.000 1.000", "…the local axis said");
+  eq(N.modalLabel(k2(N.startModal("grab"), ["Z", true])), "G ⇧Z", "the short label");
   eq(N.modalKey(N.startModal("grab"), "r").mode, "rotate", "R inside G switches to rotate");
 }
 
