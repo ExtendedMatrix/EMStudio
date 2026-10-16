@@ -104,6 +104,9 @@ export interface InspectorCallbacks {
   /** MICRO-SPAZIO-3D-2 · the «Trasformazione» of a 3D object (a model, a unit's
    *  proxy, its shape): the caller draws it into `host`, false when the node has none */
   renderTransform?: (host: HTMLElement, nodeId: string) => boolean;
+  /** MICRO-SPAZIO-3D-3 p.11 · a readable name over the technical one (a model
+   *  without its level suffix), with its chip */
+  readableName?: (nodeId: string) => { label: string; chip?: string | null; technical: string } | null;
   /** MICRO-SPAZIO-3D-3 p.6 · under «Model the proxy»: «Usa una forma abbozzata…» */
   renderSketchUse?: (host: HTMLElement, nodeId: string) => void;
 }
@@ -358,6 +361,15 @@ export function renderInspector(
     nameRow.appendChild(nameInput);
   }
   root.appendChild(nameRow);
+  // MICRO-SPAZIO-3D-3 p.11 · a model: its name without the level suffix, the
+  // technical name (the field above) beneath, as for the properties
+  const rn = cb.readableName?.(nodeId) ?? null;
+  if (rn) {
+    const lab = el("div", "insp-prop-label insp-rm-label", rn.label);
+    if (rn.chip) lab.appendChild(el("span", "sol-chip", rn.chip));
+    lab.appendChild(el("small", "prop-tech", rn.technical));
+    root.appendChild(lab);
+  }
   // MICRO-BADGE-PD · a property: its readable label over the technical name
   // the field above edits (`rules.propertyLabel`; a free name has none)
   if (node.node_type === "property") {

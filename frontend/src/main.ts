@@ -250,6 +250,7 @@ import { boxSelect, clickOutliner, clickScene, EMPTY_SEL, hideKeys, selectAll, w
 import { buildOutlinerTree, loadSpacePrefs, renderOutliner, saveSpacePrefs, type Space3dPrefs } from "./space-outliner";
 import { patchProxyNodes, proxyRelPath } from "./proxy-association";
 import { planMove, planNewGroup, planRemove, type GroupPlan } from "./rm-groups";
+import { shownModelName, splitLevel } from "./rm-names";
 import { trackpadClassifier } from "./wheel-kind";
 import { isTilesetUrl } from "./tiles3d";
 import type { ModelOptions } from "./embed3d-native";
@@ -3263,6 +3264,7 @@ function renderInspectorInto(host: HTMLElement): void {
       onOpenFacing: (tid) => openFacingFor(tid),
       renderTransform: (host2, id) => renderTransformInto(host2, id),
       renderSketchUse: (host2, id) => renderSketchUse(host2, id),
+      readableName: (id) => { const r = rmShown(id); return r && r.shown !== r.technical ? { label: r.shown, chip: r.level, technical: r.technical } : null; },
       onClearField: (nodeId, field) => {
         (storeOfNode(nodeId) ?? store!).clearField(nodeId, field);
         refreshInspector();
@@ -3621,7 +3623,10 @@ function renderNameStrip(): void {
     ctx.textContent = t("strip.graphCtx", { n: String(store.liveNodes().length) });
     return;
   }
-  title.textContent = String(n.name || n.id);
+  // MICRO-SPAZIO-3D-3 p.11 · a model with versions: its name without the level
+  const nmR = rmShown(n.id);
+  title.textContent = nmR && nmR.shown !== nmR.technical ? `${nmR.shown}${nmR.level ? ` · ${nmR.level}` : ""}` : String(n.name || n.id);
+  title.title = nmR && nmR.shown !== nmR.technical ? nmR.technical : "";
   const edges = store.doc.graph.edges;
   const ep = edges.find((e) => e.source === n.id && e.edge_type === "has_first_epoch");
   const part = edges.find((e) => e.source === n.id && e.edge_type === "is_part_of");
@@ -22102,6 +22107,26 @@ function foldPanel(key: string, folded: boolean, redraw = true): void {
   else { sp3 = { person: overlayPerson(), prefs: { ...p, collapsed: [...s] } }; saveSpacePrefs(sp3.person, sp3.prefs); }
 }
 
+/** MICRO-SPAZIO-3D-3 p.11 · a model's name as the views show it: without its
+ *  level suffix when it has versions, the level of the version drawn as a chip
+ *  (`rm-names.ts`). Null when the node is not a model of the Space. */
+function rmShown(id: string, sp: Space | null = currentSpace()): { shown: string; technical: string; level: string | null } | null {
+  const rm = sp?.rms.find((r) => r.id === id);
+  if (!rm) return null;
+  const s = shownModelName(rm.name, (rm.versions?.length ?? 0) > 1);
+  // the level of the version drawn, else the one the rule chose, else the name's
+  let drawn: string | null = null;
+  for (const h of sceneHandles.values()) {
+    const u = h.drawnUrl(`rm:${id}`);
+    const tail = (x: string) => decodeURIComponent(x.split(/[?#]/)[0]).split("/").pop() ?? "";
+    const v = u ? rm.versions?.find((x) => x.url && tail(x.url) === tail(u)) : undefined;
+    if (v) { drawn = v.lod ? `LOD${String(v.lod).replace(/\D/g, "")}` : splitLevel(v.name).level; break; }
+  }
+  const chosen = rm.choice?.entry ? rm.versions?.find((x) => x.id === rm.choice!.entry!.id) : undefined;
+  const lvl = drawn ?? (chosen ? (chosen.lod ? `LOD${String(chosen.lod).replace(/\D/g, "")}` : splitLevel(chosen.name).level) : null) ?? s.level;
+  return { ...s, level: s.shown !== s.technical || lvl ? lvl : null };
+}
+
 /** The N panel «Vista» of a Space window, drawn into `el` (Blender's sidebar). */
 function renderSpaceNPanel(el: HTMLElement, win: Win, h: SpaceSceneHandle): void {
   el.textContent = "";
@@ -23030,7 +23055,10 @@ function renderSpaceOutliner(el: HTMLElement, win: Win, sp: Space | null): void 
       const drawnUrl = h?.drawnUrl(`rm:${r.id}`) ?? "";
       const tail = (u: string) => decodeURIComponent(u.split(/[?#]/)[0]).split("/").pop() ?? "";
       const grp = r.group ? sp.rmGroups.get(r.group) : undefined;
-      return { id: r.id, name: r.name, glyph: String(st.node(r.id)?.node_type ?? "representation_model"),
+      // MICRO-SPAZIO-3D-3 p.11 · the name without its level, the level a chip
+      const nm = rmShown(r.id, sp);
+      return { id: r.id, name: nm?.shown ?? r.name, ...(nm && nm.shown !== nm.technical ? { technical: nm.technical } : {}),
+        ...(nm?.level ? { chip: nm.level } : {}), glyph: String(st.node(r.id)?.node_type ?? "representation_model"),
         tileset: !!r.resource?.tiles,
         group: grp ? { id: grp.id, name: grp.name, doc: grp.documentId ? String(st.node(grp.documentId)?.name ?? "") : undefined } : null,
         versions: (r.versions ?? []).map((v) => ({ id: v.id, name: v.name + (v.master ? ` · ${t("s3.master")}` : ""),
@@ -23484,7 +23512,8 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
     for (const r of sum.rms) {
       const isTiles = !!r.resource?.tiles;
       if (!space3dShown(isTiles ? "s3_tiles" : "s3_rm") || !shown(`rm:${r.id}`)) continue;
-      items.push({ kind: "rm", id: r.id, label: r.name, state: r.resource?.state ?? "missing",
+      const nmS = rmShown(r.id, sp);
+      items.push({ kind: "rm", id: r.id, label: nmS && nmS.shown !== nmS.technical ? `${nmS.shown}${nmS.level ? ` · ${nmS.level}` : ""}` : r.name, state: r.resource?.state ?? "missing",
         url: spaceFileUrl(r.resource), resourceId: r.resource?.id, tiles: r.resource?.tiles || undefined,
         edge: placementColour(r.genre) ?? undefined, selected: isSel(`rm:${r.id}`), active: ssel.active === `rm:${r.id}`,
         // MICRO-SPAZIO-3D-2 · the model's transform (data.transform), over its file
@@ -33878,7 +33907,7 @@ initEmData({
     askResident();
     const st = store;
     return { space: sp, units: st.liveNodes().filter((n) => isStratigraphicType(n.node_type)).map((n) => n.id),
-             ctx: { node: (id) => st.node(id), t, genre: spaceGenre } };
+             ctx: { node: (id) => st.node(id), t, genre: spaceGenre, rmName: (id) => rmShown(id) } };
   },
   onOpenDoc: (docId) => { requestDoc(docId, { reading: null }); select(docId); refreshInspector(); },
   onShowInMatrix: (id) => showInMatrix(id),

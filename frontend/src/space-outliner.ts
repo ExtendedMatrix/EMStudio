@@ -50,6 +50,8 @@ export interface OutlinerRow {
   current?: boolean;
   /** the row's tooltip (a technical name), when it is not the name */
   title?: string;
+  /** p.11 · a small chip after the name (a model's level drawn: «LOD1») */
+  chip?: string;
   /** a version's uses and level (p.10), shown small */
   uses?: string[];
   level?: string;
@@ -63,7 +65,9 @@ export interface OutlinerInput {
     /** p.7 · the container it is in: its id, its name, its document's name */
     group?: { id: string; name: string; doc?: string } | null;
     /** p.11 · the technical name, when the name shown is shortened (a tooltip) */
-    technical?: string }>;
+    technical?: string;
+    /** …and the level of the version drawn, a chip */
+    chip?: string }>;
   /** per epoch, its proxies: unit, its name, its type */
   proxies: (epochId: string) => Array<{ unitId: string; name: string; type: string }>;
   /** the type's label (US, USV/s…) */
@@ -84,7 +88,7 @@ export function buildOutlinerTree(input: OutlinerInput): OutlinerRow[] {
     if (rms.length) {
       const rmRow = (r: (typeof rms)[number]): OutlinerRow => ({
         key: `rm:${r.id}`, id: r.id, kind: r.tileset ? "tileset" : "rm", name: r.name, glyph: r.tileset ? "tileset" : r.glyph,
-        object: true, ...(r.technical ? { title: r.technical } : {}),
+        object: true, ...(r.technical ? { title: r.technical } : {}), ...(r.chip ? { chip: r.chip } : {}),
         ...(r.versions.length > 1 ? { children: r.versions.map((v) => ({
           key: `version:${r.id}:${v.id}`, id: v.id, kind: "version" as const, name: v.name, drawn: v.drawn,
           glyphText: v.drawn ? "●" : v.chosen ? "○" : "·", ...(v.uses ? { uses: v.uses } : {}), ...(v.level ? { level: v.level } : {}),
@@ -366,6 +370,15 @@ export function renderOutliner(el: HTMLElement, v: OutlinerView, act: OutlinerAc
     name.textContent = r.name;
     name.title = r.title ?? r.name;
     line.append(tw, g, name);
+    if (r.chip) { const c = document.createElement("span"); c.className = "sol-chip"; c.textContent = r.chip; line.appendChild(c); }
+    if (r.uses?.length || r.level) {
+      // p.10 · a version's level (from the chain) and its uses, small
+      const u = document.createElement("span");
+      u.className = "sol-uses";
+      u.textContent = [r.level, ...(r.uses ?? [])].filter(Boolean).join(" · ");
+      line.appendChild(u);
+    }
+    if (r.auto) { const a = document.createElement("span"); a.className = "sol-auto"; a.textContent = "A"; a.title = "auto"; line.appendChild(a); }
     if (r.kind !== "version") {
       const keys = objectKeys(r);
       if (keys.length) {

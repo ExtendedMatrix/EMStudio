@@ -12,6 +12,7 @@
  * count beside the sheet's name is the rows on screen (`check-space.mjs`).
  */
 import type { Space, SpaceResource } from "./space";
+import { shownModelName } from "./rm-names";
 import type { EmNode } from "./types";
 
 const esc = (s: unknown): string =>
@@ -22,6 +23,8 @@ export interface ModelsCtx {
   t: (key: string, vars?: Record<string, string>) => string;
   /** the genre's words (`space.genre.<key>`), else the key */
   genre: (key: string | null) => string;
+  /** MICRO-SPAZIO-3D-3 p.11 · a model's name as the Space shows it (the level of the version drawn) */
+  rmName?: (id: string) => { shown: string; technical: string; level: string | null } | null;
 }
 
 export interface ModelsRows {
@@ -80,7 +83,8 @@ export function modelsTableHtml(space: Space, units: string[], ctx: ModelsCtx,
     }
     const rm = space.rms.find((x) => x.id === r.rmId)!;
     h += `<tr data-row="${esc(rm.id)}"><td>${esc(name(r.epochId))}${span}</td>`
-      + `<td><button class="link" data-go="${esc(rm.id)}"><b>${esc(rm.name)}</b></button></td>`
+      // MICRO-SPAZIO-3D-3 p.11 · without the level suffix when it has versions
+      + `<td>${((n) => `<button class="link" data-go="${esc(rm.id)}" title="${esc(n.technical)}"><b>${esc(n.shown)}</b></button>${n.level ? ` <span class="sol-chip">${esc(n.level)}</span>` : ""}`)(ctx.rmName?.(rm.id) ?? shownModelName(rm.name, (rm.versions?.length ?? 0) > 1))}</td>`
       // MICRO-SPAZIO-3D-3 p.7 · the RM container it is in (EM Tools')
       + `<td data-col="container">${rm.group && space.rmGroups?.get(rm.group) ? `<button class="link" data-go="${esc(rm.group)}">${esc(space.rmGroups.get(rm.group)!.name)}</button>` : ""}</td>`
       + `<td>${esc(ctx.genre(rm.genre))}</td>`

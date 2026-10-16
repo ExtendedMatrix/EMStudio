@@ -9600,3 +9600,8 @@ button.hdto-v {
 .scn-ov.folded { white-space: nowrap; }
 .np-fold { cursor: pointer; user-select: none; }
 .np-sect.folded > :not(h5) { display: none; }
+/* MICRO-SPAZIO-3D-3 p.11 · a model's level, a chip beside its name; p.10 · a version's level and uses */
+.sol-chip { font-size: 0.66rem; padding: 0 4px; border-radius: 3px; background: color-mix(in srgb, var(--accent) 22%, transparent); color: var(--text); margin-left: 4px; flex: none; }
+.sol-uses { font-size: 0.64rem; color: var(--text-muted); margin-left: 4px; flex: none; white-space: nowrap; }
+.sol-auto { font-size: 0.6rem; font-weight: 700; color: #2b8a3e; border: 1px solid currentColor; border-radius: 2px; padding: 0 2px; margin-left: 3px; flex: none; }
+.insp-rm-label { font-weight: 600; }
