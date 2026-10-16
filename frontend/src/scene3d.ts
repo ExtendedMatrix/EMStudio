@@ -87,6 +87,10 @@ export interface SceneItem {
   /** TEMPLU MARE v2 · C1 · `url` IS a tileset, in this form, whatever it ends
    *  with: a store URL (`…/asset/sha256:…`) names no `.3tz` */
   tiles?: "directory" | "3tz";
+  /** MICRO-SPAZIO-3D-3 p.14 · the decorators of its label, as the graph's: a
+   *  glyph of the datamodel (`kind`, author / licence / embargo / epoch) or a
+   *  short text (PD n, «!»), each in its overlay's group */
+  decor?: Array<{ group: "rights" | "pd" | "warning" | "epoch"; kind?: string; text?: string; title: string; inherited?: boolean }>;
   /** MICRO-SPAZIO-3D-3 p.6 · a proxy's other parts (more `geometry` properties):
    *  drawn with it, each with its own pose; G / R / S move the first */
   parts?: Array<{ url: string; resourceId?: string; pose?: Pose }>;
@@ -259,6 +263,8 @@ export interface SpaceSceneOptions {
    *  too), the active last; on release, ONE call with all their poses */
   transformTargets?: () => string[];
   onTransformMany?: (poses: Array<{ key: string; pose: Pose }>) => void;
+  /** MICRO-SPAZIO-3D-3 p.14 · a datamodel glyph (2d_glyphs) for a label's decorator */
+  glyph?: (kind: string) => HTMLElement;
   /** MICRO-SPAZIO-3D-3 p.9 · a floating panel reduced to its title (the person's, per view) */
   panelFolded?: (key: string) => boolean;
   onPanelFold?: (key: string, folded: boolean) => void;
@@ -506,11 +512,23 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
         return b.isEmpty() ? new THREE.Box3(new THREE.Vector3(-0.5, 0, -0.5), new THREE.Vector3(0.5, 1, 0.5)) : b;
       };
       const span = (): number => { const s = extent().getSize(new THREE.Vector3()); return Math.max(s.x, s.y, s.z) || 1; };
-      const addLabel = (text: string, at: any, cls: string, id?: string) => {
+      const addLabel = (text: string, at: any, cls: string, id?: string, decor?: SceneItem["decor"]) => {
         const el = document.createElement("span");
         el.className = `v3d-label scn-label ${cls}`;
         el.textContent = text;
         if (id) el.dataset.id = id;
+        // MICRO-SPAZIO-3D-3 p.14 · the graph's glyphs beside the name, small
+        for (const d of decor ?? []) {
+          const g = document.createElement("span");
+          g.className = `scn-dec dec-${d.group}${d.inherited ? " inh" : ""}`;
+          g.title = d.title;
+          if (d.kind && opts.glyph) { try { g.appendChild(opts.glyph(d.kind)); } catch { g.textContent = d.text ?? ""; } }
+          else g.textContent = d.text ?? "";
+          el.appendChild(g);
+        }
+        const more = document.createElement("span");
+        more.className = "scn-more";
+        el.appendChild(more);
         labels.appendChild(el);
         anchors.push({ el, p: at.clone() });
       };
@@ -1066,7 +1084,7 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
                 }));
               }
               if (item.kind === "proxy") unitCentres.set(item.id, centreOf(obj));
-              addLabel(item.label, topOf(obj), `${item.kind === "proxy" ? "u" : "rm"}${selCls(item)}`, item.id);
+              addLabel(item.label, topOf(obj), `${item.kind === "proxy" ? "u" : "rm"}${selCls(item)}`, item.id, item.decor);
               drawn.set(`${item.kind}:${item.id}`, { item, as: "mesh", url: item.url });
             }));
           } else if (item.state === "json") {
@@ -1092,7 +1110,7 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
             tag(group, item);
             content.add(group);
             unitCentres.set(item.id, centreOf(group));
-            addLabel(item.label, topOf(group), `u${selCls(item)}`, item.id);
+            addLabel(item.label, topOf(group), `u${selCls(item)}`, item.id, item.decor);
             drawn.set(`${item.kind}:${item.id}`, { item, as: "mesh" });
           } else later.push(item);
         }
@@ -1147,16 +1165,46 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
         });
       };
 
+      let labelsShown = 0, labelsHidden = 0;
+      (probe as Record<string, unknown>).__spaceLabels = () => ({ shown: labelsShown, hidden: labelsHidden,
+        texts: [...labels.querySelectorAll<HTMLElement>(".scn-label")].filter((e) => e.style.display !== "none").map((e) => e.textContent) });
       const place = () => {
         const W = renderer.domElement.clientWidth || w, H = renderer.domElement.clientHeight || h;
         labels.style.display = ov("s3_labels") ? "" : "none";
-        if (ov("s3_labels"))
+        if (ov("s3_labels")) {
+          const DEC: Array<[string, OverlayKey]> = [["rights", "s3_dec_rights"], ["pd", "s3_dec_pd"], ["warning", "s3_dec_warning"], ["epoch", "s3_dec_epoch"]];
+          for (const [k, o] of DEC) labels.classList.toggle(`no-dec-${k}`, !ov(o));
+          // MICRO-SPAZIO-3D-3 p.14 · labels that would cover each other: the
+          // nearest (the selected first) is shown, with «+N» for the others
+          // under it; the others come back as the view gets nearer
+          const vis: Array<{ a: typeof anchors[number]; x: number; y: number; z: number; w: number; h: number; pri: number }> = [];
           for (const a of anchors) {
             const v = a.p.clone().project(camera);
-            a.el.style.left = `${((v.x + 1) / 2) * W}px`;
-            a.el.style.top = `${((1 - v.y) / 2) * H}px`;
-            a.el.style.display = v.z < 1 ? "" : "none";
+            if (!(v.z < 1)) { a.el.style.display = "none"; continue; }
+            const x = ((v.x + 1) / 2) * W, y = ((1 - v.y) / 2) * H;
+            a.el.style.left = `${x}px`;
+            a.el.style.top = `${y}px`;
+            if (!a.el.dataset.w) { a.el.style.display = ""; a.el.dataset.w = String(a.el.offsetWidth || 40); a.el.dataset.h = String(a.el.offsetHeight || 16); }
+            vis.push({ a, x, y, z: v.z, w: Number(a.el.dataset.w), h: Number(a.el.dataset.h), pri: a.el.classList.contains("sel") ? 0 : 1 });
           }
+          vis.sort((p1, p2) => p1.pri - p2.pri || p1.z - p2.z);
+          const shown: Array<{ x0: number; y0: number; x1: number; y1: number; more: number; el: HTMLElement }> = [];
+          for (const q of vis) {
+            // the label sits centred above its point (translate(-50%, -140%))
+            const r = { x0: q.x - q.w / 2, y0: q.y - 1.4 * q.h, x1: q.x + q.w / 2, y1: q.y - 0.4 * q.h };
+            const hit = shown.find((s) => r.x0 < s.x1 && r.x1 > s.x0 && r.y0 < s.y1 && r.y1 > s.y0);
+            if (hit && q.pri > 0) { hit.more++; q.a.el.style.display = "none"; continue; }
+            q.a.el.style.display = "";
+            shown.push({ ...r, more: 0, el: q.a.el });
+          }
+          for (const s of shown) {
+            const m = s.el.querySelector<HTMLElement>(".scn-more");
+            const txt = s.more ? `+${s.more}` : "";
+            if (m && m.textContent !== txt) m.textContent = txt;
+          }
+          labelsShown = shown.length;
+          labelsHidden = vis.length - shown.length;
+        }
         // the 3D cursor: a screen element where its point falls
         const cv = v3(cursorAt).project(camera);
         const showCursor = ov("s3_cursor") && cv.z < 1 && Math.abs(cv.x) <= 1.05 && Math.abs(cv.y) <= 1.05;

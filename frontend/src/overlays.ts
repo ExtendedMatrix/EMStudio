@@ -55,12 +55,17 @@ export type OverlayKey =
   | "s3_gizmo"
   | "s3_cursor"
   | "s3_sketches"
+  // MICRO-SPAZIO-3D-3 p.14 · the decorators of the Space's labels, as the graph's
+  | "s3_dec_rights"
+  | "s3_dec_pd"
+  | "s3_dec_warning"
+  | "s3_dec_epoch"
   // Drawing
   | "genre"
   | "lock"
   | "fold_count";
 
-export type OverlayGroupKey = "rights" | "paradata" | "time" | "checks" | "threed" | "drawing" | "space3d";
+export type OverlayGroupKey = "rights" | "paradata" | "time" | "checks" | "threed" | "drawing" | "space3d" | "space3d_decor";
 
 export interface OverlayItem {
   key: OverlayKey;
@@ -130,6 +135,15 @@ export const OVERLAY_GROUPS: readonly OverlayGroup[] = [
     { key: "s3_cursor", text: "⊕" },
     { key: "s3_sketches", text: "◇" },
   ] },
+  // MICRO-SPAZIO-3D-3 p.14 · on the units' labels in the scene, the graph's
+  // glyphs (2d_glyphs): author, licence and embargo; the PD badge with its
+  // number; the warning; the epoch. «Ha 3D» is not needed in the Space.
+  { key: "space3d_decor", items: [
+    { key: "s3_dec_rights", kind: "license" },
+    { key: "s3_dec_pd", text: "PD 7" },
+    { key: "s3_dec_warning", text: "!" },
+    { key: "s3_dec_epoch", kind: "EpochNode" },
+  ] },
 ];
 
 export const OVERLAY_KEYS: readonly OverlayKey[] = OVERLAY_GROUPS.flatMap((g) => g.items.map((i) => i.key));
@@ -159,7 +173,7 @@ export function defaultOverlays(view: OverlayView): OverlayState {
 }
 
 /** The Space's items (a group of their own). */
-const SPACE_KEYS = new Set<OverlayKey>(OVERLAY_GROUPS.find((g) => g.key === "space3d")!.items.map((i) => i.key));
+const SPACE_KEYS = new Set<OverlayKey>(OVERLAY_GROUPS.filter((g) => g.key === "space3d" || g.key === "space3d_decor").flatMap((g) => g.items.map((i) => i.key)));
 
 /** The items a view can draw: the liquid Graph draws only its own few. */
 export function overlayItemsFor(view: OverlayView): OverlayItem[] {

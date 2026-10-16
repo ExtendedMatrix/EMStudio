@@ -27,12 +27,12 @@ const eq = (got, want, what) => { assert.deepEqual(got, want, `${what} — got $
 
 // ── the inventory ────────────────────────────────────────────────────────────
 {
-  eq(O.OVERLAY_GROUPS.map((g) => g.key), ["rights", "paradata", "time", "checks", "threed", "drawing", "space3d"],
-    "the groups, in the menu's order (the MICRO's five, «Drawing», and the Space's own)");
+  eq(O.OVERLAY_GROUPS.map((g) => g.key), ["rights", "paradata", "time", "checks", "threed", "drawing", "space3d", "space3d_decor"],
+    "the groups, in the menu's order (the MICRO's five, «Drawing», the Space's own and its labels' decorators)");
   eq(O.OVERLAY_GROUPS.find((g) => g.key === "rights").items.map((i) => i.key),
     ["author", "author_ai", "license", "embargo", "inherited"], "authorship and rights: the four ornaments and the inherited");
   eq(new Set(O.OVERLAY_KEYS).size, O.OVERLAY_KEYS.length, "every overlay once");
-  eq(O.OVERLAY_KEYS.length, 32, "thirty-two overlays: twenty-one of the graph, eleven of the Space");
+  eq(O.OVERLAY_KEYS.length, 36, "thirty-six overlays: twenty-one of the graph, fifteen of the Space (MICRO-SPAZIO-3D-3: four decorators)");
   // every overlay is drawn somewhere: the renderers name it (a key nobody draws
   // would be a box that switches nothing)
   // MICRO-SPAZIO-3D · the Space's are gated by the scene (scene3d.ts) and by
@@ -48,7 +48,8 @@ const eq = (got, want, what) => { assert.deepEqual(got, want, `${what} — got $
   for (const v of ["matrix", "dtc", "multigraph", "soloing"])
     eq(O.overlayItemsFor(v).length, 21, `${v}: every overlay of the graph`);
   eq(O.overlayItemsFor("space").map((i) => i.key), ["s3_labels", "s3_proxies", "s3_proxy_wire", "s3_rm", "s3_tiles",
-    "s3_grid", "s3_epoch_box", "s3_sel_outline", "s3_gizmo", "s3_cursor", "s3_sketches"], "the Space: its eleven, and only them");
+    "s3_grid", "s3_epoch_box", "s3_sel_outline", "s3_gizmo", "s3_cursor", "s3_sketches",
+    "s3_dec_rights", "s3_dec_pd", "s3_dec_warning", "s3_dec_epoch"], "the Space: its fifteen, and only them");
   // every label in en, it, de
   const i18n = readFileSync(`${SRC}i18n.ts`, "utf8");
   for (const k of [...O.OVERLAY_KEYS.map((x) => `ov.item.${x}`), ...O.OVERLAY_GROUPS.map((g) => `ov.group.${g.key}`), "ov.master", "ov.all", "ov.none"])

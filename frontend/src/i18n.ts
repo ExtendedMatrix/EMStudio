@@ -61,6 +61,12 @@ type Dict = Record<string, string>;
 // `emtree.`, `empty.`, `toast.`) so a translator can work a screen at a time and
 // an unused key is findable.
 const EN: Dict = {
+  "s3.decWarning": "A warning on this unit (the Warnings table)",
+  "ov.group.space3d_decor": "On the labels",
+  "ov.item.s3_dec_rights": "Author, licence, embargo",
+  "ov.item.s3_dec_pd": "Paradata badge (PD n)",
+  "ov.item.s3_dec_warning": "Warning «!»",
+  "ov.item.s3_dec_epoch": "Epoch",
   "s3.foldedSummary": "{rm} models · proxies {px} of {n}",
   "tile.joinAligned": "Align and join: the sides are brought together, this window goes away",
   "tile.joinExtend": "Align and join: the shorter window is stretched to the other's side, the windows beside give up the band",
@@ -3684,6 +3690,12 @@ const EN: Dict = {
 
 // ── Italiano: complete, because E.D. works in it ───────────────────────────────
 const IT: Dict = {
+  "s3.decWarning": "Un avviso su questa unità (la tabella Avvisi)",
+  "ov.group.space3d_decor": "Sulle etichette",
+  "ov.item.s3_dec_rights": "Autore, licenza, embargo",
+  "ov.item.s3_dec_pd": "Badge dei paradati (PD n)",
+  "ov.item.s3_dec_warning": "Avviso «!»",
+  "ov.item.s3_dec_epoch": "Epoca",
   "s3.foldedSummary": "{rm} modelli · proxy {px} su {n}",
   "tile.joinAligned": "Allinea e unisci: i lati si allineano, questa finestra sparisce",
   "tile.joinExtend": "Allinea e unisci: la finestra più corta si allunga al lato dell'altra, le finestre accanto cedono la striscia",
@@ -7884,6 +7896,11 @@ export function setValidated(code: Locale, on: boolean): void {
 // falls back to English for the rest, the same way the other drafts do; E.D.
 // validates it in the selector like the others.
 const DE: Dict = {
+  "ov.group.space3d_decor": "Auf den Beschriftungen",
+  "ov.item.s3_dec_rights": "Autor, Lizenz, Embargo",
+  "ov.item.s3_dec_pd": "Paradaten-Abzeichen (PD n)",
+  "ov.item.s3_dec_warning": "Warnung «!»",
+  "ov.item.s3_dec_epoch": "Epoche",
   // MICRO studio-luogo (10 Oct 2026) · the study's code, kind and place, the
   // heritage gesture, the chain card and the Graph view's HDT-O layer
   "insp.hdtStudyCode": "Kürzel",

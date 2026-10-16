@@ -22120,6 +22120,39 @@ function viewName(v: AlignedView | null, ortho: boolean): string {
   return `${t(v ? VIEW_NAMES[v] : "s3.vUser")} · ${t(ortho ? "s3.vOrtho" : "s3.vPersp")}`;
 }
 
+/**
+ * MICRO-SPAZIO-3D-3 p.14 · the decorators of the units' labels in the scene,
+ * as the graph draws them: the ornaments (author, licence, embargo — inherited
+ * ones attenuated, as the funnel gives them), the badge of the paradata group
+ * with its number, the warning «!», the epoch. Computed once per drawing of
+ * the scene, for the units of the epoch.
+ */
+function spaceDecorators(st: DocumentStore, sp: Space, units: string[]): (u: string) => SceneItem["decor"] {
+  const doc = st.doc;
+  const ids = new Set(units);
+  const orn = adornmentBadges(doc.graph.nodes, doc.graph.edges, ids);
+  const fix = funnelIndex(doc);
+  const pd = propertyBadges(doc);
+  return (u) => {
+    const out: NonNullable<SceneItem["decor"]> = [];
+    const own = orn.get(u) ?? [];
+    for (const b of own) out.push({ group: "rights", kind: b.kind, title: `${b.kind}: ${b.label}` });
+    const has = new Set(own.map((b) => (b.kind === "author_ai" ? "author" : b.kind)));
+    for (const rule of BADGE_RULES) {
+      if (has.has(rule)) continue;
+      const eff = resolveEffective(doc, u, rule, fix);
+      if (eff.value == null || eff.explicit) continue;
+      out.push({ group: "rights", kind: rule, title: `${rule}: ${eff.value} · ${sourceLabel(eff.source)}`, inherited: true });
+    }
+    const g = pd.get(u);
+    if (g) out.push({ group: "pd", text: `PD ${g.count}`, title: t("compact.badge", { n: String(g.count) }) });
+    if (warnedNodes.has(u)) out.push({ group: "warning", text: "!", title: t("s3.decWarning") });
+    const ep = spaceEpochFor(u, sp);
+    if (ep) out.push({ group: "epoch", kind: "EpochNode", title: String(st.node(ep)?.name ?? ep) });
+    return out;
+  };
+}
+
 /** MICRO-SPAZIO-3D-3 p.9 · a floating panel folded or opened: per person, in
  *  the Space's local preferences (as the overlays). `redraw` false: the panel
  *  folded itself already (a tileset's strip lives in the scene). */
@@ -23267,6 +23300,7 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
       snapFace: t("s3.snapFace"), snapStep: t("s3.snapStep"),
     },
     snapAlign: () => space3dPrefs().snapAlign === true,
+    glyph: (k) => typeIconElement(k),
     panelFolded: (k) => (space3dPrefs().collapsed ?? []).includes(k),
     onPanelFold: (k, c) => foldPanel(k, c, false),
     sketchFileUrl: (s) => (s.file ? spaceFileUrl({ url: s.file.url, checksum: s.file.checksum ?? "", residency: "resident" }) : undefined),
@@ -23529,6 +23563,8 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
     }
     // MICRO-SPAZIO-3D-3 · the one selection, and its active
     const ssel = spaceSel(sp);
+    // p.14 · the decorators of the units' labels, as the graph's (2d_glyphs)
+    const decorOf = spaceDecorators(st, sp, sum.units);
     const isSel = (k: string) => ssel.keys.includes(k);
     const hidden = new Set(prefs.hidden);
     const shown = (key: string) => !hidden.has(key) && (!spaceIsolated || spaceIsolated === key);
@@ -23551,7 +23587,7 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
         const px = sp.proxies.get(u);
         if (!px || !shown(`proxy:${u}`)) continue;
         const type = st.node(u)?.node_type;
-        const common = { kind: "proxy" as const, id: u, label: nm(u), rgb: nodeMaterialRgb(type) ?? nodeMaterialRgb("US") ?? undefined,
+        const common = { kind: "proxy" as const, id: u, label: nm(u), decor: decorOf(u), rgb: nodeMaterialRgb(type) ?? nodeMaterialRgb("US") ?? undefined,
           edge: nodeStyle(type).border, selected: isSel(`proxy:${u}`), active: ssel.active === `proxy:${u}`, pose: poseOfNode(px.shapeId) };
         // MICRO-SPAZIO-3D-3 p.6 · the other parts of the unit's proxy
         const parts = (px.parts ?? []).filter((q) => q.resource?.state === "resident")

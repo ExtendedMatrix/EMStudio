@@ -9616,3 +9616,11 @@ tr.tv-sel-act > td { background: color-mix(in srgb, var(--accent) 42%, transpare
 .mdl-rm td, .mdl-px td { vertical-align: middle; }
 .mdl table.mdl-rm, .mdl table.mdl-px { height: auto; align-self: start; }
 .mdl-rm tr, .mdl-px tr { height: auto; }
+/* MICRO-SPAZIO-3D-3 p.14 · the graph's glyphs on the Space's labels, and «+N» for those under the nearest */
+.scn-dec { display: inline-flex; align-items: center; margin-left: 3px; font-size: 0.62rem; line-height: 1; vertical-align: middle; }
+.scn-dec > svg, .scn-dec > * { width: 11px; height: 11px; }
+.scn-dec.inh { opacity: 0.5; }
+.scn-dec.dec-pd { font-weight: 700; padding: 0 3px; border-radius: 3px; background: #f3e3b5; color: #6b4b00; width: auto; }
+.scn-dec.dec-warning { color: #c0392b; font-weight: 800; }
+.scn-labels.no-dec-rights .dec-rights, .scn-labels.no-dec-pd .dec-pd, .scn-labels.no-dec-warning .dec-warning, .scn-labels.no-dec-epoch .dec-epoch { display: none; }
+.scn-more:not(:empty) { margin-left: 4px; font-size: 0.62rem; font-weight: 700; opacity: 0.75; }
