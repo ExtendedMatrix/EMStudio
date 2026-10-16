@@ -110,6 +110,9 @@ export interface SceneTexts {
   /** MICRO-SPAZIO-3D-3 p.4b · the header's words (Move, Rotate, Scale, plane,
    *  local, free) and the numbers in the person's language */
   modalWords?: ModalWords;
+  /** p.5 · «aggancio alla faccia» (G with Ctrl), «a scatti» (R / S with Ctrl) */
+  snapFace?: string;
+  snapStep?: string;
   num?: (v: number, digits: number) => string;
   /** MICRO-SPAZIO-3D-2 · the view's name, top left («Frontale · Ortometrica») */
   viewName?: (view: AlignedView | null, ortho: boolean) => string;
@@ -253,6 +256,8 @@ export interface SpaceSceneOptions {
    *  too), the active last; on release, ONE call with all their poses */
   transformTargets?: () => string[];
   onTransformMany?: (poses: Array<{ key: string; pose: Pose }>) => void;
+  /** MICRO-SPAZIO-3D-3 p.5 · «Allinea alla normale» (the N panel; off by default) */
+  snapAlign?: () => boolean;
 }
 
 interface Drawn {
@@ -1184,7 +1189,13 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
                      vp: { x: number; y: number } | null; wraps: number;
                      /** R: the angle summed motion by motion (it survives a wrap) */
                      turned: number;
-                     locked: boolean };
+                     locked: boolean;
+                     /** MICRO-SPAZIO-3D-3 p.5 · Ctrl held: G snaps to the faces, R and S step */
+                     ctrl: boolean;
+                     /** the lowest point of the objects' box along the up (three's y), at the start */
+                     bottom: any;
+                     /** the face under the pointer the last motion snapped to */
+                     snapped: { point: V3; normal: V3; ms: number } | null };
       let modal: Modal | null = null;
       let lastMouse: { x: number; y: number } | null = null;
       const pickSketch = (id: string | null) => {
@@ -1197,7 +1208,12 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
         modalEl.classList.toggle("hidden", !modal);
         if (modal) {
           // MICRO-SPAZIO-3D-3 p.4b · «Sposta · piano XY · D …», as Blender's header
-          modalEl.textContent = `${modalHeader(modal.st, headerValues(modalDelta()), opts.texts.modalWords, opts.texts.num)}${opts.texts.modalHint ? ` · ${opts.texts.modalHint}` : ""}`;
+          const dl0 = modalDelta();
+          // snapped: the constraint's place says it («Sposta · aggancio alla faccia · D …»)
+          const words = dl0?.kind === "snap" && opts.texts.modalWords && opts.texts.snapFace ? { ...opts.texts.modalWords, free: opts.texts.snapFace } : opts.texts.modalWords;
+          modalEl.textContent = `${modalHeader(dl0?.kind === "snap" ? { ...modal.st, axis: null } : modal.st, headerValues(dl0), words, opts.texts.num)}`
+            + `${modal.ctrl && dl0?.kind !== "snap" && modal.st.mode !== "grab" && opts.texts.snapStep ? ` · ${opts.texts.snapStep}` : ""}`
+            + `${opts.texts.modalHint ? ` · ${opts.texts.modalHint}` : ""}`;
           modalEl.dataset.label = modalLabel(modal.st);
         }
         drawGuides();
@@ -1262,7 +1278,36 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
       /** what the gesture does now, in three's axes: a move, a turn about an
        *  axis through the pivot, a scale from the pivot along the frame's axes */
       type Delta = { kind: "grab"; d: any } | { kind: "rotate"; axis: any; angle: number }
-                 | { kind: "scale"; fb: Record<"x" | "y" | "z", number> };
+                 | { kind: "scale"; fb: Record<"x" | "y" | "z", number> }
+                 /** p.5 · laid on a face: the box's lowest point on the hit, turned by `q` (aligned to the normal) */
+                 | { kind: "snap"; at: any; q: any | null };
+      /**
+       * MICRO-SPAZIO-3D-3 p.5 · the face under the pointer, as Blender's «Face»
+       * snap held with Ctrl: the surfaces of the OTHER objects — models,
+       * proxies, sketches, and the tileset's tiles as they are drawn (only the
+       * visible ones: `traverseVisible`); the objects moved and their children
+       * are out of the ray.
+       */
+      const snapFace = (pt: { x: number; y: number }, probeOnly = false): { point: any; normal: any; n?: number } | null => {
+        if (!modal && !probeOnly) return null;
+        const t0 = performance.now();
+        const moved = new Set((modal?.targets ?? []).map((t) => modalObject(t.id)).filter(Boolean));
+        const out = (o: any) => { for (let x = o; x; x = x.parent) if (moved.has(x)) return true; return false; };
+        const cands: any[] = [];
+        for (const o of pickables) if (o.visible !== false && !out(o)) cands.push(o);
+        if (sketchGroup.visible) for (const m of sketchMeshes.values()) if (m.visible && !moved.has(m)) cands.push(m);
+        for (const l of liveLayers()) if (l.layer.object.visible) l.layer.object.traverseVisible((o: any) => { if (o.isMesh) cands.push(o); });
+        ray.setFromCamera(ndcOf(pt.x, pt.y), camera);
+        const hh = ray.intersectObjects(cands, false)[0];
+        snapMs.push(performance.now() - t0);
+        if (snapMs.length > 600) snapMs.shift();
+        if (probeOnly) return hh ? { point: hh.point, normal: hh.face?.normal, n: cands.length } : { point: null, normal: null, n: cands.length };
+        if (!hh) return null;
+        const n = hh.face?.normal ? hh.face.normal.clone().transformDirection(hh.object.matrixWorld).normalize() : new THREE.Vector3(0, 1, 0);
+        if (n.dot(ray.ray.direction) > 0) n.negate();      // the face seen, not its back
+        return { point: hh.point.clone(), normal: n };
+      };
+      const snapMs: number[] = [];
       /** a page point's ray, met with the constraint (the line of an axis, the
        *  plane that excludes one, else the view's plane), through the pivot */
       const onConstraint = (pt: { x: number; y: number }, st: ModalState, pivot: any): any | null => {
@@ -1296,6 +1341,15 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
         const v = modalValue(st);
         const pivot = modal.pivot;
         const local = !!st.local;
+        if (st.mode === "grab" && modal.ctrl && v == null && (modal.vp ?? modal.mouse)) {
+          const f = snapFace(modal.vp ?? modal.mouse!);
+          if (f) {
+            modal.snapped = { point: arr(f.point), normal: arr(f.normal), ms: snapMs[snapMs.length - 1] ?? 0 };
+            const q = opts.snapAlign?.() ? new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), f.normal) : null;
+            return { kind: "snap", at: f.point, q };
+          }
+        }
+        if (modal.snapped && !(st.mode === "grab" && modal.ctrl)) modal.snapped = null;
         if (st.mode === "grab") {
           if (v != null) {
             // a number: along the axis (X when none), or along both of a plane's
@@ -1321,8 +1375,10 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
           const axis = axVec(st.axis ?? "z", local && !!st.axis);
           if (v != null) return { kind: "rotate", axis, angle: (v * Math.PI) / 180 };
           if (!modal.mouse0 || !modal.mouse) return { kind: "rotate", axis, angle: 0 };
-          // the angle summed motion by motion: a wrapped pointer keeps turning
-          return { kind: "rotate", axis, angle: -modal.turned };
+          // the angle summed motion by motion: a wrapped pointer keeps turning;
+          // Ctrl: in steps of 5°, as Blender's increment snap
+          const ang = -modal.turned;
+          return { kind: "rotate", axis, angle: modal.ctrl ? Math.round(ang / ((5 * Math.PI) / 180)) * ((5 * Math.PI) / 180) : ang };
         }
         let f = v;
         if (f == null) {
@@ -1331,6 +1387,8 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
             const centre = toScreen(pivot) ?? modal.mouse0;
             const r0 = Math.hypot(modal.mouse0.x - centre.x, modal.mouse0.y - centre.y) || 1;
             f = Math.hypot(modal.mouse.x - centre.x, modal.mouse.y - centre.y) / r0;
+            // Ctrl: in steps of 0.1
+            if (modal.ctrl) f = Math.round(f * 10) / 10;
           }
         }
         const free = new Set(freeAxes(st));
@@ -1340,6 +1398,14 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
       const poseUnder = (t: Target, dl: Delta, pivot: any): Pose => {
         const p0 = v3(t.start.position);
         if (dl.kind === "grab") return { ...t.start, position: arr(p0.add(dl.d)) };
+        if (dl.kind === "snap") {
+          // the objects' lowest point on the face; with «Allinea alla normale»
+          // their up turned onto the face's normal, about that point
+          const rel = p0.sub(modal!.bottom);
+          if (!dl.q) return { ...t.start, position: arr(rel.add(dl.at)) };
+          const e = new THREE.Euler().setFromQuaternion(dl.q.clone().multiply(t.q0), "XYZ");
+          return { ...t.start, position: arr(rel.applyQuaternion(dl.q).add(dl.at)), rotation: [e.x, e.y, e.z] };
+        }
         if (dl.kind === "rotate") {
           const q = new THREE.Quaternion().setFromAxisAngle(dl.axis, dl.angle);
           const pos = p0.sub(pivot).applyQuaternion(q).add(pivot);
@@ -1361,6 +1427,7 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
         if (!dl) return [0, 0, 0];
         if (dl.kind === "grab") return threeToBlender(arr(dl.d)).map((x) => x || 0);
         if (dl.kind === "rotate") return [(dl.angle * 180) / Math.PI];
+        if (dl.kind === "snap") return threeToBlender(arr(dl.at.clone().sub(modal!.bottom))).map((x) => x || 0);
         return [dl.fb.x, dl.fb.y, dl.fb.z];
       };
       const modalApply = () => {
@@ -1395,8 +1462,12 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
           const mp = medianPoint(targets.map((t) => arr(new THREE.Box3().setFromObject(modalObject(t.id)).getCenter(new THREE.Vector3()))));
           pivot = mp ? v3(mp) : v3(targets[0].start.position);
         }
+        const all = new THREE.Box3();
+        for (const t of targets) all.expandByObject(modalObject(t.id));
+        const bc = all.getCenter(new THREE.Vector3());
         modal = { targets, pivot, st: startModal(mode), mouse0: lastMouse, mouse: lastMouse,
-                  vp: lastMouse ? { ...lastMouse } : null, wraps: 0, turned: 0, locked: false };
+                  vp: lastMouse ? { ...lastMouse } : null, wraps: 0, turned: 0, locked: false,
+                  ctrl: false, bottom: new THREE.Vector3(bc.x, all.min.y, bc.z), snapped: null };
         modalClient = lastMouse ? { ...lastMouse } : null;
         controls.enabled = false;
         lockPointer();
@@ -1406,6 +1477,8 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
       };
       const endModal = (confirm: boolean) => {
         if (!modal) return;
+        // the last motions of the frame, not yet applied (they coalesce per frame)
+        if (confirm) modalApply();
         const out: Array<{ key: string; pose: Pose }> = [];
         for (const t of modal.targets) {
           const m = modalObject(t.id);
@@ -1458,6 +1531,8 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
         lockElement: document.pointerLockElement === renderer.domElement, vp: modal.vp, wraps: modal.wraps, mouse: modal.mouse,
         poses: modal.targets.map((t) => ({ id: t.id, pose: modalObject(t.id) ? poseOf(modalObject(t.id)) : null })) } : null);
       (probe as Record<string, unknown>).__spaceLockLog = () => lockLog.slice();
+      (probe as Record<string, unknown>).__spaceSnapProbe = (x: number, y: number) => { const f = snapFace({ x, y }, true); return f ? { hit: f.point ? arr(f.point) : null, candidates: f.n } : null; };
+      (probe as Record<string, unknown>).__spaceSnap = () => ({ snapped: modal?.snapped ?? null, ms: snapMs.slice() });
 
       // ── MICRO-SPAZIO-3D-3 p.4 · the pointer lock of a gesture ─────────────
       const lockLog: string[] = [];
@@ -1491,14 +1566,16 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
        *  `movementX`), the virtual pointer wrapped inside the 3D */
       const modalMove = (e: PointerEvent) => {
         if (!modal) return;
+        modal.ctrl = e.ctrlKey;
         const r = renderer.domElement.getBoundingClientRect();
         const mx = Number.isFinite(e.movementX) ? e.movementX : 0, my = Number.isFinite(e.movementY) ? e.movementY : 0;
         const prev = modal.mouse ?? { x: e.clientX, y: e.clientY };
-        // the motion: the event's own (locked, the only thing there is), else
-        // the page position's difference (a browser that gives no movementX)
+        // the motion: the event's own when locked (the only thing there is),
+        // else the page position's difference — exact, where movementX is
+        // rounded to the screen's pixels and drifts from the pointer
         const fromClient = modalClient ? { x: e.clientX - modalClient.x, y: e.clientY - modalClient.y } : { x: 0, y: 0 };
         modalClient = { x: e.clientX, y: e.clientY };
-        const rel = mx || my || document.pointerLockElement === renderer.domElement ? { x: mx, y: my } : fromClient;
+        const rel = document.pointerLockElement === renderer.domElement ? { x: mx, y: my } : fromClient;
         const next = { x: prev.x + rel.x, y: prev.y + rel.y };
         if (!modal.mouse0) modal.mouse0 = { ...next };
         // R: the angle summed, about the pivot's place on screen
@@ -1515,8 +1592,11 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
         modal.wraps = Math.round(Math.abs(Math.floor((next.x - r.left) / W)) + Math.abs(Math.floor((next.y - r.top) / H)));
         modal.vp = { x: wx, y: wy };
         lastMouse = modal.vp;
-        modalApply();
+        // one application per frame: the motions of a frame coalesce (the
+        // snap's raycast is the costly part, measured on a tileset's tile)
+        if (!modalQueued) { modalQueued = true; requestAnimationFrame(() => { modalQueued = false; modalApply(); }); }
       };
+      let modalQueued = false;
 
       const onDown = (e: PointerEvent) => {
         lastMouse = { x: e.clientX, y: e.clientY };
@@ -1744,6 +1824,8 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
         const stop = () => { e.preventDefault(); e.stopPropagation(); };
         if (modal) {
           stop();
+          // MICRO-SPAZIO-3D-3 p.5 · Ctrl pressed or released without moving
+          if (e.key === "Control") { modal.ctrl = true; modalApply(); return; }
           const next = modalKey(modal.st, e.key, e.shiftKey);
           if (next.done) { modal.st = next; endModal(next.done === "confirm"); return; }
           modal.st = next;
@@ -1825,6 +1907,8 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
       renderer.domElement.addEventListener("gesturechange", onGestureChange);
       document.addEventListener("keydown", onKey, true);
       document.addEventListener("pointermove", modalMove, true);
+      const onKeyUp = (e: KeyboardEvent) => { if (modal && e.key === "Control") { modal.ctrl = false; modalApply(); } };
+      document.addEventListener("keyup", onKeyUp, true);
       const ro = new ResizeObserver(() => {
         ({ w, h } = size());
         renderer.setSize(w, h);
@@ -1848,6 +1932,7 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
         ro.disconnect();
         document.removeEventListener("keydown", onKey, true);
         document.removeEventListener("pointermove", modalMove, true);
+        document.removeEventListener("keyup", onKeyUp, true);
         document.removeEventListener("pointerlockchange", onLockChange);
         document.removeEventListener("pointerlockerror", onLockError);
         unlockPointer();

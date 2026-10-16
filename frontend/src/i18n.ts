@@ -61,6 +61,12 @@ type Dict = Record<string, string>;
 // `emtree.`, `empty.`, `toast.`) so a translator can work a screen at a time and
 // an unused key is findable.
 const EN: Dict = {
+  "s3.snapFace": "snapped to the face",
+  "s3.snapStep": "in steps (5° · 0.1)",
+  "s3.nSnap": "Snap",
+  "s3.nSnapAlign": "Align to the normal",
+  "s3.nSnapNote": "G with Ctrl held: the object's lowest point rests on the face under the pointer (models, proxies, sketches, the tiles drawn). R and S with Ctrl: steps of 5° and 0.1.",
+  "keys.s3snap": "During G: snap to the face under the pointer; during R / S: steps of 5° / 0.1",
   "s3.mGrab": "Move",
   "s3.mRotate": "Rotate",
   "s3.mScale": "Scale",
@@ -3629,6 +3635,12 @@ const EN: Dict = {
 
 // ── Italiano: complete, because E.D. works in it ───────────────────────────────
 const IT: Dict = {
+  "s3.snapFace": "aggancio alla faccia",
+  "s3.snapStep": "a scatti (5° · 0,1)",
+  "s3.nSnap": "Aggancio",
+  "s3.nSnapAlign": "Allinea alla normale",
+  "s3.nSnapNote": "G tenendo Ctrl: il punto più basso dell'oggetto si appoggia sulla faccia sotto il puntatore (modelli, proxy, abbozzi, le tessere disegnate). R e S con Ctrl: passi di 5° e 0,1.",
+  "keys.s3snap": "Durante G: aggancio alla faccia sotto il puntatore; durante R / S: passi di 5° / 0,1",
   "s3.mGrab": "Sposta",
   "s3.mRotate": "Ruota",
   "s3.mScale": "Scala",

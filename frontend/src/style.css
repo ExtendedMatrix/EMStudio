@@ -9576,3 +9576,5 @@ button.hdto-v {
 .scn-vptr::before { left: -9px; top: -0.5px; width: 18px; height: 1px; }
 .scn-vptr::after { left: -0.5px; top: -9px; width: 1px; height: 18px; }
 .scn-modal-on canvas { cursor: none; }
+/* MICRO-SPAZIO-3D-3 · the gesture's header is read, never clicked: a click on it is the gesture's confirm */
+.scn-modal { pointer-events: none; max-width: calc(100% - 24px); white-space: normal; text-align: center; }

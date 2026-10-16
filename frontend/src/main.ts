@@ -22170,6 +22170,24 @@ function renderSpaceNPanel(el: HTMLElement, win: Win, h: SpaceSceneHandle): void
     none.textContent = t("s3.nNothing");
     obj.appendChild(none);
   }
+  // MICRO-SPAZIO-3D-3 p.5 · the snap: Ctrl during G lays the object on the face
+  // under the pointer; «Allinea alla normale» (off by default) turns it too
+  const sn = sect(t("s3.nSnap"), "snap");
+  const lab = document.createElement("label");
+  lab.className = "settings-check";
+  const cb = document.createElement("input");
+  cb.type = "checkbox";
+  cb.dataset.np = "snap-align";
+  cb.checked = space3dPrefs().snapAlign === true;
+  cb.addEventListener("change", () => setSpace3dPrefs({ ...space3dPrefs(), snapAlign: cb.checked }));
+  const sp1 = document.createElement("span");
+  sp1.textContent = t("s3.nSnapAlign");
+  lab.append(cb, sp1);
+  sn.appendChild(lab);
+  const snNote = document.createElement("p");
+  snNote.className = "xf-note";
+  snNote.textContent = t("s3.nSnapNote");
+  sn.appendChild(snNote);
   // the view and the lens
   const v: SceneView = h.view();
   const vw = sect(t("s3.nViewSect"), "view");
@@ -22657,7 +22675,9 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
       modalWords: { grab: t("s3.mGrab"), rotate: t("s3.mRotate"), scale: t("s3.mScale"), plane: t("s3.mPlane"),
         local: t("s3.mLocal"), free: t("s3.mFree") },
       num: (v, d) => v.toLocaleString(getLocale(), { minimumFractionDigits: d, maximumFractionDigits: d, useGrouping: false }),
+      snapFace: t("s3.snapFace"), snapStep: t("s3.snapStep"),
     },
+    snapAlign: () => space3dPrefs().snapAlign === true,
     // MICRO-SPAZIO-3D-2 · the navigation's Preferences, read at every press
     nav: () => {
       const v = getSettings().viewer;

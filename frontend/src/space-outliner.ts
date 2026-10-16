@@ -140,6 +140,8 @@ export interface Space3dPrefs {
   /** MICRO-SPAZIO-3D-2 · the N panel («Vista») on the right, and its width */
   nShown: boolean;
   nWidth: number;
+  /** MICRO-SPAZIO-3D-3 p.5 · «Allinea alla normale»: G with Ctrl turns the object's up onto the face */
+  snapAlign?: boolean;
 }
 
 export const DEFAULT_PREFS: Space3dPrefs = { shown: true, width: 260, toggled: [], hidden: [], locked: [], nShown: false, nWidth: 250 };
@@ -161,6 +163,7 @@ export function loadSpacePrefs(person: string | null | undefined): Space3dPrefs 
       toggled: list(p.toggled), hidden: list(p.hidden), locked: list(p.locked),
       nShown: typeof p.nShown === "boolean" ? p.nShown : DEFAULT_PREFS.nShown,
       nWidth: typeof p.nWidth === "number" && p.nWidth >= 180 && p.nWidth <= 520 ? p.nWidth : DEFAULT_PREFS.nWidth,
+      snapAlign: p.snapAlign === true,
     };
   } catch {
     return { ...DEFAULT_PREFS, toggled: [], hidden: [], locked: [] };
