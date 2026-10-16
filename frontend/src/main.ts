@@ -8198,7 +8198,11 @@ function applyCommandResult(res: {
     // `addSubgraph`: verbatim insert, ONE undo step, no re-stamping — the nodes
     // were made by the host and carry its hand (AUDIT1's rule for work that
     // arrives from elsewhere).
-    added = slot.store.addSubgraph(nodes, edges);
+    // MICRO-SPAZIO-3D-2 p.7 · in a ROOM the delta is what this person asked
+    // for, and nobody else sends it (EM Tools answers the command with the
+    // delta only, `commands.execute`): it goes to the node. Beside a host
+    // (sidecar) the host made it and has it: not sent back.
+    added = slot.store.addSubgraph(nodes, edges, { share: !!sync.room });
   }
   buildScenes();
   draw();
@@ -21580,7 +21584,9 @@ function openProxyFolderPreview(units: string[]): void {
       });
       const j = await res.json() as { ok?: boolean; nodes?: EmNode[]; edges?: EmEdge[]; error?: string };
       if (!res.ok || !j.ok) throw new Error(j.error ?? `HTTP ${res.status}`);
-      const added = st.addSubgraph(j.nodes ?? [], j.edges ?? []);
+      // MICRO-SPAZIO-3D-2 p.7 · this person's gesture (the proxies of 3d_obj/
+      // bound to their units): in a room it reaches the node, one step
+      const added = st.addSubgraph(j.nodes ?? [], j.edges ?? [], { share: true });
       const msg = t("space.link3dobjDone", { n: String(pairs.length), nodes: String(added.nodes), edges: String(added.edges) });
       logInfo(msg, pairs.map((p) => p.unit));
       toastUndo(msg, st);
@@ -23483,7 +23489,8 @@ async function confirmShelfPromote(): Promise<void> {
     String((sl.store.doc.graph as Record<string, unknown>).graph_id ?? sl.id)
     === String(answer.graph_id ?? "")) ?? emtree.active();
   if (graph && slot) {
-    const added = slot.store.addSubgraph(graph.nodes ?? [], graph.edges ?? []);
+    // MICRO-SPAZIO-3D-2 p.7 · a promotion is this person's gesture: shared
+    const added = slot.store.addSubgraph(graph.nodes ?? [], graph.edges ?? [], { share: true });
     logInfo(t("shelf.promoted", {
       name: shelfPromoteTarget.name,
       facet: t(`shelf.facet.${facet}`, {}, facet),
