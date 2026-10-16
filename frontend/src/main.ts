@@ -229,7 +229,7 @@ import { openSitePicker } from "./site-picker";
 import * as chain from "./paradata-chain";
 import { carriedPropertyEdges, compactableUnits, compactProperties, dissolveGroups, drawnEdgeKey,
          propertyBadges } from "./compact";
-import { viewIndex, viewInstances } from "./paradata-view";
+import { unitsWithout3d, viewIndex, viewInstances } from "./paradata-view";
 import { applyDelta, askLibrary, libraryValue, readFromProperty, rereadProperty,
          type Dependent, type LibraryDelta } from "./property-source";
 import type { ReasoningRecord } from "./issues";
@@ -239,7 +239,11 @@ import { DOC_TOOLS, renderReadingStage, selectedPassage, type DocTool,
 import { openReadingBubble, type BubbleUnit } from "./reading-bubble";
 import { renderChronology, type ChronoEpoch, type ChronologyData } from "./chronology";
 import { buildSpace, citationKey, SpaceMarks, type Space } from "./space";
-import { mountSpaceScene, type SceneItem } from "./scene3d";
+import { mountSpaceScene, type SceneItem, type SceneMenuRequest, type SpaceSceneHandle } from "./scene3d";
+import { eulerFromUp, type CamState, type V3 } from "./space-nav";
+import { addSketch, listSketches, onSketches, removeSketch, SHAPE_FAMILIES, SHAPES, shapeById, shapeLabel, sketchById } from "./shapes3d";
+import { buildOutlinerTree, loadSpacePrefs, renderOutliner, saveSpacePrefs, type Space3dPrefs } from "./space-outliner";
+import { patchProxyNodes, proxyRelPath } from "./proxy-association";
 import { trackpadClassifier } from "./wheel-kind";
 import { isTilesetUrl } from "./tiles3d";
 import type { ModelOptions } from "./embed3d-native";
@@ -330,6 +334,7 @@ import {
   pickSourceFile,
   pickXlsx,
   readBinaryFile,
+  writeBinaryFile,
 } from "./tauri";
 import {
   describeExtraction,
@@ -417,7 +422,7 @@ import {
 import { adornmentBadges, type AdornmentBadge } from "./adornments";
 import { drawnPdChips, hitPdChip } from "./pd-chip";
 import {
-  defaultOverlays, drawnOverlayCounts, loadOverlays, NOBODY, OVERLAY_GROUPS, overlayItemsFor, overlaysHideSomething,
+  defaultOverlays, drawnOverlayCounts, loadOverlays, NOBODY, OVERLAY_GROUPS, overlayItemsFor, overlayShown, overlaysHideSomething,
   saveOverlays, withGroup, withOverlay, type OverlayKey, type OverlayState, type OverlayView,
 } from "./overlays";
 import { PD_CELL } from "./views/pd-arrange";
@@ -11387,7 +11392,7 @@ async function bridgeUrl(): Promise<string> {
   return _bridgeUrl;
 }
 /** The bridge level this editor expects (`BRIDGE_LEVEL` in tools/em_bridge.py). */
-const BRIDGE_LEVEL_WANTED = 32;   // 31 = /property-source (FONTE); 32 = /room-import, «Bring into a room» through the engine
+const BRIDGE_LEVEL_WANTED = 33;   // 31 = /property-source (FONTE); 32 = /room-import, «Bring into a room» through the engine; 33 = /fs/write (MICRO-SPAZIO-3D)
 /**
  * DEV30 U9 · WHY a call to the bridge failed, in words.
  *
@@ -14414,8 +14419,10 @@ function refreshFunnel(): void {
     || (!!lastGraphWinId && winAreas.has(lastGraphWinId));
   const belongs = !!store && anchored && !filterPanelOpen() && !overlayPanelOpen();
   btnViewProps.classList.toggle("hidden", !belongs);
-  // MICRO-SOVRAPPOSIZIONI · the overlays' glyph, beside the funnel, by the same rule
-  btnOverlays.classList.toggle("hidden", !belongs);
+  // MICRO-SOVRAPPOSIZIONI · the overlays' glyph, beside the funnel, by the same
+  // rule — and (MICRO-SPAZIO-3D) with the Space in focus, for the Space's own
+  const space = !!store && activeWindowType() === "scene" && !overlayPanelOpen();
+  btnOverlays.classList.toggle("hidden", !belongs && !space);
   refreshOverlayDot();
 }
 // Monochrome (B/W) display toggle — every node draws black-bordered + white
@@ -14702,6 +14709,12 @@ function overlaysOf(v: OverlayView): OverlayState {
 function setOverlays(v: OverlayView, st: OverlayState): void {
   overlayMemo.set(`${overlayPerson()}|${v}`, st);
   saveOverlays(overlayPerson(), v, st);
+  // MICRO-SPAZIO-3D · the Space's: its scenes re-read them (what is drawn, and
+  // the decorators without a reload)
+  if (v === "space") {
+    refreshSurfaces("scene");
+    for (const h of sceneHandles.values()) h.applyOverlays();
+  }
   draw();
   if (overlayPanelOpen()) renderOverlayPanel();
   refreshOverlayDot();
@@ -14713,6 +14726,7 @@ function overlayViewOf(winId: string, mode: ViewKind): OverlayView {
 /** the view the menu edits: the focused graph window's, else the last one's */
 function focusedOverlayView(): OverlayView {
   const here = activeWin();
+  if (here.type === "scene") return "space";
   const id = here.type === "graph" ? here.id
     : lastGraphWinId && winAreas.has(lastGraphWinId) ? lastGraphWinId : null;
   return id ? overlayViewOf(id, graphModeOf(id)) : view;
@@ -14766,7 +14780,7 @@ btnOverlays.addEventListener("click", (e) => {
   else openOverlayPanel();
 });
 function overlayViewName(v: OverlayView): string {
-  return v === "soloing" ? t("ov.view.soloing") : t(`mode.${v}`);
+  return v === "soloing" ? t("ov.view.soloing") : v === "space" ? t("ov.view.space") : t(`mode.${v}`);
 }
 function renderOverlayPanel(): void {
   const v = focusedOverlayView();
@@ -16743,6 +16757,11 @@ interface SavedView {
   folded: string[];
   context: string[];
   contextWin: string | null;
+  /** MICRO-SPAZIO-3D · the workspace the view was in: «Indietro» from the Space
+   *  to a graph of another workspace goes back there */
+  ws?: WorkspaceId;
+  /** MICRO-SPAZIO-3D · a view of the Space: its camera and its epoch */
+  space?: { cam: CamState; epoch: string | null };
 }
 const viewHistory: SavedView[] = [];
 const VIEW_HISTORY_MAX = 60;
@@ -16750,11 +16769,19 @@ const VIEW_HISTORY_MAX = 60;
 function captureView(): SavedView | null {
   if (!store) return null;
   const win = activeWin();
+  // MICRO-SPAZIO-3D · a zoom to the detail or to a box in the Space is a jump too
+  if (win.type === "scene") {
+    const cam = sceneHandles.get(win.id)?.camera();
+    if (!cam) return null;
+    return { doc: store, win: win.id, mode: view, vp: { x: 0, y: 0, scale: 1 }, selected: [...selectedIds], selectedId,
+             folded: [...(store.doc.layout?.folded_groups ?? [])], context: [...contextStack], contextWin: contextWinId,
+             ws: activeWorkspace(), space: { cam, epoch: spaceEpochId } };
+  }
   if (win.type !== "graph") return null;
   const vp = viewport();
   return { doc: store, win: win.id, mode: view, vp: { x: vp.x, y: vp.y, scale: vp.scale },
            selected: [...selectedIds], selectedId, folded: [...(store.doc.layout?.folded_groups ?? [])],
-           context: [...contextStack], contextWin: contextWinId };
+           context: [...contextStack], contextWin: contextWinId, ws: activeWorkspace() };
 }
 
 function pushView(): void {
@@ -16773,6 +16800,20 @@ function canGoBack(): boolean {
 function goBack(): void {
   if (!store || !canGoBack()) return;
   const v = viewHistory.pop()!;
+  // MICRO-SPAZIO-3D · the workspace the view was in, first
+  if (v.ws && v.ws !== activeWorkspace()) setWorkspace(v.ws);
+  if (v.space) {
+    // a view of the Space: its window, its epoch, its camera, its selection
+    const sw = windowsOf().find((w) => w.id === v.win && winAreas.has(w.id));
+    if (sw) setActiveWin(sw.id);
+    if (v.space.epoch) spaceEpochId = v.space.epoch;
+    pickOnCanvas = true;
+    try { select(v.selectedId && store.node(v.selectedId) ? v.selectedId : null); } finally { pickOnCanvas = false; }
+    sceneHandles.get(v.win)?.setCamera(v.space.cam);
+    refreshSurfaces("scene");
+    renderBackButtons();
+    return;
+  }
   const win = windowsOf().find((w) => w.id === v.win && winAreas.has(w.id));
   if (win) {
     setActiveWin(win.id);
@@ -21316,10 +21357,6 @@ async function openResourceInScene(resId: string): Promise<void> {
   await openPathInScene(abs, resId);
 }
 
-/** The window's toggles: «Modelli (RM)» and «Proxy», both on by default. */
-function spaceToggle(win: Win, which: "rm" | "px"): boolean {
-  return winCurrent(win, `space.${which}`) !== false;
-}
 
 // ── P1 · the proxies of `3d_obj/`, by name (EM convention) ──────────────────
 // Beside the em.json a `3d_obj/` folder whose files carry the units' names
@@ -21427,12 +21464,440 @@ function openProxyFolderPreview(units: string[]): void {
   document.body.appendChild(box);
 }
 
+// ── MICRO-SPAZIO-3D · the Space as a working space ──────────────────────────
+//
+// E.D., 11 Oct 2026: the epochs and the two layers stay; around them, the tools
+// of a 3D viewport — the Outliner (T), Blender's navigation, the overlays, a
+// gizmo to sketch proxies. The scene (`scene3d.ts`) holds three.js and the
+// gestures; here are the parts that know the graph and the app: what the
+// Outliner lists, what a menu offers, how a sketch becomes a unit's proxy.
+
+/** the scene of every Space window, for «Indietro» and the menus */
+const sceneHandles = new Map<string, SpaceSceneHandle>();
+/** the overlays that are CONTENT (what is drawn), not decorators: the general
+ *  switch leaves them as they are — switching the overlays off does not empty
+ *  the scene, as in Blender */
+const CONTENT_3D = new Set<OverlayKey>(["s3_proxies", "s3_rm", "s3_tiles", "s3_sketches", "s3_proxy_wire"]);
+function space3dShown(k: OverlayKey): boolean {
+  const st = overlaysOf("space");
+  return CONTENT_3D.has(k) ? !st.off.includes(k) : overlayShown(st, k);
+}
+let sp3: { person: string; prefs: Space3dPrefs } | null = null;
+function space3dPrefs(): Space3dPrefs {
+  const who = overlayPerson();
+  if (!sp3 || sp3.person !== who) sp3 = { person: who, prefs: loadSpacePrefs(who) };
+  return sp3.prefs;
+}
+function setSpace3dPrefs(p: Space3dPrefs): void {
+  sp3 = { person: overlayPerson(), prefs: p };
+  saveSpacePrefs(sp3.person, p);
+  refreshSurfaces("scene");
+}
+/** «Isola»: the one object shown, by key */
+let spaceIsolated: string | null = null;
+let spaceQuery = "";
+/** the sketch selected (it is not a node of the graph) */
+let spaceSketchSel: string | null = null;
+/** the last pointer over a scene, where Shift+A opens its menu */
+let spacePointer: { x: number; y: number } | null = null;
+onSketches(() => {
+  for (const h of sceneHandles.values()) h.syncSketches();
+  if (spaceSketchSel && !sketchById(spaceSketchSel)) spaceSketchSel = null;
+  refreshSurfaces("scene");
+});
+
+/** The key of a selected node in the Space (`rm:` a model, `proxy:` a unit). */
+function spaceKeyOf(id: string | null, sp: Space | null): string | null {
+  if (!id || !sp) return null;
+  if (sp.rms.some((r) => r.id === id)) return `rm:${id}`;
+  if (sp.proxies.has(id)) return `proxy:${id}`;
+  if (sp.epochs.some((e) => e.id === id)) return `epoch:${id}`;
+  return null;
+}
+function spaceSelectedKeys(sp: Space | null): Set<string> {
+  const out = new Set<string>();
+  const k = spaceKeyOf(selectedId, sp);
+  if (k) out.add(k);
+  if (spaceSketchSel) out.add(`sketch:${spaceSketchSel}`);
+  return out;
+}
+/** USVs → USV/s: the abbreviation the Matrix's legend uses */
+function unitTypeLabel(type: string): string {
+  const m = /^(ser)?USV([sn])$/.exec(type);
+  return m ? `${m[1] ?? ""}USV/${m[2]}` : type;
+}
+/** the 3D's epoch for a node: the model's first epoch, the unit's top epoch */
+function spaceEpochFor(id: string, sp: Space): string | null {
+  const rm = sp.rms.find((r) => r.id === id);
+  if (rm) return rm.epochs.includes(spaceEpochOf(sp) ?? "") ? spaceEpochOf(sp) : rm.epochs[0] ?? null;
+  for (const e of sp.epochs) if (sp.summary(e.id)?.units.includes(id)) {
+    if (e.id === spaceEpochOf(sp)) return e.id;
+  }
+  return sp.epochs.find((e) => sp.summary(e.id)?.units.includes(id))?.id ?? null;
+}
+
+/** a small menu at a page point, in the style of the graph's */
+let spaceMenuEl: HTMLElement | null = null;
+function closeSpaceMenu(): void {
+  spaceMenuEl?.remove();
+  spaceMenuEl = null;
+}
+// a press outside the menu, or Esc, closes it
+document.addEventListener("pointerdown", (e) => {
+  if (spaceMenuEl && !spaceMenuEl.contains(e.target as Node)) closeSpaceMenu();
+}, true);
+document.addEventListener("keydown", (e) => { if (spaceMenuEl && e.key === "Escape") { e.stopPropagation(); closeSpaceMenu(); } }, true);
+function spaceMenu(x: number, y: number, head: string, entries: Array<{ label: string; act: string; run: () => void; disabled?: boolean } | "sep">): HTMLElement {
+  hideContextMenu();
+  closeSpaceMenu();
+  const menu = document.createElement("div");
+  menu.className = "ctx-menu scn-menu";
+  menu.style.left = `${Math.min(x, innerWidth - 230)}px`;
+  menu.style.top = `${Math.min(y, innerHeight - 40 - entries.length * 28)}px`;
+  if (head) {
+    const h = document.createElement("div");
+    h.className = "ctx-header";
+    h.textContent = head;
+    menu.appendChild(h);
+  }
+  for (const e of entries) {
+    if (e === "sep") {
+      const s = document.createElement("div");
+      s.className = "ctx-sep";
+      menu.appendChild(s);
+      continue;
+    }
+    const b = document.createElement("button");
+    b.textContent = e.label;
+    b.dataset.s3 = e.act;
+    b.disabled = !!e.disabled;
+    b.onclick = () => { closeSpaceMenu(); e.run(); };
+    menu.appendChild(b);
+  }
+  document.body.appendChild(menu);
+  spaceMenuEl = menu;
+  return menu;
+}
+
+/** Shift+A in the Space · «Aggiungi»: the base shapes, born at the 3D cursor. */
+function openShapeMenu(x: number, y: number, win: Win): void {
+  const lang = getLocale();
+  const entries: Array<{ label: string; act: string; run: () => void } | "sep"> = [];
+  let fam = "";
+  for (const s of SHAPES) {
+    if (fam && s.family !== fam) entries.push("sep");
+    fam = s.family;
+    entries.push({ label: shapeLabel(s, lang), act: `add:${s.id}`, run: () => addShapeIn(win, s.id) });
+  }
+  const m = spaceMenu(x, y, t("s3.addMenu"), entries);
+  m.classList.add("scn-add");
+}
+
+/** A sketch of `shapeId`: at the 3D cursor, or laid on the surface under a
+ *  page point (its up turned to the surface's normal). */
+function addShapeIn(win: Win, shapeId: string, drop?: { x: number; y: number }): void {
+  const h = sceneHandles.get(win.id);
+  const spec = shapeById(shapeId);
+  if (!h || !spec) return;
+  let at = h.cursor();
+  let rot: V3 = [0, 0, 0];
+  if (drop) {
+    const s = h.surfaceAt(drop.x, drop.y);
+    if (s) { at = s.point; rot = eulerFromUp(s.normal); }
+  }
+  if (!space3dShown("s3_sketches"))
+    setOverlays("space", withOverlay(overlaysOf("space"), "s3_sketches", true));
+  const sk = addSketch(shapeId, at, shapeLabel(spec, getLocale()), rot);
+  spaceSketchSel = sk.id;
+  for (const x of sceneHandles.values()) x.selectSketch(sk.id);
+  logInfo(t("s3.sketched", { name: sk.name }));
+}
+
+/** The menu of a right click in the Space. */
+function sceneMenu(win: Win, h: SpaceSceneHandle, m: SceneMenuRequest): void {
+  const st = store;
+  const sp = currentSpace();
+  if (!st || !sp) return;
+  const isolate = (key: string) => { spaceIsolated = spaceIsolated === key ? null : key; refreshSurfaces("scene"); };
+  if (m.kind === "sketch" && m.id) {
+    const sk = sketchById(m.id);
+    if (!sk) return;
+    spaceMenu(m.x, m.y, sk.name, [
+      { label: t("s3.associate"), act: "associate", run: () => openAssociate(win, sk.id) },
+      { label: t("s3.frame"), act: "frame", run: () => h.frameKeys([`sketch:${sk.id}`]) },
+      { label: t("s3.isolate"), act: "isolate", run: () => isolate(`sketch:${sk.id}`) },
+      "sep",
+      { label: t("s3.deleteSketch"), act: "delete", run: () => removeSketch(sk.id) },
+    ]);
+    return;
+  }
+  if (m.kind === "proxy" && m.id) {
+    const id = m.id;
+    spaceMenu(m.x, m.y, String(st.node(id)?.name ?? id), [
+      { label: t("s3.frame"), act: "frame", run: () => h.frameKeys([`proxy:${id}`]) },
+      { label: t("s3.isolate"), act: "isolate", run: () => isolate(`proxy:${id}`) },
+      { label: t("s3.showInGraph"), act: "graph", run: () => jumpTo(id) },
+      { label: t("s3.selectUnit"), act: "select", run: () => { select(id); refreshInspector(); } },
+    ]);
+    return;
+  }
+  if (m.kind === "rm" && m.id) {
+    const id = m.id;
+    const rm = sp.rms.find((r) => r.id === id);
+    spaceMenu(m.x, m.y, rm?.name ?? String(st.node(id)?.name ?? id), [
+      { label: t("s3.solo"), act: "solo", disabled: !rm?.documentId,
+        run: () => { if (rm?.documentId) requestDoc(rm.documentId, { from: win, reading: null }); } },
+      { label: t("s3.frame"), act: "frame", run: () => h.frameKeys([`rm:${id}`]) },
+      { label: t("s3.isolate"), act: "isolate", run: () => isolate(`rm:${id}`) },
+      { label: t("s3.showInGraph"), act: "graph", run: () => jumpTo(id) },
+      { label: t("s3.selectModel"), act: "select", run: () => { select(id); refreshInspector(); } },
+    ]);
+    return;
+  }
+  spaceMenu(m.x, m.y, "", [
+    { label: `${t("s3.addMenu")} ▸`, act: "add", run: () => openShapeMenu(m.x + 12, m.y, win) },
+    { label: t("s3.frameAll"), act: "frame-all", run: () => h.frame() },
+    { label: t("s3.frameCursor"), act: "frame-cursor", run: () => h.frameCursor() },
+    { label: t("s3.boxZoom"), act: "box", run: () => h.armBoxZoom() },
+    ...(spaceIsolated ? [{ label: t("s3.showAll"), act: "unisolate", run: () => { spaceIsolated = null; refreshSurfaces("scene"); } }] : []),
+  ]);
+}
+
+/** «Associa a un'unità…»: the units a proxy can be given to (`units_without_3d`),
+ *  those of the scene's epoch first. */
+function openAssociate(win: Win, sketchId: string): void {
+  const st = store;
+  const sp = currentSpace();
+  if (!st || !sp) return;
+  document.querySelector(".s3-assoc")?.remove();
+  const free = unitsWithout3d(st.doc);
+  const epoch = spaceEpochOf(sp);
+  const here = new Set(epoch ? sp.summary(epoch)?.units ?? [] : []);
+  const units = free.without.map((id) => ({ id, name: String(st.node(id)?.name ?? id), type: String(st.node(id)?.node_type ?? ""),
+    here: here.has(id), empty: free.empty.includes(id) }))
+    .sort((a, b) => Number(b.here) - Number(a.here) || a.name.localeCompare(b.name, undefined, { numeric: true }));
+  const box = document.createElement("div");
+  box.className = "conn-panel s3-assoc";
+  box.setAttribute("role", "dialog");
+  const h = document.createElement("h4");
+  h.textContent = t("s3.associateHead", { name: sketchById(sketchId)?.name ?? "" });
+  const p = document.createElement("p");
+  p.className = "insp-hint";
+  p.textContent = t("s3.associateHint", { n: String(units.length) });
+  const q = document.createElement("input");
+  q.type = "search";
+  q.className = "s3-assoc-q";
+  q.placeholder = t("s3.search");
+  const ul = document.createElement("ul");
+  ul.className = "conn-members s3-assoc-list";
+  const draw = () => {
+    ul.textContent = "";
+    const s = q.value.trim().toLowerCase();
+    for (const u of units.filter((x) => !s || x.name.toLowerCase().includes(s)).slice(0, 200)) {
+      const li = document.createElement("li");
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "link";
+      b.dataset.unit = u.id;
+      b.textContent = `${u.name} · ${unitTypeLabel(u.type)}${u.here ? "" : ` · ${t("s3.otherEpoch")}`}${u.empty ? ` · ${t("s3.emptyGeometry")}` : ""}`;
+      b.addEventListener("click", () => { box.remove(); void associateSketch(win, sketchId, u.id); });
+      li.appendChild(b);
+      ul.appendChild(li);
+    }
+  };
+  q.addEventListener("input", draw);
+  const acts = document.createElement("div");
+  acts.className = "conn-acts";
+  const no = document.createElement("button");
+  no.type = "button";
+  no.className = "conn-btn";
+  no.textContent = t("settings.cancel");
+  no.addEventListener("click", () => box.remove());
+  acts.appendChild(no);
+  box.append(h, p, q, ul, acts);
+  Object.assign(box.style, { position: "fixed", left: "50%", top: "14%", transform: "translateX(-50%)", zIndex: "70",
+    width: "min(440px, calc(100vw - 32px))", maxHeight: "70vh", overflow: "auto" });
+  document.body.appendChild(box);
+  draw();
+  q.focus();
+}
+
+
+/**
+ * A sketch becomes the PROXY of a unit, with EM Tools' rule (Heriverse report,
+ * 6 Oct): the glb at `proxies/<unit>.glb`, relative to the project's folder,
+ * Y-up; the chain — property `geometry` → `has_semantic_shape` → SemanticShape
+ * → `has_linked_resource` → a `proxy_model` resource — written by s3Dgraphy's
+ * `create_geometry_proxy` through the bridge (the ids are the library's), its
+ * resource given the glb's sha256. Without a folder (a room only) the bytes go
+ * to the room's store, by digest, as every other file. ONE step of undo and of
+ * the CRDT (`addSubgraph`); the file written is not taken back by an undo.
+ */
+async function associateSketch(win: Win, sketchId: string, unitId: string): Promise<boolean> {
+  const st = store;
+  const h = sceneHandles.get(win.id) ?? [...sceneHandles.values()][0];
+  const sk = sketchById(sketchId);
+  if (!st || !h || !sk) return false;
+  const unitName = String(st.node(unitId)?.name ?? unitId);
+  const rel = proxyRelPath(unitName);
+  const fail = (why: string) => { toast(t("s3.associateFailed", { why })); return false; };
+  const glb = await h.sketchGlb(sketchId);
+  if (!glb) return fail(t("s3.noGlb"));
+  const bytes = new Uint8Array(glb);
+  const digest = [...new Uint8Array(await crypto.subtle.digest("SHA-256", bytes))].map((b) => b.toString(16).padStart(2, "0")).join("");
+  // the bytes: beside the em.json, or into the room's store
+  const dir = currentFilePath ? currentFilePath.replace(/[^/\\]*$/, "") : "";
+  let where: "folder" | "store";
+  try {
+    if (dir) {
+      const full = `${dir}${rel}`;
+      if (isTauri()) await writeBinaryFile(full, bytes);
+      else {
+        const r = await fetch(`${await bridgeUrl()}/fs/write`, { method: "POST", body: bytes,
+          headers: { "Content-Type": "application/octet-stream", "X-EM-Path": encodeURIComponent(full) } });
+        if (!r.ok) throw new Error(`${r.status} ${(await r.text()).slice(0, 160)}`);
+      }
+      where = "folder";
+    } else if (sync.room) {
+      const put = await putIntoStore(bytes, "model/gltf-binary");
+      if (!put) throw new Error(t("s3.storeRefused"));
+      where = "store";
+    } else {
+      return fail(t("s3.noFolder"));
+    }
+  } catch (e) {
+    return fail(String(e instanceof Error ? e.message : e));
+  }
+  // the chain, by the library
+  let j: { ok?: boolean; nodes?: EmNode[]; edges?: EmEdge[]; error?: string };
+  try {
+    const res = await fetch(`${await bridgeUrl()}/geometry-proxies`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ doc: JSON.parse(st.toJSON()), items: [{ unit_id: unitId, url: rel }] }),
+    });
+    j = await res.json();
+    if (!res.ok || !j.ok) throw new Error(j.error ?? `HTTP ${res.status}`);
+  } catch (e) {
+    return fail(String(e instanceof Error ? e.message : e));
+  }
+  // the file is THERE: its digest, resident, its type and size
+  const nodes = patchProxyNodes(j.nodes ?? [], rel, digest, bytes.length);
+  // one step of undo, and — shared — one batch of operations to the room
+  const added = st.addSubgraph(nodes, j.edges ?? [], { share: true });
+  removeSketch(sketchId);
+  const msg = t(where === "folder" ? "s3.associatedFolder" : "s3.associatedStore",
+    { unit: unitName, file: rel, nodes: String(added.nodes), edges: String(added.edges) });
+  logInfo(msg, [unitId]);
+  toastUndo(msg, st);
+  spaceResident = null;
+  buildScenes();
+  draw();
+  select(unitId);
+  refreshInspector();
+  refreshSurfaces("scene");
+  return true;
+}
+
+/** The Outliner of a Space window, drawn into `el`. */
+function renderSpaceOutliner(el: HTMLElement, win: Win, sp: Space | null): void {
+  const prefs = space3dPrefs();
+  const st = store;
+  const h = sceneHandles.get(win.id);
+  const lang = getLocale();
+  const cur = sp ? spaceEpochOf(sp) : null;
+  const rows = sp && st ? buildOutlinerTree({
+    epochs: sp.epochs.map((e) => ({ id: e.id, name: e.name, current: e.id === cur })),
+    rms: (ep) => (sp.summary(ep)?.rms ?? []).map((r) => {
+      const drawnUrl = h?.drawnUrl(`rm:${r.id}`) ?? "";
+      const tail = (u: string) => decodeURIComponent(u.split(/[?#]/)[0]).split("/").pop() ?? "";
+      return { id: r.id, name: r.name, glyph: String(st.node(r.id)?.node_type ?? "representation_model"),
+        tileset: !!r.resource?.tiles,
+        versions: (r.versions ?? []).map((v) => ({ id: v.id, name: v.name + (v.master ? ` · ${t("s3.master")}` : ""),
+          drawn: !!drawnUrl && !!v.url && tail(drawnUrl) === tail(v.url), chosen: r.choice?.entry?.id === v.id })) };
+    }),
+    proxies: (ep) => (sp.summary(ep)?.withProxy ?? []).filter((u) => sp.proxies.has(u))
+      .map((u) => ({ unitId: u, name: String(st.node(u)?.name ?? u), type: String(st.node(u)?.node_type ?? "US") })),
+    typeLabel: unitTypeLabel,
+    sketches: listSketches().map((s) => ({ id: s.id, name: s.name, shape: s.shape })),
+    texts: { rms: t("s3.rms"), proxies: t("s3.proxies"), sketches: t("s3.sketches") },
+  }) : [];
+  const fam = new Map(SHAPE_FAMILIES.map((f) => [f.id, shapeLabel(f, lang)]));
+  renderOutliner(el, {
+    rows, prefs, selected: spaceSelectedKeys(sp), isolated: spaceIsolated, query: spaceQuery,
+    glyph: (k) => typeIconElement(k),
+    texts: { search: t("s3.search"), isolate: t("s3.isolate"), frame: t("s3.frame"), eye: t("s3.eye"),
+             arrow: t("s3.arrow"), palette: t("s3.palette"), close: t("s3.closeOutliner"), empty: t("s3.outlinerEmpty") },
+    palette: SHAPES.map((s) => ({ id: s.id, name: shapeLabel(s, lang), family: s.family, familyName: fam.get(s.family) ?? s.family })),
+  }, {
+    pick: (r) => {
+      if (r.kind === "sketch") {
+        spaceSketchSel = r.id;
+        for (const x of sceneHandles.values()) x.selectSketch(r.id);
+        refreshSurfaces("scene");
+        return;
+      }
+      if (r.kind === "epoch") { spaceEpochId = r.id; select(r.id); refreshInspector(); return; }
+      if (r.kind === "rm" || r.kind === "tileset" || r.kind === "proxy") {
+        if (sp) { const ep = spaceEpochFor(r.id, sp); if (ep) spaceEpochId = ep; }
+        spaceSketchSel = null;
+        for (const x of sceneHandles.values()) x.selectSketch(null);
+        select(r.id);
+        refreshInspector();
+        return;
+      }
+      if (r.kind === "version") { select(r.id); refreshInspector(); return; }
+      const p = space3dPrefs();
+      const tg = new Set(p.toggled);
+      if (tg.has(r.key)) tg.delete(r.key); else tg.add(r.key);
+      setSpace3dPrefs({ ...p, toggled: [...tg] });
+    },
+    toggleOpen: (key) => {
+      const p = space3dPrefs();
+      const tg = new Set(p.toggled);
+      if (tg.has(key)) tg.delete(key); else tg.add(key);
+      setSpace3dPrefs({ ...p, toggled: [...tg] });
+    },
+    toggleHidden: (keys, hide) => {
+      const p = space3dPrefs();
+      const s = new Set(p.hidden);
+      for (const k of keys) if (hide) s.add(k); else s.delete(k);
+      setSpace3dPrefs({ ...p, hidden: [...s] });
+    },
+    toggleLocked: (keys, lock) => {
+      const p = space3dPrefs();
+      const s = new Set(p.locked);
+      for (const k of keys) if (lock) s.add(k); else s.delete(k);
+      setSpace3dPrefs({ ...p, locked: [...s] });
+    },
+    isolate: () => {
+      const k = [...spaceSelectedKeys(sp)].find((x) => !x.startsWith("epoch:")) ?? null;
+      spaceIsolated = spaceIsolated && (!k || spaceIsolated === k) ? null : k;
+      refreshSurfaces("scene");
+    },
+    frame: () => {
+      const keys = [...spaceSelectedKeys(sp)].filter((x) => !x.startsWith("epoch:"));
+      if (!keys.length || !h?.frameKeys(keys)) h?.frame();
+    },
+    search: (q) => { spaceQuery = q; refreshSurfaces("scene"); },
+    close: () => setSpace3dPrefs({ ...space3dPrefs(), shown: false }),
+    addShape: (id, drop) => addShapeIn(win, id, drop),
+  });
+}
+
 function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): void } {
   body.textContent = "";
   const wrap = document.createElement("div");
   wrap.className = "scn";
   const bar = document.createElement("div");
   bar.className = "scn-bar";
+  // MICRO-SPAZIO-3D · the Outliner on the left (T), the scene on the right
+  const row = document.createElement("div");
+  row.className = "scn-row";
+  const outl = document.createElement("div");
+  outl.className = "scn-outliner";
+  outl.dataset.scnOutliner = win.id;
+  const grip = document.createElement("div");
+  grip.className = "scn-grip";
   const host = document.createElement("div");
   host.className = "scn-host";
   host.dataset.scn = win.id;
@@ -21440,9 +21905,30 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
   overlay.className = "scn-ov";
   const empty = document.createElement("div");
   empty.className = "scn-empty hidden";
-  host.append(overlay, empty);
-  wrap.append(bar, host);
+  const tab = document.createElement("button");
+  tab.type = "button";
+  tab.className = "scn-tab";
+  tab.textContent = "+";
+  tab.title = t("s3.openOutliner");
+  tab.addEventListener("click", () => setSpace3dPrefs({ ...space3dPrefs(), shown: true }));
+  host.append(overlay, empty, tab);
+  row.append(outl, grip, host);
+  wrap.append(bar, row);
   body.appendChild(wrap);
+  // the panel's width: a drag of the grip, remembered
+  grip.addEventListener("pointerdown", (e) => {
+    e.preventDefault();
+    const x0 = e.clientX, w0 = space3dPrefs().width;
+    const move = (ev: PointerEvent) => { outl.style.width = `${Math.max(160, Math.min(640, w0 + ev.clientX - x0))}px`; };
+    const up = (ev: PointerEvent) => {
+      document.removeEventListener("pointermove", move);
+      document.removeEventListener("pointerup", up);
+      setSpace3dPrefs({ ...space3dPrefs(), width: Math.max(160, Math.min(640, w0 + ev.clientX - x0)) });
+    };
+    document.addEventListener("pointermove", move);
+    document.addEventListener("pointerup", up);
+  });
+  host.addEventListener("pointermove", (e) => { spacePointer = { x: e.clientX, y: e.clientY }; });
   const handle = mountSpaceScene(host, {
     texts: {
       loading: t("space.loading"), noEngine: t("em3d.noEngine"),
@@ -21452,26 +21938,53 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
       overLimit: (name, size, lim) => t("space.overLimit", { x: name, size, lim }),
       openTileset: t("lod.openTileset"), loadAnyway: t("lod.loadAnyway"),
       lodNote: (n) => t("lod.note", { n: String(n) }),
+      boxZoom: t("s3.boxZoom"), modalHint: t("s3.modalHint"),
     },
     // MICRO-3DTILES · the threshold and the tiles' memory (Preferences)
     limit: { bytes: getSettings().viewer.lodLimitMB * 1024 * 1024, points: getSettings().viewer.lodLimitPoints },
     tilesMemoryMB: getSettings().viewer.tilesMemoryMB,
-    onPickUnit: (id) => { select(id); refreshInspector(); },
-    onPickRm: (id) => {
-      select(id);
-      refreshInspector();
-      const d = currentSpace()?.rms.find((r) => r.id === id)?.documentId;
-      if (d) requestDoc(d, { from: win, reading: null });
+    isFocused: () => activeWin().id === win.id,
+    overlay: (k) => space3dShown(k),
+    locked: () => new Set(space3dPrefs().locked),
+    sketchVisible: (id) => { const k = `sketch:${id}`; return !space3dPrefs().hidden.includes(k) && (!spaceIsolated || spaceIsolated === k); },
+    epochLabel: () => { const sp = currentSpace(); const e = sp ? spaceEpochOf(sp) : null; return e ? String(store?.node(e)?.name ?? e) : ""; },
+    onPickUnit: (id) => { spaceSketchSel = null; select(id); refreshInspector(); },
+    // MICRO-SPAZIO-3D · ⌘-click selects the model; opening it is the menu's
+    // «Apri il modello in soloing» now (E.D., 11 Oct 2026)
+    onPickRm: (id) => { spaceSketchSel = null; select(id); refreshInspector(); },
+    onPickNone: () => { if (selectedId || spaceSketchSel) { spaceSketchSel = null; select(null); refreshInspector(); } },
+    onPickSketch: (id) => {
+      spaceSketchSel = id;
+      for (const [w, x] of sceneHandles) if (w !== win.id) x.selectSketch(id);
+      refreshSurfaces("scene");
     },
+    onMenu: (m) => sceneMenu(win, handle, m),
+    onBeforeJump: () => pushView(),
+    onKeyAction: (a) => {
+      if (a === "outliner") { const p = space3dPrefs(); setSpace3dPrefs({ ...p, shown: !p.shown }); return true; }
+      if (a === "add-menu") {
+        const r = host.getBoundingClientRect();
+        const at = spacePointer ?? { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+        openShapeMenu(at.x, at.y, win);
+        return true;
+      }
+      if (a === "back") { goBack(); return true; }
+      if (a === "delete" && spaceSketchSel) { removeSketch(spaceSketchSel); return true; }
+      return false;
+    },
+    onSketchChange: () => refreshSurfaces("scene"),
     onNotFound: (rid, why: FetchFailure) => {
       if (!spaceMarks.mark(rid, why)) return;
       queueMicrotask(() => { refreshSurfaces("scene"); renderEmData(); });
     },
   });
+  sceneHandles.set(win.id, handle);
   const onBar = (e: Event) => {
-    const b = (e.target as HTMLElement).closest<HTMLElement>("[data-epoch],[data-toggle],[data-frame],[data-preview-close]");
+    const b = (e.target as HTMLElement).closest<HTMLElement>("[data-epoch],[data-toggle],[data-frame],[data-preview-close],[data-act='back'],[data-outliner]");
     if (!b) return;
     e.stopPropagation();
+    if (b.dataset.act === "back") { goBack(); return; }
+    if (b.dataset.outliner) { const p = space3dPrefs(); setSpace3dPrefs({ ...p, shown: !p.shown }); return; }
     if (b.dataset.previewClose) {
       setWinCurrent(win, "space.preview", null);
     } else if (b.dataset.epoch) {
@@ -21479,8 +21992,11 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
       select(b.dataset.epoch);              // the Chronology and the Inspector follow
       refreshInspector();
     } else if (b.dataset.toggle) {
-      const w = b.dataset.toggle as "rm" | "px";
-      setWinCurrent(win, `space.${w}`, spaceToggle(win, w) ? false : null);
+      // MICRO-SPAZIO-3D · the two switches of the bar are two doors of the
+      // Space's overlays «RM» and «Proxy»: one state
+      const k: OverlayKey = b.dataset.toggle === "rm" ? "s3_rm" : "s3_proxies";
+      setOverlays("space", withOverlay(overlaysOf("space"), k, !space3dShown(k)));
+      return;
     } else if (b.dataset.frame) {
       handle.frame();
       return;
@@ -21493,8 +22009,26 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
     const sp = currentSpace();
     const epochId = sp ? spaceEpochOf(sp) : null;
     const sum = sp && epochId ? sp.summary(epochId) : null;
+    // the Outliner
+    const prefs = space3dPrefs();
+    outl.classList.toggle("hidden", !prefs.shown);
+    grip.classList.toggle("hidden", !prefs.shown);
+    tab.classList.toggle("hidden", prefs.shown);
+    if (prefs.shown) renderSpaceOutliner(outl, win, sp);
     // the bar: the epochs, the two layers, ⤢, and the colours of the language
     bar.innerHTML = "";
+    const back = document.createElement("button");
+    back.type = "button";
+    back.className = "scn-tg";
+    back.dataset.act = "back";
+    back.textContent = "←";
+    const ol = document.createElement("button");
+    ol.type = "button";
+    ol.className = "scn-tg";
+    ol.dataset.outliner = "1";
+    ol.textContent = "☰";
+    ol.title = t("s3.toggleOutliner");
+    ol.setAttribute("aria-pressed", String(prefs.shown));
     const lab = document.createElement("span");
     lab.className = "scn-lbl";
     lab.textContent = t("space.epoch");
@@ -21516,7 +22050,7 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
       b.className = "scn-tg";
       b.dataset.toggle = which;
       b.textContent = t(key);
-      b.setAttribute("aria-pressed", String(spaceToggle(win, which)));
+      b.setAttribute("aria-pressed", String(space3dShown(which === "rm" ? "s3_rm" : "s3_proxies")));
       return b;
     };
     const fr = document.createElement("button");
@@ -21525,7 +22059,8 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
     fr.dataset.frame = "1";
     fr.textContent = "⤢";
     fr.title = t("space.frame");
-    bar.append(lab, seg, tog("rm", "space.layerRm"), tog("px", "space.layerPx"), fr);
+    bar.append(back, ol, lab, seg, tog("rm", "space.layerRm"), tog("px", "space.layerPx"), fr);
+    renderBackButtons();
     // CAMPAGNA · the preview, said in the bar and closable; drawn whatever the
     // graph says (a tileset opened from the Storage needs no epoch)
     const preview = scenePreviewOf(win);
@@ -21565,11 +22100,15 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
     const st = store;
     const nm = (id: string) => String(st.node(id)?.name ?? id);
     const list = (ids: string[]) => ids.map((id) => `<button type="button" class="link" data-go="${escapeHtml(id)}">${escapeHtml(nm(id))}</button>`).join(", ");
-    // the summary: RMs present, n proxies of m units, what is without, missing, referenced
-    const rmPart = sum.rms.length
-      ? sum.rms.map((r) => `RM <button type="button" class="link" data-go="${escapeHtml(r.id)}">${escapeHtml(r.name)}</button>`
-          + ` <span class="${r.resource?.state === "resident" ? "ok" : r.resource?.state === "reference" ? "ref" : "miss"}">(${escapeHtml(t(`space.st.${r.resource?.state ?? "none"}`))})</span>`).join(", ")
-      : `<span class="miss">${escapeHtml(t("space.noRm"))}</span>`;
+    // the summary: RMs present, n proxies of m units, what is without, missing,
+    // referenced. MICRO-SPAZIO-3D · with the Outliner open the models are
+    // listed there: the summary says how many, not each one
+    const rmPart = !sum.rms.length ? `<span class="miss">${escapeHtml(t("space.noRm"))}</span>`
+      : prefs.shown && sum.rms.length > 3
+        ? `<span data-sum="rms">${escapeHtml(t("s3.rmCount", { n: String(sum.rms.length),
+            ok: String(sum.rms.filter((r) => r.resource?.state === "resident").length) }))}</span>`
+        : sum.rms.map((r) => `RM <button type="button" class="link" data-go="${escapeHtml(r.id)}">${escapeHtml(r.name)}</button>`
+          + ` <span class="${r.resource?.state === "resident" ? "ok" : r.resource?.state === "reference" ? "ref" : "miss"}">(${escapeHtml(t(`space.st.${r.resource?.state ?? "none"}`))})</span>`).join(", ");
     overlay.classList.remove("hidden");
     overlay.innerHTML = `<b>${escapeHtml(sum.epoch.name)}</b> · ${rmPart}<br>`
       + `${escapeHtml(t("space.proxies", { n: String(sum.withProxy.length), m: String(sum.units.length) }))}`
@@ -21578,15 +22117,19 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
       + (sum.missing.length ? ` · <span class="miss" data-sum="missing">${escapeHtml(t("space.missingFiles"))}: ${list(sum.missing)}</span>` : "")
       + (sum.refused.length ? ` · <span class="miss" data-sum="refused">${escapeHtml(t("space.refusedFiles"))}: ${list(sum.refused)}</span>` : "")
       + (sum.reference.length ? ` · <span class="ref" data-sum="reference">${escapeHtml(t("space.referenceOnly"))}: ${list(sum.reference)}</span>` : "")
+      + (spaceIsolated ? ` · <button type="button" class="link" data-unisolate="1">${escapeHtml(t("s3.showAll"))}</button>` : "")
       + proxyFolderOffer(sum.without);
     overlay.querySelectorAll<HTMLElement>("[data-go]").forEach((b) => b.addEventListener("click", (e) => {
       e.stopPropagation(); select(b.dataset.go!); refreshInspector();
     }));
+    overlay.querySelector<HTMLButtonElement>("[data-unisolate]")?.addEventListener("click", (e) => {
+      e.stopPropagation(); spaceIsolated = null; refreshSurfaces("scene");
+    });
     overlay.querySelector<HTMLButtonElement>("[data-action=link-3dobj]")?.addEventListener("click", (e) => {
       e.stopPropagation();
       openProxyFolderPreview(sum.without);
     });
-    const nothing = !sum.rms.length && !sum.withProxy.length && !previewItem;
+    const nothing = !sum.rms.length && !sum.withProxy.length && !previewItem && !listSketches().length;
     empty.classList.toggle("hidden", !nothing);
     if (nothing) {
       empty.innerHTML = `<b>${escapeHtml(t("space.emptyTitle", { x: sum.epoch.name }))}</b>`
@@ -21595,18 +22138,23 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
       return;
     }
     const sel = selectedId;
+    const hidden = new Set(prefs.hidden);
+    const shown = (key: string) => !hidden.has(key) && (!spaceIsolated || spaceIsolated === key);
     const items: SceneItem[] = [];
-    if (spaceToggle(win, "rm"))
-      for (const r of sum.rms)
-        items.push({ kind: "rm", id: r.id, label: r.name, state: r.resource?.state ?? "missing",
-          url: spaceFileUrl(r.resource), resourceId: r.resource?.id, tiles: r.resource?.tiles || undefined,
-          edge: placementColour(r.genre) ?? undefined, selected: sel === r.id,
-          // MICRO-3DTILES · the tileset of the same model, and the weight
-          tileset: r.tileset?.state === "resident" ? r.tileset.url || undefined : undefined,
-          bytes: r.resource?.bytes ?? null, points: r.resource?.points ?? null });
-    if (spaceToggle(win, "px"))
+    for (const r of sum.rms) {
+      const isTiles = !!r.resource?.tiles;
+      if (!space3dShown(isTiles ? "s3_tiles" : "s3_rm") || !shown(`rm:${r.id}`)) continue;
+      items.push({ kind: "rm", id: r.id, label: r.name, state: r.resource?.state ?? "missing",
+        url: spaceFileUrl(r.resource), resourceId: r.resource?.id, tiles: r.resource?.tiles || undefined,
+        edge: placementColour(r.genre) ?? undefined, selected: sel === r.id,
+        // MICRO-3DTILES · the tileset of the same model, and the weight
+        tileset: r.tileset?.state === "resident" && space3dShown("s3_tiles") ? r.tileset.url || undefined : undefined,
+        bytes: r.resource?.bytes ?? null, points: r.resource?.points ?? null });
+    }
+    if (space3dShown("s3_proxies"))
       for (const u of sum.withProxy) {
-        const px = sp.proxies.get(u)!;
+        const px = sp.proxies.get(u);
+        if (!px || !shown(`proxy:${u}`)) continue;
         const type = st.node(u)?.node_type;
         const common = { kind: "proxy" as const, id: u, label: nm(u), rgb: nodeMaterialRgb(type) ?? nodeMaterialRgb("US") ?? undefined,
           edge: nodeStyle(type).border, selected: sel === u };
@@ -21615,9 +22163,10 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
       }
     if (previewItem) items.unshift(previewItem);
     handle.update(items);
+    handle.syncSketches();
   };
   refresh();
-  return { refresh, destroy: () => { bar.removeEventListener("click", onBar); handle.dispose(); } };
+  return { refresh, destroy: () => { bar.removeEventListener("click", onBar); handle.dispose(); sceneHandles.delete(win.id); } };
 }
 
 /** The epoch's Inspector: its chronology problems, and the tool. */

@@ -93,6 +93,9 @@ export interface SpaceRM {
   /** MICRO-3DTILES · the TILESET of the same model, when its first resource is
    *  not one (proposed instead of a glb over the threshold) */
   tileset: SpaceResource | null;
+  /** MICRO-SPAZIO-3D · every version of the model (the Outliner lists them,
+   *  the one drawn highlighted); empty when it has none */
+  versions?: Array<{ id: string; name: string; url: string; master: boolean; lod: string | null }>;
 }
 
 export type ProxyGeometry = "glb" | "convex" | "spheres" | "empty";
@@ -318,11 +321,14 @@ export function buildSpace(
     const alt = pick.picked ? byId.get(pick.picked.id) : undefined;
     return alt && tilesKindOf(dataOf(alt)) === "3tz" ? alt : node;
   };
-  const chosenOf = (rmId: string): { resource: SpaceResource; choice: VersionChoice } | null => {
+  const entriesOf = (rmId: string) => {
     const linked = resourcesOf(rmId);
     const models = linked.filter((r) => str(dataOf(r).url_type) === "3d_model");
     const assets = [...new Set((models.length ? models : linked).map((r) => assetOf(vg, r.id)))].sort();
-    const entries = assets.flatMap((a) => versionsOf(vg, a));
+    return assets.flatMap((a) => versionsOf(vg, a));
+  };
+  const chosenOf = (rmId: string): { resource: SpaceResource; choice: VersionChoice } | null => {
+    const entries = entriesOf(rmId);
     if (!entries.some((e) => !e.master)) return null;
     const choice = chooseVersion(entries.filter((e) => opensGltf(e.data ?? {})), SCENE_USES);
     const node = choice?.entry ? byId.get(choice.entry.id) : undefined;
@@ -343,9 +349,12 @@ export function buildSpace(
     const own = dataOf(rm);
     const genre = str(own.geometry ?? own.certainty_class ?? dd.geometry ?? dd.certainty_class).trim() || null;
     const chosen = chosenOf(rm.id);
+    const entries = entriesOf(rm.id);
     return { id: rm.id, name: str(rm.name) || rm.id, epochs: [...eps], documentId, genre,
              resource: chosen ? chosen.resource : resourceOf(rm.id), choice: chosen?.choice ?? null,
-             tileset: tilesetOf(rm.id) };
+             tileset: tilesetOf(rm.id),
+             versions: entries.map((e) => ({ id: e.id, name: str(e.name) || e.id, url: str(e.url ?? dataOf(byId.get(e.id)).url),
+                                             master: !!e.master, lod: e.lod_level ?? null })) };
   });
 
   // proxies: unit → property(geometry) → shape (→ resource)
