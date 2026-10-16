@@ -239,7 +239,8 @@ import { DOC_TOOLS, renderReadingStage, selectedPassage, type DocTool,
          type TraceAnchor, type TraceGeometry } from "./doc-reading";
 import { openReadingBubble, type BubbleUnit } from "./reading-bubble";
 import { renderChronology, type ChronoEpoch, type ChronologyData } from "./chronology";
-import { buildSpace, citationKey, SpaceMarks, type Space } from "./space";
+import { buildSpace, citationKey, SpaceMarks, type Space, type SpaceRM } from "./space";
+import { chooseVersion, SCENE_USES, USES } from "./asset-versions";
 import { mountSpaceScene, type SceneItem, type SceneMenuRequest, type SceneView, type SpaceSceneHandle } from "./scene3d";
 import { blenderToThree, eulerFromUp, leftSelects, threeToBlender, type AlignedView, type CamState, type Pose, type V3 } from "./space-nav";
 import { carryXf, coordDecimals, deg, IDENTITY, isIdentity, poseToXf, rad, readTransform, transformData, xfToPose, type Xf } from "./transform3d";
@@ -251,6 +252,7 @@ import { buildOutlinerTree, loadSpacePrefs, renderOutliner, saveSpacePrefs, type
 import { patchProxyNodes, proxyRelPath } from "./proxy-association";
 import { planMove, planNewGroup, planRemove, type GroupPlan } from "./rm-groups";
 import { shownModelName, splitLevel } from "./rm-names";
+import { versionError, type FlowVersion, type VersionMode } from "./lod-flow";
 import { trackpadClassifier } from "./wheel-kind";
 import { isTilesetUrl } from "./tiles3d";
 import type { ModelOptions } from "./embed3d-native";
@@ -3288,6 +3290,7 @@ function renderInspectorInto(host: HTMLElement): void {
       onOpenFacing: (tid) => openFacingFor(tid),
       renderTransform: (host2, id) => renderTransformInto(host2, id),
       renderSketchUse: (host2, id) => renderSketchUse(host2, id),
+      renderVersions: (host2, id) => renderVersionsInto(host2, id),
       readableName: (id) => { const r = rmShown(id); return r && r.shown !== r.technical ? { label: r.shown, chip: r.level, technical: r.technical } : null; },
       onClearField: (nodeId, field) => {
         (storeOfNode(nodeId) ?? store!).clearField(nodeId, field);
@@ -22297,6 +22300,8 @@ function renderSpaceNPanel(el: HTMLElement, win: Win, h: SpaceSceneHandle): void
       onCommit: (xf) => commitAll(`sketch:${sk.id}`, before, xf),
       onReset: () => commitAll(`sketch:${sk.id}`, before, IDENTITY) });
   } else if (key && (key.startsWith("rm:") || key.startsWith("proxy:"))) {
+    // MICRO-SPAZIO-3D-3 p.10 · the active model's version: the mode, the version, its use, level and MB
+    if (key.startsWith("rm:")) { const vb = document.createElement("div"); vb.className = "np-ver"; if (renderVersionsInto(vb, key.slice(3))) obj.appendChild(vb); }
     const target = transformNodeOfKey(key, sp);
     const name = document.createElement("div");
     name.className = "xf-note";
@@ -22504,6 +22509,9 @@ function sceneMenu(win: Win, h: SpaceSceneHandle, m: SceneMenuRequest): void {
       "sep",
       // MICRO-SPAZIO-3D-3 p.7 · the containers, on the models selected (this one if it is not)
       ...groupMenuEntries(selectedModels(id), m.x, m.y),
+      "sep",
+      // p.10 · how they choose their version
+      ...versionMenuEntries(selectedModels(id)),
     ]);
     return;
   }
@@ -23099,6 +23107,127 @@ function groupMenuEntries(models: string[], x: number, y: number): Array<{ label
   ];
 }
 
+// ── MICRO-SPAZIO-3D-3 p.10 · a model's versions: seen, chosen, and as a flow of LOD ──
+
+/** The use «Per uso» asks: web in a browser, realtime in the desktop, unless the person changed it. */
+function deviceUse(): string { return space3dPrefs().deviceUse ?? (isTauri() ? "realtime" : "web"); }
+function versionModeOf(rmId: string): { mode: VersionMode; versionId?: string } {
+  return space3dPrefs().versionModes?.[rmId] ?? { mode: "use" };
+}
+/** The mode of some models (a container's: all of its members), per person. */
+function setVersionMode(rmIds: string[], mode: VersionMode, versionId?: string): void {
+  const p = space3dPrefs();
+  const vm = { ...(p.versionModes ?? {}) };
+  for (const id of rmIds) vm[id] = mode === "manual" ? { mode, ...(versionId ? { versionId } : {}) } : { mode };
+  setSpace3dPrefs({ ...p, versionModes: vm });
+}
+type RmVersion = NonNullable<SpaceRM["versions"]>[number];
+const lodOrd = (v: { lod: string | null }): number => { const m = /(\d+)/.exec(String(v.lod ?? "")); return m ? Number(m[1]) : -1; };
+/** The versions a glTF loader opens, with a file the scene can fetch. */
+function drawableVersions(rm: SpaceRM): Array<RmVersion & { fetch: string }> {
+  return (rm.versions ?? []).filter((v) => v.drawable && v.resource && v.resource.state === "resident")
+    .map((v) => ({ ...v, fetch: spaceFileUrl(v.resource) ?? "" })).filter((v) => !!v.fetch);
+}
+/** The flow of a model: its drawable versions, their errors (lod-flow's estimates). */
+function rmFlow(rm: SpaceRM): FlowVersion[] {
+  return drawableVersions(rm).map((v) => {
+    const d = (v.data ?? {}) as Record<string, unknown>;
+    const e = versionError(d, null);
+    const prim = (d.primitives && typeof d.primitives === "object" ? d.primitives : {}) as Record<string, unknown>;
+    return { id: v.id, url: v.fetch, ord: lodOrd(v), err: e.err, errFrom: e.from,
+      bytes: typeof d.size_bytes === "number" ? d.size_bytes : null, uses: v.uses ?? [],
+      tris: typeof prim.triangles === "number" ? prim.triangles : null };
+  });
+}
+/** What a model draws, by its mode: the file (manual, by use), or the flow (auto). */
+function rmVersionPlan(rm: SpaceRM): { url?: string; flow?: FlowVersion[]; flowStart?: string; versionId?: string } {
+  const vs = drawableVersions(rm);
+  if (!vs.length) return {};
+  const m = versionModeOf(rm.id);
+  if (m.mode === "auto" && vs.length > 1) {
+    const flow = rmFlow(rm);
+    const lightest = [...flow].sort((a, b) => b.ord - a.ord)[0];
+    return { flow, flowStart: lightest?.id, url: lightest?.url };
+  }
+  if (m.mode === "manual" && m.versionId) {
+    const v = vs.find((x) => x.id === m.versionId);
+    if (v) return { url: v.fetch, versionId: v.id };
+  }
+  // by use: the device's first, then the scene's (s3Dgraphy's choose_version, the TS twin)
+  const uses = [deviceUse(), ...SCENE_USES.filter((u) => u !== deviceUse())];
+  const ch = chooseVersion(vs.map((v) => ({ id: v.id, master: false, use: v.uses ?? [], lod_level: v.lod,
+    size_bytes: typeof (v.data ?? {}).size_bytes === "number" ? (v.data as { size_bytes: number }).size_bytes : undefined })), uses);
+  const v = ch?.entry ? vs.find((x) => x.id === ch.entry!.id) : undefined;
+  return v ? { url: v.fetch, versionId: v.id } : {};
+}
+/** The version a model draws now (the scene's, else its plan's). */
+function drawnVersionOf(rm: SpaceRM): RmVersion | null {
+  const tail = (x: string) => decodeURIComponent(x.split(/[?#]/)[0]).split("/").pop() ?? "";
+  for (const h of sceneHandles.values()) {
+    const u = h.drawnUrl(`rm:${rm.id}`);
+    if (!u) continue;
+    const v = drawableVersions(rm).find((x) => tail(x.fetch) === tail(u) || (x.url && tail(x.url) === tail(u)));
+    if (v) return v;
+  }
+  return null;
+}
+/** «Versioni»: the three modes, for the models given (a menu's entries). */
+function versionMenuEntries(rmIds: string[]): Array<{ label: string; act: string; run: () => void; disabled?: boolean }> {
+  const sp = currentSpace();
+  const withVersions = rmIds.filter((id) => (sp?.rms.find((r) => r.id === id)?.versions?.length ?? 0) > 1);
+  const off = !withVersions.length;
+  return [
+    { label: t("ver.modeAuto"), act: "ver-auto", disabled: off, run: () => setVersionMode(withVersions, "auto") },
+    { label: t("ver.modeUse", { use: deviceUse() }), act: "ver-use", disabled: off, run: () => setVersionMode(withVersions, "use") },
+    { label: t("ver.modeManual"), act: "ver-manual", disabled: off, run: () => {
+      // manual: the version each draws now stays
+      for (const id of withVersions) { const rm = sp?.rms.find((r) => r.id === id); const v = rm ? drawnVersionOf(rm) : null; setVersionMode([id], "manual", v?.id); }
+    } },
+  ];
+}
+/** The Inspector's selector of a model's versions (the same as the Outliner's dots). */
+function renderVersionsInto(host: HTMLElement, rmId: string): boolean {
+  const sp = currentSpace();
+  const rm = sp?.rms.find((r) => r.id === rmId);
+  if (!rm || (rm.versions?.length ?? 0) < 2) return false;
+  const vs = drawableVersions(rm);
+  const m = versionModeOf(rmId);
+  const drawnV = drawnVersionOf(rm);
+  const row = (lab: string, el: HTMLElement) => { const d = document.createElement("label"); d.className = "ver-row"; const s = document.createElement("span"); s.textContent = lab; d.append(s, el); host.appendChild(d); };
+  const mode = document.createElement("select");
+  mode.dataset.ver = "mode";
+  for (const [v, k] of [["auto", "ver.modeAuto"], ["use", "ver.modeUseShort"], ["manual", "ver.modeManualShort"]] as const) {
+    const o = document.createElement("option"); o.value = v; o.textContent = t(k, { use: deviceUse() }); o.selected = m.mode === v; mode.appendChild(o);
+  }
+  mode.addEventListener("change", () => setVersionMode([rmId], mode.value as VersionMode, mode.value === "manual" ? drawnV?.id : undefined));
+  row(t("ver.mode"), mode);
+  const pick = document.createElement("select");
+  pick.dataset.ver = "version";
+  for (const v of rm.versions ?? []) {
+    const o = document.createElement("option");
+    o.value = v.id;
+    const ok = vs.some((x) => x.id === v.id);
+    o.disabled = !ok;
+    o.textContent = `${lodOrd(v) >= 0 ? `LOD${lodOrd(v)}` : v.master ? t("s3.master") : "·"} · ${splitLevel(v.name).base || v.name}${(v.uses ?? []).length ? ` · ${(v.uses ?? []).join(", ")}` : ""}${ok ? "" : ` · ${t("ver.notDrawable")}`}`;
+    o.selected = drawnV?.id === v.id;
+    pick.appendChild(o);
+  }
+  pick.addEventListener("change", () => setVersionMode([rmId], "manual", pick.value));
+  row(t("ver.version"), pick);
+  const use = document.createElement("select");
+  use.dataset.ver = "use";
+  for (const u of USES) { const o = document.createElement("option"); o.value = u; o.textContent = u; o.selected = deviceUse() === u; use.appendChild(o); }
+  use.addEventListener("change", () => setSpace3dPrefs({ ...space3dPrefs(), deviceUse: use.value }));
+  row(t("ver.deviceUse"), use);
+  const note = document.createElement("p");
+  note.className = "xf-note";
+  const d = drawnV ? (drawnV.data ?? {}) as Record<string, unknown> : {};
+  note.textContent = drawnV ? t("ver.drawn", { lod: lodOrd(drawnV) >= 0 ? `LOD${lodOrd(drawnV)}` : "—", uses: (drawnV.uses ?? []).join(", ") || "—",
+    mb: typeof d.size_bytes === "number" ? (d.size_bytes / 1048576).toFixed(1) : "?" }) : t("ver.none");
+  host.appendChild(note);
+  return true;
+}
+
 /** The Outliner of a Space window, drawn into `el`. */
 function renderSpaceOutliner(el: HTMLElement, win: Win, sp: Space | null): void {
   const prefs = space3dPrefs();
@@ -23118,8 +23247,15 @@ function renderSpaceOutliner(el: HTMLElement, win: Win, sp: Space | null): void 
         ...(nm?.level ? { chip: nm.level } : {}), glyph: String(st.node(r.id)?.node_type ?? "representation_model"),
         tileset: !!r.resource?.tiles,
         group: grp ? { id: grp.id, name: grp.name, doc: grp.documentId ? String(st.node(grp.documentId)?.name ?? "") : undefined } : null,
-        versions: (r.versions ?? []).map((v) => ({ id: v.id, name: v.name + (v.master ? ` · ${t("s3.master")}` : ""),
-          drawn: !!drawnUrl && !!v.url && tail(drawnUrl) === tail(v.url), chosen: r.choice?.entry?.id === v.id })) };
+        versions: (r.versions ?? []).map((v) => {
+          const dv = drawableVersions(r).find((x) => x.id === v.id);
+          const isDrawn = !!drawnUrl && ((!!v.url && tail(drawnUrl) === tail(v.url)) || (!!dv && tail(drawnUrl) === tail(dv.fetch)));
+          const mode = versionModeOf(r.id).mode;
+          // p.10 · its uses and its level computed from the chain, small; «A» on the one the distance drew
+          return { id: v.id, name: v.name + (v.master ? ` · ${t("s3.master")}` : ""),
+            drawn: isDrawn, chosen: mode === "manual" ? versionModeOf(r.id).versionId === v.id : r.choice?.entry?.id === v.id,
+            uses: v.uses ?? [], ...(lodOrd(v) >= 0 ? { level: `LOD${lodOrd(v)}` } : {}), ...(isDrawn && mode === "auto" ? { auto: true } : {}) };
+        }) };
     }),
     proxies: (ep) => (sp.summary(ep)?.withProxy ?? []).filter((u) => sp.proxies.has(u))
       .map((u) => ({ unitId: u, name: String(st.node(u)?.name ?? u), type: String(st.node(u)?.node_type ?? "US") })),
@@ -23189,14 +23325,23 @@ function renderSpaceOutliner(el: HTMLElement, win: Win, sp: Space | null): void 
     search: (q) => { spaceQuery = q; refreshSurfaces("scene"); },
     clearSelection: () => setSpaceSel(EMPTY_SEL),
     dragSketch: (id, e) => beginSketchDrag(win, id, e),
+    // p.10 · the dot of a version's row: that version, in place of the one drawn
+    chooseVersion: (rmId, vid) => {
+      const rm = sp?.rms.find((x) => x.id === rmId);
+      if (!rm || !drawableVersions(rm).some((x) => x.id === vid)) { toast(t("ver.notDrawable")); return; }
+      setVersionMode([rmId], "manual", vid);
+    },
     // p.7 · a right click on a model's row, or on a container's: the containers' entries
     rowMenu: (r, x, y) => {
-      if (r.kind === "rm") spaceMenu(x, y, r.name, groupMenuEntries(selectedModels(r.id), x, y));
+      if (r.kind === "rm") spaceMenu(x, y, r.name, [...groupMenuEntries(selectedModels(r.id), x, y), "sep", ...versionMenuEntries(selectedModels(r.id))]);
       else if (r.kind === "rmgroup") {
         const members = (r.children ?? []).filter((c) => c.kind === "rm").map((c) => c.id);
         spaceMenu(x, y, r.name, [
           { label: t("rmg.selectMembers"), act: "rmg-select", run: () => setSpaceSel({ keys: members.map((m) => `rm:${m}`), active: members.length ? `rm:${members[members.length - 1]}` : null }) },
           { label: t("rmg.remove"), act: "rmg-remove", run: () => applyGroupPlan(planRemove(store!.doc, members), t("rmg.removed", { n: String(members.length) })) },
+          "sep",
+          // p.10 · the container's mode: for all of its models
+          ...versionMenuEntries(members),
         ]);
       }
     },
@@ -23277,6 +23422,7 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
   });
   host.addEventListener("pointermove", (e) => { spacePointer = { x: e.clientX, y: e.clientY }; });
   let npQueued = false;
+  let flowRedraw = false;
   const drawNPanel = () => {
     if (npQueued) return;
     npQueued = true;
@@ -23301,6 +23447,9 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
     },
     snapAlign: () => space3dPrefs().snapAlign === true,
     glyph: (k) => typeIconElement(k),
+    flowTitle: t("ver.flowTitle"),
+    // p.10 · a version of the flow drawn: the Outliner's dot and the N panel follow (no rebuild)
+    onVersionDrawn: () => { if (!flowRedraw) { flowRedraw = true; requestAnimationFrame(() => { flowRedraw = false; if (space3dPrefs().shown) renderSpaceOutliner(outl, win, currentSpace()); drawNPanel(); }); } },
     panelFolded: (k) => (space3dPrefs().collapsed ?? []).includes(k),
     onPanelFold: (k, c) => foldPanel(k, c, false),
     sketchFileUrl: (s) => (s.file ? spaceFileUrl({ url: s.file.url, checksum: s.file.checksum ?? "", residency: "resident" }) : undefined),
@@ -23573,8 +23722,11 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
       const isTiles = !!r.resource?.tiles;
       if (!space3dShown(isTiles ? "s3_tiles" : "s3_rm") || !shown(`rm:${r.id}`)) continue;
       const nmS = rmShown(r.id, sp);
+      // MICRO-SPAZIO-3D-3 p.10 · the version by its mode (manual, by use, the distance)
+      const plan = isTiles ? {} : rmVersionPlan(r);
       items.push({ kind: "rm", id: r.id, label: nmS && nmS.shown !== nmS.technical ? `${nmS.shown}${nmS.level ? ` · ${nmS.level}` : ""}` : r.name, state: r.resource?.state ?? "missing",
-        url: spaceFileUrl(r.resource), resourceId: r.resource?.id, tiles: r.resource?.tiles || undefined,
+        url: plan.url ?? spaceFileUrl(r.resource), resourceId: r.resource?.id,
+        ...(plan.flow ? { flow: plan.flow, flowStart: plan.flowStart } : {}), tiles: r.resource?.tiles || undefined,
         edge: placementColour(r.genre) ?? undefined, selected: isSel(`rm:${r.id}`), active: ssel.active === `rm:${r.id}`,
         // MICRO-SPAZIO-3D-2 · the model's transform (data.transform), over its file
         pose: r.resource?.tiles ? undefined : poseOfNode(r.id),

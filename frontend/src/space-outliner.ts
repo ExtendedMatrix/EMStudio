@@ -179,9 +179,14 @@ export interface Space3dPrefs {
   snapAlign?: boolean;
   /** p.9 · the floating panels reduced to their title line: `summary`, `strip:<item>`, `np:<section>` */
   collapsed?: string[];
+  /** p.10 · how each model chooses its version: manual (the one picked), the
+   *  device's use, or the distance; absent = by use */
+  versionModes?: Record<string, { mode: "manual" | "use" | "auto"; versionId?: string }>;
+  /** p.10 · the use «Per uso» asks (web in a browser, realtime in the desktop, unless changed) */
+  deviceUse?: string;
 }
 
-export const DEFAULT_PREFS: Space3dPrefs = { shown: true, width: 260, toggled: [], hidden: [], locked: [], nShown: false, nWidth: 250, snapAlign: false, collapsed: [] };
+export const DEFAULT_PREFS: Space3dPrefs = { shown: true, width: 260, toggled: [], hidden: [], locked: [], nShown: false, nWidth: 250, snapAlign: false, collapsed: [], versionModes: {} };
 
 /** Is a row open: its default, unless the person turned it. */
 export function rowOpen(r: Pick<OutlinerRow, "key" | "kind" | "current">, toggled: ReadonlySet<string>): boolean {
@@ -202,6 +207,10 @@ export function loadSpacePrefs(person: string | null | undefined): Space3dPrefs 
       nWidth: typeof p.nWidth === "number" && p.nWidth >= 180 && p.nWidth <= 520 ? p.nWidth : DEFAULT_PREFS.nWidth,
       snapAlign: p.snapAlign === true,
       collapsed: list(p.collapsed),
+      versionModes: p.versionModes && typeof p.versionModes === "object" ? Object.fromEntries(Object.entries(p.versionModes as Record<string, unknown>)
+        .filter(([, v]) => v && typeof v === "object" && ["manual", "use", "auto"].includes(String((v as { mode?: unknown }).mode)))
+        .map(([k, v]) => [k, { mode: (v as { mode: "manual" | "use" | "auto" }).mode, ...(typeof (v as { versionId?: unknown }).versionId === "string" ? { versionId: (v as { versionId: string }).versionId } : {}) }])) : {},
+      ...(typeof p.deviceUse === "string" ? { deviceUse: p.deviceUse } : {}),
     };
   } catch {
     return { ...DEFAULT_PREFS, toggled: [], hidden: [], locked: [] };
@@ -250,6 +259,8 @@ export interface OutlinerActions {
   close(): void;
   /** MICRO-SPAZIO-3D-3 · a click on the tree's empty part: nothing selected */
   clearSelection?(): void;
+  /** p.10 · the dot of a version's row: that version, drawn in place of the current */
+  chooseVersion?(rmId: string, versionId: string): void;
   /** p.7 · a right click on a row (a model, a container) */
   rowMenu?(row: OutlinerRow, x: number, y: number): void;
   /** p.6 · a press on a sketch's row: the caller follows the pointer (a drag onto a unit) */
@@ -363,6 +374,13 @@ export function renderOutliner(el: HTMLElement, v: OutlinerView, act: OutlinerAc
     if (kids.length) tw.addEventListener("click", (e) => { e.stopPropagation(); act.toggleOpen(r.key); });
     const g = document.createElement("span");
     g.className = "sol-glyph";
+    if (r.kind === "version" && act.chooseVersion) {
+      g.classList.add("sol-dot");
+      const rest = r.key.slice("version:".length);
+      const cut = rest.lastIndexOf(`:${r.id}`);
+      const rmId = cut >= 0 ? rest.slice(0, cut) : rest;
+      g.addEventListener("click", (e) => { e.stopPropagation(); act.chooseVersion!(rmId, r.id); });
+    }
     if (r.glyph) { try { g.appendChild(v.glyph(r.glyph)); } catch { g.textContent = r.glyphText ?? ""; } }
     else g.textContent = r.glyphText ?? "";
     const name = document.createElement("span");

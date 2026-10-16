@@ -61,6 +61,19 @@ type Dict = Record<string, string>;
 // `emtree.`, `empty.`, `toast.`) so a translator can work a screen at a time and
 // an unused key is findable.
 const EN: Dict = {
+  "ver.title": "Versions",
+  "ver.mode": "Mode",
+  "ver.version": "Version",
+  "ver.deviceUse": "Use of this device",
+  "ver.modeAuto": "Versions: automatic, by the distance",
+  "ver.modeUse": "Versions: by use ({use})",
+  "ver.modeManual": "Versions: manual (the one drawn stays)",
+  "ver.modeUseShort": "By use ({use})",
+  "ver.modeManualShort": "Manual",
+  "ver.notDrawable": "not a glTF the Space opens",
+  "ver.drawn": "Drawn: {lod} · uses {uses} · {mb} MB",
+  "ver.none": "No version drawn",
+  "ver.flowTitle": "Versions by distance",
   "s3.decWarning": "A warning on this unit (the Warnings table)",
   "ov.group.space3d_decor": "On the labels",
   "ov.item.s3_dec_rights": "Author, licence, embargo",
@@ -3690,6 +3703,19 @@ const EN: Dict = {
 
 // ── Italiano: complete, because E.D. works in it ───────────────────────────────
 const IT: Dict = {
+  "ver.title": "Versioni",
+  "ver.mode": "Modo",
+  "ver.version": "Versione",
+  "ver.deviceUse": "Uso di questo dispositivo",
+  "ver.modeAuto": "Versioni: automatico per distanza",
+  "ver.modeUse": "Versioni: per uso ({use})",
+  "ver.modeManual": "Versioni: manuale (resta quella disegnata)",
+  "ver.modeUseShort": "Per uso ({use})",
+  "ver.modeManualShort": "Manuale",
+  "ver.notDrawable": "non è un glTF che lo Space apre",
+  "ver.drawn": "Disegnata: {lod} · usi {uses} · {mb} MB",
+  "ver.none": "Nessuna versione disegnata",
+  "ver.flowTitle": "Versioni per distanza",
   "s3.decWarning": "Un avviso su questa unità (la tabella Avvisi)",
   "ov.group.space3d_decor": "Sulle etichette",
   "ov.item.s3_dec_rights": "Autore, licenza, embargo",

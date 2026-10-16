@@ -95,7 +95,9 @@ export interface SpaceRM {
   tileset: SpaceResource | null;
   /** MICRO-SPAZIO-3D · every version of the model (the Outliner lists them,
    *  the one drawn highlighted); empty when it has none */
-  versions?: Array<{ id: string; name: string; url: string; master: boolean; lod: string | null }>;
+  versions?: Array<{ id: string; name: string; url: string; master: boolean; lod: string | null;
+    /** MICRO-SPAZIO-3D-3 p.10 · the uses it declares, its data (the measures), whether a glTF loader opens it, its file */
+    uses?: string[]; data?: Record<string, unknown>; drawable?: boolean; resource?: SpaceResource | null }>;
   /** MICRO-SPAZIO-3D-3 p.7 · the RM container it is in (EM16-RMNG,
    *  `is_in_representation_model_group`, 1:1), or null */
   group?: string | null;
@@ -371,8 +373,11 @@ export function buildSpace(
     return { id: rm.id, name: str(rm.name) || rm.id, epochs: [...eps], documentId, genre, group,
              resource: chosen ? chosen.resource : resourceOf(rm.id), choice: chosen?.choice ?? null,
              tileset: tilesetOf(rm.id),
-             versions: entries.map((e) => ({ id: e.id, name: str(e.name) || e.id, url: str(e.url ?? dataOf(byId.get(e.id)).url),
-                                             master: !!e.master, lod: e.lod_level ?? null })) };
+             versions: entries.map((e) => { const vn = byId.get(e.id);
+               // MICRO-SPAZIO-3D-3 p.10 · its uses, its data (the measures), its file as the scene reads it
+               return { id: e.id, name: str(e.name) || e.id, url: str(e.url ?? dataOf(vn).url),
+                        master: !!e.master, lod: e.lod_level ?? null, uses: e.use ?? [], data: e.data ?? dataOf(vn),
+                        drawable: !e.master && opensGltf(e.data ?? dataOf(vn)), resource: vn ? asResource(servable(vn)) : null }; }) };
   });
 
   // proxies: unit → property(geometry) → shape (→ resource)

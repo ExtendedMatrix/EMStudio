@@ -57,6 +57,7 @@ import {
   type SpaceKeyAction, type V3,
 } from "./space-nav";
 import { medianPoint } from "./space-selection";
+import { pickByDistance, versionError, type FlowVersion } from "./lod-flow";
 import { buildShapeGeometry, listSketches, shapeById, updateSketch, type Sketch } from "./shapes3d";
 import { trackpadClassifier } from "./wheel-kind";
 
@@ -87,6 +88,11 @@ export interface SceneItem {
   /** TEMPLU MARE v2 · C1 · `url` IS a tileset, in this form, whatever it ends
    *  with: a store URL (`…/asset/sha256:…`) names no `.3tz` */
   tiles?: "directory" | "3tz";
+  /** MICRO-SPAZIO-3D-3 p.10 · the model's versions as a flow of LOD by the
+   *  distance (`lod-flow.ts`): the scene draws the one the camera asks for,
+   *  starting from `flowStart` (the lightest) */
+  flow?: FlowVersion[];
+  flowStart?: string;
   /** MICRO-SPAZIO-3D-3 p.14 · the decorators of its label, as the graph's: a
    *  glyph of the datamodel (`kind`, author / licence / embargo / epoch) or a
    *  short text (PD n, «!»), each in its overlay's group */
@@ -263,11 +269,16 @@ export interface SpaceSceneOptions {
    *  too), the active last; on release, ONE call with all their poses */
   transformTargets?: () => string[];
   onTransformMany?: (poses: Array<{ key: string; pose: Pose }>) => void;
+  /** MICRO-SPAZIO-3D-3 p.10 · a version of a model in the flow was drawn (the Outliner's dot follows) */
+  onVersionDrawn?: (rmId: string, versionId: string) => void;
+  /** the flow's words: «Versioni automatiche», and its line (levels · MB) */
+  flowTitle?: string;
   /** MICRO-SPAZIO-3D-3 p.14 · a datamodel glyph (2d_glyphs) for a label's decorator */
   glyph?: (kind: string) => HTMLElement;
   /** MICRO-SPAZIO-3D-3 p.9 · a floating panel reduced to its title (the person's, per view) */
   panelFolded?: (key: string) => boolean;
   onPanelFold?: (key: string, folded: boolean) => void;
+  /** p.10 · the flow's strip title */
   /** MICRO-SPAZIO-3D-3 p.6 · the fetchable address of a sketch's glb (a kept proxy) */
   sketchFileUrl?: (s: Sketch) => string | undefined;
   /** MICRO-SPAZIO-3D-3 p.5 · «Allinea alla normale» (the N panel; off by default) */
@@ -944,7 +955,10 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
         unitCentres.clear();
         roots.clear();
         drawn.clear();
+        // the flow keeps what each model drew (a rebuild starts from it), only for the items still in auto
+        for (const k of [...flowState.keys()]) if (!items.some((i) => `${i.kind}:${i.id}` === k && i.flow?.length)) flowState.delete(k);
         strips.textContent = "";
+        strips.appendChild(flowStrip);
         const pending: Promise<void>[] = [];
         const later: SceneItem[] = [];      // contours and labels: after the meshes, around them
         const used = new Set<string>();
@@ -975,6 +989,33 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
               if (bb) addLabel(item.label, new THREE.Vector3((bb.min.x + bb.max.x) / 2, bb.max.y, (bb.min.z + bb.max.z) / 2), `rm${selCls(item)}`, item.id);
               drawn.set(key, { item, as: "tiles", url: tsUrl });
             }));
+            continue;
+          }
+          if (item.state === "resident" && item.kind === "rm" && item.flow?.length) {
+            // MICRO-SPAZIO-3D-3 p.10 · a flow of LOD: the version drawn before
+            // (a rebuild keeps it), else the lightest
+            drawn.set(key, { item, as: "pending" });
+            pending.push((async () => {
+              const prev = flowState.get(key)?.current;
+              const v = item.flow!.find((x) => x.id === prev) ?? item.flow!.find((x) => x.id === item.flowStart) ?? item.flow![item.flow!.length - 1];
+              const got = await load(v.url);
+              if (gen !== generation || disposed) return;
+              if ("fail" in got) {
+                drawn.set(key, { item: failed(item, got.fail), as: "label" });
+                later.push(failed(item, got.fail));
+                return;
+              }
+              const obj = got.root.clone(true);
+              if (item.pose) setPose(obj, item.pose);
+              roots.set(key, obj);
+              if (selOutline(item)) content.add(selBox(obj, item));
+              tag(obj, item);
+              content.add(obj);
+              addLabel(item.label, topOf(obj), `rm${selCls(item)}`, item.id);
+              drawn.set(key, { item, as: "mesh", url: v.url });
+              flowState.set(key, { item, current: v.id, gen });
+              flowBytes.set(v.url, v.bytes ?? 0);
+            })());
             continue;
           }
           if (item.state === "resident" && item.url && item.kind === "rm") {
@@ -1049,6 +1090,8 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
               content.add(obj);
               addLabel(item.label, topOf(obj), `rm${selCls(item)}`, item.id);
               drawn.set(key, { item, as: "mesh", url: u });
+              // MICRO-SPAZIO-3D-3 p.10 · the version drawn is known now: the Outliner's dot follows
+              opts.onVersionDrawn?.(item.id, "");
             })());
             continue;
           }
@@ -1251,6 +1294,86 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
       };
       probe.__spaceOverlays = () => Object.fromEntries((["s3_labels", "s3_proxies", "s3_proxy_wire", "s3_rm", "s3_tiles",
         "s3_grid", "s3_epoch_box", "s3_sel_outline", "s3_gizmo", "s3_cursor", "s3_sketches"] as OverlayKey[]).map((k) => [k, ov(k)]));
+      // ── MICRO-SPAZIO-3D-3 p.10 · the flow of LOD ─────────────────────────
+      const flowState = new Map<string, { item: SceneItem; current: string; gen: number; asking?: string; dist?: number; want?: string | null }>();
+      /** the bytes of each version file loaded for the flow (the memory's count) */
+      const flowBytes = new Map<string, number>();
+      const flowStrip = document.createElement("div");
+      flowStrip.className = "v3d-strip scn-flow hidden";
+      let flowAt = 0;
+      const flowBudget = () => Math.max(64, opts.tilesMemoryMB ?? 512) * 1024 * 1024;
+      const flowUsed = () => { let b = 0; const cur = new Set<string>();
+        for (const [, st] of flowState) { const v = st.item.flow?.find((x) => x.id === st.current); if (v) cur.add(v.url); }
+        for (const [u, n] of flowBytes) if (cur.has(u)) b += n; return b; };
+      /** swap a model's drawn version for another, already loaded: the old one
+       *  stays until the new is ready (no hole) */
+      const swapVersion = (key: string, v: FlowVersion, root: any) => {
+        const st = flowState.get(key);
+        const old = roots.get(key);
+        if (!st || !old || st.gen !== generation || (modal && modal.targets.some((t) => t.id === key))) return;
+        const obj = root.clone(true);
+        obj.position.copy(old.position); obj.quaternion.copy(old.quaternion); obj.scale.copy(old.scale);
+        obj.updateMatrixWorld(true);
+        const gone = new Set<any>();
+        old.traverse((o: any) => gone.add(o));
+        for (let i = pickables.length - 1; i >= 0; i--) if (gone.has(pickables[i])) pickables.splice(i, 1);
+        content.remove(old);
+        tag(obj, st.item);
+        content.add(obj);
+        roots.set(key, obj);
+        st.current = v.id;
+        const d = drawn.get(key);
+        if (d) drawn.set(key, { ...d, url: v.url });
+        opts.onVersionDrawn?.(st.item.id, v.id);
+      };
+      const flowTick = () => {
+        if (!flowState.size) { flowStrip.classList.add("hidden"); return; }
+        const H = Math.max(1, renderer.domElement.clientHeight);
+        const camPos = camera.position;
+        for (const [key, st] of flowState) {
+          if (st.gen !== generation || !st.item.flow?.length) continue;
+          const obj = roots.get(key);
+          if (!obj || !obj.parent) continue;
+          const box = new THREE.Box3().setFromObject(obj);
+          const dist = isOrtho ? orthoT : Math.max(0.01, box.distanceToPoint(camPos));
+          // a version without a measure and without tris_per_m2: its error from
+          // its triangles and the model's box (lod-flow's third estimate)
+          const size = box.getSize(new THREE.Vector3());
+          for (const v of st.item.flow) if (v.err == null && v.tris) {
+            const e = versionError({ primitives: { triangles: v.tris } }, { x: size.x, y: size.y, z: size.z });
+            if (e.err != null) { v.err = e.err; v.errFrom = e.from; }
+          }
+          const { want, preload } = pickByDistance(st.item.flow, dist, FOV, H, st.current);
+          st.dist = dist; st.want = want;
+          if (preload) { const pv = st.item.flow.find((x) => x.id === preload); if (pv && !flowBytes.has(pv.url) && flowUsed() + (pv.bytes ?? 0) <= flowBudget()) { flowBytes.set(pv.url, pv.bytes ?? 0); void load(pv.url); } }
+          if (!want || want === st.current || st.asking === want) continue;
+          const v = st.item.flow.find((x) => x.id === want);
+          if (!v) continue;
+          const cur = st.item.flow.find((x) => x.id === st.current);
+          // the memory: a finer version only while the flow stays under the ceiling
+          if (cur && v.ord < cur.ord && flowUsed() - (cur.bytes ?? 0) + (v.bytes ?? 0) > flowBudget()) continue;
+          st.asking = want;
+          flowBytes.set(v.url, v.bytes ?? 0);
+          void load(v.url).then((got) => {
+            if (st.asking === want) st.asking = undefined;
+            if (disposed || "fail" in got) return;
+            const now = pickByDistance(st.item.flow!, dist, FOV, H, st.current).want;
+            if (now === want) swapVersion(key, v, got.root);
+          });
+        }
+        // the line of the strip: levels · MB, as the tileset's
+        const lv: number[] = [];
+        for (const [, st] of flowState) { const v = st.item.flow?.find((x) => x.id === st.current); if (v) lv.push(v.ord); }
+        flowStrip.classList.toggle("hidden", !lv.length);
+        if (lv.length) {
+          const mb = (flowUsed() / 1048576).toFixed(1);
+          const txt = `${opts.flowTitle ?? "Versions by distance"} · ${flowState.size} · LOD ${Math.min(...lv)}–${Math.max(...lv)} · ${mb} MB`;
+          if (flowStrip.textContent !== txt) flowStrip.textContent = txt;
+        }
+      };
+      (probe as Record<string, unknown>).__spaceFlow = () => [...flowState].map(([k, st]) => ({ key: k, current: st.current,
+        url: st.item.flow?.find((x) => x.id === st.current)?.url, asking: st.asking ?? null, dist: st.dist ?? null, want: st.want ?? null,
+        errs: st.item.flow?.map((v) => [v.ord, v.err, v.errFrom]) }));
       let raf = 0;
       let frames = 0;
       const tick = () => {
@@ -1262,6 +1385,9 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
         if (live.length && ++frames % 20 === 0) for (const l of live) l.bar.refresh();
         renderer.render(scene, camera);
         place();
+        // the flow of LOD, four times a second
+        const now = performance.now();
+        if (now - flowAt > 250) { flowAt = now; flowTick(); }
       };
 
       // ── the gestures (space-nav.ts: the table, written once) ─────────────
@@ -2025,6 +2151,7 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
       host.appendChild(labels);
       host.appendChild(strips);
       host.append(cursorEl, modalEl, boxEl, viewEl, guides, vptr);
+      strips.appendChild(flowStrip);
       showView();
       cleanup = () => {
         cancelAnimationFrame(raf);

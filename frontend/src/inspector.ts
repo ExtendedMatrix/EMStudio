@@ -107,6 +107,8 @@ export interface InspectorCallbacks {
   /** MICRO-SPAZIO-3D-3 p.11 · a readable name over the technical one (a model
    *  without its level suffix), with its chip */
   readableName?: (nodeId: string) => { label: string; chip?: string | null; technical: string } | null;
+  /** MICRO-SPAZIO-3D-3 p.10 · a model's versions: the mode, the version, the use */
+  renderVersions?: (host: HTMLElement, nodeId: string) => boolean;
   /** MICRO-SPAZIO-3D-3 p.6 · under «Model the proxy»: «Usa una forma abbozzata…» */
   renderSketchUse?: (host: HTMLElement, nodeId: string) => void;
 }
@@ -1024,6 +1026,15 @@ export function renderInspector(
     const body = el("div");
     panel.appendChild(body);
     if (cb.renderTransform(body, nodeId)) { root.appendChild(panel); transformShown = true; }
+  }
+
+  // ── MICRO-SPAZIO-3D-3 p.10 · a model's versions, the same selector as the Space's ──
+  if (nodeId && cb.renderVersions) {
+    const panel = el("div", "insp-canvas insp-ver");
+    panel.appendChild(el("h3", "insp-sect", t("ver.title")));
+    const body = el("div");
+    panel.appendChild(body);
+    if (cb.renderVersions(body, nodeId)) root.appendChild(panel);
   }
 
   // ── RISORSA-FILE · the files, the resources of a file, the revisions ─────

@@ -9624,3 +9624,9 @@ tr.tv-sel-act > td { background: color-mix(in srgb, var(--accent) 42%, transpare
 .scn-dec.dec-warning { color: #c0392b; font-weight: 800; }
 .scn-labels.no-dec-rights .dec-rights, .scn-labels.no-dec-pd .dec-pd, .scn-labels.no-dec-warning .dec-warning, .scn-labels.no-dec-epoch .dec-epoch { display: none; }
 .scn-more:not(:empty) { margin-left: 4px; font-size: 0.62rem; font-weight: 700; opacity: 0.75; }
+/* MICRO-SPAZIO-3D-3 p.10 · the versions: the dot of a row chooses, the selector in the Inspector and the N panel */
+.sol-dot { cursor: pointer; border-radius: 50%; }
+.sol-dot:hover { background: color-mix(in srgb, var(--accent) 30%, transparent); }
+.ver-row { display: grid; grid-template-columns: 9em 1fr; gap: 6px; align-items: center; margin: 3px 10px; font-size: 0.78rem; }
+.ver-row select { min-width: 0; font: inherit; }
+.scn-flow { font-size: 0.72rem; }
