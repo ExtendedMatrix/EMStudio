@@ -184,6 +184,8 @@ export interface Space3dPrefs {
   versionModes?: Record<string, { mode: "manual" | "use" | "auto"; versionId?: string }>;
   /** p.10 · the use «Per uso» asks (web in a browser, realtime in the desktop, unless changed) */
   deviceUse?: string;
+  /** p.12 · a container with its tileset's alternative: models, the tileset, or the distance (absent = auto) */
+  altModes?: Record<string, "models" | "tileset" | "auto">;
 }
 
 export const DEFAULT_PREFS: Space3dPrefs = { shown: true, width: 260, toggled: [], hidden: [], locked: [], nShown: false, nWidth: 250, snapAlign: false, collapsed: [], versionModes: {} };
@@ -211,6 +213,8 @@ export function loadSpacePrefs(person: string | null | undefined): Space3dPrefs 
         .filter(([, v]) => v && typeof v === "object" && ["manual", "use", "auto"].includes(String((v as { mode?: unknown }).mode)))
         .map(([k, v]) => [k, { mode: (v as { mode: "manual" | "use" | "auto" }).mode, ...(typeof (v as { versionId?: unknown }).versionId === "string" ? { versionId: (v as { versionId: string }).versionId } : {}) }])) : {},
       ...(typeof p.deviceUse === "string" ? { deviceUse: p.deviceUse } : {}),
+      ...(p.altModes && typeof p.altModes === "object" ? { altModes: Object.fromEntries(Object.entries(p.altModes as Record<string, unknown>)
+        .filter(([, v]) => v === "models" || v === "tileset" || v === "auto")) as Record<string, "models" | "tileset" | "auto"> } : {}),
     };
   } catch {
     return { ...DEFAULT_PREFS, toggled: [], hidden: [], locked: [] };
@@ -234,11 +238,13 @@ export interface OutlinerView {
   selected: ReadonlySet<string>;
   /** MICRO-SPAZIO-3D-3 · the active key: its row full, the other selected tenuous */
   active?: string | null;
+  /** p.12 · the objects whose alternative is drawn instead: key → by what («sostituito da») */
+  substituted?: ReadonlyMap<string, string>;
   /** the isolated object, if any */
   isolated: string | null;
   query: string;
   glyph: (kind: string) => HTMLElement;
-  texts: { search: string; isolate: string; frame: string; eye: string; arrow: string; palette: string; close: string; empty: string };
+  texts: { search: string; isolate: string; frame: string; eye: string; arrow: string; palette: string; close: string; empty: string; substitutedBy?: string };
   /** the palette of the shapes (p.4): id, name, family */
   palette: Array<{ id: string; name: string; family: string; familyName: string }>;
 }
@@ -261,6 +267,7 @@ export interface OutlinerActions {
   clearSelection?(): void;
   /** p.10 · the dot of a version's row: that version, drawn in place of the current */
   chooseVersion?(rmId: string, versionId: string): void;
+  /** p.12 · (the space-outliner draws «sostituito da» from the view's `substituted`) */
   /** p.7 · a right click on a row (a model, a container) */
   rowMenu?(row: OutlinerRow, x: number, y: number): void;
   /** p.6 · a press on a sketch's row: the caller follows the pointer (a drag onto a unit) */
@@ -404,10 +411,12 @@ export function renderOutliner(el: HTMLElement, v: OutlinerView, act: OutlinerAc
         const allLocked = keys.every((k) => locked.has(k));
         const eye = document.createElement("button");
         eye.type = "button";
-        eye.className = `sol-eye${allHidden ? " off" : ""}`;
+        const sub = r.object ? v.substituted?.get(r.key) : undefined;
+        eye.className = `sol-eye${allHidden || sub ? " off" : ""}${sub ? " subst" : ""}`;
         eye.dataset.sol = "eye";
-        eye.title = v.texts.eye;
-        eye.textContent = allHidden ? "◌" : "👁";
+        eye.title = sub ? `${v.texts.substitutedBy ?? "replaced by"} ${sub}` : v.texts.eye;
+        eye.textContent = allHidden || sub ? "◌" : "👁";
+        if (sub) line.classList.add("subst");
         eye.dataset.keys = JSON.stringify(keys);
         eye.dataset.on = String(!allHidden);
         eye.addEventListener("pointerdown", (e) => dragSwitch(e, eye, "eye", !allHidden));

@@ -9630,3 +9630,7 @@ tr.tv-sel-act > td { background: color-mix(in srgb, var(--accent) 42%, transpare
 .ver-row { display: grid; grid-template-columns: 9em 1fr; gap: 6px; align-items: center; margin: 3px 10px; font-size: 0.78rem; }
 .ver-row select { min-width: 0; font: inherit; }
 .scn-flow { font-size: 0.72rem; }
+/* MICRO-SPAZIO-3D-3 p.12 · the side of a container's alternative not drawn: its label out, its row «sostituito da» */
+.scn-label.alt-off { display: none !important; }
+.sol-row.subst > .sol-name { font-style: italic; opacity: 0.7; }
+.sol-eye.subst { color: #2b8a3e; }

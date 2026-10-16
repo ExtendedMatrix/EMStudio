@@ -93,6 +93,9 @@ export interface SceneItem {
    *  starting from `flowStart` (the lightest) */
   flow?: FlowVersion[];
   flowStart?: string;
+  /** MICRO-SPAZIO-3D-3 p.12 · a container and its tileset, one or the other by
+   *  the distance: the group, which side this item is, the tileset's error (m) */
+  alt?: { group: string; role: "tileset" | "models"; err: number };
   /** MICRO-SPAZIO-3D-3 p.14 · the decorators of its label, as the graph's: a
    *  glyph of the datamodel (`kind`, author / licence / embargo / epoch) or a
    *  short text (PD n, «!»), each in its overlay's group */
@@ -269,6 +272,8 @@ export interface SpaceSceneOptions {
    *  too), the active last; on release, ONE call with all their poses */
   transformTargets?: () => string[];
   onTransformMany?: (poses: Array<{ key: string; pose: Pose }>) => void;
+  /** MICRO-SPAZIO-3D-3 p.12 · what a container's automatic choice shows now */
+  onAltState?: (group: string, shown: "tileset" | "models") => void;
   /** MICRO-SPAZIO-3D-3 p.10 · a version of a model in the flow was drawn (the Outliner's dot follows) */
   onVersionDrawn?: (rmId: string, versionId: string) => void;
   /** the flow's words: «Versioni automatiche», and its line (levels · MB) */
@@ -1326,7 +1331,36 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
         if (d) drawn.set(key, { ...d, url: v.url });
         opts.onVersionDrawn?.(st.item.id, v.id);
       };
+      // ── MICRO-SPAZIO-3D-3 p.12 · a container or its tileset, by the distance ──
+      const altState = new Map<string, "tileset" | "models">();
+      const altTick = () => {
+        const groups = new Map<string, { err: number; tiles: string[]; models: string[] }>();
+        for (const it of items) if (it.alt) {
+          const g = groups.get(it.alt.group) ?? groups.set(it.alt.group, { err: it.alt.err, tiles: [], models: [] }).get(it.alt.group)!;
+          (it.alt.role === "tileset" ? g.tiles : g.models).push(`rm:${it.id}`);
+        }
+        if (!groups.size) return;
+        const H = Math.max(1, renderer.domElement.clientHeight);
+        for (const [gid, g] of groups) {
+          const box = new THREE.Box3();
+          for (const k of [...g.models, ...g.tiles]) { const o = roots.get(k); if (!o) continue;
+            const live = liveLayers().find((l) => l.layer.object === o); const b = live ? live.layer.bounds() : new THREE.Box3().setFromObject(o); if (b && !b.isEmpty()) box.union(b); }
+          if (box.isEmpty()) continue;
+          const dist = isOrtho ? orthoT : Math.max(0.01, box.distanceToPoint(camera.position));
+          // the same threshold as the flow: the tileset is enough while its error stays under 16 px
+          const sse = (g.err * H) / (2 * dist * Math.tan((FOV * Math.PI) / 360));
+          const prev = altState.get(gid);
+          const which: "tileset" | "models" = sse <= (prev === "tileset" ? 16 : 12.8) ? "tileset" : "models";
+          for (const k of g.tiles) { const o = roots.get(k); if (o) o.visible = which === "tileset"; }
+          for (const k of g.models) { const o = roots.get(k); if (o) o.traverse((x: any) => { x.visible = which === "models"; }); }
+          for (const a of anchors) if (a.el.dataset.id && (g.tiles.includes(`rm:${a.el.dataset.id}`) || g.models.includes(`rm:${a.el.dataset.id}`)))
+            a.el.classList.toggle("alt-off", (which === "tileset") !== g.tiles.includes(`rm:${a.el.dataset.id}`));
+          if (prev !== which) { altState.set(gid, which); opts.onAltState?.(gid, which); }
+        }
+      };
+      (probe as Record<string, unknown>).__spaceAlt = () => Object.fromEntries(altState);
       const flowTick = () => {
+        altTick();
         if (!flowState.size) { flowStrip.classList.add("hidden"); return; }
         const H = Math.max(1, renderer.domElement.clientHeight);
         const camPos = camera.position;

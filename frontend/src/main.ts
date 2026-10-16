@@ -253,6 +253,7 @@ import { patchProxyNodes, proxyRelPath } from "./proxy-association";
 import { planMove, planNewGroup, planRemove, type GroupPlan } from "./rm-groups";
 import { shownModelName, splitLevel } from "./rm-names";
 import { versionError, type FlowVersion, type VersionMode } from "./lod-flow";
+import { tilesetAlternatives, type AltMode, type TilesetAlternative } from "./tileset-alt";
 import { trackpadClassifier } from "./wheel-kind";
 import { isTilesetUrl } from "./tiles3d";
 import type { ModelOptions } from "./embed3d-native";
@@ -3290,7 +3291,7 @@ function renderInspectorInto(host: HTMLElement): void {
       onOpenFacing: (tid) => openFacingFor(tid),
       renderTransform: (host2, id) => renderTransformInto(host2, id),
       renderSketchUse: (host2, id) => renderSketchUse(host2, id),
-      renderVersions: (host2, id) => renderVersionsInto(host2, id),
+      renderVersions: (host2, id) => { const a = renderVersionsInto(host2, id); const b = renderAlternativeInto(host2, id); return a || b; },
       readableName: (id) => { const r = rmShown(id); return r && r.shown !== r.technical ? { label: r.shown, chip: r.level, technical: r.technical } : null; },
       onClearField: (nodeId, field) => {
         (storeOfNode(nodeId) ?? store!).clearField(nodeId, field);
@@ -21936,6 +21937,17 @@ function setSpace3dPrefs(p: Space3dPrefs): void {
   saveSpacePrefs(sp3.person, p);
   refreshSurfaces("scene");
 }
+/** MICRO-SPAZIO-3D-3 p.12 · the objects not drawn because their alternative is: key → by what */
+const spaceSubstituted = new Map<string, string>();
+/** …and the alternatives of the scene's epoch: model → its container, its side, the mode, by what */
+let spaceAltInfo = new Map<string, { group: string; role: "tileset" | "models"; mode: "models" | "tileset" | "auto"; by: string }>();
+function recomputeSubstituted(): void {
+  spaceSubstituted.clear();
+  for (const [id, x] of spaceAltInfo) {
+    const shownRole = x.mode === "auto" ? altShown.get(x.group) ?? "models" : x.mode;
+    if (x.role !== shownRole) spaceSubstituted.set(`rm:${id}`, x.by);
+  }
+}
 /** «Isola»: the one object shown, by key */
 let spaceIsolated: string | null = null;
 let spaceQuery = "";
@@ -23228,6 +23240,95 @@ function renderVersionsInto(host: HTMLElement, rmId: string): boolean {
   return true;
 }
 
+// ── MICRO-SPAZIO-3D-3 p.12 · the tileset as the alternative of a container ──
+
+/** The master of a model: its asset (the version chain's master), else its first file. */
+function rmMaster(rm: SpaceRM): string | null {
+  return rm.versions?.find((v) => v.master)?.id ?? rm.resource?.id ?? null;
+}
+/** The alternatives the DTC says (`tileset-alt.ts`), for this graph's containers. */
+function spaceAlternatives(sp: Space | null = currentSpace()): TilesetAlternative[] {
+  if (!sp || !store || !sp.rmGroups.size) return [];
+  const tilesets = sp.rms.filter((r) => !!r.resource?.tiles).map((r) => ({ id: r.id,
+    outs: [...new Set([...(r.versions ?? []).map((v) => v.id), r.resource?.id ?? ""].filter(Boolean))] }));
+  if (!tilesets.length) return [];
+  const groups = [...sp.rmGroups.values()].map((g) => ({ id: g.id,
+    members: g.members.map((m) => ({ id: m, master: rmMaster(sp.rms.find((r) => r.id === m)!) ?? "" })) }));
+  return tilesetAlternatives(store.doc.graph, tilesets, groups);
+}
+function altModeOf(groupId: string): AltMode { return space3dPrefs().altModes?.[groupId] ?? "auto"; }
+function setAltMode(groupId: string, mode: AltMode): void {
+  const p = space3dPrefs();
+  setSpace3dPrefs({ ...p, altModes: { ...(p.altModes ?? {}), [groupId]: mode } });
+}
+/** What the automatic choice of each container shows now (the scene says it). */
+const altShown = new Map<string, "tileset" | "models">();
+function altMenuEntries(groupId: string): Array<{ label: string; act: string; run: () => void }> {
+  const m = altModeOf(groupId);
+  return (["models", "tileset", "auto"] as const).map((k) => ({ label: `${m === k ? "● " : ""}${t(`alt.${k}`)}`, act: `alt-${k}`, run: () => setAltMode(groupId, k) }));
+}
+/** The tileset's Inspector: the container it is the alternative of, or «Dichiara che deriva da…». */
+function renderAlternativeInto(host: HTMLElement, rmId: string): boolean {
+  const sp = currentSpace();
+  const rm = sp?.rms.find((r) => r.id === rmId);
+  if (!sp || !rm?.resource?.tiles || !store) return false;
+  const alts = spaceAlternatives(sp).filter((a) => a.tileset === rmId);
+  for (const a of alts) {
+    const g = sp.rmGroups.get(a.group);
+    const p = document.createElement("p");
+    p.className = "insp-hint";
+    p.dataset.alt = a.group;
+    p.textContent = t(a.covered.length === a.total ? "alt.of" : "alt.ofPart", { group: g?.name ?? a.group, k: String(a.covered.length), n: String(a.total) });
+    host.appendChild(p);
+    const sel = document.createElement("select");
+    sel.dataset.altMode = a.group;
+    for (const k of ["models", "tileset", "auto"] as const) { const o = document.createElement("option"); o.value = k; o.textContent = t(`alt.${k}`); o.selected = altModeOf(a.group) === k; sel.appendChild(o); }
+    sel.addEventListener("change", () => setAltMode(a.group, sel.value as AltMode));
+    host.appendChild(sel);
+  }
+  if (!alts.length) {
+    const p = document.createElement("p");
+    p.className = "insp-hint";
+    p.textContent = t("alt.none");
+    host.appendChild(p);
+    const groups = [...sp.rmGroups.values()].filter((g) => g.members.length);
+    if (groups.length) {
+      const sel = document.createElement("select");
+      sel.dataset.altDeclare = "1";
+      for (const g of groups) { const o = document.createElement("option"); o.value = g.id; o.textContent = `${g.name} (${g.members.length})`; sel.appendChild(o); }
+      const b = document.createElement("button");
+      b.className = "insp-btn";
+      b.dataset.s3 = "declare-derivation";
+      b.textContent = t("alt.declare");
+      b.addEventListener("click", () => declareTilesetDerivation(rmId, sel.value));
+      host.append(sel, b);
+    }
+  }
+  return true;
+}
+/** «Dichiara che deriva da…»: the tileset's master derived from the members'
+ *  masters, one step (the TS twin of s3Dgraphy's `declare_derivation`). */
+function declareTilesetDerivation(rmId: string, groupId: string): void {
+  const st = store;
+  const sp = currentSpace();
+  const rm = sp?.rms.find((r) => r.id === rmId);
+  const g = sp?.rmGroups.get(groupId);
+  if (!st || !sp || !rm || !g || refuseReadOnly()) return;
+  const out = rmMaster(rm);
+  const inputs = g.members.map((m) => rmMaster(sp.rms.find((r) => r.id === m)!)).filter((x): x is string => !!x);
+  if (!out || !inputs.length) { toast(t("alt.noMasters")); return; }
+  let res: ReturnType<typeof declareDerivation> | null = null;
+  try { st.batch(() => { res = declareDerivation(st, { output: out, inputs, tool: "3D Tiles" }); }); }
+  catch (e) { toast(String(e instanceof Error ? e.message : e)); return; }
+  const msg = t("alt.declared", { tileset: rm.name, group: g.name, n: String((res as unknown as { inputs: string[] } | null)?.inputs.length ?? 0) });
+  logInfo(msg, [rmId]);
+  toastUndo(msg, st);
+  buildScenes();
+  draw();
+  refreshSurfaces("scene");
+  refreshInspector();
+}
+
 /** The Outliner of a Space window, drawn into `el`. */
 function renderSpaceOutliner(el: HTMLElement, win: Win, sp: Space | null): void {
   const prefs = space3dPrefs();
@@ -23265,10 +23366,11 @@ function renderSpaceOutliner(el: HTMLElement, win: Win, sp: Space | null): void 
   }) : [];
   const fam = new Map(SHAPE_FAMILIES.map((f) => [f.id, shapeLabel(f, lang)]));
   renderOutliner(el, {
-    rows, prefs, selected: spaceSelectedKeys(sp), active: spaceSel(sp).active, isolated: spaceIsolated, query: spaceQuery,
+    rows, prefs, selected: spaceSelectedKeys(sp), active: spaceSel(sp).active, substituted: spaceSubstituted, isolated: spaceIsolated, query: spaceQuery,
     glyph: (k) => typeIconElement(k),
     texts: { search: t("s3.search"), isolate: t("s3.isolate"), frame: t("s3.frame"), eye: t("s3.eye"),
-             arrow: t("s3.arrow"), palette: t("s3.palette"), close: t("s3.closeOutliner"), empty: t("s3.outlinerEmpty") },
+             arrow: t("s3.arrow"), palette: t("s3.palette"), close: t("s3.closeOutliner"), empty: t("s3.outlinerEmpty"),
+             substitutedBy: t("alt.substitutedBy") },
     palette: SHAPES.map((s) => ({ id: s.id, name: shapeLabel(s, lang), family: s.family, familyName: fam.get(s.family) ?? s.family })),
   }, {
     // MICRO-SPAZIO-3D-3 · one selection, Blender's Outliner: click = only
@@ -23342,6 +23444,8 @@ function renderSpaceOutliner(el: HTMLElement, win: Win, sp: Space | null): void 
           "sep",
           // p.10 · the container's mode: for all of its models
           ...versionMenuEntries(members),
+          // p.12 · its tileset's alternative, when the DTC says one
+          ...(spaceAlternatives().some((a) => a.group === r.id) ? ["sep" as const, ...altMenuEntries(r.id)] : []),
         ]);
       }
     },
@@ -23448,6 +23552,8 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
     snapAlign: () => space3dPrefs().snapAlign === true,
     glyph: (k) => typeIconElement(k),
     flowTitle: t("ver.flowTitle"),
+    // p.12 · the automatic choice of a container: the Outliner's «sostituito da» follows
+    onAltState: (g, which) => { if (altShown.get(g) !== which) { altShown.set(g, which); recomputeSubstituted(); if (space3dPrefs().shown) renderSpaceOutliner(outl, win, currentSpace()); } },
     // p.10 · a version of the flow drawn: the Outliner's dot and the N panel follow (no rebuild)
     onVersionDrawn: () => { if (!flowRedraw) { flowRedraw = true; requestAnimationFrame(() => { flowRedraw = false; if (space3dPrefs().shown) renderSpaceOutliner(outl, win, currentSpace()); drawNPanel(); }); } },
     panelFolded: (k) => (space3dPrefs().collapsed ?? []).includes(k),
@@ -23714,6 +23820,21 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
     const ssel = spaceSel(sp);
     // p.14 · the decorators of the units' labels, as the graph's (2d_glyphs)
     const decorOf = spaceDecorators(st, sp, sum.units);
+    // p.12 · a container with its tileset's alternative: models, tileset, or the distance
+    const alts = spaceAlternatives(sp).filter((a) => sum.rms.some((r) => r.id === a.tileset));
+    const altOfRm = new Map<string, { group: string; role: "tileset" | "models"; mode: AltMode; err: number }>();
+    for (const a of alts) {
+      const tr = sum.rms.find((r) => r.id === a.tileset)!;
+      const tv = (tr.versions ?? []).find((v) => !v.master && typeof (v.data ?? {}).geometric_error_m === "number");
+      const err = Number((tv?.data ?? {}).geometric_error_m ?? 10);
+      const mode = altModeOf(a.group);
+      altOfRm.set(a.tileset, { group: a.group, role: "tileset", mode, err });
+      for (const m of a.covered) altOfRm.set(m, { group: a.group, role: "models", mode, err });
+    }
+    spaceAltInfo = new Map([...altOfRm].map(([id, x]) => [id, { group: x.group, role: x.role, mode: x.mode,
+      by: x.role === "tileset" ? t("alt.byModels", { group: sp.rmGroups.get(x.group)?.name ?? x.group })
+        : (sp.rms.find((r) => r.id === alts.find((a) => a.group === x.group)!.tileset)?.name ?? "") }]));
+    recomputeSubstituted();
     const isSel = (k: string) => ssel.keys.includes(k);
     const hidden = new Set(prefs.hidden);
     const shown = (key: string) => !hidden.has(key) && (!spaceIsolated || spaceIsolated === key);
@@ -23721,12 +23842,16 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
     for (const r of sum.rms) {
       const isTiles = !!r.resource?.tiles;
       if (!space3dShown(isTiles ? "s3_tiles" : "s3_rm") || !shown(`rm:${r.id}`)) continue;
+      // p.12 · one of the two drawn: the other is «sostituito da» (manual modes), or the scene decides (auto)
+      const alt = altOfRm.get(r.id);
+      if (alt && alt.mode !== "auto" && (alt.mode === "tileset") !== (alt.role === "tileset")) continue;
       const nmS = rmShown(r.id, sp);
       // MICRO-SPAZIO-3D-3 p.10 · the version by its mode (manual, by use, the distance)
       const plan = isTiles ? {} : rmVersionPlan(r);
       items.push({ kind: "rm", id: r.id, label: nmS && nmS.shown !== nmS.technical ? `${nmS.shown}${nmS.level ? ` · ${nmS.level}` : ""}` : r.name, state: r.resource?.state ?? "missing",
         url: plan.url ?? spaceFileUrl(r.resource), resourceId: r.resource?.id,
-        ...(plan.flow ? { flow: plan.flow, flowStart: plan.flowStart } : {}), tiles: r.resource?.tiles || undefined,
+        ...(plan.flow ? { flow: plan.flow, flowStart: plan.flowStart } : {}),
+        ...(alt && alt.mode === "auto" ? { alt: { group: alt.group, role: alt.role, err: alt.err } } : {}), tiles: r.resource?.tiles || undefined,
         edge: placementColour(r.genre) ?? undefined, selected: isSel(`rm:${r.id}`), active: ssel.active === `rm:${r.id}`,
         // MICRO-SPAZIO-3D-2 · the model's transform (data.transform), over its file
         pose: r.resource?.tiles ? undefined : poseOfNode(r.id),

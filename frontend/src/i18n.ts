@@ -61,6 +61,17 @@ type Dict = Record<string, string>;
 // `emtree.`, `empty.`, `toast.`) so a translator can work a screen at a time and
 // an unused key is findable.
 const EN: Dict = {
+  "alt.byModels": "the models of «{group}»",
+  "alt.models": "Container: the models",
+  "alt.tileset": "Container: the tileset",
+  "alt.auto": "Container: automatic (far the tileset, near the models)",
+  "alt.of": "The alternative of «{group}»: derived from its {n} models",
+  "alt.ofPart": "The alternative of a part of «{group}»: derived from {k} of its {n} models",
+  "alt.none": "The DTC does not say this tileset derives from a container's models.",
+  "alt.declare": "Declare it derives from…",
+  "alt.noMasters": "No master to derive from",
+  "alt.declared": "{tileset} derived from the {n} models of «{group}»",
+  "alt.substitutedBy": "replaced by",
   "ver.title": "Versions",
   "ver.mode": "Mode",
   "ver.version": "Version",
@@ -3703,6 +3714,17 @@ const EN: Dict = {
 
 // ── Italiano: complete, because E.D. works in it ───────────────────────────────
 const IT: Dict = {
+  "alt.byModels": "i modelli di «{group}»",
+  "alt.models": "Contenitore: i modelli",
+  "alt.tileset": "Contenitore: il tileset",
+  "alt.auto": "Contenitore: automatico (da lontano il tileset, da vicino i modelli)",
+  "alt.of": "L'alternativa di «{group}»: deriva dai suoi {n} modelli",
+  "alt.ofPart": "L'alternativa di una parte di «{group}»: deriva da {k} dei suoi {n} modelli",
+  "alt.none": "Il DTC non dice che questo tileset deriva dai modelli di un contenitore.",
+  "alt.declare": "Dichiara che deriva da…",
+  "alt.noMasters": "Nessun master da cui derivare",
+  "alt.declared": "{tileset} deriva dai {n} modelli di «{group}»",
+  "alt.substitutedBy": "sostituito da",
   "ver.title": "Versioni",
   "ver.mode": "Modo",
   "ver.version": "Versione",
