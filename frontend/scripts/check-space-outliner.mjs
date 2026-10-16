@@ -63,8 +63,8 @@ ok(O.rowOpen({ key: "epoch:E1", kind: "epoch", current: false }, new Set(["epoch
 // the preferences
 const ED = "0000-0002-1825-0097";
 eq(O.loadSpacePrefs(ED), O.DEFAULT_PREFS, "nobody wrote anything: the default");
-O.saveSpacePrefs(ED, { ...O.DEFAULT_PREFS, hidden: ["proxy:US10"], locked: ["rm:RM_tiles"], width: 320, shown: false, toggled: ["epoch:E1"] });
-eq(O.loadSpacePrefs(ED), { shown: false, width: 320, toggled: ["epoch:E1"], hidden: ["proxy:US10"], locked: ["rm:RM_tiles"] }, "E.D.'s, read back");
+O.saveSpacePrefs(ED, { ...O.DEFAULT_PREFS, hidden: ["proxy:US10"], locked: ["rm:RM_tiles"], width: 320, shown: false, toggled: ["epoch:E1"], nShown: true, nWidth: 300 });
+eq(O.loadSpacePrefs(ED), { shown: false, width: 320, toggled: ["epoch:E1"], hidden: ["proxy:US10"], locked: ["rm:RM_tiles"], nShown: true, nWidth: 300 }, "E.D.'s, read back (MICRO-SPAZIO-3D-2: the N panel too)");
 eq(O.loadSpacePrefs("0000-0001-5109-3700"), O.DEFAULT_PREFS, "another person: the default");
 eq([...mem.keys()], ["emstudio.space3d"], "one local preference, emstudio.space3d — never in a document");
 mem.set("emstudio.space3d", "{broken");

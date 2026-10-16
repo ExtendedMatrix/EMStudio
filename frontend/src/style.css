@@ -8816,7 +8816,7 @@ button.shelf-badge { cursor: pointer; font: inherit; font-size: 10.5px; }
 .scn-seg button[aria-pressed="true"] { background: var(--accent); color: var(--on-accent); }
 .scn-tg { border: 1px solid var(--border-strong); background: var(--bg-panel); color: var(--text); border-radius: var(--radius-sm); padding: 2px 8px; font: inherit; cursor: pointer; }
 .scn-tg[aria-pressed="true"] { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
-.scn-host { position: relative; flex: 1; min-height: 200px; overflow: hidden; background: linear-gradient(var(--scene-bg-top), var(--scene-bg-bottom)); }
+.scn-host { position: relative; flex: 1; min-height: 200px; overflow: hidden; user-select: none; -webkit-user-select: none; background: linear-gradient(var(--scene-bg-top), var(--scene-bg-bottom)); }
 .scn-host .scn-canvas { display: block; width: 100%; height: 100%; cursor: grab; }
 .scn-status { position: absolute; inset: 0; display: grid; place-content: center; color: var(--scene-ink); font-size: 0.8rem; }
 .scn-ov { position: absolute; left: 10px; top: 10px; max-width: min(380px, 72%); background: var(--scene-ov-bg); color: var(--scene-ov-ink); border: 1px solid var(--scene-ov-border); border-radius: 8px; padding: 7px 10px; font-size: 0.76rem; line-height: 1.45; z-index: 2; }
@@ -8867,6 +8867,27 @@ button.shelf-badge { cursor: pointer; font: inherit; font-size: 10.5px; }
 .scn-modal.hidden, .scn-box.hidden { display: none; }
 .scn-box { position: absolute; z-index: 3; border: 1px dashed #fff; outline: 1px dashed #000; pointer-events: none; }
 .scn-host.scn-armed .scn-canvas { cursor: crosshair; }
+/* MICRO-SPAZIO-3D-2 · the view's name, top left as Blender's («Frontale · Ortometrica») */
+.scn-view { position: absolute; left: 10px; top: 6px; z-index: 2; pointer-events: none; color: var(--scene-ink); font: 600 0.74rem var(--font-ui, inherit); text-shadow: 0 0 3px var(--scene-bg-top); }
+.scn-host .scn-ov { top: 26px; }
+.scn-box.select { border-style: solid; border-color: #fff; outline-style: dashed; }
+/* the N panel «Vista», on the right as Blender's sidebar */
+.scn-npanel { display: flex; flex-direction: column; min-width: 180px; max-width: 520px; border-left: 1px solid var(--border); background: var(--bg-panel); font-size: 0.76rem; overflow: auto; }
+.scn-npanel.hidden, .scn-ngrip.hidden, .scn-ntab.hidden { display: none; }
+.scn-ngrip { width: 5px; cursor: col-resize; background: transparent; flex: none; margin-right: -3px; z-index: 3; }
+.scn-ngrip:hover { background: var(--accent); opacity: 0.4; }
+.scn-ntab { position: absolute; right: 0; top: 50%; transform: translateY(-50%); z-index: 4; border: 1px solid var(--border-strong); border-right: 0; border-radius: 6px 0 0 6px; background: var(--bg-panel); color: var(--text); padding: 10px 4px; cursor: pointer; font: inherit; font-weight: 600; }
+.scn-npanel .np-tabs { display: flex; gap: 2px; padding: 6px 8px 0; border-bottom: 1px solid var(--border); }
+.scn-npanel .np-tabs button { border: 1px solid var(--border); border-bottom: 0; border-radius: 6px 6px 0 0; background: var(--bg-panel-2, var(--bg-panel)); color: var(--text); padding: 3px 10px; font: inherit; font-weight: 600; }
+.scn-npanel .np-sect { padding: 6px 10px 8px; border-bottom: 1px solid var(--border); }
+.scn-npanel .np-sect > h5 { margin: 2px 0 6px; font-size: 0.74rem; font-weight: 600; color: var(--text-muted, inherit); text-transform: none; }
+.xf-grid { display: grid; grid-template-columns: auto 1fr; gap: 3px 6px; align-items: center; }
+.xf-grid > .xf-lab { color: var(--text-muted, inherit); font-size: 0.72rem; }
+.xf-grid > .xf-head { grid-column: 1 / -1; margin-top: 4px; font-weight: 600; font-size: 0.72rem; }
+.xf-grid input { width: 100%; min-width: 0; box-sizing: border-box; font: 0.76rem var(--mono, monospace); padding: 2px 4px; text-align: right; }
+.xf-grid input:read-only { opacity: 0.7; }
+.xf-note { margin: 4px 0 0; color: var(--text-muted, inherit); font-size: 0.7rem; line-height: 1.35; }
+.xf-actions { display: flex; gap: 6px; margin-top: 6px; flex-wrap: wrap; }
 
 .scn-empty p { margin: 0; max-width: 46ch; font-size: 0.82rem; }
 .scn-labels { position: absolute; inset: 0; pointer-events: none; }

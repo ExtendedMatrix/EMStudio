@@ -24,10 +24,14 @@ export function proxyRelPath(unitName: string): string {
 }
 
 /** The nodes the library returned, the proxy's resource told that its file is
- *  there: `checksum` sha256, `residency` resident, glb, its size. */
-export function patchProxyNodes(nodes: EmNode[], rel: string, sha256hex: string, size: number): EmNode[] {
+ *  there: `checksum` sha256, `residency` resident, glb, its size. MICRO-SPAZIO-
+ *  3D-2 · `transform` (the `data.transform` of `transform3d.ts`) goes on the
+ *  SemanticShape: the glb holds the shape in its own frame, the pose is apart. */
+export function patchProxyNodes(nodes: EmNode[], rel: string, sha256hex: string, size: number,
+                                transform?: Record<string, unknown>): EmNode[] {
   return nodes.map((n) => {
     const d = (n.data ?? {}) as Record<string, unknown>;
+    if (transform && n.node_type === "semantic_shape") return { ...n, data: { ...d, transform } };
     if (n.node_type !== "resource" || d.url_type !== "proxy_model") return n;
     return { ...n, data: { ...d, url: rel, checksum: `sha256:${sha256hex}`, residency: "resident",
       media_type: "model/gltf-binary", size_bytes: size } };

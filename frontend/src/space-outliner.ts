@@ -137,9 +137,12 @@ export interface Space3dPrefs {
   hidden: string[];
   /** objects not selectable (the arrow) */
   locked: string[];
+  /** MICRO-SPAZIO-3D-2 · the N panel («Vista») on the right, and its width */
+  nShown: boolean;
+  nWidth: number;
 }
 
-export const DEFAULT_PREFS: Space3dPrefs = { shown: true, width: 260, toggled: [], hidden: [], locked: [] };
+export const DEFAULT_PREFS: Space3dPrefs = { shown: true, width: 260, toggled: [], hidden: [], locked: [], nShown: false, nWidth: 250 };
 
 /** Is a row open: its default, unless the person turned it. */
 export function rowOpen(r: Pick<OutlinerRow, "key" | "kind" | "current">, toggled: ReadonlySet<string>): boolean {
@@ -156,6 +159,8 @@ export function loadSpacePrefs(person: string | null | undefined): Space3dPrefs 
       shown: typeof p.shown === "boolean" ? p.shown : DEFAULT_PREFS.shown,
       width: typeof p.width === "number" && p.width >= 160 && p.width <= 640 ? p.width : DEFAULT_PREFS.width,
       toggled: list(p.toggled), hidden: list(p.hidden), locked: list(p.locked),
+      nShown: typeof p.nShown === "boolean" ? p.nShown : DEFAULT_PREFS.nShown,
+      nWidth: typeof p.nWidth === "number" && p.nWidth >= 180 && p.nWidth <= 520 ? p.nWidth : DEFAULT_PREFS.nWidth,
     };
   } catch {
     return { ...DEFAULT_PREFS, toggled: [], hidden: [], locked: [] };

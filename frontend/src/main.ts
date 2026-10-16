@@ -239,10 +239,12 @@ import { DOC_TOOLS, renderReadingStage, selectedPassage, type DocTool,
 import { openReadingBubble, type BubbleUnit } from "./reading-bubble";
 import { renderChronology, type ChronoEpoch, type ChronologyData } from "./chronology";
 import { buildSpace, citationKey, SpaceMarks, type Space } from "./space";
-import { mountSpaceScene, type SceneItem, type SceneMenuRequest, type SpaceSceneHandle } from "./scene3d";
+import { mountSpaceScene, type SceneItem, type SceneMenuRequest, type SceneView, type SpaceSceneHandle } from "./scene3d";
+import { blenderToThree, eulerFromUp, leftSelects, threeToBlender, type AlignedView, type CamState, type Pose, type V3 } from "./space-nav";
+import { coordDecimals, deg, IDENTITY, isIdentity, poseToXf, rad, readTransform, transformData, xfToPose, type Xf } from "./transform3d";
+import { parseTyped, renderTransformForm, type TransformFormTexts } from "./transform-ui";
 import { implicitGroups, isImplicitGroup, outsideMembers, unitOfImplicit, withImplicitGroups } from "./implicit-pd";
-import { eulerFromUp, type CamState, type V3 } from "./space-nav";
-import { addSketch, listSketches, onSketches, removeSketch, SHAPE_FAMILIES, SHAPES, shapeById, shapeLabel, sketchById } from "./shapes3d";
+import { addSketch, listSketches, onSketches, removeSketch, SHAPE_FAMILIES, SHAPES, shapeById, shapeLabel, sketchById, updateSketch } from "./shapes3d";
 import { buildOutlinerTree, loadSpacePrefs, renderOutliner, saveSpacePrefs, type Space3dPrefs } from "./space-outliner";
 import { patchProxyNodes, proxyRelPath } from "./proxy-association";
 import { trackpadClassifier } from "./wheel-kind";
@@ -3228,6 +3230,7 @@ function renderInspectorInto(host: HTMLElement): void {
       // TRADUZIONI · the row of languages under every natural-language text
       renderTextLanguages: (box, nodeId, field) => trui.renderLanguageRow(box, translationUi, nodeId, field),
       onOpenFacing: (tid) => openFacingFor(tid),
+      renderTransform: (host2, id) => renderTransformInto(host2, id),
       onClearField: (nodeId, field) => {
         (storeOfNode(nodeId) ?? store!).clearField(nodeId, field);
         refreshInspector();
@@ -13909,6 +13912,15 @@ function openSettings(section?: string): void {
   if (lm) lm.value = grouped(s.viewer.lodLimitMB);
   if (lp) lp.value = grouped(s.viewer.lodLimitPoints);
   if (tm) tm.value = grouped(s.viewer.tilesMemoryMB);
+  // MICRO-SPAZIO-3D-2 · the Space's navigation
+  const chk = (id: string, v: boolean) => { const c = document.getElementById(id) as HTMLInputElement | null; if (c) c.checked = v; };
+  chk("set-nav-emulate3", s.viewer.emulate3Button);
+  chk("set-nav-numpad", s.viewer.emulateNumpad);
+  chk("set-nav-autopersp", s.viewer.autoPerspective);
+  const ld = document.getElementById("set-nav-leftdrag") as HTMLSelectElement | null;
+  if (ld) ld.value = s.viewer.leftDrag;
+  const seen = document.getElementById("set-nav-middle-seen");
+  if (seen) seen.textContent = t(middleSeen() ? "settings.navMiddleSeen" : "settings.navMiddleNot");
   const iiifInput = document.getElementById("set-iiif-base") as HTMLInputElement | null;
   if (iiifInput) iiifInput.value = s.iiif.base;
   const orcidClient = document.getElementById("set-orcid-client") as HTMLInputElement | null;
@@ -14223,6 +14235,10 @@ settingsModal.addEventListener("click", (e) => {
       lodLimitMB: posNum("set-lod-limit-mb", LOD_LIMIT_MB),
       lodLimitPoints: posNum("set-lod-limit-points", LOD_LIMIT_POINTS),
       tilesMemoryMB: Math.max(64, posNum("set-tiles-memory-mb", TILES_MEMORY_MB)),
+      emulate3Button: !!(document.getElementById("set-nav-emulate3") as HTMLInputElement | null)?.checked,
+      emulateNumpad: !!(document.getElementById("set-nav-numpad") as HTMLInputElement | null)?.checked,
+      autoPerspective: (document.getElementById("set-nav-autopersp") as HTMLInputElement | null)?.checked ?? true,
+      leftDrag: ((v) => (v === "orbit" || v === "select" ? v : "auto"))((document.getElementById("set-nav-leftdrag") as HTMLSelectElement | null)?.value),
     },
     iiif: {
       base: (document.getElementById("set-iiif-base") as HTMLInputElement)
@@ -21843,6 +21859,225 @@ function spaceSelectedKeys(sp: Space | null): Set<string> {
   if (spaceSketchSel) out.add(`sketch:${spaceSketchSel}`);
   return out;
 }
+// ── MICRO-SPAZIO-3D-2 · p.5 · the transform of a 3D object, in the data ─────
+//
+// Measured on 16 Oct 2026 (the report): a model's pose has one field in common
+// to EM Tools, Heriverse and s3Dgraphy's class, `data.transform`; a proxy's
+// shape has none, and EMStudio uses the same field on it until s3Dgraphy
+// decides (`transform3d.ts`). The Inspector and the N panel show the same nine
+// numbers and write to the same place, one step of undo per field confirmed; in
+// a room the write goes to the node as every field does (`setField`).
+
+/** The node whose `data.transform` places a Space key: the model, the proxy's shape. */
+function transformNodeOfKey(key: string, sp: Space | null = currentSpace()): string | null {
+  if (key.startsWith("rm:")) return key.slice(3);
+  if (key.startsWith("proxy:")) return sp?.proxies.get(key.slice(6))?.shapeId ?? null;
+  return null;
+}
+/** …and the Space key of a node: a model, a unit with a proxy, the proxy's shape. */
+function transformKeyOfNode(id: string, sp: Space | null = currentSpace()): string | null {
+  if (!sp) return null;
+  if (sp.rms.some((r) => r.id === id)) return `rm:${id}`;
+  if (sp.proxies.has(id)) return `proxy:${id}`;
+  for (const [u, px] of sp.proxies) if (px.shapeId === id) return `proxy:${u}`;
+  return null;
+}
+function nodeXf(nodeId: string | null | undefined): Xf {
+  return (nodeId ? readTransform(store?.node(nodeId)?.data as Record<string, unknown> | undefined) : null) ?? IDENTITY;
+}
+/** The pose the scene applies over the file, or none (identity). */
+function poseOfNode(nodeId: string | null | undefined): Pose | undefined {
+  const xf = nodeId ? readTransform(store?.node(nodeId)?.data as Record<string, unknown> | undefined) : null;
+  return xf && !isIdentity(xf) ? xfToPose(xf) : undefined;
+}
+function writeXf(nodeId: string, xf: Xf): void {
+  const st = storeOfNode(nodeId) ?? store;
+  if (!st || refuseReadOnly()) return;
+  st.setField(nodeId, "data.transform", transformData(xf));
+  logInfo(t("xf.written", { x: String(st.node(nodeId)?.name ?? nodeId) }), [nodeId]);
+  refreshSurfaces("scene");
+  refreshInspector();
+}
+function xfTexts(): TransformFormTexts {
+  return { position: t("xf.position"), rotation: t("xf.rotation"), scale: t("xf.scale"), quaternion: t("xf.quaternion"),
+    upAxis: (a) => t("xf.upAxis", { a }), reset: t("xf.reset"), metres: "m" };
+}
+/** Where the numbers of a key live, said under the form. */
+function xfNote(key: string, sp: Space | null): { note: string; readOnly: boolean } {
+  if (key.startsWith("rm:")) {
+    const r = sp?.rms.find((x) => `rm:${x.id}` === key);
+    if (r?.resource?.tiles) return { note: t("xf.noteTiles"), readOnly: true };
+    return { note: t("xf.noteRm"), readOnly: false };
+  }
+  return { note: t("xf.noteProxy"), readOnly: false };
+}
+/** The Inspector's «Trasformazione»: a model, a unit with a proxy, its shape. */
+function renderTransformInto(host: HTMLElement, nodeId: string): boolean {
+  const sp = currentSpace();
+  const key = transformKeyOfNode(nodeId, sp);
+  const target = key ? transformNodeOfKey(key, sp) : null;
+  if (!key || !target) return false;
+  const { note, readOnly } = xfNote(key, sp);
+  renderTransformForm(host, { xf: nodeXf(target), texts: xfTexts(), note, readOnly, probe: `insp:${key}`,
+    onCommit: (xf) => writeXf(target, xf), onReset: () => writeXf(target, IDENTITY) });
+  return true;
+}
+
+/** «Trascinamento sinistro» automatic: a middle button seen on this device. */
+const MOUSE_KEY = "emstudio.space3d.mouse";
+function middleSeen(): boolean {
+  try { return (JSON.parse(localStorage.getItem(MOUSE_KEY) ?? "{}") as { middle?: unknown }).middle === true; } catch { return false; }
+}
+function setMiddleSeen(): void {
+  try { localStorage.setItem(MOUSE_KEY, JSON.stringify({ middle: true, at: new Date().toISOString() })); } catch { /* private mode */ }
+  if (getSettings().viewer.leftDrag === "auto") toast(t("s3.middleSeen"));
+}
+/** The 3D cursor's rotation (Euler XYZ, radians, Blender's frame): the session's. */
+let spaceCursorRot: V3 = [0, 0, 0];
+const VIEW_NAMES: Record<AlignedView, string> = { front: "s3.vFront", back: "s3.vBack", right: "s3.vRight",
+  left: "s3.vLeft", top: "s3.vTop", bottom: "s3.vBottom" };
+function viewName(v: AlignedView | null, ortho: boolean): string {
+  return `${t(v ? VIEW_NAMES[v] : "s3.vUser")} · ${t(ortho ? "s3.vOrtho" : "s3.vPersp")}`;
+}
+
+/** The N panel «Vista» of a Space window, drawn into `el` (Blender's sidebar). */
+function renderSpaceNPanel(el: HTMLElement, win: Win, h: SpaceSceneHandle): void {
+  el.textContent = "";
+  const sp = currentSpace();
+  const tabs = document.createElement("div");
+  tabs.className = "np-tabs";
+  const tab = document.createElement("button");
+  tab.type = "button";
+  tab.textContent = t("s3.nView");
+  tab.setAttribute("aria-pressed", "true");
+  tabs.appendChild(tab);
+  el.appendChild(tabs);
+  const sect = (title: string, probe: string) => {
+    const d = document.createElement("div");
+    d.className = "np-sect";
+    d.dataset.np = probe;
+    const h5 = document.createElement("h5");
+    h5.textContent = title;
+    d.appendChild(h5);
+    el.appendChild(d);
+    return d;
+  };
+  // the 3D cursor: X Y Z and rotation, in the scene's frame (Blender's axes)
+  const cur = sect(t("s3.nCursor"), "cursor");
+  const at = threeToBlender(h.cursor());
+  const grid = document.createElement("div");
+  grid.className = "xf-grid";
+  const dec = coordDecimals(Math.max(...at.map(Math.abs)));
+  const row = (lab: string, field: string, v: number, d: number, commit: (x: number) => void) => {
+    const l = document.createElement("span");
+    l.className = "xf-lab";
+    l.textContent = lab;
+    const inp = document.createElement("input");
+    inp.type = "text";
+    inp.inputMode = "decimal";
+    inp.dataset.field = field;
+    inp.value = v.toFixed(d);
+    let was = inp.value;
+    const go = () => { if (inp.value === was) return; const x = parseTyped(inp.value); if (x == null) { inp.value = was; return; } was = inp.value; commit(x); };
+    inp.addEventListener("keydown", (e) => { e.stopPropagation(); if (e.key === "Enter") { e.preventDefault(); go(); inp.blur(); } if (e.key === "Escape") { inp.value = was; inp.blur(); } });
+    inp.addEventListener("change", go);
+    grid.append(l, inp);
+  };
+  const head = (text: string) => { const x = document.createElement("div"); x.className = "xf-head"; x.textContent = text; grid.appendChild(x); };
+  head(`${t("xf.position")} (m)`);
+  for (const i of [0, 1, 2] as const) row("XYZ"[i], `cursor.${"xyz"[i]}`, at[i], dec, (x) => {
+    const p = [...at] as V3; p[i] = x; h.setCursor(blenderToThree(p)); renderSpaceNPanels();
+  });
+  head(`${t("xf.rotation")} (°, XYZ)`);
+  for (const i of [0, 1, 2] as const) row("XYZ"[i], `cursor.r${"xyz"[i]}`, deg(spaceCursorRot[i]), 3, (x) => {
+    spaceCursorRot = [...spaceCursorRot] as V3; spaceCursorRot[i] = rad(x); renderSpaceNPanels();
+  });
+  cur.appendChild(grid);
+  const acts = document.createElement("div");
+  acts.className = "xf-actions";
+  const centre = document.createElement("button");
+  centre.type = "button";
+  centre.className = "btn";
+  centre.dataset.act = "cursor-centre";
+  centre.textContent = t("s3.nCentre");
+  centre.title = t("keys.s3cursorReset");
+  centre.addEventListener("click", () => { h.centreScene(); renderSpaceNPanels(); });
+  acts.appendChild(centre);
+  cur.appendChild(acts);
+  const note = document.createElement("p");
+  note.className = "xf-note";
+  note.textContent = t("s3.nCursorNote");
+  cur.appendChild(note);
+  // the selected object: its nine values, the same as the Inspector's
+  const obj = sect(t("s3.nObject"), "object");
+  const sk = spaceSketchSel ? sketchById(spaceSketchSel) : undefined;
+  const key = sk ? null : spaceKeyOf(selectedId, sp);
+  if (sk) {
+    const name = document.createElement("div");
+    name.className = "xf-note";
+    name.textContent = sk.name;
+    obj.appendChild(name);
+    const body = document.createElement("div");
+    obj.appendChild(body);
+    renderTransformForm(body, { xf: poseToXf({ position: sk.position, rotation: sk.rotation, scale: sk.scale }), texts: xfTexts(),
+      note: t("xf.noteSketch"), probe: `np:sketch:${sk.id}`,
+      onCommit: (xf) => { updateSketch(sk.id, xfToPose(xf)); renderSpaceNPanels(); },
+      onReset: () => { updateSketch(sk.id, xfToPose(IDENTITY)); renderSpaceNPanels(); } });
+  } else if (key && (key.startsWith("rm:") || key.startsWith("proxy:"))) {
+    const target = transformNodeOfKey(key, sp);
+    const name = document.createElement("div");
+    name.className = "xf-note";
+    name.textContent = String(store?.node(key.split(":").slice(1).join(":"))?.name ?? key);
+    obj.appendChild(name);
+    const body = document.createElement("div");
+    obj.appendChild(body);
+    if (target) {
+      const { note: n, readOnly } = xfNote(key, sp);
+      renderTransformForm(body, { xf: nodeXf(target), texts: xfTexts(), note: n, readOnly, probe: `np:${key}`,
+        onCommit: (xf) => writeXf(target, xf), onReset: () => writeXf(target, IDENTITY) });
+    }
+  } else {
+    const none = document.createElement("p");
+    none.className = "xf-note";
+    none.textContent = t("s3.nNothing");
+    obj.appendChild(none);
+  }
+  // the view and the lens
+  const v: SceneView = h.view();
+  const vw = sect(t("s3.nViewSect"), "view");
+  const line = document.createElement("div");
+  line.dataset.npView = `${v.view ?? "user"}:${v.ortho ? "ortho" : "persp"}`;
+  line.textContent = viewName(v.view, v.ortho);
+  vw.appendChild(line);
+  const lens = document.createElement("p");
+  lens.className = "xf-note";
+  lens.textContent = t("s3.nLens", { fov: String(v.fov), mm: String(v.lensMm) });
+  vw.appendChild(lens);
+  const va = document.createElement("div");
+  va.className = "xf-actions";
+  for (const [view, k] of [["front", "1"], ["right", "3"], ["top", "7"]] as Array<[AlignedView, string]>) {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "btn";
+    b.dataset.view = view;
+    b.textContent = `${t(VIEW_NAMES[view])} (${k})`;
+    b.addEventListener("click", () => h.setView(view));
+    va.appendChild(b);
+  }
+  const po = document.createElement("button");
+  po.type = "button";
+  po.className = "btn";
+  po.dataset.act = "toggle-ortho";
+  po.textContent = `${t(v.ortho ? "s3.vPersp" : "s3.vOrtho")} (5)`;
+  po.addEventListener("click", () => h.toggleOrtho());
+  va.appendChild(po);
+  vw.appendChild(va);
+  void win;
+}
+/** every Space window's N panel, after a change that is not the graph's */
+const npanelRenderers = new Map<string, () => void>();
+function renderSpaceNPanels(): void { for (const f of npanelRenderers.values()) f(); }
+
 /** USVs → USV/s: the abbreviation the Matrix's legend uses */
 function unitTypeLabel(type: string): string {
   const m = /^(ser)?USV([sn])$/.exec(type);
@@ -22063,9 +22298,9 @@ async function associateSketch(win: Win, sketchId: string, unitId: string): Prom
   const unitName = String(st.node(unitId)?.name ?? unitId);
   const rel = proxyRelPath(unitName);
   const fail = (why: string) => { toast(t("s3.associateFailed", { why })); return false; };
-  const glb = await h.sketchGlb(sketchId);
-  if (!glb) return fail(t("s3.noGlb"));
-  const bytes = new Uint8Array(glb);
+  const made = await h.sketchGlb(sketchId);
+  if (!made) return fail(t("s3.noGlb"));
+  const bytes = new Uint8Array(made.glb);
   const digest = [...new Uint8Array(await crypto.subtle.digest("SHA-256", bytes))].map((b) => b.toString(16).padStart(2, "0")).join("");
   // the bytes: beside the em.json, or into the room's store
   const dir = currentFilePath ? currentFilePath.replace(/[^/\\]*$/, "") : "";
@@ -22103,7 +22338,9 @@ async function associateSketch(win: Win, sketchId: string, unitId: string): Prom
     return fail(String(e instanceof Error ? e.message : e));
   }
   // the file is THERE: its digest, resident, its type and size
-  const nodes = patchProxyNodes(j.nodes ?? [], rel, digest, bytes.length);
+  // MICRO-SPAZIO-3D-2 · the shape is born in its own frame, its pose apart
+  // in the shape's data (`data.transform`, Blender's axes, the axis declared)
+  const nodes = patchProxyNodes(j.nodes ?? [], rel, digest, bytes.length, transformData(poseToXf(made.pose)));
   // one step of undo, and — shared — one batch of operations to the room
   const added = st.addSubgraph(nodes, j.edges ?? [], { share: true });
   removeSketch(sketchId);
@@ -22233,8 +22470,21 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
   tab.textContent = "+";
   tab.title = t("s3.openOutliner");
   tab.addEventListener("click", () => setSpace3dPrefs({ ...space3dPrefs(), shown: true }));
-  host.append(overlay, empty, tab);
-  row.append(outl, grip, host);
+  // MICRO-SPAZIO-3D-2 · the N panel «Vista» on the right (N), as Blender's sidebar
+  const npanel = document.createElement("div");
+  npanel.className = "scn-npanel";
+  npanel.dataset.scnNpanel = win.id;
+  const ngrip = document.createElement("div");
+  ngrip.className = "scn-ngrip";
+  const ntab = document.createElement("button");
+  ntab.type = "button";
+  ntab.className = "scn-ntab";
+  ntab.dataset.ntab = "1";
+  ntab.textContent = "‹";
+  ntab.title = t("s3.openNPanel");
+  ntab.addEventListener("click", () => setSpace3dPrefs({ ...space3dPrefs(), nShown: true }));
+  host.append(overlay, empty, tab, ntab);
+  row.append(outl, grip, host, ngrip, npanel);
   wrap.append(bar, row);
   body.appendChild(wrap);
   // the panel's width: a drag of the grip, remembered
@@ -22250,7 +22500,27 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
     document.addEventListener("pointermove", move);
     document.addEventListener("pointerup", up);
   });
+  ngrip.addEventListener("pointerdown", (e) => {
+    e.preventDefault();
+    const x0 = e.clientX, w0 = space3dPrefs().nWidth;
+    const width = (ev: PointerEvent) => Math.max(180, Math.min(520, w0 - (ev.clientX - x0)));
+    const move = (ev: PointerEvent) => { npanel.style.width = `${width(ev)}px`; };
+    const up = (ev: PointerEvent) => {
+      document.removeEventListener("pointermove", move);
+      document.removeEventListener("pointerup", up);
+      setSpace3dPrefs({ ...space3dPrefs(), nWidth: width(ev) });
+    };
+    document.addEventListener("pointermove", move);
+    document.addEventListener("pointerup", up);
+  });
   host.addEventListener("pointermove", (e) => { spacePointer = { x: e.clientX, y: e.clientY }; });
+  let npQueued = false;
+  const drawNPanel = () => {
+    if (npQueued) return;
+    npQueued = true;
+    requestAnimationFrame(() => { npQueued = false; if (space3dPrefs().nShown) renderSpaceNPanel(npanel, win, handle); });
+  };
+  npanelRenderers.set(win.id, drawNPanel);
   const handle = mountSpaceScene(host, {
     texts: {
       loading: t("space.loading"), noEngine: t("em3d.noEngine"),
@@ -22261,6 +22531,33 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
       openTileset: t("lod.openTileset"), loadAnyway: t("lod.loadAnyway"),
       lodNote: (n) => t("lod.note", { n: String(n) }),
       boxZoom: t("s3.boxZoom"), modalHint: t("s3.modalHint"),
+      viewName, centreEmpty: t("s3.centreEmpty"),
+    },
+    // MICRO-SPAZIO-3D-2 · the navigation's Preferences, read at every press
+    nav: () => {
+      const v = getSettings().viewer;
+      const seen = middleSeen();
+      return { emulate3: v.emulate3Button, emulateNumpad: v.emulateNumpad, autoPerspective: v.autoPerspective,
+        middleSeen: seen, leftSelects: leftSelects(v.leftDrag, v.emulate3Button, seen) };
+    },
+    onMiddleSeen: () => setMiddleSeen(),
+    onBoxSelect: (ids, extend) => {
+      spaceSketchSel = null;
+      if (!ids.length && !extend) select(null);
+      else selectMany(extend ? [...new Set([...selectedIds, ...ids])] : ids);
+      refreshInspector();
+      refreshSurfaces("scene");
+    },
+    onNotice: (text) => toast(text),
+    onView: () => drawNPanel(),
+    onCursor: () => drawNPanel(),
+    transformTarget: () => {
+      const k = spaceKeyOf(selectedId, currentSpace());
+      return k && (k.startsWith("rm:") || k.startsWith("proxy:")) ? k : null;
+    },
+    onTransform: (key, pose) => {
+      const target = transformNodeOfKey(key);
+      if (target && !xfNote(key, currentSpace()).readOnly) writeXf(target, poseToXf(pose));
     },
     // MICRO-3DTILES · the threshold and the tiles' memory (Preferences)
     limit: { bytes: getSettings().viewer.lodLimitMB * 1024 * 1024, points: getSettings().viewer.lodLimitPoints },
@@ -22284,6 +22581,7 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
     onBeforeJump: () => pushView(),
     onKeyAction: (a) => {
       if (a === "outliner") { const p = space3dPrefs(); setSpace3dPrefs({ ...p, shown: !p.shown }); return true; }
+      if (a === "sidebar") { const p = space3dPrefs(); setSpace3dPrefs({ ...p, nShown: !p.nShown }); return true; }
       if (a === "add-menu") {
         const r = host.getBoundingClientRect();
         const at = spacePointer ?? { x: r.left + r.width / 2, y: r.top + r.height / 2 };
@@ -22294,7 +22592,7 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
       if (a === "delete" && spaceSketchSel) { removeSketch(spaceSketchSel); return true; }
       return false;
     },
-    onSketchChange: () => refreshSurfaces("scene"),
+    onSketchChange: () => { refreshSurfaces("scene"); drawNPanel(); },
     onNotFound: (rid, why: FetchFailure) => {
       if (!spaceMarks.mark(rid, why)) return;
       queueMicrotask(() => { refreshSurfaces("scene"); renderEmData(); });
@@ -22337,6 +22635,11 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
     grip.classList.toggle("hidden", !prefs.shown);
     tab.classList.toggle("hidden", prefs.shown);
     if (prefs.shown) renderSpaceOutliner(outl, win, sp);
+    npanel.classList.toggle("hidden", !prefs.nShown);
+    ngrip.classList.toggle("hidden", !prefs.nShown);
+    ntab.classList.toggle("hidden", prefs.nShown);
+    npanel.style.width = `${prefs.nWidth}px`;
+    if (prefs.nShown) drawNPanel();
     // the bar: the epochs, the two layers, ⤢, and the colours of the language
     bar.innerHTML = "";
     const back = document.createElement("button");
@@ -22468,7 +22771,9 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
       if (!space3dShown(isTiles ? "s3_tiles" : "s3_rm") || !shown(`rm:${r.id}`)) continue;
       items.push({ kind: "rm", id: r.id, label: r.name, state: r.resource?.state ?? "missing",
         url: spaceFileUrl(r.resource), resourceId: r.resource?.id, tiles: r.resource?.tiles || undefined,
-        edge: placementColour(r.genre) ?? undefined, selected: sel === r.id,
+        edge: placementColour(r.genre) ?? undefined, selected: sel === r.id || selectedIds.has(r.id),
+        // MICRO-SPAZIO-3D-2 · the model's transform (data.transform), over its file
+        pose: r.resource?.tiles ? undefined : poseOfNode(r.id),
         // MICRO-3DTILES · the tileset of the same model, and the weight
         tileset: r.tileset?.state === "resident" && space3dShown("s3_tiles") ? r.tileset.url || undefined : undefined,
         bytes: r.resource?.bytes ?? null, points: r.resource?.points ?? null });
@@ -22479,7 +22784,7 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
         if (!px || !shown(`proxy:${u}`)) continue;
         const type = st.node(u)?.node_type;
         const common = { kind: "proxy" as const, id: u, label: nm(u), rgb: nodeMaterialRgb(type) ?? nodeMaterialRgb("US") ?? undefined,
-          edge: nodeStyle(type).border, selected: sel === u };
+          edge: nodeStyle(type).border, selected: sel === u || selectedIds.has(u), pose: poseOfNode(px.shapeId) };
         if (px.resource) items.push({ ...common, state: px.resource.state, url: spaceFileUrl(px.resource), resourceId: px.resource.id });
         else items.push({ ...common, state: "json", convexshapes: px.convexshapes, spheres: px.spheres });
       }
@@ -22488,7 +22793,7 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
     handle.syncSketches();
   };
   refresh();
-  return { refresh, destroy: () => { bar.removeEventListener("click", onBar); handle.dispose(); sceneHandles.delete(win.id); } };
+  return { refresh, destroy: () => { bar.removeEventListener("click", onBar); handle.dispose(); sceneHandles.delete(win.id); npanelRenderers.delete(win.id); } };
 }
 
 /** The epoch's Inspector: its chronology problems, and the tool. */

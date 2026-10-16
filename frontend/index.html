@@ -779,6 +779,37 @@
             </label>
           </section>
 
+          <!-- MICRO-SPAZIO-3D-2 · the Space's navigation, as Blender's Preferences ▸ Input -->
+          <section data-settings-tab="viewers" class="settings-sect" id="settings-sect-nav3d">
+            <h4 data-i18n="settings.nav3d">3D navigation (the Space)</h4>
+            <p class="settings-hint" data-i18n="settings.nav3dHint">
+              As in Blender: middle button to orbit, Shift + middle to pan, Ctrl + middle to zoom.
+              Without a middle button, Alt + left can stand for it, and the digits of the top
+              row for the numeric keypad.
+            </p>
+            <label class="settings-check">
+              <input id="set-nav-emulate3" type="checkbox" />
+              <span data-i18n="settings.navEmulate3">Emulate 3 button mouse (Alt + left drag is the middle button)</span>
+            </label>
+            <label class="settings-check">
+              <input id="set-nav-numpad" type="checkbox" />
+              <span data-i18n="settings.navNumpad">Emulate numpad (1 3 7 5 0 of the top row are the keypad's)</span>
+            </label>
+            <label class="settings-check">
+              <input id="set-nav-autopersp" type="checkbox" />
+              <span data-i18n="settings.navAutoPersp">Auto Perspective (an aligned view is orthographic; orbiting goes back to perspective)</span>
+            </label>
+            <label
+              ><span data-i18n="settings.navLeftDrag">Left drag in the 3D</span>
+              <select id="set-nav-leftdrag">
+                <option value="auto" data-i18n="settings.navLeftAuto">Automatic: orbit, until a middle button is used</option>
+                <option value="orbit" data-i18n="settings.navLeftOrbit">Orbit</option>
+                <option value="select" data-i18n="settings.navLeftSelect">Box selection, as in Blender</option>
+              </select>
+            </label>
+            <p class="settings-hint" id="set-nav-middle-seen"></p>
+          </section>
+
           <section data-settings-tab="viewers" class="settings-sect" id="settings-sect-iiif">
             <h4 data-i18n="settings.iiif">Images (IIIF)</h4>
             <p class="settings-hint" data-i18n="settings.iiifHint">

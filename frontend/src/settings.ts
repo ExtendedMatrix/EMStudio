@@ -120,6 +120,14 @@ export interface ViewerSettings {
   lodLimitPoints: number;
   /** the memory ceiling of a tileset's automatic refinement, MB */
   tilesMemoryMB: number;
+  /** MICRO-SPAZIO-3D-2 · the Space's navigation, as Blender's Preferences ▸
+   *  Input: «Emula mouse a 3 tasti» (Alt + left = middle), «Emula tastierino»
+   *  (the top row's digits are the keypad's), «Auto Perspective», and what a
+   *  left drag does («auto»: orbits until a middle button is seen) */
+  emulate3Button: boolean;
+  emulateNumpad: boolean;
+  autoPerspective: boolean;
+  leftDrag: "auto" | "orbit" | "select";
 }
 
 /** MICRO-3DTILES · the defaults of the three, MEASURED (the MICRO's report,
@@ -177,7 +185,8 @@ const DEFAULTS: Settings = {
   // No default host on purpose: a wrong one would look like a broken viewer.
   // The Heriverse deployment guide mounts the wapp at /a/heriverse.
   viewer: { atonBase: "", heriverseApp: "a/heriverse",
-            lodLimitMB: LOD_LIMIT_MB, lodLimitPoints: LOD_LIMIT_POINTS, tilesMemoryMB: TILES_MEMORY_MB },
+            lodLimitMB: LOD_LIMIT_MB, lodLimitPoints: LOD_LIMIT_POINTS, tilesMemoryMB: TILES_MEMORY_MB,
+            emulate3Button: false, emulateNumpad: false, autoPerspective: true, leftDrag: "auto" },
   // No default base, for the same reason the ATON one has none: a wrong host
   // would look like a broken image service rather than an unconfigured one.
   iiif: { base: "", mirador: "https://projectmirador.org/embed/" },

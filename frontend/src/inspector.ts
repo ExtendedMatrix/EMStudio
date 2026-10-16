@@ -101,6 +101,9 @@ export interface InspectorCallbacks {
   renderTextLanguages?: (host: HTMLElement, nodeId: string, field: string) => void;
   /** …and a translation node opens its facing text */
   onOpenFacing?: (translationId: string) => void;
+  /** MICRO-SPAZIO-3D-2 · the «Trasformazione» of a 3D object (a model, a unit's
+   *  proxy, its shape): the caller draws it into `host`, false when the node has none */
+  renderTransform?: (host: HTMLElement, nodeId: string) => boolean;
 }
 
 function el(tag: string, cls?: string, text?: string): HTMLElement {
@@ -996,6 +999,15 @@ export function renderInspector(
       }
       root.appendChild(panel);
     }
+  }
+
+  // ── MICRO-SPAZIO-3D-2 · the transform of a 3D object, in the data ─────────
+  if (nodeId && cb.renderTransform) {
+    const panel = el("div", "insp-canvas insp-xf");
+    panel.appendChild(el("h3", "insp-sect", t("xf.title")));
+    const body = el("div");
+    panel.appendChild(body);
+    if (cb.renderTransform(body, nodeId)) root.appendChild(panel);
   }
 
   // ── RISORSA-FILE · the files, the resources of a file, the revisions ─────

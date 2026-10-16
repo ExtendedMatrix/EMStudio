@@ -50,9 +50,11 @@ import { nodeBytes, ownedByNode, RoadError, type FetchFailure } from "./node-roa
 import { createTilesLayer, dracoFor, formatBytes, isTilesetUrl, tilesBar, tilesEngine, type TilesLayer } from "./tiles3d";
 import type { OverlayKey } from "./overlays";
 import {
-  AXIS_VECTOR, applyTyped, boxZoom, clipPlanes, detailZoom, DRAG_PX, frameSphere, isMacPlatform, modalKey,
-  modalLabel, modalValue, pointerIntent, spaceKeyAction, startModal, wheelFactor, zoomTowards,
-  type CamState, type ModalMode, type ModalState, type Pose, type SpaceKeyAction, type V3,
+  alignedView, AXIS_VECTOR, applyTyped, boxZoom, clipPlanes, detailZoom, DRAG_PX, dragIntent, dragZoomFactor,
+  frameSphere, isMacPlatform, keypadAction, modalKey, modalLabel, modalValue, orthoBoxZoom, orthoHalf, orthoZoom,
+  pointerIntent, sceneCentre, spaceKeyAction, startModal, wheelFactor, zoomTowards,
+  type AlignedView, type Box6, type CamState, type DragIntent, type ModalMode, type ModalState, type Pose,
+  type SpaceKeyAction, type V3,
 } from "./space-nav";
 import { buildShapeGeometry, listSketches, shapeById, updateSketch, type Sketch } from "./shapes3d";
 import { trackpadClassifier } from "./wheel-kind";
@@ -68,6 +70,9 @@ export interface SceneItem {
   resourceId?: string;
   /** linear rgb of the unit's type, for a proxy */
   rgb?: [number, number, number];
+  /** MICRO-SPAZIO-3D-2 · the object's transform, in three's axes, applied over
+   *  the file as it is (the glb is never changed): absent = identity */
+  pose?: Pose;
   /** the outline's colour (hex), e.g. the RM's placement axis */
   edge?: string;
   convexshapes?: number[][];
@@ -98,6 +103,33 @@ export interface SceneTexts {
   /** MICRO-SPAZIO-3D · the box zoom armed, the modal's hint */
   boxZoom?: string;
   modalHint?: string;
+  /** MICRO-SPAZIO-3D-2 · the view's name, top left («Frontale · Ortometrica») */
+  viewName?: (view: AlignedView | null, ortho: boolean) => string;
+  /** Shift+C on an empty scene */
+  centreEmpty?: string;
+}
+
+/** MICRO-SPAZIO-3D-2 · what the Preferences say of the navigation. */
+export interface SceneNavPrefs {
+  /** «Emula mouse a 3 tasti»: Alt + left is the middle button */
+  emulate3: boolean;
+  /** «Emula tastierino»: the top row's digits are the keypad's */
+  emulateNumpad: boolean;
+  /** «Auto Perspective»: an orbit from an aligned orthographic view goes back to perspective */
+  autoPerspective: boolean;
+  /** a middle button was seen on this device */
+  middleSeen: boolean;
+  /** the left drag selects with a box (`leftSelects` of space-nav) */
+  leftSelects: boolean;
+}
+
+/** MICRO-SPAZIO-3D-2 · the camera as the N panel shows it. */
+export interface SceneView {
+  view: AlignedView | null;
+  ortho: boolean;
+  /** the lens, in mm on a 36 mm frame (Blender's), from the vertical field */
+  lensMm: number;
+  fov: number;
 }
 
 /** MICRO-SPAZIO-3D · what was under a right click (or a Ctrl-click on a Mac). */
@@ -133,14 +165,23 @@ export interface SpaceSceneHandle {
   syncSketches(): void;
   selectSketch(id: string | null): void;
   selectedSketch(): string | null;
-  /** a sketch as a glb (its pose baked in), for «Associate with a unit» */
-  sketchGlb(id: string): Promise<ArrayBuffer | null>;
+  /** a sketch as a glb in its OWN frame, and its pose apart (MICRO-SPAZIO-3D-2:
+   *  the transform goes into the data), for «Associate with a unit» */
+  sketchGlb(id: string): Promise<{ glb: ArrayBuffer; pose: Pose } | null>;
   /** a shape dropped at a page point: the surface under it and its normal */
   surfaceAt(x: number, y: number): { point: V3; normal: V3 } | null;
   /** re-read the overlays (no reload) */
   applyOverlays(): void;
   /** the file each model is drawn from (a LOD chosen, a tileset) */
   drawnUrl(key: string): string | undefined;
+  /** MICRO-SPAZIO-3D-2 · the view (aligned, orthographic) and the lens */
+  view(): SceneView;
+  setView(v: AlignedView): void;
+  toggleOrtho(): void;
+  /** Shift+C: the cursor at the median of what is drawn, the view on most of it */
+  centreScene(): boolean;
+  /** the modal G / R / S on the selected object (sketch, proxy, model) */
+  startModal(mode: ModalMode): boolean;
 }
 
 export interface SpaceSceneOptions {
@@ -176,6 +217,20 @@ export interface SpaceSceneOptions {
   /** MICRO-3DTILES · the threshold and the tiles' memory (the Preferences) */
   limit?: { bytes: number; points: number };
   tilesMemoryMB?: number;
+  /** MICRO-SPAZIO-3D-2 · the navigation's Preferences, read at every press */
+  nav?: () => SceneNavPrefs;
+  /** the first press of a middle button on this device */
+  onMiddleSeen?: () => void;
+  /** a box selection: the units whose proxy falls in it (Shift: added) */
+  onBoxSelect?: (unitIds: string[], extend: boolean) => void;
+  /** a short notice (Shift+C on an empty scene) */
+  onNotice?: (text: string) => void;
+  /** the view changed (aligned, ortho): the N panel follows */
+  onView?: (v: SceneView) => void;
+  /** the selected object that G / R / S moves when no sketch is selected
+   *  (`proxy:<unit>`, `rm:<id>`), and its transform written on release */
+  transformTarget?: () => string | null;
+  onTransform?: (key: string, pose: Pose) => void;
 }
 
 interface Drawn {
@@ -254,19 +309,31 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
       renderer.setSize(w, h);
       renderer.domElement.className = "scn-canvas";
       const scene = new THREE.Scene();
-      const camera = new THREE.PerspectiveCamera(40, w / h, 0.01, 2000);
-      camera.position.set(6, 5, 9);
+      // MICRO-SPAZIO-3D-2 · two cameras, one view: the perspective, and the
+      // orthographic drawn from the same CamState (keypad 5)
+      const FOV = 40;
+      const persp = new THREE.PerspectiveCamera(FOV, w / h, 0.01, 2000);
+      persp.position.set(6, 5, 9);
+      let ortho: any = null;
+      let camera: any = persp;
+      let isOrtho = false;
+      /** the orthographic's distance to the pivot, as the perspective's would be */
+      let orthoT = 10;
+      /** the aligned view the camera is in (keypad 1 3 7), until an orbit */
+      let aligned: AlignedView | null = null;
+      /** the orthographic was put by an aligned view (Auto Perspective takes it back) */
+      let orthoAuto = false;
       scene.add(new THREE.HemisphereLight(0xffffff, 0x8a7a60, 2.2));
       const key = new THREE.DirectionalLight(0xffffff, 1.2);
       key.position.set(4, 8, 6);
       scene.add(key);
       const controls = new OrbitControls(camera, renderer.domElement);
       controls.enableDamping = true;
-      // MICRO-SPAZIO-3D · the controls keep the orbit (left drag) and the pan
-      // (Shift / ⌘ / Ctrl + left drag, the middle button); the zoom is the
-      // scene's own, toward the cursor, and the right button is the menu's
+      // MICRO-SPAZIO-3D-2 · the mouse is the scene's own, as Blender's
+      // (`dragIntent`): the controls keep only the touch gestures and the
+      // damping; the zoom is toward the cursor, the right button the menu's
       controls.enableZoom = false;
-      controls.mouseButtons = { LEFT: THREE.MOUSE.ROTATE, MIDDLE: THREE.MOUSE.PAN, RIGHT: null };
+      controls.mouseButtons = { LEFT: null, MIDDLE: null, RIGHT: null };
       const content = new THREE.Group();
       scene.add(content);
       // the decorators: grid and axes, the epoch's box (rebuilt with the content)
@@ -317,6 +384,9 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
       const anchors: Array<{ el: HTMLElement; p: any }> = [];
       const pickables: any[] = [];
       const unitCentres = new Map<string, any>();
+      /** MICRO-SPAZIO-3D-2 · the top object of each item drawn (`rm:` / `proxy:`),
+       *  where its transform is applied, over the file as it is */
+      const roots = new Map<string, any>();
 
       // MICRO-3DTILES · the tilesets of the scene (one layer per tileset url,
       // kept across rebuilds: a tileset is not re-fetched when a toggle
@@ -424,8 +494,55 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
       // ── the camera: Blender's navigation (space-nav.ts) ─────────────────
       const v3 = (a: V3) => new THREE.Vector3(a[0], a[1], a[2]);
       const arr = (v: any): V3 => [v.x, v.y, v.z];
-      const camState = (): CamState => ({ pos: arr(camera.position), target: arr(controls.target) });
+      const camState = (): CamState => {
+        if (!isOrtho) return { pos: arr(camera.position), target: arr(controls.target) };
+        // the orthographic as the perspective it stands for: same direction,
+        // the pivot `orthoT` away
+        const dir = new THREE.Vector3().subVectors(controls.target, camera.position).normalize();
+        return { pos: arr(controls.target.clone().addScaledVector(dir, -orthoT)), target: arr(controls.target) };
+      };
+      const orthoFrustum = () => {
+        if (!ortho) return;
+        const half = orthoHalf({ pos: [0, 0, orthoT], target: [0, 0, 0] }, FOV);
+        const a = persp.aspect || 1;
+        ortho.left = -half * a; ortho.right = half * a; ortho.top = half; ortho.bottom = -half;
+        ortho.zoom = 1;
+      };
+      /** the orthographic camera put back behind everything along its view, so
+       *  the near plane never cuts the podium */
+      const placeOrtho = (c: CamState) => {
+        const T = v3(c.target);
+        const dir = new THREE.Vector3().subVectors(T, v3(c.pos)).normalize();
+        orthoT = Math.max(1e-4, v3(c.pos).distanceTo(T));
+        const b = extent();
+        const sp = span();
+        const R = sp * 2 + orthoT + b.distanceToPoint(T) + 1;
+        camera.position.copy(T).addScaledVector(dir, -R);
+        controls.target.copy(T);
+        camera.near = Math.max(1e-3, R * 1e-6);
+        camera.far = R + sp * 4 + b.distanceToPoint(T) + 10;
+        orthoFrustum();
+        camera.lookAt(T);
+        camera.updateProjectionMatrix();
+      };
+      /** a world length per screen pixel at `p` (the pivot when none) */
+      const pxWorld = (p?: any): number => {
+        const H = Math.max(1, renderer.domElement.clientHeight);
+        if (isOrtho) return (2 * orthoHalf({ pos: [0, 0, orthoT], target: [0, 0, 0] }, FOV)) / H;
+        const dist = camera.position.distanceTo(p ?? controls.target);
+        return (2 * dist * Math.tan((FOV * Math.PI) / 360)) / H;
+      };
+      const viewNow = (): SceneView => ({ view: aligned, ortho: isOrtho, fov: FOV,
+        lensMm: Math.round((12 / Math.tan((FOV * Math.PI) / 360)) * 10) / 10 });
+      const viewEl = document.createElement("div");
+      viewEl.className = "scn-view";
+      const showView = () => {
+        viewEl.textContent = opts.texts.viewName?.(aligned, isOrtho) ?? "";
+        host.dataset.view = `${aligned ?? "user"}:${isOrtho ? "ortho" : "persp"}`;
+        opts.onView?.(viewNow());
+      };
       const updateClip = () => {
+        if (isOrtho) return;
         const { near, far } = clipPlanes(camera.position.distanceTo(controls.target), span());
         if (Math.abs(camera.near - near) / near > 0.05 || camera.far !== far) {
           camera.near = near;
@@ -438,17 +555,58 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
         // point of view from now on: the first arrival of the content does not
         // frame over it
         framed = true;
+        if (isOrtho) { placeOrtho(c); controls.update(); return; }
         camera.position.copy(v3(c.pos));
         controls.target.copy(v3(c.target));
         camera.lookAt(controls.target);
         updateClip();
         controls.update();
       };
+      /** keypad 5: the same view, the other projection */
+      const setOrtho = (on: boolean) => {
+        if (on === isOrtho) return;
+        const c = camState();
+        if (on) {
+          ortho ??= new THREE.OrthographicCamera(-1, 1, 1, -1, 0.01, 2000);
+          camera = ortho;
+        } else camera = persp;
+        isOrtho = on;
+        controls.object = camera;
+        if (gizmo) gizmo.camera = camera;
+        for (const l of layers.values()) l.layer.setCamera(camera);
+        applyCam(c);
+        showView();
+      };
+      /** keypad 1 3 7 (Ctrl: the opposite): Blender's six views, around the pivot */
+      const setAligned = (v: AlignedView) => {
+        // Auto Perspective: an aligned view is orthographic, and its
+        // orthographic is the view's (an orbit takes it back)
+        if (getNav().autoPerspective) { if (!isOrtho) setOrtho(true); orthoAuto = true; }
+        applyCam(alignedView(camState(), v));
+        aligned = v;
+        showView();
+      };
+      /** an orbit leaves the aligned view; with Auto Perspective, the
+       *  orthographic it had put goes with it */
+      const leaveAligned = () => {
+        if (!aligned) return;
+        aligned = null;
+        if (isOrtho && orthoAuto && getNav().autoPerspective) { orthoAuto = false; setOrtho(false); }
+        showView();
+      };
+      const getNav = (): SceneNavPrefs => opts.nav?.() ?? { emulate3: false, emulateNumpad: false, autoPerspective: true, middleSeen: false, leftSelects: false };
       frameIt = () => {
         const b = extent();
         const c = b.getCenter(new THREE.Vector3());
         const s = b.getSize(new THREE.Vector3());
         const sp = Math.max(s.x, s.y, s.z) || 1;
+        if (aligned || isOrtho) {
+          // MICRO-SPAZIO-3D-2 · an aligned or orthographic view keeps its direction
+          const keep = framed;
+          applyCam(frameSphere(camState(), arr(c), b.getBoundingSphere(new THREE.Sphere()).radius, FOV, persp.aspect));
+          framed = keep || framed;
+          return;
+        }
         controls.target.copy(c);
         camera.position.copy(c).add(new THREE.Vector3(sp * 0.9, sp * 0.7, sp * 1.5));
         camera.near = sp / 200;
@@ -516,9 +674,14 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
       probe.__spaceClip = () => [camera.near, camera.far];
       const zoomAt = (x: number, y: number, factor: number) => {
         const { p } = pointAt(x, y);
-        applyCam(zoomTowards(camState(), p, factor));
+        zoomToward(p, factor);
+      };
+      /** MICRO-SPAZIO-3D-2 · in orthographic the scale changes, not the place */
+      const zoomToward = (p: V3, factor: number) => {
+        applyCam(isOrtho ? orthoZoom(camState(), p, factor) : zoomTowards(camState(), p, factor));
       };
       const orbitBy = (dx: number, dy: number) => {
+        leaveAligned();
         const off = new THREE.Vector3().subVectors(camera.position, controls.target);
         const sph = new THREE.Spherical().setFromVector3(off);
         sph.theta -= dx * 0.005;
@@ -529,8 +692,7 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
         controls.update();
       };
       const panBy = (dx: number, dy: number) => {
-        const dist = camera.position.distanceTo(controls.target);
-        const k = (2 * dist * Math.tan((camera.fov * Math.PI) / 360)) / Math.max(1, renderer.domElement.clientHeight);
+        const k = pxWorld();
         const right = new THREE.Vector3().setFromMatrixColumn(camera.matrix, 0);
         const up = new THREE.Vector3().setFromMatrixColumn(camera.matrix, 1);
         const d = right.multiplyScalar(dx * k).add(up.multiplyScalar(-dy * k));
@@ -560,7 +722,7 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
       };
       const frameBox = (b: any) => {
         const sphere = b.getBoundingSphere(new THREE.Sphere());
-        applyCam(frameSphere(camState(), arr(sphere.center), sphere.radius, camera.fov, camera.aspect));
+        applyCam(frameSphere(camState(), arr(sphere.center), sphere.radius, FOV, persp.aspect));
       };
 
       // ── the sketches ─────────────────────────────────────────────────────
@@ -668,6 +830,7 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
         anchors.length = 0;
         pickables.length = 0;
         unitCentres.clear();
+        roots.clear();
         drawn.clear();
         strips.textContent = "";
         const pending: Promise<void>[] = [];
@@ -689,6 +852,9 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
               live.layer.object.userData.tiles = true;
               live.layer.object.traverse((o: any) => { o.userData.rmId = item.id; });
               content.add(live.layer.object);
+              // the tileset's pose is its tileset.json's (root.transform): the
+              // data's transform is not applied over it, and G / R / S leave it
+              roots.set(key, live.layer.object);
               el.appendChild(live.bar.el);
               live.bar.refresh();
               await live.ready;
@@ -763,6 +929,9 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
                 return;
               }
               const obj = got.root.clone(true);
+              // MICRO-SPAZIO-3D-2 · the model's transform, over the glb as it is
+              if (item.pose) setPose(obj, item.pose);
+              roots.set(key, obj);
               if (selOutline(item)) content.add(selBox(obj));
               tag(obj, item);
               content.add(obj);
@@ -782,6 +951,8 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
                 return;
               }
               const obj = got.root.clone(true);
+              if (item.pose) setPose(obj, item.pose);
+              roots.set(`${item.kind}:${item.id}`, obj);
               if (item.kind === "proxy") {
                 obj.traverse((o: any) => { if (o.isMesh) o.material = translucent(item); });
                 obj.traverse((o: any) => { if (o.isMesh) o.add(outline(o.geometry, item)); });
@@ -812,6 +983,8 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
               group.add(m);
             }
             if (!group.children.length) continue;
+            if (item.pose) setPose(group, item.pose);
+            roots.set(`${item.kind}:${item.id}`, group);
             tag(group, item);
             content.add(group);
             unitCentres.set(item.id, centreOf(group));
@@ -902,7 +1075,8 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
         if (!live) {
           content.updateMatrixWorld(true);
           const bb = new THREE.Box3();
-          content.traverse((o: any) => { if (o.isMesh && o.userData.rmId === id) bb.expandByObject(o); });
+          // MICRO-SPAZIO-3D-2 · a proxy's too (by its unit)
+          content.traverse((o: any) => { if (o.isMesh && (o.userData.rmId === id || o.userData.unitId === id)) bb.expandByObject(o); });
           b = bb.isEmpty() ? null : bb;
         }
         return b ? [...b.min.toArray(), ...b.max.toArray()].map((x: number) => Math.round(x * 1000) / 1000) : null;
@@ -942,6 +1116,9 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
       const mac = isMacPlatform();
       const isTrackpad = trackpadClassifier();
       let down: { x: number; y: number; button: number } | null = null;
+      /** MICRO-SPAZIO-3D-2 · a drag of the scene's own (`dragIntent`) */
+      let drag: { intent: Exclude<DragIntent, null>; x0: number; y0: number; x: number; y: number; started: boolean;
+                  point: V3 | null; shift: boolean; id: number } | null = null;
       let boxArmed = false;
       let boxStart: { x: number; y: number } | null = null;
       type Modal = { id: string; st: ModalState; start: Pose; mouse0: { x: number; y: number } | null; mouse: { x: number; y: number } | null };
@@ -961,13 +1138,12 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
         const st = modal.st;
         if (modalValue(st) != null) return applyTyped(modal.start, st);
         if (!modal.mouse0 || !modal.mouse) return modal.start;
-        const m = sketchMeshes.get(modal.id);
+        const m = modalObject(modal.id);
         if (!m) return modal.start;
         const dx = modal.mouse.x - modal.mouse0.x, dy = modal.mouse.y - modal.mouse0.y;
         const centre = toScreen(v3(modal.start.position)) ?? modal.mouse0;
         if (st.mode === "grab") {
-          const dist = camera.position.distanceTo(v3(modal.start.position));
-          const k = (2 * dist * Math.tan((camera.fov * Math.PI) / 360)) / Math.max(1, renderer.domElement.clientHeight);
+          const k = pxWorld(v3(modal.start.position));
           const right = new THREE.Vector3().setFromMatrixColumn(camera.matrix, 0);
           const up = new THREE.Vector3().setFromMatrixColumn(camera.matrix, 1);
           let d = right.multiplyScalar(dx * k).add(up.multiplyScalar(-dy * k));
@@ -986,16 +1162,25 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
       };
       const modalApply = () => {
         if (!modal) return;
-        const m = sketchMeshes.get(modal.id);
+        const m = modalObject(modal.id);
         const p = modalPose();
         if (m && p) setPose(m, p);
         showModal();
       };
+      /** the object G / R / S moves: the sketch selected, else the selected
+       *  proxy or model (MICRO-SPAZIO-3D-2: its transform is in the data) */
+      const modalObject = (id: string): any => (id.startsWith("sketch:") ? sketchMeshes.get(id.slice(7)) : roots.get(id));
       const startModalOn = (mode: ModalMode) => {
-        if (!sketchSel || !ov("s3_sketches")) return false;
-        const m = sketchMeshes.get(sketchSel);
+        let id: string | null = null;
+        if (sketchSel && ov("s3_sketches")) id = `sketch:${sketchSel}`;
+        else {
+          const k = opts.transformTarget?.() ?? null;
+          if (k && roots.has(k) && !roots.get(k).userData.tiles && !locked().has(k)) id = k;
+        }
+        if (!id) return false;
+        const m = modalObject(id);
         if (!m) return false;
-        modal = { id: sketchSel, st: startModal(mode), start: poseOf(m), mouse0: lastMouse, mouse: lastMouse };
+        modal = { id, st: startModal(mode), start: poseOf(m), mouse0: lastMouse, mouse: lastMouse };
         controls.enabled = false;
         gizmo?.setMode?.(mode === "grab" ? "translate" : mode === "rotate" ? "rotate" : "scale");
         showModal();
@@ -1003,11 +1188,17 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
       };
       const endModal = (confirm: boolean) => {
         if (!modal) return;
-        const m = sketchMeshes.get(modal.id);
+        const m = modalObject(modal.id);
         if (m) {
           if (!confirm) setPose(m, modal.start);
-          updateSketch(modal.id, poseOf(m));
-          if (confirm) opts.onSketchChange?.(modal.id);
+          if (modal.id.startsWith("sketch:")) {
+            const sid = modal.id.slice(7);
+            updateSketch(sid, poseOf(m));
+            if (confirm) opts.onSketchChange?.(sid);
+          } else if (confirm) {
+            // one gesture, one step: the caller writes the transform in the data
+            opts.onTransform?.(modal.id, poseOf(m));
+          }
         }
         modal = null;
         controls.enabled = true;
@@ -1034,6 +1225,20 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
           return;
         }
         down = { x: e.clientX, y: e.clientY, button: e.button };
+        // MICRO-SPAZIO-3D-2 · the mouse as Blender's; a touch is the controls'
+        if (e.pointerType === "touch") return;
+        if (e.button === 1) {
+          e.preventDefault();                       // no autoscroll, no paste
+          if (!getNav().middleSeen) opts.onMiddleSeen?.();
+        }
+        const intent = dragIntent({ button: e.button, ctrlKey: e.ctrlKey, metaKey: e.metaKey, shiftKey: e.shiftKey, altKey: e.altKey },
+          { emulate3: getNav().emulate3, leftSelects: getNav().leftSelects });
+        // a press on the gizmo is the gizmo's
+        if (intent && !(gizmo && (gizmo.axis || gizmo.dragging))) {
+          drag = { intent, x0: e.clientX, y0: e.clientY, x: e.clientX, y: e.clientY, started: false,
+                   point: intent === "zoom" ? pointAt(e.clientX, e.clientY).p : null, shift: e.shiftKey, id: e.pointerId };
+          if (e.button === 1 || (e.button === 0 && e.altKey)) e.stopImmediatePropagation();
+        }
       };
       const onMove = (e: PointerEvent) => {
         lastMouse = { x: e.clientX, y: e.clientY };
@@ -1042,6 +1247,29 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
           modal.mouse = lastMouse;
           modalApply();
           return;
+        }
+        if (drag && !gizmoDragging) {
+          const dx = e.clientX - drag.x, dy = e.clientY - drag.y;
+          if (!drag.started && Math.hypot(e.clientX - drag.x0, e.clientY - drag.y0) > DRAG_PX) {
+            drag.started = true;
+            try { renderer.domElement.setPointerCapture(drag.id); } catch { /* a synthetic pointer */ }
+          }
+          if (drag.started) {
+            if (drag.intent === "orbit") orbitBy(dx, dy);
+            else if (drag.intent === "pan") panBy(dx, dy);
+            else if (drag.intent === "zoom" && drag.point) zoomToward(drag.point, dragZoomFactor(dy));
+            else if (drag.intent === "box-select") {
+              const r = host.getBoundingClientRect();
+              boxEl.style.left = `${Math.min(drag.x0, e.clientX) - r.left}px`;
+              boxEl.style.top = `${Math.min(drag.y0, e.clientY) - r.top}px`;
+              boxEl.style.width = `${Math.abs(e.clientX - drag.x0)}px`;
+              boxEl.style.height = `${Math.abs(e.clientY - drag.y0)}px`;
+              boxEl.classList.remove("hidden");
+              boxEl.classList.add("select");
+            }
+          }
+          drag.x = e.clientX;
+          drag.y = e.clientY;
         }
         if (boxStart) {
           const r = host.getBoundingClientRect();
@@ -1065,9 +1293,30 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
         const cx = (s.x + e.clientX) / 2, cy = (s.y + e.clientY) / 2;
         const { p } = pointAt(cx, cy);
         opts.onBeforeJump?.();
-        applyCam(boxZoom(camState(), [a.x, a.y, b.x, b.y], p));
+        applyCam(isOrtho ? orthoBoxZoom(camState(), [a.x, a.y, b.x, b.y], p) : boxZoom(camState(), [a.x, a.y, b.x, b.y], p));
+      };
+      /** the box selection: the units whose proxy's centre falls in it */
+      const finishSelect = (d: NonNullable<typeof drag>, e: PointerEvent) => {
+        boxEl.classList.add("hidden");
+        boxEl.classList.remove("select");
+        const x0 = Math.min(d.x0, e.clientX), x1 = Math.max(d.x0, e.clientX);
+        const y0 = Math.min(d.y0, e.clientY), y1 = Math.max(d.y0, e.clientY);
+        const lk = locked();
+        const ids: string[] = [];
+        for (const [id, c] of unitCentres) {
+          if (lk.has(`proxy:${id}`)) continue;
+          const q = toScreen(c);
+          if (q && q.x >= x0 && q.x <= x1 && q.y >= y0 && q.y <= y1) ids.push(id);
+        }
+        opts.onBoxSelect?.(ids, d.shift);
       };
       const onUp = (e: PointerEvent) => {
+        const d = drag;
+        drag = null;
+        if (d?.started) {
+          try { renderer.domElement.releasePointerCapture(d.id); } catch { /* not captured */ }
+          if (d.intent === "box-select") finishSelect(d, e);
+        }
         if (boxStart) { finishBox(e); return; }
         if (gizmoDragging) { down = null; return; }
         const moved = !down || Math.hypot(e.clientX - down.x, e.clientY - down.y) > DRAG_PX;
@@ -1121,7 +1370,7 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
         const hh = hitsAt(e.clientX, e.clientY)[0];
         if (!hh) return;
         opts.onBeforeJump?.();
-        applyCam(detailZoom(camState(), arr(hh.point), camera.fov));
+        applyCam(detailZoom(camState(), arr(hh.point), FOV));
       };
       const onWheel = (e: WheelEvent) => {
         e.preventDefault();
@@ -1157,6 +1406,21 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
           modalApply();
           return;
         }
+        // MICRO-SPAZIO-3D-2 · the numeric keypad (or the top row, emulated)
+        const kp = keypadAction(e, getNav().emulateNumpad);
+        if (kp) {
+          stop();
+          // no camera of view: nothing (Blender's 0) — and not the graph's «0» (fit) either
+          if (kp === "camera") return;
+          if (kp === "toggle-ortho") { orthoAuto = false; setOrtho(!isOrtho); return; }
+          if (kp === "frame-selection") {
+            const keys = sketchSel ? [`sketch:${sketchSel}`] : items.filter((i) => i.selected).map((i) => `${i.kind}:${i.id}`);
+            if (!keys.length || !api.frameKeys?.(keys)) frameIt?.();
+            return;
+          }
+          setAligned(kp.view);
+          return;
+        }
         const a = spaceKeyAction(e, mac);
         if (!a) return;
         switch (a) {
@@ -1168,21 +1432,7 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
           }
           case "frame-all": frameIt?.(); stop(); return;
           case "box-zoom": boxArmed = true; host.classList.add("scn-armed"); stop(); return;
-          case "cursor-reset": {
-            const b = extent();
-            const sp = span();
-            // the world's origin — unless the study is georeferenced and the
-            // origin lies far from everything drawn (Templu Mare: 494 m below):
-            // then the middle of the base of what is drawn
-            const far = b.distanceToPoint(new THREE.Vector3(0, 0, 0)) > sp * 10;
-            const c = b.getCenter(new THREE.Vector3());
-            cursorAt = far ? [c.x, b.min.y, c.z] : [0, 0, 0];
-            cursorSet = true;
-            opts.onCursor?.(cursorAt);
-            frameIt?.();
-            stop();
-            return;
-          }
+          case "cursor-reset": centreScene(); stop(); return;
           case "grab": case "rotate": case "scale":
             if (startModalOn(a === "grab" ? "grab" : a === "rotate" ? "rotate" : "scale")) stop();
             return;
@@ -1196,6 +1446,30 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
             if (opts.onKeyAction?.(a, e)) stop();
         }
       };
+      /** MICRO-SPAZIO-3D-2 · Shift+C (E.D., 16 Oct 2026: not Blender's origin):
+       *  the cursor at the median of the geometries drawn, the view on the 5th
+       *  to 95th percentile of their boxes (`sceneCentre`) */
+      const drawnBoxes = (): Box6[] => {
+        const out: Box6[] = [];
+        content.updateMatrixWorld(true);
+        for (const [k, o] of roots) {
+          if (!o.parent || o.visible === false) continue;
+          const live = k.startsWith("rm:") ? liveLayers().find((l) => l.layer.object === o) : null;
+          const b = live ? live.layer.bounds() : new THREE.Box3().setFromObject(o);
+          if (b && !b.isEmpty()) out.push([...b.min.toArray(), ...b.max.toArray()] as Box6);
+        }
+        return out;
+      };
+      const centreScene = (): boolean => {
+        const c = sceneCentre(drawnBoxes());
+        if (!c) { if (opts.texts.centreEmpty) opts.onNotice?.(opts.texts.centreEmpty); return false; }
+        cursorAt = c.cursor;
+        cursorSet = true;
+        opts.onCursor?.(cursorAt);
+        const f = c.frame;
+        frameBox(new THREE.Box3(new THREE.Vector3(f[0], f[1], f[2]), new THREE.Vector3(f[3], f[4], f[5])));
+        return true;
+      };
       renderer.domElement.addEventListener("pointerdown", onDown, true);
       renderer.domElement.addEventListener("pointerup", onUp);
       renderer.domElement.addEventListener("pointermove", onMove);
@@ -1208,8 +1482,9 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
       const ro = new ResizeObserver(() => {
         ({ w, h } = size());
         renderer.setSize(w, h);
-        camera.aspect = w / h;
-        camera.updateProjectionMatrix();
+        persp.aspect = w / h;
+        persp.updateProjectionMatrix();
+        if (ortho) { orthoFrustum(); ortho.updateProjectionMatrix(); }
         for (const l of layers.values()) l.layer.resize();
       });
       ro.observe(host);
@@ -1217,7 +1492,8 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
       host.prepend(renderer.domElement);
       host.appendChild(labels);
       host.appendChild(strips);
-      host.append(cursorEl, modalEl, boxEl);
+      host.append(cursorEl, modalEl, boxEl, viewEl);
+      showView();
       cleanup = () => {
         cancelAnimationFrame(raf);
         for (const l of layers.values()) l.layer.dispose();
@@ -1234,6 +1510,7 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
         cursorEl.remove();
         modalEl.remove();
         boxEl.remove();
+        viewEl.remove();
       };
       api = {
         camera: camState,
@@ -1246,8 +1523,8 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
           return true;
         },
         frameCursor: () => {
-          const r = Math.max(0.5, camera.position.distanceTo(controls.target) * 0.15);
-          applyCam(frameSphere(camState(), cursorAt, r, camera.fov, camera.aspect));
+          const r = Math.max(0.5, v3(camState().pos).distanceTo(controls.target) * 0.15);
+          applyCam(frameSphere(camState(), cursorAt, r, FOV, persp.aspect));
         },
         armBoxZoom: () => { boxArmed = true; host.classList.add("scn-armed"); },
         syncSketches,
@@ -1256,16 +1533,16 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
         sketchGlb: async (id: string) => {
           const m = sketchMeshes.get(id);
           if (!m || !GLTFExporter) return null;
-          // the pose BAKED into the vertices (Y-up, the same frame as the models
-          // and the other proxies), one mesh, no edges
-          m.updateMatrixWorld(true);
+          // MICRO-SPAZIO-3D-2 · the shape in its own frame (Y-up, base at its
+          // origin), one mesh, no edges; the pose travels apart, into the data
+          // (until 16 Oct 2026 it was baked into the vertices)
           const g = m.geometry.clone();
-          g.applyMatrix4(m.matrixWorld);
           const mesh = new THREE.Mesh(g, new THREE.MeshStandardMaterial({ color: 0xd9822b }));
           mesh.name = id;
           const exporter = new GLTFExporter();
-          return await new Promise<ArrayBuffer | null>((res) => exporter.parse(mesh,
+          const glb = await new Promise<ArrayBuffer | null>((res) => exporter.parse(mesh,
             (out: unknown) => res(out instanceof ArrayBuffer ? out : null), () => res(null), { binary: true }));
+          return glb ? { glb, pose: poseOf(m) } : null;
         },
         surfaceAt: (x: number, y: number) => {
           const hh = hitsAt(x, y).find((q) => q.kind !== "sketch");
@@ -1274,6 +1551,11 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
         },
         applyOverlays,
         drawnUrl: (k: string) => drawn.get(k)?.url,
+        view: viewNow,
+        setView: (v: AlignedView) => setAligned(v),
+        toggleOrtho: () => { orthoAuto = false; setOrtho(!isOrtho); },
+        centreScene,
+        startModal: (mode: ModalMode) => startModalOn(mode),
       };
       rebuild();
       syncSketches();
@@ -1305,5 +1587,10 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
     surfaceAt: (x, y) => api.surfaceAt?.(x, y) ?? null,
     applyOverlays: () => api.applyOverlays?.(),
     drawnUrl: (k) => api.drawnUrl?.(k),
+    view: () => api.view?.() ?? { view: null, ortho: false, fov: 40, lensMm: 33 },
+    setView: (v) => api.setView?.(v),
+    toggleOrtho: () => api.toggleOrtho?.(),
+    centreScene: () => api.centreScene?.() ?? false,
+    startModal: (m) => api.startModal?.(m) ?? false,
   };
 }

@@ -114,6 +114,8 @@ export interface TilesLayer {
   bounds(): any | null;
   /** the resolution changed (the canvas was resized) */
   resize(): void;
+  /** MICRO-SPAZIO-3D-2 · the scene's camera changed (perspective ⇄ orthographic) */
+  setCamera(camera: any): void;
   onChange(cb: () => void): void;
   dispose(): void;
   /** the probes' seam: the content files loaded now (relative to the tileset) */
@@ -162,7 +164,7 @@ const levelOf = (tile: any): number => tile?.implicitTilingData
  * The tileset at `url`, for a scene whose camera and renderer are given.
  * `E` is the engine (`engine()`), `T` the tiles engine (`tilesEngine()`).
  */
-export function createTilesLayer(E: any, T: any, url: string, camera: any, renderer: any,
+export function createTilesLayer(E: any, T: any, url: string, camera0: any, renderer: any,
                                  opts: TilesOptions = {}): TilesLayer {
   const { THREE } = E;
   // RISORSA-FILE · a `.3tz`: the tileset is asked under a base nobody serves,
@@ -186,6 +188,7 @@ export function createTilesLayer(E: any, T: any, url: string, camera: any, rende
   if (T.DRACOLoader && T.GLTFExtensionsPlugin) tiles.registerPlugin(new T.GLTFExtensionsPlugin({ dracoLoader: dracoFor(E, T) }));
   // Z-up → Y-up: the one rotation (see the header)
   tiles.group.rotation.x = -Math.PI / 2;
+  let camera = camera0;
   tiles.setCamera(camera);
   tiles.setResolutionFromRenderer(camera, renderer);
   const mb = Math.max(64, opts.memoryMB ?? 400);
@@ -326,6 +329,13 @@ export function createTilesLayer(E: any, T: any, url: string, camera: any, rende
       return b.applyMatrix4(tiles.group.matrixWorld);
     },
     resize() { tiles.setResolutionFromRenderer(camera, renderer); },
+    setCamera(next: any) {
+      if (next === camera) return;
+      tiles.deleteCamera?.(camera);
+      camera = next;
+      tiles.setCamera(camera);
+      tiles.setResolutionFromRenderer(camera, renderer);
+    },
     onChange(cb) { listeners.push(cb); },
     dispose() {
       listeners.length = 0;

@@ -7,6 +7,47 @@ that asked for one.
 ## [Unreleased]
 
 ### Added
+- **The Space, second pass** (MICRO-SPAZIO-3D-2, E.D. 16 October 2026).
+  - **The implicit paradata group** (`implicit-pd.ts`): a unit with loose
+    properties (attached directly, in no group) behaves in the view as if it
+    had a group — the PD badge counts them and the instances, a click solos it,
+    Shift+click opens it in place; with a real group too, one badge, and the
+    loose ones in it marked «fuori dal gruppo». «Rendi gruppo (Compatta)»
+    makes it true in the data, and the view stays the same. On Templu Mare v2
+    every proxy (65 of 65) has its place beside its geometry property.
+  - **Shift+C**: the 3D cursor at the per-axis median of the geometries drawn,
+    the view on the 5th–95th percentile of their boxes; never the world's
+    origin; an empty scene says so and the cursor stays.
+  - **Mouse and trackpad as Blender's** (`dragIntent`): middle = orbit,
+    Shift+middle = pan, Ctrl+middle = zoom toward the point; the left drag
+    orbits until a middle button is seen (or «Emula mouse a 3 tasti»), then it
+    is the box selection; Alt+left = middle with the emulation; two fingers
+    orbit, Shift pans, Ctrl or the pinch zoom. Preferences ▸ Viewers ▸ 3D
+    navigation.
+  - **The views of the numeric keypad**: 1 front, 3 right, 7 top, Ctrl the
+    opposite, 5 perspective ⇄ orthographic (the orthographic zoom changes the
+    scale, the pivot at the point's depth, the near plane behind the scene),
+    0 nothing (no camera of view yet), «.» frames the selection; «Emula
+    tastierino», «Auto Perspective»; the view's name top left.
+  - **The N panel «Vista»** (N, or the tab on the right edge): the 3D cursor
+    (position and rotation, in the scene's frame, Z up), the selected object's
+    transform, the view and the lens.
+  - **The transform in the data** (`transform3d.ts`, `transform-ui.ts`): a
+    model's and a proxy's pose is `data.transform` (EM Tools' field: position,
+    Euler XYZ in radians, scale, Blender's Z-up frame, `up_axis` declared) on
+    the model and on the proxy's SemanticShape, applied over the file (the glb
+    never changes). The Inspector's «Trasformazione» and the N panel show the
+    same nine values and write to the same place; G / R / S move the selected
+    proxy or model too; one step of undo per gesture or field. A sketch is born
+    in its own frame: the glb holds the shape, the pose goes to the shape's data.
+  - **«Elimina stanza…»** for the owner and the node's operator, and the node's
+    **orphan assets** in the Preferences (download, delete one at a time).
+- `scripts/check-space-views.mjs` (101), `scripts/check-implicit-pd.mjs` (30).
+
+### Changed
+- The RM is bound to the epoch only directly (rules 1.6.36).
+- `addSubgraph` in a room: the proxies of `3d_obj/` and a shelf promotion are
+  shared with the node; a host command's delta is shared in a node room.
 - **The Space as a working space** (MICRO-SPAZIO-3D, E.D. 11 October 2026).
   - **Outliner of the Space** (T, or the «+» tab on the left edge): epoch →
     representation models (their versions, the one drawn highlighted) and

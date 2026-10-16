@@ -168,7 +168,9 @@ export const DRAG_PX = 4;
 /** The keys of the Space, with the 3D in focus. The value is the action. */
 export type SpaceKeyAction =
   | "frame-selection" | "frame-all" | "outliner" | "box-zoom" | "cursor-reset"
-  | "add-menu" | "grab" | "rotate" | "scale" | "delete" | "cancel" | "back";
+  | "add-menu" | "grab" | "rotate" | "scale" | "delete" | "cancel" | "back"
+  /** MICRO-SPAZIO-3D-2 · N, the «Vista» panel on the right */
+  | "sidebar";
 
 export function spaceKeyAction(e: { key: string; shiftKey: boolean; ctrlKey: boolean; metaKey: boolean; altKey: boolean },
                                mac: boolean): SpaceKeyAction | null {
@@ -187,6 +189,7 @@ export function spaceKeyAction(e: { key: string; shiftKey: boolean; ctrlKey: boo
     case ".": case "f": case "F": return "frame-selection";
     case "Home": return "frame-all";
     case "t": case "T": return "outliner";
+    case "n": case "N": return "sidebar";
     case "g": case "G": return "grab";
     case "r": case "R": return "rotate";
     case "s": case "S": return "scale";
@@ -302,4 +305,203 @@ export function eulerFromUp(normal: V3): V3 {
   const ry = Math.asin(Math.max(-1, Math.min(1, m13)));
   if (Math.abs(m13) < 0.9999999) return [Math.atan2(-m23, m33), ry, Math.atan2(-m12, m11)];
   return [Math.atan2(m32, m22), ry, 0];
+}
+
+// ── MICRO-SPAZIO-3D-2 · Shift+C: the centre of what is really there ──────────
+
+/** A world box as [minx, miny, minz, maxx, maxy, maxz]. */
+export type Box6 = [number, number, number, number, number, number];
+
+function quantile(xs: number[], q: number): number {
+  const s = [...xs].sort((a, b) => a - b);
+  if (!s.length) return NaN;
+  const i = (s.length - 1) * q;
+  const lo = Math.floor(i), hi = Math.ceil(i);
+  return s[lo] + (s[hi] - s[lo]) * (i - lo);
+}
+
+/**
+ * Shift+C, as E.D. asked on 16 Oct 2026 («non come Blender»: in a georeferenced
+ * study the world's origin shows nothing). `boxes` are the world boxes of the
+ * geometries in the scene (proxies, models, tilesets, as the overlays and the
+ * epoch draw them). The CURSOR goes to the per-axis MEDIAN of their centres;
+ * the VIEW frames the box from the 5th to the 95th percentile, per axis, of
+ * their mins and maxes — one object far away does not widen everything. The
+ * world's origin never enters. No box: null (the cursor stays where it is).
+ */
+export function sceneCentre(boxes: Box6[]): { cursor: V3; frame: Box6 } | null {
+  const ok = boxes.filter((b) => b.every((v) => Number.isFinite(v)) && b[0] <= b[3] && b[1] <= b[4] && b[2] <= b[5]);
+  if (!ok.length) return null;
+  const cursor = [0, 1, 2].map((a) => quantile(ok.map((b) => (b[a] + b[a + 3]) / 2), 0.5)) as V3;
+  const lo = [0, 1, 2].map((a) => quantile(ok.map((b) => b[a]), 0.05));
+  const hi = [0, 1, 2].map((a) => quantile(ok.map((b) => b[a + 3]), 0.95));
+  // a percentile box that does not hold the median (two far clusters) is
+  // widened to hold it: the cursor is always in the view
+  for (let a = 0; a < 3; a++) { lo[a] = Math.min(lo[a], cursor[a]); hi[a] = Math.max(hi[a], cursor[a]); }
+  return { cursor, frame: [lo[0], lo[1], lo[2], hi[0], hi[1], hi[2]] };
+}
+
+// ── MICRO-SPAZIO-3D-2 · the views of the numeric keypad ──────────────────────
+
+/**
+ * The scene's axes. The data and Blender are Z-up; glTF, three.js and so the
+ * Space are Y-up, and the glTF exporter turns Blender's (x, y, z) into three's
+ * (x, z, −y) — the tilesets get the same turn (`tiles3d.ts`, rotation.x −π/2).
+ * So Blender's +X is three's +x, Blender's +Y is three's −z, Blender's +Z
+ * (up) is three's +y.
+ */
+export function blenderToThree(p: V3): V3 { return [p[0], p[2], -p[1]]; }
+export function threeToBlender(p: V3): V3 { return [p[0], -p[2], p[1]]; }
+
+export type AlignedView = "front" | "back" | "right" | "left" | "top" | "bottom";
+
+/**
+ * Where the camera sits for each of Blender's six views, as a unit vector from
+ * the target, in three's axes — Front (keypad 1) looks along Blender's +Y from
+ * −Y, Right (3) along −X from +X, Top (7) down from +Z; Ctrl gives the
+ * opposite. Top and Bottom are a hair off the vertical so that three's Y-up
+ * `lookAt` gives Blender's screen: Top with Blender's +Y up the screen
+ * (three's −z), Bottom with −Y up.
+ */
+const VIEW_FROM: Record<AlignedView, V3> = {
+  front: blenderToThree([0, -1, 0]),
+  back: blenderToThree([0, 1, 0]),
+  right: blenderToThree([1, 0, 0]),
+  left: blenderToThree([-1, 0, 0]),
+  top: norm([0, 1, 1e-4]),
+  bottom: norm([0, -1, 1e-4]),
+};
+
+/** The camera of an aligned view around the same target at the same distance. */
+export function alignedView(cam: CamState, view: AlignedView): CamState {
+  const d = len(sub(cam.pos, cam.target)) || 1;
+  return { pos: add(cam.target, mul(VIEW_FROM[view], d)), target: cam.target };
+}
+
+/** Which aligned view a camera is in (its direction within a tenth of a degree), or null. */
+export function viewOf(cam: CamState): AlignedView | null {
+  const dir = norm(sub(cam.pos, cam.target));
+  for (const v of Object.keys(VIEW_FROM) as AlignedView[]) if (dot(dir, VIEW_FROM[v]) > 0.999998) return v;
+  return null;
+}
+
+export type KeypadAction = { view: AlignedView } | "toggle-ortho" | "camera" | "frame-selection";
+
+/**
+ * The numeric keypad, as Blender reads it: 1 front, 3 right, 7 top, Ctrl + the
+ * same the opposite (on a Mac too: Ctrl, as Blender), 5 perspective ⇄
+ * orthographic, 0 the camera, «.» frame the selection. `emulate` («Emula
+ * tastierino», the Preferences) lets the digits of the top row stand for the
+ * keypad; a modal G/R/S takes its digits before this is asked.
+ */
+export function keypadAction(e: { code?: string; key: string; ctrlKey: boolean; metaKey: boolean; altKey: boolean; shiftKey: boolean },
+                             emulate: boolean): KeypadAction | null {
+  if (e.metaKey || e.altKey) return null;
+  const code = e.code ?? "";
+  let k: string | null = null;
+  const m = /^Numpad([0-9])$/.exec(code);
+  if (m) k = m[1];
+  else if (code === "NumpadDecimal") k = ".";
+  else if (emulate && /^Digit[0-9]$/.test(code)) k = code.slice(5);
+  if (k == null) return null;
+  const opposite = e.ctrlKey;
+  switch (k) {
+    case "1": return { view: opposite ? "back" : "front" };
+    case "3": return { view: opposite ? "left" : "right" };
+    case "7": return { view: opposite ? "bottom" : "top" };
+    case "5": return opposite ? null : "toggle-ortho";
+    case "0": return opposite ? null : "camera";
+    case ".": return opposite ? null : "frame-selection";
+    default: return null;
+  }
+}
+
+/**
+ * The orthographic camera is drawn from the same CamState as the perspective:
+ * the half-height of its view is the perspective's at the pivot,
+ * `|pos − target| · tan(fov/2)`, so ⇄ keeps what is seen at the pivot.
+ */
+export function orthoHalf(cam: CamState, fovDeg: number): number {
+  return len(sub(cam.pos, cam.target)) * Math.tan((fovDeg * Math.PI) / 360);
+}
+
+/**
+ * One step of zoom in ORTHOGRAPHIC: the scale changes, not the camera's place
+ * along the view. The half-height is multiplied by `factor`, the target slides
+ * sideways so that `point` stays under the cursor, and the pivot goes to the
+ * point's depth along the view (Auto Depth).
+ */
+export function orthoZoom(cam: CamState, point: V3, factor: number, minDist = MIN_PIVOT): CamState {
+  const dir = norm(sub(cam.target, cam.pos));
+  const t = len(sub(cam.target, cam.pos));
+  const rel = sub(point, cam.target);
+  const along = dot(rel, dir);
+  const lateral = sub(rel, mul(dir, along));
+  const target = add(add(cam.target, mul(lateral, 1 - factor)), mul(dir, along));
+  const d = Math.max(minDist, t * factor);
+  return { pos: sub(target, mul(dir, d)), target };
+}
+
+/** Shift+B in orthographic: the box fills the view, the scale shrinks by it. */
+export function orthoBoxZoom(cam: CamState, rect: [number, number, number, number], point: V3): CamState {
+  const dir = norm(sub(cam.target, cam.pos));
+  const t = len(sub(cam.target, cam.pos));
+  const w = Math.abs(rect[2] - rect[0]) / 2;
+  const h = Math.abs(rect[3] - rect[1]) / 2;
+  const k = Math.min(1, Math.max(w, h, 1e-3));
+  return { pos: sub(point, mul(dir, Math.max(MIN_PIVOT, t * k))), target: point };
+}
+
+// ── MICRO-SPAZIO-3D-2 · the buttons, as Blender's ────────────────────────────
+
+export type DragIntent = "orbit" | "pan" | "zoom" | "box-select" | null;
+
+export interface NavPrefs {
+  /** «Emula mouse a 3 tasti»: Alt + left is the middle button */
+  emulate3: boolean;
+  /** the left drag selects with a box, as Blender (the Preferences: always,
+   *  never, or «automatic» — once a middle button was seen on this device, or
+   *  with the emulation on) */
+  leftSelects: boolean;
+}
+
+/** «Trascinamento sinistro»: the Preferences' choice, read with what the device showed. */
+export function leftSelects(choice: "auto" | "orbit" | "select", emulate3: boolean, middleSeen: boolean): boolean {
+  return choice === "select" || (choice === "auto" && (emulate3 || middleSeen));
+}
+
+/**
+ * What a drag means (E.D., 16 Oct 2026: «voglio ricopiare come avviene già in
+ * Blender»):
+ *
+ * | press                        | drag       |
+ * |------------------------------|------------|
+ * | middle                       | orbit      |
+ * | Shift + middle               | pan        |
+ * | Ctrl + middle (Mac too)      | zoom       |
+ * | Alt + left, «Emula 3 tasti»  | as middle  |
+ * | left, while the left does not select | orbit (Shift / ⌘ / Ctrl: pan), as before |
+ * | left, once it selects (`leftSelects`) | box selection, as Blender |
+ *
+ * The right button is the menu's, never a drag.
+ */
+export function dragIntent(e: PointerLike, prefs: NavPrefs): DragIntent {
+  let button = e.button;
+  let alt = e.altKey;
+  if (button === 0 && alt && prefs.emulate3) { button = 1; alt = false; }
+  if (button === 1) {
+    if (e.shiftKey) return "pan";
+    if (e.ctrlKey) return "zoom";
+    return "orbit";
+  }
+  if (button === 0) {
+    if (!prefs.leftSelects) return e.shiftKey || e.metaKey || e.ctrlKey ? "pan" : "orbit";
+    return "box-select";
+  }
+  return null;
+}
+
+/** The continuous zoom of Ctrl + middle drag: up comes nearer, as Blender. */
+export function dragZoomFactor(dy: number): number {
+  return Math.exp(dy * 0.006);
 }
