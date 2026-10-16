@@ -31,6 +31,7 @@
 //
 // Arrows still point DOWN (invariant 3): a process is below what it consumed
 // and above what it produced.
+import { middleCut, shortStepLabel, stepBoxLabel } from "../dtc-labels";
 import { t } from "../i18n";
 import { dtcKindLabel, isDtcChainEdge, isDtcNodeType } from "../rules";
 import type { Lane, Scene, SceneNode } from "../scene";
@@ -427,10 +428,16 @@ export function buildDtcScene(
         h: NODE_H,
         node: n,
       };
-      // DEV29 B2 · a process says its technique, not «derivation of …»
+      // DEV29 B2 · a process says its technique, not «derivation of …»;
+      // MICRO-SPAZIO-3D-3 p.13 · else its short label («LOD0 · Architrave_1»),
+      // cut in the middle when long — the full name stays in the Inspector
       if (isDtcNodeType(n.node_type) && n.node_type !== "dtc_acquisition") {
         const pl = processLabel(n);
         if (pl) sn.label = pl;
+        else {
+          const sl = stepBoxLabel(String(n.name || n.id));
+          if (sl !== String(n.name || n.id)) sn.label = sl;
+        }
       }
       if (dtcSetOwner(n.id)) sn.label = String(n.name);
       // DEV30 D3 · the two events of one lot say their dates
@@ -469,10 +476,11 @@ export function buildDtcScene(
     // a lane of processes is named by what they did (their techniques, else
     // their kinds), a lane of products by what made them. The ordinal stays
     // only when no step can be named.
-    const stepOf = (n: EmNode): string => processLabel(n) ?? String(n.name || n.id);
+    const stepOf = (n: EmNode): string => processLabel(n) ?? shortStepLabel(String(n.name || "")) ?? String(n.name || n.id);
     const steps = (ns: EmNode[]): string => {
       const all = [...new Set(ns.map(stepOf))].sort();
-      return all.slice(0, 2).join(" · ") + (all.length > 2 ? ` +${all.length - 2}` : "");
+      // the distinct steps counted whole, each shown cut in the middle (p.13)
+      return all.slice(0, 2).map((x) => middleCut(x, 36)).join(" · ") + (all.length > 2 ? ` +${all.length - 2}` : "");
     };
     const roleWords = (rl: Role, first: boolean): string => {
       const ofRole = row.filter((n) => roleOf(n) === rl);

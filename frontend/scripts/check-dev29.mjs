@@ -181,7 +181,7 @@ const doc = (nodes, edges = []) => ({ header: {}, graph: { id: "g", nodes, edges
   const lanes = sc.lanes.map((l) => l.label);
   console.log("  lanes (fixture):", JSON.stringify(lanes));
   ok(!lanes.some((l) => /\(\d\)/.test(l)), "B2 · no lane is «Products (2)» / «Processes (2)»");
-  ok(lanes.some((l) => /allineamento/.test(l)) && lanes.some((l) => /Products of .*export/.test(l)),
+  ok(lanes.some((l) => /allineamento/.test(l)) && lanes.some((l) => /Products · .*export/.test(l)),   // MICRO-SPAZIO-3D-3 p.13: «Products · …»
      "B2 · the lanes say the step (allineamento; products of the export)");
   // the same lot, two events — DEV30 D3 superseded the merge of B2: they stay
   // two, and the warning's fix LINKS them (the later cites the earlier). The
