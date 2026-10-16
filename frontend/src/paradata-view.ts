@@ -237,14 +237,14 @@ export function allViewInstances(doc: EmDocument): Map<string, ViewInstance[]> {
 //
 // `threed_instances`: the proxy of a unit drawn in the paradata group of its
 // geometry property, beside it; a representation model in the paradata group of
-// every epoch that has it (directly or through an epoch property), with the
+// every epoch bound to it directly (1.6.36: not through an epoch property), with the
 // number of its epochs. The client of s3Dgraphy's `paradata_view.threed_instances`,
 // field for field; `scripts/check-threed.mjs` holds it to the library's answer.
 
 interface ThreedRule {
   proxy?: { kind?: string; owner_edge?: string; property_type?: string; shape_edge?: string;
             file_edge?: string; file_types?: string[]; membership?: string; group_edge?: string };
-  representation_model?: { kind?: string; holders?: string[]; edge?: string; via_property?: string;
+  representation_model?: { kind?: string; holders?: string[]; edge?: string;
                            masters?: string[]; group_edge?: string; count_word?: string };
   id?: string;
 }
@@ -262,8 +262,6 @@ export interface ThreedInstance {
   owner_name: string;
   /** proxy: the geometry property it hangs from */
   beside?: string;
-  /** rm: the epoch property the link passes through, null when direct */
-  via?: string | null;
   /** the paradata group it is drawn in, null when the owner has none */
   group: string | null;
   /** the group, else the owner */
@@ -350,23 +348,17 @@ export function threedInstances(doc: EmDocument, ix: ViewIndex = viewIndex(doc))
   const rs = THREED.representation_model ?? {};
   const holders = rs.holders ?? ["EpochNode"];
   const edge = rs.edge ?? "has_representation_model";
-  const viaProp = rs.via_property ?? "has_property";
   const masters = rs.masters ?? ["RepresentationModelNode", "RepresentationModelDocNode", "RepresentationModelSpecialFindNode"];
   const word = rs.count_word ?? "×{n}";
   const isA = (n: EmNode | undefined, names: string[]) => !!n && names.some((c) => classIsA(classOf(n.node_type), c));
-  const links = new Map<string, Array<{ owner: string; via: string | null }>>();
+  const links = new Map<string, Array<{ owner: string }>>();
   for (const holder of doc.graph.nodes) {
     if (removed(holder) || !isA(holder, holders)) continue;
-    const reached: Array<[string, string | null]> = outOf(holder.id, edge).map((rm) => [rm, null]);
-    for (const pid of outOf(holder.id, viaProp)) {
-      const p = ix.node.get(pid);
-      if (p && !removed(p)) for (const rm of outOf(pid, edge)) reached.push([rm, pid]);
-    }
-    for (const [rmId, via] of reached) {
+    for (const rmId of outOf(holder.id, edge)) {
       if (!isA(ix.node.get(rmId), masters)) continue;
       const mine = links.get(rmId) ?? links.set(rmId, []).get(rmId)!;
       if (mine.some((x) => x.owner === holder.id)) continue;
-      mine.push({ owner: holder.id, via });
+      mine.push({ owner: holder.id });
     }
   }
   for (const [rmId, mine] of links) {
@@ -374,11 +366,11 @@ export function threedInstances(doc: EmDocument, ix: ViewIndex = viewIndex(doc))
     const epochs = mine.map((x) => x.owner);
     const n = epochs.length;
     for (const x of mine) {
-      const group = placeOf(ix, x.owner, x.via, membership, rs.group_edge ?? groupEdge);
+      const group = placeOf(ix, x.owner, null, membership, rs.group_edge ?? groupEdge);
       const place = group ?? x.owner;
       out.push({ id: threedInstanceId(rmId, place), kind: "rm", master: rmId, node_type: rm.node_type,
                  name: String(rm.name ?? rmId), owner: x.owner, owner_kind: "epoch",
-                 owner_name: String(ix.node.get(x.owner)?.name ?? x.owner), via: x.via, group, place,
+                 owner_name: String(ix.node.get(x.owner)?.name ?? x.owner), group, place,
                  epochs: [...epochs], count: n, count_label: n > 1 ? word.split("{n}").join(String(n)) : null,
                  removed: removed(rm) });
     }

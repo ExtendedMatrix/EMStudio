@@ -7,7 +7,8 @@
 //   node scripts/check-threed.mjs [study.em.json …]
 //
 // A small temple written here (a proxy in a group, one without, an empty
-// geometry, a model in three epochs — one of them through an epoch property)
+// geometry, a model in three epochs bound directly, and one bound only through an
+// epoch property — 1.6.36: that form gives no instance)
 // and every file given are compared. Without the s3Dgraphy venv the oracle is
 // skipped and only the temple's expected answers are checked.
 import * as esbuild from "esbuild";
@@ -41,7 +42,7 @@ const eq = (got, want, what) => { assert.deepEqual(got, want, `${what} — got $
 const ok = (c, what) => { assert.ok(c, what); checks++; };
 
 const FIELDS = ["id", "kind", "master", "node_type", "name", "owner", "owner_kind", "owner_name", "group", "place",
-                "removed", "beside", "files", "empty", "via", "epochs", "count", "count_label"];
+                "removed", "beside", "files", "empty", "epochs", "count", "count_label"];
 const pick = (r) => Object.fromEntries(FIELDS.filter((k) => k in r).map((k) => [k, r[k]]));
 const key = (r) => `${r.kind}|${r.id}`;
 const sorted = (xs) => xs.map(pick).sort((a, b) => key(a).localeCompare(key(b)));
@@ -78,7 +79,8 @@ const temple = { header: {}, graph: { graph_id: "temple", name: "temple", nodes:
   N("US5", "USVs", "USV 5"),
   N("BR1", "BR", "BR 1"),
   N("RM_A", "representation_model", "cella"), N("RM_B", "representation_model", "pronao"),
-  N("PE3", "property", "modello", { value: "RM_A" }),
+  N("RM_C", "representation_model", "podio"),
+  N("PE3", "property", "modello", { value: "RM_C" }),
 ], edges: [
   E("hg1", "E1", "PD_E1", "has_paradata_nodegroup"),
   E("hgu", "US1", "PD_US1", "has_paradata_nodegroup"),
@@ -86,7 +88,8 @@ const temple = { header: {}, graph: { graph_id: "temple", name: "temple", nodes:
   E("h2", "US2", "P2", "has_property"), E("s2", "P2", "S2", "has_semantic_shape"),
   E("h3", "US3", "P3", "has_property"),
   E("r1", "E1", "RM_A", "has_representation_model"), E("r2", "E2", "RM_A", "has_representation_model"),
-  E("hp", "E3", "PE3", "has_property"), E("r3", "PE3", "RM_A", "has_representation_model"),
+  E("r3", "E3", "RM_A", "has_representation_model"),
+  E("hp", "E3", "PE3", "has_property"), E("rc", "PE3", "RM_C", "has_representation_model"),
   E("r4", "E3", "RM_B", "has_representation_model"),
 ] }, layout: {} };
 {
@@ -98,16 +101,12 @@ const temple = { header: {}, graph: { graph_id: "temple", name: "temple", nodes:
   const a = ts.filter((r) => r.master === "RM_A");
   eq(a.map((r) => r.owner).sort(), ["E1", "E2", "E3"], "RM A in three epochs");
   eq([...new Set(a.map((r) => r.count_label))], ["×3"], "…and each says ×3");
-  eq(a.find((r) => r.owner === "E3").via, "PE3", "…one of them through an epoch property");
+  eq(ts.filter((r) => r.master === "RM_C"), [], "RM C bound only through an epoch property: no instance (1.6.36)");
   eq(a.find((r) => r.owner === "E1").id, "RM_A##PD_E1", "…in the epoch's paradata group");
   eq(ts.find((r) => r.master === "RM_B").count_label, null, "RM B in one epoch: no ×");
   const u = V.unitsWithout3d(temple);
   eq([u.with, u.empty, u.none], [["US1", "US2"], ["US3"], ["US5"]], "units: with, empty, none (BR is not a unit to model)");
-  // the oracle: python degrades a property → RM edge to generic_connection at
-  // load (the datamodel does not allow it), so the comparison runs on the
-  // temple without that one edge
-  const legal = { ...temple, graph: { ...temple.graph, edges: temple.graph.edges.filter((e) => e.id !== "r3") } };
-  compare(legal, "the temple (direct links only)");
+  compare(temple, "the temple");
 }
 
 // ── the studies given ────────────────────────────────────────────────────────
