@@ -256,6 +256,50 @@ export function renderOutliner(el: HTMLElement, v: OutlinerView, act: OutlinerAc
   const searching = !!v.query.trim();
   const rows = filterTree(v.rows, v.query);
   const order: string[] = [];
+  /**
+   * MICRO-SPAZIO-3D-3 p.2 · the eyes dragged, as Blender's: a press on an eye
+   * (or an arrow) and a drag down or up the rows gives every row crossed the
+   * SAME state as the first — on or off — a group with its children. The
+   * rows change under the pointer; the preferences are written once, at the
+   * release (one change of the person's view: the visibility is a local
+   * preference, not the data's, and ⌘Z does not reach it).
+   */
+  const dragSwitch = (e: PointerEvent, first: HTMLElement, col: "eye" | "arrow", wasOn: boolean) => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const turnOn = !wasOn;
+    const touched = new Set<string>();
+    const crossed = new Set<HTMLElement>();
+    const mark = (btn: HTMLElement) => {
+      if (crossed.has(btn)) return;
+      crossed.add(btn);
+      for (const k of JSON.parse(btn.dataset.keys ?? "[]") as string[]) touched.add(k);
+      btn.classList.toggle("off", !turnOn);
+      if (col === "eye") btn.textContent = turnOn ? "👁" : "◌";
+      btn.classList.add("swept");
+    };
+    mark(first);
+    const move = (ev: PointerEvent) => {
+      // near the tree's edge it scrolls, as a list does under a drag
+      const tr = tree.getBoundingClientRect();
+      if (ev.clientY > tr.bottom - 10) tree.scrollTop += 14;
+      else if (ev.clientY < tr.top + 10) tree.scrollTop -= 14;
+      const under = document.elementFromPoint(first.getBoundingClientRect().left + 4, Math.max(tr.top + 1, Math.min(tr.bottom - 1, ev.clientY)));
+      const line = under?.closest<HTMLElement>(".sol-row");
+      const btn = line?.querySelector<HTMLElement>(`[data-sol="${col}"]`);
+      if (btn && tree.contains(btn)) mark(btn);
+    };
+    const up = () => {
+      document.removeEventListener("pointermove", move, true);
+      document.removeEventListener("pointerup", up, true);
+      const keys = [...touched];
+      // the eye: on = shown; the arrow: on = selectable
+      if (col === "eye") act.toggleHidden(keys, !turnOn); else act.toggleLocked(keys, !turnOn);
+    };
+    document.addEventListener("pointermove", move, true);
+    document.addEventListener("pointerup", up, true);
+  };
   const draw = (r: OutlinerRow, depth: number) => {
     const line = document.createElement("div");
     const isSel = v.selected.has(r.key);
@@ -292,14 +336,20 @@ export function renderOutliner(el: HTMLElement, v: OutlinerView, act: OutlinerAc
         eye.dataset.sol = "eye";
         eye.title = v.texts.eye;
         eye.textContent = allHidden ? "◌" : "👁";
-        eye.addEventListener("click", (e) => { e.stopPropagation(); act.toggleHidden(keys, !allHidden); });
+        eye.dataset.keys = JSON.stringify(keys);
+        eye.dataset.on = String(!allHidden);
+        eye.addEventListener("pointerdown", (e) => dragSwitch(e, eye, "eye", !allHidden));
+        eye.addEventListener("click", (e) => e.stopPropagation());
         const arrow = document.createElement("button");
         arrow.type = "button";
         arrow.className = `sol-arrow${allLocked ? " off" : ""}`;
         arrow.dataset.sol = "arrow";
         arrow.title = v.texts.arrow;
         arrow.textContent = "↖";
-        arrow.addEventListener("click", (e) => { e.stopPropagation(); act.toggleLocked(keys, !allLocked); });
+        arrow.dataset.keys = JSON.stringify(keys);
+        arrow.dataset.on = String(!allLocked);
+        arrow.addEventListener("pointerdown", (e) => dragSwitch(e, arrow, "arrow", !allLocked));
+        arrow.addEventListener("click", (e) => e.stopPropagation());
         line.append(arrow, eye);
       }
     }

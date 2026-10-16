@@ -9564,3 +9564,5 @@ button.hdto-v {
 .conn-btn.conn-danger, .modal-foot button.danger { color: var(--danger); border-color: var(--danger); }
 .del-room ul { margin: 4px 0 8px 18px; padding: 0; }
 .del-room input { width: 100%; box-sizing: border-box; font: 0.8rem var(--mono, monospace); }
+/* MICRO-SPAZIO-3D-3 p.2 · an eye (or an arrow) crossed by a drag, until the release */
+.sol-eye.swept, .sol-arrow.swept { outline: 1px solid var(--accent); outline-offset: -1px; border-radius: 3px; }
