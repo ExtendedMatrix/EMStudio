@@ -60,7 +60,13 @@ export function readTransform(data: Record<string, unknown> | undefined | null):
 
 /** What goes into `data.transform`: EM Tools' shape (strings), the axis declared. */
 export function transformData(xf: Xf): Record<string, unknown> {
-  const s = (v: V3) => v.map((x) => String(Math.abs(x) < 1e-15 ? 0 : x));
+  // MICRO-SPAZIO-3D-3 p.15 · NUMBERS. Measured: the 99 models of Templu Mare
+  // v3.2 carry `["0.0", "0.0", "0.0"]`, strings — s3Dgraphy's own default
+  // (`RepresentationModelNode.__init__`, representation_node.py:47-52) and EM
+  // Tools' `str(obj.location.x)` (graph_updaters.py:310). `readTransform`
+  // reads both; written here, they are numbers (a reader that did float("0.5")
+  // takes 0.5 as well).
+  const s = (v: V3) => v.map((x) => (Math.abs(x) < 1e-15 ? 0 : x));
   return { position: s(xf.position), rotation: s(xf.rotation), scale: s(xf.scale), up_axis: xf.up_axis };
 }
 

@@ -282,6 +282,8 @@ export function renderEmData(): void {
     renderEmDataInto(h);
   }
   drawPop();
+  // MICRO-SPAZIO-3D-3 p.15 · the tables were drawn: the selection marks its rows
+  document.dispatchEvent(new CustomEvent("emdata:rendered"));
 }
 
 // ── the filter bar ──────────────────────────────────────────────────────────

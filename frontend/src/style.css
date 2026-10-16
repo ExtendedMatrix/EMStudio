@@ -9605,3 +9605,14 @@ button.hdto-v {
 .sol-uses { font-size: 0.64rem; color: var(--text-muted); margin-left: 4px; flex: none; white-space: nowrap; }
 .sol-auto { font-size: 0.6rem; font-weight: 700; color: #2b8a3e; border: 1px solid currentColor; border-radius: 2px; padding: 0 2px; margin-left: 3px; flex: none; }
 .insp-rm-label { font-weight: 600; }
+/* MICRO-SPAZIO-3D-3 p.15 · the selection in the tables (the active full, the others tenuous); thinner rows */
+tr.tv-sel > td { background: color-mix(in srgb, var(--accent) 16%, transparent); }
+tr.tv-sel-act > td { background: color-mix(in srgb, var(--accent) 42%, transparent); }
+.mdl td.mdl-ep { white-space: nowrap; max-width: 18ch; overflow: hidden; text-overflow: ellipsis; }
+.mdl-rm td, .mdl-px td { padding-top: 2px; padding-bottom: 2px; }
+.mdl-rm td .num.d { white-space: nowrap; }
+.mdl .mdl-file { white-space: nowrap; }
+.mdl-rm .btn.sm { padding: 0 8px; line-height: 1.35; min-height: 0; }
+.mdl-rm td, .mdl-px td { vertical-align: middle; }
+.mdl table.mdl-rm, .mdl table.mdl-px { height: auto; align-self: start; }
+.mdl-rm tr, .mdl-px tr { height: auto; }

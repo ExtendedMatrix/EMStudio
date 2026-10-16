@@ -3010,6 +3010,7 @@ function select(nodeId: string | null): void {
   selectedId = nodeId;
   selectedIds = new Set(nodeId ? [nodeId] : []);
   dropSketchSel();
+  queueMicrotask(markTableSelection);
   // E4 · somebody picked another node (a document closing selects null: not a pick)
   if (nodeId && nodeId !== handoffLanded) handoffLanded = null;
   selectedEdge = null; // node and connector selection are mutually exclusive
@@ -3082,6 +3083,7 @@ function toggleSelect(nodeId: string): void {
     // MICRO-SPAZIO-3D-3 · the node added is the ACTIVE, the sketches stay selected
     spaceSketchSel = null;
   }
+  queueMicrotask(markTableSelection);
   if (windowsOf().some((w) => w.type === "scene")) queueMicrotask(() => refreshSurfaces("scene"));
   refreshInspector();
   nodeList.setSelected(selectedId);
@@ -3089,13 +3091,35 @@ function toggleSelect(nodeId: string): void {
   if (!applyingRemoteSelect) sync.sendSelect(selectedId, [...selectedIds]);
 }
 
+/**
+ * MICRO-SPAZIO-3D-3 p.15 · the selection in the tables, the other way: a pick
+ * in the scene, the Outliner or the graph marks its rows in every table shown
+ * (the active full, the others tenuous) and brings the active into view. Until
+ * today a row's click selected in the Outliner and the scene, and nothing came
+ * back.
+ */
+function markTableSelection(): void {
+  const act = selectedId;
+  let activeRow: HTMLElement | null = null;
+  document.querySelectorAll<HTMLTableRowElement>(".tile-area tr[data-row]").forEach((tr) => {
+    const id = tr.dataset.row ?? "";
+    const a = !!act && id === act;
+    tr.classList.toggle("tv-sel-act", a);
+    tr.classList.toggle("tv-sel", !a && selectedIds.has(id));
+    if (a && !activeRow) activeRow = tr;
+  });
+  (activeRow as HTMLElement | null)?.scrollIntoView({ block: "nearest", inline: "nearest" });
+}
+document.addEventListener("emdata:rendered", () => markTableSelection());
+
 /** Replace the selection with a set (marquee result). */
 function selectMany(ids: string[]): void {
   selectedIds = new Set(ids);
   selectedId = ids.length ? ids[ids.length - 1] : null;
   dropSketchSel();
-  // MICRO-SPAZIO-3D-3 · the Space sees the same selection
+  // MICRO-SPAZIO-3D-3 · the Space sees the same selection, and the tables
   if (windowsOf().some((w) => w.type === "scene")) queueMicrotask(() => refreshSurfaces("scene"));
+  queueMicrotask(markTableSelection);
   refreshInspector();
   nodeList.setSelected(selectedId);
   draw();

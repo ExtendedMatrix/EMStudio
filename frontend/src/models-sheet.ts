@@ -47,7 +47,8 @@ export function modelsRows(space: Space, units: string[]): ModelsRows {
 export function fileState(r: SpaceResource | null, t: ModelsCtx["t"]): string {
   if (!r) return `<span class="st none">${esc(t("space.st.none"))}</span>`;
   return `<span class="st ${r.state}" title="${esc(r.url)}">${esc(t(`space.st.${r.state}`))}</span>`
-    + `<br><span class="num d">${esc(r.name)}</span>`;
+    // MICRO-SPAZIO-3D-3 p.15 · on the same line: a row is one line high
+    + ` <span class="num d mdl-file" title="${esc(r.name)}">${esc(r.name)}</span>`;
 }
 
 export function modelsTableHtml(space: Space, units: string[], ctx: ModelsCtx,
@@ -76,13 +77,15 @@ export function modelsTableHtml(space: Space, units: string[], ctx: ModelsCtx,
     + `<th>${esc(t("space.col.container"))}</th><th>${esc(t("space.col.genre"))}</th><th>${esc(t("space.col.record"))}</th><th>${esc(t("space.col.file"))}</th><th></th></tr></thead><tbody>`;
   for (const r of rmRows) {
     const e = space.epochs.find((x) => x.id === r.epochId);
+    // MICRO-SPAZIO-3D-3 p.15 · the dates on the name's line («XX sec 1801–2013»), cut with a tooltip
     const span = e && (e.start != null || e.end != null) ? ` <span class="num d">${e.start ?? "…"}–${e.end ?? "…"}</span>` : "";
+    const epTitle = e ? `${name(r.epochId)}${e.start != null || e.end != null ? ` ${e.start ?? "…"}–${e.end ?? "…"}` : ""}` : "";
     if (!r.rmId) {
-      h += `<tr data-row="${esc(r.epochId)}"><td>${esc(name(r.epochId))}${span}</td><td colspan="5"><span class="st none">${esc(t("space.noRm"))}</span></td><td></td></tr>`;
+      h += `<tr data-row="${esc(r.epochId)}"><td class="mdl-ep" title="${esc(epTitle)}">${esc(name(r.epochId))}${span}</td><td colspan="5"><span class="st none">${esc(t("space.noRm"))}</span></td><td></td></tr>`;
       continue;
     }
     const rm = space.rms.find((x) => x.id === r.rmId)!;
-    h += `<tr data-row="${esc(rm.id)}"><td>${esc(name(r.epochId))}${span}</td>`
+    h += `<tr data-row="${esc(rm.id)}"><td class="mdl-ep" title="${esc(epTitle)}">${esc(name(r.epochId))}${span}</td>`
       // MICRO-SPAZIO-3D-3 p.11 · without the level suffix when it has versions
       + `<td>${((n) => `<button class="link" data-go="${esc(rm.id)}" title="${esc(n.technical)}"><b>${esc(n.shown)}</b></button>${n.level ? ` <span class="sol-chip">${esc(n.level)}</span>` : ""}`)(ctx.rmName?.(rm.id) ?? shownModelName(rm.name, (rm.versions?.length ?? 0) > 1))}</td>`
       // MICRO-SPAZIO-3D-3 p.7 · the RM container it is in (EM Tools')

@@ -1017,12 +1017,13 @@ export function renderInspector(
   }
 
   // ── MICRO-SPAZIO-3D-2 · the transform of a 3D object, in the data ─────────
+  let transformShown = false;
   if (nodeId && cb.renderTransform) {
     const panel = el("div", "insp-canvas insp-xf");
     panel.appendChild(el("h3", "insp-sect", t("xf.title")));
     const body = el("div");
     panel.appendChild(body);
-    if (cb.renderTransform(body, nodeId)) root.appendChild(panel);
+    if (cb.renderTransform(body, nodeId)) { root.appendChild(panel); transformShown = true; }
   }
 
   // ── RISORSA-FILE · the files, the resources of a file, the revisions ─────
@@ -1126,6 +1127,9 @@ export function renderInspector(
       // P4.1b · the field clocks and the tombstones are machinery, not content:
       // they belong to the merge, and showing them here would bury the data
       if (k === "field_clocks" || k === "removed") continue;
+      // MICRO-SPAZIO-3D-3 p.15 · the transform is the «Trasformazione» section's
+      // nine fields above, not a raw JSON with its numbers written as strings
+      if (k === "transform" && transformShown) continue;
       // DEV29 B3 · a file set's members digest IS its checksum (s3Dgraphy dev29
       // A1 writes only `checksum`): the same sha256 twice is said once
       if (k === "members_digest" && v === (data as Record<string, unknown>).checksum) continue;

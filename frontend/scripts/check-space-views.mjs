@@ -213,7 +213,9 @@ const nearV = (a, b, eps, what) => { for (let i = 0; i < a.length; i++) assert.o
   eq(X.readTransform({}), null, "no transform: null (identity for the scene)");
   eq(X.readTransform({ transform: { position: ["a", "b", "c"] } }), null, "an unreadable one: null");
   const written = X.transformData({ position: [1.5, 0, -2], rotation: [0, 0, 0.25], scale: [1, 1, 1], up_axis: "Z" });
-  eq(written, { position: ["1.5", "0", "-2"], rotation: ["0", "0", "0.25"], scale: ["1", "1", "1"], up_axis: "Z" }, "written in EM Tools' shape (strings, radians), the axis declared");
+  // MICRO-SPAZIO-3D-3 p.15 · numbers now (the strings were s3Dgraphy's default and EM Tools' str())
+  eq(written, { position: [1.5, 0, -2], rotation: [0, 0, 0.25], scale: [1, 1, 1], up_axis: "Z" }, "written as NUMBERS (radians), the axis declared");
+  eq(X.readTransform({ transform: { position: ["0.0", "1.5", "-2"], rotation: ["0.0", "0.0", "0.0"], scale: ["1.0", "1.0", "1.0"] } }).position, [0, 1.5, -2], "…the strings of the data read as numbers");
   eq(X.readTransform({ transform: written }).position, [1.5, 0, -2], "…and read back");
   // the decimals: float32 at 500 m
   const step = 500 * 2 ** -23;
