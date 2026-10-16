@@ -9589,3 +9589,7 @@ button.hdto-v {
 .insp-sketch-use .insp-btn { margin: 3px 4px 0 0; }
 .sol-row.flash { animation: sol-flash 1.2s ease-out; }
 @keyframes sol-flash { from { background: color-mix(in srgb, #d9822b 45%, transparent); } to { background: transparent; } }
+/* MICRO-SPAZIO-3D-3 p.8 · the join's preview: the side in common lit, the window it becomes */
+.gest .gside { position: fixed; background: #2b8a3e; border-radius: 3px; box-shadow: 0 0 0 2px rgba(43, 138, 62, 0.35); pointer-events: none; }
+.gest .gunion { position: fixed; border: 2px dashed #2b8a3e; border-radius: 8px; pointer-events: none; }
+.tile-div.snapped { background: #2b8a3e !important; }

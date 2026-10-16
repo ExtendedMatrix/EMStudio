@@ -111,6 +111,7 @@ import {
   type DividerRect,
   type Rect,
 } from "./shell/layout";
+import { planJoin, snapDivider, type JoinPlan } from "./shell/join";
 import {
   paintSurface,
   preservingScroll,
@@ -483,6 +484,7 @@ import {
   GRAPH_MODES,
   applyArrangement,
   joinWindow,
+  applyJoinTree,
   siblingIdsOf,
   layoutOf,
   maximizedWin,
@@ -19581,7 +19583,10 @@ function areaAt(x: number, y: number): { el: HTMLElement; winId: string } | null
 type CornerKey = "tl" | "tr" | "bl" | "br";
 type CornerPlan =
   | { kind: "split"; dir: "row" | "col"; ratio: number; side: "a" | "b" }
-  | { kind: "join"; target: string; ok: boolean }
+  /** MICRO-SPAZIO-3D-3 p.8 · `rects`: the plan decided on the rectangles —
+   *  `join` (whole side, aligned when within 12 px), `extend` («Allinea e
+   *  unisci»), `no` (not beside each other) */
+  | { kind: "join"; target: string; ok: boolean; rects?: JoinPlan }
   | null;
 
 /**
@@ -19608,8 +19613,14 @@ function cornerPlan(corner: CornerKey, own: DOMRect, x0: number, y0: number,
   const over = areaAt(x, y);
   if (!over || over.winId === winId) return null;
   const sib = siblingIdsOf(winId);
-  return { kind: "join", target: over.winId,
-           ok: sib.length === 1 && sib[0] === over.winId };
+  if (sib.length === 1 && sib[0] === over.winId) return { kind: "join", target: over.winId, ok: true };
+  // MICRO-SPAZIO-3D-3 p.8 · not the tree's sibling: the rectangles decide
+  const rects = planJoin(layoutOf(), tileRootRect(), winId, over.winId);
+  return { kind: "join", target: over.winId, ok: rects.kind !== "no", rects };
+}
+/** The rectangle the arrangement is laid in (`positionAreas`), in tileRoot's pixels. */
+function tileRootRect(): Rect {
+  return { x: DIVIDER, y: DIVIDER, w: Math.max(0, tileRoot.clientWidth - 2 * DIVIDER), h: Math.max(0, tileRoot.clientHeight - 2 * DIVIDER) };
 }
 
 /** Attach the four corner grips to an area. */
@@ -19659,8 +19670,18 @@ function addCornerGrips(area: HTMLElement, winId: string): void {
         const dx = lastX - x0, dy = lastY - y0;
         const arrow = Math.abs(dx) >= Math.abs(dy) ? (dx > 0 ? "→" : "←")
                                                    : (dy > 0 ? "↓" : "↑");
-        veil.innerHTML = box(`gjoin${plan.ok ? "" : " no"}`, T.left, T.top, T.width, T.height,
-          `<span><b>${plan.ok ? arrow : "⊘"}</b>${escapeHtml(t(plan.ok ? "tile.joinOk" : "tile.joinNo"))}</span>`);
+        // MICRO-SPAZIO-3D-3 p.8 · the side in common lit, and what the release does
+        const jr = plan.rects;
+        const say = !jr ? t(plan.ok ? "tile.joinOk" : "tile.joinNo")
+          : jr.kind === "join" ? t(jr.aligned ? "tile.joinAligned" : "tile.joinOk")
+          : jr.kind === "extend" ? t("tile.joinExtend") : t(jr.why === "shape" ? "tile.joinShape" : "tile.joinApart");
+        const base0 = tileRoot.getBoundingClientRect();
+        const sideBox = jr && jr.kind !== "no"
+          ? box("gside", base0.left + jr.side.x - 2, base0.top + jr.side.y - 2, jr.side.w + 4, jr.side.h + 4) : "";
+        const unionBox = jr && jr.kind !== "no"
+          ? box("gunion", base0.left + jr.union.x, base0.top + jr.union.y, jr.union.w, jr.union.h) : "";
+        veil.innerHTML = unionBox + box(`gjoin${plan.ok ? "" : " no"}`, T.left, T.top, T.width, T.height,
+          `<span><b>${plan.ok ? arrow : "⊘"}</b>${escapeHtml(say)}</span>`) + sideBox;
       };
       let lastX = x0, lastY = y0;
       const move = (ev: PointerEvent): void => {
@@ -19686,13 +19707,20 @@ function addCornerGrips(area: HTMLElement, winId: string): void {
           splitWindow(winId, p.dir, activeWorkspace(), p.ratio, p.side);
           renderTiles();
           toast(t("tile.splitDone"));
+        } else if (p.ok && p.rects && p.rects.kind !== "no") {
+          // MICRO-SPAZIO-3D-3 p.8 · decided on the rectangles: aligned, stretched
+          setActiveWin(winId);
+          applyJoinTree(winId, p.target, p.rects.tree);
+          renderTiles();
+          toast(t(p.rects.kind === "extend" ? "tile.joinExtendDone" : p.rects.aligned ? "tile.joinAlignedDone" : "tile.joinDone"));
         } else if (p.ok) {
           setActiveWin(winId);                        // the dragged area stays
           joinWindow(winId);
           renderTiles();
           toast(t("tile.joinDone"));
         } else {
-          toast(t("tile.joinNo"));                    // nothing happens, and it says so
+          // nothing happens, and it says what to do
+          toast(t(p.rects?.kind === "no" && p.rects.why === "shape" ? "tile.joinShape" : "tile.joinApart"));
         }
       };
       const cancel = (): void => { plan = null; end(); };
@@ -19978,11 +20006,16 @@ function positionAreas(): void {
           for (const id of sideIds(s2))
             winAreas.get(id)?.classList.toggle("closing", s2 === side);
       };
+      // MICRO-SPAZIO-3D-3 p.8 · the magnet: near another divider of the same
+      // direction (12 px), this one lands on it and the two sides are equal
+      const others = tileDividers.map((d) => dividerInfo.get(d)).filter((o): o is DividerRect => !!o && o !== info && o.dir === info.dir)
+        .map((o) => (info.dir === "col" ? o.rect.y : o.rect.x));
       const move = (ev: PointerEvent): void => {
-        const f =
-          info.dir === "col"
-            ? (ev.clientY - base.top - info.span.y) / Math.max(1, info.span.h)
-            : (ev.clientX - base.left - info.span.x) / Math.max(1, info.span.w);
+        const raw = info.dir === "col" ? ev.clientY - base.top : ev.clientX - base.left;
+        const at = snapDivider(raw, others);
+        div.classList.toggle("snapped", at !== raw);
+        const usable = Math.max(1, (info.dir === "col" ? info.span.h : info.span.w) - DIVIDER);
+        const f = (at - (info.dir === "col" ? info.span.y : info.span.x)) / usable;
         const next = f < 0.07 ? "a" : f > 0.93 ? "b" : null;
         if (next !== closing) { closing = next; mark(closing); }
         setSplitRatioAt(info.path, f);

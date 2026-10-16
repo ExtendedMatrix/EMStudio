@@ -61,6 +61,12 @@ type Dict = Record<string, string>;
 // `emtree.`, `empty.`, `toast.`) so a translator can work a screen at a time and
 // an unused key is findable.
 const EN: Dict = {
+  "tile.joinAligned": "Align and join: the sides are brought together, this window goes away",
+  "tile.joinExtend": "Align and join: the shorter window is stretched to the other's side, the windows beside give up the band",
+  "tile.joinApart": "Cannot join: the two windows are not beside each other. Drag the corner onto a window that touches this one along a side.",
+  "tile.joinShape": "Cannot join: the windows around could not keep their shape. Join or move the ones in between first.",
+  "tile.joinAlignedDone": "Windows aligned and joined",
+  "tile.joinExtendDone": "Window stretched and joined",
   "rmg.taken": "{doc} has a container already («{name}»): in EM Tools a document has one container (its id is the document's). Choose another document, none, or «Move into the container…».",
   "rmg.hasOne": "has «{name}»",
   "space.col.container": "Container",
@@ -3677,6 +3683,12 @@ const EN: Dict = {
 
 // ── Italiano: complete, because E.D. works in it ───────────────────────────────
 const IT: Dict = {
+  "tile.joinAligned": "Allinea e unisci: i lati si allineano, questa finestra sparisce",
+  "tile.joinExtend": "Allinea e unisci: la finestra più corta si allunga al lato dell'altra, le finestre accanto cedono la striscia",
+  "tile.joinApart": "Non si uniscono: le due finestre non sono accanto. Trascina l'angolo su una finestra che tocchi questa lungo un lato.",
+  "tile.joinShape": "Non si uniscono: le finestre intorno non potrebbero tenere la loro forma. Unisci o sposta prima quelle in mezzo.",
+  "tile.joinAlignedDone": "Finestre allineate e unite",
+  "tile.joinExtendDone": "Finestra allungata e unita",
   "rmg.taken": "{doc} ha già un contenitore («{name}»): in EM Tools un documento ne ha uno solo (l'id è quello del documento). Scegli un altro documento, nessuno, o «Sposta nel contenitore…».",
   "rmg.hasOne": "ha «{name}»",
   "space.col.container": "Contenitore",

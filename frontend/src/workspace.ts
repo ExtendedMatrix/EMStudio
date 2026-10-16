@@ -1058,6 +1058,23 @@ export function joinWindow(winId: string, ws: WorkspaceId = active): boolean {
 }
 
 /**
+ * MICRO-SPAZIO-3D-3 p.8 · a join decided on the RECTANGLES (`shell/join.ts`):
+ * the tree rebuilt from them, `gone` closed, `keep` active. Refused when the
+ * tree does not hold both.
+ */
+export function applyJoinTree(keep: string, gone: string, tree: Pane, ws: WorkspaceId = active): boolean {
+  const entry = registry[ws];
+  endMagnification(ws);
+  const ids = paneIds(tree);
+  if (!ids.includes(keep) || ids.includes(gone)) return false;
+  entry.wins = entry.wins.filter((w) => w.id !== gone);
+  entry.layout = repairLayout(tree, entry.wins);
+  entry.activeId = keep;
+  persistWindows();
+  return true;
+}
+
+/**
  * The windows on the OTHER side of the split that directly holds `winId` — the
  * ones a join would absorb. Empty when the area is not inside a split.
  *
