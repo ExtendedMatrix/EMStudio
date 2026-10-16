@@ -149,7 +149,13 @@ const nearV = (a, b, eps, what) => { for (let i = 0; i < a.length; i++) assert.o
   eq(N.dragIntent(p(0, { altKey: true }), emu), "orbit", "Alt + left with the emulation: the middle's orbit");
   eq(N.dragIntent(p(0, { altKey: true, shiftKey: true }), emu), "pan", "…Shift: the middle's pan");
   eq(N.dragIntent(p(0, { altKey: true, ctrlKey: true }), emu), "zoom", "…Ctrl: the middle's zoom");
-  eq(N.dragIntent(p(2), blender), null, "the right button is the menu's, never a drag");
+  // MICRO-SPAZIO-3D-3 · the right button dragged pans (released still: the menu's, decided on release)
+  eq(N.dragIntent(p(2), blender), "pan", "the right button dragged: pan (a trackpad's two-finger press)");
+  eq(N.dragIntent(p(0), { emulate3: false, leftSelects: false, leftPans: true }), "pan", "left with the Preferences' «Pan»: pan (three fingers)");
+  // the grab: the point stays under the pointer — the camera moves opposite to the mouse
+  eq(N.grabPan(100, 0, 10, 0.001), [-1, 0], "dragged right 100 px at 10 m (1 mm/px at 1 m): the camera 1 m to the left");
+  eq(N.grabPan(0, 50, 10, 0.001), [0, 0.5], "dragged down: the camera goes up, the scene down");
+  eq(N.grabPan(100, 0, 999, 0.002, true), [-0.2, 0], "orthographic: the pixel's length, whatever the depth");
   eq(N.leftSelects("auto", false, false), false, "automatic: the left orbits on a device with no middle button seen");
   eq(N.leftSelects("auto", false, true), true, "…selects once a middle button was seen");
   eq(N.leftSelects("auto", true, false), true, "…or with the emulation");

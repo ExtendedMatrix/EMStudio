@@ -478,6 +478,9 @@ export interface NavPrefs {
    *  never, or «automatic» — once a middle button was seen on this device, or
    *  with the emulation on) */
   leftSelects: boolean;
+  /** MICRO-SPAZIO-3D-3 · the left drag pans (the Preferences' «Pan»: macOS's
+   *  three-finger drag is a left drag) */
+  leftPans?: boolean;
 }
 
 /** «Trascinamento sinistro»: the Preferences' choice, read with what the device showed. */
@@ -498,7 +501,10 @@ export function leftSelects(choice: "auto" | "orbit" | "select", emulate3: boole
  * | left, while the left does not select | orbit (Shift / ⌘ / Ctrl: pan), as before |
  * | left, once it selects (`leftSelects`) | box selection, as Blender |
  *
- * The right button is the menu's, never a drag.
+ * | right, dragged (> 4 px)      | pan (MICRO-SPAZIO-3D-3; a two-finger press on a trackpad) |
+ * | left, the Preferences' «Pan» | pan (macOS's three-finger drag) |
+ *
+ * The right button released without moving is the menu's.
  */
 export function dragIntent(e: PointerLike, prefs: NavPrefs): DragIntent {
   let button = e.button;
@@ -510,10 +516,30 @@ export function dragIntent(e: PointerLike, prefs: NavPrefs): DragIntent {
     return "orbit";
   }
   if (button === 0) {
+    if (prefs.leftPans) return "pan";
     if (!prefs.leftSelects) return e.shiftKey || e.metaKey || e.ctrlKey ? "pan" : "orbit";
     return "box-select";
   }
+  // MICRO-SPAZIO-3D-3 · the right button dragged pans (a trackpad's two-finger
+  // press and drag arrives as one); released without moving it is the menu's
+  if (button === 2) return "pan";
   return null;
+}
+
+/**
+ * MICRO-SPAZIO-3D-3 p.3 · the pan GRABS THE SCENE, as Blender's: the point
+ * grabbed stays under the pointer. `depth` is the grabbed point's distance
+ * along the view (the surface under the pointer, else the orbit centre's);
+ * `pxAtUnitDepth` the world length of a screen pixel one metre away (an
+ * orthographic view: the length of a pixel, `ortho` true). The camera moves
+ * OPPOSITE to the mouse: dragged right, the scene goes right. Returns the
+ * camera's (and the pivot's) displacement in camera axes: [right, up].
+ * Measured on 16 Oct 2026 before: −0.936 scene pixels per mouse pixel (the
+ * scene went the other way, at the pivot's depth).
+ */
+export function grabPan(dx: number, dy: number, depth: number, pxAtUnitDepth: number, ortho = false): [number, number] {
+  const k = ortho ? pxAtUnitDepth : Math.max(1e-6, depth) * pxAtUnitDepth;
+  return [-dx * k, dy * k];
 }
 
 /** The continuous zoom of Ctrl + middle drag: up comes nearer, as Blender. */

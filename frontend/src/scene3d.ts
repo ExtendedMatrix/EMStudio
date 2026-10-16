@@ -51,7 +51,7 @@ import { createTilesLayer, dracoFor, formatBytes, isTilesetUrl, tilesBar, tilesE
 import type { OverlayKey } from "./overlays";
 import {
   alignedView, AXIS_INDEX, AXIS_VECTOR, boxZoom, clipPlanes, detailZoom, DRAG_PX, dragIntent, dragZoomFactor,
-  frameSphere, isMacPlatform, keypadAction, modalKey, modalLabel, modalValue, orthoBoxZoom, orthoHalf, orthoZoom,
+  frameSphere, grabPan, isMacPlatform, keypadAction, modalKey, modalLabel, modalValue, orthoBoxZoom, orthoHalf, orthoZoom,
   pointerIntent, sceneCentre, spaceKeyAction, startModal, wheelFactor, zoomTowards,
   type AlignedView, type Box6, type CamState, type DragIntent, type ModalMode, type ModalState, type Pose,
   type SpaceKeyAction, type V3,
@@ -125,6 +125,8 @@ export interface SceneNavPrefs {
   middleSeen: boolean;
   /** the left drag selects with a box (`leftSelects` of space-nav) */
   leftSelects: boolean;
+  /** MICRO-SPAZIO-3D-3 · the left drag pans (the Preferences' «Pan») */
+  leftPans?: boolean;
 }
 
 /** MICRO-SPAZIO-3D-2 · the camera as the N panel shows it. */
@@ -721,11 +723,18 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
         camera.lookAt(controls.target);
         controls.update();
       };
-      const panBy = (dx: number, dy: number) => {
-        const k = pxWorld();
+      /** MICRO-SPAZIO-3D-3 p.3 · the pan grabs the scene (`grabPan`): the
+       *  point grabbed — the surface under the pointer, else the orbit centre's
+       *  depth — stays under the pointer */
+      const panBy = (dx: number, dy: number, grab?: V3 | null) => {
+        const H = Math.max(1, renderer.domElement.clientHeight);
+        const fwd = new THREE.Vector3().subVectors(controls.target, camera.position).normalize();
+        const depth = grab ? v3(grab).sub(camera.position).dot(fwd) : camera.position.distanceTo(controls.target);
+        const unit = isOrtho ? (2 * orthoHalf({ pos: [0, 0, orthoT], target: [0, 0, 0] }, FOV)) / H : (2 * Math.tan((FOV * Math.PI) / 360)) / H;
+        const [r, u] = grabPan(dx, dy, depth > 1e-6 ? depth : camera.position.distanceTo(controls.target), unit, isOrtho);
         const right = new THREE.Vector3().setFromMatrixColumn(camera.matrix, 0);
         const up = new THREE.Vector3().setFromMatrixColumn(camera.matrix, 1);
-        const d = right.multiplyScalar(dx * k).add(up.multiplyScalar(-dy * k));
+        const d = right.multiplyScalar(r).add(up.multiplyScalar(u));
         camera.position.add(d);
         controls.target.add(d);
         controls.update();
@@ -1322,11 +1331,11 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
           if (!getNav().middleSeen) opts.onMiddleSeen?.();
         }
         const intent = dragIntent({ button: e.button, ctrlKey: e.ctrlKey, metaKey: e.metaKey, shiftKey: e.shiftKey, altKey: e.altKey },
-          { emulate3: getNav().emulate3, leftSelects: getNav().leftSelects });
+          { emulate3: getNav().emulate3, leftSelects: getNav().leftSelects, leftPans: getNav().leftPans });
         // a press on the gizmo is the gizmo's
         if (intent && !(gizmo && (gizmo.axis || gizmo.dragging))) {
           drag = { intent, x0: e.clientX, y0: e.clientY, x: e.clientX, y: e.clientY, started: false,
-                   point: intent === "zoom" ? pointAt(e.clientX, e.clientY).p : null, shift: e.shiftKey, id: e.pointerId };
+                   point: intent === "zoom" || intent === "pan" ? pointAt(e.clientX, e.clientY).p : null, shift: e.shiftKey, id: e.pointerId };
           if (e.button === 1 || (e.button === 0 && e.altKey)) e.stopImmediatePropagation();
         }
       };
@@ -1346,7 +1355,7 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
           }
           if (drag.started) {
             if (drag.intent === "orbit") orbitBy(dx, dy);
-            else if (drag.intent === "pan") panBy(dx, dy);
+            else if (drag.intent === "pan") panBy(dx, dy, drag.point);
             else if (drag.intent === "zoom" && drag.point) zoomToward(drag.point, dragZoomFactor(dy));
             else if (drag.intent === "box-select") {
               const r = host.getBoundingClientRect();
@@ -1483,12 +1492,22 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
         opts.onBeforeJump?.();
         applyCam(detailZoom(camState(), arr(hh.point), FOV));
       };
+      let padGrab: { p: V3; until: number } | null = null;
       const onWheel = (e: WheelEvent) => {
         e.preventDefault();
         if (modal) return;
         if (e.ctrlKey) { zoomAt(e.clientX, e.clientY, wheelFactor(e.deltaY, e.deltaMode, true, host.clientHeight)); return; }
         if (isTrackpad(e as unknown as { deltaMode: number; deltaX: number; deltaY: number; wheelDeltaY?: number })) {
-          if (e.shiftKey) panBy(-e.deltaX, -e.deltaY); else orbitBy(e.deltaX, e.deltaY);
+          // MICRO-SPAZIO-3D-3 · the fingers' way: with natural scrolling a
+          // swipe to the right gives a negative deltaX, and the scene follows it
+          // the point grabbed at the gesture's start stays the grabbed one until
+          // the fingers stop (400 ms): the scene slides under a still pointer
+          if (e.shiftKey) {
+            const now = performance.now();
+            if (!padGrab || now > padGrab.until) padGrab = { p: pointAt(e.clientX, e.clientY).p, until: 0 };
+            padGrab.until = now + 400;
+            panBy(-e.deltaX, -e.deltaY, padGrab.p);
+          } else orbitBy(e.deltaX, e.deltaY);
           return;
         }
         zoomAt(e.clientX, e.clientY, wheelFactor(e.deltaY, e.deltaMode, false, host.clientHeight));

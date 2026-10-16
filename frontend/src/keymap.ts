@@ -66,6 +66,7 @@ export const KEYMAP: KeyRow[] = [
   // MICRO-SPAZIO-3D-2 · the mouse and the trackpad as Blender's (`dragIntent`)
   { id: "s3orbit", keys: "@gesture.s3Orbit", scope: "space" },
   { id: "s3pan", keys: "@gesture.s3Pan", scope: "space" },
+  { id: "s3rightDrag", keys: "@gesture.s3RightDrag", scope: "space" },
   { id: "s3zoomDrag", keys: "@gesture.s3ZoomDrag", scope: "space" },
   { id: "s3boxSel", keys: "@gesture.s3BoxSel", scope: "space" },
   { id: "s3emul3", keys: "@gesture.s3Emul3", scope: "space" },

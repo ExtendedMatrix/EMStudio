@@ -127,7 +127,9 @@ export interface ViewerSettings {
   emulate3Button: boolean;
   emulateNumpad: boolean;
   autoPerspective: boolean;
-  leftDrag: "auto" | "orbit" | "select";
+  /** MICRO-SPAZIO-3D-3 · «pan»: the left drag pans — macOS's three-finger
+   *  drag arrives as a left drag, the same as one finger's */
+  leftDrag: "auto" | "orbit" | "select" | "pan";
 }
 
 /** MICRO-3DTILES · the defaults of the three, MEASURED (the MICRO's report,

@@ -61,6 +61,10 @@ type Dict = Record<string, string>;
 // `emtree.`, `empty.`, `toast.`) so a translator can work a screen at a time and
 // an unused key is findable.
 const EN: Dict = {
+  "settings.navLeftPan": "Pan (for macOS's three-finger drag)",
+  "settings.navLeftPanHint": "macOS's three-finger drag (Accessibility) reaches the page as a left drag, the same as one finger's: to pan with three fingers choose «Pan». The orbit then stays with two fingers and the middle button.",
+  "gesture.s3RightDrag": "right drag (two fingers pressed on a trackpad)",
+  "keys.s3rightDrag": "Pan: the scene follows the pointer",
   "xf.writtenMany": "Transforms of {n} objects written",
   "s3.moreSelected": "+{n} selected",
   "s3.nMany": "{n} objects: a value changed here moves them all by the same amount",
@@ -3618,6 +3622,10 @@ const EN: Dict = {
 
 // ── Italiano: complete, because E.D. works in it ───────────────────────────────
 const IT: Dict = {
+  "settings.navLeftPan": "Panoramica (per il trascinamento a tre dita di macOS)",
+  "settings.navLeftPanHint": "Il trascinamento a tre dita di macOS (Accessibilità) arriva alla pagina come un trascinamento sinistro, uguale a quello di un dito: per la panoramica a tre dita scegli «Panoramica». L'orbita resta allora a due dita e al tasto centrale.",
+  "gesture.s3RightDrag": "trascinamento destro (due dita premute sul trackpad)",
+  "keys.s3rightDrag": "Panoramica: la scena segue il puntatore",
   "xf.writtenMany": "Trasformazioni di {n} oggetti scritte",
   "s3.moreSelected": "+{n} selezionati",
   "s3.nMany": "{n} oggetti: un valore cambiato qui li sposta tutti della stessa quantità",
