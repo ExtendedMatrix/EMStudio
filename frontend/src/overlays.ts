@@ -42,12 +42,25 @@ export type OverlayKey =
   | "name_status"
   // 3D
   | "version_format"
+  | "has_3d"
+  // MICRO-SPAZIO-3D · the Space's own (the 3D viewport, as Blender's Overlays)
+  | "s3_labels"
+  | "s3_proxies"
+  | "s3_proxy_wire"
+  | "s3_rm"
+  | "s3_tiles"
+  | "s3_grid"
+  | "s3_epoch_box"
+  | "s3_sel_outline"
+  | "s3_gizmo"
+  | "s3_cursor"
+  | "s3_sketches"
   // Drawing
   | "genre"
   | "lock"
   | "fold_count";
 
-export type OverlayGroupKey = "rights" | "paradata" | "time" | "checks" | "threed" | "drawing";
+export type OverlayGroupKey = "rights" | "paradata" | "time" | "checks" | "threed" | "drawing" | "space3d";
 
 export interface OverlayItem {
   key: OverlayKey;
@@ -93,19 +106,38 @@ export const OVERLAY_GROUPS: readonly OverlayGroup[] = [
   ] },
   { key: "threed", items: [
     { key: "version_format", text: "GLB" },
+    // MICRO-SPAZIO-3D p.5 · the badge «ha 3D» of a unit with a proxy (and its
+    // hollow sign for a geometry without a file): the 2D glyph `proxy`
+    { key: "has_3d", kind: "proxy" },
   ] },
   { key: "drawing", items: [
     { key: "genre", text: "M", liquid: true },
     { key: "lock", text: "🔒" },
     { key: "fold_count", text: "9" },
   ] },
+  // MICRO-SPAZIO-3D p.3 · the Space's overlays: only the Space draws them, and
+  // only the Space's menu lists them
+  { key: "space3d", items: [
+    { key: "s3_labels", text: "Aa" },
+    { key: "s3_proxies", kind: "proxy" },
+    { key: "s3_proxy_wire", text: "▱" },
+    { key: "s3_rm", kind: "representation_model" },
+    { key: "s3_tiles", kind: "tileset" },
+    { key: "s3_grid", text: "#" },
+    { key: "s3_epoch_box", text: "▢" },
+    { key: "s3_sel_outline", text: "◌" },
+    { key: "s3_gizmo", text: "✛" },
+    { key: "s3_cursor", text: "⊕" },
+    { key: "s3_sketches", text: "◇" },
+  ] },
 ];
 
 export const OVERLAY_KEYS: readonly OverlayKey[] = OVERLAY_GROUPS.flatMap((g) => g.items.map((i) => i.key));
 
-/** The views with their own overlays: the four projections and the soloing. */
-export type OverlayView = ViewKind | "soloing";
-export const OVERLAY_VIEWS: readonly OverlayView[] = ["matrix", "graph", "dtc", "multigraph", "soloing"];
+/** The views with their own overlays: the four projections, the soloing, and
+ *  (MICRO-SPAZIO-3D) the Space. */
+export type OverlayView = ViewKind | "soloing" | "space";
+export const OVERLAY_VIEWS: readonly OverlayView[] = ["matrix", "graph", "dtc", "multigraph", "soloing", "space"];
 
 export interface OverlayState {
   /** «Show overlays» — the general switch, as in Blender */
@@ -120,14 +152,21 @@ export interface OverlayState {
  * default in all of them, and nothing else hides a badge), so the default is
  * everything on: at opening nothing changes.
  */
-export function defaultOverlays(_view: OverlayView): OverlayState {
-  return { master: true, off: [] };
+export function defaultOverlays(view: OverlayView): OverlayState {
+  // MICRO-SPAZIO-3D · the Space opens as it did: the proxies FILLED (the wire is
+  // a choice), everything else on
+  return { master: true, off: view === "space" ? ["s3_proxy_wire"] : [] };
 }
+
+/** The Space's items (a group of their own). */
+const SPACE_KEYS = new Set<OverlayKey>(OVERLAY_GROUPS.find((g) => g.key === "space3d")!.items.map((i) => i.key));
 
 /** The items a view can draw: the liquid Graph draws only its own few. */
 export function overlayItemsFor(view: OverlayView): OverlayItem[] {
   const all = OVERLAY_GROUPS.flatMap((g) => g.items);
-  return view === "graph" ? all.filter((i) => i.liquid) : all;
+  if (view === "space") return all.filter((i) => SPACE_KEYS.has(i.key));
+  const flat = all.filter((i) => !SPACE_KEYS.has(i.key));
+  return view === "graph" ? flat.filter((i) => i.liquid) : flat;
 }
 
 /** Is this overlay drawn under this state? */
@@ -141,7 +180,9 @@ export function overlayShown(st: OverlayState | null | undefined, key: OverlayKe
 export function overlaysHideSomething(st: OverlayState, view: OverlayView): boolean {
   if (!st.master) return true;
   const can = new Set(overlayItemsFor(view).map((i) => i.key));
-  return st.off.some((k) => can.has(k));
+  // MICRO-SPAZIO-3D · the wireframe is a way of drawing the proxies, not a
+  // thing: switched off it hides nothing
+  return st.off.some((k) => can.has(k) && k !== "s3_proxy_wire");
 }
 
 /** The overlay of a badge of the ornament row (BADGE1 · FUNNEL1): its kind,
@@ -212,7 +253,8 @@ export function saveOverlays(person: string | null | undefined, view: OverlayVie
   const who = person || NOBODY;
   const mine = { ...(all[who] ?? {}) };
   const d = defaultOverlays(view);
-  if (st.master === d.master && st.off.length === 0 && d.off.length === 0) delete mine[view];
+  const same = st.off.length === d.off.length && st.off.every((k) => d.off.includes(k));
+  if (st.master === d.master && same) delete mine[view];
   else mine[view] = { master: st.master, off: [...st.off] };
   if (Object.keys(mine).length) all[who] = mine;
   else delete all[who];
