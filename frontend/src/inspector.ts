@@ -104,6 +104,8 @@ export interface InspectorCallbacks {
   /** MICRO-SPAZIO-3D-2 · the «Trasformazione» of a 3D object (a model, a unit's
    *  proxy, its shape): the caller draws it into `host`, false when the node has none */
   renderTransform?: (host: HTMLElement, nodeId: string) => boolean;
+  /** MICRO-SPAZIO-3D-3 p.6 · under «Model the proxy»: «Usa una forma abbozzata…» */
+  renderSketchUse?: (host: HTMLElement, nodeId: string) => void;
 }
 
 function el(tag: string, cls?: string, text?: string): HTMLElement {
@@ -750,6 +752,7 @@ export function renderInspector(
       b.addEventListener("click", () => cb.onCommand!(verb, nodeId));
       bar.appendChild(b);
       root.appendChild(bar);
+      if (verb === "create_proxy_for_unit" && cb.renderSketchUse) cb.renderSketchUse(root, nodeId);
       // X1/Y3 · a button that cannot be pressed says WHY beside it, in words,
       // and offers the gesture that lifts the block when there is one here: the
       // reason used to live only in the tooltip, and the off button looked on

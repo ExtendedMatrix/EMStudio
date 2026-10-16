@@ -144,7 +144,7 @@ export interface Space3dPrefs {
   snapAlign?: boolean;
 }
 
-export const DEFAULT_PREFS: Space3dPrefs = { shown: true, width: 260, toggled: [], hidden: [], locked: [], nShown: false, nWidth: 250 };
+export const DEFAULT_PREFS: Space3dPrefs = { shown: true, width: 260, toggled: [], hidden: [], locked: [], nShown: false, nWidth: 250, snapAlign: false };
 
 /** Is a row open: its default, unless the person turned it. */
 export function rowOpen(r: Pick<OutlinerRow, "key" | "kind" | "current">, toggled: ReadonlySet<string>): boolean {
@@ -212,6 +212,8 @@ export interface OutlinerActions {
   close(): void;
   /** MICRO-SPAZIO-3D-3 · a click on the tree's empty part: nothing selected */
   clearSelection?(): void;
+  /** p.6 · a press on a sketch's row: the caller follows the pointer (a drag onto a unit) */
+  dragSketch?(sketchId: string, e: PointerEvent): void;
   /** a shape of the palette: clicked (at the cursor), or dragged and dropped at a page point */
   addShape(id: string, drop?: { x: number; y: number }): void;
 }
@@ -357,6 +359,10 @@ export function renderOutliner(el: HTMLElement, v: OutlinerView, act: OutlinerAc
       }
     }
     line.addEventListener("click", (e) => act.pick(r, { toggle: e.metaKey || e.ctrlKey, range: e.shiftKey }, order));
+    if (r.kind === "sketch" && act.dragSketch) {
+      line.draggable = false;
+      line.addEventListener("pointerdown", (e) => { if (!(e.target as HTMLElement).closest("[data-sol]")) act.dragSketch!(r.id, e); });
+    }
     tree.appendChild(line);
     if (open) for (const c of kids) draw(c, depth + 1);
   };

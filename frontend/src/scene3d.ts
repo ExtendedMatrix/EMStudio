@@ -87,6 +87,9 @@ export interface SceneItem {
   /** TEMPLU MARE v2 · C1 · `url` IS a tileset, in this form, whatever it ends
    *  with: a store URL (`…/asset/sha256:…`) names no `.3tz` */
   tiles?: "directory" | "3tz";
+  /** MICRO-SPAZIO-3D-3 p.6 · a proxy's other parts (more `geometry` properties):
+   *  drawn with it, each with its own pose; G / R / S move the first */
+  parts?: Array<{ url: string; resourceId?: string; pose?: Pose }>;
   /** what the graph knows of the file: `size_bytes`, `primitives.points` */
   bytes?: number | null;
   points?: number | null;
@@ -256,6 +259,8 @@ export interface SpaceSceneOptions {
    *  too), the active last; on release, ONE call with all their poses */
   transformTargets?: () => string[];
   onTransformMany?: (poses: Array<{ key: string; pose: Pose }>) => void;
+  /** MICRO-SPAZIO-3D-3 p.6 · the fetchable address of a sketch's glb (a kept proxy) */
+  sketchFileUrl?: (s: Sketch) => string | undefined;
   /** MICRO-SPAZIO-3D-3 p.5 · «Allinea alla normale» (the N panel; off by default) */
   snapAlign?: () => boolean;
 }
@@ -815,6 +820,28 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
         for (const [id, m] of sketchMeshes) if (!want.has(id)) { sketchGroup.remove(m); sketchMeshes.delete(id); }
         for (const s of list) {
           let m = sketchMeshes.get(s.id);
+          const fileUrl = s.shape === "file" && s.file ? (opts.sketchFileUrl ? opts.sketchFileUrl(s) : s.file.url) : undefined;
+          // a glb whose address is not known yet (the bridge not answered): next time
+          if (!m && s.shape === "file" && !fileUrl) continue;
+          if (!m && s.shape === "file" && s.file && fileUrl) {
+            // MICRO-SPAZIO-3D-3 p.6 · a glb kept as a sketch (a unit's proxy
+            // before «Sostituisci»): its meshes, painted as a sketch
+            const g = new THREE.Group();
+            g.userData.sketchId = s.id;
+            g.userData.fileSketch = true;
+            sketchGroup.add(g);
+            sketchMeshes.set(s.id, g);
+            void load(fileUrl).then((got) => {
+              if (disposed || sketchMeshes.get(s.id) !== g || "fail" in got) return;
+              const obj = got.root.clone(true);
+              obj.traverse((o: any) => { if (o.isMesh) { o.material = sketchMaterial(); o.userData.sketchId = s.id;
+                const ed = new THREE.LineSegments(new THREE.EdgesGeometry(o.geometry, 20), new THREE.LineBasicMaterial({ color: 0x7a3d00 }));
+                ed.userData.edges = true; o.add(ed); } });
+              g.add(obj);
+              syncSketches();
+            });
+            m = g;
+          }
           if (!m) {
             const spec = shapeById(s.shape);
             if (!spec) continue;
@@ -830,10 +857,14 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
           if (!(modal && modal.targets.some((t) => t.id === `sketch:${s.id}`))) setPose(m, { position: s.position, rotation: s.rotation, scale: s.scale });
           m.visible = opts.sketchVisible?.(s.id) ?? true;
           const sel = sketchSet.has(s.id) || s.id === sketchSel;
+          const edgeCol = sel && ov("s3_sel_outline") ? (s.id === sketchSel ? SEL_ACTIVE : SEL_OTHER) : 0x7a3d00;
+          if (m.userData.fileSketch) {
+            m.traverse((o: any) => { if (o.userData.edges) o.material.color.set(edgeCol); });
+            continue;
+          }
           m.material.dispose();
           m.material = sketchMaterial();
-          for (const c of m.children) if (c.userData.edges)
-            c.material.color.set(sel && ov("s3_sel_outline") ? (s.id === sketchSel ? SEL_ACTIVE : SEL_OTHER) : 0x7a3d00);
+          for (const c of m.children) if (c.userData.edges) c.material.color.set(edgeCol);
         }
         if (sketchSel && !want.has(sketchSel)) sketchSel = null;
         for (const id of [...sketchSet]) if (!want.has(id)) sketchSet.delete(id);
@@ -1011,6 +1042,16 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
               }
               tag(obj, item);
               content.add(obj);
+              for (const part of item.kind === "proxy" ? item.parts ?? [] : []) {
+                pending.push(load(part.url).then((pg) => {
+                  if (gen !== generation || disposed || "fail" in pg) return;
+                  const po = pg.root.clone(true);
+                  if (part.pose) setPose(po, part.pose);
+                  po.traverse((o: any) => { if (o.isMesh) { o.material = translucent(item); o.add(outline(o.geometry, item)); } });
+                  tag(po, item);
+                  content.add(po);
+                }));
+              }
               if (item.kind === "proxy") unitCentres.set(item.id, centreOf(obj));
               addLabel(item.label, topOf(obj), `${item.kind === "proxy" ? "u" : "rm"}${selCls(item)}`, item.id);
               drawn.set(`${item.kind}:${item.id}`, { item, as: "mesh", url: item.url });
@@ -1974,8 +2015,20 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
           // MICRO-SPAZIO-3D-2 · the shape in its own frame (Y-up, base at its
           // origin), one mesh, no edges; the pose travels apart, into the data
           // (until 16 Oct 2026 it was baked into the vertices)
-          const g = m.geometry.clone();
-          const mesh = new THREE.Mesh(g, new THREE.MeshStandardMaterial({ color: 0xd9822b }));
+          let mesh: any;
+          if (m.userData.fileSketch) {
+            // a glb kept as a sketch: its meshes as they were, in the group's frame
+            mesh = new THREE.Group();
+            for (const c of m.children) {
+              const k = c.clone(true);
+              const edges: any[] = [];
+              k.traverse((o: any) => { if (o.userData.edges) edges.push(o); else if (o.isMesh) o.material = new THREE.MeshStandardMaterial({ color: 0xd9822b }); });
+              for (const o of edges) o.parent?.remove(o);
+              mesh.add(k);
+            }
+          } else {
+            mesh = new THREE.Mesh(m.geometry.clone(), new THREE.MeshStandardMaterial({ color: 0xd9822b }));
+          }
           mesh.name = id;
           const exporter = new GLTFExporter();
           const glb = await new Promise<ArrayBuffer | null>((res) => exporter.parse(mesh,

@@ -110,6 +110,9 @@ export interface SpaceProxy {
   /** [x, y, z, r] */
   spheres: number[][];
   resource: SpaceResource | null;
+  /** MICRO-SPAZIO-3D-3 p.6 · the unit's other `geometry` properties («Aggiungi
+   *  come parte»: s3Dgraphy writes one property per payload), in the graph's order */
+  parts?: SpaceProxy[];
 }
 
 export interface SpaceEpoch {
@@ -373,8 +376,10 @@ export function buildSpace(
         ? (sd.spheres as unknown[]).filter((c): c is number[] => Array.isArray(c) && c.length === 4) : [];
       const resource = resourceOf(sid);
       const geometry: ProxyGeometry = resource ? "glb" : convexshapes.length ? "convex" : spheres.length ? "spheres" : "empty";
-      proxies.set(u.id, { unitId: u.id, propertyId: pid, shapeId: sid, geometry, convexshapes, spheres, resource });
-      break;
+      const px: SpaceProxy = { unitId: u.id, propertyId: pid, shapeId: sid, geometry, convexshapes, spheres, resource };
+      const first = proxies.get(u.id);
+      if (!first) proxies.set(u.id, px);
+      else (first.parts ??= []).push(px);
     }
   }
 

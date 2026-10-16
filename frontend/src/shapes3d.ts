@@ -7,11 +7,17 @@
  * with the three.js handed in (the lazy engine), its base centred on the origin
  * so it is born ON the 3D cursor.
  *
- * A SKETCH is a shape placed in the Space and not yet a proxy: it lives in the
- * session only (this module's list, shared by every Space window), the Outliner
- * shows it as «sketched», and nothing of it enters the em.json. «Associate with
- * a unit» turns it into a proxy (main.ts): its glb, then the chain s3Dgraphy
- * writes, as EM Tools does — and the sketch leaves the list.
+ * A SKETCH is a shape placed in the Space and not yet a proxy: this module's
+ * list, shared by every Space window, which the Outliner shows as «sketched».
+ * «Associate with a unit» turns it into a proxy (main.ts): its glb, then the
+ * chain s3Dgraphy writes, as EM Tools does — and the sketch leaves the list.
+ *
+ * MICRO-SPAZIO-3D-3 p.6 · a sketch is the person's work: until 16 Oct 2026 it
+ * lived in the page only and a reload lost it. Now main.ts keeps the list in
+ * the graph's LAYOUT (`layout.sketches`, the view's part of the em.json, saved
+ * with the file; `serializeSketches` / `loadSketches`). A sketch may also be a
+ * FILE — the proxy a unit had before «Sostituisci»: then `file` says where its
+ * glb is, and the shape is that glb, not a primitive.
  */
 import catalogue from "./rules/shape_catalogue.json";
 
@@ -127,7 +133,10 @@ export function buildShapeGeometry(THREE: any, s: ShapeSpec): any {
 
 export interface Sketch {
   id: string;
+  /** the catalogue's shape, or "file" when the sketch is a glb (`file`) */
   shape: string;
+  /** MICRO-SPAZIO-3D-3 · a glb: the proxy a unit had, kept when replaced */
+  file?: { url: string; checksum?: string; from?: string };
   name: string;
   position: V3;
   /** Euler XYZ, radians */
@@ -180,6 +189,43 @@ export function removeSketch(id: string): void {
   if (i < 0) return;
   sketches.splice(i, 1);
   changed();
+}
+
+/** The list as the layout keeps it: plain data, the pose rounded to the float. */
+export function serializeSketches(): Sketch[] {
+  return sketches.map((s) => ({ id: s.id, shape: s.shape, name: s.name, position: [...s.position] as V3,
+    rotation: [...s.rotation] as V3, scale: [...s.scale] as V3, ...(s.file ? { file: { ...s.file } } : {}) }));
+}
+
+/** A list read back (the layout of a file opened): what is not a sketch is
+ *  left out; the next id follows the highest. */
+export function loadSketches(list: unknown): void {
+  const tri = (v: unknown, d: V3): V3 => (Array.isArray(v) && v.length === 3 && v.every((x) => Number.isFinite(Number(x))) ? v.map(Number) as V3 : d);
+  sketches.length = 0;
+  seq = 0;
+  for (const x of Array.isArray(list) ? list : []) {
+    const o = x as Record<string, unknown>;
+    if (!o || typeof o.id !== "string" || typeof o.shape !== "string") continue;
+    const f = o.file as Record<string, unknown> | undefined;
+    if (o.shape !== "file" && !shapeById(o.shape)) continue;
+    if (o.shape === "file" && !(f && typeof f.url === "string")) continue;
+    sketches.push({ id: o.id, shape: o.shape, name: String(o.name ?? o.id),
+      position: tri(o.position, [0, 0, 0]), rotation: tri(o.rotation, [0, 0, 0]), scale: tri(o.scale, [1, 1, 1]),
+      ...(f ? { file: { url: String(f.url), ...(typeof f.checksum === "string" ? { checksum: f.checksum } : {}), ...(typeof f.from === "string" ? { from: f.from } : {}) } } : {}) });
+    const m = /(\d+)$/.exec(o.id);
+    if (m) seq = Math.max(seq, Number(m[1]));
+  }
+  changed();
+}
+
+/** A sketch of a glb (the proxy a unit had), at its own place. */
+export function addFileSketch(file: { url: string; checksum?: string; from?: string }, name: string, pose?: { position: V3; rotation: V3; scale: V3 }): Sketch {
+  seq += 1;
+  const s: Sketch = { id: `sketch-${seq}`, shape: "file", file: { ...file }, name,
+    position: [...(pose?.position ?? [0, 0, 0])] as V3, rotation: [...(pose?.rotation ?? [0, 0, 0])] as V3, scale: [...(pose?.scale ?? [1, 1, 1])] as V3 };
+  sketches.push(s);
+  changed();
+  return s;
 }
 
 /** For the checks: forget everything. */

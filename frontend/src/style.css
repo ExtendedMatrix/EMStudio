@@ -9578,3 +9578,14 @@ button.hdto-v {
 .scn-modal-on canvas { cursor: none; }
 /* MICRO-SPAZIO-3D-3 · the gesture's header is read, never clicked: a click on it is the gesture's confirm */
 .scn-modal { pointer-events: none; max-width: calc(100% - 24px); white-space: normal; text-align: center; }
+/* MICRO-SPAZIO-3D-3 p.6 · a sketch dragged onto a unit: the ghost, the target lit */
+.s3-drag-ghost { position: fixed; z-index: 90; pointer-events: none; padding: 2px 8px; border-radius: 4px; background: #d9822b; color: #fff; font-size: 0.75rem; opacity: 0.85; box-shadow: 0 2px 6px rgba(0,0,0,0.25); }
+.s3-drag-ghost.on { background: #2b8a3e; }
+.s3-drop-hi { outline: 2px solid #2b8a3e; outline-offset: -1px; background: color-mix(in srgb, #2b8a3e 18%, transparent) !important; }
+.s3-has-proxy { color: var(--text-muted); font-size: 0.72rem; }
+.s3-free-shapes { color: #b35c00 !important; }
+.insp-sketch-use { margin: 4px 10px 8px; }
+.insp-sketch-use summary { cursor: pointer; font-size: 0.8rem; }
+.insp-sketch-use .insp-btn { margin: 3px 4px 0 0; }
+.sol-row.flash { animation: sol-flash 1.2s ease-out; }
+@keyframes sol-flash { from { background: color-mix(in srgb, #d9822b 45%, transparent); } to { background: transparent; } }

@@ -244,7 +244,7 @@ import { blenderToThree, eulerFromUp, leftSelects, threeToBlender, type AlignedV
 import { carryXf, coordDecimals, deg, IDENTITY, isIdentity, poseToXf, rad, readTransform, transformData, xfToPose, type Xf } from "./transform3d";
 import { parseTyped, renderTransformForm, type TransformFormTexts } from "./transform-ui";
 import { implicitGroups, isImplicitGroup, outsideMembers, unitOfImplicit, withImplicitGroups } from "./implicit-pd";
-import { addSketch, listSketches, onSketches, removeSketch, SHAPE_FAMILIES, SHAPES, shapeById, shapeLabel, sketchById, updateSketch } from "./shapes3d";
+import { addFileSketch, addSketch, listSketches, loadSketches, onSketches, removeSketch, serializeSketches, SHAPE_FAMILIES, SHAPES, shapeById, shapeLabel, sketchById, updateSketch } from "./shapes3d";
 import { boxSelect, clickOutliner, clickScene, EMPTY_SEL, hideKeys, selectAll, withoutKeys, type SpaceSel } from "./space-selection";
 import { buildOutlinerTree, loadSpacePrefs, renderOutliner, saveSpacePrefs, type Space3dPrefs } from "./space-outliner";
 import { patchProxyNodes, proxyRelPath } from "./proxy-association";
@@ -511,7 +511,7 @@ import {
   type WorkspaceId,
   type WindowType,
 } from "./workspace";
-import type { CentralMode, EmDocument, EmEdge, EmNode, ViewKind } from "./types";
+import type { CentralMode, EmDocument, EmEdge, EmNode, LayoutRect, ViewKind } from "./types";
 import {
   BridgeDownError,
   FileRefusedError,
@@ -918,6 +918,11 @@ let spaceSketchSel: string | null = null;
  *  replaces the nodes' selection replaces this too, unless the Space writes */
 let spaceSketchSet = new Set<string>();
 let spaceSelWriting = false;
+/** MICRO-SPAZIO-3D-3 p.6 · the sketches in the graph's layout (`sketchesFromStore`) */
+const SKETCH_ROOM_KEY = "emstudio.sketches.room";
+let sketchesLoading = false;
+let sketchesOf: DocumentStore | null = null;
+let sketchWriteTimer = 0;
 function dropSketchSel(): void {
   if (spaceSelWriting || (!spaceSketchSet.size && !spaceSketchSel)) return;
   spaceSketchSet = new Set();
@@ -3070,6 +3075,8 @@ function toggleSelect(nodeId: string): void {
   } else {
     selectedIds.add(nodeId);
     selectedId = nodeId;
+    // MICRO-SPAZIO-3D-3 · the node added is the ACTIVE, the sketches stay selected
+    spaceSketchSel = null;
   }
   if (windowsOf().some((w) => w.type === "scene")) queueMicrotask(() => refreshSurfaces("scene"));
   refreshInspector();
@@ -3114,6 +3121,8 @@ function renderInspectorInto(host: HTMLElement): void {
   }
   // MICRO-SPAZIO-3D-2 · an implicit group is the view's: its own small panel
   if (isImplicitGroup(selectedId)) { renderImplicitInspector(host, selectedId!); return; }
+  // MICRO-SPAZIO-3D-3 p.6 · the active is a sketch: its own panel, its roads to a unit
+  if (spaceSketchSel && spaceSketchSet.has(spaceSketchSel) && sketchById(spaceSketchSel)) { renderSketchInspector(host, spaceSketchSel); return; }
   // DAG · the inspector reads the store the SELECTION BELONGS TO. Clicking an
   // acquisition on the DTC canvas selects a node of the CORPUS, and a panel that
   // only ever looked at the study graph would answer "nothing selected" about a
@@ -3250,6 +3259,7 @@ function renderInspectorInto(host: HTMLElement): void {
       renderTextLanguages: (box, nodeId, field) => trui.renderLanguageRow(box, translationUi, nodeId, field),
       onOpenFacing: (tid) => openFacingFor(tid),
       renderTransform: (host2, id) => renderTransformInto(host2, id),
+      renderSketchUse: (host2, id) => renderSketchUse(host2, id),
       onClearField: (nodeId, field) => {
         (storeOfNode(nodeId) ?? store!).clearField(nodeId, field);
         refreshInspector();
@@ -5388,6 +5398,8 @@ function showDocument(target: GraphSlot | null, opts: { rebuildOnly?: boolean } 
   if (target) emtree.setActive(target.id);
 
   store = target ? target.store : null;
+  // MICRO-SPAZIO-3D-3 p.6 · the sketches are the graph's (its layout)
+  sketchesFromStore();
   // C1 · the Storage follows the ACTIVE graph's folder: dev.17 stayed on the
   // folder of the file opened last while the graph in front lived elsewhere
   const folderChanged = (outgoing?.path ?? null) !== (target?.path ?? null);
@@ -22326,7 +22338,8 @@ function sceneMenu(win: Win, h: SpaceSceneHandle, m: SceneMenuRequest): void {
     const sk = sketchById(m.id);
     if (!sk) return;
     spaceMenu(m.x, m.y, sk.name, [
-      { label: t("s3.associate"), act: "associate", run: () => openAssociate(win, sk.id) },
+      { label: t("s3.associate"), act: "associate", run: () => openAssociate(win, spaceSketchSet.has(sk.id) && spaceSketchSet.size > 1 ? [...spaceSketchSet] : [sk.id]) },
+      { label: t("s3.createUnit"), act: "create-unit", run: () => { void createUnitFromSketch(win, sk.id); } },
       { label: t("s3.frame"), act: "frame", run: () => h.frameKeys([`sketch:${sk.id}`]) },
       { label: t("s3.isolate"), act: "isolate", run: () => isolate(`sketch:${sk.id}`) },
       "sep",
@@ -22366,27 +22379,92 @@ function sceneMenu(win: Win, h: SpaceSceneHandle, m: SceneMenuRequest): void {
   ]);
 }
 
-/** «Associa a un'unità…»: the units a proxy can be given to (`units_without_3d`),
- *  those of the scene's epoch first. */
-function openAssociate(win: Win, sketchId: string): void {
+// ── MICRO-SPAZIO-3D-3 p.6 · the sketch without a unit, and its five roads to one ──
+//
+// Measured on 16 Oct 2026: a sketch lived in the page only (`shapes3d.ts`'s
+// list), never in the em.json — a reload lost it. It is the person's work, so
+// it now lives in the graph's LAYOUT (`layout.sketches`): the view's part of the
+// em.json, saved with the file and kept by s3Dgraphy's exporter and by EM Tools
+// (`graph_origins.py` carries the layout over). Not a SemanticShape without an
+// owner: the datamodel has no place for a shape given as a primitive and its
+// sizes, and a shape node with no glb and no hulls is what `create_geometry_proxy`
+// refuses to write. A room's layout is not one of its operations (only nodes and
+// edges travel), so in a room the list is also kept in this browser, per person
+// and room — said in the report.
+
+function roomSketchKey(): string { return `${overlayPerson()}|${sync.room ?? ""}`; }
+function roomSketches(): unknown {
+  try { return (JSON.parse(localStorage.getItem(SKETCH_ROOM_KEY) ?? "{}") as Record<string, unknown>)[roomSketchKey()] ?? []; } catch { return []; }
+}
+/** The active graph's sketches, read from its layout (a document shown). */
+function sketchesFromStore(): void {
+  sketchesLoading = true;
+  try {
+    let list = store?.doc.layout?.sketches as unknown;
+    if ((!Array.isArray(list) || !list.length) && sync.room) list = roomSketches();
+    loadSketches(list);
+  } finally { sketchesLoading = false; }
+  sketchesOf = store;
+  spaceSketchSet = new Set([...spaceSketchSet].filter((id) => !!sketchById(id)));
+  if (spaceSketchSel && !sketchById(spaceSketchSel)) spaceSketchSel = null;
+}
+/** …and written back, once the change settles: the layout, the file dirty. */
+function sketchesToStore(): void {
+  if (sketchesLoading) return;
+  window.clearTimeout(sketchWriteTimer);
+  sketchWriteTimer = window.setTimeout(() => {
+    const st = store;
+    if (!st || sketchesOf !== st) return;
+    const list = serializeSketches();
+    const layout = (st.doc.layout ??= {});
+    const had = Array.isArray(layout.sketches) && (layout.sketches as unknown[]).length > 0;
+    if (!list.length && !had) return;
+    if (JSON.stringify(layout.sketches ?? []) === JSON.stringify(list)) return;
+    if (list.length) layout.sketches = list; else delete layout.sketches;
+    if (sync.room) {
+      try {
+        const all = JSON.parse(localStorage.getItem(SKETCH_ROOM_KEY) ?? "{}") as Record<string, unknown>;
+        all[roomSketchKey()] = list;
+        localStorage.setItem(SKETCH_ROOM_KEY, JSON.stringify(all));
+      } catch { /* private mode */ }
+    }
+    st.touch();          // the file has changed: Save writes the layout with it
+  }, 150);
+}
+onSketches(() => sketchesToStore());
+
+/** The units a shape can be given to: every unit, the scene's epoch first,
+ *  then those without a proxy; the ones with one marked. */
+function associateCandidates(): Array<{ id: string; name: string; type: string; here: boolean; hasProxy: boolean; empty: boolean }> {
   const st = store;
   const sp = currentSpace();
-  if (!st || !sp) return;
-  document.querySelector(".s3-assoc")?.remove();
+  if (!st || !sp) return [];
   const free = unitsWithout3d(st.doc);
   const epoch = spaceEpochOf(sp);
   const here = new Set(epoch ? sp.summary(epoch)?.units ?? [] : []);
-  const units = free.without.map((id) => ({ id, name: String(st.node(id)?.name ?? id), type: String(st.node(id)?.node_type ?? ""),
-    here: here.has(id), empty: free.empty.includes(id) }))
-    .sort((a, b) => Number(b.here) - Number(a.here) || a.name.localeCompare(b.name, undefined, { numeric: true }));
+  const withP = new Set(free.with), empty = new Set(free.empty);
+  return [...free.with, ...free.without].map((id) => ({ id, name: String(st.node(id)?.name ?? id), type: String(st.node(id)?.node_type ?? ""),
+    here: here.has(id), hasProxy: withP.has(id), empty: empty.has(id) }))
+    .sort((a, b) => Number(b.here) - Number(a.here) || Number(a.hasProxy) - Number(b.hasProxy)
+      || a.name.localeCompare(b.name, undefined, { numeric: true }));
+}
+
+/** «Associa a un'unità…» (road 1): a search by name over the units. */
+function openAssociate(win: Win, sketchIds: string | string[]): void {
+  const ids = Array.isArray(sketchIds) ? sketchIds : [sketchIds];
+  const st = store;
+  if (!st || !ids.length) return;
+  document.querySelector(".s3-assoc")?.remove();
+  const units = associateCandidates();
   const box = document.createElement("div");
   box.className = "conn-panel s3-assoc";
   box.setAttribute("role", "dialog");
   const h = document.createElement("h4");
-  h.textContent = t("s3.associateHead", { name: sketchById(sketchId)?.name ?? "" });
+  h.textContent = ids.length === 1 ? t("s3.associateHead", { name: sketchById(ids[0])?.name ?? "" })
+    : t("s3.associateHeadMany", { n: String(ids.length) });
   const p = document.createElement("p");
   p.className = "insp-hint";
-  p.textContent = t("s3.associateHint", { n: String(units.length) });
+  p.textContent = t("s3.associateHintAll", { n: String(units.length), m: String(units.filter((u) => !u.hasProxy).length) });
   const q = document.createElement("input");
   q.type = "search";
   q.className = "s3-assoc-q";
@@ -22402,8 +22480,15 @@ function openAssociate(win: Win, sketchId: string): void {
       b.type = "button";
       b.className = "link";
       b.dataset.unit = u.id;
+      b.dataset.hasProxy = String(u.hasProxy);
       b.textContent = `${u.name} · ${unitTypeLabel(u.type)}${u.here ? "" : ` · ${t("s3.otherEpoch")}`}${u.empty ? ` · ${t("s3.emptyGeometry")}` : ""}`;
-      b.addEventListener("click", () => { box.remove(); void associateSketch(win, sketchId, u.id); });
+      if (u.hasProxy) {
+        const m = document.createElement("span");
+        m.className = "s3-has-proxy";
+        m.textContent = ` ◆ ${t("s3.hasProxy")}`;
+        b.appendChild(m);
+      }
+      b.addEventListener("click", () => { box.remove(); void associateFlow(win, ids, u.id); });
       li.appendChild(b);
       ul.appendChild(li);
     }
@@ -22419,12 +22504,77 @@ function openAssociate(win: Win, sketchId: string): void {
   acts.appendChild(no);
   box.append(h, p, q, ul, acts);
   Object.assign(box.style, { position: "fixed", left: "50%", top: "14%", transform: "translateX(-50%)", zIndex: "70",
-    width: "min(440px, calc(100vw - 32px))", maxHeight: "70vh", overflow: "auto" });
+    width: "min(460px, calc(100vw - 32px))", maxHeight: "70vh", overflow: "auto" });
   document.body.appendChild(box);
   draw();
   q.focus();
 }
 
+/** A unit that has a proxy already: «Sostituisci» (the old one becomes a free
+ *  sketch, not lost), «Aggiungi come parte» (a second `geometry` property — s3Dgraphy
+ *  writes one per payload, measured), «Annulla». */
+function askProxyConflict(unitName: string): Promise<"replace" | "part" | null> {
+  return new Promise((res) => {
+    document.querySelector(".s3-conflict")?.remove();
+    const box = document.createElement("div");
+    box.className = "conn-panel s3-conflict";
+    box.setAttribute("role", "dialog");
+    const h = document.createElement("h4");
+    h.textContent = t("s3.conflictHead", { unit: unitName });
+    const p = document.createElement("p");
+    p.className = "insp-hint";
+    p.textContent = t("s3.conflictHint");
+    const acts = document.createElement("div");
+    acts.className = "conn-acts";
+    const done = (v: "replace" | "part" | null) => { box.remove(); res(v); };
+    for (const [act, key] of [["replace", "s3.conflictReplace"], ["part", "s3.conflictPart"], ["cancel", "settings.cancel"]] as const) {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = act === "cancel" ? "conn-btn" : "conn-btn primary";
+      b.dataset.conflict = act;
+      b.textContent = t(key);
+      b.addEventListener("click", () => done(act === "cancel" ? null : act));
+      acts.appendChild(b);
+    }
+    box.append(h, p, acts);
+    Object.assign(box.style, { position: "fixed", left: "50%", top: "20%", transform: "translateX(-50%)", zIndex: "72",
+      width: "min(440px, calc(100vw - 32px))" });
+    document.body.appendChild(box);
+    (acts.querySelector("button") as HTMLButtonElement | null)?.focus();
+  });
+}
+
+/** The roads all end here: one or more sketches to one unit, the conflict asked
+ *  when the unit has a proxy (several sketches: the first as chosen, the others
+ *  as parts). */
+async function associateFlow(win: Win, sketchIds: string[], unitId: string): Promise<boolean> {
+  const st = store;
+  const sp = currentSpace();
+  if (!st || !sp || !sketchIds.length) return false;
+  if (!isStratigraphicType(st.node(unitId)?.node_type)) { toast(t("s3.notAUnit")); return false; }
+  let mode: "new" | "replace" | "part" = "new";
+  if (unitsWithout3d(st.doc).with.includes(unitId)) {
+    const m = await askProxyConflict(String(st.node(unitId)?.name ?? unitId));
+    if (!m) return false;
+    mode = m;
+  }
+  let okAll = true;
+  for (const [i, id] of sketchIds.entries()) {
+    const ok = await associateSketch(win, id, unitId, i === 0 ? mode : "part");
+    okAll = okAll && ok;
+    if (!ok) break;
+  }
+  return okAll;
+}
+
+/** A free name under `proxies/` for a unit: `<unit>.glb`, else `<unit>_2.glb`… —
+ *  a file is never written over (the old proxy's stays, kept as a sketch). */
+function freeProxyRel(unitName: string, taken: Set<string>): string {
+  const base = proxyRelPath(unitName);
+  if (!taken.has(base)) return base;
+  for (let k = 2; k < 1000; k++) { const r = base.replace(/\.glb$/, `_${k}.glb`); if (!taken.has(r)) return r; }
+  return base.replace(/\.glb$/, `_${Date.now()}.glb`);
+}
 
 /**
  * A sketch becomes the PROXY of a unit, with EM Tools' rule (Heriverse report,
@@ -22435,14 +22585,21 @@ function openAssociate(win: Win, sketchId: string): void {
  * resource given the glb's sha256. Without a folder (a room only) the bytes go
  * to the room's store, by digest, as every other file. ONE step of undo and of
  * the CRDT (`addSubgraph`); the file written is not taken back by an undo.
+ *
+ * MICRO-SPAZIO-3D-3 p.6 · `mode`: «replace» takes the unit's proxy away in the
+ * same step (its glb stays on disk and becomes a free sketch); «part» adds a
+ * second `geometry` property; `newUnit` is a unit born with its proxy («Crea
+ * un'unità da questa forma»), in the same step.
  */
-async function associateSketch(win: Win, sketchId: string, unitId: string): Promise<boolean> {
+async function associateSketch(win: Win, sketchId: string, unitId: string, mode: "new" | "replace" | "part" = "new",
+                               newUnit?: { node: EmNode; epochId: string | null; rect?: LayoutRect }): Promise<boolean> {
   const st = store;
   const h = sceneHandles.get(win.id) ?? [...sceneHandles.values()][0];
   const sk = sketchById(sketchId);
   if (!st || !h || !sk) return false;
-  const unitName = String(st.node(unitId)?.name ?? unitId);
-  const rel = proxyRelPath(unitName);
+  const unitName = String(newUnit?.node.name ?? st.node(unitId)?.name ?? unitId);
+  const taken = new Set(st.doc.graph.nodes.filter((n) => n.node_type === "resource").map((n) => String(((n.data ?? {}) as Record<string, unknown>).url ?? "")));
+  let rel = freeProxyRel(unitName, taken);
   const fail = (why: string) => { toast(t("s3.associateFailed", { why })); return false; };
   const made = await h.sketchGlb(sketchId);
   if (!made) return fail(t("s3.noGlb"));
@@ -22453,12 +22610,23 @@ async function associateSketch(win: Win, sketchId: string, unitId: string): Prom
   let where: "folder" | "store";
   try {
     if (dir) {
-      const full = `${dir}${rel}`;
-      if (isTauri()) await writeBinaryFile(full, bytes);
-      else {
-        const r = await fetch(`${await bridgeUrl()}/fs/write`, { method: "POST", body: bytes,
-          headers: { "Content-Type": "application/octet-stream", "X-EM-Path": encodeURIComponent(full) } });
-        if (!r.ok) throw new Error(`${r.status} ${(await r.text()).slice(0, 160)}`);
+      // a name taken on disk (a file the graph does not cite) moves to the next
+      for (let k = 0; ; k++) {
+        const full = `${dir}${rel}`;
+        let exists = false;
+        if (isTauri()) {
+          try { exists = await (await import("@tauri-apps/plugin-fs")).exists(full); } catch { exists = false; }
+          if (!exists) await writeBinaryFile(full, bytes);
+        } else {
+          const r = await fetch(`${await bridgeUrl()}/fs/write`, { method: "POST", body: bytes,
+            headers: { "Content-Type": "application/octet-stream", "X-EM-Path": encodeURIComponent(full) } });
+          if (r.status === 409) exists = true;
+          else if (!r.ok) throw new Error(`${r.status} ${(await r.text()).slice(0, 160)}`);
+        }
+        if (!exists) break;
+        if (k > 50) throw new Error(t("s3.noFreeName"));
+        taken.add(rel);
+        rel = freeProxyRel(unitName, taken);
       }
       where = "folder";
     } else if (sync.room) {
@@ -22471,28 +22639,44 @@ async function associateSketch(win: Win, sketchId: string, unitId: string): Prom
   } catch (e) {
     return fail(String(e instanceof Error ? e.message : e));
   }
-  // the chain, by the library
+  // the chain, by the library (a unit born now travels in the request)
   let j: { ok?: boolean; nodes?: EmNode[]; edges?: EmEdge[]; error?: string };
   try {
+    const doc = JSON.parse(st.toJSON()) as EmDocument;
+    if (newUnit) doc.graph.nodes.push(newUnit.node);
     const res = await fetch(`${await bridgeUrl()}/geometry-proxies`, {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ doc: JSON.parse(st.toJSON()), items: [{ unit_id: unitId, url: rel }] }),
+      body: JSON.stringify({ doc, items: [{ unit_id: unitId, url: rel }] }),
     });
     j = await res.json();
     if (!res.ok || !j.ok) throw new Error(j.error ?? `HTTP ${res.status}`);
   } catch (e) {
     return fail(String(e instanceof Error ? e.message : e));
   }
-  // the file is THERE: its digest, resident, its type and size
-  // MICRO-SPAZIO-3D-2 · the shape is born in its own frame, its pose apart
-  // in the shape's data (`data.transform`, Blender's axes, the axis declared)
   const nodes = patchProxyNodes(j.nodes ?? [], rel, digest, bytes.length, transformData(poseToXf(made.pose)));
-  // one step of undo, and — shared — one batch of operations to the room
-  const added = st.addSubgraph(nodes, j.edges ?? [], { share: true });
+  // «Sostituisci»: the proxy the unit had leaves the graph in the same step,
+  // and its glb (still on disk, still in the store) becomes a free sketch
+  const sp = currentSpace();
+  const old = mode === "replace" ? sp?.proxies.get(unitId) ?? null : null;
+  if (old?.resource?.url) {
+    const pose = poseOfNode(old.shapeId);
+    addFileSketch({ url: old.resource.url, ...(old.resource.checksum ? { checksum: old.resource.checksum } : {}), from: unitId },
+      t("s3.oldProxyName", { unit: unitName }), pose ? { position: pose.position, rotation: pose.rotation, scale: pose.scale } : undefined);
+  }
+  let added = { nodes: 0, edges: 0 };
+  st.batch(() => {
+    if (newUnit) {
+      st.addNode(newUnit.node, newUnit.rect);
+      if (newUnit.epochId) st.setFirstEpoch([newUnit.node.id], newUnit.epochId);
+    }
+    if (old) for (const id of [old.propertyId, old.shapeId, old.resource?.id].filter((x): x is string => !!x)) st.deleteNode(id);
+    // one step of undo, and — shared — one batch of operations to the room
+    added = st.addSubgraph(nodes, j.edges ?? [], { share: true });
+  });
   removeSketch(sketchId);
   const msg = t(where === "folder" ? "s3.associatedFolder" : "s3.associatedStore",
     { unit: unitName, file: rel, nodes: String(added.nodes), edges: String(added.edges) });
-  logInfo(msg, [unitId]);
+  logInfo(msg + (old ? ` · ${t("s3.replacedKept")}` : mode === "part" ? ` · ${t("s3.addedPart")}` : ""), [unitId]);
   toastUndo(msg, st);
   spaceResident = null;
   buildScenes();
@@ -22501,6 +22685,192 @@ async function associateSketch(win: Win, sketchId: string, unitId: string): Prom
   refreshInspector();
   refreshSurfaces("scene");
   return true;
+}
+
+/** Road 5 · «Crea un'unità da questa forma»: a US born in the scene's epoch,
+ *  the sketch its proxy, the name proposed; the Inspector opens on it, for the
+ *  type and the name. One step of undo with the proxy. */
+async function createUnitFromSketch(win: Win, sketchId: string): Promise<boolean> {
+  const st = store;
+  const sp = currentSpace();
+  if (!st || !sp || refuseReadOnly()) return false;
+  const epochId = spaceEpochOf(sp);
+  const type = "US";
+  const name = initialName(st.doc, type) ?? nextFreeName(st.doc, type) ?? st.freshLabel(type);
+  const node = { id: st.newId(), node_type: type, name, description: "" } as EmNode;
+  // a place in the Matrix: the epoch's lane, right of what is there
+  const lane = (st.doc.layout?.swimlanes ?? []).find((l) => l.epoch_id === epochId);
+  let rect: LayoutRect | undefined;
+  if (lane) {
+    let maxX = 0;
+    for (const r of Object.values(st.doc.layout?.positions ?? {})) if (r.y >= lane.y && r.y < lane.y + lane.height) maxX = Math.max(maxX, r.x + r.w);
+    rect = { x: maxX + 60, y: lane.y + Math.max(10, lane.height / 2 - 15), w: 90, h: 30 };
+  }
+  const ok = await associateSketch(win, sketchId, node.id, "new", { node, epochId, rect });
+  if (ok) {
+    select(node.id);
+    refreshInspector();
+    toast(t("s3.unitCreated", { name }));
+  }
+  return ok;
+}
+
+/** Road 3 · Ctrl+P «Associa all'attiva», Blender's parent: the sketches
+ *  selected go to the ACTIVE unit (picked with ⌘/Ctrl+click in the graph). */
+document.addEventListener("keydown", (e) => {
+  if (!(e.ctrlKey && !e.metaKey && !e.altKey && (e.code === "KeyP" || e.key === "p" || e.key === "P"))) return;
+  const t0 = e.target as HTMLElement | null;
+  if (t0 && (t0 instanceof HTMLInputElement || t0 instanceof HTMLTextAreaElement || t0.isContentEditable)) return;
+  if (!spaceSketchSet.size || !selectedId || !isStratigraphicType(store?.node(selectedId)?.node_type)) return;
+  const win = windowsOf().find((w) => w.type === "scene");
+  if (!win) return;
+  e.preventDefault();
+  e.stopPropagation();
+  void associateFlow(win, [...spaceSketchSet], selectedId);
+}, true);
+
+/** Road 2 · a sketch dragged from the Outliner onto a unit: a row of the Space's
+ *  Outliner, a node of the Matrix (or of any graph window), a name in the
+ *  summary's «senza:». The target lights up under the pointer. */
+let sketchDragEnded = 0;
+function graphNodeAtPage(x: number, y: number): string | null {
+  for (const [winId, g] of graphWindows) {
+    if (!g.cv.isConnected) continue;
+    const r = g.cv.getBoundingClientRect();
+    if (x < r.left || x > r.right || y < r.top || y > r.bottom) continue;
+    const under = document.elementFromPoint(x, y);
+    if (under !== g.cv) continue;
+    const prev = activeWin().id;
+    if (winId !== prev) setActiveWin(winId);
+    try {
+      const s = scene();
+      if (!s) return null;
+      const w = viewport().toWorld(x - r.left, y - r.top);
+      return hitTest(s, w.x, w.y, hitTol())?.id ?? null;
+    } finally { if (winId !== prev) setActiveWin(prev); }
+  }
+  return null;
+}
+function sketchDropTarget(x: number, y: number): { unit: string; el: HTMLElement | null } | null {
+  const el = document.elementFromPoint(x, y) as HTMLElement | null;
+  const row = el?.closest<HTMLElement>(".sol-row[data-key^='proxy:']");
+  if (row) return { unit: row.dataset.key!.slice(6), el: row };
+  const go = el?.closest<HTMLElement>(".scn-ov [data-go]");
+  if (go && isStratigraphicType(store?.node(go.dataset.go!)?.node_type)) return { unit: go.dataset.go!, el: go };
+  const id = graphNodeAtPage(x, y);
+  if (id && isStratigraphicType(store?.node(id)?.node_type)) return { unit: id, el: null };
+  return null;
+}
+function beginSketchDrag(win: Win, sketchId: string, e0: PointerEvent): void {
+  if (e0.button !== 0) return;
+  const x0 = e0.clientX, y0 = e0.clientY;
+  let dragging = false;
+  let ghost: HTMLElement | null = null;
+  let lit: HTMLElement | null = null;
+  let litNode: string | null = null;
+  const sel = spaceSketchSet.has(sketchId) && spaceSketchSet.size > 1 ? [...spaceSketchSet] : [sketchId];
+  const unlight = () => {
+    lit?.classList.remove("s3-drop-hi"); lit = null;
+    if (litNode) { litNode = null; hoverId = null; draw(); }
+  };
+  const move = (e: PointerEvent) => {
+    if (!dragging && Math.hypot(e.clientX - x0, e.clientY - y0) > 6) {
+      dragging = true;
+      ghost = document.createElement("div");
+      ghost.className = "s3-drag-ghost";
+      ghost.textContent = sel.length > 1 ? t("s3.associateHeadMany", { n: String(sel.length) }) : sketchById(sketchId)?.name ?? "";
+      document.body.appendChild(ghost);
+    }
+    if (!dragging || !ghost) return;
+    ghost.style.left = `${e.clientX + 12}px`;
+    ghost.style.top = `${e.clientY + 10}px`;
+    const tg = sketchDropTarget(e.clientX, e.clientY);
+    unlight();
+    if (tg?.el) { lit = tg.el; lit.classList.add("s3-drop-hi"); }
+    else if (tg) { litNode = tg.unit; hoverId = tg.unit; draw(); }
+    ghost.classList.toggle("on", !!tg);
+    ghost.dataset.target = tg?.unit ?? "";
+  };
+  const up = (e: PointerEvent) => {
+    document.removeEventListener("pointermove", move, true);
+    document.removeEventListener("pointerup", up, true);
+    ghost?.remove();
+    const tg = dragging ? sketchDropTarget(e.clientX, e.clientY) : null;
+    unlight();
+    if (!dragging) return;
+    sketchDragEnded = Date.now();
+    if (tg) void associateFlow(win, sel, tg.unit);
+  };
+  document.addEventListener("pointermove", move, true);
+  document.addEventListener("pointerup", up, true);
+}
+
+/** The Inspector of a sketch (the active is one): what it is, and its roads. */
+function renderSketchInspector(host: HTMLElement, sketchId: string): void {
+  host.textContent = "";
+  const sk = sketchById(sketchId);
+  const win = windowsOf().find((w) => w.type === "scene");
+  if (!sk || !win) return;
+  const head = document.createElement("div");
+  head.className = "insp-head";
+  const chip = document.createElement("span");
+  chip.className = "insp-chip";
+  chip.textContent = t("s3.sketchChip");
+  const h2 = document.createElement("h2");
+  h2.textContent = sk.name;
+  head.append(chip, h2);
+  host.appendChild(head);
+  const more = spaceSketchSet.size + selectedIds.size - 1;
+  if (more > 0) {
+    const m = document.createElement("div");
+    m.className = "insp-more";
+    m.textContent = t("s3.moreSelected", { n: String(more) });
+    host.appendChild(m);
+  }
+  const p = document.createElement("p");
+  p.className = "insp-hint";
+  p.textContent = sk.file ? t("s3.sketchFileHint", { file: sk.file.url }) : t("s3.sketchHint");
+  host.appendChild(p);
+  const bar = document.createElement("div");
+  bar.className = "insp-actions s3-sketch-acts";
+  const btn = (act: string, label: string, run: () => void) => {
+    const b = document.createElement("button");
+    b.className = "insp-btn";
+    b.dataset.s3 = act;
+    b.textContent = label;
+    b.addEventListener("click", run);
+    bar.appendChild(b);
+  };
+  btn("associate", t("s3.associate"), () => openAssociate(win, spaceSketchSet.size > 1 ? [...spaceSketchSet] : [sk.id]));
+  btn("create-unit", t("s3.createUnit"), () => { void createUnitFromSketch(win, sk.id); });
+  btn("frame", t("s3.frame"), () => sceneHandles.get(win.id)?.frameKeys([`sketch:${sk.id}`]));
+  btn("delete", t("s3.deleteSketch"), () => removeSketch(sk.id));
+  host.appendChild(bar);
+  const roads = document.createElement("p");
+  roads.className = "insp-hint";
+  roads.textContent = t("s3.sketchRoads");
+  host.appendChild(roads);
+}
+
+/** Road 4 · in a unit's Inspector, under «Model the proxy»: the free sketches. */
+function renderSketchUse(host: HTMLElement, unitId: string): void {
+  const list = listSketches();
+  const win = windowsOf().find((w) => w.type === "scene");
+  if (!list.length || !win) return;
+  const det = document.createElement("details");
+  det.className = "insp-sketch-use";
+  const sum = document.createElement("summary");
+  sum.textContent = t("s3.useSketch", { n: String(list.length) });
+  det.appendChild(sum);
+  for (const s of list) {
+    const b = document.createElement("button");
+    b.className = "insp-btn";
+    b.dataset.useSketch = s.id;
+    b.textContent = s.name;
+    b.addEventListener("click", () => { void associateFlow(win, [s.id], unitId); });
+    det.appendChild(b);
+  }
+  host.appendChild(det);
 }
 
 /** The Outliner of a Space window, drawn into `el`. */
@@ -22537,6 +22907,7 @@ function renderSpaceOutliner(el: HTMLElement, win: Win, sp: Space | null): void 
     // MICRO-SPAZIO-3D-3 · one selection, Blender's Outliner: click = only
     // it, ⌘/Ctrl+click adds or removes, Shift+click the range (space-selection.ts)
     pick: (r, mods, order) => {
+      if (Date.now() - sketchDragEnded < 400) return;      // the click that ends a drag
       if (r.kind === "sketch" || r.kind === "rm" || r.kind === "tileset" || r.kind === "proxy") {
         if (r.kind !== "sketch" && sp && !mods.toggle && !mods.range) { const ep = spaceEpochFor(r.id, sp); if (ep) spaceEpochId = ep; }
         setSpaceSel(clickOutliner(spaceSel(sp), r.key, mods, order));
@@ -22578,6 +22949,7 @@ function renderSpaceOutliner(el: HTMLElement, win: Win, sp: Space | null): void 
     },
     search: (q) => { spaceQuery = q; refreshSurfaces("scene"); },
     clearSelection: () => setSpaceSel(EMPTY_SEL),
+    dragSketch: (id, e) => beginSketchDrag(win, id, e),
     close: () => setSpace3dPrefs({ ...space3dPrefs(), shown: false }),
     addShape: (id, drop) => addShapeIn(win, id, drop),
   });
@@ -22678,6 +23050,7 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
       snapFace: t("s3.snapFace"), snapStep: t("s3.snapStep"),
     },
     snapAlign: () => space3dPrefs().snapAlign === true,
+    sketchFileUrl: (s) => (s.file ? spaceFileUrl({ url: s.file.url, checksum: s.file.checksum ?? "", residency: "resident" }) : undefined),
     // MICRO-SPAZIO-3D-2 · the navigation's Preferences, read at every press
     nav: () => {
       const v = getSettings().viewer;
@@ -22894,12 +23267,25 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
       + (sum.refused.length ? ` · <span class="miss" data-sum="refused">${escapeHtml(t("space.refusedFiles"))}: ${list(sum.refused)}</span>` : "")
       + (sum.reference.length ? ` · <span class="ref" data-sum="reference">${escapeHtml(t("space.referenceOnly"))}: ${list(sum.reference)}</span>` : "")
       + (spaceIsolated ? ` · <button type="button" class="link" data-unisolate="1">${escapeHtml(t("s3.showAll"))}</button>` : "")
+      // MICRO-SPAZIO-3D-3 p.6 · the free sketches, a light warning that opens their list
+      + (listSketches().length ? ` · <button type="button" class="link s3-free-shapes" data-sum="sketches">${escapeHtml(t("s3.freeShapes", { n: String(listSketches().length) }))}</button>` : "")
       + proxyFolderOffer(sum.without);
     overlay.querySelectorAll<HTMLElement>("[data-go]").forEach((b) => b.addEventListener("click", (e) => {
       e.stopPropagation(); select(b.dataset.go!); refreshInspector();
     }));
     overlay.querySelector<HTMLButtonElement>("[data-unisolate]")?.addEventListener("click", (e) => {
       e.stopPropagation(); spaceIsolated = null; refreshSurfaces("scene");
+    });
+    overlay.querySelector<HTMLButtonElement>("[data-sum=sketches]")?.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const p = space3dPrefs();
+      setSpace3dPrefs({ ...p, shown: true, toggled: p.toggled.filter((k) => k !== "sketches") });
+      requestAnimationFrame(() => {
+        const row = outl.querySelector<HTMLElement>(".sol-row[data-key='sketches']");
+        row?.scrollIntoView({ block: "center" });
+        row?.classList.add("flash");
+        setTimeout(() => row?.classList.remove("flash"), 1200);
+      });
     });
     overlay.querySelector<HTMLButtonElement>("[data-action=link-3dobj]")?.addEventListener("click", (e) => {
       e.stopPropagation();
@@ -22938,7 +23324,10 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
         const type = st.node(u)?.node_type;
         const common = { kind: "proxy" as const, id: u, label: nm(u), rgb: nodeMaterialRgb(type) ?? nodeMaterialRgb("US") ?? undefined,
           edge: nodeStyle(type).border, selected: isSel(`proxy:${u}`), active: ssel.active === `proxy:${u}`, pose: poseOfNode(px.shapeId) };
-        if (px.resource) items.push({ ...common, state: px.resource.state, url: spaceFileUrl(px.resource), resourceId: px.resource.id });
+        // MICRO-SPAZIO-3D-3 p.6 · the other parts of the unit's proxy
+        const parts = (px.parts ?? []).filter((q) => q.resource?.state === "resident")
+          .map((q) => ({ url: spaceFileUrl(q.resource) ?? "", resourceId: q.resource?.id, pose: poseOfNode(q.shapeId) })).filter((q) => q.url);
+        if (px.resource) items.push({ ...common, state: px.resource.state, url: spaceFileUrl(px.resource), resourceId: px.resource.id, ...(parts.length ? { parts } : {}) });
         else items.push({ ...common, state: "json", convexshapes: px.convexshapes, spheres: px.spheres });
       }
     if (previewItem) items.unshift(previewItem);

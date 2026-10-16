@@ -86,6 +86,7 @@ export const KEYMAP: KeyRow[] = [
   { id: "s3grs", keys: "G · R · S", scope: "space" },
   { id: "s3axisPlane", keys: "X Y Z · ⇧X ⇧Y ⇧Z", scope: "space" },
   { id: "s3snap", keys: "Ctrl", scope: "space" },
+  { id: "s3parent", keys: "Ctrl+P", scope: "space" },
   { id: "s3delete", keys: "X · ⌫", scope: "space" },
   { id: "s3back", keys: "⌘[ · ⌥←", scope: "space" },
   // MICRO-SPAZIO-3D-3 · the selection as Blender's
