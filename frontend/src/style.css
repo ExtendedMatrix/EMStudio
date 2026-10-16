@@ -9593,3 +9593,10 @@ button.hdto-v {
 .gest .gside { position: fixed; background: #2b8a3e; border-radius: 3px; box-shadow: 0 0 0 2px rgba(43, 138, 62, 0.35); pointer-events: none; }
 .gest .gunion { position: fixed; border: 2px dashed #2b8a3e; border-radius: 8px; pointer-events: none; }
 .tile-div.snapped { background: #2b8a3e !important; }
+/* MICRO-SPAZIO-3D-3 p.9 · the floating panels fold to their title line */
+.scn-fold { border: 0; background: none; color: inherit; font: inherit; padding: 0 4px 0 0; cursor: pointer; line-height: 1; }
+.v3d-strip.folded .tl-seg, .v3d-strip.folded .tl-more, .v3d-strip.folded .tl-less,
+.v3d-strip.folded .lod-pick, .v3d-strip.folded .lod-note, .v3d-strip.folded [data-gate] { display: none; }
+.scn-ov.folded { white-space: nowrap; }
+.np-fold { cursor: pointer; user-select: none; }
+.np-sect.folded > :not(h5) { display: none; }

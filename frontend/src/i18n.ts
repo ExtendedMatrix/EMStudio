@@ -61,6 +61,7 @@ type Dict = Record<string, string>;
 // `emtree.`, `empty.`, `toast.`) so a translator can work a screen at a time and
 // an unused key is findable.
 const EN: Dict = {
+  "s3.foldedSummary": "{rm} models · proxies {px} of {n}",
   "tile.joinAligned": "Align and join: the sides are brought together, this window goes away",
   "tile.joinExtend": "Align and join: the shorter window is stretched to the other's side, the windows beside give up the band",
   "tile.joinApart": "Cannot join: the two windows are not beside each other. Drag the corner onto a window that touches this one along a side.",
@@ -3683,6 +3684,7 @@ const EN: Dict = {
 
 // ── Italiano: complete, because E.D. works in it ───────────────────────────────
 const IT: Dict = {
+  "s3.foldedSummary": "{rm} modelli · proxy {px} su {n}",
   "tile.joinAligned": "Allinea e unisci: i lati si allineano, questa finestra sparisce",
   "tile.joinExtend": "Allinea e unisci: la finestra più corta si allunga al lato dell'altra, le finestre accanto cedono la striscia",
   "tile.joinApart": "Non si uniscono: le due finestre non sono accanto. Trascina l'angolo su una finestra che tocchi questa lungo un lato.",

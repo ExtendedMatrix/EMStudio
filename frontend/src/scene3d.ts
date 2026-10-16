@@ -259,6 +259,9 @@ export interface SpaceSceneOptions {
    *  too), the active last; on release, ONE call with all their poses */
   transformTargets?: () => string[];
   onTransformMany?: (poses: Array<{ key: string; pose: Pose }>) => void;
+  /** MICRO-SPAZIO-3D-3 p.9 · a floating panel reduced to its title (the person's, per view) */
+  panelFolded?: (key: string) => boolean;
+  onPanelFold?: (key: string, folded: boolean) => void;
   /** MICRO-SPAZIO-3D-3 p.6 · the fetchable address of a sketch's glb (a kept proxy) */
   sketchFileUrl?: (s: Sketch) => string | undefined;
   /** MICRO-SPAZIO-3D-3 p.5 · «Allinea alla normale» (the N panel; off by default) */
@@ -479,9 +482,19 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
         const el = document.createElement("div");
         el.className = "v3d-strip";
         el.dataset.id = item.id;
+        // MICRO-SPAZIO-3D-3 p.9 · a triangle, as «Forme base»: reduced, the strip
+        // keeps its title and the tileset's line (level and MB)
+        const key = `strip:${item.id}`;
+        const tw = document.createElement("button");
+        tw.type = "button";
+        tw.className = "scn-fold";
+        tw.dataset.fold = key;
+        const set = (c: boolean) => { el.classList.toggle("folded", c); tw.textContent = c ? "▸" : "▾"; tw.setAttribute("aria-expanded", String(!c)); };
+        set(!!opts.panelFolded?.(key));
+        tw.addEventListener("click", (e) => { e.stopPropagation(); const c = !el.classList.contains("folded"); set(c); opts.onPanelFold?.(key, c); });
         const b = document.createElement("b");
         b.textContent = item.label;
-        el.appendChild(b);
+        el.append(tw, b);
         strips.appendChild(el);
         return el;
       };

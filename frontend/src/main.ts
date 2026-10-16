@@ -22091,6 +22091,17 @@ function viewName(v: AlignedView | null, ortho: boolean): string {
   return `${t(v ? VIEW_NAMES[v] : "s3.vUser")} · ${t(ortho ? "s3.vOrtho" : "s3.vPersp")}`;
 }
 
+/** MICRO-SPAZIO-3D-3 p.9 · a floating panel folded or opened: per person, in
+ *  the Space's local preferences (as the overlays). `redraw` false: the panel
+ *  folded itself already (a tileset's strip lives in the scene). */
+function foldPanel(key: string, folded: boolean, redraw = true): void {
+  const p = space3dPrefs();
+  const s = new Set(p.collapsed ?? []);
+  if (folded) s.add(key); else s.delete(key);
+  if (redraw) setSpace3dPrefs({ ...p, collapsed: [...s] });
+  else { sp3 = { person: overlayPerson(), prefs: { ...p, collapsed: [...s] } }; saveSpacePrefs(sp3.person, sp3.prefs); }
+}
+
 /** The N panel «Vista» of a Space window, drawn into `el` (Blender's sidebar). */
 function renderSpaceNPanel(el: HTMLElement, win: Win, h: SpaceSceneHandle): void {
   el.textContent = "";
@@ -22108,7 +22119,14 @@ function renderSpaceNPanel(el: HTMLElement, win: Win, h: SpaceSceneHandle): void
     d.className = "np-sect";
     d.dataset.np = probe;
     const h5 = document.createElement("h5");
-    h5.textContent = title;
+    // p.9 · a section reduced to its title, as Blender's panels
+    const key = `np:${probe}`;
+    const folded = (space3dPrefs().collapsed ?? []).includes(key);
+    h5.textContent = `${folded ? "▸" : "▾"} ${title}`;
+    h5.className = "np-fold";
+    h5.dataset.fold = key;
+    h5.addEventListener("click", () => foldPanel(key, !folded));
+    d.classList.toggle("folded", folded);
     d.appendChild(h5);
     el.appendChild(d);
     return d;
@@ -23197,6 +23215,8 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
       snapFace: t("s3.snapFace"), snapStep: t("s3.snapStep"),
     },
     snapAlign: () => space3dPrefs().snapAlign === true,
+    panelFolded: (k) => (space3dPrefs().collapsed ?? []).includes(k),
+    onPanelFold: (k, c) => foldPanel(k, c, false),
     sketchFileUrl: (s) => (s.file ? spaceFileUrl({ url: s.file.url, checksum: s.file.checksum ?? "", residency: "resident" }) : undefined),
     // MICRO-SPAZIO-3D-2 · the navigation's Preferences, read at every press
     nav: () => {
@@ -23406,7 +23426,13 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
         : sum.rms.map((r) => `RM <button type="button" class="link" data-go="${escapeHtml(r.id)}">${escapeHtml(r.name)}</button>`
           + ` <span class="${r.resource?.state === "resident" ? "ok" : r.resource?.state === "reference" ? "ref" : "miss"}">(${escapeHtml(t(`space.st.${r.resource?.state ?? "none"}`))})</span>`).join(", ");
     overlay.classList.remove("hidden");
-    overlay.innerHTML = `<b>${escapeHtml(sum.epoch.name)}</b> · ${rmPart}<br>`
+    // MICRO-SPAZIO-3D-3 p.9 · the summary reduced to its title line (a triangle, as «Forme base»)
+    const folded = (prefs.collapsed ?? []).includes("summary");
+    const fold = `<button type="button" class="scn-fold" data-fold="summary" aria-expanded="${!folded}">${folded ? "▸" : "▾"}</button>`;
+    overlay.classList.toggle("folded", folded);
+    if (folded) overlay.innerHTML = `${fold}<b>${escapeHtml(sum.epoch.name)}</b> · ${escapeHtml(t("s3.foldedSummary", { rm: String(sum.rms.length), px: String(sum.withProxy.length), n: String(sum.units.length) }))}`
+      + (listSketches().length ? ` · <button type="button" class="link s3-free-shapes" data-sum="sketches">${escapeHtml(t("s3.freeShapes", { n: String(listSketches().length) }))}</button>` : "");
+    else overlay.innerHTML = `${fold}<b>${escapeHtml(sum.epoch.name)}</b> · ${rmPart}<br>`
       + `${escapeHtml(t("space.proxies", { n: String(sum.withProxy.length), m: String(sum.units.length) }))}`
       + (sum.inScene.length ? ` <span class="ref" data-sum="inScene">${escapeHtml(t("space.inScene", { n: String(sum.inScene.length) }))}</span>` : "")
       + (sum.without.length ? ` · <span class="miss" data-sum="without">${escapeHtml(t("space.without"))}: ${list(sum.without)}</span>` : "")
@@ -23417,6 +23443,9 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
       // MICRO-SPAZIO-3D-3 p.6 · the free sketches, a light warning that opens their list
       + (listSketches().length ? ` · <button type="button" class="link s3-free-shapes" data-sum="sketches">${escapeHtml(t("s3.freeShapes", { n: String(listSketches().length) }))}</button>` : "")
       + proxyFolderOffer(sum.without);
+    overlay.querySelector<HTMLButtonElement>("[data-fold=summary]")?.addEventListener("click", (e) => {
+      e.stopPropagation(); foldPanel("summary", !folded);
+    });
     overlay.querySelectorAll<HTMLElement>("[data-go]").forEach((b) => b.addEventListener("click", (e) => {
       e.stopPropagation(); select(b.dataset.go!); refreshInspector();
     }));
