@@ -1226,6 +1226,7 @@ class _RoomImportJob:
         self.total = 0
         self.go = threading.Event()
         self.go.set()
+        self.holding = 0
         self.body = body
         self.started = time.time()
 
@@ -1235,16 +1236,25 @@ class _RoomImportJob:
             self.lines.append((self.n, text))
             del self.lines[:-_RI_KEEP_LINES]
         if echo:
-            print(f"[room-import] {text}", file=sys.stderr, flush=True)
+            # past the tee: it would collect the line a second time
+            print(f"[room-import] {text}", file=getattr(sys.stderr, "stream", sys.stderr), flush=True)
 
     def hold(self):
         """The page's «Pause»: the engine waits here between two files or two
         pieces. → True when it waited."""
         if self.go.is_set():
             return False
-        self.say("paused")
+        with _RI_LOCK:
+            first = not self.holding       # the workers wait together: said once
+            self.holding += 1
+        if first:
+            self.say("paused")
         self.go.wait()
-        self.say("resumed")
+        with _RI_LOCK:
+            self.holding -= 1
+            last = self.holding == 0
+        if last:
+            self.say("resumed")
         return True
 
     def view(self, since=0):

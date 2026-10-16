@@ -140,7 +140,8 @@ try {
   ok((after.ops.g1 ?? 0) > 0, `…the node holds them (${after.ops.g1} in g1)`);
   ok(after.access?.visibility === "restricted", "study-access: restricted");
   ok(/^uploaded \d+/.test(rep.sentence) && /room r1/.test(rep.sentence), `the sentence: ${rep.sentence}`);
-  ok(done.lines.some((l) => l === "paused") && done.lines.some((l) => l === "resumed"), "the lines say paused and resumed");
+  ok(done.lines.filter((l) => l === "paused").length === 1 && done.lines.filter((l) => l === "resumed").length === 1,
+     "the lines say paused and resumed, once each");
 
   console.log("4 · a second run of the same room: 0 bytes, 0 operations");
   const p2 = await planOf("r1");
