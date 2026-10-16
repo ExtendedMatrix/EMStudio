@@ -8844,7 +8844,9 @@ button.shelf-badge { cursor: pointer; font: inherit; font-size: 10.5px; }
 .sol-tree { flex: 1; overflow: auto; padding: 2px 0; }
 .sol-row { display: flex; align-items: center; gap: 4px; padding: 1px 6px 1px 4px; cursor: default; white-space: nowrap; }
 .sol-row:hover { background: var(--bg-hover, rgba(0,0,0,0.05)); }
-.sol-row.sel { background: var(--accent); color: var(--on-accent); }
+.sol-row.sel { background: color-mix(in srgb, var(--accent) 28%, transparent); }
+/* MICRO-SPAZIO-3D-3 · the active row full, the other selected tenuous (Blender's Outliner) */
+.sol-row.sel.active { background: var(--accent); color: var(--on-accent); }
 .sol-row.cur > .sol-name { font-weight: 600; }
 .sol-row.sol-epoch > .sol-name { font-weight: 600; }
 .sol-row.sol-version { color: var(--text-muted); font-size: 0.72rem; }
@@ -8892,7 +8894,10 @@ button.shelf-badge { cursor: pointer; font: inherit; font-size: 10.5px; }
 .scn-empty p { margin: 0; max-width: 46ch; font-size: 0.82rem; }
 .scn-labels { position: absolute; inset: 0; pointer-events: none; }
 .scn-label.u { background: rgba(255, 255, 255, 0.9); }
-.scn-label.u.sel { background: #bf9000; color: #fff; }
+/* MICRO-SPAZIO-3D-3 · Blender's colours: the active light, the other selected darker */
+.scn-label.sel { background: #f15800; color: #fff; }
+.scn-label.sel.act { background: #ffaa40; color: #2a1600; }
+.insp-more { margin: 2px 10px 6px; font-size: 0.75rem; color: var(--text-muted); }
 .scn-label.ref { background: #fff4db; color: #8a5a00; border: 1px dashed #8a5a00; }
 .scn-label.miss { background: #fde8e8; color: #a33; }
 /* ── SPAZIO · «Modelli e proxy» ── */

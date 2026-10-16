@@ -119,7 +119,10 @@ const dist = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]);
     ["frame-selection", "frame-selection", "frame-selection", "frame-all", "outliner", "box-zoom", "cursor-reset", "add-menu"], "the keys");
   eq([k("g"), k("r"), k("s"), k("x"), k("Escape"), k("[", { metaKey: true }), k("ArrowLeft", { altKey: true })],
     ["grab", "rotate", "scale", "delete", "cancel", "back", "back"], "G R S X Esc, and «Indietro»");
-  eq([k("s", { metaKey: true }), k("z", { metaKey: true }), k("a")], [null, null, null], "⌘S, ⌘Z and a plain A are not the Space's");
+  eq([k("s", { metaKey: true }), k("z", { metaKey: true })], [null, null], "⌘S and ⌘Z are not the Space's");
+  // MICRO-SPAZIO-3D-3 · the selection's keys, as Blender's (Alt by the key's place: a Mac's Alt+A is «å»)
+  eq([k("a"), k("å", { altKey: true, code: "KeyA" }), k("h"), k("˙", { altKey: true, code: "KeyH" }), k("H", { shiftKey: true }), k("b")],
+    ["select-all", "select-none", "hide", "reveal", "hide-unselected", "box-select"], "A, Alt+A, H, Alt+H, Shift+H, B");
 }
 
 // ── the modal G / R / S ──────────────────────────────────────────────────────

@@ -50,12 +50,13 @@ import { nodeBytes, ownedByNode, RoadError, type FetchFailure } from "./node-roa
 import { createTilesLayer, dracoFor, formatBytes, isTilesetUrl, tilesBar, tilesEngine, type TilesLayer } from "./tiles3d";
 import type { OverlayKey } from "./overlays";
 import {
-  alignedView, AXIS_VECTOR, applyTyped, boxZoom, clipPlanes, detailZoom, DRAG_PX, dragIntent, dragZoomFactor,
+  alignedView, AXIS_INDEX, AXIS_VECTOR, boxZoom, clipPlanes, detailZoom, DRAG_PX, dragIntent, dragZoomFactor,
   frameSphere, isMacPlatform, keypadAction, modalKey, modalLabel, modalValue, orthoBoxZoom, orthoHalf, orthoZoom,
   pointerIntent, sceneCentre, spaceKeyAction, startModal, wheelFactor, zoomTowards,
   type AlignedView, type Box6, type CamState, type DragIntent, type ModalMode, type ModalState, type Pose,
   type SpaceKeyAction, type V3,
 } from "./space-nav";
+import { medianPoint } from "./space-selection";
 import { buildShapeGeometry, listSketches, shapeById, updateSketch, type Sketch } from "./shapes3d";
 import { trackpadClassifier } from "./wheel-kind";
 
@@ -78,6 +79,9 @@ export interface SceneItem {
   convexshapes?: number[][];
   spheres?: number[][];
   selected?: boolean;
+  /** MICRO-SPAZIO-3D-3 · the ACTIVE object (the last clicked), as Blender's:
+   *  its outline light, the other selected ones a darker orange */
+  active?: boolean;
   /** MICRO-3DTILES · the tileset of the same model (proposed over the threshold) */
   tileset?: string;
   /** TEMPLU MARE v2 · C1 · `url` IS a tileset, in this form, whatever it ends
@@ -165,6 +169,8 @@ export interface SpaceSceneHandle {
   syncSketches(): void;
   selectSketch(id: string | null): void;
   selectedSketch(): string | null;
+  /** MICRO-SPAZIO-3D-3 · the sketches selected, and the active one (the gizmo's) */
+  setSketchSelection(ids: string[], active: string | null): void;
   /** a sketch as a glb in its OWN frame, and its pose apart (MICRO-SPAZIO-3D-2:
    *  the transform goes into the data), for «Associate with a unit» */
   sketchGlb(id: string): Promise<{ glb: ArrayBuffer; pose: Pose } | null>;
@@ -221,8 +227,14 @@ export interface SpaceSceneOptions {
   nav?: () => SceneNavPrefs;
   /** the first press of a middle button on this device */
   onMiddleSeen?: () => void;
-  /** a box selection: the units whose proxy falls in it (Shift: added) */
-  onBoxSelect?: (unitIds: string[], extend: boolean) => void;
+  /** a box selection: the keys of the objects whose centre falls in it
+   *  (`proxy:` `rm:` `sketch:`; Shift: added) */
+  onBoxSelect?: (keys: string[], extend: boolean) => void;
+  /** MICRO-SPAZIO-3D-3 · a click that picks (`rm:` `proxy:` `sketch:`, null
+   *  on nothing), Shift held or not: the caller applies Blender's rule
+   *  (`space-selection.ts`). When given, it replaces onPickUnit / onPickRm /
+   *  onPickNone / onPickSketch */
+  onPick?: (key: string | null, shift: boolean) => void;
   /** a short notice (Shift+C on an empty scene) */
   onNotice?: (text: string) => void;
   /** the view changed (aligned, ortho): the N panel follows */
@@ -231,6 +243,10 @@ export interface SpaceSceneOptions {
    *  (`proxy:<unit>`, `rm:<id>`), and its transform written on release */
   transformTarget?: () => string | null;
   onTransform?: (key: string, pose: Pose) => void;
+  /** MICRO-SPAZIO-3D-3 · every selected object G / R / S moves (sketches
+   *  too), the active last; on release, ONE call with all their poses */
+  transformTargets?: () => string[];
+  onTransformMany?: (poses: Array<{ key: string; pose: Pose }>) => void;
 }
 
 interface Drawn {
@@ -244,6 +260,11 @@ interface Drawn {
 
 /** The 3D cursor as Blender draws it: a ring of red and white dashes, and a
  *  crosshair in black and white. A screen element, the same size at every zoom. */
+/** MICRO-SPAZIO-3D-3 · Blender's outline colours: the active, the other selected */
+const SEL_ACTIVE = 0xffaa40;
+const SEL_OTHER = 0xf15800;
+const selCls = (item: { selected?: boolean; active?: boolean }): string => (item.selected ? (item.active ? " sel act" : " sel") : "");
+
 const CURSOR_SVG = `<svg width="38" height="38" viewBox="-19 -19 38 38" aria-hidden="true">
 <circle r="9" fill="none" stroke="#fff" stroke-width="2.4"/>
 <circle r="9" fill="none" stroke="#e02020" stroke-width="2.4" stroke-dasharray="4.71 4.71"/>
@@ -265,6 +286,8 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
   let cursorAt: V3 = [0, 0, 0];
   let cursorSet = false;
   let sketchSel: string | null = null;
+  /** MICRO-SPAZIO-3D-3 · every sketch selected (`sketchSel` is the active one) */
+  let sketchSet = new Set<string>();
   // the probes' seam: what the scene holds, and where a unit sits on screen
   const probe = host as unknown as {
     __space?: () => unknown;
@@ -284,7 +307,11 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
     __spaceModal?: () => string | null;
     __spaceOverlays?: () => Record<string, boolean>;
     __spaceClip?: () => number[];
+    /** MICRO-SPAZIO-3D-3 · what the scene draws as selected, and the active */
+    __spaceSelected?: () => { selected: string[]; active: string | null };
   };
+  probe.__spaceSelected = () => ({ selected: items.filter((i) => i.selected).map((i) => `${i.kind}:${i.id}`),
+    active: items.find((i) => i.active) ? `${items.find((i) => i.active)!.kind}:${items.find((i) => i.active)!.id}` : null });
   probe.__space = () => [...drawn.values()].map((d) => ({ kind: d.item.kind, id: d.item.id, state: d.item.state, as: d.as,
     ...(d.url ? { url: d.url } : {}) }));
 
@@ -468,8 +495,11 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
           depthWrite: false, wireframe: wire });
       };
       const selOutline = (item: SceneItem) => item.selected && ov("s3_sel_outline");
+      // MICRO-SPAZIO-3D-3 · Blender's theme: the active object's outline light
+      // (#FFAA40), the other selected ones a darker orange (#F15800)
+      const selColour = (item: SceneItem): number => (item.active ? SEL_ACTIVE : SEL_OTHER);
       const outline = (geom: any, item: SceneItem, at?: any) => {
-        const col = selOutline(item) ? 0xbf9000 : new THREE.Color(item.edge ?? "#555555");
+        const col = selOutline(item) ? selColour(item) : new THREE.Color(item.edge ?? "#555555");
         const e = new THREE.LineSegments(new THREE.EdgesGeometry(geom), new THREE.LineBasicMaterial({ color: col }));
         if (at) e.position.copy(at);
         return e;
@@ -485,8 +515,8 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
         const b = new THREE.Box3().setFromObject(obj);
         return new THREE.Vector3((b.min.x + b.max.x) / 2, b.max.y, (b.min.z + b.max.z) / 2);
       };
-      const selBox = (obj: any) => {
-        const hb = new THREE.Box3Helper(new THREE.Box3().setFromObject(obj), 0xbf9000);
+      const selBox = (obj: any, item: SceneItem) => {
+        const hb = new THREE.Box3Helper(new THREE.Box3().setFromObject(obj), selColour(item));
         hb.userData.helper = true;
         return hb;
       };
@@ -779,17 +809,19 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
             sketchGroup.add(m);
             sketchMeshes.set(s.id, m);
           }
-          if (!(modal && modal.id === s.id)) setPose(m, { position: s.position, rotation: s.rotation, scale: s.scale });
+          if (!(modal && modal.targets.some((t) => t.id === `sketch:${s.id}`))) setPose(m, { position: s.position, rotation: s.rotation, scale: s.scale });
           m.visible = opts.sketchVisible?.(s.id) ?? true;
-          const sel = s.id === sketchSel;
+          const sel = sketchSet.has(s.id) || s.id === sketchSel;
           m.material.dispose();
           m.material = sketchMaterial();
-          for (const c of m.children) if (c.userData.edges) c.material.color.set(sel && ov("s3_sel_outline") ? 0xffb000 : 0x7a3d00);
+          for (const c of m.children) if (c.userData.edges)
+            c.material.color.set(sel && ov("s3_sel_outline") ? (s.id === sketchSel ? SEL_ACTIVE : SEL_OTHER) : 0x7a3d00);
         }
         if (sketchSel && !want.has(sketchSel)) sketchSel = null;
+        for (const id of [...sketchSet]) if (!want.has(id)) sketchSet.delete(id);
         attachGizmo();
       };
-      probe.__spaceSketches = () => listSketches().map((s: Sketch) => ({ ...s, selected: s.id === sketchSel }));
+      probe.__spaceSketches = () => listSketches().map((s: Sketch) => ({ ...s, selected: s.id === sketchSel || sketchSet.has(s.id), active: s.id === sketchSel }));
 
       // ── the decorators: grid and axes, the epoch's box ───────────────────
       const buildDecor = () => {
@@ -860,7 +892,7 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
               await live.ready;
               if (gen !== generation || disposed) return;
               const bb = live.layer.bounds();
-              if (bb) addLabel(item.label, new THREE.Vector3((bb.min.x + bb.max.x) / 2, bb.max.y, (bb.min.z + bb.max.z) / 2), "rm", item.id);
+              if (bb) addLabel(item.label, new THREE.Vector3((bb.min.x + bb.max.x) / 2, bb.max.y, (bb.min.z + bb.max.z) / 2), `rm${selCls(item)}`, item.id);
               drawn.set(key, { item, as: "tiles", url: tsUrl });
             }));
             continue;
@@ -932,10 +964,10 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
               // MICRO-SPAZIO-3D-2 · the model's transform, over the glb as it is
               if (item.pose) setPose(obj, item.pose);
               roots.set(key, obj);
-              if (selOutline(item)) content.add(selBox(obj));
+              if (selOutline(item)) content.add(selBox(obj, item));
               tag(obj, item);
               content.add(obj);
-              addLabel(item.label, topOf(obj), "rm", item.id);
+              addLabel(item.label, topOf(obj), `rm${selCls(item)}`, item.id);
               drawn.set(key, { item, as: "mesh", url: u });
             })());
             continue;
@@ -957,12 +989,12 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
                 obj.traverse((o: any) => { if (o.isMesh) o.material = translucent(item); });
                 obj.traverse((o: any) => { if (o.isMesh) o.add(outline(o.geometry, item)); });
               } else if (selOutline(item)) {
-                content.add(selBox(obj));
+                content.add(selBox(obj, item));
               }
               tag(obj, item);
               content.add(obj);
               if (item.kind === "proxy") unitCentres.set(item.id, centreOf(obj));
-              addLabel(item.label, topOf(obj), item.kind === "proxy" ? `u${item.selected ? " sel" : ""}` : "rm", item.id);
+              addLabel(item.label, topOf(obj), `${item.kind === "proxy" ? "u" : "rm"}${selCls(item)}`, item.id);
               drawn.set(`${item.kind}:${item.id}`, { item, as: "mesh", url: item.url });
             }));
           } else if (item.state === "json") {
@@ -988,7 +1020,7 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
             tag(group, item);
             content.add(group);
             unitCentres.set(item.id, centreOf(group));
-            addLabel(item.label, topOf(group), `u${item.selected ? " sel" : ""}`, item.id);
+            addLabel(item.label, topOf(group), `u${selCls(item)}`, item.id);
             drawn.set(`${item.kind}:${item.id}`, { item, as: "mesh" });
           } else later.push(item);
         }
@@ -1120,12 +1152,20 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
       let drag: { intent: Exclude<DragIntent, null>; x0: number; y0: number; x: number; y: number; started: boolean;
                   point: V3 | null; shift: boolean; id: number } | null = null;
       let boxArmed = false;
+      /** MICRO-SPAZIO-3D-3 · Shift+B zooms to the box, B selects in it (Blender) */
+      let boxMode: "zoom" | "select" = "zoom";
       let boxStart: { x: number; y: number } | null = null;
-      type Modal = { id: string; st: ModalState; start: Pose; mouse0: { x: number; y: number } | null; mouse: { x: number; y: number } | null };
+      /** MICRO-SPAZIO-3D-3 · G / R / S on every selected object: each one's
+       *  pose at the start, the pivot (its own origin when alone, else the
+       *  median point of their boxes' centres, `medianPoint`) */
+      type Target = { id: string; start: Pose; q0: any };
+      type Modal = { targets: Target[]; pivot: any; st: ModalState;
+                     mouse0: { x: number; y: number } | null; mouse: { x: number; y: number } | null };
       let modal: Modal | null = null;
       let lastMouse: { x: number; y: number } | null = null;
       const pickSketch = (id: string | null) => {
         sketchSel = id;
+        sketchSet = new Set(id ? [id] : []);
         syncSketches();
         opts.onPickSketch?.(id);
       };
@@ -1133,54 +1173,97 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
         modalEl.classList.toggle("hidden", !modal);
         if (modal) modalEl.textContent = `${modalLabel(modal.st)}${opts.texts.modalHint ? ` · ${opts.texts.modalHint}` : ""}`;
       };
-      const modalPose = (): Pose | null => {
+      /** what the gesture does now, in three's axes: a move, a turn about an
+       *  axis through the pivot, a scale from the pivot */
+      type Delta = { kind: "grab"; d: any } | { kind: "rotate"; axis: any; angle: number } | { kind: "scale"; f: V3 };
+      const axisOf = (st: ModalState, fallback: "x" | "z" | null) => (st.axis ?? fallback);
+      const modalDelta = (): Delta | null => {
         if (!modal) return null;
         const st = modal.st;
-        if (modalValue(st) != null) return applyTyped(modal.start, st);
-        if (!modal.mouse0 || !modal.mouse) return modal.start;
-        const m = modalObject(modal.id);
-        if (!m) return modal.start;
-        const dx = modal.mouse.x - modal.mouse0.x, dy = modal.mouse.y - modal.mouse0.y;
-        const centre = toScreen(v3(modal.start.position)) ?? modal.mouse0;
+        const v = modalValue(st);
+        const pivot = modal.pivot;
         if (st.mode === "grab") {
-          const k = pxWorld(v3(modal.start.position));
+          if (v != null) return { kind: "grab", d: v3(AXIS_VECTOR[axisOf(st, "x")!]).multiplyScalar(v) };
+          if (!modal.mouse0 || !modal.mouse) return { kind: "grab", d: new THREE.Vector3() };
+          const dx = modal.mouse.x - modal.mouse0.x, dy = modal.mouse.y - modal.mouse0.y;
+          const k = pxWorld(pivot);
           const right = new THREE.Vector3().setFromMatrixColumn(camera.matrix, 0);
           const up = new THREE.Vector3().setFromMatrixColumn(camera.matrix, 1);
           let d = right.multiplyScalar(dx * k).add(up.multiplyScalar(-dy * k));
           if (st.axis) { const a = v3(AXIS_VECTOR[st.axis]); d = a.multiplyScalar(d.dot(a)); }
-          return { ...modal.start, position: arr(v3(modal.start.position).add(d)) };
+          return { kind: "grab", d };
         }
         if (st.mode === "rotate") {
+          const axis = v3(AXIS_VECTOR[axisOf(st, "z")!]);
+          if (v != null) return { kind: "rotate", axis, angle: (v * Math.PI) / 180 };
+          if (!modal.mouse0 || !modal.mouse) return { kind: "rotate", axis, angle: 0 };
+          const centre = toScreen(pivot) ?? modal.mouse0;
           const a0 = Math.atan2(modal.mouse0.y - centre.y, modal.mouse0.x - centre.x);
           const a1 = Math.atan2(modal.mouse.y - centre.y, modal.mouse.x - centre.x);
-          const deg = -((a1 - a0) * 180) / Math.PI;
-          return applyTyped(modal.start, { ...st, typed: String(deg) });
+          return { kind: "rotate", axis, angle: -(a1 - a0) };
         }
-        const r0 = Math.hypot(modal.mouse0.x - centre.x, modal.mouse0.y - centre.y) || 1;
-        const r1 = Math.hypot(modal.mouse.x - centre.x, modal.mouse.y - centre.y);
-        return applyTyped(modal.start, { ...st, typed: String(r1 / r0) });
+        let f = v;
+        if (f == null) {
+          if (!modal.mouse0 || !modal.mouse) f = 1;
+          else {
+            const centre = toScreen(pivot) ?? modal.mouse0;
+            const r0 = Math.hypot(modal.mouse0.x - centre.x, modal.mouse0.y - centre.y) || 1;
+            f = Math.hypot(modal.mouse.x - centre.x, modal.mouse.y - centre.y) / r0;
+          }
+        }
+        const ax = axisOf(st, null);
+        if (!ax) return { kind: "scale", f: [f, f, f] };
+        const out: V3 = [1, 1, 1];
+        out[AXIS_INDEX[ax]] = f;
+        return { kind: "scale", f: out };
+      };
+      /** a target's pose under the delta, about the pivot */
+      const poseUnder = (t: Target, dl: Delta, pivot: any): Pose => {
+        const p0 = v3(t.start.position);
+        if (dl.kind === "grab") return { ...t.start, position: arr(p0.add(dl.d)) };
+        if (dl.kind === "rotate") {
+          const q = new THREE.Quaternion().setFromAxisAngle(dl.axis, dl.angle);
+          const pos = p0.sub(pivot).applyQuaternion(q).add(pivot);
+          const e = new THREE.Euler().setFromQuaternion(q.clone().multiply(t.q0), "XYZ");
+          return { ...t.start, position: arr(pos), rotation: [e.x, e.y, e.z] };
+        }
+        const rel = p0.sub(pivot);
+        const pos: V3 = [pivot.x + rel.x * dl.f[0], pivot.y + rel.y * dl.f[1], pivot.z + rel.z * dl.f[2]];
+        return { ...t.start, position: pos, scale: [t.start.scale[0] * dl.f[0], t.start.scale[1] * dl.f[1], t.start.scale[2] * dl.f[2]] };
       };
       const modalApply = () => {
         if (!modal) return;
-        const m = modalObject(modal.id);
-        const p = modalPose();
-        if (m && p) setPose(m, p);
+        const dl = modalDelta();
+        if (dl) for (const t of modal.targets) { const m = modalObject(t.id); if (m) setPose(m, poseUnder(t, dl, modal.pivot)); }
         showModal();
       };
       /** the object G / R / S moves: the sketch selected, else the selected
        *  proxy or model (MICRO-SPAZIO-3D-2: its transform is in the data) */
       const modalObject = (id: string): any => (id.startsWith("sketch:") ? sketchMeshes.get(id.slice(7)) : roots.get(id));
+      const movable = (k: string): boolean => {
+        if (k.startsWith("sketch:")) return ov("s3_sketches") && sketchMeshes.has(k.slice(7));
+        return roots.has(k) && !roots.get(k).userData.tiles && !locked().has(k);
+      };
       const startModalOn = (mode: ModalMode) => {
-        let id: string | null = null;
-        if (sketchSel && ov("s3_sketches")) id = `sketch:${sketchSel}`;
-        else {
-          const k = opts.transformTarget?.() ?? null;
-          if (k && roots.has(k) && !roots.get(k).userData.tiles && !locked().has(k)) id = k;
+        let ids: string[];
+        if (opts.transformTargets) ids = opts.transformTargets().filter(movable);
+        else if (sketchSel && ov("s3_sketches")) ids = [`sketch:${sketchSel}`];
+        else { const k = opts.transformTarget?.() ?? null; ids = k && movable(k) ? [k] : []; }
+        if (!ids.length) return false;
+        const targets: Target[] = [];
+        for (const id of ids) {
+          const m = modalObject(id);
+          if (m) targets.push({ id, start: poseOf(m), q0: m.quaternion.clone() });
         }
-        if (!id) return false;
-        const m = modalObject(id);
-        if (!m) return false;
-        modal = { id, st: startModal(mode), start: poseOf(m), mouse0: lastMouse, mouse: lastMouse };
+        if (!targets.length) return false;
+        // alone: its origin, as Blender; several: the median point of their boxes
+        let pivot: any;
+        if (targets.length === 1) pivot = v3(targets[0].start.position);
+        else {
+          const mp = medianPoint(targets.map((t) => arr(new THREE.Box3().setFromObject(modalObject(t.id)).getCenter(new THREE.Vector3()))));
+          pivot = mp ? v3(mp) : v3(targets[0].start.position);
+        }
+        modal = { targets, pivot, st: startModal(mode), mouse0: lastMouse, mouse: lastMouse };
         controls.enabled = false;
         gizmo?.setMode?.(mode === "grab" ? "translate" : mode === "rotate" ? "rotate" : "scale");
         showModal();
@@ -1188,21 +1271,28 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
       };
       const endModal = (confirm: boolean) => {
         if (!modal) return;
-        const m = modalObject(modal.id);
-        if (m) {
-          if (!confirm) setPose(m, modal.start);
-          if (modal.id.startsWith("sketch:")) {
-            const sid = modal.id.slice(7);
-            updateSketch(sid, poseOf(m));
-            if (confirm) opts.onSketchChange?.(sid);
-          } else if (confirm) {
-            // one gesture, one step: the caller writes the transform in the data
-            opts.onTransform?.(modal.id, poseOf(m));
-          }
+        const out: Array<{ key: string; pose: Pose }> = [];
+        for (const t of modal.targets) {
+          const m = modalObject(t.id);
+          if (!m) continue;
+          if (!confirm) setPose(m, t.start);
+          if (t.id.startsWith("sketch:")) {
+            const sid = t.id.slice(7);
+            updateSketch(sid, poseOf(m), true);
+            if (confirm) out.push({ key: t.id, pose: poseOf(m) });
+          } else if (confirm) out.push({ key: t.id, pose: poseOf(m) });
         }
         modal = null;
         controls.enabled = true;
         showModal();
+        // one gesture, one step: the caller writes every transform at once
+        if (confirm && out.length) {
+          if (opts.onTransformMany) opts.onTransformMany(out);
+          else for (const o of out) {
+            if (o.key.startsWith("sketch:")) opts.onSketchChange?.(o.key.slice(7));
+            else opts.onTransform?.(o.key, o.pose);
+          }
+        } else syncSketches();
       };
       probe.__spaceModal = () => (modal ? modalLabel(modal.st) : null);
 
@@ -1289,26 +1379,44 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
         host.classList.remove("scn-armed");
         controls.enabled = true;
         if (Math.abs(e.clientX - s.x) < DRAG_PX || Math.abs(e.clientY - s.y) < DRAG_PX) return;
+        if (boxMode === "select") {
+          boxMode = "zoom";
+          opts.onBoxSelect?.(keysInRect(Math.min(s.x, e.clientX), Math.min(s.y, e.clientY), Math.max(s.x, e.clientX), Math.max(s.y, e.clientY)), e.shiftKey);
+          return;
+        }
         const a = ndcOf(s.x, s.y), b = ndcOf(e.clientX, e.clientY);
         const cx = (s.x + e.clientX) / 2, cy = (s.y + e.clientY) / 2;
         const { p } = pointAt(cx, cy);
         opts.onBeforeJump?.();
         applyCam(isOrtho ? orthoBoxZoom(camState(), [a.x, a.y, b.x, b.y], p) : boxZoom(camState(), [a.x, a.y, b.x, b.y], p));
       };
-      /** the box selection: the units whose proxy's centre falls in it */
+      /** MICRO-SPAZIO-3D-3 · the keys of what is drawn whose centre falls in a
+       *  page rectangle: proxies, models (a tileset by its volume), sketches */
+      const keysInRect = (x0: number, y0: number, x1: number, y1: number): string[] => {
+        const lk = locked();
+        const out: string[] = [];
+        const inside = (c: any) => { const q = toScreen(c); return !!q && q.x >= x0 && q.x <= x1 && q.y >= y0 && q.y <= y1; };
+        content.updateMatrixWorld(true);
+        for (const [k, o] of roots) {
+          if (!o.parent || o.visible === false || lk.has(k)) continue;
+          const live = k.startsWith("rm:") ? liveLayers().find((l) => l.layer.object === o) : null;
+          const b = live ? live.layer.bounds() : new THREE.Box3().setFromObject(o);
+          if (b && !b.isEmpty() && inside(b.getCenter(new THREE.Vector3()))) out.push(k);
+        }
+        if (sketchGroup.visible)
+          for (const [id, m] of sketchMeshes) {
+            if (!m.visible || lk.has(`sketch:${id}`)) continue;
+            if (inside(new THREE.Box3().setFromObject(m).getCenter(new THREE.Vector3()))) out.push(`sketch:${id}`);
+          }
+        return out;
+      };
+      /** the box selection: the objects whose centre falls in it */
       const finishSelect = (d: NonNullable<typeof drag>, e: PointerEvent) => {
         boxEl.classList.add("hidden");
         boxEl.classList.remove("select");
         const x0 = Math.min(d.x0, e.clientX), x1 = Math.max(d.x0, e.clientX);
         const y0 = Math.min(d.y0, e.clientY), y1 = Math.max(d.y0, e.clientY);
-        const lk = locked();
-        const ids: string[] = [];
-        for (const [id, c] of unitCentres) {
-          if (lk.has(`proxy:${id}`)) continue;
-          const q = toScreen(c);
-          if (q && q.x >= x0 && q.x <= x1 && q.y >= y0 && q.y <= y1) ids.push(id);
-        }
-        opts.onBoxSelect?.(ids, d.shift);
+        opts.onBoxSelect?.(keysInRect(x0, y0, x1, y1), d.shift);
       };
       const onUp = (e: PointerEvent) => {
         const d = drag;
@@ -1352,6 +1460,7 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
         }
         if (intent === "pick-rm") {
           const hit = hits.find((x) => x.kind === "rm");
+          if (opts.onPick) { opts.onPick(hit ? `rm:${hit.id}` : null, e.shiftKey); return; }
           if (hit) opts.onPickRm?.(hit.id); else opts.onPickNone?.();
           return;
         }
@@ -1359,6 +1468,8 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
           // a sketch, then a proxy: what a plain click means here; the model
           // under it is ⌘'s (Ctrl's) — E.D., 11 Oct 2026
           const hit = hits.find((x) => x.kind === "sketch" || x.kind === "proxy");
+          // MICRO-SPAZIO-3D-3 · one selection: the caller applies Blender's rule
+          if (opts.onPick) { opts.onPick(hit ? `${hit.kind}:${hit.id}` : null, e.shiftKey); return; }
           if (hit?.kind === "sketch") { pickSketch(hit.id); return; }
           if (sketchSel) pickSketch(null);
           if (hit) opts.onPickUnit?.(hit.id); else opts.onPickNone?.();
@@ -1393,6 +1504,8 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
         zoomAt(g.clientX ?? r.left + r.width / 2, g.clientY ?? r.top + r.height / 2, gestureScale / sc);
         gestureScale = sc;
       };
+      const selectedKeysNow = (): string[] => [...items.filter((i) => i.selected).map((i) => `${i.kind}:${i.id}`),
+        ...[...new Set([...sketchSet, ...(sketchSel ? [sketchSel] : [])])].map((id) => `sketch:${id}`)];
       const onKey = (e: KeyboardEvent) => {
         if (!opts.isFocused?.()) return;
         const t = e.target as HTMLElement | null;
@@ -1414,7 +1527,7 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
           if (kp === "camera") return;
           if (kp === "toggle-ortho") { orthoAuto = false; setOrtho(!isOrtho); return; }
           if (kp === "frame-selection") {
-            const keys = sketchSel ? [`sketch:${sketchSel}`] : items.filter((i) => i.selected).map((i) => `${i.kind}:${i.id}`);
+            const keys = selectedKeysNow();
             if (!keys.length || !api.frameKeys?.(keys)) frameIt?.();
             return;
           }
@@ -1425,13 +1538,14 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
         if (!a) return;
         switch (a) {
           case "frame-selection": {
-            const keys = sketchSel ? [`sketch:${sketchSel}`] : items.filter((i) => i.selected).map((i) => `${i.kind}:${i.id}`);
+            const keys = selectedKeysNow();
             if (!keys.length || !api.frameKeys?.(keys)) frameIt?.();
             stop();
             return;
           }
           case "frame-all": frameIt?.(); stop(); return;
-          case "box-zoom": boxArmed = true; host.classList.add("scn-armed"); stop(); return;
+          case "box-zoom": boxArmed = true; boxMode = "zoom"; host.classList.add("scn-armed"); stop(); return;
+          case "box-select": boxArmed = true; boxMode = "select"; host.classList.add("scn-armed"); stop(); return;
           case "cursor-reset": centreScene(); stop(); return;
           case "grab": case "rotate": case "scale":
             if (startModalOn(a === "grab" ? "grab" : a === "rotate" ? "rotate" : "scale")) stop();
@@ -1440,7 +1554,7 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
             if (boxArmed) { boxArmed = false; host.classList.remove("scn-armed"); stop(); }
             return;
           case "delete":
-            if (sketchSel && opts.onKeyAction?.(a, e)) stop();
+            if ((sketchSel || sketchSet.size) && opts.onKeyAction?.(a, e)) stop();
             return;
           default:
             if (opts.onKeyAction?.(a, e)) stop();
@@ -1526,9 +1640,10 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
           const r = Math.max(0.5, v3(camState().pos).distanceTo(controls.target) * 0.15);
           applyCam(frameSphere(camState(), cursorAt, r, FOV, persp.aspect));
         },
-        armBoxZoom: () => { boxArmed = true; host.classList.add("scn-armed"); },
+        armBoxZoom: () => { boxArmed = true; boxMode = "zoom"; host.classList.add("scn-armed"); },
         syncSketches,
-        selectSketch: (id: string | null) => { sketchSel = id; syncSketches(); },
+        selectSketch: (id: string | null) => { sketchSel = id; sketchSet = new Set(id ? [id] : []); syncSketches(); },
+        setSketchSelection: (ids: string[], active: string | null) => { sketchSet = new Set(ids); sketchSel = active; syncSketches(); },
         selectedSketch: () => sketchSel,
         sketchGlb: async (id: string) => {
           const m = sketchMeshes.get(id);
@@ -1581,7 +1696,8 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
     frameCursor: () => api.frameCursor?.(),
     armBoxZoom: () => api.armBoxZoom?.(),
     syncSketches: () => api.syncSketches?.(),
-    selectSketch: (id) => { sketchSel = id; api.selectSketch?.(id); },
+    selectSketch: (id) => { sketchSel = id; sketchSet = new Set(id ? [id] : []); api.selectSketch?.(id); },
+    setSketchSelection: (ids, active) => { sketchSet = new Set(ids); sketchSel = active; api.setSketchSelection?.(ids, active); },
     selectedSketch: () => sketchSel,
     sketchGlb: async (id) => (api.sketchGlb ? api.sketchGlb(id) : null),
     surfaceAt: (x, y) => api.surfaceAt?.(x, y) ?? null,

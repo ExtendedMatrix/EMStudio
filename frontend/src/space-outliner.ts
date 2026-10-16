@@ -180,8 +180,10 @@ export function saveSpacePrefs(person: string | null | undefined, p: Space3dPref
 export interface OutlinerView {
   rows: OutlinerRow[];
   prefs: Space3dPrefs;
-  /** the selected keys (the app's selection, and the sketch) */
+  /** the selected keys (the app's selection, and the sketches) */
   selected: ReadonlySet<string>;
+  /** MICRO-SPAZIO-3D-3 · the active key: its row full, the other selected tenuous */
+  active?: string | null;
   /** the isolated object, if any */
   isolated: string | null;
   query: string;
@@ -191,8 +193,13 @@ export interface OutlinerView {
   palette: Array<{ id: string; name: string; family: string; familyName: string }>;
 }
 
+/** MICRO-SPAZIO-3D-3 · the keys of a click on a row, as Blender's Outliner */
+export interface RowClick { toggle: boolean; range: boolean }
+
 export interface OutlinerActions {
-  pick(row: OutlinerRow): void;
+  /** a row clicked: ⌘/Ctrl toggles, Shift the range; `order` is the object
+   *  rows as drawn, top to bottom */
+  pick(row: OutlinerRow, mods: RowClick, order: string[]): void;
   toggleOpen(key: string): void;
   toggleHidden(keys: string[], hide: boolean): void;
   toggleLocked(keys: string[], lock: boolean): void;
@@ -200,6 +207,8 @@ export interface OutlinerActions {
   frame(): void;
   search(q: string): void;
   close(): void;
+  /** MICRO-SPAZIO-3D-3 · a click on the tree's empty part: nothing selected */
+  clearSelection?(): void;
   /** a shape of the palette: clicked (at the cursor), or dragged and dropped at a page point */
   addShape(id: string, drop?: { x: number; y: number }): void;
 }
@@ -246,9 +255,12 @@ export function renderOutliner(el: HTMLElement, v: OutlinerView, act: OutlinerAc
   const toggled = new Set(v.prefs.toggled);
   const searching = !!v.query.trim();
   const rows = filterTree(v.rows, v.query);
+  const order: string[] = [];
   const draw = (r: OutlinerRow, depth: number) => {
     const line = document.createElement("div");
-    line.className = `sol-row sol-${r.kind}${v.selected.has(r.key) ? " sel" : ""}${r.current ? " cur" : ""}${r.drawn ? " drawn" : ""}`;
+    const isSel = v.selected.has(r.key);
+    line.className = `sol-row sol-${r.kind}${isSel ? " sel" : ""}${isSel && v.active === r.key ? " active" : ""}${r.current ? " cur" : ""}${r.drawn ? " drawn" : ""}`;
+    if (r.object) order.push(r.key);
     line.dataset.key = r.key;
     line.setAttribute("role", "treeitem");
     line.style.paddingLeft = `${4 + depth * 14}px`;
@@ -291,7 +303,7 @@ export function renderOutliner(el: HTMLElement, v: OutlinerView, act: OutlinerAc
         line.append(arrow, eye);
       }
     }
-    line.addEventListener("click", () => act.pick(r));
+    line.addEventListener("click", (e) => act.pick(r, { toggle: e.metaKey || e.ctrlKey, range: e.shiftKey }, order));
     tree.appendChild(line);
     if (open) for (const c of kids) draw(c, depth + 1);
   };
@@ -302,6 +314,7 @@ export function renderOutliner(el: HTMLElement, v: OutlinerView, act: OutlinerAc
     p.textContent = v.texts.empty;
     tree.appendChild(p);
   }
+  tree.addEventListener("click", (e) => { if (e.target === tree) act.clearSelection?.(); });
   el.appendChild(tree);
   // the palette of the base shapes (p.4): a click makes one at the 3D cursor,
   // a drag lays it on the surface under the pointer

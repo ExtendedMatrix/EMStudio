@@ -170,7 +170,9 @@ export type SpaceKeyAction =
   | "frame-selection" | "frame-all" | "outliner" | "box-zoom" | "cursor-reset"
   | "add-menu" | "grab" | "rotate" | "scale" | "delete" | "cancel" | "back"
   /** MICRO-SPAZIO-3D-2 · N, the «Vista» panel on the right */
-  | "sidebar";
+  | "sidebar"
+  /** MICRO-SPAZIO-3D-3 · A, Alt+A; H, Alt+H, Shift+H; B (box select) */
+  | "select-all" | "select-none" | "hide" | "reveal" | "hide-unselected" | "box-select";
 
 export function spaceKeyAction(e: { key: string; shiftKey: boolean; ctrlKey: boolean; metaKey: boolean; altKey: boolean },
                                mac: boolean): SpaceKeyAction | null {
@@ -178,9 +180,17 @@ export function spaceKeyAction(e: { key: string; shiftKey: boolean; ctrlKey: boo
   const cmd = mac ? e.metaKey : e.ctrlKey;
   if (cmd && (k === "[")) return "back";
   if (e.altKey && k === "ArrowLeft") return "back";
+  // MICRO-SPAZIO-3D-3 · Alt+A, Alt+H by the key's place: on a Mac Alt+A types «å»
+  const code = (e as { code?: string }).code ?? "";
+  if (e.altKey && !e.metaKey && !e.ctrlKey && !e.shiftKey) {
+    if (code === "KeyA" || k === "a" || k === "A") return "select-none";
+    if (code === "KeyH" || k === "h" || k === "H") return "reveal";
+    return null;
+  }
   if (e.metaKey || e.ctrlKey || e.altKey) return null;
   if (e.shiftKey) {
     if (k === "B" || k === "b") return "box-zoom";
+    if (k === "H" || k === "h") return "hide-unselected";
     if (k === "C" || k === "c") return "cursor-reset";
     if (k === "A" || k === "a") return "add-menu";
     return null;
@@ -190,6 +200,9 @@ export function spaceKeyAction(e: { key: string; shiftKey: boolean; ctrlKey: boo
     case "Home": return "frame-all";
     case "t": case "T": return "outliner";
     case "n": case "N": return "sidebar";
+    case "a": case "A": return "select-all";
+    case "h": case "H": return "hide";
+    case "b": case "B": return "box-select";
     case "g": case "G": return "grab";
     case "r": case "R": return "rotate";
     case "s": case "S": return "scale";
@@ -248,6 +261,8 @@ export function modalValue(st: ModalState): number | null {
  * A person who learned G Z 2 in Blender lifts the shape by two metres here too.
  */
 export const AXIS_VECTOR: Record<Axis, V3> = { x: [1, 0, 0], y: [0, 0, -1], z: [0, 1, 0] };
+/** …and the component of three's vectors (a scale) that each of Blender's axes is */
+export const AXIS_INDEX: Record<Axis, 0 | 1 | 2> = { x: 0, y: 2, z: 1 };
 
 export interface Pose { position: V3; rotation: V3; scale: V3 }
 

@@ -61,6 +61,16 @@ type Dict = Record<string, string>;
 // `emtree.`, `empty.`, `toast.`) so a translator can work a screen at a time and
 // an unused key is findable.
 const EN: Dict = {
+  "xf.writtenMany": "Transforms of {n} objects written",
+  "s3.moreSelected": "+{n} selected",
+  "s3.nMany": "{n} objects: a value changed here moves them all by the same amount",
+  "keys.s3selectAll": "Select everything visible",
+  "keys.s3selectNone": "Deselect everything",
+  "keys.s3hide": "Hide the selected",
+  "keys.s3reveal": "Show everything",
+  "keys.s3hideUnselected": "Hide the unselected",
+  "keys.s3boxSelect": "Box select",
+  "keys.s3shiftClick": "Add to the selection / make active / remove the active",
   // MICRO studio-luogo (10 Oct 2026) · the study's code, kind and place, the
   // heritage gesture, the chain card and the Graph view's HDT-O layer
   "insp.hdtStudyCode": "Code",
@@ -3608,6 +3618,16 @@ const EN: Dict = {
 
 // ── Italiano: complete, because E.D. works in it ───────────────────────────────
 const IT: Dict = {
+  "xf.writtenMany": "Trasformazioni di {n} oggetti scritte",
+  "s3.moreSelected": "+{n} selezionati",
+  "s3.nMany": "{n} oggetti: un valore cambiato qui li sposta tutti della stessa quantità",
+  "keys.s3selectAll": "Seleziona tutto il visibile",
+  "keys.s3selectNone": "Deseleziona tutto",
+  "keys.s3hide": "Nascondi i selezionati",
+  "keys.s3reveal": "Mostra tutto",
+  "keys.s3hideUnselected": "Nascondi i non selezionati",
+  "keys.s3boxSelect": "Selezione a riquadro",
+  "keys.s3shiftClick": "Aggiungi alla selezione / rendi attivo / togli l'attivo",
   // MICRO studio-luogo (10 Oct 2026) · the study's code, kind and place, the
   // heritage gesture, the chain card and the Graph view's HDT-O layer
   "insp.hdtStudyCode": "Codice",

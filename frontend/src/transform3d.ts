@@ -159,3 +159,20 @@ export const rad = (d: number): number => (d * Math.PI) / 180;
 export function coordDecimals(magnitude: number): number {
   return Math.abs(magnitude) < 1e4 ? 4 : 3;
 }
+
+/**
+ * MICRO-SPAZIO-3D-3 · a value changed on the ACTIVE object, carried to the
+ * other selected ones by the same amount: the difference of position and of
+ * rotation added, the ratio of scale multiplied (a zero scale changes nothing).
+ * Blender's N panel changes only the active unless Alt is held; E.D. asked
+ * that the panel act on all of them.
+ */
+export function carryXf(before: Xf, after: Xf, other: Xf): Xf {
+  const r = (i: number) => (Math.abs(before.scale[i]) > 1e-12 ? after.scale[i] / before.scale[i] : 1);
+  return {
+    position: [0, 1, 2].map((i) => other.position[i] + after.position[i] - before.position[i]) as V3,
+    rotation: [0, 1, 2].map((i) => other.rotation[i] + after.rotation[i] - before.rotation[i]) as V3,
+    scale: [0, 1, 2].map((i) => other.scale[i] * r(i)) as V3,
+    up_axis: other.up_axis,
+  };
+}

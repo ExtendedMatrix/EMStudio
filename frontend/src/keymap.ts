@@ -85,6 +85,14 @@ export const KEYMAP: KeyRow[] = [
   { id: "s3grs", keys: "G · R · S", scope: "space" },
   { id: "s3delete", keys: "X · ⌫", scope: "space" },
   { id: "s3back", keys: "⌘[ · ⌥←", scope: "space" },
+  // MICRO-SPAZIO-3D-3 · the selection as Blender's
+  { id: "s3shiftClick", keys: "⇧ + click", scope: "space" },
+  { id: "s3selectAll", keys: "A", scope: "space" },
+  { id: "s3selectNone", keys: "⌥A", scope: "space" },
+  { id: "s3boxSelect", keys: "B", scope: "space" },
+  { id: "s3hide", keys: "H", scope: "space" },
+  { id: "s3reveal", keys: "⌥H", scope: "space" },
+  { id: "s3hideUnselected", keys: "⇧H", scope: "space" },
   // tracing in the Doc window
   { id: "toolEsc", keys: "Esc", scope: "trace" },
   { id: "polyClose", keys: "@gesture.enterDbl", scope: "trace" },

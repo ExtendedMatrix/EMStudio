@@ -241,10 +241,11 @@ import { renderChronology, type ChronoEpoch, type ChronologyData } from "./chron
 import { buildSpace, citationKey, SpaceMarks, type Space } from "./space";
 import { mountSpaceScene, type SceneItem, type SceneMenuRequest, type SceneView, type SpaceSceneHandle } from "./scene3d";
 import { blenderToThree, eulerFromUp, leftSelects, threeToBlender, type AlignedView, type CamState, type Pose, type V3 } from "./space-nav";
-import { coordDecimals, deg, IDENTITY, isIdentity, poseToXf, rad, readTransform, transformData, xfToPose, type Xf } from "./transform3d";
+import { carryXf, coordDecimals, deg, IDENTITY, isIdentity, poseToXf, rad, readTransform, transformData, xfToPose, type Xf } from "./transform3d";
 import { parseTyped, renderTransformForm, type TransformFormTexts } from "./transform-ui";
 import { implicitGroups, isImplicitGroup, outsideMembers, unitOfImplicit, withImplicitGroups } from "./implicit-pd";
 import { addSketch, listSketches, onSketches, removeSketch, SHAPE_FAMILIES, SHAPES, shapeById, shapeLabel, sketchById, updateSketch } from "./shapes3d";
+import { boxSelect, clickOutliner, clickScene, EMPTY_SEL, hideKeys, selectAll, withoutKeys, type SpaceSel } from "./space-selection";
 import { buildOutlinerTree, loadSpacePrefs, renderOutliner, saveSpacePrefs, type Space3dPrefs } from "./space-outliner";
 import { patchProxyNodes, proxyRelPath } from "./proxy-association";
 import { trackpadClassifier } from "./wheel-kind";
@@ -910,6 +911,19 @@ function resetWindowCameras(): void {
 }
 let hoverId: string | null = null;
 let selectedId: string | null = null;
+/** the ACTIVE sketch of the Space (it is not a node of the graph), when the active is one */
+let spaceSketchSel: string | null = null;
+/** MICRO-SPAZIO-3D-3 · every sketch selected (the active among them): with
+ *  the nodes, the Space's one selection (`spaceSel`). A pick elsewhere that
+ *  replaces the nodes' selection replaces this too, unless the Space writes */
+let spaceSketchSet = new Set<string>();
+let spaceSelWriting = false;
+function dropSketchSel(): void {
+  if (spaceSelWriting || (!spaceSketchSet.size && !spaceSketchSel)) return;
+  spaceSketchSet = new Set();
+  spaceSketchSel = null;
+  for (const h of sceneHandles.values()) h.setSketchSelection([], null);
+}
 // Connector (edge) hover/selection is separate from node selection: the
 // selected edge is stored as the document edge (survives scene rebuilds, and
 // is what Delete removes); hover is a transient index into the current scene.
@@ -2986,6 +3000,7 @@ function select(nodeId: string | null): void {
   if (docAfter && nodeId && !docPickFrom) followDocSelection(nodeId);
   selectedId = nodeId;
   selectedIds = new Set(nodeId ? [nodeId] : []);
+  dropSketchSel();
   // E4 · somebody picked another node (a document closing selects null: not a pick)
   if (nodeId && nodeId !== handoffLanded) handoffLanded = null;
   selectedEdge = null; // node and connector selection are mutually exclusive
@@ -3056,6 +3071,7 @@ function toggleSelect(nodeId: string): void {
     selectedIds.add(nodeId);
     selectedId = nodeId;
   }
+  if (windowsOf().some((w) => w.type === "scene")) queueMicrotask(() => refreshSurfaces("scene"));
   refreshInspector();
   nodeList.setSelected(selectedId);
   draw();
@@ -3066,6 +3082,9 @@ function toggleSelect(nodeId: string): void {
 function selectMany(ids: string[]): void {
   selectedIds = new Set(ids);
   selectedId = ids.length ? ids[ids.length - 1] : null;
+  dropSketchSel();
+  // MICRO-SPAZIO-3D-3 · the Space sees the same selection
+  if (windowsOf().some((w) => w.type === "scene")) queueMicrotask(() => refreshSurfaces("scene"));
   refreshInspector();
   nodeList.setSelected(selectedId);
   draw();
@@ -3240,6 +3259,14 @@ function renderInspectorInto(host: HTMLElement): void {
     },
     selectedEdge,
   );
+  // MICRO-SPAZIO-3D-3 · the Inspector shows the ACTIVE; the others are said
+  if (selectedIds.size > 1 && selectedId) {
+    const more = document.createElement("div");
+    more.className = "insp-more";
+    more.dataset.more = String(selectedIds.size - 1);
+    more.textContent = t("s3.moreSelected", { n: String(selectedIds.size - 1) });
+    host.querySelector(".insp-head")?.after(more) ?? host.prepend(more);
+  }
   if (selectedId) renderTraceBanner(host, owning, selectedId);   // FONTE · a trace, and «Ripristina»
   if (selectedId) {
     renderUnitImages(host, owning, selectedId);          // E5 · its images
@@ -21834,13 +21861,12 @@ function setSpace3dPrefs(p: Space3dPrefs): void {
 /** «Isola»: the one object shown, by key */
 let spaceIsolated: string | null = null;
 let spaceQuery = "";
-/** the sketch selected (it is not a node of the graph) */
-let spaceSketchSel: string | null = null;
 /** the last pointer over a scene, where Shift+A opens its menu */
 let spacePointer: { x: number; y: number } | null = null;
 onSketches(() => {
   for (const h of sceneHandles.values()) h.syncSketches();
   if (spaceSketchSel && !sketchById(spaceSketchSel)) spaceSketchSel = null;
+  for (const id of [...spaceSketchSet]) if (!sketchById(id)) spaceSketchSet.delete(id);
   refreshSurfaces("scene");
 });
 
@@ -21853,11 +21879,72 @@ function spaceKeyOf(id: string | null, sp: Space | null): string | null {
   return null;
 }
 function spaceSelectedKeys(sp: Space | null): Set<string> {
-  const out = new Set<string>();
-  const k = spaceKeyOf(selectedId, sp);
-  if (k) out.add(k);
-  if (spaceSketchSel) out.add(`sketch:${spaceSketchSel}`);
+  return new Set(spaceSel(sp).keys);
+}
+/**
+ * MICRO-SPAZIO-3D-3 p.1 · the Space's ONE selection, read: the app's nodes
+ * (`selectedIds`, the active `selectedId`) as Space keys, and the sketches.
+ * Measured on 16 Oct 2026: the Outliner read only `selectedId` here while the
+ * scene drew all of `selectedIds`, and a sketch picked left the model
+ * selected — two selections. Every surface reads this now.
+ */
+function spaceSel(sp: Space | null = currentSpace()): SpaceSel {
+  const keys: string[] = [];
+  for (const id of selectedIds.size ? selectedIds : selectedId ? [selectedId] : []) {
+    const k = spaceKeyOf(id, sp);
+    if (k && !k.startsWith("epoch:")) keys.push(k);
+  }
+  for (const id of spaceSketchSet) keys.push(`sketch:${id}`);
+  const active = spaceSketchSel && spaceSketchSet.has(spaceSketchSel) ? `sketch:${spaceSketchSel}` : spaceKeyOf(selectedId, sp);
+  return { keys, active: active && keys.includes(active) ? active : null };
+}
+/** …and written: the nodes to the app's selection (the active last), the
+ *  sketches to theirs; the scenes, the Outliner, the Inspector and the graph
+ *  follow from there. */
+function setSpaceSel(next: SpaceSel): void {
+  const nodeKeys = next.keys.filter((k) => !k.startsWith("sketch:"));
+  const act = next.active && !next.active.startsWith("sketch:") ? next.active : null;
+  const ordered = act ? [...nodeKeys.filter((k) => k !== act), act] : nodeKeys;
+  const ids = ordered.map((k) => k.slice(k.indexOf(":") + 1));
+  spaceSketchSet = new Set(next.keys.filter((k) => k.startsWith("sketch:")).map((k) => k.slice(7)));
+  spaceSketchSel = next.active?.startsWith("sketch:") ? next.active.slice(7) : null;
+  for (const h of sceneHandles.values()) h.setSketchSelection([...spaceSketchSet], spaceSketchSel);
+  spaceSelWriting = true;
+  try {
+    if (!ids.length) { if (selectedId || selectedIds.size) select(null); }
+    else if (ids.length === 1) select(ids[0]);
+    else selectMany(ids);
+  } finally { spaceSelWriting = false; }
+  // the active is a sketch: the nodes stay selected, none is the Inspector's
+  refreshInspector();
+  refreshSurfaces("scene");
+}
+/** The objects of the Space shown and selectable now (A selects them): the
+ *  items of the scene's epoch the overlays and the eyes let through, and the
+ *  sketches. */
+function spaceVisibleKeys(sp: Space | null = currentSpace()): string[] {
+  const out: string[] = [];
+  const ep = sp ? spaceEpochOf(sp) : null;
+  const sum = sp && ep ? sp.summary(ep) : null;
+  const prefs = space3dPrefs();
+  const hidden = new Set(prefs.hidden), locked = new Set(prefs.locked);
+  const ok = (k: string) => !hidden.has(k) && !locked.has(k) && (!spaceIsolated || spaceIsolated === k);
+  if (sum && sp) {
+    for (const r of sum.rms) if (space3dShown(r.resource?.tiles ? "s3_tiles" : "s3_rm") && ok(`rm:${r.id}`)) out.push(`rm:${r.id}`);
+    if (space3dShown("s3_proxies")) for (const u of sum.withProxy) if (sp.proxies.has(u) && ok(`proxy:${u}`)) out.push(`proxy:${u}`);
+  }
+  if (space3dShown("s3_sketches")) for (const s of listSketches()) if (ok(`sketch:${s.id}`)) out.push(`sketch:${s.id}`);
   return out;
+}
+/** H, Alt+H, Shift+H: the eyes of the Outliner, for what is drawn now. */
+function spaceHide(mode: "selected" | "unselected" | "reveal"): void {
+  const p = space3dPrefs();
+  const vis = spaceVisibleKeys().concat(spaceSel().keys.filter((k) => p.locked.includes(k)));
+  const hidden = hideKeys(p.hidden, mode, spaceSel().keys, vis);
+  if (mode === "reveal") spaceIsolated = null;
+  setSpace3dPrefs({ ...p, hidden });
+  // what is hidden leaves the selection, as Blender
+  if (mode !== "reveal") { const h = new Set(hidden); const next = withoutKeys(spaceSel(), (k) => h.has(k)); setSpaceSel(next); }
 }
 // ── MICRO-SPAZIO-3D-2 · p.5 · the transform of a 3D object, in the data ─────
 //
@@ -21897,6 +21984,24 @@ function writeXf(nodeId: string, xf: Xf): void {
   logInfo(t("xf.written", { x: String(st.node(nodeId)?.name ?? nodeId) }), [nodeId]);
   refreshSurfaces("scene");
   refreshInspector();
+}
+/** MICRO-SPAZIO-3D-3 · the poses of one gesture on several objects: the
+ *  nodes' transforms in ONE step of undo (a room: the operations as usual),
+ *  the sketches' in the session. */
+function writePoses(poses: Array<{ key: string; pose: Pose }>): void {
+  const sp = currentSpace();
+  const nodes = poses.filter((p) => !p.key.startsWith("sketch:"))
+    .map((p) => ({ target: transformNodeOfKey(p.key, sp), xf: poseToXf(p.pose), key: p.key }))
+    .filter((x): x is { target: string; xf: Xf; key: string } => !!x.target && !xfNote(x.key, sp).readOnly);
+  for (const p of poses) if (p.key.startsWith("sketch:")) updateSketch(p.key.slice(7), p.pose);
+  if (nodes.length && store && !refuseReadOnly()) {
+    const st = store;
+    st.batch(() => { for (const n of nodes) (storeOfNode(n.target) ?? st).setField(n.target, "data.transform", transformData(n.xf)); });
+    logInfo(t("xf.writtenMany", { n: String(nodes.length) }), nodes.map((n) => n.target));
+  }
+  refreshSurfaces("scene");
+  refreshInspector();
+  renderSpaceNPanels();
 }
 function xfTexts(): TransformFormTexts {
   return { position: t("xf.position"), rotation: t("xf.rotation"), scale: t("xf.scale"), quaternion: t("xf.quaternion"),
@@ -22008,10 +22113,31 @@ function renderSpaceNPanel(el: HTMLElement, win: Win, h: SpaceSceneHandle): void
   note.className = "xf-note";
   note.textContent = t("s3.nCursorNote");
   cur.appendChild(note);
-  // the selected object: its nine values, the same as the Inspector's
+  // the selected object: its nine values, the same as the Inspector's.
+  // MICRO-SPAZIO-3D-3 · the ACTIVE one; with others selected, a value changed
+  // here carries to all of them by the same amount (`carryXf`), one step
   const obj = sect(t("s3.nObject"), "object");
-  const sk = spaceSketchSel ? sketchById(spaceSketchSel) : undefined;
-  const key = sk ? null : spaceKeyOf(selectedId, sp);
+  const ssel = spaceSel(sp);
+  const others = ssel.keys.filter((k) => k !== ssel.active);
+  const xfOfKey = (k: string): Xf | null => {
+    if (k.startsWith("sketch:")) { const s = sketchById(k.slice(7)); return s ? poseToXf({ position: s.position, rotation: s.rotation, scale: s.scale }) : null; }
+    const tn = transformNodeOfKey(k, sp);
+    return tn && !xfNote(k, sp).readOnly ? nodeXf(tn) : null;
+  };
+  const commitAll = (activeKey: string, before: Xf, after: Xf) => {
+    const poses: Array<{ key: string; pose: Pose }> = [{ key: activeKey, pose: xfToPose(after) }];
+    for (const k of others) { const o = xfOfKey(k); if (o) poses.push({ key: k, pose: xfToPose(carryXf(before, after, o)) }); }
+    writePoses(poses);
+  };
+  if (others.length) {
+    const more = document.createElement("div");
+    more.className = "xf-note np-more";
+    more.dataset.more = String(others.length);
+    more.textContent = `${t("s3.moreSelected", { n: String(others.length) })} · ${t("s3.nMany", { n: String(others.length + 1) })}`;
+    obj.appendChild(more);
+  }
+  const sk = ssel.active?.startsWith("sketch:") ? sketchById(ssel.active.slice(7)) : undefined;
+  const key = sk ? null : ssel.active;
   if (sk) {
     const name = document.createElement("div");
     name.className = "xf-note";
@@ -22019,10 +22145,11 @@ function renderSpaceNPanel(el: HTMLElement, win: Win, h: SpaceSceneHandle): void
     obj.appendChild(name);
     const body = document.createElement("div");
     obj.appendChild(body);
-    renderTransformForm(body, { xf: poseToXf({ position: sk.position, rotation: sk.rotation, scale: sk.scale }), texts: xfTexts(),
+    const before = poseToXf({ position: sk.position, rotation: sk.rotation, scale: sk.scale });
+    renderTransformForm(body, { xf: before, texts: xfTexts(),
       note: t("xf.noteSketch"), probe: `np:sketch:${sk.id}`,
-      onCommit: (xf) => { updateSketch(sk.id, xfToPose(xf)); renderSpaceNPanels(); },
-      onReset: () => { updateSketch(sk.id, xfToPose(IDENTITY)); renderSpaceNPanels(); } });
+      onCommit: (xf) => commitAll(`sketch:${sk.id}`, before, xf),
+      onReset: () => commitAll(`sketch:${sk.id}`, before, IDENTITY) });
   } else if (key && (key.startsWith("rm:") || key.startsWith("proxy:"))) {
     const target = transformNodeOfKey(key, sp);
     const name = document.createElement("div");
@@ -22033,8 +22160,9 @@ function renderSpaceNPanel(el: HTMLElement, win: Win, h: SpaceSceneHandle): void
     obj.appendChild(body);
     if (target) {
       const { note: n, readOnly } = xfNote(key, sp);
-      renderTransformForm(body, { xf: nodeXf(target), texts: xfTexts(), note: n, readOnly, probe: `np:${key}`,
-        onCommit: (xf) => writeXf(target, xf), onReset: () => writeXf(target, IDENTITY) });
+      const before = nodeXf(target);
+      renderTransformForm(body, { xf: before, texts: xfTexts(), note: n, readOnly, probe: `np:${key}`,
+        onCommit: (xf) => commitAll(key, before, xf), onReset: () => commitAll(key, before, IDENTITY) });
     }
   } else {
     const none = document.createElement("p");
@@ -22165,8 +22293,8 @@ function addShapeIn(win: Win, shapeId: string, drop?: { x: number; y: number }):
   if (!space3dShown("s3_sketches"))
     setOverlays("space", withOverlay(overlaysOf("space"), "s3_sketches", true));
   const sk = addSketch(shapeId, at, shapeLabel(spec, getLocale()), rot);
-  spaceSketchSel = sk.id;
-  for (const x of sceneHandles.values()) x.selectSketch(sk.id);
+  // a new object is the only one selected, and the active (Blender)
+  setSpaceSel({ keys: [`sketch:${sk.id}`], active: `sketch:${sk.id}` });
   logInfo(t("s3.sketched", { name: sk.name }));
 }
 
@@ -22382,28 +22510,21 @@ function renderSpaceOutliner(el: HTMLElement, win: Win, sp: Space | null): void 
   }) : [];
   const fam = new Map(SHAPE_FAMILIES.map((f) => [f.id, shapeLabel(f, lang)]));
   renderOutliner(el, {
-    rows, prefs, selected: spaceSelectedKeys(sp), isolated: spaceIsolated, query: spaceQuery,
+    rows, prefs, selected: spaceSelectedKeys(sp), active: spaceSel(sp).active, isolated: spaceIsolated, query: spaceQuery,
     glyph: (k) => typeIconElement(k),
     texts: { search: t("s3.search"), isolate: t("s3.isolate"), frame: t("s3.frame"), eye: t("s3.eye"),
              arrow: t("s3.arrow"), palette: t("s3.palette"), close: t("s3.closeOutliner"), empty: t("s3.outlinerEmpty") },
     palette: SHAPES.map((s) => ({ id: s.id, name: shapeLabel(s, lang), family: s.family, familyName: fam.get(s.family) ?? s.family })),
   }, {
-    pick: (r) => {
-      if (r.kind === "sketch") {
-        spaceSketchSel = r.id;
-        for (const x of sceneHandles.values()) x.selectSketch(r.id);
-        refreshSurfaces("scene");
+    // MICRO-SPAZIO-3D-3 · one selection, Blender's Outliner: click = only
+    // it, ⌘/Ctrl+click adds or removes, Shift+click the range (space-selection.ts)
+    pick: (r, mods, order) => {
+      if (r.kind === "sketch" || r.kind === "rm" || r.kind === "tileset" || r.kind === "proxy") {
+        if (r.kind !== "sketch" && sp && !mods.toggle && !mods.range) { const ep = spaceEpochFor(r.id, sp); if (ep) spaceEpochId = ep; }
+        setSpaceSel(clickOutliner(spaceSel(sp), r.key, mods, order));
         return;
       }
       if (r.kind === "epoch") { spaceEpochId = r.id; select(r.id); refreshInspector(); return; }
-      if (r.kind === "rm" || r.kind === "tileset" || r.kind === "proxy") {
-        if (sp) { const ep = spaceEpochFor(r.id, sp); if (ep) spaceEpochId = ep; }
-        spaceSketchSel = null;
-        for (const x of sceneHandles.values()) x.selectSketch(null);
-        select(r.id);
-        refreshInspector();
-        return;
-      }
       if (r.kind === "version") { select(r.id); refreshInspector(); return; }
       const p = space3dPrefs();
       const tg = new Set(p.toggled);
@@ -22438,6 +22559,7 @@ function renderSpaceOutliner(el: HTMLElement, win: Win, sp: Space | null): void 
       if (!keys.length || !h?.frameKeys(keys)) h?.frame();
     },
     search: (q) => { spaceQuery = q; refreshSurfaces("scene"); },
+    clearSelection: () => setSpaceSel(EMPTY_SEL),
     close: () => setSpace3dPrefs({ ...space3dPrefs(), shown: false }),
     addShape: (id, drop) => addShapeIn(win, id, drop),
   });
@@ -22541,13 +22663,9 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
         middleSeen: seen, leftSelects: leftSelects(v.leftDrag, v.emulate3Button, seen) };
     },
     onMiddleSeen: () => setMiddleSeen(),
-    onBoxSelect: (ids, extend) => {
-      spaceSketchSel = null;
-      if (!ids.length && !extend) select(null);
-      else selectMany(extend ? [...new Set([...selectedIds, ...ids])] : ids);
-      refreshInspector();
-      refreshSurfaces("scene");
-    },
+    onBoxSelect: (keys, extend) => setSpaceSel(boxSelect(spaceSel(), keys, extend)),
+    // MICRO-SPAZIO-3D-3 · a click: Blender's rule on the one selection
+    onPick: (key, shift) => setSpaceSel(clickScene(spaceSel(), key, shift)),
     onNotice: (text) => toast(text),
     onView: () => drawNPanel(),
     onCursor: () => drawNPanel(),
@@ -22555,6 +22673,13 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
       const k = spaceKeyOf(selectedId, currentSpace());
       return k && (k.startsWith("rm:") || k.startsWith("proxy:")) ? k : null;
     },
+    // MICRO-SPAZIO-3D-3 · G / R / S on every selected object, ONE step of undo
+    transformTargets: () => {
+      const s = spaceSel();
+      const sp = currentSpace();
+      return s.keys.filter((k) => k.startsWith("sketch:") || (transformNodeOfKey(k, sp) && !xfNote(k, sp).readOnly));
+    },
+    onTransformMany: (poses) => writePoses(poses),
     onTransform: (key, pose) => {
       const target = transformNodeOfKey(key);
       if (target && !xfNote(key, currentSpace()).readOnly) writeXf(target, poseToXf(pose));
@@ -22567,16 +22692,10 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
     locked: () => new Set(space3dPrefs().locked),
     sketchVisible: (id) => { const k = `sketch:${id}`; return !space3dPrefs().hidden.includes(k) && (!spaceIsolated || spaceIsolated === k); },
     epochLabel: () => { const sp = currentSpace(); const e = sp ? spaceEpochOf(sp) : null; return e ? String(store?.node(e)?.name ?? e) : ""; },
-    onPickUnit: (id) => { spaceSketchSel = null; select(id); refreshInspector(); },
     // MICRO-SPAZIO-3D · ⌘-click selects the model; opening it is the menu's
-    // «Apri il modello in soloing» now (E.D., 11 Oct 2026)
-    onPickRm: (id) => { spaceSketchSel = null; select(id); refreshInspector(); },
-    onPickNone: () => { if (selectedId || spaceSketchSel) { spaceSketchSel = null; select(null); refreshInspector(); } },
-    onPickSketch: (id) => {
-      spaceSketchSel = id;
-      for (const [w, x] of sceneHandles) if (w !== win.id) x.selectSketch(id);
-      refreshSurfaces("scene");
-    },
+    // «Apri il modello in soloing» now (E.D., 11 Oct 2026). A click goes to
+    // `onPick` (MICRO-SPAZIO-3D-3); a right click on a sketch selects it
+    onPickSketch: (id) => setSpaceSel(id ? { keys: [`sketch:${id}`], active: `sketch:${id}` } : EMPTY_SEL),
     onMenu: (m) => sceneMenu(win, handle, m),
     onBeforeJump: () => pushView(),
     onKeyAction: (a) => {
@@ -22589,7 +22708,13 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
         return true;
       }
       if (a === "back") { goBack(); return true; }
-      if (a === "delete" && spaceSketchSel) { removeSketch(spaceSketchSel); return true; }
+      if (a === "delete" && spaceSketchSet.size) { for (const id of [...spaceSketchSet]) removeSketch(id); return true; }
+      // MICRO-SPAZIO-3D-3 · A, Alt+A; H, Alt+H, Shift+H
+      if (a === "select-all") { setSpaceSel(selectAll(spaceSel(), spaceVisibleKeys())); return true; }
+      if (a === "select-none") { setSpaceSel(EMPTY_SEL); return true; }
+      if (a === "hide") { spaceHide("selected"); return true; }
+      if (a === "reveal") { spaceHide("reveal"); return true; }
+      if (a === "hide-unselected") { spaceHide("unselected"); return true; }
       return false;
     },
     onSketchChange: () => { refreshSurfaces("scene"); drawNPanel(); },
@@ -22762,7 +22887,9 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
       handle.update([]);
       return;
     }
-    const sel = selectedId;
+    // MICRO-SPAZIO-3D-3 · the one selection, and its active
+    const ssel = spaceSel(sp);
+    const isSel = (k: string) => ssel.keys.includes(k);
     const hidden = new Set(prefs.hidden);
     const shown = (key: string) => !hidden.has(key) && (!spaceIsolated || spaceIsolated === key);
     const items: SceneItem[] = [];
@@ -22771,7 +22898,7 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
       if (!space3dShown(isTiles ? "s3_tiles" : "s3_rm") || !shown(`rm:${r.id}`)) continue;
       items.push({ kind: "rm", id: r.id, label: r.name, state: r.resource?.state ?? "missing",
         url: spaceFileUrl(r.resource), resourceId: r.resource?.id, tiles: r.resource?.tiles || undefined,
-        edge: placementColour(r.genre) ?? undefined, selected: sel === r.id || selectedIds.has(r.id),
+        edge: placementColour(r.genre) ?? undefined, selected: isSel(`rm:${r.id}`), active: ssel.active === `rm:${r.id}`,
         // MICRO-SPAZIO-3D-2 · the model's transform (data.transform), over its file
         pose: r.resource?.tiles ? undefined : poseOfNode(r.id),
         // MICRO-3DTILES · the tileset of the same model, and the weight
@@ -22784,7 +22911,7 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
         if (!px || !shown(`proxy:${u}`)) continue;
         const type = st.node(u)?.node_type;
         const common = { kind: "proxy" as const, id: u, label: nm(u), rgb: nodeMaterialRgb(type) ?? nodeMaterialRgb("US") ?? undefined,
-          edge: nodeStyle(type).border, selected: sel === u || selectedIds.has(u), pose: poseOfNode(px.shapeId) };
+          edge: nodeStyle(type).border, selected: isSel(`proxy:${u}`), active: ssel.active === `proxy:${u}`, pose: poseOfNode(px.shapeId) };
         if (px.resource) items.push({ ...common, state: px.resource.state, url: spaceFileUrl(px.resource), resourceId: px.resource.id });
         else items.push({ ...common, state: "json", convexshapes: px.convexshapes, spheres: px.spheres });
       }
