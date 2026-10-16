@@ -1,9 +1,11 @@
 /**
  * THE TWO GESTURES · create a room, and put this file on it.
  *
- * `src/rooms.ts` is the pure half — an id from a name, and a container turned
- * into the operations that seat it on a table — so it is bundled with the
- * project's own esbuild and exercised in node, with real values.
+ * `src/rooms.ts` is the pure half — an id from a name, and what blocks the
+ * gesture — so it is bundled with the project's own esbuild and exercised in
+ * node, with real values. Putting a file on a room is the ENGINE's since 16 Oct
+ * 2026 (`s3dgraphy.room_import`, through the bridge's `/room-import`): sections
+ * 4 and 7 hold that, on the source and on the engine itself.
  *
  * The one that matters most here is the PARITY VECTOR. The room id is derived
  * from the name in TWO places — this app's File menu and the node's front door
@@ -102,53 +104,28 @@ console.log("\n3 · a name that derives NOTHING is refused rather than invented"
      "…and the refusal is derived from the same function, not a second rule");
 }
 
-console.log("\n4 · the upload that turns a file into a place, as OPERATIONS");
+console.log("\n4 · the file goes onto the table through the ENGINE, and the graph LAST");
 {
-  const graph = {
-    nodes: [
-      { id: "n1", name: "US 1", data: { created_at: "2020-03-01T10:00:00Z" } },
-      { id: "n2", name: "US 2",
-        data: { created_at: "2020-03-01T10:00:00Z",
-                modified_at: "2024-07-09T08:30:00Z" } },
-      { id: "n3", name: "US 3" },
-      { name: "no id at all" },
-    ],
-    edges: [
-      { id: "e1", source: "n1", target: "n2", edge_type: "is_before" },
-      { source: "n2", target: "n3", edge_type: "is_before" },   // no id
-    ],
-  };
-  const ops = R.seedOpsForContainer(graph);
-
-  eq(ops.filter((o) => o.op === "add_node").length, 3,
-     "one add_node per node THAT HAS AN ID — a node without one cannot be "
-     + "addressed by any later operation, so seating it would put something in "
-     + "the room nothing can ever refer to");
-  eq(ops.filter((o) => o.op === "add_edge").length, 1,
-     "…and the same for edges");
-
-  const names = ops.map((o) => o.op);
-  ok(names.lastIndexOf("add_node") < names.indexOf("add_edge"),
-     "EVERY node before ANY edge: an edge naming a node the room has not seen "
-     + "is an edge held in the air, and a reader looking at the room mid-seed "
-     + "would see a graph with dangling arrows");
-
-  // THE STAMPS ARE THE DOCUMENT'S OWN
-  const byId = new Map(ops.filter((o) => o.op === "add_node").map((o) => [o.id, o]));
-  eq(byId.get("n1").ts, "2020-03-01T10:00:00Z",
-     "a node with only a creation stamp travels with THAT");
-  eq(byId.get("n2").ts, "2024-07-09T08:30:00Z",
-     "…and one edited later travels with the later hand — `modified_at` wins, "
-     + "which is the rule the field-level merge arbitrates on");
-  eq(byId.get("n3").ts, undefined,
-     "…and a node with no stamp gets NONE invented: re-stamping on the way in "
-     + "would make a ten-year-old excavation look like it happened the "
-     + "afternoon somebody uploaded it");
-
-  // nothing is dropped and nothing is added
-  eq(byId.get("n1").node.name, "US 1", "the node itself travels whole");
-  eq(R.seedOpsForContainer(null), [], "no graph, no operations");
-  eq(R.seedOpsForContainer({}), [], "…and an empty one is not an error either");
+  // MICRO-PORTA-IN-STANZA-DAL-MOTORE (16 Oct 2026). Until then this section
+  // checked `seedOpsForContainer`: the graph turned into operations here and
+  // sent FIRST through the socket, then a second wave of updates per file. The
+  // operations are the engine's now (`inventory.seed_ops`: every node before
+  // any edge, the document's own stamps, the language in the op), sent LAST,
+  // after the files are hosted — asserted in s3Dgraphy's tests/test_room_import.py.
+  eq([R.seedOpsForContainer, R.seedOpsForStudy, R.studySections], [undefined, undefined, undefined],
+     "rooms.ts seats nothing any more: no second implementation of the engine's gesture");
+  const { readFileSync } = await import("node:fs");
+  const main = readFileSync(new URL("../src/main.ts", import.meta.url).pathname, "utf8");
+  const paint = main.slice(main.indexOf("function paintInventory("), main.indexOf("let lastInventoryReport"));
+  const execute = paint.indexOf('step: "execute"');
+  const done = paint.indexOf('v.state !== "done"');
+  const enter = paint.indexOf("connectToHub(");
+  ok(execute > 0 && done > execute && enter > done,
+     "the dialog's choices go to the engine (`execute`), and EMStudio enters the room only after the run is done");
+  ok(!/sendHubOp\(|seedOps/.test(paint) && !/sendHubOp\(|seedOps/.test(
+       main.slice(main.indexOf("async function bringIntoRoom"), main.indexOf("function inventorySources"))),
+     "…nothing of the graph goes through the socket on the way in");
+  ok(!/\/asset\?media_type=|\/uploads`/.test(main), "…and no byte goes up from this page: the engine sends them");
 }
 
 console.log("\n5 · the LADDER gates the gesture, and it is the ladder we have");
@@ -179,8 +156,8 @@ console.log("\n6 · THE CHEAP REFUSAL COMES FIRST");
   // invisible in any single return value.
   const { readFileSync } = await import("node:fs");
   const main = readFileSync(new URL("../src/main.ts", import.meta.url).pathname, "utf8");
-  const at = main.indexOf("async function createRoomHere");
-  ok(at > 0, "`createRoomHere` exists");
+  const at = main.indexOf("async function bringIntoRoom");
+  ok(at > 0, "`bringIntoRoom` exists");
   const body = main.slice(at, main.indexOf("\n}\n", at));
   const document_ = body.indexOf('t("room.bringNeedsDocument")');
   const ladder = body.indexOf("whatBlocksTheGesture(");
@@ -196,11 +173,16 @@ console.log("\n6 · THE CHEAP REFUSAL COMES FIRST");
 
 // ── 7 · THE WHOLE STUDY · every graph and the shelf, each op naming its graph ─
 //
-// G2 (MICRO-LO-STUDIO-IN-STANZA-NOMINA-IL-GRAFO, 5 Oct 2026): «Bring into a
-// room…» seated the active graph only. A room writes one study (I-2): it is
-// born with the study's sections, empty, and the seeding ops name their graph.
-console.log("7 · THE WHOLE STUDY");
+// G2 (MICRO-LO-STUDIO-IN-STANZA-NOMINA-IL-GRAFO, 5 Oct 2026): a room writes one
+// study (I-2), born with the study's sections, empty, and the seeding ops name
+// their graph. Since 16 Oct 2026 the ENGINE does it (`engine.birth_sections`,
+// `inventory.seed_ops`): asked here, on the same study, when s3Dgraphy is beside.
+console.log("7 · THE WHOLE STUDY (the engine's)");
 {
+  const { existsSync } = await import("node:fs");
+  const { execFileSync } = await import("node:child_process");
+  const S3D = new URL("../../../s3Dgraphy/", import.meta.url).pathname;
+  const PY = `${S3D}.venv/bin/python`;
   const unit = (id) => ({ id, node_type: "US", name: id, data: { created_at: "2026-10-05T10:00:00Z" } });
   const study = {
     header: { format: "em.json", version: "1.0" },
@@ -216,21 +198,34 @@ console.log("7 · THE WHOLE STUDY");
     },
     active_graph_id: "saggio",
   };
-  const born = R.studySections(study);
-  eq(born.graphs.map((g) => g.graph_id), ["tempio", "saggio", "shelf"],
-     "every graph and the shelf, and not the DTC corpus (the node's own)");
-  eq(born.active_graph_id, "saggio", "the graph in front stays in front");
-  ok(born.corpus === true, "…and the corpus that stayed out is said");
-  eq(born.graphs[0], { graph_id: "tempio", name: "Tempio Giunone Moneta", data: { language: "it" } },
-     "a section is born EMPTY: id, name and header, no nodes and no edges");
-  ok(born.graphs.every((g) => !("nodes" in g) && !("edges" in g)), "no content at birth");
-
-  const ops = R.seedOpsForStudy(study);
-  eq(ops.map((o) => `${o.graph_id}:${o.op}:${o.id}`),
-     ["tempio:add_node:US1", "tempio:add_node:US2", "tempio:add_edge:e1",
-      "saggio:add_node:US9", "shelf:add_node:r1"],
-     "each op names its graph, nodes before the edges of the same graph");
-  ok(!ops.some((o) => o.graph_id === "dtc"), "the corpus is not seeded");
+  if (!existsSync(PY)) console.log("  (skipped: no s3Dgraphy venv beside this checkout)");
+  else {
+    const out = JSON.parse(execFileSync(PY, ["-c", `
+import json, sys
+from s3dgraphy.container import parse_container
+from s3dgraphy.room_import import engine, inventory
+c, _w = parse_container(json.loads(sys.stdin.read()))
+members = engine._members(c)
+ops = [dict(op, graph_id=gid) for gid, g in members for op in inventory.seed_ops(g, engine._section(g))]
+print(json.dumps({"born": engine.birth_sections(members), "active": c.active_graph_id,
+                  "ops": [f"{o['graph_id']}:{o['op']}:{o['id']}" for o in ops]}))`],
+      { input: JSON.stringify(study), env: { ...process.env, PYTHONPATH: `${S3D}src` } }).toString());
+    eq(out.born.map((g) => g.graph_id), ["tempio", "saggio", "shelf"],
+       "every graph and the shelf, and not the DTC corpus (the node's own)");
+    eq(out.active, "saggio", "the graph in front stays in front");
+    ok(out.born.every((g) => !("nodes" in g) && !("edges" in g)), "a section is born EMPTY: no content at birth");
+    eq(out.born[0].name, "Tempio Giunone Moneta", "…with its name");
+    // s3Dgraphy's reading adds what a graph is born with (its `geo_<graph>`
+    // position node): the study's own units are in, in their graph, in order
+    eq(out.ops.filter((o) => /:(US\d|e1)$/.test(o)),
+       ["tempio:add_node:US1", "tempio:add_node:US2", "tempio:add_edge:e1", "saggio:add_node:US9"],
+       "each op names its graph, nodes before the edges of the same graph");
+    ok(["tempio", "saggio"].every((g) => {
+      const mine = out.ops.filter((o) => o.startsWith(`${g}:`)).map((o) => o.split(":")[1]);
+      return mine.lastIndexOf("add_node") < (mine.indexOf("add_edge") === -1 ? Infinity : mine.indexOf("add_edge"));
+    }), "…EVERY node of a graph before ANY of its edges");
+    ok(!out.ops.some((o) => o.startsWith("dtc:")), "the corpus is not seeded");
+  }
 }
 
 console.log(`\nrooms: ${checks} checks passed`);

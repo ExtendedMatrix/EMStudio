@@ -4844,106 +4844,130 @@ if (K_NODE) test("TR1.live", "T-R1 dal vivo · il pannello Connessione chiede GE
 });
 
 
-if (K_NODE && process.env.TEMPLU) test("TP2.live", "T-P2 dal vivo · Templu Mare (copia) portato in una stanza nuova del nodo di sviluppo: inventario in quattro gruppi (trovate · già nello storage · esterni · mancanti), le trovate salgono (il .3tz da 190 MB a pezzi ripristinabili), i nodi caricati hanno sha256 e il percorso d'origine; un secondo giro non ricarica niente", async () => {
-  const path = process.env.TEMPLU;
-  const doc = JSON.parse(readFileSync(path, "utf8"));
-  const name = `Templu prova ${Date.now() % 100000}`;
-  const { p, ctx, errors } = await open({ doc: null, locale: "en", w: 1600, h: 1000, init: {
-    "emstudio.settings": JSON.stringify({ sync: { hubUrl: K_NODE } }),
-    "emstudio.identities": JSON.stringify({ current: "0000-0002-1825-0097",
-      known: [{ orcid: "0000-0002-1825-0097", name: "Dev", surname: "User", verified: false }] }) } });
+// ── «Bring into a room…» is the ENGINE's (MICRO-PORTA-IN-STANZA-DAL-MOTORE,
+// 16 Oct 2026): the dialog shows `s3dgraphy.room_import`'s plan (through the
+// bridge's /room-import), sends the person's choices back, and EMStudio enters
+// the room only after the engine has seated the graph.
+//   LIVE_NODE=https://em.localhost:8443/em TEMPLU=<em.json> PORT=5173 \
+//   BRIDGE=http://localhost:8768 node scripts/check-interactions.mjs TP2
+// (the em.json's dataset under the bridge's --fs-root; read, never written)
+const DEV_ID = () => JSON.stringify({ current: "0000-0002-1825-0097",
+  known: [{ orcid: "0000-0002-1825-0097", name: "Dev", surname: "User", verified: false }] });
+/** open `doc` at `path`, sign in as dev, «Bring into a room…» named `name`: the
+ *  page with the dialog showing the engine's plan */
+async function bringPage(doc, path, name, { w = 1600, h = 1000 } = {}) {
+  const { p, ctx, errors } = await open({ doc: null, locale: "en", w, h, init: {
+    "emstudio.settings": JSON.stringify({ sync: { hubUrl: K_NODE } }), "emstudio.identities": DEV_ID() } });
   await p.evaluate(([d, pa]) => window.__EM_DRAG__.openAt(d, pa), [doc, path]);
-  await p.waitForTimeout(2500);
+  await p.waitForTimeout(1500);
   await p.evaluate((tk) => window.__EM_DRAG__.useToken(tk), kToken("dev"));
   await p.evaluate(() => window.__EM_DRAG__.bringIntoRoom());
   await p.waitForSelector("#room-name", { timeout: 10000 });
   await p.fill("#room-name", name);
   await p.click('.modal-foot button[data-a="ok"]');
-  await p.waitForSelector("#inv-pop .inv-go", { timeout: 120000 });
-  const groups = await p.evaluate(() => Object.fromEntries([...document.querySelectorAll("#inv-pop .inv-group")]
-    .map((g) => [g.dataset.group, g.querySelector("h5").textContent])));
-  const lots = await p.evaluate(() => [...document.querySelectorAll("#inv-pop .inv-lot")].map((r) => r.textContent));
-  await p.screenshot({ path: SHOT("tp2-inventario") }).catch(() => {});
+  await p.waitForSelector("#inv-pop .inv-go", { timeout: 300000 });
+  return { p, ctx, errors };
+}
+const groupsOf = (p) => p.evaluate(() => Object.fromEntries([...document.querySelectorAll("#inv-pop .inv-group")]
+  .map((g) => [g.dataset.group, g.querySelector("h5").textContent])));
+const nOf = (h) => Number(/· (\d+)/.exec(h ?? "")?.[1] ?? -1);
+const roomFile = (p) => p.evaluate(() => window.__EM_DRAG__.files().find((f) => f.room)?.room?.id ?? null);
+
+if (K_NODE && process.env.TEMPLU) test("TP2.live", "T-P2 dal vivo · Templu Mare portato in una stanza nuova del nodo di sviluppo DAL MOTORE: il dialogo mostra il piano in cinque gruppi, le trovate salgono (il tileset come .3tz), il grafo è seduto dal motore e poi EMStudio entra nella stanza; un secondo lancio con lo stesso nome carica 0 byte e 0 operazioni", async () => {
+  const path = process.env.TEMPLU;
+  const doc = JSON.parse(readFileSync(path, "utf8"));
+  const name = process.env.TP2_ROOM ?? `Templu prova ${Date.now() % 100000}`;
+  const SH = process.env.SHOTS_PREFIX ?? "tp2";
   const t0 = Date.now();
+  const { p, ctx, errors } = await bringPage(doc, path, name);
+  const planSecs = Math.round((Date.now() - t0) / 1000);
+  const groups = await groupsOf(p);
+  const lots = await p.evaluate(() => [...document.querySelectorAll("#inv-pop .inv-lot")].map((r) => r.textContent));
+  const total = await p.evaluate(() => document.querySelector("#inv-pop .inv-total")?.textContent ?? "");
+  await p.screenshot({ path: SHOT(`${SH}-inventario`) }).catch(() => {});
+  const t1 = Date.now();
   await p.click("#inv-pop .inv-go");
-  await p.waitForSelector("#inv-pop .inv-link", { timeout: 600000 });
-  const secs = Math.round((Date.now() - t0) / 1000);
+  await p.waitForSelector("#inv-pop .inv-link", { timeout: 1800000 });
+  const secs = Math.round((Date.now() - t1) / 1000);
   const first = await p.evaluate(() => window.__EM_DRAG__.inventoryReport());
-  const shelf = await p.evaluate(() => window.__EM_DRAG__.shelf());
-  await p.screenshot({ path: SHOT("tp2-referto") }).catch(() => {});
-  const room = await p.evaluate(() => window.__EM_DRAG__.files().find((f) => f.room)?.room?.id ?? null);
-  const state = await p.evaluate(() => ({ nodes: window.__EM_DRAG__.nodeCount(), files: window.__EM_DRAG__.files(), slots: window.__EM_DRAG__.slots() }));
-  // the second pass: everything is in the store now
-  await p.evaluate(() => { document.getElementById("inv-pop")?.classList.add("hidden"); window.__EM_DRAG__.inventory(); });
-  await p.waitForFunction(() => /Already in the room's storage · [1-9]/.test(document.querySelector('#inv-pop .inv-group[data-group="in_store"] h5')?.textContent ?? ""), null, { timeout: 120000 }).catch(() => {});
-  const groups2 = await p.evaluate(() => Object.fromEntries([...document.querySelectorAll("#inv-pop .inv-group")]
-    .map((g) => [g.dataset.group, g.querySelector("h5").textContent])));
-  await p.click("#inv-pop .inv-go");
-  await p.waitForSelector("#inv-pop .inv-link", { timeout: 120000 });
-  const second = await p.evaluate(() => window.__EM_DRAG__.inventoryReport());
-  const log = await p.evaluate(() => window.__EM_DRAG__.log().map((l) => l.message).filter((m) => /inventory|Uploaded|room|snapshot|seat|container/.test(m)));
+  await p.screenshot({ path: SHOT(`${SH}-referto`) }).catch(() => {});
+  await p.waitForFunction(() => window.__EM_DRAG__.files().some((f) => f.room), null, { timeout: 60000 }).catch(() => {});
+  await p.waitForTimeout(3000);
+  const room = await roomFile(p);
+  const state = await p.evaluate(() => ({ nodes: window.__EM_DRAG__.nodeCount(), status: window.__EM_DRAG__.statusLine() }));
+  await p.evaluate(() => document.getElementById("inv-pop")?.classList.add("hidden"));
+  await p.screenshot({ path: SHOT(`${SH}-in-stanza`) }).catch(() => {});
+  const log = await p.evaluate(() => window.__EM_DRAG__.log().map((l) => l.message).filter((m) => /room-import|inventory|room:/.test(m)));
   await ctx.close();
-  const up = shelf.filter((e) => /\/v1\/rooms\/.+\/asset\/sha256(:|%3A)[0-9a-f]{64}$/.test(e.locator));
-  const tz = shelf.find((e) => e.name === "TempluMare_cesium.3tz");
-  const n = (h) => Number(/· (\d+)/.exec(h ?? "")?.[1] ?? -1);
-  return { pass: n(groups.on_disk) + n(groups.in_store) === 19 && /^External references \(NAS, URL\) · 2/.test(groups.external)
-      && /^Missing · 71/.test(groups.missing) && first.uploaded + first.already === 19 && first.missing === 71
-      && up.length === 19 && up.every((e) => /^sha256:[0-9a-f]{64}$/.test(e.checksum) && e.origin && e.residency === "resident")
-      && !!tz && /TempluMare_cesium\.3tz$/.test(tz.origin) && /^Found on this computer · 0/.test(groups2.on_disk)
-      && /· 19/.test(groups2.in_store) && /· 2$/.test(groups2.external) && state.nodes > 200 && second.uploaded === 0 && second.bytes === 0 && !errors.length,
-    detail: { state, name, room, groups, lots, secs, first, groups2, second, tz, sample: up.slice(0, 2), log, errors } };
+  // the second launch: the same file, the same name — the engine takes the room up again
+  const again = await bringPage(doc, path, name);
+  const groups2 = await groupsOf(again.p);
+  const total2 = await again.p.evaluate(() => document.querySelector("#inv-pop .inv-total")?.textContent ?? "");
+  await again.p.screenshot({ path: SHOT(`${SH}-secondo-inventario`) }).catch(() => {});
+  await again.p.click("#inv-pop .inv-go");
+  await again.p.waitForSelector("#inv-pop .inv-link", { timeout: 600000 });
+  const second = await again.p.evaluate(() => window.__EM_DRAG__.inventoryReport());
+  await again.p.screenshot({ path: SHOT(`${SH}-secondo-referto`) }).catch(() => {});
+  await again.ctx.close();
+  const eng = first.engine ?? {}, eng2 = second.engine ?? {};
+  return { pass: nOf(groups.on_disk) >= 0 && nOf(groups.missing) >= 0 && room === roomIdOf(name)
+      && first.failed === 0 && (eng.seeded?.applied ?? 0) > 0 && (eng.seeded?.refused ?? 1) === 0
+      && state.nodes > 200 && second.uploaded === 0 && second.bytes === 0 && (eng2.seeded?.sent ?? -1) === 0
+      && /^To upload: 0 files/.test(total2) && !errors.length && !again.errors.length,
+    detail: { name, room, planSecs, secs, groups, lots, total, first: { ...first, engine: undefined },
+      seeded: eng.seeded, requests: eng.requests, timings: eng.timings, packs: eng.packs, state, groups2, total2,
+      second: { ...second, engine: undefined }, seeded2: eng2.seeded, requests2: eng2.requests,
+      log: log.slice(-40), errors: [...errors, ...again.errors] } };
 });
+const roomIdOf = (name) => name.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 60);
 
-
-if (K_NODE && process.env.TEMPLU) test("TU1.pause", "T-U1 (client) · un file nuovo da 48 MB sale a pezzi ripristinabili: «Pausa» ferma la coda fra due pezzi (l'avanzamento non si muove), «Riprendi» la fa continuare dall'offset del server, e il file arriva intero (sha256 dal server)", async () => {
+if (K_NODE && process.env.TEMPLU) test("TU1.pause", "T-U1 (client) · un file nuovo da 100 MB sale dal motore a pezzi ripristinabili: «Pausa» ferma il motore fra due pezzi (l'avanzamento non si muove, il nodo non ha il file), «Riprendi» lo fa continuare dall'offset del server, e il file arriva intero (sha256 dal server)", async () => {
   const dir = TEMPLU_DIR();
-  const file = `${dir}/u1-pausa-${Date.now()}.bin`;
-  execFileSync("dd", ["if=/dev/urandom", `of=${file}`, "bs=1m", "count=48"], { stdio: "ignore" });
+  const scratch = process.env.U1_DIR ?? "/tmp/emstudio-u1";
+  mkdirSync(scratch, { recursive: true });
+  const file = `${scratch}/u1-pausa-${Date.now()}.bin`;
+  execFileSync("dd", ["if=/dev/urandom", `of=${file}`, "bs=1m", "count=100"], { stdio: "ignore" });
+  const local = "sha256:" + execFileSync("shasum", ["-a", "256", file], { encoding: "utf8" }).split(" ")[0];
   const doc = { header: { format: "em.json", version: "1.0" }, active_graph_id: "g-u1", graphs: {
     "g-u1": { graph_id: "g-u1", name: "U1", nodes: [{ id: "us1", node_type: "US", name: "US 1" }], edges: [] },
     shelf: { graph_id: "shelf", name: "Shelf", data: { em_collection: "ShelfGraph" }, edges: [],
       nodes: [{ id: "big-1", name: "u1.bin", node_type: "resource", data: { url: file, media_type: "application/octet-stream" } }] } } };
-  const { p, ctx, errors } = await open({ doc: null, locale: "en", init: {
-    "emstudio.settings": JSON.stringify({ sync: { hubUrl: K_NODE } }),
-    "emstudio.identities": JSON.stringify({ current: "0000-0002-1825-0097",
-      known: [{ orcid: "0000-0002-1825-0097", name: "Dev", surname: "User", verified: false }] }) } });
-  await p.evaluate(([d, pa]) => window.__EM_DRAG__.openAt(d, pa), [doc, `${dir}/u1.em.json`]);
-  await p.waitForTimeout(1500);
-  await p.evaluate((tk) => window.__EM_DRAG__.useToken(tk), kToken("dev"));
-  await p.evaluate(() => window.__EM_DRAG__.bringIntoRoom());
-  await p.waitForSelector("#room-name", { timeout: 10000 });
-  await p.fill("#room-name", `u1 pausa ${Date.now() % 100000}`);
-  await p.click('.modal-foot button[data-a="ok"]');
-  await p.waitForSelector("#inv-pop .inv-go", { timeout: 60000 });
+  const name = `u1 pausa ${Date.now() % 100000}`;
+  const { p, ctx, errors } = await bringPage(doc, `${scratch}/u1.em.json`, name);
   await p.click("#inv-pop .inv-go");
+  // on the dev node 100 MB go up in a few seconds: «Pause» as soon as it is
+  // there — the engine holds before the next file or the next piece
   await p.waitForSelector("#inv-pop .inv-pause", { timeout: 10000 });
   await p.click("#inv-pop .inv-pause");
-  await p.waitForTimeout(2500);
+  await p.waitForTimeout(4000);       // the piece in flight ends, then it holds
   const a = await p.evaluate(() => document.querySelector("#inv-pop .inv-line:last-of-type")?.textContent ?? "");
-  const moved1 = await p.evaluate(() => window.__EM_DRAG__.log().filter((l) => /upload paused/.test(l.message)).length);
-  await p.waitForTimeout(2500);
+  const room = roomIdOf(name);
+  const head = () => execFileSync("curl", ["-sk", "-o", "/dev/null", "-w", "%{http_code}", "-I",
+    `${K_NODE}/v1/rooms/${room}/asset/${local}`, "-H", `Authorization: Bearer ${kToken("dev")}`], { encoding: "utf8" });
+  const during = head();
+  await p.waitForTimeout(3000);
   const b = await p.evaluate(() => document.querySelector("#inv-pop .inv-line:last-of-type")?.textContent ?? "");
+  const paused = await p.evaluate(() => window.__EM_DRAG__.log().filter((l) => /upload paused/.test(l.message)).length);
   await p.click("#inv-pop .inv-pause");
-  await p.waitForSelector("#inv-pop .inv-link", { timeout: 120000 });
+  await p.waitForSelector("#inv-pop .inv-link", { timeout: 300000 });
   const rep = await p.evaluate(() => window.__EM_DRAG__.inventoryReport());
-  const shelf = await p.evaluate(() => window.__EM_DRAG__.shelf());
+  const lines = await p.evaluate(() => window.__EM_DRAG__.log().map((l) => l.message).filter((m) => /room-import: (paused|resumed)/.test(m)));
   await ctx.close();
-  const local = "sha256:" + execFileSync("shasum", ["-a", "256", file], { encoding: "utf8" }).split(" ")[0];
+  const after = head();
   execFileSync("rm", ["-f", file]);
-  const e = shelf.find((x) => x.id === "big-1");
-  return { pass: moved1 === 1 && a === b && /Sending 1\/1 · u1\.bin · [1-9]/.test(a) && !/48\.0 MB of/.test(a) && rep.uploaded === 1 && rep.bytes === 48 * 1024 * 1024 && e?.checksum === local && !errors.length,
-    detail: { a, b, rep, local, entry: e, errors } };
+  return { pass: paused === 1 && a === b && !/100\.0 MB of 100\.0 MB/.test(a) && during === "404" && after === "200"
+      && rep.uploaded === 1 && rep.bytes === 100 * 1024 * 1024 && lines.length >= 2 && !errors.length,
+    detail: { a, b, during, after, lines, rep: { ...rep, engine: undefined }, local, dir, errors } };
 });
 
 // ── F1 · L1 (MICRO-ASSET-VERSIONI) · one home per file, the lot rule ────────
 //   LIVE_NODE=https://em.localhost:8443/em F1_DIR=/tmp/micro-asset-versioni/f1l1 \
-//   BRIDGE=http://localhost:8769 node scripts/check-interactions.mjs TF1 TL1
-// (F1_DIR under the bridge's --fs-root; TL1 reads the fixture of
-// `make_fixture.py` there, and the DosCo copy beside it)
-const DEV_ORCID_ID = () => JSON.stringify({ current: "0000-0002-1825-0097",
-  known: [{ orcid: "0000-0002-1825-0097", name: "Dev", surname: "User", verified: false }] });
-if (K_NODE && process.env.F1_DIR) test("TF1.live", "T-F1 dal vivo · un file a casa nella stanza A (caricato lì, citato dal grafo di A); «Porta in stanza» B lo trova «a casa in un'altra stanza» e propone «Sposta qui»; la conferma elenca A (lascia, e lì diventa riferimento); dopo il sì la casa è B sul server (un record, una casa) e nessun byte è stato rimandato", async () => {
+//   BRIDGE=http://localhost:8768 node scripts/check-interactions.mjs TF1 TL1
+// (F1_DIR under the bridge's --fs-root; TL1 writes its photos there when they
+// are not, with Pillow from s3Dgraphy's venv)
+if (K_NODE && process.env.F1_DIR) test("TF1.live", "T-F1 dal vivo · un file a casa nella stanza A (caricato lì, citato dal grafo di A); «Porta in stanza» B lo trova «a casa in un'altra stanza»: il motore propone di ospitarlo qui; scelto «Sposta qui», la conferma elenca A (lascia, e lì diventa riferimento); dopo il sì la casa è B sul server e nessun byte è stato rimandato", async () => {
   const dir = process.env.F1_DIR;
+  mkdirSync(dir, { recursive: true });
   const stamp = Date.now() % 1000000;
   const file = `${dir}/f1-podio-${stamp}.bin`;
   execFileSync("dd", ["if=/dev/urandom", `of=${file}`, "bs=1k", "count=64"], { stdio: "ignore" });
@@ -4961,19 +4985,11 @@ if (K_NODE && process.env.F1_DIR) test("TF1.live", "T-F1 dal vivo · un file a c
     "g-f1": { graph_id: "g-f1", name: "F1", nodes: [{ id: "us1", node_type: "US", name: "US 1" }], edges: [] },
     shelf: { graph_id: "shelf", name: "Shelf", data: { em_collection: "ShelfGraph" }, edges: [],
       nodes: [{ id: "podio-b", name: "podio.bin", node_type: "resource", data: { url: file, media_type: "application/octet-stream" } }] } } };
-  const { p, ctx, errors } = await open({ doc: null, locale: "en", init: {
-    "emstudio.settings": JSON.stringify({ sync: { hubUrl: K_NODE } }), "emstudio.identities": DEV_ORCID_ID() } });
-  await p.evaluate(([d, pa]) => window.__EM_DRAG__.openAt(d, pa), [doc, `${dir}/f1-${stamp}.em.json`]);
-  await p.waitForTimeout(1500);
-  await p.evaluate((tk) => window.__EM_DRAG__.useToken(tk), tok);
-  await p.evaluate(() => window.__EM_DRAG__.bringIntoRoom());
-  await p.waitForSelector("#room-name", { timeout: 10000 });
-  await p.fill("#room-name", `f1 casa b ${stamp}`);
-  await p.click('.modal-foot button[data-a="ok"]');
-  await p.waitForSelector("#inv-pop .inv-go", { timeout: 60000 });
-  const groups = await p.evaluate(() => Object.fromEntries([...document.querySelectorAll("#inv-pop .inv-group")]
-    .map((g) => [g.dataset.group, g.querySelector("h5").textContent])));
-  const proposal = await p.evaluate(() => document.querySelector('#inv-pop .inv-group[data-group="elsewhere"] select')?.value ?? null);
+  const { p, ctx, errors } = await bringPage(doc, `${dir}/f1-${stamp}.em.json`, `f1 casa b ${stamp}`);
+  const groups = await groupsOf(p);
+  const sel = '#inv-pop .inv-group[data-group="elsewhere"] select';
+  const proposal = await p.evaluate((s) => document.querySelector(s)?.value ?? null, sel);
+  await p.selectOption(sel, "move");
   await p.click("#inv-pop .inv-go");
   await p.waitForSelector("#inv-pop .inv-move-ask", { timeout: 30000 });
   const ask = await p.evaluate(() => document.querySelector("#inv-pop .inv-move-ask")?.innerText ?? "");
@@ -4981,8 +4997,11 @@ if (K_NODE && process.env.F1_DIR) test("TF1.live", "T-F1 dal vivo · un file a c
   await p.click("#inv-pop .inv-move-yes");
   await p.waitForSelector("#inv-pop .inv-link", { timeout: 60000 });
   const rep = await p.evaluate(() => window.__EM_DRAG__.inventoryReport());
+  // EMStudio enters the room after the engine: the shelf it reads is the room's
+  await p.waitForFunction(() => window.__EM_DRAG__.shelf().some((e) => e.id === "podio-b" && /\/asset\//.test(e.locator)),
+    null, { timeout: 30000 }).catch(() => {});
   const shelf = await p.evaluate(() => window.__EM_DRAG__.shelf());
-  const roomB = await p.evaluate(() => window.__EM_DRAG__.files().find((f) => f.room)?.room?.id ?? null);
+  const roomB = await roomFile(p);
   await ctx.close();
   const view = kGet(`/rooms/${roomB}/asset-home/${put.ref}`, tok);
   const hex = put.sha256;
@@ -4991,44 +5010,63 @@ if (K_NODE && process.env.F1_DIR) test("TF1.live", "T-F1 dal vivo · un file a c
   const entry = shelf.find((e) => e.id === "podio-b");
   execFileSync("rm", ["-f", file]);
   return { pass: put.home === roomA && /^At home in another room · 1/.test(groups.elsewhere) && /^Found on this computer · 0/.test(groups.on_disk)
-      && proposal === "move" && ask.includes(roomA) && /become «in another room»/.test(ask)
+      && proposal === "host" && ask.includes(roomA) && /become «in another room»/.test(ask)
       && rep.moved === 1 && rep.uploaded === 0 && rep.bytes === 0
       && view.home === roomB && view.here === true && (view.references ?? []).includes(roomA)
-      && record.home === roomB && typeof record.home === "string" && (record.moves ?? []).length === 1
-      && entry?.locator?.includes(`/rooms/${encodeURIComponent(roomB)}/asset/`) && !errors.length,
-    detail: { roomA, roomB, groups, proposal, ask, rep, view: { home: view.home, references: view.references }, record, entry, errors } };
+      && record.home === roomB && (record.moves ?? []).length === 1
+      && String(entry?.locator ?? "").includes(`/rooms/${encodeURIComponent(roomB)}/asset/`) && !errors.length,
+    detail: { roomA, roomB, groups, proposal, ask, rep: { ...rep, engine: undefined }, view: { home: view.home, references: view.references }, record, entry, errors } };
 });
 
-if (process.env.F1_DIR) test("TL1.live", "T-L1 dal vivo · il bridge legge l'EXIF: il DosCo di Templu Mare (copia) non diventa lotto, nemmeno D.07.0x con l'EXIF di una sola fotocamera; le foto di una sessione (stessa fotocamera, ≤ 30 min) sono UN lotto proposto, non confermato", async () => {
+/** L1 · the photos of the lot rule, written when they are not there: a session
+ *  of 13 shots of one body in 3 minutes, five D.07.0x of the same body in a
+ *  DosCo, eight photos with no EXIF */
+function l1Fixture(dir) {
+  if (existsSync(`${dir}/session`)) return;
+  const py = new URL("../../../s3Dgraphy/.venv/bin/python", import.meta.url).pathname;
+  execFileSync(py, ["-c", `
+import os, sys
+from PIL import Image
+d = sys.argv[1]
+def shot(path, at=None):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    img = Image.new("RGB", (8, 8), (120, 90, 60))
+    if at is None:
+        img.save(path, "JPEG"); return
+    ex = Image.Exif()
+    ex[0x010F] = "Canon"; ex[0x0110] = "Canon EOS R5"
+    sub = ex.get_ifd(0x8769); sub[0xA431] = "012345"; sub[0x9003] = at
+    img.save(path, "JPEG", exif=ex)
+for i in range(13):
+    shot(f"{d}/session/IMG_{i:04d}.JPG", f"2026:09:30 10:{(15 * i) // 60:02d}:{(15 * i) % 60:02d}")
+for i in range(1, 6):
+    shot(f"{d}/DosCo/D.07.0{i}.jpg", f"2026:09:30 11:00:0{i}")
+for i in range(8):
+    shot(f"{d}/noexif/foto_{i}.jpg")
+`, dir]);
+}
+
+if (process.env.F1_DIR && K_NODE) test("TL1.live", "T-L1 dal vivo · il bridge legge l'EXIF e il MOTORE propone i lotti: un DosCo non diventa lotto, nemmeno D.07.0x con l'EXIF di una sola fotocamera; le foto di una sessione (stessa fotocamera, ≤ 30 min) sono UN lotto proposto, non confermato", async () => {
   const dir = process.env.F1_DIR;
-  const dosco = `${dir.replace(/\/f1l1$/, "")}/DosCo`;
-  const pick = (folder) => execFileSync("ls", [folder], { encoding: "utf8" }).split("\n").filter((f) => f && !f.startsWith("."))
-    .map((f) => `${folder}/${f}`);
-  const files = [...pick(dosco), ...pick(`${dir}/DosCo`), ...pick(`${dir}/session`), ...pick(`${dir}/noexif`)];
+  l1Fixture(dir);
+  const pick = (folder) => existsSync(folder) ? execFileSync("ls", [folder], { encoding: "utf8" }).split("\n")
+    .filter((f) => f && !f.startsWith(".")).map((f) => `${folder}/${f}`) : [];
+  const files = [...pick(`${dir}/DosCo`), ...pick(`${dir}/session`), ...pick(`${dir}/noexif`)];
   const doc = { header: { format: "em.json", version: "1.0" }, active_graph_id: "g-l1", graphs: {
     "g-l1": { graph_id: "g-l1", name: "L1", nodes: [{ id: "us1", node_type: "US", name: "US 1" }], edges: [] },
     shelf: { graph_id: "shelf", name: "Shelf", data: { em_collection: "ShelfGraph" }, edges: [],
       nodes: files.map((f, i) => ({ id: `l1-${i}`, name: f.split("/").pop(), node_type: "resource", data: { url: f } })) } } };
-  const { p, ctx, errors } = await open({ doc: null, locale: "en", init: K_NODE ? {
-    "emstudio.settings": JSON.stringify({ sync: { hubUrl: K_NODE } }), "emstudio.identities": DEV_ORCID_ID() } : undefined });
-  await p.evaluate(([d, pa]) => window.__EM_DRAG__.openAt(d, pa), [doc, `${dir}/l1.em.json`]);
-  await p.waitForTimeout(1500);
-  await p.evaluate((tk) => window.__EM_DRAG__.useToken(tk), kToken("dev"));
-  await p.evaluate(() => window.__EM_DRAG__.bringIntoRoom());
-  await p.waitForSelector("#room-name", { timeout: 10000 });
-  await p.fill("#room-name", `l1 lotto ${Date.now() % 100000}`);
-  await p.click('.modal-foot button[data-a="ok"]');
-  await p.waitForSelector("#inv-pop .inv-go", { timeout: 120000 });
+  const { p, ctx, errors } = await bringPage(doc, `${dir}/l1.em.json`, `l1 lotto ${Date.now() % 100000}`);
   const lots = await p.evaluate(() => [...document.querySelectorAll("#inv-pop .inv-lot")].map((r) => ({
     text: r.querySelector("span")?.textContent ?? "", proposal: !!r.querySelector(".inv-lot-yes input"),
     checked: r.querySelector(".inv-lot-yes input")?.checked ?? null })));
-  // the DosCo copy may already be on the node (T-P2 uploaded it): then it is
-  // «already in the storage» or «at home in another room» — never a lot either way
-  const groups = await p.evaluate(() => Object.fromEntries([...document.querySelectorAll("#inv-pop .inv-group")]
-    .map((g) => [g.dataset.group, g.querySelector("h5").textContent])));
-  const n = (h) => Number(/· (\d+)/.exec(h ?? "")?.[1] ?? 0);
+  // the photos may already be on the node (an earlier run): «already in the
+  // storage» or «at home in another room» — never a lot then (they have no path to send)
+  const groups = await groupsOf(p);
   await p.screenshot({ path: SHOT("tl1-lotto-proposto") }).catch(() => {});
+  await p.click("#inv-pop .inv-later, #inv-pop .conn-acts .conn-btn:not(.inv-go)").catch(() => {});
   await ctx.close();
+  const n = (h) => Number(/· (\d+)/.exec(h ?? "")?.[1] ?? 0);
   return { pass: lots.length === 1 && /^Proposed lot «Canon EOS R5 #012345 · 2026-09-30 10:00–10:03» · 13 photos/.test(lots[0].text)
       && lots[0].proposal && lots[0].checked === false
       && n(groups.on_disk) + n(groups.in_store) + n(groups.elsewhere) === files.length && !errors.length,

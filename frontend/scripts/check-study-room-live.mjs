@@ -8,8 +8,10 @@
 // into a room…» seated the ACTIVE graph only, an operation never named its
 // graph, and a room held one graph (D-A). Now the room writes the study (I-2):
 //
-//   G2 · it is born with every graph and the shelf (`studySections`), and the
-//        seeding operations name their graph (`seedOpsForStudy`);
+//   G2 · it is born with every graph and the shelf, and the seeding operations
+//        name their graph — since 16 Oct 2026 by the ENGINE «Bring into a room…»
+//        calls (`s3dgraphy.room_import`, here through its command: the same
+//        `prepare`/`execute` the bridge runs for EMStudio);
 //   G1 · an edit of the second graph from EMStudio arrives in the second graph
 //        in EM Tools, and the other way round (EM Tools' `RoomSession`, driven
 //        by `EM-blender-tools/tests/live_study_room.py`);
@@ -21,7 +23,7 @@
 // is left on the node, named `studio-claude-<time>`, as the proof.
 import assert from "node:assert/strict";
 import { execFileSync, spawn } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import * as esbuild from "esbuild";
 
@@ -47,8 +49,8 @@ const load = async (entry) => import("data:text/javascript;base64," + Buffer.fro
   (await esbuild.build({ entryPoints: [`${SRC}${entry}`], bundle: true, format: "esm",
                          write: false })).outputFiles[0].text).toString("base64"));
 const S = await load("sync.ts");
-const R = await load("rooms.ts");
 const W = await load("wire.ts");
+const S3D = process.env.S3DGRAPHY_DIR ?? `${HERE}../../../s3Dgraphy/`;
 
 let checks = 0;
 const ok = (cond, what) => { assert.ok(cond, what); checks++; console.log(`  ✓ ${what}`); };
@@ -86,46 +88,39 @@ function send(client, op) {
 }
 
 const study = JSON.parse(readFileSync(STUDY, "utf-8"));
-const birth = R.studySections(study);
-const ids = birth.graphs.map((g) => g.graph_id);
+const corpusOrShelf = (g) => ["ShelfGraph", "DTCCorpus"].includes(study.graphs[g]?.data?.em_collection);
+const graphsOnly = Object.keys(study.graphs).filter((g) => !corpusOrShelf(g));
+const ids = [...graphsOnly, ...Object.keys(study.graphs).filter((g) => study.graphs[g]?.data?.em_collection === "ShelfGraph")];
 const units = (gid) => (study.graphs[gid]?.nodes ?? []).length;
-const graphsOnly = ids.filter((g) => study.graphs[g]?.data?.em_collection !== "ShelfGraph");
-const first = birth.active_graph_id;
+const first = study.active_graph_id && graphsOnly.includes(study.active_graph_id) ? study.active_graph_id : graphsOnly[0];
 const second = graphsOnly.find((g) => g !== first);
 const firstNode = study.graphs[first].nodes[0].id;
 const secondNode = study.graphs[second].nodes[0].id;
 console.log(`study: ${STUDY}\n  sections ${ids.join(", ")} · active ${first} · second ${second}`);
 
-// ── G2 · born with the study's sections, seeded whole ───────────────────────
-console.log("G2 · the whole study goes into the room");
+// ── G2 · born with the study's sections, seeded whole — by the ENGINE ───────
+console.log("G2 · the whole study goes into the room (the engine)");
 const roomId = `studio-claude-${Date.now().toString(36)}`;
-const made = await fetch(`${BASE}/v1/rooms`, {
-  method: "POST",
-  headers: { "Content-Type": "application/json", Authorization: `Bearer ${TOKEN}` },
-  body: JSON.stringify({ room_id: roomId, title: `Studio in stanza ${roomId}`,
-                         graphs: birth.graphs, active_graph_id: birth.active_graph_id }),
-});
-const created = await made.json();
-eq(made.status, 201, `the room ${roomId} is created`);
-eq(created.born_with, ids, "…born with every graph and the shelf");
+const work = `/tmp/studio-in-stanza/${roomId}`;
+mkdirSync(work, { recursive: true });
+const out = JSON.parse(execFileSync(`${S3D}.venv/bin/python`, ["-m", "s3dgraphy", "room-import", STUDY,
+  "--node", BASE, "--room", roomId, "--title", `Studio in stanza ${roomId}`, "--token", TOKEN,
+  "--journal", `${work}/journal.json`, "--report-dir", work, "--work-dir", `${work}/packs`, "--json"],
+  { env: { ...process.env, PYTHONPATH: `${S3D}src` }, encoding: "utf-8", maxBuffer: 1 << 26 }));
+const seededUpTo = iso();
+eq([...(out.room_state?.born_with ?? [])].sort(), [...ids].sort(), `the room ${roomId} is born with every graph and the shelf`);
+ok(out.seeded.applied > 0 && out.seeded.refused === 0,
+   `…and the engine seated them: ${out.seeded.applied} operation(s) in ${out.seeded.requests} request(s), none refused`);
 
 const A = join(roomId);
 await until("A's snapshot", () => A.heard.snapshot);
-const seed = R.seedOpsForStudy(study);
-for (const op of seed) send(A.client, op);
-await until("every seeding op answered", () => A.heard.results.length >= seed.length, 30000);
-const refusedSeed = A.heard.results.filter((r) => !r.applied);
-eq(refusedSeed.map((r) => r.reason), [], "every seeding operation applied");
-A.client.sendRequestSave();
-// where a late client will say it stopped: the last seeding op, as the room
-// stamped it (a cursor older than the log refuses the replay, rightly)
-const seededUpTo = A.heard.results.map((r) => String(r.op?.ts ?? "")).sort().at(-1);
-
 const B = join(roomId);
 const doc = await until("B's snapshot", () => B.heard.snapshot);
 eq(Object.keys(doc.graphs).sort(), [...ids].sort(), "a second client finds every section");
 for (const gid of ids) {
-  eq((doc.graphs[gid].nodes ?? []).length, units(gid), `…«${doc.graphs[gid].name}» with its ${units(gid)} node(s)`);
+  // s3Dgraphy's reading adds what a graph is born with (its geo position node)
+  ok((doc.graphs[gid].nodes ?? []).length >= units(gid),
+     `…«${doc.graphs[gid].name}» with its ${units(gid)} node(s) (${(doc.graphs[gid].nodes ?? []).length} in the room)`);
 }
 eq(doc.active_graph_id, first, "…and the graph in front is the study's");
 

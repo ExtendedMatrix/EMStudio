@@ -18,8 +18,7 @@ import {
 } from "./container";
 import type { Conflict, ProjectVersion } from "./container";
 import {
-  nameIsUsable, roomIdFromName, seedOpsForContainer, seedOpsForStudy, studySections,
-  whatBlocksTheGesture,
+  nameIsUsable, roomIdFromName, whatBlocksTheGesture,
 } from "./rooms";
 import {
   addToShelf,
@@ -361,9 +360,8 @@ import type {
   PromptResult,
   StratiMinerHandlers,
 } from "./stratiminer";
-import { buildInventory, candidatesOf, choose, confirmLot, digestInLocator, humanBytes, INV_GROUPS, inventoryReport,
-  locatorKind, movePlan, normDigest, resolveLocal, toMove, toUpload, type HomeView, type InvCandidate, type InvChoice,
-  type InvItem, type InvOutcome, type InvProbe, type Inventory, type PhotoExif } from "./room-inventory";
+import { choose, confirmLot, engineChoices, humanBytes, INV_GROUPS, inventoryFromPlan, movePlan, reportOf, toMove,
+  toUpload, type EnginePlan, type EngineReport, type HomeView, type InvChoice, type Inventory } from "./room-inventory";
 import { type HostInfo, SyncClient, SYNC_ACCEPTS, type SyncAccept } from "./sync";
 import { type Access, type ConnectionState, type NodeApi, type Reach, nodeApi, renderConnectionPanel,
   renderRoomPanel, roleStateId, roomStateId, shortNode, whereDetails, whereHealth, wherePhrase } from "./connection";
@@ -1549,7 +1547,7 @@ function paintConnectionPanel(pop: HTMLElement): void {
     // way back this panel opens again and asks the rooms again
     signInAgain: () => { pop.classList.add("hidden"); void signIntoNode({ intent: "identity", then: "rooms" }); },
     joinRoom: (id) => { pop.classList.add("hidden"); enterRoom(id); },
-    newRoom: () => { pop.classList.add("hidden"); void createRoomHere(false); },
+    newRoom: () => { pop.classList.add("hidden"); void createRoomHere(); },
     bringIntoRoom: () => { pop.classList.add("hidden"); void bringIntoRoom(); },
     roomResources: () => { pop.classList.add("hidden"); if (sync.room) void openResourceInventory(sync.room); },
     // FIRMA DELLA NASCITA · «chi sono, e come esco»
@@ -7247,12 +7245,6 @@ function renderHubRoster(): void {
  * and the desktop learns it from the link.
  */
 
-/** The document waiting to be seated on a table it does not know about yet. */
-let seedingRoom: { room: string; container: Record<string, unknown>;
-                   /** G2 · the sections the node says the room was born with;
-                    *  empty on a node that does not know the field (then: the
-                    *  active graph alone, as before) */
-                   born: string[] } | null = null;
 
 /** One field, and the verb it is for. Reuses the modal the sidecar warning uses
  *  rather than a second idea of what a dialog looks like. */
@@ -7307,60 +7299,69 @@ function askRoomName(seeding: boolean): Promise<string | null> {
   });
 }
 
-/**
- * Create a room on the node that served this page, and optionally seat the open
- * container on it.
- *
- * THE LADDER FIRST, AND NOT A FORM. Creating a room writes an ACL naming its
- * owner, so the node has to know who that is — `POST /v1/rooms` answers 401 for
- * exactly that reason. When a rung is missing the gesture does what the CHIP
- * would do, which is the point: one ladder, not a second login prompt bolted to
- * a menu item.
- */
-/** P1 · «Bring into a room…»: a new room, you its owner, this graph in it —
- *  and then its resources (P2). The candidates and the folder their relative
- *  paths start from are taken NOW: once seated, the graph is the room's copy
- *  and has no folder of its own. */
+/** P1 · «Bring into a room…»: a new room, you its owner, this study in it with
+ *  its resources — the ENGINE's gesture (MICRO-PORTA-IN-STANZA-DAL-MOTORE,
+ *  16 Oct 2026). `s3dgraphy.room_import`, through the bridge's `/room-import`,
+ *  creates the room (born with the study's sections), makes the plan, and —
+ *  after the person's choices in the dialog, which stays this page's — sends
+ *  the files, hosts the resources, seats the graph LAST and sets
+ *  `study-access`. EMStudio enters the room after, with `connectToHub`, and
+ *  reads the graph the room now holds. Until that day EMStudio did it itself:
+ *  the graph seated FIRST through the socket, then a second wave of updates,
+ *  one per file uploaded, and an inventory that saw other files than EM
+ *  Tools' (the report of MICRO-ROOM-IMPORT, 15 Oct 2026). */
 async function bringIntoRoom(): Promise<void> {
-  const before = inventorySources();
-  const seated = await createRoomHere(true);
-  if (!seated) return;
-  pendingInventory = { room: seated, ...before };
+  // THE CHEAP, LOCAL, CERTAIN REFUSAL FIRST: no document, no round trip
+  // through an identity provider to learn it
+  if (!store) { toast(t("room.bringNeedsDocument")); return; }
+  const blocked = whatBlocksTheGesture(Boolean(currentIdentity()), Boolean(hubToken));
+  if (blocked) {
+    toast(nextRungInvitation());
+    identityChipClicked();          // declare a signature, or sign in — its rung
+    return;
+  }
+  const name = await askRoomName(true);
+  if (!name) return;
+  const roomId = roomIdFromName(name);
+  const server = servingNode();
+  if (!server) { toast(t("idw.noNode")); openNodeSettings(); return; }   // DEV30 U14
+  // TAKEN NOW: the study on screen and the folders its paths start from
+  await openResourceInventory(roomId, { ...inventorySources(), doc: studyContainerDoc(), node: server,
+                                        title: name, enter: true });
 }
-/** P2 · the inventory waiting for its room to be seated (see `seatSeededContainer`) */
-let pendingInventory: { room: string; graphs: InvGraph[]; baseDir: string | null; doscoDirs: string[] } | null = null;
-type InvGraph = { id: string; nodes: EmNode[]; edges: EmEdge[] };
 
-/** P2 · what the inventory reads: the open graph, and the shelf (the project's
- *  raw material — the drone photos of a survey live there) */
-function inventorySources(): { graphs: InvGraph[]; baseDir: string | null; doscoDirs: string[] } {
-  const graphs: InvGraph[] = [];
-  if (store) graphs.push({ id: "study", nodes: store.doc.graph.nodes, edges: store.doc.graph.edges ?? [] });
-  const shelf = shelfEntries();
-  if (shelf.length) graphs.push({ id: "shelf", edges: [], nodes: shelf.map((e) => ({
-    id: e.id, name: e.name, node_type: "resource",
-    data: { url: e.locator, ...(e.checksum ? { checksum: e.checksum } : {}) } }) as unknown as EmNode) });
+/** P2 · what the engine reads: the study this page holds (every graph of the
+ *  file and the shelf — the project's raw material — as one container), its
+ *  em.json, and the folders a relative path is looked for in: the em.json's,
+ *  then the DosCo folders the file declares (L1: documentation, never a lot). */
+interface InvSource {
+  /** the study as one container: taken when the gesture starts */
+  doc?: Record<string, unknown>;
+  emJson: string | null;
+  /** the em.json's folder (also what the file tools look in) */
+  baseDir: string | null;
+  baseDirs: string[];
+  doscoDirs: string[];
+  /** the node, when it is not this session's room's (a room not entered yet) */
+  node?: string;
+  title?: string;
+  /** enter the room once the graph is seated in it */
+  enter?: boolean;
+}
+function inventorySources(): InvSource {
   const path = emtree.activeFile()?.path ?? currentFilePath;
-  const baseDir = path ? path.replace(/[\\/][^\\/]*$/, "") : null;
-  // L1 · the DosCo folders this file declares: documentation, never a lot
+  const absolute = !!path && /^(\/|[A-Za-z]:[\\/])/.test(path);
+  const baseDir = absolute ? path!.replace(/[\\/][^\\/]*$/, "") : null;
+  const under = (p: string): string => {
+    const q = p.replace(/^file:\/\//i, "");
+    return /^(\/|[A-Za-z]:[\\/]|~)/.test(q) || !baseDir ? q : `${baseDir}/${q.replace(/^\.\//, "")}`;
+  };
   const doscoDirs = emtree.slotsOf(emtree.activeFile()?.id ?? null).flatMap((sl) => sl.auxiliaryFiles ?? [])
-    .filter((f) => f.fileType === "dosco" && f.locator).map((f) => resolveLocal(f.locator, baseDir));
-  return { graphs, baseDir, doscoDirs };
+    .filter((f) => f.fileType === "dosco" && f.locator).map((f) => under(f.locator));
+  return { emJson: absolute ? path! : null, baseDir,
+           baseDirs: [...new Set([baseDir, ...doscoDirs].filter((d): d is string => !!d))], doscoDirs };
 }
 
-/** HEAD on the room's store: does it hold these bytes already? */
-async function roomHasDigest(base: string, room: string, digest: string): Promise<boolean> {
-  return (await roomAssetHead(base, room, digest)).ok;
-}
-/** F1 · …and in which room they LIVE (`X-EM-Home-Room`): bytes the node has
- *  but that are at home in another room are not this room's — «Move here». */
-async function roomAssetHead(base: string, room: string, digest: string): Promise<{ ok: boolean; home: string | null }> {
-  try {
-    const r = await nodeAuthFetch(`${base}/v1/rooms/${encodeURIComponent(room)}/asset/${encodeURIComponent(digest)}`,
-      { method: "HEAD", cache: "no-store" });
-    return { ok: r.ok, home: r.ok ? r.headers.get("X-EM-Home-Room") : null };
-  } catch { return { ok: false, home: null }; }
-}
 /** F1 · the node's answer about one file's home: where, who cites it, may I */
 async function assetHomeView(base: string, room: string, digest: string): Promise<HomeView | { error: string }> {
   try {
@@ -7371,157 +7372,46 @@ async function assetHomeView(base: string, room: string, digest: string): Promis
   } catch (exc) { return { error: String(exc) }; }
 }
 
-/** P2 · probe every candidate: the bridge for a disk path (it hashes and
- *  weighs), HEAD by sha256 for the store, nothing for an external reference */
-async function probeInventory(cands: InvCandidate[], baseDir: string | null, base: string, room: string,
-                              onStep: (done: number) => void): Promise<Map<string, InvProbe>> {
-  const out = new Map<string, InvProbe>();
-  let done = 0;
-  const one = async (c: InvCandidate): Promise<void> => {
-    const kind = locatorKind(c.locator);
-    if (kind === "external") { out.set(c.id, { group: "external", size: null, sha256: c.checksum }); return; }
-    if (kind === "store") {
-      const d = c.checksum ?? digestInLocator(c.locator);
-      const h = d ? await roomAssetHead(base, room, d) : { ok: false, home: null };
-      out.set(c.id, !h.ok ? { group: "missing", size: null, sha256: d, why: "not in this room's storage" }
-        : h.home && h.home !== room ? { group: "elsewhere", size: null, sha256: d, home: h.home }
-        : { group: "in_store", size: null, sha256: d });
-      return;
-    }
-    const path = resolveLocal(c.locator, baseDir);
+/** What the bridge says of a room import (`GET /room-import`). */
+interface ImportView {
+  ok: boolean; state: "planning" | "planned" | "running" | "done" | "failed";
+  lines?: string[]; next?: number; sent?: number; total?: number; paused?: boolean;
+  error?: string; status?: number | null; plan?: EnginePlan; report?: EngineReport & Record<string, unknown>;
+}
+/** One step of the engine's gesture, asked of the bridge. The session's token
+ *  travels in the body to the LOCAL bridge, which keeps it in memory only. */
+async function roomImportPost(body: Record<string, unknown>): Promise<{ ok: boolean; job?: string; error?: string }> {
+  try {
+    const r = await fetch(`${await bridgeUrl()}/room-import`, { method: "POST",
+      headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    const j = await r.json().catch(() => ({})) as { ok?: boolean; job?: string; error?: string };
+    return { ok: r.ok && j.ok !== false, job: j.job, error: j.error ?? (r.ok ? undefined : `bridge ${r.status}`) };
+  } catch (exc) { return { ok: false, error: String(exc) }; }
+}
+/** …and its lines, bytes, plan and report, read at intervals until it rests.
+ *  Every engine line goes to the Log, as it comes. */
+async function followRoomImport(job: string, onView: (v: ImportView) => void): Promise<ImportView> {
+  const bridge = await bridgeUrl();
+  let since = 0;
+  for (;;) {
+    let v: ImportView;
     try {
-      const r = await fetch(`${await bridgeUrl()}/fs/checksum?path=${encodeURIComponent(path)}`);
-      if (!r.ok) { out.set(c.id, { group: "missing", size: null, sha256: c.checksum, path, why: `bridge ${r.status}` }); return; }
-      const j = await r.json() as { checksum?: string; bytes?: number; exif?: PhotoExif | null };
-      const sha = normDigest(j.checksum) ?? c.checksum;
-      const h = sha ? await roomAssetHead(base, room, sha) : { ok: false, home: null };
-      // L1 · the bridge reads a photo's EXIF with the digest (camera, time): an
-      // older bridge says nothing, and then no session is proposed
-      const exif = j.exif ?? null;
-      out.set(c.id, h.ok && h.home && h.home !== room
-        ? { group: "elsewhere", size: j.bytes ?? null, sha256: sha, path, home: h.home, exif }
-        : { group: h.ok ? "in_store" : "on_disk", size: j.bytes ?? null, sha256: sha, path, exif });
-    } catch (exc) {
-      out.set(c.id, { group: "missing", size: null, sha256: c.checksum, path, why: String(exc) });
-    }
-  };
-  const queue = [...cands];
-  await Promise.all(Array.from({ length: 4 }, async () => {
-    for (let c = queue.shift(); c; c = queue.shift()) { await one(c); onStep(++done); }
-  }));
-  return out;
-}
-
-/** U1 · the upload queue is paused: the loop stops BETWEEN pieces (never in
- *  the middle of one) and goes on from the server's offset when resumed */
-let uploadPaused = false;
-const waitWhilePaused = async (): Promise<void> => {
-  while (uploadPaused) await new Promise((r) => setTimeout(r, 250));
-};
-/** Bigger than this, a file goes up in resumable pieces (U1) */
-const UPLOAD_PIECE = 8 * 1024 * 1024;
-
-/**
- * P2/U1 · send one file from the disk (through the bridge) to the room's store.
- * HEAD first — bytes the store has are not sent again. A small file is one
- * PUT; a big one is a resumable upload: pieces read with `Range` from the
- * bridge and PATCHed at the offset the SERVER says it has, so an interruption
- * resumes where the bytes stopped (a 409 hands the offset back).
- */
-async function sendToRoom(base: string, room: string, it: InvItem,
-                          onBytes: (n: number) => void): Promise<InvOutcome> {
-  // the bearer is added by `nodeAuthFetch`, the one road (it renews)
-  const auth: Record<string, string> = {};
-  const sha = it.sha256;
-  if (sha && await roomHasDigest(base, room, sha)) return { id: it.id, ok: true, sent: false, bytes: 0 };
-  const media = it.mediaType || "application/octet-stream";
-  const size = it.size ?? 0;
-  const roomUrl = `${base}/v1/rooms/${encodeURIComponent(room)}`;
-  if (size <= UPLOAD_PIECE) {
-    const bytes = await bridgeBytes(it.path!);
-    const r = await nodeAuthFetch(`${roomUrl}/asset?media_type=${encodeURIComponent(media)}`,
-      { method: "PUT", headers: auth, body: bytes });
-    if (!r.ok) return { id: it.id, ok: false, sent: false, bytes: 0, why: `${r.status} ${(await r.text()).slice(0, 120)}` };
-    const info = await r.json() as { created?: boolean; size?: number };
-    onBytes(bytes.byteLength);
-    return { id: it.id, ok: true, sent: info.created !== false, bytes: bytes.byteLength };
-  }
-  const start = await nodeAuthFetch(`${roomUrl}/uploads`, { method: "POST",
-    headers: { ...auth, "Content-Type": "application/json" },
-    body: JSON.stringify({ size, sha256: sha, media_type: media }) });
-  if (!start.ok) return { id: it.id, ok: false, sent: false, bytes: 0, why: `${start.status} ${(await start.text()).slice(0, 120)}` };
-  const up = await start.json() as { upload_id: string; offset: number };
-  let offset = up.offset ?? 0;
-  const fileUrl = await fsFileUrl(it.path!);
-  for (let tries = 0; offset < size && tries < 8;) {
-    if (uploadPaused) {
-      await waitWhilePaused();
-      // where is the server now? (another client, a restart: it decides)
-      const h = await nodeAuthFetch(`${roomUrl}/uploads/${encodeURIComponent(up.upload_id)}`, { method: "HEAD", headers: auth }).catch(() => null);
-      offset = Number(h?.headers.get("Upload-Offset") ?? offset);
-    }
-    const end = Math.min(size, offset + UPLOAD_PIECE) - 1;
-    const piece = await fetch(fileUrl, { headers: { Range: `bytes=${offset}-${end}` } });
-    if (piece.status !== 206 && piece.status !== 200) return { id: it.id, ok: false, sent: false, bytes: 0, why: `bridge ${piece.status}` };
-    const chunk = piece.status === 206 ? await piece.arrayBuffer()
-      : (await piece.arrayBuffer()).slice(offset, end + 1);
-    let r: Response;
-    try {
-      r = await nodeAuthFetch(`${roomUrl}/uploads/${encodeURIComponent(up.upload_id)}`, { method: "PATCH",
-        headers: { ...auth, "Upload-Offset": String(offset), "Content-Type": "application/offset+octet-stream" },
-        body: chunk });
-    } catch {
-      // the link dropped mid-piece: ask the server where it is, and go on from there
-      tries++;
-      const h = await nodeAuthFetch(`${roomUrl}/uploads/${encodeURIComponent(up.upload_id)}`, { method: "HEAD", headers: auth }).catch(() => null);
-      offset = Number(h?.headers.get("Upload-Offset") ?? offset);
-      continue;
-    }
-    const j = await r.json().catch(() => ({})) as { offset?: number; complete?: boolean; detail?: string };
-    if (r.status === 409) { tries++; offset = Number(j.offset ?? r.headers.get("Upload-Offset") ?? offset); continue; }
-    if (!r.ok) return { id: it.id, ok: false, sent: false, bytes: 0, why: `${r.status} ${j.detail ?? ""}`.slice(0, 160) };
-    onBytes((j.offset ?? end + 1) - offset);
-    offset = j.offset ?? end + 1;
-    if (j.complete) break;
-  }
-  return offset >= size ? { id: it.id, ok: true, sent: true, bytes: size }
-    : { id: it.id, ok: false, sent: false, bytes: 0, why: `stopped at ${offset} of ${size} bytes` };
-}
-
-/**
- * P2 · the node becomes STORE-BACKED without losing where it came from: `url`
- * is the room's asset, `checksum` the digest, residency `resident` — and the
- * disk path stays as a second address of the same bytes (`addresses.ts`). A
- * shelf entry keeps it in `extra.original_locator`.
- */
-function storeBack(it: InvItem, base: string, room: string,
-                   residency: "resident" | "reference" = "resident"): void {
-  const sha = it.sha256!;
-  const url = `${base}/v1/rooms/${encodeURIComponent(room)}/asset/${encodeURIComponent(sha)}`;
-  if (it.graphId === "shelf") {
-    const entry = shelfEntries().find((e) => e.id === it.id);
-    if (entry && entry.locator !== url) updateShelfEntry(it.id, { locator: url, checksum: sha, residency,
-      extra: { ...(entry.extra ?? {}), original_locator: entry.locator } });
-    return;
-  }
-  const st = storeOfNode(it.id);
-  const n = st?.node(it.id);
-  if (!st || !n) return;
-  const d = (n.data ?? {}) as Record<string, unknown>;
-  if (d.url === url) return;
-  const origin = String(d.url ?? d.path ?? it.locator);
-  st.updateNode(it.id, { data: { ...d, url, checksum: sha, residency,
-    ...(it.size != null ? { size_bytes: it.size } : {}),
-    ...(n.node_type === "resource_file" && !d.path ? { path: origin } : {}) } } as Partial<EmNode>);
-  if (n.node_type === "resource") {
-    try { addrs.addAddress(st, it.id, origin, { checksum: sha, residency: "reference" }); }
-    catch (exc) { logWarn(`inventory: ${it.name}: the origin ${origin} not kept as an address — ${String(exc)}`); }
+      const r = await fetch(`${bridge}/room-import?job=${encodeURIComponent(job)}&since=${since}`, { cache: "no-store" });
+      v = await r.json() as ImportView;
+      if (!r.ok) return { ok: false, state: "failed", error: v.error ?? `bridge ${r.status}` };
+    } catch (exc) { return { ok: false, state: "failed", error: String(exc) }; }
+    since = v.next ?? since;
+    for (const line of v.lines ?? []) logInfo(`room-import: ${line}`);
+    onView(v);
+    if (v.state === "planned" || v.state === "done" || v.state === "failed") return v;
+    await new Promise((r) => setTimeout(r, 400));
   }
 }
 
-/** P2 · the inventory panel for a room: four groups, choices, the upload, the report */
-async function openResourceInventory(room: string, src = inventorySources()): Promise<void> {
-  const base = (hubNodeUrl || getSettings().sync.hubUrl).trim().replace(/\/+$/, "");
+/** P2 · the inventory panel for a room: the engine's plan in five groups, the
+ *  person's choices, the run, the report. */
+async function openResourceInventory(room: string, src: InvSource = inventorySources()): Promise<void> {
+  const base = (src.node || hubNodeUrl || getSettings().sync.hubUrl).trim().replace(/\/+$/, "");
   if (!base || !room) { toast(t("share.noRoom")); return; }
   let pop = document.getElementById("inv-pop");
   if (!pop) {
@@ -7538,25 +7428,51 @@ async function openResourceInventory(room: string, src = inventorySources()): Pr
   const head = document.createElement("div");
   head.className = "modal-head";
   head.innerHTML = `<span></span><button class="modal-x" aria-label="Close">✕</button>`;
-  head.querySelector("span")!.textContent = t("inv.title", { room: roomRef(room).title });
+  head.querySelector("span")!.textContent = t("inv.title", { room: src.title || roomRef(room).title });
   head.querySelector("button")!.addEventListener("click", close);
   card.appendChild(head);
   const body = document.createElement("div");
   body.className = "inv-body";
   card.appendChild(body);
-  const cands = candidatesOf(src.graphs);
   const say = document.createElement("p");
   say.className = "inv-line";
   body.appendChild(say);
-  say.textContent = t("inv.probing", { n: String(cands.length), done: "0" });
-  const probes = await probeInventory(cands, src.baseDir, base, room,
-    (done) => { say.textContent = t("inv.probing", { n: String(cands.length), done: String(done) }); });
-  const inv = buildInventory(cands, probes, { doscoDirs: src.doscoDirs, ...lotThresholds() });
-  logInfo(`inventory «${room}»: ` + INV_GROUPS.map((g) => `${g} ${inv.groups[g].count} (${humanBytes(inv.groups[g].bytes)})`).join(" · "));
-  paintInventory(body, inv, base, room, close);
+  say.textContent = t("inv.preparing", { line: "" });
+  const { gapSeconds, minPhotos } = lotThresholds();
+  const started = await roomImportPost({ step: "plan", node: base, room, title: src.title || roomRef(room).title,
+    token: hubToken, doc: src.doc ?? studyContainerDoc(), em_json: src.emJson, base_dirs: src.baseDirs, dosco_dirs: src.doscoDirs,
+    lot_gap_seconds: gapSeconds, lot_min_photos: minPhotos,
+    // A TILESET FOLDER GOES UP AS ITS ONE CANONICAL .3tz: from a room the Space
+    // reads the .3tz (`space.ts::servable`), and the 7302 files of Templu Mare's
+    // tileset sent one by one were read by nobody (MICRO-ROOM-IMPORT, scelta 9)
+    pack_tilesets: "3tz" });
+  const v = started.ok && started.job
+    ? await followRoomImport(started.job, (x) => { say.textContent = t("inv.preparing", { line: x.lines?.at(-1) ?? "" }); })
+    : { ok: false, state: "failed" as const, error: started.error };
+  if (v.state !== "planned" || !v.plan) {
+    say.textContent = t("inv.engineFailed", { why: v.error ?? v.state });
+    logWarn(`room-import «${room}»: ${v.error ?? v.state}`);
+    return;
+  }
+  const job = started.job!;
+  if (v.plan.where?.seedable === false) {
+    // …AND ONLY INTO A ROOM THE NODE SAYS IS EMPTY: the engine read it from
+    // `POST /v1/rooms` (`missing_refs`) — seeding a room that holds a graph
+    // would write this file over somebody's work
+    void roomImportPost({ step: "forget", job });
+    toast(t("room.alreadyHasAGraph", { room: src.title || room }));
+    logWarn(`room: «${room}» already holds a graph — not seeding it (${v.plan.where.note ?? ""})`);
+    close();
+    return;
+  }
+  const inv = inventoryFromPlan(v.plan);
+  logInfo(`inventory «${room}»: ` + INV_GROUPS.map((g) => `${g} ${inv.groups[g].count} (${humanBytes(inv.groups[g].bytes)})`).join(" · ")
+          + (v.plan.where?.resumed ? ` — ${v.plan.where.note ?? "taken up again"}` : ""));
+  paintInventory(body, inv, base, room, close, { job, src });
 }
 
-function paintInventory(body: HTMLElement, inv: Inventory, base: string, room: string, close: () => void): void {
+function paintInventory(body: HTMLElement, inv: Inventory, base: string, room: string, close: () => void,
+                        run: { job: string; src: InvSource }): void {
   body.replaceChildren();
   const el = <K extends keyof HTMLElementTagNameMap>(tag: K, cls = "", text?: string): HTMLElementTagNameMap[K] => {
     const e = document.createElement(tag);
@@ -7572,6 +7488,7 @@ function paintInventory(body: HTMLElement, inv: Inventory, base: string, room: s
     sel.addEventListener("change", () => onPick(sel.value as InvChoice));
     return sel;
   };
+  const repaint = (): void => paintInventory(body, inv, base, room, close, run);
   const total = el("p", "inv-total");
   const refreshTotal = (): void => {
     const up = toUpload(inv);
@@ -7587,9 +7504,9 @@ function paintInventory(body: HTMLElement, inv: Inventory, base: string, room: s
     const h = el("h5", "", `${t(`inv.group.${g}`)} · ${inv.groups[g].count}` + (inv.groups[g].bytes ? ` · ${humanBytes(inv.groups[g].bytes)}` : ""));
     sect.appendChild(h);
     const items = inv.items.filter((i) => i.group === g);
-    if (g === "on_disk" && items.length) {
+    if (g === "on_disk" && items.some((i) => !i.fixed)) {
       const row = el("div", "inv-row");
-      row.append(el("span", "", t("inv.allOfGroup")), choiceSel("upload", (c) => { choose(inv, { group: g }, c); paintInventory(body, inv, base, room, close); }));
+      row.append(el("span", "", t("inv.allOfGroup")), choiceSel("upload", (c) => { choose(inv, { group: g }, c); repaint(); }));
       sect.appendChild(row);
       for (const lot of inv.lots.filter((l) => l.ids.some((id) => items.some((i) => i.id === id)))) {
         const r = el("div", "inv-row inv-lot");
@@ -7612,12 +7529,13 @@ function paintInventory(body: HTMLElement, inv: Inventory, base: string, room: s
       }
     }
     if (g === "elsewhere" && items.length) {
-      // F1 · the proposal: «Move here». Nothing moves before the confirmation
-      // that names the rooms citing these files (on «Upload», below)
+      // F1 · the engine's default: hosted HERE as it is, its home unchanged.
+      // «Move here» is asked file by file, and confirmed (on «Upload», below)
       sect.appendChild(el("p", "inv-line conn-dim", t("inv.elsewhereHint")));
       const row = el("div", "inv-row");
-      row.append(el("span", "", t("inv.allOfGroup")), choiceSel("move", (c) => { choose(inv, { group: g }, c); paintInventory(body, inv, base, room, close); },
-        ["move", "reference"]));
+      const all = items.every((i) => i.choice === "move") ? "move" : inv.elsewhereMode;
+      row.append(el("span", "", t("inv.allOfGroup")), choiceSel(all, (c) => { choose(inv, { group: g }, c); repaint(); },
+        ["host", "move", "reference"]));
       sect.appendChild(row);
     }
     const loose = items.filter((i) => g !== "on_disk" || !i.lotKey);
@@ -7632,8 +7550,11 @@ function paintInventory(body: HTMLElement, inv: Inventory, base: string, room: s
         r.appendChild(label);
         if (it.size != null) r.appendChild(el("span", "conn-dim", humanBytes(it.size)));
         if (g === "elsewhere" && it.home) r.appendChild(el("span", "conn-dim", t("inv.homeIn", { room: it.home })));
-        if (g === "on_disk") r.appendChild(choiceSel(it.choice, (c) => { it.choice = c; refreshTotal(); }));
-        if (g === "elsewhere") r.appendChild(choiceSel(it.choice, (c) => { it.choice = c; refreshTotal(); }, ["move", "reference"]));
+        if (g === "on_disk" && it.fixed) r.appendChild(el("span", "conn-dim", it.why ?? t("inv.choice.reference")));
+        else if (g === "on_disk") r.appendChild(choiceSel(it.choice, (c) => { it.choice = c; refreshTotal(); },
+          it.tree ? ["upload", "reference"] : ["upload", "reference", "skip"]));
+        if (g === "elsewhere") r.appendChild(choiceSel(it.choice, (c) => { choose(inv, { id: it.id }, c); refreshTotal(); },
+          [inv.elsewhereMode, "move"]));
         det.appendChild(r);
       }
       sect.appendChild(det);
@@ -7645,7 +7566,13 @@ function paintInventory(body: HTMLElement, inv: Inventory, base: string, room: s
   go.type = "button";
   const skip = el("button", "conn-btn", t("inv.later")) as HTMLButtonElement;
   skip.type = "button";
-  skip.addEventListener("click", close);
+  skip.addEventListener("click", () => {
+    // nothing sent, nothing seated: the room stays as the engine made it, and a
+    // second «Bring into a room» with the same name takes it up again
+    void roomImportPost({ step: "forget", job: run.job });
+    if (run.src.enter) toast(t("inv.later.room", { room: run.src.title || room }));
+    close();
+  });
   acts.append(go, skip);
   body.append(total, acts);
   refreshTotal();
@@ -7653,10 +7580,11 @@ function paintInventory(body: HTMLElement, inv: Inventory, base: string, room: s
   body.appendChild(progress);
   go.addEventListener("click", async () => {
     go.disabled = true;
-    const outcomes: InvOutcome[] = [];
+    skip.disabled = true;
     // F1 · «Move here», confirmed: first the node says, per file, where it
     // lives, which rooms' graphs cite it and whether you may move it; the
-    // person reads that and says yes or no. Only then the homes change.
+    // person reads that and says yes or no. Only then the engine moves them.
+    let moved: string[] = [];
     const moving = toMove(inv);
     if (moving.length) {
       progress.textContent = t("inv.moveAsking", { n: String(moving.length) });
@@ -7664,101 +7592,74 @@ function paintInventory(body: HTMLElement, inv: Inventory, base: string, room: s
       for (const it of moving) views.set(it.id, await assetHomeView(base, room, it.sha256!));
       const plan = movePlan(moving, views);
       const yes = await askMoveHere(body, plan, room);
-      for (const it of plan.movable) {
-        if (!yes) { it.choice = "reference"; continue; }
-        const v = views.get(it.id) as HomeView;
-        try {
-          const r = await nodeAuthFetch(`${base}/v1/rooms/${encodeURIComponent(room)}/asset-home/${encodeURIComponent(it.sha256!)}`, {
-            method: "POST", headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ from_room: v.home, confirm: true }) });
-          const j = await r.json().catch(() => ({})) as { home?: string; detail?: string };
-          if (r.ok && j.home === room) {
-            outcomes.push({ id: it.id, ok: true, sent: false, bytes: 0, moved: true, home: room });
-            it.home = room;
-            storeBack(it, base, room);
-            logInfo(`inventory: ${it.name} moved here from ${v.home ?? "?"} — references now in ${(v.references ?? []).join(", ") || "no other room"}`);
-          } else {
-            outcomes.push({ id: it.id, ok: false, sent: false, bytes: 0, why: `${r.status} ${j.detail ?? ""}`.slice(0, 160) });
-          }
-        } catch (exc) { outcomes.push({ id: it.id, ok: false, sent: false, bytes: 0, why: String(exc) }); }
-      }
-      for (const b of plan.blocked) { b.item.choice = "reference"; logWarn(`inventory: ${b.item.name} stays in ${b.item.home ?? "?"} — ${b.why}`); }
+      if (yes) moved = plan.movable.map((it) => it.id);
+      for (const it of moving) if (!moved.includes(it.id)) it.choice = inv.elsewhereMode;
+      for (const b of plan.blocked) logWarn(`inventory: ${b.item.name} stays in ${b.item.home ?? "?"} — ${b.why}`);
     }
-    // F1 · what stays at home elsewhere is a REFERENCE to the bytes there
-    for (const it of inv.items.filter((i) => i.group === "elsewhere" && i.choice === "reference" && i.home && i.sha256))
-      storeBack(it, base, it.home!, "reference");
-    const work = inv.items.filter((i) => i.group === "on_disk" && i.choice === "upload");
-    const want = toUpload(inv).bytes;
-    let moved = 0;
     const pause = el("button", "conn-btn inv-pause", t("inv.pause")) as HTMLButtonElement;
     pause.type = "button";
-    uploadPaused = false;
+    let paused = false;
     pause.addEventListener("click", () => {
-      uploadPaused = !uploadPaused;
-      pause.textContent = t(uploadPaused ? "inv.resume" : "inv.pause");
-      logInfo(t(uploadPaused ? "inv.paused" : "inv.resumed"));
+      paused = !paused;
+      pause.textContent = t(paused ? "inv.resume" : "inv.pause");
+      logInfo(t(paused ? "inv.paused" : "inv.resumed"));
+      void roomImportPost({ step: paused ? "pause" : "resume", job: run.job });
     });
     acts.appendChild(pause);
-    for (const [k, it] of work.entries()) {
-      await waitWhilePaused();
-      progress.textContent = t("inv.sending", { k: String(k + 1), n: String(work.length), name: it.name,
-        done: humanBytes(moved), size: humanBytes(want) });
-      let o: InvOutcome;
-      try {
-        o = await sendToRoom(base, room, it, (n) => {
-          moved += n;     // per piece: a long file shows it moving, and a pause shows it stopped
-          progress.textContent = t("inv.sending", { k: String(k + 1), n: String(work.length), name: it.name,
-            done: humanBytes(moved), size: humanBytes(want) });
-        });
-      }
-      catch (exc) { o = { id: it.id, ok: false, sent: false, bytes: 0, why: String(exc) }; }
-      outcomes.push(o);
-      if (o.ok) storeBack(it, base, room);
-      else logWarn(`inventory: ${it.name} not uploaded — ${o.why ?? "?"}`);
-    }
-    // the nodes already in the store become store-backed too (nothing is sent)
-    for (const it of inv.items) if (it.group === "in_store" && it.sha256) storeBack(it, base, room);
-    // a reference stays where it is, and says so
-    for (const it of inv.items.filter((i) => i.group === "on_disk" && i.choice === "reference")) {
-      const st = storeOfNode(it.id); const n = st?.node(it.id);
-      if (st && n) st.updateNode(it.id, { data: { ...(n.data as Record<string, unknown>), residency: "reference",
-        ...(it.sha256 ? { checksum: it.sha256 } : {}) } } as Partial<EmNode>);
-    }
-    // RAW PHOTOS AS A LOT: one acquisition in the documentation, not N rows
-    const corpus = documentationCorpus();
-    for (const lot of inv.lots.filter((l) => l.confirmed)) {
-      const ok = lot.ids.filter((id) => outcomes.some((o) => o.id === id && o.ok)
-        || inv.items.some((i) => i.id === id && i.group === "in_store"));
-      if (!corpus || !ok.length) continue;
-      for (const id of ok) { const n = storeOfNode(id)?.node(id); if (n) mirrorIntoCorpus(corpus, n); }
-      const shelfIds = ok.filter((id) => !storeOfNode(id)?.node(id));
-      for (const id of shelfIds) {
-        const e = shelfEntries().find((x) => x.id === id);
-        if (e) mirrorIntoCorpus(corpus, { id, name: e.name, node_type: "resource",
-          data: { url: e.locator, checksum: e.checksum, residency: e.residency } } as unknown as EmNode);
-      }
-      const made = bucketAcquisition(corpus, { acquisitionId: lot.acquisition ?? undefined, resources: ok,
-        name: lot.acquisition ? undefined : t("inv.lotName", { name: lot.name }),
-        metadata: { ingested_at: new Date().toISOString(), source: "EMStudio · bring into a room" } });
-      logInfo(`inventory: lot «${lot.name}» → ${made.acquisitionId} (${made.count} file)`);
-    }
+    const choices = engineChoices(inv, moved);
+    const started = await roomImportPost({ step: "execute", job: run.job, token: hubToken,
+      visibility: "restricted", ...choices });
+    const v = started.ok
+      ? await followRoomImport(run.job, (x) => {
+          progress.textContent = t("inv.sending", { done: humanBytes(x.sent ?? 0), size: humanBytes(x.total ?? 0),
+            line: x.lines?.at(-1) ?? "" });
+        })
+      : { ok: false, state: "failed" as const, error: started.error };
     pause.remove();
-    if (outcomes.some((o) => o.ok)) sync.sendRequestSave();
-    const rep = inventoryReport(inv, outcomes);
-    const door = await nodeHttp(base).door(room).catch(() => ({ web: null, scheme: null }));
-    const link = door.web || `${base}/work/?room=${encodeURIComponent(room)}`;
+    if (v.state !== "done" || !v.report) {
+      progress.textContent = t("inv.engineFailed", { why: v.error ?? v.state });
+      logWarn(`room-import «${room}»: ${v.error ?? v.state}`);
+      return;
+    }
+    const rep = reportOf(v.report);
+    for (const f of v.report.failed ?? []) logWarn(`inventory: ${f}`);
+    const door = v.report.link ? null : await nodeHttp(base).door(room).catch(() => ({ web: null, scheme: null }));
+    const link = v.report.link || door?.web || `${base}/work/?room=${encodeURIComponent(room)}`;
     const sentence = t("inv.report", { n: String(rep.uploaded), size: humanBytes(rep.bytes),
       a: String(rep.already), m: String(rep.references), k: String(rep.missing) })
       + (rep.moved ? ` · ${t("inv.moved", { n: String(rep.moved) })}` : "")
       + (rep.failed ? ` · ${t("inv.failed", { n: String(rep.failed) })}` : "");
     logInfo(`${sentence} — ${link}`);
+    if (v.report.sentence) logInfo(`room-import: ${v.report.sentence}`);
     info.textContent = sentence;
     progress.textContent = sentence;
     const a = el("a", "inv-link", link) as HTMLAnchorElement;
     a.href = link; a.target = "_blank"; a.rel = "noopener";
     body.appendChild(a);
-    lastInventoryReport = { ...rep, link };
+    lastInventoryReport = { ...rep, link, engine: v.report };
+    void roomImportPost({ step: "forget", job: run.job });
+    if (run.src.enter) {
+      // THE GRAPH IS SEATED: now EMStudio enters, and reads it from the room —
+      // the copy the node keeps, with its resources already hosted
+      logInfo(`room: «${room}» seated by the engine (${rep.seeded} operation(s)) — entering it`);
+      parkShelfInItsFile();
+      connectToHub(base, room, hubToken);
+      toast(t("room.livesOnTheNodeNow", { room }));
+    }
   });
+}
+/** The study is the ROOM's now, its shelf too (the files on it hosted by the
+ *  room): the shelf in front must become the room's when its snapshot arrives.
+ *  The shelf is one per workspace and stays with the file that brought it
+ *  (`shelfHomeFileId`), so the room's would be put away in the room's file —
+ *  measured (T-F1): after the engine the page still showed the disk paths. So
+ *  the local file's shelf is put away IN that file, unchanged, as a corpus is
+ *  (`showFileCorpus`), and the room's is adopted when it arrives. */
+function parkShelfInItsFile(): void {
+  const home = shelfHomeFileId ? emtree.file(shelfHomeFileId) : null;
+  const current = projectShelfSection();
+  if (home && current) home.retained[String(current.graph_id ?? "shelf")] = JSON.parse(JSON.stringify(current));
+  shelfHomeFileId = null;
 }
 /** P2 · the last report, for the checks */
 let lastInventoryReport: Record<string, unknown> | null = null;
@@ -7767,7 +7668,8 @@ let lastInventoryReport: Record<string, unknown> | null = null;
  * F1 · the explicit yes, inside the panel (not a browser `confirm`): which
  * rooms the files leave, which rooms' graphs will hold a REFERENCE, and that
  * whoever is not a participant of this room will not see the bytes. Files the
- * node will not let you move are named with its reason and stay references.
+ * node will not let you move are named with its reason and stay hosted here as
+ * they are (or references, as the group says).
  */
 function askMoveHere(body: HTMLElement, plan: ReturnType<typeof movePlan>, room: string): Promise<boolean> {
   return new Promise((resolve) => {
@@ -7816,15 +7718,16 @@ function enterRoom(roomId: string): void {
   document.getElementById("btn-mode-hub")?.click();
 }
 
-async function createRoomHere(seed: boolean): Promise<string | null> {
-  // THE CHEAP, LOCAL, CERTAIN REFUSAL FIRST. Measured in the browser: with a
-  // declared-but-unconfirmed signature and no document open, this sent the
-  // person through a whole sign-in against the realm — and would have greeted
-  // them on the way back with «there is no graph open to put on a table».
-  // A round trip through an identity provider to learn something that was true
-  // before it started.
-  if (seed && !store) { toast(t("room.bringNeedsDocument")); return null; }
-
+/**
+ * Create a room on the node that served this page, empty.
+ *
+ * THE LADDER FIRST, AND NOT A FORM. Creating a room writes an ACL naming its
+ * owner, so the node has to know who that is — `POST /v1/rooms` answers 401 for
+ * exactly that reason. When a rung is missing the gesture does what the CHIP
+ * would do, which is the point: one ladder, not a second login prompt bolted to
+ * a menu item.
+ */
+async function createRoomHere(): Promise<string | null> {
   const blocked = whatBlocksTheGesture(Boolean(currentIdentity()), Boolean(hubToken));
   if (blocked) {
     toast(nextRungInvitation());
@@ -7832,31 +7735,18 @@ async function createRoomHere(seed: boolean): Promise<string | null> {
     return null;
   }
 
-  const name = await askRoomName(seed);
+  const name = await askRoomName(false);
   if (!name) return null;
   const roomId = roomIdFromName(name);
   const server = servingNode();
   if (!server) { toast(t("idw.noNode")); openNodeSettings(); return null; }   // DEV30 U14
-
-  // CAPTURED BEFORE CONNECTING, and the order is the whole repair. Measured on
-  // the dev stack: a room created a second ago still SENDS a snapshot — a
-  // container holding one empty graph — so joining it would call
-  // `loadContainerDocument` with nothing in it and the document on screen would
-  // be gone. Same class as the bug STEP 4 fixed in the other direction: the
-  // snapshot arriving after the re-send overwrote it.
-  const container = seed ? studyContainerDoc() : null;
-  // G2 · the room is born with the study's sections — every graph and the
-  // shelf, empty — so each seeding operation can name its graph (I-2)
-  const birth = container ? studySections(container) : null;
 
   let created: Record<string, unknown>;
   try {
     const answer = await nodeAuthFetch(`${server}/v1/rooms`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ room_id: roomId, title: name,
-                             ...(birth ? { graphs: birth.graphs,
-                                           active_graph_id: birth.active_graph_id } : {}) }),
+      body: JSON.stringify({ room_id: roomId, title: name }),
     });
     if (!answer.ok) {
       // THE NODE'S OWN SENTENCE. A 409 («already declared») and a 401 send
@@ -7877,122 +7767,10 @@ async function createRoomHere(seed: boolean): Promise<string | null> {
   }
   logInfo(`room: created «${roomId}» on ${server} as `
           + String(created.your_role ?? "?"));
-
-  if (seed && container) {
-    // …AND ONLY INTO A ROOM THE NODE SAYS IS EMPTY. `POST /v1/rooms` refuses a
-    // room already DECLARED, but it will happily declare one that exists in the
-    // snapshot store and was never declared — and seeding that would write our
-    // file over somebody's undeclared work. The node hands us the answer in the
-    // same response: `missing_refs` naming this room's own container means it has
-    // nothing to lose.
-    const missing = (created.missing_refs as string[] | undefined) ?? [];
-    const refs = (created.container_refs as string[] | undefined) ?? [roomId];
-    const empty = refs.every((ref) => missing.includes(ref));
-    if (!empty) {
-      toast(t("room.alreadyHasAGraph", { room: name }));
-      logWarn(`room: «${roomId}» already holds a graph — not seeding it`);
-      return null;                  // the room exists; it is not seeded
-    }
-    seedingRoom = { room: roomId, container,
-                    born: ((created.born_with as string[] | undefined) ?? []).map(String) };
-  }
+  // An EMPTY room. A study with its files goes into a room through «Bring into
+  // a room…», which is the engine's (`bringIntoRoom`): this verb seats nothing.
   connectToHub(server, roomId, hubToken);
   return roomId;
-}
-
-/**
- * Seat the captured container on the table, once the room has spoken.
- *
- * WHY OPERATIONS AND NOT A NEW ENDPOINT: the relay has five idempotent verbs and
- * a merge that arbitrates them. A seeding endpoint would be a sixth way for a
- * graph to enter a room, writing straight past the convergence rules — and the
- * first time it raced a connected client the room would have two truths and no
- * ledger saying which came first.
- *
- * WHY IT ALSO LOADS LOCALLY: the relay does NOT echo the sender its own work
- * (`ws.py::_fanout(skip=origin)` — «a client must not have to recognise its own
- * work coming back»), and it had just handed us an empty snapshot. So the room
- * gets the operations and this screen gets the document, and both are the same
- * container — read once, from the copy taken before the socket opened.
- *
- * THE WHOLE STUDY (G2, I-2). The room was born with the study's sections —
- * every graph and the shelf — and each operation names its graph. A node that
- * does not know `graphs` at birth answers without `born_with`: there the
- * active graph alone is seated, unnamed, and the rest is said to stay here.
- */
-function seatSeededContainer(room: string): boolean {
-  if (!seedingRoom || seedingRoom.room !== room) return false;
-  const { container, born } = seedingRoom;
-  seedingRoom = null;
-
-  loadContainerDocument(container, roomFileName(room), null, { room: roomRef(room) });
-  const graphs = (container.graphs ?? {}) as Record<string, { nodes?: unknown[] }>;
-  const ids = Object.keys(graphs).filter((id) => !isCorpusSection(graphs[id]));
-  const activeId = String(container.active_graph_id ?? ids[0] ?? "");
-  const whole = ids.length > 0 && ids.every((id) => born.includes(
-    String((graphs[id] as Record<string, unknown>).graph_id ?? id)));
-
-  let ops: HubOp[];
-  if (whole) {
-    hubRoomGraphs = new Set(born);
-    ops = seedOpsForStudy(container);
-  } else {
-    noteRoomGraphs(null);
-    const active = graphs[activeId] as
-      { nodes?: EmNode[]; edges?: Array<Record<string, unknown>> } | undefined;
-    ops = seedOpsForContainer(active ?? null);
-  }
-  for (const op of ops) {
-    hubUnconfirmed.set(hubKey(op), op);
-    noteSyncState();
-    sendHubOp(op);
-  }
-  logInfo(`room: seated ${ops.length} operation(s) on «${room}»`
-          + (whole ? ` in ${born.length} section(s): ${born.join(", ")}` : ""));
-  if (Object.keys(graphs).some((id) => isCorpusSection(graphs[id]))) {
-    logInfo(t("room.corpusStaysTheNodes"));
-  }
-
-  // …AND ASK THE ROOM TO WRITE IT, because seating is not keeping.
-  //
-  // MEASURED on the dev stack, both halves, because the first version of this
-  // comment asserted more than was true and the measurement corrected it:
-  //
-  //   seeded WITHOUT a save → a new connection sees (206, 526). The room holds
-  //     it in memory, so nothing looks wrong. And on disk: `<room>.acl.json`
-  //     and `<room>.room.json`, and NO `<room>.em.json`.
-  //   seeded WITH a save    → the same (206, 526), and 304 066 bytes of
-  //     `<room>.em.json` beside them.
-  //
-  // So the failure this line prevents is not visible in the session that made
-  // it: it is the RESTART. `ws.py` writes the snapshot in exactly one place
-  // (`request_save`) and a disconnect deliberately does not — a relay that saved
-  // on every parting would rewrite a room whenever somebody's wifi dropped.
-  //
-  // Which makes an unsaved seeding the worst shape a failure can have: the
-  // sentence below says the live copy is the node's, the screen agrees, the
-  // person closes the file believing it is kept, and the node loses it the next
-  // time it comes up. The save is what makes the sentence true before it is said.
-  sync.sendRequestSave();
-  logInfo(`room: asked «${room}» to write its snapshot`);
-
-  // THE SENTENCE THE PROMPT ASKS FOR, at the moment it becomes true: from here
-  // the live copy is the node's. Saying it later, or not at all, is how somebody
-  // keeps editing what they think is their file.
-  toast(t("room.livesOnTheNodeNow", { room }));
-  // P2 · …and now its resources: the inventory taken before the graph left its file
-  if (pendingInventory?.room === room) {
-    const src = pendingInventory;
-    pendingInventory = null;
-    setTimeout(() => void openResourceInventory(room, src), 400);
-  }
-  if (!whole && ids.length > 1) {
-    // not a silent truncation: this node seats one graph, and the study had more
-    toast(t("room.onlyOneGraph", { n: String(ids.length - 1), graph: activeId }));
-    logWarn(`room: «${room}» holds ONE graph — ${ids.length - 1} other(s) `
-            + "stayed in the local project");
-  }
-  return true;
 }
 
 /** B2 · the node this session's room is on, as `connectToHub` was given it */
@@ -8025,16 +7803,6 @@ function connectToHub(url: string, room: string, token: string | null): void {
       // the room refused: only those fields change, the copy is not replaced
       if (hubRealignAsked) {
         hubRealignFrom(doc);
-        return;
-      }
-      // SEEDING COMES FIRST, because this snapshot is the thing it has to
-      // survive. A room created a second ago still sends one — a container with
-      // one empty graph — and loading it here would blank the document the
-      // gesture exists to seat. So a room we are seeding never loads it: it
-      // loads the copy taken before the socket opened, and sends the operations.
-      if (seatSeededContainer(room)) {
-        info.textContent = t("hub.joined", { room });
-        renderStorage();
         return;
       }
       // A ROOM is a project: the relay sends a CONTAINER (P4.2 decided a room =
@@ -11618,7 +11386,7 @@ async function bridgeUrl(): Promise<string> {
   return _bridgeUrl;
 }
 /** The bridge level this editor expects (`BRIDGE_LEVEL` in tools/em_bridge.py). */
-const BRIDGE_LEVEL_WANTED = 31;   // FONTE · 31 = /property-source, `reasoning` in /validate
+const BRIDGE_LEVEL_WANTED = 32;   // 31 = /property-source (FONTE); 32 = /room-import, «Bring into a room» through the engine
 /**
  * DEV30 U9 · WHY a call to the bridge failed, in words.
  *
@@ -12289,7 +12057,7 @@ document.getElementById("btn-share-room")
 // THE THREE VERBS, all reachable from the same place (design note): APRI is
 // File ▸ Open, and these are the two that were missing.
 document.getElementById("btn-create-room")
-  ?.addEventListener("click", () => void createRoomHere(false));
+  ?.addEventListener("click", () => void createRoomHere());
 document.getElementById("btn-bring-into-room")
   ?.addEventListener("click", () => void bringIntoRoom());
 
@@ -23789,11 +23557,18 @@ async function uploadFiles(fs: FileState[]): Promise<void> {
       logWarn(`${f.name}: ${t("fs.upload")} — ${r ? `${r.status} ${(await r.text()).slice(0, 120)}` : "no answer"}`);
       continue;
     }
-    const it = { id: f.id, name: f.name, path: f.path, sha256: f.sha256 || null, size: null,
-                 mediaType: "", locator: f.path, graphId: "study" } as unknown as InvItem;
-    const out = await sendToRoom(room.base, room.room_id, it, () => {});
-    if (out.ok) logInfo(`${f.name}: ${t("fs.upload")} · ${out.sent ? "sent" : "already there"}`);
-    else logWarn(`${f.name}: ${t("fs.upload")} — ${out.why ?? "failed"}`);
+    // the engine's door for one file (`node.upload_asset`, through the bridge):
+    // HEAD by sha256 first, one PUT or the resumable pieces, the digest checked
+    let out: { ok?: boolean; already?: boolean; error?: string } = {};
+    try {
+      const r = await fetch(`${await bridgeUrl()}/room-import`, { method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ step: "upload", node: room.base, room: room.room_id, token: room.token,
+                               path: f.path, sha256: f.sha256 || undefined }) });
+      out = await r.json().catch(() => ({ error: `bridge ${r.status}` }));
+    } catch (exc) { out = { error: String(exc) }; }
+    if (out.ok) logInfo(`${f.name}: ${t("fs.upload")} · ${out.already ? "already there" : "sent"}`);
+    else logWarn(`${f.name}: ${t("fs.upload")} — ${out.error ?? "failed"}`);
   }
   void checkFiles();
 }

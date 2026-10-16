@@ -1,89 +1,116 @@
 /**
  * MICRO-LA-BARRA-E-LE-STANZE · P2 — the RESOURCES of a graph that is going into
- * a room, in the four groups a person decides on:
+ * a room, in the five groups a person decides on:
  *
  *   on_disk   found on this computer: upload (the default), leave as a
- *             reference, or skip — per group or one by one;
+ *             reference, or skip — per group, per lot, or one by one;
  *   in_store  already in the room's storage (HEAD by sha256): nothing to send,
- *             the node only becomes store-backed;
- *   elsewhere already in the node's storage but AT HOME IN ANOTHER ROOM (HEAD
- *             answers `X-EM-Home-Room`): a file lives in ONE room (F1, E.D.
- *             3 Oct evening), so the proposal is «Move here» — confirmed after
- *             the rooms that cite it are listed — or leave it a reference;
- *   external  a reference that is not a file here (NAS, URL): counted, left;
+ *             the resource only becomes hosted;
+ *   elsewhere already on the node but AT HOME IN ANOTHER ROOM (HEAD answers
+ *             `X-EM-Home-Room`): hosted here as it is (the default), moved here
+ *             — «Move here», confirmed after the rooms that cite it are listed
+ *             — or left a reference to the room it lives in;
+ *   external  a reference that is not a file here (NAS, URL, a .blend's
+ *             datablock): counted, left;
  *   missing   a path nobody can find: counted, named, left.
  *
- * «Everything goes up, raw photos too» (E.D., 3 Oct): the storage is also the
- * backup. Raw photos travel as a LOT — one row, one choice — and land as one
- * `dtc_acquisition` in the documentation, never as hundreds of rows to tick.
+ * THE RULES ARE THE ENGINE'S (MICRO-PORTA-IN-STANZA-DAL-MOTORE, 16 Oct 2026).
+ * Which files a graph cites, where a relative path is looked for, what the node
+ * already has, which photos are one session (L1), what goes up and how a
+ * resource becomes hosted: `s3dgraphy.room_import`, the one implementation of
+ * the gesture for its three doors (the command, EM Tools, EMStudio through the
+ * bridge's `/room-import`). Until that day this module had them in TypeScript
+ * (`candidatesOf`, `buildInventory`, `locatorKind`, `resolveLocal`,
+ * `sessionLots`) and they had drifted from EM Tools' — different files seen,
+ * different folders searched. What stays here is the DIALOG's half: the
+ * engine's plan read into the five groups (the engine says `found`/`stored`
+ * where the dialog says «on this computer»/«already in the storage»), the
+ * person's choices, and those choices handed back in the engine's terms.
  *
- * THE LOT RULE (L1, E.D. 3 Oct evening, replacing «≥ 10 images per folder»,
- * which made Templu Mare's DosCo a lot): a file named like an EM document
- * (`D.01`, `D.07.03`, `D.11 Zenitale` — `isEmDocumentName`) stays a document,
- * nothing inside a DosCo is ever a lot, and a lot is PROPOSED only for photos
- * of one session: same camera (EXIF make + model + body serial) and EXIF times
- * no more than `SESSION_GAP_SECONDS` apart. A proposal the person confirms —
- * never applied by itself (`Inventory.lots[].confirmed`).
- *
- * PURE: no fetch, no DOM, no store. The caller probes (the bridge for a disk,
- * HEAD for the store) and hands the answers in; `check-room-inventory.mjs`
- * puts real values to it. The rule that keeps the origin: a resource that goes
- * up keeps its disk path as a second address (`addresses.ts`, the same digest),
- * so «where did this come from» survives the move.
+ * PURE: no fetch, no DOM, no store. `check-room-inventory.mjs` puts real plans
+ * to it; the live half is `check-interactions.mjs TP2.live` and the bridge's
+ * `check-room-import-bridge.mjs`.
  */
 
-import type { EmEdge, EmNode } from "./types";
 import { normDigest } from "./store-url";
 
 export type InvGroup = "on_disk" | "in_store" | "elsewhere" | "external" | "missing";
-export type InvChoice = "upload" | "reference" | "skip" | "move";
+/** `host` — F1, a file at home in another room hosted HERE as it is, its home
+ *  unchanged: the engine's default (`elsewhere="host"`) */
+export type InvChoice = "upload" | "reference" | "skip" | "move" | "host";
 export const INV_GROUPS: InvGroup[] = ["on_disk", "in_store", "elsewhere", "external", "missing"];
 
-/** A file the graph cites: a `resource` that carries its own locator (the
- *  implicit one-file kind), or one `resource_file` of a set. */
-export interface InvCandidate {
+/** The engine's group → the dialog's */
+export const ENGINE_GROUP: Record<string, InvGroup> = {
+  found: "on_disk", stored: "in_store", elsewhere: "elsewhere", external: "external", missing: "missing",
+};
+
+/** One row of the engine's plan, as the bridge hands it (`_RI_ROW_KEYS`). */
+export interface PlanRow {
+  id: string;
+  graph_id?: string;
+  name?: string;
+  locator?: string;
+  group: string;
+  choice?: string;
+  size?: number;
+  sha256?: string;
+  home?: string;
+  note?: string;
+  path?: string;
+  media_type?: string;
+  /** a tileset folder (`packaging: directory`): every file of it goes up */
+  tree?: string;
+  batch_id?: string;
+  batch_name?: string;
+  batch_proposed?: boolean;
+}
+
+/** A lot of the plan: a session of photos the engine PROPOSES (L1), or the
+ *  outputs of an acquisition the graph already declares (`declared`). */
+export interface PlanLot {
+  key: string; name: string; ids: string[];
+  camera?: string; from?: string; to?: string; graph_id?: string;
+  confirmed?: boolean; declared?: boolean;
+}
+
+export interface EnginePlan {
+  rows: PlanRow[];
+  lots?: PlanLot[];
+  where?: { created?: boolean; resumed?: boolean; seedable?: boolean; note?: string; born_with?: string[] };
+  summary?: Record<string, unknown>;
+}
+
+export interface InvItem {
   id: string;
   graphId: string;
   name: string;
   locator: string;
-  checksum: string | null;
-  mediaType: string | null;
-  /** the lot it travels in: an acquisition id, or `dir:<folder>` for raw photos */
-  lotKey: string | null;
-  lotName: string | null;
-  /** an acquisition that already exists in the graph (else one is made) */
-  lotAcquisition: string | null;
-}
-
-/** What the bridge read from a photo's EXIF: who took it, and when. */
-export interface PhotoExif {
-  /** make + model (+ body serial): two bodies of one model are two cameras */
-  camera: string | null;
-  /** EXIF `DateTimeOriginal` (else `DateTime`), as written: `2024:05:12 10:22:33` */
-  takenAt: string | null;
-}
-
-export interface InvProbe {
   group: InvGroup;
+  choice: InvChoice;
   size: number | null;
   sha256: string | null;
-  /** the absolute path the bridge answered for (on_disk / in_store from disk) */
-  path?: string | null;
-  /** F1 · the room the bytes live in, when the node said (`X-EM-Home-Room`) */
-  home?: string | null;
-  /** L1 · the photo's EXIF, when the bridge could read it */
-  exif?: PhotoExif | null;
+  path: string | null;
+  /** F1 · the room the bytes live in, when the node said */
+  home: string | null;
+  /** a folder the engine sends file by file (a tileset) */
+  tree: boolean;
+  /** a folder that is NOT a tileset, or a row whose choice the engine fixes:
+   *  nothing to decide */
+  fixed: boolean;
   why?: string;
-}
-
-export interface InvItem extends InvCandidate, InvProbe {
-  choice: InvChoice;
+  lotKey: string | null;
+  lotName: string | null;
 }
 
 export interface Inventory {
   items: InvItem[];
   groups: Record<InvGroup, { count: number; bytes: number }>;
   lots: InvLot[];
+  /** F1 · what a file at home elsewhere becomes when it is not moved: `host`
+   *  (the engine's default) or `reference` — ONE answer for the group, as the
+   *  engine takes it (`elsewhere=`); «Move here» is per file */
+  elsewhereMode: "host" | "reference";
 }
 
 /** A lot: the files of one `dtc_acquisition` the graph already declares
@@ -95,207 +122,68 @@ export interface InvLot {
   camera?: string; from?: string; to?: string;
 }
 
-const PHOTO_EXT = /\.(jpe?g|tiff?|png|dng|cr2|cr3|nef|arw|orf|rw2|heic|raf)$/i;
-/** L1 · two shots of one camera further apart than this are two sessions.
- *  30 minutes: a battery or card swap, a ladder moved, a drone relaunched stay
- *  in the session; the morning and the afternoon, or two days, do not. */
-export const SESSION_GAP_SECONDS = 30 * 60;
-/** L1 · fewer photos than this are files, not a lot worth proposing */
-export const SESSION_MIN_PHOTOS = 5;
-
-/** L1 · a file named like an EM document — `D.01`, `D.1`, `D.12.jpg`,
- *  `D.07.03.jpg`, `D.11 Zenitale.png` — the prefix s3Dgraphy's DosCo scanner
- *  reads (`fs_backend._EM_ID_PREFIX`), then the end, an extension, a space, `_`
- *  or `-`. A document stays a document: never a lot. */
-export function isEmDocumentName(leaf: string): boolean {
-  return /^D\.\d+(?:\.\d+)?(?=$|[\s._-])/.test(String(leaf ?? "").trim());
-}
-
-/** L1 · is this path inside a DosCo — a declared DosCo folder, or a folder
- *  named DosCo on the way? The DosCo is documentation: never a lot. */
-export function inDosco(path: string, doscoDirs: string[] = []): boolean {
-  const p = String(path ?? "").replace(/\\/g, "/");
-  const segs = p.split("/").slice(0, -1);
-  if (segs.some((s) => s.toLowerCase() === "dosco")) return true;
-  return doscoDirs.some((d) => {
-    const dir = String(d ?? "").replace(/\\/g, "/").replace(/\/+$/, "");
-    return !!dir && (p === dir || p.startsWith(`${dir}/`));
-  });
-}
-
-/** `2024:05:12 10:22:33` (EXIF) → seconds, or null. Naive time: one camera's
- *  clock against itself, so the zone does not matter. */
-export function exifSeconds(takenAt: string | null | undefined): number | null {
-  const m = /^(\d{4})[:-](\d{2})[:-](\d{2})[ T](\d{2}):(\d{2}):(\d{2})/.exec(String(takenAt ?? "").trim());
-  if (!m) return null;
-  const t = Date.UTC(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +m[6]);
-  return Number.isFinite(t) && +m[1] > 1900 ? t / 1000 : null;
-}
-
-export interface SessionPhoto { id: string; path: string; exif?: PhotoExif | null }
-export interface SessionLot { key: string; name: string; ids: string[]; camera: string; from: string; to: string }
-
-/**
- * L1 · the photo SESSIONS among these files: same camera, EXIF times at most
- * `gapSeconds` apart, at least `minPhotos`. A document-named file, a file in a
- * DosCo, a file that is not a photo, a photo with no camera or no time: never
- * in a session. Pure, and the same cases as EMtools' `inventory.session_lots`.
- */
-export function sessionLots(files: SessionPhoto[], opts: {
-  doscoDirs?: string[]; gapSeconds?: number; minPhotos?: number;
-} = {}): SessionLot[] {
-  const gap = opts.gapSeconds ?? SESSION_GAP_SECONDS;
-  const min = opts.minPhotos ?? SESSION_MIN_PHOTOS;
-  const perCamera = new Map<string, { id: string; t: number; at: string }[]>();
-  for (const f of files) {
-    const leaf = leafOf(f.path || "");
-    if (!PHOTO_EXT.test(leaf) || isEmDocumentName(leaf) || inDosco(f.path, opts.doscoDirs)) continue;
-    const camera = String(f.exif?.camera ?? "").trim();
-    const t = exifSeconds(f.exif?.takenAt);
-    if (!camera || t === null) continue;
-    perCamera.set(camera, [...(perCamera.get(camera) ?? []), { id: f.id, t, at: String(f.exif!.takenAt) }]);
-  }
-  const out: SessionLot[] = [];
-  for (const [camera, shots] of perCamera) {
-    shots.sort((a, b) => a.t - b.t || a.id.localeCompare(b.id));
-    let run: typeof shots = [];
-    const close = (): void => {
-      if (run.length >= min) {
-        const from = run[0].at, to = run[run.length - 1].at;
-        out.push({ key: `session:${camera}@${from}`, camera, from, to, ids: run.map((s) => s.id),
-          name: `${camera} · ${from.slice(0, 10).replace(/:/g, "-")} ${from.slice(11, 16)}–${to.slice(11, 16)}` });
-      }
-      run = [];
-    };
-    for (const s of shots) {
-      if (run.length && s.t - run[run.length - 1].t > gap) close();
-      run.push(s);
-    }
-    close();
-  }
-  return out;
-}
-
-/** Where a locator points, before anybody asks. */
-export function locatorKind(locator: string): "store" | "external" | "disk" | "none" {
-  const loc = (locator || "").trim();
-  if (!loc) return "none";
-  if (/\/v1\/rooms\/[^/]+\/asset\//.test(loc) || /^s3:\/\//i.test(loc)) return "store";
-  if (/^(https?|ftp|sftp|smb|afp|nfs|webdavs?|davs?):\/\//i.test(loc)) return "external";
-  if (/^\\\\/.test(loc) || /^\/\/[^/]/.test(loc)) return "external";     // UNC: a share
-  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(loc) && !/^file:\/\//i.test(loc)) return "external";
-  return "disk";
-}
-
-/** `file:///a/b` → `/a/b`; a relative path → under `baseDir` (the em.json's folder). */
-export function resolveLocal(locator: string, baseDir: string | null): string {
-  let p = locator.trim();
-  if (/^file:\/\//i.test(p)) p = decodeURIComponent(p.replace(/^file:\/\//i, ""));
-  if (/^(\/|[A-Za-z]:[\\/]|~)/.test(p) || !baseDir) return p;
-  return `${baseDir.replace(/[\\/]+$/, "")}/${p.replace(/^\.\//, "")}`;
-}
-
-/** The sha256 a store URL names, if it names one. */
-export function digestInLocator(locator: string): string | null {
-  const m = /\/asset\/(?:sha256(?::|%3A))?([0-9a-f]{64})/i.exec(locator);
-  return m ? `sha256:${m[1].toLowerCase()}` : null;
-}
-
 // the one normalization of a digest (MICRO-STORE-PERCORSO)
 export { normDigest };
 
 const leafOf = (p: string): string => p.replace(/^.*[\\/]/, "");
 
 /**
- * The files a set of graphs cites. A resource WITH `has_file` children is the
- * set and is not itself a file: its files are. A file reached by
- * `dtc_had_output` from an acquisition travels in that acquisition's lot.
- * Photo sessions are proposed later, from the EXIF the probe read
- * (`buildInventory` → `sessionLots`): a folder is no longer a lot.
+ * The engine's plan as the dialog's inventory. The default choices are the
+ * engine's: what is on the disk goes up (a tileset folder too, file by file; a
+ * folder that is not one stays a reference — said, not decided here), a file at
+ * home in another room is hosted here as it is, and the rest has nothing to send.
  */
-export function candidatesOf(
-  graphs: Array<{ id: string; nodes: EmNode[]; edges: EmEdge[] }>,
-): InvCandidate[] {
-  const out: InvCandidate[] = [];
-  const seen = new Set<string>();
-  for (const g of graphs) {
-    const byId = new Map(g.nodes.map((n) => [n.id, n]));
-    const hasFiles = new Set(g.edges.filter((e) => e.edge_type === "has_file").map((e) => String(e.source)));
-    const acqOf = new Map<string, string>();
-    for (const e of g.edges) {
-      if (e.edge_type !== "dtc_had_output") continue;
-      const src = byId.get(String(e.source));
-      if (src?.node_type === "dtc_acquisition") acqOf.set(String(e.target), src.id);
-    }
-    for (const n of g.nodes) {
-      if (n.node_type !== "resource" && n.node_type !== "resource_file") continue;
-      if (n.node_type === "resource" && hasFiles.has(n.id)) continue;
-      if (seen.has(n.id)) continue;
-      const data = (n.data ?? {}) as Record<string, unknown>;
-      const locator = String(data.url ?? data.path ?? "").trim();
-      if (!locator) continue;
-      seen.add(n.id);
-      const acq = acqOf.get(n.id) ?? null;
-      out.push({
-        id: n.id, graphId: g.id, name: String(n.name ?? "") || leafOf(locator), locator,
-        checksum: normDigest(data.checksum as string),
-        mediaType: typeof data.media_type === "string" ? data.media_type : null,
-        lotKey: acq, lotName: acq ? String(byId.get(acq)?.name ?? acq) : null,
-        lotAcquisition: acq,
-      });
-    }
-  }
-  return out;
-}
-
-/** The inventory: candidates + what the probes found. The default choice is
- *  `upload` for what is on the disk, the PROPOSAL `move` for what is at home
- *  in another room (nothing moves before the confirmation that lists the rooms
- *  citing it), and `skip` for everything else (there is nothing to send).
- *  Photo sessions (L1) are proposed here from the probes' EXIF, unconfirmed. */
-export function buildInventory(cands: InvCandidate[], probes: Map<string, InvProbe>,
-                               opts: { doscoDirs?: string[]; gapSeconds?: number; minPhotos?: number } = {}): Inventory {
-  const items: InvItem[] = cands.map((c) => {
-    const p = probes.get(c.id) ?? { group: "missing" as InvGroup, size: null, sha256: null, why: "not probed" };
-    return { ...c, ...p, choice: p.group === "on_disk" ? "upload" : p.group === "elsewhere" ? "move" : "skip" };
+export function inventoryFromPlan(plan: EnginePlan): Inventory {
+  const items: InvItem[] = (plan.rows ?? []).map((r) => {
+    const group = ENGINE_GROUP[r.group] ?? "missing";
+    const engineChoice = String(r.choice ?? "");
+    // a folder that is not a tileset, or a tileset the engine sends as its
+    // .3tz (`pack_tilesets`): the engine keeps it a reference, said in its note
+    const folder = group === "on_disk" && engineChoice === "reference";
+    const choice: InvChoice = group === "on_disk"
+      ? (engineChoice === "reference" || engineChoice === "skip" ? engineChoice : "upload")
+      : group === "elsewhere" ? "host" : "skip";
+    const locator = String(r.locator ?? "");
+    return {
+      id: r.id, graphId: String(r.graph_id ?? ""), name: String(r.name ?? "") || leafOf(locator),
+      locator, group, choice, size: typeof r.size === "number" ? r.size : null,
+      sha256: normDigest(r.sha256 ?? null), path: r.path ?? null, home: r.home ?? null,
+      tree: !!r.tree, fixed: folder, ...(r.note ? { why: r.note } : {}),
+      lotKey: r.batch_id ?? null, lotName: r.batch_name ?? null,
+    };
   });
-  const sessions = sessionLots(items.filter((i) => !i.lotKey && (i.group === "on_disk" || i.group === "in_store"))
-    .map((i) => ({ id: i.id, path: i.path || i.locator, exif: i.exif })), opts);
-  const proposed = new Map<string, SessionLot>();
-  for (const lot of sessions) {
-    proposed.set(lot.key, lot);
-    for (const id of lot.ids) {
-      const it = items.find((i) => i.id === id)!;
-      it.lotKey = lot.key; it.lotName = lot.name; it.lotAcquisition = null;
-    }
-  }
   const groups = Object.fromEntries(INV_GROUPS.map((g) => [g, { count: 0, bytes: 0 }])) as Inventory["groups"];
   for (const it of items) {
     groups[it.group].count += 1;
     groups[it.group].bytes += it.size ?? 0;
   }
-  const lots = new Map<string, InvLot>();
-  for (const it of items) {
-    if (!it.lotKey) continue;
-    const session = proposed.get(it.lotKey);
-    const lot = lots.get(it.lotKey) ?? { key: it.lotKey, name: it.lotName ?? it.lotKey, ids: [], bytes: 0,
-                                          acquisition: it.lotAcquisition,
-                                          proposed: !!session, confirmed: !session,
-                                          ...(session ? { camera: session.camera, from: session.from, to: session.to } : {}) };
-    lot.ids.push(it.id);
-    lot.bytes += it.size ?? 0;
-    lots.set(it.lotKey, lot);
-  }
-  return { items, groups, lots: [...lots.values()] };
+  const lots: InvLot[] = (plan.lots ?? []).map((l) => {
+    const ids = l.ids.filter((id) => items.some((i) => i.id === id));
+    for (const id of ids) {
+      const it = items.find((i) => i.id === id)!;
+      it.lotKey = l.key; it.lotName = l.name;
+    }
+    return {
+      key: l.key, name: l.name, ids,
+      bytes: ids.reduce((s, id) => s + (items.find((i) => i.id === id)?.size ?? 0), 0),
+      acquisition: l.declared ? l.key : null, proposed: !l.declared, confirmed: !!l.declared,
+      ...(l.camera ? { camera: l.camera } : {}), ...(l.from ? { from: l.from } : {}), ...(l.to ? { to: l.to } : {}),
+    };
+  });
+  return { items, groups, lots, elsewhereMode: "host" };
 }
 
 /** Set a choice for a whole group, a lot, or one item. Only `on_disk` items
- *  can be uploaded, referenced or skipped; only `elsewhere` items can be moved
- *  here or left as a reference; the others have nothing to decide. */
+ *  can be uploaded, referenced or skipped (a folder that is not a tileset
+ *  stays a reference); `elsewhere` items are hosted here, moved here, or left
+ *  a reference — the last two for the whole group, «Move here» also per file;
+ *  the others have nothing to decide. */
 export function choose(inv: Inventory, which: { group?: InvGroup; lot?: string; id?: string }, choice: InvChoice): void {
+  if (which.group === "elsewhere" && (choice === "host" || choice === "reference")) inv.elsewhereMode = choice;
   for (const it of inv.items) {
-    const fits = it.group === "on_disk" ? choice !== "move"
-      : it.group === "elsewhere" ? choice === "move" || choice === "reference" : false;
+    const fits = it.group === "on_disk" ? !it.fixed && (choice === "upload" || choice === "reference" || choice === "skip")
+      : it.group === "elsewhere" ? choice === "move" || choice === inv.elsewhereMode
+      : false;
     if (!fits) continue;
     if ((which.group && it.group === which.group) || (which.lot && it.lotKey === which.lot)
         || (which.id && it.id === which.id)) it.choice = choice;
@@ -345,30 +233,44 @@ export function toUpload(inv: Inventory): { count: number; bytes: number } {
   return { count: up.length, bytes: up.reduce((s, i) => s + (i.size ?? 0), 0) };
 }
 
-export interface InvOutcome {
-  id: string; ok: boolean; sent: boolean; bytes: number; why?: string;
-  /** F1 · moved here by «Move here»: no byte travelled */
-  moved?: boolean;
-  /** F1 · where the bytes live after the gesture, when the node said */
-  home?: string | null;
+/** The person's choices in the ENGINE's terms (`POST /room-import`, step
+ *  `execute`): every decidable file's choice by id (`per_item`), the files the
+ *  person said «Move here» for and the node let move (`moved`, after the
+ *  confirmation), what the others at home elsewhere become (`elsewhere`), and
+ *  the keys of the proposed lots the person confirmed. */
+export function engineChoices(inv: Inventory, moved: string[] = []): {
+  per_item: Record<string, string>; move: string[]; elsewhere: "host" | "reference"; lots: string[];
+} {
+  const perItem: Record<string, string> = {};
+  for (const it of inv.items) {
+    if (it.group === "on_disk" && !it.fixed) perItem[it.id] = it.choice;
+  }
+  return { per_item: perItem, move: [...moved], elsewhere: inv.elsewhereMode,
+           lots: inv.lots.filter((l) => l.proposed && l.confirmed).map((l) => l.key) };
 }
 
-/** The closing report: uploaded N (bytes), references M, missing K. A file
- *  already in the store is counted as «already there», not as uploaded. */
-export function inventoryReport(inv: Inventory, outcomes: InvOutcome[]): {
-  uploaded: number; bytes: number; already: number; moved: number; references: number; missing: number; failed: number;
+/** The engine's report, for the closing sentence: uploaded N (bytes), already
+ *  there, moved here, references, missing, failed. */
+export interface EngineReport {
+  uploaded?: { files?: number; bytes?: number };
+  already?: { files?: number };
+  references?: number;
+  plan?: { missing?: number };
+  failed?: string[];
+  rewritten?: { moved_here?: number };
+  seeded?: { sent?: number; applied?: number; not_news?: number; refused?: number };
+  link?: string;
+  sentence?: string;
+}
+
+export function reportOf(rep: EngineReport): {
+  uploaded: number; bytes: number; already: number; moved: number; references: number; missing: number;
+  failed: number; seeded: number;
 } {
-  const sent = outcomes.filter((o) => o.ok && o.sent);
-  const moved = outcomes.filter((o) => o.ok && o.moved).length;
-  const already = outcomes.filter((o) => o.ok && !o.sent && !o.moved).length
-    + inv.items.filter((i) => i.group === "in_store").length;
-  const references = inv.items.filter((i) => i.group === "external"
-    || ((i.group === "on_disk" || i.group === "elsewhere") && i.choice === "reference")
-    || (i.group === "elsewhere" && i.choice === "move" && !outcomes.some((o) => o.id === i.id && o.ok && o.moved))).length;
   return {
-    uploaded: sent.length, bytes: sent.reduce((s, o) => s + o.bytes, 0), already, moved,
-    references, missing: inv.items.filter((i) => i.group === "missing").length,
-    failed: outcomes.filter((o) => !o.ok).length,
+    uploaded: rep.uploaded?.files ?? 0, bytes: rep.uploaded?.bytes ?? 0, already: rep.already?.files ?? 0,
+    moved: rep.rewritten?.moved_here ?? 0, references: rep.references ?? 0, missing: rep.plan?.missing ?? 0,
+    failed: (rep.failed ?? []).length, seeded: rep.seeded?.applied ?? 0,
   };
 }
 

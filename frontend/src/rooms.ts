@@ -13,14 +13,11 @@
  * online without a room» — and with it the ambiguous case where nobody knows who
  * is keeping what.
  *
- * This module is the PURE half: deriving an id, and turning an open container
- * into the operations that seat it on a table. No fetch, no DOM, no settings —
- * which is what lets `check-rooms.mjs` put real values to it.
+ * This module is the PURE half: deriving an id from a name, and what a gesture
+ * needs before it can happen. No fetch, no DOM, no settings — which is what
+ * lets `check-rooms.mjs` put real values to it.
  */
 
-import type { EmNode } from "./types";
-import { withOpLanguage, type HubOp } from "./hub";
-import { isCorpusSection } from "./container";
 
 /**
  * The room id a name produces.
@@ -61,113 +58,17 @@ export function nameIsUsable(name: string): boolean {
   return roomIdFromName(name).length > 0;
 }
 
-/**
- * THE UPLOAD THAT TURNS A FILE INTO A PLACE — as operations, not as a payload.
- *
- * Why operations rather than a new endpoint that swallows an em.json: the relay
- * already has exactly five idempotent verbs and a merge that arbitrates them
- * (P4.1). A seeding endpoint would be a SIXTH way for a graph to enter a room,
- * writing straight into the snapshot store past the convergence rules — and the
- * first time it raced a connected client the room would have two truths and no
- * ledger saying which arrived first. Composing the verbs it already has costs
- * one walk of the document and keeps one path in.
- *
- * Nodes before edges, because an edge naming a node the room has not seen is an
- * edge the room has to hold in the air. The relay tolerates it; a reader looking
- * at the room mid-seed would not.
- *
- * NOT STAMPED HERE. `add_node` carries the node's OWN `modified_at`/`created_at`
- * if it has one — the same rule `opsForLocalChange` follows. Re-stamping on the
- * way in would make every node in a ten-year-old excavation look like it was
- * recorded the afternoon somebody uploaded it, which is the audit trail lying
- * about its own age.
+/*
+ * SEATING A STUDY IN A ROOM is not here any more (MICRO-PORTA-IN-STANZA-DAL-
+ * MOTORE, 16 Oct 2026). `seedOpsForContainer`, `studySections` and
+ * `seedOpsForStudy` turned an open container into the room's birth sections and
+ * the operations that seat it, sent FIRST through the socket; «Bring into a
+ * room…» is now the engine's (`s3dgraphy.room_import`, through the bridge's
+ * `/room-import`): born with the study's sections (`engine.birth_sections`),
+ * the files hosted, the graph seated LAST through `POST …/ops`
+ * (`inventory.seed_ops`). An empty room («New room») seats nothing, so nothing
+ * here served anything else.
  */
-export function seedOpsForContainer(
-  graph: { nodes?: EmNode[]; edges?: Array<Record<string, unknown>> } | null,
-): HubOp[] {
-  if (!graph) return [];
-  const ops: HubOp[] = [];
-  for (const node of graph.nodes ?? []) {
-    if (!node?.id) continue;
-    const data = (node.data ?? {}) as Record<string, unknown>;
-    const stamp = (data.modified_at as string) || (data.created_at as string) || undefined;
-    // dev28 · the seed is a producer too: the language in the op
-    ops.push(withOpLanguage({
-      op: "add_node",
-      node: node as unknown as Record<string, unknown>,
-      id: node.id,
-      ts: stamp,
-    }, graph as never));
-  }
-  for (const edge of graph.edges ?? []) {
-    const id = String(edge.id ?? "");
-    if (!id) continue;
-    ops.push({
-      op: "add_edge", id,
-      source: edge.source, target: edge.target, edge_type: edge.edge_type,
-    });
-  }
-  return ops;
-}
-
-/** G2 · one section a room is born with: EMPTY, its content comes as ops. */
-export interface BirthSection {
-  graph_id: string;
-  name: string;
-  data?: Record<string, unknown>;
-}
-
-/**
- * G2 · THE WHOLE STUDY, not its active graph (I-2: a room writes one study).
- *
- * What `POST /v1/rooms` is told to be born with: every graph of the container
- * and its shelf, each as an empty section with its id, its name and its header
- * (the shelf's marker is in its header). The DTC corpus stays out: on a node
- * the documentation register is the node's own, resident beside the rooms, and
- * a study's copy of it is not seeded into one room.
- */
-export function studySections(container: Record<string, unknown> | null): {
-  graphs: BirthSection[];
-  active_graph_id: string | null;
-  corpus: boolean;
-} {
-  const graphs: BirthSection[] = [];
-  let corpus = false;
-  const members = (container?.graphs ?? {}) as Record<string, Record<string, unknown>>;
-  for (const [key, section] of Object.entries(members)) {
-    if (!section || typeof section !== "object") continue;
-    if (isCorpusSection(section)) { corpus = true; continue; }
-    const gid = String(section.graph_id ?? key);
-    const out: BirthSection = { graph_id: gid, name: String(section.name ?? gid) };
-    if (section.data && typeof section.data === "object") {
-      out.data = { ...(section.data as Record<string, unknown>) };
-    }
-    graphs.push(out);
-  }
-  const active = String(container?.active_graph_id ?? "");
-  return { graphs,
-           active_graph_id: graphs.some((g) => g.graph_id === active) ? active
-             : (graphs[0]?.graph_id ?? null),
-           corpus };
-}
-
-/**
- * G2 · the operations that seat a whole study: for each section of
- * `studySections`, its nodes then its edges (`seedOpsForContainer`), each op
- * carrying the graph it is for in `graph_id` — the envelope's word, taken out
- * of the body where it leaves (`sendHubOp` in main.ts).
- */
-export function seedOpsForStudy(container: Record<string, unknown> | null):
-    Array<HubOp & { graph_id: string }> {
-  const members = (container?.graphs ?? {}) as Record<string, Record<string, unknown>>;
-  const out: Array<HubOp & { graph_id: string }> = [];
-  for (const [key, section] of Object.entries(members)) {
-    if (!section || typeof section !== "object" || isCorpusSection(section)) continue;
-    const gid = String(section.graph_id ?? key);
-    for (const op of seedOpsForContainer(section as never)) out.push({ ...op, graph_id: gid });
-  }
-  return out;
-}
 
 /**
  * What a gesture needs before it can happen, in the ladder's own terms.
