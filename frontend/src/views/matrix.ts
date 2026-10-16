@@ -13,7 +13,7 @@ import { buildMembership, type FoldedView } from "../folding";
 import { BAND_GAP } from "../scene";
 import type { Scene, SceneGroup, SceneNode, SubBand } from "../scene";
 import type { EmDocument } from "../types";
-import { viewIndex, viewInstances, type ViewInstance } from "../paradata-view";
+import { threedInstances, viewIndex, viewInstances, type ViewInstance } from "../paradata-view";
 import { paradataGroupScene, reattachedReadings } from "./pd-arrange";
 import { isRemoved } from "../crdt";
 import { t } from "../i18n";
@@ -475,6 +475,19 @@ export function buildMatrixScene(
   const instancesByGroup = new Map<string, SceneNode[]>();
   const recordsByGroup = new Map<string, ViewInstance[]>(); // the instances drawn, per group
   const vix = viewIndex(doc);
+  // MICRO-SPAZIO-3D p.5 · the 3D among the instances (rules 1.6.35): a proxy in
+  // the group of its geometry property, under the property; a model in its
+  // epoch's group, with «×N» when it is in N epochs. Drawn when the filter
+  // shows the 3D nodes (the «Links & other» ring), like any other instance.
+  const threeD = new Map<string, Array<ViewInstance & { countLabel?: string | null }>>();
+  if (!view?.instanceKindsHidden?.has("proxy") || !view?.instanceKindsHidden?.has("rm"))
+    for (const r of threedInstances(doc, vix)) {
+      if (!r.group || view?.instanceKindsHidden?.has(r.kind)) continue;
+      const rec = { id: r.id, master: r.master, kind: r.kind, node_type: r.node_type, name: r.name,
+        owner: r.owner, owner_kind: r.owner_kind, owner_name: r.owner_name, removed: r.removed,
+        readers: r.beside ? [r.beside] : [], extractors: [], through: [], countLabel: r.count_label ?? null };
+      (threeD.get(r.group) ?? threeD.set(r.group, []).get(r.group)!).push(rec);
+    }
   {
     const uses = new Map<string, number>();       // master → groups drawing it
     const below = new Map<string, number>();      // reader → instances stacked under it
@@ -482,9 +495,14 @@ export function buildMatrixScene(
       if (g.node_type !== "ParadataNodeGroup") continue;
       const gs = scene.byId.get(g.id);
       if (!gs || folded.has(g.id) || gs.collapsed) continue;
-      for (const r of viewInstances(doc, g.id, vix)) {
+      const firstMember = (scene.memberOf ? [...scene.memberOf.entries()].find(([m, gg]) => gg === g.id && !scene.byId.get(m)?.collapsed)?.[0] : undefined);
+      for (const r of [...viewInstances(doc, g.id, vix), ...(threeD.get(g.id) ?? [])]) {
         if (view?.instanceKindsHidden?.has(r.kind)) continue;
-        const reader = r.readers.map((id) => scene.byId.get(id)).find((x) => !!x && !x.collapsed);
+        // a model has no reader in the group, and a proxy whose geometry
+        // property is not drawn here has none either: they hang under the
+        // group's first member
+        const own = r.readers.map((id) => scene.byId.get(id)).find((x) => !!x && !x.collapsed);
+        const reader = own ?? ((r.kind === "rm" || r.kind === "proxy") && firstMember ? scene.byId.get(firstMember) : undefined);
         const masterNode = nodeById.get(r.master);
         if (!reader || !masterNode) continue;
         const ms = scene.byId.get(r.master);
@@ -503,6 +521,7 @@ export function buildMatrixScene(
           instanceOf: r.master,
           instanceBadge: { owner: r.owner, ownerName: r.owner_name, ownerKind: r.owner_kind, group: g.id },
           ...(r.removed ? { trace: true } : {}),
+          ...((r as { countLabel?: string | null }).countLabel ? { countLabel: (r as { countLabel?: string }).countLabel } : {}),
         };
         scene.nodes.push(inst);
         scene.byId.set(inst.id, inst);

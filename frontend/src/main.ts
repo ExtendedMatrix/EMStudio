@@ -273,6 +273,7 @@ import {
 import {
   edgeAt,
   hitAddPhase,
+  drawnAdornmentHits,
   hitAdornmentBadge,
   hitInstanceBadge,
   hitBandLabel,
@@ -2144,8 +2145,10 @@ window.__EM_SCENE__ = () => {
     const mount = graphWindows.get(winId);
     if (!mount) return null;
     const mode = graphModeOf(winId);
-    const s = scenes[mode] ?? null;
-    const vp = viewportFor(winId, mode);
+    // MICRO-SPAZIO-3D · a window in a group's soloing: that scene, its camera
+    const solo = contextIn(winId) && !!contextScene;
+    const s = solo ? contextScene : scenes[mode] ?? null;
+    const vp = solo ? contextViewport : viewportFor(winId, mode);
     const r = mount.cv.getBoundingClientRect();
     return {
       mode,
@@ -2157,6 +2160,7 @@ window.__EM_SCENE__ = () => {
         ...(n.label ? { label: n.label } : {}), ...(n.instanceOf ? { instanceOf: n.instanceOf } : {}),
         // FONTE · the badge of an instance, and a trace
         ...(n.instanceBadge ? { badge: n.instanceBadge.ownerName } : {}), ...(n.trace ? { trace: true } : {}),
+        ...(n.countLabel ? { countLabel: n.countLabel } : {}),
       })),
       // DEV29 · the scale it is drawn at, and what its lanes say
       scale: vp.scale,
@@ -2185,6 +2189,12 @@ window.__EM_SCENE__ = () => {
     return { view: vv, master: st.master, off: [...st.off] };
   },
   overlaysDrawn: () => drawnOverlayCounts(),
+  // MICRO-SPAZIO-3D · the ornament badges as drawn (canvas-relative): «ha 3D» among them
+  adornmentHits: () => drawnAdornmentHits().map((h) => ({ ...h })),
+  // the ring of a node type on (the jump's «show the ring»)
+  showRingFor: (nodeType: string) => ensureCircleVisibleFor(nodeType),
+  fold: (id: string, folded: boolean) => { store?.setFoldedMany([id], folded); buildScenes(); draw(); },
+  enterGroup: (id: string) => enterGroup(id),
   /** MICRO studio-luogo · the Graph view's HDT-O layer, read and switched, and
    *  the ids each view's projection holds (what is on screen, not the file) */
   hdtoLayer: () => hdtoLayer,
@@ -3986,7 +3996,10 @@ function requestFold(groupId: string): void {
 function contextSceneFor(id: string): Scene | null {
   if (!store) return null;
   const n = store.node(id);
-  if (n && isGroupType(n.node_type)) return buildGroupScene(store.doc, id);
+  // MICRO-SPAZIO-3D · the soloing of a paradata group draws its 3D instances
+  // when the view shows the 3D nodes (the «Links & other» ring)
+  if (n && isGroupType(n.node_type))
+    return buildGroupScene(store.doc, id, { with3d: !hiddenNodeTypes.has("representation_model") });
   return buildDtcGenesisScene(store.doc, id);
 }
 
@@ -4348,6 +4361,21 @@ function filteredView(opts: { wholeGraph?: boolean;
       adornments.set(unit, arr);
     }
   }
+  // MICRO-SPAZIO-3D p.5 · «ha 3D» on the units: a proxy (`units_without_3d`
+  // with), or — hollow — a geometry with nothing in it (empty). A click opens
+  // the Space on the unit, its proxy selected and framed; «Indietro» comes back
+  {
+    const shownIds = new Set(vNodes.map((n) => n.id));
+    const u3 = unitsWithout3d(doc);
+    for (const [list, hollow] of [[u3.with, false], [u3.empty, true]] as const)
+      for (const id of list) {
+        if (!shownIds.has(id)) continue;
+        const arr = adornments.get(id) ?? [];
+        arr.push({ ornamentId: `${HAS3D_BADGE}${id}`, kind: "has_3d",
+                   label: t(hollow ? "s3.badgeEmpty" : "s3.badge"), ...(hollow ? { hollow: true } : {}) });
+        adornments.set(id, arr);
+      }
+  }
   return {
     nodes: vNodes,
     edges: vEdges,
@@ -4355,7 +4383,15 @@ function filteredView(opts: { wholeGraph?: boolean;
     adornments,
     // MICRO-AUTORI-LAYOUT · the authors ring off: no author drawn, not even as
     // a computed instance
-    ...(hiddenNodeTypes.has("author") ? { instanceKindsHidden: new Set(["author"]) } : {}),
+    // MICRO-SPAZIO-3D · the 3D instances (a proxy, a model) only with their
+    // nodes shown (the «Links & other» ring)
+    ...(() => {
+      const k = new Set<string>();
+      if (hiddenNodeTypes.has("author")) k.add("author");
+      if (hiddenNodeTypes.has("semantic_shape")) k.add("proxy");
+      if (hiddenNodeTypes.has("representation_model")) k.add("rm");
+      return k.size ? { instanceKindsHidden: k } : {};
+    })(),
   };
 }
 
@@ -21474,6 +21510,37 @@ function openProxyFolderPreview(units: string[]): void {
 
 /** the scene of every Space window, for «Indietro» and the menus */
 const sceneHandles = new Map<string, SpaceSceneHandle>();
+/** the ornament id of a unit's «ha 3D» badge: not a node, a door */
+const HAS3D_BADGE = "has3d:";
+
+/**
+ * MICRO-SPAZIO-3D p.5 · a click on «ha 3D»: the Space (this workspace's, else
+ * the «Spazio» workspace), on the unit's epoch, the unit selected and its proxy
+ * framed once drawn. The view left is pushed: «Indietro» comes back to it.
+ */
+function openUnitInSpace(unitId: string): void {
+  if (!store) return;
+  pushView();
+  let win = windowsOf().find((w) => w.type === "scene");
+  if (!win) { setWorkspace("space"); win = windowsOf().find((w) => w.type === "scene"); }
+  if (!win) { toast(t("scene.noScene")); return; }
+  const sp = currentSpace();
+  if (sp) { const ep = spaceEpochFor(unitId, sp); if (ep) spaceEpochId = ep; }
+  spaceIsolated = null;
+  selectWindow(win.id);
+  pickOnCanvas = true;
+  try { select(unitId); } finally { pickOnCanvas = false; }
+  refreshInspector();
+  refreshSurfaces("scene");
+  const id = win.id;
+  const t0 = Date.now();
+  const tryFrame = () => {
+    const h = sceneHandles.get(id);
+    if (h?.frameKeys([`proxy:${unitId}`])) return;
+    if (Date.now() - t0 < 15000) setTimeout(tryFrame, 250);
+  };
+  setTimeout(tryFrame, 250);
+}
 /** the overlays that are CONTENT (what is drawn), not decorators: the general
  *  switch leaves them as they are — switching the overlays off does not empty
  *  the scene, as in Blender */
@@ -31125,6 +31192,11 @@ function wireGraphCanvas(canvas: HTMLCanvasElement, winId: string): void {
     if (adornmentPending) {
       const id = adornmentPending;
       adornmentPending = null;
+      // MICRO-SPAZIO-3D · «ha 3D»: the Space, on the unit
+      if (!moved && id.startsWith(HAS3D_BADGE) && hitAdornmentBadge(rx, ry) === id) {
+        openUnitInSpace(id.slice(HAS3D_BADGE.length));
+        return;
+      }
       if (!moved && hitAdornmentBadge(rx, ry) === id) {
         // PROPRIETA · the property chip of a unit opens and closes its group
         if (store?.node(id)?.node_type === "ParadataNodeGroup") requestFold(id);

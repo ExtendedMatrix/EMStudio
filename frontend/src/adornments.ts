@@ -34,6 +34,8 @@ export interface AdornmentBadge {
   /** FONTE · the instances the group draws when open (`paradata_instances`):
    *  a closed group counts them on its chip */
   instances?: number;
+  /** MICRO-SPAZIO-3D · «ha 3D» with a geometry and nothing in it */
+  hollow?: boolean;
 }
 
 // stable badge order on a referent: attribution first, then rights, then embargo

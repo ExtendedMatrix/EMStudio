@@ -18,7 +18,7 @@ import {
   segmentEntry, drawBoxOf, DOC_SHEET_ASPECT, glyphAspect, glyphRectOf, handleAnchor,
   shapePath } from "./shape-geom";
 import { activeTheme, CANVAS_TYPE, canvasFont, canvasTheme, labelOn } from "./theme";
-import { drawGlyph, glyphFor, type GlyphInk } from "./glyphs";
+import { drawGlyph, glyphByKey, glyphFor, type GlyphInk } from "./glyphs";
 import { adornmentShown, beginOverlayFrame, markOverlay, overlayShown, type OverlayKey, type OverlayState } from "./overlays";
 import { drawnPdChips, drawPdChips } from "./pd-chip";
 
@@ -336,6 +336,10 @@ export function hitPdTag(sx: number, sy: number): string | null {
 // pdTagHits, because the badges are a fixed pixel size drawn after the world
 // transform is reset; main.ts tests them with screen (client-relative) coords.
 let adornmentHits: { ornamentId: string; x: number; y: number; w: number; h: number }[] = [];
+/** For the checks: the ornament badges as drawn (canvas-relative, screen px). */
+export function drawnAdornmentHits(): ReadonlyArray<{ ornamentId: string; x: number; y: number; w: number; h: number }> {
+  return adornmentHits;
+}
 export function hitAdornmentBadge(sx: number, sy: number): string | null {
   for (const t of adornmentHits)
     if (sx >= t.x && sx <= t.x + t.w && sy >= t.y && sy <= t.y + t.h)
@@ -1129,6 +1133,26 @@ export function render(
         const isAuthor = n.node.node_type === "author" || n.node.node_type === "author_ai";
         drawGlyph(ctx, pathGlyph, ix, iy, iw, ih, glyphInk(), Math.min(iw, ih) * vp.scale,
                   isAuthor ? (n.instanceOf ? { dash: [11, 7] } : { strokeScale: 1.8 }) : undefined);
+        // MICRO-SPAZIO-3D · a model in N epochs: «×N» at its top right, on
+        // every instance (world-constant, like the document's use count)
+        if (n.countLabel && ov("doc_uses")) {
+          markOverlay("doc_uses");
+          const fpx = 11;
+          ctx.save();
+          ctx.font = canvasFont(700, fpx);
+          const tw = ctx.measureText(n.countLabel).width + 8;
+          const bx = ix + iw - tw / 2, by = iy;
+          ctx.beginPath();
+          if (typeof ctx.roundRect === "function") ctx.roundRect(bx - tw / 2, by - 8, tw, 16, 8);
+          else ctx.rect(bx - tw / 2, by - 8, tw, 16);
+          ctx.fillStyle = canvasTheme().labelInk;
+          ctx.fill();
+          ctx.fillStyle = canvasTheme().handleFill;
+          ctx.textAlign = "center";
+          ctx.textBaseline = "middle";
+          ctx.fillText(n.countLabel, bx, by + 0.5);
+          ctx.restore();
+        }
         // G9 · the format of a VERSION is not in its glyph (one drawing for
         // every glTF): the canvas writes it, when the glyph is big enough
         if (pathGlyph.key.startsWith("version:") && Math.min(iw, ih) * vp.scale >= 40 && ov("version_format")) {
@@ -1604,15 +1628,19 @@ export function render(
         continue;
       }
       const b = ads[i];
-      if ((["author", "author_ai", "license", "embargo"] as string[]).includes(b.kind)) markOverlay(b.kind as OverlayKey);
+      if ((["author", "author_ai", "license", "embargo", "has_3d"] as string[]).includes(b.kind)) markOverlay(b.kind as OverlayKey);
       if (b.inherited) markOverlay("inherited");
+      // MICRO-SPAZIO-3D · «ha 3D» is drawn with the proxy's glyph; HOLLOW (a
+      // geometry and nothing in it) attenuated, in a dashed frame — and still a
+      // click: it opens the Space on the unit
+      if (b.hollow) ctx.globalAlpha = 0.45;
       // FUNNEL1 · an INHERITED value (from activity/epoch/canvas) is drawn
       // attenuated (dimmed, dashed outline) and is NOT a click target — it has
       // no ornament node on this referent. The node's own value is a full badge.
       if (b.inherited) ctx.globalAlpha = 0.5;
       const pad = badgePx * BADGE_ICON_INSET;
       // SHIFT-A fase 6b · the ornament's own paths, when the datamodel has them
-      const bg = glyphFor(b.kind);
+      const bg = b.kind === "has_3d" ? glyphByKey("proxy") : glyphFor(b.kind);
       const img = bg ? null : imageFor(b.kind);
       if (bg) {
         const side = badgePx - 2 * pad;
@@ -1668,6 +1696,14 @@ export function render(
           ctx.lineWidth = 1.5;
           ctx.strokeRect(bx - 0.5, topY - 0.5, badgePx + 1, badgePx + 1);
         }
+      }
+      if (b.hollow) {
+        ctx.globalAlpha = 1;
+        ctx.setLineDash([2, 1.5]);
+        ctx.lineWidth = 1;
+        ctx.strokeStyle = canvasTheme().labelInk;
+        ctx.strokeRect(bx + 0.5, topY + 0.5, badgePx - 1, badgePx - 1);
+        ctx.setLineDash([]);
       }
       if (b.ornamentId === state.selectedId) {
         ctx.strokeStyle = accentColor();

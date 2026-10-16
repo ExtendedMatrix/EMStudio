@@ -16,7 +16,7 @@
 // the group in one place finds it arranged in the other.
 import type { Scene, SceneNode } from "../scene";
 import type { EmDocument, EmEdge, EmNode } from "../types";
-import { viewIndex, viewInstances, type ViewIndex, type ViewInstance } from "../paradata-view";
+import { threedInstances, viewIndex, viewInstances, type ViewIndex, type ViewInstance } from "../paradata-view";
 import { layoutLayered, NODE_H, NODE_W } from "./graph";
 
 /** the cell a node of the arrangement is centred in (context space) */
@@ -34,6 +34,14 @@ export function reattachedReadings(vix: ViewIndex, instances: ViewInstance[]): M
       for (const e of readEdge.get(x) ?? [])
         if (e.target === r.master || r.through.includes(e.target))
           out.set(edgeKey(e), r.id);
+  // MICRO-SPAZIO-3D · a proxy's instance: the `has_semantic_shape` of its
+  // geometry property ends on it, so it sits right under the property
+  for (const r of instances) {
+    if (r.kind !== "proxy") continue;
+    for (const e of vix.edges)
+      if (e.edge_type === "has_semantic_shape" && e.target === r.master && r.readers.includes(e.source))
+        out.set(edgeKey(e), r.id);
+  }
   // MICRO-AUTORI-LAYOUT · an author's instance: the `has_author` of its readers
   // (and of the extractors a combiner reaches) ends on it, so it sits right
   // under the extractor it wrote, as the document it read does
@@ -48,6 +56,17 @@ export function reattachedReadings(vix: ViewIndex, instances: ViewInstance[]): M
 }
 
 export const edgeKey = (e: EmEdge): string => e.id ?? `${e.source}→${e.target}`;
+
+/** MICRO-SPAZIO-3D · the 3D instances a group draws (`threed_instances`), in the
+ *  shape of the paradata instances: the proxy's reader is its geometry
+ *  property, a model has none; `countLabel` «×N» for a model in N epochs. */
+export type ArrangedInstance = ViewInstance & { countLabel?: string | null };
+export function threedRecords(doc: EmDocument, groupId: string, vix: ViewIndex = viewIndex(doc)): ArrangedInstance[] {
+  return threedInstances(doc, vix).filter((r) => r.group === groupId).map((r) => ({
+    id: r.id, master: r.master, kind: r.kind, node_type: r.node_type, name: r.name, owner: r.owner,
+    owner_kind: r.owner_kind, owner_name: r.owner_name, removed: r.removed,
+    readers: r.beside ? [r.beside] : [], extractors: [], through: [], countLabel: r.count_label ?? null }));
+}
 
 /**
  * The group's arranged scene: `memberIds` (the members drawn in it) and the
@@ -96,6 +115,8 @@ export function paradataGroupScene(
     sn.instanceOf = r.master;
     sn.instanceBadge = { owner: r.owner, ownerName: r.owner_name, ownerKind: r.owner_kind, group: groupId };
     if (r.removed) sn.trace = true;
+    const cl = (r as ArrangedInstance).countLabel;
+    if (cl) sn.countLabel = cl;
   }
   const stored = applyStored ? doc.layout?.group_spaces?.[groupId] : undefined;
   if (stored)

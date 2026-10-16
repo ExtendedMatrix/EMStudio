@@ -7,7 +7,8 @@ import { isDtcChainEdge } from "../rules";
 import type { Scene } from "../scene";
 import type { EmDocument } from "../types";
 import { layoutLayered } from "./graph";
-import { paradataGroupScene } from "./pd-arrange";
+import { paradataGroupScene, threedRecords } from "./pd-arrange";
+import { viewIndex, viewInstances } from "../paradata-view";
 
 function applyStored(doc: EmDocument, key: string, scene: Scene): Scene {
   const stored = doc.layout?.group_spaces?.[key];
@@ -25,12 +26,16 @@ function applyStored(doc: EmDocument, key: string, scene: Scene): Scene {
   return scene;
 }
 
-export function buildGroupScene(doc: EmDocument, groupId: string): Scene {
+export function buildGroupScene(doc: EmDocument, groupId: string, opts: { with3d?: boolean } = {}): Scene {
   const membership = buildMembership(doc);
   // MICRO-BADGE-PD · a paradata group: its members AND the instances it draws,
-  // arranged by the one function the Matrix uses when it is open in place
-  if (doc.graph.nodes.find((n) => n.id === groupId)?.node_type === "ParadataNodeGroup")
-    return paradataGroupScene(doc, groupId, membership.membersOf.get(groupId) ?? []);
+  // arranged by the one function the Matrix uses when it is open in place.
+  // MICRO-SPAZIO-3D · with the 3D nodes shown, its proxies and models too
+  if (doc.graph.nodes.find((n) => n.id === groupId)?.node_type === "ParadataNodeGroup") {
+    const vix = viewIndex(doc);
+    const insts = [...viewInstances(doc, groupId, vix), ...(opts.with3d ? threedRecords(doc, groupId, vix) : [])];
+    return paradataGroupScene(doc, groupId, membership.membersOf.get(groupId) ?? [], vix, insts);
+  }
   const { nodes, edges } = groupMembers(doc, membership, groupId);
   return applyStored(doc, groupId, layoutLayered(nodes, edges));
 }

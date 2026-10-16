@@ -41,6 +41,9 @@ export interface SceneNode {
   trace?: boolean;
   /** how many times this document is used in the scene (corner decorator) */
   useCount?: number;
+  /** MICRO-SPAZIO-3D · a representation model drawn in N epochs: «×N» on each
+   *  of its instances (`threed_instances.representation_model.count_word`) */
+  countLabel?: string;
   /** CATENA · a DATED document (its own has_first_epoch): the master in its
    *  epoch's lane, re-instanced in every paradata group that reads it */
   dated?: boolean;

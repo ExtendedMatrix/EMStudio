@@ -27,15 +27,18 @@ const eq = (got, want, what) => { assert.deepEqual(got, want, `${what} — got $
 
 // ── the inventory ────────────────────────────────────────────────────────────
 {
-  eq(O.OVERLAY_GROUPS.map((g) => g.key), ["rights", "paradata", "time", "checks", "threed", "drawing"],
-    "the groups, in the menu's order (the MICRO's five and «Drawing»)");
+  eq(O.OVERLAY_GROUPS.map((g) => g.key), ["rights", "paradata", "time", "checks", "threed", "drawing", "space3d"],
+    "the groups, in the menu's order (the MICRO's five, «Drawing», and the Space's own)");
   eq(O.OVERLAY_GROUPS.find((g) => g.key === "rights").items.map((i) => i.key),
     ["author", "author_ai", "license", "embargo", "inherited"], "authorship and rights: the four ornaments and the inherited");
   eq(new Set(O.OVERLAY_KEYS).size, O.OVERLAY_KEYS.length, "every overlay once");
-  eq(O.OVERLAY_KEYS.length, 20, "twenty overlays");
+  eq(O.OVERLAY_KEYS.length, 32, "thirty-two overlays: twenty-one of the graph, eleven of the Space");
   // every overlay is drawn somewhere: the renderers name it (a key nobody draws
   // would be a box that switches nothing)
-  const drawn = readFileSync(`${SRC}renderer.ts`, "utf8") + readFileSync(`${SRC}liquid-render.ts`, "utf8");
+  // MICRO-SPAZIO-3D · the Space's are gated by the scene (scene3d.ts) and by
+  // what the Space hands it (main.ts)
+  const drawn = readFileSync(`${SRC}renderer.ts`, "utf8") + readFileSync(`${SRC}liquid-render.ts`, "utf8")
+    + readFileSync(`${SRC}scene3d.ts`, "utf8") + readFileSync(`${SRC}main.ts`, "utf8");
   for (const k of O.OVERLAY_KEYS) {
     const named = drawn.includes(`"${k}"`) || (["author", "author_ai", "license", "embargo", "inherited"].includes(k) && drawn.includes("adornmentShown"));
     ok(named, `the renderer gates «${k}»`);
@@ -43,7 +46,9 @@ const eq = (got, want, what) => { assert.deepEqual(got, want, `${what} — got $
   // the liquid Graph draws two of them, the box views all
   eq(O.overlayItemsFor("graph").map((i) => i.key), ["pd_chip", "genre"], "the liquid Graph: the paradata chip and the genre letter");
   for (const v of ["matrix", "dtc", "multigraph", "soloing"])
-    eq(O.overlayItemsFor(v).length, 20, `${v}: every overlay`);
+    eq(O.overlayItemsFor(v).length, 21, `${v}: every overlay of the graph`);
+  eq(O.overlayItemsFor("space").map((i) => i.key), ["s3_labels", "s3_proxies", "s3_proxy_wire", "s3_rm", "s3_tiles",
+    "s3_grid", "s3_epoch_box", "s3_sel_outline", "s3_gizmo", "s3_cursor", "s3_sketches"], "the Space: its eleven, and only them");
   // every label in en, it, de
   const i18n = readFileSync(`${SRC}i18n.ts`, "utf8");
   for (const k of [...O.OVERLAY_KEYS.map((x) => `ov.item.${x}`), ...O.OVERLAY_GROUPS.map((g) => `ov.group.${g.key}`), "ov.master", "ov.all", "ov.none"])
@@ -53,6 +58,13 @@ const eq = (got, want, what) => { assert.deepEqual(got, want, `${what} — got $
 // ── the defaults: everything on, in every view (nothing changes at opening) ──
 for (const v of O.OVERLAY_VIEWS) {
   const d = O.defaultOverlays(v);
+  if (v === "space") {
+    // MICRO-SPAZIO-3D · the Space opens as it did: proxies FILLED, the wire a choice
+    eq(d, { master: true, off: ["s3_proxy_wire"] }, "space: default all on but the wire");
+    ok(!O.overlaysHideSomething(d, v), "space: the wire off is a way of drawing, no dot");
+    ok(O.overlaysHideSomething(O.withOverlay(d, "s3_grid", false), v), "space: the grid off → the dot");
+    continue;
+  }
   eq(d, { master: true, off: [] }, `${v}: default all on`);
   ok(!O.overlaysHideSomething(d, v), `${v}: the default hides nothing (no dot)`);
   for (const k of O.OVERLAY_KEYS) ok(O.overlayShown(d, k), `${v}: ${k} shown by default`);
@@ -62,7 +74,7 @@ ok(O.overlayShown(null, "warning"), "no state → drawn (a renderer without over
 // ── one by one: switch each off and on again ─────────────────────────────────
 {
   let st = O.defaultOverlays("matrix");
-  for (const k of O.OVERLAY_KEYS) {
+  for (const k of O.overlayItemsFor("matrix").map((i) => i.key)) {
     st = O.withOverlay(st, k, false);
     ok(!O.overlayShown(st, k), `${k} off`);
     for (const j of O.OVERLAY_KEYS) if (j !== k) ok(O.overlayShown(st, j), `${k} off leaves ${j} on`);
