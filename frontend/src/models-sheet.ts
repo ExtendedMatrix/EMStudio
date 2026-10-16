@@ -70,17 +70,19 @@ export function modelsTableHtml(space: Space, units: string[], ctx: ModelsCtx,
     + (json ? chip("space.sumJson", String(json), "json") : "")
     + `</div>`;
   h += `<h4>${esc(t("space.rmByEpoch"))}</h4><table class="mdl-rm"><thead><tr><th>${esc(t("space.col.epoch"))}</th><th>RM</th>`
-    + `<th>${esc(t("space.col.genre"))}</th><th>${esc(t("space.col.record"))}</th><th>${esc(t("space.col.file"))}</th><th></th></tr></thead><tbody>`;
+    + `<th>${esc(t("space.col.container"))}</th><th>${esc(t("space.col.genre"))}</th><th>${esc(t("space.col.record"))}</th><th>${esc(t("space.col.file"))}</th><th></th></tr></thead><tbody>`;
   for (const r of rmRows) {
     const e = space.epochs.find((x) => x.id === r.epochId);
     const span = e && (e.start != null || e.end != null) ? ` <span class="num d">${e.start ?? "…"}–${e.end ?? "…"}</span>` : "";
     if (!r.rmId) {
-      h += `<tr data-row="${esc(r.epochId)}"><td>${esc(name(r.epochId))}${span}</td><td colspan="4"><span class="st none">${esc(t("space.noRm"))}</span></td><td></td></tr>`;
+      h += `<tr data-row="${esc(r.epochId)}"><td>${esc(name(r.epochId))}${span}</td><td colspan="5"><span class="st none">${esc(t("space.noRm"))}</span></td><td></td></tr>`;
       continue;
     }
     const rm = space.rms.find((x) => x.id === r.rmId)!;
     h += `<tr data-row="${esc(rm.id)}"><td>${esc(name(r.epochId))}${span}</td>`
       + `<td><button class="link" data-go="${esc(rm.id)}"><b>${esc(rm.name)}</b></button></td>`
+      // MICRO-SPAZIO-3D-3 p.7 · the RM container it is in (EM Tools')
+      + `<td data-col="container">${rm.group && space.rmGroups?.get(rm.group) ? `<button class="link" data-go="${esc(rm.group)}">${esc(space.rmGroups.get(rm.group)!.name)}</button>` : ""}</td>`
       + `<td>${esc(ctx.genre(rm.genre))}</td>`
       + `<td>${rm.documentId ? `<button class="link" data-go="${esc(rm.documentId)}">${esc(name(rm.documentId))}</button>`
           : `<span class="st missing">${esc(t("space.notRecorded"))}</span>`}</td>`

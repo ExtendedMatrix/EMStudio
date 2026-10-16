@@ -96,7 +96,15 @@ export interface SpaceRM {
   /** MICRO-SPAZIO-3D · every version of the model (the Outliner lists them,
    *  the one drawn highlighted); empty when it has none */
   versions?: Array<{ id: string; name: string; url: string; master: boolean; lod: string | null }>;
+  /** MICRO-SPAZIO-3D-3 p.7 · the RM container it is in (EM16-RMNG,
+   *  `is_in_representation_model_group`, 1:1), or null */
+  group?: string | null;
 }
+
+/** MICRO-SPAZIO-3D-3 p.7 · an RM container as the graph has it (EM Tools writes
+ *  it, s3Dgraphy reads it: `RepresentationModelNodeGroup`) — its Document
+ *  (`has_representation_model` to the group), its members. */
+export interface SpaceRMGroup { id: string; name: string; documentId: string | null; members: string[] }
 
 export type ProxyGeometry = "glb" | "convex" | "spheres" | "empty";
 
@@ -146,6 +154,8 @@ export interface Space {
   epochs: SpaceEpoch[];
   rms: SpaceRM[];
   proxies: Map<string, SpaceProxy>;
+  /** MICRO-SPAZIO-3D-3 p.7 · the RM containers, empty ones too */
+  rmGroups: Map<string, SpaceRMGroup>;
   summary(epochId: string): EpochSummary | null;
   /** the top epoch a node (epoch or phase) belongs to */
   topOf(epochId: string): string | null;
@@ -155,6 +165,9 @@ export interface Space {
 export const EPOCH_LINKS = ["has_first_epoch", "survive_in_epoch", "is_in_epoch"] as const;
 const RM_TYPES = new Set(["representation_model", "representation_model_doc", "representation_model_sf"]);
 const GEOMETRY_PROPERTY_TYPE = "geometry";
+/** EM16-RMNG · the RM container and its membership (s3Dgraphy `Graph.RM_GROUP_EDGE`) */
+export const RM_GROUP_TYPE = "RepresentationModelNodeGroup";
+export const RM_GROUP_EDGE = "is_in_representation_model_group";
 
 const dataOf = (n: EmNode | undefined): Record<string, unknown> => (n?.data ?? {}) as Record<string, unknown>;
 const str = (v: unknown): string => (v == null ? "" : String(v));
@@ -353,7 +366,9 @@ export function buildSpace(
     const genre = str(own.geometry ?? own.certainty_class ?? dd.geometry ?? dd.certainty_class).trim() || null;
     const chosen = chosenOf(rm.id);
     const entries = entriesOf(rm.id);
-    return { id: rm.id, name: str(rm.name) || rm.id, epochs: [...eps], documentId, genre,
+    // a membership to a node that is not a group is not one (a hand-edited file)
+    const group = outOf(rm.id, RM_GROUP_EDGE).find((g) => byId.get(g)?.node_type === RM_GROUP_TYPE) ?? null;
+    return { id: rm.id, name: str(rm.name) || rm.id, epochs: [...eps], documentId, genre, group,
              resource: chosen ? chosen.resource : resourceOf(rm.id), choice: chosen?.choice ?? null,
              tileset: tilesetOf(rm.id),
              versions: entries.map((e) => ({ id: e.id, name: str(e.name) || e.id, url: str(e.url ?? dataOf(byId.get(e.id)).url),
@@ -402,8 +417,15 @@ export function buildSpace(
     return unitsByTop.get(epochId) ?? [];
   };
 
+  const rmGroups = new Map<string, SpaceRMGroup>();
+  for (const g of nodes) {
+    if (g.node_type !== RM_GROUP_TYPE) continue;
+    const doc = inOf(g.id, "has_representation_model").find((x) => byId.get(x)?.node_type === "document") ?? null;
+    rmGroups.set(g.id, { id: g.id, name: str(g.name) || g.id, documentId: doc, members: rms.filter((r) => r.group === g.id).map((r) => r.id) });
+  }
+
   return {
-    epochs, rms, proxies, topOf,
+    epochs, rms, proxies, rmGroups, topOf,
     summary(epochId) {
       const epoch = epochs.find((e) => e.id === epochId);
       if (!epoch) return null;

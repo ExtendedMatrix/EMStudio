@@ -248,6 +248,7 @@ import { addFileSketch, addSketch, listSketches, loadSketches, onSketches, remov
 import { boxSelect, clickOutliner, clickScene, EMPTY_SEL, hideKeys, selectAll, withoutKeys, type SpaceSel } from "./space-selection";
 import { buildOutlinerTree, loadSpacePrefs, renderOutliner, saveSpacePrefs, type Space3dPrefs } from "./space-outliner";
 import { patchProxyNodes, proxyRelPath } from "./proxy-association";
+import { planMove, planNewGroup, planRemove, type GroupPlan } from "./rm-groups";
 import { trackpadClassifier } from "./wheel-kind";
 import { isTilesetUrl } from "./tiles3d";
 import type { ModelOptions } from "./embed3d-native";
@@ -22367,6 +22368,9 @@ function sceneMenu(win: Win, h: SpaceSceneHandle, m: SceneMenuRequest): void {
       { label: t("s3.isolate"), act: "isolate", run: () => isolate(`rm:${id}`) },
       { label: t("s3.showInGraph"), act: "graph", run: () => jumpTo(id) },
       { label: t("s3.selectModel"), act: "select", run: () => { select(id); refreshInspector(); } },
+      "sep",
+      // MICRO-SPAZIO-3D-3 p.7 · the containers, on the models selected (this one if it is not)
+      ...groupMenuEntries(selectedModels(id), m.x, m.y),
     ]);
     return;
   }
@@ -22873,6 +22877,95 @@ function renderSketchUse(host: HTMLElement, unitId: string): void {
   host.appendChild(det);
 }
 
+// ── MICRO-SPAZIO-3D-3 p.7 · the RM containers: the writes, with the selection ──
+
+/** The models of the selection (a model right-clicked out of it: that one). */
+function selectedModels(clicked?: string): string[] {
+  const keys = spaceSel().keys.filter((k) => k.startsWith("rm:")).map((k) => k.slice(3));
+  return clicked && !keys.includes(clicked) ? [clicked] : keys;
+}
+/** One plan, one step of undo; in a room, the operations as usual. */
+function applyGroupPlan(plan: GroupPlan, say: string): void {
+  const st = store;
+  if (!st || refuseReadOnly()) return;
+  if (!plan.addNodes.length && !plan.addEdges.length && !plan.removeEdges.length) { toast(t("rmg.nothing")); return; }
+  st.batch(() => {
+    for (const n of plan.addNodes) st.addNode(n);
+    for (const id of plan.removeEdges) { const e = st.doc.graph.edges.find((x) => x.id === id); if (e) st.deleteEdge(e); }
+    for (const e of plan.addEdges) st.addEdge(e.source, e.target, e.type, undefined, e.id);
+  });
+  logInfo(say, plan.groupId ? [plan.groupId] : []);
+  toastUndo(say, st);
+  buildScenes();
+  draw();
+  refreshSurfaces("scene");
+  refreshInspector();
+}
+/** «Nuovo contenitore dai selezionati…»: a name and, if wanted, its document
+ *  (proposed: the one the models share). */
+function openNewGroup(models: string[]): void {
+  const st = store;
+  const sp = currentSpace();
+  if (!st || !sp || !models.length) return;
+  document.querySelector(".s3-rmg")?.remove();
+  const docsOf = new Set(models.map((m) => sp.rms.find((r) => r.id === m)?.documentId ?? null));
+  const shared = docsOf.size === 1 ? [...docsOf][0] : null;
+  const docs = st.doc.graph.nodes.filter((n) => n.node_type === "document")
+    .sort((a, b) => String(a.name).localeCompare(String(b.name), undefined, { numeric: true }));
+  const box = document.createElement("div");
+  box.className = "conn-panel s3-rmg";
+  box.setAttribute("role", "dialog");
+  box.innerHTML = `<h4>${escapeHtml(t("rmg.newHead", { n: String(models.length) }))}</h4>`
+    + `<label class="s3-rmg-row">${escapeHtml(t("rmg.name"))} <input class="s3-rmg-name" type="text"></label>`
+    + `<label class="s3-rmg-row">${escapeHtml(t("rmg.document"))} <select class="s3-rmg-doc"><option value="">${escapeHtml(t("rmg.noDocument"))}</option>`
+    + docs.map((d) => { const has = [...sp.rmGroups.values()].find((g) => g.documentId === d.id);
+      return `<option value="${escapeHtml(d.id)}"${d.id === shared && !has ? " selected" : ""}>${escapeHtml(String(d.name ?? d.id))}${has ? escapeHtml(` · ${t("rmg.hasOne", { name: has.name })}`) : ""}</option>`; }).join("")
+    + `</select></label><p class="insp-hint">${escapeHtml(t("rmg.newHint"))}</p>`
+    + `<div class="conn-acts"><button type="button" class="conn-btn" data-rmg="cancel">${escapeHtml(t("settings.cancel"))}</button>`
+    + `<button type="button" class="conn-btn primary" data-rmg="ok">${escapeHtml(t("rmg.create"))}</button></div>`;
+  Object.assign(box.style, { position: "fixed", left: "50%", top: "18%", transform: "translateX(-50%)", zIndex: "70", width: "min(420px, calc(100vw - 32px))" });
+  document.body.appendChild(box);
+  const name = box.querySelector<HTMLInputElement>(".s3-rmg-name")!;
+  name.value = shared ? t("rmg.defaultNameDoc", { doc: String(st.node(shared)?.name ?? "") }) : t("rmg.defaultName");
+  name.select();
+  name.focus();
+  const go = () => {
+    const label = name.value.trim();
+    if (!label) { name.focus(); return; }
+    const docId = box.querySelector<HTMLSelectElement>(".s3-rmg-doc")!.value || null;
+    const plan = planNewGroup(st.doc, label, docId, models);
+    if (plan.taken) { toast(t("rmg.taken", { doc: String(st.node(docId ?? "")?.name ?? ""), name: plan.taken })); return; }
+    box.remove();
+    applyGroupPlan(plan, t("rmg.created", { name: label, n: String(models.length) }));
+  };
+  name.addEventListener("keydown", (e) => { e.stopPropagation(); if (e.key === "Enter") go(); if (e.key === "Escape") box.remove(); });
+  box.querySelector("[data-rmg=ok]")!.addEventListener("click", go);
+  box.querySelector("[data-rmg=cancel]")!.addEventListener("click", () => box.remove());
+}
+/** «Sposta nel contenitore…»: the containers of the graph, one click. */
+function openMoveToGroup(models: string[], x: number, y: number): void {
+  const sp = currentSpace();
+  if (!sp || !models.length) return;
+  const groups = [...sp.rmGroups.values()].sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
+  if (!groups.length) { toast(t("rmg.none")); return; }
+  spaceMenu(x, y, t("rmg.moveHead", { n: String(models.length) }), groups.map((g) => ({
+    label: `${g.name}${g.documentId ? ` · ${String(store?.node(g.documentId)?.name ?? "")}` : ""} (${g.members.length})`,
+    act: `rmg:${g.id}`,
+    run: () => applyGroupPlan(planMove(store!.doc, g.id, models), t("rmg.moved", { name: g.name, n: String(models.length) })),
+  })));
+}
+/** The three entries, for a menu on models. */
+function groupMenuEntries(models: string[], x: number, y: number): Array<{ label: string; act: string; run: () => void; disabled?: boolean }> {
+  const sp = currentSpace();
+  const inSome = models.some((m) => !!sp?.rms.find((r) => r.id === m)?.group);
+  return [
+    { label: t("rmg.new", { n: String(models.length) }), act: "rmg-new", run: () => openNewGroup(models) },
+    { label: t("rmg.move"), act: "rmg-move", disabled: !sp?.rmGroups.size, run: () => openMoveToGroup(models, x, y) },
+    { label: t("rmg.remove"), act: "rmg-remove", disabled: !inSome,
+      run: () => applyGroupPlan(planRemove(store!.doc, models), t("rmg.removed", { n: String(models.length) })) },
+  ];
+}
+
 /** The Outliner of a Space window, drawn into `el`. */
 function renderSpaceOutliner(el: HTMLElement, win: Win, sp: Space | null): void {
   const prefs = space3dPrefs();
@@ -22885,8 +22978,10 @@ function renderSpaceOutliner(el: HTMLElement, win: Win, sp: Space | null): void 
     rms: (ep) => (sp.summary(ep)?.rms ?? []).map((r) => {
       const drawnUrl = h?.drawnUrl(`rm:${r.id}`) ?? "";
       const tail = (u: string) => decodeURIComponent(u.split(/[?#]/)[0]).split("/").pop() ?? "";
+      const grp = r.group ? sp.rmGroups.get(r.group) : undefined;
       return { id: r.id, name: r.name, glyph: String(st.node(r.id)?.node_type ?? "representation_model"),
         tileset: !!r.resource?.tiles,
+        group: grp ? { id: grp.id, name: grp.name, doc: grp.documentId ? String(st.node(grp.documentId)?.name ?? "") : undefined } : null,
         versions: (r.versions ?? []).map((v) => ({ id: v.id, name: v.name + (v.master ? ` · ${t("s3.master")}` : ""),
           drawn: !!drawnUrl && !!v.url && tail(drawnUrl) === tail(v.url), chosen: r.choice?.entry?.id === v.id })) };
     }),
@@ -22914,6 +23009,14 @@ function renderSpaceOutliner(el: HTMLElement, win: Win, sp: Space | null): void 
         return;
       }
       if (r.kind === "epoch") { spaceEpochId = r.id; select(r.id); refreshInspector(); return; }
+      // MICRO-SPAZIO-3D-3 p.7 · a container: its models (⌘/Ctrl: added to the selection)
+      if (r.kind === "rmgroup") {
+        const keys = (r.children ?? []).filter((c) => c.object).map((c) => c.key);
+        const cur = spaceSel(sp);
+        setSpaceSel(mods.toggle ? { keys: [...new Set([...cur.keys, ...keys])], active: keys[keys.length - 1] ?? cur.active }
+          : { keys, active: keys[keys.length - 1] ?? null });
+        return;
+      }
       if (r.kind === "version") { select(r.id); refreshInspector(); return; }
       const p = space3dPrefs();
       const tg = new Set(p.toggled);
@@ -22950,6 +23053,17 @@ function renderSpaceOutliner(el: HTMLElement, win: Win, sp: Space | null): void 
     search: (q) => { spaceQuery = q; refreshSurfaces("scene"); },
     clearSelection: () => setSpaceSel(EMPTY_SEL),
     dragSketch: (id, e) => beginSketchDrag(win, id, e),
+    // p.7 · a right click on a model's row, or on a container's: the containers' entries
+    rowMenu: (r, x, y) => {
+      if (r.kind === "rm") spaceMenu(x, y, r.name, groupMenuEntries(selectedModels(r.id), x, y));
+      else if (r.kind === "rmgroup") {
+        const members = (r.children ?? []).filter((c) => c.kind === "rm").map((c) => c.id);
+        spaceMenu(x, y, r.name, [
+          { label: t("rmg.selectMembers"), act: "rmg-select", run: () => setSpaceSel({ keys: members.map((m) => `rm:${m}`), active: members.length ? `rm:${members[members.length - 1]}` : null }) },
+          { label: t("rmg.remove"), act: "rmg-remove", run: () => applyGroupPlan(planRemove(store!.doc, members), t("rmg.removed", { n: String(members.length) })) },
+        ]);
+      }
+    },
     close: () => setSpace3dPrefs({ ...space3dPrefs(), shown: false }),
     addShape: (id, drop) => addShapeIn(win, id, drop),
   });

@@ -23,14 +23,20 @@
  * rest draws it.
  */
 
-export interface OutlinerVersion { id: string; name: string; drawn: boolean; chosen: boolean }
+export interface OutlinerVersion { id: string; name: string; drawn: boolean; chosen: boolean;
+  /** MICRO-SPAZIO-3D-3 p.10 · its uses (web, realtime…) and its level, computed from the chain */
+  uses?: string[]; level?: string;
+  /** the version is chosen by the distance (the «A» of the row) */
+  auto?: boolean }
 
 export interface OutlinerRow {
   /** `rm:<id>`, `proxy:<unit>`, `sketch:<id>`, `epoch:<id>`, `group:<epoch>:<type>`… */
   key: string;
   /** the node the row selects (a model, a unit), or the sketch */
   id: string;
-  kind: "epoch" | "rms" | "proxies" | "type" | "rm" | "tileset" | "proxy" | "sketches" | "sketch" | "version";
+  kind: "epoch" | "rms" | "proxies" | "type" | "rm" | "tileset" | "proxy" | "sketches" | "sketch" | "version"
+    /** MICRO-SPAZIO-3D-3 p.7 · an RM container (EM Tools'), with its models */
+    | "rmgroup";
   name: string;
   /** the glyph's node type (2d_glyphs), or a text */
   glyph?: string;
@@ -42,12 +48,22 @@ export interface OutlinerRow {
   object?: boolean;
   /** the epoch the scene shows */
   current?: boolean;
+  /** the row's tooltip (a technical name), when it is not the name */
+  title?: string;
+  /** a version's uses and level (p.10), shown small */
+  uses?: string[];
+  level?: string;
+  auto?: boolean;
 }
 
 export interface OutlinerInput {
   epochs: Array<{ id: string; name: string; current: boolean }>;
   /** per epoch, its models (tileset: the model's first file is a tileset) */
-  rms: (epochId: string) => Array<{ id: string; name: string; glyph: string; tileset: boolean; versions: OutlinerVersion[] }>;
+  rms: (epochId: string) => Array<{ id: string; name: string; glyph: string; tileset: boolean; versions: OutlinerVersion[];
+    /** p.7 · the container it is in: its id, its name, its document's name */
+    group?: { id: string; name: string; doc?: string } | null;
+    /** p.11 · the technical name, when the name shown is shortened (a tooltip) */
+    technical?: string }>;
   /** per epoch, its proxies: unit, its name, its type */
   proxies: (epochId: string) => Array<{ unitId: string; name: string; type: string }>;
   /** the type's label (US, USV/s…) */
@@ -66,15 +82,29 @@ export function buildOutlinerTree(input: OutlinerInput): OutlinerRow[] {
     const px = input.proxies(ep.id);
     const children: OutlinerRow[] = [];
     if (rms.length) {
+      const rmRow = (r: (typeof rms)[number]): OutlinerRow => ({
+        key: `rm:${r.id}`, id: r.id, kind: r.tileset ? "tileset" : "rm", name: r.name, glyph: r.tileset ? "tileset" : r.glyph,
+        object: true, ...(r.technical ? { title: r.technical } : {}),
+        ...(r.versions.length > 1 ? { children: r.versions.map((v) => ({
+          key: `version:${r.id}:${v.id}`, id: v.id, kind: "version" as const, name: v.name, drawn: v.drawn,
+          glyphText: v.drawn ? "●" : v.chosen ? "○" : "·", ...(v.uses ? { uses: v.uses } : {}), ...(v.level ? { level: v.level } : {}),
+          ...(v.auto ? { auto: true } : {}) })) } : {}),
+      });
+      const sorted = rms.slice().sort((a, b) => Number(a.tileset) - Number(b.tileset) || coll.compare(a.name, b.name));
+      // MICRO-SPAZIO-3D-3 p.7 · Epoch › Representation models › CONTAINER › RM;
+      // a model without a container stays where it was
+      const groups = new Map<string, { name: string; doc?: string; rows: OutlinerRow[] }>();
+      const loose: OutlinerRow[] = [];
+      for (const r of sorted) {
+        if (r.group) (groups.get(r.group.id) ?? groups.set(r.group.id, { name: r.group.name, doc: r.group.doc, rows: [] }).get(r.group.id)!).rows.push(rmRow(r));
+        else loose.push(rmRow(r));
+      }
+      const groupRows: OutlinerRow[] = [...groups.entries()].sort((a, b) => coll.compare(a[1].name, b[1].name)).map(([gid, g]) => ({
+        key: `rmgroup:${ep.id}:${gid}`, id: gid, kind: "rmgroup" as const, name: g.doc ? `${g.name} · ${g.doc}` : g.name,
+        glyph: "RepresentationModelNodeGroup", children: g.rows }));
       children.push({
         key: `rms:${ep.id}`, id: ep.id, kind: "rms", name: input.texts.rms, glyph: "representation_model",
-        children: rms.slice().sort((a, b) => Number(a.tileset) - Number(b.tileset) || coll.compare(a.name, b.name)).map((r) => ({
-          key: `rm:${r.id}`, id: r.id, kind: r.tileset ? "tileset" : "rm", name: r.name, glyph: r.tileset ? "tileset" : r.glyph,
-          object: true,
-          ...(r.versions.length > 1 ? { children: r.versions.map((v) => ({
-            key: `version:${r.id}:${v.id}`, id: v.id, kind: "version" as const, name: v.name, drawn: v.drawn,
-            glyphText: v.drawn ? "●" : v.chosen ? "○" : "·" })) } : {}),
-        })),
+        children: [...groupRows, ...loose],
       });
     }
     if (px.length) {
@@ -115,7 +145,8 @@ export function filterTree(rows: OutlinerRow[], q: string): OutlinerRow[] {
   // a row that matches keeps all its children; one that does not, only the
   // children that match (or lead to a match)
   const keep = (r: OutlinerRow): OutlinerRow | null => {
-    if (r.name.toLowerCase().includes(s)) return r;
+    // the name shown and the technical one (p.11: a name without its suffix)
+    if (r.name.toLowerCase().includes(s) || (r.title ?? "").toLowerCase().includes(s)) return r;
     const kids = (r.children ?? []).map(keep).filter((x): x is OutlinerRow => !!x);
     return kids.length ? { ...r, children: kids } : null;
   };
@@ -212,6 +243,8 @@ export interface OutlinerActions {
   close(): void;
   /** MICRO-SPAZIO-3D-3 · a click on the tree's empty part: nothing selected */
   clearSelection?(): void;
+  /** p.7 · a right click on a row (a model, a container) */
+  rowMenu?(row: OutlinerRow, x: number, y: number): void;
   /** p.6 · a press on a sketch's row: the caller follows the pointer (a drag onto a unit) */
   dragSketch?(sketchId: string, e: PointerEvent): void;
   /** a shape of the palette: clicked (at the cursor), or dragged and dropped at a page point */
@@ -328,7 +361,7 @@ export function renderOutliner(el: HTMLElement, v: OutlinerView, act: OutlinerAc
     const name = document.createElement("span");
     name.className = "sol-name";
     name.textContent = r.name;
-    name.title = r.name;
+    name.title = r.title ?? r.name;
     line.append(tw, g, name);
     if (r.kind !== "version") {
       const keys = objectKeys(r);
@@ -359,6 +392,8 @@ export function renderOutliner(el: HTMLElement, v: OutlinerView, act: OutlinerAc
       }
     }
     line.addEventListener("click", (e) => act.pick(r, { toggle: e.metaKey || e.ctrlKey, range: e.shiftKey }, order));
+    if (act.rowMenu && (r.kind === "rm" || r.kind === "rmgroup"))
+      line.addEventListener("contextmenu", (e) => { e.preventDefault(); act.rowMenu!(r, e.clientX, e.clientY); });
     if (r.kind === "sketch" && act.dragSketch) {
       line.draggable = false;
       line.addEventListener("pointerdown", (e) => { if (!(e.target as HTMLElement).closest("[data-sol]")) act.dragSketch!(r.id, e); });
