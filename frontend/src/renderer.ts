@@ -903,6 +903,17 @@ export function render(
     if (n.collapsed) continue; // PD1 · shown as a bottom-left tablet, not a node
     // FONTE · a TRACE (removed keeping its trace, still read) is attenuated
     ctx.globalAlpha = n.trace ? 0.38 : 1;
+    // MICRO-SPAZIO-3D-2 · «fuori dal gruppo»: a loose property shown in the
+    // unit's group by the view, a light dashed frame around it
+    if (n.outside) {
+      ctx.save();
+      ctx.setLineDash([4 / vp.scale, 3 / vp.scale]);
+      ctx.lineWidth = 1.2 / vp.scale;
+      ctx.strokeStyle = canvasTheme().labelMuted;
+      const m = 4 / vp.scale;
+      ctx.strokeRect(n.x - m, n.y - m, n.w + 2 * m, n.h + 2 * m);
+      ctx.restore();
+    }
     const st = nodeStyle(n.node.node_type);
     // Monochrome (B/W) mode: EVERY node draws with a black BORDER only — fills,
     // text and container header tints are left untouched (nodes are told apart by

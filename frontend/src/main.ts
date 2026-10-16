@@ -240,6 +240,7 @@ import { openReadingBubble, type BubbleUnit } from "./reading-bubble";
 import { renderChronology, type ChronoEpoch, type ChronologyData } from "./chronology";
 import { buildSpace, citationKey, SpaceMarks, type Space } from "./space";
 import { mountSpaceScene, type SceneItem, type SceneMenuRequest, type SpaceSceneHandle } from "./scene3d";
+import { implicitGroups, isImplicitGroup, outsideMembers, unitOfImplicit, withImplicitGroups } from "./implicit-pd";
 import { eulerFromUp, type CamState, type V3 } from "./space-nav";
 import { addSketch, listSketches, onSketches, removeSketch, SHAPE_FAMILIES, SHAPES, shapeById, shapeLabel, sketchById } from "./shapes3d";
 import { buildOutlinerTree, loadSpacePrefs, renderOutliner, saveSpacePrefs, type Space3dPrefs } from "./space-outliner";
@@ -2161,6 +2162,8 @@ window.__EM_SCENE__ = () => {
         // FONTE · the badge of an instance, and a trace
         ...(n.instanceBadge ? { badge: n.instanceBadge.ownerName } : {}), ...(n.trace ? { trace: true } : {}),
         ...(n.countLabel ? { countLabel: n.countLabel } : {}),
+        // MICRO-SPAZIO-3D-2 · a loose property shown in a real group
+        ...(n.outside ? { outside: true } : {}),
       })),
       // DEV29 · the scale it is drawn at, and what its lanes say
       scale: vp.scale,
@@ -2944,6 +2947,8 @@ function renderInspectorInto(host: HTMLElement): void {
     renderNarrativeInspectorInto(host);
     if (nvSel) return;
   }
+  // MICRO-SPAZIO-3D-2 · an implicit group is the view's: its own small panel
+  if (isImplicitGroup(selectedId)) { renderImplicitInspector(host, selectedId!); return; }
   // DAG · the inspector reads the store the SELECTION BELONGS TO. Clicking an
   // acquisition on the DTC canvas selects a node of the CORPUS, and a panel that
   // only ever looked at the study graph would answer "nothing selected" about a
@@ -3879,9 +3884,20 @@ function updateBreadcrumb(): void {
   };
   mk("Canvas", 0);
   contextStack.forEach((gid, i) => {
-    const g = store!.node(gid);
+    const g = viewNode(gid);
     mk(String(g?.name || gid), i + 1);
   });
+  // MICRO-SPAZIO-3D-2 · an implicit group open in its soloing: «Rendi gruppo (Compatta)»
+  const top = contextStack[contextStack.length - 1];
+  if (isImplicitGroup(top)) {
+    const b = document.createElement("button");
+    b.className = "bc-act";
+    b.dataset.act = "make-real";
+    b.textContent = t("ipd.makeReal");
+    b.title = t("ipd.makeRealHint");
+    b.addEventListener("click", () => makeImplicitReal(top));
+    breadcrumb.append(document.createTextNode("  "), b);
+  }
   breadcrumb.classList.remove("hidden");
 }
 
@@ -3995,11 +4011,18 @@ function requestFold(groupId: string): void {
 // upstream DTC genesis). Pick the right scene builder, reusing the same fold.
 function contextSceneFor(id: string): Scene | null {
   if (!store) return null;
-  const n = store.node(id);
+  const n = viewNode(id);
   // MICRO-SPAZIO-3D · the soloing of a paradata group draws its 3D instances
   // when the view shows the 3D nodes (the «Links & other» ring)
-  if (n && isGroupType(n.node_type))
-    return buildGroupScene(store.doc, id, { with3d: !hiddenNodeTypes.has("representation_model") });
+  // MICRO-SPAZIO-3D-2 · …on the view's document: an implicit group solos as a
+  // real one, and the loose properties in a real group are marked «outside»
+  if (n && isGroupType(n.node_type)) {
+    const vd = viewDocNow();
+    const sc = buildGroupScene(vd, id, { with3d: !hiddenNodeTypes.has("representation_model") });
+    const outside = outsideMembers(vd, id);
+    if (outside.size) for (const sn of sc.nodes) if (outside.has(sn.id)) sn.outside = true;
+    return sc;
+  }
   return buildDtcGenesisScene(store.doc, id);
 }
 
@@ -4146,6 +4169,84 @@ function labelResources(scene: Scene | null | undefined, counts: Map<string, num
  *  never has it. */
 let hdtoLayer = false;
 
+// ── MICRO-SPAZIO-3D-2 · p.1 · the implicit paradata group, in the view ──────
+/** the implicit groups opened in place (Shift + click): the view's, this session */
+const implicitOpen = new Set<string>();
+let viewDocMemo: { doc: EmDocument; nodes: number; edges: number; key: string; out: EmDocument } | null = null;
+/** The document the paradata's drawing reads: the store's, plus the implicit
+ *  groups of the units with loose properties (`implicit-pd.ts`). The data is
+ *  never touched. Remembered while the document and the open set stay. */
+function viewDocNow(): EmDocument {
+  const doc = store!.doc;
+  const key = [...implicitOpen].sort().join(",") + "|" + (doc.layout?.folded_groups ?? []).join(",");
+  const m = viewDocMemo;
+  if (m && m.doc === doc && m.nodes === doc.graph.nodes.length && m.edges === doc.graph.edges.length && m.key === key && !viewDocDirty)
+    return m.out;
+  const out = withImplicitGroups(doc, implicitOpen);
+  viewDocMemo = { doc, nodes: doc.graph.nodes.length, edges: doc.graph.edges.length, key, out };
+  viewDocDirty = false;
+  return out;
+}
+let viewDocDirty = true;
+/** a node of the view: the store's, or an implicit group */
+function viewNode(id: string | null | undefined): EmNode | undefined {
+  if (!id || !store) return undefined;
+  return store.node(id) ?? (isImplicitGroup(id) ? viewDocNow().graph.nodes.find((n) => n.id === id) : undefined);
+}
+/** Shift + click on the badge: an implicit group opens and closes in the view */
+function toggleImplicit(groupId: string): void {
+  if (implicitOpen.has(groupId)) implicitOpen.delete(groupId); else implicitOpen.add(groupId);
+  viewDocDirty = true;
+  buildScenes();
+  draw();
+}
+/** «Rendi gruppo (Compatta)»: the same «Compatta» of today, on that unit only */
+function makeImplicitReal(groupId: string): void {
+  if (!store || refuseReadOnly()) return;
+  const unit = unitOfImplicit(groupId);
+  runCompact([unit]);
+  implicitOpen.delete(groupId);
+  viewDocDirty = true;
+  // the soloing of the implicit group becomes the soloing of the real one
+  const real = store.doc.graph.edges.find((e) => e.source === unit && e.edge_type === "has_paradata_nodegroup"
+    && store!.node(e.target)?.node_type === "ParadataNodeGroup")?.target;
+  if (real) {
+    // the views «Indietro» remembers knew the group closed (implicit): so it is
+    // there, or going back would open the group «Compatta» just made
+    for (const v of viewHistory as Array<{ folded?: string[] }>) if (Array.isArray(v.folded) && !v.folded.includes(real)) v.folded.push(real);
+    const i = contextStack.indexOf(groupId);
+    if (i >= 0) { contextStack[i] = real; rebuildContext(); }
+    if (selectedId === groupId) select(real);
+  }
+  buildScenes();
+  draw();
+  refreshInspector();
+}
+/** The Inspector of an implicit group: what it gathers, and the door to make it true. */
+function renderImplicitInspector(host: HTMLElement, groupId: string): void {
+  host.textContent = "";
+  const unit = unitOfImplicit(groupId);
+  const g = implicitGroups(store!.doc).find((x) => x.group === groupId);
+  const panel = document.createElement("div");
+  panel.className = "insp-canvas";
+  panel.dataset.implicit = groupId;
+  const h = document.createElement("h3");
+  h.className = "insp-sect";
+  h.textContent = t("ipd.title", { x: String(viewNode(groupId)?.name ?? groupId) });
+  const p = document.createElement("p");
+  p.className = "insp-hint";
+  p.textContent = t("ipd.body", { unit: String(store!.node(unit)?.name ?? unit), n: String(g?.properties.length ?? 0),
+    c: String(g?.chain.length ?? 0) });
+  const b = document.createElement("button");
+  b.type = "button";
+  b.className = "insp-btn";
+  b.dataset.act = "make-real";
+  b.textContent = t("ipd.makeReal");
+  b.addEventListener("click", () => makeImplicitReal(groupId));
+  panel.append(h, p, b);
+  host.appendChild(panel);
+}
+
 function filteredView(opts: { wholeGraph?: boolean;
                         hidden?: { nodes: Set<string>; edges: Set<string> };
                         hdtoLayer?: boolean;
@@ -4157,7 +4258,8 @@ function filteredView(opts: { wholeGraph?: boolean;
   adornments: Map<string, AdornmentBadge[]>;
   instanceKindsHidden?: Set<string>;
 } {
-  const doc = store!.doc;
+  // MICRO-SPAZIO-3D-2 · the view's document: the implicit groups in it
+  const doc = viewDocNow();
   const wholeGraph = !!opts.wholeGraph;
   const hiddenNodeTypes = opts.hidden?.nodes ?? hiddenNodesNow;
   const hiddenEdgeTypes = opts.hidden?.edges ?? hiddenEdgesNow;
@@ -4589,6 +4691,8 @@ function reflowMatrix(): void {
 
 function buildScenesNow(): void {
   if (!store) return;
+  // MICRO-SPAZIO-3D-2 · the view's document, computed once per build
+  viewDocDirty = true;
   const doc = store.doc;
   // AUDIT N2 · each projection with ITS circles; equal circle sets share a view
   const views = new Map<string, ReturnType<typeof filteredView>>();
@@ -4619,7 +4723,7 @@ function buildScenesNow(): void {
     )
       warnIds.add(n.id);
   scenes.matrix = buildMatrixScene(
-    doc,
+    viewDocNow(),
     fview,
     matrixViewLayout ?? undefined,
     phasesVisible,
@@ -31057,7 +31161,8 @@ function wireGraphCanvas(canvas: HTMLCanvasElement, winId: string): void {
       const pc = hitPdChip(e.clientX - rect.left, e.clientY - rect.top);
       if (pc) {
         tooltip.innerHTML = `<b></b> <span class="tt-type"></span><br><span class="tt-desc"></span>`;
-        (tooltip.children[0] as HTMLElement).textContent = String(store?.node(pc.group)?.name ?? pc.group);
+        (tooltip.children[0] as HTMLElement).textContent = String(viewNode(pc.group)?.name ?? pc.group)
+          + (isImplicitGroup(pc.group) ? ` · ${t("ipd.implicit")}` : "");
         (tooltip.children[1] as HTMLElement).textContent = `[ParadataNodeGroup]`;
         (tooltip.children[3] as HTMLElement).textContent =
           `${pc.label} — ${t(pc.open ? "pdchip.actionsOpen" : "pdchip.actions")}`;
@@ -31183,8 +31288,8 @@ function wireGraphCanvas(canvas: HTMLCanvasElement, winId: string): void {
     if (pdChipPending) {
       const { group, shift } = pdChipPending;
       pdChipPending = null;
-      if (!moved && hitPdChip(rx, ry)?.group === group && store?.node(group)) {
-        if (shift) requestFold(group);
+      if (!moved && hitPdChip(rx, ry)?.group === group && viewNode(group)) {
+        if (shift) { if (isImplicitGroup(group)) toggleImplicit(group); else requestFold(group); }
         else enterGroup(group);
       }
       return;
@@ -31199,7 +31304,8 @@ function wireGraphCanvas(canvas: HTMLCanvasElement, winId: string): void {
       }
       if (!moved && hitAdornmentBadge(rx, ry) === id) {
         // PROPRIETA · the property chip of a unit opens and closes its group
-        if (store?.node(id)?.node_type === "ParadataNodeGroup") requestFold(id);
+        if (isImplicitGroup(id)) toggleImplicit(id);
+        else if (store?.node(id)?.node_type === "ParadataNodeGroup") requestFold(id);
         else select(id);
       }
       return;

@@ -39,6 +39,10 @@ export interface SceneNode {
   /** FONTE · a TRACE: a node removed keeping its trace (`data.removed`), still
    *  read by a live chain — drawn attenuated, selectable, restorable */
   trace?: boolean;
+  /** MICRO-SPAZIO-3D-2 · a loose property (and its chain) drawn in a unit's REAL
+   *  paradata group by the view's implicit group: «fuori dal gruppo», a light
+   *  dashed frame (`implicit-pd.ts`) */
+  outside?: boolean;
   /** how many times this document is used in the scene (corner decorator) */
   useCount?: number;
   /** MICRO-SPAZIO-3D · a representation model drawn in N epochs: «×N» on each
