@@ -257,6 +257,12 @@ const doc = (nodes, edges = []) => ({ header: {}, graph: { id: "g", nodes, edges
   eq([st.liveNodes().length - c.nodes, st.liveEdges().length - c.edges], before,
      "B9c · count minus the epochs' dates = the file's count (s3Dgraphy's)");
   ok(t("info.epochDates", { n: 24, e: 24 }).includes("24"), "B9c · the bar's words carry both numbers");
+  // MICRO-PORTA-IN-STANZA-DAL-MOTORE (16 Oct 2026) · the same file read twice
+  // makes the SAME date nodes: a second «Bring into a room…» seated them again
+  const ids = (x) => x.liveNodes().map((n) => n.id).sort().join(",");
+  const again = new DocumentStore(JSON.parse(JSON.stringify(d)));
+  again.ensureAllEpochParadata();
+  eq(ids(again), ids(st), "B9c · read twice, the epochs' dates have the same ids (derived from the epoch's)");
   const SP = process.env.DEV29_SP_CONVERTED;   // optional: the San Pietro GraphML, converted (a copy in /tmp)
   if (SP) {
     const sp = new DocumentStore(JSON.parse(readFileSync(SP, "utf8")));

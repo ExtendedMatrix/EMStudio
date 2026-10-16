@@ -1471,8 +1471,17 @@ export class DocumentStore {
       if (!missing.length) continue;
       const lane = layout.swimlanes?.find((l) => l.epoch_id === epoch.id);
       const baseY = (lane?.y ?? 0) + Math.max(0, (lane?.height ?? 200) - 46);
+      // DERIVED ids, not fresh ones: this runs at every READING of a file, so the
+      // same file opened twice must make the same nodes. Measured on 16 Oct 2026
+      // (MICRO-PORTA-IN-STANZA-DAL-MOTORE): Templu Mare v3.2 gave 9 new nodes and
+      // 15 edges at each opening, and a second «Bring into a room…» of the same
+      // file seated them again in the room — 24 operations instead of 0. From the
+      // epoch's id, which is unique: a group and a property per bound, at most.
+      // (`ensureEpochTemporalParadata`, a person's gesture, keeps `newId`.)
+      const taken = (id: string): boolean => g.nodes.some((n) => n.id === id);
       if (!pdgId) {
-        pdgId = this.newId();
+        pdgId = `${epoch.id}__paradata`;
+        if (taken(pdgId)) pdgId = this.newId();
         g.nodes.push({
           id: pdgId,
           name: paradataGroupName(epoch.name),
@@ -1489,7 +1498,8 @@ export class DocumentStore {
       }
       for (const [pt, bk] of missing) {
         const s = order.indexOf(pt);
-        const pid = this.newId();
+        let pid = `${epoch.id}__${pt}`;
+        if (taken(pid)) pid = this.newId();
         g.nodes.push({
           id: pid,
           name: pt,
