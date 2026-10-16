@@ -7,7 +7,7 @@
  *
  * A new shortcut is a new row here. The i18n key of the row is `keys.<id>`.
  */
-export type KeyScope = "app" | "graph" | "field" | "trace" | "window" | "menu";
+export type KeyScope = "app" | "graph" | "space" | "field" | "trace" | "window" | "menu";
 
 export interface KeyRow {
   id: string;
@@ -53,6 +53,25 @@ export const KEYMAP: KeyRow[] = [
   { id: "laneMenu", keys: "@gesture.rclickLane", scope: "graph" },
   { id: "longPress", keys: "@gesture.longPress", scope: "graph" },
   { id: "layoutFresh", keys: "@gesture.altLayout", scope: "graph" },
+  // MICRO-SPAZIO-3D · the Space, with the 3D in focus (E.D., 11 Oct 2026). On
+  // Windows and Linux ⌘ is Ctrl; on a Mac Ctrl + click is the right click
+  { id: "s3pick", keys: "@gesture.s3Click", scope: "space" },
+  { id: "s3pickRm", keys: "@gesture.s3CmdClick", scope: "space" },
+  { id: "s3menu", keys: "@gesture.s3RightClick", scope: "space" },
+  { id: "s3dbl", keys: "@gesture.dblclick", scope: "space" },
+  { id: "s3box", keys: "⇧B", scope: "space" },
+  { id: "s3cursor", keys: "@gesture.s3ShiftRight", scope: "space" },
+  { id: "s3cursorReset", keys: "⇧C", scope: "space" },
+  { id: "s3wheel", keys: "@gesture.s3Wheel", scope: "space" },
+  { id: "s3orbit", keys: "@gesture.s3Orbit", scope: "space" },
+  { id: "s3pan", keys: "@gesture.s3Pan", scope: "space" },
+  { id: "s3frameSel", keys: ". · F", scope: "space" },
+  { id: "s3frameAll", keys: "Home", scope: "space" },
+  { id: "s3outliner", keys: "T", scope: "space" },
+  { id: "s3add", keys: "⇧A", scope: "space" },
+  { id: "s3grs", keys: "G · R · S", scope: "space" },
+  { id: "s3delete", keys: "X · ⌫", scope: "space" },
+  { id: "s3back", keys: "⌘[ · ⌥←", scope: "space" },
   // tracing in the Doc window
   { id: "toolEsc", keys: "Esc", scope: "trace" },
   { id: "polyClose", keys: "@gesture.enterDbl", scope: "trace" },

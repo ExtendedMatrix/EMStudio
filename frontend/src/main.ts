@@ -240,6 +240,7 @@ import { openReadingBubble, type BubbleUnit } from "./reading-bubble";
 import { renderChronology, type ChronoEpoch, type ChronologyData } from "./chronology";
 import { buildSpace, citationKey, SpaceMarks, type Space } from "./space";
 import { mountSpaceScene, type SceneItem } from "./scene3d";
+import { trackpadClassifier } from "./wheel-kind";
 import { isTilesetUrl } from "./tiles3d";
 import type { ModelOptions } from "./embed3d-native";
 import { nodeBlobReady, nodeBlobUrl, ownedByNode, setNodeRoad, type FetchFailure } from "./node-road";
@@ -30964,24 +30965,10 @@ let spaceHeld = false; // Space → pan-always gesture (see pointerdown)
  *  press). */
 let rightPress: { x: number; y: number; panned: boolean } | null = null;
 let rightMenuAt = 0;
-/** G5 · a two-finger trackpad scroll in progress (its wheel events are told from
- *  a mouse wheel's, and a gesture keeps its kind until it stops for 400 ms) */
-let trackpadUntil = 0;
 /** G5 · is this wheel event a trackpad's two-finger scroll (→ pan) and not a
- *  mouse wheel (→ zoom at the cursor)? A wheel in lines or pages is a mouse; in
- *  pixels, a horizontal component, a fractional or small delta, or Chrome's
- *  legacy `wheelDeltaY` at −3 × deltaY are a trackpad's. Measured in Chrome and
- *  WebKit on macOS; a mouse with free-spinning smooth scroll can read as a
- *  trackpad, which pans — the gentler of the two mistakes. */
-function isTrackpadScroll(e: WheelEvent): boolean {
-  const now = performance.now();
-  if (e.deltaMode !== 0) return false;
-  const legacy = (e as WheelEvent & { wheelDeltaY?: number }).wheelDeltaY;
-  const fine = e.deltaX !== 0 || !Number.isInteger(e.deltaY) || Math.abs(e.deltaY) < 50 ||
-    (typeof legacy === "number" && legacy !== 0 && legacy === -3 * e.deltaY);
-  if (fine) trackpadUntil = now + 400;
-  return fine || now < trackpadUntil;
-}
+ *  mouse wheel (→ zoom at the cursor)? The rule is `wheel-kind.ts`, shared with
+ *  the Space (MICRO-SPAZIO-3D). */
+const isTrackpadScroll: (e: WheelEvent) => boolean = trackpadClassifier();
 let pdTagPending: string | null = null; // PD tag pressed → enter on click (pointerup)
 let adornmentPending: string | null = null; // ornament badge pressed → select real node
 let instanceBadgePending: string | null = null; // FONTE · an instance's badge pressed → its master
