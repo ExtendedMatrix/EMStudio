@@ -1168,8 +1168,19 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
        *  pose at the start, the pivot (its own origin when alone, else the
        *  median point of their boxes' centres, `medianPoint`) */
       type Target = { id: string; start: Pose; q0: any };
+      /** MICRO-SPAZIO-3D-3 p.4 · «continuous grab», as Blender's: during the
+       *  gesture the pointer is locked (Pointer Lock API) and the relative
+       *  motions move a VIRTUAL pointer, which leaves by one edge of the 3D and
+       *  comes back by the other; the value is read from the UNWRAPPED pointer
+       *  (`mouse`), so it keeps growing. Where the lock is refused, the same
+       *  sums from the motions the page still receives (to the screen's edge) */
       type Modal = { targets: Target[]; pivot: any; st: ModalState;
-                     mouse0: { x: number; y: number } | null; mouse: { x: number; y: number } | null };
+                     mouse0: { x: number; y: number } | null; mouse: { x: number; y: number } | null;
+                     /** the virtual pointer, drawn: inside the 3D, wrapped */
+                     vp: { x: number; y: number } | null; wraps: number;
+                     /** R: the angle summed motion by motion (it survives a wrap) */
+                     turned: number;
+                     locked: boolean };
       let modal: Modal | null = null;
       let lastMouse: { x: number; y: number } | null = null;
       const pickSketch = (id: string | null) => {
@@ -1181,7 +1192,43 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
       const showModal = () => {
         modalEl.classList.toggle("hidden", !modal);
         if (modal) modalEl.textContent = `${modalLabel(modal.st)}${opts.texts.modalHint ? ` · ${opts.texts.modalHint}` : ""}`;
+        drawGuides();
       };
+      /** the virtual pointer and the gesture's guides (a dashed line from the
+       *  pivot to the pointer, as Blender's R and S), in the 3D's pixels */
+      const guides = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+      guides.setAttribute("class", "scn-guides");
+      const vptr = document.createElement("div");
+      vptr.className = "scn-vptr hidden";
+      const drawGuides = () => {
+        guides.textContent = "";
+        vptr.classList.toggle("hidden", !modal?.vp);
+        host.classList.toggle("scn-modal-on", !!modal);
+        if (!modal) return;
+        const r = renderer.domElement.getBoundingClientRect();
+        const pv = toScreen(modal.pivot);
+        const vp = modal.vp;
+        if (vp) { vptr.style.left = `${vp.x - r.left}px`; vptr.style.top = `${vp.y - r.top}px`; }
+        const NS = "http://www.w3.org/2000/svg";
+        if (pv && vp && modal.st.mode !== "grab") {
+          const l = document.createElementNS(NS, "line");
+          l.setAttribute("x1", String(pv.x - r.left)); l.setAttribute("y1", String(pv.y - r.top));
+          l.setAttribute("x2", String(vp.x - r.left)); l.setAttribute("y2", String(vp.y - r.top));
+          l.setAttribute("class", "g-pivot");
+          guides.appendChild(l);
+        }
+        for (const g of axisGuides()) {
+          const l = document.createElementNS(NS, "line");
+          l.setAttribute("x1", String(g.a.x - r.left)); l.setAttribute("y1", String(g.a.y - r.top));
+          l.setAttribute("x2", String(g.b.x - r.left)); l.setAttribute("y2", String(g.b.y - r.top));
+          l.setAttribute("stroke", g.colour);
+          l.setAttribute("class", "g-axis");
+          guides.appendChild(l);
+        }
+      };
+      /** the coloured lines of the constrained axes through the pivot (Blender:
+       *  X red, Y green, Z blue) — p.4b fills it */
+      let axisGuides = (): Array<{ a: { x: number; y: number }; b: { x: number; y: number }; colour: string }> => [];
       /** what the gesture does now, in three's axes: a move, a turn about an
        *  axis through the pivot, a scale from the pivot */
       type Delta = { kind: "grab"; d: any } | { kind: "rotate"; axis: any; angle: number } | { kind: "scale"; f: V3 };
@@ -1206,10 +1253,8 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
           const axis = v3(AXIS_VECTOR[axisOf(st, "z")!]);
           if (v != null) return { kind: "rotate", axis, angle: (v * Math.PI) / 180 };
           if (!modal.mouse0 || !modal.mouse) return { kind: "rotate", axis, angle: 0 };
-          const centre = toScreen(pivot) ?? modal.mouse0;
-          const a0 = Math.atan2(modal.mouse0.y - centre.y, modal.mouse0.x - centre.x);
-          const a1 = Math.atan2(modal.mouse.y - centre.y, modal.mouse.x - centre.x);
-          return { kind: "rotate", axis, angle: -(a1 - a0) };
+          // the angle summed motion by motion: a wrapped pointer keeps turning
+          return { kind: "rotate", axis, angle: -modal.turned };
         }
         let f = v;
         if (f == null) {
@@ -1272,8 +1317,11 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
           const mp = medianPoint(targets.map((t) => arr(new THREE.Box3().setFromObject(modalObject(t.id)).getCenter(new THREE.Vector3()))));
           pivot = mp ? v3(mp) : v3(targets[0].start.position);
         }
-        modal = { targets, pivot, st: startModal(mode), mouse0: lastMouse, mouse: lastMouse };
+        modal = { targets, pivot, st: startModal(mode), mouse0: lastMouse, mouse: lastMouse,
+                  vp: lastMouse ? { ...lastMouse } : null, wraps: 0, turned: 0, locked: false };
+        modalClient = lastMouse ? { ...lastMouse } : null;
         controls.enabled = false;
+        lockPointer();
         gizmo?.setMode?.(mode === "grab" ? "translate" : mode === "rotate" ? "rotate" : "scale");
         showModal();
         return true;
@@ -1293,6 +1341,7 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
         }
         modal = null;
         controls.enabled = true;
+        unlockPointer();
         showModal();
         // one gesture, one step: the caller writes every transform at once
         if (confirm && out.length) {
@@ -1304,6 +1353,70 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
         } else syncSketches();
       };
       probe.__spaceModal = () => (modal ? modalLabel(modal.st) : null);
+      /** the probes' view of a continuous gesture: the lock, the virtual pointer, its wraps, the targets' poses */
+      (probe as Record<string, unknown>).__spaceModalState = () => (modal ? { label: modalLabel(modal.st), locked: modal.locked,
+        lockElement: document.pointerLockElement === renderer.domElement, vp: modal.vp, wraps: modal.wraps, mouse: modal.mouse,
+        poses: modal.targets.map((t) => ({ id: t.id, pose: modalObject(t.id) ? poseOf(modalObject(t.id)) : null })) } : null);
+      (probe as Record<string, unknown>).__spaceLockLog = () => lockLog.slice();
+
+      // ── MICRO-SPAZIO-3D-3 p.4 · the pointer lock of a gesture ─────────────
+      const lockLog: string[] = [];
+      let modalClient: { x: number; y: number } | null = null;
+      let lockWanted = false;
+      const lockPointer = () => {
+        lockWanted = true;
+        const el = renderer.domElement as HTMLCanvasElement & { requestPointerLock?: (o?: unknown) => unknown };
+        if (typeof el.requestPointerLock !== "function") { lockLog.push("no-api"); return; }
+        try {
+          const r = el.requestPointerLock({ unadjustedMovement: false }) as Promise<void> | undefined;
+          if (r && typeof (r as Promise<void>).then === "function")
+            (r as Promise<void>).then(() => lockLog.push("granted"), (err: unknown) => lockLog.push(`refused: ${String((err as Error)?.name ?? err)}`));
+        } catch (err) { lockLog.push(`threw: ${String((err as Error)?.name ?? err)}`); }
+      };
+      const unlockPointer = () => {
+        lockWanted = false;
+        if (document.pointerLockElement === renderer.domElement) document.exitPointerLock?.();
+      };
+      const onLockChange = () => {
+        const mine = document.pointerLockElement === renderer.domElement;
+        if (modal) modal.locked = mine;
+        lockLog.push(mine ? "locked" : "unlocked");
+        // the browser takes the lock back on Esc (and eats the key): the gesture is cancelled
+        if (!mine && modal && lockWanted) { lockWanted = false; endModal(false); }
+      };
+      const onLockError = () => { lockLog.push("pointerlockerror"); };
+      document.addEventListener("pointerlockchange", onLockChange);
+      document.addEventListener("pointerlockerror", onLockError);
+      /** a motion of the gesture: relative when locked (or when the page gives
+       *  `movementX`), the virtual pointer wrapped inside the 3D */
+      const modalMove = (e: PointerEvent) => {
+        if (!modal) return;
+        const r = renderer.domElement.getBoundingClientRect();
+        const mx = Number.isFinite(e.movementX) ? e.movementX : 0, my = Number.isFinite(e.movementY) ? e.movementY : 0;
+        const prev = modal.mouse ?? { x: e.clientX, y: e.clientY };
+        // the motion: the event's own (locked, the only thing there is), else
+        // the page position's difference (a browser that gives no movementX)
+        const fromClient = modalClient ? { x: e.clientX - modalClient.x, y: e.clientY - modalClient.y } : { x: 0, y: 0 };
+        modalClient = { x: e.clientX, y: e.clientY };
+        const rel = mx || my || document.pointerLockElement === renderer.domElement ? { x: mx, y: my } : fromClient;
+        const next = { x: prev.x + rel.x, y: prev.y + rel.y };
+        if (!modal.mouse0) modal.mouse0 = { ...next };
+        // R: the angle summed, about the pivot's place on screen
+        const pv = toScreen(modal.pivot);
+        if (pv) {
+          let da = Math.atan2(next.y - pv.y, next.x - pv.x) - Math.atan2(prev.y - pv.y, prev.x - pv.x);
+          if (da > Math.PI) da -= 2 * Math.PI; else if (da < -Math.PI) da += 2 * Math.PI;
+          modal.turned += da;
+        }
+        modal.mouse = next;
+        // the virtual pointer: the unwrapped one brought back inside the 3D
+        const W = Math.max(1, r.width), H = Math.max(1, r.height);
+        const wx = r.left + ((((next.x - r.left) % W) + W) % W), wy = r.top + ((((next.y - r.top) % H) + H) % H);
+        modal.wraps = Math.round(Math.abs(Math.floor((next.x - r.left) / W)) + Math.abs(Math.floor((next.y - r.top) / H)));
+        modal.vp = { x: wx, y: wy };
+        lastMouse = modal.vp;
+        modalApply();
+      };
 
       const onDown = (e: PointerEvent) => {
         lastMouse = { x: e.clientX, y: e.clientY };
@@ -1340,13 +1453,9 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
         }
       };
       const onMove = (e: PointerEvent) => {
+        // MICRO-SPAZIO-3D-3 · a gesture's motions are the document's (modalMove)
+        if (modal) return;
         lastMouse = { x: e.clientX, y: e.clientY };
-        if (modal) {
-          if (!modal.mouse0) modal.mouse0 = lastMouse;
-          modal.mouse = lastMouse;
-          modalApply();
-          return;
-        }
         if (drag && !gizmoDragging) {
           const dx = e.clientX - drag.x, dy = e.clientY - drag.y;
           if (!drag.started && Math.hypot(e.clientX - drag.x0, e.clientY - drag.y0) > DRAG_PX) {
@@ -1612,6 +1721,7 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
       renderer.domElement.addEventListener("gesturestart", onGestureStart);
       renderer.domElement.addEventListener("gesturechange", onGestureChange);
       document.addEventListener("keydown", onKey, true);
+      document.addEventListener("pointermove", modalMove, true);
       const ro = new ResizeObserver(() => {
         ({ w, h } = size());
         renderer.setSize(w, h);
@@ -1625,7 +1735,7 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
       host.prepend(renderer.domElement);
       host.appendChild(labels);
       host.appendChild(strips);
-      host.append(cursorEl, modalEl, boxEl, viewEl);
+      host.append(cursorEl, modalEl, boxEl, viewEl, guides, vptr);
       showView();
       cleanup = () => {
         cancelAnimationFrame(raf);
@@ -1634,6 +1744,12 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
         strips.remove();
         ro.disconnect();
         document.removeEventListener("keydown", onKey, true);
+        document.removeEventListener("pointermove", modalMove, true);
+        document.removeEventListener("pointerlockchange", onLockChange);
+        document.removeEventListener("pointerlockerror", onLockError);
+        unlockPointer();
+        guides.remove();
+        vptr.remove();
         gizmo?.detach?.();
         gizmo?.dispose?.();
         controls.dispose();

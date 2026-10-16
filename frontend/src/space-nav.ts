@@ -539,7 +539,7 @@ export function dragIntent(e: PointerLike, prefs: NavPrefs): DragIntent {
  */
 export function grabPan(dx: number, dy: number, depth: number, pxAtUnitDepth: number, ortho = false): [number, number] {
   const k = ortho ? pxAtUnitDepth : Math.max(1e-6, depth) * pxAtUnitDepth;
-  return [-dx * k, dy * k];
+  return [-dx * k || 0, dy * k || 0];
 }
 
 /** The continuous zoom of Ctrl + middle drag: up comes nearer, as Blender. */
