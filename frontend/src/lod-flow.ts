@@ -217,3 +217,40 @@ export function pickByDistance(versions: readonly FlowVersion[], dist: number, f
 /** The modes of a model's versions: the one chosen, the one of the device's
  *  use, or the distance. */
 export type VersionMode = "manual" | "use" | "auto";
+
+/**
+ * MICRO-TILESET-CONTENITORE p.3 · a CONTAINER and its tileset in the automatic
+ * mode (E.D., 17 Oct 2026: «da lontano il tileset, da vicino i modelli», and
+ * never the two together). The measure is the share of the view's height the
+ * container fills — the bounding sphere of its MEMBERS' boxes (the tileset's
+ * root volume is the exporter's 98 m cube on Templu Mare, not the survey):
+ *
+ *   · smaller than the view → the tileset (it streams the detail it needs);
+ *   · the container fills the view (`ALT_MODELS_IN`, or the camera inside it)
+ *     → the members' meshes, each with its own automatic LOD;
+ *   · back to the tileset only under `ALT_MODELS_OUT` (a few percent less):
+ *     the hysteresis, so the threshold does not flicker;
+ *   · never a hole: a side not ready yet (the members still loading, the
+ *     tileset's root not read, or its tiles released) leaves the other drawn.
+ */
+export const ALT_MODELS_IN = 1.0;
+export const ALT_MODELS_OUT = 0.95;
+export type AltSide = "tileset" | "models";
+export function altSide(share: number, prev: AltSide | undefined, ready: { tiles: boolean; models: boolean }): AltSide {
+  const want: AltSide = share >= (prev === "models" ? ALT_MODELS_OUT : ALT_MODELS_IN) ? "models" : "tileset";
+  if (want === "tileset" && !ready.tiles && ready.models) return "models";
+  if (want === "models" && !ready.models && ready.tiles) return "tileset";
+  return want;
+}
+/**
+ * …and the memory of the side not drawn. The tileset's tiles stop loading at
+ * once (its layer is not updated while hidden) and are RELEASED after
+ * `ALT_RELEASE_MS` hidden — longer than a person's back and forth over the
+ * threshold, short against a session (the measure: see the report of
+ * MICRO-TILESET-CONTENITORE). The members hidden go back to their lightest
+ * version, as the automatic LOD does going away (a big one leaves the memory).
+ */
+export const ALT_RELEASE_MS = 30_000;
+export function altReleaseDue(hiddenSince: number | undefined, now: number): boolean {
+  return hiddenSince != null && now - hiddenSince >= ALT_RELEASE_MS;
+}

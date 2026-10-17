@@ -65,4 +65,21 @@ eq(F.bigTurn([{ key: "a", share: 0.5, dist: 1 }]), null, "under BIG_SCREEN (0.6)
 eq(F.bigTurn([{ key: "a", share: 0.9, dist: 2 }, { key: "b", share: 1.4, dist: 3 }]), "b", "the one that fills more");
 eq(F.bigTurn([{ key: "a", share: 2, dist: 0.2 }, { key: "b", share: 2, dist: 0.1 }]), "b", "both fill it: the nearer");
 eq(F.BIG_SCREEN, 0.6, "the rule's share, written");
+// ── MICRO-TILESET-CONTENITORE p.3 · a container and its tileset in «Automatico» ──
+// measured on Templu Mare v3.3 (Survey2015's members, a sphere of ~41 m): share 0.93 at 120 m, 1.10 at 100 m
+const R = { tiles: true, models: true };
+eq(F.altSide(0.49, undefined, R), "tileset", "the opening (share 0.49): the tileset");
+eq(F.altSide(0.93, "tileset", R), "tileset", "120 m (0.93): still the tileset");
+eq(F.altSide(1.10, "tileset", R), "models", "100 m (1.10): the members");
+eq(F.altSide(0.97, "models", R), "models", "going away, at 0.97 the members stay (hysteresis)…");
+eq(F.altSide(0.94, "models", R), "tileset", "…under 0.95 the tileset again");
+eq(F.altSide(0.97, "tileset", R), "tileset", "approaching, 0.97 is not yet the members (1.0)");
+eq(F.altSide(2, undefined, R), "models", "the camera inside the container: the members");
+eq(F.altSide(0.3, "models", { tiles: false, models: true }), "models", "the tileset asked and not ready (released, loading): the members stay, no hole");
+eq(F.altSide(1.5, "tileset", { tiles: true, models: false }), "tileset", "the members asked and not loaded: the tileset stays");
+eq(F.altSide(1.5, undefined, { tiles: false, models: false }), "models", "neither ready: what the distance asks");
+eq([F.ALT_MODELS_IN, F.ALT_MODELS_OUT], [1.0, 0.95], "the threshold and its hysteresis (5 %), written");
+eq(F.altReleaseDue(undefined, 1e6), false, "a tileset drawn is never released");
+eq(F.altReleaseDue(1000, 1000 + 29999), false, "hidden 29.999 s: kept");
+eq(F.altReleaseDue(1000, 1000 + 30000), true, "hidden 30 s: released");
 console.log(`check-lod-flow: ${checks} checks passed`);

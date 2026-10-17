@@ -23721,7 +23721,10 @@ function groupMenuEntries(models: string[], x: number, y: number): Array<{ label
 /** The use «Per uso» asks: web in a browser, realtime in the desktop, unless the person changed it. */
 function deviceUse(): string { return space3dPrefs().deviceUse ?? (isTauri() ? "realtime" : "web"); }
 function versionModeOf(rmId: string): { mode: VersionMode; versionId?: string } {
-  return space3dPrefs().versionModes?.[rmId] ?? { mode: "use" };
+  // MICRO-TILESET-CONTENITORE p.3 · a member of a container whose tileset is in
+  // «Automatico» draws, near, with its own automatic LOD (unless the person chose)
+  const a = spaceAltInfo.get(rmId);
+  return space3dPrefs().versionModes?.[rmId] ?? { mode: a && a.role === "models" && a.mode === "auto" ? "auto" : "use" };
 }
 /** The mode of some models (a container's: all of its members), per person. */
 function setVersionMode(rmIds: string[], mode: VersionMode, versionId?: string): void {
@@ -25041,6 +25044,9 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
     onMeasured: (url, m) => keepMeasure(url, m),
     // p.12 · the automatic choice of a container: the Outliner's «sostituito da» follows
     onAltState: (g, which) => { if (altShown.get(g) !== which) { altShown.set(g, which); recomputeSubstituted(); if (space3dPrefs().shown) renderSpaceOutliner(outl, win, currentSpace()); } },
+    // MICRO-TILESET-CONTENITORE p.3 · the strip says what a container draws
+    altLine: (x) => t(x.side === "tileset" ? "alt.lineTiles" : "alt.lineModels", { name: x.name, mode: x.mode === "auto" ? ` · ${t("alt.word.auto")}` : "",
+      levels: x.side === "tileset" ? (x.levels ? t(/–/.test(x.levels) ? "alt.levels" : "alt.level", { l: x.levels }) : "…") : x.levels || "…" }),
     // p.10 · a version of the flow drawn: the Outliner's dot and the N panel follow (no rebuild)
     // MICRO-PROVA-DEV47 p.3 · …and the Inspector (its title's level) when the model drawn again is the one it shows
     onVersionDrawn: (rmId) => { drawnAgain.add(rmId); if (!flowRedraw) { flowRedraw = true; requestAnimationFrame(() => { flowRedraw = false; if (space3dPrefs().shown) renderSpaceOutliner(outl, win, currentSpace()); drawNPanel();
@@ -25344,7 +25350,9 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
       items.push({ kind: "rm", id: r.id, label: nmS && nmS.shown !== nmS.technical ? `${nmS.shown}${nmS.level ? ` · ${nmS.level}` : ""}` : r.name, state: r.resource?.state ?? "missing",
         url: plan.url ?? spaceFileUrl(r.resource), resourceId: r.resource?.id, ...(plan.obj ? { obj: plan.obj } : {}),
         ...(plan.flow ? { flow: plan.flow, flowStart: plan.flowStart } : {}),
-        ...(alt && alt.mode === "auto" ? { alt: { group: alt.group, role: alt.role, err: alt.err } } : {}), tiles: r.resource?.tiles || undefined,
+        // MICRO-TILESET-CONTENITORE · every mode: the scene says what the container draws
+        ...(alt ? { alt: { group: alt.group, role: alt.role, err: alt.err, mode: alt.mode, name: sp.rmGroups.get(alt.group)?.name ?? alt.group,
+          ...(alt.role === "models" && nmS?.level ? { level: nmS.level } : {}) } } : {}), tiles: r.resource?.tiles || undefined,
         edge: placementColour(r.genre) ?? undefined, selected: isSel(`rm:${r.id}`), active: ssel.active === `rm:${r.id}`,
         // MICRO-SPAZIO-3D-2 · the model's transform (data.transform), over its file
         pose: r.resource?.tiles ? undefined : poseOfNode(r.id),

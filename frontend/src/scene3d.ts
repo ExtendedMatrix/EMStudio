@@ -58,7 +58,7 @@ import {
   type SpaceKeyAction, type V3,
 } from "./space-nav";
 import { medianPoint, pickUnder, type LastPick } from "./space-selection";
-import { bigTurn, pickByDistance, screenShare, SSE_PX, versionError, type FlowVersion } from "./lod-flow";
+import { altReleaseDue, altSide, bigTurn, pickByDistance, screenShare, SSE_PX, versionError, type FlowVersion } from "./lod-flow";
 import { buildShapeGeometry, listSketches, shapeById, updateSketch, type Sketch } from "./shapes3d";
 import { fingersOf, trackpadClassifier } from "./wheel-kind";
 
@@ -96,7 +96,11 @@ export interface SceneItem {
   flowStart?: string;
   /** MICRO-SPAZIO-3D-3 p.12 · a container and its tileset, one or the other by
    *  the distance: the group, which side this item is, the tileset's error (m) */
-  alt?: { group: string; role: "tileset" | "models"; err: number };
+  alt?: { group: string; role: "tileset" | "models"; err: number;
+    /** MICRO-TILESET-CONTENITORE · the container's mode (a manual one draws
+     *  one side only), its name and, for a member not in the flow, the level
+     *  it draws («LOD2»): the strip says what is drawn */
+    mode?: "models" | "tileset" | "auto"; name?: string; level?: string };
   /** MICRO-SPAZIO-3D-3 p.14 · the decorators of its label, as the graph's: a
    *  glyph of the datamodel (`kind`, author / licence / embargo / epoch) or a
    *  short text (PD n, «!»), each in its overlay's group */
@@ -224,6 +228,8 @@ export interface SpaceSceneHandle {
   /** MICRO-PROVA-DEV48 p.2 · a tileset model's leaf tiles (`rm:<id>`), in the
    *  scene's frame; null when the scene has no layer for it */
   leavesOf(key: string): Promise<{ boxes: [V3, V3][]; tiles: number; leaves: number; unread: string[]; regions: number } | null>;
+  /** MICRO-TILESET-CONTENITORE p.3 · what a container draws now, in words (the strip's line) */
+  altLine(group: string): string | null;
   /** MICRO-SPAZIO-3D-2 · the view (aligned, orthographic) and the lens */
   view(): SceneView;
   setView(v: AlignedView): void;
@@ -297,6 +303,11 @@ export interface SpaceSceneOptions {
   onTransformMany?: (poses: Array<{ key: string; pose: Pose; pivot?: V3 | null }>) => void;
   /** MICRO-SPAZIO-3D-3 p.12 · what a container's automatic choice shows now */
   onAltState?: (group: string, shown: "tileset" | "models") => void;
+  /** MICRO-TILESET-CONTENITORE p.3 · the strip's words for what a container
+   *  draws («Survey2015 · automatico · tileset (livelli 4–7)»), and a call
+   *  when they change (the N panel's line follows) */
+  altLine?: (x: { group: string; name: string; mode: string; side: "tileset" | "models"; levels: string }) => string;
+  onAltLine?: () => void;
   /** MICRO-SPAZIO-3D-3 p.10 · a version of a model in the flow was drawn (the Outliner's dot follows) */
   onVersionDrawn?: (rmId: string, versionId: string) => void;
   /** MICRO-PROVA-DEV48 p.5 · a file loaded and counted (triangles, vertices, its
@@ -320,7 +331,8 @@ interface Drawn {
   item: SceneItem;
   /** what was drawn: a mesh, a contour, or only a label — MICRO-3DTILES: a
    *  tileset, or a glb held back by the threshold */
-  as: "mesh" | "contour" | "label" | "pending" | "tiles" | "gated";
+  /** «released»: a container's tileset whose tiles left the memory (MICRO-TILESET-CONTENITORE) */
+  as: "mesh" | "contour" | "label" | "pending" | "tiles" | "gated" | "released";
   /** the file actually drawn (a LOD set's chosen level, a tileset) */
   url?: string;
 }
@@ -582,16 +594,21 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
       /** MICRO-SPAZIO-3D-2 · the top object of each item drawn (`rm:` / `proxy:`),
        *  where its transform is applied, over the file as it is */
       const roots = new Map<string, any>();
-      // MICRO-TILESET-CONTENITORE p.2 · the side a container's automatic mode
-      // drew last (by container), kept up here: a rebuild reads it
+      // ── MICRO-TILESET-CONTENITORE · a container and its tileset: the side
+      // drawn (by container), since when the tileset is hidden, the tilesets
+      // released (by container), and the hidden ones warming before they show
       const altState = new Map<string, "tileset" | "models">();
-      /** the side an item of a container shows when it is (re)added: the last
-       *  side the distance chose (a tileset reused across rebuilds keeps no
-       *  `visible` of its own) */
+      const altHiddenSince = new Map<string, number>();
+      const altReleased = new Set<string>();
+      const altWarming = new Set<any>();
+      const altInfo = new Map<string, { side: "tileset" | "models"; share: number | null; mode: string; line: string }>();
+      /** the side an item of a container shows when it is (re)added: the
+       *  container's manual mode, else the last side the distance chose (a
+       *  tileset reused across rebuilds keeps no `visible` of its own) */
       const altVisible = (item: SceneItem): boolean => {
         const a = item.alt;
         if (!a) return true;
-        const side = altState.get(a.group);
+        const side = a.mode && a.mode !== "auto" ? a.mode : altState.get(a.group);
         return side ? side === a.role : a.role === "models";
       };
 
@@ -608,11 +625,13 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
       strips.className = "scn-strips";
       let T: any = null;
       const liveLayers = () => [...layers.values()].filter((l) => l.layer.object.parent === content);
-      const ensureLayer = async (url: string, itemId: string, archive = false): Promise<Live | null> => {
+      const ensureLayer = async (url: string, itemId: string, archive = false, mode?: "auto" | "manual"): Promise<Live | null> => {
         let live = layers.get(url);
         if (live) { live.itemId = itemId; return live; }
         try { T = T ?? await tilesEngine(); } catch { return null; }
-        const layer = createTilesLayer(E, T, url, camera, renderer, { memoryMB: opts.tilesMemoryMB, archive });
+        // MICRO-TILESET-CONTENITORE · a container's tileset refines by itself
+        // (its tiles by the distance): «Manuale» stays one click away on its bar
+        const layer = createTilesLayer(E, T, url, camera, renderer, { memoryMB: opts.tilesMemoryMB, archive, ...(mode ? { mode } : {}) });
         const bar = tilesBar(layer, tilesBarTexts());
         // ready = the root's first tile, or its failure (the frame waits for it)
         const ready = new Promise<void>((res) => {
@@ -1350,6 +1369,7 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
         for (const k of [...flowState.keys()]) if (!items.some((i) => `${i.kind}:${i.id}` === k && i.flow?.length)) flowState.delete(k);
         strips.textContent = "";
         strips.appendChild(flowStrip);
+        strips.appendChild(altStrip);
         const pending: Promise<void>[] = [];
         const later: SceneItem[] = [];      // contours and labels: after the meshes, around them
         const used = new Set<string>();
@@ -1359,11 +1379,17 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
           // a glb past the threshold)
           const tsUrl = item.state === "resident" && item.url
             ? (isTilesetUrl(item.url) || item.tiles ? item.url : useTileset.has(key) && item.tileset ? item.tileset : null) : null;
+          // MICRO-TILESET-CONTENITORE p.3 · a container's tileset released while
+          // the members are drawn: not built again until the distance asks for it
+          if (tsUrl && item.alt && altReleased.has(item.alt.group) && !layers.has(tsUrl)) {
+            drawn.set(key, { item, as: "released", url: tsUrl });
+            continue;
+          }
           if (tsUrl) {
             used.add(tsUrl);
             drawn.set(key, { item, as: "pending", url: tsUrl });
             const el = stripOf(item);
-            pending.push(ensureLayer(tsUrl, item.id, tsUrl === item.url && item.tiles === "3tz").then(async (live) => {
+            pending.push(ensureLayer(tsUrl, item.id, tsUrl === item.url && item.tiles === "3tz", item.alt ? "auto" : undefined).then(async (live) => {
               if (gen !== generation || disposed) return;
               if (!live) { drawn.set(key, { item: { ...item, state: "missing" }, as: "label" }); later.push({ ...item, state: "missing" }); return; }
               live.layer.object.userData.tiles = true;
@@ -1795,34 +1821,93 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
         opts.onVersionDrawn?.(st.item.id, v.id);
       };
       // ── MICRO-SPAZIO-3D-3 p.12 · a container or its tileset, by the distance ──
+      // MICRO-TILESET-CONTENITORE p.3 · the rule is `altSide` (lod-flow.ts): the
+      // share of the view the container's MEMBERS fill, with a hysteresis; one
+      // side drawn, never the two; the hidden tileset loads nothing and leaves
+      // the memory after ALT_RELEASE_MS; a side not ready leaves the other drawn
+      const altStrip = document.createElement("div");
+      altStrip.className = "v3d-strip scn-altline hidden";
       const altTick = () => {
-        const groups = new Map<string, { err: number; tiles: string[]; models: string[] }>();
+        const groups = new Map<string, { mode: string; name: string; tiles: string[]; models: string[] }>();
         for (const it of items) if (it.alt) {
-          const g = groups.get(it.alt.group) ?? groups.set(it.alt.group, { err: it.alt.err, tiles: [], models: [] }).get(it.alt.group)!;
+          const g = groups.get(it.alt.group) ?? groups.set(it.alt.group, { mode: it.alt.mode ?? "auto", name: it.alt.name ?? it.alt.group, tiles: [], models: [] }).get(it.alt.group)!;
           (it.alt.role === "tileset" ? g.tiles : g.models).push(`rm:${it.id}`);
         }
-        if (!groups.size) return;
-        const H = Math.max(1, renderer.domElement.clientHeight);
+        const lines: string[] = [];
+        const now = performance.now();
         for (const [gid, g] of groups) {
+          const tk = g.tiles[0];
+          const tl = tk ? liveLayers().find((l) => l.layer.object === roots.get(tk)) ?? null : null;
+          // the container's place: its members' boxes (hidden or not), else what the tileset loaded
           const box = new THREE.Box3();
-          for (const k of [...g.models, ...g.tiles]) { const o = roots.get(k); if (!o) continue;
-            const live = liveLayers().find((l) => l.layer.object === o); const b = live ? live.layer.bounds() : new THREE.Box3().setFromObject(o); if (b && !b.isEmpty()) box.union(b); }
-          if (box.isEmpty()) continue;
-          const dist = isOrtho ? orthoT : Math.max(0.01, box.distanceToPoint(camera.position));
-          // the same threshold as the flow: the tileset is enough while its error stays under 16 px
-          const sse = (g.err * H) / (2 * dist * Math.tan((FOV * Math.PI) / 360));
+          for (const k of g.models) { const o = roots.get(k); if (o?.parent === content) box.expandByObject(o); }
+          if (box.isEmpty() && tl) { const b = tl.layer.contentBox() ?? tl.layer.bounds(); if (b) box.copy(b); }
           const prev = altState.get(gid);
-          const which: "tileset" | "models" = sse <= (prev === "tileset" ? 16 : 12.8) ? "tileset" : "models";
+          let which: "tileset" | "models";
+          let share: number | null = null;
+          if (g.mode === "models" || g.mode === "tileset") which = g.mode;
+          else {
+            if (box.isEmpty()) continue;
+            const sph = box.getBoundingSphere(new THREE.Sphere());
+            share = isOrtho ? (2 * sph.radius) / Math.max(1e-6, 2 * orthoHalf(camState(), FOV)) : screenShare(sph.radius, camera.position.distanceTo(sph.center), FOV);
+            const st = tl?.layer.status();
+            const ready = { tiles: !!tl && tl.layer.rootReady() && (st?.visible ?? 0) > 0, models: g.models.some((k) => roots.get(k)?.parent === content) };
+            which = altSide(share, prev, ready);
+            const want = altSide(share, prev, { tiles: true, models: true });
+            // the tileset asked for and not ready: it loads hidden (warming) while the members stay
+            if (tl) { if (want === "tileset" && which !== "tileset") altWarming.add(tl); else altWarming.delete(tl); }
+            else if (want === "tileset" && altReleased.has(gid)) { altReleased.delete(gid); rebuild?.(); }
+          }
           for (const k of g.tiles) { const o = roots.get(k); if (o) o.visible = which === "tileset"; }
-          for (const k of g.models) { const o = roots.get(k); if (o) o.traverse((x: any) => { x.visible = which === "models"; }); }
+          for (const k of g.models) { const o = roots.get(k); if (o) o.visible = which === "models"; }
           for (const a of anchors) if (a.el.dataset.id && (g.tiles.includes(`rm:${a.el.dataset.id}`) || g.models.includes(`rm:${a.el.dataset.id}`)))
             a.el.classList.toggle("alt-off", (which === "tileset") !== g.tiles.includes(`rm:${a.el.dataset.id}`));
           if (prev !== which) { altState.set(gid, which); opts.onAltState?.(gid, which); }
+          // the tileset's own strip, dimmed while it is not drawn
+          tl?.bar.el.closest(".v3d-strip")?.classList.toggle("alt-off", which !== "tileset");
+          // the memory: the tileset hidden since…, released after ALT_RELEASE_MS
+          if (tl && which === "models") {
+            if (!altHiddenSince.has(gid)) altHiddenSince.set(gid, now);
+            if (g.mode === "auto" && !altWarming.has(tl) && altReleaseDue(altHiddenSince.get(gid), now)) {
+              for (const [u, l] of layers) if (l === tl) { l.layer.dispose(); l.bar.el.remove(); layers.delete(u); }
+              roots.delete(tk);
+              const d = drawn.get(tk);
+              if (d) drawn.set(tk, { ...d, as: "released" });
+              altReleased.add(gid);
+              altHiddenSince.delete(gid);
+            }
+          } else altHiddenSince.delete(gid);
+          // what is drawn, said: «Survey2015 · automatico · tileset (livelli 4–7)» / «· modelli (LOD2)»
+          let levels = "";
+          if (which === "tileset") {
+            const lv = tl?.layer.status().level;
+            levels = lv ? (lv[0] === lv[1] ? String(lv[0]) : `${lv[0]}–${lv[1]}`) : "";
+          } else {
+            const by = new Map<string, number>();
+            for (const k of g.models) {
+              if (roots.get(k)?.parent !== content) continue;
+              const fs = flowState.get(k);
+              const nm = (fs ? fs.item.flow?.find((x) => x.id === fs.current)?.name : null) ?? items.find((i) => `rm:${i.id}` === k)?.alt?.level ?? "";
+              if (nm) by.set(nm, (by.get(nm) ?? 0) + 1);
+            }
+            levels = by.size === 1 ? [...by.keys()][0] : [...by].map(([n, c]) => `${n} ×${c}`).join(" · ");
+          }
+          const line = opts.altLine ? opts.altLine({ group: gid, name: g.name, mode: g.mode, side: which, levels })
+            : `${g.name} · ${g.mode} · ${which}${levels ? ` (${levels})` : ""}`;
+          altInfo.set(gid, { side: which, share, mode: g.mode, line });
+          lines.push(line);
         }
+        for (const gid of [...altInfo.keys()]) if (!groups.has(gid)) altInfo.delete(gid);
+        const txt = lines.join("\n");
+        altStrip.classList.toggle("hidden", !lines.length);
+        if (altStrip.textContent !== txt) { altStrip.textContent = txt; opts.onAltLine?.(); }
       };
       (probe as Record<string, unknown>).__spaceAlt = () => Object.fromEntries(altState);
+      /** the probes' seam: by container, the side, the share, since when the tileset is hidden, released, warming */
+      (probe as Record<string, unknown>).__spaceAltInfo = () => Object.fromEntries([...altInfo].map(([g, x]) => [g, { ...x,
+        hiddenMs: altHiddenSince.has(g) ? Math.round(performance.now() - altHiddenSince.get(g)!) : null, released: altReleased.has(g),
+        warming: [...altWarming].some((l) => [...layers.values()].includes(l)) }]));
       const flowTick = () => {
-        altTick();
         if (!flowState.size) { flowStrip.classList.add("hidden"); return; }
         const H = Math.max(1, renderer.domElement.clientHeight);
         const camPos = camera.position;
@@ -1847,7 +1932,11 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
         }
         // MICRO-PROVA-DEV48 p.3 · a big version: one model at a time, the one
         // that fills more of the screen, and only once nobody else holds one
-        const asks = seen.filter(({ st, dist }) => {
+        // MICRO-TILESET-CONTENITORE p.3 · a member hidden by its container's
+        // tileset goes back to its lightest version (a big one leaves the memory)
+        const hiddenByAlt = (key: string) => roots.get(key)?.visible === false && !!flowState.get(key)?.item.alt;
+        const asks = seen.filter(({ key, st, dist }) => {
+          if (hiddenByAlt(key)) return false;
           const w = pickByDistance(st.item.flow!, dist, FOV, H, st.current).want;
           return !!st.item.flow!.find((x) => x.id === w)?.big;
         });
@@ -1856,7 +1945,9 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
         bigNow = { turn, holds };
         for (const { key, st, dist, share } of seen) {
           const allowBig = key === turn && holds.every((k) => k === key);
-          const { want, preload } = pickByDistance(st.item.flow!, dist, FOV, H, st.current, SSE_PX, allowBig);
+          const picked = pickByDistance(st.item.flow!, dist, FOV, H, st.current, SSE_PX, allowBig);
+          const lightest = [...st.item.flow!].sort((a, b) => b.ord - a.ord)[0];
+          const { want, preload } = hiddenByAlt(key) ? { want: lightest?.id ?? picked.want, preload: null } : picked;
           st.dist = dist; st.want = want; st.share = share;
           if (preload) { const pv = st.item.flow!.find((x) => x.id === preload); if (pv && !flowBytes.has(pv.url) && flowUsed() + (pv.bytes ?? 0) <= flowBudget()) { flowBytes.set(pv.url, pv.bytes ?? 0); void loadV(pv); } }
           if (!want || want === st.current || st.asking === want) continue;
@@ -1873,7 +1964,7 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
             // the choice again, with this model's turn as it is now (a model
             // without the turn asks its finest light version, and keeps it)
             const still = key === bigNow.turn && bigNow.holds.every((k) => k === key);
-            const now = pickByDistance(st.item.flow!, st.dist ?? dist, FOV, H, st.current, SSE_PX, still).want;
+            const now = hiddenByAlt(key) ? lightest?.id : pickByDistance(st.item.flow!, st.dist ?? dist, FOV, H, st.current, SSE_PX, still).want;
             if (now === want) swapVersion(key, v, got.root);
             // a big version that came too late (the camera went away): not kept
             else if (v.big && flowState.get(key)?.current !== v.id) { evict(cacheKeyOf(v)); flowBytes.delete(v.url); }
@@ -1912,7 +2003,11 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
         stepAnim(performance.now());
         controls.update();
         const live = liveLayers();
-        for (const l of live) l.layer.update();
+        // MICRO-TILESET-CONTENITORE p.3 · the container's side at every frame, BEFORE the tiles
+        // update (at 4 a second a tileset going away loaded 34 tiles, 17 MB, it would not show);
+        // a tileset hidden by its container loads nothing (unless it is warming)
+        altTick();
+        for (const l of live) if (l.layer.object.visible || altWarming.has(l)) l.layer.update();
         if (live.length && ++frames % 20 === 0) for (const l of live) l.bar.refresh();
         renderer.render(scene, camera);
         place();
@@ -2734,6 +2829,7 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
       host.appendChild(strips);
       host.append(cursorEl, modalEl, boxEl, viewEl, guides, vptr, navEl);
       strips.appendChild(flowStrip);
+      strips.appendChild(altStrip);
       showView();
       cleanup = () => {
         cancelAnimationFrame(raf);
@@ -2814,6 +2910,7 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
         applyOverlays,
         drawnUrl: (k: string) => drawn.get(k)?.url,
         localCentre: (k: string) => localCentre(k),
+        altLine: (g: string) => altInfo.get(g)?.line ?? null,
         leavesOf: (k: string) => {
           // every layer of the item, shown or not: the leaves are the tileset's JSON
           const l = [...layers.values()].find((x) => `rm:${x.itemId}` === k);
@@ -2870,6 +2967,7 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
     localCentre: (k) => api.localCentre?.(k) ?? null,
     boxOf: (k) => api.boxOf?.(k) ?? null,
     leavesOf: (k) => api.leavesOf?.(k) ?? Promise.resolve(null),
+    altLine: (g) => api.altLine?.(g) ?? null,
     view: () => api.view?.() ?? { view: null, ortho: false, fov: 40, lensMm: 33 },
     setView: (v) => api.setView?.(v),
     toggleOrtho: () => api.toggleOrtho?.(),
