@@ -113,6 +113,8 @@ export interface InspectorCallbacks {
   renderAlternative?: (host: HTMLElement, nodeId: string) => boolean;
   /** MICRO-SPAZIO-3D-3 p.6 · under «Model the proxy»: «Usa una forma abbozzata…» */
   renderSketchUse?: (host: HTMLElement, nodeId: string) => void;
+  /** MICRO-PROVA-DEV47 p.5 · a unit's proxy: its file, «Elimina il proxy» */
+  renderProxy?: (host: HTMLElement, nodeId: string) => boolean;
 }
 
 function el(tag: string, cls?: string, text?: string): HTMLElement {
@@ -1028,6 +1030,15 @@ export function renderInspector(
     const body = el("div");
     panel.appendChild(body);
     if (cb.renderTransform(body, nodeId)) { root.appendChild(panel); transformShown = true; }
+  }
+
+  // ── MICRO-PROVA-DEV47 p.5 · the unit's proxy, deletable ──
+  if (nodeId && cb.renderProxy) {
+    const panel = el("div", "insp-canvas insp-proxy");
+    panel.appendChild(el("h3", "insp-sect", t("px.title")));
+    const body = el("div");
+    panel.appendChild(body);
+    if (cb.renderProxy(body, nodeId)) root.appendChild(panel);
   }
 
   // ── MICRO-SPAZIO-3D-3 p.10 · a model's versions, the same selector as the Space's ──

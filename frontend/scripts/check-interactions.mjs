@@ -1727,7 +1727,9 @@ const assocView = (p) => p.evaluate(() => {
   const s = document.querySelector("[data-assoc]");
   if (!s) return null;
   const list = (k) => [...s.querySelectorAll(`[data-assoc-list="${k}"] .insp-assoc-unit`)].map((b) => b.dataset.unit);
-  return { head: s.querySelector(".insp-assoc-head")?.textContent, groups: [...s.querySelectorAll("[data-assoc-group]")].map((g) => g.textContent),
+  // MICRO-PROVA-DEV47 p.5 · a group's title and its count apart: read as «title (n)»
+  return { head: s.querySelector(".insp-assoc-head")?.textContent, groups: [...s.querySelectorAll("[data-assoc-group]")].map((g) => g.querySelector(".insp-assoc-gt")
+      ? `${g.querySelector(".insp-assoc-gt").textContent} (${g.querySelector(".insp-assoc-count").textContent})` : g.textContent),
     here: list("here"), elsewhere: list("elsewhere"), withProxy: list("withProxy"),
     metaSF100: s.querySelector('[data-unit="SF100"] .insp-assoc-meta')?.textContent ?? null,
     newFirst: s.firstElementChild?.nextElementSibling?.classList.contains("insp-assoc-new") ?? false,
@@ -1742,7 +1744,7 @@ const geometryOf = (p, unit) => p.evaluate((u) => {
 }, unit);
 const nodeCount = (p) => p.evaluate(() => JSON.parse(window.__EM_DRAG__.graphJson()).nodes.length);
 const inspName = (p) => p.evaluate(() => document.querySelector(".insp-name-input")?.value ?? document.querySelector(".insp-head h2")?.textContent ?? null);
-test("S3.assocInsp", "Spazio · MICRO-PANNELLI-LATERALI p.2 · «Associa a un'unità» è una sezione dell'Inspector dell'abbozzo: in cima «Crea una nuova unità», poi le orfane dell'epoca, le altre epoche con l'epoca accanto, quelle con un proxy ◆; il pulsante porta alla ricerca; un clic su un'orfana associa, l'Inspector mostra l'unità, un annulla toglie tutto", async () => {
+test("S3.assocInsp", "Spazio · MICRO-PANNELLI-LATERALI p.2 · «Associa a un'unità» è una sezione dell'Inspector dell'abbozzo: in cima «Crea una nuova unità», poi le orfane dell'epoca, le altre epoche con l'epoca accanto, quelle con un proxy ◆; il pulsante porta alla ricerca; un clic su un'orfana la sceglie e «Associa» conferma (MICRO-PROVA-DEV47 p.5), l'Inspector mostra l'unità, un annulla toglie tutto", async () => {
   const { p, ctx, errors, dir } = await assocScene("insp");
   await addCube(p);
   const v = await assocView(p);
@@ -1756,6 +1758,7 @@ test("S3.assocInsp", "Spazio · MICRO-PANNELLI-LATERALI p.2 · «Associa a un'un
   await p.selectOption("[data-assoc-type]", ""); await p.waitForTimeout(150);
   const n0 = await nodeCount(p), g0 = await geometryOf(p, "US104");
   await p.click('[data-assoc-list="here"] [data-unit="US104"]');
+  await p.click("[data-assoc-ok]");
   await p.waitForFunction(() => !document.querySelector(".scn-host").__spaceSketches().length, null, { timeout: 20000 }).catch(() => {});
   await p.waitForTimeout(600);
   const n1 = await nodeCount(p), g1 = await geometryOf(p, "US104");
@@ -1786,6 +1789,7 @@ test("S3.assocNew", "Spazio · MICRO-PANNELLI-LATERALI p.2 · «Crea una nuova u
   const after = await assocView(p);
   const n0 = await nodeCount(p);
   await p.click("[data-assoc-create]");
+  await p.click("[data-assoc-ok]");
   await p.waitForFunction(() => !document.querySelector(".scn-host").__spaceSketches().length, null, { timeout: 20000 }).catch(() => {});
   await p.waitForTimeout(600);
   const born = await p.evaluate((name) => { const g = JSON.parse(window.__EM_DRAG__.graphJson()); const n = g.nodes.find((x) => x.name === name);
@@ -1844,6 +1848,7 @@ test("S3.assocMenu", "Spazio · MICRO-PANNELLI-LATERALI p.2 · il clic destro su
   // a unit with a proxy: the question, «Aggiungi come parte»
   const g0 = await geometryOf(p, "US102");
   await p.evaluate(() => document.querySelector('[data-assoc-list="withProxy"] [data-unit="US102"]')?.click());
+  await p.evaluate(() => document.querySelector("[data-assoc-ok]")?.click());
   await p.waitForSelector(".s3-conflict", { timeout: 5000 }).catch(() => {});
   const asked = await p.evaluate(() => [...document.querySelectorAll(".s3-conflict [data-conflict]")].map((b) => b.dataset.conflict));
   await p.click('.s3-conflict [data-conflict="part"]').catch(() => {});
@@ -1918,6 +1923,8 @@ async function firstHits(p, kinds) {
     const found = {};
     for (let gy = 0.1; gy <= 0.9; gy += 0.04) for (let gx = 0.1; gx <= 0.9; gx += 0.03) {
       const x = c.x + c.width * gx, y = c.y + c.height * gy;
+      // a point the canvas itself takes (no label, no panel over it)
+      if (document.elementFromPoint(x, y)?.tagName !== "CANVAS") continue;
       const hit = h.__spaceHit(x, y);
       if (hit && kinds.includes(hit.kind) && !found[hit.kind]) found[hit.kind] = { x, y, id: hit.id };
     }
@@ -2096,6 +2103,114 @@ if (process.env.TEMPLU) test("S3.altTM", "Spazio · MICRO-PROVA-DEV47 p.4 · le 
     errors: !errors.length && !again.errors.length,
   };
   return { pass: Object.values(conds).every(Boolean), detail: { conds, before, picked, after, modes, undone, reopened, errors } };
+});
+test("S3.assocConfirm", "Spazio · MICRO-PROVA-DEV47 p.5 · «Associa a un'unità»: gruppi che si chiudono col titolo e il conteggio a destra; ogni riga col tipo colorato, il nome, l'epoca, alta uguale; il triangolino apre descrizione, tipo, epoca, documento, rapporti, proxy; il passaggio accende l'unità nella Matrix; un clic sceglie e NON associa, il riepilogo «Associa la forma … a …» con Associa e Annulla; Esc annulla, Invio conferma; lo stesso per «Crea una nuova unità»", async () => {
+  const { p, ctx, errors } = await assocScene("conferma");
+  await addCube(p);
+  const rowsH = await p.evaluate(() => [...document.querySelectorAll("[data-assoc] .insp-assoc-unit")].slice(0, 12).map((b) => Math.round(b.getBoundingClientRect().height)));
+  const chip = await p.evaluate(() => { const c = document.querySelector('[data-assoc] [data-unit="US104"] .insp-assoc-type'); return c && { t: c.textContent, bg: getComputedStyle(c).backgroundColor }; });
+  // fold a group by its title, and back
+  await p.click('[data-assoc-group="elsewhere"]'); await p.waitForTimeout(150);
+  const folded = await p.evaluate(() => ({ list: !!document.querySelector('[data-assoc-list="elsewhere"]'), count: document.querySelector('[data-assoc-group="elsewhere"] .insp-assoc-count')?.textContent }));
+  await p.click('[data-assoc-group="elsewhere"]'); await p.waitForTimeout(150);
+  // a row opened
+  await p.click('[data-assoc] [data-assoc-open="US104"]'); await p.waitForTimeout(200);
+  const detail = await p.evaluate(() => document.querySelector('[data-assoc-detail="US104"]')?.innerText ?? null);
+  // the pointer over a row lights the unit in the Matrix
+  await p.hover('[data-assoc] [data-unit="US104"] .insp-assoc-name'); await p.waitForTimeout(200);
+  const lit = await p.evaluate(() => window.__EM_DRAG__.hovered());
+  await p.mouse.move(5, 5); await p.waitForTimeout(150);
+  const unlit = await p.evaluate(() => window.__EM_DRAG__.hovered());
+  // a click chooses, and nothing is written
+  const g0 = await geometryOf(p, "US104");
+  await p.click('[data-assoc-list="here"] [data-unit="US104"] .insp-assoc-name'); await p.waitForTimeout(300);
+  const g1 = await geometryOf(p, "US104");
+  const sum = await p.evaluate(() => ({ text: document.querySelector("[data-assoc-confirm].on .insp-assoc-sum")?.textContent ?? null, picked: document.querySelector('[data-unit="US104"]')?.getAttribute("aria-pressed") }));
+  await p.screenshot({ path: `${process.env.SHOTS ?? "."}/s3-associa-conferma.png` }).catch(() => {});
+  await p.keyboard.press("Escape"); await p.waitForTimeout(200);
+  const afterEsc = await p.evaluate(() => !!document.querySelector("[data-assoc-confirm].on"));
+  // «Crea»: the summary too, and «Annulla»
+  await p.click("[data-assoc-create]"); await p.waitForTimeout(200);
+  const sumNew = await p.evaluate(() => document.querySelector("[data-assoc-confirm].on .insp-assoc-sum")?.textContent ?? null);
+  await p.click("[data-assoc-cancel]"); await p.waitForTimeout(200);
+  const n0 = await nodeCount(p);
+  // and Enter confirms
+  await p.click('[data-assoc-list="here"] [data-unit="US104"] .insp-assoc-name'); await p.waitForTimeout(300);
+  await p.keyboard.press("Enter");
+  await p.waitForFunction(() => !document.querySelector(".scn-host").__spaceSketches().length, null, { timeout: 20000 }).catch(() => {});
+  await p.waitForTimeout(500);
+  const g2 = await geometryOf(p, "US104"), n1 = await nodeCount(p);
+  await ctx.close();
+  const conds = {
+    rows: rowsH.length > 3 && new Set(rowsH).size === 1,
+    chip: chip?.t === "US" && !!chip.bg && chip.bg !== "rgba(0, 0, 0, 0)",
+    folded: !folded.list && /^\d+$/.test(folded.count ?? ""),
+    detail: /Tipo/.test(detail ?? "") && /Epoca/.test(detail ?? "") && /Documento/.test(detail ?? "") && /Rapporti/.test(detail ?? "") && /Proxy/.test(detail ?? ""),
+    hover: lit === "US104" && unlit === null,
+    chooseOnly: g1 === g0 && /^Associa la forma .+ a US104 \(US, Medioevo\)$/.test(sum.text ?? "") && sum.picked === "true",
+    escCancels: !afterEsc,
+    newAsks: /^Crea .+ \(US, Medioevo\) dalla forma /.test(sumNew ?? "") && n0 > 0,
+    enterConfirms: g2 === g0 + 1 && n1 > n0,
+    errors: !errors.length,
+  };
+  return { pass: Object.values(conds).every(Boolean), detail: { conds, rowsH, chip, folded, detail, lit, unlit, g: [g0, g1, g2], sum, sumNew, errors } };
+});
+if (process.env.TEMPLU) test("S3.proxyDel", "Spazio · MICRO-PROVA-DEV47 p.5 · «Elimina il proxy» su Templu Mare (proxy di EM Tools): nell'Inspector dell'unità, nel clic destro sul proxy in scena e con X, sempre con conferma («L'unità resta», e che viene da EM Tools); Annulla non tocca nulla; Elimina toglie la SemanticShape e la sua catena in un passo, l'unità resta, il glb resta in proxies/; ⌘Z lo riporta", async () => {
+  const { p, ctx, errors } = await templuSpace("XX");
+  const f = await firstHits(p, ["proxy"]);
+  const unit = f.proxy?.id;
+  const geom = () => p.evaluate((u) => { const g = JSON.parse(window.__EM_DRAG__.graphJson()); const by = new Map(g.nodes.map((n) => [n.id, n]));
+    return { unit: by.has(u), name: by.get(u)?.name, shapes: g.edges.filter((e) => e.source === u && e.edge_type === "has_property").map((e) => e.target)
+      .flatMap((pid) => g.edges.filter((e) => e.source === pid && e.edge_type === "has_semantic_shape")).length }; }, unit);
+  const g0 = await geom();
+  await p.mouse.click(f.proxy.x, f.proxy.y); await p.waitForTimeout(600);
+  const insp = await p.evaluate(() => document.querySelector(".insp-proxy")?.innerText ?? null);
+  await p.click('.insp-proxy [data-s3="delete-proxy"]'); await p.waitForTimeout(300);
+  const ask = await p.evaluate(() => document.querySelector(".ask-modal .modal-body")?.textContent ?? null);
+  await p.click('.ask-modal [data-a="no"]'); await p.waitForTimeout(300);
+  const gCancel = await geom();
+  await p.mouse.click(f.proxy.x, f.proxy.y, { button: "right" }); await p.waitForTimeout(300);
+  const menu = await p.evaluate(() => [...document.querySelectorAll(".scn-menu button")].map((b) => b.dataset.s3));
+  await p.click('.scn-menu [data-s3="delete-proxy"]'); await p.waitForTimeout(300);
+  await p.screenshot({ path: `${process.env.SHOTS ?? "."}/s3-elimina-proxy.png` }).catch(() => {});
+  await p.keyboard.press("Enter"); await p.waitForTimeout(800);
+  const gDel = await geom();
+  const file = `${TEMPLU_DIR()}/EM/proxies/${g0.name}.glb`;
+  const fileStays = existsSync(file);
+  const drawnAfter = await p.evaluate((u) => document.querySelector(".scn-host").__space().some((x) => x.id === u), unit);
+  await p.evaluate(() => window.__EM_DRAG__.undo()); await p.waitForTimeout(800);
+  const gUndo = await geom();
+  // X on the proxy selected: asked, Esc keeps it
+  await templuEpoch(p, "XX");
+  await p.waitForFunction((u) => document.querySelector(".scn-host").__space().some((x) => x.id === u && x.as === "mesh"), unit, { timeout: 30000 }).catch(() => {});
+  const back = await p.evaluate((u) => document.querySelector(".scn-host").__space().find((x) => x.id === u)?.as ?? null, unit);
+  // the camera may have moved with the redraw: the proxy's point again
+  const f2 = await p.evaluate((u) => { const h = document.querySelector(".scn-host"); const c = h.querySelector("canvas").getBoundingClientRect();
+    for (let gy = 0.1; gy <= 0.9; gy += 0.02) for (let gx = 0.1; gx <= 0.9; gx += 0.015) { const x = c.x + c.width * gx, y = c.y + c.height * gy;
+      if (document.elementFromPoint(x, y)?.tagName !== "CANVAS") continue; const hit = h.__spaceHit(x, y); if (hit?.kind === "proxy" && hit.id === u) return { x, y }; }
+    return null; }, unit) ?? f.proxy;
+  // a click elsewhere first: again on the same spot would take the next one behind (Blender's cycle)
+  const corner = await p.evaluate(() => { const c = document.querySelector(".scn-host canvas").getBoundingClientRect(); return { x: c.x + c.width - 30, y: c.y + c.height - 30 }; });
+  await p.mouse.click(corner.x, corner.y); await p.waitForTimeout(200);
+  await p.mouse.click(f2.x, f2.y); await p.waitForTimeout(500);
+  const beforeX = await p.evaluate(() => ({ sel: window.__EM_DRAG__.selected(), active: document.activeElement?.className ?? document.activeElement?.tagName }));
+  await p.keyboard.press("x"); await p.waitForTimeout(300);
+  const askX = await p.evaluate(() => !!document.querySelector(".ask-modal"));
+  await p.keyboard.press("Escape"); await p.waitForTimeout(300);
+  const gX = await geom();
+  await ctx.close();
+  const conds = {
+    found: !!unit && g0.shapes >= 1,
+    inspector: /Elimina il proxy/.test(insp ?? "") && /proxies\//.test(insp ?? "") && /EM Tools/.test(insp ?? ""),
+    asked: new RegExp(`Elimina il proxy di ${g0.name}\\? L'unità resta\\.`).test(ask ?? "") && /Viene da EM Tools/.test(ask ?? "") && /resta in proxies/.test(ask ?? ""),
+    cancelKeeps: gCancel.shapes === g0.shapes,
+    menu: menu.includes("delete-proxy"),
+    deleted: gDel.unit && gDel.shapes === 0 && !drawnAfter && fileStays,
+    undone: gUndo.shapes === g0.shapes,
+    xAsks: askX && gX.shapes === g0.shapes,
+    errors: !errors.length,
+  };
+  return { pass: Object.values(conds).every(Boolean), detail: { conds, unit, g0, insp, ask, gCancel, menu, gDel, file, fileStays, gUndo, askX, gX, beforeX, back, errors } };
 });
 test("S3.files", "Spazio · un file solo referenziato è un contorno con l'etichetta; uno dichiarato e assente, l'etichetta; il riepilogo li conta", async () => {
   const { p, ctx, errors } = await open({ doc: "spazio", ws: "space" });

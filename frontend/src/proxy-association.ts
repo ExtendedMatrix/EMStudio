@@ -37,3 +37,95 @@ export function patchProxyNodes(nodes: EmNode[], rel: string, sha256hex: string,
       media_type: "model/gltf-binary", size_bytes: size } };
   });
 }
+
+// ── MICRO-PROVA-DEV47 p.5 · a proxy taken away, and a unit told in brief ─────
+
+interface GraphLike { nodes: EmNode[]; edges: Array<{ id?: string; source: string; target: string; edge_type: string }> }
+
+export interface ProxyParts {
+  /** the `geometry` properties, their SemanticShapes, the shapes' resources */
+  propertyIds: string[];
+  shapeIds: string[];
+  resourceIds: string[];
+  /** the files those resources name (they stay on disk, in the store) */
+  files: string[];
+  /** a proxy EM Tools wrote (its resource without the digest's company EMStudio
+   *  gives its own: `media_type` and `size_bytes`) — asked with its own words */
+  fromEmTools: boolean;
+}
+
+/**
+ * What «Elimina il proxy» takes away, and only that: the unit's `geometry`
+ * properties that hold a SemanticShape, the shapes, and the shapes' proxy
+ * resources no other shape links (the edges go with their nodes). The unit
+ * stays, and the files: a glb in `proxies/` is left as an orphan asset (the
+ * rule of the rooms of 16 Oct: the bytes are never taken away with the graph).
+ */
+export function proxyPartsOf(g: GraphLike, unitId: string): ProxyParts {
+  const byId = new Map(g.nodes.map((n) => [n.id, n]));
+  const out = (id: string, type: string) => g.edges.filter((e) => e.source === id && e.edge_type === type).map((e) => e.target);
+  const data = (id: string) => ((byId.get(id)?.data ?? {}) as Record<string, unknown>);
+  const parts: ProxyParts = { propertyIds: [], shapeIds: [], resourceIds: [], files: [], fromEmTools: false };
+  for (const p of out(unitId, "has_property")) {
+    if (byId.get(p)?.node_type !== "property" || data(p).property_type !== "geometry") continue;
+    const shapes = out(p, "has_semantic_shape").filter((s) => byId.get(s)?.node_type === "semantic_shape");
+    if (!shapes.length) continue;
+    parts.propertyIds.push(p);
+    for (const s of shapes) {
+      parts.shapeIds.push(s);
+      for (const r of out(s, "has_linked_resource")) {
+        if (byId.get(r)?.node_type !== "resource") continue;
+        const others = g.edges.some((e) => e.edge_type === "has_linked_resource" && e.target === r && e.source !== s);
+        if (others) continue;
+        parts.resourceIds.push(r);
+        const d = data(r);
+        if (typeof d.url === "string" && d.url) parts.files.push(d.url);
+        if (!(d.media_type && d.size_bytes != null)) parts.fromEmTools = true;
+      }
+    }
+  }
+  return parts;
+}
+
+export interface UnitBrief {
+  description: string;
+  /** the documents its properties come from (property → extractor/combiner → document) */
+  documents: string[];
+  /** its first stratigraphic relations: the edge, the way, the other unit's name */
+  relations: Array<{ type: string; out: boolean; other: string }>;
+}
+
+/** A unit told in brief, for the row of «Associa a un'unità»: what one needs
+ *  to know to choose it. `isUnit` says which node types are units. */
+export function unitBrief(g: GraphLike, unitId: string, isUnit: (type: string) => boolean, maxRelations = 3): UnitBrief {
+  const byId = new Map(g.nodes.map((n) => [n.id, n]));
+  const n = byId.get(unitId);
+  const d = (n?.data ?? {}) as Record<string, unknown>;
+  const description = String((n as { description?: unknown } | undefined)?.description || d.description || "").trim();
+  // the documents: down the paradata, four steps at most
+  const PATH = new Set(["has_property", "has_data_provenance", "combines", "extracted_from"]);
+  const docs = new Set<string>();
+  let front = [unitId];
+  const seen = new Set(front);
+  for (let depth = 0; depth < 4 && front.length; depth++) {
+    const next: string[] = [];
+    for (const id of front)
+      for (const e of g.edges) {
+        if (e.source !== id || !PATH.has(e.edge_type) || seen.has(e.target)) continue;
+        seen.add(e.target);
+        const t = byId.get(e.target);
+        if (t?.node_type === "document") docs.add(String(t.name ?? t.id)); else next.push(e.target);
+      }
+    front = next;
+  }
+  const relations: UnitBrief["relations"] = [];
+  for (const e of g.edges) {
+    if (relations.length >= maxRelations) break;
+    const out = e.source === unitId;
+    if (!out && e.target !== unitId) continue;
+    const other = byId.get(out ? e.target : e.source);
+    if (!other || !isUnit(String(other.node_type))) continue;
+    relations.push({ type: e.edge_type, out, other: String(other.name ?? other.id) });
+  }
+  return { description, documents: [...docs].sort((a, b) => a.localeCompare(b, undefined, { numeric: true })), relations };
+}

@@ -2545,7 +2545,8 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
             if (boxArmed) { boxArmed = false; host.classList.remove("scn-armed"); stop(); }
             return;
           case "delete":
-            if ((sketchSel || sketchSet.size) && opts.onKeyAction?.(a, e)) stop();
+            // MICRO-PROVA-DEV47 p.5 · the sketches, and the proxies selected: the caller asks
+            if (opts.onKeyAction?.(a, e)) stop();
             return;
           default:
             if (opts.onKeyAction?.(a, e)) stop();

@@ -37,6 +37,33 @@ eq(A.proxyRelPath("US 12"), "proxies/US 12.glb", "proxies/<unit>.glb, the name a
 eq(A.proxyRelPath("USM5000/A"), "proxies/USM5000_A.glb", "a slash is not a folder");
 eq(A.proxyRelPath("  "), "proxies/proxy.glb", "no name: «proxy»");
 
+// ── MICRO-PROVA-DEV47 p.5 · a proxy taken away; a unit in brief ─────────────
+{
+  const N = (id, node_type, name, data = {}) => ({ id, node_type, name, data });
+  const E = (source, edge_type, target) => ({ id: `${source}_${edge_type}_${target}`, source, target, edge_type });
+  const g = {
+    nodes: [N("U5", "US", "SU005", { description: "Strato di crollo.\nTegole e malta." }), N("U6", "US", "SU006"), N("D1", "document", "D.07"),
+      N("P", "property", "geometry", { property_type: "geometry" }), N("S", "semantic_shape", "Shape for SU005"),
+      N("R", "resource", "SU005.glb", { url: "proxies/SU005.glb", url_type: "proxy_model", checksum: "sha256:ab" }),
+      N("P2", "property", "material", { property_type: "material" }), N("X", "extractor", "D.07.1"),
+      N("R2", "resource", "SU006.glb", { url: "proxies/SU006.glb", url_type: "proxy_model", media_type: "model/gltf-binary", size_bytes: 10 }),
+      N("P6", "property", "geometry", { property_type: "geometry" }), N("S6", "semantic_shape", "Shape for SU006")],
+    edges: [E("U5", "has_property", "P"), E("P", "has_semantic_shape", "S"), E("S", "has_linked_resource", "R"),
+      E("U5", "has_property", "P2"), E("P2", "has_data_provenance", "X"), E("X", "extracted_from", "D1"),
+      E("U5", "is_after", "U6"), E("U6", "has_property", "P6"), E("P6", "has_semantic_shape", "S6"), E("S6", "has_linked_resource", "R2")],
+  };
+  const p5 = A.proxyPartsOf(g, "U5");
+  eq([p5.propertyIds, p5.shapeIds, p5.resourceIds, p5.files], [["P"], ["S"], ["R"], ["proxies/SU005.glb"]],
+    "the proxy of SU005: its geometry property, its shape, its resource — not the material property, not the unit");
+  eq(p5.fromEmTools, true, "a resource without media_type and size_bytes: EM Tools wrote it");
+  eq(A.proxyPartsOf(g, "U6").fromEmTools, false, "EMStudio's own (digest, glb, size): not EM Tools'");
+  eq(A.proxyPartsOf(g, "D1").shapeIds, [], "a node without a proxy: nothing to take away");
+  const b = A.unitBrief(g, "U5", (t) => t === "US");
+  eq(b.documents, ["D.07"], "the document its properties come from (property → extractor → document)");
+  eq(b.relations, [{ type: "is_after", out: true, other: "SU006" }], "its stratigraphic relations, not its properties");
+  eq(b.description.split("\n")[0], "Strato di crollo.", "the description, as written");
+}
+
 // ── the catalogue ────────────────────────────────────────────────────────────
 {
   const prims = new Set(["box", "cylinder", "cone", "sphere", "hemisphere", "plane", "wedge", "prism", "torus", "arch"]);
