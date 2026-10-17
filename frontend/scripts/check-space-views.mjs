@@ -208,15 +208,37 @@ const nearV = (a, b, eps, what) => { for (let i = 0; i < a.length; i++) assert.o
   eq(nonUniform.scale, [1, 3, 2], "the scale (x, y, z) → (x, z, y), as the exporter");
   // EM Tools' strings
   const em = X.readTransform({ transform: { position: ["0.0", "0.0", "0.0"], rotation: ["0.0", "0.0", "0.0"], scale: ["1.0", "1.0", "1.0"] } });
-  eq(em, { position: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1], up_axis: "Z" }, "EM Tools' transform (strings, no axis): read, Z up");
+  eq(em, { position: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1], up_axis: "Z" }, "EM Tools' transform (strings, no axis): read, Z up, no pivot (an identity)");
   ok(X.isIdentity(em), "…the identity of the 99 models of Templu Mare");
   eq(X.readTransform({}), null, "no transform: null (identity for the scene)");
   eq(X.readTransform({ transform: { position: ["a", "b", "c"] } }), null, "an unreadable one: null");
-  const written = X.transformData({ position: [1.5, 0, -2], rotation: [0, 0, 0.25], scale: [1, 1, 1], up_axis: "Z" });
-  // MICRO-SPAZIO-3D-3 p.15 · numbers now (the strings were s3Dgraphy's default and EM Tools' str())
-  eq(written, { position: [1.5, 0, -2], rotation: [0, 0, 0.25], scale: [1, 1, 1], up_axis: "Z" }, "written as NUMBERS (radians), the axis declared");
+  const written = X.transformData({ position: [1.5, 0, -2], rotation: [0, 0, Math.PI / 6], scale: [1, 1, 1], up_axis: "Z", pivot: [10, 0, 494] });
+  // s3Dgraphy node datamodel 1.6.31 (E.D. 16-17 Oct 2026) · the new form: numbers, DEGREES, the order, the unit, the pivot, the quaternion
+  eq(written, { position: [1.5, 0, -2], rotation: [0, 0, 30], rotation_order: "XYZ", angle_unit: "deg", scale: [1, 1, 1], up_axis: "Z",
+                pivot: [10, 0, 494], quaternion: [0.9659258263, 0, 0, 0.2588190451] }, "written in the new form: numbers, degrees, rotation_order, angle_unit, pivot, quaternion");
   eq(X.readTransform({ transform: { position: ["0.0", "1.5", "-2"], rotation: ["0.0", "0.0", "0.0"], scale: ["1.0", "1.0", "1.0"] } }).position, [0, 1.5, -2], "…the strings of the data read as numbers");
-  eq(X.readTransform({ transform: written }).position, [1.5, 0, -2], "…and read back");
+  const back = X.readTransformForm({ transform: written });
+  eq(back.old, false, "…and read back: the new form");
+  nearV(back.xf.rotation, [0, 0, Math.PI / 6], 1e-9, "…the degrees as radians inside");
+  eq(back.xf.pivot, [10, 0, 494], "…the pivot");
+  const legacy = X.readTransformForm({ transform: { position: ["0.0", "0.0", "0.0"], rotation: ["0", "0", "0.5235987755982988"], scale: ["1.0", "1.0", "1.0"] } });
+  eq([legacy.old, legacy.xf.pivot], [true, [0, 0, 0]], "the old form (Podio1 turned on 16 Oct): old, and the pivot it always had, the origin");
+  eq(X.readTransformForm({ transform: { position: ["0", "0", "0"], rotation: ["0", "0", "0"], scale: ["1", "1", "1"] } }).xf.pivot, undefined, "an old identity: no pivot (the box's centre from now on)");
+  // the pivot: about the piece, not 494 m under it
+  const centre = [-13.7, -14.0, 495.75];
+  const about = { position: [0, 0, 0], rotation: [0, 0, Math.PI / 6], scale: [1, 1, 1], up_axis: "Z", pivot: centre };
+  nearV(X.effectiveTranslation(about), [centre[0] - (Math.cos(Math.PI / 6) * centre[0] - Math.sin(Math.PI / 6) * centre[1]),
+    centre[1] - (Math.sin(Math.PI / 6) * centre[0] + Math.cos(Math.PI / 6) * centre[1]), 0], 1e-9, "a turn about the centre: the root moves so that the centre stays");
+  const legacyXf = { position: [1, 2, 3], rotation: [0.3, -0.2, 1.1], scale: [1.5, 1.5, 2], up_axis: "Z", pivot: [0, 0, 0] };
+  const reb = X.rebasePivot(legacyXf, centre);
+  nearV(X.effectiveTranslation(reb), X.effectiveTranslation(legacyXf), 1e-9, "rebasePivot: the same matrix about another pivot");
+  const turned = X.withPivot(legacyXf, { ...legacyXf, rotation: [0.3, -0.2, 1.1 + Math.PI / 4] }, centre);
+  eq(turned.pivot, centre, "withPivot: the edit is about the piece's centre");
+  const applyXf = (xf, v) => { const m = X.qmatrix(X.quatFromBlenderEuler(xf.rotation)); const t = X.effectiveTranslation(xf);
+    const w = v.map((x, i) => x * xf.scale[i]); return [0, 1, 2].map((r) => t[r] + m[3 * r] * w[0] + m[3 * r + 1] * w[1] + m[3 * r + 2] * w[2]); };
+  nearV(applyXf(turned, centre), applyXf(reb, centre), 1e-9, "withPivot: a turn of 45° leaves the piece's centre where it was");
+  const far = { ...legacyXf, rotation: [0.3, -0.2, 1.1 + Math.PI / 4] };
+  ok(Math.hypot(...[0, 1, 2].map((i) => applyXf(far, centre)[i] - applyXf(legacyXf, centre)[i])) > 10, "…about the survey's origin the same turn throws it more than 10 m away");
   // the decimals: float32 at 500 m
   const step = 500 * 2 ** -23;
   ok(step < 1e-4 && step > 1e-5, `a float32 at 500 m steps ${step.toExponential(2)} m: four decimals (0.1 mm) mean something, five do not`);

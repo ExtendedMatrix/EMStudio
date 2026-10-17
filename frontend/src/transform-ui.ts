@@ -4,9 +4,11 @@
  * show the same numbers and write to the same place (`transform3d.ts`).
  *
  * The numbers are the DATA's, in Blender's frame (Z up): position in metres,
- * rotation as Euler XYZ in degrees (the data keeps radians, as EM Tools), the
- * quaternion beside it read-only, the scale. A field confirmed (Enter, or the
- * focus leaving it changed) is one call of `onCommit`, one step of undo.
+ * rotation as Euler XYZ in degrees (the data's own unit since s3Dgraphy's node
+ * datamodel 1.6.31), the quaternion beside it read-only, the scale, and the
+ * PIVOT the object turns and scales about, read-only (the centre of its box
+ * when the data says none). A field confirmed (Enter, or the focus leaving it
+ * changed) is one call of `onCommit`, one step of undo.
  */
 import { coordDecimals, deg, isIdentity, rad, xfQuaternion, type Xf } from "./transform3d";
 import type { V3 } from "./space-nav";
@@ -20,6 +22,10 @@ export interface TransformFormTexts {
   reset: string;
   /** the unit after a number (m, °) */
   metres: string;
+  /** the pivot's head, and what an absent pivot means / an old one is */
+  pivot?: string;
+  pivotBox?: string;
+  pivotOld?: string;
 }
 
 export interface TransformFormOptions {
@@ -105,6 +111,19 @@ export function renderTransformForm(host: HTMLElement, o: TransformFormOptions):
   q.style.gridColumn = "1 / -1";
   q.value = xfQuaternion(xf).map((v) => fmt(v, 5)).join("  ");
   grid.appendChild(q);
+  if (o.texts.pivot) {
+    head(o.texts.pivot);
+    const pv = document.createElement("input");
+    pv.type = "text";
+    pv.readOnly = true;
+    pv.dataset.field = "pivot";
+    pv.style.gridColumn = "1 / -1";
+    const p = xf.pivot;
+    const oldOrigin = !!p && p.every((v) => v === 0) && !isIdentity(xf);
+    pv.value = p ? p.map((v) => fmt(v, coordDecimals(Math.max(...p.map(Math.abs))))).join("  ") : (o.texts.pivotBox ?? "");
+    pv.title = p ? (oldOrigin ? o.texts.pivotOld ?? "" : o.texts.pivotBox ?? "") : (o.texts.pivotBox ?? "");
+    grid.appendChild(pv);
+  }
   host.appendChild(grid);
   const foot = document.createElement("p");
   foot.className = "xf-note";

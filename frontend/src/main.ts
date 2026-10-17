@@ -243,7 +243,7 @@ import { buildSpace, citationKey, SpaceMarks, type Space, type SpaceRM } from ".
 import { chooseVersion, SCENE_USES, USES } from "./asset-versions";
 import { mountSpaceScene, type SceneItem, type SceneMenuRequest, type SceneView, type SpaceSceneHandle } from "./scene3d";
 import { blenderToThree, eulerFromUp, leftSelects, threeToBlender, type AlignedView, type CamState, type Pose, type V3 } from "./space-nav";
-import { carryXf, coordDecimals, deg, IDENTITY, isIdentity, poseToXf, rad, readTransform, transformData, xfToPose, type Xf } from "./transform3d";
+import { carryXf, coordDecimals, deg, IDENTITY, isIdentity, poseToXf, rad, readTransform, transformData, withPivot, xfToPose, type Xf } from "./transform3d";
 import { parseTyped, renderTransformForm, type TransformFormTexts } from "./transform-ui";
 import { implicitGroups, isImplicitGroup, outsideMembers, unitOfImplicit, withImplicitGroups } from "./implicit-pd";
 import { addFileSketch, addSketch, listSketches, loadSketches, onSketches, removeSketch, serializeSketches, SHAPE_FAMILIES, SHAPES, shapeById, shapeLabel, sketchById, updateSketch } from "./shapes3d";
@@ -253,7 +253,8 @@ import { patchProxyNodes, proxyRelPath } from "./proxy-association";
 import { planMove, planNewGroup, planRemove, type GroupPlan } from "./rm-groups";
 import { shownModelName, splitLevel } from "./rm-names";
 import { versionError, type FlowVersion, type VersionMode } from "./lod-flow";
-import { tilesetAlternatives, type AltMode, type TilesetAlternative } from "./tileset-alt";
+import { findSet, measureCoverage, planDeclareAlternative, planSubcontainer, type AltMode, type AltPlan, type Box, type TilesetAlternative } from "./alternatives";
+import { ALT_RULE } from "./space";
 import { trackpadClassifier } from "./wheel-kind";
 import { isTilesetUrl } from "./tiles3d";
 import type { ModelOptions } from "./embed3d-native";
@@ -22084,6 +22085,19 @@ function poseOfNode(nodeId: string | null | undefined): Pose | undefined {
   const xf = nodeId ? readTransform(store?.node(nodeId)?.data as Record<string, unknown> | undefined) : null;
   return xf && !isIdentity(xf) ? xfToPose(xf) : undefined;
 }
+/** s3Dgraphy 1.6.31 · the centre of an object's box in its own frame (data
+ *  axes), from the first Space window that draws it: the PIVOT a gesture or a
+ *  form turns it about; null when no window has loaded it. */
+function localCentreOfKey(key: string | null | undefined): V3 | null {
+  if (!key) return null;
+  for (const h of sceneHandles.values()) { const c = h.localCentre(key); if (c) return c; }
+  return null;
+}
+/** A form's edit of a node's transform, turned and scaled about the object's
+ *  own centre (the old pivot, the file's origin, moved there first: same matrix). */
+function editXf(key: string | null, before: Xf, after: Xf): Xf {
+  return withPivot(before, after, localCentreOfKey(key));
+}
 function writeXf(nodeId: string, xf: Xf): void {
   const st = storeOfNode(nodeId) ?? store;
   if (!st || refuseReadOnly()) return;
@@ -22095,10 +22109,10 @@ function writeXf(nodeId: string, xf: Xf): void {
 /** MICRO-SPAZIO-3D-3 · the poses of one gesture on several objects: the
  *  nodes' transforms in ONE step of undo (a room: the operations as usual),
  *  the sketches' in the session. */
-function writePoses(poses: Array<{ key: string; pose: Pose }>): void {
+function writePoses(poses: Array<{ key: string; pose: Pose; pivot?: V3 | null }>): void {
   const sp = currentSpace();
   const nodes = poses.filter((p) => !p.key.startsWith("sketch:"))
-    .map((p) => ({ target: transformNodeOfKey(p.key, sp), xf: poseToXf(p.pose), key: p.key }))
+    .map((p) => ({ target: transformNodeOfKey(p.key, sp), xf: poseToXf(p.pose, p.pivot ?? localCentreOfKey(p.key)), key: p.key }))
     .filter((x): x is { target: string; xf: Xf; key: string } => !!x.target && !xfNote(x.key, sp).readOnly);
   for (const p of poses) if (p.key.startsWith("sketch:")) updateSketch(p.key.slice(7), p.pose);
   if (nodes.length && store && !refuseReadOnly()) {
@@ -22112,7 +22126,8 @@ function writePoses(poses: Array<{ key: string; pose: Pose }>): void {
 }
 function xfTexts(): TransformFormTexts {
   return { position: t("xf.position"), rotation: t("xf.rotation"), scale: t("xf.scale"), quaternion: t("xf.quaternion"),
-    upAxis: (a) => t("xf.upAxis", { a }), reset: t("xf.reset"), metres: "m" };
+    upAxis: (a) => t("xf.upAxis", { a }), reset: t("xf.reset"), metres: "m",
+    pivot: t("xf.pivot"), pivotBox: t("xf.pivotBox"), pivotOld: t("xf.pivotOld") };
 }
 /** Where the numbers of a key live, said under the form. */
 function xfNote(key: string, sp: Space | null): { note: string; readOnly: boolean } {
@@ -22130,8 +22145,9 @@ function renderTransformInto(host: HTMLElement, nodeId: string): boolean {
   const target = key ? transformNodeOfKey(key, sp) : null;
   if (!key || !target) return false;
   const { note, readOnly } = xfNote(key, sp);
-  renderTransformForm(host, { xf: nodeXf(target), texts: xfTexts(), note, readOnly, probe: `insp:${key}`,
-    onCommit: (xf) => writeXf(target, xf), onReset: () => writeXf(target, IDENTITY) });
+  const before = nodeXf(target);
+  renderTransformForm(host, { xf: before, texts: xfTexts(), note, readOnly, probe: `insp:${key}`,
+    onCommit: (xf) => writeXf(target, editXf(key, before, xf)), onReset: () => writeXf(target, IDENTITY) });
   return true;
 }
 
@@ -22303,8 +22319,10 @@ function renderSpaceNPanel(el: HTMLElement, win: Win, h: SpaceSceneHandle): void
     return tn && !xfNote(k, sp).readOnly ? nodeXf(tn) : null;
   };
   const commitAll = (activeKey: string, before: Xf, after: Xf) => {
-    const poses: Array<{ key: string; pose: Pose }> = [{ key: activeKey, pose: xfToPose(after) }];
-    for (const k of others) { const o = xfOfKey(k); if (o) poses.push({ key: k, pose: xfToPose(carryXf(before, after, o)) }); }
+    // s3Dgraphy 1.6.31 · each object turns and scales about its own centre
+    const sk = (k: string) => k.startsWith("sketch:");
+    const poses: Array<{ key: string; pose: Pose }> = [{ key: activeKey, pose: xfToPose(sk(activeKey) ? after : editXf(activeKey, before, after)) }];
+    for (const k of others) { const o = xfOfKey(k); if (o) { const c = carryXf(before, after, o); poses.push({ key: k, pose: xfToPose(sk(k) ? c : editXf(k, o, c)) }); } }
     writePoses(poses);
   };
   if (others.length) {
@@ -22827,7 +22845,7 @@ async function associateSketch(win: Win, sketchId: string, unitId: string, mode:
   } catch (e) {
     return fail(String(e instanceof Error ? e.message : e));
   }
-  const nodes = patchProxyNodes(j.nodes ?? [], rel, digest, bytes.length, transformData(poseToXf(made.pose)));
+  const nodes = patchProxyNodes(j.nodes ?? [], rel, digest, bytes.length, transformData({ ...poseToXf(made.pose), pivot: [0, 0, 0] }));
   // «Sostituisci»: the proxy the unit had leaves the graph in the same step,
   // and its glb (still on disk, still in the store) becomes a free sketch
   const sp = currentSpace();
@@ -23258,21 +23276,26 @@ function renderVersionsInto(host: HTMLElement, rmId: string): boolean {
   return true;
 }
 
-// ── MICRO-SPAZIO-3D-3 p.12 · the tileset as the alternative of a container ──
+// ── THE COMMON HAT (E.D. 17 Oct 2026) · the alternative of a container ──────
+//
+// Replaces MICRO-SPAZIO-3D-3 p.12 (the alternative computed from the DTC): two
+// resources are alternatives iff they have the same hat (s3Dgraphy
+// `alternative_sets`, the TS twin `alternatives.ts`). A tileset hatted by a
+// CONTAINER is the container's alternative — the Space gives it as a model with
+// the container's id (`SpaceRM.altOf`); a tileset with an RM of its own is a
+// model among the others. «Fa da alternativa a…» moves the hat onto a container
+// (`planDeclareAlternative`, s3Dgraphy's `declare_alternative` with its ids),
+// and proposes a sub-container when the boxes say the coverage is partial.
 
-/** The master of a model: its asset (the version chain's master), else its first file. */
-function rmMaster(rm: SpaceRM): string | null {
-  return rm.versions?.find((v) => v.master)?.id ?? rm.resource?.id ?? null;
-}
-/** The alternatives the DTC says (`tileset-alt.ts`), for this graph's containers. */
+/** The alternatives of the containers, from the sets: the container's own
+ *  alternative (its id) and the models it replaces. */
 function spaceAlternatives(sp: Space | null = currentSpace()): TilesetAlternative[] {
-  if (!sp || !store || !sp.rmGroups.size) return [];
-  const tilesets = sp.rms.filter((r) => !!r.resource?.tiles).map((r) => ({ id: r.id,
-    outs: [...new Set([...(r.versions ?? []).map((v) => v.id), r.resource?.id ?? ""].filter(Boolean))] }));
-  if (!tilesets.length) return [];
-  const groups = [...sp.rmGroups.values()].map((g) => ({ id: g.id,
-    members: g.members.map((m) => ({ id: m, master: rmMaster(sp.rms.find((r) => r.id === m)!) ?? "" })) }));
-  return tilesetAlternatives(store.doc.graph, tilesets, groups);
+  if (!sp) return [];
+  return sp.rms.filter((r) => !!r.altOf).map((r) => {
+    const set = findSet(sp.alternatives, r.altOf!);
+    const covers = set?.covers ?? [];
+    return { tileset: r.id, group: r.altOf!, covered: covers, total: covers.length };
+  });
 }
 function altModeOf(groupId: string): AltMode { return space3dPrefs().altModes?.[groupId] ?? "auto"; }
 function setAltMode(groupId: string, mode: AltMode): void {
@@ -23285,61 +23308,125 @@ function altMenuEntries(groupId: string): Array<{ label: string; act: string; ru
   const m = altModeOf(groupId);
   return (["models", "tileset", "auto"] as const).map((k) => ({ label: `${m === k ? "● " : ""}${t(`alt.${k}`)}`, act: `alt-${k}`, run: () => setAltMode(groupId, k) }));
 }
-/** The tileset's Inspector: the container it is the alternative of, or «Dichiara che deriva da…». */
-function renderAlternativeInto(host: HTMLElement, rmId: string): boolean {
+/** The boxes the Space windows measured, by key (`rm:<id>`), for the coverage. */
+function spaceBox(key: string): Box | null {
+  for (const h of sceneHandles.values()) { const b = h.boxOf(key); if (b) return b as Box; }
+  return null;
+}
+/** The Inspector of a container (its alternative: the three modes) or of a
+ *  tileset model (a member, or «Fa da alternativa a…»). */
+function renderAlternativeInto(host: HTMLElement, nodeId: string): boolean {
   const sp = currentSpace();
-  const rm = sp?.rms.find((r) => r.id === rmId);
-  if (!sp || !rm?.resource?.tiles || !store) return false;
-  const alts = spaceAlternatives(sp).filter((a) => a.tileset === rmId);
-  for (const a of alts) {
-    const g = sp.rmGroups.get(a.group);
-    const p = document.createElement("p");
-    p.className = "insp-hint";
-    p.dataset.alt = a.group;
-    p.textContent = t(a.covered.length === a.total ? "alt.of" : "alt.ofPart", { group: g?.name ?? a.group, k: String(a.covered.length), n: String(a.total) });
-    host.appendChild(p);
+  if (!sp || !store) return false;
+  const rm = sp.rms.find((r) => r.id === nodeId);
+  const modes = (gid: string) => {
     const sel = document.createElement("select");
-    sel.dataset.altMode = a.group;
-    for (const k of ["models", "tileset", "auto"] as const) { const o = document.createElement("option"); o.value = k; o.textContent = t(`alt.${k}`); o.selected = altModeOf(a.group) === k; sel.appendChild(o); }
-    sel.addEventListener("change", () => setAltMode(a.group, sel.value as AltMode));
+    sel.dataset.altMode = gid;
+    for (const k of ["models", "tileset", "auto"] as const) { const o = document.createElement("option"); o.value = k; o.textContent = t(`alt.${k}`); o.selected = altModeOf(gid) === k; sel.appendChild(o); }
+    sel.addEventListener("change", () => setAltMode(gid, sel.value as AltMode));
     host.appendChild(sel);
+  };
+  const hint = (text: string, attr?: string) => { const p = document.createElement("p"); p.className = "insp-hint"; if (attr) p.dataset.alt = attr; p.textContent = text; host.appendChild(p); };
+  if (rm?.altOf) {
+    const a = spaceAlternatives(sp).find((x) => x.tileset === rm.id);
+    const g = sp.rmGroups.get(rm.altOf);
+    hint(t("alt.of", { group: g?.name ?? rm.altOf, n: String(a?.total ?? 0) }), rm.altOf);
+    modes(rm.altOf);
+    return true;
   }
-  if (!alts.length) {
-    const p = document.createElement("p");
-    p.className = "insp-hint";
-    p.textContent = t("alt.none");
-    host.appendChild(p);
-    const groups = [...sp.rmGroups.values()].filter((g) => g.members.length);
-    if (groups.length) {
-      const sel = document.createElement("select");
-      sel.dataset.altDeclare = "1";
-      for (const g of groups) { const o = document.createElement("option"); o.value = g.id; o.textContent = `${g.name} (${g.members.length})`; sel.appendChild(o); }
-      const b = document.createElement("button");
-      b.className = "insp-btn";
-      b.dataset.s3 = "declare-derivation";
-      b.textContent = t("alt.declare");
-      b.addEventListener("click", () => declareTilesetDerivation(rmId, sel.value));
-      host.append(sel, b);
-    }
+  if (!rm?.resource?.tiles) return false;
+  if (rm.group) { hint(t("alt.member", { group: sp.rmGroups.get(rm.group)?.name ?? rm.group })); }
+  else hint(t("alt.none"));
+  const groups = [...sp.rmGroups.values()].filter((g) => g.members.length);
+  if (groups.length) {
+    const sel = document.createElement("select");
+    sel.dataset.altDeclare = "1";
+    for (const g of groups) { const o = document.createElement("option"); o.value = g.id; o.textContent = `${g.name} (${g.members.length})`; o.selected = g.id === rm.group; sel.appendChild(o); }
+    const b = document.createElement("button");
+    b.className = "insp-btn";
+    b.dataset.s3 = "declare-alternative";
+    b.textContent = t("alt.declare");
+    b.addEventListener("click", () => declareContainerAlternative(rm.id, sel.value, host));
+    host.append(sel, b);
   }
   return true;
 }
-/** «Dichiara che deriva da…»: the tileset's master derived from the members'
- *  masters, one step (the TS twin of s3Dgraphy's `declare_derivation`). */
-function declareTilesetDerivation(rmId: string, groupId: string): void {
+/** Apply a plan of the alternatives in one step of undo. */
+function applyAltPlan(st: DocumentStore, plan: AltPlan): void {
+  for (const n of plan.addNodes) st.addNode(n);
+  for (const id of plan.removeEdges) { const e = st.doc.graph.edges.find((x) => x.id === id); if (e) st.deleteEdge(e); }
+  for (const id of plan.removeNodes) st.deleteNode(id);
+  for (const e of plan.addEdges) st.addEdge(e.source, e.target, e.type, undefined, e.id);
+}
+/** «Fa da alternativa a…»: the container becomes the tileset's hat. The boxes
+ *  the scene has measured say whether it covers the whole container; when it
+ *  covers a part, the sub-container of the covered models is proposed. */
+function declareContainerAlternative(rmId: string, groupId: string, host?: HTMLElement): void {
   const st = store;
   const sp = currentSpace();
   const rm = sp?.rms.find((r) => r.id === rmId);
   const g = sp?.rmGroups.get(groupId);
   if (!st || !sp || !rm || !g || refuseReadOnly()) return;
-  const out = rmMaster(rm);
-  const inputs = g.members.map((m) => rmMaster(sp.rms.find((r) => r.id === m)!)).filter((x): x is string => !!x);
-  if (!out || !inputs.length) { toast(t("alt.noMasters")); return; }
-  let res: ReturnType<typeof declareDerivation> | null = null;
-  try { st.batch(() => { res = declareDerivation(st, { output: out, inputs, tool: "3D Tiles" }); }); }
+  // the coverage, on the boxes of the windows (the tileset's and the members')
+  const altBox = spaceBox(`rm:${rmId}`);
+  const members = g.members.filter((m) => m !== rmId);
+  const boxes = new Map<string, Box>();
+  for (const m of members) { const b = spaceBox(`rm:${m}`); if (b) boxes.set(m, b); }
+  let covered: string[] | null = null;
+  if (altBox && boxes.size === members.length && members.length) {
+    const cov = measureCoverage(altBox, boxes);
+    if (cov?.coverage === "partial") covered = cov.inside;
+    if (cov?.coverage === "more") {
+      // every member inside and the tileset much larger: it covers MORE than the
+      // container — the alternative of a larger one; the other models it covers
+      const others = sp.rms.filter((r) => r.id !== rmId && !members.includes(r.id) && !r.altOf).filter((r) => {
+        const b = spaceBox(`rm:${r.id}`);
+        return !!b && [0, 1, 2].every((i) => altBox[0][i] <= (b[0][i] + b[1][i]) / 2 && (b[0][i] + b[1][i]) / 2 <= altBox[1][i]);
+      });
+      const msg = t("alt.more", { tileset: rm.name, group: g.name, n: String(members.length), iou: cov.iou.toFixed(2), k: String(others.length),
+        names: others.slice(0, 6).map((r) => r.name).join(", ") + (others.length > 6 ? "…" : "") });
+      logInfo(msg, [rmId, groupId]);
+      if (host) { const p = document.createElement("p"); p.className = "insp-hint"; p.dataset.altMore = String(others.length); p.textContent = msg; host.appendChild(p); }
+      else toast(msg);
+      return;
+    }
+  }
+  if (covered && host) {
+    const p = document.createElement("p");
+    p.className = "insp-hint";
+    p.dataset.altPartial = String(covered.length);
+    p.textContent = t("alt.partial", { tileset: rm.name, k: String(covered.length), n: String(members.length), group: g.name });
+    const b = document.createElement("button");
+    b.className = "insp-btn";
+    b.dataset.s3 = "alt-subcontainer";
+    b.textContent = t("alt.subBtn", { k: String(covered.length) });
+    const cov = covered;
+    b.addEventListener("click", () => {
+      const name = t("alt.subName", { group: g.name });
+      const sub = planSubcontainer(st.doc.graph, groupId, cov, name, ALT_RULE);
+      let decl: AltPlan | null = null;
+      try {
+        st.batch(() => {
+          applyAltPlan(st, sub);
+          decl = planDeclareAlternative(st.doc.graph, rmId, sub.groupId, ALT_RULE);
+          applyAltPlan(st, decl);
+        });
+      } catch (e) { toast(String(e instanceof Error ? e.message : e)); return; }
+      const msg = t("alt.subDone", { name, k: String(cov.length), tileset: rm.name });
+      logInfo(msg, [sub.groupId]);
+      toastUndo(msg, st);
+      buildScenes(); draw(); refreshSurfaces("scene"); refreshInspector();
+    });
+    host.append(p, b);
+    return;
+  }
+  let plan: AltPlan;
+  try { plan = planDeclareAlternative(st.doc.graph, rmId, groupId, ALT_RULE); }
   catch (e) { toast(String(e instanceof Error ? e.message : e)); return; }
-  const msg = t("alt.declared", { tileset: rm.name, group: g.name, n: String((res as unknown as { inputs: string[] } | null)?.inputs.length ?? 0) });
-  logInfo(msg, [rmId]);
+  st.batch(() => applyAltPlan(st, plan));
+  const dropped = plan.removeNodes.length ? ` · ${t("alt.dropped", { rm: rm.name })}` : "";
+  const msg = t("alt.declared", { tileset: rm.name, group: g.name, n: String(members.length) }) + dropped;
+  logInfo(msg, [groupId]);
   toastUndo(msg, st);
   buildScenes();
   draw();
@@ -23359,7 +23446,7 @@ function renderSpaceOutliner(el: HTMLElement, win: Win, sp: Space | null): void 
     rms: (ep) => (sp.summary(ep)?.rms ?? []).map((r) => {
       const drawnUrl = h?.drawnUrl(`rm:${r.id}`) ?? "";
       const tail = (u: string) => decodeURIComponent(u.split(/[?#]/)[0]).split("/").pop() ?? "";
-      const grp = r.group ? sp.rmGroups.get(r.group) : undefined;
+      const grp = r.group ? sp.rmGroups.get(r.group) : r.altOf ? sp.rmGroups.get(r.altOf) : undefined;
       // MICRO-SPAZIO-3D-3 p.11 · the name without its level, the level a chip
       const nm = rmShown(r.id, sp);
       return { id: r.id, name: nm?.shown ?? r.name, ...(nm && nm.shown !== nm.technical ? { technical: nm.technical } : {}),
@@ -23605,9 +23692,9 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
       return keys.filter((k) => k.startsWith("sketch:") || (transformNodeOfKey(k, sp) && !xfNote(k, sp).readOnly));
     },
     onTransformMany: (poses) => writePoses(poses),
-    onTransform: (key, pose) => {
+    onTransform: (key, pose, pivot) => {
       const target = transformNodeOfKey(key);
-      if (target && !xfNote(key, currentSpace()).readOnly) writeXf(target, poseToXf(pose));
+      if (target && !xfNote(key, currentSpace()).readOnly) writeXf(target, poseToXf(pose, pivot ?? localCentreOfKey(key)));
     },
     // MICRO-3DTILES · the threshold and the tiles' memory (Preferences)
     limit: { bytes: getSettings().viewer.lodLimitMB * 1024 * 1024, points: getSettings().viewer.lodLimitPoints },

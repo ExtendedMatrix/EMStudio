@@ -2,17 +2,22 @@
  * MICRO-SPAZIO-3D-2 · p.5 · the transform of a 3D object, in the data — pure
  * (`scripts/check-transform3d.mjs`).
  *
- * Measured on 16 Oct 2026 (the report, «dove vive la trasformazione»): the one
- * field EM Tools, Heriverse and s3Dgraphy's class already share is the node's
- * `data.transform = { position, rotation, scale }` — three values each, written
- * by EM Tools as strings (`obj.location`, Euler XYZ in RADIANS, `obj.scale`) in
- * Blender's Z-up frame; on Templu Mare v2 the 99 models carry it, all identity.
- * The datamodel does not declare it (only the Python class does), and a
- * SemanticShape has no place at all: the proposal for s3Dgraphy is in the
- * report. Until it is decided EMStudio uses the same field, on the model and on
- * the proxy's shape alike, with the same shape, and adds `up_axis: "Z"` — the
- * axis declared, as the MICRO asks; a reader that does not know the key ignores
- * it. The file (glb) is never changed: the transform is applied over it.
+ * THE FORM (s3Dgraphy node datamodel 1.6.31, `geometry.transform`, E.D. 16-17
+ * Oct 2026): `data.transform = { position, rotation, rotation_order,
+ * angle_unit: "deg", scale, up_axis, pivot?, quaternion }` — NUMBERS, the
+ * rotation in DEGREES (Blender's Euler, XYZ by default: X first, then Y, then
+ * Z about the fixed axes, R = Rz·Ry·Rx), Z up, the PIVOT the point rotations
+ * and scales turn about, in the object's own frame (absent: the centre of the
+ * object's box), the quaternion computed. The matrix, in the data's frame:
+ * v' = position + pivot + R·S·(v − pivot) — the identity leaves the object
+ * where its file puts it, whatever the pivot. The file is never changed.
+ *
+ * TOLERANT READING: the old form (numbers as text, radians, no `angle_unit`,
+ * written by s3Dgraphy, EM Tools and EMStudio until 16 Oct) is read too, and
+ * an old transform that turns or scales keeps the pivot it always had, the
+ * origin; what EMStudio writes is always the new form. Inside, `Xf` keeps the
+ * rotation in RADIANS (the three.js side works in them): the conversion is at
+ * the two ends, `readTransform` and `transformData`.
  *
  * Blender's frame to three's (the glTF exporter's own rule, `export_yup`):
  * position (x, y, z) → (x, z, −y), quaternion (w, x, y, z) → (w, x, z, −y),
@@ -22,13 +27,16 @@
  */
 import type { Pose, V3 } from "./space-nav";
 
-/** A transform in the data's frame: Blender's, Z-up, Euler XYZ in radians. */
+/** A transform in the data's frame: Blender's, Z-up, Euler XYZ — in RADIANS here. */
 export interface Xf {
   position: V3;
   rotation: V3;
   scale: V3;
   /** the axis that is up in these numbers: "Z" (Blender, EM Tools) or "Y" (glTF) */
   up_axis: "Z" | "Y";
+  /** the point rotations and scales turn about, in the object's own frame;
+   *  null / absent: the centre of the object's box (the caller measures it) */
+  pivot?: V3 | null;
 }
 
 /** [w, x, y, z] */
@@ -46,28 +54,44 @@ const triple = (v: unknown): V3 | null => {
   return t.every((x) => x != null) ? (t as V3) : null;
 };
 
-/** The transform a node's data carries, or null when it carries none (or an unreadable one). */
+/** The six orders of Blender's Euler angles; the first letter turns first. */
+export const ROTATION_ORDERS = ["XYZ", "XZY", "YXZ", "YZX", "ZXY", "ZYX"] as const;
+
+/** The transform a node's data carries, or null when it carries none (or an
+ *  unreadable one). Both forms: the new (degrees, `angle_unit: "deg"`) and the
+ *  old (radians, numbers as text); `readTransformForm` says which. */
 export function readTransform(data: Record<string, unknown> | undefined | null): Xf | null {
+  return readTransformForm(data)?.xf ?? null;
+}
+export function readTransformForm(data: Record<string, unknown> | undefined | null): { xf: Xf; old: boolean } | null {
   const t = data?.transform as Record<string, unknown> | undefined;
   if (!t || typeof t !== "object") return null;
-  const position = triple(t.position) ?? [0, 0, 0];
-  const rotation = triple(t.rotation) ?? [0, 0, 0];
-  const scale = triple(t.scale) ?? [1, 1, 1];
   if (!triple(t.position) && !triple(t.rotation) && !triple(t.scale)) return null;
+  const position = triple(t.position) ?? [0, 0, 0];
+  let rotation = triple(t.rotation) ?? [0, 0, 0];
+  const scale = triple(t.scale) ?? [1, 1, 1];
+  const unit = t.angle_unit;
+  const text = [t.position, t.rotation, t.scale].some((v) => Array.isArray(v) && v.some((x) => typeof x === "string"));
+  const old = unit !== "deg" || text || "rotation_mode" in t;
+  if (unit === "deg") rotation = rotation.map(rad) as V3;
+  const order = String(t.rotation_order ?? t.rotation_mode ?? "XYZ").toUpperCase();
+  if (order !== "XYZ" && (ROTATION_ORDERS as readonly string[]).includes(order))
+    rotation = blenderEulerFromQuat(quatFromEulerOrder(rotation, order));
   const up = String(t.up_axis ?? "Z").toUpperCase() === "Y" ? "Y" : "Z";
-  return { position, rotation, scale, up_axis: up };
+  let pivot = triple(t.pivot);
+  // the old semantics: Blender's object origin, the origin of the file
+  if (!pivot && old && !(rotation.every((x) => Math.abs(x) < 1e-12) && scale.every((x) => Math.abs(x - 1) < 1e-12))) pivot = [0, 0, 0];
+  return { xf: { position, rotation, scale, up_axis: up, ...(pivot ? { pivot } : {}) }, old };
 }
 
-/** What goes into `data.transform`: EM Tools' shape (strings), the axis declared. */
+/** What goes into `data.transform`: the new form — numbers, degrees, the order,
+ *  the unit, the up axis, the pivot when there is one, the quaternion computed. */
 export function transformData(xf: Xf): Record<string, unknown> {
-  // MICRO-SPAZIO-3D-3 p.15 · NUMBERS. Measured: the 99 models of Templu Mare
-  // v3.2 carry `["0.0", "0.0", "0.0"]`, strings — s3Dgraphy's own default
-  // (`RepresentationModelNode.__init__`, representation_node.py:47-52) and EM
-  // Tools' `str(obj.location.x)` (graph_updaters.py:310). `readTransform`
-  // reads both; written here, they are numbers (a reader that did float("0.5")
-  // takes 0.5 as well).
-  const s = (v: V3) => v.map((x) => (Math.abs(x) < 1e-15 ? 0 : x));
-  return { position: s(xf.position), rotation: s(xf.rotation), scale: s(xf.scale), up_axis: xf.up_axis };
+  const c = (x: number) => { const r = Math.round(x * 1e10) / 1e10; return Math.abs(r) < 1e-15 ? 0 : r; };
+  const s = (v: readonly number[]) => v.map(c);
+  return { position: s(xf.position), rotation: s(xf.rotation.map(deg)), rotation_order: "XYZ", angle_unit: "deg",
+           scale: s(xf.scale), up_axis: xf.up_axis, ...(xf.pivot ? { pivot: s(xf.pivot) } : {}),
+           quaternion: s(xfQuaternion(xf)) };
 }
 
 export function isIdentity(xf: Xf | null, eps = 1e-12): boolean {
@@ -103,6 +127,12 @@ const clamp1 = (v: number) => Math.max(-1, Math.min(1, v));
 export function quatFromBlenderEuler(e: V3): Quat {
   return qmul(axisQ(2, e[2]), qmul(axisQ(1, e[1]), axisQ(0, e[0])));
 }
+/** Blender's Euler in any of its six orders (the first letter turns first) → quaternion. */
+export function quatFromEulerOrder(e: V3, order: string): Quat {
+  let q: Quat = [1, 0, 0, 0];
+  for (const letter of order) { const i = "XYZ".indexOf(letter) as 0 | 1 | 2; q = qmul(axisQ(i, e[i]), q); }
+  return q;
+}
 /** quaternion → Blender's Euler XYZ (R = Rz·Ry·Rx). */
 export function blenderEulerFromQuat(q: Quat): V3 {
   const m = qmatrix(q);
@@ -124,27 +154,64 @@ export function threeEulerFromQuat(q: Quat): V3 {
 
 // ── Blender's frame ⇄ three's ────────────────────────────────────────────────
 
-/** The data's transform as the scene applies it (three's axes, Euler XYZ). */
-export function xfToPose(xf: Xf): Pose {
+/** R·S·v in the data's frame (Blender's Euler XYZ, radians). */
+function rsApply(xf: Xf, v: readonly number[]): V3 {
+  const m = qmatrix(quatFromBlenderEuler(xf.rotation));
+  const w = [v[0] * xf.scale[0], v[1] * xf.scale[1], v[2] * xf.scale[2]];
+  return [m[0] * w[0] + m[1] * w[1] + m[2] * w[2], m[3] * w[0] + m[4] * w[1] + m[5] * w[2], m[6] * w[0] + m[7] * w[1] + m[8] * w[2]];
+}
+/** The translation the matrix applies to the file's origin:
+ *  position + pivot − R·S·pivot (the position itself without a pivot). */
+export function effectiveTranslation(xf: Xf, pivot: V3 | null = null): V3 {
+  const p = xf.pivot ?? pivot;
+  if (!p) return [...xf.position] as V3;
+  const rs = rsApply(xf, p);
+  return [0, 1, 2].map((i) => xf.position[i] + p[i] - rs[i]) as V3;
+}
+/** The same matrix about another pivot: the position absorbs the change,
+ *  position' = position + (I − R·S)(p − p') — s3Dgraphy's `rebase_pivot`. */
+export function rebasePivot(xf: Xf, pivot: V3, oldPivot: V3 | null = null): Xf {
+  const p = xf.pivot ?? oldPivot ?? [0, 0, 0];
+  const d: V3 = [p[0] - pivot[0], p[1] - pivot[1], p[2] - pivot[2]];
+  const rs = rsApply(xf, d);
+  return { ...xf, position: [0, 1, 2].map((i) => xf.position[i] + d[i] - rs[i]) as V3, pivot: [...pivot] as V3 };
+}
+/** A transform edited from `before` to `after` (a form, a panel), turned and
+ *  scaled about `centre` (the object's box centre, in its own frame): `before`
+ *  is first moved onto that pivot, matrix unchanged, then the edit applies —
+ *  so an old transform about the survey's origin is turned about the piece. */
+export function withPivot(before: Xf, after: Xf, centre: V3 | null): Xf {
+  if (!centre) return { ...after, pivot: after.pivot ?? before.pivot ?? null };
+  const b = rebasePivot(before, centre, before.pivot ?? null);
+  return { ...after, position: [0, 1, 2].map((i) => b.position[i] + after.position[i] - before.position[i]) as V3, pivot: [...centre] as V3 };
+}
+
+/** The data's transform as the scene applies it (three's axes, Euler XYZ),
+ *  the pivot folded into the translation of the file's root. */
+export function xfToPose(xf: Xf, pivot: V3 | null = null): Pose {
+  const t = effectiveTranslation(xf, pivot);
   // numbers already Y-up: no turn of the axes, the Euler still extrinsic XYZ
-  if (xf.up_axis === "Y") return { position: [...xf.position] as V3, rotation: threeEulerFromQuat(quatFromBlenderEuler(xf.rotation)), scale: [...xf.scale] as V3 };
+  if (xf.up_axis === "Y") return { position: t, rotation: threeEulerFromQuat(quatFromBlenderEuler(xf.rotation)), scale: [...xf.scale] as V3 };
   const [w, x, y, z] = quatFromBlenderEuler(xf.rotation);
   return {
-    position: [xf.position[0], xf.position[2], -xf.position[1]],
+    position: [t[0], t[2], -t[1]],
     rotation: threeEulerFromQuat([w, x, z, -y]),
     scale: [xf.scale[0], xf.scale[2], xf.scale[1]],
   };
 }
-/** A pose of the scene (three's axes) as the data writes it (Blender's, Z-up). */
-export function poseToXf(p: Pose): Xf {
+/** A pose of the scene (three's axes) as the data writes it (Blender's, Z-up);
+ *  with `pivot` (the object's box centre in its own frame) the transform is
+ *  written about it. */
+export function poseToXf(p: Pose, pivot: V3 | null = null): Xf {
   const [w, x, y, z] = quatFromThreeEuler(p.rotation);
   const qb: Quat = [w, x, -z, y];
-  return {
+  const xf: Xf = {
     position: [p.position[0], -p.position[2], p.position[1]],
     rotation: blenderEulerFromQuat(qb),
     scale: [p.scale[0], p.scale[2], p.scale[1]],
     up_axis: "Z",
   };
+  return pivot ? rebasePivot(xf, pivot, [0, 0, 0]) : xf;
 }
 
 /** The quaternion of a transform, in its own frame ([w, x, y, z], Blender's order). */
@@ -180,5 +247,6 @@ export function carryXf(before: Xf, after: Xf, other: Xf): Xf {
     rotation: [0, 1, 2].map((i) => other.rotation[i] + after.rotation[i] - before.rotation[i]) as V3,
     scale: [0, 1, 2].map((i) => other.scale[i] * r(i)) as V3,
     up_axis: other.up_axis,
+    pivot: other.pivot ?? null,
   };
 }

@@ -205,6 +205,11 @@ export interface SpaceSceneHandle {
   applyOverlays(): void;
   /** the file each model is drawn from (a LOD chosen, a tileset) */
   drawnUrl(key: string): string | undefined;
+  /** s3Dgraphy 1.6.31 · the centre of an object's box in its own frame, in the
+   *  data's axes (Blender's, Z up): the default pivot; null when not loaded */
+  localCentre(key: string): V3 | null;
+  /** the world box of a drawn object (three's axes), null when not drawn */
+  boxOf(key: string): [V3, V3] | null;
   /** MICRO-SPAZIO-3D-2 · the view (aligned, orthographic) and the lens */
   view(): SceneView;
   setView(v: AlignedView): void;
@@ -267,11 +272,11 @@ export interface SpaceSceneOptions {
   /** the selected object that G / R / S moves when no sketch is selected
    *  (`proxy:<unit>`, `rm:<id>`), and its transform written on release */
   transformTarget?: () => string | null;
-  onTransform?: (key: string, pose: Pose) => void;
+  onTransform?: (key: string, pose: Pose, pivot?: V3 | null) => void;
   /** MICRO-SPAZIO-3D-3 · every selected object G / R / S moves (sketches
    *  too), the active last; on release, ONE call with all their poses */
   transformTargets?: () => string[];
-  onTransformMany?: (poses: Array<{ key: string; pose: Pose }>) => void;
+  onTransformMany?: (poses: Array<{ key: string; pose: Pose; pivot?: V3 | null }>) => void;
   /** MICRO-SPAZIO-3D-3 p.12 · what a container's automatic choice shows now */
   onAltState?: (group: string, shown: "tileset" | "models") => void;
   /** MICRO-SPAZIO-3D-3 p.10 · a version of a model in the flow was drawn (the Outliner's dot follows) */
@@ -1701,6 +1706,25 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
       /** the object G / R / S moves: the sketch selected, else the selected
        *  proxy or model (MICRO-SPAZIO-3D-2: its transform is in the data) */
       const modalObject = (id: string): any => (id.startsWith("sketch:") ? sketchMeshes.get(id.slice(7)) : roots.get(id));
+      /** s3Dgraphy node datamodel 1.6.31 · the box of an object's meshes in its
+       *  OWN frame (the file's), null when nothing is loaded (a tileset) */
+      const localBox = (obj: any): any | null => {
+        if (!obj) return null;
+        const box = new THREE.Box3();
+        obj.updateMatrixWorld(true);
+        const inv = obj.matrixWorld.clone().invert();
+        obj.traverse((o: any) => {
+          if (!o.isMesh || !o.geometry || o.userData.edges) return;
+          if (!o.geometry.boundingBox) o.geometry.computeBoundingBox();
+          box.union(o.geometry.boundingBox.clone().applyMatrix4(new THREE.Matrix4().multiplyMatrices(inv, o.matrixWorld)));
+        });
+        return box.isEmpty() ? null : box;
+      };
+      /** …its centre in the data's axes (Blender's, Z up): the default PIVOT */
+      const localCentre = (id: string): V3 | null => {
+        const b = localBox(modalObject(id));
+        return b ? threeToBlender(arr(b.getCenter(new THREE.Vector3()))) : null;
+      };
       const movable = (k: string): boolean => {
         if (k.startsWith("sketch:")) return ov("s3_sketches") && sketchMeshes.has(k.slice(7));
         return roots.has(k) && !roots.get(k).userData.tiles && !locked().has(k);
@@ -1717,9 +1741,15 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
           if (m) targets.push({ id, start: poseOf(m), q0: m.quaternion.clone() });
         }
         if (!targets.length) return false;
-        // alone: its origin, as Blender; several: the median point of their boxes
+        // alone: the centre of its box (s3Dgraphy 1.6.31: the PIVOT of the data
+        // — the origin of a survey's file lies 494 m under Templu Mare's podium),
+        // a sketch its origin, as Blender; several: the median point of their boxes
         let pivot: any;
-        if (targets.length === 1) pivot = v3(targets[0].start.position);
+        if (targets.length === 1) {
+          const m0 = modalObject(targets[0].id);
+          const lb = targets[0].id.startsWith("sketch:") ? null : localBox(m0);
+          pivot = lb ? m0.localToWorld(lb.getCenter(new THREE.Vector3())) : v3(targets[0].start.position);
+        }
         else {
           const mp = medianPoint(targets.map((t) => arr(new THREE.Box3().setFromObject(modalObject(t.id)).getCenter(new THREE.Vector3()))));
           pivot = mp ? v3(mp) : v3(targets[0].start.position);
@@ -1741,7 +1771,7 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
         if (!modal) return;
         // the last motions of the frame, not yet applied (they coalesce per frame)
         if (confirm) modalApply();
-        const out: Array<{ key: string; pose: Pose }> = [];
+        const out: Array<{ key: string; pose: Pose; pivot?: V3 | null }> = [];
         for (const t of modal.targets) {
           const m = modalObject(t.id);
           if (!m) continue;
@@ -1750,7 +1780,7 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
             const sid = t.id.slice(7);
             updateSketch(sid, poseOf(m), true);
             if (confirm) out.push({ key: t.id, pose: poseOf(m) });
-          } else if (confirm) out.push({ key: t.id, pose: poseOf(m) });
+          } else if (confirm) out.push({ key: t.id, pose: poseOf(m), pivot: localCentre(t.id) });
         }
         modal = null;
         controls.enabled = true;
@@ -1761,7 +1791,7 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
           if (opts.onTransformMany) opts.onTransformMany(out);
           else for (const o of out) {
             if (o.key.startsWith("sketch:")) opts.onSketchChange?.(o.key.slice(7));
-            else opts.onTransform?.(o.key, o.pose);
+            else opts.onTransform?.(o.key, o.pose, o.pivot ?? null);
           }
         } else syncSketches();
       };
@@ -2264,6 +2294,18 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
         },
         applyOverlays,
         drawnUrl: (k: string) => drawn.get(k)?.url,
+        localCentre: (k: string) => localCentre(k),
+        boxOf: (k: string) => {
+          // a tileset: the volume its tileset.json DECLARES (the root's
+          // boundingVolume, as the automatic choice reads it), not the content
+          // loaded at this moment — a coarse level is a fraction of the whole
+          const live = liveLayers().find((l) => l.layer.object === roots.get(k));
+          const lb = live ? live.layer.bounds() : null;
+          if (lb && !lb.isEmpty()) return [arr(lb.min), arr(lb.max)] as [V3, V3];
+          const f = (probe as Record<string, unknown>).__spaceBoxOf as ((id: string) => number[] | null) | undefined;
+          const b = f?.(k.split(":").slice(1).join(":"));
+          return b ? [[b[0], b[1], b[2]], [b[3], b[4], b[5]]] as [V3, V3] : null;
+        },
         view: viewNow,
         setView: (v: AlignedView) => setAligned(v),
         toggleOrtho: () => { orthoAuto = false; setOrtho(!isOrtho); },
@@ -2301,6 +2343,8 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
     surfaceAt: (x, y) => api.surfaceAt?.(x, y) ?? null,
     applyOverlays: () => api.applyOverlays?.(),
     drawnUrl: (k) => api.drawnUrl?.(k),
+    localCentre: (k) => api.localCentre?.(k) ?? null,
+    boxOf: (k) => api.boxOf?.(k) ?? null,
     view: () => api.view?.() ?? { view: null, ortho: false, fov: 40, lensMm: 33 },
     setView: (v) => api.setView?.(v),
     toggleOrtho: () => api.toggleOrtho?.(),

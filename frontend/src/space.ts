@@ -28,6 +28,11 @@ import type { EmDocument, EmEdge, EmNode } from "./types";
 import { classOf } from "./rules";
 import { SCENE_USES, assetOf, chooseVersion, versionsOf, type VersionChoice, type VersionGraph } from "./asset-versions";
 import { pickRepresentation, plainGraph } from "./resources";
+import { alternativeSets, iterSets, type AlternativesRule, type AltResult } from "./alternatives";
+import visualRules from "./assets/em_visual_rules.json";
+
+/** The rule of the alternatives (em_visual_rules 1.6.37 → `alternatives`). */
+export const ALT_RULE = (visualRules as unknown as { alternatives: AlternativesRule }).alternatives;
 
 /** The media type of a 3D Tiles archive (s3Dgraphy `MEDIA_TYPE_3TZ`). */
 const MEDIA_3TZ = "application/vnd.maxar.archive.3tz+zip";
@@ -101,6 +106,11 @@ export interface SpaceRM {
   /** MICRO-SPAZIO-3D-3 p.7 · the RM container it is in (EM16-RMNG,
    *  `is_in_representation_model_group`, 1:1), or null */
   group?: string | null;
+  /** THE COMMON HAT (E.D. 17 Oct 2026) · not a model: the container's OWN
+   *  alternative (a tileset of the whole, hatted by the container — connections
+   *  1.6.41). Its id is the container's; drawn instead of the members, or they
+   *  instead of it */
+  altOf?: string | null;
 }
 
 /** MICRO-SPAZIO-3D-3 p.7 · an RM container as the graph has it (EM Tools writes
@@ -158,6 +168,8 @@ export interface Space {
   proxies: Map<string, SpaceProxy>;
   /** MICRO-SPAZIO-3D-3 p.7 · the RM containers, empty ones too */
   rmGroups: Map<string, SpaceRMGroup>;
+  /** THE COMMON HAT · the sets of alternatives (s3Dgraphy `alternative_sets`) */
+  alternatives: AltResult;
   summary(epochId: string): EpochSummary | null;
   /** the top epoch a node (epoch or phase) belongs to */
   topOf(epochId: string): string | null;
@@ -429,8 +441,30 @@ export function buildSpace(
     rmGroups.set(g.id, { id: g.id, name: str(g.name) || g.id, documentId: doc, members: rms.filter((r) => r.group === g.id).map((r) => r.id) });
   }
 
+  // THE COMMON HAT (E.D. 17 Oct 2026) · the sets of alternatives; a container
+  // with an alternative of its own (a tileset of the whole, hatted by the
+  // container) gets it as a model of the Space, under the container's id: its
+  // versions, the one a scene loads, the epochs of the members it replaces
+  const alternatives = alternativeSets({ nodes, edges }, ALT_RULE);
+  for (const set of iterSets(alternatives.sets)) {
+    if (set.hat_kind !== "container" || !set.alternatives.length) continue;
+    const g = rmGroups.get(set.hat);
+    const entries = set.alternatives;
+    const choice = chooseVersion(entries.filter((e) => opensGltf(e.data ?? {})), SCENE_USES);
+    const node = choice?.entry ? byId.get(choice.entry.id) : byId.get(set.assets[0]);
+    const eps = new Set(rms.filter((r) => set.covers.includes(r.id)).flatMap((r) => r.epochs));
+    const asset = byId.get(set.assets[0]);
+    rms.push({ id: set.hat, name: str(asset?.name) || set.name, epochs: [...eps], documentId: g?.documentId ?? null, genre: null,
+               group: null, altOf: set.hat, resource: node ? asResource(servable(node)) : null, choice: choice?.entry ? choice : null,
+               tileset: null,
+               versions: entries.map((e) => { const vn = byId.get(e.id);
+                 return { id: e.id, name: str(e.name) || e.id, url: str(e.url ?? dataOf(vn).url), master: !!e.master, lod: e.lod_level ?? null,
+                          uses: e.use ?? [], data: e.data ?? dataOf(vn), drawable: !e.master && opensGltf(e.data ?? dataOf(vn)),
+                          resource: vn ? asResource(servable(vn)) : null }; }) });
+  }
+
   return {
-    epochs, rms, proxies, rmGroups, topOf,
+    epochs, rms, proxies, rmGroups, alternatives, topOf,
     summary(epochId) {
       const epoch = epochs.find((e) => e.id === epochId);
       if (!epoch) return null;
