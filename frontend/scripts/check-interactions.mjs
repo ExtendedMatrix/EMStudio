@@ -2212,6 +2212,47 @@ if (process.env.TEMPLU) test("S3.proxyDel", "Spazio · MICRO-PROVA-DEV47 p.5 · 
   };
   return { pass: Object.values(conds).every(Boolean), detail: { conds, unit, g0, insp, ask, gCancel, menu, gDel, file, fileStays, gUndo, askX, gX, beforeX, back, errors } };
 });
+test("S3.oneLine", "Spazio · MICRO-PROVA-DEV47 p.6 · le intestazioni delle finestre (la riga EPOCA / Modelli / Proxy / ⤢ dello Spazio e le barre di ogni finestra: Tabular, Graph, Inspector) restano su UNA riga a 1100, 800 e 500 px con due finestre 3D affiancate; ciò che non entra scorre di lato con la rotella (e due dita), una sfumatura al bordo dice che c'è altro; il menu del tipo di finestra si apre ancora intero", async () => {
+  const out = {};
+  for (const w of [1100, 800, 500]) {
+    const { p, ctx, errors } = await open({ doc: "spazio", w, h: 800 });
+    // at 500 px the workspace's tab is past the top bar's edge: clicked from the page
+    await p.evaluate(() => document.querySelector('#workspace-bar .ws-tab[data-ws="space"]').click()); await p.waitForTimeout(700);
+    await p.waitForFunction(() => document.querySelector(".scn-host")?.dataset.ready === "1", null, { timeout: 20000 });
+    const sceneWin = await winOf(p, "scene");
+    await p.evaluate((id) => window.__EM_DRAG__.splitDoc(id), sceneWin); await p.waitForTimeout(1500);
+    const bars = await p.evaluate(() => [...document.querySelectorAll(".tile-area .tile-bar, .tile-area .scn-bar")].filter((b) => b.getBoundingClientRect().width > 0).map((b) => {
+      const kids = [...b.children].filter((c) => c.getBoundingClientRect().width > 0);
+      const ys = kids.map((c) => { const r = c.getBoundingClientRect(); return r.top + r.height / 2; }).sort((a, c) => a - c);
+      let lines = 0, last = -1e9; for (const y of ys) { if (y - last > 10) lines++; last = y; }
+      return { cls: b.className, win: b.closest(".tile-area")?.dataset.win, h: Math.round(b.getBoundingClientRect().height), lines, over: b.scrollWidth > b.clientWidth + 1, fadeR: b.classList.contains("ol-right") };
+    }));
+    const r = { bars, errors: errors.length };
+    if (w === 1100) {
+      // the wheel over a Space bar that does not fit: it moves sideways, and the left fade comes
+      const wheel = await p.evaluate(() => { const b = [...document.querySelectorAll(".scn-bar.one-line")].find((x) => x.scrollWidth > x.clientWidth + 1); if (!b) return null;
+        const r0 = b.getBoundingClientRect(); b.dispatchEvent(new WheelEvent("wheel", { deltaY: 120, deltaMode: 0, clientX: r0.x + 20, clientY: r0.y + 10, bubbles: true, cancelable: true }));
+        return { left: b.scrollLeft, fadeL: b.classList.contains("ol-left") }; });
+      await p.waitForTimeout(200);
+      const fadeL = await p.evaluate(() => [...document.querySelectorAll(".scn-bar.one-line")].some((b) => b.classList.contains("ol-left")));
+      await p.screenshot({ path: `${process.env.SHOTS ?? "."}/s3-intestazione-stretta.png` }).catch(() => {});
+      // the type menu of a header that scrolls: whole, over everything
+      await p.evaluate(() => { const b = [...document.querySelectorAll(".tile-bar.one-line")].find((x) => x.scrollWidth > x.clientWidth + 1) ?? document.querySelector(".tile-bar.one-line"); b.querySelector(".win-type-toggle")?.click(); });
+      await p.waitForTimeout(300);
+      const menu = await p.evaluate(() => { const m = [...document.querySelectorAll(".win-header .dd-menu")].find((x) => !x.classList.contains("hidden")); if (!m) return null;
+        const r = m.getBoundingClientRect(); const at = document.elementFromPoint(r.x + r.width / 2, r.y + Math.min(20, r.height / 2));
+        return { w: Math.round(r.width), h: Math.round(r.height), own: !!at && m.contains(at) }; });
+      Object.assign(r, { wheel, fadeL, menu });
+    }
+    out[w] = r;
+    await ctx.close();
+  }
+  const ok = (r) => r.bars.length >= 4 && r.bars.every((b) => b.lines <= 1 && b.h <= 46) && !r.errors;
+  const conds = { w1100: ok(out[1100]), w800: ok(out[800]), w500: ok(out[500]),
+    fadeRight: [1100, 800, 500].every((w) => out[w].bars.filter((b) => b.over).every((b) => b.fadeR)) && out[800].bars.some((b) => b.over),
+    wheel: (out[1100].wheel?.left ?? 0) > 0 && out[1100].fadeL, menu: !!out[1100].menu?.own && out[1100].menu.h > 40 };
+  return { pass: Object.values(conds).every(Boolean), detail: { conds, out } };
+});
 test("S3.files", "Spazio · un file solo referenziato è un contorno con l'etichetta; uno dichiarato e assente, l'etichetta; il riepilogo li conta", async () => {
   const { p, ctx, errors } = await open({ doc: "spazio", ws: "space" });
   await p.waitForFunction(() => document.querySelector(".scn-host")?.dataset.ready === "1", null, { timeout: 20000 });

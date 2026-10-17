@@ -255,6 +255,7 @@ import { planMove, planNewGroup, planRemove, RM_GROUP_TYPE, type GroupPlan } fro
 import { shownModelName } from "./rm-names";
 import { versionError, type FlowVersion, type VersionMode } from "./lod-flow";
 import { defaultLevel, isHeavy, levelShort, levelsOf, type Level } from "./lod-levels";
+import { oneLine } from "./one-line";
 import { findSet, measureCoverage, planDeclareAlternative, planSubcontainer, type AltMode, type AltPlan, type Box, type TilesetAlternative } from "./alternatives";
 import { ALT_RULE } from "./space";
 import { trackpadClassifier } from "./wheel-kind";
@@ -19909,6 +19910,8 @@ function createArea(winId: string): HTMLElement {
   // SAME bar every other area gets — every area is a window, so every area says
   // what it is and offers its own verbs.
   bar.className = "tile-bar win-header";
+  // MICRO-PROVA-DEV47 p.6 · one line, scrolled sideways, as Blender's headers
+  oneLine(bar);
   // STRUTTURA · a double-click on the EMPTY part of the header magnifies the
   // window and brings it back (Blender's gesture, beside Ctrl+Space). Only the
   // bar itself and its spacer: a double-click on a control is that control's.
@@ -24428,6 +24431,7 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
   wrap.className = "scn";
   const bar = document.createElement("div");
   bar.className = "scn-bar";
+  oneLine(bar);
   // MICRO-SPAZIO-3D · the Outliner on the left (T), the scene on the right
   const row = document.createElement("div");
   row.className = "scn-row";
