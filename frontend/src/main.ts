@@ -248,7 +248,7 @@ import { parseTyped, renderTransformForm, type TransformFormTexts } from "./tran
 import { implicitGroups, isImplicitGroup, outsideMembers, unitOfImplicit, withImplicitGroups } from "./implicit-pd";
 import { addFileSketch, addSketch, listSketches, loadSketches, onSketches, removeSketch, serializeSketches, SHAPE_FAMILIES, SHAPES, shapeById, shapeLabel, sketchById, updateSketch } from "./shapes3d";
 import { boxSelect, clickOutliner, clickScene, EMPTY_SEL, hideKeys, selectAll, withoutKeys, type SpaceSel } from "./space-selection";
-import { buildOutlinerTree, loadSpacePrefs, renderOutliner, saveSpacePrefs, type Space3dPrefs } from "./space-outliner";
+import { buildOutlinerTree, loadSpacePrefs, renderOutliner, saveSpacePrefs, squeezeSide, type Space3dPrefs } from "./space-outliner";
 import { patchProxyNodes, proxyRelPath } from "./proxy-association";
 import { planMove, planNewGroup, planRemove, type GroupPlan } from "./rm-groups";
 import { shownModelName, splitLevel } from "./rm-names";
@@ -23646,6 +23646,55 @@ function renderSpaceOutliner(el: HTMLElement, win: Win, sp: Space | null): void 
   });
 }
 
+/** MICRO-PANNELLI-LATERALI · a side panel's grip: a drag sizes it, between its
+ *  least and its most; under 80 px it closes (seen while dragging: the panel
+ *  goes and its triangle comes), and the drag back past 80 px brings it again.
+ *  `dir` is the way the panel grows: +1 the left one, −1 the right one. */
+function squeezeGrip(grip: HTMLElement, panel: HTMLElement, tab: HTMLElement, side: "outliner" | "npanel", dir: 1 | -1): void {
+  const shownKey = side === "outliner" ? "shown" : "nShown";
+  const widthKey = side === "outliner" ? "width" : "nWidth";
+  grip.addEventListener("pointerdown", (e) => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    const x0 = e.clientX, w0 = space3dPrefs()[widthKey];
+    const at = (ev: PointerEvent) => squeezeSide(w0 + dir * (ev.clientX - x0), side, w0);
+    const show = (open: boolean) => { panel.classList.toggle("hidden", !open); grip.classList.toggle("hidden", !open); tab.classList.toggle("hidden", open); };
+    const move = (ev: PointerEvent) => {
+      const s = at(ev);
+      show(s.open);
+      if (s.open) panel.style.width = `${s.width}px`;
+    };
+    const up = (ev: PointerEvent) => {
+      document.removeEventListener("pointermove", move);
+      document.removeEventListener("pointerup", up);
+      const s = at(ev);
+      setSpace3dPrefs({ ...space3dPrefs(), [shownKey]: s.open, [widthKey]: s.width });
+    };
+    document.addEventListener("pointermove", move);
+    document.addEventListener("pointerup", up);
+  });
+}
+/** …and its triangle: a click opens the panel, a drag inwards too, at the
+ *  width it had. `dir` is the way inwards: +1 from the left edge, −1 from the right. */
+function sideTab(tab: HTMLElement, dir: 1 | -1, open: () => void): void {
+  let dragged = false;
+  tab.addEventListener("click", () => { if (dragged) { dragged = false; return; } open(); });
+  tab.addEventListener("pointerdown", (e) => {
+    if (e.button !== 0) return;
+    const x0 = e.clientX;
+    dragged = false;
+    const move = (ev: PointerEvent) => {
+      if (dir * (ev.clientX - x0) < 6) return;
+      dragged = true;
+      stop();
+      open();
+    };
+    const stop = () => { document.removeEventListener("pointermove", move); document.removeEventListener("pointerup", stop); };
+    document.addEventListener("pointermove", move);
+    document.addEventListener("pointerup", stop);
+  });
+}
+
 function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): void } {
   body.textContent = "";
   const wrap = document.createElement("div");
@@ -23667,12 +23716,15 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
   overlay.className = "scn-ov";
   const empty = document.createElement("div");
   empty.className = "scn-empty hidden";
+  // MICRO-PANNELLI-LATERALI · the Outliner closed leaves the same triangle as the
+  // N panel's, on the left edge: a click opens it, and so does a drag inwards
   const tab = document.createElement("button");
   tab.type = "button";
   tab.className = "scn-tab";
-  tab.textContent = "+";
+  tab.dataset.tab = "1";
+  tab.textContent = "›";
   tab.title = t("s3.openOutliner");
-  tab.addEventListener("click", () => setSpace3dPrefs({ ...space3dPrefs(), shown: true }));
+  sideTab(tab, 1, () => setSpace3dPrefs({ ...space3dPrefs(), shown: true }));
   // MICRO-SPAZIO-3D-2 · the N panel «Vista» on the right (N), as Blender's sidebar
   const npanel = document.createElement("div");
   npanel.className = "scn-npanel";
@@ -23685,37 +23737,16 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
   ntab.dataset.ntab = "1";
   ntab.textContent = "‹";
   ntab.title = t("s3.openNPanel");
-  ntab.addEventListener("click", () => setSpace3dPrefs({ ...space3dPrefs(), nShown: true }));
+  sideTab(ntab, -1, () => setSpace3dPrefs({ ...space3dPrefs(), nShown: true }));
   host.append(overlay, empty, tab, ntab);
   row.append(outl, grip, host, ngrip, npanel);
   wrap.append(bar, row);
   body.appendChild(wrap);
-  // the panel's width: a drag of the grip, remembered
-  grip.addEventListener("pointerdown", (e) => {
-    e.preventDefault();
-    const x0 = e.clientX, w0 = space3dPrefs().width;
-    const move = (ev: PointerEvent) => { outl.style.width = `${Math.max(160, Math.min(640, w0 + ev.clientX - x0))}px`; };
-    const up = (ev: PointerEvent) => {
-      document.removeEventListener("pointermove", move);
-      document.removeEventListener("pointerup", up);
-      setSpace3dPrefs({ ...space3dPrefs(), width: Math.max(160, Math.min(640, w0 + ev.clientX - x0)) });
-    };
-    document.addEventListener("pointermove", move);
-    document.addEventListener("pointerup", up);
-  });
-  ngrip.addEventListener("pointerdown", (e) => {
-    e.preventDefault();
-    const x0 = e.clientX, w0 = space3dPrefs().nWidth;
-    const width = (ev: PointerEvent) => Math.max(180, Math.min(520, w0 - (ev.clientX - x0)));
-    const move = (ev: PointerEvent) => { npanel.style.width = `${width(ev)}px`; };
-    const up = (ev: PointerEvent) => {
-      document.removeEventListener("pointermove", move);
-      document.removeEventListener("pointerup", up);
-      setSpace3dPrefs({ ...space3dPrefs(), nWidth: width(ev) });
-    };
-    document.addEventListener("pointermove", move);
-    document.addEventListener("pointerup", up);
-  });
+  // the panel's width: a drag of the grip, remembered. MICRO-PANNELLI-LATERALI ·
+  // squeezed under 80 px the panel closes and its triangle is left, as Blender's
+  // regions; its width stays the one it had before the drag
+  squeezeGrip(grip, outl, tab, "outliner", 1);
+  squeezeGrip(ngrip, npanel, ntab, "npanel", -1);
   host.addEventListener("pointermove", (e) => { spacePointer = { x: e.clientX, y: e.clientY }; });
   let npQueued = false;
   let flowRedraw = false;
@@ -23830,11 +23861,10 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
   });
   sceneHandles.set(win.id, handle);
   const onBar = (e: Event) => {
-    const b = (e.target as HTMLElement).closest<HTMLElement>("[data-epoch],[data-toggle],[data-frame],[data-preview-close],[data-act='back'],[data-outliner]");
+    const b = (e.target as HTMLElement).closest<HTMLElement>("[data-epoch],[data-toggle],[data-frame],[data-preview-close],[data-act='back']");
     if (!b) return;
     e.stopPropagation();
     if (b.dataset.act === "back") { goBack(); return; }
-    if (b.dataset.outliner) { const p = space3dPrefs(); setSpace3dPrefs({ ...p, shown: !p.shown }); return; }
     if (b.dataset.previewClose) {
       setWinCurrent(win, "space.preview", null);
     } else if (b.dataset.epoch) {
@@ -23877,13 +23907,6 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
     back.className = "scn-tg";
     back.dataset.act = "back";
     back.textContent = "←";
-    const ol = document.createElement("button");
-    ol.type = "button";
-    ol.className = "scn-tg";
-    ol.dataset.outliner = "1";
-    ol.textContent = "☰";
-    ol.title = t("s3.toggleOutliner");
-    ol.setAttribute("aria-pressed", String(prefs.shown));
     const lab = document.createElement("span");
     lab.className = "scn-lbl";
     lab.textContent = t("space.epoch");
@@ -23914,7 +23937,7 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
     fr.dataset.frame = "1";
     fr.textContent = "⤢";
     fr.title = t("space.frame");
-    bar.append(back, ol, lab, seg, tog("rm", "space.layerRm"), tog("px", "space.layerPx"), fr);
+    bar.append(back, lab, seg, tog("rm", "space.layerRm"), tog("px", "space.layerPx"), fr);
     renderBackButtons();
     // CAMPAGNA · the preview, said in the bar and closable; drawn whatever the
     // graph says (a tileset opened from the Storage needs no epoch)

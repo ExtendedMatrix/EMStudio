@@ -1612,6 +1612,94 @@ test("S3.labels3", "Spazio · MICRO-GIZMO-ASSI · le etichette separate: modelli
       && proxyColour && rmColour && proxyColour !== rmColour && !errors.length,
     detail: { both, noRm, noPx, back, sk0, sk1, skName, groups, proxyColour, rmColour, errors } };
 });
+// MICRO-PANNELLI-LATERALI (E.D. 17 Oct 2026) · the two side panels as Blender's:
+// the same triangle on both edges, squeezed under 80 px a panel closes, its
+// triangle dragged inwards opens it at the width it had; no button in the bar
+test("S3.sides", "Spazio · MICRO-PANNELLI-LATERALI · i due pannelli come Blender: lo stesso triangolino sui due bordi (T e N), stretti sotto 80 px si chiudono, il triangolino trascinato verso l'interno li riapre alla larghezza di prima; nessun pulsante dell'Outliner nella barra; il gizmo resta nell'angolo della scena", async () => {
+  const { p, ctx, errors } = await gizmoScene();
+  const box = (sel) => p.evaluate((sel) => { const e = document.querySelector(sel); if (!e) return null; const r = e.getBoundingClientRect();
+    return { x: r.x, y: r.y, w: r.width, h: r.height, right: r.right, shown: getComputedStyle(e).display !== "none", text: e.textContent, title: e.title ?? null }; }, sel);
+  const state = async () => ({ outl: (await box(".scn-outliner")).shown, npanel: (await box(".scn-npanel")).shown,
+    tab: (await box(".scn-tab")).shown, ntab: (await box(".scn-ntab")).shown });
+  const gizmoGap = async () => { const h = await box(".scn-host"); const g = await box(".scn-nav-box"); return Math.round(h.right - g.right); };
+  const prefs = () => p.evaluate(() => Object.values(JSON.parse(localStorage.getItem("emstudio.space3d") ?? "{}"))[0] ?? null);
+  const corner = await p.evaluate(() => { const c = document.querySelector(".scn-host canvas").getBoundingClientRect(); return { x: c.x + 60, y: c.y + c.height - 60 }; });
+  const key = async (k) => { await p.mouse.click(corner.x, corner.y); await p.keyboard.press(k); await p.waitForTimeout(300); };
+  const noBarButton = await p.evaluate(() => !document.querySelector(".scn-bar [data-outliner]") && ![...document.querySelectorAll(".scn-bar button")].some((b) => b.textContent === "☰"));
+  const s0 = await state();
+  const gap0 = await gizmoGap();
+  // T and N: the shortcuts stay
+  await key("t");
+  const sT = await state();
+  const tab = await box(".scn-tab"), ntab = await box(".scn-ntab");
+  await p.screenshot({ path: `${process.env.SHOTS ?? "."}/s3-pannelli-chiusi-triangolini.png` }).catch(() => {});
+  await key("n");
+  const sN = await state();
+  const gapN = await gizmoGap();
+  await key("n"); await key("t");
+  const sBack = await state();
+  // the triangle's click opens: the left one, then the right one
+  await key("t");
+  await p.click(".scn-tab");  await p.waitForTimeout(250);
+  const sTabClick = await state();
+  await p.click(".scn-ntab"); await p.waitForTimeout(250);
+  const sNtabClick = await state();
+  // squeeze the Outliner: to 120 px it holds at 160; under 80 it closes, the width kept
+  const w0 = (await box(".scn-outliner")).w;
+  let g = await box(".scn-grip");
+  const ox = (await box(".scn-outliner")).x;
+  await p.mouse.move(g.x + 2, g.y + 100); await p.mouse.down();
+  await p.mouse.move(ox + 120, g.y + 100, { steps: 6 });
+  const held = (await box(".scn-outliner")).w;
+  await p.mouse.move(ox + 40, g.y + 100, { steps: 6 });
+  const midDrag = await state();
+  await p.screenshot({ path: `${process.env.SHOTS ?? "."}/s3-pannello-sinistro-stretto.png` }).catch(() => {});
+  await p.mouse.up(); await p.waitForTimeout(250);
+  const sSqueezed = await state();
+  const pSqueezed = await prefs();
+  // the triangle dragged inwards: open again, at the width it had
+  const tb = await box(".scn-tab");
+  await p.mouse.move(tb.x + 4, tb.y + tb.h / 2); await p.mouse.down(); await p.mouse.move(tb.x + 60, tb.y + tb.h / 2, { steps: 6 }); await p.mouse.up();
+  await p.waitForTimeout(250);
+  const sDragOpen = await state();
+  const wAgain = (await box(".scn-outliner")).w;
+  // the N panel the same, to the right
+  const nw0 = (await box(".scn-npanel")).w;
+  g = await box(".scn-ngrip");
+  const nright = (await box(".scn-npanel")).right;
+  await p.mouse.move(g.x + 2, g.y + 100); await p.mouse.down(); await p.mouse.move(nright - 30, g.y + 100, { steps: 8 }); await p.mouse.up();
+  await p.waitForTimeout(250);
+  const sNSqueezed = await state();
+  const gapNClosed = await gizmoGap();
+  const nt = await box(".scn-ntab");
+  await p.mouse.move(nt.x + nt.w - 4, nt.y + nt.h / 2); await p.mouse.down(); await p.mouse.move(nt.x - 60, nt.y + nt.h / 2, { steps: 6 }); await p.mouse.up();
+  await p.waitForTimeout(250);
+  const sNDragOpen = await state();
+  const nwAgain = (await box(".scn-npanel")).w;
+  const gapNOpen = await gizmoGap();
+  await ctx.close();
+  const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+  const conds = {
+    noBarButton,
+    start: same(s0, { outl: true, npanel: false, tab: false, ntab: true }),
+    T: same(sT, { outl: false, npanel: false, tab: true, ntab: true }),
+    sameTriangle: tab.text === "›" && ntab.text === "‹" && tab.title === "Apri l'Outliner (T)" && Math.abs(tab.h - ntab.h) < 1 && Math.abs(tab.w - ntab.w) < 1.5 && Math.abs(tab.y - ntab.y) < 1,
+    N: same(sN, { outl: false, npanel: true, tab: true, ntab: false }),
+    back: same(sBack, { outl: true, npanel: false, tab: false, ntab: true }),
+    tabClick: same(sTabClick, { outl: true, npanel: false, tab: false, ntab: true }),
+    ntabClick: same(sNtabClick, { outl: true, npanel: true, tab: false, ntab: false }),
+    held: held === 160,
+    closedWhileDragging: midDrag.outl === false && midDrag.tab === true,
+    squeezed: same(sSqueezed, { outl: false, npanel: true, tab: true, ntab: false }) && pSqueezed?.shown === false && pSqueezed?.width === w0,
+    dragOpen: sDragOpen.outl === true && sDragOpen.tab === false && wAgain === w0,
+    nSqueezed: sNSqueezed.npanel === false && sNSqueezed.ntab === true,
+    nDragOpen: sNDragOpen.npanel === true && nwAgain === nw0,
+    gizmoAnchored: gap0 === gapN && gapN === gapNClosed && gapNClosed === gapNOpen,
+    errors: !errors.length,
+  };
+  return { pass: Object.values(conds).every(Boolean),
+    detail: { conds, s0, sT, tab, ntab, sN, sBack, sTabClick, sNtabClick, w0, held, midDrag, sSqueezed, pSqueezed, sDragOpen, wAgain, nw0, sNSqueezed, sNDragOpen, nwAgain, gaps: [gap0, gapN, gapNClosed, gapNOpen], errors } };
+});
 test("S3.files", "Spazio · un file solo referenziato è un contorno con l'etichetta; uno dichiarato e assente, l'etichetta; il riepilogo li conta", async () => {
   const { p, ctx, errors } = await open({ doc: "spazio", ws: "space" });
   await p.waitForFunction(() => document.querySelector(".scn-host")?.dataset.ready === "1", null, { timeout: 20000 });

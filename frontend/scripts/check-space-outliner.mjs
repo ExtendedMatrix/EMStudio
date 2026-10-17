@@ -69,4 +69,12 @@ eq(O.loadSpacePrefs("0000-0001-5109-3700"), O.DEFAULT_PREFS, "another person: th
 eq([...mem.keys()], ["emstudio.space3d"], "one local preference, emstudio.space3d — never in a document");
 mem.set("emstudio.space3d", "{broken");
 eq(O.loadSpacePrefs(ED), O.DEFAULT_PREFS, "a broken store reads as the default");
+// MICRO-PANNELLI-LATERALI · a panel squeezed by its edge: held at its least, closed under 80 px
+eq(O.squeezeSide(300, "outliner", 260), { open: true, width: 300 }, "a drag to 300 px: 300 px");
+eq(O.squeezeSide(120, "outliner", 260), { open: true, width: 160 }, "under its least (160): held at 160, still open");
+eq(O.squeezeSide(80, "outliner", 260), { open: true, width: 160 }, "80 px: still open");
+eq(O.squeezeSide(79, "outliner", 260), { open: false, width: 260 }, "under 80: closed, its width the one before the drag");
+eq(O.squeezeSide(-40, "npanel", 250), { open: false, width: 250 }, "the N panel the same, past the window's side");
+eq(O.squeezeSide(100, "npanel", 250), { open: true, width: 180 }, "the N panel held at its least (180)");
+eq(O.squeezeSide(900, "npanel", 250), { open: true, width: 520 }, "…and at its most (520)");
 console.log(`check-space-outliner: ${checks} checks passed`);

@@ -190,6 +190,23 @@ export interface Space3dPrefs {
 
 export const DEFAULT_PREFS: Space3dPrefs = { shown: true, width: 260, toggled: [], hidden: [], locked: [], nShown: false, nWidth: 250, snapAlign: false, collapsed: [], versionModes: {} };
 
+/** MICRO-PANNELLI-LATERALI · the two side panels' sizes: the narrowest a panel
+ *  is drawn, the widest, and the width under which a drag of its edge closes it
+ *  (Blender: a region squeezed past its size hides, its triangle left) */
+export const SIDE_PANELS = {
+  outliner: { min: 160, max: 640 },
+  npanel: { min: 180, max: 520 },
+  closeUnder: 80,
+} as const;
+/** What a drag of a panel's edge to `raw` px makes of it: closed under
+ *  `closeUnder` (its width the one it had, to open again with), else held
+ *  between its least and its most. */
+export function squeezeSide(raw: number, side: "outliner" | "npanel", before: number): { open: boolean; width: number } {
+  const s = SIDE_PANELS[side];
+  if (raw < SIDE_PANELS.closeUnder) return { open: false, width: before };
+  return { open: true, width: Math.round(Math.max(s.min, Math.min(s.max, raw))) };
+}
+
 /** Is a row open: its default, unless the person turned it. */
 export function rowOpen(r: Pick<OutlinerRow, "key" | "kind" | "current">, toggled: ReadonlySet<string>): boolean {
   const byDefault = r.kind === "epoch" ? !!r.current : r.kind === "rm" || r.kind === "tileset" ? false : true;
