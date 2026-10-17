@@ -60,6 +60,14 @@ ok(!O.rowOpen({ key: "epoch:E1", kind: "epoch", current: false }, tg), "another 
 ok(!O.rowOpen({ key: "rm:RM_cella", kind: "rm" }, tg), "a model's versions: closed");
 ok(O.rowOpen({ key: "proxies:E2", kind: "proxies" }, tg), "a group: open");
 ok(O.rowOpen({ key: "epoch:E1", kind: "epoch", current: false }, new Set(["epoch:E1"])), "turned by the person: open");
+// MICRO-PROVA-DEV48 p.4 · a record picked elsewhere: the branches above its row open
+eq(O.opensFor(tree, "proxy:US10", new Set()), [], "a proxy of the epoch in the scene: already shown");
+eq(O.opensFor(tree, "proxy:US10", new Set(["type:E2:US"])), ["type:E2:US"], "its type closed by the person: opened");
+eq(O.opensFor(tree, "proxy:US1", new Set()), ["epoch:E1"], "a proxy of another epoch: that epoch opened");
+eq(O.opensFor(tree, "proxy:US1", new Set(["epoch:E1", "proxies:E1"])), ["proxies:E1"], "…every closed branch on the way, and only those");
+eq(O.opensFor(tree, "rm:RM_tiles", new Set(["rms:E2"])), ["rms:E2"], "a model: its section");
+eq(O.opensFor(tree, "proxy:NOPE", new Set()), [], "a row not in the tree: nothing");
+eq(O.opensFor(tree, "version:RM_cella:v0", new Set()), ["rm:RM_cella"], "a version: its model opened (closed by default)");
 // the preferences
 const ED = "0000-0002-1825-0097";
 eq(O.loadSpacePrefs(ED), O.DEFAULT_PREFS, "nobody wrote anything: the default");

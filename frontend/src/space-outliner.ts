@@ -275,6 +275,29 @@ export interface OutlinerView {
   texts: { search: string; isolate: string; frame: string; eye: string; arrow: string; palette: string; close: string; empty: string; substitutedBy?: string };
   /** the palette of the shapes (p.4): id, name, family */
   palette: Array<{ id: string; name: string; family: string; familyName: string }>;
+  /** MICRO-PROVA-DEV48 p.4 · a record selected in another window: its row is
+   *  scrolled into view (its branches already opened by `opensFor`) */
+  reveal?: string | null;
+}
+
+/**
+ * MICRO-PROVA-DEV48 p.4 · the rows to turn so that every branch above `key` is
+ * open: the epoch, the section, the type, the container or the model (for a
+ * version). Empty when the row is not in the tree, or already shown.
+ */
+export function opensFor(rows: OutlinerRow[], key: string, toggled: ReadonlySet<string>): string[] {
+  const path: OutlinerRow[] = [];
+  const find = (list: OutlinerRow[]): boolean => {
+    for (const r of list) {
+      if (r.key === key) return true;
+      path.push(r);
+      if (find(r.children ?? [])) return true;
+      path.pop();
+    }
+    return false;
+  };
+  if (!find(rows)) return [];
+  return path.filter((r) => !rowOpen(r, toggled)).map((r) => r.key);
 }
 
 /** MICRO-SPAZIO-3D-3 · the keys of a click on a row, as Blender's Outliner */
@@ -312,6 +335,9 @@ export interface OutlinerActions {
 /** Draw the panel into `el` (emptied first). The search keeps its focus. */
 export function renderOutliner(el: HTMLElement, v: OutlinerView, act: OutlinerActions): void {
   const hadFocus = document.activeElement instanceof HTMLInputElement && el.contains(document.activeElement);
+  // MICRO-PROVA-DEV48 p.4 · the list is drawn again at every pick: it stays
+  // where it was (measured on dev.48: a click on a row sent it to the top)
+  const keptTop = el.querySelector<HTMLElement>(".sol-tree")?.scrollTop ?? 0;
   el.textContent = "";
   el.style.width = `${v.prefs.width}px`;
   const head = document.createElement("div");
@@ -509,6 +535,14 @@ export function renderOutliner(el: HTMLElement, v: OutlinerView, act: OutlinerAc
   }
   tree.addEventListener("click", (e) => { if (e.target === tree) act.clearSelection?.(); });
   el.appendChild(tree);
+  tree.scrollTop = keptTop;
+  if (v.reveal) {
+    const row = tree.querySelector<HTMLElement>(`.sol-row[data-key="${CSS.escape(v.reveal)}"]`);
+    if (row) {
+      const a = row.getBoundingClientRect(), b = tree.getBoundingClientRect();
+      if (a.top < b.top || a.bottom > b.bottom) tree.scrollTop += a.top - b.top - (b.height - a.height) / 2;
+    }
+  }
   // the palette of the base shapes (p.4): a click makes one at the 3D cursor,
   // a drag lays it on the surface under the pointer
   const pal = document.createElement("details");

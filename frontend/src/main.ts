@@ -190,7 +190,7 @@ import datamodelTranslations from "./assets/datamodel_translations.json";
 import { createResourceThumb } from "./resource-preview";
 import { keepOnDisk, newEmProject, refreshFileStates, reorderApply, reorderPreview, revealFile,
          fileProjectRoot, describeFile, filesOfDocument, fileStateOf, findMovedFiles, movedFiles, dropMoved, bucketCheck, bucketPromote, dropBucket,
-         freePlanOf, freeLocal, freeUi,
+         freePlanOf, freeLocal, freeUi, fileRows, listFilter,
          type FileState, type MovedFile } from "./file-states";
 import { docFilesBox, docFilesGlyphs, filesSection, fileStateLine, resourcesTable, type FileHooks } from "./file-states-ui";
 import { paintChooser } from "./node-chooser";
@@ -249,7 +249,7 @@ import { implicitGroups, isImplicitGroup, outsideMembers, unitOfImplicit, withIm
 import { addFileSketch, addSketch, listSketches, loadSketches, onSketches, removeSketch, serializeSketches, SHAPE_FAMILIES, SHAPES, shapeById, shapeLabel, sketchById, updateSketch } from "./shapes3d";
 import { boxSelect, clickOutliner, clickScene, EMPTY_SEL, hideKeys, selectAll, withoutKeys, type SpaceSel } from "./space-selection";
 import { type AssocGroupKey, type AssocUnit, assocGroups, NEW_UNIT_ORDER, newUnitTypes } from "./sketch-associate";
-import { buildOutlinerTree, loadSpacePrefs, renderOutliner, saveSpacePrefs, squeezeSide, type Space3dPrefs } from "./space-outliner";
+import { buildOutlinerTree, loadSpacePrefs, opensFor, renderOutliner, saveSpacePrefs, squeezeSide, type Space3dPrefs } from "./space-outliner";
 import { patchProxyNodes, proxyPartsOf, proxyRelPath, unitBrief } from "./proxy-association";
 import { planMove, planNewGroup, planRemove, RM_GROUP_TYPE, type GroupPlan } from "./rm-groups";
 import { shownModelName } from "./rm-names";
@@ -472,6 +472,7 @@ import {
   setSheet,
   setTableView,
   setVolatileProvider,
+  sheetsHolding,
   tableViewOf,
 } from "./emdata";
 import { addQualiaClaim, addRow, deleteRow } from "./em-data";
@@ -2922,31 +2923,140 @@ function nodeWhollyInView(nodeId: string): boolean | null {
   return x0 >= 0 && y0 >= 0 && x0 + n.w * vp.scale <= w && y0 + n.h * vp.scale <= h;
 }
 
+//: MICRO-PROVA-DEV48 p.4 · where a pick comes from: the window under the last
+//: press or key and, in a Space window, its Outliner or its scene. Measured on
+//: dev.48 (report 2026-10-17-emstudio-prova-dev48): the rule below framed the
+//: graph windows only, and nothing asked the Space to frame — a unit picked in
+//: the Outliner, the Matrix or a table left the scene where it was. The Outliner
+//: was not taken for «the same window» as the scene: the Space was simply never
+//: told.
+type PickPart = "scene" | "outliner" | "window";
+interface PickFrom { win: string | null; part: PickPart; t: number }
+let lastPress: PickFrom | null = null;
+//: a pick made by the program (a jump back, «Indietro», «ha 3D»): no window moves
+let quietPick = false;
+function notePress(e: Event): void {
+  const el = e.target instanceof Element ? e.target : null;
+  const area = el?.closest<HTMLElement>(".tile-area[data-win]");
+  const part: PickPart = el?.closest(".scn-outliner") ? "outliner" : el?.closest(".scn-host") ? "scene" : "window";
+  lastPress = { win: area?.dataset.win ?? null, part, t: performance.now() };
+}
+document.addEventListener("pointerdown", notePress, true);
+document.addEventListener("keydown", notePress, true);
+/** The window of the pick being made: the last press or key within 2 s; none
+ *  for a pick that no gesture made (a peer's, the program's) — then every
+ *  window shows it. */
+function pickSource(): PickFrom | null {
+  if (pickOnCanvas) return { win: activeWin().id, part: "window", t: performance.now() };
+  return lastPress && performance.now() - lastPress.t < 2000 ? lastPress : null;
+}
+
 /**
- * «Zoom to selection» · B2 · a node selected in ANOTHER window (Inspector, the
- * lists, the outline, the search, the DTC, the Chronology, the Doc…) is framed
- * in the graph window — the focused one when it is a graph, else the graph
- * window last focused, whose mode `view` still is. `centerOn` does it, as the
- * places that used to call it by hand did; a node already wholly on screen is
- * left where it is (it is framed), and a node this view does not draw (folded,
- * filtered, another projection) is no error and no move. Off (B3): selection
- * only. ONE rule, in `select()` — B4: nobody calls `centerOn` after a pick any
- * more.
+ * «Zoom to selection» · B2 · a node selected in ONE window is shown by every
+ * OTHER window on screen (MICRO-PROVA-DEV48 p.4, E.D. 17 Oct 2026):
+ *
+ *   · a graph window (the Matrix, the graph) centres it, unless it is already
+ *     wholly on screen (B2, 5 Oct: it is framed); a node the view does not draw
+ *     is no error and no move;
+ *   · a Space frames it in about 200 ms (none with «Reduce motion»); a unit
+ *     whose proxy is in another epoch takes the Space to that epoch, and a line
+ *     says so; the Space's Outliner opens its branches and scrolls to the row;
+ *   · a table scrolls to the row (`markTableSelection`) and, when the row is in
+ *     another sheet, goes to that sheet; a Shelf goes to its files and marks
+ *     the file;
+ *   · the window clicked does not move (the Space's Outliner and its scene are
+ *     two: one picks, the other shows).
+ *
+ * Off (B3): the selection only. ONE rule, in `select()` — B4: nobody calls
+ * `centerOn` after a pick any more.
  */
-function frameSelection(nodeId: string): void {
+function showSelection(nodeId: string, from: PickFrom | null): void {
   if (!getSettings().interaction.zoomToSelection) return;
   const here = activeWin();
-  const target = here.type === "graph" ? here.id
-    : lastGraphWinId && winAreas.has(lastGraphWinId) ? lastGraphWinId
-    : windowsOf().find((w) => w.type === "graph" && winAreas.has(w.id))?.id;
-  if (!target) return;                      // no graph on screen: the pick is enough
-  if (target !== here.id) setActiveWin(target);
-  try {
-    if (nodeWhollyInView(nodeId) === false) centerOn(nodeId);
-  } finally {
-    if (target !== here.id) setActiveWin(here.id);
+  for (const w of windowsOf()) {
+    if (w.type !== "graph" || !winAreas.has(w.id) || from?.win === w.id) continue;
+    if (w.id !== here.id) setActiveWin(w.id);
+    try {
+      if (nodeWhollyInView(nodeId) === false) centerOn(nodeId);
+    } finally {
+      if (w.id !== here.id) setActiveWin(here.id);
+    }
   }
   draw();
+  const scenes = windowsOf().filter((w) => w.type === "scene" && winAreas.has(w.id));
+  if (scenes.length) showInSpace(nodeId, scenes.map((w) => ({
+    id: w.id, frame: !(from?.win === w.id && from.part === "scene"), reveal: !(from?.win === w.id && from.part === "outliner") })));
+  showInTables(nodeId, from);
+  showInShelf(nodeId, from);
+}
+
+/** p.4 · the Space windows show a record: its epoch, its frame, its row. */
+const spaceReveal = new Map<string, string>();
+function showInSpace(nodeId: string, wins: Array<{ id: string; frame: boolean; reveal: boolean }>): void {
+  const sp = currentSpace();
+  const key = sp ? spaceKeyOf(nodeId, sp) : null;
+  if (!sp || !key || key.startsWith("epoch:")) return;
+  const isRm = key.startsWith("rm:");
+  const shownIn = (ep: string) => isRm ? !!sp.rms.find((r) => r.id === nodeId)?.epochs.includes(ep)
+    : !!sp.summary(ep)?.withProxy.includes(nodeId);
+  const cur = spaceEpochOf(sp);
+  if (!cur || !shownIn(cur)) {
+    const other = sp.epochs.find((e) => shownIn(e.id));
+    if (!other) return;                 // drawn in no epoch: the selection is enough
+    spaceEpochId = other.id;
+    toast(t(isRm ? "s3.selEpochRm" : "s3.selEpoch", { name: String(store?.node(nodeId)?.name ?? nodeId),
+      from: String(sp.epochs.find((e) => e.id === cur)?.name ?? ""), to: other.name }));
+  }
+  for (const w of wins) if (w.reveal) spaceReveal.set(w.id, key);
+  refreshSurfaces("scene");
+  // the scene draws when its files arrive: try until the object is there
+  const t0 = Date.now();
+  for (const w of wins.filter((x) => x.frame)) {
+    const tryFrame = (): void => {
+      if (selectedId !== nodeId) return;  // another pick came
+      if (sceneHandles.get(w.id)?.frameKeys([key], true)) return;
+      if (Date.now() - t0 < 15000) setTimeout(tryFrame, 250);
+    };
+    tryFrame();
+  }
+}
+
+/** p.4 · a table whose sheet has no row for the record goes to the sheet that has
+ *  one; a sheet that has it (filtered out, or in cards) stays. The scroll is
+ *  `markTableSelection`'s. */
+function showInTables(nodeId: string, from: PickFrom | null): void {
+  // the Space's epoch bar changes the scene, it does not ask for a record:
+  // measured, every epoch chosen took the «Modelli e proxy» beside it to «Epoche»
+  if (store?.node(nodeId)?.node_type === "EpochNode" && windowsOf().find((w) => w.id === from?.win)?.type === "scene") return;
+  let holding: TableView[] | null = null;
+  let moved = false;
+  for (const w of windowsOf()) {
+    if (w.type !== "table" || !winAreas.has(w.id) || from?.win === w.id) continue;
+    const area = document.querySelector(`.tile-area[data-win="${CSS.escape(w.id)}"]`);
+    if (area?.querySelector(`tr[data-row="${CSS.escape(nodeId)}"]`)) continue;
+    holding ??= sheetsHolding(nodeId);
+    if (!holding.length || holding.includes(currentSheetKey(w))) continue;
+    setSheet(holding[0], w);
+    moved = true;
+  }
+  if (moved) renderAreaHeaders();
+}
+
+/** p.4 · a resource, a version or a file picked: a Shelf window shows its files
+ *  table with the row marked and in view. */
+function showInShelf(nodeId: string, from: PickFrom | null): void {
+  if (!fileRows().some((r) => r.id === nodeId)) return;
+  const shelves = windowsOf().filter((w) => w.type === "shelf" && winAreas.has(w.id) && from?.win !== w.id);
+  if (!shelves.length) return;
+  listFilter.selected = nodeId;
+  for (const w of shelves) if (winModeOf(w) !== "resources") setWinModeOf(w, "resources");
+  renderShelf();
+  renderAreaHeaders();
+  requestAnimationFrame(() => {
+    for (const w of shelves)
+      document.querySelector(`.tile-area[data-win="${CSS.escape(w.id)}"] .fs-item[data-id="${CSS.escape(nodeId)}"]`)
+        ?.scrollIntoView({ block: "nearest" });
+  });
 }
 
 /** S6 · «Show in the Matrix»: frame the node WITH its group, a margin around,
@@ -3035,13 +3145,14 @@ function select(nodeId: string | null): void {
   refreshInspector();
   nodeList.setSelected(nodeId);
   draw();
-  // «Zoom to selection» · a pick from another window frames the node — after
-  // the scenes this pick may rebuild (a DTC set opening, a jump that rebuilds)
-  if (nodeId && !pickOnCanvas) {
+  // «Zoom to selection» · the other windows show the node — after the scenes
+  // this pick may rebuild (a DTC set opening, a jump that rebuilds)
+  if (nodeId && !quietPick) {
     const id = nodeId;
+    const from = pickSource();
     queueMicrotask(() => {
-      // at boot the window registry's `let`s may not exist yet: nothing to frame
-      try { if (selectedId === id) frameSelection(id); } catch { /* boot */ }
+      // at boot the window registry's `let`s may not exist yet: nothing to show
+      try { if (selectedId === id) showSelection(id, from); } catch { /* boot */ }
     });
   }
   // mirror the selection to a connected peer (Blender), unless this
@@ -3118,7 +3229,9 @@ function markTableSelection(): void {
     tr.classList.toggle("tv-sel", !a && selectedIds.has(id));
     if (a && !activeRow) activeRow = tr;
   });
-  (activeRow as HTMLElement | null)?.scrollIntoView({ block: "nearest", inline: "nearest" });
+  // MICRO-PROVA-DEV48 p.4 · «Zoom to selection» off: the mark only, no scroll
+  if (getSettings().interaction.zoomToSelection)
+    (activeRow as HTMLElement | null)?.scrollIntoView({ block: "nearest", inline: "nearest" });
 }
 document.addEventListener("emdata:rendered", () => markTableSelection());
 
@@ -17261,8 +17374,8 @@ function goBack(): void {
     const sw = windowsOf().find((w) => w.id === v.win && winAreas.has(w.id));
     if (sw) setActiveWin(sw.id);
     if (v.space.epoch) spaceEpochId = v.space.epoch;
-    pickOnCanvas = true;
-    try { select(v.selectedId && store.node(v.selectedId) ? v.selectedId : null); } finally { pickOnCanvas = false; }
+    quietPick = true;
+    try { select(v.selectedId && store.node(v.selectedId) ? v.selectedId : null); } finally { quietPick = false; }
     sceneHandles.get(v.win)?.setCamera(v.space.cam);
     refreshSurfaces("scene");
     renderBackButtons();
@@ -17294,11 +17407,11 @@ function goBack(): void {
   vp.y = v.vp.y;
   vp.scale = v.vp.scale;
   const live = v.selected.filter((id) => store!.node(id));
-  pickOnCanvas = true;            // the view is restored as it was: no framing
+  quietPick = true;               // the view is restored as it was: no window moves
   try {
     if (live.length > 1) selectMany(live);
     else select(v.selectedId && store.node(v.selectedId) ? v.selectedId : live[0] ?? null);
-  } finally { pickOnCanvas = false; }
+  } finally { quietPick = false; }
   renderBackButtons();
   draw();
 }
@@ -22033,8 +22146,8 @@ function openUnitInSpace(unitId: string): void {
   if (sp) { const ep = spaceEpochFor(unitId, sp); if (ep) spaceEpochId = ep; }
   spaceIsolated = null;
   selectWindow(win.id);
-  pickOnCanvas = true;
-  try { select(unitId); } finally { pickOnCanvas = false; }
+  quietPick = true;               // the frame below is this door's
+  try { select(unitId); } finally { quietPick = false; }
   refreshInspector();
   refreshSurfaces("scene");
   const id = win.id;
@@ -24283,8 +24396,23 @@ function renderSpaceOutliner(el: HTMLElement, win: Win, sp: Space | null): void 
     texts: { rms: t("s3.rms"), proxies: t("s3.proxies"), sketches: t("s3.sketches"), lod: "LOD" },
   }) : [];
   const fam = new Map(SHAPE_FAMILIES.map((f) => [f.id, shapeLabel(f, lang)]));
+  // MICRO-PROVA-DEV48 p.4 · a record picked in another window: its branches
+  // open (a change of the person's view, kept like a click on the triangle)
+  const reveal = spaceReveal.get(win.id) ?? null;
+  spaceReveal.delete(win.id);
+  let shownPrefs = prefs;
+  if (reveal) {
+    const turn = opensFor(rows, reveal, new Set(prefs.toggled));
+    if (turn.length) {
+      const tg = new Set(prefs.toggled);
+      for (const k of turn) if (tg.has(k)) tg.delete(k); else tg.add(k);
+      shownPrefs = { ...prefs, toggled: [...tg] };
+      sp3 = { person: overlayPerson(), prefs: shownPrefs };
+      saveSpacePrefs(sp3.person, shownPrefs);
+    }
+  }
   renderOutliner(el, {
-    rows, prefs, selected: spaceSelectedKeys(sp), active: spaceSel(sp).active, substituted: spaceSubstituted, isolated: spaceIsolated, query: spaceQuery,
+    rows, prefs: shownPrefs, reveal, selected: spaceSelectedKeys(sp), active: spaceSel(sp).active, substituted: spaceSubstituted, isolated: spaceIsolated, query: spaceQuery,
     glyph: (k) => typeIconElement(k),
     texts: { search: t("s3.search"), isolate: t("s3.isolate"), frame: t("s3.frame"), eye: t("s3.eye"),
              arrow: t("s3.arrow"), palette: t("s3.palette"), close: t("s3.closeOutliner"), empty: t("s3.outlinerEmpty"),
@@ -24626,6 +24754,7 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
       setWinCurrent(win, "space.preview", null);
     } else if (b.dataset.epoch) {
       spaceEpochId = b.dataset.epoch;
+      lastPress = { win: win.id, part: "scene", t: performance.now() };   // p.4: this Space's pick, whoever clicked
       select(b.dataset.epoch);              // the Chronology and the Inspector follow
       refreshInspector();
     } else if (b.dataset.toggle) {
@@ -31198,7 +31327,7 @@ function mountPanel(panelId: string, host: HTMLElement, win: Win): PanelMount {
     // already open, has no such call coming: measured, and it came up blank.
     api.refresh();
     api.setSelected(selectedId);
-    return { refresh: api.refresh, select: (id) => api.setSelected(id) };
+    return { refresh: api.refresh, select: (id) => api.setSelected(id, getSettings().interaction.zoomToSelection) };
   }
   if (panelId === "inspector") {
     const paint = (): void => renderInspectorInto(host);

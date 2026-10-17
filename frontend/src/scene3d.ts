@@ -191,8 +191,9 @@ export interface SpaceSceneHandle {
   /** MICRO-SPAZIO-3D · the camera, for «Indietro» */
   camera(): CamState | null;
   setCamera(c: CamState): void;
-  /** frame the items (`rm:<id>`, `proxy:<unit>`, `sketch:<id>`); false when none is drawn */
-  frameKeys(keys: string[]): boolean;
+  /** frame the items (`rm:<id>`, `proxy:<unit>`, `sketch:<id>`); false when none is drawn.
+   *  `smooth`: the passage of an aligned view, about 200 ms (none with «Reduce motion») */
+  frameKeys(keys: string[], smooth?: boolean): boolean;
   /** the 3D cursor */
   cursor(): V3;
   setCursor(p: V3): void;
@@ -758,7 +759,7 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
        *  Blender's «Smooth View» (none with the system's «Reduce motion»): it
        *  ends on the very camera the keypad gives, and a gesture ends it at once */
       const VIEW_MS = 200;
-      let anim: { from: CamState; to: CamState; t0: number; view: AlignedView } | null = null;
+      let anim: { from: CamState; to: CamState; t0: number; view: AlignedView | null } | null = null;
       const reduceMotion = (): boolean => { try { return !!globalThis.matchMedia?.("(prefers-reduced-motion: reduce)").matches; } catch { return false; } };
       const finishAnim = () => {
         if (!anim) return;
@@ -770,6 +771,10 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
       };
       const stepAnim = (now: number) => {
         if (!anim) return;
+        // a passage asked during a long task (the windows redrawn after a pick)
+        // starts at its first frame, not when it was asked: else it is over
+        // before it is drawn (measured: 210 ms of redraw, then one jump)
+        if (!anim.t0) anim.t0 = now;
         const t = (now - anim.t0) / VIEW_MS;
         if (t >= 1) { finishAnim(); return; }
         applyCam(viewBetween(anim.from, anim.to, t));
@@ -1130,9 +1135,19 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
         }
         return b.isEmpty() ? null : b;
       };
-      const frameBox = (b: any) => {
+      const frameBox = (b: any, smooth = false) => {
         const sphere = b.getBoundingSphere(new THREE.Sphere());
-        applyCam(frameSphere(camState(), arr(sphere.center), sphere.radius, FOV, persp.aspect));
+        const to = frameSphere(camState(), arr(sphere.center), sphere.radius, FOV, persp.aspect);
+        // MICRO-PROVA-DEV48 p.4 · a pick from another window: the same passage
+        // as an aligned view's, the view kept (an aligned one stays aligned)
+        if (smooth && !reduceMotion()) {
+          // a passage under way goes on from where it is now, toward the new end
+          const view = anim ? anim.view : aligned;
+          anim = { from: camState(), to, t0: 0, view };
+          return;
+        }
+        finishAnim();
+        applyCam(to);
       };
 
       // ── the sketches ─────────────────────────────────────────────────────
@@ -2633,11 +2648,11 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
       api = {
         camera: camState,
         setCamera: (c: CamState) => applyCam(c),
-        frameKeys: (keys: string[]) => {
+        frameKeys: (keys: string[], smooth = false) => {
           const b = new THREE.Box3();
           for (const k of keys) { const kb = boxOfKey(k); if (kb) b.union(kb); }
           if (b.isEmpty()) return false;
-          frameBox(b);
+          frameBox(b, smooth);
           return true;
         },
         frameCursor: () => {
@@ -2718,7 +2733,7 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
     },
     camera: () => api.camera?.() ?? null,
     setCamera: (c) => api.setCamera?.(c),
-    frameKeys: (keys) => api.frameKeys?.(keys) ?? false,
+    frameKeys: (keys, smooth) => api.frameKeys?.(keys, smooth) ?? false,
     cursor: () => cursorAt,
     setCursor: (p) => { cursorAt = [...p] as V3; cursorSet = true; },
     frameCursor: () => api.frameCursor?.(),

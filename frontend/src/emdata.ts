@@ -211,6 +211,28 @@ export function sheetRowCount(sheet: TableView): number | null {
   return buildTable(store, sheet as SheetKey, volatileProvider).rows.length;
 }
 
+/**
+ * MICRO-PROVA-DEV48 p.4 · the sheets that have a row for a record, in the
+ * order a table goes to look for it: the editable sheets first, then «Modelli e
+ * proxy» and the datings. The warnings are not a record's place.
+ */
+export const SHEET_SEARCH: TableView[] = ["Units", "Models", "Epochs", "Documents", "Authors", "Claims", "Chron"];
+export function sheetsHolding(id: string): TableView[] {
+  const store = getStore();
+  const ctx = getCtx();
+  if (!store || !ctx) return [];
+  return SHEET_SEARCH.filter((sheet) => {
+    if (sheet === "Chron") return chronRows(ctx, indexOf(ctx), null).some((r) => r.node.id === id);
+    if (sheet === "Models") {
+      const sp = getSpace();
+      if (!sp) return false;
+      const rows = modelsRows(sp.space, sp.units);
+      return rows.proxy.includes(id) || rows.rm.some((r) => r.rmId === id || r.epochId === id && r.rmId === null);
+    }
+    return buildTable(store, sheet as SheetKey, volatileProvider).rows.some((r) => r.id === id);
+  });
+}
+
 /** Add a row to the sheet on screen — the `Righe ▸` menu's own path. */
 export function addEmDataRow(store: DocumentStore, win?: Win): string | null {
   const sheet = stateOf(win).sheet;

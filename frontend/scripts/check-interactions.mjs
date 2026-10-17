@@ -2108,6 +2108,97 @@ if (process.env.TEMPLU) test("S3.altTM", "Spazio · MICRO-PROVA-DEV47 p.4 · le 
   };
   return { pass: Object.values(conds).every(Boolean), detail: { conds, before, picked, after, modes, undone, reopened, errors } };
 });
+if (process.env.TEMPLU) test("S3.showSelTM", "Spazio · MICRO-PROVA-DEV48 p.4 · con «Zoom to selection» acceso la selezione si vede in ogni finestra: dall'Outliner, dal Tabular e dalla Matrix lo Spazio inquadra (un passaggio di circa 200 ms), dalla scena non si muove; l'Outliner apre i rami e scorre (e non torna in cima dopo un clic); il Tabular scorre e passa alla scheda che ha la riga (un documento: «Documenti»); un'unità col proxy in un'altra epoca porta lo Spazio a quell'epoca e lo dice; spento, resta solo la selezione", async () => {
+  const { p, ctx, errors } = await templuSpace("II", { w: 1700, h: 1050 });
+  await p.click("[data-frame]"); await p.waitForTimeout(600);
+  const H = () => document.querySelector(".scn-host");
+  const cam = () => p.evaluate(() => document.querySelector(".scn-host").__spaceCamera().join(","));
+  const home = await p.evaluate(() => document.querySelector(".scn-host").__spaceCamState());
+  const aside = () => p.evaluate((c) => document.querySelector(".scn-host").__spaceSetCam({ pos: [c.pos[0] + 300, c.pos[1], c.pos[2]], target: [c.target[0] + 300, c.target[1], c.target[2]] }), home);
+  const onScreen = (id) => p.evaluate((id) => { const h = document.querySelector(".scn-host"); const s = h.__spaceScreenOf(id); const c = h.querySelector("canvas").getBoundingClientRect(); return !!s && s.x > c.left && s.x < c.right && s.y > c.top && s.y < c.bottom; }, id);
+  const rowSeen = (sel, box) => p.evaluate(([sel, box]) => { const r = document.querySelector(sel); const b = r && (box ? document.querySelector(box) : r.closest(".tile-area")); if (!r || !b) return false; const a = r.getBoundingClientRect(), c = b.getBoundingClientRect(); return a.top >= c.top - 1 && a.bottom <= c.bottom + 1; }, [sel, box]);
+  // three units drawn here, hit in the scene
+  const ids = await p.evaluate(() => { const h = document.querySelector(".scn-host"); const cv = h.querySelector("canvas"); const c = cv.getBoundingClientRect(); const at = new Map();
+    for (let gx = 0.05; gx < 0.95; gx += 0.03) for (let gy = 0.05; gy < 0.95; gy += 0.03) { const x = c.left + gx * c.width, y = c.top + gy * c.height;
+      if (document.elementFromPoint(x, y) !== cv) continue; const hit = h.__spaceHit(x, y); if (hit?.kind === "proxy" && !at.has(hit.id)) at.set(hit.id, { x, y }); }
+    return [...at].map(([id, pt]) => ({ id, ...pt })); });
+  const out = { n: ids.length };
+  const [a, b, c] = [ids[0], ids[Math.floor(ids.length / 2)], ids[ids.length - 1]];
+  // the Outliner: the Space frames, in about 200 ms; the list stays where it was; the table scrolls
+  await aside();
+  await p.evaluate((id) => document.querySelector(`.scn-outliner .sol-row[data-key="proxy:${id}"]`).scrollIntoView({ block: "center" }), a.id);
+  const top0 = await p.evaluate(() => document.querySelector(".scn-outliner .sol-tree").scrollTop);
+  await p.evaluate(() => { window.__smp = []; const h = document.querySelector(".scn-host"); let t0 = 0; const tick = () => { window.__smp.push(h.__spaceGizmo().animating); if (performance.now() - t0 < 700) requestAnimationFrame(tick); };
+    document.addEventListener("pointerdown", () => { t0 = performance.now(); requestAnimationFrame(tick); }, { once: true, capture: true }); });
+  const c0 = await cam();
+  await p.click(`.scn-outliner .sol-row[data-key="proxy:${a.id}"] .sol-name`); await p.waitForTimeout(1200);
+  out.outliner = { moved: c0 !== await cam(), seen: await onScreen(a.id), animFrames: (await p.evaluate(() => window.__smp)).filter(Boolean).length,
+    listKept: Math.abs(await p.evaluate(() => document.querySelector(".scn-outliner .sol-tree").scrollTop) - top0) < 2,
+    table: await rowSeen(`.tile-area tr[data-row="${a.id}"].tv-sel-act`) };
+  // the table: the Space frames, the Outliner scrolls to the row
+  await aside(); await p.evaluate(() => { document.querySelector(".scn-outliner .sol-tree").scrollTop = 0; });
+  await p.evaluate((id) => document.querySelector(`.tile-area tr[data-row="${id}"]`).scrollIntoView({ block: "center" }), b.id);
+  const c1 = await cam();
+  await p.click(`.tile-area tr[data-row="${b.id}"] [data-go]`); await p.waitForTimeout(1200);
+  out.table = { moved: c1 !== await cam(), seen: await onScreen(b.id), outliner: await rowSeen(`.scn-outliner .sol-row.sel[data-key="proxy:${b.id}"]`, ".scn-outliner .sol-tree") };
+  // the Matrix: the Space frames
+  await p.evaluate((id) => window.__EM_DRAG__.jumpTo(id), c.id); await p.waitForTimeout(400);
+  await p.evaluate(() => window.__EM_DRAG__.select(null)); await aside(); await p.waitForTimeout(300);
+  const mb = await p.evaluate((id) => { const ws = window.__EM_DRAG__.winScene("space:canvas"); const b = ws.boxes.find((x) => x.id === id); return b && { x: b.x + b.w / 2, y: b.y + b.h / 2 }; }, c.id);
+  const c2 = await cam();
+  if (mb) { await p.mouse.click(mb.x, mb.y); await p.waitForTimeout(1200); }
+  out.matrix = { clicked: !!mb, moved: c2 !== await cam(), seen: await onScreen(c.id) };
+  // the scene: it does not move, the others show
+  await p.evaluate((c) => document.querySelector(".scn-host").__spaceSetCam(c), home); await p.waitForTimeout(300);
+  await p.evaluate(() => { document.querySelector(".scn-outliner .sol-tree").scrollTop = 0; });
+  const c3 = await cam();
+  await p.mouse.click(a.x, a.y); await p.waitForTimeout(1200);
+  out.scene = { selected: (await p.evaluate(() => window.__EM_DRAG__.selected())).includes(a.id), still: c3 === await cam(),
+    outliner: await rowSeen(`.scn-outliner .sol-row.sel[data-key="proxy:${a.id}"]`, ".scn-outliner .sol-tree") };
+  // a document from the Matrix: the table goes to «Documenti»
+  const doc = await p.evaluate(() => window.__EM_DRAG__.winScene("space:canvas").boxes.map((b) => b.id).find((id) => window.__EM_DRAG__.node(id)?.node_type === "document"));
+  await p.evaluate((id) => window.__EM_DRAG__.jumpTo(id), doc); await p.waitForTimeout(400);
+  await p.evaluate(() => window.__EM_DRAG__.select(null)); await p.waitForTimeout(300);
+  const db = await p.evaluate((id) => { const ws = window.__EM_DRAG__.winScene("space:canvas"); const b = ws.boxes.find((x) => x.id === id); return b && { x: b.x + b.w / 2, y: b.y + b.h / 2 }; }, doc);
+  if (db) { await p.mouse.click(db.x, db.y); await p.waitForTimeout(1200); }
+  out.sheet = { to: await p.evaluate(() => window.__EM_DRAG__.wins().find((w) => w.id === "space:models")?.state?.["current.table.sheet"]),
+    row: await rowSeen(`.tile-area tr[data-row="${doc}"].tv-sel-act`) };
+  await p.click('.tile-area[data-win="space:models"] .win-mode-toggle'); await p.waitForTimeout(200);
+  await p.click('.tile-area[data-win="space:models"] .dd-menu button[data-sheet="Models"]'); await p.waitForTimeout(600);
+  // a unit whose proxy is in XX sec, picked in the table while the Space shows II A.D.
+  const here = new Set(await p.evaluate(() => document.querySelector(".scn-host").__space().filter((x) => x.kind === "proxy").map((x) => x.id)));
+  await templuEpoch(p, "XX");
+  const there = (await p.evaluate(() => document.querySelector(".scn-host").__space().filter((x) => x.kind === "proxy").map((x) => x.id))).filter((id) => !here.has(id));
+  await templuEpoch(p, "II");
+  if (there[0]) {
+    await p.evaluate((id) => document.querySelector(`.tile-area tr[data-row="${id}"]`)?.scrollIntoView({ block: "center" }), there[0]);
+    await p.click(`.tile-area tr[data-row="${there[0]}"] [data-go]`); await p.waitForTimeout(500);
+    const toastText = await p.evaluate(() => document.querySelector("#toast")?.textContent ?? "");
+    await templuEpoch(p, "XX"); await p.waitForTimeout(800);
+    out.epoch = { to: await p.evaluate(() => document.querySelector(".scn-seg button[aria-pressed=true], .scn-seg button.active")?.textContent?.trim()), toast: toastText, seen: await onScreen(there[0]) };
+  }
+  await p.screenshot({ path: `${process.env.SHOTS ?? "."}/s3-showsel.png` }).catch(() => {});
+  // off: the selection only
+  await p.evaluate(() => document.getElementById("btn-zoom-sel").click());
+  await aside();
+  const c4 = await cam();
+  const k = await p.evaluate(() => [...document.querySelectorAll(".scn-outliner .sol-row")].map((r) => r.dataset.key).filter((k) => k.startsWith("proxy:")).at(-2));
+  await p.evaluate((k) => document.querySelector(`.scn-outliner .sol-row[data-key="${k}"]`).scrollIntoView({ block: "center" }), k);
+  await p.click(`.scn-outliner .sol-row[data-key="${k}"] .sol-name`); await p.waitForTimeout(1200);
+  out.off = { still: c4 === await cam(), selected: (await p.evaluate(() => window.__EM_DRAG__.selected())).includes(k.slice(6)) };
+  await p.evaluate(() => document.getElementById("btn-zoom-sel").click());
+  await ctx.close();
+  const conds = { found: ids.length >= 3,
+    outliner: out.outliner.moved && out.outliner.seen && out.outliner.animFrames >= 1 && out.outliner.listKept && out.outliner.table,
+    table: out.table.moved && out.table.seen && out.table.outliner,
+    matrix: out.matrix.clicked && out.matrix.moved && out.matrix.seen,
+    scene: out.scene.selected && out.scene.still && out.scene.outliner,
+    sheet: out.sheet.to === "Documents" && out.sheet.row,
+    epoch: !!out.epoch && /XX/.test(out.epoch.to ?? "") && /XX/.test(out.epoch.toast) && out.epoch.seen,
+    off: out.off.still && out.off.selected,
+    errors: !errors.filter((e) => !/Failed to load resource/.test(e)).length };
+  return { pass: Object.values(conds).every(Boolean), detail: { conds, out, errors } };
+});
 test("S3.assocConfirm", "Spazio · MICRO-PROVA-DEV47 p.5 · «Associa a un'unità»: gruppi che si chiudono col titolo e il conteggio a destra; ogni riga col tipo colorato, il nome, l'epoca, alta uguale; il triangolino apre descrizione, tipo, epoca, documento, rapporti, proxy; il passaggio accende l'unità nella Matrix; un clic sceglie e NON associa, il riepilogo «Associa la forma … a …» con Associa e Annulla; Esc annulla, Invio conferma; lo stesso per «Crea una nuova unità»", async () => {
   const { p, ctx, errors } = await assocScene("conferma");
   await addCube(p);

@@ -33,7 +33,9 @@ function rowMark(n: EmNode): HTMLElement {
 
 export interface NodeListApi {
   refresh: () => void;
-  setSelected: (id: string | null) => void;
+  /** `reveal` false (MICRO-PROVA-DEV48 p.4: «Zoom to selection» off): the
+   *  highlight only, no section opened, no scroll */
+  setSelected: (id: string | null, reveal?: boolean) => void;
 }
 
 export interface NodeListCallbacks {
@@ -486,12 +488,13 @@ export function buildNodeList(
 
   return {
     refresh: rebuild,
-    setSelected(id: string | null): void {
+    setSelected(id: string | null, reveal = true): void {
       if (selected && rows.get(selected)) rows.get(selected)!.classList.remove("selected");
       selected = id;
       const row = id ? rows.get(id) : null;
       if (row) {
         row.classList.add("selected");
+        if (!reveal) return;
         // OUT1 · a selection arriving from the canvas must be VISIBLE: if its
         // section is collapsed, open it through the header's own button so the
         // triangle and the stored state stay in step (scrolling to a hidden row
