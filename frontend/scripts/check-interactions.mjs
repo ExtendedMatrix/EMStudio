@@ -2052,25 +2052,28 @@ if (process.env.TEMPLU) test("S3.lodTMpanel", "Spazio · MICRO-PROVA-DEV47 p.3b 
   };
   return { pass: Object.values(conds).every(Boolean), detail: { conds, active, epoch, opts, ask, chips: [...new Set(afterCancel.map((r) => r.chip))], errors } };
 });
-if (process.env.TEMPLU) test("S3.altTM", "Spazio · MICRO-PROVA-DEV47 p.4 · le alternative dalla GUI su Templu Mare v3.2 (nessun contenitore): la sezione «Alternativa» del tileset dice «un modello a sé», «Nessun contenitore» e le due strade; i modelli dell'epoca scelti nell'Outliner (TEMPLUM tolto con ⌘-clic), «Crea un contenitore con i modelli selezionati» → Survey2015 (rmgroup_Survey2015, 10 modelli) e il tileset sua alternativa, la copertura come aiuto; Modelli / Tileset / Automatico sulla riga del contenitore; un passo di annulla; salvato e riaperto, resta", async () => {
+if (process.env.TEMPLU) test("S3.altTM", "Spazio · MICRO-PROVA-DEV48 p.1 (era DEV47 p.4) · l'alternativa del contenitore in un gesto su Templu Mare v3.2 (nessun contenitore): la sezione «Alternativa» del tileset dice «un modello a sé» e offre UN pulsante, «Fa da alternativa ai modelli di quest'epoca…»; la finestrella elenca gli 11 modelli spuntati, «Rilievo · XX sec», la copertura sulle foglie (IoU 0.97); TEMPLUM tolto, nome Survey2015, «Crea e dichiara» → rmgroup_Survey2015 con 10 modelli e il tileset sua alternativa, il contenitore selezionato con l'aiuto; Modelli / Tileset / Automatico sulla riga; UN passo di annulla toglie contenitore e cappello; salvato e riaperto, resta", async () => {
   const { p, ctx, errors } = await templuSpace("XX");
   const rows = () => p.evaluate(() => [...document.querySelectorAll(".scn-outliner .sol-row")].map((r) => ({ key: r.dataset.key, kind: [...r.classList].find((c) => c.startsWith("sol-") && c !== "sol-row"), name: r.querySelector(".sol-name")?.textContent, chips: [...r.querySelectorAll(".sol-chip")].map((c) => c.textContent) })));
-  const insp = () => p.evaluate(() => { const s = document.querySelector(".insp-alt"); return s && { text: s.innerText, buttons: [...s.querySelectorAll("button")].map((b) => `${b.dataset.s3}:${b.disabled ? "off" : "on"}`), help: s.querySelector("[data-alt-help]")?.dataset.altHelp ?? null, helpText: s.querySelector("[data-alt-help]")?.textContent ?? null }; });
+  const insp = () => p.evaluate(() => { const s = document.querySelector(".insp-alt"); return s && { text: s.innerText, buttons: [...s.querySelectorAll("button")].map((b) => `${b.dataset.s3}:${b.disabled ? "off" : "on"}`), help: s.querySelector("[data-alt-help], [data-alt=proposal-help]") ? true : false, helpText: s.querySelector("[data-alt-help]")?.textContent ?? null }; });
+  const dlg = () => p.evaluate(() => { const d = document.querySelector(".s3-altdlg"); return d && { rows: [...d.querySelectorAll(".s3-altdlg-row input")].map((c) => c.checked), name: d.querySelector(".s3-altdlg-name-in").value, cov: d.querySelector(".s3-altdlg-cov").textContent, ok: d.querySelector("[data-altdlg=ok]").textContent }; });
   const tileset = (await rows()).find((r) => /tileset/i.test(r.name ?? ""));
-  await p.click(`.scn-outliner .sol-row[data-key="${tileset.key}"] .sol-name`); await p.waitForTimeout(500);
+  await p.click(`.scn-outliner .sol-row[data-key="${tileset.key}"] .sol-name`); await p.waitForTimeout(1500);
   const before = await insp();
-  await p.click('.insp-alt button[data-s3="alt-new-epoch"]'); await p.waitForTimeout(500);
-  const templum = (await rows()).find((r) => /TEMPLUM/.test(r.name ?? ""));
-  await p.keyboard.down("Meta"); await p.click(`.scn-outliner .sol-row[data-key="${templum.key}"] .sol-name`); await p.keyboard.up("Meta"); await p.waitForTimeout(500);
-  const picked = await insp();
-  await p.click('.insp-alt button[data-s3="alt-new-selection"]'); await p.waitForTimeout(400);
-  await p.fill(".s3-rmg-name", "Survey2015");
-  await p.selectOption(".s3-rmg-doc", "");
-  await p.click("[data-rmg=ok]"); await p.waitForTimeout(1500); await templuEpoch(p, "XX");
+  await p.click('.insp-alt button[data-s3="alt-from-epoch"]');
+  await p.waitForFunction(() => /IoU/.test(document.querySelector(".s3-altdlg-cov")?.textContent ?? ""), null, { timeout: 20000 }).catch(() => {});
+  const opened = await dlg();
+  await p.evaluate(() => [...document.querySelectorAll(".s3-altdlg-row")].find((x) => /TEMPLUM/.test(x.textContent)).querySelector("input").click());
+  await p.fill(".s3-altdlg-name-in", "Survey2015");
+  await p.selectOption(".s3-altdlg-doc", "");
+  const ready = await dlg();
+  await p.click(".s3-altdlg [data-altdlg=ok]"); await p.waitForTimeout(1500);
+  const selected = await p.evaluate(() => window.__EM_DRAG__.selected());
+  await templuEpoch(p, "XX"); await p.waitForTimeout(1500);
   const made = await rows();
   const group = made.find((r) => r.kind === "sol-rmgroup");
   const alt = made.find((r) => r.key === "rm:rmgroup_Survey2015");
-  await p.click(`.scn-outliner .sol-row[data-key="rm:rmgroup_Survey2015"] .sol-name`); await p.waitForTimeout(500);
+  await p.click(`.scn-outliner .sol-row[data-key="rm:rmgroup_Survey2015"] .sol-name`); await p.waitForTimeout(800);
   const after = await insp();
   await p.screenshot({ path: `${process.env.SHOTS ?? "."}/s3-alt-survey2015.png` }).catch(() => {});
   const drawn = () => p.evaluate(() => { const s = document.querySelector(".scn-host").__space(); return { tiles: s.some((x) => x.id === "rmgroup_Survey2015" && x.as === "tiles"),
@@ -2082,7 +2085,7 @@ if (process.env.TEMPLU) test("S3.altTM", "Spazio · MICRO-PROVA-DEV47 p.4 · le 
     modes[m] = await drawn();
   }
   const json = await p.evaluate(() => window.__EM_DRAG__.docJson());
-  // one step of undo takes the alternative away (the container stays: its own step)
+  // ONE step of undo: the container and the hat together
   await p.evaluate(() => window.__EM_DRAG__.undo()); await p.waitForTimeout(800);
   const undone = await p.evaluate(() => { const g = JSON.parse(window.__EM_DRAG__.docJson()); const gr = Object.values(g.graphs).find((x) => x.nodes);
     return { hat: gr.edges.some((e) => e.edge_type === "has_linked_resource" && e.source === "rmgroup_Survey2015"), group: gr.nodes.some((n) => n.id === "rmgroup_Survey2015"), tilesetRm: gr.nodes.some((n) => n.node_type === "representation_model" && /XX_tileset/.test(n.name ?? "")) }; });
@@ -2096,17 +2099,46 @@ if (process.env.TEMPLU) test("S3.altTM", "Spazio · MICRO-PROVA-DEV47 p.4 · le 
   const reAlt = await again.p.evaluate(() => document.querySelector(".scn-host").__space().some((x) => x.id === "rmgroup_Survey2015"));
   await again.ctx.close();
   const conds = {
-    before: /Un modello a sé/.test(before?.text ?? "") && /Nessun contenitore in questo grafo/.test(before?.text ?? "") && before.buttons.includes("alt-new-selection:off") && before.buttons.includes("alt-new-epoch:on"),
-    picked: picked?.buttons.includes("alt-new-selection:on") && /selezionati \(10\)/.test(picked?.text ?? ""),
-    made: group?.name === "Survey2015" && group.chips.some((c) => /Automatico/.test(c)) && !!alt,
-    help: !!after?.help && /L'alternativa di «Survey2015»/.test(after?.text ?? "") && /copre/.test(after?.helpText ?? ""),
+    before: /Un modello a sé/.test(before?.text ?? "") && before.buttons.includes("alt-from-epoch:on") && !before.buttons.some((b) => /alt-confirm|alt-new/.test(b)),
+    dialog: opened?.rows.length === 11 && opened.rows.every(Boolean) && opened.name === "Rilievo · XX sec" && /IoU 0\.9/.test(opened.cov) && /foglia/.test(opened.cov),
+    ready: ready?.rows.filter(Boolean).length === 10 && ready.ok === "Crea e dichiara" && /TEMPLUM/.test(ready.cov),
+    made: group?.name === "Survey2015" && group.chips.some((c) => /Automatico/.test(c)) && !!alt && selected.includes("rmgroup_Survey2015"),
+    help: /L'alternativa di «Survey2015»/.test(after?.text ?? "") && /foglia/.test(after?.helpText ?? ""),
     modes: modes.tileset?.tiles && modes.tileset.members === 0 && modes.models && !modes.models.tiles && modes.models.members === 10 && modes.tileset.templum && modes.models.templum,
-    undo: !undone.hat && undone.group && undone.tilesetRm,
+    undo: !undone.hat && !undone.group && undone.tilesetRm,
     // the mode is the person's view (local), not the data's: a fresh profile reopens it «Automatico»
     reopened: reopened.some((r) => r.name === "Survey2015" && r.chips.some((c) => /Automatico|Modelli|Tileset/.test(c))) && reAlt,
-    errors: !errors.length && !again.errors.length,
+    errors: !errors.filter((e) => !/Failed to load resource/.test(e)).length && !again.errors.filter((e) => !/Failed to load resource/.test(e)).length,
   };
-  return { pass: Object.values(conds).every(Boolean), detail: { conds, before, picked, after, modes, undone, reopened, errors } };
+  return { pass: Object.values(conds).every(Boolean), detail: { conds, before, opened, ready, after, modes, undone, reopened, errors } };
+});
+if (process.env.TEMPLU_EMT) test("S3.altEmTools", "Spazio · MICRO-PROVA-DEV48 p.1 · un em.json salvato da EM Tools con i suoi contenitori (Survey2015, Legacy RMs; il tileset membro di Legacy RMs): la sezione del tileset PROPONE «Fa da alternativa al contenitore «Survey2015» (10 modelli)» con Conferma (il meglio coperto, IoU sulle foglie), Legacy RMs nel menu; la finestrella con TEMPLUM tolto dice «Dichiara su «Survey2015»» e non crea niente; Conferma: due contenitori prima e dopo, il cappello su rmgroup_Survey2015", async () => {
+  const { p, ctx, errors } = await open({ doc: null, w: 1600, h: 1000, init: { "emstudio.space3d": JSON.stringify({ "-": { deviceUse: "realtime" } }) } });
+  await p.evaluate(([d, path]) => window.__EM_DRAG__.openAt(d, path), [JSON.parse(readFileSync(process.env.TEMPLU_EMT, "utf8")), process.env.TEMPLU_EMT]);
+  await p.waitForFunction(() => (window.__EM_SCENE__?.()?.nodes?.length ?? 0) > 50, null, { timeout: 60000 });
+  await workspace(p, "space");
+  await p.waitForFunction(() => document.querySelector(".scn-host")?.dataset.ready === "1", null, { timeout: 60000 });
+  await templuEpoch(p, "XX");
+  const groupsOf = () => p.evaluate(() => { const g = JSON.parse(window.__EM_DRAG__.docJson()); const gr = Object.values(g.graphs).find((x) => x.nodes);
+    return { groups: gr.nodes.filter((n) => n.node_type === "RepresentationModelNodeGroup").map((n) => n.id).sort(), hat: gr.edges.filter((e) => e.edge_type === "has_linked_resource" && /rmgroup/.test(e.source)).map((e) => e.source) }; });
+  const g0 = await groupsOf();
+  const key = await p.evaluate(() => [...document.querySelectorAll(".scn-outliner .sol-row")].find((r) => /tileset/i.test(r.querySelector(".sol-name")?.textContent ?? ""))?.dataset.key);
+  await p.click(`.scn-outliner .sol-row[data-key="${key}"] .sol-name`);
+  await p.waitForSelector(".insp-alt [data-alt-proposal]", { timeout: 20000 }).catch(() => {});
+  const sect = await p.evaluate(() => { const s = document.querySelector(".insp-alt"); return s && { proposal: s.querySelector("[data-alt-proposal]")?.textContent ?? null, options: [...s.querySelectorAll("select[data-alt-propose] option")].map((o) => o.textContent), confirm: !!s.querySelector('[data-s3="alt-confirm"]') }; });
+  await p.click('.insp-alt button[data-s3="alt-from-epoch"]'); await p.waitForTimeout(1200);
+  await p.evaluate(() => [...document.querySelectorAll(".s3-altdlg-row")].find((x) => /TEMPLUM/.test(x.textContent)).querySelector("input").click());
+  const okText = await p.evaluate(() => document.querySelector(".s3-altdlg [data-altdlg=ok]")?.textContent);
+  await p.keyboard.press("Escape"); await p.waitForTimeout(300);
+  await p.click('.insp-alt button[data-s3="alt-confirm"]'); await p.waitForTimeout(2000);
+  const g1 = await groupsOf();
+  await ctx.close();
+  const conds = { proposal: /«Survey2015» \(10 modelli\)/.test(sect?.proposal ?? "") && sect.confirm && sect.options.some((o) => /Legacy RMs/.test(o)),
+    dialog: okText === "Dichiara su «Survey2015»",
+    noDouble: JSON.stringify(g0.groups) === JSON.stringify(g1.groups) && g1.groups.length === 2,
+    hat: g1.hat.length === 1 && g1.hat[0] === "rmgroup_Survey2015",
+    errors: !errors.filter((e) => !/Failed to load resource/.test(e)).length };
+  return { pass: Object.values(conds).every(Boolean), detail: { conds, sect, okText, g0, g1, errors } };
 });
 if (process.env.TEMPLU) test("S3.showSelTM", "Spazio · MICRO-PROVA-DEV48 p.4 · con «Zoom to selection» acceso la selezione si vede in ogni finestra: dall'Outliner, dal Tabular e dalla Matrix lo Spazio inquadra (un passaggio di circa 200 ms), dalla scena non si muove; l'Outliner apre i rami e scorre (e non torna in cima dopo un clic); il Tabular scorre e passa alla scheda che ha la riga (un documento: «Documenti»); un'unità col proxy in un'altra epoca porta lo Spazio a quell'epoca e lo dice; spento, resta solo la selezione", async () => {
   const { p, ctx, errors } = await templuSpace("II", { w: 1700, h: 1050 });

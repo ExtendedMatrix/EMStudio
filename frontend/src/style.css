@@ -9740,3 +9740,32 @@ tr.tv-sel-act > td { background: color-mix(in srgb, var(--accent) 42%, transpare
 .one-line::before { left: 0; order: -9999; margin-right: -28px; background: linear-gradient(to left, transparent, var(--ol-bg, var(--bg-panel))); }
 .one-line::after { right: 0; order: 9999; margin-left: -28px; background: linear-gradient(to right, transparent, var(--ol-bg, var(--bg-panel))); }
 .one-line.ol-left::before, .one-line.ol-right::after { opacity: 1; }
+
+/* MICRO-PROVA-DEV48 p.1 · the tileset's «Alternativa» in one gesture: the
+   proposed container with «Conferma», the dialog that makes and declares */
+.insp-alt-proposal { margin: 6px 0 2px; font-weight: 600; font-size: 12px; }
+.insp-btn.insp-btn-quiet { background: transparent; border-style: dashed; color: var(--text-dim); }
+.insp-alt-one { margin-top: 8px; font-size: 12px; color: var(--text-dim); }
+.insp-alt-one > summary { cursor: pointer; }
+.insp-alt-one select { display: block; width: 100%; margin: 4px 0; }
+/* the two dialogs of the containers had no panel of their own (`.conn-panel`
+   alone has none): the scene showed through them — measured on dev.48 */
+.s3-altdlg, .s3-rmg {
+  max-height: min(84vh, 720px); overflow: auto; padding: 10px 12px;
+  background: var(--bg-elevated); color: var(--text);
+  border: 1px solid var(--border); border-radius: var(--radius-lg);
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.28); font-size: 12px; line-height: 1.45;
+}
+.s3-rmg-row { display: flex; align-items: center; gap: 6px; margin: 4px 0; }
+.s3-rmg-row > input, .s3-rmg-row > select { flex: 1; min-width: 0; }
+.s3-altdlg h4 { margin: 0 0 4px; }
+.s3-altdlg-groups { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; font-size: 12px; margin: 4px 0 6px; }
+.s3-altdlg-list { max-height: 40vh; overflow: auto; border: 1px solid var(--border); border-radius: var(--radius); padding: 2px 0; margin-bottom: 8px; }
+.s3-altdlg-row { display: flex; align-items: center; gap: 6px; height: 24px; padding: 0 6px; font-size: 12px; cursor: pointer; }
+.s3-altdlg-row:hover { background: var(--bg-subtle); }
+.s3-altdlg-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.s3-altdlg-where { color: var(--text-dim); font-size: 11px; }
+.s3-altdlg-where.out { color: var(--warn); }
+.s3-altdlg-in { color: var(--text-dim); font-size: 11px; border: 1px solid var(--border); border-radius: 8px; padding: 0 5px; }
+.s3-altdlg .hidden { display: none; }
+.s3-altdlg-why:empty, .s3-altdlg-cov:empty { display: none; }

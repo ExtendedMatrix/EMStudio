@@ -251,7 +251,7 @@ import { boxSelect, clickOutliner, clickScene, EMPTY_SEL, hideKeys, selectAll, w
 import { type AssocGroupKey, type AssocUnit, assocGroups, NEW_UNIT_ORDER, newUnitTypes } from "./sketch-associate";
 import { buildOutlinerTree, loadSpacePrefs, opensFor, renderOutliner, saveSpacePrefs, squeezeSide, type Space3dPrefs } from "./space-outliner";
 import { patchProxyNodes, proxyPartsOf, proxyRelPath, unitBrief } from "./proxy-association";
-import { planMove, planNewGroup, planRemove, RM_GROUP_TYPE, type GroupPlan } from "./rm-groups";
+import { groupNodeIdFor, planMove, planNewGroup, planRemove, RM_GROUP_TYPE, type GroupPlan } from "./rm-groups";
 import { shownModelName } from "./rm-names";
 import { versionError, type FlowVersion, type VersionMode } from "./lod-flow";
 import { defaultLevel, isHeavy, levelShort, levelsOf, type Level } from "./lod-levels";
@@ -24196,47 +24196,304 @@ function renderAlternativeInto(host: HTMLElement, nodeId: string): boolean {
   if (!rm?.resource?.tiles) return false;
   if (rm.group) hint(t("alt.member", { group: sp.rmGroups.get(rm.group)?.name ?? rm.group }), "member");
   else hint(t("alt.alone"), "alone");
-  const groups = [...sp.rmGroups.values()].filter((g) => g.members.length);
-  // the models of its epochs, the tilesets and itself apart
+  // MICRO-PROVA-DEV48 p.1 · ONE gesture (E.D., 17 Oct: «non ho capito come
+  // rendere il tileset alternativo al container in cui sta»). On dev.48 the road
+  // was three steps, «Make a container of this epoch's models» made nothing (it
+  // selected them), and the choice of a container was mixed with a single
+  // model's. Now: a container that holds it or covers its place is PROPOSED,
+  // with «Conferma»; with none, ONE button opens the dialog that makes the
+  // container and declares the hat in one step of undo; a single model comes
+  // last, and says so.
   const eps = new Set(rm.epochs);
   const models = sp.rms.filter((r) => r.id !== rm.id && !r.altOf && !r.resource?.tiles && r.epochs.some((e) => eps.has(e)));
-  if (!groups.length) {
-    hint(t("alt.noGroups"), "no-groups");
-    const picked = selectedModels().filter((m) => models.some((r) => r.id === m));
-    button(t("alt.newFromSelection", { n: String(picked.length) }), "alt-new-selection", () => {
-      // the boxes now: the new container redraws the scene, and its models come back after the declaration
-      const pre = new Map<string, Box>();
-      for (const k of [rm.id, ...models.map((r) => r.id)]) { const b = spaceBox(`rm:${k}`); if (b) pre.set(k, b); }
-      openNewGroup(picked, (gid) => declareContainerAlternative(rm.id, gid, pre));
-    }, !picked.length);
-    button(t("alt.newFromEpoch", { n: String(models.length) }), "alt-new-epoch", () => {
-      // chosen in the Outliner: the epoch's models selected, ⌘-click takes one away
-      // …and the tileset stays the active one: its Inspector stays, with the button that makes the container
-      setSpaceSel({ keys: [...models.map((r) => `rm:${r.id}`), `rm:${rm.id}`], active: `rm:${rm.id}` });
-      toast(t("alt.pickInOutliner", { n: String(models.length) }));
-    }, !models.length);
+  const proposals = containerProposals(sp, rm.id);
+  if (proposals === undefined) hint(t("alt.measuring"), "measuring");
+  else if (proposals.length) {
+    const [best] = proposals;
+    const p = document.createElement("p");
+    p.className = "insp-alt-proposal";
+    p.dataset.altProposal = best.group;
+    const g = sp.rmGroups.get(best.group)!;
+    p.textContent = t("alt.proposal", { group: g.name, n: String(best.members.length) });
+    host.appendChild(p);
+    let chosen = best.group;
+    if (proposals.length > 1) {
+      // the others that hold it or cover its place, by their coverage
+      const sel = document.createElement("select");
+      sel.dataset.altPropose = "1";
+      for (const x of proposals) { const o = document.createElement("option"); o.value = x.group; o.textContent = `${sp.rmGroups.get(x.group)?.name ?? x.group} (${x.members.length}) · IoU ${x.cov ? x.cov.iou.toFixed(2) : "—"}`; sel.appendChild(o); }
+      sel.addEventListener("change", () => { chosen = sel.value; const x = proposals.find((y) => y.group === chosen)!;
+        p.textContent = t("alt.proposal", { group: sp.rmGroups.get(chosen)?.name ?? chosen, n: String(x.members.length) });
+        cov.textContent = x.cov ? coverageHelp(x.cov, rm.name, sp.rmGroups.get(chosen)?.name ?? chosen, chosen).text : t("alt.notMeasured"); });
+      host.appendChild(sel);
+    }
+    const cov = hint(best.cov ? coverageHelp(best.cov, rm.name, g.name, best.group).text : t("alt.notMeasured"), "proposal-help");
+    cov.classList.add("alt-help");
+    button(t("alt.confirm"), "alt-confirm", () => declareContainerAlternative(rm.id, chosen));
   }
-  if (groups.length || models.length) {
+  const picked = selectedModels().filter((m) => models.some((r) => r.id === m));
+  if (picked.length)
+    button(t("alt.fromSelection", { n: String(picked.length) }), "alt-from-selection", () => openAltDialog(rm.id, picked));
+  else if (proposals !== undefined && !proposals.length)
+    button(t("alt.fromEpoch"), "alt-from-epoch", () => openAltDialog(rm.id, null), !models.length);
+  if (proposals?.length && !picked.length)
+    button(t("alt.otherModels"), "alt-from-epoch", () => openAltDialog(rm.id, null), !models.length).classList.add("insp-btn-quiet");
+  // a single model: last, and named for what it is
+  if (models.length) {
+    const d = document.createElement("details");
+    d.className = "insp-alt-one";
+    const sm = document.createElement("summary");
+    sm.textContent = t("alt.oneModelHead");
+    d.appendChild(sm);
     const sel = document.createElement("select");
     sel.dataset.altDeclare = "1";
-    const og = (label: string) => { const g = document.createElement("optgroup"); g.label = label; sel.appendChild(g); return g; };
-    if (groups.length) {
-      const gg = og(t("alt.groupsHead"));
-      for (const g of groups) { const o = document.createElement("option"); o.value = g.id; o.textContent = `${g.name} (${g.members.length})`; o.selected = g.id === rm.group; gg.appendChild(o); }
-    }
-    if (models.length) {
-      const mg = og(t("alt.modelsHead"));
-      for (const r of models) { const o = document.createElement("option"); o.value = r.id; o.textContent = rmShown(r.id, sp)?.shown ?? r.name; mg.appendChild(o); }
-    }
-    host.appendChild(sel);
-    button(t("alt.declare"), "declare-alternative", () => {
-      if (sp.rmGroups.has(sel.value)) declareContainerAlternative(rm.id, sel.value);
-      else declareModelAlternative(rm.id, sel.value);
-    });
+    for (const r of models) { const o = document.createElement("option"); o.value = r.id; o.textContent = rmShown(r.id, sp)?.shown ?? r.name; sel.appendChild(o); }
+    d.appendChild(sel);
+    const b = document.createElement("button");
+    b.className = "insp-btn";
+    b.dataset.s3 = "declare-alternative";
+    b.textContent = t("alt.oneModel");
+    b.addEventListener("click", () => declareModelAlternative(rm.id, sel.value));
+    d.appendChild(b);
+    host.appendChild(d);
   }
   const help = altHelp.get(rm.id);
   if (help) helpInto(host, rm.id, help);
   return true;
+}
+
+/** MICRO-PROVA-DEV48 p.1 · a tileset's leaves as the Inspector draws (synchronous):
+ *  undefined while they are read (the Inspector is drawn again when they are),
+ *  null when no window can read them. */
+const leafCache = new Map<string, TilesetLeaves | null>();
+const leafAsked = new Set<string>();
+function leavesNow(rmId: string): TilesetLeaves | null | undefined {
+  if (leafCache.has(rmId)) return leafCache.get(rmId);
+  if (!leafAsked.has(rmId)) {
+    leafAsked.add(rmId);
+    void tilesetLeaves(rmId).then((lv) => {
+      leafCache.set(rmId, lv);
+      leafAsked.delete(rmId);
+      refreshInspector();
+    });
+  }
+  return undefined;
+}
+/** The containers a tileset can stand for: the one it is a member of, and those
+ *  whose models its leaves cover (whole, or all of them and more; IoU ≥ 0.5),
+ *  the best covered first. undefined while the leaves are read. */
+function containerProposals(sp: Space, rmId: string): Array<{ group: string; members: string[]; cov: AltCoverage | null }> | undefined {
+  const rm = sp.rms.find((r) => r.id === rmId);
+  const groups = [...sp.rmGroups.values()].filter((g) => g.members.some((m) => m !== rmId));
+  if (!rm || !groups.length) return [];
+  const lv = leavesNow(rmId);
+  if (lv === undefined) return undefined;
+  const boxes = measuredBoxes(sp.rms.map((r) => r.id));
+  const altBox = spaceBox(`rm:${rmId}`);
+  const out = groups.map((g) => {
+    const members = g.members.filter((m) => m !== rmId);
+    return { group: g.id, members, cov: altCoverage(sp, rmId, members, boxes, lv, altBox) };
+  }).filter((x) => x.group === rm.group || (!!x.cov && (x.cov.kind !== "partial" || x.cov.iou >= 0.5)));
+  return out.sort((a, b) => (b.cov?.iou ?? (b.group === rm.group ? 0.5 : 0)) - (a.cov?.iou ?? (a.group === rm.group ? 0.5 : 0)));
+}
+
+/**
+ * MICRO-PROVA-DEV48 p.1 · «Fa da alternativa ai modelli di quest'epoca…» (or
+ * «…ai modelli selezionati»): the models of the tileset's epoch, ticked but the
+ * tileset itself (or the selected ones); the container's name (proposed:
+ * «Rilievo · XX sec») and, if wanted, its document (the one they share); the
+ * coverage as they are ticked. «Crea e dichiara» makes the container and moves
+ * the hat onto it in ONE step of undo. A container of the graph that already
+ * has exactly the models ticked (EM Tools' Survey2015) is used, never doubled:
+ * the button says «Dichiara su «Survey2015»».
+ */
+function openAltDialog(rmId: string, preset: string[] | null): void {
+  const st = store;
+  const sp = currentSpace();
+  const rm = sp?.rms.find((r) => r.id === rmId);
+  if (!st || !sp || !rm || refuseReadOnly()) return;
+  document.querySelector(".s3-altdlg")?.remove();
+  const eps = new Set(rm.epochs);
+  const models = sp.rms.filter((r) => r.id !== rm.id && !r.altOf && !r.resource?.tiles && r.epochs.some((e) => eps.has(e)))
+    .sort((a, b) => (rmShown(a.id, sp)?.shown ?? a.name).localeCompare(rmShown(b.id, sp)?.shown ?? b.name, undefined, { numeric: true }));
+  const ticked = new Set(preset ?? models.map((r) => r.id));
+  const epName = sp.epochs.find((e) => eps.has(e.id))?.name ?? "";
+  // the boxes now (the new container redraws the scene), the leaves when read
+  const pre = measuredBoxes([rm.id, ...sp.rms.map((r) => r.id)]);
+  const altBox = spaceBox(`rm:${rm.id}`);
+  let leaves: TilesetLeaves | null | undefined = leafCache.get(rm.id);
+  const groups = [...sp.rmGroups.values()].filter((g) => g.members.length);
+  const docs = st.doc.graph.nodes.filter((n) => n.node_type === "document")
+    .sort((a, b) => String(a.name).localeCompare(String(b.name), undefined, { numeric: true }));
+  const box = document.createElement("div");
+  box.className = "conn-panel s3-altdlg";
+  box.setAttribute("role", "dialog");
+  box.setAttribute("aria-label", t("alt.dlgHead", { tileset: rm.name }));
+  const h = document.createElement("h4");
+  h.textContent = t("alt.dlgHead", { tileset: rm.name });
+  box.appendChild(h);
+  const sub = document.createElement("p");
+  sub.className = "insp-hint";
+  sub.textContent = t("alt.dlgSub", { epoch: epName });
+  box.appendChild(sub);
+  // the containers already in the graph (EM Tools'): one click takes theirs
+  if (groups.length) {
+    const row = document.createElement("div");
+    row.className = "s3-altdlg-groups";
+    row.append(t("alt.dlgGroups") + " ");
+    for (const g of groups) {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "chip";
+      b.dataset.altGroup = g.id;
+      b.textContent = `${g.name} (${g.members.filter((m) => m !== rm.id).length})`;
+      b.addEventListener("click", () => {
+        ticked.clear();
+        for (const m of g.members) if (m !== rm.id && models.some((r) => r.id === m)) ticked.add(m);
+        for (const c of list.querySelectorAll<HTMLInputElement>("input[type=checkbox]")) c.checked = ticked.has(c.value);
+        update();
+      });
+      row.appendChild(b);
+    }
+    box.appendChild(row);
+  }
+  const list = document.createElement("div");
+  list.className = "s3-altdlg-list";
+  for (const r of models) {
+    const lab = document.createElement("label");
+    lab.className = "s3-altdlg-row";
+    const c = document.createElement("input");
+    c.type = "checkbox";
+    c.value = r.id;
+    c.checked = ticked.has(r.id);
+    c.addEventListener("change", () => { if (c.checked) ticked.add(r.id); else ticked.delete(r.id); update(); });
+    const nm = document.createElement("span");
+    nm.className = "s3-altdlg-name";
+    nm.textContent = rmShown(r.id, sp)?.shown ?? r.name;
+    nm.title = r.name;
+    const where = document.createElement("span");
+    where.className = "s3-altdlg-where";
+    where.dataset.rm = r.id;
+    lab.append(c, nm, where);
+    if (r.group) { const gg = document.createElement("span"); gg.className = "s3-altdlg-in"; gg.textContent = sp.rmGroups.get(r.group)?.name ?? ""; lab.appendChild(gg); }
+    list.appendChild(lab);
+  }
+  box.appendChild(list);
+  const nameRow = document.createElement("label");
+  nameRow.className = "s3-rmg-row";
+  nameRow.append(t("rmg.name") + " ");
+  const name = document.createElement("input");
+  name.type = "text";
+  name.className = "s3-altdlg-name-in";
+  name.value = t("alt.dlgDefaultName", { epoch: epName });
+  nameRow.appendChild(name);
+  box.appendChild(nameRow);
+  const docRow = document.createElement("label");
+  docRow.className = "s3-rmg-row";
+  docRow.append(t("rmg.document") + " ");
+  const docSel = document.createElement("select");
+  docSel.className = "s3-altdlg-doc";
+  docSel.appendChild(new Option(t("rmg.noDocument"), ""));
+  for (const d of docs) {
+    const has = groups.find((g) => g.documentId === d.id);
+    docSel.appendChild(new Option(String(d.name ?? d.id) + (has ? " · " + t("rmg.hasOne", { name: has.name }) : ""), d.id));
+  }
+  docRow.appendChild(docSel);
+  box.appendChild(docRow);
+  const cov = document.createElement("p");
+  cov.className = "insp-hint alt-help s3-altdlg-cov";
+  box.appendChild(cov);
+  const why = document.createElement("p");
+  why.className = "insp-hint s3-altdlg-why";
+  box.appendChild(why);
+  const acts = document.createElement("div");
+  acts.className = "conn-acts";
+  const cancel = document.createElement("button");
+  cancel.type = "button";
+  cancel.className = "conn-btn";
+  cancel.dataset.altdlg = "cancel";
+  cancel.textContent = t("settings.cancel");
+  const ok = document.createElement("button");
+  ok.type = "button";
+  ok.className = "conn-btn primary";
+  ok.dataset.altdlg = "ok";
+  acts.append(cancel, ok);
+  box.appendChild(acts);
+  Object.assign(box.style, { position: "fixed", left: "50%", top: "10%", transform: "translateX(-50%)", zIndex: "70", width: "min(460px, calc(100vw - 32px))" });
+  document.body.appendChild(box);
+  const same = (g: { members: string[] }) => { const ms = g.members.filter((m) => m !== rm.id); return ms.length === ticked.size && ms.every((m) => ticked.has(m)); };
+  let use: string | null = null;
+  function update(): void {
+    // the document the ticked models share, proposed (never one that has a container already)
+    const shared = new Set([...ticked].map((m) => sp!.rms.find((r) => r.id === m)?.documentId ?? null));
+    const sd = shared.size === 1 ? [...shared][0] : null;
+    if (!docSel.dataset.touched) docSel.value = sd && !groups.some((g) => g.documentId === sd) ? sd : "";
+    use = groups.find(same)?.id ?? null;
+    const taken = !use && groups.find((g) => groupNodeIdFor(name.value.trim(), docSel.value || null) === g.id);
+    nameRow.classList.toggle("hidden", !!use);
+    docRow.classList.toggle("hidden", !!use);
+    why.textContent = use ? t("alt.dlgUses", { group: sp!.rmGroups.get(use)?.name ?? use, n: String(ticked.size) })
+      : taken ? t("alt.dlgTaken", { group: taken.name }) : "";
+    ok.textContent = use ? t("alt.dlgDeclareOn", { group: sp!.rmGroups.get(use)?.name ?? use }) : t("alt.dlgCreate");
+    ok.disabled = !ticked.size || (!use && (!name.value.trim() || !!taken));
+    // the coverage, as they are ticked; each model's place: in the tileset or not
+    if (leaves === undefined) { cov.textContent = t("alt.measuring"); return; }
+    const c = altCoverage(sp!, rm!.id, [...ticked], pre, leaves, altBox);
+    cov.textContent = c ? coverageHelp(c, rm!.name, use ? sp!.rmGroups.get(use)?.name ?? use : name.value.trim(), use ?? "").text : t("alt.notMeasured");
+    for (const w of list.querySelectorAll<HTMLElement>(".s3-altdlg-where")) {
+      const b = pre.get(w.dataset.rm!);
+      const inside = !b ? null : leaves ? footprintShare(b, leaves.boxes) >= FOOT_IN : altBox ? [0, 1, 2].every((i) => altBox[0][i] <= (b[0][i] + b[1][i]) / 2 && (b[0][i] + b[1][i]) / 2 <= altBox[1][i]) : null;
+      w.textContent = inside == null ? "" : inside ? t("alt.dlgIn") : t("alt.dlgOut");
+      w.classList.toggle("out", inside === false);
+    }
+  }
+  if (leaves === undefined) void tilesetLeaves(rm.id).then((lv) => { leaves = lv; leafCache.set(rm.id, lv); if (box.isConnected) update(); });
+  const close = () => { box.remove(); document.removeEventListener("keydown", onKey, true); };
+  const go = () => {
+    if (ok.disabled) return;
+    const members = [...ticked];
+    if (use) { close(); declareContainerAlternative(rm.id, use, pre); return; }
+    const label = name.value.trim();
+    const docId = docSel.value || null;
+    const gp = planNewGroup(st.doc, label, docId, members);
+    if (gp.taken || !gp.groupId) { toast(t("rmg.taken", { doc: String(st.node(docId ?? "")?.name ?? ""), name: gp.taken ?? label })); return; }
+    const gid = gp.groupId;
+    const c = leaves !== undefined ? altCoverage(sp, rm.id, members, pre, leaves, altBox) : null;
+    let ap: AltPlan | null = null;
+    try {
+      // ONE step of undo: the container, its members, the hat
+      st.batch(() => {
+        for (const n of gp.addNodes) st.addNode(n);
+        for (const id of gp.removeEdges) { const e = st.doc.graph.edges.find((x) => x.id === id); if (e) st.deleteEdge(e); }
+        for (const e of gp.addEdges) st.addEdge(e.source, e.target, e.type, undefined, e.id);
+        ap = planDeclareAlternative(st.doc.graph, rm.id, gid, ALT_RULE);
+        applyAltPlan(st, ap);
+      });
+    } catch (e) { toast(String(e instanceof Error ? e.message : e)); return; }
+    close();
+    const dropped = (ap as AltPlan | null)?.removeNodes.length ? ` · ${t("alt.dropped", { rm: rm.name })}` : "";
+    const msg = t("alt.createdDeclared", { group: label, n: String(members.length), tileset: rm.name }) + dropped;
+    if (c) { const help = coverageHelp(c, rm.name, label, gid); altHelp.set(gid, help); logInfo(help.text, [rm.id, gid]); }
+    logInfo(msg, [gid]);
+    toastUndo(msg, st);
+    buildScenes(); draw();
+    quietPick = true;
+    try { select(gid); } finally { quietPick = false; }
+    refreshSurfaces("scene"); refreshInspector();
+  };
+  function onKey(e: KeyboardEvent): void {
+    if (!box.isConnected) { document.removeEventListener("keydown", onKey, true); return; }
+    if (e.key === "Escape") { e.stopPropagation(); e.preventDefault(); close(); }
+    else if (e.key === "Enter" && !(e.target instanceof HTMLSelectElement)) { e.stopPropagation(); e.preventDefault(); go(); }
+  }
+  document.addEventListener("keydown", onKey, true);
+  name.addEventListener("input", update);
+  docSel.addEventListener("change", () => { docSel.dataset.touched = "1"; update(); });
+  ok.addEventListener("click", go);
+  cancel.addEventListener("click", close);
+  update();
+  name.focus();
+  name.select();
 }
 /** The coverage's help under the section (and its road: the sub-container) */
 function helpInto(host: HTMLElement, tilesetId: string, help: { kind: "partial" | "more" | "whole"; text: string; group: string; covered?: string[] }): void {
@@ -24327,6 +24584,10 @@ function declareContainerAlternative(rmId: string, groupId: string, pre?: Readon
   toastUndo(msg, st);
   buildScenes();
   draw();
+  // MICRO-PROVA-DEV48 p.1 · the container selected: its Inspector says the
+  // alternative, the three modes and the coverage (the tileset's RM is gone)
+  quietPick = true;
+  try { select(groupId); } finally { quietPick = false; }
   refreshSurfaces("scene");
   refreshInspector();
   // the tileset is now the container's (its id): the help goes with it
@@ -24382,7 +24643,7 @@ function altCoverage(sp: Space, rmId: string, members: readonly string[], boxes:
   } else return null;
   const hit = cands.filter((r) => covers(boxes.get(r.id)!));
   return { kind, iou: iouV, inside, n: members.length,
-    others: hit.filter((r) => !r.group).map((r) => r.name), otherGroups: hit.filter((r) => !!r.group).length,
+    others: hit.filter((r) => !r.group).map((r) => rmShown(r.id, sp)?.shown ?? r.name), otherGroups: hit.filter((r) => !!r.group).length,
     leaves: lv?.boxes.length ? lv.leaves : null, unread: lv?.unread.length ?? 0, unmeasured: members.length - mine.size };
 }
 /** …and its words: what it covers, the other models, what it was measured on. */
