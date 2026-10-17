@@ -1033,7 +1033,7 @@ const SHELF3 = { id: "shelf", name: "Shelf di prova", entries: [
   { id: "sh2", name: "rilievo.glb", kind: "model", locator: "https://example.org/iiif/rilievo.glb", scope: "other-HDT", residency: "reference" },
   { id: "sh3", name: "scheda_US105.pdf", kind: "document", locator: "s3://bucket/room/scheda_US105.pdf", scope: "own-study", residency: "resident" }] };
 for (const w of [1280, 1600]) {
-  test(`11.shelf${w}`, `shelf a ${w}: righe a due livelli senza testo sovrapposto, conteggio intero`, async () => {
+  test(`11.shelf${w}`, `shelf a ${w}: righe a due livelli senza testo sovrapposto, conteggio intero (MICRO-PROVA-DEV47 p.6: l'intestazione su una riga, il conteggio raggiunto scorrendola)`, async () => {
     const { p, ctx } = await open({ doc: "catena", ws: "assets", w, h: 860, init: { "emstudio.shelf": JSON.stringify(SHELF3) } });
     await p.waitForTimeout(500);
     const r = await p.evaluate(() => {
@@ -1046,6 +1046,10 @@ for (const w of [1280, 1600]) {
         if (name.width < 60) bad.push(`${row.dataset.entry}:name ${Math.round(name.width)}px`);
       }
       const c = document.querySelector('[data-win$=":shelf"] .win-strip-count');
+      // MICRO-PROVA-DEV47 p.6 · the header is one line now: a count past its edge
+      // is reached by scrolling the bar (whole, not cut), as Blender's headers
+      const ol = c?.closest(".one-line");
+      if (ol && c) ol.scrollLeft += c.getBoundingClientRect().right - ol.getBoundingClientRect().right + 2;
       const cr = c?.getBoundingClientRect();
       // whole AND in view: inside every clipping box around it (the strip, the
       // bar), not scrolled or cut out of them

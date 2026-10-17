@@ -9733,6 +9733,8 @@ tr.tv-sel-act > td { background: color-mix(in srgb, var(--accent) 42%, transpare
    The fades are two sticky ends of the row, not a mask: a mask would fade the menus that hang from the bar too */
 .one-line { flex-wrap: nowrap !important; overflow-x: auto; overflow-y: hidden; scrollbar-width: none; overscroll-behavior-x: contain; }
 .one-line::-webkit-scrollbar { display: none; }
+/* every child at its own width: a child that clips (a segment, a strip with its count) would shrink
+   to nothing instead of scrolling (measured: the shelf's count went to 0 px) */
 .one-line > * { flex-shrink: 0; }
 .one-line::before, .one-line::after { content: ""; position: sticky; flex: none; align-self: stretch; width: 28px; z-index: 2; pointer-events: none; opacity: 0; transition: opacity 0.15s; }
 .one-line::before { left: 0; order: -9999; margin-right: -28px; background: linear-gradient(to left, transparent, var(--ol-bg, var(--bg-panel))); }
