@@ -2421,7 +2421,11 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
         if ((intent === "pick-rm" || intent === "pick-proxy") && opts.onPick) {
           const at = { x: e.clientX, y: e.clientY };
           // the cycle is the plain click's: Shift keeps Blender's add / make active / remove
-          const key = pickUnder(hits, at, e.shiftKey ? null : lastPick, intent === "pick-rm");
+          // …and only while the last one picked is still the active one, as Blender's
+          // (a click on it again cycles; once something else is active, it is a plain pick)
+          const stillActive = !!lastPick && (lastPick.key.startsWith("sketch:") ? sketchSel === lastPick.key.slice(7)
+            : !!drawn.get(lastPick.key)?.item.active);
+          const key = pickUnder(hits, at, e.shiftKey || !stillActive ? null : lastPick, intent === "pick-rm");
           lastPick = key ? { ...at, key } : null;
           opts.onPick(key, e.shiftKey);
           return;
