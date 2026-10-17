@@ -256,7 +256,8 @@ import { shownModelName } from "./rm-names";
 import { versionError, type FlowVersion, type VersionMode } from "./lod-flow";
 import { defaultLevel, isHeavy, levelShort, levelsOf, type Level } from "./lod-levels";
 import { oneLine } from "./one-line";
-import { findSet, measureCoverage, planDeclareAlternative, planSubcontainer, type AltMode, type AltPlan, type Box, type TilesetAlternative } from "./alternatives";
+import { findSet, measureCoverage, planDeclareAlternative, planSubcontainer, SAME_COVERAGE_IOU, type AltMode, type AltPlan, type Box, type TilesetAlternative } from "./alternatives";
+import { FOOT_IN, footprintShare, leafCoverage } from "./tileset-leaves";
 import { ALT_RULE } from "./space";
 import { trackpadClassifier } from "./wheel-kind";
 import { isTilesetUrl } from "./tiles3d";
@@ -2451,6 +2452,19 @@ window.__EM_SCENE__ = () => {
   /** …a session whose refresh token is gone (the node's password, a spent one) */
   forgetRefresh: () => { hubRefreshToken = null; },
   openNodeSettings: () => openNodeSettings(),
+  /** MICRO-PROVA-DEV48 p.2 · a tileset's coverage of models (default: the other
+   *  models of its epoch), on its leaves, as the Inspector will say it */
+  coverage: async (rmId: string, members?: string[]) => {
+    const sp = currentSpace();
+    const rm = sp?.rms.find((r) => r.id === rmId);
+    if (!sp || !rm) return null;
+    const ms = members ?? sp.rms.filter((r) => r.id !== rmId && !r.resource?.tiles && r.epochs.some((e) => rm.epochs.includes(e))).map((r) => r.id);
+    const lv = await tilesetLeaves(rmId);
+    const cov = altCoverage(sp, rmId, ms, measuredBoxes(sp.rms.map((r) => r.id)), lv, spaceBox(`rm:${rmId}`));
+    const rootCov = altCoverage(sp, rmId, ms, measuredBoxes(sp.rms.map((r) => r.id)), null, spaceBox(`rm:${rmId}`));
+    return cov && { ...cov, rootIou: rootCov?.iou ?? null, tiles: lv?.tiles ?? null, members: ms.length,
+      text: coverageHelp(cov, rm.name, "·", "·").text };
+  },
   /** «Zoom to selection» · the focused graph window's camera, and whether a node
    *  is wholly on screen in it */
   viewOf: (id?: string) => {
@@ -24295,44 +24309,92 @@ function declareContainerAlternative(rmId: string, groupId: string, pre?: Readon
   const rm = sp?.rms.find((r) => r.id === rmId);
   const g = sp?.rmGroups.get(groupId);
   if (!st || !sp || !rm || !g || refuseReadOnly()) return;
-  // the coverage, on the boxes of the windows (the tileset's and the members'), before the hat moves
-  const altBox = spaceBox(`rm:${rmId}`) ?? pre?.get(rmId) ?? null;
+  // the coverage, on the boxes the windows measured before the hat moves (the
+  // redraw empties the scene until the models come back) and on the tileset's
+  // leaves (MICRO-PROVA-DEV48 p.2), read after: a help, said when it is known
   const members = g.members.filter((m) => m !== rmId);
-  const boxes = new Map<string, Box>();
-  for (const m of members) { const b = spaceBox(`rm:${m}`) ?? pre?.get(m); if (b) boxes.set(m, b); }
-  let help: { kind: "partial" | "more" | "whole"; text: string; group: string; covered?: string[] } | null = null;
-  // the members the windows have not measured (not drawn, still loading) are said, not guessed
-  const unmeasured = members.length - boxes.size;
-  if (altBox && boxes.size) {
-    const cov = measureCoverage(altBox, boxes);
-    if (cov?.coverage === "partial")
-      help = { kind: "partial", group: groupId, covered: cov.inside,
-               text: t("alt.partial", { tileset: rm.name, k: String(cov.inside.length), n: String(members.length), group: g.name }) };
-    else if (cov?.coverage === "more") {
-      // every member inside and the tileset much larger: the other models it covers
-      const others = sp.rms.filter((r) => r.id !== rmId && !members.includes(r.id) && !r.altOf).filter((r) => {
-        const b = spaceBox(`rm:${r.id}`) ?? pre?.get(r.id);
-        return !!b && [0, 1, 2].every((i) => altBox[0][i] <= (b[0][i] + b[1][i]) / 2 && (b[0][i] + b[1][i]) / 2 <= altBox[1][i]);
-      });
-      help = { kind: "more", group: groupId, text: t(others.length ? "alt.more" : "alt.moreNone", { tileset: rm.name, group: g.name, n: String(members.length), iou: cov.iou.toFixed(2), k: String(others.length),
-        names: others.slice(0, 6).map((r) => r.name).join(", ") + (others.length > 6 ? "…" : "") }) };
-    } else if (cov) help = { kind: "whole", group: groupId, text: t("alt.whole", { tileset: rm.name, n: String(members.length), group: g.name, iou: cov.iou.toFixed(2) }) };
-    if (help && unmeasured > 0) help.text += ` ${t("alt.unmeasured", { k: String(unmeasured) })}`;
-  }
+  const boxes = measuredBoxes(sp.rms.map((r) => r.id), pre);
+  const altBox = spaceBox(`rm:${rmId}`) ?? pre?.get(rmId) ?? null;
+  const leavesNow = tilesetLeaves(rmId);
+  const covNow = (lv: TilesetLeaves | null) => altCoverage(sp, rmId, members, boxes, lv, altBox);
   let plan: AltPlan;
   try { plan = planDeclareAlternative(st.doc.graph, rmId, groupId, ALT_RULE); }
   catch (e) { toast(String(e instanceof Error ? e.message : e)); return; }
   st.batch(() => applyAltPlan(st, plan));
   const dropped = plan.removeNodes.length ? ` · ${t("alt.dropped", { rm: rm.name })}` : "";
   const msg = t("alt.declared", { tileset: rm.name, group: g.name, n: String(members.length) }) + dropped;
-  // the tileset is now the container's (its id): the help goes with it
-  if (help) { altHelp.set(groupId, help); logInfo(help.text, [rmId, groupId]); }
   logInfo(msg, [groupId]);
   toastUndo(msg, st);
   buildScenes();
   draw();
   refreshSurfaces("scene");
   refreshInspector();
+  // the tileset is now the container's (its id): the help goes with it
+  void leavesNow.then((lv) => {
+    const cov = covNow(lv);
+    if (!cov) return;
+    const help = coverageHelp(cov, rm.name, g.name, groupId);
+    altHelp.set(groupId, help);
+    logInfo(help.text, [rmId, groupId]);
+    refreshInspector();
+  });
+}
+
+/** The boxes the Space windows measured now, by model (or those taken before a redraw). */
+function measuredBoxes(ids: readonly string[], pre?: ReadonlyMap<string, Box>): Map<string, Box> {
+  const out = new Map<string, Box>();
+  for (const id of ids) { const b = spaceBox(`rm:${id}`) ?? pre?.get(id); if (b) out.set(id, b); }
+  return out;
+}
+type TilesetLeaves = { boxes: Box[]; tiles: number; leaves: number; unread: string[]; regions: number };
+/** MICRO-PROVA-DEV48 p.2 · a tileset model's leaf tiles, from the first Space
+ *  window that has its layer (null: none has it, or it is not a tileset). */
+async function tilesetLeaves(rmId: string): Promise<TilesetLeaves | null> {
+  for (const h of sceneHandles.values()) {
+    const r = await h.leavesOf(`rm:${rmId}`).catch(() => null);
+    if (r?.boxes.length) return r as TilesetLeaves;
+  }
+  return null;
+}
+/** What a tileset covers of a set of models: on its leaves (MICRO-PROVA-DEV48
+ *  p.2), else on the volume its root declares (and the help says which). The
+ *  models outside the set it covers: those of no container (EM Tools' rule:
+ *  the place does not tell a survey from a reconstruction standing on it, so a
+ *  model of another container is counted apart, not «in more»). */
+interface AltCoverage { kind: "whole" | "partial" | "more"; iou: number; inside: string[]; n: number; others: string[]; otherGroups: number;
+  leaves: number | null; unread: number; unmeasured: number }
+function altCoverage(sp: Space, rmId: string, members: readonly string[], boxes: ReadonlyMap<string, Box>,
+                     lv: TilesetLeaves | null, altBox: Box | null): AltCoverage | null {
+  const mine = new Map(members.filter((m) => boxes.has(m)).map((m) => [m, boxes.get(m)!] as const));
+  if (!mine.size) return null;
+  const set = new Set(members);
+  const cands = sp.rms.filter((r) => r.id !== rmId && !set.has(r.id) && !r.altOf && !r.resource?.tiles && boxes.has(r.id));
+  let kind: AltCoverage["kind"], iouV: number, inside: string[];
+  let covers: (b: Box) => boolean;
+  if (lv?.boxes.length) {
+    const c = leafCoverage(lv.boxes, mine, SAME_COVERAGE_IOU)!;
+    kind = c.coverage; iouV = c.iou; inside = c.inside;
+    covers = (b) => footprintShare(b, lv.boxes) >= FOOT_IN;
+  } else if (altBox) {
+    const c = measureCoverage(altBox, mine)!;
+    kind = c.coverage; iouV = c.iou; inside = c.inside;
+    covers = (b) => [0, 1, 2].every((i) => altBox[0][i] <= (b[0][i] + b[1][i]) / 2 && (b[0][i] + b[1][i]) / 2 <= altBox[1][i]);
+  } else return null;
+  const hit = cands.filter((r) => covers(boxes.get(r.id)!));
+  return { kind, iou: iouV, inside, n: members.length,
+    others: hit.filter((r) => !r.group).map((r) => r.name), otherGroups: hit.filter((r) => !!r.group).length,
+    leaves: lv?.boxes.length ? lv.leaves : null, unread: lv?.unread.length ?? 0, unmeasured: members.length - mine.size };
+}
+/** …and its words: what it covers, the other models, what it was measured on. */
+function coverageHelp(cov: AltCoverage, tileset: string, group: string, groupId: string): { kind: "partial" | "more" | "whole"; text: string; group: string; covered?: string[] } {
+  const v = { tileset, group, n: String(cov.n), k: String(cov.inside.length), iou: cov.iou.toFixed(2) };
+  let text = t(cov.kind === "partial" ? "alt.partial" : cov.kind === "more" ? "alt.moreOf" : "alt.whole", v);
+  if (cov.others.length) text += ` ${t("alt.alsoOthers", { k: String(cov.others.length), names: cov.others.slice(0, 6).join(", ") + (cov.others.length > 6 ? "…" : "") })}`;
+  if (cov.otherGroups) text += ` ${t("alt.otherGroups", { k: String(cov.otherGroups) })}`;
+  if (cov.unmeasured > 0) text += ` ${t("alt.unmeasured", { k: String(cov.unmeasured) })}`;
+  text += ` ${cov.leaves != null ? t("alt.onLeaves", { k: String(cov.leaves) }) : t("alt.onRoot")}`;
+  if (cov.unread) text += ` ${t("alt.leavesUnread", { k: String(cov.unread) })}`;
+  return { kind: cov.kind, group: groupId, text, ...(cov.kind === "partial" ? { covered: cov.inside } : {}) };
 }
 
 /** MICRO-PROVA-DEV47 p.4 · «Usa un'alternativa…» on a model in the scene: its

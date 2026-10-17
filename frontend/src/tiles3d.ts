@@ -30,6 +30,7 @@
  */
 import { engine } from "./embed3d-native";
 import { NodeRoadTilesPlugin, roadFetch } from "./node-road";
+import { readLeaves, type Box, type LeafResult } from "./tileset-leaves";
 
 export type RefineMode = "manual" | "auto";
 
@@ -128,6 +129,10 @@ export interface TilesLayer {
   boxOf(uri: string): any | null;
   /** the tileset.json has arrived: `bounds()` is the root's volume */
   rootReady(): boolean;
+  /** MICRO-PROVA-DEV48 p.2 · the LEAF tiles' boxes in the world (three's frame),
+   *  read from the tileset.json and its external ones through the renderer's
+   *  own road (a `.3tz`, a room's store) — no tile loaded; once per layer */
+  leaves(): Promise<(Omit<LeafResult, "boxes"> & { boxes: Box[] }) | null>;
 }
 
 export interface TilesOptions {
@@ -196,6 +201,7 @@ export function createTilesLayer(E: any, T: any, url: string, camera0: any, rend
   tiles.lruCache.minBytesSize = Math.round(mb * 0.75) * 1024 * 1024;
 
   let mode: RefineMode = opts.mode ?? "manual";
+  let leafRead: ReturnType<TilesLayer["leaves"]> | null = null;
   const asked = new Set<any>();
   const history: any[] = [];
   const sceneToTile = new Map<any, any>();
@@ -382,6 +388,30 @@ export function createTilesLayer(E: any, T: any, url: string, camera0: any, rend
       return box;
     },
     rootReady: () => rootReady,
+    leaves() {
+      leafRead ??= (async () => {
+        // the renderer's road: its plugins turn the URL (an archive's base) and fetch it (signed, from the archive)
+        const readJson = async (u: string): Promise<Record<string, unknown> | null> => {
+          let pu = u;
+          tiles.invokeAllPlugins((p: any) => { pu = p.preprocessURL ? p.preprocessURL(pu, null) : pu; });
+          try {
+            const res = await tiles.invokeOnePlugin((p: any) => p.fetchData && p.fetchData(pu, tiles.fetchOptions));
+            if (!(res instanceof Response)) return res ?? null;
+            return res.ok ? await res.json() : null;
+          } catch { return null; }
+        };
+        const r = await readLeaves(new URL(url, document.baseURI).href, readJson);
+        if (!r) return null;
+        tiles.group.updateMatrixWorld(true);
+        const m = tiles.group.matrixWorld;
+        const world = r.boxes.map((b): Box => {
+          const w = new THREE.Box3(new THREE.Vector3(...b[0]), new THREE.Vector3(...b[1])).applyMatrix4(m);
+          return [[w.min.x, w.min.y, w.min.z], [w.max.x, w.max.y, w.max.z]];
+        });
+        return { ...r, boxes: world };
+      })();
+      return leafRead;
+    },
   };
   return layer;
 }

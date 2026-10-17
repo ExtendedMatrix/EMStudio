@@ -221,6 +221,9 @@ export interface SpaceSceneHandle {
   localCentre(key: string): V3 | null;
   /** the world box of a drawn object (three's axes), null when not drawn */
   boxOf(key: string): [V3, V3] | null;
+  /** MICRO-PROVA-DEV48 p.2 · a tileset model's leaf tiles (`rm:<id>`), in the
+   *  scene's frame; null when the scene has no layer for it */
+  leavesOf(key: string): Promise<{ boxes: [V3, V3][]; tiles: number; leaves: number; unread: string[]; regions: number } | null>;
   /** MICRO-SPAZIO-3D-2 · the view (aligned, orthographic) and the lens */
   view(): SceneView;
   setView(v: AlignedView): void;
@@ -2698,6 +2701,11 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
         applyOverlays,
         drawnUrl: (k: string) => drawn.get(k)?.url,
         localCentre: (k: string) => localCentre(k),
+        leavesOf: (k: string) => {
+          // every layer of the item, shown or not: the leaves are the tileset's JSON
+          const l = [...layers.values()].find((x) => `rm:${x.itemId}` === k);
+          return l ? l.layer.leaves() as Promise<any> : Promise.resolve(null);
+        },
         boxOf: (k: string) => {
           // a tileset: the volume its tileset.json DECLARES (the root's
           // boundingVolume, as the automatic choice reads it), not the content
@@ -2748,6 +2756,7 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
     drawnUrl: (k) => api.drawnUrl?.(k),
     localCentre: (k) => api.localCentre?.(k) ?? null,
     boxOf: (k) => api.boxOf?.(k) ?? null,
+    leavesOf: (k) => api.leavesOf?.(k) ?? Promise.resolve(null),
     view: () => api.view?.() ?? { view: null, ortho: false, fov: 40, lensMm: 33 },
     setView: (v) => api.setView?.(v),
     toggleOrtho: () => api.toggleOrtho?.(),
