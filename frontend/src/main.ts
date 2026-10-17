@@ -436,7 +436,7 @@ import { adornmentBadges, type AdornmentBadge } from "./adornments";
 import { drawnPdChips, hitPdChip } from "./pd-chip";
 import {
   defaultOverlays, drawnOverlayCounts, loadOverlays, NOBODY, OVERLAY_GROUPS, overlayItemsFor, overlayShown, overlaysHideSomething,
-  saveOverlays, withGroup, withOverlay, type OverlayKey, type OverlayState, type OverlayView,
+  overlayValue, saveOverlays, withGroup, withOverlay, withValue, type OverlayKey, type OverlayState, type OverlayView,
 } from "./overlays";
 import { PD_CELL } from "./views/pd-arrange";
 import { documentDating, entityEpoch, epochBounds, topEpochOf } from "./doc-dating";
@@ -15165,6 +15165,16 @@ btnOverlays.addEventListener("click", (e) => {
 function overlayViewName(v: OverlayView): string {
   return v === "soloing" ? t("ov.view.soloing") : v === "space" ? t("ov.view.space") : t(`mode.${v}`);
 }
+/** MICRO-GIZMO-ASSI · the menu's folded groups, on this machine */
+const OV_FOLDED_KEY = "emstudio.overlayGroupsFolded";
+function overlayGroupsFolded(): Set<string> {
+  try { const v = JSON.parse(localStorage.getItem(OV_FOLDED_KEY) ?? "[]"); return new Set(Array.isArray(v) ? v.map(String) : []); } catch { return new Set(); }
+}
+function setOverlayGroupFolded(g: string, folded: boolean): void {
+  const s = overlayGroupsFolded();
+  if (folded) s.add(g); else s.delete(g);
+  try { localStorage.setItem(OV_FOLDED_KEY, JSON.stringify([...s])); } catch { /* private mode */ }
+}
 function renderOverlayPanel(): void {
   const v = focusedOverlayView();
   const st = overlaysOf(v);
@@ -15197,14 +15207,29 @@ function renderOverlayPanel(): void {
   const can = new Set(overlayItemsFor(v).map((i) => i.key));
   for (const g of OVERLAY_GROUPS) {
     const items = g.items.filter((i) => can.has(i.key));
-    if (!items.length) continue;
+    // MICRO-GIZMO-ASSI · the Space's «Geometry»: sliders, no switch
+    const values = v === "space" ? g.values ?? [] : [];
+    if (!items.length && !values.length) continue;
     const sec = document.createElement("div");
     sec.className = "ov-group";
     sec.dataset.group = g.key;
+    // MICRO-GIZMO-ASSI · a group's title folds it, as Blender's panels (remembered on this machine)
+    const folded = overlayGroupsFolded().has(g.key);
+    sec.classList.toggle("folded", folded);
     const gh = document.createElement("div");
     gh.className = "ov-group-head";
+    const fold = document.createElement("button");
+    fold.type = "button";
+    fold.className = "ov-fold";
+    fold.dataset.ovFold = g.key;
+    fold.textContent = folded ? "▸" : "▾";
+    fold.setAttribute("aria-expanded", String(!folded));
+    fold.addEventListener("click", () => { setOverlayGroupFolded(g.key, !overlayGroupsFolded().has(g.key)); renderOverlayPanel(); });
     const gl = document.createElement("span");
     gl.textContent = t(`ov.group.${g.key}`);
+    gl.style.cursor = "pointer";
+    gl.addEventListener("click", () => fold.click());
+    gh.appendChild(fold);
     const allB = document.createElement("button");
     allB.type = "button";
     allB.className = "ov-link";
@@ -15217,8 +15242,31 @@ function renderOverlayPanel(): void {
     noneB.dataset.ovNone = g.key;
     noneB.textContent = t("ov.none");
     noneB.addEventListener("click", () => setOverlays(v, withGroup(overlaysOf(v), g.key, false, v)));
-    gh.append(gl, allB, noneB);
+    gh.append(gl);
+    if (items.length) gh.append(allB, noneB);
     sec.appendChild(gh);
+    for (const it of values) {
+      const row = document.createElement("label");
+      row.className = "ov-range";
+      const lab = document.createElement("span");
+      lab.textContent = t(`ov.value.${it.key}`);
+      const out = document.createElement("output");
+      const r = document.createElement("input");
+      r.type = "range";
+      r.min = String(it.min); r.max = String(it.max); r.step = String(it.step);
+      r.value = String(overlayValue(st, it.key));
+      r.dataset.ovValue = it.key;
+      out.textContent = `${Math.round(Number(r.value) * 100)} %`;
+      r.addEventListener("input", () => {
+        out.textContent = `${Math.round(Number(r.value) * 100)} %`;
+        const next = withValue(overlaysOf(v), it.key, Number(r.value));
+        overlayMemo.set(`${overlayPerson()}|${v}`, next);
+        saveOverlays(overlayPerson(), v, next);
+        for (const h of sceneHandles.values()) h.applyOverlays();
+      });
+      row.append(lab, out, r);
+      sec.appendChild(row);
+    }
     for (const it of items) {
       const row = document.createElement("label");
       row.className = "ov-row";
@@ -22201,6 +22249,8 @@ function setMiddleSeen(): void {
 let spaceCursorRot: V3 = [0, 0, 0];
 const VIEW_NAMES: Record<AlignedView, string> = { front: "s3.vFront", back: "s3.vBack", right: "s3.vRight",
   left: "s3.vLeft", top: "s3.vTop", bottom: "s3.vBottom" };
+/** MICRO-GIZMO-ASSI · the keypad's key of each view (Ctrl: the opposite, as Blender's, on a Mac too) */
+const VIEW_KEYS: Record<AlignedView, string> = { front: "1", back: "Ctrl+1", right: "3", left: "Ctrl+3", top: "7", bottom: "Ctrl+7" };
 function viewName(v: AlignedView | null, ortho: boolean): string {
   return `${t(v ? VIEW_NAMES[v] : "s3.vUser")} · ${t(ortho ? "s3.vOrtho" : "s3.vPersp")}`;
 }
@@ -23686,6 +23736,10 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
       lodNote: (n) => t("lod.note", { n: String(n) }),
       boxZoom: t("s3.boxZoom"), modalHint: t("s3.modalHint"),
       viewName, centreEmpty: t("s3.centreEmpty"),
+      // MICRO-GIZMO-ASSI · the navigation gizmo: an end names its view and its key
+      gizmo: { axis: (_a, view) => { const name = t(VIEW_NAMES[view]);
+          return t("s3.gzView", { view: name, viewLow: name.charAt(0).toLocaleLowerCase(getLocale()) + name.slice(1), key: VIEW_KEYS[view] }); },
+        zoom: t("s3.gzZoom"), pan: t("s3.gzPan"), home: t("s3.gzHome"), ortho: t("s3.gzOrtho"), label: t("s3.gzLabel") },
       modalWords: { grab: t("s3.mGrab"), rotate: t("s3.mRotate"), scale: t("s3.mScale"), plane: t("s3.mPlane"),
         local: t("s3.mLocal"), free: t("s3.mFree") },
       num: (v, d) => v.toLocaleString(getLocale(), { minimumFractionDigits: d, maximumFractionDigits: d, useGrouping: false }),
@@ -23738,6 +23792,7 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
     tilesMemoryMB: getSettings().viewer.tilesMemoryMB,
     isFocused: () => activeWin().id === win.id,
     overlay: (k) => space3dShown(k),
+    overlayValue: (k) => overlayValue(overlaysOf("space"), k),
     locked: () => new Set(space3dPrefs().locked),
     sketchVisible: (id) => { const k = `sketch:${id}`; return !space3dPrefs().hidden.includes(k) && (!spaceIsolated || spaceIsolated === k); },
     epochLabel: () => { const sp = currentSpace(); const e = sp ? spaceEpochOf(sp) : null; return e ? String(store?.node(e)?.name ?? e) : ""; },

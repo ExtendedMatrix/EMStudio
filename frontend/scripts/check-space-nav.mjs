@@ -202,4 +202,37 @@ const dist = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]);
   eq(W.fingersOf({ deltaMode: 0, deltaX: 12, deltaY: -3, webkitDirectionInvertedFromDevice: false }), [12, -3], "WebKit says not inverted (natural scrolling off): the deltas are the fingers'");
 }
 
+// ── MICRO-GIZMO-ASSI · the navigation gizmo: one function with the keypad ──
+{
+  eq(Object.fromEntries(["x", "-x", "y", "-y", "z", "-z"].map((a) => [a, N.gizmoView(a, null)])),
+    { x: "right", "-x": "left", y: "back", "-y": "front", z: "top", "-z": "bottom" }, "the ends: X right (3), −X left, Y back (Ctrl+1), −Y front (1), Z top (7), −Z bottom");
+  const key = (code, ctrl = false) => N.keypadAction({ code, key: "", ctrlKey: ctrl, metaKey: false, altKey: false, shiftKey: false }, false).view;
+  eq([N.gizmoView("x", null), N.gizmoView("-x", null), N.gizmoView("y", null), N.gizmoView("-y", null), N.gizmoView("z", null), N.gizmoView("-z", null)],
+    [key("Numpad3"), key("Numpad3", true), key("Numpad1", true), key("Numpad1"), key("Numpad7"), key("Numpad7", true)], "…the keypad's views, key by key");
+  eq(N.gizmoView("-y", "front"), "back", "a click on the end already aligned: the opposite, as Blender");
+  eq(N.gizmoView("z", "top"), "bottom", "…Top → Bottom");
+  eq(N.gizmoView("x", "front"), "right", "another end: its own view");
+  const cam0 = { pos: [3, 2, 9], target: [1, 0, -1] };
+  const front = N.alignedView(cam0, "front");
+  const lay = N.gizmoLayout(front, 40);
+  eq(lay[lay.length - 1].axis, "-y", "in the Front view the −Y end faces the viewer: drawn last, in front");
+  near(lay.find((e) => e.axis === "-y").x, 0, 1e-9, "…in the middle");
+  ok(lay.find((e) => e.axis === "z").y < -39.99 && Math.abs(lay.find((e) => e.axis === "x").x - 40) < 1e-6, "…Z up, X to the right");
+  eq(N.gizmoHit(lay, 0, 0, 10), "-y", "a click in the middle takes the nearest (−Y, not Y behind it)");
+  eq(N.gizmoHit(lay, 40, 0, 10), "x", "a click on the right: X");
+  eq(N.gizmoHit(lay, 20, 20, 10), null, "between the ends: none (a drag orbits)");
+  const top = N.gizmoLayout(N.alignedView(cam0, "top"), 40);
+  eq(top[top.length - 1].axis, "z", "from the top: Z faces the viewer");
+  ok(top.find((e) => e.axis === "y").y < -39, "…and Blender's +Y goes up the screen");
+  // the passage: it starts where the camera is and ends on the very view
+  for (const [a, b] of [["front", "right"], ["front", "back"], ["top", "bottom"], ["left", "top"]]) {
+    const A = N.alignedView(cam0, a), B = N.alignedView(cam0, b);
+    eq(N.viewBetween(A, B, 0), A, `${a} → ${b}: t = 0 is the start`);
+    eq(N.viewBetween(A, B, 1), B, `${a} → ${b}: t = 1 is the keypad's camera, exactly`);
+    const m = N.viewBetween(A, B, 0.5);
+    near(Math.hypot(...m.pos.map((v, i) => v - m.target[i])), Math.hypot(...A.pos.map((v, i) => v - A.target[i])), 1e-9, `${a} → ${b}: halfway, the same distance from the pivot`);
+    ok(m.pos.every(Number.isFinite), `${a} → ${b}: halfway, a finite camera (opposite views turn through the side)`);
+  }
+}
+
 console.log(`check-space-nav: ${checks} checks passed`);

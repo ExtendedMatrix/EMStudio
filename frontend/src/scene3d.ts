@@ -48,11 +48,12 @@ import { engine, headBytes, lodLevelOf, probeLods, tilesBarTexts } from "./embed
 import { onFirstVisible } from "./lazy";
 import { nodeBytes, ownedByNode, RoadError, type FetchFailure } from "./node-road";
 import { createTilesLayer, dracoFor, formatBytes, isTilesetUrl, tilesBar, tilesEngine, type TilesLayer } from "./tiles3d";
-import type { OverlayKey } from "./overlays";
+import type { OverlayKey, OverlayValueKey } from "./overlays";
 import {
   alignedView, AXIS_INDEX, AXIS_VECTOR, boxZoom, freeAxes, modalHeader, threeToBlender, type ModalWords, clipPlanes, detailZoom, DRAG_PX, dragIntent, dragZoomFactor,
   frameSphere, grabPan, isMacPlatform, keypadAction, modalKey, modalLabel, modalValue, orthoBoxZoom, orthoHalf, orthoZoom,
   pointerIntent, sceneCentre, spaceKeyAction, startModal, wheelFactor, zoomTowards,
+  gizmoHit, gizmoLayout, gizmoView, viewBetween, GIZMO_AXES, type GizmoAxis,
   type AlignedView, type Box6, type CamState, type DragIntent, type ModalMode, type ModalState, type Pose,
   type SpaceKeyAction, type V3,
 } from "./space-nav";
@@ -134,6 +135,9 @@ export interface SceneTexts {
   viewName?: (view: AlignedView | null, ortho: boolean) => string;
   /** Shift+C on an empty scene */
   centreEmpty?: string;
+  /** MICRO-GIZMO-ASSI · the navigation gizmo's tooltips: an end («Vista
+   *  frontale (1)»), the column (zoom, pan, frame all, perspective ⇄ orthographic) */
+  gizmo?: { axis: (a: GizmoAxis, view: AlignedView) => string; zoom: string; pan: string; home: string; ortho: string; label: string };
 }
 
 /** MICRO-SPAZIO-3D-2 · what the Preferences say of the navigation. */
@@ -243,6 +247,8 @@ export interface SpaceSceneOptions {
   isFocused?: () => boolean;
   /** the Space's overlays (`overlays.ts`, view `space`) */
   overlay?: (k: OverlayKey) => boolean;
+  /** MICRO-GIZMO-ASSI · the sliders of «Geometry» (the proxies' opacity) */
+  overlayValue?: (k: OverlayValueKey) => number;
   /** items not selectable (the Outliner's arrow), by key */
   locked?: () => ReadonlySet<string>;
   /** a sketch shown (the Outliner's eye, «Isola») */
@@ -330,7 +336,10 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
   let frameIt: (() => void) | null = null;
   let cleanup: (() => void) | null = null;
   const drawn = new Map<string, Drawn>();
-  const ov = (k: OverlayKey): boolean => opts.overlay?.(k) ?? (k !== "s3_proxy_wire");
+  const ov = (k: OverlayKey): boolean => opts.overlay?.(k) ?? (k !== "s3_proxy_wire" && k !== "s3_axis_z" && k !== "s3_labels_sketch");
+  const val = (k: OverlayValueKey, def: number): number => opts.overlayValue?.(k) ?? def;
+  /** MICRO-GIZMO-ASSI · the proxies' opacity, filled or in wireframe */
+  const proxyOpacity = (): number => (ov("s3_proxy_wire") ? val("s3_opacity_wire", 0.9) : val("s3_opacity_proxy", 0.42));
   // MICRO-SPAZIO-3D · the parts the handle reaches once the engine is up
   let api: Partial<SpaceSceneHandle> = {};
   let cursorAt: V3 = [0, 0, 0];
@@ -343,6 +352,11 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
     __space?: () => unknown;
     __spaceScreenOf?: (id: string) => { x: number; y: number } | null;
     __spaceCamera?: () => number[];
+    /** MICRO-GIZMO-ASSI · the navigation gizmo, the camera's matrices, a camera set */
+    __spaceGizmo?: () => unknown;
+    __spaceCamMatrix?: () => unknown;
+    __spaceSetCam?: (c: CamState) => void;
+    __spaceCamState?: () => CamState;
     __spaceTiles?: () => unknown;
     __spaceTileScreenOf?: (uri: string) => { x: number; y: number } | null;
     /** TEMPLU MARE v2 · C1 · the world box of what an item drew (a model's
@@ -567,7 +581,7 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
         c.setRGB(r, g, b, THREE.LinearSRGBColorSpace);
         // MICRO-SPAZIO-3D · «in fil di ferro»: the overlay draws the proxies as wire
         const wire = ov("s3_proxy_wire");
-        return new THREE.MeshLambertMaterial({ color: c, transparent: true, opacity: wire ? 0.9 : 0.42,
+        return new THREE.MeshLambertMaterial({ color: c, transparent: true, opacity: proxyOpacity(),
           depthWrite: false, wireframe: wire });
       };
       const selOutline = (item: SceneItem) => item.selected && ov("s3_sel_outline");
@@ -683,14 +697,37 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
         applyCam(c);
         showView();
       };
-      /** keypad 1 3 7 (Ctrl: the opposite): Blender's six views, around the pivot */
+      /** MICRO-GIZMO-ASSI · the passage to an aligned view, about 200 ms as
+       *  Blender's «Smooth View» (none with the system's «Reduce motion»): it
+       *  ends on the very camera the keypad gives, and a gesture ends it at once */
+      const VIEW_MS = 200;
+      let anim: { from: CamState; to: CamState; t0: number; view: AlignedView } | null = null;
+      const reduceMotion = (): boolean => { try { return !!globalThis.matchMedia?.("(prefers-reduced-motion: reduce)").matches; } catch { return false; } };
+      const finishAnim = () => {
+        if (!anim) return;
+        const a = anim;
+        anim = null;
+        applyCam(a.to);
+        aligned = a.view;
+        showView();
+      };
+      const stepAnim = (now: number) => {
+        if (!anim) return;
+        const t = (now - anim.t0) / VIEW_MS;
+        if (t >= 1) { finishAnim(); return; }
+        applyCam(viewBetween(anim.from, anim.to, t));
+      };
+      /** keypad 1 3 7 (Ctrl: the opposite) and the gizmo's ends: Blender's six
+       *  views, around the pivot — ONE function for both */
       const setAligned = (v: AlignedView) => {
+        finishAnim();
         // Auto Perspective: an aligned view is orthographic, and its
         // orthographic is the view's (an orbit takes it back)
         if (getNav().autoPerspective) { if (!isOrtho) setOrtho(true); orthoAuto = true; }
-        applyCam(alignedView(camState(), v));
-        aligned = v;
-        showView();
+        const from = camState();
+        const to = alignedView(from, v);
+        if (reduceMotion()) { applyCam(to); aligned = v; showView(); return; }
+        anim = { from, to, t0: performance.now(), view: v };
       };
       /** an orbit leaves the aligned view; with Auto Perspective, the
        *  orthographic it had put goes with it */
@@ -784,9 +821,11 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
       };
       /** MICRO-SPAZIO-3D-2 · in orthographic the scale changes, not the place */
       const zoomToward = (p: V3, factor: number) => {
+        finishAnim();
         applyCam(isOrtho ? orthoZoom(camState(), p, factor) : zoomTowards(camState(), p, factor));
       };
       const orbitBy = (dx: number, dy: number) => {
+        finishAnim();
         leaveAligned();
         const off = new THREE.Vector3().subVectors(camera.position, controls.target);
         const sph = new THREE.Spherical().setFromVector3(off);
@@ -801,6 +840,7 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
        *  point grabbed — the surface under the pointer, else the orbit centre's
        *  depth — stays under the pointer */
       const panBy = (dx: number, dy: number, grab?: V3 | null) => {
+        finishAnim();
         const H = Math.max(1, renderer.domElement.clientHeight);
         const fwd = new THREE.Vector3().subVectors(controls.target, camera.position).normalize();
         const depth = grab ? v3(grab).sub(camera.position).dot(fwd) : camera.position.distanceTo(controls.target);
@@ -813,6 +853,206 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
         controls.target.add(d);
         controls.update();
       };
+      // ── MICRO-GIZMO-ASSI · the navigation gizmo, top right, as Blender's ──
+      // A 2D canvas over the scene (never in its raycast): the six ends of the
+      // data's axes as the camera sees them, the nearest in front; full balls
+      // with their letter for +X +Y +Z, hollow paler ones for the negatives. A
+      // click looks along the axis (the keypad's views, `setAligned`), again on
+      // the aligned one the opposite; a drag orbits about the orbit centre.
+      // Under it the column: zoom (drag up and down), pan (drag), frame all
+      // (Home: there is no camera object here), perspective ⇄ orthographic (5).
+      // Each end is a button too: Tab reaches it, Enter chooses, the tooltip
+      // names the view and its key.
+      const NAV_R = 34, BALL = 10, NAV_PAD = 6;
+      const NAV_SIZE = 2 * (NAV_R + BALL + NAV_PAD);
+      const NAV_COL: Record<"x" | "y" | "z", string> = { x: "#ff3352", y: "#8bdc00", z: "#2890ff" };   // Blender's theme
+      const navEl = document.createElement("div");
+      navEl.className = "scn-nav";
+      navEl.setAttribute("role", "group");
+      navEl.setAttribute("aria-label", opts.texts.gizmo?.label ?? "Navigation");
+      const navBox = document.createElement("div");
+      navBox.className = "scn-nav-box";
+      navBox.style.width = navBox.style.height = `${NAV_SIZE}px`;
+      // an SVG, not a 2D canvas: measured on Templu Mare, a canvas's strokes
+      // after the WebGL frame cost 1.9 ms each drawing (the GPU's sync), the
+      // same figure in SVG attributes 0.1 ms
+      const SVGNS = "http://www.w3.org/2000/svg";
+      const navSvg = document.createElementNS(SVGNS, "svg");
+      navSvg.setAttribute("class", "scn-nav-cv");
+      navSvg.setAttribute("width", String(NAV_SIZE));
+      navSvg.setAttribute("height", String(NAV_SIZE));
+      navSvg.setAttribute("aria-hidden", "true");
+      const navHalo = document.createElementNS(SVGNS, "circle");
+      navHalo.setAttribute("cx", String(NAV_SIZE / 2)); navHalo.setAttribute("cy", String(NAV_SIZE / 2));
+      navHalo.setAttribute("r", String(NAV_R + BALL + 2));
+      navHalo.setAttribute("class", "scn-nav-halo");
+      navSvg.appendChild(navHalo);
+      const navParts = new Map<GizmoAxis, { g: SVGGElement; line: SVGLineElement | null }>();
+      for (const a of GIZMO_AXES) {
+        const pos = !a.startsWith("-");
+        const col = NAV_COL[a.replace("-", "") as "x" | "y" | "z"];
+        const g = document.createElementNS(SVGNS, "g");
+        let line: SVGLineElement | null = null;
+        if (pos) {
+          line = document.createElementNS(SVGNS, "line");
+          line.setAttribute("x2", String(NAV_SIZE / 2)); line.setAttribute("y2", String(NAV_SIZE / 2));
+          line.setAttribute("stroke", col); line.setAttribute("stroke-width", "2");
+          g.appendChild(line);
+        }
+        // in the group's frame the ball sits at the centre; the group moves
+        const ball = document.createElementNS(SVGNS, "circle");
+        ball.setAttribute("cx", String(NAV_SIZE / 2)); ball.setAttribute("cy", String(NAV_SIZE / 2));
+        ball.setAttribute("r", String(pos ? BALL : BALL - 1));
+        ball.setAttribute("fill", col);
+        if (!pos) { ball.setAttribute("fill-opacity", "0.35"); ball.setAttribute("stroke", col); ball.setAttribute("stroke-width", "1.5"); }
+        g.appendChild(ball);
+        if (pos) {
+          const tx = document.createElementNS(SVGNS, "text");
+          tx.textContent = a.toUpperCase();
+          tx.setAttribute("class", "scn-nav-letter");
+          tx.setAttribute("x", String(NAV_SIZE / 2)); tx.setAttribute("y", String(NAV_SIZE / 2));
+          g.appendChild(tx);
+        }
+        navParts.set(a, { g, line });
+        navSvg.appendChild(g);
+      }
+      navBox.appendChild(navSvg);
+      const balls = new Map<GizmoAxis, HTMLButtonElement>();
+      for (const a of GIZMO_AXES) {
+        const b = document.createElement("button");
+        b.type = "button";
+        b.className = `scn-nav-ball ${a.startsWith("-") ? "neg" : "pos"}`;
+        b.dataset.axis = a;
+        b.style.width = b.style.height = `${2 * BALL}px`;
+        // a click of the pointer is read on release (a drag orbits); the
+        // keyboard's (detail 0) here
+        b.addEventListener("click", (e) => { if (e.detail === 0) setAligned(gizmoView(a, aligned)); });
+        balls.set(a, b);
+        navBox.appendChild(b);
+      }
+      const navCol = document.createElement("div");
+      navCol.className = "scn-nav-col";
+      const ICON: Record<string, string> = {
+        zoom: '<svg viewBox="0 0 16 16" width="15" height="15"><circle cx="6.5" cy="6.5" r="4.2" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M9.6 9.6 14 14" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>',
+        pan: '<svg viewBox="0 0 16 16" width="15" height="15"><path d="M5 8V3.5a1 1 0 0 1 2 0V7m0-4.5v-.2a1 1 0 0 1 2 0V7m0-4a1 1 0 0 1 2 0V7.5m0-2.5a1 1 0 0 1 2 0V10c0 2.6-1.9 4.5-4.5 4.5S4.3 13 3.4 11.4L2.2 9.2a1 1 0 0 1 1.7-1L5 9.6" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" stroke-linecap="round"/></svg>',
+        home: '<svg viewBox="0 0 16 16" width="15" height="15"><path d="M2 5V2h3M11 2h3v3M14 11v3h-3M5 14H2v-3" fill="none" stroke="currentColor" stroke-width="1.6"/><rect x="5.5" y="5.5" width="5" height="5" fill="none" stroke="currentColor" stroke-width="1.2"/></svg>',
+        ortho: '<svg viewBox="0 0 16 16" width="15" height="15"><path d="M2 2h12v12H2zM6 2v12M10 2v12M2 6h12M2 10h12" fill="none" stroke="currentColor" stroke-width="1.1"/></svg>',
+        persp: '<svg viewBox="0 0 16 16" width="15" height="15"><path d="M4 3h8l3 11H1zM6.6 3 5.6 14M9.4 3l1 11M3 7.5h10M2 11h12" fill="none" stroke="currentColor" stroke-width="1.1" stroke-linejoin="round"/></svg>',
+      };
+      const colBtn = (act: string, title: string): HTMLButtonElement => {
+        const b = document.createElement("button");
+        b.type = "button";
+        b.className = "scn-nav-btn";
+        b.dataset.nav = act;
+        b.title = title;
+        b.setAttribute("aria-label", title);
+        b.innerHTML = ICON[act];
+        navCol.appendChild(b);
+        return b;
+      };
+      const zoomBtn = colBtn("zoom", opts.texts.gizmo?.zoom ?? "Zoom (drag)");
+      const panBtn = colBtn("pan", opts.texts.gizmo?.pan ?? "Pan (drag)");
+      const homeBtn = colBtn("home", opts.texts.gizmo?.home ?? "Frame all (Home)");
+      const orthoBtn = colBtn("ortho", opts.texts.gizmo?.ortho ?? "Perspective / Orthographic (5)");
+      navEl.append(navBox, navCol);
+      homeBtn.addEventListener("click", () => frameIt?.());
+      orthoBtn.addEventListener("click", () => { finishAnim(); orthoAuto = false; setOrtho(!isOrtho); });
+      /** a press on the gizmo or on a button of the column, followed to its release */
+      const navDrag = (el: HTMLElement, onMove: (dx: number, dy: number) => void, onClick?: (x: number, y: number) => void) => {
+        el.addEventListener("pointerdown", (e: PointerEvent) => {
+          if (e.button !== 0 && e.button !== 1) return;
+          e.preventDefault();
+          e.stopPropagation();
+          el.setPointerCapture?.(e.pointerId);
+          let lx = e.clientX, ly = e.clientY, moved = false;
+          const x0 = e.clientX, y0 = e.clientY;
+          const mv = (ev: PointerEvent) => {
+            if (!moved && Math.hypot(ev.clientX - x0, ev.clientY - y0) <= DRAG_PX) return;
+            moved = true;
+            onMove(ev.clientX - lx, ev.clientY - ly);
+            lx = ev.clientX; ly = ev.clientY;
+          };
+          const up = (ev: PointerEvent) => {
+            el.removeEventListener("pointermove", mv);
+            el.removeEventListener("pointerup", up);
+            el.removeEventListener("pointercancel", up);
+            el.releasePointerCapture?.(e.pointerId);
+            if (!moved && ev.type === "pointerup") onClick?.(ev.clientX, ev.clientY);
+          };
+          el.addEventListener("pointermove", mv);
+          el.addEventListener("pointerup", up);
+          el.addEventListener("pointercancel", up);
+        });
+      };
+      let navLayout: ReturnType<typeof gizmoLayout> = [];
+      navDrag(navBox, (dx, dy) => orbitBy(dx, dy), (x, y) => {
+        const r = navBox.getBoundingClientRect();
+        const a = gizmoHit(navLayout, x - r.left - NAV_SIZE / 2, y - r.top - NAV_SIZE / 2, BALL + 1);
+        if (a) setAligned(gizmoView(a, anim ? anim.view : aligned));
+      });
+      // the lens: up is nearer, as the Ctrl + middle drag
+      navDrag(zoomBtn, (_dx, dy) => zoomToward(arr(controls.target), dragZoomFactor(dy)));
+      navDrag(panBtn, (dx, dy) => panBy(dx, dy));
+      let navHover = false;
+      navBox.addEventListener("pointerenter", () => { navHover = true; navKey = ""; });
+      navBox.addEventListener("pointerleave", () => { navHover = false; navKey = ""; });
+      let navKey = "";
+      let navTipsFor: AlignedView | null | undefined = undefined;
+      /** what one drawing of the gizmo costs (ms), measured at every frame it is drawn */
+      const navCost = { n: 0, sum: 0, max: 0, last: 0 };
+      const drawNav = () => {
+        const on = ov("s3_navgizmo");
+        navEl.style.display = on ? "" : "none";
+        if (!on) return;
+        const t0 = performance.now();
+        const st = camState();
+        const key = `${st.pos.map((v) => v.toFixed(5))}|${st.target.map((v) => v.toFixed(5))}|${isOrtho}|${navHover}`;
+        if (key === navKey) return;
+        navKey = key;
+        const icon = isOrtho ? "persp" : "ortho";
+        if (orthoBtn.dataset.icon !== icon) { orthoBtn.dataset.icon = icon; orthoBtn.innerHTML = ICON[icon]; }
+        navLayout = gizmoLayout(st, NAV_R);
+        navHalo.style.display = navHover ? "" : "none";
+        const c = NAV_SIZE / 2;
+        const order = navLayout.map((e) => e.axis).join();
+        const reorder = navSvg.dataset.order !== order;
+        if (reorder) navSvg.dataset.order = order;
+        navLayout.forEach((e, i) => {
+          const dx = Math.round(e.x * 10) / 10, dy = Math.round(e.y * 10) / 10;
+          const x = c + dx, y = c + dy;
+          const part = navParts.get(e.axis)!;
+          // the nearest drawn last, in front
+          if (reorder) navSvg.appendChild(part.g);
+          part.g.setAttribute("transform", `translate(${dx} ${dy})`);
+          // the arm, from the gizmo's centre (in the group's frame, −d from the ball)
+          if (part.line) { part.line.setAttribute("x1", String(c - dx)); part.line.setAttribute("y1", String(c - dy)); }
+          const b = balls.get(e.axis)!;
+          // the DOM only where it changed: a write per frame per ball costs more than the drawing
+          const at = `${Math.round(x - BALL)},${Math.round(y - BALL)},${i + 1}`;
+          if (b.dataset.at !== at) {
+            b.dataset.at = at;
+            b.style.left = `${Math.round(x - BALL)}px`;
+            b.style.top = `${Math.round(y - BALL)}px`;
+            b.style.zIndex = String(i + 1);
+          }
+        });
+        if (navTipsFor !== aligned) {
+          navTipsFor = aligned;
+          for (const [a, b] of balls) {
+            const tip = opts.texts.gizmo?.axis(a, gizmoView(a, aligned)) ?? a;
+            b.title = tip; b.setAttribute("aria-label", tip);
+          }
+        }
+        const dt = performance.now() - t0;
+        navCost.n++; navCost.sum += dt; navCost.last = dt; if (dt > navCost.max) navCost.max = dt;
+      };
+      probe.__spaceGizmo = () => ({ shown: navEl.style.display !== "none", aligned, animating: !!anim,
+        balls: navLayout.map((e) => { const r = balls.get(e.axis)!.getBoundingClientRect(); return { axis: e.axis, x: r.left + r.width / 2, y: r.top + r.height / 2, depth: Math.round(e.depth * 1000) / 1000 }; }),
+        cost: { n: navCost.n, avg: navCost.n ? navCost.sum / navCost.n : 0, max: navCost.max, last: navCost.last } });
+      probe.__spaceCamMatrix = () => { camera.updateMatrixWorld(true); return { ortho: isOrtho, view: aligned, world: [...camera.matrixWorld.elements], proj: [...camera.projectionMatrix.elements] }; };
+      probe.__spaceSetCam = (c: CamState) => { finishAnim(); if (isOrtho) { orthoAuto = false; setOrtho(false); } applyCam(c); if (aligned) { aligned = null; showView(); } };
+      probe.__spaceCamState = () => camState();
+
       /** a box of objects (a model's meshes, a tileset's tiles, a proxy, a sketch) */
       const boxOfKey = (k: string): any | null => {
         const [kind, ...rest] = k.split(":");
@@ -841,7 +1081,7 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
       // ── the sketches ─────────────────────────────────────────────────────
       const sketchMeshes = new Map<string, any>();
       const sketchMaterial = () => new THREE.MeshLambertMaterial({ color: new THREE.Color("#d9822b"), transparent: true,
-        opacity: ov("s3_proxy_wire") ? 0.9 : 0.55, depthWrite: false, wireframe: ov("s3_proxy_wire") });
+        opacity: ov("s3_proxy_wire") ? val("s3_opacity_wire", 0.9) : 0.55, depthWrite: false, wireframe: ov("s3_proxy_wire") });
       const poseOf = (m: any): Pose => ({ position: arr(m.position), rotation: [m.rotation.x, m.rotation.y, m.rotation.z], scale: arr(m.scale) });
       const setPose = (m: any, p: Pose) => {
         m.position.set(...p.position);
@@ -939,24 +1179,31 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
         const c = b.getCenter(new THREE.Vector3());
         const s = b.getSize(new THREE.Vector3());
         const sp = Math.max(s.x, s.z, 1);
+        // a grid of whole metres under the content, ten lines per side at least
+        const step = Math.pow(10, Math.floor(Math.log10(sp / 10)));
+        const n = Math.ceil((sp * 1.4) / step);
         if (ov("s3_grid")) {
-          // a grid of whole metres under the content, ten lines per side at least
-          const step = Math.pow(10, Math.floor(Math.log10(sp / 10)));
-          const n = Math.ceil((sp * 1.4) / step);
           const grid = new THREE.GridHelper(n * step, n, 0x8a8a8a, 0xb8b8b8);
           grid.position.set(c.x, b.min.y, c.z);
           grid.material.transparent = true;
           grid.material.opacity = 0.55;
           grid.userData.helper = true;
           decor.add(grid);
-          // the axes through the grid's centre, as Blender's floor: X red, Y
-          // (Blender's, three's −z) green
-          const L = (n * step) / 2;
-          const ax = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(c.x - L, b.min.y, c.z), new THREE.Vector3(c.x + L, b.min.y, c.z)]);
-          const ay = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(c.x, b.min.y, c.z + L), new THREE.Vector3(c.x, b.min.y, c.z - L)]);
-          decor.add(new THREE.Line(ax, new THREE.LineBasicMaterial({ color: 0xd04040 })));
-          decor.add(new THREE.Line(ay, new THREE.LineBasicMaterial({ color: 0x40a040 })));
         }
+        // the axes through the grid's centre, as Blender's floor: X red, Y
+        // (Blender's, three's −z) green, Z (three's y) blue. MICRO-GIZMO-ASSI ·
+        // three switches of their own, as Blender's (X and Y on, Z off)
+        const L = (n * step) / 2;
+        const axis = (k: OverlayKey, a: number[], z: number[], col: number) => {
+          if (!ov(k)) return;
+          const g = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(a[0], a[1], a[2]), new THREE.Vector3(z[0], z[1], z[2])]);
+          const line = new THREE.Line(g, new THREE.LineBasicMaterial({ color: col }));
+          line.userData.axis = k;
+          decor.add(line);
+        };
+        axis("s3_axis_x", [c.x - L, b.min.y, c.z], [c.x + L, b.min.y, c.z], 0xd04040);
+        axis("s3_axis_y", [c.x, b.min.y, c.z + L], [c.x, b.min.y, c.z - L], 0x40a040);
+        axis("s3_axis_z", [c.x, b.min.y - L, c.z], [c.x, b.min.y + L, c.z], 0x4060d0);
         if (ov("s3_epoch_box") && content.children.length) {
           const hb = new THREE.Box3Helper(b.clone().expandByScalar(sp * 0.01), 0x6b8fb5);
           hb.userData.helper = true;
@@ -1004,7 +1251,7 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
               await live.ready;
               if (gen !== generation || disposed) return;
               const bb = live.layer.bounds();
-              if (bb) addLabel(item.label, new THREE.Vector3((bb.min.x + bb.max.x) / 2, bb.max.y, (bb.min.z + bb.max.z) / 2), `rm${selCls(item)}`, item.id);
+              if (bb) addLabel(item.label, new THREE.Vector3((bb.min.x + bb.max.x) / 2, bb.max.y, (bb.min.z + bb.max.z) / 2), `rm k-rm${selCls(item)}`, item.id);
               drawn.set(key, { item, as: "tiles", url: tsUrl });
             }));
             continue;
@@ -1029,7 +1276,7 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
               if (selOutline(item)) content.add(selBox(obj, item));
               tag(obj, item);
               content.add(obj);
-              addLabel(item.label, topOf(obj), `rm${selCls(item)}`, item.id);
+              addLabel(item.label, topOf(obj), `rm k-rm${selCls(item)}`, item.id);
               drawn.set(key, { item, as: "mesh", url: v.url });
               flowState.set(key, { item, current: v.id, gen });
               flowBytes.set(v.url, v.bytes ?? 0);
@@ -1106,7 +1353,7 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
               if (selOutline(item)) content.add(selBox(obj, item));
               tag(obj, item);
               content.add(obj);
-              addLabel(item.label, topOf(obj), `rm${selCls(item)}`, item.id);
+              addLabel(item.label, topOf(obj), `rm k-rm${selCls(item)}`, item.id);
               drawn.set(key, { item, as: "mesh", url: u });
               // MICRO-SPAZIO-3D-3 p.10 · the version drawn is known now: the Outliner's dot follows
               opts.onVersionDrawn?.(item.id, "");
@@ -1145,7 +1392,7 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
                 }));
               }
               if (item.kind === "proxy") unitCentres.set(item.id, centreOf(obj));
-              addLabel(item.label, topOf(obj), `${item.kind === "proxy" ? "u" : "rm"}${selCls(item)}`, item.id, item.decor);
+              addLabel(item.label, topOf(obj), `${item.kind === "proxy" ? "u k-proxy" : "rm k-rm"}${selCls(item)}`, item.id, item.decor);
               drawn.set(`${item.kind}:${item.id}`, { item, as: "mesh", url: item.url });
             }));
           } else if (item.state === "json") {
@@ -1171,7 +1418,7 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
             tag(group, item);
             content.add(group);
             unitCentres.set(item.id, centreOf(group));
-            addLabel(item.label, topOf(group), `u${selCls(item)}`, item.id, item.decor);
+            addLabel(item.label, topOf(group), `u k-proxy${selCls(item)}`, item.id, item.decor);
             drawn.set(`${item.kind}:${item.id}`, { item, as: "mesh" });
           } else later.push(item);
         }
@@ -1196,7 +1443,7 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
               content.add(c);
               // at the right-hand top corner: the summary sits top-left
               addLabel(opts.texts.referenceOnly(item.label),
-                new THREE.Vector3(box.max.x, box.max.y + 0.15 * k, box.max.z), "ref", item.id);
+                new THREE.Vector3(box.max.x, box.max.y + 0.15 * k, box.max.z), `ref k-${item.kind}`, item.id);
               drawn.set(key, { item, as: "contour" });
             } else {
               const at = b.getCenter(new THREE.Vector3());
@@ -1205,7 +1452,7 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
               const gated = drawn.get(key)?.as === "gated";
               const refused = item.state === "refused";
               addLabel(gated ? item.label : refused ? opts.texts.refused(item.label) : opts.texts.missing(item.label), at,
-                gated ? "miss gated" : refused ? "miss refused" : "miss", item.id);
+                `${gated ? "miss gated" : refused ? "miss refused" : "miss"} k-${item.kind}`, item.id);
               if (!gated) drawn.set(key, { item, as: "label" });
             }
           }
@@ -1229,17 +1476,55 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
       let labelsShown = 0, labelsHidden = 0;
       (probe as Record<string, unknown>).__spaceLabels = () => ({ shown: labelsShown, hidden: labelsHidden,
         texts: [...labels.querySelectorAll<HTMLElement>(".scn-label")].filter((e) => e.style.display !== "none").map((e) => e.textContent) });
+      // MICRO-GIZMO-ASSI · the sketches' labels (their name, over their box),
+      // an overlay of their own; kept across rebuilds, as the sketches
+      const sketchLabels = new Map<string, { el: HTMLElement; p: any }>();
+      const sketchAnchors = (): Array<{ el: HTMLElement; p: any }> => {
+        const on = ov("s3_labels_sketch") && sketchGroup.visible;
+        const names = on ? new Map(listSketches().map((s: Sketch) => [s.id, s.name])) : new Map<string, string>();
+        for (const [id, a] of sketchLabels) if (!names.has(id) || !sketchMeshes.get(id)?.visible) { a.el.remove(); sketchLabels.delete(id); }
+        if (!on) return [];
+        for (const [id, name] of names) {
+          const m = sketchMeshes.get(id);
+          if (!m?.visible) continue;
+          let a = sketchLabels.get(id);
+          if (!a) {
+            const el = document.createElement("span");
+            el.className = "v3d-label scn-label sk k-sketch";
+            el.dataset.id = id;
+            const more = document.createElement("span");
+            more.className = "scn-more";
+            el.append(document.createTextNode(name), more);
+            labels.appendChild(el);
+            a = { el, p: new THREE.Vector3() };
+            sketchLabels.set(id, a);
+          } else if (a.el.firstChild && a.el.firstChild.textContent !== name) a.el.firstChild.textContent = name;
+          if (a.el.parentNode !== labels) labels.appendChild(a.el);   // a rebuild empties the layer
+          const bb = new THREE.Box3().setFromObject(m);
+          if (!bb.isEmpty()) a.p.set((bb.min.x + bb.max.x) / 2, bb.max.y, (bb.min.z + bb.max.z) / 2);
+          const sel = sketchSet.has(id) || id === sketchSel;
+          a.el.classList.toggle("sel", sel);
+          a.el.classList.toggle("act", id === sketchSel);
+        }
+        return [...sketchLabels.values()];
+      };
       const place = () => {
         const W = renderer.domElement.clientWidth || w, H = renderer.domElement.clientHeight || h;
-        labels.style.display = ov("s3_labels") ? "" : "none";
-        if (ov("s3_labels")) {
+        // MICRO-GIZMO-ASSI · three switches: the models' labels, the proxies', the sketches'
+        const kinds = { rm: ov("s3_labels_rm"), proxy: ov("s3_labels_proxy") };
+        const skA = sketchAnchors();
+        const anyLabel = kinds.rm || kinds.proxy || skA.length > 0;
+        labels.style.display = anyLabel ? "" : "none";
+        if (anyLabel) {
           const DEC: Array<[string, OverlayKey]> = [["rights", "s3_dec_rights"], ["pd", "s3_dec_pd"], ["warning", "s3_dec_warning"], ["epoch", "s3_dec_epoch"]];
           for (const [k, o] of DEC) labels.classList.toggle(`no-dec-${k}`, !ov(o));
           // MICRO-SPAZIO-3D-3 p.14 · labels that would cover each other: the
           // nearest (the selected first) is shown, with «+N» for the others
           // under it; the others come back as the view gets nearer
           const vis: Array<{ a: typeof anchors[number]; x: number; y: number; z: number; w: number; h: number; pri: number }> = [];
-          for (const a of anchors) {
+          for (const a of [...anchors, ...skA]) {
+            const kd = a.el.classList.contains("k-proxy") ? "proxy" : a.el.classList.contains("k-sketch") ? "sketch" : "rm";
+            if (kd !== "sketch" && !kinds[kd]) { a.el.style.display = "none"; continue; }
             const v = a.p.clone().project(camera);
             if (!(v.z < 1)) { a.el.style.display = "none"; continue; }
             const x = ((v.x + 1) / 2) * W, y = ((1 - v.y) / 2) * H;
@@ -1299,19 +1584,19 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
           if (o.isMesh && o.userData.unitId && o.material) {
             const wire = ov("s3_proxy_wire");
             o.material.wireframe = wire;
-            o.material.opacity = wire ? 0.9 : 0.42;
+            o.material.opacity = proxyOpacity();
           }
         });
         for (const m of sketchMeshes.values()) {
           m.material.wireframe = ov("s3_proxy_wire");
-          m.material.opacity = ov("s3_proxy_wire") ? 0.9 : 0.55;
+          m.material.opacity = ov("s3_proxy_wire") ? val("s3_opacity_wire", 0.9) : 0.55;
         }
         sketchGroup.visible = ov("s3_sketches");
         buildDecor();
         attachGizmo();
       };
-      probe.__spaceOverlays = () => Object.fromEntries((["s3_labels", "s3_proxies", "s3_proxy_wire", "s3_rm", "s3_tiles",
-        "s3_grid", "s3_epoch_box", "s3_sel_outline", "s3_gizmo", "s3_cursor", "s3_sketches"] as OverlayKey[]).map((k) => [k, ov(k)]));
+      probe.__spaceOverlays = () => Object.fromEntries((["s3_labels_rm", "s3_labels_proxy", "s3_labels_sketch", "s3_proxies", "s3_proxy_wire", "s3_rm", "s3_tiles",
+        "s3_grid", "s3_axis_x", "s3_axis_y", "s3_axis_z", "s3_navgizmo", "s3_epoch_box", "s3_sel_outline", "s3_gizmo", "s3_cursor", "s3_sketches"] as OverlayKey[]).map((k) => [k, ov(k)]));
       // ── MICRO-SPAZIO-3D-3 p.10 · the flow of LOD ─────────────────────────
       const flowState = new Map<string, { item: SceneItem; current: string; gen: number; asking?: string; dist?: number; want?: string | null }>();
       /** the bytes of each version file loaded for the flow (the memory's count) */
@@ -1426,12 +1711,14 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
       const tick = () => {
         if (disposed) return;
         raf = requestAnimationFrame(tick);
+        stepAnim(performance.now());
         controls.update();
         const live = liveLayers();
         for (const l of live) l.layer.update();
         if (live.length && ++frames % 20 === 0) for (const l of live) l.bar.refresh();
         renderer.render(scene, camera);
         place();
+        drawNav();
         // the flow of LOD, four times a second
         const now = performance.now();
         if (now - flowAt > 250) { flowAt = now; flowTick(); }
@@ -2144,7 +2431,7 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
           stop();
           // no camera of view: nothing (Blender's 0) — and not the graph's «0» (fit) either
           if (kp === "camera") return;
-          if (kp === "toggle-ortho") { orthoAuto = false; setOrtho(!isOrtho); return; }
+          if (kp === "toggle-ortho") { finishAnim(); orthoAuto = false; setOrtho(!isOrtho); return; }
           if (kp === "frame-selection") {
             const keys = selectedKeysNow();
             if (!keys.length || !api.frameKeys?.(keys)) frameIt?.();
@@ -2228,7 +2515,7 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
       host.prepend(renderer.domElement);
       host.appendChild(labels);
       host.appendChild(strips);
-      host.append(cursorEl, modalEl, boxEl, viewEl, guides, vptr);
+      host.append(cursorEl, modalEl, boxEl, viewEl, guides, vptr, navEl);
       strips.appendChild(flowStrip);
       showView();
       cleanup = () => {
@@ -2255,6 +2542,7 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
         modalEl.remove();
         boxEl.remove();
         viewEl.remove();
+        navEl.remove();
       };
       api = {
         camera: camState,
@@ -2322,7 +2610,7 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
         },
         view: viewNow,
         setView: (v: AlignedView) => setAligned(v),
-        toggleOrtho: () => { orthoAuto = false; setOrtho(!isOrtho); },
+        toggleOrtho: () => { finishAnim(); orthoAuto = false; setOrtho(!isOrtho); },
         centreScene,
         startModal: (mode: ModalMode) => startModalOn(mode),
       };

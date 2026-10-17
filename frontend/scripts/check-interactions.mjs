@@ -1473,10 +1473,144 @@ test("S3.pad", "Spazio · PARTE 0b · due dita (scorrimento naturale) girano la 
   const a = await padCase(false), b = await padCase(true);
   const same = (x, y) => Math.sign(x) === Math.sign(y) && x !== 0;
   const o = a.out, q = b.out;
-  if (process.env.PAD_LOG) console.log(JSON.stringify({ natural: o, inverted: q }));
   return { pass: same(o.dragRight, o.fingersRight) && same(o.dragUp, o.fingersUp) && o.panDot > 0 && same(o.ctrlFingers, o.wheel)
       && same(q.dragRight, -q.fingersRight) && same(q.dragUp, -q.fingersUp) && q.panDot > 0 && !a.errors.length && !b.errors.length,
     detail: { natural: o, inverted: q, errors: [...a.errors, ...b.errors] } };
+});
+// MICRO-GIZMO-ASSI · the navigation gizmo, top right, as Blender's
+const gz = (p) => p.evaluate(() => document.querySelector(".scn-host").__spaceGizmo());
+const camM = (p) => p.evaluate(() => document.querySelector(".scn-host").__spaceCamMatrix());
+const viewTag = (p) => p.evaluate(() => document.querySelector(".scn-host").dataset.view);
+const ballAt = async (p, axis) => (await gz(p)).balls.find((b) => b.axis === axis);
+async function gizmoScene() {
+  const { p, ctx, errors } = await open({ doc: "spazio", ws: "space" });
+  await p.waitForFunction(() => document.querySelector(".scn-host")?.dataset.ready === "1", null, { timeout: 20000 });
+  await spaceOn(p, "EP_MOD");
+  const start = await p.evaluate(() => document.querySelector(".scn-host").__spaceCamState());
+  const reset = () => p.evaluate((c) => document.querySelector(".scn-host").__spaceSetCam(c), start);
+  return { p, ctx, errors, start, reset };
+}
+test("S3.gizmo6", "Spazio · MICRO-GIZMO-ASSI · le sei viste dal gizmo sono quelle del tastierino (stessa matrice di camera): X destra (3), −X sinistra (Ctrl+3), Y retro (Ctrl+1), −Y frontale (1), Z dall'alto (7), −Z da sotto (Ctrl+7); ortometrica con Auto Perspective, l'etichetta lo dice", async () => {
+  const { p, ctx, errors, reset } = await gizmoScene();
+  const r = await p.evaluate(() => { const c = document.querySelector(".scn-host canvas").getBoundingClientRect(); return { x: c.x + 60, y: c.y + c.height - 60 }; });
+  const KEYS = { x: "Numpad3", "-x": "Control+Numpad3", y: "Control+Numpad1", "-y": "Numpad1", z: "Numpad7", "-z": "Control+Numpad7" };
+  const WANT = { x: "right", "-x": "left", y: "back", "-y": "front", z: "top", "-z": "bottom" };
+  const out = {};
+  let worst = 0;
+  for (const [axis, key] of Object.entries(KEYS)) {
+    await reset(); await p.waitForTimeout(150);
+    await p.mouse.click(r.x, r.y);   // the 3D has the focus (an empty corner: nothing picked)
+    await p.keyboard.press(key); await p.waitForTimeout(400);
+    const k = await camM(p); const kv = await viewTag(p);
+    await reset(); await p.waitForTimeout(150);
+    const b = await ballAt(p, axis);
+    await p.mouse.click(b.x, b.y); await p.waitForTimeout(400);
+    const g = await camM(p); const gv = await viewTag(p);
+    const d = Math.max(...k.world.map((v, i) => Math.abs(v - g.world[i])), ...k.proj.map((v, i) => Math.abs(v - g.proj[i])));
+    worst = Math.max(worst, d);
+    out[axis] = { key: kv, gizmo: gv, d, label: await p.evaluate(() => document.querySelector(".scn-view")?.textContent) };
+  }
+  await ctx.close();
+  const pass = Object.entries(out).every(([a, o]) => o.key === `${WANT[a]}:ortho` && o.gizmo === o.key && o.d < 1e-6)
+    && /Frontale · Ortometrica/.test(out["-y"].label) && !errors.length;
+  return { pass, detail: { out, worst, errors } };
+});
+test("S3.gizmoAgain", "Spazio · MICRO-GIZMO-ASSI · un clic sull'asse già allineato dà la vista opposta, come Blender; il passaggio è animato (circa 200 ms) e finisce sulla vista esatta", async () => {
+  const { p, ctx, errors, reset } = await gizmoScene();
+  await reset(); await p.waitForTimeout(150);
+  let b = await ballAt(p, "-y");
+  await p.mouse.click(b.x, b.y);
+  const during = (await gz(p)).animating;
+  await p.waitForTimeout(80);
+  const mid = await viewTag(p);
+  await p.waitForTimeout(400);
+  const first = await viewTag(p);
+  // now −Y faces the viewer, in the middle: the same ball again
+  b = await ballAt(p, "-y");
+  const front = (await gz(p)).balls.slice(-1)[0].axis;
+  await p.mouse.click(b.x, b.y); await p.waitForTimeout(400);
+  const second = await viewTag(p);
+  await ctx.close();
+  return { pass: during === true && /^user:/.test(mid) && first === "front:ortho" && front === "-y" && second === "back:ortho" && !errors.length,
+    detail: { during, mid, first, front, second, errors } };
+});
+test("S3.gizmoDrag", "Spazio · MICRO-GIZMO-ASSI · trascinare il gizmo orbita attorno al centro d'orbita, nel verso del trascinamento sinistro; la colonna: lente (zoom), mano (pan), inquadra tutto, prospettiva ⇄ ortometrica", async () => {
+  const { p, ctx, errors, reset } = await gizmoScene();
+  const azOf = (c) => Math.atan2(c[0] - c[3], c[2] - c[5]);
+  const cam = () => p.evaluate(() => document.querySelector(".scn-host").__spaceCamera());
+  await reset(); await p.waitForTimeout(150);
+  const box = await p.evaluate(() => { const r = document.querySelector(".scn-nav-box").getBoundingClientRect(); return { x: r.x, y: r.y, w: r.width }; });
+  // a corner of the gizmo with no ball: the drag starts there
+  const sx = box.x + 6, sy = box.y + box.w - 6;
+  let c0 = await cam();
+  await p.mouse.move(sx, sy); await p.mouse.down(); await p.mouse.move(sx + 60, sy, { steps: 6 }); await p.mouse.up();
+  await p.waitForTimeout(200);
+  let c1 = await cam();
+  const gizmoTurn = Math.atan2(Math.sin(azOf(c1) - azOf(c0)), Math.cos(azOf(c1) - azOf(c0)));
+  const targetKept = c1.slice(3).every((v, i) => Math.abs(v - c0[3 + i]) < 1e-6);
+  const viewAfterDrag = await viewTag(p);
+  await reset(); await p.waitForTimeout(150);
+  const r = await p.evaluate(() => { const c = document.querySelector(".scn-host canvas").getBoundingClientRect(); return { x: c.x + c.width / 2, y: c.y + c.height / 2 }; });
+  c0 = await cam();
+  await p.mouse.move(r.x, r.y); await p.mouse.down(); await p.mouse.move(r.x + 60, r.y, { steps: 6 }); await p.mouse.up();
+  await p.waitForTimeout(200);
+  c1 = await cam();
+  const dragTurn = Math.atan2(Math.sin(azOf(c1) - azOf(c0)), Math.cos(azOf(c1) - azOf(c0)));
+  // the column
+  const btn = (k) => p.evaluate((k) => { const r = document.querySelector(`.scn-nav-btn[data-nav="${k}"]`).getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2, title: document.querySelector(`.scn-nav-btn[data-nav="${k}"]`).title }; }, k);
+  const dist = (c) => Math.hypot(c[0] - c[3], c[1] - c[4], c[2] - c[5]);
+  await reset(); await p.waitForTimeout(150);
+  const z = await btn("zoom"); c0 = await cam();
+  await p.mouse.move(z.x, z.y); await p.mouse.down(); await p.mouse.move(z.x, z.y - 50, { steps: 5 }); await p.mouse.up();
+  await p.waitForTimeout(200); c1 = await cam();
+  const zoomUp = dist(c1) - dist(c0);
+  const pn = await btn("pan"); c0 = await cam();
+  await p.mouse.move(pn.x, pn.y); await p.mouse.down(); await p.mouse.move(pn.x + 50, pn.y, { steps: 5 }); await p.mouse.up();
+  await p.waitForTimeout(200); c1 = await cam();
+  const panMoved = Math.hypot(c1[3] - c0[3], c1[4] - c0[4], c1[5] - c0[5]);
+  const o = await btn("ortho"); const v0 = await viewTag(p);
+  await p.mouse.click(o.x, o.y); await p.waitForTimeout(200);
+  const v1 = await viewTag(p);
+  const h = await btn("home"); c0 = await cam();
+  await p.mouse.click(h.x, h.y); await p.waitForTimeout(200); c1 = await cam();
+  const homeMoved = c1.some((v, i) => Math.abs(v - c0[i]) > 1e-6);
+  const titles = [z.title, pn.title, h.title, o.title];
+  const tips = await p.evaluate(() => [...document.querySelectorAll(".scn-nav-ball")].map((b) => [b.dataset.axis, b.title]));
+  await ctx.close();
+  return { pass: gizmoTurn !== 0 && Math.sign(gizmoTurn) === Math.sign(dragTurn) && targetKept && /^user:/.test(viewAfterDrag)
+      && zoomUp < 0 && panMoved > 0 && v0 === "user:persp" && v1 === "user:ortho" && homeMoved
+      && tips.some(([a, t]) => a === "-y" && t === "Vista frontale (1)") && tips.some(([a, t]) => a === "y" && t === "Vista retro (Ctrl+1)") && !errors.length,
+    detail: { gizmoTurn, dragTurn, targetKept, viewAfterDrag, zoomUp, panMoved, v0, v1, homeMoved, titles, tips, errors } };
+});
+test("S3.labels3", "Spazio · MICRO-GIZMO-ASSI · le etichette separate: modelli, proxy, abbozzi (tre voci nel gruppo «Testo»); di default modelli e proxy accesi, abbozzi spenti; spente una per volta", async () => {
+  const { p, ctx, errors } = await gizmoScene();
+  const kinds = () => p.evaluate(() => { const vis = [...document.querySelectorAll(".scn-label")].filter((e) => e.style.display !== "none" && e.closest(".scn-labels")?.style.display !== "none");
+    return { rm: vis.filter((e) => e.classList.contains("k-rm")).length, proxy: vis.filter((e) => e.classList.contains("k-proxy")).length, sketch: vis.filter((e) => e.classList.contains("k-sketch")).length }; });
+  const toggle = async (k) => { await p.click(`#overlay-panel input[data-ov="${k}"]`); await p.waitForTimeout(400); };
+  const both = await kinds();
+  await p.click("#btn-overlays"); await p.waitForTimeout(300);
+  const groups = await p.evaluate(() => [...document.querySelectorAll("#overlay-panel .ov-group")].map((g) => [g.dataset.group, [...g.querySelectorAll("input[data-ov]")].map((i) => i.dataset.ov)]));
+  await toggle("s3_labels_rm");
+  const noRm = await kinds();
+  await toggle("s3_labels_rm"); await toggle("s3_labels_proxy");
+  const noPx = await kinds();
+  await toggle("s3_labels_proxy");
+  const back = await kinds();
+  // a sketch (a cube of «Forme base»): no label until its switch is on
+  await p.click('.scn-outliner button[data-shape="cube"]'); await p.waitForTimeout(600);
+  const sk0 = await kinds();
+  await toggle("s3_labels_sketch");
+  const sk1 = await kinds();
+  const skName = await p.evaluate(() => [...document.querySelectorAll(".scn-label.k-sketch")].map((e) => e.firstChild?.textContent));
+  const proxyColour = await p.evaluate(() => { const e = [...document.querySelectorAll(".scn-label.k-proxy")].find((x) => !x.classList.contains("sel")); return e ? getComputedStyle(e).backgroundColor : null; });
+  const rmColour = await p.evaluate(() => { const e = [...document.querySelectorAll(".scn-label.k-rm")].find((x) => !x.classList.contains("sel")); return e ? getComputedStyle(e).backgroundColor : null; });
+  await ctx.close();
+  const text = groups.find(([g]) => g === "s3_text")?.[1] ?? [];
+  return { pass: both.rm > 0 && both.proxy > 0 && both.sketch === 0 && noRm.rm === 0 && noRm.proxy === both.proxy && noPx.proxy === 0 && noPx.rm === both.rm
+      && back.rm === both.rm && back.proxy === both.proxy && JSON.stringify(text) === JSON.stringify(["s3_labels_rm", "s3_labels_proxy", "s3_labels_sketch"])
+      && sk0.sketch === 0 && sk1.sketch === 1 && skName.length === 1
+      && proxyColour && rmColour && proxyColour !== rmColour && !errors.length,
+    detail: { both, noRm, noPx, back, sk0, sk1, skName, groups, proxyColour, rmColour, errors } };
 });
 test("S3.files", "Spazio · un file solo referenziato è un contorno con l'etichetta; uno dichiarato e assente, l'etichetta; il riepilogo li conta", async () => {
   const { p, ctx, errors } = await open({ doc: "spazio", ws: "space" });
@@ -5310,7 +5444,7 @@ for (const c of chosen) {
   let r;
   try { r = await c.fn(); } catch (err) { r = { pass: false, detail: { error: String(err.message ?? err).split("\n")[0].slice(0, 240) } }; }
   results.push({ id: c.id, what: c.what, ...r });
-  console.log(`${r.pass ? "✓" : "✗"} ${c.id} ${c.what}${r.pass ? "" : "  " + JSON.stringify(r.detail)}`);
+  console.log(`${r.pass ? "✓" : "✗"} ${c.id} ${c.what}${r.pass && !process.env.DETAIL ? "" : "  " + JSON.stringify(r.detail)}`);
 }
 await browser.close();
 if (jsonAt) writeFileSync(jsonAt, JSON.stringify(results, null, 1));

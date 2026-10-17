@@ -9634,3 +9634,35 @@ tr.tv-sel-act > td { background: color-mix(in srgb, var(--accent) 42%, transpare
 .scn-label.alt-off { display: none !important; }
 .sol-row.subst > .sol-name { font-style: italic; opacity: 0.7; }
 .sol-eye.subst { color: #2b8a3e; }
+
+/* MICRO-GIZMO-ASSI · the navigation gizmo, top right of the 3D, as Blender's */
+.scn-nav { position: absolute; right: 8px; top: 6px; z-index: 3; display: flex; flex-direction: column; align-items: center; gap: 4px; pointer-events: none; }
+.scn-nav-box { position: relative; pointer-events: auto; cursor: grab; touch-action: none; }
+.scn-nav-box:active { cursor: grabbing; }
+.scn-nav-cv { display: block; }
+.scn-nav-ball { position: absolute; padding: 0; margin: 0; border: 0; border-radius: 50%; background: transparent; cursor: pointer; }
+.scn-nav-ball:focus-visible { outline: 2px solid var(--focus, #2890ff); outline-offset: 1px; }
+.scn-nav-col { display: flex; flex-direction: column; gap: 4px; pointer-events: auto; }
+.scn-nav-btn { width: 26px; height: 26px; display: grid; place-items: center; padding: 0; border: 0; border-radius: 50%;
+  background: rgba(40, 40, 40, 0.55); color: #f2f2f2; cursor: grab; touch-action: none; }
+.scn-nav-btn[data-nav="home"], .scn-nav-btn[data-nav="ortho"] { cursor: pointer; }
+.scn-nav-btn:hover { background: rgba(80, 80, 80, 0.8); }
+.scn-nav-btn:focus-visible { outline: 2px solid var(--focus, #2890ff); outline-offset: 1px; }
+/* MICRO-GIZMO-ASSI · the labels by family: the models' ochre (the accent, as
+   the bar's «Modelli (RM)»), the proxies' light blue, the sketches' orange of
+   their meshes; the selection keeps Blender's orange over all of them */
+.scn-label.u.k-proxy { background: var(--info-soft); color: var(--info-ink); border: 1px solid color-mix(in srgb, var(--info-ink) 35%, transparent); }
+.scn-label.k-sketch { background: #fbe3cc; color: #6b3300; border: 1px dashed #d9822b; }
+.scn-label.k-sketch.sel { background: #f15800; color: #fff; }
+.scn-label.k-sketch.sel.act { background: #ffaa40; color: #2a1600; }
+.scn-label.u.k-proxy.sel { background: #f15800; color: #fff; border-color: transparent; }
+.scn-label.u.k-proxy.sel.act { background: #ffaa40; color: #2a1600; }
+/* the menu's groups fold, as Blender's panels */
+.ov-group-head .ov-fold { border: 0; background: none; padding: 0 4px 0 0; cursor: pointer; color: inherit; font: inherit; }
+.ov-group.folded > :not(.ov-group-head) { display: none; }
+.ov-range { display: grid; grid-template-columns: 1fr 9ch; gap: 2px 8px; align-items: center; padding: 2px 0 2px 22px; font-size: 0.78rem; }
+.ov-range input[type="range"] { grid-column: 1 / -1; width: 100%; }
+.ov-range output { text-align: right; font-variant-numeric: tabular-nums; }
+.scn-nav-cv { overflow: visible; }
+.scn-nav-halo { fill: rgba(255, 255, 255, 0.18); }
+.scn-nav-letter { font: 700 11px system-ui, sans-serif; fill: #1a1a1a; text-anchor: middle; dominant-baseline: central; pointer-events: none; }

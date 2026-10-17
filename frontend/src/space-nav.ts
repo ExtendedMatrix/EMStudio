@@ -454,6 +454,88 @@ export function viewOf(cam: CamState): AlignedView | null {
   return null;
 }
 
+/** The opposite of an aligned view (Ctrl on the keypad). */
+export const OPPOSITE_VIEW: Record<AlignedView, AlignedView> = { front: "back", back: "front", right: "left", left: "right", top: "bottom", bottom: "top" };
+
+/**
+ * MICRO-GIZMO-ASSI · Blender's navigation gizmo: the six ends of the axes of
+ * the DATA's frame (Z up), as the camera sees them. A click on an end looks
+ * along that axis from its side: X = Right (keypad 3), −X = Left (Ctrl+3),
+ * Y = Back (Ctrl+1: the Front looks along +Y), −Y = Front (1), Z = Top (7),
+ * −Z = Bottom (Ctrl+7) — the keypad's views, one function (`alignedView`).
+ */
+export type GizmoAxis = "x" | "y" | "z" | "-x" | "-y" | "-z";
+export const GIZMO_AXES: readonly GizmoAxis[] = ["x", "y", "z", "-x", "-y", "-z"];
+export const GIZMO_VIEW: Record<GizmoAxis, AlignedView> = { x: "right", "-x": "left", y: "back", "-y": "front", z: "top", "-z": "bottom" };
+const GIZMO_DIR: Record<GizmoAxis, V3> = {
+  x: blenderToThree([1, 0, 0]), "-x": blenderToThree([-1, 0, 0]),
+  y: blenderToThree([0, 1, 0]), "-y": blenderToThree([0, -1, 0]),
+  z: blenderToThree([0, 0, 1]), "-z": blenderToThree([0, 0, -1]),
+};
+
+/** The view a click on an end gives: its own, or — when the camera is already
+ *  in it — the opposite, as Blender's. */
+export function gizmoView(axis: GizmoAxis, current: AlignedView | null): AlignedView {
+  const v = GIZMO_VIEW[axis];
+  return current === v ? OPPOSITE_VIEW[v] : v;
+}
+
+/** The camera's screen frame (three's Y-up `lookAt`): right, up, toward the viewer. */
+export function cameraFrame(cam: CamState): { right: V3; up: V3; back: V3 } {
+  const back = norm(sub(cam.pos, cam.target));
+  const f: V3 = [-back[0], -back[1], -back[2]];
+  let right = norm([f[1] * 0 - f[2] * 1, f[2] * 0 - f[0] * 0, f[0] * 1 - f[1] * 0]);   // f × (0,1,0)
+  if (len(right) < 1e-9 || !Number.isFinite(right[0])) right = [1, 0, 0];
+  const up: V3 = [right[1] * f[2] - right[2] * f[1], right[2] * f[0] - right[0] * f[2], right[0] * f[1] - right[1] * f[0]];
+  return { right, up: norm(up), back };
+}
+
+/** Where each end sits in the gizmo (x right, y DOWN, from its centre, `r` the
+ *  arm's length) and how near it is (`depth` > 0: toward the viewer), drawn
+ *  far first so that the nearest is in front. */
+export function gizmoLayout(cam: CamState, r: number): Array<{ axis: GizmoAxis; x: number; y: number; depth: number }> {
+  const { right, up, back } = cameraFrame(cam);
+  return GIZMO_AXES.map((axis) => {
+    const d = GIZMO_DIR[axis];
+    return { axis, x: dot(d, right) * r, y: -dot(d, up) * r, depth: dot(d, back) };
+  }).sort((a, b) => a.depth - b.depth);
+}
+
+/** The end under a point of the gizmo (from its centre), the nearest first; null on none. */
+export function gizmoHit(layout: ReturnType<typeof gizmoLayout>, x: number, y: number, ballR: number): GizmoAxis | null {
+  for (let i = layout.length - 1; i >= 0; i--) {
+    const e = layout[i];
+    if (Math.hypot(x - e.x, y - e.y) <= ballR) return e.axis;
+  }
+  return null;
+}
+
+/** MICRO-GIZMO-ASSI · the passage between two views (Blender's «Smooth View»,
+ *  about 200 ms): the direction turned on the sphere around the same pivot,
+ *  the distance between the two; `t` in [0, 1], eased. Opposite directions
+ *  turn about the vertical (or, from Top to Bottom, about the screen's right). */
+export function viewBetween(from: CamState, to: CamState, t: number): CamState {
+  if (t <= 0) return from;
+  if (t >= 1) return to;
+  const e = t * t * (3 - 2 * t);
+  const target = add(from.target, mul(sub(to.target, from.target), e));
+  const a = sub(from.pos, from.target), b = sub(to.pos, to.target);
+  const la = len(a) || 1, lb = len(b) || 1;
+  const ua = norm(a), ub = norm(b);
+  const c = Math.max(-1, Math.min(1, dot(ua, ub)));
+  let dir: V3;
+  if (c > 0.9999995) dir = ub;
+  else {
+    // a unit vector ⟂ ua in the plane of the turn; opposite views turn through
+    // the side (about the vertical) or, Top ⇄ Bottom, through the front
+    const through = (p: V3): V3 => norm(sub(p, mul(ua, dot(p, ua))));
+    const w: V3 = c >= -0.9999 ? through(ub) : Math.abs(ua[1]) < 0.9 ? norm([ua[2], 0, -ua[0]]) : through(blenderToThree([0, -1, 0]));
+    const ang = Math.acos(c) * e;
+    dir = norm(add(mul(ua, Math.cos(ang)), mul(w, Math.sin(ang))));
+  }
+  return { pos: add(target, mul(dir, la + (lb - la) * e)), target };
+}
+
 export type KeypadAction = { view: AlignedView } | "toggle-ortho" | "camera" | "frame-selection";
 
 /**

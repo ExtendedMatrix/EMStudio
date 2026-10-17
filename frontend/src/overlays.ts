@@ -43,8 +43,16 @@ export type OverlayKey =
   // 3D
   | "version_format"
   | "has_3d"
-  // MICRO-SPAZIO-3D · the Space's own (the 3D viewport, as Blender's Overlays)
-  | "s3_labels"
+  // MICRO-SPAZIO-3D · the Space's own (the 3D viewport, as Blender's Overlays);
+  // MICRO-GIZMO-ASSI · the labels three (models, proxies, sketches), the axes
+  // three, the navigation gizmo
+  | "s3_labels_rm"
+  | "s3_labels_proxy"
+  | "s3_labels_sketch"
+  | "s3_axis_x"
+  | "s3_axis_y"
+  | "s3_axis_z"
+  | "s3_navgizmo"
   | "s3_proxies"
   | "s3_proxy_wire"
   | "s3_rm"
@@ -65,7 +73,13 @@ export type OverlayKey =
   | "lock"
   | "fold_count";
 
-export type OverlayGroupKey = "rights" | "paradata" | "time" | "checks" | "threed" | "drawing" | "space3d" | "space3d_decor";
+export type OverlayGroupKey = "rights" | "paradata" | "time" | "checks" | "threed" | "drawing"
+  | "s3_guides" | "s3_text" | "s3_objects" | "space3d_decor" | "s3_geometry";
+
+/** MICRO-GIZMO-ASSI · a value of a view's overlays, not a switch: a slider of
+ *  the «Geometry» group (Blender's Overlays ▸ Geometry) */
+export type OverlayValueKey = "s3_opacity_proxy" | "s3_opacity_wire";
+export interface OverlayValueItem { key: OverlayValueKey; min: number; max: number; step: number; def: number }
 
 export interface OverlayItem {
   key: OverlayKey;
@@ -80,6 +94,8 @@ export interface OverlayItem {
 export interface OverlayGroup {
   key: OverlayGroupKey;
   items: OverlayItem[];
+  /** its sliders (the Space's «Geometry») */
+  values?: OverlayValueItem[];
 }
 
 /** The inventory, grouped as the menu shows it. Measured in the code
@@ -121,19 +137,30 @@ export const OVERLAY_GROUPS: readonly OverlayGroup[] = [
     { key: "fold_count", text: "9" },
   ] },
   // MICRO-SPAZIO-3D p.3 · the Space's overlays: only the Space draws them, and
-  // only the Space's menu lists them
-  { key: "space3d", items: [
-    { key: "s3_labels", text: "Aa" },
+  // only the Space's menu lists them. MICRO-GIZMO-ASSI · in the groups of
+  // Blender's «Viewport Overlays»: Guides, Text, Objects, Geometry
+  { key: "s3_guides", items: [
+    { key: "s3_grid", text: "#" },
+    { key: "s3_axis_x", text: "X" },
+    { key: "s3_axis_y", text: "Y" },
+    { key: "s3_axis_z", text: "Z" },
+    { key: "s3_cursor", text: "⊕" },
+    { key: "s3_navgizmo", text: "⊹" },
+    { key: "s3_epoch_box", text: "▢" },
+  ] },
+  { key: "s3_text", items: [
+    { key: "s3_labels_rm", kind: "representation_model" },
+    { key: "s3_labels_proxy", kind: "proxy" },
+    { key: "s3_labels_sketch", text: "◇" },
+  ] },
+  { key: "s3_objects", items: [
     { key: "s3_proxies", kind: "proxy" },
     { key: "s3_proxy_wire", text: "▱" },
     { key: "s3_rm", kind: "representation_model" },
     { key: "s3_tiles", kind: "tileset" },
-    { key: "s3_grid", text: "#" },
-    { key: "s3_epoch_box", text: "▢" },
+    { key: "s3_sketches", text: "◇" },
     { key: "s3_sel_outline", text: "◌" },
     { key: "s3_gizmo", text: "✛" },
-    { key: "s3_cursor", text: "⊕" },
-    { key: "s3_sketches", text: "◇" },
   ] },
   // MICRO-SPAZIO-3D-3 p.14 · on the units' labels in the scene, the graph's
   // glyphs (2d_glyphs): author, licence and embargo; the PD badge with its
@@ -144,7 +171,15 @@ export const OVERLAY_GROUPS: readonly OverlayGroup[] = [
     { key: "s3_dec_warning", text: "!" },
     { key: "s3_dec_epoch", kind: "EpochNode" },
   ] },
+  // MICRO-GIZMO-ASSI · the opacity of the proxies, filled and in wireframe (the
+  // values the scene used: 0.42 and 0.9)
+  { key: "s3_geometry", items: [], values: [
+    { key: "s3_opacity_proxy", min: 0.05, max: 1, step: 0.01, def: 0.42 },
+    { key: "s3_opacity_wire", min: 0.05, max: 1, step: 0.01, def: 0.9 },
+  ] },
 ];
+
+export const OVERLAY_VALUES: readonly OverlayValueItem[] = OVERLAY_GROUPS.flatMap((g) => g.values ?? []);
 
 export const OVERLAY_KEYS: readonly OverlayKey[] = OVERLAY_GROUPS.flatMap((g) => g.items.map((i) => i.key));
 
@@ -158,6 +193,8 @@ export interface OverlayState {
   master: boolean;
   /** the overlays switched off one by one (kept while the master is off) */
   off: OverlayKey[];
+  /** MICRO-GIZMO-ASSI · the sliders moved from their default (absent: the default) */
+  values?: Partial<Record<OverlayValueKey, number>>;
 }
 
 /**
@@ -168,12 +205,30 @@ export interface OverlayState {
  */
 export function defaultOverlays(view: OverlayView): OverlayState {
   // MICRO-SPAZIO-3D · the Space opens as it did: the proxies FILLED (the wire is
-  // a choice), everything else on
-  return { master: true, off: view === "space" ? ["s3_proxy_wire"] : [] };
+  // a choice), everything else on. MICRO-GIZMO-ASSI · as it did too: the axis
+  // Z was never drawn (Blender's default: X and Y), the sketches had no label
+  return { master: true, off: view === "space" ? ["s3_axis_z", "s3_labels_sketch", "s3_proxy_wire"] : [] };
+}
+
+/** A slider's value under this state (its default when untouched). */
+export function overlayValue(st: OverlayState | null | undefined, key: OverlayValueKey): number {
+  const it = OVERLAY_VALUES.find((v) => v.key === key)!;
+  const v = st?.values?.[key];
+  return typeof v === "number" && Number.isFinite(v) ? Math.min(it.max, Math.max(it.min, v)) : it.def;
+}
+
+/** Move a slider. */
+export function withValue(st: OverlayState, key: OverlayValueKey, v: number): OverlayState {
+  const it = OVERLAY_VALUES.find((x) => x.key === key)!;
+  const values = { ...(st.values ?? {}) };
+  if (Math.abs(v - it.def) < 1e-9) delete values[key];
+  else values[key] = Math.min(it.max, Math.max(it.min, v));
+  return Object.keys(values).length ? { ...st, values } : { master: st.master, off: st.off };
 }
 
 /** The Space's items (a group of their own). */
-const SPACE_KEYS = new Set<OverlayKey>(OVERLAY_GROUPS.filter((g) => g.key === "space3d" || g.key === "space3d_decor").flatMap((g) => g.items.map((i) => i.key)));
+const SPACE_GROUPS = new Set<OverlayGroupKey>(["s3_guides", "s3_text", "s3_objects", "space3d_decor", "s3_geometry"]);
+const SPACE_KEYS = new Set<OverlayKey>(OVERLAY_GROUPS.filter((g) => SPACE_GROUPS.has(g.key)).flatMap((g) => g.items.map((i) => i.key)));
 
 /** The items a view can draw: the liquid Graph draws only its own few. */
 export function overlayItemsFor(view: OverlayView): OverlayItem[] {
@@ -195,8 +250,10 @@ export function overlaysHideSomething(st: OverlayState, view: OverlayView): bool
   if (!st.master) return true;
   const can = new Set(overlayItemsFor(view).map((i) => i.key));
   // MICRO-SPAZIO-3D · the wireframe is a way of drawing the proxies, not a
-  // thing: switched off it hides nothing
-  return st.off.some((k) => can.has(k) && k !== "s3_proxy_wire");
+  // thing: switched off it hides nothing. MICRO-GIZMO-ASSI · neither does what
+  // is off by default (the axis Z, the sketches' labels): nothing was hidden
+  const def = defaultOverlays(view).off;
+  return st.off.some((k) => can.has(k) && !def.includes(k));
 }
 
 /** The overlay of a badge of the ornament row (BADGE1 · FUNNEL1): its kind,
@@ -213,7 +270,7 @@ export function adornmentShown(st: OverlayState | null | undefined,
 export function withOverlay(st: OverlayState, key: OverlayKey, on: boolean): OverlayState {
   const off = st.off.filter((k) => k !== key);
   if (!on) off.push(key);
-  return { master: st.master, off: OVERLAY_KEYS.filter((k) => off.includes(k)) };
+  return { ...st, off: OVERLAY_KEYS.filter((k) => off.includes(k)) };
 }
 
 /** «All» / «None» of a group. */
@@ -233,7 +290,9 @@ export const OVERLAYS_KEY = "emstudio.overlays";
 /** the person of a machine with nobody declared */
 export const NOBODY = "-";
 
-type Stored = Record<string, Partial<Record<OverlayView, OverlayState>>>;
+type Stored = Record<string, Partial<Record<OverlayView, OverlayState & { rev?: number }>>>;
+/** MICRO-GIZMO-ASSI · the revision of the Space's keys a remembered state was written with */
+const SPACE_REV = 2;
 
 function readAll(): Stored {
   try {
@@ -248,11 +307,24 @@ function readAll(): Stored {
 function clean(v: unknown, view: OverlayView): OverlayState {
   const d = defaultOverlays(view);
   if (!v || typeof v !== "object") return d;
-  const o = v as { master?: unknown; off?: unknown };
-  const off = Array.isArray(o.off)
-    ? OVERLAY_KEYS.filter((k) => (o.off as unknown[]).includes(k))
+  const o = v as { master?: unknown; off?: unknown; values?: unknown; rev?: unknown };
+  const was = Array.isArray(o.off) ? (o.off as unknown[]) : null;
+  // MICRO-GIZMO-ASSI · a Space remembered before the groups (no `rev`): the
+  // one switch «s3_labels» is the three, and the keys born off (the axis Z,
+  // the sketches' labels) start at their default
+  const before = view === "space" && o.rev !== SPACE_REV;
+  const old = before && was?.includes("s3_labels") ? ["s3_labels_rm", "s3_labels_proxy", "s3_labels_sketch"] : [];
+  const born: OverlayKey[] = before ? ["s3_axis_z", "s3_labels_sketch"] : [];
+  const off = was
+    ? OVERLAY_KEYS.filter((k) => was.includes(k) || old.includes(k) || born.includes(k))
     : d.off;
-  return { master: typeof o.master === "boolean" ? o.master : d.master, off };
+  const out: OverlayState = { master: typeof o.master === "boolean" ? o.master : d.master, off };
+  if (o.values && typeof o.values === "object") {
+    const values: Partial<Record<OverlayValueKey, number>> = {};
+    for (const it of OVERLAY_VALUES) { const x = (o.values as Record<string, unknown>)[it.key]; if (typeof x === "number" && Number.isFinite(x)) values[it.key] = x; }
+    if (Object.keys(values).length) out.values = values;
+  }
+  return out;
 }
 
 /** The overlays of a view for a person: what was remembered, else the default. */
@@ -268,8 +340,9 @@ export function saveOverlays(person: string | null | undefined, view: OverlayVie
   const mine = { ...(all[who] ?? {}) };
   const d = defaultOverlays(view);
   const same = st.off.length === d.off.length && st.off.every((k) => d.off.includes(k));
-  if (st.master === d.master && same) delete mine[view];
-  else mine[view] = { master: st.master, off: [...st.off] };
+  const vals = st.values && Object.keys(st.values).length ? { ...st.values } : null;
+  if (st.master === d.master && same && !vals) delete mine[view];
+  else mine[view] = { master: st.master, off: [...st.off], ...(vals ? { values: vals } : {}), ...(view === "space" ? { rev: SPACE_REV } : {}) };
   if (Object.keys(mine).length) all[who] = mine;
   else delete all[who];
   try {
