@@ -130,6 +130,8 @@ export interface ViewerSettings {
   /** MICRO-SPAZIO-3D-3 · «pan»: the left drag pans — macOS's three-finger
    *  drag arrives as a left drag, the same as one finger's */
   leftDrag: "auto" | "orbit" | "select" | "pan";
+  /** PARTE 0b · two fingers orbit the other way round (off: as the left drag) */
+  invertTrackpadOrbit?: boolean;
 }
 
 /** MICRO-3DTILES · the defaults of the three, MEASURED (the MICRO's report,
@@ -188,7 +190,8 @@ const DEFAULTS: Settings = {
   // The Heriverse deployment guide mounts the wapp at /a/heriverse.
   viewer: { atonBase: "", heriverseApp: "a/heriverse",
             lodLimitMB: LOD_LIMIT_MB, lodLimitPoints: LOD_LIMIT_POINTS, tilesMemoryMB: TILES_MEMORY_MB,
-            emulate3Button: false, emulateNumpad: false, autoPerspective: true, leftDrag: "auto" },
+            emulate3Button: false, emulateNumpad: false, autoPerspective: true, leftDrag: "auto",
+            invertTrackpadOrbit: false },
   // No default base, for the same reason the ATON one has none: a wrong host
   // would look like a broken image service rather than an unconfigured one.
   iiif: { base: "", mirador: "https://projectmirador.org/embed/" },

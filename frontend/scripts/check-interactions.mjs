@@ -1420,6 +1420,64 @@ test("S3.pick", "Spazio · un clic su un proxy seleziona l'unità: Ispettore e M
       && JSON.stringify(cam0) === JSON.stringify(after.camera) && !errors.length,
     detail: { at, selected, insp, labels: after.labels, cam0, cam1: after.camera, errors } };
 });
+// PARTE 0b (E.D. 17 Oct 2026) · two fingers turn the scene as the left drag:
+// macOS's natural scrolling (its default) gives the fingers' movement with the
+// opposite sign; the orbit read it as it came and turned the other way round
+const azEl = (c) => { const d = [c[0] - c[3], c[1] - c[4], c[2] - c[5]]; const r = Math.hypot(...d);
+  return { az: Math.atan2(d[0], d[2]), el: Math.asin(d[1] / r), r, target: c.slice(3) }; };
+const angle = (a) => Math.atan2(Math.sin(a), Math.cos(a));
+const padWheel = (p, o) => p.evaluate((o) => {
+  const c = document.querySelector(".scn-host canvas"); const r = c.getBoundingClientRect();
+  for (let i = 0; i < (o.n ?? 1); i++) c.dispatchEvent(new WheelEvent("wheel", { deltaX: o.dx ?? 0, deltaY: o.dy ?? 0, deltaMode: o.mode ?? 0,
+    shiftKey: !!o.shift, ctrlKey: !!o.ctrl, clientX: r.x + r.width / 2, clientY: r.y + r.height / 2, bubbles: true, cancelable: true }));
+}, o);
+async function padCase(invert) {
+  const init = invert ? { "emstudio.settings": JSON.stringify({ viewer: { invertTrackpadOrbit: true } }) } : undefined;
+  const { p, ctx, errors } = await open({ doc: "spazio", ws: "space", init });
+  await p.waitForFunction(() => document.querySelector(".scn-host")?.dataset.ready === "1", null, { timeout: 20000 });
+  await spaceOn(p, "EP_MED");
+  const cam = async () => azEl((await sceneState(p)).camera);
+  const r = await p.evaluate(() => { const c = document.querySelector(".scn-host canvas").getBoundingClientRect(); return { x: c.x + c.width / 2, y: c.y + c.height / 2 }; });
+  const out = {};
+  // the left drag to the right, then up
+  let c0 = await cam();
+  await p.mouse.move(r.x, r.y); await p.mouse.down(); await p.mouse.move(r.x + 80, r.y, { steps: 8 }); await p.mouse.up();
+  await p.waitForTimeout(300);
+  let c1 = await cam(); out.dragRight = angle(c1.az - c0.az);
+  c0 = c1; await p.mouse.move(r.x, r.y); await p.mouse.down(); await p.mouse.move(r.x, r.y - 60, { steps: 8 }); await p.mouse.up();
+  await p.waitForTimeout(300);
+  c1 = await cam(); out.dragUp = c1.el - c0.el;
+  // two fingers to the right with natural scrolling: deltaX negative (a fraction: a trackpad's)
+  c0 = c1; await padWheel(p, { dx: -10.5, n: 8 }); await p.waitForTimeout(300);
+  c1 = await cam(); out.fingersRight = angle(c1.az - c0.az);
+  // two fingers up with natural scrolling: deltaY positive
+  c0 = c1; await padWheel(p, { dy: 7.5, n: 8 }); await p.waitForTimeout(300);
+  c1 = await cam(); out.fingersUp = c1.el - c0.el;
+  // Shift + two fingers to the right: the scene slides right, as a pan drag to the right (Shift + middle)
+  c0 = c1; await padWheel(p, { dx: -10.5, n: 6, shift: true }); await p.waitForTimeout(500);
+  c1 = await cam(); const padPan = c1.target.map((v, i) => v - c0.target[i]);
+  c0 = c1; await p.mouse.move(r.x, r.y); await p.keyboard.down("Shift"); await p.mouse.down({ button: "middle" });
+  await p.mouse.move(r.x + 60, r.y, { steps: 6 }); await p.mouse.up({ button: "middle" }); await p.keyboard.up("Shift");
+  await p.waitForTimeout(300);
+  c1 = await cam(); const dragPan = c1.target.map((v, i) => v - c0.target[i]);
+  out.panDot = padPan.reduce((a, v, i) => a + v * dragPan[i], 0);
+  // Ctrl + two fingers away (natural: deltaY positive) and the mouse wheel away (natural: deltaY positive too)
+  c0 = c1; await padWheel(p, { dy: 6, n: 4, ctrl: true }); await p.waitForTimeout(300);
+  c1 = await cam(); out.ctrlFingers = c1.r - c0.r;
+  c0 = c1; await padWheel(p, { dy: 1, mode: 1, n: 2 }); await p.waitForTimeout(300);
+  c1 = await cam(); out.wheel = c1.r - c0.r;
+  await ctx.close();
+  return { out, errors };
+}
+test("S3.pad", "Spazio · PARTE 0b · due dita (scorrimento naturale) girano la scena come il trascinamento sinistro nello stesso verso; Maiusc+due dita come il pan, Ctrl+due dita come la rotella; con «Inverti l'orbita del trackpad» al contrario", async () => {
+  const a = await padCase(false), b = await padCase(true);
+  const same = (x, y) => Math.sign(x) === Math.sign(y) && x !== 0;
+  const o = a.out, q = b.out;
+  if (process.env.PAD_LOG) console.log(JSON.stringify({ natural: o, inverted: q }));
+  return { pass: same(o.dragRight, o.fingersRight) && same(o.dragUp, o.fingersUp) && o.panDot > 0 && same(o.ctrlFingers, o.wheel)
+      && same(q.dragRight, -q.fingersRight) && same(q.dragUp, -q.fingersUp) && q.panDot > 0 && !a.errors.length && !b.errors.length,
+    detail: { natural: o, inverted: q, errors: [...a.errors, ...b.errors] } };
+});
 test("S3.files", "Spazio · un file solo referenziato è un contorno con l'etichetta; uno dichiarato e assente, l'etichetta; il riepilogo li conta", async () => {
   const { p, ctx, errors } = await open({ doc: "spazio", ws: "space" });
   await p.waitForFunction(() => document.querySelector(".scn-host")?.dataset.ready === "1", null, { timeout: 20000 });

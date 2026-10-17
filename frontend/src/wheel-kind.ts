@@ -32,3 +32,17 @@ export function trackpadClassifier(now: () => number = () => performance.now()):
     return fine || t < until;
   };
 }
+
+/** PARTE 0b (E.D. 17 Oct 2026) · where the FINGERS went, from a trackpad's
+ *  wheel. macOS's natural scrolling (its default, and E.D.'s) inverts the
+ *  deltas: fingers to the right give a NEGATIVE deltaX, the content following
+ *  them. A drag of the pointer is never inverted, so a two-finger gesture that
+ *  must do what the drag does (the orbit, the pan) reads the fingers, not the
+ *  deltas. WebKit says whether the deltas were inverted
+ *  (`webkitDirectionInvertedFromDevice`: Safari, the desktop's WKWebView);
+ *  Chromium does not, and macOS's default is assumed. Blender does the same on
+ *  macOS (its «Natural Trackpad Direction», on by default). */
+export function fingersOf(e: WheelLike & { webkitDirectionInvertedFromDevice?: boolean }): [number, number] {
+  const inverted = typeof e.webkitDirectionInvertedFromDevice === "boolean" ? e.webkitDirectionInvertedFromDevice : true;
+  return inverted ? [-e.deltaX, -e.deltaY] : [e.deltaX, e.deltaY];
+}

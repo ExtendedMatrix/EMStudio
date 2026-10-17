@@ -13993,6 +13993,7 @@ function openSettings(section?: string): void {
   chk("set-nav-emulate3", s.viewer.emulate3Button);
   chk("set-nav-numpad", s.viewer.emulateNumpad);
   chk("set-nav-autopersp", s.viewer.autoPerspective);
+  chk("set-nav-invorbit", !!s.viewer.invertTrackpadOrbit);
   const ld = document.getElementById("set-nav-leftdrag") as HTMLSelectElement | null;
   if (ld) ld.value = s.viewer.leftDrag;
   const seen = document.getElementById("set-nav-middle-seen");
@@ -14314,6 +14315,7 @@ settingsModal.addEventListener("click", (e) => {
       emulate3Button: !!(document.getElementById("set-nav-emulate3") as HTMLInputElement | null)?.checked,
       emulateNumpad: !!(document.getElementById("set-nav-numpad") as HTMLInputElement | null)?.checked,
       autoPerspective: (document.getElementById("set-nav-autopersp") as HTMLInputElement | null)?.checked ?? true,
+      invertTrackpadOrbit: !!(document.getElementById("set-nav-invorbit") as HTMLInputElement | null)?.checked,
       leftDrag: ((v) => (v === "orbit" || v === "select" || v === "pan" ? v : "auto"))((document.getElementById("set-nav-leftdrag") as HTMLSelectElement | null)?.value),
     },
     iiif: {
@@ -23705,7 +23707,7 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
       const seen = middleSeen();
       return { emulate3: v.emulate3Button, emulateNumpad: v.emulateNumpad, autoPerspective: v.autoPerspective,
         middleSeen: seen, leftSelects: v.leftDrag !== "pan" && leftSelects(v.leftDrag, v.emulate3Button, seen),
-        leftPans: v.leftDrag === "pan" };
+        leftPans: v.leftDrag === "pan", invertTrackpadOrbit: !!v.invertTrackpadOrbit };
     },
     onMiddleSeen: () => setMiddleSeen(),
     onBoxSelect: (keys, extend) => setSpaceSel(boxSelect(spaceSel(), keys, extend)),

@@ -59,7 +59,7 @@ import {
 import { medianPoint } from "./space-selection";
 import { pickByDistance, versionError, type FlowVersion } from "./lod-flow";
 import { buildShapeGeometry, listSketches, shapeById, updateSketch, type Sketch } from "./shapes3d";
-import { trackpadClassifier } from "./wheel-kind";
+import { fingersOf, trackpadClassifier } from "./wheel-kind";
 
 export interface SceneItem {
   kind: "rm" | "proxy";
@@ -150,6 +150,8 @@ export interface SceneNavPrefs {
   leftSelects: boolean;
   /** MICRO-SPAZIO-3D-3 · the left drag pans (the Preferences' «Pan») */
   leftPans?: boolean;
+  /** PARTE 0b · «Inverti l'orbita del trackpad»: two fingers orbit against the drag */
+  invertTrackpadOrbit?: boolean;
 }
 
 /** MICRO-SPAZIO-3D-2 · the camera as the N panel shows it. */
@@ -2088,16 +2090,22 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
         if (modal) return;
         if (e.ctrlKey) { zoomAt(e.clientX, e.clientY, wheelFactor(e.deltaY, e.deltaMode, true, host.clientHeight)); return; }
         if (isTrackpad(e as unknown as { deltaMode: number; deltaX: number; deltaY: number; wheelDeltaY?: number })) {
-          // MICRO-SPAZIO-3D-3 · the fingers' way: with natural scrolling a
-          // swipe to the right gives a negative deltaX, and the scene follows it
+          // PARTE 0b · the fingers' way (`fingersOf`: natural scrolling undone):
+          // two fingers to the right orbit and pan as the left drag to the
+          // right. The orbit read the deltas as they come, against the drag
+          // with natural scrolling (E.D., 17 Oct 2026: «invertita»)
+          const [fx, fy] = fingersOf(e as unknown as { deltaMode: number; deltaX: number; deltaY: number; webkitDirectionInvertedFromDevice?: boolean });
           // the point grabbed at the gesture's start stays the grabbed one until
           // the fingers stop (400 ms): the scene slides under a still pointer
           if (e.shiftKey) {
             const now = performance.now();
             if (!padGrab || now > padGrab.until) padGrab = { p: pointAt(e.clientX, e.clientY).p, until: 0 };
             padGrab.until = now + 400;
-            panBy(-e.deltaX, -e.deltaY, padGrab.p);
-          } else orbitBy(e.deltaX, e.deltaY);
+            panBy(fx, fy, padGrab.p);
+          } else {
+            const k = getNav().invertTrackpadOrbit ? -1 : 1;
+            orbitBy(k * fx, k * fy);
+          }
           return;
         }
         zoomAt(e.clientX, e.clientY, wheelFactor(e.deltaY, e.deltaMode, false, host.clientHeight));

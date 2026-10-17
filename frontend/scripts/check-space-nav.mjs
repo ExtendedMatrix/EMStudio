@@ -194,4 +194,12 @@ const dist = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]);
   ok(kind({ deltaMode: 0, deltaX: 0, deltaY: 120, wheelDeltaY: -360 }), "Chrome's legacy wheelDeltaY at −3×: a trackpad");
 }
 
+// ── PARTE 0b · the fingers' way (E.D. 17 Oct 2026: two fingers orbited the wrong way) ──
+{
+  const z = (v) => v.map((x) => x + 0);   // −0 and 0 are the same movement
+  eq(z(W.fingersOf({ deltaMode: 0, deltaX: -12, deltaY: 0 })), [12, 0], "natural scrolling assumed (Chromium says nothing): fingers to the right give −deltaX, the fingers went +x");
+  eq(z(W.fingersOf({ deltaMode: 0, deltaX: 0, deltaY: 8, webkitDirectionInvertedFromDevice: true })), [0, -8], "WebKit says inverted: fingers up (+deltaY) went −y, up the screen");
+  eq(W.fingersOf({ deltaMode: 0, deltaX: 12, deltaY: -3, webkitDirectionInvertedFromDevice: false }), [12, -3], "WebKit says not inverted (natural scrolling off): the deltas are the fingers'");
+}
+
 console.log(`check-space-nav: ${checks} checks passed`);
