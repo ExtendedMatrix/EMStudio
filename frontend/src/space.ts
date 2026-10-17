@@ -248,6 +248,39 @@ export class SpaceMarks {
   }
 }
 
+/** PARTE 0 · I MODELLI SPARITI (E.D. 17 Oct 2026) · the resident files whose
+ *  fetch got NO answer — the bridge or the node not listening yet (the
+ *  desktop's sidecar still starting when the Space opens): not a verdict on
+ *  the file. They wait and are asked again; one is missing only when it stays
+ *  silent after the bridge answered (a refusal without CORS, a dead route) or
+ *  after `giveUpMs` of silence. `scripts/check-space-models.mjs`. */
+export class UnansweredFiles {
+  private readonly waiting = new Map<string, number>();
+  private readonly retried = new Map<string, { since: number; up: boolean }>();
+  constructor(readonly giveUpMs = 120_000) {}
+  get size(): number { return this.waiting.size; }
+  /** a fetch got no answer: `wait` (the first: the caller starts asking
+   *  again), `waiting` (already), `missing` (the verdict: mark it) */
+  heard(resourceId: string, now: number): "wait" | "waiting" | "missing" {
+    if (this.waiting.has(resourceId)) return "waiting";
+    const was = this.retried.get(resourceId);
+    this.retried.delete(resourceId);
+    if (was && (was.up || now - was.since > this.giveUpMs)) return "missing";
+    const first = !this.waiting.size;
+    this.waiting.set(resourceId, was?.since ?? now);
+    return first ? "wait" : "waiting";
+  }
+  /** still silent for less than `giveUpMs`: keep waiting for the bridge */
+  patient(now: number): boolean {
+    return !this.waiting.size || now - Math.min(...this.waiting.values()) <= this.giveUpMs;
+  }
+  /** asked again now (`up`: the bridge answered /health first) */
+  retry(up: boolean): void {
+    for (const [id, since] of this.waiting) this.retried.set(id, { since, up });
+    this.waiting.clear();
+  }
+}
+
 /** Is a URL somewhere else (a web locator), as `effective_residency` reads it? */
 const isRemote = (url: string): boolean => /^[a-z][a-z0-9+.-]*:\/\//i.test(url) && !/^file:/i.test(url);
 

@@ -248,8 +248,10 @@ export interface SpaceSceneOptions {
   /** the epoch's name, for its box */
   epochLabel?: () => string;
   /** a resident file did not come: the caller marks it missing — or, when
-   *  the node refused it (401/403), refused */
-  onNotFound?: (resourceId: string, why: FetchFailure) => void;
+   *  the node refused it (401/403), refused. `unanswered`: no HTTP answer at
+   *  all (the bridge or the node not listening yet, the desktop's sidecar
+   *  still starting) — not a verdict on the file: the caller asks again */
+  onNotFound?: (resourceId: string, why: FetchFailure, unanswered?: boolean) => void;
   /** MICRO-3DTILES · the threshold and the tiles' memory (the Preferences) */
   limit?: { bytes: number; points: number };
   tilesMemoryMB?: number;
@@ -432,7 +434,9 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
         .then((T) => { loader.setDRACOLoader(dracoFor(E, T)); }).catch(() => undefined));
       // a model, or why it did not come. A failure is not kept: once the
       // access is granted (or the file uploaded), asking again asks again
-      type Loaded = { root: any } | { fail: FetchFailure };
+      // `unanswered`: nothing answered (a network error, no HTTP status) —
+      // a parse error or a 404 is an answer
+      type Loaded = { root: any } | { fail: FetchFailure; unanswered?: boolean };
       const cache = new Map<string, Promise<Loaded>>();
       const load = (url: string): Promise<Loaded> => {
         let p = cache.get(url);
@@ -442,9 +446,11 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
             ? nodeBytes(url).then(
                 (buf) => new Promise<Loaded>((res) => loader.parse(buf, "",
                   (g: any) => res({ root: g.scene }), () => res({ fail: "missing" }))),
-                (e) => ({ fail: e instanceof RoadError ? e.why : "missing" }))
+                (e) => ({ fail: e instanceof RoadError ? e.why : "missing", unanswered: e instanceof RoadError && e.status === 0 }))
             : new Promise<Loaded>((res) => loader.load(url, (g: any) => res({ root: g.scene }), undefined,
-                () => res({ fail: "missing" }))));
+                // three's FileLoader: an HTTP error carries its response, a
+                // refused connection is the fetch's own TypeError
+                (e: any) => res({ fail: "missing", unanswered: !e?.response && e instanceof TypeError && /fetch|load failed|network/i.test(String(e?.message)) }))));
           cache.set(url, p);
           const mine = p;
           void p.then((x) => { if ("fail" in x && cache.get(url) === mine) cache.delete(url); });
@@ -1088,7 +1094,7 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
               if ("fail" in got) {
                 drawn.set(key, { item: failed(item, got.fail), as: "label" });
                 later.push(failed(item, got.fail));
-                if (item.resourceId) opts.onNotFound?.(item.resourceId, got.fail);
+                if (item.resourceId) opts.onNotFound?.(item.resourceId, got.fail, got.unanswered);
                 return;
               }
               const obj = got.root.clone(true);
@@ -1112,7 +1118,7 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
               if ("fail" in got) {
                 drawn.set(`${item.kind}:${item.id}`, { item: failed(item, got.fail), as: "label" });
                 later.push(failed(item, got.fail));
-                if (item.resourceId) opts.onNotFound?.(item.resourceId, got.fail);
+                if (item.resourceId) opts.onNotFound?.(item.resourceId, got.fail, got.unanswered);
                 return;
               }
               const obj = got.root.clone(true);

@@ -239,7 +239,7 @@ import { DOC_TOOLS, renderReadingStage, selectedPassage, type DocTool,
          type TraceAnchor, type TraceGeometry } from "./doc-reading";
 import { openReadingBubble, type BubbleUnit } from "./reading-bubble";
 import { renderChronology, type ChronoEpoch, type ChronologyData } from "./chronology";
-import { buildSpace, citationKey, SpaceMarks, type Space, type SpaceRM } from "./space";
+import { buildSpace, citationKey, SpaceMarks, UnansweredFiles, type Space, type SpaceRM } from "./space";
 import { chooseVersion, SCENE_USES, USES } from "./asset-versions";
 import { mountSpaceScene, type SceneItem, type SceneMenuRequest, type SceneView, type SpaceSceneHandle } from "./scene3d";
 import { blenderToThree, eulerFromUp, leftSelects, threeToBlender, type AlignedView, type CamState, type Pose, type V3 } from "./space-nav";
@@ -21731,6 +21731,41 @@ function askResident(): void {
   })();
 }
 
+/** PARTE 0 · I MODELLI SPARITI (E.D. 17 Oct 2026) · a resident file whose
+ *  fetch got NO answer is not missing: marked so, it stayed «file mancante»
+ *  for the whole session and the Space empty (measured: 11 of the 12 models
+ *  of XX sec, dev.45 and dev.46 alike, with the bridge unreachable for the
+ *  first 4 s — the desktop's sidecar starting). The Space says it is waiting
+ *  and asks again: when the bridge's /health answers (a file opened from the
+ *  disk), or every 1.5 s (a room's store); the rule is `UnansweredFiles`. */
+const spaceUnanswered = new UnansweredFiles();
+let spaceWaitTimer: ReturnType<typeof setTimeout> | null = null;
+function spaceAwaitAnswer(resourceId: string): void {
+  const v = spaceUnanswered.heard(resourceId, Date.now());
+  if (v === "missing") {
+    if (spaceMarks.mark(resourceId, "missing")) queueMicrotask(() => { refreshSurfaces("scene"); renderEmData(); });
+    return;
+  }
+  if (v === "waiting" || spaceWaitTimer) return;
+  queueMicrotask(() => { refreshSurfaces("scene"); });   // the summary says it waits
+  const again = (): void => {
+    spaceWaitTimer = setTimeout(() => { void (async () => {
+      // offline the bytes come through the bridge: ask it first, cheaply
+      let up = false;
+      if (!assetStoreBase()) {
+        const base = await bridgeUrl();
+        up = await fetch(`${base}/health`).then((r) => r.ok, () => false);
+        if (!up && spaceUnanswered.patient(Date.now())) { again(); return; }
+        if (up && !bridgeBaseNow) bridgeBaseNow = base;
+      }
+      spaceWaitTimer = null;
+      spaceUnanswered.retry(up);
+      refreshSurfaces("scene"); renderEmData();
+    })(); }, 1500);
+  };
+  again();
+}
+
 /** The scene's epoch: the one chosen, else the first (newest) top epoch. */
 function spaceEpochOf(sp: Space): string | null {
   if (spaceEpochId && sp.epochs.some((e) => e.id === spaceEpochId)) return spaceEpochId;
@@ -23730,7 +23765,8 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
       return false;
     },
     onSketchChange: () => { refreshSurfaces("scene"); drawNPanel(); },
-    onNotFound: (rid, why: FetchFailure) => {
+    onNotFound: (rid, why: FetchFailure, unanswered?: boolean) => {
+      if (unanswered && why === "missing") { spaceAwaitAnswer(rid); return; }
       if (!spaceMarks.mark(rid, why)) return;
       queueMicrotask(() => { refreshSurfaces("scene"); renderEmData(); });
     },
@@ -23883,6 +23919,7 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
       + (sum.inScene.length ? ` <span class="ref" data-sum="inScene">${escapeHtml(t("space.inScene", { n: String(sum.inScene.length) }))}</span>` : "")
       + (sum.without.length ? ` · <span class="miss" data-sum="without">${escapeHtml(t("space.without"))}: ${list(sum.without)}</span>` : "")
       + (sum.missing.length ? ` · <span class="miss" data-sum="missing">${escapeHtml(t("space.missingFiles"))}: ${list(sum.missing)}</span>` : "")
+      + (spaceUnanswered.size ? ` · <span class="ref" data-sum="waiting">${escapeHtml(t("space.waitingFiles", { n: String(spaceUnanswered.size) }))}</span>` : "")
       + (sum.refused.length ? ` · <span class="miss" data-sum="refused">${escapeHtml(t("space.refusedFiles"))}: ${list(sum.refused)}</span>` : "")
       + (sum.reference.length ? ` · <span class="ref" data-sum="reference">${escapeHtml(t("space.referenceOnly"))}: ${list(sum.reference)}</span>` : "")
       + (spaceIsolated ? ` · <button type="button" class="link" data-unisolate="1">${escapeHtml(t("s3.showAll"))}</button>` : "")
