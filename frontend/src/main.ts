@@ -24498,6 +24498,7 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
   host.addEventListener("pointermove", (e) => { spacePointer = { x: e.clientX, y: e.clientY }; });
   let npQueued = false;
   let flowRedraw = false;
+  const drawnAgain = new Set<string>();
   const drawNPanel = () => {
     if (npQueued) return;
     npQueued = true;
@@ -24530,7 +24531,9 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
     // p.12 · the automatic choice of a container: the Outliner's «sostituito da» follows
     onAltState: (g, which) => { if (altShown.get(g) !== which) { altShown.set(g, which); recomputeSubstituted(); if (space3dPrefs().shown) renderSpaceOutliner(outl, win, currentSpace()); } },
     // p.10 · a version of the flow drawn: the Outliner's dot and the N panel follow (no rebuild)
-    onVersionDrawn: () => { if (!flowRedraw) { flowRedraw = true; requestAnimationFrame(() => { flowRedraw = false; if (space3dPrefs().shown) renderSpaceOutliner(outl, win, currentSpace()); drawNPanel(); }); } },
+    // MICRO-PROVA-DEV47 p.3 · …and the Inspector (its title's level) when the model drawn again is the one it shows
+    onVersionDrawn: (rmId) => { drawnAgain.add(rmId); if (!flowRedraw) { flowRedraw = true; requestAnimationFrame(() => { flowRedraw = false; if (space3dPrefs().shown) renderSpaceOutliner(outl, win, currentSpace()); drawNPanel();
+      if (selectedId && drawnAgain.has(selectedId)) refreshInspector(); drawnAgain.clear(); }); } },
     panelFolded: (k) => (space3dPrefs().collapsed ?? []).includes(k),
     onPanelFold: (k, c) => foldPanel(k, c, false),
     sketchFileUrl: (s) => (s.file ? spaceFileUrl({ url: s.file.url, checksum: s.file.checksum ?? "", residency: "resident" }) : undefined),
