@@ -23795,7 +23795,7 @@ async function chooseLevels(pairs: Array<[string, string]>): Promise<boolean> {
   const total = { bytes: all.reduce((a, h) => a + (h.v.bytes ?? 0), 0), tris: all.reduce((a, h) => a + (h.v.tris ?? 0), 0) };
   if (all.some((h) => isHeavy(h.v)) || isHeavy(total)) {
     const what = all.length === 1 ? `${rmShown(all[0].rm.id, sp)?.shown ?? all[0].rm.name} ${levelShortOf(all[0].rm, all[0].v.id)}` : t("lod.nModels", { n: String(all.length) });
-    if (!await askModal(t("lod.heavyTitle"), t("lod.heavyAsk", { what, mb: mbOf(total.bytes) }), t("lod.heavyYes"))) return false;
+    if (!await askModal(t("lod.heavyTitle"), t(all.length === 1 ? "lod.heavyAsk" : "lod.heavyAskMany", { what, mb: mbOf(total.bytes) }), t("lod.heavyYes"))) return false;
   }
   for (const [rmId, vid] of pairs) setVersionMode([rmId], "manual", vid);
   return true;

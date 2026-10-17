@@ -2042,7 +2042,7 @@ if (process.env.TEMPLU) test("S3.lodTMpanel", "Spazio · MICRO-PROVA-DEV47 p.3b 
   const conds = {
     active: !!active && active.scope[0] === "active:true" && active.mode.join() === "Manuale:false,Per uso:true,Automatico:false" && active.level.some((x) => /LOD2 · OBJ/.test(x)) && /LOD2 · OBJ.*uso/.test(active.drawn ?? ""),
     epoch: !!epoch && epoch.scope[2] === "epoch:true" && opts.some((o) => /Fisso: LOD0 \(11\)/.test(o.t)),
-    asked: /11 modelli pesa 1\.\d\d GB/.test(ask ?? ""),
+    asked: /11 modelli pesano 1\.\d\d GB insieme/.test(ask ?? ""),
     cancelKeeps: afterCancel.filter((r) => /SM_OB_/.test(r.name ?? "")).every((r) => /^LOD2 · fisso/.test(r.chip ?? "")),
     errors: !errors.length,
   };
