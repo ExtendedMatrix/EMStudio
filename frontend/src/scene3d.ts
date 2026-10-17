@@ -299,6 +299,9 @@ export interface SpaceSceneOptions {
   onAltState?: (group: string, shown: "tileset" | "models") => void;
   /** MICRO-SPAZIO-3D-3 p.10 · a version of a model in the flow was drawn (the Outliner's dot follows) */
   onVersionDrawn?: (rmId: string, versionId: string) => void;
+  /** MICRO-PROVA-DEV48 p.5 · a file loaded and counted (triangles, vertices, its
+   *  box in its own frame): the caller keeps it in the measures' cache */
+  onMeasured?: (url: string, m: { tris: number; verts: number; box: [[number, number, number], [number, number, number]] | null }) => void;
   /** the flow's words: «Versioni automatiche», and its line (levels · MB) */
   flowTitle?: string;
   /** MICRO-SPAZIO-3D-3 p.14 · a datamodel glyph (2d_glyphs) for a label's decorator */
@@ -479,9 +482,24 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
                 (e: any) => res({ fail: "missing", unanswered: !e?.response && e instanceof TypeError && /fetch|load failed|network/i.test(String(e?.message)) }))));
           cache.set(url, p);
           const mine = p;
-          void p.then((x) => { if ("fail" in x && cache.get(url) === mine) cache.delete(url); });
+          void p.then((x) => { if ("fail" in x) { if (cache.get(url) === mine) cache.delete(url); } else measured(url, x.root); });
         }
         return p;
+      };
+      /** MICRO-PROVA-DEV48 p.5 · what a file loaded holds, counted once per load */
+      const measured = (url: string, root: any) => {
+        if (!opts.onMeasured) return;
+        let tris = 0, verts = 0;
+        root.updateMatrixWorld?.(true);
+        root.traverse((o: any) => {
+          const g = o.isMesh ? o.geometry : null;
+          const pos = g?.attributes?.position;
+          if (!pos) return;
+          verts += pos.count;
+          tris += Math.floor((g.index ? g.index.count : pos.count) / 3);
+        });
+        const b = new THREE.Box3().setFromObject(root);
+        opts.onMeasured(url, { tris, verts, box: b.isEmpty() ? null : [[b.min.x, b.min.y, b.min.z], [b.max.x, b.max.y, b.max.z]] });
       };
       // MICRO-PROVA-DEV47 p.3a · an OBJ version (the survey's levels of the
       // author, RB/LOD0–2 of Templu Mare): the .obj, the .mtl it calls, the
@@ -530,7 +548,7 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
           })();
           cache.set(k, p);
           const mine = p;
-          void p.then((x) => { if ("fail" in x && cache.get(k) === mine) cache.delete(k); });
+          void p.then((x) => { if ("fail" in x) { if (cache.get(k) === mine) cache.delete(k); } else measured(url, x.root); });
         }
         return p;
       };

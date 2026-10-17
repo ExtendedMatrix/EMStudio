@@ -254,6 +254,7 @@ import { patchProxyNodes, proxyPartsOf, proxyRelPath, unitBrief } from "./proxy-
 import { groupNodeIdFor, planMove, planNewGroup, planRemove, RM_GROUP_TYPE, type GroupPlan } from "./rm-groups";
 import { shownModelName } from "./rm-names";
 import { versionError, type FlowVersion, type VersionMode } from "./lod-flow";
+import { fingerprint, getMeasure, putMeasure } from "./measure-cache";
 import { defaultLevel, isHeavy, levelShort, levelsOf, type Level } from "./lod-levels";
 import { oneLine } from "./one-line";
 import { findSet, measureCoverage, planDeclareAlternative, planSubcontainer, SAME_COVERAGE_IOU, type AltMode, type AltPlan, type Box, type TilesetAlternative } from "./alternatives";
@@ -23808,6 +23809,9 @@ function levelLongOf(rm: SpaceRM, v: RmVersion): string {
   if (fmt) parts.push(fmt);
   const w = mbOf(v.bytes);
   if (w) parts.push(w);
+  // MICRO-PROVA-DEV48 p.5 · the triangles the graph does not say, counted by the Space: a cache, marked
+  const m = v.tris ? null : getMeasure(versionFingerprint(v));
+  if (m) parts.push(t("lod.measuredTris", { n: m.tris.toLocaleString(getLocale()) }));
   if ((v.uses ?? []).length) parts.push((v.uses ?? []).join(", "));
   return parts.join(" · ");
 }
@@ -23832,6 +23836,33 @@ function rmFlow(rm: SpaceRM): FlowVersion[] {
       tris: typeof prim.triangles === "number" ? prim.triangles : null };
   });
 }
+/** MICRO-PROVA-DEV48 p.5 · the fingerprint of the file a version draws: its
+ *  checksum and size as the graph declares them — for a set (an OBJ with its
+ *  mtl and textures), its entry file's (`has_file`, the .obj) */
+const flowUrlPrint = new Map<string, string | null>();
+function versionFingerprint(v: RmVersion): string | null {
+  const st = store;
+  const d = (v.data ?? {}) as Record<string, unknown>;
+  if (v.format === "obj" && st) {
+    for (const e of st.doc.graph.edges) {
+      if (e.edge_type !== "has_file" || e.source !== v.id) continue;
+      const f = st.node(e.target);
+      const fd = (f?.data ?? {}) as Record<string, unknown>;
+      if (/\.obj$/i.test(String(fd.url ?? f?.name ?? "")) || fd.media_type === "model/obj") return fingerprint(fd.checksum, fd.size_bytes);
+    }
+  }
+  return fingerprint(d.checksum, d.size_bytes);
+}
+/** …and a file the Space loaded and counted, kept under it (never in the em.json) */
+function keepMeasure(url: string, m: { tris: number; verts: number; box: [[number, number, number], [number, number, number]] | null }): void {
+  const fp = flowUrlPrint.get(url) ?? (() => {
+    // a version drawn outside the flow (by use, fixed): its fingerprint from the graph
+    for (const rm of currentSpace()?.rms ?? []) for (const v of drawableVersions(rm)) if (v.fetch === url) return versionFingerprint(v);
+    return null;
+  })();
+  putMeasure(fp, { tris: m.tris, verts: m.verts, ...(m.box ? { box: m.box } : {}), by: `EMStudio ${__EMSTUDIO_VERSION__}` });
+}
+
 /** What a model draws, by its mode: the file (manual, by use), or the flow (auto). */
 function rmVersionPlan(rm: SpaceRM): { url?: string; flow?: FlowVersion[]; flowStart?: string; versionId?: string; obj?: { modifier?: (u: string) => string }; bytes?: number | null } {
   const vs = drawableVersions(rm);
@@ -24979,6 +25010,8 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
     snapAlign: () => space3dPrefs().snapAlign === true,
     glyph: (k) => typeIconElement(k),
     flowTitle: t("ver.flowTitle"),
+    // MICRO-PROVA-DEV48 p.5 · what a file holds, counted at its load: the measures' cache
+    onMeasured: (url, m) => keepMeasure(url, m),
     // p.12 · the automatic choice of a container: the Outliner's «sostituito da» follows
     onAltState: (g, which) => { if (altShown.get(g) !== which) { altShown.set(g, which); recomputeSubstituted(); if (space3dPrefs().shown) renderSpaceOutliner(outl, win, currentSpace()); } },
     // p.10 · a version of the flow drawn: the Outliner's dot and the N panel follow (no rebuild)
