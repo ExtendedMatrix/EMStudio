@@ -14799,15 +14799,21 @@ function closeFilterPanel(): void {
  * could change one of those three — otherwise each route re-decides and they
  * disagree, which is how the funnel ended up on the narrative.
  */
+/** MICRO-PROVA-DEV47 · each 3D window's own overlays glyph, by window id */
+const sceneOverlayBtns = new Map<string, HTMLButtonElement>();
 function refreshFunnel(): void {
   const anchored = activeWindowType() === "graph"
     || (!!lastGraphWinId && winAreas.has(lastGraphWinId));
   const belongs = !!store && anchored && !filterPanelOpen() && !overlayPanelOpen();
   btnViewProps.classList.toggle("hidden", !belongs);
   // MICRO-SOVRAPPOSIZIONI · the overlays' glyph, beside the funnel, by the same
-  // rule — and (MICRO-SPAZIO-3D) with the Space in focus, for the Space's own
-  const space = !!store && activeWindowType() === "scene" && !overlayPanelOpen();
-  btnOverlays.classList.toggle("hidden", !belongs && !space);
+  // rule. MICRO-PROVA-DEV47 · a 3D window has its own glyph, in the scene
+  // (E.D., 17 Oct: the one glyph followed the focus, and a click in another
+  // window took it away from the Space): the floating one is the graph's only
+  const space = activeWindowType() === "scene";
+  btnOverlays.classList.toggle("hidden", !belongs || space);
+  const here = activeWin().id;
+  for (const [id, b] of sceneOverlayBtns) b.classList.toggle("hidden", !store || (overlayPanelOpen() && here === id));
   refreshOverlayDot();
 }
 // Monochrome (B/W) display toggle — every node draws black-bordered + white
@@ -15157,6 +15163,15 @@ function refreshOverlayDot(): void {
   if (btnOverlays.title !== tip) {
     btnOverlays.title = tip;
     btnOverlays.setAttribute("aria-label", tip);
+  }
+  // MICRO-PROVA-DEV47 · the 3D windows' glyphs: the Space's state, one for all of them
+  if (sceneOverlayBtns.size) {
+    const sOff = overlaysHideSomething(overlaysOf("space"), "space");
+    const sTip = t(sOff ? "ov.btnOff" : "ov.btn");
+    for (const b of sceneOverlayBtns.values()) {
+      b.classList.toggle("ov-off", sOff);
+      if (b.title !== sTip) { b.title = sTip; b.setAttribute("aria-label", sTip); }
+    }
   }
 }
 btnOverlays.addEventListener("click", (e) => {
@@ -23871,7 +23886,24 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
   ntab.textContent = "‹";
   ntab.title = t("s3.openNPanel");
   sideTab(ntab, -1, () => setSpace3dPrefs({ ...space3dPrefs(), nShown: true }));
-  host.append(overlay, empty, tab, ntab);
+  // MICRO-PROVA-DEV47 · the overlays glyph of THIS window, floating in the
+  // scene's top right corner above the navigation gizmo: the graph's twin
+  // (same glyph, dot and tooltip), there whichever window has the focus
+  const ovBtn = document.createElement("button");
+  ovBtn.type = "button";
+  ovBtn.className = "scn-ovbtn";
+  ovBtn.dataset.scnOverlays = win.id;
+  ovBtn.innerHTML = btnOverlays.innerHTML;
+  for (const ev of ["pointerdown", "dblclick", "contextmenu", "wheel"]) ovBtn.addEventListener(ev, (e) => e.stopPropagation());
+  ovBtn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    if (activeWin().id !== win.id) selectWindow(win.id);
+    else if (overlayPanelOpen()) { closeOverlayPanel(); return; }
+    openOverlayPanel();
+  });
+  sceneOverlayBtns.set(win.id, ovBtn);
+  queueMicrotask(refreshFunnel);
+  host.append(overlay, empty, tab, ntab, ovBtn);
   row.append(outl, grip, host, ngrip, npanel);
   wrap.append(bar, row);
   body.appendChild(wrap);
@@ -24234,7 +24266,7 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
     handle.syncSketches();
   };
   refresh();
-  return { refresh, destroy: () => { bar.removeEventListener("click", onBar); handle.dispose(); sceneHandles.delete(win.id); npanelRenderers.delete(win.id); } };
+  return { refresh, destroy: () => { bar.removeEventListener("click", onBar); handle.dispose(); sceneHandles.delete(win.id); npanelRenderers.delete(win.id); sceneOverlayBtns.delete(win.id); } };
 }
 
 /** The epoch's Inspector: its chronology problems, and the tool. */

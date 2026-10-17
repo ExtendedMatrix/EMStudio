@@ -1588,7 +1588,7 @@ test("S3.labels3", "Spazio · MICRO-GIZMO-ASSI · le etichette separate: modelli
     return { rm: vis.filter((e) => e.classList.contains("k-rm")).length, proxy: vis.filter((e) => e.classList.contains("k-proxy")).length, sketch: vis.filter((e) => e.classList.contains("k-sketch")).length }; });
   const toggle = async (k) => { await p.click(`#overlay-panel input[data-ov="${k}"]`); await p.waitForTimeout(400); };
   const both = await kinds();
-  await p.click("#btn-overlays"); await p.waitForTimeout(300);
+  await p.click(".scn-ovbtn"); await p.waitForTimeout(300);
   const groups = await p.evaluate(() => [...document.querySelectorAll("#overlay-panel .ov-group")].map((g) => [g.dataset.group, [...g.querySelectorAll("input[data-ov]")].map((i) => i.dataset.ov)]));
   await toggle("s3_labels_rm");
   const noRm = await kinds();
@@ -1865,6 +1865,51 @@ test("S3.assocMenu", "Spazio · MICRO-PANNELLI-LATERALI p.2 · il clic destro su
     errors: !errors.length,
   };
   return { pass: Object.values(conds).every(Boolean), detail: { conds, closed, menu, labels, grab, grabGone, opened, out1, out2, foldTitle, asked, g: [g0, g1, g2], errors } };
+});
+// ── MICRO-PROVA-DEV47 (E.D. 17 Oct 2026, dev.47 on Templu Mare v3.2) ─────────
+// p.1 · each 3D window its own overlays glyph, floating in the scene's corner
+// above the navigation gizmo, whichever window has the focus
+const ovGeo = (p) => p.evaluate(() => [...document.querySelectorAll(".scn-host")].map((h) => {
+  const R = (e) => { if (!e) return null; const r = e.getBoundingClientRect(); return [r.left, r.top, r.right, r.bottom]; };
+  const b = h.querySelector(".scn-ovbtn");
+  const hit = (a, c) => !!(a && c && !(a[2] <= c[0] || c[2] <= a[0] || a[3] <= c[1] || c[3] <= a[1]));
+  const rb = R(b), rh = R(h);
+  return { win: h.dataset.scn, shown: !!b && getComputedStyle(b).display !== "none", title: b?.title ?? null,
+    overGizmo: hit(rb, R(h.querySelector(".scn-nav-box"))) || hit(rb, R(h.querySelector(".scn-nav-col"))),
+    inside: !!rb && rb[0] >= rh[0] && rb[2] <= rh[2] && rb[1] >= rh[1] };
+}));
+test("S3.ovbtn", "Spazio · MICRO-PROVA-DEV47 p.1 · il pulsante delle sovrapposizioni è flottante in ogni finestra 3D (anche la seconda), sopra il gizmo senza toccarlo, con il pannello N aperto e chiuso, anche quando il fuoco è in un'altra finestra; apre il menu per gruppi e spegnere le etichette dei proxy funziona", async () => {
+  const { p, ctx, errors } = await gizmoScene();
+  const corner = async () => p.evaluate(() => { const c = document.querySelector(".scn-host canvas").getBoundingClientRect(); return { x: c.x + 40, y: c.y + c.height - 40 }; });
+  const g0 = await ovGeo(p);
+  await p.click(".scn-ntab"); await p.waitForTimeout(300);
+  const gN = await ovGeo(p);
+  let c = await corner(); await p.mouse.click(c.x, c.y); await p.keyboard.press("n"); await p.keyboard.press("t"); await p.waitForTimeout(300);
+  // the focus in another window: the glyph stays in the scene, the graph's floating one is not over it
+  const other = await p.evaluate(() => window.__EM_DRAG__.wins().find((w) => w.type !== "scene")?.id);
+  const oc = await p.evaluate((id) => { const r = document.querySelector(`.tile-area[data-win="${id}"]`).getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; }, other);
+  await p.mouse.click(oc.x, oc.y);
+  await p.waitForTimeout(300);
+  const gOther = await ovGeo(p);
+  const sceneWin = await winOf(p, "scene");
+  const second = await p.evaluate((id) => window.__EM_DRAG__.splitDoc(id), sceneWin);
+  await p.waitForTimeout(1500);
+  const g2 = await ovGeo(p);
+  const labels = () => p.evaluate(() => [...document.querySelectorAll(".scn-label.k-proxy")].filter((e) => e.style.display !== "none" && e.closest(".scn-labels")?.style.display !== "none").length);
+  const px0 = await labels();
+  await p.click(`.scn-ovbtn[data-scn-overlays="${second}"]`); await p.waitForTimeout(400);
+  const panel = await p.evaluate(() => ({ open: !document.getElementById("overlay-panel").classList.contains("hidden"), view: document.getElementById("overlay-panel").dataset.view,
+    groups: [...document.querySelectorAll("#overlay-panel .ov-group")].map((g) => g.dataset.group) }));
+  await p.screenshot({ path: `${process.env.SHOTS ?? "."}/s3-ovbtn-seconda-finestra.png` }).catch(() => {});
+  await p.click('#overlay-panel input[data-ov="s3_labels_proxy"]'); await p.waitForTimeout(500);
+  const px1 = await labels();
+  const dot = await p.evaluate(() => [...document.querySelectorAll(".scn-ovbtn")].every((b) => b.classList.contains("ov-off")));
+  await ctx.close();
+  const ok = (gs, n) => gs.length === n && gs.every((g) => g.shown && !g.overGizmo && g.inside && /Sovrapposizioni/.test(g.title ?? ""));
+  const conds = { closed: ok(g0, 1), nOpen: ok(gN, 1), otherFocus: ok(gOther, 1), twoWindows: !!second && ok(g2, 2),
+    menu: panel.open && panel.view === "space" && ["s3_guides", "s3_text", "s3_objects", "s3_geometry"].every((k) => panel.groups.includes(k)),
+    proxyLabelsOff: px0 > 0 && px1 === 0, dot, errors: !errors.length };
+  return { pass: Object.values(conds).every(Boolean), detail: { conds, g0, gN, gOther, g2, panel, px: [px0, px1], errors } };
 });
 test("S3.files", "Spazio · un file solo referenziato è un contorno con l'etichetta; uno dichiarato e assente, l'etichetta; il riepilogo li conta", async () => {
   const { p, ctx, errors } = await open({ doc: "spazio", ws: "space" });

@@ -9656,7 +9656,18 @@ tr.tv-sel-act > td { background: color-mix(in srgb, var(--accent) 42%, transpare
 .sol-eye.subst { color: #2b8a3e; }
 
 /* MICRO-GIZMO-ASSI · the navigation gizmo, top right of the 3D, as Blender's */
-.scn-nav { position: absolute; right: 8px; top: 6px; z-index: 3; display: flex; flex-direction: column; align-items: center; gap: 4px; pointer-events: none; }
+/* MICRO-PROVA-DEV47 · a 3D window's overlays glyph: #btn-overlays' twin, centred
+   over the navigation gizmo (whose box is 100 px wide), which sits under it */
+.scn-ovbtn { position: absolute; right: 43px; top: 6px; z-index: 4; width: 30px; height: 30px; padding: 0;
+  display: flex; align-items: center; justify-content: center; background: var(--bg-elevated);
+  border: 1px solid var(--border); border-radius: var(--radius-lg); box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
+  cursor: pointer; color: var(--text); }
+.scn-ovbtn:hover { background: var(--bg-panel); border-color: var(--border-strong); }
+.scn-ovbtn.hidden { display: none; }
+.scn-ovbtn .ov-dot { position: absolute; top: 3px; right: 3px; width: 7px; height: 7px; border-radius: 50%;
+  background: var(--accent); box-shadow: 0 0 0 1.5px var(--bg-elevated); display: none; }
+.scn-ovbtn.ov-off .ov-dot { display: block; }
+.scn-nav { position: absolute; right: 8px; top: 42px; z-index: 3; display: flex; flex-direction: column; align-items: center; gap: 4px; pointer-events: none; }
 .scn-nav-box { position: relative; pointer-events: auto; cursor: grab; touch-action: none; }
 .scn-nav-box:active { cursor: grabbing; }
 .scn-nav-cv { display: block; }
