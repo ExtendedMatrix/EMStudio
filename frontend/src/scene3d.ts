@@ -363,6 +363,7 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
     __spaceCamState?: () => CamState;
     __spaceTiles?: () => unknown;
     __spaceLoadTimes?: () => Record<string, number>;
+    __spaceMeshesOf?: (id: string) => { meshes: number; verts: number; other: number };
     __spaceTileScreenOf?: (uri: string) => { x: number; y: number } | null;
     /** TEMPLU MARE v2 · C1 · the world box of what an item drew (a model's
      *  meshes, a tileset's loaded tiles): [minx, miny, minz, maxx, maxy, maxz] */
@@ -496,7 +497,11 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
             const manager = new THREE.LoadingManager();
             if (modifier) manager.setURLModifier(modifier);
             try {
-              const text = String(await new THREE.FileLoader(manager).loadAsync(url));
+              let text = String(await new THREE.FileLoader(manager).loadAsync(url));
+              // a stray edge among the faces turns three's object into LINES, all of
+              // it (OB_PRATO_LOD2.obj: one `l` among 52 140 faces, measured 17 Oct):
+              // with faces, the loose edges go
+              if (/^f\s/m.test(text) && /^l\s/m.test(text)) text = text.replace(/^l\s.*$/gm, "");
               const base = url.slice(0, url.lastIndexOf("/") + 1);
               const libs = [...text.matchAll(/^mtllib\s+(.+?)\s*$/gm)].map((m) => m[1]);
               const reader = new E.OBJLoader(manager);
@@ -1622,6 +1627,13 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
       };
       probe.__spaceCamera = () => [...camera.position.toArray(), ...controls.target.toArray()].map((x: number) => Math.round(x * 1000) / 1000);
       probe.__spaceCursor = () => cursorAt.map((q) => Math.round(q * 10000) / 10000);
+      /** MICRO-PROVA-DEV47 · what an object is made of in the scene: meshes, vertices, in the content or not */
+      probe.__spaceMeshesOf = (id: string) => {
+        let meshes = 0, verts = 0, other = 0;
+        content.traverse((o: any) => { if (o.userData.rmId !== id && o.userData.unitId !== id) return;
+          if (o.isMesh) { meshes++; verts += o.geometry?.attributes?.position?.count ?? 0; } else if (o.isPoints || o.isLine) other++; });
+        return { meshes, verts, other };
+      };
       probe.__spaceBoxOf = (id: string) => {
         const live = liveLayers().find((l) => l.itemId === id);
         let b = live ? live.layer.contentBox() : null;

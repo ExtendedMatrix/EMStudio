@@ -1976,6 +1976,8 @@ if (process.env.TEMPLU) test("S3.lodTM", "Spazio · MICRO-PROVA-DEV47 p.3 · Tem
   const sp = () => p.evaluate((id) => document.querySelector(".scn-host").__space().find((x) => x.id === id), id);
   const box = () => p.evaluate((id) => document.querySelector(".scn-host").__spaceBoxOf(id), id);
   const d2 = await sp(), b2 = await box();
+  // every survey model a mesh: OB_PRATO_LOD2.obj has one stray edge among its faces (three made it lines)
+  const meshes = await p.evaluate(() => { const h = document.querySelector(".scn-host"); return h.__space().filter((x) => /SM_OB_/.test(x.id)).map((x) => [x.id, h.__spaceMeshesOf(x.id)]); });
   await p.click(`.scn-outliner .sol-row[data-key="rm:${id}"] [data-sol="lod"]`); await p.waitForTimeout(300);
   const menu = await menuItems(p);
   await p.screenshot({ path: `${process.env.SHOTS ?? "."}/s3-lod-menu-outliner.png` }).catch(() => {});
@@ -1997,6 +1999,7 @@ if (process.env.TEMPLU) test("S3.lodTM", "Spazio · MICRO-PROVA-DEV47 p.3 · Tem
   const conds = {
     podioLOD2: /^LOD2 · uso/.test(podio?.chip ?? "") && /OB_PODIO_LOD2\.obj$/.test(d2?.url ?? "") && d2?.as === "mesh",
     allSurveyLOD2: xx.filter((r) => /SM_OB_/.test(r.name ?? "")).every((r) => /^LOD2 · uso/.test(r.chip ?? "")),
+    allMeshes: meshes.length === 11 && meshes.every(([, m]) => m.meshes > 0 && m.other === 0),
     tilesetSaysTileset: xx.filter((r) => /tileset/i.test(r.name ?? "")).every((r) => /^tileset/.test(r.chip ?? "")),
     menu: ["LOD0 · OBJ", "LOD1 · OBJ", "LOD2 · OBJ", "derivata da LOD2 · copia · glb", "derivata da LOD2 · 50 %"].every((w) => menu.some((m) => m.label.includes(w)))
       && menu.some((m) => m.disabled && /master · \.blend.*aprilo in Blender/.test(m.label)) && menu.some((m) => m.act === "ver-auto") && menu.some((m) => m.act === "ver-use"),
@@ -2005,7 +2008,7 @@ if (process.env.TEMPLU) test("S3.lodTM", "Spazio · MICRO-PROVA-DEV47 p.3 · Tem
     reconstructionWhole: ii.length > 50 && ii.every((r) => /^intero · uso/.test(r.chip ?? "")),
     errors: !errors.length,
   };
-  return { pass: Object.values(conds).every(Boolean), detail: { conds, podio, b2, b3, b0, ms0, chip3, menu: menu.map((m) => m.label), iiChips: [...new Set(ii.map((r) => r.chip))], errors } };
+  return { pass: Object.values(conds).every(Boolean), detail: { conds, podio, b2, b3, b0, ms0, chip3, meshes, menu: menu.map((m) => m.label), iiChips: [...new Set(ii.map((r) => r.chip))], errors } };
 });
 if (process.env.TEMPLU) test("S3.lodTMpanel", "Spazio · MICRO-PROVA-DEV47 p.3b · il pannello N «Livello di dettaglio» per l'attivo, la selezione e l'epoca, con le parole di Cesium (Manuale / Per uso / Automatico); sull'epoca «Fisso: LOD0» per 11 modelli (1 GB) chiede prima, Annulla (Esc) non cambia nulla", async () => {
   const { p, ctx, errors } = await templuSpace("XX");
