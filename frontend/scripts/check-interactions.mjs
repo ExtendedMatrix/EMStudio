@@ -1700,6 +1700,172 @@ test("S3.sides", "Spazio · MICRO-PANNELLI-LATERALI · i due pannelli come Blend
   return { pass: Object.values(conds).every(Boolean),
     detail: { conds, s0, sT, tab, ntab, sN, sBack, sTabClick, sNtabClick, w0, held, midDrag, sSqueezed, pSqueezed, sDragOpen, wAgain, nw0, sNSqueezed, sNDragOpen, nwAgain, gaps: [gap0, gapN, gapNClosed, gapNOpen], errors } };
 });
+// MICRO-PANNELLI-LATERALI p.2 (E.D. 17 Oct 2026) · «Associa a un'unità» in the
+// Inspector, not a dropdown over the scene; the right click on a sketch as
+// Blender's object menu. The spazio fixture opened FROM A FOLDER of the bridge,
+// so the proxy's glb is written beside it (FS_ROOT, a copy per case)
+async function assocScene(name, { w = 1600, h = 1000 } = {}) {
+  const root = FS_ROOT ?? (await rootPath());
+  const dir = `${root}/pannelli-${name}`;
+  rmSync(dir, { recursive: true, force: true });
+  mkdirSync(dir, { recursive: true });
+  copyFileSync(`${TD}spazio.em.json`, `${dir}/spazio.em.json`);
+  const { p, ctx, errors } = await open({ doc: null, w, h });
+  await p.evaluate(([d, path]) => window.__EM_DRAG__.openAt(d, path), [fixture("spazio"), `${dir}/spazio.em.json`]);
+  await p.waitForFunction(() => window.__EM_SCENE__?.()?.nodes?.length > 0, null, { timeout: 20000 });
+  await workspace(p, "space");
+  await p.waitForFunction(() => document.querySelector(".scn-host")?.dataset.ready === "1", null, { timeout: 20000 });
+  await spaceOn(p, "EP_MED");
+  return { p, ctx, errors, dir };
+}
+// the palette may sit below the Outliner's fold in a small window: scrolled to first
+const addCube = async (p) => {
+  await p.evaluate(() => { const b = document.querySelector('.scn-outliner button[data-shape="cube"]'); b.closest("details")?.setAttribute("open", ""); b.scrollIntoView({ block: "center" }); });
+  await p.click('.scn-outliner button[data-shape="cube"]'); await p.waitForTimeout(700);
+};
+const assocView = (p) => p.evaluate(() => {
+  const s = document.querySelector("[data-assoc]");
+  if (!s) return null;
+  const list = (k) => [...s.querySelectorAll(`[data-assoc-list="${k}"] .insp-assoc-unit`)].map((b) => b.dataset.unit);
+  return { head: s.querySelector(".insp-assoc-head")?.textContent, groups: [...s.querySelectorAll("[data-assoc-group]")].map((g) => g.textContent),
+    here: list("here"), elsewhere: list("elsewhere"), withProxy: list("withProxy"),
+    metaSF100: s.querySelector('[data-unit="SF100"] .insp-assoc-meta')?.textContent ?? null,
+    newFirst: s.firstElementChild?.nextElementSibling?.classList.contains("insp-assoc-new") ?? false,
+    types: [...s.querySelectorAll("[data-assoc-new-type] option")].map((o) => o.value), name: s.querySelector("[data-assoc-new-name]")?.value };
+});
+/** a unit's geometry properties (the proxies' chains), read from the graph */
+const geometryOf = (p, unit) => p.evaluate((u) => {
+  const g = JSON.parse(window.__EM_DRAG__.graphJson());
+  const byId = new Map(g.nodes.map((n) => [n.id, n]));
+  return g.edges.filter((e) => e.source === u && e.edge_type === "has_property").map((e) => byId.get(e.target))
+    .filter((n) => n && /geometry/i.test(String(n.name ?? "") + String(n.data?.property_type ?? ""))).length;
+}, unit);
+const nodeCount = (p) => p.evaluate(() => JSON.parse(window.__EM_DRAG__.graphJson()).nodes.length);
+const inspName = (p) => p.evaluate(() => document.querySelector(".insp-name-input")?.value ?? document.querySelector(".insp-head h2")?.textContent ?? null);
+test("S3.assocInsp", "Spazio · MICRO-PANNELLI-LATERALI p.2 · «Associa a un'unità» è una sezione dell'Inspector dell'abbozzo: in cima «Crea una nuova unità», poi le orfane dell'epoca, le altre epoche con l'epoca accanto, quelle con un proxy ◆; il pulsante porta alla ricerca; un clic su un'orfana associa, l'Inspector mostra l'unità, un annulla toglie tutto", async () => {
+  const { p, ctx, errors, dir } = await assocScene("insp");
+  await addCube(p);
+  const v = await assocView(p);
+  await p.click('.s3-sketch-acts [data-s3="associate"]'); await p.waitForTimeout(400);
+  const focus = await p.evaluate(() => ({ q: document.activeElement?.dataset?.assocQ === "1", floating: !!document.querySelector(".s3-assoc") }));
+  // the search, the type filter
+  await p.fill("[data-assoc-q]", "us10"); await p.waitForTimeout(150);
+  const searched = await assocView(p);
+  await p.fill("[data-assoc-q]", ""); await p.selectOption("[data-assoc-type]", "SF"); await p.waitForTimeout(150);
+  const filtered = await assocView(p);
+  await p.selectOption("[data-assoc-type]", ""); await p.waitForTimeout(150);
+  const n0 = await nodeCount(p), g0 = await geometryOf(p, "US104");
+  await p.click('[data-assoc-list="here"] [data-unit="US104"]');
+  await p.waitForFunction(() => !document.querySelector(".scn-host").__spaceSketches().length, null, { timeout: 20000 }).catch(() => {});
+  await p.waitForTimeout(600);
+  const n1 = await nodeCount(p), g1 = await geometryOf(p, "US104");
+  const selected = await p.evaluate(() => window.__EM_DRAG__.selected()[0] ?? null);
+  const shown = await inspName(p);
+  const files = readdirSync(`${dir}/proxies`).filter((f) => f.endsWith(".glb"));
+  await p.evaluate(() => window.__EM_DRAG__.undo()); await p.waitForTimeout(500);
+  const n2 = await nodeCount(p), g2 = await geometryOf(p, "US104");
+  await ctx.close();
+  const conds = {
+    section: v?.head === "Associa a un'unità" && v.newFirst && v.types[0] === "US" && v.types.includes("USVs") && /^US\d+|^SU\d+/.test(v.name ?? ""),
+    groups: v?.here.includes("US104") && !v.here.includes("SF100") && v.elsewhere.includes("SF100") && /Età imperiale/.test(v.metaSF100 ?? "")
+      && v.withProxy.includes("US102") && /^Orfane di Medioevo/.test(v.groups[0]) && /\(\d+\)$/.test(v.groups[2]),
+    focus: focus.q && !focus.floating,
+    search: JSON.stringify([searched.here, searched.elsewhere]) === JSON.stringify([["US104"], []]) && searched.withProxy.every((u) => /us10/i.test(u)),
+    filter: filtered.here.length === 0 && JSON.stringify(filtered.elsewhere) === JSON.stringify(["SF100"]) && filtered.withProxy.length === 0,
+    associated: g1 === g0 + 1 && n1 > n0 && selected === "US104" && shown === "US104" && files.length === 1,
+    undone: n2 === n0 && g2 === g0,
+    errors: !errors.length,
+  };
+  return { pass: Object.values(conds).every(Boolean), detail: { conds, v, focus, searched, filtered, n: [n0, n1, n2], g: [g0, g1, g2], selected, shown, files, errors } };
+});
+test("S3.assocNew", "Spazio · MICRO-PANNELLI-LATERALI p.2 · «Crea una nuova unità da questa forma» nell'Inspector: il tipo dal datamodel (USV/s), il nome proposto che segue il tipo; nasce l'unità con il proxy, nell'epoca in scena; un annulla la toglie", async () => {
+  const { p, ctx, errors } = await assocScene("new");
+  await addCube(p);
+  const before = await assocView(p);
+  await p.selectOption("[data-assoc-new-type]", "USVs"); await p.waitForTimeout(150);
+  const after = await assocView(p);
+  const n0 = await nodeCount(p);
+  await p.click("[data-assoc-create]");
+  await p.waitForFunction(() => !document.querySelector(".scn-host").__spaceSketches().length, null, { timeout: 20000 }).catch(() => {});
+  await p.waitForTimeout(600);
+  const born = await p.evaluate((name) => { const g = JSON.parse(window.__EM_DRAG__.graphJson()); const n = g.nodes.find((x) => x.name === name);
+    return n ? { id: n.id, type: n.node_type } : null; }, after.name);
+  const g1 = born ? await geometryOf(p, born.id) : 0;
+  const shown = await inspName(p);
+  const n1 = await nodeCount(p);
+  await p.evaluate(() => window.__EM_DRAG__.undo()); await p.waitForTimeout(500);
+  const gone = await p.evaluate((id) => !JSON.parse(window.__EM_DRAG__.graphJson()).nodes.some((x) => x.id === id), born?.id);
+  const n2 = await nodeCount(p);
+  await ctx.close();
+  const conds = { proposed: before.name !== after.name && /USV/.test(after.name ?? ""), born: born?.type === "USVs" && g1 === 1 && shown === after.name,
+    undone: gone && n2 === n0 && n1 > n0, errors: !errors.length };
+  return { pass: Object.values(conds).every(Boolean), detail: { conds, before: before.name, after: after.name, born, g1, shown, n: [n0, n1, n2], errors } };
+});
+test("S3.assocMenu", "Spazio · MICRO-PANNELLI-LATERALI p.2 · il clic destro su un abbozzo come Blender (associa, crea, inquadra, sposta/ruota/scala, elimina); «Associa a un'unità…» apre l'Inspector se è chiuso e mette il fuoco nella ricerca; un'unità con proxy chiede «Sostituisci / Aggiungi come parte»; nessun elemento fuori dalla finestra dello Spazio", async () => {
+  const { p, ctx, errors } = await assocScene("menu", { w: 1100, h: 760 });
+  // the Inspector closed: «Associa…» opens it
+  const insp = await p.evaluate(() => window.__EM_DRAG__.wins().find((w) => w.type === "inspector")?.id ?? null);
+  if (insp) await p.evaluate((id) => window.__EM_DRAG__.closeWin(id), insp);
+  await p.waitForTimeout(400);
+  const closed = await p.evaluate(() => !window.__EM_DRAG__.wins().some((w) => w.type === "inspector"));
+  await addCube(p);
+  // the cube is born at the 3D cursor, maybe out of the frame: «Inquadra» the selection
+  await p.click('.sol-head [data-sol="frame"]'); await p.waitForTimeout(500);
+  const at = await p.evaluate(() => { const h = document.querySelector(".scn-host"); const s = h.__spaceSketches()[0]; return h.__spaceProject(s.position); });
+  await p.mouse.click(at.x, at.y, { button: "right" }); await p.waitForTimeout(400);
+  const menu = await p.evaluate(() => [...document.querySelectorAll(".scn-menu button")].map((b) => b.dataset.s3));
+  const labels = await p.evaluate(() => [...document.querySelectorAll(".scn-menu button")].map((b) => b.textContent));
+  // «Sposta (G)» from the menu: the modal of G, as the key; Esc leaves it
+  await p.click('.scn-menu [data-s3="grab"]', { timeout: 5000 }).catch(() => {}); await p.waitForTimeout(300);
+  const grab = await p.evaluate(() => document.querySelector(".scn-host").__spaceModal());
+  await p.keyboard.press("Escape"); await p.waitForTimeout(300);
+  const grabGone = await p.evaluate(() => document.querySelector(".scn-host").__spaceModal());
+  await p.mouse.click(at.x, at.y, { button: "right" }); await p.waitForTimeout(400);
+  await p.click('.scn-menu [data-s3="associate"]', { timeout: 5000 }).catch((e) => errors.push(`menu: ${String(e).slice(0, 120)}`)); await p.waitForTimeout(700);
+  const opened = await p.evaluate(() => ({ insp: window.__EM_DRAG__.wins().some((w) => w.type === "inspector"), q: document.activeElement?.dataset?.assocQ === "1",
+    floating: !!document.querySelector(".s3-assoc") }));
+  // nothing of the Space's window outside it (the summary open and folded)
+  const outside = () => p.evaluate(() => {
+    const area = document.querySelector(".scn").closest(".tile-area");
+    const A = area.getBoundingClientRect();
+    return [...area.querySelectorAll("*")].filter((e) => { const r = e.getBoundingClientRect(); if (!r.width || !r.height) return false;
+      const out = r.right > A.right + 1 || r.left < A.left - 1 || r.bottom > A.bottom + 1 || r.top < A.top - 1;
+      if (!out) return false;
+      for (let a = e.parentElement; a && a !== area; a = a.parentElement) { const o = getComputedStyle(a); const R = a.getBoundingClientRect();
+        if ((o.overflow !== "visible" || o.overflowX !== "visible") && R.right <= A.right + 1 && R.bottom <= A.bottom + 1) return false; }
+      return true; }).map((e) => String(e.className).slice(0, 40));
+  });
+  const out1 = await outside();
+  await p.evaluate(() => document.querySelector(".scn-ov [data-fold=summary]")?.click()); await p.waitForTimeout(300);
+  const out2 = await outside();
+  const foldTitle = await p.evaluate(() => document.querySelector(".scn-ov").title);
+  await p.evaluate(() => document.querySelector(".scn-ov [data-fold=summary]")?.click()); await p.waitForTimeout(300);
+  await p.screenshot({ path: `${process.env.SHOTS ?? "."}/s3-associa-inspector-stretto.png` }).catch(() => {});
+  // a unit with a proxy: the question, «Aggiungi come parte»
+  const g0 = await geometryOf(p, "US102");
+  await p.evaluate(() => document.querySelector('[data-assoc-list="withProxy"] [data-unit="US102"]')?.click());
+  await p.waitForSelector(".s3-conflict", { timeout: 5000 }).catch(() => {});
+  const asked = await p.evaluate(() => [...document.querySelectorAll(".s3-conflict [data-conflict]")].map((b) => b.dataset.conflict));
+  await p.click('.s3-conflict [data-conflict="part"]').catch(() => {});
+  await p.waitForFunction(() => !document.querySelector(".scn-host").__spaceSketches().length, null, { timeout: 20000 }).catch(() => {});
+  await p.waitForTimeout(600);
+  const g1 = await geometryOf(p, "US102");
+  await p.evaluate(() => window.__EM_DRAG__.undo()); await p.waitForTimeout(500);
+  const g2 = await geometryOf(p, "US102");
+  await ctx.close();
+  const conds = {
+    closed,
+    menu: JSON.stringify(menu) === JSON.stringify(["associate", "create-unit", "frame", "isolate", "grab", "rotate", "scale", "delete"])
+      && labels.includes("Sposta (G)") && labels.includes("Elimina l'abbozzo (X)"),
+    grab: !!grab && !grabGone,
+    opened: opened.insp && opened.q && !opened.floating,
+    inside: !out1.length && !out2.length && /proxy/.test(foldTitle),
+    asked: JSON.stringify(asked) === JSON.stringify(["replace", "part", "cancel"]),
+    part: g1 === g0 + 1 && g2 === g0,
+    errors: !errors.length,
+  };
+  return { pass: Object.values(conds).every(Boolean), detail: { conds, closed, menu, labels, grab, grabGone, opened, out1, out2, foldTitle, asked, g: [g0, g1, g2], errors } };
+});
 test("S3.files", "Spazio · un file solo referenziato è un contorno con l'etichetta; uno dichiarato e assente, l'etichetta; il riepilogo li conta", async () => {
   const { p, ctx, errors } = await open({ doc: "spazio", ws: "space" });
   await p.waitForFunction(() => document.querySelector(".scn-host")?.dataset.ready === "1", null, { timeout: 20000 });

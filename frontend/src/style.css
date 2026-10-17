@@ -9585,6 +9585,23 @@ button.hdto-v {
 .s3-has-proxy { color: var(--text-muted); font-size: 0.72rem; }
 .s3-free-shapes { color: #b35c00 !important; }
 .insp-sketch-use { margin: 4px 10px 8px; }
+/* MICRO-PANNELLI-LATERALI p.2 · «Associa a un'unità», a section of the sketch's Inspector */
+.s3-sketch-acts { flex-wrap: wrap; }
+.s3-sketch-acts .insp-btn { flex: 1 1 auto; }
+.insp-assoc-row .insp-btn { flex: none; }
+.insp-assoc { margin: 6px 10px 10px; padding-top: 6px; border-top: 1px solid var(--border); }
+.insp-assoc-head { margin: 0 0 6px; font-size: 0.86rem; font-weight: 700; }
+.insp-assoc-sub { margin: 8px 0 3px; font-size: 0.72rem; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.04em; }
+.insp-assoc-row { display: flex; gap: 4px; align-items: center; flex-wrap: wrap; }
+.insp-assoc-row input[type="text"], .insp-assoc-q { flex: 1; min-width: 90px; font: inherit; padding: 2px 6px; border: 1px solid var(--border-strong); border-radius: var(--radius-sm); background: var(--bg); color: var(--text); }
+.insp-assoc-row select { font: inherit; max-width: 45%; }
+.insp-assoc-new { padding: 4px 6px 6px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg-panel-2, var(--bg-panel)); margin-bottom: 6px; }
+.insp-assoc-new .insp-assoc-sub { margin-top: 0; text-transform: none; letter-spacing: 0; font-size: 0.78rem; color: var(--text); }
+.insp-assoc-list { list-style: none; margin: 0; padding: 0; }
+.insp-assoc-unit { display: flex; width: 100%; gap: 6px; align-items: baseline; border: 0; background: none; color: var(--text); padding: 2px 4px; font: inherit; text-align: left; cursor: pointer; border-radius: var(--radius-sm); }
+.insp-assoc-unit:hover, .insp-assoc-unit:focus-visible { background: color-mix(in srgb, var(--accent) 22%, transparent); }
+.insp-assoc-name { font-weight: 600; overflow-wrap: anywhere; }
+.insp-assoc-meta { color: var(--text-muted); font-size: 0.74rem; overflow-wrap: anywhere; }
 .insp-sketch-use summary { cursor: pointer; font-size: 0.8rem; }
 .insp-sketch-use .insp-btn { margin: 3px 4px 0 0; }
 .sol-row.flash { animation: sol-flash 1.2s ease-out; }
@@ -9597,7 +9614,10 @@ button.hdto-v {
 .scn-fold { border: 0; background: none; color: inherit; font: inherit; padding: 0 4px 0 0; cursor: pointer; line-height: 1; }
 .v3d-strip.folded .tl-seg, .v3d-strip.folded .tl-more, .v3d-strip.folded .tl-less,
 .v3d-strip.folded .lod-pick, .v3d-strip.folded .lod-note, .v3d-strip.folded [data-gate] { display: none; }
-.scn-ov.folded { white-space: nowrap; }
+/* MICRO-PANNELLI-LATERALI p.2 · the summary never leaves its window: folded,
+   one line shortened (the whole in its tooltip); open, it wraps and scrolls */
+.scn-ov.folded { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: calc(100% - 20px); }
+.scn-host .scn-ov:not(.folded) { max-height: calc(100% - 40px); overflow: auto; overflow-wrap: anywhere; }
 .np-fold { cursor: pointer; user-select: none; }
 .np-sect.folded > :not(h5) { display: none; }
 /* MICRO-SPAZIO-3D-3 p.11 · a model's level, a chip beside its name; p.10 · a version's level and uses */

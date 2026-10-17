@@ -2411,7 +2411,11 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
       const selectedKeysNow = (): string[] => [...items.filter((i) => i.selected).map((i) => `${i.kind}:${i.id}`),
         ...[...new Set([...sketchSet, ...(sketchSel ? [sketchSel] : [])])].map((id) => `sketch:${id}`)];
       const onKey = (e: KeyboardEvent) => {
-        if (!opts.isFocused?.()) return;
+        // MICRO-PANNELLI-LATERALI p.2 · a modal G / R / S owns the keyboard until
+        // it ends, as Blender's: the focus follows the mouse, and a G started
+        // from the right-click menu (or a pointer that strayed over the next
+        // window) must still hear Esc, Enter and the numbers
+        if (!opts.isFocused?.() && !modal) return;
         const t = e.target as HTMLElement | null;
         if (t && (t instanceof HTMLInputElement || t instanceof HTMLTextAreaElement || t instanceof HTMLSelectElement || t.isContentEditable)) return;
         const stop = () => { e.preventDefault(); e.stopPropagation(); };

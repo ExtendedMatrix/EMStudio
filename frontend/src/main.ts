@@ -248,6 +248,7 @@ import { parseTyped, renderTransformForm, type TransformFormTexts } from "./tran
 import { implicitGroups, isImplicitGroup, outsideMembers, unitOfImplicit, withImplicitGroups } from "./implicit-pd";
 import { addFileSketch, addSketch, listSketches, loadSketches, onSketches, removeSketch, serializeSketches, SHAPE_FAMILIES, SHAPES, shapeById, shapeLabel, sketchById, updateSketch } from "./shapes3d";
 import { boxSelect, clickOutliner, clickScene, EMPTY_SEL, hideKeys, selectAll, withoutKeys, type SpaceSel } from "./space-selection";
+import { type AssocGroupKey, type AssocUnit, assocGroups, NEW_UNIT_ORDER, newUnitTypes } from "./sketch-associate";
 import { buildOutlinerTree, loadSpacePrefs, renderOutliner, saveSpacePrefs, squeezeSide, type Space3dPrefs } from "./space-outliner";
 import { patchProxyNodes, proxyRelPath } from "./proxy-association";
 import { planMove, planNewGroup, planRemove, type GroupPlan } from "./rm-groups";
@@ -313,6 +314,7 @@ import {
   hdtoProfileTypes,
   isGroupType,
   isStratigraphicType,
+  typesOfClass,
   isDtcChainEdge,
   isDtcNodeType,
   nodeTypeForClass,
@@ -22606,17 +22608,29 @@ function sceneMenu(win: Win, h: SpaceSceneHandle, m: SceneMenuRequest): void {
   const st = store;
   const sp = currentSpace();
   if (!st || !sp) return;
+  // MICRO-PANNELLI-LATERALI p.2 · a right click makes the scene's window the
+  // active one, as Blender's area under the pointer: G / R / S from its menu
+  // then hear Esc, Enter and the numbers
+  selectWindow(win.id);
   const isolate = (key: string) => { spaceIsolated = spaceIsolated === key ? null : key; refreshSurfaces("scene"); };
   if (m.kind === "sketch" && m.id) {
     const sk = sketchById(m.id);
     if (!sk) return;
     spaceMenu(m.x, m.y, sk.name, [
-      { label: t("s3.associate"), act: "associate", run: () => openAssociate(win, spaceSketchSet.has(sk.id) && spaceSketchSet.size > 1 ? [...spaceSketchSet] : [sk.id]) },
+      // MICRO-PANNELLI-LATERALI p.2 · as Blender's object menu: the roads to a
+      // unit, the view, the transforms, the deletion (no Duplicate: there is no
+      // Shift+D in the Space yet)
+      { label: t("s3.associate"), act: "associate", run: () => revealAssociate() },
       { label: t("s3.createUnit"), act: "create-unit", run: () => { void createUnitFromSketch(win, sk.id); } },
+      "sep",
       { label: t("s3.frame"), act: "frame", run: () => h.frameKeys([`sketch:${sk.id}`]) },
       { label: t("s3.isolate"), act: "isolate", run: () => isolate(`sketch:${sk.id}`) },
       "sep",
-      { label: t("s3.deleteSketch"), act: "delete", run: () => removeSketch(sk.id) },
+      { label: t("s3.menuGrab"), act: "grab", run: () => h.startModal("grab") },
+      { label: t("s3.menuRotate"), act: "rotate", run: () => h.startModal("rotate") },
+      { label: t("s3.menuScale"), act: "scale", run: () => h.startModal("scale") },
+      "sep",
+      { label: t("s3.deleteSketchKey"), act: "delete", run: () => { for (const id of spaceSketchSet.has(sk.id) ? [...spaceSketchSet] : [sk.id]) removeSketch(id); } },
     ]);
     return;
   }
@@ -22712,81 +22726,200 @@ function sketchesToStore(): void {
 }
 onSketches(() => sketchesToStore());
 
-/** The units a shape can be given to: every unit, the scene's epoch first,
- *  then those without a proxy; the ones with one marked. */
-function associateCandidates(): Array<{ id: string; name: string; type: string; here: boolean; hasProxy: boolean; empty: boolean }> {
+/** The units a shape can be given to: every unit, with its epochs and whether
+ *  it has a proxy already (MICRO-PANNELLI-LATERALI p.2 groups them). */
+function associateCandidates(): AssocUnit[] {
   const st = store;
   const sp = currentSpace();
   if (!st || !sp) return [];
   const free = unitsWithout3d(st.doc);
-  const epoch = spaceEpochOf(sp);
-  const here = new Set(epoch ? sp.summary(epoch)?.units ?? [] : []);
+  const epochsOf = new Map<string, string[]>();
+  for (const e of sp.epochs) for (const u of sp.summary(e.id)?.units ?? []) {
+    const l = epochsOf.get(u);
+    if (l) l.push(e.id); else epochsOf.set(u, [e.id]);
+  }
   const withP = new Set(free.with), empty = new Set(free.empty);
   return [...free.with, ...free.without].map((id) => ({ id, name: String(st.node(id)?.name ?? id), type: String(st.node(id)?.node_type ?? ""),
-    here: here.has(id), hasProxy: withP.has(id), empty: empty.has(id) }))
-    .sort((a, b) => Number(b.here) - Number(a.here) || Number(a.hasProxy) - Number(b.hasProxy)
-      || a.name.localeCompare(b.name, undefined, { numeric: true }));
+    epochs: epochsOf.get(id) ?? [], hasProxy: withP.has(id), empty: empty.has(id) }));
 }
 
-/** «Associa a un'unità…» (road 1): a search by name over the units. */
-function openAssociate(win: Win, sketchIds: string | string[]): void {
-  const ids = Array.isArray(sketchIds) ? sketchIds : [sketchIds];
+// ── MICRO-PANNELLI-LATERALI p.2 · «Associa a un'unità» in the Inspector ──
+//
+// Measured on dev.45 (E.D., 17 Oct 2026): the choice was a dropdown floating
+// over the scene, long and narrow, on the epoch's box and the N panel. It is a
+// section of the sketch's Inspector now: a new unit from the shape on top, then
+// the orphans of the scene's epoch, those of the other epochs, those with a
+// proxy (◆, the question of yesterday). The search and the type stay while the
+// Inspector redraws.
+let assocQuery = "";
+let assocType = "";
+/** the rows drawn per group: the rest is reached by the search */
+const ASSOC_ROWS = 60;
+
+function renderAssociateSection(host: HTMLElement, win: Win, sketchId: string, ids: string[]): void {
   const st = store;
-  if (!st || !ids.length) return;
-  document.querySelector(".s3-assoc")?.remove();
+  const sp = currentSpace();
+  if (!st || !sp) return;
   const units = associateCandidates();
-  const box = document.createElement("div");
-  box.className = "conn-panel s3-assoc";
-  box.setAttribute("role", "dialog");
-  const h = document.createElement("h4");
-  h.textContent = ids.length === 1 ? t("s3.associateHead", { name: sketchById(ids[0])?.name ?? "" })
-    : t("s3.associateHeadMany", { n: String(ids.length) });
-  const p = document.createElement("p");
-  p.className = "insp-hint";
-  p.textContent = t("s3.associateHintAll", { n: String(units.length), m: String(units.filter((u) => !u.hasProxy).length) });
+  const epoch = spaceEpochOf(sp);
+  const epochName = (id: string) => sp.epochs.find((e) => e.id === id)?.name ?? String(st.node(id)?.name ?? id);
+  const sec = document.createElement("section");
+  sec.className = "insp-assoc";
+  sec.dataset.assoc = "1";
+  const h = document.createElement("h3");
+  h.className = "insp-assoc-head";
+  h.textContent = ids.length === 1 ? t("s3.assocSection") : t("s3.associateHeadMany", { n: String(ids.length) });
+  sec.appendChild(h);
+  // 1 · a new unit from this shape: its type (the datamodel's) and a name proposed
+  const types = newUnitTypes(typesOfClass("StratigraphicNode"));
+  const nu = document.createElement("div");
+  nu.className = "insp-assoc-new";
+  const nuHead = document.createElement("div");
+  nuHead.className = "insp-assoc-sub";
+  nuHead.textContent = t("s3.assocNew");
+  const tsel = document.createElement("select");
+  tsel.dataset.assocNewType = "1";
+  tsel.title = t("s3.assocNewType");
+  for (const ty of types) {
+    const o = document.createElement("option");
+    o.value = ty;
+    o.textContent = unitTypeLabel(ty);
+    tsel.appendChild(o);
+  }
+  const proposed = (ty: string) => initialName(st.doc, ty) ?? nextFreeName(st.doc, ty) ?? st.freshLabel(ty);
+  const nin = document.createElement("input");
+  nin.type = "text";
+  nin.dataset.assocNewName = "1";
+  nin.title = t("s3.assocNewName");
+  nin.value = proposed(tsel.value);
+  let nameTouched = false;
+  nin.addEventListener("input", () => { nameTouched = true; });
+  tsel.addEventListener("change", () => { if (!nameTouched) nin.value = proposed(tsel.value); });
+  const go = document.createElement("button");
+  go.type = "button";
+  go.className = "insp-btn";
+  go.dataset.assocCreate = "1";
+  go.textContent = t("s3.assocCreate");
+  go.addEventListener("click", () => { void createUnitFromSketch(win, sketchId, tsel.value, nin.value.trim() || proposed(tsel.value)); });
+  const nuRow = document.createElement("div");
+  nuRow.className = "insp-assoc-row";
+  nuRow.append(tsel, nin, go);
+  nu.append(nuHead, nuRow);
+  sec.appendChild(nu);
+  // the search and the type filter, over the three groups
+  const filt = document.createElement("div");
+  filt.className = "insp-assoc-row";
   const q = document.createElement("input");
   q.type = "search";
-  q.className = "s3-assoc-q";
+  q.className = "insp-assoc-q";
+  q.dataset.assocQ = "1";
   q.placeholder = t("s3.search");
-  const ul = document.createElement("ul");
-  ul.className = "conn-members s3-assoc-list";
+  q.value = assocQuery;
+  const fsel = document.createElement("select");
+  fsel.dataset.assocType = "1";
+  const all = document.createElement("option");
+  all.value = "";
+  all.textContent = t("s3.assocAllTypes");
+  fsel.appendChild(all);
+  const lists = document.createElement("div");
+  lists.className = "insp-assoc-lists";
+  filt.append(q, fsel);
+  sec.append(filt, lists);
   const draw = () => {
-    ul.textContent = "";
-    const s = q.value.trim().toLowerCase();
-    for (const u of units.filter((x) => !s || x.name.toLowerCase().includes(s)).slice(0, 200)) {
-      const li = document.createElement("li");
-      const b = document.createElement("button");
-      b.type = "button";
-      b.className = "link";
-      b.dataset.unit = u.id;
-      b.dataset.hasProxy = String(u.hasProxy);
-      b.textContent = `${u.name} · ${unitTypeLabel(u.type)}${u.here ? "" : ` · ${t("s3.otherEpoch")}`}${u.empty ? ` · ${t("s3.emptyGeometry")}` : ""}`;
-      if (u.hasProxy) {
-        const m = document.createElement("span");
-        m.className = "s3-has-proxy";
-        m.textContent = ` ◆ ${t("s3.hasProxy")}`;
-        b.appendChild(m);
-      }
-      b.addEventListener("click", () => { box.remove(); void associateFlow(win, ids, u.id); });
-      li.appendChild(b);
-      ul.appendChild(li);
+    const g = assocGroups(units, epoch, assocQuery, assocType, NEW_UNIT_ORDER);
+    if (fsel.options.length === 1) for (const ty of g.types) {
+      const o = document.createElement("option");
+      o.value = ty;
+      o.textContent = unitTypeLabel(ty);
+      fsel.appendChild(o);
     }
+    fsel.value = g.types.includes(assocType) ? assocType : "";
+    lists.textContent = "";
+    const group = (key: AssocGroupKey, title: string, list: AssocUnit[]) => {
+      const head = document.createElement("div");
+      head.className = "insp-assoc-sub";
+      head.dataset.assocGroup = key;
+      head.textContent = title;
+      lists.appendChild(head);
+      const ul = document.createElement("ul");
+      ul.className = "insp-assoc-list";
+      ul.dataset.assocList = key;
+      for (const u of list.slice(0, ASSOC_ROWS)) {
+        const li = document.createElement("li");
+        const b = document.createElement("button");
+        b.type = "button";
+        b.className = "insp-assoc-unit";
+        b.dataset.unit = u.id;
+        b.dataset.hasProxy = String(u.hasProxy);
+        const name = document.createElement("span");
+        name.className = "insp-assoc-name";
+        name.textContent = (u.hasProxy ? "◆ " : "") + u.name;
+        const meta = document.createElement("span");
+        meta.className = "insp-assoc-meta";
+        const where = key === "here" ? "" : u.epochs.length ? epochName(u.epochs.includes(epoch ?? "") ? epoch! : u.epochs[0]) : t("s3.noEpoch");
+        meta.textContent = [unitTypeLabel(u.type), where, u.empty ? t("s3.emptyGeometry") : ""].filter(Boolean).join(" · ");
+        b.append(name, meta);
+        if (u.hasProxy) b.title = t("s3.hasProxy");
+        b.addEventListener("click", () => { void associateFlow(win, ids, u.id); });
+        li.appendChild(b);
+        ul.appendChild(li);
+      }
+      if (list.length > ASSOC_ROWS) {
+        const li = document.createElement("li");
+        li.className = "insp-hint";
+        li.textContent = t("s3.assocMore", { n: String(list.length - ASSOC_ROWS) });
+        ul.appendChild(li);
+      }
+      if (!list.length) {
+        const li = document.createElement("li");
+        li.className = "insp-hint";
+        li.textContent = t("s3.assocNone");
+        ul.appendChild(li);
+      }
+      lists.appendChild(ul);
+    };
+    group("here", t("s3.assocHere", { epoch: epoch ? epochName(epoch) : t("s3.noEpoch"), n: String(g.here.length) }), g.here);
+    group("elsewhere", t("s3.assocElsewhere", { n: String(g.elsewhere.length) }), g.elsewhere);
+    group("withProxy", t("s3.assocWithProxy", { n: String(g.withProxy.length) }), g.withProxy);
   };
-  q.addEventListener("input", draw);
-  const acts = document.createElement("div");
-  acts.className = "conn-acts";
-  const no = document.createElement("button");
-  no.type = "button";
-  no.className = "conn-btn";
-  no.textContent = t("settings.cancel");
-  no.addEventListener("click", () => box.remove());
-  acts.appendChild(no);
-  box.append(h, p, q, ul, acts);
-  Object.assign(box.style, { position: "fixed", left: "50%", top: "14%", transform: "translateX(-50%)", zIndex: "70",
-    width: "min(460px, calc(100vw - 32px))", maxHeight: "70vh", overflow: "auto" });
-  document.body.appendChild(box);
+  q.addEventListener("input", () => { assocQuery = q.value; draw(); });
+  fsel.addEventListener("change", () => { assocType = fsel.value; draw(); });
   draw();
-  q.focus();
+  host.appendChild(sec);
+}
+
+/** «Associa a un'unità…» (the sketch's card, the right click): the Inspector's
+ *  section, the Inspector opened if it is not there, the focus in its search. */
+function revealAssociate(): void {
+  let w = windowsOf().find((x) => x.type === "inspector");
+  const max = maximizedWin();
+  if (max && max !== w?.id) { toggleMaximize(max); renderTiles(); }
+  if (!w) {
+    // beside the graph, where the Space's arrangement keeps it: splitting the
+    // scene would leave the 3D a strip in a small window (measured at 1100 px)
+    const anchor = windowsOf().find((x) => x.type === "graph") ?? windowsOf().find((x) => x.type === "scene") ?? activeWin();
+    setActiveWin(anchor.id);
+    const made = splitWindow(anchor.id, "row", activeWorkspace(), 0.52, "b");
+    if (!made) return;
+    for (const k of Object.keys(made.state)) delete made.state[k];   // not the scene's
+    setWinType(made, "inspector");
+    renderTiles();
+    w = made;
+  }
+  refreshInspector();
+  const id = w.id;
+  let tries = 0;
+  const focus = () => {
+    const q = winAreas.get(id)?.querySelector<HTMLInputElement>("[data-assoc-q]");
+    if (q) {
+      q.closest<HTMLElement>("[data-assoc]")?.scrollIntoView({ block: "start" });
+      q.focus();
+      q.select();
+      return;
+    }
+    if (++tries < 20) requestAnimationFrame(focus);
+  };
+  requestAnimationFrame(focus);
 }
 
 /** A unit that has a proxy already: «Sostituisci» (the old one becomes a free
@@ -22969,13 +23102,12 @@ async function associateSketch(win: Win, sketchId: string, unitId: string, mode:
 /** Road 5 · «Crea un'unità da questa forma»: a US born in the scene's epoch,
  *  the sketch its proxy, the name proposed; the Inspector opens on it, for the
  *  type and the name. One step of undo with the proxy. */
-async function createUnitFromSketch(win: Win, sketchId: string): Promise<boolean> {
+async function createUnitFromSketch(win: Win, sketchId: string, type = "US", chosen?: string): Promise<boolean> {
   const st = store;
   const sp = currentSpace();
   if (!st || !sp || refuseReadOnly()) return false;
   const epochId = spaceEpochOf(sp);
-  const type = "US";
-  const name = initialName(st.doc, type) ?? nextFreeName(st.doc, type) ?? st.freshLabel(type);
+  const name = chosen || (initialName(st.doc, type) ?? nextFreeName(st.doc, type) ?? st.freshLabel(type));
   const node = { id: st.newId(), node_type: type, name, description: "" } as EmNode;
   // a place in the Matrix: the epoch's lane, right of what is there
   const lane = (st.doc.layout?.swimlanes ?? []).find((l) => l.epoch_id === epochId);
@@ -23120,11 +23252,12 @@ function renderSketchInspector(host: HTMLElement, sketchId: string): void {
     b.addEventListener("click", run);
     bar.appendChild(b);
   };
-  btn("associate", t("s3.associate"), () => openAssociate(win, spaceSketchSet.size > 1 ? [...spaceSketchSet] : [sk.id]));
+  btn("associate", t("s3.associate"), () => revealAssociate());
   btn("create-unit", t("s3.createUnit"), () => { void createUnitFromSketch(win, sk.id); });
   btn("frame", t("s3.frame"), () => sceneHandles.get(win.id)?.frameKeys([`sketch:${sk.id}`]));
   btn("delete", t("s3.deleteSketch"), () => removeSketch(sk.id));
   host.appendChild(bar);
+  renderAssociateSection(host, win, sk.id, spaceSketchSet.size > 1 ? [...spaceSketchSet] : [sk.id]);
   const roads = document.createElement("p");
   roads.className = "insp-hint";
   roads.textContent = t("s3.sketchRoads");
@@ -24006,6 +24139,8 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
       // MICRO-SPAZIO-3D-3 p.6 · the free sketches, a light warning that opens their list
       + (listSketches().length ? ` · <button type="button" class="link s3-free-shapes" data-sum="sketches">${escapeHtml(t("s3.freeShapes", { n: String(listSketches().length) }))}</button>` : "")
       + proxyFolderOffer(sum.without);
+    // MICRO-PANNELLI-LATERALI p.2 · folded, the line may be shortened: the whole in the tooltip
+    if (folded) overlay.title = (overlay.textContent ?? "").replace(/^▸/, ""); else overlay.removeAttribute("title");
     overlay.querySelector<HTMLButtonElement>("[data-fold=summary]")?.addEventListener("click", (e) => {
       e.stopPropagation(); foldPanel("summary", !folded);
     });
