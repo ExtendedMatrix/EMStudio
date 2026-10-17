@@ -52,6 +52,8 @@ export interface OutlinerRow {
   title?: string;
   /** p.11 · a small chip after the name (a model's level drawn: «LOD1») */
   chip?: string;
+  /** MICRO-PROVA-DEV47 p.4 · a container's alternative: the mode (Modelli / Tileset / Automatico), a small menu */
+  altChip?: string;
   /** a version's uses and level (p.10), shown small */
   uses?: string[];
   level?: string;
@@ -63,7 +65,9 @@ export interface OutlinerInput {
   /** per epoch, its models (tileset: the model's first file is a tileset) */
   rms: (epochId: string) => Array<{ id: string; name: string; glyph: string; tileset: boolean; versions: OutlinerVersion[];
     /** p.7 · the container it is in: its id, its name, its document's name */
-    group?: { id: string; name: string; doc?: string } | null;
+    group?: { id: string; name: string; doc?: string;
+      /** MICRO-PROVA-DEV47 p.4 · the container has its alternative: the mode's word (a small menu) */
+      alt?: string } | null;
     /** p.11 · the technical name, when the name shown is shortened (a tooltip) */
     technical?: string;
     /** …and the level of the version drawn, a chip */
@@ -99,15 +103,19 @@ export function buildOutlinerTree(input: OutlinerInput): OutlinerRow[] {
       const sorted = rms.slice().sort((a, b) => Number(a.tileset) - Number(b.tileset) || coll.compare(a.name, b.name));
       // MICRO-SPAZIO-3D-3 p.7 · Epoch › Representation models › CONTAINER › RM;
       // a model without a container stays where it was
-      const groups = new Map<string, { name: string; doc?: string; rows: OutlinerRow[] }>();
+      const groups = new Map<string, { name: string; doc?: string; alt?: string; rows: OutlinerRow[] }>();
       const loose: OutlinerRow[] = [];
       for (const r of sorted) {
-        if (r.group) (groups.get(r.group.id) ?? groups.set(r.group.id, { name: r.group.name, doc: r.group.doc, rows: [] }).get(r.group.id)!).rows.push(rmRow(r));
-        else loose.push(rmRow(r));
+        if (r.group) {
+          const g = groups.get(r.group.id) ?? groups.set(r.group.id, { name: r.group.name, doc: r.group.doc, rows: [] }).get(r.group.id)!;
+          if (r.group.alt) g.alt = r.group.alt;
+          g.rows.push(rmRow(r));
+        } else loose.push(rmRow(r));
       }
       const groupRows: OutlinerRow[] = [...groups.entries()].sort((a, b) => coll.compare(a[1].name, b[1].name)).map(([gid, g]) => ({
         key: `rmgroup:${ep.id}:${gid}`, id: gid, kind: "rmgroup" as const, name: g.doc ? `${g.name} · ${g.doc}` : g.name,
-        glyph: "RepresentationModelNodeGroup", children: g.rows, ...(input.texts.lod ? { chip: input.texts.lod } : {}) }));
+        glyph: "RepresentationModelNodeGroup", children: g.rows, ...(input.texts.lod ? { chip: input.texts.lod } : {}),
+        ...(g.alt ? { altChip: g.alt } : {}) }));
       children.push({
         key: `rms:${ep.id}`, id: ep.id, kind: "rms", name: input.texts.rms, glyph: "representation_model",
         children: [...groupRows, ...loose],
@@ -293,6 +301,8 @@ export interface OutlinerActions {
   /** MICRO-PROVA-DEV47 p.3b · the level's chip, a small menu: a model's levels,
    *  or (a container's, an epoch's) the same for all of its models */
   chipMenu?(row: OutlinerRow, x: number, y: number): void;
+  /** MICRO-PROVA-DEV47 p.4 · the container's alternative chip: Modelli / Tileset / Automatico */
+  altMenu?(row: OutlinerRow, x: number, y: number): void;
   /** p.6 · a press on a sketch's row: the caller follows the pointer (a drag onto a unit) */
   dragSketch?(sketchId: string, e: PointerEvent): void;
   /** a shape of the palette: clicked (at the cursor), or dragged and dropped at a page point */
@@ -430,6 +440,16 @@ export function renderOutliner(el: HTMLElement, v: OutlinerView, act: OutlinerAc
         c.tabIndex = -1;
         c.addEventListener("click", (e) => { e.stopPropagation(); const b = c.getBoundingClientRect(); act.chipMenu!(r, b.left, b.bottom + 2); });
       }
+      line.appendChild(c);
+    }
+    if (r.altChip && act.altMenu) {
+      const c = document.createElement("button");
+      c.type = "button";
+      c.className = "sol-chip sol-lod sol-alt";
+      c.dataset.sol = "alt";
+      c.tabIndex = -1;
+      c.textContent = `${r.altChip} ▾`;
+      c.addEventListener("click", (e) => { e.stopPropagation(); const b = c.getBoundingClientRect(); act.altMenu!(r, b.left, b.bottom + 2); });
       line.appendChild(c);
     }
     if (r.uses?.length || r.level) {

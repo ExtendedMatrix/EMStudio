@@ -251,7 +251,7 @@ import { boxSelect, clickOutliner, clickScene, EMPTY_SEL, hideKeys, selectAll, w
 import { type AssocGroupKey, type AssocUnit, assocGroups, NEW_UNIT_ORDER, newUnitTypes } from "./sketch-associate";
 import { buildOutlinerTree, loadSpacePrefs, renderOutliner, saveSpacePrefs, squeezeSide, type Space3dPrefs } from "./space-outliner";
 import { patchProxyNodes, proxyRelPath } from "./proxy-association";
-import { planMove, planNewGroup, planRemove, type GroupPlan } from "./rm-groups";
+import { planMove, planNewGroup, planRemove, RM_GROUP_TYPE, type GroupPlan } from "./rm-groups";
 import { shownModelName } from "./rm-names";
 import { versionError, type FlowVersion, type VersionMode } from "./lod-flow";
 import { defaultLevel, isHeavy, levelShort, levelsOf, type Level } from "./lod-levels";
@@ -3295,7 +3295,8 @@ function renderInspectorInto(host: HTMLElement): void {
       onOpenFacing: (tid) => openFacingFor(tid),
       renderTransform: (host2, id) => renderTransformInto(host2, id),
       renderSketchUse: (host2, id) => renderSketchUse(host2, id),
-      renderVersions: (host2, id) => { const a = renderVersionsInto(host2, id); const b = renderAlternativeInto(host2, id); return a || b; },
+      renderVersions: (host2, id) => renderVersionsInto(host2, id),
+      renderAlternative: (host2, id) => renderAlternativeInto(host2, id),
       readableName: (id) => { const r = rmShown(id); return r && r.shown !== r.technical ? { label: r.shown, chip: r.level, technical: r.technical } : null; },
       onClearField: (nodeId, field) => {
         (storeOfNode(nodeId) ?? store!).clearField(nodeId, field);
@@ -22674,6 +22675,13 @@ function sceneMenu(win: Win, h: SpaceSceneHandle, m: SceneMenuRequest): void {
       { label: t("s3.showInGraph"), act: "graph", run: () => jumpTo(id) },
       { label: t("s3.selectModel"), act: "select", run: () => { select(id); refreshInspector(); } },
       "sep",
+      // MICRO-PROVA-DEV47 p.4 · the two roads of the alternatives, from the scene
+      { label: t("s3.partOfGroup"), act: "rmg-part", run: () => {
+        const models = selectedModels(id);
+        if (sp.rmGroups.size) openMoveToGroup(models, m.x, m.y); else openNewGroup(models);
+      } },
+      { label: t("s3.useAlternative"), act: "alt-use", run: () => useAlternativeFrom(id, m.x, m.y) },
+      "sep",
       // MICRO-SPAZIO-3D-3 p.7 · the containers, on the models selected (this one if it is not)
       ...groupMenuEntries(selectedModels(id), m.x, m.y),
       "sep",
@@ -23330,7 +23338,7 @@ function applyGroupPlan(plan: GroupPlan, say: string): void {
 }
 /** «Nuovo contenitore dai selezionati…»: a name and, if wanted, its document
  *  (proposed: the one the models share). */
-function openNewGroup(models: string[]): void {
+function openNewGroup(models: string[], then?: (groupId: string) => void): void {
   const st = store;
   const sp = currentSpace();
   if (!st || !sp || !models.length) return;
@@ -23365,6 +23373,8 @@ function openNewGroup(models: string[]): void {
     if (plan.taken) { toast(t("rmg.taken", { doc: String(st.node(docId ?? "")?.name ?? ""), name: plan.taken })); return; }
     box.remove();
     applyGroupPlan(plan, t("rmg.created", { name: label, n: String(models.length) }));
+    // MICRO-PROVA-DEV47 p.4 · «Crea un contenitore con i modelli selezionati» from a tileset: then its alternative
+    if (then && plan.groupId) then(plan.groupId);
   };
   name.addEventListener("keydown", (e) => { e.stopPropagation(); if (e.key === "Enter") go(); if (e.key === "Escape") box.remove(); });
   box.querySelector("[data-rmg=ok]")!.addEventListener("click", go);
@@ -23826,8 +23836,15 @@ function spaceBox(key: string): Box | null {
   for (const h of sceneHandles.values()) { const b = h.boxOf(key); if (b) return b as Box; }
   return null;
 }
+/** MICRO-PROVA-DEV47 p.4 · the coverage's word after a declaration, kept for the
+ *  Inspector of the tileset (a help, never a block): partial (with the road of
+ *  the sub-container), more than the container, or the whole */
+const altHelp = new Map<string, { kind: "partial" | "more" | "whole"; text: string; group: string; covered?: string[] }>();
 /** The Inspector of a container (its alternative: the three modes) or of a
- *  tileset model (a member, or «Fa da alternativa a…»). */
+ *  tileset model: MICRO-PROVA-DEV47 p.4, the section «Alternativa» always —
+ *  what it is now (a model of its own, a member, a container's alternative),
+ *  «Fa da alternativa a…» with the containers and the models of its epoch, and
+ *  with no container the two roads to make one. */
 function renderAlternativeInto(host: HTMLElement, nodeId: string): boolean {
   const sp = currentSpace();
   if (!sp || !store) return false;
@@ -23839,30 +23856,125 @@ function renderAlternativeInto(host: HTMLElement, nodeId: string): boolean {
     sel.addEventListener("change", () => setAltMode(gid, sel.value as AltMode));
     host.appendChild(sel);
   };
-  const hint = (text: string, attr?: string) => { const p = document.createElement("p"); p.className = "insp-hint"; if (attr) p.dataset.alt = attr; p.textContent = text; host.appendChild(p); };
+  const hint = (text: string, attr?: string) => { const p = document.createElement("p"); p.className = "insp-hint"; if (attr) p.dataset.alt = attr; p.textContent = text; host.appendChild(p); return p; };
+  const button = (label: string, probe: string, run: () => void, disabled = false) => {
+    const b = document.createElement("button");
+    b.className = "insp-btn";
+    b.dataset.s3 = probe;
+    b.textContent = label;
+    b.disabled = disabled;
+    b.addEventListener("click", run);
+    host.appendChild(b);
+    return b;
+  };
   if (rm?.altOf) {
     const a = spaceAlternatives(sp).find((x) => x.tileset === rm.id);
     const g = sp.rmGroups.get(rm.altOf);
     hint(t("alt.of", { group: g?.name ?? rm.altOf, n: String(a?.total ?? 0) }), rm.altOf);
     modes(rm.altOf);
+    const help = altHelp.get(rm.id);
+    if (help) helpInto(host, rm.id, help);
     return true;
   }
+  // a container without an alternative of its own: where one comes from
+  if (store.node(nodeId)?.node_type === RM_GROUP_TYPE) { hint(t("alt.groupNone"), "group-none"); return true; }
   if (!rm?.resource?.tiles) return false;
-  if (rm.group) { hint(t("alt.member", { group: sp.rmGroups.get(rm.group)?.name ?? rm.group })); }
-  else hint(t("alt.none"));
+  if (rm.group) hint(t("alt.member", { group: sp.rmGroups.get(rm.group)?.name ?? rm.group }), "member");
+  else hint(t("alt.alone"), "alone");
   const groups = [...sp.rmGroups.values()].filter((g) => g.members.length);
-  if (groups.length) {
+  // the models of its epochs, the tilesets and itself apart
+  const eps = new Set(rm.epochs);
+  const models = sp.rms.filter((r) => r.id !== rm.id && !r.altOf && !r.resource?.tiles && r.epochs.some((e) => eps.has(e)));
+  if (!groups.length) {
+    hint(t("alt.noGroups"), "no-groups");
+    const picked = selectedModels().filter((m) => models.some((r) => r.id === m));
+    button(t("alt.newFromSelection", { n: String(picked.length) }), "alt-new-selection", () => {
+      // the boxes now: the new container redraws the scene, and its models come back after the declaration
+      const pre = new Map<string, Box>();
+      for (const k of [rm.id, ...models.map((r) => r.id)]) { const b = spaceBox(`rm:${k}`); if (b) pre.set(k, b); }
+      openNewGroup(picked, (gid) => declareContainerAlternative(rm.id, gid, pre));
+    }, !picked.length);
+    button(t("alt.newFromEpoch", { n: String(models.length) }), "alt-new-epoch", () => {
+      // chosen in the Outliner: the epoch's models selected, ⌘-click takes one away
+      // …and the tileset stays the active one: its Inspector stays, with the button that makes the container
+      setSpaceSel({ keys: [...models.map((r) => `rm:${r.id}`), `rm:${rm.id}`], active: `rm:${rm.id}` });
+      toast(t("alt.pickInOutliner", { n: String(models.length) }));
+    }, !models.length);
+  }
+  if (groups.length || models.length) {
     const sel = document.createElement("select");
     sel.dataset.altDeclare = "1";
-    for (const g of groups) { const o = document.createElement("option"); o.value = g.id; o.textContent = `${g.name} (${g.members.length})`; o.selected = g.id === rm.group; sel.appendChild(o); }
-    const b = document.createElement("button");
-    b.className = "insp-btn";
-    b.dataset.s3 = "declare-alternative";
-    b.textContent = t("alt.declare");
-    b.addEventListener("click", () => declareContainerAlternative(rm.id, sel.value, host));
-    host.append(sel, b);
+    const og = (label: string) => { const g = document.createElement("optgroup"); g.label = label; sel.appendChild(g); return g; };
+    if (groups.length) {
+      const gg = og(t("alt.groupsHead"));
+      for (const g of groups) { const o = document.createElement("option"); o.value = g.id; o.textContent = `${g.name} (${g.members.length})`; o.selected = g.id === rm.group; gg.appendChild(o); }
+    }
+    if (models.length) {
+      const mg = og(t("alt.modelsHead"));
+      for (const r of models) { const o = document.createElement("option"); o.value = r.id; o.textContent = rmShown(r.id, sp)?.shown ?? r.name; mg.appendChild(o); }
+    }
+    host.appendChild(sel);
+    button(t("alt.declare"), "declare-alternative", () => {
+      if (sp.rmGroups.has(sel.value)) declareContainerAlternative(rm.id, sel.value);
+      else declareModelAlternative(rm.id, sel.value);
+    });
   }
+  const help = altHelp.get(rm.id);
+  if (help) helpInto(host, rm.id, help);
   return true;
+}
+/** The coverage's help under the section (and its road: the sub-container) */
+function helpInto(host: HTMLElement, tilesetId: string, help: { kind: "partial" | "more" | "whole"; text: string; group: string; covered?: string[] }): void {
+  const p = document.createElement("p");
+  p.className = "insp-hint alt-help";
+  p.dataset.altHelp = help.kind;
+  p.textContent = help.text;
+  host.appendChild(p);
+  if (help.kind !== "partial" || !help.covered?.length) return;
+  const st = store!;
+  const cov = help.covered;
+  const sp = currentSpace();
+  const g = sp?.rmGroups.get(help.group);
+  const rm = sp?.rms.find((r) => r.id === tilesetId || r.altOf === help.group);
+  const b = document.createElement("button");
+  b.className = "insp-btn";
+  b.dataset.s3 = "alt-subcontainer";
+  b.textContent = t("alt.subBtn", { k: String(cov.length) });
+  b.addEventListener("click", () => {
+    if (!g || refuseReadOnly()) return;
+    const name = t("alt.subName", { group: g.name });
+    const sub = planSubcontainer(st.doc.graph, help.group, cov, name, ALT_RULE);
+    try {
+      st.batch(() => {
+        applyAltPlan(st, sub);
+        // the hat moves from the container onto its sub-container
+        applyAltPlan(st, planDeclareAlternative(st.doc.graph, rm?.altOf ? rm.altOf : tilesetId, sub.groupId, ALT_RULE));
+      });
+    } catch (e) { toast(String(e instanceof Error ? e.message : e)); return; }
+    altHelp.delete(tilesetId);
+    const msg = t("alt.subDone", { name, k: String(cov.length), tileset: rm?.name ?? tilesetId });
+    logInfo(msg, [sub.groupId]);
+    toastUndo(msg, st);
+    buildScenes(); draw(); refreshSurfaces("scene"); refreshInspector();
+  });
+  host.appendChild(b);
+}
+/** «Fa da alternativa a…» a MODEL: the two have the same hat (s3Dgraphy's
+ *  `declare_alternative` with the model as the hat), one step of undo. */
+function declareModelAlternative(tilesetId: string, rmId: string): void {
+  const st = store;
+  const sp = currentSpace();
+  const rm = sp?.rms.find((r) => r.id === tilesetId);
+  const other = sp?.rms.find((r) => r.id === rmId);
+  if (!st || !rm || !other || refuseReadOnly()) return;
+  let plan: AltPlan;
+  try { plan = planDeclareAlternative(st.doc.graph, tilesetId, rmId, ALT_RULE); }
+  catch (e) { toast(String(e instanceof Error ? e.message : e)); return; }
+  st.batch(() => applyAltPlan(st, plan));
+  const msg = t("alt.declaredModel", { tileset: rm.name, rm: other.name });
+  logInfo(msg, [rmId]);
+  toastUndo(msg, st);
+  buildScenes(); draw(); refreshSurfaces("scene"); refreshInspector();
 }
 /** Apply a plan of the alternatives in one step of undo. */
 function applyAltPlan(st: DocumentStore, plan: AltPlan): void {
@@ -23871,67 +23983,40 @@ function applyAltPlan(st: DocumentStore, plan: AltPlan): void {
   for (const id of plan.removeNodes) st.deleteNode(id);
   for (const e of plan.addEdges) st.addEdge(e.source, e.target, e.type, undefined, e.id);
 }
-/** «Fa da alternativa a…»: the container becomes the tileset's hat. The boxes
- *  the scene has measured say whether it covers the whole container; when it
- *  covers a part, the sub-container of the covered models is proposed. */
-function declareContainerAlternative(rmId: string, groupId: string, host?: HTMLElement): void {
+/** «Fa da alternativa a…»: the container becomes the tileset's hat.
+ *  MICRO-PROVA-DEV47 p.4 · the coverage is a HELP, never a block: the
+ *  declaration is made (one step of undo), and the boxes the scene measured say
+ *  after it whether the tileset covers the whole container, a part of it (and
+ *  the road: the sub-container of the covered ones), or more than it. */
+function declareContainerAlternative(rmId: string, groupId: string, pre?: ReadonlyMap<string, Box>): void {
   const st = store;
   const sp = currentSpace();
   const rm = sp?.rms.find((r) => r.id === rmId);
   const g = sp?.rmGroups.get(groupId);
   if (!st || !sp || !rm || !g || refuseReadOnly()) return;
-  // the coverage, on the boxes of the windows (the tileset's and the members')
-  const altBox = spaceBox(`rm:${rmId}`);
+  // the coverage, on the boxes of the windows (the tileset's and the members'), before the hat moves
+  const altBox = spaceBox(`rm:${rmId}`) ?? pre?.get(rmId) ?? null;
   const members = g.members.filter((m) => m !== rmId);
   const boxes = new Map<string, Box>();
-  for (const m of members) { const b = spaceBox(`rm:${m}`); if (b) boxes.set(m, b); }
-  let covered: string[] | null = null;
-  if (altBox && boxes.size === members.length && members.length) {
+  for (const m of members) { const b = spaceBox(`rm:${m}`) ?? pre?.get(m); if (b) boxes.set(m, b); }
+  let help: { kind: "partial" | "more" | "whole"; text: string; group: string; covered?: string[] } | null = null;
+  // the members the windows have not measured (not drawn, still loading) are said, not guessed
+  const unmeasured = members.length - boxes.size;
+  if (altBox && boxes.size) {
     const cov = measureCoverage(altBox, boxes);
-    if (cov?.coverage === "partial") covered = cov.inside;
-    if (cov?.coverage === "more") {
-      // every member inside and the tileset much larger: it covers MORE than the
-      // container — the alternative of a larger one; the other models it covers
+    if (cov?.coverage === "partial")
+      help = { kind: "partial", group: groupId, covered: cov.inside,
+               text: t("alt.partial", { tileset: rm.name, k: String(cov.inside.length), n: String(members.length), group: g.name }) };
+    else if (cov?.coverage === "more") {
+      // every member inside and the tileset much larger: the other models it covers
       const others = sp.rms.filter((r) => r.id !== rmId && !members.includes(r.id) && !r.altOf).filter((r) => {
-        const b = spaceBox(`rm:${r.id}`);
+        const b = spaceBox(`rm:${r.id}`) ?? pre?.get(r.id);
         return !!b && [0, 1, 2].every((i) => altBox[0][i] <= (b[0][i] + b[1][i]) / 2 && (b[0][i] + b[1][i]) / 2 <= altBox[1][i]);
       });
-      const msg = t("alt.more", { tileset: rm.name, group: g.name, n: String(members.length), iou: cov.iou.toFixed(2), k: String(others.length),
-        names: others.slice(0, 6).map((r) => r.name).join(", ") + (others.length > 6 ? "…" : "") });
-      logInfo(msg, [rmId, groupId]);
-      if (host) { const p = document.createElement("p"); p.className = "insp-hint"; p.dataset.altMore = String(others.length); p.textContent = msg; host.appendChild(p); }
-      else toast(msg);
-      return;
-    }
-  }
-  if (covered && host) {
-    const p = document.createElement("p");
-    p.className = "insp-hint";
-    p.dataset.altPartial = String(covered.length);
-    p.textContent = t("alt.partial", { tileset: rm.name, k: String(covered.length), n: String(members.length), group: g.name });
-    const b = document.createElement("button");
-    b.className = "insp-btn";
-    b.dataset.s3 = "alt-subcontainer";
-    b.textContent = t("alt.subBtn", { k: String(covered.length) });
-    const cov = covered;
-    b.addEventListener("click", () => {
-      const name = t("alt.subName", { group: g.name });
-      const sub = planSubcontainer(st.doc.graph, groupId, cov, name, ALT_RULE);
-      let decl: AltPlan | null = null;
-      try {
-        st.batch(() => {
-          applyAltPlan(st, sub);
-          decl = planDeclareAlternative(st.doc.graph, rmId, sub.groupId, ALT_RULE);
-          applyAltPlan(st, decl);
-        });
-      } catch (e) { toast(String(e instanceof Error ? e.message : e)); return; }
-      const msg = t("alt.subDone", { name, k: String(cov.length), tileset: rm.name });
-      logInfo(msg, [sub.groupId]);
-      toastUndo(msg, st);
-      buildScenes(); draw(); refreshSurfaces("scene"); refreshInspector();
-    });
-    host.append(p, b);
-    return;
+      help = { kind: "more", group: groupId, text: t(others.length ? "alt.more" : "alt.moreNone", { tileset: rm.name, group: g.name, n: String(members.length), iou: cov.iou.toFixed(2), k: String(others.length),
+        names: others.slice(0, 6).map((r) => r.name).join(", ") + (others.length > 6 ? "…" : "") }) };
+    } else if (cov) help = { kind: "whole", group: groupId, text: t("alt.whole", { tileset: rm.name, n: String(members.length), group: g.name, iou: cov.iou.toFixed(2) }) };
+    if (help && unmeasured > 0) help.text += ` ${t("alt.unmeasured", { k: String(unmeasured) })}`;
   }
   let plan: AltPlan;
   try { plan = planDeclareAlternative(st.doc.graph, rmId, groupId, ALT_RULE); }
@@ -23939,12 +24024,34 @@ function declareContainerAlternative(rmId: string, groupId: string, host?: HTMLE
   st.batch(() => applyAltPlan(st, plan));
   const dropped = plan.removeNodes.length ? ` · ${t("alt.dropped", { rm: rm.name })}` : "";
   const msg = t("alt.declared", { tileset: rm.name, group: g.name, n: String(members.length) }) + dropped;
+  // the tileset is now the container's (its id): the help goes with it
+  if (help) { altHelp.set(groupId, help); logInfo(help.text, [rmId, groupId]); }
   logInfo(msg, [groupId]);
   toastUndo(msg, st);
   buildScenes();
   draw();
   refreshSurfaces("scene");
   refreshInspector();
+}
+
+/** MICRO-PROVA-DEV47 p.4 · «Usa un'alternativa…» on a model in the scene: its
+ *  container's choice (Modelli / Tileset / Automatico) when the container has
+ *  one; a tileset, its section «Alternativa» in the Inspector; else the word of
+ *  where an alternative comes from. */
+function useAlternativeFrom(rmId: string, x: number, y: number): void {
+  const sp = currentSpace();
+  const rm = sp?.rms.find((r) => r.id === rmId);
+  if (!sp || !rm) return;
+  const gid = rm.altOf ?? rm.group;
+  if (gid && sp.rms.some((r) => r.altOf === gid)) { spaceMenu(x, y, sp.rmGroups.get(gid)?.name ?? gid, altMenuEntries(gid)); return; }
+  if (rm.resource?.tiles) {
+    setSpaceSel({ keys: [`rm:${rm.id}`], active: `rm:${rm.id}` });
+    select(rm.id);
+    refreshInspector();
+    requestAnimationFrame(() => document.querySelector(".insp-alt")?.scrollIntoView({ block: "nearest" }));
+    return;
+  }
+  toast(rm.group ? t("alt.noneInGroup", { group: sp.rmGroups.get(rm.group)?.name ?? rm.group }) : t("alt.noneHere"));
 }
 
 /** The Outliner of a Space window, drawn into `el`. */
@@ -23960,6 +24067,8 @@ function renderSpaceOutliner(el: HTMLElement, win: Win, sp: Space | null): void 
       const drawnUrl = h?.drawnUrl(`rm:${r.id}`) ?? "";
       const tail = (u: string) => decodeURIComponent(u.split(/[?#]/)[0]).split("/").pop() ?? "";
       const grp = r.group ? sp.rmGroups.get(r.group) : r.altOf ? sp.rmGroups.get(r.altOf) : undefined;
+      // MICRO-PROVA-DEV47 p.4 · a container with its alternative: Modelli / Tileset / Automatico on its row
+      const hasAlt = !!grp && sp.rms.some((x) => x.altOf === grp.id);
       // MICRO-SPAZIO-3D-3 p.11 · the name without its level, the level a chip
       const nm = rmShown(r.id, sp);
       return { id: r.id, name: nm?.shown ?? r.name, ...(nm && nm.shown !== nm.technical ? { technical: nm.technical } : {}),
@@ -23967,7 +24076,8 @@ function renderSpaceOutliner(el: HTMLElement, win: Win, sp: Space | null): void 
         ...(nm?.level ? { chip: (r.versions?.length ?? 0) > 1 ? `${nm.level} · ${modeWord(versionModeOf(r.id).mode)}` : nm.level } : {}),
         glyph: String(st.node(r.id)?.node_type ?? "representation_model"),
         tileset: !!r.resource?.tiles,
-        group: grp ? { id: grp.id, name: grp.name, doc: grp.documentId ? String(st.node(grp.documentId)?.name ?? "") : undefined } : null,
+        group: grp ? { id: grp.id, name: grp.name, doc: grp.documentId ? String(st.node(grp.documentId)?.name ?? "") : undefined,
+          ...(hasAlt ? { alt: t(`alt.chip.${altModeOf(grp.id)}`) } : {}) } : null,
         versions: (r.versions ?? []).map((v) => {
           const dv = drawableVersions(r).find((x) => x.id === v.id);
           const isDrawn = !!drawnUrl && ((!!v.url && tail(drawnUrl) === tail(v.url)) || (!!dv && tail(drawnUrl) === tail(dv.fetch)));
@@ -24055,6 +24165,7 @@ function renderSpaceOutliner(el: HTMLElement, win: Win, sp: Space | null): void 
       void chooseLevels([[rmId, vid]]);
     },
     // MICRO-PROVA-DEV47 p.3b · the level's chip: the levels of a model, or the same for a container's, an epoch's models
+    altMenu: (r, x, y) => spaceMenu(x, y, r.name, altMenuEntries(r.id)),
     chipMenu: (r, x, y) => { const ids = lodRowModels(r); spaceMenu(x, y, r.kind === "rm" ? r.name : `${r.name} · ${t("lod.nModels", { n: String(ids.length) })}`, lodMenuEntries(ids)); },
     // p.7 · a right click on a model's row, or on a container's: the containers' entries
     rowMenu: (r, x, y) => {

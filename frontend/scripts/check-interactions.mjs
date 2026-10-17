@@ -2041,6 +2041,62 @@ if (process.env.TEMPLU) test("S3.lodTMpanel", "Spazio · MICRO-PROVA-DEV47 p.3b 
   };
   return { pass: Object.values(conds).every(Boolean), detail: { conds, active, epoch, opts, ask, chips: [...new Set(afterCancel.map((r) => r.chip))], errors } };
 });
+if (process.env.TEMPLU) test("S3.altTM", "Spazio · MICRO-PROVA-DEV47 p.4 · le alternative dalla GUI su Templu Mare v3.2 (nessun contenitore): la sezione «Alternativa» del tileset dice «un modello a sé», «Nessun contenitore» e le due strade; i modelli dell'epoca scelti nell'Outliner (TEMPLUM tolto con ⌘-clic), «Crea un contenitore con i modelli selezionati» → Survey2015 (rmgroup_Survey2015, 10 modelli) e il tileset sua alternativa, la copertura come aiuto; Modelli / Tileset / Automatico sulla riga del contenitore; un passo di annulla; salvato e riaperto, resta", async () => {
+  const { p, ctx, errors } = await templuSpace("XX");
+  const rows = () => p.evaluate(() => [...document.querySelectorAll(".scn-outliner .sol-row")].map((r) => ({ key: r.dataset.key, kind: [...r.classList].find((c) => c.startsWith("sol-") && c !== "sol-row"), name: r.querySelector(".sol-name")?.textContent, chips: [...r.querySelectorAll(".sol-chip")].map((c) => c.textContent) })));
+  const insp = () => p.evaluate(() => { const s = document.querySelector(".insp-alt"); return s && { text: s.innerText, buttons: [...s.querySelectorAll("button")].map((b) => `${b.dataset.s3}:${b.disabled ? "off" : "on"}`), help: s.querySelector("[data-alt-help]")?.dataset.altHelp ?? null, helpText: s.querySelector("[data-alt-help]")?.textContent ?? null }; });
+  const tileset = (await rows()).find((r) => /tileset/i.test(r.name ?? ""));
+  await p.click(`.scn-outliner .sol-row[data-key="${tileset.key}"] .sol-name`); await p.waitForTimeout(500);
+  const before = await insp();
+  await p.click('.insp-alt button[data-s3="alt-new-epoch"]'); await p.waitForTimeout(500);
+  const templum = (await rows()).find((r) => /TEMPLUM/.test(r.name ?? ""));
+  await p.keyboard.down("Meta"); await p.click(`.scn-outliner .sol-row[data-key="${templum.key}"] .sol-name`); await p.keyboard.up("Meta"); await p.waitForTimeout(500);
+  const picked = await insp();
+  await p.click('.insp-alt button[data-s3="alt-new-selection"]'); await p.waitForTimeout(400);
+  await p.fill(".s3-rmg-name", "Survey2015");
+  await p.selectOption(".s3-rmg-doc", "");
+  await p.click("[data-rmg=ok]"); await p.waitForTimeout(1500); await templuEpoch(p, "XX");
+  const made = await rows();
+  const group = made.find((r) => r.kind === "sol-rmgroup");
+  const alt = made.find((r) => r.key === "rm:rmgroup_Survey2015");
+  await p.click(`.scn-outliner .sol-row[data-key="rm:rmgroup_Survey2015"] .sol-name`); await p.waitForTimeout(500);
+  const after = await insp();
+  await p.screenshot({ path: `${process.env.SHOTS ?? "."}/s3-alt-survey2015.png` }).catch(() => {});
+  const drawn = () => p.evaluate(() => { const s = document.querySelector(".scn-host").__space(); return { tiles: s.some((x) => x.id === "rmgroup_Survey2015" && x.as === "tiles"),
+    members: s.filter((x) => /SM_OB_/.test(x.id) && !/TEMPLUM/.test(x.id) && x.as === "mesh").length, templum: s.some((x) => /TEMPLUM/.test(x.id) && x.as === "mesh") }; });
+  const modes = {};
+  for (const m of ["tileset", "models"]) {
+    await p.click(`.scn-outliner .sol-row[data-key="${group.key}"] [data-sol="alt"]`); await p.waitForTimeout(300);
+    await p.click(`.scn-menu button[data-s3="alt-${m}"]`); await templuEpoch(p, "XX");
+    modes[m] = await drawn();
+  }
+  const json = await p.evaluate(() => window.__EM_DRAG__.docJson());
+  // one step of undo takes the alternative away (the container stays: its own step)
+  await p.evaluate(() => window.__EM_DRAG__.undo()); await p.waitForTimeout(800);
+  const undone = await p.evaluate(() => { const g = JSON.parse(window.__EM_DRAG__.docJson()); const gr = Object.values(g.graphs).find((x) => x.nodes);
+    return { hat: gr.edges.some((e) => e.edge_type === "has_linked_resource" && e.source === "rmgroup_Survey2015"), group: gr.nodes.some((n) => n.id === "rmgroup_Survey2015"), tilesetRm: gr.nodes.some((n) => n.node_type === "representation_model" && /XX_tileset/.test(n.name ?? "")) }; });
+  await ctx.close();
+  const saved = `${process.env.TEMPLU.replace(/\.em\.json$/, "")}-s3alt.em.json`;
+  writeFileSync(saved, json);
+  const prev = process.env.TEMPLU; process.env.TEMPLU = saved;
+  const again = await templuSpace("XX");
+  process.env.TEMPLU = prev;
+  const reopened = (await again.p.evaluate(() => [...document.querySelectorAll(".scn-outliner .sol-row.sol-rmgroup")].map((r) => ({ name: r.querySelector(".sol-name")?.textContent, chips: [...r.querySelectorAll(".sol-chip")].map((c) => c.textContent) }))));
+  const reAlt = await again.p.evaluate(() => document.querySelector(".scn-host").__space().some((x) => x.id === "rmgroup_Survey2015"));
+  await again.ctx.close();
+  const conds = {
+    before: /Un modello a sé/.test(before?.text ?? "") && /Nessun contenitore in questo grafo/.test(before?.text ?? "") && before.buttons.includes("alt-new-selection:off") && before.buttons.includes("alt-new-epoch:on"),
+    picked: picked?.buttons.includes("alt-new-selection:on") && /selezionati \(10\)/.test(picked?.text ?? ""),
+    made: group?.name === "Survey2015" && group.chips.some((c) => /Automatico/.test(c)) && !!alt,
+    help: !!after?.help && /L'alternativa di «Survey2015»/.test(after?.text ?? "") && /copre/.test(after?.helpText ?? ""),
+    modes: modes.tileset?.tiles && modes.tileset.members === 0 && modes.models && !modes.models.tiles && modes.models.members === 10 && modes.tileset.templum && modes.models.templum,
+    undo: !undone.hat && undone.group && undone.tilesetRm,
+    // the mode is the person's view (local), not the data's: a fresh profile reopens it «Automatico»
+    reopened: reopened.some((r) => r.name === "Survey2015" && r.chips.some((c) => /Automatico|Modelli|Tileset/.test(c))) && reAlt,
+    errors: !errors.length && !again.errors.length,
+  };
+  return { pass: Object.values(conds).every(Boolean), detail: { conds, before, picked, after, modes, undone, reopened, errors } };
+});
 test("S3.files", "Spazio · un file solo referenziato è un contorno con l'etichetta; uno dichiarato e assente, l'etichetta; il riepilogo li conta", async () => {
   const { p, ctx, errors } = await open({ doc: "spazio", ws: "space" });
   await p.waitForFunction(() => document.querySelector(".scn-host")?.dataset.ready === "1", null, { timeout: 20000 });
