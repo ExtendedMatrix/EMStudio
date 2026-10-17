@@ -9652,6 +9652,7 @@ tr.tv-sel-act > td { background: color-mix(in srgb, var(--accent) 42%, transpare
 .scn-flow { font-size: 0.72rem; }
 /* MICRO-TILESET-CONTENITORE · what a container draws, one line per container */
 .scn-altline { font-size: 0.72rem; white-space: pre-line; }
+.np-alt-title { font-weight: 600; color: inherit; }
 .v3d-strip.alt-off { opacity: 0.55; }
 /* MICRO-SPAZIO-3D-3 p.12 · the side of a container's alternative not drawn: its label out, its row «sostituito da» */
 .scn-label.alt-off { display: none !important; }

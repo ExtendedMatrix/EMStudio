@@ -24035,6 +24035,18 @@ function lodRowModels(r: { kind: string; id: string; children?: Array<{ kind: st
 let npLodScope: "active" | "selection" | "epoch" = "active";
 function renderLodSection(host: HTMLElement, sp: Space | null): void {
   const ssel = spaceSel(sp);
+  // MICRO-TILESET-CONTENITORE p.4 · the active is a container (its alternative)
+  // or one of its members: Modelli / Tileset / Automatico, and what is drawn
+  const act = ssel.active ?? "";
+  const actId = act.startsWith("rm:") ? act.slice(3) : act.startsWith("rmgroup:") ? act.split(":").pop() ?? "" : "";
+  const gid = actId ? (spaceAltInfo.get(actId)?.group ?? (sp?.rms.some((r) => r.altOf === actId) ? actId : null)) : null;
+  if (gid) {
+    const h = document.createElement("div");
+    h.className = "xf-note np-alt-title";
+    h.textContent = t("alt.npTitle", { name: sp?.rmGroups.get(gid)?.name ?? gid });
+    host.appendChild(h);
+    altModeButtons(host, gid, { np: "alt-mode" });
+  }
   const active = ssel.active?.startsWith("rm:") ? [ssel.active.slice(3)] : [];
   const selection = ssel.keys.filter((k) => k.startsWith("rm:")).map((k) => k.slice(3));
   const ep = sp ? spaceEpochOf(sp) : null;
@@ -24197,12 +24209,47 @@ function altEffectiveMode(groupId: string, sp: Space | null = currentSpace()): E
 function setAltMode(groupId: string, mode: AltMode): void {
   const p = space3dPrefs();
   setSpace3dPrefs({ ...p, altModes: { ...(p.altModes ?? {}), [groupId]: mode } });
+  // MICRO-TILESET-CONTENITORE p.4 · one source: the Inspector and the N panels follow
+  refreshInspector();
+  renderSpaceNPanels();
 }
 /** What the automatic choice of each container shows now (the scene says it). */
 const altShown = new Map<string, "tileset" | "models">();
 function altMenuEntries(groupId: string): Array<{ label: string; act: string; run: () => void }> {
   const m = altModeOf(groupId);
   return (["models", "tileset", "auto", "use"] as const).map((k) => ({ label: `${m === k ? "● " : ""}${t(`alt.${k}`, { use: deviceUse() })}`, act: `alt-${k}`, run: () => setAltMode(groupId, k) }));
+}
+/** MICRO-TILESET-CONTENITORE p.4 · the three buttons of a container's mode —
+ *  Modelli / Tileset / Automatico — the same in the N panel and in the
+ *  Inspector; one source (the person's `altModes`): a click anywhere redraws
+ *  every place (the Outliner's chip, the other panel); and the line of what
+ *  is drawn, which the scene keeps up to date */
+function altModeButtons(host: HTMLElement, gid: string, probe: Record<string, string>): void {
+  const m = altModeOf(gid);
+  const d = document.createElement("div");
+  d.className = "tl-seg np-seg alt-seg";
+  for (const [k, v] of Object.entries(probe)) d.dataset[k] = v;
+  d.dataset.group = gid;
+  for (const k of ["models", "tileset", "auto"] as const) {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.dataset.v = k;
+    b.textContent = t(`alt.chip.${k}`);
+    b.title = t(`alt.${k}`);
+    b.setAttribute("aria-pressed", String(m === k));
+    b.addEventListener("click", () => setAltMode(gid, k));
+    d.appendChild(b);
+  }
+  host.appendChild(d);
+  if (m === "use") { const p = document.createElement("p"); p.className = "xf-note"; p.textContent = t("alt.npUse", { use: deviceUse() }); host.appendChild(p); }
+  let line: string | null = null;
+  for (const h of sceneHandles.values()) { line = h.altLine(gid); if (line) break; }
+  const p = document.createElement("p");
+  p.className = "xf-note alt-line";
+  p.dataset.group = gid;
+  if (probe.np) p.dataset.np = "alt-line"; else p.dataset.alt = "line";
+  p.textContent = line ?? "";
+  host.appendChild(p);
 }
 /** The boxes the Space windows measured, by key (`rm:<id>`), for the coverage. */
 function spaceBox(key: string): Box | null {
@@ -24222,13 +24269,8 @@ function renderAlternativeInto(host: HTMLElement, nodeId: string): boolean {
   const sp = currentSpace();
   if (!sp || !store) return false;
   const rm = sp.rms.find((r) => r.id === nodeId);
-  const modes = (gid: string) => {
-    const sel = document.createElement("select");
-    sel.dataset.altMode = gid;
-    for (const k of ["models", "tileset", "auto"] as const) { const o = document.createElement("option"); o.value = k; o.textContent = t(`alt.${k}`); o.selected = altModeOf(gid) === k; sel.appendChild(o); }
-    sel.addEventListener("change", () => setAltMode(gid, sel.value as AltMode));
-    host.appendChild(sel);
-  };
+  // MICRO-TILESET-CONTENITORE p.4 · three buttons, not a menu
+  const modes = (gid: string) => altModeButtons(host, gid, { altMode: gid });
   const hint = (text: string, attr?: string) => { const p = document.createElement("p"); p.className = "insp-hint"; if (attr) p.dataset.alt = attr; p.textContent = text; host.appendChild(p); return p; };
   const button = (label: string, probe: string, run: () => void, disabled = false) => {
     const b = document.createElement("button");
@@ -25043,10 +25085,11 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
     // MICRO-PROVA-DEV48 p.5 · what a file holds, counted at its load: the measures' cache
     onMeasured: (url, m) => keepMeasure(url, m),
     // p.12 · the automatic choice of a container: the Outliner's «sostituito da» follows
-    onAltState: (g, which) => { if (altShown.get(g) !== which) { altShown.set(g, which); recomputeSubstituted(); if (space3dPrefs().shown) renderSpaceOutliner(outl, win, currentSpace()); } },
-    // MICRO-TILESET-CONTENITORE p.3 · the strip says what a container draws
+    onAltState: (g, which) => { if (altShown.get(g) !== which) { altShown.set(g, which); recomputeSubstituted(); if (space3dPrefs().shown) renderSpaceOutliner(outl, win, currentSpace()); drawNPanel(); } },
+    // MICRO-TILESET-CONTENITORE p.3 · the strip says what a container draws; the N panel's line follows
     altLine: (x) => t(x.side === "tileset" ? "alt.lineTiles" : "alt.lineModels", { name: x.name, mode: x.mode === "auto" ? ` · ${t("alt.word.auto")}` : "",
       levels: x.side === "tileset" ? (x.levels ? t(/–/.test(x.levels) ? "alt.levels" : "alt.level", { l: x.levels }) : "…") : x.levels || "…" }),
+    onAltLine: () => { for (const el of document.querySelectorAll<HTMLElement>("[data-np=alt-line], [data-alt=line]")) { const g = el.dataset.group; const h = sceneHandles.get(win.id); const l = g && h ? h.altLine(g) : null; if (l) el.textContent = l; } },
     // p.10 · a version of the flow drawn: the Outliner's dot and the N panel follow (no rebuild)
     // MICRO-PROVA-DEV47 p.3 · …and the Inspector (its title's level) when the model drawn again is the one it shows
     onVersionDrawn: (rmId) => { drawnAgain.add(rmId); if (!flowRedraw) { flowRedraw = true; requestAnimationFrame(() => { flowRedraw = false; if (space3dPrefs().shown) renderSpaceOutliner(outl, win, currentSpace()); drawNPanel();

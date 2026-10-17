@@ -2140,6 +2140,70 @@ if (process.env.TEMPLU_EMT) test("S3.altEmTools", "Spazio · MICRO-PROVA-DEV48 p
     errors: !errors.filter((e) => !/Failed to load resource/.test(e)).length };
   return { pass: Object.values(conds).every(Boolean), detail: { conds, sect, okText, g0, g1, errors } };
 });
+if (process.env.TEMPLU33) test("S3.tilesetCont", "Spazio · MICRO-TILESET-CONTENITORE · Templu Mare v3.3 (Survey2015 col cappello del tileset): aperta pulita il contenitore è in «Automatico» e da lontano disegna il solo tileset; da Automatico a Tileset la scena mostra il tileset senza riavvio (prima restava vuota: il visible=false dell'automatico); Modelli → Tileset → Automatico → Modelli con il conteggio di ciò che è disegnato, mai tutti e due; in automatico da lontano solo il tileset, da vicino solo le mesh dei membri, la striscia lo dice; il selettore Modelli / Tileset / Automatico nel pannello N, sulla riga dell'Outliner e nell'Inspector, una sola sorgente; la scelta Modelli resta riaprendo", async () => {
+  const G = "rmgroup_Survey2015";
+  const { p, ctx, errors } = await open({ doc: null, w: 1700, h: 1050, init: { "emstudio.space3d": JSON.stringify({ "-": { deviceUse: "realtime", nShown: true } }) } });
+  const openDoc = async () => {
+    await p.evaluate(([d, path]) => window.__EM_DRAG__.openAt(d, path), [JSON.parse(readFileSync(process.env.TEMPLU33, "utf8")), process.env.TEMPLU33]);
+    await p.waitForFunction(() => (window.__EM_SCENE__?.()?.nodes?.length ?? 0) > 50, null, { timeout: 60000 });
+    await workspace(p, "space");
+    await p.waitForFunction(() => document.querySelector(".scn-host")?.dataset.ready === "1", null, { timeout: 60000 });
+    await templuEpoch(p, "XX");
+  };
+  // what is DRAWN: the tileset's visible meshes, the members' (TEMPLUM is outside the container)
+  const drawnNow = () => p.evaluate((G) => { const h = document.querySelector(".scn-host"); const d = h.__spaceDrawn(); const ts = d[`rm:${G}`];
+    return { tiles: ts?.visible ? ts.meshes : 0, members: Object.entries(d).filter(([k, x]) => /SM_OB_/.test(k) && !/TEMPLUM/.test(k) && x.visible && x.meshes > 0).length,
+      chip: document.querySelector(".scn-outliner .sol-row.sol-rmgroup [data-sol=alt]")?.textContent ?? null, line: document.querySelector(".scn-altline")?.textContent ?? "" }; }, G);
+  const until = async (ok, ms = 15000) => { const t0 = Date.now(); let d; do { d = await drawnNow(); if (ok(d)) return d; await p.waitForTimeout(250); } while (Date.now() - t0 < ms); return d; };
+  const viaChip = async (m) => { await p.click(`.scn-outliner .sol-row.sol-rmgroup [data-sol="alt"]`); await p.waitForTimeout(300); await p.click(`.scn-menu button[data-s3="alt-${m}"]`); await templuEpoch(p, "XX"); };
+  const one = (d) => (d.tiles > 0) !== (d.members > 0);
+  await openDoc();
+  const opened = await until((d) => d.tiles > 0 && /automatico/.test(d.line));
+  // the case of E.D.: from «Automatico» straight to «Tileset»
+  await viaChip("tileset");
+  const tilesetFromAuto = await until((d) => d.tiles > 0 && d.members === 0, 8000);
+  const steps = {};
+  for (const m of ["models", "tileset", "auto", "models"]) {
+    await viaChip(m);
+    steps[m + (steps[m] ? "2" : "")] = await until((d) => (m === "models" ? d.members === 10 && d.tiles === 0 : m === "tileset" ? d.tiles > 0 && d.members === 0 : one(d)), 10000);
+  }
+  // the person's choice stays: «Modelli», the document opened again
+  await openDoc();
+  const reopened = await until((d) => d.members === 10, 10000);
+  // the N panel: the container active, its three buttons; «Automatico» there → the chip and the Inspector follow
+  await p.click(`.scn-outliner .sol-row[data-key="rm:${G}"] .sol-name`); await p.waitForTimeout(1200);
+  const npBefore = await p.evaluate(() => [...document.querySelectorAll("[data-np=alt-mode] button")].map((b) => `${b.dataset.v}:${b.getAttribute("aria-pressed")}`));
+  await p.click(`[data-np=alt-mode] button[data-v=auto]`); await p.waitForTimeout(1500);
+  const oneSource = await p.evaluate(() => ({ chip: document.querySelector(".scn-outliner .sol-row.sol-rmgroup [data-sol=alt]")?.textContent,
+    insp: [...document.querySelectorAll(".insp-alt [data-alt-mode] button[aria-pressed=true]")].map((b) => b.dataset.v), np: [...document.querySelectorAll("[data-np=alt-mode] button[aria-pressed=true]")].map((b) => b.dataset.v) }));
+  // far and near, the camera on the members' centre along the view
+  const geo = await p.evaluate(() => { const h = document.querySelector(".scn-host"); const bs = ["SM_OB_EST_bk_LOD1_model", "SM_OB_EST_fr_LOD1_model", "SM_OB_PODIO_LOD1_model", "SM_OB_PRATO_LOD1_model"].map((i) => h.__spaceBoxOf(i)).filter(Boolean);
+    const c = [0, 1, 2].map((k) => (Math.min(...bs.map((b) => b[k])) + Math.max(...bs.map((b) => b[k + 3]))) / 2); const cam = h.__spaceCamera(); const d = [0, 1, 2].map((k) => cam[k] - c[k]); const n = Math.hypot(...d); return { c, dir: d.map((x) => x / n) }; });
+  const at = (dist) => p.evaluate(([g, dist]) => document.querySelector(".scn-host").__spaceSetCam({ pos: g.c.map((v, k) => v + g.dir[k] * dist), target: g.c }), [geo, dist]);
+  const dist = {};
+  let both = 0;
+  for (const d of [250, 60, 250]) {
+    await at(d);
+    const r = await until((x) => (d > 100 ? x.tiles > 0 && x.members === 0 : x.members > 0 && x.tiles === 0), 10000);
+    if (r.tiles > 0 && r.members > 0) both++;
+    dist[d + (dist[d] ? "b" : "")] = r;
+  }
+  await ctx.close();
+  const conds = {
+    opened: opened.tiles > 0 && opened.members === 0 && /Automatico/.test(opened.chip ?? "") && /Survey2015 · automatico · tileset/.test(opened.line),
+    tilesetFromAuto: tilesetFromAuto.tiles > 0 && tilesetFromAuto.members === 0,
+    switches: steps.models.members === 10 && steps.models.tiles === 0 && steps.tileset.tiles > 0 && steps.tileset.members === 0 && one(steps.auto) && steps.models2.members === 10 && steps.models2.tiles === 0,
+    reopened: reopened.members === 10 && reopened.tiles === 0 && /Modelli/.test(reopened.chip ?? ""),
+    npanel: npBefore.join() === "models:true,tileset:false,auto:false",
+    oneSource: /Automatico/.test(oneSource.chip ?? "") && oneSource.insp.join() === "auto" && oneSource.np.join() === "auto",
+    far: dist[250].tiles > 0 && dist[250].members === 0 && /tileset \(livell/.test(dist[250].line),
+    near: dist[60].members === 10 && dist[60].tiles === 0 && /modelli \(/.test(dist[60].line),
+    farAgain: dist["250b"].tiles > 0 && dist["250b"].members === 0,
+    neverBoth: both === 0,
+    errors: !errors.filter((e) => !/Failed to load resource/.test(e)).length,
+  };
+  return { pass: Object.values(conds).every(Boolean), detail: { conds, opened, tilesetFromAuto, steps, reopened, npBefore, oneSource, dist, errors } };
+});
 if (process.env.TEMPLU) test("S3.showSelTM", "Spazio · MICRO-PROVA-DEV48 p.4 · con «Zoom to selection» acceso la selezione si vede in ogni finestra: dall'Outliner, dal Tabular e dalla Matrix lo Spazio inquadra (un passaggio di circa 200 ms), dalla scena non si muove; l'Outliner apre i rami e scorre (e non torna in cima dopo un clic); il Tabular scorre e passa alla scheda che ha la riga (un documento: «Documenti»); un'unità col proxy in un'altra epoca porta lo Spazio a quell'epoca e lo dice; spento, resta solo la selezione", async () => {
   const { p, ctx, errors } = await templuSpace("II", { w: 1700, h: 1050 });
   await p.click("[data-frame]"); await p.waitForTimeout(600);
