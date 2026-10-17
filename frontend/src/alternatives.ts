@@ -63,8 +63,9 @@ export interface AltResult {
   warnings: AltWarning[];
   counts: { sets: number; with_alternatives: number; containers: number; by_reason: Record<string, number>; entries: number };
 }
-/** The choice of a container with an alternative: its models, the tileset, or the distance. */
-export type AltMode = "models" | "tileset" | "auto";
+/** The choice of a container with an alternative: its models, the tileset, the
+ *  distance, or the uses (the tileset when it declares the device's). */
+export type AltMode = "models" | "tileset" | "auto" | "use";
 /** A container's alternative as the Space draws it: the model that stands for
  *  it (`tileset`, the container's id), the container, the models it replaces. */
 export interface TilesetAlternative { tileset: string; group: string; covered: string[]; total: number }

@@ -196,7 +196,7 @@ export interface Space3dPrefs {
   /** p.10 · the use «Per uso» asks (web in a browser, realtime in the desktop, unless changed) */
   deviceUse?: string;
   /** p.12 · a container with its tileset's alternative: models, the tileset, or the distance (absent = auto) */
-  altModes?: Record<string, "models" | "tileset" | "auto">;
+  altModes?: Record<string, "models" | "tileset" | "auto" | "use">;
 }
 
 export const DEFAULT_PREFS: Space3dPrefs = { shown: true, width: 260, toggled: [], hidden: [], locked: [], nShown: false, nWidth: 250, snapAlign: false, collapsed: [], versionModes: {} };
@@ -242,7 +242,7 @@ export function loadSpacePrefs(person: string | null | undefined): Space3dPrefs 
         .map(([k, v]) => [k, { mode: (v as { mode: "manual" | "use" | "auto" }).mode, ...(typeof (v as { versionId?: unknown }).versionId === "string" ? { versionId: (v as { versionId: string }).versionId } : {}) }])) : {},
       ...(typeof p.deviceUse === "string" ? { deviceUse: p.deviceUse } : {}),
       ...(p.altModes && typeof p.altModes === "object" ? { altModes: Object.fromEntries(Object.entries(p.altModes as Record<string, unknown>)
-        .filter(([, v]) => v === "models" || v === "tileset" || v === "auto")) as Record<string, "models" | "tileset" | "auto"> } : {}),
+        .filter(([, v]) => v === "models" || v === "tileset" || v === "auto" || v === "use")) as Record<string, "models" | "tileset" | "auto" | "use"> } : {}),
     };
   } catch {
     return { ...DEFAULT_PREFS, toggled: [], hidden: [], locked: [] };

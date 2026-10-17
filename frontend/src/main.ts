@@ -24180,7 +24180,17 @@ function spaceAlternatives(sp: Space | null = currentSpace()): TilesetAlternativ
     return { tileset: r.id, group: r.altOf!, covered: covers, total: covers.length };
   });
 }
+/** MICRO-TILESET-CONTENITORE p.1 · the person's choice for a container (per
+ *  person, by the container's id); without one, «Automatico» — every viewer */
 function altModeOf(groupId: string): AltMode { return space3dPrefs().altModes?.[groupId] ?? "auto"; }
+/** …and what it means now: «Per uso» is the tileset when it declares the
+ *  device's use (`deviceUse`), else the models — a choice of the menu, never the default */
+function altEffectiveMode(groupId: string, sp: Space | null = currentSpace()): Exclude<AltMode, "use"> {
+  const m = altModeOf(groupId);
+  if (m !== "use") return m;
+  const ts = sp?.rms.find((r) => r.altOf === groupId);
+  return (ts?.versions ?? []).some((v) => (v.uses ?? []).includes(deviceUse())) ? "tileset" : "models";
+}
 function setAltMode(groupId: string, mode: AltMode): void {
   const p = space3dPrefs();
   setSpace3dPrefs({ ...p, altModes: { ...(p.altModes ?? {}), [groupId]: mode } });
@@ -24189,7 +24199,7 @@ function setAltMode(groupId: string, mode: AltMode): void {
 const altShown = new Map<string, "tileset" | "models">();
 function altMenuEntries(groupId: string): Array<{ label: string; act: string; run: () => void }> {
   const m = altModeOf(groupId);
-  return (["models", "tileset", "auto"] as const).map((k) => ({ label: `${m === k ? "● " : ""}${t(`alt.${k}`)}`, act: `alt-${k}`, run: () => setAltMode(groupId, k) }));
+  return (["models", "tileset", "auto", "use"] as const).map((k) => ({ label: `${m === k ? "● " : ""}${t(`alt.${k}`, { use: deviceUse() })}`, act: `alt-${k}`, run: () => setAltMode(groupId, k) }));
 }
 /** The boxes the Space windows measured, by key (`rm:<id>`), for the coverage. */
 function spaceBox(key: string): Box | null {
@@ -25305,12 +25315,12 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
     const decorOf = spaceDecorators(st, sp, sum.units);
     // p.12 · a container with its tileset's alternative: models, tileset, or the distance
     const alts = spaceAlternatives(sp).filter((a) => sum.rms.some((r) => r.id === a.tileset));
-    const altOfRm = new Map<string, { group: string; role: "tileset" | "models"; mode: AltMode; err: number }>();
+    const altOfRm = new Map<string, { group: string; role: "tileset" | "models"; mode: Exclude<AltMode, "use">; err: number }>();
     for (const a of alts) {
       const tr = sum.rms.find((r) => r.id === a.tileset)!;
       const tv = (tr.versions ?? []).find((v) => !v.master && typeof (v.data ?? {}).geometric_error_m === "number");
       const err = Number((tv?.data ?? {}).geometric_error_m ?? 10);
-      const mode = altModeOf(a.group);
+      const mode = altEffectiveMode(a.group, sp);
       altOfRm.set(a.tileset, { group: a.group, role: "tileset", mode, err });
       for (const m of a.covered) altOfRm.set(m, { group: a.group, role: "models", mode, err });
     }
