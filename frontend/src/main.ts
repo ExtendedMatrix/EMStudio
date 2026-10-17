@@ -252,8 +252,9 @@ import { type AssocGroupKey, type AssocUnit, assocGroups, NEW_UNIT_ORDER, newUni
 import { buildOutlinerTree, loadSpacePrefs, renderOutliner, saveSpacePrefs, squeezeSide, type Space3dPrefs } from "./space-outliner";
 import { patchProxyNodes, proxyRelPath } from "./proxy-association";
 import { planMove, planNewGroup, planRemove, type GroupPlan } from "./rm-groups";
-import { shownModelName, splitLevel } from "./rm-names";
+import { shownModelName } from "./rm-names";
 import { versionError, type FlowVersion, type VersionMode } from "./lod-flow";
+import { defaultLevel, isHeavy, levelShort, levelsOf, type Level } from "./lod-levels";
 import { findSet, measureCoverage, planDeclareAlternative, planSubcontainer, type AltMode, type AltPlan, type Box, type TilesetAlternative } from "./alternatives";
 import { ALT_RULE } from "./space";
 import { trackpadClassifier } from "./wheel-kind";
@@ -22329,10 +22330,11 @@ function rmShown(id: string, sp: Space | null = currentSpace()): { shown: string
     const u = h.drawnUrl(`rm:${id}`);
     const tail = (x: string) => decodeURIComponent(x.split(/[?#]/)[0]).split("/").pop() ?? "";
     const v = u ? rm.versions?.find((x) => x.url && tail(x.url) === tail(u)) : undefined;
-    if (v) { drawn = v.lod ? `LOD${String(v.lod).replace(/\D/g, "")}` : splitLevel(v.name).level; break; }
+    // MICRO-PROVA-DEV47 p.3 · the author's LOD, «intero», «derivata» — never the chain's lodN of a recipe's version
+    if (v) { drawn = v.master ? null : levelShortOf(rm, v.id); break; }
   }
-  const chosen = rm.choice?.entry ? rm.versions?.find((x) => x.id === rm.choice!.entry!.id) : undefined;
-  const lvl = drawn ?? (chosen ? (chosen.lod ? `LOD${String(chosen.lod).replace(/\D/g, "")}` : splitLevel(chosen.name).level) : null) ?? s.level;
+  const planned = (rm.versions?.length ?? 0) > 1 ? rmVersionPlan(rm).versionId : undefined;
+  const lvl = drawn ?? (planned ? levelShortOf(rm, planned) : null) ?? ((rm.versions?.length ?? 0) > 1 ? null : s.level);
   return { ...s, level: s.shown !== s.technical || lvl ? lvl : null };
 }
 
@@ -22452,7 +22454,7 @@ function renderSpaceNPanel(el: HTMLElement, win: Win, h: SpaceSceneHandle): void
       onReset: () => commitAll(`sketch:${sk.id}`, before, IDENTITY) });
   } else if (key && (key.startsWith("rm:") || key.startsWith("proxy:"))) {
     // MICRO-SPAZIO-3D-3 p.10 · the active model's version: the mode, the version, its use, level and MB
-    if (key.startsWith("rm:")) { const vb = document.createElement("div"); vb.className = "np-ver"; if (renderVersionsInto(vb, key.slice(3))) obj.appendChild(vb); }
+    // (MICRO-PROVA-DEV47 p.3b: now the section «Livello di dettaglio», below)
     const target = transformNodeOfKey(key, sp);
     const name = document.createElement("div");
     name.className = "xf-note";
@@ -22472,6 +22474,8 @@ function renderSpaceNPanel(el: HTMLElement, win: Win, h: SpaceSceneHandle): void
     none.textContent = t("s3.nNothing");
     obj.appendChild(none);
   }
+  // MICRO-PROVA-DEV47 p.3b · the level of detail, for the active, the selection, the epoch
+  renderLodSection(sect(t("lod.title"), "lod"), sp);
   // MICRO-SPAZIO-3D-3 p.5 · the snap: Ctrl during G lays the object on the face
   // under the pointer; «Allinea alla normale» (off by default) turns it too
   const sn = sect(t("s3.nSnap"), "snap");
@@ -23406,14 +23410,95 @@ function setVersionMode(rmIds: string[], mode: VersionMode, versionId?: string):
 }
 type RmVersion = NonNullable<SpaceRM["versions"]>[number];
 const lodOrd = (v: { lod: string | null }): number => { const m = /(\d+)/.exec(String(v.lod ?? "")); return m ? Number(m[1]) : -1; };
-/** The versions a glTF loader opens, with a file the scene can fetch. */
-function drawableVersions(rm: SpaceRM): Array<RmVersion & { fetch: string }> {
-  return (rm.versions ?? []).filter((v) => v.drawable && v.resource && v.resource.state === "resident")
-    .map((v) => ({ ...v, fetch: spaceFileUrl(v.resource) ?? "" })).filter((v) => !!v.fetch);
+/** MICRO-PROVA-DEV47 p.3a · where the Space reads an OBJ version: its entry (the
+ *  .obj) and its other files (the .mtl, the textures) from the `has_file`
+ *  edges — the Doc viewer's addresses (`docModelOf`): offline beside the
+ *  em.json through the bridge, in a room by digest. Null until the bridge has
+ *  answered, or when the set has no file. */
+const objAddressCache = new Map<string, { url: string; modifier: (u: string) => string } | null>();
+function objAddressOf(resId: string): { url: string; modifier: (u: string) => string } | null {
+  const st = store;
+  if (!st) return null;
+  const store0 = assetStoreBase();
+  if (!store0 && !bridgeBaseNow) {
+    void bridgeUrl().then((b) => { if (b && !bridgeBaseNow) { bridgeBaseNow = b; refreshSurfaces("scene"); } });
+    return null;
+  }
+  const key = `${resId}\u0000${store0 ?? currentFilePath ?? ""}\u0000${bridgeBaseNow ?? ""}\u0000${spaceVersion}`;
+  if (objAddressCache.has(key)) return objAddressCache.get(key)!;
+  const choice = chooseModel(storeGraph(st), [resId]);
+  let out: { url: string; modifier: (u: string) => string } | null = null;
+  if (choice.kind === "open") {
+    const baseDir = currentFilePath ? currentFilePath.replace(/[^/\\]*$/, "") : "";
+    const map = addressMap(choice, store0
+      ? { mode: "online", assetUrl: (c) => storeUrlOf(store0, c) }
+      : { mode: "offline", baseDir,
+          fileUrl: (abs) => `${bridgeBaseNow}/fs/at/${abs.replace(/^\/+/, "").split("/").map(encodeURIComponent).join("/")}` });
+    out = { url: map.entryUrl, modifier: map.modifier };
+  }
+  objAddressCache.set(key, out);
+  return out;
 }
-/** The flow of a model: its drawable versions, their errors (lod-flow's estimates). */
+/** The versions the Space opens (a glTF, a tileset, an OBJ), with a file the scene can fetch. */
+function drawableVersions(rm: SpaceRM): Array<RmVersion & { fetch: string; modifier?: (u: string) => string }> {
+  return (rm.versions ?? []).filter((v) => v.drawable && v.resource && v.resource.state === "resident")
+    .map((v) => {
+      if (v.format === "obj") { const a = objAddressOf(v.id); return { ...v, fetch: a?.url ?? "", modifier: a?.modifier }; }
+      return { ...v, fetch: spaceFileUrl(v.resource) ?? "" };
+    }).filter((v) => !!v.fetch);
+}
+/** MICRO-PROVA-DEV47 p.3 · a model's levels: the author's (LOD0…), the whole
+ *  model, the recipe's derived ones (`lod-levels.ts`) */
+const levelsMemo = new WeakMap<SpaceRM, Map<string, Level>>();
+function rmLevels(rm: SpaceRM): Map<string, Level> {
+  let m = levelsMemo.get(rm);
+  if (!m) {
+    m = levelsOf((rm.versions ?? []).map((v) => ({ id: v.id, master: v.master, lod: v.lod, step: v.step ?? null, input: v.input ?? null,
+      bytes: v.bytes ?? null, tris: v.tris ?? null })));
+    levelsMemo.set(rm, m);
+  }
+  return m;
+}
+const LEVEL_TEXTS = () => ({ whole: t("lod.whole"), derived: t("lod.derived"), master: t("s3.master") });
+/** «LOD2», «intero», «derivata», «master» */
+function levelShortOf(rm: SpaceRM, vid: string): string {
+  // a tileset is its own pyramid of levels (Cesium's): not a LOD of the author
+  if (rm.versions?.find((v) => v.id === vid)?.format === "tiles") return "tileset";
+  return levelShort(rmLevels(rm).get(vid), LEVEL_TEXTS());
+}
+const mbOf = (b: number | null | undefined): string => (typeof b === "number" ? (b >= 1024 ** 3 ? `${(b / 1024 ** 3).toFixed(2)} GB` : b >= 1048576 ? `${(b / 1048576).toFixed(b >= 10 * 1048576 ? 0 : 1)} MB` : `${Math.max(1, Math.round(b / 1024))} kB`) : "");
+/** The long name of a level, for the menus: «LOD2 · OBJ · 9 MB · preview»,
+ *  «derivata da LOD2 · 50 % · glb · 0.4 MB · web», «master · .blend: aprilo in Blender». */
+function levelLongOf(rm: SpaceRM, v: RmVersion): string {
+  const l = rmLevels(rm).get(v.id);
+  const parts: string[] = [];
+  if (l?.origin === "recipe" && !l.whole) {
+    const base = l.base ? (rm.versions ?? []).find((x) => x.id === l.base) : undefined;
+    const from = base ? levelShortOf(rm, base.id) : "?";
+    parts.push(t("lod.derivedFrom", { from }));
+    if (l.ratio != null && l.ratio < 1) parts.push(`${Math.round(l.ratio * 100)} %`);
+    else parts.push(t("lod.copy"));
+  } else parts.push(levelShortOf(rm, v.id));
+  const fmt = v.format === "obj" ? "OBJ" : v.format === "gltf" ? "glb" : v.format === "tiles" ? "tileset" : v.format === "blend" ? ".blend" : "";
+  if (fmt) parts.push(fmt);
+  const w = mbOf(v.bytes);
+  if (w) parts.push(w);
+  if ((v.uses ?? []).length) parts.push((v.uses ?? []).join(", "));
+  return parts.join(" · ");
+}
+/** Why a version does not open in the Space, and what to do instead — never a bare error */
+function levelWhyNot(_rm: SpaceRM, v: RmVersion): string {
+  if (v.master && v.format === "blend") return t("lod.whyBlend");
+  if (v.master) return t("lod.whyMaster");
+  if (v.resource && v.resource.state !== "resident") return t("lod.whyMissing");
+  if (v.format === "obj") return t("lod.whyObjWait");
+  return t("lod.whyFormat");
+}
+/** The flow of a model: its drawable versions, their errors (lod-flow's estimates).
+ *  MICRO-PROVA-DEV47 p.3 · the OBJ sets stay out: they carry no measure the
+ *  distance reads (no triangles, no tris_per_m2), and three's loader of the flow is the glTF one */
 function rmFlow(rm: SpaceRM): FlowVersion[] {
-  return drawableVersions(rm).map((v) => {
+  return drawableVersions(rm).filter((v) => v.format !== "obj").map((v) => {
     const d = (v.data ?? {}) as Record<string, unknown>;
     const e = versionError(d, null);
     const prim = (d.primitives && typeof d.primitives === "object" ? d.primitives : {}) as Record<string, unknown>;
@@ -23423,25 +23508,34 @@ function rmFlow(rm: SpaceRM): FlowVersion[] {
   });
 }
 /** What a model draws, by its mode: the file (manual, by use), or the flow (auto). */
-function rmVersionPlan(rm: SpaceRM): { url?: string; flow?: FlowVersion[]; flowStart?: string; versionId?: string } {
+function rmVersionPlan(rm: SpaceRM): { url?: string; flow?: FlowVersion[]; flowStart?: string; versionId?: string; obj?: { modifier?: (u: string) => string }; bytes?: number | null } {
   const vs = drawableVersions(rm);
   if (!vs.length) return {};
   const m = versionModeOf(rm.id);
+  const asPlan = (v: (typeof vs)[number]) => ({ url: v.fetch, versionId: v.id, bytes: v.bytes ?? null, ...(v.format === "obj" ? { obj: { modifier: v.modifier } } : {}) });
   if (m.mode === "auto" && vs.length > 1) {
     const flow = rmFlow(rm);
     const lightest = [...flow].sort((a, b) => b.ord - a.ord)[0];
-    return { flow, flowStart: lightest?.id, url: lightest?.url };
+    if (flow.length) return { flow, flowStart: lightest?.id, url: lightest?.url };
   }
   if (m.mode === "manual" && m.versionId) {
     const v = vs.find((x) => x.id === m.versionId);
-    if (v) return { url: v.fetch, versionId: v.id };
+    if (v) return asPlan(v);
+  }
+  // MICRO-PROVA-DEV47 p.3 · the desktop's default (realtime): the survey's
+  // lightest level of the AUTHOR, the reconstruction's WHOLE model; the
+  // recipe's versions for the web, or by the distance
+  if (deviceUse() === "realtime") {
+    const d = defaultLevel(rmLevels(rm), new Set(vs.map((v) => v.id)));
+    const v = d ? vs.find((x) => x.id === d) : undefined;
+    if (v) return asPlan(v);
   }
   // by use: the device's first, then the scene's (s3Dgraphy's choose_version, the TS twin)
   const uses = [deviceUse(), ...SCENE_USES.filter((u) => u !== deviceUse())];
   const ch = chooseVersion(vs.map((v) => ({ id: v.id, master: false, use: v.uses ?? [], lod_level: v.lod,
     size_bytes: typeof (v.data ?? {}).size_bytes === "number" ? (v.data as { size_bytes: number }).size_bytes : undefined })), uses);
   const v = ch?.entry ? vs.find((x) => x.id === ch.entry!.id) : undefined;
-  return v ? { url: v.fetch, versionId: v.id } : {};
+  return v ? asPlan(v) : {};
 }
 /** The version a model draws now (the scene's, else its plan's). */
 function drawnVersionOf(rm: SpaceRM): RmVersion | null {
@@ -23468,6 +23562,189 @@ function versionMenuEntries(rmIds: string[]): Array<{ label: string; act: string
     } },
   ];
 }
+/** MICRO-PROVA-DEV47 · a question in a card, as the app's other modals: Enter
+ *  says yes, Esc no. One door for the heavy level (p.3a) and the deletion of a
+ *  proxy (p.5): `window.confirm` is not the desktop's (a WebView has none). */
+function askModal(title: string, body: string, yes: string, no: string = t("common.cancel")): Promise<boolean> {
+  return new Promise((resolve) => {
+    const modal = document.createElement("div");
+    modal.className = "modal ask-modal";
+    const card = document.createElement("div");
+    card.className = "modal-card";
+    card.innerHTML = `<div class="modal-head"><span>${escapeHtml(title)}</span></div><div class="modal-body"><p>${escapeHtml(body)}</p></div>`
+      + `<div class="modal-foot"><button data-a="no">${escapeHtml(no)}</button><button data-a="yes" class="primary">${escapeHtml(yes)}</button></div>`;
+    modal.appendChild(card);
+    const finish = (ok: boolean) => { modal.remove(); document.removeEventListener("keydown", onKey, true); resolve(ok); };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); finish(false); }
+      else if (e.key === "Enter") { e.preventDefault(); e.stopPropagation(); finish(true); }
+    };
+    (card.querySelector('[data-a="no"]') as HTMLButtonElement).onclick = () => finish(false);
+    (card.querySelector('[data-a="yes"]') as HTMLButtonElement).onclick = () => finish(true);
+    modal.addEventListener("click", (e) => { if (e.target === modal) finish(false); });
+    document.addEventListener("keydown", onKey, true);
+    document.body.appendChild(modal);
+    (card.querySelector('[data-a="yes"]') as HTMLButtonElement).focus();
+  });
+}
+/** MICRO-PROVA-DEV47 p.3 · fixed levels for some models, each its own version
+ *  (Manual); a heavy one (`isHeavy`: over 150 MB or 5 M triangles) asked first */
+async function chooseLevels(pairs: Array<[string, string]>): Promise<boolean> {
+  const sp = currentSpace();
+  const all = pairs.map(([rmId, vid]) => { const rm = sp?.rms.find((r) => r.id === rmId); const v = rm?.versions?.find((x) => x.id === vid);
+    return rm && v ? { rm, v } : null; }).filter((x): x is { rm: SpaceRM; v: RmVersion } => !!x);
+  // one heavy version, or all of them together (the eleven LOD0 of an epoch: 1 GB)
+  const total = { bytes: all.reduce((a, h) => a + (h.v.bytes ?? 0), 0), tris: all.reduce((a, h) => a + (h.v.tris ?? 0), 0) };
+  if (all.some((h) => isHeavy(h.v)) || isHeavy(total)) {
+    const what = all.length === 1 ? `${rmShown(all[0].rm.id, sp)?.shown ?? all[0].rm.name} ${levelShortOf(all[0].rm, all[0].v.id)}` : t("lod.nModels", { n: String(all.length) });
+    if (!await askModal(t("lod.heavyTitle"), t("lod.heavyAsk", { what, mb: mbOf(total.bytes) }), t("lod.heavyYes"))) return false;
+  }
+  for (const [rmId, vid] of pairs) setVersionMode([rmId], "manual", vid);
+  return true;
+}
+const modeWord = (m: VersionMode): string => t(m === "manual" ? "lod.chipManual" : m === "auto" ? "lod.chipAuto" : "lod.chipUse");
+/** The levels some models share, by their short name («LOD2», «intero»), with the version of each */
+function sharedLevels(rmIds: string[]): Array<{ short: string; pairs: Array<[string, string]> }> {
+  const sp = currentSpace();
+  const by = new Map<string, Array<[string, string]>>();
+  for (const id of rmIds) {
+    const rm = sp?.rms.find((r) => r.id === id);
+    if (!rm) continue;
+    const lv = rmLevels(rm);
+    for (const v of drawableVersions(rm).sort((a, b) => (lv.get(a.id)?.rank ?? 0) - (lv.get(b.id)?.rank ?? 0))) {
+      const l = lv.get(v.id);
+      if (!l || (l.origin === "recipe" && !l.whole)) continue;      // a derived one is not a level to share
+      const k = levelShortOf(rm, v.id);
+      const list = by.get(k) ?? by.set(k, []).get(k)!;
+      if (!list.some(([r]) => r === id)) list.push([id, v.id]);
+    }
+  }
+  return [...by.entries()].map(([short, pairs]) => ({ short, pairs }));
+}
+/** MICRO-PROVA-DEV47 p.3b · the menu of the levels: one model's (each version,
+ *  its name, form, weight and uses; the one drawn marked; one that does not
+ *  open says why), or several models' (the levels they share); then the modes */
+function lodMenuEntries(rmIds: string[]): Array<{ label: string; act: string; run: () => void; disabled?: boolean } | "sep"> {
+  const sp = currentSpace();
+  const out: Array<{ label: string; act: string; run: () => void; disabled?: boolean } | "sep"> = [];
+  const withVersions = rmIds.filter((id) => (sp?.rms.find((r) => r.id === id)?.versions?.length ?? 0) > 1);
+  if (!withVersions.length) return [{ label: t("lod.noLevels"), act: "lod-none", disabled: true, run: () => undefined }];
+  if (withVersions.length === 1) {
+    const rm = sp!.rms.find((r) => r.id === withVersions[0])!;
+    const lv = rmLevels(rm);
+    const ok = new Set(drawableVersions(rm).map((v) => v.id));
+    const drawn = drawnVersionOf(rm);
+    const m = versionModeOf(rm.id);
+    for (const v of [...(rm.versions ?? [])].sort((a, b) => (lv.get(a.id)?.rank ?? -1) - (lv.get(b.id)?.rank ?? -1))) {
+      const mark = drawn?.id === v.id ? "●" : m.mode === "manual" && m.versionId === v.id ? "○" : "·";
+      out.push({ label: `${mark} ${levelLongOf(rm, v)}${ok.has(v.id) ? "" : ` — ${levelWhyNot(rm, v)}`}`, act: `lod:${levelShortOf(rm, v.id)}:${v.id}`,
+        disabled: !ok.has(v.id), run: () => { void chooseLevels([[rm.id, v.id]]); } });
+    }
+  } else {
+    for (const g of sharedLevels(withVersions))
+      out.push({ label: t("lod.fixedAll", { lod: g.short, n: String(g.pairs.length) }), act: `lod:${g.short}`, run: () => { void chooseLevels(g.pairs); } });
+  }
+  out.push("sep",
+    { label: t("ver.modeAuto"), act: "ver-auto", run: () => setVersionMode(withVersions, "auto") },
+    { label: t("ver.modeUse", { use: deviceUse() }), act: "ver-use", run: () => setVersionMode(withVersions, "use") });
+  return out;
+}
+/** The models of an Outliner row: a model, a container's members, an epoch's models */
+function lodRowModels(r: { kind: string; id: string; children?: Array<{ kind: string; id: string; children?: unknown[] }> }): string[] {
+  if (r.kind === "rm") return [r.id];
+  if (r.kind === "rmgroup") return (r.children ?? []).filter((c) => c.kind === "rm").map((c) => c.id);
+  if (r.kind === "epoch") return (currentSpace()?.summary(r.id)?.rms ?? []).filter((x) => !x.resource?.tiles).map((x) => x.id);
+  return [];
+}
+/** MICRO-PROVA-DEV47 p.3b · the N panel's «Livello di dettaglio»: for the
+ *  active model, the selection, or the whole epoch — the mode (Cesium's words
+ *  and look: «Manuale», «Automatico», and «Per uso») and, in Manual, the level */
+let npLodScope: "active" | "selection" | "epoch" = "active";
+function renderLodSection(host: HTMLElement, sp: Space | null): void {
+  const ssel = spaceSel(sp);
+  const active = ssel.active?.startsWith("rm:") ? [ssel.active.slice(3)] : [];
+  const selection = ssel.keys.filter((k) => k.startsWith("rm:")).map((k) => k.slice(3));
+  const ep = sp ? spaceEpochOf(sp) : null;
+  const epoch = ep ? lodRowModels({ kind: "epoch", id: ep }) : [];
+  const ids = npLodScope === "active" ? active : npLodScope === "selection" ? selection : epoch;
+  const seg = (probe: string, opts: Array<[string, string]>, on: string, pick: (v: string) => void, title?: string) => {
+    const d = document.createElement("div");
+    d.className = "tl-seg np-seg";
+    d.dataset.np = probe;
+    if (title) d.title = title;
+    for (const [v, label] of opts) {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.dataset.v = v;
+      b.textContent = label;
+      b.setAttribute("aria-pressed", String(v === on));
+      b.addEventListener("click", () => pick(v));
+      d.appendChild(b);
+    }
+    host.appendChild(d);
+  };
+  seg("lod-scope", [["active", t("lod.scopeActive")], ["selection", t("lod.scopeSelection", { n: String(selection.length) })], ["epoch", t("lod.scopeEpoch")]],
+    npLodScope, (v) => { npLodScope = v as typeof npLodScope; renderSpaceNPanels(); });
+  const withVersions = ids.filter((id) => (sp?.rms.find((r) => r.id === id)?.versions?.length ?? 0) > 1);
+  if (!withVersions.length) {
+    const p = document.createElement("p");
+    p.className = "xf-note";
+    p.textContent = ids.length ? t("lod.noLevels") : t("lod.noModel");
+    host.appendChild(p);
+    return;
+  }
+  const modes = new Set(withVersions.map((id) => versionModeOf(id).mode));
+  const on = modes.size === 1 ? [...modes][0] : "";
+  seg("lod-mode", [["manual", t("tl.manual")], ["use", t("lod.byUse")], ["auto", t("tl.auto")]], on, (v) => {
+    if (v === "manual") {
+      // Manual: the version each draws now stays
+      for (const id of withVersions) { const rm = sp?.rms.find((r) => r.id === id); const dv = rm ? drawnVersionOf(rm) : null; setVersionMode([id], "manual", dv?.id); }
+    } else setVersionMode(withVersions, v as VersionMode);
+  }, t("lod.modeTitle"));
+  if (on === "manual" || withVersions.length === 1) {
+    const pick = document.createElement("select");
+    pick.dataset.np = "lod-level";
+    if (withVersions.length === 1) {
+      const rm = sp!.rms.find((r) => r.id === withVersions[0])!;
+      const lv = rmLevels(rm);
+      const ok = new Set(drawableVersions(rm).map((v) => v.id));
+      const drawn = drawnVersionOf(rm);
+      for (const v of [...(rm.versions ?? [])].sort((a, b) => (lv.get(a.id)?.rank ?? -1) - (lv.get(b.id)?.rank ?? -1))) {
+        const o = document.createElement("option");
+        o.value = v.id;
+        o.disabled = !ok.has(v.id);
+        o.textContent = `${levelLongOf(rm, v)}${ok.has(v.id) ? "" : ` — ${levelWhyNot(rm, v)}`}`;
+        o.selected = drawn?.id === v.id;
+        pick.appendChild(o);
+      }
+      pick.addEventListener("change", () => { void chooseLevels([[rm.id, pick.value]]).then((done) => { if (!done) renderSpaceNPanels(); }); });
+    } else {
+      const shared = sharedLevels(withVersions);
+      const o0 = document.createElement("option"); o0.value = ""; o0.textContent = t("lod.pickLevel"); pick.appendChild(o0);
+      for (const g of shared) { const o = document.createElement("option"); o.value = g.short; o.textContent = t("lod.fixedAll", { lod: g.short, n: String(g.pairs.length) }); pick.appendChild(o); }
+      pick.addEventListener("change", () => { const g = shared.find((x) => x.short === pick.value); if (g) void chooseLevels(g.pairs); });
+    }
+    const lab = document.createElement("label");
+    lab.className = "ver-row";
+    const sp0 = document.createElement("span");
+    sp0.textContent = t("lod.level");
+    lab.append(sp0, pick);
+    host.appendChild(lab);
+  }
+  const note = document.createElement("p");
+  note.className = "xf-note";
+  note.dataset.np = "lod-drawn";
+  if (withVersions.length === 1) {
+    const rm = sp!.rms.find((r) => r.id === withVersions[0])!;
+    const dv = drawnVersionOf(rm);
+    note.textContent = dv ? t("lod.drawn", { what: levelLongOf(rm, dv), mode: modeWord(versionModeOf(rm.id).mode) }) : t("ver.none");
+  } else {
+    const count = new Map<string, number>();
+    for (const id of withVersions) { const rm = sp?.rms.find((r) => r.id === id); const dv = rm ? drawnVersionOf(rm) : null; const k = rm && dv ? levelShortOf(rm, dv.id) : "—"; count.set(k, (count.get(k) ?? 0) + 1); }
+    note.textContent = t("lod.drawnMany", { n: String(withVersions.length), what: [...count].map(([k, n]) => `${k} ×${n}`).join(", ") });
+  }
+  host.appendChild(note);
+}
 /** The Inspector's selector of a model's versions (the same as the Outliner's dots). */
 function renderVersionsInto(host: HTMLElement, rmId: string): boolean {
   const sp = currentSpace();
@@ -23491,11 +23768,12 @@ function renderVersionsInto(host: HTMLElement, rmId: string): boolean {
     o.value = v.id;
     const ok = vs.some((x) => x.id === v.id);
     o.disabled = !ok;
-    o.textContent = `${lodOrd(v) >= 0 ? `LOD${lodOrd(v)}` : v.master ? t("s3.master") : "·"} · ${splitLevel(v.name).base || v.name}${(v.uses ?? []).length ? ` · ${(v.uses ?? []).join(", ")}` : ""}${ok ? "" : ` · ${t("ver.notDrawable")}`}`;
+    // MICRO-PROVA-DEV47 p.3 · the author's LOD, the whole, the recipe's derived ones; one that does not open says why
+    o.textContent = `${levelLongOf(rm, v)}${ok ? "" : ` — ${levelWhyNot(rm, v)}`}`;
     o.selected = drawnV?.id === v.id;
     pick.appendChild(o);
   }
-  pick.addEventListener("change", () => setVersionMode([rmId], "manual", pick.value));
+  pick.addEventListener("change", () => { void chooseLevels([[rmId, pick.value]]).then((done) => { if (!done) refreshInspector(); }); });
   row(t("ver.version"), pick);
   const use = document.createElement("select");
   use.dataset.ver = "use";
@@ -23505,8 +23783,8 @@ function renderVersionsInto(host: HTMLElement, rmId: string): boolean {
   const note = document.createElement("p");
   note.className = "xf-note";
   const d = drawnV ? (drawnV.data ?? {}) as Record<string, unknown> : {};
-  note.textContent = drawnV ? t("ver.drawn", { lod: lodOrd(drawnV) >= 0 ? `LOD${lodOrd(drawnV)}` : "—", uses: (drawnV.uses ?? []).join(", ") || "—",
-    mb: typeof d.size_bytes === "number" ? (d.size_bytes / 1048576).toFixed(1) : "?" }) : t("ver.none");
+  void d;
+  note.textContent = drawnV ? t("lod.drawn", { what: levelLongOf(rm, drawnV), mode: modeWord(m.mode) }) : t("ver.none");
   host.appendChild(note);
   return true;
 }
@@ -23685,7 +23963,9 @@ function renderSpaceOutliner(el: HTMLElement, win: Win, sp: Space | null): void 
       // MICRO-SPAZIO-3D-3 p.11 · the name without its level, the level a chip
       const nm = rmShown(r.id, sp);
       return { id: r.id, name: nm?.shown ?? r.name, ...(nm && nm.shown !== nm.technical ? { technical: nm.technical } : {}),
-        ...(nm?.level ? { chip: nm.level } : {}), glyph: String(st.node(r.id)?.node_type ?? "representation_model"),
+        // MICRO-PROVA-DEV47 p.3b · the level and the mode («LOD2 · uso», «intero · fisso»), a small menu
+        ...(nm?.level ? { chip: (r.versions?.length ?? 0) > 1 ? `${nm.level} · ${modeWord(versionModeOf(r.id).mode)}` : nm.level } : {}),
+        glyph: String(st.node(r.id)?.node_type ?? "representation_model"),
         tileset: !!r.resource?.tiles,
         group: grp ? { id: grp.id, name: grp.name, doc: grp.documentId ? String(st.node(grp.documentId)?.name ?? "") : undefined } : null,
         versions: (r.versions ?? []).map((v) => {
@@ -23695,14 +23975,14 @@ function renderSpaceOutliner(el: HTMLElement, win: Win, sp: Space | null): void 
           // p.10 · its uses and its level computed from the chain, small; «A» on the one the distance drew
           return { id: v.id, name: v.name + (v.master ? ` · ${t("s3.master")}` : ""),
             drawn: isDrawn, chosen: mode === "manual" ? versionModeOf(r.id).versionId === v.id : r.choice?.entry?.id === v.id,
-            uses: v.uses ?? [], ...(lodOrd(v) >= 0 ? { level: `LOD${lodOrd(v)}` } : {}), ...(isDrawn && mode === "auto" ? { auto: true } : {}) };
+            uses: v.uses ?? [], ...(v.master ? {} : { level: levelShortOf(r, v.id) }), ...(isDrawn && mode === "auto" ? { auto: true } : {}) };
         }) };
     }),
     proxies: (ep) => (sp.summary(ep)?.withProxy ?? []).filter((u) => sp.proxies.has(u))
       .map((u) => ({ unitId: u, name: String(st.node(u)?.name ?? u), type: String(st.node(u)?.node_type ?? "US") })),
     typeLabel: unitTypeLabel,
     sketches: listSketches().map((s) => ({ id: s.id, name: s.name, shape: s.shape })),
-    texts: { rms: t("s3.rms"), proxies: t("s3.proxies"), sketches: t("s3.sketches") },
+    texts: { rms: t("s3.rms"), proxies: t("s3.proxies"), sketches: t("s3.sketches"), lod: "LOD" },
   }) : [];
   const fam = new Map(SHAPE_FAMILIES.map((f) => [f.id, shapeLabel(f, lang)]));
   renderOutliner(el, {
@@ -23770,9 +24050,12 @@ function renderSpaceOutliner(el: HTMLElement, win: Win, sp: Space | null): void 
     // p.10 · the dot of a version's row: that version, in place of the one drawn
     chooseVersion: (rmId, vid) => {
       const rm = sp?.rms.find((x) => x.id === rmId);
-      if (!rm || !drawableVersions(rm).some((x) => x.id === vid)) { toast(t("ver.notDrawable")); return; }
-      setVersionMode([rmId], "manual", vid);
+      const v = rm?.versions?.find((x) => x.id === vid);
+      if (!rm || !drawableVersions(rm).some((x) => x.id === vid)) { toast(rm && v ? levelWhyNot(rm, v) : t("ver.notDrawable")); return; }
+      void chooseLevels([[rmId, vid]]);
     },
+    // MICRO-PROVA-DEV47 p.3b · the level's chip: the levels of a model, or the same for a container's, an epoch's models
+    chipMenu: (r, x, y) => { const ids = lodRowModels(r); spaceMenu(x, y, r.kind === "rm" ? r.name : `${r.name} · ${t("lod.nModels", { n: String(ids.length) })}`, lodMenuEntries(ids)); },
     // p.7 · a right click on a model's row, or on a container's: the containers' entries
     rowMenu: (r, x, y) => {
       if (r.kind === "rm") spaceMenu(x, y, r.name, [...groupMenuEntries(selectedModels(r.id), x, y), "sep", ...versionMenuEntries(selectedModels(r.id))]);
@@ -24238,7 +24521,7 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
       // MICRO-SPAZIO-3D-3 p.10 · the version by its mode (manual, by use, the distance)
       const plan = isTiles ? {} : rmVersionPlan(r);
       items.push({ kind: "rm", id: r.id, label: nmS && nmS.shown !== nmS.technical ? `${nmS.shown}${nmS.level ? ` · ${nmS.level}` : ""}` : r.name, state: r.resource?.state ?? "missing",
-        url: plan.url ?? spaceFileUrl(r.resource), resourceId: r.resource?.id,
+        url: plan.url ?? spaceFileUrl(r.resource), resourceId: r.resource?.id, ...(plan.obj ? { obj: plan.obj } : {}),
         ...(plan.flow ? { flow: plan.flow, flowStart: plan.flowStart } : {}),
         ...(alt && alt.mode === "auto" ? { alt: { group: alt.group, role: alt.role, err: alt.err } } : {}), tiles: r.resource?.tiles || undefined,
         edge: placementColour(r.genre) ?? undefined, selected: isSel(`rm:${r.id}`), active: ssel.active === `rm:${r.id}`,
@@ -24246,7 +24529,7 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
         pose: r.resource?.tiles ? undefined : poseOfNode(r.id),
         // MICRO-3DTILES · the tileset of the same model, and the weight
         tileset: r.tileset?.state === "resident" && space3dShown("s3_tiles") ? r.tileset.url || undefined : undefined,
-        bytes: r.resource?.bytes ?? null, points: r.resource?.points ?? null });
+        bytes: (plan.versionId ? plan.bytes : null) ?? r.resource?.bytes ?? null, points: r.resource?.points ?? null });
     }
     if (space3dShown("s3_proxies"))
       for (const u of sum.withProxy) {

@@ -102,7 +102,11 @@ export interface SpaceRM {
    *  the one drawn highlighted); empty when it has none */
   versions?: Array<{ id: string; name: string; url: string; master: boolean; lod: string | null;
     /** MICRO-SPAZIO-3D-3 p.10 · the uses it declares, its data (the measures), whether a glTF loader opens it, its file */
-    uses?: string[]; data?: Record<string, unknown>; drawable?: boolean; resource?: SpaceResource | null }>;
+    uses?: string[]; data?: Record<string, unknown>; drawable?: boolean; resource?: SpaceResource | null;
+    /** MICRO-PROVA-DEV47 p.3 · the step that made it (its data), what that step
+     *  took in, its weight (its files', for a set), its triangles, its form */
+    step?: Record<string, unknown> | null; input?: string | null; bytes?: number | null; tris?: number | null;
+    format?: VersionFormat }>;
   /** MICRO-SPAZIO-3D-3 p.7 · the RM container it is in (EM16-RMNG,
    *  `is_in_representation_model_group`, 1:1), or null */
   group?: string | null;
@@ -116,6 +120,11 @@ export interface SpaceRM {
 /** MICRO-SPAZIO-3D-3 p.7 · an RM container as the graph has it (EM Tools writes
  *  it, s3Dgraphy reads it: `RepresentationModelNodeGroup`) — its Document
  *  (`has_representation_model` to the group), its members. */
+/** MICRO-PROVA-DEV47 p.3a · what a version is, for the Space: a glTF, an OBJ
+ *  (with its mtl and textures, a file set), a tileset, a .blend datablock
+ *  (Blender only), or another file */
+export type VersionFormat = "gltf" | "obj" | "tiles" | "blend" | "other";
+
 export interface SpaceRMGroup { id: string; name: string; documentId: string | null; members: string[] }
 
 export type ProxyGeometry = "glb" | "convex" | "spheres" | "empty";
@@ -373,6 +382,41 @@ export function buildSpace(
   // C1 · a TILESET version too (a folder or a .3tz): the scene draws it as tiles
   const opensGltf = (d: Record<string, unknown>): boolean =>
     /\.(glb|gltf)(\?|#|$)/i.test(str(d.url)) || /^model\/gltf/i.test(str(d.media_type)) || tilesKindOf(d) !== "";
+  // MICRO-PROVA-DEV47 p.3a · an OBJ: its own url, or the entry of its file set
+  // (`has_file`: the .obj, its .mtl, the textures), as RB/LOD0–2 of Templu Mare
+  const filesOf = (id: string) => outOf(id, "has_file").map((x) => byId.get(x)).filter((f): f is EmNode => !!f);
+  const isObj = (d: Record<string, unknown>) => /\.obj(\?|#|$)/i.test(str(d.url)) || /^model\/obj/i.test(str(d.media_type));
+  const formatOf = (n: EmNode | undefined): VersionFormat => {
+    const d = dataOf(n);
+    if (tilesKindOf(d)) return "tiles";
+    if (opensGltf(d)) return "gltf";
+    if (isObj(d) || (n && filesOf(n.id).some((f) => isObj(dataOf(f))))) return "obj";
+    if (/^blend:\/\//i.test(str(d.url)) || str(d.packaging) === "datablock") return "blend";
+    return "other";
+  };
+  const weightOf = (n: EmNode | undefined): number | null => {
+    const own = num(dataOf(n).size_bytes);
+    if (own != null) return own;
+    const fs = n ? filesOf(n.id).map((f) => num(dataOf(f).size_bytes)) : [];
+    return fs.length && fs.every((x) => x != null) ? fs.reduce((a, b) => a! + b!, 0) : null;
+  };
+  const stepOf = (id: string): { step: Record<string, unknown> | null; input: string | null } => {
+    for (const proc of inOf(id, "dtc_had_output")) {
+      const pd = dataOf(byId.get(proc));
+      if (pd.dtc_kind !== "lod_generation") continue;
+      return { step: pd, input: outOf(proc, "dtc_had_input").find((x) => byId.get(x)?.node_type === "resource") ?? null };
+    }
+    return { step: null, input: null };
+  };
+  const versionRow = (e: { id: string; name?: string; url?: string; master?: boolean; lod_level?: string | null; use?: string[]; data?: Record<string, unknown> }) => {
+    const vn = byId.get(e.id);
+    const fmt = formatOf(vn);
+    const prim = (dataOf(vn).primitives ?? {}) as Record<string, unknown>;
+    return { id: e.id, name: str(e.name) || e.id, url: str(e.url ?? dataOf(vn).url),
+             master: !!e.master, lod: e.lod_level ?? null, uses: e.use ?? [], data: e.data ?? dataOf(vn),
+             drawable: !e.master && (fmt === "gltf" || fmt === "tiles" || fmt === "obj"), resource: vn ? asResource(servable(vn)) : null,
+             ...stepOf(e.id), bytes: weightOf(vn), tris: num(prim.triangles), format: fmt };
+  };
   // C1 · the version's REPRESENTATION a store can serve: a tileset folder is
   // thousands of files and the store holds one per digest, so from a node the
   // scene reads the folder's archive (`dtc_derived_from`, the `preferred` one
@@ -418,11 +462,8 @@ export function buildSpace(
     return { id: rm.id, name: str(rm.name) || rm.id, epochs: [...eps], documentId, genre, group,
              resource: chosen ? chosen.resource : resourceOf(rm.id), choice: chosen?.choice ?? null,
              tileset: tilesetOf(rm.id),
-             versions: entries.map((e) => { const vn = byId.get(e.id);
-               // MICRO-SPAZIO-3D-3 p.10 · its uses, its data (the measures), its file as the scene reads it
-               return { id: e.id, name: str(e.name) || e.id, url: str(e.url ?? dataOf(vn).url),
-                        master: !!e.master, lod: e.lod_level ?? null, uses: e.use ?? [], data: e.data ?? dataOf(vn),
-                        drawable: !e.master && opensGltf(e.data ?? dataOf(vn)), resource: vn ? asResource(servable(vn)) : null }; }) };
+             // MICRO-SPAZIO-3D-3 p.10 · its uses, its data (the measures), its file as the scene reads it
+             versions: entries.map(versionRow) };
   });
 
   // proxies: unit → property(geometry) → shape (→ resource)
@@ -490,10 +531,7 @@ export function buildSpace(
     rms.push({ id: set.hat, name: str(asset?.name) || set.name, epochs: [...eps], documentId: g?.documentId ?? null, genre: null,
                group: null, altOf: set.hat, resource: node ? asResource(servable(node)) : null, choice: choice?.entry ? choice : null,
                tileset: null,
-               versions: entries.map((e) => { const vn = byId.get(e.id);
-                 return { id: e.id, name: str(e.name) || e.id, url: str(e.url ?? dataOf(vn).url), master: !!e.master, lod: e.lod_level ?? null,
-                          uses: e.use ?? [], data: e.data ?? dataOf(vn), drawable: !e.master && opensGltf(e.data ?? dataOf(vn)),
-                          resource: vn ? asResource(servable(vn)) : null }; }) });
+               versions: entries.map(versionRow) });
   }
 
   return {

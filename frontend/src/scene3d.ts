@@ -104,6 +104,10 @@ export interface SceneItem {
   /** MICRO-SPAZIO-3D-3 p.6 · a proxy's other parts (more `geometry` properties):
    *  drawn with it, each with its own pose; G / R / S move the first */
   parts?: Array<{ url: string; resourceId?: string; pose?: Pose }>;
+  /** MICRO-PROVA-DEV47 p.3a · `url` is an OBJ: read with three's OBJLoader and
+   *  the MTLLoader of the .mtl it calls, each file through `modifier` (a file
+   *  set's other files, from its `has_file` edges) */
+  obj?: { modifier?: (u: string) => string };
   /** what the graph knows of the file: `size_bytes`, `primitives.points` */
   bytes?: number | null;
   points?: number | null;
@@ -358,6 +362,7 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
     __spaceSetCam?: (c: CamState) => void;
     __spaceCamState?: () => CamState;
     __spaceTiles?: () => unknown;
+    __spaceLoadTimes?: () => Record<string, number>;
     __spaceTileScreenOf?: (uri: string) => { x: number; y: number } | null;
     /** TEMPLU MARE v2 · C1 · the world box of what an item drew (a model's
      *  meshes, a tileset's loaded tiles): [minx, miny, minz, maxx, maxy, maxz] */
@@ -470,6 +475,53 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
           cache.set(url, p);
           const mine = p;
           void p.then((x) => { if ("fail" in x && cache.get(url) === mine) cache.delete(url); });
+        }
+        return p;
+      };
+      // MICRO-PROVA-DEV47 p.3a · an OBJ version (the survey's levels of the
+      // author, RB/LOD0–2 of Templu Mare): the .obj, the .mtl it calls, the
+      // textures the .mtl calls, every file through the set's addresses. The
+      // data is Z-up, Blender's own, and so are these OBJ (measured on OB_PODIO:
+      // its LOD2 is the recipe's glb copy of it, vertex for vertex — the OBJ's
+      // (x, y, z) are the glb's (x, −z, y)): turned as the glTF exporter turns
+      // Blender's axes, so the two coincide
+      const loadTimes = new Map<string, number>();
+      probe.__spaceLoadTimes = () => Object.fromEntries(loadTimes);
+      const loadObj = (url: string, modifier?: (u: string) => string): Promise<Loaded> => {
+        const k = `obj\u0000${url}`;
+        let p = cache.get(k);
+        if (!p) {
+          p = (async (): Promise<Loaded> => {
+            const t0 = performance.now();
+            const manager = new THREE.LoadingManager();
+            if (modifier) manager.setURLModifier(modifier);
+            try {
+              const text = String(await new THREE.FileLoader(manager).loadAsync(url));
+              const base = url.slice(0, url.lastIndexOf("/") + 1);
+              const libs = [...text.matchAll(/^mtllib\s+(.+?)\s*$/gm)].map((m) => m[1]);
+              const reader = new E.OBJLoader(manager);
+              if (libs.length) {
+                try {
+                  const mtl = new E.MTLLoader(manager);
+                  mtl.setPath(base);
+                  const materials = await mtl.loadAsync(libs[0]);
+                  materials.preload();
+                  reader.setMaterials(materials);
+                } catch { /* the geometry without its materials */ }
+              }
+              const group = reader.parse(text);
+              group.rotation.x = -Math.PI / 2;
+              const root = new THREE.Group();
+              root.add(group);
+              loadTimes.set(url, Math.round(performance.now() - t0));
+              return { root };
+            } catch (e: any) {
+              return { fail: "missing", unanswered: !e?.response && e instanceof TypeError };
+            }
+          })();
+          cache.set(k, p);
+          const mine = p;
+          void p.then((x) => { if ("fail" in x && cache.get(k) === mine) cache.delete(k); });
         }
         return p;
       };
@@ -1286,11 +1338,14 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
           if (item.state === "resident" && item.url && item.kind === "rm") {
             // a LOD set: the lightest level, or the one chosen; and the threshold
             const base = item.url;
-            if (lodLevelOf(base) != null && !lodSets.has(base)) lodSets.set(base, probeLods(base));
-            const el = lodLevelOf(base) != null || opts.limit ? stripOf(item) : null;
+            // MICRO-PROVA-DEV47 p.3a · an OBJ version is one level of the graph's,
+            // not a set of «_LODn» siblings to probe (OB_PODIO_LOD2.obj is named so)
+            const isSet = !item.obj && lodLevelOf(base) != null;
+            if (isSet && !lodSets.has(base)) lodSets.set(base, probeLods(base));
+            const el = isSet || opts.limit ? stripOf(item) : null;
             drawn.set(key, { item, as: "pending" });
             pending.push((async () => {
-              const set = lodLevelOf(base) != null ? await lodSets.get(base)! : [];
+              const set = isSet ? await lodSets.get(base)! : [];
               const lvl = lodChoice.get(key) ?? set[set.length - 1]?.level;
               const chosen = set.find((x) => x.level === lvl);
               const u = chosen?.url ?? base;
@@ -1314,7 +1369,7 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
               // the threshold: what the graph knows, else a HEAD
               const lim = opts.limit;
               if (lim && !forced.has(u)) {
-                const bytes = (u === base ? item.bytes : null) ?? chosen?.bytes ?? await headBytes(u);
+                const bytes = (u === base ? item.bytes : null) ?? chosen?.bytes ?? (item.obj ? null : await headBytes(u));
                 const pts = u === base ? item.points ?? null : null;
                 if (gen !== generation || disposed) return;
                 if ((bytes != null && bytes > lim.bytes) || (pts != null && pts > lim.points)) {
@@ -1338,7 +1393,7 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
                 }
               }
               if (el && !el.querySelector("select")) el.remove();
-              const got = await load(u);
+              const got = await (item.obj ? loadObj(u, item.obj.modifier) : load(u));
               if (gen !== generation || disposed) return;
               if ("fail" in got) {
                 drawn.set(key, { item: failed(item, got.fail), as: "label" });
@@ -1362,7 +1417,7 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
           }
           if (item.state === "resident" && item.url) {
             drawn.set(`${item.kind}:${item.id}`, { item, as: "pending" });
-            pending.push(load(item.url).then((got) => {
+            pending.push((item.obj ? loadObj(item.url, item.obj.modifier) : load(item.url)).then((got) => {
               if (gen !== generation || disposed) return;
               if ("fail" in got) {
                 drawn.set(`${item.kind}:${item.id}`, { item: failed(item, got.fail), as: "label" });

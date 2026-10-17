@@ -9697,3 +9697,10 @@ tr.tv-sel-act > td { background: color-mix(in srgb, var(--accent) 42%, transpare
 .scn-nav-cv { overflow: visible; }
 .scn-nav-halo { fill: rgba(255, 255, 255, 0.18); }
 .scn-nav-letter { font: 700 11px system-ui, sans-serif; fill: #1a1a1a; text-anchor: middle; dominant-baseline: central; pointer-events: none; }
+
+/* MICRO-PROVA-DEV47 p.3b · the level's chip on a model, a container, an epoch: a small menu */
+.sol-chip.sol-lod { border: 0; font: inherit; font-size: 0.66rem; line-height: 1.35; cursor: pointer; white-space: nowrap; }
+.sol-chip.sol-lod:hover { background: color-mix(in srgb, var(--accent) 45%, transparent); }
+.sol-epoch .sol-chip.sol-lod, .sol-rmgroup .sol-chip.sol-lod { background: transparent; border: 1px solid color-mix(in srgb, var(--accent) 40%, transparent); }
+.np-seg { margin: 2px 0 6px; display: flex; }
+.np-seg button { flex: 1; font-size: 0.72rem; padding: 2px 4px; }

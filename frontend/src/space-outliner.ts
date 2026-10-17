@@ -73,7 +73,9 @@ export interface OutlinerInput {
   /** the type's label (US, USV/s…) */
   typeLabel: (type: string) => string;
   sketches: Array<{ id: string; name: string; shape: string }>;
-  texts: { rms: string; proxies: string; sketches: string; tilesets?: string };
+  texts: { rms: string; proxies: string; sketches: string; tilesets?: string;
+    /** MICRO-PROVA-DEV47 p.3b · the chip of a container's or an epoch's levels («LOD ▾») */
+    lod?: string };
 }
 
 /** The tree, pure. Types in the order the datamodel's list gives them, the
@@ -105,7 +107,7 @@ export function buildOutlinerTree(input: OutlinerInput): OutlinerRow[] {
       }
       const groupRows: OutlinerRow[] = [...groups.entries()].sort((a, b) => coll.compare(a[1].name, b[1].name)).map(([gid, g]) => ({
         key: `rmgroup:${ep.id}:${gid}`, id: gid, kind: "rmgroup" as const, name: g.doc ? `${g.name} · ${g.doc}` : g.name,
-        glyph: "RepresentationModelNodeGroup", children: g.rows }));
+        glyph: "RepresentationModelNodeGroup", children: g.rows, ...(input.texts.lod ? { chip: input.texts.lod } : {}) }));
       children.push({
         key: `rms:${ep.id}`, id: ep.id, kind: "rms", name: input.texts.rms, glyph: "representation_model",
         children: [...groupRows, ...loose],
@@ -123,7 +125,8 @@ export function buildOutlinerTree(input: OutlinerInput): OutlinerRow[] {
         })),
       });
     }
-    out.push({ key: `epoch:${ep.id}`, id: ep.id, kind: "epoch", name: ep.name, glyph: "EpochNode", current: ep.current, children });
+    out.push({ key: `epoch:${ep.id}`, id: ep.id, kind: "epoch", name: ep.name, glyph: "EpochNode", current: ep.current, children,
+      ...(input.texts.lod && rms.length ? { chip: input.texts.lod } : {}) });
   }
   if (input.sketches.length)
     out.push({ key: "sketches", id: "", kind: "sketches", name: input.texts.sketches, glyphText: "◇",
@@ -287,6 +290,9 @@ export interface OutlinerActions {
   /** p.12 · (the space-outliner draws «sostituito da» from the view's `substituted`) */
   /** p.7 · a right click on a row (a model, a container) */
   rowMenu?(row: OutlinerRow, x: number, y: number): void;
+  /** MICRO-PROVA-DEV47 p.3b · the level's chip, a small menu: a model's levels,
+   *  or (a container's, an epoch's) the same for all of its models */
+  chipMenu?(row: OutlinerRow, x: number, y: number): void;
   /** p.6 · a press on a sketch's row: the caller follows the pointer (a drag onto a unit) */
   dragSketch?(sketchId: string, e: PointerEvent): void;
   /** a shape of the palette: clicked (at the cursor), or dragged and dropped at a page point */
@@ -412,7 +418,20 @@ export function renderOutliner(el: HTMLElement, v: OutlinerView, act: OutlinerAc
     name.textContent = r.name;
     name.title = r.title ?? r.name;
     line.append(tw, g, name);
-    if (r.chip) { const c = document.createElement("span"); c.className = "sol-chip"; c.textContent = r.chip; line.appendChild(c); }
+    if (r.chip) {
+      // MICRO-PROVA-DEV47 p.3b · on a model, a container, an epoch: a small menu of the levels
+      const menu = !!act.chipMenu && (r.kind === "rm" || r.kind === "rmgroup" || r.kind === "epoch");
+      const c = document.createElement(menu ? "button" : "span");
+      c.className = `sol-chip${menu ? " sol-lod" : ""}`;
+      c.textContent = menu ? `${r.chip} ▾` : r.chip;
+      if (menu) {
+        (c as HTMLButtonElement).type = "button";
+        c.dataset.sol = "lod";
+        c.tabIndex = -1;
+        c.addEventListener("click", (e) => { e.stopPropagation(); const b = c.getBoundingClientRect(); act.chipMenu!(r, b.left, b.bottom + 2); });
+      }
+      line.appendChild(c);
+    }
     if (r.uses?.length || r.level) {
       // p.10 · a version's level (from the chain) and its uses, small
       const u = document.createElement("span");

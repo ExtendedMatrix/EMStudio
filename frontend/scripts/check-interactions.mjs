@@ -1943,6 +1943,101 @@ test("S3.pickRm", "Spazio · MICRO-PROVA-DEV47 p.2 · un clic semplice seleziona
     menu: (out.menu ?? []).includes("rmg-new"), errors: !errors.length };
   return { pass: Object.values(conds).every(Boolean), detail: { conds, f, out, errors } };
 });
+/** MICRO-PROVA-DEV47 · Templu Mare (a copy: TEMPLU=<em.json>, the bridge's fs-root over it) in the Space, an epoch by its name */
+async function templuSpace(epochPrefix, { use = "realtime", w = 1600, h = 1000 } = {}) {
+  const { p, ctx, errors } = await open({ doc: null, w, h, init: { "emstudio.space3d": JSON.stringify({ "-": { deviceUse: use } }) } });
+  await p.evaluate(([d, path]) => window.__EM_DRAG__.openAt(d, path), [JSON.parse(readFileSync(process.env.TEMPLU, "utf8")), process.env.TEMPLU]);
+  await p.waitForFunction(() => (window.__EM_SCENE__?.()?.nodes?.length ?? 0) > 50, null, { timeout: 60000 });
+  await workspace(p, "space");
+  await p.waitForFunction(() => document.querySelector(".scn-host")?.dataset.ready === "1", null, { timeout: 60000 });
+  await templuEpoch(p, epochPrefix);
+  return { p, ctx, errors };
+}
+async function templuEpoch(p, epochPrefix) {
+  const ep = await p.evaluate((pre) => [...document.querySelectorAll(".scn-seg button[data-epoch]")].find((b) => b.textContent.trim().startsWith(pre))?.dataset.epoch, epochPrefix);
+  if (ep) await p.click(`.scn-seg button[data-epoch="${ep}"]`);
+  for (let i = 0; i < 400; i++) {
+    const st = await p.evaluate(() => { const s = document.querySelector(".scn-host")?.__space?.() ?? []; return { pending: s.filter((x) => x.as === "pending").length, gates: document.querySelectorAll("[data-gate=load]").length }; });
+    if (st.gates) { await p.click("[data-gate=load]"); continue; }
+    if (!st.pending) break;
+    await p.waitForTimeout(250);
+  }
+  await p.waitForTimeout(600);
+  return ep;
+}
+const olRows = (p) => p.evaluate(() => [...document.querySelectorAll(".scn-outliner .sol-row.sol-rm, .scn-outliner .sol-row.sol-tileset")]
+  .map((r) => ({ key: r.dataset.key, name: r.querySelector(".sol-name")?.textContent, chip: r.querySelector(".sol-chip")?.textContent ?? null })));
+const menuItems = (p) => p.evaluate(() => [...document.querySelectorAll(".scn-menu button")].map((b) => ({ act: b.dataset.s3, label: b.textContent, disabled: b.disabled })));
+if (process.env.TEMPLU) test("S3.lodTM", "Spazio · MICRO-PROVA-DEV47 p.3 · Templu Mare v3.2 nel desktop (uso realtime): il rilievo apre il LOD2 OBJ dell'autore (obj + mtl + texture dai has_file), che coincide al millimetro con la copia glb della ricetta; la ricostruzione dice «intero», mai «LOD1»; l'etichetta del livello nell'Outliner è un menu coi livelli (OBJ dell'autore, derivate con l'origine, il master .blend che dice perché non si apre); il LOD0 si carica e si misura", async () => {
+  const { p, ctx, errors } = await templuSpace("XX");
+  const xx = await olRows(p);
+  const podio = xx.find((r) => /PODIO/.test(r.name ?? ""));
+  const id = podio?.key?.slice(3);
+  const sp = () => p.evaluate((id) => document.querySelector(".scn-host").__space().find((x) => x.id === id), id);
+  const box = () => p.evaluate((id) => document.querySelector(".scn-host").__spaceBoxOf(id), id);
+  const d2 = await sp(), b2 = await box();
+  await p.click(`.scn-outliner .sol-row[data-key="rm:${id}"] [data-sol="lod"]`); await p.waitForTimeout(300);
+  const menu = await menuItems(p);
+  await p.screenshot({ path: `${process.env.SHOTS ?? "."}/s3-lod-menu-outliner.png` }).catch(() => {});
+  const copy = menu.find((m) => /derivata da LOD2 · copia/.test(m.label));
+  if (copy) { await p.click(`.scn-menu button[data-s3="${copy.act}"]`); await templuEpoch(p, "XX"); }
+  const b3 = await box(); const chip3 = (await olRows(p)).find((r) => r.key === podio.key)?.chip;
+  await p.click(`.scn-outliner .sol-row[data-key="rm:${id}"] [data-sol="lod"]`); await p.waitForTimeout(300);
+  const l0 = (await menuItems(p)).find((m) => /^. LOD0 · OBJ/.test(m.label));
+  const t0 = Date.now();
+  if (l0) await p.click(`.scn-menu button[data-s3="${l0.act}"]`);
+  await p.waitForFunction((id) => /LOD0\.obj$/.test(document.querySelector(".scn-host").__space().find((x) => x.id === id)?.url ?? "")
+    && document.querySelector(".scn-host").__space().find((x) => x.id === id)?.as === "mesh", id, { timeout: 120000 }).catch(() => {});
+  const ms0 = Date.now() - t0;
+  const b0 = await box(); const d0 = await sp();
+  await templuEpoch(p, "II");
+  const ii = await olRows(p);
+  await ctx.close();
+  const near = (a, b, tol) => !!a && !!b && a.every((v, i) => Math.abs(v - b[i]) <= tol);
+  const conds = {
+    podioLOD2: /^LOD2 · uso/.test(podio?.chip ?? "") && /OB_PODIO_LOD2\.obj$/.test(d2?.url ?? "") && d2?.as === "mesh",
+    allSurveyLOD2: xx.filter((r) => /SM_OB_/.test(r.name ?? "")).every((r) => /^LOD2 · uso/.test(r.chip ?? "")),
+    tilesetSaysTileset: xx.filter((r) => /tileset/i.test(r.name ?? "")).every((r) => /^tileset/.test(r.chip ?? "")),
+    menu: ["LOD0 · OBJ", "LOD1 · OBJ", "LOD2 · OBJ", "derivata da LOD2 · copia · glb", "derivata da LOD2 · 50 %"].every((w) => menu.some((m) => m.label.includes(w)))
+      && menu.some((m) => m.disabled && /master · \.blend.*aprilo in Blender/.test(m.label)) && menu.some((m) => m.act === "ver-auto") && menu.some((m) => m.act === "ver-use"),
+    copyCoincides: near(b2, b3, 0.001) && /^derivata · fisso/.test(chip3 ?? ""),
+    lod0: /LOD0\.obj$/.test(d0?.url ?? "") && near(b0, b2, 0.0015),
+    reconstructionWhole: ii.length > 50 && ii.every((r) => /^intero · uso/.test(r.chip ?? "")),
+    errors: !errors.length,
+  };
+  return { pass: Object.values(conds).every(Boolean), detail: { conds, podio, b2, b3, b0, ms0, chip3, menu: menu.map((m) => m.label), iiChips: [...new Set(ii.map((r) => r.chip))], errors } };
+});
+if (process.env.TEMPLU) test("S3.lodTMpanel", "Spazio · MICRO-PROVA-DEV47 p.3b · il pannello N «Livello di dettaglio» per l'attivo, la selezione e l'epoca, con le parole di Cesium (Manuale / Per uso / Automatico); sull'epoca «Fisso: LOD0» per 11 modelli (1 GB) chiede prima, Annulla (Esc) non cambia nulla", async () => {
+  const { p, ctx, errors } = await templuSpace("XX");
+  const xx = await olRows(p);
+  const podio = xx.find((r) => /PODIO/.test(r.name ?? ""));
+  await p.click(`.scn-outliner .sol-row[data-key="${podio.key}"] .sol-name`); await p.waitForTimeout(400);
+  if (!await p.$(".scn-npanel:not(.hidden) [data-np=lod], [data-np=lod]:visible")) { await p.click(".scn-ntab").catch(() => {}); await p.waitForTimeout(400); }
+  const panel = () => p.evaluate(() => { const s = document.querySelector('[data-np="lod"]'); return s && { scope: [...s.querySelectorAll('[data-np="lod-scope"] button')].map((b) => `${b.dataset.v}:${b.getAttribute("aria-pressed")}`),
+    mode: [...s.querySelectorAll('[data-np="lod-mode"] button')].map((b) => `${b.textContent}:${b.getAttribute("aria-pressed")}`),
+    level: [...s.querySelectorAll('[data-np="lod-level"] option')].map((o) => o.textContent), drawn: s.querySelector('[data-np="lod-drawn"]')?.textContent }; });
+  const active = await panel();
+  await p.screenshot({ path: `${process.env.SHOTS ?? "."}/s3-lod-pannello-n.png` }).catch(() => {});
+  await p.click('[data-np="lod-scope"] button[data-v="epoch"]'); await p.waitForTimeout(300);
+  await p.click('[data-np="lod-mode"] button[data-v="manual"]'); await p.waitForTimeout(400);
+  const epoch = await panel();
+  const opts = await p.evaluate(() => [...document.querySelectorAll('[data-np="lod-level"] option')].map((o) => ({ v: o.value, t: o.textContent })));
+  const l0 = opts.find((o) => /LOD0/.test(o.t));
+  if (l0) await p.selectOption('[data-np="lod-level"]', l0.v);
+  await p.waitForTimeout(300);
+  const ask = await p.evaluate(() => document.querySelector(".ask-modal .modal-body")?.textContent ?? null);
+  await p.keyboard.press("Escape"); await p.waitForTimeout(300);
+  const afterCancel = await olRows(p);
+  await ctx.close();
+  const conds = {
+    active: !!active && active.scope[0] === "active:true" && active.mode.join() === "Manuale:false,Per uso:true,Automatico:false" && active.level.some((x) => /LOD2 · OBJ/.test(x)) && /LOD2 · OBJ.*uso/.test(active.drawn ?? ""),
+    epoch: !!epoch && epoch.scope[2] === "epoch:true" && opts.some((o) => /Fisso: LOD0 \(11\)/.test(o.t)),
+    asked: /11 modelli pesa 1\.\d\d GB/.test(ask ?? ""),
+    cancelKeeps: afterCancel.filter((r) => /SM_OB_/.test(r.name ?? "")).every((r) => /^LOD2 · fisso/.test(r.chip ?? "")),
+    errors: !errors.length,
+  };
+  return { pass: Object.values(conds).every(Boolean), detail: { conds, active, epoch, opts, ask, chips: [...new Set(afterCancel.map((r) => r.chip))], errors } };
+});
 test("S3.files", "Spazio · un file solo referenziato è un contorno con l'etichetta; uno dichiarato e assente, l'etichetta; il riepilogo li conta", async () => {
   const { p, ctx, errors } = await open({ doc: "spazio", ws: "space" });
   await p.waitForFunction(() => document.querySelector(".scn-host")?.dataset.ready === "1", null, { timeout: 20000 });
