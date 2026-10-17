@@ -58,7 +58,7 @@ import {
   type SpaceKeyAction, type V3,
 } from "./space-nav";
 import { medianPoint, pickUnder, type LastPick } from "./space-selection";
-import { pickByDistance, versionError, type FlowVersion } from "./lod-flow";
+import { bigTurn, pickByDistance, screenShare, SSE_PX, versionError, type FlowVersion } from "./lod-flow";
 import { buildShapeGeometry, listSketches, shapeById, updateSketch, type Sketch } from "./shapes3d";
 import { fingersOf, trackpadClassifier } from "./wheel-kind";
 
@@ -501,6 +501,24 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
         const b = new THREE.Box3().setFromObject(root);
         opts.onMeasured(url, { tris, verts, box: b.isEmpty() ? null : [[b.min.x, b.min.y, b.min.z], [b.max.x, b.max.y, b.max.z]] });
       };
+      /** …and a big version that leaves the flow leaves the memory: its cached
+       *  file is forgotten, its geometries and textures given back */
+      const evict = (key: string) => {
+        const p = cache.get(key);
+        if (!p) return;
+        cache.delete(key);
+        void p.then((x) => {
+          if ("fail" in x) return;
+          x.root.traverse((o: any) => {
+            o.geometry?.dispose?.();
+            for (const m of Array.isArray(o.material) ? o.material : o.material ? [o.material] : []) {
+              for (const v of Object.values(m)) if ((v as any)?.isTexture) (v as any).dispose();
+              m.dispose?.();
+            }
+          });
+        });
+      };
+      (probe as Record<string, unknown>).__spaceCacheKeys = () => [...cache.keys()].map((k) => k.replace(/^obj\u0000/, "obj:"));
       // MICRO-PROVA-DEV47 p.3a · an OBJ version (the survey's levels of the
       // author, RB/LOD0–2 of Templu Mare): the .obj, the .mtl it calls, the
       // textures the .mtl calls, every file through the set's addresses. The
@@ -552,6 +570,9 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
         }
         return p;
       };
+      /** a version of the flow: a glb, or an OBJ of the author's */
+      const loadV = (v: FlowVersion): Promise<Loaded> => (v.obj ? loadObj(v.url, v.obj.modifier) : load(v.url));
+      const cacheKeyOf = (v: FlowVersion): string => (v.obj ? `obj\u0000${v.url}` : v.url);
       const failed = (item: SceneItem, why: FetchFailure): SceneItem => ({ ...item, state: why });
       let framed = false;
       let generation = 0;
@@ -1356,7 +1377,7 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
             pending.push((async () => {
               const prev = flowState.get(key)?.current;
               const v = item.flow!.find((x) => x.id === prev) ?? item.flow!.find((x) => x.id === item.flowStart) ?? item.flow![item.flow!.length - 1];
-              const got = await load(v.url);
+              const got = await loadV(v);
               if (gen !== generation || disposed) return;
               if ("fail" in got) {
                 drawn.set(key, { item: failed(item, got.fail), as: "label" });
@@ -1373,6 +1394,8 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
               drawn.set(key, { item, as: "mesh", url: v.url });
               flowState.set(key, { item, current: v.id, gen });
               flowBytes.set(v.url, v.bytes ?? 0);
+              // MICRO-PROVA-DEV48 p.3 · the label says it from the first drawing («auto · derivata lod4»)
+              opts.onVersionDrawn?.(item.id, v.id);
             })());
             continue;
           }
@@ -1701,7 +1724,10 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
       probe.__spaceOverlays = () => Object.fromEntries((["s3_labels_rm", "s3_labels_proxy", "s3_labels_sketch", "s3_proxies", "s3_proxy_wire", "s3_rm", "s3_tiles",
         "s3_grid", "s3_axis_x", "s3_axis_y", "s3_axis_z", "s3_navgizmo", "s3_epoch_box", "s3_sel_outline", "s3_gizmo", "s3_cursor", "s3_sketches"] as OverlayKey[]).map((k) => [k, ov(k)]));
       // ── MICRO-SPAZIO-3D-3 p.10 · the flow of LOD ─────────────────────────
-      const flowState = new Map<string, { item: SceneItem; current: string; gen: number; asking?: string; dist?: number; want?: string | null }>();
+      const flowState = new Map<string, { item: SceneItem; current: string; gen: number; asking?: string; dist?: number; want?: string | null; share?: number }>();
+      /** whose turn a big version is, and who holds one (the probe's) */
+      let bigNow: { turn: string | null; holds: string[] } = { turn: null, holds: [] };
+      (probe as Record<string, unknown>).__spaceBig = () => ({ ...bigNow });
       /** the bytes of each version file loaded for the flow (the memory's count) */
       const flowBytes = new Map<string, number>();
       const flowStrip = document.createElement("div");
@@ -1727,9 +1753,12 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
         tag(obj, st.item);
         content.add(obj);
         roots.set(key, obj);
+        const was = st.item.flow?.find((x) => x.id === st.current);
         st.current = v.id;
         const d = drawn.get(key);
         if (d) drawn.set(key, { ...d, url: v.url });
+        // MICRO-PROVA-DEV48 p.3 · a big version given up leaves the memory
+        if (was?.big && was.id !== v.id) { evict(cacheKeyOf(was)); flowBytes.delete(was.url); }
         opts.onVersionDrawn?.(st.item.id, v.id);
       };
       // ── MICRO-SPAZIO-3D-3 p.12 · a container or its tileset, by the distance ──
@@ -1765,6 +1794,8 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
         if (!flowState.size) { flowStrip.classList.add("hidden"); return; }
         const H = Math.max(1, renderer.domElement.clientHeight);
         const camPos = camera.position;
+        // the distance of each model, and the share of the screen it fills
+        const seen: Array<{ key: string; st: typeof flowState extends Map<string, infer V> ? V : never; dist: number; share: number }> = [];
         for (const [key, st] of flowState) {
           if (st.gen !== generation || !st.item.flow?.length) continue;
           const obj = roots.get(key);
@@ -1778,35 +1809,67 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
             const e = versionError({ primitives: { triangles: v.tris } }, { x: size.x, y: size.y, z: size.z });
             if (e.err != null) { v.err = e.err; v.errFrom = e.from; }
           }
-          const { want, preload } = pickByDistance(st.item.flow, dist, FOV, H, st.current);
-          st.dist = dist; st.want = want;
-          if (preload) { const pv = st.item.flow.find((x) => x.id === preload); if (pv && !flowBytes.has(pv.url) && flowUsed() + (pv.bytes ?? 0) <= flowBudget()) { flowBytes.set(pv.url, pv.bytes ?? 0); void load(pv.url); } }
+          const sph = box.getBoundingSphere(new THREE.Sphere());
+          const share = isOrtho ? (2 * sph.radius) / Math.max(1e-6, 2 * orthoHalf(camState(), FOV)) : screenShare(sph.radius, camPos.distanceTo(sph.center), FOV);
+          seen.push({ key, st, dist, share });
+        }
+        // MICRO-PROVA-DEV48 p.3 · a big version: one model at a time, the one
+        // that fills more of the screen, and only once nobody else holds one
+        const asks = seen.filter(({ st, dist }) => {
+          const w = pickByDistance(st.item.flow!, dist, FOV, H, st.current).want;
+          return !!st.item.flow!.find((x) => x.id === w)?.big;
+        });
+        const turn = bigTurn(asks.map(({ key, share, dist }) => ({ key, share, dist })));
+        const holds = seen.filter(({ st }) => !!st.item.flow!.find((x) => x.id === st.current || x.id === st.asking)?.big).map((x) => x.key);
+        bigNow = { turn, holds };
+        for (const { key, st, dist, share } of seen) {
+          const allowBig = key === turn && holds.every((k) => k === key);
+          const { want, preload } = pickByDistance(st.item.flow!, dist, FOV, H, st.current, SSE_PX, allowBig);
+          st.dist = dist; st.want = want; st.share = share;
+          if (preload) { const pv = st.item.flow!.find((x) => x.id === preload); if (pv && !flowBytes.has(pv.url) && flowUsed() + (pv.bytes ?? 0) <= flowBudget()) { flowBytes.set(pv.url, pv.bytes ?? 0); void loadV(pv); } }
           if (!want || want === st.current || st.asking === want) continue;
-          const v = st.item.flow.find((x) => x.id === want);
+          const v = st.item.flow!.find((x) => x.id === want);
           if (!v) continue;
-          const cur = st.item.flow.find((x) => x.id === st.current);
+          const cur = st.item.flow!.find((x) => x.id === st.current);
           // the memory: a finer version only while the flow stays under the ceiling
           if (cur && v.ord < cur.ord && flowUsed() - (cur.bytes ?? 0) + (v.bytes ?? 0) > flowBudget()) continue;
           st.asking = want;
           flowBytes.set(v.url, v.bytes ?? 0);
-          void load(v.url).then((got) => {
+          void loadV(v).then((got) => {
             if (st.asking === want) st.asking = undefined;
-            if (disposed || "fail" in got) return;
-            const now = pickByDistance(st.item.flow!, dist, FOV, H, st.current).want;
+            if (disposed || "fail" in got) { if (v.big) evict(cacheKeyOf(v)); return; }
+            // the choice again, with this model's turn as it is now (a model
+            // without the turn asks its finest light version, and keeps it)
+            const still = key === bigNow.turn && bigNow.holds.every((k) => k === key);
+            const now = pickByDistance(st.item.flow!, st.dist ?? dist, FOV, H, st.current, SSE_PX, still).want;
             if (now === want) swapVersion(key, v, got.root);
+            // a big version that came too late (the camera went away): not kept
+            else if (v.big && flowState.get(key)?.current !== v.id) { evict(cacheKeyOf(v)); flowBytes.delete(v.url); }
           });
         }
-        // the line of the strip: levels · MB, as the tileset's
-        const lv: number[] = [];
-        for (const [, st] of flowState) { const v = st.item.flow?.find((x) => x.id === st.current); if (v) lv.push(v.ord); }
-        flowStrip.classList.toggle("hidden", !lv.length);
-        if (lv.length) {
+        // the line of the strip: what is drawn, by its name (MICRO-PROVA-DEV48
+        // p.3: «LOD 3–4» were the chain's numbers, not the levels), and the MB
+        const by = new Map<string, number>();
+        let any = false;
+        const order: Array<[string, number]> = [];
+        for (const [, st] of flowState) {
+          const v = st.item.flow?.find((x) => x.id === st.current);
+          if (!v) continue;
+          any = true;
+          const nm = v.name ?? `LOD ${v.ord}`;
+          if (!by.has(nm)) order.push([nm, v.ord]);
+          by.set(nm, (by.get(nm) ?? 0) + 1);
+        }
+        flowStrip.classList.toggle("hidden", !any);
+        if (any) {
           const mb = (flowUsed() / 1048576).toFixed(1);
-          const txt = `${opts.flowTitle ?? "Versions by distance"} · ${flowState.size} · LOD ${Math.min(...lv)}–${Math.max(...lv)} · ${mb} MB`;
+          const parts = order.sort((a, b) => a[1] - b[1]).map(([nm]) => (by.size > 1 || flowState.size > 1 ? `${nm} ${by.get(nm)}` : nm));
+          const txt = `${opts.flowTitle ?? "Versions by distance"} · ${flowState.size} · ${parts.join(" · ")} · ${mb} MB`;
           if (flowStrip.textContent !== txt) flowStrip.textContent = txt;
         }
       };
       (probe as Record<string, unknown>).__spaceFlow = () => [...flowState].map(([k, st]) => ({ key: k, current: st.current,
+        name: st.item.flow?.find((x) => x.id === st.current)?.name ?? null, share: st.share ?? null,
         url: st.item.flow?.find((x) => x.id === st.current)?.url, asking: st.asking ?? null, dist: st.dist ?? null, want: st.want ?? null,
         errs: st.item.flow?.map((v) => [v.ord, v.err, v.errFrom]) }));
       let raf = 0;

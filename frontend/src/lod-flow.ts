@@ -25,17 +25,141 @@
 
 export interface FlowVersion {
   id: string;
-  /** the fetchable address (a glb) */
+  /** the fetchable address (a glb, or an OBJ's entry) */
   url: string;
-  /** the level computed from the chain (lod0 = 0, the finest drawn) */
+  /** the place in the chain, from the finest (0) to the coarsest */
   ord: number;
-  /** the error in metres, and where it came from */
+  /** the error in metres, and where it came from (MICRO-PROVA-DEV48 p.3: the
+   *  triangles counted by the Space, «measured»; those a recipe's version says
+   *  of the level it copied, «recipe»; estimated from the weight, «weight») */
   err: number | null;
-  errFrom: "measure" | "tris_per_m2" | "triangles" | "none";
+  errFrom: "measure" | "tris_per_m2" | "triangles" | "measured" | "recipe" | "weight" | "none";
   bytes: number | null;
   uses: string[];
   /** the triangles, for an error estimated from the model's box (the scene knows the box) */
   tris?: number | null;
+  /** MICRO-PROVA-DEV48 p.3 · what the label says it is («LOD0», «derivata lod4», «intero») */
+  name?: string;
+  /** an OBJ (the author's levels): read with the OBJ loader, its other files through `modifier` */
+  obj?: { modifier?: (u: string) => string };
+  /** a BIG version (the author's finest, or over 150 MB): see `BIG_SCREEN` */
+  big?: boolean;
+}
+
+/**
+ * MICRO-PROVA-DEV48 p.3 · the rule of a big version in the automatic mode
+ * (E.D., 17 Oct 2026: «LOD0 non arriva mai»), written:
+ *
+ *   · it is never asked before (no question, no preload): it is loaded only
+ *     when the distance asks for it AND the model fills the screen — its
+ *     bounding sphere at least `BIG_SCREEN` of the view's height (or the
+ *     camera inside it);
+ *   · ONE at a time: of the models that ask, the one that fills more of the
+ *     screen (then the nearer); another that holds one goes back to its finer
+ *     light version first, and the big one it held leaves the memory before the
+ *     next is loaded;
+ *   · going away, it goes back to a light version and leaves the memory.
+ */
+export const BIG_SCREEN = 0.6;
+
+/** The share of the view's height a sphere of `radius` at `dist` (from its
+ *  centre) fills; 2 when the camera is inside it. */
+export function screenShare(radius: number, dist: number, fovDeg: number): number {
+  if (dist <= radius) return 2;
+  return (2 * Math.atan(radius / dist)) / ((fovDeg * Math.PI) / 180);
+}
+
+/** Which of the models asking for a big version may have it now: the one that
+ *  fills more of the screen (then the nearer), among those over BIG_SCREEN. */
+export function bigTurn(asks: ReadonlyArray<{ key: string; share: number; dist: number }>): string | null {
+  const ok = asks.filter((a) => a.share >= BIG_SCREEN).sort((a, b) => b.share - a.share || a.dist - b.dist);
+  return ok[0]?.key ?? null;
+}
+
+/** One version as the chain is built from the graph and the cache. */
+export interface ChainIn {
+  id: string;
+  url: string;
+  /** the order of `lod-levels.ts` (the author's levels by the chain, each
+   *  derived version right after the level it comes from) */
+  rank: number;
+  name: string;
+  /** the version's data (`geometric_error_m`, `tris_per_m2`, `primitives`) */
+  data: Record<string, unknown>;
+  /** the triangles the Space counted (the measures' cache), when the data has none */
+  measured?: number | null;
+  /** a recipe's version: the level it was made from, and the share it kept */
+  base?: string | null;
+  ratio?: number | null;
+  bytes?: number | null;
+  format?: string;
+  uses?: string[];
+  obj?: { modifier?: (u: string) => string };
+  big?: boolean;
+}
+
+/**
+ * MICRO-PROVA-DEV48 p.3 · the chain of the automatic mode: EVERY level the
+ * Space opens — for a survey the recipe's lod4 and lod3, then the author's
+ * LOD2, LOD1, LOD0; for a reconstruction the derived one and the whole —
+ * finest first, with an error each, from ONE scale so they can be compared:
+ *
+ *   · the triangles: the data's, else those the Space counted (the cache,
+ *     «measured»), else those a recipe's version says of its base (a copy
+ *     with `ratio` r of a level with T triangles has r·T: T = its own / r),
+ *     else estimated from the weight beside a level of the same form whose
+ *     triangles are known;
+ *   · the error: `geometric_error_m` when declared; else √(area / triangles),
+ *     the side of a mean triangle, with the model's area from the versions
+ *     that declare `tris_per_m2` (area = triangles / tris_per_m2); without an
+ *     area the triangles go to the scene, which estimates from the box (the
+ *     same scale for all); `tris_per_m2` alone, √(1 / tris_per_m2);
+ *   · finer is never coarser: along the chain an error is at least the one
+ *     before it (two versions of one geometry — LOD2 and its glb copy — have
+ *     the same, and the distance takes the lighter, later in the chain).
+ */
+export function buildChain(vs: readonly ChainIn[]): FlowVersion[] {
+  const num = (v: unknown) => (typeof v === "number" ? v : typeof v === "string" && v.trim() ? Number(v) : NaN);
+  const sorted = [...vs].sort((a, b) => a.rank - b.rank);
+  const tris = new Map<string, { n: number; from: FlowVersion["errFrom"] }>();
+  for (const v of sorted) {
+    const prim = (v.data.primitives && typeof v.data.primitives === "object" ? v.data.primitives : {}) as Record<string, unknown>;
+    const t = num(prim.triangles ?? prim.faces);
+    if (Number.isFinite(t) && t > 0) tris.set(v.id, { n: t, from: "triangles" });
+    else if (v.measured && v.measured > 0) tris.set(v.id, { n: v.measured, from: "measured" });
+  }
+  // a recipe's version says the triangles of the level it was made from
+  for (let pass = 0; pass < 4; pass++) for (const v of sorted) {
+    const own = tris.get(v.id);
+    if (!own || !v.base || !(v.ratio && v.ratio > 0) || tris.has(v.base) || !sorted.some((x) => x.id === v.base)) continue;
+    tris.set(v.base, { n: Math.round(own.n / v.ratio), from: "recipe" });
+  }
+  // the weight, beside the nearest level of the same form whose triangles are known
+  for (const v of sorted) {
+    if (tris.has(v.id) || !(v.bytes && v.bytes > 0)) continue;
+    const ref = sorted.filter((w) => w.format === v.format && tris.has(w.id) && w.bytes && w.bytes > 0 && tris.get(w.id)!.from !== "weight")
+      .sort((a, b) => Math.abs(a.rank - v.rank) - Math.abs(b.rank - v.rank))[0];
+    if (ref) tris.set(v.id, { n: Math.round(tris.get(ref.id)!.n * v.bytes / ref.bytes!), from: "weight" });
+  }
+  // the model's area, from the versions that declare tris_per_m2 and their triangles
+  const areas = sorted.map((v) => { const t = tris.get(v.id); const d = num(v.data.tris_per_m2); return t && t.from === "triangles" && d > 0 ? t.n / d : NaN; })
+    .filter((a) => Number.isFinite(a) && a > 0).sort((a, b) => a - b);
+  const area = areas.length ? areas[Math.floor(areas.length / 2)] : null;
+  const out: FlowVersion[] = sorted.map((v, i) => {
+    const g = num(v.data.geometric_error_m);
+    const tpm = num(v.data.tris_per_m2);
+    const t = tris.get(v.id);
+    let err: number | null = null;
+    let errFrom: FlowVersion["errFrom"] = "none";
+    if (Number.isFinite(g) && g > 0) { err = g; errFrom = "measure"; }
+    else if (area && t) { err = Math.sqrt(area / t.n); errFrom = t.from; }
+    else if (Number.isFinite(tpm) && tpm > 0) { err = Math.sqrt(1 / tpm); errFrom = "tris_per_m2"; }
+    return { id: v.id, url: v.url, ord: i, err, errFrom, bytes: v.bytes ?? null, uses: v.uses ?? [], tris: t?.n ?? null, name: v.name,
+      ...(v.obj ? { obj: v.obj } : {}), ...(v.big ? { big: true } : {}) };
+  });
+  let prev = 0;
+  for (const v of out) if (v.err != null) { if (v.err < prev) v.err = prev; prev = v.err; }
+  return out;
 }
 
 /** Cesium's maximum screen-space error, in pixels. */
@@ -72,8 +196,10 @@ export function screenError(err: number, dist: number, fovDeg: number, heightPx:
  * is there when the camera arrives.
  */
 export function pickByDistance(versions: readonly FlowVersion[], dist: number, fovDeg: number, heightPx: number,
-                               current: string | null = null, threshold = SSE_PX): { want: string | null; preload: string | null } {
-  const ok = versions.filter((v) => v.err != null && v.url);
+                               current: string | null = null, threshold = SSE_PX, allowBig = true): { want: string | null; preload: string | null } {
+  // MICRO-PROVA-DEV48 p.3 · a big version only when it is this model's turn (`bigTurn`)
+  // (a model that holds one and has not the turn goes back to its finest light version)
+  const ok = versions.filter((v) => v.err != null && v.url && (allowBig || !v.big));
   if (!ok.length) return { want: null, preload: null };
   const fineToCoarse = [...ok].sort((a, b) => a.ord - b.ord);
   const coarseToFine = [...fineToCoarse].reverse();
@@ -83,7 +209,8 @@ export function pickByDistance(versions: readonly FlowVersion[], dist: number, f
   // hysteresis: a finer current stays until the coarser is well under the threshold
   if (cur && cur.ord < want.ord && sse(want) > threshold * 0.8) want = cur;
   const finer = fineToCoarse.filter((v) => v.ord < want.ord).pop() ?? null;
-  const preload = finer && sse(want) > threshold * 0.6 ? finer.id : null;
+  // a big version is never preloaded: it comes when it is asked, and only then
+  const preload = finer && !finer.big && sse(want) > threshold * 0.6 ? finer.id : null;
   return { want: want.id, preload };
 }
 

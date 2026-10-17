@@ -2231,6 +2231,47 @@ if (process.env.TEMPLU) test("S3.showSelTM", "Spazio · MICRO-PROVA-DEV48 p.4 ·
     errors: !errors.filter((e) => !/Failed to load resource/.test(e)).length };
   return { pass: Object.values(conds).every(Boolean), detail: { conds, out, errors } };
 });
+if (process.env.TEMPLU) test("S3.lodAutoTM", "Spazio · MICRO-PROVA-DEV48 p.3 e p.5 · l'automatico per distanza usa anche i livelli dell'autore: XX sec tutto in «auto» (l'etichetta dice «auto · derivata lod4»); OB_PODIO isolato, la rotella verso di lui passa per lod3 e LOD1 fino a LOD0 disegnato («auto · LOD0», la striscia lo dice); allontanandosi torna a una derivata e LOD0 lascia la memoria; mai due LOD0; le misure dei file stanno nella cache locale (emstudio.measures, «misurato»), l'em.json non cambia", async () => {
+  const { p, ctx, errors } = await templuSpace("XX", { w: 1600, h: 1000 });
+  const doc0 = await p.evaluate(() => window.__EM_DRAG__.docJson());
+  const epKey = await p.evaluate(() => document.querySelector(".scn-outliner .sol-row.cur")?.dataset.key);
+  await p.click(`.scn-outliner .sol-row[data-key="${epKey}"] .sol-chip`); await p.waitForTimeout(300);
+  await p.click('.scn-menu button[data-s3="ver-auto"]'); await templuEpoch(p, "XX"); await p.waitForTimeout(1500);
+  const chip = (k) => p.evaluate((k) => document.querySelector(`.scn-outliner .sol-row[data-key="${k}"] .sol-chip`)?.textContent ?? "", k);
+  const podio = await p.evaluate(() => [...document.querySelectorAll(".scn-outliner .sol-row")].find((r) => /^rm:/.test(r.dataset.key) && /PODIO/.test(r.textContent))?.dataset.key);
+  const chip0 = await chip(podio);
+  await p.click(`.scn-outliner .sol-row[data-key="${podio}"] .sol-name`); await p.waitForTimeout(300);
+  await p.click('.scn-outliner [data-sol="isolate"]'); await p.waitForTimeout(1500);
+  await p.click(`.scn-outliner .sol-row[data-key="${podio}"] .sol-name`); await p.waitForTimeout(300);
+  await p.click('.scn-outliner [data-sol="frame"]'); await p.waitForTimeout(800);
+  const st = () => p.evaluate((k) => { const h = document.querySelector(".scn-host"); const f = h.__spaceFlow().find((x) => x.key === k);
+    return { name: f?.name ?? null, lod0: h.__spaceCacheKeys().filter((u) => /_LOD0\.obj/.test(u)).length }; }, podio);
+  const id = podio.slice(3);
+  const seen = []; let maxLod0 = 0; let at0 = null;
+  for (let i = 0; i < 60 && !at0; i++) {
+    const c = await p.evaluate((rid) => { const h = document.querySelector(".scn-host"); const b = h.__spaceBoxOf(rid); return b && h.__spaceProject([(b[0] + b[3]) / 2, b[4], (b[2] + b[5]) / 2]); }, id);
+    if (!c) break;
+    await p.mouse.move(c.x, c.y + 20); await p.mouse.wheel(0, -240); await p.waitForTimeout(500);
+    const s = await st(); maxLod0 = Math.max(maxLod0, s.lod0);
+    if (s.name && seen[seen.length - 1] !== s.name) seen.push(s.name);
+    if (s.name === "LOD0") at0 = { chip: await chip(podio), strip: await p.evaluate(() => document.querySelector(".scn-flow")?.textContent ?? "") };
+  }
+  await p.screenshot({ path: `${process.env.SHOTS ?? "."}/s3-podio-auto-lod0.png` }).catch(() => {});
+  let away = null;
+  for (let i = 0; i < 40 && !away; i++) { await p.mouse.wheel(0, 300); await p.waitForTimeout(400); const s = await st(); maxLod0 = Math.max(maxLod0, s.lod0); if (s.name && /derivata/.test(s.name)) away = s; }
+  await p.waitForTimeout(1000);
+  const after = await st();
+  const ms = await p.evaluate(() => JSON.parse(localStorage.getItem("emstudio.measures") ?? "{}"));
+  const doc1 = await p.evaluate(() => window.__EM_DRAG__.docJson());
+  await ctx.close();
+  const conds = { auto: /^auto · derivata lod4/.test(chip0),
+    chain: seen.includes("LOD1") && seen[seen.length - 1] === "LOD0" && !!at0,
+    label: /^auto · LOD0/.test(at0?.chip ?? "") && /LOD0/.test(at0?.strip ?? ""),
+    away: !!away && after.lod0 === 0, oneLod0: maxLod0 <= 1,
+    measures: Object.values(ms).some((m) => m.tris > 0 && /EMStudio/.test(m.by)), docSame: doc0 === doc1,
+    errors: !errors.filter((e) => !/Failed to load resource/.test(e)).length };
+  return { pass: Object.values(conds).every(Boolean), detail: { conds, chip0, seen, at0, away, after, maxLod0, measures: Object.keys(ms).length, errors } };
+});
 test("S3.assocConfirm", "Spazio · MICRO-PROVA-DEV47 p.5 · «Associa a un'unità»: gruppi che si chiudono col titolo e il conteggio a destra; ogni riga col tipo colorato, il nome, l'epoca, alta uguale; il triangolino apre descrizione, tipo, epoca, documento, rapporti, proxy; il passaggio accende l'unità nella Matrix; un clic sceglie e NON associa, il riepilogo «Associa la forma … a …» con Associa e Annulla; Esc annulla, Invio conferma; lo stesso per «Crea una nuova unità»", async () => {
   const { p, ctx, errors } = await assocScene("conferma");
   await addCube(p);

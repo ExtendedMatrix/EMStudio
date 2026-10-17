@@ -253,7 +253,7 @@ import { buildOutlinerTree, loadSpacePrefs, opensFor, renderOutliner, saveSpaceP
 import { patchProxyNodes, proxyPartsOf, proxyRelPath, unitBrief } from "./proxy-association";
 import { groupNodeIdFor, planMove, planNewGroup, planRemove, RM_GROUP_TYPE, type GroupPlan } from "./rm-groups";
 import { shownModelName } from "./rm-names";
-import { versionError, type FlowVersion, type VersionMode } from "./lod-flow";
+import { buildChain, type FlowVersion, type VersionMode } from "./lod-flow";
 import { fingerprint, getMeasure, putMeasure } from "./measure-cache";
 import { defaultLevel, isHeavy, levelShort, levelsOf, type Level } from "./lod-levels";
 import { oneLine } from "./one-line";
@@ -22460,14 +22460,10 @@ function rmShown(id: string, sp: Space | null = currentSpace()): { shown: string
   if (!rm) return null;
   const s = shownModelName(rm.name, (rm.versions?.length ?? 0) > 1);
   // the level of the version drawn, else the one the rule chose, else the name's
-  let drawn: string | null = null;
-  for (const h of sceneHandles.values()) {
-    const u = h.drawnUrl(`rm:${id}`);
-    const tail = (x: string) => decodeURIComponent(x.split(/[?#]/)[0]).split("/").pop() ?? "";
-    const v = u ? rm.versions?.find((x) => x.url && tail(x.url) === tail(u)) : undefined;
-    // MICRO-PROVA-DEV47 p.3 · the author's LOD, «intero», «derivata» — never the chain's lodN of a recipe's version
-    if (v) { drawn = v.master ? null : levelShortOf(rm, v.id); break; }
-  }
+  // MICRO-PROVA-DEV47 p.3 · the author's LOD, «intero», «derivata» — never the chain's lodN of a recipe's version
+  // (MICRO-PROVA-DEV48 p.3: by the file drawn, an OBJ's too — its set has no url of its own)
+  const dv = drawnVersionOf(rm);
+  const drawn: string | null = dv && !dv.master ? levelShortOf(rm, dv.id) : null;
   const planned = (rm.versions?.length ?? 0) > 1 ? rmVersionPlan(rm).versionId : undefined;
   const lvl = drawn ?? (planned ? levelShortOf(rm, planned) : null) ?? ((rm.versions?.length ?? 0) > 1 ? null : s.level);
   return { ...s, level: s.shown !== s.technical || lvl ? lvl : null };
@@ -23735,7 +23731,6 @@ function setVersionMode(rmIds: string[], mode: VersionMode, versionId?: string):
   setSpace3dPrefs({ ...p, versionModes: vm });
 }
 type RmVersion = NonNullable<SpaceRM["versions"]>[number];
-const lodOrd = (v: { lod: string | null }): number => { const m = /(\d+)/.exec(String(v.lod ?? "")); return m ? Number(m[1]) : -1; };
 /** MICRO-PROVA-DEV47 p.3a · where the Space reads an OBJ version: its entry (the
  *  .obj) and its other files (the .mtl, the textures) from the `has_file`
  *  edges — the Doc viewer's addresses (`docModelOf`): offline beside the
@@ -23823,18 +23818,37 @@ function levelWhyNot(_rm: SpaceRM, v: RmVersion): string {
   if (v.format === "obj") return t("lod.whyObjWait");
   return t("lod.whyFormat");
 }
-/** The flow of a model: its drawable versions, their errors (lod-flow's estimates).
- *  MICRO-PROVA-DEV47 p.3 · the OBJ sets stay out: they carry no measure the
- *  distance reads (no triangles, no tris_per_m2), and three's loader of the flow is the glTF one */
+/**
+ * The flow of a model: MICRO-PROVA-DEV48 p.3 · EVERY level the Space opens,
+ * the author's OBJ too (on dev.48 they stayed out: «LOD0 never comes», E.D.),
+ * in the order of `lod-levels.ts`, each with an error on one scale
+ * (`buildChain`): the data's triangles, else those the Space counted (the
+ * measures' cache, p.5), else those a recipe's copy says of its base, else
+ * the weight's estimate. The author's finest level is BIG (`BIG_SCREEN`).
+ */
 function rmFlow(rm: SpaceRM): FlowVersion[] {
-  return drawableVersions(rm).filter((v) => v.format !== "obj").map((v) => {
-    const d = (v.data ?? {}) as Record<string, unknown>;
-    const e = versionError(d, null);
-    const prim = (d.primitives && typeof d.primitives === "object" ? d.primitives : {}) as Record<string, unknown>;
-    return { id: v.id, url: v.fetch, ord: lodOrd(v), err: e.err, errFrom: e.from,
-      bytes: typeof d.size_bytes === "number" ? d.size_bytes : null, uses: v.uses ?? [],
-      tris: typeof prim.triangles === "number" ? prim.triangles : null };
-  });
+  const lv = rmLevels(rm);
+  const vs = drawableVersions(rm).filter((v) => v.format !== "tiles" && !v.master);
+  const authors = vs.filter((v) => lv.get(v.id)?.origin === "author");
+  const finest = authors.length > 1 ? authors.reduce((a, b) => ((lv.get(a.id)?.authorOrd ?? 99) <= (lv.get(b.id)?.authorOrd ?? 99) ? a : b)) : null;
+  return buildChain(vs.map((v) => {
+    const l = lv.get(v.id);
+    const fp = versionFingerprint(v);
+    flowUrlPrint.set(v.fetch, fp);
+    return { id: v.id, url: v.fetch, rank: l?.rank ?? 99, name: autoLevelName(rm, v), data: (v.data ?? {}) as Record<string, unknown>,
+      measured: v.tris ? null : getMeasure(fp)?.tris ?? null,
+      base: l?.origin === "recipe" && !l.whole ? l.base : null, ratio: l?.origin === "recipe" && !l.whole ? l.ratio : null,
+      bytes: v.bytes ?? null, format: v.format, uses: v.uses ?? [],
+      ...(v.format === "obj" ? { obj: { modifier: v.modifier } } : {}),
+      ...(v === finest || isHeavy(v) ? { big: true } : {}) };
+  }));
+}
+/** MICRO-PROVA-DEV48 p.3 · a level as the automatic mode names it: «LOD0», «intero»,
+ *  «derivata lod4» (a recipe's version with the chain's own number, to tell two apart) */
+function autoLevelName(rm: SpaceRM, v: RmVersion): string {
+  const l = rmLevels(rm).get(v.id);
+  const short = levelShortOf(rm, v.id);
+  return l?.origin === "recipe" && !l.whole && v.lod ? `${short} ${v.lod}` : short;
 }
 /** MICRO-PROVA-DEV48 p.5 · the fingerprint of the file a version draws: its
  *  checksum and size as the graph declares them — for a set (an OBJ with its
@@ -24728,7 +24742,10 @@ function renderSpaceOutliner(el: HTMLElement, win: Win, sp: Space | null): void 
       const nm = rmShown(r.id, sp);
       return { id: r.id, name: nm?.shown ?? r.name, ...(nm && nm.shown !== nm.technical ? { technical: nm.technical } : {}),
         // MICRO-PROVA-DEV47 p.3b · the level and the mode («LOD2 · uso», «intero · fisso»), a small menu
-        ...(nm?.level ? { chip: (r.versions?.length ?? 0) > 1 ? `${nm.level} · ${modeWord(versionModeOf(r.id).mode)}` : nm.level } : {}),
+        // MICRO-PROVA-DEV48 p.3 · in auto the label says what the distance drew: «auto · LOD0», «auto · derivata lod4»
+        ...(nm?.level ? { chip: (r.versions?.length ?? 0) > 1
+          ? (versionModeOf(r.id).mode === "auto" ? `${modeWord("auto")} · ${((dv) => dv ? autoLevelName(r, dv) : nm.level)(drawnVersionOf(r))}` : `${nm.level} · ${modeWord(versionModeOf(r.id).mode)}`)
+          : nm.level } : {}),
         glyph: String(st.node(r.id)?.node_type ?? "representation_model"),
         tileset: !!r.resource?.tiles,
         group: grp ? { id: grp.id, name: grp.name, doc: grp.documentId ? String(st.node(grp.documentId)?.name ?? "") : undefined,
