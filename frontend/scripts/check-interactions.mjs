@@ -1911,6 +1911,38 @@ test("S3.ovbtn", "Spazio · MICRO-PROVA-DEV47 p.1 · il pulsante delle sovrappos
     proxyLabelsOff: px0 > 0 && px1 === 0, dot, errors: !errors.length };
   return { pass: Object.values(conds).every(Boolean), detail: { conds, g0, gN, gOther, g2, panel, px: [px0, px1], errors } };
 });
+/** MICRO-PROVA-DEV47 p.2 · the first point of each kind under a grid of the canvas */
+async function firstHits(p, kinds) {
+  return p.evaluate((kinds) => {
+    const h = document.querySelector(".scn-host"); const c = h.querySelector("canvas").getBoundingClientRect();
+    const found = {};
+    for (let gy = 0.1; gy <= 0.9; gy += 0.04) for (let gx = 0.1; gx <= 0.9; gx += 0.03) {
+      const x = c.x + c.width * gx, y = c.y + c.height * gy;
+      const hit = h.__spaceHit(x, y);
+      if (hit && kinds.includes(hit.kind) && !found[hit.kind]) found[hit.kind] = { x, y, id: hit.id };
+    }
+    return found;
+  }, kinds);
+}
+test("S3.pickRm", "Spazio · MICRO-PROVA-DEV47 p.2 · un clic semplice seleziona ciò che è più vicino sotto il puntatore, come Blender: un modello (RM) e non solo i proxy; Outliner e Inspector lo seguono; Maiusc aggiunge; il clic destro apre il menu del modello", async () => {
+  const { p, ctx, errors } = await gizmoScene();
+  const f = await firstHits(p, ["rm", "proxy"]);
+  const sel = () => p.evaluate(() => ({ sel: window.__EM_DRAG__.selected(), insp: document.querySelector(".insp-name-input")?.value ?? null,
+    outl: [...document.querySelectorAll(".scn-outliner .sol-row.sel, .scn-outliner .sol-row[aria-selected=true]")].map((e) => e.dataset.key ?? e.textContent.trim().slice(0, 30)) }));
+  const out = {};
+  if (f.rm) { await p.mouse.click(f.rm.x, f.rm.y); await p.waitForTimeout(600); out.rm = await sel(); }
+  if (f.proxy) { await p.mouse.click(f.proxy.x, f.proxy.y); await p.waitForTimeout(600); out.proxy = await sel(); }
+  if (f.rm && f.proxy) { await p.keyboard.down("Shift"); await p.mouse.click(f.rm.x, f.rm.y); await p.keyboard.up("Shift"); await p.waitForTimeout(600); out.shift = await sel(); }
+  if (f.rm) { await p.mouse.click(f.rm.x, f.rm.y, { button: "right" }); await p.waitForTimeout(400);
+    out.menu = await p.evaluate(() => [...document.querySelectorAll(".scn-menu button")].map((b) => b.dataset.s3)); await p.keyboard.press("Escape"); }
+  await p.screenshot({ path: `${process.env.SHOTS ?? "."}/s3-pickrm.png` }).catch(() => {});
+  await ctx.close();
+  const conds = { found: !!f.rm && !!f.proxy, rm: out.rm?.sel?.length === 1 && out.rm.sel[0] === f.rm?.id,
+    proxy: out.proxy?.sel?.length === 1 && out.proxy.sel[0] === f.proxy?.id,
+    shift: (out.shift?.sel ?? []).includes(f.rm?.id) && (out.shift?.sel ?? []).includes(f.proxy?.id),
+    menu: (out.menu ?? []).includes("rmg-new"), errors: !errors.length };
+  return { pass: Object.values(conds).every(Boolean), detail: { conds, f, out, errors } };
+});
 test("S3.files", "Spazio · un file solo referenziato è un contorno con l'etichetta; uno dichiarato e assente, l'etichetta; il riepilogo li conta", async () => {
   const { p, ctx, errors } = await open({ doc: "spazio", ws: "space" });
   await p.waitForFunction(() => document.querySelector(".scn-host")?.dataset.ready === "1", null, { timeout: 20000 });

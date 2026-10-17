@@ -147,6 +147,11 @@ export function isMacPlatform(nav: { platform?: string; userAgent?: string } | u
  * | right                         | menu-proxy   | menu-proxy      |
  * | right + ⌘ (Mac) / Ctrl        | menu-rm      | menu-rm         |
  * | right + Shift                 | cursor       | cursor          |
+ *
+ * MICRO-PROVA-DEV47 p.2 (E.D., 17 Oct 2026) · «pick-proxy» is now the plain
+ * pick: the NEAREST thing under the pointer, model, proxy or sketch, as
+ * Blender's (`pickUnder`, space-selection.ts); «pick-rm» the models only. The
+ * menus the same: the nearest thing's menu, ⌘ (Ctrl) a model's.
  */
 export function pointerIntent(e: PointerLike, mac: boolean): PointerIntent {
   const model = mac ? e.metaKey : e.ctrlKey;

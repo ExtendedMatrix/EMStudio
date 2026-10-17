@@ -75,4 +75,19 @@ eq(c.position, [12, 0, 4], "N panel: the other moves by the same amount");
 eq(c.rotation.map((v) => Math.round(v * 1e9) / 1e9), [0.5, 0, 0.2], "…turns by the same angle");
 eq(c.scale, [6, 3, 3], "…scales by the same ratio");
 
+
+// MICRO-PROVA-DEV47 p.2 · the click picks the nearest, whatever it is; ⌘ the
+// models only; a tie goes sketch, proxy, model; again on the spot, the next
+const H = [{ kind: "rm", id: "Tetto", distance: 240.1 }, { kind: "proxy", id: "USV149", distance: 251.6 }, { kind: "rm", id: "Tetto", distance: 240.9 }, { kind: "rm", id: "Col", distance: 260 }];
+eq(S.pickUnder(H, { x: 10, y: 10 }, null, false), "rm:Tetto", "a click on the roof: the roof (the model in front), not the proxy behind it");
+eq(S.pickUnder(H, { x: 10, y: 10 }, null, true), "rm:Tetto", "⌘: the nearest model");
+eq(S.pickUnder([{ kind: "proxy", id: "U1", distance: 5 }], { x: 0, y: 0 }, null, true), null, "⌘ on a proxy alone: nothing");
+eq(S.pickUnder(H, { x: 11, y: 12 }, { x: 10, y: 10, key: "rm:Tetto" }, false), "proxy:USV149", "again on the spot: the next one behind");
+eq(S.pickUnder(H, { x: 11, y: 12 }, { x: 10, y: 10, key: "proxy:USV149" }, false), "rm:Col", "…and the next");
+eq(S.pickUnder(H, { x: 11, y: 12 }, { x: 10, y: 10, key: "rm:Col" }, false), "rm:Tetto", "…and round");
+eq(S.pickUnder(H, { x: 40, y: 12 }, { x: 10, y: 10, key: "rm:Tetto" }, false), "rm:Tetto", "elsewhere: the nearest again");
+eq(S.pickUnder([{ kind: "rm", id: "M", distance: 10 }, { kind: "proxy", id: "U", distance: 10.004 }, { kind: "sketch", id: "s", distance: 10.008 }], { x: 0, y: 0 }, null, false),
+  "sketch:s", "surfaces within 1 cm: sketch, then proxy, then model");
+eq(S.pickUnder([], { x: 0, y: 0 }, null, false), null, "nothing under the pointer: nothing");
+
 console.log(`check-space-selection: ${checks} checks, all green`);

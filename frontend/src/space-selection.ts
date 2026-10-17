@@ -120,3 +120,45 @@ export function medianPoint(centres: ReadonlyArray<readonly [number, number, num
   for (const c of centres) for (let i = 0; i < 3; i++) s[i] += c[i];
   return [s[0] / centres.length, s[1] / centres.length, s[2] / centres.length];
 }
+
+/**
+ * MICRO-PROVA-DEV47 p.2 · what a click picks, as Blender's: the NEAREST thing
+ * under the pointer, whatever it is (a model, a proxy, a sketch). Measured on
+ * Templu Mare v3.2 (E.D., 17 Oct 2026): the plain click took the first proxy
+ * along the ray and skipped the models (the table of 11 Oct, «a click is the
+ * proxy's, ⌘ the model's»), so a click on the roof selected USV149, a proxy
+ * behind it, and a model never came with a plain click.
+ *
+ *   · `hits` are the ray's, nearest first; `model` (⌘ on a Mac, Ctrl
+ *     elsewhere) keeps the models only, as before;
+ *   · surfaces within `tie` of each other (a proxy drawn on the model it was
+ *     cut from) go sketch, then proxy, then model: the 11 Oct preference,
+ *     where the eye cannot tell them apart;
+ *   · a click again on the same spot (within `spot` px) with the last pick
+ *     still under it takes the NEXT one behind it, and round: Blender's cycle
+ *     through what overlaps.
+ */
+export interface PickHit { kind: string; id: string; distance: number }
+export interface LastPick { x: number; y: number; key: string }
+const KIND_RANK: Record<string, number> = { sketch: 0, proxy: 1, rm: 2 };
+export function pickUnder(hits: readonly PickHit[], at: { x: number; y: number }, last: LastPick | null,
+  model: boolean, tie = 0.01, spot = 4): string | null {
+  const ok = hits.filter((h) => !model || h.kind === "rm");
+  if (!ok.length) return null;
+  // one entry per object, at its nearest surface
+  const near = new Map<string, number>();
+  for (const h of ok) {
+    const k = `${h.kind}:${h.id}`;
+    if (!near.has(k) || h.distance < near.get(k)!) near.set(k, h.distance);
+  }
+  const rank = (k: string) => KIND_RANK[k.slice(0, k.indexOf(":"))] ?? 3;
+  const order = [...near.entries()].sort((a, b) => {
+    if (Math.abs(a[1] - b[1]) <= tie) return rank(a[0]) - rank(b[0]) || a[1] - b[1];
+    return a[1] - b[1];
+  }).map(([k]) => k);
+  if (last && Math.hypot(at.x - last.x, at.y - last.y) <= spot) {
+    const i = order.indexOf(last.key);
+    if (i >= 0) return order[(i + 1) % order.length];
+  }
+  return order[0];
+}

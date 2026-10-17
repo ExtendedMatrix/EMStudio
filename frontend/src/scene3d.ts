@@ -57,7 +57,7 @@ import {
   type AlignedView, type Box6, type CamState, type DragIntent, type ModalMode, type ModalState, type Pose,
   type SpaceKeyAction, type V3,
 } from "./space-nav";
-import { medianPoint } from "./space-selection";
+import { medianPoint, pickUnder, type LastPick } from "./space-selection";
 import { pickByDistance, versionError, type FlowVersion } from "./lod-flow";
 import { buildShapeGeometry, listSketches, shapeById, updateSketch, type Sketch } from "./shapes3d";
 import { fingersOf, trackpadClassifier } from "./wheel-kind";
@@ -2306,6 +2306,8 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
         const y0 = Math.min(d.y0, e.clientY), y1 = Math.max(d.y0, e.clientY);
         opts.onBoxSelect?.(keysInRect(x0, y0, x1, y1), d.shift);
       };
+      /** the last click's pick, for the cycle through what overlaps */
+      let lastPick: LastPick | null = null;
       const onUp = (e: PointerEvent) => {
         const d = drag;
         drag = null;
@@ -2338,17 +2340,27 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
           return;
         }
         if (intent === "menu-proxy" || intent === "menu-rm") {
-          const sk = hits.find((x) => x.kind === "sketch");
-          const want = intent === "menu-rm" ? hits.find((x) => x.kind === "rm") : sk ?? hits.find((x) => x.kind === "proxy");
-          const hit = want ?? null;
+          // MICRO-PROVA-DEV47 p.2 · the menu of the nearest thing, as the click's
+          const key = pickUnder(hits, { x: e.clientX, y: e.clientY }, null, intent === "menu-rm");
+          const hit = key ? hits.find((x) => `${x.kind}:${x.id}` === key) ?? null : null;
           if (hit?.kind === "sketch") pickSketch(hit.id);
           opts.onMenu?.({ kind: hit ? hit.kind : "none", id: hit?.id ?? null, x: e.clientX, y: e.clientY,
             point: hits[0] ? arr(hits[0].point) : null });
           return;
         }
+        // MICRO-PROVA-DEV47 p.2 · a click picks the nearest thing under the
+        // pointer, as Blender's (`pickUnder`): again on the spot, the next one
+        // behind; ⌘ (Ctrl) the models only
+        if ((intent === "pick-rm" || intent === "pick-proxy") && opts.onPick) {
+          const at = { x: e.clientX, y: e.clientY };
+          // the cycle is the plain click's: Shift keeps Blender's add / make active / remove
+          const key = pickUnder(hits, at, e.shiftKey ? null : lastPick, intent === "pick-rm");
+          lastPick = key ? { ...at, key } : null;
+          opts.onPick(key, e.shiftKey);
+          return;
+        }
         if (intent === "pick-rm") {
           const hit = hits.find((x) => x.kind === "rm");
-          if (opts.onPick) { opts.onPick(hit ? `rm:${hit.id}` : null, e.shiftKey); return; }
           if (hit) opts.onPickRm?.(hit.id); else opts.onPickNone?.();
           return;
         }
@@ -2356,8 +2368,6 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
           // a sketch, then a proxy: what a plain click means here; the model
           // under it is ⌘'s (Ctrl's) — E.D., 11 Oct 2026
           const hit = hits.find((x) => x.kind === "sketch" || x.kind === "proxy");
-          // MICRO-SPAZIO-3D-3 · one selection: the caller applies Blender's rule
-          if (opts.onPick) { opts.onPick(hit ? `${hit.kind}:${hit.id}` : null, e.shiftKey); return; }
           if (hit?.kind === "sketch") { pickSketch(hit.id); return; }
           if (sketchSel) pickSketch(null);
           if (hit) opts.onPickUnit?.(hit.id); else opts.onPickNone?.();
