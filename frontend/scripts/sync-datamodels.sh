@@ -85,6 +85,9 @@ cp "$CFG/em_qualia_types.json" "$DST/"
 # I1 (4 Oct 2026) · the ONE list of the states and their symbols, which
 # state-symbols.ts draws in its own way (check-state-symbols.mjs)
 [ -f "$CFG/em_state_symbols.json" ] && cp "$CFG/em_state_symbols.json" "$DST/"
+# the cases of the alternatives (s3Dgraphy 1.6.37, E.D. 17 Oct 2026): the contract
+# scripts/check-alternatives.mjs passes, like version_for_cases.json
+[ -f "$CFG/alternative_cases.json" ] && cp "$CFG/alternative_cases.json" "$DST/"
 mkdir -p "$DST/icons2d"
 # BOTH raster and vector. Only `*.png` was copied here, which is why EMStudio drew
 # no SVG icons even after 28 of them shipped in s3Dgraphy: the renderer prefers
