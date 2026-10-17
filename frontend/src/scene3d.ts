@@ -582,6 +582,18 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
       /** MICRO-SPAZIO-3D-2 · the top object of each item drawn (`rm:` / `proxy:`),
        *  where its transform is applied, over the file as it is */
       const roots = new Map<string, any>();
+      // MICRO-TILESET-CONTENITORE p.2 · the side a container's automatic mode
+      // drew last (by container), kept up here: a rebuild reads it
+      const altState = new Map<string, "tileset" | "models">();
+      /** the side an item of a container shows when it is (re)added: the last
+       *  side the distance chose (a tileset reused across rebuilds keeps no
+       *  `visible` of its own) */
+      const altVisible = (item: SceneItem): boolean => {
+        const a = item.alt;
+        if (!a) return true;
+        const side = altState.get(a.group);
+        return side ? side === a.role : a.role === "models";
+      };
 
       // MICRO-3DTILES · the tilesets of the scene (one layer per tileset url,
       // kept across rebuilds: a tileset is not re-fetched when a toggle
@@ -1356,6 +1368,10 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
               if (!live) { drawn.set(key, { item: { ...item, state: "missing" }, as: "label" }); later.push({ ...item, state: "missing" }); return; }
               live.layer.object.userData.tiles = true;
               live.layer.object.traverse((o: any) => { o.userData.rmId = item.id; });
+              // MICRO-TILESET-CONTENITORE p.2 · the layer is kept across rebuilds:
+              // the `visible` the automatic mode left on it is set again here
+              // (it stayed false choosing «Tileset» from «Automatico»: the scene empty)
+              live.layer.object.visible = altVisible(item);
               content.add(live.layer.object);
               // the tileset's pose is its tileset.json's (root.transform): the
               // data's transform is not applied over it, and G / R / S leave it
@@ -1387,6 +1403,7 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
               const obj = got.root.clone(true);
               if (item.pose) setPose(obj, item.pose);
               roots.set(key, obj);
+              obj.visible = altVisible(item);
               if (selOutline(item)) content.add(selBox(obj, item));
               tag(obj, item);
               content.add(obj);
@@ -1469,6 +1486,7 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
               // MICRO-SPAZIO-3D-2 · the model's transform, over the glb as it is
               if (item.pose) setPose(obj, item.pose);
               roots.set(key, obj);
+              obj.visible = altVisible(item);
               if (selOutline(item)) content.add(selBox(obj, item));
               tag(obj, item);
               content.add(obj);
@@ -1693,6 +1711,20 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
           if (o.isMesh) { meshes++; verts += o.geometry?.attributes?.position?.count ?? 0; } else if (o.isPoints || o.isLine) other++; });
         return { meshes, verts, other };
       };
+      /** MICRO-TILESET-CONTENITORE · what is DRAWN, by key: the object in the
+       *  scene, visible all the way up, its visible meshes (a tileset's tiles) */
+      (probe as Record<string, unknown>).__spaceDrawn = () => {
+        const out: Record<string, { inScene: boolean; visible: boolean; meshes: number; tiles?: number }> = {};
+        for (const [k, o] of roots) {
+          let vis = true, inScene = false;
+          for (let q = o; q; q = q.parent) { if (!q.visible) vis = false; if (q === content) inScene = true; }
+          let meshes = 0;
+          if (vis && inScene) o.traverseVisible((x: any) => { if (x.isMesh) meshes++; });
+          const live = liveLayers().find((l) => l.layer.object === o);
+          out[k] = { inScene, visible: vis, meshes, ...(live ? { tiles: live.layer.loadedFiles().length } : {}) };
+        }
+        return out;
+      };
       probe.__spaceBoxOf = (id: string) => {
         const live = liveLayers().find((l) => l.itemId === id);
         let b = live ? live.layer.contentBox() : null;
@@ -1745,6 +1777,7 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
         if (!st || !old || st.gen !== generation || (modal && modal.targets.some((t) => t.id === key))) return;
         const obj = root.clone(true);
         obj.position.copy(old.position); obj.quaternion.copy(old.quaternion); obj.scale.copy(old.scale);
+        obj.visible = old.visible;
         obj.updateMatrixWorld(true);
         const gone = new Set<any>();
         old.traverse((o: any) => gone.add(o));
@@ -1762,7 +1795,6 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
         opts.onVersionDrawn?.(st.item.id, v.id);
       };
       // ── MICRO-SPAZIO-3D-3 p.12 · a container or its tileset, by the distance ──
-      const altState = new Map<string, "tileset" | "models">();
       const altTick = () => {
         const groups = new Map<string, { err: number; tiles: string[]; models: string[] }>();
         for (const it of items) if (it.alt) {
