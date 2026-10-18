@@ -1,30 +1,20 @@
-# immagine · la web app di EMStudio su GHCR — PRONTA E NON ATTIVA
+# immagine · la web app di EMStudio su GHCR — ACCESA A OGNI TAG
 #
-# ══ PERCHÉ QUESTO FILE NON HA UN `push:` ════════════════════════════════════
+# ══ DA QUANDO HA UN `push:` ═════════════════════════════════════════════════
 #
-# Non è una dimenticanza ed è la cosa più importante da sapere qui dentro.
+# Fino al 18 ottobre 2026 si lanciava solo a mano. Quel giorno E.D. ha deciso di
+# pubblicarla, con le immagini del nodo (server, catalogo, StratiField): da allora
+# ogni tag `v*` — quello che `./em.sh devrel` spinge per il desktop — pubblica
+# anche l'immagine con lo stesso nome.
 #
-# Un pacchetto GHCR NON segue il rinomino o il trasferimento del suo repository:
-# nasce nel namespace del proprietario di allora, e cambiarlo vuol dire
-# cancellarlo e ripubblicarlo — cioè rompere chiunque l'abbia già specchiato.
-# PSNC specchia le immagini sul registry interno del loro OpenShift: è
-# precisamente il caso peggiore.
+# La ragione per cui era spenta resta vera e va saputa: un pacchetto GHCR NON
+# segue il rinomino o il trasferimento del suo repository. Nasce nel namespace
+# del proprietario di allora (`ghcr.io/extendedmatrix/`, dal 22 settembre 2026),
+# e spostarlo vuol dire cancellarlo e ripubblicarlo, rompendo chi l'ha già
+# specchiato (PSNC, sul registry interno del loro OpenShift). Prima di
+# trasferire di nuovo questo repository, si spegne il `push:` qui sotto.
 #
-# Il 22 settembre 2026 EMStudio è stato trasferito in `github.com/ExtendedMatrix`
-# — la casa della comunità Extended Matrix, che è più longeva del progetto
-# StratiGraph e a cui l'editor appartiene. Quindi il namespace di questa
-# immagine è `ghcr.io/extendedmatrix/`, distinto da `ghcr.io/stratigraph-eccch/`
-# dove stanno le immagini del progetto. Due namespace, e ciascuno dice chi
-# risponde dell'artefatto.
-#
-# Finché E.D. non decide che è il momento, questo workflow si lancia SOLO a
-# mano, e solo scrivendo il nome dell'immagine per esteso. Il giorno in cui si
-# accende, bastano tre righe:
-#
-#     on:
-#       push:
-#         tags:
-#           - 'v*'
+# A mano si lancia ancora, per un tag già esistente, scrivendo `emstudio`.
 #
 # ══ IL RESTO ════════════════════════════════════════════════════════════════
 #
@@ -39,6 +29,9 @@
 name: immagine
 
 on:
+  push:
+    tags:
+      - 'v*'
   workflow_dispatch:
     inputs:
       conferma:
@@ -62,11 +55,11 @@ jobs:
     runs-on: ubuntu-24.04
 
     steps:
-      # Il cancello, e non è una formalità: finché questo workflow non ha un
-      # `push:`, l'unico modo di pubblicare è che una persona lo lanci e scriva
-      # il nome. Se qualcuno accende il trigger automatico senza togliere
-      # questo passo, il job diventa rosso e lo dice invece di pubblicare.
+      # Il cancello vale per il lancio A MANO: chi pubblica un tag già
+      # esistente scrive il nome. Su un tag spinto non c'è niente da
+      # confermare — il tag è la conferma.
       - name: Conferma esplicita
+        if: github.event_name == 'workflow_dispatch'
         run: |
           if [ "${{ inputs.conferma }}" != "emstudio" ]; then
             echo "::error::Questo workflow pubblica un pacchetto pubblico e non" \
@@ -95,7 +88,7 @@ jobs:
         with:
           images: ghcr.io/${{ github.repository }}
           tags: |
-            type=raw,value=${{ inputs.tag }}
+            type=raw,value=${{ inputs.tag || github.ref_name }}
             type=sha,format=long
           labels: |
             org.opencontainers.image.licenses=GPL-3.0-or-later
@@ -130,4 +123,4 @@ jobs:
       - name: Tirata ANONIMA, e entrambe le architetture
         run: |
           ./scripts/verifica-tirata-anonima.sh \
-            "ghcr.io/${{ github.repository }}:${{ inputs.tag }}"
+            "ghcr.io/${{ github.repository }}:${{ inputs.tag || github.ref_name }}"
