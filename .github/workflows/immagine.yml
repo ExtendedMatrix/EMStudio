@@ -88,7 +88,9 @@ jobs:
         with:
           images: ghcr.io/${{ github.repository }}
           tags: |
-            type=raw,value=${{ inputs.tag || github.ref_name }}
+            # semver (`v1.6.0-dev.50` → `1.6.0-dev.50`), e niente `latest`:
+            # PSNC sceglie per ambiente, dev · stage · production.
+            type=semver,pattern={{version}},value=${{ inputs.tag || github.ref_name }}
             type=sha,format=long
           labels: |
             org.opencontainers.image.licenses=GPL-3.0-or-later
@@ -123,4 +125,4 @@ jobs:
       - name: Tirata ANONIMA, e entrambe le architetture
         run: |
           ./scripts/verifica-tirata-anonima.sh \
-            "ghcr.io/${{ github.repository }}:${{ inputs.tag || github.ref_name }}"
+            "ghcr.io/${{ github.repository }}:${{ steps.meta.outputs.version }}"
