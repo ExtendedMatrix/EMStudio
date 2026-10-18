@@ -6,7 +6,7 @@
  * this module exists: three of the columns are things only the library can
  * answer —
  *
- *   · **RESIDENCE** (disk / minio / uri) — read off the locator, plus what the
+ *   · **RESIDENCE** (disk / s3 / uri) — read off the locator, plus what the
  *     origin says about where it came from;
  *   · **ROLE** (comparandum / internal_source) — STATED, never derived, and
  *     orthogonal to the fence: my own asset can be a comparandum and somebody

@@ -14757,10 +14757,10 @@ function hatShelfEntry(entry: OrphanEntry): void {
   toast(t("res.hatted", { name: String(entry.key_id || t("res.aResource")) }));
 }
 
-// ── Resources (link nodes) list + "Promote to MinIO" ───────────────────────────
+// ── Resources (link nodes) list + "Promote to the S3 store" ────────────────────
 // Lists the graph's resources via the bridge (/list-resources — single connector).
-// Promote uploads a LOCAL resource's bytes into the shared MinIO under its OWN
-// stable ID (one ID space FS↔MinIO), then repoints its ResourceNode locator at the
+// Promote uploads a LOCAL resource's bytes into the shared S3 store under its OWN
+// stable ID (one ID space FS↔S3), then repoints its ResourceNode locator at the
 // returned s3:// URI. The stable ID and every graph reference are unchanged.
 async function renderResLinks(): Promise<void> {
   if (!store) return;
@@ -14806,9 +14806,9 @@ async function renderResLinks(): Promise<void> {
       const btn = document.createElement("button");
       // AUDIT N9 · a different verb from «Promuovi a documento» (the Shelf's):
       // this moves the BYTES to the object store
-      btn.textContent = t("res.uploadMinio");
+      btn.textContent = t("res.uploadS3");
       btn.title = t("res.uploadTitle");
-      btn.addEventListener("click", () => void promoteToMinio(r, btn));
+      btn.addEventListener("click", () => void promoteToS3(r, btn));
       row.appendChild(btn);
     }
     resLinks.appendChild(row);
@@ -14836,16 +14836,16 @@ function listResourcesFromStore(): ResourceRow[] {
   return out;
 }
 
-async function promoteToMinio(r: ResourceRow, btn: HTMLButtonElement): Promise<void> {
+async function promoteToS3(r: ResourceRow, btn: HTMLButtonElement): Promise<void> {
   if (!store) return;
   btn.disabled = true;
   const prev = btn.textContent;
   btn.textContent = t("res.uploading");
   try {
-    const res = await fetch(`${await bridgeUrl()}/ingest-minio`, {
+    const res = await fetch(`${await bridgeUrl()}/ingest-s3`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      // resource_id = the resource's stable ID → same id in FS and MinIO
+      // resource_id = the resource's stable ID → same id in FS and the S3 store
       body: JSON.stringify({ path: r.locator, resource_id: r.id }),
     });
     if (!res.ok) {
@@ -14856,8 +14856,8 @@ async function promoteToMinio(r: ResourceRow, btn: HTMLButtonElement): Promise<v
       } catch {
         /* non-JSON */
       }
-      // 501 = the [minio] extra isn't bundled — a clear, graceful message.
-      toast(res.status === 501 ? t("res.minioUnavailable", { msg }) : t("res.uploadFailed", { msg }));
+      // 501 = the [s3] extra isn't bundled — a clear, graceful message.
+      toast(res.status === 501 ? t("res.s3Unavailable", { msg }) : t("res.uploadFailed", { msg }));
       btn.disabled = false;
       btn.textContent = prev;
       return;
@@ -25686,7 +25686,7 @@ const receiptStudy = new Map<string, string | null>();
 // s3Dgraphy — because three of its columns are things only the library can
 // answer, and answering them here would be a second answer:
 //
-//   · RESIDENCE (disk/minio/uri) — the locator, plus what the origin says;
+//   · RESIDENCE (disk/s3/uri) — the locator, plus what the origin says;
 //   · ROLE (comparandum/internal_source) — STATED, orthogonal to the fence;
 //   · MODE (only_shelf/used_in_graph) — the hatting reference-check across
 //     EVERY graph of the container, which is why the whole container travels.
@@ -26684,7 +26684,7 @@ async function bridgeBlobUrl(url: string): Promise<string> {
 
 // ── W1 · STORAGE · the window onto where the bytes live ─────────────────────
 //
-// Its MODES are the backends — Filesystem and the room's MinIO — because "one
+// Its MODES are the backends — Filesystem and the room's S3 store — because "one
 // window, several ways of looking" is the shape the Graph window already has.
 // Adding Samba or WebDAV later is an entry in `WINDOW_MODES` plus a branch in
 // `renderStorage`, not a new window type.
@@ -27038,7 +27038,7 @@ function setStorageSelected(win: Win, path: string | null): void {
  *
  * So Storage follows the table's pattern (WIN5, `emdata.ts`): one renderer, as
  * many mounts as there are areas. Each host carries the WINDOW it belongs to —
- * which is what makes the two independent: the mode (filesystem / minio) and the
+ * which is what makes the two independent: the mode (filesystem / s3) and the
  * folder are per-instance state on the window, and always were.
  *
  * Not the panels' pattern (re-homing a singleton), deliberately: a panel is one
@@ -27519,19 +27519,19 @@ function renderStorageInto(host: StorageHost): void {
     if (c) body.prepend(c);
   };
 
-  if (winModeOf(win) === "minio") {
+  if (winModeOf(win) === "s3") {
     // THE OBJECT STORE, for real now. A file goes to the room's store, comes
     // back as its own sha256, becomes a ResourceNode that POINTS at those bytes
     // — never carries them — and the upload is also the moment the rights are
     // declared, because that is when the asset first exists as a thing anybody
     // can point at (`s3Dgraphy/docs/asset-dtc-protocol.md`).
-    if (crumb) crumb.textContent = sync.room ? `${t("storage.minio")} · ${sync.room}` : "";
+    if (crumb) crumb.textContent = sync.room ? `${t("storage.s3")} · ${sync.room}` : "";
     up?.classList.add("hidden");
     // the ingestion panel is LONG: keep the place, per window (the body is a new
     // element after a tree rebuild)
     paintSurface(win, body, () => {
       body.textContent = "";
-      body.appendChild(minioPanel());
+      body.appendChild(s3Panel());
       withCard();
     });
     return;
@@ -29446,7 +29446,7 @@ function ingestField(
  * Saying which one is missing is the difference between a disabled tab and an
  * instruction.
  */
-function minioPanel(): HTMLElement {
+function s3Panel(): HTMLElement {
   const box = document.createElement("div");
   box.className = "ing-panel";
 
@@ -29459,7 +29459,7 @@ function minioPanel(): HTMLElement {
   // (the bytes must go somewhere); READING and drawing the corpus is a fact about
   // the project, and belongs to nobody's connection.
   const blocked = (!sync.room || !getSettings().sync.hubUrl)
-    ? t("storage.minioNeedsRoom")
+    ? t("storage.s3NeedsRoom")
     : !currentIdentity() ? t("assets.needsIdentity")
     : !store ? t("assets.needsDocument")
     : null;
@@ -29509,7 +29509,7 @@ function minioPanel(): HTMLElement {
  * missing is everything after it.
  *
  * And it only appears where it can work: the store belongs to a ROOM, and in
- * Standalone the panel says so above (`storage.minioNeedsRoom`) and this is not
+ * Standalone the panel says so above (`storage.s3NeedsRoom`) and this is not
  * built at all — a funnel greyed out with no explanation is worse than no funnel.
  */
 function ingestFunnel(): HTMLElement {

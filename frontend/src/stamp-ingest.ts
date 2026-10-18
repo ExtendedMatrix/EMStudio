@@ -6,7 +6,7 @@
  * si scartano per la stessa ragione:
  *
  * * **bloccare** chi carica un file non timbrato non impedisce l'atto, lo sposta
- *   fuori dal sistema — si carica dalla console di MinIO o con `mc`, e nello
+ *   fuori dal sistema — si carica dalla console dello store S3 o con un client S3, e nello
  *   store finisce un oggetto senza nessuna traccia, che è il caso peggiore;
  * * **avvisare** lascia nello store byte indistinguibili da quelli timbrati.
  *

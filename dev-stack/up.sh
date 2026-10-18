@@ -2,8 +2,8 @@
 # One-command local stack for the EM Resource layer.
 #
 #   ./up.sh ensure       # install/verify the engine (Homebrew, docker, compose, Colima) + start it
-#   ./up.sh dev          # just MinIO (+ bucket with versioning) — dev & local real-work
-#   ./up.sh dev auth     # MinIO + Keycloak + Postgres (compose profile `auth`)
+#   ./up.sh dev          # just RustFS/S3 (+ bucket with versioning) — dev & local real-work
+#   ./up.sh dev auth     # RustFS + Keycloak + Postgres (compose profile `auth`)
 #   ./up.sh full         # the COMPLETE WP6 stack (delegates to Heriverse-Docker)
 #   ./up.sh down [full]  # stop the dev stack (or `down full` for the WP6 stack)
 #
@@ -78,15 +78,15 @@ case "$cmd" in
     if [ "${1:-}" = "auth" ]; then profile_args=(--profile auth); fi
     compose -f "$DEV_COMPOSE" "${profile_args[@]}" up -d
     echo ""
-    echo "  MinIO S3 API   → http://localhost:${S3_PORT}"
-    echo "  MinIO console  → http://localhost:${S3_CONSOLE_PORT}   (user: ${S3_ACCESS_KEY_ID})"
+    echo "  RustFS S3 API  → http://localhost:${S3_PORT}"
+    echo "  RustFS console → http://localhost:${S3_CONSOLE_PORT}/rustfs/console/   (user: ${S3_ACCESS_KEY_ID})"
     echo "  shared bucket  → ${S3_BUCKET}   (versioning ON)"
     if [ "${1:-}" = "auth" ]; then
       echo "  Keycloak       → http://localhost:${KEYCLOAK_PORT}/   (dev mode)"
     fi
     echo ""
     echo "  point em-bridge / EMStudio at it:  set -a; . \"$ENV_FILE\"; set +a"
-    echo "  (S3_ENDPOINT=http://localhost:${S3_PORT}) — bucket init runs in the 'createbuckets' service"
+    echo "  (S3_ENDPOINT=http://localhost:${S3_PORT}) — bucket init runs in the 'rustfs-init' service"
     ;;
   full)
     preflight

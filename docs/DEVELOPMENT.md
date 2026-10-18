@@ -105,7 +105,7 @@ export, resource previews and coordinate reprojection. Build the sidecar FIRST �
 # 1. build venv for the sidecar (once per machine)
 cd s3Dgraphy
 python3 -m venv .venv
-.venv/bin/pip install -e '.[sync,minio,geo,docx]' pandas lxml pyinstaller
+.venv/bin/pip install -e '.[sync,s3,geo,docx]' pandas lxml pyinstaller
 .venv/bin/pip install Pillow                     # image thumbnails (recommended)
 .venv/bin/pip install cairosvg                   # figures in the exports (see below)
 
@@ -148,7 +148,7 @@ Measured on an M-series Mac, same code, only the flags differing:
   want PDF covers install it beside the *dev* bridge (`pip install pymupdf`;
   `./dev.sh` runs from the venv, nothing is frozen) — the packaged app shows the
   typed document icon, which is the pre-existing behaviour.
-- **minio** (`s3dgraphy[minio]`) — `/ingest-minio` + `/presign`; 501 without it.
+- **boto3** (`s3dgraphy[s3]`) — `/ingest-s3` + `/presign` (the S3 object store, RustFS in dev); 501 without it.
 - **python-docx** (`s3dgraphy[docx]`) — the **Word export**, i.e. the app's
   `Esporta ▸ Word`. Pure Python, nothing native, ~500 kB: there is no reason to
   ship without it, and `build-bridge.sh` says so when it is missing. It needs

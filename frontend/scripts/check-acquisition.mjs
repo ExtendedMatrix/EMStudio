@@ -119,7 +119,7 @@ function bodyOf(src, signature) {
   ok(/ing-depositor/.test(delivery) && /assets\.depositorHint/.test(delivery),
     "the DEPOSITOR is shown as a line, with the reason it is not a box");
   // the shipped pre-fill, by its exact shape
-  ok(!/ingestDraft\.authorOrcid\s*=\s*me\.orcid/.test(bodyOf(MAIN, "function minioPanel()")),
+  ok(!/ingestDraft\.authorOrcid\s*=\s*me\.orcid/.test(bodyOf(MAIN, "function s3Panel()")),
     "opening the panel must NOT assert that whoever is logged in made the " +
       "files. It did: `if (!ingestDraft.authorOrcid) { ingestDraft.authorOrcid " +
       "= me.orcid; … }` ran on every open, which is the confusion between " +
@@ -195,8 +195,8 @@ function bodyOf(src, signature) {
       "tonight, and is asserted here so it stays true");
   ok(/storageDragPayload/.test(funnel),
     "…and a drag out of the disk pane, which carries a path rather than bytes");
-  const panel = bodyOf(MAIN, "function minioPanel()");
-  const gateAt = panel.indexOf("storage.minioNeedsRoom");
+  const panel = bodyOf(MAIN, "function s3Panel()");
+  const gateAt = panel.indexOf("storage.s3NeedsRoom");
   const funnelAt = panel.indexOf("ingestFunnel()");
   ok(gateAt > 0 && funnelAt > gateAt,
     "the store belongs to a ROOM: standalone, the panel says so and the funnel " +

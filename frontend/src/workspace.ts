@@ -43,7 +43,7 @@ export type WindowType =
   // it carries no palette and no chevron.
   | "viewer"
   // W1 · STORAGE · where the bytes live. Its Modes are the BACKENDS (filesystem
-  // and the room's MinIO, Samba/WebDAV conceivable) — the same shape as the
+  // and the room's S3 store, Samba/WebDAV conceivable) — the same shape as the
   // graph window's projections: one window, several ways of looking.
   | "storage"
   // (A2's ANNOTATOR is not a type any more: AUDIT N4 made the Doc window the
@@ -94,10 +94,10 @@ export type GraphMode = ViewKind;
  *  `multigraph` first shipped invisible to `winMode`). */
 export const GRAPH_MODES: GraphMode[] = ["matrix", "graph", "dtc", "multigraph", "graphs"];
 
-/** The backends a Storage window can show: the disk, and the room's MinIO
- *  (`minioPanel`: delivery, lots, derivation). AUDIT C · it said «NOT connected
+/** The backends a Storage window can show: the disk, and the room's S3 store
+ *  (`s3Panel`: delivery, lots, derivation). AUDIT C · it said «NOT connected
  *  (phase 2)», which stopped being true when the panel was implemented. */
-export const STORAGE_MODES = ["filesystem", "minio"] as const;
+export const STORAGE_MODES = ["filesystem", "s3"] as const;
 
 /** How a Viewer window shows its collection: one item at a time, or all of it.
  *  Same collection either way — the Mode is the reading, not the content. */
@@ -180,7 +180,7 @@ export interface Arrangement {
     name: string;
     type: WindowType;
     /** per-instance state, e.g. `{ mode: "dtc" }` for a graph window or
-     *  `{ "mode.storage": "minio" }` for any other type — see `modeKey`, which
+     *  `{ "mode.storage": "s3" }` for any other type — see `modeKey`, which
      *  is the one place that knows a graph's slot is the bare `mode`. */
     state?: Record<string, unknown>;
   }>;

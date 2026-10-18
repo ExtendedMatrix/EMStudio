@@ -9,8 +9,8 @@
 #
 # Needs s3Dgraphy importable (its venv has pyinstaller + pandas + lxml):
 #   (cd ../../s3Dgraphy && python3 -m venv .venv \
-#      && .venv/bin/pip install -e '.[sync,minio,geo,docx]' pandas lxml pyinstaller)
-# The [minio] extra enables the /ingest-minio + /presign endpoints in the
+#      && .venv/bin/pip install -e '.[sync,s3,geo,docx]' pandas lxml pyinstaller)
+# The [s3] extra (boto3) enables the /ingest-s3 + /presign endpoints in the
 # sidecar; without it those endpoints 501 gracefully (like TTL without rdflib).
 # The [geo] extra (pyproj) enables /reproject + /georeference-scene, i.e. the map
 # for projected coordinates. The [docx] extra (python-docx) enables the Word
@@ -66,16 +66,18 @@ esac
 WORK="$(mktemp -d)"
 echo "Building em-bridge sidecar for $TRIPLE …"
 
-# Bundle the MinIO SDK only if it is installed in the build venv, so the shared
-# object-store endpoints (/ingest-minio, /presign) work offline in the desktop
-# sidecar. If [minio] wasn't installed, skip it — those endpoints then 501
-# gracefully (like TTL without rdflib), and the build still succeeds.
-MINIO_ARGS=()
-if "$PY" -c "import minio" 2>/dev/null; then
-  MINIO_ARGS=(--collect-submodules minio --copy-metadata minio)
-  echo "  · bundling the 'minio' SDK (shared MinIO endpoints enabled)"
+# Bundle the S3 SDK (boto3) only if it is installed in the build venv, so the
+# shared object-store endpoints (/ingest-s3, /presign) work offline in the desktop
+# sidecar. If [s3] wasn't installed, skip it — those endpoints then 501
+# gracefully (like TTL without rdflib), and the build still succeeds. botocore's
+# service models are DATA files (JSON), hence `--collect-data botocore`.
+S3_ARGS=()
+if "$PY" -c "import boto3" 2>/dev/null; then
+  S3_ARGS=(--collect-submodules boto3 --collect-submodules botocore
+           --collect-data botocore --copy-metadata boto3 --copy-metadata botocore)
+  echo "  · bundling the 'boto3' SDK (shared S3 endpoints enabled)"
 else
-  echo "  · 'minio' SDK not in build venv — /ingest-minio + /presign will 501"
+  echo "  · 'boto3' SDK not in build venv — /ingest-s3 + /presign will 501"
 fi
 
 # The optional engines added by the geo + preview work.
@@ -98,7 +100,7 @@ fi
 GEO_ARGS=()
 # `${ARR[@]+"${ARR[@]}"}` below, not `"${ARR[@]}"`: macOS ships bash 3.2, where
 # expanding an EMPTY array under `set -u` aborts with "unbound variable". That bit
-# for real — the build failed on any machine without the minio SDK.
+# for real — the build failed on any machine without the S3 SDK.
 if "$PY" -c "import pyproj" 2>/dev/null; then
   PROJ_DATA_DIR="$("$PY" -c 'import pyproj, os; print(os.path.join(os.path.dirname(pyproj.__file__), "proj_dir", "share", "proj"))')"
   GEO_ARGS=(--collect-submodules pyproj --copy-metadata pyproj)
@@ -188,7 +190,7 @@ fi
   --add-data "$SRC/mappings${SEP}s3dgraphy/mappings" \
   --hidden-import lxml --hidden-import lxml.etree --hidden-import lxml._elementpath \
   --collect-submodules rdflib --copy-metadata rdflib \
-  ${MINIO_ARGS[@]+"${MINIO_ARGS[@]}"} \
+  ${S3_ARGS[@]+"${S3_ARGS[@]}"} \
   ${GEO_ARGS[@]+"${GEO_ARGS[@]}"} \
   ${PREVIEW_ARGS[@]+"${PREVIEW_ARGS[@]}"} \
   ${DOCX_ARGS[@]+"${DOCX_ARGS[@]}"} \

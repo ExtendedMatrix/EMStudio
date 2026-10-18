@@ -3,7 +3,7 @@
 // selezione»), with the same names and the same refusals.
 //
 // The same bytes — the same digest — are ONE resource with several addresses
-// (the same PDF on the disk, on MinIO, on Zenodo): if an address dies, the
+// (the same PDF on the disk, on the S3 store, on Zenodo): if an address dies, the
 // resource stays. Another manifestation is a sister resource, not an address.
 //
 //   data.addresses = [{locator, residency?, checked_at?, ok?}]

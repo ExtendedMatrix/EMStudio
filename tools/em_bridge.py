@@ -124,12 +124,12 @@ Endpoints:
                              so the UI can draw a typed placeholder, and remote
                              resources answer with their URL so the browser
                              fetches them directly.)
-    POST /ingest-minio     ← {path, resource_id?} → {id, object_key, s3_uri}
+    POST /ingest-s3        ← {path, resource_id?} → {id, object_key, s3_uri}
     POST /presign          ← {id|object_key} → {object_key, http_url}
-                             (shared MinIO object store — s3Dgraphy R2; config from
+                             (shared S3 object store — s3Dgraphy R2; config from
                              the S3_* env, same store Heriverse uses; resource_id
                              keeps a resource's stable ID on "promote"; 501 if the
-                             optional [minio] extra is not bundled)
+                             optional [s3] extra is not bundled)
     POST /generate-narrative-draft
                            ← {doc, activity_id, provider?, model?, instruction?}
                            → {doc, narrative_id, chapter_title, author_id,
@@ -1542,10 +1542,10 @@ def make_handler(api):
             if self.command != "HEAD":
                 self.wfile.write(body)
 
-        # Per-process id → MinIO object_key map, populated by /ingest-minio so a
+        # Per-process id → S3 object_key map, populated by /ingest-s3 so a
         # later /presign can accept the stable {id} (transport-layer convenience;
         # callers may also presign an {object_key} directly, statelessly).
-        _minio_keys: dict = {}
+        _s3_keys: dict = {}
 
         # Quieter, dev-friendly logging.
         def log_message(self, fmt, *args):
@@ -1920,13 +1920,13 @@ def make_handler(api):
                     self._fail(400, f"invalid JSON body: {exc}")
                     return
                 self._georeference_scene(body)
-            elif route in ("/ingest-minio", "/presign"):
+            elif route in ("/ingest-s3", "/presign"):
                 try:
                     body = json.loads(raw.decode("utf-8")) if raw else {}
                 except Exception as exc:
                     self._fail(400, f"invalid JSON body: {exc}")
                     return
-                self._minio(route, body)
+                self._s3(route, body)
             elif route == "/generate-narrative-draft":
                 try:
                     body = json.loads(raw.decode("utf-8")) if raw else {}
@@ -4280,37 +4280,37 @@ def make_handler(api):
                                       "anything outside the named folder"]},
             })
 
-        # Shared MinIO object store (R2 + connective tissue): ingest a local file
-        # into the SAME MinIO Heriverse provisions (config read from the S3_* env
+        # Shared S3 object store (R2 + connective tissue): ingest a local file
+        # into the SAME S3 store Heriverse provisions (config read from the S3_* env
         # by s3dgraphy.api), and presign an object key → a fetchable http_url.
-        # Thin adapter over the api ops; 501 if the [minio] extra is absent (like
+        # Thin adapter over the api ops; 501 if the [s3] extra is absent (like
         # TTL without rdflib) or the op is missing (stale s3dgraphy). A small
         # per-process id→object_key cache lets /presign accept {id} across requests.
-        def _minio(self, route, body):
-            need = "ingest_minio_resource" if route == "/ingest-minio" \
-                else "presign_minio_resource"
+        def _s3(self, route, body):
+            need = "ingest_s3_resource" if route == "/ingest-s3" \
+                else "presign_s3_resource"
             if not hasattr(api, need):
-                self._fail(501, "MinIO ops unavailable — s3dgraphy is out of date")
+                self._fail(501, "S3 ops unavailable — s3dgraphy is out of date")
                 return
             try:
-                if route == "/ingest-minio":
+                if route == "/ingest-s3":
                     path = body.get("path", "")
                     if not path:
-                        self._fail(400, "ingest-minio needs a local file 'path'")
+                        self._fail(400, "ingest-s3 needs a local file 'path'")
                         return
                     if not os.path.isfile(path):
                         self._fail(400, f"no such file: {path}")
                         return
                     # optional resource_id → "promote" keeps the resource's stable
-                    # ID (same id whether FS or MinIO — one ID space)
+                    # ID (same id whether FS or S3 — one ID space)
                     rid = body.get("resource_id") or None
-                    res = api.ingest_minio_resource(path, resource_id=rid)
-                    Handler._minio_keys[res["id"]] = res["object_key"]
+                    res = api.ingest_s3_resource(path, resource_id=rid)
+                    Handler._s3_keys[res["id"]] = res["object_key"]
                     payload = {"ok": True, **res}
                 else:  # /presign
                     key = body.get("object_key")
                     if not key and body.get("id"):
-                        key = Handler._minio_keys.get(body["id"])
+                        key = Handler._s3_keys.get(body["id"])
                         if not key:
                             self._fail(404, "unknown id — ingest first, or pass object_key")
                             return
@@ -4318,11 +4318,11 @@ def make_handler(api):
                         self._fail(400, "presign needs 'object_key' (or a known 'id')")
                         return
                     expires = int(body.get("expires_seconds", 3600))
-                    res = api.presign_minio_resource(key, expires_seconds=expires)
+                    res = api.presign_s3_resource(key, expires_seconds=expires)
                     payload = {"ok": True, **res}
-            except ImportError as exc:  # api.MissingDependency (minio SDK absent)
+            except ImportError as exc:  # api.MissingDependency (boto3 SDK absent)
                 self._fail(501,
-                           f"MinIO backend unavailable — the 'minio' extra is not "
+                           f"S3 backend unavailable — the 's3' extra is not "
                            f"bundled ({exc})")
                 return
             except Exception as exc:  # pragma: no cover — surface to the UI
@@ -5005,17 +5005,17 @@ def make_handler(api):
             return None
 
         def _presign_s3(self, s3_uri):
-            """s3://bucket/key → a temporary http URL, or None when the MinIO
+            """s3://bucket/key → a temporary http URL, or None when the S3
             extra is not bundled / the store is unreachable. Best effort: a
             missing signature is a placeholder, not an error."""
-            if not hasattr(api, "presign_minio_resource"):
+            if not hasattr(api, "presign_s3_resource"):
                 return None
             rest = s3_uri[5:] if s3_uri.startswith("s3://") else s3_uri
             key = rest.split("/", 1)[1] if "/" in rest else ""
             if not key:
                 return None
             try:
-                return api.presign_minio_resource(key, expires_seconds=3600).get(
+                return api.presign_s3_resource(key, expires_seconds=3600).get(
                     "http_url")
             except Exception:
                 return None
@@ -5575,7 +5575,7 @@ def main() -> int:
     print(f"em_bridge listening on http://{args.host}:{args.port} "
           f"(POST /graphml, /import-graphml, /export-ttl, /resolve-authority, "
           f"/scan-resources, /list-resources, /resolve-resource, "
-          f"/resource-preview, /reproject, /georeference-scene, /ingest-minio, "
+          f"/resource-preview, /reproject, /georeference-scene, /ingest-s3, "
           f"/presign, /detach-dtc, /inject-dtc, /bake-dtc, /annotate; "
           f"GET /health, /resolve-authority, /fs/list, /fs/file, /fs/checksum, /fs/roots) — Ctrl-C to stop")
     print("  fs roots (all /fs/* is confined to these): "

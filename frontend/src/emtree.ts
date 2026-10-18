@@ -43,7 +43,7 @@ import { getRecents, type RecentFile } from "./recent";
  *    pattern the resource layer already has. An aux file that quietly persisted
  *    would put a copy of somebody's database inside a document they then share.
  * 2. **The sources are plural**: local files now; the StratiGraph Catalog, the
- *    HDT Catalog (ECCCH) and MinIO later. Each brings its own resolution and its
+ *    HDT Catalog (ECCCH) and the S3 store later. Each brings its own resolution and its
  *    own auth, so the shape here is deliberately minimal: what it is and where it
  *    came from, nothing about how to read it.
  *
@@ -57,8 +57,8 @@ import { getRecents, type RecentFile } from "./recent";
  *   `unified_xlsx_importer`, and the bridge exposes `/import-em-data`, but that
  *   one BUILDS a document rather than merging into one — a bake is a merge, and
  *   inventing it here would be inventing the semantics of the merge too.
- * TODO(ET3): the non-local sources (StratiGraph Catalog, HDT Catalog, MinIO) +
- *   "promote to MinIO". `kind` is already the field that will say which.
+ * TODO(ET3): the non-local sources (StratiGraph Catalog, HDT Catalog, S3 store) +
+ *   "promote to the S3 store". `kind` is already the field that will say which.
  */
 /**
  * What KIND of source an auxiliary file is — the five EMtools types
@@ -127,7 +127,7 @@ export interface AuxiliaryFile {
   id: string;
   name: string;
   /** Where it lives. `local` is the only one P0 would accept. */
-  kind: "local" | "catalog" | "hdt" | "minio";
+  kind: "local" | "catalog" | "hdt" | "s3";
   locator: string;
   /** Which of the five source kinds this is (AUX1). */
   fileType: AuxFileType;

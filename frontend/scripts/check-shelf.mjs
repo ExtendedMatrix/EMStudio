@@ -266,7 +266,7 @@ const DIGEST_B = "sha256:" + "cd".repeat(32);
   const answer = {
     columns: ["ID", "NAME", "RESIDENCE", "ROLE", "MODE", "SIZE"],
     rows: [
-      { ID: "r1", NAME: "tempio", RESIDENCE: "minio", ROLE: "comparandum",
+      { ID: "r1", NAME: "tempio", RESIDENCE: "s3", ROLE: "comparandum",
         MODE: "used_in_graph", SIZE: 104857 },
       { ID: "r2", NAME: "foto", RESIDENCE: "uri", ROLE: "", MODE: "only_shelf",
         SIZE: "" },
@@ -319,7 +319,7 @@ const DIGEST_B = "sha256:" + "cd".repeat(32);
   ok(Sorg.indirizziNelCodice(src).length === 0,
      "no locator in the code: residence is not computed here");
   ok(!Sorg.stringheLetterali(src).some((v) => /^s3:/.test(v)), "…nor an s3 address");
-  for (const value of ["minio", "only_shelf", "used_in_graph", "comparandum",
+  for (const value of ["s3", "only_shelf", "used_in_graph", "comparandum",
                        "internal_source", "subscribe"]) {
     ok(!Sorg.nomina(src, value),
        `the value "${value}" is never named: it is the library's`);

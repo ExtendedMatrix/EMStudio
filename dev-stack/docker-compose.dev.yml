@@ -1,7 +1,7 @@
 # EM dev-stack — a LIGHT local object-storage stack for the Resource layer's
-# MinIO tier (dev AND local real-work without a remote server).
+# S3 tier (dev AND local real-work without a remote server).
 #
-# Default (`up.sh dev`)        = just MinIO + a one-shot bucket init.
+# Default (`up.sh dev`)        = just RustFS (S3) + a one-shot bucket init.
 # With auth (`up.sh dev auth`) = adds Keycloak + Postgres (compose profile `auth`).
 #
 # Reuses Heriverse's S3_* conventions and the shared `heriverse` bucket, so bytes
@@ -11,45 +11,83 @@
 # .env — copy .env.example → .env to customise. This is a STANDALONE dev profile;
 # it does not modify Heriverse-Docker's production compose.
 #
-# NOTE on endpoints: inside this compose network, services reach MinIO at
-# http://minio:9000 (used by `createbuckets` below). A HOST process (em-bridge)
+# The S3 server is RustFS (Apache-2.0), the same pinned image as
+# stratigraph-server's dev-stack: it speaks plain S3, so s3dgraphy's S3 backend
+# (boto3) and every S3 client talk to it unchanged.
+#
+# NOTE on endpoints: inside this compose network, services reach the store at
+# http://rustfs:9000 (used by `rustfs-init` below). A HOST process (em-bridge)
 # must use http://localhost:${S3_PORT} — that is what S3_ENDPOINT in .env is for.
 
 services:
-  # ── MinIO / S3 object store ──────────────────────────────────────────────────
-  minio:
-    image: minio/minio:latest
-    container_name: em-dev-minio
+  # ── RustFS / S3 object store ─────────────────────────────────────────────────
+  rustfs:
+    # Pinned, with the digest beside it: a moving tag is an image that changes
+    # under your feet; the digest is the name that stays put.
+    image: rustfs/rustfs:1.0.2  # sha256:7e948dad4748bda48f8985fda7195f8cf2e4259427011f6120acc2c9acf51587
+    container_name: em-dev-rustfs
     restart: unless-stopped
     ports:
       - "${S3_PORT:-9000}:9000"          # S3 API
-      - "${S3_CONSOLE_PORT:-9001}:9001"  # web console
+      - "${S3_CONSOLE_PORT:-9001}:9001"  # web console (/rustfs/console/)
     environment:
-      MINIO_ROOT_USER: ${S3_ACCESS_KEY_ID:-admin}
-      MINIO_ROOT_PASSWORD: ${S3_SECRET_ACCESS_KEY:-password}
+      # one volume, one disk — a dev node needs no erasure coding
+      RUSTFS_VOLUMES: "/data"
+      RUSTFS_ADDRESS: "0.0.0.0:9000"
+      RUSTFS_CONSOLE_ENABLE: "true"
+      RUSTFS_CONSOLE_ADDRESS: "0.0.0.0:9001"
+      RUSTFS_ACCESS_KEY: ${S3_ACCESS_KEY_ID:-admin}
+      RUSTFS_SECRET_KEY: ${S3_SECRET_ACCESS_KEY:-password}
     volumes:
-      - minio_data:/data
-    command: server /data --console-address ":9001"
+      # the image runs as uid 10001 and its /data is 10001's: an empty named
+      # volume inherits that owner on first creation, no chown needed
+      - rustfs_data:/data
+    healthcheck:
+      # the readiness endpoint, not a port check (curl is in the image)
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:9000/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
 
   # ── one-shot: create the shared bucket + turn ON versioning ───────────────────
   # Versioning makes updates non-destructive: a resource keeps its stable ID and
-  # MinIO keeps the object's history. Idempotent — safe to re-run.
-  createbuckets:
-    image: minio/mc:latest
-    container_name: em-dev-createbuckets
+  # the store keeps the object's history. Idempotent — safe to re-run.
+  # No extra client image: the rustfs image's curl signs plain S3 calls (SigV4).
+  # CreateBucket: 200 = made, 409 (BucketAlreadyOwnedByYou) = already there.
+  # PutBucketVersioning is best effort — a refusal is reported, not fatal.
+  rustfs-init:
+    image: rustfs/rustfs:1.0.2  # sha256:7e948dad4748bda48f8985fda7195f8cf2e4259427011f6120acc2c9acf51587
+    container_name: em-dev-rustfs-init
     depends_on:
-      - minio
+      rustfs:
+        condition: service_healthy
     restart: "no"
+    environment:
+      S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID:-admin}
+      S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY:-password}
+      S3_BUCKET: ${S3_BUCKET:-heriverse}
     entrypoint:
       - /bin/sh
       - -c
-      - >
-        until /usr/bin/mc alias set local http://minio:9000
-        "${S3_ACCESS_KEY_ID:-admin}" "${S3_SECRET_ACCESS_KEY:-password}";
-        do echo 'waiting for minio…'; sleep 2; done;
-        /usr/bin/mc mb --ignore-existing "local/${S3_BUCKET:-heriverse}";
-        /usr/bin/mc version enable "local/${S3_BUCKET:-heriverse}";
-        echo "bucket '${S3_BUCKET:-heriverse}' ready (versioning enabled)";
+      - |
+        code=$$(curl -s -o /dev/null -w '%{http_code}' -X PUT \
+          --aws-sigv4 'aws:amz:us-east-1:s3' \
+          --user "$$S3_ACCESS_KEY_ID:$$S3_SECRET_ACCESS_KEY" \
+          "http://rustfs:9000/$$S3_BUCKET")
+        case "$$code" in
+          200|409) echo "bucket ready: $$S3_BUCKET ($$code)" ;;
+          *) echo "bucket NOT created: HTTP $$code"; exit 1 ;;
+        esac
+        vcode=$$(curl -s -o /dev/null -w '%{http_code}' -X PUT \
+          --aws-sigv4 'aws:amz:us-east-1:s3' \
+          --user "$$S3_ACCESS_KEY_ID:$$S3_SECRET_ACCESS_KEY" \
+          -H 'Content-Type: application/xml' \
+          --data '<VersioningConfiguration xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><Status>Enabled</Status></VersioningConfiguration>' \
+          "http://rustfs:9000/$$S3_BUCKET?versioning")
+        case "$$vcode" in
+          200) echo "versioning enabled on $$S3_BUCKET" ;;
+          *) echo "versioning NOT enabled on $$S3_BUCKET: HTTP $$vcode (bucket usable)" ;;
+        esac
 
   # ── optional auth (compose profile `auth`) ────────────────────────────────────
   postgres:
@@ -85,5 +123,5 @@ services:
       - "${KEYCLOAK_PORT:-8080}:8080"
 
 volumes:
-  minio_data:
+  rustfs_data:
   postgres_data:

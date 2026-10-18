@@ -6312,7 +6312,7 @@ object.viewer-media {
   border-radius: var(--radius);
 }
 /* WHERE the bytes are */
-.shelf-badge.v-minio { border-color: #3a7fb8; color: #6fb3e0; }
+.shelf-badge.v-s3 { border-color: #3a7fb8; color: #6fb3e0; }
 .shelf-badge.v-uri { border-color: #7a6fb8; color: #a99be0; }
 .shelf-badge.v-disk { border-color: var(--border); color: var(--text-muted); }
 /* WHAT it is for — a comparandum is somebody else's yardstick, an internal

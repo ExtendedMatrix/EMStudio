@@ -256,7 +256,7 @@ const eq = (got, want, what) => {
 // transform does not hand one type's mode to another.
 {
   eq(W.winModes("graph"), W.GRAPH_MODES, "the graph window's modes ARE GRAPH_MODES");
-  eq([...W.winModes("storage")], ["filesystem", "minio"], "storage offers its two backends");
+  eq([...W.winModes("storage")], ["filesystem", "s3"], "storage offers its two backends");
   eq([...W.winModes("viewer")], ["single", "gallery"], "viewer offers single + gallery");
   eq([...W.winModes("table")], [], "a type with no modes has no mode list");
 
@@ -284,8 +284,8 @@ const eq = (got, want, what) => {
   const t = { id: "t", type: "graph", state: {} };
   W.setWinModeOf(t, "dtc");
   t.type = "storage";
-  W.setWinModeOf(t, "minio");
-  eq(W.winModeOf(t), "minio", "as storage it is in the storage mode");
+  W.setWinModeOf(t, "s3");
+  eq(W.winModeOf(t), "s3", "as storage it is in the storage mode");
   t.type = "graph";
   eq(W.winModeOf(t), "dtc", "and transformed back it is still in dtc");
   eq(W.winMode(t), "dtc", "the typed graph reader agrees with the generic one");

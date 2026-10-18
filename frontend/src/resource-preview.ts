@@ -265,7 +265,7 @@ function fill(box: HTMLElement, a: PreviewAnswer, opts: ThumbOptions): void {
       return;
     }
     box.appendChild(typedMark(type,
-      a.needs_presign ? "3D · MinIO" : t("rp.localThreeD")));
+      a.needs_presign ? "3D · S3" : t("rp.localThreeD")));
     box.title = a.needs_presign ? t("rp.cannotSign") : t("rp.notAddressable");
     return;
   }
