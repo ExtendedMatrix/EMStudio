@@ -66,7 +66,7 @@
     },
     "updater": {
       "//": "MICRO-DOVE-CHI-MENU p.7 · the PUBLIC key of EMStudio's updates (E.D., 19 Oct 2026, ~/.tauri/emstudio-updater.key.pub; the private one is only in the repository's secrets). Every update is checked against it before it is installed. `createUpdaterArtifacts` is false HERE so a `cargo tauri build` without the private key still builds; .github/workflows/release.yml turns it on when TAURI_SIGNING_PRIVATE_KEY is present. The endpoint below is the stable channel's; a dev build asks for its release's own latest.json (main.rs, `update_install`).",
-      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDRCQkNBRUU4NTBBQjNBQjQKUldTME9xdFE2SzY4U3c5bW90eFRKS21nWVp6eHEvQVl6V0hRRjlYdTJVUlVUaDVoVGlrV0lFeEoK",
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDI0Q0YyOUVGNkI5ODk4ClJXU1ltR3Z2S2M4a0FGZDAwN1YwWEkyWkwzR3R3WkRIR295LzVJSWEwVndtR0Q1bi9UNFNybmlMCg==",
       "endpoints": [
         "https://github.com/ExtendedMatrix/EMStudio/releases/latest/download/latest.json"
       ]
