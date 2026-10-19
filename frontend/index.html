@@ -39,7 +39,7 @@
         <!-- NIGHT-SPAZIO · the version left the bar: it is in the tooltip of
              this mark, in the status bar and in Aiuto ▸ Informazioni -->
       </span>
-      <!-- MENU1 · leader bar: File · Modifica · Mode · Help. The generic
+      <!-- MENU1 · leader bar: File · Modifica · Strumenti · Aiuto (Mode left it, p.3). The generic
            .dropdown/.dd-toggle/.dd-menu wiring (main.ts) auto-attaches; items
            keep their IDs so existing handlers (open/save/import/export/undo/
            redo/settings/sync) are reused, not reimplemented. -->
@@ -55,31 +55,16 @@
           <!-- MICRO-DOVE-CHI-MENU p.1 · filled from src/menu-table.ts by menu-ui.ts (one table, the page and the system menu) -->
         </div>
       </div>
-      <div class="dropdown" id="dd-mode">
-        <button class="dd-toggle" data-i18n-title="menu.modeTitle" title="Session mode"><span data-i18n="toolbar.mode">Mode</span> ▾</button>
-        <div class="dd-menu hidden">
-          <button id="btn-mode-standalone" data-i18n-title="menu.standaloneTitle" title="Standalone: editing a local .em.json"><span data-i18n="toolbar.modeStandalone">Standalone</span></button>
-          <button id="btn-mode-sidecar" data-i18n-title="menu.sidecarTitle" title="Sidecar: live-synced to a host (Blender/EMtools) — ADR-002"><span data-i18n="toolbar.modeSidecar">Sidecar (sync)</span></button>
-          <!-- MODES1 · reachable, not faked: the entry exists so the third mode
-               has a NAME in the interface, and clicking it says plainly that
-               there is no StratiGraph Server to connect to yet. A disabled button would
-               have said "later" without saying what it is. -->
-          <button id="btn-mode-hub" data-i18n-title="mode.hubTitle" title="Join a room on a StratiGraph node"><span data-i18n="toolbar.modeHub">Join Room</span></button>
-          <div class="dd-sep"></div>
-          <!-- ROUND-TRIP · the same room, in the other editor. Not a file
-               transfer: the document lives in the room, so changing surface is
-               a new join. Hidden until there IS a room, because an "open the
-               other editor" that opens nothing is worse than an absent one. -->
-          <button id="btn-open-other" class="hidden" data-i18n-title="roundtrip.title"><span data-i18n="roundtrip.item">Open this room in…</span></button>
-          <!-- CONDIVIDI · A LINK, and deliberately not a panel.
-               Design note `EM_design_condividi-e-firma.md`, Regola IV: the panel
-               lives on the node that hosts the room — that is where the ACL and
-               the owner are, and there is no second copy to keep in step. Every
-               app brings a link here; none brings a copy.
-               Hidden outside a room for the same reason as the line above: there
-               is nothing to share when there is no table. -->
-          <button id="btn-share-room" class="hidden" data-i18n-title="share.openTitle"><span data-i18n="share.open">Share this room…</span></button>
-        </div>
+      <!-- MICRO-DOVE-CHI-MENU p.3 · «Mode» left the top bar: the mode, the node
+           and the room have ONE place, «Where you are» (the status bar's left
+           label, ⇧⌘L). The buttons stay, hidden, because the panel presses
+           them: their handlers are the mode's one implementation. -->
+      <div id="mode-actions" hidden>
+        <button id="btn-mode-standalone" data-i18n-title="menu.standaloneTitle" title="Standalone: editing a local .em.json"><span data-i18n="toolbar.modeStandalone">Standalone</span></button>
+        <button id="btn-mode-sidecar" data-i18n-title="menu.sidecarTitle" title="Sidecar: live-synced to a host (Blender/EMtools) — ADR-002"><span data-i18n="toolbar.modeSidecar">Sidecar (sync)</span></button>
+        <button id="btn-mode-hub" data-i18n-title="mode.hubTitle" title="Join a room on a StratiGraph node"><span data-i18n="toolbar.modeHub">Join Room</span></button>
+        <button id="btn-open-other" class="hidden" data-i18n-title="roundtrip.title"><span data-i18n="roundtrip.item">Open this room in…</span></button>
+        <button id="btn-share-room" class="hidden" data-i18n-title="share.openTitle"><span data-i18n="share.open">Share this room…</span></button>
       </div>
       <!-- WIN7 · Tools: the one-shot instruments. They are not editors and never
            were — StratiMiner exists to MAKE a graph and then get out of the way,

@@ -22,6 +22,8 @@ export const KEYMAP: KeyRow[] = [
   { id: "save", keys: "⌘S", scope: "app" },
   { id: "saveAs", keys: "⇧⌘S", scope: "app" },
   { id: "settings", keys: "⌘,", scope: "app" },
+  // MICRO-DOVE-CHI-MENU p.3 · «Where you are» (the status bar's left label)
+  { id: "where", keys: "⇧⌘L", scope: "app" },
   { id: "undo", keys: "⌘Z", scope: "app" },
   { id: "redo", keys: "⇧⌘Z", scope: "app" },
   { id: "add", keys: "⇧A", scope: "app" },

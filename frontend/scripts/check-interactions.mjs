@@ -4815,7 +4815,7 @@ test("Y1.wait", "Y1 · Sidecar senza Blender: la voce di stato dice «in attesa 
       opened++;
       ws.onMessage(() => {});
     } } });
-  await p.click("#dd-mode .dd-toggle");
+  await p.click("#mode-indicator");   // MICRO-DOVE-CHI-MENU p.3 · «Mode» left the bar
   await p.click('#conn-pop .conn-mode[data-mode="sidecar"]');
   await p.waitForTimeout(1200);
   const waiting = await p.evaluate(() => window.__EM_DRAG__.statusLine());
@@ -4823,13 +4823,13 @@ test("Y1.wait", "Y1 · Sidecar senza Blender: la voce di stato dice «in attesa 
   blender = true;
   await p.waitForFunction(() => document.body.classList.contains("sync-active"), null, { timeout: 9000 }).catch(() => {});
   const back = await p.evaluate(() => ({ line: window.__EM_DRAG__.statusLine(), active: document.body.classList.contains("sync-active") }));
-  await p.click("#dd-mode .dd-toggle");
+  await p.click("#mode-indicator");   // MICRO-DOVE-CHI-MENU p.3 · «Mode» left the bar
   await p.click('#conn-pop .conn-mode[data-mode="standalone"]');
   await p.waitForTimeout(400);
   const off = await p.evaluate(() => window.__EM_DRAG__.statusLine());
   const log = await p.evaluate(() => window.__EM_DRAG__.log().map((l) => l.message));
   await ctx.close();
-  return { pass: /^Waiting for Blender…$/.test(waiting) && back.active && opened >= 1 && !/Waiting/.test(back.line)
+  return { pass: /^On this computer · waiting for Blender…$/.test(waiting) && back.active && opened >= 1 && !/Waiting/.test(back.line)
       && /^On this computer$/.test(off) && log.some((m) => /Blender is back/.test(m)) && !errors.length,
     detail: { waiting, back, opened, tries, off, errors } };
 });
@@ -4849,7 +4849,7 @@ test("Y2.blender", "Y2 · un file «Temple» (EM 1.6.16) aperto, poi Sidecar: il
   await p.waitForFunction(() => !!window.__EM_DRAG__, null, { timeout: 20000 });
   await p.evaluate(([d]) => window.__EM_DRAG__.openAt(d, "/tmp/y2/Temple.em.json"), [temple("1.6.16", ["SU001"])]);
   await p.waitForTimeout(1500);
-  await p.click("#dd-mode .dd-toggle");
+  await p.click("#mode-indicator");   // MICRO-DOVE-CHI-MENU p.3 · «Mode» left the bar
   await p.click('#conn-pop .conn-mode[data-mode="sidecar"]');
   await p.waitForTimeout(2500);
   const r = await p.evaluate(() => ({ slots: window.__EM_DRAG__.slots(), strip: document.getElementById("ns-title")?.textContent,
@@ -5793,14 +5793,16 @@ test("TZ.standalone", "T-Z · Su questo computer: la barra ha esattamente quattr
     modes: [...document.querySelectorAll("#conn-pop .conn-mode")].map((b) => b.textContent),
     sects: [...document.querySelectorAll("#conn-pop .conn-sect")].map((s) => s.dataset.sect ?? "modes") }));
   await p.keyboard.press("Escape");
-  await p.click("#dd-mode .dd-toggle");
+  // MICRO-DOVE-CHI-MENU p.3 · no «Mode» menu any more: ⇧⌘L opens the same panel
+  await p.evaluate(() => document.getElementById("conn-pop")?.classList.add("hidden"));
+  await p.keyboard.press("Shift+Meta+L");
   await p.waitForTimeout(300);
   const fromMenu = await p.evaluate(() => !document.getElementById("conn-pop")?.classList.contains("hidden")
-    && !!document.querySelector("#conn-pop .conn-mode") && document.querySelector("#dd-mode .dd-menu").classList.contains("hidden"));
+    && !!document.querySelector("#conn-pop .conn-mode") && !document.getElementById("dd-mode"));
   const hubTitle = await p.evaluate(() => document.querySelector('#conn-pop .conn-mode[data-mode="hub"]')?.title ?? "");
   await ctx.close();
   return { pass: barOk(bar) && bar.zones[0].text === "On this computer" && bar.health === "ok" && panel.open
-      && JSON.stringify(panel.modes) === JSON.stringify(["On this computer", "With Blender", "In a room"])
+      && JSON.stringify(panel.modes) === JSON.stringify(["On this computer", "With an app", "In a room"])
       && fromMenu && !/NOT WIRED|[Hh]ub/.test(hubTitle) && !errors.length,
     detail: { bar, panel, fromMenu, hubTitle, errors } };
 });
@@ -5821,7 +5823,7 @@ test("TZ.sidecar", "T-Z + T-B1 (lato EMStudio) · Con Blender: quattro zone, zon
           payload: { reason: "no_graph_loaded", message: "No graph loaded in Blender: load it from the EM panel", graphs: ["GreatTemple"], host } }));
       });
     } } });
-  await p.click("#dd-mode .dd-toggle");
+  await p.click("#mode-indicator");   // MICRO-DOVE-CHI-MENU p.3 · «Mode» left the bar
   await p.click('#conn-pop .conn-mode[data-mode="sidecar"]');
   await p.waitForFunction(() => document.body.classList.contains("sync-active"), null, { timeout: 9000 }).catch(() => {});
   await p.waitForTimeout(800);
@@ -5848,11 +5850,13 @@ test("TZ.sidecar", "T-Z + T-B1 (lato EMStudio) · Con Blender: quattro zone, zon
   const slots2 = await p.evaluate(() => window.__EM_DRAG__.slots());
   await p.screenshot({ path: SHOT("tz-barra-sidecar"), clip: { x: 0, y: 960, width: 1600, height: 40 } }).catch(() => {});
   await ctx.close();
-  return { pass: barOk(empty) && empty.zones[0].text === "With Blender (GreatTemple_2026_v3.blend)" && empty.health === "warn"
+  return { pass: barOk(empty) && empty.zones[0].text === "On this computer · with Blender" && empty.health === "warn"
       && /No graph loaded in Blender \(GreatTemple is listed but not loaded\)/.test(empty.zones[2].text)
       && log1.some((m) => /No graph loaded in Blender/.test(m))
       && /No graph loaded in Blender/.test(panel.text) && panel.accept && /What you accept from Blender/.test(panel.text)
-      && !panel.sects.includes("node") && !/em\.localhost/.test(panel.text) && !/em\.localhost/.test(empty.all)
+      // MICRO-DOVE-CHI-MENU p.3 · the panel always has its three sections (the
+      // nodes too, with an app): the BAR still says no node in a Sidecar
+      && JSON.stringify(panel.sects.slice(0, 3)) === JSON.stringify(["mode", "apps", "nodes"]) && !/em\.localhost/.test(empty.all)
       && barOk(loaded) && loaded.health === "ok" && slots.length === 1 && slots2.length === 1 && connects === 1 && !errors.length,
     detail: { empty, panel, loaded, slots, slots2, connects, log1: log1.slice(-4), errors } };
 });
@@ -6261,7 +6265,7 @@ test("TT1.sidecar", "MICRO T1 · Con Blender: arriva il grafo, poi «On this com
     } } });
   const baseline = await everyWindowSays(p);
   await workspace(p, "canvas");
-  await p.click("#dd-mode .dd-toggle");
+  await p.click("#mode-indicator");   // MICRO-DOVE-CHI-MENU p.3 · «Mode» left the bar
   await p.click('#conn-pop .conn-mode[data-mode="sidecar"]');
   await p.waitForFunction(() => window.__EM_DRAG__.nodeCount() > 0, null, { timeout: 15000 }).catch(() => {});
   await p.waitForTimeout(1500);
@@ -6270,7 +6274,7 @@ test("TT1.sidecar", "MICRO T1 · Con Blender: arriva il grafo, poi «On this com
   const words = await wordsOfTheDocument(p);
   const before = leftoversOf(await everyWindowSays(p), words, baseline);
   await workspace(p, "canvas");
-  await p.click("#dd-mode .dd-toggle");
+  await p.click("#mode-indicator");   // MICRO-DOVE-CHI-MENU p.3 · «Mode» left the bar
   await p.click('#conn-pop .conn-mode[data-mode="standalone"]');
   await p.waitForTimeout(1200);
   await p.screenshot({ path: SHOT("tt1-sidecar-dopo-uscita") }).catch(() => {});

@@ -387,7 +387,7 @@ import type {
 import { choose, confirmLot, engineChoices, humanBytes, INV_GROUPS, inventoryFromPlan, movePlan, reportOf, toMove,
   toUpload, type EnginePlan, type EngineReport, type HomeView, type InvChoice, type Inventory } from "./room-inventory";
 import { type HostInfo, SyncClient, SYNC_ACCEPTS, type SyncAccept } from "./sync";
-import { type Access, type ConnectionState, type NodeApi, type Reach, nodeApi, renderConnectionPanel,
+import { type Access, type ConnectionState, type NodeApi, type NodeEntry, type Reach, nodeAccessOf, nodeApi, renderConnectionPanel,
   renderRoomPanel, roleStateId, roomStateId, shortNode, whereDetails, whereHealth, wherePhrase,
   type OrphanAsset, type RoomInfo } from "./connection";
 import { stateBadge, stateSign } from "./state-symbols";
@@ -410,6 +410,7 @@ import {
   AI_PROVIDERS,
   getSettings,
   getSyncUrl,
+  savedNodes,
   iiifBase,
   LOD_LIMIT_MB,
   LOD_LIMIT_POINTS,
@@ -1415,7 +1416,43 @@ function connectionState(): ConnectionState {
     notice: hostNotice, misaligned, reconnecting: hubReconnecting,
     waitingOps: room ? hubWaitingCount() : 0,
     readOnly: hubReadOnly(), role: hostInfo.role ?? null, sync: room ? roomSyncState() : null,
-    who: connectionWho() };
+    who: connectionWho(), nodes: knownNodes(), appUrl: getSyncUrl() };
+}
+/** MICRO-DOVE-CHI-MENU p.3 · the nodes this computer knows, the active one
+ *  first, with what was measured of each (the active one's access is this
+ *  session's; another node's is «not entered») */
+function knownNodes(): NodeEntry[] {
+  const s = getSettings();
+  const active = s.sync.hubUrl.trim().replace(/\/+$/, "");
+  const urls = [active, ...savedNodes(s)].filter((u, i, all) => u && all.indexOf(u) === i);
+  return urls.map((url) => url === active
+    ? { url, active: true, reach: nodeReach, access: nodeAccessOf(connectionAccess()) }
+    : { url, active: false, reach: nodeReachOf.get(url) ?? "unknown", access: "none" });
+}
+/** p.3 · what each known node answered when last asked (the active one is `nodeReach`) */
+const nodeReachOf = new Map<string, Reach>();
+/** p.3 · one node's `/v1/health`, within 5 s */
+async function probeNode(base: string): Promise<{ reach: Reach; profile?: string }> {
+  const ctl = new AbortController();
+  const timer = setTimeout(() => ctl.abort(), 5000);
+  try {
+    const r = await fetch(`${base}/v1/health`, { signal: ctl.signal, cache: "no-store" });
+    const j = r.ok ? await r.json().catch(() => null) as { service?: string; profile?: string } | null : null;
+    return { reach: j?.service === "stratigraph-server" ? "reachable" : "unreachable", profile: j?.profile };
+  } catch {
+    return { reach: "unreachable" };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+/** p.3 · the other known nodes, asked when «Where you are» opens */
+async function probeOtherNodes(): Promise<void> {
+  const active = getSettings().sync.hubUrl.trim().replace(/\/+$/, "");
+  await Promise.all(savedNodes(getSettings()).filter((u) => u !== active).map(async (u) => {
+    nodeReachOf.set(u, (await probeNode(u)).reach);
+  }));
+  const pop = document.getElementById("conn-pop");
+  if (pop && !pop.classList.contains("hidden") && pop.dataset.view === "conn") paintConnectionPanel(pop);
 }
 /** FIRMA DELLA NASCITA · the person this session entered the node as, for the
  *  panel's «Who you are» (read at boot before the identity `let`s exist) */
@@ -1527,22 +1564,13 @@ async function pollNodeReach(): Promise<void> {
   const base = getSettings().sync.hubUrl.trim().replace(/\/+$/, "");
   let next: Reach = "unknown";
   if (base) {
-    const ctl = new AbortController();
-    const timer = setTimeout(() => ctl.abort(), 5000);
-    try {
-      const r = await fetch(`${base}/v1/health`, { signal: ctl.signal, cache: "no-store" });
-      const j = r.ok ? await r.json().catch(() => null) as { service?: string; profile?: string } | null : null;
-      next = j?.service === "stratigraph-server" ? "reachable" : "unreachable";
-      // N2 · a personal node keeps no copy of the files: the bar says it
-      const personal = j?.profile === "personal";
-      if (personal !== nodePersonal) {
-        nodePersonal = personal;
-        if (personal) { logInfo(t("fs.personalNode")); info.textContent = t("fs.personalNode"); }
-      }
-    } catch {
-      next = "unreachable";
-    } finally {
-      clearTimeout(timer);
+    const probe = await probeNode(base);
+    next = probe.reach;
+    // N2 · a personal node keeps no copy of the files: the bar says it
+    const personal = probe.profile === "personal";
+    if (next === "reachable" && personal !== nodePersonal) {
+      nodePersonal = personal;
+      if (personal) { logInfo(t("fs.personalNode")); info.textContent = t("fs.personalNode"); }
     }
   }
   if (next !== nodeReach) {
@@ -1613,6 +1641,26 @@ function paintConnectionPanel(pop: HTMLElement): void {
     // FIRMA DELLA NASCITA · «chi sono, e come esco»
     signOutOfNode: () => { pop.classList.add("hidden"); void signOutOfNode(); },
     signInAsOther: () => { pop.classList.add("hidden"); void signInAsOther(); },
+    // MICRO-DOVE-CHI-MENU p.3 · entering a node is done HERE, about a place:
+    // the same sign-ins as before (oidc.ts), only moved and named
+    enterNode: (url, how) => {
+      pop.classList.add("hidden");
+      useNodeAddress(url);
+      if (how === "orcid") void signIntoNode({ idpHint: "orcid", intent: "identity", then: "rooms" });
+      else void signIntoNode({ intent: "identity", loginHint: currentIdentity()?.orcid || undefined, then: "rooms" });
+    },
+    useNode: (url) => { useNodeAddress(url); paintConnectionPanel(pop); },
+    retryNode: (url) => {
+      nodeReachOf.delete(url);
+      if (url === getSettings().sync.hubUrl.trim().replace(/\/+$/, "")) void pollNodeReach().then(() => paintConnectionPanel(pop));
+      else void probeOtherNodes();
+    },
+    addNode: () => { void addNodeByAddress().then(() => paintConnectionPanel(pop)); },
+    findApp: () => findSyncApp(),
+    openOther: document.getElementById("btn-open-other")?.classList.contains("hidden") ? undefined
+      : () => { pop.classList.add("hidden"); document.getElementById("btn-open-other")?.click(); },
+    shareRoom: document.getElementById("btn-share-room")?.classList.contains("hidden") ? undefined
+      : () => { pop.classList.add("hidden"); document.getElementById("btn-share-room")?.click(); },
   }, { host: sidecarDetail, accept: syncControlEl, roster: hubRosterEl });
   placeConnectionPop(pop);
 }
@@ -1644,6 +1692,62 @@ function toggleConnectionPanel(anchor: HTMLElement | null = null): void {
   pop.classList.remove("hidden");
   paintConnectionPanel(pop);
   void pollNodeReach();
+  void probeOtherNodes();
+}
+/** p.3 · a known node becomes the active one (and stays among the saved). */
+function useNodeAddress(url: string): void {
+  const clean = url.trim().replace(/\/+$/, "");
+  const s = getSettings();
+  if (s.sync.hubUrl.trim().replace(/\/+$/, "") === clean) return;
+  saveSettings({ ...s, sync: { ...s.sync, hubUrl: clean, nodes: [...new Set([clean, ...savedNodes(s)])] } });
+  logInfo(`${t("nodes.use")}: ${clean}`);
+  nodeReach = "unknown";
+  void pollNodeReach();
+}
+/** p.3 · «Add a node…»: its address, asked; it joins the saved nodes. */
+async function addNodeByAddress(): Promise<void> {
+  const typed = window.prompt(t("conn.addNodeAsk"), "https://");
+  if (!typed) return;
+  let url: string;
+  try {
+    const u = new URL(typed.trim());
+    url = u.toString().replace(/\/+$/, "");
+  } catch {
+    toast(t("conn.addNodeBad", { typed }));
+    return;
+  }
+  const s = getSettings();
+  saveSettings({ ...s, sync: { ...s.sync, nodes: [...new Set([...savedNodes(s), url])] } });
+  nodeReachOf.set(url, (await probeNode(url)).reach);
+  if (!s.sync.hubUrl.trim()) useNodeAddress(url);
+}
+/** p.3 · «Find» the synchronised app: the ports EM Tools is known to use, on
+ *  this computer. The local network is not searched: EM Tools does not announce
+ *  itself (measured, 19 Oct 2026), so there is nothing to browse for yet. */
+const SYNC_PORTS = [8788, 8789, 8790, 8787];
+async function findSyncApp(): Promise<string | null> {
+  const s = getSettings();
+  const tries = [s.sync.port, ...SYNC_PORTS].filter((p, i, all) => all.indexOf(p) === i);
+  for (const port of tries) {
+    const url = `ws://localhost:${port}`;
+    const open = await new Promise<boolean>((resolve) => {
+      let done = false;
+      const finish = (ok: boolean): void => { if (!done) { done = true; resolve(ok); } };
+      try {
+        const ws = new WebSocket(url);
+        const timer = setTimeout(() => { try { ws.close(); } catch { /* */ } finish(false); }, 1200);
+        ws.onopen = () => { clearTimeout(timer); try { ws.close(); } catch { /* */ } finish(true); };
+        ws.onerror = () => { clearTimeout(timer); finish(false); };
+      } catch { finish(false); }
+    });
+    if (open) {
+      const next = getSettings();
+      saveSettings({ ...next, sync: { ...next.sync, protocol: "ws", host: "localhost", port } });
+      logInfo(t("conn.foundApp", { url }));
+      return url;
+    }
+  }
+  return null;
 }
 /** K2 · the room's settings, in the same popover: the node's own API */
 function openRoomPanel(roomId?: string): void {
@@ -6210,7 +6314,10 @@ function loadDocument(
   currentFilePath = path; // desktop: enables in-place Save; null in browser
   void storageFollowDocument(path);
   // QOL1 · remember this open (path for desktop reopen, name otherwise).
-  addRecent({ path, name: path ? baseName(path) : sourceName }, Date.now());
+  // MICRO-DOVE-CHI-MENU p.2 · a room's document is not a dropped file: the
+  // room itself is the recent (`fetchRoomTitle`), reopened by entering it
+  const fromRoom = !path && !!sync.room && (sync.connected || sync.retrying);
+  if (!fromRoom) addRecent({ path, name: path ? baseName(path) : sourceName }, Date.now());
   // Does the INCOMING doc already carry node positions? Capture this BEFORE
   // ensureAllEpochParadata (which adds positions for the boxes it creates) —
   // otherwise those few positions make the doc look "already laid out" and we
@@ -14481,6 +14588,7 @@ settingsModal.addEventListener("click", (e) => {
       // connection time and never written down.
       hubUrl: (document.getElementById("set-hub-url") as HTMLInputElement)?.value.trim() ?? "",
       hubRoom: (document.getElementById("set-hub-room") as HTMLInputElement)?.value.trim() ?? "",
+      nodes: getSettings().sync.nodes,
     },
     developer: { showNodeIds: setDevUuid.checked },
     interaction: {
@@ -35557,6 +35665,13 @@ window.addEventListener("keydown", (e) => {
   if (command) {
     e.preventDefault();
     runCommand(command);
+    return;
+  }
+  // MICRO-DOVE-CHI-MENU p.3 · ⇧⌘L: «Where you are», the panel «Mode» was
+  // (L for «luogo», the place; ⌘L alone is the browser's address bar)
+  if ((e.metaKey || e.ctrlKey) && e.shiftKey && !e.altKey && e.key.toLowerCase() === "l") {
+    e.preventDefault();
+    toggleConnectionPanel();
     return;
   }
   if (inField) return;

@@ -66,6 +66,20 @@ that asked for one.
   change). A recent that no longer exists says so and offers «Remove it from
   the list». The Dock menu is not done: tauri 2.11.5 has no API for it
   (measured). `scripts/check-recents.mjs` (15).
+- **«Where you are»** (MICRO-DOVE-CHI-MENU p.3): «Mode» left the top bar; the
+  status bar's left label is the one way in (and ⇧⌘L). It says the place in
+  full — «On this computer», «On this computer · with Blender», «Room X ·
+  em.localhost» — with a green, amber (reconnecting) or red (unreachable) dot.
+  Its panel has three sections: the mode (on this computer / with an app / in a
+  room); the synchronised apps (Blender: state, `ws://` address, «Find», which
+  tries the known ports on this computer); the nodes and rooms (every saved node
+  with whether it answers, your access — not entered / entered as declared /
+  accredited — and Enter with ORCID / with the node's password, or Leave; the
+  active node's rooms under it; «Find nodes», «Add a node…»). A node that does
+  not answer says so in one line with «Try again» (it was «the node did not give
+  the list: Load failed»). The saved nodes are a list (`sync.nodes`, born from
+  `hubUrl`). A room's document is no longer recorded as a dropped file: the
+  room is the recent. `scripts/check-dove-sei.mjs` (21).
 - The RM is bound to the epoch only directly (rules 1.6.36).
 - `addSubgraph` in a room: the proxies of `3d_obj/` and a shelf promotion are
   shared with the node; a host command's delta is shared in a node room.

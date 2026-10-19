@@ -37,6 +37,10 @@ export interface SyncSettings {
    *  session, because a token on disk outlives the reason it was issued. */
   hubUrl: string;
   hubRoom: string;
+  /** MICRO-DOVE-CHI-MENU p.3/p.5 · the nodes this computer knows (Settings ▸
+   *  Connections), `hubUrl` being the active one. Born from `hubUrl` for a
+   *  settings file written before the list existed. */
+  nodes: string[];
 }
 
 export interface DeveloperSettings {
@@ -181,7 +185,7 @@ const DEFAULTS: Settings = {
   identity: { orcidClientId: "APP-DBYSPGP676HKN8OE", orcidBase: "https://orcid.org" },
   texts: { displayLang: "" },
   sync: { protocol: "ws", host: "localhost", port: 8788, tool: "blender",
-          accept: "everything", hubUrl: "", hubRoom: "" },
+          accept: "everything", hubUrl: "", hubRoom: "", nodes: [] },
   developer: { showNodeIds: false },
   interaction: { edgeTooltips: true, strictDocumentNames: true,
                  lotGapMinutes: 30, lotMinPhotos: 5, zoomToSelection: true },
@@ -217,7 +221,7 @@ export const SYNC_TOOLS: { value: string; label: string; enabled: boolean }[] =
 
 function clone(s: Settings): Settings {
   return {
-    sync: { ...s.sync },
+    sync: { ...s.sync, nodes: [...(s.sync.nodes ?? [])] },
     developer: { ...s.developer },
     identity: { ...s.identity },
     texts: { ...s.texts },
@@ -244,6 +248,13 @@ function clone(s: Settings): Settings {
 function migrateSync(stored: Partial<SyncSettings> | undefined
                     ): Partial<SyncSettings> {
   const raw = { ...(stored ?? {}) } as Record<string, unknown>;
+  // MICRO-DOVE-CHI-MENU p.5 · the saved nodes are a LIST now: the one node a
+  // settings file of before held (`hubUrl`) is its first entry, and stays the
+  // active one — nothing lost, nothing to set again
+  if (!Array.isArray(raw.nodes)) {
+    const one = typeof raw.hubUrl === "string" ? raw.hubUrl.trim().replace(/\/+$/, "") : "";
+    raw.nodes = one ? [one] : [];
+  }
   const old = raw.direction;
   delete raw.direction;
   if (typeof raw.accept === "string"
@@ -337,4 +348,12 @@ export function lotThresholds(): { gapSeconds: number; minPhotos: number } {
   const min = Math.round(Number(i.lotMinPhotos));
   return { gapSeconds: (Number.isFinite(gap) && gap > 0 ? gap : 30) * 60,
            minPhotos: Number.isFinite(min) && min >= 2 ? min : 5 };
+}
+
+/** MICRO-DOVE-CHI-MENU p.3 · the saved nodes, clean (no trailing slash, no
+ *  doubles, the active one included). */
+export function savedNodes(s: Settings = current): string[] {
+  const clean = (u: string): string => u.trim().replace(/\/+$/, "");
+  const all = [clean(s.sync.hubUrl), ...(s.sync.nodes ?? []).map(clean)];
+  return all.filter((u, i) => u && all.indexOf(u) === i);
 }

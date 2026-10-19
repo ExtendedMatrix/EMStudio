@@ -70,6 +70,41 @@ export interface ConnectionState {
    *  this session has not entered the node. */
   who?: { name: string | null; orcid: string | null; role: string | null;
           local?: string | null } | null;
+  /** MICRO-DOVE-CHI-MENU p.3 · the nodes this computer knows (Settings ▸
+   *  Connections), the active one first, each with what was measured of it */
+  nodes?: NodeEntry[];
+  /** …and the synchronised app's address (`ws://localhost:8788`) */
+  appUrl?: string;
+}
+
+/** p.3 · a known node, as «Where you are» lists it. `access` is THIS session's,
+ *  so it is known for the active node only («not entered» for the others). */
+export interface NodeEntry {
+  url: string;
+  active: boolean;
+  reach: Reach;
+  access: NodeAccess;
+}
+/** not entered · entered as declared (the node's password, a room's door: the
+ *  node attests an iD nobody verified) · accredited (ORCID through the node) ·
+ *  expired (the node's token ran out) */
+export type NodeAccess = "none" | "declared" | "accredited" | "expired";
+
+/** p.3 · this session's access, as the node list says it */
+export function nodeAccessOf(access: Access): NodeAccess {
+  if (access === "orcid_node") return "accredited";
+  if (access === "node_password" || access === "room_token") return "declared";
+  if (access === "expired") return "expired";
+  return "none";
+}
+
+/** p.3 · a request that never reached the node (the browser says «Load
+ *  failed», «Failed to fetch», «NetworkError…»): the node does not answer, which
+ *  is not the same as the node refusing */
+export function unreachableError(error: unknown): boolean {
+  if (error instanceof NodeError) return false;
+  const m = error instanceof Error ? error.message : String(error);
+  return error instanceof TypeError || /Load failed|Failed to fetch|NetworkError|network|ECONNREFUSED|aborted/i.test(m);
 }
 
 // ── I1 rimasto (E.D., 4 Oct 2026) · the room, the role and the sync with the
@@ -121,10 +156,11 @@ export function nodeName(url: string): string {
  */
 export function wherePhrase(s: ConnectionState): string {
   if (s.mode === "sidecar") {
+    // MICRO-DOVE-CHI-MENU p.3 · «On this computer · with Blender»: the place
+    // first, the app second; the file the app has open is in the tooltip
     const tool = s.hostTool || "Blender";
     if (s.waiting) return t("where.sidecarWaiting", { tool });
-    return s.hostFile ? t("where.sidecarFile", { tool, file: s.hostFile })
-      : t("where.sidecar", { tool });
+    return t("where.sidecar", { tool });
   }
   if (s.mode === "hub" && s.room) {
     // TAVOLO 8 · without network the session is still IN the room, and what it
@@ -164,6 +200,7 @@ export function whereHealth(s: ConnectionState): Health {
  */
 export function whereDetails(s: ConnectionState): string[] {
   const out = [wherePhrase(s)];
+  if (s.mode === "sidecar" && s.hostFile) out.push(t("where.sidecarFile", { tool: s.hostTool || "Blender", file: s.hostFile }));
   if (s.notice) out.push(s.notice);
   if (s.misaligned) out.push(s.misaligned);
   if (s.mode !== "sidecar" && s.node) {
@@ -358,6 +395,21 @@ export interface ConnectionGestures {
   /** …and «Sign in as another user»: the realm asks user and password again
    *  (`prompt=login`) even with its session still alive in the browser */
   signInAsOther?(): void;
+  /** MICRO-DOVE-CHI-MENU p.3 · enter a node: with ORCID (the node accredits)
+   *  or with the node's password (the node attests the iD) */
+  enterNode?(url: string, how: "orcid" | "password"): void;
+  /** …make another known node the active one */
+  useNode?(url: string): void;
+  /** …ask a node again (one that did not answer) */
+  retryNode?(url: string): void;
+  /** …«Add a node…» by its address */
+  addNode?(): void;
+  /** …«Find the synchronised app»: the known ports on this computer; returns
+   *  the address found, or null */
+  findApp?(): Promise<string | null>;
+  /** …the room's other door («Open this room in…»), «Share this room…» */
+  openOther?(): void;
+  shareRoom?(): void;
 }
 
 /** FIRMA DELLA NASCITA · «Who you are» — the person and the role this session
@@ -455,8 +507,15 @@ export function renderRoomList(host: HTMLElement, rooms: RoomInfo[], current: st
   paint();
 }
 
-/** The panel zone 1 opens: where you are, the three ways of working, and — only
- *  when they matter — the host, the node, the room and the rooms you can enter. */
+/**
+ * MICRO-DOVE-CHI-MENU p.3 · «Where you are», the panel zone 1 opens (the left
+ * label of the status bar; «Mode» left the top bar). Three sections, always in
+ * this order: the MODE (on this computer / with an app / in a room), the
+ * SYNCHRONISED APPS (Blender today: its state, its address, «Find»), and the
+ * NODES AND ROOMS (every known node with whether it answers, your access and
+ * Enter / Leave; under the active one its rooms). Entering a node is done here,
+ * because it is about a place; who you are is the right label's panel.
+ */
 export function renderConnectionPanel(host: HTMLElement, s: ConnectionState, g: ConnectionGestures,
                                       parts: ConnectionParts = {}): void {
   host.textContent = "";
@@ -471,14 +530,10 @@ export function renderConnectionPanel(host: HTMLElement, s: ConnectionState, g: 
   host.appendChild(head);
   if (s.notice) host.appendChild(el("p", "conn-line conn-warn", s.notice));
   if (s.misaligned) host.appendChild(el("p", "conn-line conn-warn", s.misaligned));
-  // the person first: «with whom am I in here» is the question the panel is
-  // opened with from zone 2 — never in a Sidecar, where no node is involved
-  if (s.mode !== "sidecar") {
-    const who = renderWhoSection(s, g);
-    if (who) host.appendChild(who);
-  }
 
+  // 1 · the mode
   const modes = el("div", "conn-sect");
+  modes.dataset.sect = "mode";
   modes.appendChild(el("h5", "", t("conn.modeHead")));
   const row = el("div", "conn-modes");
   for (const m of ["standalone", "sidecar", "hub"] as SessionMode[]) {
@@ -492,22 +547,143 @@ export function renderConnectionPanel(host: HTMLElement, s: ConnectionState, g: 
   modes.appendChild(row);
   host.appendChild(modes);
 
-  // the other end, when it is a host on this computer: no node here (D-B)
+  // 2 · the synchronised apps: Blender today, the shape ready for others
+  const apps = el("div", "conn-sect");
+  apps.dataset.sect = "apps";
+  apps.appendChild(el("h5", "", t("conn.appsHead")));
+  const tool = s.hostTool || "Blender";
+  const appRow = el("div", "conn-app");
+  appRow.dataset.app = tool.toLowerCase();
+  const appState = s.mode !== "sidecar" ? "off" : s.waiting ? "waiting" : "on";
+  appRow.dataset.state = appState;
+  const appDot = el("span", "where-dot");
+  appDot.dataset.health = appState === "on" ? "ok" : appState === "waiting" ? "warn" : "off";
+  appRow.append(appDot, el("b", "", tool), el("span", "conn-dim", ` · ${t(`conn.appState.${appState}`)}`));
+  apps.appendChild(appRow);
+  const addr = el("p", "conn-line conn-dim conn-app-url", s.appUrl ?? "");
+  addr.dataset.url = s.appUrl ?? "";
+  apps.appendChild(addr);
+  if (s.mode === "sidecar" && s.hostFile) apps.appendChild(el("p", "conn-line", t("where.sidecarFile", { tool, file: s.hostFile })));
   if (s.mode === "sidecar") {
-    const side = el("div", "conn-sect");
-    side.dataset.sect = "host";
-    side.appendChild(el("h5", "", s.hostTool || "Blender"));
-    if (parts.host) side.appendChild(parts.host);
+    if (parts.host) apps.appendChild(parts.host);
     if (parts.accept) {
-      side.appendChild(el("h5", "", t("conn.acceptHead", { tool: s.hostTool || "Blender" })));
-      side.appendChild(parts.accept);
+      apps.appendChild(el("h5", "", t("conn.acceptHead", { tool })));
+      apps.appendChild(parts.accept);
     }
-    host.appendChild(side);
-    return;
   }
+  const appActs = el("div", "conn-acts");
+  if (g.findApp) {
+    const find = btn(t("conn.findApp"));
+    find.dataset.act = "find-app";
+    find.title = t("conn.findAppTitle");
+    const said = el("span", "conn-dim conn-find-said");
+    find.addEventListener("click", async () => {
+      find.disabled = true;
+      said.textContent = t("conn.finding");
+      const url = await g.findApp!().catch(() => null);
+      find.disabled = false;
+      said.textContent = url ? t("conn.foundApp", { url }) : t("conn.noApp");
+      said.dataset.found = url ?? "";
+      if (url) { addr.textContent = url; addr.dataset.url = url; }
+    });
+    appActs.append(find, said);
+  }
+  apps.appendChild(appActs);
+  host.appendChild(apps);
 
+  // 3 · the nodes and their rooms
+  const nodes = el("div", "conn-sect");
+  nodes.dataset.sect = "nodes";
+  nodes.appendChild(el("h5", "", t("conn.nodesHead")));
+  const list = s.nodes ?? (s.node ? [{ url: s.node, active: true, reach: s.reach, access: nodeAccessOf(s.access) }] : []);
+  if (!list.length) nodes.appendChild(el("p", "conn-line conn-dim", t("conn.noNodeLong")));
+  const ul = el("ul", "conn-nodes");
+  /** the active node's row: its room and its rooms are drawn inside it */
+  let activeLi: HTMLElement | null = null;
+  for (const n of list) {
+    const li = el("li", "conn-node" + (n.active ? " on" : ""));
+    if (n.active) activeLi = li;
+    li.dataset.node = n.url;
+    li.dataset.reach = n.reach;
+    li.dataset.access = n.access;
+    const line = el("div", "conn-node-line");
+    line.appendChild(stateBadge(n.reach === "unreachable" ? "node.unreachable" : "node.reachable", false));
+    const name = n.active || !g.useNode ? el("b", "", shortNode(n.url))
+      : btn(shortNode(n.url), "conn-btn conn-node-use");
+    if (!n.active && g.useNode) {
+      (name as HTMLButtonElement).title = t("conn.useNodeTitle");
+      name.addEventListener("click", () => g.useNode!(n.url));
+    }
+    line.appendChild(name);
+    line.appendChild(el("span", "conn-dim", ` · ${t(`conn.reach.${n.reach}`)}`));
+    if (n.active) line.appendChild(el("span", "conn-access", ` · ${t(`conn.nodeAccess.${n.access}`)}`));
+    li.appendChild(line);
+    if (n.reach === "unreachable") {
+      // one line, and «Try again»
+      const down = el("p", "conn-line conn-err", t("conn.nodeDown", { node: shortNode(n.url) }));
+      down.dataset.err = "unreachable";
+      if (g.retryNode) {
+        const again = btn(t("nodes.retry"));
+        again.dataset.act = "retry-node";
+        again.addEventListener("click", () => g.retryNode!(n.url));
+        down.append(" ", again);
+      }
+      li.appendChild(down);
+    } else if (n.active) {
+      const acts = el("div", "conn-acts");
+      if (n.access === "none" || n.access === "expired") {
+        if (g.enterNode) {
+          const viaOrcid = btn(t("conn.enterOrcid"));
+          viaOrcid.dataset.act = "enter-orcid";
+          viaOrcid.title = t("conn.enterOrcidTitle");
+          viaOrcid.addEventListener("click", () => g.enterNode!(n.url, "orcid"));
+          const viaPw = btn(t("conn.enterPassword"));
+          viaPw.dataset.act = "enter-password";
+          viaPw.title = t("conn.enterPasswordTitle");
+          viaPw.addEventListener("click", () => g.enterNode!(n.url, "password"));
+          acts.append(viaOrcid, viaPw);
+        }
+      } else {
+        if (g.signOutOfNode) {
+          const out = btn(t("conn.leaveNode"));
+          out.dataset.act = "sign-out-node";
+          out.title = t("conn.signOutNodeTitle");
+          out.addEventListener("click", () => g.signOutOfNode!());
+          acts.appendChild(out);
+        }
+        if (g.signInAsOther) {
+          const other = btn(t("conn.signInOther"));
+          other.dataset.act = "sign-in-other";
+          other.title = t("conn.signInOtherTitle");
+          other.addEventListener("click", () => g.signInAsOther!());
+          acts.appendChild(other);
+        }
+      }
+      li.appendChild(acts);
+    }
+    ul.appendChild(li);
+  }
+  nodes.appendChild(ul);
+  const nodeActs = el("div", "conn-acts");
+  if (g.chooseNode) {
+    const find = btn(t("conn.findNodes"));
+    find.dataset.act = "choose-node";
+    find.title = t("conn.findNodesTitle");
+    find.addEventListener("click", () => g.chooseNode!());
+    nodeActs.appendChild(find);
+  }
+  if (g.addNode) {
+    const add = btn(t("conn.addNode"));
+    add.dataset.act = "add-node";
+    add.addEventListener("click", () => g.addNode!());
+    nodeActs.appendChild(add);
+  }
+  nodes.appendChild(nodeActs);
+  host.appendChild(nodes);
+
+  // the room this session is in, under its node
   if (s.mode === "hub" && s.room) {
-    const room = el("div", "conn-sect");
+    const room = el("div", "conn-sect conn-sub");
     room.dataset.sect = "room";
     room.appendChild(el("h5", "", t("conn.roomHead")));
     room.appendChild(el("p", "conn-line", t("conn.inRoom", { room: s.roomTitle || s.room })));
@@ -539,44 +715,28 @@ export function renderConnectionPanel(host: HTMLElement, s: ConnectionState, g: 
       res.addEventListener("click", () => g.roomResources!());
       acts.appendChild(res);
     }
+    if (g.openOther) {
+      const other = btn(t("roundtrip.item"));
+      other.dataset.act = "open-other";
+      other.title = t("roundtrip.title");
+      other.addEventListener("click", () => g.openOther!());
+      acts.appendChild(other);
+    }
+    if (g.shareRoom) {
+      const share = btn(t("share.open"));
+      share.dataset.act = "share-room";
+      share.title = t("share.openTitle");
+      share.addEventListener("click", () => g.shareRoom!());
+      acts.appendChild(share);
+    }
     acts.appendChild(leave);
     room.appendChild(acts);
-    host.appendChild(room);
+    (activeLi ?? host).appendChild(room);
   }
-
-  const node = el("div", "conn-sect");
-  node.dataset.sect = "node";
-  node.appendChild(el("h5", "", t("conn.nodeHead")));
-  if (!s.node) {
-    node.appendChild(el("p", "conn-line", t("conn.noNodeLong")));
-  } else {
-    const dl = el("dl", "conn-facts");
-    const fact = (k: string, v: string, cls = ""): void => {
-      dl.appendChild(el("dt", "", k));
-      dl.appendChild(el("dd", cls, v));
-    };
-    fact(t("conn.k.node"), shortNode(s.node));
-    fact(t("conn.k.reach"), t(`conn.reach.${s.reach}`), `conn-reach-${s.reach}`);
-    // the access is a DETAIL OF THE LINK TO THE NODE, not a second identity
-    fact(t("conn.k.access"), accessLine(s.access), s.access === "expired" ? "conn-access-expired" : "");
-    node.appendChild(dl);
-  }
-  const nodeActs = el("div", "conn-acts");
-  const set = btn(t("conn.nodeSettings"));
-  set.addEventListener("click", () => g.openNodeSettings());
-  nodeActs.appendChild(set);
-  if (g.chooseNode) {
-    const choose = btn(t("nodes.choose"));
-    choose.dataset.act = "choose-node";
-    choose.addEventListener("click", () => g.chooseNode!());
-    nodeActs.appendChild(choose);
-  }
-  node.appendChild(nodeActs);
-  host.appendChild(node);
 
   // R1 · the rooms, asked of the node with this session's access
-  if (s.node && g.listRooms) {
-    const rooms = el("div", "conn-sect");
+  if (s.node && g.listRooms && s.reach !== "unreachable") {
+    const rooms = el("div", "conn-sect conn-sub");
     rooms.dataset.sect = "rooms";
     rooms.appendChild(el("h5", "", t("rooms.head")));
     const body = el("div", "conn-rooms-body");
@@ -597,12 +757,20 @@ export function renderConnectionPanel(host: HTMLElement, s: ConnectionState, g: 
       acts.appendChild(br);
     }
     rooms.appendChild(acts);
-    host.appendChild(rooms);
+    (activeLi ?? host).appendChild(rooms);
     void g.listRooms().then(
       (list) => renderRoomList(body, list, s.room, (id) => g.joinRoom?.(id)),
       (error) => {
         body.textContent = "";
         // A2 · an expired access is not a fault to read: it has a gesture
+        // p.3 · …and a session that never entered is not «expired»: the way in
+        // is the node's own «Enter», just above
+        if (error instanceof NodeError && error.status === 401 && nodeAccessOf(s.access) === "none") {
+          const line = el("p", "conn-line conn-dim", t("rooms.enterFirst"));
+          line.dataset.err = "not-entered";
+          body.appendChild(line);
+          return;
+        }
         if (error instanceof NodeError && error.status === 401 && g.signInAgain) {
           const line = el("p", "conn-line conn-err conn-expired", t("rooms.accessExpired"));
           const again = btn(t("rooms.signInAgain"));
@@ -612,7 +780,19 @@ export function renderConnectionPanel(host: HTMLElement, s: ConnectionState, g: 
           body.appendChild(line);
           return;
         }
-        body.appendChild(el("p", "conn-line conn-err", t("rooms.cannotList", { why: (error as Error).message })));
+        // p.3 · «the node did not give the list: Load failed» was the
+        // browser's words: a node that does not answer is said as such
+        const line = el("p", "conn-line conn-err", unreachableError(error)
+          ? t("rooms.unreachable", { node: shortNode(s.node) })
+          : t("rooms.cannotList", { why: (error as Error).message }));
+        line.dataset.err = unreachableError(error) ? "unreachable" : "refused";
+        if (g.retryNode) {
+          const again = btn(t("nodes.retry"));
+          again.dataset.act = "retry-node";
+          again.addEventListener("click", () => g.retryNode!(s.node));
+          line.append(" ", again);
+        }
+        body.appendChild(line);
       });
   }
 }
