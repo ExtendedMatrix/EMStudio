@@ -479,7 +479,10 @@ import {
 } from "./emdata";
 import { addQualiaClaim, addRow, deleteRow } from "./em-data";
 import { isVolatile, VOLATILE_KEY } from "./volatile";
-import { addRecent, getRecents, removeRecent, type RecentFile } from "./recent";
+import {
+  addRecent, addRecentRoom, clearRecents, getRecents, onRecentsChange, recentReopenable,
+  recentWhere, removeRecentEntry, type RecentFile,
+} from "./recent";
 import {
   WORKSPACES,
   WINDOW_TYPE_META,
@@ -638,7 +641,10 @@ import {
   type DropOptions,
   type DropTarget,
 } from "./drag";
-import { buildPageMenus, commandForKey, followLocale, installNativeMenu, runCommand, type DynamicItem } from "./menu-ui";
+import {
+  buildPageMenus, commandForKey, followLocale, installNativeMenu, refreshNativeRecent, runCommand,
+  type DynamicItem,
+} from "./menu-ui";
 import { currentPlatform } from "./menu-table";
 
 // MICRO-DOVE-CHI-MENU p.1 · the menus come from ONE table (`menu-table.ts`):
@@ -1510,6 +1516,8 @@ async function fetchRoomTitle(room: string): Promise<void> {
     roomTitleOf = { room, title: r.title || room };
     renderStatusLine();
   } catch { /* the id stands in: the line still says which room */ }
+  // MICRO-DOVE-CHI-MENU p.2 · a room entered is a recent: File ▸ Open Recent
+  addRecentRoom({ node: base, room, name: roomTitleOf?.room === room ? roomTitleOf.title : room }, Date.now());
 }
 /** K1 · the node is asked every 10 s while one is set: «not reachable» within
  *  the 30 s the request asks for, and back as soon as it answers again */
@@ -8929,44 +8937,66 @@ function closeActiveDocument(): void {
   closeGraphAsking(slot.id);
 }
 
-/** File ▸ Open Recent: the same list as the Stratigraphy panel's «Recent». */
+/** MICRO-DOVE-CHI-MENU p.2 · File ▸ Open Recent (the page's and the system's):
+ *  the same list as the Stratigraphy panel's «Recent», files and rooms, each
+ *  with where it lives; «Clear the list» at the bottom. */
 function recentMenuItems(): DynamicItem[] {
-  return getRecents().map((r, i) => ({
+  const list = getRecents();
+  if (!list.length) return [];
+  const items: DynamicItem[] = list.map((r, i) => ({
     id: String(i),
-    label: r.name,
-    detail: r.path ? dirName(r.path) : t("emtree.noFile"),
-    disabled: !r.path,
+    label: r.kind === "room" ? t("recent.roomLabel", { name: r.name }) : r.name,
+    detail: recentWhere(r) || t("recent.dropped"),
+    disabled: !recentReopenable(r),
     run: () => void openRecentFile(r),
   }));
+  items.push({ id: "—", label: "", run: () => {} });
+  items.push({ id: "clear", label: t("recent.clear"), run: () => clearRecents() });
+  return items;
 }
-function dirName(path: string): string {
-  const cut = Math.max(path.lastIndexOf("/"), path.lastIndexOf("\\"));
-  return cut > 0 ? path.slice(0, cut) : path;
-}
+// one list, every drawer follows it: the system's File and the EMtree panels
+onRecentsChange(() => {
+  void refreshNativeRecent();
+  try { refreshEMTree(); } catch { /* boot: the panel is drawn later */ }
+});
 
 // QOL1 · reopen a recent file. A path-less recent (a browser drop) cannot be
 // reopened by the sandbox; a path-bearing one reopens on the desktop and, if the
 // file has since disappeared, is pruned from the list.
 async function openRecentFile(r: RecentFile): Promise<void> {
-  if (!r.path) {
-    toast("Recente aperto per drag&drop: riaprilo trascinando di nuovo il file " +
-          "(il browser non può riaprirlo per percorso).");
+  // p.2 · a room: entering it again, on its node
+  if (r.kind === "room" && r.node && r.room) {
+    const s = getSettings();
+    if (s.sync.hubUrl.trim().replace(/\/+$/, "") !== r.node) {
+      saveSettings({ ...s, sync: { ...s.sync, hubUrl: r.node } });
+      void pollNodeReach();
+    }
+    enterRoom(r.room);
     return;
   }
+  if (!r.path) {
+    toast(t("recent.droppedLong", { name: r.name }));
+    return;
+  }
+  let res: Awaited<ReturnType<typeof readEmJsonPath>> = null;
   try {
-    const res = await readEmJsonPath(r.path);
-    if (!res) {
-      toast("Riapertura per percorso disponibile solo nell'app desktop.");
-      return;
-    }
-    if (!(await confirmLeaveSidecar("Opening a file"))) return;
-    // the same door as the browser: a container `{graphs:{…}}` (what s3Dgraphy
-    // writes) and a single graph (a container-of-one) both open.
-    loadContainerDocument(JSON.parse(res.text), baseName(res.path), res.path);
+    res = await readEmJsonPath(r.path);
   } catch {
-    removeRecent(r.path);
-    toast("Il file recente non è più leggibile — rimosso dai recenti.");
-    refreshEMTree();   // every live EMtree window: the list is one shorter
+    // p.2 · a recent that is not there any more SAYS so, and offers to go
+    if (confirm(t("recent.missingAsk", { name: r.name, path: r.path }))) removeRecentEntry(r);
+    return;
+  }
+  if (!res) {
+    toast(t("recent.desktopOnly"));
+    return;
+  }
+  if (!(await confirmLeaveSidecar("Opening a file"))) return;
+  // the same door as the browser: a container `{graphs:{…}}` (what s3Dgraphy
+  // writes) and a single graph (a container-of-one) both open.
+  try {
+    loadContainerDocument(JSON.parse(res.text), baseName(res.path), res.path);
+  } catch (e) {
+    toast(t("recent.unreadable", { name: r.name, why: e instanceof Error ? e.message : String(e) }));
   }
 }
 

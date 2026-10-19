@@ -29,7 +29,7 @@
 import { shownCode } from "./hdto";
 import type { DocumentStore } from "./model";
 import type { ViewKind } from "./types";
-import { getRecents, type RecentFile } from "./recent";
+import { getRecents, recentReopenable, recentWhere, type RecentFile } from "./recent";
 
 /**
  * A per-graph auxiliary file — **the place, not the feature** (ET1 P0).
@@ -969,9 +969,11 @@ export function renderEMTree(host: HTMLElement, tree: EMTree,
         <div class="et-recents-head">${esc(labels("emtree.recent"))}</div>
         <ul class="et-recent-list">
           ${recents.map((r, i) =>
-            `<li><button class="et-recent${r.path ? "" : " et-recent-nofile"}"
-                 data-recent="${i}" title="${esc(r.path ?? labels("emtree.noFile"))}">
-               ${esc(r.name)}</button></li>`).join("")}
+            // MICRO-DOVE-CHI-MENU p.2 · the same list as File ▸ Open Recent:
+            // files and rooms, each with where it lives
+            `<li><button class="et-recent${recentReopenable(r) ? "" : " et-recent-nofile"}${r.kind === "room" ? " et-recent-room" : ""}"
+                 data-recent="${i}" title="${esc(recentWhere(r) || labels("emtree.noFile"))}">
+               ${esc(r.name)}${r.kind === "room" ? ` <small>${esc(recentWhere(r))}</small>` : ""}</button></li>`).join("")}
         </ul>
       </div>`
     : "";

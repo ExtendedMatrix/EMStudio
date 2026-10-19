@@ -3875,6 +3875,13 @@ const EN: Dict = {
   "menu.closeTitle": "Close the active document (asking to save it if needed) and go back to the start screen",
   "menu.svgItem": "SVG",
   "menu.ttlItem": "Turtle (.ttl)",
+  "recent.roomLabel": "Room {name}",
+  "recent.dropped": "dropped in the browser: drag it in again to reopen it",
+  "recent.droppedLong": "«{name}» was dropped into the browser, which cannot reopen a file by its path: drag it in again.",
+  "recent.clear": "Clear the list",
+  "recent.missingAsk": "«{name}» no longer exists at\n{path}\n\nRemove it from the list?",
+  "recent.desktopOnly": "Reopening by path works in the desktop app only.",
+  "recent.unreadable": "«{name}» could not be read: {why}",
 };
 
 // ── Italiano: complete, because E.D. works in it ───────────────────────────────
@@ -7624,6 +7631,13 @@ const IT: Dict = {
   "menu.closeTitle": "Chiudi il documento attivo (chiedendo di salvarlo se serve) e torna alla schermata iniziale",
   "menu.svgItem": "SVG",
   "menu.ttlItem": "Turtle (.ttl)",
+  "recent.roomLabel": "Stanza {name}",
+  "recent.dropped": "trascinato nel browser: trascinalo di nuovo per riaprirlo",
+  "recent.droppedLong": "«{name}» è stato trascinato nel browser, che non può riaprire un file dal percorso: trascinalo di nuovo.",
+  "recent.clear": "Svuota l'elenco",
+  "recent.missingAsk": "«{name}» non esiste più in\n{path}\n\nToglierlo dall'elenco?",
+  "recent.desktopOnly": "Riaprire dal percorso funziona solo nell'app desktop.",
+  "recent.unreadable": "«{name}» non si legge: {why}",
 };
 
 // ── The six other project languages: AI DRAFTS, awaiting validation ───────────

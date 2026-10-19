@@ -58,6 +58,14 @@ that asked for one.
   Quit closes File on Windows and Linux. Settings left Edit. The shortcuts are
   read from the same rows. `scripts/check-menu-table.mjs` (114) compares the
   two surfaces per platform.
+- **Open Recent everywhere** (MICRO-DOVE-CHI-MENU p.2): File ▸ Open Recent ▸
+  (the page's and the Mac's system menu) lists the last 10 files AND rooms,
+  each with its folder or «node · room» in small, and «Clear the list» at the
+  bottom; it is the same list as the Stratigraphy panel's «Recent»
+  (`recent.ts`, which now records a room entered and tells every drawer of a
+  change). A recent that no longer exists says so and offers «Remove it from
+  the list». The Dock menu is not done: tauri 2.11.5 has no API for it
+  (measured). `scripts/check-recents.mjs` (15).
 - The RM is bound to the epoch only directly (rules 1.6.36).
 - `addSubgraph` in a room: the proxies of `3d_obj/` and a shelf promotion are
   shared with the node; a host command's delta is shared in a node room.

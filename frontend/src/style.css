@@ -6086,8 +6086,6 @@ object.viewer-media {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  direction: rtl;
-  text-align: left;
 }
 .shelf-badges {
   display: flex;
@@ -9790,8 +9788,6 @@ tr.tv-sel-act > td { background: color-mix(in srgb, var(--accent) 42%, transpare
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  direction: rtl;
-  text-align: left;
 }
 .dd-sub-menu .dd-empty {
   padding: 6px 10px;
