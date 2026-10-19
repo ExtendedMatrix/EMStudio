@@ -5468,14 +5468,17 @@ const fakeNode = (seen) => ({ pattern: "https://nodo.test/**", handler: async (r
 test("E2.nodepw", "E2+E3 · dal desktop, «iD and the node's password»: il nodo dice che il suo ORCID non ha client e «Chi sei» chiude quella via col perché; la password del nodo apre il login nel browser di sistema col redirect org.extendedmatrix.emstudio:/oidc-return; il codice torna per deep link, lo scambio nomina lo stesso redirect (PKCE, niente segreto) e l'identità è attestata dal nodo", async () => {
   const seen = {};
   const orcid = await fakeOrcid();
+  // MICRO-DOVE-CHI-MENU p.4 · the node's password is an ENTRY to a node, so it
+  // is reached from «Where you are» (the node's row), with the declared iD
   const { p, ctx, errors } = await open({ doc: LITE(), locale: "en", hook: tauriDesktop(), route: fakeNode(seen),
-    init: { "emstudio.settings": JSON.stringify({ sync: { hubUrl: "https://nodo.test" } }) } });
+    init: { "emstudio.settings": JSON.stringify({ sync: { hubUrl: "https://nodo.test" } }),
+            "emstudio.identities": JSON.stringify({ current: ORCID_ID, known: [{ orcid: ORCID_ID, verified: false }] }) } });
   await p.route(orcid.route.pattern, orcid.route.handler);
-  await p.click("#footer-identity");
-  await p.waitForFunction(() => document.querySelector('.idpanel [data-idp-way="nodepw"]')?.dataset.idpReady === "true", null, { timeout: 8000 }).catch(() => {});
-  const before = await idPanel(p);
-  await p.fill(".idpanel [data-idp-orcid]", ORCID_ID);
-  await p.locator('.idpanel [data-idp-way="nodepw"] button').click();
+  await p.click("#mode-indicator");
+  await p.waitForFunction(() => !!document.querySelector('#conn-pop .conn-node.on [data-act="enter-password"]'), null, { timeout: 8000 }).catch(() => {});
+  const before = await p.evaluate(() => ({ enter: [...document.querySelectorAll('#conn-pop .conn-node.on [data-act^="enter"]')].map((b) => b.dataset.act),
+    access: document.querySelector("#conn-pop .conn-node.on")?.dataset.access }));
+  await p.locator('#conn-pop .conn-node.on [data-act="enter-password"]').click();
   await p.waitForTimeout(900);
   const opened = await p.evaluate(() => window.__OPENED__.slice());
   const waiting = await idPanel(p);
@@ -5494,15 +5497,13 @@ test("E2.nodepw", "E2+E3 · dal desktop, «iD and the node's password»: il nodo
   after.set = await p.evaluate(() => document.getElementById("set-orcid-state")?.textContent ?? "");
   await p.screenshot({ path: SHOT("e2-password-del-nodo") }).catch(() => {});
   await ctx.close();
-  const w1 = before.ways.stratigraph ?? {};
-  return { pass: w1.ready === "false" && w1.closed === "no-client" && /no ORCID client/.test(w1.desc)
-      && before.ways.nodepw?.ready === "true" && !before.ways.nodepw?.hidden
+  return { pass: JSON.stringify(before.enter) === JSON.stringify(["enter-orcid", "enter-password"]) && before.access === "none"
       && opened.length === 1 && url?.searchParams.get("redirect_uri") === "org.extendedmatrix.emstudio:/oidc-return"
       && url?.searchParams.get("login_hint") === ORCID_ID && url?.searchParams.get("code_challenge_method") === "S256"
       && waiting.paste === "node"
       && seen.exchange?.redirect_uri === "org.extendedmatrix.emstudio:/oidc-return" && seen.whoamiAuth === "Bearer AT-nodo"
       && /attested by the node Nodo di prova/.test(after.chip) && /Attested by the node Nodo di prova: Dev \(0000-0002-1825-0097\)/.test(after.set) && !errors.length,
-    detail: { w1, nodepw: before.ways.nodepw, opened, waiting: waiting.paste, exchange: seen.exchange && { ...seen.exchange, code_verifier: "…" }, whoami: seen.whoamiAuth, panelAfterReturn: seen.panelAfterReturn, after, errors } };
+    detail: { before, opened, waiting: waiting.paste, exchange: seen.exchange && { ...seen.exchange, code_verifier: "…" }, whoami: seen.whoamiAuth, panelAfterReturn: seen.panelAfterReturn, after, errors } };
 });
 
 // ── MICRO-APRI-IN-EMSTUDIO (13 ott) · il link apre, non rientra ─────────────
@@ -5779,7 +5780,8 @@ const barOf = (p) => p.evaluate(() => {
   const cut = [...bar.querySelectorAll(".sb-zone button, .sb-zone .where-text")].filter((e) => visible(e) && e.scrollWidth > e.clientWidth + 1).map((e) => e.id || e.className);
   return { zones, all, cut, health: document.getElementById("mode-indicator").dataset.health };
 });
-const barOk = (b) => JSON.stringify(b.zones.map((z) => z.zone)) === JSON.stringify(["where", "who", "message", "log"])
+// MICRO-DOVE-CHI-MENU p.4 · «who» moved to the RIGHT end of the bar
+const barOk = (b) => JSON.stringify(b.zones.map((z) => z.zone)) === JSON.stringify(["where", "message", "log", "who"])
   && !/run:|NOT WIRED|Take from|Prendo da|TOOL|\bAT\b/.test(b.all) && !b.cut.length;
 
 test("TZ.standalone", "T-Z · Su questo computer: la barra ha esattamente quattro zone (dove · chi · messaggio · log), nessun «run:», «NOT WIRED» o «Take from…», niente tagliato; la zona 1 dice «On this computer» e il clic apre il pannello Connessione; il menu Mode apre lo stesso pannello", async () => {
@@ -5851,7 +5853,7 @@ test("TZ.sidecar", "T-Z + T-B1 (lato EMStudio) · Con Blender: quattro zone, zon
   await p.screenshot({ path: SHOT("tz-barra-sidecar"), clip: { x: 0, y: 960, width: 1600, height: 40 } }).catch(() => {});
   await ctx.close();
   return { pass: barOk(empty) && empty.zones[0].text === "On this computer · with Blender" && empty.health === "warn"
-      && /No graph loaded in Blender \(GreatTemple is listed but not loaded\)/.test(empty.zones[2].text)
+      && /No graph loaded in Blender \(GreatTemple is listed but not loaded\)/.test(empty.zones[1].text)
       && log1.some((m) => /No graph loaded in Blender/.test(m))
       && /No graph loaded in Blender/.test(panel.text) && panel.accept && /What you accept from Blender/.test(panel.text)
       // MICRO-DOVE-CHI-MENU p.3 · the panel always has its three sections (the
@@ -5879,7 +5881,7 @@ if (K_NODE) test("TZ.room", "T-Z + T-B2 dal vivo · in stanza: quattro zone, zon
   await ctx.close();
   const roomFiles = (fs) => fs.filter((f) => f.room?.id === "cantiere-demo");
   return { pass: barOk(bar) && /^Room Cantiere · demo \(due container\) · em\.localhost$/.test(bar.zones[0].text)
-      && /^Dev User( ✓)? · owner$/.test(bar.zones[1].text)
+      && /^Dev User(⬢)? · ★ owner$/.test(bar.zones[3].text)
       && roomFiles(files1).length === 1 && roomFiles(files2).length === 1
       && tails.some((x) => /in the room Cantiere · demo \(due container\) on em\.localhost:8443/.test(x)) && !tails.some((x) => /browser/.test(x))
       && !errors.length,
@@ -6313,6 +6315,92 @@ if (K_NODE) test("TT1.live", "MICRO T1 dal vivo · utente dev in una stanza del 
       && files.length === 0 && !errors.length,
     detail: { room, words: { title: words.title, nodes: words.nodes, pill: words.pill, units: words.units.length },
               inside: before.found.length, after, files, errors } };
+});
+
+// ── MICRO-DOVE-CHI-MENU (19 ott 2026) · un posto per ogni cosa ─────────────
+test("DC1.menu", "DOVE-CHI-MENU p.1 · il File della pagina viene dalla tabella: Nuovo, Apri…, Apri recenti ▸, Apri al posto…, Chiudi, Salva…, Importa ▸, Esporta ▸, Integra, Crea una stanza, Porta in una nuova stanza; Impostazioni non è più in Modifica ma nell'Aiuto (web)", async () => {
+  const { p, ctx, errors } = await open({ doc: "catena", locale: "it" });
+  const file = await p.evaluate(() => [...document.querySelectorAll("#dd-file .dd-menu > *")].map((e) =>
+    e.classList.contains("dd-sep") ? "—" : e.dataset.cmd ?? e.dataset.sub));
+  const edit = await p.evaluate(() => [...document.querySelectorAll("#dd-edit .dd-menu > button")].map((e) => e.dataset.cmd));
+  const help = await p.evaluate(() => [...document.querySelectorAll("#dd-help .dd-menu > button")].map((e) => e.dataset.cmd));
+  const labels = await p.evaluate(() => [...document.querySelectorAll("#dd-file .dd-menu > button .dd-label-text")].map((e) => e.textContent));
+  await ctx.close();
+  const want = ["new", "open", "openRecent", "openReplace", "close", "—", "save", "saveAs", "saveAll", "pin", "—",
+    "import", "export", "integrate", "—", "createRoom", "bringIntoRoom"];
+  return { pass: JSON.stringify(file) === JSON.stringify(want) && JSON.stringify(edit) === JSON.stringify(["undo", "redo"])
+      && help.includes("settingsHelp") && help.includes("aboutHelp") && !help.includes("updatesHelp")
+      && labels[0] === "Nuovo" && labels.includes("Chiudi") && !errors.length,
+    detail: { file, edit, help, labels, errors } };
+});
+
+test("DC2.recent", "DOVE-CHI-MENU p.2 · Apri recenti dallo Spazio: la stanza (nodo · stanza), il file (cartella), quello trascinato (non riapribile), «Svuota l'elenco»; svuotato, anche il pannello di Stratigrafia è vuoto (una sorgente)", async () => {
+  const recents = [
+    { kind: "room", path: null, name: "Foro", node: "https://em.localhost:8443/em", room: "sarmitest-16102026", ts: 3 },
+    { path: "/Users/ed/Scavi/sarmi.emj", name: "sarmi.emj", ts: 2 },
+    { path: null, name: "trascinato.emj", ts: 1 }];
+  const { p, ctx, errors } = await open({ doc: null, locale: "it", init: { "em.recentFiles": JSON.stringify(recents) } });
+  await p.locator("#workspace-bar .ws-tab", { hasText: /Spazio|Space/ }).first().click().catch(() => {});
+  await p.waitForTimeout(600);
+  await p.click("#dd-file .dd-toggle");
+  await p.click('#dd-file [data-sub="openRecent"] .dd-sub-toggle');
+  await p.waitForTimeout(200);
+  const items = await p.evaluate(() => [...document.querySelectorAll('#dd-file [data-sub="openRecent"] .dd-sub-menu > *')].map((e) =>
+    e.classList.contains("dd-sep") ? "—" : `${e.querySelector(".dd-label-text")?.textContent}|${e.querySelector(".dd-detail")?.textContent ?? ""}|${e.disabled ? "off" : "on"}`));
+  await p.screenshot({ path: SHOT("dc2-apri-recenti-spazio"), clip: { x: 0, y: 0, width: 900, height: 420 } }).catch(() => {});
+  await p.locator('#dd-file [data-sub="openRecent"] [data-dyn="clear"]').click();
+  await p.waitForTimeout(200);
+  const after = await p.evaluate(() => JSON.parse(localStorage.getItem("em.recentFiles") ?? "[]").length);
+  await ctx.close();
+  return { pass: items[0] === "Stanza Foro|em.localhost:8443 · sarmitest-16102026|on" && items[1] === "sarmi.emj|/Users/ed/Scavi|on"
+      && /^trascinato\.emj\|.+\|off$/.test(items[2]) && items[3] === "—" && /^Svuota l'elenco/.test(items[4]) && after === 0 && !errors.length,
+    detail: { items, after, errors } };
+});
+
+test("DC3.where", "DOVE-CHI-MENU p.3 · niente «Mode» in alto; ⇧⌘L apre «Dove sei»: Modo · App sincronizzate · Nodi e stanze; un nodo che non risponde lo dice in una riga con «Riprova», mai «Load failed»", async () => {
+  const { p, ctx, errors } = await open({ doc: null, locale: "it",
+    init: { "emstudio.settings": JSON.stringify({ sync: { hubUrl: "https://nodo.irraggiungibile.invalid/em", nodes: ["https://nodo.irraggiungibile.invalid/em"] } }) } });
+  const mode = await p.evaluate(() => !!document.getElementById("dd-mode"));
+  await p.keyboard.press("Shift+Meta+L");
+  await p.waitForFunction(() => document.querySelector("#conn-pop .conn-node.on")?.dataset.reach === "unreachable", null, { timeout: 12000 }).catch(() => {});
+  const panel = await p.evaluate(() => ({ sects: [...document.querySelectorAll("#conn-pop > .conn-sect")].map((s) => s.dataset.sect),
+    text: document.getElementById("conn-pop")?.textContent ?? "",
+    retry: !!document.querySelector('#conn-pop [data-err="unreachable"] [data-act="retry-node"]'),
+    label: document.querySelector("#mode-indicator")?.textContent }));
+  await p.screenshot({ path: SHOT("dc3-dove-sei-nodo-irraggiungibile") }).catch(() => {});
+  await ctx.close();
+  return { pass: !mode && JSON.stringify(panel.sects) === JSON.stringify(["mode", "apps", "nodes"]) && panel.retry
+      && /non risponde/.test(panel.text) && !/Load failed|Failed to fetch/.test(panel.text) && panel.label === "Sul computer" && !errors.length,
+    detail: { mode, panel: { ...panel, text: panel.text.slice(0, 300) }, errors } };
+});
+
+test("DC4.who", "DOVE-CHI-MENU p.4 · «Chi sei» a destra della barra: dichiarato = bordo tratteggiato, verificato = pieno, accreditato = pieno + segno del nodo; il tooltip dice nome · iD, lo stato e la legenda; il pannello ha UN pulsante «Verifica con ORCID», niente «Sign in to the node»", async () => {
+  const ID = "0000-0003-1111-1112";
+  const base = { orcid: ID, name: "Editor", surname: "Uno" };
+  const seen = {};
+  for (const [k, me] of Object.entries({ declared: { ...base, verified: false },
+    verified: { ...base, verified: true, verifiedBy: "orcid.org", authMode: "orcid" },
+    accredited: { ...base, verified: true, verifiedBy: "nodo.test", authMode: "orcid", accredited: true, attestedBy: "nodo.test" } })) {
+    const { p, ctx, errors } = await open({ doc: null, locale: "it", init: { "emstudio.identities": JSON.stringify({ current: ID, known: [me] }) } });
+    seen[k] = await p.evaluate(() => { const c = document.getElementById("footer-identity");
+      return { state: c.dataset.identityState, border: getComputedStyle(c).borderTopStyle, mark: !!c.querySelector(".id-node-mark"),
+        title: c.title, last: [...document.querySelectorAll("#statusbar .sb-zone")].pop()?.dataset.zone, errors: 0 }; });
+    if (k === "declared") {
+      await p.click("#footer-identity");
+      await p.waitForTimeout(600);
+      seen.panel = await p.evaluate(() => ({ buttons: [...document.querySelectorAll(".idpanel button")].map((b) => b.textContent) }));
+    }
+    seen[k].errors = errors.length;
+    await ctx.close();
+  }
+  const d = seen.declared, v = seen.verified, a = seen.accredited;
+  const verifyButtons = seen.panel.buttons.filter((b) => /Verifica con ORCID|Conferma con ORCID|Confirm with ORCID/.test(b));
+  return { pass: d.state === "declared" && d.border === "dashed" && !d.mark && v.state === "verified" && v.border === "solid" && !v.mark
+      && a.state === "accredited" && a.border === "solid" && a.mark && d.last === "who"
+      && d.title.startsWith(`Editor Uno · ${ID}`) && /tratteggiato/.test(d.title) && /pieno/.test(d.title)
+      && verifyButtons.length === 1 && !seen.panel.buttons.some((b) => /Sign in to the node|Entra nel nodo/.test(b))
+      && !d.errors && !v.errors && !a.errors,
+    detail: { seen } };
 });
 
 // ── run ─────────────────────────────────────────────────────────────────────

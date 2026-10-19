@@ -80,6 +80,17 @@ that asked for one.
   the list: Load failed»). The saved nodes are a list (`sync.nodes`, born from
   `hubUrl`). A room's document is no longer recorded as a dropped file: the
   room is the recent. `scripts/check-dove-sei.mjs` (21).
+- **«Who you are»** (MICRO-DOVE-CHI-MENU p.4): the identity label moved to the
+  RIGHT of the status bar. Its outline is its state: dashed = declared, solid =
+  verified by ORCID, solid with the node's mark ⬢ = accredited on a node; no ◌
+  or ✓ beside the name. The tooltip: «Name · iD», the state in one line, the
+  legend of the three signs. The panel: the identity with its state; ONE «Verify
+  with ORCID» (ORCID directly where this build has a client, through the node's
+  ORCID on the web) and «Declare»; the nodes it is accredited on (information,
+  «Manage in «Where you are»»); «This computer's identities…»; «Sign out of this
+  identity». The node's sign-ins (ORCID through its Keycloak, its password) left
+  this panel for «Where you are»; the flows are the same. Browser suite: DC1–DC4
+  (menus, recents, where, who); E2.nodepw enters the node from «Where you are».
 - The RM is bound to the epoch only directly (rules 1.6.36).
 - `addSubgraph` in a room: the proxies of `3d_obj/` and a shelf promotion are
   shared with the node; a host command's delta is shared in a node room.

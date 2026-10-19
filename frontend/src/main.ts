@@ -80,7 +80,6 @@ import {
   verifyCurrentIdentity,
   adoptVerifiedIdentity,
   attestIdentity,
-  normalizeOrcid,
   identityState,
   signatureAuth,
   WitnessedClaim,
@@ -13679,93 +13678,83 @@ function refreshIdentityChip(): void {
       node: self!.name || self!.orcid || "", orcid: self!.orcid ?? "", local: otherLocal }) : "";
   }
 
+  chip.classList.remove("id-declared", "id-verified", "id-accredited", "id-attested");
+  chip.textContent = "";
   if (rung === "none") {
     chip.textContent = t("identity.none");
     chip.title = t("identity.noneTitle");
+    chip.dataset.identityState = "none";
     return;
   }
 
   const who = identity && (identity.name || identity.surname)
     ? `${identity.name ?? ""} ${identity.surname ?? ""}`.trim()
     : (identity?.orcid ?? nodeIdentity?.name ?? nodeIdentity?.orcid ?? "");
+  // FIRMA DELLA NASCITA · in a room the name is the ROOM's person (the hand
+  // that signs), not this computer's
+  const seated = rung === "presence" ? (self?.name || self?.orcid || who) : who;
+  const orcid = rung === "presence" ? (self?.orcid ?? identity?.orcid ?? "") : (identity?.orcid ?? nodeIdentity?.orcid ?? "");
 
-  if (rung === "presence") {
-    // the room, and what this session may do in it. `sync.role` when the room
-    // has said; otherwise the place alone — a role we have not been told is not
-    // a role to display.
-    // the role the ROOM resolved, from the host's own `host_info` — never
-    // guessed, and absent rather than invented when the room said nothing (the
-    // chip shows a permission it was told about, and never negotiates one)
-    const said = hostInfo.role ?? null;
-    // Z · ZONE 2, «who you are»: the name, ✓ when ORCID stands behind it, and
-    // the role IN this room. The room itself is zone 1's; the node's password is
-    // a detail of the link to the node (the Connection panel), not a second
-    // identity beside the tick.
-    // FIRMA DELLA NASCITA · the name is the ROOM's person (the hand that signs),
-    // not this computer's: entered as `editor`, the chip said Dev User
-    const seated = self!.name || self!.orcid || who;
-    const sameAsLocal = sameSignature(identity?.orcid, self!.orcid) === true;
-    const tick = nodeIdentity && nodeIdentity.authMode !== "node_password"
-      || (sameAsLocal && identityState(identity) === "verified") ? " ✓" : "";
-    chip.classList.add("id-presence");
-    // I1 · the role with the list's sign (none for a role the list lacks)
+  // MICRO-DOVE-CHI-MENU p.4 · THREE STATES, said by the outline and nothing
+  // else beside the name: dashed = declared (an ORCID written here, nobody
+  // verified it); solid = verified by ORCID; solid + the node's mark =
+  // accredited on a node (you may publish there). A node's password ATTESTS
+  // an iD without ORCID: declared, with the node named in the tooltip.
+  const state = chipIdentityState();
+  chip.dataset.identityState = state;
+  chip.classList.add(`id-${state}`);
+  if (identityState(identity) === "attested" || nodeIdentity?.authMode === "node_password") chip.classList.add("id-attested");
+  if (rung === "presence") chip.classList.add("id-presence");
+  const nameEl = document.createElement("span");
+  nameEl.className = "id-name";
+  nameEl.textContent = seated;
+  chip.appendChild(nameEl);
+  const node = accreditedNode();
+  if (state === "accredited") {
+    const mark = document.createElement("span");
+    mark.className = "id-node-mark";
+    mark.textContent = stateSign("node.reachable").glyph;
+    mark.dataset.node = node;
+    chip.appendChild(mark);
+  }
+  // the role IN this room, with the list's sign — never guessed (`host_info.role`)
+  const said = rung === "presence" ? hostInfo.role ?? null : null;
+  if (said) {
     const roleId = roleStateId(said);
     const sign = roleId ? `${stateSign(roleId).glyph} ` : "";
-    chip.textContent = `${seated}${tick}` + (said ? ` · ${sign}${t(`room.role.${said}`)}` : "");
-    chip.title = t("ident.presenceTitle", { who: seated, room: String(sync.room),
-                                            node: nodeIdentity?.node ?? shortNode(getSettings().sync.hubUrl) })
-      + (self!.orcid ? ` (${self!.orcid})` : "") + `\n${t("ident.presenceClick")}`;
-    return;
+    chip.appendChild(document.createTextNode(` · ${sign}${t(`room.role.${said}`)}`));
   }
-
-  if (rung === "identity") {
-    chip.classList.add("id-identity");
-    // dev27 · a session the node ATTESTS (its password, offline) says so in ONE
-    // word; the node and how are in the title and in the panel
-    if (nodeIdentity!.authMode === "node_password") {
-      chip.classList.add("id-attested");
-      chip.dataset.identityState = "attested";
-      chip.textContent = identityState(identity) === "verified" ? `${who} ✓` : who;
-      chip.title = t("idp.attestedTitle", { who, node: nodeIdentity!.attestedBy || nodeIdentity!.node });
-      return;
-    }
-    chip.dataset.identityState = "verified";
-    chip.textContent = `${who} ✓`;
-    chip.title = t("ident.identityTitle", { who, node: nodeIdentity!.node });
-    return;
-  }
-
-  // FIRMA. NO TICK — not even when the ORCID's own checksum flow has run: that
-  // is a different claim from «a node confirms this is you», and one mark for
-  // two facts is how the two get confused. The dashed outline is the whole
-  // statement.
-  chip.classList.add("id-signature");
-  if (nodeIdentityLost) chip.classList.add("id-lost");
-  // dev27 · an identity a node attested stays attested when the node is out of
-  // reach (it was the person, then): the word stays, the outline is dashed
-  const attested = identityState(identity) === "attested";
-  chip.dataset.identityState = attested ? "attested" : identityState(identity) ?? "none";
-  chip.classList.toggle("id-attested", attested);
-  // DEV30 U13 · a VERIFIED identity is not shown as a mere signature: the
-  // word says it, and the tooltip is the one sentence (`identitySentence`)
-  const verifiedId = identityState(identity) === "verified";
-  chip.classList.toggle("verified", verifiedId);
-  chip.dataset.identityState = verifiedId ? "verified" : chip.dataset.identityState;
-  chip.textContent = attested ? who : verifiedId ? `${who} ✓` : `◌ ${who}`;
-  // A DEGRADATION IS SAID, and «the node knows you as somebody else» is one. A
-  // chip that simply stayed dashed would be right and mute, and a mute
-  // degradation is the failure that looks like a success.
+  // A DEGRADATION IS SAID: the node knows you as somebody else, or a
+  // confirmation was lost — amber, and the sentence in the tooltip
   const mismatch = nodeConfirmsTheSignature() === false;
-  if (mismatch) chip.classList.add("id-lost");
-  chip.title = mismatch
-    ? t("ident.otherPerson", {
-        who, node: nodeIdentity!.node,
-        them: nodeIdentity!.name || nodeIdentity!.orcid || "",
-        orcid: nodeIdentity!.orcid ?? "",
-      })
-    : nodeIdentityLost
-      ? t("ident.lostTitle", { who, why: nodeIdentityLost })
-      : identitySentence(identity) + (identityState(identity) === "declared" ? ` ${t("idw.clickToVerify")}` : "");
+  if (mismatch || (nodeIdentityLost && state !== "accredited")) chip.classList.add("id-lost");
+  const stateLine = mismatch
+    ? t("ident.otherPerson", { who, node: nodeIdentity!.node, them: nodeIdentity!.name || nodeIdentity!.orcid || "",
+                               orcid: nodeIdentity!.orcid ?? "" })
+    : nodeIdentityLost ? t("ident.lostTitle", { who, why: nodeIdentityLost })
+    : state === "accredited" ? t("who.state.accredited", { node })
+    : state === "verified" ? t("who.state.verified", { by: identity?.verifiedBy ?? "ORCID" })
+    : identityState(identity) === "attested" ? t("who.state.attested", { node: identity?.attestedBy ?? "" })
+    : t("who.state.declared");
+  // the tooltip: «Name · iD», the state in one line, the legend of the three signs
+  chip.title = [orcid ? `${seated} · ${orcid}` : seated, stateLine, "",
+                t("who.legend", { mark: stateSign("node.reachable").glyph })].join("\n");
+}
+
+/** p.4 · the chip's state: declared · verified · accredited (see above). */
+function chipIdentityState(): "declared" | "verified" | "accredited" {
+  const me = currentIdentity();
+  const viaNode = !!nodeIdentity && nodeIdentity.authMode !== "node_password" && nodeConfirmsTheSignature() !== false;
+  if (viaNode || me?.accredited) return "accredited";
+  if (identityState(me) === "verified") return "verified";
+  return "declared";
+}
+/** p.4 · the node that accredits this identity (this session's, or the one
+ *  that said so last) */
+function accreditedNode(): string {
+  const me = currentIdentity();
+  return nodeIdentity && nodeIdentity.authMode !== "node_password" ? nodeIdentity.node
+    : me?.accredited ? (me.attestedBy || me.verifiedBy || "") : "";
 }
 
 /**
@@ -13835,12 +13824,12 @@ function identityChipClicked(): void {
       // or re-declared
       openIdentityPanel();
       return;
-    // FIRMA DELLA NASCITA · «chi sono, e come esco»: the connection panel says
-    // with which person and role this session entered the node, and has «Sign
-    // out of the node» / «Sign in as another user» — one place, from the chip
+    // MICRO-DOVE-CHI-MENU p.4 · the chip ALWAYS opens «Who you are»: the
+    // person, its state, the nodes it is accredited on. Entering and leaving
+    // a node is «Where you are» (one link away, in the panel)
     case "identity":
     case "presence":
-      toggleConnectionPanel(document.getElementById("footer-identity"));
+      openIdentityPanel();
       return;
   }
 }
@@ -18803,139 +18792,125 @@ function openIdentityPanel(then?: () => void,
     return { row, desc: d };
   };
 
-  // 1 · through a StratiGraph node
-  const w1 = way("stratigraph", t("idp.way1"), t("idp.probing"));
-  const b1 = el("button", "primary", confirming ? t("idp.confirmBtn") : t("idp.way1Btn"));
-  b1.type = "button";
-  b1.disabled = true;
-  let idpHint = "orcid";
-  b1.addEventListener("click", () => { closeIdentityPanel(); void signIntoNode({ idpHint, intent: "identity" }); });
-  w1.row.appendChild(b1);
-
-  // 1b · dev27 · L'ACCESSO SUL CAMPO: the iD and the node's password — shown
-  // when a node answers and ORCID does not (no internet, a local network). The
-  // node's Keycloak, its own login form, the iD as the user name; the result
-  // is an identity ATTESTED by the node, not verified by ORCID.
-  const wp = way("nodepw", t("idp.wayNodePw"), t("idp.probing"));
-  wp.row.hidden = true;
-  wp.row.dataset.idpReady = "false";
-  const bp = el("button", "primary", t("idp.wayNodePwBtn"));
-  bp.type = "button";
-  bp.disabled = true;
-  bp.addEventListener("click", () => {
-    const typed = (box.querySelector("[data-idp-orcid]") as HTMLInputElement | null)?.value ?? "";
-    const iD = orcidProblem(typed) ? (me?.orcid ?? "") : normalizeOrcid(typed);
-    closeIdentityPanel();
-    void signIntoNode({ intent: "identity", loginHint: iD || undefined });
-  });
-  wp.row.appendChild(bp);
-
-  const orcidBase = getSettings().identity.orcidBase || "https://orcid.org";
-  void Promise.all([probeStratiGraphNode(), orcidIn.orcidReachable(orcidBase, 2500)]).then(([pr, orcidUp]) => {
-    if (!box.isConnected) return;
-    if (pr.orcidIdp) idpHint = pr.orcidIdp;
-    const host = pr.ok ? new URL(pr.server).host : "";
-    const node = pr.nodeName || host;
-    // ENTRARE DAL DESKTOP (E3) · the node says its ORCID provider has no
-    // client: the way is CLOSED, with the node's reason — it used to be offered
-    // and fail at ORCID with «invalid client»
-    const nodeOrcidClosed = pr.ok && pr.orcidReady === false;
-    const viaOrcid = pr.ok && orcidUp && !nodeOrcidClosed;
-    w1.desc.textContent = !pr.ok ? (pr.why ?? "")
-      : nodeOrcidClosed ? t("idp.nodeOrcidClosed", { node: host, why: pr.orcidWhy || "" })
-      : orcidUp ? t("idp.way1Desc", { node: host }) : t("idp.orcidDown", { base: new URL(orcidBase).host });
-    if (nodeOrcidClosed) w1.row.dataset.idpClosed = "no-client";
-    b1.disabled = !viaOrcid;
-    w1.row.classList.toggle("off", !viaOrcid);
-    w1.row.dataset.idpReady = String(viaOrcid);
-    // DEV30 U14 · no node configured: the way to configure one, at hand
-    if (pr.noNode) {
-      const cfgBtn = el("button", "link", t("idw.configureNode"));
-      cfgBtn.type = "button";
-      cfgBtn.dataset.idpConfigure = "1";
-      cfgBtn.addEventListener("click", () => { closeIdentityPanel(); openNodeSettings(); });
-      w1.row.appendChild(cfgBtn);
-    }
-    // the field way: a node, and no ORCID — nor ORCID through the node
-    const field = pr.ok && (!orcidUp || nodeOrcidClosed);
-    wp.row.hidden = !field;
-    wp.desc.textContent = !field ? "" : orcidUp ? t("idp.wayNodePwDescClosed", { node }) : t("idp.wayNodePwDesc", { node });
-    bp.disabled = !field;
-    wp.row.dataset.idpReady = String(field);
-    wp.row.dataset.idpNode = node;
-  });
-
-  // 2 · ORCID itself
-  const cfg = orcidConfig();
-  // ENTRARE DAL DESKTOP · EMStudio's client on orcid.org knows ONE return, the
-  // desktop's public page: a web build on a node would derive its own page as
-  // the redirect, and ORCID would refuse it. The web needs a client of its own
-  // (Settings ▸ Identity), registered with its page — or the node's way.
-  const webOnDefault = !!cfg && cfg.isDefault && !isTauri();
-  const w2 = way("orcid", t("idp.way2"), !cfg ? t("idp.noClient") : webOnDefault ? t("idp.orcidWebNeedsClient") : t("idp.probing"));
-  const b2 = el("button", "ghost", confirming ? t("idp.confirmBtn") : t("idp.way2Btn"));
-  b2.type = "button";
-  b2.disabled = true;
-  b2.addEventListener("click", () => {
-    if (!cfg) return;
-    if (!isTauri()) { window.location.assign(orcidIn.orcidAuthorizeUrl(cfg)); return; }
-    // the desktop: ORCID in the system browser, back through the public page
-    const url = orcidIn.orcidAuthorizeUrl(cfg, window.location.href, ORCID_DESKTOP_RETURN);
-    closeIdentityPanel();
-    void openInSystemBrowser(url).then((opened) => {
-      if (opened) { logInfo("identity: ORCID is open in the browser — waiting for its answer"); openIdentityPanel(undefined, { waiting: "orcid" }); }
+  // MICRO-DOVE-CHI-MENU p.4 · «Who you are»: declare, or verify with ORCID —
+  // ONE verification button, not three. Entering a NODE (ORCID through its
+  // Keycloak, or its password) is about a place and lives in «Where you are»;
+  // the flows themselves (orcid-signin.ts, oidc.ts) are unchanged: only where
+  // they are reached and what they are called.
+  const verified = meState === "verified" || (meState === "attested" && !!me?.verified);
+  if (!verified) {
+    const cfg = orcidConfig();
+    // ENTRARE DAL DESKTOP · EMStudio's client on orcid.org knows ONE return, the
+    // desktop's public page: a web build on a node would derive its own page as
+    // the redirect, and ORCID would refuse it — there the verification goes
+    // through the node's ORCID (the node's Keycloak brokers ORCID), as before.
+    const webOnDefault = !!cfg && cfg.isDefault && !isTauri();
+    const direct = !!cfg && !webOnDefault;
+    const wv = way("orcid", t("who.verifyHead"), t("idp.probing"));
+    const bv = el("button", "primary", t("who.verify"));
+    bv.type = "button";
+    bv.dataset.idpVerify = "1";
+    bv.disabled = true;
+    let route: "orcid" | "node" | null = null;
+    let idpHint = "orcid";
+    bv.addEventListener("click", () => {
+      if (route === "node") { closeIdentityPanel(); void signIntoNode({ idpHint, intent: "identity" }); return; }
+      if (route !== "orcid" || !cfg) return;
+      if (!isTauri()) { window.location.assign(orcidIn.orcidAuthorizeUrl(cfg)); return; }
+      // the desktop: ORCID in the system browser, back through the public page
+      const url = orcidIn.orcidAuthorizeUrl(cfg, window.location.href, ORCID_DESKTOP_RETURN);
+      closeIdentityPanel();
+      void openInSystemBrowser(url).then((opened) => {
+        if (opened) { logInfo("identity: ORCID is open in the browser — waiting for its answer"); openIdentityPanel(undefined, { waiting: "orcid" }); }
+      });
     });
-  });
-  w2.row.appendChild(b2);
-  if (!cfg || webOnDefault) { w2.row.classList.add("off"); w2.row.dataset.idpReady = "false"; }
-  else void orcidIn.orcidReachable(cfg.base).then((up) => {
-    if (!box.isConnected) return;
-    w2.desc.textContent = up ? t("idp.way2Desc", { base: new URL(cfg.base).host }) : t("idp.offline");
-    b2.disabled = !up;
-    w2.row.classList.toggle("off", !up);
-    w2.row.dataset.idpReady = String(up);
-  });
+    wv.row.appendChild(bv);
+    const orcidBase = cfg?.base || getSettings().identity.orcidBase || "https://orcid.org";
+    void Promise.all([orcidIn.orcidReachable(orcidBase, 2500),
+                      direct ? Promise.resolve(null) : probeStratiGraphNode()]).then(([up, pr]) => {
+      if (!box.isConnected) return;
+      if (direct && up) {
+        route = "orcid";
+        wv.desc.textContent = t("idp.way2Desc", { base: new URL(orcidBase).host });
+      } else if (!direct && up && pr?.ok && pr.orcidReady !== false) {
+        route = "node";
+        if (pr.orcidIdp) idpHint = pr.orcidIdp;
+        wv.desc.textContent = t("who.verifyViaNode", { node: new URL(pr.server).host });
+      } else {
+        wv.desc.textContent = !up ? t("idp.offline")
+          : !direct && pr?.ok && pr.orcidReady === false ? t("idp.nodeOrcidClosed", { node: new URL(pr.server).host, why: pr.orcidWhy || "" })
+          : !direct ? t("who.verifyNeedsNode")
+          : t("idp.noClient");
+      }
+      bv.disabled = !route;
+      wv.row.classList.toggle("off", !route);
+      wv.row.dataset.idpReady = String(!!route);
+      wv.row.dataset.idpRoute = route ?? "";
+    });
 
-  // 3 · declared, offline
-  const w3 = way("declare", t("idp.way3"), t("idp.way3Desc"));
-  w3.row.dataset.idpReady = "true";
-  const line = el("div", "idp-line");
-  const inp = el("input");
-  inp.dataset.idpOrcid = "1";
-  inp.placeholder = "0000-0000-0000-000X";
-  inp.autocomplete = "off";
-  inp.spellcheck = false;
-  inp.setAttribute("aria-label", "ORCID iD");
-  if (me && !me.verified) inp.value = me.orcid;
-  const nameIn = el("input");
-  nameIn.dataset.idpName = "1";
-  nameIn.placeholder = t("idp.namePh");
-  nameIn.setAttribute("aria-label", t("idp.namePh"));
-  if (me?.name || me?.surname) nameIn.value = [me.name, me.surname].filter(Boolean).join(" ");
-  const b3 = el("button", "ghost", t("idp.way3Btn"));
-  b3.type = "button";
-  b3.dataset.idpDeclare = "1";
-  const err = el("div", "idp-err");
-  const declare = (): void => {
-    const full = nameIn.value.trim();
-    const sp = full.lastIndexOf(" ");
-    const res = declareIdentity(inp.value, sp > 0 ? { name: full.slice(0, sp), surname: full.slice(sp + 1) } : { name: full });
-    if (!res.ok) { err.textContent = t(`identity.problem.${res.problem}`); inp.focus(); return; }
-    applyIdentityToDocument();
-    refreshIdentityPanel();
-    refreshIdentityChip();
-    toast(t("identity.declared", { orcid: res.identity.orcid }));
-    closeIdentityPanel();
-    resumeIdentityThen();
-  };
-  b3.addEventListener("click", declare);
-  inp.addEventListener("keydown", (e) => { if (e.key === "Enter") declare(); });
-  line.append(inp, nameIn, b3);
-  w3.row.append(line, err);
+    // declared, offline: the iD written here
+    const w3 = way("declare", t("idp.way3"), t("idp.way3Desc"));
+    w3.row.dataset.idpReady = "true";
+    const line = el("div", "idp-line");
+    const inp = el("input");
+    inp.dataset.idpOrcid = "1";
+    inp.placeholder = "0000-0000-0000-000X";
+    inp.autocomplete = "off";
+    inp.spellcheck = false;
+    inp.setAttribute("aria-label", "ORCID iD");
+    if (me && !me.verified) inp.value = me.orcid;
+    const nameIn = el("input");
+    nameIn.dataset.idpName = "1";
+    nameIn.placeholder = t("idp.namePh");
+    nameIn.setAttribute("aria-label", t("idp.namePh"));
+    if (me?.name || me?.surname) nameIn.value = [me.name, me.surname].filter(Boolean).join(" ");
+    const b3 = el("button", "ghost", t("idp.way3Btn"));
+    b3.type = "button";
+    b3.dataset.idpDeclare = "1";
+    const err = el("div", "idp-err");
+    const declare = (): void => {
+      const full = nameIn.value.trim();
+      const sp = full.lastIndexOf(" ");
+      const res = declareIdentity(inp.value, sp > 0 ? { name: full.slice(0, sp), surname: full.slice(sp + 1) } : { name: full });
+      if (!res.ok) { err.textContent = t(`identity.problem.${res.problem}`); inp.focus(); return; }
+      applyIdentityToDocument();
+      refreshIdentityPanel();
+      refreshIdentityChip();
+      toast(t("identity.declared", { orcid: res.identity.orcid }));
+      closeIdentityPanel();
+      resumeIdentityThen();
+    };
+    b3.addEventListener("click", declare);
+    inp.addEventListener("keydown", (e) => { if (e.key === "Enter") declare(); });
+    line.append(inp, nameIn, b3);
+    w3.row.append(line, err);
+    queueMicrotask(() => inp.focus());
+  }
+
+  // the nodes this identity is accredited on: information only, managed in
+  // «Where you are» (entering and leaving a node is about a place)
+  const nodesBox = el("div", "idp-nodes");
+  nodesBox.dataset.idpNodes = "1";
+  nodesBox.appendChild(el("b", undefined, t("who.nodesHead")));
+  const accNode = accreditedNode();
+  const selfOnNode = nodeSelf();
+  if (accNode) nodesBox.appendChild(el("div", "idp-d", t("who.accreditedOn", { node: accNode })));
+  else nodesBox.appendChild(el("div", "idp-d", t("who.noNodes")));
+  if (selfOnNode && localIsAnotherPerson()) {
+    nodesBox.appendChild(el("div", "idp-d idp-warn", t("conn.whoLocalOther", {
+      local: localIsAnotherPerson() ?? "", who: selfOnNode.name || selfOnNode.orcid || "" })));
+  }
+  const toWhere = el("button", "link", t("who.manageWhere"));
+  toWhere.type = "button";
+  toWhere.dataset.idpWhere = "1";
+  toWhere.addEventListener("click", () => { closeIdentityPanel(); toggleConnectionPanel(); });
+  nodesBox.appendChild(toWhere);
+  box.appendChild(nodesBox);
 
   const foot = el("div", "idp-foot");
-  const manage = el("button", "link", t("idp.manage"));
+  const manage = el("button", "link", t("who.thisComputer"));
   manage.type = "button";
+  manage.dataset.idpManage = "1";
   manage.addEventListener("click", () => { closeIdentityPanel(); openSettings("settings-sect-identity"); });
   const cl = el("button", "link", t("tr.close"));
   cl.type = "button";
@@ -18945,7 +18920,7 @@ function openIdentityPanel(then?: () => void,
   // DEV30 U15 · leave: forget this identity on this machine, and the node's
   // session with it (nothing is deleted anywhere else)
   if (me) {
-    const out = el("button", "link", t("idw.signOut"));
+    const out = el("button", "link", t("who.signOut"));
     out.type = "button";
     out.dataset.idpSignout = "1";
     out.title = t("idw.signOutHint", { orcid: me.orcid });
@@ -18974,7 +18949,16 @@ function openIdentityPanel(then?: () => void,
     document.removeEventListener("keydown", onKey, true);
   };
   document.addEventListener("keydown", onKey, true);
-  inp.focus();
+  // p.4 · opened from the chip, which is on the RIGHT of the status bar now:
+  // above it, right-aligned
+  if (!opts.anchor && chip?.isConnected) {
+    const r = chip.getBoundingClientRect();
+    box.style.left = "auto";
+    box.style.top = "auto";
+    box.style.right = `${Math.max(8, Math.round(innerWidth - r.right))}px`;
+    box.style.bottom = `${Math.max(8, Math.round(innerHeight - r.top + 6))}px`;
+    box.dataset.anchored = "chip";
+  }
 }
 
 /** A node confirmed who signed in: the identity is VERIFIED with the node as

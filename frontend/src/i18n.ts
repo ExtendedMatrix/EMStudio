@@ -3912,6 +3912,21 @@ const EN: Dict = {
   "rooms.unreachable": "{node} does not answer, so its rooms cannot be listed.",
   "keys.where": "Where you are",
   "rooms.enterFirst": "Enter the node to see your rooms on it.",
+  "who.state.declared": "Declared: an ORCID written here, not verified by anyone. You can work and sign; to publish, verify it.",
+  "who.state.verified": "Verified: confirmed by {by}.",
+  "who.state.accredited": "Accredited on {node}: you may publish there.",
+  "who.state.attested": "Declared, attested by the node {node} with its password (not by ORCID).",
+  "who.legend": "╌ dashed: declared, not verified\n━ solid: confirmed by ORCID\n━ {mark} solid with the node's mark: accredited on a node, you may publish there",
+  "who.verifyHead": "Verify with ORCID",
+  "who.verify": "Verify with ORCID",
+  "who.verifyViaNode": "ORCID, through the node {node} (this web page has no ORCID client of its own)",
+  "who.nodesHead": "Accredited on",
+  "who.accreditedOn": "{node}: you may publish there",
+  "who.noNodes": "no node yet",
+  "who.manageWhere": "Manage in «Where you are»",
+  "who.thisComputer": "This computer's identities…",
+  "who.signOut": "Sign out of this identity",
+  "who.verifyNeedsNode": "On the web ORCID is reached through a node: choose one in «Where you are», or give this page an ORCID client of its own (This computer's identities…).",
 };
 
 // ── Italiano: complete, because E.D. works in it ───────────────────────────────
@@ -7698,6 +7713,21 @@ const IT: Dict = {
   "rooms.unreachable": "{node} non risponde, quindi le sue stanze non si possono elencare.",
   "keys.where": "Dove sei",
   "rooms.enterFirst": "Entra nel nodo per vedere le tue stanze.",
+  "who.state.declared": "Dichiarato: un ORCID scritto qui, non verificato da nessuno. Puoi lavorare e firmare; per pubblicare, verificalo.",
+  "who.state.verified": "Verificato: confermato da {by}.",
+  "who.state.accredited": "Accreditato su {node}: lì puoi pubblicare.",
+  "who.state.attested": "Dichiarato, attestato dal nodo {node} con la sua password (non da ORCID).",
+  "who.legend": "╌ tratteggiato: dichiarato, non verificato\n━ pieno: confermato da ORCID\n━ {mark} pieno con il segno del nodo: accreditato su un nodo, lì puoi pubblicare",
+  "who.verifyHead": "Verifica con ORCID",
+  "who.verify": "Verifica con ORCID",
+  "who.verifyViaNode": "ORCID, attraverso il nodo {node} (questa pagina web non ha un client ORCID suo)",
+  "who.nodesHead": "Accreditato su",
+  "who.accreditedOn": "{node}: lì puoi pubblicare",
+  "who.noNodes": "nessun nodo, per ora",
+  "who.manageWhere": "Gestisci in «Dove sei»",
+  "who.thisComputer": "Identità di questo computer…",
+  "who.signOut": "Esci da questa identità",
+  "who.verifyNeedsNode": "Sul web ORCID si raggiunge attraverso un nodo: sceglilo in «Dove sei», o dai a questa pagina un client ORCID suo (Identità di questo computer…).",
 };
 
 // ── The six other project languages: AI DRAFTS, awaiting validation ───────────

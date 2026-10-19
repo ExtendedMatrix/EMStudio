@@ -9809,3 +9809,20 @@ tr.tv-sel-act > td { background: color-mix(in srgb, var(--accent) 42%, transpare
 .conn-panel .conn-access { font-size: 12px; }
 .conn-panel .conn-node[data-access="accredited"] .conn-access { color: var(--ok, #2e8b57); }
 .conn-panel .conn-sect.conn-sub { margin-left: 14px; padding-left: 8px; border-left: 2px solid var(--border); }
+
+/* MICRO-DOVE-CHI-MENU p.4 · «Who you are» on the RIGHT of the bar, and its
+   three states said by the outline alone: dashed = declared, solid = verified
+   by ORCID, solid + the node's mark = accredited on a node */
+#statusbar .sb-who { margin-left: 6px; }
+.footer-chip.id-declared,
+.footer-chip.id-verified,
+.footer-chip.id-accredited { border-radius: 999px; padding: 1px 9px; color: var(--text); }
+.footer-chip.id-declared { border: 1px dashed var(--border-strong, var(--border)); }
+.footer-chip.id-verified,
+.footer-chip.id-accredited { border: 1px solid var(--ok, var(--border-strong)); }
+.footer-chip.id-presence { background: color-mix(in srgb, var(--ok, #4cc98a) 16%, transparent); font-weight: 600; }
+.footer-chip.id-lost { border-color: var(--warn, var(--border)); color: var(--warn, var(--text)); }
+.footer-chip .id-node-mark { margin-left: 5px; font-size: 10px; color: var(--ok, var(--text)); }
+.idp-nodes { display: grid; gap: 3px; padding: 8px 10px; margin-bottom: 8px; border: 1px dashed var(--border); border-radius: var(--radius); }
+.idp-nodes .idp-warn { color: var(--warn, #b7791f); }
+.idp-nodes > button.link { justify-self: start; }

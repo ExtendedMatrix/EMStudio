@@ -324,15 +324,7 @@
       <div class="sb-zone sb-where" data-zone="where">
         <button id="mode-indicator" type="button" aria-haspopup="dialog"><span class="where-dot"></span><span class="where-text">On this computer</span></button>
       </div>
-      <!-- 2 · WHO YOU ARE: «Name ✓» (+ the role in a room) → the Identity panel.
-           A claimed iD and a verified one look different on purpose: the
-           difference decides whether this person may publish. -->
-      <div class="sb-zone sb-who" data-zone="who">
-        <button id="footer-identity" class="footer-chip" title="">—</button>
-        <!-- FIRMA DELLA NASCITA · the node's person is not this computer's: said in one line -->
-        <span id="footer-identity-other" class="sb-other hidden"></span>
-      </div>
-      <!-- 3 · THE MESSAGE: the last useful sentence for a person. The context
+      <!-- 2 · THE MESSAGE: the last useful sentence for a person. The context
            breadcrumb, the project's revision and the conflict chip are messages
            too: they say something about what is on screen. -->
       <div class="sb-zone sb-message" data-zone="message">
@@ -341,11 +333,20 @@
         <span id="project-version" class="hidden"></span>
         <button id="conflict-reopen" class="footer-chip hidden" title=""></button>
       </div>
-      <!-- 4 · LOG AND WARNINGS: «what happened» (a drawer) and «what is wrong
+      <!-- 3 · LOG AND WARNINGS: «what happened» (a drawer) and «what is wrong
            now», counted in ONE place from `issues()`. -->
       <div class="sb-zone sb-log" data-zone="log">
         <button id="footer-log" class="footer-log" type="button" aria-expanded="false" aria-controls="log-drawer">Log · 0</button>
         <button id="footer-warnings" class="warn-pill ok" type="button" aria-expanded="false" aria-haspopup="dialog">0</button>
+      </div>
+      <!-- 4 · WHO YOU ARE (MICRO-DOVE-CHI-MENU p.4: on the RIGHT, «where» on the
+           left): the name, its outline saying its state → the «Who you are» panel.
+           A claimed iD and a verified one look different on purpose: the
+           difference decides whether this person may publish. -->
+      <div class="sb-zone sb-who" data-zone="who">
+        <button id="footer-identity" class="footer-chip" title="">—</button>
+        <!-- FIRMA DELLA NASCITA · the node's person is not this computer's: said in one line -->
+        <span id="footer-identity-other" class="sb-other hidden"></span>
       </div>
       <!-- Z · what LEFT the bar, kept as live elements the code goes on drawing:
            the Connection panel places them in its sections when it opens. -->
