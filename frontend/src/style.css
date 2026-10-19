@@ -9837,3 +9837,12 @@ tr.tv-sel-act > td { background: color-mix(in srgb, var(--accent) 42%, transpare
 .settings-adv > summary { cursor: pointer; color: var(--text-muted); font-size: 12px; }
 .set-nodes .set-node-active { display: inline; margin: 0; }
 #settings-sect-node .settings-node-actions #set-node-add { flex: 1 1 auto; min-width: 18ch; }
+
+/* MICRO-DOVE-CHI-MENU p.6 · Blender's numeric field: a press drags (the arrows
+   say so), a click types (the caret says so), what a column drag took is lit */
+input.num-field { cursor: ew-resize; font-variant-numeric: tabular-nums; text-align: right; }
+input.num-field.num-editing { cursor: text; text-align: left; }
+input.num-field.num-ro { cursor: default; color: var(--text-muted); }
+input.num-field.num-dragging,
+input.num-field.num-taken { background: color-mix(in srgb, var(--accent, #4a8fe7) 22%, var(--bg-panel)); }
+body.num-drag-on, body.num-drag-on * { cursor: ew-resize !important; user-select: none; }

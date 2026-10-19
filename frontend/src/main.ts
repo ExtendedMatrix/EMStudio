@@ -243,7 +243,8 @@ import { chooseVersion, SCENE_USES, USES } from "./asset-versions";
 import { mountSpaceScene, type SceneItem, type SceneMenuRequest, type SceneView, type SpaceSceneHandle } from "./scene3d";
 import { blenderToThree, eulerFromUp, leftSelects, threeToBlender, type AlignedView, type CamState, type Pose, type V3 } from "./space-nav";
 import { carryXf, coordDecimals, deg, IDENTITY, isIdentity, poseToXf, rad, readTransform, transformData, withPivot, xfToPose, type Xf } from "./transform3d";
-import { parseTyped, renderTransformForm, type TransformFormTexts } from "./transform-ui";
+import { renderTransformForm, type TransformFormTexts } from "./transform-ui";
+import { NumGroup, numField } from "./num-field";
 import { implicitGroups, isImplicitGroup, outsideMembers, unitOfImplicit, withImplicitGroups } from "./implicit-pd";
 import { addFileSketch, addSketch, listSketches, loadSketches, onSketches, removeSketch, serializeSketches, SHAPE_FAMILIES, SHAPES, shapeById, shapeLabel, sketchById, updateSketch } from "./shapes3d";
 import { boxSelect, clickOutliner, clickScene, EMPTY_SEL, hideKeys, selectAll, withoutKeys, type SpaceSel } from "./space-selection";
@@ -22704,30 +22705,30 @@ function renderSpaceNPanel(el: HTMLElement, win: Win, h: SpaceSceneHandle): void
   const grid = document.createElement("div");
   grid.className = "xf-grid";
   const dec = coordDecimals(Math.max(...at.map(Math.abs)));
-  const row = (lab: string, field: string, v: number, d: number, commit: (x: number) => void) => {
+  // MICRO-DOVE-CHI-MENU p.6 · Blender's numeric fields: drag, click to type,
+  // ⌘C ⌘V Backspace over them, a drag down X·Y·Z takes the three; one gesture
+  // is one write
+  const posGroup = new NumGroup((changes) => {
+    const p = [...at] as V3;
+    for (const c of changes) { const i = "xyz".indexOf(c.field.slice(-1)); if (i >= 0 && c.value != null) p[i] = c.value; }
+    h.setCursor(blenderToThree(p)); renderSpaceNPanels();
+  });
+  const rotGroup = new NumGroup((changes) => {
+    const r = [...spaceCursorRot] as V3;
+    for (const c of changes) { const i = "xyz".indexOf(c.field.slice(-1)); if (i >= 0 && c.value != null) r[i] = rad(c.value); }
+    spaceCursorRot = r; renderSpaceNPanels();
+  });
+  const row = (lab: string, field: string, v: number, d: number, unit: "m" | "deg", group: NumGroup) => {
     const l = document.createElement("span");
     l.className = "xf-lab";
     l.textContent = lab;
-    const inp = document.createElement("input");
-    inp.type = "text";
-    inp.inputMode = "decimal";
-    inp.dataset.field = field;
-    inp.value = v.toFixed(d);
-    let was = inp.value;
-    const go = () => { if (inp.value === was) return; const x = parseTyped(inp.value); if (x == null) { inp.value = was; return; } was = inp.value; commit(x); };
-    inp.addEventListener("keydown", (e) => { e.stopPropagation(); if (e.key === "Enter") { e.preventDefault(); go(); inp.blur(); } if (e.key === "Escape") { inp.value = was; inp.blur(); } });
-    inp.addEventListener("change", go);
-    grid.append(l, inp);
+    grid.append(l, numField({ value: v, decimals: d, unit, defaultValue: 0, field, group, column: unit }));
   };
   const head = (text: string) => { const x = document.createElement("div"); x.className = "xf-head"; x.textContent = text; grid.appendChild(x); };
   head(`${t("xf.position")} (m)`);
-  for (const i of [0, 1, 2] as const) row("XYZ"[i], `cursor.${"xyz"[i]}`, at[i], dec, (x) => {
-    const p = [...at] as V3; p[i] = x; h.setCursor(blenderToThree(p)); renderSpaceNPanels();
-  });
+  for (const i of [0, 1, 2] as const) row("XYZ"[i], `cursor.${"xyz"[i]}`, at[i], dec, "m", posGroup);
   head(`${t("xf.rotation")} (°, XYZ)`);
-  for (const i of [0, 1, 2] as const) row("XYZ"[i], `cursor.r${"xyz"[i]}`, deg(spaceCursorRot[i]), 3, (x) => {
-    spaceCursorRot = [...spaceCursorRot] as V3; spaceCursorRot[i] = rad(x); renderSpaceNPanels();
-  });
+  for (const i of [0, 1, 2] as const) row("XYZ"[i], `cursor.r${"xyz"[i]}`, deg(spaceCursorRot[i]), 3, "deg", rotGroup);
   cur.appendChild(grid);
   const acts = document.createElement("div");
   acts.className = "xf-actions";

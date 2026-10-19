@@ -6437,6 +6437,71 @@ test("DC5.settings", "DOVE-CHI-MENU p.5 · Impostazioni per argomento: Generale 
     detail: { tabs, ident, conn, saved: saved.sync, errors } };
 });
 
+test("DC6.num", "DOVE-CHI-MENU p.6 · il campo numerico di Blender, con eventi sintetici: trascinare (1 cm/px), Maiusc fine, Ctrl a scatti, Esc annulla, clic per scrivere (Invio conferma, Esc annulla), ⌘C/⌘V e Backspace col mouse sopra, trascinare in giù su X·Y·Z li prende insieme; UN commit per gesto; nel pannello N il cursore 3D usa lo stesso campo", async () => {
+  const { p, ctx, errors } = await open({ doc: "catena", locale: "it" });
+  await ctx.grantPermissions(["clipboard-read", "clipboard-write"]).catch(() => {});
+  await p.evaluate(async () => {
+    const m = await import("/em/studio/src/num-field.ts");
+    const box = document.createElement("div");
+    box.id = "dc6";
+    Object.assign(box.style, { position: "fixed", left: "200px", top: "200px", zIndex: 99999, background: "#fff", padding: "8px",
+      display: "grid", gridTemplateColumns: "120px", gap: "4px" });
+    window.__dc6 = { commits: [] };
+    const g = new m.NumGroup((ch) => window.__dc6.commits.push(ch.map((c) => `${c.field}=${c.value}`).join(",")));
+    for (const a of ["x", "y", "z"]) box.appendChild(m.numField({ value: 1, decimals: 3, unit: "m", defaultValue: 0, field: `p.${a}`, group: g, column: "p" }));
+    box.appendChild(m.numField({ value: 10, decimals: 3, unit: "deg", defaultValue: 0, field: "r", commit: (v) => window.__dc6.commits.push(`r=${v}`) }));
+    document.body.appendChild(box);
+  });
+  const c = async (f) => { const b = await p.locator(`#dc6 [data-field="${f}"]`).boundingBox(); return { x: b.x + b.width / 2, y: b.y + b.height / 2 }; };
+  const val = (f) => p.locator(`#dc6 [data-field="${f}"]`).inputValue();
+  const commits = () => p.evaluate(() => window.__dc6.commits.slice());
+  const drag = async (f, dx, steps = 10) => { const a = await c(f); await p.mouse.move(a.x, a.y); await p.mouse.down();
+    for (let i = 1; i <= steps; i++) await p.mouse.move(a.x + (dx * i) / steps, a.y); await p.mouse.up(); await p.waitForTimeout(50); };
+  const r = {};
+  await drag("p.x", 50);                                   // 50 px × 1 cm
+  r.drag = [await val("p.x"), (await commits()).length];
+  await p.keyboard.down("Shift"); await drag("p.x", 50); await p.keyboard.up("Shift");   // fine: 50 × 1 mm
+  r.shift = await val("p.x");
+  await p.keyboard.down("Control"); await drag("r", 40); await p.keyboard.up("Control");  // 10° + 40° → notches of 5°
+  r.ctrl = await val("r");
+  { const a = await c("p.y"); await p.mouse.move(a.x, a.y); await p.mouse.down(); for (let i = 1; i <= 8; i++) await p.mouse.move(a.x + i * 8, a.y);
+    await p.keyboard.press("Escape"); await p.mouse.up(); r.esc = [await val("p.y"), (await commits()).length]; }
+  // a click types: Enter confirms, Esc cancels
+  await p.click('#dc6 [data-field="p.z"]'); await p.keyboard.type("2,5"); await p.keyboard.press("Enter");   // the click selected the value
+  r.typed = await val("p.z");
+  await p.click('#dc6 [data-field="p.z"]'); await p.keyboard.press("End"); await p.keyboard.type("x"); await p.keyboard.press("Enter");
+  r.typedBad = await val("p.z");   // not a number: the value comes back
+  await p.click('#dc6 [data-field="p.z"]'); await p.keyboard.type("999"); await p.keyboard.press("Escape");
+  r.typedEsc = await val("p.z");
+  // over a field: ⌘C on X, ⌘V on Y, Backspace on Z
+  await p.mouse.move(...Object.values(await c("p.x"))); await p.keyboard.press("Meta+c");
+  await p.mouse.move(...Object.values(await c("p.y"))); await p.keyboard.press("Meta+v"); await p.waitForTimeout(150);
+  r.paste = [await val("p.x"), await val("p.y")];
+  await p.mouse.move(...Object.values(await c("p.z"))); await p.keyboard.press("Backspace"); await p.waitForTimeout(50);
+  r.back = await val("p.z");
+  // down over X, Y, Z, then sideways: the three together, ONE commit
+  const n0 = (await commits()).length;
+  { const a = await c("p.x"), z = await c("p.z"); await p.mouse.move(a.x, a.y); await p.mouse.down();
+    for (let i = 1; i <= 8; i++) await p.mouse.move(a.x, a.y + ((z.y - a.y) * i) / 8);
+    for (let i = 1; i <= 10; i++) await p.mouse.move(a.x + i * 3, z.y); await p.mouse.up(); await p.waitForTimeout(50); }
+  const all = await commits();
+  r.column = { n: all.length - n0, last: all.at(-1), vals: [await val("p.x"), await val("p.y"), await val("p.z")] };
+  r.commits = all;
+  // the N panel's 3D cursor is the same field
+  await workspace(p, "space");
+  await p.waitForTimeout(1200);
+  if (!await p.$('.scn-npanel:not(.hidden) [data-field^="cursor."]')) { await p.click(".scn-ntab").catch(() => {}); await p.waitForTimeout(600); }
+  r.npanel = await p.evaluate(() => [...document.querySelectorAll('.scn-npanel [data-field^="cursor."]')].map((i) => `${i.dataset.field}:${i.classList.contains("num-field")}`));
+  await p.screenshot({ path: SHOT("dc6-campo-numerico") }).catch(() => {});
+  await ctx.close();
+  const pass = r.drag[0] === "1.500" && r.drag[1] === 1 && r.shift === "1.550" && r.ctrl === "50.000"
+    && r.esc[0] === "1.000" && r.esc[1] === r.drag[1] + 2   // the Esc'd drag wrote nothing (shift + ctrl wrote one each)
+    && r.typed === "2.500" && r.typedBad === "2.500" && r.typedEsc === "2.500" && r.paste[0] === "1.550" && r.paste[1] === "1.550" && r.back === "0.000"
+    && r.column.n === 1 && /p\.x=.*p\.y=.*p\.z=/.test(r.column.last ?? "")
+    && r.npanel.length >= 6 && r.npanel.every((x) => x.endsWith(":true")) && !errors.length;
+  return { pass, detail: { r, errors } };
+});
+
 // ── run ─────────────────────────────────────────────────────────────────────
 const chosen = cases.filter((c) => !only.length || only.includes(c.id) || only.some((o) => c.id.startsWith(o + ".")));
 for (const c of chosen) {

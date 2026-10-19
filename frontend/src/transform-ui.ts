@@ -11,6 +11,7 @@
  * changed) is one call of `onCommit`, one step of undo.
  */
 import { coordDecimals, deg, isIdentity, rad, xfQuaternion, type Xf } from "./transform3d";
+import { NumGroup, formatNumber, numField, parseNumber } from "./num-field";
 import type { V3 } from "./space-nav";
 
 export interface TransformFormTexts {
@@ -40,18 +41,10 @@ export interface TransformFormOptions {
   probe?: string;
 }
 
-const fmt = (v: number, d: number): string => {
-  const s = v.toFixed(d);
-  return s === `-${(0).toFixed(d)}` ? (0).toFixed(d) : s;
-};
+const fmt = formatNumber;
 
 /** Read a number as a person types it: a comma is a decimal point too. */
-export function parseTyped(s: string): number | null {
-  const t = s.trim().replace(/\s+/g, "").replace(",", ".");
-  if (!t) return null;
-  const v = Number(t);
-  return Number.isFinite(v) ? v : null;
-}
+export const parseTyped = parseNumber;
 
 export function renderTransformForm(host: HTMLElement, o: TransformFormOptions): void {
   host.textContent = "";
@@ -65,35 +58,28 @@ export function renderTransformForm(host: HTMLElement, o: TransformFormOptions):
     h.textContent = text;
     grid.appendChild(h);
   };
-  const field = (group: "position" | "rotation" | "scale", i: 0 | 1 | 2, value: number, decimals: number) => {
+  // MICRO-DOVE-CHI-MENU p.6 · Blender's numeric fields (`num-field.ts`): drag
+  // to change, a click to type, ⌘C ⌘V Backspace with the mouse over; a drag
+  // down a column (X, Y, Z) takes the three. Whatever changed in one gesture
+  // is ONE `onCommit`, one step of undo.
+  const group = new NumGroup((changes) => {
+    if (o.readOnly) return;
+    const next: Xf = { ...xf, position: [...xf.position] as V3, rotation: [...xf.rotation] as V3, scale: [...xf.scale] as V3 };
+    for (const c of changes) {
+      const [g, axis] = c.field.split(".") as ["position" | "rotation" | "scale", "x" | "y" | "z"];
+      const i = "xyz".indexOf(axis);
+      if (c.value == null || i < 0) continue;
+      if (g === "rotation") next.rotation[i] = rad(c.value);
+      else next[g][i] = c.value;
+    }
+    o.onCommit?.(next);
+  });
+  const field = (g: "position" | "rotation" | "scale", i: 0 | 1 | 2, value: number, decimals: number) => {
     const lab = document.createElement("span");
     lab.className = "xf-lab";
     lab.textContent = "XYZ"[i];
-    const inp = document.createElement("input");
-    inp.type = "text";
-    inp.inputMode = "decimal";
-    inp.spellcheck = false;
-    inp.dataset.field = `${group}.${"xyz"[i]}`;
-    inp.value = fmt(value, decimals);
-    inp.readOnly = !!o.readOnly;
-    let was = inp.value;
-    const commit = () => {
-      // Enter, then the focus leaving: one value, ONE step of undo
-      if (o.readOnly || inp.value === was) return;
-      was = inp.value;
-      const v = parseTyped(inp.value);
-      if (v == null) { inp.value = was; return; }
-      const next: Xf = { ...xf, position: [...xf.position] as V3, rotation: [...xf.rotation] as V3, scale: [...xf.scale] as V3 };
-      if (group === "rotation") next.rotation[i] = rad(v);
-      else next[group][i] = v;
-      o.onCommit?.(next);
-    };
-    inp.addEventListener("keydown", (e) => {
-      e.stopPropagation();                      // G, R, S, N… typed here are digits and letters
-      if (e.key === "Enter") { e.preventDefault(); commit(); inp.blur(); }
-      if (e.key === "Escape") { inp.value = was; inp.blur(); }
-    });
-    inp.addEventListener("change", commit);
+    const inp = numField({ value, decimals, unit: g === "position" ? "m" : g === "rotation" ? "deg" : "scale",
+      defaultValue: g === "scale" ? 1 : 0, readOnly: !!o.readOnly, field: `${g}.${"xyz"[i]}`, group, column: g });
     grid.append(lab, inp);
   };
   const dec = coordDecimals(Math.max(...xf.position.map(Math.abs)));
@@ -113,16 +99,29 @@ export function renderTransformForm(host: HTMLElement, o: TransformFormOptions):
   grid.appendChild(q);
   if (o.texts.pivot) {
     head(o.texts.pivot);
-    const pv = document.createElement("input");
-    pv.type = "text";
-    pv.readOnly = true;
-    pv.dataset.field = "pivot";
-    pv.style.gridColumn = "1 / -1";
     const p = xf.pivot;
     const oldOrigin = !!p && p.every((v) => v === 0) && !isIdentity(xf);
-    pv.value = p ? p.map((v) => fmt(v, coordDecimals(Math.max(...p.map(Math.abs))))).join("  ") : (o.texts.pivotBox ?? "");
-    pv.title = p ? (oldOrigin ? o.texts.pivotOld ?? "" : o.texts.pivotBox ?? "") : (o.texts.pivotBox ?? "");
-    grid.appendChild(pv);
+    if (p) {
+      // read-only: the data's pivot is shown and copied (⌘C over it), not dragged
+      const pd = coordDecimals(Math.max(...p.map(Math.abs)));
+      for (const i of [0, 1, 2] as const) {
+        const lab = document.createElement("span");
+        lab.className = "xf-lab";
+        lab.textContent = "XYZ"[i];
+        const pv = numField({ value: p[i], decimals: pd, unit: "m", readOnly: true, field: `pivot.${"xyz"[i]}` });
+        pv.title = oldOrigin ? o.texts.pivotOld ?? "" : "";
+        grid.append(lab, pv);
+      }
+    } else {
+      const pv = document.createElement("input");
+      pv.type = "text";
+      pv.readOnly = true;
+      pv.dataset.field = "pivot";
+      pv.style.gridColumn = "1 / -1";
+      pv.value = o.texts.pivotBox ?? "";
+      pv.title = o.texts.pivotBox ?? "";
+      grid.appendChild(pv);
+    }
   }
   host.appendChild(grid);
   const foot = document.createElement("p");

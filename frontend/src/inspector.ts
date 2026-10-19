@@ -1,3 +1,4 @@
+import { numField } from "./num-field";
 import { t } from "./i18n";
 import type { DocumentStore } from "./model";
 import { edgeStyle, nodeStyle } from "./palette";
@@ -1397,15 +1398,11 @@ function renderQualeObject(root: HTMLElement, store: DocumentStore, node: EmNode
       sel.addEventListener("change", () => write(sel.value));
       box.appendChild(sel);
     } else if (/^float 0-1/.test(what)) {
-      const num = document.createElement("input");
-      num.type = "number"; num.min = "0"; num.max = "1"; num.step = "0.05";
-      num.className = "insp-name-input";
-      num.dataset.field = `data.${key}`;
-      num.value = typeof current === "number" ? String(current) : "";
-      num.addEventListener("change", () => {
-        const v = num.value === "" ? null : Math.min(1, Math.max(0, Number(num.value)));
-        write(v === null || Number.isNaN(v) ? null : v);
-      });
+      // MICRO-DOVE-CHI-MENU p.6 · the Inspector's numbers are Blender's
+      // fields too: drag (Ctrl = by 0.05), click to type, Backspace = empty
+      const num = numField({ value: typeof current === "number" ? current : null, unit: "plain", decimals: 2,
+        min: 0, max: 1, nullable: true, defaultValue: null, field: `data.${key}`, commit: (v) => write(v) });
+      num.classList.add("insp-name-input");
       box.appendChild(num);
     } else {
       const inp = document.createElement("input");

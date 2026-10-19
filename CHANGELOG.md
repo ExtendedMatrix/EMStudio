@@ -101,6 +101,16 @@ that asked for one.
   you are». A dev.50 settings file migrates with nothing lost (node → the saved
   list and still active, room, Blender, ORCID client).
   `scripts/check-settings-migrate.mjs` (22), browser suite DC5.
+- **Numeric fields as Blender's** (MICRO-DOVE-CHI-MENU p.6, `num-field.ts`):
+  one field for the N panel's 3D cursor, the transform (position, rotation,
+  scale), the pivot (read only) and the Inspector's 0–1 numbers. Drag sideways
+  to change (1 cm, 1°, 0.01 of scale per pixel; Shift fine ×0.1; Ctrl by
+  notches of 1 m, 5°, 0.1), the pointer locked and given back; a click without
+  a drag types, the value selected (Enter confirms, Esc cancels, what is not a
+  number puts the value back); with the mouse over it ⌘C copies, ⌘V pastes,
+  Backspace puts the default back; a drag down over X·Y·Z takes the three and
+  changes them together. One gesture is one write, one step of undo. Browser
+  suite DC6.
 - The RM is bound to the epoch only directly (rules 1.6.36).
 - `addSubgraph` in a room: the proxies of `3d_obj/` and a shelf promotion are
   shared with the node; a host command's delta is shared in a node room.
