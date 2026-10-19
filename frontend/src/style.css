@@ -9773,3 +9773,28 @@ tr.tv-sel-act > td { background: color-mix(in srgb, var(--accent) 42%, transpare
 .s3-altdlg-in { color: var(--text-dim); font-size: 11px; border: 1px solid var(--border); border-radius: 8px; padding: 0 5px; }
 .s3-altdlg .hidden { display: none; }
 .s3-altdlg-why:empty, .s3-altdlg-cov:empty { display: none; }
+
+/* MICRO-DOVE-CHI-MENU p.1–2 · the table's menus: a dynamic item (Open Recent)
+   says its name and, small, where it lives; an empty list says so */
+.dd-sub-menu .dd-dyn {
+  display: flex !important;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1px;
+  max-width: 340px;
+}
+.dd-sub-menu .dd-dyn .dd-detail {
+  font-size: 10.5px;
+  color: var(--text-faint);
+  max-width: 320px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  direction: rtl;
+  text-align: left;
+}
+.dd-sub-menu .dd-empty {
+  padding: 6px 10px;
+  font-size: 12px;
+  color: var(--text-faint);
+}

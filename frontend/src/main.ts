@@ -479,7 +479,7 @@ import {
 } from "./emdata";
 import { addQualiaClaim, addRow, deleteRow } from "./em-data";
 import { isVolatile, VOLATILE_KEY } from "./volatile";
-import { addRecent, removeRecent, type RecentFile } from "./recent";
+import { addRecent, getRecents, removeRecent, type RecentFile } from "./recent";
 import {
   WORKSPACES,
   WINDOW_TYPE_META,
@@ -638,6 +638,13 @@ import {
   type DropOptions,
   type DropTarget,
 } from "./drag";
+import { buildPageMenus, commandForKey, followLocale, installNativeMenu, runCommand, type DynamicItem } from "./menu-ui";
+import { currentPlatform } from "./menu-table";
+
+// MICRO-DOVE-CHI-MENU p.1 · the menus come from ONE table (`menu-table.ts`):
+// drawn here, before any handler below looks its button up by id
+const PLATFORM = currentPlatform(isTauri());
+buildPageMenus(PLATFORM, { recent: () => recentMenuItems() });
 
 declare global {
   interface Window {
@@ -1792,31 +1799,10 @@ document.getElementById("set-orph-type")?.addEventListener("change", () => void 
 document.getElementById("set-orph-since")?.addEventListener("change", () => void paintOrphans());
 
 modeIndicator.addEventListener("click", () => toggleConnectionPanel());
-// T2 · the desktop's app menu: «Settings…» (⌘,)
-if (isTauri()) {
-  void import("@tauri-apps/api/event")
-    .then(({ listen }) => listen("open-settings", () => openSettings()))
-    .catch(() => { /* an older shell: Edit › Settings… still opens it */ });
-  // MICRO-AUTORI-LAYOUT p.3 · the desktop's File menu: New ⌘N, Save ⌘S, Save As ⇧⌘S
-  void import("@tauri-apps/api/event")
-    .then(({ listen }) => Promise.all((["new", "save", "save-as"] as const)
-      .map((c) => listen(`menu-${c}`, () => fileCommand(c)))))
-    .catch(() => { /* an older shell: the in-app File menu still has them */ });
-}
-/** MICRO-AUTORI-LAYOUT p.3 · New / Save / Save as, from the keyboard or the
- *  desktop's native menu. One press may arrive twice on the desktop (the
- *  webview's keydown and the menu's accelerator): the second within 400 ms is
- *  the same press. */
-const lastFileCommand = { c: "", at: 0 };
-function fileCommand(c: "new" | "save" | "save-as"): void {
-  const now = performance.now();
-  if (lastFileCommand.c === c && now - lastFileCommand.at < 400) return;
-  lastFileCommand.c = c;
-  lastFileCommand.at = now;
-  if (c === "new") document.getElementById("btn-new")?.click();
-  else if (c === "save-as") void saveAsDocument();
-  else void saveDocument();
-}
+// MICRO-DOVE-CHI-MENU p.1 · the Mac desktop's menu bar, from the same table
+// as the page's menus; its items press the same buttons (`runCommand`)
+void installNativeMenu(PLATFORM);
+followLocale(PLATFORM);
 modeIndicator.addEventListener("keydown", (e) => {
   if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggleConnectionPanel(); }
 });
@@ -8929,6 +8915,35 @@ function browserDownload(text: string, filename: string): void {
   URL.revokeObjectURL(a.href);
 }
 
+/** MICRO-DOVE-CHI-MENU p.1 · the document File ▸ Close closes: the active
+ *  graph's file (all its graphs), or the active graph when it has no file. */
+function closeActiveDocument(): void {
+  const slot = emtree.active();
+  if (!slot) return;
+  const file = emtree.fileOf(slot);
+  if (file) {
+    if (emtree.fileDirty(file.id) && !confirm(t("emtree.closeFileUnsaved", { name: file.name }))) return;
+    closeFile(file.id);
+    return;
+  }
+  closeGraphAsking(slot.id);
+}
+
+/** File ▸ Open Recent: the same list as the Stratigraphy panel's «Recent». */
+function recentMenuItems(): DynamicItem[] {
+  return getRecents().map((r, i) => ({
+    id: String(i),
+    label: r.name,
+    detail: r.path ? dirName(r.path) : t("emtree.noFile"),
+    disabled: !r.path,
+    run: () => void openRecentFile(r),
+  }));
+}
+function dirName(path: string): string {
+  const cut = Math.max(path.lastIndexOf("/"), path.lastIndexOf("\\"));
+  return cut > 0 ? path.slice(0, cut) : path;
+}
+
 // QOL1 · reopen a recent file. A path-less recent (a browser drop) cannot be
 // reopened by the sandbox; a path-bearing one reopens on the desktop and, if the
 // file has since disappeared, is pruned from the list.
@@ -11827,6 +11842,16 @@ document
 // F2 / F3 · the two new gestures of the file menu
 document.getElementById("btn-save-all")?.addEventListener("click", () => void saveAllDocuments());
 document.getElementById("btn-open-replace")?.addEventListener("click", () => void openReplacing());
+// MICRO-DOVE-CHI-MENU p.1 · File ▸ Close (⌘W): the active document, asking
+// for its unsaved work; with nothing left open, the start screen
+document.getElementById("btn-close-doc")?.addEventListener("click", () => closeActiveDocument());
+// …and Quit, at the bottom of File on Windows and Linux (the Mac's is the
+// system's EMStudio ▸ Quit): the window closes through its usual questions
+document.getElementById("btn-quit")?.addEventListener("click", () => {
+  void import("@tauri-apps/api/window")
+    .then(({ getCurrentWindow }) => getCurrentWindow().close())
+    .catch(() => window.close());
+});
 document
   .getElementById("btn-pin-version")
   ?.addEventListener("click", () => pinProjectVersion());
@@ -15512,6 +15537,23 @@ function closeSlot(id: string): void {
   refreshEMTree();
 }
 
+/** Close one graph, asking for its unsaved work (the EMtree's ×, File ▸ Close). */
+function closeGraphAsking(id: string): void {
+  const slot = emtree.get(id);
+  if (!slot) return;
+  // Unsaved work is the one thing a close must not take silently.
+  if (slot.store.dirty
+      && !confirm(t("emtree.unsaved", { name: slotLabel(slot) }))) {
+    return;
+  }
+  // F2 · closing a graph is not deleting it from its file: the version on
+  // disk stays in the file and is written back by the next Save of that file
+  const file = emtree.fileOf(slot);
+  const gid = String((slot.store.doc.graph as Record<string, unknown>).graph_id ?? slot.id);
+  if (file && file.onDisk[gid]) file.retained[gid] = file.onDisk[gid];
+  closeSlot(id);
+}
+
 /** F2 · close a file and every graph of it (the caller has asked about unsaved work). */
 function closeFile(fileId: string): void {
   const wasActive = emtree.activeFile()?.id === fileId;
@@ -15691,21 +15733,7 @@ const emtreeHandlers: EMTreeHandlers = {
     if (id === emtree.activeId) return;
     activateSlot(id);
   },
-  onRemove: (id) => {
-    const slot = emtree.get(id);
-    if (!slot) return;
-    // Unsaved work is the one thing a close must not take silently.
-    if (slot.store.dirty
-        && !confirm(t("emtree.unsaved", { name: slotLabel(slot) }))) {
-      return;
-    }
-    // F2 · closing a graph is not deleting it from its file: the version on
-    // disk stays in the file and is written back by the next Save of that file
-    const file = emtree.fileOf(slot);
-    const gid = String((slot.store.doc.graph as Record<string, unknown>).graph_id ?? slot.id);
-    if (file && file.onDisk[gid]) file.retained[gid] = file.onDisk[gid];
-    closeSlot(id);
-  },
+  onRemove: (id) => closeGraphAsking(id),
   onMoveGraph: (slotId, anchor) => openMoveMenu(slotId, anchor),
   onSaveFile: (fileId) => {
     const file = emtree.file(fileId);
@@ -35492,26 +35520,13 @@ function keyScopeOf(target: EventTarget | null): "field" | "control" | "graph" {
 window.addEventListener("keydown", (e) => {
   const scope = keyScopeOf(e.target);
   const inField = scope === "field";
-  if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "s") {
+  // MICRO-DOVE-CHI-MENU p.1 · the menus' shortcuts (⌘N ⌘O ⌘W ⌘S ⇧⌘S ⌥⌘S ⌘,
+  // …) are read from the table of commands, the same rows that draw the items:
+  // a key shown beside an item is the key that runs it, wherever the focus is
+  const command = commandForKey(e);
+  if (command) {
     e.preventDefault();
-    // F2 · ⌥⌘S saves every file with unsaved work
-    if (e.altKey) void saveAllDocuments();
-    else if (e.shiftKey) fileCommand("save-as");
-    else fileCommand("save");
-    return;
-  }
-  // MICRO-AUTORI-LAYOUT p.3 · ⌘N a new graph, the File menu's «New» (its
-  // Sidecar check included). A browser keeps ⌘N for a window when it wants to.
-  if ((e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === "n") {
-    e.preventDefault();
-    fileCommand("new");
-    return;
-  }
-  // T2 · ⌘, opens Settings (the macOS convention; the desktop's app menu
-  // carries the same entry and sends `open-settings`)
-  if ((e.metaKey || e.ctrlKey) && e.key === ",") {
-    e.preventDefault();
-    openSettings();
+    runCommand(command);
     return;
   }
   if (inField) return;

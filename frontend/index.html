@@ -46,83 +46,13 @@
       <div class="dropdown" id="dd-file">
         <button class="dd-toggle" data-i18n-title="menu.fileTitle" title="File operations"><span data-i18n="toolbar.file">File</span> ▾</button>
         <div class="dd-menu hidden">
-          <button id="btn-new" data-i18n-title="menu.newTitle" title="New empty .em.json" data-i18n="toolbar.new">New</button>
-          <button id="btn-open" data-i18n-title="menu.openTitle" title="Open an .em.json file" data-i18n="toolbar.open">Open…</button>
-          <button id="btn-open-replace" data-i18n="toolbar.openReplace" data-i18n-title="menu.openReplaceTitle">Open in place of the open files…</button>
-          <!-- THE THREE VERBS in one place (design note `EM_design_aprire-entrare-creare.md`):
-               APRI is the line above — a file, yours, on your disk. These two are
-               CREA: a room, empty, or carrying the container in your hands. ENTRA
-               stays in Mode ▸ Hub, where the room and its link already live.
-               No server-address field: this page is served BY the node. -->
-          <button id="btn-create-room" data-i18n="room.createItem" data-i18n-title="room.createItemTitle">Create a room…</button>
-          <button id="btn-bring-into-room" data-i18n="room.bringItem" data-i18n-title="room.bringItemTitle">Bring this into a new room…</button>
-          <!-- MULTIGRAPH · the offline "integrate later": another emj's graphs are
-               TAKEN INTO this project (shared nodes merge by UUID). No server, no
-               session — the whole collaboration story for async work by sector. -->
-          <button id="btn-add-project" data-i18n="container.addToProject" data-i18n-title="container.addToProjectTitle">Integrate into this file…</button>
-          <!-- MICRO-UN-POSTO · Import is a SUB-MENU, like Export. «Tabella con
-               mappatura…» is THE door for a table or an XML read through a
-               mapping: it always opens the mapping editor, which the EMtree's
-               Map/Bake and StratiMiner fill in their turn. -->
-          <div class="dd-sub">
-            <button class="dd-sub-toggle">
-              <span data-i18n="toolbar.import">Import</span>
-              <span class="dd-sub-caret">▸</span>
-            </button>
-            <div class="dd-sub-menu hidden">
-              <button
-                id="btn-import-graphml"
-                title="Import a yEd GraphML file (needs the local dev bridge — see dev.sh)"
-                data-i18n-title="toolbar.importGraphmlTitle"
-              >
-                <span data-i18n="toolbar.importGraphmlItem">GraphML…</span>
-              </button>
-              <button id="btn-import-mapping" data-i18n-title="impmap.menuTitle"
-                      title="Read a table or an XML through a mapping: into a new graph, or onto this one">
-                <span data-i18n="impmap.menu">Table with a mapping…</span>
-              </button>
-            </div>
-          </div>
-          <!-- BUGS-UI · Export is a nested SUB-MENU (was a section of File):
-               three formats flat in the File list read as three File commands.
-               The items keep their ids, so the existing export handlers are
-               reused untouched. -->
-          <div class="dd-sep"></div>
-          <div class="dd-sub">
-            <button class="dd-sub-toggle" data-i18n-title="menu.exportTitle" title="Export the current document">
-              <span data-i18n="toolbar.export">Export</span>
-              <span class="dd-sub-caret">▸</span>
-            </button>
-            <div class="dd-sub-menu hidden">
-              <button id="btn-svg" data-i18n-title="menu.svgTitle" title="Export current view as SVG">SVG</button>
-              <!-- GraphML is not exported any more (E.D., 4 Oct 2026): it is read
-                   once into an em.json (File ▸ Importa ▸ GraphML) and never written. -->
-              <button id="btn-ttl" data-i18n-title="menu.ttlTitle" title="Export as RDF/CIDOC Turtle (.ttl) via the s3Dgraphy projection">Turtle (.ttl)</button>
-              <!-- AUDIT N9 · the narrative's four files (HTML, Word, LaTeX,
-                   Jupyter) are exported from the narrative window's «Esporta ▾»,
-                   the one place of that verb (with the check of the unvalidated
-                   AI paragraphs and the reader link). -->
-            </div>
-          </div>
-          <!-- AUDIT N9 · «Pubblica…» has ONE place: the name strip, top right
-               (the identity gate is the same). -->
-          <div class="dd-sep"></div>
-          <button id="btn-save" data-i18n-title="menu.saveTitle" title="Save .em.json (⌘S)" data-i18n="toolbar.save">Save</button>
-          <button id="btn-save-as" data-i18n-title="menu.saveAsTitle" title="Save .em.json to a new file (⇧⌘S)" data-i18n="toolbar.saveAs">Save As…</button>
-          <button id="btn-save-all" data-i18n-title="menu.saveAllTitle" title="Save every file with unsaved changes (⌥⌘S)" data-i18n="toolbar.saveAll">Save all</button>
-          <!-- P3 · pin: freeze the project as the thing a citation points at.
-               The DOI is the Catalog's to mint; this is the stable snapshot it
-               would mint for. -->
-          <button id="btn-pin-version" data-i18n="version.pin" data-i18n-title="version.pinTitle">Fissa versione…</button>
+          <!-- MICRO-DOVE-CHI-MENU p.1 · filled from src/menu-table.ts by menu-ui.ts (one table, the page and the system menu) -->
         </div>
       </div>
       <div class="dropdown" id="dd-edit">
         <button class="dd-toggle" data-i18n-title="menu.editTitle" title="Edit"><span data-i18n="toolbar.edit">Edit</span> ▾</button>
         <div class="dd-menu hidden">
-          <button id="btn-undo" data-i18n-title="toolbar.undo" disabled><span data-i18n="toolbar.undoItem">Undo</span></button>
-          <button id="btn-redo" data-i18n-title="toolbar.redo" disabled><span data-i18n="toolbar.redoItem">Redo</span></button>
-          <div class="dd-sep"></div>
-          <button id="btn-settings" data-i18n-title="toolbar.settings"><span data-i18n="toolbar.settingsItem">Settings…</span></button>
+          <!-- MICRO-DOVE-CHI-MENU p.1 · filled from src/menu-table.ts by menu-ui.ts (one table, the page and the system menu) -->
         </div>
       </div>
       <div class="dropdown" id="dd-mode">
@@ -183,17 +113,7 @@
       <div class="dropdown" id="dd-help">
         <button class="dd-toggle" data-i18n-title="menu.helpTitle" title="Help"><span data-i18n="toolbar.help">Help</span> ▾</button>
         <div class="dd-menu hidden">
-          <button id="btn-help-workspaces"><span data-i18n="ws.helpMenu">Workspaces…</span></button>
-          <button id="btn-help-shortcuts"><span data-i18n="shortcuts.menu">Shortcuts</span></button>
-          <button id="btn-help-legend"><span data-i18n="legend.full">EM legend</span></button>
-          <button id="btn-help-about"><span data-i18n="toolbar.about">About EMStudio</span></button>
-          <button id="btn-help-updates"><span data-i18n="toolbar.updates">Check for updates…</span></button>
-          <!-- MENU-AUDIT · "Ontology models…" REMOVED. It listed five rows, two
-               of them hardcoded strings — while the version button in the footer
-               ("Extended Matrix 1.6") already opens the same breakdown built
-               from the datamodel's own `referenced_ontology_versions`, with the
-               source links. The same view offered twice, and the menu copy was
-               the poorer and the one that could go stale (invariant 1). -->
+          <!-- MICRO-DOVE-CHI-MENU p.1 · filled from src/menu-table.ts by menu-ui.ts (one table, the page and the system menu) -->
         </div>
       </div>
       <!-- sync stays in the DOM (hidden) so its existing handler is reused;

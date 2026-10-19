@@ -3861,6 +3861,20 @@ const EN: Dict = {
   "storage.docDirNoFile": "the graph does not come from a file with a known path (opened in the browser, or new)",
   "storage.docDirNotServed": "{dir} is not served by the bridge: add it with «+ 📁»",
   "me.langNewGraph": "A new graph has no language of its own: every node it creates is born with the study's, «{lang}» (data.lang).",
+  "menu.app": "EMStudio",
+  "menu.services": "Services",
+  "menu.hide": "Hide EMStudio",
+  "menu.hideOthers": "Hide Others",
+  "menu.showAll": "Show All",
+  "menu.quit": "Quit EMStudio",
+  "menu.window": "Window",
+  "menu.openRecent": "Open Recent",
+  "menu.openRecentTitle": "The last files and rooms you opened",
+  "menu.recentNone": "No recent files",
+  "toolbar.close": "Close",
+  "menu.closeTitle": "Close the active document (asking to save it if needed) and go back to the start screen",
+  "menu.svgItem": "SVG",
+  "menu.ttlItem": "Turtle (.ttl)",
 };
 
 // ── Italiano: complete, because E.D. works in it ───────────────────────────────
@@ -7596,6 +7610,20 @@ const IT: Dict = {
   "storage.docDirNoFile": "il grafo non viene da un file con un percorso noto (aperto nel browser, o nuovo)",
   "storage.docDirNotServed": "{dir} non è servita dal bridge: aggiungila con «+ 📁»",
   "me.langNewGraph": "Un grafo nuovo non ha una lingua sua: ogni nodo che crea nasce con quella dello studio, «{lang}» (data.lang).",
+  "menu.app": "EMStudio",
+  "menu.services": "Servizi",
+  "menu.hide": "Nascondi EMStudio",
+  "menu.hideOthers": "Nascondi altre",
+  "menu.showAll": "Mostra tutte",
+  "menu.quit": "Esci da EMStudio",
+  "menu.window": "Finestra",
+  "menu.openRecent": "Apri recenti",
+  "menu.openRecentTitle": "Gli ultimi file e stanze che hai aperto",
+  "menu.recentNone": "Nessun file recente",
+  "toolbar.close": "Chiudi",
+  "menu.closeTitle": "Chiudi il documento attivo (chiedendo di salvarlo se serve) e torna alla schermata iniziale",
+  "menu.svgItem": "SVG",
+  "menu.ttlItem": "Turtle (.ttl)",
 };
 
 // ── The six other project languages: AI DRAFTS, awaiting validation ───────────

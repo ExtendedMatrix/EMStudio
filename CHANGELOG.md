@@ -45,6 +45,19 @@ that asked for one.
 - `scripts/check-space-views.mjs` (101), `scripts/check-implicit-pd.mjs` (30).
 
 ### Changed
+- **One table of commands, two menus** (MICRO-DOVE-CHI-MENU p.1, E.D. 19 October
+  2026). `menu-table.ts` holds every command (id, label, accelerator,
+  platforms); the page's File, Edit and Help and the Mac desktop's menu bar are
+  generated from it (`menu-ui.ts`, through Tauri's menu API — `main.rs` no longer
+  builds a menu). File, in order: New, Open…, Open Recent ▸, Open in place…,
+  Close (⌘W), Save, Save As…, Save all, Pin version…, Import ▸, Export ▸,
+  Integrate…, Create a room…, Bring into a new room… — the same on both
+  surfaces. The system's EMStudio menu: About, Check for updates…, Settings…
+  ⌘,, Services, Hide, Hide Others, Show All, Quit ⌘Q; on the web, Windows and
+  Linux About and Settings are in Help (Check for updates on the desktop only),
+  Quit closes File on Windows and Linux. Settings left Edit. The shortcuts are
+  read from the same rows. `scripts/check-menu-table.mjs` (114) compares the
+  two surfaces per platform.
 - The RM is bound to the epoch only directly (rules 1.6.36).
 - `addSubgraph` in a room: the proxies of `3d_obj/` and a shelf promotion are
   shared with the node; a host command's delta is shared in a node room.

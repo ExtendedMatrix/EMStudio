@@ -622,50 +622,11 @@ fn main() {
                                registration still applies");
                 }
             }
-            // T2 · «Settings…» (⌘,) in the app's own menu, where a Mac user
-            // looks for it; it opens the same Settings as Edit › Settings….
-            #[cfg(target_os = "macos")]
-            {
-                use tauri::menu::{Menu, MenuItem, MenuItemKind, PredefinedMenuItem};
-                let handle = app.handle();
-                let menu = Menu::default(handle)?;
-                if let Some(MenuItemKind::Submenu(app_menu)) = menu.items()?.into_iter().next() {
-                    let settings = MenuItem::with_id(handle, "settings", "Settings…", true,
-                                                     Some("CmdOrCtrl+,"))?;
-                    let sep = PredefinedMenuItem::separator(handle)?;
-                    app_menu.insert_items(&[&sep, &settings], 1)?;
-                }
-                // MICRO-AUTORI-LAYOUT p.3 · File › New graph ⌘N, Save ⌘S,
-                // Save As… ⇧⌘S, above the default «Close Window»; the page
-                // runs the same commands as its File menu
-                for item in menu.items()? {
-                    if let MenuItemKind::Submenu(sub) = item {
-                        if sub.text()? != "File" {
-                            continue;
-                        }
-                        let new = MenuItem::with_id(handle, "menu-new", "New Graph", true,
-                                                    Some("CmdOrCtrl+N"))?;
-                        let save = MenuItem::with_id(handle, "menu-save", "Save", true,
-                                                     Some("CmdOrCtrl+S"))?;
-                        let save_as = MenuItem::with_id(handle, "menu-save-as", "Save As…", true,
-                                                        Some("CmdOrCtrl+Shift+S"))?;
-                        let sep = PredefinedMenuItem::separator(handle)?;
-                        sub.insert_items(&[&new, &sep, &save, &save_as], 0)?;
-                        let sep2 = PredefinedMenuItem::separator(handle)?;
-                        sub.insert(&sep2, 4)?;
-                        break;
-                    }
-                }
-                app.set_menu(menu)?;
-                app.on_menu_event(|app, event| {
-                    let id = event.id().as_ref();
-                    if id == "settings" {
-                        let _ = app.emit("open-settings", ());
-                    } else if matches!(id, "menu-new" | "menu-save" | "menu-save-as") {
-                        let _ = app.emit(id, ());
-                    }
-                });
-            }
+            // MICRO-DOVE-CHI-MENU p.1 · the menu bar is no longer built here:
+            // the page builds it from its table of commands
+            // (frontend/src/menu-table.ts) through Tauri's menu API, so the
+            // system's menus and the page's are one definition. Until the page
+            // has loaded, macOS shows Tauri's default menu.
             // B2 · the files this launch was given on the command line
             if let Ok(cwd) = std::env::current_dir() {
                 let files = files_in_args(std::env::args().skip(1), &cwd);
