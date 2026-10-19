@@ -9846,3 +9846,8 @@ input.num-field.num-ro { cursor: default; color: var(--text-muted); }
 input.num-field.num-dragging,
 input.num-field.num-taken { background: color-mix(in srgb, var(--accent, #4a8fe7) 22%, var(--bg-panel)); }
 body.num-drag-on, body.num-drag-on * { cursor: ew-resize !important; user-select: none; }
+
+/* MICRO-DOVE-CHI-MENU p.7 · Check for updates: what it found, and what to do */
+.help-pop-line { margin: 4px 0; }
+.help-pop-why { color: var(--text-faint); font-size: 12px; }
+.help-pop-acts { display: flex; gap: 8px; justify-content: flex-end; margin-top: 10px; }

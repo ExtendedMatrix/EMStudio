@@ -245,6 +245,7 @@ import { blenderToThree, eulerFromUp, leftSelects, threeToBlender, type AlignedV
 import { carryXf, coordDecimals, deg, IDENTITY, isIdentity, poseToXf, rad, readTransform, transformData, withPivot, xfToPose, type Xf } from "./transform3d";
 import { renderTransformForm, type TransformFormTexts } from "./transform-ui";
 import { NumGroup, numField } from "./num-field";
+import { checkForUpdates, RELEASES_PAGE, type UpdateCheck } from "./updates";
 import { implicitGroups, isImplicitGroup, outsideMembers, unitOfImplicit, withImplicitGroups } from "./implicit-pd";
 import { addFileSketch, addSketch, listSketches, loadSketches, onSketches, removeSketch, serializeSketches, SHAPE_FAMILIES, SHAPES, shapeById, shapeLabel, sketchById, updateSketch } from "./shapes3d";
 import { boxSelect, clickOutliner, clickScene, EMPTY_SEL, hideKeys, selectAll, withoutKeys, type SpaceSel } from "./space-selection";
@@ -344,6 +345,7 @@ import {
   llmKeyStatus,
   setLlmKey,
   clearLlmKey,
+  installUpdate,
   onForeignBridge,
   takeDesktopQueue,
   onDesktopQueue,
@@ -12892,7 +12894,6 @@ function nodeRoadUrl(url: string): string {
 setNodeRoad({ fetch: (url, init) => nodeAuthFetch(nodeRoadUrl(url), init), owns: nodeOwnsUrl });
 
 // ---------- MENU1 · Help menu (About / Updates / Ontology models) ----------
-const RELEASES_URL = "https://github.com/EmanuelDemetrescu/EMStudio/releases";
 function helpPopover(title: string, rows: Array<[string, string]>): void {
   document.getElementById("help-pop")?.remove();
   const pop = document.createElement("div");
@@ -12929,11 +12930,64 @@ document.getElementById("btn-help-about")?.addEventListener("click", () => {
     ["License", "GPL-3.0 · CNR ISPC — StratiGraph (HE GA 101232855)"],
   ]);
 });
-document.getElementById("btn-help-updates")?.addEventListener("click", () => {
-  // No in-app updater yet — point at the releases page (stub, declared).
-  toast(t("toast.noUpdater"));
-  window.open(RELEASES_URL, "_blank", "noopener,noreferrer");
-});
+// MICRO-DOVE-CHI-MENU p.7 · Check for updates (desktop only: the menu table
+// does not draw it on the web, whose app is updated by its node). GitHub's
+// newest release of the installed version's channel (`updates.ts`): newer →
+// «Download» (its page) and, when the release carries a signed update,
+// «Install and restart»; not newer → «You have the latest version»; no
+// network → said.
+function updatesPopover(r: UpdateCheck | null): void {
+  helpPopover(t("toolbar.updates").replace(/…$/, ""), []);
+  const pop = document.getElementById("help-pop")!;
+  pop.dataset.updates = r?.kind ?? "checking";
+  const line = (text: string): HTMLElement => {
+    const p = document.createElement("p");
+    p.className = "help-pop-line";
+    p.textContent = text;
+    pop.appendChild(p);
+    return p;
+  };
+  const button = (text: string, id: string, act: () => void): HTMLButtonElement => {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "btn";
+    b.dataset.act = id;
+    b.textContent = text;
+    b.addEventListener("click", act);
+    return b;
+  };
+  const acts = document.createElement("div");
+  acts.className = "help-pop-acts";
+  if (!r) line(t("updates.checking"));
+  else if (r.kind === "offline") {
+    line(t("updates.offline"));
+    line(r.why).classList.add("help-pop-why");
+    acts.append(button(t("updates.retry"), "retry", () => void runUpdateCheck()),
+      button(t("updates.releases"), "releases", () => void openInSystemBrowser(RELEASES_PAGE)));
+  } else if (r.kind === "current") {
+    line(t("updates.current", { version: __EMSTUDIO_VERSION__ }));
+    line(t(r.channel === "dev" ? "updates.channelDev" : "updates.channelStable")).classList.add("help-pop-why");
+  } else {
+    line(t("updates.newer", { version: r.version }));
+    line(t("updates.installed", { version: __EMSTUDIO_VERSION__ })).classList.add("help-pop-why");
+    acts.append(button(t("updates.download"), "get-release", () => void openInSystemBrowser(r.url)));
+    if (r.installable) {
+      acts.append(button(t("updates.install"), "install", async () => {
+        line(t("updates.installing"));
+        const error = await installUpdate(r.tag);
+        if (error) { logWarn(`updates: ${error}`); line(t("updates.installFailed", { why: error })); }
+      }));
+    }
+  }
+  if (acts.childElementCount) pop.appendChild(acts);
+}
+async function runUpdateCheck(): Promise<void> {
+  updatesPopover(null);
+  const r = await checkForUpdates(__EMSTUDIO_VERSION__);
+  if (r.kind === "offline") logWarn(`updates: GitHub not reached — ${r.why}`);
+  updatesPopover(r);
+}
+document.getElementById("btn-help-updates")?.addEventListener("click", () => void runUpdateCheck());
 // MENU-AUDIT · the Help ▸ "Ontology models…" item is gone: the version button in
 // the footer opens the same breakdown, built from the datamodel's own
 // `referenced_ontology_versions` (with source links) instead of five rows two of

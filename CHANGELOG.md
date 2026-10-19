@@ -111,6 +111,18 @@ that asked for one.
   Backspace puts the default back; a drag down over X·Y·Z takes the three and
   changes them together. One gesture is one write, one step of undo. Browser
   suite DC6.
+- **Check for updates** (MICRO-DOVE-CHI-MENU p.7, desktop only): asks GitHub
+  (ExtendedMatrix/EMStudio) for the newest published release of the installed
+  version's channel — a dev build sees dev and stable releases, a stable build
+  stable ones — and says «X is out · Download» (the release page), «You have
+  the latest version», or that GitHub cannot be reached. When the release
+  carries a signed update (`latest.json`), «Install and restart» downloads it,
+  checks its signature against the public key in `tauri.conf.json` and installs
+  it (`tauri-plugin-updater`, `update_install` in main.rs). The release
+  workflow makes the signed update archives and `latest.json` when the secret
+  `TAURI_SIGNING_PRIVATE_KEY` is present, and builds as before, saying so,
+  when it is not. `scripts/check-updates.mjs` (17), browser suite DC7, two Rust
+  tests.
 - The RM is bound to the epoch only directly (rules 1.6.36).
 - `addSubgraph` in a room: the proxies of `3d_obj/` and a shelf promotion are
   shared with the node; a host command's delta is shared in a node room.

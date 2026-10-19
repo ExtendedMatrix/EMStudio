@@ -6502,6 +6502,44 @@ test("DC6.num", "DOVE-CHI-MENU p.6 · il campo numerico di Blender, con eventi s
   return { pass, detail: { r, errors } };
 });
 
+test("DC7.updates", "DOVE-CHI-MENU p.7 · «Controlla aggiornamenti…» chiede a GitHub (ExtendedMatrix/EMStudio) l'ultima release del canale: più nuova → «È uscita la …» con Scarica (e Installa e riavvia se c'è latest.json); uguale → «Hai l'ultima versione»; senza rete → lo dice, con Riprova", async () => {
+  const { p, ctx, errors } = await open({ doc: "catena", locale: "it" });
+  const installed = await p.evaluate(() => document.querySelector("#btn-version, [data-version]")?.textContent ?? "");
+  let answer = { status: 200, body: [] };
+  const asked = [];
+  await p.route("https://api.github.com/**", (route) => {
+    asked.push(route.request().url());
+    if (answer.abort) return route.abort("internetdisconnected");
+    return route.fulfill({ status: answer.status, contentType: "application/json", body: JSON.stringify(answer.body) });
+  });
+  const run = async () => {
+    await p.evaluate(() => document.getElementById("btn-help-updates")?.click());
+    await p.waitForFunction(() => document.getElementById("help-pop")?.dataset.updates !== "checking", null, { timeout: 5000 }).catch(() => {});
+    return p.evaluate(() => { const pop = document.getElementById("help-pop");
+      return { kind: pop?.dataset.updates ?? null, text: pop?.innerText ?? "", acts: [...(pop?.querySelectorAll("[data-act]") ?? [])].map((b) => b.dataset.act) }; });
+  };
+  const r = {};
+  answer = { status: 200, body: [
+    { tag_name: "v99.0.0-dev.1", html_url: "https://github.com/ExtendedMatrix/EMStudio/releases/tag/v99.0.0-dev.1", draft: false, prerelease: true, assets: [{ name: "latest.json" }] },
+    { tag_name: "v99.0.0", html_url: "https://github.com/ExtendedMatrix/EMStudio/releases/tag/v99.0.0", draft: true, prerelease: false, assets: [] },
+    { tag_name: "v99.0.0-dev.0", html_url: "x", draft: false, prerelease: true, assets: [] } ] };
+  r.newer = await run();
+  await p.screenshot({ path: SHOT("dc7-aggiornamenti-nuova") }).catch(() => {});
+  answer = { status: 200, body: [{ tag_name: "v0.0.1", html_url: "x", draft: false, prerelease: false, assets: [] }] };
+  r.current = await run();
+  await p.screenshot({ path: SHOT("dc7-aggiornamenti-ultima") }).catch(() => {});
+  answer = { abort: true };
+  r.offline = await run();
+  await p.screenshot({ path: SHOT("dc7-aggiornamenti-senza-rete") }).catch(() => {});
+  await ctx.close();
+  const pass = r.newer.kind === "newer" && /99\.0\.0-dev\.1/.test(r.newer.text) && r.newer.acts.join() === "get-release,install"
+    && r.current.kind === "current" && /ultima versione/.test(r.current.text) && !r.current.acts.length
+    && r.offline.kind === "offline" && r.offline.acts.join() === "retry,releases"
+    && asked.length === 3 && asked.every((u) => u.startsWith("https://api.github.com/repos/ExtendedMatrix/EMStudio/releases"))
+    && !errors.filter((e) => !/internetdisconnected|ERR_INTERNET_DISCONNECTED|Failed to load resource/.test(e)).length;
+  return { pass, detail: { installed, r, asked, errors } };
+});
+
 // ── run ─────────────────────────────────────────────────────────────────────
 const chosen = cases.filter((c) => !only.length || only.includes(c.id) || only.some((o) => c.id.startsWith(o + ".")));
 for (const c of chosen) {

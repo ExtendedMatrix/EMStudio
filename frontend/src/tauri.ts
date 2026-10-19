@@ -254,6 +254,19 @@ export async function setLlmKey(key: string): Promise<string | null> {
   }
 }
 
+/** MICRO-DOVE-CHI-MENU p.7 · install the signed update of release `tag` and
+ *  restart (main.rs `update_install`). Returns an error message; on success
+ *  the app restarts and nothing returns. */
+export async function installUpdate(tag: string): Promise<string | null> {
+  if (!isTauri()) return "updates are installed by the desktop app only";
+  try {
+    await invoke("update_install", { tag });
+    return null;
+  } catch (e) {
+    return e instanceof Error ? e.message : String(e);
+  }
+}
+
 export async function clearLlmKey(): Promise<string | null> {
   if (!isTauri()) return "no secure storage outside the desktop app";
   try {

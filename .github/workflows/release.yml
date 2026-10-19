@@ -32,6 +32,15 @@
 # Windows signing is NOT wired: Tauri v2 takes a certificate thumbprint or a
 # signCommand in tauri.conf.json, which is a repo change plus a machine-installed
 # certificate, and neither belongs in a workflow. Declared rather than half-done.
+#
+# ── updates (MICRO-DOVE-CHI-MENU p.7, 19 Oct 2026) ──────────────────────────
+# With the secret TAURI_SIGNING_PRIVATE_KEY (and its password) each build also
+# makes the SIGNED update archive of its platform, and tauri-action merges them
+# into the release's `latest.json` — what the app's «Install and restart» reads
+# (apps/desktop/src-tauri/src/main.rs, `update_install`), checked against the
+# public key in tauri.conf.json. Without the secret the build is as before, no
+# update archives and a line in the log, never a failure: the app's «Check for
+# updates» still finds the release and opens its page.
 name: release (desktop)
 
 on:
@@ -453,6 +462,30 @@ jobs:
             echo "macOS, or SmartScreen ▸ More info ▸ Run anyway on Windows)"
           fi
 
+      # The update archives are switched on HERE, on the runner's checkout, and
+      # only when the private key is there: tauri.conf.json keeps them off so a
+      # `cargo tauri build` without the key builds (a build asked for update
+      # archives and given no key refuses to finish).
+      - name: Do we have the updater's key?
+        shell: bash
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+        run: |
+          if [ -n "${TAURI_SIGNING_PRIVATE_KEY:-}" ]; then
+            node -e '
+              const fs = require("fs");
+              const f = "apps/desktop/src-tauri/tauri.conf.json";
+              const c = JSON.parse(fs.readFileSync(f, "utf8"));
+              c.bundle.createUpdaterArtifacts = true;
+              fs.writeFileSync(f, JSON.stringify(c, null, 2) + "\n");'
+            echo "updater key present — this build makes signed update archives,"
+            echo "and the release gets them in latest.json"
+          else
+            echo "no TAURI_SIGNING_PRIVATE_KEY — building WITHOUT update archives"
+            echo "(declared: the app's «Check for updates» still finds this release"
+            echo "and opens its page; «Install and restart» needs latest.json)"
+          fi
+
       - name: Build the desktop app (signed)
         if: steps.signing.outputs.sign == 'true'
         uses: tauri-apps/tauri-action@v0
@@ -464,20 +497,38 @@ jobs:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          # the update archives' signature (empty without the secret: then
+          # tauri.conf.json asks for none, see the step above)
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           projectPath: apps/desktop
           releaseId: ${{ needs.draft.outputs.release_id }}
           args: --target ${{ matrix.target }}
+          # latest.json on the release, one entry per platform; on Windows
+          # the NSIS installer, which installs over the same x.y.z (every dev
+          # build's bundle version is x.y.z, see scripts/set-version.mjs)
+          includeUpdaterJson: true
+          updaterJsonPreferNsis: true
 
       - name: Build the desktop app (unsigned)
         if: steps.signing.outputs.sign != 'true'
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # the update archives' signature (empty without the secret: then
+          # tauri.conf.json asks for none, see the step above)
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           projectPath: apps/desktop
           releaseId: ${{ needs.draft.outputs.release_id }}
           args: --target ${{ matrix.target }}
+          # latest.json on the release, one entry per platform; on Windows
+          # the NSIS installer, which installs over the same x.y.z (every dev
+          # build's bundle version is x.y.z, see scripts/set-version.mjs)
+          includeUpdaterJson: true
+          updaterJsonPreferNsis: true
 
       # A copy of the installers as a plain artifact too: a draft release is
       # visible only to people with write access, and a tester on the team

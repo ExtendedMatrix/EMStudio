@@ -190,6 +190,54 @@ struct DesktopQueue {
 
 struct Pending(Mutex<DesktopQueue>);
 
+/// MICRO-DOVE-CHI-MENU p.7 · the repository whose Releases carry the updates.
+const RELEASES_REPO: &str = "ExtendedMatrix/EMStudio";
+
+/// Install the update of release `tag` and restart.
+///
+/// WHICH release is the page's choice (it asked GitHub for the newest one of
+/// the installed version's channel); this only refuses a tag that is not newer
+/// than what runs, and lets the plugin do the rest: `latest.json` of THAT
+/// release, the platform's archive, its signature checked against the public
+/// key in tauri.conf.json — an unsigned or foreign archive is refused there.
+///
+/// The plugin's own "is it newer" is switched off on purpose: it compares the
+/// BUNDLE's version, which is `x.y.z` for every dev build (set-version.mjs), so
+/// dev.51 would never look newer than dev.50. Cargo's version is the full one.
+#[tauri::command]
+async fn update_install(app: tauri::AppHandle, tag: String) -> Result<(), String> {
+    use tauri_plugin_updater::UpdaterExt;
+    if !tag.chars().all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '-') {
+        return Err(format!("not a release tag: {tag}"));
+    }
+    let wanted = semver::Version::parse(tag.trim_start_matches('v'))
+        .map_err(|e| format!("{tag}: {e}"))?;
+    let installed = semver::Version::parse(env!("CARGO_PKG_VERSION"))
+        .map_err(|e| e.to_string())?;
+    if wanted <= installed {
+        return Err(format!("{wanted} is not newer than {installed}"));
+    }
+    let url: tauri::Url = format!("https://github.com/{RELEASES_REPO}/releases/download/{tag}/latest.json")
+        .parse()
+        .map_err(|e| format!("{e}"))?;
+    let update = app
+        .updater_builder()
+        .endpoints(vec![url])
+        .map_err(|e| e.to_string())?
+        .version_comparator(|_, _| true)
+        .build()
+        .map_err(|e| e.to_string())?
+        .check()
+        .await
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| format!("{tag} has no update for this platform"))?;
+    update
+        .download_and_install(|_, _| {}, || {})
+        .await
+        .map_err(|e| e.to_string())?;
+    app.restart();
+}
+
 /// What the page has not taken yet; emptied by the call.
 #[tauri::command]
 fn take_desktop_queue(state: tauri::State<Pending>) -> DesktopQueue {
@@ -597,6 +645,9 @@ fn main() {
         // APRI IN EMSTUDIO · sign-in pages go to the system browser; any other
         // page that is not EMStudio gets «Torna a EMStudio»
         .plugin(navigation_guard())
+        // MICRO-DOVE-CHI-MENU p.7 · the update of a release, signed (see
+        // `update_install`; the public key is in tauri.conf.json)
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(BridgeChild(Mutex::new(None)))
         .manage(Pending(Mutex::new(DesktopQueue::default())))
         .invoke_handler(tauri::generate_handler![
@@ -604,7 +655,8 @@ fn main() {
             take_desktop_queue,
             llm_key_status,
             set_llm_key,
-            clear_llm_key
+            clear_llm_key,
+            update_install
         ])
         .setup(|app| {
             #[cfg(any(target_os = "linux", all(debug_assertions,
@@ -799,5 +851,31 @@ mod tests {
         }
         let none = port_taken_message(8765, None);
         assert!(none.contains("8765") && none.contains("8775") && !none.contains("portachiavi"), "{none}");
+    }
+
+    /// MICRO-DOVE-CHI-MENU p.7 · the updater's configuration is what the plugin
+    /// reads at launch (a key it refused would stop the app from starting): a
+    /// minisign PUBLIC key, an https endpoint, and no update archives in a
+    /// build without the private key (the release workflow turns them on).
+    #[test]
+    fn updater_config_is_read_by_the_plugin() {
+        let conf: serde_json::Value =
+            serde_json::from_str(include_str!("../tauri.conf.json")).unwrap();
+        let raw = conf["plugins"]["updater"].clone();
+        let cfg: tauri_plugin_updater::Config = serde_json::from_value(raw).unwrap();
+        assert!(cfg.endpoints.iter().all(|u| u.scheme() == "https"), "{:?}", cfg.endpoints);
+        assert!(!cfg.endpoints.is_empty());
+        let key = cfg.pubkey.trim();
+        assert!(!key.is_empty());
+        assert!(!key.to_ascii_lowercase().contains("secret"), "a private key in the config");
+        assert_eq!(conf["bundle"]["createUpdaterArtifacts"], serde_json::json!(false));
+    }
+
+    #[test]
+    fn a_dev_tag_is_newer_than_the_dev_before_it() {
+        let v = |s: &str| semver::Version::parse(s).unwrap();
+        assert!(v("1.6.0-dev.51") > v("1.6.0-dev.50"));
+        assert!(v("1.6.0-dev.100") > v("1.6.0-dev.99"));
+        assert!(v("1.6.0") > v("1.6.0-dev.99"));
     }
 }
