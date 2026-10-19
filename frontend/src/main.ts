@@ -14147,7 +14147,7 @@ let settingsOpenedWith: { locale: Locale; theme: ThemeMode; settings: string } |
  *  node's section, with the cursor in its address field. */
 function openNodeSettings(): void {
   openSettings("settings-sect-node");
-  const field = document.getElementById("set-hub-url") as HTMLInputElement | null;
+  const field = document.getElementById("set-node-add") as HTMLInputElement | null;
   setTimeout(() => field?.focus(), 0);
 }
 
@@ -14211,38 +14211,87 @@ async function probeNodeAt(address: string): Promise<{ ok: boolean; text: string
   }
 }
 
-document.getElementById("set-node-test")?.addEventListener("click", async () => {
-  const out = document.getElementById("set-node-result");
-  const field = document.getElementById("set-hub-url") as HTMLInputElement | null;
-  if (!out || !field) return;
-  out.textContent = t("settings.nodeTesting");
-  out.dataset.state = "";
-  const r = await probeNodeAt(field.value);
-  out.textContent = r.text;
-  out.dataset.state = r.ok ? "ok" : r.suggest ? "suggest" : "no";
-  // E4 · the right address, one click away (and «Test» again, to see it answer)
-  if (r.suggest) {
-    const use = document.createElement("button");
-    use.type = "button";
-    use.className = "link";
-    use.dataset.nodeSuggest = r.suggest;
-    use.textContent = t("settings.nodeUseSuggested", { url: r.suggest });
-    use.addEventListener("click", () => {
-      field.value = r.suggest!;
-      document.getElementById("set-node-test")?.click();
-    });
-    out.append(" ", use);
+// MICRO-DOVE-CHI-MENU p.5 · Settings ▸ Connections: the saved nodes as a list
+// (address, Test, Remove), edited on a working copy and written on Save. No
+// Sign in and no Room: entering a node and choosing a room are «Where you are».
+let settingsNodes: string[] = [];
+function paintSettingsNodes(): void {
+  const ul = document.getElementById("set-nodes");
+  if (!ul) return;
+  ul.textContent = "";
+  const active = getSettings().sync.hubUrl.trim().replace(/\/+$/, "");
+  if (!settingsNodes.length) {
+    const li = document.createElement("li");
+    li.className = "settings-hint";
+    li.textContent = t("settings.nodesNone");
+    ul.appendChild(li);
   }
+  for (const url of settingsNodes) {
+    const li = document.createElement("li");
+    li.dataset.node = url;
+    const addr = document.createElement("code");
+    addr.textContent = url;
+    li.appendChild(addr);
+    if (url === active) {
+      const on = document.createElement("span");
+      on.className = "settings-hint set-node-active";
+      on.textContent = ` · ${t("settings.nodeActive")}`;
+      li.appendChild(on);
+    }
+    const test = document.createElement("button");
+    test.type = "button";
+    test.dataset.nodeTest = url;
+    test.textContent = t("settings.nodeTest");
+    const rm = document.createElement("button");
+    rm.type = "button";
+    rm.dataset.nodeRemove = url;
+    rm.textContent = t("settings.nodeRemove");
+    const out = document.createElement("p");
+    out.className = "settings-hint set-node-said";
+    out.setAttribute("aria-live", "polite");
+    test.addEventListener("click", async () => {
+      out.textContent = t("settings.nodeTesting");
+      out.dataset.state = "";
+      const r = await probeNodeAt(url);
+      out.textContent = r.text;
+      out.dataset.state = r.ok ? "ok" : r.suggest ? "suggest" : "no";
+      // E4 · the right address, one click away (and «Test» again, to see it answer)
+      if (r.suggest) {
+        const use = document.createElement("button");
+        use.type = "button";
+        use.className = "link";
+        use.dataset.nodeSuggest = r.suggest;
+        use.textContent = t("settings.nodeUseSuggested", { url: r.suggest });
+        use.addEventListener("click", () => {
+          settingsNodes = settingsNodes.map((u) => (u === url ? r.suggest! : u)).filter((u, i, all) => all.indexOf(u) === i);
+          paintSettingsNodes();
+          (document.querySelector(`[data-node-test="${CSS.escape(r.suggest!)}"]`) as HTMLButtonElement | null)?.click();
+        });
+        out.append(" ", use);
+      }
+    });
+    rm.addEventListener("click", () => {
+      settingsNodes = settingsNodes.filter((u) => u !== url);
+      paintSettingsNodes();
+    });
+    li.append(" ", test, " ", rm, out);
+    ul.appendChild(li);
+  }
+}
+document.getElementById("set-node-add-btn")?.addEventListener("click", () => {
+  const field = document.getElementById("set-node-add") as HTMLInputElement | null;
+  const out = document.getElementById("set-node-result");
+  const typed = field?.value.trim().replace(/\/+$/, "") ?? "";
+  if (!typed) { if (out) out.textContent = t("settings.nodeEmpty"); return; }
+  if (!/^https?:\/\//.test(typed)) { if (out) out.textContent = t("settings.nodeNotUrl", { url: typed }); return; }
+  if (!settingsNodes.includes(typed)) settingsNodes.push(typed);
+  if (field) field.value = "";
+  if (out) out.textContent = "";
+  paintSettingsNodes();
+  (document.querySelector(`[data-node-test="${CSS.escape(typed)}"]`) as HTMLButtonElement | null)?.click();
 });
-document.getElementById("set-node-signin")?.addEventListener("click", () => {
-  const field = document.getElementById("set-hub-url") as HTMLInputElement | null;
-  const address = field?.value.trim().replace(/\/+$/, "") ?? "";
-  if (!address) { openNodeSettings(); toast(t("settings.nodeEmpty")); return; }
-  // the address typed IS the node to sign in to: kept first, so the sign-in's
-  // return finds it (it reads the saved settings, never this field)
-  const s = getSettings();
-  if (s.sync.hubUrl !== address) saveSettings({ ...s, sync: { ...s.sync, hubUrl: address } });
-  void signIntoNode({ intent: "identity" });
+document.getElementById("set-node-add")?.addEventListener("keydown", (e) => {
+  if (e.key === "Enter") { e.preventDefault(); document.getElementById("set-node-add-btn")?.click(); }
 });
 
 function openSettings(section?: string): void {
@@ -14253,10 +14302,8 @@ function openSettings(section?: string): void {
   setProtoSel.value = s.sync.protocol;
   setHostInp.value = s.sync.host;
   setPortInp.value = String(s.sync.port);
-  const hubUrlInp = document.getElementById("set-hub-url") as HTMLInputElement | null;
-  const hubRoomInp = document.getElementById("set-hub-room") as HTMLInputElement | null;
-  if (hubUrlInp) hubUrlInp.value = s.sync.hubUrl ?? "";
-  if (hubRoomInp) hubRoomInp.value = s.sync.hubRoom ?? "";
+  settingsNodes = savedNodes(s);
+  paintSettingsNodes();
   setDevUuid.checked = s.developer.showNodeIds;
   setEdgeTips.checked = s.interaction.edgeTooltips;
   setStrictDocNames.checked = s.interaction.strictDocumentNames;
@@ -14573,11 +14620,14 @@ settingsModal.addEventListener("click", (e) => {
       // footer, changed while working. Carried through so saving the endpoint
       // does not silently reset what this client is taking in.
       accept: getSettings().sync.accept,
-      // P4.3 · the room's address. The token is NOT here: it is asked for at
-      // connection time and never written down.
-      hubUrl: (document.getElementById("set-hub-url") as HTMLInputElement)?.value.trim() ?? "",
-      hubRoom: (document.getElementById("set-hub-room") as HTMLInputElement)?.value.trim() ?? "",
-      nodes: getSettings().sync.nodes,
+      // MICRO-DOVE-CHI-MENU p.5 · the saved nodes from the list; the active
+      // node stays the active one unless it was removed (then the first). The
+      // room is chosen in «Where you are» and carried through untouched. The
+      // token is NOT here: it is asked for at connection time, never written.
+      nodes: [...settingsNodes],
+      hubUrl: settingsNodes.includes(getSettings().sync.hubUrl.trim().replace(/\/+$/, ""))
+        ? getSettings().sync.hubUrl.trim().replace(/\/+$/, "") : settingsNodes[0] ?? "",
+      hubRoom: getSettings().sync.hubRoom,
     },
     developer: { showNodeIds: setDevUuid.checked },
     interaction: {

@@ -9826,3 +9826,14 @@ tr.tv-sel-act > td { background: color-mix(in srgb, var(--accent) 42%, transpare
 .idp-nodes { display: grid; gap: 3px; padding: 8px 10px; margin-bottom: 8px; border: 1px dashed var(--border); border-radius: var(--radius); }
 .idp-nodes .idp-warn { color: var(--warn, #b7791f); }
 .idp-nodes > button.link { justify-self: start; }
+
+/* MICRO-DOVE-CHI-MENU p.5 · Settings ▸ Connections: the saved nodes, one row
+   each; Identity's ORCID client in a closed «Advanced» */
+.set-nodes { list-style: none; margin: 4px 0 8px; padding: 0; display: grid; gap: 4px; }
+.set-nodes li { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+.set-nodes li code { font-size: 12px; }
+.set-nodes .set-node-said { flex-basis: 100%; margin: 0 0 4px; }
+.settings-adv { margin-top: 10px; border-top: 1px solid var(--border); padding-top: 6px; }
+.settings-adv > summary { cursor: pointer; color: var(--text-muted); font-size: 12px; }
+.set-nodes .set-node-active { display: inline; margin: 0; }
+#settings-sect-node .settings-node-actions #set-node-add { flex: 1 1 auto; min-width: 18ch; }

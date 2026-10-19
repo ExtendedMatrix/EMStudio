@@ -3755,8 +3755,8 @@ const EN: Dict = {
   "idw.signOutHint": "{orcid} leaves this machine's list and nobody is authoring; what is already signed stays signed",
   "idw.signOutAsk": "Sign out and forget {who} ({orcid}) on this machine? What you already signed keeps its signature.",
   "idw.signedOut": "{orcid} forgotten on this machine: nobody is authoring now",
-  "idw.noNode": "No StratiGraph node configured: write its address in Settings › Sync › Your StratiGraph node.",
-  "idw.configureNode": "Configure a node (Settings › Sync)…",
+  "idw.noNode": "No StratiGraph node is known: add one in «Where you are» (or Settings › Connections).",
+  "idw.configureNode": "Add a node (Settings › Connections)…",
   "idw.setTitle": "Identity (ORCID)",
   "idw.setHint": "The ORCID iD is the identity: what you create and change carries the signature of the current author. You can declare it offline and work at once; verifying it is what unlocks publishing as that person.",
   "idw.setName": "Name (optional)",
@@ -3927,6 +3927,15 @@ const EN: Dict = {
   "who.thisComputer": "This computer's identities…",
   "who.signOut": "Sign out of this identity",
   "who.verifyNeedsNode": "On the web ORCID is reached through a node: choose one in «Where you are», or give this page an ORCID client of its own (This computer's identities…).",
+  "settings.tab.connections": "Connections",
+  "settings.nodesTitle": "StratiGraph nodes",
+  "settings.nodesHint": "The nodes this computer knows. You enter one, and pick its rooms, in «Where you are» (the status bar's left label).",
+  "settings.nodesNone": "No node saved yet: add its address below.",
+  "settings.nodeActive": "active",
+  "settings.nodeAdd": "Add",
+  "settings.nodeRemove": "Remove",
+  "settings.appsTitle": "Synchronised apps",
+  "settings.advancedBox": "Advanced",
 };
 
 // ── Italiano: complete, because E.D. works in it ───────────────────────────────
@@ -6767,7 +6776,7 @@ const IT: Dict = {
   "settings.tab.general": "Generale",
   "settings.tab.identity": "Identità",
   "settings.tab.sync": "Sync",
-  "settings.tab.viewers": "Visori",
+  "settings.tab.viewers": "Visualizzatori",
   "settings.tab.advanced": "Avanzate",
   "settings.language": "Lingua",
   "settings.languageHint":
@@ -7556,8 +7565,8 @@ const IT: Dict = {
   "idw.signOutHint": "{orcid} esce dall'elenco di questa macchina e nessuno firma; quello che è già firmato resta firmato",
   "idw.signOutAsk": "Uscire e dimenticare {who} ({orcid}) su questa macchina? Quello che hai già firmato tiene la sua firma.",
   "idw.signedOut": "{orcid} dimenticata su questa macchina: ora non firma nessuno",
-  "idw.noNode": "Nessun nodo StratiGraph configurato: scrivi il suo indirizzo in Impostazioni › Sync › Il tuo nodo StratiGraph.",
-  "idw.configureNode": "Configura un nodo (Impostazioni › Sync)…",
+  "idw.noNode": "Nessun nodo StratiGraph conosciuto: aggiungine uno in «Dove sei» (o Impostazioni › Connessioni).",
+  "idw.configureNode": "Aggiungi un nodo (Impostazioni › Connessioni)…",
   "idw.setTitle": "Identità (ORCID)",
   "idw.setHint": "L'ORCID iD è l'identità: quello che crei e modifichi porta la firma dell'autore corrente. Puoi dichiararlo senza rete e lavorare subito; verificarlo è ciò che sblocca la pubblicazione come quella persona.",
   "idw.setName": "Nome (facoltativo)",
@@ -7728,6 +7737,15 @@ const IT: Dict = {
   "who.thisComputer": "Identità di questo computer…",
   "who.signOut": "Esci da questa identità",
   "who.verifyNeedsNode": "Sul web ORCID si raggiunge attraverso un nodo: sceglilo in «Dove sei», o dai a questa pagina un client ORCID suo (Identità di questo computer…).",
+  "settings.tab.connections": "Connessioni",
+  "settings.nodesTitle": "Nodi StratiGraph",
+  "settings.nodesHint": "I nodi che questo computer conosce. Si entra in un nodo, e se ne scelgono le stanze, in «Dove sei» (l'etichetta a sinistra della barra di stato).",
+  "settings.nodesNone": "Nessun nodo salvato: aggiungi il suo indirizzo qui sotto.",
+  "settings.nodeActive": "attivo",
+  "settings.nodeAdd": "Aggiungi",
+  "settings.nodeRemove": "Rimuovi",
+  "settings.appsTitle": "App sincronizzate",
+  "settings.advancedBox": "Avanzate",
 };
 
 // ── The six other project languages: AI DRAFTS, awaiting validation ───────────

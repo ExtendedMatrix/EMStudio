@@ -6403,6 +6403,40 @@ test("DC4.who", "DOVE-CHI-MENU p.4 · «Chi sei» a destra della barra: dichiara
     detail: { seen } };
 });
 
+test("DC5.settings", "DOVE-CHI-MENU p.5 · Impostazioni per argomento: Generale · Identità · Connessioni · Visualizzatori · Avanzate; le impostazioni della dev.50 (nodo, stanza, Blender, client ORCID) arrivano al posto nuovo; Connessioni elenca il nodo (Prova, Rimuovi) senza Accedi né Stanza; il client ORCID in «Avanzate» chiuso; Salva non perde niente", async () => {
+  const old = { identity: { orcidClientId: "APP-SANDBOX0001", orcidBase: "https://sandbox.orcid.org" },
+    sync: { protocol: "ws", host: "192.168.1.5", port: 8790, tool: "blender", direction: "receive",
+            hubUrl: "https://em.localhost:8443/em", hubRoom: "sarmitest-16102026" } };
+  const { p, ctx, errors } = await open({ doc: null, locale: "it", init: { "emstudio.settings": JSON.stringify(old) } });
+  await p.keyboard.press("Meta+,");   // the table's shortcut (Help ▸ Settings on the web)
+  await p.waitForTimeout(400);
+  await p.locator("#settings-tabs button", { hasText: "Identità" }).click();
+  await p.waitForTimeout(300);
+  const tabs = await p.evaluate(() => [...document.querySelectorAll("#settings-tabs button")].map((b) => b.textContent));
+  const ident = await p.evaluate(() => ({ advOpen: document.getElementById("set-orcid-adv")?.open,
+    client: document.getElementById("set-orcid-client")?.value, base: document.getElementById("set-orcid-base")?.value }));
+  await p.screenshot({ path: SHOT("dc5-impostazioni-identita") }).catch(() => {});
+  await p.locator("#settings-tabs button", { hasText: "Connessioni" }).click();
+  await p.waitForTimeout(300);
+  const conn = await p.evaluate(() => ({ nodes: [...document.querySelectorAll("#set-nodes li[data-node]")].map((li) => li.dataset.node),
+    acts: [...document.querySelectorAll("#set-nodes li[data-node] button")].map((b) => b.textContent),
+    room: !!document.getElementById("set-hub-room"), signin: !!document.getElementById("set-node-signin"),
+    host: document.getElementById("set-sync-host")?.value, port: document.getElementById("set-sync-port")?.value }));
+  await p.screenshot({ path: SHOT("dc5-impostazioni-connessioni") }).catch(() => {});
+  await p.click("#settings-save");
+  await p.waitForTimeout(300);
+  const saved = await p.evaluate(() => JSON.parse(localStorage.getItem("emstudio.settings")));
+  await ctx.close();
+  return { pass: JSON.stringify(tabs) === JSON.stringify(["Generale", "Identità", "Connessioni", "Visualizzatori", "Avanzate"])
+      && ident.advOpen === false && ident.client === "APP-SANDBOX0001" && ident.base === "https://sandbox.orcid.org"
+      && JSON.stringify(conn.nodes) === JSON.stringify(["https://em.localhost:8443/em"]) && conn.acts.join("|") === "Prova|Rimuovi"
+      && !conn.room && !conn.signin && conn.host === "192.168.1.5" && conn.port === "8790"
+      && saved.sync.hubUrl === "https://em.localhost:8443/em" && saved.sync.hubRoom === "sarmitest-16102026"
+      && JSON.stringify(saved.sync.nodes) === JSON.stringify(["https://em.localhost:8443/em"]) && saved.sync.port === 8790
+      && saved.identity.orcidClientId === "APP-SANDBOX0001" && !errors.length,
+    detail: { tabs, ident, conn, saved: saved.sync, errors } };
+});
+
 // ── run ─────────────────────────────────────────────────────────────────────
 const chosen = cases.filter((c) => !only.length || only.includes(c.id) || only.some((o) => c.id.startsWith(o + ".")));
 for (const c of chosen) {

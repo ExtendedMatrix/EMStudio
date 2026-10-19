@@ -91,6 +91,16 @@ that asked for one.
   identity». The node's sign-ins (ORCID through its Keycloak, its password) left
   this panel for «Where you are»; the flows are the same. Browser suite: DC1–DC4
   (menus, recents, where, who); E2.nodepw enters the node from «Where you are».
+- **Settings by topic** (MICRO-DOVE-CHI-MENU p.5): General · Identity ·
+  Connections · Viewers · Advanced. «Sync» is gone (it mixed the node and
+  Blender): Identity holds the ORCID iD, name and surname, with the ORCID client
+  id and orcid.org / sandbox in a closed «Advanced»; Connections holds the saved
+  nodes (address, Test, Remove, Add) and the synchronised apps (Blender:
+  protocol, host, port), and the node operator's orphan assets. No Room field
+  and no Sign in in Settings: the room is chosen and the node entered in «Where
+  you are». A dev.50 settings file migrates with nothing lost (node → the saved
+  list and still active, room, Blender, ORCID client).
+  `scripts/check-settings-migrate.mjs` (22), browser suite DC5.
 - The RM is bound to the epoch only directly (rules 1.6.36).
 - `addSubgraph` in a room: the proxies of `3d_obj/` and a shelf promotion are
   shared with the node; a host command's delta is shared in a node room.

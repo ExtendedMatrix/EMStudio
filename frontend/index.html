@@ -447,34 +447,84 @@
               <select id="set-text-lang"></select>
             </label>
           </section>
-          <!-- F8 (U17) · TWO sections with their own names. Signing in has
-               nothing to do with Blender: the node comes first, with its
-               address, «Test» (reachable, server version, ways in) and «Sign
-               in» right there; the room belongs to the node. -->
-          <section data-settings-tab="sync" class="settings-sect" id="settings-sect-node">
-            <h4 data-i18n="settings.nodeTitle">Your StratiGraph node</h4>
-            <p class="settings-hint" data-i18n="settings.nodeHint">
-              The StratiGraph server you sign in to and share rooms on. The
-              access token is asked for when you connect and is never saved.
+          <!-- IDENTITY · who is working. The ORCID iD is the identity itself;
+               everything else here is for humans to read. Note the contrast with
+               the AI key below: an iD is a PUBLIC identifier (it is printed on
+               papers) and lives in localStorage in clear text, while the tokens
+               that verify it are secrets and never touch this window. -->
+          <section data-settings-tab="identity" class="settings-sect" id="settings-sect-identity">
+            <!-- DEV30 U16 · in the interface's language (data-i18n), like the
+                 rest of Settings: the section was written in Italian -->
+            <h4 data-i18n="idw.setTitle">Identity (ORCID)</h4>
+            <p class="settings-hint" data-i18n="idw.setHint">
+              The ORCID iD is the identity: what you create and change carries the
+              signature of the current author. You can declare it offline and work at
+              once; verifying it is what unlocks publishing as that person.
             </p>
             <label
-              ><span data-i18n="settings.nodeAddress">Address</span>
-              <input id="set-hub-url" type="url" data-i18n-placeholder="settings.nodeAddressPh"
-                     placeholder="for example https://em.localhost:8443" />
+              >ORCID iD
+              <input
+                id="set-orcid"
+                type="text"
+                autocomplete="off"
+                spellcheck="false"
+                placeholder="0000-0000-0000-0000"
+              />
             </label>
+            <label
+              ><span data-i18n="idw.setName">Name (optional)</span>
+              <input id="set-orcid-name" type="text" autocomplete="off" />
+            </label>
+            <label
+              ><span data-i18n="idw.setSurname">Surname (optional)</span>
+              <input id="set-orcid-surname" type="text" autocomplete="off" />
+            </label>
+            <p class="settings-url">
+              <button id="set-orcid-declare" type="button" data-i18n="idw.setDeclare">Declare</button>
+              <button id="set-orcid-verify" type="button" data-i18n="idw.setVerify">Verify with ORCID</button>
+              <button id="set-orcid-signout" type="button" data-i18n="idw.signOut" hidden>Sign out · forget this identity</button>
+            </p>
+            <p class="settings-hint" id="set-orcid-state"></p>
+            <div id="set-orcid-known"></div>
+            <!-- MICRO-DOVE-CHI-MENU p.5 · the ORCID client and orcid.org / sandbox
+                 are for whoever deploys EMStudio: in «Advanced», closed -->
+            <details class="settings-adv" id="set-orcid-adv">
+              <summary data-i18n="settings.advancedBox">Advanced</summary>
+              <p class="settings-hint" data-i18n="idp.clientHint">
+                ORCID's own sign-in needs a client registered at ORCID, with this page as its redirect.
+              </p>
+              <label
+                ><span data-i18n="idp.clientId">ORCID client id (public)</span>
+                <input id="set-orcid-client" type="text" autocomplete="off" spellcheck="false" placeholder="APP-DBYSPGP676HKN8OE" />
+              </label>
+              <label
+                ><span data-i18n="idp.clientBase">ORCID</span>
+                <select id="set-orcid-base">
+                  <option value="https://orcid.org">orcid.org</option>
+                  <option value="https://sandbox.orcid.org">sandbox.orcid.org</option>
+                </select>
+              </label>
+            </details>
+          </section>
+          <!-- MICRO-DOVE-CHI-MENU p.5 · CONNECTIONS: the saved nodes (address,
+               Test, Remove) and, below, the synchronised apps. Entering a node
+               and choosing a room are «Where you are»: no Sign in, no Room here. -->
+          <section data-settings-tab="connections" class="settings-sect" id="settings-sect-node">
+            <h4 data-i18n="settings.nodesTitle">StratiGraph nodes</h4>
+            <p class="settings-hint" data-i18n="settings.nodesHint">
+              The nodes this computer knows. You enter one, and pick its rooms, in «Where you are»
+              (the status bar's left label).
+            </p>
+            <ul id="set-nodes" class="set-nodes"></ul>
             <div class="settings-node-actions">
-              <button type="button" id="set-node-test" data-i18n="settings.nodeTest">Test</button>
-              <button type="button" id="set-node-signin" data-i18n="settings.nodeSignIn">Sign in</button>
+              <input id="set-node-add" type="url" data-i18n-placeholder="settings.nodeAddressPh"
+                     placeholder="for example https://em.localhost:8443/em" />
+              <button type="button" id="set-node-add-btn" data-i18n="settings.nodeAdd">Add</button>
             </div>
             <p class="settings-hint" id="set-node-result" aria-live="polite"></p>
-            <label
-              ><span data-i18n="settings.nodeRoom">Room</span>
-              <input id="set-hub-room" type="text" data-i18n-placeholder="settings.nodeRoomPh"
-                     placeholder="for example scavo-2026" />
-            </label>
           </section>
           <!-- MICRO-SPAZIO-3D-2 p.6 · the node's orphan assets, for its operator -->
-          <section data-settings-tab="sync" class="settings-sect orph-off" id="settings-sect-orphans">
+          <section data-settings-tab="connections" class="settings-sect orph-off" id="settings-sect-orphans">
             <h4 data-i18n="settings.orphans">Orphan assets</h4>
             <p class="settings-hint" data-i18n="settings.orphansHint">
               Files of the node's store that no room cites any more (their room was deleted). They stay
@@ -494,8 +544,8 @@
             </div>
             <div id="set-orph-list" class="orph-list"></div>
           </section>
-          <section data-settings-tab="sync" class="settings-sect" id="settings-sect-sync">
-            <h4 data-i18n="settings.blenderTitle">Sync with Blender / EMtools</h4>
+          <section data-settings-tab="connections" class="settings-sect" id="settings-sect-sync">
+            <h4 data-i18n="settings.appsTitle">Synchronised apps</h4>
             <p class="settings-hint" data-i18n="settings.blenderHint">
               Live sync with a tool on this machine or your network (ADR-002):
               the chosen tool is the host and runs the WebSocket server;
@@ -574,63 +624,6 @@
             <p class="settings-hint" data-i18n="settings.lotHint">
               Photos of one camera close in time are proposed as one lot; the lot is always confirmed by whoever uploads.
             </p>
-          </section>
-          <!-- IDENTITY · who is working. The ORCID iD is the identity itself;
-               everything else here is for humans to read. Note the contrast with
-               the AI key below: an iD is a PUBLIC identifier (it is printed on
-               papers) and lives in localStorage in clear text, while the tokens
-               that verify it are secrets and never touch this window. -->
-          <section data-settings-tab="identity" class="settings-sect" id="settings-sect-identity">
-            <!-- DEV30 U16 · in the interface's language (data-i18n), like the
-                 rest of Settings: the section was written in Italian -->
-            <h4 data-i18n="idw.setTitle">Identity (ORCID)</h4>
-            <p class="settings-hint" data-i18n="idw.setHint">
-              The ORCID iD is the identity: what you create and change carries the
-              signature of the current author. You can declare it offline and work at
-              once; verifying it is what unlocks publishing as that person.
-            </p>
-            <label
-              >ORCID iD
-              <input
-                id="set-orcid"
-                type="text"
-                autocomplete="off"
-                spellcheck="false"
-                placeholder="0000-0000-0000-0000"
-              />
-            </label>
-            <label
-              ><span data-i18n="idw.setName">Name (optional)</span>
-              <input id="set-orcid-name" type="text" autocomplete="off" />
-            </label>
-            <label
-              ><span data-i18n="idw.setSurname">Surname (optional)</span>
-              <input id="set-orcid-surname" type="text" autocomplete="off" />
-            </label>
-            <p class="settings-url">
-              <button id="set-orcid-declare" type="button" data-i18n="idw.setDeclare">Declare</button>
-              <button id="set-orcid-verify" type="button" data-i18n="idw.setVerify">Verify with ORCID</button>
-              <button id="set-orcid-signout" type="button" data-i18n="idw.signOut" hidden>Sign out · forget this identity</button>
-            </p>
-            <p class="settings-hint" id="set-orcid-state"></p>
-            <div id="set-orcid-known"></div>
-            <!-- IDENTITÀ · «Sign in with ORCID» needs a client registered at
-                 ORCID. Its id is public; there is no secret anywhere. -->
-            <h4 data-i18n="idp.clientTitle">Sign in with ORCID</h4>
-            <p class="settings-hint" data-i18n="idp.clientHint">
-              ORCID's own sign-in needs a client registered at ORCID, with this page as its redirect.
-            </p>
-            <label
-              ><span data-i18n="idp.clientId">ORCID client id (public)</span>
-              <input id="set-orcid-client" type="text" autocomplete="off" spellcheck="false" placeholder="APP-DBYSPGP676HKN8OE" />
-            </label>
-            <label
-              ><span data-i18n="idp.clientBase">ORCID</span>
-              <select id="set-orcid-base">
-                <option value="https://orcid.org">orcid.org</option>
-                <option value="https://sandbox.orcid.org">sandbox.orcid.org</option>
-              </select>
-            </label>
           </section>
           <section data-settings-tab="viewers" class="settings-sect">
             <h4 data-i18n="settings.viewer">3D viewer</h4>
