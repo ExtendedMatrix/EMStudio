@@ -124,5 +124,7 @@ jobs:
 
       - name: Tirata ANONIMA, e entrambe le architetture
         run: |
+          # Un riferimento docker vuole il nome in minuscolo (ExtendedMatrix → extendedmatrix),
+          # come lo scrive già docker/metadata-action nei tag.
           ./scripts/verifica-tirata-anonima.sh \
-            "ghcr.io/${{ github.repository }}:${{ steps.meta.outputs.version }}"
+            "ghcr.io/${GITHUB_REPOSITORY,,}:${{ steps.meta.outputs.version }}"
