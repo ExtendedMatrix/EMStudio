@@ -3950,6 +3950,13 @@ const EN: Dict = {
   "insp.deleteNode": "Delete node",
   "insp.deleteEpoch": "Delete epoch",
   "insp.searchPh": "Search this panel",
+  "issues.fixMoveDocDate": "Move the date into its property",
+  "issues.docDateCopy": "{d}: the date {v} is also copied in the node's data — it lives in its property («Dating of the document»)",
+  "issues.docDateNoProperty": "{d}: the date {v} is only in the node's data — it has no property («Dating of the document»)",
+  "issues.keepPropertyDate": "keep {v} (the property's)",
+  "issues.keepDataDate": "keep {v} (the node's data)",
+  "issues.movedDocDate": "{d}: the date {v} is in its property",
+  "io.yedDrawingDropped": "GraphML: yEd's drawing (shape, colours, borders, positions) left out of {n} nodes — the glyph comes from the visual rules",
 };
 
 // ── Italiano: complete, because E.D. works in it ───────────────────────────────
@@ -7774,6 +7781,13 @@ const IT: Dict = {
   "insp.deleteNode": "Elimina nodo",
   "insp.deleteEpoch": "Elimina epoca",
   "insp.searchPh": "Cerca nel pannello",
+  "issues.fixMoveDocDate": "Sposta la data nella sua proprietà",
+  "issues.docDateCopy": "{d}: la data {v} è copiata anche nei dati del nodo — vive nella sua proprietà («Datazione del documento»)",
+  "issues.docDateNoProperty": "{d}: la data {v} sta solo nei dati del nodo — non ha la sua proprietà («Datazione del documento»)",
+  "issues.keepPropertyDate": "tieni {v} (della proprietà)",
+  "issues.keepDataDate": "tieni {v} (dei dati del nodo)",
+  "issues.movedDocDate": "{d}: la data {v} è nella sua proprietà",
+  "io.yedDrawingDropped": "GraphML: il disegno di yEd (forma, colori, bordi, posizioni) lasciato fuori da {n} nodi — il glifo viene dalle regole visive",
 };
 
 // ── The six other project languages: AI DRAFTS, awaiting validation ───────────
@@ -7904,6 +7918,13 @@ const EL: Dict = {
   "insp.deleteNode": "Διαγραφή κόμβου",
   "insp.deleteEpoch": "Διαγραφή εποχής",
   "insp.searchPh": "Αναζήτηση στο πλαίσιο",
+  "issues.fixMoveDocDate": "Μεταφορά της ημερομηνίας στην ιδιότητά της",
+  "issues.docDateCopy": "{d}: η ημερομηνία {v} είναι αντιγραμμένη και στα δεδομένα του κόμβου — ανήκει στην ιδιότητά της",
+  "issues.docDateNoProperty": "{d}: η ημερομηνία {v} υπάρχει μόνο στα δεδομένα του κόμβου — δεν έχει ιδιότητα",
+  "issues.keepPropertyDate": "κράτησε {v} (της ιδιότητας)",
+  "issues.keepDataDate": "κράτησε {v} (των δεδομένων του κόμβου)",
+  "issues.movedDocDate": "{d}: η ημερομηνία {v} είναι στην ιδιότητά της",
+  "io.yedDrawingDropped": "GraphML: το σχέδιο του yEd (σχήμα, χρώματα, περιγράμματα, θέσεις) αφαιρέθηκε από {n} κόμβους — το γλύφο έρχεται από τους οπτικούς κανόνες",
 };
 
 const HE: Dict = {
@@ -8007,6 +8028,13 @@ const HE: Dict = {
   "insp.deleteNode": "מחיקת צומת",
   "insp.deleteEpoch": "מחיקת תקופה",
   "insp.searchPh": "חיפוש בחלונית",
+  "issues.fixMoveDocDate": "העברת התאריך למאפיין שלו",
+  "issues.docDateCopy": "{d}: התאריך {v} מועתק גם בנתוני הצומת — מקומו במאפיין שלו",
+  "issues.docDateNoProperty": "{d}: התאריך {v} נמצא רק בנתוני הצומת — אין לו מאפיין",
+  "issues.keepPropertyDate": "השאר {v} (של המאפיין)",
+  "issues.keepDataDate": "השאר {v} (של נתוני הצומת)",
+  "issues.movedDocDate": "{d}: התאריך {v} נמצא במאפיין שלו",
+  "io.yedDrawingDropped": "GraphML: הציור של yEd (צורה, צבעים, מסגרות, מיקומים) הושמט מ־{n} צמתים — הגליף בא מהכללים החזותיים",
 };
 
 const ES: Dict = {
@@ -8115,6 +8143,13 @@ const ES: Dict = {
   "insp.deleteNode": "Eliminar nodo",
   "insp.deleteEpoch": "Eliminar época",
   "insp.searchPh": "Buscar en el panel",
+  "issues.fixMoveDocDate": "Mover la fecha a su propiedad",
+  "issues.docDateCopy": "{d}: la fecha {v} está copiada también en los datos del nodo — vive en su propiedad",
+  "issues.docDateNoProperty": "{d}: la fecha {v} solo está en los datos del nodo — no tiene su propiedad",
+  "issues.keepPropertyDate": "conservar {v} (la de la propiedad)",
+  "issues.keepDataDate": "conservar {v} (la de los datos del nodo)",
+  "issues.movedDocDate": "{d}: la fecha {v} está en su propiedad",
+  "io.yedDrawingDropped": "GraphML: el dibujo de yEd (forma, colores, bordes, posiciones) dejado fuera de {n} nodos — el glifo viene de las reglas visuales",
 };
 
 const PL: Dict = {
@@ -8222,6 +8257,13 @@ const PL: Dict = {
   "insp.deleteNode": "Usuń węzeł",
   "insp.deleteEpoch": "Usuń epokę",
   "insp.searchPh": "Szukaj w panelu",
+  "issues.fixMoveDocDate": "Przenieś datę do jej właściwości",
+  "issues.docDateCopy": "{d}: data {v} jest skopiowana także w danych węzła — należy do jej właściwości",
+  "issues.docDateNoProperty": "{d}: data {v} jest tylko w danych węzła — nie ma właściwości",
+  "issues.keepPropertyDate": "zachowaj {v} (z właściwości)",
+  "issues.keepDataDate": "zachowaj {v} (z danych węzła)",
+  "issues.movedDocDate": "{d}: data {v} jest w swojej właściwości",
+  "io.yedDrawingDropped": "GraphML: rysunek yEd (kształt, kolory, obramowania, pozycje) pominięty w {n} węzłach — glif pochodzi z reguł wizualnych",
 };
 
 const RO: Dict = {
@@ -8330,6 +8372,13 @@ const RO: Dict = {
   "insp.deleteNode": "Șterge nodul",
   "insp.deleteEpoch": "Șterge epoca",
   "insp.searchPh": "Caută în panou",
+  "issues.fixMoveDocDate": "Mută data în proprietatea ei",
+  "issues.docDateCopy": "{d}: data {v} e copiată și în datele nodului — locul ei e în proprietatea ei",
+  "issues.docDateNoProperty": "{d}: data {v} e doar în datele nodului — nu are proprietate",
+  "issues.keepPropertyDate": "păstrează {v} (a proprietății)",
+  "issues.keepDataDate": "păstrează {v} (a datelor nodului)",
+  "issues.movedDocDate": "{d}: data {v} e în proprietatea ei",
+  "io.yedDrawingDropped": "GraphML: desenul yEd (formă, culori, margini, poziții) lăsat pe dinafară la {n} noduri — glifa vine din regulile vizuale",
 };
 
 const FR: Dict = {
@@ -8441,6 +8490,13 @@ const FR: Dict = {
   "insp.deleteNode": "Supprimer le nœud",
   "insp.deleteEpoch": "Supprimer l'époque",
   "insp.searchPh": "Chercher dans le panneau",
+  "issues.fixMoveDocDate": "Déplacer la date dans sa propriété",
+  "issues.docDateCopy": "{d} : la date {v} est aussi copiée dans les données du nœud — elle vit dans sa propriété",
+  "issues.docDateNoProperty": "{d} : la date {v} n'est que dans les données du nœud — elle n'a pas de propriété",
+  "issues.keepPropertyDate": "garder {v} (celle de la propriété)",
+  "issues.keepDataDate": "garder {v} (celle des données du nœud)",
+  "issues.movedDocDate": "{d} : la date {v} est dans sa propriété",
+  "io.yedDrawingDropped": "GraphML : le dessin de yEd (forme, couleurs, bordures, positions) laissé hors de {n} nœuds — le glyphe vient des règles visuelles",
 };
 
 /**
@@ -9781,6 +9837,13 @@ const DE: Dict = {
   "insp.deleteNode": "Knoten löschen",
   "insp.deleteEpoch": "Epoche löschen",
   "insp.searchPh": "Im Bereich suchen",
+  "issues.fixMoveDocDate": "Datum in seine Eigenschaft verschieben",
+  "issues.docDateCopy": "{d}: das Datum {v} steht auch in den Daten des Knotens — es gehört in seine Eigenschaft",
+  "issues.docDateNoProperty": "{d}: das Datum {v} steht nur in den Daten des Knotens — es hat keine Eigenschaft",
+  "issues.keepPropertyDate": "{v} behalten (die der Eigenschaft)",
+  "issues.keepDataDate": "{v} behalten (die der Knotendaten)",
+  "issues.movedDocDate": "{d}: das Datum {v} steht in seiner Eigenschaft",
+  "io.yedDrawingDropped": "GraphML: yEds Zeichnung (Form, Farben, Ränder, Positionen) bei {n} Knoten weggelassen — die Glyphe kommt aus den visuellen Regeln",
 };
 
 const DICTS: Record<Locale, Dict> = {

@@ -40,7 +40,13 @@ const base = () => ({ graph: { nodes: [
 ] } });
 const run = (doc, extra = {}) => M.issues({ doc, nodes: doc.graph.nodes, isUnit: () => false, t: M.t,
   fixers: { leaveGroup: { label: "leave", run: () => {} }, alignDocDate: { label: "align", run: () => {} }, redate: () => {} }, ...extra })
-  .filter((i) => i.node === "D70");
+  .filter((i) => i.node === "D70")
+  // MICRO-PULIZIA p.7 · the importer's copy of the date is said apart (below)
+  .filter((i) => !/also copied in the node's data|only in the node's data/.test(i.txt));
+// MICRO-PULIZIA p.7 · «Move the date into its property»: the copy said, and cured
+const copyNotices = (doc, extra = {}) => M.issues({ doc, nodes: doc.graph.nodes, isUnit: () => false, t: M.t,
+  fixers: { moveDocDate: { label: "move", run: () => {} }, alignDocDate: { label: "align", run: () => {} } }, ...extra })
+  .filter((i) => i.node === "D70" && /node's data/.test(i.txt));
 
 {
   const d = base();
@@ -88,5 +94,20 @@ for (const f of process.argv.slice(2)) {
   if (d70) eq([d70.year, name(d70.epoch)], [1870, "XX sec"], `${f.split("/").pop()}: D.70 → 1870, XX sec`);
   const is = M.issues({ doc, nodes: g.nodes, isUnit: () => false, t: M.t }).filter((i) => i.rule === "chronology" && docs.some((d) => d.id === i.node));
   console.log(`  ${f.split("/").pop()}: ${docs.length} documents, ${rows.length} dated; warnings: ${is.map((i) => i.txt).join(" | ") || "none"}`);
+}
+{
+  // the same year in the property and in the node's data: an info, «move»
+  const same = copyNotices(base());
+  ok(same.length === 1 && same[0].sev === "info" && same[0].fix?.label === "move" && /also copied/.test(same[0].txt),
+     "D.70: 1870 in both — the copy is said, its cure moves it");
+  // only in the node's data: «move» makes the property
+  const d = base(); d.graph.nodes = d.graph.nodes.filter((n) => n.id !== "P70"); d.graph.edges = d.graph.edges.filter((e) => e.id !== "e4");
+  const only = copyNotices(d);
+  ok(only.length === 1 && /only in the node's data/.test(only[0].txt) && only[0].fix?.label === "move", "no property: said, «move» makes it");
+  // two years: which one to keep is asked
+  const two = base(); two.graph.nodes.find((n) => n.id === "D70").data.absolute_time_start = "1871";
+  const w = M.issues({ doc: two, nodes: two.graph.nodes, isUnit: () => false, t: M.t,
+    fixers: { moveDocDate: { label: "move", run: () => {} } } }).find((i) => i.node === "D70" && /1870 in its property and 1871/.test(i.txt));
+  ok(w?.fix?.kind === "pick" && w.fix.options.map((o) => o.value).join() === "1870,1871", "two years: the cure asks which to keep");
 }
 console.log(`check-doc-dating: ${checks} checks passed`);

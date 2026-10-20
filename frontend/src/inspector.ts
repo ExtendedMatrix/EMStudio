@@ -165,7 +165,7 @@ const ID_FIELDS = new Set(["graph_id", "original_id", "original_emid", "emid", "
  *  details», closed — an archaeologist reads the unit, not its y_pos */
 const TECH_FIELDS = new Set(["is_canonical", "y_pos", "x_pos", "shape", "fill_color", "border_style",
   "border_color", "border_width", "symbol", "width", "height", "font_family", "font_size",
-  "font_style", "text_color", "label_color", "geometry", "yed_id", "graphml_id",
+  "font_style", "text_color", "label_color", "yed_id", "graphml_id",
   // MICRO-BADGE-PD-CRONOLOGIA · the yEd records the GraphML importer folded into
   // one document (`original_id`, `y_pos`…): the importer's memory, not a datum
   // anybody reads — the instances a reader sees are the view's (`paradata_instances`)
@@ -1182,6 +1182,9 @@ export function renderInspector(
       // MICRO-SPAZIO-3D-3 p.15 · the transform is the «Trasformazione» section's
       // nine fields above, not a raw JSON with its numbers written as strings
       if (k === "transform" && transformShown) continue;
+      // MICRO-PULIZIA p.7 · a document's date is shown in «Dating of the
+      // document» only (its property); the importer's copy is not a second fact
+      if (k === "absolute_time_start" && node.node_type === "document") continue;
       // DEV29 B3 · a file set's members digest IS its checksum (s3Dgraphy dev29
       // A1 writes only `checksum`): the same sha256 twice is said once
       if (k === "members_digest" && v === (data as Record<string, unknown>).checksum) continue;

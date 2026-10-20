@@ -45,6 +45,22 @@ that asked for one.
 - `scripts/check-space-views.mjs` (101), `scripts/check-implicit-pd.mjs` (30).
 
 ### Changed
+- **The import's residues out of the data** (MICRO-PULIZIA-INTERFACCIA p.7).
+  yEd's drawing (`shape`, `fill_color`, `border_style`, `border_color`,
+  `border_width`, `symbol`, the positions, the fonts…) is not a datum — the
+  glyph is the visual rules'. Measured: s3Dgraphy's GraphML importer writes it
+  (`attributes`) and its em.json exporter lifts it into `data`; nothing draws
+  from it. So EMStudio's GraphML import no longer brings it in and the Save
+  leaves it out (`model.ts` `YED_DRAWING_KEYS`), keeping what IS read: an
+  epoch's `fill_color` (its colour) and a document's border while it has no
+  `certainty_class`. `geometry` (the document's geometry axis) is a datum and
+  left the «Technical details». GT16: 120 nodes with yEd residues → 0 after a
+  save. **A document's date lives in its property** («Dating of the document»):
+  the Inspector no longer shows the `data.absolute_time_start` copy, the dating
+  section no longer writes it, and Warnings has a cure, «Move the date into its
+  property» — no property: made with that value; the same value: the copy goes;
+  two values: it asks which to keep. GT16: 4 copies → 0.
+  `__EM_DRAG__.issues()` says each issue's cure, `runIssueFix` presses it.
 - **The Inspector, sectioned** (MICRO-PULIZIA-INTERFACCIA p.6). Every section
   closes with its triangle, as in a 3D program's properties (the heading is the
   button, `aria-expanded`); the state is remembered per node type. The whole of

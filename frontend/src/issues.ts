@@ -79,6 +79,10 @@ export interface IssueFixers {
   leaveGroup?: { label: string; run: (memberId: string, groupId: string) => void };
   /** …a document's `data.absolute_time_start` aligned to its property */
   alignDocDate?: { label: string; run: (docId: string, value: string) => void };
+  /** MICRO-PULIZIA p.7 · the date moved into its property: made with that
+   *  value when there is none, the copy in the node's data removed; `value`
+   *  is the one kept when the two disagreed */
+  moveDocDate?: { label: string; run: (docId: string, value: string) => void };
   /** …a document's `has_first_epoch` replaced by the epoch that holds its year */
   redate?: (docId: string, epochId: string) => void;
 }
@@ -258,13 +262,29 @@ export function issues(src: IssueSources): Issue[] {
     for (const n of nodes) {
       if (n.node_type !== "document") continue;
       const dd = documentDating(doc, n.id, bounds);
-      // 1 · the property and the node's own field say two years
-      if (dd.propertyValue && dd.dataValue && dd.propertyValue !== dd.dataValue
-          && Number(dd.propertyValue) !== Number(dd.dataValue))
-        push({ node: n.id, sev: "warn", rule: "chronology",
-               txt: t("issues.docDateMismatch", { d: name(n.id), p: dd.propertyValue, v: dd.dataValue }),
-               ...(fx.alignDocDate ? { fix: { kind: "button" as const, label: fx.alignDocDate.label,
-                   run: () => fx.alignDocDate!.run(n.id, dd.propertyValue) } } : {}) });
+      // MICRO-PULIZIA p.7 · the date lives in its PROPERTY («Dating of the
+      // document»); a `data.absolute_time_start` beside it is the GraphML
+      // importer's copy. One cure, «Move the date into its property»: no
+      // property → made with that value; the same value → the copy goes; two
+      // values → which one to keep is asked (the cure is a choice of the two)
+      if (dd.dataValue) {
+        const differ = !!dd.propertyValue && dd.propertyValue !== dd.dataValue
+          && Number(dd.propertyValue) !== Number(dd.dataValue);
+        const mv = fx.moveDocDate;
+        if (differ)
+          push({ node: n.id, sev: "warn", rule: "chronology",
+                 txt: t("issues.docDateMismatch", { d: name(n.id), p: dd.propertyValue, v: dd.dataValue }),
+                 ...(mv ? { fix: { kind: "pick" as const, placeholder: mv.label,
+                     options: [{ value: dd.propertyValue, label: t("issues.keepPropertyDate", { v: dd.propertyValue }) },
+                               { value: dd.dataValue, label: t("issues.keepDataDate", { v: dd.dataValue }) }],
+                     run: (v: string) => mv.run(n.id, v) } }
+                    : fx.alignDocDate ? { fix: { kind: "button" as const, label: fx.alignDocDate.label,
+                     run: () => fx.alignDocDate!.run(n.id, dd.propertyValue) } } : {}) });
+        else
+          push({ node: n.id, sev: "info", rule: "chronology",
+                 txt: t(dd.propertyValue ? "issues.docDateCopy" : "issues.docDateNoProperty", { d: name(n.id), v: dd.dataValue }),
+                 ...(mv ? { fix: { kind: "button" as const, label: mv.label, run: () => mv.run(n.id, dd.dataValue) } } : {}) });
+      }
       // 2 · the year is outside the epoch it declares
       const de = dd.declaredEpoch ? bnd.get(dd.declaredEpoch) : undefined;
       if (dd.year != null && de && (dd.year < de.lo || dd.year > de.hi)) {

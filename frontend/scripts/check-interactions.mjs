@@ -6749,6 +6749,47 @@ test("PU6.inspector", "PULIZIA p.6 · Inspector: ogni sezione si chiude col tria
   return { pass, detail: { ...r, prop, sameType, errors } };
 });
 
+test("PU7.residues", "PULIZIA p.7 · il salvataggio toglie il disegno di yEd (shape, fill_color, border_*, symbol, x/y) ma tiene il colore di un'epoca e il bordo di un documento senza certainty_class; «Sposta la data nella sua proprietà»: senza proprietà la crea, uguale toglie la copia, diversa chiede quale tenere; l'Inspector mostra la data solo nella sua sezione", async () => {
+  const doc = fixture("catena");
+  const g = doc.graph;
+  const unit = g.nodes.find((n) => n.id === "USM101");
+  unit.data = { ...(unit.data ?? {}), shape: "rectangle", fill_color: "#FFFFFF", border_style: "#9B3333", symbol: "white rectangle", y_pos: 12 };
+  const ep = g.nodes.find((n) => n.node_type === "EpochNode");
+  if (ep) ep.data = { ...(ep.data ?? {}), fill_color: "#CCFFCC" };
+  // three documents: date only in data; same in both; two different years
+  const mk = (id, v, prop) => {
+    g.nodes.push({ id, name: id, node_type: "document", data: { absolute_time_start: v, border_color: "#000000", border_width: 4 } });
+    if (prop != null) {
+      g.nodes.push({ id: `${id}-p`, name: "absolute_time_start", node_type: "property", data: { property_type: "absolute_time_start", value: prop } });
+      g.edges.push({ id: `${id}-e`, source: id, target: `${id}-p`, edge_type: "has_property" });
+    }
+  };
+  mk("PU7-A", "1870", null); mk("PU7-B", "1900", "1900"); mk("PU7-C", "1950", "1960");
+  const { p, ctx, errors } = await open({ doc, locale: "it" });
+  const r = {};
+  r.issues = await p.evaluate(() => window.__EM_DRAG__.issues().filter((i) => /^PU7-/.test(i.node ?? "")).map((i) => ({ n: i.node, fix: i.fix?.kind, opts: i.fix?.options ?? null })));
+  // the Inspector: the date is not a field of «Data»
+  await pick(p, "PU7-B");
+  r.dataShowsDate = await p.evaluate(() => [...document.querySelectorAll('[data-win$="inspector"] .insp-data dt')].some((d) => d.textContent === "absolute_time_start"));
+  r.fixed = await p.evaluate(() => ["PU7-A", "PU7-B"].map((id) => window.__EM_DRAG__.runIssueFix(id, id)).concat(window.__EM_DRAG__.runIssueFix("PU7-C", "PU7-C", "1950")));
+  await p.waitForTimeout(300);
+  const saved = await p.evaluate(() => JSON.parse(window.__EM_DRAG__.docJson()));
+  await ctx.close();
+  const gg = saved.graph ?? Object.values(saved.graphs).find((x) => (x.nodes ?? []).some((n) => n.id === "USM101"));
+  const node = (id) => gg.nodes.find((n) => n.id === id);
+  const prop = (id) => { const e = gg.edges.find((x) => x.source === id && x.edge_type === "has_property"); return e ? node(e.target)?.data?.value : null; };
+  r.unit = Object.keys(node("USM101").data ?? {}).filter((k) => ["shape", "fill_color", "border_style", "symbol", "y_pos"].includes(k));
+  r.epochFill = ep ? node(ep.id)?.data?.fill_color ?? null : "n/a";
+  r.docBorder = node("PU7-A").data?.border_color ?? null;
+  r.dates = ["PU7-A", "PU7-B", "PU7-C"].map((id) => ({ id, copy: node(id)?.data?.absolute_time_start ?? null, prop: prop(id) }));
+  const byN = Object.fromEntries(r.issues.filter((i) => !!i.fix).map((i) => [i.n, i]));
+  const pass = byN["PU7-A"]?.fix === "button" && byN["PU7-B"]?.fix === "button" && byN["PU7-C"]?.fix === "pick" && byN["PU7-C"].opts?.join() === "1960,1950"
+    && !r.dataShowsDate && r.fixed.every(Boolean)
+    && !r.unit.length && (r.epochFill === "#CCFFCC" || r.epochFill === "n/a") && r.docBorder === "#000000"
+    && r.dates.every((d) => d.copy === null) && r.dates.map((d) => d.prop).join() === "1870,1900,1950" && !errors.length;
+  return { pass, detail: { ...r, errors } };
+});
+
 // ── run ─────────────────────────────────────────────────────────────────────
 const chosen = cases.filter((c) => !only.length || only.includes(c.id) || only.some((o) => c.id.startsWith(o + ".")));
 for (const c of chosen) {

@@ -150,7 +150,7 @@ import {
   renderLogPanel,
   versionBanner,
 } from "./logpanel";
-import { DocumentStore, setRoomAuthor } from "./model";
+import { DocumentStore, setRoomAuthor, stripYedDrawing } from "./model";
 import {
   HAS_PARADATA_NODEGROUP,
   initialName,
@@ -2396,7 +2396,18 @@ window.__EM_SCENE__ = () => {
   wins: () => windowsOf().map((w) => ({ id: w.id, type: w.type, state: w.state })),
   closeWin: (id: string) => { if (closeWindow(id)) renderTiles(); },
   data: (id: string) => JSON.parse(JSON.stringify(store?.node(id)?.data ?? null)),
-  issues: () => allIssues().map((i) => ({ rule: i.rule, node: i.node, txt: i.txt, sev: i.sev })),
+  issues: () => allIssues().map((i) => ({ rule: i.rule, node: i.node, txt: i.txt, sev: i.sev,
+    fix: i.fix ? { kind: i.fix.kind, label: "label" in i.fix ? i.fix.label : undefined,
+                   options: "options" in i.fix ? i.fix.options.map((o) => o.value) : undefined } : null })),
+  /** MICRO-PULIZIA p.7 · press the cure of the issue on `node` whose text holds
+   *  `has` (a «pick» with `value`), as the Warnings table does */
+  runIssueFix: (node: string, has: string, value?: string): boolean => {
+    const i = allIssues().find((x) => x.node === node && x.txt.includes(has) && !!x.fix);
+    if (!i?.fix) return false;
+    if (i.fix.kind === "pick") (i.fix.run as (v: string) => void)(value ?? i.fix.options[0]?.value ?? "");
+    else (i.fix.run as () => void)();
+    return true;
+  },
   /** SHIFT-A · what a node IS, read-only: type, name and its edges */
   nodeInfo: (id: string) => {
     const n = store?.node(id);
@@ -10784,10 +10795,14 @@ function renderDocumentDating(st: DocumentStore, host: HTMLElement, docId: strin
                               at ? { x: at.x, y: at.y + at.h + 40, w: 90, h: 30 } : undefined);
         st.addEdge(docId, np.id, "has_property");
       }
+      // MICRO-PULIZIA p.7 · the date lives in its property: the node's own
+      // `data.absolute_time_start` (the importer's copy) is not written, and a
+      // copy left by an old file goes with the first year written here
       const data = { ...((st.node(docId)?.data ?? {}) as Record<string, unknown>) };
-      if (v) data.absolute_time_start = v;
-      else delete data.absolute_time_start;
-      st.updateNode(docId, { data });
+      if ("absolute_time_start" in data) {
+        delete data.absolute_time_start;
+        st.updateNode(docId, { data });
+      }
     });
     return true;
   }
@@ -12762,6 +12777,10 @@ async function importGraphmlText(text: string, srcName: string, srcPath: string 
       return;
     }
     const doc = (await res.json()) as EmDocument;
+    // MICRO-PULIZIA p.7 · yEd's drawing does not come in: the glyph is the
+    // visual rules', not a datum of the node (`model.ts` YED_DRAWING_KEYS)
+    const cleaned = stripYedDrawing(doc.graph?.nodes ?? []);
+    if (cleaned) logInfo(t("io.yedDrawingDropped", { n: String(cleaned) }));
     const before = emtree.activeId;
     loadDocument(doc, srcName); // no layout → auto fresh-layout on load
     const slot = emtree.active();
@@ -16738,6 +16757,27 @@ function issueFixers(st: DocumentStore): IssueFixers {
     redate: (d, epoch) => {
       st.setFirstEpoch([d], epoch);
       done(t("chain.datedIn", { d: nm(d), e: nm(epoch) }), [d, epoch]);
+    },
+    // MICRO-PULIZIA p.7 · «Move the date into its property»: one undo step
+    moveDocDate: {
+      label: t("issues.fixMoveDocDate"),
+      run: (d, value) => {
+        st.batch(() => {
+          const p = documentStartProperty(st, d);
+          if (p) st.setPropertyValue(p, value);
+          else {
+            const at = st.doc.layout?.positions?.[d];
+            const np = st.addNode({ id: st.newId(), name: "absolute_time_start", node_type: "property", description: value,
+                                    data: { property_type: "absolute_time_start", value } },
+                                  at ? { x: at.x, y: at.y + at.h + 40, w: 90, h: 30 } : undefined);
+            st.addEdge(d, np.id, "has_property");
+          }
+          const data = { ...((st.node(d)?.data ?? {}) as Record<string, unknown>) };
+          delete data.absolute_time_start;
+          st.updateNode(d, { data });
+        });
+        done(t("issues.movedDocDate", { d: nm(d), v: value }), [d]);
+      },
     },
     alignDocDate: {
       label: t("issues.fixAlignDate"),

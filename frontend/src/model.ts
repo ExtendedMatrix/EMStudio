@@ -3798,15 +3798,60 @@ export class DocumentStore {
  * the document in memory keeps them (the inspector's «Technical details» still
  * shows them), and the SAVE leaves them out. A copy only where there is one to
  * drop, so a graph without them is written exactly as it was.
+ *
+ * MICRO-PULIZIA p.7 · …and so does the rest of yEd's DRAWING (E.D., 20 Oct
+ * 2026: the glyph is fixed by the visual rules, so it is not a datum). Measured
+ * who writes them: s3Dgraphy's GraphML importer (`import_graphml.py` puts
+ * shape / fill_color / border_style on the units, border_color / border_width
+ * on the documents, in `attributes`) and its `emjson_exporter`, which lifts the
+ * attributes into `data`. Who reads them: nobody draws from them — the GraphML
+ * exporter and EMStudio take the drawing from `em_visual_rules` — with two
+ * exceptions, kept: an EPOCH's `fill_color` is its colour (s3Dgraphy's merger,
+ * json and xlsx exporters, EMStudio's epoch table read it), and a document's
+ * border is where its certainty comes from until `certainty_class` is written
+ * (the importer derives it from the colour). `geometry` is NOT drawing (the
+ * document's geometry axis) and `width`/`height` can be a resource's own size:
+ * neither is touched.
  */
 export const GRAPHML_DRAWING_KEYS = ["y_pos", "x_pos"] as const;
+export const YED_DRAWING_KEYS = ["y_pos", "x_pos", "shape", "fill_color", "border_style", "border_color",
+  "border_width", "symbol", "font_family", "font_size", "font_style", "text_color", "label_color",
+  "yed_id", "graphml_id"] as const;
+
+/** The yEd drawing keys a node's data carries that can go (the exceptions kept). */
+export function yedResidueKeys(n: EmNode): string[] {
+  const d = (n.data ?? {}) as Record<string, unknown>;
+  return YED_DRAWING_KEYS.filter((k) => {
+    if (!(k in d)) return false;
+    if (k === "fill_color" && n.node_type === "EpochNode") return false;
+    if ((k === "border_color" || k === "border_width") && n.node_type === "document" && d.certainty_class == null) return false;
+    return true;
+  });
+}
+
+/** MICRO-PULIZIA p.7 · the yEd drawing out of a graph's nodes, IN PLACE (what an
+ *  import hands over before it becomes a document); returns how many nodes had any. */
+export function stripYedDrawing(nodes: EmNode[]): number {
+  let touched = 0;
+  for (const n of nodes) {
+    const ks = yedResidueKeys(n);
+    const d = n.data as Record<string, unknown> | undefined;
+    const inst = d && Array.isArray(d.instances) ? (d.instances as unknown[]) : null;
+    const instDirty = !!inst?.some((i) => !!i && typeof i === "object" && GRAPHML_DRAWING_KEYS.some((k) => k in (i as object)));
+    if (!ks.length && !instDirty) continue;
+    touched++;
+    for (const k of ks) delete d![k];
+    if (instDirty) for (const i of inst!) if (i && typeof i === "object") for (const k of GRAPHML_DRAWING_KEYS) delete (i as Record<string, unknown>)[k];
+  }
+  return touched;
+}
 
 function withoutDrawingKeys<G extends { nodes: EmNode[] }>(graph: G): G {
   const has = (o: unknown): boolean =>
     !!o && typeof o === "object" && GRAPHML_DRAWING_KEYS.some((k) => k in (o as object));
-  const strip = (o: Record<string, unknown>): Record<string, unknown> => {
+  const strip = (o: Record<string, unknown>, keys: readonly string[]): Record<string, unknown> => {
     const out = { ...o };
-    for (const k of GRAPHML_DRAWING_KEYS) delete out[k];
+    for (const k of keys) delete out[k];
     return out;
   };
   let changed = false;
@@ -3815,11 +3860,12 @@ function withoutDrawingKeys<G extends { nodes: EmNode[] }>(graph: G): G {
     if (!d) return n;
     const inst = Array.isArray(d.instances) ? (d.instances as unknown[]) : null;
     const instDirty = !!inst?.some(has);
-    if (!has(d) && !instDirty) return n;
+    const keys = yedResidueKeys(n);
+    if (!keys.length && !instDirty) return n;
     changed = true;
-    const data = strip(d);
+    const data = strip(d, keys);
     if (instDirty)
-      data.instances = inst!.map((i) => (has(i) ? strip(i as Record<string, unknown>) : i));
+      data.instances = inst!.map((i) => (has(i) ? strip(i as Record<string, unknown>, GRAPHML_DRAWING_KEYS) : i));
     return { ...n, data };
   });
   return changed ? { ...graph, nodes } : graph;
