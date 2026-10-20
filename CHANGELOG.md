@@ -45,6 +45,19 @@ that asked for one.
 - `scripts/check-space-views.mjs` (101), `scripts/check-implicit-pd.mjs` (30).
 
 ### Changed
+- **The Inspector, sectioned** (MICRO-PULIZIA-INTERFACCIA p.6). Every section
+  closes with its triangle, as in a 3D program's properties (the heading is the
+  button, `aria-expanded`); the state is remembered per node type. The whole of
+  the data — the fields and the technical details — is ONE section, «Data»
+  (the technical ones under a small heading, no second triangle). «Delete
+  node» is at the very end, after «History of this node». A search at the top
+  keeps only the sections and the fields that match, opening a closed section
+  that holds a match (for the search only). «Open with…» is one row of icons
+  (StratiField, Blender, Heriverse): names and reasons in the tooltips and the
+  aria-labels, an unavailable tool `aria-disabled` and its click says why.
+  On a property, «+ reading» is **«Interpretation»** with the extractor's glyph
+  (it creates the extractor); its buttons wrap as whole buttons, one line each,
+  at 280 and 400 px. «Also called» moved under the node's own block.
 - **The Matrix is laid out on what it draws** (MICRO-PULIZIA-INTERFACCIA p.5).
   The archival layout (what «Recompute layout» writes and the file keeps) places
   every node, the outer ring included — Representation Models, resources and

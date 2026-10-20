@@ -75,6 +75,8 @@ export interface InspectorCallbacks {
   commandsBlocked?: () => string | null;
   /** I6 · «Open with…»: the tools that know this node, off ones with why */
   openWith?: (nodeId: string) => { key: string; label: string; ok: boolean; why?: string; run: () => void }[];
+  /** MICRO-PULIZIA p.6 · a command that cannot run here was pressed: say why */
+  onBlocked?: (why: string) => void;
   /** X1 · the gesture that lifts the block, when there is one here (connect) */
   commandsFix?: () => { label: string; run: () => void } | null;
   /** P4.1b · empty ONE field, through the act that leaves its tombstone. */
@@ -117,6 +119,15 @@ export interface InspectorCallbacks {
   /** MICRO-PROVA-DEV47 p.5 · a unit's proxy: its file, «Elimina il proxy» */
   renderProxy?: (host: HTMLElement, nodeId: string) => boolean;
 }
+
+/** MICRO-PULIZIA p.6 · «Open with…»'s icons, by tool (currentColor, 18 px):
+ *  StratiField a recording sheet, Blender its eye-and-orbit, Heriverse a
+ *  globe. Their names are tooltips and aria-labels. */
+const OPEN_WITH_ICONS: Record<string, string> = {
+  stratifield: `<svg viewBox="0 0 18 18" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="2.5" width="11" height="13" rx="1.2"/><path d="M6.5 2.5v-1h5v1M6 7h6M6 9.8h6M6 12.6h3.5"/></svg>`,
+  blender: `<svg viewBox="0 0 18 18" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><circle cx="10.5" cy="10" r="4.6"/><circle cx="10.5" cy="10" r="1.6"/><path d="M6.6 7.2 1.8 3.6M7.2 6.4H3.4M6.3 9.4 2 9.2"/></svg>`,
+  heriverse: `<svg viewBox="0 0 18 18" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="9" r="6.5"/><path d="M2.5 9h13M9 2.5c2 2 2.8 4.2 2.8 6.5S11 13.5 9 15.5M9 2.5C7 4.5 6.2 6.7 6.2 9S7 13.5 9 15.5"/></svg>`,
+};
 
 function el(tag: string, cls?: string, text?: string): HTMLElement {
   const e = document.createElement(tag);
@@ -790,21 +801,30 @@ export function renderInspector(
     }
   }
 
-  // I6 · «Open with…» — the same entries as the node's context menu
+  // I6 · «Open with…» — the same entries as the node's context menu.
+  // MICRO-PULIZIA p.6 · ONE ROW OF ICONS: the tool's name, and — for one that
+  // cannot be reached from here — why, are the tooltip and what a screen reader
+  // says; an unavailable tool is `aria-disabled` (still reached by Tab) and its
+  // click says why instead of doing nothing. The sentences under each button
+  // (three lines out of every node's Inspector) are gone.
   const tools = nodeId && cb.openWith ? cb.openWith(nodeId) : [];
   if (tools.length) {
     root.appendChild(el("h3", "insp-sect", t("openWith.head")));
     const box = el("div", "insp-openwith");
+    box.setAttribute("role", "group");
+    box.setAttribute("aria-label", t("openWith.head"));
     for (const x of tools) {
-      const row = el("div", "insp-openwith-row");
-      const b = el("button", "insp-btn" + (x.ok ? "" : " insp-btn-off"), x.label) as HTMLButtonElement;
+      const b = el("button", "insp-openwith-btn" + (x.ok ? "" : " off")) as HTMLButtonElement;
+      b.type = "button";
       b.dataset.openwith = x.key;
-      b.disabled = !x.ok;
-      b.setAttribute("aria-disabled", String(!x.ok));
-      b.addEventListener("click", () => x.run());
-      row.appendChild(b);
-      if (!x.ok && x.why) row.appendChild(el("span", "insp-openwith-why", x.why));
-      box.appendChild(row);
+      b.innerHTML = OPEN_WITH_ICONS[x.key] ?? "";
+      if (!b.innerHTML) b.textContent = x.label;
+      const tip = x.ok ? x.label : `${x.label} — ${x.why ?? ""}`;
+      b.title = tip;
+      b.setAttribute("aria-label", tip);
+      if (!x.ok) b.setAttribute("aria-disabled", "true");
+      b.addEventListener("click", () => (x.ok ? x.run() : cb.onBlocked?.(x.why ?? x.label)));
+      box.appendChild(b);
     }
     root.appendChild(box);
   }
@@ -1117,10 +1137,9 @@ export function renderInspector(
       });
     }
     if (rows.length) {
-      const details = el("details", "insp-propagative") as HTMLDetailsElement;
-      details.open = true;
-      const sum = el("summary", "insp-sect-summary", "Propagative metadata");
-      details.appendChild(sum);
+      // MICRO-PULIZIA p.6 · a section like the others (its triangle is theirs)
+      root.appendChild(el("h3", "insp-sect", t("insp.propagative")));
+      const details = el("div", "insp-propagative");
       for (const r of rows) {
         const row = el("div", `insp-prop-row${r.own ? " insp-prop-own" : " insp-prop-inherited"}`);
         row.appendChild(el("span", "insp-prop-rule", r.rule));
@@ -1184,14 +1203,18 @@ export function renderInspector(
       }
       into.appendChild(dd);
     }
-    if (dl.childElementCount) {
-      root.appendChild(el("h3", "insp-sect", t("insp.dataSect")));
-      root.appendChild(dl);
+    // MICRO-PULIZIA p.6 · the whole of the data — the fields and the technical
+    // details — under ONE triangle, «Data»: the technical ones under a small
+    // heading of their own, no second triangle inside the first
+    if (dl.childElementCount || tech.childElementCount) {
+      const h = el("h3", "insp-sect", t("insp.dataSect"));
+      h.dataset.sect = "data";
+      root.appendChild(h);
+      if (dl.childElementCount) root.appendChild(dl);
     }
     if (tech.childElementCount) {
-      const det = document.createElement("details");
-      det.className = "insp-tech";
-      det.appendChild(el("summary", "", t("insp.techDetails", { n: String(tech.childElementCount / 2) })));
+      const det = el("div", "insp-tech");
+      det.appendChild(el("div", "insp-subhead", t("insp.techDetails", { n: String(tech.childElementCount / 2) })));
       det.appendChild(tech);
       root.appendChild(det);
     }
@@ -1329,15 +1352,17 @@ export function renderInspector(
   const isPhaseNode =
     node.node_type === "EpochNode" && store.parentEpoch(nodeId) != null;
   const isTopEpoch = node.node_type === "EpochNode" && !isPhaseNode;
+  // MICRO-PULIZIA p.6 · the danger zone goes to the very end (after «History of
+  // this node», which main.ts appends): marked so it can be found and moved
   if (isTopEpoch) {
-    const danger = el("div", "insp-actions");
-    const delEp = el("button", "insp-btn danger", "Delete epoch");
+    const danger = el("div", "insp-actions insp-danger-zone");
+    const delEp = el("button", "insp-btn danger", t("insp.deleteEpoch"));
     delEp.addEventListener("click", () => cb.onDeleteEpoch(nodeId));
     danger.appendChild(delEp);
     root.appendChild(danger);
   } else if (!isPhaseNode) {
-    const danger = el("div", "insp-actions");
-    const delNode = el("button", "insp-btn danger", "Delete node");
+    const danger = el("div", "insp-actions insp-danger-zone");
+    const delNode = el("button", "insp-btn danger", t("insp.deleteNode"));
     delNode.addEventListener("click", () => cb.onDeleteNode(nodeId));
     danger.appendChild(delNode);
     root.appendChild(danger);

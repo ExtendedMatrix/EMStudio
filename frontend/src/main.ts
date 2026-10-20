@@ -3528,6 +3528,7 @@ function renderInspectorInto(host: HTMLElement): void {
       },
       commandsBlocked: commandsBlockedReason,
       openWith: (id) => openWithTools(id),
+      onBlocked: (why) => toast(why),
       commandsFix: () => (sync.connected ? null
         : { label: t("cmd.connect"), run: () => { if (!sync.connected) btnSync.click(); } }),
       isResourceOpen: (id) => openResourceFiles.has(id),
@@ -3575,7 +3576,170 @@ function renderInspectorInto(host: HTMLElement): void {
   renderInspectorIssues(host);
   renderNodeHistory(host);
   citeSectionFor(host); // COLLEGARE · «Cita in «capitolo»», with the story open
+  finishInspector(host, storeOfNode(selectedId)?.node(selectedId ?? "")?.node_type ?? "");
   readOnlyFields(host);
+}
+
+// ── MICRO-PULIZIA p.6 · the Inspector's sections, its search, its foot ───────
+//
+// Every section of the Inspector is a heading `h3.insp-sect` followed by its
+// content, written by a dozen renderers (inspector.ts, the chain, the images,
+// the history…). ONE pass, after all of them, makes each a section that closes
+// with its triangle, as in a 3D program's properties — the state remembered
+// per node TYPE (an extractor's open sections are not a unit's) — puts the
+// danger zone (Delete node) at the very end, after «History of this node», and
+// adds the search at the top: what does not match is hidden, a closed section
+// holding a match is opened (for the search only: its state is not written).
+const INSP_SECT_KEY = "emstudio.inspSections";
+let inspQuery = "";
+function inspSectState(): Record<string, Record<string, boolean>> {
+  try { return JSON.parse(localStorage.getItem(INSP_SECT_KEY) ?? "{}") ?? {}; } catch { return {}; }
+}
+function inspSectKey(h: HTMLElement): string {
+  return h.dataset.sect ?? (h.dataset.sectLabel ?? h.textContent ?? "").replace(/\s*[·(].*$/, "").trim().toLowerCase();
+}
+function finishInspector(host: HTMLElement, nodeType: string): void {
+  const col = (host.querySelector(".insp-body") as HTMLElement | null) ?? host;
+  // the foot: after the history, the last thing of the panel
+  const danger = host.querySelector<HTMLElement>(".insp-danger-zone");
+  if (danger) col.appendChild(danger);
+  // «Also called» was drawn above the name: with a triangle, a section there
+  // reads as if the name were its content — it goes after the node's own block
+  const alt = host.querySelector<HTMLElement>(".insp-alt-labels");
+  const firstSect = [...host.querySelectorAll<HTMLElement>("h3.insp-sect")].find((h) => !alt?.contains(h));
+  if (alt && firstSect) {
+    const anchor = firstSect.parentElement === alt.parentElement ? firstSect
+      : (firstSect.closest(".insp-alt-labels, section") as HTMLElement | null) ?? firstSect;
+    anchor.before(alt);
+  }
+  // the history's eyebrow is a section heading like the others
+  const hist = host.querySelector<HTMLElement>(".insp-history-eyebrow");
+  if (hist && hist.tagName !== "H3") {
+    const h = document.createElement("h3");
+    h.className = "insp-sect insp-history-eyebrow";
+    h.textContent = hist.textContent;
+    h.dataset.sect = "history";
+    hist.replaceWith(h);
+  }
+  const state = inspSectState()[nodeType] ?? {};
+  let k = 0;
+  for (const h of [...host.querySelectorAll<HTMLElement>("h3.insp-sect")]) {
+    if (h.querySelector(".insp-sect-toggle")) continue;
+    const parent = h.parentElement;
+    if (!parent) continue;
+    const body = document.createElement("div");
+    body.className = "insp-sect-body";
+    body.id = `insp-sect-${++k}`;
+    let n = h.nextElementSibling;
+    // a section ends at the next heading, at the danger zone, or at a block
+    // that carries headings of its own (the chain, the history, «Also called»)
+    while (n && !(n instanceof HTMLElement && (n.matches("h3.insp-sect") || n.classList.contains("insp-danger-zone")
+                                                || !!n.querySelector("h3.insp-sect")))) {
+      const next = n.nextElementSibling;
+      body.appendChild(n);
+      n = next;
+    }
+    h.after(body);
+    const label = h.textContent ?? "";
+    h.dataset.sectLabel = label;
+    const key = inspSectKey(h);
+    const closed = state[key] === true;
+    h.textContent = "";
+    const tg = document.createElement("button");
+    tg.type = "button";
+    tg.className = "insp-sect-toggle";
+    tg.setAttribute("aria-expanded", String(!closed));
+    tg.setAttribute("aria-controls", body.id);
+    tg.innerHTML = `<span class="insp-sect-tri" aria-hidden="true">${closed ? "▸" : "▾"}</span>`;
+    tg.appendChild(document.createTextNode(label));
+    h.appendChild(tg);
+    h.classList.toggle("closed", closed);
+    body.hidden = closed;
+    tg.addEventListener("click", () => {
+      const now = !body.hidden;           // closing?
+      body.hidden = now;
+      h.classList.toggle("closed", now);
+      tg.setAttribute("aria-expanded", String(!now));
+      (tg.firstElementChild as HTMLElement).textContent = now ? "▸" : "▾";
+      const all = inspSectState();
+      const mine = (all[nodeType] ??= {});
+      if (now) mine[key] = true; else delete mine[key];
+      try { localStorage.setItem(INSP_SECT_KEY, JSON.stringify(all)); } catch { /* private mode */ }
+    });
+  }
+  // the search, at the top (under the type and the close)
+  if (host.querySelector(".insp-sect")) {
+    const box = document.createElement("div");
+    box.className = "insp-search";
+    const q = document.createElement("input");
+    q.type = "search";
+    q.className = "insp-search-input";
+    q.placeholder = t("insp.searchPh");
+    q.setAttribute("aria-label", t("insp.searchPh"));
+    q.value = inspQuery;
+    q.addEventListener("input", () => { inspQuery = q.value; applyInspSearch(host); });
+    q.addEventListener("keydown", (e) => {
+      e.stopPropagation();
+      if (e.key === "Escape" && q.value) { e.preventDefault(); q.value = ""; inspQuery = ""; applyInspSearch(host); }
+    });
+    box.appendChild(q);
+    const head = host.querySelector(".insp-head");
+    if (head) head.after(box); else col.prepend(box);
+    if (inspQuery) applyInspSearch(host);
+  }
+}
+/** the text a piece of the Inspector says, the values of its fields included */
+function inspText(el: Element): string {
+  const vals = [...el.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>("input:not([type=search]), textarea")]
+    .map((x) => x.value).join(" ");
+  return `${el.textContent ?? ""} ${el instanceof HTMLInputElement ? el.value : ""} ${vals}`.toLowerCase();
+}
+function applyInspSearch(host: HTMLElement): void {
+  const q = inspQuery.trim().toLowerCase();
+  for (const el of host.querySelectorAll<HTMLElement>(".insp-search-miss")) el.classList.remove("insp-search-miss");
+  const tri = (body: HTMLElement, open: boolean): void => {
+    const t0 = body.previousElementSibling?.querySelector(".insp-sect-tri");
+    if (t0) t0.textContent = open ? "▾" : "▸";
+  };
+  for (const b of host.querySelectorAll<HTMLElement>(".insp-sect-body[data-search-open]")) {
+    b.hidden = true;
+    delete b.dataset.searchOpen;
+    tri(b, false);
+  }
+  host.classList.toggle("insp-searching", !!q);
+  if (!q) return;
+  for (const h of host.querySelectorAll<HTMLElement>("h3.insp-sect")) {
+    const body = h.nextElementSibling as HTMLElement | null;
+    if (!body?.classList.contains("insp-sect-body")) continue;
+    if ((h.dataset.sectLabel ?? h.textContent ?? "").toLowerCase().includes(q)) {
+      if (body.hidden) { body.hidden = false; body.dataset.searchOpen = "1"; tri(body, true); }
+      continue;
+    }
+    // the fields: a dt/dd pair is one, anything else is one piece
+    let any = false;
+    for (const part of [...body.children] as HTMLElement[]) {
+      if (part.tagName === "DL") {
+        let anyDt = false;
+        const kids = [...part.children] as HTMLElement[];
+        for (let i = 0; i < kids.length; i += 2) {
+          const dt = kids[i], dd = kids[i + 1];
+          const hit = inspText(dt).includes(q) || (!!dd && inspText(dd).includes(q));
+          dt.classList.toggle("insp-search-miss", !hit);
+          dd?.classList.toggle("insp-search-miss", !hit);
+          anyDt ||= hit;
+        }
+        part.classList.toggle("insp-search-miss", !anyDt);
+        any ||= anyDt;
+      } else {
+        const hit = inspText(part).includes(q);
+        part.classList.toggle("insp-search-miss", !hit);
+        any ||= hit;
+      }
+    }
+    h.classList.toggle("insp-search-miss", !any);
+    body.classList.toggle("insp-search-miss", !any);
+    if (any && body.hidden) { body.hidden = false; body.dataset.searchOpen = "1"; tri(body, true); }
+  }
 }
 
 /**

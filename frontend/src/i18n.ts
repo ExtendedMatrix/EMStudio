@@ -3477,7 +3477,7 @@ const EN: Dict = {
   "chain.sharedWith": "shared with",
   "chain.valuePh": "value",
   "chain.noReading": "No reading: the value has no source yet.",
-  "chain.addReading": "+ reading",
+  "chain.addReading": "Interpretation",
   "chain.addSource": "+ source (creates a combiner)",
   "chain.combinerHint": "A second source makes a combiner that holds the two readings together.",
   "chain.reading": "Reading",
@@ -3945,6 +3945,11 @@ const EN: Dict = {
   "l.monochrome": "Monochrome (B/W) — black borders",
   "compact.cmdAllTitle": "Compact the properties (whole graph): every unit's loose properties into its paradata group — one undo step",
   "menu.uniformSpellingsTitle": "Bring the edges written with an older spelling to the canonical one, in the whole graph — one undo step",
+  "chain.addReadingTitle": "Interpretation: create the extractor that reads this value from a source (a document, a unit)",
+  "insp.propagative": "Propagative metadata",
+  "insp.deleteNode": "Delete node",
+  "insp.deleteEpoch": "Delete epoch",
+  "insp.searchPh": "Search this panel",
 };
 
 // ── Italiano: complete, because E.D. works in it ───────────────────────────────
@@ -7296,7 +7301,7 @@ const IT: Dict = {
   "chain.sharedWith": "condivisa con",
   "chain.valuePh": "valore",
   "chain.noReading": "Nessuna lettura: il valore non ha ancora una fonte.",
-  "chain.addReading": "+ lettura",
+  "chain.addReading": "Interpretazione",
   "chain.addSource": "+ fonte (crea il combiner)",
   "chain.combinerHint": "Una seconda fonte crea un combiner che tiene insieme le due letture.",
   "chain.reading": "Lettura",
@@ -7764,6 +7769,11 @@ const IT: Dict = {
   "l.monochrome": "Monocromo (B/N) — bordi neri",
   "compact.cmdAllTitle": "Compatta le proprietà (tutto il grafo): le proprietà sciolte di ogni unità nel suo gruppo di paradati — un solo annulla",
   "menu.uniformSpellingsTitle": "Porta alla grafia canonica gli archi scritti con una grafia vecchia, in tutto il grafo — un solo annulla",
+  "chain.addReadingTitle": "Interpretazione: crea l'estrattore che legge questo valore da una fonte (un documento, un'unità)",
+  "insp.propagative": "Metadati propagativi",
+  "insp.deleteNode": "Elimina nodo",
+  "insp.deleteEpoch": "Elimina epoca",
+  "insp.searchPh": "Cerca nel pannello",
 };
 
 // ── The six other project languages: AI DRAFTS, awaiting validation ───────────
@@ -7888,6 +7898,12 @@ const EL: Dict = {
   "compact.cmdAllTitle": "Συμπύκνωση ιδιοτήτων (όλος ο γράφος): οι χαλαρές ιδιότητες κάθε μονάδας στην ομάδα παραδεδομένων της — μία αναίρεση",
   "menu.uniformSpellingsTitle": "Φέρνει στην κανονική γραφή τις ακμές με παλαιότερη γραφή, σε όλο τον γράφο — μία αναίρεση",
   "win.fitTitle": "Προσαρμογή σε αυτό το παράθυρο (0 · ⇧C)",
+  "chain.addReading": "Ερμηνεία",
+  "chain.addReadingTitle": "Ερμηνεία: δημιουργία του εξαγωγέα που διαβάζει αυτή την τιμή από μια πηγή (έγγραφο, μονάδα)",
+  "insp.propagative": "Μεταδιδόμενα μεταδεδομένα",
+  "insp.deleteNode": "Διαγραφή κόμβου",
+  "insp.deleteEpoch": "Διαγραφή εποχής",
+  "insp.searchPh": "Αναζήτηση στο πλαίσιο",
 };
 
 const HE: Dict = {
@@ -7985,6 +8001,12 @@ const HE: Dict = {
   "compact.cmdAllTitle": "דחיסת המאפיינים (כל הגרף): המאפיינים הרופפים של כל יחידה לקבוצת הפרה־נתונים שלה — ביטול אחד",
   "menu.uniformSpellingsTitle": "מביא לכתיב הקנוני קשתות שנכתבו בכתיב ישן, בכל הגרף — ביטול אחד",
   "win.fitTitle": "התאמה לחלון זה (0 · ⇧C)",
+  "chain.addReading": "פרשנות",
+  "chain.addReadingTitle": "פרשנות: יצירת המחלץ שקורא ערך זה ממקור (מסמך, יחידה)",
+  "insp.propagative": "מטא־נתונים מתפשטים",
+  "insp.deleteNode": "מחיקת צומת",
+  "insp.deleteEpoch": "מחיקת תקופה",
+  "insp.searchPh": "חיפוש בחלונית",
 };
 
 const ES: Dict = {
@@ -8087,6 +8109,12 @@ const ES: Dict = {
   "compact.cmdAllTitle": "Compactar las propiedades (todo el grafo): las propiedades sueltas de cada unidad en su grupo de paradatos — un solo deshacer",
   "menu.uniformSpellingsTitle": "Llevar a la grafía canónica las aristas escritas con una grafía antigua, en todo el grafo — un solo deshacer",
   "win.fitTitle": "Ajustar a esta ventana (0 · ⇧C)",
+  "chain.addReading": "Interpretación",
+  "chain.addReadingTitle": "Interpretación: crear el extractor que lee este valor de una fuente (un documento, una unidad)",
+  "insp.propagative": "Metadatos propagativos",
+  "insp.deleteNode": "Eliminar nodo",
+  "insp.deleteEpoch": "Eliminar época",
+  "insp.searchPh": "Buscar en el panel",
 };
 
 const PL: Dict = {
@@ -8188,6 +8216,12 @@ const PL: Dict = {
   "compact.cmdAllTitle": "Zagęść właściwości (cały graf): luźne właściwości każdej jednostki do jej grupy paradanych — jedno cofnięcie",
   "menu.uniformSpellingsTitle": "Sprowadza krawędzie zapisane starszą pisownią do kanonicznej, w całym grafie — jedno cofnięcie",
   "win.fitTitle": "Dopasuj do tego okna (0 · ⇧C)",
+  "chain.addReading": "Interpretacja",
+  "chain.addReadingTitle": "Interpretacja: utwórz ekstraktor, który odczytuje tę wartość ze źródła (dokumentu, jednostki)",
+  "insp.propagative": "Metadane propagowane",
+  "insp.deleteNode": "Usuń węzeł",
+  "insp.deleteEpoch": "Usuń epokę",
+  "insp.searchPh": "Szukaj w panelu",
 };
 
 const RO: Dict = {
@@ -8290,6 +8324,12 @@ const RO: Dict = {
   "compact.cmdAllTitle": "Compactează proprietățile (tot graful): proprietățile libere ale fiecărei unități în grupul ei de paradate — o singură anulare",
   "menu.uniformSpellingsTitle": "Aduce la grafia canonică muchiile scrise cu o grafie veche, în tot graful — o singură anulare",
   "win.fitTitle": "Potrivește în această fereastră (0 · ⇧C)",
+  "chain.addReading": "Interpretare",
+  "chain.addReadingTitle": "Interpretare: creează extractorul care citește această valoare dintr-o sursă (un document, o unitate)",
+  "insp.propagative": "Metadate propagative",
+  "insp.deleteNode": "Șterge nodul",
+  "insp.deleteEpoch": "Șterge epoca",
+  "insp.searchPh": "Caută în panou",
 };
 
 const FR: Dict = {
@@ -8395,6 +8435,12 @@ const FR: Dict = {
   "compact.cmdAllTitle": "Compacter les propriétés (tout le graphe) : les propriétés libres de chaque unité dans son groupe de paradonnées — une seule annulation",
   "menu.uniformSpellingsTitle": "Ramener à la graphie canonique les arêtes écrites avec une ancienne graphie, dans tout le graphe — une seule annulation",
   "win.fitTitle": "Ajuster à cette fenêtre (0 · ⇧C)",
+  "chain.addReading": "Interprétation",
+  "chain.addReadingTitle": "Interprétation : créer l'extracteur qui lit cette valeur dans une source (un document, une unité)",
+  "insp.propagative": "Métadonnées propagatives",
+  "insp.deleteNode": "Supprimer le nœud",
+  "insp.deleteEpoch": "Supprimer l'époque",
+  "insp.searchPh": "Chercher dans le panneau",
 };
 
 /**
@@ -9576,7 +9622,7 @@ const DE: Dict = {
   "chain.sharedWith": "geteilt mit",
   "chain.valuePh": "Wert",
   "chain.noReading": "Keine Lesung: der Wert hat noch keine Quelle.",
-  "chain.addReading": "+ Lesung",
+  "chain.addReading": "Interpretation",
   "chain.addSource": "+ Quelle (erzeugt einen Combiner)",
   "chain.combinerHint": "Eine zweite Quelle erzeugt einen Combiner, der beide Lesungen zusammenhält.",
   "chain.reading": "Lesung",
@@ -9730,6 +9776,11 @@ const DE: Dict = {
   "compact.cmdAllTitle": "Eigenschaften verdichten (ganzer Graph): die losen Eigenschaften jeder Einheit in ihre Paradatengruppe — ein Rückgängig",
   "menu.uniformSpellingsTitle": "Kanten mit älterer Schreibweise im ganzen Graphen auf die kanonische bringen — ein Rückgängig",
   "win.fitTitle": "An dieses Fenster anpassen (0 · ⇧C)",
+  "chain.addReadingTitle": "Interpretation: den Extraktor anlegen, der diesen Wert aus einer Quelle liest (einem Dokument, einer Einheit)",
+  "insp.propagative": "Propagative Metadaten",
+  "insp.deleteNode": "Knoten löschen",
+  "insp.deleteEpoch": "Epoche löschen",
+  "insp.searchPh": "Im Bereich suchen",
 };
 
 const DICTS: Record<Locale, Dict> = {

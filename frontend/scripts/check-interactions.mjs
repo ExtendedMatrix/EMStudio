@@ -4892,16 +4892,18 @@ test("TI3.ids", "T-I3 · Tempio (copia), Inspector di USM01b: con «Show node UU
     const r = await p.evaluate(() => {
       const root = document.querySelector(".insp-data")?.closest("#inspector, .insp-root, [data-surface], .tile-area") ?? document;
       const keys = (sel) => [...root.querySelectorAll(sel)].map((d) => d.textContent);
-      const tech = root.querySelector("details.insp-tech");
-      return { main: keys(":scope .insp-data:not(details .insp-data) dt"), tech: tech ? [...tech.querySelectorAll("dt")].map((d) => d.textContent) : [],
-        open: tech?.open ?? null, text: root.textContent };
+      // MICRO-PULIZIA p.6 · the technical details are inside «Data», under a
+      // small heading — one triangle for the whole of the data, not a second
+      const tech = root.querySelector(".insp-tech");
+      return { main: keys(":scope .insp-data:not(.insp-tech .insp-data) dt"), tech: tech ? [...tech.querySelectorAll("dt")].map((d) => d.textContent) : [],
+        open: tech ? !!tech.closest(".insp-sect-body") && tech.querySelectorAll("details").length === 0 : null, text: root.textContent };
     });
     await ctx.close();
     return { ...r, errors };
   };
   const off = await run(false), on = await run(true);
   const noIds = (x) => !x.main.includes("graph_id") && !x.main.includes("original_id") && !x.tech.includes("graph_id") && !x.tech.includes("original_id");
-  return { pass: noIds(off) && off.open === false && ["shape", "y_pos", "fill_color", "border_style", "symbol"].every((k) => off.tech.includes(k))
+  return { pass: noIds(off) && off.open === true && ["shape", "y_pos", "fill_color", "border_style", "symbol"].every((k) => off.tech.includes(k))
       && !off.main.includes("label") && !off.main.includes("stratigraphic_kind")
       && on.tech.includes("graph_id") && on.tech.includes("original_id") && !on.main.includes("graph_id") && !off.errors.length && !on.errors.length,
     detail: { off: { main: off.main, tech: off.tech, open: off.open }, on: { main: on.main, tech: on.tech } } };
@@ -4929,8 +4931,10 @@ test("TT1.undated", "T-T1 · Tempio (copia, nessuna epoca con date): «Check the
 test("I6.openwith", "I6 · «Open with…» nell'Inspector e nel menu contestuale del nodo: StratiField · scheda US, Blender, Heriverse; in Standalone senza stanza né scena tutte spente, ognuna col motivo in una riga", async () => {
   const { p, ctx, errors } = await open({ doc: "catena", locale: "en" });
   await pick(p, "USM101");
-  const insp = await p.evaluate(() => [...document.querySelectorAll(".insp-openwith-row")].map((r) => ({
-    key: r.querySelector("button")?.dataset.openwith, off: r.querySelector("button")?.disabled, why: r.querySelector(".insp-openwith-why")?.textContent ?? "" })));
+  // MICRO-PULIZIA p.6 · one row of icons: an unavailable tool is aria-disabled
+  // (still reached by Tab), and its why is the tooltip
+  const insp = await p.evaluate(() => [...document.querySelectorAll(".insp-openwith [data-openwith]")].map((b) => ({
+    key: b.dataset.openwith, off: b.getAttribute("aria-disabled") === "true" && !b.disabled, why: (b.title.split(" — ")[1] ?? "") })));
   // the context menu: right-click on the selected node
   const win = await winOf(p, "graph");
   const ws = await p.evaluate((w) => window.__EM_DRAG__.winScene(w), win);
@@ -6693,6 +6697,56 @@ test("PU5.matrix", "PULIZIA p.5 · la Matrix è disposta su ciò che disegna: la
   });
   const pass = !!g.viewLayout && !outside.length && !gaps.length && slack.every((x) => x <= 120) && before === after && !errors.length;
   return { pass, detail: { view: !!g.viewLayout, outside, gaps, slack, docUnchanged: before === after, errors } };
+});
+
+test("PU6.inspector", "PULIZIA p.6 · Inspector: ogni sezione si chiude col triangolo e lo stato si ricorda per tipo di nodo; «Dati» è un triangolo solo; Elimina nodo dopo «Storia di questo nodo»; la ricerca lascia solo ciò che corrisponde e apre la sezione chiusa che lo contiene; «Apri con…» è una riga di icone (aria-disabled + perché nel tooltip); «Interpretazione» porta il glifo dell'estrattore; i pulsanti della proprietà stanno su una riga ciascuno a 280 e 400 px", async () => {
+  const { p, ctx, errors } = await open({ doc: "catena", locale: "it" });
+  const I = '[data-win$="inspector"]';
+  await pick(p, "USM101");
+  await p.waitForTimeout(400);
+  const order = () => p.evaluate((I) => [...document.querySelector(I).querySelectorAll("h3.insp-sect, .insp-danger-zone")].map((e) => e.classList.contains("insp-danger-zone") ? "DANGER" : (e.dataset.sect ?? e.textContent.replace(/[▾▸]/, "").trim().split(" ·")[0])), I);
+  const r = { order: await order() };
+  r.toggles = await p.evaluate((I) => [...document.querySelector(I).querySelectorAll("h3.insp-sect")].every((h) => !!h.querySelector("button.insp-sect-toggle[aria-expanded]")), I);
+  r.openWith = await p.evaluate((I) => [...document.querySelector(I).querySelectorAll(".insp-openwith [data-openwith]")].map((b) => ({ svg: !!b.querySelector("svg"), aria: b.getAttribute("aria-disabled"), disabled: b.disabled, tip: b.title })), I);
+  // close «Connections» on a unit; another unit shows it closed, a property does not
+  await p.evaluate((I) => [...document.querySelector(I).querySelectorAll(".insp-sect-toggle")].find((b) => /Connections/.test(b.textContent))?.click(), I);
+  const sameType = await p.evaluate(() => { const g = JSON.parse(window.__EM_DRAG__.graphJson()); const t0 = g.nodes.find((n) => n.id === "USM101")?.node_type;
+    return g.nodes.find((n) => n.id !== "USM101" && n.node_type === t0)?.id ?? null; });
+  if (sameType) await pick(p, sameType);
+  await p.waitForTimeout(300);
+  r.otherUnitClosed = await p.evaluate((I) => [...document.querySelector(I).querySelectorAll("h3.insp-sect.closed")].map((h) => h.textContent.replace(/[▾▸]/, "").trim()), I);
+  // the search opens the closed section holding a match, and hides the rest
+  // a word that only the closed «Connections» holds: its first relation's name
+  r.word = await p.evaluate((I) => { const h = [...document.querySelector(I).querySelectorAll("h3.insp-sect")].find((x) => /Connections/.test(x.textContent));
+    return h?.nextElementSibling?.querySelector(".insp-group-title")?.textContent.replace(/\s*\(\d+\)$/, "") ?? "is after"; }, I);
+  await p.fill(`${I} .insp-search-input`, r.word);
+  await p.waitForTimeout(200);
+  r.search = await p.evaluate((I) => ({ visible: [...document.querySelector(I).querySelectorAll("h3.insp-sect")].filter((h) => h.offsetParent).map((h) => h.textContent.replace(/[▾▸]/, "").trim()),
+    opened: document.querySelector(I).querySelectorAll(".insp-sect-body[data-search-open]:not([hidden])").length }), I);
+  await p.fill(`${I} .insp-search-input`, "");
+  await p.evaluate(() => localStorage.removeItem("emstudio.inspSections"));
+  // a property without a reading: «Interpretazione» with the extractor's glyph; the buttons at 280 / 400 px
+  const prop = await p.evaluate(() => { const g = JSON.parse(window.__EM_DRAG__.graphJson());
+    return g.nodes.find((n) => n.node_type === "property" && !g.edges.some((e) => e.source === n.id && e.edge_type === "has_data_provenance"))?.id ?? null; });
+  if (prop) await pick(p, prop);
+  await p.waitForTimeout(300);
+  r.acts = {};
+  for (const w of [280, 400]) {
+    await p.evaluate(([I, w]) => { const a = document.querySelector(I); a.style.width = w + "px"; }, [I, w]);
+    await p.waitForTimeout(150);
+    r.acts[w] = await p.evaluate((I) => [...document.querySelectorAll(`${I} .chain-card-acts .insp-btn`)].map((b) => ({ t: b.textContent.trim(), h: Math.round(b.getBoundingClientRect().height), glyph: !!b.querySelector(".chain-glyph svg") })), I);
+  }
+  await p.screenshot({ path: SHOT("pu6-inspector") }).catch(() => {});
+  await ctx.close();
+  const hist = r.order.indexOf("history"), dz = r.order.indexOf("DANGER");
+  const interp = (r.acts[280] ?? []).find((a) => /Interpretazione/.test(a.t));
+  const pass = r.toggles && hist >= 0 && dz === r.order.length - 1 && dz > hist
+    && r.openWith.length === 3 && r.openWith.every((x) => x.svg && x.aria === "true" && !x.disabled && / — .{10,}/.test(x.tip))
+    && !!sameType && r.otherUnitClosed.some((x) => /Connections/.test(x))
+    && r.search.visible.length === 1 && /Connections/.test(r.search.visible[0]) && r.search.opened === 1
+    && (!prop || (!!interp && interp.glyph && [280, 400].every((w) => r.acts[w].every((a) => a.h <= 34))))
+    && !errors.length;
+  return { pass, detail: { ...r, prop, sameType, errors } };
 });
 
 // ── run ─────────────────────────────────────────────────────────────────────

@@ -2535,6 +2535,24 @@ body.sync-active #footer-brand #em-version {
   color: var(--text-muted);
   font-weight: 600;
 }
+/* MICRO-PULIZIA p.6 · every section closes with its triangle, as in a 3D
+   program's properties; the heading is the button */
+.insp-sect-toggle {
+  display: flex; align-items: center; gap: 5px; width: 100%;
+  padding: 0; border: 0; background: none; cursor: pointer;
+  font: inherit; letter-spacing: inherit; text-transform: inherit; color: inherit; text-align: start;
+}
+.insp-sect-toggle:hover { color: var(--text); }
+.insp-sect-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.insp-sect-tri { display: inline-block; width: 1em; font-size: 10px; }
+.insp-sect.closed { margin-bottom: 2px; }
+.insp-search { margin: 4px 0 6px; }
+.insp-search-input {
+  width: 100%; box-sizing: border-box; padding: 4px 8px;
+  border: 1px solid var(--border); border-radius: var(--radius);
+  background: var(--bg-sunken); color: var(--text); font: inherit; font-size: 12px;
+}
+.insp-searching .insp-search-miss { display: none !important; }
 
 .insp-data {
   margin: 0;
@@ -8610,7 +8628,14 @@ button.chain-geo.chain-place:hover { background: var(--bg-hover); border-color: 
 .chain-result { font-weight: 600; }
 .chain-acts { display: inline-flex; gap: 4px; }
 .chain-note { font-size: 11.5px; color: var(--text-muted); margin: 4px 0; }
-.chain-card-acts { display: flex; gap: 6px; margin-top: 6px; }
+/* MICRO-PULIZIA p.6 · the property's buttons in a narrow panel: they wrap as
+   whole buttons (one line each), never into a column of single words */
+.chain-card-acts { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.chain-card-acts .insp-btn {
+  flex: 1 1 auto; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  display: inline-flex; align-items: center; justify-content: center; gap: 5px;
+}
+.chain-card-acts .insp-btn .chain-glyph { flex: none; width: 16px; height: 16px; display: inline-grid; place-items: center; }
 .chain-ai { color: var(--ai-ink); border-color: var(--ai-ink); border-style: dashed; cursor: pointer; background: none; }
 .chain-ai.ok { border-style: solid; }
 
@@ -9265,11 +9290,13 @@ input.storage-path:focus { border-color: var(--accent); background: var(--bg-pan
 #set-node-result[data-state="ok"] { color: var(--ok-ink); }   /* Z1 · success reads green, not as a warning */
 #set-node-result[data-state="no"] { color: var(--danger); }
 
-/* I3/S5 · the technical fields, closed by default */
+/* I3/S5 · the technical fields — MICRO-PULIZIA p.6: inside «Data», under a
+   small heading of their own (one triangle for the whole of the data) */
 .insp-tech {
   margin: 4px 0 10px;
   font-size: 12px;
 }
+.insp-subhead { margin: 8px 0 2px; font-size: 11px; color: var(--text-muted); }
 .insp-tech > summary {
   cursor: pointer;
   color: var(--text-muted);
@@ -9280,11 +9307,19 @@ input.storage-path:focus { border-color: var(--accent); background: var(--bg-pan
   font-size: 11px;
 }
 
-/* I6 · «Open with…» */
-.insp-openwith { display: flex; flex-direction: column; gap: 4px; margin: 4px 0 10px; }
-.insp-openwith-row { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; }
-.insp-openwith-row .insp-btn { flex: 0 0 auto; }
-.insp-openwith-why { flex: 1 1 12em; min-width: 0; font-size: 11px; color: var(--text-muted); }
+/* I6 · «Open with…» — MICRO-PULIZIA p.6: one row of icons, the names and the
+   reasons in the tooltips; an unavailable tool is faint and dashed, still a
+   button (aria-disabled) */
+.insp-openwith { display: flex; flex-wrap: wrap; gap: 6px; margin: 4px 0 10px; }
+.insp-openwith-btn {
+  display: inline-grid; place-items: center;
+  width: 34px; height: 30px; padding: 0;
+  border: 1px solid var(--border-strong); border-radius: var(--radius);
+  background: var(--bg-panel); color: var(--text); cursor: pointer;
+}
+.insp-openwith-btn:hover { background: var(--bg-hover); }
+.insp-openwith-btn.off { color: var(--text-faint); border-style: dashed; cursor: default; }
+.insp-openwith-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .ctx-menu .ctx-sub { padding: 4px 10px 2px; font-size: 11px; color: var(--text-muted); }
 .ctx-menu .ctx-why { padding: 0 10px 4px 22px; font-size: 11px; color: var(--text-dim); max-width: 260px; }
 .ctx-menu button:disabled { color: var(--text-dim); cursor: not-allowed; }

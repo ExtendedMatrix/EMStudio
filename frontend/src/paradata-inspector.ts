@@ -15,6 +15,7 @@
  * draws and calls back.
  */
 import { t } from "./i18n";
+import { glyphByKey, glyphSvg } from "./glyphs";
 import { propertyLabel } from "./rules";
 import type { DocumentStore } from "./model";
 import {
@@ -258,8 +259,18 @@ export function propertyCard(ui: ChainUi, propertyId: string, ownerId: string | 
     card.appendChild(el("p", "chain-note", t("chain.noReading")));
   if (ui.addReading && !heir) {
     const acts = el("div", "chain-card-acts");
-    const b = el("button", "insp-btn", prov.direct.length && !prov.combiners.length
-      ? t("chain.addSource") : t("chain.addReading"));
+    // MICRO-PULIZIA p.6 · «Reading» is «Interpretation»: the button carries the
+    // EXTRACTOR's glyph (the visual rules', the one the canvas draws) because
+    // what it makes is an extractor; the second source keeps its sentence
+    const second = prov.direct.length > 0 && !prov.combiners.length;
+    const b = el("button", "insp-btn", second ? t("chain.addSource") : t("chain.addReading"));
+    const xg = glyphByKey("extractor");
+    if (xg && !second) {
+      const ic = el("span", "chain-glyph");
+      ic.innerHTML = glyphSvg(xg, null, 16);
+      b.prepend(ic);
+    }
+    b.title = second ? t("chain.combinerHint") : t("chain.addReadingTitle");
     b.type = "button";
     b.dataset.addReading = propertyId;
     b.addEventListener("click", () => ui.addReading!(propertyId, b));
