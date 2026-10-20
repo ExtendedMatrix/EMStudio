@@ -4184,7 +4184,8 @@ test("W02.dating", "U2 · l'anno propone l'epoca che lo contiene (un bottone la 
   const r3 = await q.evaluate(() => ({ hint: document.querySelector("[data-doc-year-hint]")?.textContent ?? "", btn: !!document.querySelector('[data-action="write-epoch-dates"]') }));
   await c2.close();
   await ctx.close();
-  return { pass: r1.year === "150" && r1.prop.join() === "150" && /falls in Età romana/.test(r1.hint) && r2.ep === "ep1" && r2.sel[0] === "d02"
+  // MICRO-PULIZIA p.7 · the date lives in its PROPERTY only: no copy in the data
+  return { pass: r1.year === undefined && r1.prop.join() === "150" && /falls in Età romana/.test(r1.hint) && r2.ep === "ep1" && r2.sel[0] === "d02"
       && /No epoch has its dates/.test(r3.hint) && r3.btn && !errors.length, detail: { r1, r2, r3, errors } };
 });
 
