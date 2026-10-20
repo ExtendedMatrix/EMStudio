@@ -18,9 +18,11 @@ import {
   addEmbed,
   addProse,
   defaultViewType,
+  editChapters,
   setChapterAnchor,
   toggleCanonical,
 } from "./narrative-edit";
+import { newQueryOptions, queryOf, QUERY_VIEW_TYPE, type QueryKind } from "./narrative-query";
 
 /**
  * Prose the scaffolder writes — it reads as "not written yet", exactly as the
@@ -91,6 +93,8 @@ export function scaffoldNarrativeFromGraph(store: DocumentStore): string | null 
     store.topEpochIdsChrono().forEach((eid, i) => {
       addEpochChapterAt(store, nid, eid, i + 1);
     });
+    // NARRATIVA-BLOCCHI p.3 · the standard blocks, where the story wants them
+    addStandardBlocks(store, nid);
     return nid;
   });
 }
@@ -138,4 +142,51 @@ function addEpochChapterAt(
   // default embed = the epoch's matrix slice (defaultViewType(EpochNode) → "matrix").
   addEmbed(store, narrativeId, index, epochId, defaultViewType(ep));
   addProse(store, narrativeId, index, placeholder());
+}
+
+// ── NARRATIVA-BLOCCHI p.3 · the standard blocks ──────────────────────────────
+//
+// Three blocks that ask the graph (`narrative-query.ts`), placed where a story
+// of a site needs them: **Storia delle ricerche** opens the story (the first
+// block of the first chapter), **Beni coinvolti** comes after the introduction
+// (the end of the first chapter, after its prose and its study), the
+// **Bibliografia** closes it (a last chapter of its own, settled ★ so a
+// regeneration leaves it). A new story gets them from the scaffolder; an
+// existing one only when somebody asks («Aggiungi i blocchi standard» in the
+// Index) — and then only the ones it does not have.
+
+/** The standard blocks a story does not have yet, in the order they go. */
+export function missingStandardBlocks(store: DocumentStore, narrativeId: string): QueryKind[] {
+  const narr = narrativesIn(store.doc).find((n) => n.id === narrativeId);
+  if (!narr) return [];
+  const have = new Set<string>();
+  for (const c of narr.chapters) for (const b of c.blocks ?? []) {
+    const q = queryOf(b);
+    if (q) have.add(q.query);
+  }
+  return (["research_history", "heritage", "bibliography"] as QueryKind[]).filter((k) => !have.has(k));
+}
+
+/** Add the standard blocks a story lacks. One undo step; returns what was
+ *  added. The ref is the graph-self node, made on demand (as the map's). */
+export function addStandardBlocks(store: DocumentStore, narrativeId: string): QueryKind[] {
+  const missing = missingStandardBlocks(store, narrativeId);
+  if (!missing.length) return [];
+  store.batch(() => {
+    const gid = store.ensureGraphRootId();
+    const block = (kind: QueryKind) => ({ block_type: "embed" as const, ref: gid,
+                                          view_type: QUERY_VIEW_TYPE, options: newQueryOptions(kind) });
+    editChapters(store, narrativeId, (cs) => {
+      const opening = missing.filter((k) => k !== "bibliography");
+      if (opening.length && !cs.length) cs.push({ title: t("scaffold.intro"), canonical: true, blocks: [] });
+      if (opening.length) {
+        const first = (cs[0].blocks ??= []);
+        if (missing.includes("research_history")) first.unshift(block("research_history"));
+        if (missing.includes("heritage")) first.push(block("heritage"));
+      }
+      if (missing.includes("bibliography"))
+        cs.push({ title: t("nq.title.bibliography"), canonical: true, blocks: [block("bibliography")] });
+    });
+  });
+  return missing;
 }

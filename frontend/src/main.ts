@@ -132,6 +132,8 @@ import { acceptInvite, canManage, pendingJoin } from "./members";
 
 import {
   addEpochChapter,
+  addStandardBlocks,
+  missingStandardBlocks,
   scaffoldNarrativeFromGraph,
   undescribedEpochs,
 } from "./narrative-scaffold";
@@ -26145,6 +26147,13 @@ function renderNarrativeIndexInto(body: HTMLElement, _win: Win): void {
       onAddChapter: () => nedit.addChapter(s, narrId),
       undescribedEpochs: () => undescribedEpochs(s, narrId),
       onAddEpochChapter: (id: string) => addEpochChapter(s, narrId, id),
+      // NARRATIVA-BLOCCHI p.3 · an existing story gets the standard blocks
+      // only when asked, and only the ones it lacks (one undo step)
+      standardMissing: () => missingStandardBlocks(s, narrId).map((k) => t(`nq.title.${k}`)),
+      onAddStandard: () => {
+        const added = addStandardBlocks(s, narrId);
+        if (added.length) logInfo(t("nidx.standardAdded", { list: added.map((k) => t(`nq.title.${k}`)).join(", ") }), [narrId]);
+      },
       // (AUDIT C · «↻ Regenerate» went: always disabled, it promised a gesture
       // that does not exist)
       coverage: (h: HTMLElement) => renderCoverageInto(h, narrId),

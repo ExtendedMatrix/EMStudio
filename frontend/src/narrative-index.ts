@@ -28,6 +28,10 @@ export interface IndexHooks {
   onAddChapter?(): void;
   undescribedEpochs?(): { id: string; name: string }[];
   onAddEpochChapter?(epochId: string): void;
+  /** NARRATIVA-BLOCCHI p.3 · the standard blocks the story lacks (names), and
+   *  the gesture that adds them */
+  standardMissing?(): string[];
+  onAddStandard?(): void;
   onRegenerate?(): void;
   canRegenerate?(): boolean;
   /** fase 5 · the coverage section, drawn by its own module into this host */
@@ -188,6 +192,11 @@ export function renderNarrativeIndex(host: HTMLElement, doc: EmDocument | null, 
       add.appendChild(b);
     };
     mk(`+ ${t("nidx.chapter")}`, t("nv.addChapterTitle"), () => hooks.onAddChapter?.());
+    const missing = hooks.standardMissing?.() ?? [];
+    if (missing.length && hooks.onAddStandard) {
+      mk(`+ ${t("nidx.standard")}`, t("nidx.standardTitle", { list: missing.join(", ") }), () => hooks.onAddStandard?.());
+      add.lastElementChild?.setAttribute("data-nidxact", "standard");
+    }
     for (const ep of hooks.undescribedEpochs?.() ?? [])
       mk(`+ ${ep.name}`, t("nidx.epochChapter", { name: ep.name }), () => hooks.onAddEpochChapter?.(ep.id));
     if (hooks.onRegenerate)

@@ -6897,6 +6897,60 @@ test("NB1.title", "NARRATIVA-BLOCCHI p.1 · titolo e sottotitolo si scrivono nel
   return { pass, detail: { ...r, errors } };
 });
 
+test("NB2.blocks", "NARRATIVA-BLOCCHI p.2/p.3 · lo scheletro di una narrativa nuova mette i tre blocchi che interrogano il grafo (la bibliografia conta i documenti del grafo); l'Inspector di un blocco ne cambia l'ambito, un annulla; in Stampa sono testo con la data", async () => {
+  const { p, ctx, errors } = await open({ doc: "TempluMare", locale: "it" });
+  await workspace(p, "narrative");
+  const go = p.locator('[data-action="scaffold"]').first();
+  if (await go.count()) { await go.click(); await p.waitForTimeout(600); }
+  const blocks = () => p.evaluate(() => [...document.querySelectorAll(".nv-query")].map((b) => `${b.dataset.query}:${b.dataset.count}`));
+  const r = { scaffolded: await blocks() };
+  const docs = await p.evaluate(() => JSON.parse(window.__EM_DRAG__.graphJson()).nodes.filter((n) => n.node_type === "document").length);
+  r.docs = docs;
+  r.offered = await p.locator('[data-nidxact="standard"]').count();
+  const bib = p.locator('.nv-query[data-query="bibliography"]').first();
+  await bib.scrollIntoViewIfNeeded().catch(() => {});
+  await bib.click({ position: { x: 20, y: 8 } }).catch(() => {});
+  await p.waitForTimeout(500);
+  r.scope = await p.evaluate(() => document.querySelector('[data-nvset="q-scope"]')?.value ?? null);
+  await p.selectOption('[data-nvset="q-scope"]', "narrative").catch(() => {});
+  await p.waitForTimeout(500);
+  r.afterScope = await blocks();
+  await p.evaluate(() => window.__EM_DRAG__.undo());
+  await p.waitForTimeout(500);
+  r.afterUndo = await blocks();
+  await p.screenshot({ path: SHOT("nb2-blocchi") }).catch(() => {});
+  await p.locator('.nv-readings button[data-reading="print"]').first().click();
+  await p.waitForTimeout(600);
+  r.printed = await p.evaluate(() => [...document.querySelectorAll(".nv-print-prose")].filter((x) => /calcolato il \d{4}-\d{2}-\d{2}/.test(x.textContent)).length);
+  await ctx.close();
+  const kinds = (xs) => xs.map((x) => x.split(":")[0]).sort().join(",");
+  const pass = kinds(r.scaffolded) === "bibliography,heritage,research_history"
+    && r.scaffolded.includes(`bibliography:${docs}`) && r.offered === 0 && r.scope === "graph"
+    && r.afterScope.some((x) => x.startsWith("bibliography:") && x !== `bibliography:${docs}`)
+    && r.afterUndo.includes(`bibliography:${docs}`) && r.printed === 3 && !errors.length;
+  return { pass, detail: { ...r, errors } };
+});
+
+test("NB3.index", "NARRATIVA-BLOCCHI p.3 · una narrativa esistente non si tocca: l'Indice propone «Blocchi standard» (solo quelli che mancano) e li aggiunge in un annulla", async () => {
+  const { p, ctx, errors } = await open({ doc: "PortaMarina-lite", locale: "it" });
+  await workspace(p, "narrative");
+  await p.waitForTimeout(600);
+  const state = () => p.evaluate(() => JSON.stringify(JSON.parse(window.__EM_DRAG__.graphJson()).nodes.find((n) => n.node_type === "narrative").data));
+  const before = await state();
+  const btn = p.locator('[data-nidxact="standard"]').first();
+  const r = { offered: await btn.count(), tip: await btn.getAttribute("title").catch(() => null) };
+  await btn.click();
+  await p.waitForTimeout(600);
+  r.blocks = await p.evaluate(() => [...document.querySelectorAll(".nv-query")].map((b) => b.dataset.query));
+  r.offeredAfter = await p.locator('[data-nidxact="standard"]').count();
+  await p.evaluate(() => window.__EM_DRAG__.undo());
+  await p.waitForTimeout(500);
+  r.restored = (await state()) === before;
+  await ctx.close();
+  const pass = r.offered === 1 && /Storia delle ricerche/.test(r.tip ?? "") && r.blocks.length === 3 && r.offeredAfter === 0 && r.restored && !errors.length;
+  return { pass, detail: { ...r, errors } };
+});
+
 // ── run ─────────────────────────────────────────────────────────────────────
 const chosen = cases.filter((c) => !only.length || only.includes(c.id) || only.some((o) => c.id.startsWith(o + ".")));
 for (const c of chosen) {

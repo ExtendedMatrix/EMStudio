@@ -7,6 +7,14 @@ that asked for one.
 ## [Unreleased]
 
 ### Added
+- **The standard blocks in a new story's outline** (MICRO-NARRATIVA-BLOCCHI
+  p.3). «Proponi i capitoli» puts Storia delle ricerche first, Beni coinvolti
+  after the introduction (the end of the first chapter), and a last settled
+  chapter Bibliografia — still one undo step. An existing story is not
+  touched: its Index offers «+ Blocchi standard» with the ones it lacks, and
+  adds only those, in one step. `check-narrative-query.mjs` (the three
+  queries on a synthetic two-graph file with a nested HDT-O chain, and on a
+  copy of the GT16 file with `NARR_V33`) and NB1–NB3 in the browser suite.
 - **Blocks that ask the graph** (MICRO-NARRATIVA-BLOCCHI p.2, E.D. 20 October
   2026; `narrative-query.ts`). Three standard blocks of a story put a question
   to the graph and show what answers, recomputed every time the page is drawn:
