@@ -6790,6 +6790,30 @@ test("PU7.residues", "PULIZIA p.7 · il salvataggio toglie il disegno di yEd (sh
   return { pass, detail: { ...r, errors } };
 });
 
+test("PU8.index", "PULIZIA p.8 · Indice della narrativa: un titolo lungo accanto a un distintivo lungo non va a capo una lettera per riga; il distintivo va sotto o si accorcia con l'ellissi e il nome intero è nel tooltip — largo e a 200 px", async () => {
+  const doc = fixture("catena");
+  const ep = doc.graph.nodes.find((n) => n.node_type === "EpochNode");
+  ep.name = "VAct.01 Foundations of the temple and of its long podium";
+  doc.graph.nodes.push({ id: "PU8-N", node_type: "narrative", name: "PU8 story", data: { chapters: [
+    { title: "Ricostruzione — Virtual Activity 1: foundations of the building", anchor: ep.id, blocks: [] },
+    { title: "Ricostruzione — Virtual Activity 2: colonnade", anchor: ep.id, blocks: [] } ] } });
+  const { p, ctx, errors } = await open({ doc, locale: "it", ws: "narrative" });
+  await p.waitForTimeout(800);
+  const area = await p.evaluate(() => [...document.querySelectorAll(".tile-area")].find((a) => a.dataset.surfaceType === "narrative-index")?.dataset.win ?? null);
+  const measure = () => p.evaluate((w) => [...document.querySelectorAll(`.tile-area[data-win="${w}"] .nidx-row`)].map((r) => {
+    const t = r.querySelector(".nidx-t"), l = r.querySelector(".nidx-lane"); const lh = parseFloat(getComputedStyle(t).lineHeight) || 16;
+    return { tw: Math.round(t.getBoundingClientRect().width), lines: Math.round(t.getBoundingClientRect().height / lh), tip: l?.title ?? null,
+             laneInside: l ? l.getBoundingClientRect().right <= r.getBoundingClientRect().right + 1 : true }; }), area);
+  const wide = await measure();
+  await p.evaluate((a) => { document.querySelector(`.tile-area[data-win="${a}"]`).style.width = "200px"; }, area);
+  await p.waitForTimeout(200);
+  const narrow = await measure();
+  await p.screenshot({ path: SHOT("pu8-indice") }).catch(() => {});
+  await ctx.close();
+  const ok = (rows) => rows.length === 2 && rows.every((r) => r.tw >= 100 && r.lines <= 5 && r.tip === ep.name && r.laneInside);
+  return { pass: !!area && ok(wide) && ok(narrow) && !errors.length, detail: { area, wide, narrow, errors } };
+});
+
 // ── run ─────────────────────────────────────────────────────────────────────
 const chosen = cases.filter((c) => !only.length || only.includes(c.id) || only.some((o) => c.id.startsWith(o + ".")));
 for (const c of chosen) {

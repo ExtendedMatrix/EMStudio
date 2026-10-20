@@ -8375,14 +8375,19 @@ body.gesturing-resize * {
 .nidx-tag.ai { color: var(--ai-ink, #a04a00); border-color: currentColor; }
 .nidx-tag.todo { color: var(--text-muted); font-style: italic; }
 .nidx-ch { list-style: none; margin: 0; padding: 0; }
-.nidx-row { display: flex; align-items: baseline; gap: 6px; width: 100%; border: 0; background: none; color: var(--text); font: inherit; text-align: left; padding: 4px 6px; border-radius: var(--radius); cursor: pointer; }
+.nidx-row { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 6px; width: 100%; border: 0; background: none; color: var(--text); font: inherit; text-align: left; padding: 4px 6px; border-radius: var(--radius); cursor: pointer; }
 .nidx-row:hover { background: var(--bg-hover); }
 .nidx-row.on { background: var(--accent-wash, rgba(191,144,0,.15)); box-shadow: inset 2px 0 0 var(--accent); }
 .nidx-n { color: var(--text-faint); font-variant-numeric: tabular-nums; min-width: 1.4em; }
 .nidx-t { min-width: 0; overflow-wrap: anywhere; }  /* NARRATIVE-DESK · wraps, never «Marcomannic…» */
+/* MICRO-PULIZIA p.8 · the title keeps its width: at least 9em before the
+   badges may sit beside it; with less room they go under it, right-aligned,
+   and the lane's name is ellipsed (its tooltip says it whole) */
+.nidx-row > .nidx-t { flex: 1 1 9em; }
+.nidx-meta { display: flex; gap: 4px; align-items: baseline; flex: 0 1 auto; min-width: 0; max-width: 100%; margin-left: auto; }
 .nidx-star { color: var(--accent); }
 .nidx-grow { flex: 1; }
-.nidx-lane { font-size: 10.5px; color: var(--text-muted); white-space: nowrap; }
+.nidx-lane { font-size: 10.5px; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; max-width: 16em; }
 .nidx-add { display: flex; flex-wrap: wrap; gap: 4px; margin: 8px 0; }
 .nidx-btn { font: inherit; font-size: 11.5px; border: 1px solid var(--border); background: var(--bg); color: var(--text); border-radius: var(--radius); padding: 2px 7px; cursor: pointer; }
 .nidx-btn:disabled { opacity: 0.5; cursor: default; }

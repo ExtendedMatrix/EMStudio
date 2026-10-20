@@ -140,14 +140,23 @@ export function renderNarrativeIndex(host: HTMLElement, doc: EmDocument | null, 
       star.title = t("nidx.canonical");
       b.appendChild(star);
     }
-    b.appendChild(el("span", "nidx-grow"));
+    // MICRO-PULIZIA p.8 · the badges in a box of their own: the title keeps
+    // its width (never one letter per line beside a long lane), the box goes
+    // under it when the row is narrow, and the lane's name is shortened with
+    // an ellipsis — the whole name in its tooltip
+    const meta = el("span", "nidx-meta");
     const lane = ch.anchor ? index.get(ch.anchor) : undefined;
     // the lane's chip only when it says something the title does not
     const laneName = lane ? String(lane.name ?? lane.id) : "";
-    if (lane && laneName !== (ch.title ?? "")) b.appendChild(el("span", "nidx-lane", laneName));
+    if (lane && laneName !== (ch.title ?? "")) {
+      const chip = el("span", "nidx-lane", laneName);
+      chip.title = laneName;
+      meta.appendChild(chip);
+    }
     const needs = chapterNeeds(ch as Parameters<typeof chapterNeeds>[0]);
-    if (needs.ai) b.appendChild(el("span", "nidx-tag ai", `AI ${needs.ai}`));
-    if (needs.todo) b.appendChild(el("span", "nidx-tag todo", t("nidx.toWrite")));
+    if (needs.ai) meta.appendChild(el("span", "nidx-tag ai", `AI ${needs.ai}`));
+    if (needs.todo) meta.appendChild(el("span", "nidx-tag todo", t("nidx.toWrite")));
+    if (meta.childElementCount) b.appendChild(meta);
     b.addEventListener("click", () => hooks.onPick(i));
     li.appendChild(b);
     list.appendChild(li);

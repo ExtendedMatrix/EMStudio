@@ -45,6 +45,13 @@ that asked for one.
 - `scripts/check-space-views.mjs` (101), `scripts/check-implicit-pd.mjs` (30).
 
 ### Changed
+- **The narrative Index keeps its titles readable** (MICRO-PULIZIA-INTERFACCIA
+  p.8). A chapter whose lane badge was long («VAct.01 Foundations of the
+  temple», `white-space: nowrap`) squeezed its title to one letter per line
+  (measured on «Il Grande Tempio», row 8: 26 px wide, 19 lines). The badges sit
+  in a box of their own: the title keeps at least 9em, the box goes under it
+  when the row is narrow, the lane's name is ellipsed with the whole name in its
+  tooltip. Measured after: every title ≥ 115 px and ≤ 4 lines, wide and at 200 px.
 - **The import's residues out of the data** (MICRO-PULIZIA-INTERFACCIA p.7).
   yEd's drawing (`shape`, `fill_color`, `border_style`, `border_color`,
   `border_width`, `symbol`, the positions, the fonts…) is not a datum — the
