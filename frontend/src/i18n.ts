@@ -4097,6 +4097,10 @@ const EN: Dict = {
   "chain.noExtraction": "Nothing extracted yet: mark the document in the Viewer, or «Interpretation» on a property",
   "chain.linkExtractionTitle": "Which property this extraction reads: it becomes its source (a second source makes the combiner)",
   "chain.extractionLinked": "{x} now feeds {p}",
+  "insp.docCard": "Document card",
+  "insp.docTitlePh": "a title distinct from the code",
+  "insp.docFilePh": "the file, relative to the study (DosCo/…) or a web address",
+  "insp.docCardNote": "The code is the name above, the year is in «Dating of the document», the language and the translation under the description.",
   "settings.highDelayS": "Viewer: seconds still on a node before its high version (s)",
 };
 
@@ -8069,6 +8073,10 @@ const IT: Dict = {
   "chain.noExtraction": "Ancora nessuna estrazione: segna il documento nel Viewer, o «Interpretazione» su una proprietà",
   "chain.linkExtractionTitle": "Quale proprietà legge questa estrazione: ne diventa la fonte (una seconda fonte crea il combinatore)",
   "chain.extractionLinked": "{x} ora alimenta {p}",
+  "insp.docCard": "Scheda del documento",
+  "insp.docTitlePh": "un titolo distinto dal codice",
+  "insp.docFilePh": "il file, relativo allo studio (DosCo/…) o un indirizzo web",
+  "insp.docCardNote": "Il codice è il nome sopra, l'anno sta in «Datazione del documento», lingua e traduzione sotto la descrizione.",
   "settings.highDelayS": "Viewer: secondi fermi su un nodo prima della versione alta (s)",
 };
 
@@ -8347,6 +8355,10 @@ const EL: Dict = {
   "chain.noExtraction": "Καμία εξαγωγή ακόμη: σημείωσε το έγγραφο στον Viewer ή «Ερμηνεία» σε μια ιδιότητα",
   "chain.linkExtractionTitle": "Ποια ιδιότητα διαβάζει αυτή η εξαγωγή: γίνεται πηγή της (μια δεύτερη πηγή δημιουργεί τον συνδυαστή)",
   "chain.extractionLinked": "Το {x} τροφοδοτεί πλέον το {p}",
+  "insp.docCard": "Καρτέλα εγγράφου",
+  "insp.docTitlePh": "ένας τίτλος διαφορετικός από τον κωδικό",
+  "insp.docFilePh": "το αρχείο, σχετικά με τη μελέτη (DosCo/…) ή μια διεύθυνση ιστού",
+  "insp.docCardNote": "Ο κωδικός είναι το όνομα παραπάνω, το έτος στη «Χρονολόγηση του εγγράφου», η γλώσσα και η μετάφραση κάτω από την περιγραφή.",
   "settings.highDelayS": "Viewer: δευτερόλεπτα στον ίδιο κόμβο πριν από την υψηλή έκδοση (s)",
 };
 
@@ -8598,6 +8610,10 @@ const HE: Dict = {
   "chain.noExtraction": "עדיין לא חולץ דבר: סמן את המסמך ב־Viewer, או «פרשנות» על מאפיין",
   "chain.linkExtractionTitle": "איזה מאפיין החילוץ הזה קורא: הוא הופך למקור שלו (מקור שני יוצר את המשלב)",
   "chain.extractionLinked": "{x} מזין כעת את {p}",
+  "insp.docCard": "כרטיס המסמך",
+  "insp.docTitlePh": "כותרת שונה מהקוד",
+  "insp.docFilePh": "הקובץ, יחסית למחקר (DosCo/…) או כתובת אינטרנט",
+  "insp.docCardNote": "הקוד הוא השם למעלה, השנה נמצאת ב«תיארוך המסמך», השפה והתרגום מתחת לתיאור.",
   "settings.highDelayS": "Viewer: שניות על אותו צומת לפני הגרסה הגבוהה (s)",
 };
 
@@ -8854,6 +8870,10 @@ const ES: Dict = {
   "chain.noExtraction": "Todavía nada extraído: marca el documento en el Viewer, o «Interpretación» en una propiedad",
   "chain.linkExtractionTitle": "Qué propiedad lee esta extracción: se convierte en su fuente (una segunda fuente crea el combinador)",
   "chain.extractionLinked": "{x} ahora alimenta {p}",
+  "insp.docCard": "Ficha del documento",
+  "insp.docTitlePh": "un título distinto del código",
+  "insp.docFilePh": "el archivo, relativo al estudio (DosCo/…) o una dirección web",
+  "insp.docCardNote": "El código es el nombre de arriba, el año está en «Datación del documento», la lengua y la traducción bajo la descripción.",
   "settings.highDelayS": "Viewer: segundos quieto en un nodo antes de su versión alta (s)",
 };
 
@@ -9109,6 +9129,10 @@ const PL: Dict = {
   "chain.noExtraction": "Jeszcze nic nie wyodrębniono: zaznacz dokument w Viewerze lub «Interpretacja» na właściwości",
   "chain.linkExtractionTitle": "Którą właściwość odczytuje ta ekstrakcja: staje się jej źródłem (drugie źródło tworzy kombinator)",
   "chain.extractionLinked": "{x} zasila teraz {p}",
+  "insp.docCard": "Karta dokumentu",
+  "insp.docTitlePh": "tytuł inny niż kod",
+  "insp.docFilePh": "plik względem badania (DosCo/…) lub adres WWW",
+  "insp.docCardNote": "Kod to nazwa powyżej, rok jest w «Datowanie dokumentu», język i tłumaczenie pod opisem.",
   "settings.highDelayS": "Viewer: sekundy na węźle przed wersją wysoką (s)",
 };
 
@@ -9365,6 +9389,10 @@ const RO: Dict = {
   "chain.noExtraction": "Încă nimic extras: marchează documentul în Viewer sau «Interpretare» pe o proprietate",
   "chain.linkExtractionTitle": "Ce proprietate citește această extragere: devine sursa ei (o a doua sursă creează combinatorul)",
   "chain.extractionLinked": "{x} alimentează acum {p}",
+  "insp.docCard": "Fișa documentului",
+  "insp.docTitlePh": "un titlu diferit de cod",
+  "insp.docFilePh": "fișierul, relativ la studiu (DosCo/…) sau o adresă web",
+  "insp.docCardNote": "Codul este numele de sus, anul este în «Datarea documentului», limba și traducerea sub descriere.",
   "settings.highDelayS": "Viewer: secunde pe același nod înainte de versiunea înaltă (s)",
 };
 
@@ -9624,6 +9652,10 @@ const FR: Dict = {
   "chain.noExtraction": "Rien d'extrait pour l'instant : marquez le document dans le Viewer, ou «Interprétation» sur une propriété",
   "chain.linkExtractionTitle": "Quelle propriété lit cette extraction : elle en devient la source (une deuxième source crée le combinateur)",
   "chain.extractionLinked": "{x} alimente maintenant {p}",
+  "insp.docCard": "Fiche du document",
+  "insp.docTitlePh": "un titre distinct du code",
+  "insp.docFilePh": "le fichier, relatif à l'étude (DosCo/…) ou une adresse web",
+  "insp.docCardNote": "Le code est le nom ci-dessus, l'année est dans «Datation du document», la langue et la traduction sous la description.",
   "settings.highDelayS": "Viewer : secondes sur un nœud avant sa version haute (s)",
 };
 
@@ -11112,6 +11144,10 @@ const DE: Dict = {
   "chain.noExtraction": "Noch nichts extrahiert: markiere das Dokument im Viewer, oder «Interpretation» an einer Eigenschaft",
   "chain.linkExtractionTitle": "Welche Eigenschaft diese Extraktion liest: sie wird ihre Quelle (eine zweite Quelle erzeugt den Kombinator)",
   "chain.extractionLinked": "{x} speist jetzt {p}",
+  "insp.docCard": "Dokumentkarte",
+  "insp.docTitlePh": "ein Titel, der sich vom Kürzel unterscheidet",
+  "insp.docFilePh": "die Datei, relativ zur Studie (DosCo/…), oder eine Webadresse",
+  "insp.docCardNote": "Das Kürzel ist der Name oben, das Jahr steht in «Datierung des Dokuments», Sprache und Übersetzung unter der Beschreibung.",
   "settings.highDelayS": "Viewer: Sekunden auf einem Knoten vor seiner hohen Version (s)",
 };
 

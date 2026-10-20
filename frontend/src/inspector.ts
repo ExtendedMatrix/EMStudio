@@ -1211,6 +1211,7 @@ export function renderInspector(
     // heading of their own, no second triangle inside the first
     if (dl.childElementCount || tech.childElementCount) {
       const h = el("h3", "insp-sect", t("insp.dataSect"));
+      h.dataset.sectData = "1";
       h.dataset.sect = "data";
       root.appendChild(h);
       if (dl.childElementCount) root.appendChild(dl);

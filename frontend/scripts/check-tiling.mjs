@@ -328,7 +328,8 @@ const eq = (got, want, what) => {
   // NIGHT-SPAZIO (30 set 2026) · the fifth space, «Spazio» (scrivania v11b)
   eq(ids, ["canvas", "provenance", "assets", "narrative", "space"],
      "the five spaces, with the ids every saved arrangement is keyed by");
-  eq(W.PARKED_WORKSPACES.map((w) => w.id), ["dtc", "comparisons", "annotator"], "the rest stay parked");
+  // MICRO-VIEWER-UNICO · the Annotator went: it was Fonti with the Viewer large
+  eq(W.PARKED_WORKSPACES.map((w) => w.id), ["dtc", "comparisons"], "the rest stay parked");
   const sig = (id) => W.arrangementSignature(W.WORKSPACES.find((w) => w.id === id).arrangement);
   // G7 (MICRO grafo reattivo) · the graphs of the workspace above the Outliner
   eq(sig("canvas"), "row(col(emtree,outliner),row(col(graph:matrix,table),inspector))",
@@ -355,8 +356,10 @@ const eq = (got, want, what) => {
        "the Outliner, the lower side of the stack, is left alone (null)");
   }
   // DEV30 U6 · the graph window of Fonti opens on the Matrix, the standard view
-  eq(sig("provenance"), "row(table,row(col(doc,graph:matrix),inspector))",
-     "Fonti: Documents · Document above the graph · Inspector");
+  // MICRO-VIEWER-UNICO · the Doc window went: Fonti is the Tabular of the
+  // documents, the Viewer above the Matrix, the Inspector
+  eq(sig("provenance"), "row(table,row(col(viewer,graph:matrix),inspector))",
+     "Fonti: Documents · the Viewer above the graph · Inspector");
   eq(sig("assets"), "row(col(emtree,shelf),row(storage,graph:dtc))",
      "Contenuti: EMTree above the Shelf · Storage · DTC — and no Inspector");
   eq(sig("space"), "row(col(scene,table),row(graph:matrix,inspector))",

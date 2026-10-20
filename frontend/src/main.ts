@@ -195,7 +195,7 @@ import { keepOnDisk, newEmProject, refreshFileStates, reorderApply, reorderPrevi
          fileProjectRoot, describeFile, filesOfDocument, fileStateOf, findMovedFiles, movedFiles, dropMoved, bucketCheck, bucketPromote, dropBucket,
          freePlanOf, freeLocal, freeUi, fileRows, listFilter,
          type FileState, type MovedFile } from "./file-states";
-import { docFilesBox, docFilesGlyphs, filesSection, fileStateLine, resourcesTable, type FileHooks } from "./file-states-ui";
+import { docFilesBox, filesSection, fileStateLine, resourcesTable, type FileHooks } from "./file-states-ui";
 import { paintChooser } from "./node-chooser";
 import { proposeLanguages, type LanguageProposal } from "./lang-guess";
 import {
@@ -270,7 +270,6 @@ import { FOOT_IN, footprintShare, leafCoverage } from "./tileset-leaves";
 import { ALT_RULE } from "./space";
 import { trackpadClassifier } from "./wheel-kind";
 import { isTilesetUrl } from "./tiles3d";
-import type { ModelOptions } from "./embed3d-native";
 import { nodeBlobReady, nodeBlobUrl, ownedByNode, setNodeRoad, type FetchFailure } from "./node-road";
 import { isRoomUrl, rebaseRoomUrl, storeAddress, storeUrlOf } from "./store-url";
 import { isRef3D, resolve3d } from "./embed3d";
@@ -3314,7 +3313,7 @@ function select(nodeId: string | null): void {
   const readsBefore = !!selectedId && ["document", "extractor"].includes(store?.node(selectedId)?.node_type ?? "");
   const readsAfter = !!nodeId && ["document", "extractor"].includes(store?.node(nodeId)?.node_type ?? "");
   if ((readsBefore || readsAfter) && selectedId !== nodeId)
-    queueMicrotask(() => { if (windowsOf().some((w) => w.type === "doc")) renderDocView(); });
+    queueMicrotask(() => { if (windowsOf().some((w) => w.type === "viewer")) renderDocView(); });
   if (docAfter && nodeId && !docPickFrom) followDocSelection(nodeId);
   selectedId = nodeId;
   selectedIds = new Set(nodeId ? [nodeId] : []);
@@ -3624,6 +3623,7 @@ function renderInspectorInto(host: HTMLElement): void {
   }
   if (selectedId) renderTraceBanner(host, owning, selectedId);   // FONTE · a trace, and «Ripristina»
   if (selectedId) {
+    renderDocumentCard(host, owning, selectedId);        // MICRO-VIEWER-UNICO p.5 · the Doc's fields
     renderUnitImages(host, owning, selectedId);          // E5 · its images
     renderAltLabels(host, owning, selectedId);           // A1 · its other labels
     renderChainSection(host, chainUi(owning), selectedId); // CATENA
@@ -21317,7 +21317,7 @@ const TRANSFORM_TYPES: WindowType[] = [
   "emtree",
   "outliner",
   "inspector",
-  "doc",
+  // MICRO-VIEWER-UNICO · no "doc": the Viewer is the one reader and tracer
   "viewer",
   "storage",
   // AUDIT N4 · no "annotator": the Doc window is the one tracer
@@ -21357,219 +21357,18 @@ function currentDocId(win: Win): string | null {
   return typeof v === "string" ? v : null;
 }
 
-function documentsInGraph(): EmNode[] {
-  return (store?.doc.graph.nodes ?? []).filter((n) => n.node_type === "document");
-}
-
-/** CAMPAGNA (1 ott, difetto 16) · the document a Doc window SHOWS — one
- *  answer for its selector, its tools and its body. The body fell back to the
- *  first document when the window's own one was gone (an undo removed it) while
- *  the selector said «—»: two answers to one question. */
-function docShownIn(win: Win): EmNode | null {
-  const docs = documentsInGraph();
-  const id = currentDocId(win);
-  return docs.find((d) => d.id === id) ?? docs[0] ?? null;
-}
 
 /** The focused Doc window's surface. WIN7 split the rendering out (below) so a
  *  SECONDARY Doc area can paint the same thing into its own two boxes. */
 function renderDocView(): void {
-  refreshSurfaces("doc");
+  // MICRO-VIEWER-UNICO · the reader of a document is the Viewer: a url the
+  // bridge answered, a reading traced, repaint it
+  refreshSurfaces("viewer");
 }
 
-/** A Doc surface wide enough for the list and the detail side by side gets the
- *  row layout; a narrow one stacks them. Measured from the SURFACE, so the two
- *  renderings answer it the same way and the focus never enters into it. */
-function reflectDocWidth(surface: HTMLElement): void {
-  surface.classList.toggle("doc-wide", surface.clientWidth >= 520);
-}
-
-/** Draw the sources of the graph for ONE window into ONE pair of boxes. The
- *  window is a parameter because "which document is current" lives on it: two
- *  Doc areas can sit on different sources. */
-function renderDocViewInto(
-  win: Win,
-  list: HTMLElement,
-  detail: HTMLElement,
-): void {
-  list.innerHTML = "";
-  detail.innerHTML = "";
-  const docs = documentsInGraph();
-  if (!docs.length) {
-    detail.innerHTML =
-      `<div class="doc-empty">${t("doc.empty")}</div>`;
-    return;
-  }
-  // SPAZIO · which document a Doc shows is ITS OWN (`current.doc`): a document
-  // selected elsewhere reaches the service window or the space's Doc through
-  // `select` → `followDocSelection`, never a Doc opened or kept by hand
-  const current = docShownIn(win) ?? docs[0];
-  const repaint = (): void => renderDocViewInto(win, list, detail);
-  // AUDIT N8 · ONE SELECTION: the Doc shows the document selected anywhere
-  // (the Documents table, the graph, the Outliner); picking one here selects it
-  // and the Inspector follows. In a space whose Table already lists the
-  // documents the Doc does not list them a second time.
-  const listed = windowsOf().some((w) => w.type === "table" && winCurrent(w, "table.sheet") === "Documents");
-  list.classList.toggle("hidden", listed);
-  list.parentElement?.classList.toggle("doc-no-list", listed);
-  for (const d of docs) {
-    const b = document.createElement("button");
-    b.className = "doc-item" + (d.id === current.id ? " current" : "");
-    const data = (d.data ?? {}) as Record<string, unknown>;
-    const sub = String(data.title ?? data.filename ?? d.description ?? "");
-    b.innerHTML =
-      `${escapeHtml(d.name || d.id)}` +
-      (sub ? `<span class="doc-sub">${escapeHtml(sub)}</span>` : "");
-    // R2 · the signs of its files, once they were asked about
-    const signs = store ? docFilesGlyphs(filesOfDocument(store.doc.graph, d.id)) : null;
-    if (signs) b.appendChild(signs);
-    b.addEventListener("click", () => {
-      setWinCurrent(win, "doc", d.id);
-      setWinCurrent(win, "reading", null);
-      // the Inspector, the graph and the table follow; the OTHER Docs do not
-      docPickFrom = win.id;
-      try { select(d.id); } finally { docPickFrom = null; }
-      repaint();
-    });
-    list.appendChild(b);
-  }
-  // CATENA · the source itself, to read, trace on and describe (its readings)
-  if (store) renderDocReadingStage(win, detail, current);
-  // the current document's fields, straight onto the node
-  const data = (current.data ?? {}) as Record<string, unknown>;
-  const field = (
-    label: string,
-    value: string,
-    commit: (v: string) => void,
-  ): void => {
-    const l = document.createElement("label");
-    l.className = "doc-field";
-    l.textContent = label;
-    const inp = document.createElement("input");
-    inp.className = "doc-input";
-    inp.value = value;
-    inp.addEventListener("change", () => commit(inp.value));
-    detail.appendChild(l);
-    detail.appendChild(inp);
-  };
-  const setData = (key: string, v: string): void => {
-    if (!store) return;
-    store.updateNode(current.id, {
-      data: { ...(current.data ?? {}), [key]: v },
-    } as Partial<EmNode>);
-    // AUDIT A2 · no repaint here: the store's own flush repaints this window,
-    // and holds it while the focus is in the next field (Tab stays alive)
-  };
-  field(t("doc.name"), current.name ?? "", (v) =>
-    store?.updateNode(current.id, { name: v }),
-  );
-  field(t("doc.title"), String(data.title ?? ""), (v) => setData("title", v));
-  field(t("doc.filename"), String(data.filename ?? ""), (v) =>
-    setData("filename", v),
-  );
-  field(t("doc.year"), String(data.year ?? ""), (v) => setData("year", v));
-  field(t("doc.description"), current.description ?? "", (v) =>
-    store?.updateNode(current.id, { description: v }),
-  );
-  // R2 · where its files are, with the common signs and their gestures
-  if (store) detail.appendChild(docFilesBox(filesOfDocument(store.doc.graph, current.id), fileHooks()));
-  // TRADUZIONI · the languages of the description, and the facing text
-  if (store && trx.isNaturalLanguage(current, "description")) {
-    const langs = document.createElement("div");
-    langs.className = "doc-langs";
-    trui.renderLanguageRow(langs, translationUi, current.id, "description");
-    const facing = document.createElement("button");
-    facing.className = "insp-btn";
-    facing.dataset.docFacing = "1";
-    facing.textContent = t("tr.fromDoc");
-    facing.title = t("tr.fromDocTitle");
-    // dev27 · the facing text opens on the EXTRACTOR, with the passage it
-    // selected: the document is the work, and its own facing text is for its
-    // descriptive fields only (the language row above)
-    const passages0 = passagesOf(store.doc, current.id);
-    if (passages0.length) {
-      facing.textContent = t("tr.fromDocPassage", { n: String(passages0[0].extractor.name ?? "") });
-      facing.title = t("tr.fromDocPassageTitle");
-      facing.dataset.docFacing = passages0[0].extractor.id;
-    }
-    facing.addEventListener("click", () => {
-      const target = passages0.length ? passages0[0].extractor.id : current.id;
-      const first = trx.translationsOf(store!.doc, target, "description")[0];
-      trui.openFacingText(translationUi, target, "description", first?.id ?? null);
-    });
-    langs.appendChild(facing);
-    detail.appendChild(langs);
-  }
-
-  // dev27 · THE PASSAGES: each extractor that reads this document — directly,
-  // or through a page/box of one of its resources — with its words in their
-  // language, beside the resource (and the page) they come from
-  if (store) {
-    const ps = passagesOf(store.doc, current.id);
-    if (ps.length) {
-      const box = document.createElement("div");
-      box.className = "doc-passages";
-      box.dataset.docPassages = String(ps.length);
-      const h = document.createElement("div");
-      h.className = "doc-links";
-      h.textContent = t("doc.passages", { n: String(ps.length) });
-      box.appendChild(h);
-      for (const p of ps) {
-        const card = document.createElement("div");
-        card.className = "doc-passage";
-        card.dataset.passage = p.extractor.id;
-        const where = document.createElement("div");
-        where.className = "doc-passage-where";
-        const onName = p.on && p.on.id !== current.id ? String(p.on.name ?? p.on.id) : t("doc.passageHere");
-        const langs = p.on?.node_type === "resource" ? trx.contentLanguages(p.on) : [];
-        where.textContent = [String(p.extractor.name ?? p.extractor.id), onName,
-          p.page !== null ? t("doc.passagePage", { p: String(p.page) }) : (p.geometry === "passage" ? t("doc.passageText") : ""),
-          langs.length ? `(${langs.join(", ")})` : ""].filter(Boolean).join(" · ");
-        const text = document.createElement("div");
-        text.className = "doc-passage-text";
-        if (p.lang) text.lang = p.lang;
-        text.textContent = p.text ? `«${p.text}»${p.lang ? ` — ${p.lang}` : ""}` : t("doc.passageEmpty");
-        const open = document.createElement("button");
-        open.className = "insp-btn";
-        open.dataset.passageFacing = p.extractor.id;
-        open.textContent = t("tr.fromDoc");
-        open.addEventListener("click", () => {
-          const first = trx.translationsOf(store!.doc, p.extractor.id, "description")[0];
-          trui.openFacingText(translationUi, p.extractor.id, "description", first?.id ?? null);
-        });
-        const go = document.createElement("button");
-        go.className = "insp-btn";
-        go.textContent = t("doc.passageSelect");
-        go.addEventListener("click", () => select(p.extractor.id));
-        const btns = document.createElement("div");
-        btns.className = "insp-actions";
-        btns.append(open, go);
-        card.append(where, text, btns);
-        box.appendChild(card);
-      }
-      detail.appendChild(box);
-    }
-  }
-
-  // what hangs off this document — the reason a source is in the graph at all
-  const extractors = (store?.doc.graph.edges ?? []).filter(
-    (e) => e.edge_type === "extracted_from" && e.target === current.id,
-  );
-  const links = document.createElement("div");
-  links.className = "doc-links";
-  links.textContent = t("doc.extractors", { n: String(extractors.length) });
-  detail.appendChild(links);
-  const jump = document.createElement("button");
-  jump.className = "insp-btn";
-  jump.textContent = t("doc.reveal");
-  jump.addEventListener("click", () => {
-    // AUDIT N8 · the graph window of THIS space, when there is one (Fonti has it
-    // right under the Doc) — the Doc stays a Doc; only without one does this
-    // window become the graph, as `revealFromNarrative` does
-    revealFromNarrative(current.id);
-  });
-  detail.appendChild(jump);
-}
+// MICRO-VIEWER-UNICO · the Doc window's list (now the Tabular's Documents), its
+// fields (now the Inspector's «Scheda del documento») and its stage (now the
+// Viewer's, `renderNodeViewer`) went with it.
 
 
 // ── CATENA · the Doc window reads the source ────────────────────────────────
@@ -21715,42 +21514,6 @@ function signedImageUrl(url: string | null): string | null {
   return null;
 }
 
-/** MICRO-3DTILES · what the Doc's 3D viewer is told about a big asset: the
- *  threshold (Preferences), what the graph knows of the file (`size_bytes`,
- *  `primitives.points`), and the TILESET of the same model — a resource of the
- *  document, or of the RM it records, with `packaging: directory` or a
- *  `tileset.json` locator (the `_link` distribution EMtools writes). */
-function docModelOptions(d: EmNode): ModelOptions {
-  const st = store;
-  const v = getSettings().viewer;
-  const opts: ModelOptions = {
-    limit: { bytes: v.lodLimitMB * 1024 * 1024, points: v.lodLimitPoints },
-    tiles: { memoryMB: v.tilesMemoryMB },
-  };
-  const chosen = docModelOf(d);
-  if (chosen?.modifier) { opts.urlModifier = chosen.modifier; opts.lods = false; }
-  if (chosen?.files) opts.files = chosen.files;
-  if (chosen?.resolved) opts.resolved = chosen.resolved;
-  if (!st) return opts;
-  const linked = (id: string) => st.liveEdges()
-    .filter((e) => e.source === id && e.edge_type === "has_linked_resource").map((e) => st.node(e.target)).filter(Boolean) as EmNode[];
-  const rms = st.liveEdges().filter((e) => e.source === d.id && e.edge_type === "has_representation_model").map((e) => e.target);
-  const resources = [...linked(d.id), ...rms.flatMap(linked)];
-  const own = viewerSourceOf(d);
-  const primary = resources.find((r) => viewerSourceOf(r) === own) ?? (own ? null : resources[0] ?? null);
-  const data = (primary?.data ?? {}) as Record<string, unknown>;
-  const num = (x: unknown) => (typeof x === "number" && Number.isFinite(x) ? x : null);
-  const prims = (data.primitives ?? {}) as Record<string, unknown>;
-  opts.known = { bytes: num(data.size_bytes), points: num(prims.points) };
-  const ts = resources.find((r) => {
-    const rd = (r.data ?? {}) as Record<string, unknown>;
-    return r !== primary && (rd.packaging === "directory" || isTilesetUrl(viewerSourceOf(r)));
-  });
-  const tsSrc = ts ? viewerSourceOf(ts) : null;
-  opts.tileset = tsSrc ? docSrcUrl(tsSrc) : null;
-  return opts;
-}
-
 async function docText(d: EmNode): Promise<string | null> {
   const data = (d.data ?? {}) as Record<string, unknown>;
   if (typeof data.text === "string" && data.text) return data.text;
@@ -21884,46 +21647,6 @@ function aiChipFor(id: string): HTMLElement | null {
   return b;
 }
 
-function renderDocReadingStage(win: Win, detail: HTMLElement, d: EmNode): void {
-  if (!store) return;
-  const st = store;
-  const armedRaw = winCurrent(win, "reading");
-  const reads = chain.readingsOfDocument(st.doc, d.id);
-  const armed = typeof armedRaw === "string" && reads.includes(armedRaw) ? armedRaw : null;
-  const selectedReading = selectedId && reads.includes(selectedId) ? selectedId : null;
-  const medium = chainMedium(d);
-  const url = docMediaUrl(d);
-  renderReadingStage(detail, {
-    store: st,
-    docId: d.id,
-    medium,
-    armed,
-    current: armed ?? selectedReading,
-    imageUrl: medium === "image" ? signedImageUrl(url) : null,
-    modelUrl: medium === "3d" ? url : null,
-    model: medium === "3d" ? docModelOptions(d) : undefined,
-    modelNote: (() => {
-      const c = docModelOf(d)?.choice;
-      if (c?.kind !== "blender") return undefined;
-      return t("declared.onlyBlender", { file: `${c.blendFile.split("/").pop() || c.blendFile} · ${c.datablock}` });
-    })(),
-    text: () => docText(d),
-    onTrace: (x, g) => traceReading(win, x, d.id, g),
-    tool: docToolOf(win),
-    onTraceFree: (g, anchor) => askWhatItReads(win, detail, d.id, g, anchor),
-    vertices: readingVertices,
-    onSelect: (x) => { setWinCurrent(win, "reading", null); select(x); refreshInspector(); renderDocView(); draw(); },
-    onDisarm: () => { setWinCurrent(win, "reading", null); renderDocView(); },
-    onUseValue: (x) => chainUi(st).useAsValue(x),
-    onPropose: (x, text) => void proposeReading(win, x, d.id, text),
-    onVerify: (x) => verifyAiNodes([x]),
-    aiChip: aiChipFor,
-  });
-  // the header's tools follow the document shown (its medium decides them)
-  const strip = winAreas.get(win.id)?.querySelector<HTMLElement>(".win-strip");
-  if (strip) fillDocTools(win, strip);
-}
-
 /** LUOGO · the vertices of a 3D place: its `data.coords` (or a legacy point's
  *  own). A region of 7–11 ott not migrated (no folder, no file) has none. */
 function readingVertices(g: chain.Geometry): [number, number, number][] | null {
@@ -22052,9 +21775,12 @@ document.addEventListener("keydown", (e) => {
   if ((e.target as HTMLElement | null)?.closest?.(".rd-bubble")) return;
   let any = false;
   for (const w of windowsOf()) {
-    if (w.type !== "doc") continue;
+    if (w.type !== "viewer") continue;
     if (winCurrent(w, "reading")) { setWinCurrent(w, "reading", null); any = true; }
     if (winCurrent(w, "doc.tool")) { setWinCurrent(w, "doc.tool", null); any = true; }
+    // MICRO-VIEWER-UNICO · the Viewer's 3D trace: Esc cancels its vertices first, then the tool
+    const vs = viewerScenes.get(w.id);
+    if (vs?.trace.tool) { vs.trace.vertices = []; vs.trace.tool = null; any = true; }
   }
   if (any) { renderDocView(); refreshDocTools(); }
 });
@@ -22090,29 +21816,22 @@ const DOC_TOOL_GLYPH: Record<DocTool, string> = {
  *  the other Docs do not */
 let docPickFrom: string | null = null;
 
-function docRoleOf(w: Win): "service" | "user" | null {
-  const r = winCurrent(w, "doc.role");
-  return r === "service" || r === "user" ? r : null;
-}
-
-/** The window a request lands in: the service one, else the space's Doc. */
+/** The window a request lands in. MICRO-VIEWER-UNICO · a VIEWER now — the
+ *  service one, else the space's, never one holding a dropped collection or
+ *  pinned on another node (a pin is a decision). */
 function docForRequests(): Win | null {
-  const docs = windowsOf().filter((w) => w.type === "doc");
-  return docs.find((w) => docRoleOf(w) === "service") ?? docs.find((w) => docRoleOf(w) === null) ?? null;
+  const vs = windowsOf().filter((w) => w.type === "viewer" && !winCurrent(w, "collection"));
+  const free = vs.filter((w) => !viewerKept(w));
+  return free.find((w) => winCurrent(w, "viewer.role") === "service") ?? free[0] ?? null;
 }
 
-/** A document selected elsewhere: the request window shows it, if there is one
- *  (a selection opens nothing — it is not a request). */
-function followDocSelection(docId: string): void {
-  const w = docForRequests();
-  if (!w || winCurrent(w, "doc") === docId) return;
-  setWinCurrent(w, "doc", docId);
-  setWinCurrent(w, "reading", null);
-  refreshDocTools();
-}
+/** A document selected elsewhere: the Viewer follows the selection by itself
+ *  (MICRO-VIEWER-UNICO); a request window has nothing to do. */
+function followDocSelection(_docId: string): void { /* the Viewer reads `selectedId` */ }
 
 /** Show a document in the service window — opening it beside the asker the
- *  first time. Returns the window, or null without a graph. */
+ *  first time. Returns the window, or null without a graph.
+ *  MICRO-VIEWER-UNICO · the window is a Viewer, and «show» is a selection. */
 function requestDoc(docId: string, opts: { from?: Win | null; reading?: string | null } = {}): Win | null {
   if (!store || !store.node(docId)) return null;
   let w = docForRequests();
@@ -22128,16 +21847,15 @@ function requestDoc(docId: string, opts: { from?: Win | null; reading?: string |
     const made = splitWindow(anchor.id, "row", activeWorkspace(), 0.55, "b");
     if (!made) return null;
     for (const k of Object.keys(made.state)) delete made.state[k];   // not the anchor's mode or sheet
-    setWinType(made, "doc");
-    setWinCurrent(made, "doc.role", "service");
+    setWinType(made, "viewer");
+    setWinCurrent(made, "viewer.role", "service");
     w = made;
-    setWinCurrent(w, "doc", docId);
     if (opts.reading !== undefined) setWinCurrent(w, "reading", opts.reading);
     renderTiles();
-  } else {
-    setWinCurrent(w, "doc", docId);
-    if (opts.reading !== undefined) setWinCurrent(w, "reading", opts.reading);
-  }
+  } else if (opts.reading !== undefined) setWinCurrent(w, "reading", opts.reading);
+  // the Viewer shows the selection: the document (or the reading asked for) is selected
+  if (selectedId !== (opts.reading ?? docId) && !(opts.reading == null && selectedId && viewerTargetOf(store.doc.graph, selectedId)?.id === docId))
+    select(opts.reading ?? docId);
   renderDocView();
   refreshDocTools();
   const area = winAreas.get(w.id);
@@ -22146,84 +21864,10 @@ function requestDoc(docId: string, opts: { from?: Win | null; reading?: string |
   return w;
 }
 
-function fillDocTools(win: Win, strip: HTMLElement): void {
-  strip.textContent = "";
-  const d = docShownIn(win) ?? undefined;
-  // SPAZIO · the window's OWN document: changing it here changes only this one
-  const docs = documentsInGraph();
-  if (docs.length) {
-    const pickEl = document.createElement("select");
-    pickEl.className = "doc-pick";
-    pickEl.setAttribute("aria-label", t("svc.document"));
-    if (!d) pickEl.appendChild(Object.assign(document.createElement("option"), { value: "", textContent: "—" }));
-    for (const x of docs)
-      pickEl.appendChild(Object.assign(document.createElement("option"),
-        { value: x.id, textContent: String(x.name || x.id), selected: x.id === d?.id }));
-    pickEl.addEventListener("change", (e) => {
-      e.stopPropagation();
-      if (!pickEl.value) return;
-      setWinCurrent(win, "doc", pickEl.value);
-      setWinCurrent(win, "reading", null);
-      surfaceOf(win.id)?.refresh();
-      fillDocTools(win, strip);
-    });
-    pickEl.addEventListener("pointerdown", (e) => e.stopPropagation());
-    strip.appendChild(pickEl);
-  }
-  if (docRoleOf(win) === "service") {
-    const tag = document.createElement("span");
-    tag.className = "win-svc";
-    tag.textContent = t("svc.tag");
-    tag.title = t("svc.tagTitle");
-    const keep = document.createElement("button");
-    keep.type = "button";
-    keep.className = "win-act";
-    keep.dataset.svcKeep = win.id;
-    keep.textContent = `📌 ${t("svc.keep")}`;
-    keep.title = t("svc.keepTitle");
-    keep.addEventListener("click", (e) => {
-      e.stopPropagation();
-      setWinCurrent(win, "doc.role", "user");
-      toast(t("svc.kept"));
-      fillDocTools(win, strip);
-    });
-    strip.append(tag, keep);
-  }
-  const medium = d ? chainMedium(d) : null;
-  if (!medium) return;
-  const box = document.createElement("span");
-  box.className = "rd-tools";
-  box.setAttribute("role", "group");
-  box.setAttribute("aria-label", t("rdt.tools"));
-  const current = docToolOf(win);
-  for (const tool of DOC_TOOLS[medium]) {
-    const b = document.createElement("button");
-    b.type = "button";
-    b.className = "win-act rd-tool" + (current === tool ? " on" : "");
-    b.dataset.tool = tool;
-    b.textContent = `${DOC_TOOL_GLYPH[tool]} ${t(`rdt.${tool}`)}`;
-    b.title = t(`rdt.${tool}Hint`);
-    b.setAttribute("aria-pressed", String(current === tool));
-    b.addEventListener("click", (e) => {
-      e.stopPropagation();
-      if (tool === "passage") { readPassageIn(win); return; }
-      setWinCurrent(win, "doc.tool", current === tool ? null : tool);
-      renderDocView();
-      refreshDocTools();
-    });
-    box.appendChild(b);
-  }
-  if (current) box.appendChild(Object.assign(document.createElement("span"), {
-    className: "rd-tools-hint", textContent: t(current === "polygon" ? "rdt.escPoly" : current === "polyline" ? "rdt.escPolyline" : "rdt.esc") }));
-  strip.appendChild(box);
-}
-/** Repaint the tools of every Doc window (the document or the tool changed). */
+/** Repaint the tools of every Viewer (the document or the tool changed): they
+ *  are in its bar, which its repaint draws. */
 function refreshDocTools(): void {
-  for (const w of windowsOf()) {
-    if (w.type !== "doc") continue;
-    const strip = winAreas.get(w.id)?.querySelector<HTMLElement>(".win-strip");
-    if (strip) fillDocTools(w, strip);
-  }
+  refreshSurfaces("viewer");
 }
 /** «❝ Leggi il passo selezionato»: the selection in THIS window's text */
 function readPassageIn(win: Win): void {
@@ -22306,6 +21950,64 @@ function askWhatExtractionReads(st: DocumentStore, x: string, anchorEl: HTMLElem
     onCreate: (unitId, name) => link(() => addQualiaClaim(st, unitId, name, "")),
     onClose: () => {},
   });
+}
+
+/** MICRO-VIEWER-UNICO p.5 · what the Doc window's fields were, in the Inspector
+ *  of a document: its title and its file (the name, the description, its
+ *  language and translation are the Inspector's own; the year is «Datazione»). */
+function renderDocumentCard(host: HTMLElement, st: DocumentStore, id: string): void {
+  const d = st.node(id);
+  if (d?.node_type !== "document") return;
+  const data = (d.data ?? {}) as Record<string, unknown>;
+  const sec = document.createElement("section");
+  sec.className = "insp-doc-card";
+  const h = document.createElement("h3");
+  h.className = "insp-sect";
+  h.dataset.sect = "doccard";
+  h.textContent = t("insp.docCard");
+  sec.appendChild(h);
+  const field = (key: "title" | "url", label: string, ph: string): void => {
+    const l = document.createElement("label");
+    l.className = "doc-field";
+    l.textContent = label;
+    const inp = document.createElement("input");
+    inp.className = "doc-input";
+    inp.dataset.docField = key;
+    inp.value = String(data[key] ?? "");
+    inp.placeholder = ph;
+    inp.addEventListener("keydown", (e) => e.stopPropagation());
+    inp.addEventListener("change", () => {
+      const now = (st.node(id)?.data ?? {}) as Record<string, unknown>;
+      const v = inp.value.trim();
+      const next = { ...now };
+      if (v) next[key] = v; else delete next[key];
+      st.updateNode(id, { data: next } as Partial<EmNode>);
+    });
+    l.appendChild(inp);
+    sec.appendChild(l);
+  };
+  field("title", t("doc.title"), t("insp.docTitlePh"));
+  field("url", t("doc.filename"), t("insp.docFilePh"));
+  // R2 · where its files are, with the common signs and their gestures (the Doc's box)
+  sec.appendChild(docFilesBox(filesOfDocument(st.doc.graph, id), fileHooks()));
+  // DEV30 U4 · «Mostra nella Matrix», as the document's card in the Tabular had it
+  const acts = document.createElement("div");
+  acts.className = "insp-actions";
+  const sm = document.createElement("button");
+  sm.type = "button";
+  sm.className = "insp-btn";
+  sm.dataset.showMatrix = id;
+  sm.textContent = t("table.showInMatrix");
+  sm.addEventListener("click", () => showInMatrix(id));
+  acts.appendChild(sm);
+  sec.appendChild(acts);
+  const note = document.createElement("p");
+  note.className = "chain-note";
+  note.textContent = t("insp.docCardNote");
+  sec.appendChild(note);
+  const dati = host.querySelector<HTMLElement>("h3.insp-sect[data-sect-data]");
+  if (dati) dati.before(sec);
+  else (host.querySelector(".insp-body") ?? host).appendChild(sec);
 }
 
 /** ONE undo step: (the new property,) the extractor, its region, the chain. */
@@ -27890,8 +27592,7 @@ function documentCard(): HTMLElement | null {
   go.addEventListener("click", () => {
     const id = d.id;
     setWorkspace("provenance");
-    const docWin = windowsOf().find((w) => w.type === "doc");
-    if (docWin) setWinCurrent(docWin, "doc", id);
+    // MICRO-VIEWER-UNICO · Fonti's Viewer follows the selection
     select(id);
     renderDocView();
   });
@@ -33968,8 +33669,6 @@ function transformWindowOf(win: Win, type: WindowType): void {
   if (win.type === type) return;
   setActiveWin(win.id);
   setWinType(win, type);
-  // SPAZIO · a Doc made by hand is yours: no request will change it
-  if (type === "doc") setWinCurrent(win, "doc.role", "user");
   renderTiles();   // the area re-surfaces itself, and the wrap re-mounts if it
 }                  // was this window that held it
 
@@ -34108,10 +33807,7 @@ function buildHeaderStrip(win: Win): HTMLElement {
   const strip = document.createElement("span");
   strip.className = "win-strip";
 
-  if (win.type === "doc") {
-    fillDocTools(win, strip);
-    return strip;
-  }
+
 
   if (win.type === "storage" && winModeOf(win) === "filesystem") {
     // the object-store mode has no folder to walk, so it has no crumb: its own
@@ -34462,6 +34158,43 @@ const WINDOW_MENUS: Record<WindowType, WinMenu[]> = {
   // an editor. Its ONE state — pinned to a dropped folder, or following the
   // selection again — is here because there is no other way back.
   viewer: [
+    // MICRO-VIEWER-UNICO · the document the Viewer shows: new, delete, its
+    // regions as Web Annotations (the Doc window's menu, moved)
+    {
+      label: "menu.document",
+      items: (win) => [
+        {
+          label: "menu.newDocument",
+          run: () => {
+            if (!store) return;
+            const id = addRow(store, "Documents");
+            if (id) { setWinCurrent(win, "viewer.keep", null); select(id); refreshInspector(); }
+            renderViewer();
+          },
+          disabledReason: () => (store ? null : t("menu.noGraph")),
+        },
+        {
+          label: "menu.deleteDocument",
+          run: () => {
+            const id = currentDocId(win);
+            if (!store || !id) return;
+            deleteRow(store, id);
+            if (viewerKept(win) === id) setWinCurrent(win, "viewer.keep", null);
+            renderViewer();
+          },
+          disabledReason: () =>
+            currentDocId(win) ? null : t("menu.pickDocument"),
+        },
+        // MICRO-UN-POSTO · what the old Annotator's IIIF corner did that is
+        // worth keeping: the image's regions, as W3C Web Annotations, for
+        // somebody else's viewer (Mirador reads an AnnotationPage)
+        {
+          label: "menu.copyWebAnnotations",
+          run: () => copyDocWebAnnotations(win),
+          disabledReason: () => docWebAnnotationRefusal(win),
+        },
+      ],
+    },
     {
       label: "menu.collection",
       items: (win) => {
@@ -34525,43 +34258,6 @@ const WINDOW_MENUS: Record<WindowType, WinMenu[]> = {
             clearShelf();
             renderShelf();
           },
-        },
-      ],
-    },
-  ],
-  doc: [
-    {
-      label: "menu.document",
-      items: (win) => [
-        {
-          label: "menu.newDocument",
-          run: () => {
-            if (!store) return;
-            const id = addRow(store, "Documents");
-            if (id) setWinCurrent(win, "doc", id);
-            renderDocView();
-          },
-          disabledReason: () => (store ? null : t("menu.noGraph")),
-        },
-        {
-          label: "menu.deleteDocument",
-          run: () => {
-            const id = currentDocId(win);
-            if (!store || !id) return;
-            deleteRow(store, id);
-            setWinCurrent(win, "doc", null);
-            renderDocView();
-          },
-          disabledReason: () =>
-            currentDocId(win) ? null : t("menu.pickDocument"),
-        },
-        // MICRO-UN-POSTO · what the old Annotator's IIIF corner did that is
-        // worth keeping: the image's regions, as W3C Web Annotations, for
-        // somebody else's viewer (Mirador reads an AnnotationPage)
-        {
-          label: "menu.copyWebAnnotations",
-          run: () => copyDocWebAnnotations(win),
-          disabledReason: () => docWebAnnotationRefusal(win),
         },
       ],
     },
@@ -37238,7 +36934,7 @@ updateToolbar();
 registerBuiltinSurfaces({
   addEmDataHost, removeEmDataHost, renderEmData,
   addStorageHost, removeStorageHost, renderStorage,
-  renderShelfInto, renderViewerInto, renderDocViewInto, reflectDocWidth,
+  renderShelfInto, renderViewerInto,
   renderStudyInto,
   renderNarrativeIndexInto,
   renderChronologyInto,

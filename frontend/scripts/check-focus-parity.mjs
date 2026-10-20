@@ -69,7 +69,7 @@ const CONVERTED = {
   storage: ["storage-view", "storage-bar", "storage-body"],
   shelf:   ["shelf-view", "shelf-body"],
   viewer:  ["viewer-view", "viewer-stage", "viewer-caption", "viewer-bar"],
-  doc:     ["doc-view", "doc-view-list", "doc-view-detail"],
+  // (doc: gone with MICRO-VIEWER-UNICO — its reader is the Viewer's)
   study:   ["study-view", "study-body"],
   // 3 ott 2026 (COLLEGARE) · the Index was BORN converted: no singleton ever,
   // and the id it would have had is asserted absent all the same

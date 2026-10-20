@@ -75,8 +75,6 @@ export interface SurfaceDeps {
   renderShelfInto(win: Win, body: HTMLElement, count: HTMLElement | null): void;
   renderViewerInto(win: Win, stage: HTMLElement, caption: HTMLElement,
                    bar: HTMLElement): void;
-  renderDocViewInto(win: Win, list: HTMLElement, detail: HTMLElement): void;
-  reflectDocWidth(surface: HTMLElement): void;
   renderStudyInto(body: HTMLElement): void;
   /** COLLEGARE · the Index of a story, into any body. */
   renderNarrativeIndexInto(body: HTMLElement, win: Win): void;
@@ -253,48 +251,7 @@ export function registerBuiltinSurfaces(deps: SurfaceDeps): void {
     },
   });
 
-  // ── DOC ──────────────────────────────────────────────────────────────────
-  registerSurfaceType({
-    id: "doc",
-    create(): Surface {
-      let root: HTMLElement | null = null;
-      let list: HTMLElement | null = null;
-      let detail: HTMLElement | null = null;
-      let win: Win | null = null;
-      return {
-        mount(area, w) {
-          win = w;
-          root = document.createElement("div");
-          root.className = "doc-surface";
-          list = document.createElement("div");
-          list.className = "doc-list";
-          detail = document.createElement("div");
-          detail.className = "doc-detail";
-          root.append(list, detail);
-          area.appendChild(root);
-          this.refresh();
-        },
-        refresh() {
-          if (!win || !root || !list || !detail || !root.isConnected) return;
-          const w = win, r = root, l = list, d = detail;
-          // the direction is keyed to the SURFACE's width, never to who has the
-          // focus — so entering this window reflows nothing (FOCUS-PARITY)
-          deps.reflectDocWidth(r);
-          // two scrollers, two slots: the list you had scrolled and the source
-          // you were reading are both positions worth keeping
-          paintSurface(w, l, () =>
-            paintSurface(w, d, () => deps.renderDocViewInto(w, l, d), "doc-detail"),
-            "doc-list");
-        },
-        setFocused(on) { markFocus(root, on); },
-        destroy() {
-          root?.remove();
-          root = list = detail = null;
-          win = null;
-        },
-      };
-    },
-  });
+  // (── DOC ── went with MICRO-VIEWER-UNICO: its reader is the Viewer's.)
 
   // ── STUDY ────────────────────────────────────────────────────────────────
   //

@@ -44,8 +44,9 @@ const eq = (got, want, what) => {
   eq(W.WORKSPACES.map((w) => w.id), ["canvas", "provenance", "assets", "narrative", "space"],
      "the bar holds the five spaces");
   eq(W.WORKSPACES[0].labelKey, "ws.stratigraphy", "…the first called Stratigrafia");
-  eq(W.PARKED_WORKSPACES.map((w) => w.id), ["dtc", "comparisons", "annotator"],
-     "the three others are parked with their ids unchanged");
+  // MICRO-VIEWER-UNICO · the Annotator went (it was Fonti with the Viewer large)
+  eq(W.PARKED_WORKSPACES.map((w) => w.id), ["dtc", "comparisons"],
+     "the two others are parked with their ids unchanged");
   eq(W.activeWorkspace(), "canvas", "a persisted id pointing at a parked tab falls back to canvas");
   ok(W.applyArrangement("canvas"), "the Stratigrafia arrangement applies");
   const ids = W.paneIds(W.layoutOf("canvas"));

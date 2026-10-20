@@ -394,9 +394,12 @@ test("A9", "un file lasciato su un capitolo non arriva al caricatore globale", a
 });
 
 // ── PARTE 1 · il focus è sacro ──────────────────────────────────────────────
-test("1.doc", "Doc: nome → Tab → il focus è nel titolo, vivo", async () => {
+// MICRO-VIEWER-UNICO · the Doc window's fields are the Inspector's «Scheda del
+// documento» now: the same promise there (Tab goes to the next field, alive)
+test("1.doc", "Scheda del documento (Inspector): titolo → Tab → il focus è nel campo del file, vivo", async () => {
   const { p, ctx } = await open({ doc: "catena", ws: "provenance" });
-  const first = p.locator(".doc-input").first();
+  await pick(p, "D3");
+  const first = p.locator('.insp-doc-card [data-doc-field="title"]').first();
   await first.waitFor({ timeout: 8000 });
   await first.click();
   await p.keyboard.press("End");
@@ -406,9 +409,10 @@ test("1.doc", "Doc: nome → Tab → il focus è nel titolo, vivo", async () => 
   await p.keyboard.type("T");
   await p.waitForTimeout(300);
   const focus = await activeDesc(p);
-  const second = await p.locator(".doc-input").nth(1).inputValue();
+  const second = await p.locator('.insp-doc-card [data-doc-field="url"]').first().inputValue();
+  const title = await p.evaluate(() => window.__EM_DRAG__.data("D3")?.title ?? null);
   await ctx.close();
-  return { pass: focus.includes("doc-input") && second.endsWith("T"), detail: { focus, second } };
+  return { pass: focus.includes("doc-input") && second.endsWith("T") && title === "z", detail: { focus, second, title } };
 });
 test("1.flush", "un cambio ridisegna una volta: tela e ispettore non due volte", async () => {
   const { p, ctx } = await open({ doc: "catena", init: { "em.perf": "1" } });
@@ -651,8 +655,10 @@ test("4.sidecar", "origine timbrata, poi un modello in /modelli apre su «Viene 
 // ── PARTE 5 · un solo tracciatore, e la lettura parte dal documento ─────────
 async function openDocImage(p) {
   await workspace(p, "provenance");
-  // AUDIT N8 · in Fonti the Documents table is the list: the Doc shows its pick
-  await p.locator('[data-win$=":docs"] .tv-card[data-id="D3"] h3').first().click();
+  // AUDIT N8 · in Fonti the Documents table is the list: the VIEWER shows its pick
+  // (MICRO-VIEWER-UNICO: the Doc window is the Viewer, the table is in rows —
+  // its gutter ● picks the row's node)
+  await p.locator('[data-win$=":docs"] [data-pick="D3"]').first().click();
   await p.waitForSelector(".rd-img img", { timeout: 8000 });
   await p.waitForFunction(() => document.querySelector(".rd-img img")?.complete, null, { timeout: 8000 });
   await p.waitForTimeout(300);
@@ -671,7 +677,7 @@ test("5.onebar", "una sola barra di strumenti nella Doc di un'immagine", async (
       tools: [...area.querySelectorAll(".rd-tools [data-tool]")].map((b) => b.dataset.tool),
       others: area.querySelectorAll(".rd-3d-tools, .annot-tools-host, .annot-tools").length,
       modes: [...area.querySelectorAll(".tile-bar button")].map((b) => b.textContent.trim()).filter((x) => /^(View|Annotate|Mask|Guarda|Annota|Maschera)$/.test(x)),
-      annotatorType: window.__EM_DRAG__.wins().some((w) => w.type === "annotator"),
+      annotatorType: window.__EM_DRAG__.wins().some((w) => w.type === "annotator" || w.type === "doc"),
     };
   });
   await ctx.close();
@@ -934,27 +940,35 @@ test("8.search", "«USM101» + Invio seleziona l'unità, non PD_USM101; la tendi
 });
 
 // ── PARTE 9 · una selezione, tutti i pannelli ──────────────────────────────
-test("9.docsel", "documento scelto (nella tabella Documenti di Fonti) → la Doc lo mostra e l'ispettore è del documento", async () => {
+// MICRO-VIEWER-UNICO · Fonti: the Tabular of the documents, the VIEWER (no list of its own)
+test("9.docsel", "documento scelto (nella Tabular Documenti di Fonti) → il Viewer lo mostra e l'ispettore è del documento", async () => {
   const { p, ctx } = await open({ doc: "catena", ws: "provenance" });
-  const docList = await p.evaluate(() => { const l = document.querySelector(".doc-list"); return l ? !l.classList.contains("hidden") && l.offsetParent !== null : false; });
-  // a card of the Documents table
-  await p.locator('[data-win$=":docs"] .tv-card[data-id="D3"] h3').first().click();
+  const docList = await p.evaluate(() => !!document.querySelector(".doc-list"));
+  await p.locator('[data-win$=":docs"] [data-pick="D3"]').first().click();
   await p.waitForTimeout(500);
   const r = await p.evaluate(() => ({ sel: window.__EM_DRAG__.selected()[0], doc: document.querySelector(".rd-stage")?.dataset.doc,
+    viewer: !!document.querySelector(".rd-stage")?.closest('[data-surface-type="viewer"]'),
     insp: document.querySelector('[data-win$="inspector"] .insp-head')?.textContent ?? "" }));
   await ctx.close();
-  return { pass: !docList && r.sel === "D3" && r.doc === "D3" && /document|D\.3/.test(r.insp), detail: { docList, ...r } };
+  return { pass: !docList && r.sel === "D3" && r.doc === "D3" && r.viewer && /document|D\.3/.test(r.insp), detail: { docList, ...r } };
 });
-test("9.reveal", "«Mostra sul canvas» in Fonti usa il grafo sotto la Doc (la Doc resta Doc)", async () => {
+// MICRO-VIEWER-UNICO · the Doc's «Mostra sul canvas» went with its card: a
+// document picked in Fonti's table is shown by the graph under the Viewer
+// («Zoom to selection»), and no window changes type or space
+test("9.reveal", "un documento scelto in Fonti è mostrato dal grafo sotto il Viewer; nessuna finestra cambia tipo né spazio", async () => {
   const { p, ctx } = await open({ doc: "catena", ws: "provenance" });
   const before = await p.evaluate(() => window.__EM_DRAG__.wins().map((w) => w.type).sort().join());
-  await p.locator(".doc-detail button", { hasText: /Mostra sul canvas|Show on canvas/ }).first().click();
-  await p.waitForTimeout(500);
+  await p.locator('[data-win$=":docs"] [data-pick="D3"]').first().click();
+  await p.waitForTimeout(700);
   const after = await p.evaluate(() => window.__EM_DRAG__.wins().map((w) => w.type).sort().join());
   const ws = await p.evaluate(() => document.querySelector("#workspace-bar .ws-tab.active")?.dataset.ws);
   const sel = await p.evaluate(() => window.__EM_DRAG__.selected()[0]);
+  const win = await winOf(p, "graph");
+  const sc = await p.evaluate((w) => window.__EM_DRAG__.winScene(w), win);
+  const box = sc?.boxes.find((b) => b.id === "D3" || b.id.startsWith("D3"));
+  const shown = !!box && box.x + box.w > sc.rect.x && box.x < sc.rect.x + sc.rect.w && box.y + box.h > sc.rect.y && box.y < sc.rect.y + sc.rect.h;
   await ctx.close();
-  return { pass: before === after && ws === "provenance" && !!sel, detail: { before, after, ws, sel } };
+  return { pass: before === after && ws === "provenance" && sel === "D3" && shown, detail: { before, after, ws, sel, box, rect: sc?.rect } };
 });
 // NIGHT-SPAZIO · the rule changed: a space without a Doc no longer sends the
 // reader to Fonti — «Leggi» opens the service window BESIDE, in this space
@@ -966,7 +980,8 @@ test("9.read", "«Leggi» in uno spazio senza Doc apre la finestra di servizio a
   await p.locator(".insp-chain .chain-acts button", { hasText: "Leggi" }).first().click();
   await p.waitForTimeout(900);
   const ws1 = await p.evaluate(() => document.querySelector("#workspace-bar .ws-tab.active, #workspace-bar .ws-tab[aria-selected=true]")?.dataset.ws ?? null);
-  const docs = await p.evaluate(() => window.__EM_DRAG__.wins().filter((w) => w.type === "doc").map((w) => w.state["current.doc.role"] ?? null));
+  // MICRO-VIEWER-UNICO · the service window is a Viewer
+  const docs = await p.evaluate(() => window.__EM_DRAG__.wins().filter((w) => w.type === "viewer").map((w) => w.state["current.viewer.role"] ?? null));
   await ctx.close();
   return { pass: labels.some((l) => /^Leggi$/.test(l.trim())) && !labels.some((l) => /Fonti/.test(l)) && ws0 === ws1
       && docs.length === 1 && docs[0] === "service", detail: { labels, ws0, ws1, docs } };
@@ -1259,17 +1274,20 @@ const placeOf = (p, x) => p.evaluate((id) => {
   return { id: r.id, data: r.data, shapes: d.edgesOf("has_semantic_shape").filter((ed) => ed.source === r.id).length };
 }, x);
 /** a reading on P_H read from D.2 (the model), in the Provenance space */
+// MICRO-VIEWER-UNICO · the document's model is the Viewer's scene (the Space's
+// engine): its readings are marks over it, the tools in the Viewer's bar
 async function readingOnModel(p) {
   await pick(p, "USM101");
   await p.locator('[data-add-reading="P_H"]').first().click();
   await p.waitForTimeout(300);
   await p.locator(".addm-item", { hasText: "D.2 ·" }).first().click();
   await p.waitForTimeout(900);
-  await p.waitForFunction(() => document.querySelector(".rd-3d-host")?.dataset.ready === "1", null, { timeout: 15000 });
+  await p.waitForFunction(() => { const w = window.__EM_DRAG__.wins().find((x) => x.type === "viewer"); return !!w && window.__EM_DRAG__.viewerState(w.id)?.scene?.framed; }, null, { timeout: 30000 });
+  await p.waitForTimeout(300);
   return (await p.evaluate(() => window.__EM_DRAG__.selected()))[0];
 }
-const modelCanvas = (p) => p.evaluate(() => { const cv = document.querySelector(".rd-3d-host canvas"); const r = cv.getBoundingClientRect(); return { x: r.x, y: r.y, w: r.width, h: r.height }; });
-const markerLabels = (p) => p.evaluate(() => [...document.querySelectorAll(".rd-3d-host .v3d-label")].filter((l) => !l.classList.contains("draft")).map((l) => l.textContent));
+const modelCanvas = (p) => p.evaluate(() => { const cv = document.querySelector(".vw-scene canvas"); const r = cv.getBoundingClientRect(); return { x: r.x, y: r.y, w: r.width, h: r.height }; });
+const markerLabels = (p) => p.evaluate(() => [...document.querySelectorAll(".vw-scene .scn-mark-label")].map((l) => l.textContent));
 test("S2.trace", "punto, linea e polilinea tracciati: i vertici in data.coords, nessuna forma né glb; salvato e riaperto misura uguale", async () => {
   const { p, ctx, errors } = await open({ doc: "catena" });
   const glbCalls = [];
@@ -1289,7 +1307,7 @@ test("S2.trace", "punto, linea e polilinea tracciati: i vertici in data.coords, 
   await p.mouse.click(...at(c, 0.45, 0.5)); await p.waitForTimeout(250);
   await p.mouse.click(...at(c, 0.6, 0.5)); await p.waitForTimeout(900);
   xs.point = await readingOnModel(p);
-  await p.click('.rd-tool[data-tool="point"]');
+  await p.click('.rd-tool[data-tool="elevation"]');
   c = await modelCanvas(p);
   await p.mouse.click(...at(c, 0.5, 0.5)); await p.waitForTimeout(900);
   const places = {};
@@ -1305,7 +1323,7 @@ test("S2.trace", "punto, linea e polilinea tracciati: i vertici in data.coords, 
   const measures2 = await again.p.evaluate((ids) => Object.fromEntries(Object.entries(ids).map(([k, x]) => [k, window.__EM_DRAG__.measure?.(x) ?? null])), xs);
   await workspace(again.p, "provenance");
   await pick(again.p, "D2");
-  await again.p.waitForFunction(() => document.querySelector(".rd-3d-host")?.dataset.ready === "1", null, { timeout: 15000 }).catch(() => {});
+  await again.p.waitForFunction(() => { const w = window.__EM_DRAG__.wins().find((x) => x.type === "viewer"); return !!w && window.__EM_DRAG__.viewerState(w.id)?.scene?.framed; }, null, { timeout: 30000 }).catch(() => {});
   await again.p.waitForTimeout(800);
   const markers2 = await markerLabels(again.p);
   await again.ctx.close();
@@ -2531,14 +2549,21 @@ test("S3.shared", "Spazio · l'epoca è condivisa con la Cronologia: sceglierla 
 
 // ── NIGHT-SPAZIO · parte 4 · la finestra di servizio, e ogni Doc il suo documento
 /** the Doc windows on screen: their document, their role, what they draw */
-const docWins = (p) => p.evaluate(() => window.__EM_DRAG__.wins().filter((w) => w.type === "doc").map((w) => {
-  const area = document.querySelector(`[data-win="${w.id}"]`);
-  return { id: w.id, doc: w.state["current.doc"] ?? null, role: w.state["current.doc.role"] ?? null,
-    service: !!area?.querySelector(".win-svc"), keep: !!area?.querySelector("[data-svc-keep]"),
-    medium: area?.querySelector(".rd-3d-host") ? "3d" : area?.querySelector(".rd-img, .rd-image, img.rd-stage-img, .rd-2d") ? "image"
-      : area?.querySelector(".rd-text, .rd-passage") ? "text" : null };
+// MICRO-VIEWER-UNICO · the windows a request lands in are VIEWERS: the
+// document each shows (the pinned one, else the selection's), whether it is the
+// service one, its pin, what it reads
+const docWins = (p) => p.evaluate(() => window.__EM_DRAG__.wins().filter((w) => w.type === "viewer").map((w) => {
+  const area = document.querySelector(`.tile-area[data-win="${w.id}"]`);
+  const v = window.__EM_DRAG__.viewerState(w.id);
+  return { id: w.id, doc: v?.target ? (v.target.kind === "document" ? v.target.id : v.target.docId) : null,
+    role: w.state["current.viewer.role"] ?? null, service: w.state["current.viewer.role"] === "service",
+    keep: !!area?.querySelector("[data-vw-keep]"), kept: v?.kept ?? null,
+    medium: area?.querySelector(".vw-scene") ? "3d" : area?.querySelector(".rd-img") ? "image"
+      : area?.querySelector(".rd-text, .rd-passage, .vw-pdf") ? "text" : null };
 }));
-test("S4.keep", "Spazio · un RM (3D) dalla Tabella apre la finestra di servizio; «Tieni» la fa tua; una foto dall'ispettore va in una NUOVA finestra di servizio e il 3D resta", async () => {
+// MICRO-VIEWER-UNICO · the service window is a Viewer, and «Tieni» is its pin:
+// a Viewer pinned on a node is never taken by a request
+test("S4.keep", "Spazio · un RM (3D) dalla Tabella apre il Viewer di servizio; 📌 lo tiene sul documento; una foto dall'ispettore va in un NUOVO Viewer di servizio e il 3D resta", async () => {
   const { p, ctx, errors } = await open({ doc: "spazio", ws: "space" });
   await p.waitForSelector('[data-open-doc="D2"]', { timeout: 15000 });
   const before = await docWins(p);
@@ -2546,7 +2571,8 @@ test("S4.keep", "Spazio · un RM (3D) dalla Tabella apre la finestra di servizio
   await p.waitForTimeout(1500);
   const opened = await docWins(p);
   await p.screenshot({ path: `${process.env.SHOTS ?? "."}/s4-servizio-prima-di-tieni.png` }).catch(() => {});
-  await p.locator("[data-svc-keep]").first().click().catch(() => {});
+  const o = opened.find((w) => w.doc === "D2");
+  if (o) await p.locator(`.tile-area[data-win="${o.id}"] [data-vw-keep]`).first().click().catch(() => {});
   await p.waitForTimeout(500);
   const kept = await docWins(p);
   // a photo, asked from the Inspector: a reading of P_H on D.3
@@ -2558,15 +2584,16 @@ test("S4.keep", "Spazio · un RM (3D) dalla Tabella apre la finestra di servizio
   const after = await docWins(p);
   await p.screenshot({ path: `${process.env.SHOTS ?? "."}/s4-servizio-dopo-tieni.png` }).catch(() => {});
   await ctx.close();
-  const o = opened.find((w) => w.doc === "D2");
   const k = kept.find((w) => w.id === o?.id);
   const a3d = after.find((w) => w.id === o?.id);
   const photo = after.find((w) => w.doc === "D3");
-  return { pass: !before.length && opened.length === 1 && o?.service && o?.keep && k && !k.service && k.role === "user"
+  return { pass: !before.length && opened.length === 1 && o?.service && o?.keep && k?.kept === "D2"
       && a3d?.doc === "D2" && after.length === 2 && photo && photo.id !== o.id && photo.service && !errors.length,
     detail: { before, opened, kept, after, errors } };
 });
-test("S4.sources", "Fonti · la richiesta usa la Doc dello spazio (nessuna finestra nuova); due Doc tengono due documenti", async () => {
+// MICRO-VIEWER-UNICO · Fonti's Viewer takes the request; two Viewers hold two
+// documents when one is pinned (the Doc's own picker went with the Doc)
+test("S4.sources", "Fonti · la richiesta usa il Viewer dello spazio (nessuna finestra nuova); due Viewer tengono due documenti, uno tenuto col 📌", async () => {
   const { p, ctx, errors } = await open({ doc: "catena", ws: "provenance" });
   const w0 = await docWins(p);
   await pick(p, "USM101");
@@ -2575,18 +2602,20 @@ test("S4.sources", "Fonti · la richiesta usa la Doc dello spazio (nessuna fines
   await p.locator(".addm-item", { hasText: "D.3 ·" }).first().click();
   await p.waitForTimeout(1200);
   const w1 = await docWins(p);
-  // a second Doc, opened by hand (split of the first), on another document
+  // a second Viewer, opened by hand (split of the first), pinned on another document
   const second = await p.evaluate((id) => window.__EM_DRAG__.splitDoc?.(id) ?? null, w1[0]?.id);
   await p.waitForTimeout(600);
-  if (second) {
-    await p.selectOption(`[data-win="${second}"] select.doc-pick`, "D1").catch(() => {});
-    await p.waitForTimeout(600);
-  }
+  await pick(p, "D1");
+  await p.waitForTimeout(400);
+  if (second) await p.locator(`.tile-area[data-win="${second}"] [data-vw-keep]`).first().click().catch(() => {});
+  await p.waitForTimeout(300);
+  await pick(p, "D3");
+  await p.waitForTimeout(600);
   const w2 = await docWins(p);
   await ctx.close();
   const main = w2.find((w) => w.id === w1[0]?.id), other = w2.find((w) => w.id === second);
   return { pass: w0.length === 1 && w1.length === 1 && w1[0].doc === "D3" && !w1[0].service
-      && main?.doc === "D3" && other?.doc === "D1" && other?.role === "user" && !errors.length,
+      && main?.doc === "D3" && other?.doc === "D1" && other?.kept === "D1" && !errors.length,
     detail: { w0, w1, second, w2, errors } };
 });
 
@@ -2969,7 +2998,8 @@ test("U3.webanno", "la Doc di un'immagine ha nel «⋯» «Copia le regioni come
   await p.waitForTimeout(300);
   await p.keyboard.press("Enter");
   await p.waitForTimeout(600);
-  const docWin = `[data-win="${await winOf(p, "doc")}"]`;
+  // MICRO-VIEWER-UNICO · the menu «Documento» is the Viewer's
+  const docWin = `.tile-area[data-win="${await winOf(p, "viewer")}"]`;
   const menuItem = async () => {
     await p.click(`${docWin} .win-more`);
     await p.waitForTimeout(150);
@@ -3365,21 +3395,29 @@ test("T2.gate", "Soglia · un glb oltre la soglia (le Preferenze) non si carica 
       && t.tileset && same(t.files, ["punti.pnts"]) && !errors.length,
     detail: { gate: g.gate, before, after: t.files, errors } };
 });
-test("T2.gateLoad", "Soglia · «Caricalo comunque» carica il glb; sotto la soglia (Preferenze alzate) si apre da solo", async () => {
-  const a = await openTilesDoc("D3");
-  await a.p.click(`[data-win="${a.win}"] [data-gate="load"]`);
-  await a.p.waitForFunction((w) => document.querySelector(`[data-win="${w}"] .rd-3d-host`)?.dataset.ready === "1", a.win, { timeout: 10000 });
-  const loaded = await tilesState(a.p, a.win);
+// MICRO-VIEWER-UNICO · the Doc's 3D reader went: the document's model is the
+// Viewer's scene (the Space's engine), and its gate is the Space's
+test("T2.gateLoad", "Soglia · nel Viewer «Caricalo comunque» carica il glb oltre la soglia; sotto la soglia (Preferenze alzate) si apre da solo", async () => {
+  const gateIn = async (o) => {
+    const win = await o.p.evaluate(() => window.__EM_DRAG__.openDoc("D3"));
+    await o.p.waitForFunction((w) => { const h = document.querySelector(`.tile-area[data-win="${w}"] .vw-scene`); return !!h && (!!h.querySelector('[data-gate="load"]')
+      || (window.__EM_DRAG__.viewerState(w)?.scene?.events ?? []).some((e) => e.what === "drawn")); }, win, { timeout: 20000 });
+    return win;
+  };
+  const a = await open({ doc: fixture("tiles"), ws: "provenance" });
+  const w1 = await gateIn(a);
+  const gated = await a.p.evaluate((w) => !!document.querySelector(`.tile-area[data-win="${w}"] .vw-scene [data-gate="load"]`), w1);
+  await a.p.click(`.tile-area[data-win="${w1}"] .vw-scene [data-gate="load"]`).catch(() => {});
+  await a.p.waitForFunction((w) => (window.__EM_DRAG__.viewerState(w)?.scene?.events ?? []).some((e) => e.what === "drawn"), w1, { timeout: 15000 }).catch(() => {});
+  const loaded = (await a.p.evaluate((w) => window.__EM_DRAG__.viewerState(w)?.scene?.events ?? [], w1)).filter((e) => e.what === "drawn").map((e) => e.url);
   await a.ctx.close();
-  const settings = JSON.stringify({ viewer: { lodLimitMB: 2000 } });
-  let d = fixture("tiles");
-  const o = await open({ doc: d, ws: "provenance", init: { "emstudio.settings": settings } });
-  const win = await o.p.evaluate(() => window.__EM_DRAG__.openDoc("D3"));
-  await o.p.waitForFunction((w) => { const h = document.querySelector(`[data-win="${w}"] .rd-3d-host`); return h && (h.dataset.ready === "1" || h.dataset.gated === "1"); }, win, { timeout: 15000 });
-  const high = await tilesState(o.p, win);
+  const o = await open({ doc: fixture("tiles"), ws: "provenance", init: { "emstudio.settings": JSON.stringify({ viewer: { lodLimitMB: 2000 } }) } });
+  const w2 = await gateIn(o);
+  const high = await o.p.evaluate((w) => ({ gate: !!document.querySelector(`.tile-area[data-win="${w}"] .vw-scene [data-gate="load"]`),
+    drawn: (window.__EM_DRAG__.viewerState(w)?.scene?.events ?? []).filter((e) => e.what === "drawn").map((e) => e.url) }), w2);
   await o.ctx.close();
-  return { pass: /catena-muro\.gltf$/.test(loaded.model ?? "") && !loaded.gate && /catena-muro\.gltf$/.test(high.model ?? "") && !high.gate
-      && !a.errors.length && !o.errors.length, detail: { loaded: loaded.model, high: [high.model, high.gate], errors: [...a.errors, ...o.errors] } };
+  return { pass: gated && loaded.some((u) => /catena-muro\.gltf$/.test(u ?? "")) && !high.gate && high.drawn.some((u) => /catena-muro\.gltf$/.test(u ?? ""))
+      && !a.errors.length && !o.errors.length, detail: { gated, loaded, high, errors: [...a.errors, ...o.errors] } };
 });
 
 // ── MICRO-3DTILES-LOD · parte 3 · «US view» entra nelle Unità ─────────────────
@@ -4207,10 +4245,13 @@ test("W03.lock", "U3 · «Blocca la posizione» è nel menu del nodo sulla Matri
   return { pass: !inInspector && items.some((x) => /^Lock position/.test(x)) && pinned && !errors.length, detail: { inInspector, items: items.slice(0, 5), pinned, errors } };
 });
 
-test("W04.showmatrix", "U4 · dalla scheda del documento «Mostra nella Matrix»: lo seleziona e la finestra del grafo passa alla Matrix", async () => {
+// MICRO-VIEWER-UNICO · Fonti's table is in rows: the document's card is the
+// Inspector's «Scheda del documento», and «Mostra nella Matrix» is there
+test("W04.showmatrix", "U4 · dalla scheda del documento (Inspector) «Mostra nella Matrix»: lo seleziona e la finestra del grafo passa alla Matrix", async () => {
   const { p, ctx, errors } = await open({ doc: LITE(), locale: "en", ws: "provenance" });
-  const has = await p.locator('[data-show-matrix="d02"]').count();
-  if (has) await p.click('[data-show-matrix="d02"]');
+  await pick(p, "d02");
+  const has = await p.locator('.insp-doc-card [data-show-matrix="d02"]').count();
+  if (has) await p.click('.insp-doc-card [data-show-matrix="d02"]');
   await p.waitForTimeout(900);
   const r = await p.evaluate(() => ({ sel: window.__EM_DRAG__.selected(), mode: window.__EM_DRAG__.wins().find((w) => w.type === "graph")?.state?.mode }));
   await p.screenshot({ path: SHOT("w04-mostra-nella-matrix") }).catch(() => {});
@@ -7103,7 +7144,70 @@ test("VU3.quota", "VIEWER-UNICO p.4 · un punto quota sul 3D di D.01 crea l'estr
   return { pass, detail: { at: at?.h, x: x && { name: x.name, result: x.data?.result }, reg: reg?.data, toDoc, marks, steps: undo1 - undo0, listed, linked, unlinked, gone, errors } };
 });
 
+test("VU4.image", "VIEWER-UNICO p.3/p.4 · il documento di un'immagine nel Viewer: le regioni già fatte si vedono, Regione traccia e chiede che cosa estrae (come in Doc), «Copia le regioni come Web Annotations» è nel menu Documento del Viewer", async () => {
+  const { p, ctx, errors } = await open({ doc: "catena" });
+  const w = await viewerIn(p, "outliner");
+  await p.evaluate(() => window.__EM_DRAG__.select("D3"));
+  await p.waitForSelector(`.tile-area[data-win="${w}"] .rd-img img`, { timeout: 8000 }).catch(() => {});
+  await p.waitForTimeout(500);
+  const area = `.tile-area[data-win="${w}"]`;
+  const before = await p.evaluate(() => window.__EM_DRAG__.idsOfType("extractor").length);
+  const tools = await p.evaluate((a) => [...document.querySelectorAll(`${a} .viewer-bar [data-tool]`)].map((b) => b.dataset.tool), area);
+  await p.click(`${area} [data-tool="rect"]`).catch(() => {});
+  await p.waitForTimeout(200);
+  const img = await p.evaluate((a) => { const r = document.querySelector(`${a} .rd-img svg`)?.getBoundingClientRect(); return r && { x: r.x, y: r.y, w: r.width, h: r.height }; }, area);
+  if (img) {
+    await p.mouse.move(img.x + img.w * 0.3, img.y + img.h * 0.3); await p.mouse.down();
+    await p.mouse.move(img.x + img.w * 0.4, img.y + img.h * 0.4); await p.mouse.move(img.x + img.w * 0.5, img.y + img.h * 0.45); await p.mouse.up();
+  }
+  await p.waitForTimeout(300);
+  const bubble = await p.evaluate(() => !!document.querySelector(".rd-bubble"));
+  await p.keyboard.press("Enter");
+  await p.waitForTimeout(600);
+  const after = await p.evaluate(() => window.__EM_DRAG__.idsOfType("extractor").length);
+  const regions = await p.evaluate((a) => document.querySelectorAll(`${a} .rd-region`).length, area);
+  // the menu Documento of the Viewer has the Web Annotations
+  await p.evaluate((x) => window.__EM_DRAG__.select?.(null) ?? null, w).catch(() => {});
+  await p.evaluate(() => window.__EM_DRAG__.select("D3"));
+  await p.waitForTimeout(300);
+  // the window's «⋯»: the Viewer's menus, Documento first
+  await p.click(`${area} .win-more`).catch(() => {});
+  await p.waitForTimeout(300);
+  const menuItems = await p.evaluate(() => [...document.querySelectorAll(".dd-menu:not(.hidden) .dd-group, .dd-menu:not(.hidden) button")].map((b) => b.textContent.trim()).filter(Boolean));
+  await p.screenshot({ path: SHOT("vu4-immagine") }).catch(() => {});
+  await ctx.close();
+  const pass = tools.join() === "rect,polygon" && !!img && bubble && after === before + 1 && regions >= 1
+    && menuItems.some((t) => /^Documento$/.test(t)) && menuItems.some((t) => /Web Annotation/.test(t)) && !errors.length;
+  return { pass, detail: { tools, img: !!img, bubble, before, after, regions, menuItems: menuItems.slice(0, 10), errors } };
+});
 
+test("VU5.sources", "VIEWER-UNICO p.5 · la finestra Doc non c'è più: Fonti è Tabular dei documenti · Viewer · Matrix · Inspector; nessun Doc nel menu dei tipi; un workspace salvato con una Doc la apre come Viewer (tenuto sul suo documento se era tuo); l'Inspector del documento ha la sua scheda", async () => {
+  const saved = { provenance: { activeId: "provenance:doc", wins: [
+    { id: "provenance:doc", type: "doc", state: { "current.doc": "D3", "current.doc.role": "user" } },
+    { id: "provenance:graph", type: "graph", state: { mode: "matrix" } },
+    { id: "provenance:inspector", type: "inspector", state: {} }],
+    layout: { kind: "split", dir: "row", ratio: 0.6, a: { kind: "leaf", winId: "provenance:doc" }, b: { kind: "split", dir: "col", ratio: 0.5, a: { kind: "leaf", winId: "provenance:graph" }, b: { kind: "leaf", winId: "provenance:inspector" } } } } };
+  const fresh = await open({ doc: "catena" });
+  await workspace(fresh.p, "provenance");
+  const types = await fresh.p.evaluate(() => window.__EM_DRAG__.wins().map((w) => w.type + (w.type === "table" ? ":" + w.state["current.table.sheet"] : "")));
+  const anyDoc = await fresh.p.evaluate(() => window.__EM_DRAG__.wins().some((w) => w.type === "doc"));
+  await fresh.p.evaluate(() => window.__EM_DRAG__.select("D3"));
+  await fresh.p.waitForTimeout(600);
+  const card = await fresh.p.evaluate(() => ({ head: [...document.querySelectorAll("h3.insp-sect")].map((h) => h.textContent).some((t) => /Scheda del documento/.test(t)),
+    fields: [...document.querySelectorAll(".insp-doc-card [data-doc-field]")].map((i) => i.dataset.docField) }));
+  // the transform menu of a window: no «Doc»
+  const typeMenu = await fresh.p.evaluate(() => [...document.querySelectorAll(".win-type-menu [data-type], [data-transform-type]")].map((b) => b.dataset.type ?? b.dataset.transformType));
+  await fresh.p.screenshot({ path: SHOT("vu5-fonti") }).catch(() => {});
+  await fresh.ctx.close();
+  const old = await open({ doc: "catena", init: { "emstudio.windows": JSON.stringify(saved), "emstudio.workspaces.rev": "4" } });
+  await workspace(old.p, "provenance");
+  const migrated = await old.p.evaluate(() => window.__EM_DRAG__.wins().map((w) => ({ type: w.type, keep: w.state["current.viewer.keep"] ?? null })));
+  await old.ctx.close();
+  const pass = types[0] === "viewer" && types.includes("table:Documents") && types.includes("graph") && types.includes("inspector") && !anyDoc
+    && card.head && card.fields.join() === "title,url" && !typeMenu.includes("doc")
+    && !migrated.some((w) => w.type === "doc") && !fresh.errors.length && !old.errors.length;
+  return { pass, detail: { types, card, typeMenu, migrated, errors: [...fresh.errors, ...old.errors] } };
+});
 
 
 // ── run ─────────────────────────────────────────────────────────────────────

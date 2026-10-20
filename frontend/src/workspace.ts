@@ -27,7 +27,10 @@ export type WindowType =
   | "graph"
   | "narrative"
   | "table"
-  | "doc"
+  // (MICRO-VIEWER-UNICO · "doc" is not a type any more: the Doc window's
+  // reader and tracer are the Viewer's, its list the Tabular's, its card the
+  // Inspector's. The string stays only as an ALIAS, read by `migrateWin` and
+  // `loadCustom`: a saved Doc opens as a Viewer.)
   // WIN6 · the side panels became window types of their own: everything in the
   // shell is a window now, so anything can be tiled, resized and focused.
   | "emtree"
@@ -253,26 +256,26 @@ const BUILTIN_WORKSPACES: WorkspacePreset[] = [
                      b: { win: "inspector" } } },
     },
   },
-  // FONTI · «Da dove viene questo dato?» The documents as cards, the one you are
-  // reading above the graph it feeds, and the Inspector: the paradata chain
-  // lives there.
+  // FONTI · «Da dove viene questo dato?» MICRO-VIEWER-UNICO (E.D., 20 Oct
+  // 2026): the documents are the Tabular's sheet (sorted and filtered by
+  // column), the one you look at, annotate and extract from is the VIEWER, the
+  // Matrix under it, and the Inspector — the document's fields and its
+  // extractions live there. The Doc window that did all four is gone.
   {
     id: "provenance", labelKey: "ws.sources", hintKey: "ws.qSources",
-    icon: "⌖", windowType: "doc", builtin: true,
+    icon: "⌖", windowType: "viewer", builtin: true,
     arrangement: {
       wins: [
-        { name: "doc", type: "doc" },
-        { name: "docs", type: "table",
-          state: { "current.table.sheet": "Documents", "current.table.view": "cards" } },
+        { name: "viewer", type: "viewer" },
+        { name: "docs", type: "table", state: { "current.table.sheet": "Documents" } },
         // DEV30 U6 · the standard view of every graph window is the Matrix
-        // (E.D., 2 Oct): Fonti's opened in Graph, the only one that did
         { name: "graph", type: "graph", state: { mode: "matrix" } },
         { name: "inspector", type: "inspector" },
       ],
-      active: "doc",
-      layout: { dir: "row", ratio: 0.2, a: { win: "docs" },
+      active: "viewer",
+      layout: { dir: "row", ratio: 0.22, a: { win: "docs" },
                 b: { dir: "row", ratio: 0.72,
-                     a: { dir: "col", ratio: 0.55, a: { win: "doc" }, b: { win: "graph" } },
+                     a: { dir: "col", ratio: 0.55, a: { win: "viewer" }, b: { win: "graph" } },
                      b: { win: "inspector" } } },
     },
   },
@@ -383,23 +386,9 @@ export const PARKED_WORKSPACES: WorkspacePreset[] = [
                      b: { win: "inspector" } } },
     },
   },
-  // 6 · ANNOTATOR — annotating images: the picture with its regions, a preview
-  // to pick the next one from, and the Inspector for what a region became.
-  {
-    id: "annotator", labelKey: "ws.annotator", hintKey: "ws.annotatorHint",
-    icon: "✎", windowType: "doc", builtin: true,
-    arrangement: {
-      wins: [
-        // AUDIT N4 · the Annotator is the Doc window (one tracer)
-        { name: "annotator", type: "doc" },
-        { name: "viewer", type: "viewer" },
-        { name: "inspector", type: "inspector" },
-      ],
-      layout: { dir: "row", ratio: 0.62, a: { win: "annotator" },
-                b: { dir: "col", ratio: 0.5, a: { win: "viewer" },
-                     b: { win: "inspector" } } },
-    },
-  },
+  // (6 · ANNOTATOR went with MICRO-VIEWER-UNICO: it was Fonti with the reader
+  // large, and the reader is the Viewer of Fonti now. A saved Annotator opens
+  // Fonti — `initial` — and a window of its type opens a Viewer: `migrateWin`.)
 ];
 
 const CUSTOM_KEY = "emstudio.workspaces.custom";
@@ -415,11 +404,12 @@ function loadCustom(): WorkspacePreset[] {
         w && typeof w.id === "string" &&
         ![...BUILTIN_WORKSPACES, ...PARKED_WORKSPACES].some((b) => b.id === w.id),
     ).map((w) => ({
-      // AUDIT N4 · an Annotator in a user's arrangement is a Doc window now
+      // AUDIT N4 · an Annotator in a user's arrangement was a Doc window;
+      // MICRO-VIEWER-UNICO · and a Doc window is a Viewer now
       ...w,
-      windowType: (w.windowType as string) === "annotator" ? "doc" : w.windowType,
+      windowType: (w.windowType as string) === "annotator" || (w.windowType as string) === "doc" ? "viewer" : w.windowType,
       arrangement: w.arrangement && Array.isArray(w.arrangement.wins)
-        ? { ...w.arrangement, wins: w.arrangement.wins.map((x) => (x.type as string) === "annotator" ? { ...x, type: "doc" as WindowType }
+        ? { ...w.arrangement, wins: w.arrangement.wins.map((x) => (x.type as string) === "annotator" || (x.type as string) === "doc" ? { ...x, type: "viewer" as WindowType }
             // MICRO-3DTILES-LOD · the «US view» is the Units now
             : x.type === "table" && x.state?.["current.table.sheet"] === "US" ? { ...x, state: { ...x.state, "current.table.sheet": "Units" } } : x) }
         : w.arrangement,
@@ -546,7 +536,6 @@ export const WINDOW_TYPE_META: Record<WindowType, { icon: string; labelKey: stri
   graph: { icon: windowIcon("graph"), labelKey: "win.graph" },
   narrative: { icon: windowIcon("narrative"), labelKey: "win.narrative" },
   table: { icon: windowIcon("table"), labelKey: "win.tabular" },
-  doc: { icon: windowIcon("doc"), labelKey: "win.doc" },
   emtree: { icon: windowIcon("emtree"), labelKey: "win.emtree" },
   outliner: { icon: windowIcon("outliner"), labelKey: "win.outliner" },
   inspector: { icon: windowIcon("inspector"), labelKey: "win.inspector" },
@@ -572,6 +561,8 @@ function initial(): WorkspaceId {
   try {
     const saved = localStorage.getItem(STORAGE_KEY);
     if (saved && WORKSPACES.some((w) => w.id === saved)) return saved as WorkspaceId;
+    // MICRO-VIEWER-UNICO · the Annotator was Fonti with the Viewer large
+    if (saved === "annotator") return "provenance";
   } catch {
     /* storage disabled */
   }
@@ -693,7 +684,17 @@ export function migrateWin(w: Win): Win {
   // place (its View/Annotate mode had no meaning in the Doc and is dropped).
   if ((w.type as string) === "annotator") {
     delete state["mode.annotator"];
-    return { ...w, type: "doc", state };
+    return { ...w, type: "viewer", state };
+  }
+  // MICRO-VIEWER-UNICO · THE DOC WINDOW IS GONE: its reader and its tracer are
+  // the Viewer's, its list the Tabular's, its card the Inspector's. A saved Doc
+  // opens as a Viewer; one kept by hand on a document (role «user») keeps it —
+  // the Viewer's pin; the workspace's or the service one follows the selection.
+  if ((w.type as string) === "doc") {
+    const kept = state["current.doc.role"] === "user" && typeof state["current.doc"] === "string" ? state["current.doc"] : null;
+    for (const k of ["current.doc", "current.doc.role", "current.reading"]) delete state[k];
+    if (kept) state["current.viewer.keep"] = kept;
+    return { ...w, type: "viewer", state };
   }
   if (w.type === "emtree" && state["current.panel"] === "nodelist") {
     delete state["current.panel"];
@@ -779,11 +780,13 @@ export const LEGACY_SIGNATURES: Record<string, string[]> = {
   canvas: ["row(outliner,row(graph:matrix,inspector))", "row(emtree,row(graph:matrix,inspector))",
            // rev 4 (G7) · the Stratigraphy seed before the graphs panel came in
            "row(outliner,row(col(graph:matrix,table),inspector))"],
-  provenance: ["row(storage,row(graph:dtc,inspector))"],
+  provenance: ["row(storage,row(graph:dtc,inspector))",
+               // rev 5 (MICRO-VIEWER-UNICO) · the Fonti seed with the Doc window
+               "row(table,row(col(doc,graph:matrix),inspector))"],
   assets: ["row(storage,row(storage,col(graph:dtc,inspector)))"],
   narrative: ["row(narrative,viewer)"],
 };
-export const WORKSPACES_REV = 4;
+export const WORKSPACES_REV = 5;
 const REV_KEY = "emstudio.workspaces.rev";
 
 export function migrateSavedArrangements(
@@ -981,8 +984,8 @@ export function splitWindow(
   if (!src) return null;
   endMagnification(ws); // shaping the arrangement brings the arrangement back
   const clone = addWindow(src.type, { ...src.state }, ws); // appends + activates
-  // SPAZIO · a Doc split by hand is the user's: not a second service window
-  if (clone.type === "doc") clone.state["current.doc.role"] = "user";
+  // SPAZIO · a Viewer split by hand is the user's: not a second service window
+  if (clone.type === "viewer") delete clone.state["current.viewer.role"];
   // `addWindow` gave the clone a home of its own (any window must have one);
   // here we want it in a SPECIFIC place, so prune that provisional leaf first —
   // otherwise the clone would be placed twice and the tree would out-count the

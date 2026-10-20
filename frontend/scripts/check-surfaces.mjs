@@ -404,9 +404,17 @@ ok(typeof globalThis.requestAnimationFrame === "function",
   ok(!M.surfaceTypeOf("annotator"), "annotator · no surface of its own any more");
   ok(!("ANNOTATOR_CAPABILITIES" in M), "annotator · …nor a declared limit for one");
   const W = await load("workspace.ts");
+  // MICRO-VIEWER-UNICO · …and a Doc is a Viewer now: the two aliases land there
   eq(W.migrateWin({ id: "x:annotator", type: "annotator", state: { "mode.annotator": "annotate" } }),
-     { id: "x:annotator", type: "doc", state: {} },
-     "annotator · the ALIAS stays: a saved Annotator opens as a Doc, its mode dropped");
+     { id: "x:annotator", type: "viewer", state: {} },
+     "annotator · the ALIAS stays: a saved Annotator opens as a Viewer, its mode dropped");
+  ok(!M.surfaceTypeOf("doc"), "doc · no surface of its own any more (MICRO-VIEWER-UNICO)");
+  eq(W.migrateWin({ id: "x:doc", type: "doc", state: { "current.doc": "D1", "current.doc.role": "user", "current.doc.tool": "rect" } }),
+     { id: "x:doc", type: "viewer", state: { "current.doc.tool": "rect", "current.viewer.keep": "D1" } },
+     "doc · a saved Doc kept by hand opens as a Viewer pinned on its document");
+  eq(W.migrateWin({ id: "x:doc2", type: "doc", state: { "current.doc": "D1", "current.doc.role": "service" } }),
+     { id: "x:doc2", type: "viewer", state: {} },
+     "doc · the service / workspace Doc opens as a Viewer that follows the selection");
 }
 
 // ── 13 · …and every surface really DRAWS, rather than announcing itself ────
@@ -464,7 +472,6 @@ ok(typeof globalThis.requestAnimationFrame === "function",
     storage: "addStorageHost",
     shelf:   "renderShelfInto",
     viewer:  "renderViewerInto",
-    doc:     "renderDocViewInto",
     study:   "renderStudyInto",
     "narrative-index": "renderNarrativeIndexInto",
     // 13 set 2026 · the two HOSTED types. A panel window builds its OWN panel in

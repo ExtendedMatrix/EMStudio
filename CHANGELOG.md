@@ -94,6 +94,20 @@ that asked for one.
 - `scripts/check-space-views.mjs` (101), `scripts/check-implicit-pd.mjs` (30).
 
 ### Changed
+- **The Doc window is gone** (MICRO-VIEWER-UNICO p.5). Its four jobs each have
+  one place: the list is the Tabular's Documents sheet, the card the
+  Inspector's («Scheda del documento»: title, file and its files; the code,
+  the description, the language and the translation were already there, the
+  year is «Datazione»), the reader and the tracer are the Viewer's, the menu
+  «Documento» (new, delete, the regions as Web Annotations) is the Viewer's.
+  Fonti is the Tabular of the documents, the Viewer above the Matrix, the
+  Inspector; the Annotator workspace went (it was Fonti with the Viewer
+  large). A saved Doc opens as a Viewer — pinned on its document when it was
+  kept by hand; a saved Annotator or Fonti with the Doc is reseeded. Requests
+  («Leggi», a double click on a document, Shelf ▸ Annota) open the service
+  Viewer beside, never one that is pinned. VU5; the suite cases of the Doc
+  rewritten to the Viewer (1.doc, 5.*, 9.*, S2.trace, S4.*, U3.webanno,
+  T2.gateLoad).
 - **A story's title and subtitle are written in the page** (MICRO-NARRATIVA-
   BLOCCHI p.1, E.D. 20 October 2026). In Write the title (`name`) and the
   subtitle (`description`) of the story are edited where they are read, with
