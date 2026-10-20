@@ -576,6 +576,26 @@ jobs:
               core.setFailed("the release has no assets: leaving it as a draft");
               return;
             }
+            // latest.json: tauri-action writes the download URLs as
+            // /releases/latest/download/…, but every dev release is a
+            // prerelease, so «latest» answers 404 and «Install and restart»
+            // fails. Point them at THIS tag. The signatures are over the
+            // archives, not over latest.json, so they stay valid.
+            const lj = assets.data.find((a) => a.name === "latest.json");
+            if (lj) {
+              const res = await github.request(
+                "GET /repos/{owner}/{repo}/releases/assets/{asset_id}",
+                { owner, repo, asset_id: lj.id, headers: { accept: "application/octet-stream" } });
+              const text = Buffer.from(res.data).toString("utf8");
+              const fixed = text.split("/releases/latest/download/").join(`/releases/download/${tag}/`);
+              if (fixed !== text) {
+                await github.rest.repos.deleteReleaseAsset({ owner, repo, asset_id: lj.id });
+                await github.rest.repos.uploadReleaseAsset({
+                  owner, repo, release_id: found.id, name: "latest.json",
+                  headers: { "content-type": "application/json" }, data: fixed });
+                core.info(`latest.json now points at ${tag}`);
+              }
+            }
             await github.rest.repos.updateRelease({
               owner, repo, release_id: found.id, draft: false });
             core.info(`published ${tag}`);
