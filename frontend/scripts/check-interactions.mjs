@@ -973,7 +973,10 @@ test("9.read", "«Leggi» in uno spazio senza Doc apre la finestra di servizio a
 });
 
 // ── PARTE 10 · intestazioni sobrie, un verbo per azione ─────────────────────
-test("10.header", "l'intestazione del grafo: tipo, modo a segmenti, un solo menu «⋯» (niente tre «Graph»)", async () => {
+// MICRO-PULIZIA p.4 · the «⋯» no longer gathers Layout and «Normalizza
+// grafie…»: Layout and «Compatta» are icons on the bar, the spellings are in
+// Tools, and an empty «⋯» is not drawn (the Matrix's is empty)
+test("10.header", "l'intestazione del grafo: tipo, modo a segmenti, nessun «⋯» vuoto (niente tre «Graph»); «Uniforma le grafie…» sta in Strumenti", async () => {
   const { p, ctx } = await open({ doc: "catena" });
   const r = await p.evaluate(() => {
     const bar = document.querySelector('[data-win="canvas:1"] .tile-bar') ?? document.querySelector(".tile-active .tile-bar");
@@ -981,16 +984,12 @@ test("10.header", "l'intestazione del grafo: tipo, modo a segmenti, un solo menu
       seg: [...bar.querySelectorAll(".win-seg button")].map((b) => b.textContent),
       menus: [...bar.querySelectorAll(".win-menu-toggle")].map((b) => b.textContent.trim()),
       graphWords: (bar.innerText.match(/\bGrafo\b|\bGraph\b/g) ?? []).length,
+      tools: [...document.querySelectorAll("#dd-tools .dd-menu button")].map((b) => b.textContent.trim()),
     };
   });
-  // the «⋯» gathers Layout and «Normalizza grafie…»
-  await p.click('.tile-active .win-more');
-  await p.waitForTimeout(150);
-  const items = await p.evaluate(() => [...document.querySelectorAll(".dd-menu:not(.hidden) button")].map((b) => b.textContent));
-  await p.keyboard.press("Escape");
   await ctx.close();
-  return { pass: r.seg.length === 4 && r.menus.length === 1 && r.menus[0] === "⋯" && r.graphWords <= 2
-    && items.some((i) => /grafie|spellings/i.test(i)), detail: { ...r, items } };
+  return { pass: r.seg.length === 4 && r.menus.length === 0 && r.graphWords <= 2
+    && r.tools.some((i) => /grafie|spellings/i.test(i)), detail: r };
 });
 test("10.warnings", "la pillola degli avvisi porta alla tabella, non apre un popover sopra l'ispettore; conta solo il grafo", async () => {
   const { p, ctx } = await open({ doc: "catena" });
@@ -6636,6 +6635,38 @@ test("PU3.views", "PULIZIA p.3 · viste del grafo: niente «Grafo completo»; «
     && r.matrixPanel.some((x) => /Monocromo/.test(x)) && !r.graphPanel.some((x) => /Monocromo/.test(x)) && r.graphPanel.some((x) => /^HDT-O/.test(x))
     && r.hdtoChecked === true && r.on > r.off && r.studyOn && !r.studyOff && r.square.draws === true && r.square.aspect === 1 && !errors.length;
   return { pass, detail: { ...r, errors } };
+});
+
+test("PU4.header", "PULIZIA p.4 · testata del grafo: Ricalcola layout è un'icona (senza «Layout»), accanto Compatta le proprietà; niente «+»; Uniforma le grafie in Strumenti; ⇧C adatta come 0; il «⋯» solo dove ha qualcosa (il Grafo: l'algoritmo)", async () => {
+  const { p, ctx, errors } = await open({ doc: "TempluMare", locale: "it" });
+  const bar = () => p.evaluate(() => {
+    const b = document.querySelector('.tile-area[data-win="canvas:1"] .tile-bar');
+    const acts = [...b.querySelectorAll(".win-act")].map((x) => ({ act: x.dataset.act ?? null, text: x.textContent.trim(), aria: x.getAttribute("aria-label") ?? "", title: x.title, svg: !!x.querySelector("svg") }));
+    return { acts, more: !!b.querySelector(".win-more"), text: b.innerText };
+  });
+  const matrix = await bar();
+  await p.evaluate(() => [...document.querySelectorAll('.tile-area[data-win="canvas:1"] .tile-bar button')].find((b) => b.offsetParent && !b.closest(".dd-menu") && b.textContent.trim() === "Grafo")?.click());
+  await p.waitForTimeout(800);
+  const graph = await bar();
+  await p.evaluate(() => [...document.querySelectorAll('.tile-area[data-win="canvas:1"] .tile-bar button')].find((b) => b.offsetParent && !b.closest(".dd-menu") && b.textContent.trim() === "Matrix")?.click());
+  await p.waitForTimeout(800);
+  // ⇧C = 0: zoom in, then each key brings the same framing
+  const cv = await p.evaluate(() => { const r = document.querySelector('.tile-area[data-win="canvas:1"] canvas').getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; });
+  await p.mouse.click(cv.x, cv.y);
+  const vpNow = () => p.evaluate(() => { const v = window.__EM_DRAG__.viewNow()?.vp; return v ? JSON.stringify([v.x, v.y, v.scale].map((n) => Math.round(n * 100) / 100)) : null; });
+  await p.keyboard.press("0"); await p.waitForTimeout(200);
+  const fit0 = await vpNow();
+  await p.keyboard.press("+"); await p.keyboard.press("+"); await p.waitForTimeout(200);
+  const zoomed = await vpNow();
+  await p.keyboard.press("Shift+C"); await p.waitForTimeout(200);
+  const fitC = await vpNow();
+  const tools = await p.evaluate(() => [...document.querySelectorAll("#dd-tools .dd-menu button")].map((b) => b.id));
+  await ctx.close();
+  const lay = matrix.acts.find((a) => a.act === "layout"), comp = matrix.acts.find((a) => a.act === "compact-all");
+  const pass = !!lay && lay.svg && !lay.text && /Ricalcola layout/.test(lay.aria) && !!comp && comp.svg && /Compatta le proprietà/.test(comp.aria)
+    && !matrix.acts.some((a) => a.text === "+") && !/Disponi|Layout\b/.test(matrix.text) && !matrix.more && graph.more
+    && tools.includes("btn-tool-uniform") && !!fit0 && zoomed !== fit0 && fitC === fit0 && !errors.length;
+  return { pass, detail: { matrix, graphMore: graph.more, fit0, zoomed, fitC, tools, errors } };
 });
 
 // ── run ─────────────────────────────────────────────────────────────────────

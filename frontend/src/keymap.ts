@@ -35,7 +35,7 @@ export const KEYMAP: KeyRow[] = [
   { id: "undoToast", keys: "@gesture.undoButton", scope: "graph" },
   { id: "nudge", keys: "← → ↑ ↓", scope: "graph" },
   { id: "nudge10", keys: "⇧ ← → ↑ ↓", scope: "graph" },
-  { id: "fit", keys: "0", scope: "graph" },
+  { id: "fit", keys: "0 · ⇧C", scope: "graph" },
   { id: "back", keys: "⌘[ · ⌥←", scope: "graph" },
   { id: "zoomIn", keys: "+ · =", scope: "graph" },
   { id: "zoomOut", keys: "−", scope: "graph" },

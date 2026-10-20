@@ -1511,7 +1511,7 @@ const EN: Dict = {
   "menu.algoGraphOnly": "The algorithm applies to the graph projections; Matrix uses em-core's lanes.",
   "menu.relayoutByAlgo": "In this projection the layout is rebuilt by changing the algorithm.",
   "menu.relayout": "Recompute layout",
-  "win.layoutTitle": "Layout: arrange this view again — the only command that moves the nodes. One undo. Alt-click: a fresh arrangement, the manual one dropped.",
+  "win.layoutTitle": "Recompute layout: arrange this view again — the only command that moves the nodes. One undo. Alt-click: a fresh arrangement, the manual one dropped.",
   "menu.graph": "Graph",
   "menu.uniformSpellings": "Normalise spellings…",
   "menu.noOldSpellings": "Every edge already uses the canonical spelling.",
@@ -1987,7 +1987,7 @@ const EN: Dict = {
   "ws.close": "Close this workspace",
   "win.typeTitle": "Window type — transform this window",
   "win.modeTitle": "Mode — what THIS window is showing",
-  "win.fitTitle": "Fit to this window (0)",
+  "win.fitTitle": "Fit to this window (0 · ⇧C)",
   "win.zoom1Title": "Actual size (zoom 100%)",
   "win.editTitle": "Write in this narrative (prose, order, blocks)",
   "mode.label": "{mode} Mode",
@@ -3943,6 +3943,8 @@ const EN: Dict = {
   "liq.hdto": "HDT-O",
   "liq.hdtoTitle": "The nodes of the cultural context: study (HC9), heritage entity (HC1), digital twin (HC2), project (HC13), the graph itself (HC16) with its paradata, the authors and licences as nodes. Off: the Graph without them, the ornaments as badges.",
   "l.monochrome": "Monochrome (B/W) — black borders",
+  "compact.cmdAllTitle": "Compact the properties (whole graph): every unit's loose properties into its paradata group — one undo step",
+  "menu.uniformSpellingsTitle": "Bring the edges written with an older spelling to the canonical one, in the whole graph — one undo step",
 };
 
 // ── Italiano: complete, because E.D. works in it ───────────────────────────────
@@ -5392,7 +5394,7 @@ const IT: Dict = {
   "menu.algoGraphOnly": "L'algoritmo vale per le proiezioni a grafo; Matrix usa le corsie di em-core.",
   "menu.relayoutByAlgo": "In questa proiezione il layout si rigenera cambiando algoritmo.",
   "menu.relayout": "Ricalcola layout",
-  "win.layoutTitle": "Layout: ridispone questa vista — il solo comando che sposta i nodi. Si annulla in un colpo. Alt-clic: una disposizione nuova, senza quella fatta a mano.",
+  "win.layoutTitle": "Ricalcola layout: ridispone questa vista — il solo comando che sposta i nodi. Si annulla in un colpo. Alt-clic: una disposizione nuova, senza quella fatta a mano.",
   "menu.graph": "Grafo",
   "menu.uniformSpellings": "Uniforma le grafie…",
   "menu.noOldSpellings": "Tutti gli archi usano già la grafia canonica.",
@@ -5846,7 +5848,7 @@ const IT: Dict = {
   "ws.close": "Chiudi questo workspace",
   "win.typeTitle": "Tipo di finestra — trasforma questa finestra",
   "win.modeTitle": "Modo — che cosa mostra QUESTA finestra",
-  "win.fitTitle": "Adatta a questa finestra (0)",
+  "win.fitTitle": "Adatta a questa finestra (0 · ⇧C)",
   "win.zoom1Title": "Dimensione reale (zoom 100%)",
   "win.editTitle": "Scrivi in questa narrativa (prosa, ordine, blocchi)",
   "mode.label": "{mode} Mode",
@@ -7760,6 +7762,8 @@ const IT: Dict = {
   "liq.hdto": "HDT-O",
   "liq.hdtoTitle": "I nodi del contesto culturale: studio (HC9), entità di patrimonio (HC1), gemello digitale (HC2), progetto (HC13), il grafo stesso (HC16) con i suoi paradati, autori e licenze come nodi. Spento: il Grafo senza di loro, gli ornamenti come distintivi.",
   "l.monochrome": "Monocromo (B/N) — bordi neri",
+  "compact.cmdAllTitle": "Compatta le proprietà (tutto il grafo): le proprietà sciolte di ogni unità nel suo gruppo di paradati — un solo annulla",
+  "menu.uniformSpellingsTitle": "Porta alla grafia canonica gli archi scritti con una grafia vecchia, in tutto il grafo — un solo annulla",
 };
 
 // ── The six other project languages: AI DRAFTS, awaiting validation ───────────
@@ -7880,6 +7884,10 @@ const EL: Dict = {
   "liq.hdto": "HDT-O",
   "liq.hdtoTitle": "Οι κόμβοι του πολιτισμικού πλαισίου: μελέτη (HC9), οντότητα κληρονομιάς (HC1), ψηφιακό δίδυμο (HC2), έργο (HC13), ο ίδιος ο γράφος (HC16) με τα παραδεδομένα του, συγγραφείς και άδειες ως κόμβοι. Κλειστό: ο Γράφος χωρίς αυτούς, τα στολίδια ως σήματα.",
   "l.monochrome": "Μονόχρωμο (Α/Μ) — μαύρα περιγράμματα",
+  "win.layoutTitle": "Επανυπολογισμός διάταξης: αναδιατάσσει αυτή την προβολή — η μόνη εντολή που μετακινεί κόμβους. Μία αναίρεση. Alt-κλικ: νέα διάταξη, χωρίς τη χειροκίνητη.",
+  "compact.cmdAllTitle": "Συμπύκνωση ιδιοτήτων (όλος ο γράφος): οι χαλαρές ιδιότητες κάθε μονάδας στην ομάδα παραδεδομένων της — μία αναίρεση",
+  "menu.uniformSpellingsTitle": "Φέρνει στην κανονική γραφή τις ακμές με παλαιότερη γραφή, σε όλο τον γράφο — μία αναίρεση",
+  "win.fitTitle": "Προσαρμογή σε αυτό το παράθυρο (0 · ⇧C)",
 };
 
 const HE: Dict = {
@@ -7973,6 +7981,10 @@ const HE: Dict = {
   "liq.hdto": "HDT-O",
   "liq.hdtoTitle": "צמתי ההקשר התרבותי: מחקר (HC9), ישות מורשת (HC1), תאום דיגיטלי (HC2), פרויקט (HC13), הגרף עצמו (HC16) עם הפרה־נתונים שלו, מחברים ורישיונות כצמתים. כבוי: הגרף בלעדיהם, הקישוטים כתגים.",
   "l.monochrome": "מונוכרום (ש/ל) — מסגרות שחורות",
+  "win.layoutTitle": "חישוב פריסה מחדש: מסדר את התצוגה מחדש — הפקודה היחידה שמזיזה צמתים. ביטול אחד. Alt-לחיצה: סידור חדש, בלי הסידור הידני.",
+  "compact.cmdAllTitle": "דחיסת המאפיינים (כל הגרף): המאפיינים הרופפים של כל יחידה לקבוצת הפרה־נתונים שלה — ביטול אחד",
+  "menu.uniformSpellingsTitle": "מביא לכתיב הקנוני קשתות שנכתבו בכתיב ישן, בכל הגרף — ביטול אחד",
+  "win.fitTitle": "התאמה לחלון זה (0 · ⇧C)",
 };
 
 const ES: Dict = {
@@ -8071,6 +8083,10 @@ const ES: Dict = {
   "liq.hdto": "HDT-O",
   "liq.hdtoTitle": "Los nodos del contexto cultural: estudio (HC9), entidad patrimonial (HC1), gemelo digital (HC2), proyecto (HC13), el propio grafo (HC16) con sus paradatos, autores y licencias como nodos. Apagado: el Grafo sin ellos, los ornamentos como insignias.",
   "l.monochrome": "Monocromo (B/N) — bordes negros",
+  "win.layoutTitle": "Recalcular el diseño: reordena esta vista — el único comando que mueve los nodos. Se deshace de una vez. Alt-clic: una disposición nueva, sin la hecha a mano.",
+  "compact.cmdAllTitle": "Compactar las propiedades (todo el grafo): las propiedades sueltas de cada unidad en su grupo de paradatos — un solo deshacer",
+  "menu.uniformSpellingsTitle": "Llevar a la grafía canónica las aristas escritas con una grafía antigua, en todo el grafo — un solo deshacer",
+  "win.fitTitle": "Ajustar a esta ventana (0 · ⇧C)",
 };
 
 const PL: Dict = {
@@ -8168,6 +8184,10 @@ const PL: Dict = {
   "liq.hdto": "HDT-O",
   "liq.hdtoTitle": "Węzły kontekstu kulturowego: badanie (HC9), obiekt dziedzictwa (HC1), cyfrowy bliźniak (HC2), projekt (HC13), sam graf (HC16) z jego paradanymi, autorzy i licencje jako węzły. Wyłączone: Graf bez nich, ozdobniki jako odznaki.",
   "l.monochrome": "Monochromatyczny (C/B) — czarne obramowania",
+  "win.layoutTitle": "Przelicz układ: ponownie rozmieszcza ten widok — jedyne polecenie, które przesuwa węzły. Jedno cofnięcie. Alt-klik: nowy układ, bez ręcznego.",
+  "compact.cmdAllTitle": "Zagęść właściwości (cały graf): luźne właściwości każdej jednostki do jej grupy paradanych — jedno cofnięcie",
+  "menu.uniformSpellingsTitle": "Sprowadza krawędzie zapisane starszą pisownią do kanonicznej, w całym grafie — jedno cofnięcie",
+  "win.fitTitle": "Dopasuj do tego okna (0 · ⇧C)",
 };
 
 const RO: Dict = {
@@ -8266,6 +8286,10 @@ const RO: Dict = {
   "liq.hdto": "HDT-O",
   "liq.hdtoTitle": "Nodurile contextului cultural: studiu (HC9), entitate de patrimoniu (HC1), geamăn digital (HC2), proiect (HC13), graful însuși (HC16) cu paradatele lui, autori și licențe ca noduri. Oprit: Graful fără ele, ornamentele ca insigne.",
   "l.monochrome": "Monocrom (A/N) — margini negre",
+  "win.layoutTitle": "Recalculează aranjarea: rearanjează această vedere — singura comandă care mută nodurile. O singură anulare. Alt-clic: o aranjare nouă, fără cea manuală.",
+  "compact.cmdAllTitle": "Compactează proprietățile (tot graful): proprietățile libere ale fiecărei unități în grupul ei de paradate — o singură anulare",
+  "menu.uniformSpellingsTitle": "Aduce la grafia canonică muchiile scrise cu o grafie veche, în tot graful — o singură anulare",
+  "win.fitTitle": "Potrivește în această fereastră (0 · ⇧C)",
 };
 
 const FR: Dict = {
@@ -8367,6 +8391,10 @@ const FR: Dict = {
   "liq.hdto": "HDT-O",
   "liq.hdtoTitle": "Les nœuds du contexte culturel : étude (HC9), entité patrimoniale (HC1), jumeau numérique (HC2), projet (HC13), le graphe lui-même (HC16) avec ses paradonnées, auteurs et licences comme nœuds. Éteint : le Graphe sans eux, les ornements en badges.",
   "l.monochrome": "Monochrome (N/B) — bordures noires",
+  "win.layoutTitle": "Recalculer la mise en page : réarrange cette vue — la seule commande qui déplace les nœuds. Une annulation. Alt-clic : une disposition neuve, sans celle faite à la main.",
+  "compact.cmdAllTitle": "Compacter les propriétés (tout le graphe) : les propriétés libres de chaque unité dans son groupe de paradonnées — une seule annulation",
+  "menu.uniformSpellingsTitle": "Ramener à la graphie canonique les arêtes écrites avec une ancienne graphie, dans tout le graphe — une seule annulation",
+  "win.fitTitle": "Ajuster à cette fenêtre (0 · ⇧C)",
 };
 
 /**
@@ -9698,6 +9726,10 @@ const DE: Dict = {
   "liq.hdto": "HDT-O",
   "liq.hdtoTitle": "Die Knoten des kulturellen Kontexts: Studie (HC9), Kulturerbe-Entität (HC1), digitaler Zwilling (HC2), Projekt (HC13), der Graph selbst (HC16) mit seinen Paradaten, Autoren und Lizenzen als Knoten. Aus: der Graph ohne sie, die Ornamente als Abzeichen.",
   "l.monochrome": "Monochrom (S/W) — schwarze Ränder",
+  "win.layoutTitle": "Layout neu berechnen: ordnet diese Ansicht neu an — der einzige Befehl, der Knoten bewegt. Ein Rückgängig. Alt-Klick: eine frische Anordnung ohne die manuelle.",
+  "compact.cmdAllTitle": "Eigenschaften verdichten (ganzer Graph): die losen Eigenschaften jeder Einheit in ihre Paradatengruppe — ein Rückgängig",
+  "menu.uniformSpellingsTitle": "Kanten mit älterer Schreibweise im ganzen Graphen auf die kanonische bringen — ein Rückgängig",
+  "win.fitTitle": "An dieses Fenster anpassen (0 · ⇧C)",
 };
 
 const DICTS: Record<Locale, Dict> = {

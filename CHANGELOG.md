@@ -45,6 +45,14 @@ that asked for one.
 - `scripts/check-space-views.mjs` (101), `scripts/check-implicit-pd.mjs` (30).
 
 ### Changed
+- **The graph window's bar** (MICRO-PULIZIA-INTERFACCIA p.4). «Recompute
+  layout» is an icon of its own (no word «Layout»; its name and Alt-click in the
+  tooltip and the aria-label), and beside it an icon for «Compact the
+  properties (whole graph)» (not available: `aria-disabled`, and it says why).
+  «Uniform spellings…» moved to Tools. The «+» left the bar (⇧A and Tools ▸ Add
+  node… stay). «Fit to this window» takes ⇧C too, as in the 3D Space, besides
+  0; Back and 1:1 stay. The «⋯» is drawn only when it holds something: in the
+  Graph, the layout algorithm; in the Matrix it is gone.
 - **The graph window's views** (MICRO-PULIZIA-INTERFACCIA p.3). «Full graph» is
   gone: the **Graph** (the liquid picture) draws every node present — the HDT-O
   ones (study, heritage entity, twin, project, the graph itself), the graph's

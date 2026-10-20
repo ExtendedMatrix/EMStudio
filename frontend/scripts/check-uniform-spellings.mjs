@@ -190,8 +190,9 @@ const triples = (edges) =>
 // ── 4 · the command is wired: menu → dialog → store ──────────────────────────
 {
   const main = readFileSync(`${SRC}main.ts`, "utf8");
-  ok(/label: "menu\.uniformSpellings",\s*run: \(\) => promptUniformSpellings\(\)/.test(main),
-     "the graph window's menu runs the command");
+  // MICRO-PULIZIA p.4 · the command left the graph window's «⋯» for Tools
+  ok(/getElementById\("btn-tool-uniform"\)[\s\S]{0,300}promptUniformSpellings\(\)/.test(main),
+     "Tools ▸ Uniform spellings… runs the command");
   ok(/const plan = target\.spellingPlan\(\);/.test(main), "the dialog counts first");
   ok(/const done = target\.uniformSpellings\(\);/.test(main), "…then applies");
   const model = readFileSync(`${SRC}model.ts`, "utf8");

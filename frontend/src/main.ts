@@ -15149,6 +15149,13 @@ async function promoteToS3(r: ResourceRow, btn: HTMLButtonElement): Promise<void
   }
 }
 
+// MICRO-PULIZIA p.4 · «Uniform spellings…» left the graph's «⋯» for Tools: a
+// document fix-up, not a tool of one window. Not available → it says why.
+document.getElementById("btn-tool-uniform")?.addEventListener("click", () => {
+  const why = !store ? t("menu.noGraph") : store.spellingPlan().steps.length ? null : t("menu.noOldSpellings");
+  if (why) { toast(why); return; }
+  promptUniformSpellings();
+});
 (document.getElementById("btn-resources") as HTMLButtonElement).addEventListener(
   "click",
   openResources,
@@ -32389,7 +32396,8 @@ function buildAreaHeader(win: Win): DocumentFragment {
   // dropdown per group, named with words the bar already said («Graph ▾» with
   // one item, beside the type «Graph ▾» and the mode «Matrix ▾»).
   const menus = WINDOW_MENUS[type];
-  if (menus.length) {
+  // MICRO-PULIZIA p.4 · a «⋯» with nothing in it is not drawn
+  if (menus.some((m) => m.items(win).length)) {
     const dd = document.createElement("div");
     dd.className = "dropdown win-menu";
     const toggle = document.createElement("button");
@@ -32487,13 +32495,8 @@ function buildAreaHeader(win: Win): DocumentFragment {
   // MICRO-PULIZIA p.2 · what the panel is, as a «?» in its header, not a paragraph
   if (type === "emtree") frag.appendChild(helpMark(t("emtree.intro")));
   if (type === "graph") {
-    // SHIFT-A · the «+» beside the mode: «Aggiungi» at the window's centre
-    act("+", t("add.headerBtn"), false, () => {
-      const cv = graphWindows.get(win.id)?.cv;
-      if (!cv) return;
-      const r = cv.getBoundingClientRect();
-      openAddMenu(win, r.left + r.width / 2, r.top + r.height / 2);
-    });
+    // MICRO-PULIZIA p.4 · the «+» left the bar: «Aggiungi» is ⇧A and Tools ▸
+    // Add node… (the same menu, at the cursor)
     // FONTE · «Indietro»: always on the bar, off while the stack is empty
     act("←", t("fonte.backEmpty"), false, () => {
       focusThen(win, () => goBack());
@@ -32503,6 +32506,7 @@ function buildAreaHeader(win: Win): DocumentFragment {
                if (b.disabled) b.title = t("fonte.backEmpty"); else b.title = t("fonte.backTitle", { n: String(viewHistory.length) }); } }
     // G4 · the legend's opener is a floating glyph in the canvas's corner now
     act("⤢", t("win.fitTitle"), false, () => {
+      // (MICRO-PULIZIA p.4 · 0 and ⇧C, as in the 3D Space)
       focusThen(win, () => fit());
     });
     act("1:1", t("win.zoom1Title"), false, () => {
@@ -32514,16 +32518,36 @@ function buildAreaHeader(win: Win): DocumentFragment {
       });
     });
     // MICRO-AUTORI-LAYOUT p.4 · «Layout» always on the bar: the one command that
-    // arranges again (nothing else moves a node); Alt drops the manual arrangement
-    act("⊞ " + t("toolbar.layout"), t("win.layoutTitle"), false, () => {});
+    // arranges again (nothing else moves a node); Alt drops the manual arrangement.
+    // MICRO-PULIZIA p.4 · an icon of its own (no word «Layout»), its name in
+    // the tooltip and for the screen reader; beside it, «Compact the
+    // properties (whole graph)», which left the «⋯»
+    act("", t("win.layoutTitle"), false, () => {});
     { const b = frag.lastElementChild as HTMLButtonElement | null;
       if (b) {
         b.dataset.act = "layout";
+        b.innerHTML = WIN_ICON_RELAYOUT;
+        b.setAttribute("aria-label", t("win.layoutTitle"));
         b.addEventListener("click", (e) => {
           const fresh = (e as MouseEvent).altKey;
           focusThen(win, () => void layoutAll(fresh));
         });
       } }
+    {
+      const why = !store ? t("menu.noGraph") : compactableUnits(store.doc).length ? null : t("compact.none");
+      act("", why ? `${t("compact.cmdAll")} — ${why}` : t("compact.cmdAllTitle"), false, () => {
+        if (why) { toast(why); return; }
+        focusThen(win, () => runCompact());
+      });
+      const b = frag.lastElementChild as HTMLButtonElement | null;
+      if (b) {
+        b.dataset.act = "compact-all";
+        b.innerHTML = WIN_ICON_COMPACT;
+        b.setAttribute("aria-label", b.title);
+        // not available: still reached by Tab, and it says why (aria-disabled)
+        if (why) { b.setAttribute("aria-disabled", "true"); b.classList.add("win-act-off"); }
+      }
+    }
     // MICRO-PULIZIA p.3 · the «Graph paradata» badge is gone from the bar: the
     // view is one of the modes («Graphs paradata»), opened from there
   }
@@ -33084,13 +33108,22 @@ const click = (id: string): void => document.getElementById(id)?.click();
 //    workspaces: they are different scopes (leader = which arrangement, header =
 //    what THIS window shows) and the tiling of WIN5 is where that pair finally
 //    reads as one thing. Deliberately left alone.
+/** MICRO-PULIZIA p.4 · the graph bar's two icons: recompute the layout (four
+ *  boxes re-arranged by arrows), compact the properties (loose chips gathered
+ *  into a group). currentColor, like the window-type icons. */
+const WIN_ICON_RELAYOUT = `<svg class="wico" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="2" width="4.5" height="3.5" rx="0.8"/><rect x="9.5" y="10.5" width="4.5" height="3.5" rx="0.8"/><path d="M8.5 3.8h3.2a1.6 1.6 0 0 1 1.6 1.6v2.4M12 6.6l1.3 1.3 1.3-1.3M7.5 12.2H4.3a1.6 1.6 0 0 1-1.6-1.6V8.2M4 9.4 2.7 8.1 1.4 9.4"/></svg>`;
+const WIN_ICON_COMPACT = `<svg class="wico" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="8.5" width="9.5" height="6" rx="1.2" stroke-dasharray="2 1.4"/><path d="M1.5 2h4M1.5 4.6h4M1.5 7.2h4"/><path d="M6.6 4.6c2.4 0 3.6.9 3.6 3"/><path d="m8.9 6.6 1.3 1.3 1.3-1.3"/><path d="M7.4 11.5h4.6"/></svg>`;
 const WINDOW_MENUS: Record<WindowType, WinMenu[]> = {
+  // MICRO-PULIZIA p.4 · what is left in the graph's «⋯»: the Graph's layout
+  // algorithm. «Recompute layout» and «Compact the properties» are icons on the
+  // bar, «Uniform spellings…» is in Tools; in the Matrix (and the DTC, the
+  // Graphs paradata) the menu is empty and is not drawn.
   graph: [
     {
       label: "Layout",
       items: (win) => {
-        const mode = winMode(win);
-        const algoItems = (["layered", "radial", "force"] as GraphAlgorithm[]).map(
+        if (winMode(win) !== "graph") return [];
+        return (["layered", "radial", "force"] as GraphAlgorithm[]).map(
           (a) => ({
             label: a[0].toUpperCase() + a.slice(1),
             run: () => {
@@ -33101,46 +33134,7 @@ const WINDOW_MENUS: Record<WindowType, WinMenu[]> = {
             checked: () => graphAlgorithm === a,
           }),
         );
-        // G2 · the Matrix has ONE layout (em-core v5): the choice of algorithm
-        // is the Graph's, and it is not even offered elsewhere
-        return [
-          {
-            label: "menu.relayout",
-            run: () => click("btn-layout"),
-            disabledReason: () =>
-              mode === "matrix"
-                ? null
-                : t("menu.relayoutByAlgo"),
-          },
-          ...(mode === "graph" ? algoItems : []),
-        ];
       },
-    },
-    {
-      // SPELL1 · the document-level fix-ups of the graph. Today one: bring the
-      // edges to the canonical spelling — explicitly, never at load (E.D., 27
-      // set 2026: a spelling is accepted when read, and rewriting it is a
-      // decision somebody makes, visibly and undoably).
-      label: "menu.graph",
-      items: () => [
-        {
-          label: "menu.uniformSpellings",
-          run: () => promptUniformSpellings(),
-          disabledReason: () =>
-            !store
-              ? t("menu.noGraph")
-              : store.spellingPlan().steps.length
-                ? null
-                : t("menu.noOldSpellings"),
-        },
-        {
-          // PROPRIETA · every unit's direct properties into its group, one step
-          label: "compact.cmdAll",
-          run: () => runCompact(),
-          disabledReason: () =>
-            !store ? t("menu.noGraph") : compactableUnits(store.doc).length ? null : t("compact.none"),
-        },
-      ],
     },
   ],
   // NARRATIVE-DESK (29 set 2026) · the narrative window carries NO menus.
@@ -35843,6 +35837,14 @@ window.addEventListener("keydown", (e) => {
     return;
   }
   if (e.key === "0") fit();
+  // MICRO-PULIZIA p.4 · ⇧C fits too, as in the 3D Space (where ⇧C is the
+  // Space's own: only a graph window takes it here)
+  if (e.shiftKey && !e.metaKey && !e.ctrlKey && !e.altKey && e.key.toUpperCase() === "C"
+      && activeWindowType() === "graph") {
+    e.preventDefault();
+    fit();
+    return;
+  }
   // TOCCARE · Esc during a drag puts everything back where it was at the press
   if (e.key === "Escape" && cancelDrag()) {
     e.preventDefault();
