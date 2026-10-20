@@ -6814,6 +6814,45 @@ test("PU8.index", "PULIZIA p.8 · Indice della narrativa: un titolo lungo accant
   return { pass: !!area && ok(wide) && ok(narrow) && !errors.length, detail: { area, wide, narrow, errors } };
 });
 
+test("PU9.tables", "PULIZIA p.9 · le tabelle si ordinano e si filtrano: clic sull'intestazione (crescente, decrescente, ordine della tabella) con aria-sort e freccia; un filtro per colonna (scelta per i valori fissi); «Azzera filtri»; lo stato resta quando la tabella si ridisegna", async () => {
+  const { p, ctx, errors } = await open({ doc: "TempluMare", locale: "it" });
+  const T = '[data-win="canvas:issues"]';
+  await p.waitForSelector(`${T} table[data-tt="1"]`, { timeout: 8000 }).catch(() => {});
+  const read = () => p.evaluate((T) => { const tb = document.querySelector(`${T} table[data-tt="1"]`);
+    const heads = [...(tb?.tHead?.rows[0]?.cells ?? [])];
+    const ci = heads.findIndex((h) => /Nodo/i.test(h.textContent));
+    const rows = [...(tb?.tBodies[0]?.rows ?? [])].filter((r) => !r.classList.contains("tt-hidden"));
+    return { n: rows.length, total: tb?.tBodies[0]?.rows.length ?? 0, col: rows.map((r) => r.cells[ci]?.textContent.trim() ?? ""),
+             aria: heads[ci]?.getAttribute("aria-sort"), arrow: heads[ci]?.querySelector(".tt-arrow")?.textContent ?? "",
+             clear: document.querySelector(`${T} .tt-clear`)?.getAttribute("aria-disabled") }; }, T);
+  const r = { start: await read() };
+  const click = () => p.evaluate((T) => [...document.querySelectorAll(`${T} th .tt-sort`)].find((b) => /Nodo/i.test(b.textContent))?.click(), T);
+  await click(); r.asc = await read();
+  await click(); r.desc = await read();
+  // a filter with a choice (Gravità): the first value
+  const sel = await p.evaluate((T) => { const s = [...document.querySelectorAll(`${T} select.tt-filter`)][0]; return s ? { col: s.dataset.col, v: s.options[1]?.value } : null; }, T);
+  if (sel) await p.selectOption(`${T} select.tt-filter[data-col="${sel.col}"]`, sel.v);
+  await p.waitForTimeout(150);
+  r.filtered = await read();
+  // the table is rebuilt by a change: it comes back sorted and filtered
+  const prop = await p.evaluate(() => JSON.parse(window.__EM_DRAG__.graphJson()).nodes.find((n) => n.node_type === "property")?.id);
+  await p.evaluate((id) => window.__EM_DRAG__.setValue(id, "pu9"), prop);
+  await p.waitForTimeout(600);
+  r.rebuilt = await read();
+  await p.click(`${T} .tt-clear`);
+  await p.waitForTimeout(150);
+  r.cleared = await read();
+  await ctx.close();
+  const cmp = (a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" });
+  const sorted = (xs, dir) => xs.every((x, i) => i === 0 || !x || !xs[i - 1] || cmp(xs[i - 1], x) * dir <= 0);
+  const pass = r.start.total > 3 && r.asc.aria === "ascending" && /▲/.test(r.asc.arrow) && sorted(r.asc.col, 1)
+    && r.desc.aria === "descending" && sorted(r.desc.col, -1)
+    && !!sel && r.filtered.n < r.filtered.total && r.filtered.clear === "false"
+    && r.rebuilt.n === r.filtered.n && r.rebuilt.aria === "descending"
+    && r.cleared.n === r.cleared.total && r.cleared.clear === "true" && !errors.length;
+  return { pass, detail: { ...Object.fromEntries(Object.entries(r).map(([k, v]) => [k, { ...v, col: v.col.slice(0, 4) }])), sel, errors } };
+});
+
 // ── run ─────────────────────────────────────────────────────────────────────
 const chosen = cases.filter((c) => !only.length || only.includes(c.id) || only.some((o) => c.id.startsWith(o + ".")));
 for (const c of chosen) {

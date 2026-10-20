@@ -151,6 +151,7 @@ import {
   versionBanner,
 } from "./logpanel";
 import { DocumentStore, setRoomAuthor, stripYedDrawing } from "./model";
+import { installTableTools } from "./table-tools";
 import {
   HAS_PARADATA_NODEGROUP,
   initialName,
@@ -36256,6 +36257,11 @@ void wireDesktopDeepLink();
 // would show a frame of English (or an LTR frame in Hebrew) and then flip.
 initI18n();
 populateLanguageSelect();
+// MICRO-PULIZIA p.9 · every table of the app sorts and filters (table-tools.ts)
+installTableTools(document.body, () => ({
+  filter: t("tt.filter"), any: t("tt.any"), clear: t("tt.clear"), clearNone: t("tt.clearNone"),
+  sortBy: (col) => t("tt.sortBy", { col }), shown: (n, total) => t("tt.shown", { n: String(n), total: String(total) }),
+}));
 renderWarningsPill();
 renderLogButton(); // SHIFT-A · «Log · n» in the status bar
 // PELLE · the canvas face (Sora) arrives after the first frame; one redraw when

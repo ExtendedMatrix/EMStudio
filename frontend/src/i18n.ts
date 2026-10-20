@@ -3957,6 +3957,12 @@ const EN: Dict = {
   "issues.keepDataDate": "keep {v} (the node's data)",
   "issues.movedDocDate": "{d}: the date {v} is in its property",
   "io.yedDrawingDropped": "GraphML: yEd's drawing (shape, colours, borders, positions) left out of {n} nodes — the glyph comes from the visual rules",
+  "tt.filter": "filter",
+  "tt.any": "all",
+  "tt.clear": "Clear filters",
+  "tt.clearNone": "Clear filters — no filter is set",
+  "tt.sortBy": "Sort by {col} (ascending, descending, the table's order)",
+  "tt.shown": "{n} of {total} rows",
 };
 
 // ── Italiano: complete, because E.D. works in it ───────────────────────────────
@@ -7788,6 +7794,12 @@ const IT: Dict = {
   "issues.keepDataDate": "tieni {v} (dei dati del nodo)",
   "issues.movedDocDate": "{d}: la data {v} è nella sua proprietà",
   "io.yedDrawingDropped": "GraphML: il disegno di yEd (forma, colori, bordi, posizioni) lasciato fuori da {n} nodi — il glifo viene dalle regole visive",
+  "tt.filter": "filtra",
+  "tt.any": "tutti",
+  "tt.clear": "Azzera filtri",
+  "tt.clearNone": "Azzera filtri — nessun filtro impostato",
+  "tt.sortBy": "Ordina per {col} (crescente, decrescente, l'ordine della tabella)",
+  "tt.shown": "{n} di {total} righe",
 };
 
 // ── The six other project languages: AI DRAFTS, awaiting validation ───────────
@@ -7925,6 +7937,12 @@ const EL: Dict = {
   "issues.keepDataDate": "κράτησε {v} (των δεδομένων του κόμβου)",
   "issues.movedDocDate": "{d}: η ημερομηνία {v} είναι στην ιδιότητά της",
   "io.yedDrawingDropped": "GraphML: το σχέδιο του yEd (σχήμα, χρώματα, περιγράμματα, θέσεις) αφαιρέθηκε από {n} κόμβους — το γλύφο έρχεται από τους οπτικούς κανόνες",
+  "tt.filter": "φίλτρο",
+  "tt.any": "όλα",
+  "tt.clear": "Καθαρισμός φίλτρων",
+  "tt.clearNone": "Καθαρισμός φίλτρων — κανένα φίλτρο",
+  "tt.sortBy": "Ταξινόμηση κατά {col} (αύξουσα, φθίνουσα, η σειρά του πίνακα)",
+  "tt.shown": "{n} από {total} γραμμές",
 };
 
 const HE: Dict = {
@@ -8035,6 +8053,12 @@ const HE: Dict = {
   "issues.keepDataDate": "השאר {v} (של נתוני הצומת)",
   "issues.movedDocDate": "{d}: התאריך {v} נמצא במאפיין שלו",
   "io.yedDrawingDropped": "GraphML: הציור של yEd (צורה, צבעים, מסגרות, מיקומים) הושמט מ־{n} צמתים — הגליף בא מהכללים החזותיים",
+  "tt.filter": "סינון",
+  "tt.any": "הכול",
+  "tt.clear": "ניקוי מסננים",
+  "tt.clearNone": "ניקוי מסננים — אין מסנן",
+  "tt.sortBy": "מיון לפי {col} (עולה, יורד, סדר הטבלה)",
+  "tt.shown": "{n} מתוך {total} שורות",
 };
 
 const ES: Dict = {
@@ -8150,6 +8174,12 @@ const ES: Dict = {
   "issues.keepDataDate": "conservar {v} (la de los datos del nodo)",
   "issues.movedDocDate": "{d}: la fecha {v} está en su propiedad",
   "io.yedDrawingDropped": "GraphML: el dibujo de yEd (forma, colores, bordes, posiciones) dejado fuera de {n} nodos — el glifo viene de las reglas visuales",
+  "tt.filter": "filtrar",
+  "tt.any": "todos",
+  "tt.clear": "Borrar filtros",
+  "tt.clearNone": "Borrar filtros — ningún filtro",
+  "tt.sortBy": "Ordenar por {col} (ascendente, descendente, el orden de la tabla)",
+  "tt.shown": "{n} de {total} filas",
 };
 
 const PL: Dict = {
@@ -8264,6 +8294,12 @@ const PL: Dict = {
   "issues.keepDataDate": "zachowaj {v} (z danych węzła)",
   "issues.movedDocDate": "{d}: data {v} jest w swojej właściwości",
   "io.yedDrawingDropped": "GraphML: rysunek yEd (kształt, kolory, obramowania, pozycje) pominięty w {n} węzłach — glif pochodzi z reguł wizualnych",
+  "tt.filter": "filtruj",
+  "tt.any": "wszystkie",
+  "tt.clear": "Wyczyść filtry",
+  "tt.clearNone": "Wyczyść filtry — brak filtrów",
+  "tt.sortBy": "Sortuj według {col} (rosnąco, malejąco, kolejność tabeli)",
+  "tt.shown": "{n} z {total} wierszy",
 };
 
 const RO: Dict = {
@@ -8379,6 +8415,12 @@ const RO: Dict = {
   "issues.keepDataDate": "păstrează {v} (a datelor nodului)",
   "issues.movedDocDate": "{d}: data {v} e în proprietatea ei",
   "io.yedDrawingDropped": "GraphML: desenul yEd (formă, culori, margini, poziții) lăsat pe dinafară la {n} noduri — glifa vine din regulile vizuale",
+  "tt.filter": "filtrează",
+  "tt.any": "toate",
+  "tt.clear": "Șterge filtrele",
+  "tt.clearNone": "Șterge filtrele — niciun filtru",
+  "tt.sortBy": "Sortează după {col} (crescător, descrescător, ordinea tabelului)",
+  "tt.shown": "{n} din {total} rânduri",
 };
 
 const FR: Dict = {
@@ -8497,6 +8539,12 @@ const FR: Dict = {
   "issues.keepDataDate": "garder {v} (celle des données du nœud)",
   "issues.movedDocDate": "{d} : la date {v} est dans sa propriété",
   "io.yedDrawingDropped": "GraphML : le dessin de yEd (forme, couleurs, bordures, positions) laissé hors de {n} nœuds — le glyphe vient des règles visuelles",
+  "tt.filter": "filtrer",
+  "tt.any": "tous",
+  "tt.clear": "Effacer les filtres",
+  "tt.clearNone": "Effacer les filtres — aucun filtre",
+  "tt.sortBy": "Trier par {col} (croissant, décroissant, l'ordre du tableau)",
+  "tt.shown": "{n} sur {total} lignes",
 };
 
 /**
@@ -9844,6 +9892,12 @@ const DE: Dict = {
   "issues.keepDataDate": "{v} behalten (die der Knotendaten)",
   "issues.movedDocDate": "{d}: das Datum {v} steht in seiner Eigenschaft",
   "io.yedDrawingDropped": "GraphML: yEds Zeichnung (Form, Farben, Ränder, Positionen) bei {n} Knoten weggelassen — die Glyphe kommt aus den visuellen Regeln",
+  "tt.filter": "filtern",
+  "tt.any": "alle",
+  "tt.clear": "Filter zurücksetzen",
+  "tt.clearNone": "Filter zurücksetzen — kein Filter gesetzt",
+  "tt.sortBy": "Nach {col} sortieren (aufsteigend, absteigend, Reihenfolge der Tabelle)",
+  "tt.shown": "{n} von {total} Zeilen",
 };
 
 const DICTS: Record<Locale, Dict> = {

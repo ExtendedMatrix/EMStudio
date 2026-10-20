@@ -45,6 +45,20 @@ that asked for one.
 - `scripts/check-space-views.mjs` (101), `scripts/check-implicit-pd.mjs` (30).
 
 ### Changed
+- **Every table sorts and filters, with one component** (MICRO-PULIZIA-
+  INTERFACCIA p.9, `table-tools.ts`). It enhances any table once it is in the
+  page: a click on a heading sorts (ascending, descending, back to the table's
+  own order) with `aria-sort` and an arrow; a row under the headings filters
+  each column — a text, or a choice for a column of a few fixed values; «Clear
+  filters» (aria-disabled when there is none) and «n of N rows». The state is
+  remembered per table (kind + headings), so a sheet rebuilt by an edit comes
+  back as it was left; rows are only moved and hidden, the document is never
+  touched. Received: every Tabular sheet and computed view (Warnings,
+  Datings, to verify, verified, Models and proxies), the Shelf's table, the
+  mapping editor's fields, the node's orphans. Left alone, and why: the file
+  states (their own sort and chips), the Chronology (its order is the
+  chronology, rows carry inline forms), a story's embedded tables (content),
+  the shortcuts and the workspace legend.
 - **The narrative Index keeps its titles readable** (MICRO-PULIZIA-INTERFACCIA
   p.8). A chapter whose lane badge was long («VAct.01 Foundations of the
   temple», `white-space: nowrap`) squeezed its title to one letter per line

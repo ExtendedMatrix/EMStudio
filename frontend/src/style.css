@@ -9895,3 +9895,22 @@ body.num-drag-on, body.num-drag-on * { cursor: ew-resize !important; user-select
 .help-pop-line { margin: 4px 0; }
 .help-pop-why { color: var(--text-faint); font-size: 12px; }
 .help-pop-acts { display: flex; gap: 8px; justify-content: flex-end; margin-top: 10px; }
+
+/* ── MICRO-PULIZIA p.9 · every table sorts and filters (table-tools.ts) ───── */
+.tt-sort {
+  display: inline-flex; align-items: baseline; gap: 2px; padding: 0; border: 0; background: none;
+  font: inherit; color: inherit; letter-spacing: inherit; text-transform: inherit; text-align: inherit; cursor: pointer;
+}
+.tt-sort:hover { color: var(--text); text-decoration: underline; text-underline-offset: 2px; }
+.tt-sort:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.tt-arrow { color: var(--accent-ink, var(--accent)); font-size: 0.85em; }
+.tt-filters th { padding-top: 2px; padding-bottom: 4px; font-weight: 400; }
+.tt-filter {
+  width: 100%; min-width: 4em; box-sizing: border-box; padding: 1px 4px;
+  border: 1px solid var(--border); border-radius: var(--radius-sm, 3px);
+  background: var(--bg-sunken); color: var(--text); font: inherit; font-size: 11px; text-transform: none; letter-spacing: 0;
+}
+.tt-bar { display: flex; align-items: center; gap: 8px; margin: 2px 0 4px; font-size: 11px; color: var(--text-muted); }
+.tt-clear { font: inherit; font-size: 11px; padding: 1px 7px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg-panel); color: var(--text); cursor: pointer; }
+.tt-clear[aria-disabled="true"] { color: var(--text-faint); cursor: default; }
+tr.tt-hidden { display: none; }
