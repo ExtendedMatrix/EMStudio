@@ -86,6 +86,9 @@ export interface ReadingStageCtx {
   onPropose?: (extractorId: string, text: string) => void;
   onVerify?: (extractorId: string) => void;
   aiChip?: (id: string) => HTMLElement | null;
+  /** MICRO-VIEWER-UNICO · the list of the document's readings under the stage:
+   *  the Viewer leaves it to the Inspector («Estrazioni da questo documento») */
+  list?: boolean;
 }
 
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, cls?: string, text?: string): HTMLElementTagNameMap[K] {
@@ -168,6 +171,7 @@ export function renderReadingStage(host: HTMLElement, ctx: ReadingStageCtx): voi
   }
 
   // the readings of this document
+  if (ctx.list === false) { host.prepend(stage); return; }
   const list = el("div", "rd-list");
   list.appendChild(el("div", "rd-eyebrow", t("chain.readingsOf", { n: String(reads.length) })));
   if (!reads.length) list.appendChild(el("p", "chain-note", t("rd.noReading")));

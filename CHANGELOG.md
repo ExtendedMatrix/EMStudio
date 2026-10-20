@@ -7,6 +7,29 @@ that asked for one.
 ## [Unreleased]
 
 ### Added
+- **One Viewer for a document or a resource** (MICRO-VIEWER-UNICO p.1–4, E.D.
+  20 October 2026; `viewer-node.ts`, `viewer-annot.ts`). The Viewer shows ONE
+  node, following the selection of every window (📌 holds it on a node):
+  a resource with its versions, or a document WHOLE — its file, its linked
+  resources, the crops of its extractors, scrolled; its representation models
+  and their container as a small scene of that document only, with the Space's
+  engine (the container's tileset drawn as the Space draws it). A line says
+  where what is shown comes from (D.09: no file, 87 representation models).
+  The version: the lightest at once, the highest within the threshold of the
+  Preferences (summed over the document's models) after 2 s still on the same
+  node (`highDelayS`), a new node cancels it; the bar says what is seen
+  («10 modelli · derivata lod4 · 3.7 MB» → «LOD2 dell'autore · 83 MB») and its
+  selector forces a version. One reader per medium: the image (a IIIF
+  thumbnail first, then the size of the frame), the text with its facing
+  translation, the PDF, the 3D framed whole at the opening (Shift+C) — D.01 was
+  one wall of ten, LOD0, read Y-up: a thin strip seen edge-on. On the model,
+  a spot height, an impost height, a bedding plane (three points or a face) and
+  a line each make an extractor of the document in one undo step
+  (`addFreeExtraction`): the coordinates in the model's frame, what was read
+  and its value (`reading_kind`, `value`, `plane`); the Inspector lists them in
+  «Estrazioni da questo documento», and «Interpretazione» makes one a source of
+  a property (`linkExtraction`; a second source makes the combiner).
+  `check-viewer-unico.mjs`, VU1–VU4 in the browser suite.
 - **The standard blocks in a new story's outline** (MICRO-NARRATIVA-BLOCCHI
   p.3). «Proponi i capitoli» puts Storia delle ricerche first, Beni coinvolti
   after the introduction (the end of the first chapter), and a last settled

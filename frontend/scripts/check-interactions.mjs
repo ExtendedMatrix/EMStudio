@@ -6951,6 +6951,161 @@ test("NB3.index", "NARRATIVA-BLOCCHI p.3 · una narrativa esistente non si tocca
   return { pass, detail: { ...r, errors } };
 });
 
+// ── MICRO-VIEWER-UNICO · one Viewer per document and resource ───────────────
+// VU1–VU3 need the Templu Mare v3.3 (a copy: `VIEWER_V33`) and a bridge that
+// serves its folder (`VIEWER_BRIDGE`, e.g. `em_bridge.py --fs-root /tmp/viewer`);
+// without them they say so and fail — the files are the case.
+const V33 = process.env.VIEWER_V33 ?? "/tmp/viewer/EM/TempluMare_v3.3.em.json";
+const V33_BRIDGE = process.env.VIEWER_BRIDGE ?? BRIDGE;
+async function openV33(extra = {}) {
+  if (!existsSync(V33)) throw new Error(`the v3.3 copy is not at ${V33}`);
+  const ctx = await browser.newContext({ viewport: { width: extra.w ?? 1600, height: extra.h ?? 1000 } });
+  const p = await ctx.newPage();
+  const errors = [];
+  p.on("pageerror", (e) => errors.push(String(e).slice(0, 300)));
+  await p.addInitScript((loc) => { try { if (!sessionStorage.getItem("probe")) { localStorage.clear(); localStorage.setItem("emstudio.locale", loc); sessionStorage.setItem("probe", "1"); } } catch { /* */ } }, extra.locale ?? "it");
+  await p.goto(`http://localhost:${PORT}/em/studio/?bridge=${encodeURIComponent(V33_BRIDGE)}`);
+  await p.waitForSelector("#workspace-bar .ws-tab", { timeout: 30000 });
+  await p.evaluate(([d, path]) => window.__EM_DRAG__.openAt(d, path), [JSON.parse(readFileSync(V33, "utf8")), V33]);
+  await p.waitForFunction(() => (window.__EM_SCENE__?.()?.nodes?.length ?? 0) > 50, null, { timeout: 60000 });
+  await p.waitForTimeout(600);
+  return { p, ctx, errors };
+}
+const v33Id = (p, name, type = "document") => p.evaluate(([n, ty]) => JSON.parse(window.__EM_DRAG__.graphJson()).nodes.find((x) => x.name === n && x.node_type === ty)?.id, [name, type]);
+/** a Viewer in place of a window of the space (the Inspector of Stratigrafia, by default) */
+const viewerIn = (p, type = "outliner") => p.evaluate((ty) => { const w = window.__EM_DRAG__.wins().find((x) => x.type === ty); window.__EM_DRAG__.retype(w.id, "viewer"); return w.id; }, type);
+const vState = (p, w) => p.evaluate((x) => window.__EM_DRAG__.viewerState(x), w);
+
+test("VU1.d01", "VIEWER-UNICO p.1/p.3 · D.01 nel Viewer: tutto il documento (i 10 modelli di Survey2015 e il contenitore), la riga dice da dove viene; la scena è inquadrata intera all'apertura (⇧C), non una striscia di taglio; D.09 dice «87 modelli» e nessun file", async () => {
+  const { p, ctx, errors } = await openV33();
+  const w = await viewerIn(p, "inspector");
+  const d01 = await v33Id(p, "D.01");
+  await p.evaluate((d) => window.__EM_DRAG__.select(d), d01);
+  // the ten models of the light step drawn (the framing follows their arrival)
+  await p.waitForFunction((x) => (window.__EM_DRAG__.viewerState(x)?.scene?.events ?? []).filter((e) => e.what === "drawn").length >= 10, w, { timeout: 60000 }).catch(() => {});
+  await p.waitForTimeout(1200);
+  const s = await vState(p, w);
+  await p.screenshot({ path: SHOT("vu1-d01") }).catch(() => {});
+  const sc = s?.scene?.screen;
+  const rw = sc?.rect ? sc.rect.x1 - sc.rect.x0 : 0, rh = sc?.rect ? sc.rect.y1 - sc.rect.y0 : 0;
+  const d09 = await v33Id(p, "D.09");
+  await p.evaluate((d) => window.__EM_DRAG__.select(d), d09);
+  await p.waitForTimeout(1500);
+  const s9 = await vState(p, w);
+  await ctx.close();
+  const pass = s?.target?.kind === "document" && s.target.models.length === 10 && s.target.groups.length === 1
+    && /10 modelli di rappresentazione/.test(s.bar?.source ?? "") && /contenitore Survey2015/.test(s.bar?.source ?? "")
+    && s.scene?.framed && sc?.boxes >= 10 && rw > sc.canvas.w * 0.3 && rh > sc.canvas.h * 0.2 && Math.min(rw, rh) / Math.max(rw, rh) > 0.15
+    && s9?.target?.models.length === 87 && s9.target.parts.length === 0 && /87 modelli/.test(s9.bar?.source ?? "") && !errors.length;
+  return { pass, detail: { source: s?.bar?.source, framed: s?.scene?.framed, screen: sc, rw, rh, d09: s9?.bar?.source, errors } };
+});
+
+test("VU2.versions", "VIEWER-UNICO p.2 · scorrendo 10 documenti in fretta non si carica nessuna versione alta; fermi su D.01 la leggera subito («derivata lod4»), l'alta dopo il ritardo (2 s), la barra lo dice; il selettore forza una versione", async () => {
+  const { p, ctx, errors } = await openV33();
+  const w = await viewerIn(p, "inspector");
+  const reqs = [];
+  p.on("request", (r) => { if (/\.(obj|glb|gltf)(\?|$)/i.test(r.url())) reqs.push({ t: Date.now(), u: decodeURIComponent(r.url()) }); });
+  // the bridge says which files are on the disk once: ask it with D.01 shown, then go back to nothing
+  const d01 = await v33Id(p, "D.01");
+  const names = ["D.02", "D.09", "D.03", "D.01", "D.05", "D.08", "D.09", "D.07", "D.11", "D.04"];
+  const ids = [];
+  for (const n of names) ids.push(await v33Id(p, n));
+  const t0 = Date.now();
+  for (const id of ids) { await p.evaluate((d) => window.__EM_DRAG__.select(d), id); await p.waitForTimeout(250); }
+  const scrolled = reqs.filter((r) => r.t >= t0).map((r) => r.u);
+  const highWhileScrolling = scrolled.filter((u) => !/@lod\d|lod1-realtime-web|lod4-web/.test(u));
+  reqs.length = 0;
+  const tSel = Date.now();
+  await p.evaluate((d) => window.__EM_DRAG__.select(d), d01);
+  await p.waitForFunction((x) => (window.__EM_DRAG__.viewerState(x)?.scene?.events ?? []).some((e) => e.what === "drawn"), w, { timeout: 60000 }).catch(() => {});
+  const light = await vState(p, w);
+  await p.waitForFunction((x) => window.__EM_DRAG__.viewerState(x)?.scene?.step === "high", w, { timeout: 30000 }).catch(() => {});
+  await p.waitForTimeout(4000);
+  const high = await vState(p, w);
+  const ev = high?.scene?.events ?? [];
+  const tLight = ev.find((e) => e.what === "drawn")?.t ?? null;
+  const tHigh = ev.find((e) => e.what === "high")?.t ?? null;
+  const lightAt = Math.max(...ev.filter((e) => e.what === "drawn" && /lod4/.test(e.url ?? "")).map((e) => e.t));
+  // the selector: LOD0 forced is asked for (the high step stayed under the threshold)
+  const opts = await p.evaluate((x) => [...document.querySelectorAll(`.tile-area[data-win="${x}"] select[data-vw-force] option`)].map((o) => o.value), w);
+  await p.screenshot({ path: SHOT("vu2-d01-alta") }).catch(() => {});
+  await ctx.close();
+  const pass = scrolled.length > 0 && highWhileScrolling.length === 0
+    && /derivata lod4/.test(light?.bar?.seen ?? light?.scene?.seen ?? "") && high?.scene?.step === "high"
+    && tHigh != null && tHigh - lightAt >= 1900 - 300 && /LOD2/.test(high?.scene?.seen ?? "")
+    && !!high?.scene?.plan?.heavier && opts.includes("LOD0") && !errors.length;
+  return { pass, detail: { scrolled: scrolled.length, highWhileScrolling: highWhileScrolling.slice(0, 4), lightSeen: light?.scene?.seen,
+    highSeen: high?.scene?.seen, tLight, lightAt, tHigh, plan: high?.scene?.plan && { light: high.scene.plan.lightBytes, high: high.scene.plan.highBytes, heavier: high.scene.plan.heavier },
+    opts, sinceSelect: Date.now() - tSel, errors } };
+});
+
+test("VU3.quota", "VIEWER-UNICO p.4 · un punto quota sul 3D di D.01 crea l'estrattore del documento (coordinate del documento, il valore letto), il segno nella scena, la riga in «Estrazioni da questo documento»; «Interpretazione» lo collega a una proprietà; un annulla per gesto", async () => {
+  const { p, ctx, errors } = await openV33();
+  const w = await viewerIn(p, "outliner");
+  const d01 = await v33Id(p, "D.01");
+  await p.evaluate((d) => window.__EM_DRAG__.select(d), d01);
+  await p.waitForFunction((x) => window.__EM_DRAG__.viewerState(x)?.scene?.framed, w, { timeout: 60000 }).catch(() => {});
+  await p.waitForTimeout(3000);
+  const area = `.tile-area[data-win="${w}"]`;
+  await p.click(`${area} [data-tool="elevation"]`);
+  const box = await p.locator(`${area} .vw-scene canvas`).first().boundingBox();
+  const at = await p.evaluate(([x, b]) => {
+    const host = document.querySelector(`.tile-area[data-win="${x}"] .vw-scene`), cv = host.querySelector("canvas");
+    for (const fy of [0.5, 0.45, 0.55, 0.4, 0.6, 0.35, 0.65]) for (const fx of [0.5, 0.45, 0.55, 0.4, 0.6, 0.35, 0.65]) {
+      const px = b.x + b.width * fx, py = b.y + b.height * fy;
+      if (document.elementFromPoint(px, py) !== cv) continue;
+      const h = host.__spaceHit?.(px, py);
+      if (h) return { px, py, h };
+    }
+    return null;
+  }, [w, box]);
+  const undo0 = await p.evaluate(() => window.__EM_DRAG__.undoDepth());
+  if (at) await p.mouse.click(at.px, at.py);
+  await p.waitForTimeout(1200);
+  const g = JSON.parse(await p.evaluate(() => window.__EM_DRAG__.graphJson()));
+  const sel = (await p.evaluate(() => window.__EM_DRAG__.selected()))[0];
+  const x = g.nodes.find((n) => n.id === sel);
+  const reg = x && g.nodes.find((n) => n.node_type === "annotation_region" && g.edges.some((e) => e.source === x.id && e.target === n.id && e.edge_type === "extracted_from"));
+  const toDoc = x && g.edges.some((e) => e.source === x.id && e.target === d01 && e.edge_type === "extracted_from");
+  const marks = await p.evaluate((x) => document.querySelector(`.tile-area[data-win="${x}"] .vw-scene`)?.__spaceMarks?.() ?? [], w);
+  const undo1 = await p.evaluate(() => window.__EM_DRAG__.undoDepth());
+  // the Inspector of the document lists it; «Interpretazione» → a property
+  await p.evaluate((d) => window.__EM_DRAG__.select(d), d01);
+  await p.waitForTimeout(800);
+  const iw = await p.evaluate(() => window.__EM_DRAG__.wins().find((q) => q.type === "inspector").id);
+  const ia = `.tile-area[data-win="${iw}"]`;
+  const listed = await p.evaluate(([a, id]) => ({ head: [...document.querySelectorAll(`${a} h3.insp-sect`)].map((h) => h.textContent).find((t) => /Estrazioni da questo documento/.test(t)) ?? null,
+    row: !!document.querySelector(`${a} .chain-reading[data-extractor="${id}"]`) }), [ia, x?.id]);
+  let linked = null;
+  if (x) {
+    await p.click(`${ia} [data-link-extraction="${x.id}"]`);
+    await p.waitForTimeout(300);
+    const opt = await p.evaluate(() => document.querySelector(".rd-bubble-opt")?.dataset.property ?? null);
+    if (opt) await p.click(`.rd-bubble-opt[data-property="${opt}"]`);
+    await p.waitForTimeout(500);
+    const g2 = JSON.parse(await p.evaluate(() => window.__EM_DRAG__.graphJson()));
+    linked = g2.edges.some((e) => e.target === x.id && (e.edge_type === "has_data_provenance" || e.edge_type === "combines"));
+  }
+  await p.screenshot({ path: SHOT("vu3-quota") }).catch(() => {});
+  await p.evaluate(() => window.__EM_DRAG__.undo());
+  await p.waitForTimeout(300);
+  const g3 = JSON.parse(await p.evaluate(() => window.__EM_DRAG__.graphJson()));
+  const unlinked = !g3.edges.some((e) => e.target === x?.id && (e.edge_type === "has_data_provenance" || e.edge_type === "combines")) && g3.nodes.some((n) => n.id === x?.id);
+  await p.evaluate(() => window.__EM_DRAG__.undo());
+  await p.waitForTimeout(300);
+  const gone = !JSON.parse(await p.evaluate(() => window.__EM_DRAG__.graphJson())).nodes.some((n) => n.id === x?.id);
+  await ctx.close();
+  // the coords in the scene's frame (glTF, Y up: the datamodel's), the height read on its vertical
+  const z = reg?.data?.coords?.[0]?.[1];
+  const pass = !!at && x?.node_type === "extractor" && toDoc && reg?.data?.reading_kind === "spot_height" && reg?.data?.resource_id === d01
+    && Math.abs((z ?? 0) - at.h.point[1]) < 1e-3 && Math.abs((reg?.data?.value ?? 0) - at.h.point[1]) < 1e-3 && /quota/.test(x?.data?.result ?? "") && marks.some((m) => m.id === x.id && m.shown)
+    && undo1 - undo0 === 1 && !!listed.head && listed.row && linked && unlinked && gone && !errors.length;
+  return { pass, detail: { at: at?.h, x: x && { name: x.name, result: x.data?.result }, reg: reg?.data, toDoc, marks, steps: undo1 - undo0, listed, linked, unlinked, gone, errors } };
+});
+
+
+
+
 // ── run ─────────────────────────────────────────────────────────────────────
 const chosen = cases.filter((c) => !only.length || only.includes(c.id) || only.some((o) => c.id.startsWith(o + ".")));
 for (const c of chosen) {

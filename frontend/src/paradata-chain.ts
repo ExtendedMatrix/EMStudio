@@ -497,39 +497,96 @@ export function addReading(
       join(sourceId);
     } else sourceId = source.id;
 
-    const prov = provenanceOf(doc, propertyId);
-    let combinerId = prov.combiners[0] ?? null;
-    let combinerCreated: string | null = null;
-    const moved: string[] = [];
-    if (!combinerId && prov.direct.length) {
-      combinerId = store.newId();
-      store.addNode({ id: combinerId, node_type: "combiner", name: deriveCombinerName(doc),
-                      description: "" } as EmNode);
-      combinerCreated = combinerId;
-      join(combinerId);
-      for (const x of prov.direct) {
-        const e = edges(doc).find((ed) => ed.edge_type === HAS_DATA_PROVENANCE
-          && ed.source === propertyId && ed.target === x);
-        if (e) store.deleteEdge(e);
-        store.addEdge(combinerId, x, COMBINES);
-        moved.push(x);
-      }
-      store.addEdge(propertyId, combinerId, HAS_DATA_PROVENANCE);
-    }
-
     const extractorId = store.newId();
     store.addNode({ id: extractorId, node_type: "extractor",
       name: initialName(doc, "extractor") ?? "Temp1",
       description: opts.description ?? "",
       ...(opts.extractorData ? { data: { ...opts.extractorData } } : {}) } as EmNode);
-    if (combinerId) store.addEdge(combinerId, extractorId, COMBINES);
-    else store.addEdge(propertyId, extractorId, HAS_DATA_PROVENANCE);
+    const hung = hangUnder(store, propertyId, extractorId, join);
     store.addEdge(extractorId, sourceId, EXTRACTED_FROM);
     const renamed = renameOnAttach(doc, extractorId);
     if (renamed) store.updateNode(extractorId, { name: renamed });
     join(extractorId);
-    return { extractorId, sourceId, combinerCreated, combinerId, moved, documentCreated };
+    return { extractorId, sourceId, ...hung, documentCreated };
   });
+}
+
+/** The extractor under the property: `has_data_provenance`, or `combines` from
+ *  its combiner — and THE SECOND SOURCE (the property had a direct extractor
+ *  and no combiner: a combiner `C.<n>` is made and the direct ones move under
+ *  it). The one rule `addReading` and `linkExtraction` share. Inside a batch. */
+function hangUnder(store: DocumentStore, propertyId: string, extractorId: string,
+                   join: (id: string) => void): { combinerCreated: string | null; combinerId: string | null; moved: string[] } {
+  const doc = store.doc;
+  const prov = provenanceOf(doc, propertyId);
+  let combinerId = prov.combiners[0] ?? null;
+  let combinerCreated: string | null = null;
+  const moved: string[] = [];
+  if (!combinerId && prov.direct.length) {
+    combinerId = store.newId();
+    store.addNode({ id: combinerId, node_type: "combiner", name: deriveCombinerName(doc),
+                    description: "" } as EmNode);
+    combinerCreated = combinerId;
+    join(combinerId);
+    for (const x of prov.direct) {
+      const e = edges(doc).find((ed) => ed.edge_type === HAS_DATA_PROVENANCE
+        && ed.source === propertyId && ed.target === x);
+      if (e) store.deleteEdge(e);
+      store.addEdge(combinerId, x, COMBINES);
+      moved.push(x);
+    }
+    store.addEdge(propertyId, combinerId, HAS_DATA_PROVENANCE);
+  }
+  if (combinerId) store.addEdge(combinerId, extractorId, COMBINES);
+  else store.addEdge(propertyId, extractorId, HAS_DATA_PROVENANCE);
+  return { combinerCreated, combinerId, moved };
+}
+
+/**
+ * MICRO-VIEWER-UNICO p.4 · AN EXTRACTION BORN IN THE VIEWER: a mark on the
+ * document (a point, a plane, a line on its model) is already a reading of it,
+ * before anybody says which property it feeds. ONE undo step: the extractor
+ * (`extracted_from` the document, named `<document>.<NN>` by the naming rule),
+ * its region (`setReadingGeometry`, the coordinates in the model's frame as the
+ * datamodel says, plus `regionData`: what was read and its value), and `data.result` — the
+ * value read, which `resultOf` gives back and «Usa come valore» writes.
+ * The property comes later, with «Interpretazione» (`linkExtraction`).
+ */
+export function addFreeExtraction(
+  store: DocumentStore,
+  documentId: string,
+  trace: TraceGeometry,
+  opts: { regionData?: Record<string, unknown>; result?: string; description?: string } = {},
+): { extractorId: string; regionId: string } | null {
+  if (!store.node(documentId)) return null;
+  return store.batch(() => {
+    const doc = store.doc;
+    const extractorId = store.newId();
+    store.addNode({ id: extractorId, node_type: "extractor",
+      name: initialName(doc, "extractor") ?? "Temp1",
+      description: opts.description ?? "",
+      ...(opts.result ? { data: { result: opts.result } } : {}) } as EmNode);
+    store.addEdge(extractorId, documentId, EXTRACTED_FROM);
+    const renamed = renameOnAttach(doc, extractorId);
+    if (renamed) store.updateNode(extractorId, { name: renamed });
+    const placed = setReadingGeometry(store, extractorId, documentId, trace, opts.regionData);
+    return placed ? { extractorId, regionId: placed.regionId } : null;
+  });
+}
+
+/** «Interpretazione» on an extraction that feeds nothing yet: it becomes a
+ *  source of the property (the second source makes the combiner, as `addReading`).
+ *  One undo step; nothing when it already feeds that property. */
+export function linkExtraction(store: DocumentStore, propertyId: string, extractorId: string): boolean {
+  if (!store.node(propertyId) || !store.node(extractorId)) return false;
+  if (propertyOfExtractor(store.doc, extractorId) === propertyId) return false;
+  store.batch(() => {
+    const group = chainGroup(store.doc, propertyId);
+    const join = (id: string) => { if (group && !store.hasEdge(id, group, IS_IN_PARADATA_NODEGROUP)) store.addEdge(id, group, IS_IN_PARADATA_NODEGROUP); };
+    hangUnder(store, propertyId, extractorId, join);
+    join(extractorId);
+  });
+  return true;
 }
 
 /** The reading's description (the extractor's `description`). */
@@ -579,6 +636,9 @@ export function setReadingGeometry(
   onId: string | null,
   trace: TraceGeometry | { kind: "region"; shape_kind: "rect" | "polygon"; rect?: number[]; points?: number[][]; page?: number }
     | { kind: "point3d"; p: Vec3 },
+  /** MICRO-VIEWER-UNICO p.4 · more of the region's data (what was read: its
+   *  kind, its value, a plane), written when the region is made */
+  regionData?: Record<string, unknown>,
 ): PlacedReading | null {
   const g: TraceGeometry = trace.kind === "region" ? { ...trace, kind: "region2d" }
     : trace.kind === "point3d" ? { kind: "point", vertices: [trace.p] } : trace;
@@ -616,6 +676,7 @@ export function setReadingGeometry(
         data.crs = DEFAULT_CRS;
       }
       if (onId) data.resource_id = onId;
+      if (regionData) for (const [k, v] of Object.entries(regionData)) if (!(k in data)) data[k] = v;
       store.addNode({ id: regionId, node_type: "annotation_region",
                       name: `${String(x.name ?? extractorId)} · ${kind}`, description: "", data } as EmNode);
     }

@@ -240,8 +240,28 @@ export interface SpaceSceneHandle {
   startModal(mode: ModalMode): boolean;
 }
 
+/** MICRO-VIEWER-UNICO p.4 · a mark drawn over the scene: a reading of the
+ *  document shown (a spot height, a plane, a line), or the one being traced.
+ *  Vertices in three's axes (the caller converts the data's). */
+export interface SceneMark {
+  id: string;
+  kind: "point" | "line" | "polyline" | "plane";
+  vertices: V3[];
+  label: string;
+  selected?: boolean;
+  /** the trace in progress (dashed, no label click) */
+  draft?: boolean;
+}
+
 export interface SpaceSceneOptions {
   texts: SceneTexts;
+  /** MICRO-VIEWER-UNICO p.4 · a plain left click (or a double click) with a
+   *  tool armed: the surface under it — or null — goes to the caller FIRST;
+   *  true = the click was the tool's (nothing is picked, no zoom) */
+  onTool?: (hit: { point: V3; normal: V3 | null; key: string } | null, dbl: boolean) => boolean;
+  /** …the marks to draw, read at every frame (cheap: a few points), and a click on one */
+  marks?: () => SceneMark[];
+  onMark?: (id: string) => void;
   onPickUnit?: (unitId: string) => void;
   onPickRm?: (rmId: string) => void;
   /** MICRO-SPAZIO-3D · a click on nothing (Blender deselects) */
@@ -460,6 +480,12 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
       scene.add(sketchGroup);
       const labels = document.createElement("div");
       labels.className = "v3d-labels scn-labels";
+      // MICRO-VIEWER-UNICO p.4 · the readings of the document, over the scene
+      const MARKNS = "http://www.w3.org/2000/svg";
+      const marksEl = document.createElementNS(MARKNS, "svg");
+      marksEl.setAttribute("class", "scn-marks");
+      const markLabels = document.createElement("div");
+      markLabels.className = "scn-mark-labels";
       const cursorEl = document.createElement("div");
       cursorEl.className = "scn-cursor";
       cursorEl.innerHTML = CURSOR_SVG;
@@ -1995,6 +2021,72 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
         name: st.item.flow?.find((x) => x.id === st.current)?.name ?? null, share: st.share ?? null,
         url: st.item.flow?.find((x) => x.id === st.current)?.url, asking: st.asking ?? null, dist: st.dist ?? null, want: st.want ?? null,
         errs: st.item.flow?.map((v) => [v.ord, v.err, v.errFrom]) }));
+      // MICRO-VIEWER-UNICO p.4 · the marks: projected at every frame, a dot per
+      // vertex, a line through them (closed for a plane), the name at the first
+      let marksSig = "";
+      const placeMarks = () => {
+        const ms = opts.marks?.() ?? [];
+        if (!ms.length) { if (marksSig) { marksEl.textContent = ""; markLabels.textContent = ""; marksSig = ""; } return; }
+        const r = renderer.domElement.getBoundingClientRect();
+        const W = r.width || w, H = r.height || h;
+        const proj = (p: V3): { x: number; y: number } | null => {
+          const v = new THREE.Vector3(p[0], p[1], p[2]).project(camera);
+          if (!(v.z < 1)) return null;
+          return { x: ((v.x + 1) / 2) * W, y: ((1 - v.y) / 2) * H };
+        };
+        const sig = ms.map((m) => `${m.id}:${m.vertices.length}:${m.selected ? 1 : 0}:${m.draft ? 1 : 0}:${m.label}`).join("|");
+        if (sig !== marksSig) {
+          marksSig = sig;
+          marksEl.textContent = "";
+          markLabels.textContent = "";
+          for (const m of ms) {
+            const g = document.createElementNS(MARKNS, "g");
+            g.setAttribute("class", `scn-mark k-${m.kind}${m.selected ? " sel" : ""}${m.draft ? " draft" : ""}`);
+            g.dataset.mark = m.id;
+            if (m.vertices.length > 1) {
+              const pl = document.createElementNS(MARKNS, m.kind === "plane" ? "polygon" : "polyline");
+              g.appendChild(pl);
+            }
+            for (let i = 0; i < m.vertices.length; i++) {
+              const c = document.createElementNS(MARKNS, "circle");
+              c.setAttribute("r", m.selected ? "5" : "4");
+              g.appendChild(c);
+            }
+            marksEl.appendChild(g);
+            if (!m.draft && m.label) {
+              const l = document.createElement("button");
+              l.type = "button";
+              l.className = `scn-mark-label${m.selected ? " sel" : ""}`;
+              l.dataset.mark = m.id;
+              l.textContent = m.label;
+              l.addEventListener("pointerdown", (e) => e.stopPropagation());
+              l.addEventListener("click", (e) => { e.stopPropagation(); opts.onMark?.(m.id); });
+              markLabels.appendChild(l);
+            }
+          }
+        }
+        const groups = [...marksEl.children] as SVGGElement[];
+        const labs = [...markLabels.children] as HTMLElement[];
+        let li = 0;
+        ms.forEach((m, k) => {
+          const g = groups[k];
+          if (!g) return;
+          const pts = m.vertices.map(proj);
+          const ok = pts.every(Boolean);
+          g.style.display = ok ? "" : "none";
+          if (ok) {
+            const shape = g.querySelector("polyline, polygon");
+            if (shape) shape.setAttribute("points", pts.map((q) => `${q!.x},${q!.y}`).join(" "));
+            g.querySelectorAll("circle").forEach((c, i) => { c.setAttribute("cx", String(pts[i]!.x)); c.setAttribute("cy", String(pts[i]!.y)); });
+          }
+          if (!m.draft && m.label) {
+            const l = labs[li++];
+            if (l) { l.style.display = ok ? "" : "none"; if (ok) { l.style.left = `${pts[0]!.x}px`; l.style.top = `${pts[0]!.y}px`; } }
+          }
+        });
+      };
+      (probe as Record<string, unknown>).__spaceMarks = () => [...markLabels.children].map((e) => ({ id: (e as HTMLElement).dataset.mark,
+        text: e.textContent, x: parseFloat((e as HTMLElement).style.left), y: parseFloat((e as HTMLElement).style.top), shown: (e as HTMLElement).style.display !== "none" }));
       let raf = 0;
       let frames = 0;
       const tick = () => {
@@ -2011,6 +2103,7 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
         if (live.length && ++frames % 20 === 0) for (const l of live) l.bar.refresh();
         renderer.render(scene, camera);
         place();
+        placeMarks();
         drawNav();
         // the flow of LOD, four times a second
         const now = performance.now();
@@ -2616,6 +2709,11 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
         if (moved) return;
         const r = renderer.domElement.getBoundingClientRect();
         ray.setFromCamera(new THREE.Vector2(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1), camera);
+        // MICRO-VIEWER-UNICO p.4 · a tool armed: a plain left click is its
+        if (opts.onTool && button === 0 && !e.shiftKey && !e.altKey && !e.ctrlKey && !e.metaKey) {
+          const hh = hitsAt(e.clientX, e.clientY).find((q) => q.kind !== "sketch") ?? null;
+          if (opts.onTool(hh ? { point: arr(hh.point), normal: worldNormal(hh), key: `${hh.kind}:${hh.id}` } : null, false)) return;
+        }
         // MICRO-3DTILES · «Più dettaglio qui» armed on a tileset: the click is its
         const armed = liveLayers().find((l) => l.bar.armed());
         if (armed && button === 0) {
@@ -2674,6 +2772,7 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
       const onDbl = (e: MouseEvent) => {
         if (modal || boxArmed || e.button !== 0) return;
         const hh = hitsAt(e.clientX, e.clientY)[0];
+        if (opts.onTool?.(hh ? { point: arr(hh.point), normal: worldNormal(hh), key: `${hh.kind}:${hh.id}` } : null, true)) return;
         if (!hh) return;
         opts.onBeforeJump?.();
         applyCam(detailZoom(camState(), arr(hh.point), FOV));
@@ -2826,6 +2925,7 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
       status.remove();
       host.prepend(renderer.domElement);
       host.appendChild(labels);
+      host.append(marksEl, markLabels);
       host.appendChild(strips);
       host.append(cursorEl, modalEl, boxEl, viewEl, guides, vptr, navEl);
       strips.appendChild(flowStrip);
@@ -2851,6 +2951,8 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
         renderer.dispose();
         renderer.domElement.remove();
         labels.remove();
+        marksEl.remove();
+        markLabels.remove();
         cursorEl.remove();
         modalEl.remove();
         boxEl.remove();

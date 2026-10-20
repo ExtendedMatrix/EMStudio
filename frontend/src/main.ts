@@ -244,7 +244,10 @@ import { openReadingBubble, type BubbleUnit } from "./reading-bubble";
 import { renderChronology, type ChronoEpoch, type ChronologyData } from "./chronology";
 import { buildSpace, citationKey, SpaceMarks, UnansweredFiles, type Space, type SpaceRM } from "./space";
 import { chooseVersion, SCENE_USES, USES } from "./asset-versions";
-import { mountSpaceScene, type SceneItem, type SceneMenuRequest, type SceneView, type SpaceSceneHandle } from "./scene3d";
+import { mountSpaceScene, type SceneItem, type SceneMark, type SceneMenuRequest, type SceneView, type SpaceSceneHandle } from "./scene3d";
+import { HIGH_DELAY_MS, HighLoader, ladderOf, scenePlan, viewerSourceLine, viewerTargetOf,
+         type ScenePlan, type ViewerPart, type ViewerTarget, type WeighedVersion } from "./viewer-node";
+import { CLICKS, readingOf as reading3dOf, VIEWER_3D_TOOLS, type ReadTexts, type Viewer3dTool } from "./viewer-annot";
 import { blenderToThree, eulerFromUp, leftSelects, threeToBlender, type AlignedView, type CamState, type Pose, type V3 } from "./space-nav";
 import { carryXf, coordDecimals, deg, IDENTITY, isIdentity, poseToXf, rad, readTransform, transformData, withPivot, xfToPose, type Xf } from "./transform3d";
 import { renderTransformForm, type TransformFormTexts } from "./transform-ui";
@@ -424,6 +427,7 @@ import {
   saveSettings,
   SYNC_TOOLS,
   TILES_MEMORY_MB,
+  HIGH_DELAY_S,
   type Settings,
 } from "./settings";
 import { envelope as wireEnvelope } from "./wire";
@@ -431,6 +435,7 @@ import {
   imageService as iiifImageService,
   regionToWebAnnotation,
   thumbnailUrl as iiifThumbnailUrl,
+  fittedUrl as fittedIiifUrl,
   isImageResource,
 } from "./iiif";
 import { altLabelsOf } from "./altlabels";
@@ -2647,6 +2652,45 @@ window.__EM_SCENE__ = () => {
     setWinType(w, type as WindowType);
     renderTiles();
     return true;
+  },
+  /** MICRO-VIEWER-UNICO · what a Viewer window shows: the node, its target, the
+   *  scene's step and what it asked for, timed; the bar's words */
+  viewerState: (winId: string) => {
+    const w = windowsOf().find((x) => x.id === winId);
+    if (!w || !store) return null;
+    const target = viewerTargetOf(store.doc.graph, viewerNodeOf(w));
+    const s = viewerScenes.get(winId);
+    const area = winAreas.get(winId);
+    const bar = area?.querySelector<HTMLElement>(".viewer-bar");
+    return { node: viewerNodeOf(w), kept: viewerKept(w), target,
+      scene: s ? { key: s.key, step: s.step, forced: s.forced, framed: s.framed, events: s.events, urls: [...s.urls],
+        plan: { lightBytes: s.plan.lightBytes, highBytes: s.plan.highBytes, hasHigh: s.plan.hasHigh, heavier: s.plan.heavier,
+          light: [...s.plan.light].map(([k, v]) => [k, v.label, v.bytes]), high: [...s.plan.high].map(([k, v]) => [k, v.label, v.bytes]) },
+        seen: vwSeenLine(s), trace: s.trace, armed: highLoaderOf(w).armed(),
+        // Parte 3 · where the content falls on the canvas: the boxes of the models
+        // drawn, projected (page px), and the canvas — a strip seen edge-on is
+        // a rectangle a few pixels thick
+        screen: (() => {
+          const proj = (s.host as unknown as { __spaceProject?: (p: number[]) => { x: number; y: number } | null }).__spaceProject;
+          const cv = s.host.querySelector("canvas")?.getBoundingClientRect();
+          if (!proj || !cv) return null;
+          let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity, boxes = 0;
+          for (const id of [...s.models, ...s.groups]) {
+            const b = s.handle.boxOf(`rm:${id}`);
+            if (!b) continue;
+            boxes++;
+            for (const cx of [b[0][0], b[1][0]]) for (const cy of [b[0][1], b[1][1]]) for (const cz of [b[0][2], b[1][2]]) {
+              const q = proj([cx, cy, cz]);
+              if (!q) continue;
+              x0 = Math.min(x0, q.x); y0 = Math.min(y0, q.y); x1 = Math.max(x1, q.x); y1 = Math.max(y1, q.y);
+            }
+          }
+          return boxes ? { boxes, canvas: { x: cv.x, y: cv.y, w: cv.width, h: cv.height }, rect: { x0, y0, x1, y1 } } : { boxes: 0 };
+        })() } : null,
+      bar: bar ? { title: bar.querySelector("[data-vw-title]")?.textContent ?? null, source: bar.querySelector("[data-vw-source]")?.textContent ?? null,
+        seen: bar.querySelector("[data-vw-seen]")?.textContent ?? null, pos: bar.querySelector<HTMLElement>("[data-vw-pos]")?.dataset.vwPos ?? null,
+        tools: [...bar.querySelectorAll<HTMLElement>("[data-tool]")].map((b) => b.dataset.tool) } : null,
+      caption: area?.querySelector(".viewer-caption")?.textContent ?? null };
   },
   /** MICRO-UN-POSTO · how many undo steps the store holds */
   undoDepth: () => store?.undoDepth ?? 0,
@@ -10711,6 +10755,7 @@ function chainUi(st: DocumentStore): ChainUi {
     readLabel: () => t("chain.read"),
     aiChip: aiChipFor,
     documentExtras: (host, docId) => renderDocumentDating(st, host, docId),
+    linkExtraction: (x, anchor) => askWhatExtractionReads(st, x, anchor),
     useAsValue: (x) => {
       const p = chain.useAsValue(st, x, readingVerticesById);
       if (!p) return;
@@ -14682,6 +14727,9 @@ function openSettings(section?: string): void {
   if (lm) lm.value = grouped(s.viewer.lodLimitMB);
   if (lp) lp.value = grouped(s.viewer.lodLimitPoints);
   if (tm) tm.value = grouped(s.viewer.tilesMemoryMB);
+  // MICRO-VIEWER-UNICO p.2 · the pause before the Viewer's high version
+  const hd = numIn("set-viewer-high-delay");
+  if (hd) hd.value = String(s.viewer.highDelayS ?? HIGH_DELAY_S).replace(".", (0.5).toLocaleString(getLocale()).charAt(1));
   // MICRO-SPAZIO-3D-2 · the Space's navigation
   const chk = (id: string, v: boolean) => { const c = document.getElementById(id) as HTMLInputElement | null; if (c) c.checked = v; };
   chk("set-nav-emulate3", s.viewer.emulate3Button);
@@ -15018,6 +15066,8 @@ settingsModal.addEventListener("click", (e) => {
       lodLimitMB: posNum("set-lod-limit-mb", LOD_LIMIT_MB),
       lodLimitPoints: posNum("set-lod-limit-points", LOD_LIMIT_POINTS),
       tilesMemoryMB: Math.max(64, posNum("set-tiles-memory-mb", TILES_MEMORY_MB)),
+      highDelayS: (() => { const v = Number(String((document.getElementById("set-viewer-high-delay") as HTMLInputElement | null)?.value ?? "").replace(",", "."));
+        return Number.isFinite(v) && v >= 0 ? Math.min(60, v) : HIGH_DELAY_S; })(),
       emulate3Button: !!(document.getElementById("set-nav-emulate3") as HTMLInputElement | null)?.checked,
       emulateNumpad: !!(document.getElementById("set-nav-numpad") as HTMLInputElement | null)?.checked,
       autoPerspective: (document.getElementById("set-nav-autopersp") as HTMLInputElement | null)?.checked ?? true,
@@ -21297,6 +21347,12 @@ const TRANSFORM_TYPES: WindowType[] = [
  *  callers are items of a window's own Doc menu, and since the registry carries
  *  the window they have one to give. */
 function currentDocId(win: Win): string | null {
+  // MICRO-VIEWER-UNICO · a Viewer's document: the one it shows (pinned or selected)
+  if (win.type === "viewer") {
+    if (!store || winCurrent(win, "collection")) return null;
+    const tg = viewerTargetOf(store.doc.graph, viewerNodeOf(win));
+    return tg?.kind === "document" ? tg.id : null;
+  }
   const v = winCurrent(win, "doc");
   return typeof v === "string" ? v : null;
 }
@@ -22219,6 +22275,39 @@ function askWhatItReads(win: Win, detail: HTMLElement, docId: string, g: TraceGe
     onClose: () => { delete host.dataset.pending; },
   });
 }
+/** MICRO-VIEWER-UNICO p.4 · «Interpretazione» on an extraction born in the
+ *  Viewer: the bubble of «Cosa stai estraendo?», in the window of the button;
+ *  the answer hangs the extractor under the property (`linkExtraction`, the
+ *  second source makes the combiner) — one undo step, a new property with it. */
+function askWhatExtractionReads(st: DocumentStore, x: string, anchorEl: HTMLElement): void {
+  const host = (anchorEl.closest(".tile-area") as HTMLElement | null) ?? document.body;
+  const hr = host.getBoundingClientRect(), br = anchorEl.getBoundingClientRect();
+  const units: BubbleUnit[] = st.liveNodes()
+    .filter((n) => isStratigraphicType(n.node_type))
+    .map((u) => ({ id: u.id, name: String(u.name || u.id),
+      props: chain.propertiesOf(st.doc, u.id).map((pid) => ({ id: pid, name: String(st.node(pid)?.name ?? pid), value: chain.propertyValue(st.node(pid)) })) }));
+  const names = [...new Set(st.liveNodes().filter((n) => n.node_type === "property").map((n) => String(n.name ?? "")))].filter(Boolean).sort();
+  const link = (pid: () => string | null) => {
+    const ok = st.batch(() => { const p = pid(); return p ? chain.linkExtraction(st, p, x) : false; });
+    if (!ok) return;
+    const p = chain.propertyOfExtractor(st.doc, x);
+    const msg = t("chain.extractionLinked", { x: String(st.node(x)?.name ?? x), p: String(st.node(p ?? "")?.name ?? p) });
+    logInfo(msg, [x, p ?? ""]);
+    toastUndo(msg, st);
+    refreshInspector();
+    draw();
+  };
+  openReadingBubble(host, {
+    anchor: { x: br.left - hr.left, y: br.top - hr.top, w: br.width, h: br.height },
+    what: `${String(st.node(x)?.name ?? x)} · ${chain.resultOf(st.doc, x)}`,
+    units, propertyNames: names,
+    preferUnit: null,
+    onPick: (propertyId) => link(() => propertyId),
+    onCreate: (unitId, name) => link(() => addQualiaClaim(st, unitId, name, "")),
+    onClose: () => {},
+  });
+}
+
 /** ONE undo step: (the new property,) the extractor, its region, the chain. */
 function readingFromDocument(win: Win, docId: string, g: TraceGeometry, property: () => string | null): void {
   if (!store) return;
@@ -22568,6 +22657,7 @@ function askResident(): void {
       if (st !== store) return;
       spaceResident = { version, ids: new Set((j.resident ?? []).map((x) => x.resource_id)) };
       refreshSurfaces("scene");
+      refreshSurfaces("viewer");
       renderEmData();
     } catch {
       /* offline: the recorded state stands */
@@ -32018,6 +32108,784 @@ function setViewerIndex(win: Win, index: number): void {
  * bridge was started with*. Outside them it is still refused, and the window
  * says which fence it hit rather than showing a broken image.
  */
+// ── MICRO-VIEWER-UNICO · THE VIEWER OF ONE NODE ─────────────────────────────
+//
+// The Viewer sees, annotates and extracts from ONE document or ONE resource
+// (E.D., 20 Oct 2026). It follows the selection of every window; the pin
+// («Tieni», `current.viewer.keep`) holds it on a node. What it opens is
+// `viewer-node.ts`'s answer: the whole document (its images to scroll, its
+// models as a small scene of that document only, the container's tileset as
+// the Space draws it), and the line that says where each thing comes from.
+// Single / Gallery stay for a folder of the disk or the Shelf (a collection
+// dropped on the window, `current.collection`).
+
+/** The node the window holds (the pin), if it is still in the graph. */
+function viewerKept(win: Win): string | null {
+  const v = winCurrent(win, "viewer.keep");
+  return typeof v === "string" && store?.node(v) ? v : null;
+}
+/** The node the Viewer shows: the pinned one, else the selection. */
+function viewerNodeOf(win: Win): string | null {
+  return viewerKept(win) ?? selectedId;
+}
+/** Parte 2 · the pause before the high version, from the Preferences (seconds). */
+function viewerHighDelayMs(): number {
+  const s = Number(getSettings().viewer.highDelayS);
+  return Math.max(0, Number.isFinite(s) ? s : HIGH_DELAY_MS / 1000) * 1000;
+}
+const viewerHigh = new Map<string, HighLoader>();
+function highLoaderOf(win: Win): HighLoader {
+  let l = viewerHigh.get(win.id);
+  if (!l) { l = new HighLoader(viewerHighDelayMs); viewerHigh.set(win.id, l); }
+  return l;
+}
+
+/** One version as the Viewer's scene draws it. */
+interface VwVersion extends WeighedVersion { url: string; obj?: { modifier?: (u: string) => string } }
+/** The scene of a Viewer window: kept across repaints while it shows the same
+ *  document (a repaint must not reload ten models, nor reframe them). */
+interface VwScene {
+  key: string;
+  host: HTMLElement;
+  handle: SpaceSceneHandle;
+  docId: string | null;
+  models: string[];
+  groups: string[];
+  ladders: Map<string, VwVersion[]>;
+  plan: ScenePlan;
+  /** the Space the ladders were weighed on (it is read again when a file's state changes) */
+  sp: Space;
+  /** «light» until the pause is over, then «high»; a version forced by the selector wins */
+  step: "light" | "high";
+  forced: string | null;
+  framed: boolean;
+  /** the trace in progress (Parte 4) */
+  trace: { tool: Viewer3dTool | null; vertices: V3[] };
+  /** what happened, timed from the mount (the report's measures) */
+  events: Array<{ t: number; what: string; url?: string }>;
+  t0: number;
+  /** the urls the scene asked for, light and high */
+  urls: Set<string>;
+  /** Parte 3 · the framing follows the models as they arrive, until the person moves the view */
+  userMoved?: boolean;
+  framedCam?: string | null;
+  frameTimer?: ReturnType<typeof setTimeout> | null;
+  /** Parte 3 · a 3D FILE shown that is no representation model (a resource selected) */
+  preview?: { id: string; url: string; label: string } | null;
+}
+const viewerScenes = new Map<string, VwScene>();
+
+function disposeViewerScene(winId: string): void {
+  const s = viewerScenes.get(winId);
+  if (!s) return;
+  s.handle.dispose();
+  s.host.remove();
+  viewerScenes.delete(winId);
+}
+
+/** The words «derivata lod4 · 2 MB» / «LOD0 dell'autore · 160 MB» of a version. */
+function vwVersionWords(v: WeighedVersion | undefined, bytes: number | null, n: number): string {
+  if (!v) return "";
+  const lab = v.origin === "author" ? t("vw.ofAuthor", { l: v.label }) : v.label;
+  const w = bytes != null && bytes > 0 ? mbOf(bytes) : "";
+  return [n > 1 ? t("vw.nModels", { n: String(n) }) : "", lab, w].filter(Boolean).join(" · ");
+}
+
+/** The ladder of a model, lightest first: the versions the Space opens, weighed
+ *  (the graph's bytes, the measures' cache for the triangles). */
+function vwLadderOf(rm: SpaceRM): VwVersion[] {
+  const lv = rmLevels(rm);
+  const vs = drawableVersions(rm).filter((v) => v.format !== "tiles");
+  if (!vs.length) {
+    const url = rm.resource && rm.resource.state === "resident" && !rm.resource.tiles ? spaceFileUrl(rm.resource) : undefined;
+    return url ? [{ id: `res:${rm.resource!.id}`, label: rm.resource!.name, origin: "other", bytes: rm.resource!.bytes ?? null,
+                    tris: null, rank: 0, url }] : [];
+  }
+  const ladder = ladderOf(vs.map((v) => {
+    const l = lv.get(v.id);
+    return { id: v.id, label: autoLevelName(rm, v), origin: (l?.origin ?? "other") as WeighedVersion["origin"],
+             bytes: v.bytes ?? null, tris: v.tris ?? getMeasure(versionFingerprint(v))?.tris ?? null, rank: l?.rank ?? 99 };
+  }));
+  return ladder.map((w) => {
+    const v = vs.find((x) => x.id === w.id)!;
+    return { ...w, url: v.fetch, ...(v.format === "obj" ? { obj: { modifier: v.modifier } } : {}) };
+  });
+}
+
+/** The version each model draws now: forced, else the plan's step. */
+function vwVersionOf(s: VwScene, rmId: string): VwVersion | undefined {
+  const l = s.ladders.get(rmId) ?? [];
+  if (s.forced) return l.find((v) => v.label === s.forced) ?? l[l.length - 1];
+  const want = (s.step === "high" ? s.plan.high : s.plan.light).get(rmId);
+  return l.find((v) => v.id === want?.id) ?? l[0];
+}
+
+/** The line of the bar: what is seen now. */
+function vwSeenLine(s: VwScene): string {
+  const ids = [...s.ladders.keys()].filter((id) => (s.ladders.get(id) ?? []).length);
+  const vs = ids.map((id) => vwVersionOf(s, id)).filter(Boolean) as VwVersion[];
+  if (!vs.length) return "";
+  const bytes = vs.reduce((a, v) => a + (v.bytes ?? 0), 0);
+  // one label when every model is at the same level, else the first and «…»
+  const same = vs.every((v) => v.label === vs[0].label && v.origin === vs[0].origin);
+  const words = vwVersionWords(vs[0], bytes, vs.length);
+  return same ? words : `${words} …`;
+}
+
+/** The items of the scene of a document: its models (and the container's
+ *  tileset), the version of each by the Viewer's rule, as the Space draws them. */
+function vwSceneItems(s: VwScene): SceneItem[] {
+  const sp = currentSpace();
+  if (!sp) return [];
+  const items: SceneItem[] = [];
+  const alts = spaceAlternatives(sp).filter((a) => s.groups.includes(a.group));
+  const altOfRm = new Map<string, { group: string; role: "tileset" | "models"; mode: Exclude<AltMode, "use">; err: number }>();
+  for (const a of alts) {
+    const tr = sp.rms.find((r) => r.id === a.tileset);
+    if (!tr) continue;
+    const tv = (tr.versions ?? []).find((v) => !v.master && typeof (v.data ?? {}).geometric_error_m === "number");
+    const err = Number((tv?.data ?? {}).geometric_error_m ?? 10);
+    const mode = altEffectiveMode(a.group, sp);
+    altOfRm.set(a.tileset, { group: a.group, role: "tileset", mode, err });
+    for (const m of a.covered) altOfRm.set(m, { group: a.group, role: "models", mode, err });
+  }
+  const rms = sp.rms.filter((r) => s.models.includes(r.id) || (r.altOf && s.groups.includes(r.altOf)));
+  for (const r of rms) {
+    const alt = altOfRm.get(r.id);
+    if (alt && alt.mode !== "auto" && (alt.mode === "tileset") !== (alt.role === "tileset")) continue;
+    const isTiles = !!r.resource?.tiles;
+    const v = isTiles ? undefined : vwVersionOf(s, r.id);
+    const url = isTiles ? spaceFileUrl(r.resource) : v?.url;
+    if (url) s.urls.add(url);
+    items.push({ kind: "rm", id: r.id, label: r.name, state: r.resource?.state ?? "missing",
+      url, resourceId: r.resource?.id, ...(v?.obj ? { obj: v.obj } : {}),
+      ...(alt ? { alt: { group: alt.group, role: alt.role, err: alt.err, mode: alt.mode, name: sp.rmGroups.get(alt.group)?.name ?? alt.group } } : {}),
+      tiles: r.resource?.tiles || undefined, edge: placementColour(r.genre) ?? undefined,
+      pose: isTiles ? undefined : poseOfNode(r.id), bytes: v?.bytes ?? r.resource?.bytes ?? null, points: r.resource?.points ?? null });
+  }
+  if (s.preview) items.push({ kind: "rm", id: `preview:${s.preview.id}`, label: s.preview.label, state: "resident", url: s.preview.url });
+  return items;
+}
+
+/** The readings of the document as marks (their vertices are in the data's
+ *  axes: three's for the scene), and the trace in progress. */
+function vwMarks(win: Win, s: VwScene): SceneMark[] {
+  const st = store;
+  if (!st || !s.docId) return [];
+  const sel = selectedId;
+  const out: SceneMark[] = [];
+  for (const x of chain.readingsOfDocument(st.doc, s.docId)) {
+    const g = chain.geometryOf(st.doc, x);
+    if (!g || !chain.isGlbKind(g.kind)) continue;
+    const vs = readingVertices(g);
+    if (!vs?.length) continue;
+    const region = g.regionId ? st.node(g.regionId) : null;
+    const rd = (region?.data ?? {}) as Record<string, unknown>;
+    const plane = !!rd.plane;
+    const res = chain.resultOf(st.doc, x);
+    out.push({ id: x, kind: plane && vs.length >= 3 ? "plane" : g.kind, vertices: vs.map((p) => [p[0], p[1], p[2]] as V3),
+      label: `${String(st.node(x)?.name ?? x)}${res ? ` · ${res}` : ""}`, selected: x === sel || g.regionId === sel });
+  }
+  if (s.trace.vertices.length)
+    out.push({ id: "draft", kind: s.trace.vertices.length > 1 ? "polyline" : "point", vertices: s.trace.vertices.map((p) => [p[0], p[1], p[2]] as V3), label: "", draft: true });
+  void win;
+  return out;
+}
+
+/** The words a 3D reading writes as its value (Parte 4). */
+const VW_READ_TEXTS = (): ReadTexts => ({
+  spot: (z) => t("vw.read.spot", { z }),
+  impost: (z) => t("vw.read.impost", { z }),
+  plane: (z, dip, dir) => (dir == null ? t("vw.read.planeLevel", { z, dip }) : t("vw.read.plane", { z, dip, dir })),
+  length: (m) => t("vw.read.length", { m }),
+});
+
+/** A click of a 3D tool on the document's scene. */
+function vwToolClick(win: Win, s: VwScene, hit: { point: V3; normal: V3 | null; key: string } | null, dbl: boolean): boolean {
+  const tool = s.trace.tool;
+  if (!tool || !store || !s.docId) return false;
+  const st = store;
+  if (dbl) {
+    if (tool === "polyline" && s.trace.vertices.length >= 2) { vwFinishTrace(win, s, null); return true; }
+    return true;   // the second click of a double click: not a zoom while tracing
+  }
+  if (!hit) { toast(t("vw.noSurface")); return true; }
+  // the scene's frame (glTF, Y up): the datamodel's frame of a 3D region's coords
+  const p: V3 = [hit.point[0], hit.point[1], hit.point[2]];
+  const last = s.trace.vertices[s.trace.vertices.length - 1];
+  if (last && Math.hypot(p[0] - last[0], p[1] - last[1], p[2] - last[2]) < 1e-6) return true;
+  s.trace.vertices.push(p);
+  const need = CLICKS[tool];
+  if (need && s.trace.vertices.length >= need) vwFinishTrace(win, s, hit.normal);
+  else refreshViewerBar(win);
+  void st;
+  return true;
+}
+
+/** The trace is complete: ONE undo step makes the extractor of the document,
+ *  its region in the document's frame and the value read (`addFreeExtraction`). */
+function vwFinishTrace(win: Win, s: VwScene, normal: V3 | null): void {
+  const tool = s.trace.tool;
+  const st = store;
+  const vs = s.trace.vertices.slice();
+  s.trace.vertices = [];
+  if (!tool || !st || !s.docId) return;
+  const num = (v: number, d: number) => v.toLocaleString(getLocale(), { minimumFractionDigits: d, maximumFractionDigits: d, useGrouping: false });
+  const r = reading3dOf(tool, vs, normal, VW_READ_TEXTS(), num);
+  if (!r) { toast(t(tool === "plane3" ? "vw.planeCollinear" : "vw.traceIncomplete")); refreshViewerBar(win); return; }
+  let made: { extractorId: string; regionId: string } | null = null;
+  // a reading armed («Leggi» from the Inspector) takes the trace as its place;
+  // otherwise the trace IS a new extraction of the document
+  const armedRaw = winCurrent(win, "reading");
+  const armed = typeof armedRaw === "string" && chain.readingsOfDocument(st.doc, s.docId).includes(armedRaw) ? armedRaw : null;
+  try {
+    if (armed) {
+      const docId = s.docId;
+      made = st.batch(() => {
+        const placed = chain.setReadingGeometry(st, armed, docId, r.trace, r.regionData);
+        const x = st.node(armed);
+        if (x) st.updateNode(armed, { data: { ...((x.data ?? {}) as Record<string, unknown>), result: r.result } });
+        return placed ? { extractorId: armed, regionId: placed.regionId } : null;
+      });
+      setWinCurrent(win, "reading", null);
+    } else {
+      const docId = s.docId;
+      const me = identityForSigning();
+      // the extraction is the PERSON's, as a reading traced in the Doc was: signed when an identity is set
+      made = st.batch(() => {
+        const m = chain.addFreeExtraction(st, docId, r.trace, { regionData: r.regionData, result: r.result });
+        if (m && me) { const author = nauth.authorForIdentity(st, me); if (!st.hasEdge(m.extractorId, author, "has_author")) st.addEdge(m.extractorId, author, "has_author"); }
+        return m;
+      });
+    }
+  } catch (err) { toast(String((err as Error).message ?? err)); }
+  if (!made) return;
+  const name = String(st.node(made.extractorId)?.name ?? made.extractorId);
+  const msg = t("vw.extracted", { x: name, v: r.result });
+  logInfo(msg, [made.extractorId, s.docId]);
+  toastUndo(msg, st);
+  s.events.push({ t: performance.now() - s.t0, what: `extract:${tool}` });
+  select(made.extractorId);
+  refreshInspector();
+}
+
+/** Mount (or keep) the scene of a document in a Viewer window's stage. */
+function vwScene(win: Win, stage: HTMLElement, target: ViewerTarget, preview: VwScene["preview"]): VwScene | null {
+  const sp = currentSpace();
+  if (!sp) return null;
+  const key = `${target.docId ?? target.id}|${target.models.join(",")}|${target.groups.join(",")}|${preview?.url ?? ""}`;
+  const kept = viewerScenes.get(win.id);
+  if (kept && kept.key === key) {
+    stage.appendChild(kept.host);
+    // the Space read again (the bridge said which files are on the disk, a
+    // version was added): the ladders follow, and the scene if they changed
+    if (kept.sp !== sp) {
+      kept.sp = sp;
+      const before = JSON.stringify([...kept.ladders].map(([k, l]) => [k, l.map((v) => v.id)]));
+      vwWeigh(kept, sp);
+      if (JSON.stringify([...kept.ladders].map(([k, l]) => [k, l.map((v) => v.id)])) !== before) {
+        kept.handle.update(vwSceneItems(kept));
+        if (vwLightDrawn(kept)) vwArmHigh(win, kept);
+      }
+    }
+    return kept;
+  }
+  disposeViewerScene(win.id);
+  const host = document.createElement("div");
+  host.className = "vw-scene scn-host";
+  host.dataset.vwScene = win.id;
+  stage.appendChild(host);
+  const slot: VwScene = { key, host, docId: target.docId, models: target.models, groups: target.groups, ladders: new Map(),
+    plan: scenePlan(new Map(), 0), sp, step: "light", forced: null, framed: false, trace: { tool: null, vertices: [] }, events: [],
+    t0: performance.now(), urls: new Set(), preview, handle: null as unknown as SpaceSceneHandle };
+  vwWeigh(slot, sp);
+  const tool = winCurrent(win, "doc.tool");
+  slot.trace.tool = (VIEWER_3D_TOOLS as readonly string[]).includes(String(tool)) ? tool as Viewer3dTool
+    // a reading armed with no tool chosen: a spot height, as the Doc's point was
+    : typeof winCurrent(win, "reading") === "string" ? "elevation" : null;
+  slot.handle = mountSpaceScene(host, {
+    texts: {
+      loading: t("space.loading"), noEngine: t("em3d.noEngine"),
+      referenceOnly: (name) => t("space.refOnly", { x: name }),
+      missing: (name) => t("space.fileMissing", { x: name }),
+      refused: (name) => t("space.fileRefused", { x: name }),
+      overLimit: (name, size, lim) => t("space.overLimit", { x: name, size, lim }),
+      openTileset: t("lod.openTileset"), loadAnyway: t("lod.loadAnyway"),
+      lodNote: (n) => t("lod.note", { n: String(n) }),
+      viewName, centreEmpty: t("s3.centreEmpty"),
+      gizmo: { axis: (_a, view) => { const name = t(VIEW_NAMES[view]);
+          return t("s3.gzView", { view: name, viewLow: name.charAt(0).toLocaleLowerCase(getLocale()) + name.slice(1), key: VIEW_KEYS[view] }); },
+        zoom: t("s3.gzZoom"), pan: t("s3.gzPan"), home: t("s3.gzHome"), ortho: t("s3.gzOrtho"), label: t("s3.gzLabel") },
+      num: (v, d) => v.toLocaleString(getLocale(), { minimumFractionDigits: d, maximumFractionDigits: d, useGrouping: false }),
+    },
+    glyph: (k) => typeIconElement(k),
+    flowTitle: t("ver.flowTitle"),
+    onMeasured: (url, m) => {
+      keepMeasure(url, m);
+      slot.events.push({ t: Math.round(performance.now() - slot.t0), what: "drawn", url });
+      vwFrameArrivals(win, slot);
+      // Parte 2 · the pause starts when the light step is on screen, every model of it
+      if (slot.step === "light" && !slot.forced && vwLightDrawn(slot)) vwArmHigh(win, slot);
+      refreshViewerBar(win);
+    },
+    altLine: (x) => t(x.side === "tileset" ? "alt.lineTiles" : "alt.lineModels", { name: x.name, mode: x.mode === "auto" ? ` · ${t("alt.word.auto")}` : "",
+      levels: x.side === "tileset" ? (x.levels ? t(/–/.test(x.levels) ? "alt.levels" : "alt.level", { l: x.levels }) : "…") : x.levels || "…" }),
+    onAltLine: () => refreshViewerBar(win),
+    nav: () => {
+      const v = getSettings().viewer;
+      const seen = middleSeen();
+      return { emulate3: v.emulate3Button, emulateNumpad: v.emulateNumpad, autoPerspective: v.autoPerspective,
+        middleSeen: seen, leftSelects: false, leftPans: v.leftDrag === "pan", invertTrackpadOrbit: !!v.invertTrackpadOrbit };
+    },
+    onMiddleSeen: () => setMiddleSeen(),
+    // a click on a model selects it (the Inspector follows); the pin keeps the document
+    onPick: (k) => { if (k?.startsWith("rm:") && !k.startsWith("rm:preview:")) { select(k.slice(3)); refreshInspector(); } },
+    onNotice: (text) => toast(text),
+    // the threshold of the Preferences, as the Space: a single file over it (no
+    // lighter version to start from) is asked, with its tileset proposed
+    limit: { bytes: getSettings().viewer.lodLimitMB * 1024 * 1024, points: getSettings().viewer.lodLimitPoints },
+    tilesMemoryMB: getSettings().viewer.tilesMemoryMB,
+    isFocused: () => activeWin().id === win.id,
+    // the document's scene: the models and their tileset; no proxies, no sketches, no labels
+    overlay: (k) => (k === "s3_proxies" || k === "s3_labels_proxy" || k === "s3_labels_sketch" || k === "s3_labels_rm" ? false : space3dShown(k)),
+    overlayValue: (k) => overlayValue(overlaysOf("space"), k),
+    sketchVisible: () => false,
+    onNotFound: (rid, why: FetchFailure, unanswered?: boolean) => {
+      if (unanswered && why === "missing") return;
+      slot.events.push({ t: Math.round(performance.now() - slot.t0), what: `notfound:${why}`, url: rid });
+    },
+    // the container's tileset strip reduced to its title (the Viewer is often
+    // narrow); a strip that asks something (a file over the threshold) stays open
+    panelFolded: (k) => target.groups.some((g) => k === `strip:${g}`),
+    onTool: (hit, dbl) => vwToolClick(win, slot, hit, dbl),
+    marks: () => vwMarks(win, slot),
+    onMark: (id) => { select(id); refreshInspector(); },
+  });
+  viewerScenes.set(win.id, slot);
+  slot.handle.update(vwSceneItems(slot));
+  slot.events.push({ t: 0, what: "light" });
+  return slot;
+}
+
+/** Every model of the light step has been drawn (its file arrived and was counted). */
+function vwLightDrawn(s: VwScene): boolean {
+  const want = [...s.plan.light].map(([id, v]) => s.ladders.get(id)?.find((x) => x.id === v.id)?.url).filter(Boolean) as string[];
+  const got = new Set(s.events.filter((e) => e.what === "drawn").map((e) => e.url));
+  return want.length > 0 && want.every((u) => got.has(u));
+}
+
+/** Parte 3 · the whole content framed at the opening — Shift+C, as the Space —
+ *  and framed AGAIN as the models arrive (measured: framed at the first wall,
+ *  the view held one wall of ten), until the person moves the view or the light
+ *  step is complete. */
+function vwFrameArrivals(win: Win, s: VwScene): void {
+  if (s.userMoved || viewerScenes.get(win.id) !== s) return;
+  const cam = s.handle.camera();
+  if (s.framedCam && cam && JSON.stringify(cam) !== s.framedCam) { s.userMoved = true; return; }
+  if (s.frameTimer) clearTimeout(s.frameTimer);
+  s.frameTimer = setTimeout(() => {
+    s.frameTimer = null;
+    if (s.userMoved || viewerScenes.get(win.id) !== s) return;
+    const now = s.handle.camera();
+    if (s.framedCam && now && JSON.stringify(now) !== s.framedCam) { s.userMoved = true; return; }
+    vwFrameOnce(win, s, true);
+    // the camera as framed: a different one later is the person's
+    setTimeout(() => { const c = s.handle.camera(); s.framedCam = c ? JSON.stringify(c) : null; }, 400);
+    if (vwLightDrawn(s)) s.userMoved = true;   // complete: the view is the person's from here
+  }, 200);
+}
+
+/** The ladders of the scene's models and the plan (the threshold: the
+ *  Preferences' «whole file» one, over the document's models summed). */
+function vwWeigh(s: VwScene, sp: Space): void {
+  s.ladders = new Map();
+  for (const id of s.models) { const rm = sp.rms.find((r) => r.id === id); if (rm) s.ladders.set(id, vwLadderOf(rm)); }
+  s.plan = scenePlan(s.ladders as Map<string, WeighedVersion[]>, getSettings().viewer.lodLimitMB * 1024 * 1024);
+}
+
+/** Parte 2 · the high version after the pause — only if this window still shows
+ *  this document, nothing was forced, and there is something higher to load. */
+function vwArmHigh(win: Win, s: VwScene): void {
+  if (!s.plan.hasHigh || s.step === "high" || s.forced) { if (!s.plan.hasHigh) highLoaderOf(win).cancel(); return; }
+  highLoaderOf(win).arm(s.key, () => {
+    if (viewerScenes.get(win.id) !== s || s.forced) return;
+    s.step = "high";
+    s.events.push({ t: Math.round(performance.now() - s.t0), what: "high" });
+    s.handle.update(vwSceneItems(s));
+    refreshViewerBar(win);
+  });
+}
+
+// Parte 4 · Enter closes a polyline traced on a document's model (a double
+// click does too), before the app's own Enter — the Doc's rule, kept
+document.addEventListener("keydown", (e) => {
+  if (e.key !== "Enter") return;
+  const tgt = e.target as HTMLElement | null;
+  if (tgt && (tgt.tagName === "INPUT" || tgt.tagName === "TEXTAREA" || tgt.isContentEditable)) return;
+  for (const [winId, s] of viewerScenes) {
+    if (s.trace.tool !== "polyline" || s.trace.vertices.length < 2) continue;
+    const w = windowsOf().find((x) => x.id === winId);
+    if (!w) continue;
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    vwFinishTrace(w, s, null);
+    return;
+  }
+}, true);
+
+/** Parte 3 · the whole content framed at the opening — Shift+C, as the Space:
+ *  the scene's own `centreScene` (the median of the boxes, most of them in view). */
+function vwFrameOnce(win: Win, s: VwScene, again = false): void {
+  if ((s.framed && !again) || viewerScenes.get(win.id) !== s) return;
+  if (s.handle.centreScene()) {
+    s.framed = true;
+    s.events.push({ t: Math.round(performance.now() - s.t0), what: "framed" });
+  }
+}
+
+/** Repaint only the bar of a Viewer (a version drawn, a vertex added). */
+function refreshViewerBar(win: Win): void {
+  const area = winAreas.get(win.id);
+  const bar = area?.querySelector<HTMLElement>(".viewer-bar");
+  const s = viewerScenes.get(win.id);
+  if (!bar || !s) return;
+  const seen = bar.querySelector<HTMLElement>("[data-vw-seen]");
+  if (seen) seen.textContent = vwSeenLine(s);
+  const alt = bar.querySelector<HTMLElement>("[data-vw-alt]");
+  if (alt) alt.textContent = s.groups.map((g) => s.handle.altLine(g)).filter(Boolean).join(" · ");
+  const tr = bar.querySelector<HTMLElement>("[data-vw-trace]");
+  if (tr) tr.textContent = s.trace.tool ? vwTraceWords(s) : "";
+}
+function vwTraceWords(s: VwScene): string {
+  const tool = s.trace.tool;
+  if (!tool) return "";
+  const n = s.trace.vertices.length;
+  const need = CLICKS[tool];
+  return `${t(`vw.tool.${tool}`)} · ${need ? `${n}/${need}` : t("rd.vertices", { n: String(n) })} — ${t(`vw.hint.${tool}`)}`;
+}
+
+/** The parts the window scrolls: the scene first (when there are models), then
+ *  the document's images, texts, PDFs. */
+type VwItem = { kind: "scene" } | { kind: "part"; part: ViewerPart };
+function vwItemsOf(target: ViewerTarget): VwItem[] {
+  const items: VwItem[] = [];
+  if (target.models.length || target.parts.some((p) => p.medium === "3d")) items.push({ kind: "scene" });
+  for (const p of target.parts) if (p.medium !== "3d") items.push({ kind: "part", part: p });
+  return items;
+}
+
+function vwButton(cls: string, text: string, title: string, on: () => void): HTMLButtonElement {
+  const b = document.createElement("button");
+  b.type = "button";
+  b.className = cls;
+  b.textContent = text;
+  b.title = title;
+  b.setAttribute("aria-label", title);
+  b.addEventListener("click", (e) => { e.stopPropagation(); on(); });
+  return b;
+}
+
+/** Draw the Viewer of a node. False when there is no node to show (the
+ *  caller says so). */
+function renderNodeViewer(win: Win, stage: HTMLElement, caption: HTMLElement, bar: HTMLElement): boolean {
+  if (!store) return false;
+  const st = store;
+  askResident();
+  const nodeId = viewerNodeOf(win);
+  const target = viewerTargetOf(st.doc.graph, nodeId);
+  bar.classList.remove("hidden");
+  bar.textContent = "";
+  bar.classList.add("vw-bar");
+  // the pin: holds the Viewer on this node whatever is selected elsewhere
+  const kept = viewerKept(win);
+  const shownId = target?.id ?? nodeId;
+  const keep = vwButton("vw-keep win-act" + (kept ? " on" : ""), "📌", t(kept ? "vw.unkeepTitle" : "vw.keepTitle"), () => {
+    setWinCurrent(win, "viewer.keep", kept ? null : shownId);
+    renderViewer();
+  });
+  keep.dataset.vwKeep = kept ? "on" : "off";
+  keep.setAttribute("aria-pressed", String(!!kept));
+  keep.disabled = !shownId;
+  bar.appendChild(keep);
+  if (!target || target.kind === "none") {
+    disposeViewerScene(win.id);
+    highLoaderOf(win).cancel();
+    const n = nodeId ? st.node(nodeId) : null;
+    // a node with a file of its own the Viewer always showed (a shelf entry…): the collection
+    if (n && viewerSourceOf(n)) return false;
+    const title = document.createElement("span");
+    title.className = "vw-title";
+    title.textContent = n ? String(n.name || n.id) : "";
+    bar.appendChild(title);
+    stage.appendChild(viewerEmpty(n ? t("vw.nothingIn", { name: String(n.name || n.id) }) : t("vw.noSelection")));
+    return true;
+  }
+  const name = (id: string) => String(st.node(id)?.name || id);
+  // the title, and where what is shown comes from
+  const title = document.createElement("span");
+  title.className = "vw-title";
+  title.dataset.vwTitle = target.id;
+  title.textContent = name(target.id) + (target.from && target.from !== target.id ? ` · ${t("vw.fromSel", { x: name(target.from) })}` : "");
+  const src = document.createElement("span");
+  src.className = "vw-source";
+  src.dataset.vwSource = "1";
+  src.textContent = viewerSourceLine(target, {
+    models: (n) => t("vw.src.models", { n: String(n) }), group: (g) => t("vw.src.group", { g }), own: t("vw.src.own"),
+    linked: (n) => t("vw.src.linked", { n: String(n) }), crops: (n) => t("vw.src.crops", { n: String(n) }),
+    nothing: t("vw.src.nothing"), name,
+  });
+  src.title = t("vw.sourceTitle");
+  bar.append(title, src);
+  // what is open: reset the scroll to the first item when the node shown changes
+  const onNow = winCurrent(win, "viewer.on");
+  if (onNow !== target.id) { setWinCurrent(win, "viewer.on", target.id); setWinCurrent(win, "item", null); }
+  const items = vwItemsOf(target);
+  // a reading selected says which item: its 3D place → the scene; on the image → the image
+  if (target.reading && onNow !== target.id) {
+    const g = chain.geometryOf(st.doc, target.reading);
+    const want = g && chain.isGlbKind(g.kind) ? items.findIndex((i) => i.kind === "scene")
+      : g?.kind === "region2d" || g?.kind === "passage" ? items.findIndex((i) => i.kind === "part" && (i.part.via === "own" || i.part.via === "linked")) : -1;
+    if (want > 0) setWinCurrent(win, "item", want);
+  }
+  if (!items.length) {
+    disposeViewerScene(win.id);
+    highLoaderOf(win).cancel();
+    stage.appendChild(viewerEmpty(t("vw.noMedia", { name: name(target.id) })));
+    return true;
+  }
+  const index = Math.min(viewerIndex(win), items.length - 1);
+  if (items.length > 1) {
+    const prev = vwButton("viewer-nav", "‹", t("vw.prev"), () => setViewerIndex(win, index - 1));
+    const pos = document.createElement("span");
+    pos.className = "viewer-pos";
+    pos.dataset.vwPos = `${index + 1}/${items.length}`;
+    pos.textContent = `${index + 1} / ${items.length}`;
+    const next = vwButton("viewer-nav", "›", t("vw.next"), () => setViewerIndex(win, index + 1));
+    prev.disabled = index === 0;
+    next.disabled = index === items.length - 1;
+    bar.append(prev, pos, next);
+  }
+  const item = items[index];
+  if (item.kind === "scene") {
+    const p3 = target.parts.find((p) => p.medium === "3d");
+    const preview = !target.models.length && p3 ? (() => { const u = docSrcUrl(p3.locator); return u ? { id: p3.id, url: u, label: p3.name } : null; })() : null;
+    const s = vwScene(win, stage, target, preview);
+    if (!s) { stage.appendChild(viewerEmpty(t("space.noEpochs"))); return true; }
+    if (typeof winCurrent(win, "reading") === "string" && !s.trace.tool) s.trace.tool = "elevation";
+    // tracing: a click on a mark's name is a vertex like any other, not a pick
+    s.host.classList.toggle("tracing", !!s.trace.tool);
+    vwSceneBar(win, bar, s);
+    caption.textContent = target.models.length ? t("vw.cap.scene", { n: String(target.models.length) }) : (p3?.name ?? "");
+    return true;
+  }
+  disposeViewerScene(win.id);
+  highLoaderOf(win).cancel();
+  vwPartStage(win, stage, bar, target, item.part);
+  caption.textContent = `${item.part.name} · ${t(`vw.via.${item.part.via}`, { x: item.part.through ? name(item.part.through) : "" })}`;
+  return true;
+}
+
+/** The bar of the scene: what is seen («derivata lod4 · 2 MB»), the selector
+ *  that forces a version, the container's line, the 3D tools. */
+function vwSceneBar(win: Win, bar: HTMLElement, s: VwScene): void {
+  const seen = document.createElement("span");
+  seen.className = "vw-seen";
+  seen.dataset.vwSeen = "1";
+  seen.textContent = vwSeenLine(s);
+  seen.title = t("vw.seenTitle", { s: String(viewerHighDelayMs() / 1000), lim: String(getSettings().viewer.lodLimitMB) });
+  bar.appendChild(seen);
+  // the selector: «automatica» (light, then high), or one level for every model
+  const labels: Array<{ label: string; bytes: number; origin: string }> = [];
+  for (const l of s.ladders.values()) for (const v of l) {
+    const x = labels.find((y) => y.label === v.label);
+    if (x) x.bytes += v.bytes ?? 0; else labels.push({ label: v.label, bytes: v.bytes ?? 0, origin: v.origin });
+  }
+  if (labels.length > 1) {
+    const sel = document.createElement("select");
+    sel.className = "vw-force";
+    sel.dataset.vwForce = "1";
+    sel.setAttribute("aria-label", t("vw.forceTitle"));
+    sel.title = t("vw.forceTitle");
+    sel.appendChild(Object.assign(document.createElement("option"), { value: "", textContent: t("vw.forceAuto"), selected: !s.forced }));
+    for (const l of labels.sort((a, b) => a.bytes - b.bytes))
+      sel.appendChild(Object.assign(document.createElement("option"), { value: l.label, selected: s.forced === l.label,
+        textContent: [l.origin === "author" ? t("vw.ofAuthor", { l: l.label }) : l.label, l.bytes ? mbOf(l.bytes) : ""].filter(Boolean).join(" · ") }));
+    sel.addEventListener("pointerdown", (e) => e.stopPropagation());
+    sel.addEventListener("change", (e) => {
+      e.stopPropagation();
+      s.forced = sel.value || null;
+      if (s.forced) highLoaderOf(win).cancel();
+      s.events.push({ t: Math.round(performance.now() - s.t0), what: `forced:${s.forced ?? "auto"}` });
+      s.handle.update(vwSceneItems(s));
+      refreshViewerBar(win);
+    });
+    bar.appendChild(sel);
+  }
+  if (s.plan.heavier && !s.forced && s.step === "high") {
+    const h = document.createElement("span");
+    h.className = "vw-heavier";
+    h.dataset.vwHeavier = "1";
+    h.textContent = t("vw.heavier", { l: s.plan.heavier.label, w: mbOf(s.plan.heavier.bytes), lim: String(getSettings().viewer.lodLimitMB) });
+    bar.appendChild(h);
+  }
+  const alt = document.createElement("span");
+  alt.className = "vw-alt";
+  alt.dataset.vwAlt = "1";
+  alt.textContent = s.groups.map((g) => s.handle.altLine(g)).filter(Boolean).join(" · ");
+  bar.appendChild(alt);
+  const fit = vwButton("win-act vw-fit", "⤢", t("vw.fitTitle"), () => { s.handle.centreScene(); });
+  fit.dataset.vwFit = "1";
+  bar.appendChild(fit);
+  if (!s.docId) return;
+  // Parte 4 · the tools of the document's model
+  const box = document.createElement("span");
+  box.className = "rd-tools vw-tools";
+  box.setAttribute("role", "group");
+  box.setAttribute("aria-label", t("rdt.tools"));
+  for (const tool of VIEWER_3D_TOOLS) {
+    const on = s.trace.tool === tool;
+    // an icon each, its name and what it reads in the tooltip (the bar is narrow)
+    const b = vwButton("win-act rd-tool vw-tool" + (on ? " on" : ""), VW_TOOL_GLYPH[tool], `${t(`vw.tool.${tool}`)} — ${t(`vw.hint.${tool}`)}`, () => {
+      s.trace.tool = on ? null : tool;
+      s.trace.vertices = [];
+      setWinCurrent(win, "doc.tool", s.trace.tool);
+      renderViewer();
+    });
+    b.dataset.tool = tool;
+    b.setAttribute("aria-pressed", String(on));
+    box.appendChild(b);
+  }
+  bar.appendChild(box);
+  const tr = document.createElement("span");
+  tr.className = "rd-tools-hint";
+  tr.dataset.vwTrace = "1";
+  tr.textContent = vwTraceWords(s);
+  bar.appendChild(tr);
+}
+const VW_TOOL_GLYPH: Record<Viewer3dTool, string> = { elevation: "⌖", impost: "⊤", plane3: "◿", planeFace: "▱", line: "╱", polyline: "〰" };
+
+/** The address of a part: in a room the store's (by its checksum), on the disk
+ *  the bridge's, a web url as it is — the Doc's rule (`docSrcUrl`, `storeAddress`). */
+function vwPartUrl(part: ViewerPart): string | null {
+  const n = store?.node(part.id);
+  const store0 = assetStoreBase();
+  if (store0 && n) {
+    const at = storeAddress((n.data ?? null) as Record<string, unknown> | null, store0, sync.room);
+    if (at) return at;
+  }
+  return docSrcUrl(part.locator);
+}
+
+/** An image, a text, a PDF of the node: the document's own medium carries the
+ *  tracer (regions, polygons, passages); a crop of an extractor is shown as it is. */
+function vwPartStage(win: Win, stage: HTMLElement, bar: HTMLElement, target: ViewerTarget, part: ViewerPart): void {
+  const st = store!;
+  const d = target.docId ? st.node(target.docId) : null;
+  const primary = !!d && target.kind === "document" && (part.via === "own" || part.via === "linked")
+    && target.parts.find((p) => p.medium === part.medium && (p.via === "own" || p.via === "linked")) === part;
+  if (part.medium === "pdf") {
+    const obj = document.createElement("object");
+    obj.className = "viewer-media vw-pdf";
+    obj.type = "application/pdf";
+    obj.dataset.vwPdf = part.id;
+    const url = vwPartUrl(part);
+    if (url) void bridgeBlobUrl(url).then((u) => { obj.data = u; }).catch(() => obj.appendChild(document.createTextNode(t("viewer.unreachable"))));
+    else obj.appendChild(document.createTextNode(t("storage.loading")));
+    stage.appendChild(obj);
+    return;
+  }
+  if (primary && d && (part.medium === "image" || part.medium === "text")) {
+    const host = document.createElement("div");
+    host.className = "doc-detail vw-detail";
+    stage.appendChild(host);
+    const armedRaw = winCurrent(win, "reading");
+    const reads = chain.readingsOfDocument(st.doc, d.id);
+    const armed = typeof armedRaw === "string" && reads.includes(armedRaw) ? armedRaw : null;
+    const selectedReading = selectedId && reads.includes(selectedId) ? selectedId : (target.reading && reads.includes(target.reading) ? target.reading : null);
+    const tool = docToolOf(win);
+    const medium = part.medium;
+    // Parte 3 · a IIIF image: the small thumbnail at once, then the size of the frame
+    const node = st.node(part.id) ?? d;
+    const svc = medium === "image" ? iiifImageService(node, iiifBase()) : null;
+    const url = medium === "image" ? (svc ? iiifThumbnailUrl(node, iiifBase(), 256) : signedImageUrl(vwPartUrl(part))) : null;
+    renderReadingStage(host, {
+      store: st, docId: d.id, medium, armed, current: armed ?? selectedReading,
+      imageUrl: url, modelUrl: null,
+      text: () => docText(d),
+      onTrace: (x, g) => traceReading(win, x, d.id, g),
+      tool: tool && DOC_TOOLS[medium].includes(tool) ? tool : null,
+      onTraceFree: (g, anchor) => askWhatItReads(win, host, d.id, g, anchor),
+      vertices: readingVertices,
+      onSelect: (x) => { setWinCurrent(win, "reading", null); select(x); refreshInspector(); renderViewer(); draw(); },
+      onDisarm: () => { setWinCurrent(win, "reading", null); renderViewer(); },
+      onUseValue: (x) => chainUi(st).useAsValue(x),
+      onPropose: (x, text) => void proposeReading(win, x, d.id, text),
+      onVerify: (x) => verifyAiNodes([x]),
+      aiChip: aiChipFor,
+      list: false,
+    });
+    if (svc) {
+      const img = host.querySelector<HTMLImageElement>(".rd-img img");
+      if (img) {
+        img.dataset.vwStep = "thumb";
+        img.addEventListener("load", () => {
+          if (img.dataset.vwStep !== "thumb") return;
+          const fitted = fittedIiifUrl(node, iiifBase(), stage.clientWidth || 800);
+          if (fitted) { img.dataset.vwStep = "fitted"; img.src = fitted; }
+        }, { once: true });
+      }
+    }
+    // the tools of the medium, in the bar
+    const box = document.createElement("span");
+    box.className = "rd-tools vw-tools";
+    box.setAttribute("role", "group");
+    box.setAttribute("aria-label", t("rdt.tools"));
+    for (const tl of DOC_TOOLS[medium]) {
+      const on = tool === tl;
+      const b = vwButton("win-act rd-tool" + (on ? " on" : ""), `${DOC_TOOL_GLYPH[tl]} ${t(`rdt.${tl}`)}`, t(`rdt.${tl}Hint`), () => {
+        if (tl === "passage") { readPassageIn(win); return; }
+        setWinCurrent(win, "doc.tool", on ? null : tl);
+        renderViewer();
+      });
+      b.dataset.tool = tl;
+      b.setAttribute("aria-pressed", String(on));
+      box.appendChild(b);
+    }
+    if (tool && DOC_TOOLS[medium].includes(tool)) box.appendChild(Object.assign(document.createElement("span"), {
+      className: "rd-tools-hint", textContent: t(tool === "polygon" ? "rdt.escPoly" : "rdt.esc") }));
+    bar.appendChild(box);
+    // TRADUZIONI · a text with its facing translation, as the Doc had it
+    if (medium === "text" && trx.isNaturalLanguage(d, "description")) {
+      const langs = document.createElement("div");
+      langs.className = "doc-langs";
+      trui.renderLanguageRow(langs, translationUi, d.id, "description");
+      const facing = vwButton("insp-btn", t("tr.fromDoc"), t("tr.fromDocTitle"), () => {
+        const ps = passagesOf(st.doc, d.id);
+        const targetId = ps.length ? ps[0].extractor.id : d.id;
+        const first = trx.translationsOf(st.doc, targetId, "description")[0];
+        trui.openFacingText(translationUi, targetId, "description", first?.id ?? null);
+      });
+      facing.dataset.docFacing = "1";
+      langs.appendChild(facing);
+      host.appendChild(langs);
+    }
+    return;
+  }
+  // a picture that is not the document's own medium: shown, not traced
+  if (part.medium === "image") {
+    const img = document.createElement("img");
+    img.className = "viewer-media";
+    img.alt = part.name;
+    img.dataset.vwImg = part.id;
+    const url = vwPartUrl(part);
+    if (url) img.src = signedImageUrl(url) ?? url;
+    stage.appendChild(img);
+    return;
+  }
+  const box = viewerEmpty(t("viewer.notPreviewable", { name: part.name }));
+  stage.appendChild(box);
+}
+
 function renderViewer(): void {
   refreshSurfaces("viewer");
 }
@@ -32030,6 +32898,19 @@ function renderViewerInto(win: Win, stage: HTMLElement, caption: HTMLElement,
   caption.textContent = "";
   bar.classList.add("hidden");
 
+  // MICRO-VIEWER-UNICO · no collection dropped on it: the Viewer of ONE node
+  const dropped = winCurrent(win, "collection");
+  if (!dropped) {
+    if (renderNodeViewer(win, stage, caption, bar)) return;
+    stage.textContent = "";
+    bar.textContent = "";
+    bar.classList.add("hidden");
+    bar.classList.remove("vw-bar");
+  } else {
+    disposeViewerScene(win.id);
+    highLoaderOf(win).cancel();
+    bar.classList.remove("vw-bar");
+  }
   const key = viewerKeyOf(win);
   if (!key) {
     stage.appendChild(viewerEmpty(t("viewer.noSelection")));

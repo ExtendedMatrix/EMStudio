@@ -9936,3 +9936,36 @@ tr.tt-hidden { display: none; }
 .nv-print-prose { white-space: pre-line; }
 .ninsp-q-types label { display: block; font-size: 12px; }
 .ninsp-head-input { width: 100%; }
+
+/* MICRO-VIEWER-UNICO · the Viewer of one node: its bar (pin, title, where it
+   comes from, the items, what is seen, the version forced, the tools), the
+   document's scene with its marks, the document's own reader */
+.viewer-bar.vw-bar { flex-wrap: wrap; row-gap: 4px; }
+.vw-keep { padding: 1px 6px; opacity: 0.55; }
+.vw-keep.on { opacity: 1; background: var(--accent-soft, #fdf2c4); }
+.vw-title { font-weight: 600; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 40%; }
+.vw-source { color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; flex: 1 1 120px; }
+.vw-seen { font-family: var(--mono, ui-monospace, monospace); color: var(--text); }
+.vw-heavier { color: var(--warn, #9a6a00); }
+.vw-alt:empty { display: none; }
+.vw-force { font-size: 11px; max-width: 220px; }
+.vw-tools { display: inline-flex; flex-wrap: wrap; gap: 4px; }
+.vw-scene { position: absolute; inset: 0; min-height: 0; }
+.viewer-stage:has(> .vw-scene) { position: relative; padding: 0; }
+.vw-detail { width: 100%; height: 100%; overflow: auto; }
+.vw-pdf { width: 100%; height: 100%; }
+.scn-marks { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; overflow: visible; z-index: 3; }
+.scn-mark polyline, .scn-mark polygon { fill: none; stroke: #ffd400; stroke-width: 2; }
+.scn-mark.k-plane polygon { fill: rgba(255, 212, 0, 0.22); }
+.scn-mark circle { fill: #ffd400; stroke: #222; stroke-width: 1.2; }
+.scn-mark.sel circle, .scn-mark.sel polyline, .scn-mark.sel polygon { stroke: #f15800; }
+.scn-mark.sel circle { fill: #ffaa40; }
+.scn-mark.draft polyline { stroke-dasharray: 5 4; }
+.scn-mark.draft circle { fill: #fff; }
+.scn-mark-labels { position: absolute; inset: 0; pointer-events: none; z-index: 4; }
+.scn-mark-label { position: absolute; transform: translate(8px, -50%); pointer-events: auto; font-size: 11px; padding: 1px 5px;
+  border: 1px solid #222; border-radius: 3px; background: rgba(255, 255, 255, 0.9); color: #111; cursor: pointer; white-space: nowrap; }
+.scn-mark-label.sel { border-color: #f15800; background: #fff3e0; }
+.chain-interpret { display: inline-flex; align-items: center; gap: 4px; }
+.chain-interpret .chain-glyph, .chain-interpret .chain-glyph svg { width: 14px; height: 14px; flex: 0 0 14px; }
+.vw-scene.tracing .scn-mark-label { pointer-events: none; }

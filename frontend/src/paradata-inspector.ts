@@ -62,6 +62,9 @@ export interface ChainUi {
   aiChip?: (nodeId: string) => HTMLElement | null;
   /** the extra rows a document shows (dating, phase 6) */
   documentExtras?: (host: HTMLElement, documentId: string) => void;
+  /** MICRO-VIEWER-UNICO p.4 · «Interpretazione» on an extraction that feeds no
+   *  property yet (born in the Viewer): which property it reads */
+  linkExtraction?: (extractorId: string, anchor: HTMLElement) => void;
 }
 
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, cls?: string, text?: string): HTMLElementTagNameMap[K] {
@@ -194,6 +197,18 @@ function readingRow(ui: ChainUi, x: string, depth: number, withProperty = false)
     a.title = t("chain.readHint");
     a.addEventListener("click", () => ui.openReading!(x));
     acts.appendChild(a);
+  }
+  // MICRO-VIEWER-UNICO p.4 · an extraction of the document that feeds nothing
+  // yet: «Interpretazione» says which property it reads
+  if (!propertyOfExtractor(doc, x) && ui.linkExtraction) {
+    const b = el("button", "tv-act chain-interpret", t("chain.addReading"));
+    const xg = glyphByKey("extractor");
+    if (xg) { const ic = el("span", "chain-glyph"); ic.innerHTML = glyphSvg(xg, null, 14); b.prepend(ic); }
+    b.type = "button";
+    b.title = t("chain.linkExtractionTitle");
+    b.dataset.linkExtraction = x;
+    b.addEventListener("click", () => ui.linkExtraction!(x, b));
+    acts.appendChild(b);
   }
   if (res && propertyOfExtractor(doc, x)) {
     const u = el("button", "tv-act", t("chain.useValue"));
@@ -328,7 +343,13 @@ export function renderChainSection(host: HTMLElement, ui: ChainUi, nodeId: strin
     }
     if (node.node_type === "document") {
       const reads = readingsOfDocument(doc, nodeId);
-      sec.appendChild(el("h3", "insp-sect", t("chain.readingsOf", { n: String(reads.length) })));
+      // MICRO-VIEWER-UNICO p.5 · «Estrazioni da questo documento»: each one goes
+      // to its place in the Viewer (the badge of its place), the free ones say
+      // «Interpretazione»
+      const h = el("h3", "insp-sect", t("chain.extractionsOf", { n: String(reads.length) }));
+      h.dataset.sect = "extractions";
+      sec.appendChild(h);
+      if (!reads.length) sec.appendChild(el("p", "chain-note", t("chain.noExtraction")));
       for (const x of reads) sec.appendChild(readingRow(ui, x, 0, true));
       ui.documentExtras?.(sec, nodeId);
     }
