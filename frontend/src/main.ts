@@ -154,7 +154,7 @@ import {
   versionBanner,
 } from "./logpanel";
 import { DocumentStore, setRoomAuthor, stripYedDrawing } from "./model";
-import { installTableTools } from "./table-tools";
+import { clearFiltersHiding, installTableTools } from "./table-tools";
 import {
   HAS_PARADATA_NODEGROUP,
   initialName,
@@ -487,6 +487,9 @@ import {
   setVolatileProvider,
   sheetsHolding,
   tableViewOf,
+  emDataFilter,
+  hasEmDataFacets,
+  clearEmDataFilters,
 } from "./emdata";
 import { addQualiaClaim, addRow, deleteRow } from "./em-data";
 import { isVolatile, VOLATILE_KEY } from "./volatile";
@@ -2691,6 +2694,30 @@ window.__EM_SCENE__ = () => {
         tools: [...bar.querySelectorAll<HTMLElement>("[data-tool]")].map((b) => b.dataset.tool) } : null,
       caption: area?.querySelector(".viewer-caption")?.textContent ?? null };
   },
+  /** MICRO-VIEWER-UNICO p.6 · a Tabular on a sheet, and what it shows: its rows,
+   *  how many a column filter hides, the selected one and whether it is in view */
+  setSheet: (winId: string, sheet: string) => {
+    const w = windowsOf().find((x) => x.id === winId);
+    if (!w) return false;
+    setSheet(sheet as TableView, w);
+    renderAreaHeaders();
+    return true;
+  },
+  tableRows: (winId: string) => {
+    const w = windowsOf().find((x) => x.id === winId);
+    const area = winAreas.get(winId);
+    if (!w || !area) return null;
+    const trs = [...area.querySelectorAll<HTMLTableRowElement>("tbody tr[data-row], tbody tr[data-id]")];
+    const act = area.querySelector<HTMLElement>(".tv-sel-act");
+    const body = act?.closest<HTMLElement>(".tile-tablebody") ?? area;
+    const rb = act?.getBoundingClientRect(), bb = body.getBoundingClientRect();
+    return { sheet: currentSheetKey(w), rows: trs.length, hidden: trs.filter((r) => r.classList.contains("tt-hidden")).length,
+      shownIds: trs.filter((r) => !r.classList.contains("tt-hidden")).map((r) => r.dataset.row ?? r.dataset.id),
+      active: act ? (act.dataset.row ?? act.dataset.id) : null,
+      activeInView: !!(act && rb && rb.top >= bb.top - 1 && rb.bottom <= bb.bottom + 1),
+      filters: [...area.querySelectorAll<HTMLInputElement | HTMLSelectElement>(".tt-filter")].filter((c) => c.value).map((c) => [c.dataset.col, c.value]),
+      bar: emDataFilter(w), scrollTop: (area.querySelector<HTMLElement>(".tile-tablebody")?.scrollTop ?? 0) };
+  },
   /** MICRO-UN-POSTO · how many undo steps the store holds */
   undoDepth: () => store?.undoDepth ?? 0,
   /** MICRO-UN-POSTO · an auxiliary row on the active graph, as the EMtree's
@@ -3216,18 +3243,52 @@ function showInTables(nodeId: string, from: PickFrom | null): void {
   // the Space's epoch bar changes the scene, it does not ask for a record:
   // measured, every epoch chosen took the «Modelli e proxy» beside it to «Epoche»
   if (store?.node(nodeId)?.node_type === "EpochNode" && windowsOf().find((w) => w.id === from?.win)?.type === "scene") return;
+  // MICRO-VIEWER-UNICO p.6 · EVERY Tabular open, each on its own sheet: one with a
+  // row for the node stays on its sheet (a row filtered out by a column filter
+  // or by the bar's filter comes back, and a line says which filter went); one
+  // without goes to the sheet that has the node. The window clicked does not move.
   let holding: TableView[] | null = null;
   let moved = false;
+  const said: string[] = [];
+  const nm = String(store?.node(nodeId)?.name || nodeId);
   for (const w of windowsOf()) {
     if (w.type !== "table" || !winAreas.has(w.id) || from?.win === w.id) continue;
     const area = document.querySelector(`.tile-area[data-win="${CSS.escape(w.id)}"]`);
-    if (area?.querySelector(`tr[data-row="${CSS.escape(nodeId)}"]`)) continue;
+    const row = area?.querySelector<HTMLTableRowElement>(`tr[data-row="${CSS.escape(nodeId)}"], tr[data-id="${CSS.escape(nodeId)}"]`)
+      ?? area?.querySelector<HTMLElement>(`.tv-card[data-id="${CSS.escape(nodeId)}"]`) ?? null;
+    const sheetName = t(`table.sheet.${currentSheetKey(w)}`);
+    if (row) continue;   // its column filters are looked at below, once every table is drawn
     holding ??= sheetsHolding(nodeId);
-    if (!holding.length || holding.includes(currentSheetKey(w))) continue;
+    if (!holding.length) continue;
+    if (holding.includes(currentSheetKey(w))) {
+      // its sheet has it, and no row is drawn: the bar's text or a facet hides it
+      if (emDataFilter(w) || hasEmDataFacets(w)) {
+        clearEmDataFilters(w);
+        said.push(t("table.focusUnfilteredBar", { name: nm, sheet: sheetName }));
+      }
+      continue;
+    }
     setSheet(holding[0], w);
     moved = true;
   }
   if (moved) renderAreaHeaders();
+  // the column filters, once every table is drawn and dressed (a sheet switched
+  // above redraws EVERY table, and their filters come back in a MutationObserver):
+  // a filter that hides the node's row goes, and a line says which
+  const fromWin = from?.win ?? null;
+  requestAnimationFrame(() => {
+    if (selectedId !== nodeId) return;
+    for (const w of windowsOf()) {
+      if (w.type !== "table" || !winAreas.has(w.id) || fromWin === w.id) continue;
+      const area = document.querySelector(`.tile-area[data-win="${CSS.escape(w.id)}"]`);
+      const row = area?.querySelector<HTMLTableRowElement>(`tr[data-row="${CSS.escape(nodeId)}"], tr[data-id="${CSS.escape(nodeId)}"]`);
+      const table = row?.closest("table");
+      if (!row || !table) continue;
+      const cleared = clearFiltersHiding(table, row);
+      if (cleared.length) said.push(t("table.focusUnfiltered", { name: nm, sheet: t(`table.sheet.${currentSheetKey(w)}`), cols: cleared.join(", ") }));
+    }
+    if (said.length) { toast([...new Set(said)].join(" · ")); markTableSelection(); }
+  });
 }
 
 /** p.4 · a resource, a version or a file picked: a Shelf window shows its files
@@ -3338,6 +3399,7 @@ function select(nodeId: string | null): void {
   if (nodeId && !quietPick) {
     const id = nodeId;
     const from = pickSource();
+    lastSelFrom = from?.win ?? null;
     queueMicrotask(() => {
       // at boot the window registry's `let`s may not exist yet: nothing to show
       try { if (selectedId === id) showSelection(id, from); } catch { /* boot */ }
@@ -3407,19 +3469,36 @@ function toggleSelect(nodeId: string): void {
  * today a row's click selected in the Outliner and the scene, and nothing came
  * back.
  */
+/** The window the last pick came from: its own table does not scroll (MICRO-VIEWER-UNICO p.6). */
+let lastSelFrom: string | null = null;
 function markTableSelection(): void {
   const act = selectedId;
-  let activeRow: HTMLElement | null = null;
-  document.querySelectorAll<HTMLTableRowElement>(".tile-area tr[data-row]").forEach((tr) => {
-    const id = tr.dataset.row ?? "";
+  // MICRO-VIEWER-UNICO p.6 · per AREA: with two or three Tabulars each goes to
+  // its own row (until today only the first row of the page was scrolled), the
+  // rows of the computed views (`data-id`: Chron, Issues) and the cards too
+  const areas = new Map<Element, HTMLElement>();
+  document.querySelectorAll<HTMLElement>(".tile-area tr[data-row], .tile-area tr[data-id], .tile-area .tv-card[data-id]").forEach((tr) => {
+    const id = tr.dataset.row ?? tr.dataset.id ?? "";
     const a = !!act && id === act;
     tr.classList.toggle("tv-sel-act", a);
     tr.classList.toggle("tv-sel", !a && selectedIds.has(id));
-    if (a && !activeRow) activeRow = tr;
+    const area = tr.closest(".tile-area");
+    if (a && area && !areas.has(area) && !tr.classList.contains("tt-hidden")) areas.set(area, tr);
   });
   // MICRO-PROVA-DEV48 p.4 · «Zoom to selection» off: the mark only, no scroll
-  if (getSettings().interaction.zoomToSelection)
-    (activeRow as HTMLElement | null)?.scrollIntoView({ block: "nearest", inline: "nearest" });
+  if (!getSettings().interaction.zoomToSelection) return;
+  // after the column tools have dressed a table just drawn (their row of
+  // filters and their order arrive in a MutationObserver, after this call):
+  // measured, a scroll before them left the row out of view
+  const from = lastSelFrom;
+  requestAnimationFrame(() => {
+    for (const [area, tr] of areas) {
+      if (!tr.isConnected || (from && (area as HTMLElement).dataset.win === from)) continue;
+      const box = tr.closest<HTMLElement>(".tile-tablebody") ?? area as HTMLElement;
+      const rb = tr.getBoundingClientRect(), bb = box.getBoundingClientRect();
+      if (rb.top < bb.top || rb.bottom > bb.bottom) tr.scrollIntoView({ block: "nearest", inline: "nearest" });
+    }
+  });
 }
 document.addEventListener("emdata:rendered", () => markTableSelection());
 
@@ -37018,7 +37097,25 @@ initEmData({
   },
   onOpenDoc: (docId) => { requestDoc(docId, { reading: null }); select(docId); refreshInspector(); },
   onShowInMatrix: (id) => showInMatrix(id),
+  // MICRO-VIEWER-UNICO p.6 · Resources, Interpretations, Combiners
+  getLedgerCtx: () => (store ? { t, isUnit: isStratigraphicType, ai: (id) => aiv.aiState(store!.doc, id), where: ledgerWhere } : null),
 });
+
+/** Where a resource's bytes are, as the app knows it now: the resolver's answer
+ *  (the Storage), else the bridge's «on the disk» (the Space asked), else what
+ *  the node says (a reference; a checksum in a room = the store). Null: not asked. */
+function ledgerWhere(id: string): "disk" | "store" | "both" | "missing" | "reference" | null {
+  const fs = fileStateOf(id)?.state;
+  if (fs === "on_disk" || fs === "disk") return "disk";
+  if (fs === "both") return "both";
+  if (fs === "missing" || fs === "empty_copy") return "missing";
+  if (fs === "in_store" || fs === "store_only" || fs === "bucket_only") return "store";
+  const d = (store?.node(id)?.data ?? {}) as Record<string, unknown>;
+  if (d.residency === "reference") return "reference";
+  if (spaceResident?.version === spaceVersion && spaceResident.ids.has(id)) return "disk";
+  if (assetStoreBase() && typeof d.checksum === "string" && d.checksum) return "store";
+  return null;
+}
 // AUX2: the EM-Data table paints a row blue iff its node is volatile — the SAME
 // marker the canvas overlay reads, so table and graph never disagree.
 setVolatileProvider((id) => isVolatile(store?.node(id)));

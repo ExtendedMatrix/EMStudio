@@ -16,6 +16,8 @@
 //    and Chronology.
 
 import { modelsRows, modelsTableHtml, type ModelsCtx } from "./models-sheet";
+import { LEDGER_SHEETS, ledgerIds, ledgerTableHtml, type LedgerCtx, type LedgerSheet } from "./ledger-sheets";
+import { setColumnFilter } from "./table-tools";
 import type { Space } from "./space";
 import type { DocumentStore } from "./model";
 import type { Win } from "./workspace";
@@ -120,7 +122,8 @@ interface TableState extends FacetSelection {
 }
 
 const VIEWS: TableView[] = ["Units", "Epochs", "Claims", "Authors", "Documents",
-                            "Chron", "Issues", "Models"];
+                            "Chron", "Issues", "Models", "Resources", "Interpretations", "Combiners"];
+const isLedger = (v: TableView): v is LedgerSheet => (LEDGER_SHEETS as string[]).includes(v);
 /** MICRO-3DTILES-LOD · a sheet that is no more, and where it went: the «US view»
  *  was the Units with the first epoch (the Units have it now) */
 const RETIRED_SHEETS: Record<string, TableView> = { US: "Units" };
@@ -162,6 +165,16 @@ export function emDataFilter(win?: Win): string {
   return stateOf(win).q;
 }
 
+/** MICRO-VIEWER-UNICO p.6 · a window's facets chosen (the bar's ▾), and both cleared at once */
+export function hasEmDataFacets(win?: Win): boolean {
+  return Object.values(stateOf(win).f).some((v) => v.length);
+}
+export function clearEmDataFilters(win?: Win): void {
+  patchState(win, { q: "", f: {} });
+  closePop();
+  renderEmData();
+}
+
 export function setEmDataFilter(q: string, win?: Win): void {
   if (q === stateOf(win).q) return;
   patchState(win, { q });
@@ -200,6 +213,7 @@ export function sheetRowCount(sheet: TableView): number | null {
   if (!store || !ctx) return null;
   if (sheet === "Chron") return chronRows(ctx, indexOf(ctx), null).length;
   if (sheet === "Issues") return ctx.issues.length;
+  if (isLedger(sheet)) return ledgerIds(store.doc, sheet).size;
   if (sheet === "Models") {
     const sp = getSpace();
     // the rows, not the table: building the HTML to count it was the first cost
@@ -216,12 +230,15 @@ export function sheetRowCount(sheet: TableView): number | null {
  * order a table goes to look for it: the editable sheets first, then «Modelli e
  * proxy» and the datings. The warnings are not a record's place.
  */
-export const SHEET_SEARCH: TableView[] = ["Units", "Models", "Epochs", "Documents", "Authors", "Claims", "Chron"];
+export const SHEET_SEARCH: TableView[] = ["Units", "Models", "Epochs", "Documents", "Authors", "Claims", "Chron",
+  // MICRO-VIEWER-UNICO p.6 · a resource, an extractor, a combiner: their sheets
+  "Resources", "Interpretations", "Combiners"];
 export function sheetsHolding(id: string): TableView[] {
   const store = getStore();
   const ctx = getCtx();
   if (!store || !ctx) return [];
   return SHEET_SEARCH.filter((sheet) => {
+    if (isLedger(sheet)) return ledgerIds(store.doc, sheet).has(id);
     if (sheet === "Chron") return chronRows(ctx, indexOf(ctx), null).some((r) => r.node.id === id);
     if (sheet === "Models") {
       const sp = getSpace();
@@ -236,7 +253,7 @@ export function sheetsHolding(id: string): TableView[] {
 /** Add a row to the sheet on screen — the `Righe ▸` menu's own path. */
 export function addEmDataRow(store: DocumentStore, win?: Win): string | null {
   const sheet = stateOf(win).sheet;
-  if (sheet === "Chron" || sheet === "Issues" || sheet === "Models") return null;
+  if (sheet === "Chron" || sheet === "Issues" || sheet === "Models" || isLedger(sheet)) return null;
   const id = addRow(store, sheet);
   if (id) renderEmData();
   return id;
@@ -252,6 +269,7 @@ export function toggleEmDataClaimForm(store: DocumentStore, win?: Win): boolean 
 let onDeleted: ((name: string, store: DocumentStore) => void) | null = null;
 /** SPAZIO · the «Modelli e proxy» view: the graph's 3D, read by `space.ts` */
 let getSpace: () => { space: Space; units: string[]; ctx: ModelsCtx } | null = () => null;
+let getLedgerCtx: () => LedgerCtx | null = () => null;
 let onOpenDoc: (docId: string, from: HTMLElement) => void = () => {};
 let onShowInMatrix: (id: string) => void = () => {};
 export function initEmData(opts: {
@@ -272,7 +290,10 @@ export function initEmData(opts: {
   onOpenDoc?: (docId: string, from: HTMLElement) => void;
   /** DEV30 U4 · «Show in the Matrix» on a document's card */
   onShowInMatrix?: (id: string) => void;
+  /** MICRO-VIEWER-UNICO p.6 · what the three new sheets ask the app (where a file is, the AI state) */
+  getLedgerCtx?: () => LedgerCtx | null;
 }): void {
+  if (opts.getLedgerCtx) getLedgerCtx = opts.getLedgerCtx;
   if (opts.onShowInMatrix) onShowInMatrix = opts.onShowInMatrix;
   if (opts.onDeleted) onDeleted = opts.onDeleted;
   if (opts.getSpace) getSpace = opts.getSpace;
@@ -496,6 +517,13 @@ function renderEmDataInto(host: EmDataHost): void {
       .filter((r) => passes(r.node.id, String(r.node.name)));
     count = rows.length;
     content = cards ? chronCardsHtml(rows, cs) : chronTableHtml(rows, cs);
+  } else if (isLedger(st.sheet)) {
+    const lc = getLedgerCtx();
+    if (lc) {
+      const r = ledgerTableHtml(store.doc, st.sheet, lc, (id, text) => passes(id, text));
+      count = r.count;
+      content = r.html;
+    }
   } else if (st.sheet === "Models") {
     const sp = getSpace();
     if (sp) {
@@ -862,6 +890,20 @@ function wireBody(host: EmDataHost, store: DocumentStore, st: TableState): void 
   // a node named anywhere in a view (a card, a link, a computed row) is a pick
   body.querySelectorAll<HTMLElement>("[data-go]").forEach((el) =>
     el.addEventListener("click", (e) => { e.stopPropagation(); onRowPicked(el.dataset.go!); }));
+  // MICRO-VIEWER-UNICO p.6 · a combiner's «n interpretations»: the Interpretations
+  // sheet of THIS window, filtered on that combiner (the column filter, as by hand)
+  body.querySelectorAll<HTMLElement>("[data-ledger-show]").forEach((el) =>
+    el.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const name = el.dataset.ledgerShow!;
+      setSheet("Interpretations", win);
+      const at = (tries: number) => requestAnimationFrame(() => {
+        const tb = host.body.querySelector<HTMLTableElement>("table.ledger-int");
+        if (tb?.dataset.tt === "1") setColumnFilter(tb, t("ledger.col.combiner"), name);
+        else if (tries > 0) at(tries - 1);
+      });
+      at(10);
+    }));
   body.querySelectorAll<HTMLElement>("[data-show-matrix]").forEach((el) =>
     el.addEventListener("click", (e) => { e.stopPropagation(); onShowInMatrix(el.dataset.showMatrix!); }));
   body.querySelectorAll<HTMLElement>("[data-open-doc]").forEach((el) =>
@@ -935,6 +977,13 @@ function wireBody(host: EmDataHost, store: DocumentStore, st: TableState): void 
   };
   body.querySelectorAll<HTMLTableRowElement>("tr[data-row]").forEach((tr) =>
     tr.addEventListener("mousedown", () => markCurrent(tr.getAttribute("data-row"))));
+  // MICRO-VIEWER-UNICO p.6 · the three read-only sheets: a click on a row (not
+  // on one of its buttons) selects its node — the Viewer and the Inspector follow
+  body.querySelectorAll<HTMLTableRowElement>("table.ledger-table tr[data-row]").forEach((tr) =>
+    tr.addEventListener("click", (e) => {
+      if ((e.target as HTMLElement).closest("button, a, input, select")) return;
+      onRowPicked(tr.dataset.row!);
+    }));
   body.querySelectorAll<HTMLButtonElement>("[data-pick]").forEach((btn) => {
     const rowId = btn.getAttribute("data-pick")!;
     btn.addEventListener("mousedown", (e) => {

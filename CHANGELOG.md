@@ -7,6 +7,20 @@ that asked for one.
 ## [Unreleased]
 
 ### Added
+- **Resources, Interpretations, Combiners in the Tabular** (MICRO-VIEWER-UNICO
+  p.6; `ledger-sheets.ts`). Three computed views, a row per node: the
+  resources (media, versions with the lightest and the highest weighed,
+  licence, author, where the file is, «↑ D.xx» for every document that
+  recalls it), the extractors (the document they read, what they read — a
+  IIIF region, a 3D annotation, a text, another property — the value read,
+  the property and unit they feed, who made them, an AI not yet verified
+  said), the combiners (property and unit, how many interpretations, «n ▸»
+  shows them filtered, the rule, the value). A click on a row selects its node.
+  **The focus of every Tabular**: with «Zoom to selection» each open Tabular
+  goes to its own row (each scrolled, not only the first of the page), changes
+  sheet only when the node is not in its own, and a column filter or the
+  bar's filter hiding the row is cleared with a line that says so; the window
+  clicked does not move. VU6; S6.sheets counts the three new views.
 - **One Viewer for a document or a resource** (MICRO-VIEWER-UNICO p.1–4, E.D.
   20 October 2026; `viewer-node.ts`, `viewer-annot.ts`). The Viewer shows ONE
   node, following the selection of every window (📌 holds it on a node):

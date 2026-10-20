@@ -268,3 +268,39 @@ export function installTableTools(root: HTMLElement, labels: () => TableToolsLab
   mo.observe(root, { childList: true, subtree: true });
   return mo;
 }
+
+/** MICRO-VIEWER-UNICO p.6 · set a column's filter from outside (a button that
+ *  shows «the interpretations of C.4»): the same control the person types in,
+ *  so the state is written and the count said as by hand. False: no such column. */
+export function setColumnFilter(table: HTMLTableElement, label: string, value: string): boolean {
+  const ctl = table.querySelector<HTMLInputElement | HTMLSelectElement>(`.tt-filter[data-col="${CSS.escape(label)}"]`);
+  if (!ctl) return false;
+  if (ctl instanceof HTMLSelectElement && value && ![...ctl.options].some((o) => o.value === value))
+    ctl.appendChild(new Option(value, value));
+  ctl.value = value;
+  ctl.dispatchEvent(new Event(ctl instanceof HTMLSelectElement ? "change" : "input"));
+  return true;
+}
+
+/** MICRO-VIEWER-UNICO p.6 · «Zoom to selection» reaching a row a column filter
+ *  hides: the filters that hide THAT row are cleared (the others stay), and
+ *  their columns are returned — the caller says so in a line. */
+export function clearFiltersHiding(table: HTMLTableElement, tr: HTMLTableRowElement): string[] {
+  if (!tr.classList.contains("tt-hidden")) return [];
+  const heads = headCells(table);
+  const cleared: string[] = [];
+  for (const ctl of [...table.querySelectorAll<HTMLInputElement | HTMLSelectElement>(".tt-filter")]) {
+    const v = ctl.value.trim();
+    if (!v) continue;
+    const label = ctl.dataset.col ?? "";
+    const ci = heads.findIndex((th) => th.dataset.ttLabel === label);
+    if (ci < 0) continue;
+    const val = cellValue(tr.cells[ci]).toLowerCase();
+    const ok = ctl instanceof HTMLSelectElement ? val === v.toLowerCase() : val.includes(v.toLowerCase());
+    if (ok) continue;
+    ctl.value = "";
+    ctl.dispatchEvent(new Event(ctl instanceof HTMLSelectElement ? "change" : "input"));
+    cleared.push(label);
+  }
+  return cleared;
+}

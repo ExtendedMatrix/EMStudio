@@ -2738,7 +2738,8 @@ test("S6.sheets", "Tabella · due gruppi (Schede, Viste calcolate), ogni voce co
   const views = items.filter((i) => i.group === "Viste calcolate").map((i) => i.label);
   const counted = items.every((i) => i.count != null && i.note && Number(i.count) === shown[i.sheet]);
   return { pass: groups.join() === "Schede,Viste calcolate" && ["Unità", "Epoche", "Documenti", "Claims", "Autori"].every((x) => sheets.includes(x))
-      && views.join() === "Datazioni,Avvisi,Modelli e proxy" && !items.some((i) => i.label === "Cronologia") && counted && !errors.length,
+      // MICRO-VIEWER-UNICO p.6 · and the three new ones: the resources, the extractors, the combiners
+      && views.join() === "Datazioni,Avvisi,Modelli e proxy,Risorse,Interpretazioni,Combinatori" && !items.some((i) => i.label === "Cronologia") && counted && !errors.length,
     detail: { items, shown, errors } };
 });
 test("S6.datings", "Tabella · «Datazioni» (già «Cronologia») ha i dati di prima: una riga per unità, TPQ/TAQ e datazioni", async () => {
@@ -7209,6 +7210,64 @@ test("VU5.sources", "VIEWER-UNICO p.5 · la finestra Doc non c'è più: Fonti è
   return { pass, detail: { types, card, typeMenu, migrated, errors: [...fresh.errors, ...old.errors] } };
 });
 
+test("VU6.tables", "VIEWER-UNICO p.6 · Risorse, Interpretazioni, Combinatori nella Tabular (una riga = un nodo, il clic lo seleziona, «↑ D.xx» sale al documento); con due e tre Tabular su schede diverse ognuna va alla sua riga, cambia scheda solo se il nodo non c'è, un filtro che nasconde la riga si toglie e lo si dice; la finestra cliccata non si muove", async () => {
+  const { p, ctx, errors } = await open({ doc: "catena", w: 1800, h: 1100 });
+  const wins = await p.evaluate(() => window.__EM_DRAG__.wins().map((w) => ({ id: w.id, type: w.type })));
+  const T1 = wins.find((w) => w.type === "table").id, T2 = wins.find((w) => w.type === "outliner").id;
+  await p.evaluate((x) => window.__EM_DRAG__.retype(x, "table"), T2);
+  await p.waitForTimeout(400);
+  const rows = (x) => p.evaluate((y) => window.__EM_DRAG__.tableRows(y), x);
+  const sheet = async (x, s) => { await p.evaluate(([a, b]) => window.__EM_DRAG__.setSheet(a, b), [x, s]); await p.waitForTimeout(500); };
+  const r = {};
+  for (const s of ["Resources", "Interpretations", "Combiners"]) { await sheet(T1, s); r[s] = (await rows(T1))?.rows; }
+  // a click on an Interpretations row selects the extractor; its «↑ D.1» goes to the document
+  await sheet(T1, "Interpretations");
+  const first = await p.evaluate((x) => document.querySelector(`.tile-area[data-win="${x}"] table.ledger-int tbody tr[data-row] td`)?.parentElement?.dataset.row, T1);
+  await p.click(`.tile-area[data-win="${T1}"] table.ledger-int tbody tr[data-row="${first}"] td.ledger-name`).catch(() => {});
+  await p.waitForTimeout(400);
+  r.clicked = (await p.evaluate(() => window.__EM_DRAG__.selected()))[0] === first;
+  const up = await p.evaluate((x) => document.querySelector(`.tile-area[data-win="${x}"] table.ledger-int tbody tr button[data-go]`)?.dataset.go, T1);
+  if (up) await p.click(`.tile-area[data-win="${T1}"] table.ledger-int tbody tr button[data-go="${up}"]`).catch(() => {});
+  await p.waitForTimeout(400);
+  r.up = (await p.evaluate(() => window.__EM_DRAG__.selected()))[0] === up;
+  // two Tabulars: Units and Models hold a unit — neither changes sheet
+  await sheet(T1, "Units"); await sheet(T2, "Models");
+  await p.evaluate(() => window.__EM_DRAG__.select("USM101"));
+  await p.waitForTimeout(900);
+  r.both = [await rows(T1), await rows(T2)].map((x) => [x.sheet, x.active, x.activeInView]);
+  // an extractor: Units does not hold it → Interpretations; Models neither
+  await p.evaluate(() => window.__EM_DRAG__.select("X1"));
+  await p.waitForTimeout(900);
+  r.extractor = [await rows(T1), await rows(T2)].map((x) => [x.sheet, x.active, x.activeInView]);
+  // a column filter hiding the row: cleared, and said
+  await sheet(T1, "Interpretations");
+  await p.evaluate((x) => { const c = document.querySelector(`.tile-area[data-win="${x}"] .tt-filter[data-col="Nome"]`); if (c) { c.value = "zzz"; c.dispatchEvent(new Event("input")); } }, T1);
+  await p.waitForTimeout(300);
+  r.hidden = (await rows(T1)).hidden;
+  const toastBefore = await p.evaluate(() => document.getElementById("toast")?.textContent ?? "");
+  await p.evaluate(() => window.__EM_DRAG__.select("D1"));
+  await p.waitForTimeout(200);
+  await p.evaluate(() => window.__EM_DRAG__.select("X1"));
+  await p.waitForTimeout(900);
+  r.unfiltered = await rows(T1).then((x) => ({ hidden: x.hidden, filters: x.filters, inView: x.activeInView }));
+  r.toast = await p.evaluate(() => document.getElementById("toast")?.textContent ?? "");
+  // three Tabulars; a click IN one of them: that one does not scroll
+  const T3 = wins.find((w) => w.type === "emtree").id;
+  await p.evaluate((x) => window.__EM_DRAG__.retype(x, "table"), T3);
+  await p.waitForTimeout(400);
+  await sheet(T1, "Units"); await sheet(T2, "Models"); await sheet(T3, "Documents");
+  await p.evaluate(() => window.__EM_DRAG__.select("D1"));
+  await p.waitForTimeout(900);
+  r.three = [await rows(T1), await rows(T2), await rows(T3)].map((x) => [x.sheet, x.active, x.activeInView]);
+  await p.screenshot({ path: SHOT("vu6-tre-tabular") }).catch(() => {});
+  await ctx.close();
+  const pass = r.Resources >= 0 && r.Interpretations > 0 && r.Combiners >= 0 && r.clicked && r.up
+    && r.both[0][0] === "Units" && r.both[1][0] === "Models" && r.both.every((x) => x[1] === "USM101")
+    && r.extractor.every((x) => x[0] === "Interpretations" && x[1] === "X1" && x[2])
+    && r.hidden > 0 && r.unfiltered.hidden === 0 && !r.unfiltered.filters.length && /filtro/.test(r.toast) && r.toast !== toastBefore
+    && r.three.every((x) => x[0] === "Documents" && x[1] === "D1" && x[2]) && !errors.length;
+  return { pass, detail: { ...r, errors } };
+});
 
 // ── run ─────────────────────────────────────────────────────────────────────
 const chosen = cases.filter((c) => !only.length || only.includes(c.id) || only.some((o) => c.id.startsWith(o + ".")));
