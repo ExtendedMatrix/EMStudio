@@ -5151,22 +5151,18 @@ test("TC1.storage", "T-C1 · due file aperti in cartelle diverse: lo Storage mos
     detail: { afterB, afterA, a, b, errors } };
 });
 
-test("B1.near", "B1 · «Publish…» da dichiarato: «Who you are» compare sotto il bottone, allineato a destra, e non copre l'avviso in basso", async () => {
+// MICRO-PULIZIA p.1 · «Publish…» no longer asks who you are first and then says
+// «nowhere to publish to»: the path B1 measured is gone. What stays measurable:
+// it is grey, reached by Tab, and its click explains and opens no panel.
+test("B1.near", "B1 → PULIZIA p.1 · «Publish…» grigio (aria-disabled, raggiungibile da Tab): il clic dice «fase 2» e non apre «Who you are»", async () => {
   const { p, ctx, errors } = await open({ doc: "catena", locale: "en" });
-  await p.click("#ns-publish");
-  await p.waitForTimeout(500);
-  const r = await p.evaluate(() => {
-    const b = document.getElementById("ns-publish").getBoundingClientRect();
-    const box = document.querySelector(".idpanel")?.getBoundingClientRect();
-    const toast = document.getElementById("toast");
-    const tr = toast && !toast.classList.contains("hidden") ? toast.getBoundingClientRect() : null;
-    const over = (x, y) => x && y && !(x.right <= y.left || y.right <= x.left || x.bottom <= y.top || y.bottom <= x.top);
-    return { btn: [b.left, b.bottom, b.right], box: box && [box.left, box.top, box.right, box.bottom], coversToast: tr ? over(box, tr) : null,
-      coversBtn: over(box, b) };
-  });
+  await p.click("#ns-publish", { force: true });
+  await p.waitForTimeout(400);
+  const r = await p.evaluate(() => ({ aria: document.getElementById("ns-publish").getAttribute("aria-disabled"),
+    disabled: document.getElementById("ns-publish").disabled, panel: !!document.querySelector(".idpanel"),
+    toast: document.getElementById("toast").innerText }));
   await ctx.close();
-  return { pass: !!r.box && Math.abs(r.box[1] - r.btn[1]) < 20 && Math.abs(r.box[2] - r.btn[2]) < 4 && !r.coversToast && !r.coversBtn && !errors.length,
-    detail: { r, errors } };
+  return { pass: r.aria === "true" && !r.disabled && !r.panel && /phase 2/.test(r.toast) && !errors.length, detail: { r, errors } };
 });
 
 test("TC2.scan", "T-C2 · Tempio (copia sotto la radice del bridge), scan di EM/DosCo: ID doppi D.04 e D.11, un file senza ID; Documents: D.02, D.32 e D.33 tutti presenti (nessun «absent»), con la miniatura; ogni orfano ha la miniatura, o dice «empty copy» se i suoi byte sono zeri", async () => {
@@ -6538,6 +6534,32 @@ test("DC7.updates", "DOVE-CHI-MENU p.7 · «Controlla aggiornamenti…» chiede 
     && asked.length === 3 && asked.every((u) => u.startsWith("https://api.github.com/repos/ExtendedMatrix/EMStudio/releases"))
     && !errors.filter((e) => !/internetdisconnected|ERR_INTERNET_DISCONNECTED|Failed to load resource/.test(e)).length;
   return { pass, detail: { installed, r, asked, errors } };
+});
+
+// ── MICRO-PULIZIA-INTERFACCIA (20 ott 2026) ─────────────────────────────────
+test("PU1.strip", "PULIZIA p.1 · barra del nome: niente «em.json»; un pallino accanto al nome quando ci sono modifiche (tooltip «Modifiche non salvate · ⌘S»), il pallino salva e il salvataggio lo dice; «Pubblica…» grigio con il perché; «Progetto vN» senza impronta, l'impronta nel tooltip", async () => {
+  const { p, ctx, errors } = await open({ doc: "catena", locale: "it" });
+  const st = () => p.evaluate(() => { const d = document.getElementById("dirty-dot"), v = document.getElementById("project-version"), pub = document.getElementById("ns-publish");
+    return { save: !!document.getElementById("ns-save"), dot: !!d && !d.classList.contains("hidden"), tip: d?.title ?? "", aria: d?.getAttribute("aria-label") ?? "",
+      inStrip: !!d?.closest("#name-strip"), pub: pub?.getAttribute("aria-disabled"), pubTip: pub?.title ?? "", ver: v?.textContent ?? "", verTip: v?.title ?? "" }; });
+  const r0 = await st();
+  const prop = await p.evaluate(() => JSON.parse(window.__EM_DRAG__.graphJson()).nodes.find((n) => n.node_type === "property")?.id);
+  await p.evaluate((id) => window.__EM_DRAG__.setValue(id, "pu1"), prop);
+  await p.waitForTimeout(300);
+  const r1 = await st();
+  const dl = p.waitForEvent("download", { timeout: 5000 }).catch(() => null);
+  await p.click("#dirty-dot");
+  const file = (await dl)?.suggestedFilename() ?? null;
+  await p.waitForTimeout(300);
+  const r2 = await st();
+  const toast = await p.evaluate(() => document.getElementById("toast").innerText);
+  await ctx.close();
+  const pass = !r0.save && r1.dot && r1.inStrip && /Modifiche non salvate · (⌘S|Ctrl\+S)/.test(r1.tip) && r1.aria === r1.tip
+    && !!file && !r2.dot && /^Salvato: /.test(toast)
+    && r0.pub === "true" && /fase 2/.test(r0.pubTip)
+    && (!r2.ver || (/^Progetto v\d+$/.test(r2.ver) && /sha256:/.test(r2.verTip) && /Fissa versione/.test(r2.verTip)))
+    && !errors.length;
+  return { pass, detail: { r0, r1, r2, file, toast, errors } };
 });
 
 // ── run ─────────────────────────────────────────────────────────────────────

@@ -3903,7 +3903,9 @@ function renderNameStrip(): void {
     part ? t("strip.partOf", { x: name(part.target) }) : "",
   ].filter(Boolean).join(" · ");
 }
-document.getElementById("ns-save")?.addEventListener("click", () => click("btn-save"));
+// MICRO-PULIZIA p.1 · the dot beside the name is Save, for the mouse and for Tab
+dirtyDot.addEventListener("click", () => click("btn-save"));
+onLocaleChange(updateToolbar);
 document.getElementById("ns-publish")?.addEventListener("click", () => publishToStratiGraph());
 onLocaleChange(renderNameStrip);
 
@@ -4294,7 +4296,13 @@ function syncLegend(host: HTMLElement, win: Win | undefined, shown: Scene | null
 function updateToolbar(): void {
   btnUndo.disabled = !undoStore()?.canUndo;
   btnRedo.disabled = !undoStore()?.canRedo;
-  dirtyDot.classList.toggle("hidden", !store?.dirty);
+  // MICRO-PULIZIA p.1 · the active graph's FILE: a graph moved out of it is
+  // unsaved work of the file even when no graph of it is dirty
+  const af = emtree.activeFile();
+  dirtyDot.classList.toggle("hidden", !(store?.dirty || (af && emtree.fileDirty(af.id))));
+  const saveKeys = /Mac/.test(navigator.platform) ? "⌘S" : "Ctrl+S";
+  dirtyDot.title = t("strip.dirtyTitle", { keys: saveKeys });
+  dirtyDot.setAttribute("aria-label", dirtyDot.title);
   // POL1: the filter panel filters nothing without a graph, and an enabled
   // control that does nothing is a worse answer than an absent one.
   refreshFunnel();
@@ -8704,17 +8712,21 @@ function updateVersionIndicator(): void {
     return;
   }
   el.classList.remove("hidden");
-  el.textContent = `${t("version.project")} ${versionLabel(projectVersion)}`;
+  // MICRO-PULIZIA p.1 · «Project v17» in the bar; the digest it came from and
+  // what the number means go in the tooltip
+  el.textContent = `${t("version.project")} v${projectVersion.number}`;
   const at = projectVersion.modified_at
     ? new Date(projectVersion.modified_at).toLocaleString()
     : "";
   el.title = [
+    `${t("version.project")} ${versionLabel(projectVersion)}`,
     `${t("version.digest")}: ${projectVersion.id}`,
     projectVersion.was_revision_of
       ? `${t("version.wasRevisionOf")}: ${projectVersion.was_revision_of}`
       : "",
     at ? `${t("version.modifiedAt")}: ${at}` : "",
     t("version.hint"),
+    t("version.pinHint"),
   ].filter(Boolean).join("\n");
 }
 
@@ -8930,6 +8942,7 @@ async function saveFile(file: OpenFile): Promise<boolean> {
       currentFilePath = emtree.active()?.path ?? currentFilePath;
       info.textContent = `saved ${baseName(file.path)}`;
       logInfo(t("save.fileWritten", { file: file.name, n: String(Object.keys(doc.graphs).length) }));
+      toast(t("save.savedToast", { file: baseName(file.path) }));
       updateToolbar();
       refreshEMTree();
       return true;
@@ -8941,6 +8954,7 @@ async function saveFile(file: OpenFile): Promise<boolean> {
   const doc = fileContainer(file);
   browserDownload(JSON.stringify(doc, null, 1), downloadNameFor(file));
   markFileSaved(file, doc);
+  toast(t("save.downloadedToast", { file: downloadNameFor(file) }));
   updateToolbar();
   refreshEMTree();
   return true;
@@ -8962,6 +8976,7 @@ async function saveFileAs(file: OpenFile, defaultPath: string | null = null): Pr
       addRecent({ path, name: baseName(path) }, Date.now());
       markFileSaved(file, doc);
       info.textContent = `saved ${baseName(path)}`;
+      toast(t("save.savedToast", { file: baseName(path) }));
       updateToolbar();
       refreshEMTree();
       return true;
@@ -8972,6 +8987,7 @@ async function saveFileAs(file: OpenFile, defaultPath: string | null = null): Pr
   }
   browserDownload(text, downloadNameFor(file));
   markFileSaved(file, doc);
+  toast(t("save.downloadedToast", { file: downloadNameFor(file) }));
   updateToolbar();
   refreshEMTree();
   return true;
@@ -14627,8 +14643,16 @@ document.getElementById("shelf-promote-x")?.addEventListener(
 // useless exactly where it is most needed, in a trench with no network.
 /** AUDIT N9 · «Pubblica…», the one place of the verb (the name strip) */
 function publishToStratiGraph(): void {
+  // MICRO-PULIZIA p.1 · grey until phase 2 (aria-disabled, so it is still
+  // reached by Tab): a click says when it comes, and leads nowhere else — the
+  // identity question used to come first and end in «nowhere to publish to».
+  const btn = document.getElementById("ns-publish");
+  if (btn?.getAttribute("aria-disabled") === "true") {
+    toast(t("strip.publishPhase2"));
+    return;
+  }
   // B1 · «Who you are» opens beside the button that asked for it
-  if (!requireVerifiedIdentity(document.getElementById("ns-publish"))) return;
+  if (!requireVerifiedIdentity(btn)) return;
   // Verified, and still nothing to publish TO: the StratiGraph delivery
   // endpoint is phase 2. Saying so is the honest end of this path — the gate is
   // real and measurable today, the destination is not there yet.

@@ -105,7 +105,7 @@
            the Mode menu drives connect/disconnect. -->
       <button id="btn-sync" class="hidden" title="Connect to Blender/EMtools for live selection sync" data-i18n="toolbar.sync">Sync</button>
       <!-- MENU-AUDIT · Risorse moved into the Strumenti menu (see above). -->
-      <span id="dirty-dot" class="hidden" data-i18n-title="menu.dirtyTitle" title="unsaved changes">●</span>
+      <!-- MICRO-PULIZIA p.1 · the unsaved-changes dot moved beside the name, in the name strip -->
       <span class="tb-sep"></span>
       <!-- HDR1 · WORKSPACE TABS — the master header's only switcher, and the one
            question it answers: which workspace. The built-ins (Graph editing ·
@@ -147,6 +147,11 @@
     <div id="name-strip">
       <div class="ns-name">
         <h1 id="ns-title">EMStudio</h1>
+        <!-- MICRO-PULIZIA p.1 · the em.json button (a Save with no name and no
+             answer) is gone: unsaved changes are a dot beside the name, and the
+             dot is Save (⌘S) for whoever clicks it or reaches it with Tab -->
+        <button id="dirty-dot" class="hidden" type="button"
+                title="Unsaved changes · ⌘S" aria-label="Unsaved changes · ⌘S"></button>
         <span id="ns-ctx"></span>
       </div>
       <div id="search-wrap" class="ns-search">
@@ -170,8 +175,11 @@
       </button>
       <span class="ns-grow"></span>
       <div class="ns-actions">
-        <button id="ns-save" class="ns-btn" type="button" data-i18n="strip.save">em.json</button>
-        <button id="ns-publish" class="ns-btn primary" type="button" data-i18n="strip.publish">Publish…</button>
+        <!-- MICRO-PULIZIA p.1 · «Publish…» stays where the verb will live, grey:
+             aria-disabled (not disabled) so Tab reaches it and the tooltip says why -->
+        <button id="ns-publish" class="ns-btn primary" type="button" aria-disabled="true"
+                data-i18n="strip.publish" data-i18n-title="strip.publishPhase2"
+                title="Publishing to a StratiGraph node arrives with phase 2">Publish…</button>
       </div>
     </div>
     <main>

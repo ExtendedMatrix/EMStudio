@@ -45,6 +45,15 @@ that asked for one.
 - `scripts/check-space-views.mjs` (101), `scripts/check-implicit-pd.mjs` (30).
 
 ### Changed
+- **The name strip, cleaned** (MICRO-PULIZIA-INTERFACCIA p.1, E.D. 20 October
+  2026). The «em.json» button (a Save with no name and no answer) is gone:
+  unsaved changes are a dot beside the name (tooltip «Unsaved changes · ⌘S»;
+  the dot is a button, it saves), and a save says so in a toast. «Publish…»
+  stays, grey (`aria-disabled`, still reached by Tab): its tooltip and its click
+  say that publishing to a StratiGraph node arrives with phase 2 — no identity
+  question that ended in «nowhere to publish to». The status bar reads
+  «Project v17»; the digest, what the number means and «Pin version…» are in
+  the tooltip. `data-i18n-aria-label` translates the name of icon-only buttons.
 - **One table of commands, two menus** (MICRO-DOVE-CHI-MENU p.1, E.D. 19 October
   2026). `menu-table.ts` holds every command (id, label, accelerator,
   platforms); the page's File, Edit and Help and the Mac desktop's menu bar are

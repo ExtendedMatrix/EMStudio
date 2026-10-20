@@ -349,7 +349,6 @@ const EN: Dict = {
   "menu.stratiminerTitle": "StratiMiner: build a graph from a folder of unstructured sources, via the reviewable em_data.xlsx table",
   "menu.resourcesTitle": "Resources: the shared Resource layer (Documents · RM · DTC · orphan files) via the bridge",
   "menu.helpTitle": "Help",
-  "menu.dirtyTitle": "unsaved changes",
   "tst.movedTo": "moved to {name}",
   "tst.anEpoch": "the epoch",
   "tst.numbered": "numbered {n}",
@@ -1705,7 +1704,6 @@ const EN: Dict = {
   "tile.splitDone": "Window split",
   "tile.joinDone": "Windows joined",
   "strip.search": "Search the graph… (/)",
-  "strip.save": "em.json",
   "strip.publish": "Publish…",
   "strip.noResults": "No results",
   "strip.graphCtx": "graph · {n} nodes",
@@ -3948,6 +3946,11 @@ const EN: Dict = {
   "updates.install": "Install and restart",
   "updates.installing": "Downloading and checking the signature…",
   "updates.installFailed": "The update was not installed: {why}",
+  "strip.dirtyTitle": "Unsaved changes · {keys}",
+  "strip.publishPhase2": "Publishing to a StratiGraph node arrives with phase 2: there is nowhere to publish to yet.",
+  "save.savedToast": "Saved: {file}",
+  "save.downloadedToast": "Saved: {file} (downloaded)",
+  "version.pinHint": "File ▸ Pin version… freezes it for the DOI.",
 };
 
 // ── Italiano: complete, because E.D. works in it ───────────────────────────────
@@ -4240,7 +4243,6 @@ const IT: Dict = {
   "menu.stratiminerTitle": "StratiMiner: costruisci un grafo da una cartella di fonti non strutturate, passando per la tabella em_data.xlsx da rivedere",
   "menu.resourcesTitle": "Risorse: il livello condiviso delle risorse (Documenti · RM · DTC · file orfani) tramite il bridge",
   "menu.helpTitle": "Aiuto",
-  "menu.dirtyTitle": "modifiche non salvate",
   "tst.movedTo": "spostato in {name}",
   "tst.anEpoch": "l'epoca",
   "tst.numbered": "numerati {n}",
@@ -5574,7 +5576,6 @@ const IT: Dict = {
   "tile.splitDone": "Finestra divisa",
   "tile.joinDone": "Finestre unite",
   "strip.search": "Cerca nel grafo… (/)",
-  "strip.save": "em.json",
   "strip.publish": "Pubblica…",
   "strip.noResults": "Nessun risultato",
   "strip.graphCtx": "grafo · {n} nodi",
@@ -7770,6 +7771,11 @@ const IT: Dict = {
   "updates.install": "Installa e riavvia",
   "updates.installing": "Scarico e controllo la firma…",
   "updates.installFailed": "L'aggiornamento non è stato installato: {why}",
+  "strip.dirtyTitle": "Modifiche non salvate · ⌘S",
+  "strip.publishPhase2": "La pubblicazione verso il nodo StratiGraph arriva con la fase 2: non c'è ancora dove pubblicare.",
+  "save.savedToast": "Salvato: {file}",
+  "save.downloadedToast": "Salvato: {file} (scaricato)",
+  "version.pinHint": "File ▸ Fissa versione… la congela per il DOI.",
 };
 
 // ── The six other project languages: AI DRAFTS, awaiting validation ───────────
@@ -7883,6 +7889,11 @@ const EL: Dict = {
   "toast.activeGraph": "ενεργός γράφος: «{name}»",
   "toast.workspaceEmpty": "κενός χώρος εργασίας — κανένας ανοιχτός γράφος",
   "toast.openOrDrop": "ανοίξτε ή σύρετε ένα αρχείο .em.json",
+  "strip.dirtyTitle": "Μη αποθηκευμένες αλλαγές · ⌘S",
+  "strip.publishPhase2": "Η δημοσίευση σε κόμβο StratiGraph έρχεται με τη φάση 2: δεν υπάρχει ακόμη πού να δημοσιεύσετε.",
+  "save.savedToast": "Αποθηκεύτηκε: {file}",
+  "save.downloadedToast": "Αποθηκεύτηκε: {file} (λήψη)",
+  "version.pinHint": "Αρχείο ▸ Κλείδωμα έκδοσης… την παγώνει για το DOI.",
 };
 
 const HE: Dict = {
@@ -7969,6 +7980,11 @@ const HE: Dict = {
   "toast.activeGraph": "גרף פעיל: \"{name}\"",
   "toast.workspaceEmpty": "מרחב העבודה ריק — אין גרף פתוח",
   "toast.openOrDrop": "פתח או גרור קובץ .em.json",
+  "strip.dirtyTitle": "שינויים שלא נשמרו · ⌘S",
+  "strip.publishPhase2": "פרסום לצומת StratiGraph יגיע בשלב 2: עדיין אין לאן לפרסם.",
+  "save.savedToast": "נשמר: {file}",
+  "save.downloadedToast": "נשמר: {file} (הורד)",
+  "version.pinHint": "קובץ ▸ קיבוע גרסה… מקפיא אותה עבור ה־DOI.",
 };
 
 const ES: Dict = {
@@ -8060,6 +8076,11 @@ const ES: Dict = {
   "toast.activeGraph": "grafo activo: «{name}»",
   "toast.workspaceEmpty": "espacio de trabajo vacío — ningún grafo abierto",
   "toast.openOrDrop": "abre o arrastra un archivo .em.json",
+  "strip.dirtyTitle": "Cambios sin guardar · ⌘S",
+  "strip.publishPhase2": "La publicación en un nodo StratiGraph llega con la fase 2: todavía no hay dónde publicar.",
+  "save.savedToast": "Guardado: {file}",
+  "save.downloadedToast": "Guardado: {file} (descargado)",
+  "version.pinHint": "Archivo ▸ Fijar versión… la congela para el DOI.",
 };
 
 const PL: Dict = {
@@ -8150,6 +8171,11 @@ const PL: Dict = {
   "toast.activeGraph": "aktywny graf: „{name}”",
   "toast.workspaceEmpty": "obszar roboczy pusty — brak otwartego grafu",
   "toast.openOrDrop": "otwórz lub przeciągnij plik .em.json",
+  "strip.dirtyTitle": "Niezapisane zmiany · ⌘S",
+  "strip.publishPhase2": "Publikacja w węźle StratiGraph przyjdzie z fazą 2: na razie nie ma dokąd publikować.",
+  "save.savedToast": "Zapisano: {file}",
+  "save.downloadedToast": "Zapisano: {file} (pobrano)",
+  "version.pinHint": "Plik ▸ Zamroź wersję… zamraża ją dla DOI.",
 };
 
 const RO: Dict = {
@@ -8241,6 +8267,11 @@ const RO: Dict = {
   "toast.activeGraph": "graf activ: „{name}”",
   "toast.workspaceEmpty": "spațiu de lucru gol — niciun graf deschis",
   "toast.openOrDrop": "deschide sau trage un fișier .em.json",
+  "strip.dirtyTitle": "Modificări nesalvate · ⌘S",
+  "strip.publishPhase2": "Publicarea pe un nod StratiGraph vine cu faza 2: încă nu există unde publica.",
+  "save.savedToast": "Salvat: {file}",
+  "save.downloadedToast": "Salvat: {file} (descărcat)",
+  "version.pinHint": "Fișier ▸ Fixează versiunea… o îngheață pentru DOI.",
 };
 
 const FR: Dict = {
@@ -8335,6 +8366,11 @@ const FR: Dict = {
   "toast.activeGraph": "graphe actif : « {name} »",
   "toast.workspaceEmpty": "espace de travail vide — aucun graphe ouvert",
   "toast.openOrDrop": "ouvrez ou déposez un fichier .em.json",
+  "strip.dirtyTitle": "Modifications non enregistrées · ⌘S",
+  "strip.publishPhase2": "La publication vers un nœud StratiGraph arrive avec la phase 2 : il n'y a pas encore où publier.",
+  "save.savedToast": "Enregistré : {file}",
+  "save.downloadedToast": "Enregistré : {file} (téléchargé)",
+  "version.pinHint": "Fichier ▸ Figer la version… la fige pour le DOI.",
 };
 
 /**
@@ -8496,7 +8532,6 @@ const DE: Dict = {
   "menu.stratiminerTitle": "StratiMiner: einen Graphen aus einem Ordner unstrukturierter Quellen bauen, über die prüfbare Tabelle em_data.xlsx",
   "menu.resourcesTitle": "Ressourcen: die gemeinsame Ressourcenebene (Dokumente · RM · DTC · verwaiste Dateien) über die Bridge",
   "menu.helpTitle": "Hilfe",
-  "menu.dirtyTitle": "ungespeicherte Änderungen",
   "tst.movedTo": "verschoben nach {name}",
   "tst.anEpoch": "die Epoche",
   "tst.numbered": "{n} nummeriert",
@@ -9110,7 +9145,6 @@ const DE: Dict = {
   "tile.splitDone": "Fenster geteilt",
   "tile.joinDone": "Fenster vereint",
   "strip.search": "Im Graphen suchen… (/)",
-  "strip.save": "em.json",
   "strip.publish": "Veröffentlichen…",
   "strip.noResults": "Keine Treffer",
   "strip.graphCtx": "Graph · {n} Knoten",
@@ -9656,6 +9690,11 @@ const DE: Dict = {
   "tropy.promote": "Zum Dokument befördern",
   "tropy.promoteHint": "Macht daraus einen DocumentNode des Graphen; jede Auswahl wird eine Lesung mit ihrem Bereich",
   "tropy.promotedMsg": "{d} befördert: {n} Lesungen aus seinen Auswahlen",
+  "strip.dirtyTitle": "Ungespeicherte Änderungen · ⌘S",
+  "strip.publishPhase2": "Das Veröffentlichen auf einem StratiGraph-Knoten kommt mit Phase 2: Es gibt noch kein Ziel.",
+  "save.savedToast": "Gespeichert: {file}",
+  "save.downloadedToast": "Gespeichert: {file} (heruntergeladen)",
+  "version.pinHint": "Datei ▸ Version fixieren… friert sie für den DOI ein.",
 };
 
 const DICTS: Record<Locale, Dict> = {
@@ -9780,7 +9819,8 @@ export function t(key: string, vars?: Record<string, string | number>,
 
 /**
  * Translate the static markup: `data-i18n` sets the text, `data-i18n-title` the
- * tooltip, `data-i18n-placeholder` the placeholder.
+ * tooltip, `data-i18n-placeholder` the placeholder, `data-i18n-aria-label` the
+ * name a screen reader says (an icon-only button has no text to say).
  *
  * Attributes on the HTML rather than building the toolbar in TS: the chrome is
  * already written in `index.html` and rewriting it as JS to make it translatable
@@ -9795,6 +9835,10 @@ export function applyStaticTranslations(root: ParentNode = document): void {
   root.querySelectorAll<HTMLElement>("[data-i18n-title]").forEach((element) => {
     const key = element.dataset.i18nTitle;
     if (key) element.title = t(key);
+  });
+  root.querySelectorAll<HTMLElement>("[data-i18n-aria-label]").forEach((element) => {
+    const key = element.dataset.i18nAriaLabel;
+    if (key) element.setAttribute("aria-label", t(key));
   });
   root.querySelectorAll<HTMLElement>("[data-i18n-placeholder]")
     .forEach((element) => {
