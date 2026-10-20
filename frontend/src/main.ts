@@ -126,7 +126,8 @@ import {
   unknownCapabilities,
 } from "./connectors";
 import type { ConnectorVersions } from "./connectors";
-import { narrativesIn, renderNarrativeView } from "./narrative";
+import { narrativesIn, queryInputFor, renderNarrativeView, setQueryContext } from "./narrative";
+import * as nq from "./narrative-query";
 import { acceptInvite, canManage, pendingJoin } from "./members";
 
 import {
@@ -12611,6 +12612,19 @@ function epochSliceOf(scene: Scene, epochId: string): Scene | null {
   };
 }
 
+/** NARRATIVA-BLOCCHI p.2 · the export carries a query block as the text of
+ *  its answer, with the date: s3Dgraphy's exporters read prose, and do not
+ *  know `options.query`. A copy: the story keeps its live block. */
+function withBakedQueries(docJson: EmDocument, narrativeId: string): EmDocument {
+  const nar = docJson.graph.nodes.find((n) => n.id === narrativeId);
+  const data = (nar?.data ?? {}) as Record<string, unknown>;
+  if (!nar || !Array.isArray(data.chapters)) return docJson;
+  const chapters = data.chapters as { blocks?: { block_type?: string }[] }[];
+  if (!chapters.some((c) => (c.blocks ?? []).some((b) => nq.queryOf(b)))) return docJson;
+  nar.data = { ...data, chapters: nq.bakeQueries(chapters, queryInputFor(docJson, chapters as never), new Date()) };
+  return docJson;
+}
+
 async function exportNarrative(format: string, opts: { force?: boolean } = {}): Promise<void> {
   if (!store) {
     toast(t("toast.openADocument"));
@@ -12645,7 +12659,7 @@ async function exportNarrative(format: string, opts: { force?: boolean } = {}): 
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ doc: JSON.parse(store.toJSON()),
+        body: JSON.stringify({ doc: withBakedQueries(JSON.parse(store.toJSON()), chosen),
                                narrative_id: chosen,
                                figures,
                                // COLLEGARE · only when the dialog's «Esporta
@@ -18850,7 +18864,8 @@ function markNarrativeSelection(): void {
     if (!host) continue;
     host.querySelectorAll(".nv-sel").forEach((e) => e.classList.remove("nv-sel"));
     if (!nvSel || !nvFocus) continue;
-    const target = nvSel.block == null
+    const target = nvSel.chapter === -1 ? host.querySelector(".nv-head")
+      : nvSel.block == null
       ? host.querySelector(`.nv-chapter[data-chapter="${nvSel.chapter}"] > .nv-chapter-head`)
       : host.querySelector(`.nv-block-row[data-block="${nvSel.chapter}:${nvSel.block}"]`);
     target?.classList.add("nv-sel");
@@ -19558,6 +19573,7 @@ function renderNarrativeInspectorInto(host: HTMLElement): void {
     onRename: (title) => nedit.renameChapter(st, narrativeId, chapter, title),
     onRenameNarrative: (name) => nedit.renameNarrative(st, narrativeId, name),
     onSetDescription: (text) => nedit.setNarrativeDescription(st, narrativeId, text),
+    onSetQuery: (patch) => block != null && nedit.setBlockOptions(st, narrativeId, chapter, block, patch),
     onSetAnchor: (a) => nedit.setChapterAnchor(st, narrativeId, chapter, a),
     onSignMe: () => signChapterAsMe(narrativeId, chapter),
     onToggleCanonical: () => nedit.toggleCanonical(st, narrativeId, chapter),
@@ -19625,6 +19641,27 @@ function insertEmbedAt(narrativeId: string, c: number, at: number, ref: string, 
   setNarrativeSelection(narrativeId, { chapter: c, block: at });
 }
 
+/** NARRATIVA-BLOCCHI p.2 · a query block: an embed of the graph (made on
+ *  demand, as the map's), `view_type` table, its question in `options`. One
+ *  undo step (a replaced paragraph and its block in one batch). */
+function insertQueryAt(narrativeId: string, c: number, at: number, kind: nq.QueryKind, replace: boolean): void {
+  if (!store) return;
+  const st = store;
+  st.batch(() => {
+    const gid = st.ensureGraphRootId();
+    if (replace) nedit.deleteBlock(st, narrativeId, c, at);
+    nedit.editChapters(st, narrativeId, (cs) => {
+      const ch = cs[c];
+      if (!ch) return;
+      const blocks = (ch.blocks ??= []);
+      blocks.splice(Math.min(at, blocks.length), 0,
+        { block_type: "embed", ref: gid, view_type: nq.QUERY_VIEW_TYPE, options: nq.newQueryOptions(kind) });
+    });
+  });
+  logInfo(t("nv.blockAdded", { what: t(`nq.title.${kind}`), name: String(st.doc.graph["name"] ?? "") }), [narrativeId]);
+  setNarrativeSelection(narrativeId, { chapter: c, block: at });
+}
+
 function openBlocksMenu(narrativeId: string, c: number, at: number, anchor: HTMLElement, replace: boolean): void {
   if (!store) return;
   const st = store;
@@ -19643,6 +19680,12 @@ function openBlocksMenu(narrativeId: string, c: number, at: number, anchor: HTML
         if (replace) nedit.deleteBlock(st, narrativeId, c, at);
         void generateChapterDraft(narrativeId, c);
       } },
+    // NARRATIVA-BLOCCHI p.2 · the blocks that ask the graph: no second step,
+    // the question points at the graph and its parameters are the Inspector's
+    ...nq.QUERY_KINDS.map((kind): AddMenuEntry => ({
+      key: `b|q|${kind}`, label: t(`nq.title.${kind}`), detail: t(`nq.what.${kind}`),
+      run: () => insertQueryAt(narrativeId, c, at, kind, replace),
+    })),
     ...BLOCK_MEDIA.filter((vt) => nedit.VIEW_TYPES.includes(vt)).map((vt): AddMenuEntry => ({
       key: `b|${vt}`, label: viewTypeLabel(vt), detail: t(`nv.blk.${vt}Hint`),
       run: () => pickRefFor(narrativeId, c, at, vt, replace, x, y),
@@ -19775,6 +19818,19 @@ function openSitePickerOnGraph(): void {
   });
 }
 setSitePicker(() => openSitePickerOnGraph());
+// NARRATIVA-BLOCCHI p.2 · a query block reads the graphs of the story's file
+// (the story's own graph first), and an entry of another graph brings that
+// graph in front and jumps to the node — as a cross-graph rapporto does
+setQueryContext({
+  graphs: () => graphsBeside().slots.map((sl) => ({
+    graphId: String(sl.store.doc.graph.graph_id ?? sl.id), label: slotLabel(sl), doc: sl.store.doc })),
+  go: (graphId, nodeId) => {
+    const slot = graphsBeside().slots.find((sl) => String(sl.store.doc.graph.graph_id ?? sl.id) === graphId);
+    if (!slot) return;
+    if (slot !== emtree.active()) activateSlot(slot.id);
+    revealFromNarrative(nodeId);
+  },
+});
 
 /** The map embed's Inspector: the graph's TWO positions, side by side — the
  *  site (`site_position`, what the map shows) and the 3D anchor (the

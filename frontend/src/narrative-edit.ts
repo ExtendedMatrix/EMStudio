@@ -245,6 +245,25 @@ export function setEmbedCaption(store: DocumentStore, narrativeId: string,
   });
 }
 
+/** NARRATIVA-BLOCCHI p.2 · a block's `options`, merged: a key set to `null`
+ *  or `undefined` is removed. One call, one undo step (a query block's scope,
+ *  types and order are each one gesture in its Inspector). */
+export function setBlockOptions(store: DocumentStore, narrativeId: string,
+                                chapterIndex: number, blockIndex: number,
+                                patch: Record<string, unknown>): void {
+  editChapters(store, narrativeId, (cs) => {
+    const b = cs[chapterIndex]?.blocks?.[blockIndex];
+    if (!b) return;
+    const opts: Record<string, unknown> = { ...(b.options ?? {}) };
+    for (const [k, v] of Object.entries(patch)) {
+      if (v === null || v === undefined) delete opts[k];
+      else opts[k] = v;
+    }
+    if (Object.keys(opts).length) b.options = opts;
+    else delete b.options;
+  });
+}
+
 export function deleteBlock(store: DocumentStore, narrativeId: string,
                             chapterIndex: number, blockIndex: number): void {
   editChapters(store, narrativeId, (cs) => {

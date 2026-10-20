@@ -23,6 +23,7 @@ import { blockStatus } from "./narrative-authorship";
 import { narrativesIn } from "./narrative";
 import { mentionsIn, notebookKindOf, printKindOf } from "./narrative-projection";
 import { narrativeViewTypeDescription } from "./rules";
+import { QUERY_ORDERS, QUERY_SCOPES, QUERY_TYPES, queryOf } from "./narrative-query";
 import type { EmDocument, EmNode } from "./types";
 
 export interface NarrInspectorHooks {
@@ -39,6 +40,8 @@ export interface NarrInspectorHooks {
   /** NARRATIVA-BLOCCHI p.1 · the story's title and subtitle (chapter -1) */
   onRenameNarrative(name: string): void;
   onSetDescription(text: string): void;
+  /** NARRATIVA-BLOCCHI p.2 · a query block's question (scope, types, order) */
+  onSetQuery(patch: Record<string, unknown>): void;
   onSetAnchor(anchor: string | null): void;
   onSignMe(): void;
   onToggleCanonical(): void;
@@ -152,8 +155,10 @@ export function renderNarrativeInspector(root: HTMLElement, h: NarrInspectorHook
   root.appendChild(wrap);
 
   const head = el("div", "ninsp-head");
+  const q = queryOf(block);
   const what = !block ? `${t("ninsp.chapter")} ${h.chapter + 1}`
     : block.block_type === "prose" ? t("ninsp.paragraph")
+    : q ? `${t("nq.kindLabel")} · ${t(`nq.title.${q.query}`)}`
     : `Embed · ${h.viewTypeLabel(String(block.view_type ?? ""))}`;
   head.appendChild(el("b", undefined, what));
   head.appendChild(el("div", "ninsp-dim",
@@ -257,6 +262,65 @@ export function renderNarrativeInspector(root: HTMLElement, h: NarrInspectorHook
       s.appendChild(button(t("nv.retract"), h.onRetract));
     }
     s.appendChild(el("p", "ninsp-note", t("ninsp.mentionNote")));
+  } else if (q) {
+    // ── NARRATIVA-BLOCCHI p.2 · a block that asks the graph ────────────────
+    const s = section(wrap);
+    s.appendChild(el("p", "ninsp-note", t(`nq.what.${q.query}`)));
+    const sl = el("label", "ninsp-l", t("nq.scopeLabel"));
+    const ss = document.createElement("select");
+    ss.dataset.nvset = "q-scope";
+    for (const sc of QUERY_SCOPES) {
+      const o = document.createElement("option");
+      o.value = sc;
+      o.textContent = t(`nq.scope.${sc}`);
+      o.selected = sc === q.scope;
+      ss.appendChild(o);
+    }
+    ss.addEventListener("change", () => h.onSetQuery({ scope: ss.value }));
+    sl.appendChild(ss);
+    s.appendChild(sl);
+    const tl = el("div", "ninsp-l ninsp-q-types", t("nq.typesLabel"));
+    const all = QUERY_TYPES[q.query];
+    for (const ty of all) {
+      const lab = el("label");
+      const cb = document.createElement("input");
+      cb.type = "checkbox";
+      cb.dataset.nvset = `q-type-${ty}`;
+      cb.checked = q.types.includes(ty);
+      cb.addEventListener("change", () => {
+        const next = all.filter((x) => (x === ty ? cb.checked : q.types.includes(x)));
+        // every type again is the default: written as nothing
+        h.onSetQuery({ types: next.length === all.length ? null : next });
+      });
+      lab.append(cb, ` ${t(`nq.type.${ty}`)}`);
+      tl.appendChild(lab);
+    }
+    s.appendChild(tl);
+    const ol = el("label", "ninsp-l", t("nq.orderLabel"));
+    const os = document.createElement("select");
+    os.dataset.nvset = "q-order";
+    for (const od of QUERY_ORDERS[q.query]) {
+      const o = document.createElement("option");
+      o.value = od;
+      o.textContent = t(`nq.order.${od}`);
+      o.selected = od === q.order;
+      os.appendChild(o);
+    }
+    os.addEventListener("change", () => h.onSetQuery({ order: os.value }));
+    ol.appendChild(os);
+    s.appendChild(ol);
+    s.appendChild(el("p", "ninsp-note", t("nq.liveTitle")));
+    const out = section(wrap, t("ninsp.outside"));
+    const tbl = el("table", "ninsp-out");
+    const row = (k: string, v: string): void => {
+      const tr = el("tr");
+      tr.append(el("td", undefined, k), el("td", undefined, v));
+      tbl.appendChild(tr);
+    };
+    row(t("ninsp.reader"), t("ninsp.readerLive"));
+    row("DOCX · LaTeX", t("nq.asStatic"));
+    row("Jupyter", t("nq.asStatic"));
+    out.appendChild(tbl);
   } else {
     // ── an embed ───────────────────────────────────────────────────────────
     const node = index.get(String(block.ref ?? ""));

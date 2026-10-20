@@ -33,6 +33,9 @@ import {
   paradataEmbed, rmDocEmbed, tableEmbed, timelineEmbed, unSceneEmbed,
 } from "./narrative-embeds";
 import { iiifBase } from "./settings";
+import {
+  bakeQueries, queryOf, runQuery, type QueryGraph, type QueryInput, type QueryResult,
+} from "./narrative-query";
 import { createOsmMap } from "./osm-map";
 import type { OsmView } from "./osm-map";
 import { nodeStyle } from "./palette";
@@ -891,6 +894,74 @@ export function setSitePicker(fn: ((anchor: HTMLElement) => void) | null): void 
   sitePicker = fn;
 }
 
+/** NARRATIVA-BLOCCHI p.2 · what a query block may read beyond its own graph:
+ *  the editor installs the graphs of the file (`graphsBeside`) and the way to
+ *  one of their nodes; the served reader has only the document it shows. */
+export interface QueryContext {
+  graphs(doc: EmDocument): QueryGraph[];
+  go(graphId: string, nodeId: string): void;
+}
+let queryContext: QueryContext | null = null;
+export function setQueryContext(ctx: QueryContext | null): void {
+  queryContext = ctx;
+}
+
+/** The graphs a question reads, the story's own first; the reader's case is
+ *  the one document. */
+export function queryInputFor(doc: EmDocument, chapters: NarrativeChapter[]): QueryInput {
+  const here = String(doc.graph.graph_id ?? "graph");
+  const own: QueryGraph = { graphId: here, label: String(doc.graph.name ?? here), doc };
+  const ctxGraphs = queryContext?.graphs(doc) ?? [];
+  const graphs = ctxGraphs.some((g) => g.graphId === here) ? ctxGraphs : [own, ...ctxGraphs];
+  return { graphs, here, chapters };
+}
+
+/** A query block, live: its question, answered now. */
+function queryEmbed(result: QueryResult, here: string,
+                    onReveal?: (nodeId: string) => void): HTMLElement {
+  const q = result.options;
+  const box = el("div", "nv-embed nv-query");
+  box.dataset.query = q.query;
+  box.dataset.count = String(result.count);
+  box.appendChild(el("div", "nv-embed-kind", t("nq.kindLabel")));
+  box.appendChild(el("div", "nv-embed-title", t(`nq.title.${q.query}`)));
+  const meta = el("div", "nv-query-meta",
+    `${t(`nq.scope.${q.scope}`)} · ${t("nq.nEntries", { n: String(result.count) })}`);
+  meta.title = t("nq.liveTitle");
+  box.appendChild(meta);
+  for (const g of result.groups) {
+    if (g.label) box.appendChild(el("div", "nv-query-group", `${g.label} (${g.rows.length})`));
+    const ul = el("ul", "nv-query-list");
+    for (const row of g.rows) {
+      const li = el("li", "nv-query-row");
+      li.dataset.id = row.id;
+      li.dataset.graph = row.graphId;
+      li.style.marginLeft = `${row.depth * 1.25}em`;
+      if (row.depth) li.classList.add("nv-query-nested");
+      const head = el("div", "nv-query-head");
+      const go = el("button", "nv-query-go", row.title) as HTMLButtonElement;
+      go.type = "button";
+      go.title = t("nq.goTitle", { name: row.title });
+      const canGo = row.graphId === here ? !!onReveal : !!queryContext;
+      go.disabled = !canGo;
+      go.addEventListener("click", (e) => {
+        e.stopPropagation();
+        if (row.graphId === here && onReveal) onReveal(row.id);
+        else queryContext?.go(row.graphId, row.id);
+      });
+      head.appendChild(go);
+      if (row.kind) head.appendChild(el("span", "nv-query-kind", row.kind));
+      li.appendChild(head);
+      for (const line of row.lines) li.appendChild(el("div", "nv-query-line", line));
+      ul.appendChild(li);
+    }
+    box.appendChild(ul);
+  }
+  if (!result.count) box.appendChild(el("div", "nv-embed-note", t("nq.empty")));
+  for (const n of result.notes) box.appendChild(el("div", "nv-embed-note nv-query-note", n));
+  return box;
+}
+
 /** A mention in the page: the node's NAME, clickable, never editable as text. */
 function mentionChip(ref: string, index: Map<string, EmNode>, editable: boolean,
                      onReveal?: (id: string) => void): HTMLElement {
@@ -1028,12 +1099,17 @@ export function renderNarrativeView(
   const index = new Map((doc?.graph?.nodes ?? []).map((n) => [n.id, n]));
 
   // ── STAMPA · NOTEBOOK — the page as the exporters will write it ──────────
+  // NARRATIVA-BLOCCHI p.2 · a query block is printed as the text of its
+  // answer, with the date it was computed — the same bake the export sends
+  const baked = (): Narrative => doc
+    ? { ...current, chapters: bakeQueries(current.chapters, queryInputFor(doc, current.chapters), new Date()) }
+    : current;
   if (reading === "print") {
-    renderPrintPreview(container, current, index, page);
+    renderPrintPreview(container, baked(), index, page);
     return;
   }
   if (reading === "notebook") {
-    renderNotebookPreview(container, current, index);
+    renderNotebookPreview(container, baked(), index);
     return;
   }
 
@@ -1247,6 +1323,11 @@ export function renderNarrativeView(
         body = writing
           ? editableInPlace(block.text ?? "", index, ci, bi, editor!, page)
           : renderProseWithMentions(block.text ?? "", index, false, onReveal);
+      } else if (doc && queryOf(block)) {
+        // NARRATIVA-BLOCCHI p.2 · a block that asks the graph, answered now
+        const input = queryInputFor(doc, current.chapters);
+        body = queryEmbed(runQuery(input, queryOf(block)!), input.here,
+          writing ? undefined : onReveal);
       } else {
         body = renderEmbed(block, index, doc,
           `${current.id}:${ci}:${bi}:${block.ref ?? ""}`,

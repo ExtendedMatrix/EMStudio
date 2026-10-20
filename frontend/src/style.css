@@ -9920,4 +9920,19 @@ tr.tt-hidden { display: none; }
 .nv-lede.nv-empty-lede::before { content: attr(data-placeholder); color: var(--text-faint); font-style: italic; }
 .nv-lede.nv-empty-lede:focus::before { content: none; }
 .nv-lede.nv-editable { min-height: 1.4em; }
+/* NARRATIVA-BLOCCHI p.2 · a block that asks the graph */
+.nv-query-meta { font-size: 11.5px; color: var(--text-faint); margin: 2px 0 8px; }
+.nv-query-group { font-size: 11.5px; font-weight: 600; text-transform: uppercase; letter-spacing: .3px; color: var(--text-muted); margin: 10px 0 4px; }
+.nv-query-list { list-style: none; margin: 0; padding: 0; }
+.nv-query-row { padding: 5px 0 6px; border-top: 1px solid var(--border); }
+.nv-query-row:first-child { border-top: 0; }
+.nv-query-nested { border-left: 2px solid var(--border-strong); padding-left: 8px; }
+.nv-query-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px; }
+.nv-query-go { background: none; border: 0; padding: 0; font: inherit; font-weight: 600; color: var(--accent-ink, var(--accent)); cursor: pointer; text-align: left; }
+.nv-query-go:disabled { color: var(--text); cursor: default; }
+.nv-query-kind { font-size: 10.5px; color: var(--text-faint); border: 1px solid var(--border); border-radius: 8px; padding: 0 6px; }
+.nv-query-line { font-size: 12.5px; color: var(--text-muted); line-height: 1.45; }
+.nv-query-note { margin-top: 6px; }
+.nv-print-prose { white-space: pre-line; }
+.ninsp-q-types label { display: block; font-size: 12px; }
 .ninsp-head-input { width: 100%; }

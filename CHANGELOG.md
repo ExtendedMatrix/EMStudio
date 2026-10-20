@@ -7,6 +7,24 @@ that asked for one.
 ## [Unreleased]
 
 ### Added
+- **Blocks that ask the graph** (MICRO-NARRATIVA-BLOCCHI p.2, E.D. 20 October
+  2026; `narrative-query.ts`). Three standard blocks of a story put a question
+  to the graph and show what answers, recomputed every time the page is drawn:
+  **Storia delle ricerche** (the graphs of the file — a graph is a study —
+  with their rapporti, HC9 studies and HC13 projects, by date: who, when,
+  which project, which licence and embargo), **Bibliografia** (the documents,
+  grouped as the datamodel tells them apart — with a geometry, comparative,
+  the rest — in one citation form; from the story, through the properties of
+  the nodes it cites, or from the graph) and **Beni coinvolti** (every HC1,
+  HC2, HC9, HC13, HC16 and the arcs that really join them, nested only where
+  an arc says «part of»; a good named by two graphs is one). A block is an
+  embed of the graph, `view_type` table, with its question in `options`
+  (`query`, `scope`: this story / this graph / every graph of the file,
+  `types`, `order`) — nothing in the NarrativeNode changes. It is inserted
+  from the Blocks menu, its parameters are in its Inspector (one undo step
+  each), an entry leads to its node, in its own graph. Print, Notebook and the
+  export carry it as static text with the date it was computed (a prose block
+  baked on a copy; an entry of the story's graph is a mention).
 - **The Space, second pass** (MICRO-SPAZIO-3D-2, E.D. 16 October 2026).
   - **The implicit paradata group** (`implicit-pd.ts`): a unit with loose
     properties (attached directly, in no group) behaves in the view as if it
