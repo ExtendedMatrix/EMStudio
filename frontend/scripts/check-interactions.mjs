@@ -6562,6 +6562,33 @@ test("PU1.strip", "PULIZIA p.1 · barra del nome: niente «em.json»; un pallino
   return { pass, detail: { r0, r1, r2, file, toast, errors } };
 });
 
+test("PU2.emtree", "PULIZIA p.2 · pannello dei file e dei grafi: niente testo introduttivo (è un «?» nella testata), niente Nuovo/Apri/Recenti; i file aperti con i loro grafi, l'attivo evidenziato; il triangolino solo dove il pannello è impilato su un altro; file ausiliari con un «?»", async () => {
+  const { p, ctx, errors } = await open({ doc: "TempluMare", locale: "it" });
+  const look = (win) => p.evaluate((win) => {
+    const a = document.querySelector(`.tile-area[data-win="${win}"]`);
+    const bar = a?.querySelector(".tile-bar");
+    return { compress: !!bar?.querySelector(".win-act[title^='Comprimi'], .win-act[title^='Espandi']"),
+      help: bar?.querySelector(".win-help")?.title ?? "", helpAria: bar?.querySelector(".win-help")?.getAttribute("aria-label") ?? "",
+      intro: !!a?.querySelector(".et-intro"), actions: !!a?.querySelector('[data-et="et-new"], [data-et="et-open"]'), recents: !!a?.querySelector(".et-recents"),
+      files: a?.querySelectorAll(".et-file").length ?? 0, slots: a?.querySelectorAll(".et-file .et-slot").length ?? 0,
+      active: a?.querySelectorAll(".et-slot.active").length ?? 0, move: a?.querySelectorAll(".et-move").length ?? 0,
+      auxQ: a?.querySelector(".aux-sect-head .et-q")?.title ?? "", todo: !!a?.querySelector(".et-todo") };
+  }, win);
+  const stacked = await look("canvas:graphs");
+  // the Inspector is alone in its column: turned into the EMtree it has no triangle
+  await p.click('.tile-area[data-win="canvas:inspector"] .win-type-toggle');
+  await p.click('.tile-area[data-win="canvas:inspector"] .dd-menu [data-wt="emtree"]');
+  await p.waitForTimeout(500);
+  const aloneWin = await p.evaluate(() => [...document.querySelectorAll(".tile-area")].find((a) => a.dataset.surfaceType === "emtree" && a.dataset.win !== "canvas:graphs")?.dataset.win);
+  const alone = aloneWin ? await look(aloneWin) : null;
+  await p.screenshot({ path: SHOT("pu2-pannello-file-grafi") }).catch(() => {});
+  await ctx.close();
+  const pass = stacked.compress && !!alone && !alone.compress && /ciascuno con i suoi grafi/.test(stacked.help) && stacked.helpAria === stacked.help
+    && !stacked.intro && !stacked.actions && !stacked.recents && !stacked.todo
+    && stacked.files >= 1 && stacked.slots >= 1 && stacked.active === 1 && stacked.move >= 1 && /VOLATILI/.test(stacked.auxQ) && !errors.length;
+  return { pass, detail: { stacked, aloneWin, alone, errors } };
+});
+
 // ── run ─────────────────────────────────────────────────────────────────────
 const chosen = cases.filter((c) => !only.length || only.includes(c.id) || only.some((o) => c.id.startsWith(o + ".")));
 for (const c of chosen) {

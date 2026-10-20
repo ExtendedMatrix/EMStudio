@@ -45,6 +45,16 @@ that asked for one.
 - `scripts/check-space-views.mjs` (101), `scripts/check-implicit-pd.mjs` (30).
 
 ### Changed
+- **The files-and-graphs panel is the list of what is open** (MICRO-PULIZIA-
+  INTERFACCIA p.2). The introduction is a «?» in the panel's header (tooltip,
+  Tab, screen reader; a click says it in a toast); New graph, Open… and Recent
+  files left the panel — they are File's (File ▸ Open Recent is their one
+  place). The body: the open files, each with its graphs, the active graph
+  marked, «Move to…» as before. The collapse triangle follows a rule: it is
+  drawn only where the panel is the upper side of a vertical split, i.e. where
+  closing it gives the space to the panel below — alone in its column it is not
+  drawn. Auxiliary files: one row per file (name, type with a «?», state), the
+  type's meaning and the long note in tooltips; their header is translated.
 - **The name strip, cleaned** (MICRO-PULIZIA-INTERFACCIA p.1, E.D. 20 October
   2026). The «em.json» button (a Save with no name and no answer) is gone:
   unsaved changes are a dot beside the name (tooltip «Unsaved changes · ⌘S»;

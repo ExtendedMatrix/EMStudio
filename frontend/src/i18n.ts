@@ -2882,16 +2882,11 @@ const EN: Dict = {
   "empty.emtree": "open the workspace",
 
   // EMTree panel
-  "emtree.intro":
-    "The graphs open in this workspace. Click one to work on it — the canvas, " +
-    "the Inspector and the narrative always show the active graph.",
-  "emtree.new": "New graph",
-  "emtree.open": "Open…",
-  "emtree.empty": "No graph open yet.",
+  "emtree.intro": "The files open in this workspace, each with its graphs. Click a graph to work on it — the canvas, the Inspector and the narrative always show the active graph. ⇄ moves a graph to another file; New, Open… and the recent files are in File.",
+  "emtree.empty": "No graph open yet: File ▸ New, or File ▸ Open…",
   "emtree.close": "Close this graph",
   "emtree.viewList": "List",
   "emtree.viewOverview": "Overview",
-  "emtree.recent": "Recent files",
   "emtree.nodes": "nodes",
   "emtree.edges": "edges",
   "emtree.noFile": "not saved to a file yet",
@@ -2939,10 +2934,7 @@ const EN: Dict = {
   "epoch.inviteAdd": "add",
   "emtree.noAux": "no auxiliary files",
   "emtree.auxFiles": "auxiliary file(s)",
-  "emtree.auxNote":
-    "Auxiliary sources (xlsx, pyArchInit, XML) attach to a graph and are " +
-    "VOLATILE: they never enter the em.json unless you bake them. Mapping, " +
-    "baking and the remote catalogues are still to come.",
+  "emtree.auxNote": "Auxiliary sources (xlsx, pyArchInit, XML, a DosCo folder…) attach to a graph and are VOLATILE: mapped on the fly, drawn in blue, never in the em.json until you write them into the graph.",
   "emtree.unsaved": "\"{name}\" has unsaved changes. Close it anyway?",
   "open.overUnsaved": "\"{name}\" has unsaved changes. Open \"{file}\" beside it? It stays in the EMTree, still unsaved.",
 
@@ -3951,6 +3943,9 @@ const EN: Dict = {
   "save.savedToast": "Saved: {file}",
   "save.downloadedToast": "Saved: {file} (downloaded)",
   "version.pinHint": "File ▸ Pin version… freezes it for the DOI.",
+  "emtree.auxHead": "Auxiliary files",
+  "emtree.auxAdd": "+ add",
+  "emtree.auxAddTitle": "Attach a local file or folder to this graph",
 };
 
 // ── Italiano: complete, because E.D. works in it ───────────────────────────────
@@ -6711,16 +6706,11 @@ const IT: Dict = {
   "empty.stratiminer": "costruiscine uno dai tuoi dati",
   "empty.emtree": "apri lo spazio di lavoro",
 
-  "emtree.intro":
-    "I grafi aperti in questo spazio di lavoro. Cliccane uno per lavorarci — " +
-    "il canvas, l'Ispettore e la narrativa mostrano sempre il grafo attivo.",
-  "emtree.new": "Nuovo grafo",
-  "emtree.open": "Apri…",
-  "emtree.empty": "Nessun grafo aperto.",
+  "emtree.intro": "I file aperti in questo spazio di lavoro, ciascuno con i suoi grafi. Clicca un grafo per lavorarci — il canvas, l'Ispettore e la narrativa mostrano sempre il grafo attivo. ⇄ sposta un grafo in un altro file; Nuovo, Apri… e i file recenti stanno in File.",
+  "emtree.empty": "Nessun grafo aperto: File ▸ Nuovo, o File ▸ Apri…",
   "emtree.close": "Chiudi questo grafo",
   "emtree.viewList": "Elenco",
   "emtree.viewOverview": "Panoramica",
-  "emtree.recent": "File recenti",
   "emtree.nodes": "nodi",
   "emtree.edges": "archi",
   "emtree.noFile": "non ancora salvato su file",
@@ -6768,10 +6758,7 @@ const IT: Dict = {
   "epoch.inviteAdd": "aggiungi",
   "emtree.noAux": "nessun file ausiliario",
   "emtree.auxFiles": "file ausiliari",
-  "emtree.auxNote":
-    "Le sorgenti ausiliarie (xlsx, pyArchInit, XML) si agganciano a un grafo e " +
-    "sono VOLATILI: non entrano nell'em.json se non le si fa il bake. Mapping, " +
-    "bake e cataloghi remoti sono ancora da fare.",
+  "emtree.auxNote": "Le fonti ausiliarie (xlsx, pyArchInit, XML, una cartella DosCo…) si allegano a un grafo e sono VOLATILI: mappate al volo, disegnate in blu, mai nell'em.json finché non le scrivi nel grafo.",
   "emtree.unsaved": "«{name}» ha modifiche non salvate. Chiuderlo comunque?",
   "open.overUnsaved": "«{name}» ha modifiche non salvate. Aprire «{file}» accanto? Resta nell'EMTree, ancora da salvare.",
 
@@ -7776,6 +7763,9 @@ const IT: Dict = {
   "save.savedToast": "Salvato: {file}",
   "save.downloadedToast": "Salvato: {file} (scaricato)",
   "version.pinHint": "File ▸ Fissa versione… la congela per il DOI.",
+  "emtree.auxHead": "File ausiliari",
+  "emtree.auxAdd": "+ aggiungi",
+  "emtree.auxAddTitle": "Allega a questo grafo un file o una cartella locale",
 };
 
 // ── The six other project languages: AI DRAFTS, awaiting validation ───────────
@@ -7848,19 +7838,14 @@ const EL: Dict = {
     "Οι γράφοι που είναι ανοιχτοί σε αυτόν τον χώρο εργασίας. Κάντε κλικ σε " +
     "έναν για να εργαστείτε σε αυτόν — ο καμβάς, ο Επιθεωρητής και η αφήγηση " +
     "δείχνουν πάντα τον ενεργό γράφο.",
-  "emtree.new": "Νέος γράφος",
-  "emtree.open": "Άνοιγμα…",
-  "emtree.empty": "Δεν έχει ανοίξει κανένας γράφος.",
+  "emtree.empty": "Κανένας γράφος ανοιχτός: Αρχείο ▸ Νέο ή Αρχείο ▸ Άνοιγμα…",
   "emtree.close": "Κλείσιμο αυτού του γράφου",
   "emtree.nodes": "κόμβοι",
   "emtree.edges": "ακμές",
   "emtree.noFile": "δεν έχει αποθηκευτεί ακόμη σε αρχείο",
   "emtree.noAux": "κανένα βοηθητικό αρχείο",
   "emtree.auxFiles": "βοηθητικά αρχεία",
-  "emtree.auxNote":
-    "Οι βοηθητικές πηγές (xlsx, pyArchInit, XML) συνδέονται με έναν γράφο και " +
-    "είναι ΠΤΗΤΙΚΕΣ: δεν μπαίνουν ποτέ στο em.json εκτός αν κάνετε bake. Η " +
-    "αντιστοίχιση, το bake και οι απομακρυσμένοι κατάλογοι εκκρεμούν ακόμη.",
+  "emtree.auxNote": "Οι βοηθητικές πηγές (xlsx, pyArchInit, XML, φάκελος DosCo…) επισυνάπτονται σε έναν γράφο και είναι ΠΡΟΣΩΡΙΝΕΣ: αντιστοιχίζονται επί τόπου, σχεδιάζονται μπλε, ποτέ στο em.json μέχρι να τις γράψετε στον γράφο.",
   "emtree.unsaved":
     "Το «{name}» έχει μη αποθηκευμένες αλλαγές. Να κλείσει παρόλα αυτά;",
 
@@ -7894,6 +7879,9 @@ const EL: Dict = {
   "save.savedToast": "Αποθηκεύτηκε: {file}",
   "save.downloadedToast": "Αποθηκεύτηκε: {file} (λήψη)",
   "version.pinHint": "Αρχείο ▸ Κλείδωμα έκδοσης… την παγώνει για το DOI.",
+  "emtree.auxHead": "Βοηθητικά αρχεία",
+  "emtree.auxAdd": "+ προσθήκη",
+  "emtree.auxAddTitle": "Επισύναψη τοπικού αρχείου ή φακέλου σε αυτόν τον γράφο",
 };
 
 const HE: Dict = {
@@ -7942,19 +7930,14 @@ const HE: Dict = {
   "emtree.intro":
     "הגרפים הפתוחים במרחב העבודה הזה. לחץ על אחד כדי לעבוד עליו — הבד, המפקח " +
     "והנרטיב מציגים תמיד את הגרף הפעיל.",
-  "emtree.new": "גרף חדש",
-  "emtree.open": "פתיחה…",
-  "emtree.empty": "אין גרף פתוח.",
+  "emtree.empty": "אין גרף פתוח: קובץ ▸ חדש, או קובץ ▸ פתיחה…",
   "emtree.close": "סגור את הגרף הזה",
   "emtree.nodes": "צמתים",
   "emtree.edges": "קשתות",
   "emtree.noFile": "עדיין לא נשמר לקובץ",
   "emtree.noAux": "אין קבצי עזר",
   "emtree.auxFiles": "קבצי עזר",
-  "emtree.auxNote":
-    "מקורות עזר (xlsx, pyArchInit, XML) מתחברים לגרף והם נדיפים: הם לעולם לא " +
-    "נכנסים ל-em.json אלא אם מבצעים bake. מיפוי, bake והקטלוגים המרוחקים עדיין " +
-    "לפנינו.",
+  "emtree.auxNote": "מקורות עזר (xlsx, ‏pyArchInit, ‏XML, תיקיית DosCo…) מצורפים לגרף והם זמניים: ממופים בזמן אמת, מצוירים בכחול, ולעולם לא נכנסים ל־em.json עד שתכתוב אותם לגרף.",
   "emtree.unsaved": "ל־\"{name}\" יש שינויים שלא נשמרו. לסגור בכל זאת?",
 
   "settings.title": "הגדרות",
@@ -7985,6 +7968,9 @@ const HE: Dict = {
   "save.savedToast": "נשמר: {file}",
   "save.downloadedToast": "נשמר: {file} (הורד)",
   "version.pinHint": "קובץ ▸ קיבוע גרסה… מקפיא אותה עבור ה־DOI.",
+  "emtree.auxHead": "קבצי עזר",
+  "emtree.auxAdd": "+ הוספה",
+  "emtree.auxAddTitle": "צירוף קובץ או תיקייה מקומיים לגרף זה",
 };
 
 const ES: Dict = {
@@ -8037,19 +8023,14 @@ const ES: Dict = {
     "Los grafos abiertos en este espacio de trabajo. Haz clic en uno para " +
     "trabajar en él — el lienzo, el Inspector y la narrativa muestran siempre " +
     "el grafo activo.",
-  "emtree.new": "Nuevo grafo",
-  "emtree.open": "Abrir…",
-  "emtree.empty": "No hay ningún grafo abierto.",
+  "emtree.empty": "Ningún grafo abierto: Archivo ▸ Nuevo, o Archivo ▸ Abrir…",
   "emtree.close": "Cerrar este grafo",
   "emtree.nodes": "nodos",
   "emtree.edges": "aristas",
   "emtree.noFile": "aún no guardado en un archivo",
-  "emtree.noAux": "sin archivos auxiliares",
+  "emtree.noAux": "ningún archivo auxiliar",
   "emtree.auxFiles": "archivos auxiliares",
-  "emtree.auxNote":
-    "Las fuentes auxiliares (xlsx, pyArchInit, XML) se vinculan a un grafo y " +
-    "son VOLÁTILES: nunca entran en el em.json si no haces el bake. El mapeo, " +
-    "el bake y los catálogos remotos están aún por llegar.",
+  "emtree.auxNote": "Las fuentes auxiliares (xlsx, pyArchInit, XML, una carpeta DosCo…) se adjuntan a un grafo y son VOLÁTILES: mapeadas al vuelo, dibujadas en azul, nunca en el em.json hasta que las escribas en el grafo.",
   "emtree.unsaved": "«{name}» tiene cambios sin guardar. ¿Cerrarlo de todos modos?",
 
   "settings.title": "Ajustes",
@@ -8081,6 +8062,9 @@ const ES: Dict = {
   "save.savedToast": "Guardado: {file}",
   "save.downloadedToast": "Guardado: {file} (descargado)",
   "version.pinHint": "Archivo ▸ Fijar versión… la congela para el DOI.",
+  "emtree.auxHead": "Archivos auxiliares",
+  "emtree.auxAdd": "+ añadir",
+  "emtree.auxAddTitle": "Adjuntar un archivo o una carpeta local a este grafo",
 };
 
 const PL: Dict = {
@@ -8131,19 +8115,14 @@ const PL: Dict = {
   "emtree.intro":
     "Grafy otwarte w tym obszarze roboczym. Kliknij jeden, aby na nim " +
     "pracować — kanwa, Inspektor i narracja pokazują zawsze aktywny graf.",
-  "emtree.new": "Nowy graf",
-  "emtree.open": "Otwórz…",
-  "emtree.empty": "Nie otwarto żadnego grafu.",
+  "emtree.empty": "Żaden graf nie jest otwarty: Plik ▸ Nowy lub Plik ▸ Otwórz…",
   "emtree.close": "Zamknij ten graf",
   "emtree.nodes": "węzły",
   "emtree.edges": "krawędzie",
   "emtree.noFile": "jeszcze nie zapisano do pliku",
   "emtree.noAux": "brak plików pomocniczych",
   "emtree.auxFiles": "pliki pomocnicze",
-  "emtree.auxNote":
-    "Źródła pomocnicze (xlsx, pyArchInit, XML) dołączają się do grafu i są " +
-    "ULOTNE: nigdy nie wchodzą do em.json, dopóki nie wykonasz bake. " +
-    "Mapowanie, bake i zdalne katalogi są jeszcze przed nami.",
+  "emtree.auxNote": "Źródła pomocnicze (xlsx, pyArchInit, XML, folder DosCo…) dołącza się do grafu i są ULOTNE: mapowane w locie, rysowane na niebiesko, nigdy w em.json, dopóki nie zapiszesz ich w grafie.",
   "emtree.unsaved": "„{name}” ma niezapisane zmiany. Zamknąć mimo to?",
 
   "settings.title": "Ustawienia",
@@ -8176,6 +8155,9 @@ const PL: Dict = {
   "save.savedToast": "Zapisano: {file}",
   "save.downloadedToast": "Zapisano: {file} (pobrano)",
   "version.pinHint": "Plik ▸ Zamroź wersję… zamraża ją dla DOI.",
+  "emtree.auxHead": "Pliki pomocnicze",
+  "emtree.auxAdd": "+ dodaj",
+  "emtree.auxAddTitle": "Dołącz lokalny plik lub folder do tego grafu",
 };
 
 const RO: Dict = {
@@ -8228,19 +8210,14 @@ const RO: Dict = {
     "Grafurile deschise în acest spațiu de lucru. Apasă pe unul pentru a " +
     "lucra pe el — pânza, Inspectorul și narațiunea arată întotdeauna graful " +
     "activ.",
-  "emtree.new": "Graf nou",
-  "emtree.open": "Deschide…",
-  "emtree.empty": "Niciun graf deschis.",
+  "emtree.empty": "Niciun graf deschis: Fișier ▸ Nou sau Fișier ▸ Deschide…",
   "emtree.close": "Închide acest graf",
   "emtree.nodes": "noduri",
   "emtree.edges": "muchii",
   "emtree.noFile": "încă nesalvat într-un fișier",
   "emtree.noAux": "niciun fișier auxiliar",
   "emtree.auxFiles": "fișiere auxiliare",
-  "emtree.auxNote":
-    "Sursele auxiliare (xlsx, pyArchInit, XML) se atașează la un graf și sunt " +
-    "VOLATILE: nu intră niciodată în em.json dacă nu faci bake. Maparea, " +
-    "bake-ul și cataloagele remote sunt încă de făcut.",
+  "emtree.auxNote": "Sursele auxiliare (xlsx, pyArchInit, XML, un dosar DosCo…) se atașează unui graf și sunt VOLATILE: mapate din mers, desenate cu albastru, niciodată în em.json până nu le scrii în graf.",
   "emtree.unsaved": "„{name}” are modificări nesalvate. Îl închizi oricum?",
 
   "settings.title": "Setări",
@@ -8272,6 +8249,9 @@ const RO: Dict = {
   "save.savedToast": "Salvat: {file}",
   "save.downloadedToast": "Salvat: {file} (descărcat)",
   "version.pinHint": "Fișier ▸ Fixează versiunea… o îngheață pentru DOI.",
+  "emtree.auxHead": "Fișiere auxiliare",
+  "emtree.auxAdd": "+ adaugă",
+  "emtree.auxAddTitle": "Atașează un fișier sau un dosar local acestui graf",
 };
 
 const FR: Dict = {
@@ -8324,19 +8304,14 @@ const FR: Dict = {
     "Les graphes ouverts dans cet espace de travail. Cliquez sur l'un d'eux " +
     "pour y travailler — le canevas, l'Inspecteur et le récit montrent " +
     "toujours le graphe actif.",
-  "emtree.new": "Nouveau graphe",
-  "emtree.open": "Ouvrir…",
-  "emtree.empty": "Aucun graphe ouvert.",
+  "emtree.empty": "Aucun graphe ouvert : Fichier ▸ Nouveau, ou Fichier ▸ Ouvrir…",
   "emtree.close": "Fermer ce graphe",
   "emtree.nodes": "nœuds",
   "emtree.edges": "arêtes",
   "emtree.noFile": "pas encore enregistré dans un fichier",
   "emtree.noAux": "aucun fichier auxiliaire",
   "emtree.auxFiles": "fichiers auxiliaires",
-  "emtree.auxNote":
-    "Les sources auxiliaires (xlsx, pyArchInit, XML) se rattachent à un " +
-    "graphe et sont VOLATILES : elles n'entrent jamais dans l'em.json sans un " +
-    "bake. Le mapping, le bake et les catalogues distants restent à faire.",
+  "emtree.auxNote": "Les sources auxiliaires (xlsx, pyArchInit, XML, un dossier DosCo…) se joignent à un graphe et sont VOLATILES : mappées à la volée, dessinées en bleu, jamais dans l'em.json tant que vous ne les écrivez pas dans le graphe.",
   "emtree.unsaved":
     "« {name} » comporte des modifications non enregistrées. Le fermer quand " +
     "même ?",
@@ -8371,6 +8346,9 @@ const FR: Dict = {
   "save.savedToast": "Enregistré : {file}",
   "save.downloadedToast": "Enregistré : {file} (téléchargé)",
   "version.pinHint": "Fichier ▸ Figer la version… la fige pour le DOI.",
+  "emtree.auxHead": "Fichiers auxiliaires",
+  "emtree.auxAdd": "+ ajouter",
+  "emtree.auxAddTitle": "Joindre un fichier ou un dossier local à ce graphe",
 };
 
 /**
@@ -9695,6 +9673,12 @@ const DE: Dict = {
   "save.savedToast": "Gespeichert: {file}",
   "save.downloadedToast": "Gespeichert: {file} (heruntergeladen)",
   "version.pinHint": "Datei ▸ Version fixieren… friert sie für den DOI ein.",
+  "emtree.empty": "Noch kein Graph geöffnet: Datei ▸ Neu oder Datei ▸ Öffnen…",
+  "emtree.auxHead": "Hilfsdateien",
+  "emtree.auxAdd": "+ hinzufügen",
+  "emtree.auxAddTitle": "Eine lokale Datei oder einen Ordner an diesen Graphen anhängen",
+  "emtree.noAux": "keine Hilfsdateien",
+  "emtree.auxNote": "Hilfsquellen (xlsx, pyArchInit, XML, ein DosCo-Ordner…) werden an einen Graphen angehängt und sind FLÜCHTIG: im Flug zugeordnet, blau gezeichnet, nie in der em.json, bis Sie sie in den Graphen schreiben.",
 };
 
 const DICTS: Record<Locale, Dict> = {

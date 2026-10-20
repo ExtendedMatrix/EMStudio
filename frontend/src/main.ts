@@ -16001,9 +16001,6 @@ const emtreeHandlers: EMTreeHandlers = {
     if (emtree.fileDirty(fileId) && !confirm(t("emtree.closeFileUnsaved", { name: file.name }))) return;
     closeFile(fileId);
   },
-  onOpen: () => void openDocument(),
-  onNew: () => newDocument(),
-  onOpenRecent: (r) => void openRecentFile(r),
   // AUX1 · auxiliary files live on the SLOT and never in em.json, so every one of
   // these mutates `slot.auxiliaryFiles` and re-renders the tree — none of them
   // touches `store`, which is what keeps an un-baked aux out of a shared document.
@@ -32449,6 +32446,19 @@ function buildAreaHeader(win: Win): DocumentFragment {
     frag.appendChild(dd);
   }
 
+  /** MICRO-PULIZIA · a «?» that explains, as a tooltip: reached by Tab, read by
+   *  a screen reader, and a click (or Enter) says it in a toast for whoever has
+   *  no pointer to hover with */
+  const helpMark = (text: string): HTMLElement => {
+    const q = document.createElement("button");
+    q.type = "button";
+    q.className = "win-help";
+    q.textContent = "?";
+    q.title = text;
+    q.setAttribute("aria-label", text);
+    q.addEventListener("click", (e) => { e.stopPropagation(); toast(text); });
+    return q;
+  };
   // ── the window ACTIONS: one-click verbs on THIS window ────────────────────
   const act = (glyph: string, title: string, on: boolean, run: () => void): void => {
     const b = document.createElement("button");
@@ -32462,8 +32472,12 @@ function buildAreaHeader(win: Win): DocumentFragment {
     frag.appendChild(b);
   };
   // G7 · a panel stacked above another (the graphs above the Outliner) can be
-  // compressed to its header and brought back
-  if (type === "emtree") {
+  // compressed to its header and brought back.
+  // MICRO-PULIZIA p.2 · THE RULE: the triangle is there only where it gives
+  // room to another panel — the window is the upper side of a vertical split
+  // (`stackedRatio` ≠ null, the only place `toggleCompressed` acts). Alone in
+  // its column it would close the panel and give the space to nobody.
+  if (type === "emtree" && stackedRatio(win.id) !== null) {
     const on = isCompressed(win.id);
     act(on ? "▸" : "▾", t(on ? "win.expand" : "win.compress"), on, () => {
       const area = winAreas.get(win.id);
@@ -32478,6 +32492,8 @@ function buildAreaHeader(win: Win): DocumentFragment {
       }
     });
   }
+  // MICRO-PULIZIA p.2 · what the panel is, as a «?» in its header, not a paragraph
+  if (type === "emtree") frag.appendChild(helpMark(t("emtree.intro")));
   if (type === "graph") {
     // SHIFT-A · the «+» beside the mode: «Aggiungi» at the window's centre
     act("+", t("add.headerBtn"), false, () => {

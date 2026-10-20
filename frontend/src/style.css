@@ -2644,47 +2644,6 @@ body.sync-active #footer-brand #em-version {
 }
 
 
-/* QOL1 · recent files list in the EMTree panel */
-.et-recents {
-  margin-bottom: 10px;
-}
-.et-recents-head {
-  font-size: 10.5px;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: var(--text-faint);
-  margin: 2px 4px 4px;
-  font-weight: 600;
-}
-.et-recent-list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-}
-.et-recent {
-  display: block;
-  width: 100%;
-  text-align: left;
-  padding: 3px 8px;
-  border: none;
-  background: none;
-  font: inherit;
-  font-size: 11.5px;
-  color: var(--accent-ink);
-  cursor: pointer;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  border-radius: var(--radius-sm);
-}
-.et-recent:hover {
-  background: var(--bg-subtle);
-}
-.et-recent-nofile {
-  color: var(--text-faint);
-  cursor: default;
-}
-
 /* NARRWS1 · the narrative-mode left palette (building blocks, not node types) */
 
 .np-sect {
@@ -5002,14 +4961,38 @@ body.sync-active #footer-brand #em-version {
   color: var(--text-faint);
 }
 
-.et-todo {
-  margin-top: 18px;
-  padding-top: 8px;
-  border-top: 1px dashed var(--border);
-  font-size: 10.5px;
-  line-height: 1.45;
-  color: var(--text-dim);
+/* MICRO-PULIZIA p.2 · a «?» that explains in its tooltip (the panel's header,
+   the auxiliary files and their types) */
+.win-header .win-help {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  cursor: help;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border-radius: 50%;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-muted);
 }
+.et-q {
+  display: inline-grid;
+  place-items: center;
+  width: 14px;
+  height: 14px;
+  margin-left: 4px;
+  border: 1px solid var(--border-strong);
+  border-radius: 50%;
+  font-size: 9.5px;
+  font-weight: 700;
+  line-height: 1;
+  color: var(--text-muted);
+  text-transform: none;
+  cursor: help;
+  vertical-align: 1px;
+}
+.aux-sect-head .et-q { margin-right: auto; margin-left: 6px; }
+.et-q:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 
 /* ── POL1 · collapsing the side columns ──────────────────────────────────────
    Width to 0 rather than `display:none`: the element stays in the flex row, so

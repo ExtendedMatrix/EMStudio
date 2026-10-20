@@ -66,7 +66,9 @@ eq(drawn, ["b.emj|/a", "Uno|nodo.esempio.eu · r1", "—", "Clear the list|"], "
 
 // one source: the panel and the menus import the same module
 const emtree = readFileSync(`${SRC}emtree.ts`, "utf8");
-ok(/from "\.\/recent"/.test(emtree) && /getRecents\(\)/.test(emtree), "the Stratigraphy panel reads recent.ts");
+// MICRO-PULIZIA p.2 · the recent files left the Stratigraphy panel: File ▸ Open
+// Recent is their one place, so the panel must not read the list any more
+ok(!/from "\.\/recent"/.test(emtree) && !/getRecents\(\)/.test(emtree), "the Stratigraphy panel no longer lists the recent files");
 const main = readFileSync(`${SRC}main.ts`, "utf8");
 ok(/recentMenuItems\(\)[\s\S]*getRecents\(\)/.test(main), "File ▸ Open Recent reads recent.ts");
 ok(/addRecentRoom\(/.test(main), "a room entered is recorded");

@@ -29,7 +29,6 @@
 import { shownCode } from "./hdto";
 import type { DocumentStore } from "./model";
 import type { ViewKind } from "./types";
-import { getRecents, recentReopenable, recentWhere, type RecentFile } from "./recent";
 
 /**
  * A per-graph auxiliary file — **the place, not the feature** (ET1 P0).
@@ -501,11 +500,8 @@ export class EMTree {
 export interface EMTreeHandlers {
   onActivate(id: string): void;
   onRemove(id: string): void;
-  /** Add = the same Open… the toolbar uses; the tree does not duplicate it. */
-  onOpen(): void;
-  onNew(): void;
-  /** QOL1 · open a recent file (reopenable only when it carries a path). */
-  onOpenRecent?(r: RecentFile): void;
+  // MICRO-PULIZIA p.2 · New, Open… and the recent files are File's: the panel
+  // is the list of what is open, and nothing else
   /** Inline rename from the tree (POL1): double-click the name. */
   onRename(id: string, name: string): void;
   /** AUX1 — auxiliary files of the ACTIVE slot. The tree renders, main.ts acts. */
@@ -637,13 +633,16 @@ function auxSection(tree: EMTree, labels: (key: string) => string): string {
   const rows = slot.auxiliaryFiles.map((f) => {
     const type = AUX_FILE_TYPES.find((t) => t.value === f.fileType);
     const state = f.baked ? "baked" : f.mapped ? "volatile" : "attached";
+    // MICRO-PULIZIA p.2 · one row: name, type with its «?», state; what the type
+    // is and what its state means are tooltips, not paragraphs
+    const stateWhy = labels(f.baked ? "aux.stateBaked" : f.mapped ? "aux.stateVolatile" : "aux.stateIdle");
     return `
       <li class="aux-row${f.expanded ? " open" : ""}" data-aux="${esc(f.id)}">
         <button class="aux-head" data-aux-toggle="${esc(f.id)}"
-                title="${esc(type?.hint ?? "")}">
+                title="${esc(`${f.name} · ${type?.label ?? f.fileType}: ${type?.hint ?? ""}\n${stateWhy}`)}">
           <span class="aux-caret">${f.expanded ? "▾" : "▸"}</span>
           <span class="aux-name">${esc(f.name)}</span>
-          <span class="aux-type">${esc(type?.label ?? f.fileType)}</span>
+          <span class="aux-type">${esc(type?.label ?? f.fileType)}<span class="et-q" aria-hidden="true">?</span></span>
           <span class="aux-badge aux-${state}">${state}</span>
         </button>
         <button class="aux-del" data-aux-remove="${esc(f.id)}"
@@ -654,14 +653,14 @@ function auxSection(tree: EMTree, labels: (key: string) => string): string {
   return `
     <div class="aux-sect">
       <div class="aux-sect-head">
-        <span>Auxiliary files</span>
-        <button data-et="aux-add" title="Attach a local file or folder to this graph">+ add</button>
+        <span>${esc(labels("emtree.auxHead"))}</span>
+        <span class="et-q" tabindex="0" role="img" title="${esc(labels("emtree.auxNote"))}"
+              aria-label="${esc(labels("emtree.auxNote"))}">?</span>
+        <button data-et="aux-add" title="${esc(labels("emtree.auxAddTitle"))}">${esc(labels("emtree.auxAdd"))}</button>
       </div>
       ${slot.auxiliaryFiles.length
         ? `<ul class="aux-list">${rows}</ul>`
-        : `<p class="aux-empty">${esc(labels("emtree.noAux"))} — sources attached
-             to this graph, mapped on the fly. Nothing is written into the
-             em.json until you bake it.</p>`}
+        : `<p class="aux-empty">${esc(labels("emtree.noAux"))}</p>`}
     </div>`;
 }
 
@@ -870,13 +869,8 @@ export function renderEMTree(host: HTMLElement, tree: EMTree,
                 title="${esc(labels("emtree.moveTitle"))}">⇄</button>
         <button class="et-close" data-close="${esc(slot.id)}"
                 title="${esc(labels("emtree.close"))}">×</button>
-        <!-- Aux files: the STUB. Shown as a count so the place is visible in the
-             UI and nobody wonders where they would go; the list, the mapping and
-             the bake are ET2. -->
         ${stories}
-        <div class="et-aux">${aux === 0
-          ? labels("emtree.noAux")
-          : `${aux} ${labels("emtree.auxFiles")}`}</div>
+        ${aux === 0 ? "" : `<div class="et-aux">${aux} ${esc(labels("emtree.auxFiles"))}</div>`}
       </li>`;
   };
 
@@ -958,44 +952,13 @@ export function renderEMTree(host: HTMLElement, tree: EMTree,
     : `${tree.slots.length
         ? rows
         : `<p class="et-empty">${esc(labels("emtree.empty"))}</p>`}
-       ${auxSection(tree, labels)}
-       <p class="et-todo">${esc(labels("emtree.auxNote"))}</p>`;
-
-  // QOL1 · recent files (newest first). A path-less entry (a browser drop) is
-  // shown but marked not-reopenable — the sandbox cannot reopen a file by path.
-  const recents = getRecents();
-  const recentBlock = recents.length
-    ? `<div class="et-recents">
-        <div class="et-recents-head">${esc(labels("emtree.recent"))}</div>
-        <ul class="et-recent-list">
-          ${recents.map((r, i) =>
-            // MICRO-DOVE-CHI-MENU p.2 · the same list as File ▸ Open Recent:
-            // files and rooms, each with where it lives
-            `<li><button class="et-recent${recentReopenable(r) ? "" : " et-recent-nofile"}${r.kind === "room" ? " et-recent-room" : ""}"
-                 data-recent="${i}" title="${esc(recentWhere(r) || labels("emtree.noFile"))}">
-               ${esc(r.name)}${r.kind === "room" ? ` <small>${esc(recentWhere(r))}</small>` : ""}</button></li>`).join("")}
-        </ul>
-      </div>`
-    : "";
+       ${auxSection(tree, labels)}`;
 
   host.innerHTML = `
     <div class="et-panel">
-      <p class="et-intro">${esc(labels("emtree.intro"))}</p>
-      <div class="et-actions">
-        <button data-et="et-new">${esc(labels("emtree.new"))}</button>
-        <button data-et="et-open">${esc(labels("emtree.open"))}</button>
-      </div>
-      ${recentBlock}
       ${toggle}
       ${body}
     </div>`;
-
-  host.querySelectorAll<HTMLButtonElement>(".et-recent").forEach((button) => {
-    button.addEventListener("click", () => {
-      const r = recents[Number(button.dataset.recent)];
-      if (r) handlers.onOpenRecent?.(r);
-    });
-  });
 
   // OVR1 · toggle handlers: flip the mode and re-render this same panel (the
   // overview is view-only, so a re-render is all it takes).
@@ -1148,8 +1111,4 @@ export function renderEMTree(host: HTMLElement, tree: EMTree,
       if (id) handlers.onRemove(id);
     });
   });
-  host.querySelector<HTMLButtonElement>('[data-et="et-open"]')
-    ?.addEventListener("click", () => handlers.onOpen());
-  host.querySelector<HTMLButtonElement>('[data-et="et-new"]')
-    ?.addEventListener("click", () => handlers.onNew());
 }
