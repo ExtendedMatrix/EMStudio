@@ -82,9 +82,12 @@ export function renderNarrativeIndex(host: HTMLElement, doc: EmDocument | null, 
   const eyebrow = el("div", "nidx-eyebrow", t("win.narrative"));
   if (nr.templateId) eyebrow.appendChild(el("span", "nidx-tag", nr.templateId));
   head.appendChild(eyebrow);
-  head.appendChild(el("b", "nidx-title", nr.name));
+  const title = el("b", "nidx-title", nr.name);
+  title.title = t("nidx.titleWhere");
+  head.appendChild(title);
   const { responsible, assisted } = bylineOf(doc, nr.id, nr.chapters as EditableChapter[]);
   const by = el("div", "nidx-by");
+  by.title = t("nidx.bylineComputed");
   by.appendChild(el("span", "nidx-dim", `${t("nv.curatedBy")} `));
   by.appendChild(document.createTextNode(responsible.map((a) => a.label).join(", ") || "—"));
   if (!responsible.length && hooks.onSignMe) {
@@ -154,8 +157,16 @@ export function renderNarrativeIndex(host: HTMLElement, doc: EmDocument | null, 
       meta.appendChild(chip);
     }
     const needs = chapterNeeds(ch as Parameters<typeof chapterNeeds>[0]);
-    if (needs.ai) meta.appendChild(el("span", "nidx-tag ai", `AI ${needs.ai}`));
-    if (needs.todo) meta.appendChild(el("span", "nidx-tag todo", t("nidx.toWrite")));
+    if (needs.ai) {
+      const ai = el("span", "nidx-tag ai", `AI ${needs.ai}`);
+      ai.title = t("nidx.aiComputed");
+      meta.appendChild(ai);
+    }
+    if (needs.todo) {
+      const todo = el("span", "nidx-tag todo", t("nidx.toWrite"));
+      todo.title = t("nidx.todoComputed");
+      meta.appendChild(todo);
+    }
     if (meta.childElementCount) b.appendChild(meta);
     b.addEventListener("click", () => hooks.onPick(i));
     li.appendChild(b);

@@ -36,6 +36,9 @@ export interface NarrInspectorHooks {
   viewTypesFor(node: EmNode | undefined): string[];
   viewTypeLabel(vt: string): string;
   onRename(title: string): void;
+  /** NARRATIVA-BLOCCHI p.1 · the story's title and subtitle (chapter -1) */
+  onRenameNarrative(name: string): void;
+  onSetDescription(text: string): void;
   onSetAnchor(anchor: string | null): void;
   onSignMe(): void;
   onToggleCanonical(): void;
@@ -82,8 +85,60 @@ function section(host: HTMLElement, title?: string): HTMLElement {
   return s;
 }
 
+/** A text field of the Inspector written on `change` (Enter or leaving it):
+ *  one gesture, one undo step, through the same mutator as the page. */
+function textField(host: HTMLElement, label: string, key: string, value: string,
+                   commit: (v: string) => void, opts: { multiline?: boolean; placeholder?: string; title?: string } = {}): void {
+  const l = el("label", "ninsp-l", label);
+  const input = (opts.multiline ? document.createElement("textarea") : document.createElement("input")) as
+    HTMLInputElement | HTMLTextAreaElement;
+  input.className = "insp-name-input ninsp-head-input";
+  input.dataset.nvset = key;
+  input.value = value;
+  if (opts.placeholder) input.placeholder = opts.placeholder;
+  if (opts.title) input.title = opts.title;
+  if (opts.multiline) (input as HTMLTextAreaElement).rows = 2;
+  input.addEventListener("keydown", (e) => {
+    e.stopPropagation();
+    if ((e as KeyboardEvent).key === "Enter" && !(e as KeyboardEvent).shiftKey) {
+      e.preventDefault();
+      input.blur();
+    }
+  });
+  input.addEventListener("change", () => commit(input.value));
+  l.appendChild(input);
+  host.appendChild(l);
+}
+
+/** NARRATIVA-BLOCCHI p.1 · the Inspector of the story itself: its title and
+ *  subtitle, written here or in the page (the same field), and what is
+ *  computed about it, said to be computed. */
+function renderStoryInspector(root: HTMLElement, h: NarrInspectorHooks): void {
+  const nr = narrativesIn(h.doc).find((n) => n.id === h.narrativeId);
+  if (!nr) return;
+  const wrap = el("div", "ninsp");
+  root.appendChild(wrap);
+  const head = el("div", "ninsp-head");
+  head.appendChild(el("b", undefined, t("ninsp.story")));
+  head.appendChild(el("div", "ninsp-dim", nr.name));
+  wrap.appendChild(head);
+  const s = section(wrap);
+  textField(s, t("ninsp.storyTitle"), "story-title", nr.name, (v) => h.onRenameNarrative(v),
+            { title: t("ninsp.storyTitleNote") });
+  textField(s, t("ninsp.subtitle"), "story-subtitle", nr.description ?? "", (v) => h.onSetDescription(v),
+            { multiline: true, placeholder: t("nv.addSubtitle") });
+  const info = section(wrap, t("ninsp.computed"));
+  if (nr.templateId) field(info, t("ninsp.template"), nr.templateId);
+  field(info, t("ninsp.chapters"), String(nr.chapters.length));
+  info.appendChild(el("p", "ninsp-note", t("nv.metaComputed")));
+}
+
 export function renderNarrativeInspector(root: HTMLElement, h: NarrInspectorHooks): void {
   root.textContent = "";
+  if (h.chapter === -1) {
+    renderStoryInspector(root, h);
+    return;
+  }
   const nr = narrativesIn(h.doc).find((n) => n.id === h.narrativeId);
   const ch = nr?.chapters[h.chapter];
   if (!nr || !ch) return;
@@ -108,15 +163,11 @@ export function renderNarrativeInspector(root: HTMLElement, h: NarrInspectorHook
   if (!block) {
     // ── the chapter ────────────────────────────────────────────────────────
     const s = section(wrap);
-    // AUDIT N9 · the title is written IN THE PAGE (the chapter's heading); the
-    // Inspector SHOWS it — one place to edit, not two
-    const lt = el("div", "ninsp-l", t("ninsp.title"));
-    const ti = el("b", "ninsp-title", ch.title ?? "");
-    ti.dataset.nvset = "title";
-    ti.title = t("ninsp.titleInPage");
-    lt.appendChild(ti);
-    s.appendChild(lt);
-    void h.onRename;
+    // NARRATIVA-BLOCCHI p.1 · the title is written in the page AND here: one
+    // field (`chapters[i].title`), one mutator (`renameChapter`), one undo step
+    // per gesture — the Inspector shows it and writes it (AUDIT N9 left this
+    // hook unconnected, «one place to edit»; E.D. asks for both)
+    textField(s, t("ninsp.title"), "title", ch.title ?? "", (v) => { if (v.trim()) h.onRename(v.trim()); });
     const ll = el("label", "ninsp-l", t("ninsp.lane"));
     const ls = document.createElement("select");
     ls.dataset.nvset = "anchor";

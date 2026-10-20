@@ -615,6 +615,9 @@ function renderEmbed(
   } else {
     box = notYetRendered(viewType || "embed", node, ref);
   }
+  // NARRATIVA-BLOCCHI p.1 · an embed is the graph's, drawn now: what it says
+  // is changed in the node; here only how it is shown and its caption
+  box.title = box.title ? `${box.title}\n${t("nv.embedComputed")}` : t("nv.embedComputed");
   if (node && onReveal) {
     const reveal = () => onReveal(node.id);
     // An embed you can DO something in cannot also be one big button: dragging
@@ -772,6 +775,10 @@ export interface NarrativeEditor {
   narrativeId: string;
   addChapter(): void;
   renameChapter(index: number, title: string): void;
+  /** NARRATIVA-BLOCCHI p.1 · the story's title (`name`) and subtitle
+   *  (`description`), written in the page as a chapter's title is */
+  renameNarrative?(name: string): void;
+  setDescription?(text: string): void;
   moveChapter(index: number, delta: number): void;
   deleteChapter(index: number): void;
   toggleCanonical(index: number): void;
@@ -891,7 +898,7 @@ function mentionChip(ref: string, index: Map<string, EmNode>, editable: boolean,
   const chip = el("span", "nv-mention" + (node ? "" : " nv-mention-miss"),
     node ? String(node.name || node.id) : `${ref} ?`);
   chip.dataset.ref = ref;
-  chip.title = node ? `${node.node_type} · ${node.description ?? ""}` : t("nv.mentionMissing", { id: ref });
+  chip.title = node ? `${node.node_type} · ${node.description ?? ""} — ${t("nv.fromGraph")}` : t("nv.mentionMissing", { id: ref });
   if (editable) chip.setAttribute("contenteditable", "false");
   if (node && onReveal)
     chip.addEventListener("click", (e) => {
@@ -1031,14 +1038,54 @@ export function renderNarrativeView(
   }
 
   const head = el("header", "nv-head");
-  head.appendChild(el("h1", "nv-title", current.name));
-  // NARRATIVE-DESK · «template · n capitoli», as on the desk
+  const h1 = el("h1", "nv-title", current.name);
+  head.appendChild(h1);
+  // NARRATIVE-DESK · «template · n capitoli», as on the desk. NARRATIVA-BLOCCHI
+  // p.1 · information, not text to write: computed (the scaffold the story was
+  // started from, the chapters it has), and its tooltip says so
   const meta: string[] = [];
   if (current.templateId) meta.push(current.templateId);
   meta.push(t("nv.nChapters", { n: String(current.chapters.length) }));
-  head.appendChild(el("div", "nv-meta", meta.join(" · ")));
-  if (current.description)
-    head.appendChild(el("p", "nv-lede", current.description));
+  const metaEl = el("div", "nv-meta", meta.join(" · "));
+  metaEl.title = t("nv.metaComputed");
+  head.appendChild(metaEl);
+  const lede = el("p", "nv-lede", current.description ?? "");
+  if (current.description || writing) head.appendChild(lede);
+  // NARRATIVA-BLOCCHI p.1 · the title and the subtitle are written IN THE PAGE,
+  // with the gesture of a chapter's title: click, type, Enter or leave. One
+  // field each (`name`, `description`), one undo step per gesture.
+  if (writing) {
+    const inPlace = (node: HTMLElement, settled: string, commit: (v: string) => void,
+                     placeholder?: string): void => {
+      node.setAttribute("contenteditable", "true");
+      node.spellcheck = node === lede;
+      node.classList.add("nv-editable");
+      if (placeholder) {
+        node.dataset.placeholder = placeholder;
+        node.classList.toggle("nv-empty-lede", !settled.trim());
+      }
+      node.addEventListener("input", () => {
+        if (placeholder) node.classList.toggle("nv-empty-lede", !(node.textContent ?? "").trim());
+      });
+      node.addEventListener("click", (e) => e.stopPropagation());
+      node.addEventListener("blur", () => {
+        const next = (node.textContent || "").trim();
+        if (next !== settled.trim()) commit(next);
+      });
+      node.addEventListener("keydown", (e) => {
+        e.stopPropagation();
+        if (e.key === "Enter" || e.key === "Escape") {
+          e.preventDefault();
+          if (e.key === "Escape") node.textContent = settled;
+          node.blur();
+        }
+      });
+    };
+    if (editor!.renameNarrative)
+      inPlace(h1, current.name, (v) => { if (v) editor!.renameNarrative!(v); else h1.textContent = current.name; });
+    if (editor!.setDescription)
+      inPlace(lede, current.description ?? "", (v) => editor!.setDescription!(v), t("nv.addSubtitle"));
+  }
 
   // The byline is TWO lines, and the split is the point (N8). People who can be
   // asked about a claim go first, as responsible; models follow as assistance.
@@ -1051,6 +1098,7 @@ export function renderNarrativeView(
   // carries «a cura di — · Firmo io», where it can be fixed. The big orange
   // «no person responsible» between the title and the story is gone.
   const byline = el("div", "nv-authors");
+  byline.title = t("nidx.bylineComputed");
   byline.appendChild(el("span", "nv-authors-label", t("nv.curatedBy")));
   for (const a of responsible) {
     const chip = authorChip(a, false);
@@ -1075,6 +1123,13 @@ export function renderNarrativeView(
   const paper = writing ? container : el("div", "nv-paper nv-sheet");
   if (!writing) container.appendChild(paper);
   paper.appendChild(head);
+  // NARRATIVA-BLOCCHI p.1 · the story's head is a part of its own: a click on
+  // it gives the Inspector the story (title, subtitle) — chapter -1
+  if (page.onSelectPart) {
+    head.classList.add("nv-selectable");
+    if (page.selection && page.selection.chapter === -1) head.classList.add("nv-sel");
+    head.addEventListener("click", () => page.onSelectPart!({ chapter: -1, block: null }));
+  }
 
   const sel = page.selection ?? null;
   const pick = (s: NarrativeSelection): void => page.onSelectPart?.(s);
@@ -1121,7 +1176,7 @@ export function renderNarrativeView(
         h.appendChild(chip);
       } else if (laneName && laneName !== chapter.title) {
         const chip = el("span", "nv-anchor", laneName);
-        chip.title = t("nv.narratesLane", { name: laneName });
+        chip.title = `${t("nv.narratesLane", { name: laneName })} — ${t("nv.fromGraph")}`;
         h.appendChild(chip);
       }
     }
@@ -1353,6 +1408,7 @@ function renderPrintPreview(container: HTMLElement, nr: Narrative, index: Map<st
                             page: PageHooks): void {
   // RIFINITURE · the print sheet is paper in both themes
   const sheet = el("div", "nv-print nv-paper");
+  sheet.title = t("nv.previewComputed");
   sheet.appendChild(el("h1", "nv-title", nr.name));
   if (nr.description) sheet.appendChild(el("p", "nv-lede", nr.description));
   const { items, bibliography } = printItems(nr.chapters as ProjChapter[], index);
@@ -1406,6 +1462,7 @@ function renderPrintPreview(container: HTMLElement, nr: Narrative, index: Map<st
 // ── NOTEBOOK · the page as Jupyter will write it ───────────────────────────
 function renderNotebookPreview(container: HTMLElement, nr: Narrative, index: Map<string, EmNode>): void {
   const nb = el("div", "nv-nb");
+  nb.title = t("nv.previewComputed");
   let i = 1;
   for (const c of notebookCells(nr.name, nr.chapters as ProjChapter[], index)) {
     const cell = el("div", `nv-nb-cell nv-nb-${c.cell_type}`);

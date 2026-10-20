@@ -110,6 +110,30 @@ export function editChapters(
   store.updateNode(narrativeId, { data });
 }
 
+// ── the story itself ─────────────────────────────────────────────────────────
+//
+// NARRATIVA-BLOCCHI p.1 · the title of the story is the node's `name`, its
+// subtitle the node's `description` — the fields every node has, written by the
+// same `updateNode` as everything else: one gesture, one undo step, and the page
+// and the Inspector read the one field. A title cannot be emptied (a story with
+// no name is listed by its id); a subtitle can, and then the page offers one.
+
+export function renameNarrative(store: DocumentStore, narrativeId: string,
+                                name: string): void {
+  const node = store.node(narrativeId);
+  const next = name.trim();
+  if (!node || !next || next === node.name) return;
+  store.updateNode(narrativeId, { name: next });
+}
+
+export function setNarrativeDescription(store: DocumentStore, narrativeId: string,
+                                        description: string): void {
+  const node = store.node(narrativeId);
+  const next = description.trim();
+  if (!node || next === (node.description ?? "")) return;
+  store.updateNode(narrativeId, { description: next });
+}
+
 // ── chapters ──────────────────────────────────────────────────────────────────
 
 export function addChapter(store: DocumentStore, narrativeId: string,

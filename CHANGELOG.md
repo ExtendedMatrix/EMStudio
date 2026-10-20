@@ -45,6 +45,18 @@ that asked for one.
 - `scripts/check-space-views.mjs` (101), `scripts/check-implicit-pd.mjs` (30).
 
 ### Changed
+- **A story's title and subtitle are written in the page** (MICRO-NARRATIVA-
+  BLOCCHI p.1, E.D. 20 October 2026). In Write the title (`name`) and the
+  subtitle (`description`) of the story are edited where they are read, with
+  the gesture of a chapter's title (click, type, Enter or leave; Esc goes
+  back): one field each, one undo step per gesture. An empty subtitle shows
+  «Aggiungi un sottotitolo»; an empty title is refused. A click on the story's
+  head opens its Inspector (title and subtitle, the same fields), and the
+  chapter's Inspector now writes the chapter's title too (`onRename`, left
+  unconnected since AUDIT N9). The «template · n chapters» line stays
+  information and says so in its tooltip; so do the other texts computed from
+  the graph (embeds, mentions, the lane chip, the byline, the Index's AI and
+  «to write» tags, the Print and Notebook previews).
 - **Every table sorts and filters, with one component** (MICRO-PULIZIA-
   INTERFACCIA p.9, `table-tools.ts`). It enhances any table once it is in the
   page: a click on a heading sorts (ascending, descending, back to the table's

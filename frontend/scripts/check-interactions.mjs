@@ -6854,6 +6854,49 @@ test("PU9.tables", "PULIZIA p.9 · le tabelle si ordinano e si filtrano: clic su
   return { pass, detail: { ...Object.fromEntries(Object.entries(r).map(([k, v]) => [k, { ...v, col: v.col.slice(0, 4) }])), sel, errors } };
 });
 
+test("NB1.title", "NARRATIVA-BLOCCHI p.1 · titolo e sottotitolo si scrivono nella pagina (Scrivi), un annulla per gesto; sottotitolo vuoto → «Aggiungi un sottotitolo»; l'Inspector del racconto mostra e scrive lo stesso campo; la riga del modello è informazione", async () => {
+  const { p, ctx, errors } = await open({ doc: "PortaMarina-lite", locale: "it" });
+  await workspace(p, "narrative");
+  await p.waitForTimeout(600);
+  const story = () => p.evaluate(() => JSON.parse(window.__EM_DRAG__.graphJson()).nodes.find((n) => n.node_type === "narrative"));
+  const r = { start: (await story()).name };
+  const title = p.locator(".nv-head .nv-title").first();
+  await title.waitFor({ timeout: 8000 });
+  r.editable = await title.getAttribute("contenteditable");
+  await title.click();
+  await p.evaluate(() => { const t = document.querySelector(".nv-head .nv-title"); const g = document.createRange(); g.selectNodeContents(t); g.collapse(false); const s = getSelection(); s.removeAllRanges(); s.addRange(g); });
+  await p.keyboard.type(" NB1");
+  await p.keyboard.press("Enter");
+  await p.waitForTimeout(400);
+  r.typed = (await story()).name;
+  await p.evaluate(() => window.__EM_DRAG__.undo());
+  await p.waitForTimeout(400);
+  r.undone = (await story()).name;
+  const lede = p.locator(".nv-head .nv-lede").first();
+  await lede.click();
+  await p.evaluate(() => { const t = document.querySelector(".nv-head .nv-lede"); const g = document.createRange(); g.selectNodeContents(t); const s = getSelection(); s.removeAllRanges(); s.addRange(g); });
+  await p.keyboard.press("Backspace");
+  await p.keyboard.press("Enter");
+  await p.waitForTimeout(400);
+  r.emptied = (await story()).description ?? "";
+  r.placeholder = await p.evaluate(() => { const l = document.querySelector(".nv-head .nv-lede"); return l ? getComputedStyle(l, "::before").content : null; });
+  await p.locator(".nv-head .nv-meta").first().click();
+  await p.waitForTimeout(400);
+  r.meta = await p.evaluate(() => ({ editable: document.querySelector(".nv-head .nv-meta")?.getAttribute("contenteditable"), tip: document.querySelector(".nv-head .nv-meta")?.title }));
+  r.inspector = await p.evaluate(() => document.querySelector('[data-nvset="story-title"]')?.value ?? null);
+  await p.fill('[data-nvset="story-subtitle"]', "Dal pannello NB1");
+  await p.press('[data-nvset="story-subtitle"]', "Enter");
+  await p.waitForTimeout(400);
+  r.fromInspector = (await story()).description;
+  r.pageLede = await p.evaluate(() => document.querySelector(".nv-head .nv-lede")?.textContent);
+  await p.screenshot({ path: SHOT("nb1-titolo") }).catch(() => {});
+  await ctx.close();
+  const pass = r.editable === "true" && r.typed === `${r.start} NB1` && r.undone === r.start && r.emptied === ""
+    && /Aggiungi un sottotitolo/.test(r.placeholder ?? "") && r.meta.editable !== "true" && /Calcolato/.test(r.meta.tip ?? "")
+    && r.inspector === r.start && r.fromInspector === "Dal pannello NB1" && r.pageLede === "Dal pannello NB1" && !errors.length;
+  return { pass, detail: { ...r, errors } };
+});
+
 // ── run ─────────────────────────────────────────────────────────────────────
 const chosen = cases.filter((c) => !only.length || only.includes(c.id) || only.some((o) => c.id.startsWith(o + ".")));
 for (const c of chosen) {

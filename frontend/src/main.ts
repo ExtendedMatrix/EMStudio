@@ -18740,6 +18740,8 @@ function narrativeEditor(narrativeId: string): NarrativeEditor {
     regenerateViaBridge: () =>
       toast(t("ai.regenerateUnavailable")),
     renameChapter: (i, t) => nedit.renameChapter(s, narrativeId, i, t),
+    renameNarrative: (name) => nedit.renameNarrative(s, narrativeId, name),
+    setDescription: (text) => nedit.setNarrativeDescription(s, narrativeId, text),
     moveChapter: (i, d) => nedit.moveChapter(s, narrativeId, i, d),
     deleteChapter: (i) => nedit.deleteChapter(s, narrativeId, i),
     toggleCanonical: (i) => nedit.toggleCanonical(s, narrativeId, i),
@@ -18858,7 +18860,9 @@ function markNarrativeSelection(): void {
 function setNarrativeSelection(narrativeId: string, sel: NarrativeSelection): void {
   nvSel = { narrativeId, chapter: sel.chapter, block: sel.block };
   nvFocus = true;
-  for (const w of windowsOf()) if (w.type === "narrative") setCurrentChapterIndex(w, sel.chapter);
+  // NARRATIVA-BLOCCHI p.1 · the story's head (-1) is not a chapter to work on
+  if (sel.chapter >= 0)
+    for (const w of windowsOf()) if (w.type === "narrative") setCurrentChapterIndex(w, sel.chapter);
   markNarrativeSelection();
   refreshSurfaces("inspector");
   syncGraphToChapter();
@@ -18889,7 +18893,8 @@ function storyMarks(): { storyLane: string | null; storyCited: Set<string> | nul
   const story = windowsOf().find((w) => w.type === "narrative");
   const narr = activeNarrative();
   if (!story || !narr) return { storyLane: null, storyCited: null };
-  const ci = nvSel && nvFocus && nvSel.narrativeId === narr.id ? nvSel.chapter : validCurrentChapter(story);
+  const ci = nvSel && nvFocus && nvSel.narrativeId === narr.id && nvSel.chapter >= 0
+    ? nvSel.chapter : validCurrentChapter(story);
   if (ci == null) return { storyLane: null, storyCited: null };
   const ch = (narr.chapters as ProjChapter[])[ci];
   return { storyLane: ch?.anchor ?? null, storyCited: chapterCitedIds(store.doc, narr.id, ci) };
@@ -19536,7 +19541,8 @@ function renderNarrativeInspectorInto(host: HTMLElement): void {
   const block = nvSel.block;
   const chapters = (((st.node(narrativeId)?.data ?? {}) as Record<string, unknown>).chapters ?? []) as nedit.EditableChapter[];
   const ch = chapters[chapter];
-  if (!ch) {
+  // NARRATIVA-BLOCCHI p.1 · chapter -1 is the story itself (its head)
+  if (!ch && !(chapter === -1 && st.node(narrativeId))) {
     nvSel = null;
     nvFocus = false;
     return;
@@ -19550,13 +19556,15 @@ function renderNarrativeInspectorInto(host: HTMLElement): void {
     viewTypesFor: (n) => viewTypesFor(n, isStratigraphicType, is3dDocument),
     viewTypeLabel,
     onRename: (title) => nedit.renameChapter(st, narrativeId, chapter, title),
+    onRenameNarrative: (name) => nedit.renameNarrative(st, narrativeId, name),
+    onSetDescription: (text) => nedit.setNarrativeDescription(st, narrativeId, text),
     onSetAnchor: (a) => nedit.setChapterAnchor(st, narrativeId, chapter, a),
     onSignMe: () => signChapterAsMe(narrativeId, chapter),
     onToggleCanonical: () => nedit.toggleCanonical(st, narrativeId, chapter),
-    canGenerate: () => !!ch.anchor,
+    canGenerate: () => !!ch?.anchor,
     generating: () => generating.has(chapter),
     onGenerate: () => void generateChapterDraft(narrativeId, chapter),
-    pending: () => nauth.pendingInChapter(ch).length,
+    pending: () => (ch ? nauth.pendingInChapter(ch).length : 0),
     onVerifyChapter: () => verifyChapter(narrativeId, chapter),
     onMove: (d) => {
       if (block == null) {
@@ -19565,7 +19573,7 @@ function renderNarrativeInspectorInto(host: HTMLElement): void {
         nvSel = { narrativeId, chapter: to, block: null };
       } else {
         nedit.moveBlock(st, narrativeId, chapter, block, d);
-        const to = Math.max(0, Math.min((ch.blocks ?? []).length - 1, block + d));
+        const to = Math.max(0, Math.min((ch?.blocks ?? []).length - 1, block + d));
         nvSel = { narrativeId, chapter, block: to };
       }
       refreshInspector();
@@ -19575,7 +19583,7 @@ function renderNarrativeInspectorInto(host: HTMLElement): void {
         nedit.deleteChapter(st, narrativeId, chapter);
         nvSel = null;
         nvFocus = false;
-        toastUndo(t("del.chapter", { name: String(ch.title ?? chapter + 1) }), st);
+        toastUndo(t("del.chapter", { name: String(ch?.title ?? chapter + 1) }), st);
       } else {
         nedit.deleteBlock(st, narrativeId, chapter, block);
         nvSel = { narrativeId, chapter, block: null };

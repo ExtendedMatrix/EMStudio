@@ -9914,3 +9914,10 @@ body.num-drag-on, body.num-drag-on * { cursor: ew-resize !important; user-select
 .tt-clear { font: inherit; font-size: 11px; padding: 1px 7px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg-panel); color: var(--text); cursor: pointer; }
 .tt-clear[aria-disabled="true"] { color: var(--text-faint); cursor: default; }
 tr.tt-hidden { display: none; }
+
+/* NARRATIVA-BLOCCHI p.1 · the story's title and subtitle, written in the page */
+.nv-head .nv-title.nv-editable:focus, .nv-head .nv-lede.nv-editable:focus { box-shadow: 0 0 0 1px var(--accent); border-radius: var(--radius-sm); }
+.nv-lede.nv-empty-lede::before { content: attr(data-placeholder); color: var(--text-faint); font-style: italic; }
+.nv-lede.nv-empty-lede:focus::before { content: none; }
+.nv-lede.nv-editable { min-height: 1.4em; }
+.ninsp-head-input { width: 100%; }
