@@ -2512,6 +2512,22 @@ window.__EM_SCENE__ = () => {
     finally { if (g && g.id !== prev) setActiveWin(prev); }
   },
   dirty: () => !!store?.dirty,
+  /** MICRO-PULIZIA p.5 · the Matrix as drawn, in world units: the boxes (a
+   *  group's member carries its group), the lanes, the groups — what the
+   *  layout's voids are measured on */
+  matrixGeom: () => {
+    const s = scenes.matrix;
+    if (!s) return null;
+    return {
+      nodes: s.nodes.filter((n) => !n.collapsed).map((n) => ({ id: n.id, x: n.x, y: n.y, w: n.w, h: n.h,
+        type: n.node.node_type, group: s.memberOf?.get(n.id) ?? null, isGroup: !!s.groupsById?.get(n.id) })),
+      lanes: s.lanes.map((l) => ({ id: l.id, label: l.label, y: l.y, height: l.height })),
+      groups: (s.groups ?? []).map((g) => ({ id: g.id, x: g.x, y: g.y, w: g.w, h: g.h })),
+      edges: s.edges.length,
+      viewLayout: matrixViewLayout ? Object.keys(matrixViewLayout.positions ?? {}) : null,
+      viewCanvas: matrixViewLayout?.canvas ?? null, viewLanes: matrixViewLayout?.swimlanes ?? null,
+    };
+  },
   /** DEV29 · the EMTree's graphs, in order: name, dirty, active */
   slots: () => emtree.slots.map((sl) => ({ name: slotLabel(sl), dirty: !!sl.store.dirty, active: sl === emtree.active() })),
   /** the graph as it stands — two reads equal = nothing was written between */
@@ -5188,7 +5204,11 @@ function buildScenesNow(): void {
   scenes.matrix = buildMatrixScene(
     viewDocNow(),
     fview,
-    matrixViewLayout ?? undefined,
+    // MICRO-PULIZIA p.5 · the view layout; a node it does not know yet (added
+    // since — its own run is queued) at its archival place meanwhile
+    matrixViewLayout
+      ? { ...matrixViewLayout, positions: { ...(doc.layout?.positions ?? {}), ...(matrixViewLayout.positions ?? {}) } }
+      : undefined,
     phasesVisible,
     warnIds,
     restackMemo,
@@ -5304,30 +5324,104 @@ function matrixTighterThanDefault(): boolean {
   const cur = circleState.matrix;
   return [...def].some((k) => !cur.has(k));
 }
+/**
+ * MICRO-PULIZIA p.5 · THE MATRIX IS LAID OUT ON WHAT IT DRAWS — always, not only
+ * when a filter is tighter than the default.
+ *
+ * The archival layout (`doc.layout`, what «Recompute layout» writes and the
+ * file keeps) places EVERY node, the outer ring included: Representation
+ * Models, resources and their DTC chains as a band under each lane, and the
+ * small pieces of a lane on shelves below its big one. The Matrix hides that
+ * ring by default, so it drew the archival positions with the band's room
+ * left empty and a few stray boxes far below (GT16, measured 20 Oct 2026: the
+ * II A.D. lane 3 960 high for 1 568 of content, 4 boxes farther than 300 from
+ * anything, the drawing 6 956 × 4 524 with 1.1 % of it nodes). The VIEW layout
+ * is em-core's on the visible subgraph, seeded From-Sketch by the archival one
+ * (the hand's order kept): lanes as tall as their content, the small pieces
+ * packed beside the big one, edges shorter. The document is untouched — the
+ * drawing is not the data — and a hand move writes to both.
+ *
+ * Recomputed when what it was computed for changes (`matrixViewSig`: the
+ * document, its nodes and edges, the filter, the folds, a new archival layout).
+ */
+let matrixViewSig = "";
+let matrixViewQueued = false;
+function matrixViewSigNow(): string {
+  if (!store) return "";
+  const d = store.doc;
+  return [emtree.active()?.id ?? "", d.graph.nodes.length, d.graph.edges.length,
+    [...circleState.matrix].sort().join(","), (d.layout?.folded_groups ?? []).length,
+    layoutRevision(d.layout)].join("§");
+}
+/** the archival layout's identity: a new object is a new layout (setLayout) */
+const layoutIds = new WeakMap<object, number>();
+let layoutIdNext = 1;
+function layoutRevision(l: EmDocument["layout"] | undefined): number {
+  if (!l) return 0;
+  let id = layoutIds.get(l);
+  if (!id) { id = layoutIdNext++; layoutIds.set(l, id); }
+  return id;
+}
+/** queue ONE recomputation when the view layout is stale (flushChange, a load) */
+function matrixViewMaybeStale(): void {
+  if (!store || matrixViewQueued || matrixViewSigNow() === matrixViewSig) return;
+  matrixViewQueued = true;
+  queueMicrotask(() => { matrixViewQueued = false; void refreshMatrixViewLayout(); });
+}
 async function refreshMatrixViewLayout(): Promise<void> {
   if (!store) return;
-  const filtered = matrixTighterThanDefault();
-  if (!filtered) {
-    if (matrixViewLayout !== null) {
-      matrixViewLayout = null;
-      buildScenes();
-      draw();
-    }
-    return;
-  }
+  const sig = matrixViewSigNow();
+  matrixViewSig = sig;
   const v = filteredView({ placesUndrawn: true });
   const doc = store.doc;
   try {
     const { computeLayout } = await import("./emcore");
+    // MICRO-PULIZIA p.5 · the engine needs what places a unit in TIME even
+    // where the Matrix does not draw it: the epochs (lanes, not boxes) and the
+    // edges among the drawn nodes whatever their ring — `has_first_epoch` is
+    // in «other edges», hidden by default, and without it every unit fell in
+    // one lane (measured on GT16: XX sec 14 of 23, Post antiquity empty)
+    // …and ONLY what it draws as a box: a closed paradata group is a «PD»
+    // tablet on its unit, an epoch's is the lane's tag — boxes em-core would
+    // otherwise make room for (GT16: 123 of the 348 nodes it placed). The
+    // drawn set does not depend on positions, so the scene just built says it.
+    const drawn = scenes.matrix
+      ? new Set(scenes.matrix.nodes.filter((n) => !n.collapsed).map((n) => n.id)) : null;
+    const nodes = drawn ? v.nodes.filter((n) => drawn.has(n.id)) : v.nodes;
+    const ids = new Set(nodes.map((n) => n.id));
+    const epochs = doc.graph.nodes.filter((n) => !ids.has(n.id) && classOf(n.node_type) === "EpochNode");
+    for (const n of epochs) ids.add(n.id);
+    const both = (e: EmEdge): boolean => ids.has(e.source) && ids.has(e.target);
+    const kept = v.edges.filter(both);
+    const seen = new Set(kept.map((e) => `${e.source}|${e.target}|${e.edge_type}`));
+    const extra = doc.graph.edges.filter((e) => both(e)
+      && !seen.has(`${e.source}|${e.target}|${e.edge_type}`)
+      && !isRemoved(e as unknown as Record<string, unknown>));
     const subGraph = {
       ...doc.graph,
-      nodes: v.nodes,
-      edges: v.edges,
+      nodes: [...nodes, ...epochs],
+      edges: [...kept, ...extra],
     } as EmDocument["graph"];
     // seed with the archival layout (From-Sketch) so kept nodes barely move
-    matrixViewLayout = await perfTimeAsync("runLayout", () =>
+    const out = await perfTimeAsync("runLayout", () =>
       computeLayout(subGraph, doc.layout ?? undefined),
     );
+    // a newer document or change arrived meanwhile: its own run decides
+    if (matrixViewSig !== sig || store?.doc !== doc) return;
+    // a «PD» tablet (left out above) sits on its unit: there, and not at its
+    // archival place, or the outline of a group it belongs to reaches for it
+    // (GT16: an activity 4 748 wide around 1 040 of members)
+    if (drawn && out.positions) {
+      const referent = new Map<string, string>();
+      for (const e of doc.graph.edges)
+        if (e.edge_type === "has_paradata_nodegroup") referent.set(e.target, e.source);
+      for (const n of v.nodes) {
+        if (drawn.has(n.id) || out.positions[n.id]) continue;
+        const at = out.positions[referent.get(n.id) ?? ""];
+        if (at) out.positions[n.id] = { ...at };
+      }
+    }
+    matrixViewLayout = out;
   } catch {
     matrixViewLayout = null; // fall back to archival on failure
   }
@@ -5526,6 +5620,7 @@ function flushChange(): void {
   duringStoreFlush(() => {
     refreshNameStatus();          // NAME1: label colours follow the graph
     ensureScenes();               // (recomputes the hidden types first)
+    matrixViewMaybeStale();       // MICRO-PULIZIA p.5 · the Matrix's own layout
     if (filterPanelOpen()) renderCirclesPanel(); // refresh circle counts
     updateInfo();             // (the issues: the canvas draws their «!»)
     draw();                   // the canvas first: the node stops where it was left
@@ -5695,6 +5790,8 @@ function showDocument(target: GraphSlot | null, opts: { rebuildOnly?: boolean } 
     }
     recomputeHiddenFromCircles(); // derive hidden types for this document
     buildScenes();
+    matrixViewSig = "";           // MICRO-PULIZIA p.5 · this document's view layout
+    matrixViewMaybeStale();
   } else {
     scenes.matrix = null;
     scenes.graph = null;
@@ -15241,7 +15338,7 @@ function applyTemplate(t: DetailTemplate): void {
   draw();
   renderCirclesPanel();
   if (view === "matrix") void refreshMatrixViewLayout();
-  else matrixViewLayout = null;
+  else matrixViewMaybeStale(); // MICRO-PULIZIA p.5 · the Matrix keeps its view layout (its signature says when it is stale)
 }
 function renderCirclesPanel(): void {
   filterPanel.innerHTML = "";
@@ -15323,7 +15420,7 @@ function renderCirclesPanel(): void {
         // Matrix recompacts on the filtered subgraph (em-core view layout);
         // in Graph the layout already reflows, so just invalidate for later.
         if (view === "matrix") void refreshMatrixViewLayout();
-        else matrixViewLayout = null;
+        else matrixViewMaybeStale(); // MICRO-PULIZIA p.5 · the Matrix keeps its view layout (its signature says when it is stale)
       });
       row.appendChild(cb);
       row.appendChild(document.createTextNode(` ${circle.label} (${count})`));
@@ -15459,7 +15556,7 @@ function renderCirclesPanel(): void {
       draw();
     renderCirclesPanel();
     if (view === "matrix") void refreshMatrixViewLayout();
-    else matrixViewLayout = null;
+    else matrixViewMaybeStale(); // MICRO-PULIZIA p.5 · the Matrix keeps its view layout (its signature says when it is stale)
   });
   filterPanel.appendChild(reset);
 }

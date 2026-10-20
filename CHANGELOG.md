@@ -45,6 +45,21 @@ that asked for one.
 - `scripts/check-space-views.mjs` (101), `scripts/check-implicit-pd.mjs` (30).
 
 ### Changed
+- **The Matrix is laid out on what it draws** (MICRO-PULIZIA-INTERFACCIA p.5).
+  The archival layout (what «Recompute layout» writes and the file keeps) places
+  every node, the outer ring included — Representation Models, resources and
+  their DTC chains in a band under each lane, closed paradata groups as boxes —
+  and the Matrix, which hides that ring and draws a closed group as a «PD»
+  tablet on its unit, showed the room left for them as voids. Now the Matrix
+  always draws em-core's VIEW layout of exactly the boxes it draws (plus the
+  epochs and every edge among them, `has_first_epoch` included, whatever its
+  ring), seeded From-Sketch by the archival one; the document's layout is never
+  written by it, and a hand move goes to both. Recomputed when what it was made
+  for changes (nodes, edges, filter, folds, a new archival layout). On the GT16
+  (20 Oct 2026): the drawing 6956 × 4524 → 3732 × 2236, nodes 1.1 % → 4.2 % of it,
+  the II A.D. lane 3960 → 1738 high, horizontal voids over 120 in a lane 2 → 0,
+  boxes farther than 300 from any other 4 → 0, mean edge length 1096 → 538.
+  `__EM_DRAG__.matrixGeom()` reads the Matrix as drawn (the checks' hook).
 - **The graph window's bar** (MICRO-PULIZIA-INTERFACCIA p.4). «Recompute
   layout» is an icon of its own (no word «Layout»; its name and Alt-click in the
   tooltip and the aria-label), and beside it an icon for «Compact the

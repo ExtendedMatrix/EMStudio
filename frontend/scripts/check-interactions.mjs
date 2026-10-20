@@ -6669,6 +6669,32 @@ test("PU4.header", "PULIZIA p.4 · testata del grafo: Ricalcola layout è un'ico
   return { pass, detail: { matrix, graphMore: graph.more, fit0, zoomed, fitC, tools, errors } };
 });
 
+test("PU5.matrix", "PULIZIA p.5 · la Matrix è disposta su ciò che disegna: layout di vista di em-core (epoche e archi compresi), nessun vuoto orizzontale oltre 120 in una corsia, nessun nodo fuori dalle corsie, corsie alte quanto il contenuto; il layout del documento non cambia", async () => {
+  const { p, ctx, errors } = await open({ doc: "TempluMare", locale: "it" });
+  const before = await p.evaluate(() => JSON.stringify(JSON.parse(window.__EM_DRAG__.docJson()).layout?.positions ?? JSON.parse(window.__EM_DRAG__.docJson()).graphs));
+  await p.waitForFunction(() => !!window.__EM_DRAG__.matrixGeom()?.viewLayout, null, { timeout: 10000 }).catch(() => {});
+  await p.waitForTimeout(300);
+  const g = await p.evaluate(() => window.__EM_DRAG__.matrixGeom());
+  const after = await p.evaluate(() => JSON.stringify(JSON.parse(window.__EM_DRAG__.docJson()).layout?.positions ?? JSON.parse(window.__EM_DRAG__.docJson()).graphs));
+  await ctx.close();
+  const top = g.nodes.filter((n) => !n.group);
+  const lanes = g.lanes;
+  const laneOf = (n) => lanes.findIndex((l) => n.y + n.h / 2 >= l.y && n.y + n.h / 2 < l.y + l.height);
+  const outside = top.filter((n) => laneOf(n) < 0).map((n) => n.id);
+  const gaps = [];
+  const slack = [];
+  lanes.forEach((l, i) => {
+    const inl = top.filter((n) => laneOf(n) === i);
+    const iv = inl.map((n) => [n.x, n.x + n.w]).sort((a, b) => a[0] - b[0]);
+    const m = [];
+    for (const [a, b] of iv) { if (m.length && a <= m[m.length - 1][1]) m[m.length - 1][1] = Math.max(m[m.length - 1][1], b); else m.push([a, b]); }
+    for (let k = 1; k < m.length; k++) if (m[k][0] - m[k - 1][1] > 120) gaps.push(Math.round(m[k][0] - m[k - 1][1]));
+    if (inl.length) slack.push(Math.round(l.height - (Math.max(...inl.map((n) => n.y + n.h)) - Math.min(...inl.map((n) => n.y)))));
+  });
+  const pass = !!g.viewLayout && !outside.length && !gaps.length && slack.every((x) => x <= 120) && before === after && !errors.length;
+  return { pass, detail: { view: !!g.viewLayout, outside, gaps, slack, docUnchanged: before === after, errors } };
+});
+
 // ── run ─────────────────────────────────────────────────────────────────────
 const chosen = cases.filter((c) => !only.length || only.includes(c.id) || only.some((o) => c.id.startsWith(o + ".")));
 for (const c of chosen) {
