@@ -22,6 +22,7 @@
  */
 import rules from "./assets/em_visual_rules.json";
 import { ICON_NODE_TYPES } from "./icons";
+import { HDTO_GLYPHS, HDTO_GLYPH_TYPES } from "./hdto-glyphs";
 import type { NodeStyle } from "./palette";
 
 /**
@@ -77,6 +78,8 @@ export function glyphAspect(
   data?: Record<string, unknown> | null,
 ): number | null {
   if (nodeType === "document") return DOC_SHEET_ASPECT;
+  // MICRO-PULIZIA p.3 · the HDT-O glyphs (the graph among them): square
+  if (HDTO_GLYPH_TYPES.has(nodeType) && !GLYPHS[nodeType]) return HDTO_GLYPHS[nodeType].aspect;
   const kind = data?.["dtc_kind"];
   const entry = ICON_NODE_TYPES.has(nodeType)
     ? GLYPHS[nodeType]
@@ -116,6 +119,9 @@ export function drawsAsGlyph(
 ): boolean {
   return (
     ICON_NODE_TYPES.has(nodeType) ||
+    // MICRO-PULIZIA p.3 · the HDT-O nodes are glyphs too: the graph's plate is
+    // its square glyph, not the 240 × 68 box (what is selected and clicked)
+    HDTO_GLYPH_TYPES.has(nodeType) ||
     // the DTC profile picks a glyph per NODE, not per type: a plain `link` is a
     // chain, a `link` with a kind is a photograph or a mesh (EM2)
     (!!data && data["dtc_kind"] !== undefined) ||

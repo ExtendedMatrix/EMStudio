@@ -92,7 +92,7 @@ export type GraphMode = ViewKind;
  *  the menu from it and `winMode` validates against it, so a new projection is
  *  one entry here rather than two lists that can disagree (which is exactly how
  *  `multigraph` first shipped invisible to `winMode`). */
-export const GRAPH_MODES: GraphMode[] = ["matrix", "graph", "dtc", "multigraph", "graphs"];
+export const GRAPH_MODES: GraphMode[] = ["matrix", "graph", "dtc", "graphs"];
 
 /** The backends a Storage window can show: the disk, and the room's S3 store
  *  (`s3Panel`: delivery, lots, derivation). AUDIT C · it said «NOT connected
@@ -1464,6 +1464,9 @@ export function setWinModeOf(win: Win, mode: string): boolean {
  *  `winModeOf` the canvas code reads. */
 export function winMode(win: Win): GraphMode {
   const m = win.state["mode"];
+  // MICRO-PULIZIA p.3 · a window left on the «Full graph» opens on the Graph,
+  // which draws every node now
+  if (m === "multigraph") return "graph";
   return GRAPH_MODES.includes(m as GraphMode) ? (m as GraphMode) : "matrix";
 }
 

@@ -24,6 +24,7 @@
  * roles and the SVG are exercised in node (`scripts/check-glyphs.mjs`).
  */
 import rules from "./assets/em_visual_rules.json";
+import { HDTO_GLYPHS, HDTO_GLYPH_TYPES } from "./hdto-glyphs";
 
 interface RawLayer {
   d: string;
@@ -106,7 +107,9 @@ const cache = new Map<string, Glyph | null>();
 export function glyphByKey(key: string): Glyph | null {
   const hit = cache.get(key);
   if (hit !== undefined) return hit;
-  const raw = BLOCK[key] as RawGlyph | undefined;
+  // MICRO-PULIZIA p.3 · the datamodel first; an HDT-O type it does not draw
+  // yet takes its pending entry (hdto-glyphs.ts, the same format)
+  const raw = (BLOCK[key] ?? HDTO_GLYPHS[key]) as RawGlyph | undefined;
   let g: Glyph | null = null;
   if (raw && Array.isArray(raw.viewBox) && Array.isArray(raw.layers) && raw.layers.length) {
     g = {
@@ -141,6 +144,7 @@ export function glyphByKey(key: string): Glyph | null {
  */
 export function glyphFor(nodeType: string, data?: Record<string, unknown> | null): Glyph | null {
   if (GLYPH_TYPES.has(nodeType)) return glyphByKey(nodeType);
+  if (HDTO_GLYPH_TYPES.has(nodeType)) return glyphByKey(nodeType);
   const kind = data?.["dtc_kind"];
   if (typeof kind === "string") return glyphByKey(`dtc:${kind}`);
   const dk = dataGlyphKey(nodeType, data);

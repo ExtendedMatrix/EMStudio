@@ -45,6 +45,23 @@ that asked for one.
 - `scripts/check-space-views.mjs` (101), `scripts/check-implicit-pd.mjs` (30).
 
 ### Changed
+- **The graph window's views** (MICRO-PULIZIA-INTERFACCIA p.3). «Full graph» is
+  gone: the **Graph** (the liquid picture) draws every node present — the HDT-O
+  ones (study, heritage entity, twin, project, the graph itself), the graph's
+  paradata and the ornaments as nodes — and its funnel has an **HDT-O** switch
+  (on by default) that takes them out again; a window left on the Full graph
+  opens on the Graph. «Multigraph» is called **«Graphs paradata»** and the
+  «Graph paradata» badge left the Matrix's bar (the view is one of the modes).
+  The funnel keeps to each view what is its own: **Monochrome** is the Matrix's
+  and the DTC's (the Graph draws discs, and never read it). **The HDT-O nodes
+  have glyphs** (`hdto-glyphs.ts`, in the datamodel's `2d_glyphs` format, read
+  only for a type the vendored rules do not draw yet): the ornaments' grammar —
+  a grey pictogram in a #333333 frame — with a square plate; the graph's glyph
+  is square, and what is selected and clicked is that square, not the 240 × 68
+  box. The texts no longer equate a twin with a graph: the twin's gloss says a
+  twin can be of any scale (a site, a building, US 100) and the graph is one of
+  the proposition sets it gathers; the DTC's empty state, the asset scope hint
+  and the HDT-O switch say the same.
 - **The files-and-graphs panel is the list of what is open** (MICRO-PULIZIA-
   INTERFACCIA p.2). The introduction is a «?» in the panel's header (tooltip,
   Tab, screen reader; a click says it in a toast); New graph, Open… and Recent

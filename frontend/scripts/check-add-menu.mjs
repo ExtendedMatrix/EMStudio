@@ -106,8 +106,9 @@ const eq = (got, want, what) => {
      "Matrix paradata only LINKED, Graph paradata free");
   const hdto = table.find((r) => r.category === "HDT-O");
   if (hdto)
-    eq([hdto.cells.matrix, hdto.cells.graph, hdto.cells.multigraph], ["off", "off", "on"],
-       "HDT-O only where it is drawn (multigraph)");
+    // MICRO-PULIZIA p.3 · the Graph draws them now (the Full graph is gone)
+    eq([hdto.cells.matrix, hdto.cells.graph, hdto.cells.multigraph], ["off", "on", "on"],
+       "HDT-O only where it is drawn (the Graph)");
   const dtc = table.find((r) => r.category === "DTC");
   eq([dtc.cells.matrix, dtc.cells.dtc, cell("US", "dtc")], ["off", "on", "off"],
      "DTC chunks only in the DTC projection, and it offers nothing else");

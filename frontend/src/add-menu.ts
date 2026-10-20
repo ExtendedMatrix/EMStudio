@@ -124,16 +124,17 @@ export const DTC_CATEGORY = "DTC";
  *    provenance forest inside a stratigraphic matrix — which is what the corpus
  *    separation exists to prevent. Conversely, the DTC projection offers
  *    nothing BUT the DTC chunks (WIN3, the palette's per-mode rule).
- *  · HDT-O types are only drawn by `multigraph` (`filteredView` drops them
- *    unless `wholeGraph`): adding one anywhere else would create a node you
- *    cannot see.
+ *  · HDT-O types are drawn by the Graph (MICRO-PULIZIA p.3: its whole view,
+ *    the «Full graph» it replaced) and never by the Matrix or the DTC: adding
+ *    one there would create a node you cannot see.
  *  · Matrix paradata only LINKED: a paradata node loose in Matrix has no lane
  *    and no unit to hang from, so it would float with nowhere to be (E.D., 30 set).
  */
 export function categoryState(ctx: AddContext, category: string): CategoryState {
   if (category === DTC_CATEGORY) return ctx === "dtc" ? "on" : "off";
   if (ctx === "dtc") return "off";
-  if (category === HDTO_CATEGORY) return ctx === "multigraph" ? "on" : "off";
+  // MICRO-PULIZIA p.3 · the Graph draws the HDT-O nodes now (the Full graph is gone)
+  if (category === HDTO_CATEGORY) return ctx === "graph" || ctx === "multigraph" ? "on" : "off";
   if (ctx === "matrix" && category === "Paradata") return "linked";
   return "on";
 }

@@ -6589,6 +6589,55 @@ test("PU2.emtree", "PULIZIA p.2 · pannello dei file e dei grafi: niente testo i
   return { pass, detail: { stacked, aloneWin, alone, errors } };
 });
 
+test("PU3.views", "PULIZIA p.3 · viste del grafo: niente «Grafo completo»; «Paradati dei grafi» al posto di «Multigrafo» e niente distintivo nella Matrix; il Grafo disegna anche gli HDT-O e l'imbuto ha l'interruttore HDT-O; Monochrome solo dove vale (Matrix); il grafo ha la piastra quadrata", async () => {
+  // the fixture with a study (HC9): one HDT-O node for the Graph to draw or hide
+  const doc = fixture("TempluMare");
+  doc.graph.nodes.push({ id: "pu3-study", node_type: "study", name: "PU3 study", data: { hdto_role: "study" } });
+  const { p, ctx, errors } = await open({ doc, locale: "it" });
+  const seg = () => p.evaluate(() => [...document.querySelectorAll('.tile-area[data-win="canvas:1"] .tile-bar button')].filter((b) => b.offsetParent && !b.closest(".dd-menu")).map((b) => b.textContent.trim()));
+  const mode = (label) => p.evaluate((label) => [...document.querySelectorAll('.tile-area[data-win="canvas:1"] .tile-bar button')].find((b) => b.offsetParent && !b.closest(".dd-menu") && b.textContent.trim() === label)?.click(), label);
+  const panel = () => p.evaluate(() => [...document.querySelectorAll("#filter-panel .fp-row")].map((e) => e.textContent.trim()));
+  const r = { segs: await seg(), chip: await p.evaluate(() => !!document.querySelector('[data-act="graph-paradata"]')) };
+  await p.evaluate(() => document.getElementById("btn-view-props")?.click());
+  await p.waitForTimeout(300);
+  r.matrixPanel = await panel();
+  await p.evaluate(() => document.querySelector("#filter-panel .fp-close")?.click());
+  await mode("Grafo");
+  await p.waitForTimeout(1500);
+  r.on = await p.evaluate(() => window.__EM_SCENE__().nodes.length);
+  r.studyOn = await p.evaluate(() => window.__EM_SCENE__().nodes.includes("pu3-study"));
+  await p.evaluate(() => document.getElementById("btn-view-props")?.click());
+  await p.waitForTimeout(300);
+  r.graphPanel = await panel();
+  r.hdtoChecked = await p.evaluate(() => document.querySelector('#filter-panel [data-liq="hdto"]')?.checked ?? null);
+  await p.click('#filter-panel [data-liq="hdto"]');
+  await p.waitForTimeout(1200);
+  r.off = await p.evaluate(() => window.__EM_SCENE__().nodes.length);
+  r.studyOff = await p.evaluate(() => window.__EM_SCENE__().nodes.includes("pu3-study"));
+  await p.click('#filter-panel [data-liq="hdto"]');
+  await p.waitForTimeout(800);
+  await p.screenshot({ path: SHOT("pu3-filtro-grafo-hdto") }).catch(() => {});
+  await p.evaluate(() => document.querySelector("#filter-panel .fp-close")?.click());
+  await mode("Paradati dei grafi");
+  await p.waitForTimeout(1200);
+  // the graph's node: what is selected and clicked is its square glyph
+  r.rootBox = await p.evaluate(async () => {
+    const sg = await import("/em/studio/src/scene.ts").catch(() => null);
+    const sc = window.__EM_DRAG__.winScene("canvas:1");
+    const b = sc?.boxes.find((x) => /graphroot$/.test(x.id)) ?? sc?.boxes[0];
+    return b ? { w: Math.round(b.w), h: Math.round(b.h), mode: sc.mode, lib: !!sg } : null;
+  });
+  r.square = await p.evaluate(async () => {
+    const sh = await import("/em/studio/src/shape-geom.ts");
+    return { draws: sh.drawsAsGlyph("graph"), aspect: sh.glyphAspect("graph") };
+  });
+  await ctx.close();
+  const pass = !r.segs.includes("Grafo completo") && !r.segs.includes("Multigrafo") && r.segs.includes("Paradati dei grafi") && !r.chip
+    && r.matrixPanel.some((x) => /Monocromo/.test(x)) && !r.graphPanel.some((x) => /Monocromo/.test(x)) && r.graphPanel.some((x) => /^HDT-O/.test(x))
+    && r.hdtoChecked === true && r.on > r.off && r.studyOn && !r.studyOff && r.square.draws === true && r.square.aspect === 1 && !errors.length;
+  return { pass, detail: { ...r, errors } };
+});
+
 // ── run ─────────────────────────────────────────────────────────────────────
 const chosen = cases.filter((c) => !only.length || only.includes(c.id) || only.some((o) => c.id.startsWith(o + ".")));
 for (const c of chosen) {

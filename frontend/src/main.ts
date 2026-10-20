@@ -1,5 +1,5 @@
 import "./style.css";
-import { hdtoChain, hdtoDropped, shownCode, studyCode, withCode } from "./hdto";
+import { hdtoDropped, shownCode, studyCode, withCode } from "./hdto";
 import { linksOf, resolveAddress, type GraphDocs } from "./links";
 import { applyFolding, buildMembership, MEMBERSHIP_EDGES } from "./folding";
 import { geoOf, georeferenceScene, reprojectPoint, setBridgeResolver } from "./geo";
@@ -728,7 +728,6 @@ const CENTRAL_MODES: CentralMode[] = [
   "matrix",
   "graph",
   "dtc",
-  "multigraph",
 ];
 // Graph-view layout: chosen algorithm + manual position overrides (drags /
 // liquid clustering). Overrides persist across rebuilds in-session and are
@@ -2482,8 +2481,8 @@ window.__EM_SCENE__ = () => {
   enterGroup: (id: string) => enterGroup(id),
   /** MICRO studio-luogo · the Graph view's HDT-O layer, read and switched, and
    *  the ids each view's projection holds (what is on screen, not the file) */
-  hdtoLayer: () => hdtoLayer,
-  setHdtoLayer: (on: boolean) => setHdtoLayer(on),
+  /** MICRO-PULIZIA p.3 · the Graph view's HDT-O switch */
+  liquidHdto: (on?: boolean) => { if (typeof on === "boolean") setLiquidHdto(on); return liquidHdto; },
   viewNodeIds: (v: "matrix" | "graph") =>
     (v === "matrix" ? scenes.matrix : scenes.graph)?.nodes.map((n: { id: string }) => n.id) ?? [],
   setOverlays: (v: OverlayView, st: { master?: boolean; off?: OverlayKey[] }) => {
@@ -4627,12 +4626,14 @@ function labelResources(scene: Scene | null | undefined, counts: Map<string, num
   }
 }
 
-/** MICRO studio-luogo, part D · the Heritage Digital Twin layer of the Graph
- *  view: the study, its place, the HC1, the twin, the project and their edges,
- *  drawn over the graph when it is on. OFF by default and not remembered — a
- *  layer you switch on to look, like the multigraph's whole view; the Matrix
- *  never has it. */
-let hdtoLayer = false;
+/** MICRO-PULIZIA p.3 · the Graph view draws EVERY node present — the HDT-O
+ *  ones (study, heritage entity, twin, project, the graph itself), the graph's
+ *  paradata and the ornaments as nodes: what the «Full graph» showed, which is
+ *  gone. The funnel's «HDT-O» switch hides them again (the Graph as it was:
+ *  ornaments as badges, the cultural context out). ON by default, not
+ *  remembered; the Matrix never draws them. (It replaces MICRO studio-luogo's
+ *  «HDT-O layer», which added only the study's chain.) */
+let liquidHdto = true;
 
 // ── MICRO-SPAZIO-3D-2 · p.1 · the implicit paradata group, in the view ──────
 /** the implicit groups opened in place (Shift + click): the view's, this session */
@@ -4714,7 +4715,6 @@ function renderImplicitInspector(host: HTMLElement, groupId: string): void {
 
 function filteredView(opts: { wholeGraph?: boolean;
                         hidden?: { nodes: Set<string>; edges: Set<string> };
-                        hdtoLayer?: boolean;
                         /** the Matrix: no LocationNodeGroup drawn (11 Oct 2026) */
                         placesUndrawn?: boolean } = {}): {
   nodes: EmDocument["graph"]["nodes"];
@@ -4776,7 +4776,7 @@ function filteredView(opts: { wholeGraph?: boolean;
   // view's layer is on.
   // A place is never part of it (E.D., 11 Oct 2026): «un luogo è topografia».
   const dropped = !wholeGraph
-    ? hdtoDropped(doc, vNodes, HDTO_HIDDEN_TYPES, !!opts.hdtoLayer)
+    ? hdtoDropped(doc, vNodes, HDTO_HIDDEN_TYPES, false)
     : new Set<string>();
   // …and the Matrix draws no PLACE as a box (E.D., 11 Oct 2026, «il disegno non
   // è il dato»): site, area, saggio, toponym — empty or full. The nodes and
@@ -5162,13 +5162,11 @@ function buildScenesNow(): void {
   // AUDIT N2 · each projection with ITS circles; equal circle sets share a view
   const views = new Map<string, ReturnType<typeof filteredView>>();
   const viewFor = (v: ViewKind, whole = false): ReturnType<typeof filteredView> => {
-    const layer = v === "graph" && hdtoLayer;
     const noPlaces = v === "matrix";
-    const key = `${whole ? "W" : ""}${layer ? "H" : ""}${noPlaces ? "P" : ""}${[...circleState[v]].sort().join(",")}`;
+    const key = `${whole ? "W" : ""}${noPlaces ? "P" : ""}${[...circleState[v]].sort().join(",")}`;
     let fv = views.get(key);
     if (!fv) {
-      fv = filteredView({ wholeGraph: whole, hidden: hiddenFor(v), hdtoLayer: layer,
-                         placesUndrawn: noPlaces });
+      fv = filteredView({ wholeGraph: whole, hidden: hiddenFor(v), placesUndrawn: noPlaces });
       views.set(key, fv);
     }
     return fv;
@@ -5196,7 +5194,9 @@ function buildScenesNow(): void {
     restackMemo,
     restackKey(doc, fview, phasesVisible),
   );
-  scenes.graph = buildGraphLiquid(doc, viewFor("graph"));
+  // MICRO-PULIZIA p.3 · the Graph: every node present (the whole view) unless
+  // its HDT-O switch is off
+  scenes.graph = buildGraphLiquid(doc, viewFor("graph", liquidHdto));
   // DAG · the DTC projection reads the **corpus** — the documentation member —
   // and not the study graph.
   //
@@ -5271,18 +5271,10 @@ function buildScenesNow(): void {
     lastDtcSource = dtcSource;
     for (const key of [...framedViews]) if (key.endsWith(":dtc")) framedViews.delete(key);
   }
-  // MULTIGRAPH · the same layered projection as Graph, over the WHOLE view:
-  // ornaments as nodes and the graph-scope layer included, so author, licence,
-  // embargo and the site position are visible and selectable (and therefore
-  // editable in the Inspector) instead of living only in a side panel.
-  scenes.multigraph = buildGraphScene(doc, viewFor("multigraph", true), {
-    // G2 · «force» is the Graph's live simulation (a worker); the Full graph,
-    // which keeps the EM shapes, keeps a static layout instead of the old
-    // O(n²) force on the main thread (6 s on 5000 units, measured)
-    algorithm: graphAlgorithm === "force" ? "layered" : graphAlgorithm,
-    overrides: multigraphOverrides,
-  });
-  labelResources(scenes.multigraph, fileCounts(doc.graph.edges));
+  // MICRO-PULIZIA p.3 · GONE: the «Full graph» (`scenes.multigraph`, the
+  // layered projection of the whole view). The Graph draws every node now,
+  // with the HDT-O switch in its funnel.
+  scenes.multigraph = null;
   // MICRO-AUTORI-LAYOUT p.5 · the Multigraph: every graph open in the
   // workspace, a node with its own paradata, the rapporti between them
   const gd = buildGraphsDoc(emtree.slots.map((sl) => ({
@@ -15409,33 +15401,29 @@ function renderCirclesPanel(): void {
     hideRow.append(hideCb, document.createTextNode(` ${t("liq.hide")}`));
     filterPanel.appendChild(hideRow);
 
-    // MICRO studio-luogo · the Heritage Digital Twin layer: the study in its
-    // cultural context, over the graph, switched on and off here
-    const hh = document.createElement("div");
-    hh.className = "fp-sect";
-    hh.textContent = t("hdto.layer");
-    filterPanel.appendChild(hh);
-    const chainSize = hdtoChain(store.doc).layerIds.size;
-    const layerRow = document.createElement("label");
-    layerRow.className = "fp-row";
-    if (!chainSize) layerRow.style.opacity = "0.45";
-    const layerCb = document.createElement("input");
-    layerCb.type = "checkbox";
-    layerCb.dataset.hdtoLayer = "1";
-    layerCb.checked = hdtoLayer;
-    layerCb.addEventListener("change", () => setHdtoLayer(layerCb.checked));
-    layerRow.append(layerCb, document.createTextNode(` ${t("hdto.layerToggle")} (${chainSize})`));
-    filterPanel.appendChild(layerRow);
-    if (!chainSize) {
-      const none = document.createElement("div");
-      none.className = "fp-hint";
-      none.textContent = t("hdto.layerEmpty");
-      filterPanel.appendChild(none);
-    }
+    // MICRO-PULIZIA p.3 · HDT-O: the cultural context's nodes (study, heritage
+    // entity, twin, project, the graph and its paradata, the ornaments as
+    // nodes), shown or hidden — on by default
+    const hdtoN = store.doc.graph.nodes.filter((n) => HDTO_HIDDEN_TYPES.has(n.node_type)
+      || !!(n.data as Record<string, unknown> | undefined)?.hdto_role).length;
+    const hdtoRow = document.createElement("label");
+    hdtoRow.className = "fp-row";
+    hdtoRow.title = t("liq.hdtoTitle");
+    const hdtoCb = document.createElement("input");
+    hdtoCb.type = "checkbox";
+    hdtoCb.dataset.liq = "hdto";
+    hdtoCb.checked = liquidHdto;
+    hdtoCb.addEventListener("change", () => setLiquidHdto(hdtoCb.checked));
+    hdtoRow.append(hdtoCb, document.createTextNode(` ${t("liq.hdto")} (${hdtoN})`));
+    filterPanel.appendChild(hdtoRow);
   }
 
   // Display options (presentation, not a filter): monochrome overrides every
   // node to a black border + white fill — the pre-EM-1.3 shape-only look.
+  // MICRO-PULIZIA p.3 · the EM shapes' option: the Matrix's and the DTC's
+  // (boxes and glyphs). The Graph draws discs (`renderLiquid`), which it
+  // never read — offered there it changed nothing.
+  if (view !== "graph") {
   const dh = document.createElement("div");
   dh.className = "fp-sect";
   dh.textContent = t("l.display");
@@ -15450,8 +15438,9 @@ function renderCirclesPanel(): void {
     draw();
   });
   monoRow.appendChild(monoCb);
-  monoRow.appendChild(document.createTextNode(" Monochrome (B/W) — black borders"));
+  monoRow.appendChild(document.createTextNode(` ${t("l.monochrome")}`));
   filterPanel.appendChild(monoRow);
+  }
 
   const reset = document.createElement("button");
   reset.className = "fp-reset";
@@ -15467,10 +15456,10 @@ function renderCirclesPanel(): void {
   });
   filterPanel.appendChild(reset);
 }
-/** Switch the Graph view's HDT-O layer (MICRO studio-luogo, part D). */
-function setHdtoLayer(on: boolean): void {
-  if (hdtoLayer === on) return;
-  hdtoLayer = on;
+/** MICRO-PULIZIA p.3 · the Graph view's HDT-O switch. */
+function setLiquidHdto(on: boolean): void {
+  if (liquidHdto === on) return;
+  liquidHdto = on;
   buildScenes();
   draw();
 }
@@ -17584,11 +17573,14 @@ function jumpTo(nodeId: string): void {
     }
     // the window the jump started in (captured above), never the one under the pointer now
     const win = target ?? here;
-    if (isAdornmentNodeType(nt ?? "") && view !== "multigraph" && view !== "graphs" && win.type === "graph") {
+    if (isAdornmentNodeType(nt ?? "") && view !== "graphs" && win.type === "graph"
+        && !(view === "graph" && liquidHdto)) {
       // the graph's own author / licence / embargo hangs from the graph's node
-      // in the Multigraph; any other in the Full graph
+      // in the Graphs paradata; any other is a node of the Graph, HDT-O on
+      // (MICRO-PULIZIA p.3: the Full graph is gone)
       const ofGraph = store ? graphParadataOf(store.doc).has(nodeId) : false;
-      setWindowMode(win, ofGraph ? "graphs" : "multigraph");
+      if (!ofGraph) setLiquidHdto(true);
+      setWindowMode(win, ofGraph ? "graphs" : "graph");
       requestAnimationFrame(() => {
         select(nodeId);
         if (scene()?.byId.has(nodeId)) frameNodeInContext(nodeId);
@@ -32532,22 +32524,8 @@ function buildAreaHeader(win: Win): DocumentFragment {
           focusThen(win, () => void layoutAll(fresh));
         });
       } }
-    // MICRO-AUTORI-LAYOUT p.5 · the graph's own paradata are not drawn in the
-    // Matrix and the Graph: their badge on the bar opens the Multigraph
-    const wm = graphModeOf(win.id);
-    if ((wm === "matrix" || wm === "graph") && store?.graphParadataGroup()) {
-      const c = document.createElement("button");
-      c.type = "button";
-      c.className = "wi-chip";
-      c.dataset.act = "graph-paradata";
-      c.textContent = `◎ ${t("graphs.badge")}`;
-      c.title = t("graphs.badgeTitle");
-      c.addEventListener("click", (e) => {
-        e.stopPropagation();
-        focusThen(win, () => setWindowMode(win, "graphs"));
-      });
-      frag.appendChild(c);
-    }
+    // MICRO-PULIZIA p.3 · the «Graph paradata» badge is gone from the bar: the
+    // view is one of the modes («Graphs paradata»), opened from there
   }
   if (type === "narrative") {
     // ✎ · writing IS a mode of a narrative window, so it is a toggle you can see

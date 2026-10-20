@@ -324,9 +324,6 @@ const EN: Dict = {
   "hdto.twin": "Digital twin",
   "hdto.notAttributed": "study not yet attributed to a heritage asset",
   "hdto.project": "Project",
-  "hdto.layer": "Heritage Digital Twin",
-  "hdto.layerToggle": "Show the HDT-O layer (study, heritage, twin, project)",
-  "hdto.layerEmpty": "This graph has no HDT-O chain yet: fill it in the Study window.",
   "settings.iiifHint": "Where the images live: the address of an IIIF Image API service (Cantaloupe, in the StratiGraph stack). An image's identifier is its sha256, so only the host goes here. Left empty, everything works as before: no thumbnails, no broken frames.",
   "settings.iiifBase": "IIIF service (Image API 3)",
   "menu.copyWebAnnotations": "Copy the regions as Web Annotations (IIIF)",
@@ -1363,7 +1360,7 @@ const EN: Dict = {
   "insp.hdtParent": "Part of",
   "insp.hdtParentPh": "the whole it belongs to, e.g. Poggibonsi",
   "insp.hdtTwin": "Its digital twin",
-  "insp.hdtTwinGloss": "HC2 · Heritage Digital Twin — the shared digital record of that thing, which several studies can hang on.",
+  "insp.hdtTwinGloss": "HC2 · Heritage Digital Twin — the shared digital record of that thing, which several studies can hang on. A twin is a twin of a heritage asset at any scale: a site, a building, a single unit (an inscription, US 100) can each have one; this graph is one of the proposition sets (HC16) it gathers.",
   "insp.hdtProject": "The project",
   "insp.hdtProjectGloss": "HC13 · Project — the funded or institutional frame the study was made in.",
   "insp.hdtProjectName": "Name",
@@ -1903,7 +1900,7 @@ const EN: Dict = {
   "assets.referenceNote": "HONEST NOTE: bytes by reference stay outside StratiGraph Server, so NO embargo can be applied to them and the licence can only travel, not be enforced. Never use it for sensitive or embargoed material. It needs a path — a file dropped from the desktop has no location the graph could point at.",
   "assets.referenceNeedsPath": "reference needs a file from the disk pane: a desktop drop has no path, and a reference to nowhere is not a reference.",
   "assets.scope": "Fence (where it comes from)",
-  "assets.scopeHint": "own-study = mine; own-HDT = my own twin; other-HDT = another site's, a comparandum. It changes what a comparison means, so it is recorded.",
+  "assets.scopeHint": "own-study = mine; own-HDT = from a twin of my own (of the site, a building, a unit…); other-HDT = from somebody else's twin, a comparandum. It changes what a comparison means, so it is recorded.",
   "assets.queue": "Queue ({n})",
   "assets.queueEmpty": "Nothing queued. Drop files above, or pick them.",
   "assets.use.iiif": "image (IIIF/annotation)",
@@ -2641,8 +2638,8 @@ const EN: Dict = {
   "mode.matrix": "Matrix",
   "mode.graph": "Graph",
   "mode.dtc": "DTC",
-  "mode.multigraph": "Full graph",
-  "mode.graphs": "Multigraph",
+  "mode.multigraph": "Graph",
+  "mode.graphs": "Graphs paradata",
   "graphs.inspTitle": "The graph",
   "graphs.inspName": "Name",
   "graphs.inspCode": "Code",
@@ -2652,8 +2649,6 @@ const EN: Dict = {
   "graphs.inspLicense": "Licence",
   "graphs.inspEmbargo": "Embargo",
   "graphs.inspLinks": "Rapporti with other graphs",
-  "graphs.badge": "Graph paradata",
-  "graphs.badgeTitle": "The graph's own paradata (authors, licence, embargo, date) are not objects of the site: they are in the Multigraph view, on the graph's node",
   "win.add": "Add a graph window to this workspace",
   "win.splitRight": "Split: a new area to the right",
   "win.splitDown": "Split: a new area below",
@@ -2791,8 +2786,7 @@ const EN: Dict = {
   "dtc.standaloneShort": "Standalone · no node",
   "dtc.noNode":
     "No node is configured (Mode ▸ Hub), so there is nobody to ask. The chain of a file lives on the node that holds the corpus.",
-  "dtc.empty":
-    "DTC — no digital-twin chain in this graph yet (no dtc_ relation, no linked resource).",
+  "dtc.empty": "DTC — this graph has no documentation chain yet (no dtc_ relation, no linked resource).",
   // DAG · the view reads the DOCUMENTATION member now, so the empty state is
   // about the corpus and says what fills it
   "dtc.corpusEmpty":
@@ -3946,6 +3940,9 @@ const EN: Dict = {
   "emtree.auxHead": "Auxiliary files",
   "emtree.auxAdd": "+ add",
   "emtree.auxAddTitle": "Attach a local file or folder to this graph",
+  "liq.hdto": "HDT-O",
+  "liq.hdtoTitle": "The nodes of the cultural context: study (HC9), heritage entity (HC1), digital twin (HC2), project (HC13), the graph itself (HC16) with its paradata, the authors and licences as nodes. Off: the Graph without them, the ornaments as badges.",
+  "l.monochrome": "Monochrome (B/W) — black borders",
 };
 
 // ── Italiano: complete, because E.D. works in it ───────────────────────────────
@@ -4213,9 +4210,6 @@ const IT: Dict = {
   "hdto.twin": "Gemello digitale",
   "hdto.notAttributed": "studio non ancora attribuito a un bene",
   "hdto.project": "Progetto",
-  "hdto.layer": "Heritage Digital Twin",
-  "hdto.layerToggle": "Mostra lo strato HDT-O (studio, bene, gemello, progetto)",
-  "hdto.layerEmpty": "Questo grafo non ha ancora una catena HDT-O: compilala nella finestra Studio.",
   "settings.iiifHint": "Dove vivono le immagini: l'indirizzo di un servizio IIIF Image API (Cantaloupe, nello stack StratiGraph). L'identificatore di un'immagine è il suo sha256, quindi qui serve solo l'host. Lasciato vuoto, tutto funziona come prima: nessuna miniatura, nessun riquadro rotto.",
   "settings.iiifBase": "Servizio IIIF (Image API 3)",
   "menu.copyWebAnnotations": "Copia le regioni come Web Annotation (IIIF)",
@@ -5249,7 +5243,7 @@ const IT: Dict = {
   "insp.hdtParent": "Parte di",
   "insp.hdtParentPh": "l'insieme a cui appartiene, es. Poggibonsi",
   "insp.hdtTwin": "Il suo gemello digitale",
-  "insp.hdtTwinGloss": "HC2 · Heritage Digital Twin — la registrazione digitale condivisa di quella cosa, a cui più studi possono appendersi.",
+  "insp.hdtTwinGloss": "HC2 · Heritage Digital Twin — la registrazione digitale condivisa di quella cosa, a cui più studi possono appendersi. Un gemello è il gemello di un bene a qualunque scala: un sito, un edificio, una sola unità (un'iscrizione, US 100) possono avere ciascuno il suo; questo grafo è uno degli insiemi di proposizioni (HC16) che raccoglie.",
   "insp.hdtProject": "Il progetto",
   "insp.hdtProjectGloss": "HC13 · Project — la cornice finanziata o istituzionale in cui lo studio è stato fatto.",
   "insp.hdtProjectName": "Nome",
@@ -5766,7 +5760,7 @@ const IT: Dict = {
   "assets.referenceNote": "NOTA ONESTA: i byte by reference stanno FUORI da StratiGraph Server, quindi NESSUN embargo può essere applicato e la licenza può solo viaggiare, non essere imposta. Mai per materiale sensibile o embargato. Serve un percorso: un file trascinato dal desktop non ha una posizione che il grafo possa indicare.",
   "assets.referenceNeedsPath": "reference vuole un file dal riquadro del disco: un drop dal desktop non ha percorso, e un riferimento a nulla non è un riferimento.",
   "assets.scope": "Recinto (da dove viene)",
-  "assets.scopeHint": "own-study = mio; own-HDT = del mio gemello; other-HDT = di un altro sito, un comparandum. Cambia il senso di un confronto, quindi si scrive.",
+  "assets.scopeHint": "own-study = mio; own-HDT = da un mio gemello (del sito, di un edificio, di un'unità…); other-HDT = dal gemello di qualcun altro, un comparandum. Cambia il senso di un confronto, quindi si scrive.",
   "assets.queue": "Coda ({n})",
   "assets.queueEmpty": "Niente in coda. Trascina i file qui sopra, o scegli.",
   "assets.use.iiif": "immagine (IIIF/annotazione)",
@@ -6487,8 +6481,8 @@ const IT: Dict = {
   "mode.matrix": "Matrix",
   "mode.graph": "Grafo",
   "mode.dtc": "DTC",
-  "mode.multigraph": "Grafo completo",
-  "mode.graphs": "Multigrafo",
+  "mode.multigraph": "Grafo",
+  "mode.graphs": "Paradati dei grafi",
   "graphs.inspTitle": "Il grafo",
   "graphs.inspName": "Nome",
   "graphs.inspCode": "Codice",
@@ -6498,8 +6492,6 @@ const IT: Dict = {
   "graphs.inspLicense": "Licenza",
   "graphs.inspEmbargo": "Embargo",
   "graphs.inspLinks": "Rapporti con altri grafi",
-  "graphs.badge": "Paradati del grafo",
-  "graphs.badgeTitle": "I paradati del grafo (autori, licenza, embargo, data) non sono oggetti del sito: stanno nella vista Multigrafo, sul nodo del grafo",
   "win.add": "Aggiungi una finestra grafo a questo workspace",
   "win.splitRight": "Dividi: nuova area a destra",
   "win.splitDown": "Dividi: nuova area sotto",
@@ -6628,8 +6620,7 @@ const IT: Dict = {
   "dtc.standaloneShort": "Standalone · nessun nodo",
   "dtc.noNode":
     "Nessun nodo configurato (Modo ▸ Hub), quindi non c'è nessuno a cui chiedere. La catena di un file vive sul nodo che tiene il corpus.",
-  "dtc.empty":
-    "DTC — questo grafo non ha ancora una catena di gemello digitale (nessuna relazione dtc_, nessuna risorsa collegata).",
+  "dtc.empty": "DTC — questo grafo non ha ancora una catena della documentazione (nessuna relazione dtc_, nessuna risorsa collegata).",
   "dtc.corpusEmpty":
     "Nessuna documentazione, ancora. Trascina dei file nel tab Documentazione (arrivano come lotto, con la loro acquisizione), o dichiara una derivazione — quel che compare qui è il corpus: acquisizioni, trasformazioni e i file di cui parlano.",
   "assets.registered":
@@ -7766,6 +7757,9 @@ const IT: Dict = {
   "emtree.auxHead": "File ausiliari",
   "emtree.auxAdd": "+ aggiungi",
   "emtree.auxAddTitle": "Allega a questo grafo un file o una cartella locale",
+  "liq.hdto": "HDT-O",
+  "liq.hdtoTitle": "I nodi del contesto culturale: studio (HC9), entità di patrimonio (HC1), gemello digitale (HC2), progetto (HC13), il grafo stesso (HC16) con i suoi paradati, autori e licenze come nodi. Spento: il Grafo senza di loro, gli ornamenti come distintivi.",
+  "l.monochrome": "Monocromo (B/N) — bordi neri",
 };
 
 // ── The six other project languages: AI DRAFTS, awaiting validation ───────────
@@ -7882,6 +7876,10 @@ const EL: Dict = {
   "emtree.auxHead": "Βοηθητικά αρχεία",
   "emtree.auxAdd": "+ προσθήκη",
   "emtree.auxAddTitle": "Επισύναψη τοπικού αρχείου ή φακέλου σε αυτόν τον γράφο",
+  "mode.graphs": "Παραδεδομένα των γράφων",
+  "liq.hdto": "HDT-O",
+  "liq.hdtoTitle": "Οι κόμβοι του πολιτισμικού πλαισίου: μελέτη (HC9), οντότητα κληρονομιάς (HC1), ψηφιακό δίδυμο (HC2), έργο (HC13), ο ίδιος ο γράφος (HC16) με τα παραδεδομένα του, συγγραφείς και άδειες ως κόμβοι. Κλειστό: ο Γράφος χωρίς αυτούς, τα στολίδια ως σήματα.",
+  "l.monochrome": "Μονόχρωμο (Α/Μ) — μαύρα περιγράμματα",
 };
 
 const HE: Dict = {
@@ -7971,6 +7969,10 @@ const HE: Dict = {
   "emtree.auxHead": "קבצי עזר",
   "emtree.auxAdd": "+ הוספה",
   "emtree.auxAddTitle": "צירוף קובץ או תיקייה מקומיים לגרף זה",
+  "mode.graphs": "פרה־נתונים של הגרפים",
+  "liq.hdto": "HDT-O",
+  "liq.hdtoTitle": "צמתי ההקשר התרבותי: מחקר (HC9), ישות מורשת (HC1), תאום דיגיטלי (HC2), פרויקט (HC13), הגרף עצמו (HC16) עם הפרה־נתונים שלו, מחברים ורישיונות כצמתים. כבוי: הגרף בלעדיהם, הקישוטים כתגים.",
+  "l.monochrome": "מונוכרום (ש/ל) — מסגרות שחורות",
 };
 
 const ES: Dict = {
@@ -8065,6 +8067,10 @@ const ES: Dict = {
   "emtree.auxHead": "Archivos auxiliares",
   "emtree.auxAdd": "+ añadir",
   "emtree.auxAddTitle": "Adjuntar un archivo o una carpeta local a este grafo",
+  "mode.graphs": "Paradatos de los grafos",
+  "liq.hdto": "HDT-O",
+  "liq.hdtoTitle": "Los nodos del contexto cultural: estudio (HC9), entidad patrimonial (HC1), gemelo digital (HC2), proyecto (HC13), el propio grafo (HC16) con sus paradatos, autores y licencias como nodos. Apagado: el Grafo sin ellos, los ornamentos como insignias.",
+  "l.monochrome": "Monocromo (B/N) — bordes negros",
 };
 
 const PL: Dict = {
@@ -8158,6 +8164,10 @@ const PL: Dict = {
   "emtree.auxHead": "Pliki pomocnicze",
   "emtree.auxAdd": "+ dodaj",
   "emtree.auxAddTitle": "Dołącz lokalny plik lub folder do tego grafu",
+  "mode.graphs": "Paradane grafów",
+  "liq.hdto": "HDT-O",
+  "liq.hdtoTitle": "Węzły kontekstu kulturowego: badanie (HC9), obiekt dziedzictwa (HC1), cyfrowy bliźniak (HC2), projekt (HC13), sam graf (HC16) z jego paradanymi, autorzy i licencje jako węzły. Wyłączone: Graf bez nich, ozdobniki jako odznaki.",
+  "l.monochrome": "Monochromatyczny (C/B) — czarne obramowania",
 };
 
 const RO: Dict = {
@@ -8252,6 +8262,10 @@ const RO: Dict = {
   "emtree.auxHead": "Fișiere auxiliare",
   "emtree.auxAdd": "+ adaugă",
   "emtree.auxAddTitle": "Atașează un fișier sau un dosar local acestui graf",
+  "mode.graphs": "Paradatele grafurilor",
+  "liq.hdto": "HDT-O",
+  "liq.hdtoTitle": "Nodurile contextului cultural: studiu (HC9), entitate de patrimoniu (HC1), geamăn digital (HC2), proiect (HC13), graful însuși (HC16) cu paradatele lui, autori și licențe ca noduri. Oprit: Graful fără ele, ornamentele ca insigne.",
+  "l.monochrome": "Monocrom (A/N) — margini negre",
 };
 
 const FR: Dict = {
@@ -8349,6 +8363,10 @@ const FR: Dict = {
   "emtree.auxHead": "Fichiers auxiliaires",
   "emtree.auxAdd": "+ ajouter",
   "emtree.auxAddTitle": "Joindre un fichier ou un dossier local à ce graphe",
+  "mode.graphs": "Paradonnées des graphes",
+  "liq.hdto": "HDT-O",
+  "liq.hdtoTitle": "Les nœuds du contexte culturel : étude (HC9), entité patrimoniale (HC1), jumeau numérique (HC2), projet (HC13), le graphe lui-même (HC16) avec ses paradonnées, auteurs et licences comme nœuds. Éteint : le Graphe sans eux, les ornements en badges.",
+  "l.monochrome": "Monochrome (N/B) — bordures noires",
 };
 
 /**
@@ -8481,9 +8499,6 @@ const DE: Dict = {
   "hdto.twin": "Digitaler Zwilling",
   "hdto.notAttributed": "Studie noch keinem Kulturgut zugeordnet",
   "hdto.project": "Projekt",
-  "hdto.layer": "Heritage Digital Twin",
-  "hdto.layerToggle": "HDT-O-Schicht zeigen (Studie, Kulturgut, Zwilling, Projekt)",
-  "hdto.layerEmpty": "Dieser Graph hat noch keine HDT-O-Kette: füllen Sie sie im Fenster Studie aus.",
   "me.intro": "Die eine Tür für eine Tabelle oder ein XML, gelesen über eine Zuordnung. Drei Fragen: was gelesen wird, wie, und wo und wie es hineinkommt. Der EMtree füllt sie mit einer Hilfsdatei, StratiMiner mit seinen Vorschlägen.",
   "shelf.annotateTitle": "Diese Ressource im Doc-Fenster öffnen, um darauf zu zeichnen",
   "shelf.noAnnotator": "kein Doc-Fenster zum Öffnen — machen Sie einen Bereich zu einem Doc.",
@@ -9679,6 +9694,10 @@ const DE: Dict = {
   "emtree.auxAddTitle": "Eine lokale Datei oder einen Ordner an diesen Graphen anhängen",
   "emtree.noAux": "keine Hilfsdateien",
   "emtree.auxNote": "Hilfsquellen (xlsx, pyArchInit, XML, ein DosCo-Ordner…) werden an einen Graphen angehängt und sind FLÜCHTIG: im Flug zugeordnet, blau gezeichnet, nie in der em.json, bis Sie sie in den Graphen schreiben.",
+  "mode.graphs": "Paradaten der Graphen",
+  "liq.hdto": "HDT-O",
+  "liq.hdtoTitle": "Die Knoten des kulturellen Kontexts: Studie (HC9), Kulturerbe-Entität (HC1), digitaler Zwilling (HC2), Projekt (HC13), der Graph selbst (HC16) mit seinen Paradaten, Autoren und Lizenzen als Knoten. Aus: der Graph ohne sie, die Ornamente als Abzeichen.",
+  "l.monochrome": "Monochrom (S/W) — schwarze Ränder",
 };
 
 const DICTS: Record<Locale, Dict> = {
