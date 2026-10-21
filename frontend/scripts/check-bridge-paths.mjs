@@ -103,7 +103,7 @@ eq(H.doc_home, ["/Users/ed/EM"], "the home folder itself is never opened by a do
 eq(H.doc_disk, ["C:\\EM"], "a whole disk is never opened by a document");
 eq(H.cloud_win, [false, true, true, true], "Windows: RECALL_ON_DATA_ACCESS, RECALL_ON_OPEN, OFFLINE = online only");
 eq(H.cloud_mac, [false, true], "macOS: SF_DATALESS = online only");
-eq(H.level, 34, "the bridge says level 34 (/fs/doc, /fs/probe)");
+eq(H.level >= 34, true, "the bridge says level 34 or later (/fs/doc, /fs/probe; 35: /fs/collect)");
 eq(H.onedrive.mac[0], ["Library/CloudStorage/OneDrive-CNR", 1], "OneDrive found under ~/Library/CloudStorage, the one holding the study's folder first");
 eq(H.onedrive.mac.length, 3, "…the others listed too (another account, ~/OneDrive*)");
 eq([H.onedrive.win_first_has, H.onedrive.win_n], [1, 4], "Windows' %OneDriveCommercial% is asked as well");

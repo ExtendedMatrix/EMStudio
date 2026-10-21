@@ -6370,7 +6370,7 @@ test("DC1.menu", "DOVE-CHI-MENU p.1 · il File della pagina viene dalla tabella:
   const labels = await p.evaluate(() => [...document.querySelectorAll("#dd-file .dd-menu > button .dd-label-text")].map((e) => e.textContent));
   await ctx.close();
   const want = ["new", "open", "openRecent", "openReplace", "close", "—", "save", "saveAs", "saveAll", "pin", "—",
-    "import", "export", "integrate", "relocate", "—", "createRoom", "bringIntoRoom"];
+    "import", "export", "integrate", "relocate", "collect", "—", "createRoom", "bringIntoRoom"];
   return { pass: JSON.stringify(file) === JSON.stringify(want) && JSON.stringify(edit) === JSON.stringify(["undo", "redo"])
       && help.includes("settingsHelp") && help.includes("aboutHelp") && !help.includes("updatesHelp")
       && labels[0] === "Nuovo" && labels.includes("Chiudi") && !errors.length,
@@ -7796,6 +7796,30 @@ test("WM4.relocate", "WINDOWS-MODELLI p.4 · «Ritrova i file» nella cartella d
     && /si ritrovano sotto la cartella di OneDrive di questo computer, non nella cartella scelta qui/.test(w.why ?? "") && w.set === "Imposta la cartella di OneDrive…"
     && w.go === null && /^Niente da riscrivere: i file da collegare si ritrovano impostando la cartella di OneDrive/.test(w.hint ?? "") && !english.length && !errors.length;
   return { pass, detail: { ...w, english, errors } };
+});
+
+test("WM5.collect", "WINDOWS-MODELLI p.5 · File ▸ «Raccogli le risorse…» su v4 senza cartella di OneDrive: 46 file fuori dallo studio (44 onedrive://, 2 smb://), nessuno raggiungibile da qui e ognuno dice perché; niente da copiare, nessun pulsante «Copia 0 file»: una riga dice cosa fare; le cartelle per tipo proposte sono modificabili", async () => {
+  const { p, ctx, errors } = await wmOpenCopy();
+  const inMenu = await p.evaluate(() => [...document.querySelectorAll("#dd-file .dd-menu > button")].map((e) => e.dataset.cmd).includes("collect"));
+  await p.evaluate(() => window.__EM_DRAG__.collect());
+  await p.waitForSelector('.modal[data-dialog="collect"]', { timeout: 60000 });
+  await p.waitForTimeout(800);
+  const w = await p.evaluate(() => {
+    const m = document.querySelector('.modal[data-dialog="collect"]');
+    const vis = (sel) => { const e = m.querySelector(sel); return e && !e.hidden ? e.textContent : null; };
+    return { title: m.querySelector(".modal-head").textContent, tally: vis('[data-collect="tally"]'), go: vis('[data-act="collect-go"]'), hint: vis('[data-collect="hint"]'),
+      kinds: [...m.querySelectorAll(".relocate-list")].map((u) => [u.dataset.kind, u.querySelectorAll("li").length]),
+      disabled: [...m.querySelectorAll('.relocate-list input[type="checkbox"]')].every((b) => b.disabled),
+      why: [...new Set([...m.querySelectorAll(".relocate-list li .relocate-to")].map((e) => e.textContent))],
+      roots: [...m.querySelectorAll("[data-collect-root]")].map((i) => [i.dataset.collectRoot, i.value]) };
+  });
+  await p.screenshot({ path: SHOT("wm5-collect") }).catch(() => {});
+  await ctx.close();
+  const pass = inMenu && /^Raccogli le risorse — in /.test(w.title) && /^46 fuori · 0 scelti · 0 file, 0 B da copiare/.test(w.tally ?? "") && w.go === null
+    && w.hint === "Niente scelto: spunta i file da raccogliere." && JSON.stringify(w.kinds) === JSON.stringify([["onedrive", 44], ["smb", 2]]) && w.disabled
+    && w.why.length === 2 && w.why.some((x) => /imposta prima la cartella di OneDrive/.test(x)) && w.why.some((x) => /condivisione di rete/.test(x))
+    && w.roots.length === 2 && !errors.length;
+  return { pass, detail: { inMenu, ...w, errors } };
 });
 
 // ── run ─────────────────────────────────────────────────────────────────────

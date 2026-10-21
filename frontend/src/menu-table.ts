@@ -128,6 +128,8 @@ export const MENUS: MenuDef[] = [
       cmd("integrate", "container.addToProject", "btn-add-project", { title: "container.addToProjectTitle" }),
       // MICRO-PERCORSI-WINDOWS p.3 · Blender's «Find Missing Files», for a study
       cmd("relocate", "fs.relocate", "btn-relocate-files", { title: "fs.relocateTitle" }),
+      // MICRO-WINDOWS-MODELLI p.5 · Maya's «Collect Files», Blender's «Pack Resources»
+      cmd("collect", "fs.collect", "btn-collect-files", { title: "fs.collectTitle" }),
       sep,
       cmd("createRoom", "room.createItem", "btn-create-room", { title: "room.createItemTitle" }),
       cmd("bringIntoRoom", "room.bringItem", "btn-bring-into-room", { title: "room.bringItemTitle" }),

@@ -414,6 +414,238 @@ def _doc_roots(em_json, locators, *, pathmod=os.path, home=None):
 #: only, never written to fs_roots.json
 _FS_ROOTS_DOC: list = []
 
+# ── MICRO-WINDOWS-MODELLI p.5 · «Raccogli le risorse…» (Maya's «Collect Files»,
+# Blender's «Pack») ──────────────────────────────────────────────────────────
+#
+# The page names the files of a study that live OUTSIDE its folder and where
+# each goes inside it; the bridge works out what each one needs (an OBJ: its
+# mtl and the textures the mtl names; a glTF: its buffers and images; a folder:
+# its files, not the backups), COPIES — never moves — verifies every copy by
+# its sha256, and says what it did. Nothing is overwritten: a file already at
+# the destination with the same bytes is «there», with other bytes a conflict.
+
+#: what a collected folder leaves behind: Blender's backups (.blend1, .blend2…),
+#: an editor's `~`, the system's litter, the hidden
+_COLLECT_SKIP = re.compile(r"(\.blend\d+|~)$|^(\.ds_store|thumbs\.db|desktop\.ini)$|^\.", re.I)
+#: the texture statements of an .mtl
+_MTL_MAP = re.compile(r"^\s*(map_\w+|bump|disp|decal|norm|refl)\s+(.+?)\s*$", re.M | re.I)
+
+
+def _mtl_texture_names(text):
+    """The files an .mtl names, options (`-s 1 1 1`, `-clamp on`, `-bm 0.5`)
+    skipped; a name may hold spaces."""
+    out = []
+    for m in _MTL_MAP.finditer(text or ""):
+        toks = m.group(2).split()
+        i = 0
+        while i < len(toks) and toks[i].startswith("-") and not re.match(r"^-?\d", toks[i]):
+            i += 1
+            while i < len(toks) and (re.match(r"^-?\d+(\.\d+)?$", toks[i]) or toks[i] in ("on", "off")):
+                i += 1
+        name = " ".join(toks[i:]).strip()
+        if name and name not in out:
+            out.append(name)
+    return out
+
+
+def _read_text(path):
+    try:
+        with open(_long_path(path), "r", encoding="utf-8", errors="replace") as fh:
+            return fh.read()
+    except OSError:
+        return ""
+
+
+#: what a set of images / of documents holds (a folder resource's `url_type`)
+_COLLECT_OF_TYPE = {
+    "image": re.compile(r"\.(jpe?g|png|tiff?|webp|gif|bmp|heic|exr|hdr|svg)$", re.I),
+    "document": re.compile(r"\.(pdf|docx?|odt|rtf|txt|md|xlsx?|ods|csv|tsv|pptx?)$", re.I),
+}
+
+
+def _collect_set(src, *, packaging="", url_type=""):
+    """The files `src` needs, as `(absolute source, path under its destination)`,
+    and the notes (a companion named and not there).
+
+    A folder that is a `directory` (a tileset, a whole folder): all of it,
+    the backups left. A folder that is a `file_set` (EM Tools' «the renders of
+    TM015»): its OWN files, not its subfolders — measured on Templu Mare, the
+    blocks' folders hold `old/` with intermediate meshes up to 1.1 GB, 6.3 GB
+    in all for 44 references — and, for a set of images or documents, only
+    those. An OBJ: + the .mtl it calls + the textures the .mtl names; a glTF:
+    + its buffers and images; anything else: itself."""
+    files, notes = [], []
+    seen = set()
+
+    def add(f, rel):
+        key = os.path.normcase(os.path.normpath(f))
+        if key not in seen:
+            seen.add(key)
+            files.append((os.path.normpath(f), rel.replace("\\", "/")))
+
+    disk = _long_path(src, always=True)
+    if os.path.isdir(disk):
+        whole = str(packaging or "").lower() == "directory"
+        only = _COLLECT_OF_TYPE.get(str(url_type or "").lower())
+        for here, dirs, names in os.walk(disk):
+            dirs[:] = sorted(d for d in dirs if not d.startswith(".")) if whole else []
+            for n in sorted(names):
+                if _COLLECT_SKIP.search(n) or (only and not only.search(n)):
+                    continue
+                full = _short_path(os.path.join(here, n))
+                add(full, os.path.relpath(full, src))
+        return files, notes
+    base = os.path.dirname(src)
+
+    def beside(name, folder):
+        f = os.path.normpath(os.path.join(folder, name.replace("\\", "/")))
+        if not os.path.isfile(_long_path(f)):
+            notes.append(f"{os.path.basename(src)}: «{name}» is named and not there")
+            return None
+        inside = os.path.normcase(f).startswith(os.path.normcase(base + os.sep))
+        return f, (os.path.relpath(f, base) if inside else os.path.basename(f))
+
+    add(src, os.path.basename(src))
+    ext = os.path.splitext(src)[1].lower()
+    if ext == ".obj":
+        for m in re.finditer(r"^\s*mtllib\s+(.+?)\s*$", _read_text(src), re.M):
+            whole = m.group(1)
+            names = [whole] if os.path.isfile(_long_path(os.path.join(base, whole))) else whole.split()
+            for name in names:
+                got = beside(name, base)
+                if not got:
+                    continue
+                add(*got)
+                for tex in _mtl_texture_names(_read_text(got[0])):
+                    t = beside(tex, os.path.dirname(got[0]))
+                    if t:
+                        add(*t)
+    elif ext == ".gltf":
+        try:
+            g = json.loads(_read_text(src) or "{}")
+        except ValueError:
+            g = {}
+        for part in list(g.get("buffers") or []) + list(g.get("images") or []):
+            uri = str((part or {}).get("uri") or "")
+            if uri and not re.match(r"^[a-z][a-z0-9+.-]*:", uri, re.I):
+                got = beside(urllib.parse.unquote(uri), base)
+                if got:
+                    add(*got)
+    return files, notes
+
+
+def _sha256_of(path, chunk=1 << 20):
+    h = hashlib.sha256()
+    with open(_long_path(path), "rb") as fh:
+        for b in iter(lambda: fh.read(chunk), b""):
+            h.update(b)
+    return h.hexdigest()
+
+
+def _inside(child, parent):
+    c, p = os.path.normcase(os.path.normpath(child)), os.path.normcase(os.path.normpath(parent))
+    try:
+        return os.path.commonpath([c, p]) == p
+    except ValueError:
+        return False
+
+
+def _real_dest(path):
+    """A destination that may not exist yet, resolved as the disk will: its
+    nearest existing folder through `realpath` (a link, `/tmp` → `/private/tmp`
+    on the Mac, a junction on Windows), the rest as written. Measured: without
+    it a study under /tmp refused every destination as «not inside» its own
+    (realpath'd) folder."""
+    p = os.path.normpath(os.path.expanduser(path))
+    rest = []
+    while p and not os.path.exists(_long_path(p)):
+        p, tail = os.path.split(p)
+        if not tail:
+            break
+        rest.insert(0, tail)
+    base = _short_path(os.path.realpath(_long_path(p))) if p else p
+    return os.path.join(base, *rest) if rest else base
+
+
+def _collect(root, items, *, run=False):
+    """The plan of «Raccogli le risorse…» (`run` False) or its copy (`run`
+    True). `root`: the study's folder, every destination inside it; `items`:
+    `{id, src, dest}`, `dest` the folder the set goes to. Per item its files
+    (`new` / `there` / `conflict`), their bytes, after a run each copy's
+    sha256 checked against its source's."""
+    out, total, copied = [], 0, 0
+    planned = set()           # a file two items share (an OBJ and its folder): counted once
+    for it in items:
+        rid = str(it.get("id") or "")
+        src = _short_path(os.path.realpath(_long_path(os.path.expanduser(str(it.get("src") or "")))))
+        dest = _real_dest(str(it.get("dest") or "")) if it.get("dest") else ""
+        rec = {"id": rid, "src": _out_path(src), "dest": _out_path(dest), "files": [], "notes": [], "ok": False}
+        out.append(rec)
+        if not src or not os.path.exists(_long_path(src)):
+            rec["error"] = "not on this computer"
+            continue
+        if not _fs_inside_roots(src):
+            rec["error"] = "outside the served folders"
+            continue
+        if not dest or not _inside(dest, root):
+            rec["error"] = "the destination is not inside the study's folder"
+            continue
+        files, rec["notes"] = _collect_set(src, packaging=str(it.get("packaging") or ""),
+                                           url_type=str(it.get("url_type") or ""))
+        ok = True
+        for f, rel in files:
+            to = os.path.normpath(os.path.join(dest, rel))
+            try:
+                size = os.stat(_long_path(f)).st_size
+            except OSError:
+                rec["notes"].append(f"{os.path.basename(f)}: cannot be read")
+                ok = False
+                continue
+            row = {"src": _out_path(f), "dest": _out_path(to), "bytes": size}
+            key = os.path.normcase(to)
+            if not run and key in planned:
+                row["state"] = "shared"
+                rec["files"].append(row)
+                continue
+            planned.add(key)
+            if os.path.exists(_long_path(to)):
+                same = os.stat(_long_path(to)).st_size == size and _sha256_of(to) == _sha256_of(f)
+                row["state"] = "there" if same else "conflict"
+                ok = ok and same
+            else:
+                row["state"] = "new"
+                total += size
+            if run and row["state"] == "new":
+                part = to + ".em-part"
+                try:
+                    os.makedirs(_long_path(os.path.dirname(to), always=True), exist_ok=True)
+                    h = hashlib.sha256()
+                    with open(_long_path(f), "rb") as a, open(_long_path(part), "wb") as b:
+                        for chunk in iter(lambda: a.read(1 << 20), b""):
+                            h.update(chunk)
+                            b.write(chunk)
+                    # the copy read back from the disk, not the bytes we wrote
+                    if _sha256_of(part) != h.hexdigest():
+                        raise OSError(0, "the copy's sha256 differs from its source's")
+                    try:
+                        st = os.stat(_long_path(f))
+                        os.utime(_long_path(part), (st.st_atime, st.st_mtime))
+                    except OSError:
+                        pass
+                    os.replace(_long_path(part), _long_path(to))
+                    row["state"], row["sha256"] = "copied", h.hexdigest()
+                    copied += size
+                except OSError as exc:
+                    try:
+                        os.remove(_long_path(part))      # only the half-copy this call made
+                    except OSError:
+                        pass
+                    row["state"], row["error"] = "failed", exc.strerror or str(exc)
+                    ok = False
+            rec["files"].append(row)
+        rec["ok"] = ok and bool(files)
+    return {"ok": True, "items": out, "bytes": total, "copied": copied}
+
 
 #: Directories `/fs/list` and `/fs/file` may reach (W1), from `--fs-root`
 #: (repeatable) or `EM_BRIDGE_FS_ROOTS` (os.pathsep- or comma-separated).
@@ -1318,7 +1550,10 @@ def _load_s3dgraphy(s3dgraphy_src: "pathlib.Path | None"):
 #: 33 = /fs/write, a sketched proxy's glb beside the em.json (MICRO-SPAZIO-3D).
 #: 34 = /fs/doc (the open em.json's folders always served) and /fs/probe (a
 #: file there, online only in OneDrive, or missing) — MICRO-PERCORSI-WINDOWS.
-BRIDGE_LEVEL = 34   # 30 also = /validate
+#: 35 = /fs/collect («Raccogli le risorse…»: what a study's outside files need,
+#: copied inside, every copy checked by sha256) and /health's `pid` / `sidecar`
+#: — MICRO-WINDOWS-MODELLI.
+BRIDGE_LEVEL = 35   # 30 also = /validate
 
 
 # ── FONTE · the rules of «la proprietà come fonte», asked of the library ──────
@@ -2157,7 +2392,7 @@ def make_handler(api):
                     self._fail(400, f"invalid JSON body: {exc}")
                     return
                 self._fs_roots_edit(body)
-            elif route in ("/fs/doc", "/fs/probe", "/fs/onedrive"):
+            elif route in ("/fs/doc", "/fs/probe", "/fs/onedrive", "/fs/collect"):
                 # MICRO-PERCORSI-WINDOWS · the open document's folders, and the
                 # state of its files (there, online only, missing)
                 if not self._fs_gate():
@@ -2170,6 +2405,16 @@ def make_handler(api):
                 if route == "/fs/onedrive":
                     names = [str(x) for x in (body.get("names") or []) if isinstance(x, str)][:50]
                     self._json({"ok": True, "candidates": _onedrive_candidates(names)})
+                    return
+                if route == "/fs/collect":
+                    # MICRO-WINDOWS-MODELLI p.5 · the study's folder must be one
+                    # this bridge serves (the open em.json's, `/fs/doc`)
+                    root = _short_path(os.path.realpath(_long_path(os.path.expanduser(str(body.get("root") or "")))))
+                    if not root or not os.path.isdir(_long_path(root)) or not _fs_inside_roots(root) or _is_whole_disk(root):
+                        self._fail(403, "the study's folder is not one this bridge serves")
+                        return
+                    items = [x for x in (body.get("items") or []) if isinstance(x, dict)][:5000]
+                    self._json(_collect(root, items, run=bool(body.get("run"))))
                     return
                 (self._fs_doc if route == "/fs/doc" else self._fs_probe)(body)
             elif route == "/annotate":

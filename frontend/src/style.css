@@ -9668,6 +9668,11 @@ button.hdto-v {
 /* MICRO-WINDOWS-MODELLI p.4 · why the onedrive:// wait, and what to do when nothing is to rewrite */
 .relocate-why { font-size: 0.76rem; margin: 2px 0 6px; color: var(--muted, inherit); }
 .relocate-why button { font-size: 0.74rem; }
+/* MICRO-WINDOWS-MODELLI p.5 · «Raccogli le risorse…» */
+.collect-roots { display: flex; gap: 14px; flex-wrap: wrap; font-size: 0.78rem; margin: 6px 0; }
+.collect-roots label { display: flex; align-items: center; gap: 6px; }
+.collect-roots input, .collect-dest { font-size: 0.75rem; min-width: 0; }
+.collect-dest { flex: 0 1 220px; }
 .relocate-hint { font-size: 0.8rem; margin: 10px 0 0; padding: 6px 8px; border-radius: 4px; background: var(--warn-soft); color: var(--warn-ink); }
 /* MICRO-SPAZIO-3D-3 p.2 · an eye (or an arrow) crossed by a drag, until the release */
 .sol-eye.swept, .sol-arrow.swept { outline: 1px solid var(--accent); outline-offset: -1px; border-radius: 3px; }

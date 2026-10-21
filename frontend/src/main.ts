@@ -365,6 +365,7 @@ import {
 } from "./tauri";
 import * as paths from "./paths";
 import { classify, isDiskUrl, locatorOnDisk, rewritePlan, tally, type LostFile, type Verdict } from "./relocate";
+import { collectedUrl, defaultRoots, outsideFiles, proposeDest, studyRootOf, totals, type CollectRoots, type CollectRow, type DocFile, type OutsideFile } from "./collect";
 import {
   describeExtraction,
   describeImport,
@@ -2569,6 +2570,9 @@ window.__EM_SCENE__ = () => {
    *  for the folder), and what its window shows */
   relocate: (folder: string) => relocateFiles(folder),
   relocateState: () => relocateLast,
+  // MICRO-WINDOWS-MODELLI p.5 · «Raccogli le risorse…»: the window, and what it did
+  collect: () => collectResources(),
+  collectState: () => collectLast,
   /** SPAZIO · `api.measure` of an extractor's place, and of a region */
   measure: (x: string) => {
     const g = store ? chain.geometryOf(store.doc, x) : null;
@@ -12418,6 +12422,7 @@ document
   .getElementById("btn-pin-version")
   ?.addEventListener("click", () => pinProjectVersion());
 document.getElementById("btn-relocate-files")?.addEventListener("click", () => { void relocateFiles(); });
+document.getElementById("btn-collect-files")?.addEventListener("click", () => { void collectResources(); });
 // MICRO-PERCORSI-WINDOWS p.4 · Settings ▸ Files on this computer ▸ «Find it»
 document.getElementById("set-onedrive-find")?.addEventListener("click", () => {
   const out = document.getElementById("set-onedrive-found");
@@ -12497,7 +12502,7 @@ async function bridgeUrl(): Promise<string> {
   return _bridgeUrl;
 }
 /** The bridge level this editor expects (`BRIDGE_LEVEL` in tools/em_bridge.py). */
-const BRIDGE_LEVEL_WANTED = 34;   // 31 = /property-source (FONTE); 32 = /room-import, «Bring into a room» through the engine; 33 = /fs/write (MICRO-SPAZIO-3D); 34 = /fs/doc, /fs/probe (MICRO-PERCORSI-WINDOWS)
+const BRIDGE_LEVEL_WANTED = 35;   // 31 = /property-source (FONTE); 32 = /room-import, «Bring into a room» through the engine; 33 = /fs/write (MICRO-SPAZIO-3D); 34 = /fs/doc, /fs/probe (MICRO-PERCORSI-WINDOWS); 35 = /fs/collect, /health's pid (MICRO-WINDOWS-MODELLI)
 /** the level that serves the open em.json's folders (`/fs/doc`): below it a
  *  model's 403 is the bridge's age, not the file (load-failure.ts) */
 const BRIDGE_LEVEL_FS_DOC = 34;
@@ -28312,6 +28317,264 @@ async function setOneDriveFromRelocate(folder: string, modal: HTMLElement): Prom
   refreshSurfaces("scene");
   refreshSurfaces("viewer");
   await relocateFiles(folder);
+}
+
+// ── MICRO-WINDOWS-MODELLI p.5 · «Raccogli le risorse…» ───────────────────────
+//
+// Maya's «Collect Files», Blender's «Pack Resources», for a study: the files it
+// names outside its folder, with where each goes inside it (by type, editable),
+// the weight, then a COPY by the bridge (never a move; only what each needs —
+// an OBJ with its mtl and textures, a folder without its .blend1/.blend2;
+// every copy checked by sha256) and the urls written again relative to the
+// em.json, in one undo. The copies stay when the urls are undone.
+
+let collectLast: { root: string; items: OutsideFile[]; dest: Record<string, string>; plan: CollectRow[];
+  result: CollectRow[] | null; rewritten: Array<{ id: string; from: string; to: string }> } | null = null;
+
+function documentFiles(): DocFile[] {
+  const out: DocFile[] = [];
+  const seen = new Set<string>();
+  for (const st of [store, documentationCorpus({ create: false })]) {
+    if (!st) continue;
+    for (const n of st.doc.graph.nodes) {
+      if (seen.has(n.id)) continue;
+      const d = (n.data ?? {}) as Record<string, unknown>;
+      const url = typeof d.url === "string" ? d.url : "";
+      if (!url) continue;
+      seen.add(n.id);
+      out.push({ id: n.id, name: String(n.name ?? n.id), url, urlType: String(d.url_type ?? ""), packaging: String(d.packaging ?? "") });
+    }
+  }
+  return out;
+}
+
+async function collectPlan(root: string, items: OutsideFile[], dest: Map<string, string>, run: boolean): Promise<CollectRow[] | string> {
+  const body = { root, run, items: items.filter((x) => x.src && dest.has(x.id)).map((x) => ({ id: x.id, src: x.src, dest: paths.join(root, dest.get(x.id)!), packaging: x.packaging ?? "", url_type: x.urlType ?? "" })) };
+  try {
+    const r = await fetch(`${await bridgeUrl()}/fs/collect`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    const j = await r.json().catch(() => null) as { items?: CollectRow[]; error?: string } | null;
+    if (!r.ok || !j?.items) return r.status === 404 ? t("collect.older") : (j?.error ?? `HTTP ${r.status}`);
+    return j.items;
+  } catch (e) {
+    return errorText(e) ?? t("collect.older");
+  }
+}
+
+async function collectResources(): Promise<void> {
+  if (!store || !currentFilePath || assetStoreBase()) { toast(t("collect.noFile")); return; }
+  const emjson = currentFilePath;
+  // the study's folders (and this computer's OneDrive folder) served first
+  await serveDocumentFolders(emjson);
+  const files = documentFiles();
+  const root = studyRootOf(emjson, files.map((f) => f.url));
+  const items = outsideFiles(files, emjson, root, oneDriveRoot());
+  if (!items.length) { toast(t("collect.none", { root: paths.toNative(root) })); return; }
+  showCollectWindow(emjson, root, items);
+}
+
+function showCollectWindow(emjson: string, root: string, items: OutsideFile[]): void {
+  document.querySelector('.modal[data-dialog="collect"]')?.remove();
+  let roots: CollectRoots = defaultRoots(items, emjson, root);
+  let dest = proposeDest(items, roots);
+  const edited = new Map<string, string>();      // a group's folder written by hand
+  const picked = new Set(items.filter((x) => x.src).map((x) => x.id));
+  const modal = document.createElement("div");
+  modal.className = "modal";
+  modal.dataset.dialog = "collect";
+  const card = document.createElement("div");
+  card.className = "modal-card relocate collect";
+  const head = document.createElement("div");
+  head.className = "modal-head";
+  head.textContent = t("collect.title", { root: paths.toNative(root) });
+  const body = document.createElement("div");
+  body.className = "modal-body";
+  const intro = document.createElement("p");
+  intro.textContent = t("collect.intro");
+  // the type folders, editable
+  const rootsRow = document.createElement("div");
+  rootsRow.className = "collect-roots";
+  const field = (key: keyof CollectRoots) => {
+    const l = document.createElement("label");
+    l.textContent = t(`collect.root.${key}`);
+    const inp = document.createElement("input");
+    inp.type = "text";
+    inp.value = roots[key];
+    inp.dataset.collectRoot = key;
+    inp.addEventListener("change", () => { roots = { ...roots, [key]: inp.value.trim().replace(/^\/+|\/+$/g, "") || roots[key] }; dest = proposeDest(items, roots); draw(); void plan(); });
+    l.appendChild(inp);
+    return l;
+  };
+  rootsRow.append(field("models"), field("documents"));
+  const sum = document.createElement("p");
+  sum.dataset.collect = "tally";
+  const list = document.createElement("div");
+  const foot = document.createElement("div");
+  foot.className = "modal-foot";
+  const cancel = document.createElement("button");
+  cancel.textContent = t("common.cancel");
+  cancel.onclick = () => modal.remove();
+  const go = document.createElement("button");
+  go.className = "primary";
+  go.dataset.act = "collect-go";
+  let rows: CollectRow[] = [];
+  let planning = 0;
+  const destOf = (id: string) => edited.get(id) ?? dest.get(id) ?? "";
+  const chosen = () => items.filter((x) => x.src && picked.has(x.id));
+  const destMap = () => new Map(chosen().map((x) => [x.id, destOf(x.id)]));
+  const summarize = () => {
+    const tt = totals(rows.filter((r) => picked.has(r.id)));
+    const unreachable = items.filter((x) => !x.src).length;
+    sum.textContent = t("collect.tally", { n: String(items.length), k: String(chosen().length), files: String(tt.files),
+      size: formatBytes(tt.bytes), there: String(tt.there), conflicts: String(tt.conflicts), out: String(unreachable) });
+    const errs = rows.filter((r) => picked.has(r.id) && r.error).length;
+    go.textContent = t("collect.go", { files: String(tt.files - tt.there - tt.conflicts), size: formatBytes(tt.bytes) });
+    // not disabled while a plan is asked: the click that blurs an edited field
+    // starts a plan, and a button disabled by it ate that click (measured) —
+    // the click waits for the plan instead
+    go.disabled = !planning && (!chosen().length || tt.files - tt.there - tt.conflicts <= 0 && !chosen().some((x) => rows.find((r) => r.id === x.id)?.ok));
+    go.hidden = go.disabled;
+    hint.textContent = go.hidden ? t(chosen().length ? (tt.conflicts || errs ? "collect.none.conflict" : "collect.none.there") : "collect.none.chosen") : "";
+    hint.hidden = !go.hidden;
+  };
+  const hint = document.createElement("p");
+  hint.className = "relocate-hint";
+  hint.dataset.collect = "hint";
+  const draw = () => {
+    list.textContent = "";
+    const kinds: Array<OutsideFile["kind"]> = ["onedrive", "absolute", "blend", "smb"];
+    for (const kind of kinds) {
+      const vs = items.filter((x) => x.kind === kind);
+      if (!vs.length) continue;
+      const h = document.createElement("h4");
+      h.textContent = `${t(`collect.kind.${kind}`)} (${vs.length})`;
+      const ul = document.createElement("ul");
+      ul.className = "relocate-list";
+      ul.dataset.kind = kind;
+      for (const v of vs) {
+        const li = document.createElement("li");
+        li.dataset.id = v.id;
+        const box = document.createElement("input");
+        box.type = "checkbox";
+        box.checked = picked.has(v.id);
+        box.disabled = !v.src;
+        box.addEventListener("change", () => { if (box.checked) picked.add(v.id); else picked.delete(v.id); summarize(); void plan(); });
+        const name = document.createElement("span");
+        name.className = "relocate-name";
+        name.textContent = v.name;
+        name.title = v.url;
+        li.append(box, name);
+        if (!v.src) {
+          const why = document.createElement("span");
+          why.className = "relocate-to";
+          why.textContent = t(`collect.why.${v.why ?? "onedrive"}`);
+          li.appendChild(why);
+        } else {
+          const to = document.createElement("input");
+          to.type = "text";
+          to.className = "collect-dest";
+          to.value = destOf(v.id);
+          to.title = paths.toNative(v.src);
+          to.addEventListener("change", () => {
+            // one folder for the whole group at the source: its rows follow
+            const was = destOf(v.id);
+            const now = to.value.trim().replace(/^\/+|\/+$/g, "");
+            for (const x of items) if (destOf(x.id) === was) edited.set(x.id, now);
+            draw();
+            void plan();
+          });
+          const r = rows.find((x) => x.id === v.id);
+          const info = document.createElement("span");
+          info.className = "relocate-to";
+          info.dataset.collectRow = v.id;
+          if (r) {
+            const tt = totals([r]);
+            info.textContent = r.error ? t("collect.rowError", { why: r.error })
+              : t("collect.row", { files: String(tt.files), size: formatBytes(r.files.reduce((a, f) => a + f.bytes, 0)) })
+                + (tt.conflicts ? ` · ${t("collect.conflict", { n: String(tt.conflicts) })}` : "")
+                + (tt.there === tt.files && tt.files ? ` · ${t("collect.there")}` : "")
+                + (r.notes.length ? ` · ${r.notes.join("; ")}` : "");
+          }
+          li.append(document.createTextNode("→"), to, info);
+        }
+        ul.appendChild(li);
+      }
+      list.append(h, ul);
+    }
+    summarize();
+  };
+  let planning$: Promise<void> = Promise.resolve();
+  const plan = (): Promise<void> => (planning$ = planOnce());
+  const planOnce = async () => {
+    const mine = ++planning;
+    summarize();
+    const got = await collectPlan(root, chosen(), destMap(), false);
+    if (mine !== planning) return;
+    planning = 0;
+    if (typeof got === "string") { rows = []; sum.textContent = got; go.hidden = true; return; }
+    rows = got;
+    collectLast = { root, items, dest: Object.fromEntries(destMap()), plan: rows, result: null, rewritten: [] };
+    draw();
+  };
+  go.onclick = async () => {
+    go.disabled = true;
+    await planning$;
+    if (!chosen().length) { summarize(); return; }
+    go.disabled = true;
+    go.textContent = t("collect.copying");
+    const got = await collectPlan(root, chosen(), destMap(), true);
+    if (typeof got === "string") { toast(got); go.disabled = false; summarize(); return; }
+    const done = got.filter((r) => r.ok);
+    const tt = totals(got);
+    const plan2: Array<{ id: string; from: string; to: string }> = [];
+    for (const r of done) {
+      const it = items.find((x) => x.id === r.id);
+      if (!it) continue;
+      const to = collectedUrl(it, paths.join(root, destOf(it.id)), emjson);
+      if (to !== it.url) plan2.push({ id: it.id, from: it.url, to });
+    }
+    collectLast = { root, items, dest: Object.fromEntries(destMap()), plan: rows, result: got, rewritten: plan2 };
+    logInfo(t("collect.done", { n: String(tt.copied), size: formatBytes(tt.copiedBytes), there: String(tt.there), items: String(done.length) }));
+    for (const r of got.filter((x) => !x.ok)) logWarn(t("collect.itemFailed", { name: items.find((x) => x.id === r.id)?.name ?? r.id,
+      why: r.error ?? r.files.filter((f) => f.error || f.state === "conflict").map((f) => `${paths.basename(f.dest)}: ${f.error ?? t("collect.conflict", { n: "1" })}`).join("; ") }));
+    modal.remove();
+    applyCollected(plan2, tt.copied, tt.copiedBytes);
+  };
+  foot.append(cancel, go);
+  body.append(intro, rootsRow, sum, list, hint);
+  card.append(head, body, foot);
+  modal.appendChild(card);
+  modal.addEventListener("click", (e) => { if (e.target === modal) modal.remove(); });
+  document.body.appendChild(modal);
+  draw();
+  void plan();
+}
+
+/** the urls of what was collected, relative to the em.json: one step of undo
+ *  per document; the copies stay where they are */
+function applyCollected(plan: Array<{ id: string; from: string; to: string }>, copied: number, bytes: number): void {
+  if (!plan.length) { toast(t("collect.doneNothing")); return; }
+  const byStore = new Map<DocumentStore, typeof plan>();
+  for (const p of plan) {
+    const st = storeOfNode(p.id) ?? store;
+    if (!st?.node(p.id)) continue;
+    byStore.set(st, [...(byStore.get(st) ?? []), p]);
+  }
+  let last: DocumentStore | null = null;
+  for (const [st, ps] of byStore) {
+    st.batch(() => {
+      for (const p of ps) {
+        const d = (st.node(p.id)?.data ?? {}) as Record<string, unknown>;
+        st.updateNode(p.id, { data: { ...d, url: p.to } } as Partial<EmNode>);
+      }
+    });
+    last = st;
+  }
+  for (const p of plan) logInfo(`${t("fs.collect")} ${p.from} → ${p.to}`);
+  if (last) toastUndo(t("collect.rewritten", { n: String(plan.length), files: String(copied), size: formatBytes(bytes) }), last);
+  if (currentFilePath) void serveDocumentFolders(currentFilePath);
+  void checkFiles();
+  refreshSurfaces("scene");
+  refreshSurfaces("viewer");
 }
 
 /** the rewrite: one step of undo per document (a study is one) */
