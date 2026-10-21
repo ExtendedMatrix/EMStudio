@@ -108,7 +108,8 @@ checks += 4;
 // keeps the typed prompt — it has no path to give.
 const tauri = readFileSync(`${SRC}tauri.ts`, "utf8");
 const pick = tauri.slice(tauri.indexOf("export async function pickFile("));
-assert.ok(/if \(!isTauri\(\)\) return null;\s*const picked = await open\(\{ multiple: false, directory: false/.test(pick),
+// (MICRO-PERCORSI-WINDOWS: the answer goes through `picked`, made `/`-shaped)
+assert.ok(/if \(!isTauri\(\)\) return null;\s*return picked\(await open\(\{ multiple: false, directory: false/.test(pick),
   "pickFile opens the native dialog for one file, and only in the desktop");
 const relink = main.slice(main.indexOf("async function relinkFile("), main.indexOf("async function uploadFiles("));
 assert.ok(/if \(isTauri\(\)\)[\s\S]*await pickFile\(ask,[\s\S]*\} else \{\s*path = window\.prompt\(ask/.test(relink),
