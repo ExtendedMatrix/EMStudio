@@ -27,6 +27,7 @@ import { packagingName } from "./rules";
 import { uuid5 } from "./commands";
 import type { DocumentStore } from "./model";
 import type { EmEdge, EmNode } from "./types";
+import { basename } from "./paths";
 
 export const EDGE_HAS_FILE = "has_file";
 export const EDGE_DERIVED_FROM = "dtc_derived_from";
@@ -168,7 +169,7 @@ export function leaf(url: string): string {
   const b = parseBlendLocator(url);
   if (b) return b[2];
   const u = str(url).replace(/\/+$/, "");
-  const base = u.slice(u.lastIndexOf("/") + 1);
+  const base = basename(u);
   return base || str(url);
 }
 

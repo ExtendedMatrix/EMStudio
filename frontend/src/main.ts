@@ -362,6 +362,7 @@ import {
   readBinaryFile,
   writeBinaryFile,
 } from "./tauri";
+import * as paths from "./paths";
 import {
   describeExtraction,
   describeImport,
@@ -2724,7 +2725,7 @@ window.__EM_SCENE__ = () => {
     const slot = emtree.active();
     if (!slot) return null;
     const id = row.id ?? crypto.randomUUID();
-    slot.auxiliaryFiles.push({ name: row.locator.split("/").pop() ?? row.locator, kind: "local",
+    slot.auxiliaryFiles.push({ name: paths.basename(row.locator) || row.locator, kind: "local",
       fileType: "mapped_source" as AuxFileType, baked: false, mapped: false, expanded: true,
       ...row, id } as AuxiliaryFile);
     openEMTree();
@@ -6384,6 +6385,9 @@ function loadContainerDocument(
   path: string | null = null,
   opts: { additive?: boolean; room?: { id: string; title: string; node: string } } = {},
 ): void {
+  // MICRO-PERCORSI-WINDOWS · the em.json's path is kept `/`-shaped (`C:/…`):
+  // every folder and every relative locator is read from it (paths.ts)
+  if (path) path = paths.toPosix(path);
   const parsed = parseContainer(doc);
   if (!parsed.members.length && !parsed.shelf) {
     info.textContent = `${sourceName}: ${parsed.warnings[0] ?? "not an .em.json document"}`;
@@ -6709,7 +6713,7 @@ function loadDocument(
     logError(`${sourceName}: not an .em.json document (missing graph.nodes)`);
     return;
   }
-  currentFilePath = path; // desktop: enables in-place Save; null in browser
+  currentFilePath = path ? paths.toPosix(path) : null; // desktop: enables in-place Save; null in browser
   void storageFollowDocument(path);
   // QOL1 · remember this open (path for desktop reopen, name otherwise).
   // MICRO-DOVE-CHI-MENU p.2 · a room's document is not a dropped file: the
@@ -8354,11 +8358,11 @@ interface InvSource {
 }
 function inventorySources(): InvSource {
   const path = emtree.activeFile()?.path ?? currentFilePath;
-  const absolute = !!path && /^(\/|[A-Za-z]:[\\/])/.test(path);
-  const baseDir = absolute ? path!.replace(/[\\/][^\\/]*$/, "") : null;
+  const absolute = !!path && paths.isAbsolute(path);
+  const baseDir = absolute ? paths.dirname(path!) : null;
   const under = (p: string): string => {
     const q = p.replace(/^file:\/\//i, "");
-    return /^(\/|[A-Za-z]:[\\/]|~)/.test(q) || !baseDir ? q : `${baseDir}/${q.replace(/^\.\//, "")}`;
+    return q.startsWith("~") || !baseDir ? q : paths.join(baseDir, q);
   };
   const doscoDirs = emtree.slotsOf(emtree.activeFile()?.id ?? null).flatMap((sl) => sl.auxiliaryFiles ?? [])
     .filter((f) => f.fileType === "dosco" && f.locator).map((f) => under(f.locator));
@@ -12495,7 +12499,7 @@ async function bridgeWhy(route: string, e: unknown, status?: number): Promise<st
  *  (`reading-files.ts`). Nothing writes a glb any more — the vertices of a
  *  reading are the region's `data.coords`. */
 const readingFiles = new ReadingFiles({
-  projectRoot: () => (currentFilePath ? currentFilePath.replace(/[\\/][^\\/]*$/, "") || null : null),
+  projectRoot: () => (currentFilePath ? paths.dirname(currentFilePath) || null : null),
   bridge: async () => {
     try {
       const base = await bridgeUrl();
@@ -12925,7 +12929,7 @@ async function importGraphmlText(text: string, srcName: string, srcPath: string 
     if (!slot || slot.id === before) return;   // refused by loadDocument, which said why
     // DEV30 U1 · the folder of the GraphML is the study's until it is saved:
     // its documents' «/DosCo/…» are read there
-    if (srcPath) slot.sourceDir = srcPath.replace(/[\\/][^\\/]*$/, "") || null;
+    if (srcPath) slot.sourceDir = paths.dirname(srcPath) || null;
     toast(t("io.imported", { name: srcName }));
     await keepGraphmlAsEmJson(slot, srcName, srcPath);
   } catch {
@@ -12949,9 +12953,8 @@ async function keepGraphmlAsEmJson(slot: GraphSlot, srcName: string, srcPath: st
   emtree.assign(slot.id, file.id);
   let ok = false;
   if (isTauri()) {
-    const dir = srcPath ? srcPath.replace(/[\\/][^\\/]*$/, "") : "";
-    const sep = srcPath?.includes("\\") && !srcPath.includes("/") ? "\\" : "/";
-    ok = await saveFileAs(file, dir ? `${dir}${sep}${proposed}` : proposed);
+    const dir = srcPath ? paths.dirname(srcPath) : "";
+    ok = await saveFileAs(file, dir ? paths.join(dir, proposed) : proposed);
   } else {
     const typed = window.prompt(t("graphml.emjsonPrompt"), proposed)?.trim();
     if (typed) {
@@ -17916,7 +17919,7 @@ const smHandlers: StratiMinerHandlers = {
     const xlsx = smState.xlsxPath.trim();
     if (!xlsx) { toast(t("impmap.needSource")); return; }
     openImportDoor({
-      from: { kind: "stratiminer", label: xlsx.split("/").pop() ?? xlsx },
+      from: { kind: "stratiminer", label: paths.basename(xlsx) || xlsx },
       path: xlsx,
       mappingKind: "none",
       target: "new",
@@ -21486,11 +21489,11 @@ function docModelOf(d: EmNode): DocModel | null {
     void bridgeUrl().then((b) => { bridgeBaseNow = b; renderDocView(); });
     return { choice, url: null };
   }
-  const baseDir = currentFilePath ? currentFilePath.replace(/[^/\\]*$/, "") : "";
+  const baseDir = currentFilePath ? paths.dirname(currentFilePath) : "";
   const map = addressMap(choice, store0
     ? { mode: "online", assetUrl: (c) => storeUrlOf(store0, c) }
     : { mode: "offline", baseDir,
-        fileUrl: (abs) => `${bridgeBaseNow}/fs/at/${abs.replace(/^\/+/, "").split("/").map(encodeURIComponent).join("/")}` });
+        fileUrl: (abs) => `${bridgeBaseNow}/fs/at/${paths.fsAtPath(abs)}` });
   // a file SET is handed virtual (its files ask one another); one file — a glb,
   // a tileset's door, a .3tz — goes as its real address
   const several = choice.files.length > 1;
@@ -21537,7 +21540,7 @@ function docMediaUrl(d: EmNode): string | null {
 /** DEV30 U1 · the folder a study's relative paths are read from: the open
  *  em.json's, else the GraphML's it was imported from (desktop), else none. */
 function studyDir(): string | null {
-  if (currentFilePath) return currentFilePath.replace(/[\\/][^\\/]*$/, "") || null;
+  if (currentFilePath) return paths.dirname(currentFilePath) || null;
   return emtree.active()?.sourceDir ?? null;
 }
 /**
@@ -22382,15 +22385,9 @@ function spaceFileUrl(res: { url: string; checksum: string; residency?: string }
     // not a relative path handed to the loader: it would fail, and the file be
     // counted «not found» for the session; the scene is drawn again on the answer
     void bridgeUrl().then((b) => { if (b && !bridgeBaseNow) { bridgeBaseNow = b; refreshSurfaces("scene"); refreshSurfaces("viewer"); } });
-    return /^\//.test(u) ? u : undefined;
+    return paths.isAbsolute(u) ? u : undefined;
   }
-  const baseDir = currentFilePath ? currentFilePath.replace(/[^/\\]*$/, "") : "";
-  const parts: string[] = [];
-  for (const p of (u.startsWith("/") || !baseDir ? u : `${baseDir}${u}`).split("/")) {
-    if (p === "..") parts.pop(); else if (p !== "." && (p || !parts.length)) parts.push(p);
-  }
-  const abs = parts.join("/");
-  return `${bridgeBaseNow}/fs/at/${abs.replace(/^\/+/, "").split("/").map(encodeURIComponent).join("/")}`;
+  return `${bridgeBaseNow}/fs/at/${paths.fsAtPath(paths.resolveRelative(currentFilePath, u))}`;
 }
 
 /** MICRO-SPAZIO-3D-3 · the Space read once per state of the document: the
@@ -22507,7 +22504,7 @@ async function openPathInScene(path: string, resourceId?: string): Promise<void>
   const entry = isArchive || /(^|\/)tileset\.json$/i.test(p) ? p : `${p}/tileset.json`;
   let url: string;
   try { url = isArchive ? await fsFileUrl(entry) : await fsTreeUrl(entry); } catch { toast(t("storage.bridgeDown")); return; }
-  const label = (isArchive ? p : entry.replace(/\/tileset\.json$/i, "")).split("/").pop() ?? p;
+  const label = paths.basename(isArchive ? p : entry.replace(/\/tileset\.json$/i, "")) || p;
   let win = windowsOf().find((w) => w.type === "scene");
   if (!win) { setWorkspace("space"); win = windowsOf().find((w) => w.type === "scene"); }
   if (!win) { toast(t("scene.noScene")); return; }
@@ -22527,9 +22524,7 @@ async function openResourceInScene(resId: string): Promise<void> {
   const d = (st.node(resId)?.data ?? {}) as Record<string, unknown>;
   const loc = String(((entry?.node.data ?? {}) as Record<string, unknown>).url ?? d.url ?? "");
   if (!loc) { toast(t("scene.noLocator")); return; }
-  const baseDir = currentFilePath ? currentFilePath.replace(/[^/\\]*$/, "") : "";
-  const abs = loc.startsWith("/") || !baseDir ? loc : `${baseDir}${loc}`;
-  await openPathInScene(abs, resId);
+  await openPathInScene(paths.resolveRelative(currentFilePath, loc), resId);
 }
 
 
@@ -23812,16 +23807,16 @@ async function associateSketch(win: Win, sketchId: string, unitId: string, mode:
   const bytes = new Uint8Array(made.glb);
   const digest = [...new Uint8Array(await crypto.subtle.digest("SHA-256", bytes))].map((b) => b.toString(16).padStart(2, "0")).join("");
   // the bytes: beside the em.json, or into the room's store
-  const dir = currentFilePath ? currentFilePath.replace(/[^/\\]*$/, "") : "";
+  const dir = currentFilePath ? paths.dirname(currentFilePath) : "";
   let where: "folder" | "store";
   try {
     if (dir) {
       // a name taken on disk (a file the graph does not cite) moves to the next
       for (let k = 0; ; k++) {
-        const full = `${dir}${rel}`;
+        const full = paths.join(dir, rel);
         let exists = false;
         if (isTauri()) {
-          try { exists = await (await import("@tauri-apps/plugin-fs")).exists(full); } catch { exists = false; }
+          try { exists = await (await import("@tauri-apps/plugin-fs")).exists(paths.toNative(full)); } catch { exists = false; }
           if (!exists) await writeBinaryFile(full, bytes);
         } else {
           const r = await fetch(`${await bridgeUrl()}/fs/write`, { method: "POST", body: bytes,
@@ -24261,11 +24256,11 @@ function objAddressOf(resId: string): { url: string; modifier: (u: string) => st
   const choice = chooseModel(storeGraph(st), [resId]);
   let out: { url: string; modifier: (u: string) => string } | null = null;
   if (choice.kind === "open") {
-    const baseDir = currentFilePath ? currentFilePath.replace(/[^/\\]*$/, "") : "";
+    const baseDir = currentFilePath ? paths.dirname(currentFilePath) : "";
     const map = addressMap(choice, store0
       ? { mode: "online", assetUrl: (c) => storeUrlOf(store0, c) }
       : { mode: "offline", baseDir,
-          fileUrl: (abs) => `${bridgeBaseNow}/fs/at/${abs.replace(/^\/+/, "").split("/").map(encodeURIComponent).join("/")}` });
+          fileUrl: (abs) => `${bridgeBaseNow}/fs/at/${paths.fsAtPath(abs)}` });
     out = { url: map.entryUrl, modifier: map.modifier };
   }
   objAddressCache.set(key, out);
@@ -24420,7 +24415,7 @@ function rmVersionPlan(rm: SpaceRM): { url?: string; flow?: FlowVersion[]; flowS
 }
 /** The version a model draws now (the scene's, else its plan's). */
 function drawnVersionOf(rm: SpaceRM): RmVersion | null {
-  const tail = (x: string) => decodeURIComponent(x.split(/[?#]/)[0]).split("/").pop() ?? "";
+  const tail = (x: string) => paths.leafName(x);
   for (const h of sceneHandles.values()) {
     const u = h.drawnUrl(`rm:${rm.id}`);
     if (!u) continue;
@@ -25297,7 +25292,7 @@ function renderSpaceOutliner(el: HTMLElement, win: Win, sp: Space | null): void 
     epochs: sp.epochs.map((e) => ({ id: e.id, name: e.name, current: e.id === cur })),
     rms: (ep) => (sp.summary(ep)?.rms ?? []).map((r) => {
       const drawnUrl = h?.drawnUrl(`rm:${r.id}`) ?? "";
-      const tail = (u: string) => decodeURIComponent(u.split(/[?#]/)[0]).split("/").pop() ?? "";
+      const tail = (u: string) => paths.leafName(u);
       const grp = r.group ? sp.rmGroups.get(r.group) : r.altOf ? sp.rmGroups.get(r.altOf) : undefined;
       // MICRO-PROVA-DEV47 p.4 · a container with its alternative: Modelli / Tileset / Automatico on its row
       const hasAlt = !!grp && sp.rms.some((x) => x.altOf === grp.id);
@@ -26168,7 +26163,7 @@ function renderShelfInto(win: Win, body: HTMLElement,
     // graph_id` of their stamps), and the others said, one click away
     const active = store ? String((store.doc.graph as Record<string, unknown>).graph_id ?? "") : "";
     const all = !active || winCurrent(win, "shelf.studies") === "all";
-    for (const e of entries) if (receiptOf(e) && /^\//.test(e.locator) && !receiptChecks.has(e.id))
+    for (const e of entries) if (receiptOf(e) && paths.isAbsolute(e.locator) && !receiptChecks.has(e.id))
       void runReceiptCheck(e.id, e.locator, receiptOf(e)!);
     const shown = all ? entries : entries.filter((e) => !receiptOf(e) || receiptStudy.get(e.id) === active);
     const other = entries.filter((e) => receiptOf(e) && receiptStudy.has(e.id) && receiptStudy.get(e.id) !== active).length;
@@ -26541,7 +26536,7 @@ function shelfRow(entry: ShelfEntry): HTMLElement {
   }
   // RIFINITURE · the description is written IN THE STAMP: the shelf shows the
   // receipt's copy read-only, and this opens the stamp's form on that file
-  if (rec && /^\//.test(entry.locator)) {
+  if (rec && paths.isAbsolute(entry.locator)) {
     const ed = document.createElement("button");
     // AUDIT N8 · the Storage of this space; when there is none it goes to
     // Contenuti, and the button says so
@@ -26553,7 +26548,7 @@ function shelfRow(entry: ShelfEntry): HTMLElement {
     actions.appendChild(ed);
   }
   // CAMPAGNA · a tileset on the shelf (a .3tz, a tileset folder) opens in the Scene
-  if (/^\//.test(entry.locator) && (/\.3tz$/i.test(entry.locator) || /(^|\/)tileset\.json$/i.test(entry.locator)
+  if (paths.isAbsolute(entry.locator) && (/\.3tz$/i.test(entry.locator) || /(^|\/)tileset\.json$/i.test(entry.locator)
       || (receiptOf(entry) && !/\.[A-Za-z0-9]{1,5}$/.test(entry.locator)))) {
     const sc = document.createElement("button");
     sc.textContent = t("scene.openHere");
@@ -26631,13 +26626,13 @@ function importTropy(txt: string, fileName: string): number {
  *  with its digest), a tileset folder, a .3tz — and the resource is made in that
  *  form; anything else is the entry's locator, one file. */
 async function promoteBytesOf(entry: ShelfEntry): Promise<PromoteBytes> {
-  if (!receiptOf(entry) || !/^\//.test(entry.locator)) return {};
+  if (!receiptOf(entry) || !paths.isAbsolute(entry.locator)) return {};
   let st: Stamp | null = null;
   try { st = await readStamp(stampPathFor(entry.locator)); } catch { st = null; }
   const self = (st as unknown as { self?: Record<string, unknown> } | null)?.self;
   if (!self) return {};
-  const loc = entry.locator.replace(/\/+$/, "");
-  const dir = loc.slice(0, loc.lastIndexOf("/"));
+  const loc = paths.toPosix(entry.locator).replace(/\/+$/, "");
+  const dir = paths.dirname(loc);
   const digest = typeof self.digest === "string" ? self.digest : undefined;
   const content = self.content_digest ? { content_digest: self.content_digest } : {};
   if (self.packaging === "file_set" && Array.isArray(self.members)) {
@@ -26656,7 +26651,7 @@ async function promoteBytesOf(entry: ShelfEntry): Promise<PromoteBytes> {
              files: [{ path: "tileset.json", url: `${loc}/tileset.json` }] };
   if (self.packaging === "archive")
     return { packaging: "archive", data: content,
-             files: [{ path: loc.split("/").pop() ?? loc, url: loc, ...(digest ? { checksum: digest } : {}),
+             files: [{ path: paths.basename(loc) || loc, url: loc, ...(digest ? { checksum: digest } : {}),
                        media_type: "application/vnd.maxar.archive.3tz+zip" }] };
   return {};
 }
@@ -26696,7 +26691,7 @@ function receiptLine(entry: ShelfEntry, rec: NonNullable<ReturnType<typeof recei
     rec.parents.length ? t("receipt.parents", { n: String(rec.parents.length), first: rec.parents[0].resource_id }) : t("receipt.origin")];
   // CAMPAGNA · the little seal in place of the word: it opens the card (the
   // sidecar beside the file, when it is reachable)
-  if (rec.checksum) line.appendChild(sealMini(rec.checksum, /^\//.test(entry.locator)
+  if (rec.checksum) line.appendChild(sealMini(rec.checksum, paths.isAbsolute(entry.locator)
     ? () => { void showSealOf(entry.locator); } : undefined));
   line.appendChild(document.createTextNode(bits.filter(Boolean).join(" · ")));
   if (rec.title || rec.description) {
@@ -26714,7 +26709,7 @@ function receiptLine(entry: ShelfEntry, rec: NonNullable<ReturnType<typeof recei
   tag.title = t("receipt.checkHint");
   tag.addEventListener("click", () => void runReceiptCheck(entry.id, entry.locator, rec));
   line.appendChild(tag);
-  if (st === undefined && /^\//.test(entry.locator)) void runReceiptCheck(entry.id, entry.locator, rec);
+  if (st === undefined && paths.isAbsolute(entry.locator)) void runReceiptCheck(entry.id, entry.locator, rec);
   return line;
 }
 
@@ -27456,7 +27451,7 @@ async function askStamps(path: string | null): Promise<void> {
   diskStamps = { status: "reading", path };
   redrawNeighbourhood();
   try {
-    const folder = path.slice(0, path.lastIndexOf("/")) || "/";
+    const folder = paths.dirname(path) || "/";
     const listing = await fsList(folder);
     const entry = listing.entries.find((e) => e.path === path);
     if (!entry) {
@@ -27648,14 +27643,14 @@ function documentCard(): HTMLElement | null {
   for (const f of files) {
     const fd = (f.data ?? {}) as Record<string, unknown>;
     const n = document.createElement("code");
-    n.textContent = String(fd.filename ?? fd.locator ?? f.name ?? f.id).split("/").pop() ?? f.id;
+    n.textContent = paths.basename(String(fd.filename ?? fd.locator ?? f.name ?? f.id)) || f.id;
     fl.appendChild(n);
     const where = fileStateLine(f.id, fileHooks());   // R2 · its state and gestures
     if (where) fl.appendChild(where);
     if (fd.checksum || fd.sha256) {
       // CAMPAGNA · the little seal takes the place of the word «stamped»
       const loc = String(fd.url ?? fd.locator ?? "");
-      const mini = sealMini(String(fd.checksum ?? fd.sha256), /^\//.test(loc) ? () => { void showSealOf(loc); } : undefined);
+      const mini = sealMini(String(fd.checksum ?? fd.sha256), paths.isAbsolute(loc) ? () => { void showSealOf(loc); } : undefined);
       mini.title = `${t("dcard.stamped")} · ${mini.title}`;
       fl.appendChild(mini);
     }
@@ -28283,7 +28278,7 @@ async function fillDraftSets(): Promise<void> {
   // archive: one resource either way, with its content digest (difetto 8)
   const one = draft.picked.length === 1 ? draft.picked[0] : null;
   if (one && (one.name === "tileset.json" || TREE_EXT.test(one.name))) {
-    const at = one.name === "tileset.json" ? one.path.slice(0, one.path.lastIndexOf("/")) : one.path;
+    const at = one.name === "tileset.json" ? paths.dirname(one.path) : one.path;
     try { draft.tree = await treeOf(at); } catch { draft.tree = null; }
   }
   if (stampDraft !== draft) return;
@@ -28837,8 +28832,8 @@ async function packTilesetFlow(folder: string): Promise<import("./pack3tz").Pack
     logInfo(msg);
     if (store) {
       const rel = (abs: string) => {
-        const dir = currentFilePath ? currentFilePath.replace(/[^/\\]*$/, "") : "";
-        return dir && abs.startsWith(dir) ? abs.slice(dir.length) : abs;
+        const dir = currentFilePath ? paths.dirname(currentFilePath) : "";
+        return dir && paths.isInside(dir, abs) ? paths.relativeTo(currentFilePath!, abs) : abs;
       };
       const ids = landPack(storeGraph(store), rel(folder), { ...out, path: rel(out.path!) },
         { folder: baseName(folder), archive: baseName(out.path!) });
@@ -28949,7 +28944,7 @@ function treeChoice(draft: Draft): HTMLElement {
   const box = document.createElement("div");
   box.className = "stamp-handle stamp-tree";
   box.dataset.tree = tr.packaging;
-  const folderName = (tr.path.split("/").pop() || tr.path) + (tr.packaging === "directory" ? "/" : "");
+  const folderName = (paths.basename(tr.path) || tr.path) + (tr.packaging === "directory" ? "/" : "");
   const choice = (asTree: boolean): HTMLButtonElement => {
     const b = document.createElement("button");
     b.type = "button";
@@ -29256,7 +29251,7 @@ async function openFromStorage(path: string): Promise<void> {
  *  the person navigates to afterwards stays theirs. */
 async function storageFollowDocument(path: string | null): Promise<void> {
   if (!path) return;
-  const dir = path.replace(/[\\/][^\\/]*$/, "");
+  const dir = paths.dirname(path);
   if (!dir) return;
   try { await fsList(dir); } catch { return; }   // not served here: nothing to start from
   if (currentFilePath !== path) return;
@@ -29270,7 +29265,7 @@ async function storageFollowDocument(path: string | null): Promise<void> {
 function documentFolder(): { dir: string } | { why: string } {
   if (!store) return { why: t("storage.docDirNoGraph") };
   if (!currentFilePath) return { why: t("storage.docDirNoFile") };
-  const dir = currentFilePath.replace(/[\\/][^\\/]*$/, "");
+  const dir = paths.dirname(currentFilePath);
   return dir ? { dir } : { why: t("storage.docDirNoFile") };
 }
 
@@ -29329,7 +29324,7 @@ function composeFolderButton(listing: FsListing, inline = false): HTMLElement {
   // is on the folder, never on its tileset.json alone (difetto 8)
   const tileset = listing.entries.find((e) => e.type === "file" && e.name === "tileset.json");
   if (tileset) {
-    b.textContent = t("compose.openTileset", { name: (listing.path.split("/").pop() || listing.path) + "/" });
+    b.textContent = t("compose.openTileset", { name: (paths.basename(listing.path) || listing.path) + "/" });
     b.onclick = () => openDraft([tileset], listing);
     if (inline) return b;
     const box = document.createElement("div");
@@ -29538,7 +29533,7 @@ function openStampEditor(path: string): void {
     win = windowsOf().find((w) => w.type === "storage");
   }
   if (!win) return;
-  const folder = path.slice(0, path.lastIndexOf("/")) || "/";
+  const folder = paths.dirname(path) || "/";
   stampEditing = path;
   if (storagePath(win) !== folder) setStoragePath(win, folder);
   if (storageSelected(win) !== path) setStorageSelected(win, path);
@@ -29647,7 +29642,7 @@ async function showSealOf(path: string): Promise<void> {
  *  bozza nuova, e la sua uscita la si sceglie dal disco. La strada in avanti che
  *  un'errata non è. */
 async function composeFromStamped(path: string, stamp: Stamp): Promise<void> {
-  const folder = path.slice(0, path.lastIndexOf("/")) || "/";
+  const folder = paths.dirname(path) || "/";
   let listing: FsListing;
   try {
     listing = await fsList(folder);
@@ -36497,7 +36492,7 @@ function showMissingParentMenu(
   menu.appendChild(header);
 
   const anchor = diskStamps.status === "stamped" ? diskStamps.path : "";
-  const near = anchor.slice(0, anchor.lastIndexOf("/")) || "";
+  const near = anchor ? paths.dirname(anchor) : "";
   const run = async (folder: string, recursive: boolean): Promise<void> => {
     hideContextMenu();
     if (!folder) return;

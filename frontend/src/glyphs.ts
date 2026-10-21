@@ -25,6 +25,7 @@
  */
 import rules from "./assets/em_visual_rules.json";
 import { HDTO_GLYPHS, HDTO_GLYPH_TYPES } from "./hdto-glyphs";
+import { basename } from "./paths";
 
 interface RawLayer {
   d: string;
@@ -168,7 +169,7 @@ const DATA_GLYPHS: Array<[string, DataGlyphSpec]> = Object.entries(
 export function dataGlyphKey(nodeType: string, data?: Record<string, unknown> | null): string | null {
   if (!DATA_GLYPHS.length) return null;
   const url = String(data?.["url"] ?? "").split("?")[0].replace(/\/+$/, "").toLowerCase();
-  const name = url.slice(url.lastIndexOf("/") + 1);
+  const name = basename(url);
   const dot = name.lastIndexOf(".");
   const ext = dot > 0 ? name.slice(dot) : "";
   const field = (f: string): string[] => {

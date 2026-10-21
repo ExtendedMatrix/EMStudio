@@ -19,6 +19,7 @@
  *
  * The module never touches em.json and never renders: it answers questions.
  */
+import { basename, fsAtPath } from "./paths";
 
 export interface FsEntry {
   name: string;
@@ -70,9 +71,7 @@ export async function fsFileUrl(path: string): Promise<string> {
  *  tileset's `tiles/0/0/0.glb`, a .gltf's .bin. The query form cannot do that —
  *  a relative URI resolved against `/fs/file?path=…` lands on `/fs/tiles/…`. */
 export async function fsTreeUrl(path: string): Promise<string> {
-  const p = path.replace(/\\/g, "/");
-  const rest = p.startsWith("/") ? p.slice(1) : p;
-  return `${await base()}/fs/at/${rest.split("/").map(encodeURIComponent).join("/")}`;
+  return `${await base()}/fs/at/${fsAtPath(path)}`;
 }
 
 /** CAMPAGNA (1 ott, difetto 5) · a file that CALLS other files by a relative
@@ -216,7 +215,7 @@ export class FileRefusedError extends Error {
 
 /** A single file on disk → a collection of one. */
 export async function collectionFromFile(path: string): Promise<Collection> {
-  const name = path.split("/").pop() || path;
+  const name = basename(path) || path;
   const ext = name.split(".").pop() ?? "";
   const probe = await fsProbe(path);
   if (!probe.ok) throw new FileRefusedError(probe.status);

@@ -30,6 +30,7 @@ import {
   type ResourceGraph,
 } from "./resources";
 import type { EmNode } from "./types";
+import { dirname, join, normalize } from "./paths";
 
 export type DeclaredKind = "datablock" | "file" | "sources";
 export const DECLARED_KINDS: DeclaredKind[] = ["datablock", "file", "sources"];
@@ -145,17 +146,16 @@ export interface Bundled<F extends PickedFile> {
  *  show it). `sets` = the bridge's answer, by path. */
 export function bundleOutputs<F extends PickedFile>(files: F[], sets: Map<string, FollowedSet>):
     { resources: Bundled<F>[]; absorbed: string[] } {
-  const dirOf = (p: string) => p.slice(0, p.lastIndexOf("/") + 1);
   const called = new Set<string>();
   for (const f of files) {
     const s = sets.get(f.path);
     if (!s || s.error || s.members.length < 2) continue;
-    for (const m of s.members) if (m.role !== "entry_point") called.add(dirOf(f.path) + m.path);
+    for (const m of s.members) if (m.role !== "entry_point") called.add(join(dirname(f.path), m.path));
   }
   const resources: Bundled<F>[] = [];
   const absorbed: string[] = [];
   for (const f of files) {
-    if (called.has(f.path)) { absorbed.push(f.path); continue; }
+    if (called.has(normalize(f.path))) { absorbed.push(f.path); continue; }
     const s = sets.get(f.path);
     resources.push(s && !s.error && s.members.length > 1 ? { file: f, set: s } : { file: f });
   }

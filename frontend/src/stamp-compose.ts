@@ -43,6 +43,7 @@ import {
 } from "./declared";
 import type { FsEntry } from "./storage";
 import type { TreeInfo } from "./stamp-tree";
+import { basename } from "./paths";
 
 /** Un'uscita della bozza: un file selezionato che non è ancora timbrato. */
 export interface DraftOutput {
@@ -183,7 +184,7 @@ export function applyHandle(draft: Draft): void {
   // .3tz as an archive with its content digest
   if (draft.tree && draft.asTree && draft.picked.length === 1) {
     const tr = draft.tree;
-    const name = tr.path.split("/").pop() || tr.path;
+    const name = basename(tr.path) || tr.path;
     draft.outputs = [{ path: tr.path, name, size: tr.size_bytes, mtime: draft.picked[0].mtime,
                        digest: tr.digest, tree: tr,
                        media_type: tr.packaging === "archive" ? "application/vnd.maxar.archive.3tz+zip" : undefined }];

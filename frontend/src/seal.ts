@@ -22,6 +22,7 @@
  * the seal, Esc closes, the focus goes to «Done» and comes back.
  */
 import { getLocale, t } from "./i18n";
+import { basename } from "./paths";
 
 export interface SealStamp {
   stamp?: number;
@@ -143,7 +144,7 @@ export function sealWords(st: SealStamp, kindLabel: (k: string) => string = (k) 
   const label = self.label || members.find((m) => m.role === "entry_point")?.path || self.resource_id || "";
   let what: string;
   if (self.packaging === "file_set" && members.length > 1) {
-    const others = members.filter((m) => m.role !== "entry_point").map((m) => m.path.split("/").pop());
+    const others = members.filter((m) => m.role !== "entry_point").map((m) => basename(m.path));
     what = t("seal.whatSet", { n: String(members.length), door: label, others: others.join(", ") });
   } else if (self.packaging === "directory") {
     what = t("seal.whatFolder", { name: label, n: String(self.content_digest?.files ?? self.measures?.files ?? "") });

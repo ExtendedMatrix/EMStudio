@@ -30,6 +30,7 @@ import { SCENE_USES, assetOf, chooseVersion, versionsOf, type VersionChoice, typ
 import { pickRepresentation, plainGraph } from "./resources";
 import { alternativeSets, iterSets, type AlternativesRule, type AltResult } from "./alternatives";
 import visualRules from "./assets/em_visual_rules.json";
+import { basename } from "./paths";
 
 /** The rule of the alternatives (em_visual_rules 1.6.37 → `alternatives`). */
 export const ALT_RULE = (visualRules as unknown as { alternatives: AlternativesRule }).alternatives;
@@ -356,7 +357,7 @@ export function buildSpace(
     if (state === "resident" && opts.refused?.has(r.id)) state = "refused";
     else if (state === "resident" && opts.notFound?.has(r.id)) state = "missing";
     const prims = (d.primitives ?? {}) as Record<string, unknown>;
-    return { id: r.id, name: str(r.name) || str(d.url).split("/").pop() || r.id, url: str(d.url),
+    return { id: r.id, name: str(r.name) || basename(str(d.url)) || r.id, url: str(d.url),
              checksum: str(d.checksum), residency: str(d.residency).trim(), state, packaging: str(d.packaging),
              bytes: num(d.size_bytes), points: num(prims.points), tiles: tilesKindOf(d) };
   };

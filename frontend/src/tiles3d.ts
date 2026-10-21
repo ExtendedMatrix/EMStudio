@@ -150,7 +150,7 @@ let draco: any = null;
 export function dracoFor(E: any, T: any): any {
   if (draco) return draco;
   const manager = new E.THREE.LoadingManager();
-  manager.setURLModifier((u: string) => T.DRACO_FILES[String(u).split("/").pop() ?? ""] ?? u);
+  manager.setURLModifier((u: string) => T.DRACO_FILES[String(u).split("/").pop() ?? ""] ?? u); // paths:url
   draco = new T.DRACOLoader(manager);
   draco.setDecoderPath("draco/");
   draco.setDecoderConfig({ type: "wasm" });

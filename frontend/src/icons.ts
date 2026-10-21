@@ -109,7 +109,7 @@ function declaredBasenames(nodeType: string): string[] {
   for (const key of ["2d_file_vect", "2d_file_rast", "file_2d"]) {
     const path = entry[key];
     if (typeof path !== "string") continue;
-    const base = path.split("/").pop()?.replace(/\.(svg|png)$/i, "");
+    const base = path.split("/").pop()?.replace(/\.(svg|png)$/i, ""); // paths:url — a datamodel's asset name
     if (!base || out.includes(base)) continue;
     // Refuse a declaration that names ANOTHER type's own file. `USVn` and `USN`
     // both declare `src/2D/US.png`, and honouring that would hand them the

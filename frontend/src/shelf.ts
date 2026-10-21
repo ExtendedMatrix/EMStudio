@@ -34,6 +34,7 @@
  */
 
 import { addResource } from "./resources";
+import { basename } from "./paths";
 
 export type ShelfScope = "own-study" | "own-HDT" | "other-HDT";
 export type ShelfResidency = "reference" | "resident";
@@ -193,7 +194,7 @@ export function addToShelf(input: {
   }
   const entry: ShelfEntry = {
     id: input.id ?? crypto.randomUUID(),
-    name: input.name?.trim() || locator.split("/").pop() || locator,
+    name: input.name?.trim() || basename(locator) || locator,
     locator,
     kind: shelfKind(locator),
   };

@@ -592,7 +592,7 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
               // it (OB_PRATO_LOD2.obj: one `l` among 52 140 faces, measured 17 Oct):
               // with faces, the loose edges go
               if (/^f\s/m.test(text) && /^l\s/m.test(text)) text = text.replace(/^l\s.*$/gm, "");
-              const base = url.slice(0, url.lastIndexOf("/") + 1);
+              const base = url.slice(0, url.lastIndexOf("/") + 1); // paths:url — the loader's URL, not a disk path
               const libs = [...text.matchAll(/^mtllib\s+(.+?)\s*$/gm)].map((m) => m[1]);
               const reader = new E.OBJLoader(manager);
               if (libs.length) {

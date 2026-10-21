@@ -10,6 +10,7 @@
  */
 import type { ShelfEntry } from "./shelf";
 import type { StampReceipt } from "./stamp-compose";
+import { basename } from "./paths";
 
 export const RECEIPT_KEY = "stamp_receipt";
 
@@ -22,7 +23,7 @@ export function receiptOf(e: ShelfEntry | undefined): StampReceipt | null {
 export function receiptShelfInput(path: string, receipt: StampReceipt): {
   locator: string; name: string; checksum?: string; extra: Record<string, unknown>;
 } {
-  const base = path.split("/").pop() || path;
+  const base = basename(path) || path;
   return {
     locator: path,
     name: receipt.title || base,
@@ -110,7 +111,7 @@ export function verdictChanged(verdict: StampVerdict | null | undefined): string
  */
 export function refreshedCopies(entries: ShelfEntry[], path: string, next: StampReceipt):
   Array<{ id: string; patch: Partial<ShelfEntry> }> {
-  const base = path.split("/").pop() || path;
+  const base = basename(path) || path;
   return entries.filter((e) => e.locator === path).map((e) => {
     const old = receiptOf(e);
     const followed = e.name === (old?.title || base);

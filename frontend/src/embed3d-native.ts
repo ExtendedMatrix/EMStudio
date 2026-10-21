@@ -467,7 +467,7 @@ export function mount3dViewer(host: HTMLElement, url: string,
           const url = new URL(u, location.href);
           const p = url.searchParams.get("path") ?? decodeURIComponent(url.pathname);
           return p.split("/").filter(Boolean).pop() ?? u;
-        } catch { return u.split("/").pop() ?? u; }
+        } catch { return u.split("/").pop() ?? u; } // paths:url
       };
       // MICRO-SPAZIO-FIRMATO · the node REFUSED a file (401/403): that is access,
       // not a file that is missing, and the sentence says so
@@ -504,7 +504,7 @@ export function mount3dViewer(host: HTMLElement, url: string,
       const openObj = async (u: string) => {
         try {
           const text = String(await new THREE.FileLoader(manager).loadAsync(u));
-          const base = u.slice(0, u.lastIndexOf("/") + 1);
+          const base = u.slice(0, u.lastIndexOf("/") + 1); // paths:url — the loader's URL, not a disk path
           const libs = [...text.matchAll(/^mtllib\s+(.+?)\s*$/gm)].map((m) => m[1]);
           const loader = new OBJLoader(manager);
           if (libs.length) {

@@ -48,6 +48,7 @@
  */
 
 import { fsList, type FsEntry } from "./storage";
+import { basename, dirname } from "./paths";
 
 // ── il formato, come DATI ───────────────────────────────────────────────────
 //
@@ -300,7 +301,7 @@ export function nameSimilarity(a: string, b: string): number {
 }
 
 function stem(name: string): string {
-  const base = name.split("/").pop() ?? name;
+  const base = basename(name) || name;
   const dot = base.lastIndexOf(".");
   return (dot > 0 ? base.slice(0, dot) : base).toLowerCase();
 }
@@ -486,7 +487,7 @@ async function followHints(
   const wanted = normaliseDigest(parent.digest);
   if (!wanted || !locators.length) return null;
   for (const locator of locators) {
-    const folder = locator.slice(0, locator.lastIndexOf("/")) || "/";
+    const folder = dirname(locator) || "/";
     let entry: FsEntry | undefined;
     try {
       entry = (await fsList(folder)).entries.find((e) => e.path === locator);

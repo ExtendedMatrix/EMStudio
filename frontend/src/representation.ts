@@ -28,6 +28,7 @@ import {
   resourceFiles,
   type ResourceGraph,
 } from "./resources";
+import { join } from "./paths";
 
 /** The packagings EMStudio's viewer opens (a datablock only Blender does). */
 export const WEB_OPENS = ["file_set", "file", "directory", "archive"];
@@ -104,17 +105,11 @@ export type AddressContext =
 
 export const VIRTUAL = "https://emres.invalid/";
 
-const isAbsolute = (p: string) => p.startsWith("/") || /^[A-Za-z]:[\\/]/.test(p);
-function joinPath(a: string, b: string): string {
-  // an empty base joins nothing: `b` stays relative (measured: "" + "x.obj" was
-  // "/x.obj", and the file was then asked at the root of the disk)
-  const parts = (isAbsolute(b) || !a ? b : `${a.replace(/\/*$/, "/")}${b}`).split("/");
-  const out: string[] = [];
-  for (const p of parts) {
-    if (p === "..") out.pop(); else if (p !== "." && (p || !out.length)) out.push(p);
-  }
-  return out.join("/");
-}
+// an empty base joins nothing: `b` stays relative (measured: "" + "x.obj" was
+// "/x.obj", and the file was then asked at the root of the disk). MICRO-PERCORSI-
+// WINDOWS: the join is `paths.ts`'s — a `C:\…` base was one segment here, and the
+// `..` of `../RB/…` ate it whole.
+const joinPath = (a: string, b: string): string => join(a, b);
 
 export interface AddressMap {
   /** the URL a loader is handed: the entry point under the virtual base */

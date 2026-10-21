@@ -14,6 +14,8 @@
  * Dedup by path (or name when there is no path; node + room for a room),
  * newest first, capped.
  */
+import { dirname, toNative } from "./paths";
+
 export interface RecentFile {
   /** Absolute path (desktop) or null (browser drop — not reopenable). */
   path: string | null;
@@ -117,8 +119,8 @@ export function recentWhere(r: RecentFile): string {
     return `${node} · ${r.room ?? ""}`;
   }
   if (!r.path) return "";
-  const cut = Math.max(r.path.lastIndexOf("/"), r.path.lastIndexOf("\\"));
-  return cut > 0 ? r.path.slice(0, cut) : r.path;
+  // said as the platform writes it (`C:\…` on Windows), kept as `/` inside
+  return toNative(dirname(r.path)) || r.path;
 }
 
 /** p.2 · can this entry be reopened here (a room always; a file by its path). */

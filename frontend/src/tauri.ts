@@ -8,6 +8,18 @@ import { open, save } from "@tauri-apps/plugin-dialog";
 import { exists, mkdir, readFile, readTextFile, writeFile, writeTextFile } from "@tauri-apps/plugin-fs";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { invoke } from "@tauri-apps/api/core";
+import { basename, dirname, toNative, toPosix } from "./paths";
+
+// MICRO-PERCORSI-WINDOWS · THE BOUNDARY. Inside the app a path is `/`-shaped
+// (`C:/Users/…` on Windows, see paths.ts); what the dialogs and the shell give
+// is made so here (`picked`, `takeDesktopQueue`), and what goes to the disk is
+// turned back here (`toNative`, every plugin-fs call and a dialog's
+// `defaultPath`). Rust's std adds the `\\?\` prefix itself for a path past
+// MAX_PATH, so plugin-fs needs nothing more.
+const picked = (p: unknown): string | null => {
+  const one = Array.isArray(p) ? p[0] : p;
+  return typeof one === "string" && one ? toPosix(one) : null;
+};
 
 // QOL1 · `.emj` is the native short extension for an em.json document; `.em.json`
 // and `.json` stay accepted. The parser is content-based (header.format), so the
@@ -40,10 +52,9 @@ export function isTauri(): boolean {
 export async function openEmJson(): Promise<
   { path: string; text: string } | null
 > {
-  const picked = await open({ multiple: false, filters: EM_FILTERS });
-  const path = Array.isArray(picked) ? picked[0] : picked;
-  if (!path || typeof path !== "string") return null;
-  const text = await readTextFile(path);
+  const path = picked(await open({ multiple: false, filters: EM_FILTERS }));
+  if (!path) return null;
+  const text = await readTextFile(toNative(path));
   return { path, text };
 }
 
@@ -53,28 +64,28 @@ export async function readEmJsonPath(
   path: string,
 ): Promise<{ path: string; text: string } | null> {
   if (!isTauri()) return null;
-  const text = await readTextFile(path);
-  return { path, text };
+  const text = await readTextFile(toNative(path));
+  return { path: toPosix(path), text };
 }
 
 /** Overwrite an already-known file in place. */
 export async function writeEmJson(path: string, text: string): Promise<void> {
-  await writeTextFile(path, text);
+  await writeTextFile(toNative(path), text);
 }
 
 /** SPAZIO · the bytes of a file beside the em.json — the glb of a reading of
  *  7–11 ott, read once to migrate it (nothing writes one any more). */
 export async function readBinaryFile(path: string): Promise<Uint8Array> {
-  return await readFile(path);
+  return await readFile(toNative(path));
 }
 
 /** MICRO-SPAZIO-3D · a sketched proxy's glb beside the em.json (`proxies/…`):
  *  its folder made when missing, an existing file never overwritten. */
 export async function writeBinaryFile(path: string, bytes: Uint8Array): Promise<void> {
-  if (await exists(path)) throw new Error("a file is already there: not overwritten");
-  const dir = path.replace(/[\\/][^\\/]*$/, "");
-  if (dir && !(await exists(dir))) await mkdir(dir, { recursive: true });
-  await writeFile(path, bytes);
+  if (await exists(toNative(path))) throw new Error("a file is already there: not overwritten");
+  const dir = dirname(path);
+  if (dir && !(await exists(toNative(dir)))) await mkdir(toNative(dir), { recursive: true });
+  await writeFile(toNative(path), bytes);
 }
 
 /** Native "Save As…" dialog → the chosen path (already written), or null.
@@ -84,9 +95,9 @@ export async function saveAsEmJson(
   text: string,
   defaultPath: string,
 ): Promise<string | null> {
-  const path = await save({ defaultPath, filters: EM_FILTERS });
+  const path = picked(await save({ defaultPath: toNative(defaultPath), filters: EM_FILTERS }));
   if (!path) return null;
-  await writeTextFile(path, text);
+  await writeTextFile(toNative(path), text);
   return path;
 }
 
@@ -99,9 +110,7 @@ export async function saveAsEmJson(
  * worth the name, so there the path is typed. */
 export async function pickFolder(): Promise<string | null> {
   if (!isTauri()) return null;
-  const picked = await open({ directory: true, multiple: false });
-  return Array.isArray(picked) ? (picked[0] ?? null)
-    : (typeof picked === "string" ? picked : null);
+  return picked(await open({ directory: true, multiple: false }));
 }
 
 /** Native picker for an em_data.xlsx → the chosen path, or null.
@@ -110,9 +119,7 @@ export async function pickFolder(): Promise<string | null> {
  * lives there), so the contents never need to enter the webview. */
 export async function pickXlsx(): Promise<string | null> {
   if (!isTauri()) return null;
-  const picked = await open({ multiple: false, filters: XLSX_FILTERS });
-  return Array.isArray(picked) ? (picked[0] ?? null)
-    : (typeof picked === "string" ? picked : null);
+  return picked(await open({ multiple: false, filters: XLSX_FILTERS }));
 }
 
 /** Native picker for a MAPPING SOURCE → the chosen path, or null.
@@ -131,9 +138,7 @@ export async function pickSourceFile(extensions: string[]): Promise<string | nul
   const filters = extensions.length
     ? [{ name: "Mapping source", extensions }]
     : undefined;
-  const picked = await open({ multiple: false, filters });
-  return Array.isArray(picked) ? (picked[0] ?? null)
-    : (typeof picked === "string" ? picked : null);
+  return picked(await open({ multiple: false, filters }));
 }
 
 /** Native picker for ONE file on this computer → its path, or null.
@@ -147,20 +152,17 @@ export async function pickSourceFile(extensions: string[]): Promise<string | nul
  */
 export async function pickFile(title: string, defaultPath?: string): Promise<string | null> {
   if (!isTauri()) return null;
-  const picked = await open({ multiple: false, directory: false, title,
-    ...(defaultPath ? { defaultPath } : {}) });
-  return Array.isArray(picked) ? (picked[0] ?? null)
-    : (typeof picked === "string" ? picked : null);
+  return picked(await open({ multiple: false, directory: false, title,
+    ...(defaultPath ? { defaultPath: toNative(defaultPath) } : {}) }));
 }
 
 /** Native "Open…" dialog for a .graphml file → picked path + contents. */
 export async function openGraphml(): Promise<
   { path: string; text: string } | null
 > {
-  const picked = await open({ multiple: false, filters: GRAPHML_FILTERS });
-  const path = Array.isArray(picked) ? picked[0] : picked;
-  if (!path || typeof path !== "string") return null;
-  const text = await readTextFile(path);
+  const path = picked(await open({ multiple: false, filters: GRAPHML_FILTERS }));
+  if (!path) return null;
+  const text = await readTextFile(toNative(path));
   return { path, text };
 }
 
@@ -170,9 +172,9 @@ export async function saveTtl(
   text: string,
   defaultName: string,
 ): Promise<string | null> {
-  const path = await save({ defaultPath: defaultName, filters: TTL_FILTERS });
+  const path = picked(await save({ defaultPath: toNative(defaultName), filters: TTL_FILTERS }));
   if (!path) return null;
-  await writeTextFile(path, text);
+  await writeTextFile(toNative(path), text);
   return path;
 }
 
@@ -312,7 +314,8 @@ export async function onForeignBridge(
 export async function takeDesktopQueue(): Promise<{ files: string[]; notices: string[] }> {
   if (!isTauri()) return { files: [], notices: [] };
   try {
-    return await invoke<{ files: string[]; notices: string[] }>("take_desktop_queue");
+    const q = await invoke<{ files: string[]; notices: string[] }>("take_desktop_queue");
+    return { ...q, files: q.files.map(toPosix) };
   } catch {
     return { files: [], notices: [] };   // an older shell: nothing kept
   }
@@ -332,6 +335,5 @@ export async function onDesktopQueue(handler: () => void): Promise<void> {
 
 /** Basename of an absolute path, for the window title / info bar. */
 export function baseName(path: string): string {
-  const parts = path.split(/[\\/]/);
-  return parts[parts.length - 1] || path;
+  return basename(path) || path;
 }

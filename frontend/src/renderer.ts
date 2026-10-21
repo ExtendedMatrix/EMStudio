@@ -32,6 +32,7 @@ function glyphInk(): GlyphInk {
 import type { Scene, Viewport } from "./scene";
 import { isLiquid } from "./views/liquid";
 import { renderLiquid, type LiquidState } from "./liquid-render";
+import { basename } from "./paths";
 
 export interface ConnectDrag {
   fromId: string;
@@ -557,7 +558,7 @@ export function formatAcronym(d: Record<string, unknown> | undefined): string | 
   if (media === "application/x-blender" || d.packaging === "datablock") return "BLEND";
   if (media === "application/vnd.maxar.archive.3tz+zip") return "3TZ";
   const url = String(d.url ?? "").split("?")[0].replace(/\/+$/, "").toLowerCase();
-  const name = url.slice(url.lastIndexOf("/") + 1);
+  const name = basename(url);
   if (name === "tileset.json") return "3D TILES";
   const dot = name.lastIndexOf(".");
   const ext = dot > 0 ? name.slice(dot + 1) : "";

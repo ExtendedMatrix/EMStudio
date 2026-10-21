@@ -20,6 +20,7 @@ import {
   type Pointer,
   type ResourceGraph,
 } from "./resources";
+import { basename } from "./paths";
 
 export interface FileRow {
   id: string; role: string; path: string; implicit: boolean;
@@ -153,7 +154,7 @@ export function renderResourcePanel(store: DocumentStore, id: string, h: Resourc
   const blend = typeof d.url === "string" ? parseBlendLocator(d.url) : null;
   if (blend) {
     const line = el("div", "insp-hint res-blend",
-      t("declared.onlyBlender", { file: `${blend[0].split("/").pop()} · ${blend[2]}` }));
+      t("declared.onlyBlender", { file: `${basename(blend[0])} · ${blend[2]}` }));
     line.dataset.blend = blend[0];
     panel.appendChild(line);
   }
