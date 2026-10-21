@@ -7750,6 +7750,18 @@ test("WM1.loadfail", "WINDOWS-MODELLI p.1 · un modello che non arriva lo dice: 
   return { pass, detail: { lines: lines.length, first: lines[0], doc: log.find((l) => /fs\/doc/.test(l)), marks: marks.length, drawn, errors } };
 });
 
+test("WM2.port", "WINDOWS-MODELLI p.2 · la pagina come il desktop (IPC simulato): la porta è quella decisa dalla shell (8765 di un altro programma → la successiva); con l'em.json in C:/Users/Utente/OneDrive - CNR/… ogni richiesta — modelli, tileset.json e tessere, proxy — va a quella base e mai alla 8765, nella forma C:/…; il XX sec è disegnato (10 RM, il tileset, 5 proxy), nessun segno di modello mancato", async () => {
+  const { p, ctx, errors, asked, drawn, bport } = await wmOpen({ tauri: true });
+  const marks = await p.evaluate(() => document.querySelectorAll(".sol-fail").length);
+  const warn = await p.evaluate(() => window.__EM_DRAG__.log().filter((e) => /Modello non caricato/.test(e.message)).length);
+  await ctx.close();
+  const at = asked.filter((a) => a.path.startsWith("/fs/at/"));
+  const pass = asked.length > 0 && asked.every((a) => a.port === bport) && at.length > 0 && at.every((a) => a.path.startsWith(`/fs/at/${WM_STUDY}/`))
+    && at.some((a) => /cesium\/TempluMare\/(tileset\.json|Data\/)/.test(a.path))
+    && drawn["rm/mesh"] === 10 && drawn["rm/tiles"] === 1 && drawn["proxy/mesh"] === 5 && !marks && !warn && !errors.length;
+  return { pass, detail: { ports: [...new Set(asked.map((a) => a.port))], bport, asked: asked.length, fsAt: at.length, drawn, marks, warn, errors } };
+});
+
 // ── run ─────────────────────────────────────────────────────────────────────
 const chosen = cases.filter((c) => !only.length || only.includes(c.id) || only.some((o) => c.id.startsWith(o + ".")));
 for (const c of chosen) {

@@ -12485,11 +12485,15 @@ let shelfTableAsked = false;
 let _bridgeUrl: string | null = null;
 async function bridgeUrl(): Promise<string> {
   if (_bridgeUrl) return _bridgeUrl;
-  _bridgeUrl =
+  const found =
     new URLSearchParams(location.search).get("bridge") ??
     (window as unknown as { EM_BRIDGE?: string }).EM_BRIDGE ??
-    (await transformerUrl()) ??
-    "http://localhost:8765";
+    (await transformerUrl());
+  // MICRO-WINDOWS-MODELLI p.2 · on the desktop the port is the shell's (8765,
+  // or the next one when 8765 is another program's): a failed ask is not
+  // remembered as 8765 for the whole session — the next call asks again
+  if (!found && isTauri()) return "http://localhost:8765";
+  _bridgeUrl = found ?? "http://localhost:8765";
   return _bridgeUrl;
 }
 /** The bridge level this editor expects (`BRIDGE_LEVEL` in tools/em_bridge.py). */
