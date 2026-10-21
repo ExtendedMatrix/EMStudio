@@ -7664,6 +7664,92 @@ test("WP3.onedrive", "PERCORSI-WINDOWS p.4 · Templu Mare v4 con la cartella di 
   return { pass, detail: { none, set } };
 });
 
+// ── MICRO-WINDOWS-MODELLI (21 ott 2026) · i modelli su Windows ──────────────
+// Templu Mare v4 opened at E.D.'s Windows path (`C:/Users/Utente/OneDrive - CNR/…`),
+// its requests answered from the copy (WP_V4), as WP1.
+const WM_STUDY = "C:/Users/Utente/OneDrive - CNR/0_RACCOLTA_CNR/StratiGraph-grp - Documenti/WP 06 - Web Environment Development/T6.5/TempluMare_v2_for_3DR_2026-10-06";
+const WM_WIN = `${WM_STUDY.replace(/\//g, "\\")}\\EM\\TempluMare_v4.em.json`;
+const wmEnc = (x) => x.split("/").map(encodeURIComponent).join("/");
+/** a page on the v4 copy at the Windows path; `refuse`: the bridge serves none of
+ *  its folders (its /fs/doc refused, the models asked outside every root) */
+async function wmOpen({ tauri = false, refuse = false } = {}) {
+  if (!existsSync(WP_V4)) throw new Error(`the v4 copy is not at ${WP_V4}`);
+  const COPY = WP_V4.replace(/\/EM\/[^/]+$/, "");
+  const bport = new URL(WP_BRIDGE).port;
+  const ctx = await browser.newContext({ viewport: { width: 1600, height: 1000 } });
+  const p = await ctx.newPage();
+  const errors = [], asked = [];
+  p.on("pageerror", (e) => errors.push(String(e).slice(0, 300)));
+  p.on("request", (r) => { const u = new URL(r.url()); if (/^(localhost|127\.0\.0\.1)$/.test(u.hostname) && u.port !== PORT) asked.push({ port: u.port, path: decodeURIComponent(u.pathname) }); });
+  let busy = 0; const waiting = [];
+  const slot = () => new Promise((r) => { if (busy < 6) { busy++; r(); } else waiting.push(r); });
+  const free = () => { const n = waiting.shift(); if (n) n(); else busy--; };
+  const handler = (base) => async (route) => {
+    const req = route.request();
+    let url = req.url().replace(base, WP_BRIDGE);
+    if (refuse && /\/fs\/doc$/.test(url))
+      return route.fulfill({ status: 404, headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": `http://localhost:${PORT}` }, body: JSON.stringify({ ok: false, error: "not an em.json on this computer" }) });
+    const winAt = `${WP_BRIDGE}/fs/at/${wmEnc(WM_STUDY)}`;
+    if (url.startsWith(winAt)) url = `${WP_BRIDGE}/fs/at/${refuse ? "private/var/empty/wm1" : wmEnc(COPY.slice(1))}${url.slice(winAt.length)}`;
+    let post = req.postData();
+    if (post && /\/fs\/(doc|probe)$/.test(url)) post = post.split(WM_STUDY).join(COPY);
+    await slot();
+    try { const res = await route.fetch({ url, postData: post ?? undefined }); free(); await route.fulfill({ response: res }); }
+    catch { free(); await route.abort(); }
+  };
+  await ctx.route(`${WP_BRIDGE}/**`, handler(WP_BRIDGE));
+  await ctx.route(`http://localhost:${bport}/**`, handler(`http://localhost:${bport}`));
+  await p.addInitScript(([tauriOn, bridge]) => {
+    try { if (!sessionStorage.getItem("probe")) { localStorage.clear(); localStorage.setItem("emstudio.locale", "it"); sessionStorage.setItem("probe", "1"); } } catch { /* */ }
+    if (!tauriOn) return;
+    // the shell's IPC, as much as the page asks at start: the port the shell decided
+    let n = 1;
+    window.__TAURI_INTERNALS__ = {
+      metadata: { currentWindow: { label: "main" }, currentWebview: { windowLabel: "main", label: "main" } },
+      transformCallback(cb) { const id = n++; window[`_${id}`] = cb; return id; },
+      unregisterCallback() {}, convertFileSrc(x) { return x; },
+      async invoke(cmd) {
+        if (cmd === "transformer_url") { await new Promise((r) => setTimeout(r, 120)); return bridge; }
+        if (cmd === "take_desktop_queue") return { files: [], notices: [] };
+        if (cmd === "llm_key_status") return { available: false, set: false, detail: "" };
+        if (cmd === "plugin:event|listen") return n++;
+        if (cmd === "plugin:fs|exists") return false;
+        if (cmd.startsWith("plugin:menu|")) return [n++, ""];
+        if (cmd.startsWith("plugin:window|") || cmd.startsWith("plugin:webview|")) return null;
+        if (cmd.startsWith("plugin:app|")) return "1.6.0-dev.57";
+        throw new Error(`not simulated: ${cmd}`);
+      },
+    };
+    window.__TAURI_EVENT_PLUGIN_INTERNALS__ = { unregisterListener() {} };
+  }, [tauri, `http://localhost:${bport}`]);
+  await p.goto(`http://localhost:${PORT}/em/studio/${tauri ? "" : `?bridge=${encodeURIComponent(WP_BRIDGE)}`}`);
+  await p.waitForSelector("#workspace-bar .ws-tab", { timeout: 60000 });
+  await p.evaluate(([d, path]) => window.__EM_DRAG__.openAt(d, path), [JSON.parse(readFileSync(WP_V4, "utf8")), WM_WIN]);
+  await p.waitForFunction(() => (window.__EM_SCENE__?.()?.nodes?.length ?? 0) > 50, null, { timeout: 60000 });
+  await p.waitForTimeout(1200);
+  await p.click(`#workspace-bar .ws-tab[data-ws="space"]`);
+  await p.waitForFunction(() => document.querySelector(".scn-host")?.dataset.ready === "1", null, { timeout: 60000 });
+  await p.waitForFunction(() => { const s = document.querySelector(".scn-host")?.__space?.() ?? []; return s.length && !s.some((x) => x.as === "pending"); }, null, { timeout: 120000 }).catch(() => {});
+  await p.waitForTimeout(1500);
+  const drawn = await p.evaluate(() => { const c = {}; for (const x of document.querySelector(".scn-host").__space()) c[`${x.kind}/${x.as}`] = (c[`${x.kind}/${x.as}`] ?? 0) + 1; return c; });
+  return { p, ctx, errors, asked, drawn, bport };
+}
+
+test("WM1.loadfail", "WINDOWS-MODELLI p.1 · un modello che non arriva lo dice: con il bridge che non serve le cartelle dello studio (/fs/doc rifiutato, ogni modello 403) il Log ha una riga per i 10 RM, i 5 proxy e il tileset del XX sec — nome, url con la base del bridge, HTTP 403, «il bridge non serve la cartella» — più la riga di /fs/doc; nell'Outliner i modelli hanno il segno ⚠ con il motivo", async () => {
+  const { p, ctx, errors, drawn } = await wmOpen({ refuse: true });
+  await p.waitForTimeout(6000);   // the tileset's root waits 8 s before it is given up on
+  const log = await p.evaluate(() => window.__EM_DRAG__.log().map((e) => `${e.level} ${e.message}`));
+  const marks = await p.evaluate(() => [...document.querySelectorAll(".sol-fail")].map((e) => e.title));
+  await p.screenshot({ path: SHOT("wm1-loadfail") }).catch(() => {});
+  await ctx.close();
+  const lines = log.filter((l) => /^warn Modello non caricato: /.test(l));
+  const base = WP_BRIDGE.replace("127.0.0.1", "127.0.0.1");
+  const pass = lines.length === 16 && lines.every((l) => l.includes(`${base}/fs/at/C:/Users/Utente/`) && /· HTTP 403 · il bridge non serve la cartella di questo file \(403\)$/.test(l))
+    && lines.some((l) => /tileset\.json/.test(l)) && log.some((l) => /^warn Il bridge non ha servito le cartelle del documento aperto .*404\) not an em\.json/.test(l))
+    && marks.length >= 10 && marks.every((m) => /il bridge non serve la cartella/.test(m)) && drawn["rm/label"] === 10 && !errors.length;
+  return { pass, detail: { lines: lines.length, first: lines[0], doc: log.find((l) => /fs\/doc/.test(l)), marks: marks.length, drawn, errors } };
+});
+
 // ── run ─────────────────────────────────────────────────────────────────────
 const chosen = cases.filter((c) => !only.length || only.includes(c.id) || only.some((o) => c.id.startsWith(o + ".")));
 for (const c of chosen) {

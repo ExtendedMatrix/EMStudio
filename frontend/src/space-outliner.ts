@@ -58,6 +58,8 @@ export interface OutlinerRow {
   uses?: string[];
   level?: string;
   auto?: boolean;
+  /** MICRO-WINDOWS-MODELLI p.1 · the object did not come: why, in words (a mark, the reason its tooltip) */
+  failed?: string;
 }
 
 export interface OutlinerInput {
@@ -71,9 +73,11 @@ export interface OutlinerInput {
     /** p.11 · the technical name, when the name shown is shortened (a tooltip) */
     technical?: string;
     /** …and the level of the version drawn, a chip */
-    chip?: string }>;
-  /** per epoch, its proxies: unit, its name, its type */
-  proxies: (epochId: string) => Array<{ unitId: string; name: string; type: string }>;
+    chip?: string;
+    /** MICRO-WINDOWS-MODELLI p.1 · it did not come, and why */
+    failed?: string }>;
+  /** per epoch, its proxies: unit, its name, its type (and why it did not come) */
+  proxies: (epochId: string) => Array<{ unitId: string; name: string; type: string; failed?: string }>;
   /** the type's label (US, USV/s…) */
   typeLabel: (type: string) => string;
   sketches: Array<{ id: string; name: string; shape: string }>;
@@ -95,6 +99,7 @@ export function buildOutlinerTree(input: OutlinerInput): OutlinerRow[] {
       const rmRow = (r: (typeof rms)[number]): OutlinerRow => ({
         key: `rm:${r.id}`, id: r.id, kind: r.tileset ? "tileset" : "rm", name: r.name, glyph: r.tileset ? "tileset" : r.glyph,
         object: true, ...(r.technical ? { title: r.technical } : {}), ...(r.chip ? { chip: r.chip } : {}),
+        ...(r.failed ? { failed: r.failed } : {}),
         ...(r.versions.length > 1 ? { children: r.versions.map((v) => ({
           key: `version:${r.id}:${v.id}`, id: v.id, kind: "version" as const, name: v.name, drawn: v.drawn,
           glyphText: v.drawn ? "●" : v.chosen ? "○" : "·", ...(v.uses ? { uses: v.uses } : {}), ...(v.level ? { level: v.level } : {}),
@@ -129,7 +134,8 @@ export function buildOutlinerTree(input: OutlinerInput): OutlinerRow[] {
         children: [...byType.entries()].sort((a, b) => coll.compare(input.typeLabel(a[0]), input.typeLabel(b[0]))).map(([type, list]) => ({
           key: `type:${ep.id}:${type}`, id: type, kind: "type", name: `${input.typeLabel(type)} (${list.length})`, glyph: type,
           children: list.slice().sort((a, b) => coll.compare(a.name, b.name)).map((p) => ({
-            key: `proxy:${p.unitId}`, id: p.unitId, kind: "proxy", name: p.name, glyph: type, object: true })),
+            key: `proxy:${p.unitId}`, id: p.unitId, kind: "proxy", name: p.name, glyph: type, object: true,
+            ...(p.failed ? { failed: p.failed } : {}) })),
         })),
       });
     }
@@ -454,6 +460,16 @@ export function renderOutliner(el: HTMLElement, v: OutlinerView, act: OutlinerAc
     name.textContent = r.name;
     name.title = r.title ?? r.name;
     line.append(tw, g, name);
+    if (r.failed) {
+      // MICRO-WINDOWS-MODELLI p.1 · it did not come: a mark, the reason in its tooltip
+      const f = document.createElement("span");
+      f.className = "sol-fail";
+      f.dataset.sol = "fail";
+      f.textContent = "⚠";
+      f.title = r.failed;
+      line.appendChild(f);
+      line.classList.add("failed");
+    }
     if (r.chip) {
       // MICRO-PROVA-DEV47 p.3b · on a model, a container, an epoch: a small menu of the levels
       const menu = !!act.chipMenu && (r.kind === "rm" || r.kind === "rmgroup" || r.kind === "epoch");

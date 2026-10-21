@@ -300,6 +300,10 @@ export interface SpaceSceneOptions {
    *  all (the bridge or the node not listening yet, the desktop's sidecar
    *  still starting) — not a verdict on the file: the caller asks again */
   onNotFound?: (resourceId: string, why: FetchFailure, unanswered?: boolean) => void;
+  /** MICRO-WINDOWS-MODELLI p.1 · a model's load ended: `error` null when it
+   *  came, else what the loader said (a network error too: the caller decides
+   *  when a silence is worth a line) */
+  onLoadOutcome?: (key: string, label: string, url: string, error: unknown | null) => void;
   /** MICRO-3DTILES · the threshold and the tiles' memory (the Preferences) */
   limit?: { bytes: number; points: number };
   tilesMemoryMB?: number;
@@ -516,7 +520,8 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
       // access is granted (or the file uploaded), asking again asks again
       // `unanswered`: nothing answered (a network error, no HTTP status) —
       // a parse error or a 404 is an answer
-      type Loaded = { root: any } | { fail: FetchFailure; unanswered?: boolean };
+      // MICRO-WINDOWS-MODELLI p.1 · `err`: what the loader said, for the Log
+      type Loaded = { root: any } | { fail: FetchFailure; unanswered?: boolean; err?: unknown };
       const cache = new Map<string, Promise<Loaded>>();
       const load = (url: string): Promise<Loaded> => {
         let p = cache.get(url);
@@ -525,12 +530,12 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
             // the room's store: the bytes through the signed road, then parsed
             ? nodeBytes(url).then(
                 (buf) => new Promise<Loaded>((res) => loader.parse(buf, "",
-                  (g: any) => res({ root: g.scene }), () => res({ fail: "missing" }))),
-                (e) => ({ fail: e instanceof RoadError ? e.why : "missing", unanswered: e instanceof RoadError && e.status === 0 }))
+                  (g: any) => res({ root: g.scene }), (e: unknown) => res({ fail: "missing", err: e ?? new Error("glTF") }))),
+                (e) => ({ fail: e instanceof RoadError ? e.why : "missing", unanswered: e instanceof RoadError && e.status === 0, err: e }))
             : new Promise<Loaded>((res) => loader.load(url, (g: any) => res({ root: g.scene }), undefined,
                 // three's FileLoader: an HTTP error carries its response, a
                 // refused connection is the fetch's own TypeError
-                (e: any) => res({ fail: "missing", unanswered: !e?.response && e instanceof TypeError && /fetch|load failed|network/i.test(String(e?.message)) }))));
+                (e: any) => res({ fail: "missing", unanswered: !e?.response && e instanceof TypeError && /fetch|load failed|network/i.test(String(e?.message)), err: e }))));
           cache.set(url, p);
           const mine = p;
           void p.then((x) => { if ("fail" in x) { if (cache.get(url) === mine) cache.delete(url); } else measured(url, x.root); });
@@ -612,7 +617,7 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
               loadTimes.set(url, Math.round(performance.now() - t0));
               return { root };
             } catch (e: any) {
-              return { fail: "missing", unanswered: !e?.response && e instanceof TypeError };
+              return { fail: "missing", unanswered: !e?.response && e instanceof TypeError, err: e };
             }
           })();
           cache.set(k, p);
@@ -663,6 +668,8 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
       const strips = document.createElement("div");
       strips.className = "scn-strips";
       let T: any = null;
+      /** the tilesets whose late root is watched (once each: a kept layer outlives the rebuilds) */
+      const rootWatched = new WeakSet<object>();
       const liveLayers = () => [...layers.values()].filter((l) => l.layer.object.parent === content);
       const ensureLayer = async (url: string, itemId: string, archive = false, mode?: "auto" | "manual"): Promise<Live | null> => {
         let live = layers.get(url);
@@ -1474,6 +1481,18 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
               live.bar.refresh();
               await live.ready;
               if (gen !== generation || disposed) return;
+              // MICRO-WINDOWS-MODELLI p.1 · a tileset whose root did not come says so
+              const tst = live.layer.status();
+              // (the renderer does not always say it: a refused tileset.json left
+              // `failed` empty and the root never ready, measured on a 403)
+              if (!live.layer.rootReady()) {
+                opts.onLoadOutcome?.(key, item.label, tsUrl, { type: "error", message: `tileset: ${tst.failed ?? "no root"}` });
+                if (!rootWatched.has(live.layer)) {
+                  rootWatched.add(live.layer);
+                  const l = live.layer;
+                  l.onChange(() => { if (l.rootReady()) opts.onLoadOutcome?.(key, item.label, tsUrl, null); });
+                }
+              } else opts.onLoadOutcome?.(key, item.label, tsUrl, null);
               const bb = live.layer.bounds();
               if (bb) addLabel(item.label, new THREE.Vector3((bb.min.x + bb.max.x) / 2, bb.max.y, (bb.min.z + bb.max.z) / 2), `rm k-rm${selCls(item)}`, item.id);
               drawn.set(key, { item, as: "tiles", url: tsUrl });
@@ -1489,6 +1508,7 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
               const v = item.flow!.find((x) => x.id === prev) ?? item.flow!.find((x) => x.id === item.flowStart) ?? item.flow![item.flow!.length - 1];
               const got = await loadV(v);
               if (gen !== generation || disposed) return;
+              opts.onLoadOutcome?.(key, item.label, v.url, "fail" in got ? got.err ?? null : null);
               if ("fail" in got) {
                 drawn.set(key, { item: failed(item, got.fail), as: "label" });
                 later.push(failed(item, got.fail));
@@ -1574,8 +1594,10 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
                 drawn.set(key, { item: failed(item, got.fail), as: "label" });
                 later.push(failed(item, got.fail));
                 if (item.resourceId) opts.onNotFound?.(item.resourceId, got.fail, got.unanswered);
+                opts.onLoadOutcome?.(key, item.label, u, got.err ?? null);
                 return;
               }
+              opts.onLoadOutcome?.(key, item.label, u, null);
               const obj = got.root.clone(true);
               // MICRO-SPAZIO-3D-2 · the model's transform, over the glb as it is
               if (item.pose) setPose(obj, item.pose);
@@ -1599,8 +1621,10 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
                 drawn.set(`${item.kind}:${item.id}`, { item: failed(item, got.fail), as: "label" });
                 later.push(failed(item, got.fail));
                 if (item.resourceId) opts.onNotFound?.(item.resourceId, got.fail, got.unanswered);
+                opts.onLoadOutcome?.(`${item.kind}:${item.id}`, item.label, item.url!, got.err ?? null);
                 return;
               }
+              opts.onLoadOutcome?.(`${item.kind}:${item.id}`, item.label, item.url!, null);
               const obj = got.root.clone(true);
               if (item.pose) setPose(obj, item.pose);
               roots.set(`${item.kind}:${item.id}`, obj);

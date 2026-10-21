@@ -243,6 +243,7 @@ import { DOC_TOOLS, renderReadingStage, selectedPassage, type DocTool,
 import { openReadingBubble, type BubbleUnit } from "./reading-bubble";
 import { renderChronology, type ChronoEpoch, type ChronologyData } from "./chronology";
 import { buildSpace, citationKey, SpaceMarks, UnansweredFiles, type Space, type SpaceRM } from "./space";
+import { diagnose, errorText, FailureLog, isNetworkError, type LoadFailure, type Probes } from "./load-failure";
 import { chooseVersion, SCENE_USES, USES } from "./asset-versions";
 import { mountSpaceScene, type SceneItem, type SceneStats, type SceneMark, type SceneMenuRequest, type SceneView, type SpaceSceneHandle } from "./scene3d";
 import { ladderOf, versionChoices, viewerSourceLine, viewerTargetOf,
@@ -12493,6 +12494,9 @@ async function bridgeUrl(): Promise<string> {
 }
 /** The bridge level this editor expects (`BRIDGE_LEVEL` in tools/em_bridge.py). */
 const BRIDGE_LEVEL_WANTED = 34;   // 31 = /property-source (FONTE); 32 = /room-import, «Bring into a room» through the engine; 33 = /fs/write (MICRO-SPAZIO-3D); 34 = /fs/doc, /fs/probe (MICRO-PERCORSI-WINDOWS)
+/** the level that serves the open em.json's folders (`/fs/doc`): below it a
+ *  model's 403 is the bridge's age, not the file (load-failure.ts) */
+const BRIDGE_LEVEL_FS_DOC = 34;
 /**
  * DEV30 U9 · WHY a call to the bridge failed, in words.
  *
@@ -21640,15 +21644,28 @@ async function serveDocumentFolders(path: string): Promise<void> {
     const d = paths.dirname(loc);
     if (d) dirs.add(d);
   }
-  let j: { ok?: boolean; added?: string[] } | null = null;
+  let j: { ok?: boolean; added?: string[]; folders?: string[] } | null = null;
+  // MICRO-WINDOWS-MODELLI p.1 · what the bridge answered is said, whatever it
+  // was: on E.D.'s Windows the Log had no line on the folders, and nobody could
+  // tell whether they were served
+  const base = await bridgeUrl();
   try {
-    const r = await fetch(`${await bridgeUrl()}/fs/doc`, { method: "POST", headers: { "Content-Type": "application/json" },
+    const r = await fetch(`${base}/fs/doc`, { method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ em_json: path, locators: [...dirs], ...(oneDriveRoot() ? { onedrive_root: oneDriveRoot() } : {}) }) });
     j = r.ok ? await r.json() : null;
-  } catch { j = null; }
+    if (!r.ok && currentFilePath === path) {
+      const why = await r.json().then((x: { error?: string; message?: string }) => x.error ?? x.message ?? "", () => "");
+      logWarn(t(r.status === 404 && (!why || /unknown endpoint/i.test(why)) ? "fs.docOlder" : "fs.docFailed", { url: `${base}/fs/doc`, status: String(r.status), why }));
+    }
+  } catch (e) {
+    j = null;
+    if (currentFilePath === path) logWarn(t("fs.docFailed", { url: `${base}/fs/doc`, status: "—", why: errorText(e) ?? "" }));
+  }
   if (currentFilePath === path) void openingFileCheck(path);
+  if (j?.ok && !j.added?.length && j.folders?.length && currentFilePath === path)
+    logInfo(t("fs.docAlready", { dirs: j.folders.map((d) => paths.toNative(d)).join(", "), url: base }));
   if (!j?.added?.length || currentFilePath !== path) return;
-  logInfo(t("fs.docServed", { dirs: j.added.map((d) => paths.toNative(d)).join(", ") }));
+  logInfo(t("fs.docServed", { dirs: j.added.map((d) => paths.toNative(d)).join(", "), url: base }));
   // what was refused before the answer is asked again
   spaceMarks.notFound.clear();
   spaceMarks.refused.clear();
@@ -22619,6 +22636,67 @@ function spaceAwaitAnswer(resourceId: string): void {
     })(); }, 1500);
   };
   again();
+}
+
+/** MICRO-WINDOWS-MODELLI p.1 · every model the Space or the Viewer gives up
+ *  on writes ONE line in the Log — its name, the URL asked (the bridge's base
+ *  included), the HTTP status or the error, the cause in words
+ *  (`load-failure.ts`) — and its row in the Outliner a mark with the cause.
+ *  A network error waits a moment first: the desktop's sidecar starting is not
+ *  a failure (PARTE 0), and a file asked again and drawn says nothing. */
+const modelFailures = new FailureLog();
+let modelFailuresOf = "";
+const modelFailed = new Map<string, string>();   // key → the url that failed, until it is drawn
+const failureProbes: Probes = {
+  head: (u) => fetch(u, { method: "HEAD" }).then((r) => r.status, () => null),
+  health: (b) => fetch(`${b}/health`).then((r) => (r.ok ? r.json() : null), () => null),
+  wanted: BRIDGE_LEVEL_FS_DOC,
+};
+function failureWords(f: LoadFailure): string {
+  let base = "";
+  try { base = new URL(f.url).origin; } catch { /* not a URL */ }
+  return t(`load.cause.${f.cause}`, { base });
+}
+function shownUrl(u: string): string {
+  try { return decodeURIComponent(u); } catch { return u; }
+}
+function noteModelLoad(key: string | null, name: string, url: string, error: unknown | null): void {
+  const docKey = `${currentFilePath ?? ""}\u0000${citationKey(store?.doc ?? null)}`;
+  if (docKey !== modelFailuresOf) { modelFailuresOf = docKey; modelFailures.reset(); modelFailed.clear(); }
+  const k = key ?? `url:${url}`;
+  if (error == null) {
+    modelFailed.delete(k);
+    if (modelFailures.cleared(k)) refreshSurfaces("scene");
+    return;
+  }
+  if (modelFailed.get(k) === url) return;     // already being said
+  modelFailed.set(k, url);
+  let silent = 0;
+  const say = async (): Promise<void> => {
+    if (modelFailed.get(k) !== url || docKey !== modelFailuresOf) return;   // drawn since, or another document
+    // nothing answers at that base yet: the sidecar may be starting (PARTE 0);
+    // said only after two minutes of silence — the line of /fs/doc says it at once
+    if (isNetworkError(error) && silent++ < 30) {
+      let base = "";
+      try { base = new URL(url).origin; } catch { /* */ }
+      if (base && !(await failureProbes.health(base))) { setTimeout(() => { void say(); }, 4000); return; }
+    }
+    void diagnose(name, url, error, failureProbes).then((f) => {
+      if (modelFailed.get(k) !== url || docKey !== modelFailuresOf) return;
+      if (modelFailures.note(k, f)) {
+        const ids = key && /^(rm|proxy):/.test(key) ? [key.slice(key.indexOf(":") + 1)] : undefined;
+        logWarn(t("load.failed", { name, url: shownUrl(url),
+          answer: f.status != null ? `HTTP ${f.status}` : (f.error ?? t("load.noAnswer")), cause: failureWords(f) }), ids);
+      }
+      refreshSurfaces("scene");
+    });
+  };
+  if (isNetworkError(error)) setTimeout(() => { void say(); }, 4000); else void say();
+}
+/** the Outliner's mark of an object that did not come: the cause, for its tooltip */
+function modelFailureOf(key: string): string | undefined {
+  const f = modelFailures.byKey.get(key);
+  return f ? `${failureWords(f)} — ${shownUrl(f.url)}${f.status != null ? ` (HTTP ${f.status})` : ""}` : undefined;
 }
 
 /** The scene's epoch: the one chosen, else the first (newest) top epoch. */
@@ -25445,7 +25523,9 @@ function renderSpaceOutliner(el: HTMLElement, win: Win, sp: Space | null): void 
       const hasAlt = !!grp && sp.rms.some((x) => x.altOf === grp.id);
       // MICRO-SPAZIO-3D-3 p.11 · the name without its level, the level a chip
       const nm = rmShown(r.id, sp);
+      const failed = modelFailureOf(`rm:${r.id}`);
       return { id: r.id, name: nm?.shown ?? r.name, ...(nm && nm.shown !== nm.technical ? { technical: nm.technical } : {}),
+        ...(failed ? { failed } : {}),
         // MICRO-PROVA-DEV47 p.3b · the level and the mode («LOD2 · uso», «intero · fisso»), a small menu
         // MICRO-PROVA-DEV48 p.3 · in auto the label says what the distance drew: «auto · LOD0», «auto · derivata lod4»
         ...(nm?.level ? { chip: (r.versions?.length ?? 0) > 1
@@ -25466,7 +25546,8 @@ function renderSpaceOutliner(el: HTMLElement, win: Win, sp: Space | null): void 
         }) };
     }),
     proxies: (ep) => (sp.summary(ep)?.withProxy ?? []).filter((u) => sp.proxies.has(u))
-      .map((u) => ({ unitId: u, name: String(st.node(u)?.name ?? u), type: String(st.node(u)?.node_type ?? "US") })),
+      .map((u) => { const failed = modelFailureOf(`proxy:${u}`);
+        return { unitId: u, name: String(st.node(u)?.name ?? u), type: String(st.node(u)?.node_type ?? "US"), ...(failed ? { failed } : {}) }; }),
     typeLabel: unitTypeLabel,
     sketches: listSketches().map((s) => ({ id: s.id, name: s.name, shape: s.shape })),
     texts: { rms: t("s3.rms"), proxies: t("s3.proxies"), sketches: t("s3.sketches"), lod: "LOD" },
@@ -25825,6 +25906,7 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
       return false;
     },
     onSketchChange: () => { refreshSurfaces("scene"); drawNPanel(); },
+    onLoadOutcome: (key, label, url, error) => noteModelLoad(key, label, url, error),
     onNotFound: (rid, why: FetchFailure, unanswered?: boolean) => {
       if (unanswered && why === "missing") { spaceAwaitAnswer(rid); return; }
       if (!spaceMarks.mark(rid, why)) return;
@@ -32629,6 +32711,7 @@ function vwScene(win: Win, stage: HTMLElement, target: ViewerTarget, preview: Vw
     overlay: (k) => (k === "s3_proxies" || k === "s3_labels_proxy" || k === "s3_labels_sketch" || k === "s3_labels_rm" ? false : space3dShown(k)),
     overlayValue: (k) => overlayValue(overlaysOf("space"), k),
     sketchVisible: () => false,
+    onLoadOutcome: (key, label, url, error) => noteModelLoad(key, label, url, error),
     onNotFound: (rid, why: FetchFailure, unanswered?: boolean) => {
       if (unanswered && why === "missing") return;
       slot.events.push({ t: Math.round(performance.now() - slot.t0), what: `notfound:${why}`, url: rid });
