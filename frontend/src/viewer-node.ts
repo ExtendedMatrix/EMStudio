@@ -220,7 +220,7 @@ export function viewerSourceLine(t: ViewerTarget, texts: {
   return bits.length ? bits.join(" · ") : texts.nothing;
 }
 
-// ── PARTE 2 · the version: the lightest first, the high one after a pause ────
+// ── PARTE 2 · the version: one, the lightest or the tileset; the higher ones by hand ──
 
 /** One version as the Viewer weighs it (`main.ts` fills it from the Space's rows). */
 export interface WeighedVersion {
@@ -250,85 +250,50 @@ export function ladderOf(vs: readonly WeighedVersion[]): WeighedVersion[] {
   });
 }
 
-/** The default pause before the high version is asked for (Parte 2: «un paio di secondi»). */
-export const HIGH_DELAY_MS = 2000;
-
-export interface ScenePlan {
-  /** per model: the version drawn first (the lightest) and the high one */
-  light: Map<string, WeighedVersion>;
-  high: Map<string, WeighedVersion>;
-  /** the bytes of each step, summed over the models */
-  lightBytes: number;
-  highBytes: number;
-  /** the finest versions exist but weigh over the threshold: asked, not loaded */
-  heavier: { bytes: number; label: string } | null;
-  /** true when the high step is a real change (some model has a heavier version) */
-  hasHigh: boolean;
+/**
+ * MICRO-VIEWER-SPAZIO-EMTREE p.2 (E.D., 21 Oct 2026: «dopo 2 s partiva la
+ * grande e rallentava tutta l'interfaccia») · the Viewer loads ONE version and
+ * never climbs by itself: the higher ones are E.D.'s to choose. A choice is a
+ * level of the document's models (the same label on every model that has it,
+ * the bytes summed), or the tileset of one of its containers — the container's
+ * hat, which joins the high and the low resolution and is the best way to work
+ * on it, so it is the default when there is one; else the lightest level.
+ */
+export interface VersionChoice {
+  /** the level's label, or `tileset:<container>` */
+  key: string;
+  /** «derivata lod4», «LOD2», the tileset's name */
+  label: string;
+  /** who made it (the level), or a tileset */
+  kind: WeighedVersion["origin"] | "tileset";
+  /** the bytes: summed over the models that have it; a tileset's own (0: unknown) */
+  bytes: number;
+  /** how many models have that level (a tileset: the models it covers) */
+  models: number;
+  /** over the threshold of the Preferences: loaded only when chosen */
+  over: boolean;
 }
 
-/**
- * The plan of a document's scene: the lightest version of each model first;
- * after the pause the HIGHEST step whose sum over the models stays within the
- * threshold. A step is a position on each model's ladder counted from the top
- * (0 = its heaviest, 1 = the one under it…): the scene climbs as a whole, so ten
- * walls never stand at ten different levels of detail. What is over the
- * threshold is offered (`heavier`), never loaded unasked.
- */
-export function scenePlan(ladders: Map<string, WeighedVersion[]>, limitBytes: number): ScenePlan {
-  const light = new Map<string, WeighedVersion>(), high = new Map<string, WeighedVersion>();
-  let lightBytes = 0;
-  for (const [id, l] of ladders) if (l.length) { light.set(id, l[0]); lightBytes += l[0].bytes ?? 0; }
-  const deepest = Math.max(0, ...[...ladders.values()].map((l) => l.length - 1));
-  let heavier: ScenePlan["heavier"] = null;
-  let highBytes = lightBytes;
-  for (let fromTop = 0; fromTop <= deepest; fromTop++) {
-    const pick = new Map<string, WeighedVersion>();
-    let sum = 0;
-    for (const [id, l] of ladders) {
-      if (!l.length) continue;
-      const v = l[Math.max(0, l.length - 1 - fromTop)];
-      pick.set(id, v);
-      sum += v.bytes ?? 0;
-    }
-    if (sum <= limitBytes || fromTop === deepest) {
-      if (sum > limitBytes) break;           // even the lightest step is over: stay on the light one
-      for (const [id, v] of pick) high.set(id, v);
-      highBytes = sum;
-      break;
-    }
-    if (!heavier) heavier = { bytes: sum, label: [...pick.values()][0]?.label ?? "" };
-  }
-  if (!high.size) for (const [id, v] of light) high.set(id, v);
-  const hasHigh = [...high].some(([id, v]) => light.get(id)?.id !== v.id);
-  return { light, high, lightBytes, highBytes, heavier, hasHigh };
-}
+/** A container of the document that has a tileset: its id, its name, the tileset's weight. */
+export interface TilesetOfDoc { group: string; name: string; bytes: number | null; covers: number }
 
-/**
- * The pause, as a small object: `arm(key)` starts it for a node, a second `arm`
- * with another key cancels the first (a new node selected annuls the load in
- * progress), `cancel()` stops it. The callback runs only if the key is still
- * the armed one when the time is up. Timers are injected so a check can run
- * the clock by hand.
- */
-export class HighLoader {
-  private key: string | null = null;
-  private timer: unknown = null;
-  constructor(private readonly delay: () => number,
-              private readonly clock: { set: (f: () => void, ms: number) => unknown; clear: (h: unknown) => void } =
-                { set: (f, ms) => setTimeout(f, ms), clear: (h) => clearTimeout(h as ReturnType<typeof setTimeout>) }) {}
-  armed(): string | null { return this.key; }
-  arm(key: string, run: () => void): void {
-    if (this.key === key && this.timer != null) return;     // the same node, still waiting: the pause goes on
-    this.cancel();
-    this.key = key;
-    this.timer = this.clock.set(() => {
-      this.timer = null;
-      if (this.key === key) run();
-    }, this.delay());
+/** The Viewer's «Versioni»: the tilesets first, then the levels from the
+ *  lightest; `def` the one shown when nobody chose. */
+export function versionChoices(ladders: Map<string, WeighedVersion[]>, tilesets: readonly TilesetOfDoc[],
+  limitBytes: number): { choices: VersionChoice[]; def: string | null } {
+  const levels = new Map<string, VersionChoice>();
+  for (const l of ladders.values()) for (const v of l) {
+    const c = levels.get(v.label) ?? { key: v.label, label: v.label, kind: v.origin, bytes: 0, models: 0, over: false };
+    c.bytes += v.bytes ?? 0;
+    c.models++;
+    levels.set(v.label, c);
   }
-  cancel(): void {
-    if (this.timer != null) this.clock.clear(this.timer);
-    this.timer = null;
-    this.key = null;
-  }
+  // the order of the levels: the lightest first — by the bytes, then by the
+  // chain of the first model that has it (a coarser rank is lighter)
+  const rankOf = (label: string) => Math.max(...[...ladders.values()].map((l) => l.find((v) => v.label === label)?.rank ?? -1));
+  const lv = [...levels.values()].sort((a, b) => a.bytes - b.bytes || rankOf(b.label) - rankOf(a.label));
+  for (const c of lv) c.over = c.bytes > limitBytes;
+  const ts: VersionChoice[] = tilesets.map((x) => ({ key: `tileset:${x.group}`, label: x.name, kind: "tileset", bytes: x.bytes ?? 0, models: x.covers, over: false }));
+  const choices = [...ts, ...lv];
+  return { choices, def: ts[0]?.key ?? lv[0]?.key ?? null };
 }

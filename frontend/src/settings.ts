@@ -124,9 +124,6 @@ export interface ViewerSettings {
   lodLimitPoints: number;
   /** the memory ceiling of a tileset's automatic refinement, MB */
   tilesMemoryMB: number;
-  /** MICRO-VIEWER-UNICO p.2 · the Viewer shows the lightest version at once and
-   *  the highest after this many seconds still on the same node */
-  highDelayS: number;
   /** MICRO-SPAZIO-3D-2 · the Space's navigation, as Blender's Preferences ▸
    *  Input: «Emula mouse a 3 tasti» (Alt + left = middle), «Emula tastierino»
    *  (the top row's digits are the keypad's), «Auto Perspective», and what a
@@ -151,7 +148,6 @@ export interface ViewerSettings {
 export const LOD_LIMIT_MB = 200;
 export const LOD_LIMIT_POINTS = 10_000_000;
 export const TILES_MEMORY_MB = 400;
-export const HIGH_DELAY_S = 2;
 
 /** TRADUZIONI · «show the texts in…»: the language the texts of the GRAPH are
  *  shown in where a translation exists. "" = the interface language (the
@@ -197,7 +193,7 @@ const DEFAULTS: Settings = {
   // No default host on purpose: a wrong one would look like a broken viewer.
   // The Heriverse deployment guide mounts the wapp at /a/heriverse.
   viewer: { atonBase: "", heriverseApp: "a/heriverse",
-            lodLimitMB: LOD_LIMIT_MB, lodLimitPoints: LOD_LIMIT_POINTS, tilesMemoryMB: TILES_MEMORY_MB, highDelayS: HIGH_DELAY_S,
+            lodLimitMB: LOD_LIMIT_MB, lodLimitPoints: LOD_LIMIT_POINTS, tilesMemoryMB: TILES_MEMORY_MB,
             emulate3Button: false, emulateNumpad: false, autoPerspective: true, leftDrag: "auto",
             invertTrackpadOrbit: false },
   // No default base, for the same reason the ATON one has none: a wrong host

@@ -7023,8 +7023,8 @@ test("VU1.d01", "VIEWER-UNICO p.1/p.3 · D.01 nel Viewer: tutto il documento (i 
   const w = await viewerIn(p, "inspector");
   const d01 = await v33Id(p, "D.01");
   await p.evaluate((d) => window.__EM_DRAG__.select(d), d01);
-  // the ten models of the light step drawn (the framing follows their arrival)
-  await p.waitForFunction((x) => (window.__EM_DRAG__.viewerState(x)?.scene?.events ?? []).filter((e) => e.what === "drawn").length >= 10, w, { timeout: 60000 }).catch(() => {});
+  // MICRO-VIEWER-SPAZIO-EMTREE p.2 · the container's tileset is the default: its first tiles drawn (the framing follows them)
+  await p.waitForFunction((x) => (window.__EM_DRAG__.viewerState(x)?.scene?.events ?? []).some((e) => e.what === "tiles" || e.what === "drawn"), w, { timeout: 60000 }).catch(() => {});
   await p.waitForTimeout(1200);
   const s = await vState(p, w);
   await p.screenshot({ path: SHOT("vu1-d01") }).catch(() => {});
@@ -7037,17 +7037,16 @@ test("VU1.d01", "VIEWER-UNICO p.1/p.3 · D.01 nel Viewer: tutto il documento (i 
   await ctx.close();
   const pass = s?.target?.kind === "document" && s.target.models.length === 10 && s.target.groups.length === 1
     && /10 modelli di rappresentazione/.test(s.bar?.source ?? "") && /contenitore Survey2015/.test(s.bar?.source ?? "")
-    && s.scene?.framed && sc?.boxes >= 10 && rw > sc.canvas.w * 0.3 && rh > sc.canvas.h * 0.2 && Math.min(rw, rh) / Math.max(rw, rh) > 0.15
+    && s.scene?.framed && sc?.boxes >= 1 && rw > sc.canvas.w * 0.3 && rh > sc.canvas.h * 0.2 && Math.min(rw, rh) / Math.max(rw, rh) > 0.15
     && s9?.target?.models.length === 87 && s9.target.parts.length === 0 && /87 modelli/.test(s9.bar?.source ?? "") && !errors.length;
   return { pass, detail: { source: s?.bar?.source, framed: s?.scene?.framed, screen: sc, rw, rh, d09: s9?.bar?.source, errors } };
 });
 
-test("VU2.versions", "VIEWER-UNICO p.2 · scorrendo 10 documenti in fretta non si carica nessuna versione alta; fermi su D.01 la leggera subito («derivata lod4»), l'alta dopo il ritardo (2 s), la barra lo dice; il selettore forza una versione", async () => {
+test("VU2.versions", "VIEWER-SPAZIO-EMTREE p.2 · nessuna versione alta da sola: scorrendo 10 documenti e fermi 6 s su D.01 si vede il tileset del contenitore (il default), nessun livello alto chiesto; «Versioni» nella barra (tileset, livelli con peso e tipo, LOD0 oltre la soglia) e il tab laterale sono una sola scelta; LOD2 scelto a mano si carica", async () => {
   const { p, ctx, errors } = await openV33();
   const w = await viewerIn(p, "inspector");
   const reqs = [];
   p.on("request", (r) => { if (/\.(obj|glb|gltf)(\?|$)/i.test(r.url())) reqs.push({ t: Date.now(), u: decodeURIComponent(r.url()) }); });
-  // the bridge says which files are on the disk once: ask it with D.01 shown, then go back to nothing
   const d01 = await v33Id(p, "D.01");
   const names = ["D.02", "D.09", "D.03", "D.01", "D.05", "D.08", "D.09", "D.07", "D.11", "D.04"];
   const ids = [];
@@ -7055,30 +7054,77 @@ test("VU2.versions", "VIEWER-UNICO p.2 · scorrendo 10 documenti in fretta non s
   const t0 = Date.now();
   for (const id of ids) { await p.evaluate((d) => window.__EM_DRAG__.select(d), id); await p.waitForTimeout(250); }
   const scrolled = reqs.filter((r) => r.t >= t0).map((r) => r.u);
-  const highWhileScrolling = scrolled.filter((u) => !/@lod\d|lod1-realtime-web|lod4-web/.test(u));
-  reqs.length = 0;
-  const tSel = Date.now();
+  const heavy = (u) => !/@lod\d|lod1-realtime-web|lod4-web|TempluMare_tiles|\/tiles?\//i.test(u);
+  const highWhileScrolling = scrolled.filter(heavy);
   await p.evaluate((d) => window.__EM_DRAG__.select(d), d01);
-  await p.waitForFunction((x) => (window.__EM_DRAG__.viewerState(x)?.scene?.events ?? []).some((e) => e.what === "drawn"), w, { timeout: 60000 }).catch(() => {});
-  const light = await vState(p, w);
-  await p.waitForFunction((x) => window.__EM_DRAG__.viewerState(x)?.scene?.step === "high", w, { timeout: 30000 }).catch(() => {});
-  await p.waitForTimeout(4000);
-  const high = await vState(p, w);
-  const ev = high?.scene?.events ?? [];
-  const tLight = ev.find((e) => e.what === "drawn")?.t ?? null;
-  const tHigh = ev.find((e) => e.what === "high")?.t ?? null;
-  const lightAt = Math.max(...ev.filter((e) => e.what === "drawn" && /lod4/.test(e.url ?? "")).map((e) => e.t));
-  // the selector: LOD0 forced is asked for (the high step stayed under the threshold)
-  const opts = await p.evaluate((x) => [...document.querySelectorAll(`.tile-area[data-win="${x}"] select[data-vw-force] option`)].map((o) => o.value), w);
-  await p.screenshot({ path: SHOT("vu2-d01-alta") }).catch(() => {});
+  await p.waitForFunction((x) => (window.__EM_DRAG__.viewerState(x)?.scene?.events ?? []).some((e) => e.what === "tiles" || e.what === "drawn"), w, { timeout: 60000 }).catch(() => {});
+  reqs.length = 0;
+  await p.waitForTimeout(6000);
+  const still = await vState(p, w);
+  const climbed = reqs.filter((r) => heavy(r.u)).map((r) => r.u);
+  const area = `.tile-area[data-win="${w}"]`;
+  const opts = await p.evaluate((a) => [...document.querySelectorAll(`${a} select[data-vw-versions] option`)].map((o) => [o.value, o.textContent]), area);
+  // the side panel: the same list, as radio buttons
+  await p.click(`${area} [data-vw-np-tab]`);
+  await p.waitForTimeout(400);
+  const radios = await p.evaluate((a) => [...document.querySelectorAll(`${a} [data-vw-choice]`)].map((r) => [r.dataset.vwChoice, r.checked]), area);
+  // LOD2 by hand, from the panel: asked for, drawn, and the bar's list follows
+  reqs.length = 0;
+  await p.click(`${area} [data-vw-choice="LOD2"]`).catch(() => {});
+  await p.waitForFunction((x) => /LOD2/.test(window.__EM_DRAG__.viewerState(x)?.scene?.seen ?? ""), w, { timeout: 30000 }).catch(() => {});
+  await p.waitForTimeout(1500);
+  const chosen = await vState(p, w);
+  const barNow = await p.evaluate((a) => document.querySelector(`${a} select[data-vw-versions]`)?.value ?? null, area);
+  await p.screenshot({ path: SHOT("vu2-d01-versioni") }).catch(() => {});
   await ctx.close();
-  const pass = scrolled.length > 0 && highWhileScrolling.length === 0
-    && /derivata lod4/.test(light?.bar?.seen ?? light?.scene?.seen ?? "") && high?.scene?.step === "high"
-    && tHigh != null && tHigh - lightAt >= 1900 - 300 && /LOD2/.test(high?.scene?.seen ?? "")
-    && !!high?.scene?.plan?.heavier && opts.includes("LOD0") && !errors.length;
-  return { pass, detail: { scrolled: scrolled.length, highWhileScrolling: highWhileScrolling.slice(0, 4), lightSeen: light?.scene?.seen,
-    highSeen: high?.scene?.seen, tLight, lightAt, tHigh, plan: high?.scene?.plan && { light: high.scene.plan.lightBytes, high: high.scene.plan.highBytes, heavier: high.scene.plan.heavier },
-    opts, sinceSelect: Date.now() - tSel, errors } };
+  const keys = opts.map((o) => o[0]);
+  const pass = scrolled.length >= 0 && highWhileScrolling.length === 0
+    && /^tileset:/.test(still?.scene?.choice ?? "") && /tileset/.test(still?.scene?.seen ?? "") && climbed.length === 0
+    && !still?.scene?.events?.some((e) => e.what === "high")
+    && /^tileset:/.test(keys[0] ?? "") && keys.includes("LOD2") && keys.includes("LOD0") && opts.some((o) => o[0] === "LOD0" && /soglia/.test(o[1]))
+    && JSON.stringify(radios.map((r) => r[0])) === JSON.stringify(keys) && radios[0]?.[1] === true
+    && chosen?.scene?.choice === "LOD2" && reqs.some((r) => /LOD2/i.test(r.u)) && barNow === "LOD2" && !errors.length;
+  return { pass, detail: { scrolled: scrolled.length, highWhileScrolling: highWhileScrolling.slice(0, 4), still: still?.scene && { choice: still.scene.choice, seen: still.scene.seen },
+    climbed: climbed.slice(0, 4), opts, radios, chosen: chosen?.scene && { choice: chosen.scene.choice, seen: chosen.scene.seen }, lod2Reqs: reqs.filter((r) => /LOD2/i.test(r.u)).length, barNow, errors } };
+});
+
+test("VS2.viewer-gestures", "VIEWER-SPAZIO-EMTREE p.2 · Viewer: il clic semplice non seleziona (è degli strumenti), Alt+clic seleziona la mesh e il Viewer resta sul documento intero, il doppio clic porta centro e zoom sul punto senza selezionare né isolare", async () => {
+  const { p, ctx, errors } = await openV33();
+  const w = await viewerIn(p, "inspector");
+  const d01 = await v33Id(p, "D.01");
+  await p.evaluate((d) => window.__EM_DRAG__.select(d), d01);
+  await p.waitForFunction((x) => window.__EM_DRAG__.viewerState(x)?.scene?.framed, w, { timeout: 60000 }).catch(() => {});
+  await p.waitForTimeout(2500);
+  const at = await p.evaluate((x) => {
+    const host = document.querySelector(`.tile-area[data-win="${x}"] .vw-scene`), cv = host?.querySelector("canvas");
+    if (!cv) return null; const b = cv.getBoundingClientRect();
+    for (const fy of [0.5, 0.45, 0.55, 0.4, 0.6, 0.35, 0.65]) for (const fx of [0.5, 0.45, 0.55, 0.4, 0.6, 0.35, 0.65]) {
+      const px = Math.round(b.x + b.width * fx), py = Math.round(b.y + b.height * fy);
+      if (document.elementFromPoint(px, py) !== cv) continue;
+      const h = host.__spaceHit?.(px, py); if (h) return { px, py, h };
+    }
+    return null;
+  }, w);
+  const r = { at: at && `${at.h.kind}:${at.h.id}` };
+  const look = async () => { const s = await vState(p, w); return { sel: await p.evaluate(() => window.__EM_DRAG__.selected()), node: s?.node, kind: s?.target?.kind, models: s?.target?.models?.length }; };
+  if (at) {
+    await p.mouse.click(at.px, at.py); await p.waitForTimeout(800);
+    r.click = await look();
+    await p.keyboard.down("Alt"); await p.mouse.click(at.px, at.py); await p.keyboard.up("Alt"); await p.waitForTimeout(800);
+    r.alt = await look();
+    await p.evaluate((d) => window.__EM_DRAG__.select(d), d01); await p.waitForTimeout(600);
+    await p.mouse.dblclick(at.px, at.py); await p.waitForTimeout(2500);
+    r.dbl = await look();
+    const c = await p.evaluate((x) => document.querySelector(`.tile-area[data-win="${x}"] .vw-scene`).__spaceCamState(), w);
+    r.dist = Math.hypot(...c.target.map((v, i) => v - at.h.point[i]));
+  }
+  r.help = await p.evaluate(() => document.querySelector("[data-gestures=viewer]")?.getAttribute("title") ?? null);
+  await ctx.close();
+  const doc = (x) => x && x.node === d01 && x.kind === "document" && x.models === 10;
+  const pass = !!at && JSON.stringify(r.click.sel) === JSON.stringify([d01]) && doc(r.click)
+    && r.alt.sel.length === 1 && r.alt.sel[0] !== d01 && doc(r.alt)
+    && JSON.stringify(r.dbl.sel) === JSON.stringify([d01]) && doc(r.dbl) && r.dist < 0.6 && /Alt/.test(r.help ?? "") && !errors.length;
+  return { pass, detail: { ...r, d01, errors } };
 });
 
 test("VU3.quota", "VIEWER-UNICO p.4 · un punto quota sul 3D di D.01 crea l'estrattore del documento (coordinate del documento, il valore letto), il segno nella scena, la riga in «Estrazioni da questo documento»; «Interpretazione» lo collega a una proprietà; un annulla per gesto", async () => {

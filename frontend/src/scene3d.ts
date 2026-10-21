@@ -235,7 +235,7 @@ export interface SpaceSceneHandle {
   setView(v: AlignedView): void;
   toggleOrtho(): void;
   /** Shift+C: the cursor at the median of what is drawn, the view on most of it */
-  centreScene(): boolean;
+  centreScene(quiet?: boolean): boolean;
   /** the modal G / R / S on the selected object (sketch, proxy, model) */
   startModal(mode: ModalMode): boolean;
 }
@@ -2929,9 +2929,11 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
         }
         return out;
       };
-      const centreScene = (): boolean => {
+      // quiet: a framing the scene asks for itself (the Viewer's, as files
+      // arrive) says nothing when there is nothing drawn yet
+      const centreScene = (quiet = false): boolean => {
         const c = sceneCentre(drawnBoxes());
-        if (!c) { if (opts.texts.centreEmpty) opts.onNotice?.(opts.texts.centreEmpty); return false; }
+        if (!c) { if (opts.texts.centreEmpty && !quiet) opts.onNotice?.(opts.texts.centreEmpty); return false; }
         cursorAt = c.cursor;
         cursorSet = true;
         opts.onCursor?.(cursorAt);
@@ -3112,7 +3114,7 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
     view: () => api.view?.() ?? { view: null, ortho: false, fov: 40, lensMm: 33 },
     setView: (v) => api.setView?.(v),
     toggleOrtho: () => api.toggleOrtho?.(),
-    centreScene: () => api.centreScene?.() ?? false,
+    centreScene: (quiet) => api.centreScene?.(quiet) ?? false,
     startModal: (m) => api.startModal?.(m) ?? false,
   };
 }

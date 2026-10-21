@@ -110,33 +110,21 @@ const G = {
   eq(l.map((x) => x.id), ["lod4", "lod2", "lod0"], "P2 · the ladder: from the lightest to the heaviest, by the weight measured");
   const unknown = vn.ladderOf([v("a", "A", null, 0), v("b", "B", null, 3)]);
   eq(unknown.map((x) => x.id), ["b", "a"], "P2 · …weights unknown: by the chain (a coarser rank is lighter)");
-  const one = vn.scenePlan(new Map([["m", l]]), 200e6);
-  eq([one.light.get("m").id, one.high.get("m").id, one.hasHigh, one.heavier], ["lod4", "lod0", true, null],
-     "P2 · one model, 160 MB under 200: the light one first, then the author's LOD0");
+  // MICRO-VIEWER-SPAZIO-EMTREE p.2 · one version, never a climb by itself; the tileset first
+  const one = vn.versionChoices(new Map([["m", l]]), [], 200e6);
+  eq([one.def, one.choices.map((c) => c.key)], ["derivata lod4", ["derivata lod4", "LOD2", "LOD0"]],
+     "P2 · one model: the levels from the lightest, the lightest shown");
   const ten = new Map(Array.from({ length: 10 }, (_, i) => [`m${i}`, l]));
-  const p10 = vn.scenePlan(ten, 200e6);
-  eq([p10.high.get("m0").id, p10.highBytes, p10.heavier?.label], ["lod2", 90e6, "LOD0"],
-     "P2 · ten models: the threshold is the document's (1.6 GB of LOD0 is asked, not loaded) — the scene climbs to LOD2 as a whole");
-  const tight = vn.scenePlan(ten, 1e6);
-  eq([tight.hasHigh, tight.high.get("m0").id], [false, "lod4"], "P2 · even the light step over the threshold: the light one stays");
-  // the pause: a fake clock
-  const timers = [];
-  const clock = { set: (f, ms) => { timers.push({ f, ms, live: true }); return timers.length - 1; }, clear: (h) => { timers[h].live = false; } };
-  const hl = new vn.HighLoader(() => 2000, clock);
-  const ran = [];
-  hl.arm("D.01", () => ran.push("D.01"));
-  eq(timers[0].ms, 2000, "P2 · the pause is a parameter (2 s by default)");
-  hl.arm("D.01", () => ran.push("again"));
-  eq(timers.length, 1, "P2 · the same node still waiting: the pause goes on (not restarted at every repaint)");
-  hl.arm("D.02", () => ran.push("D.02"));
-  ok(!timers[0].live, "P2 · a new node selected cancels the load in progress");
-  for (const t of timers) if (t.live) t.f();
-  eq(ran, ["D.02"], "P2 · …only the node still shown loads its high version");
-  hl.arm("D.09", () => ran.push("D.09"));
-  hl.cancel();
-  for (const t of timers) if (t.live) t.f();
-  eq(ran, ["D.02"], "P2 · cancel: nothing");
-  eq(vn.HIGH_DELAY_MS, 2000, "P2 · the default pause");
+  const p10 = vn.versionChoices(ten, [], 200e6);
+  eq(p10.choices.map((c) => [c.key, c.bytes, c.models, c.over]), [["derivata lod4", 20e6, 10, false], ["LOD2", 90e6, 10, false], ["LOD0", 1600e6, 10, true]],
+     "P2 · ten models: the bytes summed over the document, LOD0 over the threshold (marked, loaded only when chosen)");
+  eq(p10.def, "derivata lod4", "P2 · …the lightest is the default, nothing climbs");
+  const withTiles = vn.versionChoices(ten, [{ group: "G", name: "Survey2015", bytes: 3e6, covers: 10 }], 200e6);
+  eq([withTiles.def, withTiles.choices[0].kind, withTiles.choices[0].label, withTiles.choices[0].models], ["tileset:G", "tileset", "Survey2015", 10],
+     "P2 · a container with a tileset: the tileset is the default (high and low resolution together)");
+  eq(vn.HighLoader, undefined, "P2 · the pause and its loader are gone");
+  eq(vn.HIGH_DELAY_MS, undefined, "P2 · …and its parameter");
+  eq(vn.versionChoices(new Map(), [], 200e6), { choices: [], def: null }, "P2 · no model, no tileset: nothing to choose");
 }
 
 // ── Parte 4 · what a mark on the model reads ───────────────────────────────

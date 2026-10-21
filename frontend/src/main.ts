@@ -245,8 +245,8 @@ import { renderChronology, type ChronoEpoch, type ChronologyData } from "./chron
 import { buildSpace, citationKey, SpaceMarks, UnansweredFiles, type Space, type SpaceRM } from "./space";
 import { chooseVersion, SCENE_USES, USES } from "./asset-versions";
 import { mountSpaceScene, type SceneItem, type SceneMark, type SceneMenuRequest, type SceneView, type SpaceSceneHandle } from "./scene3d";
-import { HIGH_DELAY_MS, HighLoader, ladderOf, scenePlan, viewerSourceLine, viewerTargetOf,
-         type ScenePlan, type ViewerPart, type ViewerTarget, type WeighedVersion } from "./viewer-node";
+import { ladderOf, versionChoices, viewerSourceLine, viewerTargetOf,
+         type VersionChoice, type ViewerPart, type ViewerTarget, type WeighedVersion } from "./viewer-node";
 import { CLICKS, readingOf as reading3dOf, VIEWER_3D_TOOLS, type ReadTexts, type Viewer3dTool } from "./viewer-annot";
 import { blenderToThree, eulerFromUp, leftSelects, threeToBlender, type AlignedView, type CamState, type Pose, type V3 } from "./space-nav";
 import { carryXf, coordDecimals, deg, IDENTITY, isIdentity, poseToXf, rad, readTransform, transformData, withPivot, xfToPose, type Xf } from "./transform3d";
@@ -426,7 +426,6 @@ import {
   saveSettings,
   SYNC_TOOLS,
   TILES_MEMORY_MB,
-  HIGH_DELAY_S,
   type Settings,
 } from "./settings";
 import { envelope as wireEnvelope } from "./wire";
@@ -2665,10 +2664,8 @@ window.__EM_SCENE__ = () => {
     const area = winAreas.get(winId);
     const bar = area?.querySelector<HTMLElement>(".viewer-bar");
     return { node: viewerNodeOf(w), kept: viewerKept(w), target,
-      scene: s ? { key: s.key, step: s.step, forced: s.forced, framed: s.framed, events: s.events, urls: [...s.urls],
-        plan: { lightBytes: s.plan.lightBytes, highBytes: s.plan.highBytes, hasHigh: s.plan.hasHigh, heavier: s.plan.heavier,
-          light: [...s.plan.light].map(([k, v]) => [k, v.label, v.bytes]), high: [...s.plan.high].map(([k, v]) => [k, v.label, v.bytes]) },
-        seen: vwSeenLine(s), trace: s.trace, armed: highLoaderOf(w).armed(),
+      scene: s ? { key: s.key, choice: s.choice, choices: s.choices.map((c) => ({ ...c })), framed: s.framed, events: s.events, urls: [...s.urls],
+        seen: vwSeenLine(s), trace: s.trace,
         // Parte 3 · where the content falls on the canvas: the boxes of the models
         // drawn, projected (page px), and the canvas — a strip seen edge-on is
         // a rectangle a few pixels thick
@@ -14806,9 +14803,6 @@ function openSettings(section?: string): void {
   if (lm) lm.value = grouped(s.viewer.lodLimitMB);
   if (lp) lp.value = grouped(s.viewer.lodLimitPoints);
   if (tm) tm.value = grouped(s.viewer.tilesMemoryMB);
-  // MICRO-VIEWER-UNICO p.2 · the pause before the Viewer's high version
-  const hd = numIn("set-viewer-high-delay");
-  if (hd) hd.value = String(s.viewer.highDelayS ?? HIGH_DELAY_S).replace(".", (0.5).toLocaleString(getLocale()).charAt(1));
   // MICRO-SPAZIO-3D-2 · the Space's navigation
   const chk = (id: string, v: boolean) => { const c = document.getElementById(id) as HTMLInputElement | null; if (c) c.checked = v; };
   chk("set-nav-emulate3", s.viewer.emulate3Button);
@@ -15145,8 +15139,6 @@ settingsModal.addEventListener("click", (e) => {
       lodLimitMB: posNum("set-lod-limit-mb", LOD_LIMIT_MB),
       lodLimitPoints: posNum("set-lod-limit-points", LOD_LIMIT_POINTS),
       tilesMemoryMB: Math.max(64, posNum("set-tiles-memory-mb", TILES_MEMORY_MB)),
-      highDelayS: (() => { const v = Number(String((document.getElementById("set-viewer-high-delay") as HTMLInputElement | null)?.value ?? "").replace(",", "."));
-        return Number.isFinite(v) && v >= 0 ? Math.min(60, v) : HIGH_DELAY_S; })(),
       emulate3Button: !!(document.getElementById("set-nav-emulate3") as HTMLInputElement | null)?.checked,
       emulateNumpad: !!(document.getElementById("set-nav-numpad") as HTMLInputElement | null)?.checked,
       autoPerspective: (document.getElementById("set-nav-autopersp") as HTMLInputElement | null)?.checked ?? true,
@@ -22387,7 +22379,7 @@ function spaceFileUrl(res: { url: string; checksum: string; residency?: string }
   if (!bridgeBaseNow) {
     // not a relative path handed to the loader: it would fail, and the file be
     // counted «not found» for the session; the scene is drawn again on the answer
-    void bridgeUrl().then((b) => { if (b && !bridgeBaseNow) { bridgeBaseNow = b; refreshSurfaces("scene"); } });
+    void bridgeUrl().then((b) => { if (b && !bridgeBaseNow) { bridgeBaseNow = b; refreshSurfaces("scene"); refreshSurfaces("viewer"); } });
     return /^\//.test(u) ? u : undefined;
   }
   const baseDir = currentFilePath ? currentFilePath.replace(/[^/\\]*$/, "") : "";
@@ -24259,7 +24251,7 @@ function objAddressOf(resId: string): { url: string; modifier: (u: string) => st
   if (!st) return null;
   const store0 = assetStoreBase();
   if (!store0 && !bridgeBaseNow) {
-    void bridgeUrl().then((b) => { if (b && !bridgeBaseNow) { bridgeBaseNow = b; refreshSurfaces("scene"); } });
+    void bridgeUrl().then((b) => { if (b && !bridgeBaseNow) { bridgeBaseNow = b; refreshSurfaces("scene"); refreshSurfaces("viewer"); } });
     return null;
   }
   const key = `${resId}\u0000${store0 ?? currentFilePath ?? ""}\u0000${bridgeBaseNow ?? ""}\u0000${spaceVersion}`;
@@ -31909,21 +31901,24 @@ function viewerKept(win: Win): string | null {
   const v = winCurrent(win, "viewer.keep");
   return typeof v === "string" && store?.node(v) ? v : null;
 }
-/** The node the Viewer shows: the pinned one, else the selection. */
+/** The node the Viewer shows: the pinned one, else the selection — but a part
+ *  of the document it shows (one of its models, its container) selected keeps
+ *  the document whole: MICRO-VIEWER-SPAZIO-EMTREE p.2, the mesh selected with
+ *  Alt + click in the Viewer (or in the Space, the Tabular) is not an isolation
+ *  of that mesh. */
 function viewerNodeOf(win: Win): string | null {
-  return viewerKept(win) ?? selectedId;
+  const kept = viewerKept(win);
+  if (kept) return kept;
+  const on = winCurrent(win, "viewer.on");
+  const s = viewerScenes.get(win.id);
+  if (selectedId && typeof on === "string" && s?.docId === on && on !== selectedId
+      && (s.models.includes(selectedId) || s.groups.includes(selectedId)) && store?.node(on)) return on;
+  return selectedId;
 }
-/** Parte 2 · the pause before the high version, from the Preferences (seconds). */
-function viewerHighDelayMs(): number {
-  const s = Number(getSettings().viewer.highDelayS);
-  return Math.max(0, Number.isFinite(s) ? s : HIGH_DELAY_MS / 1000) * 1000;
-}
-const viewerHigh = new Map<string, HighLoader>();
-function highLoaderOf(win: Win): HighLoader {
-  let l = viewerHigh.get(win.id);
-  if (!l) { l = new HighLoader(viewerHighDelayMs); viewerHigh.set(win.id, l); }
-  return l;
-}
+/** p.2 · the selection before an Alt + click in a Viewer (a slow double click gives it back) */
+let vwSelBeforePick: string | null = null;
+/** p.2 · the version chosen in a Viewer, per window and scene, for the session */
+const viewerChoice = new Map<string, string>();
 
 /** One version as the Viewer's scene draws it. */
 interface VwVersion extends WeighedVersion { url: string; obj?: { modifier?: (u: string) => string } }
@@ -31937,20 +31932,25 @@ interface VwScene {
   models: string[];
   groups: string[];
   ladders: Map<string, VwVersion[]>;
-  plan: ScenePlan;
+  /** MICRO-VIEWER-SPAZIO-EMTREE p.2 · «Versioni»: the containers' tilesets, the
+   *  levels from the lightest; the one drawn (the default: the tileset, else the
+   *  lightest — nothing climbs by itself) */
+  choices: VersionChoice[];
+  choice: string | null;
   /** the Space the ladders were weighed on (it is read again when a file's state changes) */
   sp: Space;
-  /** «light» until the pause is over, then «high»; a version forced by the selector wins */
-  step: "light" | "high";
-  forced: string | null;
   framed: boolean;
   /** the trace in progress (Parte 4) */
   trace: { tool: Viewer3dTool | null; vertices: V3[] };
   /** what happened, timed from the mount (the report's measures) */
   events: Array<{ t: number; what: string; url?: string }>;
   t0: number;
-  /** the urls the scene asked for, light and high */
+  /** the urls the scene asked for */
   urls: Set<string>;
+  /** the framings tried with nothing drawn yet */
+  frameTries?: number;
+  /** what the scene was last handed (`vwItemsSig`) */
+  sig?: string;
   /** Parte 3 · the framing follows the models as they arrive, until the person moves the view */
   userMoved?: boolean;
   framedCam?: string | null;
@@ -32000,13 +32000,31 @@ function vwLadderOf(rm: SpaceRM): VwVersion[] {
 /** The version each model draws now: forced, else the plan's step. */
 function vwVersionOf(s: VwScene, rmId: string): VwVersion | undefined {
   const l = s.ladders.get(rmId) ?? [];
-  if (s.forced) return l.find((v) => v.label === s.forced) ?? l[l.length - 1];
-  const want = (s.step === "high" ? s.plan.high : s.plan.light).get(rmId);
-  return l.find((v) => v.id === want?.id) ?? l[0];
+  // a level chosen: that level where the model has it, else its lightest; the
+  // tileset (or nothing chosen): the lightest of each model
+  const c = s.choice;
+  return (c && !c.startsWith("tileset:") ? l.find((v) => v.label === c) : undefined) ?? l[0];
+}
+
+/** p.2 · what a scene draws, as a key: each item's file and state */
+function vwItemsSig(items: SceneItem[]): string {
+  return JSON.stringify(items.map((i) => [i.id, i.url ?? null, i.state]));
+}
+
+/** p.2 · a choice of «Versioni» in words: «LOD2 · livello dell'autore · 83 MB»,
+ *  «Survey2015 · tileset · 10 modelli», «LOD0 · 955 MB · oltre la soglia» */
+function vwChoiceWords(c: VersionChoice): string {
+  const kind = t(`vw.kind.${c.kind}`);
+  const bits = [c.label, c.label.toLowerCase().includes(kind.toLowerCase()) ? "" : kind,
+    c.bytes > 0 ? mbOf(c.bytes) : "", c.kind === "tileset" && c.models ? t("vw.nModels", { n: String(c.models) }) : "",
+    c.over ? t("vw.overLimit", { lim: String(getSettings().viewer.lodLimitMB) }) : ""];
+  return bits.filter(Boolean).join(" · ");
 }
 
 /** The line of the bar: what is seen now. */
 function vwSeenLine(s: VwScene): string {
+  const c = s.choices.find((x) => x.key === s.choice);
+  if (c?.kind === "tileset") return vwChoiceWords(c);
   const ids = [...s.ladders.keys()].filter((id) => (s.ladders.get(id) ?? []).length);
   const vs = ids.map((id) => vwVersionOf(s, id)).filter(Boolean) as VwVersion[];
   if (!vs.length) return "";
@@ -32030,7 +32048,9 @@ function vwSceneItems(s: VwScene): SceneItem[] {
     if (!tr) continue;
     const tv = (tr.versions ?? []).find((v) => !v.master && typeof (v.data ?? {}).geometric_error_m === "number");
     const err = Number((tv?.data ?? {}).geometric_error_m ?? 10);
-    const mode = altEffectiveMode(a.group, sp);
+    // MICRO-VIEWER-SPAZIO-EMTREE p.2 · the Viewer's own «Versioni», not the
+    // Space's Automatico: the tileset when it is the one chosen, else the models
+    const mode: Exclude<AltMode, "use"> = s.choice === `tileset:${a.group}` ? "tileset" : "models";
     altOfRm.set(a.tileset, { group: a.group, role: "tileset", mode, err });
     for (const m of a.covered) altOfRm.set(m, { group: a.group, role: "models", mode, err });
   }
@@ -32163,16 +32183,15 @@ function vwScene(win: Win, stage: HTMLElement, target: ViewerTarget, preview: Vw
   if (kept && kept.key === key) {
     stage.appendChild(kept.host);
     // the Space read again (the bridge said which files are on the disk, a
-    // version was added): the ladders follow, and the scene if they changed
-    if (kept.sp !== sp) {
-      kept.sp = sp;
-      const before = JSON.stringify([...kept.ladders].map(([k, l]) => [k, l.map((v) => v.id)]));
-      vwWeigh(kept, sp);
-      if (JSON.stringify([...kept.ladders].map(([k, l]) => [k, l.map((v) => v.id)])) !== before) {
-        kept.handle.update(vwSceneItems(kept));
-        if (vwLightDrawn(kept)) vwArmHigh(win, kept);
-      }
-    }
+    // version was added): the ladders follow
+    if (kept.sp !== sp) { kept.sp = sp; vwWeigh(kept, sp, win.id); }
+    // …and the scene, if what it draws changed since it was handed over: each
+    // file's address and state too — MICRO-VIEWER-SPAZIO-EMTREE p.2, measured:
+    // the bridge's address arrives after the first drawing (no Space change),
+    // and the container's tileset stayed a label with no url for good
+    const items = vwSceneItems(kept);
+    const sig = vwItemsSig(items);
+    if (sig !== kept.sig) { kept.sig = sig; kept.handle.update(items); }
     return kept;
   }
   disposeViewerScene(win.id);
@@ -32181,9 +32200,9 @@ function vwScene(win: Win, stage: HTMLElement, target: ViewerTarget, preview: Vw
   host.dataset.vwScene = win.id;
   stage.appendChild(host);
   const slot: VwScene = { key, host, docId: target.docId, models: target.models, groups: target.groups, ladders: new Map(),
-    plan: scenePlan(new Map(), 0), sp, step: "light", forced: null, framed: false, trace: { tool: null, vertices: [] }, events: [],
+    choices: [], choice: null, sp, framed: false, trace: { tool: null, vertices: [] }, events: [],
     t0: performance.now(), urls: new Set(), preview, handle: null as unknown as SpaceSceneHandle };
-  vwWeigh(slot, sp);
+  vwWeigh(slot, sp, win.id);
   const tool = winCurrent(win, "doc.tool");
   slot.trace.tool = (VIEWER_3D_TOOLS as readonly string[]).includes(String(tool)) ? tool as Viewer3dTool
     // a reading armed with no tool chosen: a spot height, as the Doc's point was
@@ -32209,13 +32228,17 @@ function vwScene(win: Win, stage: HTMLElement, target: ViewerTarget, preview: Vw
       keepMeasure(url, m);
       slot.events.push({ t: Math.round(performance.now() - slot.t0), what: "drawn", url });
       vwFrameArrivals(win, slot);
-      // Parte 2 · the pause starts when the light step is on screen, every model of it
-      if (slot.step === "light" && !slot.forced && vwLightDrawn(slot)) vwArmHigh(win, slot);
       refreshViewerBar(win);
     },
     altLine: (x) => t(x.side === "tileset" ? "alt.lineTiles" : "alt.lineModels", { name: x.name, mode: x.mode === "auto" ? ` · ${t("alt.word.auto")}` : "",
       levels: x.side === "tileset" ? (x.levels ? t(/–/.test(x.levels) ? "alt.levels" : "alt.level", { l: x.levels }) : "…") : x.levels || "…" }),
-    onAltLine: () => refreshViewerBar(win),
+    // p.2 · the container's tileset drawn (its line changes as its tiles come):
+    // the framing follows it as it follows the models' files
+    onAltLine: () => {
+      if (!slot.events.some((e) => e.what === "tiles")) slot.events.push({ t: Math.round(performance.now() - slot.t0), what: "tiles" });
+      vwFrameArrivals(win, slot);
+      refreshViewerBar(win);
+    },
     nav: () => {
       const v = getSettings().viewer;
       const seen = middleSeen();
@@ -32223,8 +32246,22 @@ function vwScene(win: Win, stage: HTMLElement, target: ViewerTarget, preview: Vw
         middleSeen: seen, leftSelects: false, leftPans: v.leftDrag === "pan", invertTrackpadOrbit: !!v.invertTrackpadOrbit };
     },
     onMiddleSeen: () => setMiddleSeen(),
-    // a click on a model selects it (the Inspector follows); the pin keeps the document
-    onPick: (k) => { if (k?.startsWith("rm:") && !k.startsWith("rm:preview:")) { select(k.slice(3)); refreshInspector(); } },
+    // MICRO-VIEWER-SPAZIO-EMTREE p.2 · the plain click is the annotation
+    // tools'; Alt + click selects the mesh (the Inspector follows) and the
+    // Viewer stays on its document (`viewerNodeOf`); the double click only moves
+    plainPicks: false,
+    onPick: (k) => {
+      if (!k?.startsWith("rm:") || k.startsWith("rm:preview:")) return;
+      vwSelBeforePick = selectedId;
+      select(k.slice(3)); refreshInspector();
+    },
+    onPickUndo: () => { if (selectedId !== vwSelBeforePick) { select(vwSelBeforePick); refreshInspector(); } },
+    onKeyAction: (a) => {
+      if (a !== "sidebar") return false;
+      setWinCurrent(win, "viewer.np", winCurrent(win, "viewer.np") === true ? null : true);
+      renderViewer();
+      return true;
+    },
     onNotice: (text) => toast(text),
     // the threshold of the Preferences, as the Space: a single file over it (no
     // lighter version to start from) is asked, with its tileset proposed
@@ -32247,16 +32284,21 @@ function vwScene(win: Win, stage: HTMLElement, target: ViewerTarget, preview: Vw
     onMark: (id) => { select(id); refreshInspector(); },
   });
   viewerScenes.set(win.id, slot);
-  slot.handle.update(vwSceneItems(slot));
-  slot.events.push({ t: 0, what: "light" });
+  const items0 = vwSceneItems(slot);
+  slot.sig = vwItemsSig(items0);
+  slot.handle.update(items0);
+  slot.events.push({ t: 0, what: `choice:${slot.choice ?? "none"}` });
   return slot;
 }
 
-/** Every model of the light step has been drawn (its file arrived and was counted). */
+/** Every model file of the version shown has been drawn (it arrived and was
+ *  counted), and the tileset chosen has drawn its first tiles. */
 function vwLightDrawn(s: VwScene): boolean {
-  const want = [...s.plan.light].map(([id, v]) => s.ladders.get(id)?.find((x) => x.id === v.id)?.url).filter(Boolean) as string[];
+  const items = vwSceneItems(s);
+  const want = items.filter((i) => !i.tiles && i.url).map((i) => i.url!);
   const got = new Set(s.events.filter((e) => e.what === "drawn").map((e) => e.url));
-  return want.length > 0 && want.every((u) => got.has(u));
+  const tiles = !items.some((i) => i.tiles) || s.events.some((e) => e.what === "tiles");
+  return (want.length > 0 || items.some((i) => i.tiles)) && tiles && want.every((u) => got.has(u));
 }
 
 /** Parte 3 · the whole content framed at the opening — Shift+C, as the Space —
@@ -32274,31 +32316,44 @@ function vwFrameArrivals(win: Win, s: VwScene): void {
     const now = s.handle.camera();
     if (s.framedCam && now && JSON.stringify(now) !== s.framedCam) { s.userMoved = true; return; }
     vwFrameOnce(win, s, true);
+    // MICRO-VIEWER-SPAZIO-EMTREE p.2 · a tileset's first tiles come after its
+    // line says so: nothing drawn yet, try again shortly (measured: D.01's
+    // tileset left unframed in a corner)
+    if (!s.framed) { if ((s.frameTries = (s.frameTries ?? 0) + 1) <= 30) setTimeout(() => vwFrameArrivals(win, s), 400); return; }
     // the camera as framed: a different one later is the person's
     setTimeout(() => { const c = s.handle.camera(); s.framedCam = c ? JSON.stringify(c) : null; }, 400);
     if (vwLightDrawn(s)) s.userMoved = true;   // complete: the view is the person's from here
   }, 200);
 }
 
-/** The ladders of the scene's models and the plan (the threshold: the
- *  Preferences' «whole file» one, over the document's models summed). */
-function vwWeigh(s: VwScene, sp: Space): void {
+/** The ladders of the scene's models and its «Versioni» (the threshold: the
+ *  Preferences' «whole file» one, over the document's models summed: a level
+ *  over it is marked, and loaded only when chosen). The choice already made in
+ *  this window for this scene stays; otherwise the default (the tileset, else
+ *  the lightest). */
+function vwWeigh(s: VwScene, sp: Space, winId?: string): void {
   s.ladders = new Map();
   for (const id of s.models) { const rm = sp.rms.find((r) => r.id === id); if (rm) s.ladders.set(id, vwLadderOf(rm)); }
-  s.plan = scenePlan(s.ladders as Map<string, WeighedVersion[]>, getSettings().viewer.lodLimitMB * 1024 * 1024);
+  const tilesets = spaceAlternatives(sp).filter((a) => s.groups.includes(a.group)).map((a) => {
+    const tr = sp.rms.find((r) => r.id === a.tileset);
+    return { group: a.group, name: sp.rmGroups.get(a.group)?.name ?? tr?.name ?? a.group, bytes: tr?.resource?.bytes ?? null, covers: a.covered.length };
+  });
+  const { choices, def } = versionChoices(s.ladders as Map<string, WeighedVersion[]>, tilesets, getSettings().viewer.lodLimitMB * 1024 * 1024);
+  s.choices = choices;
+  const kept = winId ? viewerChoice.get(`${winId}|${s.key}`) : undefined;
+  s.choice = [kept, s.choice].find((c) => c && choices.some((x) => x.key === c)) ?? def;
 }
 
-/** Parte 2 · the high version after the pause — only if this window still shows
- *  this document, nothing was forced, and there is something higher to load. */
-function vwArmHigh(win: Win, s: VwScene): void {
-  if (!s.plan.hasHigh || s.step === "high" || s.forced) { if (!s.plan.hasHigh) highLoaderOf(win).cancel(); return; }
-  highLoaderOf(win).arm(s.key, () => {
-    if (viewerScenes.get(win.id) !== s || s.forced) return;
-    s.step = "high";
-    s.events.push({ t: Math.round(performance.now() - s.t0), what: "high" });
-    s.handle.update(vwSceneItems(s));
-    refreshViewerBar(win);
-  });
+/** p.2 · a version chosen by hand («Versioni», the bar or the side panel): drawn, remembered */
+function vwChoose(win: Win, s: VwScene, key: string): void {
+  if (s.choice === key || !s.choices.some((c) => c.key === key)) return;
+  s.choice = key;
+  viewerChoice.set(`${win.id}|${s.key}`, key);
+  s.events.push({ t: Math.round(performance.now() - s.t0), what: `choice:${key}` });
+  const items = vwSceneItems(s);
+  s.sig = vwItemsSig(items);
+  s.handle.update(items);
+  renderViewer();
 }
 
 // Parte 4 · Enter closes a polyline traced on a document's model (a double
@@ -32322,7 +32377,7 @@ document.addEventListener("keydown", (e) => {
  *  the scene's own `centreScene` (the median of the boxes, most of them in view). */
 function vwFrameOnce(win: Win, s: VwScene, again = false): void {
   if ((s.framed && !again) || viewerScenes.get(win.id) !== s) return;
-  if (s.handle.centreScene()) {
+  if (s.handle.centreScene(true)) {
     s.framed = true;
     s.events.push({ t: Math.round(performance.now() - s.t0), what: "framed" });
   }
@@ -32394,7 +32449,6 @@ function renderNodeViewer(win: Win, stage: HTMLElement, caption: HTMLElement, ba
   bar.appendChild(keep);
   if (!target || target.kind === "none") {
     disposeViewerScene(win.id);
-    highLoaderOf(win).cancel();
     const n = nodeId ? st.node(nodeId) : null;
     // a node with a file of its own the Viewer always showed (a shelf entry…): the collection
     if (n && viewerSourceOf(n)) return false;
@@ -32434,7 +32488,6 @@ function renderNodeViewer(win: Win, stage: HTMLElement, caption: HTMLElement, ba
   }
   if (!items.length) {
     disposeViewerScene(win.id);
-    highLoaderOf(win).cancel();
     stage.appendChild(viewerEmpty(t("vw.noMedia", { name: name(target.id) })));
     return true;
   }
@@ -32460,11 +32513,11 @@ function renderNodeViewer(win: Win, stage: HTMLElement, caption: HTMLElement, ba
     // tracing: a click on a mark's name is a vertex like any other, not a pick
     s.host.classList.toggle("tracing", !!s.trace.tool);
     vwSceneBar(win, bar, s);
+    vwSidePanel(win, s);
     caption.textContent = target.models.length ? t("vw.cap.scene", { n: String(target.models.length) }) : (p3?.name ?? "");
     return true;
   }
   disposeViewerScene(win.id);
-  highLoaderOf(win).cancel();
   vwPartStage(win, stage, bar, target, item.part);
   caption.textContent = `${item.part.name} · ${t(`vw.via.${item.part.via}`, { x: item.part.through ? name(item.part.through) : "" })}`;
   return true;
@@ -32477,41 +32530,24 @@ function vwSceneBar(win: Win, bar: HTMLElement, s: VwScene): void {
   seen.className = "vw-seen";
   seen.dataset.vwSeen = "1";
   seen.textContent = vwSeenLine(s);
-  seen.title = t("vw.seenTitle", { s: String(viewerHighDelayMs() / 1000), lim: String(getSettings().viewer.lodLimitMB) });
+  seen.title = t("vw.seenTitle", { lim: String(getSettings().viewer.lodLimitMB) });
   bar.appendChild(seen);
-  // the selector: «automatica» (light, then high), or one level for every model
-  const labels: Array<{ label: string; bytes: number; origin: string }> = [];
-  for (const l of s.ladders.values()) for (const v of l) {
-    const x = labels.find((y) => y.label === v.label);
-    if (x) x.bytes += v.bytes ?? 0; else labels.push({ label: v.label, bytes: v.bytes ?? 0, origin: v.origin });
-  }
-  if (labels.length > 1) {
+  // MICRO-VIEWER-SPAZIO-EMTREE p.2 · «Versioni»: the tileset, the levels from the
+  // lightest, weight and kind; the side panel's tab is the same list
+  if (s.choices.length > 1) {
+    const lab = document.createElement("label");
+    lab.className = "vw-versions-l";
+    lab.textContent = t("vw.versions");
     const sel = document.createElement("select");
-    sel.className = "vw-force";
-    sel.dataset.vwForce = "1";
-    sel.setAttribute("aria-label", t("vw.forceTitle"));
-    sel.title = t("vw.forceTitle");
-    sel.appendChild(Object.assign(document.createElement("option"), { value: "", textContent: t("vw.forceAuto"), selected: !s.forced }));
-    for (const l of labels.sort((a, b) => a.bytes - b.bytes))
-      sel.appendChild(Object.assign(document.createElement("option"), { value: l.label, selected: s.forced === l.label,
-        textContent: [l.origin === "author" ? t("vw.ofAuthor", { l: l.label }) : l.label, l.bytes ? mbOf(l.bytes) : ""].filter(Boolean).join(" · ") }));
+    sel.className = "vw-versions";
+    sel.dataset.vwVersions = "1";
+    sel.title = t("vw.versionsTitle", { lim: String(getSettings().viewer.lodLimitMB) });
+    for (const c of s.choices)
+      sel.appendChild(Object.assign(document.createElement("option"), { value: c.key, selected: s.choice === c.key, textContent: vwChoiceWords(c) }));
     sel.addEventListener("pointerdown", (e) => e.stopPropagation());
-    sel.addEventListener("change", (e) => {
-      e.stopPropagation();
-      s.forced = sel.value || null;
-      if (s.forced) highLoaderOf(win).cancel();
-      s.events.push({ t: Math.round(performance.now() - s.t0), what: `forced:${s.forced ?? "auto"}` });
-      s.handle.update(vwSceneItems(s));
-      refreshViewerBar(win);
-    });
-    bar.appendChild(sel);
-  }
-  if (s.plan.heavier && !s.forced && s.step === "high") {
-    const h = document.createElement("span");
-    h.className = "vw-heavier";
-    h.dataset.vwHeavier = "1";
-    h.textContent = t("vw.heavier", { l: s.plan.heavier.label, w: mbOf(s.plan.heavier.bytes), lim: String(getSettings().viewer.lodLimitMB) });
-    bar.appendChild(h);
+    sel.addEventListener("change", (e) => { e.stopPropagation(); vwChoose(win, s, sel.value); });
+    lab.appendChild(sel);
+    bar.appendChild(lab);
   }
   const alt = document.createElement("span");
   alt.className = "vw-alt";
@@ -32546,6 +32582,87 @@ function vwSceneBar(win: Win, bar: HTMLElement, s: VwScene): void {
   tr.dataset.vwTrace = "1";
   tr.textContent = vwTraceWords(s);
   bar.appendChild(tr);
+}
+/** MICRO-VIEWER-SPAZIO-EMTREE p.2 · the Viewer's side panel (N, or its triangle):
+ *  the tab «Versioni» — the bar's list, as radio buttons, from the same source —
+ *  and what can be done with that model. Over the scene's right edge. */
+function vwSidePanel(win: Win, s: VwScene): void {
+  s.host.querySelector(".vw-np")?.remove();
+  s.host.querySelector(".vw-np-tab")?.remove();
+  const open = winCurrent(win, "viewer.np") === true;
+  const tab = document.createElement("button");
+  tab.type = "button";
+  tab.className = "vw-np-tab scn-ntab";
+  tab.dataset.vwNpTab = "1";
+  tab.textContent = "◂";
+  tab.title = t("vw.npOpen");
+  tab.setAttribute("aria-label", t("vw.npOpen"));
+  tab.classList.toggle("hidden", open);
+  for (const ev of ["pointerdown", "dblclick", "wheel"]) tab.addEventListener(ev, (e) => e.stopPropagation());
+  tab.addEventListener("click", (e) => { e.stopPropagation(); setWinCurrent(win, "viewer.np", true); renderViewer(); });
+  s.host.appendChild(tab);
+  if (!open) return;
+  const np = document.createElement("div");
+  np.className = "vw-np";
+  np.dataset.vwNp = "1";
+  for (const ev of ["pointerdown", "dblclick", "wheel", "contextmenu"]) np.addEventListener(ev, (e) => e.stopPropagation());
+  const tabs = document.createElement("div");
+  tabs.className = "np-tabs";
+  const t1 = document.createElement("button");
+  t1.type = "button";
+  t1.textContent = t("vw.versions");
+  t1.setAttribute("aria-pressed", "true");
+  const close = document.createElement("button");
+  close.type = "button";
+  close.className = "vw-np-close";
+  close.textContent = "▸";
+  close.title = t("vw.npClose");
+  close.setAttribute("aria-label", t("vw.npClose"));
+  close.addEventListener("click", (e) => { e.stopPropagation(); setWinCurrent(win, "viewer.np", null); renderViewer(); });
+  tabs.append(t1, close);
+  np.appendChild(tabs);
+  const list = document.createElement("div");
+  list.className = "vw-np-list";
+  list.setAttribute("role", "radiogroup");
+  list.setAttribute("aria-label", t("vw.versions"));
+  const name = `vw-ver-${win.id}`;
+  for (const c of s.choices) {
+    const row = document.createElement("label");
+    row.className = "vw-np-row" + (c.over ? " over" : "");
+    const r = document.createElement("input");
+    r.type = "radio";
+    r.name = name;
+    r.value = c.key;
+    r.checked = s.choice === c.key;
+    r.dataset.vwChoice = c.key;
+    r.addEventListener("change", () => vwChoose(win, s, c.key));
+    const words = document.createElement("span");
+    words.textContent = vwChoiceWords(c);
+    words.title = words.textContent;
+    row.append(r, words);
+    list.appendChild(row);
+  }
+  if (!s.choices.length) list.appendChild(Object.assign(document.createElement("p"), { className: "chain-note", textContent: t("vw.noVersions") }));
+  np.appendChild(list);
+  // what can be done with that model
+  const acts = document.createElement("div");
+  acts.className = "vw-np-acts";
+  const act = (label: string, key: string, run: () => void, disabled = false) => {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "insp-btn";
+    b.textContent = label;
+    b.dataset.vwNpAct = key;
+    b.disabled = disabled;
+    b.addEventListener("click", (e) => { e.stopPropagation(); run(); });
+    acts.appendChild(b);
+  };
+  act(t("vw.fitTitle"), "frame", () => { s.handle.centreScene(); });
+  act(t("vw.npInMatrix"), "matrix", () => { if (s.docId) jumpTo(s.docId); }, !s.docId);
+  act(t("vw.npInSpace"), "space", () => { const id = s.models[0]; if (id) openUnitInSpace(id); }, !s.models.length);
+  for (const g of s.groups) act(t("vw.npSelectGroup", { g: String(store?.node(g)?.name ?? g) }), `group:${g}`, () => { select(g); refreshInspector(); });
+  np.appendChild(acts);
+  s.host.appendChild(np);
 }
 const VW_TOOL_GLYPH: Record<Viewer3dTool, string> = { elevation: "⌖", impost: "⊤", plane3: "◿", planeFace: "▱", line: "╱", polyline: "〰" };
 
@@ -32693,7 +32810,6 @@ function renderViewerInto(win: Win, stage: HTMLElement, caption: HTMLElement,
     bar.classList.remove("vw-bar");
   } else {
     disposeViewerScene(win.id);
-    highLoaderOf(win).cancel();
     bar.classList.remove("vw-bar");
   }
   const key = viewerKeyOf(win);
@@ -33535,8 +33651,9 @@ function buildAreaHeader(win: Win): DocumentFragment {
   }
   // MICRO-PULIZIA p.2 · what the panel is, as a «?» in its header, not a paragraph
   if (type === "emtree") frag.appendChild(helpMark(t("emtree.intro")));
-  // MICRO-VIEWER-SPAZIO-EMTREE p.1 · the clicks of the 3D, said where the 3D is
+  // MICRO-VIEWER-SPAZIO-EMTREE p.1–2 · the clicks of the 3D, said where the 3D is
   if (type === "scene") { const q = helpMark(t("s3.gestures")); q.dataset.gestures = "space"; frag.appendChild(q); }
+  if (type === "viewer") { const q = helpMark(t("vw.gestures")); q.dataset.gestures = "viewer"; frag.appendChild(q); }
   if (type === "graph") {
     // MICRO-PULIZIA p.4 · the «+» left the bar: «Aggiungi» is ⇧A and Tools ▸
     // Add node… (the same menu, at the cursor)

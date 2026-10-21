@@ -108,6 +108,24 @@ that asked for one.
 - `scripts/check-space-views.mjs` (101), `scripts/check-implicit-pd.mjs` (30).
 
 ### Changed
+- **The Viewer draws one version, and only E.D. climbs** (MICRO-VIEWER-
+  SPAZIO-EMTREE p.2, 21 October 2026; `viewer-node.ts`, `main.ts`). E.D. on
+  dev.54: «dopo 2 s partiva la grande e rallentava tutta l'interfaccia». The
+  pause and its loader are gone, and its parameter in the Preferences: the
+  Viewer loads the container's TILESET when the document has one (it joins
+  the high and the low resolution, the best way to work on it), else the
+  lightest level. «Versioni» in the Viewer's bar and the tab «Versioni» of its
+  side panel (N, or the ◂ on its edge) are one list from one source: the
+  tileset, then the levels from the lightest with their weight and kind
+  (author's level, derived), a level over the threshold marked and loaded only
+  when chosen; the panel also frames, shows the document in the Matrix, opens
+  it in the Space, selects the container. The gestures are the Space's: the
+  double click only moves; Alt + click selects the mesh and the Viewer stays
+  on its whole document; the plain click is the annotation tools'. Measured
+  on the way: the Viewer never redrew when the bridge's address arrived after
+  its first drawing (no change of the Space), so a tileset stayed a label —
+  the scene is now handed again whenever a file's address or state changes,
+  and the framing tries again until the first tiles are drawn. VU1, VU2, VS2.
 - **The clicks of the Space, as E.D. meant them from the start** (MICRO-VIEWER-
   SPAZIO-EMTREE p.1, 21 October 2026; `space-nav.ts`, `space-selection.ts`,
   `scene3d.ts`). A click selects the PROXY under the cursor (a sketch too),

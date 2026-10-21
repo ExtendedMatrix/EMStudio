@@ -9946,9 +9946,21 @@ tr.tt-hidden { display: none; }
 .vw-title { font-weight: 600; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 40%; }
 .vw-source { color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; flex: 1 1 120px; }
 .vw-seen { font-family: var(--mono, ui-monospace, monospace); color: var(--text); }
-.vw-heavier { color: var(--warn, #9a6a00); }
 .vw-alt:empty { display: none; }
-.vw-force { font-size: 11px; max-width: 220px; }
+/* MICRO-VIEWER-SPAZIO-EMTREE p.2 · «Versioni» in the bar, and the side panel's tab */
+.vw-versions-l { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; color: var(--text-muted); white-space: nowrap; }
+.vw-versions { font-size: 11px; max-width: 260px; }
+.vw-np-tab { top: 40%; }
+.vw-np { position: absolute; top: 0; right: 0; bottom: 0; width: min(260px, 70%); z-index: 5; display: flex; flex-direction: column;
+  border-left: 1px solid var(--border); background: var(--bg-panel); font-size: 0.76rem; overflow: auto; }
+.vw-np .np-tabs { display: flex; gap: 2px; padding: 6px 8px 0; border-bottom: 1px solid var(--border); }
+.vw-np .np-tabs button { border: 1px solid var(--border); border-bottom: 0; border-radius: 6px 6px 0 0; background: var(--bg-panel-2, var(--bg-panel)); color: var(--text); padding: 3px 10px; font: inherit; font-weight: 600; }
+.vw-np .np-tabs .vw-np-close { margin-left: auto; border: 0; background: none; font-weight: 400; }
+.vw-np-list { display: flex; flex-direction: column; gap: 2px; padding: 8px 10px; border-bottom: 1px solid var(--border); }
+.vw-np-row { display: flex; align-items: center; gap: 6px; min-width: 0; cursor: pointer; }
+.vw-np-row > span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.vw-np-row.over > span { color: var(--warn, #9a6a00); }
+.vw-np-acts { display: flex; flex-direction: column; align-items: stretch; gap: 4px; padding: 8px 10px; }
 .vw-tools { display: inline-flex; flex-wrap: wrap; gap: 4px; }
 .vw-scene { position: absolute; inset: 0; min-height: 0; }
 .viewer-stage:has(> .vw-scene) { position: relative; padding: 0; }
