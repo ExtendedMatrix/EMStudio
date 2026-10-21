@@ -32499,6 +32499,36 @@ function renderNodeViewer(win: Win, stage: HTMLElement, caption: HTMLElement, ba
     stage.appendChild(viewerEmpty(t("vw.noMedia", { name: name(target.id) })));
     return true;
   }
+  // MICRO-VIEWER-SPAZIO-EMTREE p.5 · a document that groups several images:
+  // the Gallery lays them out, a click opens one in Single
+  const imgs = items.map((it, i) => ({ it, i })).filter((x) => x.it.kind === "part" && x.it.part.medium === "image");
+  if (winModeOf(win) === "gallery" && imgs.length > 1) {
+    disposeViewerScene(win.id);
+    const grid = document.createElement("div");
+    grid.className = "viewer-gallery";
+    grid.dataset.vwGallery = target.id;
+    for (const { it, i } of imgs) {
+      if (it.kind !== "part") continue;
+      const cell = document.createElement("button");
+      cell.type = "button";
+      cell.className = "viewer-thumb";
+      cell.title = it.part.name;
+      const url = vwPartUrl(it.part);
+      const img = document.createElement("img");
+      img.alt = it.part.name;
+      img.loading = "lazy";
+      if (url) img.src = signedImageUrl(url) ?? url;
+      const label = document.createElement("span");
+      label.className = "viewer-thumb-label";
+      label.textContent = it.part.name;
+      cell.append(img, label);
+      cell.addEventListener("click", () => { setWinCurrent(win, "item", i === 0 ? null : i); setWinModeOf(win, "single"); renderViewer(); renderAreaHeaders(); });
+      grid.appendChild(cell);
+    }
+    stage.appendChild(grid);
+    caption.textContent = `${name(target.id)} — ${imgs.length}`;
+    return true;
+  }
   const index = Math.min(viewerIndex(win), items.length - 1);
   if (items.length > 1) {
     const prev = vwButton("viewer-nav", "‹", t("vw.prev"), () => setViewerIndex(win, index - 1));
@@ -32829,6 +32859,7 @@ function renderViewerInto(win: Win, stage: HTMLElement, caption: HTMLElement,
   caption.textContent = "";
   bar.classList.add("hidden");
 
+  vwSyncModes(win);
   // MICRO-VIEWER-UNICO · no collection dropped on it: the Viewer of ONE node
   const dropped = winCurrent(win, "collection");
   if (!dropped) {
@@ -32944,6 +32975,7 @@ function drawViewerCollection(
   bar: HTMLElement,
 ): void {
   stage.textContent = "";
+  vwSyncModes(win);
   if (!collection.items.length) {
     const box = viewerEmpty(t("viewer.emptyCollection", { name: collection.title }));
     if (collection.note) {
@@ -32956,7 +32988,7 @@ function drawViewerCollection(
     return;
   }
 
-  if (winModeOf(win) === "gallery") {
+  if (winModeOf(win) === "gallery" && collection.items.filter((i) => i.kind === "image").length > 1) {
     stage.appendChild(viewerGallery(win, collection));
     caption.textContent = collection.note
       ? `${collection.title} — ${collection.items.length} · ${collection.note}`
@@ -33904,6 +33936,31 @@ function transformWindowOf(win: Win, type: WindowType): void {
   renderTiles();   // the area re-surfaces itself, and the wrap re-mounts if it
 }                  // was this window that held it
 
+/** MICRO-VIEWER-SPAZIO-EMTREE p.5 · how many images the Viewer of `win` could
+ *  lay out as a Gallery: a collection dropped on it (a folder of the disk, the
+ *  Shelf) or read from a node's file counts its images — a folder still being
+ *  read counts as many; a node's Viewer counts the images of what it shows.
+ *  Single / Gallery is offered from two up: a 3D document, a PDF, a single
+ *  image has nothing to lay out. */
+function viewerImageCount(win: Win): number {
+  const cached = viewerCollections.get(win.id)?.value;
+  const images = (c: Collection) => c.items.filter((i) => i.kind === "image").length;
+  if (winCurrent(win, "collection")) return cached ? images(cached) : Infinity;
+  const target = store ? viewerTargetOf(store.doc.graph, viewerNodeOf(win)) : null;
+  if (target && target.kind !== "none") return target.parts.filter((p) => p.medium === "image").length;
+  // a node with a file of its own (a shelf entry…): the collection read from it
+  return cached ? images(cached) : 0;
+}
+/** …and the header follows when that changes (another node selected, a folder read) */
+const viewerGalleryOffered = new Map<string, boolean>();
+function vwSyncModes(win: Win): void {
+  const on = viewerImageCount(win) >= 2;
+  if (viewerGalleryOffered.get(win.id) === on) return;
+  const first = !viewerGalleryOffered.has(win.id);
+  viewerGalleryOffered.set(win.id, on);
+  if (!first) queueMicrotask(() => renderAreaHeaders());
+}
+
 /**
  * The MODES a window offers in its header, or null when it has none.
  *
@@ -33935,6 +33992,8 @@ function headerModesOf(win: Win): {
   // is one entry in `WINDOW_MODES` and appears here without a branch of its own.
   // (Graph keeps its own arm above because changing its mode also re-mounts a
   // canvas projection; Tabular's "mode" is a sheet, which is not window state.)
+  // MICRO-VIEWER-SPAZIO-EMTREE p.5 · Single / Gallery only where there are images to lay out
+  if (win.type === "viewer" && viewerImageCount(win) < 2) return null;
   if (winModes(win.type).length) {
     const cur = winModeOf(win);
     return {

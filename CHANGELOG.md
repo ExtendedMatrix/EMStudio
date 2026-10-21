@@ -118,6 +118,14 @@ that asked for one.
   objects; the frame rate is 60 FPS with it on and off. VS4.
 
 ### Changed
+- **Single / Gallery only where there are images to lay out** (MICRO-VIEWER-
+  SPAZIO-EMTREE p.5). The Viewer's header offers the two modes only when what
+  it shows groups two images or more: a folder of the disk, the Shelf, or a
+  document with several images (D.11 of Templu Mare: its own and those of its
+  extractors). A 3D document, a PDF, a single image has no selector; the
+  header follows the selection. A document's Gallery lays its images out and
+  a click opens one in Single — before, Gallery did nothing on a document.
+  VS5.
 - **A PDF in the Viewer keeps its tools, off, and says why** (MICRO-VIEWER-
   SPAZIO-EMTREE p.3). E.D. on dev.54 saw no annotation tool in the Viewer.
   Measured on all 55 documents of Templu Mare v3.3, in Fonti and in a Viewer

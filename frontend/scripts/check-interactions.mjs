@@ -7180,6 +7180,32 @@ test("VS4.stats", "VIEWER-SPAZIO-EMTREE p.4 · «Statistiche» fra le sovrapposi
   return { pass, detail: { ...r, viewer: r.viewer && { on: r.viewer.on, text: r.viewer.text }, viewerOff: r.viewerOff && { on: r.viewerOff.on }, errors } };
 });
 
+test("VS5.gallery", "VIEWER-SPAZIO-EMTREE p.5 · Singola/Gallery solo dove ci sono più immagini: non per D.01 (3D), D.05 (PDF), D.08 (una immagine); sì per D.11 (tre immagini), dove Gallery le dispone e un clic ne apre una in Singola", async () => {
+  const { p, ctx, errors } = await openV33();
+  await p.click(`#workspace-bar .ws-tab[data-ws="provenance"]`); await p.waitForTimeout(1000);
+  const w = await p.evaluate(() => window.__EM_DRAG__.wins().find((x) => x.type === "viewer")?.id);
+  const bar = `.tile-area[data-win="${w}"] .tile-bar`;
+  const modes = () => p.evaluate((b) => [...document.querySelectorAll(`${b} button`)].map((x) => x.textContent.trim()).filter((x) => /^(Singola|Gallery)$/.test(x)), bar);
+  const r = {};
+  for (const n of ["D.01", "D.05", "D.08", "D.11"]) { await p.evaluate((d) => window.__EM_DRAG__.select(d), await v33Id(p, n)); await p.waitForTimeout(1200); r[n] = await modes(); }
+  // D.11: the Gallery, then one of its images
+  await p.evaluate((b) => [...document.querySelectorAll(`${b} button`)].find((x) => x.textContent.trim() === "Gallery")?.click(), bar);
+  await p.waitForTimeout(800);
+  r.thumbs = await p.evaluate((x) => document.querySelectorAll(`.tile-area[data-win="${x}"] [data-vw-gallery] .viewer-thumb`).length, w);
+  await p.screenshot({ path: SHOT("vs5-d11-gallery") }).catch(() => {});
+  await p.evaluate((x) => document.querySelectorAll(`.tile-area[data-win="${x}"] [data-vw-gallery] .viewer-thumb`)[1]?.click(), w);
+  await p.waitForTimeout(800);
+  r.after = await p.evaluate((x) => window.__EM_DRAG__.viewerState(x)?.bar?.pos ?? null, w);
+  r.modeAfter = await p.evaluate((b) => [...document.querySelectorAll(`${b} button`)].find((x) => /Singola/.test(x.textContent) )?.getAttribute("aria-pressed") ?? document.querySelector(`${b} .on, ${b} [aria-current]`)?.textContent ?? null, bar);
+  // back to a 3D document: the selector goes again
+  await p.evaluate((d) => window.__EM_DRAG__.select(d), await v33Id(p, "D.01")); await p.waitForTimeout(1200);
+  r.backD01 = await modes();
+  await ctx.close();
+  const pass = !r["D.01"].length && !r["D.05"].length && !r["D.08"].length && r["D.11"].join() === "Singola,Gallery"
+    && r.thumbs >= 2 && r.after === "2/3" && !r.backD01.length && !errors.length;
+  return { pass, detail: { ...r, errors } };
+});
+
 test("VU3.quota", "VIEWER-UNICO p.4 · un punto quota sul 3D di D.01 crea l'estrattore del documento (coordinate del documento, il valore letto), il segno nella scena, la riga in «Estrazioni da questo documento»; «Interpretazione» lo collega a una proprietà; un annulla per gesto", async () => {
   const { p, ctx, errors } = await openV33();
   const w = await viewerIn(p, "outliner");
