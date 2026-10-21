@@ -25573,6 +25573,8 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
     requestAnimationFrame(() => { npQueued = false; if (space3dPrefs().nShown) renderSpaceNPanel(npanel, win, handle); });
   };
   npanelRenderers.set(win.id, drawNPanel);
+  /** the selection before the last click's pick (a slow double click restores it) */
+  let selBeforePick: SpaceSel | null = null;
   const handle = mountSpaceScene(host, {
     texts: {
       loading: t("space.loading"), noEngine: t("em3d.noEngine"),
@@ -25622,7 +25624,10 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
     onMiddleSeen: () => setMiddleSeen(),
     onBoxSelect: (keys, extend) => setSpaceSel(boxSelect(spaceSel(), keys, extend)),
     // MICRO-SPAZIO-3D-3 · a click: Blender's rule on the one selection
-    onPick: (key, shift) => setSpaceSel(clickScene(spaceSel(), key, shift)),
+    // (MICRO-VIEWER-SPAZIO-EMTREE p.1: the proxy; Alt + click the mesh)
+    onPick: (key, shift) => { selBeforePick = spaceSel(); setSpaceSel(clickScene(spaceSel(), key, shift)); },
+    // …and a slow double click gives the selection back: it only moves the view
+    onPickUndo: () => { if (selBeforePick) setSpaceSel(selBeforePick); selBeforePick = null; },
     onNotice: (text) => toast(text),
     onView: () => drawNPanel(),
     onCursor: () => drawNPanel(),
@@ -33530,6 +33535,8 @@ function buildAreaHeader(win: Win): DocumentFragment {
   }
   // MICRO-PULIZIA p.2 · what the panel is, as a «?» in its header, not a paragraph
   if (type === "emtree") frag.appendChild(helpMark(t("emtree.intro")));
+  // MICRO-VIEWER-SPAZIO-EMTREE p.1 · the clicks of the 3D, said where the 3D is
+  if (type === "scene") { const q = helpMark(t("s3.gestures")); q.dataset.gestures = "space"; frag.appendChild(q); }
   if (type === "graph") {
     // MICRO-PULIZIA p.4 · the «+» left the bar: «Aggiungi» is ⇧A and Tools ▸
     // Add node… (the same menu, at the cursor)

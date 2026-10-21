@@ -134,30 +134,33 @@ export function isMacPlatform(nav: { platform?: string; userAgent?: string } | u
 }
 
 /**
- * The table of the clicks. The MODEL key is ⌘ on a Mac, Ctrl elsewhere: on a
- * Mac Ctrl + click IS the right click (WebKit and Chrome deliver it as a
- * `contextmenu`, with `button` 0 and `ctrlKey`), so it opens the proxy's menu
- * like any right click.
+ * The table of the clicks. On a Mac Ctrl + click IS the right click (WebKit
+ * and Chrome deliver it as a `contextmenu`, with `button` 0 and `ctrlKey`), so
+ * it opens the proxy's menu like any right click.
  *
  * | press                         | Mac          | Windows / Linux |
  * |-------------------------------|--------------|-----------------|
  * | left                          | pick-proxy   | pick-proxy      |
+ * | left + Alt                    | pick-rm      | pick-rm         |
  * | left + ⌘ (Mac) / Ctrl         | pick-rm      | pick-rm         |
  * | left + Ctrl (Mac)             | menu-proxy   | —               |
  * | right                         | menu-proxy   | menu-proxy      |
  * | right + ⌘ (Mac) / Ctrl        | menu-rm      | menu-rm         |
  * | right + Shift                 | cursor       | cursor          |
  *
- * MICRO-PROVA-DEV47 p.2 (E.D., 17 Oct 2026) · «pick-proxy» is now the plain
- * pick: the NEAREST thing under the pointer, model, proxy or sketch, as
- * Blender's (`pickUnder`, space-selection.ts); «pick-rm» the models only. The
- * menus the same: the nearest thing's menu, ⌘ (Ctrl) a model's.
+ * MICRO-VIEWER-SPAZIO-EMTREE p.1 (E.D.'s rule from the start, 21 Oct 2026) ·
+ * a click selects the PROXY under the pointer (a sketch too: it becomes one),
+ * Alt + click the MESH (the representation model, a tileset); ⌘ / Ctrl + click
+ * stays a second way to the mesh. The double click only moves the view
+ * (`detailZoom`): it picks nothing — the scene holds its first click back
+ * (`PICK_WAIT_MS`). A left drag with Alt is the orbit while «Emulate 3 button
+ * mouse» is on (`dragIntent`): a press that moves is never a click.
  */
 export function pointerIntent(e: PointerLike, mac: boolean): PointerIntent {
   const model = mac ? e.metaKey : e.ctrlKey;
   if (e.button === 0) {
     if (mac && e.ctrlKey) return model ? "menu-rm" : "menu-proxy";
-    return model ? "pick-rm" : "pick-proxy";
+    return model || e.altKey ? "pick-rm" : "pick-proxy";
   }
   if (e.button === 2) {
     if (e.shiftKey) return "cursor";
@@ -165,6 +168,14 @@ export function pointerIntent(e: PointerLike, mac: boolean): PointerIntent {
   }
   return "none";
 }
+
+/** MICRO-VIEWER-SPAZIO-EMTREE p.1 · how long a click waits before it picks: a
+ *  second press on the same spot within it makes a double click, which moves
+ *  the view and picks nothing. A slower double click (the system's interval is
+ *  longer) undoes the pick of its first click instead. */
+export const PICK_WAIT_MS = 250;
+/** …and the interval within which a second press on the spot is a double click's */
+export const DOUBLE_MS = 500;
 
 /** A press that moves more than this is a drag (an orbit, a pan), not a click —
  *  the graph's threshold. */

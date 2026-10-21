@@ -89,5 +89,10 @@ eq(S.pickUnder(H, { x: 40, y: 12 }, { x: 10, y: 10, key: "rm:Tetto" }, false), "
 eq(S.pickUnder([{ kind: "rm", id: "M", distance: 10 }, { kind: "proxy", id: "U", distance: 10.004 }, { kind: "sketch", id: "s", distance: 10.008 }], { x: 0, y: 0 }, null, false),
   "sketch:s", "surfaces within 1 cm: sketch, then proxy, then model");
 eq(S.pickUnder([], { x: 0, y: 0 }, null, false), null, "nothing under the pointer: nothing");
+// MICRO-VIEWER-SPAZIO-EMTREE p.1 · the plain click: the proxy under the pointer, even behind the roof
+eq(S.pickUnder(H, { x: 10, y: 10 }, null, "proxy"), "proxy:USV149", "a click: the proxy, not the model in front of it");
+eq(S.pickUnder([{ kind: "rm", id: "M", distance: 10 }], { x: 0, y: 0 }, null, "proxy"), null, "a click on a model alone: nothing (Alt + click is the model's)");
+eq(S.pickUnder([{ kind: "rm", id: "M", distance: 9 }, { kind: "sketch", id: "s", distance: 10 }], { x: 0, y: 0 }, null, "proxy"), "sketch:s", "…a sketch is a proxy to be");
+eq(S.pickUnder([{ kind: "proxy", id: "A", distance: 5 }, { kind: "proxy", id: "B", distance: 6 }], { x: 1, y: 1 }, { x: 0, y: 0, key: "proxy:A" }, "proxy"), "proxy:B", "again on the spot: the next proxy behind");
 
 console.log(`check-space-selection: ${checks} checks, all green`);

@@ -108,6 +108,18 @@ that asked for one.
 - `scripts/check-space-views.mjs` (101), `scripts/check-implicit-pd.mjs` (30).
 
 ### Changed
+- **The clicks of the Space, as E.D. meant them from the start** (MICRO-VIEWER-
+  SPAZIO-EMTREE p.1, 21 October 2026; `space-nav.ts`, `space-selection.ts`,
+  `scene3d.ts`). A click selects the PROXY under the cursor (a sketch too),
+  even when a mesh is drawn in front of it; Alt + click selects the MESH (the
+  representation model, a tileset; ⌘ / Ctrl + click stays a second way); the
+  double click only MOVES — the centre of rotation and the zoom go to the
+  point, nothing is selected. Measured on dev.54: the click took the nearest
+  thing whatever it was, Alt was ignored, and the double click's two clicks
+  cycled to the object BEHIND before the zoom — a double click selected. Now
+  a click waits 250 ms before it picks: a second press on the spot makes it a
+  double click; a slower double click gives the selection back. The «?» in
+  the Space's header and the key map say the rule. VS1.
 - **The Doc window is gone** (MICRO-VIEWER-UNICO p.5). Its four jobs each have
   one place: the list is the Tabular's Documents sheet, the card the
   Inspector's («Scheda del documento»: title, file and its files; the code,

@@ -7269,6 +7269,73 @@ test("VU6.tables", "VIEWER-UNICO p.6 · Risorse, Interpretazioni, Combinatori ne
   return { pass, detail: { ...r, errors } };
 });
 
+// ── MICRO-VIEWER-SPAZIO-EMTREE · clicks, versions, tools, statistics, EMtree ──
+// VS1–VS3 read the Templu Mare v3.3 copy (`VIEWER_V33`, `VIEWER_BRIDGE`) as VU1–VU3.
+/** the Space on the v3.3, epoch II, framed; the first canvas point whose hit is of `kind` */
+async function spaceV33(p, epoch = "II") {
+  await p.click(`#workspace-bar .ws-tab[data-ws="space"]`);
+  await p.waitForFunction(() => document.querySelector(".scn-host")?.dataset.ready === "1", null, { timeout: 60000 });
+  const ep = await p.evaluate((pre) => [...document.querySelectorAll(".scn-seg button[data-epoch]")].find((b) => b.textContent.trim().startsWith(pre))?.dataset.epoch, epoch);
+  if (ep) await p.click(`.scn-seg button[data-epoch="${ep}"]`);
+  for (let i = 0; i < 200; i++) {
+    const n = await p.evaluate(() => (document.querySelector(".scn-host")?.__space?.() ?? []).filter((x) => x.as === "pending").length);
+    if (!n) break;
+    await p.waitForTimeout(250);
+  }
+  await p.evaluate(() => document.querySelector("[data-frame]")?.click());
+  await p.waitForTimeout(1500);
+}
+const spaceHitOf = (p, kind) => p.evaluate((k) => {
+  const h = document.querySelector(".scn-host"); const r = h.querySelector("canvas").getBoundingClientRect();
+  for (let gy = 0.3; gy <= 0.8; gy += 0.03) for (let gx = 0.25; gx <= 0.75; gx += 0.03) {
+    // whole pixels: a page event's coordinates are, and a grazing roof is a metre deep in 0.3 px
+    const x = Math.round(r.left + r.width * gx), y = Math.round(r.top + r.height * gy);
+    if (document.elementFromPoint(x, y)?.tagName !== "CANVAS") continue;
+    const hit = h.__spaceHit(x, y); if (hit && hit.kind === k) return { x, y, hit };
+  }
+  return null;
+}, kind);
+
+test("VS1.gestures", "VIEWER-SPAZIO-EMTREE p.1 · Spazio: il clic seleziona il proxy (anche sotto la mesh), Alt+clic la mesh, il doppio clic porta centro e zoom sul punto senza selezionare né isolare (rapido e lento); il «?» e la mappa dei tasti dicono la regola", async () => {
+  const { p, ctx, errors } = await openV33();
+  await spaceV33(p);
+  const sel = () => p.evaluate(() => document.querySelector(".scn-host").__spaceSelected().selected);
+  const cam = () => p.evaluate(() => document.querySelector(".scn-host").__spaceCamState());
+  const home = await cam();
+  const reset = async () => { await p.evaluate((c) => document.querySelector(".scn-host").__spaceSetCam(c), home); await p.keyboard.press("Escape"); await p.waitForTimeout(300); };
+  const r = {};
+  const px = await spaceHitOf(p, "proxy"), rm = await spaceHitOf(p, "rm");
+  // a click on the mesh in front: the proxy under it, not the mesh
+  await reset();
+  await p.mouse.click(rm.x, rm.y); await p.waitForTimeout(600);
+  r.clickOnMesh = await sel();
+  await p.mouse.move(rm.x, rm.y); await p.keyboard.press("Alt+KeyA"); await p.waitForTimeout(200);
+  await p.mouse.click(px.x, px.y); await p.waitForTimeout(600);
+  r.click = await sel();
+  await p.keyboard.down("Alt"); await p.mouse.click(rm.x, rm.y); await p.keyboard.up("Alt"); await p.waitForTimeout(600);
+  r.alt = await sel();
+  // the double click: the selection stays the mesh's, the centre goes to the point
+  const before = await sel();
+  await p.mouse.dblclick(px.x, px.y); await p.waitForTimeout(2500);
+  const c1 = await cam();
+  r.dbl = { sel: await sel(), dist: Math.hypot(...c1.target.map((v, i) => v - px.hit.point[i])), isolated: await p.evaluate(() => document.querySelector("[data-sol=isolate]")?.getAttribute("aria-pressed")) };
+  // a slow double click (the first click has already picked): undone
+  await reset();
+  await p.mouse.move(rm.x, rm.y); await p.keyboard.down("Alt"); await p.mouse.click(rm.x, rm.y); await p.keyboard.up("Alt"); await p.waitForTimeout(500);
+  const beforeSlow = await sel();
+  await p.mouse.click(px.x, px.y); await p.waitForTimeout(330);
+  await p.mouse.click(px.x, px.y, { clickCount: 2 }); await p.waitForTimeout(1000);
+  r.slow = await sel();
+  const help = await p.evaluate(() => document.querySelector("[data-gestures=space]")?.getAttribute("title") ?? null);
+  await p.screenshot({ path: SHOT("vs1-spazio-gesti") }).catch(() => {});
+  await ctx.close();
+  const pk = `proxy:${px.hit.id}`, mk = `rm:${rm.hit.id}`;
+  const pass = r.clickOnMesh.length === 1 && r.clickOnMesh[0].startsWith("proxy:") && JSON.stringify(r.click) === JSON.stringify([pk])
+    && JSON.stringify(r.alt) === JSON.stringify([mk]) && JSON.stringify(r.dbl.sel) === JSON.stringify(before) && r.dbl.dist < 0.6 && r.dbl.isolated !== "true"
+    && JSON.stringify(r.slow) === JSON.stringify(beforeSlow) && /Alt/.test(help ?? "") && !errors.length;
+  return { pass, detail: { ...r, before, beforeSlow, pk, mk, help, errors } };
+});
+
 // ── run ─────────────────────────────────────────────────────────────────────
 const chosen = cases.filter((c) => !only.length || only.includes(c.id) || only.some((o) => c.id.startsWith(o + ".")));
 for (const c of chosen) {

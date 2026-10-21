@@ -96,7 +96,9 @@ const dist = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]);
   const ev = (button, k = {}) => ({ button, ctrlKey: false, metaKey: false, shiftKey: false, altKey: false, ...k });
   const MAC = true, WIN = false;
   const table = [
+    // MICRO-VIEWER-SPAZIO-EMTREE p.1 · the click the proxy, Alt + click the mesh (⌘ / Ctrl too)
     ["left", ev(0), "pick-proxy", "pick-proxy"],
+    ["Alt + left", ev(0, { altKey: true }), "pick-rm", "pick-rm"],
     ["⌘ + left", ev(0, { metaKey: true }), "pick-rm", "pick-proxy"],
     ["Ctrl + left", ev(0, { ctrlKey: true }), "menu-proxy", "pick-rm"],
     ["right", ev(2), "menu-proxy", "menu-proxy"],
@@ -109,6 +111,7 @@ const dist = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]);
     eq(N.pointerIntent(e, MAC), mac, `Mac · ${name}`);
     eq(N.pointerIntent(e, WIN), win, `Windows/Linux · ${name}`);
   }
+  ok(N.PICK_WAIT_MS > 0 && N.PICK_WAIT_MS < N.DOUBLE_MS && N.DOUBLE_MS <= 600, "a click waits less than a double click lasts");
   ok(N.isMacPlatform({ platform: "MacIntel" }) && !N.isMacPlatform({ platform: "Win32", userAgent: "Windows NT" }), "the platform");
 }
 

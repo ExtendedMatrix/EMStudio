@@ -129,8 +129,10 @@ export function medianPoint(centres: ReadonlyArray<readonly [number, number, num
  * proxy's, ⌘ the model's»), so a click on the roof selected USV149, a proxy
  * behind it, and a model never came with a plain click.
  *
- *   · `hits` are the ray's, nearest first; `model` (⌘ on a Mac, Ctrl
- *     elsewhere) keeps the models only, as before;
+ *   · `hits` are the ray's, nearest first; `model` true keeps the models
+ *     only (Alt + click, ⌘ / Ctrl too), «proxy» the proxies and the sketches
+ *     only (the plain click, MICRO-VIEWER-SPAZIO-EMTREE p.1: E.D.'s rule
+ *     since the start), false everything;
  *   · surfaces within `tie` of each other (a proxy drawn on the model it was
  *     cut from) go sketch, then proxy, then model: the 11 Oct preference,
  *     where the eye cannot tell them apart;
@@ -142,8 +144,8 @@ export interface PickHit { kind: string; id: string; distance: number }
 export interface LastPick { x: number; y: number; key: string }
 const KIND_RANK: Record<string, number> = { sketch: 0, proxy: 1, rm: 2 };
 export function pickUnder(hits: readonly PickHit[], at: { x: number; y: number }, last: LastPick | null,
-  model: boolean, tie = 0.01, spot = 4): string | null {
-  const ok = hits.filter((h) => !model || h.kind === "rm");
+  model: boolean | "proxy", tie = 0.01, spot = 4): string | null {
+  const ok = hits.filter((h) => model === "proxy" ? h.kind !== "rm" : !model || h.kind === "rm");
   if (!ok.length) return null;
   // one entry per object, at its nearest surface
   const near = new Map<string, number>();

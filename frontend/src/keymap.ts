@@ -58,7 +58,7 @@ export const KEYMAP: KeyRow[] = [
   // MICRO-SPAZIO-3D · the Space, with the 3D in focus (E.D., 11 Oct 2026). On
   // Windows and Linux ⌘ is Ctrl; on a Mac Ctrl + click is the right click
   { id: "s3pick", keys: "@gesture.s3Click", scope: "space" },
-  { id: "s3pickRm", keys: "@gesture.s3CmdClick", scope: "space" },
+  { id: "s3pickRm", keys: "@gesture.s3AltClick", scope: "space" },
   { id: "s3menu", keys: "@gesture.s3RightClick", scope: "space" },
   { id: "s3dbl", keys: "@gesture.dblclick", scope: "space" },
   { id: "s3box", keys: "⇧B", scope: "space" },

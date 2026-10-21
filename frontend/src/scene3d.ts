@@ -52,7 +52,7 @@ import type { OverlayKey, OverlayValueKey } from "./overlays";
 import {
   alignedView, AXIS_INDEX, AXIS_VECTOR, boxZoom, freeAxes, modalHeader, threeToBlender, type ModalWords, clipPlanes, detailZoom, DRAG_PX, dragIntent, dragZoomFactor,
   frameSphere, grabPan, isMacPlatform, keypadAction, modalKey, modalLabel, modalValue, orthoBoxZoom, orthoHalf, orthoZoom,
-  pointerIntent, sceneCentre, spaceKeyAction, startModal, wheelFactor, zoomTowards,
+  pointerIntent, sceneCentre, spaceKeyAction, PICK_WAIT_MS, DOUBLE_MS, startModal, wheelFactor, zoomTowards,
   gizmoHit, gizmoLayout, gizmoView, viewBetween, GIZMO_AXES, type GizmoAxis,
   type AlignedView, type Box6, type CamState, type DragIntent, type ModalMode, type ModalState, type Pose,
   type SpaceKeyAction, type V3,
@@ -309,6 +309,13 @@ export interface SpaceSceneOptions {
    *  (`space-selection.ts`). When given, it replaces onPickUnit / onPickRm /
    *  onPickNone / onPickSketch */
   onPick?: (key: string | null, shift: boolean) => void;
+  /** MICRO-VIEWER-SPAZIO-EMTREE p.1 · a double click slower than the click's
+   *  wait: the pick of its first click is undone (the caller restores the
+   *  selection it had before it) */
+  onPickUndo?: () => void;
+  /** p.2 · false: a plain click picks nothing — the Viewer, where the click is
+   *  the annotation tools' and Alt + click selects the mesh */
+  plainPicks?: boolean;
   /** a short notice (Shift+C on an empty scene) */
   onNotice?: (text: string) => void;
   /** the view changed (aligned, ortho): the N panel follows */
@@ -2694,6 +2701,13 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
       };
       /** the last click's pick, for the cycle through what overlaps */
       let lastPick: LastPick | null = null;
+      /** MICRO-VIEWER-SPAZIO-EMTREE p.1 · the last left release (a double
+       *  click's first), the pick still waiting, the last pick made (undone by a
+       *  slow double click) */
+      let lastUp: { t: number; x: number; y: number } | null = null;
+      let pendingPick: ReturnType<typeof setTimeout> | null = null;
+      let undoable: { t: number; prev: LastPick | null } | null = null;
+      const dropPendingPick = () => { if (pendingPick) { clearTimeout(pendingPick); pendingPick = null; } };
       const onUp = (e: PointerEvent) => {
         const d = drag;
         drag = null;
@@ -2707,6 +2721,13 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
         const button = down?.button ?? e.button;
         down = null;
         if (moved) return;
+        // MICRO-VIEWER-SPAZIO-EMTREE p.1 · the second press of a double click
+        // picks nothing (the first one's pick, still waiting, is dropped): the
+        // double click is the view's (`onDbl`)
+        const now = performance.now();
+        const second = button === 0 && !!lastUp && now - lastUp.t < DOUBLE_MS && Math.hypot(e.clientX - lastUp.x, e.clientY - lastUp.y) <= DRAG_PX * 2;
+        lastUp = button === 0 && !second ? { t: now, x: e.clientX, y: e.clientY } : null;
+        if (second) { dropPendingPick(); return; }
         const r = renderer.domElement.getBoundingClientRect();
         ray.setFromCamera(new THREE.Vector2(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1), camera);
         // MICRO-VIEWER-UNICO p.4 · a tool armed: a plain left click is its
@@ -2743,15 +2764,27 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
         // pointer, as Blender's (`pickUnder`): again on the spot, the next one
         // behind; ⌘ (Ctrl) the models only
         if ((intent === "pick-rm" || intent === "pick-proxy") && opts.onPick) {
+          // p.2 · the Viewer: the plain click is the tools', Alt + click the mesh
+          if (intent === "pick-proxy" && opts.plainPicks === false) return;
           const at = { x: e.clientX, y: e.clientY };
-          // the cycle is the plain click's: Shift keeps Blender's add / make active / remove
-          // …and only while the last one picked is still the active one, as Blender's
-          // (a click on it again cycles; once something else is active, it is a plain pick)
-          const stillActive = !!lastPick && (lastPick.key.startsWith("sketch:") ? sketchSel === lastPick.key.slice(7)
-            : !!drawn.get(lastPick.key)?.item.active);
-          const key = pickUnder(hits, at, e.shiftKey || !stillActive ? null : lastPick, intent === "pick-rm");
-          lastPick = key ? { ...at, key } : null;
-          opts.onPick(key, e.shiftKey);
+          const shift = e.shiftKey;
+          const onPick = opts.onPick;
+          // MICRO-VIEWER-SPAZIO-EMTREE p.1 · the pick waits PICK_WAIT_MS: a
+          // second press on the spot makes it a double click, which picks nothing
+          dropPendingPick();
+          pendingPick = setTimeout(() => {
+            pendingPick = null;
+            // the cycle is the plain click's: Shift keeps Blender's add / make active / remove
+            // …and only while the last one picked is still the active one, as Blender's
+            // (a click on it again cycles; once something else is active, it is a plain pick)
+            const stillActive = !!lastPick && (lastPick.key.startsWith("sketch:") ? sketchSel === lastPick.key.slice(7)
+              : !!drawn.get(lastPick.key)?.item.active);
+            // a click: the proxy (or sketch) under the pointer; Alt (⌘ / Ctrl): the mesh
+            const key = pickUnder(hits, at, shift || !stillActive ? null : lastPick, intent === "pick-rm" ? true : "proxy");
+            undoable = { t: performance.now(), prev: lastPick };
+            lastPick = key ? { ...at, key } : null;
+            onPick(key, shift);
+          }, PICK_WAIT_MS);
           return;
         }
         if (intent === "pick-rm") {
@@ -2771,6 +2804,11 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
       const onContext = (e: MouseEvent) => { e.preventDefault(); };
       const onDbl = (e: MouseEvent) => {
         if (modal || boxArmed || e.button !== 0) return;
+        // MICRO-VIEWER-SPAZIO-EMTREE p.1 · a double click picks nothing: the
+        // first click's pick is dropped, or undone when it was already made
+        dropPendingPick();
+        if (undoable && performance.now() - undoable.t < DOUBLE_MS) { lastPick = undoable.prev; opts.onPickUndo?.(); }
+        undoable = null;
         const hh = hitsAt(e.clientX, e.clientY)[0];
         if (opts.onTool?.(hh ? { point: arr(hh.point), normal: worldNormal(hh), key: `${hh.kind}:${hh.id}` } : null, true)) return;
         if (!hh) return;
@@ -2933,6 +2971,7 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
       showView();
       cleanup = () => {
         cancelAnimationFrame(raf);
+        dropPendingPick();
         for (const l of layers.values()) l.layer.dispose();
         layers.clear();
         strips.remove();
