@@ -231,10 +231,17 @@ async fn update_install(app: tauri::AppHandle, tag: String) -> Result<(), String
         .await
         .map_err(|e| e.to_string())?
         .ok_or_else(|| format!("{tag} has no update for this platform"))?;
-    update
-        .download_and_install(|_, _| {}, || {})
-        .await
-        .map_err(|e| e.to_string())?;
+    // MICRO-WINDOWS-MODELLI p.3 · the sidecar is closed BEFORE the installer:
+    // on Windows `install` ends the app with `std::process::exit(0)` (no
+    // `RunEvent::Exit`), and the sidecar left behind kept port 8765 for the
+    // version just installed. Downloaded first, so a failed download leaves
+    // the bridge running; a failed install starts it again.
+    let bytes = update.download(|_, _| {}, || {}).await.map_err(|e| e.to_string())?;
+    stop_bridge(&app);
+    if let Err(e) = update.install(bytes) {
+        spawn_bridge(&app);
+        return Err(e.to_string());
+    }
     app.restart();
 }
 
@@ -420,6 +427,11 @@ fn spawn_bridge(app: &tauri::AppHandle) {
     if let Some(key) = stored_llm_key() {
         env.insert("ANTHROPIC_API_KEY".to_string(), key);
     }
+    // MICRO-WINDOWS-MODELLI p.3 · the bridge watches THIS process and leaves
+    // with it, however it ends (on Windows `getppid` never changes, and the
+    // updater ends the app with `std::process::exit`): an environment variable,
+    // so an older sidecar binary is not refused an argument it does not know
+    env.insert("EM_BRIDGE_PARENT_PID".to_string(), std::process::id().to_string());
     match cmd
         .args(["--port", &bridge_port().to_string(), "--exit-with-parent"])
         .envs(env)
@@ -500,21 +512,266 @@ fn next_free_port(start: u16, tries: u16) -> Option<u16> {
         .find(|&p| !port_busy(p))
 }
 
-/// What to say when the default port belongs to another program — the port,
-/// and what the app did about it. Not a word about the keychain: the key has
-/// nothing to do with it.
-fn port_taken_message(taken: u16, used: Option<u16>) -> String {
+/// What to say when the default port belongs to another program — WHO holds it
+/// (the program and its PID, when the system says), and what the app did about
+/// it. Not a word about the keychain: the key has nothing to do with it.
+fn port_taken_message(taken: u16, used: Option<u16>, owner: Option<&PortOwner>) -> String {
+    let who = match owner {
+        Some(o) if !o.name.is_empty() => format!("dal programma «{}» (PID {}), che non è il bridge di EMStudio", o.name, o.pid),
+        Some(o) => format!("dal processo PID {}, che non è il bridge di EMStudio", o.pid),
+        None => "da un processo che non risponde come il bridge di EMStudio".to_string(),
+    };
     match used {
         Some(p) => format!(
-            "La porta {taken} è occupata da un processo che non risponde come \
-             il bridge di EMStudio: il bridge locale usa la porta {p}."
+            "La porta {taken} è tenuta {who}: l'app non lo tocca e il bridge \
+             locale usa la porta {p}."
         ),
         None => format!(
-            "Le porte da {taken} a {} sono occupate da altri processi: il bridge \
-             locale non è partito (import/export GraphML e generazione non \
-             disponibili). Libera la porta {taken} e riavvia l'app.",
+            "La porta {taken} è tenuta {who}, e le porte fino alla {} sono \
+             occupate: il bridge locale non è partito (import/export GraphML, \
+             modelli dal disco e generazione non disponibili). Libera la porta \
+             {taken} e riavvia l'app.",
             taken.saturating_add(BRIDGE_PORT_TRIES)
         ),
+    }
+}
+
+// ── MICRO-WINDOWS-MODELLI p.3 · the orphan of an earlier session ───────────
+//
+// E.D., Windows, 21 Oct 2026, dev.56 at 12:36:19: «La porta 8765 è occupata da
+// un processo che non risponde come il bridge di EMStudio: il bridge locale usa
+// la porta 8766», right after «Installa e riavvia» from dev.55. Read in the
+// code, three things make it: the Windows updater ends the app with
+// `std::process::exit(0)` before the installer runs (tauri-plugin-updater 2.12,
+// updater.rs:882) — no `RunEvent::Exit`, the sidecar is never killed; the
+// bridge's watch (`getppid()` changing) never fires on Windows, which does not
+// re-parent an orphan; and the orphan, its pipes closed, failed every request
+// on its first log line, so it kept the port answering nothing. Now: the app
+// asks the SYSTEM who holds the port (netstat + tasklist on Windows, lsof
+// elsewhere); a bridge of EMStudio's — its executable is `em-bridge…`, or its
+// /health says `sidecar` — that is not this app's child is closed and the port
+// taken back. A bridge started by hand (./dev.sh: a Python, no `sidecar`) is
+// left alone (K1's message), and so is any other program.
+
+/// Who holds a port, as the system says.
+#[derive(Debug, Clone, PartialEq)]
+struct PortOwner {
+    pid: u32,
+    name: String,
+}
+
+/// An executable of EMStudio's bridge: `em-bridge` (PyInstaller's name, the
+/// sidecar's `em-bridge-<triple>[.exe]`), whatever the case.
+fn is_bridge_executable(name: &str) -> bool {
+    name.to_ascii_lowercase().starts_with("em-bridge")
+}
+
+/// `netstat -ano -p TCP` (Windows): the PID listening on `port`. The state
+/// word is localised (LISTENING, ABHÖREN…); a listener's remote address
+/// `0.0.0.0:0` / `[::]:0` is not, so that is what is read.
+fn parse_netstat_listener(text: &str, port: u16) -> Option<u32> {
+    let local = format!(":{port}");
+    text.lines().find_map(|line| {
+        let f: Vec<&str> = line.split_whitespace().collect();
+        if f.len() >= 5 && f[0].eq_ignore_ascii_case("TCP") && f[1].ends_with(&local) && f[2].ends_with(":0") {
+            f[f.len() - 1].parse::<u32>().ok().filter(|&p| p > 0)
+        } else {
+            None
+        }
+    })
+}
+
+/// `tasklist /FI "PID eq n" /FO CSV /NH` (Windows): the image name.
+fn parse_tasklist_csv(text: &str) -> Option<String> {
+    let line = text.lines().find(|l| l.starts_with('"'))?;
+    line[1..].split('"').next().map(str::to_string).filter(|n| !n.is_empty())
+}
+
+/// `lsof -nP -iTCP:<port> -sTCP:LISTEN -Fpc`: the first process, its command.
+fn parse_lsof(text: &str) -> Option<PortOwner> {
+    let mut pid = None;
+    let mut name = String::new();
+    for l in text.lines() {
+        if let Some(p) = l.strip_prefix('p') {
+            if pid.is_some() {
+                break;
+            }
+            pid = p.trim().parse::<u32>().ok();
+        } else if let Some(c) = l.strip_prefix('c') {
+            if name.is_empty() {
+                name = c.trim().to_string();
+            }
+        }
+    }
+    Some(PortOwner { pid: pid?, name })
+}
+
+/// A system tool, without a console window flashing on Windows.
+fn quiet(program: &str) -> std::process::Command {
+    #[allow(unused_mut)]
+    let mut c = std::process::Command::new(program);
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        c.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
+    }
+    c
+}
+
+/// Who listens on `port` on 127.0.0.1, as the system says. None when the
+/// system tool is not there or says nothing.
+fn port_owner(port: u16) -> Option<PortOwner> {
+    #[cfg(windows)]
+    {
+        let out = quiet("netstat").args(["-ano", "-p", "TCP"]).output().ok()?;
+        let pid = parse_netstat_listener(&String::from_utf8_lossy(&out.stdout), port)?;
+        let name = quiet("tasklist")
+            .args(["/FI", &format!("PID eq {pid}"), "/FO", "CSV", "/NH"])
+            .output()
+            .ok()
+            .and_then(|o| parse_tasklist_csv(&String::from_utf8_lossy(&o.stdout)))
+            .unwrap_or_default();
+        Some(PortOwner { pid, name })
+    }
+    #[cfg(not(windows))]
+    {
+        let out = quiet("lsof")
+            .args(["-nP", &format!("-iTCP:{port}"), "-sTCP:LISTEN", "-Fpc"])
+            .output()
+            .ok()?;
+        parse_lsof(&String::from_utf8_lossy(&out.stdout))
+    }
+}
+
+/// End a process and what it started (a PyInstaller bridge is two processes).
+fn kill_tree(pid: u32) -> bool {
+    #[cfg(windows)]
+    {
+        quiet("taskkill").args(["/PID", &pid.to_string(), "/T", "/F"]).status().map(|s| s.success()).unwrap_or(false)
+    }
+    #[cfg(not(windows))]
+    {
+        quiet("kill").args(["-TERM", &pid.to_string()]).status().map(|s| s.success()).unwrap_or(false)
+    }
+}
+
+/// Wait until nothing answers on `port`. Returns false on timeout.
+fn wait_port_free(port: u16, timeout: std::time::Duration) -> bool {
+    let deadline = std::time::Instant::now() + timeout;
+    while std::time::Instant::now() < deadline {
+        if !port_busy(port) {
+            return true;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+    !port_busy(port)
+}
+
+/// The JSON a bridge's /health gives, if it gives one.
+fn health_json(port: u16) -> Option<serde_json::Value> {
+    use std::io::{Read, Write};
+    use std::net::{SocketAddr, TcpStream};
+    use std::time::Duration;
+    let addr: SocketAddr = format!("127.0.0.1:{port}").parse().unwrap();
+    let mut stream = TcpStream::connect_timeout(&addr, Duration::from_millis(150)).ok()?;
+    let _ = stream.set_read_timeout(Some(Duration::from_millis(800)));
+    stream.write_all(b"GET /health HTTP/1.0\r\nHost: 127.0.0.1\r\n\r\n").ok()?;
+    let mut buf = Vec::new();
+    let _ = stream.take(16 * 1024).read_to_end(&mut buf);
+    let text = String::from_utf8_lossy(&buf);
+    let body = text.split("\r\n\r\n").nth(1)?;
+    serde_json::from_str(body.trim()).ok()
+}
+
+/// What the launch does with the bridge's port.
+#[derive(Debug, PartialEq)]
+struct Launch {
+    port: u16,
+    spawn: bool,
+    notice: Option<String>,
+}
+
+/// MICRO-WINDOWS-MODELLI p.3 · the launch's decision on the bridge's port:
+/// free → ours; an orphaned bridge of EMStudio's → closed, and ours; a bridge
+/// started by hand → used, said (K1); another program → the next free port,
+/// said with the program's name.
+fn decide_launch(default: u16, tries: u16) -> Launch {
+    let holder = port_holder(default);
+    if holder == PortHolder::Free {
+        return Launch { port: default, spawn: true, notice: None };
+    }
+    let owner = port_owner(default);
+    let health = if holder == PortHolder::Bridge { health_json(default) } else { None };
+    let sidecar = health.as_ref().and_then(|h| h.get("sidecar")).and_then(|v| v.as_bool()).unwrap_or(false);
+    let health_pid = health.as_ref().and_then(|h| h.get("pid")).and_then(|v| v.as_u64()).map(|p| p as u32);
+    let ours = match &owner {
+        Some(o) if is_bridge_executable(&o.name) => Some(o.clone()),
+        _ if sidecar => health_pid.map(|pid| PortOwner { pid, name: owner.as_ref().map(|o| o.name.clone()).unwrap_or_default() }),
+        _ => None,
+    }
+    .filter(|o| o.pid != std::process::id());
+    if let Some(o) = ours {
+        kill_tree(o.pid);
+        if wait_port_free(default, std::time::Duration::from_secs(5)) {
+            return Launch { port: default, spawn: true, notice: Some(orphan_closed_message(default, &o)) };
+        }
+        let next = next_free_port(default, tries);
+        return Launch { port: next.unwrap_or(default), spawn: next.is_some(), notice: Some(orphan_stuck_message(default, &o, next)) };
+    }
+    match holder {
+        PortHolder::Bridge => Launch { port: default, spawn: false, notice: Some(foreign_bridge_message_at(default, owner.as_ref())) },
+        _ => {
+            let next = next_free_port(default, tries);
+            Launch { port: next.unwrap_or(default), spawn: next.is_some(), notice: Some(port_taken_message(default, next, owner.as_ref())) }
+        }
+    }
+}
+
+fn orphan_closed_message(port: u16, o: &PortOwner) -> String {
+    format!(
+        "La porta {port} era tenuta da un bridge di EMStudio rimasto aperto da una \
+         sessione precedente («{}», PID {}): l'app l'ha chiuso e il bridge locale \
+         usa di nuovo la porta {port}.",
+        if o.name.is_empty() { "em-bridge" } else { &o.name },
+        o.pid
+    )
+}
+
+fn orphan_stuck_message(port: u16, o: &PortOwner, used: Option<u16>) -> String {
+    let then = match used {
+        Some(p) => format!("il bridge locale usa la porta {p}"),
+        None => "il bridge locale non è partito".to_string(),
+    };
+    format!(
+        "La porta {port} è tenuta da un bridge di EMStudio rimasto aperto da una \
+         sessione precedente («{}», PID {}): l'app ha provato a chiuderlo ma la \
+         porta è ancora occupata, e {then}. Chiudi «em-bridge» in Gestione \
+         attività (Monitoraggio Attività sul Mac) e riavvia l'app.",
+        if o.name.is_empty() { "em-bridge" } else { &o.name },
+        o.pid
+    )
+}
+
+/// K1's message at launch, naming the process when the system says.
+fn foreign_bridge_message_at(port: u16, owner: Option<&PortOwner>) -> String {
+    let who = owner.map(|o| format!(" («{}», PID {})", o.name, o.pid)).unwrap_or_default();
+    format!(
+        "Un altro bridge{who} è già in ascolto sulla porta {port} e non è stato \
+         avviato dall'app: l'app lo usa così com'è, ma la key del portachiavi non \
+         lo raggiunge. Chiudi quel processo (tipicamente ./dev.sh) e riavvia \
+         l'app, oppure esporta ANTHROPIC_API_KEY nell'ambiente di quel bridge."
+    )
+}
+
+/// Stop this app's sidecar and what it started, and wait for its port.
+fn stop_bridge(app: &tauri::AppHandle) {
+    let taken = app.state::<BridgeChild>().0.lock().unwrap().take();
+    if let Some(child) = taken {
+        // a PyInstaller bridge is two processes: on Windows the tree, then the handle
+        #[cfg(windows)]
+        let _ = kill_tree(child.pid());
+        let _ = child.kill();
+        let _ = wait_port_free(bridge_port(), std::time::Duration::from_secs(5));
     }
 }
 
@@ -533,14 +790,7 @@ fn port_taken_message(taken: u16, used: Option<u16>) -> String {
 /// the actual precondition — a blind `sleep(500ms)` would be both slower than
 /// needed on a fast machine and still too short on a loaded one.
 fn wait_for_bridge_port_free(timeout: std::time::Duration) -> bool {
-    let deadline = std::time::Instant::now() + timeout;
-    while std::time::Instant::now() < deadline {
-        if !bridge_port_busy() {
-            return true;
-        }
-        std::thread::sleep(std::time::Duration::from_millis(50));
-    }
-    !bridge_port_busy()
+    wait_port_free(bridge_port(), timeout)
 }
 
 /// Tell the frontend that the bridge on :8765 is not ours, so the key cannot
@@ -700,28 +950,28 @@ fn main() {
             // B3 · …and if it is ANOTHER program (not an em-bridge), the bridge
             // moves to the next free port and the message says which port is
             // taken and which one is used — before, it spoke of the keychain.
-            match port_holder(BRIDGE_PORT_DEFAULT) {
-                PortHolder::Free => spawn_bridge(app.handle()),
-                PortHolder::Bridge => queue_notice(app.handle(), foreign_bridge_message()),
-                PortHolder::Other => {
-                    let next = next_free_port(BRIDGE_PORT_DEFAULT, BRIDGE_PORT_TRIES);
-                    queue_notice(app.handle(), port_taken_message(BRIDGE_PORT_DEFAULT, next));
-                    if let Some(p) = next {
-                        BRIDGE_PORT.store(p, Ordering::Relaxed);
-                        spawn_bridge(app.handle());
-                    }
-                }
+            //
+            // MICRO-WINDOWS-MODELLI p.3 · …and an orphaned bridge of EMStudio's
+            // (an earlier session's sidecar) is closed and the port taken back
+            // (`decide_launch`). The decision is made here, in `setup`, and the
+            // page cannot read a port before it: Tauri creates the window before
+            // `setup` runs (tauri 2.11.5, app.rs:2524–2530), but `transformer_url`
+            // is a synchronous command, run on the main thread, which `setup`
+            // holds until it returns.
+            let launch = decide_launch(BRIDGE_PORT_DEFAULT, BRIDGE_PORT_TRIES);
+            BRIDGE_PORT.store(launch.port, Ordering::Relaxed);
+            if let Some(n) = launch.notice {
+                queue_notice(app.handle(), n);
+            }
+            if launch.spawn {
+                spawn_bridge(app.handle());
             }
             Ok(())
         })
         .build(tauri::generate_context!())
         .expect("error while building EMStudio")
         .run(|app, event| match event {
-            tauri::RunEvent::Exit => {
-                if let Some(child) = app.state::<BridgeChild>().0.lock().unwrap().take() {
-                    let _ = child.kill();
-                }
-            }
+            tauri::RunEvent::Exit => stop_bridge(app),
             // B2 · macOS hands files over as an Apple event (double click,
             // «Open With», `open -a EMStudio file.em.json`), at launch or while
             // the app runs. Deep links come this way too: only `file:` URLs
@@ -841,7 +1091,7 @@ mod tests {
         drop(free);
         assert_eq!(port_holder(fport), PortHolder::Free);
         // the message names the taken port and the one used, not the keychain
-        let m = port_taken_message(8765, Some(8766));
+        let m = port_taken_message(8765, Some(8766), None);
         assert!(m.contains("8765") && m.contains("8766") && !m.contains("portachiavi"), "{m}");
         // …and the page reads the port it moved to, as it always read it
         if std::env::var("EM_TRANSFORMER_URL").is_err() {
@@ -849,8 +1099,98 @@ mod tests {
             assert_eq!(transformer_url(), "http://localhost:8771");
             BRIDGE_PORT.store(BRIDGE_PORT_DEFAULT, Ordering::Relaxed);
         }
-        let none = port_taken_message(8765, None);
+        let none = port_taken_message(8765, None, None);
         assert!(none.contains("8765") && none.contains("8775") && !none.contains("portachiavi"), "{none}");
+    }
+
+    /// MICRO-WINDOWS-MODELLI p.3 · what the system tools say, read: Windows'
+    /// netstat (its state word localised: the remote `:0` is what is read) and
+    /// tasklist, and lsof elsewhere.
+    #[test]
+    fn the_owner_of_a_port_is_read_from_the_system_tools() {
+        let netstat = "\r\nConnessioni attive\r\n\r\n  Proto  Indirizzo locale       Indirizzo esterno      Stato           PID\r\n\
+          TCP    0.0.0.0:135            0.0.0.0:0              LISTENING       1088\r\n\
+          TCP    127.0.0.1:8765         127.0.0.1:51234        ESTABLISHED     4242\r\n\
+          TCP    127.0.0.1:8765         0.0.0.0:0              LISTENING       9876\r\n\
+          TCP    127.0.0.1:8766         0.0.0.0:0              ABHÖREN         5555\r\n\
+          TCP    [::1]:8767             [::]:0                 LISTENING       7777\r\n";
+        assert_eq!(parse_netstat_listener(netstat, 8765), Some(9876), "the listener, not a connection to it");
+        assert_eq!(parse_netstat_listener(netstat, 8766), Some(5555), "a localised state word");
+        assert_eq!(parse_netstat_listener(netstat, 8767), Some(7777), "IPv6");
+        assert_eq!(parse_netstat_listener(netstat, 876), None, "a port is not a prefix");
+        assert_eq!(parse_tasklist_csv("\"em-bridge-x86_64-pc-windows-msvc.exe\",\"9876\",\"Console\",\"1\",\"212.340 K\"\r\n"),
+                   Some("em-bridge-x86_64-pc-windows-msvc.exe".to_string()));
+        assert_eq!(parse_tasklist_csv("INFORMAZIONI: nessuna attività in esecuzione corrisponde ai criteri specificati.\r\n"), None);
+        assert_eq!(parse_lsof("p4321\ncem-bridge-aarch\nf5\n"), Some(PortOwner { pid: 4321, name: "em-bridge-aarch".into() }));
+        assert_eq!(parse_lsof(""), None);
+        assert!(is_bridge_executable("em-bridge-x86_64-pc-windows-msvc.exe") && is_bridge_executable("EM-BRIDGE.EXE"));
+        assert!(!is_bridge_executable("python3.12") && !is_bridge_executable("Python"));
+        // the messages say who and what was done
+        let o = PortOwner { pid: 9876, name: "em-bridge-x86_64-pc-windows-msvc.exe".into() };
+        let m = orphan_closed_message(8765, &o);
+        assert!(m.contains("9876") && m.contains("em-bridge") && m.contains("chiuso") && m.contains("8765"), "{m}");
+        let other = PortOwner { pid: 31, name: "jupyter.exe".into() };
+        let m = port_taken_message(8765, Some(8766), Some(&other));
+        assert!(m.contains("jupyter.exe") && m.contains("31") && m.contains("8766") && m.contains("non lo tocca"), "{m}");
+    }
+
+    /// …measured on this machine: who holds a port of this test, and the
+    /// launch's decision with a process named like the sidecar that answers
+    /// nothing (the wedged orphan) and with another program.
+    #[cfg(unix)]
+    #[test]
+    fn an_orphaned_bridge_is_closed_and_another_program_is_left_alone() {
+        let me = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = me.local_addr().unwrap().port();
+        let o = port_owner(port).expect("lsof names the holder");
+        assert_eq!(o.pid, std::process::id());
+        drop(me);
+        // the listeners are this test binary, copied under the name to be read
+        // (a system binary copied elsewhere is killed by macOS; a symlink keeps
+        // its own name): `mute_listener_when_asked` holds the port, answering nothing
+        let dir = std::env::temp_dir().join(format!("emstudio-orphan-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let free = || { let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap(); l.local_addr().unwrap().port() };
+        let listen = |name: &str, port: u16| {
+            let exe = dir.join(name);
+            std::fs::copy(std::env::current_exe().unwrap(), &exe).unwrap();
+            let child = std::process::Command::new(&exe)
+                .args(["--exact", "tests::mute_listener_when_asked", "--nocapture"])
+                .env("EMSTUDIO_TEST_MUTE_PORT", port.to_string())
+                .stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null()).spawn().unwrap();
+            for _ in 0..100 { if port_busy(port) { break; } std::thread::sleep(std::time::Duration::from_millis(30)); }
+            child
+        };
+        // a sidecar of an earlier session, answering nothing: closed, the port taken back
+        let p1 = free();
+        let mut orphan = listen("em-bridge-test", p1);
+        let l = decide_launch(p1, 3);
+        assert_eq!((l.port, l.spawn), (p1, true), "{l:?}");
+        assert!(l.notice.as_deref().unwrap_or("").contains("chiuso"), "{l:?}");
+        assert!(orphan.try_wait().unwrap().is_some() || { std::thread::sleep(std::time::Duration::from_millis(300)); orphan.try_wait().unwrap().is_some() },
+                "the orphan is gone");
+        // another program: left alone, the next port, named
+        let p2 = free();
+        let mut other = listen("altro-programma", p2);
+        let l = decide_launch(p2, 3);
+        assert!(l.spawn && l.port != p2, "{l:?}");
+        assert!(l.notice.as_deref().unwrap_or("").contains("altro-programma"), "{l:?}");
+        assert!(other.try_wait().unwrap().is_none(), "another program is not touched");
+        let _ = other.kill();
+        let _ = other.wait();
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Not a test by itself: the listener the test above starts (a port held,
+    /// nothing answered — the wedged orphan). Without its variable, nothing.
+    #[test]
+    fn mute_listener_when_asked() {
+        let Ok(port) = std::env::var("EMSTUDIO_TEST_MUTE_PORT") else { return };
+        let l = std::net::TcpListener::bind(format!("127.0.0.1:{port}")).unwrap();
+        let mut held = Vec::new();
+        for s in l.incoming().flatten() {
+            held.push(s);
+        }
     }
 
     /// MICRO-DOVE-CHI-MENU p.7 · the updater's configuration is what the plugin

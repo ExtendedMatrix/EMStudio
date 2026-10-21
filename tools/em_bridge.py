@@ -1156,6 +1156,86 @@ def _set_fs_roots(paths) -> None:
     _FS_ROOTS[:] = roots
 
 
+def _pid_alive(pid: int, *, nt=None) -> bool:
+    """Is process `pid` still running? MICRO-WINDOWS-MODELLI p.3: on Windows
+    `os.getppid()` never changes (Windows does not re-parent an orphan), so the
+    watch below never fired there; a process is asked about by its handle."""
+    nt = (os.name == "nt") if nt is None else nt
+    if pid <= 0:
+        return False
+    if nt:
+        import ctypes
+        from ctypes import wintypes
+        k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        k32.OpenProcess.restype = wintypes.HANDLE
+        k32.OpenProcess.argtypes = (wintypes.DWORD, wintypes.BOOL, wintypes.DWORD)
+        k32.WaitForSingleObject.restype = wintypes.DWORD
+        k32.WaitForSingleObject.argtypes = (wintypes.HANDLE, wintypes.DWORD)
+        k32.CloseHandle.argtypes = (wintypes.HANDLE,)
+        SYNCHRONIZE, WAIT_TIMEOUT, ERROR_ACCESS_DENIED = 0x00100000, 0x102, 5
+        h = k32.OpenProcess(SYNCHRONIZE, False, pid)
+        if not h:
+            # refused is alive (another session's, an elevated one): only a
+            # process that is not there ends the watch
+            return ctypes.get_last_error() == ERROR_ACCESS_DENIED
+        try:
+            return k32.WaitForSingleObject(h, 0) == WAIT_TIMEOUT
+        finally:
+            k32.CloseHandle(h)
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
+def _exit_when_pid_gone(pid: int, poll: float = 1.0) -> None:
+    """MICRO-WINDOWS-MODELLI p.3 · terminate once the APP that spawned this
+    bridge is gone, named by its pid (`--parent-pid`, the desktop shell passes
+    its own). Not the direct parent: a PyInstaller-onefile bridge is two
+    processes, and the bootloader between this one and the app outlives an app
+    that exits without killing it — measured in the code: on Windows the
+    updater ends the app with `std::process::exit(0)` before installing
+    (tauri-plugin-updater 2.12 updater.rs:882), no `RunEvent::Exit`, so the
+    sidecar was never killed and kept port 8765."""
+    def _watch() -> None:
+        while True:
+            time.sleep(poll)
+            if not _pid_alive(pid):
+                os._exit(0)
+
+    threading.Thread(target=_watch, daemon=True).start()
+
+
+class _SafeStream:
+    """A stdout/stderr that never raises. MICRO-WINDOWS-MODELLI p.3: once the
+    app that read the sidecar's pipes is gone, every write fails (EPIPE /
+    EINVAL), and the request handler that logs its line dies before it
+    answers — the orphan kept the port and answered NOTHING, so the next app
+    could not even recognise it as a bridge («La porta 8765 è occupata da un
+    processo che non risponde come il bridge di EMStudio», E.D., 21 Oct)."""
+
+    def __init__(self, stream):
+        self._s = stream
+
+    def write(self, data):
+        try:
+            return self._s.write(data)
+        except (OSError, ValueError):
+            return len(data) if hasattr(data, "__len__") else 0
+
+    def flush(self):
+        try:
+            self._s.flush()
+        except (OSError, ValueError):
+            pass
+
+    def __getattr__(self, name):
+        return getattr(self._s, name)
+
+
 def _exit_when_orphaned(poll: float = 1.0) -> None:
     """Terminate the process once the parent that spawned it is gone.
 
@@ -1327,6 +1407,9 @@ def reasoning_records(graph) -> list:
     from s3dgraphy.property_source import message
     return [{**r, "message": message(r)} for r in api.reasoning_diagnostics(graph)]
 _STARTED_AT = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+#: MICRO-WINDOWS-MODELLI p.3 · who this bridge is, for the app that finds it on
+#: its port: a desktop's sidecar (and whose), or one started by hand (./dev.sh)
+_SIDECAR = {"sidecar": False, "parent_pid": None}
 
 
 def _s3dgraphy_identity() -> dict:
@@ -1896,6 +1979,9 @@ def make_handler(api):
                                    "fs_scope": _fs_scope(),
                                    "bridge_level": BRIDGE_LEVEL,
                                    "started_at": _STARTED_AT,
+                                   "pid": os.getpid(),
+                                   "sidecar": _SIDECAR["sidecar"],
+                                   "parent_pid": _SIDECAR["parent_pid"],
                                    "s3dgraphy": _s3dgraphy_identity()}).encode()
                 self.send_response(200)
                 self._cors()
@@ -5784,6 +5870,13 @@ def main() -> int:
     ap.add_argument("--exit-with-parent", action="store_true",
                     help="terminate when the spawning process exits "
                          "(used by the EMStudio desktop shell)")
+    ap.add_argument("--parent-pid", type=int, metavar="PID",
+                    default=int(os.environ.get("EM_BRIDGE_PARENT_PID") or 0) or None,
+                    help="terminate when process PID exits (the desktop shell "
+                         "passes its own in EM_BRIDGE_PARENT_PID — an environment "
+                         "variable, so an older sidecar binary is not refused an "
+                         "argument it does not know: it works on Windows and "
+                         "through a PyInstaller bootloader)")
     ap.add_argument("--fs-root", action="append", default=None, metavar="DIR",
                     help="a folder /fs/list and /fs/file may reach; repeatable. "
                          "Default: the EMStudio checkout. Also EM_BRIDGE_FS_ROOTS.")
@@ -5796,7 +5889,15 @@ def main() -> int:
                          "Also EM_BRIDGE_FS_ALL=1.")
     args = ap.parse_args()
 
-    if args.exit_with_parent:
+    # MICRO-WINDOWS-MODELLI p.3 · a sidecar's pipes may close under it: its
+    # writes must never cost an answer
+    sys.stdout = _SafeStream(sys.stdout)
+    sys.stderr = _SafeStream(sys.stderr)
+    _SIDECAR["sidecar"] = bool(args.exit_with_parent or args.parent_pid)
+    _SIDECAR["parent_pid"] = args.parent_pid
+    if args.parent_pid:
+        _exit_when_pid_gone(args.parent_pid)
+    elif args.exit_with_parent:
         _exit_when_orphaned()
 
     # Roots: the flag wins over the environment, and the fallback is the
