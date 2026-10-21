@@ -108,6 +108,17 @@ that asked for one.
 - `scripts/check-space-views.mjs` (101), `scripts/check-implicit-pd.mjs` (30).
 
 ### Changed
+- **A PDF in the Viewer keeps its tools, off, and says why** (MICRO-VIEWER-
+  SPAZIO-EMTREE p.3). E.D. on dev.54 saw no annotation tool in the Viewer.
+  Measured on all 55 documents of Templu Mare v3.3, in Fonti and in a Viewer
+  alone: the 3D has its six (spot height, impost, bedding plane by three
+  points and by a face, line, polyline), the images Region and Polygon — but
+  the 31 PDFs (the plates TM0nn, D.02–D.05, D.12), shown by the browser's
+  reader, had none, and 24 documents have no file. A region on a PDF is traced
+  on a page drawn as an image, which EMStudio does not do yet: the bar now
+  shows Region and Polygon off, with the reason. Point, line and polyline on
+  an image are not in s3Dgraphy's region2d (rect and polygon only): a proposal
+  in the report, not invented here. VS3 looks for the tools on screen.
 - **The Viewer draws one version, and only E.D. climbs** (MICRO-VIEWER-
   SPAZIO-EMTREE p.2, 21 October 2026; `viewer-node.ts`, `main.ts`). E.D. on
   dev.54: «dopo 2 s partiva la grande e rallentava tutta l'interfaccia». The

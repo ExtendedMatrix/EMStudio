@@ -32694,6 +32694,27 @@ function vwPartStage(win: Win, stage: HTMLElement, bar: HTMLElement, target: Vie
     if (url) void bridgeBlobUrl(url).then((u) => { obj.data = u; }).catch(() => obj.appendChild(document.createTextNode(t("viewer.unreachable"))));
     else obj.appendChild(document.createTextNode(t("storage.loading")));
     stage.appendChild(obj);
+    // MICRO-VIEWER-SPAZIO-EMTREE p.3 · measured on Templu Mare v3.3: the 31 PDFs
+    // (the plates TM0nn, D.02–D.05, D.12) showed NO tool, so the tools seemed
+    // gone. A region on a PDF is traced on a page drawn as an image (region2d
+    // has its `page`), which EMStudio cannot draw yet: the document's tools
+    // stay in the bar, off, and say why
+    if (primary) {
+      const box = document.createElement("span");
+      box.className = "rd-tools vw-tools vw-tools-off";
+      box.setAttribute("role", "group");
+      box.setAttribute("aria-label", t("rdt.tools"));
+      box.title = t("vw.pdfToolsOff");
+      box.dataset.vwPdfTools = "1";
+      for (const tl of DOC_TOOLS.image) {
+        const b = vwButton("win-act rd-tool", `${DOC_TOOL_GLYPH[tl]} ${t(`rdt.${tl}`)}`, t("vw.pdfToolsOff"), () => {});
+        b.dataset.tool = tl;
+        b.disabled = true;
+        box.appendChild(b);
+      }
+      box.appendChild(Object.assign(document.createElement("span"), { className: "rd-tools-hint", textContent: t("vw.pdfToolsNote") }));
+      bar.appendChild(box);
+    }
     return;
   }
   if (primary && d && (part.medium === "image" || part.medium === "text")) {

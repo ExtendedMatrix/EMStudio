@@ -9962,6 +9962,8 @@ tr.tt-hidden { display: none; }
 .vw-np-row.over > span { color: var(--warn, #9a6a00); }
 .vw-np-acts { display: flex; flex-direction: column; align-items: stretch; gap: 4px; padding: 8px 10px; }
 .vw-tools { display: inline-flex; flex-wrap: wrap; gap: 4px; }
+/* MICRO-VIEWER-SPAZIO-EMTREE p.3 · a PDF's tools: there, off, with the reason */
+.vw-tools-off .rd-tool:disabled { opacity: 0.55; cursor: help; }
 .vw-scene { position: absolute; inset: 0; min-height: 0; }
 .viewer-stage:has(> .vw-scene) { position: relative; padding: 0; }
 .vw-detail { width: 100%; height: 100%; overflow: auto; }

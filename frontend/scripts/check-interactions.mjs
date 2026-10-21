@@ -7127,6 +7127,36 @@ test("VS2.viewer-gestures", "VIEWER-SPAZIO-EMTREE p.2 · Viewer: il clic semplic
   return { pass, detail: { ...r, d01, errors } };
 });
 
+test("VS3.tools", "VIEWER-SPAZIO-EMTREE p.3 · gli strumenti di annotazione a schermo (non solo nel codice): nel Viewer di Fonti e in un Viewer da solo, D.01 (3D) punto quota, imposta, piano di posa (3 punti e faccia), linea, polilinea; D.11 (immagine) regione e poligono; una tavola PDF (TM015) gli strumenti spenti con il motivo", async () => {
+  const { p, ctx, errors } = await openV33();
+  /** the tools of window w as on screen: inside the window, drawn, not covered */
+  const onScreen = (w) => p.evaluate((x) => {
+    const area = document.querySelector(`.tile-area[data-win="${x}"]`); if (!area) return null;
+    const ar = area.getBoundingClientRect();
+    return [...area.querySelectorAll("[data-tool]")].filter((b) => {
+      const r = b.getBoundingClientRect(); if (!r.width || !r.height) return false;
+      const top = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
+      return r.x >= ar.x - 1 && r.right <= ar.right + 1 && r.y >= ar.y - 1 && r.bottom <= ar.bottom + 1 && (top === b || b.contains(top));
+    }).map((b) => b.dataset.tool + (b.disabled ? ":off" : ""));
+  }, w);
+  const r = {};
+  const look = async (w, name, k) => { await p.evaluate((d) => window.__EM_DRAG__.select(d), await v33Id(p, name)); await p.waitForTimeout(1500); r[k] = await onScreen(w); };
+  await p.click(`#workspace-bar .ws-tab[data-ws="provenance"]`); await p.waitForTimeout(1000);
+  const fonti = await p.evaluate(() => window.__EM_DRAG__.wins().find((x) => x.type === "viewer")?.id);
+  await look(fonti, "D.01", "fontiD01"); await look(fonti, "D.11", "fontiD11"); await look(fonti, "TM015", "fontiPdf");
+  r.pdfNote = await p.evaluate((x) => document.querySelector(`.tile-area[data-win="${x}"] [data-vw-pdf-tools]`)?.textContent ?? null, fonti);
+  await p.screenshot({ path: SHOT("vs3-fonti-pdf") }).catch(() => {});
+  await p.click(`#workspace-bar .ws-tab[data-ws="canvas"]`); await p.waitForTimeout(800);
+  const alone = await viewerIn(p, "inspector");
+  await look(alone, "D.01", "aloneD01"); await look(alone, "D.11", "aloneD11");
+  await p.screenshot({ path: SHOT("vs3-alone-d11") }).catch(() => {});
+  await ctx.close();
+  const T3 = "elevation,impost,plane3,planeFace,line,polyline", TI = "rect,polygon";
+  const pass = String(r.fontiD01) === T3 && String(r.aloneD01) === T3 && String(r.fontiD11) === TI && String(r.aloneD11) === TI
+    && String(r.fontiPdf) === "rect:off,polygon:off" && /PDF/.test(r.pdfNote ?? "") && !errors.length;
+  return { pass, detail: { ...r, errors } };
+});
+
 test("VU3.quota", "VIEWER-UNICO p.4 · un punto quota sul 3D di D.01 crea l'estrattore del documento (coordinate del documento, il valore letto), il segno nella scena, la riga in «Estrazioni da questo documento»; «Interpretazione» lo collega a una proprietà; un annulla per gesto", async () => {
   const { p, ctx, errors } = await openV33();
   const w = await viewerIn(p, "outliner");

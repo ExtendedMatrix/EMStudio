@@ -4156,6 +4156,8 @@ const EN: Dict = {
   "vw.npInMatrix": "Show the document in the Matrix",
   "vw.npInSpace": "Open in the Space",
   "vw.npSelectGroup": "Select the container {g}",
+  "vw.pdfToolsOff": "On a PDF a region is traced on a page shown as an image: EMStudio does not draw a PDF's pages yet (the browser's reader shows it). The tools come back on the images and on the 3D",
+  "vw.pdfToolsNote": "PDF: not traceable here yet",
 };
 
 // ── Italiano: complete, because E.D. works in it ───────────────────────────────
@@ -8186,6 +8188,8 @@ const IT: Dict = {
   "vw.npInMatrix": "Mostra il documento nella Matrix",
   "vw.npInSpace": "Apri nello Spazio",
   "vw.npSelectGroup": "Seleziona il contenitore {g}",
+  "vw.pdfToolsOff": "Su un PDF la regione si traccia su una pagina mostrata come immagine: EMStudio non disegna ancora le pagine di un PDF (lo mostra il lettore del browser). Gli strumenti ci sono sulle immagini e sul 3D",
+  "vw.pdfToolsNote": "PDF: qui non ancora tracciabile",
 };
 
 // ── The six other project languages: AI DRAFTS, awaiting validation ───────────
@@ -8521,6 +8525,8 @@ const EL: Dict = {
   "vw.npInMatrix": "Εμφάνιση του εγγράφου στο Matrix",
   "vw.npInSpace": "Άνοιγμα στον Χώρο",
   "vw.npSelectGroup": "Επιλογή του περιέκτη {g}",
+  "vw.pdfToolsOff": "Σε ένα PDF η περιοχή χαράσσεται σε μια σελίδα που εμφανίζεται ως εικόνα: το EMStudio δεν σχεδιάζει ακόμη τις σελίδες ενός PDF (το δείχνει ο αναγνώστης του προγράμματος περιήγησης). Τα εργαλεία υπάρχουν στις εικόνες και στο 3D",
+  "vw.pdfToolsNote": "PDF: δεν χαράσσεται ακόμη εδώ",
 };
 
 const HE: Dict = {
@@ -8829,6 +8835,8 @@ const HE: Dict = {
   "vw.npInMatrix": "הצג את המסמך במטריצה",
   "vw.npInSpace": "פתח במרחב",
   "vw.npSelectGroup": "בחר את המכל {g}",
+  "vw.pdfToolsOff": "ב-PDF אזור משורטט על עמוד המוצג כתמונה: EMStudio עדיין אינו מצייר את עמודי ה-PDF (קורא הדפדפן מציג אותו). הכלים קיימים בתמונות וב-3D",
+  "vw.pdfToolsNote": "PDF: עדיין לא ניתן לשרטט כאן",
 };
 
 const ES: Dict = {
@@ -9142,6 +9150,8 @@ const ES: Dict = {
   "vw.npInMatrix": "Mostrar el documento en la Matrix",
   "vw.npInSpace": "Abrir en el Espacio",
   "vw.npSelectGroup": "Seleccionar el contenedor {g}",
+  "vw.pdfToolsOff": "En un PDF la región se traza sobre una página mostrada como imagen: EMStudio aún no dibuja las páginas de un PDF (lo muestra el lector del navegador). Las herramientas están en las imágenes y en el 3D",
+  "vw.pdfToolsNote": "PDF: aquí aún no se traza",
 };
 
 const PL: Dict = {
@@ -9454,6 +9464,8 @@ const PL: Dict = {
   "vw.npInMatrix": "Pokaż dokument w Matrix",
   "vw.npInSpace": "Otwórz w Przestrzeni",
   "vw.npSelectGroup": "Zaznacz kontener {g}",
+  "vw.pdfToolsOff": "Na PDF region rysuje się na stronie pokazanej jako obraz: EMStudio nie rysuje jeszcze stron PDF (pokazuje go czytnik przeglądarki). Narzędzia są na obrazach i w 3D",
+  "vw.pdfToolsNote": "PDF: tu jeszcze nie do rysowania",
 };
 
 const RO: Dict = {
@@ -9767,6 +9779,8 @@ const RO: Dict = {
   "vw.npInMatrix": "Arată documentul în Matrix",
   "vw.npInSpace": "Deschide în Spațiu",
   "vw.npSelectGroup": "Selectează containerul {g}",
+  "vw.pdfToolsOff": "Pe un PDF regiunea se trasează pe o pagină afișată ca imagine: EMStudio nu desenează încă paginile unui PDF (îl arată cititorul browserului). Uneltele există pe imagini și pe 3D",
+  "vw.pdfToolsNote": "PDF: aici încă nu se trasează",
 };
 
 const FR: Dict = {
@@ -10083,6 +10097,8 @@ const FR: Dict = {
   "vw.npInMatrix": "Montrer le document dans la Matrix",
   "vw.npInSpace": "Ouvrir dans l'Espace",
   "vw.npSelectGroup": "Sélectionner le conteneur {g}",
+  "vw.pdfToolsOff": "Sur un PDF la région se trace sur une page montrée comme image : EMStudio ne dessine pas encore les pages d'un PDF (le lecteur du navigateur l'affiche). Les outils sont sur les images et sur la 3D",
+  "vw.pdfToolsNote": "PDF : pas encore traçable ici",
 };
 
 /**
@@ -11628,6 +11644,8 @@ const DE: Dict = {
   "vw.npInMatrix": "Dokument in der Matrix zeigen",
   "vw.npInSpace": "Im Raum öffnen",
   "vw.npSelectGroup": "Container {g} auswählen",
+  "vw.pdfToolsOff": "Auf einem PDF wird eine Region auf einer als Bild gezeigten Seite gezogen: EMStudio zeichnet die Seiten eines PDF noch nicht (der Reader des Browsers zeigt es). Die Werkzeuge gibt es auf Bildern und im 3D",
+  "vw.pdfToolsNote": "PDF: hier noch nicht zu ziehen",
 };
 
 const DICTS: Record<Locale, Dict> = {
