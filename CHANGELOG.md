@@ -107,6 +107,16 @@ that asked for one.
     **orphan assets** in the Preferences (download, delete one at a time).
 - `scripts/check-space-views.mjs` (101), `scripts/check-implicit-pd.mjs` (30).
 
+### Added
+- **«Statistiche» among the overlays of the 3D** (MICRO-VIEWER-SPAZIO-EMTREE
+  p.4; `overlays.ts`, `scene3d.ts`). Under the view's name: the triangles and
+  the draw calls of the last frame (renderer.info), the vertices and the
+  objects of the visible scene, the FPS — read at most twice a second. Off by
+  default, also for a Space remembered before it; the Viewer follows the
+  same switch. Measured (Templu Mare v3.3, Chrome with the GPU): a reading
+  costs 0.15 ms on average (0.9 ms at most) on 1.6 million triangles and 217
+  objects; the frame rate is 60 FPS with it on and off. VS4.
+
 ### Changed
 - **A PDF in the Viewer keeps its tools, off, and says why** (MICRO-VIEWER-
   SPAZIO-EMTREE p.3). E.D. on dev.54 saw no annotation tool in the Viewer.

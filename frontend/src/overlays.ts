@@ -63,6 +63,8 @@ export type OverlayKey =
   | "s3_gizmo"
   | "s3_cursor"
   | "s3_sketches"
+  // MICRO-VIEWER-SPAZIO-EMTREE p.4 · triangles, vertices, objects, FPS (off by default)
+  | "s3_stats"
   // MICRO-SPAZIO-3D-3 p.14 · the decorators of the Space's labels, as the graph's
   | "s3_dec_rights"
   | "s3_dec_pd"
@@ -147,6 +149,7 @@ export const OVERLAY_GROUPS: readonly OverlayGroup[] = [
     { key: "s3_cursor", text: "⊕" },
     { key: "s3_navgizmo", text: "⊹" },
     { key: "s3_epoch_box", text: "▢" },
+    { key: "s3_stats", text: "Σ" },
   ] },
   { key: "s3_text", items: [
     { key: "s3_labels_rm", kind: "representation_model" },
@@ -207,7 +210,7 @@ export function defaultOverlays(view: OverlayView): OverlayState {
   // MICRO-SPAZIO-3D · the Space opens as it did: the proxies FILLED (the wire is
   // a choice), everything else on. MICRO-GIZMO-ASSI · as it did too: the axis
   // Z was never drawn (Blender's default: X and Y), the sketches had no label
-  return { master: true, off: view === "space" ? ["s3_axis_z", "s3_labels_sketch", "s3_proxy_wire"] : [] };
+  return { master: true, off: view === "space" ? ["s3_axis_z", "s3_labels_sketch", "s3_proxy_wire", "s3_stats"] : [] };
 }
 
 /** A slider's value under this state (its default when untouched). */
@@ -292,7 +295,7 @@ export const NOBODY = "-";
 
 type Stored = Record<string, Partial<Record<OverlayView, OverlayState & { rev?: number }>>>;
 /** MICRO-GIZMO-ASSI · the revision of the Space's keys a remembered state was written with */
-const SPACE_REV = 2;
+const SPACE_REV = 3;
 
 function readAll(): Stored {
   try {
@@ -312,9 +315,12 @@ function clean(v: unknown, view: OverlayView): OverlayState {
   // MICRO-GIZMO-ASSI · a Space remembered before the groups (no `rev`): the
   // one switch «s3_labels» is the three, and the keys born off (the axis Z,
   // the sketches' labels) start at their default
-  const before = view === "space" && o.rev !== SPACE_REV;
+  // MICRO-VIEWER-SPAZIO-EMTREE p.4 · rev 3: «Statistiche» is born off for a
+  // Space remembered before it (rev 2), the rest of that memory as it was
+  const rev = view === "space" ? (typeof o.rev === "number" ? o.rev : 1) : SPACE_REV;
+  const before = rev < 2;
   const old = before && was?.includes("s3_labels") ? ["s3_labels_rm", "s3_labels_proxy", "s3_labels_sketch"] : [];
-  const born: OverlayKey[] = before ? ["s3_axis_z", "s3_labels_sketch"] : [];
+  const born: OverlayKey[] = [...(before ? ["s3_axis_z", "s3_labels_sketch"] as OverlayKey[] : []), ...(rev < 3 ? ["s3_stats"] as OverlayKey[] : [])];
   const off = was
     ? OVERLAY_KEYS.filter((k) => was.includes(k) || old.includes(k) || born.includes(k))
     : d.off;

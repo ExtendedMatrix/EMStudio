@@ -4158,6 +4158,8 @@ const EN: Dict = {
   "vw.npSelectGroup": "Select the container {g}",
   "vw.pdfToolsOff": "On a PDF a region is traced on a page shown as an image: EMStudio does not draw a PDF's pages yet (the browser's reader shows it). The tools come back on the images and on the 3D",
   "vw.pdfToolsNote": "PDF: not traceable here yet",
+  "ov.item.s3_stats": "Statistics: triangles, vertices, objects, FPS",
+  "s3.stats": "{tri} triangles · {vert} vertices · {obj} objects · {calls} draw calls · {fps} FPS",
 };
 
 // ── Italiano: complete, because E.D. works in it ───────────────────────────────
@@ -8190,6 +8192,8 @@ const IT: Dict = {
   "vw.npSelectGroup": "Seleziona il contenitore {g}",
   "vw.pdfToolsOff": "Su un PDF la regione si traccia su una pagina mostrata come immagine: EMStudio non disegna ancora le pagine di un PDF (lo mostra il lettore del browser). Gli strumenti ci sono sulle immagini e sul 3D",
   "vw.pdfToolsNote": "PDF: qui non ancora tracciabile",
+  "ov.item.s3_stats": "Statistiche: triangoli, vertici, oggetti, FPS",
+  "s3.stats": "{tri} triangoli · {vert} vertici · {obj} oggetti · {calls} chiamate · {fps} FPS",
 };
 
 // ── The six other project languages: AI DRAFTS, awaiting validation ───────────
@@ -8527,6 +8531,7 @@ const EL: Dict = {
   "vw.npSelectGroup": "Επιλογή του περιέκτη {g}",
   "vw.pdfToolsOff": "Σε ένα PDF η περιοχή χαράσσεται σε μια σελίδα που εμφανίζεται ως εικόνα: το EMStudio δεν σχεδιάζει ακόμη τις σελίδες ενός PDF (το δείχνει ο αναγνώστης του προγράμματος περιήγησης). Τα εργαλεία υπάρχουν στις εικόνες και στο 3D",
   "vw.pdfToolsNote": "PDF: δεν χαράσσεται ακόμη εδώ",
+  "s3.stats": "{tri} τρίγωνα · {vert} κορυφές · {obj} αντικείμενα · {calls} κλήσεις · {fps} FPS",
 };
 
 const HE: Dict = {
@@ -8837,6 +8842,7 @@ const HE: Dict = {
   "vw.npSelectGroup": "בחר את המכל {g}",
   "vw.pdfToolsOff": "ב-PDF אזור משורטט על עמוד המוצג כתמונה: EMStudio עדיין אינו מצייר את עמודי ה-PDF (קורא הדפדפן מציג אותו). הכלים קיימים בתמונות וב-3D",
   "vw.pdfToolsNote": "PDF: עדיין לא ניתן לשרטט כאן",
+  "s3.stats": "{tri} משולשים · {vert} קודקודים · {obj} אובייקטים · {calls} קריאות ציור · {fps} FPS",
 };
 
 const ES: Dict = {
@@ -9152,6 +9158,7 @@ const ES: Dict = {
   "vw.npSelectGroup": "Seleccionar el contenedor {g}",
   "vw.pdfToolsOff": "En un PDF la región se traza sobre una página mostrada como imagen: EMStudio aún no dibuja las páginas de un PDF (lo muestra el lector del navegador). Las herramientas están en las imágenes y en el 3D",
   "vw.pdfToolsNote": "PDF: aquí aún no se traza",
+  "s3.stats": "{tri} triángulos · {vert} vértices · {obj} objetos · {calls} llamadas · {fps} FPS",
 };
 
 const PL: Dict = {
@@ -9466,6 +9473,7 @@ const PL: Dict = {
   "vw.npSelectGroup": "Zaznacz kontener {g}",
   "vw.pdfToolsOff": "Na PDF region rysuje się na stronie pokazanej jako obraz: EMStudio nie rysuje jeszcze stron PDF (pokazuje go czytnik przeglądarki). Narzędzia są na obrazach i w 3D",
   "vw.pdfToolsNote": "PDF: tu jeszcze nie do rysowania",
+  "s3.stats": "{tri} trójkątów · {vert} wierzchołków · {obj} obiektów · {calls} wywołań · {fps} FPS",
 };
 
 const RO: Dict = {
@@ -9781,6 +9789,7 @@ const RO: Dict = {
   "vw.npSelectGroup": "Selectează containerul {g}",
   "vw.pdfToolsOff": "Pe un PDF regiunea se trasează pe o pagină afișată ca imagine: EMStudio nu desenează încă paginile unui PDF (îl arată cititorul browserului). Uneltele există pe imagini și pe 3D",
   "vw.pdfToolsNote": "PDF: aici încă nu se trasează",
+  "s3.stats": "{tri} triunghiuri · {vert} vârfuri · {obj} obiecte · {calls} apeluri · {fps} FPS",
 };
 
 const FR: Dict = {
@@ -10099,6 +10108,7 @@ const FR: Dict = {
   "vw.npSelectGroup": "Sélectionner le conteneur {g}",
   "vw.pdfToolsOff": "Sur un PDF la région se trace sur une page montrée comme image : EMStudio ne dessine pas encore les pages d'un PDF (le lecteur du navigateur l'affiche). Les outils sont sur les images et sur la 3D",
   "vw.pdfToolsNote": "PDF : pas encore traçable ici",
+  "s3.stats": "{tri} triangles · {vert} sommets · {obj} objets · {calls} appels · {fps} FPS",
 };
 
 /**
@@ -11646,6 +11656,8 @@ const DE: Dict = {
   "vw.npSelectGroup": "Container {g} auswählen",
   "vw.pdfToolsOff": "Auf einem PDF wird eine Region auf einer als Bild gezeigten Seite gezogen: EMStudio zeichnet die Seiten eines PDF noch nicht (der Reader des Browsers zeigt es). Die Werkzeuge gibt es auf Bildern und im 3D",
   "vw.pdfToolsNote": "PDF: hier noch nicht zu ziehen",
+  "ov.item.s3_stats": "Statistik: Dreiecke, Eckpunkte, Objekte, FPS",
+  "s3.stats": "{tri} Dreiecke · {vert} Eckpunkte · {obj} Objekte · {calls} Draw-Calls · {fps} FPS",
 };
 
 const DICTS: Record<Locale, Dict> = {

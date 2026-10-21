@@ -244,7 +244,7 @@ import { openReadingBubble, type BubbleUnit } from "./reading-bubble";
 import { renderChronology, type ChronoEpoch, type ChronologyData } from "./chronology";
 import { buildSpace, citationKey, SpaceMarks, UnansweredFiles, type Space, type SpaceRM } from "./space";
 import { chooseVersion, SCENE_USES, USES } from "./asset-versions";
-import { mountSpaceScene, type SceneItem, type SceneMark, type SceneMenuRequest, type SceneView, type SpaceSceneHandle } from "./scene3d";
+import { mountSpaceScene, type SceneItem, type SceneStats, type SceneMark, type SceneMenuRequest, type SceneView, type SpaceSceneHandle } from "./scene3d";
 import { ladderOf, versionChoices, viewerSourceLine, viewerTargetOf,
          type VersionChoice, type ViewerPart, type ViewerTarget, type WeighedVersion } from "./viewer-node";
 import { CLICKS, readingOf as reading3dOf, VIEWER_3D_TOOLS, type ReadTexts, type Viewer3dTool } from "./viewer-annot";
@@ -15934,6 +15934,7 @@ function setOverlays(v: OverlayView, st: OverlayState): void {
   if (v === "space") {
     refreshSurfaces("scene");
     for (const h of sceneHandles.values()) h.applyOverlays();
+    for (const vs of viewerScenes.values()) vs.handle.applyOverlays();
   }
   draw();
   if (overlayPanelOpen()) renderOverlayPanel();
@@ -16109,6 +16110,7 @@ function renderOverlayPanel(): void {
         overlayMemo.set(`${overlayPerson()}|${v}`, next);
         saveOverlays(overlayPerson(), v, next);
         for (const h of sceneHandles.values()) h.applyOverlays();
+        for (const vs of viewerScenes.values()) vs.handle.applyOverlays();
       });
       row.append(lab, out, r);
       sec.appendChild(row);
@@ -25577,7 +25579,7 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
       openTileset: t("lod.openTileset"), loadAnyway: t("lod.loadAnyway"),
       lodNote: (n) => t("lod.note", { n: String(n) }),
       boxZoom: t("s3.boxZoom"), modalHint: t("s3.modalHint"),
-      viewName, centreEmpty: t("s3.centreEmpty"),
+      viewName, centreEmpty: t("s3.centreEmpty"), stats: sceneStatsWords,
       // MICRO-GIZMO-ASSI · the navigation gizmo: an end names its view and its key
       gizmo: { axis: (_a, view) => { const name = t(VIEW_NAMES[view]);
           return t("s3.gzView", { view: name, viewLow: name.charAt(0).toLocaleLowerCase(getLocale()) + name.slice(1), key: VIEW_KEYS[view] }); },
@@ -32006,6 +32008,12 @@ function vwVersionOf(s: VwScene, rmId: string): VwVersion | undefined {
   return (c && !c.startsWith("tileset:") ? l.find((v) => v.label === c) : undefined) ?? l[0];
 }
 
+/** MICRO-VIEWER-SPAZIO-EMTREE p.4 · the overlay «Statistiche», in words */
+function sceneStatsWords(x: SceneStats): string {
+  const n = (v: number) => v.toLocaleString(getLocale());
+  return t("s3.stats", { tri: n(x.triangles), vert: n(x.vertices), obj: n(x.objects), calls: n(x.calls), fps: String(x.fps) });
+}
+
 /** p.2 · what a scene draws, as a key: each item's file and state */
 function vwItemsSig(items: SceneItem[]): string {
   return JSON.stringify(items.map((i) => [i.id, i.url ?? null, i.state]));
@@ -32216,7 +32224,7 @@ function vwScene(win: Win, stage: HTMLElement, target: ViewerTarget, preview: Vw
       overLimit: (name, size, lim) => t("space.overLimit", { x: name, size, lim }),
       openTileset: t("lod.openTileset"), loadAnyway: t("lod.loadAnyway"),
       lodNote: (n) => t("lod.note", { n: String(n) }),
-      viewName, centreEmpty: t("s3.centreEmpty"),
+      viewName, centreEmpty: t("s3.centreEmpty"), stats: sceneStatsWords,
       gizmo: { axis: (_a, view) => { const name = t(VIEW_NAMES[view]);
           return t("s3.gzView", { view: name, viewLow: name.charAt(0).toLocaleLowerCase(getLocale()) + name.slice(1), key: VIEW_KEYS[view] }); },
         zoom: t("s3.gzZoom"), pan: t("s3.gzPan"), home: t("s3.gzHome"), ortho: t("s3.gzOrtho"), label: t("s3.gzLabel") },

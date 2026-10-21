@@ -143,6 +143,8 @@ export interface SceneTexts {
   viewName?: (view: AlignedView | null, ortho: boolean) => string;
   /** Shift+C on an empty scene */
   centreEmpty?: string;
+  /** MICRO-VIEWER-SPAZIO-EMTREE p.4 · the overlay «Statistiche», top left */
+  stats?: (s: SceneStats) => string;
   /** MICRO-GIZMO-ASSI · the navigation gizmo's tooltips: an end («Vista
    *  frontale (1)»), the column (zoom, pan, frame all, perspective ⇄ orthographic) */
   gizmo?: { axis: (a: GizmoAxis, view: AlignedView) => string; zoom: string; pan: string; home: string; ortho: string; label: string };
@@ -252,6 +254,9 @@ export interface SceneMark {
   /** the trace in progress (dashed, no label click) */
   draft?: boolean;
 }
+
+/** MICRO-VIEWER-SPAZIO-EMTREE p.4 · what the renderer drew in its last frame */
+export interface SceneStats { triangles: number; vertices: number; objects: number; calls: number; points: number; fps: number }
 
 export interface SpaceSceneOptions {
   texts: SceneTexts;
@@ -386,7 +391,7 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
   let frameIt: (() => void) | null = null;
   let cleanup: (() => void) | null = null;
   const drawn = new Map<string, Drawn>();
-  const ov = (k: OverlayKey): boolean => opts.overlay?.(k) ?? (k !== "s3_proxy_wire" && k !== "s3_axis_z" && k !== "s3_labels_sketch");
+  const ov = (k: OverlayKey): boolean => opts.overlay?.(k) ?? (k !== "s3_proxy_wire" && k !== "s3_axis_z" && k !== "s3_labels_sketch" && k !== "s3_stats");
   const val = (k: OverlayValueKey, def: number): number => opts.overlayValue?.(k) ?? def;
   /** MICRO-GIZMO-ASSI · the proxies' opacity, filled or in wireframe */
   const proxyOpacity = (): number => (ov("s3_proxy_wire") ? val("s3_opacity_wire", 0.9) : val("s3_opacity_proxy", 0.42));
@@ -820,6 +825,35 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
         lensMm: Math.round((12 / Math.tan((FOV * Math.PI) / 360)) * 10) / 10 });
       const viewEl = document.createElement("div");
       viewEl.className = "scn-view";
+      // MICRO-VIEWER-SPAZIO-EMTREE p.4 · «Statistiche» (off by default): what the
+      // renderer drew in its last frame, read from renderer.info, at most twice
+      // a second; the vertices and the objects counted on the visible scene at
+      // the same pace. The cost of the reading is measured and kept (the probe)
+      const statsEl = document.createElement("div");
+      statsEl.dataset.stats = "1";
+      let statsOn = ov("s3_stats");
+      statsEl.className = "scn-stats" + (statsOn ? "" : " hidden");
+      let statAt = 0, statFrames = 0;
+      let stats: SceneStats | null = null;
+      const statCost: number[] = [];
+      const readStats = (now: number) => {
+        const t0 = performance.now();
+        let vertices = 0, objects = 0;
+        scene.traverseVisible((o: any) => {
+          if (!(o.isMesh || o.isPoints || o.isLine) || o.userData?.helper) return;
+          objects++;
+          vertices += o.geometry?.attributes?.position?.count ?? 0;
+        });
+        const r = renderer.info.render;
+        const fps = statAt ? Math.round((statFrames * 1000) / (now - statAt)) : 0;
+        stats = { triangles: r.triangles, vertices, objects, calls: r.calls, points: r.points, fps };
+        statsEl.textContent = opts.texts.stats?.(stats) ?? `${r.triangles} ▲ · ${vertices} · ${objects} · ${fps} FPS`;
+        statCost.push(performance.now() - t0);
+        if (statCost.length > 120) statCost.shift();
+        statAt = now; statFrames = 0;
+      };
+      (probe as Record<string, unknown>).__spaceStats = () => ({ on: statsOn, shown: !statsEl.classList.contains("hidden"), text: statsEl.textContent,
+        stats, readMs: statCost.length ? { last: statCost[statCost.length - 1], mean: statCost.reduce((a, b) => a + b, 0) / statCost.length, max: Math.max(...statCost), n: statCost.length } : null });
       const showView = () => {
         viewEl.textContent = opts.texts.viewName?.(aligned, isOrtho) ?? "";
         host.dataset.view = `${aligned ?? "user"}:${isOrtho ? "ortho" : "persp"}`;
@@ -1809,6 +1843,9 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
           m.material.opacity = ov("s3_proxy_wire") ? val("s3_opacity_wire", 0.9) : 0.55;
         }
         sketchGroup.visible = ov("s3_sketches");
+        statsOn = ov("s3_stats");
+        statsEl.classList.toggle("hidden", !statsOn);
+        if (!statsOn) { statAt = 0; statFrames = 0; }
         buildDecor();
         attachGizmo();
       };
@@ -2109,6 +2146,7 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
         for (const l of live) if (l.layer.object.visible || altWarming.has(l)) l.layer.update();
         if (live.length && ++frames % 20 === 0) for (const l of live) l.bar.refresh();
         renderer.render(scene, camera);
+        if (statsOn) { statFrames++; const n = performance.now(); if (n - statAt >= 500) readStats(n); }
         place();
         placeMarks();
         drawNav();
@@ -2967,7 +3005,7 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
       host.appendChild(labels);
       host.append(marksEl, markLabels);
       host.appendChild(strips);
-      host.append(cursorEl, modalEl, boxEl, viewEl, guides, vptr, navEl);
+      host.append(cursorEl, modalEl, boxEl, viewEl, statsEl, guides, vptr, navEl);
       strips.appendChild(flowStrip);
       strips.appendChild(altStrip);
       showView();
@@ -2998,6 +3036,7 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
         modalEl.remove();
         boxEl.remove();
         viewEl.remove();
+        statsEl.remove();
         navEl.remove();
       };
       api = {

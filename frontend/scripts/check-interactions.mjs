@@ -7157,6 +7157,29 @@ test("VS3.tools", "VIEWER-SPAZIO-EMTREE p.3 · gli strumenti di annotazione a sc
   return { pass, detail: { ...r, errors } };
 });
 
+test("VS4.stats", "VIEWER-SPAZIO-EMTREE p.4 · «Statistiche» fra le sovrapposizioni: spenta di default; accesa dice triangoli, vertici, oggetti e FPS letti dal renderer, al massimo 2 volte al secondo, la lettura costa meno di 2 ms; il Viewer segue lo stesso interruttore", async () => {
+  const { p, ctx, errors } = await openV33();
+  await spaceV33(p);
+  const st = (sel = ".scn-host") => p.evaluate((x) => document.querySelector(x)?.__spaceStats?.() ?? null, sel);
+  const setStats = (on) => p.evaluate((o) => { const cur = window.__EM_DRAG__.overlays("space"); const off = new Set(cur.off ?? []); if (o) off.delete("s3_stats"); else off.add("s3_stats"); window.__EM_DRAG__.setOverlays("space", { off: [...off] }); }, on);
+  const r = { def: await st() };
+  r.inMenu = await p.evaluate(() => (window.__EM_DRAG__.overlays("space").off ?? []).includes("s3_stats"));
+  await setStats(true); await p.waitForTimeout(800);
+  const a = await st(); await p.waitForTimeout(3000); const b = await st();
+  r.on = { text: b?.text, triangles: b?.stats?.triangles, vertices: b?.stats?.vertices, objects: b?.stats?.objects, fps: b?.stats?.fps, reads3s: (b?.readMs?.n ?? 0) - (a?.readMs?.n ?? 0), mean: b?.readMs?.mean };
+  await p.click(`#workspace-bar .ws-tab[data-ws="canvas"]`); await p.waitForTimeout(800);
+  const w = await viewerIn(p, "inspector");
+  await p.evaluate((d) => window.__EM_DRAG__.select(d), await v33Id(p, "D.01"));
+  await p.waitForTimeout(3000);
+  r.viewer = await st(`.tile-area[data-win="${w}"] .vw-scene`);
+  await setStats(false); await p.waitForTimeout(400);
+  r.viewerOff = await st(`.tile-area[data-win="${w}"] .vw-scene`);
+  await ctx.close();
+  const pass = r.def && !r.def.on && !r.def.shown && r.inMenu && /triangoli.*vertici.*oggetti.*FPS/.test(r.on.text ?? "") && r.on.triangles > 0 && r.on.vertices > 0 && r.on.objects > 0
+    && r.on.reads3s >= 4 && r.on.reads3s <= 7 && r.on.mean < 2 && r.viewer?.on && r.viewer?.shown && r.viewerOff && !r.viewerOff.on && !r.viewerOff.shown && !errors.length;
+  return { pass, detail: { ...r, viewer: r.viewer && { on: r.viewer.on, text: r.viewer.text }, viewerOff: r.viewerOff && { on: r.viewerOff.on }, errors } };
+});
+
 test("VU3.quota", "VIEWER-UNICO p.4 · un punto quota sul 3D di D.01 crea l'estrattore del documento (coordinate del documento, il valore letto), il segno nella scena, la riga in «Estrazioni da questo documento»; «Interpretazione» lo collega a una proprietà; un annulla per gesto", async () => {
   const { p, ctx, errors } = await openV33();
   const w = await viewerIn(p, "outliner");

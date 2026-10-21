@@ -8903,6 +8903,12 @@ button.shelf-badge { cursor: pointer; font: inherit; font-size: 10.5px; }
 .scn-host.scn-armed .scn-canvas { cursor: crosshair; }
 /* MICRO-SPAZIO-3D-2 · the view's name, top left as Blender's («Frontale · Ortometrica») */
 .scn-view { position: absolute; left: 10px; top: 6px; z-index: 2; pointer-events: none; color: var(--scene-ink); font: 600 0.74rem var(--font-ui, inherit); text-shadow: 0 0 3px var(--scene-bg-top); }
+/* MICRO-VIEWER-SPAZIO-EMTREE p.4 · «Statistiche», under the view's name; the
+   epoch's summary steps down while it is shown. In a narrow Viewer the line
+   wraps (it never runs under the gizmo) */
+.scn-host:has(> .scn-stats:not(.hidden)) > .scn-ov { top: 44px; }
+.scn-stats { position: absolute; left: 10px; top: 24px; max-width: calc(100% - 110px); white-space: normal; z-index: 2; pointer-events: none; color: var(--scene-ink); font: 500 0.68rem var(--mono, ui-monospace, monospace); text-shadow: 0 0 3px var(--scene-bg-top); }
+.scn-stats.hidden { display: none; }
 .scn-host .scn-ov { top: 26px; }
 .scn-box.select { border-style: solid; border-color: #fff; outline-style: dashed; }
 /* the N panel «Vista», on the right as Blender's sidebar */

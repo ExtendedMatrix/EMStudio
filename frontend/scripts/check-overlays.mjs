@@ -33,7 +33,7 @@ const eq = (got, want, what) => { assert.deepEqual(got, want, `${what} — got $
   eq(O.OVERLAY_GROUPS.find((g) => g.key === "rights").items.map((i) => i.key),
     ["author", "author_ai", "license", "embargo", "inherited"], "authorship and rights: the four ornaments and the inherited");
   eq(new Set(O.OVERLAY_KEYS).size, O.OVERLAY_KEYS.length, "every overlay once");
-  eq(O.OVERLAY_KEYS.length, 42, "forty-two overlays: twenty-one of the graph, twenty-one of the Space (MICRO-GIZMO-ASSI: three labels, three axes, the navigation gizmo)");
+  eq(O.OVERLAY_KEYS.length, 43, "forty-three overlays: twenty-one of the graph, twenty-two of the Space (MICRO-GIZMO-ASSI: three labels, three axes, the navigation gizmo; MICRO-VIEWER-SPAZIO-EMTREE p.4: the statistics)");
   // every overlay is drawn somewhere: the renderers name it (a key nobody draws
   // would be a box that switches nothing)
   // MICRO-SPAZIO-3D · the Space's are gated by the scene (scene3d.ts) and by
@@ -48,10 +48,10 @@ const eq = (got, want, what) => { assert.deepEqual(got, want, `${what} — got $
   eq(O.overlayItemsFor("graph").map((i) => i.key), ["pd_chip", "genre"], "the liquid Graph: the paradata chip and the genre letter");
   for (const v of ["matrix", "dtc", "multigraph", "soloing"])
     eq(O.overlayItemsFor(v).length, 21, `${v}: every overlay of the graph`);
-  eq(O.overlayItemsFor("space").map((i) => i.key), ["s3_grid", "s3_axis_x", "s3_axis_y", "s3_axis_z", "s3_cursor", "s3_navgizmo", "s3_epoch_box",
+  eq(O.overlayItemsFor("space").map((i) => i.key), ["s3_grid", "s3_axis_x", "s3_axis_y", "s3_axis_z", "s3_cursor", "s3_navgizmo", "s3_epoch_box", "s3_stats",
     "s3_labels_rm", "s3_labels_proxy", "s3_labels_sketch",
     "s3_proxies", "s3_proxy_wire", "s3_rm", "s3_tiles", "s3_sketches", "s3_sel_outline", "s3_gizmo",
-    "s3_dec_rights", "s3_dec_pd", "s3_dec_warning", "s3_dec_epoch"], "the Space: its twenty-one, in their groups, and only them");
+    "s3_dec_rights", "s3_dec_pd", "s3_dec_warning", "s3_dec_epoch"], "the Space: its twenty-two, in their groups, and only them");
   eq(O.OVERLAY_VALUES.map((v) => [v.key, v.def]), [["s3_opacity_proxy", 0.42], ["s3_opacity_wire", 0.9]], "Geometry: two sliders, at the opacities the scene used");
   // every label in en, it, de
   const i18n = readFileSync(`${SRC}i18n.ts`, "utf8");
@@ -66,7 +66,7 @@ for (const v of O.OVERLAY_VIEWS) {
   if (v === "space") {
     // MICRO-SPAZIO-3D · the Space opens as it did: proxies FILLED, the wire a choice
     // MICRO-GIZMO-ASSI · as it was: the axis Z never drawn (Blender: X and Y), the sketches without a label
-    eq(d, { master: true, off: ["s3_axis_z", "s3_labels_sketch", "s3_proxy_wire"] }, "space: default all on but the sketches' labels, the axis Z and the wire");
+    eq(d, { master: true, off: ["s3_axis_z", "s3_labels_sketch", "s3_proxy_wire", "s3_stats"] }, "space: default all on but the sketches' labels, the axis Z, the wire and the statistics");
     ok(!O.overlaysHideSomething(d, v), "space: what is off by default hides nothing, no dot");
     ok(O.overlaysHideSomething(O.withOverlay(d, "s3_grid", false), v), "space: the grid off → the dot");
     ok(O.overlaysHideSomething(O.withOverlay(d, "s3_labels_proxy", false), v), "space: the proxies' labels off → the dot");
@@ -157,10 +157,10 @@ ok(O.overlayShown(null, "warning"), "no state → drawn (a renderer without over
   mem.clear();
   // a Space remembered before the groups, with the one switch of the labels off
   mem.set("emstudio.overlays", JSON.stringify({ "-": { space: { master: true, off: ["s3_labels", "s3_grid"] } } }));
-  eq(O.loadOverlays(null, "space").off, ["s3_grid", "s3_axis_z", "s3_labels_rm", "s3_labels_proxy", "s3_labels_sketch"],
+  eq(O.loadOverlays(null, "space").off, ["s3_grid", "s3_axis_z", "s3_stats", "s3_labels_rm", "s3_labels_proxy", "s3_labels_sketch"],
     "the old «s3_labels» off: the three labels off; the axis Z born off; the grid kept off");
   mem.set("emstudio.overlays", JSON.stringify({ "-": { space: { master: true, off: ["s3_proxy_wire", "s3_grid"] } } }));
-  eq(O.loadOverlays(null, "space").off, ["s3_grid", "s3_axis_z", "s3_labels_sketch", "s3_proxy_wire"],
+  eq(O.loadOverlays(null, "space").off, ["s3_grid", "s3_axis_z", "s3_stats", "s3_labels_sketch", "s3_proxy_wire"],
     "an old state with the labels on: models' and proxies' on, the new ones at their default (off)");
   // the three, one by one
   let st = O.defaultOverlays("space");
@@ -171,7 +171,13 @@ ok(O.overlayShown(null, "warning"), "no state → drawn (a renderer without over
   // a state written now is read back as it is (the axis Z on stays on)
   O.saveOverlays(null, "space", O.withOverlay(st, "s3_axis_z", true));
   O = await load();
-  eq(O.loadOverlays(null, "space").off, ["s3_proxy_wire"], "reload: the Z axis and the sketches' labels switched on stay on");
+  eq(O.loadOverlays(null, "space").off, ["s3_stats", "s3_proxy_wire"], "reload: the Z axis and the sketches' labels switched on stay on");
+  // MICRO-VIEWER-SPAZIO-EMTREE p.4 · a Space remembered at rev 2: the statistics born off, nothing else touched
+  mem.set("emstudio.overlays", JSON.stringify({ "-": { space: { master: true, off: ["s3_grid"], rev: 2 } } }));
+  eq(O.loadOverlays(null, "space").off, ["s3_grid", "s3_stats"], "rev 2: the statistics born off; the axis Z and the sketches' labels switched on stay on");
+  O.saveOverlays(null, "space", O.withOverlay(O.loadOverlays(null, "space"), "s3_stats", true));
+  O = await load();
+  eq(O.loadOverlays(null, "space").off, ["s3_grid"], "the statistics switched on stay on (rev 3)");
   // the sliders
   eq(O.overlayValue(O.defaultOverlays("space"), "s3_opacity_proxy"), 0.42, "the proxies' opacity: 0.42 by default");
   const moved = O.withValue(O.defaultOverlays("space"), "s3_opacity_proxy", 0.7);
