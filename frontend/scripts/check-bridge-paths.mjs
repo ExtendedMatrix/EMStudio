@@ -40,6 +40,7 @@ out = {
   "long": b._long_path(long_win, nt=True)[:7],
   "long_unc": b._long_path(share, nt=True)[:11],
   "short_kept": b._long_path("C:\\a\\b.glb", nt=True),
+  "walked": b._long_path("C:\\Scavi", nt=True, always=True),
   "posix_untouched": b._long_path("/" + "a" * 300, nt=False)[:3],
   "short_back": b._short_path(b._long_path(long_win, nt=True)) == long_win,
   "short_unc_back": b._short_path("\\\\?\\UNC\\nas\\s\\x"),
@@ -72,6 +73,7 @@ ok(H.long_len > 260, `the Windows fixture is past MAX_PATH (${H.long_len} charac
 eq(H.long, "\\\\?\\C:\\", "a Windows path past MAX_PATH gets the \\\\?\\ prefix");
 eq(H.long_unc, "\\\\?\\UNC\\nas", "…a share gets \\\\?\\UNC\\");
 eq(H.short_kept, "C:\\a\\b.glb", "a short Windows path is handed as it is");
+eq(H.walked, "\\\\?\\C:\\Scavi", "a folder to WALK gets the prefix whatever its length (what is under it may be long)");
 eq(H.posix_untouched, "/aa", "not on Windows: nothing added");
 ok(H.short_back, "the prefix comes off again (what realpath may hand back)");
 eq(H.short_unc_back, "\\\\nas\\s\\x", "…for a share too");

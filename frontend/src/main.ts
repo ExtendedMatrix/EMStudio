@@ -192,7 +192,7 @@ import connectionsDatamodel from "./assets/s3Dgraphy_connections_datamodel.json"
 import datamodelTranslations from "./assets/datamodel_translations.json";
 import { createResourceThumb } from "./resource-preview";
 import { keepOnDisk, newEmProject, refreshFileStates, reorderApply, reorderPreview, revealFile,
-         fileProjectRoot, describeFile, filesOfDocument, fileStateOf, findMovedFiles, movedFiles, dropMoved, bucketCheck, bucketPromote, dropBucket,
+         fileProjectRoot, describeFile, filesOfDocument, fileStateOf, fileStates, findMovedFiles, movedFiles, dropMoved, bucketCheck, bucketPromote, dropBucket,
          freePlanOf, freeLocal, freeUi, fileRows, listFilter,
          type FileState, type MovedFile } from "./file-states";
 import { docFilesBox, filesSection, fileStateLine, resourcesTable, type FileHooks } from "./file-states-ui";
@@ -363,6 +363,7 @@ import {
   writeBinaryFile,
 } from "./tauri";
 import * as paths from "./paths";
+import { classify, isDiskUrl, rewritePlan, tally, type LostFile, type Verdict } from "./relocate";
 import {
   describeExtraction,
   describeImport,
@@ -2562,6 +2563,10 @@ window.__EM_SCENE__ = () => {
   // document to `loadDocument` and lose the corpus of a project on the way
   // F2 · …and a single graph too: a path is a FILE, and only that door makes one
   openAt: (d: EmDocument, path: string) => loadContainerDocument(d, baseName(path), path),
+  /** MICRO-PERCORSI-WINDOWS p.3 · «Ritrova i file…» in a named folder (no dialog
+   *  for the folder), and what its window shows */
+  relocate: (folder: string) => relocateFiles(folder),
+  relocateState: () => relocateLast,
   /** SPAZIO · `api.measure` of an extractor's place, and of a region */
   measure: (x: string) => {
     const g = store ? chain.geometryOf(store.doc, x) : null;
@@ -12410,6 +12415,7 @@ document.getElementById("btn-quit")?.addEventListener("click", () => {
 document
   .getElementById("btn-pin-version")
   ?.addEventListener("click", () => pinProjectVersion());
+document.getElementById("btn-relocate-files")?.addEventListener("click", () => { void relocateFiles(); });
 // P3 · the panel can be dismissed; the chip is how it comes back. A notice you
 // cannot re-read is a notice you were only allowed to see once.
 document.getElementById("conflict-reopen")?.addEventListener("click", () => {
@@ -21564,6 +21570,7 @@ async function serveDocumentFolders(path: string): Promise<void> {
       body: JSON.stringify({ em_json: path, locators: [...dirs] }) });
     j = r.ok ? await r.json() : null;
   } catch { j = null; }
+  if (currentFilePath === path) void openingFileCheck(path);
   if (!j?.added?.length || currentFilePath !== path) return;
   logInfo(t("fs.docServed", { dirs: j.added.map((d) => paths.toNative(d)).join(", ") }));
   // what was refused before the answer is asked again
@@ -27922,6 +27929,203 @@ async function relinkFile(f: FileState): Promise<void> {
   st.updateNode(f.id, { data: { ...d, url: path.trim() } } as Partial<EmNode>);
   logInfo(`${f.name}: ${t("fs.findHere")} → ${path.trim()}`);
   void checkFiles();
+}
+
+// ── MICRO-PERCORSI-WINDOWS p.3 · «Ritrova i file…» ─────────────────────────
+// Blender's «Find Missing Files»: a folder the person names is walked by the
+// bridge; each file the document cannot find is proposed by its sha256, else by
+// name + size (s3Dgraphy `find_moved`, `relocate.ts` says what each proposal
+// is); on «Rewrite» the urls become RELATIVE to the em.json, in ONE step of
+// undo. The opening says how many files are not found, with the way here.
+
+/** what the last «Ritrova i file» found (the probes read it) */
+let relocateLast: { folder: string; verdicts: Verdict[]; applied: Array<{ id: string; from: string; to: string }> } | null = null;
+
+/** the files of the open document the disk cannot answer for, after a check */
+function lostFiles(): LostFile[] {
+  return fileStates()
+    .filter((f) => f.state === "missing" || f.state === "empty_copy")
+    .map((f) => {
+      const d = ((storeOfNode(f.id) ?? store)?.node(f.id)?.data ?? {}) as Record<string, unknown>;
+      return { id: f.id, name: f.name, state: f.state, url: String(d.url ?? "") };
+    })
+    .filter((f) => isDiskUrl(f.url));
+}
+
+async function relocateFiles(folderGiven?: string): Promise<void> {
+  if (!store || !currentFilePath || assetStoreBase()) { toast(t("relocate.noFile")); return; }
+  const emjson = currentFilePath;
+  let folder = folderGiven ?? null;
+  if (!folder) {
+    if (isTauri()) {
+      try { folder = await pickFolder(); } catch { folder = null; }
+    } else {
+      folder = window.prompt(t("relocate.pickPrompt"), paths.toNative(paths.dirname(emjson)))?.trim() || null;
+    }
+  }
+  if (!folder) return;
+  folder = paths.toPosix(folder);
+  toast(t("relocate.searching", { where: paths.toNative(folder) }));
+  const bridge = await bridgeUrl();
+  const r = await refreshFileStates(bridge, store.doc, { folders: fileFolders(), room: null });
+  if (!r.ok) { toast(r.error ?? t("relocate.failed")); return; }
+  const lost = lostFiles();
+  let moved: MovedFile[] = [];
+  if (lost.length) {
+    try { moved = await findMovedFiles(bridge, store.doc, [folder], fileProjectRoot()); }
+    catch (e) { toast(String((e as Error)?.message ?? e)); return; }
+  }
+  const verdicts = classify(lost, moved);
+  relocateLast = { folder, verdicts, applied: [] };
+  filesRefresh();
+  if (currentFilePath !== emjson) return;
+  showRelocateWindow(folder, verdicts, emjson);
+}
+
+/** the window: what was found, what is ambiguous (the person picks), what is
+ *  missing, what waits for this computer's OneDrive folder */
+function showRelocateWindow(folder: string, verdicts: Verdict[], emjson: string): void {
+  document.querySelector('.modal[data-dialog="relocate"]')?.remove();
+  const modal = document.createElement("div");
+  modal.className = "modal";
+  modal.dataset.dialog = "relocate";
+  const card = document.createElement("div");
+  card.className = "modal-card relocate";
+  const head = document.createElement("div");
+  head.className = "modal-head";
+  head.textContent = t("relocate.title", { where: paths.toNative(folder) });
+  const body = document.createElement("div");
+  body.className = "modal-body";
+  const n = tally(verdicts);
+  const sum = document.createElement("p");
+  sum.dataset.relocate = "tally";
+  sum.textContent = verdicts.length
+    ? t("relocate.tally", { found: String(n.found), ambiguous: String(n.ambiguous), missing: String(n.missing), link: String(n.link) })
+    : t("relocate.nothing");
+  body.appendChild(sum);
+  const how = (c: { how: string }) => t(`relocate.how.${c.how}`);
+  const rel = (p: string) => paths.relativeTo(emjson, p);
+  const picked = new Map<string, string>();
+  const go = document.createElement("button");
+  const count = () => {
+    const k = verdicts.filter((v) => picked.has(v.id)).length;
+    go.textContent = t("relocate.apply", { n: String(k) });
+    go.disabled = !k;
+  };
+  const section = (kind: Verdict["kind"]) => {
+    const vs = verdicts.filter((v) => v.kind === kind);
+    if (!vs.length) return;
+    const h = document.createElement("h4");
+    h.textContent = `${t(`relocate.kind.${kind}`)} (${vs.length})`;
+    const ul = document.createElement("ul");
+    ul.className = "relocate-list";
+    ul.dataset.kind = kind;
+    for (const v of vs) {
+      const li = document.createElement("li");
+      li.dataset.id = v.id;
+      const name = document.createElement("span");
+      name.className = "relocate-name";
+      name.textContent = v.name || paths.leafName(v.url);
+      name.title = v.url;
+      li.appendChild(name);
+      if (kind === "found" && v.choice) {
+        const box = document.createElement("input");
+        box.type = "checkbox";
+        box.checked = true;
+        picked.set(v.id, v.choice);
+        const choice = v.choice;
+        box.addEventListener("change", () => { if (box.checked) picked.set(v.id, choice); else picked.delete(v.id); count(); });
+        const to = document.createElement("span");
+        to.className = "relocate-to";
+        to.textContent = `→ ${rel(choice)} · ${how(v.candidates[0])}`;
+        to.title = paths.toNative(choice);
+        li.prepend(box);
+        li.appendChild(to);
+      } else if (kind === "ambiguous") {
+        const sel = document.createElement("select");
+        const none = document.createElement("option");
+        none.value = "";
+        none.textContent = t("relocate.pick");
+        sel.appendChild(none);
+        for (const c of v.candidates) {
+          const o = document.createElement("option");
+          o.value = c.path;
+          o.textContent = `${rel(c.path)} · ${how(c)}`;
+          sel.appendChild(o);
+        }
+        sel.addEventListener("change", () => { if (sel.value) picked.set(v.id, sel.value); else picked.delete(v.id); count(); });
+        li.appendChild(sel);
+      } else {
+        const at = document.createElement("span");
+        at.className = "relocate-to";
+        at.textContent = kind === "link" ? `${v.url} · ${t("relocate.linkHint")}` : v.url;
+        li.appendChild(at);
+      }
+      ul.appendChild(li);
+    }
+    body.append(h, ul);
+  };
+  (["found", "ambiguous", "missing", "link"] as const).forEach(section);
+  const foot = document.createElement("div");
+  foot.className = "modal-foot";
+  const close = () => modal.remove();
+  const cancel = document.createElement("button");
+  cancel.textContent = t("common.cancel");
+  cancel.onclick = close;
+  go.dataset.act = "relocate-go";
+  go.className = "primary";
+  go.onclick = () => {
+    const chosen = verdicts.map((v) => ({ ...v, choice: picked.get(v.id) ?? null }));
+    applyRelocation(rewritePlan(chosen, emjson));
+    close();
+  };
+  count();
+  foot.append(cancel, go);
+  card.append(head, body, foot);
+  modal.appendChild(card);
+  modal.addEventListener("click", (e) => { if (e.target === modal) close(); });
+  document.body.appendChild(modal);
+}
+
+/** the rewrite: one step of undo per document (a study is one) */
+function applyRelocation(plan: Array<{ id: string; from: string; to: string }>): void {
+  if (!plan.length) return;
+  const byStore = new Map<DocumentStore, typeof plan>();
+  for (const p of plan) {
+    const st = storeOfNode(p.id) ?? store;
+    if (!st?.node(p.id)) continue;
+    byStore.set(st, [...(byStore.get(st) ?? []), p]);
+  }
+  let last: DocumentStore | null = null;
+  for (const [st, ps] of byStore) {
+    st.batch(() => {
+      for (const p of ps) {
+        const d = (st.node(p.id)?.data ?? {}) as Record<string, unknown>;
+        st.updateNode(p.id, { data: { ...d, url: p.to } } as Partial<EmNode>);
+      }
+    });
+    last = st;
+  }
+  for (const p of plan) logInfo(`${t("fs.relocate")} ${p.from || "—"} → ${p.to}`);
+  if (relocateLast) relocateLast.applied = plan;
+  dropMoved(plan.map((p) => p.id));
+  if (last) toastUndo(t("relocate.done", { n: String(plan.length) }), last);
+  spaceMarks.notFound.clear();
+  void checkFiles();
+  refreshSurfaces("scene");
+  refreshSurfaces("viewer");
+}
+
+/** the opening: «N files not found · Find missing files…» — once per open,
+ *  after the bridge serves the document's folders */
+async function openingFileCheck(path: string): Promise<void> {
+  if (!store || currentFilePath !== path || assetStoreBase()) return;
+  await checkFiles();
+  if (currentFilePath !== path) return;
+  const n = lostFiles().length;
+  if (!n) return;
+  logInfo(t("relocate.atOpen", { n: String(n) }));
+  toastAsk(t("relocate.atOpen", { n: String(n) }), [{ label: t("fs.relocate"), run: () => { void relocateFiles(); } }]);
 }
 
 async function uploadFiles(fs: FileState[]): Promise<void> {

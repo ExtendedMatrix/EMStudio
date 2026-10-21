@@ -88,7 +88,7 @@ const MAIN = readFileSync(`${SRC}main.ts`, "utf8");
 const FILE_ORDER = ["new", "open", "openRecent▸", "openReplace", "close", "—",
   "save", "saveAs", "saveAll", "pin", "—",
   "import▸", "import/importGraphml", "import/importMapping",
-  "export▸", "export/exportSvg", "export/exportTtl", "integrate", "—",
+  "export▸", "export/exportSvg", "export/exportTtl", "integrate", "relocate", "—",
   "createRoom", "bringIntoRoom"];
 
 for (const platform of ["web", "mac", "win", "linux"]) {

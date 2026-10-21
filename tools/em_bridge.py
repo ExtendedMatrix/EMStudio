@@ -301,17 +301,18 @@ def _fs_at_path(url_path):
 _WIN_LONG_FROM = 248
 
 
-def _long_path(path, *, nt=None):
+def _long_path(path, *, nt=None, always=False):
     """A path the OS calls can reach past MAX_PATH: on Windows, a long one as
     `\\\\?\\C:\\…` (a share as `\\\\?\\UNC\\server\\share\\…`), normalised first
     (the prefix turns off the OS's own `/` and `..` handling). Anything else —
-    a short path, another OS — as it is."""
+    a short path, another OS — as it is. `always`: a folder that will be WALKED
+    (what lies under it may be long, the folder itself short)."""
     import ntpath
     nt = (os.name == "nt") if nt is None else nt
     if not nt or not path:
         return path
     p = str(path)
-    if p.startswith("\\\\?\\") or len(p) < _WIN_LONG_FROM:
+    if p.startswith("\\\\?\\") or (len(p) < _WIN_LONG_FROM and not always):
         return p
     p = ntpath.normpath(p)
     if p.startswith("\\\\"):
@@ -859,6 +860,9 @@ def _files_route(route, body):
         folders = [os.path.abspath(os.path.expanduser(f)) for f in body.get("folders") or [] if f]
         if body.get("project_root"):
             folders.append(os.path.abspath(os.path.expanduser(body["project_root"])))
+        # MICRO-PERCORSI-WINDOWS · walked with the \\?\ prefix on Windows: a file
+        # deep in the folder may pass MAX_PATH (the page drops the prefix again)
+        folders = [_long_path(f, always=True) for f in folders]
         if not hasattr(api, "find_moved_files"):
             raise ValueError("this s3Dgraphy is too old for «Find moved files»")
         found = []

@@ -126,6 +126,8 @@ export const MENUS: MenuDef[] = [
         cmd("exportTtl", "menu.ttlItem", "btn-ttl", { title: "menu.ttlTitle" }),
       ] },
       cmd("integrate", "container.addToProject", "btn-add-project", { title: "container.addToProjectTitle" }),
+      // MICRO-PERCORSI-WINDOWS p.3 · Blender's «Find Missing Files», for a study
+      cmd("relocate", "fs.relocate", "btn-relocate-files", { title: "fs.relocateTitle" }),
       sep,
       cmd("createRoom", "room.createItem", "btn-create-room", { title: "room.createItemTitle" }),
       cmd("bringIntoRoom", "room.bringItem", "btn-bring-into-room", { title: "room.bringItemTitle" }),

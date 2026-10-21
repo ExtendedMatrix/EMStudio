@@ -7560,6 +7560,65 @@ test("WP1.windows", "PERCORSI-WINDOWS p.1/p.2 · Templu Mare v4 aperto da C:\\�
   return { pass, detail: { doc, asked: at.length, notOk: at.filter((a) => !(a.status >= 200 && a.status < 300)).slice(0, 3), first: at[0], drawn, miss, errors } };
 });
 
+// WP2 · «Ritrova i file…» on a study whose proxies were moved: Templu Mare v4's
+// em.json alone in a study folder (made here, under the system's temp), its
+// proxies copied to another folder with their names (`altrove/proxies-spostati`).
+const WP2_BRIDGE = process.env.WINPATHS_BRIDGE ?? "http://127.0.0.1:8872";
+test("WP2.relocate", "PERCORSI-WINDOWS p.3 · Templu Mare v4 senza i suoi file: all'apertura «N file non trovati · Ritrova i file…»; «Ritrova i file» in un'altra cartella trova i 65 proxy per sha256, dice ambigui, mancanti e da collegare (onedrive://); «Riscrivi» li rende relativi all'em.json (../../altrove/…) in un passo; Annulla li rimette tutti", async () => {
+  if (!existsSync(WP_V4)) throw new Error(`the v4 copy is not at ${WP_V4}`);
+  const { mkdtempSync, realpathSync: real } = await import("node:fs");
+  const base = real(mkdtempSync(`${(await import("node:os")).tmpdir()}/wp2-`));
+  const emj = `${base}/studio/EM/TempluMare_v4.em.json`;
+  const away = `${base}/altrove/proxies-spostati`;
+  mkdirSync(`${base}/studio/EM`, { recursive: true });
+  mkdirSync(away, { recursive: true });
+  copyFileSync(WP_V4, emj);
+  const proxDir = WP_V4.replace(/[^/]+$/, "proxies");
+  for (const f of readdirSync(proxDir)) copyFileSync(`${proxDir}/${f}`, `${away}/${f}`);
+  const ctx = await browser.newContext({ viewport: { width: 1500, height: 950 } });
+  const p = await ctx.newPage();
+  const errors = [];
+  p.on("pageerror", (e) => errors.push(String(e).slice(0, 300)));
+  await p.addInitScript(() => { try { if (!sessionStorage.getItem("probe")) { localStorage.clear(); localStorage.setItem("emstudio.locale", "it"); sessionStorage.setItem("probe", "1"); } } catch { /* */ } });
+  await p.goto(`http://localhost:${PORT}/em/studio/?bridge=${encodeURIComponent(WP2_BRIDGE)}`);
+  await p.waitForSelector("#workspace-bar .ws-tab", { timeout: 30000 });
+  await p.evaluate(([d, path]) => window.__EM_DRAG__.openAt(d, path), [JSON.parse(readFileSync(emj, "utf8")), emj]);
+  await p.waitForFunction(() => (window.__EM_SCENE__?.()?.nodes?.length ?? 0) > 50, null, { timeout: 60000 });
+  // the opening's word, with its way in
+  const atOpen = await p.waitForFunction(() => { const el = document.getElementById("toast"); const b = [...(el?.querySelectorAll("button.toast-action") ?? [])].map((x) => x.textContent);
+    return el && !el.classList.contains("hidden") && /file non trovati/.test(el.textContent ?? "") ? { text: el.textContent, buttons: b } : null; }, null, { timeout: 120000 })
+    .then((h) => h.jsonValue()).catch(() => null);
+  const urlOf = (id) => p.evaluate((x) => JSON.parse(window.__EM_DRAG__.graphJson()).nodes.find((n) => n.id === x)?.data?.url, id);
+  await p.evaluate((f) => window.__EM_DRAG__.relocate(f), `${base}/altrove`);
+  await p.waitForSelector('.modal[data-dialog="relocate"]', { timeout: 180000 });
+  const win = await p.evaluate(() => {
+    const m = document.querySelector('.modal[data-dialog="relocate"]');
+    const n = (k) => m.querySelectorAll(`.relocate-list[data-kind="${k}"] li`).length;
+    return { tally: m.querySelector('[data-relocate="tally"]')?.textContent, found: n("found"), ambiguous: n("ambiguous"), missing: n("missing"), link: n("link"),
+             go: m.querySelector('[data-act="relocate-go"]')?.textContent,
+             sample: m.querySelector('.relocate-list[data-kind="found"] li .relocate-to')?.textContent };
+  });
+  await p.screenshot({ path: SHOT("wp2-relocate") }).catch(() => {});
+  const st = await p.evaluate(() => window.__EM_DRAG__.relocateState());
+  const su002 = st.verdicts.find((v) => /proxies\/SU002\.glb$/.test(v.url))?.id;
+  const before = su002 ? await urlOf(su002) : null;
+  await p.click('.modal[data-dialog="relocate"] [data-act="relocate-go"]');
+  await p.waitForTimeout(500);
+  const after = su002 ? await urlOf(su002) : null;
+  const applied = (await p.evaluate(() => window.__EM_DRAG__.relocateState()))?.applied ?? [];
+  const undoBtn = await p.$("#toast button.toast-action");
+  if (undoBtn) await undoBtn.click();
+  await p.waitForTimeout(300);
+  const undone = su002 ? await urlOf(su002) : null;
+  const allBack = await p.evaluate((ids) => { const g = JSON.parse(window.__EM_DRAG__.graphJson()); return ids.every(([id, from]) => g.nodes.find((n) => n.id === id)?.data?.url === from); }, applied.map((a) => [a.id, a.from]));
+  await ctx.close();
+  const pass = !!atOpen && atOpen.buttons.includes("Ritrova i file…") && win.found === 65 && win.link > 0 && win.missing > 0
+    && /Riscrivi 65 percorsi/.test(win.go ?? "") && /^→ \.\.\/\.\.\/altrove\/proxies-spostati\/SU\d+\.glb · stessi byte \(sha256\)$/.test(win.sample ?? "")
+    && before === "proxies/SU002.glb" && after === "../../altrove/proxies-spostati/SU002.glb" && applied.length === 65
+    && undone === "proxies/SU002.glb" && allBack && !errors.length;
+  return { pass, detail: { atOpen, win, before, after, applied: applied.length, undone, allBack, errors } };
+});
+
 // ── run ─────────────────────────────────────────────────────────────────────
 const chosen = cases.filter((c) => !only.length || only.includes(c.id) || only.some((o) => c.id.startsWith(o + ".")));
 for (const c of chosen) {
