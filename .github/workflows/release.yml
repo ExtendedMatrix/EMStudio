@@ -530,6 +530,22 @@ jobs:
           includeUpdaterJson: true
           updaterJsonPreferNsis: true
 
+      # MICRO-INSTALLER-PULSANTE p.1 · the NSIS installer closes em-bridge.exe
+      # before it copies (windows/installer-hooks.nsh). Without it an update
+      # stops on «Error opening file for writing: …\em-bridge.exe», and
+      # «Ignore» keeps the old bridge. The script tauri-cli handed to makensis
+      # must include the hooks file and insert both macros; a build where it
+      # does not is a build that would ship that error again.
+      - name: Windows · the installer carries the em-bridge hooks
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          nsi=$(ls apps/desktop/src-tauri/target/${{ matrix.target }}/release/nsis/*/installer.nsi | head -1)
+          echo "installer script: $nsi"
+          grep -n 'installer-hooks.nsh' "$nsi"
+          grep -n 'insertmacro NSIS_HOOK_PREINSTALL' "$nsi"
+          grep -n 'insertmacro NSIS_HOOK_PREUNINSTALL' "$nsi"
+
       # A copy of the installers as a plain artifact too: a draft release is
       # visible only to people with write access, and a tester on the team
       # should not need that to try a nightly.

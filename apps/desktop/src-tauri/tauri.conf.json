@@ -52,7 +52,12 @@
         "role": "Editor"
       }
     ],
-    "createUpdaterArtifacts": false
+    "createUpdaterArtifacts": false,
+    "windows": {
+      "nsis": {
+        "installerHooks": "windows/installer-hooks.nsh"
+      }
+    }
   },
   "plugins": {
     "deep-link": {
