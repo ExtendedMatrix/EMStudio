@@ -118,6 +118,16 @@ that asked for one.
   objects; the frame rate is 60 FPS with it on and off. VS4.
 
 ### Changed
+- **The EMtree, redrawn as the Outliner draws its rows** (MICRO-VIEWER-
+  SPAZIO-EMTREE p.6; `emtree.ts`). E.D.: the files and their graphs were
+  «caotici». One line per file: its name, the dot of unsaved work, the ⌘S
+  mark, the actions (Save, Close) over the line's end on hover or focus; the
+  path is the tooltip (a file with no path still says where it lives). Under
+  it the graphs, indented, one line each: a mark for the active one (and the
+  Outliner's inset bar), name, code (GT16), nodes; move and close on hover.
+  A graph's narratives and its auxiliary files are secondary lines under it.
+  Nothing wraps: every label ellipsizes and says itself whole in its
+  tooltip. Screenshots at 280 and 400 px in the report. VS6.
 - **Single / Gallery only where there are images to lay out** (MICRO-VIEWER-
   SPAZIO-EMTREE p.5). The Viewer's header offers the two modes only when what
   it shows groups two images or more: a folder of the disk, the Shelf, or a

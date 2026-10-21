@@ -845,39 +845,65 @@ export function renderEMTree(host: HTMLElement, tree: EMTree,
     return `${label} (${n})`;
   });
 
+  // MICRO-VIEWER-SPAZIO-EMTREE p.6 · the list, redrawn (E.D.: «caotico»): one
+  // line per file — its name, the dot of unsaved work, the actions on hover or
+  // focus, the path in the tooltip; its graphs indented under it, one line each
+  // — name, code, nodes, the active one marked as the Outliner marks the
+  // selected; a graph's narratives and its auxiliary files as secondary lines.
+  // Nothing wraps: every label ellipsizes and says itself in its tooltip.
+  const dirtyDot = (title: string) => `<span class="et-dirty" role="img" aria-label="${esc(title)}" title="${esc(title)}">●</span>`;
   const slotRow = (slot: GraphSlot): string => {
     const i = tree.slots.indexOf(slot);
     const isActive = slot.id === tree.activeId;
     const nodes = slot.store.doc.graph?.nodes?.length ?? 0;
     const edges = slot.store.doc.graph?.edges?.length ?? 0;
-    const aux = slot.auxiliaryFiles.length;
+    const code = shownCode(slot.store.doc);
+    const name = displayNames[i];
+    const tip = [name, code ? `(${code})` : "", `· ${nodes} ${labels("emtree.nodes")} · ${edges} ${labels("emtree.edges")}`,
+      isActive ? `· ${labels("emtree.activeTitle")}` : ""].filter(Boolean).join(" ");
     // COLLEGARE · the graph's stories, under it: a narrative lives IN a graph
     const stories = (slot.store.doc.graph?.nodes ?? []).filter((n) => n.node_type === "narrative")
       .map((n) => {
         const ch = ((n.data ?? {}) as { chapters?: unknown[] }).chapters;
-        return `<button type="button" class="et-story" data-story="${esc(n.id)}" data-slot="${esc(slot.id)}">❧ ${esc(String(n.name || n.id))}`
-          + ` <span class="et-meta">${Array.isArray(ch) ? ch.length : 0} ${esc(labels("emtree.chapters"))}</span></button>`;
+        const nm = String(n.name || n.id);
+        const chs = `${Array.isArray(ch) ? ch.length : 0} ${labels("emtree.chapters")}`;
+        return `<button type="button" class="et-story" data-story="${esc(n.id)}" data-slot="${esc(slot.id)}" title="${esc(`${nm} · ${chs}`)}">`
+          + `<span class="et-story-glyph" aria-hidden="true">❧</span><span class="et-story-name">${esc(nm)}</span>`
+          + `<span class="et-meta">${esc(chs)}</span></button>`;
       }).join("");
+    // the auxiliary files of this graph: one compact line (the list and its
+    // options are the section below, for the active graph)
+    const auxNames = slot.auxiliaryFiles.map((f) => f.name);
+    const aux = !auxNames.length ? "" : `
+        <div class="et-aux" title="${esc(`${auxNames.length} ${labels("emtree.auxFiles")}: ${auxNames.join(", ")}`)}">
+          <span class="et-aux-glyph" aria-hidden="true">⎘</span><span class="et-aux-n">${auxNames.length}</span>
+          <span class="et-aux-names">${esc(auxNames.join(" · "))}</span>
+        </div>`;
     return `
       <li class="et-slot${isActive ? " active" : ""}" data-id="${esc(slot.id)}">
-        <button class="et-pick" data-id="${esc(slot.id)}"
-                title="${esc(slot.path ?? labels("emtree.noFile"))}">
-          <span class="et-name">${esc(displayNames[i])}${slot.store.dirty ? " •" : ""}</span>
-          <span class="et-meta">${nodes} ${labels("emtree.nodes")} · ${edges} ${labels("emtree.edges")}</span>
-        </button>
-        <button class="et-move" data-move="${esc(slot.id)}"
-                title="${esc(labels("emtree.moveTitle"))}">⇄</button>
-        <button class="et-close" data-close="${esc(slot.id)}"
-                title="${esc(labels("emtree.close"))}">×</button>
+        <div class="et-row">
+          <button class="et-pick" data-id="${esc(slot.id)}" title="${esc(tip)}"${isActive ? ' aria-current="true"' : ""}>
+            <span class="et-mark" aria-hidden="true">${isActive ? "●" : "○"}</span>
+            <span class="et-name">${esc(name)}</span>${code && !name.includes(`(${code})`) ? `<span class="et-code">${esc(code)}</span>` : ""}
+            ${slot.store.dirty ? dirtyDot(labels("emtree.dirtyTitle")) : ""}
+            <span class="et-meta">${nodes} ${labels("emtree.nodes")}</span>
+          </button>
+          <span class="et-acts">
+            <button class="et-move" data-move="${esc(slot.id)}"
+                    title="${esc(labels("emtree.moveTitle"))}" aria-label="${esc(labels("emtree.moveTitle"))}">⇄</button>
+            <button class="et-close" data-close="${esc(slot.id)}"
+                    title="${esc(labels("emtree.close"))}" aria-label="${esc(labels("emtree.close"))}">×</button>
+          </span>
+        </div>
         ${stories}
-        ${aux === 0 ? "" : `<div class="et-aux">${aux} ${esc(labels("emtree.auxFiles"))}</div>`}
+        ${aux}
       </li>`;
   };
 
-  // F1 · TWO LEVELS: each open file is a group (its name, the tail of its path,
-  // whether it has unsaved work), its graphs under it; the graphs that have no
-  // file yet sit in «Senza file». The ACTIVE graph's file is marked: it is the
-  // one ⌘S writes, and until today nothing on screen said which that was.
+  // F1 · TWO LEVELS: each open file is a group (its name, whether it has
+  // unsaved work), its graphs under it; the graphs that have no file yet sit
+  // in «Senza file». The ACTIVE graph's file is marked: it is the one ⌘S
+  // writes, and until today nothing on screen said which that was.
   const activeFileId = tree.active()?.fileId ?? null;
   const known = new Set(tree.files.map((f) => f.id));
   const groups = tree.files.map((file) => {
@@ -895,7 +921,8 @@ export function renderEMTree(host: HTMLElement, tree: EMTree,
         </div>`;
     // B2 · where a file with no path lives, said truly: in its room, or — on
     // the desktop — simply not saved yet («opened in the browser» was the web's
-    // sentence, and the desktop showed it too)
+    // sentence, and the desktop showed it too). A file with a path says it in
+    // its tooltip: the line is its name (MICRO-VIEWER-SPAZIO-EMTREE p.6)
     const where = file.room
       ? labels("emtree.fileInRoom", { room: file.room.title || file.room.id,
                                       node: file.room.node })
@@ -903,15 +930,18 @@ export function renderEMTree(host: HTMLElement, tree: EMTree,
     const isTarget = !!tree.active() && activeFileId === file.id;
     return `
       <li class="et-file${isTarget ? " et-file-active" : ""}" data-file="${esc(file.id)}">
-        <div class="et-file-head" title="${esc(file.path ?? where)}">
-          <span class="et-file-icon">▤</span>
-          <span class="et-file-name">${esc(file.name)}${tree.fileDirty(file.id) ? " •" : ""}</span>
-          <span class="et-file-tail">${esc(file.path ? pathTail(file.path) : where)}</span>
+        <div class="et-file-head" title="${esc(file.path ?? where)}" tabindex="0">
+          <span class="et-file-icon" aria-hidden="true">▤</span>
+          <span class="et-file-name">${esc(file.name)}</span>
+          ${tree.fileDirty(file.id) ? dirtyDot(labels("emtree.dirtyTitle")) : ""}
           ${isTarget ? `<span class="et-file-target" title="${esc(labels("emtree.saveTargetTitle"))}">${esc(labels("emtree.saveTarget"))}</span>` : ""}
-          <button class="et-file-save" data-save-file="${esc(file.id)}"
-                  title="${esc(labels("emtree.saveFileTitle"))}">${esc(labels("emtree.saveFile"))}</button>
-          <button class="et-file-close" data-close-file="${esc(file.id)}"
-                  title="${esc(labels("emtree.closeFileTitle"))}">×</button>
+          <span class="et-acts">
+            <button class="et-file-save" data-save-file="${esc(file.id)}"
+                    title="${esc(labels("emtree.saveFileTitle"))}">${esc(labels("emtree.saveFile"))}</button>
+            <button class="et-file-close" data-close-file="${esc(file.id)}"
+                    title="${esc(labels("emtree.closeFileTitle"))}" aria-label="${esc(labels("emtree.closeFileTitle"))}">×</button>
+          </span>
+          ${file.path ? "" : `<span class="et-file-tail">${esc(where)}</span>`}
         </div>
         <ul class="et-slots">${members.map(slotRow).join("")}</ul>
         ${corpusRow}

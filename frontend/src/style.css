@@ -4802,165 +4802,217 @@ body.sync-active #footer-brand #em-version {
   right: 2px;
 }
 
-.et-slots {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 5px;
-}
-
-.et-slot {
-  display: grid;
-  /* row button takes the space, move + close keep their own columns, aux note
-     spans them underneath */
-  grid-template-columns: 1fr auto auto;
-  align-items: center;
-  border: 1px solid var(--border);
-  border-left: 3px solid transparent;
-  border-radius: var(--radius);
-  background: var(--bg-panel);
-}
-
-.et-slot.active {
-  border-left-color: var(--accent);
-  background: var(--bg-accent-soft);
-}
-
-.et-pick {
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-  min-width: 0;                 /* a long graph name must ellipsize, not stretch */
-  padding: 6px 4px 6px 8px;
-  border: none;
-  background: none;
-  text-align: left;
-  cursor: pointer;
-  font: inherit;
-}
-
-.et-name {
-  font-size: 12.5px;
-  font-weight: 600;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.et-slot.active .et-name {
-  /* the accent ON --bg-accent-soft measured 4.43 (dark) and 3.99 (light):
-     the ink that belongs on that surface is --accent-ink, not --accent. */
-  color: var(--accent-ink);
-}
-
-.et-meta {
-  font-size: 10.5px;
-  color: var(--text-faint);
-}
-
-.et-close {
-  padding: 2px 8px;
-  margin-right: 4px;
-  border: none;
-  background: none;
-  color: var(--text-dim);
-  font-size: 15px;
-  line-height: 1;
-  cursor: pointer;
-  border-radius: var(--radius-sm);
-}
-
-.et-close:hover {
-  color: var(--danger);
-  background: var(--bg-danger-soft);
-}
-
-/* F1 · the two levels: a file is a group, its graphs under it */
+/* MICRO-VIEWER-SPAZIO-EMTREE p.6 · the list as the Outliner draws its rows:
+   one line per file and per graph (12.5px, 4px 6px, the selected marked by an
+   inset bar), the graphs indented under their file, a graph's narratives and
+   auxiliary files as secondary lines under it; the actions appear on hover or
+   focus, nothing wraps (ellipsis, the whole in the tooltip). */
 .et-files {
   list-style: none;
   margin: 0;
   padding: 0;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 6px;
 }
 .et-file {
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 4px 4px 6px;
-}
-.et-file.et-file-active {
-  /* the file ⌘S writes */
-  border-color: var(--accent);
-  box-shadow: inset 3px 0 0 var(--accent);
+  border-radius: var(--radius-sm);
 }
 .et-file-head {
   display: flex;
-  flex-wrap: wrap;              /* the path tail takes its own line */
-  align-items: baseline;
-  gap: 2px 6px;
-  padding: 2px 2px 5px 4px;
+  align-items: center;
+  gap: 6px;
   min-width: 0;
-}
-.et-file-icon { color: var(--text-dim); }
-.et-file-name {
-  flex: 1;
-  min-width: 0;
-  font-size: 12px;
-  font-weight: 700;
+  padding: 4px 6px;
+  border-radius: var(--radius-sm);
   white-space: nowrap;
+  outline: none;
+}
+.et-file-head:hover { background: var(--bg-hover); }
+.et-file-head:focus-visible { box-shadow: inset 0 0 0 2px var(--accent); }
+.et-file-icon { flex: none; color: var(--text-dim); }
+.et-file-name {
+  flex: 0 1 auto;
+  min-width: 0;
+  font-size: 12.5px;
+  font-weight: 700;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 .et-file-tail {
-  order: 10;
-  flex: 1 0 100%;
+  flex: 1 1 0;
   min-width: 0;
-  padding-left: 18px;           /* under the name, past the icon */
-  font-size: 10px;
+  font-size: 10.5px;
   color: var(--text-faint);
-  white-space: nowrap;
   overflow: hidden;
-  text-overflow: ellipsis;      /* `pathTail` already keeps the END, the part that says where */
+  text-overflow: ellipsis;
 }
 .et-file-target {
+  flex: none;
   font-size: 9.5px;
   padding: 0 5px;
   border-radius: var(--radius-sm);
   background: var(--bg-accent-soft);
   color: var(--accent-ink);
-  white-space: nowrap;
 }
 .et-nofile .et-file-name { font-style: italic; font-weight: 600; }
-.et-file-save, .et-file-close, .et-move {
+.et-dirty { flex: none; color: var(--warn, #c98a00); font-size: 9px; line-height: 1; }
+/* the actions: over the row's right end, seen on hover or focus — hidden they
+   take no room, so a narrow panel still shows the names whole */
+.et-file-head, .et-row { position: relative; }
+.et-acts {
+  position: absolute;
+  right: 2px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: inline-flex;
+  align-items: center;
+  gap: 1px;
+  padding-left: 6px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-panel);
+  box-shadow: -8px 0 8px -4px var(--bg-panel);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.1s;
+}
+.et-file-head:hover .et-acts, .et-file-head:focus-within .et-acts,
+.et-row:hover .et-acts, .et-row:focus-within .et-acts { opacity: 1; pointer-events: auto; }
+/* the row's own surface under the actions (hover, the active graph's tint) */
+.et-file-head:hover .et-acts, .et-row:hover .et-acts {
+  background: linear-gradient(var(--bg-hover), var(--bg-hover)), var(--bg-panel);
+  box-shadow: none;
+}
+.et-slot.active > .et-row .et-acts {
+  background: linear-gradient(var(--bg-accent-soft), var(--bg-accent-soft)), var(--bg-panel);
+  box-shadow: none;
+}
+.et-slot.active > .et-row:hover .et-acts {
+  background: linear-gradient(var(--bg-hover), var(--bg-hover)), linear-gradient(var(--bg-accent-soft), var(--bg-accent-soft)), var(--bg-panel);
+}
+@media (hover: none) { .et-acts { position: static; transform: none; opacity: 1; pointer-events: auto; box-shadow: none; margin-left: auto; } }
+.et-file-save, .et-file-close, .et-move, .et-close {
   padding: 1px 6px;
   border: none;
   background: none;
   color: var(--text-dim);
   font-size: 11px;
+  line-height: 1.4;
   cursor: pointer;
   border-radius: var(--radius-sm);
 }
-.et-file-close { font-size: 14px; line-height: 1; }
+.et-file-close, .et-close { font-size: 14px; line-height: 1; }
 .et-file-save:hover, .et-move:hover { color: var(--accent-ink); background: var(--bg-accent-soft); }
-.et-file-close:hover { color: var(--danger); background: var(--bg-danger-soft); }
+.et-file-close:hover, .et-close:hover { color: var(--danger); background: var(--bg-danger-soft); }
+.et-file.et-file-active > .et-file-head .et-file-name { color: var(--accent-ink); }
+
+.et-slots {
+  list-style: none;
+  margin: 0;
+  padding: 0 0 0 14px;          /* the graphs, under their file */
+  display: flex;
+  flex-direction: column;
+}
+.et-slot { min-width: 0; }
+.et-row {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  border-radius: var(--radius-sm);
+}
+.et-row:hover { background: var(--bg-hover); }
+.et-slot.active > .et-row {
+  background: var(--bg-accent-soft);
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+.et-pick {
+  flex: 1 1 auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;                 /* a long graph name must ellipsize, not stretch */
+  padding: 4px 6px;
+  border: none;
+  background: none;
+  text-align: left;
+  cursor: pointer;
+  font: inherit;
+  white-space: nowrap;
+}
+.et-mark { flex: none; font-size: 8px; color: var(--text-faint); width: 8px; }
+.et-slot.active .et-mark { color: var(--accent); }
+.et-name {
+  flex: 0 1 auto;
+  min-width: 0;
+  font-size: 12.5px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.et-slot.active .et-name {
+  /* the accent ON --bg-accent-soft measured 4.43 (dark) and 3.99 (light):
+     the ink that belongs on that surface is --accent-ink, not --accent. */
+  color: var(--accent-ink);
+}
+.et-code {
+  flex: none;
+  font: 400 10.5px var(--font-mono, ui-monospace, monospace);
+  color: var(--text-muted);
+}
+.et-meta {
+  flex: none;
+  margin-left: auto;
+  padding-left: 4px;
+  font-size: 10.5px;
+  color: var(--text-faint);
+  white-space: nowrap;
+}
+/* the secondary lines of a graph: its narratives, its auxiliary files */
+.et-story, .et-aux {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  min-width: 0;
+  padding: 2px 6px 2px 26px;
+  border: none;
+  background: none;
+  font: inherit;
+  font-size: 11.5px;
+  color: var(--text-muted);
+  text-align: left;
+  white-space: nowrap;
+  border-radius: var(--radius-sm);
+}
+.et-story { cursor: pointer; }
+.et-story:hover { background: var(--bg-hover); color: var(--text); }
+.et-story-glyph, .et-aux-glyph { flex: none; color: var(--text-faint); }
+.et-story-name, .et-aux-names { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.et-aux { font-size: 10.5px; color: var(--text-faint); }
+.et-aux-n { flex: none; font-weight: 600; }
 .et-retained {
-  margin: 4px 4px 0;
+  margin: 2px 6px 0 20px;
   font-size: 10px;
   color: var(--text-faint);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 /* E5 · the file's DTC corpus, under its file: shown, or kept with «Show» */
 .et-corpus {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   gap: 6px;
-  margin: 4px 4px 0 14px;
+  margin: 2px 0 0 14px;
+  padding: 2px 6px;
   font-size: 11px;
   color: var(--text-dim);
+  white-space: nowrap;
+  min-width: 0;
 }
-.et-corpus .et-meta { color: var(--text-faint); font-size: 10px; }
+.et-corpus .et-name { font-size: 11.5px; }
+.et-corpus .et-meta { color: var(--text-faint); font-size: 10px; margin-left: 0; }
 .et-corpus[data-corpus-state="kept"] .et-name { font-style: italic; }
 .et-corpus-show {
   margin-left: auto;
@@ -4973,13 +5025,6 @@ body.sync-active #footer-brand #em-version {
   border-radius: var(--radius-sm);
 }
 .et-corpus-show:hover { background: var(--bg-accent-soft); }
-
-.et-aux {
-  grid-column: 1 / -1;
-  padding: 0 8px 6px;
-  font-size: 10px;
-  color: var(--text-faint);
-}
 
 /* MICRO-PULIZIA p.2 · a «?» that explains in its tooltip (the panel's header,
    the auxiliary files and their types) */
@@ -8584,7 +8629,6 @@ body.gesturing-resize * {
 .nidx-covrow.warn .nidx-covh { color: var(--warn-ink, #8a5a00); }
 .nidx-covrow.ok .nidx-covh { color: var(--ok-ink, #2e6b32); }
 .nidx-eyebrow .nidx-tag { margin-left: 6px; }
-.et-story { font-size: 11.5px; padding: 1px 0 1px 14px; color: var(--text); }
 
 /* NARRATIVE-DESK · «Pubblica ▾» carries its whole label (it was a 30px
    square action, «Publis…») */

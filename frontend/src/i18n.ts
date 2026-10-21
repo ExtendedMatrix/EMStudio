@@ -4160,6 +4160,8 @@ const EN: Dict = {
   "vw.pdfToolsNote": "PDF: not traceable here yet",
   "ov.item.s3_stats": "Statistics: triangles, vertices, objects, FPS",
   "s3.stats": "{tri} triangles · {vert} vertices · {obj} objects · {calls} draw calls · {fps} FPS",
+  "emtree.dirtyTitle": "Unsaved changes",
+  "emtree.activeTitle": "the active graph",
 };
 
 // ── Italiano: complete, because E.D. works in it ───────────────────────────────
@@ -8194,6 +8196,8 @@ const IT: Dict = {
   "vw.pdfToolsNote": "PDF: qui non ancora tracciabile",
   "ov.item.s3_stats": "Statistiche: triangoli, vertici, oggetti, FPS",
   "s3.stats": "{tri} triangoli · {vert} vertici · {obj} oggetti · {calls} chiamate · {fps} FPS",
+  "emtree.dirtyTitle": "Modifiche non salvate",
+  "emtree.activeTitle": "il grafo attivo",
 };
 
 // ── The six other project languages: AI DRAFTS, awaiting validation ───────────
@@ -8532,6 +8536,8 @@ const EL: Dict = {
   "vw.pdfToolsOff": "Σε ένα PDF η περιοχή χαράσσεται σε μια σελίδα που εμφανίζεται ως εικόνα: το EMStudio δεν σχεδιάζει ακόμη τις σελίδες ενός PDF (το δείχνει ο αναγνώστης του προγράμματος περιήγησης). Τα εργαλεία υπάρχουν στις εικόνες και στο 3D",
   "vw.pdfToolsNote": "PDF: δεν χαράσσεται ακόμη εδώ",
   "s3.stats": "{tri} τρίγωνα · {vert} κορυφές · {obj} αντικείμενα · {calls} κλήσεις · {fps} FPS",
+  "emtree.dirtyTitle": "Μη αποθηκευμένες αλλαγές",
+  "emtree.activeTitle": "το ενεργό γράφημα",
 };
 
 const HE: Dict = {
@@ -8843,6 +8849,8 @@ const HE: Dict = {
   "vw.pdfToolsOff": "ב-PDF אזור משורטט על עמוד המוצג כתמונה: EMStudio עדיין אינו מצייר את עמודי ה-PDF (קורא הדפדפן מציג אותו). הכלים קיימים בתמונות וב-3D",
   "vw.pdfToolsNote": "PDF: עדיין לא ניתן לשרטט כאן",
   "s3.stats": "{tri} משולשים · {vert} קודקודים · {obj} אובייקטים · {calls} קריאות ציור · {fps} FPS",
+  "emtree.dirtyTitle": "שינויים שלא נשמרו",
+  "emtree.activeTitle": "הגרף הפעיל",
 };
 
 const ES: Dict = {
@@ -9159,6 +9167,8 @@ const ES: Dict = {
   "vw.pdfToolsOff": "En un PDF la región se traza sobre una página mostrada como imagen: EMStudio aún no dibuja las páginas de un PDF (lo muestra el lector del navegador). Las herramientas están en las imágenes y en el 3D",
   "vw.pdfToolsNote": "PDF: aquí aún no se traza",
   "s3.stats": "{tri} triángulos · {vert} vértices · {obj} objetos · {calls} llamadas · {fps} FPS",
+  "emtree.dirtyTitle": "Cambios sin guardar",
+  "emtree.activeTitle": "el grafo activo",
 };
 
 const PL: Dict = {
@@ -9474,6 +9484,8 @@ const PL: Dict = {
   "vw.pdfToolsOff": "Na PDF region rysuje się na stronie pokazanej jako obraz: EMStudio nie rysuje jeszcze stron PDF (pokazuje go czytnik przeglądarki). Narzędzia są na obrazach i w 3D",
   "vw.pdfToolsNote": "PDF: tu jeszcze nie do rysowania",
   "s3.stats": "{tri} trójkątów · {vert} wierzchołków · {obj} obiektów · {calls} wywołań · {fps} FPS",
+  "emtree.dirtyTitle": "Niezapisane zmiany",
+  "emtree.activeTitle": "aktywny graf",
 };
 
 const RO: Dict = {
@@ -9790,6 +9802,8 @@ const RO: Dict = {
   "vw.pdfToolsOff": "Pe un PDF regiunea se trasează pe o pagină afișată ca imagine: EMStudio nu desenează încă paginile unui PDF (îl arată cititorul browserului). Uneltele există pe imagini și pe 3D",
   "vw.pdfToolsNote": "PDF: aici încă nu se trasează",
   "s3.stats": "{tri} triunghiuri · {vert} vârfuri · {obj} obiecte · {calls} apeluri · {fps} FPS",
+  "emtree.dirtyTitle": "Modificări nesalvate",
+  "emtree.activeTitle": "graful activ",
 };
 
 const FR: Dict = {
@@ -10109,6 +10123,8 @@ const FR: Dict = {
   "vw.pdfToolsOff": "Sur un PDF la région se trace sur une page montrée comme image : EMStudio ne dessine pas encore les pages d'un PDF (le lecteur du navigateur l'affiche). Les outils sont sur les images et sur la 3D",
   "vw.pdfToolsNote": "PDF : pas encore traçable ici",
   "s3.stats": "{tri} triangles · {vert} sommets · {obj} objets · {calls} appels · {fps} FPS",
+  "emtree.dirtyTitle": "Modifications non enregistrées",
+  "emtree.activeTitle": "le graphe actif",
 };
 
 /**
@@ -11658,6 +11674,8 @@ const DE: Dict = {
   "vw.pdfToolsNote": "PDF: hier noch nicht zu ziehen",
   "ov.item.s3_stats": "Statistik: Dreiecke, Eckpunkte, Objekte, FPS",
   "s3.stats": "{tri} Dreiecke · {vert} Eckpunkte · {obj} Objekte · {calls} Draw-Calls · {fps} FPS",
+  "emtree.dirtyTitle": "Ungespeicherte Änderungen",
+  "emtree.activeTitle": "der aktive Graph",
 };
 
 const DICTS: Record<Locale, Dict> = {

@@ -7206,6 +7206,41 @@ test("VS5.gallery", "VIEWER-SPAZIO-EMTREE p.5 · Singola/Gallery solo dove ci so
   return { pass, detail: { ...r, errors } };
 });
 
+test("VS6.emtree", "VIEWER-SPAZIO-EMTREE p.6 · l'EMtree: un file per riga col suo nome (il percorso nel tooltip), il pallino delle modifiche, le azioni al passaggio del mouse; sotto i grafi rientrati con nome, codice, nodi e il segno dell'attivo; la narrativa come voce secondaria; nessuna etichetta va a capo a 280 e a 400 px", async () => {
+  const { p, ctx, errors } = await openV33();
+  await p.evaluate(([d, path]) => window.__EM_DRAG__.openAt(d, path), [fixture("PortaMarina-lite"), "/tmp/vse/scavi/PortaMarina/PortaMarina-lite.em.json"]);
+  await p.waitForTimeout(1200);
+  await p.evaluate(() => window.__EM_DRAG__.auxAdd({ locator: "/tmp/vse/scavi/PortaMarina/US_schede_2024.xlsx", fileType: "emdb_xlsx", expanded: false }));
+  await p.waitForTimeout(500);
+  const r = {};
+  for (const W of [280, 400]) {
+    r[W] = await p.evaluate((w) => {
+      const a = document.querySelector('.tile-area[data-surface-type="emtree"]'); if (!a) return null;
+      a.style.width = `${w}px`;
+      const rows = [...a.querySelectorAll(".et-file-head, .et-row, .et-story, .et-aux")];
+      const tall = rows.filter((e) => e.getBoundingClientRect().height > 30).map((e) => e.textContent.trim().slice(0, 30));
+      const over = [...a.querySelectorAll(".et-file-name, .et-name, .et-story-name, .et-aux-names, .et-meta")].filter((e) => getComputedStyle(e).whiteSpace !== "nowrap" && !e.closest(".et-pick, .et-file-head, .et-story, .et-aux")).length;
+      const files = [...a.querySelectorAll(".et-file")].map((f) => ({ name: f.querySelector(".et-file-name")?.textContent, tip: f.querySelector(".et-file-head")?.title,
+        tail: !!f.querySelector(".et-file-tail"), dirty: !!f.querySelector(".et-file-head .et-dirty"),
+        graphs: [...f.querySelectorAll(".et-slot")].map((g) => ({ name: g.querySelector(".et-name")?.textContent, code: g.querySelector(".et-code")?.textContent ?? null,
+          meta: g.querySelector(".et-row .et-meta")?.textContent, active: g.querySelector(".et-pick")?.getAttribute("aria-current") === "true",
+          stories: g.querySelectorAll(".et-story").length, aux: g.querySelector(".et-aux .et-aux-names")?.textContent ?? null })) }));
+      const acts = [...a.querySelectorAll(".et-acts")].map((e) => getComputedStyle(e).opacity);
+      return { tall, over, files, acts };
+    }, W);
+  }
+  await p.hover('.tile-area[data-surface-type="emtree"] .et-file-head');
+  await p.waitForTimeout(250);
+  r.hoverActs = await p.evaluate(() => getComputedStyle(document.querySelector('.tile-area[data-surface-type="emtree"] .et-file-head .et-acts')).opacity);
+  await p.screenshot({ path: SHOT("vs6-emtree") }).catch(() => {});
+  await ctx.close();
+  const ok = (x) => x && !x.tall.length && x.files.length === 2 && x.files.every((f) => !f.tail && /\.em\.json$/.test(f.tip ?? "") && /^[^/]+\.em\.json$/.test(f.name ?? ""))
+    && x.files[0].graphs[0]?.code === "GT16" && /nodi/.test(x.files[0].graphs[0]?.meta ?? "") && x.files[0].graphs[0]?.stories >= 1
+    && x.files[1].graphs[0]?.active && x.files[1].graphs[0]?.aux === "US_schede_2024.xlsx" && x.files.some((f) => f.dirty);
+  const pass = ok(r[280]) && ok(r[400]) && r.hoverActs === "1" && !errors.length;
+  return { pass, detail: { ...r, errors } };
+});
+
 test("VU3.quota", "VIEWER-UNICO p.4 · un punto quota sul 3D di D.01 crea l'estrattore del documento (coordinate del documento, il valore letto), il segno nella scena, la riga in «Estrazioni da questo documento»; «Interpretazione» lo collega a una proprietà; un annulla per gesto", async () => {
   const { p, ctx, errors } = await openV33();
   const w = await viewerIn(p, "outliner");

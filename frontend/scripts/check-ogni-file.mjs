@@ -106,7 +106,11 @@ const graphDoc = (id, units = ["US1"]) => ({
   ok(files[0].classList.contains("et-file-active"), "F1 · the active graph's file is marked");
   ok(files[1].classList.contains("et-nofile") && files[1].querySelectorAll(".et-slot").length === 1,
      "F1 · the import is under «Senza file»");
-  ok(files[0].querySelector(".et-file-tail")?.textContent.includes("A.em.json"), "F1 · the path tail is visible");
+  // MICRO-VIEWER-SPAZIO-EMTREE p.6 · the file's line is its name; the path is its tooltip
+  ok(!files[0].querySelector(".et-file-tail") && files[0].querySelector(".et-file-head")?.title === "/s/A.em.json", "F1 · the path in the tooltip, not a line");
+  eq(files[0].querySelector(".et-file-name")?.textContent, "A.em.json", "F1 · the file's name alone (the unsaved dot is its own mark)");
+  ok(files[0].querySelector(".et-slot.active .et-pick")?.getAttribute("aria-current") === "true", "F1 · the active graph is marked (aria-current)");
+  ok(!!files[0].querySelector(".et-slot .et-row .et-acts .et-move") && !!files[0].querySelector(".et-file-head .et-acts .et-file-save"), "F1 · the actions sit in the row, shown on hover or focus");
 }
 
 // ── F5 · an epoch's date is born when it is written ─────────────────────────
