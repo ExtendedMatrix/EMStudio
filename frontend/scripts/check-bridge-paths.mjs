@@ -33,6 +33,16 @@ sys.path.insert(0, sys.argv[0] if False else ${JSON.stringify(TOOLS)})
 import em_bridge as b
 long_win = "C:\\Users\\Emanuel Demetrescu\\OneDrive - CNR\\" + "\\".join(["cartella_%02d_TempluMare" % i for i in range(12)]) + "\\x.glb"
 share = "\\\\nas\\scavi\\" + "\\".join(["d%02d_xxxxxxxxxxxxxxxxxxxx" % i for i in range(12)]) + "\\x.glb"
+def od_candidates():
+    import tempfile, os
+    home = tempfile.mkdtemp()
+    for d in ("Library/CloudStorage/OneDrive-CNR/Dottorato Bucarest", "Library/CloudStorage/OneDrive-Altro", "OneDrive - Vecchio"):
+        os.makedirs(os.path.join(home, d))
+    win = tempfile.mkdtemp()                      # what Windows names in %OneDriveCommercial%
+    os.makedirs(os.path.join(win, "Dottorato Bucarest"))
+    a = [(os.path.relpath(c["path"], home), c["has"]) for c in b._onedrive_candidates(["Dottorato Bucarest"], home=home, env={})]
+    w = [c["has"] for c in b._onedrive_candidates(["Dottorato Bucarest"], home=home, env={"OneDriveCommercial": win})]
+    return {"mac": a, "win_first_has": w[0], "win_n": len(w)}
 class St:
     def __init__(self, attrs=0, flags=0): self.st_file_attributes = attrs; self.st_flags = flags
 out = {
@@ -61,6 +71,9 @@ out = {
   "cloud_win": [b._cloud_only(St(attrs=a)) for a in (0x20, 0x400000 | 0x20, 0x40000, 0x1000)],
   "cloud_mac": [b._cloud_only(St(flags=f)) for f in (0x60, 0x40000060)],
   "level": b.BRIDGE_LEVEL,
+  "onedrive": od_candidates(),
+  "with_onedrive": b._with_onedrive({"graphs": {"g": {"nodes": [{"data": {"url": "onedrive://Dottorato Bucarest/2_Rilievo/TM015.obj"}},
+                                                                {"data": {"url": "../RB/a.glb"}}]}}}, "/OD")["graphs"]["g"]["nodes"],
 }
 print(json.dumps(out))
 `], { encoding: "utf8" });
@@ -91,6 +104,11 @@ eq(H.doc_disk, ["C:\\EM"], "a whole disk is never opened by a document");
 eq(H.cloud_win, [false, true, true, true], "Windows: RECALL_ON_DATA_ACCESS, RECALL_ON_OPEN, OFFLINE = online only");
 eq(H.cloud_mac, [false, true], "macOS: SF_DATALESS = online only");
 eq(H.level, 34, "the bridge says level 34 (/fs/doc, /fs/probe)");
+eq(H.onedrive.mac[0], ["Library/CloudStorage/OneDrive-CNR", 1], "OneDrive found under ~/Library/CloudStorage, the one holding the study's folder first");
+eq(H.onedrive.mac.length, 3, "…the others listed too (another account, ~/OneDrive*)");
+eq([H.onedrive.win_first_has, H.onedrive.win_n], [1, 4], "Windows' %OneDriveCommercial% is asked as well");
+eq(H.with_onedrive.map((n) => n.data.url), ["/OD/Dottorato Bucarest/2_Rilievo/TM015.obj", "../RB/a.glb"],
+   "the library is asked with onedrive:// under this computer's folder; the rest untouched");
 
 // ── 2 · a bridge for real ───────────────────────────────────────────────────
 const dir = realpathSync(mkdtempSync(`${tmpdir()}/bridge-paths-`));

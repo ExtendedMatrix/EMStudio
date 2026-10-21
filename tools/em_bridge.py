@@ -810,7 +810,67 @@ def _bucket_route(route, body):
     return {"ok": True, "report": report, "quarantine": quarantine}
 
 
+def _with_onedrive(doc, root):
+    """MICRO-PERCORSI-WINDOWS p.4 · a copy of the document whose `onedrive://`
+    locators name this computer's OneDrive folder (`root`, a setting of the
+    machine, never of the study): `onedrive://Dottorato Bucarest/x.obj` →
+    `<root>/Dottorato Bucarest/x.obj`. The library then finds them as any file.
+    The page's document keeps its `onedrive://` — only the question changes."""
+    root = str(root or "").strip()
+    if not root or not isinstance(doc, (dict, list)):
+        return doc
+    out = json.loads(json.dumps(doc))
+
+    def walk(x):
+        if isinstance(x, dict):
+            url = x.get("url")
+            if isinstance(url, str) and url.lower().startswith("onedrive://"):
+                x["url"] = os.path.join(root, *[p for p in url[len("onedrive://"):].split("/") if p])
+            for v in x.values():
+                walk(v)
+        elif isinstance(x, list):
+            for v in x:
+                walk(v)
+    walk(out)
+    return out
+
+
+def _onedrive_candidates(names=(), *, home=None, env=None):
+    """MICRO-PERCORSI-WINDOWS p.4 · where OneDrive is on this computer: macOS
+    `~/Library/CloudStorage/OneDrive-*`, Windows' own variables (OneDriveCommercial,
+    OneDrive, OneDriveConsumer) and `~/OneDrive*`. Each says how many of `names`
+    (the first folders the study's `onedrive://` name) it holds — the one that
+    holds them is the one to propose."""
+    home = pathlib.Path(home or pathlib.Path.home())
+    env = os.environ if env is None else env
+    seen, out = set(), []
+
+    def add(p):
+        p = str(p)
+        if not p or not os.path.isdir(p):
+            return
+        key = os.path.normcase(os.path.realpath(p))
+        if key in seen:
+            return
+        seen.add(key)
+        out.append({"path": _out_path(p), "has": sum(1 for n in names if n and os.path.isdir(os.path.join(p, n)))})
+    for var in ("OneDriveCommercial", "OneDrive", "OneDriveConsumer"):
+        add(env.get(var) or "")
+    for parent in (home / "Library" / "CloudStorage", home):
+        try:
+            for name in sorted(os.listdir(parent)):
+                if name.startswith("OneDrive"):
+                    add(parent / name)
+        except OSError:
+            pass
+    out.sort(key=lambda c: -c["has"])
+    return out
+
+
 def _files_route(route, body):
+    # MICRO-PERCORSI-WINDOWS p.4 · `onedrive://` under this computer's OneDrive
+    if body.get("onedrive_root") and "doc" in body:
+        body = {**body, "doc": _with_onedrive(body["doc"], body["onedrive_root"])}
     """R1/R2/C1 · the bridge's half of the files: the library answers, the
     bridge only carries the question (the page never sees a filesystem path it
     did not already name)."""
@@ -2011,7 +2071,7 @@ def make_handler(api):
                     self._fail(400, f"invalid JSON body: {exc}")
                     return
                 self._fs_roots_edit(body)
-            elif route in ("/fs/doc", "/fs/probe"):
+            elif route in ("/fs/doc", "/fs/probe", "/fs/onedrive"):
                 # MICRO-PERCORSI-WINDOWS · the open document's folders, and the
                 # state of its files (there, online only, missing)
                 if not self._fs_gate():
@@ -2020,6 +2080,10 @@ def make_handler(api):
                     body = json.loads(raw.decode("utf-8")) if raw else {}
                 except Exception as exc:
                     self._fail(400, f"invalid JSON body: {exc}")
+                    return
+                if route == "/fs/onedrive":
+                    names = [str(x) for x in (body.get("names") or []) if isinstance(x, str)][:50]
+                    self._json({"ok": True, "candidates": _onedrive_candidates(names)})
                     return
                 (self._fs_doc if route == "/fs/doc" else self._fs_probe)(body)
             elif route == "/annotate":
@@ -3770,6 +3834,15 @@ def make_handler(api):
                 return
             locs = [str(x) for x in (body.get("locators") or []) if isinstance(x, str)][:20000]
             granted = [d for d in _doc_roots(full, locs) if os.path.isdir(_long_path(d))]
+            # p.4 · this computer's OneDrive folder, named in the settings: the
+            # study's `onedrive://` files are read there (never a whole disk nor
+            # the home folder itself)
+            od = str(body.get("onedrive_root") or "").strip()
+            if od:
+                od = _short_path(os.path.realpath(_long_path(os.path.expanduser(od))))
+                if os.path.isdir(_long_path(od)) and not _is_whole_disk(od) \
+                        and os.path.normcase(od) != os.path.normcase(str(pathlib.Path.home())):
+                    granted.append(od)
             added = [d for d in granted if not _fs_inside_roots(d)]
             for d in added:
                 if d not in _FS_ROOTS_DOC:

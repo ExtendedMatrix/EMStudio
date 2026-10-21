@@ -363,7 +363,7 @@ import {
   writeBinaryFile,
 } from "./tauri";
 import * as paths from "./paths";
-import { classify, isDiskUrl, rewritePlan, tally, type LostFile, type Verdict } from "./relocate";
+import { classify, isDiskUrl, locatorOnDisk, rewritePlan, tally, type LostFile, type Verdict } from "./relocate";
 import {
   describeExtraction,
   describeImport,
@@ -422,6 +422,7 @@ import {
   getSyncUrl,
   savedNodes,
   iiifBase,
+  oneDriveRoot,
   LOD_LIMIT_MB,
   LOD_LIMIT_POINTS,
   lotThresholds,
@@ -12416,6 +12417,16 @@ document
   .getElementById("btn-pin-version")
   ?.addEventListener("click", () => pinProjectVersion());
 document.getElementById("btn-relocate-files")?.addEventListener("click", () => { void relocateFiles(); });
+// MICRO-PERCORSI-WINDOWS p.4 · Settings ▸ Files on this computer ▸ «Find it»
+document.getElementById("set-onedrive-find")?.addEventListener("click", () => {
+  const out = document.getElementById("set-onedrive-found");
+  const input = document.getElementById("set-onedrive-root") as HTMLInputElement | null;
+  void oneDriveCandidates(oneDriveNames()).then((cs) => {
+    if (out) out.textContent = cs.length ? cs.map((c) => paths.toNative(c.path)).join(" · ") : t("settings.onedriveNotFound");
+    const best = cs.find((c) => c.has > 0) ?? cs[0];
+    if (best && input && !input.value.trim()) input.value = paths.toNative(best.path);
+  });
+});
 // P3 · the panel can be dismissed; the chip is how it comes back. A notice you
 // cannot re-read is a notice you were only allowed to see once.
 document.getElementById("conflict-reopen")?.addEventListener("click", () => {
@@ -14827,6 +14838,14 @@ function openSettings(section?: string): void {
   if (seen) seen.textContent = t(middleSeen() ? "settings.navMiddleSeen" : "settings.navMiddleNot");
   const iiifInput = document.getElementById("set-iiif-base") as HTMLInputElement | null;
   if (iiifInput) iiifInput.value = s.iiif.base;
+  // MICRO-PERCORSI-WINDOWS p.4 · this computer's OneDrive folder, as the platform writes it
+  const odInput = document.getElementById("set-onedrive-root") as HTMLInputElement | null;
+  if (odInput) {
+    odInput.value = paths.toNative(s.files.onedriveRoot);
+    odInput.placeholder = t("settings.onedriveNone");
+  }
+  const odFound = document.getElementById("set-onedrive-found");
+  if (odFound) odFound.textContent = "";
   const orcidClient = document.getElementById("set-orcid-client") as HTMLInputElement | null;
   if (orcidClient) orcidClient.value = s.identity.orcidClientId;
   const orcidBase = document.getElementById("set-orcid-base") as HTMLSelectElement | null;
@@ -15163,6 +15182,10 @@ settingsModal.addEventListener("click", (e) => {
       // the Mirador address had one reader, the old Annotator (MICRO-UN-POSTO)
       mirador: getSettings().iiif.mirador,
     },
+    files: {
+      onedriveRoot: paths.toPosix((document.getElementById("set-onedrive-root") as HTMLInputElement | null)?.value.trim() ?? "")
+        .replace(/(.)\/+$/, "$1"),
+    },
   };
   // AUDIT N11 · what changed, said by name (the toast spoke of the sync target
   // whatever had been changed)
@@ -15171,7 +15194,7 @@ settingsModal.addEventListener("click", (e) => {
   const changed: string[] = [];
   if (was && getLocale() !== was.locale) changed.push(t("settings.w.language"));
   if (was && storedMode() !== was.theme) changed.push(t("settings.w.theme"));
-  for (const k of ["identity", "texts", "sync", "interaction", "viewer", "iiif", "ai", "developer"] as const)
+  for (const k of ["identity", "texts", "sync", "interaction", "viewer", "iiif", "files", "ai", "developer"] as const)
     if (JSON.stringify(before[k]) !== JSON.stringify(next[k])) changed.push(t(`settings.w.${k}`));
   saveSettings(next);
   settingsOpenedWith = null;          // saved: nothing to put back
@@ -21501,7 +21524,7 @@ function docModelOf(d: EmNode): DocModel | null {
   const baseDir = currentFilePath ? paths.dirname(currentFilePath) : "";
   const map = addressMap(choice, store0
     ? { mode: "online", assetUrl: (c) => storeUrlOf(store0, c) }
-    : { mode: "offline", baseDir,
+    : { mode: "offline", baseDir, resolve: diskLocator,
         fileUrl: (abs) => `${bridgeBaseNow}/fs/at/${paths.fsAtPath(abs)}` });
   // a file SET is handed virtual (its files ask one another); one file — a glb,
   // a tileset's door, a .3tz — goes as its real address
@@ -21548,6 +21571,59 @@ function docMediaUrl(d: EmNode): string | null {
 
 // ── MICRO-PERCORSI-WINDOWS · the open em.json's folders, OneDrive's placeholders ──
 
+/** MICRO-PERCORSI-WINDOWS p.4 · a locator of the open document on this disk
+ *  (relocate.ts `locatorOnDisk`, with this computer's OneDrive folder) — the
+ *  viewer's addresses ask it for a file set's door */
+function diskLocator(loc: string): string {
+  return locatorOnDisk(currentFilePath, loc, { onedriveRoot: oneDriveRoot() }) ?? loc;
+}
+
+/** the first folders the document's `onedrive://` name (`Dottorato Bucarest`) */
+function oneDriveNames(): string[] {
+  const out = new Set<string>();
+  for (const n of store?.doc.graph.nodes ?? []) {
+    const m = /^onedrive:\/\/([^/]+)/i.exec(String(((n.data ?? {}) as Record<string, unknown>).url ?? ""));
+    if (m) out.add(m[1]);
+  }
+  return [...out];
+}
+
+/** where OneDrive is on this computer, as the bridge finds it — the folder that
+ *  holds the study's `onedrive://` first */
+async function oneDriveCandidates(names: string[]): Promise<Array<{ path: string; has: number }>> {
+  try {
+    const r = await fetch(`${await bridgeUrl()}/fs/onedrive`, { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ names }) });
+    return r.ok ? ((await r.json()).candidates ?? []) : [];
+  } catch { return []; }
+}
+
+/** «proposed automatically when found»: a document with `onedrive://` opened
+ *  on a computer with no OneDrive folder set — the folder that holds them is
+ *  proposed (one click: «Use it»), never set by itself. Null: nothing to propose. */
+async function oneDriveProposal(): Promise<{ text: string; answer: { label: string; run: () => void } } | null> {
+  if (oneDriveRoot()) return null;
+  const names = oneDriveNames();
+  if (!names.length) return null;
+  const best = (await oneDriveCandidates(names)).find((c) => c.has > 0);
+  if (!best || oneDriveRoot()) return null;
+  return {
+    text: t("onedrive.found", { path: paths.toNative(best.path), n: String(names.length) }),
+    answer: {
+      label: t("onedrive.use"),
+      run: () => {
+        const s = getSettings();
+        saveSettings({ ...s, files: { ...s.files, onedriveRoot: best.path } });
+        logInfo(t("onedrive.set", { path: paths.toNative(best.path) }));
+        // the bridge serves it, the files are asked again, the opening's word follows
+        if (currentFilePath) void serveDocumentFolders(currentFilePath);
+        refreshSurfaces("scene");
+        refreshSurfaces("viewer");
+      },
+    },
+  };
+}
+
 /** «The folder of the open em.json is always served»: the bridge is told which
  *  em.json is open and where its relative locators go (`POST /fs/doc`), and
  *  serves — for this session — its folder and the study's folder `../RB/…`
@@ -21567,7 +21643,7 @@ async function serveDocumentFolders(path: string): Promise<void> {
   let j: { ok?: boolean; added?: string[] } | null = null;
   try {
     const r = await fetch(`${await bridgeUrl()}/fs/doc`, { method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ em_json: path, locators: [...dirs] }) });
+      body: JSON.stringify({ em_json: path, locators: [...dirs], ...(oneDriveRoot() ? { onedrive_root: oneDriveRoot() } : {}) }) });
     j = r.ok ? await r.json() : null;
   } catch { j = null; }
   if (currentFilePath === path) void openingFileCheck(path);
@@ -21589,8 +21665,8 @@ async function noteCloudOnly(rid: string): Promise<void> {
   const st = storeOfNode(rid) ?? store;
   const d = (st?.node(rid)?.data ?? {}) as Record<string, unknown>;
   const u = String(d.url ?? "") || (st ? String(((resourceFiles(storeGraph(st), rid)[0]?.node.data ?? {}) as Record<string, unknown>).url ?? "") : "");
-  if (!u || paths.hasScheme(u)) return;
-  const abs = paths.resolveRelative(currentFilePath, u);
+  const abs = locatorOnDisk(currentFilePath, u, { onedriveRoot: oneDriveRoot() });
+  if (!abs) return;
   let state = "";
   try {
     const r = await fetch(`${await bridgeUrl()}/fs/probe`, { method: "POST", headers: { "Content-Type": "application/json" },
@@ -22456,7 +22532,9 @@ function spaceFileUrl(res: { url: string; checksum: string; residency?: string }
     void bridgeUrl().then((b) => { if (b && !bridgeBaseNow) { bridgeBaseNow = b; refreshSurfaces("scene"); refreshSurfaces("viewer"); } });
     return paths.isAbsolute(u) ? u : undefined;
   }
-  return `${bridgeBaseNow}/fs/at/${paths.fsAtPath(paths.resolveRelative(currentFilePath, u))}`;
+  // relative to the em.json, absolute, or onedrive:// under this computer's OneDrive
+  const abs = locatorOnDisk(currentFilePath, u, { onedriveRoot: oneDriveRoot() });
+  return abs ? `${bridgeBaseNow}/fs/at/${paths.fsAtPath(abs)}` : undefined;
 }
 
 /** MICRO-SPAZIO-3D-3 · the Space read once per state of the document: the
@@ -22593,7 +22671,7 @@ async function openResourceInScene(resId: string): Promise<void> {
   const d = (st.node(resId)?.data ?? {}) as Record<string, unknown>;
   const loc = String(((entry?.node.data ?? {}) as Record<string, unknown>).url ?? d.url ?? "");
   if (!loc) { toast(t("scene.noLocator")); return; }
-  await openPathInScene(paths.resolveRelative(currentFilePath, loc), resId);
+  await openPathInScene(locatorOnDisk(currentFilePath, loc, { onedriveRoot: oneDriveRoot() }) ?? loc, resId);
 }
 
 
@@ -24328,7 +24406,7 @@ function objAddressOf(resId: string): { url: string; modifier: (u: string) => st
     const baseDir = currentFilePath ? paths.dirname(currentFilePath) : "";
     const map = addressMap(choice, store0
       ? { mode: "online", assetUrl: (c) => storeUrlOf(store0, c) }
-      : { mode: "offline", baseDir,
+      : { mode: "offline", baseDir, resolve: diskLocator,
           fileUrl: (abs) => `${bridgeBaseNow}/fs/at/${paths.fsAtPath(abs)}` });
     out = { url: map.entryUrl, modifier: map.modifier };
   }
@@ -27763,7 +27841,7 @@ async function checkFiles(): Promise<void> {
   // looking at (in the browser a document has no path of its own)
   const browsing = windowsOf().filter((w) => w.type === "storage").map((w) => storagePath(w));
   const folders = [src.baseDir, ...src.doscoDirs, ...browsing].filter((x): x is string => !!x);
-  const r = await refreshFileStates(await bridgeUrl(), store.doc, { folders, room: fileRoom() });
+  const r = await refreshFileStates(await bridgeUrl(), store.doc, { folders, room: fileRoom(), onedriveRoot: oneDriveRoot() });
   filesChecking = false;
   if (!r.ok) logWarn(`files: ${r.error}`);
   else if (!fileProjectRoot()) logInfo(t("fs.noProject"));
@@ -27877,7 +27955,7 @@ async function findMoved(): Promise<void> {
     } catch { /* the project's folders are enough */ }
   }
   try {
-    const found = await findMovedFiles(await bridgeUrl(), store.doc, folders, fileProjectRoot());
+    const found = await findMovedFiles(await bridgeUrl(), store.doc, folders, fileProjectRoot(), oneDriveRoot());
     toast(found.length ? t("fs.movedFound", { n: String(found.length) }) : t("fs.noneMoved"));
   } catch (e) {
     toast(String((e as Error)?.message ?? e));
@@ -27967,15 +28045,15 @@ async function relocateFiles(folderGiven?: string): Promise<void> {
   folder = paths.toPosix(folder);
   toast(t("relocate.searching", { where: paths.toNative(folder) }));
   const bridge = await bridgeUrl();
-  const r = await refreshFileStates(bridge, store.doc, { folders: fileFolders(), room: null });
+  const r = await refreshFileStates(bridge, store.doc, { folders: fileFolders(), room: null, onedriveRoot: oneDriveRoot() });
   if (!r.ok) { toast(r.error ?? t("relocate.failed")); return; }
   const lost = lostFiles();
   let moved: MovedFile[] = [];
   if (lost.length) {
-    try { moved = await findMovedFiles(bridge, store.doc, [folder], fileProjectRoot()); }
+    try { moved = await findMovedFiles(bridge, store.doc, [folder], fileProjectRoot(), oneDriveRoot()); }
     catch (e) { toast(String((e as Error)?.message ?? e)); return; }
   }
-  const verdicts = classify(lost, moved);
+  const verdicts = classify(lost, moved, { onedriveRoot: oneDriveRoot() });
   relocateLast = { folder, verdicts, applied: [] };
   filesRefresh();
   if (currentFilePath !== emjson) return;
@@ -28124,8 +28202,12 @@ async function openingFileCheck(path: string): Promise<void> {
   if (currentFilePath !== path) return;
   const n = lostFiles().length;
   if (!n) return;
-  logInfo(t("relocate.atOpen", { n: String(n) }));
-  toastAsk(t("relocate.atOpen", { n: String(n) }), [{ label: t("fs.relocate"), run: () => { void relocateFiles(); } }]);
+  // the `onedrive://` wait for this computer's OneDrive folder: proposed in the same word
+  const od = await oneDriveProposal();
+  if (currentFilePath !== path) return;
+  const text = [t("relocate.atOpen", { n: String(n) }), od?.text].filter(Boolean).join(" · ");
+  logInfo(text);
+  toastAsk(text, [...(od ? [od.answer] : []), { label: t("fs.relocate"), run: () => { void relocateFiles(); } }], od ? 30000 : 15000);
 }
 
 async function uploadFiles(fs: FileState[]): Promise<void> {

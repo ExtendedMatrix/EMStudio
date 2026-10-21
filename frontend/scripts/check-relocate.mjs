@@ -53,7 +53,24 @@ eq(R.rewritePlan([{ id: "x", name: "x", url: "a.glb", kind: "found", choice: "/t
 eq(R.rewritePlan([{ id: "x", name: "x", url: "a.glb", kind: "found", choice: "\\\\nas\\scavi\\TM\\RB\\a.glb", candidates: [] }], "//nas/scavi/TM/EM/x.em.json"),
    [{ id: "x", from: "a.glb", to: "../RB/a.glb" }], "a share: ../RB");
 eq(["proxies/a.glb", "../RB/a.obj", "/abs/a.jpg", "C:\\x\\a.jpg", "onedrive://D/a.obj", "https://x/a.jpg", "blend://../RB/a.blend#Mesh/x", ""].map(R.isDiskUrl),
-   [true, true, true, true, true, false, false, false], "isDiskUrl: what the disk answers for (and onedrive://), not the web nor a datablock");
+   [true, true, true, true, true, false, true, false], "isDiskUrl: what the disk answers for (a .blend's datablock, onedrive:// too), not the web");
+
+// ── p.4 · a locator on THIS computer ─────────────────────────────────────────
+const OD_MAC = "/Users/ed/Library/CloudStorage/OneDrive-CNR", OD_WIN = "C:\\Users\\ed\\OneDrive - CNR";
+eq(R.locatorOnDisk(EMJ, "onedrive://Dottorato Bucarest/2_Rilievo/3DModels/TM015/TM015.obj", { onedriveRoot: OD_WIN }),
+   "C:/Users/ed/OneDrive - CNR/Dottorato Bucarest/2_Rilievo/3DModels/TM015/TM015.obj", "onedrive:// under Windows' OneDrive folder");
+eq(R.locatorOnDisk("/Users/ed/T/EM/x.em.json", "onedrive://Dottorato Bucarest/TM015.obj", { onedriveRoot: OD_MAC }),
+   `${OD_MAC}/Dottorato Bucarest/TM015.obj`, "…under the Mac's");
+eq(R.locatorOnDisk(EMJ, "onedrive://Dottorato Bucarest/TM015.obj"), null, "…and nowhere with no OneDrive folder set: to be linked");
+eq(R.locatorOnDisk(EMJ, "blend://../RB/TempluMare_2021.blend#Mesh/ME_EST_L_LOD0"), "C:/Users/Ed/T6.5/RB/TempluMare_2021.blend",
+   "blend://: its .blend, relative to the em.json through paths.ts");
+eq(R.locatorOnDisk(EMJ, "blend://..%2FRB%2FTempluMare%202021.blend#Mesh/x"), "C:/Users/Ed/T6.5/RB/TempluMare 2021.blend", "…its path decoded first");
+eq([R.locatorOnDisk(EMJ, "../SB/a.glb"), R.locatorOnDisk(EMJ, "https://x/a.glb"), R.locatorOnDisk(EMJ, "D:\\a.glb")],
+   ["C:/Users/Ed/T6.5/SB/a.glb", null, "D:/a.glb"], "relative, web, absolute");
+eq(R.rewritePlan([{ id: "b", name: "x", url: "blend://../RB/TempluMare_2021.blend#Mesh/ME_EST_L_LOD0", kind: "found",
+                    choice: "C:\\Users\\Ed\\T6.5\\RB\\archivio\\TempluMare_2021.blend", candidates: [] }], EMJ),
+   [{ id: "b", from: "blend://../RB/TempluMare_2021.blend#Mesh/ME_EST_L_LOD0", to: "blend://../RB/archivio/TempluMare_2021.blend#Mesh/ME_EST_L_LOD0" }],
+   "a datablock whose .blend moved keeps its type and name, its path relative");
 
 if (fails.length) {
   console.log(`check-relocate: ${fails.length} of ${checks} FAILED`);

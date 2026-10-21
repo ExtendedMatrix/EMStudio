@@ -7,7 +7,26 @@
 // linked» (an `onedrive://` with no OneDrive folder set on this computer) — and
 // the rewrite, every url written RELATIVE to the em.json (`../RB/x.glb`), the
 // way Templu Mare v4 keeps its own. Pure: `check-relocate.mjs` asks it.
-import { hasScheme, relativeTo, toPosix } from "./paths";
+import { hasScheme, join, relativeTo, resolveRelative, toPosix } from "./paths";
+import { makeBlendLocator, parseBlendLocator } from "./resources";
+
+/** MICRO-PERCORSI-WINDOWS p.4 · where a locator of the document is on THIS
+ *  computer: relative to the em.json (`../RB/x.glb`), absolute as it is, an
+ *  `onedrive://<path>` under this computer's OneDrive folder (a setting per
+ *  machine: `~/Library/CloudStorage/OneDrive-CNR` on the Mac, `C:\Users\<u>\
+ *  OneDrive - CNR` on Windows), the `.blend` of a `blend://<path>#Type/name`
+ *  (its path relative like any other). A web address, or an `onedrive://`
+ *  with no OneDrive folder set: null. */
+export function locatorOnDisk(emjsonPath: string | null, url: string, opts: { onedriveRoot?: string } = {}): string | null {
+  const u = String(url ?? "").trim();
+  if (!u) return null;
+  const od = /^onedrive:\/\/(.*)$/i.exec(u);
+  if (od) return opts.onedriveRoot ? join(opts.onedriveRoot, od[1]) : null;
+  const blend = parseBlendLocator(u);
+  if (blend) return resolveRelative(emjsonPath, blend[0]);
+  if (hasScheme(u)) return null;
+  return resolveRelative(emjsonPath, u);
+}
 
 /** a file the document cannot find (a row of `/files-state`) */
 export interface LostFile { id: string; name: string; state: string; url: string }
@@ -53,15 +72,18 @@ export function rewritePlan(verdicts: Verdict[], emjsonPath: string): Array<{ id
   const out: Array<{ id: string; from: string; to: string }> = [];
   for (const v of verdicts) {
     if (!v.choice) continue;
-    const to = relativeTo(emjsonPath, toPosix(v.choice));
+    const rel = relativeTo(emjsonPath, toPosix(v.choice));
+    // a datablock keeps its type and name: only its .blend moved
+    const blend = parseBlendLocator(v.url);
+    const to = blend ? makeBlendLocator(rel, blend[1], blend[2]) : rel;
     if (to && to !== v.url) out.push({ id: v.id, from: v.url, to });
   }
   return out;
 }
 
-/** a url the disk can answer for (relative or absolute), as opposed to a web
- *  address or a datablock: the opening's count is of these and of `onedrive://` */
-export const isDiskUrl = (u: string): boolean => !!u && (!hasScheme(u) || /^onedrive:\/\//i.test(u));
+/** a url the disk can answer for (relative or absolute, the .blend of a
+ *  datablock, an `onedrive://`), as opposed to a web address */
+export const isDiskUrl = (u: string): boolean => !!u && (!hasScheme(u) || /^(onedrive|blend):\/\//i.test(u));
 
 /** the tally said at the opening and on top of the window */
 export function tally(vs: Verdict[]): Record<VerdictKind, number> {

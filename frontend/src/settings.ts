@@ -168,6 +168,16 @@ export interface IdentitySettings {
   orcidBase: string;
 }
 
+/** MICRO-PERCORSI-WINDOWS p.4 · facts about THIS computer's disk, never the
+ *  study's: an `onedrive://Dottorato Bucarest/…` of the data is under
+ *  `~/Library/CloudStorage/OneDrive-CNR` on the Mac and `C:\Users\<u>\OneDrive -
+ *  CNR` on Windows — the same study, two machines, two answers. Empty: the
+ *  `onedrive://` files are «to be linked» («Find missing files…» says so). */
+export interface FilesSettings {
+  /** this computer's OneDrive folder, `/`-shaped (paths.ts) */
+  onedriveRoot: string;
+}
+
 export interface Settings {
   identity: IdentitySettings;
   texts: TextSettings;
@@ -177,6 +187,7 @@ export interface Settings {
   ai: AiSettings;
   viewer: ViewerSettings;
   iiif: IiifSettings;
+  files: FilesSettings;
 }
 
 const KEY = "emstudio.settings";
@@ -199,6 +210,7 @@ const DEFAULTS: Settings = {
   // No default base, for the same reason the ATON one has none: a wrong host
   // would look like a broken image service rather than an unconfigured one.
   iiif: { base: "", mirador: "https://projectmirador.org/embed/" },
+  files: { onedriveRoot: "" },
 };
 
 /** Providers em-bridge registers (`tools/llm_provider.py`). `echo` is a real
@@ -229,6 +241,7 @@ function clone(s: Settings): Settings {
     ai: { ...s.ai },
     viewer: { ...s.viewer },
     iiif: { ...s.iiif },
+    files: { ...s.files },
   };
 }
 
@@ -281,6 +294,7 @@ function load(): Settings {
       ai: { ...DEFAULTS.ai, ...(parsed.ai ?? {}) },
       viewer: { ...DEFAULTS.viewer, ...(parsed.viewer ?? {}) },
       iiif: { ...DEFAULTS.iiif, ...(parsed.iiif ?? {}) },
+      files: { ...DEFAULTS.files, ...(parsed.files ?? {}) },
     };
   } catch {
     return clone(DEFAULTS);
@@ -318,6 +332,11 @@ export function atonBase(): string {
  *  Every caller treats "" as "do what you did before this existed": no
  *  thumbnail, no zoomable image, no Mirador button. A missing service must
  *  degrade quietly, not produce a broken picture. */
+/** this computer's OneDrive folder (`/`-shaped, no trailing `/`), or "" */
+export function oneDriveRoot(): string {
+  return current.files.onedriveRoot.trim().replace(/\\/g, "/").replace(/(.)\/+$/, "$1");
+}
+
 export function iiifBase(): string {
   return current.iiif.base.trim().replace(/\/+$/, "");
 }

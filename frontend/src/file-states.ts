@@ -78,12 +78,14 @@ export interface RoomRef { base: string; room_id: string; token?: string | null 
 /** Ask the bridge; never throws (a bridge that is down keeps the old answers) */
 export async function refreshFileStates(bridge: string, doc: unknown, opts: {
   folders?: string[]; projectRoot?: string; room?: RoomRef | null;
+  /** MICRO-PERCORSI-WINDOWS p.4 · this computer's OneDrive folder (`onedrive://`) */
+  onedriveRoot?: string;
 } = {}): Promise<{ ok: boolean; error?: string }> {
   try {
     const res = await fetch(`${bridge}/files-state`, {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ doc, folders: opts.folders ?? [], project_root: opts.projectRoot ?? "",
-                             room: opts.room ?? null }),
+                             room: opts.room ?? null, ...(opts.onedriveRoot ? { onedrive_root: opts.onedriveRoot } : {}) }),
     });
     const j = await res.json().catch(() => ({}));
     if (!res.ok || !j.ok) return { ok: false, error: String(j.error ?? `bridge ${res.status}`) };
@@ -111,10 +113,11 @@ async function post(bridge: string, route: string, body: unknown): Promise<Recor
 /** «Find moved files…»: the bridge looks in the folders for the files that are
  *  missing — by sha256, then by name and size — and proposes; nothing changes */
 export async function findMovedFiles(bridge: string, doc: unknown, folders: string[],
-                                     projectRoot: string): Promise<MovedFile[]> {
+                                     projectRoot: string, onedriveRoot = ""): Promise<MovedFile[]> {
   const lost = fileStates().filter((f) => f.state === "missing" || f.state === "empty_copy");
   const j = await post(bridge, "/files-find-moved",
-                       { doc, folders, project_root: projectRoot, results: lost });
+                       { doc, folders, project_root: projectRoot, results: lost,
+                         ...(onedriveRoot ? { onedrive_root: onedriveRoot } : {}) });
   MOVED = (j.found as MovedFile[]) ?? [];
   return MOVED;
 }

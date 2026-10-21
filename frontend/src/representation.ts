@@ -99,7 +99,10 @@ export function chooseModel(g: ResourceGraph, starts: string[], canOpen: string[
 
 export type AddressContext =
   /** offline: the folder of the em.json, and how a path on disk is fetched */
-  | { mode: "offline"; baseDir: string; fileUrl: (absPath: string) => string }
+  | { mode: "offline"; baseDir: string; fileUrl: (absPath: string) => string;
+      /** where a locator is on this disk, when the caller knows more than the
+       *  em.json's folder (`onedrive://`, a `.blend`) — default: beside it */
+      resolve?: (locator: string) => string }
   /** online: how a digest is fetched from the store */
   | { mode: "online"; assetUrl: (checksum: string) => string };
 
@@ -128,7 +131,10 @@ export function addressMap(choice: Extract<ModelChoice, { kind: "open" }>, ctx: 
   const resolved = new Map<string, string>();
   const unlisted: string[] = [];
   // offline: where the entry is on disk (its own locator, beside the em.json)
-  const entryAbs = ctx.mode === "offline" ? joinPath(ctx.baseDir, choice.entry.locator || choice.entry.path) : "";
+  // the door's own locator on this disk: the caller's resolver when it has one
+  // (an `onedrive://`, the `.blend` of a datablock — MICRO-PERCORSI-WINDOWS p.4)
+  const door = choice.entry.locator || choice.entry.path;
+  const entryAbs = ctx.mode === "offline" ? (ctx.resolve ? ctx.resolve(door) : joinPath(ctx.baseDir, door)) : "";
   const entryRoot = entryAbs ? entryAbs.slice(0, entryAbs.length - choice.entry.path.length) : "";
   const real = (rel: string): string => {
     const f = byPath.get(rel);

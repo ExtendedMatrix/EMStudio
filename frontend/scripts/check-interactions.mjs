@@ -7619,6 +7619,51 @@ test("WP2.relocate", "PERCORSI-WINDOWS p.3 · Templu Mare v4 senza i suoi file: 
   return { pass, detail: { atOpen, win, before, after, applied: applied.length, undone, allBack, errors } };
 });
 
+// WP3 · this computer's OneDrive folder: a fake one under the system's temp
+// (never E.D.'s own), holding two of the study's `onedrive://` (TM003's folder
+// and its .obj), set in the settings as a person would.
+test("WP3.onedrive", "PERCORSI-WINDOWS p.4 · Templu Mare v4 con la cartella di OneDrive di questo computer impostata: i suoi onedrive:// si cercano lì (TM003 e TM003.obj trovati), nessuno è più «da collegare», gli altri sono mancanti; senza impostazione sono «da collegare»; Impostazioni ▸ Generale mostra la cartella", async () => {
+  if (!existsSync(WP_V4)) throw new Error(`the v4 copy is not at ${WP_V4}`);
+  const { mkdtempSync, realpathSync: real } = await import("node:fs");
+  const base = real(mkdtempSync(`${(await import("node:os")).tmpdir()}/wp3-`));
+  const emj = `${base}/studio/EM/TempluMare_v4.em.json`;
+  const od = `${base}/OneDrive - Prova`;
+  mkdirSync(`${base}/studio/EM`, { recursive: true });
+  mkdirSync(`${od}/Dottorato Bucarest/2_Rilievo/3DModels/TM003`, { recursive: true });
+  writeFileSync(`${od}/Dottorato Bucarest/2_Rilievo/3DModels/TM003/TM003.obj`, "v 0 0 0\n");
+  copyFileSync(WP_V4, emj);
+  const run = async (root) => {
+    const ctx = await browser.newContext({ viewport: { width: 1400, height: 900 } });
+    const p = await ctx.newPage();
+    const errors = [];
+    p.on("pageerror", (e) => errors.push(String(e).slice(0, 300)));
+    await p.addInitScript((r) => { try { if (!sessionStorage.getItem("probe")) { localStorage.clear(); localStorage.setItem("emstudio.locale", "it");
+      if (r) localStorage.setItem("emstudio.settings", JSON.stringify({ files: { onedriveRoot: r } })); sessionStorage.setItem("probe", "1"); } } catch { /* */ } }, root);
+    await p.goto(`http://localhost:${PORT}/em/studio/?bridge=${encodeURIComponent(WP2_BRIDGE)}`);
+    await p.waitForSelector("#workspace-bar .ws-tab", { timeout: 30000 });
+    await p.evaluate(([d, path]) => window.__EM_DRAG__.openAt(d, path), [JSON.parse(readFileSync(emj, "utf8")), emj]);
+    await p.waitForFunction(() => (window.__EM_SCENE__?.()?.nodes?.length ?? 0) > 50, null, { timeout: 60000 });
+    await p.evaluate((f) => window.__EM_DRAG__.relocate(f), `${base}/studio`);
+    await p.waitForSelector('.modal[data-dialog="relocate"]', { timeout: 180000 });
+    const st = await p.evaluate(() => window.__EM_DRAG__.relocateState());
+    const od3 = st.verdicts.filter((v) => /^onedrive:/.test(v.url));
+    let shown = null;
+    if (root) {
+      await p.evaluate(() => document.querySelector('.modal[data-dialog="relocate"]')?.remove());
+      await p.evaluate(() => document.getElementById("btn-settings")?.click());
+      await p.waitForTimeout(400);
+      shown = await p.evaluate(() => document.getElementById("set-onedrive-root")?.value ?? null);
+    }
+    await ctx.close();
+    return { kinds: od3.reduce((a, v) => ({ ...a, [v.kind]: (a[v.kind] ?? 0) + 1 }), {}), tm003: od3.filter((v) => /TM003(\/|\.obj)$/.test(v.url)).length, shown, errors };
+  };
+  const none = await run("");
+  const set = await run(od);
+  const pass = none.kinds.link === 44 && !none.kinds.missing && set.kinds.missing === 42 && !set.kinds.link && set.tm003 === 0
+    && set.shown === od && !none.errors.length && !set.errors.length;
+  return { pass, detail: { none, set } };
+});
+
 // ── run ─────────────────────────────────────────────────────────────────────
 const chosen = cases.filter((c) => !only.length || only.includes(c.id) || only.some((o) => c.id.startsWith(o + ".")));
 for (const c of chosen) {
