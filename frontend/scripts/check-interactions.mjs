@@ -6370,7 +6370,7 @@ test("DC1.menu", "DOVE-CHI-MENU p.1 · il File della pagina viene dalla tabella:
   const labels = await p.evaluate(() => [...document.querySelectorAll("#dd-file .dd-menu > button .dd-label-text")].map((e) => e.textContent));
   await ctx.close();
   const want = ["new", "open", "openRecent", "openReplace", "close", "—", "save", "saveAs", "saveAll", "pin", "—",
-    "import", "export", "integrate", "—", "createRoom", "bringIntoRoom"];
+    "import", "export", "integrate", "relocate", "—", "createRoom", "bringIntoRoom"];
   return { pass: JSON.stringify(file) === JSON.stringify(want) && JSON.stringify(edit) === JSON.stringify(["undo", "redo"])
       && help.includes("settingsHelp") && help.includes("aboutHelp") && !help.includes("updatesHelp")
       && labels[0] === "Nuovo" && labels.includes("Chiudi") && !errors.length,

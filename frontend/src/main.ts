@@ -28197,9 +28197,14 @@ function applyRelocation(plan: Array<{ id: string; from: string; to: string }>):
 /** the opening: «N files not found · Find missing files…» — once per open,
  *  after the bridge serves the document's folders */
 async function openingFileCheck(path: string): Promise<void> {
-  if (!store || currentFilePath !== path || assetStoreBase()) return;
-  await checkFiles();
-  if (currentFilePath !== path) return;
+  if (!store || currentFilePath !== path || assetStoreBase() || filesChecking) return;
+  // asked quietly: the Viewer and the Inspector are not drawn again for it (a
+  // gesture in the Viewer during the seconds the check takes would be undone —
+  // measured on VS2's double click)
+  const r = await refreshFileStates(await bridgeUrl(), store.doc, { folders: fileFolders(), room: fileRoom(), onedriveRoot: oneDriveRoot() });
+  if (!r.ok || currentFilePath !== path) return;
+  renderStorage();
+  renderEmData();
   const n = lostFiles().length;
   if (!n) return;
   // the `onedrive://` wait for this computer's OneDrive folder: proposed in the same word
