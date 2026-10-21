@@ -1952,20 +1952,21 @@ async function firstHits(p, kinds) {
     return found;
   }, kinds);
 }
-test("S3.pickRm", "Spazio · MICRO-PROVA-DEV47 p.2 · un clic semplice seleziona ciò che è più vicino sotto il puntatore, come Blender: un modello (RM) e non solo i proxy; Outliner e Inspector lo seguono; Maiusc aggiunge; il clic destro apre il menu del modello", async () => {
+test("S3.pickRm", "Spazio · MICRO-PROVA-DEV47 p.2, rivisto da MICRO-VIEWER-SPAZIO-EMTREE p.1 · un modello (RM) si seleziona con Alt+clic (il clic semplice è dei proxy: su un modello senza proxy sotto non seleziona niente); Outliner e Inspector lo seguono; Maiusc aggiunge; il clic destro apre il menu del modello", async () => {
   const { p, ctx, errors } = await gizmoScene();
   const f = await firstHits(p, ["rm", "proxy"]);
   const sel = () => p.evaluate(() => ({ sel: window.__EM_DRAG__.selected(), insp: document.querySelector(".insp-name-input")?.value ?? null,
     outl: [...document.querySelectorAll(".scn-outliner .sol-row.sel, .scn-outliner .sol-row[aria-selected=true]")].map((e) => e.dataset.key ?? e.textContent.trim().slice(0, 30)) }));
   const out = {};
-  if (f.rm) { await p.mouse.click(f.rm.x, f.rm.y); await p.waitForTimeout(600); out.rm = await sel(); }
+  if (f.rm) { await p.mouse.click(f.rm.x, f.rm.y); await p.waitForTimeout(600); out.plain = await sel(); }
+  if (f.rm) { await p.keyboard.down("Alt"); await p.mouse.click(f.rm.x, f.rm.y); await p.keyboard.up("Alt"); await p.waitForTimeout(600); out.rm = await sel(); }
   if (f.proxy) { await p.mouse.click(f.proxy.x, f.proxy.y); await p.waitForTimeout(600); out.proxy = await sel(); }
-  if (f.rm && f.proxy) { await p.keyboard.down("Shift"); await p.mouse.click(f.rm.x, f.rm.y); await p.keyboard.up("Shift"); await p.waitForTimeout(600); out.shift = await sel(); }
+  if (f.rm && f.proxy) { await p.keyboard.down("Shift"); await p.keyboard.down("Alt"); await p.mouse.click(f.rm.x, f.rm.y); await p.keyboard.up("Alt"); await p.keyboard.up("Shift"); await p.waitForTimeout(600); out.shift = await sel(); }
   if (f.rm) { await p.mouse.click(f.rm.x, f.rm.y, { button: "right" }); await p.waitForTimeout(400);
     out.menu = await p.evaluate(() => [...document.querySelectorAll(".scn-menu button")].map((b) => b.dataset.s3)); await p.keyboard.press("Escape"); }
   await p.screenshot({ path: `${process.env.SHOTS ?? "."}/s3-pickrm.png` }).catch(() => {});
   await ctx.close();
-  const conds = { found: !!f.rm && !!f.proxy, rm: out.rm?.sel?.length === 1 && out.rm.sel[0] === f.rm?.id,
+  const conds = { found: !!f.rm && !!f.proxy, plain: !(out.plain?.sel ?? []).includes(f.rm?.id), rm: out.rm?.sel?.length === 1 && out.rm.sel[0] === f.rm?.id,
     proxy: out.proxy?.sel?.length === 1 && out.proxy.sel[0] === f.proxy?.id,
     shift: (out.shift?.sel ?? []).includes(f.rm?.id) && (out.shift?.sel ?? []).includes(f.proxy?.id),
     menu: (out.menu ?? []).includes("rmg-new"), errors: !errors.length };
@@ -7462,9 +7463,12 @@ test("VS1.gestures", "VIEWER-SPAZIO-EMTREE p.1 · Spazio: il clic seleziona il p
   const sel = () => p.evaluate(() => document.querySelector(".scn-host").__spaceSelected().selected);
   const cam = () => p.evaluate(() => document.querySelector(".scn-host").__spaceCamState());
   const home = await cam();
-  const reset = async () => { await p.evaluate((c) => document.querySelector(".scn-host").__spaceSetCam(c), home); await p.keyboard.press("Escape"); await p.waitForTimeout(300); };
   const r = {};
   const px = await spaceHitOf(p, "proxy"), rm = await spaceHitOf(p, "rm");
+  // Escape redraws the scene: a click before it answers again hits nothing (measured on a loaded run)
+  const reset = async () => { await p.evaluate((c) => document.querySelector(".scn-host").__spaceSetCam(c), home); await p.keyboard.press("Escape"); await p.waitForTimeout(300);
+    await p.waitForFunction(([a, b]) => { const h = document.querySelector(".scn-host"); return h.__spaceHit(a.x, a.y)?.kind === "rm" && h.__spaceHit(b.x, b.y)?.kind === "proxy"; }, [rm, px], { timeout: 10000 }).catch(() => {});
+    await p.waitForTimeout(300); };
   // a click on the mesh in front: the proxy under it, not the mesh
   await reset();
   await p.mouse.click(rm.x, rm.y); await p.waitForTimeout(600);
