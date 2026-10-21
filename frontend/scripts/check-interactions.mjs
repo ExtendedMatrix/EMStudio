@@ -7822,6 +7822,54 @@ test("WM5.collect", "WINDOWS-MODELLI p.5 · File ▸ «Raccogli le risorse…» 
   return { pass, detail: { inMenu, ...w, errors } };
 });
 
+// ── MICRO-INSTALLER-PULSANTE ────────────────────────────────────────────────
+test("IP2.pill", "INSTALLER-PULSANTE p.2 · «Ritrova i file» sempre a portata: nella barra in basso, accanto a «Log», «44 da collegare» su v4 senza cartella di OneDrive (gli onedrive:// contati a parte, nessun «0 file mancanti»); un clic apre «Ritrova i file…»; su un documento senza file mancanti l'indicatore non c'è", async () => {
+  const { p, ctx, errors } = await wmOpenCopy();
+  await p.waitForFunction(() => !document.getElementById("footer-missing")?.classList.contains("hidden"), null, { timeout: 120000 }).catch(() => {});
+  const bar = await p.evaluate(() => {
+    const b = document.getElementById("footer-missing");
+    return { shown: !b.classList.contains("hidden"), text: b.textContent, title: b.title, missing: b.dataset.missing, link: b.dataset.link,
+      besideLog: b.previousElementSibling?.id === "footer-log" && b.closest(".sb-log") !== null };
+  });
+  let asked = null;
+  p.once("dialog", (d) => { asked = d.message(); void d.accept(WP_V4.replace(/\/EM\/[^/]+$/, "")); });
+  await p.click("#footer-missing");
+  const opened = await p.waitForSelector('.modal[data-dialog="relocate"]', { timeout: 180000 }).then(() => true, () => false);
+  await p.screenshot({ path: SHOT("ip2-pill") }).catch(() => {});
+  await ctx.close();
+  const o = await open({ doc: "catena" });
+  const none = await o.p.evaluate(() => document.getElementById("footer-missing")?.classList.contains("hidden"));
+  await o.ctx.close();
+  const pass = bar.shown && bar.text === "44 da collegare" && bar.missing === "0" && bar.link === "44" && bar.besideLog
+    && /0 mancanti, 44 onedrive:\/\//.test(bar.title) && !!asked && opened && none === true && !errors.length && !o.errors.length;
+  return { pass, detail: { bar, asked, opened, none, errors: [...errors, ...o.errors] } };
+});
+
+test("IP2.failmenu", "INSTALLER-PULSANTE p.2 · nell'Outliner dello Spazio il segno ⚠ di un modello che non arriva apre un piccolo menu: il motivo, poi «Ritrova…», che apre «Ritrova i file»; lo stesso «Ritrova…» in cima al menu del tasto destro sul modello", async () => {
+  const { p, ctx, errors } = await wmOpen({ refuse: true });
+  await p.waitForSelector(".sol-fail-menu", { timeout: 60000 });
+  const mark = await p.evaluate(() => { const f = document.querySelector(".sol-fail-menu"); return { tag: f.tagName, title: f.title }; });
+  await p.click(".sol-fail-menu");
+  const menu = await p.evaluate(() => [...document.querySelectorAll(".scn-menu button")].map((b) => ({ act: b.dataset.s3, text: b.textContent, disabled: b.disabled })));
+  let asked = null;
+  p.once("dialog", (d) => { asked = d.message(); void d.dismiss(); });
+  await p.click('.scn-menu button[data-s3="relocate"]');
+  await p.waitForTimeout(600);
+  // the right click on a model's row that did not come
+  const row = p.locator(".sol-row.failed", { has: p.locator(".sol-fail-menu") }).first();
+  const rowCount = await row.count();
+  let ctxMenu = [];
+  if (rowCount) {
+    await row.click({ button: "right" });
+    ctxMenu = await p.evaluate(() => [...document.querySelectorAll(".scn-menu button")].map((b) => b.dataset.s3));
+  }
+  await p.screenshot({ path: SHOT("ip2-failmenu") }).catch(() => {});
+  await ctx.close();
+  const pass = mark.tag === "BUTTON" && menu.length === 2 && menu[0].act === "fail-why" && menu[0].disabled && menu[0].text === mark.title
+    && menu[1].act === "relocate" && menu[1].text === "Ritrova…" && !!asked && rowCount > 0 && ctxMenu[0] === "fail-why" && ctxMenu[1] === "relocate" && !errors.length;
+  return { pass, detail: { mark, menu, asked, rowCount, ctxMenu: ctxMenu.slice(0, 4), errors } };
+});
+
 // ── run ─────────────────────────────────────────────────────────────────────
 const chosen = cases.filter((c) => !only.length || only.includes(c.id) || only.some((o) => c.id.startsWith(o + ".")));
 for (const c of chosen) {

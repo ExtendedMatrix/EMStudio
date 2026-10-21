@@ -364,7 +364,7 @@ import {
   writeBinaryFile,
 } from "./tauri";
 import * as paths from "./paths";
-import { classify, isDiskUrl, locatorOnDisk, rewritePlan, tally, type LostFile, type Verdict } from "./relocate";
+import { classify, isDiskUrl, locatorOnDisk, missingCount, rewritePlan, tally, type LostFile, type Verdict } from "./relocate";
 import { collectedUrl, defaultRoots, outsideFiles, proposeDest, studyRootOf, totals, type CollectRoots, type CollectRow, type DocFile, type OutsideFile } from "./collect";
 import {
   describeExtraction,
@@ -18235,6 +18235,7 @@ function refreshLogPanel(): void {
   // SHIFT-A · the log lives in the status bar's DRAWER now (and its button)
   renderLogDrawer();
   renderLogButton();
+  renderMissingPill();
 }
 
 // ---------- SHIFT-A · the LOG: «what happened», a drawer of the status bar ----------
@@ -23424,6 +23425,14 @@ document.addEventListener("pointerdown", (e) => {
   if (spaceMenuEl && !spaceMenuEl.contains(e.target as Node)) closeSpaceMenu();
 }, true);
 document.addEventListener("keydown", (e) => { if (spaceMenuEl && e.key === "Escape") { e.stopPropagation(); closeSpaceMenu(); } }, true);
+/** MICRO-INSTALLER-PULSANTE p.2 · an object of the Outliner that did not come:
+ *  its reason (as a line, not a verb), then «Find…» — «Find missing files…» */
+function failMenuEntries(r: { failed?: string }): Array<{ label: string; act: string; run: () => void; disabled?: boolean }> {
+  return [
+    ...(r.failed ? [{ label: r.failed, act: "fail-why", run: () => {}, disabled: true }] : []),
+    { label: t("relocate.findShort"), act: "relocate", run: () => { void relocateFiles(); } },
+  ];
+}
 function spaceMenu(x: number, y: number, head: string, entries: Array<{ label: string; act: string; run: () => void; disabled?: boolean } | "sep">): HTMLElement {
   hideContextMenu();
   closeSpaceMenu();
@@ -25650,8 +25659,11 @@ function renderSpaceOutliner(el: HTMLElement, win: Win, sp: Space | null): void 
     altMenu: (r, x, y) => spaceMenu(x, y, r.name, altMenuEntries(r.id)),
     chipMenu: (r, x, y) => { const ids = lodRowModels(r); spaceMenu(x, y, r.kind === "rm" ? r.name : `${r.name} · ${t("lod.nModels", { n: String(ids.length) })}`, lodMenuEntries(ids)); },
     // p.7 · a right click on a model's row, or on a container's: the containers' entries
+    // MICRO-INSTALLER-PULSANTE p.2 · the mark of a model that did not come: why, and «Find…»
+    failMenu: (r, x, y) => spaceMenu(x, y, r.name, failMenuEntries(r)),
     rowMenu: (r, x, y) => {
-      if (r.kind === "rm") spaceMenu(x, y, r.name, [...groupMenuEntries(selectedModels(r.id), x, y), "sep", ...versionMenuEntries(selectedModels(r.id))]);
+      if (r.kind === "rm") spaceMenu(x, y, r.name, [...(r.failed ? [...failMenuEntries(r), "sep" as const] : []),
+        ...groupMenuEntries(selectedModels(r.id), x, y), "sep", ...versionMenuEntries(selectedModels(r.id))]);
       else if (r.kind === "rmgroup") {
         const members = (r.children ?? []).filter((c) => c.kind === "rm").map((c) => c.id);
         spaceMenu(x, y, r.name, [
@@ -27916,7 +27928,7 @@ function documentCard(): HTMLElement | null {
 // ── R1/R2 (E.D., 4 Oct 2026) · where the files are, with the ONE resolver ──
 let filesChecking = false;
 
-function filesRefresh(): void { renderStorage(); refreshInspector(); renderDocView(); renderEmData(); if (activeWin().type === "shelf") renderShelf(); }
+function filesRefresh(): void { renderStorage(); refreshInspector(); renderDocView(); renderEmData(); if (activeWin().type === "shelf") renderShelf(); renderMissingPill(); }
 
 function fileRoom(): { base: string; room_id: string; token?: string | null } | null {
   const base = (hubNodeUrl || getSettings().sync.hubUrl).trim().replace(/\/+$/, "");
@@ -28120,6 +28132,26 @@ function lostFiles(): LostFile[] {
     })
     .filter((f) => isDiskUrl(f.url));
 }
+
+/** MICRO-INSTALLER-PULSANTE p.2 · «N missing files» beside the Log, always at
+ *  hand: only for a document opened from the disk (the window's own rule) and
+ *  only when something is lost; the `onedrive://` waiting for this computer's
+ *  OneDrive folder said apart («M to link»). A click opens «Find missing files…». */
+function renderMissingPill(): void {
+  const b = document.getElementById("footer-missing");
+  if (!b) return;
+  const c = store && currentFilePath && !assetStoreBase() ? missingCount(lostFiles(), { onedriveRoot: oneDriveRoot() }) : { missing: 0, link: 0 };
+  const parts = [
+    ...(c.missing ? [t("relocate.pillMissing", { n: String(c.missing) })] : []),
+    ...(c.link ? [t("relocate.pillLink", { n: String(c.link) })] : []),
+  ];
+  b.classList.toggle("hidden", !parts.length);
+  b.textContent = parts.join(" · ");
+  b.title = t("relocate.pillTip", { missing: String(c.missing), link: String(c.link) });
+  b.dataset.missing = String(c.missing);
+  b.dataset.link = String(c.link);
+}
+document.getElementById("footer-missing")?.addEventListener("click", () => { void relocateFiles(); });
 
 async function relocateFiles(folderGiven?: string): Promise<void> {
   if (!store || !currentFilePath || assetStoreBase()) { toast(t("relocate.noFile")); return; }
@@ -28617,6 +28649,7 @@ async function openingFileCheck(path: string): Promise<void> {
   if (!r.ok || currentFilePath !== path) return;
   renderStorage();
   renderEmData();
+  renderMissingPill();
   const n = lostFiles().length;
   if (!n) return;
   // the `onedrive://` wait for this computer's OneDrive folder: proposed in the same word

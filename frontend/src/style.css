@@ -8183,6 +8183,9 @@ body.gesturing-resize * {
 }
 .footer-log.on { border-color: var(--accent); }
 .footer-log.owed { color: var(--warn-ink, #8a5a00); }
+/* MICRO-INSTALLER-PULSANTE p.2 · «N missing files», beside the Log */
+.footer-missing { color: var(--warn-ink, #8a5a00); }
+.footer-missing.hidden { display: none; }
 .log-drawer {
   position: fixed; left: 8px; right: 8px; bottom: 30px; z-index: 40;
   display: flex; flex-direction: column; min-height: 120px;
@@ -9733,6 +9736,8 @@ button.hdto-v {
 /* MICRO-SPAZIO-3D-3 p.11 · a model's level, a chip beside its name; p.10 · a version's level and uses */
 /* MICRO-WINDOWS-MODELLI p.1 · a model that did not come: the mark, the reason in its tooltip */
 .sol-fail { color: var(--warn, #d08a00); margin-left: 4px; flex: none; cursor: help; font-size: 0.8rem; }
+.sol-fail-menu { border: 0; background: none; padding: 0 2px; cursor: pointer; line-height: inherit; }
+.sol-fail-menu:hover { color: var(--warn-ink, #8a5a00); }
 .sol-chip { font-size: 0.66rem; padding: 0 4px; border-radius: 3px; background: color-mix(in srgb, var(--accent) 22%, transparent); color: var(--text); margin-left: 4px; flex: none; }
 .sol-uses { font-size: 0.64rem; color: var(--text-muted); margin-left: 4px; flex: none; white-space: nowrap; }
 .sol-auto { font-size: 0.6rem; font-weight: 700; color: #2b8a3e; border: 1px solid currentColor; border-radius: 2px; padding: 0 2px; margin-left: 3px; flex: none; }

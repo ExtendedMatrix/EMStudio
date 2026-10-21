@@ -91,3 +91,16 @@ export function tally(vs: Verdict[]): Record<VerdictKind, number> {
   for (const v of vs) t[v.kind]++;
   return t;
 }
+
+/** MICRO-INSTALLER-PULSANTE p.2 · the status bar's «N missing files»: the files
+ *  of the open document the disk cannot answer for, the `onedrive://` that wait
+ *  for this computer's OneDrive folder counted apart («to link») — the same
+ *  split as the window's (`classify`), so the bar and the window agree. */
+export function missingCount(lost: LostFile[], opts: { onedriveRoot?: string } = {}): { missing: number; link: number } {
+  let missing = 0, link = 0;
+  for (const f of lost) {
+    if (/^onedrive:\/\//i.test(f.url) && !opts.onedriveRoot) link++;
+    else missing++;
+  }
+  return { missing, link };
+}

@@ -72,6 +72,13 @@ eq(R.rewritePlan([{ id: "b", name: "x", url: "blend://../RB/TempluMare_2021.blen
    [{ id: "b", from: "blend://../RB/TempluMare_2021.blend#Mesh/ME_EST_L_LOD0", to: "blend://../RB/archivio/TempluMare_2021.blend#Mesh/ME_EST_L_LOD0" }],
    "a datablock whose .blend moved keeps its type and name, its path relative");
 
+// ── MICRO-INSTALLER-PULSANTE p.2 · the status bar's «N missing · M to link» ──
+eq(R.missingCount(lost), { missing: 5, link: 1 }, "the bar counts what the window says: the onedrive:// to link apart");
+eq(R.missingCount(lost, { onedriveRoot: OD_MAC }), { missing: 6, link: 0 }, "…with a OneDrive folder set, an onedrive:// not found is missing");
+eq(R.missingCount([]), { missing: 0, link: 0 }, "nothing lost, nothing to show");
+eq(R.missingCount(lost), (({ missing, link }) => ({ missing, link }))(R.tally(R.classify(lost, []))),
+   "…and the same split as the window's, with nothing proposed");
+
 if (fails.length) {
   console.log(`check-relocate: ${fails.length} of ${checks} FAILED`);
   for (const f of fails) console.log(`  ✗ ${f}`);

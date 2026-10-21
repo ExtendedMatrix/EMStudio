@@ -332,6 +332,9 @@ export interface OutlinerActions {
   chipMenu?(row: OutlinerRow, x: number, y: number): void;
   /** MICRO-PROVA-DEV47 p.4 · the container's alternative chip: Modelli / Tileset / Automatico */
   altMenu?(row: OutlinerRow, x: number, y: number): void;
+  /** MICRO-INSTALLER-PULSANTE p.2 · the mark of an object that did not come, a
+   *  small menu: why, and «Find…» (the same window as File ▸ Find missing files) */
+  failMenu?(row: OutlinerRow, x: number, y: number): void;
   /** p.6 · a press on a sketch's row: the caller follows the pointer (a drag onto a unit) */
   dragSketch?(sketchId: string, e: PointerEvent): void;
   /** a shape of the palette: clicked (at the cursor), or dragged and dropped at a page point */
@@ -462,11 +465,16 @@ export function renderOutliner(el: HTMLElement, v: OutlinerView, act: OutlinerAc
     line.append(tw, g, name);
     if (r.failed) {
       // MICRO-WINDOWS-MODELLI p.1 · it did not come: a mark, the reason in its tooltip
-      const f = document.createElement("span");
-      f.className = "sol-fail";
+      const f = document.createElement(act.failMenu ? "button" : "span");
+      f.className = `sol-fail${act.failMenu ? " sol-fail-menu" : ""}`;
       f.dataset.sol = "fail";
       f.textContent = "⚠";
       f.title = r.failed;
+      if (act.failMenu) {
+        (f as HTMLButtonElement).type = "button";
+        f.tabIndex = -1;
+        f.addEventListener("click", (e) => { e.stopPropagation(); const b = f.getBoundingClientRect(); act.failMenu!(r, b.left, b.bottom + 2); });
+      }
       line.appendChild(f);
       line.classList.add("failed");
     }
@@ -535,6 +543,8 @@ export function renderOutliner(el: HTMLElement, v: OutlinerView, act: OutlinerAc
     line.addEventListener("click", (e) => act.pick(r, { toggle: e.metaKey || e.ctrlKey, range: e.shiftKey }, order));
     if (act.rowMenu && (r.kind === "rm" || r.kind === "rmgroup"))
       line.addEventListener("contextmenu", (e) => { e.preventDefault(); act.rowMenu!(r, e.clientX, e.clientY); });
+    else if (act.failMenu && r.failed)
+      line.addEventListener("contextmenu", (e) => { e.preventDefault(); act.failMenu!(r, e.clientX, e.clientY); });
     if (r.kind === "sketch" && act.dragSketch) {
       line.draggable = false;
       line.addEventListener("pointerdown", (e) => { if (!(e.target as HTMLElement).closest("[data-sol]")) act.dragSketch!(r.id, e); });
