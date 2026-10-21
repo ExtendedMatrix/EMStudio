@@ -7870,6 +7870,65 @@ test("IP2.failmenu", "INSTALLER-PULSANTE p.2 · nell'Outliner dello Spazio il se
   return { pass, detail: { mark, menu, asked, rowCount, ctxMenu: ctxMenu.slice(0, 4), errors } };
 });
 
+test("IP3.level", "INSTALLER-PULSANTE p.3 · il bridge che risponde è di un livello diverso da BRIDGE_LEVEL_WANTED: una riga nel Log (con url, PID e da quando) e un avviso — sul desktop «Il bridge che risponde è di una versione diversa (33 invece di 35): chiudi i processi em-bridge e riapri EMStudio», nel browser «…rilancialo (./dev.sh)»; detto una volta; il bridge di questo albero non dice niente", async () => {
+  const wanted = Number(/const BRIDGE_LEVEL_WANTED = (\d+)/.exec(readFileSync(new URL("../src/main.ts", import.meta.url), "utf8"))[1]);
+  const old = { pattern: `${BRIDGE}/health`, handler: (route) => route.fulfill({ status: 200,
+    headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" },
+    body: JSON.stringify({ ok: true, service: "em_bridge", bridge_level: 33, pid: 4242, started_at: "2026-10-20T08:00:00", sidecar: true }) }) };
+  const said = async (p) => {
+    await p.waitForFunction(() => window.__EM_DRAG__.log().some((e) => /versione diversa/.test(e.message)), null, { timeout: 20000 }).catch(() => {});
+    return p.evaluate(() => ({ log: window.__EM_DRAG__.log().filter((e) => /versione diversa/.test(e.message)).map((e) => `${e.level} ${e.message}`),
+      toast: document.getElementById("toast")?.classList.contains("hidden") ? null : document.getElementById("toast")?.textContent }));
+  };
+  // the browser, an old bridge
+  const a = await open({ doc: null, route: old });
+  const wa = await said(a.p);
+  await a.ctx.close();
+  // the desktop (IPC simulated), an old bridge
+  const tauriHook = ([bridge]) => {
+    let n = 1;
+    window.__TAURI_INTERNALS__ = {
+      metadata: { currentWindow: { label: "main" }, currentWebview: { windowLabel: "main", label: "main" } },
+      transformCallback(cb) { const id = n++; window[`_${id}`] = cb; return id; },
+      unregisterCallback() {}, convertFileSrc(x) { return x; },
+      async invoke(cmd) {
+        if (cmd === "transformer_url") return bridge;
+        if (cmd === "take_desktop_queue") return { files: [], notices: [] };
+        if (cmd === "llm_key_status") return { available: false, set: false, detail: "" };
+        if (cmd === "plugin:event|listen") return n++;
+        if (cmd === "plugin:fs|exists") return false;
+        if (cmd.startsWith("plugin:menu|")) return [n++, ""];
+        if (cmd.startsWith("plugin:window|") || cmd.startsWith("plugin:webview|")) return null;
+        if (cmd.startsWith("plugin:app|")) return "1.6.0-dev.58";
+        throw new Error(`not simulated: ${cmd}`);
+      },
+    };
+    window.__TAURI_EVENT_PLUGIN_INTERNALS__ = { unregisterListener() {} };
+  };
+  const ctx = await browser.newContext({ viewport: { width: 1500, height: 950 } });
+  await ctx.route(old.pattern, old.handler);
+  const p = await ctx.newPage();
+  const errors = [];
+  p.on("pageerror", (e) => errors.push(String(e).slice(0, 300)));
+  await p.addInitScript(() => { try { if (!sessionStorage.getItem("probe")) { localStorage.clear(); localStorage.setItem("emstudio.locale", "it"); sessionStorage.setItem("probe", "1"); } } catch { /* */ } });
+  await p.addInitScript(tauriHook, [BRIDGE]);
+  await p.goto(`http://localhost:${PORT}/em/studio/`);
+  await p.waitForSelector("#workspace-bar .ws-tab", { timeout: 60000 });
+  const wd = await said(p);
+  await p.screenshot({ path: SHOT("ip3-level") }).catch(() => {});
+  await ctx.close();
+  // this tree's bridge: nothing
+  const c = await open({ doc: null });
+  await c.p.waitForTimeout(3000);
+  const wc = await said(c.p);
+  await c.ctx.close();
+  const desk = `Il bridge che risponde è di una versione diversa (33 invece di ${wanted}): chiudi i processi em-bridge e riapri EMStudio`;
+  const pass = wd.log.length === 1 && wd.log[0].startsWith(`warn ${desk} (${BRIDGE} · PID 4242 · acceso da 2026-10-20T08:00:00)`) && (wd.toast ?? "").startsWith(desk)
+    && wa.log.length === 1 && /^warn Il bridge che risponde è di una versione diversa \(33 invece di \d+\): rilancialo \(\.\/dev\.sh\)/.test(wa.log[0])
+    && wc.log.length === 0 && !errors.length && !a.errors.length && !c.errors.length;
+  return { pass, detail: { wanted, desktop: wd, browser: wa, thisTree: wc, errors: [...errors, ...a.errors, ...c.errors] } };
+});
+
 // ── run ─────────────────────────────────────────────────────────────────────
 const chosen = cases.filter((c) => !only.length || only.includes(c.id) || only.some((o) => c.id.startsWith(o + ".")));
 for (const c of chosen) {

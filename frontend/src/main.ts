@@ -364,6 +364,7 @@ import {
   writeBinaryFile,
 } from "./tauri";
 import * as paths from "./paths";
+import { bridgeLevelVerdict, levelKey, type BridgeHealth } from "./bridge-level";
 import { classify, isDiskUrl, locatorOnDisk, missingCount, rewritePlan, tally, type LostFile, type Verdict } from "./relocate";
 import { collectedUrl, defaultRoots, outsideFiles, proposeDest, studyRootOf, totals, type CollectRoots, type CollectRow, type DocFile, type OutsideFile } from "./collect";
 import {
@@ -12503,6 +12504,30 @@ async function bridgeUrl(): Promise<string> {
 }
 /** The bridge level this editor expects (`BRIDGE_LEVEL` in tools/em_bridge.py). */
 const BRIDGE_LEVEL_WANTED = 35;   // 31 = /property-source (FONTE); 32 = /room-import, «Bring into a room» through the engine; 33 = /fs/write (MICRO-SPAZIO-3D); 34 = /fs/doc, /fs/probe (MICRO-PERCORSI-WINDOWS); 35 = /fs/collect, /health's pid (MICRO-WINDOWS-MODELLI)
+/** MICRO-INSTALLER-PULSANTE p.3 · the bridge that answers says its level; one
+ *  that differs from BRIDGE_LEVEL_WANTED is said in the Log (its url, pid, since
+ *  when) and in a notice — once per bridge. Asked at start, while the sidecar
+ *  starts (up to two minutes), and again when a document opens. */
+const bridgeLevelSaid = new Set<string>();
+async function checkBridgeLevel(patience = 0): Promise<void> {
+  const base = await bridgeUrl();
+  const h = await fetch(`${base}/health`, { cache: "no-store" }).then((r) => (r.ok ? r.json() : null), () => null) as BridgeHealth | null;
+  if (!h || (h as { service?: string }).service !== "em_bridge") {
+    if (patience > 0) setTimeout(() => { void checkBridgeLevel(patience - 1); }, 4000);
+    return;
+  }
+  const v = bridgeLevelVerdict(h, BRIDGE_LEVEL_WANTED);
+  if (v.kind === "same") return;
+  const key = levelKey(base, h);
+  if (bridgeLevelSaid.has(key)) return;
+  bridgeLevelSaid.add(key);
+  const words = t(isTauri() ? "bridge.levelOther" : "bridge.levelOtherDev",
+    { have: v.have === null ? t("bridge.levelNone") : String(v.have), wanted: String(v.wanted) });
+  const where = t("bridge.levelWhere", { url: base, pid: String(h.pid ?? "—"), since: String(h.started_at ?? t("bridge.sinceUnknown")) });
+  logWarn(`${words} (${where})`);
+  // a notice that stays: this one explains every failure that follows it
+  toastAsk(words, [{ label: "Log", run: () => setLogDrawerOpen(true) }], 30000);
+}
 /** the level that serves the open em.json's folders (`/fs/doc`): below it a
  *  model's 403 is the bridge's age, not the file (load-failure.ts) */
 const BRIDGE_LEVEL_FS_DOC = 34;
@@ -21672,6 +21697,7 @@ async function serveDocumentFolders(path: string): Promise<void> {
     if (currentFilePath === path) logWarn(t("fs.docFailed", { url: `${base}/fs/doc`, status: "—", why: errorText(e) ?? "" }));
   }
   if (currentFilePath === path) void openingFileCheck(path);
+  void checkBridgeLevel();
   if (j?.ok && !j.added?.length && j.folders?.length && currentFilePath === path)
     logInfo(t("fs.docAlready", { dirs: j.folders.map((d) => paths.toNative(d)).join(", "), url: base }));
   if (!j?.added?.length || currentFilePath !== path) return;
@@ -38001,6 +38027,8 @@ installTableTools(document.body, () => ({
 }));
 renderWarningsPill();
 renderLogButton(); // SHIFT-A · «Log · n» in the status bar
+// MICRO-INSTALLER-PULSANTE p.3 · which bridge answers: said if it is not the one wanted
+void checkBridgeLevel(30);
 // PELLE · the canvas face (Sora) arrives after the first frame; one redraw when
 // it is in, so the drawing does not stay in the fallback until the next click.
 whenCanvasFontsReady(() => draw());
