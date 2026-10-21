@@ -9665,6 +9665,10 @@ button.hdto-v {
 .relocate-name { flex: 0 0 auto; max-width: 40%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .relocate-to { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted, #888); font-family: var(--mono, monospace); }
 .relocate-list select { flex: 1 1 auto; min-width: 0; font-size: 0.75rem; }
+/* MICRO-WINDOWS-MODELLI p.4 · why the onedrive:// wait, and what to do when nothing is to rewrite */
+.relocate-why { font-size: 0.76rem; margin: 2px 0 6px; color: var(--muted, inherit); }
+.relocate-why button { font-size: 0.74rem; }
+.relocate-hint { font-size: 0.8rem; margin: 10px 0 0; padding: 6px 8px; border-radius: 4px; background: var(--warn-soft); color: var(--warn-ink); }
 /* MICRO-SPAZIO-3D-3 p.2 · an eye (or an arrow) crossed by a drag, until the release */
 .sol-eye.swept, .sol-arrow.swept { outline: 1px solid var(--accent); outline-offset: -1px; border-radius: 3px; }
 /* MICRO-SPAZIO-3D-3 p.4 · a continuous G / R / S: the virtual pointer (it leaves by one

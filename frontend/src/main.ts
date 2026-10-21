@@ -28171,16 +28171,52 @@ function showRelocateWindow(folder: string, verdicts: Verdict[], emjson: string)
   const rel = (p: string) => paths.relativeTo(emjson, p);
   const picked = new Map<string, string>();
   const go = document.createElement("button");
+  // MICRO-WINDOWS-MODELLI p.4 · «Riscrivi 0 percorsi» was offered as an action
+  // with nothing to do: with nothing chosen the button goes and a line says
+  // what to do — choose among the ambiguous, look in another folder, set the
+  // OneDrive folder
+  const hint = document.createElement("p");
+  hint.className = "relocate-hint";
+  hint.dataset.relocate = "hint";
+  const again = document.createElement("button");
+  again.dataset.act = "relocate-again";
+  again.textContent = t("relocate.again");
+  again.onclick = () => { modal.remove(); void relocateFiles(); };
   const count = () => {
     const k = verdicts.filter((v) => picked.has(v.id)).length;
     go.textContent = t("relocate.apply", { n: String(k) });
     go.disabled = !k;
+    go.hidden = !k;
+    const why = k ? "" : !verdicts.length ? "relocate.none.all"
+      : n.found && !picked.size ? "relocate.none.unchecked"
+      : n.ambiguous ? "relocate.none.ambiguous"
+      : n.missing ? (n.link ? "relocate.none.missingLink" : "relocate.none.missing")
+      : n.link ? "relocate.none.link" : "relocate.none.all";
+    hint.textContent = why ? t(why) : "";
+    hint.hidden = !why;
+    again.hidden = !why || why === "relocate.none.all" || why === "relocate.none.link";
   };
   const section = (kind: Verdict["kind"]) => {
     const vs = verdicts.filter((v) => v.kind === kind);
     if (!vs.length) return;
     const h = document.createElement("h4");
     h.textContent = `${t(`relocate.kind.${kind}`)} (${vs.length})`;
+    // p.4 · the onedrive:// ones are not looked for in the folder chosen: they
+    // resolve under this computer's OneDrive folder, set from here
+    let linkWhy: HTMLElement | null = null;
+    if (kind === "link") {
+      linkWhy = document.createElement("p");
+      linkWhy.className = "relocate-why";
+      linkWhy.dataset.relocate = "link-why";
+      const words = document.createElement("span");
+      words.textContent = t("relocate.linkWhy");
+      const set = document.createElement("button");
+      set.type = "button";
+      set.dataset.act = "relocate-onedrive";
+      set.textContent = t("relocate.setOneDrive");
+      set.onclick = () => { void setOneDriveFromRelocate(folder, modal); };
+      linkWhy.append(words, " ", set);
+    }
     const ul = document.createElement("ul");
     ul.className = "relocate-list";
     ul.dataset.kind = kind;
@@ -28222,12 +28258,12 @@ function showRelocateWindow(folder: string, verdicts: Verdict[], emjson: string)
       } else {
         const at = document.createElement("span");
         at.className = "relocate-to";
-        at.textContent = kind === "link" ? `${v.url} · ${t("relocate.linkHint")}` : v.url;
+        at.textContent = v.url;
         li.appendChild(at);
       }
       ul.appendChild(li);
     }
-    body.append(h, ul);
+    body.append(h, ...(linkWhy ? [linkWhy] : []), ul);
   };
   (["found", "ambiguous", "missing", "link"] as const).forEach(section);
   const foot = document.createElement("div");
@@ -28244,11 +28280,38 @@ function showRelocateWindow(folder: string, verdicts: Verdict[], emjson: string)
     close();
   };
   count();
-  foot.append(cancel, go);
+  body.appendChild(hint);
+  foot.append(cancel, again, go);
   card.append(head, body, foot);
   modal.appendChild(card);
   modal.addEventListener("click", (e) => { if (e.target === modal) close(); });
   document.body.appendChild(modal);
+}
+
+/** MICRO-WINDOWS-MODELLI p.4 · «Imposta la cartella di OneDrive…» from the
+ *  window: the folder that holds the study's `onedrive://` names when the
+ *  bridge finds one, else the one the person picks; then the bridge serves it
+ *  and the same search runs again, in the same folder */
+async function setOneDriveFromRelocate(folder: string, modal: HTMLElement): Promise<void> {
+  const best = (await oneDriveCandidates(oneDriveNames())).find((c) => c.has > 0);
+  let root: string | null = best?.path ?? null;
+  if (!root) {
+    if (isTauri()) {
+      try { root = await pickFolder(); } catch { root = null; }
+    } else {
+      root = window.prompt(t("relocate.oneDrivePrompt"), "")?.trim() || null;
+    }
+  }
+  if (!root) return;
+  root = paths.toPosix(root);
+  const s = getSettings();
+  saveSettings({ ...s, files: { ...s.files, onedriveRoot: root } });
+  logInfo(t("onedrive.set", { path: paths.toNative(root) }));
+  modal.remove();
+  if (currentFilePath) await serveDocumentFolders(currentFilePath);
+  refreshSurfaces("scene");
+  refreshSurfaces("viewer");
+  await relocateFiles(folder);
 }
 
 /** the rewrite: one step of undo per document (a study is one) */

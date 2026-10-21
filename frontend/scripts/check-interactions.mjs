@@ -7762,6 +7762,42 @@ test("WM2.port", "WINDOWS-MODELLI p.2 · la pagina come il desktop (IPC simulato
   return { pass, detail: { ports: [...new Set(asked.map((a) => a.port))], bport, asked: asked.length, fsAt: at.length, drawn, marks, warn, errors } };
 });
 
+/** the v4 copy opened at its own (Mac) path, no OneDrive folder set */
+async function wmOpenCopy() {
+  if (!existsSync(WP_V4)) throw new Error(`the v4 copy is not at ${WP_V4}`);
+  const ctx = await browser.newContext({ viewport: { width: 1500, height: 950 } });
+  const p = await ctx.newPage();
+  const errors = [];
+  p.on("pageerror", (e) => errors.push(String(e).slice(0, 300)));
+  await p.addInitScript(() => { try { if (!sessionStorage.getItem("probe")) { localStorage.clear(); localStorage.setItem("emstudio.locale", "it"); sessionStorage.setItem("probe", "1"); } } catch { /* */ } });
+  await p.goto(`http://localhost:${PORT}/em/studio/?bridge=${encodeURIComponent(WP_BRIDGE)}`);
+  await p.waitForSelector("#workspace-bar .ws-tab", { timeout: 60000 });
+  await p.evaluate(([d, path]) => window.__EM_DRAG__.openAt(d, path), [JSON.parse(readFileSync(WP_V4, "utf8")), WP_V4]);
+  await p.waitForFunction(() => (window.__EM_SCENE__?.()?.nodes?.length ?? 0) > 50, null, { timeout: 60000 });
+  await p.waitForTimeout(1500);
+  return { p, ctx, errors };
+}
+
+test("WM4.relocate", "WINDOWS-MODELLI p.4 · «Ritrova i file» nella cartella dello studio, senza cartella di OneDrive: 44 da collegare, che dicono di risolversi con la cartella di OneDrive di questo computer e non con quella scelta, con il pulsante «Imposta la cartella di OneDrive…»; nessun «Riscrivi 0 percorsi»: una riga dice cosa fare; la finestra è in italiano", async () => {
+  const { p, ctx, errors } = await wmOpenCopy();
+  await p.evaluate((f) => window.__EM_DRAG__.relocate(f), WP_V4.replace(/\/EM\/[^/]+$/, ""));
+  await p.waitForSelector('.modal[data-dialog="relocate"]', { timeout: 180000 });
+  const w = await p.evaluate(() => {
+    const m = document.querySelector('.modal[data-dialog="relocate"]');
+    const vis = (sel) => { const e = m.querySelector(sel); return e && !e.hidden ? e.textContent : null; };
+    return { title: m.querySelector(".modal-head").textContent, tally: vis('[data-relocate="tally"]'), link: m.querySelectorAll('.relocate-list[data-kind="link"] li').length,
+      why: vis('[data-relocate="link-why"]'), set: vis('[data-act="relocate-onedrive"]'), go: vis('[data-act="relocate-go"]'), hint: vis('[data-relocate="hint"]'),
+      heads: [...m.querySelectorAll("h4")].map((h) => h.textContent), buttons: [...m.querySelectorAll("button")].filter((b) => !b.hidden).map((b) => b.textContent) };
+  });
+  await p.screenshot({ path: SHOT("wm4-relocate") }).catch(() => {});
+  await ctx.close();
+  const english = [w.title, w.tally, w.why, w.hint, ...w.heads, ...w.buttons].filter((x) => x && /\b(Find|missing|found|ambiguous|link|Rewrite|paths?|Cancel|Look|folder|Set)\b/.test(x));
+  const pass = /^Ritrova i file — /.test(w.title) && w.tally === "0 trovati · 0 ambigui · 0 mancanti · 44 da collegare" && w.link === 44
+    && /si ritrovano sotto la cartella di OneDrive di questo computer, non nella cartella scelta qui/.test(w.why ?? "") && w.set === "Imposta la cartella di OneDrive…"
+    && w.go === null && /^Niente da riscrivere: i file da collegare si ritrovano impostando la cartella di OneDrive/.test(w.hint ?? "") && !english.length && !errors.length;
+  return { pass, detail: { ...w, english, errors } };
+});
+
 // ── run ─────────────────────────────────────────────────────────────────────
 const chosen = cases.filter((c) => !only.length || only.includes(c.id) || only.some((o) => c.id.startsWith(o + ".")));
 for (const c of chosen) {
