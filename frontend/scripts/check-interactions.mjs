@@ -7500,6 +7500,66 @@ test("VS1.gestures", "VIEWER-SPAZIO-EMTREE p.1 · Spazio: il clic seleziona il p
   return { pass, detail: { ...r, before, beforeSlow, pk, mk, help, errors } };
 });
 
+// ── MICRO-PERCORSI-WINDOWS · an em.json opened at a Windows path ────────────
+// WP1 needs the Templu Mare v4 copy (`WINPATHS_V4`, the study of
+// `/tmp/winpaths`) and a bridge that serves NONE of its folders
+// (`WINPATHS_BRIDGE`, e.g. `em_bridge.py --fs-root /tmp/wp/empty`): the page is
+// told the em.json is at C:\Users\ed\OneDrive - CNR\…\EM\, and what it asks the
+// bridge under C:/… is rewritten to the copy on its way (nothing else). The
+// rewrite holds the requests to 6 at a time, as the browser does: from node
+// they would all go at once and the bridge's queue would reset them.
+const WP_V4 = process.env.WINPATHS_V4 ?? "/tmp/winpaths/EM/TempluMare_v4.em.json";
+const WP_BRIDGE = (process.env.WINPATHS_BRIDGE ?? "http://127.0.0.1:8872").replace("//localhost:", "//127.0.0.1:");
+test("WP1.windows", "PERCORSI-WINDOWS p.1/p.2 · Templu Mare v4 aperto da C:\\…\\EM\\ con un bridge che non serve nessuna sua cartella: la pagina dice al bridge quale em.json è aperto (/fs/doc), lo Spazio chiede i modelli come C:/…/RB/… e li disegna tutti (10 RM, il tileset, 5 proxy del XX sec), nessun «file mancante»", async () => {
+  if (!existsSync(WP_V4)) throw new Error(`the v4 copy is not at ${WP_V4}`);
+  const COPY = WP_V4.replace(/\/EM\/[^/]+$/, "");
+  const WIN_STUDY = "C:/Users/ed/OneDrive - CNR/T6.5/TempluMare_v2_for_3DR_2026-10-06";
+  const WIN = `${WIN_STUDY.replace(/\//g, "\\")}\\EM\\TempluMare_v4.em.json`;
+  const enc = (x) => x.split("/").map(encodeURIComponent).join("/");
+  const ctx = await browser.newContext({ viewport: { width: 1600, height: 1000 } });
+  const p = await ctx.newPage();
+  const errors = [], asked = [];
+  p.on("pageerror", (e) => errors.push(String(e).slice(0, 300)));
+  let busy = 0; const waiting = [];
+  const slot = () => new Promise((r) => { if (busy < 6) { busy++; r(); } else waiting.push(r); });
+  const free = () => { const n = waiting.shift(); if (n) n(); else busy--; };
+  await ctx.route(`${WP_BRIDGE}/**`, async (route) => {
+    const req = route.request();
+    let url = req.url();
+    const winAt = `${WP_BRIDGE}/fs/at/${enc(WIN_STUDY)}`;
+    if (url.startsWith(winAt)) url = `${WP_BRIDGE}/fs/at/${enc(COPY.slice(1))}${url.slice(winAt.length)}`;
+    let post = req.postData();
+    if (post && /\/fs\/(doc|probe)$/.test(url)) post = post.split(WIN_STUDY).join(COPY);
+    await slot();
+    try {
+      const res = await route.fetch({ url, postData: post ?? undefined });
+      free();
+      if (/\/fs\/(at|doc)/.test(req.url())) asked.push({ url: decodeURIComponent(req.url().slice(WP_BRIDGE.length)), status: res.status() });
+      await route.fulfill({ response: res });
+    } catch (e) { free(); asked.push({ url: req.url(), status: -1 }); await route.abort(); }
+  });
+  await p.addInitScript(() => { try { if (!sessionStorage.getItem("probe")) { localStorage.clear(); localStorage.setItem("emstudio.locale", "it"); sessionStorage.setItem("probe", "1"); } } catch { /* */ } });
+  await p.goto(`http://localhost:${PORT}/em/studio/?bridge=${encodeURIComponent(WP_BRIDGE)}`);
+  await p.waitForSelector("#workspace-bar .ws-tab", { timeout: 30000 });
+  await p.evaluate(([d, path]) => window.__EM_DRAG__.openAt(d, path), [JSON.parse(readFileSync(WP_V4, "utf8")), WIN]);
+  await p.waitForFunction(() => (window.__EM_SCENE__?.()?.nodes?.length ?? 0) > 50, null, { timeout: 60000 });
+  await p.waitForTimeout(1200);
+  await p.click(`#workspace-bar .ws-tab[data-ws="space"]`);
+  await p.waitForFunction(() => document.querySelector(".scn-host")?.dataset.ready === "1", null, { timeout: 60000 });
+  await p.waitForFunction(() => { const s = document.querySelector(".scn-host")?.__space?.() ?? []; return s.length && !s.some((x) => x.as === "pending"); }, null, { timeout: 120000 }).catch(() => {});
+  await p.waitForTimeout(1500);
+  const drawn = await p.evaluate(() => { const c = {}; for (const x of document.querySelector(".scn-host").__space()) c[`${x.kind}/${x.as}`] = (c[`${x.kind}/${x.as}`] ?? 0) + 1; return c; });
+  const miss = await p.evaluate(() => [...document.querySelectorAll(".scn-host .miss")].map((e) => e.textContent.slice(0, 80)));
+  await p.screenshot({ path: SHOT("wp1-windows") }).catch(() => {});
+  await ctx.close();
+  const at = asked.filter((a) => a.url.startsWith("/fs/at/"));
+  const doc = asked.find((a) => a.url === "/fs/doc");
+  const pass = doc?.status === 200 && at.length > 0 && at.every((a) => a.url.startsWith(`/fs/at/${WIN_STUDY}/`) && a.status >= 200 && a.status < 300)
+    && drawn["rm/mesh"] === 10 && drawn["rm/tiles"] === 1 && drawn["proxy/mesh"] === 5 && !drawn["rm/label"] && !drawn["proxy/label"]
+    && !miss.some((m) => /mancante/.test(m)) && !errors.length;
+  return { pass, detail: { doc, asked: at.length, notOk: at.filter((a) => !(a.status >= 200 && a.status < 300)).slice(0, 3), first: at[0], drawn, miss, errors } };
+});
+
 // ── run ─────────────────────────────────────────────────────────────────────
 const chosen = cases.filter((c) => !only.length || only.includes(c.id) || only.some((o) => c.id.startsWith(o + ".")));
 for (const c of chosen) {

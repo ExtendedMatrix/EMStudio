@@ -14,8 +14,9 @@ import { basename, dirname, toNative, toPosix } from "./paths";
 // (`C:/Users/…` on Windows, see paths.ts); what the dialogs and the shell give
 // is made so here (`picked`, `takeDesktopQueue`), and what goes to the disk is
 // turned back here (`toNative`, every plugin-fs call and a dialog's
-// `defaultPath`). Rust's std adds the `\\?\` prefix itself for a path past
-// MAX_PATH, so plugin-fs needs nothing more.
+// `defaultPath`). Past MAX_PATH, plugin-fs relies on Rust's std, which on
+// Windows adds the `\\?\` prefix itself (`maybe_verbatim`, since 1.58): known
+// from std, NOT measured here (no Windows) — the Windows run is the test.
 const picked = (p: unknown): string | null => {
   const one = Array.isArray(p) ? p[0] : p;
   return typeof one === "string" && one ? toPosix(one) : null;

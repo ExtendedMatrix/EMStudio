@@ -280,9 +280,138 @@ def _fs_at_path(url_path):
     drive letter (`C:/…`) first stays as it is. Percent-decoded once. The gate
     is `_fs_resolve`'s, the same as `/fs/file`: realpath inside the roots."""
     raw = urllib.parse.unquote(url_path[len("/fs/at/"):])
-    if raw.startswith("~") or re.match(r"^[A-Za-z]:", raw):
+    # MICRO-PERCORSI-WINDOWS · a share (`\\server\share\…`) arrives marked by
+    # its two backslashes (the page's `paths.fsAtPath`): it stays a share
+    if raw.startswith("~") or re.match(r"^[A-Za-z]:", raw) or raw.startswith("\\\\"):
         return raw
     return "/" + raw
+
+
+# ── MICRO-PERCORSI-WINDOWS (21 Oct 2026) · Windows' paths, read as they are ──
+#
+# Measured on the Templu Mare dataset: its absolute paths reach 335 characters
+# on the Mac, past Windows' classic MAX_PATH (260). Python opens such a path only
+# if the system's LongPathsEnabled is on AND the executable says it is long-path
+# aware; the `\\?\` prefix needs neither. So every call that touches the disk
+# for a /fs route goes through `_long_path`, and every comparison with the
+# roots through `_short_path` (the prefix off, the case folded by `normcase`).
+
+#: Windows' MAX_PATH, less the 12 a folder keeps for an 8.3 name: from here on
+#: a path is handed to the OS with the `\\?\` prefix
+_WIN_LONG_FROM = 248
+
+
+def _long_path(path, *, nt=None):
+    """A path the OS calls can reach past MAX_PATH: on Windows, a long one as
+    `\\\\?\\C:\\…` (a share as `\\\\?\\UNC\\server\\share\\…`), normalised first
+    (the prefix turns off the OS's own `/` and `..` handling). Anything else —
+    a short path, another OS — as it is."""
+    import ntpath
+    nt = (os.name == "nt") if nt is None else nt
+    if not nt or not path:
+        return path
+    p = str(path)
+    if p.startswith("\\\\?\\") or len(p) < _WIN_LONG_FROM:
+        return p
+    p = ntpath.normpath(p)
+    if p.startswith("\\\\"):
+        return "\\\\?\\UNC\\" + p[2:]
+    return "\\\\?\\" + p
+
+
+def _short_path(path):
+    """The `\\\\?\\` prefix off again (what `realpath` may hand back for a long
+    path on Windows), so the path compares with the roots and reads as written."""
+    p = str(path)
+    if p.startswith("\\\\?\\UNC\\"):
+        return "\\\\" + p[8:]
+    if p.startswith("\\\\?\\"):
+        return p[4:]
+    return p
+
+
+def _out_path(path, *, nt=None):
+    """A path as the page keeps it: `/`-shaped on Windows too (`C:/Users/…`,
+    paths.ts) — the page compares the paths a listing gives with the ones it
+    holds, and this bridge reads `C:/…` as well as `C:\\…`."""
+    nt = (os.name == "nt") if nt is None else nt
+    return _short_path(path).replace("\\", "/") if nt and path else path
+
+
+#: a file that is THERE but whose bytes are in the cloud. Windows (OneDrive
+#: Files On-Demand, the cloud-files API): FILE_ATTRIBUTE_OFFLINE 0x1000,
+#: RECALL_ON_OPEN 0x40000, RECALL_ON_DATA_ACCESS 0x400000. macOS (File
+#: Provider, OneDrive in ~/Library/CloudStorage): SF_DATALESS 0x40000000 in
+#: st_flags — measured on this Mac: `ls -lO` says «compressed,dataless», st_flags
+#: 0x40000060, st_blocks 0.
+_WIN_CLOUD_ATTRS = 0x1000 | 0x40000 | 0x400000
+_SF_DATALESS = 0x40000000
+
+
+def _cloud_only(st) -> bool:
+    """Is a stat'ed file a cloud placeholder (bytes not on this computer)?"""
+    attrs = getattr(st, "st_file_attributes", 0) or 0
+    flags = getattr(st, "st_flags", 0) or 0
+    return bool(attrs & _WIN_CLOUD_ATTRS) or bool(flags & _SF_DATALESS)
+
+
+#: what the page says of a cloud-only file, instead of «not found»
+CLOUD_ONLY_MESSAGE = ("the file is in OneDrive (online only): download it, or make it "
+                      "«always available on this device»")
+
+
+def _file_state(path) -> str:
+    """`ok`, `cloud-only`, `folder` or `missing` — from a stat, never a read
+    (reading a placeholder would start its download)."""
+    try:
+        st = os.stat(_long_path(path))
+    except OSError:
+        return "missing"
+    if os.path.isdir(_long_path(path)):
+        return "folder"
+    return "cloud-only" if _cloud_only(st) else "ok"
+
+
+#: how far above the em.json's folder its relative locators may open a folder
+#: (`../RB/…` is one: the study's folder, where EM/, RB/, SB/ live)
+_DOC_ROOT_UP = 2
+
+
+def _doc_roots(em_json, locators, *, pathmod=os.path, home=None):
+    """MICRO-PERCORSI-WINDOWS · the folders an open em.json may always read:
+    its own, and the one its relative locators climb to (`../RB/x.glb` → the
+    study's folder), at most `_DOC_ROOT_UP` levels above it, never a whole disk
+    nor the home folder itself. Pure: `check-bridge-paths.mjs` asks it with
+    `ntpath` for Windows."""
+    folder = pathmod.dirname(pathmod.normpath(em_json))
+    if not folder:
+        return []
+    out = [folder]
+    top = folder
+    for loc in locators or ():
+        loc = str(loc or "")
+        if not loc or re.match(r"^[A-Za-z][A-Za-z0-9+.-]+:", loc) or pathmod.isabs(loc) \
+                or re.match(r"^[A-Za-z]:", loc) or loc.startswith(("/", "\\")):
+            continue                       # a scheme, an absolute path: not the study's
+        target = pathmod.normpath(pathmod.join(folder, loc))
+        try:
+            common = pathmod.commonpath([folder, target])
+        except ValueError:                 # another drive
+            continue
+        rel = pathmod.relpath(folder, common) if common != folder else ""
+        ups = len([x for x in rel.replace("\\", "/").split("/") if x]) if rel else 0
+        # a locator that climbs further is not the study's: it opens nothing
+        if ups <= _DOC_ROOT_UP and len(common) < len(top):
+            top = common
+    home = pathmod.normpath(home or str(pathlib.Path.home()))
+    if top != folder and not _is_whole_disk(top) and pathmod.normcase(top) != pathmod.normcase(home):
+        out.append(top)
+    return out
+
+
+#: the folders granted because a document was opened from them — this session
+#: only, never written to fs_roots.json
+_FS_ROOTS_DOC: list = []
 
 
 #: Directories `/fs/list` and `/fs/file` may reach (W1), from `--fs-root`
@@ -855,8 +984,14 @@ def _fs_inside_roots(full: str) -> bool:
     """Is this path reachable right now? True everywhere in whole-disk mode."""
     if _FS_ALL:
         return True
-    return any(full == root or full.startswith(root + os.sep)
-               for root in _FS_ROOTS)
+    # MICRO-PERCORSI-WINDOWS · `\\?\` off, and Windows' case folded (C:\Users
+    # and c:\users are one folder there; on POSIX normcase changes nothing)
+    f = os.path.normcase(_short_path(full))
+    for root in _FS_ROOTS:
+        r = os.path.normcase(root)
+        if f == r or f.startswith(r.rstrip(os.sep) + os.sep):
+            return True
+    return False
 
 #: The roots given at startup (flag + environment). Kept apart from the ones the
 #: UI persists so that removing a folder from the interface can never delete what
@@ -1037,7 +1172,9 @@ def _load_s3dgraphy(s3dgraphy_src: "pathlib.Path | None"):
 #: `reasoning` records of /validate (la proprietà come fonte, 9 Oct 2026).
 #: 32 = /room-import, «Bring into a room…» through s3Dgraphy's engine (16 Oct 2026).
 #: 33 = /fs/write, a sketched proxy's glb beside the em.json (MICRO-SPAZIO-3D).
-BRIDGE_LEVEL = 33   # 30 also = /validate
+#: 34 = /fs/doc (the open em.json's folders always served) and /fs/probe (a
+#: file there, online only in OneDrive, or missing) — MICRO-PERCORSI-WINDOWS.
+BRIDGE_LEVEL = 34   # 30 also = /validate
 
 
 # ── FONTE · the rules of «la proprietà come fonte», asked of the library ──────
@@ -1666,8 +1803,9 @@ def make_handler(api):
             # MICRO-SPAZIO-3D · `X-EM-Path` / `X-EM-Overwrite` ride with /fs/write
             self.send_header("Access-Control-Allow-Headers",
                              "Content-Type, X-EM-Filename, Range, X-EM-Path, X-EM-Overwrite")
+            # MICRO-PERCORSI-WINDOWS · `X-EM-File: cloud-only` (a placeholder)
             self.send_header("Access-Control-Expose-Headers",
-                             "Content-Range, Accept-Ranges, Content-Length")
+                             "Content-Range, Accept-Ranges, Content-Length, X-EM-File")
 
         def do_OPTIONS(self):
             if not self._gate():
@@ -1869,6 +2007,17 @@ def make_handler(api):
                     self._fail(400, f"invalid JSON body: {exc}")
                     return
                 self._fs_roots_edit(body)
+            elif route in ("/fs/doc", "/fs/probe"):
+                # MICRO-PERCORSI-WINDOWS · the open document's folders, and the
+                # state of its files (there, online only, missing)
+                if not self._fs_gate():
+                    return
+                try:
+                    body = json.loads(raw.decode("utf-8")) if raw else {}
+                except Exception as exc:
+                    self._fail(400, f"invalid JSON body: {exc}")
+                    return
+                (self._fs_doc if route == "/fs/doc" else self._fs_probe)(body)
             elif route == "/annotate":
                 try:
                     body = json.loads(raw.decode("utf-8")) if raw else {}
@@ -3533,15 +3682,19 @@ def make_handler(api):
                 return
             digest = hashlib.sha256()
             try:
-                with open(full, "rb") as fh:
+                with open(_long_path(full), "rb") as fh:
                     for block in iter(lambda: fh.read(1024 * 1024), b""):
                         digest.update(block)
             except OSError as exc:
+                if _file_state(full) == "cloud-only":
+                    self._json({"ok": False, "code": "cloud-only", "error": CLOUD_ONLY_MESSAGE},
+                               status=409, headers={"X-EM-File": "cloud-only"})
+                    return
                 self._fail(403, f"cannot read that file: {exc.strerror}")
                 return
             exif = _photo_exif(full)
             self._json({"ok": True, "checksum": f"sha256:{digest.hexdigest()}",
-                        "bytes": os.path.getsize(full),
+                        "bytes": os.path.getsize(_long_path(full)),
                         **({"exif": {"camera": exif["camera"],
                                      "takenAt": exif["taken_at"]}} if exif else {})})
 
@@ -3590,9 +3743,49 @@ def make_handler(api):
                 return
             # Re-resolve the live set from the same three sources as at startup,
             # so what /fs serves and what was saved can never drift apart.
-            _set_fs_roots(list(_FS_ROOTS_STARTUP) + _fs_roots_servable(persisted))
+            _set_fs_roots(list(_FS_ROOTS_STARTUP) + _fs_roots_servable(persisted) + _FS_ROOTS_DOC)
             self._json({"ok": True, "roots": _FS_ROOTS, "persisted": persisted,
                         "suspended": _fs_roots_suspended(), "scope": _fs_scope()})
+
+        def _fs_doc(self, body):
+            """MICRO-PERCORSI-WINDOWS · «the folder of the open em.json is always
+            served». The page names the em.json it opened from the disk and its
+            relative locators; the bridge serves, for this session only (nothing
+            written to fs_roots.json), the em.json's folder and the study's
+            folder its `../` climb to (`_doc_roots`). Measured: on a desktop
+            whose fs_roots.json was empty — a fresh Windows install — the em.json's
+            own folder was outside every root and every model answered 403.
+            Only a file that is there and is an em.json opens anything."""
+            raw = str(body.get("em_json") or "").strip()
+            if not raw:
+                self._fail(400, "/fs/doc needs `em_json`")
+                return
+            full = _short_path(os.path.realpath(_long_path(os.path.expanduser(raw))))
+            if not os.path.isfile(_long_path(full)) or not re.search(r"\.(em\.json|emj|json)$", full, re.I):
+                self._fail(404, "not an em.json on this computer")
+                return
+            locs = [str(x) for x in (body.get("locators") or []) if isinstance(x, str)][:20000]
+            granted = [d for d in _doc_roots(full, locs) if os.path.isdir(_long_path(d))]
+            added = [d for d in granted if not _fs_inside_roots(d)]
+            for d in added:
+                if d not in _FS_ROOTS_DOC:
+                    _FS_ROOTS_DOC.append(d)
+            if added:
+                _set_fs_roots(list(_FS_ROOTS) + added)
+                print(f"  [bridge] serving the open document's folder(s): {', '.join(added)}",
+                      file=sys.stderr)
+            self._json({"ok": True, "folders": [_out_path(d) for d in granted],
+                        "added": [_out_path(d) for d in added]})
+
+        def _fs_probe(self, body):
+            """MICRO-PERCORSI-WINDOWS · the state of files from a stat, never a
+            read: `ok`, `folder`, `cloud-only` (there, its bytes in OneDrive),
+            `missing`, or `outside` (not in a served folder: not asked)."""
+            out = []
+            for raw in [str(x) for x in (body.get("paths") or []) if isinstance(x, str)][:5000]:
+                full = _short_path(os.path.realpath(_long_path(os.path.expanduser(raw))))
+                out.append({"path": raw, "state": _file_state(full) if _fs_inside_roots(full) else "outside"})
+            self._json({"ok": True, "files": out, "cloud_only_message": CLOUD_ONLY_MESSAGE})
 
         # ── W1 · the filesystem as two routes ──────────────────────────────
         #
@@ -3617,7 +3810,7 @@ def make_handler(api):
             """
             if not raw:
                 return None, (400, "this route needs a 'path' query parameter")
-            full = os.path.realpath(os.path.expanduser(raw))
+            full = _short_path(os.path.realpath(_long_path(os.path.expanduser(raw))))
             if not _fs_inside_roots(full):
                 return None, (403, "path outside the allowed roots. em-bridge "
                                    "serves only the folders named at launch "
@@ -3626,11 +3819,12 @@ def make_handler(api):
                                    "machine, start it with --fs-all "
                                    "(EM_BRIDGE_FS_ALL=1) — one switch, announced, "
                                    "never a default.")
-            if want == "dir" and not os.path.isdir(full):
+            disk = _long_path(full)
+            if want == "dir" and not os.path.isdir(disk):
                 return None, (404, "not a directory")
-            if want == "file" and not os.path.isfile(full):
+            if want == "file" and not os.path.isfile(disk):
                 return None, (404, "not a file")
-            if not os.path.exists(full):
+            if not os.path.exists(disk):
                 return None, (404, "no such path")
             return full, None
 
@@ -3643,10 +3837,10 @@ def make_handler(api):
             it: one unreadable entry must not cost the other ninety-nine.
             """
             try:
-                st = os.stat(full)
+                st = os.stat(_long_path(full))
             except OSError:
                 return None
-            is_dir = os.path.isdir(full)
+            is_dir = os.path.isdir(_long_path(full))
             entry = {
                 "name": name,
                 "type": "dir" if is_dir else "file",
@@ -3655,6 +3849,9 @@ def make_handler(api):
                 "ext": "" if is_dir
                        else os.path.splitext(name)[1].lower().lstrip("."),
             }
+            # MICRO-PERCORSI-WINDOWS · there, but its bytes are in the cloud
+            if not is_dir and _cloud_only(st):
+                entry["cloud_only"] = True
             # A symlink pointing out of the roots is REAL content of this
             # folder, so it is listed — but it will 403 when opened, and a UI
             # that only learns this from the refusal offers a dead end. Say so
@@ -3682,7 +3879,7 @@ def make_handler(api):
                 entries = [e for e in (self._fs_entry(r, os.path.basename(r) or r)
                                        for r in starts) if e]
                 for entry, root in zip(entries, starts):
-                    entry["path"] = root
+                    entry["path"] = _out_path(root)
                 self._json({"ok": True, "roots": True, "path": "",
                             "parent": None, "scope": _fs_scope(),
                             "entries": entries})
@@ -3692,7 +3889,7 @@ def make_handler(api):
                 self._fail(*err)
                 return
             try:
-                names = os.listdir(full)
+                names = os.listdir(_long_path(full))
             except OSError as exc:
                 self._fail(403, f"cannot read that directory: {exc.strerror}")
                 return
@@ -3702,7 +3899,7 @@ def make_handler(api):
                     continue
                 entry = self._fs_entry(os.path.join(full, name), name)
                 if entry:
-                    entry["path"] = os.path.join(full, name)
+                    entry["path"] = _out_path(os.path.join(full, name))
                     entries.append(entry)
             # Dirs first, then files, each by name folded to lower case — the
             # order a file manager gives, and stable across platforms because it
@@ -3713,9 +3910,9 @@ def make_handler(api):
             # should not have to work it out.
             parent = os.path.dirname(full)
             at_root = any(full == root for root in _FS_ROOTS)
-            self._json({"ok": True, "roots": False, "path": full,
+            self._json({"ok": True, "roots": False, "path": _out_path(full),
                         "name": os.path.basename(full) or full,
-                        "parent": None if at_root else parent,
+                        "parent": None if at_root else _out_path(parent),
                         "entries": entries})
 
         def _fs_file(self, raw, *, body=True):
@@ -3736,10 +3933,19 @@ def make_handler(api):
                 self._fail(*err)
                 return
             media, _ = mimetypes.guess_type(full)
+            disk = _long_path(full)
+            # MICRO-PERCORSI-WINDOWS · a cloud placeholder: a HEAD says so in a
+            # header (the bytes may still come: reading starts the download); a
+            # read that fails on one says so instead of «cannot read»
+            cloud = _file_state(full) == "cloud-only"
             try:
-                size = os.path.getsize(full)
-                fh = open(full, "rb") if body else None
+                size = os.path.getsize(disk)
+                fh = open(disk, "rb") if body else None
             except OSError as exc:
+                if cloud:
+                    self._json({"ok": False, "code": "cloud-only", "error": CLOUD_ONLY_MESSAGE},
+                               status=409, headers={"X-EM-File": "cloud-only"})
+                    return
                 self._fail(403, f"cannot read that file: {exc.strerror}")
                 return
             # RISORSA-FILE · ONE byte range (`bytes=a-b`, `a-`, `-n`), answered
@@ -3774,6 +3980,8 @@ def make_handler(api):
                 self.send_header("Content-Type",
                                  media or "application/octet-stream")
                 self.send_header("Accept-Ranges", "bytes")
+                if cloud:
+                    self.send_header("X-EM-File", "cloud-only")
                 if partial:
                     self.send_header("Content-Range", f"bytes {start}-{end}/{size}")
                 self.send_header("Content-Length", str(end - start + 1))
@@ -3800,10 +4008,12 @@ def make_handler(api):
                 if fh is not None:
                     fh.close()
 
-        def _json(self, payload, status=200):
+        def _json(self, payload, status=200, headers=None):
             out = json.dumps(payload).encode()
             self.send_response(status)
             self._cors()
+            for k, v in (headers or {}).items():
+                self.send_header(k, v)
             self.send_header("Content-Type", "application/json")
             self.send_header("Content-Length", str(len(out)))
             self.end_headers()

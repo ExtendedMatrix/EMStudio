@@ -402,7 +402,7 @@ import { type Access, type ConnectionState, type NodeApi, type NodeEntry, type R
 import { stateBadge, stateSign } from "./state-symbols";
 import * as alignment from "./alignment";
 import { buildCommand, type CommandVerb } from "./commands";
-import { addResource, fileCounts, foldFiles, movePointers, packagingLabel, replaceFile, resourceFiles, resourceLabel, storeGraph } from "./resources";
+import { addResource, fileCounts, foldFiles, movePointers, packagingLabel, parseBlendLocator, replaceFile, resourceFiles, resourceLabel, storeGraph } from "./resources";
 import { askWhichPointersMove } from "./resource-panel";
 import { addressMap, chooseModel, needsChoice, startResources, type ModelChoice } from "./representation";
 import { foldForms, landPack, packTileset } from "./pack3tz";
@@ -6715,6 +6715,9 @@ function loadDocument(
   }
   currentFilePath = path ? paths.toPosix(path) : null; // desktop: enables in-place Save; null in browser
   void storageFollowDocument(path);
+  // MICRO-PERCORSI-WINDOWS · the bridge serves the em.json's folders (the
+  // store is seated by the end of this call: asked right after it)
+  if (path) void Promise.resolve().then(() => serveDocumentFolders(paths.toPosix(path)));
   // QOL1 · remember this open (path for desktop reopen, name otherwise).
   // MICRO-DOVE-CHI-MENU p.2 · a room's document is not a dropped file: the
   // room itself is the recent (`fetchRoomTitle`), reopened by entering it
@@ -12472,7 +12475,7 @@ async function bridgeUrl(): Promise<string> {
   return _bridgeUrl;
 }
 /** The bridge level this editor expects (`BRIDGE_LEVEL` in tools/em_bridge.py). */
-const BRIDGE_LEVEL_WANTED = 33;   // 31 = /property-source (FONTE); 32 = /room-import, «Bring into a room» through the engine; 33 = /fs/write (MICRO-SPAZIO-3D)
+const BRIDGE_LEVEL_WANTED = 34;   // 31 = /property-source (FONTE); 32 = /room-import, «Bring into a room» through the engine; 33 = /fs/write (MICRO-SPAZIO-3D); 34 = /fs/doc, /fs/probe (MICRO-PERCORSI-WINDOWS)
 /**
  * DEV30 U9 · WHY a call to the bridge failed, in words.
  *
@@ -21537,6 +21540,65 @@ function docMediaUrl(d: EmNode): string | null {
   return docSrcUrl(src);
 }
 
+// ── MICRO-PERCORSI-WINDOWS · the open em.json's folders, OneDrive's placeholders ──
+
+/** «The folder of the open em.json is always served»: the bridge is told which
+ *  em.json is open and where its relative locators go (`POST /fs/doc`), and
+ *  serves — for this session — its folder and the study's folder `../RB/…`
+ *  climbs to. Measured: on a desktop with no folder granted (a fresh Windows
+ *  install) every model of the em.json answered 403. An older bridge (no
+ *  route) or none: the folders it already serves, as before. */
+async function serveDocumentFolders(path: string): Promise<void> {
+  if (!store || sync.room || assetStoreBase()) return;
+  const dirs = new Set<string>();
+  for (const n of store.doc.graph.nodes) {
+    const u = String(((n.data ?? {}) as Record<string, unknown>).url ?? "");
+    const loc = parseBlendLocator(u)?.[0] ?? u;
+    if (!loc || paths.hasScheme(loc) || paths.isAbsolute(loc)) continue;
+    const d = paths.dirname(loc);
+    if (d) dirs.add(d);
+  }
+  let j: { ok?: boolean; added?: string[] } | null = null;
+  try {
+    const r = await fetch(`${await bridgeUrl()}/fs/doc`, { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ em_json: path, locators: [...dirs] }) });
+    j = r.ok ? await r.json() : null;
+  } catch { j = null; }
+  if (!j?.added?.length || currentFilePath !== path) return;
+  logInfo(t("fs.docServed", { dirs: j.added.map((d) => paths.toNative(d)).join(", ") }));
+  // what was refused before the answer is asked again
+  spaceMarks.notFound.clear();
+  spaceMarks.refused.clear();
+  refreshSurfaces("scene");
+  refreshSurfaces("viewer");
+}
+
+/** the resources whose file is on this computer but ONLINE ONLY (OneDrive Files
+ *  On-Demand on Windows, a «dataless» file on the Mac): the label and the
+ *  message say so instead of «not found» */
+const cloudOnly = new Set<string>();
+async function noteCloudOnly(rid: string): Promise<void> {
+  if (!currentFilePath || assetStoreBase() || cloudOnly.has(rid)) return;
+  const st = storeOfNode(rid) ?? store;
+  const d = (st?.node(rid)?.data ?? {}) as Record<string, unknown>;
+  const u = String(d.url ?? "") || (st ? String(((resourceFiles(storeGraph(st), rid)[0]?.node.data ?? {}) as Record<string, unknown>).url ?? "") : "");
+  if (!u || paths.hasScheme(u)) return;
+  const abs = paths.resolveRelative(currentFilePath, u);
+  let state = "";
+  try {
+    const r = await fetch(`${await bridgeUrl()}/fs/probe`, { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ paths: [abs] }) });
+    state = r.ok ? String((await r.json()).files?.[0]?.state ?? "") : "";
+  } catch { state = ""; }
+  if (state !== "cloud-only" || cloudOnly.has(rid)) return;
+  cloudOnly.add(rid);
+  const name = paths.basename(abs);
+  toast(t("fs.cloudOnly", { name }));
+  logWarn(`${name}: ${t("fs.cloudOnly", { name })} — ${paths.toNative(abs)}`);
+  refreshSurfaces("scene");
+  refreshSurfaces("viewer");
+}
+
 /** DEV30 U1 · the folder a study's relative paths are read from: the open
  *  em.json's, else the GraphML's it was imported from (desktop), else none. */
 function studyDir(): string | null {
@@ -25568,7 +25630,7 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
     texts: {
       loading: t("space.loading"), noEngine: t("em3d.noEngine"),
       referenceOnly: (name) => t("space.refOnly", { x: name }),
-      missing: (name) => t("space.fileMissing", { x: name }),
+      missing: (name, rid) => (rid && cloudOnly.has(rid) ? t("space.fileCloudOnly", { x: name }) : t("space.fileMissing", { x: name })),
       refused: (name) => t("space.fileRefused", { x: name }),
       overLimit: (name, size, lim) => t("space.overLimit", { x: name, size, lim }),
       openTileset: t("lod.openTileset"), loadAnyway: t("lod.loadAnyway"),
@@ -25681,6 +25743,7 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
     onNotFound: (rid, why: FetchFailure, unanswered?: boolean) => {
       if (unanswered && why === "missing") { spaceAwaitAnswer(rid); return; }
       if (!spaceMarks.mark(rid, why)) return;
+      void noteCloudOnly(rid);
       queueMicrotask(() => { refreshSurfaces("scene"); renderEmData(); });
     },
   });
@@ -32214,7 +32277,7 @@ function vwScene(win: Win, stage: HTMLElement, target: ViewerTarget, preview: Vw
     texts: {
       loading: t("space.loading"), noEngine: t("em3d.noEngine"),
       referenceOnly: (name) => t("space.refOnly", { x: name }),
-      missing: (name) => t("space.fileMissing", { x: name }),
+      missing: (name, rid) => (rid && cloudOnly.has(rid) ? t("space.fileCloudOnly", { x: name }) : t("space.fileMissing", { x: name })),
       refused: (name) => t("space.fileRefused", { x: name }),
       overLimit: (name, size, lim) => t("space.overLimit", { x: name, size, lim }),
       openTileset: t("lod.openTileset"), loadAnyway: t("lod.loadAnyway"),
@@ -32278,6 +32341,7 @@ function vwScene(win: Win, stage: HTMLElement, target: ViewerTarget, preview: Vw
     onNotFound: (rid, why: FetchFailure, unanswered?: boolean) => {
       if (unanswered && why === "missing") return;
       slot.events.push({ t: Math.round(performance.now() - slot.t0), what: `notfound:${why}`, url: rid });
+      void noteCloudOnly(rid);
     },
     // the container's tileset strip reduced to its title (the Viewer is often
     // narrow); a strip that asks something (a file over the threshold) stays open

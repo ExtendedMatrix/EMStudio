@@ -121,7 +121,8 @@ export interface SceneTexts {
   loading: string;
   noEngine: string;
   referenceOnly: (name: string) => string;
-  missing: (name: string) => string;
+  /** `resourceId`: MICRO-PERCORSI-WINDOWS, a file online only says so */
+  missing: (name: string, resourceId?: string) => string;
   /** MICRO-SPAZIO-FIRMATO · the node refused the file (access) */
   refused: (name: string) => string;
   /** MICRO-3DTILES · a glb over the threshold, and the two ways on */
@@ -1681,7 +1682,7 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
               // MICRO-3DTILES · held back by the threshold: its label says so
               const gated = drawn.get(key)?.as === "gated";
               const refused = item.state === "refused";
-              addLabel(gated ? item.label : refused ? opts.texts.refused(item.label) : opts.texts.missing(item.label), at,
+              addLabel(gated ? item.label : refused ? opts.texts.refused(item.label) : opts.texts.missing(item.label, item.resourceId), at,
                 `${gated ? "miss gated" : refused ? "miss refused" : "miss"} k-${item.kind}`, item.id);
               if (!gated) drawn.set(key, { item, as: "label" });
             }
