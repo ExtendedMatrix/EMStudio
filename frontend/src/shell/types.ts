@@ -32,6 +32,10 @@ import { t } from "../i18n";
 export interface TableMount {
   body: HTMLElement;
   readonly count: HTMLElement | null;
+  /** MICRO-PANNELLI-OVERLAY-TABULAR p.2 · the slot of the window's bar where the
+   *  filter row lives (one head row: type, sheet, Rows | Cards, filter, chips,
+   *  count, «⋯») */
+  readonly bar?: HTMLElement | null;
   /** STRUTTURA · the window this mount belongs to: its sheet, its row/card
    *  choice and its filters are PER WINDOW (two tables, two questions) */
   win?: Win;
@@ -133,6 +137,7 @@ export function registerBuiltinSurfaces(deps: SurfaceDeps): void {
             body: el,
             win,
             get count() { return strip(el.parentElement, "win-strip-count"); },
+            get bar() { return strip(el.parentElement, "win-fbar-slot"); },
             enabled: () => el.isConnected,
             place: surfacePlace(win),
           };

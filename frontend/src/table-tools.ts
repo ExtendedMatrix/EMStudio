@@ -244,6 +244,11 @@ export function enhanceTable(table: HTMLTableElement, labels: TableToolsLabels):
     clear.setAttribute("aria-disabled", String(!any));
     clear.title = any ? labels.clear : labels.clearNone;
     count.textContent = any ? labels.shown(shown, groups.length) : "";
+    // MICRO-PANNELLI-OVERLAY-TABULAR p.2 · said to whoever holds the table (the
+    // Tabular's head row, where «Clear filters» and the count are)
+    table.dataset.ttShown = String(shown);
+    table.dataset.ttTotal = String(groups.length);
+    table.dispatchEvent(new CustomEvent("tt:change", { bubbles: true, detail: { any, shown, total: groups.length } }));
   }
   apply();
 }

@@ -93,6 +93,9 @@ let runIssueBulk: (key: string, nodes: string[]) => void = () => {};
 export interface EmDataHost {
   body: HTMLElement;
   count?: HTMLElement | null;
+  /** MICRO-PANNELLI-OVERLAY-TABULAR p.2 · where the filter row is drawn: the
+   *  window bar's slot (one head row); absent, at the top of the body */
+  bar?: HTMLElement | null;
   actions?: HTMLElement | null;
   /** STRUTTURA · the window whose sheet and filters this mount shows */
   win?: Win;
@@ -106,7 +109,32 @@ const hosts: EmDataHost[] = [];
 
 export function addEmDataHost(host: EmDataHost): void {
   hosts.push(host);
+  // MICRO-PANNELLI-OVERLAY-TABULAR p.2 · a column filter typed in a table of
+  // this window: the head row's «Clear filters» and its count follow it
+  host.body.addEventListener("tt:change", () => syncColumnFilters(host));
   renderEmData();
+}
+
+/** the column filters set in this window's tables (table-tools) */
+function columnFiltersOn(body: HTMLElement): HTMLElement[] {
+  return [...body.querySelectorAll<HTMLInputElement | HTMLSelectElement>("tr.tt-filters .tt-filter")].filter((c) => c.value.trim());
+}
+/** the head row says what the column filters do: «Clear filters» shown while
+ *  any filter is set (the text, a facet or a column), and the rows counted are
+ *  the rows left on screen */
+function syncColumnFilters(host: EmDataHost): void {
+  const root = host.bar ?? host.body;
+  const fbar = root.querySelector<HTMLElement>(".fbar");
+  if (!fbar) return;
+  const cols = columnFiltersOn(host.body).length > 0;
+  const clear = fbar.querySelector<HTMLElement>("[data-fclear]");
+  if (clear) clear.hidden = !(cols || fbar.dataset.any === "1");
+  const count = fbar.querySelector<HTMLElement>(".fcount");
+  const base = Number(fbar.dataset.count ?? 0);
+  let hidden = 0;
+  for (const tb of host.body.querySelectorAll<HTMLTableElement>("table[data-tt='1']"))
+    hidden += Number(tb.dataset.ttTotal ?? 0) - Number(tb.dataset.ttShown ?? 0);
+  if (count) count.textContent = t("table.rows", { n: String(Math.max(0, base - hidden)) });
 }
 
 /** Unregister a host — ownership is explicit (WIN-FIX1). */
@@ -345,13 +373,16 @@ function filterBarHtml(host: EmDataHost, st: TableState, defs: FacetDef[],
     (tk.v === "*" ? `${escapeHtml(t(tk.label))}: ${tk.count}` : escapeHtml(tk.label)) +
     ` <span>×</span></button>`).join("");
   const any = st.q || defs.some((d) => (st.f[d.key] ?? []).length);
-  return `<div class="fbar">` +
+  // MICRO-PANNELLI-OVERLAY-TABULAR p.2 · one row: the field, the facets, «Clear
+  // filters» only while a filter is set (the column filters too), the count
+  return `<div class="fbar" data-any="${any ? "1" : "0"}" data-count="${count}">` +
     `<input class="fq" type="search" data-fq="1" value="${escapeAttr(st.q)}" ` +
     `placeholder="${escapeAttr(t(defs.length ? "table.filterTokens" : "table.filter"))}" ` +
     `aria-label="${escapeAttr(t("table.filter"))}">` +
-    btns + toks + `<span class="fgrow"></span>` +
+    btns + toks +
+    `<button class="fclear" type="button" data-fclear="1"${any ? "" : " hidden"}>${escapeHtml(t("table.clear"))}</button>` +
+    `<span class="fgrow"></span>` +
     `<span class="fcount">${escapeHtml(t("table.rows", { n: String(count) }))}</span>` +
-    (any ? `<button class="fclear" type="button" data-fclear="1">${escapeHtml(t("table.clear"))}</button>` : "") +
     `</div>`;
 }
 
@@ -368,7 +399,7 @@ function drawPop(): void {
   if (!pop) return;
   const host = hosts.find((h) => (h.win?.id ?? "") === pop!.win);
   const ctx = getCtx();
-  const btn = host?.body.querySelector<HTMLElement>(`[data-fpop="${CSS.escape(pop.key)}"]`);
+  const btn = (host?.bar ?? host?.body)?.querySelector<HTMLElement>(`[data-fpop="${CSS.escape(pop.key)}"]`);
   if (!host || !ctx || !btn) { pop = null; return; }
   const st = stateOf(host.win);
   const ix = indexOf(ctx);
@@ -486,12 +517,15 @@ function renderEmDataInto(host: EmDataHost): void {
   const store = getStore();
   const ctx = getCtx();
   if (!store || !ctx) {
+    if (host.bar) host.bar.innerHTML = "";
     body.innerHTML = `<div class="emdata-empty">${escapeHtml(t("table.empty"))}</div>`;
     if (countEl) countEl.textContent = "";
     return;
   }
   // keep the focus in the text box across the rebuild (a keystroke re-renders)
-  const hadFocus = document.activeElement?.closest?.(".tile-tablebody") === body &&
+  const barEl = host.bar ?? null;
+  const hadFocus = (document.activeElement?.closest?.(".tile-tablebody") === body ||
+                    (!!barEl && barEl.contains(document.activeElement))) &&
                    (document.activeElement as HTMLElement).matches(".fq");
   const caret = hadFocus ? (document.activeElement as HTMLInputElement).selectionStart : null;
 
@@ -568,10 +602,14 @@ function renderEmDataInto(host: EmDataHost): void {
   // the count lives in the filter bar, next to what it counts
   if (countEl) countEl.textContent = "";
 
-  body.innerHTML = filterBarHtml(host, st, defs, count) + content;
+  if (barEl) {
+    barEl.innerHTML = filterBarHtml(host, st, defs, count);
+    body.innerHTML = content;
+  } else body.innerHTML = filterBarHtml(host, st, defs, count) + content;
   wireBody(host, store, st);
+  syncColumnFilters(host);
   if (hadFocus) {
-    const f = body.querySelector<HTMLInputElement>(".fq");
+    const f = (barEl ?? body).querySelector<HTMLInputElement>(".fq");
     f?.focus();
     if (f && caret != null) f.setSelectionRange(caret, caret);
   }
@@ -863,10 +901,14 @@ function issuesTableHtml(rows: ViewCtx["issues"], ctx: ViewCtx, ix: ReturnType<t
 function wireBody(host: EmDataHost, store: DocumentStore, st: TableState): void {
   const body = host.body;
   const win = host.win;
-  const fq = body.querySelector<HTMLInputElement>(".fq");
+  // the filter row: in the window's bar, or at the top of the body
+  const fb = host.bar ?? body;
+  const fq = fb.querySelector<HTMLInputElement>(".fq");
   fq?.addEventListener("input", () => setEmDataFilter(fq.value, win));
   fq?.addEventListener("pointerdown", (e) => e.stopPropagation());
-  body.querySelectorAll<HTMLButtonElement>("[data-fpop]").forEach((b) =>
+  // the arrows move the rows (p.4), not the caret: inside the field they stay the field's
+  fq?.addEventListener("keydown", (e) => e.stopPropagation());
+  fb.querySelectorAll<HTMLButtonElement>("[data-fpop]").forEach((b) =>
     b.addEventListener("click", (e) => {
       e.stopPropagation();
       const key = b.dataset.fpop!;
@@ -875,14 +917,19 @@ function wireBody(host: EmDataHost, store: DocumentStore, st: TableState): void 
       renderEmData();
       document.querySelector<HTMLInputElement>(".fpop .fpq")?.focus();
     }));
-  body.querySelectorAll<HTMLButtonElement>("[data-ftok]").forEach((b) =>
+  fb.querySelectorAll<HTMLButtonElement>("[data-ftok]").forEach((b) =>
     b.addEventListener("click", () => {
       const [key, v] = b.dataset.ftok!.split("|");
       const f = { ...st.f, [key]: v === "*" ? [] : (st.f[key] ?? []).filter((x) => x !== v) };
       patchState(win, { f });
       renderEmData();
     }));
-  body.querySelector<HTMLButtonElement>("[data-fclear]")?.addEventListener("click", () => {
+  fb.querySelector<HTMLButtonElement>("[data-fclear]")?.addEventListener("click", () => {
+    // the column filters of this window's tables too (table-tools keeps them)
+    for (const c of columnFiltersOn(body) as Array<HTMLInputElement | HTMLSelectElement>) {
+      c.value = "";
+      c.dispatchEvent(new Event(c instanceof HTMLSelectElement ? "change" : "input"));
+    }
     patchState(win, { q: "", f: {} });
     closePop();
     renderEmData();

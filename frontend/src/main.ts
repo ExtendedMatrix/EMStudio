@@ -34530,6 +34530,17 @@ function buildAreaHeader(win: Win): DocumentFragment {
     frag.appendChild(seg);
   }
 
+  // ── MICRO-PANNELLI-OVERLAY-TABULAR p.2 · the Tabular's ONE head row ───────
+  // The filter field, the facet chips, «Clear filters» (only with a filter set)
+  // and the count are drawn by the table (`emdata.ts`) into this slot, between
+  // Rows | Cards and «⋯»: the second row of the window («Filter» … «N rows»)
+  // and the third («Clear filters») are gone.
+  if (type === "table") {
+    const slot = document.createElement("div");
+    slot.className = "win-fbar-slot";
+    frag.appendChild(slot);
+  }
+
   // ── the window's MENU, «⋯» (AUDIT N9) ─────────────────────────────────────
   //
   // ONE menu per window, called «⋯», that gathers the window's tools — the

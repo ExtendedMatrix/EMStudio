@@ -9996,6 +9996,42 @@ body.num-drag-on, body.num-drag-on * { cursor: ew-resize !important; user-select
 .tt-clear[aria-disabled="true"] { color: var(--text-faint); cursor: default; }
 tr.tt-hidden { display: none; }
 
+/* ── MICRO-PANNELLI-OVERLAY-TABULAR p.2 · the Tabular: one head row, and the
+   column headings with their filters held at the top while the rows scroll ── */
+.win-fbar-slot { flex: 1 1 auto; min-width: 0; display: flex; align-items: center; }
+.win-fbar-slot:empty { display: none; }
+.win-fbar-slot .fbar {
+  flex: 1 1 auto; min-width: 0; display: flex; align-items: center; gap: 6px;
+  flex-wrap: nowrap; overflow: hidden; padding: 0; border: 0; background: none;
+}
+.win-fbar-slot .fbar .fq { width: 180px; flex: 0 1 180px; min-width: 70px; padding: 3px 8px; font-size: 12px; }
+.win-fbar-slot .fbar .fbtn, .win-fbar-slot .fbar .ftok, .win-fbar-slot .fbar .fclear { flex: none; white-space: nowrap; }
+.win-fbar-slot .fbar .fcount { flex: none; white-space: nowrap; }
+.win-fbar-slot .fbar .fclear[hidden] { display: none; }
+/* the second row of «Clear filters» is gone: the head row's clears every filter */
+.tile-tablebody .tt-bar { display: none; }
+.tile-tablebody table > thead { position: sticky; top: 0; z-index: 2; background: var(--bg-subtle); }
+.tile-tablebody table > thead th { position: static; }
+/* a head that stays must hide the rows passing under it: the cells without a
+   background of their own get the body's (lower specificity than any table's) */
+.tile-tablebody :where(table > thead th) { background: var(--bg-subtle); }
+.tile-tablebody table > thead tr.tt-filters th { background: var(--bg-subtle); }
+/* the models view: two sections, each with its title and its own head in place */
+/* the computed views kept their table in a box that scrolls sideways (DEV29
+   B8), and a box that scrolls holds a sticky head to itself: in the Tabular the
+   window's body scrolls both ways, so the box does not have to */
+.tile-tablebody .tv-pad:has(> .tv-table) { overflow-x: visible; }
+.tile-tablebody .mdl h4 { position: sticky; top: 0; z-index: 3; box-sizing: border-box; height: 28px; line-height: 18px; margin: 0; padding: 6px 2px 4px; background: var(--bg-subtle); }
+.tile-tablebody .mdl table > thead { top: 28px; }
+/* collapsed borders belong to the table, not to the cell, and stay behind when
+   the head sticks: the rows showed through them. The tables with bottom rules
+   only lose nothing by keeping their borders on the cells */
+.tile-tablebody .mdl table, .tile-tablebody table.tv-table { border-collapse: separate; border-spacing: 0; }
+/* …and the bordered grid of the sheets keeps its single lines: each cell draws
+   its right and bottom edge, the table its left and top */
+.tile-tablebody table.emdata-table { border-collapse: separate; border-spacing: 0; border-left: 1px solid var(--border); border-top: 1px solid var(--border); }
+.tile-tablebody table.emdata-table th, .tile-tablebody table.emdata-table td { border-width: 0 1px 1px 0; }
+
 /* NARRATIVA-BLOCCHI p.1 · the story's title and subtitle, written in the page */
 .nv-head .nv-title.nv-editable:focus, .nv-head .nv-lede.nv-editable:focus { box-shadow: 0 0 0 1px var(--accent); border-radius: var(--radius-sm); }
 .nv-lede.nv-empty-lede::before { content: attr(data-placeholder); color: var(--text-faint); font-style: italic; }

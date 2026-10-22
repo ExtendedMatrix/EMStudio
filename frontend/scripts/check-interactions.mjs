@@ -2729,7 +2729,8 @@ test("S6.sheets", "Tabella · due gruppi (Schede, Viste calcolate), ogni voce co
     await p.locator(`.dd-menu:not(.hidden) button[data-sheet="${it.sheet}"]`).first().click({ timeout: 4000 });
     await p.waitForTimeout(500);
     shown[it.sheet] = await p.evaluate(() => {
-      const f = [...document.querySelectorAll(".tile-tablebody .fcount")].map((x) => x.textContent)[0] ?? null;
+      // MICRO-PANNELLI-OVERLAY-TABULAR p.2 · the count is in the window's head row now
+      const f = [...document.querySelectorAll('[data-surface-type="table"] .fcount')].map((x) => x.textContent)[0] ?? null;
       return f ? Number((/\d+/.exec(f) ?? ["-1"])[0]) : null;
     });
   }
@@ -6868,7 +6869,8 @@ test("PU9.tables", "PULIZIA p.9 · le tabelle si ordinano e si filtrano: clic su
     const rows = [...(tb?.tBodies[0]?.rows ?? [])].filter((r) => !r.classList.contains("tt-hidden"));
     return { n: rows.length, total: tb?.tBodies[0]?.rows.length ?? 0, col: rows.map((r) => r.cells[ci]?.textContent.trim() ?? ""),
              aria: heads[ci]?.getAttribute("aria-sort"), arrow: heads[ci]?.querySelector(".tt-arrow")?.textContent ?? "",
-             clear: document.querySelector(`${T} .tt-clear`)?.getAttribute("aria-disabled") }; }, T);
+             // MICRO-PANNELLI-OVERLAY-TABULAR p.2 · «Clear filters» is the head row's, shown only with a filter set
+             clear: ((b) => (b ? String(b.hidden) : null))(document.querySelector(`${T} .fclear`)) }; }, T);
   const r = { start: await read() };
   const click = () => p.evaluate((T) => [...document.querySelectorAll(`${T} th .tt-sort`)].find((b) => /Nodo/i.test(b.textContent))?.click(), T);
   await click(); r.asc = await read();
@@ -6883,7 +6885,7 @@ test("PU9.tables", "PULIZIA p.9 · le tabelle si ordinano e si filtrano: clic su
   await p.evaluate((id) => window.__EM_DRAG__.setValue(id, "pu9"), prop);
   await p.waitForTimeout(600);
   r.rebuilt = await read();
-  await p.click(`${T} .tt-clear`);
+  await p.click(`${T} .fclear`);
   await p.waitForTimeout(150);
   r.cleared = await read();
   await ctx.close();
@@ -8002,6 +8004,63 @@ test("PO1.inside", "PANNELLI-OVERLAY p.1 · nel layout di E.D. (Matrix stretta a
   await ctx.close();
   const pass = ok && out.scene.glyphIn && out.scene.title === "Overlays — Space" && out.scene.panelIn && out.table === 0 && !errors.length;
   return { pass, detail: { ...out, errors } };
+});
+
+/** pick a sheet in the Space's Tabular (its rows) */
+async function poSheet(p, sheet) {
+  await p.evaluate((s) => document.querySelector(`.tile-area[data-win="space:models"] .dd-menu button[data-sheet="${s}"]`)?.click(), sheet);
+  await p.waitForTimeout(700);
+  await p.evaluate(() => { const b = [...document.querySelectorAll('.tile-area[data-win="space:models"] .tile-bar .win-seg button')].find((x) => /^(Rows|Righe)$/.test(x.textContent.trim())); if (b && b.getAttribute("aria-pressed") !== "true") b.click(); });
+  await p.waitForTimeout(300);
+}
+/** what the Tabular's head shows, and whether, scrolled to `at`, the column headings and their filters are still seen */
+const poHead = (p, at) => p.evaluate((at) => {
+  const area = document.querySelector('.tile-area[data-win="space:models"]');
+  const body = area.querySelector(".tile-tablebody");
+  const bar = area.querySelector(":scope > .tile-bar");
+  body.scrollTop = 0;
+  const a = area.getBoundingClientRect();
+  const first = [...body.querySelectorAll("table tbody tr")].find((tr) => tr.getBoundingClientRect().height > 0);
+  const head = first ? Math.round(first.getBoundingClientRect().top - a.top) : null;
+  const barRect = bar.getBoundingClientRect();
+  const inBar = !!bar.querySelector(".fbar .fq") && !!bar.querySelector(".fbar .fcount");
+  const rowsInBody = body.querySelectorAll(".fbar").length + [...body.querySelectorAll(".tt-bar")].filter((x) => x.getBoundingClientRect().height > 0).length;
+  const clearShown = !bar.querySelector(".fclear")?.hidden;
+  body.scrollTop = at;
+  const b = body.getBoundingClientRect();
+  const tb = document.elementFromPoint(b.left + 40, b.top + b.height * 0.75)?.closest("table");
+  const seen = (el) => { if (!el) return false; const r = el.getBoundingClientRect(); const hit = document.elementFromPoint(r.left + Math.min(20, r.width / 2), r.top + r.height / 2); return r.top >= b.top - 1 && !!hit && (hit === el || el.contains(hit)); };
+  const th = tb?.tHead?.rows[0]?.cells[0];
+  const filt = tb?.querySelector("tr.tt-filters .tt-filter")?.closest("th");
+  const h4 = document.elementFromPoint(b.left + 60, b.top + 8)?.closest("h4")?.textContent ?? null;
+  return { head, barH: Math.round(barRect.height), inBar, rowsInBody, clearShown, scrolled: body.scrollTop, headingSeen: seen(th), filterSeen: seen(filt), table: tb?.className ?? null, h4 };
+}, at);
+
+test("PO2.head", "PANNELLI-OVERLAY p.2 · il Tabular ha una sola riga di testa (tipo, scheda, Rows | Cards, Filter, chip, conteggio, «⋯»): niente seconda riga «Filter» né terza «Clear filters»; «Clear filters» compare solo con un filtro (anche di colonna) e li toglie tutti; scorrendo, intestazioni e filtri di colonna restano in alto in Units, Documents, Claims; nella vista dei modelli i proxy hanno il loro titolo e la loro testa", async () => {
+  const { p, ctx, errors } = await poOpen({ doc: "TempluMare" });
+  const out = {};
+  for (const sh of ["Units", "Documents", "Claims"]) { await poSheet(p, sh); out[sh] = await poHead(p, 300); }
+  // a column filter: «Clear filters» appears in the head row and clears it
+  await poSheet(p, "Units");
+  const col = await p.evaluate(() => { const c = document.querySelector('.tile-area[data-win="space:models"] .tile-tablebody input.tt-filter'); return c?.dataset.col ?? null; });
+  await p.fill(`.tile-area[data-win="space:models"] .tile-tablebody input.tt-filter[data-col="${col}"]`, "1");
+  await p.waitForTimeout(250);
+  const filtered = await p.evaluate(() => { const bar = document.querySelector('.tile-area[data-win="space:models"] > .tile-bar');
+    return { clearShown: !bar.querySelector(".fclear").hidden, count: bar.querySelector(".fcount").textContent }; });
+  await p.click('.tile-area[data-win="space:models"] > .tile-bar .fclear');
+  await p.waitForTimeout(250);
+  const cleared = await p.evaluate(() => { const area = document.querySelector('.tile-area[data-win="space:models"]');
+    return { clearShown: !area.querySelector(".tile-bar .fclear").hidden, left: [...area.querySelectorAll(".tt-filter")].filter((c) => c.value).length, count: area.querySelector(".tile-bar .fcount").textContent }; });
+  // the models view, scrolled to the end: the proxies' own title and head
+  await poSheet(p, "Models");
+  out.Models = await poHead(p, 1e6);
+  await p.screenshot({ path: SHOT("po2-head") }).catch(() => {});
+  await ctx.close();
+  const one = (r) => r.inBar && r.rowsInBody === 0 && !r.clearShown && r.headingSeen && r.filterSeen && r.scrolled > 0;
+  const pass = ["Units", "Documents", "Claims"].every((k) => one(out[k]))
+    && out.Models.inBar && /mdl-px/.test(out.Models.table ?? "") && out.Models.headingSeen && /prox/i.test(out.Models.h4 ?? "")
+    && !!col && filtered.clearShown && cleared.clearShown === false && cleared.left === 0 && filtered.count !== cleared.count && !errors.length;
+  return { pass, detail: { ...out, col, filtered, cleared, errors } };
 });
 
 // ── run ─────────────────────────────────────────────────────────────────────
