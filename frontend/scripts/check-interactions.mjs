@@ -7929,6 +7929,81 @@ test("IP3.level", "INSTALLER-PULSANTE p.3 · il bridge che risponde è di un liv
   return { pass, detail: { wanted, desktop: wd, browser: wa, thisTree: wc, errors: [...errors, ...a.errors, ...c.errors] } };
 });
 
+// ── MICRO-PANNELLI-OVERLAY-TABULAR ───────────────────────────────────────────
+// E.D.'s layout in the Space: the graph window (Matrix) narrow on the left, the
+// 3D scene in the middle, the Tabular below the two, the Inspector on the right
+const PO_LAYOUT = (graphFrac) => JSON.stringify({ space: {
+  wins: [{ id: "space:1", type: "scene", state: {} },
+    { id: "space:models", type: "table", state: { "current.table.sheet": "Models" } },
+    { id: "space:canvas", type: "graph", state: { mode: "matrix" } },
+    { id: "space:inspector", type: "inspector", state: {} }],
+  activeId: "space:1",
+  layout: { kind: "split", dir: "row", ratio: 0.8,
+    a: { kind: "split", dir: "col", ratio: 0.72,
+      a: { kind: "split", dir: "row", ratio: graphFrac, a: { kind: "leaf", winId: "space:canvas" }, b: { kind: "leaf", winId: "space:1" } },
+      b: { kind: "leaf", winId: "space:models" } },
+    b: { kind: "leaf", winId: "space:inspector" } } } });
+const poOpen = (o = {}) => open({ locale: "en", w: 1728, h: 1000, init: { "emstudio.windows": PO_LAYOUT(0.3),
+  "emstudio.workspaces.rev": "5", "emstudio.workspace": "space" }, ...o });
+const poAreas = (p) => p.evaluate(() => Object.fromEntries([...document.querySelectorAll(".tile-area")].map((a) => {
+  const r = a.getBoundingClientRect(); return [a.dataset.win, { x: r.left, y: r.top, w: r.width, h: r.height }]; })));
+const poRect = (p, sel) => p.evaluate((s) => { const e = [...document.querySelectorAll(s)].find((x) => !x.classList.contains("hidden") && x.getBoundingClientRect().width > 0);
+  if (!e) return null; const r = e.getBoundingClientRect(); return { x: r.left, y: r.top, w: r.width, h: r.height }; }, sel);
+const poInside = (b, a) => !!b && !!a && b.x >= a.x - 0.5 && b.x + b.w <= a.x + a.w + 0.5 && b.y >= a.y - 0.5 && b.y + b.h <= a.y + a.h + 0.5;
+/** drag the divider at the graph window's right edge so the graph is `px` wide */
+async function poGraphWidth(p, px) {
+  const g = (await poAreas(p))["space:canvas"];
+  const d = await p.evaluate((edge) => [...document.querySelectorAll(".tile-div:not(.hidden)")].map((x) => x.getBoundingClientRect())
+    .map((r) => ({ x: r.left, y: r.top, w: r.width, h: r.height })).find((r) => Math.abs(r.x - edge) < 10 && r.h > 40), g.x + g.w);
+  await p.mouse.move(d.x + d.w / 2, d.y + d.h / 2); await p.mouse.down();
+  await p.mouse.move(g.x + px + d.w / 2, d.y + d.h / 2, { steps: 8 }); await p.mouse.up();
+  await p.waitForTimeout(300);
+}
+
+test("PO1.inside", "PANNELLI-OVERLAY p.1 · nel layout di E.D. (Matrix stretta a sinistra, scena 3D, Tabular sotto): con il grafo largo 380 e 260 px, il filtro e il glifo degli overlay stanno dentro il grafo e aprono «Overlays — Matrix» dentro di esso, che resta tale passando col mouse sulla scena; il glifo della scena apre «Overlays — Space» dentro la scena; il Tabular a fuoco non ha nessun glifo né pannello dentro di sé", async () => {
+  const { p, ctx, errors } = await poOpen();
+  const out = {};
+  let ok = true;
+  for (const px of [380, 260]) {
+    await poGraphWidth(p, px);
+    const A = await poAreas(p);
+    const g = A["space:canvas"];
+    await p.mouse.move(g.x + g.w / 2, g.y + g.h / 2); await p.waitForTimeout(250);
+    const funnel = await poRect(p, "#btn-view-props"), glyph = await poRect(p, "#btn-overlays");
+    // the pointer travels to the glyph from the graph's middle (focus follows the mouse)
+    await p.mouse.move(glyph.x + glyph.w / 2, glyph.y + glyph.h / 2, { steps: 6 });
+    await p.mouse.click(glyph.x + glyph.w / 2, glyph.y + glyph.h / 2); await p.waitForTimeout(300);
+    const panel = await poRect(p, "#overlay-panel");
+    const title = await p.evaluate(() => document.querySelector("#overlay-panel .fp-hint")?.textContent);
+    const s = A["space:1"];
+    await p.mouse.move(s.x + s.w / 2, s.y + s.h / 2, { steps: 6 }); await p.waitForTimeout(300);
+    const titleAfter = await p.evaluate(() => document.querySelector("#overlay-panel .fp-hint")?.textContent);
+    const panelAfter = await poRect(p, "#overlay-panel");
+    await p.evaluate(() => document.querySelector("#overlay-panel .fp-close")?.click());
+    out[px] = { w: Math.round(g.w), funnelIn: poInside(funnel, g), glyphIn: poInside(glyph, g), title, panelIn: poInside(panel, g), titleAfter, panelAfterIn: poInside(panelAfter, g) };
+    ok &&= Math.abs(g.w - px) < 4 && out[px].funnelIn && out[px].glyphIn && title === "Overlays — Matrix" && out[px].panelIn && titleAfter === "Overlays — Matrix" && out[px].panelAfterIn;
+  }
+  await p.screenshot({ path: SHOT("po1-260") }).catch(() => {});
+  // the scene's own glyph
+  const A = await poAreas(p);
+  const s = A["space:1"];
+  await p.mouse.move(s.x + s.w / 2, s.y + s.h / 2); await p.waitForTimeout(250);
+  const sg = await poRect(p, ".scn-ovbtn");
+  await p.mouse.click(sg.x + sg.w / 2, sg.y + sg.h / 2); await p.waitForTimeout(300);
+  const sp = await poRect(p, "#overlay-panel");
+  out.scene = { glyphIn: poInside(sg, s), title: await p.evaluate(() => document.querySelector("#overlay-panel .fp-hint")?.textContent), panelIn: poInside(sp, s) };
+  await p.evaluate(() => document.querySelector("#overlay-panel .fp-close")?.click());
+  // the Tabular focused: nothing of the overlays inside it
+  const tb = A["space:models"];
+  await p.mouse.move(tb.x + tb.w / 2, tb.y + tb.h / 2, { steps: 4 }); await p.waitForTimeout(300);
+  out.table = await p.evaluate((t) => [...document.querySelectorAll("#btn-overlays, #btn-view-props, .scn-ovbtn, #overlay-panel")]
+    .filter((e) => !e.classList.contains("hidden")).map((e) => e.getBoundingClientRect())
+    .filter((r) => r.width && r.left >= t.x && r.right <= t.x + t.w && r.top >= t.y && r.bottom <= t.y + t.h).length, tb);
+  await ctx.close();
+  const pass = ok && out.scene.glyphIn && out.scene.title === "Overlays — Space" && out.scene.panelIn && out.table === 0 && !errors.length;
+  return { pass, detail: { ...out, errors } };
+});
+
 // ── run ─────────────────────────────────────────────────────────────────────
 const chosen = cases.filter((c) => !only.length || only.includes(c.id) || only.some((o) => c.id.startsWith(o + ".")));
 for (const c of chosen) {

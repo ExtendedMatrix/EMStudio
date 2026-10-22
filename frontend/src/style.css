@@ -2114,6 +2114,12 @@ body.sync-active #mode-indicator::before {
   color: var(--text);
 }
 #btn-overlays:hover { background: var(--bg-panel); border-color: var(--border-strong); }
+/* MICRO-PANNELLI-OVERLAY · a window under 120 px: the glyph goes below the
+   funnel, both inside the window's right edge */
+#tile-root.live-narrow #btn-overlays {
+  left: calc(var(--live-x, 0px) + var(--live-w, 100%) - 40px);
+  top: calc(var(--live-y, 0px) + var(--winbar-h, 0px) + 46px);
+}
 #btn-overlays.hidden { display: none; }
 #btn-overlays .ov-dot {
   position: absolute;

@@ -15685,7 +15685,11 @@ function filterPanelOpen(): boolean {
 function openFilterPanel(): void {
   renderCirclesPanel();
   closeOverlayPanel();   // MICRO-SOVRAPPOSIZIONI · alternatives, like the legend
+  // MICRO-PANNELLI-OVERLAY · the panel belongs to the graph window whose funnel
+  // opened it, and is drawn inside that window (`placeOwnedPanels`)
+  filterOwner = canvasAnchorId();
   filterPanel.classList.remove("hidden");
+  placeOwnedPanels();
   btnViewProps.classList.add("hidden");
   // G4 · the filter and the legend are alternatives: the focused window's
   // legend closes when the filter opens
@@ -15694,6 +15698,7 @@ function openFilterPanel(): void {
 }
 function closeFilterPanel(): void {
   filterPanel.classList.add("hidden");
+  filterOwner = null;
   refreshFunnel();
 }
 
@@ -15706,19 +15711,36 @@ function closeFilterPanel(): void {
  */
 /** MICRO-PROVA-DEV47 · each 3D window's own overlays glyph, by window id */
 const sceneOverlayBtns = new Map<string, HTMLButtonElement>();
+/**
+ * MICRO-PANNELLI-OVERLAY · the graph window the floating funnel and overlays
+ * glyph belong to: the focused one if it is a graph, else the last graph window
+ * focused (AUDIT N2), else none. While one of the two panels is open, the window
+ * that opened it — the pointer crossing another window does not move it.
+ */
+function canvasAnchorId(): string | null {
+  const pinned = overlayPanelOpen() && overlayOwner && graphWinIds().has(overlayOwner) ? overlayOwner
+    : filterPanelOpen() && filterOwner && graphWinIds().has(filterOwner) ? filterOwner : null;
+  if (pinned) return pinned;
+  const here = activeWin();
+  if (here.type === "graph") return here.id;
+  return lastGraphWinId && winAreas.has(lastGraphWinId) ? lastGraphWinId : null;
+}
+/** the graph windows placed in the current workspace */
+function graphWinIds(): Set<string> {
+  return new Set(windowsOf().filter((w) => w.type === "graph" && winAreas.has(w.id)).map((w) => w.id));
+}
 function refreshFunnel(): void {
-  const anchored = activeWindowType() === "graph"
-    || (!!lastGraphWinId && winAreas.has(lastGraphWinId));
-  const belongs = !!store && anchored && !filterPanelOpen() && !overlayPanelOpen();
+  const anchor = canvasAnchorId();
+  // the funnel and the glyph are the anchor graph window's, whichever window has
+  // the focus (MICRO-PANNELLI-OVERLAY: hiding the glyph when the Space took the
+  // focus is what made it vanish under the pointer on its way to it); a panel
+  // open on that window takes their place
+  const onAnchor = !!anchor && ((filterPanelOpen() && filterOwner === anchor) || (overlayPanelOpen() && overlayOwner === anchor));
+  const belongs = !!store && !!anchor && !onAnchor;
   btnViewProps.classList.toggle("hidden", !belongs);
-  // MICRO-SOVRAPPOSIZIONI · the overlays' glyph, beside the funnel, by the same
-  // rule. MICRO-PROVA-DEV47 · a 3D window has its own glyph, in the scene
-  // (E.D., 17 Oct: the one glyph followed the focus, and a click in another
-  // window took it away from the Space): the floating one is the graph's only
-  const space = activeWindowType() === "scene";
-  btnOverlays.classList.toggle("hidden", !belongs || space);
-  const here = activeWin().id;
-  for (const [id, b] of sceneOverlayBtns) b.classList.toggle("hidden", !store || (overlayPanelOpen() && here === id));
+  btnOverlays.classList.toggle("hidden", !belongs);
+  // MICRO-PROVA-DEV47 · a 3D window has its own glyph, in the scene
+  for (const [id, b] of sceneOverlayBtns) b.classList.toggle("hidden", !store || (overlayPanelOpen() && overlayOwner === id));
   refreshOverlayDot();
 }
 // Monochrome (B/W) display toggle — every node draws black-bordered + white
@@ -16025,6 +16047,26 @@ function focusedOverlayView(): OverlayView {
     : lastGraphWinId && winAreas.has(lastGraphWinId) ? lastGraphWinId : null;
   return id ? overlayViewOf(id, graphModeOf(id)) : view;
 }
+/**
+ * MICRO-PANNELLI-OVERLAY · the window whose overlays the open panel shows: the
+ * one whose glyph was clicked. The panel is that window's and nobody else's —
+ * focus follows the mouse, and the panel used to follow the focus, so moving
+ * towards it over another window turned «Overlays — Space» into «— Matrix».
+ */
+let overlayOwner: string | null = null;
+/** …and the graph window whose funnel opened the filter panel */
+let filterOwner: string | null = null;
+/** the view of a window that has overlays: a graph window's, or the Space's */
+function overlayViewOfWin(winId: string): OverlayView | null {
+  const w = windowsOf().find((x) => x.id === winId);
+  if (!w) return null;
+  if (w.type === "scene") return "space";
+  if (w.type === "graph") return overlayViewOf(w.id, graphModeOf(w.id));
+  return null; // the other windows have no overlays (MICRO-PANNELLI-OVERLAY census)
+}
+function overlayPanelView(): OverlayView {
+  return (overlayOwner && overlayViewOfWin(overlayOwner)) || focusedOverlayView();
+}
 const btnOverlays = document.createElement("button");
 btnOverlays.id = "btn-overlays";
 btnOverlays.type = "button";
@@ -16041,25 +16083,38 @@ for (const ev of ["pointerdown", "wheel", "dblclick", "contextmenu"])
 function overlayPanelOpen(): boolean {
   return !overlayPanel.classList.contains("hidden");
 }
-function openOverlayPanel(): void {
+/** open the overlays of ONE window (a graph window's or a 3D window's) */
+function openOverlayPanel(owner: string | null = canvasAnchorId()): void {
+  if (!owner || !overlayViewOfWin(owner)) return;
   if (filterPanelOpen()) closeFilterPanel();
-  const w = activeWin();
-  if (w.type === "graph" && legendOpen(w)) setLegendOpen(w, false);
+  const w = windowsOf().find((x) => x.id === owner);
+  if (w?.type === "graph" && legendOpen(w)) setLegendOpen(w, false);
+  overlayOwner = owner;
+  overlayPanel.dataset.win = owner;
   overlayPanel.classList.remove("hidden");
   renderOverlayPanel();
   refreshFunnel();
+  placeOwnedPanels();
 }
 function closeOverlayPanel(): void {
   if (!overlayPanelOpen()) return;
   overlayPanel.classList.add("hidden");
   overlayPanel.dataset.key = "";
+  overlayPanel.dataset.win = "";
+  overlayOwner = null;
   refreshFunnel();
 }
 /** the dot on the glyph: something this view can draw is switched off */
 function refreshOverlayDot(): void {
-  const v = focusedOverlayView();
-  // the panel follows the focus: another window, or the soloing entered or left
-  if (overlayPanelOpen() && overlayPanel.dataset.view !== v) renderOverlayPanel();
+  // the panel follows ITS window (MICRO-PANNELLI-OVERLAY): the soloing entered
+  // or left there, or its mode changed — not the focus going elsewhere
+  if (overlayPanelOpen()) {
+    if (overlayOwner && !overlayViewOfWin(overlayOwner)) { closeOverlayPanel(); return; }
+    if (overlayPanel.dataset.view !== overlayPanelView()) renderOverlayPanel();
+  }
+  // the floating glyph's dot: its graph window's view
+  const anchor = canvasAnchorId();
+  const v = (anchor && overlayViewOfWin(anchor)) || focusedOverlayView();
   const off = overlaysHideSomething(overlaysOf(v), v);
   btnOverlays.classList.toggle("ov-off", off);
   const tip = t(off ? "ov.btnOff" : "ov.btn");
@@ -16079,8 +16134,9 @@ function refreshOverlayDot(): void {
 }
 btnOverlays.addEventListener("click", (e) => {
   e.stopPropagation();
-  if (overlayPanelOpen()) closeOverlayPanel();
-  else openOverlayPanel();
+  const anchor = canvasAnchorId();
+  if (overlayPanelOpen() && overlayOwner === anchor) closeOverlayPanel();
+  else openOverlayPanel(anchor);
 });
 function overlayViewName(v: OverlayView): string {
   return v === "soloing" ? t("ov.view.soloing") : v === "space" ? t("ov.view.space") : t(`mode.${v}`);
@@ -16096,7 +16152,7 @@ function setOverlayGroupFolded(g: string, folded: boolean): void {
   try { localStorage.setItem(OV_FOLDED_KEY, JSON.stringify([...s])); } catch { /* private mode */ }
 }
 function renderOverlayPanel(): void {
-  const v = focusedOverlayView();
+  const v = overlayPanelView();
   const st = overlaysOf(v);
   overlayPanel.textContent = "";
   overlayPanel.dataset.view = v;
@@ -21132,6 +21188,12 @@ function positionAreas(): void {
     div.classList.toggle("tile-div-col", info.dir === "col");
     placeAt(div, info.rect);
   });
+  // MICRO-PANNELLI-OVERLAY · the areas moved: the floating funnel and glyph,
+  // placed against `--live-*`, move with them. Measured: a divider drag called
+  // only this, so a graph window narrowed from 409 to 263 px kept its glyphs at
+  // x 339–405, in the 3D scene beside it — where reaching them handed the focus
+  // to the scene
+  if (tileRoot.isConnected) reflectLiveArea();
 }
 
 /** The focus ring and the input routing, and NOTHING else. */
@@ -21205,9 +21267,10 @@ let lastGraphWinId: string | null = null;
  */
 function reflectLiveArea(): void {
   // AUDIT N2 · the canvas overlays (funnel, detail panel, drop hint) stay on
-  // the graph window they belong to: crossing the Inspector does not move them
-  const anchor = activeWin().type === "graph" || !lastGraphWinId || !winAreas.has(lastGraphWinId)
-    ? activeWin().id : lastGraphWinId;
+  // the graph window they belong to: crossing the Inspector does not move them.
+  // MICRO-PANNELLI-OVERLAY · nor crossing another graph window while one of
+  // their panels is open (`canvasAnchorId`)
+  const anchor = canvasAnchorId() ?? activeWin().id;
   const el = winAreas.get(anchor);
   const root = tileRoot.getBoundingClientRect();
   const r = el ? el.getBoundingClientRect() : root;
@@ -21217,9 +21280,49 @@ function reflectLiveArea(): void {
   tileRoot.style.setProperty("--live-w", `${Math.round(r.width)}px`);
   tileRoot.style.setProperty("--live-h", `${Math.round(r.height)}px`);
   tileRoot.style.setProperty("--winbar-h", `${bar?.offsetHeight ?? 0}px`);
+  // MICRO-PANNELLI-OVERLAY · a window too narrow for the funnel and the glyph
+  // side by side stacks them, still inside it
+  tileRoot.classList.toggle("live-narrow", r.width < 120);
+  placeOwnedPanels();
   tileRoot.style.setProperty(
     "--palette-w",
     el ? getComputedStyle(el).getPropertyValue("--palette-w").trim() || "0px" : "0px");
+}
+
+/**
+ * MICRO-PANNELLI-OVERLAY · the two floating panels of a window — the overlays
+ * and the filter — drawn INSIDE the window they belong to: right-aligned under
+ * its bar (a 3D window: under its own glyph), as wide as it allows (300 px at
+ * most), and as tall as what is left of it, scrolling inside. Measured: they
+ * were placed against `--live-*` (the graph anchor) at a fixed 300 × 70vh, so
+ * the Space's panel opened over the Matrix and a narrow window's spilled into
+ * its neighbours (the Tabular below).
+ */
+function placeOwnedPanels(): void {
+  const root = tileRoot.getBoundingClientRect();
+  const place = (panel: HTMLElement, owner: string | null, maxW: number): void => {
+    if (panel.classList.contains("hidden") || !owner) return;
+    const area = winAreas.get(owner);
+    if (!area) return;
+    const r = area.getBoundingClientRect();
+    const bar = area.querySelector<HTMLElement>(":scope > .tile-bar");
+    let top = r.top + (bar?.offsetHeight ?? 0) + 10;
+    const glyph = sceneOverlayBtns.get(owner);
+    if (glyph && panel === overlayPanel) {
+      // the 3D window's glyph sits below the scene's toolbar: the panel opens there
+      const host = glyph.parentElement?.getBoundingClientRect();
+      if (host) top = host.top + 6;
+    }
+    const w = Math.max(0, Math.min(maxW, r.width - 20));
+    const left = r.right - 10 - w;
+    panel.style.left = `${Math.round(left - root.left)}px`;
+    panel.style.top = `${Math.round(top - root.top)}px`;
+    panel.style.width = `${Math.round(w)}px`;
+    panel.style.maxHeight = `${Math.max(60, Math.round(r.bottom - 10 - top))}px`;
+    panel.style.transform = "none";
+  };
+  place(overlayPanel, overlayOwner, 300);
+  place(filterPanel, filterOwner, 250);
 }
 
 /**
@@ -25812,9 +25915,8 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
   for (const ev of ["pointerdown", "dblclick", "contextmenu", "wheel"]) ovBtn.addEventListener(ev, (e) => e.stopPropagation());
   ovBtn.addEventListener("click", (e) => {
     e.stopPropagation();
-    if (activeWin().id !== win.id) selectWindow(win.id);
-    else if (overlayPanelOpen()) { closeOverlayPanel(); return; }
-    openOverlayPanel();
+    if (overlayPanelOpen() && overlayOwner === win.id) { closeOverlayPanel(); return; }
+    openOverlayPanel(win.id);
   });
   sceneOverlayBtns.set(win.id, ovBtn);
   queueMicrotask(refreshFunnel);
