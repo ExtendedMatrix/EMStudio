@@ -8104,6 +8104,73 @@ test("PO3.menu", "PANNELLI-OVERLAY p.3 · il «⋯» del Tabular: senza em.json 
   return { pass, detail: { ...out, errors: [...a.errors, ...b.errors] } };
 });
 
+// p.4 needs the GT16 (Templu Mare v4, a COPY: `PANNELLI_V4`)
+const PO_V4 = process.env.PANNELLI_V4 ?? "/tmp/pannelli/EM/TempluMare_v4.em.json";
+const poName = (p) => p.evaluate(() => { const id = window.__EM_DRAG__.selected()[0]; return id ? String(window.__EM_DRAG__.node(id)?.name ?? id) : null; });
+const poInspector = (p) => p.evaluate(() => document.querySelector('.tile-area[data-win="space:inspector"] .insp-name-row .insp-name-input')?.value
+  ?? document.querySelector('.tile-area[data-win="space:inspector"] .insp-name-row')?.textContent?.trim() ?? null);
+/** the gutter ▸ of the row named `name` in the Space's Tabular */
+const poPickRow = async (p, name) => {
+  const id = await p.evaluate((n) => [...document.querySelectorAll('.tile-area[data-win="space:models"] .tile-tablebody tr[data-row]')]
+    .map((tr) => tr.dataset.row).find((r) => String(window.__EM_DRAG__.node(r)?.name ?? "") === n), name);
+  await p.click(`.tile-area[data-win="space:models"] .tile-tablebody [data-pick="${id}"]`);
+  await p.waitForTimeout(400);
+  return id;
+};
+
+test("PO4.arrows", "PANNELLI-OVERLAY p.4 · le frecce nelle liste: GT16, Tabular Documents, scelta D.02, ↓ → D.03 (selezione e Inspector), ancora ↓ → D.04; Units, ↑ dalla seconda riga → la prima; la riga resta in vista sotto la testa; nel pannello laterale dello Spazio ↓ passa alla riga dopo; una cella in scrittura tiene le sue frecce", async () => {
+  if (!existsSync(PO_V4)) return { pass: false, detail: { missing: PO_V4 } };
+  const { p, ctx, errors } = await poOpen({ doc: null });
+  await p.evaluate(([d, path]) => window.__EM_DRAG__.openAt(d, path), [JSON.parse(readFileSync(PO_V4, "utf8")), PO_V4]);
+  await p.waitForFunction(() => (window.__EM_SCENE__?.()?.nodes?.length ?? 0) > 50, null, { timeout: 60000 });
+  await p.waitForTimeout(1500);
+  const out = {};
+  await poSheet(p, "Documents");
+  // sorted by ID, as in E.D.'s screenshot («ID ▲»): the arrows follow the order on screen
+  await p.evaluate(() => { const th = document.querySelector('.tile-area[data-win="space:models"] table.emdata-table thead tr:first-child th[data-tt-label="ID"]');
+    if (th?.getAttribute("aria-sort") !== "ascending") th?.querySelector(".tt-sort")?.click(); });
+  await p.waitForTimeout(300);
+  out.sorted = await p.evaluate(() => document.querySelector('.tile-area[data-win="space:models"] table.emdata-table th[data-tt-label="ID"]')?.getAttribute("aria-sort"));
+  await poPickRow(p, "D.02");
+  out.picked = await poName(p);
+  await p.keyboard.press("ArrowDown"); await p.waitForTimeout(500);
+  out.down1 = { sel: await poName(p), insp: await poInspector(p) };
+  await p.keyboard.press("ArrowDown"); await p.waitForTimeout(500);
+  out.down2 = await poName(p);
+  // in view, under the head that stays
+  out.inView = await p.evaluate(() => { const body = document.querySelector('.tile-area[data-win="space:models"] .tile-tablebody');
+    const tr = body.querySelector("tr.tv-sel-act, tr.emdata-current"); if (!tr) return false;
+    const r = tr.getBoundingClientRect(), h = tr.closest("table").tHead.getBoundingClientRect(), b = body.getBoundingClientRect();
+    return r.top >= h.bottom - 1 && r.bottom <= b.bottom + 1; });
+  // a cell being written keeps its arrows
+  const title = '.tile-area[data-win="space:models"] .tile-tablebody tr.tv-sel-act input[data-col="TITLE"], .tile-area[data-win="space:models"] .tile-tablebody tr.emdata-current input[data-col="TITLE"]';
+  await p.click(title); await p.keyboard.type("x"); await p.keyboard.press("ArrowDown"); await p.waitForTimeout(300);
+  out.writing = await poName(p);
+  await p.keyboard.press("Backspace"); await p.keyboard.press("Escape");
+  // the Units: ↑ from the second row
+  await poSheet(p, "Units");
+  const names = await p.evaluate(() => [...document.querySelectorAll('.tile-area[data-win="space:models"] .tile-tablebody tr[data-row]')]
+    .filter((tr) => !tr.classList.contains("tt-hidden")).slice(0, 2).map((tr) => String(window.__EM_DRAG__.node(tr.dataset.row)?.name ?? "")));
+  await poPickRow(p, names[1]);
+  await p.keyboard.press("ArrowUp"); await p.waitForTimeout(500);
+  out.units = { names, up: await poName(p) };
+  // the Space's side panel
+  const keys = await p.evaluate(() => [...document.querySelectorAll(".sol-row")].filter((r) => /^proxy:/.test(r.dataset.key ?? "") && r.getBoundingClientRect().height > 0).slice(0, 2).map((r) => r.dataset.key));
+  if (keys.length === 2) {
+    await p.click(`.sol-row[data-key="${keys[0]}"]`); await p.waitForTimeout(400);
+    const s0 = await p.evaluate(() => window.__EM_DRAG__.selected()[0]);
+    const nextKey = await p.evaluate(() => { const ls = [...document.querySelectorAll(".sol-row")]; const i = ls.findIndex((l) => l.classList.contains("active")); return ls[i + 1]?.dataset.key ?? null; });
+    await p.keyboard.press("ArrowDown"); await p.waitForTimeout(500);
+    out.space = { s0, nextKey, active: await p.evaluate(() => document.querySelector(".sol-row.active")?.dataset.key ?? null) };
+  }
+  await p.screenshot({ path: SHOT("po4-arrows") }).catch(() => {});
+  await ctx.close();
+  const pass = out.picked === "D.02" && out.down1.sel === "D.03" && out.down1.insp === "D.03" && out.down2 === "D.04" && out.inView
+    && out.writing === "D.04" && out.units.up === out.units.names[0]
+    && !!out.space && out.space.nextKey && out.space.active === out.space.nextKey && !errors.length;
+  return { pass, detail: { ...out, errors } };
+});
+
 // ── run ─────────────────────────────────────────────────────────────────────
 const chosen = cases.filter((c) => !only.length || only.includes(c.id) || only.some((o) => c.id.startsWith(o + ".")));
 for (const c of chosen) {

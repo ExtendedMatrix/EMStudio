@@ -16,6 +16,7 @@
 //    and Chronology.
 
 import { modelsRows, modelsTableHtml, type ModelsCtx } from "./models-sheet";
+import { listMayMove, listStep, ROW_KEYS } from "./list-keys";
 import { LEDGER_SHEETS, ledgerIds, ledgerTableHtml, type LedgerCtx, type LedgerSheet } from "./ledger-sheets";
 import { setColumnFilter } from "./table-tools";
 import type { Space } from "./space";
@@ -112,7 +113,56 @@ export function addEmDataHost(host: EmDataHost): void {
   // MICRO-PANNELLI-OVERLAY-TABULAR p.2 · a column filter typed in a table of
   // this window: the head row's «Clear filters» and its count follow it
   host.body.addEventListener("tt:change", () => syncColumnFilters(host));
+  // MICRO-PANNELLI-OVERLAY-TABULAR p.4 · ↑ ↓ pick the row before / after, as a
+  // click: the body takes the keyboard when a row is clicked (tabIndex −1), and
+  // only the Tabular that has it moves
+  host.body.tabIndex = -1;
+  host.body.addEventListener("keydown", (e) => rowKeys(host, e));
   renderEmData();
+}
+
+/** the id a row of any view stands for (a sheet's `data-row`, a computed
+ *  view's `data-id`, else the node its link goes to) */
+function rowIdOf(tr: HTMLElement): string | null {
+  return tr.dataset.row ?? tr.dataset.id
+    ?? tr.querySelector<HTMLElement>("[data-pick]")?.dataset.pick
+    ?? tr.querySelector<HTMLElement>("[data-go]")?.dataset.go ?? null;
+}
+/** the rows on screen that pick a node, top to bottom (the hidden by a column filter left out) */
+function pickableRows(body: HTMLElement): HTMLElement[] {
+  return [...body.querySelectorAll<HTMLElement>("table > tbody > tr")]
+    .filter((tr) => !tr.classList.contains("tt-hidden") && tr.getBoundingClientRect().height > 0 && !!rowIdOf(tr));
+}
+function rowKeys(host: EmDataHost, e: KeyboardEvent): void {
+  if (e.metaKey || e.ctrlKey || e.altKey || e.shiftKey || !ROW_KEYS.includes(e.key)) return;
+  const el = e.target as HTMLElement;
+  // a cell being written keeps its arrows; the column filters keep theirs
+  if (el !== host.body && (!listMayMove(el as HTMLInputElement) || el.closest(".tt-filters, .emdata-claimform-slot"))) return;
+  const rows = pickableRows(host.body);
+  const sel = rows.findIndex((tr) => tr.classList.contains("tv-sel-act"));
+  const at = sel >= 0 ? sel : rows.findIndex((tr) => tr.classList.contains("emdata-current"));
+  const to = listStep(e.key, at, rows.length, ROW_KEYS);
+  if (to === null) return;
+  e.preventDefault();
+  e.stopPropagation();
+  if (to === at) return;
+  const id = rowIdOf(rows[to])!;
+  if (el !== host.body) host.body.focus({ preventScroll: true });
+  setCurrentRow(id);
+  onRowPicked(id);
+  // the row in view, below the head that stays (the tables may be redrawn by the pick)
+  requestAnimationFrame(() => {
+    const body = host.body;
+    const tr = pickableRows(body).find((r) => rowIdOf(r) === id);
+    if (!tr) return;
+    body.querySelectorAll("tr.emdata-current").forEach((r) => r.classList.remove("emdata-current"));
+    if (tr.dataset.row) tr.classList.add("emdata-current");
+    const head = tr.closest("table")?.tHead?.getBoundingClientRect().bottom ?? body.getBoundingClientRect().top;
+    const r = tr.getBoundingClientRect(), b = body.getBoundingClientRect();
+    if (r.top < head) body.scrollTop -= head - r.top;
+    else if (r.bottom > b.bottom) body.scrollTop += r.bottom - b.bottom;
+    if (document.activeElement === document.body) body.focus({ preventScroll: true });
+  });
 }
 
 /** the column filters set in this window's tables (table-tools) */
@@ -1037,6 +1087,8 @@ function wireBody(host: EmDataHost, store: DocumentStore, st: TableState): void 
     const rowId = btn.getAttribute("data-pick")!;
     btn.addEventListener("mousedown", (e) => {
       e.preventDefault();
+      // p.4 · the gutter's pick gives the table the keyboard (↑ ↓), not the button
+      body.focus({ preventScroll: true });
       markCurrent(rowId);
       onRowPicked(rowId);
     });

@@ -10021,6 +10021,8 @@ tr.tt-hidden { display: none; }
    B8), and a box that scrolls holds a sticky head to itself: in the Tabular the
    window's body scrolls both ways, so the box does not have to */
 .tile-tablebody .tv-pad:has(> .tv-table) { overflow-x: visible; }
+/* p.4 · the body and the Space's tree take the keyboard for ↑ ↓ without a ring around them */
+.tile-tablebody:focus, .sol-tree:focus { outline: none; }
 .tile-tablebody .mdl h4 { position: sticky; top: 0; z-index: 3; box-sizing: border-box; height: 28px; line-height: 18px; margin: 0; padding: 6px 2px 4px; background: var(--bg-subtle); }
 .tile-tablebody .mdl table > thead { top: 28px; }
 /* collapsed borders belong to the table, not to the cell, and stay behind when

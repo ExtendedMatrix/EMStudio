@@ -22,6 +22,7 @@
  * `buildOutlinerTree` is pure (checked in node, `check-space-outliner.mjs`); the
  * rest draws it.
  */
+import { listStep } from "./list-keys";
 
 export interface OutlinerVersion { id: string; name: string; drawn: boolean; chosen: boolean;
   /** MICRO-SPAZIO-3D-3 p.10 · its uses (web, realtime…) and its level, computed from the chain */
@@ -347,6 +348,8 @@ export function renderOutliner(el: HTMLElement, v: OutlinerView, act: OutlinerAc
   // MICRO-PROVA-DEV48 p.4 · the list is drawn again at every pick: it stays
   // where it was (measured on dev.48: a click on a row sent it to the top)
   const keptTop = el.querySelector<HTMLElement>(".sol-tree")?.scrollTop ?? 0;
+  // MICRO-PANNELLI-OVERLAY-TABULAR p.4 · the tree had the keyboard (↑ ↓): the new one takes it
+  const treeHadKeys = !!document.activeElement?.classList.contains("sol-tree") && el.contains(document.activeElement);
   el.textContent = "";
   el.style.width = `${v.prefs.width}px`;
   const head = document.createElement("div");
@@ -431,7 +434,9 @@ export function renderOutliner(el: HTMLElement, v: OutlinerView, act: OutlinerAc
     document.addEventListener("pointermove", move, true);
     document.addEventListener("pointerup", up, true);
   };
+  const rowOf = new Map<string, OutlinerRow>();
   const draw = (r: OutlinerRow, depth: number) => {
+    rowOf.set(r.key, r);
     const line = document.createElement("div");
     const isSel = v.selected.has(r.key);
     line.className = `sol-row sol-${r.kind}${isSel ? " sel" : ""}${isSel && v.active === r.key ? " active" : ""}${r.current ? " cur" : ""}${r.drawn ? " drawn" : ""}`;
@@ -560,8 +565,33 @@ export function renderOutliner(el: HTMLElement, v: OutlinerView, act: OutlinerAc
     tree.appendChild(p);
   }
   tree.addEventListener("click", (e) => { if (e.target === tree) act.clearSelection?.(); });
+  // MICRO-PANNELLI-OVERLAY-TABULAR p.4 · ↑ ↓ Home End pick the row before / after,
+  // as a plain click (the lists' one rule, `list-keys.ts`); a click on a row
+  // gives the tree the keyboard
+  tree.tabIndex = -1;
+  tree.addEventListener("keydown", (e) => {
+    if (e.metaKey || e.ctrlKey || e.altKey || e.shiftKey) return;
+    const lines = [...tree.querySelectorAll<HTMLElement>(".sol-row")];
+    const act0 = lines.findIndex((l) => l.classList.contains("active"));
+    const at = act0 >= 0 ? act0 : lines.findIndex((l) => l.classList.contains("sel"));
+    const to = listStep(e.key, at, lines.length);
+    if (to === null) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const r = rowOf.get(lines[to].dataset.key ?? "");
+    if (to !== at && r) act.pick(r, { toggle: false, range: false }, order);
+  });
   el.appendChild(tree);
   tree.scrollTop = keptTop;
+  if (treeHadKeys) {
+    tree.focus({ preventScroll: true });
+    const a = tree.querySelector<HTMLElement>(".sol-row.active");
+    if (a) {
+      const ra = a.getBoundingClientRect(), rt = tree.getBoundingClientRect();
+      if (ra.top < rt.top) tree.scrollTop -= rt.top - ra.top;
+      else if (ra.bottom > rt.bottom) tree.scrollTop += ra.bottom - rt.bottom;
+    }
+  }
   if (v.reveal) {
     const row = tree.querySelector<HTMLElement>(`.sol-row[data-key="${CSS.escape(v.reveal)}"]`);
     if (row) {

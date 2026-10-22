@@ -10,6 +10,7 @@ import { buildOutline, epochSpan, type OutlineUnit } from "./outline";
 import { t } from "./i18n";
 import { glyphFor, glyphSvg } from "./glyphs";
 import { activeTheme, canvasTheme } from "./theme";
+import { listStep } from "./list-keys";
 
 /** SHIFT-A fase 6b · a row's mark: the node's GLYPH, inline, when the datamodel
  *  draws it from paths (extractor, combiner, the ornaments, the DTC kinds) —
@@ -460,11 +461,10 @@ export function buildNodeList(
       if (r?.dataset.nlId) onPick(r.dataset.nlId);
     };
     const cur = at >= 0 ? list[at] : null;
-    switch (e.key) {
-      case "ArrowDown": go(at < 0 ? 0 : at + 1); break;
-      case "ArrowUp": go(at < 0 ? 0 : at - 1); break;
-      case "Home": go(0); break;
-      case "End": go(list.length - 1); break;
+    // MICRO-PANNELLI-OVERLAY-TABULAR p.4 · ↑ ↓ Home End: the one rule of the lists (`list-keys.ts`)
+    const step = listStep(e.key, at, list.length);
+    switch (step !== null ? "step" : e.key) {
+      case "step": go(step!); break;
       case "ArrowLeft":
       case "ArrowRight": {
         if (!cur?.dataset.nlId) return;
