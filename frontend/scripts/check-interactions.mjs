@@ -8063,6 +8063,47 @@ test("PO2.head", "PANNELLI-OVERLAY p.2 · il Tabular ha una sola riga di testa (
   return { pass, detail: { ...out, col, filtered, cleared, errors } };
 });
 
+/** the Tabular's «⋯»: absent, or the items it lists when opened */
+async function poMenu(p) {
+  const T = '.tile-area[data-win="space:models"] > .tile-bar';
+  if (!(await p.locator(`${T} .win-more`).count())) return null;
+  await p.click(`${T} .win-more`); await p.waitForTimeout(200);
+  const items = await p.evaluate((T) => [...document.querySelectorAll(`${T} .win-menu .dd-menu button`)].map((b) => b.textContent.trim()), T);
+  await p.keyboard.press("Escape"); await p.evaluate((T) => document.querySelector(`${T} .win-menu .dd-menu`)?.classList.add("hidden"), T);
+  return items;
+}
+
+test("PO3.menu", "PANNELLI-OVERLAY p.3 · il «⋯» del Tabular: senza em.json non c'è, e compare quando il file si apre; «Add row» dove si aggiunge una riga, «Add a claim» solo nei Claims, «Delete the current row» solo con una riga scelta, niente nelle viste calcolate; tutto nella lingua dell'interfaccia (in italiano «Aggiungi riga», «Aggiungi claim»; le intestazioni delle schede tradotte)", async () => {
+  const a = await poOpen({ doc: null });
+  await poSheet(a.p, "Documents");
+  const empty = await poMenu(a.p);
+  await a.p.evaluate((d) => window.__EM_DRAG__.openAt(d, "/tmp/po3/TempluMare.em.json"), fixture("TempluMare"));
+  await a.p.waitForFunction(() => (window.__EM_SCENE__?.()?.nodes?.length ?? 0) > 0, null, { timeout: 30000 });
+  await a.p.waitForTimeout(600);
+  const opened = await poMenu(a.p);
+  const out = { empty, opened };
+  await poSheet(a.p, "Units"); out.units = await poMenu(a.p);
+  await a.p.click('.tile-area[data-win="space:models"] .tile-tablebody table.emdata-table tbody tr td:nth-child(2)');
+  await a.p.waitForTimeout(300);
+  out.unitsRow = await poMenu(a.p);
+  await poSheet(a.p, "Claims"); out.claims = await poMenu(a.p);
+  await poSheet(a.p, "Models"); out.models = await poMenu(a.p);
+  await poSheet(a.p, "Issues"); out.issues = await poMenu(a.p);
+  await a.p.screenshot({ path: SHOT("po3-menu") }).catch(() => {});
+  await a.ctx.close();
+  const b = await poOpen({ doc: "TempluMare", locale: "it" });
+  await poSheet(b.p, "Units"); out.itUnits = await poMenu(b.p);
+  out.itHeads = await b.p.evaluate(() => [...document.querySelectorAll('.tile-area[data-win="space:models"] table.emdata-table thead tr:first-child th')].map((th) => th.textContent.trim()).filter(Boolean));
+  await poSheet(b.p, "Claims"); out.itClaims = await poMenu(b.p);
+  await b.ctx.close();
+  const eq = (x, y) => JSON.stringify(x) === JSON.stringify(y);
+  const pass = empty === null && eq(opened, ["Add row"]) && eq(out.units, ["Add row"]) && eq(out.unitsRow, ["Add row", "Delete the current row"])
+    && eq(out.claims, ["Add a claim"]) && out.models === null && out.issues === null
+    && eq(out.itUnits, ["Aggiungi riga"]) && eq(out.itClaims, ["Aggiungi claim"]) && out.itHeads.includes("Nome") && out.itHeads.includes("Prima epoca")
+    && !a.errors.length && !b.errors.length;
+  return { pass, detail: { ...out, errors: [...a.errors, ...b.errors] } };
+});
+
 // ── run ─────────────────────────────────────────────────────────────────────
 const chosen = cases.filter((c) => !only.length || only.includes(c.id) || only.some((o) => c.id.startsWith(o + ".")));
 for (const c of chosen) {

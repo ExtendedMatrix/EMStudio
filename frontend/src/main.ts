@@ -35273,6 +35273,8 @@ interface WinMenu {
 }
 
 const click = (id: string): void => document.getElementById(id)?.click();
+/** MICRO-PANNELLI-OVERLAY-TABULAR p.3 · the sheets a row is appended to (em-data `addRow`) */
+const TABLE_APPEND_SHEETS: TableView[] = ["Units", "Epochs", "Documents", "Authors"];
 
 // WIN4 · AUDIT against the master header (the app toolbar) and against the
 // bar's own controls — every duplicate removed, with its reason:
@@ -35333,44 +35335,46 @@ const WINDOW_MENUS: Record<WindowType, WinMenu[]> = {
   table: [
     {
       label: "menu.rows",
-      items: (win) => [
-        {
-          // FOCUS-NOJITTER · calls the mutator directly. It used to click a
-          // `+ row` button in the table's head — a button that only existed in
-          // the FOCUSED window's head, which is what made the head change size
-          // on every focus change. The head has no buttons now; this menu is
-          // where a command on this window lives.
-          label: "menu.addRow",
-          run: () => {
-            if (!store) return;
-            if (!addEmDataRow(store, win))
-              toast(t("menu.sheetNoNewRows"));
-          },
-          disabledReason: () => (store ? null : t("menu.noGraph")),
-        },
-        {
-          label: "Aggiungi claim",
-          run: () => {
-            if (store) toggleEmDataClaimForm(store, win);
-          },
-          disabledReason: () =>
-            currentSheetKey(win) === "Claims"
-              ? null
-              : t("menu.claimsFromSheet"),
-        },
-        {
-          label: "menu.deleteRow",
-          run: () => {
-            const id = currentRowId();
-            if (!store || !id) return;
-            deleteRow(store, id);
-            setCurrentRowId(null);
-            renderEmData();
-          },
-          disabledReason: () =>
-            currentRowId() ? null : t("menu.pickRow"),
-        },
-      ],
+      // MICRO-PANNELLI-OVERLAY-TABULAR p.3 · only what makes sense for THIS sheet
+      // and this state: no document → nothing (and no «⋯»); «Add row» where a
+      // row is appended (Units, Epochs, Documents, Authors), «Add a claim» on
+      // the Claims, «Delete the current row» on a sheet with a row picked in
+      // this window. A computed view (Datings, Warnings, Models, the ledgers)
+      // has no row verbs. Measured on dev.58: the three were offered with no
+      // em.json open, and «Aggiungi claim» was Italian among English.
+      items: (win) => {
+        if (!store) return [];
+        const sheet = currentSheetKey(win);
+        const out: WinMenuItem[] = [];
+        if (TABLE_APPEND_SHEETS.includes(sheet))
+          out.push({
+            // FOCUS-NOJITTER · calls the mutator directly (no button in the head)
+            label: "menu.addRow",
+            run: () => {
+              if (!store) return;
+              if (!addEmDataRow(store, win)) toast(t("menu.sheetNoNewRows"));
+            },
+          });
+        if (sheet === "Claims")
+          out.push({ label: "menu.addClaim", run: () => { if (store) toggleEmDataClaimForm(store, win); } });
+        // the current row must be a row of the sheet on screen that can be
+        // deleted (its ✕): the window keeps its row across a sheet change, and
+        // a unit picked in the Units must not be deleted from the Claims
+        const row = winCurrent(win, "row");
+        if ((EMDB_SHEETS as TableView[]).includes(sheet) && typeof row === "string" && store.node(row)
+            && winAreas.get(win.id)?.querySelector(`.tile-tablebody [data-del="${CSS.escape(row)}"]`))
+          out.push({
+            label: "menu.deleteRow",
+            run: () => {
+              const id = winCurrent(win, "row");
+              if (!store || typeof id !== "string") return;
+              deleteRow(store, id);
+              setWinCurrent(win, "row", null);
+              renderEmData();
+            },
+          });
+        return out;
+      },
     },
   ],
   // WIN5 · the Doc window is real, so it has commands: the sources of the graph

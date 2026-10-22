@@ -630,7 +630,9 @@ function emdbTableHtml(store: DocumentStore, sheet: SheetKey,
     ? (id: string): string => `<td class="emdata-ro fs-files-cell">${docFilesHtml(filesOfDocument(g, id), (x) => describeFile(g, x))}</td>`
     : null;
   const head = `<tr><th class="emdata-gutter-head" title="${escapeAttr(t("table.pickHint"))}"></th>` +
-    table.columns.map((c) => `<th>${escapeHtml(c.label)}</th>`).join("") +
+    // MICRO-PANNELLI-OVERLAY-TABULAR p.3 · in the interface's language (the key
+    // is the column's, the English label the fallback)
+    table.columns.map((c) => `<th>${escapeHtml(t(`emdb.col.${c.key}`, undefined, c.label))}</th>`).join("") +
     (files ? `<th>${escapeHtml(t("dcard.files"))}</th>` : "") + `<th></th></tr>`;
   const rowsHtml = rows.map((row) => {
     const cells = table.columns.map((col, ci) =>
