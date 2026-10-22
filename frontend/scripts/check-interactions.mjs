@@ -3437,7 +3437,7 @@ test("T3.column", "Unità · la colonna «First epoch» (già della Vista US) è
   const after = await p.evaluate(() => window.__EM_DRAG__.nodeInfo("US102").edges.filter((e) => e.type === "has_first_epoch").map((e) => e.target));
   const shown = await p.evaluate((s) => document.querySelector(s)?.value ?? null, sel);
   await ctx.close();
-  return { pass: head.includes("First epoch") && !items.some((i) => i.sheet === "US" || /Vista US|US view/.test(i.label))
+  return { pass: head.includes("Prima epoca") /* MICRO-PANNELLI-OVERLAY-TABULAR p.3 · the heading in the interface language */ && !items.some((i) => i.sheet === "US" || /Vista US|US view/.test(i.label))
       && same(before, ["EP_MOD"]) && same(after, ["EP_MED"]) && shown === "EP_MED" && !errors.length,
     detail: { head, sheets: items.map((i) => i.sheet), before, after, shown, errors } };
 });
@@ -3465,7 +3465,7 @@ test("T3.saved", "Unità · uno spazio salvato con una Tabella sulla «US view»
   await ctx.close();
   const storedSheets = Object.values(r.stored).flatMap((ws) => (ws.wins ?? []).filter((w) => w.type === "table").map((w) => w.state?.["current.table.sheet"]));
   return { pass: turned > 0 && r.sheets.length > 0 && r.sheets.every((s) => s === "Units") && !storedSheets.includes("US")
-      && r.head.includes("First epoch") && r.label.includes("Unità") && !errors.length,
+      && r.head.includes("Prima epoca") && r.label.includes("Unità") && !errors.length,
     detail: { turned, sheets: r.sheets, storedSheets, head: r.head, label: r.label, errors } };
 });
 
