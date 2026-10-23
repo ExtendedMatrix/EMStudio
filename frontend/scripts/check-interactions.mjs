@@ -9573,6 +9573,41 @@ test("GR2.clip", "GEOREF-GRAFO p.0b · il terreno non copre il rilievo: GT16 (EP
   return { pass, detail: out };
 });
 
+test("GR3.node", "GEOREF-GRAFO p.1 · il georiferimento è un nodo esposto del grafo: il GT16 (geo_TempluMare_v2, 0 archi su disco) all'apertura entra nel gruppo «Graph paradata» con un is_in_paradata_nodegroup — una correzione detta UNA volta nel Log, un passo che Ctrl+Z toglie, il file segnato come modificato; si vede nel Grafo e nella vista «Graphs paradata» accanto a licenza e autore; salvato e riaperto, l'arco c'è una volta e nessuna correzione è ridetta; i valori (EPSG:3844 327372.56 448682.65 0) non cambiano", async () => {
+  if (!existsSync(GEOREF_V4)) return { pass: false, detail: { missing: GEOREF_V4 } };
+  const { p, ctx, errors } = await grOpen();
+  const D = (f, a) => p.evaluate(f, a);
+  const GEO = "geo_TempluMare_v2";
+  const geoEdges = () => D((g) => window.__EM_DRAG__.edgesOf("is_in_paradata_nodegroup").filter((e) => e.source === g).map((e) => e.target), GEO);
+  const said = () => D(() => { const l = window.__EM_DRAG__.log(); return (Array.isArray(l) ? l : []).filter((x) => /joined the graph's paradata group/.test(x.message ?? "")).length; });
+  const out = { edges: await geoEdges(), said: await said(), undo: await D(() => window.__EM_DRAG__.undoDepth()), dirty: await D(() => window.__EM_DRAG__.dirty()),
+    data: await D((g) => { const d = window.__EM_DRAG__.node(g)?.data ?? {}; return [d.epsg, d.shift_x, d.shift_y, d.shift_z]; }, GEO) };
+  await D(() => window.__EM_DRAG__.setGraphMode("graph"));
+  await p.waitForTimeout(1500);
+  out.inGraph = await D((g) => window.__EM_SCENE__().nodes.includes(g), GEO);
+  await D(() => window.__EM_DRAG__.setGraphMode("graphs"));
+  await p.waitForTimeout(1500);
+  out.inGraphs = await D((g) => { const ns = window.__EM_SCENE__().nodes.map(String); return { geo: ns.some((n) => n.endsWith(g)), lic: ns.some((n) => n.endsWith("_graph_license")), n: ns.length }; }, GEO);
+  await D(() => window.__EM_DRAG__.setGraphMode("graph"));
+  await p.waitForTimeout(800);
+  const text = await D(() => window.__EM_DRAG__.docJson());
+  await D(() => window.__EM_DRAG__.undo());
+  await p.waitForTimeout(400);
+  out.afterUndo = await geoEdges();
+  // saved (the text before the undo) and reopened
+  await D(([d, path]) => window.__EM_DRAG__.openAt(d, path), [JSON.parse(text), GEOREF_V4]);
+  await p.waitForFunction(() => (window.__EM_SCENE__?.()?.nodes?.length ?? 0) > 50, null, { timeout: 60000 }); await p.waitForTimeout(1500);
+  out.reopened = { edges: await geoEdges(), said: await said(), data: await D((g) => { const d = window.__EM_DRAG__.node(g)?.data ?? {}; return [d.epsg, d.shift_x, d.shift_y, d.shift_z]; }, GEO) };
+  out.errors = errors;
+  await ctx.close();
+  const PD = "6af9866e-96a9-5c99-a6b1-78524ae2e2c2_graph_paradata";
+  const V = JSON.stringify([3844, 327372.56, 448682.65, 0]);
+  const pass = JSON.stringify(out.edges) === JSON.stringify([PD]) && out.said === 1 && out.undo === 1 && out.dirty === true && JSON.stringify(out.data) === V
+    && out.inGraph && out.inGraphs.geo && out.inGraphs.lic && out.afterUndo.length === 0
+    && JSON.stringify(out.reopened.edges) === JSON.stringify([PD]) && out.reopened.said === 1 && JSON.stringify(out.reopened.data) === V && !errors.length;
+  return { pass, detail: out };
+});
+
 // ── run ─────────────────────────────────────────────────────────────────────
 const chosen =cases.filter((c) => !only.length || only.includes(c.id) || only.some((o) => c.id.startsWith(o + ".")));
 for (const c of chosen) {

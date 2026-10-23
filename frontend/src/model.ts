@@ -2737,6 +2737,69 @@ export class DocumentStore {
     return pdgId;
   }
 
+  // ── MICRO-GEOREF-GRAFO p.1 · the georeference, an exposed node of the graph ──
+  // The GeoPositionNode is graph-level metadata like the author, the licence and
+  // the embargo, and lives where they live: a member of the graph-scope
+  // ParadataNodeGroup (`is_in_paradata_nodegroup`, admitted by the connections
+  // datamodel for GeoPositionNode at graph scope). ONE source: the globe, the
+  // Space and the Inspector read and write this node.
+
+  /** The graph's GeoPositionNode (one per graph), or undefined: never a fake one. */
+  geoPositionNode(): EmNode | undefined {
+    return this.liveNodes().find((n) => n.node_type === "geo_position");
+  }
+
+  /** Does the GeoPositionNode lack its membership of the graph's paradata group?
+   *  (false when there is no node: nothing to put anywhere) */
+  geoOutsideGraphParadata(): boolean {
+    const g = this.geoPositionNode();
+    if (!g) return false;
+    const pdg = this.graphParadataGroup();
+    return !pdg || !this.liveEdges().some((e) =>
+      e.edge_type === "is_in_paradata_nodegroup" && e.source === g.id && e.target === pdg);
+  }
+
+  /** Put the GeoPositionNode in the graph's paradata group (the group, and the
+   *  graph's own node, made when missing) — inside the caller's step. True when
+   *  something was written. */
+  putGeoInGraphParadata(): boolean {
+    const g = this.geoPositionNode();
+    if (!g || !this.geoOutsideGraphParadata()) return false;
+    const pdg = this.ensureGraphParadata();
+    this.addEdge(g.id, pdg, "is_in_paradata_nodegroup");
+    return true;
+  }
+
+  /** Declare or change the georeference — EPSG, shift, azimuth, the vertical
+   *  reference — on the GeoPositionNode, created when missing (id `geo_<graph
+   *  id>`, as s3Dgraphy's Graph makes it; the azimuth from the grid north, z 0
+   *  unless given: E.D.'s rule, the heights are in the models) and put in the
+   *  graph's paradata group. ONE undo step. `undefined` leaves a field alone,
+   *  `null` removes it. */
+  setGeoreference(patch: Record<string, unknown>): EmNode {
+    return this.batch(() => {
+      let g = this.geoPositionNode();
+      if (!g) {
+        const gid = String((this.doc.graph as Record<string, unknown>).graph_id ?? "graph");
+        const ids = new Set(this.doc.graph.nodes.map((n) => n.id));
+        let id = `geo_${gid}`;
+        for (let i = 2; ids.has(id); i++) id = `geo_${gid}_${i}`;
+        g = this.addNode({ id, name: "geo_position", node_type: "geo_position", description: "",
+                           data: { shift_x: 0, shift_y: 0, shift_z: 0, rotation: 0, rotation_reference: "grid" } } as EmNode);
+      }
+      const data: Record<string, unknown> = { ...((g.data ?? {}) as Record<string, unknown>) };
+      for (const [k, v] of Object.entries(patch)) {
+        if (v === undefined) continue;
+        if (v === null) delete data[k];
+        else data[k] = v;
+      }
+      if (data.rotation_reference == null) data.rotation_reference = "grid";
+      this.updateNode(g.id, { data } as Partial<EmNode>);
+      this.putGeoInGraphParadata();
+      return this.node(g.id) ?? g;
+    });
+  }
+
   /** rule key → the s3Dgraphy datamodel CLASS of its graph-scope member node. */
   private static readonly GRAPH_SCOPE_CLASS: Record<
     "author" | "license" | "embargo",

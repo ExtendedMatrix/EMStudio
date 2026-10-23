@@ -246,6 +246,7 @@ import { buildSpace, citationKey, SpaceMarks, UnansweredFiles, type Space, type 
 import { diagnose, errorText, FailureLog, isNetworkError, type LoadFailure, type Probes } from "./load-failure";
 import { chooseVersion, SCENE_USES, USES } from "./asset-versions";
 import { mountGeoSpace, type GeoSpaceDeps } from "./geo-space";
+import { georefSummary } from "./georef";
 import { mountSpaceScene, type SceneItem, type SceneStats, type SceneMark, type SceneMenuRequest, type SceneView, type SpaceSceneHandle } from "./scene3d";
 import { ladderOf, versionChoices, viewerSourceLine, viewerTargetOf,
          type VersionChoice, type ViewerPart, type ViewerTarget, type WeighedVersion } from "./viewer-node";
@@ -6903,6 +6904,15 @@ function loadDocument(
   // S6 — the load is the anchor of the activity log: what came in, from where,
   // which language version it declares, and what the document leaves unresolved.
   if (placeholdersRemoved) logInfo(t("epoch.emptyDatesRemoved", { n: String(placeholdersRemoved) }));
+  // MICRO-GEOREF-GRAFO p.1 · a GeoPositionNode outside the graph's paradata group
+  // (every em.json before today: the GT16's had 0 edges) joins it, like the author
+  // and the licence — a correction of the file, said once, one undo step, the file
+  // modified; never in silence
+  if (loaded.geoOutsideGraphParadata()) {
+    loaded.batch(() => loaded.putGeoInGraphParadata());
+    const g = loaded.geoPositionNode();
+    logInfo(t("georef.joined", { id: String(g?.id ?? "") }), g ? [g.id] : []);
+  }
   const declared = versionBanner(d);
   logInfo(
     `loaded "${sourceName}" — ${d.graph.nodes.length} nodes, ` +
@@ -17598,12 +17608,8 @@ function readShiftInto(st: DocumentStore, file?: File): void {
         throw new Error(String((j as { error?: string }).error ?? `HTTP ${r.status}`));
       }
       const { epsg, shift_x, shift_y, shift_z } = j as { epsg: number; shift_x: number; shift_y: number; shift_z: number };
-      const geo = st.liveNodes().find((n) => n.node_type === "geo_position");
-      st.batch(() => {
-        const data = { ...((geo?.data ?? {}) as Record<string, unknown>), epsg, shift_x, shift_y, shift_z };
-        if (geo) st.updateNode(geo.id, { data });
-        else st.addNode({ id: st.newId(), node_type: "geo_position", name: "geo_position", data: { rotation: 0, ...data } } as EmNode);
-      });
+      // MICRO-GEOREF-GRAFO · the node (made when missing) in the graph's paradata group, one step
+      st.setGeoreference({ epsg, shift_x, shift_y, shift_z });
       const msg = t("issues.shiftRead", { f: f.name, epsg: String(epsg), x: String(shift_x), y: String(shift_y), z: String(shift_z) });
       logInfo(msg, []);
       toastUndo(msg, st);
@@ -37493,9 +37499,10 @@ function wireGraphCanvas(canvas: HTMLCanvasElement, winId: string): void {
       (tooltip.children[1] as HTMLElement).textContent = showId
         ? `[${hit.node.node_type}] ${hit.id}`
         : `[${hit.node.node_type}${plab ? ` · ${plab.technical}` : typeWords(hit.node.node_type)}]`;
-      (tooltip.children[3] as HTMLElement).textContent = String(
-        hit.node.description ?? "",
-      ).slice(0, 220);
+      (tooltip.children[3] as HTMLElement).textContent = hit.node.node_type === "geo_position"
+        // MICRO-GEOREF-GRAFO p.1 · the georeference says itself: the CRS and the shift
+        ? georefSummary((hit.node.data ?? {}) as Record<string, unknown>, t)
+        : String(hit.node.description ?? "").slice(0, 220);
       tooltip.style.left = Math.min(e.clientX + 14, innerWidth - 380) + "px";
       tooltip.style.top = e.clientY + 14 + "px";
       tooltip.classList.remove("hidden");
