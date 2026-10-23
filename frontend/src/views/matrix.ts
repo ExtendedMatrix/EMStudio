@@ -605,16 +605,19 @@ export function buildMatrixScene(
     // the box: under the unit, centred on it (without one, where the members were)
     const lineY = ref ? ref.y + ref.h + GAP : oy0 - GROUP_HEADER - 6;
     const left = ref ? ref.x + ref.w / 2 - (ax1 - ax0) / 2 : ox0;
-    const anchor = { x: left - ax0, y: lineY + GROUP_HEADER + 6 - ay0 };
+    // MICRO-GLIFI-OVERLAY-CONTINUITA p.4 · the box moved by hand: its offset from
+    // the place under the unit, kept in the group's own space under its own id
+    const moved = doc.layout?.group_spaces?.[g.id]?.[g.id];
+    const anchor = { x: left - ax0 + (moved?.x ?? 0), y: lineY + GROUP_HEADER + 6 - ay0 + (moved?.y ?? 0) };
     for (const sn of drawn) {
       const a = arr.byId.get(sn.id);
       if (!a) continue;
       sn.x = anchor.x + a.x + a.w / 2 - sn.w / 2;
       sn.y = anchor.y + a.y + a.h / 2 - sn.h / 2;
-      if (!sn.instanceOf) {
-        scene.arrangedIn.set(sn.id, g.id);
-        scene.arrangedAt!.set(sn.id, { x: a.x, y: a.y, w: a.w, h: a.h });
-      }
+      // p.4 · an instance too: what the hand moves is written in the group's
+      // space (pd-arrange reads it back), as for a member
+      scene.arrangedIn.set(sn.id, g.id);
+      scene.arrangedAt!.set(sn.id, { x: a.x, y: a.y, w: a.w, h: a.h });
     }
     scene.pdAnchor.set(g.id, anchor);
     // MICRO-AUTORI-LAYOUT p.2 · the lane no longer «makes room» by moving the

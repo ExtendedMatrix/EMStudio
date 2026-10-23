@@ -2476,6 +2476,8 @@ window.__EM_SCENE__ = () => {
       })),
       // DEV29 · the scale it is drawn at, and what its lanes say
       scale: vp.scale,
+      // p.4 · the camera's origin (a box's world x = (x − rect.x − origin.x) / scale)
+      origin: { x: vp.x, y: vp.y },
       lanes: (s?.lanes ?? []).map((l) => l.label),
     };
   },
@@ -2518,6 +2520,9 @@ window.__EM_SCENE__ = () => {
     const next = { ...cur, master: st.master ?? cur.master, off: st.off ? [...st.off] : [...cur.off] };
     setOverlays(v, typeof st.keepFar === "boolean" ? withHideFar(next, !st.keepFar) : next);
   },
+  /** MICRO-GLIFI-OVERLAY-CONTINUITA p.4 · units to another epoch (the lane
+   *  drop's and the Inspector's gesture), and the Matrix's soloing camera */
+  setFirstEpoch: (ids: string[], epochId: string) => store?.setFirstEpoch(ids, epochId),
   /** MICRO-GLIFI-OVERLAY-CONTINUITA p.3 · a unit's continuity, and the gesture */
   continuityOf: (unitId: string) => continuityOfUnit(unitId),
   setContinuity: (unitId: string, epoch: string, reason?: EndReason | null, source?: string | null) => applyContinuity(unitId, epoch, reason, source),
@@ -5469,7 +5474,7 @@ const restackMemo = newRestackMemo();
 let restackEpoch = 0;
 function restackKey(
   doc: EmDocument,
-  fview: { nodes: unknown[] },
+  _fview: { nodes: unknown[] },
   phasesVisible: Set<string>,
 ): string {
   const lanes = (matrixViewLayout ?? doc.layout)?.swimlanes ?? [];
@@ -5478,8 +5483,9 @@ function restackKey(
     emtree.active()?.id ?? "",
     JSON.stringify(lanes),
     [...phasesVisible].sort().join(","),
-    (doc.layout?.folded_groups ?? []).join(","),
-    fview.nodes.length,
+    // MICRO-GLIFI-OVERLAY-CONTINUITA p.4 · not the folds nor the number of nodes
+    // drawn: closing a group or filtering does not re-flow the lanes (their
+    // upward growth stays as it was; «Riordina» / a layout forgets it)
     matrixViewLayout ? "view" : "doc",
   ].join("§");
 }
@@ -5525,9 +5531,7 @@ function buildScenesNow(): void {
     fview,
     // MICRO-PULIZIA p.5 · the view layout; a node it does not know yet (added
     // since — its own run is queued) at its archival place meanwhile
-    matrixViewLayout
-      ? { ...matrixViewLayout, positions: { ...(doc.layout?.positions ?? {}), ...(matrixViewLayout.positions ?? {}) } }
-      : undefined,
+    matrixViewLayout ? { ...matrixViewLayout, positions: viewPositionsNow(doc) } : undefined,
     phasesVisible,
     warnIds,
     restackMemo,
@@ -5663,17 +5667,44 @@ function matrixTighterThanDefault(): boolean {
  * packed beside the big one, edges shorter. The document is untouched — the
  * drawing is not the data — and a hand move writes to both.
  *
- * Recomputed when what it was computed for changes (`matrixViewSig`: the
- * document, its nodes and edges, the filter, the folds, a new archival layout).
+ * MICRO-GLIFI-OVERLAY-CONTINUITA p.4 · computed when the document is opened
+ * and when a layout is ASKED for («Recompute layout», which writes a new
+ * archival layout) — never by itself after: «the place of a node is decided by
+ * the person» (E.D., 23 Oct 2026). It used to be recomputed whenever the
+ * document's node or edge count, the filter or the folds changed (measured on
+ * the GT16: a ring of the filter off moved 21 nodes of 175, closing an
+ * activity 171). A node it does not know (born since, or shown by a filter)
+ * gets a proposed place and keeps it (`viewPositionsNow`).
  */
 let matrixViewSig = "";
 let matrixViewQueued = false;
 function matrixViewSigNow(): string {
   if (!store) return "";
   const d = store.doc;
-  return [emtree.active()?.id ?? "", d.graph.nodes.length, d.graph.edges.length,
-    [...circleState.matrix].sort().join(","), (d.layout?.folded_groups ?? []).length,
-    layoutRevision(d.layout)].join("§");
+  return [emtree.active()?.id ?? "", layoutRevision(d.layout)].join("§");
+}
+/**
+ * p.4 · the Matrix's positions: the view layout's, and for a node it does not
+ * know yet a PROPOSED place — the archival one carried into the view's lane of
+ * the same epoch (the two layouts' lanes differ) — written into the view layout
+ * at once, so from then on it does not move by itself.
+ */
+function viewPositionsNow(doc: EmDocument): Record<string, import("./types").LayoutRect> | undefined {
+  if (!matrixViewLayout) return undefined;
+  const view = (matrixViewLayout.positions ??= {});
+  const arch = doc.layout?.positions ?? {};
+  const aLanes = doc.layout?.swimlanes ?? [];
+  const vLanes = new Map((matrixViewLayout.swimlanes ?? []).map((l) => [l.epoch_id, l]));
+  for (const [id, r] of Object.entries(arch)) {
+    if (view[id]) continue;
+    const cy = r.y + r.h / 2;
+    const al = aLanes.find((l) => cy >= l.y && cy < l.y + l.height);
+    const vl = al ? vLanes.get(al.epoch_id) : undefined;
+    view[id] = vl
+      ? { ...r, y: vl.y + Math.min(Math.max(4, r.y - al!.y), Math.max(4, vl.height - r.h - 4)) }
+      : { ...r };
+  }
+  return { ...arch, ...view };
 }
 /** the archival layout's identity: a new object is a new layout (setLayout) */
 const layoutIds = new WeakMap<object, number>();
@@ -5816,9 +5847,10 @@ function applyCanvasView(v: ViewKind): void {
     recomputeHiddenFromCircles();
     buildScenes();
     if (filterPanelOpen()) renderCirclesPanel();
-    // entering Matrix under a filter → recompact via the em-core view layout
-    // (kept when another window leaves Matrix: a Matrix window may still show)
-    if (v === "matrix") void refreshMatrixViewLayout();
+    // MICRO-GLIFI-OVERLAY-CONTINUITA p.4 · entering the Matrix computes its view
+    // layout only if this document has none yet (it used to recompute it at
+    // every return: a Matrix moved by coming back to it)
+    if (v === "matrix") matrixViewMaybeStale();
   }
   if (contextStack.length) {
     contextStack = [];
@@ -10147,10 +10179,36 @@ function settleDropped(
 ): void {
   const st = store!;
   const groupIds = [primary, ...members];
+  // MICRO-GLIFI-OVERLAY-CONTINUITA p.4 · in a soloing the drop IS the place, in
+  // the group's space: written as it is (the passes below compared the drop with
+  // a soloing scene nobody had rebuilt, found it equal, and wrote nothing — the
+  // node went back where it was at the next rebuild: E.D.'s combiner)
+  if (inContext() && !groupMove) {
+    const ctxId = contextStack[contextStack.length - 1];
+    const s = scene();
+    for (const [id, want] of dropped) {
+      const sn = s?.byId.get(id);
+      if (!sn) continue;
+      st.moveInGroupSpace(ctxId, id, { x: want.x, y: want.y, w: sn.w, h: sn.h }, false);
+    }
+    return;
+  }
   for (let pass = 0; pass < 4; pass++) {
     buildScenes();
     const s = scene();
     if (!s) return;
+    // p.4 · an open paradata group's box moved by hand: its offset, in its space
+    if (groupMove && s.pdAnchor?.has(primary)) {
+      const want = dropped.get(primary);
+      const got = s.byId.get(primary);
+      if (!want || !got) return;
+      const dx = want.x - got.x;
+      const dy = want.y - got.y;
+      if (Math.abs(dx) + Math.abs(dy) <= 0.5) return;
+      const was = st.doc.layout?.group_spaces?.[primary]?.[primary];
+      st.moveInGroupSpace(primary, primary, { x: (was?.x ?? 0) + dx, y: (was?.y ?? 0) + dy, w: 0, h: 0 }, false);
+      continue;
+    }
     if (groupMove) {
       const want = dropped.get(primary);
       const got = s.byId.get(primary);
@@ -10164,7 +10222,8 @@ function settleDropped(
     let done = true;
     for (const [id, want] of dropped) {
       const got = s.byId.get(id);
-      if (!got || got.instanceOf) continue; // an instance follows its group
+      // an instance follows its group — unless the group arranges it (p.4)
+      if (!got || (got.instanceOf && !s.arrangedIn?.has(id))) continue;
       const dx = want.x - got.x;
       const dy = want.y - got.y;
       if (Math.abs(dx) + Math.abs(dy) <= 0.5) continue;
@@ -10172,6 +10231,29 @@ function settleDropped(
       moveOneByDelta(id, dx, dy, false);
     }
     if (done) return;
+  }
+}
+
+/**
+ * MICRO-GLIFI-OVERLAY-CONTINUITA p.4 · nodes given another epoch by a gesture
+ * that does not place them (dating a document): each one, if its box is not in
+ * that epoch's lane in the Matrix, goes into it — the same height from the
+ * lane's top it had in its old lane, kept inside — and nothing else moves.
+ */
+function placeInEpochLane(ids: string[], epochId: string): void {
+  const s = scenes.matrix;
+  if (!s || !store) return;
+  const band = s.subBands?.find((b) => b.phaseId === epochId && !b.residual) ?? s.lanes.find((l) => l.id === epochId);
+  if (!band) return;
+  for (const id of ids) {
+    const sn = s.byId.get(id);
+    if (!sn) continue;
+    const cy = sn.y + sn.h / 2;
+    if (cy >= band.y && cy <= band.y + band.height) continue;
+    const old = s.lanes.find((l) => cy >= l.y && cy < l.y + l.height);
+    const off = old ? sn.y - old.y : 30;
+    const y = band.y + Math.min(Math.max(8, off), Math.max(8, band.height - sn.h - 8));
+    moveOneByDelta(id, 0, y - sn.y, false);
   }
 }
 
@@ -10921,11 +11003,18 @@ function renderDocumentDating(st: DocumentStore, host: HTMLElement, docId: strin
         const e = st.liveEdges().find((x) => x.source === docId && x.edge_type === "has_first_epoch");
         if (e) st.deleteEdge(e);
       }
+      // MICRO-GLIFI-OVERLAY-CONTINUITA p.4 · the document goes into its epoch's
+      // lane, and nothing else moves (it was a whole relayout of the Matrix)
+      if (v && st === store) placeInEpochLane([docId], v);
     });
     const msg = v ? t("chain.datedIn", { d: String(d.name ?? docId), e: String(st.node(v)?.name ?? v) })
                   : t("chain.undated", { d: String(d.name ?? docId) });
     logInfo(msg, [docId]);
-    void runLayout(false).then(() => { select(docId); refreshInspector(); toastUndo(msg, st); });
+    buildScenes();
+    draw();
+    select(docId);
+    refreshInspector();
+    toastUndo(msg, st);
   };
   sel.addEventListener("change", () => dateIn(sel.value));
   const year = document.createElement("input");
@@ -15763,8 +15852,8 @@ function applyTemplate(t: DetailTemplate): void {
   buildScenes();
   draw();
   renderCirclesPanel();
-  if (view === "matrix") void refreshMatrixViewLayout();
-  else matrixViewMaybeStale(); // MICRO-PULIZIA p.5 · the Matrix keeps its view layout (its signature says when it is stale)
+  // MICRO-GLIFI-OVERLAY-CONTINUITA p.4 · a filter hides and shows, it does not
+  // re-lay the Matrix out: what it hides leaves its place empty
 }
 function renderCirclesPanel(): void {
   filterPanel.innerHTML = "";
@@ -15842,11 +15931,9 @@ function renderCirclesPanel(): void {
         else visible.delete(circle.key);
         recomputeHiddenFromCircles();
         buildScenes();
-              draw();
-        // Matrix recompacts on the filtered subgraph (em-core view layout);
-        // in Graph the layout already reflows, so just invalidate for later.
-        if (view === "matrix") void refreshMatrixViewLayout();
-        else matrixViewMaybeStale(); // MICRO-PULIZIA p.5 · the Matrix keeps its view layout (its signature says when it is stale)
+        draw();
+        // MICRO-GLIFI-OVERLAY-CONTINUITA p.4 · no recompaction: the Matrix keeps
+        // every place (a hidden node leaves its room; «Recompute layout» packs)
       });
       row.appendChild(cb);
       row.appendChild(document.createTextNode(` ${circle.label} (${count})`));
@@ -15979,10 +16066,9 @@ function renderCirclesPanel(): void {
     circleState[view] = defaultVisibleCircles(view);
     recomputeHiddenFromCircles();
     buildScenes();
-      draw();
+    draw();
     renderCirclesPanel();
-    if (view === "matrix") void refreshMatrixViewLayout();
-    else matrixViewMaybeStale(); // MICRO-PULIZIA p.5 · the Matrix keeps its view layout (its signature says when it is stale)
+    // p.4 · no recompaction (see the ring's checkbox)
   });
   filterPanel.appendChild(reset);
 }
@@ -36428,7 +36514,11 @@ function wireGraphCanvas(canvas: HTMLCanvasElement, winId: string): void {
     // MICRO-BADGE-PD · the soloing of a paradata group draws its instances too
     // MICRO-GLIFI-OVERLAY-CONTINUITA p.3 · …and so is a continuity node: the
     // view draws it above its unit, in its epoch's lane (it follows the unit)
-    if ((hit?.instanceOf || hit?.continuity) && (view === "matrix" || inContext())) {
+    // MICRO-GLIFI-OVERLAY-CONTINUITA p.4 · an instance in an arranged paradata
+    // group (open in place, or its soloing) IS placed by the hand: its place is
+    // written in the group's space; elsewhere it stays a click
+    const instMovable = !!hit?.instanceOf && (inContext() || !!s.arrangedIn?.has(hit.id));
+    if (((hit?.instanceOf && !instMovable) || hit?.continuity) && (view === "matrix" || inContext())) {
       // TOCCARE · a document INSTANCE is drawn by the view in its usage context;
       // it has no position of its own to store and no membership of its own to
       // change (a drop used to hand its scene id to moveToGroup, which wrote an

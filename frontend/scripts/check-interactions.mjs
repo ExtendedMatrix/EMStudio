@@ -8330,6 +8330,105 @@ test("GL3.continuity", "GLIFI-OVERLAY p.3 · il nodo di continuità: nel GT16 i 
   return { pass, detail: { ...out, errors } };
 });
 
+test("GL4.positions", "GLIFI-OVERLAY p.4 · la posizione di un nodo la decide la persona: GT16, gruppo PD di VSF125 aperto sul posto, trascinati combinatore, estrattore e istanza di documento e la scatola del gruppo: restano dopo chiudi/riapri, un'unità spostata in un'altra epoca, un anello del filtro spento e riacceso; nel soloing del gruppo combinatore, estrattore e istanza trascinati restano dopo uscita e rientro; spegnere un anello o chiudere un'attività non sposta nessun altro nodo della Matrix", async () => {
+  if (!existsSync(GL_V4)) return { pass: false, detail: { missing: GL_V4 } };
+  const { p, ctx, errors } = await glOpen();
+  const D = (f, a) => p.evaluate(f, a);
+  const W = await D(() => window.__EM_DRAG__.wins().find((w) => w.type === "graph").id);
+  const out = {};
+  const snap = () => D(() => Object.fromEntries(window.__EM_DRAG__.matrixGeom().nodes.map((n) => [n.id, [Math.round(n.x), Math.round(n.y)]])));
+  const moved = (a, b, skip = []) => Object.keys(a).filter((id) => b[id] && !skip.includes(id) && Math.abs(a[id][0] - b[id][0]) + Math.abs(a[id][1] - b[id][1]) > 1).length;
+  // the group: VSF125's paradata, with a combiner, an extractor and a document instance
+  const grp = await D(() => { const E = window.__EM_DRAG__; const g = E.edgesOf("has_paradata_nodegroup").find((e) => E.node(e.source)?.name === "VSF125")?.target;
+    const mem = E.edgesOf("is_in_paradata_nodegroup").filter((e) => e.target === g).map((e) => e.source);
+    return { g, combiner: mem.find((m) => E.node(m)?.node_type === "combiner"), extractor: mem.find((m) => E.node(m)?.node_type === "extractor"), property: mem.find((m) => E.node(m)?.node_type === "property") }; });
+  // the whole Matrix: a ring off and on, an activity closed and opened
+  let s0 = await snap();
+  await p.click("#btn-view-props"); await p.waitForTimeout(300);
+  const ring = () => D(() => { const r = [...document.querySelectorAll("#filter-panel .fp-row")].find((x) => /^Continuity \(BR\)/.test(x.textContent.trim())); r?.querySelector("input")?.click(); return !!r; });
+  out.ring = await ring(); await p.waitForTimeout(2500);
+  out.ringMoved = moved(s0, await snap());
+  await ring(); await p.waitForTimeout(2500);
+  await p.keyboard.press("Escape");
+  s0 = await snap();
+  const act = await D(() => window.__EM_DRAG__.matrixGeom().nodes.find((n) => n.isGroup && n.type === "ActivityNodeGroup")?.id);
+  await D((g) => window.__EM_DRAG__.fold(g, true), act); await p.waitForTimeout(2500);
+  out.foldMoved = moved(s0, await snap(), [act]);
+  await D((g) => window.__EM_DRAG__.fold(g, false), act); await p.waitForTimeout(2500);
+  // a node born: a proposed place, kept through a ring off and on and a fold
+  // …born from «Add» at the cursor, in an empty place of XX sec
+  const sb = await snap();
+  const rr = await glFrame(p, 0.6, 3500, 150);
+  await p.mouse.click(rr.x + rr.w / 2, rr.y + rr.h / 2, { button: "right" }); await p.waitForTimeout(500);
+  await p.fill(".addm .addm-q", "US"); await p.waitForTimeout(300);
+  await p.click(".addm .addm-item"); await p.waitForTimeout(1500);
+  const sa = await snap();
+  const born = Object.keys(sa).find((id) => !sb[id]) ?? null;
+  const bornAt0 = born ? sa[born] : null;
+  await p.click("#btn-view-props"); await p.waitForTimeout(300);
+  await ring(); await p.waitForTimeout(1500); await ring(); await p.waitForTimeout(1500);
+  await p.keyboard.press("Escape");
+  await D((g) => window.__EM_DRAG__.fold(g, true), act); await p.waitForTimeout(1500);
+  await D((g) => window.__EM_DRAG__.fold(g, false), act); await p.waitForTimeout(1500);
+  out.born = { at: bornAt0, after: (await snap())[born] ?? null };
+  // in place
+  await D((g) => window.__EM_DRAG__.fold(g, false), grp.g); await p.waitForTimeout(1200);
+  const at = (sid) => D((sid) => { const n = window.__EM_DRAG__.matrixGeom().nodes.find((x) => x.id === sid); return n ? [Math.round(n.x), Math.round(n.y)] : null; }, sid);
+  const scr = (id) => D(([w, id]) => { const ws = window.__EM_DRAG__.winScene(w); const b = ws.boxes.find((x) => x.id === id || x.instanceOf === id); return b ? { x: b.x + b.w / 2, y: b.y + b.h / 2, sid: b.id, scale: ws.scale, ox: ws.origin?.x, oy: ws.origin?.y, rx: ws.rect.x, ry: ws.rect.y } : null; }, [W, id]);
+  const g0 = await D((g) => window.__EM_DRAG__.matrixGeom().nodes.find((n) => n.id === g), grp.g);
+  const r = await D((w) => window.__EM_DRAG__.winScene(w).rect, W);
+  await D(([x, y, w, h]) => window.__EM_DRAG__.frameWorld(x, y, w, h, 30), [g0.x + g0.w / 2 - (r.w - 60) / 2, g0.y + g0.h / 2 - (r.h - 60) / 2, r.w - 60, r.h - 60]);
+  await p.waitForTimeout(500);
+  const drag = async (id, dx = 70, dy = 45) => { const b = await scr(id); if (!b) return null;
+    await p.mouse.move(b.x, b.y); await p.mouse.down(); await p.mouse.move(b.x + dx / 2, b.y + dy / 2, { steps: 4 }); await p.mouse.move(b.x + dx, b.y + dy, { steps: 4 }); await p.mouse.up();
+    await p.waitForTimeout(700); return b.sid; };
+  const inst = await D(([w]) => window.__EM_DRAG__.winScene(w).boxes.find((b) => b.instanceOf)?.id, [W]);
+  const place = {};
+  for (const [k, id] of Object.entries({ combiner: grp.combiner, extractor: grp.extractor, instance: inst })) {
+    const before = await at(id); const sid = await drag(id); place[k] = { sid, before, after: await at(sid) };
+  }
+  // the box: dragged by its title bar
+  const gb = await D(([w, g]) => window.__EM_DRAG__.winScene(w).boxes.find((b) => b.id === g), [W, grp.g]);
+  const boxBefore = await at(grp.g);
+  await p.mouse.move(gb.x + 40, gb.y + 8); await p.mouse.down(); await p.mouse.move(gb.x + 80, gb.y + 8, { steps: 4 }); await p.mouse.move(gb.x + 120, gb.y - 2, { steps: 4 }); await p.mouse.up();
+  await p.waitForTimeout(800);
+  out.box = { before: boxBefore, after: await at(grp.g) };
+  for (const v of Object.values(place)) v.afterBox = await at(v.sid);
+  // close and reopen, an epoch change elsewhere, a ring off and on
+  await D((g) => window.__EM_DRAG__.fold(g, true), grp.g); await p.waitForTimeout(600);
+  await D((g) => window.__EM_DRAG__.fold(g, false), grp.g); await p.waitForTimeout(1000);
+  for (const v of Object.values(place)) v.reopen = await at(v.sid);
+  out.box.reopen = await at(grp.g);
+  const other = await D(() => { const g = window.__EM_DRAG__.matrixGeom(); return { u: g.nodes.find((n) => n.type === "US" && !n.group && n.y > g.lanes[2].y)?.id, ep: g.lanes[1].id }; });
+  out.epochUnit = other.u ? true : null;
+  await D(([u, e]) => window.__EM_DRAG__.setFirstEpoch?.([u], e), [other.u, other.ep]); await p.waitForTimeout(1500);
+  for (const v of Object.values(place)) v.epoch = await at(v.sid);
+  await p.click("#btn-view-props"); await p.waitForTimeout(300);
+  await ring(); await p.waitForTimeout(2000); await ring(); await p.waitForTimeout(2000);
+  await p.keyboard.press("Escape");
+  for (const v of Object.values(place)) v.filter = await at(v.sid);
+  // the soloing: world positions relative to an untouched property
+  await D((g) => window.__EM_DRAG__.enterGroup(g), grp.g); await p.waitForTimeout(1200);
+  const rel = async (id) => { const a = await scr(id), q = await scr(grp.property); return a && q ? [Math.round((a.x - q.x) / a.scale), Math.round((a.y - q.y) / a.scale)] : null; };
+  const solo = {};
+  const sinst = await D(([w]) => window.__EM_DRAG__.winScene(w).boxes.find((b) => b.instanceOf)?.id, [W]);
+  for (const [k, id] of Object.entries({ combiner: grp.combiner, extractor: grp.extractor, instance: sinst })) {
+    const before = await rel(id); await drag(id, 60, 40); solo[k] = { before, after: await rel(id) };
+  }
+  await D(() => window.__EM_DRAG__.goBack()); await p.waitForTimeout(700);
+  await D((g) => window.__EM_DRAG__.enterGroup(g), grp.g); await p.waitForTimeout(1200);
+  for (const [k, v] of Object.entries(solo)) v.reenter = await rel(k === "instance" ? sinst : grp[k]);
+  await p.screenshot({ path: SHOT("gl4-positions") }).catch(() => {});
+  await ctx.close();
+  const same = (a, b) => !!a && !!b && Math.abs(a[0] - b[0]) <= 1 && Math.abs(a[1] - b[1]) <= 1;
+  const placedOk = Object.values(place).every((v) => v.before && v.after && !same(v.before, v.after) && same(v.afterBox ?? v.after, v.reopen) && same(v.reopen, v.epoch) && same(v.epoch, v.filter));
+  const soloOk = Object.values(solo).every((v) => v.before && v.after && !same(v.before, v.after) && same(v.after, v.reenter));
+  const pass = out.ring && out.ringMoved === 0 && out.foldMoved === 0 && placedOk && soloOk
+    && !!out.born.at && JSON.stringify(out.born.at) === JSON.stringify(out.born.after)
+    && !same(out.box.before, out.box.after) && same(out.box.after, out.box.reopen) && !errors.length;
+  return { pass, detail: { ...out, place, solo, errors } };
+});
+
 // ── run ─────────────────────────────────────────────────────────────────────
 const chosen = cases.filter((c) => !only.length || only.includes(c.id) || only.some((o) => c.id.startsWith(o + ".")));
 for (const c of chosen) {
