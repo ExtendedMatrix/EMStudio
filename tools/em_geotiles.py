@@ -677,6 +677,9 @@ def tile_range(bbox, z):
 # ── jobs: «Estrai area», the globe minimum ───────────────────────────────────
 
 MAX_EXTRACT_TILES = 40000
+#: this many tiles failing one after the other stop a job (four workers: four
+#: rounds of the same refusal are a cause, not bad luck)
+FAIL_BLOCK = 16
 _JOBS = {}
 _JOBS_LOCK = threading.Lock()
 
@@ -711,7 +714,7 @@ def _run_extract(job: Job, plan, out_path, source_id, meta, bounds, pkg_dirs, ce
         coords = [(z, x, y) for (z, x0, x1, y0, y1) in plan for x in range(x0, x1 + 1) for y in range(y0, y1 + 1)]
 
         def one(c):
-            if job.cancel.is_set():
+            if job.cancel.is_set() or stop.is_set():
                 return c, None, "cancelled"
             try:
                 d, where = tile_for(source_id, *c, pkg_dirs=pkg_dirs)
@@ -719,23 +722,37 @@ def _run_extract(job: Job, plan, out_path, source_id, meta, bounds, pkg_dirs, ce
             except Exception as exc:  # noqa: BLE001 — one tile is not the job
                 return c, None, f"error: {exc}"
 
+        # MICRO-BRIDGE-CERTIFICATI p.2 · a tile that failed is not DONE (E.D.'s
+        # «globe-min: failed · 5461/5461 · 0.0 MB»: every tile a certificate
+        # error, every one counted), and a first block of failures with nothing
+        # come is the job failing, said with its reason, not 5461 more tries
+        stop = threading.Event()
+        run_of_errors, last_error = 0, ""
         with ThreadPoolExecutor(max_workers=4) as ex:
             for c, d, where in ex.map(one, coords):
-                if job.cancel.is_set():
+                if job.cancel.is_set() or stop.is_set():
                     break
                 key = where.split(":")[0]
                 job.where[key] = job.where.get(key, 0) + 1
+                if where.startswith("error"):
+                    job.failed += 1
+                    run_of_errors += 1
+                    last_error = where[len("error: "):]
+                    if run_of_errors >= FAIL_BLOCK:
+                        stop.set()
+                    continue
+                run_of_errors = 0
                 if d:
                     tiles[c] = d
                     job.bytes += len(d)
-                elif where.startswith("error"):
-                    job.failed += 1
                 job.done += 1
         if job.cancel.is_set():
             job.state = "cancelled"
             return
+        if stop.is_set():
+            raise ValueError(f"{FAIL_BLOCK} tiles in a row failed: {last_error}")
         if not tiles:
-            raise ValueError("no tile came: offline, or outside the source")
+            raise ValueError(f"no tile came: {last_error}" if last_error else "no tile came: outside the source")
         os.makedirs(os.path.dirname(out_path), exist_ok=True)
         meta = {**meta, "source": source_id, "attribution": src["attribution"],
                 **({"encoding": src["encoding"]} if src.get("encoding") else {})}

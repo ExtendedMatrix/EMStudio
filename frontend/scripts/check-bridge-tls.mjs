@@ -11,7 +11,9 @@
 //      HEAD and «Keep on disk», the LLM provider — urlopen replaced by a spy;
 //   4. a failure says why: a local HTTPS server with a self-signed certificate
 //      → `certificate not verifiable (…)` in the tile's X-EM-Tile, in
-//      /tiles/failures (cleared by the next tile that comes);
+//      /tiles/failures (cleared by the next tile that comes), and a job over
+//      that source stops at its first block of failures as «failed», with the
+//      reason, without counting a failed tile as done;
 //   5. a bridge started for real: /health says `tls_ca: certifi`, `--tls-check`
 //      answers 0.
 //
@@ -129,6 +131,9 @@ data, where = G.tile_for("selfsigned", 2, 1, 1)
 print(json.dumps({"why": why, "fail": fail, "job": job.view(), "after": [data.decode(), where], "left": G.failures()["sources"]}))`);
   ok(/^certificate not verifiable \(/.test(r.why ?? ""), `a self-signed server: «${r.why}», not «URLError»`);
   ok(r.fail?.reason === r.why && r.fail.count >= 1, "/tiles/failures names the source and the reason");
+  eq([r.job.state, r.job.done], ["failed", 0], "the job over that source: failed, and no failed tile counted as done");
+  ok(r.job.failed >= 16 && r.job.failed < 341, `it stopped at the first block of failures (${r.job.failed} of 341 tried)`);
+  ok(/in a row failed: certificate not verifiable/.test(r.job.error ?? ""), `the job's error is the reason: «${r.job.error}»`);
   eq(r.after, ["png", "online"], "trusted, the same server answers the tile");
   eq(r.left, {}, "and the source's failure is cleared by the tile that came");
 } else {

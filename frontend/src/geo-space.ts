@@ -361,8 +361,16 @@ export function mountGeoSpace(d: GeoSpaceDeps): GeoSpace {
       bar.max = Math.max(1, job.total);
       bar.value = job.done;
       const words = document.createElement("span");
-      words.textContent = t("geo.job", { kind: String(job.kind), state: String(job.state), done: String(job.done), total: String(job.total), mb: fmtMB(job.bytes || job.result?.bytes || 0) });
+      words.textContent = t("geo.job", { kind: String(job.kind), state: t(`geo.state.${job.state}`), done: String(job.done), total: String(job.total), mb: fmtMB(job.bytes || job.result?.bytes || 0) })
+        + (job.failed ? ` · ${t("geo.jobFailedTiles", { n: String(job.failed) })}` : "");
       p.append(bar, words);
+      if (job.error) {
+        const why = document.createElement("span");
+        why.className = "geo-job-error";
+        why.dataset.geoJobError = "1";
+        why.textContent = String(job.error);
+        p.appendChild(why);
+      }
       if (job.state === "running") p.appendChild(btn(t("geo.cancel"), "cancel"));
       ex.appendChild(p);
     }
