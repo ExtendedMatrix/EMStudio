@@ -262,6 +262,10 @@ export interface GeoCtx {
   /** MICRO-GLOBO-INTERAZIONE p.1 · the box of the models drawn (three's axes),
    *  null while none has come */
   contentBox?: () => [V3, V3] | null;
+  /** MICRO-GLOBO-INTERAZIONE p.2 · the camera put with its up (the globe's hands:
+   *  north is not the scene's +y), the pivot at `target`; the vertical field */
+  setPose?: (pos: V3, target: V3, up: V3) => void;
+  fov?: number;
 }
 
 /** MICRO-GEOGLOBO · the globe, driven by the scene: called once a frame */
@@ -3206,6 +3210,16 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
         camState,
         applyCam: (c: CamState) => { finishAnim(); applyCam(c); },
         setOrtho: (on: boolean) => { finishAnim(); orthoAuto = false; setOrtho(on); if (!on && aligned) { aligned = null; showView(); } },
+        fov: FOV,
+        setPose: (pos: V3, target: V3, up: V3) => {
+          finishAnim();
+          framed = true;
+          camera.up.set(up[0], up[1], up[2]);
+          if (isOrtho) { placeOrtho({ pos, target }); return; }
+          camera.position.set(pos[0], pos[1], pos[2]);
+          controls.target.set(target[0], target[1], target[2]);
+          camera.lookAt(controls.target);
+        },
         contentBox: () => {
           const b = new THREE.Box3();
           for (const c of content.children) if (!c.userData.contour && !c.userData.tiles && !c.userData.helper) b.expandByObject(c);

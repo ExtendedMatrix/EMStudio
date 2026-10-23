@@ -10146,3 +10146,12 @@ tr.tt-hidden { display: none; }
 .geo-panel .geo-fail { color: var(--danger); cursor: help; }
 .geo-attrib { position: absolute; right: 6px; bottom: 4px; max-width: 70%; z-index: 2; font-size: 0.62rem; line-height: 1.25; color: var(--scene-ink); background: color-mix(in srgb, var(--scene-bg-top) 70%, transparent); padding: 1px 6px; border-radius: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; pointer-events: auto; }
 .geo-attrib.hidden { display: none; }
+/* MICRO-GLOBO-INTERAZIONE p.2 · the compass of the globe and the plan: the needle
+   points north on the screen; a click puts north up, a double click levels too */
+.geo-compass { position: absolute; left: 10px; bottom: 26px; z-index: 3; width: 38px; height: 38px; padding: 0; border: 0; border-radius: 50%; background: transparent; cursor: pointer; }
+.geo-compass.hidden { display: none; }
+.geo-compass .geo-compass-ring { fill: color-mix(in srgb, var(--scene-bg-top) 80%, transparent); stroke: var(--scene-ov-border, #888); stroke-width: 1.5; }
+.geo-compass .geo-compass-n { fill: #d33; }
+.geo-compass .geo-compass-s { fill: var(--scene-ink, #333); opacity: 0.55; }
+.geo-compass .geo-compass-t { font: 700 7px var(--font-ui, sans-serif); fill: #fff; }
+.geo-compass:focus-visible { outline: 2px solid var(--accent, #4a90e2); }

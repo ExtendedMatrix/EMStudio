@@ -8814,6 +8814,10 @@ test("GG1.globe", "GEOGLOBO p.1 · il GT16 sul globo: «Territory» misura l'anc
     await p.mouse.move(at.x, at.y);
     await p.mouse.wheel(0, -240);
     await p.waitForTimeout(50);
+    // MICRO-GLOBO-INTERAZIONE · the passage waits for the end of the gesture (a
+    // wheel burst: 300 ms of quiet): under 3 km, stop and let it happen
+    const h = await geoState(p);
+    if (h.mode === "globe" && h.altitude < 3000) { out.heldBelow = Math.round(h.altitude); await p.waitForTimeout(500); }
   }
   out.down = (await geoState(p)).lastSwitch;
   for (let i = 0; i < 300; i++) {
@@ -8902,6 +8906,123 @@ test("GG5.fail", "BRIDGE-CERTIFICATI · una fonte che il bridge non raggiunge (i
   await ctx.close();
   const pass = out.mark.length === 1 && out.mark[0][0] === "base:s2cloudless-2016" && out.mark[0][1].includes(why)
     && out.log.length === 1 && /^warn /.test(out.log[0]) && out.log[0].includes(why) && out.after === 0 && !out.errors.length;
+  return { pass, detail: out };
+});
+
+test("GG6.hands", "GLOBO-INTERAZIONE p.2 · le mani di Google Earth nel Globo e nella Pianta, con eventi simulati: il sinistro trascinato afferra la Terra (il punto sotto il cursore resta sotto il cursore, entro 1 px) e il nord resta a 0° dopo il pan e dopo la rotella; il destro e Shift + sinistro ruotano e inclinano attorno al punto sotto il cursore; la bussola si vede, un clic la riporta a 0°, il doppio clic anche la vista dall'alto; nella Pianta il trascinamento afferra (non orbita) e il destro ruota senza inclinare; la rotella che scende sotto i 3 km non cambia le mani a metà raffica, le cambia appena finisce; nel Sito resta l'orbita (le mani del globo spente)", async () => {
+  if (!existsSync(GEO_V4)) return { pass: false, detail: { missing: GEO_V4 } };
+  const { p, ctx, errors } = await geoOpen();
+  const out = {};
+  await geoOn(p);
+  const box = await (await p.$(".scn-host canvas")).boundingBox();
+  const C = { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+  const pick = (x, y) => p.evaluate(([x, y]) => document.querySelector(".scn-host").__geoPickAt(x, y), [x, y]);
+  const scr = (P) => p.evaluate((P) => document.querySelector(".scn-host").__geoScreenOf(P), P);
+  const drag = async (x0, y0, dx, dy, o = {}) => {
+    if (o.key) await p.keyboard.down(o.key);
+    await p.mouse.move(x0, y0); await p.mouse.down({ button: o.button ?? "left" });
+    for (let i = 1; i <= 8; i++) { await p.mouse.move(x0 + (dx * i) / 8, y0 + (dy * i) / 8); await p.waitForTimeout(16); }
+    await p.mouse.up({ button: o.button ?? "left" });
+    if (o.key) await p.keyboard.up(o.key);
+    await p.waitForTimeout(250);
+  };
+  const grabErr = async (x0, y0, dx, dy) => { const P = await pick(x0, y0); await drag(x0, y0, dx, dy); const s = P ? await scr(P) : null; return s ? Math.hypot(s.x - x0 - dx, s.y - y0 - dy) : null; };
+  // the globe: north up after the flight, the compass shown
+  await p.click('.scn-bar [data-geo-mode="globe"]');
+  await p.waitForTimeout(300);
+  let g = await geoIdle(p);
+  out.globe = { mode: g.mode, heading: g.pose?.heading, compass: g.compass };
+  out.grabGlobe = await grabErr(C.x + 40, C.y + 30, 60, -50);
+  out.headingAfterGrab = (await geoState(p)).pose.heading;
+  // the wheel toward the site, down to a region
+  const site = await p.evaluate(() => document.querySelector(".scn-host").__spaceProject([0, 0, 0]));
+  await p.mouse.move(site.x, site.y);
+  for (let i = 0; i < 80; i++) { g = await geoState(p); if (g.altitude < 60000) break; await p.mouse.wheel(0, -300); await p.waitForTimeout(40);
+    const s2 = await p.evaluate(() => document.querySelector(".scn-host").__spaceProject([0, 0, 0])); if (s2) await p.mouse.move(s2.x, s2.y); }
+  await p.waitForTimeout(400);
+  g = await geoState(p);
+  out.region = { mode: g.mode, alt: Math.round(g.altitude), heading: g.pose.heading };
+  out.grabRegion = await grabErr(C.x + 60, C.y + 50, -120, -40);
+  {
+    const x = C.x - 70, y = C.y + 40, P = await pick(x, y);
+    await p.mouse.move(x, y);
+    for (let i = 0; i < 3; i++) { await p.mouse.wheel(0, -120); await p.waitForTimeout(40); }
+    await p.waitForTimeout(400);
+    const s = P ? await scr(P) : null;
+    out.wheelRegion = { err: s ? Math.hypot(s.x - x, s.y - y) : null, heading: (await geoState(p)).pose.heading };
+  }
+  // right drag and Shift + left: turn and tilt around the point under the cursor
+  {
+    const x = C.x + 50, y = C.y + 40, P = await pick(x, y);
+    const g0 = await geoState(p);
+    await drag(x, y, 100, -60, { button: "right" });
+    const g1 = await geoState(p);
+    const s = P ? await scr(P) : null;
+    out.turn = { err: s ? Math.hypot(s.x - x, s.y - y) : null, heading: [g0.pose.heading, g1.pose.heading], pitch: [g0.pose.pitch, g1.pose.pitch] };
+    await drag(C.x, C.y, -60, 0, { key: "Shift" });
+    out.shiftTurn = (await geoState(p)).pose.heading;
+    out.grabTurned = await grabErr(C.x - 60, C.y + 30, 90, 30);
+    out.headingKept = (await geoState(p)).pose.heading;
+  }
+  // the compass
+  out.compassBefore = (await geoState(p)).compass;
+  await p.click(".scn-host .geo-compass");
+  await p.waitForTimeout(700);
+  g = await geoState(p);
+  out.compassClick = { heading: g.pose.heading, compass: g.compass, pitch: g.pose.pitch };
+  await p.dblclick(".scn-host .geo-compass");
+  await p.waitForTimeout(900);
+  g = await geoState(p);
+  out.compassDbl = { heading: g.pose.heading, pitch: g.pose.pitch };
+  // the plan: the same hands
+  await p.click('.scn-bar [data-geo-mode="plan"]');
+  await p.waitForTimeout(300);
+  g = await geoIdle(p);
+  out.plan = { mode: g.mode, heading: g.pose.heading, hands: g.hands.enabled };
+  out.grabPlan = await grabErr(C.x + 80, C.y + 30, -130, 70);
+  await drag(C.x, C.y, 90, -70, { button: "right" });
+  g = await geoState(p);
+  out.planTurn = { heading: g.pose.heading, pitch: g.pose.pitch, mode: g.mode };
+  // the globe again, just over 3 km above the site: a wheel burst down past it keeps the globe's hands until it ends
+  await p.click(".scn-host .geo-compass");
+  await p.click('.scn-bar [data-geo-mode="globe"]');
+  await p.waitForTimeout(300);
+  await geoIdle(p);
+  const s3 = await p.evaluate(() => document.querySelector(".scn-host").__spaceProject([0, 0, 0]));
+  await p.mouse.move(s3.x, s3.y);
+  const burst = [];
+  for (let i = 0; i < 200; i++) {
+    g = await geoState(p);
+    if (g.altitude < 2500 || g.mode !== "globe") break;
+    await p.mouse.wheel(0, g.altitude > 10000 ? -300 : -60);
+    await p.waitForTimeout(30);
+    const s4 = await p.evaluate(() => document.querySelector(".scn-host").__spaceProject([0, 0, 0])); if (s4) await p.mouse.move(s4.x, s4.y);
+  }
+  g = await geoState(p);
+  burst.push({ alt: Math.round(g.altitude), mode: g.mode, busy: g.hands.busy });
+  await p.waitForTimeout(700);
+  g = await geoState(p);
+  burst.push({ alt: Math.round(g.altitude), mode: g.mode, hands: g.hands.enabled });
+  out.burst = burst;
+  // the site: the Space's orbit
+  const c0 = await p.evaluate(() => document.querySelector(".scn-host").__spaceCamState());
+  await drag(C.x, C.y, 100, 0, { button: "middle" });
+  const c1 = await p.evaluate(() => document.querySelector(".scn-host").__spaceCamState());
+  out.site = { mode: (await geoState(p)).mode, hands: (await geoState(p)).hands.enabled, compass: (await geoState(p)).compass,
+    orbit: Math.hypot(...c0.pos.map((v, i) => v - c1.pos[i])) > 1 && Math.hypot(...c0.target.map((v, i) => v - c1.target[i])) < 1e-3 };
+  out.errors = errors;
+  await p.screenshot({ path: SHOT("gg6-hands") }).catch(() => {});
+  await ctx.close();
+  const z = (h) => Math.abs((((h ?? 99) + 540) % 360) - 180) < 0.01;
+  const px = (e, tol = 1) => e !== null && e <= tol;
+  const pass = out.globe.mode === "globe" && z(out.globe.heading) && out.globe.compass !== null && px(out.grabGlobe) && z(out.headingAfterGrab)
+    && out.region.mode === "globe" && z(out.region.heading) && px(out.grabRegion) && px(out.wheelRegion.err, 2) && z(out.wheelRegion.heading)
+    && px(out.turn.err) && Math.abs(out.turn.heading[1] - out.turn.heading[0]) > 10 && out.turn.pitch[1] > out.turn.pitch[0] + 5
+    && Math.abs(out.shiftTurn - out.turn.heading[1]) > 5 && px(out.grabTurned) && Math.abs(out.headingKept - out.shiftTurn) < 1e-6
+    && Math.abs(out.compassBefore) > 5 && z(out.compassClick.heading) && z(out.compassClick.compass) && Math.abs(out.compassDbl.pitch + 90) < 0.01 && z(out.compassDbl.heading)
+    && out.plan.mode === "plan" && out.plan.hands && z(out.plan.heading) && px(out.grabPlan) && Math.abs(out.planTurn.heading) > 10 && Math.abs(out.planTurn.pitch + 90) < 0.01
+    && burst[0].mode === "globe" && burst[0].alt < 3000 && burst[1].mode === "site" && !burst[1].hands
+    && out.site.mode === "site" && !out.site.hands && out.site.compass === null && out.site.orbit && !errors.length;
   return { pass, detail: out };
 });
 

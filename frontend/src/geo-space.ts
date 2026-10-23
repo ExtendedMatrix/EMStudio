@@ -143,7 +143,7 @@ export function mountGeoSpace(d: GeoSpaceDeps): GeoSpace {
       if (!anchor) { s.on = false; save(); d.toast(anchorNote); return; }
       globe = createGlobe({
         anchor, shift, layers: s.layers, bridge, pkgDirs: pkgDir() ? [pkgDir()!] : [],
-        attributionTitle: t("geo.attribution"),
+        attributionTitle: t("geo.attribution"), compassTitle: t("geo.compass"),
         heightMode: s.height, zInCoords,
         onHeight: (hh) => { heightNow = hh; draw(); },
         onMode: (m) => { s.mode = m; save(); d.redrawBar(); },

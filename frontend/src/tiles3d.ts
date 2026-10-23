@@ -43,7 +43,7 @@ export async function tilesEngine(): Promise<{ TilesRenderer: any; ImplicitTilin
     Archive3tz: any; Tiles3tzPlugin: any; sourceFor: any; archiveBase: any;
     DRACOLoader: any; GLTFExtensionsPlugin: any; DRACO_FILES: Record<string, string>;
     /** MICRO-GEOGLOBO · the globe's parts (`globe3d.ts`) */
-    GlobeControls: any; TerrariumMeshPlugin: any; ImageOverlayPlugin: any; XYZTilesOverlay: any;
+    TerrariumMeshPlugin: any; ImageOverlayPlugin: any; XYZTilesOverlay: any;
     LRUCache: any; PriorityQueue: any; DownloadPriorityQueue: any }> {
   if (!tilesPromise) {
     // a CONSTANT condition, as in `engine()`: the other arm leaves the build
@@ -58,7 +58,7 @@ export async function tilesEngine(): Promise<{ TilesRenderer: any; ImplicitTilin
             import("3d-tiles-renderer/src/three/plugins/images/terrain-rgb/TerrariumMeshPlugin.js"),
             import("3d-tiles-renderer/src/three/plugins/images/ImageOverlayPlugin.js"), import("3d-tiles-renderer/core")]);
           return { TilesRenderer: r.TilesRenderer, ImplicitTilingPlugin: p.ImplicitTilingPlugin,
-                   GlobeControls: r.GlobeControls, TerrariumMeshPlugin: tr.TerrariumMeshPlugin,
+                   TerrariumMeshPlugin: tr.TerrariumMeshPlugin,
                    ImageOverlayPlugin: io.ImageOverlayPlugin, XYZTilesOverlay: io.XYZTilesOverlay,
                    LRUCache: co.LRUCache, PriorityQueue: co.PriorityQueue, DownloadPriorityQueue: co.DownloadPriorityQueue,
                    Archive3tz: z.Archive3tz, Tiles3tzPlugin: z.Tiles3tzPlugin,

@@ -11,10 +11,10 @@
 export { TilesRenderer } from "3d-tiles-renderer/three";
 export { ImplicitTilingPlugin } from "3d-tiles-renderer/core/plugins";
 // MICRO-GEOGLOBO · the globe of the Space rides with the renderer too: the
-// ellipsoid's hands, the Terrarium terrain, the image overlays (XYZ tiles: the
-// bridge's `/tiles/...`, a source online). By their own files, as below: the
-// plugins index would bring every plugin
-export { GlobeControls } from "3d-tiles-renderer/three";
+// Terrarium terrain, the image overlays (XYZ tiles: the bridge's `/tiles/...`, a
+// source online). By their own files, as below: the plugins index would bring
+// every plugin. (The globe's hands are EMStudio's since MICRO-GLOBO-INTERAZIONE,
+// `geo-hands.ts`: the library's `GlobeControls` is not shipped.)
 // …with queues and a memory of its own: the renderer's defaults are module-wide,
 // shared with every tileset of the Space
 export { LRUCache, PriorityQueue, DownloadPriorityQueue } from "3d-tiles-renderer/core";

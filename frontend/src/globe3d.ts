@@ -15,8 +15,10 @@
  *   · the FRAME: the tiles' group carries the inverse of the site's ENU frame,
  *     so the Earth sits around the scene and the site's models keep their small
  *     coordinates (`siteFrame`);
- *   · the HANDS: `GlobeControls` in the globe mode, the Space's own (Blender's)
- *     in plan and site. The passage by the altitude only changes the hands: the
+ *   · the HANDS: Google Earth's (`geo-hands.ts`: grab, turn and tilt around the
+ *     point under the cursor, zoom to it, north up and a compass) in the globe
+ *     and the plan, the Space's own (Blender's) in the site. The passage by the
+ *     altitude only changes the hands, never in the middle of a gesture: the
  *     camera does not move, nothing jumps. A mode chosen in the bar flies there
  *     (`flyAt`), around the Earth;
  *   · a raster may also lie on a PLANE at the site's height (its corners in the
@@ -26,8 +28,10 @@
  * a frame; the probes read `host.__geo()`.
  */
 import { tilesEngine } from "./tiles3d";
+import { createGeoHands, poseBasis, poseFromCameraUp, hitEllipsoid, type GeoHands, type Pose } from "./geo-hands";
+import { fingersOf, trackpadClassifier } from "./wheel-kind";
 import {
-  BUDGET, autoMode, attributionOf, earthCentreLocal, flyAt, flyMs, imageOrder, invertRigid, localToLonLat,
+  BUDGET, applyM4, autoMode, attributionOf, earthCentreLocal, ecefToGeodetic, flyAt, flyMs, imageOrder, invertRigid, localToLonLat,
   siteFrame, siteHeight, sourceById, tileTemplate, WGS84, type GeoLayer, type GeoMode, type HeightMode, type SiteAnchor,
   type SiteHeight, type V3,
 } from "./geoglobe";
@@ -54,6 +58,8 @@ export interface GlobeOptions {
   onMode?: (m: GeoMode, why: "hand" | "auto") => void;
   /** words: the attribution's prefix */
   attributionTitle?: string;
+  /** words: the compass's tooltip */
+  compassTitle?: string;
 }
 
 export interface GlobeApi extends GeoDriver {
@@ -85,6 +91,10 @@ export interface GlobeState {
   attribution: string[];
   error: string | null;
   height: SiteHeight;
+  /** MICRO-GLOBO-INTERAZIONE p.2 · the hands, the camera as a pose, the compass's heading (null: hidden) */
+  hands: { enabled: boolean; busy: boolean; last: Record<string, unknown> | null };
+  pose: Pose | null;
+  compass: number | null;
   lastSwitch: { from: GeoMode; to: GeoMode; why: "hand" | "auto"; at: number; posBefore: V3; posAfter: V3 } | null;
 }
 
@@ -96,7 +106,10 @@ export function createGlobe(o: GlobeOptions): GlobeApi {
   let tiles: any = null;
   let terrain: any = null;
   let overlayPlugin: any = null;
-  let globeCtl: any = null;
+  /** MICRO-GLOBO-INTERAZIONE p.2 · the hands of the globe and the plan, and the compass */
+  let geoHands: GeoHands | null = null;
+  let compassEl: HTMLButtonElement | null = null;
+  let compassDeg = NaN;
   let mode: GeoMode = "site";
   let layers = o.layers;
   let error: string | null = null;
@@ -232,9 +245,6 @@ export function createGlobe(o: GlobeOptions): GlobeApi {
     tiles.setCamera(ctx.camera());
     tiles.setResolutionFromRenderer(ctx.camera(), renderer);
     lastCam = ctx.camera();
-    globeCtl = new T.GlobeControls(g, ctx.camera(), null, tiles);
-    globeCtl.enableDamping = true;
-    globeCtl.adjustHeight = true;
     applyLayers();
     void THREE;
   };
@@ -265,7 +275,6 @@ export function createGlobe(o: GlobeOptions): GlobeApi {
     if (!ctx || !tiles) return;
     for (const h of overlays.values()) overlayPlugin?.deleteOverlay(h.ov);
     overlays.clear();
-    if (globeCtl) { globeCtl.detach?.(); globeCtl.dispose?.(); globeCtl = null; }
     tiles.group.removeFromParent();
     tiles.dispose();
     tiles = null;
@@ -401,18 +410,112 @@ export function createGlobe(o: GlobeOptions): GlobeApi {
     return { ...g, ground: 2 * R * Math.asin(Math.min(1, Math.sqrt(h))) };
   };
 
-  /** the hands, by mode: the globe's controls own the pointer in the globe mode */
+  // ── MICRO-GLOBO-INTERAZIONE p.2 · the camera as a pose (ECEF), both ways ──
+  const rotOf = (m: number[]): number[] => { const k = Math.hypot(m[0], m[1], m[2]) || 1; return [m[0] / k, m[1] / k, m[2] / k, 0, m[4] / k, m[5] / k, m[6] / k, 0, m[8] / k, m[9] / k, m[10] / k, 0, 0, 0, 0, 1]; };
+  const toEcef = (p: V3): V3 => applyM4(frame, p);
+  const toLocal = (p: V3): V3 => applyM4(invertRigid(frame), p);
+  const dirToEcef = (d: V3): V3 => applyM4(rotOf(frame), d);
+  const dirToLocal = (d: V3): V3 => applyM4(rotOf(invertRigid(frame)), d);
+  /** the ground's height near the site (the terrain drawn under the origin), else the site's */
+  const groundRef = (): number => {
+    const y = groundAt(0, 0);
+    return y !== null ? ecefToGeodetic(toEcef([0, y, 0])).h : (anchor.siteH ?? anchor.h);
+  };
+  const poseNow = (): Pose => {
+    const c = ctx!.camState();
+    const cam = ctx!.camera();
+    // the screen's up as drawn (the camera's own +y), not `camera.up`: looking
+    // straight down at the Earth that one may be along the view and say nothing
+    cam.updateMatrixWorld();
+    const yAxis = new ctx!.THREE.Vector3(0, 1, 0).applyQuaternion(cam.quaternion);
+    const up: V3 = [yAxis.x, yAxis.y, yAxis.z];
+    const pos = toEcef(c.pos), fwd = dirToEcef([c.target[0] - c.pos[0], c.target[1] - c.pos[1], c.target[2] - c.pos[2]]);
+    return poseFromCameraUp(pos, fwd, dirToEcef(up));
+  };
+  const applyPose = (p: Pose) => {
+    if (!ctx) return;
+    const b = poseBasis(p);
+    const far = 1000 + Math.max(0, p.h);
+    // the pivot on the ground the orthographic's scale is read at (`View.refH`)
+    const hit = hitEllipsoid(b.pos, b.fwd, Math.min(refHeight(), Math.max(0, p.h - 1)));
+    const tgt: V3 = hit ?? [b.pos[0] + b.fwd[0] * far, b.pos[1] + b.fwd[1] * far, b.pos[2] + b.fwd[2] * far];
+    ctx.setPose?.(toLocal(b.pos), toLocal(tgt), dirToLocal(b.up));
+  };
+  /** the height the plan's scale and the pivot are read at: the ground near the site, 0 from far */
+  const refHeight = (): number => { const w = where(); return w && w.h > 50000 ? 0 : groundRef(); };
+  const ensureHands = () => {
+    if (geoHands || !ctx) return;
+    const dom = ctx.renderer.domElement as HTMLElement;
+    const isPad = trackpadClassifier();
+    const host = ctx.host;
+    geoHands = createGeoHands({
+      dom,
+      area: host,
+      // the scene's own layers over the canvas (the models' labels, the marks, the
+      // attribution) are the scene's; a button, a panel, the compass, the gizmo are not
+      accepts: (t) => {
+        const el = t as HTMLElement | null;
+        if (!el || !(el instanceof Element)) return false;
+        if (el === dom) return true;
+        if (el.closest("button, input, select, textarea, a, [data-geo-panel], .geo-compass, .scn-nav, .scn-bar, .scn-modal")) return false;
+        return !!el.closest(".v3d-labels, .scn-labels, .scn-mark-labels, .scn-marks, .scn-strips, .geo-attrib, .scn-cursor") && host.contains(el);
+      },
+      pose: poseNow,
+      view: () => ({ width: dom.clientWidth || 1, height: dom.clientHeight || 1, fov: ctx?.fov ?? 40, ortho: !!ctx?.camera().isOrthographicCamera,
+        refH: Math.min(refHeight(), Math.max(0, poseNow().h - 1)) }),
+      apply: applyPose,
+      pick: (cx, cy) => {
+        if (!ctx || !tiles) return null;
+        const r = dom.getBoundingClientRect();
+        const ray = new ctx.THREE.Raycaster();
+        ray.setFromCamera(new ctx.THREE.Vector2(((cx - r.left) / r.width) * 2 - 1, -((cy - r.top) / r.height) * 2 + 1), ctx.camera());
+        const shown = (q: any): boolean => { for (let x = q; x; x = x.parent) if (x.visible === false) return false; return true; };
+        const hit = ray.intersectObject(tiles.group, true).find((h: any) => shown(h.object));
+        return hit ? toEcef(arr(hit.point)) : null;
+      },
+      fallbackHeight: refHeight,
+      plan: () => mode === "plan",
+      isTrackpad: (e) => isPad(e as unknown as { deltaMode: number; deltaX: number; deltaY: number; wheelDeltaY?: number }),
+      fingers: (e) => fingersOf(e as unknown as { deltaMode: number; deltaX: number; deltaY: number; webkitDirectionInvertedFromDevice?: boolean }),
+    });
+  };
+  /** the compass: where north is on the screen; a click puts it up, a double click levels the view too */
+  const drawCompass = () => {
+    if (!ctx) return;
+    if (!compassEl) {
+      compassEl = document.createElement("button");
+      compassEl.type = "button";
+      compassEl.className = "geo-compass";
+      compassEl.dataset.geoCompass = "1";
+      compassEl.innerHTML = `<svg viewBox="-20 -20 40 40" width="34" height="34" aria-hidden="true"><circle r="18" class="geo-compass-ring"/><g class="geo-compass-needle"><path d="M0,-15 L5,0 L-5,0 Z" class="geo-compass-n"/><path d="M0,15 L5,0 L-5,0 Z" class="geo-compass-s"/><text y="-6.5" text-anchor="middle" class="geo-compass-t">N</text></g></svg>`;
+      compassEl.title = o.compassTitle ?? "North up (double click: straight down too)";
+      compassEl.setAttribute("aria-label", compassEl.title);
+      for (const ev of ["pointerdown", "wheel", "contextmenu"]) compassEl.addEventListener(ev, (e) => e.stopPropagation());
+      compassEl.addEventListener("click", (e) => { e.stopPropagation(); geoHands?.northUp(false); });
+      compassEl.addEventListener("dblclick", (e) => { e.stopPropagation(); e.preventDefault(); geoHands?.northUp(true); });
+      ctx.host.appendChild(compassEl);
+    }
+    const show = mode === "globe" || mode === "plan";
+    compassEl.classList.toggle("hidden", !show);
+    if (!show) return;
+    const h = poseNow().heading;
+    if (Math.abs(h - compassDeg) < 0.005) return;
+    compassDeg = h;
+    compassEl.dataset.heading = h.toFixed(2);
+    compassEl.querySelector<SVGGElement>(".geo-compass-needle")?.setAttribute("transform", `rotate(${(-h).toFixed(2)})`);
+  };
+  /** north up at the end of a flight to the globe or the plan (the default) */
+  const northNow = () => { if (!ctx) return; const p = poseNow(); if (Math.abs(p.heading) > 1e-6) applyPose({ ...p, heading: 0 }); };
+
+  /** the hands, by mode: Google Earth's in the globe and the plan, the Space's in the site */
   const hands = (m: GeoMode, from: GeoMode | null, repivot: boolean) => {
-    if (!ctx || !globeCtl) return;
-    const dom = ctx.renderer.domElement;
-    if (m === "globe") {
-      if (!globeCtl.domElement) globeCtl.attach(dom);
-      globeCtl.setCamera(ctx.camera());
-      globeCtl.enabled = true;
+    if (!ctx) return;
+    ensureHands();
+    if (m === "globe" || m === "plan") {
+      if (geoHands) geoHands.enabled = true;
     } else {
-      if (globeCtl.domElement) globeCtl.detach();
-      globeCtl.enabled = false;
-      if (from !== "globe" || !repivot) return;
+      if (geoHands) geoHands.enabled = false;
+      if ((from !== "globe" && from !== "plan") || !repivot) return;
       // from the globe's hands to the Space's: the camera stays where it is, the
       // orbit's pivot goes on the site's level (y = 0) along the view — not on
       // the terrain hit, which at that moment may still be the flat tile under
@@ -457,8 +560,8 @@ export function createGlobe(o: GlobeOptions): GlobeApi {
     if (!ctx) return;
     const c = ctx.camState();
     const reduce = (() => { try { return !!globalThis.matchMedia?.("(prefers-reduced-motion: reduce)").matches; } catch { return false; } })();
-    if (globeCtl?.domElement) globeCtl.detach();
-    if (reduce) { ctx.applyCam(to); enter(then, "hand", false); return; }
+    if (geoHands) geoHands.enabled = false;
+    if (reduce) { ctx.applyCam(to); enter(then, "hand", false); if (then !== "site") northNow(); return; }
     flight = { from: c, to, t0: 0, ms: flyMs(c.pos, to.pos, centre), then };
   };
 
@@ -473,6 +576,27 @@ export function createGlobe(o: GlobeOptions): GlobeApi {
       (c.host as unknown as { __geoGround?: (x: number, z: number) => number | null }).__geoGround = groundAt;
       // MICRO-GLOBO-INTERAZIONE p.1 · the models' box, as the height is decided on it
       (c.host as unknown as { __geoContent?: () => unknown }).__geoContent = () => ctx?.contentBox?.() ?? null;
+      // MICRO-GLOBO-INTERAZIONE p.2 · the probes' seams: the ground under a client point (ECEF), and
+      // where an ECEF point is on the screen (client px)
+      (c.host as unknown as { __geoPickAt?: unknown }).__geoPickAt = (cx: number, cy: number) => {
+        if (!ctx || !tiles) return null;
+        const dom = ctx.renderer.domElement as HTMLElement;
+        const r = dom.getBoundingClientRect();
+        const ray = new ctx.THREE.Raycaster();
+        ray.setFromCamera(new ctx.THREE.Vector2(((cx - r.left) / r.width) * 2 - 1, -((cy - r.top) / r.height) * 2 + 1), ctx.camera());
+        const shown = (q: any): boolean => { for (let x = q; x; x = x.parent) if (x.visible === false) return false; return true; };
+        const hit = ray.intersectObject(tiles.group, true).find((h: any) => shown(h.object));
+        return hit ? toEcef(arr(hit.point)) : null;
+      };
+      (c.host as unknown as { __geoScreenOf?: unknown }).__geoScreenOf = (P: V3) => {
+        if (!ctx) return null;
+        const dom = ctx.renderer.domElement as HTMLElement;
+        const r = dom.getBoundingClientRect();
+        const cam = ctx.camera();
+        cam.updateMatrixWorld();
+        const v = new ctx.THREE.Vector3(...toLocal(P)).project(cam);
+        return { x: r.left + ((v.x + 1) / 2) * r.width, y: r.top + ((1 - v.y) / 2) * r.height };
+      };
       (c.host as unknown as { __geoPlanes?: () => unknown }).__geoPlanes = () => [...planes.entries()].map(([id, h]) => ({ id, y: h.mesh.position.y,
         corners: (h.mesh.userData.probe as V3[]).slice(0, 4) }));
       void tilesEngine().then((E) => {
@@ -482,7 +606,10 @@ export function createGlobe(o: GlobeOptions): GlobeApi {
       }).catch((e) => { error = String((e as Error)?.message ?? e); });
     },
     detach() {
-      if (globeCtl) { globeCtl.detach?.(); globeCtl.dispose?.(); }
+      geoHands?.dispose();
+      geoHands = null;
+      compassEl?.remove();
+      compassEl = null;
       for (const h of overlays.values()) overlayPlugin?.deleteOverlay(h.ov);
       overlays.clear();
       for (const h of planes.values()) h.mesh.removeFromParent();
@@ -491,14 +618,13 @@ export function createGlobe(o: GlobeOptions): GlobeApi {
       attribEl?.remove();
       if (ctx && savedRatio !== null) ctx.renderer.setPixelRatio(savedRatio);
       if (ctx) { delete ctx.host.dataset.geoMode; delete (ctx.host as unknown as { __geo?: unknown }).__geo; }
-      tiles = null; globeCtl = null; ctx = null;
+      tiles = null; ctx = null;
     },
     setCamera(cam) {
       if (tiles) tiles.setCamera(cam);
-      if (globeCtl && mode === "globe") globeCtl.setCamera(cam);
       lastCam = cam;
     },
-    ownsPointer: () => mode === "globe" || !!flight,
+    ownsPointer: () => mode === "globe" || mode === "plan" || !!flight,
     far() {
       const p = camLocal();
       if (!p) return null;
@@ -519,16 +645,19 @@ export function createGlobe(o: GlobeOptions): GlobeApi {
         const t = Math.min(1, (now - flight.t0) / flight.ms);
         const at = flyAt(flight.from, flight.to, centre, t);
         // the flight lands on its own view: the pivot is the one it brought
-        if (t >= 1) { const f = flight; flight = null; ctx.applyCam(f.to); enter(f.then, "hand", false); }
+        if (t >= 1) { const f = flight; flight = null; ctx.applyCam(f.to); enter(f.then, "hand", false); if (f.then !== "site") northNow(); }
         else ctx.applyCam(at);
+      } else if (geoHands?.busy()) {
+        // a gesture under way keeps its hands: the passage waits for its end
+        geoHands.update();
       } else if (mode === "globe") {
-        globeCtl.update();
         const w = where();
         if (w) { const next = autoMode("globe", w.h, w.ground); if (next !== "globe") enter(next, "auto"); }
       } else {
         const w = where();
         if (w && autoMode(mode, w.h, w.ground) === "globe") enter("globe", "auto");
       }
+      drawCompass();
       if (flight || mode === "globe") {
         // the globe's clip planes: the scene's own (the site's span) would cut the Earth
         const p = arr(cam.position);
@@ -576,6 +705,9 @@ export function createGlobe(o: GlobeOptions): GlobeApi {
         bytes: tiles?.lruCache?.cachedBytes ?? 0, maxBytes: BUDGET.lruMaxBytes,
         overlays: [...overlays.keys()], terrainAsked, terrainFlat,
         attribution: attributionOf(layers), error, height, lastSwitch,
+        hands: { enabled: !!geoHands?.enabled, busy: !!geoHands?.busy(), last: geoHands?.last() ?? null },
+        pose: ctx ? poseNow() : null,
+        compass: compassEl && !compassEl.classList.contains("hidden") ? Number(compassEl.dataset.heading ?? 0) : null,
       };
     },
   };
