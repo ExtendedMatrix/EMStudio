@@ -10154,6 +10154,8 @@ tr.tt-hidden { display: none; }
 .geo-panel .geo-h { display: flex; justify-content: space-between; align-items: center; }
 .geo-panel .geo-anchor, .geo-panel .geo-budget { color: var(--text-muted, inherit); font-size: 0.68rem; overflow-wrap: anywhere; }
 .geo-panel .geo-height { display: flex; flex-direction: column; gap: 3px; font-size: 0.68rem; color: var(--text-muted, inherit); overflow-wrap: anywhere; }
+.geo-panel .geo-clip { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; font-size: 0.72rem; }
+.geo-panel .geo-clip input[type="number"] { width: 4.5em; }
 .geo-panel .geo-row { display: flex; align-items: center; gap: 4px; }
 .geo-panel .geo-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .geo-panel .geo-row input[type=range] { width: 70px; }

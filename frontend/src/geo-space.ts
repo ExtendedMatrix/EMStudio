@@ -42,7 +42,9 @@ export interface GeoSpaceDeps {
   log?: (s: string) => void;
 }
 
-interface Saved { on: boolean; mode: GeoMode; layers: GeoLayer[]; panel: boolean; half: number; zmax: number; source: string; height: HeightMode }
+interface Saved { on: boolean; mode: GeoMode; layers: GeoLayer[]; panel: boolean; half: number; zmax: number; source: string; height: HeightMode;
+  /** MICRO-GEOREF-GRAFO p.0b · the terrain cut under the site, and its margin (m) */
+  clip: boolean; clipMargin: number }
 
 const fmtMB = (b: number) => `${(b / 1048576).toFixed(b < 10485760 ? 1 : 0)} MB`;
 
@@ -84,9 +86,10 @@ export function mountGeoSpace(d: GeoSpaceDeps): GeoSpace {
       return { on: !!raw?.on, mode: (["globe", "plan", "site"].includes(raw?.mode) ? raw.mode : "site") as GeoMode,
         layers: readLayers(raw?.layers), panel: !!raw?.panel, half: Number(raw?.half) || 2000,
         zmax: Number(raw?.zmax) || 16, source: typeof raw?.source === "string" ? raw.source : "s2cloudless-2016",
-        height: (HEIGHT_MODES.includes(raw?.height) ? raw.height : "auto") as HeightMode };
+        height: (HEIGHT_MODES.includes(raw?.height) ? raw.height : "auto") as HeightMode,
+        clip: raw?.clip !== false, clipMargin: Number.isFinite(raw?.clipMargin) ? Math.max(0, raw.clipMargin) : 10 };
     } catch {
-      return { on: false, mode: "site", layers: readLayers(null), panel: false, half: 2000, zmax: 16, source: "s2cloudless-2016", height: "auto" };
+      return { on: false, mode: "site", layers: readLayers(null), panel: false, half: 2000, zmax: 16, source: "s2cloudless-2016", height: "auto", clip: true, clipMargin: 10 };
     }
   };
   let s = load();
@@ -145,9 +148,9 @@ export function mountGeoSpace(d: GeoSpaceDeps): GeoSpace {
       globe = createGlobe({
         anchor, shift, layers: s.layers, bridge, pkgDirs: pkgDir() ? [pkgDir()!] : [],
         attributionTitle: t("geo.attribution"), compassTitle: t("geo.compass"),
-        heightMode: s.height, zInCoords,
+        heightMode: s.height, zInCoords, clip: { on: s.clip, margin: s.clipMargin },
         onHeight: (hh) => { heightNow = hh; draw(); },
-        onMode: (m) => { s.mode = m; save(); d.redrawBar(); },
+        onMode: (m) => { s.mode = m; save(); d.redrawBar(); draw(); },
       });
       d.handle.setGeo(globe);
       if (s.mode !== "site") globe.setMode(s.mode);
@@ -305,6 +308,26 @@ export function mountGeoSpace(d: GeoSpaceDeps): GeoSpace {
     }
     hr.append(hl, hs);
     panel.appendChild(hr);
+    // MICRO-GEOREF-GRAFO p.0b · the terrain cut under the site
+    const cr = document.createElement("div");
+    cr.className = "geo-clip";
+    const cl = document.createElement("label");
+    cl.title = t("geo.clipHint");
+    const cb = document.createElement("input");
+    cb.type = "checkbox";
+    cb.checked = s.clip;
+    cb.dataset.geoAct = "clip";
+    cl.append(cb, document.createTextNode(` ${t("geo.clip")}`));
+    const cm = document.createElement("input");
+    cm.type = "number"; cm.min = "0"; cm.step = "1"; cm.value = String(s.clipMargin);
+    cm.dataset.geoAct = "clip-margin"; cm.title = t("geo.clipMargin");
+    const cs = document.createElement("span");
+    cs.className = "geo-est";
+    const box = globe?.state().clip.box;
+    cs.dataset.geoClip = box ? box.map((v) => v.toFixed(1)).join(",") : "";
+    cs.textContent = box ? t("geo.clipState", { w: (box[2] - box[0]).toFixed(0), h: (box[3] - box[1]).toFixed(0) }) : t("geo.clipIdle");
+    cr.append(cl, cm, document.createTextNode(" m "), cs);
+    panel.appendChild(cr);
     // the layers, in drawing order: the first is drawn first (under)
     const list = document.createElement("div");
     list.className = "geo-list";
@@ -493,6 +516,8 @@ export function mountGeoSpace(d: GeoSpaceDeps): GeoSpace {
     const a = el.dataset.geoAct;
     if (a === "source") { s.source = el.value; save(); draw(); }
     else if (a === "height") { s.height = (HEIGHT_MODES.includes(el.value as HeightMode) ? el.value : "auto") as HeightMode; save(); globe?.setHeightMode(s.height); draw(); }
+    else if (a === "clip") { s.clip = el.checked; save(); globe?.setClip(s.clip, s.clipMargin); draw(); }
+    else if (a === "clip-margin") { s.clipMargin = Math.max(0, Number(el.value) || 0); save(); globe?.setClip(s.clip, s.clipMargin); draw(); }
     else if (a === "half") { s.half = Math.max(100, Number(el.value) || 2000); save(); draw(); }
     else if (a === "zmax") { s.zmax = Math.max(0, Math.min(18, Number(el.value) || 0)); save(); draw(); }
     else if (a === "cache-limit" && bridge) {

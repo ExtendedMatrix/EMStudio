@@ -468,6 +468,7 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
      *  meshes, a tileset's loaded tiles): [minx, miny, minz, maxx, maxy, maxz] */
     __spaceBoxOf?: (id: string) => number[] | null;
     /** MICRO-SPAZIO-3D · the surface under a page point, what it belongs to */
+    __spaceDown?: (x: number, z: number, only?: string) => { y: number; key: string } | null;
     __spaceHit?: (x: number, y: number) => { point: number[]; kind: string; id: string; distance: number; normal: number[] } | null;
     /** a world point on the page */
     __spaceProject?: (p: number[]) => { x: number; y: number } | null;
@@ -1097,6 +1098,20 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
           normal: (worldNormal(hh) ?? [0, 0, 0]).map((q) => Math.round(q * 1000) / 1000) } : null;
       };
       probe.__spaceProject = (p: number[]) => toScreen(new THREE.Vector3(p[0], p[1], p[2]));
+      // MICRO-GEOREF-GRAFO p.0b · the highest surface of the models straight under a point (three's x, z):
+      // the item and its height, for the terrain measured against the survey
+      probe.__spaceDown = (x: number, z: number, only?: string) => {
+        const r = new THREE.Raycaster(new THREE.Vector3(x, 1e5, z), new THREE.Vector3(0, -1, 0));
+        const shown = (q: any): boolean => { for (let o = q; o; o = o.parent) if (o.visible === false) return false; return true; };
+        const keyOf = (q: any): string => (q.userData.unitId ? `proxy:${q.userData.unitId}` : `rm:${q.userData.rmId}`);
+        const hits: Array<{ y: number; key: string; d: number }> = r.intersectObjects(pickables.filter(shown), false)
+          .map((h: any) => ({ y: h.point.y, key: keyOf(h.object), d: h.distance }));
+        // a tileset (the survey's) answers with its tiles drawn
+        for (const l of liveLayers()) if (l.layer.object.visible)
+          for (const h of r.intersectObject(l.layer.object, true)) if (shown(h.object)) hits.push({ y: h.point.y, key: `rm:${l.itemId}`, d: h.distance });
+        const hit = hits.sort((a, b) => a.d - b.d).find((h) => !only || h.key.includes(only));
+        return hit ? { y: hit.y, key: hit.key } : null;
+      };
       probe.__spaceClip = () => [camera.near, camera.far];
       const zoomAt = (x: number, y: number, factor: number) => {
         const { p } = pointAt(x, y);

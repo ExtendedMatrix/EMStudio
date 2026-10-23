@@ -9517,6 +9517,62 @@ test("GR1.level", "GEOREF-GRAFO p.0a · l'orbita del Sito resta in bolla: GT16, 
   return { pass, detail: out };
 });
 
+test("GR2.clip", "GEOREF-GRAFO p.0b · il terreno non copre il rilievo: GT16 (EPSG:3844, shift z 0), «Territory», modo Sito — il terreno globale si ritaglia sull'impronta dei modelli più 10 m (i quattro piani su ogni materiale delle tessere), il GT16 si posa sul terreno senza sommare z (il terreno sopra il rilievo di pochi decimetri, misurato su una griglia sotto il tileset del rilievo); «Ritaglia il terreno sotto il sito» spento lo ridà intero, il margine a 25 m allarga il ritaglio di 15 m per lato, la scelta resta nelle preferenze locali (non nell'em.json); in Pianta il terreno è intero", async () => {
+  if (!existsSync(GEOREF_V4)) return { pass: false, detail: { missing: GEOREF_V4 } };
+  const { p, ctx, errors } = await grOpen();
+  await grSpace(p);
+  await geoOn(p);
+  const H = (f, a) => p.evaluate(f, a);
+  const st = () => H(() => document.querySelector(".scn-host").__geo());
+  // the tiles refined at the site
+  for (let i = 0, quiet = 0; i < 240 && quiet < 6; i++) {
+    await p.waitForTimeout(500);
+    const g = await st();
+    quiet = g.tiles.downloading === 0 && g.tiles.parsing === 0 && g.terrainAsked > 0 ? quiet + 1 : 0;
+  }
+  const out = { height: (await st()).height, content: await H(() => document.querySelector(".scn-host").__geoContent()), on: (await st()).clip };
+  // the terrain against the survey, on a grid under its tileset
+  const box = await H(() => document.querySelector(".scn-host").__spaceBoxOf("rmgroup_Survey2015"));
+  const ds = [];
+  for (let i = 0; i <= 8 && box; i++) for (let j = 0; j <= 8; j++) {
+    const x = box[0] + ((box[3] - box[0]) * i) / 8, z = box[2] + ((box[5] - box[2]) * j) / 8;
+    const r = await H(([x, z]) => { const h = document.querySelector(".scn-host"); return { t: h.__geoGround(x, z), s: h.__spaceDown(x, z, "Survey2015") }; }, [x, z]);
+    if (r.t !== null && r.s) ds.push(r.t - r.s.y);
+  }
+  ds.sort((a, b) => a - b);
+  out.terrainOverSurvey = ds.length ? { n: ds.length, median: ds[Math.floor(ds.length / 2)], min: ds[0], max: ds[ds.length - 1] } : null;
+  await p.click('.scn-bar [data-geo="panel"]');
+  await p.waitForTimeout(300);
+  out.panelOn = await H(() => document.querySelector(".geo-panel .geo-clip")?.textContent ?? "");
+  await p.click('.geo-panel [data-geo-act="clip"]');
+  await p.waitForTimeout(800);
+  out.off = (await st()).clip;
+  await p.click('.geo-panel [data-geo-act="clip"]');
+  await p.fill('.geo-panel [data-geo-act="clip-margin"]', "25");
+  await p.press('.geo-panel [data-geo-act="clip-margin"]', "Enter");
+  await p.waitForTimeout(800);
+  out.m25 = (await st()).clip;
+  out.saved = await H(() => Object.entries(localStorage).filter(([k]) => k.startsWith("emstudio.geo.")).map(([, v]) => { const j = JSON.parse(v); return [j.clip, j.clipMargin]; }));
+  out.docSays = await H(() => /clipMargin/.test(window.__EM_DRAG__.docJson()));
+  await p.click('.scn-bar [data-geo-mode="plan"]');
+  await p.waitForTimeout(300); await geoIdle(p, 30000); await p.waitForTimeout(500);
+  out.plan = (await st()).clip;
+  out.errors = errors;
+  await ctx.close();
+  const c = out.content;
+  const near = (a, b) => Math.abs(a - b) < 1e-6;
+  const b10 = out.on.box, b25 = out.m25.box;
+  const pass = out.height?.h === 0 && out.height?.shiftZ === 0
+    && !!c && !!b10 && near(b10[0], c[0][0] - 10) && near(b10[1], c[0][2] - 10) && near(b10[2], c[1][0] + 10) && near(b10[3], c[1][2] + 10) && out.on.materials > 0
+    && /cut: \d+ × \d+ m/.test(out.panelOn)
+    && out.off.on === false && out.off.box === null && out.off.materials === 0
+    && !!b25 && near(b25[0], b10[0] - 15) && near(b25[3], b10[3] + 15) && out.m25.materials > 0
+    && JSON.stringify(out.saved) === JSON.stringify([[true, 25]]) && out.docSays === false
+    && out.plan.box === null && out.plan.materials === 0
+    && !!out.terrainOverSurvey && out.terrainOverSurvey.n >= 20 && Math.abs(out.terrainOverSurvey.median) < 2 && !errors.length;
+  return { pass, detail: out };
+});
+
 // ── run ─────────────────────────────────────────────────────────────────────
 const chosen =cases.filter((c) => !only.length || only.includes(c.id) || only.some((o) => c.id.startsWith(o + ".")));
 for (const c of chosen) {

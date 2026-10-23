@@ -60,6 +60,9 @@ export interface GlobeOptions {
   attributionTitle?: string;
   /** words: the compass's tooltip */
   compassTitle?: string;
+  /** MICRO-GEOREF-GRAFO p.0b · the terrain cut under the models' footprint in the
+   *  site (and its margin, metres); default on, 10 m */
+  clip?: { on: boolean; margin: number };
 }
 
 export interface GlobeApi extends GeoDriver {
@@ -71,6 +74,8 @@ export interface GlobeApi extends GeoDriver {
   height(): SiteHeight;
   /** «Vai al sito»: the flight to the site's framing */
   goToSite(): void;
+  /** MICRO-GEOREF-GRAFO p.0b · the terrain cut under the site: on/off, the margin (m) */
+  setClip(on: boolean, margin: number): void;
   state(): GlobeState;
 }
 
@@ -96,6 +101,9 @@ export interface GlobeState {
   pose: Pose | null;
   compass: number | null;
   lastSwitch: { from: GeoMode; to: GeoMode; why: "hand" | "auto"; at: number; posBefore: V3; posAfter: V3 } | null;
+  /** MICRO-GEOREF-GRAFO p.0b · the terrain's cut: asked, drawn now (the site's footprint
+   *  plus the margin, three's x/z), and how many of the tiles' materials carry it */
+  clip: { on: boolean; margin: number; box: [number, number, number, number] | null; materials: number };
 }
 
 const arr = (v: any): V3 => [v.x, v.y, v.z];
@@ -123,6 +131,56 @@ export function createGlobe(o: GlobeOptions): GlobeApi {
   let lastCam: any = null;
   let attribEl: HTMLElement | null = null;
   let savedRatio: number | null = null;
+  // MICRO-GEOREF-GRAFO p.0b · the terrain cut under the site. Measured (23 Oct): the
+  // Copernicus surface (30 m, with its trees) stands a little over the GT16's ground
+  // and pierces the survey. In the site the global terrain is cut on the models'
+  // footprint (their box in plan, the margin around it), in the globe and the plan
+  // it is whole: four clipping planes whose intersection is cut (`clipIntersection`),
+  // on every material of the tiles — a material cloned by a plugin is found again
+  let clip = { on: o.clip?.on ?? true, margin: Number.isFinite(o.clip?.margin) ? Math.max(0, o.clip!.margin) : 10 };
+  let clipPlanes: any[] | null = null;
+  let clipBox: [number, number, number, number] | null = null;
+  let clipMaterials = 0;
+  let clipTick = 0;
+  let savedLocalClipping: boolean | null = null;
+  const clipNow = (): [number, number, number, number] | null => {
+    if (!clip.on || mode !== "site" || flight) return null;
+    const b = ctx?.contentBox?.();
+    if (!b) return null;
+    const m = clip.margin;
+    return [b[0][0] - m, b[0][2] - m, b[1][0] + m, b[1][2] + m];   // x0 z0 x1 z1
+  };
+  const applyClip = (force = false) => {
+    if (!ctx || !tiles) return;
+    const box = clipNow();
+    if (box && !clipPlanes) {
+      const P = ctx.THREE.Plane, V = ctx.THREE.Vector3;
+      // outward normals: a point inside the box is behind all four, and only there is it cut
+      clipPlanes = [new P(new V(1, 0, 0), 0), new P(new V(-1, 0, 0), 0), new P(new V(0, 0, 1), 0), new P(new V(0, 0, -1), 0)];
+    }
+    if (box && clipPlanes) {
+      clipPlanes[0].constant = -box[2]; clipPlanes[1].constant = box[0];
+      clipPlanes[2].constant = -box[3]; clipPlanes[3].constant = box[1];
+    }
+    const changed = JSON.stringify(box) !== JSON.stringify(clipBox);
+    clipBox = box;
+    if (!changed && !force && ++clipTick % 15 !== 0) return;
+    const want = box ? clipPlanes : null;
+    let n = 0;
+    tiles.group.traverse((q: any) => {
+      if (!q.isMesh || !q.material) return;
+      for (const mat of Array.isArray(q.material) ? q.material : [q.material]) {
+        if (mat.clippingPlanes !== want) {
+          const was = mat.clippingPlanes?.length ?? 0;
+          mat.clippingPlanes = want;
+          mat.clipIntersection = true;
+          if (was !== (want?.length ?? 0)) mat.needsUpdate = true;
+        }
+        if (want) n++;
+      }
+    });
+    clipMaterials = n;
+  };
   // MICRO-GLOBO-INTERAZIONE p.1 · the shift's z applied ONCE: the origin's
   // height is decided on the models' heights (`siteHeight`), when they come
   const anchor: SiteAnchor = { ...o.anchor };
@@ -235,6 +293,8 @@ export function createGlobe(o: GlobeOptions): GlobeApi {
     }
     tiles.errorTarget = BUDGET.errorTarget;
     tiles.addEventListener?.("load-error", (e: any) => { error = String(e?.error?.message ?? e?.error ?? "load error"); });
+    // a tile come: its material is cut at the next frame, not a quarter of a second later
+    tiles.addEventListener?.("load-model", () => { clipTick = 14; });
     // the Earth around the site: the group carries the inverse of the site's frame
     const g = tiles.group;
     g.matrixAutoUpdate = false;
@@ -574,6 +634,8 @@ export function createGlobe(o: GlobeOptions): GlobeApi {
       ctx = c;
       ctx.host.dataset.geoMode = mode;
       if (savedRatio === null) savedRatio = c.renderer.getPixelRatio();
+      if (savedLocalClipping === null) savedLocalClipping = !!c.renderer.localClippingEnabled;
+      c.renderer.localClippingEnabled = true;
       c.renderer.setPixelRatio(Math.min(globalThis.devicePixelRatio || 1, BUDGET.maxPixelRatio));
       (c.host as unknown as { __geo?: () => GlobeState }).__geo = () => api.state();
       // the probes' seam: the ground's height (the terrain drawn) under a point of the scene
@@ -621,6 +683,8 @@ export function createGlobe(o: GlobeOptions): GlobeApi {
       if (tiles) { tiles.group.removeFromParent(); tiles.dispose(); }
       attribEl?.remove();
       if (ctx && savedRatio !== null) ctx.renderer.setPixelRatio(savedRatio);
+      if (ctx && savedLocalClipping !== null) ctx.renderer.localClippingEnabled = savedLocalClipping;
+      clipPlanes = null; clipBox = null;
       if (ctx) { delete ctx.host.dataset.geoMode; delete (ctx.host as unknown as { __geo?: unknown }).__geo; }
       tiles = null; ctx = null;
     },
@@ -682,6 +746,7 @@ export function createGlobe(o: GlobeOptions): GlobeApi {
         const y = ys.length ? Math.max(...ys) + 0.1 : 0;
         if (Math.abs(mesh.position.y - y) > 0.01) mesh.position.y = y;
       }
+      applyClip();
       cam.updateMatrixWorld();
       tiles.setResolutionFromRenderer(cam, ctx.renderer);
       tiles.update();
@@ -699,6 +764,10 @@ export function createGlobe(o: GlobeOptions): GlobeApi {
       const to = viewFor("site");
       if (to) fly(to, "site");
     },
+    setClip(on, margin) {
+      clip = { on, margin: Number.isFinite(margin) ? Math.max(0, margin) : 10 };
+      applyClip(true);
+    },
     state(): GlobeState {
       const w = where();
       const st = tiles?.stats ?? {};
@@ -712,6 +781,7 @@ export function createGlobe(o: GlobeOptions): GlobeApi {
         hands: { enabled: !!geoHands?.enabled, busy: !!geoHands?.busy(), last: geoHands?.last() ?? null },
         pose: ctx ? poseNow() : null,
         compass: compassEl && !compassEl.classList.contains("hidden") ? Number(compassEl.dataset.heading ?? 0) : null,
+        clip: { on: clip.on, margin: clip.margin, box: clipBox, materials: clipMaterials },
       };
     },
   };
