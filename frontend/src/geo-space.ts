@@ -14,6 +14,7 @@
  * the person turns «Territorio» on.
  */
 import { geoOf } from "./geo";
+import { basename, dirname } from "./paths";
 import {
   BUDGET, EXTRACT_MAX_TILES, SOURCES, boxAround, extractTileCount, layersKey, moveLayer, readLayers, setLayer,
   sourceById, type GeoLayer, type GeoMode, type SiteAnchor,
@@ -41,7 +42,6 @@ export interface GeoSpaceDeps {
 
 interface Saved { on: boolean; mode: GeoMode; layers: GeoLayer[]; panel: boolean; half: number; zmax: number; source: string }
 
-const dirOf = (p: string) => p.replace(/\\/g, "/").replace(/\/[^/]*$/, "");
 const fmtMB = (b: number) => `${(b / 1048576).toFixed(b < 10485760 ? 1 : 0)} MB`;
 
 export interface GeoSpace {
@@ -80,7 +80,7 @@ export function mountGeoSpace(d: GeoSpaceDeps): GeoSpace {
   let s = load();
   let loadedFor = docKey();
   const save = () => { try { localStorage.setItem(layersKey(d.person(), docKey()), JSON.stringify(s)); } catch { /* full: kept in memory */ } };
-  const pkgDir = () => { const p = d.docPath(); return p ? `${dirOf(p)}/geo` : null; };
+  const pkgDir = () => { const p = d.docPath(); return p ? `${dirname(p)}/geo` : null; };
 
   const panel = document.createElement("div");
   panel.className = "geo-panel hidden";
@@ -204,7 +204,7 @@ export function mountGeoSpace(d: GeoSpaceDeps): GeoSpace {
       if (done.state !== "done") { d.toast(t("geo.rasterFailed", { x: String(done.error ?? done.state) })); return; }
       const res = done.result;
       const id = `raster:${path}`;
-      const name = path.replace(/\\/g, "/").split("/").pop() ?? path;
+      const name = basename(path) || path;
       const layer: GeoLayer = { id, kind: "raster", name, visible: true, opacity: 1, path: res.path, original: path,
         bounds: res.bounds, raster: res.kind, minZoom: res.min_zoom, maxZoom: res.max_zoom };
       setLayers([layer, ...s.layers.filter((l) => l.id !== id)]);

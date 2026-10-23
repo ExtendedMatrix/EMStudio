@@ -32950,7 +32950,7 @@ function openFileInViewer(path: string, from: Win): void {
     w = made;
     renderTiles();
   }
-  const name = path.replace(/\\/g, "/").split("/").pop() ?? path;
+  const name = paths.basename(path) || path;
   pinViewerCollection(w, { type: "file", path, name, ext: name.split(".").pop() ?? "" });
 }
 
