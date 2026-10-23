@@ -17,7 +17,8 @@ import { threedInstances, viewIndex, viewInstances, type ViewInstance } from "..
 import { paradataGroupScene, reattachedReadings } from "./pd-arrange";
 import { isRemoved } from "../crdt";
 import { t } from "../i18n";
-import { ancestorsOf } from "../rules";
+import { ancestorsOf, isContinuityType, isVirtualType } from "../rules";
+import { continuityKind, continuityLinks, continuityPlace } from "../continuity";
 
 /**
  * TOCCARE · the re-stack, remembered.
@@ -954,6 +955,24 @@ export function buildMatrixScene(
     for (const sb of subBands) {
       const bi = laneIndexOf.get(sb.laneId);
       if (bi != null) sb.y += nodeShift[bi];
+    }
+  }
+
+  // MICRO-GLIFI-OVERLAY-CONTINUITA p.3 · a continuity node (BR) is drawn as its
+  // unit's: straight above it, in the lane of its epoch (continuity.ts), where
+  // the lanes are final. Its line is drawn straight (routing.ts, renderer.ts).
+  {
+    const links = continuityLinks(doc.graph.edges, (id) => isContinuityType(nodeById.get(id)?.node_type));
+    for (const [brId, l] of links) {
+      const br = scene.byId.get(brId), unit = scene.byId.get(l.unit);
+      if (!br || !unit || unit.collapsed) continue;
+      const band = l.epoch
+        ? scene.subBands?.find((b) => b.phaseId === l.epoch && !b.residual) ?? scene.lanes.find((x) => x.id === l.epoch) ?? null
+        : null;
+      const at = continuityPlace(unit, br, band);
+      br.x = at.x;
+      br.y = at.y;
+      br.continuity = { unit: unit.id, kind: continuityKind(isVirtualType(unit.node.node_type)) };
     }
   }
 

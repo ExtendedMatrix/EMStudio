@@ -8,6 +8,7 @@ import { documentVariant, edgeInk, edgeStyle, nodeStyle } from "./palette";
 import {
   arrowheadPath,
   drawArrowhead,
+  isContinuityEdge,
   routeScene,
   SYMMETRIC_EDGES,
   traceRoute,
@@ -797,10 +798,16 @@ export function render(
   const lodBridges = bridgeR * vp.scale >= 1.5;
   const lodArrows = arrowSize * vp.scale >= 3;
   const batches = new Map<string, { type: string | undefined; o: EdgeStrokeOpts; routes: EdgeRoute[] }>();
+  const contIdx: number[] = [];
   for (let i = 0; i < scene.edges.length; i++) {
     if (!visible[i]) continue;
     if (boxes[i * 4] > wx1 || boxes[i * 4 + 2] < wx0 || boxes[i * 4 + 1] > wy1 || boxes[i * 4 + 3] < wy0) continue;
     const e = scene.edges[i];
+    // MICRO-GLIFI-OVERLAY-CONTINUITA p.3 · the continuity's line has its own pass
+    if (isContinuityEdge(scene, e)) {
+      contIdx.push(i);
+      continue;
+    }
     if (focusId && (e.source === focusId || e.target === focusId)) {
       accent.push(i);
       continue;
@@ -840,6 +847,45 @@ export function render(
   const order = [...batches.values()].sort((a, b) => +!!a.o.conflict - +!!b.o.conflict);
   const viewRect = [wx0, wy0, wx1, wy1] as const;
   for (const b of order) strokeEdges(ctx, b.routes, b.type, b.o, lodBridges, lodArrows, viewRect);
+  // MICRO-GLIFI-OVERLAY-CONTINUITA p.3 · the continuity: one vertical line from
+  // the unit to its rhombus, in the rhombus's ink, and at the rhombus a bar (a
+  // real unit ends there) or an arrow (a virtual one survives up to there)
+  for (const i of contIdx) {
+    const e = scene.edges[i];
+    const br = scene.byId.get(e.source)?.continuity ? scene.byId.get(e.source)! : scene.byId.get(e.target)!;
+    const pts = routes[i].pts;
+    const tip = br.id === e.source ? pts[0] : pts[pts.length - 1];
+    const from = br.id === e.source ? pts[pts.length - 1] : pts[0];
+    const ink = nodeStyle(br.node.node_type).fill || canvasTheme().labelInk;
+    const up = tip.y <= from.y ? -1 : 1; // the line's direction, unit → rhombus
+    ctx.save();
+    ctx.globalAlpha = lit ? 0.25 : 1;
+    ctx.strokeStyle = activeTheme() === "dark" && ink.toLowerCase() === "#000000" ? canvasTheme().labelInk : ink;
+    ctx.fillStyle = ctx.strokeStyle;
+    ctx.lineWidth = 1.6 * k;
+    ctx.setLineDash([]);
+    ctx.beginPath();
+    ctx.moveTo(from.x, from.y);
+    ctx.lineTo(tip.x, tip.y);
+    ctx.stroke();
+    const a = Math.max(5, 7 * k);
+    ctx.beginPath();
+    if (br.continuity!.kind === "end") {
+      // the end: a bar across the line, just before the rhombus
+      ctx.lineWidth = 2.4 * k;
+      ctx.moveTo(tip.x - a, tip.y - up * a * 0.5);
+      ctx.lineTo(tip.x + a, tip.y - up * a * 0.5);
+      ctx.stroke();
+    } else {
+      // the survival: an arrowhead pointing at the rhombus
+      ctx.moveTo(tip.x, tip.y);
+      ctx.lineTo(tip.x - a * 0.6, tip.y - up * a * 1.1);
+      ctx.lineTo(tip.x + a * 0.6, tip.y - up * a * 1.1);
+      ctx.closePath();
+      ctx.fill();
+    }
+    ctx.restore();
+  }
   for (const i of litIdx) {
     const e = scene.edges[i];
     // the ochre halo of a picked connector under it (the selection's signal),
@@ -1328,7 +1374,10 @@ export function render(
       ctx.stroke();
     }
 
-    if (drawLabels) {
+    // MICRO-GLIFI-OVERLAY-CONTINUITA p.3 · a continuity drawn as its unit's has
+    // no caption: its name is the importer's («continuity_node»), the same for
+    // every one, and under the rhombus it would cover the line's end
+    if (drawLabels && !n.continuity) {
       const label = nodeText(n);
       ctx.font = canvasFont(CANVAS_TYPE.nodeLabel.weight, fitPx(CANVAS_TYPE.nodeLabel.px, n.h));
       // A SHRUNKEN shape (BR) cannot hold its own name: `textColor` is computed

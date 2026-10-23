@@ -35,6 +35,7 @@ export type OverlayKey =
   // Time
   | "lane_pd_tag"
   | "date_invite"
+  | "continuity"
   // Checks and warnings
   | "warning"
   | "lane_warning"
@@ -120,6 +121,9 @@ export const OVERLAY_GROUPS: readonly OverlayGroup[] = [
   { key: "time", items: [
     { key: "lane_pd_tag", text: "PD" },
     { key: "date_invite", text: "—" },
+    // MICRO-GLIFI-OVERLAY-CONTINUITA p.3 · the continuity node (BR) and its
+    // line to the unit; off, neither is drawn (the data stays)
+    { key: "continuity", kind: "BR" },
   ] },
   { key: "checks", items: [
     { key: "warning", text: "!" },

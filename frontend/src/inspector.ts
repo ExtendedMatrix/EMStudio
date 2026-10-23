@@ -34,6 +34,9 @@ export interface InspectorCallbacks {
   /** PROPRIETA · the verbs of a unit on its paradata group («Compact the
    *  properties», «Dissolve the group») that apply to it now */
   propertyGroupActions?: (nodeId: string) => Array<{ cmd: string; label: string; run: () => void }>;
+  /** MICRO-GLIFI-OVERLAY-CONTINUITA p.3 · «End in…» / «Survives until…» of a
+   *  unit, and what its continuity says now */
+  continuity?: (nodeId: string) => { cmd: string; label: string; state: string | null; run: (anchor?: HTMLElement) => void } | null;
   /** MICRO-UN-POSTO · open the site selector on the graph node */
   onSetSitePosition?: () => void;
   onClose: () => void;
@@ -742,6 +745,21 @@ export function renderInspector(
     enter.addEventListener("click", () => cb.onEnterGroup(nodeId));
     bar.appendChild(enter);
     root.appendChild(bar);
+  }
+
+  // MICRO-GLIFI-OVERLAY-CONTINUITA p.3 · until when the unit lasts
+  if (nodeId && cb.continuity) {
+    const c = cb.continuity(nodeId);
+    if (c) {
+      root.appendChild(el("h3", "insp-sect", t("cont.sect")));
+      if (c.state) root.appendChild(el("div", "insp-cont-state", c.state));
+      const bar = el("div", "insp-actions");
+      const b = el("button", "insp-btn", c.label) as HTMLButtonElement;
+      b.dataset.cmd = c.cmd;
+      b.addEventListener("click", () => c.run(b));
+      bar.appendChild(b);
+      root.appendChild(bar);
+    }
   }
 
   // PROPRIETA · a unit's properties into its paradata group, and back

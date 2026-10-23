@@ -638,7 +638,8 @@ import {
   DECLARED_KINDS, landStep, parentLabel, type DeclaredKind, type DeclaredLevel,
 } from "./declared";
 import { adaptDraft } from "./views/stamps";
-import { ancestorsOf, dtcFamiliesOf, dtcKindFamily, dtcKindsFor, propertyLabel } from "./rules";
+import { ancestorsOf, dtcFamiliesOf, dtcKindFamily, dtcKindsFor, isContinuityType, isVirtualType, propertyLabel } from "./rules";
+import { continuityLinks, dropContinuity, END_REASONS, planContinuity, type EndReason } from "./continuity";
 import { digestOf, isStampPath, stampPathFor } from "./stamp";
 // DTCEMS3 · il verbale d'ingestione: niente entra nello store senza che si
 // sappia chi ce l'ha messo. La forma dell'atto sta qui; il verbale lo emette
@@ -2517,6 +2518,9 @@ window.__EM_SCENE__ = () => {
     const next = { ...cur, master: st.master ?? cur.master, off: st.off ? [...st.off] : [...cur.off] };
     setOverlays(v, typeof st.keepFar === "boolean" ? withHideFar(next, !st.keepFar) : next);
   },
+  /** MICRO-GLIFI-OVERLAY-CONTINUITA p.3 · a unit's continuity, and the gesture */
+  continuityOf: (unitId: string) => continuityOfUnit(unitId),
+  setContinuity: (unitId: string, epoch: string, reason?: EndReason | null, source?: string | null) => applyContinuity(unitId, epoch, reason, source),
   /** a world rect framed in the focused graph window (the probes' camera) */
   frameWorld: (x: number, y: number, w: number, h: number, pad = 30) => {
     const cv = graphWindows.get(activeWin().id)?.cv;
@@ -3597,6 +3601,7 @@ function renderInspectorInto(host: HTMLElement): void {
           acts.push({ cmd: "dissolve", label: t("compact.dissolve"), run: () => runDissolve([id]) });
         return acts;
       },
+      continuity: (id) => continuityAction(id),
       onAddPhase: (epochId) => {
         const ph = store!.addPhase(epochId, (n) => t("l.phaseDefault", { n }));
         select(ph.id);
@@ -4814,6 +4819,7 @@ function contextSceneFor(id: string): Scene | null {
     const sc = buildGroupScene(vd, id, { with3d: !hiddenNodeTypes.has("representation_model") });
     const outside = outsideMembers(vd, id);
     if (outside.size) for (const sn of sc.nodes) if (outside.has(sn.id)) sn.outside = true;
+    if (!overlayShown(overlaysOf("soloing"), "continuity")) dropContinuity(sc, isContinuityType);
     return sc;
   }
   return buildDtcGenesisScene(store.doc, id);
@@ -5527,6 +5533,9 @@ function buildScenesNow(): void {
     restackMemo,
     restackKey(doc, fview, phasesVisible),
   );
+  // MICRO-GLIFI-OVERLAY-CONTINUITA p.3 · the overlay «Continuity» off: the BR
+  // and its line are not drawn (and not touched); the graph keeps them
+  if (scenes.matrix && !overlayShown(overlaysOf("matrix"), "continuity")) dropContinuity(scenes.matrix, isContinuityType);
   // MICRO-PULIZIA p.3 · the Graph: every node present (the whole view) unless
   // its HDT-O switch is off
   scenes.graph = buildGraphLiquid(doc, viewFor("graph", liquidHdto));
@@ -16023,8 +16032,15 @@ function overlaysOf(v: OverlayView): OverlayState {
   return st;
 }
 function setOverlays(v: OverlayView, st: OverlayState): void {
+  const contWas = overlayShown(overlaysOf(v), "continuity");
   overlayMemo.set(`${overlayPerson()}|${v}`, st);
   saveOverlays(overlayPerson(), v, st);
+  // MICRO-GLIFI-OVERLAY-CONTINUITA p.3 · «Continuity» takes nodes out of the
+  // drawn scene: the scene is rebuilt (no layout runs)
+  if (contWas !== overlayShown(st, "continuity") && store) {
+    buildScenes();
+    if (inContext()) contextScene = contextSceneFor(contextStack[contextStack.length - 1]);
+  }
   // MICRO-SPAZIO-3D · the Space's: its scenes re-read them (what is drawn, and
   // the decorators without a reload)
   if (v === "space") {
@@ -36410,7 +36426,9 @@ function wireGraphCanvas(canvas: HTMLCanvasElement, winId: string): void {
     }
     const hit = hitTest(s, w.x, w.y, hitTol());
     // MICRO-BADGE-PD · the soloing of a paradata group draws its instances too
-    if (hit?.instanceOf && (view === "matrix" || inContext())) {
+    // MICRO-GLIFI-OVERLAY-CONTINUITA p.3 · …and so is a continuity node: the
+    // view draws it above its unit, in its epoch's lane (it follows the unit)
+    if ((hit?.instanceOf || hit?.continuity) && (view === "matrix" || inContext())) {
       // TOCCARE · a document INSTANCE is drawn by the view in its usage context;
       // it has no position of its own to store and no membership of its own to
       // change (a drop used to hand its scene id to moveToGroup, which wrote an
@@ -37773,6 +37791,161 @@ function openWithTools(nodeId: string): OpenWith[] {
 
 /** `win`: the graph window the right-click happened in — captured when the menu
  *  opens, never re-read when an item is clicked (the focus may have moved). */
+// ── MICRO-GLIFI-OVERLAY-CONTINUITA p.3 · the continuity of a unit ─────────────
+// «End in…» (a real unit: the epoch, the reason, the source) and «Survives
+// until…» (a virtual unit: the epoch, the source) create or update its
+// continuity node (BR) and its edges in one undo step (continuity.ts says what
+// is written).
+interface UnitContinuity { br: string; epoch: string | null; reason: EndReason | null; source: string | null }
+function continuityOfUnit(unitId: string): UnitContinuity | null {
+  if (!store) return null;
+  const st = store;
+  const links = continuityLinks(st.doc.graph.edges, (id) => isContinuityType(st.node(id)?.node_type));
+  for (const [br, l] of links) {
+    if (l.unit !== unitId) continue;
+    const r = (st.node(br)?.data as { end_reason?: unknown } | undefined)?.end_reason;
+    const src = st.doc.graph.edges.find((e) => e.source === br && e.edge_type === "has_documentation")?.target ?? null;
+    return { br, epoch: l.epoch, reason: (END_REASONS as readonly string[]).includes(String(r)) ? (r as EndReason) : null, source: src };
+  }
+  return null;
+}
+/** the verb a unit offers (none for a BR, a group, a non-stratigraphic node) */
+function continuityAction(unitId: string): { cmd: string; label: string; state: string | null; run: (anchor?: HTMLElement) => void } | null {
+  const n = store?.node(unitId);
+  if (!n || !isStratigraphicType(n.node_type) || isContinuityType(n.node_type) || isGroupType(n.node_type)) return null;
+  const virtual = isVirtualType(n.node_type);
+  const c = continuityOfUnit(unitId);
+  const ep = c?.epoch ? String(store!.node(c.epoch)?.name ?? c.epoch) : null;
+  const src = c?.source ? String(store!.node(c.source)?.name ?? c.source) : null;
+  const state = !c ? null
+    : [t(virtual ? "cont.state.survive" : "cont.state.end", { epoch: ep ?? "?" }),
+       !virtual && c.reason ? t(`cont.reason.${c.reason}`) : null, src ? t("cont.state.source", { doc: src }) : null]
+      .filter(Boolean).join(" · ");
+  return {
+    cmd: virtual ? "continuity-survive" : "continuity-end",
+    label: t(virtual ? "cont.survive" : "cont.end"),
+    state,
+    run: (anchor) => {
+      const r = anchor?.getBoundingClientRect();
+      openContinuityForm(unitId, r ? r.left : innerWidth / 2 - 140, r ? r.bottom + 4 : 120);
+    },
+  };
+}
+/** write it: one step of the undo */
+function applyContinuity(unitId: string, epoch: string, reason: EndReason | null | undefined, source: string | null | undefined): string | null {
+  if (!store) return null;
+  const st = store;
+  const unit = st.node(unitId);
+  if (!unit) return null;
+  const cur = continuityOfUnit(unitId);
+  const first = st.doc.graph.edges.find((e) => e.source === unitId && e.edge_type === "has_first_epoch")?.target ?? null;
+  const top = (id: string | null): string | null => { let x = id; const seen = new Set<string>(); while (x && st.parentEpoch(x) && !seen.has(x)) { seen.add(x); x = st.parentEpoch(x); } return x; };
+  const plan = planContinuity(st.doc.graph.edges, {
+    unit: unitId, epoch, chrono: st.topEpochIdsChrono(), firstEpoch: top(first), br: cur?.br ?? null,
+    source, reason: isVirtualType(unit.node_type) ? undefined : reason,
+  });
+  let br = cur?.br ?? null;
+  st.batch(() => {
+    if (plan.createBr) {
+      const at = st.doc.layout?.positions?.[unitId];
+      const n = st.addNode({ id: st.newId(), node_type: "BR", name: "continuity_node", description: "_continuity",
+        data: { label: "continuity node" } } as EmNode,
+        at ? { x: at.x + at.w / 2 - 11.2, y: at.y - 40, w: 22.4, h: 22.4 } : undefined);
+      br = n.id;
+    }
+    for (const id of plan.remove) {
+      const e = st.doc.graph.edges.find((x) => (x.id ?? `${x.source}__${x.edge_type}__${x.target}`) === id);
+      if (e) st.deleteEdge(e);
+    }
+    for (const a of plan.add) st.addEdge(a.source === "$br" ? br! : a.source, a.target === "$br" ? br! : a.target, a.edge_type);
+    if (plan.reason !== undefined && br) {
+      const data = { ...((st.node(br)?.data ?? {}) as Record<string, unknown>) };
+      if (plan.reason) data.end_reason = plan.reason;
+      else delete data.end_reason;
+      st.updateNode(br, { data } as Partial<EmNode>);
+    }
+  });
+  const ep = String(st.node(epoch)?.name ?? epoch);
+  toastUndo(t(isVirtualType(unit.node_type) ? "cont.done.survive" : "cont.done.end", { unit: String(unit.name ?? unitId), epoch: ep }), st);
+  return br;
+}
+/** the small form: the epoch, the reason (a real unit), the source */
+function openContinuityForm(unitId: string, x: number, y: number): void {
+  document.querySelector(".cont-form")?.remove();
+  if (!store) return;
+  const st = store;
+  const unit = st.node(unitId);
+  if (!unit) return;
+  const virtual = isVirtualType(unit.node_type);
+  const cur = continuityOfUnit(unitId);
+  const box = document.createElement("div");
+  box.className = "cont-form";
+  box.dataset.unit = unitId;
+  box.style.left = `${Math.max(8, Math.min(x, innerWidth - 300))}px`;
+  box.style.top = `${Math.max(8, Math.min(y, innerHeight - 260))}px`;
+  const title = document.createElement("div");
+  title.className = "cont-title";
+  title.textContent = `${t(virtual ? "cont.survive" : "cont.end")} · ${String(unit.name ?? unitId)}`;
+  box.appendChild(title);
+  const field = (label: string, sel: HTMLSelectElement): void => {
+    const l = document.createElement("label");
+    l.className = "cont-field";
+    const s0 = document.createElement("span");
+    s0.textContent = label;
+    l.append(s0, sel);
+    box.appendChild(l);
+  };
+  const opt = (sel: HTMLSelectElement, value: string, text: string, on: boolean): void => {
+    const o = document.createElement("option");
+    o.value = value; o.textContent = text; o.selected = on;
+    sel.appendChild(o);
+  };
+  // the epochs, newest first (as the lanes), the current one chosen
+  const epSel = document.createElement("select");
+  epSel.dataset.cont = "epoch";
+  const chrono = st.topEpochIdsChrono();
+  for (const id of [...chrono].reverse()) opt(epSel, id, String(st.node(id)?.name ?? id), id === cur?.epoch);
+  if (!cur?.epoch && chrono.length) epSel.value = chrono[chrono.length - 1];
+  field(t("cont.epoch"), epSel);
+  let reasonSel: HTMLSelectElement | null = null;
+  if (!virtual) {
+    reasonSel = document.createElement("select");
+    reasonSel.dataset.cont = "reason";
+    opt(reasonSel, "", t("cont.reason.none"), !cur?.reason);
+    for (const r of END_REASONS) opt(reasonSel, r, t(`cont.reason.${r}`), cur?.reason === r);
+    field(t("cont.reason"), reasonSel);
+  }
+  const srcSel = document.createElement("select");
+  srcSel.dataset.cont = "source";
+  opt(srcSel, "", t("cont.source.none"), !cur?.source);
+  const docs = st.liveNodes().filter((n) => n.node_type === "document")
+    .sort((a, b) => String(a.name ?? "").localeCompare(String(b.name ?? ""), undefined, { numeric: true }));
+  for (const d of docs) opt(srcSel, d.id, `${String(d.name ?? d.id)}${d.description ? " · " + String(d.description).slice(0, 40) : ""}`, cur?.source === d.id);
+  field(t("cont.source"), srcSel);
+  const bar = document.createElement("div");
+  bar.className = "cont-bar";
+  const ok = document.createElement("button");
+  ok.type = "button";
+  ok.className = "insp-btn";
+  ok.dataset.cont = "apply";
+  ok.textContent = t("cont.apply");
+  ok.addEventListener("click", () => {
+    applyContinuity(unitId, epSel.value, reasonSel ? ((reasonSel.value || null) as EndReason | null) : undefined, srcSel.value || null);
+    box.remove();
+  });
+  const no = document.createElement("button");
+  no.type = "button";
+  no.className = "insp-btn";
+  no.dataset.cont = "cancel";
+  no.textContent = t("common.cancel", undefined, "Cancel");
+  no.addEventListener("click", () => box.remove());
+  bar.append(ok, no);
+  box.appendChild(bar);
+  box.addEventListener("keydown", (e) => { if (e.key === "Escape") { e.stopPropagation(); box.remove(); } });
+  document.body.appendChild(box);
+  epSel.focus();
+}
+
 function showContextMenu(clientX: number, clientY: number, win?: Win): void {
   hideContextMenu();
   if (!store || !selectedIds.size) return;
@@ -37853,6 +38026,11 @@ function showContextMenu(clientX: number, clientY: number, win?: Win): void {
   // PROPRIETA · the units of the selection: their properties into their groups
   // (one gesture, one undo step), and back
   const units = ids.filter((id) => isStratigraphicType(store!.node(id)?.node_type));
+  // MICRO-GLIFI-OVERLAY-CONTINUITA p.3 · «End in…» / «Survives until…»
+  if (ids.length === 1 && units.length === 1) {
+    const ca = continuityAction(units[0]);
+    if (ca) item(ca.label, () => openContinuityForm(units[0], clientX, clientY)).dataset.cmd = ca.cmd;
+  }
   if (units.length) {
     if (compactableUnits(store.doc).some((u) => units.includes(u)))
       item(t("compact.cmd"), () => runCompact(units)).dataset.cmd = "compact";

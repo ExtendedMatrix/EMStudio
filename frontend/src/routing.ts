@@ -2,7 +2,8 @@
 // target, and "bridge" arcs where a horizontal run crosses a vertical run of
 // another edge. Routes are cached per scene + edge-filter key and recomputed
 // on any document mutation (scenes are rebuilt then).
-import { visibleBoxOf, type Scene } from "./scene";
+import { visibleBoxOf, type Scene, type SceneEdge } from "./scene";
+import { continuityRoute } from "./continuity";
 import type { Box } from "./shape-geom";
 
 /**
@@ -36,6 +37,14 @@ export const SYMMETRIC_EDGES = new Set([
 
 const EPS = 0.5;
 
+/** MICRO-GLIFI-OVERLAY-CONTINUITA p.3 · the line of a continuity node to its
+ *  unit (the BR's `continuity`): drawn straight, outside the routing of the
+ *  other edges — it takes no port and makes no bridge. */
+export function isContinuityEdge(scene: Scene, e: SceneEdge): boolean {
+  return scene.byId.get(e.source)?.continuity?.unit === e.target
+    || scene.byId.get(e.target)?.continuity?.unit === e.source;
+}
+
 /**
  * Port assignment: multiple edges leaving/entering the same node side get
  * distinct anchor positions spread along the side (yEd-style ports),
@@ -62,6 +71,7 @@ function computePorts(scene: Scene, vb: Map<string, Box>): Map<string, number> {
 
   for (let i = 0; i < scene.edges.length; i++) {
     const e = scene.edges[i];
+    if (isContinuityEdge(scene, e)) continue;
     const a = vb.get(e.source)!;
     const b = vb.get(e.target)!;
     if (b.y >= a.y + a.h - 2) {
@@ -79,6 +89,15 @@ function computePorts(scene: Scene, vb: Map<string, Box>): Map<string, number> {
     }
   }
 
+  // MICRO-GLIFI-OVERLAY-CONTINUITA p.3 · the side of a unit its continuity line
+  // leaves from keeps its middle for that line: the other edges spread around it
+  const reserved = new Set<string>();
+  for (const n of scene.byId.values()) {
+    const c = n.continuity;
+    const u = c ? vb.get(c.unit) : undefined;
+    if (!c || !u) continue;
+    reserved.add(`${c.unit}|${n.y + n.h <= u.y ? "top" : "bottom"}`);
+  }
   // distribute anchors along each side
   const ports = new Map<string, number>(); // `${edge}|${end}` → coordinate
   for (const [key, slots] of sides) {
@@ -89,8 +108,14 @@ function computePorts(scene: Scene, vb: Map<string, Box>): Map<string, number> {
       (a, b) => a.otherPos - b.otherPos || a.edge - b.edge,
     );
     const m = slots.length;
+    // with the middle reserved: m + 1 places, the one nearest the middle skipped
+    const fs = reserved.has(key)
+      ? (() => { const all = Array.from({ length: m + 1 }, (_, j) => (j + 1) / (m + 2));
+          let mid = 0; all.forEach((f, j) => { if (Math.abs(f - 0.5) < Math.abs(all[mid] - 0.5)) mid = j; });
+          return all.filter((_, j) => j !== mid); })()
+      : null;
     slots.forEach((slot, k) => {
-      const f = (k + 1) / (m + 1);
+      const f = fs ? fs[k] : (k + 1) / (m + 1);
       const coord =
         side === "top" || side === "bottom" ? n.x + n.w * f : n.y + n.h * f;
       ports.set(`${slot.edge}|${slot.end}`, coord);
@@ -193,15 +218,19 @@ interface VSeg {
 export function routeScene(scene: Scene, visible: boolean[]): EdgeRoute[] {
   const vb = boxesOf(scene);
   const ports = computePorts(scene, vb);
-  const routes: EdgeRoute[] = scene.edges.map((_, i) => ({
-    pts: routeOne(scene, i, ports, vb),
-    bridges: [],
-  }));
+  const cont = scene.edges.map((e) => isContinuityEdge(scene, e));
+  const routes: EdgeRoute[] = scene.edges.map((e, i) => {
+    if (!cont[i]) return { pts: routeOne(scene, i, ports, vb), bridges: [] };
+    const brId = scene.byId.get(e.source)?.continuity ? e.source : e.target;
+    const unitId = brId === e.source ? e.target : e.source;
+    const pts = continuityRoute(vb.get(unitId)!, vb.get(brId)!);
+    return { pts: brId === e.source ? pts : [...pts].reverse(), bridges: pts.map(() => []) };
+  });
 
   // vertical segments of visible edges, sorted by x for fast range lookup
   const verticals: VSeg[] = [];
   routes.forEach((r, i) => {
-    if (!visible[i]) return;
+    if (!visible[i] || cont[i]) return;
     for (let s = 0; s < r.pts.length - 1; s++) {
       const p = r.pts[s];
       const q = r.pts[s + 1];
@@ -230,7 +259,7 @@ export function routeScene(scene: Scene, visible: boolean[]): EdgeRoute[] {
 
   const MARGIN = 4; // don't draw bridges glued to a corner
   routes.forEach((r, i) => {
-    if (!visible[i]) return;
+    if (!visible[i] || cont[i]) return;
     r.bridges = r.pts.map(() => []);
     for (let s = 0; s < r.pts.length - 1; s++) {
       const p = r.pts[s];

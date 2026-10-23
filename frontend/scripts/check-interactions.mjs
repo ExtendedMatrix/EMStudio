@@ -8254,6 +8254,82 @@ test("GL2.defaults", "GLIFI-OVERLAY p.2 · le sovrapposizioni di base sono quell
   return { pass, detail: { ...out, errors: [...errors, ...b.errors] } };
 });
 
+test("GL3.continuity", "GLIFI-OVERLAY p.3 · il nodo di continuità: nel GT16 i due BR di XX sec stanno dritti sopra SU002 e SU019, nella corsia di XX sec; la sovrapposizione «Continuity» (Tempo, accesa) spenta toglie i BR dal disegno e lascia il dato; dall'Inspector «End in…» su SU003 (Post antiquity, destroyed, D.02) e «Survives until…» su USV132 (XX sec) creano il BR e i suoi archi, un annulla ciascuno; il menu dell'unità offre il verbo", async () => {
+  if (!existsSync(GL_V4)) return { pass: false, detail: { missing: GL_V4 } };
+  const { p, ctx, errors } = await glOpen();
+  const out = {};
+  const geom = () => p.evaluate(() => { const g = window.__EM_DRAG__.matrixGeom(); for (const n of g.nodes) n.name = window.__EM_DRAG__.node(n.id)?.name; return g; });
+  let g = await geom();
+  const by = (name) => g.nodes.find((n) => n.name === name);
+  const laneOf = (n) => g.lanes.find((l) => n.y >= l.y && n.y + n.h <= l.y + l.height)?.label ?? null;
+  const brs = g.nodes.filter((n) => n.type === "BR");
+  const units = await p.evaluate((ids) => ids.map((id) => window.__EM_DRAG__.edgesOf("is_after").find((e) => e.source === id)?.target), brs.map((b) => b.id));
+  out.straight = brs.map((b, i) => { const u = g.nodes.find((n) => n.id === units[i]);
+    return { unit: u?.name, dx: u ? Math.abs((b.x + b.w / 2) - (u.x + u.w / 2)) : null, lane: laneOf(b), above: u ? b.y + b.h <= u.y : null }; });
+  // the overlay: in Time, on; off, the BRs leave the drawing, the data stays
+  out.panelItem = await p.evaluate(() => { document.querySelector("#btn-overlays")?.click();
+    const cb = document.querySelector('#overlay-panel .ov-group[data-group="time"] input[data-ov="continuity"]'); return cb ? cb.checked : null; });
+  await p.evaluate(() => document.querySelector('#overlay-panel input[data-ov="continuity"]')?.click());
+  await p.waitForTimeout(400);
+  out.offDrawn = await p.evaluate((ids) => ids.filter((id) => window.__EM_DRAG__.viewNodeIds("matrix").includes(id)).length, brs.map((b) => b.id));
+  out.offData = await p.evaluate((ids) => ids.filter((id) => !!window.__EM_DRAG__.node(id)).length, brs.map((b) => b.id));
+  await p.evaluate(() => document.querySelector('#overlay-panel input[data-ov="continuity"]')?.click());
+  await p.waitForTimeout(400);
+  out.onDrawn = await p.evaluate((ids) => ids.filter((id) => window.__EM_DRAG__.viewNodeIds("matrix").includes(id)).length, brs.map((b) => b.id));
+  await p.keyboard.press("Escape");
+  // the two verbs, from the Inspector
+  const insp = await p.evaluate(() => window.__EM_DRAG__.wins().find((w) => w.type === "inspector")?.id);
+  const verb = async (name, epoch, reason, doc) => {
+    const id = by(name).id;
+    await p.evaluate((x) => window.__EM_DRAG__.select(x), id);
+    await p.waitForTimeout(500);
+    const btn = `.tile-area[data-win="${insp}"] [data-cmd^="continuity-"]`;
+    const label = await p.textContent(btn);
+    await p.click(btn); await p.waitForTimeout(300);
+    await p.selectOption('.cont-form select[data-cont="epoch"]', g.lanes.find((l) => l.label === epoch).id);
+    if (reason) await p.selectOption('.cont-form select[data-cont="reason"]', reason);
+    if (doc) await p.selectOption('.cont-form select[data-cont="source"]', await p.evaluate((n) => [...document.querySelectorAll('.cont-form select[data-cont="source"] option')].find((o) => o.textContent.split(" · ")[0] === n)?.value, doc));
+    const u0 = await p.evaluate(() => window.__EM_DRAG__.undoDepth());
+    await p.click('.cont-form [data-cont="apply"]'); await p.waitForTimeout(700);
+    const c = await p.evaluate((x) => window.__EM_DRAG__.continuityOf(x), id);
+    return { label, steps: (await p.evaluate(() => window.__EM_DRAG__.undoDepth())) - u0, c,
+      survive: await p.evaluate((x) => window.__EM_DRAG__.edgesOf("survive_in_epoch").filter((e) => e.source === x).map((e) => window.__EM_DRAG__.node(e.target)?.name).sort(), id),
+      doc: c ? await p.evaluate((b) => window.__EM_DRAG__.edgesOf("has_documentation").filter((e) => e.source === b).map((e) => window.__EM_DRAG__.node(e.target)?.name), c.br) : null,
+      state: await p.evaluate((w) => document.querySelector(`.tile-area[data-win="${w}"] .insp-cont-state`)?.textContent ?? null, insp) };
+  };
+  out.us = await verb("SU003", "Post antiquity", "destroyed", "D.02");
+  out.usv = await verb("USV132", "XX sec", null, null);
+  g = await geom();
+  const placed = (name, c) => { const u = by(name), b = g.nodes.find((n) => n.id === c?.br); return b ? { dx: Math.abs((b.x + b.w / 2) - (u.x + u.w / 2)), lane: laneOf(b) } : null; };
+  out.usPlaced = placed("SU003", out.us.c);
+  out.usvPlaced = placed("USV132", out.usv.c);
+  // the unit's menu offers the verb
+  const box = await p.evaluate((id) => window.__EM_DRAG__.winScene(window.__EM_DRAG__.wins().find((w) => w.type === "graph").id).boxes.find((b) => b.id === id), by("USV132").id);
+  await glFrame(p, 0.6, by("USV132").x + 45, by("USV132").y);
+  const box2 = await p.evaluate((id) => window.__EM_DRAG__.winScene(window.__EM_DRAG__.wins().find((w) => w.type === "graph").id).boxes.find((b) => b.id === id), by("USV132").id);
+  await p.mouse.click(box2.x + box2.w / 2, box2.y + box2.h / 2, { button: "right" }); await p.waitForTimeout(400);
+  out.menu = await p.evaluate(() => [...document.querySelectorAll(".ctx-menu button[data-cmd^='continuity-']")].map((b) => b.textContent));
+  await p.keyboard.press("Escape"); await p.evaluate(() => document.querySelector(".ctx-menu")?.remove());
+  await glFrame(p, 0.35, by("USV132").x + 45, 700);
+  await p.screenshot({ path: SHOT("gl3-continuity") }).catch(() => {});
+  // one undo each
+  await p.evaluate(() => window.__EM_DRAG__.undo()); await p.waitForTimeout(300);
+  out.undo1 = await p.evaluate(([a, b]) => [!!window.__EM_DRAG__.continuityOf(a), !!window.__EM_DRAG__.continuityOf(b)], [by("USV132").id, by("SU003").id]);
+  await p.evaluate(() => window.__EM_DRAG__.undo()); await p.waitForTimeout(300);
+  out.undo2 = await p.evaluate(([a, b]) => [!!window.__EM_DRAG__.continuityOf(a), !!window.__EM_DRAG__.continuityOf(b)], [by("USV132").id, by("SU003").id]);
+  void box;
+  await ctx.close();
+  const pass = out.straight.length === 2 && out.straight.every((x) => x.dx < 0.5 && x.lane === "XX sec" && x.above)
+    && out.panelItem === true && out.offDrawn === 0 && out.offData === 2 && out.onDrawn === 2
+    && out.us.label === "End in…" && out.us.steps === 1 && out.us.c?.reason === "destroyed" && JSON.stringify(out.us.survive) === JSON.stringify(["Post antiquity"])
+    && JSON.stringify(out.us.doc) === JSON.stringify(["D.02"]) && /Ends in Post antiquity/.test(out.us.state ?? "")
+    && out.usv.label === "Survives until…" && out.usv.steps === 1 && JSON.stringify(out.usv.survive) === JSON.stringify(["Post antiquity", "XX sec"])
+    && out.usPlaced?.dx < 0.5 && out.usPlaced?.lane === "Post antiquity" && out.usvPlaced?.dx < 0.5 && out.usvPlaced?.lane === "XX sec"
+    && JSON.stringify(out.menu) === JSON.stringify(["Survives until…"])
+    && JSON.stringify(out.undo1) === JSON.stringify([false, true]) && JSON.stringify(out.undo2) === JSON.stringify([false, false]) && !errors.length;
+  return { pass, detail: { ...out, errors } };
+});
+
 // ── run ─────────────────────────────────────────────────────────────────────
 const chosen = cases.filter((c) => !only.length || only.includes(c.id) || only.some((o) => c.id.startsWith(o + ".")));
 for (const c of chosen) {

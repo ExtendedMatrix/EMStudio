@@ -43,6 +43,10 @@ export interface SceneNode {
    *  paradata group by the view's implicit group: «fuori dal gruppo», a light
    *  dashed frame (`implicit-pd.ts`) */
   outside?: boolean;
+  /** MICRO-GLIFI-OVERLAY-CONTINUITA p.3 · a continuity node (BR) drawn as its
+   *  unit's: the unit, and whether it ends a real unit or extends a virtual
+   *  one (continuity.ts). Placed by the view above the unit; not dragged. */
+  continuity?: { unit: string; kind: "end" | "survive" };
   /** how many times this document is used in the scene (corner decorator) */
   useCount?: number;
   /** MICRO-SPAZIO-3D · a representation model drawn in N epochs: «×N» on each
