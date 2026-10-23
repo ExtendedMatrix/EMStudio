@@ -8628,6 +8628,141 @@ if (K_NODE && process.env.CORSIA_ROOM) test("GL6.live", "CORSIA p.2 dal vivo · 
   return { pass: !same(r.a0, r.a1) && same(r.b0, r.b1) && !r.sentA.length && r.log === 1 && !r.errors.length, detail: r };
 });
 
+// ── MICRO-GEOGLOBO · the GT16 (a COPY: `GEO_V4`) and a bridge of this tree that
+// serves its folder (`GEO_BRIDGE`, level 36: /tiles, /geo); the orthophoto of the
+// test (`GEO_ORTHO`, a GeoTIFF in EPSG:31700 made by the report's script). The
+// globe's tiles come from the sources online through that bridge: offline the
+// modes and the layers still answer, the pictures are empty ──
+const GEO_V4 = process.env.GEO_V4 ?? "/tmp/globo/EM/TempluMare_v4.em.json";
+const GEO_BRIDGE = process.env.GEO_BRIDGE ?? BRIDGE;
+const GEO_ORTHO = process.env.GEO_ORTHO ?? "/tmp/globo/EM/geo-raster/ortho_gt16_31700.tif";
+const geoOpen = async () => {
+  const ctx = await browser.newContext({ viewport: { width: 1600, height: 1000 } });
+  const p = await ctx.newPage();
+  const errors = [];
+  p.on("pageerror", (e) => errors.push(String(e).slice(0, 300)));
+  p.on("console", (m) => { if (m.type() === "error" && /NaN|reading 'color'|could not be decoded/.test(m.text())) errors.push(m.text().slice(0, 200)); });
+  const asked = [];
+  p.on("request", (r) => { if (/\/tiles\/|tiles\.maps\.eox|mapterhorn|openstreetmap/.test(r.url())) asked.push(r.url()); });
+  await p.addInitScript(() => { try { if (!sessionStorage.getItem("probe")) { localStorage.clear(); localStorage.setItem("emstudio.locale", "en"); sessionStorage.setItem("probe", "1"); } } catch {} });
+  await p.goto(`http://localhost:${PORT}/em/studio/?bridge=${encodeURIComponent(GEO_BRIDGE)}`);
+  await p.waitForSelector("#workspace-bar .ws-tab", { timeout: 30000 });
+  await p.evaluate(([d, path]) => window.__EM_DRAG__.openAt(d, path), [JSON.parse(readFileSync(GEO_V4, "utf8")), GEO_V4]);
+  await p.waitForFunction(() => (window.__EM_SCENE__?.()?.nodes?.length ?? 0) > 50, null, { timeout: 60000 });
+  await workspace(p, "space");
+  await p.waitForFunction(() => document.querySelector(".scn-host")?.dataset.ready === "1", null, { timeout: 120000 });
+  await p.waitForTimeout(800);
+  return { p, ctx, errors, asked };
+};
+const geoOn = async (p) => {
+  await p.click('.scn-bar [data-geo="toggle"]');
+  await p.waitForFunction(() => document.querySelector(".scn-host")?.__geo?.()?.ready, null, { timeout: 30000 });
+};
+const geoState = (p) => p.evaluate(() => document.querySelector(".scn-host").__geo());
+const geoIdle = async (p, ms = 20000) => {
+  const t0 = Date.now();
+  while (Date.now() - t0 < ms) { const g = await geoState(p); if (!g.flying) return g; await p.waitForTimeout(200); }
+  return geoState(p);
+};
+
+test("GG4.off", "GEOGLOBO · spento di default: lo Spazio del GT16 si apre come prima — niente globo, nessuna tessera chiesta (né al bridge né in rete); il pulsante «Territory» nella barra, senza i modi", async () => {
+  if (!existsSync(GEO_V4)) return { pass: false, detail: { missing: GEO_V4 } };
+  const { p, ctx, errors, asked } = await geoOpen();
+  await p.waitForTimeout(1500);
+  const out = { geo: await p.evaluate(() => !!document.querySelector(".scn-host").__geo), asked: asked.length,
+    bar: await p.evaluate(() => ({ toggle: document.querySelector('.scn-bar [data-geo="toggle"]')?.getAttribute("aria-pressed"), modes: document.querySelectorAll(".scn-bar [data-geo-mode]").length })), errors };
+  await ctx.close();
+  return { pass: !out.geo && out.asked === 0 && out.bar.toggle === "false" && out.bar.modes === 0 && !errors.length, detail: out };
+});
+
+test("GG1.globe", "GEOGLOBO p.1 · il GT16 sul globo: «Territory» misura l'ancora (EPSG:31700 → 45,5139 N 22,7892 E, il nord della griglia a −1,58°); «Globe» vola sopra la Terra (oltre 10 000 km, nessun NaN per strada); la rotella sul sito scende e sotto i 3 km la camera passa alle mani dello Spazio SENZA muoversi (stessa posizione prima e dopo il passaggio); la rotella indietro oltre i 30 km la ridà al globo; «Go to the site» atterra in modo Sito; l'attribuzione delle fonti è in basso", async () => {
+  if (!existsSync(GEO_V4)) return { pass: false, detail: { missing: GEO_V4 } };
+  const { p, ctx, errors } = await geoOpen();
+  const out = {};
+  await geoOn(p);
+  out.anchor = await p.evaluate(() => document.querySelector(".scn-host").__geoSpace().anchor);
+  await p.click('.scn-bar [data-geo-mode="globe"]');
+  await p.waitForTimeout(300);
+  let g = await geoIdle(p);
+  out.globe = { mode: g.mode, alt: Math.round(g.altitude) };
+  out.attribution = await p.evaluate(() => document.querySelector(".scn-host .geo-attrib")?.textContent ?? "");
+  // the wheel on the site
+  const box = await (await p.$(".scn-host canvas")).boundingBox();
+  for (let i = 0; i < 300; i++) {
+    g = await geoState(p);
+    if (g.mode !== "globe") break;
+    const s = await p.evaluate(() => document.querySelector(".scn-host").__spaceProject([0, 0, 0]));
+    const at = s && s.x > box.x && s.x < box.x + box.width && s.y > box.y && s.y < box.y + box.height ? s : { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+    await p.mouse.move(at.x, at.y);
+    await p.mouse.wheel(0, -240);
+    await p.waitForTimeout(50);
+  }
+  out.down = (await geoState(p)).lastSwitch;
+  for (let i = 0; i < 300; i++) {
+    g = await geoState(p);
+    if (g.mode === "globe") break;
+    await p.mouse.wheel(0, 400);
+    await p.waitForTimeout(40);
+  }
+  out.up = (await geoState(p)).lastSwitch;
+  await p.click('.scn-bar [data-geo="site"]');
+  await p.waitForTimeout(300);
+  g = await geoIdle(p);
+  out.landed = { mode: g.mode, alt: Math.round(g.altitude) };
+  out.pressed = await p.evaluate(() => document.querySelector('.scn-bar [data-geo-mode][aria-pressed="true"]')?.dataset.geoMode);
+  out.errors = errors;
+  await ctx.close();
+  const d = out.down, u = out.up;
+  const still = (s) => !!s && Math.hypot(s.posBefore[0] - s.posAfter[0], s.posBefore[1] - s.posAfter[1], s.posBefore[2] - s.posAfter[2]) < 1e-3;
+  const pass = Math.abs(out.anchor?.lat - 45.51389) < 1e-4 && Math.abs(out.anchor?.lon - 22.78921) < 1e-4 && Math.abs(out.anchor?.azimuth + 1.584) < 0.01
+    && out.globe.mode === "globe" && out.globe.alt > 1e7
+    && d?.from === "globe" && d?.to === "site" && d?.why === "auto" && still(d)
+    && u?.from === "site" && u?.to === "globe" && u?.why === "auto" && still(u)
+    && out.landed.mode === "site" && out.landed.alt < 3000 && out.pressed === "site"
+    && /EOX/.test(out.attribution) && /Mapterhorn/.test(out.attribution) && !out.errors.length;
+  return { pass, detail: out };
+});
+
+test("GG2.layers", "GEOGLOBO p.2–4 · il pannello «Layers»: un'ortofoto GeoTIFF in EPSG:31700 aggiunta dal suo percorso diventa un livello (il bridge la riproietta in un PMTiles accanto, l'originale resta) drappeggiato sul terreno, in cima all'elenco; l'opacità e l'ordine cambiano senza errori di three; «su un piano» la mette sul piano del sito con i suoi spigoli dove il CRS li dice (±100 m attorno all'ancora), appena sopra il terreno; «Estrai area» non offre OpenStreetMap (solo online); nessun «could not be decoded»", async () => {
+  if (!existsSync(GEO_V4) || !existsSync(GEO_ORTHO)) return { pass: false, detail: { missing: [GEO_V4, GEO_ORTHO].filter((f) => !existsSync(f)) } };
+  const { p, ctx, errors } = await geoOpen();
+  const out = {};
+  await geoOn(p);
+  await p.click('.scn-bar [data-geo="panel"]');
+  await p.waitForSelector(".geo-panel:not(.hidden)");
+  await p.fill(".geo-panel [data-geo-raster]", GEO_ORTHO);
+  await p.click('.geo-panel [data-geo-act="add-raster"]');
+  await p.waitForFunction(() => (document.querySelector(".scn-host").__geoSpace().layers ?? []).some((l) => l.kind === "raster"), null, { timeout: 60000 });
+  const id = `raster:${GEO_ORTHO}`;
+  out.layers = await p.evaluate(() => document.querySelector(".scn-host").__geoSpace().layers.map((l) => [l.id, l.kind, l.maxZoom ?? null, !!l.path]));
+  await p.waitForTimeout(1500);
+  out.overlays = (await geoState(p)).overlays;
+  // the opacity, the order
+  await p.$eval(`.geo-panel [data-geo-layer="${id}"] input[type=range]`, (el) => { el.value = "0.4"; el.dispatchEvent(new Event("input", { bubbles: true })); });
+  await p.click(`.geo-panel [data-geo-layer="${id}"] [data-geo-act="down"]`);
+  out.order = await p.evaluate(() => document.querySelector(".scn-host").__geoSpace().layers.map((l) => l.id).slice(0, 2));
+  out.opacity = await p.evaluate((i) => document.querySelector(".scn-host").__geoSpace().layers.find((l) => l.id === i)?.opacity, id);
+  await p.click(`.geo-panel [data-geo-layer="${id}"] [data-geo-act="up"]`);
+  // on a plane
+  await p.click(`.geo-panel [data-geo-layer="${id}"] [data-geo-act="plane"]`);
+  await p.evaluate(() => document.querySelector(".scn-host").__spaceSetCam({ pos: [150, 200, 300], target: [0, 0, 0] }));
+  await p.waitForFunction(() => (document.querySelector(".scn-host").__geoPlanes?.() ?? []).length === 1, null, { timeout: 30000 });
+  await p.waitForTimeout(4000);
+  out.plane = await p.evaluate(() => { const h = document.querySelector(".scn-host"); return { planes: h.__geoPlanes(), ground: h.__geoGround(0, 0) }; });
+  out.overlaysPlane = (await geoState(p)).overlays;
+  out.osm = await p.evaluate(() => { const o = document.querySelector('.geo-panel [data-geo-act="source"] option[value="osm"]'); return o ? o.disabled : null; });
+  out.errors = errors;
+  await ctx.close();
+  const c = out.plane.planes[0]?.corners ?? [];
+  const corners = c.length === 4 && [[-100, 100], [100, 100], [100, -100], [-100, -100]].every(([x, z], i) => Math.abs(c[i][0] - x) < 1e-6 && Math.abs(c[i][2] - z) < 1e-6);
+  const pass = out.layers[0]?.[0] === id && out.layers[0][1] === "raster" && out.layers[0][2] >= 19 && out.layers[0][3]
+    && out.overlays.includes(id) && out.order[1] === id && out.opacity === 0.4
+    && corners && out.plane.ground !== null && out.plane.planes[0].y >= out.plane.ground - 0.5 && !out.overlaysPlane.includes(id)
+    && out.osm === true && !out.errors.length;
+  return { pass, detail: out };
+});
+
+
 // ── run ─────────────────────────────────────────────────────────────────────
 const chosen = cases.filter((c) => !only.length || only.includes(c.id) || only.some((o) => c.id.startsWith(o + ".")));
 for (const c of chosen) {

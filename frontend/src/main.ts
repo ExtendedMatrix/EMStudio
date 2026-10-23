@@ -245,6 +245,7 @@ import { renderChronology, type ChronoEpoch, type ChronologyData } from "./chron
 import { buildSpace, citationKey, SpaceMarks, UnansweredFiles, type Space, type SpaceRM } from "./space";
 import { diagnose, errorText, FailureLog, isNetworkError, type LoadFailure, type Probes } from "./load-failure";
 import { chooseVersion, SCENE_USES, USES } from "./asset-versions";
+import { mountGeoSpace, type GeoSpaceDeps } from "./geo-space";
 import { mountSpaceScene, type SceneItem, type SceneStats, type SceneMark, type SceneMenuRequest, type SceneView, type SpaceSceneHandle } from "./scene3d";
 import { ladderOf, versionChoices, viewerSourceLine, viewerTargetOf,
          type VersionChoice, type ViewerPart, type ViewerTarget, type WeighedVersion } from "./viewer-node";
@@ -26420,7 +26421,17 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
     },
   });
   sceneHandles.set(win.id, handle);
+  // MICRO-GEOGLOBO · the territory of this Space: the globe, its modes, its layers
+  const geoSpace = mountGeoSpace({
+    host, handle, t: (k, v) => t(k, v), person: () => overlayPerson(),
+    doc: () => (store?.doc ?? null) as ReturnType<GeoSpaceDeps["doc"]>,
+    docPath: () => emtree.activeFile()?.path ?? currentFilePath,
+    bridge: () => bridgeUrl(), toast,
+    openInViewer: (path) => openFileInViewer(path, win),
+    redrawBar: () => refresh(),
+  });
   const onBar = (e: Event) => {
+    if (geoSpace.onBar(e.target as HTMLElement)) { e.stopPropagation(); return; }
     const b = (e.target as HTMLElement).closest<HTMLElement>("[data-epoch],[data-toggle],[data-frame],[data-preview-close],[data-act='back']");
     if (!b) return;
     e.stopPropagation();
@@ -26498,7 +26509,7 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
     fr.dataset.frame = "1";
     fr.textContent = "⤢";
     fr.title = t("space.frame");
-    bar.append(back, lab, seg, tog("rm", "space.layerRm"), tog("px", "space.layerPx"), fr);
+    bar.append(back, lab, seg, tog("rm", "space.layerRm"), tog("px", "space.layerPx"), fr, ...geoSpace.barButtons());
     renderBackButtons();
     // CAMPAGNA · the preview, said in the bar and closable; drawn whatever the
     // graph says (a tileset opened from the Storage needs no epoch)
@@ -26664,7 +26675,7 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
     handle.syncSketches();
   };
   refresh();
-  return { refresh, destroy: () => { bar.removeEventListener("click", onBar); handle.dispose(); sceneHandles.delete(win.id); npanelRenderers.delete(win.id); sceneOverlayBtns.delete(win.id); } };
+  return { refresh, destroy: () => { bar.removeEventListener("click", onBar); geoSpace.destroy(); handle.dispose(); sceneHandles.delete(win.id); npanelRenderers.delete(win.id); sceneOverlayBtns.delete(win.id); } };
 }
 
 /** The epoch's Inspector: its chronology problems, and the tool. */
@@ -32920,6 +32931,26 @@ function pinViewerCollection(win: Win, payload: StorageDragPayload): void {
   setWinModeOf(win, payload.type === "dir" ? "gallery" : "single");
   renderViewer();
   renderAreaHeaders();
+}
+
+/** MICRO-GEOGLOBO · a raster (or any file) opened as a document in the Viewer —
+ *  the service one, else one made beside the asker, as `requestDoc` does —
+ *  pinned to the file, flat, with its georeference (`storage.ts withGeo`) */
+function openFileInViewer(path: string, from: Win): void {
+  let w = docForRequests();
+  if (!w) {
+    if (maximizedWin()) toggleMaximize(maximizedWin()!);
+    setActiveWin(from.id);
+    const made = splitWindow(from.id, "row", activeWorkspace(), 0.55, "b");
+    if (!made) return;
+    for (const k of Object.keys(made.state)) delete made.state[k];
+    setWinType(made, "viewer");
+    setWinCurrent(made, "viewer.role", "service");
+    w = made;
+    renderTiles();
+  }
+  const name = path.replace(/\\/g, "/").split("/").pop() ?? path;
+  pinViewerCollection(w, { type: "file", path, name, ext: name.split(".").pop() ?? "" });
 }
 
 function formatBytes(n: number): string {

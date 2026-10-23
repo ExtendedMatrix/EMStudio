@@ -41,18 +41,26 @@ let tilesPromise: Promise<any> | null = null;
  *  tileset opens — the same moment the renderer itself arrives. */
 export async function tilesEngine(): Promise<{ TilesRenderer: any; ImplicitTilingPlugin: any;
     Archive3tz: any; Tiles3tzPlugin: any; sourceFor: any; archiveBase: any;
-    DRACOLoader: any; GLTFExtensionsPlugin: any; DRACO_FILES: Record<string, string> }> {
+    DRACOLoader: any; GLTFExtensionsPlugin: any; DRACO_FILES: Record<string, string>;
+    /** MICRO-GEOGLOBO · the globe's parts (`globe3d.ts`) */
+    GlobeControls: any; TerrariumMeshPlugin: any; ImageOverlayPlugin: any; XYZTilesOverlay: any;
+    LRUCache: any; PriorityQueue: any; DownloadPriorityQueue: any }> {
   if (!tilesPromise) {
     // a CONSTANT condition, as in `engine()`: the other arm leaves the build
     tilesPromise = __EM_LAZY_3D__
       ? engine().then(() => import(/* @vite-ignore */ new URL("./tiles3d.js", document.baseURI).href))
       : (async () => {
-          const [r, p, z, d, x, w, m] = await Promise.all([import("3d-tiles-renderer/three"),
+          const [r, p, z, d, x, w, m, tr, io, co] = await Promise.all([import("3d-tiles-renderer/three"),
             import("3d-tiles-renderer/core/plugins"), import("./tiles3tz"),
             import("three/examples/jsm/loaders/DRACOLoader.js"), import("3d-tiles-renderer/src/three/plugins/GLTFExtensionsPlugin.js"),
             import("../node_modules/three/examples/jsm/libs/draco/gltf/draco_wasm_wrapper.js?url"),
-            import("../node_modules/three/examples/jsm/libs/draco/gltf/draco_decoder.wasm?url")]);
+            import("../node_modules/three/examples/jsm/libs/draco/gltf/draco_decoder.wasm?url"),
+            import("3d-tiles-renderer/src/three/plugins/images/terrain-rgb/TerrariumMeshPlugin.js"),
+            import("3d-tiles-renderer/src/three/plugins/images/ImageOverlayPlugin.js"), import("3d-tiles-renderer/core")]);
           return { TilesRenderer: r.TilesRenderer, ImplicitTilingPlugin: p.ImplicitTilingPlugin,
+                   GlobeControls: r.GlobeControls, TerrariumMeshPlugin: tr.TerrariumMeshPlugin,
+                   ImageOverlayPlugin: io.ImageOverlayPlugin, XYZTilesOverlay: io.XYZTilesOverlay,
+                   LRUCache: co.LRUCache, PriorityQueue: co.PriorityQueue, DownloadPriorityQueue: co.DownloadPriorityQueue,
                    Archive3tz: z.Archive3tz, Tiles3tzPlugin: z.Tiles3tzPlugin,
                    sourceFor: z.sourceFor, archiveBase: z.archiveBase,
                    DRACOLoader: d.DRACOLoader, GLTFExtensionsPlugin: x.GLTFExtensionsPlugin,

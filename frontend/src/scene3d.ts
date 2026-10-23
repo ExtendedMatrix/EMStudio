@@ -241,6 +241,38 @@ export interface SpaceSceneHandle {
   centreScene(quiet?: boolean): boolean;
   /** the modal G / R / S on the selected object (sketch, proxy, model) */
   startModal(mode: ModalMode): boolean;
+  /** MICRO-GEOGLOBO · the globe of the Space (null: none) */
+  setGeo(g: GeoDriver | null): void;
+}
+
+/** MICRO-GEOGLOBO · what the scene hands the globe (`globe3d.ts`) once its
+ *  engine is up: its parts, and the camera's two doors (read, write) */
+export interface GeoCtx {
+  THREE: any;
+  scene: any;
+  renderer: any;
+  host: HTMLElement;
+  camera: () => any;
+  camState: () => CamState;
+  /** the camera put (the Space's orbit pivot is the target) */
+  applyCam: (c: CamState) => void;
+  setOrtho: (on: boolean) => void;
+  /** the view that frames what is drawn (from above, for the plan) */
+  siteView: (top: boolean) => CamState;
+}
+
+/** MICRO-GEOGLOBO · the globe, driven by the scene: called once a frame */
+export interface GeoDriver {
+  attach(ctx: GeoCtx): void;
+  detach(): void;
+  update(): void;
+  /** the globe's hands have the pointer (the globe mode, a flight): the
+   *  Space's gestures stand aside */
+  ownsPointer(): boolean;
+  /** a far plane the scene must reach (the horizon), or null */
+  far(): number | null;
+  /** the scene's camera changed (perspective ⇄ orthographic) */
+  setCamera(camera: any): void;
 }
 
 /** MICRO-VIEWER-UNICO p.4 · a mark drawn over the scene: a reading of the
@@ -402,6 +434,9 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
   const proxyOpacity = (): number => (ov("s3_proxy_wire") ? val("s3_opacity_wire", 0.9) : val("s3_opacity_proxy", 0.42));
   // MICRO-SPAZIO-3D · the parts the handle reaches once the engine is up
   let api: Partial<SpaceSceneHandle> = {};
+  /** MICRO-GEOGLOBO · the globe, and the scene's parts once the engine is up */
+  let geo: GeoDriver | null = null;
+  let geoCtx: GeoCtx | null = null;
   let cursorAt: V3 = [0, 0, 0];
   let cursorSet = false;
   let sketchSel: string | null = null;
@@ -792,6 +827,14 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
       const v3 = (a: V3) => new THREE.Vector3(a[0], a[1], a[2]);
       const arr = (v: any): V3 => [v.x, v.y, v.z];
       const camState = (): CamState => {
+        // MICRO-GEOGLOBO · the globe's hands do not move the orbit's pivot: the
+        // view is the camera's own direction, at the pivot's distance
+        if (geo?.ownsPointer() && !isOrtho) {
+          const dir = new THREE.Vector3();
+          camera.getWorldDirection(dir);
+          const d = Math.max(1, camera.position.distanceTo(controls.target));
+          return { pos: arr(camera.position), target: arr(camera.position.clone().addScaledVector(dir, d)) };
+        }
         if (!isOrtho) return { pos: arr(camera.position), target: arr(controls.target) };
         // the orthographic as the perspective it stands for: same direction,
         // the pivot `orthoT` away
@@ -817,7 +860,7 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
         camera.position.copy(T).addScaledVector(dir, -R);
         controls.target.copy(T);
         camera.near = Math.max(1e-3, R * 1e-6);
-        camera.far = R + sp * 4 + b.distanceToPoint(T) + 10;
+        camera.far = Math.max(R + sp * 4 + b.distanceToPoint(T) + 10, geo ? R + (geo.far() ?? 0) : 0);
         orthoFrustum();
         camera.lookAt(T);
         camera.updateProjectionMatrix();
@@ -868,8 +911,10 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
         opts.onView?.(viewNow());
       };
       const updateClip = () => {
-        if (isOrtho) return;
-        const { near, far } = clipPlanes(camera.position.distanceTo(controls.target), span());
+        if (isOrtho || geo?.ownsPointer()) return;
+        const { near, far: f0 } = clipPlanes(camera.position.distanceTo(controls.target), span());
+        // MICRO-GEOGLOBO · with the globe, as far as the horizon
+        const far = Math.max(f0, geo?.far() ?? 0);
         if (Math.abs(camera.near - near) / near > 0.05 || camera.far !== far) {
           camera.near = near;
           camera.far = far;
@@ -900,6 +945,7 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
         controls.object = camera;
         if (gizmo) gizmo.camera = camera;
         for (const l of layers.values()) l.layer.setCamera(camera);
+        geo?.setCamera(camera);
         applyCam(c);
         showView();
       };
@@ -2162,7 +2208,9 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
         if (disposed) return;
         raf = requestAnimationFrame(tick);
         stepAnim(performance.now());
-        controls.update();
+        // MICRO-GEOGLOBO · the globe moves the camera in its mode (its hands, a flight)
+        if (geo) geo.update();
+        if (!geo?.ownsPointer()) controls.update();
         const live = liveLayers();
         // MICRO-TILESET-CONTENITORE p.3 · the container's side at every frame, BEFORE the tiles
         // update (at 4 a second a tileset going away loaded 34 tiles, 17 MB, it would not show);
@@ -2642,6 +2690,7 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
       let modalQueued = false;
 
       const onDown = (e: PointerEvent) => {
+        if (geo?.ownsPointer()) return;   // MICRO-GEOGLOBO · the globe's hands
         lastMouse = { x: e.clientX, y: e.clientY };
         // the capture phase, before OrbitControls and the gizmo: a modal's click
         // and a box's drag are not an orbit
@@ -2679,6 +2728,7 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
         }
       };
       const onMove = (e: PointerEvent) => {
+        if (geo?.ownsPointer()) return;   // MICRO-GEOGLOBO · the globe's hands
         // MICRO-SPAZIO-3D-3 · a gesture's motions are the document's (modalMove)
         if (modal) return;
         lastMouse = { x: e.clientX, y: e.clientY };
@@ -2772,6 +2822,7 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
       let undoable: { t: number; prev: LastPick | null } | null = null;
       const dropPendingPick = () => { if (pendingPick) { clearTimeout(pendingPick); pendingPick = null; } };
       const onUp = (e: PointerEvent) => {
+        if (geo?.ownsPointer()) return;   // MICRO-GEOGLOBO · the globe's hands
         const d = drag;
         drag = null;
         if (d?.started) {
@@ -2866,6 +2917,7 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
       };
       const onContext = (e: MouseEvent) => { e.preventDefault(); };
       const onDbl = (e: MouseEvent) => {
+        if (geo?.ownsPointer()) return;   // MICRO-GEOGLOBO · the globe's hands
         if (modal || boxArmed || e.button !== 0) return;
         // MICRO-VIEWER-SPAZIO-EMTREE p.1 · a double click picks nothing: the
         // first click's pick is dropped, or undone when it was already made
@@ -2880,6 +2932,7 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
       };
       let padGrab: { p: V3; until: number } | null = null;
       const onWheel = (e: WheelEvent) => {
+        if (geo?.ownsPointer()) return;   // MICRO-GEOGLOBO · the globe's hands
         e.preventDefault();
         if (modal) return;
         if (e.ctrlKey) { zoomAt(e.clientX, e.clientY, wheelFactor(e.deltaY, e.deltaMode, true, host.clientHeight)); return; }
@@ -2908,6 +2961,7 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
       let gestureScale = 1;
       const onGestureStart = (e: Event) => { e.preventDefault(); gestureScale = 1; };
       const onGestureChange = (e: Event) => {
+        if (geo?.ownsPointer()) return;   // MICRO-GEOGLOBO · the globe's hands
         e.preventDefault();
         const g = e as Event & { scale?: number; clientX?: number; clientY?: number };
         const sc = typeof g.scale === "number" && g.scale > 0 ? g.scale : 1;
@@ -3036,6 +3090,8 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
       showView();
       cleanup = () => {
         cancelAnimationFrame(raf);
+        geo?.detach();
+        geo = null;
         dropPendingPick();
         for (const l of layers.values()) l.layer.dispose();
         layers.clear();
@@ -3140,6 +3196,24 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
         centreScene,
         startModal: (mode: ModalMode) => startModalOn(mode),
       };
+      // MICRO-GEOGLOBO · the scene's parts, for the globe (attached now or when it comes)
+      geoCtx = {
+        THREE, scene, renderer, host,
+        camera: () => camera,
+        camState,
+        applyCam: (c: CamState) => { finishAnim(); applyCam(c); },
+        setOrtho: (on: boolean) => { finishAnim(); orthoAuto = false; setOrtho(on); if (!on && aligned) { aligned = null; showView(); } },
+        siteView: (top: boolean) => {
+          const b = extent();
+          const c = arr(b.getCenter(new THREE.Vector3()));
+          const r = Math.max(5, b.getBoundingSphere(new THREE.Sphere()).radius);
+          const from: CamState = top ? { pos: [c[0], c[1] + 1, c[2]], target: c } : { pos: [c[0] + r, c[1] + r * 0.8, c[2] + r * 1.6], target: c };
+          const f = frameSphere(from, c, r, FOV, persp.aspect || 1);
+          if (top) { aligned = "top"; showView(); return alignedView(f, "top"); }
+          return f;
+        },
+      };
+      if (geo) geo.attach(geoCtx);
       rebuild();
       syncSketches();
       tick();
@@ -3180,5 +3254,11 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
     toggleOrtho: () => api.toggleOrtho?.(),
     centreScene: (quiet) => api.centreScene?.(quiet) ?? false,
     startModal: (m) => api.startModal?.(m) ?? false,
+    setGeo: (g) => {
+      if (g === geo) return;
+      geo?.detach();
+      geo = g;
+      if (g && geoCtx) g.attach(geoCtx);
+    },
   };
 }
