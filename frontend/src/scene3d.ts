@@ -259,6 +259,9 @@ export interface GeoCtx {
   setOrtho: (on: boolean) => void;
   /** the view that frames what is drawn (from above, for the plan) */
   siteView: (top: boolean) => CamState;
+  /** MICRO-GLOBO-INTERAZIONE p.1 · the box of the models drawn (three's axes),
+   *  null while none has come */
+  contentBox?: () => [V3, V3] | null;
 }
 
 /** MICRO-GEOGLOBO · the globe, driven by the scene: called once a frame */
@@ -3203,6 +3206,12 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
         camState,
         applyCam: (c: CamState) => { finishAnim(); applyCam(c); },
         setOrtho: (on: boolean) => { finishAnim(); orthoAuto = false; setOrtho(on); if (!on && aligned) { aligned = null; showView(); } },
+        contentBox: () => {
+          const b = new THREE.Box3();
+          for (const c of content.children) if (!c.userData.contour && !c.userData.tiles && !c.userData.helper) b.expandByObject(c);
+          for (const l of liveLayers()) { const lb = l.layer.bounds(); if (lb) b.union(lb); }
+          return b.isEmpty() ? null : [arr(b.min), arr(b.max)] as [V3, V3];
+        },
         siteView: (top: boolean) => {
           const b = extent();
           const c = arr(b.getCenter(new THREE.Vector3()));

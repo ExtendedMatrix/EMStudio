@@ -16,8 +16,8 @@
 import { geoOf } from "./geo";
 import { basename, dirname } from "./paths";
 import {
-  BUDGET, EXTRACT_MAX_TILES, SOURCES, boxAround, extractTileCount, layersKey, moveLayer, readLayers, setLayer,
-  sourceById, type GeoLayer, type GeoMode, type SiteAnchor,
+  BUDGET, EXTRACT_MAX_TILES, HEIGHT_MODES, SOURCES, boxAround, extractTileCount, layersKey, moveLayer, readLayers, setLayer,
+  sourceById, type GeoLayer, type GeoMode, type HeightMode, type SiteAnchor, type SiteHeight,
 } from "./geoglobe";
 import { createGlobe, type GlobeApi } from "./globe3d";
 import type { SpaceSceneHandle } from "./scene3d";
@@ -42,7 +42,7 @@ export interface GeoSpaceDeps {
   log?: (s: string) => void;
 }
 
-interface Saved { on: boolean; mode: GeoMode; layers: GeoLayer[]; panel: boolean; half: number; zmax: number; source: string }
+interface Saved { on: boolean; mode: GeoMode; layers: GeoLayer[]; panel: boolean; half: number; zmax: number; source: string; height: HeightMode }
 
 const fmtMB = (b: number) => `${(b / 1048576).toFixed(b < 10485760 ? 1 : 0)} MB`;
 
@@ -62,6 +62,9 @@ export function mountGeoSpace(d: GeoSpaceDeps): GeoSpace {
   let anchor: SiteAnchor | null = null;
   let shift: { x: number; y: number; rotation: number; epsg: number } | undefined;
   let anchorNote = "";
+  // MICRO-GLOBO-INTERAZIONE p.1 · how the shift's z was applied, and the node's word on it
+  let heightNow: SiteHeight | null = null;
+  let zInCoords: boolean | null = null;
   let busy = false;
   let job: Record<string, any> | null = null;
   let jobTimer = 0;
@@ -79,9 +82,10 @@ export function mountGeoSpace(d: GeoSpaceDeps): GeoSpace {
       const raw = JSON.parse(localStorage.getItem(layersKey(d.person(), docKey())) ?? "null");
       return { on: !!raw?.on, mode: (["globe", "plan", "site"].includes(raw?.mode) ? raw.mode : "site") as GeoMode,
         layers: readLayers(raw?.layers), panel: !!raw?.panel, half: Number(raw?.half) || 2000,
-        zmax: Number(raw?.zmax) || 16, source: typeof raw?.source === "string" ? raw.source : "s2cloudless-2016" };
+        zmax: Number(raw?.zmax) || 16, source: typeof raw?.source === "string" ? raw.source : "s2cloudless-2016",
+        height: (HEIGHT_MODES.includes(raw?.height) ? raw.height : "auto") as HeightMode };
     } catch {
-      return { on: false, mode: "site", layers: readLayers(null), panel: false, half: 2000, zmax: 16, source: "s2cloudless-2016" };
+      return { on: false, mode: "site", layers: readLayers(null), panel: false, half: 2000, zmax: 16, source: "s2cloudless-2016", height: "auto" };
     }
   };
   let s = load();
@@ -104,6 +108,7 @@ export function mountGeoSpace(d: GeoSpaceDeps): GeoSpace {
     const g = geoOf(data);
     const h = Number(data.shift_z) || 0;
     const rot = Number(data.rotation) || 0;
+    zInCoords = typeof data.shift_z_in_coordinates === "boolean" ? data.shift_z_in_coordinates : null;
     if (g.ok && (g.epsg === 4326)) {
       anchorNote = `EPSG:4326 · ${g.lat.toFixed(6)}, ${g.lon.toFixed(6)}`;
       shift = { x: g.lon, y: g.lat, rotation: rot, epsg: 4326 };
@@ -139,6 +144,8 @@ export function mountGeoSpace(d: GeoSpaceDeps): GeoSpace {
       globe = createGlobe({
         anchor, shift, layers: s.layers, bridge, pkgDirs: pkgDir() ? [pkgDir()!] : [],
         attributionTitle: t("geo.attribution"),
+        heightMode: s.height, zInCoords,
+        onHeight: (hh) => { heightNow = hh; draw(); },
         onMode: (m) => { s.mode = m; save(); d.redrawBar(); },
       });
       d.handle.setGeo(globe);
@@ -269,6 +276,26 @@ export function mountGeoSpace(d: GeoSpaceDeps): GeoSpace {
     a.className = "geo-anchor";
     a.textContent = anchorNote;
     panel.appendChild(a);
+    // the site's height: the shift's z, applied once (or not, when the models carry it)
+    const hr = document.createElement("div");
+    hr.className = "geo-height";
+    hr.dataset.geoHeight = heightNow?.applied ?? "";
+    const hl = document.createElement("span");
+    const hn = heightNow;
+    hl.textContent = hn ? t(hn.applied === "coords" ? "geo.heightCoords" : "geo.heightShift", { z: hn.shiftZ.toFixed(2),
+      mid: hn.contentMid === null ? "—" : hn.contentMid.toFixed(1), why: t(`geo.heightWhy.${hn.reason}`) }) : t("geo.heightWait");
+    const hs = document.createElement("select");
+    hs.dataset.geoAct = "height";
+    hs.title = t("geo.heightHint");
+    for (const m of HEIGHT_MODES) {
+      const o = document.createElement("option");
+      o.value = m;
+      o.textContent = t(`geo.height.${m}`);
+      o.selected = m === s.height;
+      hs.appendChild(o);
+    }
+    hr.append(hl, hs);
+    panel.appendChild(hr);
     // the layers, in drawing order: the first is drawn first (under)
     const list = document.createElement("div");
     list.className = "geo-list";
@@ -437,6 +464,7 @@ export function mountGeoSpace(d: GeoSpaceDeps): GeoSpace {
     const el = e.target as HTMLInputElement;
     const a = el.dataset.geoAct;
     if (a === "source") { s.source = el.value; save(); draw(); }
+    else if (a === "height") { s.height = (HEIGHT_MODES.includes(el.value as HeightMode) ? el.value : "auto") as HeightMode; save(); globe?.setHeightMode(s.height); draw(); }
     else if (a === "half") { s.half = Math.max(100, Number(el.value) || 2000); save(); draw(); }
     else if (a === "zmax") { s.zmax = Math.max(0, Math.min(18, Number(el.value) || 0)); save(); draw(); }
     else if (a === "cache-limit" && bridge) {
@@ -517,7 +545,7 @@ export function mountGeoSpace(d: GeoSpaceDeps): GeoSpace {
       globe = null;
       panel.remove();
     },
-    state: () => ({ on: s.on, mode: globe?.mode() ?? s.mode, layers: s.layers, anchor, anchorNote, bridge, pkgDir: pkgDir(), job, cache: cacheInfo, failures, globe: globe?.state() ?? null }),
+    state: () => ({ on: s.on, mode: globe?.mode() ?? s.mode, layers: s.layers, anchor, anchorNote, height: heightNow, heightMode: s.height, bridge, pkgDir: pkgDir(), job, cache: cacheInfo, failures, globe: globe?.state() ?? null }),
   };
   (d.host as unknown as { __geoSpace?: () => unknown }).__geoSpace = api.state;
   return api;

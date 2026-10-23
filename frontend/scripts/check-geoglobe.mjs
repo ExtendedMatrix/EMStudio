@@ -168,4 +168,24 @@ print(json.dumps([t.transform(*p) for p in ${JSON.stringify(P)}]))`);
   eq(M.readLayers(null).length, 3, "nothing saved: the defaults");
 }
 
+// ── 6 · MICRO-GLOBO-INTERAZIONE p.1 · the site's height, applied once ─────────
+{
+  // the GT16: the shift file says z 500, the models stand at 491–495 m (their glTF nodes carry 495.2)
+  const gt = M.siteHeight(500, { minY: 491.2, maxY: 495.3 });
+  eq([gt.applied, gt.h, gt.reason, gt.reference], ["coords", 0, "near-shift", "orthometric"], "GT16: the z is already in the models — not added again");
+  const sh = M.siteHeight(500, { minY: -4, maxY: 12 });
+  eq([sh.applied, sh.h, sh.reason], ["shift", 500, "near-zero"], "a model made by subtracting the shift (near 0): the z is added");
+  eq(M.siteHeight(500, { minY: 489.25, maxY: 587.56 }).applied, "coords", "GT16 with the survey's tileset (its declared box up to 587 m): still in the models");
+  eq(M.siteHeight(0.12, { minY: 489.25, maxY: 587.56 }).applied, "shift", "a small z (the 2015 estimate, 0.12 m) is simply added");
+  eq(M.siteHeight(500, null).reason, "no-content", "no model yet: wait (the shift's z meanwhile)");
+  eq(M.siteHeight(0, { minY: 3, maxY: 9 }).reason, "no-z", "no z: nothing to decide");
+  eq([M.siteHeight(500, { minY: 491, maxY: 495 }, "shift").applied, M.siteHeight(500, { minY: -1, maxY: 1 }, "coords").h], ["shift", 0], "the person's choice wins");
+  eq(M.siteHeight(500, { minY: 491, maxY: 495 }, "auto", false).applied, "shift", "the geo_position's word wins over the rule");
+  // applied once: the origin at 0, the models at their own 491–495 m; the CRS scaled at the site's height
+  const a = { lon: 22.789207886221057, lat: 45.51388980543227, h: gt.h, siteH: gt.h + gt.contentMid, azimuth: -1.584, scale: 1.0000337 };
+  // (5.5 cm over: the frame's one scale is the grid's, horizontal, applied to the heights too)
+  near(M.localToLonLat(a, [0, 493.25, 0]).h, 493.25, 0.06, "a model at y 493.25 is at 493.25 m (once), not 993.25");
+  near(M.crsScale(a), 1.0000337 * (1 + 493.25 / 6378137), 1e-9, "the CRS's metres scaled at the site's height, not the origin's");
+}
+
 console.log(`geoglobe: ${checks} checks passed${py ? "" : " (no s3Dgraphy venv: PROJ comparisons skipped)"}`);

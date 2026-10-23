@@ -10131,6 +10131,7 @@ tr.tt-hidden { display: none; }
 .geo-panel button[data-off] { opacity: 0.35; cursor: default; }
 .geo-panel .geo-h { display: flex; justify-content: space-between; align-items: center; }
 .geo-panel .geo-anchor, .geo-panel .geo-budget { color: var(--text-muted, inherit); font-size: 0.68rem; overflow-wrap: anywhere; }
+.geo-panel .geo-height { display: flex; flex-direction: column; gap: 3px; font-size: 0.68rem; color: var(--text-muted, inherit); overflow-wrap: anywhere; }
 .geo-panel .geo-row { display: flex; align-items: center; gap: 4px; }
 .geo-panel .geo-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .geo-panel .geo-row input[type=range] { width: 70px; }

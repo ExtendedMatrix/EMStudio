@@ -222,15 +222,19 @@ export function enuAxes(lonDeg: number, latDeg: number): { e: V3; n: V3; u: V3 }
  * The site's anchor, as the bridge measures it from the GeoPositionNode
  * (`/geo/frame`, pyproj): where the scene's origin is on the ellipsoid, and
  * which way its +y (the CRS's grid north, turned by the node's `rotation`)
- * points, clockwise from true north. `h` is the shift's z, an ORTHOMETRIC
- * height: the terrain tiles are orthometric too and are drawn as if it were
- * ellipsoidal, so the two agree with each other (the geoid, ~40 m in Romania,
- * shifts both alike).
+ * points, clockwise from true north. `h` is the height of the scene's origin
+ * as applied ONCE (`siteHeight`: the shift's z, or 0 when the models' own
+ * coordinates already carry it), an ORTHOMETRIC height: the terrain tiles are
+ * orthometric too and are drawn as if it were ellipsoidal, so the two agree with
+ * each other (the geoid, 44.4 m at the GT16 by EGM2008, shifts both alike).
  */
 export interface SiteAnchor {
   lon: number;
   lat: number;
   h: number;
+  /** the height the site's models stand at (the origin's plus their own middle):
+   *  the CRS's metres are scaled at it (`crsScale`); `h` when unknown */
+  siteH?: number;
   /** degrees, clockwise from true north, of the scene's +y */
   azimuth: number;
   /** the CRS's scale at the anchor (a local metre is `scale` true metres) */
@@ -250,7 +254,58 @@ export type M4 = number[];
  * point 100 m east in EPSG:31700 fell at 100.011 m of the scene — 11 cm a km.
  */
 export function crsScale(a: SiteAnchor): number {
-  return (a.scale ?? 1) * (1 + a.h / WGS84.a);
+  return (a.scale ?? 1) * (1 + (a.siteH ?? a.h) / WGS84.a);
+}
+
+// ── the site's height (MICRO-GLOBO-INTERAZIONE p.1) ─────────────────────────
+
+/**
+ * How the shift's z is applied: `auto` (the rule below), `shift` (added to the
+ * models' coordinates: they were made by subtracting it), `coords` (already in
+ * the models' coordinates: not added again).
+ */
+export type HeightMode = "auto" | "shift" | "coords";
+export const HEIGHT_MODES: HeightMode[] = ["auto", "shift", "coords"];
+
+export interface SiteHeight {
+  /** the scene origin's orthometric height, applied once */
+  h: number;
+  /** what was done with the shift's z */
+  applied: "shift" | "coords";
+  /** why: the GeoPositionNode says it, the person chose it, the rule on the
+   *  models' heights, or nothing to decide (no z, no content yet) */
+  reason: "declared" | "chosen" | "near-shift" | "near-zero" | "no-z" | "no-content";
+  shiftZ: number;
+  /** the middle of the models' heights in the scene (three's y), or null */
+  contentMid: number | null;
+  /** the vertical reference, always orthometric here (the terrain's) */
+  reference: "orthometric";
+}
+
+/**
+ * The site's height, applied ONCE (E.D., 23 Oct 2026: «il riquadro galleggia»).
+ * Measured on the GT16: the shift file says z 500, but the models' own heights
+ * are already metres above the sea (their y 491–495 m: the glTF nodes carry
+ * 495.2), and the lab's anchor added 500 more — the site floated ~490 m over the
+ * terrain. The 2015 survey agrees: its rigid residual against the lab's shift
+ * is −500.05 m in z (the dataset's LEGGIMI). The rule: when the models' middle
+ * height is within half the shift's z of it, the z is already in their
+ * coordinates and is not added; otherwise it is (a model made by subtracting the
+ * shift sits near 0; a small z, 0.12 m, is simply added). The GeoPositionNode
+ * may say it (`shift_z_in_coordinates`, proposed to s3Dgraphy), and the person
+ * may choose it: those win.
+ */
+export function siteHeight(shiftZ: number, content: { minY: number; maxY: number } | null,
+                           mode: HeightMode = "auto", declared: boolean | null = null): SiteHeight {
+  const z = Number.isFinite(shiftZ) ? shiftZ : 0;
+  const mid = content && Number.isFinite(content.minY) && Number.isFinite(content.maxY) ? (content.minY + content.maxY) / 2 : null;
+  const out = (applied: "shift" | "coords", reason: SiteHeight["reason"]): SiteHeight =>
+    ({ h: applied === "shift" ? z : 0, applied, reason, shiftZ: z, contentMid: mid, reference: "orthometric" });
+  if (mode === "shift" || mode === "coords") return out(mode, "chosen");
+  if (declared !== null) return out(declared ? "coords" : "shift", "declared");
+  if (!z) return out("shift", "no-z");
+  if (mid === null) return out("shift", "no-content");
+  return Math.abs(mid - z) < Math.abs(z) / 2 ? out("coords", "near-shift") : out("shift", "near-zero");
 }
 
 /**

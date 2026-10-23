@@ -28,12 +28,21 @@
 import { tilesEngine } from "./tiles3d";
 import {
   BUDGET, autoMode, attributionOf, earthCentreLocal, flyAt, flyMs, imageOrder, invertRigid, localToLonLat,
-  siteFrame, sourceById, tileTemplate, WGS84, type GeoLayer, type GeoMode, type SiteAnchor, type V3,
+  siteFrame, siteHeight, sourceById, tileTemplate, WGS84, type GeoLayer, type GeoMode, type HeightMode, type SiteAnchor,
+  type SiteHeight, type V3,
 } from "./geoglobe";
 import type { GeoCtx, GeoDriver } from "./scene3d";
 
 export interface GlobeOptions {
+  /** the anchor as measured; its `h` is the shift's z (how it is applied is
+   *  `siteHeight`'s, here, once the models' heights are known) */
   anchor: SiteAnchor;
+  /** MICRO-GLOBO-INTERAZIONE p.1 · the person's choice for the shift's z */
+  heightMode?: HeightMode;
+  /** the GeoPositionNode's `shift_z_in_coordinates`, when it says it */
+  zInCoords?: boolean | null;
+  /** the height was decided (or decided again) */
+  onHeight?: (h: SiteHeight) => void;
   /** the GeoPositionNode's shift and rotation: a raster on a plane is placed by them */
   shift?: { x: number; y: number; rotation: number; epsg: number };
   layers: GeoLayer[];
@@ -51,6 +60,9 @@ export interface GlobeApi extends GeoDriver {
   setLayers(l: GeoLayer[]): void;
   setMode(m: GeoMode): void;
   mode(): GeoMode;
+  /** MICRO-GLOBO-INTERAZIONE p.1 · how the shift's z is applied */
+  setHeightMode(m: HeightMode): void;
+  height(): SiteHeight;
   /** «Vai al sito»: the flight to the site's framing */
   goToSite(): void;
   state(): GlobeState;
@@ -72,6 +84,7 @@ export interface GlobeState {
   terrainFlat: number;
   attribution: string[];
   error: string | null;
+  height: SiteHeight;
   lastSwitch: { from: GeoMode; to: GeoMode; why: "hand" | "auto"; at: number; posBefore: V3; posAfter: V3 } | null;
 }
 
@@ -97,8 +110,38 @@ export function createGlobe(o: GlobeOptions): GlobeApi {
   let lastCam: any = null;
   let attribEl: HTMLElement | null = null;
   let savedRatio: number | null = null;
-  const frame = siteFrame(o.anchor);
-  const centre = earthCentreLocal(o.anchor);
+  // MICRO-GLOBO-INTERAZIONE p.1 · the shift's z applied ONCE: the origin's
+  // height is decided on the models' heights (`siteHeight`), when they come
+  const anchor: SiteAnchor = { ...o.anchor };
+  let heightMode: HeightMode = o.heightMode ?? "auto";
+  const contentY = (): { minY: number; maxY: number } | null => {
+    const b = ctx?.contentBox?.();
+    return b ? { minY: b[0][1], maxY: b[1][1] } : null;
+  };
+  let height: SiteHeight = siteHeight(o.anchor.h, null, heightMode, o.zInCoords ?? null);
+  let frame = siteFrame(anchor);
+  let centre = earthCentreLocal(anchor);
+  const reframe = () => {
+    anchor.h = height.h;
+    anchor.siteH = height.h + (height.contentMid ?? 0);
+    frame = siteFrame(anchor);
+    centre = earthCentreLocal(anchor);
+    if (tiles) {
+      const g = tiles.group;
+      g.matrix.fromArray(invertRigid(frame));
+      g.matrixWorldNeedsUpdate = true;
+    }
+  };
+  const decideHeight = () => {
+    const next = siteHeight(o.anchor.h, contentY(), heightMode, o.zInCoords ?? null);
+    const changed = next.h !== height.h || next.applied !== height.applied || next.reason !== height.reason;
+    height = next;
+    reframe();
+    if (changed || !decided) o.onHeight?.(height);
+    decided = true;
+  };
+  let decided = false;
+  reframe();
 
   /** the flat Terrarium tile: elevation 0 (R 128, G 0, B 0) */
   const flat = (size: number): Promise<Blob> => (flatTile ??= new Promise<Blob>((res, rej) => {
@@ -349,12 +392,12 @@ export function createGlobe(o: GlobeOptions): GlobeApi {
   const where = () => {
     const p = camLocal();
     if (!p) return null;
-    const g = localToLonLat(o.anchor, p);
+    const g = localToLonLat(anchor, p);
     // the ground distance to the site, on a sphere: enough for a threshold
     const R = WGS84.a;
     const d2r = Math.PI / 180;
-    const dLat = (g.lat - o.anchor.lat) * d2r, dLon = (g.lon - o.anchor.lon) * d2r;
-    const h = Math.sin(dLat / 2) ** 2 + Math.cos(o.anchor.lat * d2r) * Math.cos(g.lat * d2r) * Math.sin(dLon / 2) ** 2;
+    const dLat = (g.lat - anchor.lat) * d2r, dLon = (g.lon - anchor.lon) * d2r;
+    const h = Math.sin(dLat / 2) ** 2 + Math.cos(anchor.lat * d2r) * Math.cos(g.lat * d2r) * Math.sin(dLon / 2) ** 2;
     return { ...g, ground: 2 * R * Math.asin(Math.min(1, Math.sqrt(h))) };
   };
 
@@ -428,12 +471,14 @@ export function createGlobe(o: GlobeOptions): GlobeApi {
       (c.host as unknown as { __geo?: () => GlobeState }).__geo = () => api.state();
       // the probes' seam: the ground's height (the terrain drawn) under a point of the scene
       (c.host as unknown as { __geoGround?: (x: number, z: number) => number | null }).__geoGround = groundAt;
+      // MICRO-GLOBO-INTERAZIONE p.1 · the models' box, as the height is decided on it
+      (c.host as unknown as { __geoContent?: () => unknown }).__geoContent = () => ctx?.contentBox?.() ?? null;
       (c.host as unknown as { __geoPlanes?: () => unknown }).__geoPlanes = () => [...planes.entries()].map(([id, h]) => ({ id, y: h.mesh.position.y,
         corners: (h.mesh.userData.probe as V3[]).slice(0, 4) }));
       void tilesEngine().then((E) => {
         T = E;
         if (!ctx) return;
-        try { buildTiles(); enter(mode, "auto"); } catch (e) { error = String((e as Error)?.message ?? e); }
+        try { decideHeight(); buildTiles(); enter(mode, "auto"); } catch (e) { error = String((e as Error)?.message ?? e); }
       }).catch((e) => { error = String((e as Error)?.message ?? e); });
     },
     detach() {
@@ -464,6 +509,8 @@ export function createGlobe(o: GlobeOptions): GlobeApi {
     },
     update() {
       if (!ctx || !tiles) return;
+      // the models came after the globe: the height waited for them
+      if (height.reason === "no-content" && heightMode === "auto" && o.zInCoords == null && contentY()) decideHeight();
       const cam = ctx.camera();
       if (cam !== lastCam) api.setCamera(cam);
       if (flight) {
@@ -513,6 +560,8 @@ export function createGlobe(o: GlobeOptions): GlobeApi {
       fly(to, m);
     },
     mode: () => mode,
+    setHeightMode(m) { heightMode = m; decideHeight(); },
+    height: () => height,
     goToSite() {
       const to = viewFor("site");
       if (to) fly(to, "site");
@@ -526,7 +575,7 @@ export function createGlobe(o: GlobeOptions): GlobeApi {
         tiles: { loaded: st.loaded ?? 0, visible: tiles?.visibleTiles?.size ?? 0, downloading: st.downloading ?? 0, parsing: st.parsing ?? 0, failed: st.failed ?? 0 },
         bytes: tiles?.lruCache?.cachedBytes ?? 0, maxBytes: BUDGET.lruMaxBytes,
         overlays: [...overlays.keys()], terrainAsked, terrainFlat,
-        attribution: attributionOf(layers), error, lastSwitch,
+        attribution: attributionOf(layers), error, height, lastSwitch,
       };
     },
   };
