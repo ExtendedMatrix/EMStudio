@@ -1553,7 +1553,9 @@ def _load_s3dgraphy(s3dgraphy_src: "pathlib.Path | None"):
 #: 35 = /fs/collect («Raccogli le risorse…»: what a study's outside files need,
 #: copied inside, every copy checked by sha256) and /health's `pid` / `sidecar`
 #: — MICRO-WINDOWS-MODELLI.
-BRIDGE_LEVEL = 35   # 30 also = /validate
+#: 36 = /tiles/* and /geo/* (MICRO-GEOGLOBO): the globe's tiles (packages,
+#: cache, sources), «Estrai area», the globe minimum, the site frame, rasters.
+BRIDGE_LEVEL = 36   # 30 also = /validate
 
 
 # ── FONTE · the rules of «la proprietà come fonte», asked of the library ──────
@@ -2187,7 +2189,7 @@ def make_handler(api):
                              "Content-Type, X-EM-Filename, Range, X-EM-Path, X-EM-Overwrite")
             # MICRO-PERCORSI-WINDOWS · `X-EM-File: cloud-only` (a placeholder)
             self.send_header("Access-Control-Expose-Headers",
-                             "Content-Range, Accept-Ranges, Content-Length, X-EM-File")
+                             "Content-Range, Accept-Ranges, Content-Length, X-EM-File, X-EM-Tile")
 
         def do_OPTIONS(self):
             if not self._gate():
@@ -2269,6 +2271,11 @@ def make_handler(api):
                                 {"label": os.path.basename(r) or r, "path": r,
                                  "kind": "bookmark", "served": True}
                                 for r in _FS_ROOTS]})
+            elif route.startswith("/tiles/") or route.startswith("/geo/"):
+                # MICRO-GEOGLOBO · the globe's tiles and rasters (`em_geotiles`)
+                if not self._fs_gate():
+                    return
+                self._geo_get(parsed, route, body=body)
             elif route == "/fs/roots":
                 if not self._fs_gate():
                     return
@@ -2297,6 +2304,10 @@ def make_handler(api):
                 if not self._fs_gate():
                     return
                 self._fs_file(_fs_at_path(parsed.path), body=False)
+            elif parsed.path.startswith("/tiles/archive/"):
+                if not self._fs_gate():
+                    return
+                self._fs_file(_fs_at_path("/fs/at/" + parsed.path[len("/tiles/archive/"):]), body=False)
             else:
                 self.send_error(405, "HEAD is served only for /fs/file and /fs/at/")
 
@@ -2417,6 +2428,16 @@ def make_handler(api):
                     self._json(_collect(root, items, run=bool(body.get("run"))))
                     return
                 (self._fs_doc if route == "/fs/doc" else self._fs_probe)(body)
+            elif route.startswith("/tiles/") or route.startswith("/geo/"):
+                # MICRO-GEOGLOBO · extract, globe minimum, cache, site frame, raster import
+                if not self._fs_gate():
+                    return
+                try:
+                    body = json.loads(raw.decode("utf-8")) if raw else {}
+                except Exception as exc:
+                    self._fail(400, f"invalid JSON body: {exc}")
+                    return
+                self._geo_post(route, body if isinstance(body, dict) else {})
             elif route == "/annotate":
                 try:
                     body = json.loads(raw.decode("utf-8")) if raw else {}
@@ -4322,6 +4343,178 @@ def make_handler(api):
                         "name": os.path.basename(full) or full,
                         "parent": None if at_root else _out_path(parent),
                         "entries": entries})
+
+        # ── MICRO-GEOGLOBO · the globe (`em_geotiles.py`) ───────────────
+
+        def _geo_inside(self, raw):
+            """A folder or file named by the page, inside the served roots."""
+            if not raw:
+                return None
+            full = _short_path(os.path.realpath(_long_path(os.path.expanduser(str(raw)))))
+            return full if _fs_inside_roots(full) else None
+
+        def _send_bytes(self, data, media, *, cache="max-age=86400", extra=None, body=True):
+            self.send_response(200)
+            self._cors()
+            self.send_header("Content-Type", media)
+            self.send_header("Content-Length", str(len(data)))
+            self.send_header("Cache-Control", cache)
+            for k, v in (extra or {}).items():
+                self.send_header(k, v)
+            self.end_headers()
+            if body:
+                try:
+                    self.wfile.write(data)
+                except (BrokenPipeError, ConnectionResetError):
+                    pass
+
+        def _geo_get(self, parsed, route, *, body=True):
+            import em_geotiles as G
+            q = urllib.parse.parse_qs(parsed.query)
+            one = lambda k, d="": (q.get(k) or [d])[0]
+            parts = route.split("/")
+            try:
+                if route.startswith("/tiles/xyz/") and len(parts) == 7:
+                    # /tiles/xyz/<source>/<z>/<x>/<y>: package, globe minimum, cache, online
+                    sid, z, x, y = parts[3], int(parts[4]), int(parts[5]), int(re.sub(r"\.\w+$", "", parts[6]))
+                    src = G.SOURCES.get(sid)
+                    if src is None:
+                        self._fail(404, f"unknown source {sid!r}")
+                        return
+                    pkgs = [p for p in (self._geo_inside(v) for v in q.get("pkg", [])) if p]
+                    try:
+                        data, where = G.tile_for(sid, z, x, y, pkg_dirs=pkgs, online=one("offline") != "1")
+                    except Exception as exc:  # noqa: BLE001 — offline, refused, timeout
+                        data, where = None, f"failed: {type(exc).__name__}"
+                    if not data:
+                        if src.get("encoding") == "terrarium":
+                            # no terrain here: the page draws the flat surface (a 404,
+                            # never a picture an elevation decoder would read as −32768 m)
+                            self.send_response(404)
+                            self._cors()
+                            self.send_header("X-EM-Tile", where or "empty")
+                            self.send_header("Content-Length", "0")
+                            self.end_headers()
+                            return
+                        self._send_bytes(G.EMPTY_PNG, "image/png", cache="max-age=60",
+                                         extra={"X-EM-Tile": where or "empty"}, body=body)
+                        return
+                    media = G.TYPE_MEDIA[G.TILE_TYPES[src["type"]]]
+                    self._send_bytes(data, media, extra={"X-EM-Tile": where}, body=body)
+                elif route.startswith("/tiles/pm/") and len(parts) == 6:
+                    # /tiles/pm/<z>/<x>/<y>?path=<a package>: a raster made at import, a project's extract
+                    path = self._geo_inside(one("path"))
+                    a = G.open_pmtiles(path) if path else None
+                    if a is None:
+                        self._fail(404, "no such package (or outside the served roots)")
+                        return
+                    z, x, y = int(parts[3]), int(parts[4]), int(re.sub(r"\.\w+$", "", parts[5]))
+                    data = a.get(z, x, y)
+                    if not data:
+                        self._send_bytes(G.EMPTY_PNG, "image/png", extra={"X-EM-Tile": "empty"}, body=body)
+                        return
+                    self._send_bytes(data, G.TYPE_MEDIA.get(a.tile_type, "application/octet-stream"),
+                                     cache="max-age=60, must-revalidate", extra={"X-EM-Tile": "package"}, body=body)
+                elif route.startswith("/tiles/archive/"):
+                    # a package's own bytes, by range (a PMTiles reader in the page)
+                    self._fs_file(_fs_at_path("/fs/at/" + parsed.path[len("/tiles/archive/"):]), body=body)
+                elif route == "/tiles/cache":
+                    self._json({"ok": True, **G.cache().stats()})
+                elif route == "/tiles/job":
+                    status, payload = G.job_get(one("id"))
+                    self._json(payload, status)
+                elif route == "/tiles/globe-min":
+                    self._json(G.globe_min_state())
+                elif route == "/tiles/packages":
+                    d = self._geo_inside(one("dir"))
+                    if not d:
+                        self._fail(403, "the folder is not one this bridge serves")
+                        return
+                    out = []
+                    for a, sid in G.packages_in(d):
+                        m = a.metadata()
+                        out.append({"path": a.path, "source": sid, "bytes": os.path.getsize(a.path),
+                                    "min_zoom": a.min_zoom, "max_zoom": a.max_zoom, "bounds": list(a.bounds),
+                                    "kind": m.get("kind"), "name": m.get("name"), "original": m.get("original")})
+                    self._json({"ok": True, "packages": out})
+                elif route == "/geo/raster-info":
+                    path = self._geo_inside(one("path"))
+                    if not path or not os.path.isfile(_long_path(path)):
+                        self._fail(404, "no such raster (or outside the served roots)")
+                        return
+                    epsg = int(one("epsg")) if one("epsg") else None
+                    target = int(one("target")) if one("target") else None
+                    info = G.raster_info(path, epsg, target)
+                    self._json(info, 200 if info.get("ok") else 422)
+                elif route == "/geo/raster-preview":
+                    path = self._geo_inside(one("path"))
+                    if not path or not os.path.isfile(_long_path(path)):
+                        self._fail(404, "no such raster (or outside the served roots)")
+                        return
+                    mx = max(64, min(8192, int(one("max", "2048"))))
+                    epsg = int(one("epsg")) if one("epsg") else None
+                    self._send_bytes(G.raster_preview(path, mx, epsg), "image/png", cache="max-age=60", body=body)
+                else:
+                    self._fail(404, "unknown geo route")
+            except ImportError as exc:
+                self._fail(501, f"geo: a dependency is missing in this bridge ({exc.name}: pyproj or Pillow)")
+            except ValueError as exc:
+                self._fail(400, str(exc))
+
+        def _geo_post(self, route, body):
+            import em_geotiles as G
+            inside = lambda p: bool(self._geo_inside(p))
+            try:
+                if route == "/tiles/extract":
+                    if body.get("dest"):
+                        body = {**body, "dest": self._geo_inside(body["dest"]) or body["dest"]}
+                    status, payload = G.start_extract(body, inside)
+                    self._json(payload, status)
+                elif route == "/tiles/globe-min":
+                    status, payload = G.start_globe_min(body)
+                    self._json(payload, status)
+                elif route == "/tiles/job":
+                    status, payload = G.job_cancel(str(body.get("id") or ""))
+                    self._json(payload, status)
+                elif route == "/tiles/cache":
+                    c = G.cache()
+                    if body.get("clear"):
+                        c.clear()
+                    if body.get("limit_mb") is not None:
+                        c.set_limit_mb(max(0.0, float(body["limit_mb"])))
+                    self._json({"ok": True, **c.stats()})
+                elif route == "/geo/frame":
+                    self._json(G.site_frame(int(body["epsg"]), float(body["x"]), float(body["y"]),
+                                            float(body.get("z") or 0), float(body.get("rotation") or 0)))
+                elif route == "/geo/raster-import":
+                    path = self._geo_inside(body.get("path"))
+                    if not path or not os.path.isfile(_long_path(path)):
+                        self._fail(404, "no such raster (or outside the served roots)")
+                        return
+                    epsg = int(body["epsg"]) if body.get("epsg") else None
+                    job = G.Job("raster-import", 1)
+                    with G._JOBS_LOCK:
+                        G._JOBS[job.id] = job
+
+                    def run():
+                        try:
+                            def prog(d, t):
+                                job.done, job.total = d, t
+                            job.result = G.import_raster(path, epsg_override=epsg, progress=prog, cancel=job.cancel)
+                            job.state = "done"
+                        except InterruptedError:
+                            job.state = "cancelled"
+                        except Exception as exc:  # noqa: BLE001
+                            job.state = "failed"
+                            job.error = str(exc)
+                    threading.Thread(target=run, daemon=True).start()
+                    self._json(job.view(), 202)
+                else:
+                    self._fail(404, "unknown geo route")
+            except ImportError as exc:
+                self._fail(501, f"geo: a dependency is missing in this bridge ({exc.name}: pyproj or Pillow)")
+            except (KeyError, ValueError, TypeError) as exc:
+                self._fail(400, f"geo: {exc}")
 
         def _fs_file(self, raw, *, body=True):
             import mimetypes
