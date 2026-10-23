@@ -93,6 +93,18 @@ const BY_CLASS: Record<string, PendingGlyph> = {
     { d: "M38 24V106", role: "ground", stroke: GROUND, stroke_width: 7, ...round },
     { d: "M42 28H98L85 46L98 64H42Z", role: "ground", fill: GROUND },
   ], "HC13 Project"),
+  // MICRO-GEOREF-GRAFO · the georeference, a member of the graph's paradata group
+  // beside the author, the licence and the embargo: their grammar (a grey
+  // pictogram in a #333333 ring), a map's pin — the pictogram of icons2d/
+  // geo_position.svg, drawn on the 128 grid. Pending in em_visual_rules like the others
+  GeoPositionNode: {
+    viewBox: [0, 0, 128, 128], aspect: 1, layers: [
+      { d: "M64 22C46.3 22 32 36.3 32 54C32 76 64 108 64 108C64 108 96 76 96 54C96 36.3 81.7 22 64 22Z", role: "ground", fill: GROUND },
+      { d: "M77 54A13 13 0 1 1 51 54A13 13 0 1 1 77 54Z", role: "paper", fill: "#FFFFFF" },
+      { d: "M123 64A59 59 0 1 1 5 64A59 59 0 1 1 123 64Z", role: "ink", stroke: INK, stroke_width: 7 },
+    ],
+    source: "EMStudio hdto-glyphs.ts (pending in em_visual_rules) · GeoPositionNode (the graph's georeference)",
+  },
 };
 
 const CLASSES = (registry as unknown as { node_types?: Record<string, { node_type?: string }> }).node_types ?? {};

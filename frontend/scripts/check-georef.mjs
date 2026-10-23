@@ -38,7 +38,7 @@ const globPlugin = {
   },
 };
 const bundle = await esbuild.build({
-  stdin: { contents: `export * from "./georef"; export { DocumentStore } from "./model";`, resolveDir: SRC, loader: "ts" },
+  stdin: { contents: `export * from "./georef"; export { DocumentStore } from "./model"; export { glyphFor } from "./glyphs";`, resolveDir: SRC, loader: "ts" },
   bundle: true, format: "esm", write: false, plugins: [globPlugin],
   loader: { ".svg": "text", ".png": "text" }, logLevel: "silent",
 });
@@ -178,6 +178,13 @@ print(json.dumps([[x*math.cos(th)+y*math.sin(th)+a["shift_x"], -x*math.sin(th)+y
   eq(M.crsWarning({ ok: true, epsg: 3844, deprecated: false, to_wgs84: { name: "Pulkovo 1942(58) to WGS 84 (19)", accuracy: 3, ballpark: false } }), null, "3844: nothing to say");
   eq(M.verticalOf({}), "orthometric", "the vertical reference: orthometric unless said");
   eq(M.epsgOf({ epsg: "EPSG::3844" }), 3844, "an epsg written with its prefix");
+}
+
+// ── 4 · its own glyph (pending in em_visual_rules, the ornaments' grammar) ──
+{
+  const g = M.glyphFor("geo_position");
+  ok(!!g && g.layers.length === 3, "geo_position is drawn from its own glyph, not as a box");
+  eq(g.layers.map((l) => l.role), ["ground", "paper", "ink"], "…a grey pin in the #333333 ring, as the author, the licence and the embargo");
 }
 
 console.log(`georef: ${checks} checks passed`);
