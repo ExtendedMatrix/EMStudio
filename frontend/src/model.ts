@@ -57,6 +57,9 @@ export type GraphOp =
 interface Snapshot {
   graph: string;
   layout: string;
+  /** MICRO-CORSIA-GRUPPI p.1 · the view's own positions (the Matrix's view
+   *  layout, held outside the document), so an undo puts them back too */
+  view?: string | null;
   /** TAVOLO 2 · in a room (`DocumentStore.liveHistory`): the operations the step
    *  emitted — what an undo of it has to answer with operations of its own */
   ops?: GraphOp[];
@@ -394,6 +397,13 @@ export class DocumentStore {
   private historyFn: ((note: LiveHistoryNote) => void) | null = null;
 
   /** TAVOLO 2 · told what an undo / redo did in a room (the Log says it). */
+  /** MICRO-CORSIA-GRUPPI p.1 · what the view keeps outside the document
+   *  (the Matrix's view layout): taken with every step, put back with it */
+  private viewHistory: { take: () => string | null; restore: (v: string) => void } | null = null;
+  setViewHistory(h: { take: () => string | null; restore: (v: string) => void }): void {
+    this.viewHistory = h;
+  }
+
   onHistory(fn: (note: LiveHistoryNote) => void): void {
     this.historyFn = fn;
   }
@@ -584,6 +594,7 @@ export class DocumentStore {
     return {
       graph: JSON.stringify(this.doc.graph),
       layout: JSON.stringify(this.doc.layout ?? null),
+      view: this.viewHistory?.take() ?? null,
     };
   }
 
@@ -592,6 +603,7 @@ export class DocumentStore {
     const layout = JSON.parse(s.layout);
     if (layout === null) delete this.doc.layout;
     else this.doc.layout = layout;
+    if (s.view) this.viewHistory?.restore(s.view);
   }
 
   private checkpoint(): void {

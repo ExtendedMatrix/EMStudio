@@ -478,7 +478,7 @@ import {
 import { HIT_TOL_PX } from "./shape-geom";
 import { drawnGlyphRect, plateOf } from "./plate";
 import { glyphFor } from "./glyphs";
-import { GROUP_HEADER, GROUP_PAD, newRestackMemo } from "./views/matrix";
+import { GROUP_HEADER, GROUP_PAD, LANE_PAD, newRestackMemo } from "./views/matrix";
 import { setupSearch } from "./search";
 import {
   addEmDataHost,
@@ -2408,6 +2408,9 @@ window.__EM_SCENE__ = () => {
   },
   canUndo: () => !!store?.canUndo,
   undo: () => store?.undo(),
+  redo: () => store?.redo(),
+  /** MICRO-CORSIA-GRUPPI · a node's place in the Matrix's view layout (and in the archive) */
+  viewPosition: (id: string) => ({ view: matrixViewLayout?.positions?.[id] ?? null, arch: store?.doc.layout?.positions?.[id] ?? null }),
   /** MICRO-PROVA-DEV47 p.5 · the node lit by a hover (the Matrix's, the Associa section's) */
   hovered: () => hoverId,
   /** COLLEGARE · the gestures a probe needs without aiming at pixels */
@@ -3674,12 +3677,10 @@ function renderInspectorInto(host: HTMLElement): void {
       },
       onAssignEpoch: (nodeId, epochId) => {
         store!.setFirstEpoch([nodeId], epochId);
-        // re-home + reflow are view-side, but a fresh em-core layout gives the
-        // moved unit a clean position inside its new band
-        void runLayout(false).then(() => {
-          select(nodeId);
-          toast(t("tst.movedTo", { name: String(store!.node(epochId)?.name ?? t("tst.anEpoch")) }));
-        });
+        // MICRO-CORSIA-GRUPPI p.1 · the unit goes into its new lane and nothing
+        // else moves (`followEpochChanges`; it was a whole relayout)
+        select(nodeId);
+        toast(t("tst.movedTo", { name: String(store!.node(epochId)?.name ?? t("tst.anEpoch")) }));
       },
       onTogglePin: (nodeId) => togglePin([nodeId]),
       isPinned: (nodeId) => store!.isPinned(nodeId),
@@ -5574,6 +5575,8 @@ function buildScenesNow(): void {
   // MICRO-GLIFI-OVERLAY-CONTINUITA p.3 · the overlay «Continuity» off: the BR
   // and its line are not drawn (and not touched); the graph keeps them
   if (scenes.matrix && !overlayShown(overlaysOf("matrix"), "continuity")) dropContinuity(scenes.matrix, isContinuityType);
+  // MICRO-CORSIA-GRUPPI p.1 · the epochs as the document came: what changes after is followed
+  if (!epochSeen.has(store)) epochSeen.set(store, firstEpochs(store));
   // MICRO-PULIZIA p.3 · the Graph: every node present (the whole view) unless
   // its HDT-O switch is off
   scenes.graph = buildGraphLiquid(doc, viewFor("graph", liquidHdto));
@@ -6011,6 +6014,8 @@ function flushChange(): void {
   duringStoreFlush(() => {
     refreshNameStatus();          // NAME1: label colours follow the graph
     ensureScenes();               // (recomputes the hidden types first)
+    followEpochChanges();         // MICRO-CORSIA-GRUPPI p.1 · a new epoch, its lane
+    ensureScenes();
     matrixViewMaybeStale();       // MICRO-PULIZIA p.5 · the Matrix's own layout
     if (filterPanelOpen()) renderCirclesPanel(); // refresh circle counts
     updateInfo();             // (the issues: the canvas draws their «!»)
@@ -6046,6 +6051,17 @@ function wireStore(s: DocumentStore): void {
       logWarn(t("hist.roomSkipped", { verb, what }));
       toast(t("hist.roomSkipped", { verb, what }));
     }
+  });
+  // MICRO-CORSIA-GRUPPI p.1 · the Matrix's view layout goes with each undo step:
+  // an undo or a redo puts the positions back as they were, and does not ask
+  // em-core for a new view layout (it did: the restored layout is a new object)
+  s.setViewHistory({
+    take: () => (s === store && matrixViewLayout ? JSON.stringify(matrixViewLayout) : null),
+    restore: (v) => {
+      if (s !== store) return;
+      matrixViewLayout = JSON.parse(v) as import("./types").EmLayout;
+      matrixViewSig = matrixViewSigNow();
+    },
   });
   s.onChange(() => {
     docChangeSeq++; // any store's change: the memo is keyed by document, not by slot
@@ -10272,26 +10288,142 @@ function settleDropped(
 }
 
 /**
- * MICRO-GLIFI-OVERLAY-CONTINUITA p.4 · nodes given another epoch by a gesture
- * that does not place them (dating a document): each one, if its box is not in
- * that epoch's lane in the Matrix, goes into it — the same height from the
- * lane's top it had in its old lane, kept inside — and nothing else moves.
+ * MICRO-GLIFI-OVERLAY-CONTINUITA p.4 / MICRO-CORSIA-GRUPPI p.1 · a node given
+ * another epoch by anything but the hand that drags it (the Inspector, the
+ * Tabular, dating a document, a menu, a room's operation, a merge, an undo)
+ * goes into that epoch's lane in the Matrix, and NOTHING ELSE MOVES: its x is
+ * kept if the place is free, its height from the lane's top as it was in the
+ * old lane (kept inside), and if that place is taken the nearest free one in
+ * the lane (sideways first, then the other rows of the lane). A node already
+ * in the lane is left where it is — that is the drag, and a redo.
+ *
+ * Not placed: a member of an open container or an instance (they live in the
+ * group's space), a group (it carries its members), a BR (drawn above its unit,
+ * `continuity.ts`), a node the Matrix does not draw (filtered, folded).
  */
-function placeInEpochLane(ids: string[], epochId: string): void {
+const LANE_GAP = 12;
+/** per document: the epoch each node was last seen in */
+const epochSeen = new WeakMap<DocumentStore, Map<string, string>>();
+
+function firstEpochs(st: DocumentStore): Map<string, string> {
+  const out = new Map<string, string>();
+  for (const e of st.liveEdges())
+    if (e.edge_type === "has_first_epoch" && !out.has(e.source)) out.set(e.source, e.target);
+  return out;
+}
+
+/** flushChange · the nodes whose first epoch changed since the last look */
+function followEpochChanges(): void {
+  const st = store;
+  if (!st || !scenes.matrix) return;
+  const now = firstEpochs(st);
+  const seen = epochSeen.get(st);
+  if (!seen) { epochSeen.set(st, now); return; }
+  const changed: [string, string, string][] = [];
+  for (const [id, ep] of now) {
+    const was = seen.get(id);
+    if (was && was !== ep) changed.push([id, was, ep]);
+    seen.set(id, ep);
+  }
+  for (const id of [...seen.keys()]) if (!now.has(id)) seen.delete(id);
+  if (changed.length) placeInEpochLane(changed);
+}
+
+function placeInEpochLane(changes: [string, string, string][]): void {
+  const st = store;
   const s = scenes.matrix;
-  if (!s || !store) return;
-  const band = s.subBands?.find((b) => b.phaseId === epochId && !b.residual) ?? s.lanes.find((l) => l.id === epochId);
-  if (!band) return;
-  for (const id of ids) {
-    const sn = s.byId.get(id);
-    if (!sn) continue;
+  if (!s || !st) return;
+  const arch = st.doc.layout?.positions ?? {};
+  const view = matrixViewLayout?.positions;
+  const archLanes = st.doc.layout?.swimlanes ?? [];
+  const placed = new Map<string, { x: number; y: number }>();
+  const settled = settledPlaces();
+  for (const [id, , to] of changes) {
+    const drawn = s.byId.get(id);
+    const sn = drawn && { ...drawn, ...settled(drawn) };
+    if (!sn || sn.collapsed || sn.instanceOf || s.memberOf?.has(id) || s.groupsById?.has(id)) continue;
+    if (isContinuityType(sn.node.node_type)) continue;
+    const band = s.subBands?.find((b) => b.phaseId === to && !b.residual) ?? s.lanes.find((l) => l.id === to);
+    if (!band) continue;
+    // already in the lane: the hand put it there (a drag), or an undo/redo
+    // put the view back with the step (`setViewHistory`)
     const cy = sn.y + sn.h / 2;
     if (cy >= band.y && cy <= band.y + band.height) continue;
-    const old = s.lanes.find((l) => cy >= l.y && cy < l.y + l.height);
-    const off = old ? sn.y - old.y : 30;
-    const y = band.y + Math.min(Math.max(8, off), Math.max(8, band.height - sn.h - 8));
-    moveOneByDelta(id, 0, y - sn.y, false);
+    const at = freePlaceInBand(s, id, sn, band);
+    const dx = at.x - sn.x, dy = at.y - sn.y;
+    if (view?.[id]) view[id] = { ...view[id], x: view[id].x + dx, y: view[id].y + dy };
+    // the archive moves too, unless it is already in that epoch's lane
+    const a = arch[id];
+    const al = archLanes.find((l) => l.epoch_id === to);
+    if (a && !(al && a.y + a.h / 2 >= al.y && a.y + a.h / 2 <= al.y + al.height))
+      st.moveNodesBy([id], dx, dy, false);
+    placed.set(id, at);
   }
+  if (!placed.size || !view) { if (placed.size) scenesDirty = true; return; }
+  // MEASURED, as for a drop: the lanes' translations differ from lane to lane,
+  // so look where the node landed and correct the view by the difference (no
+  // slide while measuring: a sliding node is still where it was)
+  slideSuppressed++;
+  try {
+    for (let pass = 0; pass < 3; pass++) {
+      buildScenes();
+      let done = true;
+      for (const [id, want] of placed) {
+        const got = scenes.matrix?.byId.get(id);
+        if (!got || !view[id]) continue;
+        const dx = want.x - got.x, dy = want.y - got.y;
+        if (Math.abs(dx) + Math.abs(dy) <= 0.5) continue;
+        done = false;
+        view[id] = { ...view[id], x: view[id].x + dx, y: view[id].y + dy };
+      }
+      if (done) break;
+    }
+  } finally {
+    slideSuppressed--;
+  }
+  scenesDirty = true;
+}
+
+/** where the scene's objects are going: a sliding one is drawn where it was
+ *  (the slide of an undo, a layout), and it is going to its target */
+function settledPlaces(): (o: { x: number; y: number }) => { x: number; y: number } {
+  const to = new Map<object, { x: number; y: number }>();
+  for (const it of slideRun?.items ?? []) to.set(it.obj, { x: it.tx, y: it.ty });
+  return (o) => to.get(o) ?? { x: o.x, y: o.y };
+}
+
+/** the place a node takes in a band: its x and its height from the old lane's
+ *  top if free, else the nearest free one (sideways, then the band's rows) */
+function freePlaceInBand(s: Scene, id: string, sn: { x: number; y: number; w: number; h: number },
+                         band: { y: number; height: number }): { x: number; y: number } {
+  const cy = sn.y + sn.h / 2;
+  const old = s.lanes.find((l) => cy >= l.y && cy < l.y + l.height);
+  const off = old ? sn.y - old.y : 30;
+  // inside the lane as the re-stack measures it (8 under the top, LANE_PAD over
+  // the bottom): a node past either edge would grow the lane and push the others
+  const top = band.y + 8, bottom = Math.max(top, band.y + band.height - sn.h - LANE_PAD);
+  const y0 = Math.min(Math.max(top, band.y + off), bottom);
+  const settled = settledPlaces();
+  const obstacles: { x: number; y: number; w: number; h: number }[] = [];
+  for (const d of s.nodes) {
+    if (d.id === id || d.collapsed || isContinuityType(d.node.node_type)) continue;
+    const n = { ...d, ...settled(d) };
+    if (n.y > band.y + band.height || n.y + n.h < band.y) continue;
+    obstacles.push(n);
+  }
+  for (const g of s.groups ?? []) if (g.id !== id) obstacles.push({ ...g, ...settled(g) });
+  const free = (x: number, y: number): boolean => !obstacles.some((o) =>
+    x < o.x + o.w + LANE_GAP && o.x < x + sn.w + LANE_GAP && y < o.y + o.h + LANE_GAP && o.y < y + sn.h + LANE_GAP);
+  const rows = [y0];
+  for (let k = 1; k < 20; k++) {
+    for (const y of [y0 - k * (sn.h + LANE_GAP), y0 + k * (sn.h + LANE_GAP)])
+      if (y >= top && y <= bottom) rows.push(y);
+  }
+  const step = (sn.w + LANE_GAP) / 2;
+  for (let k = 0; k <= 80; k++)
+    for (const dx of k ? [k * step, -k * step] : [0])
+      for (const y of rows) if (free(sn.x + dx, y)) return { x: sn.x + dx, y };
+  return { x: sn.x, y: y0 };
 }
 
 /** The release of a node drag: reassign (if the target changed) and place, as
@@ -11041,8 +11173,8 @@ function renderDocumentDating(st: DocumentStore, host: HTMLElement, docId: strin
         if (e) st.deleteEdge(e);
       }
       // MICRO-GLIFI-OVERLAY-CONTINUITA p.4 · the document goes into its epoch's
-      // lane, and nothing else moves (it was a whole relayout of the Matrix)
-      if (v && st === store) placeInEpochLane([docId], v);
+      // lane, and nothing else moves (it was a whole relayout of the Matrix):
+      // MICRO-CORSIA-GRUPPI p.1 · `followEpochChanges`, as for every epoch change
     });
     const msg = v ? t("chain.datedIn", { d: String(d.name ?? docId), e: String(st.node(v)?.name ?? v) })
                   : t("chain.undated", { d: String(d.name ?? docId) });

@@ -8431,6 +8431,63 @@ test("GL4.positions", "GLIFI-OVERLAY p.4 · la posizione di un nodo la decide la
   return { pass, detail: { ...out, place, solo, errors } };
 });
 
+// ── MICRO-CORSIA-GRUPPI-STANZA · the GT16 (a COPY: `GLIFI_V4`, or `CORSIA_V4`) ──
+const CO_V4 = process.env.CORSIA_V4 ?? GL_V4;
+test("GL5.lane", "CORSIA p.1 · un'unità messa in un'altra epoca fuori dal trascinamento va nella corsia nuova e nient'altro si muove: GT16, dal Tabular USV151 da II A.D. a Post antiquity → nella corsia Post antiquity, stessa x, nessuna sovrapposizione, 0 altri nodi spostati, un passo di annulla; annulla → epoca e posizione di prima; ripristina → di nuovo lì; il BR di SU002 che finisce in Post antiquity si ridisegna sopra la sua unità in quella corsia, gli altri fermi", async () => {
+  if (!existsSync(CO_V4)) return { pass: false, detail: { missing: CO_V4 } };
+  const { p, ctx, errors } = await glOpen();
+  const D = (f, a) => p.evaluate(f, a);
+  const geom = () => D(() => { const g = window.__EM_DRAG__.matrixGeom(); for (const n of g.nodes) n.name = window.__EM_DRAG__.node(n.id)?.name; return g; });
+  const laneOf = (g, n) => g.lanes.find((l) => n.y + n.h / 2 >= l.y && n.y + n.h / 2 < l.y + l.height)?.label;
+  const snap = (g) => Object.fromEntries(g.nodes.map((n) => [n.id, [Math.round(n.x), Math.round(n.y)]]));
+  const moved = (a, b, skip) => Object.keys(a).filter((id) => !skip.includes(id) && b[id] && Math.abs(a[id][0] - b[id][0]) + Math.abs(a[id][1] - b[id][1]) > 1).length;
+  let g = await geom();
+  const u = g.nodes.find((n) => n.name === "USV151");
+  const pa = g.lanes.find((l) => l.label === "Post antiquity");
+  const out = { from: [Math.round(u.x), Math.round(u.y), laneOf(g, u)] };
+  const s0 = snap(g);
+  const bar = p.locator("[data-win] .tile-bar", { has: p.locator(".win-mode-toggle") }).filter({ hasText: /Tabular|Tabella/ }).first();
+  await bar.locator(".win-mode-toggle").click(); await p.waitForTimeout(300);
+  await p.locator('.dd-menu:not(.hidden) button[data-sheet="Units"]').first().click(); await p.waitForTimeout(800);
+  const undo0 = await D(() => window.__EM_DRAG__.undoDepth());
+  await p.selectOption(`select[data-col="EPOCH"][data-row="${u.id}"]`, pa.id);
+  await p.waitForTimeout(1500);
+  g = await geom();
+  const a = g.nodes.find((n) => n.id === u.id);
+  out.to = [Math.round(a.x), Math.round(a.y), laneOf(g, a)];
+  out.steps = (await D(() => window.__EM_DRAG__.undoDepth())) - undo0;
+  out.others = moved(s0, snap(g), [u.id]);
+  out.overlaps = g.nodes.filter((n) => n.id !== u.id && !n.isGroup && n.x < a.x + a.w && a.x < n.x + n.w && n.y < a.y + a.h && a.y < n.y + n.h).map((n) => n.name);
+  await D(() => window.__EM_DRAG__.undo()); await p.waitForTimeout(1500);
+  g = await geom();
+  const b = g.nodes.find((n) => n.id === u.id);
+  out.undo = [Math.round(b.x), Math.round(b.y), laneOf(g, b)];
+  out.undoEpoch = await D((id) => window.__EM_DRAG__.edgesOf("has_first_epoch").filter((e) => e.source === id).map((e) => window.__EM_DRAG__.node(e.target)?.name), u.id);
+  out.undoOthers = moved(s0, snap(g), []);
+  await D(() => window.__EM_DRAG__.redo?.()); await p.waitForTimeout(1500);
+  g = await geom();
+  const c = g.nodes.find((n) => n.id === u.id);
+  out.redo = [Math.round(c.x), Math.round(c.y), laneOf(g, c)];
+  await D(() => window.__EM_DRAG__.undo()); await p.waitForTimeout(1500);
+  // the BR: SU002 ends in Post antiquity (was XX sec)
+  g = await geom();
+  const su = g.nodes.find((n) => n.name === "SU002");
+  const br = (await D((id) => window.__EM_DRAG__.continuityOf(id), su.id)).br;
+  const sB = snap(g);
+  await D(([id, e]) => window.__EM_DRAG__.setContinuity(id, e, null, null), [su.id, pa.id]); await p.waitForTimeout(1500);
+  g = await geom();
+  const bn = g.nodes.find((n) => n.id === br);
+  out.br = bn ? { dx: Math.round(bn.x + bn.w / 2 - (su.x + su.w / 2)), lane: laneOf(g, bn), above: bn.y < su.y } : null;
+  out.brOthers = moved(sB, snap(g), [br]);
+  await p.screenshot({ path: SHOT("gl5-lane") }).catch(() => {});
+  await ctx.close();
+  const same = (x, y) => x && y && Math.abs(x[0] - y[0]) <= 1 && Math.abs(x[1] - y[1]) <= 1 && x[2] === y[2];
+  const pass = out.from[2] === "II A.D." && out.to[2] === "Post antiquity" && out.to[0] === out.from[0] && out.steps === 1
+    && out.others === 0 && !out.overlaps.length && same(out.undo, out.from) && out.undoEpoch.join() === "II A.D." && out.undoOthers === 0
+    && same(out.redo, out.to) && out.br?.lane === "Post antiquity" && out.br.dx === 0 && out.br.above && out.brOthers === 0 && !errors.length;
+  return { pass, detail: { ...out, errors } };
+});
+
 // ── run ─────────────────────────────────────────────────────────────────────
 const chosen = cases.filter((c) => !only.length || only.includes(c.id) || only.some((o) => c.id.startsWith(o + ".")));
 for (const c of chosen) {

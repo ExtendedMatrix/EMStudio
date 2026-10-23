@@ -57,7 +57,7 @@ export function newRestackMemo(): RestackMemo {
 export const GROUP_HEADER = 20;
 export const GROUP_PAD = 12;
 const CELL_GAP = 14;
-const LANE_PAD = 14;
+export const LANE_PAD = 14;
 const CLOSED_W = 150;
 const CLOSED_H = 40;
 
@@ -658,18 +658,21 @@ export function buildMatrixScene(
     );
     // MICRO-BADGE-PD-CRONOLOGIA · a dated document stands in the epoch of its
     // date (em-core): when that is not its group's lane, the group does not
-    // wrap it across the lanes — the membership is drawn as an edge
+    // wrap it across the lanes — the membership is drawn as an edge.
+    // MICRO-CORSIA-GRUPPI p.1 · the same for any member given another epoch (a
+    // unit of an activity moved to its new lane): the group stays in the lane
+    // where most of its members are, the one elsewhere is joined by its edge
     const laneOfSn = (id: string): number => {
       const sn = scene.byId.get(id)!;
       return laneOf.get(id) ?? laneIdxOfY(sn.y + sn.h / 2);
     };
     const docs = memberIds.filter((m) => scene.byId.get(m)!.node.node_type === "document");
-    if (docs.length && docs.length < memberIds.length) {
+    if (docs.length < memberIds.length && memberIds.length > 1) {
       const tally = new Map<number, number>();
       for (const m of memberIds)
         if (!docs.includes(m)) tally.set(laneOfSn(m), (tally.get(laneOfSn(m)) ?? 0) + 1);
       const home = [...tally].sort((a, b) => b[1] - a[1] || a[0] - b[0])[0]?.[0];
-      if (home != null) memberIds = memberIds.filter((m) => !docs.includes(m) || laneOfSn(m) === home);
+      if (home != null) memberIds = memberIds.filter((m) => laneOfSn(m) === home);
     }
     // document instances drawn inside this group count as members
     for (const inst of instancesByGroup.get(g.id) ?? []) memberIds.push(inst.id);
