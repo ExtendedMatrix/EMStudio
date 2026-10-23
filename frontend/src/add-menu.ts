@@ -69,7 +69,9 @@ export const SECTIONS: Section[] = [
     types: ["US", "USVn", "USVs", "USD", "TSU", "USN", "USNt", "SE", "BR"],
   },
   { label: "Special finds", types: ["SF", "VSF", "RSF"] },
-  { label: "Series", types: ["serSU", "serUSVn", "serUSVs", "serUSD"] },
+  // serVSF (node datamodel 1.6.35): the series of Virtual Special Finds, born
+  // from the menu as the other series are
+  { label: "Series", types: ["serSU", "serUSVn", "serUSVs", "serUSD", "serVSF"] },
   { label: "Paradata", types: ["property", "extractor", "combiner", "document"] },
   {
     label: "Groups",

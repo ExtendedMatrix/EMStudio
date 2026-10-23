@@ -139,7 +139,8 @@ for style in styles.values():                 # or declared by one
             if isinstance(path, str):
                 raster_only.add(pathlib.PurePath(path).stem)
 # Sharing that icons.ts spells out in FILE_ALIAS (BR → continuity, serUSVn/s →
-# serUSV): declared nowhere, deliberate all the same.
+# serUSV; serVSF → VSF, which the rules declare and is reachable anyway):
+# declared nowhere, deliberate all the same.
 reachable |= {"continuity", "serUSV"}
 
 # SHIFT-A (1 ott 2026) · a declaration that icons.ts NEVER READS makes nothing

@@ -4,7 +4,7 @@ import type { DocumentStore } from "./model";
 import { edgeStyle, nodeStyle } from "./palette";
 import { dataGlyphLabel, glyphFor, glyphSvg } from "./glyphs";
 import { activeTheme, canvasTheme } from "./theme";
-import { classOf, conceptParts, isGroupType, isStratigraphicType, nodeElements, propertyLabel, stratigraphicKindLabel, stratigraphicKindOf } from "./rules";
+import { classOf, conceptParts, isGroupType, isStratigraphicType, nodeElements, propertyLabel, stratigraphicKindLabel, stratigraphicKindOf, typeDescription, typeLabel } from "./rules";
 import { BADGE_RULES, resolveEffective, sourceLabel } from "./funnel";
 import type { AuthorityCandidate, EmEdge, EmNode } from "./types";
 import { qualiaList } from "./vocab";
@@ -303,6 +303,14 @@ export function renderInspector(
   chip.style.background = st.fill;
   chip.style.color = st.textColor;
   chip.style.borderColor = st.border;
+  // MICRO-SERVSF-FINE-ISTANZE p.1 · the chip says the type's name and, on
+  // hover, its definition — the datamodel's (1.6.34: SF, RSF «Repositioned
+  // Special Find», VSF; 1.6.35: serVSF), in the interface's language
+  {
+    const lab = typeLabel(node.node_type);
+    chip.dataset.typeLabel = lab;
+    chip.title = [lab !== node.node_type ? lab : "", typeDescription(node.node_type)].filter(Boolean).join("\n");
+  }
   // G9 · the node's glyph, 16 px (frameless under 24), before its type — and
   // for a node whose glyph comes from its data, the name of that glyph
   {

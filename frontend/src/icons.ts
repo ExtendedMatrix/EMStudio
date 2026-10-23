@@ -54,11 +54,16 @@ const STYLE_KEY: Record<string, string> = {
 };
 
 /** Icon files that several node types legitimately share. `BR` is drawn with
- *  the continuity glyph; the two series-of-virtual types share one drawing. */
+ *  the continuity glyph; the two series-of-virtual types share one drawing.
+ *  `serVSF` (node datamodel 1.6.35, the series of Virtual Special Finds) declares
+ *  the VSF's own files (`em_visual_rules` 1.6.39: «the drawings are the VSF's
+ *  until a glyph of its own is approved») — a declaration naming ANOTHER type's
+ *  file, which `declaredBasenames` refuses unless the sharing is spelled out here. */
 const FILE_ALIAS: Record<string, string> = {
   BR: "continuity",
   serUSVn: "serUSV",
   serUSVs: "serUSV",
+  serVSF: "VSF",
 };
 
 function asset(basename: string, rasterFirst = false): string | null {
@@ -132,7 +137,8 @@ const urlCache = new Map<string, string | null>();
  *   1. whatever `em_visual_rules.json` DECLARES, vector before raster;
  *   2. an SVG or PNG named after the node type itself — the convention most of
  *      the shipped files follow;
- *   3. the same for a known shared file (`BR` → continuity, serUSVn/s → serUSV).
+ *   3. the same for a known shared file (`BR` → continuity, serUSVn/s → serUSV,
+ *      serVSF → VSF).
  *
  * The declaration came LAST until POL4, to protect against two wrong fields:
  * `USVn` and `USN` both declare `src/2D/US.png`, and trusting that first would

@@ -9183,6 +9183,59 @@ test("GG3.viewer", "GEOGLOBO p.4 · il raster come documento nel Viewer: «Apri 
   return { pass: /EPSG:31700 · 0\.100 m\/px · 2000×2000 · 327200\.00, 448270\.00 – 327400\.00, 448470\.00/.test(out.caption ?? "") && out.img?.w === 2000 && !errors.length, detail: out };
 });
 
+// ── MICRO-SERVSF-FINE-ISTANZE ───────────────────────────────────────────────
+const SV_V4 = process.env.SERVSF_V4 ?? "/tmp/servsf/EM/TempluMare_v4.em.json";
+const svOpen = async (path = SV_V4) => {
+  const o = await open({ doc: null, locale: "en", w: 1728, h: 1000 });
+  await o.p.evaluate(([d, path]) => window.__EM_DRAG__.openAt(d, path), [JSON.parse(readFileSync(path, "utf8")), path]);
+  await o.p.waitForFunction(() => (window.__EM_SCENE__?.()?.nodes?.length ?? 0) > 50, null, { timeout: 60000 });
+  await o.p.waitForTimeout(1500);
+  return o;
+};
+
+test("SV1.servsf", "SERVSF-FINE-ISTANZE p.1 · la serie di VSF nell'interfaccia: GT16, Matrix, «Add» al cursore in XX sec, «VSF series» nel gruppo Series col suo cartellino (la ripetizione di uno stesso oggetto); nasce serVSF, disegnata nella Matrix e nel Grafo col glifo della VSF (ellisse, bordo #B19F61), l'Inspector dice «VSF series» (e nel cartellino del tipo la definizione), la Legenda EM la elenca (serVSF); il cartellino di un RSF sul canvas dice «Repositioned Special Find»", async () => {
+  if (!existsSync(SV_V4)) return { pass: false, detail: { missing: SV_V4 } };
+  const { p, ctx, errors } = await svOpen();
+  const D = (f, a) => p.evaluate(f, a);
+  const out = {};
+  const before = new Set(await D(() => window.__EM_DRAG__.viewNodeIds("matrix")));
+  const rr = await glFrame(p, 0.6, 3500, 150);
+  await p.mouse.click(rr.x + rr.w / 2, rr.y + rr.h / 2, { button: "right" }); await p.waitForTimeout(500);
+  await p.fill(".addm .addm-q", "VSF series"); await p.waitForTimeout(300);
+  out.items = await D(() => [...document.querySelectorAll(".addm .addm-item")].map((b) => b.textContent.trim()).slice(0, 4));
+  const item = p.locator(".addm .addm-item").first();
+  await item.hover(); await p.waitForTimeout(250);
+  out.card = await D(() => { const t = document.getElementById("tooltip"); return t && !t.classList.contains("hidden") ? t.textContent : null; });
+  await item.click(); await p.waitForTimeout(1500);
+  const born = (await D(() => window.__EM_DRAG__.viewNodeIds("matrix"))).find((id) => !before.has(id)) ?? null;
+  out.born = born ? await D((id) => ({ type: window.__EM_DRAG__.node(id)?.node_type, name: window.__EM_DRAG__.node(id)?.name }), born) : null;
+  out.style = await D(() => { const s = window.__EM_DRAG__.nodeStyleOf?.("serVSF"); return s ?? null; });
+  const insp = await D(() => window.__EM_DRAG__.wins().find((w) => w.type === "inspector")?.id);
+  if (born) { await D((id) => window.__EM_DRAG__.select(id), born); await p.waitForTimeout(500); }
+  out.inspector = insp ? await D((w) => { const c = document.querySelector(`.tile-area[data-win="${w}"] .insp-chip`); return c ? { label: c.dataset.typeLabel, title: c.title.slice(0, 80) } : null; }, insp) : null;
+  await p.screenshot({ path: SHOT("sv1-matrix") }).catch(() => {});
+  // the Graph view draws it too
+  out.inGraph = born ? await D(async (id) => { window.__EM_DRAG__.setGraphMode?.("graph"); await new Promise((r) => setTimeout(r, 1500)); return window.__EM_DRAG__.viewNodeIds("graph").includes(id); }, born) : null;
+  // Help ▸ EM legend
+  out.legend = await D(() => { document.getElementById("btn-help-legend")?.click();
+    const row = [...document.querySelectorAll(".em-legend .gl-node, .em-legend .gl-item")].find((r) => r.querySelector(".gl-code")?.textContent === "serVSF");
+    const txt = row ? row.textContent : null; document.querySelector(".em-legend .modal-foot button")?.click(); return txt; });
+  // an RSF's card on the canvas
+  await D(() => window.__EM_DRAG__.setGraphMode?.("matrix")); await p.waitForTimeout(1200);
+  const rsf = await D(() => window.__EM_DRAG__.matrixGeom().nodes.find((n) => n.type === "RSF"));
+  if (rsf) {
+    await glFrame(p, 0.8, rsf.x + rsf.w / 2, rsf.y + rsf.h / 2);
+    const b = await D((id) => window.__EM_DRAG__.winScene(window.__EM_DRAG__.wins().find((w) => w.type === "graph").id).boxes.find((x) => x.id === id), rsf.id);
+    if (b) { await p.mouse.move(b.x + b.w / 2, b.y + b.h / 2); await p.waitForTimeout(900); }
+    out.rsfCard = await D(() => { const t = document.getElementById("tooltip"); return t && !t.classList.contains("hidden") ? t.textContent.slice(0, 160) : null; });
+  }
+  await ctx.close();
+  const pass = out.items[0]?.includes("VSF series") && /repetition/i.test(out.card ?? "")
+    && out.born?.type === "serVSF" && out.style?.shape === "ellipse" && String(out.style?.border).toUpperCase() === "#B19F61"
+    && out.inspector?.label === "VSF series" && /repetition/i.test(out.inspector?.title ?? "") && out.inGraph === true && /VSF series/.test(out.legend ?? "") && /Repositioned Special Find/.test(out.rsfCard ?? "") && !errors.length;
+  return { pass, detail: { ...out, errors } };
+});
+
 // ── run ─────────────────────────────────────────────────────────────────────
 const chosen = cases.filter((c) => !only.length || only.includes(c.id) || only.some((o) => c.id.startsWith(o + ".")));
 for (const c of chosen) {

@@ -641,7 +641,7 @@ import {
   DECLARED_KINDS, landStep, parentLabel, type DeclaredKind, type DeclaredLevel,
 } from "./declared";
 import { adaptDraft } from "./views/stamps";
-import { ancestorsOf, dtcFamiliesOf, dtcKindFamily, dtcKindsFor, isContinuityType, isVirtualType, propertyLabel } from "./rules";
+import { ancestorsOf, dtcFamiliesOf, dtcKindFamily, dtcKindsFor, isContinuityType, isVirtualType, propertyLabel, typeLabel as datamodelTypeLabel } from "./rules";
 import { continuityLinks, dropContinuity, END_REASONS, planContinuity, type EndReason } from "./continuity";
 import { digestOf, isStampPath, stampPathFor } from "./stamp";
 // DTCEMS3 · il verbale d'ingestione: niente entra nello store senza che si
@@ -2580,6 +2580,10 @@ window.__EM_SCENE__ = () => {
   /** MICRO-PULIZIA p.5 · the Matrix as drawn, in world units: the boxes (a
    *  group's member carries its group), the lanes, the groups — what the
    *  layout's voids are measured on */
+  /** MICRO-SERVSF-FINE-ISTANZE p.1 · the focused graph window's projection, and
+   *  the style a node type is drawn with (shape, border, fill: `palette.ts`) */
+  setGraphMode: (v: ViewKind) => setView(v),
+  nodeStyleOf: (nodeType: string) => { const s = nodeStyle(nodeType); return { shape: s.shape, border: s.border, fill: s.fill }; },
   matrixGeom: () => {
     const s = scenes.matrix;
     if (!s) return null;
@@ -24164,6 +24168,14 @@ const npanelRenderers = new Map<string, () => void>();
 function renderSpaceNPanels(): void { for (const f of npanelRenderers.values()) f(); }
 
 /** USVs → USV/s: the abbreviation the Matrix's legend uses */
+/** MICRO-SERVSF-FINE-ISTANZE p.1 · a node's card on the canvas names its type
+ *  in words beside the code, «[RSF · Repositioned Special Find]» — a
+ *  stratigraphic type only (the others' code is already the word) */
+function typeWords(nodeType: string | undefined): string {
+  if (!nodeType || !isStratigraphicType(nodeType)) return "";
+  const lab = datamodelTypeLabel(nodeType);
+  return lab && lab !== nodeType ? ` · ${lab}` : "";
+}
 function unitTypeLabel(type: string): string {
   const m = /^(ser)?USV([sn])$/.exec(type);
   return m ? `${m[1] ?? ""}USV/${m[2]}` : type;
@@ -37454,7 +37466,7 @@ function wireGraphCanvas(canvas: HTMLCanvasElement, winId: string): void {
       if (plab && plab.label !== plab.technical) (tooltip.children[0] as HTMLElement).textContent += ` — ${plab.label}`;
       (tooltip.children[1] as HTMLElement).textContent = showId
         ? `[${hit.node.node_type}] ${hit.id}`
-        : `[${hit.node.node_type}${plab ? ` · ${plab.technical}` : ""}]`;
+        : `[${hit.node.node_type}${plab ? ` · ${plab.technical}` : typeWords(hit.node.node_type)}]`;
       (tooltip.children[3] as HTMLElement).textContent = String(
         hit.node.description ?? "",
       ).slice(0, 220);

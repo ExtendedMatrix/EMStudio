@@ -433,7 +433,7 @@ const QUALIA_TO_RUNG: Record<string, string> = {
   hypothetical: "asserted",
 };
 
-const VIRTUAL = /^(USV|USVn|USVs|USD|VSF|serUSV|serUSD)/;
+const VIRTUAL = /^(USV|USVn|USVs|USD|VSF|serUSV|serUSD|serVSF)/;
 
 export interface Certainty {
   rung: string;
