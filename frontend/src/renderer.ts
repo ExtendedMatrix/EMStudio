@@ -1470,7 +1470,9 @@ export function render(
     for (const n of shown) {
       if (n.collapsed) continue;
       if (!state.peerSelections.has(n.id)) continue;
-      ctx.strokeRect(n.x - 4, n.y - 4, n.w + 8, n.h + 8);
+      // MICRO-GLIFI-OVERLAY-CONTINUITA p.5 · around what is drawn, not the box
+      const vb = visibleBoxOf(n);
+      ctx.strokeRect(vb.x - 4, vb.y - 4, vb.w + 8, vb.h + 8);
     }
     ctx.restore();
   }
@@ -1547,7 +1549,9 @@ export function render(
     const pad = 4 / vp.scale;
     for (const n of shown) {
       if (!state.storyCited.has(n.instanceOf ?? n.id)) continue;
-      ctx.strokeRect(n.x - pad, n.y - pad, n.w + pad * 2, n.h + pad * 2);
+      // p.5 · around what is drawn
+      const vb = visibleBoxOf(n);
+      ctx.strokeRect(vb.x - pad, vb.y - pad, vb.w + pad * 2, vb.h + pad * 2);
     }
     ctx.restore();
   }

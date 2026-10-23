@@ -23,6 +23,7 @@
 import rules from "./assets/em_visual_rules.json";
 import { ICON_NODE_TYPES } from "./icons";
 import { HDTO_GLYPHS, HDTO_GLYPH_TYPES } from "./hdto-glyphs";
+import { dataGlyphKey } from "./glyphs";
 import type { NodeStyle } from "./palette";
 
 /**
@@ -81,11 +82,15 @@ export function glyphAspect(
   // MICRO-PULIZIA p.3 · the HDT-O glyphs (the graph among them): square
   if (HDTO_GLYPH_TYPES.has(nodeType) && !GLYPHS[nodeType]) return HDTO_GLYPHS[nodeType].aspect;
   const kind = data?.["dtc_kind"];
+  // MICRO-GLIFI-OVERLAY-CONTINUITA p.5 · …and a glyph a node takes from its DATA
+  // (the proxy, the versions, the tileset, the RM container: G9), in the
+  // renderer's order (`glyphFor`): its plate was the node's box
+  const dk = !ICON_NODE_TYPES.has(nodeType) && typeof kind !== "string" ? dataGlyphKey(nodeType, data) : null;
   const entry = ICON_NODE_TYPES.has(nodeType)
     ? GLYPHS[nodeType]
     : typeof kind === "string"
       ? GLYPHS[`dtc:${kind}`]
-      : undefined;
+      : dk ? GLYPHS[dk] : undefined;
   const a = entry?.aspect;
   return typeof a === "number" && Number.isFinite(a) && a > 0 ? a : null;
 }
@@ -125,6 +130,9 @@ export function drawsAsGlyph(
     // the DTC profile picks a glyph per NODE, not per type: a plain `link` is a
     // chain, a `link` with a kind is a photograph or a mesh (EM2)
     (!!data && data["dtc_kind"] !== undefined) ||
+    // MICRO-GLIFI-OVERLAY-CONTINUITA p.5 · a glyph from the node's DATA (G9):
+    // the proxy, the versions, the tileset, the RM container drawn as a node
+    !!dataGlyphKey(nodeType, data) ||
     nodeType === "document" ||
     nodeType === "property"
   );

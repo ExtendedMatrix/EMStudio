@@ -476,6 +476,8 @@ import {
   type Scene,
 } from "./scene";
 import { HIT_TOL_PX } from "./shape-geom";
+import { drawnGlyphRect, plateOf } from "./plate";
+import { glyphFor } from "./glyphs";
 import { GROUP_HEADER, GROUP_PAD, newRestackMemo } from "./views/matrix";
 import { setupSearch } from "./search";
 import {
@@ -2520,6 +2522,24 @@ window.__EM_SCENE__ = () => {
     const next = { ...cur, master: st.master ?? cur.master, off: st.off ? [...st.off] : [...cur.off] };
     setOverlays(v, typeof st.keepFar === "boolean" ? withHideFar(next, !st.keepFar) : next);
   },
+  /** MICRO-GLIFI-OVERLAY-CONTINUITA p.5 · every glyph node of a view's scene:
+   *  the rect its glyph is drawn in and its plate (world units) */
+  glyphPlates: (mode: ViewKind) => {
+    const s = mode === "matrix" ? scenes.matrix : mode === "graph" ? scenes.graph : mode === "dtc" ? scenes.dtc
+      : (scenes as Record<string, Scene | null | undefined>)[mode] ?? null;
+    if (!s) return null;
+    const liquid = isLiquid(s);
+    return s.nodes.filter((n) => !n.collapsed && !s.groupsById?.has(n.id)).map((n) => {
+      const data = n.node.data as Record<string, unknown> | undefined;
+      const g = liquid ? { x: n.x, y: n.y, w: n.w, h: n.w } : drawnGlyphRect(n);
+      if (!g) return null;
+      const pl = plateOf(s, n);
+      const key = n.node.node_type === "document" ? "document" : (glyphFor(n.node.node_type, data)?.key ?? n.node.node_type);
+      // the liquid Graph's plate used to be `visibleBoxOf` (a square, ≤ 30 for a glyph type)
+      const vb = liquid ? visibleBoxOf(n) : null;
+      return { id: n.id, type: n.node.node_type, key, box: [n.w, n.h], glyph: [g.w, g.h], plate: [pl.w, pl.h], round: pl.round, ...(vb ? { was: [vb.w, vb.h] } : {}) };
+    }).filter(Boolean);
+  },
   /** MICRO-GLIFI-OVERLAY-CONTINUITA p.4 · units to another epoch (the lane
    *  drop's and the Inspector's gesture), and the Matrix's soloing camera */
   setFirstEpoch: (ids: string[], epochId: string) => store?.setFirstEpoch(ids, epochId),
@@ -2959,7 +2979,8 @@ function paintGraphWindow(p: GraphPaint): void {
       // selection is the ring on the "PD" tablet, drawn by the renderer).
       if (!sn || sn.collapsed) continue;
       // TOCCARE · the ring goes around what is DRAWN (visibleBoxOf), like the click
-      const vb = visibleBoxOf(sn);
+      // MICRO-GLIFI-OVERLAY-CONTINUITA p.5 · the plate: a disc in the Graph
+      const vb = plateOf(s, sn);
       const x = vb.x * vp.scale + vp.x - 3;
       const y = vb.y * vp.scale + vp.y - 3;
       const bw = vb.w * vp.scale + 6;
@@ -2969,6 +2990,13 @@ function paintGraphWindow(p: GraphPaint): void {
       c.fillStyle = active ? th.selectWash : th.selectWashSoft;
       c.strokeStyle = active ? th.accent : th.selectSoft;
       c.lineWidth = active ? 3 : 2;
+      if (vb.round) {
+        c.beginPath();
+        c.arc(x + bw / 2, y + bh / 2, bw / 2, 0, Math.PI * 2);
+        c.fill();
+        c.stroke();
+        continue;
+      }
       c.fillRect(x, y, bw, bh);
       c.strokeRect(x, y, bw, bh);
     }
@@ -2986,7 +3014,13 @@ function paintGraphWindow(p: GraphPaint): void {
     c.setLineDash([6, 4]);
     for (const sn of s.nodes) {
       if (sn.collapsed || !isVolatile(store.node(sn.id))) continue;
-      const vb = visibleBoxOf(sn);
+      const vb = plateOf(s, sn);
+      if (vb.round) {
+        c.beginPath();
+        c.arc(vb.x * vp.scale + vp.x + vb.w * vp.scale / 2, vb.y * vp.scale + vp.y + vb.h * vp.scale / 2, vb.w * vp.scale / 2 + 3, 0, Math.PI * 2);
+        c.stroke();
+        continue;
+      }
       c.strokeRect(
         vb.x * vp.scale + vp.x - 3,
         vb.y * vp.scale + vp.y - 3,
