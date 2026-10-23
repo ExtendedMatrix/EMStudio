@@ -27932,7 +27932,8 @@ const bridgeBlobCache = new Map<string, string>();
 async function bridgeBlobUrl(url: string): Promise<string> {
   // MICRO-SPAZIO-FIRMATO · the room's store: the same blob, fetched signed
   if (ownedByNode(url)) return await nodeBlobUrl(url);
-  if (!url.includes("/fs/file?path=")) return url;   // not ours: leave it alone
+  // MICRO-GEOGLOBO · a GeoTIFF's preview reads the disk too: the same gate, the same blob
+  if (!url.includes("/fs/file?path=") && !url.includes("/geo/raster-preview?")) return url;   // not ours: leave it alone
   const cached = bridgeBlobCache.get(url);
   if (cached) return cached;
   const res = await fetch(url);
@@ -34311,9 +34312,9 @@ function drawViewerCollection(
   const item = collection.items[index];
   stage.appendChild(viewerItemElement(item, stage));
   const label = (): string =>
-    item.pages
+    (item.pages
       ? `${item.title} — ${t("viewer.pages", { n: String(item.pages) })}`
-      : item.title;
+      : item.title) + (item.geo ? ` — ${item.geo}` : "");
   caption.textContent = label();
   // The page count costs a fetch, so it is read for the PDF you are LOOKING at,
   // not for every PDF in the folder: a collection is built from a listing, and a

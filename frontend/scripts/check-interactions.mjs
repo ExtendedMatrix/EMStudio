@@ -8762,6 +8762,25 @@ test("GG2.layers", "GEOGLOBO p.2–4 · il pannello «Layers»: un'ortofoto GeoT
   return { pass, detail: out };
 });
 
+test("GG3.viewer", "GEOGLOBO p.4 · il raster come documento nel Viewer: «Apri nel Viewer» dal pannello mostra la GeoTIFF in piano (l'anteprima PNG del bridge, nel suo CRS) e la didascalia dice il georiferimento — EPSG:31700 · 0.100 m/px · 2000×2000 · gli angoli", async () => {
+  if (!existsSync(GEO_V4) || !existsSync(GEO_ORTHO)) return { pass: false, detail: { missing: [GEO_V4, GEO_ORTHO].filter((f) => !existsSync(f)) } };
+  const { p, ctx, errors } = await geoOpen();
+  await geoOn(p);
+  await p.click('.scn-bar [data-geo="panel"]');
+  await p.fill(".geo-panel [data-geo-raster]", GEO_ORTHO);
+  await p.click('.geo-panel [data-geo-act="add-raster"]');
+  await p.waitForFunction(() => (document.querySelector(".scn-host").__geoSpace().layers ?? []).some((l) => l.kind === "raster"), null, { timeout: 60000 });
+  await p.click(`.geo-panel [data-geo-layer="raster:${GEO_ORTHO}"] [data-geo-act="viewer"]`);
+  await p.waitForFunction(() => [...document.querySelectorAll("*")].some((e) => e.childElementCount === 0 && /EPSG:31700 ·/.test(e.textContent ?? ""))
+    && [...document.querySelectorAll("img.viewer-media")].some((i) => i.naturalWidth > 0), null, { timeout: 30000 }).catch(() => null);
+  const out = await p.evaluate(() => ({
+    caption: [...document.querySelectorAll("*")].map((e) => (e.childElementCount === 0 ? e.textContent : "")).find((t) => /EPSG:31700 ·/.test(t ?? "")) ?? null,
+    // the picture: the bridge's PNG (fetched as a blob), drawn flat
+    img: [...document.querySelectorAll("img.viewer-media")].map((i) => ({ alt: i.alt, w: i.naturalWidth, h: i.naturalHeight })).find((i) => /ortho/.test(i.alt)) ?? null }));
+  out.errors = errors;
+  await ctx.close();
+  return { pass: /EPSG:31700 · 0\.100 m\/px · 2000×2000 · 327200\.00, 448270\.00 – 327400\.00, 448470\.00/.test(out.caption ?? "") && out.img?.w === 2000 && !errors.length, detail: out };
+});
 
 // ── run ─────────────────────────────────────────────────────────────────────
 const chosen = cases.filter((c) => !only.length || only.includes(c.id) || only.some((o) => c.id.startsWith(o + ".")));

@@ -126,6 +126,9 @@ export interface CollectionItem {
    *  a badge; phase 2 turns it into that many ITEMS, which is why the field is
    *  on the item and not on the collection. */
   pages?: number;
+  /** MICRO-GEOGLOBO · a georeferenced raster (GeoTIFF): drawn flat from the
+   *  bridge's preview (a browser decodes no TIFF), its georeference in words */
+  geo?: string;
 }
 
 export interface Collection {
@@ -152,6 +155,7 @@ export function kindOfExt(ext: string): ItemKind {
 }
 
 export function isDecodable(item: CollectionItem): boolean {
+  if (item.geo) return true;
   const ext = (item.path ?? item.url).split(".").pop()?.toLowerCase() ?? "";
   return item.kind !== "other" && !UNDECODABLE.has(ext.replace(/[?#].*$/, ""));
 }
@@ -173,6 +177,7 @@ export async function collectionFromFolder(path: string): Promise<Collection> {
     kind: kindOfExt(e.ext),
     path: e.path,
   }));
+  await Promise.all(items.map((i) => withGeo(i, bridge)));
   const skipped = listing.entries.filter(
     (e) => e.type === "file" && kindOfExt(e.ext) === "other",
   ).length;
@@ -227,7 +232,37 @@ export async function collectionFromFile(path: string): Promise<Collection> {
     path,
   };
   if (item.kind === "pdf") item.pages = (await pdfPageCount(item.url)) ?? undefined;
+  await withGeo(item, await base());
   return { title: name, items: [item], source: { kind: "file", ref: path } };
+}
+
+/** MICRO-GEOGLOBO · a .tif that is a GeoTIFF: the bridge reads its georeference
+ *  (`/geo/raster-info`) and draws it as a PNG (`/geo/raster-preview`), in its
+ *  own CRS — the original is the document, untouched. A TIFF without a
+ *  georeference, or a bridge without the route, stays as it was (undecodable). */
+export function geoLine(info: Record<string, unknown>): string {
+  const n = (v: unknown, d = 2) => Number(v).toFixed(d);
+  const c = (info.corners as [number, number][] | undefined) ?? [];
+  const parts = [`EPSG:${info.epsg}`, `${n(info.pixel_size, 3)} m/px`, `${info.width}×${info.height}`];
+  if (c.length === 4) parts.push(`${n(c[0][0])}, ${n(c[0][1])} – ${n(c[2][0])}, ${n(c[2][1])}`);
+  const e = info.elevation as [number, number] | undefined;
+  if (e) parts.push(`${n(e[0], 1)}–${n(e[1], 1)} m`);
+  return parts.join(" · ");
+}
+
+async function withGeo(item: CollectionItem, bridge: string): Promise<void> {
+  const ext = (item.path ?? "").split(".").pop()?.toLowerCase() ?? "";
+  if (!item.path || (ext !== "tif" && ext !== "tiff")) return;
+  try {
+    const r = await fetch(`${bridge}/geo/raster-info?path=${encodeURIComponent(item.path)}`);
+    if (!r.ok) return;
+    const info = (await r.json()) as Record<string, unknown>;
+    if (!info.ok) return;
+    item.url = `${bridge}/geo/raster-preview?path=${encodeURIComponent(item.path)}&max=4096`;
+    item.geo = geoLine(info);
+  } catch {
+    /* no bridge, or an older one: the TIFF stays undecodable, as before */
+  }
 }
 
 /** A URL a node already carries → a collection of one, no bridge involved. */
