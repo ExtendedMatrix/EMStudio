@@ -106,7 +106,7 @@ export interface CrsInfo {
   kind?: string;
   deprecated?: boolean;
   /** the codes PROJ's database names as its replacement (deprecation, supersession) */
-  replacements?: Array<{ epsg: number; name: string; same_grid: boolean; source: string }>;
+  replacements?: Array<{ epsg: number; name: string; same_grid: boolean; source: string; to_wgs84?: { name: string; accuracy: number | null; ballpark: boolean } | null }>;
   /** the transformation to WGS 84 PROJ uses at the shift, and its accuracy (m; null: unknown) */
   to_wgs84?: { name: string; accuracy: number | null; ballpark: boolean } | null;
   error?: string;

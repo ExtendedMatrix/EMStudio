@@ -44,6 +44,8 @@ export interface InspectorCallbacks {
   epochInstances?: (nodeId: string) => HTMLElement | null;
   /** MICRO-UN-POSTO · open the site selector on the graph node */
   onSetSitePosition?: () => void;
+  /** MICRO-GEOREF-GRAFO · the graph's georeference (and the map pin's proposal), under the site position */
+  geoSections?: (host: HTMLElement) => void;
   onClose: () => void;
   onDeleteNode: (nodeId: string) => void;
   onDeleteEdge: (edge: EmEdge) => void;
@@ -1314,6 +1316,7 @@ export function renderInspector(
     }
     root.appendChild(box);
     renderSitePosition(root, store, cb.onSetSitePosition, true);
+    cb.geoSections?.(root);
   }
 
   // connections grouped by edge type and direction, deletable

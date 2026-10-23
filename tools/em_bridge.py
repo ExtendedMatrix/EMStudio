@@ -1560,7 +1560,10 @@ def _load_s3dgraphy(s3dgraphy_src: "pathlib.Path | None"):
 #: 37 = every HTTPS request through `em_net` (certifi's CAs: the packaged
 #: bridge verified nothing), a failed tile's reason in X-EM-Tile, and
 #: /tiles/failures for the «Livelli» panel — MICRO-BRIDGE-CERTIFICATI.
-BRIDGE_LEVEL = 37   # 30 also = /validate
+#: 38 = /geo/crs-info (a CRS as PROJ's database knows it: its name, a deprecated
+#: code and its replacement, the accuracy of the operation to WGS 84 at the
+#: shift) and /geo/convert-shift — MICRO-GEOREF-GRAFO.
+BRIDGE_LEVEL = 38   # 30 also = /validate
 
 
 # ── FONTE · the rules of «la proprietà come fonte», asked of the library ──────
@@ -4456,6 +4459,12 @@ def make_handler(api):
                     target = int(one("target")) if one("target") else None
                     info = G.raster_info(path, epsg, target)
                     self._json(info, 200 if info.get("ok") else 422)
+                elif route == "/geo/crs-info":
+                    # MICRO-GEOREF-GRAFO · the georeference's CRS, read from PROJ's database
+                    x = float(one("x")) if one("x") else None
+                    y = float(one("y")) if one("y") else None
+                    info = G.crs_info(int(one("epsg")), x, y)
+                    self._json(info, 200 if info.get("ok") else 422)
                 elif route == "/geo/raster-preview":
                     path = self._geo_inside(one("path"))
                     if not path or not os.path.isfile(_long_path(path)):
@@ -4496,6 +4505,10 @@ def make_handler(api):
                 elif route == "/geo/frame":
                     self._json(G.site_frame(int(body["epsg"]), float(body["x"]), float(body["y"]),
                                             float(body.get("z") or 0), float(body.get("rotation") or 0)))
+                elif route == "/geo/convert-shift":
+                    # MICRO-GEOREF-GRAFO · a shift to another CRS (the same grid: the same numbers)
+                    out = G.convert_point(int(body["from"]), int(body["to"]), float(body["x"]), float(body["y"]))
+                    self._json(out, 200 if out.get("ok") else 422)
                 elif route == "/geo/raster-import":
                     path = self._geo_inside(body.get("path"))
                     if not path or not os.path.isfile(_long_path(path)):

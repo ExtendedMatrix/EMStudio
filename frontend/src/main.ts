@@ -247,6 +247,7 @@ import { diagnose, errorText, FailureLog, isNetworkError, type LoadFailure, type
 import { chooseVersion, SCENE_USES, USES } from "./asset-versions";
 import { mountGeoSpace, type GeoSpaceDeps } from "./geo-space";
 import { georefSummary } from "./georef";
+import { proposalNow, proposeConversion, renderGeorefSection, type GeorefDeps } from "./georef-panel";
 import { mountSpaceScene, type SceneItem, type SceneStats, type SceneMark, type SceneMenuRequest, type SceneView, type SpaceSceneHandle } from "./scene3d";
 import { ladderOf, versionChoices, viewerSourceLine, viewerTargetOf,
          type VersionChoice, type ViewerPart, type ViewerTarget, type WeighedVersion } from "./viewer-node";
@@ -3629,6 +3630,7 @@ function renderInspectorInto(host: HTMLElement): void {
     {
       onJump: (id) => jumpTo(id),     // FONTE · a jump: «Indietro» comes back
       onSetSitePosition: () => openSitePickerOnGraph(),
+      geoSections: (h) => renderGeoSections(h, owning),
       onClose: () => select(null),
       // DAG · act on the document the thing LIVES in: an acquisition deleted
       // from the DTC canvas is deleted from the corpus, and `store!` there would
@@ -6913,6 +6915,8 @@ function loadDocument(
     const g = loaded.geoPositionNode();
     logInfo(t("georef.joined", { id: String(g?.id ?? "") }), g ? [g.id] : []);
   }
+  // …and a deprecated CRS, or one PROJ reaches only by a ballpark: the conversion proposed
+  if (loaded.geoPositionNode()) proposeGeorefConversion(loaded);
   const declared = versionBanner(d);
   logInfo(
     `loaded "${sourceName}" — ${d.graph.nodes.length} nodes, ` +
@@ -13145,7 +13149,7 @@ async function bridgeUrl(): Promise<string> {
   return _bridgeUrl;
 }
 /** The bridge level this editor expects (`BRIDGE_LEVEL` in tools/em_bridge.py). */
-const BRIDGE_LEVEL_WANTED = 37;   // 37 = HTTPS through em_net, /tiles/failures (MICRO-BRIDGE-CERTIFICATI); 36 = /tiles/*, /geo/* (MICRO-GEOGLOBO); 31 = /property-source (FONTE); 32 = /room-import, «Bring into a room» through the engine; 33 = /fs/write (MICRO-SPAZIO-3D); 34 = /fs/doc, /fs/probe (MICRO-PERCORSI-WINDOWS); 35 = /fs/collect, /health's pid (MICRO-WINDOWS-MODELLI)
+const BRIDGE_LEVEL_WANTED = 38;   // 38 = /geo/crs-info, /geo/convert-shift (MICRO-GEOREF-GRAFO); 37 = HTTPS through em_net, /tiles/failures (MICRO-BRIDGE-CERTIFICATI); 36 = /tiles/*, /geo/* (MICRO-GEOGLOBO); 31 = /property-source (FONTE); 32 = /room-import, «Bring into a room» through the engine; 33 = /fs/write (MICRO-SPAZIO-3D); 34 = /fs/doc, /fs/probe (MICRO-PERCORSI-WINDOWS); 35 = /fs/collect, /health's pid (MICRO-WINDOWS-MODELLI)
 /** MICRO-INSTALLER-PULSANTE p.3 · the bridge that answers says its level; one
  *  that differs from BRIDGE_LEVEL_WANTED is said in the Log (its url, pid, since
  *  when) and in a notice — once per bridge. Asked at start, while the sidecar
@@ -17616,6 +17620,8 @@ function readShiftInto(st: DocumentStore, file?: File): void {
       refreshIssues();
       refreshInspector();
       draw();
+      // MICRO-GEOREF-GRAFO · a deprecated or ballpark CRS read from the file: the conversion proposed
+      window.setTimeout(() => proposeGeorefConversion(st), 5200);
     } catch (e) {
       // DEV30 U9 · a fetch that fails outright (WebKit's «Load failed») says
       // which bridge and why, not the browser's two words
@@ -17634,6 +17640,34 @@ function readShiftInto(st: DocumentStore, file?: File): void {
   input.onchange = () => { const f = input.files?.[0]; input.remove(); if (f) void go(f); };
   document.body.appendChild(input);
   input.click();
+}
+
+/** MICRO-GEOREF-GRAFO p.2 · what the «Georeferencing» section and the
+ *  conversion's proposal need of the app: the bridge (when it answers), the
+ *  reading of a SHIFT.txt, a download, the Log, the toasts */
+function georefDeps(st: DocumentStore): GeorefDeps {
+  return {
+    bridge: async () => {
+      const b = await bridgeUrl().catch(() => null);
+      return b && await fetch(`${b}/health`).then((r) => r.ok, () => false) ? b : null;
+    },
+    importShift: () => readShiftInto(st),
+    download: (name, text) => downloadBlob(new Blob([text], { type: "text/plain" }), name, "text/plain"),
+    redraw: () => { if (store === st) refreshInspector(); },
+    log: (m, ids) => logInfo(m, ids),
+    done: (m) => { toastUndo(m, st); refreshIssues(); refreshInspector(); draw(); },
+    say: (m) => toast(m),
+  };
+}
+/** MICRO-GEOREF-GRAFO · the graph's georeference sections, under its site position */
+function renderGeoSections(host: HTMLElement, st: DocumentStore): void {
+  renderGeorefSection(host, st, georefDeps(st));
+}
+/** …the conversion proposed (a deprecated CRS, a ballpark operation): once, at the
+ *  opening and after a SHIFT.txt */
+function proposeGeorefConversion(st: DocumentStore): void {
+  void proposeConversion(st, georefDeps(st), (msg, answers) => { if (store === st) toastAsk(msg, answers, 20000); })
+    .then((said) => { if (said && store === st) { refreshIssues(); refreshInspector(); } });
 }
 
 /** CAMPAGNA · the corrections of the Warnings view, one per rule, each one
@@ -17664,6 +17698,7 @@ function issueFixers(st: DocumentStore): IssueFixers {
     // DEV29 B8 · «Read a SHIFT.txt…»: s3Dgraphy reads it (bridge /read-shift),
     // the GeoPositionNode takes the CRS and the shift, one undo step
     readShift: { label: t("issues.readShift"), run: () => readShiftInto(st) },
+    crsProposal: () => proposalNow(st, georefDeps(st)),
     // DEV30 D3 · the same lot, two events, LINKED: the later cites the earlier
     // (`dtc_had_input` event → event). Nothing is merged (E.D., 2 Oct 2026:
     // the capture of 2018 and the download of 2026 are two acts). One undo step.
@@ -27126,6 +27161,7 @@ function renderStudyInto(body: HTMLElement): void {
     resolveAuthority: resolveAuthority,
     searchTwins: (term) => searchTwins(term),
     onSetSitePosition: () => openSitePickerOnGraph(),
+    geoSections: (h) => renderGeoSections(h, store!),
     otherStudyCodes: () => otherStudyCodes(),
   });
 }

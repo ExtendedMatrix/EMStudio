@@ -164,7 +164,19 @@ const O = { origin: "http://localhost:5173" };
 try {
   for (let i = 0; i < 100; i++) { try { if ((await fetch(`${B}/health`)).ok) break; } catch { /* starting */ } await new Promise((r) => setTimeout(r, 150)); }
   const health = await (await fetch(`${B}/health`)).json();
-  eq(health.bridge_level, 37, "the bridge's level: 37 (/tiles, /geo, /tiles/failures)");
+  eq(health.bridge_level, 38, "the bridge's level: 38 (/tiles, /geo, /tiles/failures, /geo/crs-info)");
+  // MICRO-GEOREF-GRAFO · the GT16's CRS, as PROJ's database knows it
+  const c31700 = await (await fetch(`${B}/geo/crs-info?epsg=31700&x=327372.56&y=448682.65`, { headers: O })).json();
+  eq([c31700.deprecated, c31700.replacements.map((r) => [r.epsg, r.same_grid]), c31700.to_wgs84?.ballpark, c31700.to_wgs84?.accuracy],
+    [true, [[3844, true]], true, null], "/geo/crs-info: EPSG:31700 is deprecated, PROJ's database gives 3844 (the same grid), its operation a ballpark of unknown accuracy");
+  eq([c31700.replacements[0].to_wgs84?.name, c31700.replacements[0].to_wgs84?.accuracy], ["Pulkovo 1942(58) to WGS 84 (19)", 3], "…3844's operation at the shift: Pulkovo 1942(58) to WGS 84 (19), 3 m");
+  const c3844 = await (await fetch(`${B}/geo/crs-info?epsg=3844&x=327372.56&y=448682.65`, { headers: O })).json();
+  eq([c3844.name, c3844.deprecated, c3844.to_wgs84?.ballpark], ["Pulkovo 1942(58) / Stereo70", false, false], "/geo/crs-info: 3844, nothing to say");
+  eq((await fetch(`${B}/geo/crs-info?epsg=999999`, { headers: O })).status, 422, "/geo/crs-info: a code PROJ does not know, refused by name");
+  const same = await (await fetch(`${B}/geo/convert-shift`, { method: "POST", headers: { ...O, "Content-Type": "application/json" }, body: JSON.stringify({ from: 31700, to: 3844, x: 327372.56, y: 448682.65 }) })).json();
+  eq([same.same_grid, same.x, same.y, same.op], [true, 327372.56, 448682.65, null], "/geo/convert-shift: the same grid, the same numbers");
+  const utm = await (await fetch(`${B}/geo/convert-shift`, { method: "POST", headers: { ...O, "Content-Type": "application/json" }, body: JSON.stringify({ from: 3844, to: 32634, x: 327372.56, y: 448682.65 }) })).json();
+  ok(!utm.same_grid && Math.abs(utm.x - 639685.86) < 0.05 && Math.abs(utm.y - 5041873.94) < 0.05 && utm.op?.accuracy === 3, "/geo/convert-shift: another grid, reprojected with its operation's accuracy (UTM 34N, 3 m)");
   const f = await (await fetch(`${B}/geo/frame`, { method: "POST", headers: { ...O, "Content-Type": "application/json" }, body: JSON.stringify({ epsg: 31700, x: 327300, y: 448370, z: 500, rotation: 0 }) })).json();
   ok(Math.abs(f.lat - 45.51389) < 1e-5 && Math.abs(f.lon - 22.78921) < 1e-5 && Math.abs(f.azimuth + 1.584) < 0.01, "/geo/frame: the GT16's anchor by PROJ, and the grid's north");
   const rot = await (await fetch(`${B}/geo/frame`, { method: "POST", headers: { ...O, "Content-Type": "application/json" }, body: JSON.stringify({ epsg: 31700, x: 327300, y: 448370, z: 500, rotation: 10 }) })).json();

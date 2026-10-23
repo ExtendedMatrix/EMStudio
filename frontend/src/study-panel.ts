@@ -53,7 +53,7 @@ import type { InspectorCallbacks } from "./inspector";
  *  This is a TYPE narrowing: the bindings that arrive are the same ones. */
 export type StudyPanelCallbacks = Pick<
   InspectorCallbacks,
-  "resolveAuthority" | "searchTwins" | "onSetSitePosition" | "otherStudyCodes"
+  "resolveAuthority" | "searchTwins" | "onSetSitePosition" | "otherStudyCodes" | "geoSections"
 >;
 
 function el(tag: string, cls?: string, text?: string): HTMLElement {
@@ -576,6 +576,8 @@ export function renderStudyPanel(
   // edited elsewhere). Pick on a mini-map or type lon/lat; empty = not
   // positioned (no fabricated 0/0). Read by the narrative mini-map / overview.
   renderSitePosition(panel, store, cb.onSetSitePosition);
+  // MICRO-GEOREF-GRAFO · the georeference, where the graph's other properties are
+  cb.geoSections?.(panel);
 
   // ── HDT-O (ECHOES D7.1) per-graph panel ────────────────────────────────
   // This graph = a Study (HC9) whose proposition set (HC16) is about a

@@ -911,6 +911,151 @@ def site_frame(epsg: int, x: float, y: float, z: float = 0.0, rotation: float = 
             "rotation": float(rotation), "scale": dist / 100.0, "scale_east": dist_e / 100.0, "epsg": int(epsg)}
 
 
+# ── MICRO-GEOREF-GRAFO · a CRS as PROJ's database knows it ───────────────────
+
+def _proj_db():
+    import sqlite3
+    import pyproj
+    return sqlite3.connect(f"file:{os.path.join(pyproj.datadir.get_data_dir(), 'proj.db')}?mode=ro", uri=True)
+
+
+def _op_at(src, dst, x, y):
+    """The operation PROJ uses for a point of `src` (the first, by its order of
+    preference, whose area of use holds the point — what `proj_trans` does with a
+    list of candidates), and the point transformed. None when none answers."""
+    from pyproj.transformer import TransformerGroup
+    tg = TransformerGroup(src, dst, always_xy=True)
+    first = None
+    for t in tg.transformers:
+        try:
+            a, b = t.transform(x, y)
+        except Exception:  # noqa: BLE001 — a candidate that cannot run here
+            continue
+        if not (math.isfinite(a) and math.isfinite(b)):
+            continue
+        # the point in degrees, for the area of use (the operation's own target when it is 4326)
+        lon, lat = (a, b) if int(dst) == 4326 else (None, None)
+        if lon is None:
+            try:
+                from pyproj import Transformer
+                lon, lat = Transformer.from_crs(src, 4326, always_xy=True).transform(x, y)
+            except Exception:  # noqa: BLE001
+                lon = lat = None
+        aou = t.area_of_use
+        inside = (aou is None or lon is None
+                  or (aou.west <= lon <= aou.east and aou.south <= lat <= aou.north)
+                  or (aou.west > aou.east and (lon >= aou.west or lon <= aou.east) and aou.south <= lat <= aou.north))
+        hit = (t, a, b)
+        if inside:
+            return hit
+        first = first or hit
+    return first
+
+
+def _op_words(t):
+    """an operation as the panel says it: its name, its accuracy (metres, None:
+    unknown) and whether it is a «ballpark» (no datum shift: PROJ's own word)"""
+    acc = t.accuracy if t.accuracy is not None and t.accuracy >= 0 else None
+    steps = [st for st in t.description.split(" + ") if not st.startswith("axis order change") and not st.startswith("Inverse of ")]
+    name = " + ".join(steps) or t.description
+    return {"name": name, "accuracy": acc, "ballpark": "ballpark" in t.description.lower()}
+
+
+def same_grid(a: int, b: int) -> bool:
+    """Two projected CRSs on the same grid: the same projection with the same
+    parameters, on the same ellipsoid, in the same units — only the declared
+    datum may differ (EPSG:31700 and 3844: Stereo 70 on Krassowsky 1940). Their
+    coordinates are the same numbers; a conversion is the code only."""
+    from pyproj import CRS
+    A, B = CRS.from_epsg(int(a)), CRS.from_epsg(int(b))
+    if not (A.is_projected and B.is_projected):
+        return False
+    oa, ob = A.coordinate_operation, B.coordinate_operation
+    if oa is None or ob is None or oa.method_name != ob.method_name:
+        return False
+    pa = sorted((p.name, round(float(p.value), 9), p.unit_name) for p in oa.params)
+    pb = sorted((p.name, round(float(p.value), 9), p.unit_name) for p in ob.params)
+    ea, eb = A.ellipsoid, B.ellipsoid
+    units = [ax.unit_name for ax in A.axis_info] == [ax.unit_name for ax in B.axis_info]
+    return pa == pb and units and abs(ea.semi_major_metre - eb.semi_major_metre) < 1e-6 \
+        and abs((ea.inverse_flattening or 0) - (eb.inverse_flattening or 0)) < 1e-6
+
+
+def crs_info(epsg: int, x=None, y=None) -> dict:
+    """What a georeference needs to know about its CRS, from PROJ's database: its
+    name and kind; whether EPSG deprecated it, and the codes the database gives as
+    its replacement (its `deprecation` and `supersession` tables — never a table
+    written by hand), each saying whether it is the same grid; the operation to
+    WGS 84 PROJ uses at the point (x, y) — the shift — with its accuracy, and
+    whether it is a «ballpark» (no datum shift; ~127 m at the GT16 for 31700)."""
+    from pyproj import CRS
+    epsg = int(epsg)
+    try:
+        crs = CRS.from_epsg(epsg)
+    except Exception as exc:  # noqa: BLE001 — an unknown code
+        return {"ok": False, "epsg": epsg, "error": f"EPSG:{epsg} is not in PROJ's database ({exc})"}
+    kind = "projected" if crs.is_projected else "geographic" if crs.is_geographic else crs.type_name
+    table = "projected_crs" if crs.is_projected else "geodetic_crs"
+    deprecated = False
+    repl = []
+    with _proj_db() as db:
+        row = db.execute(f"SELECT deprecated FROM {table} WHERE auth_name='EPSG' AND code=?", (str(epsg),)).fetchone()
+        deprecated = bool(row and row[0])
+        seen = set()
+        for code, source in db.execute(
+                "SELECT replacement_code, source FROM deprecation WHERE table_name=? AND deprecated_auth_name='EPSG' "
+                "AND deprecated_code=? AND replacement_auth_name='EPSG'", (table, str(epsg))).fetchall() + \
+                db.execute("SELECT replacement_code, source FROM supersession WHERE superseded_table_name=? "
+                           "AND superseded_auth_name='EPSG' AND superseded_code=? AND replacement_auth_name='EPSG'",
+                           (table, str(epsg))).fetchall():
+            c = int(code)
+            if c in seen:
+                continue
+            seen.add(c)
+            try:
+                name = CRS.from_epsg(c).name
+            except Exception:  # noqa: BLE001
+                name = ""
+            repl.append({"epsg": c, "name": name, "same_grid": same_grid(epsg, c) if crs.is_projected else False,
+                         "source": source or "EPSG"})
+    to = None
+    if epsg != 4326:
+        if x is None or y is None:
+            aou = crs.area_of_use
+            if aou is not None:
+                from pyproj import Transformer
+                x, y = Transformer.from_crs(4326, epsg, always_xy=True).transform((aou.west + aou.east) / 2, (aou.south + aou.north) / 2)
+        hit = _op_at(epsg, 4326, float(x), float(y)) if x is not None else None
+        to = _op_words(hit[0]) if hit else None
+    for r in repl:
+        # the replacement's own operation to WGS 84, at the same point (moved to its grid when it is another)
+        r["to_wgs84"] = None
+        if x is None:
+            continue
+        rx, ry = float(x), float(y)
+        if not r["same_grid"]:
+            c = convert_point(epsg, r["epsg"], rx, ry)
+            if not c.get("ok"):
+                continue
+            rx, ry = c["x"], c["y"]
+        hit = _op_at(r["epsg"], 4326, rx, ry)
+        r["to_wgs84"] = _op_words(hit[0]) if hit else None
+    return {"ok": True, "epsg": epsg, "name": crs.name, "kind": kind, "deprecated": deprecated,
+            "replacements": repl, "to_wgs84": to}
+
+
+def convert_point(src: int, dst: int, x: float, y: float) -> dict:
+    """A shift from one CRS to another with the best operation PROJ has for that
+    point, and its accuracy. The same grid: the same numbers (no operation)."""
+    if same_grid(src, dst):
+        return {"ok": True, "x": float(x), "y": float(y), "same_grid": True, "op": None}
+    hit = _op_at(int(src), int(dst), float(x), float(y))
+    if not hit:
+        return {"ok": False, "error": f"PROJ has no operation from EPSG:{src} to EPSG:{dst} for this point"}
+    t, a, b = hit
+    return {"ok": True, "x": a, "y": b, "same_grid": False, "op": _op_words(t)}
+
+
 # ── rasters ──────────────────────────────────────────────────────────────────
 
 MAX_PIXELS = 300_000_000

@@ -9608,6 +9608,95 @@ test("GR3.node", "GEOREF-GRAFO p.1 · il georiferimento è un nodo esposto del g
   return { pass, detail: out };
 });
 
+test("GR4.inspector", "GEOREF-GRAFO p.2 · la sezione «Georeferencing» nell'Inspector del grafo: il GT16 con l'EPSG di prima (31700) — all'apertura la proposta «Convert to EPSG:3844» UNA volta nel Log e nella vista Avvisi, col motivo e l'accuratezza prima/dopo (sconosciuta → 3 m), mai una sostituzione silenziosa; nella sezione il nome del sistema letto da PROJ, «deprecated», il sostituto della stessa griglia; un clic converte (solo il codice, lo shift resta) in un passo che Ctrl+Z toglie; shift Z ≠ 0 mostrato come scelta esplicita; le quote ortometriche/ellissoidiche scritte nel nodo; «Export shift.txt» scrive EPSG::NNNN X Y Z; «Import shift.txt» di un file senza z dà z 0; un grafo senza georiferimento: nessun nodo, «Georeference…» lo crea nel gruppo dei paradati", async () => {
+  if (!existsSync(GEOREF_V4)) return { pass: false, detail: { missing: GEOREF_V4 } };
+  const f = JSON.parse(readFileSync(GEOREF_V4, "utf8"));
+  const gid = Object.keys(f.graphs).find((k) => (f.graphs[k].nodes ?? []).length > 100);
+  const geo = f.graphs[gid].nodes.find((n) => n.node_type === "geo_position");
+  geo.data = { ...geo.data, epsg: 31700 };
+  const { p, ctx, errors } = await grOpen(f);
+  const D = (fn, a) => p.evaluate(fn, a);
+  const GEO = "geo_TempluMare_v2", ROOT = `${gid}_graphroot`;
+  const node = () => D((g) => { const d = window.__EM_DRAG__.node(g)?.data ?? {}; return [d.epsg, d.shift_x, d.shift_y, d.shift_z, d.vertical_reference ?? null]; }, GEO);
+  const logs = (re) => D((s) => window.__EM_DRAG__.log().filter((x) => new RegExp(s).test(x.message ?? "")).map((x) => x.message), re);
+  const sec = (sel) => D((s) => { const e = document.querySelector(`[data-section="georef"] ${s}`); return e ? (e.dataset.to ?? e.dataset.accuracy ?? e.textContent) : null; }, sel);
+  const out = {};
+  await p.waitForFunction(() => window.__EM_DRAG__.log().some((x) => /Convert to EPSG:3844/.test(x.message ?? "")), null, { timeout: 30000 }).catch(() => null);
+  out.proposed = await logs("Convert to EPSG:3844");
+  out.issue = await D(() => (window.__EM_DRAG__.issues?.() ?? []).filter((i) => /EPSG:3844/.test(i.txt ?? "")).map((i) => [i.rule, i.sev, i.fix?.label ?? null]));
+  await D((r) => window.__EM_DRAG__.select(r), ROOT);
+  await p.waitForSelector('[data-section="georef"] [data-georef="convert"]', { timeout: 20000 }).catch(() => null);
+  out.before = { crs: await sec('[data-georef="crs"]'), acc: await sec('[data-georef="accuracy"]'), warn: await sec('[data-georef="warn-deprecated"]'), to: await sec('[data-georef="convert"]'), node: await node() };
+  const u0 = await D(() => window.__EM_DRAG__.undoDepth());
+  await p.click('[data-section="georef"] [data-georef="convert"]');
+  await p.waitForFunction((g) => window.__EM_DRAG__.node(g)?.data?.epsg === 3844, GEO, { timeout: 10000 }).catch(() => null);
+  await p.waitForTimeout(2500);
+  out.after = { node: await node(), steps: (await D(() => window.__EM_DRAG__.undoDepth())) - u0, said: await logs("EPSG:31700 → EPSG:3844, the same grid"),
+    crs: await sec('[data-georef="crs"]'), acc: await sec('[data-georef="accuracy"]'), warn: await sec(".georef-warn") };
+  await D(() => window.__EM_DRAG__.undo()); await p.waitForTimeout(500);
+  out.undone = await node();
+  await D(() => window.__EM_DRAG__.redo()); await p.waitForTimeout(800);
+  // an explicit z
+  await p.fill('[data-section="georef"] [data-georef-field="shift_z"]', "12.5");
+  await p.press('[data-section="georef"] [data-georef-field="shift_z"]', "Enter"); await p.waitForTimeout(600);
+  out.z = { node: await node(), choice: await sec('[data-georef="z-choice"]') };
+  await D(() => window.__EM_DRAG__.undo()); await p.waitForTimeout(600);
+  out.zBack = { node: await node(), choice: await sec('[data-georef="z-choice"]') };
+  // the vertical reference
+  await p.selectOption('[data-section="georef"] [data-georef-field="vertical_reference"]', "ellipsoidal"); await p.waitForTimeout(600);
+  out.vert = (await node())[4];
+  await p.selectOption('[data-section="georef"] [data-georef-field="vertical_reference"]', "orthometric"); await p.waitForTimeout(600);
+  out.vertBack = (await node())[4];
+  // export
+  const [dl] = await Promise.all([p.waitForEvent("download", { timeout: 10000 }).catch(() => null), p.click('[data-section="georef"] [data-georef="export"]')]);
+  out.exported = dl ? [dl.suggestedFilename(), readFileSync(await dl.path(), "utf8")] : null;
+  // import a SHIFT.txt without z
+  const txt = "/tmp/georef-gr4-shift-noz.txt";
+  writeFileSync(txt, "EPSG::31700 327300 448370\n");
+  const [fc] = await Promise.all([p.waitForEvent("filechooser", { timeout: 10000 }).catch(() => null), p.click('[data-section="georef"] [data-georef="import"]')]);
+  if (fc) await fc.setFiles(txt);
+  await p.waitForFunction((g) => window.__EM_DRAG__.node(g)?.data?.shift_x === 327300, GEO, { timeout: 15000 }).catch(() => null);
+  out.imported = await node();
+  await p.waitForFunction(() => window.__EM_DRAG__.log().filter((x) => /Convert to EPSG:3844/.test(x.message ?? "")).length >= 2, null, { timeout: 30000 }).catch(() => null);
+  out.proposedAgain = (await logs("Convert to EPSG:3844")).length;
+  await p.screenshot({ path: SHOT("gr4-inspector") }).catch(() => {});
+  await ctx.close();
+  // a graph without a georeference
+  const g2 = JSON.parse(readFileSync(GEOREF_V4, "utf8"));
+  g2.graphs[gid].nodes = g2.graphs[gid].nodes.filter((n) => n.node_type !== "geo_position");
+  const o2 = await grOpen(g2);
+  const D2 = (fn, a) => o2.p.evaluate(fn, a);
+  out.bare = { geo: await D2(() => window.__EM_DRAG__.idsOfType("geo_position")) };
+  await D2((r) => window.__EM_DRAG__.select(r), ROOT);
+  await o2.p.waitForSelector('[data-section="georef"] [data-georef="create"]', { timeout: 10000 }).catch(() => null);
+  const u1 = await D2(() => window.__EM_DRAG__.undoDepth());
+  await o2.p.click('[data-section="georef"] [data-georef="create"]').catch(() => null);
+  await o2.p.waitForTimeout(800);
+  const made = await D2(() => window.__EM_DRAG__.idsOfType("geo_position"));
+  out.bare.made = made;
+  out.bare.steps = (await D2(() => window.__EM_DRAG__.undoDepth())) - u1;
+  out.bare.edge = await D2((g) => window.__EM_DRAG__.edgesOf("is_in_paradata_nodegroup").filter((e) => e.source === g).map((e) => e.target), made[0]);
+  out.bare.fields = await D2(() => [...document.querySelectorAll('[data-section="georef"] [data-georef-field]')].map((e) => e.dataset.georefField));
+  await D2(() => window.__EM_DRAG__.undo()); await o2.p.waitForTimeout(400);
+  out.bare.undone = await D2(() => window.__EM_DRAG__.idsOfType("geo_position"));
+  out.errors = [...errors, ...o2.errors];
+  await o2.ctx.close();
+  const PD = `${gid}_graph_paradata`;
+  const pass = out.proposed.length === 1 && /unknown → ±3 m/.test(out.proposed[0]) && out.issue.length === 1 && out.issue[0][2] === "Convert to EPSG:3844"
+    && /Dealul Piscului 1970/.test(out.before.crs ?? "") && out.before.acc === "unknown" && !!out.before.warn && out.before.to === "3844"
+    && JSON.stringify(out.before.node.slice(0, 4)) === JSON.stringify([31700, 327372.56, 448682.65, 0])
+    && JSON.stringify(out.after.node.slice(0, 4)) === JSON.stringify([3844, 327372.56, 448682.65, 0]) && out.after.steps === 1 && out.after.said.length === 1
+    && /Pulkovo 1942\(58\) \/ Stereo70/.test(out.after.crs ?? "") && out.after.acc === "3" && out.after.warn === null
+    && out.undone[0] === 31700
+    && out.z.node[3] === 12.5 && /explicit choice/.test(out.z.choice ?? "") && out.zBack.node[3] === 0 && out.zBack.choice === null
+    && out.vert === "ellipsoidal" && out.vertBack === null
+    && out.exported?.[0] === "SHIFT.txt" && out.exported?.[1] === "EPSG::3844 327372.56 448682.65 0\n"
+    && JSON.stringify(out.imported.slice(0, 4)) === JSON.stringify([31700, 327300, 448370, 0]) && out.proposedAgain >= 2
+    && out.bare.geo.length === 0 && out.bare.made.length === 1 && out.bare.steps === 1 && JSON.stringify(out.bare.edge) === JSON.stringify([PD])
+    && out.bare.fields.includes("epsg") && out.bare.undone.length === 0 && !out.errors.length;
+  return { pass, detail: out };
+});
+
 // ── run ─────────────────────────────────────────────────────────────────────
 const chosen =cases.filter((c) => !only.length || only.includes(c.id) || only.some((o) => c.id.startsWith(o + ".")));
 for (const c of chosen) {

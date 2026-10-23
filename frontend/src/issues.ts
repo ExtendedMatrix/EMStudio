@@ -70,6 +70,9 @@ export interface IssueFixers {
   setUrl?: { label: string; run: (from: string, to: string) => void };
   /** DEV29 B8 · «Read a SHIFT.txt…»: declares the graph's CRS and shift */
   readShift?: { label: string; run: () => void };
+  /** MICRO-GEOREF-GRAFO · a deprecated CRS or a ballpark operation, as PROJ said it
+   *  (the bridge's answer kept): the reason, and «Convert to EPSG:NNNN» */
+  crsProposal?: () => { node: string; txt: string; label: string; run: () => void } | null;
   /** DEV29 B2 · two acquisition events for the same files → one (`keep` stays,
    *  with the name and the facts of `drop`, which goes) */
   /** DEV30 D3 · two events of one lot, linked: the later one CITES the
@@ -468,6 +471,8 @@ export function issues(src: IssueSources): Issue[] {
   for (const i of addressIssues(nodes, t, fx.setUrl)) push(i);
   const geo = georeferenceIssue(nodes, t, fx.readShift);
   if (geo) push(geo);
+  const crs = fx.crsProposal?.();
+  if (crs) push({ node: crs.node, sev: "warn", rule: "georef", txt: crs.txt, fix: { kind: "button" as const, label: crs.label, run: crs.run } });
   for (const n of nodes) {
     const d = (n.data ?? {}) as Record<string, unknown>;
     if (d.missing === true || d.missing === "true")

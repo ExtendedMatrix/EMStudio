@@ -10179,3 +10179,15 @@ tr.tt-hidden { display: none; }
 .geo-compass .geo-compass-s { fill: var(--scene-ink, #333); opacity: 0.55; }
 .geo-compass .geo-compass-t { font: 700 7px var(--font-ui, sans-serif); fill: #fff; }
 .geo-compass:focus-visible { outline: 2px solid var(--accent, #4a90e2); }
+
+/* MICRO-GEOREF-GRAFO · the «Georeferencing» section of the graph's Inspector */
+.georef-sec .georef-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 8px; margin: 4px 0; }
+.georef-sec .georef-f { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.georef-sec .georef-f input, .georef-sec .georef-f select { width: 100%; box-sizing: border-box; }
+.georef-sec .georef-crs { font-size: 0.78rem; margin: 2px 0 4px; }
+.georef-sec .georef-bad { outline: 1px solid #c0392b; }
+.georef-sec .georef-zchoice { border-color: #d98e04; }
+.georef-sec .georef-warn { margin: 6px 0; padding: 6px 8px; border-left: 3px solid #d98e04; background: rgba(217, 142, 4, 0.08); font-size: 0.78rem; display: flex; flex-direction: column; gap: 4px; }
+.georef-sec .georef-repl { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.georef-sec .georef-acts { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0; }
+.georef-sec .georef-f .insp-name-input { font-size: 0.85rem; padding: 3px 6px; }
