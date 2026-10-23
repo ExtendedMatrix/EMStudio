@@ -60,7 +60,8 @@ const eq = (got, want, what) => { assert.deepEqual(got, want, `${what} — got $
     eq(i18n.split(`"${k}":`).length - 1, 3, `«${k}» in en, it, de`);
 }
 
-// ── the defaults: everything on, in every view (nothing changes at opening) ──
+// ── the defaults: MICRO-GLIFI-OVERLAY-CONTINUITA p.2 · E.D.'s Matrix panel —
+//    everything on but the inherited badges, in every graph view ──────────────
 for (const v of O.OVERLAY_VIEWS) {
   const d = O.defaultOverlays(v);
   if (v === "space") {
@@ -73,20 +74,21 @@ for (const v of O.OVERLAY_VIEWS) {
     ok(O.overlayShown(d, "s3_navgizmo") && O.overlayShown(d, "s3_labels_rm") && O.overlayShown(d, "s3_labels_proxy"), "space: the navigation gizmo and the labels of models and proxies on");
     continue;
   }
-  eq(d, { master: true, off: [] }, `${v}: default all on`);
+  eq(d, { master: true, off: ["inherited"] }, `${v}: default all on but the inherited`);
   ok(!O.overlaysHideSomething(d, v), `${v}: the default hides nothing (no dot)`);
-  for (const k of O.OVERLAY_KEYS) ok(O.overlayShown(d, k), `${v}: ${k} shown by default`);
+  for (const k of O.OVERLAY_KEYS) ok(O.overlayShown(d, k) === (k !== "inherited"), `${v}: ${k} ${k === "inherited" ? "off" : "shown"} by default`);
 }
 ok(O.overlayShown(null, "warning"), "no state → drawn (a renderer without overlays)");
 
 // ── one by one: switch each off and on again ─────────────────────────────────
 {
-  let st = O.defaultOverlays("matrix");
+  let st = { master: true, off: [] };
   for (const k of O.overlayItemsFor("matrix").map((i) => i.key)) {
     st = O.withOverlay(st, k, false);
     ok(!O.overlayShown(st, k), `${k} off`);
     for (const j of O.OVERLAY_KEYS) if (j !== k) ok(O.overlayShown(st, j), `${k} off leaves ${j} on`);
-    ok(O.overlaysHideSomething(st, "matrix"), `${k} off → the dot`);
+    // what is off by default is no dot (the inherited, p.2)
+    ok(O.overlaysHideSomething(st, "matrix") === (k !== "inherited"), `${k} off → ${k === "inherited" ? "no dot (its default)" : "the dot"}`);
     st = O.withOverlay(st, k, true);
     ok(O.overlayShown(st, k), `${k} on again`);
     ok(!O.overlaysHideSomething(st, "matrix"), `${k} on again → no dot`);
@@ -95,7 +97,7 @@ ok(O.overlayShown(null, "warning"), "no state → drawn (a renderer without over
   st = O.withOverlay(O.defaultOverlays("matrix"), "lock", false);
   const m = { ...st, master: false };
   for (const k of O.OVERLAY_KEYS) ok(!O.overlayShown(m, k), `master off: ${k} hidden`);
-  eq({ ...m, master: true }.off, ["lock"], "master on again: the single choice is still there");
+  eq({ ...m, master: true }.off, ["inherited", "lock"], "master on again: the single choice is still there");
   ok(O.overlaysHideSomething(m, "graph"), "master off → the dot");
   // the dot counts what the view can draw: «lock» off is nothing in the liquid Graph
   ok(!O.overlaysHideSomething(st, "graph"), "lock off: no dot in the Graph, which draws no lock");
@@ -108,10 +110,10 @@ ok(O.overlayShown(null, "warning"), "no state → drawn (a renderer without over
   eq(st.off, ["author", "author_ai", "license", "embargo", "inherited"], "None of the rights");
   ok(O.overlayShown(st, "pd_chip"), "None of the rights leaves the paradata");
   st = O.withGroup(st, "rights", true);
-  eq(st.off, [], "All of the rights");
+  eq(st.off, [], "All of the rights (the inherited too)");
   // in the Graph, «None» of the paradata switches only what it draws
   st = O.withGroup(O.defaultOverlays("graph"), "paradata", false, "graph");
-  eq(st.off, ["pd_chip"], "None of the paradata in the Graph: the chip");
+  eq(st.off, ["inherited", "pd_chip"], "None of the paradata in the Graph: the chip (the inherited stays off, its default)");
 }
 
 // ── the ornament row: kind, and inherited ────────────────────────────────────
@@ -135,11 +137,14 @@ ok(O.overlayShown(null, "warning"), "no state → drawn (a renderer without over
   O = await load();   // the page reloaded
   eq(O.loadOverlays(ED, "matrix"), { master: true, off: ["author", "license"] }, "reload: E.D.'s Matrix");
   eq(O.loadOverlays(ED, "soloing"), { master: false, off: [] }, "reload: E.D.'s soloing");
-  eq(O.loadOverlays(ED, "graph"), { master: true, off: [] }, "reload: E.D.'s Graph untouched → default");
-  eq(O.loadOverlays(ED, "dtc"), { master: true, off: [] }, "reload: E.D.'s DTC untouched → default");
+  eq(O.loadOverlays(ED, "graph"), { master: true, off: ["inherited"] }, "reload: E.D.'s Graph untouched → default");
+  eq(O.loadOverlays(ED, "dtc"), { master: true, off: ["inherited"] }, "reload: E.D.'s DTC untouched → default");
   eq(O.loadOverlays(null, "graph"), { master: true, off: ["genre"] }, "reload: nobody's Graph");
-  eq(O.loadOverlays(null, "matrix"), { master: true, off: [] }, "another person does not see E.D.'s Matrix");
-  eq(O.loadOverlays("0000-0001-5109-3700", "matrix"), { master: true, off: [] }, "a third person: the default");
+  eq(O.loadOverlays(null, "matrix"), { master: true, off: ["inherited"] }, "another person does not see E.D.'s Matrix");
+  eq(O.loadOverlays("0000-0001-5109-3700", "matrix"), { master: true, off: ["inherited"] }, "a third person: the default");
+  // p.2 · a choice remembered before the new default stays the person's: all on, inherited included
+  O.saveOverlays("0000-0003-0000-0001", "matrix", { master: true, off: ["lock"] });
+  eq(O.loadOverlays("0000-0003-0000-0001", "matrix"), { master: true, off: ["lock"] }, "a remembered choice is kept (the inherited stay on for whoever chose so)");
   // only these keys: one entry, never in a document
   eq([...mem.keys()], ["emstudio.overlays"], "one local preference, emstudio.overlays");
   // the default is forgotten, so a later default reaches whoever never touched it
@@ -149,7 +154,7 @@ ok(O.overlayShown(null, "warning"), "no state → drawn (a renderer without over
   mem.set("emstudio.overlays", JSON.stringify({ "-": { matrix: { master: true, off: ["warning", "gone"] } } }));
   eq(O.loadOverlays(null, "matrix").off, ["warning"], "an unknown key is dropped");
   mem.set("emstudio.overlays", "{not json");
-  eq(O.loadOverlays(null, "matrix"), { master: true, off: [] }, "a broken store → default");
+  eq(O.loadOverlays(null, "matrix"), { master: true, off: ["inherited"] }, "a broken store → default");
 }
 
 // ── MICRO-GIZMO-ASSI · the Space's labels, three; the memory of before; the sliders ─

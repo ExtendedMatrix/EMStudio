@@ -216,16 +216,21 @@ export function withHideFar(st: OverlayState, hide: boolean): OverlayState {
 }
 
 /**
- * The default of a view. Measured: today every overlay is drawn in every view
- * where it has something to say (the BADGE1 ring `authors_licenses` is on by
- * default in all of them, and nothing else hides a badge), so the default is
- * everything on: at opening nothing changes.
+ * The default of a view.
+ *
+ * MICRO-GLIFI-OVERLAY-CONTINUITA p.2 · the graph's views open as E.D. set the
+ * Matrix's panel (22 Oct 2026, dev.58): authorship and rights on (author, AI
+ * author, licence, embargo), the INHERITED ones off, every paradata, time,
+ * checks, 3D and drawing overlay on. Before, everything was on. A person's
+ * remembered choice stays theirs (`loadOverlays`); «Restore the default
+ * overlays» comes back here.
  */
+export const GRAPH_DEFAULT_OFF: readonly OverlayKey[] = ["inherited"];
 export function defaultOverlays(view: OverlayView): OverlayState {
   // MICRO-SPAZIO-3D · the Space opens as it did: the proxies FILLED (the wire is
   // a choice), everything else on. MICRO-GIZMO-ASSI · as it did too: the axis
   // Z was never drawn (Blender's default: X and Y), the sketches had no label
-  return { master: true, off: view === "space" ? ["s3_axis_z", "s3_labels_sketch", "s3_proxy_wire", "s3_stats"] : [] };
+  return { master: true, off: view === "space" ? ["s3_axis_z", "s3_labels_sketch", "s3_proxy_wire", "s3_stats"] : [...GRAPH_DEFAULT_OFF] };
 }
 
 /** A slider's value under this state (its default when untouched). */

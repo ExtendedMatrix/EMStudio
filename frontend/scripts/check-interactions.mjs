@@ -8223,6 +8223,37 @@ test("GL1.glyphs", "GLIFI-OVERLAY p.1 · i glifi decorativi non superano 0,75 de
     clicked: out.clicked, panel: out.panel, state: out.state, farKept: out.farKept.chips.slice(0, 3), errors } };
 });
 
+test("GL2.defaults", "GLIFI-OVERLAY p.2 · le sovrapposizioni di base sono quelle del pannello di E.D.: chi non ha una scelta salvata apre la Matrix del GT16 con Autore, Autore IA, Licenza, Embargo accesi, Ereditato spento (nessun distintivo ereditato disegnato), tutto il resto acceso; una scelta salvata resta; «Restore the default overlays» torna alla base", async () => {
+  if (!existsSync(GL_V4)) return { pass: false, detail: { missing: GL_V4 } };
+  const { p, ctx, errors } = await glOpen();
+  const out = {};
+  await glFrame(p, 0.6);
+  out.state = await p.evaluate(() => window.__EM_DRAG__.overlays("matrix"));
+  out.drawn = await p.evaluate(() => window.__EM_DRAG__.overlaysDrawn());
+  out.panel = await p.evaluate(() => { document.querySelector("#btn-overlays")?.click();
+    return Object.fromEntries([...document.querySelectorAll("#overlay-panel input[type=checkbox][data-ov]")].map((c) => [c.dataset.ov, c.checked])); });
+  out.reset = await p.evaluate(() => document.querySelector("#overlay-panel .fp-reset")?.textContent ?? null);
+  // a choice: the lock off and the inherited on; remembered; the reset comes back to the base
+  await p.evaluate(() => window.__EM_DRAG__.setOverlays("matrix", { off: ["lock"] }));
+  out.chosen = await p.evaluate(() => JSON.parse(localStorage.getItem("emstudio.overlays") ?? "{}"));
+  await p.evaluate(() => document.querySelector("#overlay-panel .fp-reset")?.click());
+  out.afterReset = await p.evaluate(() => window.__EM_DRAG__.overlays("matrix"));
+  await ctx.close();
+  // a saved choice stays: a person who had everything on keeps it
+  const b = await open({ doc: "catena", locale: "en", init: { "emstudio.overlays": JSON.stringify({ "-": { matrix: { master: true, off: ["lock"] } } }) } });
+  out.saved = await b.p.evaluate(() => window.__EM_DRAG__.overlays("matrix"));
+  await b.ctx.close();
+  const on = ["author", "author_ai", "license", "embargo", "pd_chip", "pd_tablet", "instance_badge", "trace", "doc_uses", "lane_pd_tag", "date_invite", "warning", "lane_warning", "ai_chip", "name_status", "version_format", "has_3d", "genre", "lock", "fold_count"];
+  const pass = JSON.stringify(out.state.off) === JSON.stringify(["inherited"]) && out.state.master === true
+    && !out.drawn.inherited && (out.drawn.has_3d ?? 0) > 0 && (out.drawn.pd_chip ?? 0) > 0
+    && out.panel.inherited === false && on.every((k) => out.panel[k] === true) && out.panel.master === true
+    && out.reset === "Restore the default overlays"
+    && JSON.stringify(out.chosen["-"]?.matrix?.off) === JSON.stringify(["lock"])
+    && JSON.stringify(out.afterReset.off) === JSON.stringify(["inherited"])
+    && JSON.stringify(out.saved.off) === JSON.stringify(["lock"]) && !errors.length && !b.errors.length;
+  return { pass, detail: { ...out, errors: [...errors, ...b.errors] } };
+});
+
 // ── run ─────────────────────────────────────────────────────────────────────
 const chosen = cases.filter((c) => !only.length || only.includes(c.id) || only.some((o) => c.id.startsWith(o + ".")));
 for (const c of chosen) {
