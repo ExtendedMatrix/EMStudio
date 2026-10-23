@@ -5772,8 +5772,11 @@ async function refreshMatrixViewLayout(): Promise<void> {
     // tablet on its unit, an epoch's is the lane's tag — boxes em-core would
     // otherwise make room for (GT16: 123 of the 348 nodes it placed). The
     // drawn set does not depend on positions, so the scene just built says it.
+    // MICRO-GLIFI-OVERLAY-CONTINUITA p.3 · …and not the continuity nodes: the
+    // view draws each one above its unit (views/matrix.ts), so the engine must
+    // not keep a place for it (it left a 244-wide hole in a TempluMare lane)
     const drawn = scenes.matrix
-      ? new Set(scenes.matrix.nodes.filter((n) => !n.collapsed).map((n) => n.id)) : null;
+      ? new Set(scenes.matrix.nodes.filter((n) => !n.collapsed && !isContinuityType(n.node.node_type)).map((n) => n.id)) : null;
     const nodes = drawn ? v.nodes.filter((n) => drawn.has(n.id)) : v.nodes;
     const ids = new Set(nodes.map((n) => n.id));
     const epochs = doc.graph.nodes.filter((n) => !ids.has(n.id) && classOf(n.node_type) === "EpochNode");

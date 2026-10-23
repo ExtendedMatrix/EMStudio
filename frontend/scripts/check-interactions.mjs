@@ -6726,10 +6726,12 @@ test("PU5.matrix", "PULIZIA p.5 · la Matrix è disposta su ciò che disegna: la
   const g = await p.evaluate(() => window.__EM_DRAG__.matrixGeom());
   const after = await p.evaluate(() => JSON.stringify(JSON.parse(window.__EM_DRAG__.docJson()).layout?.positions ?? JSON.parse(window.__EM_DRAG__.docJson()).graphs));
   await ctx.close();
-  const top = g.nodes.filter((n) => !n.group);
+  // GLIFI-OVERLAY p.3 · a continuity node (BR) is drawn by the view above its
+  // unit, in its epoch's lane, not where the layout put it: not a gap of the layout
+  const top = g.nodes.filter((n) => !n.group && n.type !== "BR");
   const lanes = g.lanes;
   const laneOf = (n) => lanes.findIndex((l) => n.y + n.h / 2 >= l.y && n.y + n.h / 2 < l.y + l.height);
-  const outside = top.filter((n) => laneOf(n) < 0).map((n) => n.id);
+  const outside = g.nodes.filter((n) => !n.group).filter((n) => laneOf(n) < 0).map((n) => n.id);
   const gaps = [];
   const slack = [];
   lanes.forEach((l, i) => {
