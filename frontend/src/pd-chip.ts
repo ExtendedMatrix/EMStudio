@@ -18,6 +18,7 @@ import type { AdornmentBadge } from "./adornments";
 import { nodeStyle } from "./palette";
 import type { SceneNode, Viewport } from "./scene";
 import { canvasFont, canvasTheme, labelOn } from "./theme";
+import { cappedGlyphPx, glyphsHidden, UNIT_REF_WORLD } from "./glyph-scale";
 
 /** the chip's height at scale 1 (as the ornament badges' BADGE_PX) and its
  *  screen floor (the epochs' «PD» tag is 14 px high) */
@@ -67,14 +68,15 @@ export function drawPdChips(
   viewH: number,
   selectedId: string | null,
   box?: (n: SceneNode) => { x: number; y: number; w: number; h: number },
+  /** MICRO-GLIFI-OVERLAY-CONTINUITA p.1 · hide the chip of a unit seen from
+   *  afar (glyph-scale.ts); false: kept, under the same ceiling */
+  hideFar = true,
 ): void {
   hits = [];
   const th = canvasTheme();
   const fill = nodeStyle("ParadataNodeGroup").labelBackground || th.groupHeaderFallback;
   const ink = labelOn(fill) === th.onLight ? "#5a3200" : labelOn(fill);
-  const h = Math.max(CHIP_MIN_PX, CHIP_PX * vp.scale);
-  const fpx = Math.max(8, Math.round(h * 0.56));
-  const r0 = h * 0.4;
+  const h0 = Math.max(CHIP_MIN_PX, CHIP_PX * vp.scale);
   ctx.save();
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
@@ -82,6 +84,14 @@ export function drawPdChips(
     const b = pdChipOf(n);
     if (!b || !b.group) continue;
     const r = box ? box(n) : { x: n.x * vp.scale + vp.x, y: n.y * vp.scale + vp.y, w: n.w * vp.scale, h: n.h * vp.scale };
+    // p.1 · the screen floor no longer outgrows the unit: at most
+    // GLYPH_MAX_RATIO of it, and nothing below GLYPH_HIDE_UNIT_PX
+    const unitPx = Math.max(0, Math.min(r.w, r.h, UNIT_REF_WORLD * vp.scale));
+    if (glyphsHidden(unitPx, hideFar)) continue;
+    const h = cappedGlyphPx(h0, unitPx);
+    if (h < 1) continue;
+    const fpx = Math.max(Math.min(8, h * 0.56), Math.round(h * 0.56));
+    const r0 = h * 0.4;
     if (r.x + r.w + h * 4 < 0 || r.x > viewW || r.y > viewH || r.y + r.h + h < 0) continue;
     // «PD» then the properties (accent disc) then, closed, the instances (muted)
     ctx.font = canvasFont(700, fpx);
@@ -109,7 +119,7 @@ export function drawPdChips(
       ctx.fillStyle = bg;
       ctx.fill();
       ctx.fillStyle = labelOn(bg);
-      ctx.font = canvasFont(700, Math.max(7, Math.round(r0 * 1.35)));
+      ctx.font = canvasFont(700, Math.max(Math.min(7, r0 * 1.35), Math.round(r0 * 1.35)));
       ctx.fillText(String(v), cx, y + h / 2 + 0.5);
     };
     let cx = x + pdW + h * 0.1 + r0;

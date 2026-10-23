@@ -8171,6 +8171,58 @@ test("PO4.arrows", "PANNELLI-OVERLAY p.4 · le frecce nelle liste: GT16, Tabular
   return { pass, detail: { ...out, errors } };
 });
 
+// ── MICRO-GLIFI-OVERLAY-CONTINUITA · the GT16 (Templu Mare v4, a COPY: `GLIFI_V4`) ──
+const GL_V4 = process.env.GLIFI_V4 ?? "/tmp/glifi/EM/TempluMare_v4.em.json";
+const glOpen = async () => {
+  const o = await open({ doc: null, locale: "en", w: 1728, h: 1000 });
+  await o.p.evaluate(([d, path]) => window.__EM_DRAG__.openAt(d, path), [JSON.parse(readFileSync(GL_V4, "utf8")), GL_V4]);
+  await o.p.waitForFunction(() => (window.__EM_SCENE__?.()?.nodes?.length ?? 0) > 50, null, { timeout: 60000 });
+  await o.p.waitForTimeout(1500);
+  return o;
+};
+/** the Matrix framed at `s` around a world point (the probes' camera) */
+const glFrame = async (p, s, cx = 2300, cy = 1080) => {
+  const r = await p.evaluate(() => window.__EM_DRAG__.winScene(window.__EM_DRAG__.wins().find((w) => w.type === "graph")?.id ?? "canvas:1")?.rect);
+  const w = (r.w - 60) / s, h = (r.h - 60) / s;
+  await p.evaluate(([x, y, w, h]) => window.__EM_DRAG__.frameWorld(x, y, w, h, 30), [cx - w / 2, cy - h / 2, w, h]);
+  await p.waitForTimeout(400);
+  return r;
+};
+
+test("GL1.glyphs", "GLIFI-OVERLAY p.1 · i glifi decorativi non superano 0,75 dell'unità a schermo: GT16, Matrix a scala 0,2 nessun chip PD né distintivo (nascosti da lontano), a 0,4 i chip PD alti ≤ 0,75 × 12,8 px (prima: 14 fissi), a 0,6 intatti (14 px); un chip a 0,4 resta cliccabile (entra nel gruppo); «Nascondi i glifi da lontano» acceso di default nel pannello, spento i chip a 0,2 restano, ≤ 4,8 px", async () => {
+  if (!existsSync(GL_V4)) return { pass: false, detail: { missing: GL_V4 } };
+  const { p, ctx, errors } = await glOpen();
+  const out = {};
+  const read = () => p.evaluate(() => ({ chips: window.__EM_DRAG__.pdChips().map((c) => Math.round(c.h * 100) / 100),
+    badges: window.__EM_DRAG__.adornmentHits().length }));
+  await glFrame(p, 0.2, 1866, 1098); out.far = await read();
+  await glFrame(p, 0.6); out.mid = await read();
+  const rect = await glFrame(p, 0.4); out.between = await read();
+  // a chip still answers a click: it solos its group
+  const chip = await p.evaluate(() => window.__EM_DRAG__.pdChips()[0] ?? null);
+  if (chip) {
+    await p.mouse.click(rect.x + chip.x + chip.w / 2, rect.y + chip.y + chip.h / 2);
+    await p.waitForTimeout(800);
+    out.clicked = await p.evaluate(() => window.__EM_DRAG__.context().length);
+  }
+  // the switch, in the panel, on by default; off, the far chips stay (capped)
+  out.panel = await p.evaluate(() => { document.querySelector("#btn-overlays")?.click(); return document.querySelector('#overlay-panel [data-ov="hide_far"]')?.checked ?? null; });
+  out.state = await p.evaluate(() => window.__EM_DRAG__.overlays("matrix"));
+  await p.evaluate(() => { const ctx = window.__EM_DRAG__.context(); if (ctx.length) window.__EM_DRAG__.goBack?.(); });
+  await p.keyboard.press("Escape"); await p.waitForTimeout(400);
+  await p.evaluate(() => window.__EM_DRAG__.setOverlays("matrix", { keepFar: true }));
+  await glFrame(p, 0.2, 1866, 1098); out.farKept = await read();
+  await p.screenshot({ path: SHOT("gl1-glyphs") }).catch(() => {});
+  await ctx.close();
+  const pass = out.far.chips.length === 0 && out.far.badges === 0
+    && out.between.chips.length > 20 && out.between.chips.every((h) => h <= 0.75 * 12.8 + 0.01)
+    && out.mid.chips.length > 20 && out.mid.chips.every((h) => Math.abs(h - 14) < 0.01)
+    && out.clicked > 0 && out.panel === true && out.state.hideFar === true
+    && out.farKept.chips.length > 50 && out.farKept.chips.every((h) => h <= 0.75 * 6.4 + 0.01) && !errors.length;
+  return { pass, detail: { far: out.far, mid: out.mid.chips.slice(0, 3), between: out.between.chips.slice(0, 3), n: out.between.chips.length,
+    clicked: out.clicked, panel: out.panel, state: out.state, farKept: out.farKept.chips.slice(0, 3), errors } };
+});
+
 // ── run ─────────────────────────────────────────────────────────────────────
 const chosen = cases.filter((c) => !only.length || only.includes(c.id) || only.some((o) => c.id.startsWith(o + ".")));
 for (const c of chosen) {

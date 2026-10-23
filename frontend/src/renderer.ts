@@ -19,7 +19,8 @@ import {
   shapePath } from "./shape-geom";
 import { activeTheme, CANVAS_TYPE, canvasFont, canvasTheme, labelOn } from "./theme";
 import { drawGlyph, glyphByKey, glyphFor, type GlyphInk } from "./glyphs";
-import { adornmentShown, beginOverlayFrame, markOverlay, overlayShown, type OverlayKey, type OverlayState } from "./overlays";
+import { adornmentShown, beginOverlayFrame, farGlyphsHidden, markOverlay, overlayShown, type OverlayKey, type OverlayState } from "./overlays";
+import { cappedGlyphPx, glyphFactor, glyphsHidden, unitScreenPx } from "./glyph-scale";
 import { drawnPdChips, drawPdChips } from "./pd-chip";
 
 /** SHIFT-A fase 6b · the theme colours the RECOLOURABLE roles of a glyph take
@@ -29,7 +30,7 @@ function glyphInk(): GlyphInk {
   const th = canvasTheme();
   return { ink: th.labelInk, paper: th.canvasBg, dark: activeTheme() === "dark" };
 }
-import type { Scene, Viewport } from "./scene";
+import type { Scene, SceneNode, Viewport } from "./scene";
 import { isLiquid } from "./views/liquid";
 import { renderLiquid, type LiquidState } from "./liquid-render";
 import { basename } from "./paths";
@@ -674,6 +675,12 @@ export function render(
   }
   // MICRO-SOVRAPPOSIZIONI · is this overlay drawn in this window's view?
   const ov = (k: OverlayKey): boolean => overlayShown(state.overlays, k);
+  // MICRO-GLIFI-OVERLAY-CONTINUITA p.1 · a unit's decorative glyphs never
+  // outgrow it (glyph-scale.ts): the unit's measure on screen, and whether its
+  // glyphs are hidden from afar
+  const hideFar = farGlyphsHidden(state.overlays);
+  const unitPxOf = (n: SceneNode): number => { const vb = visibleBoxOf(n); return unitScreenPx(vb.w, vb.h, vp.scale); };
+  const glyphsOff = (n: SceneNode): boolean => glyphsHidden(unitPxOf(n), hideFar);
   const dpr = window.devicePixelRatio || 1;
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.clearRect(0, 0, viewW, viewH);
@@ -935,7 +942,7 @@ export function render(
         borderCol,
         headerFillFor(n.node.node_type, st.border, st.labelBackground),
         vp.scale,
-        ov("fold_count") && n.badge ? (markOverlay("fold_count"), n.badge) : undefined,
+        ov("fold_count") && n.badge && !glyphsOff(n) ? (markOverlay("fold_count"), n.badge) : undefined,
         drawLabels,
         glyphFor(n.node.node_type, n.node.data as Record<string, unknown> | undefined),
       );
@@ -1038,7 +1045,7 @@ export function render(
         ctx.textBaseline = "middle";
         ctx.fillText(label, n.x + n.w / 2, y0 + ih * 0.62);
       }
-      if (n.useCount && ov("doc_uses")) {
+      if (n.useCount && ov("doc_uses") && !glyphsOff(n)) {
         // BUGS-UI · world-constant, like every other node decorator
         markOverlay("doc_uses");
         const r = 6.5;
@@ -1147,13 +1154,18 @@ export function render(
                   isAuthor ? (n.instanceOf ? { dash: [11, 7] } : { strokeScale: 1.8 }) : undefined);
         // MICRO-SPAZIO-3D · a model in N epochs: «×N» at its top right, on
         // every instance (world-constant, like the document's use count)
-        if (n.countLabel && ov("doc_uses")) {
+        if (n.countLabel && ov("doc_uses") && !glyphsOff(n)) {
           markOverlay("doc_uses");
           const fpx = 11;
           ctx.save();
           ctx.font = canvasFont(700, fpx);
           const tw = ctx.measureText(n.countLabel).width + 8;
           const bx = ix + iw - tw / 2, by = iy;
+          // p.1 · 16 high at scale 1, never more than its unit allows
+          const f = glyphFactor(16 * vp.scale, unitPxOf(n));
+          ctx.translate(bx, by);
+          ctx.scale(f, f);
+          ctx.translate(-bx, -by);
           ctx.beginPath();
           if (typeof ctx.roundRect === "function") ctx.roundRect(bx - tw / 2, by - 8, tw, 16, 8);
           else ctx.rect(bx - tw / 2, by - 8, tw, 16);
@@ -1356,7 +1368,7 @@ export function render(
     // PD tablet bottom-left, the AI chip just outside bottom-right, the handle on
     // the right edge at mid-height).
     {
-      const letter = ov("genre") ? genreLetterOf(n) : "";
+      const letter = ov("genre") && !glyphsOff(n) ? genreLetterOf(n) : "";
       if (letter) {
         markOverlay("genre");
         const gs = genreSize(sh);
@@ -1370,7 +1382,7 @@ export function render(
     }
 
     // folded-group badge (count of hidden nodes)
-    if (n.badge && ov("fold_count")) {
+    if (n.badge && ov("fold_count") && !glyphsOff(n)) {
       markOverlay("fold_count");
       // BUGS-UI · a world-constant radius: the count badge scales with the node
       // exactly like the ornament chips (it used to grow as 1/sqrt(scale),
@@ -1441,9 +1453,9 @@ export function render(
   }
   // pinned badge: a small lock at the top-right corner of every locked node
   for (const n of shown) {
-    if (!n.pinned || n.collapsed || !ov("lock")) continue;
+    if (!n.pinned || n.collapsed || !ov("lock") || glyphsOff(n)) continue;
     markOverlay("lock");
-    const s = 12 / vp.scale;
+    const s = cappedGlyphPx(12, unitPxOf(n)) / vp.scale;
     ctx.font = canvasFont(400, s);
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
@@ -1454,24 +1466,26 @@ export function render(
   // corner (the top-right one is the lock's and the use-count's). World-space
   // like the lock, a constant screen size; chrome, never a node's own style.
   if (state.warnIds?.size && ov("warning")) {
-    const r = 7 / vp.scale;
     for (const n of shown) {
-      if (!state.warnIds.has(n.id)) continue;
+      if (!state.warnIds.has(n.id) || glyphsOff(n)) continue;
       markOverlay("warning");
+      // p.1 · 14 px across, never more than its unit allows
+      const f = glyphFactor(14, unitPxOf(n));
+      const r = (7 * f) / vp.scale;
       const cx = n.x;
       const cy = n.y;
       ctx.beginPath();
       ctx.arc(cx, cy, r, 0, Math.PI * 2);
       ctx.fillStyle = "#e3b43a";
       ctx.fill();
-      ctx.lineWidth = 2 / vp.scale;
+      ctx.lineWidth = (2 * f) / vp.scale;
       ctx.strokeStyle = canvasTheme().handleRing;
       ctx.stroke();
       ctx.fillStyle = "#1d1d1b";
-      ctx.font = canvasFont(700, 10 / vp.scale);
+      ctx.font = canvasFont(700, (10 * f) / vp.scale);
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
-      ctx.fillText("!", cx, cy + 0.5 / vp.scale);
+      ctx.fillText("!", cx, cy + (0.5 * f) / vp.scale);
     }
   }
 
@@ -1494,13 +1508,14 @@ export function render(
     const css = getComputedStyle(document.documentElement);
     const ink = css.getPropertyValue("--ai-ink").trim() || "#7a4fc4";
     const panel = css.getPropertyValue("--bg-panel").trim() || "#fff";
-    const h = 13 / Math.sqrt(vp.scale);
-    ctx.font = canvasFont(700, h * 0.7);
     ctx.textBaseline = "middle";
     for (const n of shown) {
       const st = state.aiNodes.get(n.instanceOf ?? n.id);
-      if (!st) continue;
+      if (!st || glyphsOff(n)) continue;
       markOverlay("ai_chip");
+      // p.1 · 13·√zoom px high, never more than its unit allows
+      const h = cappedGlyphPx(13 * Math.sqrt(vp.scale), unitPxOf(n)) / vp.scale;
+      ctx.font = canvasFont(700, h * 0.7);
       const label = st === "verified" ? "AI ✓" : "AI";
       const w = ctx.measureText(label).width + h * 0.7;
       const vb = visibleBoxOf(n);
@@ -1602,13 +1617,15 @@ export function render(
   // match the drawing exactly, at any zoom.
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   adornmentHits = [];
-  const badgePx = BADGE_PX * vp.scale;
+  const badgeAll = BADGE_PX * vp.scale;
   const badgeGap = BADGE_GAP * vp.scale;
   for (const n of shown) {
     // MICRO-BADGE-PD · the group's chip is not of this row: bottom-right, drawn
     // by `drawPdChips` below
     const ads = n.adornments?.filter((b) => !b.group && adornmentShown(state.overlays, b));
-    if (!ads || !ads.length) continue;
+    if (!ads || !ads.length || glyphsOff(n)) continue;
+    // p.1 · scaled with the node already (half a unit); the ceiling holds anyway
+    const badgePx = cappedGlyphPx(badgeAll, unitPxOf(n));
     const r = nodeScreenRect(n, vp);
     if (r.x + r.w < -badgePx || r.x > viewW || r.y + r.h < -badgePx || r.y > viewH)
       continue; // node (plus its badge row) entirely off-screen
@@ -1727,7 +1744,7 @@ export function render(
   }
   // ── MICRO-BADGE-PD · the chip of a unit's paradata group, bottom-right ──────
   // (switched off, it is drawn on no node, so it has no hit rect either)
-  drawPdChips(ctx, ov("pd_chip") ? shown : [], vp, viewW, viewH, state.selectedId ?? null);
+  drawPdChips(ctx, ov("pd_chip") ? shown : [], vp, viewW, viewH, state.selectedId ?? null, undefined, hideFar);
   for (let i = drawnPdChips().length; i > 0; i--) markOverlay("pd_chip");
 
   // ── FONTE · the badge of an INSTANCE, top left: «from US 12», «from
@@ -1740,14 +1757,20 @@ export function render(
   const ovInstance = ov("instance_badge"), ovTrace = ov("trace");
   for (const n of shown) {
     if (!(n.instanceBadge && ovInstance) && !(n.trace && ovTrace)) continue;
+    if (glyphsOff(n)) continue;
     const r = nodeScreenRect(n, vp);
+    const badgePx = badgeAll;
     if (r.x + r.w < 0 || r.x > viewW || r.y + r.h < -badgePx || r.y > viewH + badgePx) continue;
-    const fpx = Math.max(7, Math.round(badgePx * 0.5));
+    // p.1 · the 7 px floor of the text, under the unit's ceiling
+    const u = unitPxOf(n);
+    const fpx0 = Math.max(7, Math.round(badgePx * 0.5));
+    const h0 = Math.max(badgePx * 0.8, fpx0 * 1.5);
+    const fpx = fpx0 * glyphFactor(h0, u);
     ctx.font = canvasFont(600, fpx);
     if (n.instanceBadge?.ownerName && ovInstance) {
       const text = reasoningText("instance_badge", "label", { owner: n.instanceBadge.ownerName });
       const w = ctx.measureText(text).width + fpx * 1.1;
-      const h = Math.max(badgePx * 0.8, fpx * 1.5);
+      const h = cappedGlyphPx(h0, u);
       const bx = r.x - badgePx * 0.25;
       const by = r.y - h * 0.6;
       ctx.beginPath();
@@ -1779,6 +1802,7 @@ export function render(
   // double click enters the hypergraph (main.ts). BUGS-UI: sized off `badgePx`,
   // so it scales with its referent like the badges do.
   pdDecoratorHits = [];
+  const badgePx = badgeAll;
   const PD_W = badgePx * 1.5;
   const pdFill = nodeStyle("ParadataNodeGroup").labelBackground || groupHeaderFill();
   // BUGFIX-PDG · drawn from the REFERENT node (`pdCollapsed` = the PDG id), so the
@@ -1788,6 +1812,8 @@ export function render(
     if (!pdgId) continue;
     // PROPRIETA · a group shown by its property chip needs no «PD» tablet too
     if (ref.adornments?.some((b) => b.group === pdgId)) continue;
+    // p.1 · scaled with the node already; hidden from afar like the others
+    if (glyphsOff(ref)) continue;
     const r = nodeScreenRect(ref, vp);
     if (r.x + r.w < 0 || r.x - PD_W > viewW || r.y > viewH || r.y + r.h < 0)
       continue;

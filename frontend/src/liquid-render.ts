@@ -13,7 +13,7 @@
  * switch). Culling: a disc or an edge off screen is not drawn.
  */
 import { drawGlyph, type GlyphInk } from "./glyphs";
-import { markOverlay, overlayShown, type OverlayState } from "./overlays";
+import { farGlyphsHidden, markOverlay, overlayShown, type OverlayState } from "./overlays";
 import { drawnPdChips, drawPdChips } from "./pd-chip";
 import { propertyLabel, stratigraphicKindLetter, stratigraphicKindOf } from "./rules";
 import { FAMILY_COLOR, discVisibility, type Disc, type LiquidExtra, type LiquidFilter } from "./views/liquid";
@@ -218,7 +218,7 @@ export function renderLiquid(
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   const withChip = !overlayShown(overlays, "pd_chip") ? []
     : scene.nodes.filter((n) => n.adornments?.length && vis.get(n.id) !== "hide" && n.w * k >= 9);
-  drawPdChips(ctx, withChip, vp, viewW, viewH, st.selectedId);
+  drawPdChips(ctx, withChip, vp, viewW, viewH, st.selectedId, undefined, farGlyphsHidden(overlays));
   for (let i = drawnPdChips().length; i > 0; i--) markOverlay("pd_chip");
 }
 

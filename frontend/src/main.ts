@@ -457,7 +457,7 @@ import {
 import { adornmentBadges, type AdornmentBadge } from "./adornments";
 import { drawnPdChips, hitPdChip } from "./pd-chip";
 import {
-  defaultOverlays, drawnOverlayCounts, loadOverlays, NOBODY, OVERLAY_GROUPS, overlayItemsFor, overlayShown, overlaysHideSomething,
+  defaultOverlays, drawnOverlayCounts, farGlyphsHidden, withHideFar, loadOverlays, NOBODY, OVERLAY_GROUPS, overlayItemsFor, overlayShown, overlaysHideSomething,
   overlayValue, saveOverlays, withGroup, withOverlay, withValue, type OverlayKey, type OverlayState, type OverlayView,
 } from "./overlays";
 import { PD_CELL } from "./views/pd-arrange";
@@ -2497,7 +2497,7 @@ window.__EM_SCENE__ = () => {
   overlays: (v?: OverlayView) => {
     const vv = v ?? focusedOverlayView();
     const st = overlaysOf(vv);
-    return { view: vv, master: st.master, off: [...st.off] };
+    return { view: vv, master: st.master, off: [...st.off], hideFar: farGlyphsHidden(st) };
   },
   overlaysDrawn: () => drawnOverlayCounts(),
   // MICRO-SPAZIO-3D · the ornament badges as drawn (canvas-relative): «ha 3D» among them
@@ -2512,9 +2512,10 @@ window.__EM_SCENE__ = () => {
   liquidHdto: (on?: boolean) => { if (typeof on === "boolean") setLiquidHdto(on); return liquidHdto; },
   viewNodeIds: (v: "matrix" | "graph") =>
     (v === "matrix" ? scenes.matrix : scenes.graph)?.nodes.map((n: { id: string }) => n.id) ?? [],
-  setOverlays: (v: OverlayView, st: { master?: boolean; off?: OverlayKey[] }) => {
+  setOverlays: (v: OverlayView, st: { master?: boolean; off?: OverlayKey[]; keepFar?: boolean }) => {
     const cur = overlaysOf(v);
-    setOverlays(v, { master: st.master ?? cur.master, off: st.off ? [...st.off] : [...cur.off] });
+    const next = { ...cur, master: st.master ?? cur.master, off: st.off ? [...st.off] : [...cur.off] };
+    setOverlays(v, typeof st.keepFar === "boolean" ? withHideFar(next, !st.keepFar) : next);
   },
   /** a world rect framed in the focused graph window (the probes' camera) */
   frameWorld: (x: number, y: number, w: number, h: number, pad = 30) => {
@@ -16177,9 +16178,23 @@ function renderOverlayPanel(): void {
   mcb.type = "checkbox";
   mcb.checked = st.master;
   mcb.dataset.ov = "master";
-  mcb.addEventListener("change", () => setOverlays(v, { master: mcb.checked, off: [...overlaysOf(v).off] }));
+  mcb.addEventListener("change", () => setOverlays(v, { ...overlaysOf(v), master: mcb.checked, off: [...overlaysOf(v).off] }));
   master.append(mcb, document.createTextNode(" " + t("ov.master")));
   overlayPanel.appendChild(master);
+  // MICRO-GLIFI-OVERLAY-CONTINUITA p.1 · a unit a few pixels high loses its
+  // glyphs (glyph-scale.ts); switched off, they are kept, under their ceiling
+  if (v !== "space") {
+    const far = document.createElement("label");
+    far.className = "ov-master ov-far";
+    const fcb = document.createElement("input");
+    fcb.type = "checkbox";
+    fcb.checked = farGlyphsHidden(st);
+    fcb.dataset.ov = "hide_far";
+    fcb.addEventListener("change", () => setOverlays(v, withHideFar(overlaysOf(v), fcb.checked)));
+    far.append(fcb, document.createTextNode(" " + t("ov.hideFar")));
+    far.title = t("ov.hideFarTip");
+    overlayPanel.appendChild(far);
+  }
   const can = new Set(overlayItemsFor(v).map((i) => i.key));
   for (const g of OVERLAY_GROUPS) {
     const items = g.items.filter((i) => can.has(i.key));

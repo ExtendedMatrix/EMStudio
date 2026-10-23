@@ -198,6 +198,21 @@ export interface OverlayState {
   off: OverlayKey[];
   /** MICRO-GIZMO-ASSI · the sliders moved from their default (absent: the default) */
   values?: Partial<Record<OverlayValueKey, number>>;
+  /** MICRO-GLIFI-OVERLAY-CONTINUITA p.1 · «Hide glyphs from afar» switched OFF:
+   *  the glyphs of a unit a few pixels high are kept (under their ceiling,
+   *  glyph-scale.ts). Absent: hidden, the default. */
+  keepFar?: boolean;
+}
+
+/** Are the glyphs of a unit seen from afar hidden under this state? */
+export function farGlyphsHidden(st: OverlayState | null | undefined): boolean {
+  return !st?.keepFar;
+}
+
+/** «Hide glyphs from afar», switched. */
+export function withHideFar(st: OverlayState, hide: boolean): OverlayState {
+  const { keepFar: _k, ...rest } = st;
+  return hide ? rest : { ...rest, keepFar: true };
 }
 
 /**
@@ -226,7 +241,7 @@ export function withValue(st: OverlayState, key: OverlayValueKey, v: number): Ov
   const values = { ...(st.values ?? {}) };
   if (Math.abs(v - it.def) < 1e-9) delete values[key];
   else values[key] = Math.min(it.max, Math.max(it.min, v));
-  return Object.keys(values).length ? { ...st, values } : { master: st.master, off: st.off };
+  return Object.keys(values).length ? { ...st, values } : { master: st.master, off: st.off, ...(st.keepFar ? { keepFar: true } : {}) };
 }
 
 /** The Space's items (a group of their own). */
@@ -310,7 +325,7 @@ function readAll(): Stored {
 function clean(v: unknown, view: OverlayView): OverlayState {
   const d = defaultOverlays(view);
   if (!v || typeof v !== "object") return d;
-  const o = v as { master?: unknown; off?: unknown; values?: unknown; rev?: unknown };
+  const o = v as { master?: unknown; off?: unknown; values?: unknown; rev?: unknown; keepFar?: unknown };
   const was = Array.isArray(o.off) ? (o.off as unknown[]) : null;
   // MICRO-GIZMO-ASSI · a Space remembered before the groups (no `rev`): the
   // one switch «s3_labels» is the three, and the keys born off (the axis Z,
@@ -330,6 +345,7 @@ function clean(v: unknown, view: OverlayView): OverlayState {
     for (const it of OVERLAY_VALUES) { const x = (o.values as Record<string, unknown>)[it.key]; if (typeof x === "number" && Number.isFinite(x)) values[it.key] = x; }
     if (Object.keys(values).length) out.values = values;
   }
+  if (o.keepFar === true) out.keepFar = true;
   return out;
 }
 
@@ -347,8 +363,8 @@ export function saveOverlays(person: string | null | undefined, view: OverlayVie
   const d = defaultOverlays(view);
   const same = st.off.length === d.off.length && st.off.every((k) => d.off.includes(k));
   const vals = st.values && Object.keys(st.values).length ? { ...st.values } : null;
-  if (st.master === d.master && same && !vals) delete mine[view];
-  else mine[view] = { master: st.master, off: [...st.off], ...(vals ? { values: vals } : {}), ...(view === "space" ? { rev: SPACE_REV } : {}) };
+  if (st.master === d.master && same && !vals && !st.keepFar) delete mine[view];
+  else mine[view] = { master: st.master, off: [...st.off], ...(vals ? { values: vals } : {}), ...(st.keepFar ? { keepFar: true } : {}), ...(view === "space" ? { rev: SPACE_REV } : {}) };
   if (Object.keys(mine).length) all[who] = mine;
   else delete all[who];
   try {
