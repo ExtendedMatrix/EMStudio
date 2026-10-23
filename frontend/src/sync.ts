@@ -108,8 +108,14 @@ export interface HostInfo {
  * group's id); `null` means the entry is gone (the rule's place again).
  */
 export interface LayoutPayload {
+  /** MICRO-STANZA-POSIZIONI · "" is the Matrix (`layout.positions`) */
   space: string;
   positions: Record<string, { x: number; y: number; w: number; h: number } | null>;
+  /** the whole space replaced (a «Recompute layout»): entries not named are gone */
+  whole?: boolean;
+  /** with a whole Matrix: the archival layout's lanes and canvas */
+  swimlanes?: unknown;
+  canvas?: unknown;
   /** set by a ROOM: whose positions these are */
   connection_id?: string;
   author?: string | null;

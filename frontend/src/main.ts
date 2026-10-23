@@ -5822,6 +5822,9 @@ async function refreshMatrixViewLayout(): Promise<void> {
   } catch {
     matrixViewLayout = null; // fall back to archival on failure
   }
+  // MICRO-STANZA-POSIZIONI · the view of the door's layout is here: the room's
+  // positions arrive on it (they rebuild the scene themselves)
+  applyRoomMatrix(store);
   buildScenes();
   draw();
 }
@@ -6911,6 +6914,7 @@ function loadDocument(
     // Silent and non-blocking: nothing moves, so there is nothing to explain, and
     // a failure leaves the document exactly as it was on disk.
     void reassertSizes(loaded).finally(() => {
+      applyRoomMatrix(loaded, true);  // MICRO-STANZA-POSIZIONI · a room's moves, on its layout
       if (store !== loaded) return;   // another graph is in front now: its own load frames it
       // BUGS-UI · the geometry is only FINAL here (sizes re-asserted / layout
       // computed). Any camera framed earlier in the load framed a half-built
@@ -6924,6 +6928,7 @@ function loadDocument(
     logInfo("no stored positions — computing a fresh layout via em-core");
     void runLayout(true, loaded, false, true)
       .then(() => {
+        applyRoomMatrix(loaded, true);  // MICRO-STANZA-POSIZIONI · a room's positions, on it
         if (store !== loaded) return;   // laid out in its own store; the front is another graph's
         resetWindowCameras(); // frame the FINISHED layout, not the empty scene
         setViewOnLoad("matrix");
@@ -7531,6 +7536,8 @@ function hubApplyRemote(message: Record<string, unknown>, graphId?: string): voi
   }
   const op = message as unknown as HubOp;
   const kind = String(op.op ?? "");
+  // MICRO-STANZA-POSIZIONI · what this op moves here is not sent back
+  remoteFlush = true;
 
   if (kind === "update_field") {
     const node = target.node(String(op.node_id ?? op.id ?? ""));
@@ -8934,7 +8941,11 @@ function connectToHub(url: string, room: string, token: string | null): void {
       // it to the single-graph loader was the first thing that broke here — the
       // document arrived and nothing appeared, because it had no `.graph`.
       noteRoomGraphs(doc);       // G1 · the graphs an op may name here
+      // MICRO-STANZA-POSIZIONI · the room's Matrix positions land on the
+      // door's layout, not instead of it (`takeRoomMatrix`)
+      takeRoomMatrix(doc as unknown as Record<string, unknown>);
       loadContainerDocument(doc, roomFileName(room), null, { room: roomRef(room) });
+      seatRoomMatrix();
       info.textContent = t("hub.joined", { room });
       // E4 · a link with `&node=` lands on its unit once the room is here
       landOnHandoffNode();
@@ -9896,6 +9907,8 @@ async function reassertSizes(target: DocumentStore | null = store): Promise<void
     });
     if (!changed.length) return;
     st.setLayout(fixed);
+    // MICRO-STANZA-POSIZIONI · every screen re-asserts the same sizes: nobody's move
+    layoutSeenNow(st);
     logInfo(
       `${changed.length} node size(s) re-asserted from their type ` +
         `(a stored size never wins over the type's geometry)`,
@@ -10411,48 +10424,205 @@ function placeInEpochLane(changes: [string, string, string][]): void {
  */
 const spacesSeen = new WeakMap<DocumentStore, Map<string, string>>();
 let layoutLocalSaid = false;
+/**
+ * MICRO-STANZA-POSIZIONI (E.D., 23 Oct 2026: «the Matrix's positions are the
+ * room's too, not personal») · the space "" of a `layout` frame is the Matrix:
+ * the ARCHIVAL positions (`layout.positions`, what a file keeps). Every screen
+ * draws the Matrix through its view layout (em-core on what it draws, seeded by
+ * the archive): a position that arrives moves the archive to the sender's
+ * place and the view by the same delta — what a hand move does here
+ * (`moveTo`). Two screens that laid the same document out the same way stay
+ * the same; a «Recompute layout» travels whole, and the receiver lays its
+ * view out on it as the sender did.
+ */
+const MATRIX_SPACE = "";
+/** the archival layout object each store's frames were last compared against */
+const layoutSeenRev = new WeakMap<DocumentStore, number>();
+/** a flush that follows an operation from the room: what moves in it (the epoch
+ *  lane's rule placing a unit) is this screen's echo of the sender's change,
+ *  and the sender's own positions are on their way — not sent back */
+let remoteFlush = false;
+const spaceKey = (space: string, id: string): string => `${space}\u0000${id}`;
+const rectSig = (r: LayoutRect): string =>
+  JSON.stringify([Math.round(r.x * 100) / 100, Math.round(r.y * 100) / 100, r.w, r.h]);
 function spacesOf(st: DocumentStore): Map<string, string> {
   const out = new Map<string, string>();
+  for (const [id, r] of Object.entries(st.doc.layout?.positions ?? {}))
+    if (r) out.set(spaceKey(MATRIX_SPACE, id), rectSig(r));
   for (const [space, rects] of Object.entries(st.doc.layout?.group_spaces ?? {}))
     for (const [id, r] of Object.entries(rects ?? {}))
-      out.set(`${space}\u0000${id}`, JSON.stringify([Math.round(r.x * 100) / 100, Math.round(r.y * 100) / 100, r.w, r.h]));
+      if (r) out.set(spaceKey(space, id), rectSig(r));
   return out;
+}
+/** the positions as they are now are what this screen has said (or heard) */
+function layoutSeenNow(st: DocumentStore): void {
+  spacesSeen.set(st, spacesOf(st));
+  layoutSeenRev.set(st, layoutRevision(st.doc.layout));
+}
+function rectIn(st: DocumentStore, space: string, id: string): LayoutRect | undefined {
+  return space === MATRIX_SPACE ? st.doc.layout?.positions?.[id] : st.doc.layout?.group_spaces?.[space]?.[id];
 }
 function shareGroupSpaces(): void {
   const st = store;
   if (!st) return;
+  // a drag in flight writes nothing (TOCCARE): its commit, at the release, is
+  // the ONE frame — never one per move
+  if (dragMode === "node" && dragMoving) return;
+  const fromRoom = remoteFlush;
+  remoteFlush = false;
   const now = spacesOf(st);
   const seen = spacesSeen.get(st);
+  const rev = layoutRevision(st.doc.layout);
+  const seenRev = layoutSeenRev.get(st);
   spacesSeen.set(st, now);
-  if (!seen || !sync.room || !sync.connected) return;
+  layoutSeenRev.set(st, rev);
+  if (!seen || fromRoom || !sync.room || !sync.connected) return;
   const changed = new Map<string, Record<string, LayoutRect | null>>();
   const note = (key: string, rect: LayoutRect | null): void => {
-    const [space, id] = key.split("\u0000");
+    const cut = key.indexOf("\u0000");
+    const space = key.slice(0, cut), id = key.slice(cut + 1);
     (changed.get(space) ?? changed.set(space, {}).get(space)!)[id] = rect;
   };
   for (const [key, v] of now) if (seen.get(key) !== v) {
-    const [space, id] = key.split("\u0000");
-    note(key, st.doc.layout!.group_spaces![space][id]);
+    const cut = key.indexOf("\u0000");
+    note(key, rectIn(st, key.slice(0, cut), key.slice(cut + 1)) ?? null);
   }
   for (const key of seen.keys()) if (!now.has(key)) note(key, null);
-  if (!changed.size) return;
+  // a NEW archival layout («Layout», «Riordina»): this screen lays its view out
+  // again on it (the view's signature follows the layout object), so the others
+  // must too — the whole Matrix, not a delta. An undo puts its view back with
+  // the step (`setViewHistory` re-signs it): not whole
+  const whole = seenRev !== undefined && seenRev !== rev && st === store && matrixViewSig !== matrixViewSigNow();
+  if (!changed.size && !whole) return;
   if (!hostInfo.layout) {
-    // said once per session: the hand's positions inside a group stay here
+    // said once per session: the hand's positions stay here
     if (!layoutLocalSaid) { layoutLocalSaid = true; logInfo(t("room.layoutLocal")); }
     return;
   }
   if (!sync.canWrite) return;
   const graphId = String((st.doc.graph as Record<string, unknown>).graph_id ?? "");
   const named = graphId && hubRoomGraphs.has(graphId) ? graphId : undefined;
+  if (whole) {
+    changed.delete(MATRIX_SPACE);
+    const l = st.doc.layout ?? {};
+    sync.sendCommand(wireEnvelope("layout", { space: MATRIX_SPACE, positions: { ...(l.positions ?? {}) }, whole: true,
+      ...(l.swimlanes ? { swimlanes: l.swimlanes } : {}), ...(l.canvas ? { canvas: l.canvas } : {}) } as unknown as Record<string, unknown>, { graph_id: named }));
+  }
   for (const [space, positions] of changed)
     sync.sendCommand(wireEnvelope("layout", { space, positions } as unknown as Record<string, unknown>, { graph_id: named }));
 }
+/** frames that arrived during a drag: applied at the release (the node under
+ *  the hand is not moved by somebody else's frame) */
+let heldLayout: { body: LayoutPayload; graphId?: string }[] = [];
+/** the ids the release just committed: newer than any frame held meanwhile */
+let heldSkip: Set<string> | null = null;
+function releaseHeldLayout(): void {
+  const held = heldLayout, skip = heldSkip;
+  heldLayout = [];
+  heldSkip = null;
+  for (const h of held) {
+    const positions = skip
+      ? Object.fromEntries(Object.entries(h.body.positions ?? {}).filter(([id]) => !skip.has(id))) : h.body.positions;
+    hubApplyLayout({ ...h.body, positions }, h.graphId);
+  }
+}
 /** a room's `layout` frame: the positions land, and are not sent back */
 function hubApplyLayout(body: LayoutPayload, graphId?: string): void {
+  if (dragMode === "node" && dragMoving) { heldLayout.push({ body, graphId }); return; }
   const target = hubStoreFor(graphId);
-  if (!target || !body?.space || !body.positions) return;
-  target.applyRemoteLayout(String(body.space), body.positions);
-  if (spacesSeen.has(target)) spacesSeen.set(target, spacesOf(target));
+  if (!target || typeof body?.space !== "string" || !body.positions) return;
+  const matrix = body.space === MATRIX_SPACE;
+  const before = matrix ? { ...(target.doc.layout?.positions ?? {}) } : null;
+  target.applyRemoteLayout(body.space, body.positions, { whole: body.whole, swimlanes: body.swimlanes, canvas: body.canvas });
+  // the Matrix's VIEW follows by the archive's delta, as a hand move does
+  // (a whole layout lays the view out again instead: a new layout object)
+  const view = target === store ? matrixViewLayout?.positions : undefined;
+  if (matrix && before && view && !body.whole)
+    for (const [id, r] of Object.entries(body.positions)) {
+      const was = before[id], v = view[id];
+      if (r && was && v) view[id] = { ...v, x: v.x + r.x - was.x, y: v.y + r.y - was.y };
+    }
+  // what arrived is not this screen's to say again
+  const seen = spacesSeen.get(target);
+  if (seen) {
+    if (body.whole)
+      for (const key of [...seen.keys()]) if (key.startsWith(spaceKey(body.space, ""))) seen.delete(key);
+    for (const id of body.whole ? Object.keys(rectsOf(target, body.space)) : Object.keys(body.positions)) {
+      const r = rectIn(target, body.space, id);
+      if (r) seen.set(spaceKey(body.space, id), rectSig(r));
+      else seen.delete(spaceKey(body.space, id));
+    }
+    if (body.whole && matrix) layoutSeenRev.set(target, layoutRevision(target.doc.layout));
+  }
+}
+function rectsOf(st: DocumentStore, space: string): Record<string, LayoutRect> {
+  return (space === MATRIX_SPACE ? st.doc.layout?.positions : st.doc.layout?.group_spaces?.[space]) ?? {};
+}
+/**
+ * «Who enters a room sees the room's positions» · a room's snapshot brings its
+ * Matrix positions in `graphs.<id>.layout.positions`. Two cases:
+ *
+ * - positions alone (moves since the room was laid out at the door): NOT read
+ *   as the document's layout. Every screen lays a room's document out the
+ *   same way at the door (`runLayout`, initial), and the room's positions then
+ *   arrive on it as frames would — after the view is laid out on that same
+ *   base, so the view moves by the same deltas the others' did;
+ * - a whole layout (somebody's «Layout»: the room keeps its lanes too): read
+ *   as the document's layout, and the view is laid out on it — what the
+ *   screens in the room did when it arrived. Measured on the GT16 (GL7.room,
+ *   every group open on both screens): taken as moves on the door's base, the
+ *   archive was the same and 1186 of the 1188 drawn nodes were elsewhere than
+ *   on the screen that asked for the layout; read as the layout, 0. The nodes
+ *   moved after it come back to where they started (`moved_from`, kept by the
+ *   room) and move again on the view: without it, 7 of 1188 were elsewhere.
+ */
+const roomMatrixPending = new WeakMap<DocumentStore, { positions: Record<string, LayoutRect>; ready: boolean }>();
+const roomMatrixByGraph = new Map<string, Record<string, LayoutRect>>();
+function takeRoomMatrix(doc: Record<string, unknown>): void {
+  roomMatrixByGraph.clear();
+  for (const [key, section] of Object.entries((doc.graphs ?? {}) as Record<string, Record<string, unknown>>)) {
+    const layout = section?.layout as import("./types").EmLayout | undefined;
+    const movedFrom = layout?.moved_from as Record<string, LayoutRect | null> | undefined;
+    if (layout) delete layout.moved_from;          // the room's bookkeeping, not the document's
+    if (!layout?.positions || !Object.keys(layout.positions).length) continue;
+    const graphId = String(section.graph_id ?? key);
+    if (Array.isArray(layout.swimlanes) && layout.swimlanes.length) {
+      // a whole layout: the document's, as it was when it arrived — the nodes
+      // moved since back where they started (`moved_from`), and their moves
+      // land on the view laid out on it
+      const moves: Record<string, LayoutRect> = {};
+      for (const [id, from] of Object.entries(movedFrom ?? {})) {
+        const now = layout.positions[id];
+        if (!now) continue;
+        moves[id] = now;
+        if (from) layout.positions[id] = from;
+        else delete layout.positions[id];
+      }
+      if (Object.keys(moves).length) roomMatrixByGraph.set(graphId, moves);
+      continue;
+    }
+    roomMatrixByGraph.set(graphId, layout.positions);
+    delete layout.positions;
+    delete layout.swimlanes;
+    delete layout.canvas;
+  }
+}
+function seatRoomMatrix(): void {
+  for (const [graphId, positions] of roomMatrixByGraph) {
+    const st = hubStoreFor(graphId);
+    if (st) roomMatrixPending.set(st, { positions, ready: false });
+  }
+  roomMatrixByGraph.clear();
+}
+/** the door's layout is done (`ready`), and — for the graph in front — its view too */
+function applyRoomMatrix(st: DocumentStore | null, ready = false): void {
+  const p = st && roomMatrixPending.get(st);
+  if (!st || !p) return;
+  if (ready) p.ready = true;
+  if (!p.ready) return;
+  if (st === store && (matrixViewQueued || matrixViewSig !== matrixViewSigNow())) return;
+  roomMatrixPending.delete(st);
+  hubApplyLayout({ space: MATRIX_SPACE, positions: p.positions }, String((st.doc.graph as Record<string, unknown>).graph_id ?? "") || undefined);
 }
 
 /** where the scene's objects are going: a sliding one is drawn where it was
@@ -10552,6 +10722,9 @@ function endNodeDrag(): void {
   dragDropOpts = null;
   dragStartTarget = null;
   dropTarget = null;
+  // MICRO-STANZA-POSIZIONI · the room's frames held during the drag
+  if (heldLayout.length) releaseHeldLayout();
+  heldSkip = null;
 }
 
 /** Esc during a drag: nothing was written, so a rebuild IS the undo. */
@@ -36262,6 +36435,9 @@ async function runLayout(fresh: boolean, target: DocumentStore | null = store,
     ...(all ? { rearrange: (g: string) => st.node(g)?.node_type === "ParadataNodeGroup" } : {}),
     initial,
   });
+  // MICRO-STANZA-POSIZIONI · the door's layout is nobody's move: every screen
+  // in the room computes the same one, and none of them sends it
+  if (initial) layoutSeenNow(st);
 }
 
 /**
@@ -37403,6 +37579,9 @@ function wireGraphCanvas(canvas: HTMLCanvasElement, winId: string): void {
     } else if (mode === "node" && dragNodeId && dragMoving) {
       // drag ended → ONE commit: the reassignment, if the target changed, and
       // the position the node was dropped at, in a single undo step
+      // (MICRO-STANZA-POSIZIONI · and these places are newer than any frame
+      // the room sent meanwhile)
+      heldSkip = new Set([...dragMoving.nodes.keys(), ...dragMoving.groups.keys()]);
       commitNodeDrag(w.x, w.y, e.altKey);
     }
     endNodeDrag();

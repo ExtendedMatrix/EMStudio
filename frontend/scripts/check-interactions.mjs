@@ -8628,6 +8628,124 @@ if (K_NODE && process.env.CORSIA_ROOM) test("GL6.live", "CORSIA p.2 dal vivo · 
   return { pass: !same(r.a0, r.a1) && same(r.b0, r.b1) && !r.sentA.length && r.log === 1 && !r.errors.length, detail: r };
 });
 
+// MICRO-STANZA-POSIZIONI (LAYOUT_NODE + LAYOUT_ROOM: a stratigraph-server that
+// declares `layout`, a room holding the GT16 with no layout). The positions are
+// the room's: the Matrix's and those inside a group travel, stay, and a late
+// arrival sees them; a frame does not move the node under somebody's hand
+const LAY_NODE = (process.env.LAYOUT_NODE ?? "").replace(/\/+$/, "");
+const LAY_ROOM = process.env.LAYOUT_ROOM ?? "";
+if (LAY_NODE && LAY_ROOM) test("GL7.room", "STANZA-POSIZIONI · istanza di prova del server con «layout», la stanza del GT16: A trascina un'unità della Matrix e il combinatore nel gruppo PD di VSF125 → B vede entrambi; B esce e rientra, restano; C che entra dopo li vede; un frame che arriva mentre B tiene l'unità in mano non la sposta, al rilascio vince B e A lo vede; «Layout» di A arriva intero e le tre Matrix restano uguali; un frame per rilascio, nessuna operazione di grafo; la stanza le tiene (lettura REST)", async () => {
+  const one = async () => {
+    const o = await open({ doc: null, locale: "en", w: 1728, h: 1000, init: { "emstudio.settings": JSON.stringify({ sync: { hubUrl: LAY_NODE } }) } });
+    const frames = [];
+    o.p.on("websocket", (ws) => ws.on("framesent", (f) => { try { const m = JSON.parse(f.payload);
+      if (m.type === "layout" || m.type === "op") frames.push({ type: m.type, space: m.payload?.space, n: Object.keys(m.payload?.positions ?? {}).length, whole: !!m.payload?.whole }); } catch {} }));
+    await o.p.evaluate(([u, r]) => window.__EM_DRAG__.joinRoom(u, r, null), [LAY_NODE, LAY_ROOM]);
+    await o.p.waitForFunction(() => (window.__EM_SCENE__?.()?.nodes?.length ?? 0) > 50, null, { timeout: 120000 });
+    await o.p.waitForTimeout(3500);
+    return { ...o, frames };
+  };
+  const foldBut = async (c, keep) => { await c.p.evaluate((keep) => { const E = window.__EM_DRAG__; for (const n of E.matrixGeom().nodes) if (n.isGroup && n.type === "ParadataNodeGroup" && n.id !== keep) E.fold(n.id, true); E.fold(keep, false); }, keep); await c.p.waitForTimeout(1500); };
+  const all = (p) => p.evaluate(() => Object.fromEntries(window.__EM_DRAG__.matrixGeom().nodes.map((n) => [n.id, [Math.round(n.x), Math.round(n.y)]])));
+  const differ = (a, b) => Object.keys(a).filter((id) => b[id] && Math.abs(a[id][0] - b[id][0]) + Math.abs(a[id][1] - b[id][1]) > 2).length;
+  const same = (x, y) => !!x && !!y && Math.abs(x[0] - y[0]) <= 1 && Math.abs(x[1] - y[1]) <= 1;
+  const out = {};
+  const A = await one(), B = await one();
+  const g = await A.p.evaluate(() => { const E = window.__EM_DRAG__; const g = E.edgesOf("has_paradata_nodegroup").find((e) => E.node(e.source)?.name === "VSF125")?.target;
+    const unit = E.matrixGeom().nodes.find((n) => E.node(n.id)?.name === "USV151")?.id;
+    return { g, unit, combiner: E.edgesOf("is_in_paradata_nodegroup").filter((e) => e.target === g).map((e) => e.source).find((m) => E.node(m)?.node_type === "combiner") }; });
+  out.ids = g;
+  for (const c of [A, B]) await foldBut(c, g.g);
+  out.start = { sameMatrix: differ(await all(A.p), await all(B.p)) };
+  const wa = await glWin(A.p);
+  const a0 = { u: await glAt(A.p, g.unit), c: await glAt(A.p, g.combiner) };
+  // 1 · A moves a unit of the Matrix and the combiner inside VSF125's group
+  await glFrameOn(A.p, wa, g.unit);
+  out.draggedUnit = await glDrag(A.p, wa, g.unit, 90, 0);
+  await glFrameOn(A.p, wa, g.g);
+  out.draggedComb = await glDrag(A.p, wa, g.combiner, 70, 45);
+  await B.p.waitForTimeout(2000);
+  const a1 = { u: await glAt(A.p, g.unit), c: await glAt(A.p, g.combiner) }, b1 = { u: await glAt(B.p, g.unit), c: await glAt(B.p, g.combiner) };
+  out.moved = { a0, a1, b1 };
+  // 2 · B leaves and comes back
+  await B.ctx.close();
+  const B2 = await one();
+  await foldBut(B2, g.g);
+  const b2 = { u: await glAt(B2.p, g.unit), c: await glAt(B2.p, g.combiner) };
+  // 3 · C enters after
+  const C = await one();
+  await foldBut(C, g.g);
+  const c1 = { u: await glAt(C.p, g.unit), c: await glAt(C.p, g.combiner) };
+  out.back = { b2, c1, matrixAvsB2: differ(await all(A.p), await all(B2.p)), matrixAvsC: differ(await all(A.p), await all(C.p)) };
+  // 4 · B2 holds the unit; A moves it meanwhile; B2 releases: B2's place wins
+  const wb = await glWin(B2.p);
+  await glFrameOn(B2.p, wb, g.unit);
+  await glFrameOn(A.p, wa, g.unit);
+  const hb = await glScr(B2.p, wb, g.unit);
+  await B2.p.mouse.move(hb.x, hb.y); await B2.p.mouse.down(); await B2.p.mouse.move(hb.x + 20, hb.y, { steps: 4 }); await B2.p.mouse.move(hb.x + 40, hb.y, { steps: 4 });
+  await B2.p.waitForTimeout(300);
+  const held0 = await glAt(B2.p, g.unit);
+  await glDrag(A.p, wa, g.unit, -120, 0);
+  await B2.p.waitForTimeout(1500);
+  const held1 = await glAt(B2.p, g.unit);
+  await B2.p.mouse.move(hb.x + 60, hb.y, { steps: 4 }); await B2.p.mouse.up();
+  await B2.p.waitForTimeout(2000);
+  out.hand = { held0, held1, aMoved: await glAt(A.p, g.unit), b2: await glAt(B2.p, g.unit), a: null, c: null };
+  out.hand.a = await glAt(A.p, g.unit); out.hand.c = await glAt(C.p, g.unit);
+  // what the room keeps (REST), before and after the new layout
+  const kept = async () => { const doc = await (await fetch(`${LAY_NODE}/v1/rooms/${LAY_ROOM}/document`)).json();
+    const sec = Object.values(doc.doc.graphs).find((x) => (x.nodes ?? []).some((n) => n.id === g.unit));
+    return { unit: sec?.layout?.positions?.[g.unit] ?? null, combiner: sec?.layout?.group_spaces?.[g.g]?.[g.combiner] ?? null, positions: Object.keys(sec?.layout?.positions ?? {}).length }; };
+  out.kept = await kept();
+  // 5 · A asks for a new layout: it travels whole. The ARCHIVE is the same on
+  // every screen; the drawing is the same where the folds are (a fold is this
+  // screen's, `layout.folded_groups`, and the view is laid out on what is
+  // drawn): A opens every group again, as a room arrives, and so does D, who
+  // enters after; B2 and C keep theirs folded
+  const arch = (p) => p.evaluate(() => { const d = JSON.parse(window.__EM_DRAG__.docJson()); const l = d.layout ?? Object.values(d.graphs ?? {})[0]?.layout;
+    return Object.fromEntries(Object.entries(l?.positions ?? {}).map(([id, r]) => [id, [Math.round(r.x), Math.round(r.y)]])); });
+  const archDiff = (a, b) => Object.keys(a).filter((id) => !b[id] || Math.abs(a[id][0] - b[id][0]) + Math.abs(a[id][1] - b[id][1]) > 1).length + Object.keys(b).filter((id) => !a[id]).length;
+  await A.p.evaluate(() => { const E = window.__EM_DRAG__; for (const id of E.folded()) E.fold(id, false); });
+  await A.p.waitForTimeout(1500);
+  const nA = A.frames.length;
+  // (the toolbar's button, clicked as a script: it sits under the window bars)
+  await A.p.evaluate(() => document.getElementById("btn-layout").click()); await A.p.waitForTimeout(5000);
+  const archA = await arch(A.p);
+  out.whole = { frames: A.frames.slice(nA), archAvsB2: archDiff(archA, await arch(B2.p)), archAvsC: archDiff(archA, await arch(C.p)),
+    B2vsC: differ(await all(B2.p), await all(C.p)), archA: Object.keys(archA).length, kept: await kept() };
+  out.framesA = A.frames.slice(0, nA); out.framesB2 = B2.frames;
+  // 6 · D enters AFTER the new layout, its groups as they arrive (open, like A's)
+  const D = await one();
+  const probe = (p) => p.evaluate((u) => { const E = window.__EM_DRAG__; const g = E.matrixGeom();
+    return { vp: E.viewPosition(u), lanes: g.lanes.map((l) => [l.label, Math.round(l.y), Math.round(l.height)]), nodes: g.nodes.length, folded: E.folded().length }; }, g.unit);
+  out.afterWhole = { AvsD: differ(await all(A.p), await all(D.p)), archAvsD: archDiff(archA, await arch(D.p)), A: await probe(A.p), D: await probe(D.p) };
+  await D.ctx.close();
+  // 7 · A moves the unit after the new layout; E enters after that: the room's
+  // `moved_from` gives E the same base, and the move on it
+  await glFrameOn(A.p, wa, g.unit);
+  await glDrag(A.p, wa, g.unit, 70, 0);
+  await A.p.waitForTimeout(1500);
+  const E = await one();
+  out.afterWholeMove = { AvsE: differ(await all(A.p), await all(E.p)), archAvsE: archDiff(await arch(A.p), await arch(E.p)),
+    unit: [await glAt(A.p, g.unit), await glAt(E.p, g.unit)] };
+  await E.ctx.close();
+  out.errors = [...A.errors, ...B2.errors, ...C.errors];
+  await A.p.screenshot({ path: SHOT("gl7-room-A") }).catch(() => {});
+  await C.p.screenshot({ path: SHOT("gl7-room-C") }).catch(() => {});
+  await A.ctx.close(); await B2.ctx.close(); await C.ctx.close();
+  const m = out.moved, bk = out.back, h = out.hand, w = out.whole;
+  const pass = out.draggedUnit && out.draggedComb && out.start.sameMatrix === 0
+    && !same(m.a0.u, m.a1.u) && !same(m.a0.c, m.a1.c) && same(m.a1.u, m.b1.u) && same(m.a1.c, m.b1.c)
+    && same(bk.b2.u, m.a1.u) && same(bk.b2.c, m.a1.c) && same(bk.c1.u, m.a1.u) && same(bk.c1.c, m.a1.c) && bk.matrixAvsB2 === 0 && bk.matrixAvsC === 0
+    && same(h.held0, h.held1) && !same(h.b2, h.held0) && same(h.a, h.b2) && same(h.c, h.b2)
+    && w.frames.some((f) => f.space === "" && f.whole) && w.archAvsB2 === 0 && w.archAvsC === 0 && w.B2vsC === 0
+    && out.afterWhole.AvsD === 0 && out.afterWhole.archAvsD === 0 && out.afterWholeMove.archAvsE === 0 && out.afterWholeMove.AvsE === 0
+    && out.framesA.filter((f) => f.type === "layout").length === 3 && !out.framesA.some((f) => f.type === "op")
+    && out.framesA.filter((f) => f.type === "layout" && f.space === "").length === 2
+    && !!out.kept.unit && !!out.kept.combiner && w.kept.positions > 50 && w.kept.positions === w.archA && !out.errors.length;
+  return { pass, detail: out };
+});
+
 // ── MICRO-GEOGLOBO · the GT16 (a COPY: `GEO_V4`) and a bridge of this tree that
 // serves its folder (`GEO_BRIDGE`, level 36: /tiles, /geo); the orthophoto of the
 // test (`GEO_ORTHO`, a GeoTIFF in EPSG:31700 made by the report's script). The

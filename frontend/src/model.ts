@@ -3557,14 +3557,35 @@ export class DocumentStore {
    * of this person's history (no undo step, no operation back). `null` takes
    * the entry away: the rule's place again.
    */
-  applyRemoteLayout(space: string, positions: Record<string, LayoutRect | null>): void {
+  applyRemoteLayout(space: string, positions: Record<string, LayoutRect | null>,
+                    opts: { whole?: boolean; swimlanes?: unknown; canvas?: unknown } = {}): void {
+    // MICRO-STANZA-POSIZIONI · the space "" is the Matrix (`layout.positions`).
+    // `whole` is somebody's «Recompute layout»: the Matrix's positions replaced,
+    // in a NEW layout object — this screen lays its view out on it, as that
+    // screen did (`matrixViewSigNow` follows the object)
+    if (!space) {
+      const was = this.doc.layout ?? {};
+      const own: Record<string, LayoutRect> = opts.whole ? {} : (was.positions ??= {});
+      for (const [id, rect] of Object.entries(positions)) {
+        if (rect) own[id] = { x: rect.x, y: rect.y, w: rect.w, h: rect.h };
+        else delete own[id];
+      }
+      if (opts.whole) {
+        this.doc.layout = { ...was, positions: own,
+          ...(Array.isArray(opts.swimlanes) ? { swimlanes: opts.swimlanes as import("./types").Swimlane[] } : {}),
+          ...(opts.canvas && typeof opts.canvas === "object" ? { canvas: opts.canvas as { width: number; height: number } } : {}) };
+      } else this.doc.layout = Object.assign(was, { positions: own });
+      this.emit();
+      return;
+    }
     const spaces = ((this.doc.layout ??= {}).group_spaces ??= {});
-    const own = (spaces[space] ??= {});
+    const own: Record<string, LayoutRect> = opts.whole ? {} : (spaces[space] ??= {});
     for (const [id, rect] of Object.entries(positions)) {
       if (rect) own[id] = { x: rect.x, y: rect.y, w: rect.w, h: rect.h };
       else delete own[id];
     }
-    if (!Object.keys(own).length) delete spaces[space];
+    if (Object.keys(own).length) spaces[space] = own;
+    else delete spaces[space];
     this.emit();
   }
 
