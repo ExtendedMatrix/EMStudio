@@ -929,11 +929,30 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
           camera.updateProjectionMatrix();
         }
       };
+      /** MICRO-GEOREF-GRAFO p.0a · outside the globe's hands the camera's up is
+       *  the scene's vertical (three's +y, the data's Z). Measured (23 Oct): the
+       *  globe's pose wrote `camera.up` (its screen-up in the Earth's frame, a
+       *  horizontal north when it looked down) and nothing gave it back — the
+       *  flight to the site lands with `repivot` false, «Restore» and the plan
+       *  only move the position — while the orbit turns about +y and the
+       *  OrbitControls' `lookAt` at every frame used that up: a rolled horizon,
+       *  the gizmo's Z askew. Both cameras, so a keypad 5 does not bring it back */
+      const level = () => {
+        if (geo?.ownsPointer()) return;
+        let rolled = false;
+        for (const c of [persp, ortho]) {
+          if (!c || (c.up.x === 0 && c.up.y === 1 && c.up.z === 0)) continue;
+          c.up.set(0, 1, 0);
+          rolled = rolled || c === camera;
+        }
+        if (rolled) camera.lookAt(controls.target);
+      };
       const applyCam = (c: CamState) => {
         // a camera given (a jump, a frame of a key, «Indietro») is the reader's
         // point of view from now on: the first arrival of the content does not
         // frame over it
         framed = true;
+        level();
         if (isOrtho) { placeOrtho(c); controls.update(); return; }
         camera.position.copy(v3(c.pos));
         controls.target.copy(v3(c.target));
@@ -1091,6 +1110,7 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
       const orbitBy = (dx: number, dy: number) => {
         finishAnim();
         leaveAligned();
+        level();
         const off = new THREE.Vector3().subVectors(camera.position, controls.target);
         const sph = new THREE.Spherical().setFromVector3(off);
         sph.theta -= dx * 0.005;
@@ -2218,7 +2238,7 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
         stepAnim(performance.now());
         // MICRO-GEOGLOBO · the globe moves the camera in its mode (its hands, a flight)
         if (geo) geo.update();
-        if (!geo?.ownsPointer()) controls.update();
+        if (!geo?.ownsPointer()) { level(); controls.update(); }
         const live = liveLayers();
         // MICRO-TILESET-CONTENITORE p.3 · the container's side at every frame, BEFORE the tiles
         // update (at 4 a second a tileset going away loaded 34 tiles, 17 MB, it would not show);

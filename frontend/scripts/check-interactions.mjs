@@ -9420,8 +9420,105 @@ test("SV3.instances", "SERVSF-FINE-ISTANZE p.3 · le istanze per epoca: GT16, Sp
   return { pass, detail: { ...out, cursor, cursor2, errors } };
 });
 
+// ── MICRO-GEOREF-GRAFO · the GT16 as it is now (EPSG:3844, shift z 0), a COPY
+// (`GEOREF_V4`), and a bridge of this tree serving its folder (`GEOREF_BRIDGE`) ──
+const GEOREF_V4 = process.env.GEOREF_V4 ?? "/tmp/georef/pkg/EM/TempluMare_v4.em.json";
+const GEOREF_BRIDGE = process.env.GEOREF_BRIDGE ?? GEO_BRIDGE;
+const grOpen = async (doc = null) => {
+  const ctx = await browser.newContext({ viewport: { width: 1600, height: 1000 } });
+  const p = await ctx.newPage();
+  const errors = [];
+  p.on("pageerror", (e) => errors.push(String(e).slice(0, 300)));
+  p.on("console", (m) => { if (m.type() === "error" && /NaN|reading 'color'|could not be decoded/.test(m.text())) errors.push(m.text().slice(0, 200)); });
+  await p.addInitScript(() => { try { if (!sessionStorage.getItem("probe")) { localStorage.clear(); localStorage.setItem("emstudio.locale", "en"); sessionStorage.setItem("probe", "1"); } } catch {} });
+  await p.goto(`http://localhost:${PORT}/em/studio/?bridge=${encodeURIComponent(GEOREF_BRIDGE)}`);
+  await p.waitForSelector("#workspace-bar .ws-tab", { timeout: 30000 });
+  await p.evaluate(([d, path]) => window.__EM_DRAG__.openAt(d, path), [doc ?? JSON.parse(readFileSync(GEOREF_V4, "utf8")), GEOREF_V4]);
+  await p.waitForFunction(() => (window.__EM_SCENE__?.()?.nodes?.length ?? 0) > 50, null, { timeout: 60000 });
+  await p.waitForTimeout(800);
+  return { p, ctx, errors };
+};
+const grSpace = async (p) => {
+  await workspace(p, "space");
+  await p.waitForFunction(() => document.querySelector(".scn-host")?.dataset.ready === "1", null, { timeout: 120000 });
+  await p.waitForTimeout(800);
+};
+/** the camera's roll (deg: its right vector's height) and the angle on screen of
+ *  the scene's vertical through the pivot (deg from the screen's up) */
+const grLevel = (p) => p.evaluate(() => {
+  const h = document.querySelector(".scn-host");
+  const m = h.__spaceCamMatrix().world;
+  const roll = (Math.asin(Math.max(-1, Math.min(1, m[1]))) * 180) / Math.PI;
+  const t = h.__spaceCamState().target;
+  const d = Math.hypot(...h.__spaceCamState().pos.map((v, i) => v - t[i])) * 0.1 || 1;
+  const a = h.__spaceProject(t), b = h.__spaceProject([t[0], t[1] + d, t[2]]);
+  const z = a && b ? (Math.atan2(b.x - a.x, a.y - b.y) * 180) / Math.PI : null;
+  const g = h.__spaceGizmo?.();
+  const zb = g?.balls?.find((x) => x.axis === "z"), c = g?.balls?.find((x) => x.axis === "-z");
+  return { roll, zScreen: z, gizmoZ: zb && c ? (Math.atan2(zb.x - c.x, c.y - zb.y) * 180) / Math.PI : null };
+});
+
+test("GR1.level", "GEOREF-GRAFO p.0a · l'orbita del Sito resta in bolla: GT16, «Territory», Globe (le sue mani: una presa e un giro con inclinazione) → Pianta → Sito con la barra, poi «Frame all» (Home): il rollio della camera è 0 e la verticale della scena (la Z dei dati) è verticale sullo schermo, anche nel gizmo; 360° di orbita orizzontale (il gizmo trascinato) non lo cambiano; lo stesso dopo Globe (le mani) → Sito diretto", async () => {
+  if (!existsSync(GEOREF_V4)) return { pass: false, detail: { missing: GEOREF_V4 } };
+  const { p, ctx, errors } = await grOpen();
+  await grSpace(p);
+  await geoOn(p);
+  const out = { steps: [] };
+  const go = async (m) => { await p.click(`.scn-bar [data-geo-mode="${m}"]`); await p.waitForTimeout(300); await geoIdle(p, 30000); await p.waitForTimeout(400); };
+  const orbit = async () => {
+    const nav = await (await p.$(".scn-host .scn-nav-box")).boundingBox();
+    const x0 = nav.x + nav.width / 2, y0 = nav.y + nav.height / 2;
+    let worst = 0;
+    await p.mouse.move(x0, y0);
+    await p.mouse.down();
+    // 2π at 0.005 rad a pixel: 1257 px, by steps of 60 back and forth on the gizmo
+    let x = x0, dir = 1;
+    for (let done = 0; done < 1260; done += 30) {
+      if (Math.abs(x + dir * 30 - x0) > 40) dir = -dir;
+      x += dir * 30;
+      await p.mouse.move(x, y0);
+      await p.waitForTimeout(16);
+      if (dir < 0) continue;
+      const l = await grLevel(p);
+      worst = Math.max(worst, Math.abs(l.roll), Math.abs(l.zScreen ?? 99));
+    }
+    await p.mouse.up();
+    return worst;
+  };
+  // the globe's hands, as a person uses them: a grab and a turn with tilt (they write the pose's up)
+  const hands = async () => {
+    const c = await (await p.$(".scn-host canvas")).boundingBox();
+    const cx = c.x + c.width / 2, cy = c.y + c.height / 2;
+    await p.mouse.move(cx, cy); await p.mouse.down(); await p.mouse.move(cx + 120, cy + 60, { steps: 8 }); await p.mouse.up();
+    await p.waitForTimeout(300);
+    await p.mouse.move(cx, cy); await p.mouse.down({ button: "right" }); await p.mouse.move(cx + 140, cy - 70, { steps: 8 }); await p.mouse.up({ button: "right" });
+    await p.waitForTimeout(500);
+    out.pose = (await geoState(p)).pose;
+  };
+  await go("globe");
+  await hands();
+  await go("plan");
+  await go("site");
+  out.steps.push({ after: "globe(hands)→plan→site", mode: (await geoState(p)).mode, ...(await grLevel(p)) });
+  await p.click(".scn-bar [data-frame]");
+  await p.waitForTimeout(600);
+  out.steps.push({ after: "home", ...(await grLevel(p)) });
+  out.orbitWorst = await orbit();
+  await go("globe");
+  await hands();
+  await go("site");
+  out.steps.push({ after: "globe(hands)→site", mode: (await geoState(p)).mode, ...(await grLevel(p)) });
+  out.orbitWorst2 = await orbit();
+  out.errors = errors;
+  await ctx.close();
+  const lvl = (s) => Math.abs(s.roll) < 0.05 && s.zScreen !== null && Math.abs(s.zScreen) < 0.1 && (s.gizmoZ === null || Math.abs(s.gizmoZ) < 1);
+  const pass = out.steps.length === 3 && out.steps.every(lvl) && out.steps[0].mode === "site" && out.steps[2].mode === "site"
+    && out.orbitWorst < 0.1 && out.orbitWorst2 < 0.1 && !errors.length;
+  return { pass, detail: out };
+});
+
 // ── run ─────────────────────────────────────────────────────────────────────
-const chosen = cases.filter((c) => !only.length || only.includes(c.id) || only.some((o) => c.id.startsWith(o + ".")));
+const chosen =cases.filter((c) => !only.length || only.includes(c.id) || only.some((o) => c.id.startsWith(o + ".")));
 for (const c of chosen) {
   let r;
   try { r = await c.fn(); } catch (err) { r = { pass: false, detail: { error: String(err.message ?? err).split("\n")[0].slice(0, 240) } }; }

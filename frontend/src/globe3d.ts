@@ -515,6 +515,10 @@ export function createGlobe(o: GlobeOptions): GlobeApi {
       if (geoHands) geoHands.enabled = true;
     } else {
       if (geoHands) geoHands.enabled = false;
+      // MICRO-GEOREF-GRAFO p.0a · the site's up is its vertical, by every road
+      // (a flight lands with `repivot` false: its up stayed the globe's)
+      // (the scene's frame loop levels the view on it, `level`)
+      ctx.camera().up.set(0, 1, 0);
       if ((from !== "globe" && from !== "plan") || !repivot) return;
       // from the globe's hands to the Space's: the camera stays where it is, the
       // orbit's pivot goes on the site's level (y = 0) along the view — not on
