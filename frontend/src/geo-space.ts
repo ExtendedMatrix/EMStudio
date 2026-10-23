@@ -70,6 +70,7 @@ export function mountGeoSpace(d: GeoSpaceDeps): GeoSpace {
   let jobTimer = 0;
   let cacheInfo: Record<string, any> | null = null;
   let globeMin: Record<string, any> | null = null;
+  let globeMinReading = false;
   let bridge: string | null = null;
   // MICRO-BRIDGE-CERTIFICATI · the sources the bridge cannot reach online, and
   // why (`/tiles/failures`): beside the source in «Livelli», once in the Log
@@ -188,8 +189,16 @@ export function mountGeoSpace(d: GeoSpaceDeps): GeoSpace {
 
   const refreshCache = async () => {
     if (!bridge) return;
-    cacheInfo = await fetch(`${bridge}/tiles/cache`).then((r) => r.json(), () => null);
-    globeMin = await fetch(`${bridge}/tiles/globe-min`).then((r) => r.json(), () => null);
+    const ask = (path: string) => fetch(`${bridge}${path}`).then((r) => (r.ok ? r.json() : null)).catch(() => null);
+    // what the folder holds, or null: not read (never «not downloaded» for a bridge
+    // that did not answer). Measured: the globe's tiles may hold the browser's six
+    // connections to the bridge for seconds — meanwhile the line says «reading»
+    globeMinReading = true;
+    draw();
+    const [c, g] = await Promise.all([ask("/tiles/cache"), ask("/tiles/globe-min")]);
+    cacheInfo = c;
+    globeMin = g;
+    globeMinReading = false;
     draw();
   };
 
@@ -403,12 +412,31 @@ export function mountGeoSpace(d: GeoSpaceDeps): GeoSpace {
     }
     panel.appendChild(ex);
     // the globe minimum, the cache
+    // MICRO-GLOBO-INTERAZIONE p.3 · what the globe minimum IS, read by the bridge from
+    // its folder (`/tiles/globe-min` status): present after a restart, a reinstall, a
+    // failed job; «not downloaded» only when the folder says so, «unknown» when the
+    // bridge did not answer
     const gm = document.createElement("div");
     gm.className = "geo-min";
+    const im = globeMin?.status?.imagery as { state?: string; source?: string; bytes?: number; max_zoom?: number; zmax?: number } | undefined;
     const have = (globeMin?.packages ?? []) as Array<{ source: string; bytes: number }>;
+    const gmState = !globeMin ? (globeMinReading ? "reading" : "unknown") : im?.state ?? (have.length ? "present" : "absent");
+    gm.dataset.geoMin = gmState;
     const gmText = document.createElement("span");
-    gmText.textContent = have.length ? t("geo.globeMinHave", { x: have.map((p) => `${p.source} ${fmtMB(p.bytes)}`).join(", ") }) : t("geo.globeMinNone");
-    gm.append(gmText, btn(t("geo.globeMinGet"), "globe-min"));
+    gmText.textContent = gmState === "reading" ? t("geo.globeMinReading") : gmState === "unknown" ? t("geo.globeMinUnknown")
+      : gmState === "present" && im ? t("geo.globeMinPresent", { src: sourceById(im.source ?? "")?.label ?? String(im.source), mb: fmtMB(im.bytes ?? 0), z: String(im.max_zoom ?? "") })
+      : gmState === "partial" && im ? t("geo.globeMinPartial", { mb: fmtMB(im.bytes ?? 0), z: String(im.max_zoom ?? ""), want: String(im.zmax ?? "") })
+      : gmState === "present" ? t("geo.globeMinHave", { x: have.map((p) => `${p.source} ${fmtMB(p.bytes)}`).join(", ") })
+      : t("geo.globeMinNone");
+    gm.append(gmText, btn(t(gmState === "present" ? "geo.globeMinAgain" : "geo.globeMinGet"), "globe-min", gmState === "present" ? t("geo.globeMinAgainHint") : ""));
+    const lj = globeMin?.last_job as { state?: string; error?: string } | null | undefined;
+    if (lj && lj.state === "failed" && gmState !== "absent" && gmState !== "unknown") {
+      const kept = document.createElement("span");
+      kept.className = "geo-job-error";
+      kept.dataset.geoMinKept = "1";
+      kept.textContent = t("geo.globeMinKept", { why: String(lj.error ?? "") });
+      gm.appendChild(kept);
+    }
     panel.appendChild(gm);
     const ca = document.createElement("div");
     ca.className = "geo-cache";

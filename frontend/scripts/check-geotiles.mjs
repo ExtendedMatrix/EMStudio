@@ -16,7 +16,7 @@
 //   node scripts/check-geotiles.mjs
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { PMTiles } from "pmtiles";
@@ -154,6 +154,7 @@ run(`
 G.write_pmtiles(${JSON.stringify(dir)} + "/study/geo/s2.pmtiles", [((14, 9229, 5860), b"JPEGBYTES"), ((13, 4614, 2930), b"JPEGPARENT")],
                 tile_type="jpg", metadata={"source": "s2cloudless-2016"}, bounds=(22.7, 45.4, 22.9, 45.6))
 print(json.dumps(1))`);
+let bridge2 = null;
 const bridge = spawn(PY, [`${TOOLS}em_bridge.py`, "--port", String(port), "--fs-root", dir, "--s3dgraphy", `${S3D}src`],
   { env: { ...process.env, EM_BRIDGE_STATE_DIR: state }, stdio: ["ignore", "ignore", "pipe"] });
 let log = "";
@@ -203,8 +204,40 @@ try {
   eq([c.limit_bytes, c.dir], [64 * 1048576, `${state}/geo/cache`], "/tiles/cache: the ceiling set, kept in the app's folder");
   const gm = await (await fetch(`${B}/tiles/globe-min`, { headers: O })).json();
   eq([gm.plan.imagery, gm.packages], [{ source: "s2cloudless-2016", zmax: 6 }, []], "/tiles/globe-min: the plan (Sentinel-2 z0–z6), nothing downloaded yet");
+  eq([gm.status.imagery.state, gm.last_job], ["absent", null], "…its status read from the folder: absent, no job yet");
+  // MICRO-GLOBO-INTERAZIONE p.3 · the globe minimum stays: a package on disk (z0–z6, every tile
+  // the same few bytes) is present for this bridge, for a NEW one (a restart, a reinstall),
+  // and after a job that failed (no network): the file untouched, the failure said beside it
+  run(`
+os.makedirs(${JSON.stringify(state)} + "/geo/globe", exist_ok=True)
+tiles = [((z, x, y), b"JPEG") for z in range(7) for x in range(1 << z) for y in range(1 << z)]
+G.write_pmtiles(${JSON.stringify(state)} + "/geo/globe/s2cloudless-2016-z0-6.pmtiles", tiles, tile_type="jpg",
+                metadata={"source": "s2cloudless-2016", "name": "globe minimum s2cloudless-2016"})
+print(json.dumps(1))`);
+  const pkgFile = `${state}/geo/globe/s2cloudless-2016-z0-6.pmtiles`;
+  const st0 = statSync(pkgFile);
+  const gm1 = await (await fetch(`${B}/tiles/globe-min`, { headers: O })).json();
+  eq([gm1.status.imagery.state, gm1.status.imagery.max_zoom], ["present", 6], "a package down to z6 in the app's folder: present");
+  bridge.kill();
+  await new Promise((r) => setTimeout(r, 300));
+  const port2 = await new Promise((res) => { const s = createServer(); s.listen(0, "127.0.0.1", () => { const p = s.address().port; s.close(() => res(p)); }); });
+  bridge2 = spawn(PY, [`${TOOLS}em_bridge.py`, "--port", String(port2), "--fs-root", dir, "--s3dgraphy", `${S3D}src`],
+    { env: { ...process.env, EM_BRIDGE_STATE_DIR: state, HTTPS_PROXY: "http://127.0.0.1:9", https_proxy: "http://127.0.0.1:9" }, stdio: ["ignore", "ignore", "pipe"] });
+  const B2 = `http://127.0.0.1:${port2}`;
+  for (let i = 0; i < 100; i++) { try { if ((await fetch(`${B2}/health`)).ok) break; } catch { /* starting */ } await new Promise((r) => setTimeout(r, 150)); }
+  const gm2 = await (await fetch(`${B2}/tiles/globe-min`, { headers: O })).json();
+  eq([gm2.status.imagery.state, gm2.last_job], ["present", null], "a NEW bridge on the same folder (a restart, a reinstall): present, read from the file");
+  const jj = await (await fetch(`${B2}/tiles/globe-min`, { method: "POST", headers: { ...O, "Content-Type": "application/json" }, body: JSON.stringify({ what: "imagery" }) })).json();
+  let jb = jj;
+  for (let i = 0; i < 200 && jb.state === "running"; i++) { await new Promise((r) => setTimeout(r, 150)); jb = await (await fetch(`${B2}/tiles/job?id=${jj.job}`, { headers: O })).json(); }
+  eq(jb.state, "failed", "a download with no network: the job fails (its first block of failures)");
+  const gm3 = await (await fetch(`${B2}/tiles/globe-min`, { headers: O })).json();
+  eq([gm3.status.imagery.state, gm3.last_job?.state], ["present", "failed"], "…and the package is still present; the failure is said beside it, not instead of it");
+  const st1 = statSync(pkgFile);
+  eq([st1.size, st1.mtimeMs], [st0.size, st0.mtimeMs], "…the file untouched by the failed job");
 } finally {
   bridge.kill();
+  bridge2?.kill();
 }
 
 console.log(`geotiles: ${checks} checks passed`);

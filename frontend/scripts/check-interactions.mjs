@@ -9026,6 +9026,41 @@ test("GG6.hands", "GLOBO-INTERAZIONE p.2 · le mani di Google Earth nel Globo e 
   return { pass, detail: out };
 });
 
+test("GG7.globemin", "GLOBO-INTERAZIONE p.3 · il globo minimo resta: il pannello «Layers» dice ciò che il bridge legge dalla cartella (non la memoria di un job) — presente (sorgente, peso, z0–6) con «Download again» invece di «Download»; presente e l'ultimo download fallito: presente, e il fallimento detto accanto; assente: «not downloaded»; il bridge che non risponde: «not read», mai «not downloaded»", async () => {
+  if (!existsSync(GEO_V4)) return { pass: false, detail: { missing: GEO_V4 } };
+  const { p, ctx, errors } = await geoOpen();
+  const pkg = { source: "s2cloudless-2016", path: "/x/globe/s2cloudless-2016-z0-6.pmtiles", bytes: 29762357, max_zoom: 6 };
+  const body = (k) => k === "error" ? null : JSON.stringify({ ok: true, dir: "/x/globe", packages: k === "absent" ? [] : [pkg],
+    status: { imagery: k === "absent" ? { source: "s2cloudless-2016", zmax: 6, state: "absent" } : { ...pkg, zmax: 6, state: "present" }, terrain: { source: "mapterhorn", zmax: 3, state: "absent" } },
+    last_job: k === "failed" ? { job: "j1", state: "failed", error: "16 tiles in a row failed: connection refused", done: 0, failed: 16, total: 5461 } : null,
+    plan: { imagery: { source: "s2cloudless-2016", zmax: 6 }, terrain: { source: "mapterhorn", zmax: 3 } } });
+  let mode = "present";
+  await p.route("**/tiles/globe-min", (r) => r.request().method() !== "GET" ? r.continue()
+    : mode === "error" ? r.fulfill({ status: 500, headers: { "Access-Control-Allow-Origin": "*" }, body: "" })
+    : r.fulfill({ contentType: "application/json", headers: { "Access-Control-Allow-Origin": "*" }, body: body(mode) }));
+  await geoOn(p);
+  const out = {};
+  const read = async () => {
+    const panelBtn = '.scn-bar [data-geo="panel"]';
+    if (await p.$(".geo-panel:not(.hidden)")) { await p.click(panelBtn); await p.waitForTimeout(200); }
+    await p.click(panelBtn);
+    await p.waitForSelector(".geo-panel:not(.hidden)");
+    // the globe's tiles may hold the browser's connections to the bridge: the line says «reading» meanwhile
+    out.sawReading ||= await p.evaluate(() => document.querySelector(".geo-panel .geo-min")?.dataset.geoMin === "reading");
+    await p.waitForFunction(() => document.querySelector(".geo-panel .geo-min")?.dataset.geoMin !== "reading", null, { timeout: 60000 }).catch(() => {});
+    return p.evaluate(() => { const g = document.querySelector(".geo-panel .geo-min"); return { state: g?.dataset.geoMin, text: g?.querySelector("span")?.textContent ?? "",
+      button: g?.querySelector('[data-geo-act="globe-min"]')?.textContent ?? "", kept: g?.querySelector("[data-geo-min-kept]")?.textContent ?? null }; });
+  };
+  for (const k of ["present", "failed", "absent", "error"]) { mode = k; out[k] = await read(); }
+  out.errors = errors.filter((e) => !/status of 500/.test(e));
+  await ctx.close();
+  const pass = out.present.state === "present" && /present/.test(out.present.text) && /28\.4 MB|28 MB/.test(out.present.text) && /z0–6/.test(out.present.text) && /again/i.test(out.present.button) && out.present.kept === null
+    && out.failed.state === "present" && /present/.test(out.failed.text) && /connection refused/.test(out.failed.kept ?? "")
+    && out.absent.state === "absent" && /not downloaded/.test(out.absent.text) && !/again/i.test(out.absent.button)
+    && out.error.state === "unknown" && /not read/.test(out.error.text) && !/not downloaded/.test(out.error.text) && !out.errors.length;
+  return { pass, detail: out };
+});
+
 test("GG3.viewer", "GEOGLOBO p.4 · il raster come documento nel Viewer: «Apri nel Viewer» dal pannello mostra la GeoTIFF in piano (l'anteprima PNG del bridge, nel suo CRS) e la didascalia dice il georiferimento — EPSG:31700 · 0.100 m/px · 2000×2000 · gli angoli", async () => {
   if (!existsSync(GEO_V4) || !existsSync(GEO_ORTHO)) return { pass: false, detail: { missing: [GEO_V4, GEO_ORTHO].filter((f) => !existsSync(f)) } };
   const { p, ctx, errors } = await geoOpen();

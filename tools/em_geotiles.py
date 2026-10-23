@@ -609,13 +609,15 @@ def packages_in(folder) -> list:
     return out
 
 
-def tile_for(source_id: str, z: int, x: int, y: int, pkg_dirs=(), online=True):
+def tile_for(source_id: str, z: int, x: int, y: int, pkg_dirs=(), online=True, globe=True):
     """(bytes, where) — the project's packages, the globe minimum, the cache,
-    the source. `where` says which: the report and the tests read it."""
+    the source. `where` says which: the report and the tests read it.
+    `globe=False`: not from the globe minimum (the job that renews it must not
+    copy it into itself, MICRO-GLOBO-INTERAZIONE p.3)."""
     src = SOURCES.get(source_id)
     if src is None:
         raise KeyError(source_id)
-    for d in [*pkg_dirs, geo_dir() / "globe"]:
+    for d in [*pkg_dirs, *([geo_dir() / "globe"] if globe else [])]:
         for a, sid in packages_in(d):
             if sid != source_id:
                 continue
@@ -705,7 +707,7 @@ class Job:
                 "result": self.result, "where": self.where, "seconds": round(time.time() - self.started, 1)}
 
 
-def _run_extract(job: Job, plan, out_path, source_id, meta, bounds, pkg_dirs, center_zoom):
+def _run_extract(job: Job, plan, out_path, source_id, meta, bounds, pkg_dirs, center_zoom, globe=True):
     """plan: [(z, x0, x1, y0, y1)]. Tiles fetched four at a time."""
     from concurrent.futures import ThreadPoolExecutor
     src = SOURCES[source_id]
@@ -717,7 +719,7 @@ def _run_extract(job: Job, plan, out_path, source_id, meta, bounds, pkg_dirs, ce
             if job.cancel.is_set() or stop.is_set():
                 return c, None, "cancelled"
             try:
-                d, where = tile_for(source_id, *c, pkg_dirs=pkg_dirs)
+                d, where = tile_for(source_id, *c, pkg_dirs=pkg_dirs, globe=globe)
                 return c, d, where
             except Exception as exc:  # noqa: BLE001 — one tile is not the job
                 return c, None, f"error: {exc}"
@@ -837,18 +839,41 @@ def start_globe_min(body: dict) -> "tuple[int, dict]":
     with _JOBS_LOCK:
         _JOBS[job.id] = job
     meta = {"name": f"globe minimum {source_id}", "created": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}
+    # never from the globe minimum itself: «Scarica di nuovo» renews it from the
+    # cache and the source; the package there stays until the new one is written
+    # whole (`write_pmtiles` writes a .part, then replaces)
     threading.Thread(target=_run_extract, args=(job, plan, out, source_id, meta,
-                                                (-180.0, -85.0511287798066, 180.0, 85.0511287798066), [], 0),
+                                                (-180.0, -85.0511287798066, 180.0, 85.0511287798066), [], 0, False),
                      daemon=True).start()
     return 202, job.view()
 
 
 def globe_min_state() -> dict:
+    """What the globe minimum IS, read from its folder (MICRO-GLOBO-INTERAZIONE
+    p.3, E.D.: «dopo la reinstallazione il pannello chiedeva di nuovo il globo
+    minimo»): a package on disk is present after a restart, a reinstall, a job
+    that failed — the job's memory is the job's, not the package's. Per part of
+    the plan: `present` (a package of that source down to the plan's zoom),
+    `partial` (one, shallower), `absent`. The last globe-minimum job of this
+    process, if any, beside it: a failure is said without hiding the package."""
     d = geo_dir() / "globe"
     have = []
     for a, sid in packages_in(d):
         have.append({"source": sid, "path": a.path, "bytes": os.path.getsize(a.path), "max_zoom": a.max_zoom})
-    return {"ok": True, "dir": str(d), "packages": have, "plan": {k: {"source": v[0], "zmax": v[1]} for k, v in GLOBE_MIN.items()}}
+    status = {}
+    for what, (sid, zmax) in GLOBE_MIN.items():
+        mine = [p for p in have if p["source"] == sid]
+        best = max(mine, key=lambda p: (p["max_zoom"], p["bytes"])) if mine else None
+        status[what] = {"source": sid, "zmax": zmax,
+                        "state": "absent" if best is None else ("present" if best["max_zoom"] >= zmax else "partial"),
+                        **({"path": best["path"], "bytes": best["bytes"], "max_zoom": best["max_zoom"]} if best else {})}
+    with _JOBS_LOCK:
+        jobs = [j for j in _JOBS.values() if j.kind == "globe-min"]
+    last = max(jobs, key=lambda j: j.started) if jobs else None
+    return {"ok": True, "dir": str(d), "packages": have, "status": status,
+            "last_job": ({"job": last.id, "state": last.state, "error": last.error, "done": last.done,
+                          "failed": last.failed, "total": last.total} if last else None),
+            "plan": {k: {"source": v[0], "zmax": v[1]} for k, v in GLOBE_MIN.items()}}
 
 
 def job_get(job_id: str) -> "tuple[int, dict]":
