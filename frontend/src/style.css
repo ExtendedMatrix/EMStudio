@@ -10140,5 +10140,6 @@ tr.tt-hidden { display: none; }
 .geo-panel select { font: inherit; max-width: 100%; }
 .geo-panel .geo-job { display: flex; align-items: center; gap: 6px; width: 100%; }
 .geo-panel .geo-job progress { flex: 1; }
+.geo-panel .geo-fail { color: var(--danger); cursor: help; }
 .geo-attrib { position: absolute; right: 6px; bottom: 4px; max-width: 70%; z-index: 2; font-size: 0.62rem; line-height: 1.25; color: var(--scene-ink); background: color-mix(in srgb, var(--scene-bg-top) 70%, transparent); padding: 1px 6px; border-radius: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; pointer-events: auto; }
 .geo-attrib.hidden { display: none; }

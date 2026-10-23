@@ -31,6 +31,8 @@ import urllib.error
 import urllib.request
 from typing import Any, Callable, Dict, List, Optional
 
+import em_net
+
 DEFAULT_TIMEOUT = 120
 
 
@@ -204,7 +206,7 @@ class ClaudeProvider(LLMProvider):
                 "x-api-key": api_key,
             })
         try:
-            with urllib.request.urlopen(request, timeout=self.timeout) as resp:
+            with em_net.urlopen(request, timeout=self.timeout) as resp:
                 payload = json.loads(resp.read().decode("utf-8"))
         except urllib.error.HTTPError as exc:
             detail = ""
@@ -217,7 +219,7 @@ class ClaudeProvider(LLMProvider):
             raise LLMError(f"Anthropic returned {exc.code}: {detail}",
                            status=502) from None
         except urllib.error.URLError as exc:
-            raise LLMError(f"could not reach Anthropic: {exc.reason}",
+            raise LLMError(f"could not reach Anthropic: {em_net.reason(exc)}",
                            status=502) from None
 
         parts = [c.get("text", "") for c in payload.get("content", [])

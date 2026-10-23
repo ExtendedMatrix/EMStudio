@@ -8880,6 +8880,31 @@ test("GG2.layers", "GEOGLOBO p.2–4 · il pannello «Layers»: un'ortofoto GeoT
   return { pass, detail: out };
 });
 
+test("GG5.fail", "BRIDGE-CERTIFICATI · una fonte che il bridge non raggiunge (il caso di E.D.: il bridge installato, «certificate not verifiable») lo dice: nel pannello «Layers» un ⚠ accanto alla fonte, col motivo; nel Log una riga sola anche se il bridge la ripete; la fonte che torna a rispondere toglie il ⚠", async () => {
+  if (!existsSync(GEO_V4)) return { pass: false, detail: { missing: GEO_V4 } };
+  const { p, ctx, errors } = await geoOpen();
+  const why = "certificate not verifiable (unable to get local issuer certificate)";
+  let failing = true;
+  await p.route("**/tiles/failures", (r) => r.fulfill({ contentType: "application/json", headers: { "Access-Control-Allow-Origin": "*" },
+    body: JSON.stringify({ ok: true, sources: failing ? { "s2cloudless-2016": { reason: why, count: 12, since: 1, at: 2 } } : {} }) }));
+  const out = {};
+  await geoOn(p);
+  await p.click('.scn-bar [data-geo="panel"]');
+  await p.waitForSelector(".geo-panel:not(.hidden)");
+  await p.waitForSelector('.geo-panel [data-geo-fail="s2cloudless-2016"]', { timeout: 15000 }).catch(() => {});
+  out.mark = await p.evaluate(() => [...document.querySelectorAll(".geo-panel [data-geo-fail]")].map((e) => [e.closest("[data-geo-layer]")?.dataset.geoLayer, e.title]));
+  await p.waitForTimeout(9000);    // two more polls: the same reason, not a second line
+  out.log = await p.evaluate(() => window.__EM_DRAG__.log().filter((e) => /does not answer through the bridge/.test(e.message)).map((e) => `${e.level} ${e.message}`));
+  failing = false;
+  await p.waitForFunction(() => !document.querySelector(".geo-panel [data-geo-fail]"), null, { timeout: 15000 }).catch(() => {});
+  out.after = await p.evaluate(() => document.querySelectorAll(".geo-panel [data-geo-fail]").length);
+  out.errors = errors;
+  await ctx.close();
+  const pass = out.mark.length === 1 && out.mark[0][0] === "base:s2cloudless-2016" && out.mark[0][1].includes(why)
+    && out.log.length === 1 && /^warn /.test(out.log[0]) && out.log[0].includes(why) && out.after === 0 && !out.errors.length;
+  return { pass, detail: out };
+});
+
 test("GG3.viewer", "GEOGLOBO p.4 · il raster come documento nel Viewer: «Apri nel Viewer» dal pannello mostra la GeoTIFF in piano (l'anteprima PNG del bridge, nel suo CRS) e la didascalia dice il georiferimento — EPSG:31700 · 0.100 m/px · 2000×2000 · gli angoli", async () => {
   if (!existsSync(GEO_V4) || !existsSync(GEO_ORTHO)) return { pass: false, detail: { missing: [GEO_V4, GEO_ORTHO].filter((f) => !existsSync(f)) } };
   const { p, ctx, errors } = await geoOpen();

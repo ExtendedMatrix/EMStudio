@@ -182,6 +182,8 @@ import uuid
 import zipfile
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
+import em_net
+
 
 #: Extra origins the operator vouches for, comma-separated in
 #: `EM_BRIDGE_ALLOW_ORIGIN`. The gate below is deliberately strict — it refuses
@@ -941,7 +943,7 @@ def _room_probe(room):
         req = urllib.request.Request(f"{base}/v1/rooms/{rid}/asset/sha256:{hexd}",
                                      method="HEAD", headers=headers)
         try:
-            with urllib.request.urlopen(req, timeout=10):
+            with em_net.urlopen(req, timeout=10):
                 return True
         except Exception:  # noqa: BLE001 — 404, refused or down: not there for us
             return False
@@ -1206,7 +1208,7 @@ def _files_route(route, body):
         rid = urllib.parse.quote(str(room["room_id"]), safe="")
         headers = {"Authorization": f"Bearer {room['token']}"} if room.get("token") else {}
         req = urllib.request.Request(f"{base}/v1/rooms/{rid}/asset/sha256:{hexd}", headers=headers)
-        with urllib.request.urlopen(req, timeout=600) as answer:
+        with em_net.urlopen(req, timeout=600) as answer:
             data = answer.read()
         if hashlib.sha256(data).hexdigest() != hexd:
             raise ValueError("the bytes from the node are not the ones the graph names")
@@ -1555,7 +1557,10 @@ def _load_s3dgraphy(s3dgraphy_src: "pathlib.Path | None"):
 #: — MICRO-WINDOWS-MODELLI.
 #: 36 = /tiles/* and /geo/* (MICRO-GEOGLOBO): the globe's tiles (packages,
 #: cache, sources), «Estrai area», the globe minimum, the site frame, rasters.
-BRIDGE_LEVEL = 36   # 30 also = /validate
+#: 37 = every HTTPS request through `em_net` (certifi's CAs: the packaged
+#: bridge verified nothing), a failed tile's reason in X-EM-Tile, and
+#: /tiles/failures for the «Livelli» panel — MICRO-BRIDGE-CERTIFICATI.
+BRIDGE_LEVEL = 37   # 30 also = /validate
 
 
 # ── FONTE · the rules of «la proprietà come fonte», asked of the library ──────
@@ -2219,6 +2224,8 @@ def make_handler(api):
                                    "pid": os.getpid(),
                                    "sidecar": _SIDECAR["sidecar"],
                                    "parent_pid": _SIDECAR["parent_pid"],
+                                   # MICRO-BRIDGE-CERTIFICATI · where its HTTPS trust comes from
+                                   "tls_ca": "certifi" if em_net.ca_file() else "system",
                                    "s3dgraphy": _s3dgraphy_identity()}).encode()
                 self.send_response(200)
                 self._cors()
@@ -4385,7 +4392,8 @@ def make_handler(api):
                     try:
                         data, where = G.tile_for(sid, z, x, y, pkg_dirs=pkgs, online=one("offline") != "1")
                     except Exception as exc:  # noqa: BLE001 — offline, refused, timeout
-                        data, where = None, f"failed: {type(exc).__name__}"
+                        # the reason in words (MICRO-BRIDGE-CERTIFICATI), not «URLError»
+                        data, where = None, "failed: " + (str(exc) if isinstance(exc, G.FetchFailed) else em_net.reason(exc))
                     if not data:
                         if src.get("encoding") == "terrarium":
                             # no terrain here: the page draws the flat surface (a 404,
@@ -4420,6 +4428,8 @@ def make_handler(api):
                     self._fs_file(_fs_at_path("/fs/at/" + parsed.path[len("/tiles/archive/"):]), body=body)
                 elif route == "/tiles/cache":
                     self._json({"ok": True, **G.cache().stats()})
+                elif route == "/tiles/failures":
+                    self._json(G.failures())
                 elif route == "/tiles/job":
                     status, payload = G.job_get(one("id"))
                     self._json(payload, status)
@@ -6325,7 +6335,17 @@ def main() -> int:
                          "the whole machine. Announced at startup and reported "
                          "by /health (fs_scope) — never a silent default. "
                          "Also EM_BRIDGE_FS_ALL=1.")
+    ap.add_argument("--tls-check", action="store_true",
+                    help="print where this bridge's HTTPS trust comes from and exit "
+                         "(non-zero without certifi's bundle): build-bridge.sh asks "
+                         "it of the frozen binary, on every OS it builds")
     args = ap.parse_args()
+
+    if args.tls_check:
+        ca = em_net.ca_file()
+        have = bool(ca and os.path.isfile(ca))
+        print(json.dumps({"certifi": ca, "present": have, "frozen": bool(getattr(sys, "frozen", False))}))
+        return 0 if have else 3
 
     # MICRO-WINDOWS-MODELLI p.3 · a sidecar's pipes may close under it: its
     # writes must never cost an answer
@@ -6364,6 +6384,12 @@ def main() -> int:
               f"--fs-all serves the whole disk instead.", file=sys.stderr)
 
     _ensure_proj_data()
+    # MICRO-BRIDGE-CERTIFICATI · every HTTPS request of this process, the
+    # library's too, verifies with certifi's CAs (the frozen interpreter has none)
+    em_net.install_default()
+    if not em_net.ca_file():
+        print("  [bridge] https: certifi missing — the interpreter's own CAs only",
+              file=sys.stderr)
 
     try:
         api = _load_s3dgraphy(args.s3dgraphy)

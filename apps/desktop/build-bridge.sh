@@ -62,6 +62,12 @@ esac
 [[ -x "$PY" ]] || { echo "python not found at $PY (set PYTHON=…)"; exit 1; }
 [[ -d "$SRC" ]] || { echo "s3Dgraphy src not found at $SRC (set S3DGRAPHY=…)"; exit 1; }
 "$PY" -c "import PyInstaller" 2>/dev/null || { echo "pyinstaller missing: $PY -m pip install pyinstaller"; exit 1; }
+# MICRO-BRIDGE-CERTIFICATI · certifi is what the frozen bridge verifies HTTPS
+# with (tools/em_net.py): a python.org/CI interpreter, frozen, finds no CA of
+# its own on the person's machine, and every tile is CERTIFICATE_VERIFY_FAILED.
+# It came in until now only because pyproj depends on it; it is REQUIRED here,
+# and the binary is asked afterwards (`--tls-check`) whether the bundle is inside.
+"$PY" -c "import certifi" 2>/dev/null || { echo "certifi missing: $PY -m pip install certifi (the bridge's HTTPS needs it)"; exit 1; }
 
 WORK="$(mktemp -d)"
 echo "Building em-bridge sidecar for $TRIPLE …"
@@ -190,6 +196,7 @@ fi
   --add-data "$SRC/mappings${SEP}s3dgraphy/mappings" \
   --hidden-import lxml --hidden-import lxml.etree --hidden-import lxml._elementpath \
   --collect-submodules rdflib --copy-metadata rdflib \
+  --hidden-import em_net --hidden-import certifi --collect-data certifi \
   ${S3_ARGS[@]+"${S3_ARGS[@]}"} \
   ${GEO_ARGS[@]+"${GEO_ARGS[@]}"} \
   ${PREVIEW_ARGS[@]+"${PREVIEW_ARGS[@]}"} \
@@ -207,4 +214,6 @@ cp "$WORK/dist/em-bridge$EXE" "$OUT/em-bridge-$TRIPLE$EXE"
 # get Developer ID + notarization at the .app level). A no-op elsewhere.
 codesign -s - --force "$OUT/em-bridge-$TRIPLE$EXE" 2>/dev/null || true
 rm -rf "$WORK"
+# the frozen binary itself says where its certificates are (macOS, Windows, Linux)
+"$OUT/em-bridge-$TRIPLE$EXE" --tls-check || { echo "✗ the frozen bridge has no certifi bundle: its HTTPS would verify nothing"; exit 1; }
 echo "✓ $OUT/em-bridge-$TRIPLE$EXE"

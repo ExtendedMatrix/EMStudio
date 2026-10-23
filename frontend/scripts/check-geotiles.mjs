@@ -163,7 +163,7 @@ const O = { origin: "http://localhost:5173" };
 try {
   for (let i = 0; i < 100; i++) { try { if ((await fetch(`${B}/health`)).ok) break; } catch { /* starting */ } await new Promise((r) => setTimeout(r, 150)); }
   const health = await (await fetch(`${B}/health`)).json();
-  eq(health.bridge_level, 36, "the bridge's level: 36 (/tiles, /geo)");
+  eq(health.bridge_level, 37, "the bridge's level: 37 (/tiles, /geo, /tiles/failures)");
   const f = await (await fetch(`${B}/geo/frame`, { method: "POST", headers: { ...O, "Content-Type": "application/json" }, body: JSON.stringify({ epsg: 31700, x: 327300, y: 448370, z: 500, rotation: 0 }) })).json();
   ok(Math.abs(f.lat - 45.51389) < 1e-5 && Math.abs(f.lon - 22.78921) < 1e-5 && Math.abs(f.azimuth + 1.584) < 0.01, "/geo/frame: the GT16's anchor by PROJ, and the grid's north");
   const rot = await (await fetch(`${B}/geo/frame`, { method: "POST", headers: { ...O, "Content-Type": "application/json" }, body: JSON.stringify({ epsg: 31700, x: 327300, y: 448370, z: 500, rotation: 10 }) })).json();

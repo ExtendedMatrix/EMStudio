@@ -38,6 +38,8 @@ export interface GeoSpaceDeps {
   openInViewer: (path: string) => void;
   /** the bar must be drawn again (the switch, the modes) */
   redrawBar: () => void;
+  /** a line in the Log (a source failing online: said once per reason) */
+  log?: (s: string) => void;
 }
 
 interface Saved { on: boolean; mode: GeoMode; layers: GeoLayer[]; panel: boolean; half: number; zmax: number; source: string }
@@ -66,6 +68,11 @@ export function mountGeoSpace(d: GeoSpaceDeps): GeoSpace {
   let cacheInfo: Record<string, any> | null = null;
   let globeMin: Record<string, any> | null = null;
   let bridge: string | null = null;
+  // MICRO-BRIDGE-CERTIFICATI · the sources the bridge cannot reach online, and
+  // why (`/tiles/failures`): beside the source in «Livelli», once in the Log
+  let failures: Record<string, { reason: string; count: number }> = {};
+  let failTimer = 0;
+  const failSaid = new Set<string>();
   const docKey = () => d.docPath() ?? String(d.doc()?.graph?.graph_id ?? "unsaved");
   const load = (): Saved => {
     try {
@@ -137,6 +144,7 @@ export function mountGeoSpace(d: GeoSpaceDeps): GeoSpace {
       d.handle.setGeo(globe);
       if (s.mode !== "site") globe.setMode(s.mode);
       void refreshCache();
+      watchFailures(!!bridge);
     } finally {
       busy = false;
       d.redrawBar();
@@ -144,10 +152,31 @@ export function mountGeoSpace(d: GeoSpaceDeps): GeoSpace {
     }
   };
   const stop = () => {
+    watchFailures(false);
     d.handle.setGeo(null);
     globe = null;
     d.redrawBar();
     draw();
+  };
+
+  const pollFailures = async () => {
+    if (!bridge || !globe || document.hidden) return;
+    const j = await fetch(`${bridge}/tiles/failures`).then((r) => (r.ok ? r.json() : null), () => null);
+    if (!j?.ok) return;    // an older bridge (level < 37): nothing to say
+    const now = (j.sources ?? {}) as typeof failures;
+    for (const [sid, f] of Object.entries(now)) {
+      const key = `${sid}\u0000${f.reason}`;
+      if (failSaid.has(key)) continue;
+      failSaid.add(key);
+      d.log?.(t("geo.sourceFailedLog", { src: sourceById(sid)?.label ?? sid, why: f.reason }));
+    }
+    const was = JSON.stringify(Object.entries(failures).map(([k, v]) => [k, v.reason]));
+    failures = now;
+    if (was !== JSON.stringify(Object.entries(now).map(([k, v]) => [k, v.reason]))) draw();
+  };
+  const watchFailures = (on: boolean) => {
+    clearInterval(failTimer);
+    if (on) { failTimer = window.setInterval(() => { void pollFailures(); }, 4000); void pollFailures(); }
   };
 
   const refreshCache = async () => {
@@ -258,6 +287,16 @@ export function mountGeoSpace(d: GeoSpaceDeps): GeoSpace {
       const src = l.source ? sourceById(l.source) : undefined;
       name.title = src ? `${src.label}\n${src.licence}\n${src.offline ? t("geo.offlineOk") : t("geo.onlineOnly")}` : (l.original ?? l.path ?? "");
       row.append(eye, name);
+      const fail = l.source ? failures[l.source] : undefined;
+      if (fail) {
+        const w = document.createElement("span");
+        w.className = "geo-fail";
+        w.dataset.geoFail = l.source!;
+        w.textContent = "⚠";
+        w.title = t("geo.sourceFailed", { why: fail.reason, n: String(fail.count) });
+        w.setAttribute("aria-label", w.title);
+        row.appendChild(w);
+      }
       if (l.kind !== "terrain") {
         const op = document.createElement("input");
         op.type = "range";
@@ -465,11 +504,12 @@ export function mountGeoSpace(d: GeoSpaceDeps): GeoSpace {
     },
     destroy() {
       clearInterval(jobTimer);
+      clearInterval(failTimer);
       d.handle.setGeo(null);
       globe = null;
       panel.remove();
     },
-    state: () => ({ on: s.on, mode: globe?.mode() ?? s.mode, layers: s.layers, anchor, anchorNote, bridge, pkgDir: pkgDir(), job, cache: cacheInfo, globe: globe?.state() ?? null }),
+    state: () => ({ on: s.on, mode: globe?.mode() ?? s.mode, layers: s.layers, anchor, anchorNote, bridge, pkgDir: pkgDir(), job, cache: cacheInfo, failures, globe: globe?.state() ?? null }),
   };
   (d.host as unknown as { __geoSpace?: () => unknown }).__geoSpace = api.state;
   return api;

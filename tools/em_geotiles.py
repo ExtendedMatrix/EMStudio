@@ -54,8 +54,11 @@ import pathlib
 import struct
 import threading
 import time
+import urllib.error
 import urllib.request
 import uuid
+
+import em_net
 
 # ── PMTiles v3 ───────────────────────────────────────────────────────────────
 
@@ -530,18 +533,62 @@ EMPTY_PNG = bytes.fromhex(
 _NET = threading.BoundedSemaphore(6)
 
 
+class FetchFailed(Exception):
+    """A source online did not answer a tile: ``str()`` is the reason in words
+    (``em_net.reason``), what the tile's ``X-EM-Tile`` header and the panel say."""
+
+
+#: MICRO-BRIDGE-CERTIFICATI · the last failure of each source online, until a
+#: tile of it comes again: {source: {reason, count, at, said}} (``/tiles/failures``)
+_FAILURES = {}
+_FAIL_LOCK = threading.Lock()
+
+
+def _note_failure(source_id: str, why: str) -> None:
+    with _FAIL_LOCK:
+        f = _FAILURES.get(source_id)
+        if f is None or f["reason"] != why:
+            f = _FAILURES[source_id] = {"reason": why, "count": 0, "since": time.time()}
+            # once per source and reason in the bridge's own log, not per tile
+            print(f"  [bridge] tiles: {source_id} online failed: {why}", flush=True)
+        f["count"] += 1
+        f["at"] = time.time()
+
+
+def _note_success(source_id: str) -> None:
+    if source_id in _FAILURES:
+        with _FAIL_LOCK:
+            _FAILURES.pop(source_id, None)
+
+
+def failures() -> dict:
+    """GET /tiles/failures: the sources online that are failing now, and why."""
+    with _FAIL_LOCK:
+        return {"ok": True, "sources": {k: {**v, "since": round(v["since"], 1), "at": round(v["at"], 1)}
+                                        for k, v in _FAILURES.items()}}
+
+
 def fetch_online(source_id: str, z: int, x: int, y: int, timeout=20):
     src = SOURCES[source_id]
     url = src["url"].replace("{z}", str(z)).replace("{x}", str(x)).replace("{y}", str(y))
     req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
     with _NET:
         try:
-            with urllib.request.urlopen(req, timeout=timeout) as r:
-                return r.read()
+            with em_net.urlopen(req, timeout=timeout) as r:
+                data = r.read()
         except urllib.error.HTTPError as exc:
             if exc.code == 404:
+                _note_success(source_id)
                 return b""     # outside the source's coverage: an answer, not a failure
-            raise
+            why = em_net.reason(exc)
+            _note_failure(source_id, why)
+            raise FetchFailed(why) from None
+        except Exception as exc:  # noqa: BLE001 — refused, offline, a certificate, a timeout, a cut answer
+            why = em_net.reason(exc)
+            _note_failure(source_id, why)
+            raise FetchFailed(why) from None
+    _note_success(source_id)
+    return data
 
 
 def packages_in(folder) -> list:
