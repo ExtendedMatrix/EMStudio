@@ -6910,10 +6910,16 @@ function loadDocument(
   // (every em.json before today: the GT16's had 0 edges) joins it, like the author
   // and the licence — a correction of the file, said once, one undo step, the file
   // modified; never in silence
+  // A room's document is not a file: every person entering would send the same
+  // edit (measured: GL6.room, two clients, two operations nobody asked for) — there
+  // it is said, not written; the file is corrected where it is opened as a file
   if (loaded.geoOutsideGraphParadata()) {
-    loaded.batch(() => loaded.putGeoInGraphParadata());
     const g = loaded.geoPositionNode();
-    logInfo(t("georef.joined", { id: String(g?.id ?? "") }), g ? [g.id] : []);
+    if (fromRoom) logInfo(t("georef.outsideInRoom", { id: String(g?.id ?? "") }), g ? [g.id] : []);
+    else {
+      loaded.batch(() => loaded.putGeoInGraphParadata());
+      logInfo(t("georef.joined", { id: String(g?.id ?? "") }), g ? [g.id] : []);
+    }
   }
   // …and a deprecated CRS, or one PROJ reaches only by a ballpark: the conversion proposed
   if (loaded.geoPositionNode()) proposeGeorefConversion(loaded);
