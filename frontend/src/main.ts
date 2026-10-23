@@ -642,6 +642,7 @@ import {
 } from "./declared";
 import { adaptDraft } from "./views/stamps";
 import { ancestorsOf, dtcFamiliesOf, dtcKindFamily, dtcKindsFor, isContinuityType, isVirtualType, propertyLabel, typeLabel as datamodelTypeLabel, endReasonLabel } from "./rules";
+import { epochInstances, instanceTransform, instanceTypes, planInstance } from "./epoch-instances";
 import { continuityLinks, dropContinuity, END_REASONS, END_REASON_DEFAULT, endOfUnit, endReasonDescription, endReasonOf, endReasonPredicate, endReasonWritten, planContinuity, type EndReason } from "./continuity";
 import { digestOf, isStampPath, stampPathFor } from "./stamp";
 // DTCEMS3 · il verbale d'ingestione: niente entra nello store senza che si
@@ -2583,6 +2584,13 @@ window.__EM_SCENE__ = () => {
   /** MICRO-SERVSF-FINE-ISTANZE p.1 · the focused graph window's projection, and
    *  the style a node type is drawn with (shape, border, fill: `palette.ts`) */
   setGraphMode: (v: ViewKind) => setView(v),
+  /** MICRO-SERVSF-FINE-ISTANZE p.3 · the chain of a unit (s3Dgraphy's
+   *  epoch_instances), the 3D cursor in the data's axes, and the Space's line */
+  epochInstances: (id: string) => (store ? epochInstances(store.doc, id) : []),
+  setSpaceCursor: (p: V3) => { for (const h of sceneHandles.values()) h.setCursor(blenderToThree(p)); },
+  spaceCursor: () => spaceCursorData(),
+  spaceCentre: (key: string) => { for (const h of sceneHandles.values()) { const b = h.boxOf(key); if (b) return threeToBlender([(b[0][0] + b[1][0]) / 2, (b[0][1] + b[1][1]) / 2, (b[0][2] + b[1][2]) / 2]); } return null; },
+  instanceMarks: () => instanceMarks().map((m) => ({ id: m.id, kind: m.kind, n: m.vertices.length, label: m.label, vertices: m.vertices.map((v) => threeToBlender(v)) })),
   nodeStyleOf: (nodeType: string) => { const s = nodeStyle(nodeType); return { shape: s.shape, border: s.border, fill: s.fill }; },
   matrixGeom: () => {
     const s = scenes.matrix;
@@ -3655,6 +3663,7 @@ function renderInspectorInto(host: HTMLElement): void {
       },
       continuity: (id) => continuityAction(id),
       endOfUnit: (id) => renderBrSection(id),
+      epochInstances: (id) => renderInstancesSection(id),
       onAddPhase: (epochId) => {
         const ph = store!.addPhase(epochId, (n) => t("l.phaseDefault", { n }));
         select(ph.id);
@@ -23812,7 +23821,12 @@ function spaceHide(mode: "selected" | "unselected" | "reveal"): void {
 /** The node whose `data.transform` places a Space key: the model, the proxy's shape. */
 function transformNodeOfKey(key: string, sp: Space | null = currentSpace()): string | null {
   if (key.startsWith("rm:")) return key.slice(3);
-  if (key.startsWith("proxy:")) return sp?.proxies.get(key.slice(6))?.shapeId ?? null;
+  if (key.startsWith("proxy:")) {
+    // MICRO-SERVSF-FINE-ISTANZE p.3 · an instance is placed by ITS model, never
+    // by the shared proxy's shape (that would move the other instances too)
+    const px = sp?.proxies.get(key.slice(6));
+    return px ? (px.instanceOf ? px.xfNode ?? null : px.shapeId) : null;
+  }
   return null;
 }
 /** …and the Space key of a node: a model, a unit with a proxy, the proxy's shape. */
@@ -23820,7 +23834,8 @@ function transformKeyOfNode(id: string, sp: Space | null = currentSpace()): stri
   if (!sp) return null;
   if (sp.rms.some((r) => r.id === id)) return `rm:${id}`;
   if (sp.proxies.has(id)) return `proxy:${id}`;
-  for (const [u, px] of sp.proxies) if (px.shapeId === id) return `proxy:${u}`;
+  for (const [u, px] of sp.proxies) if (px.instanceOf && px.xfNode === id) return `proxy:${u}`;
+  for (const [u, px] of sp.proxies) if (px.shapeId === id && !px.instanceOf) return `proxy:${u}`;
   return null;
 }
 function nodeXf(nodeId: string | null | undefined): Xf {
@@ -23882,6 +23897,9 @@ function xfNote(key: string, sp: Space | null): { note: string; readOnly: boolea
     if (r?.resource?.tiles) return { note: t("xf.noteTiles"), readOnly: true };
     return { note: t("xf.noteRm"), readOnly: false };
   }
+  const px = sp?.proxies.get(key.slice(6));
+  if (px?.instanceOf) return px.xfNode ? { note: t("inst.xfNote", { from: String(store?.node(px.instanceOf)?.name ?? px.instanceOf) }), readOnly: false }
+    : { note: t("inst.xfNone"), readOnly: true };
   return { note: t("xf.noteProxy"), readOnly: false };
 }
 /** The Inspector's «Trasformazione»: a model, a unit with a proxy, its shape. */
@@ -24879,7 +24897,8 @@ async function associateSketch(win: Win, sketchId: string, unitId: string, mode:
   // «Sostituisci»: the proxy the unit had leaves the graph in the same step,
   // and its glb (still on disk, still in the store) becomes a free sketch
   const sp = currentSpace();
-  const old = mode === "replace" ? sp?.proxies.get(unitId) ?? null : null;
+  // MICRO-SERVSF-FINE-ISTANZE p.3 · an instance's proxy is another unit's: not this one's to replace
+  const old = mode === "replace" && !sp?.proxies.get(unitId)?.instanceOf ? sp?.proxies.get(unitId) ?? null : null;
   if (old?.resource?.url) {
     const pose = poseOfNode(old.shapeId);
     addFileSketch({ url: old.resource.url, ...(old.resource.checksum ? { checksum: old.resource.checksum } : {}), from: unitId },
@@ -26687,6 +26706,9 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
     // `onPick` (MICRO-SPAZIO-3D-3); a right click on a sketch selects it
     onPickSketch: (id) => setSpaceSel(id ? { keys: [`sketch:${id}`], active: `sketch:${id}` } : EMPTY_SEL),
     onMenu: (m) => sceneMenu(win, handle, m),
+    // MICRO-SERVSF-FINE-ISTANZE p.3 · the instances of the unit selected, a dashed line; a point picks that instance
+    marks: () => instanceMarks(),
+    onMark: (id) => { if (id.startsWith("inst:")) goToInstance(id.slice(5)); },
     onBeforeJump: () => pushView(),
     onKeyAction: (a) => {
       if (a === "outliner") { const p = space3dPrefs(); setSpace3dPrefs({ ...p, shown: !p.shown }); return true; }
@@ -26966,7 +26988,9 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
         if (!px || !shown(`proxy:${u}`)) continue;
         const type = st.node(u)?.node_type;
         const common = { kind: "proxy" as const, id: u, label: nm(u), decor: decorOf(u), rgb: nodeMaterialRgb(type) ?? nodeMaterialRgb("US") ?? undefined,
-          edge: nodeStyle(type).border, selected: isSel(`proxy:${u}`), active: ssel.active === `proxy:${u}`, pose: poseOfNode(px.shapeId) };
+          edge: nodeStyle(type).border, selected: isSel(`proxy:${u}`), active: ssel.active === `proxy:${u}`,
+          // MICRO-SERVSF-FINE-ISTANZE p.3 · an instance at its own model's transform
+          pose: poseOfNode(px.instanceOf ? px.xfNode ?? px.shapeId : px.shapeId) };
         // MICRO-SPAZIO-3D-3 p.6 · the other parts of the unit's proxy
         const parts = (px.parts ?? []).filter((q) => q.resource?.state === "resident")
           .map((q) => ({ url: spaceFileUrl(q.resource) ?? "", resourceId: q.resource?.id, pose: poseOfNode(q.shapeId) })).filter((q) => q.url);
@@ -38616,6 +38640,327 @@ function openContinuityForm(unitId: string, x: number, y: number): void {
   box.addEventListener("keydown", (e) => { if (e.key === "Escape") { e.stopPropagation(); box.remove(); } });
   document.body.appendChild(box);
   epSel.focus();
+}
+
+// ── MICRO-SERVSF-FINE-ISTANZE p.3 · the instances of an object in the epochs ──
+// For an SF / RSF / VSF (and any unit in a chain of `changed_from`), the panel
+// reads s3Dgraphy's `epoch_instances` (`epoch-instances.ts`): epoch → position →
+// state, one row per instance, oldest first. A click on a row selects that
+// instance: the Space goes to its epoch and frames it (the rule of
+// `showInSpace`). In the Space a dashed line joins the instances of the unit
+// selected, through their positions. The gestures are the minimal ones:
+//   · «⌖» puts the instance's CENTRE at the 3D cursor — written as the
+//     transform of ITS model (an RM, an RMSF for an SF, created when it has
+//     none, hatted to the same asset), or of the proxy's shape for the
+//     instance that owns the geometry; rotation and scale are kept;
+//   · the state is the instance's `conservation_state` property (made when
+//     written the first time);
+//   · «New instance…»: an epoch, a type, a name, a state, the position at the
+//     cursor or none: the unit, its epoch, the `changed_from`, the state, the
+//     model with only the transform — no geometry copied, one step of undo.
+// Where the centre is: the box of any instance of the chain drawn in a Space
+// window, less its translation — the geometry is one, so the file's centre is
+// the same for all. Rotation and scale are not accounted for in that centre:
+// the line and «⌖» are exact for instances that only move.
+type InstRow = ReturnType<typeof epochInstances>[number];
+/** the translation an instance stands at (data axes): its placement, else the
+ *  proxy shape's it is drawn with, else none */
+function instanceTranslation(st: DocumentStore, r: InstRow): V3 {
+  const own = instanceTransform(st.doc, r);
+  const xf = own ? readTransform({ transform: own.transform }) : null;
+  if (xf) return xf.position;
+  const gf = r.geometry_from && r.geometry_from !== r.id ? epochInstances(st.doc, r.geometry_from).find((x) => x.id === r.geometry_from) : null;
+  const sh = gf?.shape ? readTransform(st.node(gf.shape)?.data as Record<string, unknown> | undefined) : null;
+  return sh ? sh.position : [0, 0, 0];
+}
+/** the centre of the chain's ONE geometry in its file (data axes), measured on
+ *  an instance drawn now; null when none is drawn */
+function chainFileCentre(st: DocumentStore, chain: InstRow[]): V3 | null {
+  for (const r of chain) for (const h of sceneHandles.values()) {
+    const b = h.boxOf(`proxy:${r.id}`);
+    if (!b) continue;
+    const c = threeToBlender([(b[0][0] + b[1][0]) / 2, (b[0][1] + b[1][1]) / 2, (b[0][2] + b[1][2]) / 2]);
+    const t0 = instanceTranslation(st, r);
+    return [c[0] - t0[0], c[1] - t0[1], c[2] - t0[2]];
+  }
+  return null;
+}
+/** the 3D cursor of the first Space window (data axes), null without one */
+function spaceCursorData(): V3 | null {
+  for (const h of sceneHandles.values()) return threeToBlender(h.cursor());
+  return null;
+}
+/** the resource the chain's geometry is drawn from (the same asset for a new model) */
+function chainResource(chain: InstRow[]): string | null {
+  const sp = currentSpace();
+  for (const r of chain) { const px = sp?.proxies.get(r.id); if (px?.resource?.id) return px.resource.id; }
+  return null;
+}
+/** «⌖» · the instance's centre at the 3D cursor, one step of undo */
+function placeInstanceAtCursor(unitId: string): void {
+  if (!store || refuseReadOnly()) return;
+  const st = store;
+  const chain = epochInstances(st.doc, unitId);
+  const r = chain.find((x) => x.id === unitId);
+  const cur = spaceCursorData();
+  if (!r) return;
+  if (!cur) { toast(t("inst.noSpace")); return; }
+  const c0 = chainFileCentre(st, chain);
+  if (!c0) { toast(t("inst.notDrawn")); return; }
+  const pos: V3 = [cur[0] - c0[0], cur[1] - c0[1], cur[2] - c0[2]];
+  const own = instanceTransform(st.doc, r);
+  const base = (own ? readTransform({ transform: own.transform }) : null) ?? IDENTITY;
+  const xf: Xf = { ...base, position: pos };
+  st.batch(() => {
+    if (r.placements.length) st.setField(r.placements.find((p) => p.transform)?.model ?? r.placements[0].model, "data.transform", transformData(xf));
+    else if (r.geometry === null || r.geometry_from !== r.id) {
+      // an instance without a model: one, with only the transform, on the same asset
+      const sf = r.node_type === "SF";
+      const m = st.addNode({ id: st.newId(), node_type: sf ? "representation_model_sf" : "representation_model",
+        name: `${r.name}_position`, description: "", data: { transform: transformData(xf) } } as EmNode);
+      st.addEdge(unitId, m.id, sf ? "has_representation_model_sf" : "has_representation_model");
+      const res = chainResource(chain);
+      if (res) st.addEdge(m.id, res, "has_linked_resource");
+    } else if (r.shape) st.setField(r.shape, "data.transform", transformData(xf));
+  });
+  toastUndo(t("inst.posWritten", { name: r.name, x: pos.map((v) => v.toFixed(2)).join(", ") }), st);
+  refreshSurfaces("scene");
+  refreshInspector();
+}
+/** the state of an instance: its conservation_state property, made the first time */
+function writeInstanceState(unitId: string, value: string): void {
+  if (!store || refuseReadOnly()) return;
+  const st = store;
+  const r = epochInstances(st.doc, unitId).find((x) => x.id === unitId);
+  if (!r) return;
+  const v = value.trim();
+  if ((r.conservation_state ?? "") === v) return;
+  st.batch(() => {
+    if (r.conservation_property) st.setPropertyValue(r.conservation_property, v);
+    else if (v) {
+      const p = st.addNode({ id: st.newId(), node_type: "property", name: "conservation_state", description: v,
+        data: { property_type: "conservation_state", value: v } } as EmNode);
+      st.addEdge(unitId, p.id, "has_property");
+    }
+  });
+  toastUndo(t("inst.stateWritten", { name: r.name, state: v || "—" }), st);
+}
+/** a row clicked: that instance selected, the Space taken to its epoch */
+function goToInstance(id: string): void {
+  const scenesOpen = windowsOf().some((w) => w.type === "scene" && winAreas.has(w.id));
+  select(id);
+  if (!scenesOpen) { toast(t("inst.noSpace")); return; }
+  if (!getSettings().interaction.zoomToSelection)
+    showInSpace(id, windowsOf().filter((w) => w.type === "scene" && winAreas.has(w.id)).map((w) => ({ id: w.id, frame: true, reveal: true })));
+}
+/** «New instance…»: written in one step of undo; returns the new unit */
+function createInstance(from: string, o: { epoch: string; node_type: string; name: string; state: string; atCursor: boolean }): string | null {
+  if (!store || refuseReadOnly()) return null;
+  const st = store;
+  const chain = epochInstances(st.doc, from);
+  const src = chain.find((x) => x.id === from);
+  if (!src) return null;
+  const top = (id: string | null): string | null => { let x = id; const seen = new Set<string>(); while (x && st.parentEpoch(x) && !seen.has(x)) { seen.add(x); x = st.parentEpoch(x); } return x; };
+  let transform: Record<string, unknown> | null = null;
+  if (o.atCursor) {
+    const cur = spaceCursorData();
+    const c0 = chainFileCentre(st, chain);
+    if (!cur) { toast(t("inst.noSpace")); return null; }
+    if (!c0) { toast(t("inst.notDrawn")); return null; }
+    const own = instanceTransform(st.doc, src);
+    const base = (own ? readTransform({ transform: own.transform }) : null) ?? IDENTITY;
+    transform = transformData({ ...base, position: [cur[0] - c0[0], cur[1] - c0[1], cur[2] - c0[2]] });
+  }
+  const plan = planInstance({ from, fromEpoch: top(src.first_epoch), epoch: o.epoch, chrono: st.topEpochIdsChrono(),
+    node_type: o.node_type, name: o.name, state: o.state, transform, resource: transform ? chainResource(chain) : null });
+  const ids = new Map<string, string>();
+  st.batch(() => {
+    const at = st.doc.layout?.positions?.[from];
+    const lane = scenes.matrix?.lanes.find((l) => l.id === o.epoch);
+    for (const x of plan.nodes) {
+      const rect = x.key === "$unit" && at && lane ? { x: at.x + at.w + 40, y: lane.y + lane.height / 2 - at.h / 2, w: at.w, h: at.h } : undefined;
+      const n = st.addNode({ id: st.newId(), ...x.node } as EmNode, rect);
+      ids.set(x.key, n.id);
+    }
+    for (const e of plan.edges) st.addEdge(ids.get(e.source) ?? e.source, ids.get(e.target) ?? e.target, e.edge_type);
+  });
+  const unit = ids.get("$unit") ?? null;
+  toastUndo(t("inst.created", { name: o.name, epoch: String(st.node(o.epoch)?.name ?? o.epoch) }), st);
+  refreshSurfaces("scene");
+  return unit;
+}
+/** the Inspector's section */
+function renderInstancesSection(unitId: string): HTMLElement | null {
+  if (!store) return null;
+  const st = store;
+  const node = st.node(unitId);
+  if (!node || !isStratigraphicType(node.node_type) || isContinuityType(node.node_type) || isGroupType(node.node_type)) return null;
+  const chain = epochInstances(st.doc, unitId);
+  if (!/SpecialFind/.test(classOf(node.node_type)) && chain.length < 2) return null;
+  const sec = document.createElement("section");
+  sec.className = "insp-inst";
+  sec.dataset.inst = unitId;
+  const h = document.createElement("h3");
+  h.className = "insp-sect";
+  h.textContent = t("inst.sect");
+  sec.appendChild(h);
+  const tbl = document.createElement("div");
+  tbl.className = "insp-inst-list";
+  const nm = (id: string | null) => (id ? String(st.node(id)?.name ?? id) : "—");
+  for (const r of chain) {
+    const row = document.createElement("div");
+    row.className = `insp-inst-row${r.id === unitId ? " cur" : ""}`;
+    row.dataset.instRow = r.id;
+    row.title = t("inst.goTo", { name: r.name });
+    const ep = document.createElement("span");
+    ep.className = "insp-inst-ep";
+    ep.textContent = r.epochs.length ? r.epochs.map(nm).join(" · ") : "—";
+    const who = document.createElement("span");
+    who.className = "insp-inst-who";
+    who.textContent = `${r.name} · ${r.node_type ?? ""}`;
+    const own = instanceTransform(st.doc, r);
+    const xf = own ? readTransform({ transform: own.transform }) : null;
+    const pos = document.createElement("span");
+    pos.className = "insp-inst-pos";
+    pos.dataset.instPos = r.id;
+    pos.textContent = (xf ? xf.position.map((v) => v.toFixed(2)).join(", ") + " m" : t("inst.posFile"))
+      + (r.geometry_from && r.geometry_from !== r.id ? ` · ${t("inst.geomFrom", { name: nm(r.geometry_from) })}` : r.geometry_from ? ` · ${t("inst.geomOwn")}` : ` · ${t("inst.geomNone")}`);
+    const state = document.createElement("input");
+    state.className = "insp-inst-state";
+    state.dataset.instState = r.id;
+    state.value = r.conservation_state ?? "";
+    state.placeholder = t("inst.statePh");
+    state.addEventListener("change", () => writeInstanceState(r.id, state.value));
+    const at = document.createElement("button");
+    at.type = "button";
+    at.className = "insp-btn insp-inst-at";
+    at.dataset.instAt = r.id;
+    at.textContent = "⌖";
+    at.title = t("inst.posFromCursor");
+    at.disabled = !r.geometry_from;
+    at.addEventListener("click", (e) => { e.stopPropagation(); placeInstanceAtCursor(r.id); });
+    for (const x of [state, at]) x.addEventListener("click", (e) => e.stopPropagation());
+    row.addEventListener("click", () => goToInstance(r.id));
+    const line1 = document.createElement("div");
+    line1.className = "insp-inst-l1";
+    line1.append(ep, who);
+    const line2 = document.createElement("div");
+    line2.className = "insp-inst-l2";
+    line2.append(pos, state, at);
+    row.append(line1, line2);
+    tbl.appendChild(row);
+  }
+  sec.appendChild(tbl);
+  // «New instance…»
+  const bar = document.createElement("div");
+  bar.className = "insp-actions";
+  const nb = document.createElement("button");
+  nb.type = "button";
+  nb.className = "insp-btn";
+  nb.dataset.cmd = "instance-new";
+  nb.textContent = t("inst.new");
+  bar.appendChild(nb);
+  sec.appendChild(bar);
+  const form = document.createElement("div");
+  form.className = "insp-inst-form hidden";
+  const field = (label: string, el: HTMLElement): void => {
+    const l = document.createElement("label");
+    l.className = "insp-br-row";
+    const s0 = document.createElement("span");
+    s0.className = "insp-br-l";
+    s0.textContent = label;
+    el.classList.add("insp-br-v");
+    l.append(s0, el);
+    form.appendChild(l);
+  };
+  const held = new Set(chain.map((r) => r.first_epoch).filter(Boolean));
+  const epSel = document.createElement("select");
+  epSel.dataset.inst = "epoch";
+  for (const id of [...st.topEpochIdsChrono()].reverse()) {
+    const o = document.createElement("option");
+    o.value = id; o.textContent = nm(id); o.disabled = held.has(id);
+    epSel.appendChild(o);
+  }
+  epSel.value = [...epSel.options].find((o) => !o.disabled)?.value ?? "";
+  field(t("inst.epoch"), epSel);
+  const tySel = document.createElement("select");
+  tySel.dataset.inst = "type";
+  for (const ty of instanceTypes(node.node_type)) {
+    const o = document.createElement("option");
+    o.value = ty; o.textContent = `${ty} · ${datamodelTypeLabel(ty)}`;
+    tySel.appendChild(o);
+  }
+  field(t("inst.type"), tySel);
+  const nameIn = document.createElement("input");
+  nameIn.dataset.inst = "name";
+  const proposed = (ty: string) => initialName(st.doc, ty) ?? nextFreeName(st.doc, ty) ?? st.freshLabel(ty);
+  nameIn.value = proposed(tySel.value);
+  tySel.addEventListener("change", () => { nameIn.value = proposed(tySel.value); });
+  field(t("inst.name"), nameIn);
+  const stIn = document.createElement("input");
+  stIn.dataset.inst = "state";
+  stIn.placeholder = t("inst.statePh");
+  field(t("inst.state"), stIn);
+  const atCb = document.createElement("input");
+  atCb.type = "checkbox";
+  atCb.dataset.inst = "at-cursor";
+  atCb.checked = sceneHandles.size > 0;
+  atCb.disabled = sceneHandles.size === 0;
+  field(t("inst.useCursor"), atCb);
+  const fbar = document.createElement("div");
+  fbar.className = "insp-actions";
+  const ok = document.createElement("button");
+  ok.type = "button";
+  ok.className = "insp-btn";
+  ok.dataset.inst = "create";
+  ok.textContent = t("inst.create");
+  ok.disabled = !epSel.value;
+  ok.addEventListener("click", () => {
+    const id = createInstance(unitId, { epoch: epSel.value, node_type: tySel.value, name: nameIn.value.trim() || proposed(tySel.value), state: stIn.value, atCursor: atCb.checked });
+    if (id) refreshInspector();
+  });
+  fbar.appendChild(ok);
+  form.appendChild(fbar);
+  const hint = document.createElement("div");
+  hint.className = "insp-hint";
+  hint.textContent = t("inst.hint");
+  form.appendChild(hint);
+  sec.appendChild(form);
+  nb.addEventListener("click", () => form.classList.toggle("hidden"));
+  return sec;
+}
+/** the dashed line of the Space: the instances of the unit selected, through
+ *  their positions (three's axes), and a point per instance named by its epoch */
+let instanceMarksMemo: { key: string; chain: InstRow[]; trans: V3[]; labels: string[] } | null = null;
+function instanceMarks(): SceneMark[] {
+  const st = store;
+  if (!st || !selectedId || !space3dShown("s3_instances")) return [];
+  // read at every frame: the chain, its translations and names once per change
+  // (`spaceVersion`), only the drawn boxes per frame
+  const key = `${selectedId}|${spaceVersion}`;
+  if (!instanceMarksMemo || instanceMarksMemo.key !== key) {
+    const chain = epochInstances(st.doc, selectedId);
+    instanceMarksMemo = { key, chain, trans: chain.map((r) => instanceTranslation(st, r)),
+      labels: chain.map((r) => `${r.name} · ${r.first_epoch ? String(st.node(r.first_epoch)?.name ?? "") : "—"}`) };
+  }
+  const { chain, trans, labels } = instanceMarksMemo;
+  if (chain.length < 2) return [];
+  let c0: V3 | null = null;
+  for (let i = 0; i < chain.length && !c0; i++) for (const h of sceneHandles.values()) {
+    const b = h.boxOf(`proxy:${chain[i].id}`);
+    if (!b) continue;
+    const c = threeToBlender([(b[0][0] + b[1][0]) / 2, (b[0][1] + b[1][1]) / 2, (b[0][2] + b[1][2]) / 2]);
+    c0 = [c[0] - trans[i][0], c[1] - trans[i][1], c[2] - trans[i][2]];
+    break;
+  }
+  if (!c0) return [];
+  // only the instances with a position of their own (a model, or the geometry's own proxy)
+  const placed = chain.map((r, i) => ({ r, i })).filter(({ r }) => r.geometry_from === r.id || r.placements.length > 0);
+  if (placed.length < 2) return [];
+  const pts = placed.map(({ i }) => blenderToThree([c0![0] + trans[i][0], c0![1] + trans[i][1], c0![2] + trans[i][2]]));
+  const marks: SceneMark[] = [{ id: `chain:${selectedId}`, kind: "chain", vertices: pts, label: "" }];
+  placed.forEach(({ r, i }, k) => marks.push({ id: `inst:${r.id}`, kind: "point", vertices: [pts[k]], label: labels[i], selected: r.id === selectedId }));
+  return marks;
 }
 
 // ── MICRO-SERVSF-FINE-ISTANZE p.2 · the Inspector of a BR ─────────────────────

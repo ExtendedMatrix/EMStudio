@@ -33,7 +33,7 @@ const eq = (got, want, what) => { assert.deepEqual(got, want, `${what} — got $
   eq(O.OVERLAY_GROUPS.find((g) => g.key === "rights").items.map((i) => i.key),
     ["author", "author_ai", "license", "embargo", "inherited"], "authorship and rights: the four ornaments and the inherited");
   eq(new Set(O.OVERLAY_KEYS).size, O.OVERLAY_KEYS.length, "every overlay once");
-  eq(O.OVERLAY_KEYS.length, 44, "forty-four overlays: twenty-two of the graph, twenty-two of the Space (MICRO-GIZMO-ASSI: three labels, three axes, the navigation gizmo; MICRO-VIEWER-SPAZIO-EMTREE p.4: the statistics; MICRO-GLIFI-OVERLAY-CONTINUITA p.3: the continuity, in Time)");
+  eq(O.OVERLAY_KEYS.length, 45, "forty-five overlays: twenty-two of the graph, twenty-three of the Space (MICRO-GIZMO-ASSI: three labels, three axes, the navigation gizmo; MICRO-VIEWER-SPAZIO-EMTREE p.4: the statistics; MICRO-GLIFI-OVERLAY-CONTINUITA p.3: the continuity, in Time; MICRO-SERVSF-FINE-ISTANZE p.3: the instances, in Objects)");
   eq(O.OVERLAY_GROUPS.find((g) => g.key === "time").items.map((i) => i.key), ["lane_pd_tag", "date_invite", "continuity"], "Time: the epoch's tag, the invitation, the continuity");
   // every overlay is drawn somewhere: the renderers name it (a key nobody draws
   // would be a box that switches nothing)
@@ -51,8 +51,8 @@ const eq = (got, want, what) => { assert.deepEqual(got, want, `${what} — got $
     eq(O.overlayItemsFor(v).length, 22, `${v}: every overlay of the graph`);
   eq(O.overlayItemsFor("space").map((i) => i.key), ["s3_grid", "s3_axis_x", "s3_axis_y", "s3_axis_z", "s3_cursor", "s3_navgizmo", "s3_epoch_box", "s3_stats",
     "s3_labels_rm", "s3_labels_proxy", "s3_labels_sketch",
-    "s3_proxies", "s3_proxy_wire", "s3_rm", "s3_tiles", "s3_sketches", "s3_sel_outline", "s3_gizmo",
-    "s3_dec_rights", "s3_dec_pd", "s3_dec_warning", "s3_dec_epoch"], "the Space: its twenty-two, in their groups, and only them");
+    "s3_proxies", "s3_proxy_wire", "s3_rm", "s3_tiles", "s3_sketches", "s3_instances", "s3_sel_outline", "s3_gizmo",
+    "s3_dec_rights", "s3_dec_pd", "s3_dec_warning", "s3_dec_epoch"], "the Space: its twenty-three, in their groups, and only them");
   eq(O.OVERLAY_VALUES.map((v) => [v.key, v.def]), [["s3_opacity_proxy", 0.42], ["s3_opacity_wire", 0.9]], "Geometry: two sliders, at the opacities the scene used");
   // every label in en, it, de
   const i18n = readFileSync(`${SRC}i18n.ts`, "utf8");

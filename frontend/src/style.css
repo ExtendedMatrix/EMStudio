@@ -1437,6 +1437,19 @@ body.sync-active #mode-indicator::before {
 .cont-form .cont-field select { font-size: 13px; color: var(--text); }
 .cont-form .cont-bar { display: flex; gap: 6px; justify-content: flex-end; }
 .insp-cont-state { font-size: 12.5px; color: var(--text-muted); margin: 2px 0 4px; }
+/* MICRO-SERVSF-FINE-ISTANZE p.3 · the instances of an object in the epochs */
+.insp-inst-list { display: flex; flex-direction: column; gap: 4px; margin: 4px 0 6px; }
+.insp-inst-row { border: 1px solid var(--border); border-radius: 6px; padding: 4px 6px; cursor: pointer; font-size: 12.5px; }
+.insp-inst-row:hover { border-color: var(--accent); }
+.insp-inst-row.cur { border-color: #b19f61; box-shadow: inset 3px 0 0 #b19f61; }
+.insp-inst-l1, .insp-inst-l2 { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.insp-inst-ep { font-weight: 600; }
+.insp-inst-who { color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.insp-inst-pos { flex: 1 1 auto; min-width: 0; color: var(--text-muted); font-size: 11.5px; overflow-wrap: anywhere; }
+.insp-inst-state { flex: 0 1 45%; min-width: 60px; font-size: 12px; padding: 2px 5px; }
+.insp-inst-at { padding: 0 6px; }
+.insp-inst-form { border-top: 1px dashed var(--border); padding-top: 4px; }
+.insp-inst-form.hidden { display: none; }
 /* MICRO-SERVSF-FINE-ISTANZE p.2 · a BR's own section: label · value rows */
 .insp-br-row { display: flex; align-items: center; gap: 8px; margin: 3px 0; font-size: 12.5px; }
 .insp-br-l { flex: 0 0 92px; color: var(--text-muted); }
@@ -10120,6 +10133,9 @@ tr.tt-hidden { display: none; }
 .scn-mark.sel circle, .scn-mark.sel polyline, .scn-mark.sel polygon { stroke: #f15800; }
 .scn-mark.sel circle { fill: #ffaa40; }
 .scn-mark.draft polyline { stroke-dasharray: 5 4; }
+/* MICRO-SERVSF-FINE-ISTANZE p.3 · the instances of one object, joined by a dashed line */
+.scn-mark.k-chain polyline { stroke: #b19f61; stroke-width: 2; stroke-dasharray: 7 5; }
+.scn-mark.k-chain circle { fill: #b19f61; }
 .scn-mark.draft circle { fill: #fff; }
 .scn-mark-labels { position: absolute; inset: 0; pointer-events: none; z-index: 4; }
 .scn-mark-label { position: absolute; transform: translate(8px, -50%); pointer-events: auto; font-size: 11px; padding: 1px 5px;

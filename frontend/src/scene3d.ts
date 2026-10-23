@@ -287,7 +287,8 @@ export interface GeoDriver {
  *  Vertices in three's axes (the caller converts the data's). */
 export interface SceneMark {
   id: string;
-  kind: "point" | "line" | "polyline" | "plane";
+  /** MICRO-SERVSF-FINE-ISTANZE p.3 · `chain`: the dashed line of an object's instances */
+  kind: "point" | "line" | "polyline" | "plane" | "chain";
   vertices: V3[];
   label: string;
   selected?: boolean;

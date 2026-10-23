@@ -40,6 +40,8 @@ export interface InspectorCallbacks {
   /** MICRO-SERVSF-FINE-ISTANZE p.2 · a BR's own section: its unit, the type of
    *  the end, the CIDOC class, the epoch and its rule, its own dating */
   endOfUnit?: (nodeId: string) => HTMLElement | null;
+  /** MICRO-SERVSF-FINE-ISTANZE p.3 · the instances of an object in the epochs */
+  epochInstances?: (nodeId: string) => HTMLElement | null;
   /** MICRO-UN-POSTO · open the site selector on the graph node */
   onSetSitePosition?: () => void;
   onClose: () => void;
@@ -778,6 +780,10 @@ export function renderInspector(
 
   if (nodeId && cb.endOfUnit && node.node_type === "BR") {
     const sec = cb.endOfUnit(nodeId);
+    if (sec) root.appendChild(sec);
+  }
+  if (nodeId && cb.epochInstances && isStratigraphicType(node.node_type)) {
+    const sec = cb.epochInstances(nodeId);
     if (sec) root.appendChild(sec);
   }
 

@@ -9321,6 +9321,105 @@ test("SV2.endtype", "SERVSF-FINE-ISTANZE p.2 · il tipo di fine: GT16, «End in�
   return { pass, detail: { ...out, errors } };
 });
 
+test("SV3.instances", "SERVSF-FINE-ISTANZE p.3 · le istanze per epoca: GT16, Spazio in II A.D., T21 (SF col suo proxy): l'Inspector ha «Instances in the epochs» con una riga (II A.D., geometria propria); «New instance…» in XX sec, SF, uno stato, la posizione al cursore 3D: un annulla; nasce l'unità con has_first_epoch, changed_from verso T21, lo stato, un RMSF con la sola trasformazione sullo stesso asset; due righe dalla più antica; nello Spazio la linea tratteggiata fra le due istanze, la seconda al cursore; il clic sulla riga della nuova la seleziona e porta lo Spazio in XX sec, dove è disegnata con la geometria di T21 al cursore; «⌖» la sposta col cursore (un annulla); lo stato di T21 scritto dalla riga (un annulla); salva e riapri: due righe, gli stati", async () => {
+  if (!existsSync(SV_V4)) return { pass: false, detail: { missing: SV_V4 } };
+  const { p, ctx, errors } = await svOpen();
+  const D = (f, a) => p.evaluate(f, a);
+  const out = {};
+  const near = (a, b, tol = 0.05) => !!a && !!b && a.every((v, i) => Math.abs(v - b[i]) < tol);
+  const wait = async () => { for (let i = 0; i < 200; i++) { const n = await D(() => (document.querySelector(".scn-host")?.__space?.() ?? []).filter((x) => x.as === "pending").length); if (!n) break; await p.waitForTimeout(250); } };
+  await p.click(`#workspace-bar .ws-tab[data-ws="space"]`);
+  await p.waitForFunction(() => document.querySelector(".scn-host")?.dataset.ready === "1", null, { timeout: 60000 });
+  const epochBtn = (name) => D((n) => [...document.querySelectorAll(".scn-seg button[data-epoch]")].find((b) => b.textContent.trim() === n)?.dataset.epoch, name);
+  const II = await epochBtn("II A.D."), XX = await epochBtn("XX sec");
+  await p.click(`.scn-seg button[data-epoch="${II}"]`); await wait();
+  await D(() => document.querySelector("[data-frame]")?.click()); await p.waitForTimeout(1500);
+  const T21 = await D(() => window.__EM_DRAG__.viewNodeIds("matrix").find((id) => window.__EM_DRAG__.node(id)?.name === "T21") ?? null);
+  await D((id) => window.__EM_DRAG__.select(id), T21); await p.waitForTimeout(800);
+  const insp = await D(() => window.__EM_DRAG__.wins().find((w) => w.type === "inspector")?.id);
+  const IN = `.tile-area[data-win="${insp}"]`;
+  const rows = () => D((w) => [...document.querySelectorAll(`${w} .insp-inst-row`)].map((r) => ({ id: r.dataset.instRow,
+    ep: r.querySelector(".insp-inst-ep")?.textContent, pos: r.querySelector(".insp-inst-pos")?.textContent, state: r.querySelector(".insp-inst-state")?.value })), IN);
+  out.rows0 = await rows();
+  out.drawn0 = await D((id) => (document.querySelector(".scn-host").__space() ?? []).find((x) => x.id === id)?.as ?? null, T21);
+  const c21 = await D((id) => window.__EM_DRAG__.spaceCentre(`proxy:${id}`), T21);
+  out.c21 = c21;
+  const cursor = c21 ? [c21[0] + 3, c21[1] + 1, c21[2] + 0.5] : null;
+  await D((c) => window.__EM_DRAG__.setSpaceCursor(c), cursor); await p.waitForTimeout(300);
+  // «New instance…» in XX sec
+  await p.click(`${IN} [data-cmd="instance-new"]`); await p.waitForTimeout(200);
+  out.form = await D((w) => ({ epochs: [...document.querySelectorAll(`${w} .insp-inst-form select[data-inst="epoch"] option`)].map((o) => [o.textContent, o.disabled]),
+    types: [...document.querySelectorAll(`${w} .insp-inst-form select[data-inst="type"] option`)].map((o) => o.value),
+    atCursor: document.querySelector(`${w} .insp-inst-form input[data-inst="at-cursor"]`)?.checked }), IN);
+  await p.selectOption(`${IN} .insp-inst-form select[data-inst="epoch"]`, XX);
+  await p.fill(`${IN} .insp-inst-form input[data-inst="state"]`, "fragmentary, found in the collapse");
+  const u0 = await D(() => window.__EM_DRAG__.undoDepth());
+  await p.click(`${IN} .insp-inst-form [data-inst="create"]`); await p.waitForTimeout(1200);
+  out.steps = (await D(() => window.__EM_DRAG__.undoDepth())) - u0;
+  const chain = await D((id) => window.__EM_DRAG__.epochInstances(id), T21);
+  const fresh = chain.find((r) => r.id !== T21);
+  out.chain = chain.map((r) => ({ name: r.name, type: r.node_type, state: r.conservation_state, placements: r.placements.map((x) => x.node_type), geometry_from: r.geometry_from === T21 ? "T21" : r.geometry_from }));
+  out.edges = fresh ? await D(([n, t]) => {
+    const E = window.__EM_DRAG__;
+    const name = (id) => E.node(id)?.name ?? id;
+    const of = (type) => E.edgesOf(type).filter((e) => e.source === n).map((e) => name(e.target));
+    const rm = E.edgesOf("has_representation_model_sf").find((e) => e.source === n)?.target;
+    return { first: of("has_first_epoch"), changed: of("changed_from"), rmLinks: rm ? E.edgesOf("has_linked_resource").filter((e) => e.source === rm).map((e) => E.node(e.target)?.node_type) : null,
+      proxyRes: (() => { const g = E.edgesOf("has_property").filter((e) => e.source === t).map((e) => e.target).find((x) => E.node(x)?.data?.property_type === "geometry");
+        const sh = g && E.edgesOf("has_semantic_shape").find((e) => e.source === g)?.target; return sh ? E.edgesOf("has_linked_resource").filter((e) => e.source === sh).map((e) => e.target) : null; })(),
+      rmRes: rm ? E.edgesOf("has_linked_resource").filter((e) => e.source === rm).map((e) => e.target) : null,
+      rmData: rm ? Object.keys(E.node(rm)?.data ?? {}) : null };
+  }, [fresh.id, T21]) : null;
+  await D((id) => window.__EM_DRAG__.select(id), T21); await p.waitForTimeout(700);
+  out.rows1 = await rows();
+  out.marks = await D(() => window.__EM_DRAG__.instanceMarks());
+  out.svgChain = await D(() => { const pl = document.querySelector(".scn-mark.k-chain polyline"); return pl ? pl.getAttribute("points")?.trim().split(/\s+/).length ?? 0 : null; });
+  await p.screenshot({ path: SHOT("sv3-chain-II") }).catch(() => {});
+  // the new instance's row: selected, the Space in XX sec, drawn at the cursor with T21's geometry
+  if (fresh) await p.click(`${IN} .insp-inst-row[data-inst-row="${fresh.id}"] .insp-inst-ep`);
+  await p.waitForTimeout(1500); await wait(); await p.waitForTimeout(800);
+  out.after = fresh ? await D(([id]) => ({ selected: window.__EM_DRAG__.selected?.() ?? null,
+    epoch: [...document.querySelectorAll(".scn-seg button[data-epoch]")].find((b) => b.getAttribute("aria-pressed") === "true")?.textContent.trim(),
+    drawn: (document.querySelector(".scn-host").__space() ?? []).find((x) => x.id === id)?.as ?? null,
+    centre: window.__EM_DRAG__.spaceCentre(`proxy:${id}`) }), [fresh.id]) : null;
+  await p.screenshot({ path: SHOT("sv3-instance-XX") }).catch(() => {});
+  // «⌖»: the cursor 2 m north, the instance follows
+  const cursor2 = cursor ? [cursor[0], cursor[1] + 2, cursor[2]] : null;
+  await D((c) => window.__EM_DRAG__.setSpaceCursor(c), cursor2);
+  if (fresh) await D((id) => window.__EM_DRAG__.select(id), fresh.id); await p.waitForTimeout(600);
+  const u1 = await D(() => window.__EM_DRAG__.undoDepth());
+  if (fresh) await p.click(`${IN} .insp-inst-row[data-inst-row="${fresh.id}"] [data-inst-at]`);
+  await p.waitForTimeout(1500);
+  out.move = fresh ? { steps: (await D(() => window.__EM_DRAG__.undoDepth())) - u1, centre: await D((id) => window.__EM_DRAG__.spaceCentre(`proxy:${id}`), fresh.id) } : null;
+  // T21's state, from its row
+  const u2 = await D(() => window.__EM_DRAG__.undoDepth());
+  await p.fill(`${IN} .insp-inst-row[data-inst-row="${T21}"] .insp-inst-state`, "restored, glued");
+  await p.press(`${IN} .insp-inst-row[data-inst-row="${T21}"] .insp-inst-state`, "Enter"); await p.waitForTimeout(200);
+  await D(() => document.activeElement?.blur()); await p.waitForTimeout(600);
+  out.state = { steps: (await D(() => window.__EM_DRAG__.undoDepth())) - u2, value: (await D((id) => window.__EM_DRAG__.epochInstances(id), T21)).find((r) => r.id === T21)?.conservation_state };
+  // save and reopen
+  const text = await D(() => window.__EM_DRAG__.docJson());
+  await D(([d, path]) => window.__EM_DRAG__.openAt(d, path), [JSON.parse(text), SV_V4]);
+  await p.waitForFunction(() => (window.__EM_SCENE__?.()?.nodes?.length ?? 0) > 50, null, { timeout: 60000 }); await p.waitForTimeout(1500);
+  out.reopened = (await D((id) => window.__EM_DRAG__.epochInstances(id), T21)).map((r) => [r.name, r.conservation_state, r.placements.length]);
+  await ctx.close();
+  const m = out.marks ?? [];
+  const chainMark = m.find((x) => x.kind === "chain");
+  const pass = out.rows0.length === 1 && out.rows0[0].ep === "II A.D." && /own geometry/.test(out.rows0[0].pos ?? "") && out.drawn0 === "mesh"
+    && out.form.epochs.find((e) => e[0] === "II A.D.")?.[1] === true && out.form.types[0] === "SF" && out.form.atCursor === true
+    && out.steps === 1 && out.chain.length === 2 && out.chain[0].name === "T21" && out.chain[1].type === "SF" && out.chain[1].state === "fragmentary, found in the collapse"
+    && JSON.stringify(out.chain[1].placements) === JSON.stringify(["representation_model_sf"]) && out.chain[1].geometry_from === "T21"
+    && JSON.stringify(out.edges?.first) === JSON.stringify(["XX sec"]) && JSON.stringify(out.edges?.changed) === JSON.stringify(["T21"])
+    && out.edges?.rmData?.includes("transform") && !out.edges?.rmData?.some((k) => /url|geometry|checksum|convex|sphere/.test(k)) && JSON.stringify(out.edges?.rmRes) === JSON.stringify(out.edges?.proxyRes) && (out.edges?.rmRes ?? []).length === 1
+    && out.rows1.length === 2 && out.rows1[0].ep === "II A.D." && out.rows1[1].ep === "XX sec" && /geometry of T21/.test(out.rows1[1].pos ?? "") && / m · /.test(out.rows1[1].pos ?? "")
+    && chainMark?.n === 2 && near(chainMark.vertices[0], out.c21, 0.05) && near(chainMark.vertices[1], cursor, 0.05) && out.svgChain === 2
+    && out.after?.epoch === "XX sec" && out.after?.drawn === "mesh" && near(out.after?.centre, cursor, 0.05)
+    && out.move?.steps === 1 && near(out.move?.centre, cursor2, 0.05)
+    && out.state.steps === 1 && out.state.value === "restored, glued"
+    && JSON.stringify(out.reopened.map((r) => r[1])) === JSON.stringify(["restored, glued", "fragmentary, found in the collapse"]) && !errors.length;
+  return { pass, detail: { ...out, cursor, cursor2, errors } };
+});
+
 // ── run ─────────────────────────────────────────────────────────────────────
 const chosen = cases.filter((c) => !only.length || only.includes(c.id) || only.some((o) => c.id.startsWith(o + ".")));
 for (const c of chosen) {

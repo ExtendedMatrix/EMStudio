@@ -31,6 +31,7 @@ import { pickRepresentation, plainGraph } from "./resources";
 import { alternativeSets, iterSets, type AlternativesRule, type AltResult } from "./alternatives";
 import visualRules from "./assets/em_visual_rules.json";
 import { basename } from "./paths";
+import { epochInstances } from "./epoch-instances";
 
 /** The rule of the alternatives (em_visual_rules 1.6.37 → `alternatives`). */
 export const ALT_RULE = (visualRules as unknown as { alternatives: AlternativesRule }).alternatives;
@@ -143,6 +144,14 @@ export interface SpaceProxy {
   /** MICRO-SPAZIO-3D-3 p.6 · the unit's other `geometry` properties («Aggiungi
    *  come parte»: s3Dgraphy writes one property per payload), in the graph's order */
   parts?: SpaceProxy[];
+  /** MICRO-SERVSF-FINE-ISTANZE p.3 · an INSTANCE drawn with another's geometry:
+   *  the unit of the chain whose proxy it is (`geometry_from`) — its property,
+   *  shape and file are that unit's, never this one's to change */
+  instanceOf?: string;
+  /** …and the node whose `data.transform` places it: its first model (RM /
+   *  RMSF) — the one with a transform, else the first; null = none yet (it
+   *  stands where the shared proxy stands) */
+  xfNode?: string | null;
 }
 
 export interface SpaceEpoch {
@@ -489,6 +498,35 @@ export function buildSpace(
       const first = proxies.get(u.id);
       if (!first) proxies.set(u.id, px);
       else (first.parts ??= []).push(px);
+    }
+  }
+
+  // MICRO-SERVSF-FINE-ISTANZE p.3 · the INSTANCES of an object in the other
+  // epochs (the chain of `changed_from`, s3Dgraphy `epoch_instances`): one
+  // without a geometry of its own is drawn with the chain's ONE proxy (its
+  // `geometry_from`), at its OWN position — the transform of its model —
+  // never a copy of the geometry. An instance with no model has no position of
+  // its own and is NOT drawn: standing where the other instance stands would
+  // say a place nobody gave (the capital reused in a wall today was not in the
+  // wall in Roman times); the panel lists it and «⌖» gives it one. Only the
+  // nodes a chain touches are read.
+  {
+    const inChain = new Set<string>();
+    for (const e of edges) if (e.edge_type === "changed_from" || e.edge_type === "changed_to") { inChain.add(e.source); inChain.add(e.target); }
+    const done = new Set<string>();
+    const sub = { graph: { nodes, edges } } as unknown as EmDocument;
+    for (const id of inChain) {
+      if (done.has(id) || !opts.isUnit(byId.get(id)?.node_type)) continue;
+      const chain = epochInstances(sub, id);
+      for (const r of chain) done.add(r.id);
+      for (const r of chain) {
+        if (proxies.has(r.id) || !r.geometry_from || r.geometry_from === r.id || !opts.isUnit(r.node_type ?? undefined)) continue;
+        const src = proxies.get(r.geometry_from);
+        if (!src || src.instanceOf) continue;
+        const xf = r.placements.find((p) => p.transform)?.model ?? r.placements[0]?.model ?? null;
+        if (!xf) continue;
+        proxies.set(r.id, { ...src, unitId: r.id, instanceOf: src.unitId, xfNode: xf });
+      }
     }
   }
 

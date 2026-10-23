@@ -64,6 +64,8 @@ export type OverlayKey =
   | "s3_gizmo"
   | "s3_cursor"
   | "s3_sketches"
+  /** MICRO-SERVSF-FINE-ISTANZE p.3 · the dashed line of an object's instances */
+  | "s3_instances"
   // MICRO-VIEWER-SPAZIO-EMTREE p.4 · triangles, vertices, objects, FPS (off by default)
   | "s3_stats"
   // MICRO-SPAZIO-3D-3 p.14 · the decorators of the Space's labels, as the graph's
@@ -166,6 +168,7 @@ export const OVERLAY_GROUPS: readonly OverlayGroup[] = [
     { key: "s3_rm", kind: "representation_model" },
     { key: "s3_tiles", kind: "tileset" },
     { key: "s3_sketches", text: "◇" },
+    { key: "s3_instances", text: "┄" },
     { key: "s3_sel_outline", text: "◌" },
     { key: "s3_gizmo", text: "✛" },
   ] },
