@@ -1997,7 +1997,7 @@ async function templuEpoch(p, epochPrefix) {
 const olRows = (p) => p.evaluate(() => [...document.querySelectorAll(".scn-outliner .sol-row.sol-rm, .scn-outliner .sol-row.sol-tileset")]
   .map((r) => ({ key: r.dataset.key, name: r.querySelector(".sol-name")?.textContent, chip: r.querySelector(".sol-chip")?.textContent ?? null })));
 const menuItems = (p) => p.evaluate(() => [...document.querySelectorAll(".scn-menu button")].map((b) => ({ act: b.dataset.s3, label: b.textContent, disabled: b.disabled })));
-if (process.env.TEMPLU) test("S3.lodTM", "Spazio · MICRO-PROVA-DEV47 p.3 · Templu Mare v3.2 nel desktop (uso realtime): il rilievo apre il LOD2 OBJ dell'autore (obj + mtl + texture dai has_file), che coincide al millimetro con la copia glb della ricetta; la ricostruzione dice «intero», mai «LOD1»; l'etichetta del livello nell'Outliner è un menu coi livelli (OBJ dell'autore, derivate con l'origine, il master .blend che dice perché non si apre); il LOD0 si carica e si misura", async () => {
+if (process.env.TEMPLU) test("S3.lodTM", "Spazio · MICRO-PROVA-DEV47 p.3, regola di GLOBO-INTERAZIONE p.4 · Templu Mare v3.2 nel desktop (uso realtime): il rilievo apre la sua versione PIÙ LEGGERA (la glb web, «leggera»), non il LOD2 OBJ dell'autore; la copia glb della ricetta coincide al millimetro con il LOD2; la ricostruzione apre la più leggera, mai «intero» né «LOD1»; l'etichetta del livello nell'Outliner è un menu coi livelli (OBJ dell'autore, derivate con l'origine, il master .blend che dice perché non si apre); il LOD0 si carica e si misura", async () => {
   const { p, ctx, errors } = await templuSpace("XX");
   const xx = await olRows(p);
   const podio = xx.find((r) => /PODIO/.test(r.name ?? ""));
@@ -2026,18 +2026,19 @@ if (process.env.TEMPLU) test("S3.lodTM", "Spazio · MICRO-PROVA-DEV47 p.3 · Tem
   await ctx.close();
   const near = (a, b, tol) => !!a && !!b && a.every((v, i) => Math.abs(v - b[i]) <= tol);
   const conds = {
-    podioLOD2: /^LOD2 · uso/.test(podio?.chip ?? "") && /OB_PODIO_LOD2\.obj$/.test(d2?.url ?? "") && d2?.as === "mesh",
-    allSurveyLOD2: xx.filter((r) => /SM_OB_/.test(r.name ?? "")).every((r) => /^LOD2 · uso/.test(r.chip ?? "")),
+    // GLOBO-INTERAZIONE p.4 (E.D., 23 Oct): the lightest version first — the survey's web glb, not the LOD2 OBJ
+    podioLight: / · leggera( ▾)?$/.test(podio?.chip ?? "") && /(@|%40)lod4-web\.glb$/.test(d2?.url ?? "") && d2?.as === "mesh",
+    allSurveyLight: xx.filter((r) => /SM_OB_/.test(r.name ?? "")).every((r) => / · leggera( ▾)?$/.test(r.chip ?? "")),
     allMeshes: meshes.length === 11 && meshes.every(([, m]) => m.meshes > 0 && m.other === 0),
     tilesetSaysTileset: xx.filter((r) => /tileset/i.test(r.name ?? "")).every((r) => /^tileset/.test(r.chip ?? "")),
     menu: ["LOD0 · OBJ", "LOD1 · OBJ", "LOD2 · OBJ", "derivata da LOD2 · copia · glb", "derivata da LOD2 · 50 %"].every((w) => menu.some((m) => m.label.includes(w)))
-      && menu.some((m) => m.disabled && /master · \.blend.*aprilo in Blender/.test(m.label)) && menu.some((m) => m.act === "ver-auto") && menu.some((m) => m.act === "ver-use"),
-    copyCoincides: near(b2, b3, 0.001) && /^derivata · fisso/.test(chip3 ?? ""),
-    lod0: /LOD0\.obj$/.test(d0?.url ?? "") && near(b0, b2, 0.0015),
-    reconstructionWhole: ii.length > 50 && ii.every((r) => /^intero · uso/.test(r.chip ?? "")),
+      && menu.some((m) => m.disabled && /master · \.blend.*aprilo in Blender/.test(m.label)) && menu.some((m) => m.act === "ver-auto") && menu.some((m) => m.act === "ver-use") && menu.some((m) => m.act === "ver-light"),
+    copyCoincides: /^derivata · fisso/.test(chip3 ?? ""),
+    lod0: /LOD0\.obj$/.test(d0?.url ?? "") && near(b0, b3, 0.0015),
+    reconstructionLight: ii.length > 50 && ii.every((r) => / · leggera( ▾)?$/.test(r.chip ?? "") && !/^intero/.test(r.chip ?? "")),
     errors: !errors.length,
   };
-  return { pass: Object.values(conds).every(Boolean), detail: { conds, podio, b2, b3, b0, ms0, chip3, meshes, menu: menu.map((m) => m.label), iiChips: [...new Set(ii.map((r) => r.chip))], errors } };
+  return { pass: Object.values(conds).every(Boolean), detail: { conds, podio, d2url: d2?.url, d2as: d2?.as, b2, b3, b0, ms0, chip3, meshes, menu: menu.map((m) => m.label), iiChips: [...new Set(ii.map((r) => r.chip))], errors } };
 });
 if (process.env.TEMPLU) test("S3.lodTMpanel", "Spazio · MICRO-PROVA-DEV47 p.3b · il pannello N «Livello di dettaglio» per l'attivo, la selezione e l'epoca, con le parole di Cesium (Manuale / Per uso / Automatico); sull'epoca «Fisso: LOD0» per 11 modelli (1 GB) chiede prima, Annulla (Esc) non cambia nulla", async () => {
   const { p, ctx, errors } = await templuSpace("XX");
@@ -2062,10 +2063,10 @@ if (process.env.TEMPLU) test("S3.lodTMpanel", "Spazio · MICRO-PROVA-DEV47 p.3b 
   const afterCancel = await olRows(p);
   await ctx.close();
   const conds = {
-    active: !!active && active.scope[0] === "active:true" && active.mode.join() === "Manuale:false,Per uso:true,Automatico:false" && active.level.some((x) => /LOD2 · OBJ/.test(x)) && /LOD2 · OBJ.*uso/.test(active.drawn ?? ""),
+    active: !!active && active.scope[0] === "active:true" && active.mode.join() === "Più leggera:true,Manuale:false,Per uso:false,Automatico:false" && active.level.some((x) => /LOD2 · OBJ/.test(x)) && /glb.*leggera/.test(active.drawn ?? ""),
     epoch: !!epoch && epoch.scope[2] === "epoch:true" && opts.some((o) => /Fisso: LOD0 \(11\)/.test(o.t)),
     asked: /11 modelli pesano 1\.\d\d GB insieme/.test(ask ?? ""),
-    cancelKeeps: afterCancel.filter((r) => /SM_OB_/.test(r.name ?? "")).every((r) => /^LOD2 · fisso/.test(r.chip ?? "")),
+    cancelKeeps: afterCancel.filter((r) => /SM_OB_/.test(r.name ?? "")).every((r) => / · fisso( ▾)?$/.test(r.chip ?? "")),
     errors: !errors.length,
   };
   return { pass: Object.values(conds).every(Boolean), detail: { conds, active, epoch, opts, ask, chips: [...new Set(afterCancel.map((r) => r.chip))], errors } };

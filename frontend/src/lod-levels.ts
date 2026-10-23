@@ -140,6 +140,31 @@ export function defaultLevel(levels: Map<string, Level>, drawable: ReadonlySet<s
   return ok.find((l) => l.whole)?.id ?? null;
 }
 
+/**
+ * MICRO-GLOBO-INTERAZIONE p.4 · the version a model loads FIRST (E.D., 23 Oct
+ * 2026: «sempre la versione più leggera»): the default tileset when the model
+ * has one (it streams its own levels); else the LIGHTEST — by the effective
+ * weight of the version's files (an OBJ set: the .obj, its .mtl, its textures),
+ * a glb before an OBJ at the same weight, an unknown weight after every known
+ * one, then the id. The others load only on an explicit choice (manual, by
+ * use, automatic by the distance). Measured before it on the GT16 (desktop):
+ * the 87 models of D.09 loaded the WHOLE model (lod0, 437 KB for an architrave)
+ * instead of its 81 KB lod1, and the 10 meshes of the survey (D.01) the author's
+ * LOD2 OBJ (13.4 MB) instead of the 0.5 MB web glb.
+ */
+export interface WeighIn { id: string; format?: string; bytes?: number | null; master?: boolean }
+export function lightestVersion<T extends WeighIn>(versions: readonly T[]): T | null {
+  const ok = versions.filter((v) => !v.master);
+  if (!ok.length) return null;
+  const tiles = ok.filter((v) => v.format === "tiles");
+  const pool = tiles.length ? tiles : ok;
+  const fmt = (v: WeighIn) => (v.format === "gltf" ? 0 : v.format === "obj" ? 1 : 2);
+  const known = (v: WeighIn) => typeof v.bytes === "number" && Number.isFinite(v.bytes);
+  return [...pool].sort((a, b) => (known(a) === known(b) ? 0 : known(a) ? -1 : 1)
+    || (known(a) && known(b) ? (a.bytes as number) - (b.bytes as number) : 0)
+    || fmt(a) - fmt(b) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))[0];
+}
+
 /** MICRO-PROVA-DEV47 p.3a · the weight over which a version is asked before it
  *  is loaded: 150 MB of files, or 5 million triangles. */
 export const HEAVY_BYTES = 150 * 1024 * 1024;

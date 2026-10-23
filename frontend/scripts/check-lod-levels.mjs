@@ -70,4 +70,18 @@ eq(L.isHeavy({ bytes: 113_000_000 }), false, "LOD0 of OB_PODIO, 108 MB: loaded w
 eq(L.isHeavy({ bytes: 160 * 1024 * 1024 }), true, "over 150 MB: asked first");
 eq(L.isHeavy({ tris: 6_000_000 }), true, "over 5 million triangles: asked first");
 
+// MICRO-GLOBO-INTERAZIONE p.4 · the lightest version first (E.D., 23 Oct 2026): the default
+// tileset when there is one, else the lightest by the files' weight, a glb before an OBJ
+{
+  const podio = [{ id: "master", master: true, format: "blend", bytes: 541690739 }, { id: "lod0", format: "obj", bytes: 151182800 },
+    { id: "lod1", format: "obj", bytes: 70024402 }, { id: "lod2", format: "obj", bytes: 13421902 }, { id: "lod3", format: "gltf", bytes: 5103988 }, { id: "lod4", format: "gltf", bytes: 515888 }];
+  eq(L.lightestVersion(podio)?.id, "lod4", "the survey (OB_EST_bk): the 0.5 MB web glb, not the author's 13.4 MB LOD2 OBJ");
+  eq(L.lightestVersion([{ id: "m", master: true, format: "blend", bytes: 92279767 }, { id: "lod0", format: "gltf", bytes: 436664 }, { id: "lod1", format: "gltf", bytes: 81320 }])?.id,
+    "lod1", "the reconstruction (D.09, an architrave): its 81 KB lod1, not the whole 437 KB lod0");
+  eq(L.lightestVersion([{ id: "a", format: "obj", bytes: 1000 }, { id: "b", format: "gltf", bytes: 1000 }])?.id, "b", "the same weight: the glb before the OBJ");
+  eq(L.lightestVersion([{ id: "a", format: "gltf" }, { id: "b", format: "obj", bytes: 9e8 }])?.id, "b", "an unknown weight goes after every known one");
+  eq(L.lightestVersion([{ id: "g", format: "gltf", bytes: 1000 }, { id: "t", format: "tiles", bytes: 198361152 }])?.id, "t", "a tileset is the default when the model has one (it streams its own levels)");
+  eq(L.lightestVersion([{ id: "m", master: true, format: "gltf", bytes: 1 }]), null, "only a master: nothing to choose here (the rule of the use decides)");
+}
+
 console.log(`check-lod-levels: ${checks} checks, all green`);

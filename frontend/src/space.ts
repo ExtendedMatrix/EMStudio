@@ -395,11 +395,13 @@ export function buildSpace(
     if (/^blend:\/\//i.test(str(d.url)) || str(d.packaging) === "datablock") return "blend";
     return "other";
   };
+  // MICRO-GLOBO-INTERAZIONE p.4 · the EFFECTIVE weight: an OBJ set is its files
+  // (the .obj, the .mtl, the textures), a glb its own; both known, the larger
   const weightOf = (n: EmNode | undefined): number | null => {
     const own = num(dataOf(n).size_bytes);
-    if (own != null) return own;
     const fs = n ? filesOf(n.id).map((f) => num(dataOf(f).size_bytes)) : [];
-    return fs.length && fs.every((x) => x != null) ? fs.reduce((a, b) => a! + b!, 0) : null;
+    const files = fs.length && fs.every((x) => x != null) ? fs.reduce((a, b) => a! + b!, 0) : null;
+    return own != null && files != null ? Math.max(own, files) : own ?? files;
   };
   const stepOf = (id: string): { step: Record<string, unknown> | null; input: string | null } => {
     for (const proc of inOf(id, "dtc_had_output")) {

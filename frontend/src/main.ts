@@ -265,7 +265,7 @@ import { groupNodeIdFor, planMove, planNewGroup, planRemove, RM_GROUP_TYPE, type
 import { shownModelName } from "./rm-names";
 import { buildChain, type FlowVersion, type VersionMode } from "./lod-flow";
 import { fingerprint, getMeasure, putMeasure } from "./measure-cache";
-import { defaultLevel, isHeavy, levelShort, levelsOf, type Level } from "./lod-levels";
+import { defaultLevel, isHeavy, levelShort, levelsOf, lightestVersion, type Level } from "./lod-levels";
 import { oneLine } from "./one-line";
 import { findSet, measureCoverage, planDeclareAlternative, planSubcontainer, SAME_COVERAGE_IOU, type AltMode, type AltPlan, type Box, type TilesetAlternative } from "./alternatives";
 import { FOOT_IN, footprintShare, leafCoverage } from "./tileset-leaves";
@@ -25129,7 +25129,8 @@ function versionModeOf(rmId: string): { mode: VersionMode; versionId?: string } 
   // MICRO-TILESET-CONTENITORE p.3 · a member of a container whose tileset is in
   // «Automatico» draws, near, with its own automatic LOD (unless the person chose)
   const a = spaceAltInfo.get(rmId);
-  return space3dPrefs().versionModes?.[rmId] ?? { mode: a && a.role === "models" && a.mode === "auto" ? "auto" : "use" };
+  // MICRO-GLOBO-INTERAZIONE p.4 · nobody chose: the lightest version (E.D.)
+  return space3dPrefs().versionModes?.[rmId] ?? { mode: a && a.role === "models" && a.mode === "auto" ? "auto" : "light" };
 }
 /** The mode of some models (a container's: all of its members), per person. */
 function setVersionMode(rmIds: string[], mode: VersionMode, versionId?: string): void {
@@ -25300,6 +25301,13 @@ function rmVersionPlan(rm: SpaceRM): { url?: string; flow?: FlowVersion[]; flowS
     const v = vs.find((x) => x.id === m.versionId);
     if (v) return asPlan(v);
   }
+  // MICRO-GLOBO-INTERAZIONE p.4 · the default (E.D., 23 Oct 2026: «sempre la versione
+  // più leggera»): the model's tileset if it has one, else the lightest version by
+  // the weight of its files, a glb before an OBJ; the others on an explicit choice
+  if (m.mode === "light") {
+    const v = lightestVersion(vs);
+    if (v) return asPlan(v);
+  }
   // MICRO-PROVA-DEV47 p.3 · the desktop's default (realtime): the survey's
   // lightest level of the AUTHOR, the reconstruction's WHOLE model; the
   // recipe's versions for the web, or by the distance
@@ -25332,6 +25340,7 @@ function versionMenuEntries(rmIds: string[]): Array<{ label: string; act: string
   const withVersions = rmIds.filter((id) => (sp?.rms.find((r) => r.id === id)?.versions?.length ?? 0) > 1);
   const off = !withVersions.length;
   return [
+    { label: t("ver.modeLight"), act: "ver-light", disabled: off, run: () => setVersionMode(withVersions, "light") },
     { label: t("ver.modeAuto"), act: "ver-auto", disabled: off, run: () => setVersionMode(withVersions, "auto") },
     { label: t("ver.modeUse", { use: deviceUse() }), act: "ver-use", disabled: off, run: () => setVersionMode(withVersions, "use") },
     { label: t("ver.modeManual"), act: "ver-manual", disabled: off, run: () => {
@@ -25380,7 +25389,7 @@ async function chooseLevels(pairs: Array<[string, string]>): Promise<boolean> {
   for (const [rmId, vid] of pairs) setVersionMode([rmId], "manual", vid);
   return true;
 }
-const modeWord = (m: VersionMode): string => t(m === "manual" ? "lod.chipManual" : m === "auto" ? "lod.chipAuto" : "lod.chipUse");
+const modeWord = (m: VersionMode): string => t(m === "manual" ? "lod.chipManual" : m === "auto" ? "lod.chipAuto" : m === "light" ? "lod.chipLight" : "lod.chipUse");
 /** The levels some models share, by their short name («LOD2», «intero»), with the version of each */
 function sharedLevels(rmIds: string[]): Array<{ short: string; pairs: Array<[string, string]> }> {
   const sp = currentSpace();
@@ -25423,6 +25432,7 @@ function lodMenuEntries(rmIds: string[]): Array<{ label: string; act: string; ru
       out.push({ label: t("lod.fixedAll", { lod: g.short, n: String(g.pairs.length) }), act: `lod:${g.short}`, run: () => { void chooseLevels(g.pairs); } });
   }
   out.push("sep",
+    { label: t("ver.modeLight"), act: "ver-light", run: () => setVersionMode(withVersions, "light") },
     { label: t("ver.modeAuto"), act: "ver-auto", run: () => setVersionMode(withVersions, "auto") },
     { label: t("ver.modeUse", { use: deviceUse() }), act: "ver-use", run: () => setVersionMode(withVersions, "use") });
   return out;
@@ -25485,7 +25495,7 @@ function renderLodSection(host: HTMLElement, sp: Space | null): void {
   }
   const modes = new Set(withVersions.map((id) => versionModeOf(id).mode));
   const on = modes.size === 1 ? [...modes][0] : "";
-  seg("lod-mode", [["manual", t("tl.manual")], ["use", t("lod.byUse")], ["auto", t("tl.auto")]], on, (v) => {
+  seg("lod-mode", [["light", t("lod.light")], ["manual", t("tl.manual")], ["use", t("lod.byUse")], ["auto", t("tl.auto")]], on, (v) => {
     if (v === "manual") {
       // Manual: the version each draws now stays
       for (const id of withVersions) { const rm = sp?.rms.find((r) => r.id === id); const dv = rm ? drawnVersionOf(rm) : null; setVersionMode([id], "manual", dv?.id); }
@@ -25546,7 +25556,7 @@ function renderVersionsInto(host: HTMLElement, rmId: string): boolean {
   const row = (lab: string, el: HTMLElement) => { const d = document.createElement("label"); d.className = "ver-row"; const s = document.createElement("span"); s.textContent = lab; d.append(s, el); host.appendChild(d); };
   const mode = document.createElement("select");
   mode.dataset.ver = "mode";
-  for (const [v, k] of [["auto", "ver.modeAuto"], ["use", "ver.modeUseShort"], ["manual", "ver.modeManualShort"]] as const) {
+  for (const [v, k] of [["light", "ver.modeLightShort"], ["auto", "ver.modeAuto"], ["use", "ver.modeUseShort"], ["manual", "ver.modeManualShort"]] as const) {
     const o = document.createElement("option"); o.value = v; o.textContent = t(k, { use: deviceUse() }); o.selected = m.mode === v; mode.appendChild(o);
   }
   mode.addEventListener("change", () => setVersionMode([rmId], mode.value as VersionMode, mode.value === "manual" ? drawnV?.id : undefined));

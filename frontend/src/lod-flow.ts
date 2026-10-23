@@ -216,7 +216,8 @@ export function pickByDistance(versions: readonly FlowVersion[], dist: number, f
 
 /** The modes of a model's versions: the one chosen, the one of the device's
  *  use, or the distance. */
-export type VersionMode = "manual" | "use" | "auto";
+/** MICRO-GLOBO-INTERAZIONE p.4 · `light`, the default: the lightest version (`lightestVersion`) */
+export type VersionMode = "manual" | "use" | "auto" | "light";
 
 /**
  * MICRO-TILESET-CONTENITORE p.3 · a CONTAINER and its tileset in the automatic

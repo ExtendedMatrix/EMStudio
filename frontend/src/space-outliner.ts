@@ -199,7 +199,7 @@ export interface Space3dPrefs {
   collapsed?: string[];
   /** p.10 · how each model chooses its version: manual (the one picked), the
    *  device's use, or the distance; absent = by use */
-  versionModes?: Record<string, { mode: "manual" | "use" | "auto"; versionId?: string }>;
+  versionModes?: Record<string, { mode: "manual" | "use" | "auto" | "light"; versionId?: string }>;
   /** p.10 · the use «Per uso» asks (web in a browser, realtime in the desktop, unless changed) */
   deviceUse?: string;
   /** p.12 · a container with its tileset's alternative: models, the tileset, or the distance (absent = auto) */
@@ -245,8 +245,8 @@ export function loadSpacePrefs(person: string | null | undefined): Space3dPrefs 
       snapAlign: p.snapAlign === true,
       collapsed: list(p.collapsed),
       versionModes: p.versionModes && typeof p.versionModes === "object" ? Object.fromEntries(Object.entries(p.versionModes as Record<string, unknown>)
-        .filter(([, v]) => v && typeof v === "object" && ["manual", "use", "auto"].includes(String((v as { mode?: unknown }).mode)))
-        .map(([k, v]) => [k, { mode: (v as { mode: "manual" | "use" | "auto" }).mode, ...(typeof (v as { versionId?: unknown }).versionId === "string" ? { versionId: (v as { versionId: string }).versionId } : {}) }])) : {},
+        .filter(([, v]) => v && typeof v === "object" && ["manual", "use", "auto", "light"].includes(String((v as { mode?: unknown }).mode)))
+        .map(([k, v]) => [k, { mode: (v as { mode: "manual" | "use" | "auto" | "light" }).mode, ...(typeof (v as { versionId?: unknown }).versionId === "string" ? { versionId: (v as { versionId: string }).versionId } : {}) }])) : {},
       ...(typeof p.deviceUse === "string" ? { deviceUse: p.deviceUse } : {}),
       ...(p.altModes && typeof p.altModes === "object" ? { altModes: Object.fromEntries(Object.entries(p.altModes as Record<string, unknown>)
         .filter(([, v]) => v === "models" || v === "tileset" || v === "auto" || v === "use")) as Record<string, "models" | "tileset" | "auto" | "use"> } : {}),
