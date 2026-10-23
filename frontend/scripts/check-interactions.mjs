@@ -9740,6 +9740,32 @@ test("GR5.pin", "GEOREF-GRAFO p.3 · il segnaposto del sito propone il centro de
   return { pass, detail: out };
 });
 
+test("GR6.follow", "GEOREF-GRAFO · una sola fonte: il globo acceso sul GT16 con l'EPSG di prima (31700, il ballpark) si ricolloca da sé quando il nodo cambia — «Convert to EPSG:3844» dall'Inspector del grafo e l'ancora del globo diventa quella di 3844 (Pulkovo 1942(58) to WGS 84 (19)), circa 127 m più in là, senza spegnere e riaccendere «Territory»", async () => {
+  if (!existsSync(GEOREF_V4)) return { pass: false, detail: { missing: GEOREF_V4 } };
+  const f = JSON.parse(readFileSync(GEOREF_V4, "utf8"));
+  const gid = Object.keys(f.graphs).find((k) => (f.graphs[k].nodes ?? []).length > 100);
+  f.graphs[gid].nodes.find((n) => n.node_type === "geo_position").data.epsg = 31700;
+  const { p, ctx, errors } = await grOpen(f);
+  await grSpace(p);
+  await geoOn(p);
+  const D = (fn, a) => p.evaluate(fn, a);
+  const anchor = () => D(() => document.querySelector(".scn-host").__geoSpace().anchor);
+  const out = { before: await anchor() };
+  await D((r) => window.__EM_DRAG__.select(r), `${gid}_graphroot`);
+  await p.waitForSelector('[data-section="georef"] [data-georef="convert"]', { timeout: 30000 }).catch(() => null);
+  await p.click('[data-section="georef"] [data-georef="convert"]').catch(() => null);
+  await p.waitForFunction(() => document.querySelector(".scn-host").__geoSpace().anchor?.epsg === 3844, null, { timeout: 30000 }).catch(() => null);
+  await p.waitForFunction(() => document.querySelector(".scn-host")?.__geo?.()?.ready, null, { timeout: 30000 }).catch(() => null);
+  out.after = await anchor();
+  out.on = await D(() => document.querySelector(".scn-host").__geoSpace().on);
+  const R = 6371000, r = Math.PI / 180;
+  out.moved = out.before && out.after ? R * Math.hypot((out.after.lat - out.before.lat) * r, (out.after.lon - out.before.lon) * r * Math.cos(out.before.lat * r)) : null;
+  out.errors = errors;
+  await ctx.close();
+  const pass = out.before?.epsg === 31700 && out.after?.epsg === 3844 && out.on === true && out.moved !== null && Math.abs(out.moved - 127.3) < 2 && !errors.length;
+  return { pass, detail: out };
+});
+
 // ── run ─────────────────────────────────────────────────────────────────────
 const chosen =cases.filter((c) => !only.length || only.includes(c.id) || only.some((o) => c.id.startsWith(o + ".")));
 for (const c of chosen) {

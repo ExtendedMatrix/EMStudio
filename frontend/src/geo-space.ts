@@ -80,6 +80,14 @@ export function mountGeoSpace(d: GeoSpaceDeps): GeoSpace {
   let failTimer = 0;
   const failSaid = new Set<string>();
   const docKey = () => d.docPath() ?? String(d.doc()?.graph?.graph_id ?? "unsaved");
+  // MICRO-GEOREF-GRAFO · ONE source, the GeoPositionNode: the globe placed by it is
+  // placed again when it changes (a conversion, a SHIFT.txt, a field of the Inspector)
+  const geoSig = (): string => {
+    const gp = (d.doc()?.graph?.nodes ?? []).find((n) => n.node_type === "geo_position");
+    const x = (gp?.data ?? {}) as Record<string, unknown>;
+    return gp ? JSON.stringify([x.epsg, x.shift_x, x.shift_y, x.shift_z, x.rotation, x.shift_z_in_coordinates]) : "";
+  };
+  let placedBy: string | null = null;
   const load = (): Saved => {
     try {
       const raw = JSON.parse(localStorage.getItem(layersKey(d.person(), docKey())) ?? "null");
@@ -143,6 +151,7 @@ export function mountGeoSpace(d: GeoSpaceDeps): GeoSpace {
       // the bridge answers? (its tiles: the cache, the packages); else the sources online
       const ok = bridge ? await fetch(`${bridge}/health`).then((r) => r.ok, () => false) : false;
       if (!ok) bridge = null;
+      placedBy = geoSig();
       anchor = await measureAnchor();
       if (!anchor) { s.on = false; save(); d.toast(anchorNote); return; }
       globe = createGlobe({
@@ -536,6 +545,11 @@ export function mountGeoSpace(d: GeoSpaceDeps): GeoSpace {
         if (globe && (!s.on || was)) stop();
         if (s.on && !globe) queueMicrotask(() => { void start(); });
       }
+      // the georeference changed under a globe placed by the old one: placed again
+      if (globe && !busy && placedBy !== null && geoSig() !== placedBy) {
+        placedBy = null;     // once: the bar is drawn again meanwhile
+        queueMicrotask(() => { stop(); void start(); });
+      }
       const out: HTMLElement[] = [];
       const tg = document.createElement("button");
       tg.type = "button";
@@ -598,7 +612,7 @@ export function mountGeoSpace(d: GeoSpaceDeps): GeoSpace {
       globe = null;
       panel.remove();
     },
-    state: () => ({ on: s.on, mode: globe?.mode() ?? s.mode, layers: s.layers, anchor, anchorNote, height: heightNow, heightMode: s.height, bridge, pkgDir: pkgDir(), job, cache: cacheInfo, failures, globe: globe?.state() ?? null }),
+    state: () => ({ on: s.on, mode: globe?.mode() ?? s.mode, layers: s.layers, anchor, anchorNote, placedBy, height: heightNow, heightMode: s.height, bridge, pkgDir: pkgDir(), job, cache: cacheInfo, failures, globe: globe?.state() ?? null }),
   };
   (d.host as unknown as { __geoSpace?: () => unknown }).__geoSpace = api.state;
   return api;
