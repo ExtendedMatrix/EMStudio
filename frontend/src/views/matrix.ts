@@ -17,8 +17,8 @@ import { threedInstances, viewIndex, viewInstances, type ViewInstance } from "..
 import { paradataGroupScene, reattachedReadings } from "./pd-arrange";
 import { isRemoved } from "../crdt";
 import { t } from "../i18n";
-import { ancestorsOf, isContinuityType, isVirtualType } from "../rules";
-import { continuityKind, continuityLinks, continuityPlace } from "../continuity";
+import { ancestorsOf, endReasonLabel, isContinuityType, isVirtualType } from "../rules";
+import { continuityKind, continuityLinks, continuityPlace, endReasonOf, endReasonWritten } from "../continuity";
 
 /**
  * TOCCARE · the re-stack, remembered.
@@ -978,7 +978,8 @@ export function buildMatrixScene(
       const at = continuityPlace(unit, br, band);
       br.x = at.x;
       br.y = at.y;
-      br.continuity = { unit: unit.id, kind: continuityKind(isVirtualType(unit.node.node_type)) };
+      br.continuity = { unit: unit.id, kind: continuityKind(isVirtualType(unit.node.node_type)),
+        ...(endReasonWritten(br.node.data) ? { reason: endReasonLabel(endReasonOf(br.node.data)) } : {}) };
     }
   }
 

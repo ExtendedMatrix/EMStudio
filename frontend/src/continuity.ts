@@ -16,7 +16,9 @@
 // with the other edges: it takes no port of the unit and makes no bridges.
 //
 // Pure: no DOM, no store (scripts/check-continuity.mjs).
-import type { EmEdge } from "./types";
+import type { EmDocument, EmEdge, EmNode } from "./types";
+import nodeDatamodel from "./assets/s3Dgraphy_node_datamodel.json";
+import { entityEpoch, epochBounds, yearOf } from "./doc-dating";
 
 export type ContinuityKind = "end" | "survive";
 
@@ -108,13 +110,52 @@ export function dropContinuity<N extends { id: string; node: { node_type?: strin
 //     chosen one INCLUDED (the others it had are taken away);
 //   · the source: `has_documentation` BR → a document (the datamodel allows it
 //     from any StratigraphicNode, the BR being one);
-//   · the reason (a real unit: removed, destroyed, relocated): not in the
-//     datamodel (s3Dgraphy 1.6, ContinuityNode has no field of its own) — kept
-//     in the BR's `data.end_reason` until s3Dgraphy declares it (the report's
-//     proposal).
+//   · the TYPE of the end (MICRO-SERVSF-FINE-ISTANZE p.2): the BR's
+//     `data.end_reason`, declared since s3Dgraphy node datamodel 1.6.36
+//     (`ContinuityNode.properties.end_reason`, E.D. 23 Oct 2026): destroyed,
+//     transformed, removed, relocated, unknown — the default, which is NOT
+//     written (a BR without a type is «unknown», and stays without one: the
+//     round trip of s3Dgraphy's RDF keeps it so). The list, the default, the
+//     CIDOC class each type decides are read from the datamodel, never here.
 
-export const END_REASONS = ["removed", "destroyed", "relocated"] as const;
-export type EndReason = (typeof END_REASONS)[number];
+interface EndReasonRule {
+  default?: string;
+  values?: Record<string, string>;
+  labels?: Record<string, string>;
+  rdf?: { class_when?: Record<string, string>; unit_predicate_when?: Record<string, string>; concepts?: Record<string, string> };
+}
+const END_RULE: EndReasonRule = ((nodeDatamodel as unknown as {
+  stratigraphic_nodes?: { StratigraphicNode?: { subtypes?: { BR?: { properties?: { end_reason?: EndReasonRule } } } } };
+}).stratigraphic_nodes?.StratigraphicNode?.subtypes?.BR?.properties?.end_reason) ?? {};
+
+/** the types of the end of a unit, in the datamodel's order */
+export const END_REASONS: readonly string[] = Object.keys(END_RULE.values ?? {});
+export type EndReason = string;
+/** the datamodel's default («unknown»): what a BR without a type is */
+export const END_REASON_DEFAULT: string = END_RULE.default ?? "unknown";
+
+/** a BR's type: its `data.end_reason` when the datamodel knows it, else the default */
+export function endReasonOf(data: unknown): string {
+  const r = (data as { end_reason?: unknown } | null | undefined)?.end_reason;
+  return typeof r === "string" && END_REASONS.includes(r) ? r : END_REASON_DEFAULT;
+}
+/** …and whether it is written (a type chosen), not the default by absence */
+export function endReasonWritten(data: unknown): boolean {
+  const r = (data as { end_reason?: unknown } | null | undefined)?.end_reason;
+  return typeof r === "string" && END_REASONS.includes(r) && r !== END_REASON_DEFAULT;
+}
+/** the CIDOC class the type decides (`rdf.class_when`: E6, E81, E80, E9, E64) */
+export function endReasonClass(reason: string): string | null {
+  return END_RULE.rdf?.class_when?.[reason] ?? null;
+}
+/** the property the BR reaches its unit by (`rdf.unit_predicate_when`) */
+export function endReasonPredicate(reason: string): string | null {
+  return END_RULE.rdf?.unit_predicate_when?.[reason] ?? null;
+}
+/** the datamodel's English description of a type */
+export function endReasonDescription(reason: string): string {
+  return END_RULE.values?.[reason] ?? "";
+}
 
 export interface ContinuityRequest {
   unit: string;
@@ -129,7 +170,8 @@ export interface ContinuityRequest {
   /** a document backing it: a document id, null = none (taken away),
    *  undefined = leave as it is */
   source?: string | null;
-  /** a real unit's reason: undefined = leave as it is, null = none */
+  /** the type of the end: undefined = leave as it is, null or the default =
+   *  none written (a BR without a type is the default, «unknown») */
   reason?: EndReason | null;
 }
 
@@ -140,7 +182,8 @@ export interface ContinuityPlan {
   add: { source: string; target: string; edge_type: string }[];
   /** edges to take away (ids of the graph's edges) */
   remove: string[];
-  /** the BR's data.end_reason after the gesture (undefined: untouched) */
+  /** the BR's data.end_reason after the gesture (undefined: untouched; null:
+   *  none written — the default) */
   reason?: EndReason | null;
   /** the epochs the unit survives in after the gesture */
   survives: string[];
@@ -168,5 +211,88 @@ export function planContinuity(edges: readonly (EmEdge & { id?: string })[], req
     if (req.br) for (const e of edges) if (e.source === req.br && e.edge_type === "has_documentation" && e.target !== req.source) remove.push(idOf(e));
     if (req.source && (!req.br || !has(req.br, req.source, "has_documentation"))) add.push({ source: br, target: req.source, edge_type: "has_documentation" });
   }
-  return { createBr: !req.br, add, remove, ...(req.reason !== undefined ? { reason: req.reason } : {}), survives };
+  const reason = req.reason === undefined ? undefined
+    : req.reason && req.reason !== END_REASON_DEFAULT && END_REASONS.includes(req.reason) ? req.reason : null;
+  return { createBr: !req.br, add, remove, ...(reason !== undefined ? { reason } : {}), survives };
+}
+
+// ── the END of a unit, read (MICRO-SERVSF-FINE-ISTANZE p.2) ──────────────────
+//
+// The BR is a spatiotemporal unit like the others (s3Dgraphy node datamodel
+// 1.6.36): paradata, its OWN start and end (`absolute_time_start` /
+// `absolute_time_end`, properties as any unit's), and an epoch read by one
+// rule, s3Dgraphy's `spatiotemporal.end_of_unit`: a date of its own → the epoch
+// of the date (`own_date`); else the LAST epoch its unit lives in — the latest
+// of the unit's `has_first_epoch` / `survive_in_epoch` by its start —
+// (`inherited`); only when the unit has none, the BR's own `has_first_epoch`
+// (`declared`). `scripts/check-continuity.mjs` compares it with s3Dgraphy.
+
+export interface EndOfUnit {
+  id: string;
+  unit: string | null;
+  units: string[];
+  end_reason: string;
+  cidoc_class: string | null;
+  epoch: string | null;
+  epoch_rule: "own_date" | "inherited" | "declared" | null;
+  start: number | null;
+  end: number | null;
+}
+
+const goneN = (x: { data?: unknown } | undefined): boolean => !!(x?.data as { removed?: unknown } | undefined)?.removed;
+const goneE = (e: EmEdge): boolean => !!((e as { attributes?: unknown }).attributes as { removed?: unknown } | undefined)?.removed;
+
+/** the year ONE of an entity's own dates says: the property (value, else
+ *  description), else the node's own field (s3Dgraphy `own_time`) */
+export function ownTime(doc: EmDocument, id: string, quale: "absolute_time_start" | "absolute_time_end",
+                        byId: Map<string, EmNode> = new Map(doc.graph.nodes.map((n) => [n.id, n]))): number | null {
+  for (const e of doc.graph.edges) {
+    if (e.source !== id || e.edge_type !== "has_property" || goneE(e)) continue;
+    const p = byId.get(e.target);
+    if (!p || goneN(p) || p.node_type !== "property") continue;
+    const pd = (p.data ?? {}) as Record<string, unknown>;
+    if (pd.property_type !== quale && p.name !== quale) continue;
+    const y = yearOf(pd.value) ?? yearOf(p.description);
+    if (y != null) return y;
+  }
+  return yearOf(((byId.get(id)?.data ?? {}) as Record<string, unknown>)[quale]);
+}
+
+/** everything the graph says about the end of a unit — a BR; null for a node
+ *  that is not one */
+export function endOfUnit(doc: EmDocument, brId: string): EndOfUnit | null {
+  const byId = new Map(doc.graph.nodes.map((n) => [n.id, n]));
+  const br = byId.get(brId);
+  if (!br || br.node_type !== "BR" || goneN(br)) return null;
+  const units: string[] = [];
+  for (const e of doc.graph.edges) {
+    if (goneE(e)) continue;
+    if (e.edge_type === "is_after" && e.source === brId && !units.includes(e.target)) units.push(e.target);
+    else if (e.edge_type === "is_before" && e.target === brId && !units.includes(e.source)) units.push(e.source);
+  }
+  const reason = endReasonOf(br.data);
+  const start = ownTime(doc, brId, "absolute_time_start", byId), end = ownTime(doc, brId, "absolute_time_end", byId);
+  let epoch: string | null = null;
+  let rule: EndOfUnit["epoch_rule"] = null;
+  if (start != null || end != null) {
+    epoch = entityEpoch(doc, brId, epochBounds(doc), byId).epoch;
+    rule = "own_date";
+  }
+  if (epoch == null && units.length) {
+    const startOf = (id: string): number => yearOf(((byId.get(id)?.data ?? {}) as Record<string, unknown>).start_time) ?? -Infinity;
+    const lanes = doc.graph.edges.filter((e) => !goneE(e) && e.source === units[0]
+      && (e.edge_type === "has_first_epoch" || e.edge_type === "survive_in_epoch")).map((e) => e.target);
+    if (lanes.length) {
+      // the latest by its start; on a tie the first written (Python's max)
+      let best = lanes[0];
+      for (const l of lanes) if (startOf(l) > startOf(best)) best = l;
+      epoch = best;
+      rule = "inherited";
+    }
+  }
+  if (epoch == null) {
+    const d = doc.graph.edges.find((e) => !goneE(e) && e.source === brId && e.edge_type === "has_first_epoch");
+    if (d) { epoch = d.target; rule = "declared"; }
+  }
+  return { id: brId, unit: units[0] ?? null, units, end_reason: reason, cidoc_class: endReasonClass(reason), epoch, epoch_rule: rule, start, end };
 }

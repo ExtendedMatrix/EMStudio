@@ -2,10 +2,16 @@
 // epoch it stands for, where the Matrix draws it (straight above its unit, in
 // its epoch's lane), its straight line, the overlay that takes it out of the
 // drawing, and what «End in…» / «Survives until…» write.
+// MICRO-SERVSF-FINE-ISTANZE p.2 · the TYPE of the end (node datamodel 1.6.36):
+// the five of the datamodel, the default not written, the CIDOC class each
+// decides, and the end of a unit read as s3Dgraphy reads it (`end_of_unit`,
+// compared on the same documents when the s3Dgraphy venv is there).
 //
 //   node scripts/check-continuity.mjs
 import * as esbuild from "esbuild";
 import assert from "node:assert/strict";
+import { existsSync } from "node:fs";
+import { execFileSync } from "node:child_process";
 
 const SRC = new URL("../src/", import.meta.url).pathname;
 const bundle = await esbuild.build({ entryPoints: [`${SRC}continuity.ts`], bundle: true, format: "esm", write: false });
@@ -105,7 +111,77 @@ const isBr = (id) => id.startsWith("BR");
   const s2 = C.planContinuity([...E, { id: "z", source: "BR1", target: "D01", edge_type: "has_documentation" }],
     { unit: "SU002", epoch: "XX", chrono, firstEpoch: "II", br: "BR1", source: null });
   eq([s2.add, s2.remove], [[], ["z"]], "no source: taken away");
-  eq(C.END_REASONS, ["removed", "destroyed", "relocated"], "the three reasons");
+  // MICRO-SERVSF-FINE-ISTANZE p.2 · the five types, read from the datamodel
+  eq(C.END_REASONS, ["destroyed", "transformed", "removed", "relocated", "unknown"], "the five types of node datamodel 1.6.36");
+  eq(C.END_REASON_DEFAULT, "unknown", "the default");
+  eq(C.END_REASONS.map(C.endReasonClass), ["crm:E6_Destruction", "crm:E81_Transformation", "crm:E80_Part_Removal", "crm:E9_Move", "crm:E64_End_of_Existence"],
+    "the class each type decides (rdf.class_when)");
+  eq(C.END_REASONS.map(C.endReasonPredicate), ["crm:P13_destroyed", "crm:P124_transformed", "crm:P113_removed", "crm:P25_moved", "crm:P93_took_out_of_existence"],
+    "the property the BR reaches its unit by");
+  const tr = C.planContinuity(E, { unit: "SU003", epoch: "PA", chrono, firstEpoch: "II", br: null, reason: "transformed" });
+  eq(tr.reason, "transformed", "a type chosen is written");
+  const un = C.planContinuity(E, { unit: "SU003", epoch: "PA", chrono, firstEpoch: "II", br: "BR1", reason: "unknown" });
+  ok("reason" in un && un.reason === null, "«unknown», the default, is NOT written (taken away when there was one)");
+  const bad = C.planContinuity(E, { unit: "SU003", epoch: "PA", chrono, firstEpoch: "II", br: "BR1", reason: "exploded" });
+  eq(bad.reason, null, "a value the datamodel does not know is not written");
+  const vt = C.planContinuity([], { unit: "USV132", epoch: "XX", chrono, firstEpoch: "II", br: null, reason: "relocated" });
+  eq(vt.reason, "relocated", "a virtual unit's BR takes a type too («Survives until…» asks it)");
+  eq([C.endReasonOf({}), C.endReasonOf({ end_reason: "removed" }), C.endReasonOf({ end_reason: "x" })], ["unknown", "removed", "unknown"], "a BR's type: written, else the default");
+  eq([C.endReasonWritten({}), C.endReasonWritten({ end_reason: "unknown" }), C.endReasonWritten({ end_reason: "destroyed" })], [false, false, true], "…and whether one is chosen");
+}
+
+// ── the end of a unit, read: the rule of s3Dgraphy's end_of_unit ─────────────
+{
+  const ep = (id, a, b) => ({ id, node_type: "EpochNode", name: id, data: { start_time: a, end_time: b } });
+  const u = (id, t = "US") => ({ id, node_type: t, name: id, data: {} });
+  const prop = (id, q, v) => ({ id, node_type: "property", name: q, description: String(v), data: { property_type: q, value: String(v) } });
+  const e = (s, t, type) => ({ id: `${s}-${type}-${t}`, source: s, target: t, edge_type: type });
+  const doc = { graph: { nodes: [ep("II", 100, 199), ep("PA", 500, 1899), ep("XX", 1900, 2013),
+    u("SU1"), u("SU2"), u("SU3"), u("SU4"),
+    { id: "B1", node_type: "BR", name: "continuity_node", data: { end_reason: "destroyed" } },
+    { id: "B2", node_type: "BR", name: "continuity_node", data: {} },
+    { id: "B3", node_type: "BR", name: "continuity_node", data: { end_reason: "relocated" } },
+    { id: "B4", node_type: "BR", name: "continuity_node", data: { end_reason: "transformed" } },
+    prop("P3", "absolute_time_start", 1960)],
+  edges: [
+    // B1: inherited — the last epoch SU1 lives in (XX), though the BR says PA
+    e("B1", "SU1", "is_after"), e("B1", "PA", "has_first_epoch"), e("SU1", "II", "has_first_epoch"), e("SU1", "PA", "survive_in_epoch"), e("SU1", "XX", "survive_in_epoch"),
+    // B2: the unit has no epoch: the BR's own has_first_epoch (declared)
+    e("B2", "SU2", "is_after"), e("B2", "PA", "has_first_epoch"),
+    // B3: a date of its own, 1960 → XX sec (own_date)
+    e("B3", "SU3", "is_after"), e("B3", "PA", "has_first_epoch"), e("SU3", "II", "has_first_epoch"), e("B3", "P3", "has_property"),
+    // B4: drawn the other way, is_before unit → BR
+    e("SU4", "B4", "is_before"), e("SU4", "II", "has_first_epoch"),
+  ] } };
+  const got = Object.fromEntries(["B1", "B2", "B3", "B4"].map((id) => [id, C.endOfUnit(doc, id)]));
+  eq([got.B1.unit, got.B1.end_reason, got.B1.cidoc_class, got.B1.epoch, got.B1.epoch_rule], ["SU1", "destroyed", "crm:E6_Destruction", "XX", "inherited"], "B1: inherited, the last epoch the unit lives in");
+  eq([got.B2.end_reason, got.B2.cidoc_class, got.B2.epoch, got.B2.epoch_rule], ["unknown", "crm:E64_End_of_Existence", "PA", "declared"], "B2: no type → unknown; the unit without epochs → declared");
+  eq([got.B3.start, got.B3.epoch, got.B3.epoch_rule], [1960, "XX", "own_date"], "B3: its own date puts it in XX sec");
+  eq([got.B4.unit, got.B4.epoch, got.B4.epoch_rule], ["SU4", "II", "inherited"], "B4: is_before unit → BR reads the same");
+  eq(C.endOfUnit(doc, "SU1"), null, "a unit is not a BR");
+  // the same documents, read by s3Dgraphy
+  const S3D = new URL("../../../s3Dgraphy/", import.meta.url).pathname;
+  const PY = `${S3D}.venv/bin/python`;
+  if (existsSync(PY)) {
+    const script = `
+import json,sys
+from s3dgraphy import api
+from s3dgraphy.spatiotemporal import end_of_unit
+d = json.loads(sys.stdin.read())
+g, w = api.load_emjson(d)
+print(json.dumps({b: end_of_unit(g, b) for b in ["B1", "B2", "B3", "B4"]}))`;
+    const em = { version: "1.0", graphs: { g1: { graph_id: "g1", name: "g", ...doc.graph } }, active_graph_id: "g1" };
+    let py = null;
+    try {
+      py = JSON.parse(execFileSync(PY, ["-c", script], { input: JSON.stringify(em), maxBuffer: 1 << 26,
+        env: { ...process.env, PYTHONPATH: `${S3D}src` } }).toString().trim().split("\n").pop());
+    } catch (err) { py = { error: String(err.message ?? err).slice(0, 300) }; }
+    ok(!py.error, `s3Dgraphy read the documents (${py.error ?? "ok"})`);
+    for (const b of ["B1", "B2", "B3", "B4"]) {
+      const pick = (x) => x && { unit: x.unit, units: x.units, end_reason: x.end_reason, cidoc_class: x.cidoc_class, epoch: x.epoch, epoch_rule: x.epoch_rule, start: x.start, end: x.end };
+      eq(pick(got[b]), pick(py[b]), `${b}: EMStudio reads the end as s3Dgraphy does`);
+    }
+  } else console.log("  (s3Dgraphy venv not found: the oracle is skipped)");
 }
 
 console.log(`check-continuity: ${checks} checks ✓`);

@@ -980,6 +980,26 @@ export function stratigraphicKindLabel(kind: string): string {
   return _US_KIND_RULE.labels?.[kind] ?? kind;
 }
 
+// MICRO-SERVSF-FINE-ISTANZE p.2 · the TYPE of the end of a unit (a BR's
+// `data.end_reason`, node datamodel 1.6.36): its label in the active locale,
+// from the translations' `end_reasons` (1.14), else the datamodel's English
+// label. The list and the default are `continuity.ts`'s (END_REASONS), read
+// from the same entry.
+const _END_TRANSLATIONS = (
+  datamodelTranslations as { end_reasons?: Record<string, { label?: Record<string, string | boolean> }> }
+).end_reasons ?? {};
+const _END_LABELS = ((nodeDatamodel as unknown as {
+  stratigraphic_nodes?: { StratigraphicNode?: { subtypes?: { BR?: { properties?: {
+    end_reason?: { labels?: Record<string, string> } } } } } };
+}).stratigraphic_nodes?.StratigraphicNode?.subtypes?.BR?.properties?.end_reason?.labels) ?? {};
+export function endReasonLabel(reason: string): string {
+  const loc = _END_TRANSLATIONS[reason]?.label?.[getLocale()];
+  if (typeof loc === "string" && loc.trim()) return loc;
+  const en = _END_TRANSLATIONS[reason]?.label?.en;
+  if (typeof en === "string" && en.trim()) return en;
+  return _END_LABELS[reason] ?? reason;
+}
+
 /** The decorator's letter: the default code minus the «US» it shares with the
  *  type (`default_code.masonry` = USM → «M», `coating` = USR → «R»). */
 export function stratigraphicKindLetter(kind: string): string {

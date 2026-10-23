@@ -9236,6 +9236,91 @@ test("SV1.servsf", "SERVSF-FINE-ISTANZE p.1 · la serie di VSF nell'interfaccia:
   return { pass, detail: { ...out, errors } };
 });
 
+test("SV2.endtype", "SERVSF-FINE-ISTANZE p.2 · il tipo di fine: GT16, «End in…» dall'Inspector su cinque unità, una per tipo (SU003 destroyed, SU004 transformed, SU007 ignota e poi «removed» dall'Inspector del BR, RSF001 relocated, SU020 lasciata «unknown»): il modulo offre i cinque tipi del datamodel con le etichette tradotte, «unknown» scelto di default e non scritto; un annulla ciascuno; nella Matrix il BR dice il tipo accanto al rombo (non per «unknown»); l'Inspector del BR dice classe CIDOC, epoca «ereditata»; una data propria (1960) lo porta in XX sec con la regola «dalla sua data», l'unità sopravvive fino a lì; salva e riapri: i tipi restano; «Esporta RDF» dall'interfaccia (il bridge, s3Dgraphy) scrive per ciascuno la sua classe (E6, E81, E80, E9, E64) e la sua proprietà", async () => {
+  if (!existsSync(SV_V4)) return { pass: false, detail: { missing: SV_V4 } };
+  const { p, ctx, errors } = await svOpen();
+  const D = (f, a) => p.evaluate(f, a);
+  const out = {};
+  const g = await D(() => { const g = window.__EM_DRAG__.matrixGeom(); for (const n of g.nodes) n.name = window.__EM_DRAG__.node(n.id)?.name; return g; });
+  const by = (name) => g.nodes.find((n) => n.name === name);
+  const insp = await D(() => window.__EM_DRAG__.wins().find((w) => w.type === "inspector")?.id);
+  const IN = `.tile-area[data-win="${insp}"]`;
+  const end = async (name, epoch, reason) => {
+    const id = by(name)?.id;
+    if (!id) return { missing: name };
+    await D((x) => window.__EM_DRAG__.select(x), id); await p.waitForTimeout(500);
+    await p.click(`${IN} [data-cmd^="continuity-"]`); await p.waitForTimeout(300);
+    const options = await D(() => [...document.querySelectorAll('.cont-form select[data-cont="reason"] option')].map((o) => [o.value, o.textContent, o.selected]));
+    await p.selectOption('.cont-form select[data-cont="epoch"]', g.lanes.find((l) => l.label === epoch).id);
+    if (reason) await p.selectOption('.cont-form select[data-cont="reason"]', reason);
+    const u0 = await D(() => window.__EM_DRAG__.undoDepth());
+    await p.click('.cont-form [data-cont="apply"]'); await p.waitForTimeout(700);
+    const c = await D((x) => window.__EM_DRAG__.continuityOf(x), id);
+    return { id, options, steps: (await D(() => window.__EM_DRAG__.undoDepth())) - u0, br: c?.br, reason: c?.reason, written: c?.written,
+      raw: c ? await D((b) => window.__EM_DRAG__.node(b)?.data?.end_reason ?? null, c.br) : null };
+  };
+  out.SU003 = await end("SU003", "Post antiquity", "destroyed");
+  out.SU004 = await end("SU004", "Post antiquity", "transformed");
+  out.SU007 = await end("SU007", "Post antiquity", null);
+  out.RSF001 = await end("RSF001", "XX sec", "relocated");
+  out.SU020 = await end("SU020", "Post antiquity", "unknown");
+  // the BR's Inspector: SU007's type from unknown to removed, one undo step
+  await D((b) => window.__EM_DRAG__.select(b), out.SU007.br); await p.waitForTimeout(500);
+  out.brInsp = await D((w) => { const s = document.querySelector(`${w} .insp-br`); if (!s) return null;
+    const v = (k) => s.querySelector(`[data-br="${k}"] .insp-br-v`)?.textContent ?? null;
+    return { type: s.querySelector('select[data-br="type"]')?.value, class: v("class"), epoch: v("epoch"), unit: v("unit") }; }, IN);
+  const u0 = await D(() => window.__EM_DRAG__.undoDepth());
+  await p.selectOption(`${IN} .insp-br select[data-br="type"]`, "removed"); await p.waitForTimeout(500);
+  out.brEdit = { steps: (await D(() => window.__EM_DRAG__.undoDepth())) - u0, raw: await D((b) => window.__EM_DRAG__.node(b)?.data?.end_reason, out.SU007.br),
+    class: await D((w) => document.querySelector(`${w} .insp-br [data-br="class"] .insp-br-v`)?.textContent ?? null, IN) };
+  // SU003's BR: a date of its own, 1960 → XX sec
+  await D((b) => window.__EM_DRAG__.select(b), out.SU003.br); await p.waitForTimeout(500);
+  await p.fill(`${IN} .insp-br input[data-br="start"]`, "1960"); await p.press(`${IN} .insp-br input[data-br="start"]`, "Enter");
+  await p.locator(`${IN} .insp-br input[data-br="start"]`).blur().catch(() => {}); await p.waitForTimeout(800);
+  out.dated = await D(([w, b, u]) => ({ epoch: document.querySelector(`${w} .insp-br [data-br="epoch"] .insp-br-v`)?.textContent ?? null,
+    first: window.__EM_DRAG__.node(window.__EM_DRAG__.edgesOf("has_first_epoch").find((e) => e.source === b)?.target)?.name,
+    survive: window.__EM_DRAG__.edgesOf("survive_in_epoch").filter((e) => e.source === u).map((e) => window.__EM_DRAG__.node(e.target)?.name).sort(),
+    prop: window.__EM_DRAG__.edgesOf("has_property").filter((e) => e.source === b).map((e) => window.__EM_DRAG__.node(e.target)?.data?.property_type) }),
+    [IN, out.SU003.br, out.SU003.id]);
+  // the sign beside the rhombus
+  const geo = await D(() => window.__EM_DRAG__.matrixGeom().nodes.filter((n) => n.type === "BR").map((n) => [n.id, n.endType ?? null]));
+  out.signs = Object.fromEntries(["SU003", "SU004", "SU007", "RSF001", "SU020"].map((k) => [k, (geo.find(([id]) => id === out[k].br) ?? [])[1] ?? null]));
+  const b3 = by("SU004"); if (b3) await glFrame(p, 0.7, b3.x + 40, b3.y - 40);
+  await p.screenshot({ path: SHOT("sv2-endtypes") }).catch(() => {});
+  // save and reopen
+  const text = await D(() => window.__EM_DRAG__.docJson());
+  await D(([d, path]) => window.__EM_DRAG__.openAt(d, path), [JSON.parse(text), SV_V4]);
+  await p.waitForFunction(() => (window.__EM_SCENE__?.()?.nodes?.length ?? 0) > 50, null, { timeout: 60000 }); await p.waitForTimeout(1500);
+  out.reopened = await D((ids) => ids.map((id) => window.__EM_DRAG__.continuityOf(id)?.reason ?? null), ["SU003", "SU004", "SU007", "RSF001", "SU020"].map((k) => out[k].id));
+  // «Export RDF» from the interface: the bridge's s3Dgraphy
+  const [dl] = await Promise.all([p.waitForEvent("download", { timeout: 60000 }).catch(() => null), D(() => document.getElementById("btn-ttl")?.click())]);
+  const ttl = dl ? readFileSync(await dl.path(), "utf8") : "";
+  out.ttlBytes = ttl.length;
+  // each BR's block: its rdf:type and the property to its unit (prefixed or full IRIs)
+  const block = (brId) => { const i = ttl.indexOf(brId); if (i < 0) return ""; const j = ttl.lastIndexOf("\n\n", i); const k = ttl.indexOf("\n\n", i); return ttl.slice(j < 0 ? 0 : j, k < 0 ? ttl.length : k); };
+  out.rdf = Object.fromEntries(["SU003", "SU004", "SU007", "RSF001", "SU020"].map((k) => {
+    const b = block(out[k].br);
+    return [k, ["E6_Destruction", "E81_Transformation", "E80_Part_Removal", "E9_Move", "E64_End_of_Existence"].filter((c) => b.includes(c))
+      .concat(["P13_destroyed", "P124_transformed", "P113_removed", "P25_moved", "P93_took_out_of_existence"].filter((c) => b.includes(c)))];
+  }));
+  await ctx.close();
+  const five = ["destroyed", "transformed", "removed", "relocated", "unknown"];
+  const pass = JSON.stringify(out.SU003.options.map((o) => o[0])) === JSON.stringify(five) && out.SU007.options.find((o) => o[2])?.[0] === "unknown"
+    && ["SU003", "SU004", "SU007", "RSF001", "SU020"].every((k) => out[k].steps === 1)
+    && out.SU003.raw === "destroyed" && out.SU004.raw === "transformed" && out.SU007.raw === null && out.RSF001.raw === "relocated" && out.SU020.raw === null
+    && out.brInsp?.type === "unknown" && /E64_End_of_Existence/.test(out.brInsp?.class ?? "") && /inherited/.test(out.brInsp?.epoch ?? "")
+    && out.brEdit.steps === 1 && out.brEdit.raw === "removed" && /E80_Part_Removal/.test(out.brEdit.class ?? "")
+    && /XX sec/.test(out.dated.epoch ?? "") && /own date/.test(out.dated.epoch ?? "") && out.dated.first === "XX sec" && out.dated.survive.includes("XX sec") && out.dated.prop.includes("absolute_time_start")
+    && out.signs.SU003 === "destroyed" && out.signs.SU004 === "transformed" && out.signs.SU007 === "removed" && out.signs.RSF001 === "relocated" && out.signs.SU020 === null
+    && JSON.stringify(out.reopened) === JSON.stringify(["destroyed", "transformed", "removed", "relocated", "unknown"])
+    && out.rdf.SU003.includes("E6_Destruction") && out.rdf.SU003.includes("P13_destroyed")
+    && out.rdf.SU004.includes("E81_Transformation") && out.rdf.SU004.includes("P124_transformed")
+    && out.rdf.SU007.includes("E80_Part_Removal") && out.rdf.SU007.includes("P113_removed")
+    && out.rdf.RSF001.includes("E9_Move") && out.rdf.RSF001.includes("P25_moved")
+    && out.rdf.SU020.includes("E64_End_of_Existence") && out.rdf.SU020.includes("P93_took_out_of_existence") && !errors.length;
+  return { pass, detail: { ...out, errors } };
+});
+
 // ── run ─────────────────────────────────────────────────────────────────────
 const chosen = cases.filter((c) => !only.length || only.includes(c.id) || only.some((o) => c.id.startsWith(o + ".")));
 for (const c of chosen) {

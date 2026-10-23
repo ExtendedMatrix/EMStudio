@@ -1408,6 +1408,20 @@ export function render(
         captionOutside ? sy + sh + 1 : n.y + n.h / 2,
       );
     }
+    // MICRO-SERVSF-FINE-ISTANZE p.2 · the TYPE of an end, when one is chosen
+    // (destroyed, transformed, removed, relocated: node datamodel 1.6.36), a
+    // small word in ink at the right of the rhombus — the line comes from below
+    // and nothing else sits there; «unknown», the default, says nothing
+    if (drawLabels && n.continuity?.reason) {
+      ctx.save();
+      ctx.font = canvasFont(CANVAS_TYPE.nodeLabel.weight, Math.max(CANVAS_TYPE.minPx, n.h * 0.42));
+      ctx.fillStyle = canvasTheme().labelInk;
+      ctx.globalAlpha = 0.85;
+      ctx.textAlign = "left";
+      ctx.textBaseline = "middle";
+      ctx.fillText(n.continuity.reason, n.x + n.w + 4, n.y + n.h / 2);
+      ctx.restore();
+    }
 
     // SPAZIO · the GENRE of a US (node datamodel `stratigraphic_kind`): a small
     // letter — M masonry, R coating, from the datamodel's default code — in the

@@ -1437,6 +1437,12 @@ body.sync-active #mode-indicator::before {
 .cont-form .cont-field select { font-size: 13px; color: var(--text); }
 .cont-form .cont-bar { display: flex; gap: 6px; justify-content: flex-end; }
 .insp-cont-state { font-size: 12.5px; color: var(--text-muted); margin: 2px 0 4px; }
+/* MICRO-SERVSF-FINE-ISTANZE p.2 · a BR's own section: label · value rows */
+.insp-br-row { display: flex; align-items: center; gap: 8px; margin: 3px 0; font-size: 12.5px; }
+.insp-br-l { flex: 0 0 92px; color: var(--text-muted); }
+.insp-br-v { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
+.insp-br-row select.insp-br-v, .insp-br-row input.insp-br-v { width: auto; }
+.insp-br-row input.insp-br-v { font-size: 12.5px; font-weight: 400; padding: 3px 6px; min-width: 0; }
 .ctx-menu {
   position: fixed;
   z-index: 1000;

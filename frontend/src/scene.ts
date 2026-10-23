@@ -46,7 +46,10 @@ export interface SceneNode {
   /** MICRO-GLIFI-OVERLAY-CONTINUITA p.3 · a continuity node (BR) drawn as its
    *  unit's: the unit, and whether it ends a real unit or extends a virtual
    *  one (continuity.ts). Placed by the view above the unit; not dragged. */
-  continuity?: { unit: string; kind: "end" | "survive" };
+  continuity?: { unit: string; kind: "end" | "survive";
+    /** MICRO-SERVSF-FINE-ISTANZE p.2 · the type of the end in words, when one
+     *  is chosen (none for the default, «unknown») */
+    reason?: string };
   /** how many times this document is used in the scene (corner decorator) */
   useCount?: number;
   /** MICRO-SPAZIO-3D · a representation model drawn in N epochs: «×N» on each

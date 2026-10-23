@@ -37,6 +37,9 @@ export interface InspectorCallbacks {
   /** MICRO-GLIFI-OVERLAY-CONTINUITA p.3 · «End in…» / «Survives until…» of a
    *  unit, and what its continuity says now */
   continuity?: (nodeId: string) => { cmd: string; label: string; state: string | null; run: (anchor?: HTMLElement) => void } | null;
+  /** MICRO-SERVSF-FINE-ISTANZE p.2 · a BR's own section: its unit, the type of
+   *  the end, the CIDOC class, the epoch and its rule, its own dating */
+  endOfUnit?: (nodeId: string) => HTMLElement | null;
   /** MICRO-UN-POSTO · open the site selector on the graph node */
   onSetSitePosition?: () => void;
   onClose: () => void;
@@ -446,6 +449,9 @@ export function renderInspector(
   // a free-text box would write labels without concepts, or invent URIs.
   const shownAbove = new Set<string>(kindOf ? ["stratigraphic_kind"] : []);
   for (const rule of nodeElements(node.node_type)) {
+    // MICRO-SERVSF-FINE-ISTANZE p.2 · a BR's type is in its own section,
+    // translated and editable
+    if (rule.field === "end_reason" && cb.endOfUnit) continue;
     const key = (rule.em_json ?? `data.${rule.field}`).replace(/^data\./, "");
     const raw = ((node.data ?? {}) as Record<string, unknown>)[key];
     if (raw === undefined || raw === null || raw === "") continue;
@@ -768,6 +774,11 @@ export function renderInspector(
       bar.appendChild(b);
       root.appendChild(bar);
     }
+  }
+
+  if (nodeId && cb.endOfUnit && node.node_type === "BR") {
+    const sec = cb.endOfUnit(nodeId);
+    if (sec) root.appendChild(sec);
   }
 
   // PROPRIETA · a unit's properties into its paradata group, and back

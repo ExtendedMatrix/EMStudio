@@ -162,7 +162,8 @@ for (const [old, canon] of PAIRS) {
     if (R.classOf(t) === "Node") continue; // not a registered type in this build
     // node datamodel 1.6.12: the US also carries its genre (`stratigraphic_kind`);
     // 1.6.13: and the code it came in with (`source_code`, USS for a coating…)
-    const def = els.filter((r) => r.field !== "stratigraphic_kind" && r.field !== "source_code");
+    // 1.6.36: and the BR the type of the end (`end_reason`)
+    const def = els.filter((r) => r.field !== "stratigraphic_kind" && r.field !== "source_code" && r.field !== "end_reason");
     eq(def.map((r) => r.field), ["definition"], `${t} carries definition`);
     eq(def[0].value, "concept", `${t}.definition is a concept`);
     eq(def[0].em_json, "data.definition", `${t}.definition lives in data.definition`);
@@ -174,6 +175,11 @@ for (const [old, canon] of PAIRS) {
     eq(kind?.em_json, "data.stratigraphic_kind", "it lives in data.stratigraphic_kind");
     const code = R.nodeElements("US").find((r) => r.field === "source_code");
     eq([code?.value, code?.em_json], ["string", "data.source_code"], "a US carries source_code in data.source_code (1.6.13)");
+  }
+  {
+    const end = R.nodeElements("BR").find((r) => r.field === "end_reason");
+    eq([end?.value, end?.em_json], ["enum", "data.end_reason"], "a BR carries end_reason, an enum in data.end_reason (1.6.36)");
+    ok(!R.nodeElements("US").some((r) => r.field === "end_reason"), "…and only the BR");
   }
   eq(fields("EpochNode"), [], "an epoch has no definition");
   eq(fields("property"), [], "a PropertyNode has no definition");

@@ -641,8 +641,8 @@ import {
   DECLARED_KINDS, landStep, parentLabel, type DeclaredKind, type DeclaredLevel,
 } from "./declared";
 import { adaptDraft } from "./views/stamps";
-import { ancestorsOf, dtcFamiliesOf, dtcKindFamily, dtcKindsFor, isContinuityType, isVirtualType, propertyLabel, typeLabel as datamodelTypeLabel } from "./rules";
-import { continuityLinks, dropContinuity, END_REASONS, planContinuity, type EndReason } from "./continuity";
+import { ancestorsOf, dtcFamiliesOf, dtcKindFamily, dtcKindsFor, isContinuityType, isVirtualType, propertyLabel, typeLabel as datamodelTypeLabel, endReasonLabel } from "./rules";
+import { continuityLinks, dropContinuity, END_REASONS, END_REASON_DEFAULT, endOfUnit, endReasonDescription, endReasonOf, endReasonPredicate, endReasonWritten, planContinuity, type EndReason } from "./continuity";
 import { digestOf, isStampPath, stampPathFor } from "./stamp";
 // DTCEMS3 · il verbale d'ingestione: niente entra nello store senza che si
 // sappia chi ce l'ha messo. La forma dell'atto sta qui; il verbale lo emette
@@ -2589,7 +2589,8 @@ window.__EM_SCENE__ = () => {
     if (!s) return null;
     return {
       nodes: s.nodes.filter((n) => !n.collapsed).map((n) => ({ id: n.id, x: n.x, y: n.y, w: n.w, h: n.h,
-        type: n.node.node_type, group: s.memberOf?.get(n.id) ?? null, isGroup: !!s.groupsById?.get(n.id) })),
+        type: n.node.node_type, group: s.memberOf?.get(n.id) ?? null, isGroup: !!s.groupsById?.get(n.id),
+        ...(n.continuity?.reason ? { endType: n.continuity.reason } : {}) })),
       lanes: s.lanes.map((l) => ({ id: l.id, label: l.label, y: l.y, height: l.height })),
       groups: (s.groups ?? []).map((g) => ({ id: g.id, x: g.x, y: g.y, w: g.w, h: g.h })),
       edges: s.edges.length,
@@ -3653,6 +3654,7 @@ function renderInspectorInto(host: HTMLElement): void {
         return acts;
       },
       continuity: (id) => continuityAction(id),
+      endOfUnit: (id) => renderBrSection(id),
       onAddPhase: (epochId) => {
         const ph = store!.addPhase(epochId, (n) => t("l.phaseDefault", { n }));
         select(ph.id);
@@ -38464,16 +38466,16 @@ function openWithTools(nodeId: string): OpenWith[] {
 // until…» (a virtual unit: the epoch, the source) create or update its
 // continuity node (BR) and its edges in one undo step (continuity.ts says what
 // is written).
-interface UnitContinuity { br: string; epoch: string | null; reason: EndReason | null; source: string | null }
+interface UnitContinuity { br: string; epoch: string | null; reason: EndReason; written: boolean; source: string | null }
 function continuityOfUnit(unitId: string): UnitContinuity | null {
   if (!store) return null;
   const st = store;
   const links = continuityLinks(st.doc.graph.edges, (id) => isContinuityType(st.node(id)?.node_type));
   for (const [br, l] of links) {
     if (l.unit !== unitId) continue;
-    const r = (st.node(br)?.data as { end_reason?: unknown } | undefined)?.end_reason;
+    const data = st.node(br)?.data;
     const src = st.doc.graph.edges.find((e) => e.source === br && e.edge_type === "has_documentation")?.target ?? null;
-    return { br, epoch: l.epoch, reason: (END_REASONS as readonly string[]).includes(String(r)) ? (r as EndReason) : null, source: src };
+    return { br, epoch: l.epoch, reason: endReasonOf(data), written: endReasonWritten(data), source: src };
   }
   return null;
 }
@@ -38487,7 +38489,7 @@ function continuityAction(unitId: string): { cmd: string; label: string; state: 
   const src = c?.source ? String(store!.node(c.source)?.name ?? c.source) : null;
   const state = !c ? null
     : [t(virtual ? "cont.state.survive" : "cont.state.end", { epoch: ep ?? "?" }),
-       !virtual && c.reason ? t(`cont.reason.${c.reason}`) : null, src ? t("cont.state.source", { doc: src }) : null]
+       endReasonLabel(c.reason), src ? t("cont.state.source", { doc: src }) : null]
       .filter(Boolean).join(" · ");
   return {
     cmd: virtual ? "continuity-survive" : "continuity-end",
@@ -38510,7 +38512,7 @@ function applyContinuity(unitId: string, epoch: string, reason: EndReason | null
   const top = (id: string | null): string | null => { let x = id; const seen = new Set<string>(); while (x && st.parentEpoch(x) && !seen.has(x)) { seen.add(x); x = st.parentEpoch(x); } return x; };
   const plan = planContinuity(st.doc.graph.edges, {
     unit: unitId, epoch, chrono: st.topEpochIdsChrono(), firstEpoch: top(first), br: cur?.br ?? null,
-    source, reason: isVirtualType(unit.node_type) ? undefined : reason,
+    source, reason,
   });
   let br = cur?.br ?? null;
   st.batch(() => {
@@ -38537,7 +38539,7 @@ function applyContinuity(unitId: string, epoch: string, reason: EndReason | null
   toastUndo(t(isVirtualType(unit.node_type) ? "cont.done.survive" : "cont.done.end", { unit: String(unit.name ?? unitId), epoch: ep }), st);
   return br;
 }
-/** the small form: the epoch, the reason (a real unit), the source */
+/** the small form: the epoch, the type of the end, the source */
 function openContinuityForm(unitId: string, x: number, y: number): void {
   document.querySelector(".cont-form")?.remove();
   if (!store) return;
@@ -38575,14 +38577,16 @@ function openContinuityForm(unitId: string, x: number, y: number): void {
   for (const id of [...chrono].reverse()) opt(epSel, id, String(st.node(id)?.name ?? id), id === cur?.epoch);
   if (!cur?.epoch && chrono.length) epSel.value = chrono[chrono.length - 1];
   field(t("cont.epoch"), epSel);
-  let reasonSel: HTMLSelectElement | null = null;
-  if (!virtual) {
-    reasonSel = document.createElement("select");
-    reasonSel.dataset.cont = "reason";
-    opt(reasonSel, "", t("cont.reason.none"), !cur?.reason);
-    for (const r of END_REASONS) opt(reasonSel, r, t(`cont.reason.${r}`), cur?.reason === r);
-    field(t("cont.reason"), reasonSel);
+  // MICRO-SERVSF-FINE-ISTANZE p.2 · the TYPE, for both gestures: the
+  // datamodel's five (node 1.6.36), their labels translated, «unknown» chosen
+  // when the BR has none (and then not written)
+  const reasonSel = document.createElement("select");
+  reasonSel.dataset.cont = "reason";
+  for (const r of END_REASONS) {
+    opt(reasonSel, r, endReasonLabel(r), (cur?.reason ?? END_REASON_DEFAULT) === r);
+    (reasonSel.lastElementChild as HTMLOptionElement).title = endReasonDescription(r);
   }
+  field(t("cont.reason"), reasonSel);
   const srcSel = document.createElement("select");
   srcSel.dataset.cont = "source";
   opt(srcSel, "", t("cont.source.none"), !cur?.source);
@@ -38598,7 +38602,7 @@ function openContinuityForm(unitId: string, x: number, y: number): void {
   ok.dataset.cont = "apply";
   ok.textContent = t("cont.apply");
   ok.addEventListener("click", () => {
-    applyContinuity(unitId, epSel.value, reasonSel ? ((reasonSel.value || null) as EndReason | null) : undefined, srcSel.value || null);
+    applyContinuity(unitId, epSel.value, reasonSel.value || null, srcSel.value || null);
     box.remove();
   });
   const no = document.createElement("button");
@@ -38612,6 +38616,147 @@ function openContinuityForm(unitId: string, x: number, y: number): void {
   box.addEventListener("keydown", (e) => { if (e.key === "Escape") { e.stopPropagation(); box.remove(); } });
   document.body.appendChild(box);
   epSel.focus();
+}
+
+// ── MICRO-SERVSF-FINE-ISTANZE p.2 · the Inspector of a BR ─────────────────────
+// The end of a unit, as s3Dgraphy reads it (`continuity.ts::endOfUnit`, the
+// rule of `spatiotemporal.end_of_unit`): its unit, its TYPE (editable, one undo
+// step; the default not written), the CIDOC class and property the type decides
+// (`rdf.class_when` / `unit_predicate_when`), the epoch with the rule that gave
+// it, and the BR's OWN dating — start and end, each an `absolute_time_*`
+// property of the BR (has_property) as for any unit, so it takes its paradata.
+// A date of its own puts the end in the epoch of the date: the BR's
+// `has_first_epoch` and the unit's `survive_in_epoch` follow in the same step.
+function writeBrType(brId: string, reason: string): void {
+  if (!store || refuseReadOnly()) return;
+  const st = store;
+  const data = { ...((st.node(brId)?.data ?? {}) as Record<string, unknown>) };
+  if (reason && reason !== END_REASON_DEFAULT) data.end_reason = reason;
+  else delete data.end_reason;
+  st.updateNode(brId, { data } as Partial<EmNode>);
+  const unit = endOfUnit(st.doc, brId)?.unit;
+  toastUndo(t("br.typeWritten", { unit: String((unit && st.node(unit)?.name) || unit || brId), type: endReasonLabel(endReasonOf(data)) }), st);
+}
+function brDateProperty(brId: string, quale: "absolute_time_start" | "absolute_time_end"): EmNode | null {
+  if (!store) return null;
+  const st = store;
+  for (const e of st.doc.graph.edges) {
+    if (e.source !== brId || e.edge_type !== "has_property") continue;
+    const p = st.node(e.target);
+    if (p?.node_type === "property" && ((p.data as Record<string, unknown> | undefined)?.property_type === quale || p.name === quale)) return p;
+  }
+  return null;
+}
+function writeBrDate(brId: string, which: "start" | "end", value: string): void {
+  if (!store || refuseReadOnly()) return;
+  const st = store;
+  const quale = which === "start" ? "absolute_time_start" : "absolute_time_end";
+  const v = value.trim();
+  let moved: string | null = null;
+  st.batch(() => {
+    const p = brDateProperty(brId, quale);
+    if (p) st.setPropertyValue(p.id, v);
+    else if (v) {
+      const np = st.addNode({ id: st.newId(), name: quale, node_type: "property", description: v,
+        data: { property_type: quale, value: v } } as EmNode);
+      st.addEdge(brId, np.id, "has_property");
+    }
+    // the date's epoch: the BR is drawn there and the unit survives up to it
+    const eu = endOfUnit(st.doc, brId);
+    const declared = st.doc.graph.edges.find((e) => e.source === brId && e.edge_type === "has_first_epoch")?.target ?? null;
+    const top = (id: string | null): string | null => { let x = id; const seen = new Set<string>(); while (x && st.parentEpoch(x) && !seen.has(x)) { seen.add(x); x = st.parentEpoch(x); } return x; };
+    const want = eu?.epoch_rule === "own_date" ? top(eu.epoch) : null;
+    if (eu?.unit && want && want !== declared) {
+      const first = st.doc.graph.edges.find((e) => e.source === eu.unit && e.edge_type === "has_first_epoch")?.target ?? null;
+      const plan = planContinuity(st.doc.graph.edges, { unit: eu.unit, epoch: want, chrono: st.topEpochIdsChrono(), firstEpoch: top(first), br: brId });
+      for (const id of plan.remove) {
+        const e = st.doc.graph.edges.find((x) => (x.id ?? `${x.source}__${x.edge_type}__${x.target}`) === id);
+        if (e) st.deleteEdge(e);
+      }
+      for (const a of plan.add) st.addEdge(a.source === "$br" ? brId : a.source, a.target === "$br" ? brId : a.target, a.edge_type);
+      moved = want;
+    }
+  });
+  const unit = endOfUnit(st.doc, brId)?.unit;
+  if (moved) toastUndo(t("br.dateMoved", { unit: String((unit && st.node(unit)?.name) || unit || brId), epoch: String(st.node(moved)?.name ?? moved) }), st);
+}
+function renderBrSection(brId: string): HTMLElement | null {
+  if (!store) return null;
+  const st = store;
+  const eu = endOfUnit(st.doc, brId);
+  if (!eu) return null;
+  const sec = document.createElement("section");
+  sec.className = "insp-br";
+  sec.dataset.br = brId;
+  const h = document.createElement("h3");
+  h.className = "insp-sect";
+  h.textContent = t("br.sect");
+  sec.appendChild(h);
+  const row = (label: string, body: HTMLElement | string, key?: string): HTMLElement => {
+    const r = document.createElement("div");
+    r.className = "insp-br-row";
+    if (key) r.dataset.br = key;
+    const l = document.createElement("span");
+    l.className = "insp-br-l";
+    l.textContent = label;
+    const b = typeof body === "string" ? Object.assign(document.createElement("span"), { textContent: body }) : body;
+    b.classList.add("insp-br-v");
+    r.append(l, b);
+    sec.appendChild(r);
+    return r;
+  };
+  if (eu.unit) {
+    const a = document.createElement("button");
+    a.type = "button";
+    a.className = "insp-link";
+    a.textContent = `→ ${String(st.node(eu.unit)?.name ?? eu.unit)}`;
+    a.addEventListener("click", () => jumpTo(eu.unit!));
+    row(t("br.unit"), a, "unit");
+  }
+  const sel = document.createElement("select");
+  sel.dataset.br = "type";
+  for (const r of END_REASONS) {
+    const o = document.createElement("option");
+    o.value = r; o.textContent = endReasonLabel(r); o.title = endReasonDescription(r); o.selected = r === eu.end_reason;
+    sel.appendChild(o);
+  }
+  sel.title = endReasonDescription(eu.end_reason);
+  sel.addEventListener("change", () => writeBrType(brId, sel.value));
+  row(t("br.type"), sel);
+  row(t("br.class"), [eu.cidoc_class, endReasonPredicate(eu.end_reason)].filter(Boolean).join(" · "), "class");
+  const epName = eu.epoch ? String(st.node(eu.epoch)?.name ?? eu.epoch) : "—";
+  row(t("br.epoch"), `${epName} · ${t(`br.rule.${eu.epoch_rule ?? "none"}`)}`, "epoch");
+  const dh = document.createElement("div");
+  dh.className = "insp-field-label";
+  dh.textContent = t("br.dating");
+  sec.appendChild(dh);
+  for (const which of ["start", "end"] as const) {
+    const quale = which === "start" ? "absolute_time_start" : "absolute_time_end";
+    const p = brDateProperty(brId, quale);
+    const inp = document.createElement("input");
+    inp.className = "insp-name-input";
+    inp.dataset.br = which;
+    const pv = p ? String((p.data as Record<string, unknown> | undefined)?.value ?? p.description ?? "") : "";
+    inp.value = pv;
+    inp.placeholder = "e.g. 1960  (negative = BCE)";
+    inp.addEventListener("change", () => writeBrDate(brId, which, inp.value));
+    const r = row(t(which === "start" ? "br.start" : "br.end"), inp);
+    if (p) {
+      const j = document.createElement("button");
+      j.type = "button";
+      j.className = "insp-link";
+      j.dataset.br = `prop-${which}`;
+      j.textContent = "→";
+      j.title = quale;
+      j.addEventListener("click", () => jumpTo(p.id));
+      r.appendChild(j);
+    }
+  }
+  const hint = document.createElement("div");
+  hint.className = "insp-hint";
+  hint.textContent = t("br.datingHint");
+  sec.appendChild(hint);
+  return sec;
 }
 
 function showContextMenu(clientX: number, clientY: number, win?: Win): void {
