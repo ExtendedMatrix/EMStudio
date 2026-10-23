@@ -3551,6 +3551,23 @@ export class DocumentStore {
     this.emit();
   }
 
+  /**
+   * MICRO-CORSIA-GRUPPI p.2 · positions inside a group that arrived from the
+   * room: written where this screen keeps its own (`group_spaces`), not a step
+   * of this person's history (no undo step, no operation back). `null` takes
+   * the entry away: the rule's place again.
+   */
+  applyRemoteLayout(space: string, positions: Record<string, LayoutRect | null>): void {
+    const spaces = ((this.doc.layout ??= {}).group_spaces ??= {});
+    const own = (spaces[space] ??= {});
+    for (const [id, rect] of Object.entries(positions)) {
+      if (rect) own[id] = { x: rect.x, y: rect.y, w: rect.w, h: rect.h };
+      else delete own[id];
+    }
+    if (!Object.keys(own).length) delete spaces[space];
+    this.emit();
+  }
+
   /** Replace the layout (recompute), preserving fold state + group spaces. */
   setLayout(layout: import("./types").EmLayout,
             opts: { rearrange?: (groupId: string) => boolean; initial?: boolean } = {}): void {

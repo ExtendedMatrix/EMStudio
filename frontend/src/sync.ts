@@ -92,6 +92,27 @@ export interface HostInfo {
   accept?: string;
   /** Y6 · the units whose proxy object is in the host's 3D scene (EMtools) */
   scene_proxies?: string[];
+  /**
+   * MICRO-CORSIA-GRUPPI p.2 · the host RELAYS positions (`layout` frames) to
+   * the others in the room and keeps them with the room's document. Declared,
+   * never guessed: a host that does not say so does not get them — the
+   * positions stay on this screen, as they always have.
+   */
+  layout?: boolean;
+}
+
+/**
+ * MICRO-CORSIA-GRUPPI p.2 · the body of a `layout` frame: positions of ONE
+ * space. `space` is a group's id — the positions are its `group_spaces` (a
+ * paradata group open in place, its soloing, the box's own offset under the
+ * group's id); `null` means the entry is gone (the rule's place again).
+ */
+export interface LayoutPayload {
+  space: string;
+  positions: Record<string, { x: number; y: number; w: number; h: number } | null>;
+  /** set by a ROOM: whose positions these are */
+  connection_id?: string;
+  author?: string | null;
 }
 
 /** The BODY of each message type. The envelope (`v`, `type`, `source`) is
@@ -175,6 +196,9 @@ export interface SyncCallbacks {
    * turns into a sentence in its own language; `message` is the host's.
    */
   onSnapshotUnavailable?: (info: SnapshotUnavailablePayload) => void;
+  /** MICRO-CORSIA-GRUPPI p.2 · somebody moved things inside a group (only
+   *  from a host that declares `layout`) */
+  onLayout?: (body: LayoutPayload, graphId?: string) => void;
   /** P4.3 · the room roster / awareness changed (relay only) */
   onPresence?: (message: Record<string, unknown>) => void;
   /** P4.3 · SOMEBODY ELSE selected something. Awareness, never my selection. */
@@ -494,6 +518,11 @@ export class SyncClient {
         // this one would CHANGE THIS DOCUMENT.
         if (!this.acceptsOps) return;
         this.cb?.onOp(payload as unknown as GraphOp, graphId);
+      } else if (type === "layout") {
+        // a position is not an edit of the graph, but it is the document's
+        // (its layout): the same gate as an operation
+        if (!this.acceptsOps) return;
+        this.cb?.onLayout?.(payload as unknown as LayoutPayload, graphId);
       } else if (type === "denied") {
         // NOT gated by the sync direction: this is the answer to something this
         // user did, and swallowing it would leave them staring at an edit that

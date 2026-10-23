@@ -8488,6 +8488,146 @@ test("GL5.lane", "CORSIA p.1 · un'unità messa in un'altra epoca fuori dal tras
   return { pass, detail: { ...out, errors } };
 });
 
+/** CORSIA p.2 · a relay in this process speaking the room's wire: it seats every
+ *  socket with the GT16 (no layout, as a room's snapshot), declares `layout` or
+ *  not, fans out `layout` frames (and answers ops); `seen.layout` keeps them */
+const layoutRelay = (doc, layout) => {
+  const seen = { layout: [], ops: 0, sockets: [] };
+  const node = fakeNode(seen);
+  const host = (i) => ({ tool: "stratigraph-server", file: "corsia", room: "corsia", connection_id: `c${i}`, role: "owner", can_write: true, ...(layout ? { layout: true } : {}) });
+  return { seen, route: { pattern: node.pattern, handler: node.handler },
+    wsRoute: { pattern: /nodo\.test/, handler: (ws) => {
+      const i = seen.sockets.push(ws) - 1;
+      ws.send(JSON.stringify({ v: 2, type: "snapshot", source: "em-server", payload: { doc, host: host(i) } }));
+      ws.onMessage((raw) => {
+        let m; try { m = JSON.parse(String(raw)); } catch { return; }
+        if (m.type === "client_info") ws.send(JSON.stringify({ v: 2, type: "host_info", source: "em-server", payload: host(i) }));
+        else if (m.type === "layout") {
+          seen.layout.push(m);
+          for (const o of seen.sockets) if (o !== ws) o.send(JSON.stringify({ v: 2, type: "layout", source: "em-server", graph_id: m.graph_id, payload: { ...m.payload, connection_id: `c${i}` } }));
+        } else if (m.type === "op") {
+          seen.ops++;
+          ws.send(JSON.stringify({ v: 2, type: "op_result", source: "em-server", payload: { applied: true, op: m.payload, graph_id: m.graph_id } }));
+          for (const o of seen.sockets) if (o !== ws) o.send(JSON.stringify({ v: 2, type: "op", source: "em-server", graph_id: m.graph_id, payload: m.payload }));
+        }
+      });
+    } } };
+};
+/** two EMStudios in the relay's room, the GT16's paradata groups closed but VSF125's */
+const twoInRoom = async (relay) => {
+  const one = async () => {
+    const o = await open({ doc: null, locale: "en", w: 1728, h: 1000, route: relay.route, wsRoute: relay.wsRoute,
+      init: { "emstudio.settings": JSON.stringify({ sync: { hubUrl: "https://nodo.test" } }) } });
+    await o.p.evaluate(() => window.__EM_DRAG__.joinRoom("https://nodo.test", "corsia", "AT-nodo"));
+    await o.p.waitForFunction(() => (window.__EM_SCENE__?.()?.nodes?.length ?? 0) > 50, null, { timeout: 120000 });
+    await o.p.waitForTimeout(2500);
+    return o;
+  };
+  const A = await one(), B = await one();
+  const grp = await A.p.evaluate(() => { const E = window.__EM_DRAG__; const g = E.edgesOf("has_paradata_nodegroup").find((e) => E.node(e.source)?.name === "VSF125")?.target;
+    const mem = E.edgesOf("is_in_paradata_nodegroup").filter((e) => e.target === g).map((e) => e.source);
+    return { g, combiner: mem.find((m) => E.node(m)?.node_type === "combiner"), extractor: mem.find((m) => E.node(m)?.node_type === "extractor"), property: mem.find((m) => E.node(m)?.node_type === "property") }; });
+  for (const c of [A, B]) {
+    await c.p.evaluate((keep) => { const E = window.__EM_DRAG__; for (const n of E.matrixGeom().nodes) if (n.isGroup && n.type === "ParadataNodeGroup" && n.id !== keep) E.fold(n.id, true); E.fold(keep, false); }, grp.g);
+    await c.p.waitForTimeout(1500);
+  }
+  return { A, B, grp };
+};
+const glAt = (p, id) => p.evaluate((id) => { const n = window.__EM_DRAG__.matrixGeom().nodes.find((x) => x.id === id); return n ? [Math.round(n.x), Math.round(n.y)] : null; }, id);
+const glWin = (p) => p.evaluate(() => window.__EM_DRAG__.wins().find((w) => w.type === "graph").id);
+const glScr = (p, w, id) => p.evaluate(([w, id]) => { const ws = window.__EM_DRAG__.winScene(w); const b = ws.boxes.find((x) => x.id === id || x.instanceOf === id); return b ? { x: b.x + b.w / 2, y: b.y + b.h / 2, scale: ws.scale } : null; }, [w, id]);
+const glDrag = async (p, w, id, dx, dy) => { const b = await glScr(p, w, id); if (!b) return false;
+  await p.mouse.move(b.x, b.y); await p.mouse.down(); await p.mouse.move(b.x + dx / 2, b.y + dy / 2, { steps: 4 }); await p.mouse.move(b.x + dx, b.y + dy, { steps: 4 }); await p.mouse.up();
+  await p.waitForTimeout(900); return true; };
+const glFrameOn = async (p, w, id) => { const g0 = await p.evaluate((g) => window.__EM_DRAG__.matrixGeom().nodes.find((n) => n.id === g), id); const r = await p.evaluate((w) => window.__EM_DRAG__.winScene(w).rect, w);
+  await p.evaluate(([x, y, w, h]) => window.__EM_DRAG__.frameWorld(x, y, w, h, 30), [g0.x + g0.w / 2 - (r.w - 60) / 2, g0.y + g0.h / 2 - (r.h - 60) / 2, r.w - 60, r.h - 60]); await p.waitForTimeout(500); };
+
+test("GL6.room", "CORSIA p.2 · le posizioni dentro i gruppi viaggiano nella stanza che lo dichiara: due EMStudio nella stessa stanza (relay di prova con «layout» in host_info, il GT16): A trascina il combinatore nel gruppo di VSF125 aperto sul posto → B lo vede nella nuova posizione, anche dopo chiudi e riapri; A nel soloing del gruppo trascina l'estrattore → B nel soloing lo vede lì; nessuna operazione di grafo; una stanza che NON dichiara «layout» non riceve nulla, B resta com'era e il Log di A lo dice", async () => {
+  if (!existsSync(CO_V4)) return { pass: false, detail: { missing: CO_V4 } };
+  const full = JSON.parse(readFileSync(CO_V4, "utf8"));
+  const doc = { ...full, graphs: Object.fromEntries(Object.entries(full.graphs).map(([k, g]) => { const { layout, ...rest } = g; return [k, rest]; })) };
+  delete doc.layout;
+  const out = {};
+  // 1 · the room declares `layout`
+  {
+    const relay = layoutRelay(doc, true);
+    const { A, B, grp } = await twoInRoom(relay);
+    const wa = await glWin(A.p), wb = await glWin(B.p);
+    await glFrameOn(A.p, wa, grp.g);
+    const a0 = await glAt(A.p, grp.combiner), b0 = await glAt(B.p, grp.combiner);
+    out.dragged = await glDrag(A.p, wa, grp.combiner, 70, 45);
+    await B.p.waitForTimeout(1500);
+    const a1 = await glAt(A.p, grp.combiner), b1 = await glAt(B.p, grp.combiner);
+    await B.p.evaluate((g) => window.__EM_DRAG__.fold(g, true), grp.g); await B.p.waitForTimeout(800);
+    await B.p.evaluate((g) => window.__EM_DRAG__.fold(g, false), grp.g); await B.p.waitForTimeout(1200);
+    const b2 = await glAt(B.p, grp.combiner);
+    out.inPlace = { a0, a1, b0, b1, reopened: b2 };
+    // the soloing: world offset of the extractor from the property, A and then B
+    const rel = async (p, w) => { const x = await glScr(p, w, grp.extractor), q = await glScr(p, w, grp.property); return x && q ? [Math.round((x.x - q.x) / x.scale), Math.round((x.y - q.y) / x.scale)] : null; };
+    await A.p.evaluate((g) => window.__EM_DRAG__.enterGroup(g), grp.g); await A.p.waitForTimeout(1200);
+    const s0 = await rel(A.p, wa);
+    await glDrag(A.p, wa, grp.extractor, 60, 40);
+    const s1 = await rel(A.p, wa);
+    await B.p.waitForTimeout(1200);
+    await B.p.evaluate((g) => window.__EM_DRAG__.enterGroup(g), grp.g); await B.p.waitForTimeout(1200);
+    out.solo = { a0: s0, a1: s1, b: await rel(B.p, wb) };
+    out.frames = relay.seen.layout.map((m) => ({ space: m.payload.space === grp.g, ids: Object.keys(m.payload.positions).length, graph: !!m.graph_id }));
+    out.ops = relay.seen.ops;
+    out.errors = [...A.errors, ...B.errors];
+    await A.p.screenshot({ path: SHOT("gl6-room-A") }).catch(() => {});
+    await B.p.screenshot({ path: SHOT("gl6-room-B") }).catch(() => {});
+    await A.ctx.close(); await B.ctx.close();
+  }
+  // 2 · a room that does not declare it: nothing leaves, B stays, A's Log says so
+  {
+    const relay = layoutRelay(doc, false);
+    const { A, B, grp } = await twoInRoom(relay);
+    const wa = await glWin(A.p);
+    await glFrameOn(A.p, wa, grp.g);
+    const a0 = await glAt(A.p, grp.combiner), b0 = await glAt(B.p, grp.combiner);
+    await glDrag(A.p, wa, grp.combiner, 70, 45);
+    await B.p.waitForTimeout(1500);
+    out.without = { a0, a1: await glAt(A.p, grp.combiner), b0, b1: await glAt(B.p, grp.combiner), frames: relay.seen.layout.length,
+      log: (await A.p.evaluate(() => window.__EM_DRAG__.log().map((l) => l.message))).filter((m) => /stay on this screen/.test(m)).length,
+      errors: [...A.errors, ...B.errors] };
+    await A.ctx.close(); await B.ctx.close();
+  }
+  const same = (x, y) => !!x && !!y && Math.abs(x[0] - y[0]) <= 1 && Math.abs(x[1] - y[1]) <= 1;
+  const ip = out.inPlace, so = out.solo, wo = out.without;
+  const pass = out.dragged && same(ip.a0, ip.b0) && !same(ip.a0, ip.a1) && same(ip.a1, ip.b1) && same(ip.b1, ip.reopened)
+    && !same(so.a0, so.a1) && same(so.a1, so.b) && out.frames.length >= 2 && out.frames.every((f) => f.space && f.ids >= 1) && out.ops === 0
+    && !same(wo.a0, wo.a1) && same(wo.b0, wo.b1) && wo.frames === 0 && wo.log === 1 && !out.errors.length && !wo.errors.length;
+  return { pass, detail: out };
+});
+
+// LIVE (LIVE_NODE + CORSIA_ROOM, a room holding the GT16): the dev node does not
+// declare `layout` — A's positions inside a group stay with A, nothing leaves
+if (K_NODE && process.env.CORSIA_ROOM) test("GL6.live", "CORSIA p.2 dal vivo · nodo di sviluppo, due EMStudio nella stanza del GT16: il nodo non dichiara «layout», quindi A che trascina il combinatore nel gruppo di VSF125 non manda nulla, B resta com'era, il Log di A lo dice; nessuna operazione di grafo", async () => {
+  const one = async () => {
+    const o = await open({ doc: null, locale: "en", w: 1728, h: 1000, init: { "emstudio.settings": JSON.stringify({ sync: { hubUrl: K_NODE } }) } });
+    const frames = [];
+    o.p.on("websocket", (ws) => ws.on("framesent", (f) => { try { const m = JSON.parse(f.payload); if (m.type === "layout" || m.type === "op") frames.push(m.type); } catch {} }));
+    await o.p.evaluate(([u, r, tk]) => window.__EM_DRAG__.joinRoom(u, r, tk), [K_NODE, process.env.CORSIA_ROOM, kToken("dev")]);
+    await o.p.waitForFunction(() => (window.__EM_SCENE__?.()?.nodes?.length ?? 0) > 50, null, { timeout: 120000 });
+    await o.p.waitForTimeout(2500);
+    return { ...o, frames };
+  };
+  const A = await one(), B = await one();
+  const g = await A.p.evaluate(() => { const E = window.__EM_DRAG__; const g = E.edgesOf("has_paradata_nodegroup").find((e) => E.node(e.source)?.name === "VSF125")?.target;
+    return { g, combiner: E.edgesOf("is_in_paradata_nodegroup").filter((e) => e.target === g).map((e) => e.source).find((m) => E.node(m)?.node_type === "combiner") }; });
+  for (const c of [A, B]) { await c.p.evaluate((keep) => { const E = window.__EM_DRAG__; for (const n of E.matrixGeom().nodes) if (n.isGroup && n.type === "ParadataNodeGroup" && n.id !== keep) E.fold(n.id, true); E.fold(keep, false); }, g.g); await c.p.waitForTimeout(1500); }
+  const wa = await glWin(A.p);
+  await glFrameOn(A.p, wa, g.g);
+  const a0 = await glAt(A.p, g.combiner), b0 = await glAt(B.p, g.combiner);
+  await glDrag(A.p, wa, g.combiner, 70, 45);
+  await B.p.waitForTimeout(2000);
+  const r = { a0, a1: await glAt(A.p, g.combiner), b0, b1: await glAt(B.p, g.combiner), sentA: [...A.frames],
+    log: (await A.p.evaluate(() => window.__EM_DRAG__.log().map((l) => l.message))).filter((m) => /stay on this screen/.test(m)).length, errors: [...A.errors, ...B.errors] };
+  await A.ctx.close(); await B.ctx.close();
+  const same = (x, y) => !!x && !!y && Math.abs(x[0] - y[0]) <= 1 && Math.abs(x[1] - y[1]) <= 1;
+  return { pass: !same(r.a0, r.a1) && same(r.b0, r.b1) && !r.sentA.length && r.log === 1 && !r.errors.length, detail: r };
+});
+
 // ── run ─────────────────────────────────────────────────────────────────────
 const chosen = cases.filter((c) => !only.length || only.includes(c.id) || only.some((o) => c.id.startsWith(o + ".")));
 for (const c of chosen) {

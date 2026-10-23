@@ -399,7 +399,7 @@ import type {
 } from "./stratiminer";
 import { choose, confirmLot, engineChoices, humanBytes, INV_GROUPS, inventoryFromPlan, movePlan, reportOf, toMove,
   toUpload, type EnginePlan, type EngineReport, type HomeView, type InvChoice, type Inventory } from "./room-inventory";
-import { type HostInfo, SyncClient, SYNC_ACCEPTS, type SyncAccept } from "./sync";
+import { type HostInfo, type LayoutPayload, SyncClient, SYNC_ACCEPTS, type SyncAccept } from "./sync";
 import { type Access, type ConnectionState, type NodeApi, type NodeEntry, type Reach, nodeAccessOf, nodeApi, renderConnectionPanel,
   renderRoomPanel, roleStateId, roomStateId, shortNode, whereDetails, whereHealth, wherePhrase,
   type OrphanAsset, type RoomInfo } from "./connection";
@@ -6016,6 +6016,7 @@ function flushChange(): void {
     ensureScenes();               // (recomputes the hidden types first)
     followEpochChanges();         // MICRO-CORSIA-GRUPPI p.1 · a new epoch, its lane
     ensureScenes();
+    shareGroupSpaces();           // MICRO-CORSIA-GRUPPI p.2 · …and the groups' positions, to the room
     matrixViewMaybeStale();       // MICRO-PULIZIA p.5 · the Matrix's own layout
     if (filterPanelOpen()) renderCirclesPanel(); // refresh circle counts
     updateInfo();             // (the issues: the canvas draws their «!»)
@@ -8916,6 +8917,7 @@ function connectToHub(url: string, room: string, token: string | null): void {
       draw();
     },
     onOp: (op, graphId) => hubApplyRemote(op as unknown as Record<string, unknown>, graphId),
+    onLayout: (body, graphId) => hubApplyLayout(body, graphId),
     onSnapshot: (doc) => {
       // TAVOLO 2 · the snapshot THIS session asked for, to take back the fields
       // the room refused: only those fields change, the copy is not replaced
@@ -10382,6 +10384,65 @@ function placeInEpochLane(changes: [string, string, string][]): void {
     slideSuppressed--;
   }
   scenesDirty = true;
+}
+
+/**
+ * MICRO-CORSIA-GRUPPI p.2 · the positions inside the groups travel in a room.
+ *
+ * Measured (23 Oct 2026, dev node 1.6.0.dev26): NO position travels in a room —
+ * not the Matrix's, not a group's. The five operations are the graph's, and the
+ * relay drops a frame it does not know. So the positions inside a group (an
+ * open paradata group, its soloing, the box's offset: all `group_spaces`) leave
+ * as a `layout` frame, ONE per space and per change, only to a room whose host
+ * declares `layout` in `host_info`; what arrives is written without an undo
+ * step. Every way a position changes is covered by looking at the result —
+ * a drag, a nudge, an undo, a «Layout» that forgets a group's arrangement —
+ * not at the gestures: the spaces are compared with what was last seen.
+ */
+const spacesSeen = new WeakMap<DocumentStore, Map<string, string>>();
+let layoutLocalSaid = false;
+function spacesOf(st: DocumentStore): Map<string, string> {
+  const out = new Map<string, string>();
+  for (const [space, rects] of Object.entries(st.doc.layout?.group_spaces ?? {}))
+    for (const [id, r] of Object.entries(rects ?? {}))
+      out.set(`${space}\u0000${id}`, JSON.stringify([Math.round(r.x * 100) / 100, Math.round(r.y * 100) / 100, r.w, r.h]));
+  return out;
+}
+function shareGroupSpaces(): void {
+  const st = store;
+  if (!st) return;
+  const now = spacesOf(st);
+  const seen = spacesSeen.get(st);
+  spacesSeen.set(st, now);
+  if (!seen || !sync.room || !sync.connected) return;
+  const changed = new Map<string, Record<string, LayoutRect | null>>();
+  const note = (key: string, rect: LayoutRect | null): void => {
+    const [space, id] = key.split("\u0000");
+    (changed.get(space) ?? changed.set(space, {}).get(space)!)[id] = rect;
+  };
+  for (const [key, v] of now) if (seen.get(key) !== v) {
+    const [space, id] = key.split("\u0000");
+    note(key, st.doc.layout!.group_spaces![space][id]);
+  }
+  for (const key of seen.keys()) if (!now.has(key)) note(key, null);
+  if (!changed.size) return;
+  if (!hostInfo.layout) {
+    // said once per session: the hand's positions inside a group stay here
+    if (!layoutLocalSaid) { layoutLocalSaid = true; logInfo(t("room.layoutLocal")); }
+    return;
+  }
+  if (!sync.canWrite) return;
+  const graphId = String((st.doc.graph as Record<string, unknown>).graph_id ?? "");
+  const named = graphId && hubRoomGraphs.has(graphId) ? graphId : undefined;
+  for (const [space, positions] of changed)
+    sync.sendCommand(wireEnvelope("layout", { space, positions } as unknown as Record<string, unknown>, { graph_id: named }));
+}
+/** a room's `layout` frame: the positions land, and are not sent back */
+function hubApplyLayout(body: LayoutPayload, graphId?: string): void {
+  const target = hubStoreFor(graphId);
+  if (!target || !body?.space || !body.positions) return;
+  target.applyRemoteLayout(String(body.space), body.positions);
+  if (spacesSeen.has(target)) spacesSeen.set(target, spacesOf(target));
 }
 
 /** where the scene's objects are going: a sliding one is drawn where it was
