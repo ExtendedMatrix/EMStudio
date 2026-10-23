@@ -3625,6 +3625,19 @@ export class DocumentStore {
     this.emit();
   }
 
+  /** MICRO-GLOBO-INTERAZIONE p.5 · groups opened or closed in the room by
+   *  somebody else: not a step of this person's history (no undo step) */
+  applyRemoteFolded(changes: Record<string, boolean>): void {
+    const layout = (this.doc.layout ??= {});
+    const set = new Set(layout.folded_groups ?? []);
+    for (const [id, closed] of Object.entries(changes)) {
+      if (closed) set.add(id);
+      else set.delete(id);
+    }
+    layout.folded_groups = [...set].sort();
+    this.emit();
+  }
+
   isFolded(groupId: string): boolean {
     return this.doc.layout?.folded_groups?.includes(groupId) ?? false;
   }

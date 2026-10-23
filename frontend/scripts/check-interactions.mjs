@@ -8492,10 +8492,10 @@ test("GL5.lane", "CORSIA p.1 · un'unità messa in un'altra epoca fuori dal tras
 /** CORSIA p.2 · a relay in this process speaking the room's wire: it seats every
  *  socket with the GT16 (no layout, as a room's snapshot), declares `layout` or
  *  not, fans out `layout` frames (and answers ops); `seen.layout` keeps them */
-const layoutRelay = (doc, layout) => {
+const layoutRelay = (doc, layout, folded = false) => {
   const seen = { layout: [], ops: 0, sockets: [] };
   const node = fakeNode(seen);
-  const host = (i) => ({ tool: "stratigraph-server", file: "corsia", room: "corsia", connection_id: `c${i}`, role: "owner", can_write: true, ...(layout ? { layout: true } : {}) });
+  const host = (i) => ({ tool: "stratigraph-server", file: "corsia", room: "corsia", connection_id: `c${i}`, role: "owner", can_write: true, ...(layout ? { layout: true } : {}), ...(folded ? { layout_folded: true } : {}) });
   return { seen, route: { pattern: node.pattern, handler: node.handler },
     wsRoute: { pattern: /nodo\.test/, handler: (ws) => {
       const i = seen.sockets.push(ws) - 1;
@@ -8601,6 +8601,63 @@ test("GL6.room", "CORSIA p.2 · le posizioni dentro i gruppi viaggiano nella sta
   return { pass, detail: out };
 });
 
+test("GL8.folds", "GLOBO-INTERAZIONE p.5 · i gruppi chiusi viaggiano nella stanza che lo dichiara (relay di prova con «layout_folded», il GT16, due EMStudio): A chiude un gruppo PD → B lo vede chiuso, A lo riapre → B lo vede aperto; A apre il gruppo implicito dei paradati sciolti di un'unità → B lo vede aperto; un frame «layout» con il solo «folded» per gesto, nessuna operazione di grafo e nessun passo di annulla a B; una stanza che NON lo dichiara non riceve nulla, B resta com'era e il Log di A lo dice una volta", async () => {
+  if (!existsSync(CO_V4)) return { pass: false, detail: { missing: CO_V4 } };
+  const full = JSON.parse(readFileSync(CO_V4, "utf8"));
+  const doc = { ...full, graphs: Object.fromEntries(Object.entries(full.graphs).map(([k, g]) => { const { layout, ...rest } = g; return [k, rest]; })) };
+  delete doc.layout;
+  // a loose property on a unit, so the view makes an implicit paradata group for it
+  {
+    const g = Object.values(doc.graphs).find((x) => (x.nodes ?? []).length > 100);
+    const withGroup = new Set(g.edges.filter((e) => e.edge_type === "has_paradata_nodegroup").map((e) => e.source));
+    const unit = g.nodes.find((n) => n.node_type === "US" && !withGroup.has(n.id));
+    g.nodes.push({ id: "gl8-loose-prop", node_type: "property", name: "material", data: { property_type: "material", value: "tufo" } });
+    g.edges.push({ id: "gl8-loose-edge", source: unit.id, target: "gl8-loose-prop", edge_type: "has_property" });
+  }
+  const out = {};
+  const folded = (p) => p.evaluate(() => window.__EM_DRAG__.folded());
+  {
+    const relay = layoutRelay(doc, true, true);
+    const { A, B, grp } = await twoInRoom(relay);
+    const n0 = relay.seen.layout.length;      // the setup's own folds (every PD group but VSF125's) went first
+    const g = grp.g;
+    const b0 = (await folded(B.p)).includes(g);
+    const undoB0 = await B.p.evaluate(() => window.__EM_DRAG__.undoDepth?.() ?? null);
+    await A.p.evaluate((g) => window.__EM_DRAG__.fold(g, true), g); await B.p.waitForTimeout(1200);
+    const b1 = (await folded(B.p)).includes(g);
+    await A.p.evaluate((g) => window.__EM_DRAG__.fold(g, false), g); await B.p.waitForTimeout(1200);
+    const b2 = (await folded(B.p)).includes(g);
+    const imp = await A.p.evaluate(() => window.__EM_DRAG__.implicitGroupIds()[0] ?? null);
+    const bi0 = imp ? (await B.p.evaluate(() => window.__EM_DRAG__.implicitOpen())).includes(imp) : null;
+    if (imp) { await A.p.evaluate((id) => window.__EM_DRAG__.toggleImplicit(id), imp); await B.p.waitForTimeout(1200); }
+    const bi1 = imp ? (await B.p.evaluate(() => window.__EM_DRAG__.implicitOpen())).includes(imp) : null;
+    const undoB1 = await B.p.evaluate(() => window.__EM_DRAG__.undoDepth?.() ?? null);
+    out.room = { g, b0, b1, b2, imp, bi0, bi1, undoB: [undoB0, undoB1],
+      frames: relay.seen.layout.slice(n0).map((m) => ({ folded: m.payload.folded ?? null, positions: Object.keys(m.payload.positions ?? {}).length })).filter((f) => f.folded),
+      ops: relay.seen.ops, errors: [...A.errors, ...B.errors] };
+    await A.ctx.close(); await B.ctx.close();
+  }
+  {
+    const relay = layoutRelay(doc, true, false);
+    const { A, B, grp } = await twoInRoom(relay);
+    const b0 = (await folded(B.p)).includes(grp.g);
+    await A.p.evaluate((g) => window.__EM_DRAG__.fold(g, true), grp.g); await B.p.waitForTimeout(1200);
+    await A.p.evaluate((g) => window.__EM_DRAG__.fold(g, false), grp.g); await B.p.waitForTimeout(600);
+    await A.p.evaluate((g) => window.__EM_DRAG__.fold(g, true), grp.g); await B.p.waitForTimeout(800);
+    out.without = { b0, b1: (await folded(B.p)).includes(grp.g), frames: relay.seen.layout.filter((m) => m.payload.folded).length,
+      log: (await A.p.evaluate(() => window.__EM_DRAG__.log().map((l) => l.message))).filter((m) => /open or close stay so on this screen/.test(m)).length,
+      errors: [...A.errors, ...B.errors] };
+    await A.ctx.close(); await B.ctx.close();
+  }
+  const r = out.room, w = out.without;
+  const pass = r.b0 === false && r.b1 === true && r.b2 === false && !!r.imp && r.bi0 === false && r.bi1 === true
+    && r.frames.length === 3 && r.frames[0].folded[r.g] === true && r.frames[1].folded[r.g] === false && r.frames[2].folded[r.imp] === false
+    && r.frames.every((f) => f.positions === 0 && Object.keys(f.folded).length === 1) && r.ops === 0 && (r.undoB[0] === null || r.undoB[0] === r.undoB[1])
+    && !r.errors.length
+    && w.b0 === false && w.b1 === false && w.frames === 0 && w.log === 1 && !w.errors.length;
+  return { pass, detail: out };
+});
+
 // LIVE (LIVE_NODE + CORSIA_ROOM, a room holding the GT16): the dev node does not
 // declare `layout` — A's positions inside a group stay with A, nothing leaves
 if (K_NODE && process.env.CORSIA_ROOM) test("GL6.live", "CORSIA p.2 dal vivo · nodo di sviluppo, due EMStudio nella stanza del GT16: il nodo non dichiara «layout», quindi A che trascina il combinatore nel gruppo di VSF125 non manda nulla, B resta com'era, il Log di A lo dice; nessuna operazione di grafo", async () => {
@@ -8640,7 +8697,9 @@ if (LAY_NODE && LAY_ROOM) test("GL7.room", "STANZA-POSIZIONI · istanza di prova
     const o = await open({ doc: null, locale: "en", w: 1728, h: 1000, init: { "emstudio.settings": JSON.stringify({ sync: { hubUrl: LAY_NODE } }) } });
     const frames = [];
     o.p.on("websocket", (ws) => ws.on("framesent", (f) => { try { const m = JSON.parse(f.payload);
-      if (m.type === "layout" || m.type === "op") frames.push({ type: m.type, space: m.payload?.space, n: Object.keys(m.payload?.positions ?? {}).length, whole: !!m.payload?.whole }); } catch {} }));
+      // GLOBO-INTERAZIONE p.5 · a frame that only opens or closes groups (`fold`) is not a release's
+      if (m.type === "layout" || m.type === "op") frames.push({ type: m.type, space: m.payload?.space, n: Object.keys(m.payload?.positions ?? {}).length, whole: !!m.payload?.whole,
+        fold: !!m.payload?.folded && !Object.keys(m.payload?.positions ?? {}).length && !m.payload?.whole }); } catch {} }));
     await o.p.evaluate(([u, r]) => window.__EM_DRAG__.joinRoom(u, r, null), [LAY_NODE, LAY_ROOM]);
     await o.p.waitForFunction(() => (window.__EM_SCENE__?.()?.nodes?.length ?? 0) > 50, null, { timeout: 120000 });
     await o.p.waitForTimeout(3500);
@@ -8678,6 +8737,8 @@ if (LAY_NODE && LAY_ROOM) test("GL7.room", "STANZA-POSIZIONI · istanza di prova
   await foldBut(C, g.g);
   const c1 = { u: await glAt(C.p, g.unit), c: await glAt(C.p, g.combiner) };
   out.back = { b2, c1, matrixAvsB2: differ(await all(A.p), await all(B2.p)), matrixAvsC: differ(await all(A.p), await all(C.p)) };
+  { const aa = await all(A.p), bb = await all(B2.p); out.backDiff = Object.keys(aa).filter((id) => bb[id] && Math.abs(aa[id][0] - bb[id][0]) + Math.abs(aa[id][1] - bb[id][1]) > 2).slice(0, 6).map((id) => [id, aa[id], bb[id]]);
+    out.backFolded = [(await A.p.evaluate(() => window.__EM_DRAG__.folded())).length, (await B2.p.evaluate(() => window.__EM_DRAG__.folded())).length]; }
   // 4 · B2 holds the unit; A moves it meanwhile; B2 releases: B2's place wins
   const wb = await glWin(B2.p);
   await glFrameOn(B2.p, wb, g.unit);
@@ -8741,9 +8802,49 @@ if (LAY_NODE && LAY_ROOM) test("GL7.room", "STANZA-POSIZIONI · istanza di prova
     && same(h.held0, h.held1) && !same(h.b2, h.held0) && same(h.a, h.b2) && same(h.c, h.b2)
     && w.frames.some((f) => f.space === "" && f.whole) && w.archAvsB2 === 0 && w.archAvsC === 0 && w.B2vsC === 0
     && out.afterWhole.AvsD === 0 && out.afterWhole.archAvsD === 0 && out.afterWholeMove.archAvsE === 0 && out.afterWholeMove.AvsE === 0
-    && out.framesA.filter((f) => f.type === "layout").length === 3 && !out.framesA.some((f) => f.type === "op")
-    && out.framesA.filter((f) => f.type === "layout" && f.space === "").length === 2
+    && out.framesA.filter((f) => f.type === "layout" && !f.fold).length === 3 && !out.framesA.some((f) => f.type === "op")
+    && out.framesA.filter((f) => f.type === "layout" && !f.fold && f.space === "").length === 2
     && !!out.kept.unit && !!out.kept.combiner && w.kept.positions > 50 && w.kept.positions === w.archA && !out.errors.length;
+  return { pass, detail: out };
+});
+
+// GLOBO-INTERAZIONE p.5 (LAYOUT_NODE + FOLDS_ROOM: a stratigraph-server that declares
+// `layout_folded`, a room holding the GT16): the groups' open/closed are the room's
+if (LAY_NODE && process.env.FOLDS_ROOM) test("GL8.live", "GLOBO-INTERAZIONE p.5 dal vivo · istanza di prova del server con «layout_folded», la stanza del GT16: A chiude il gruppo PD di VSF125 → B lo vede chiuso; A lo riapre e chiude quello di un'altra unità → B li vede così; C che entra dopo li trova come li ha lasciati A (dall'istantanea); la stanza li tiene (lettura REST, folded_groups); nessuna operazione di grafo", async () => {
+  const room = process.env.FOLDS_ROOM;
+  const one = async () => {
+    const o = await open({ doc: null, locale: "en", w: 1728, h: 1000, init: { "emstudio.settings": JSON.stringify({ sync: { hubUrl: LAY_NODE } }) } });
+    const frames = [];
+    o.p.on("websocket", (ws) => ws.on("framesent", (f) => { try { const m = JSON.parse(f.payload); if (m.type === "layout" || m.type === "op") frames.push({ type: m.type, folded: m.payload?.folded ?? null }); } catch {} }));
+    await o.p.evaluate(([u, r]) => window.__EM_DRAG__.joinRoom(u, r, null), [LAY_NODE, room]);
+    await o.p.waitForFunction(() => (window.__EM_SCENE__?.()?.nodes?.length ?? 0) > 50, null, { timeout: 120000 });
+    await o.p.waitForTimeout(3000);
+    return { ...o, frames };
+  };
+  const folded = (p) => p.evaluate(() => window.__EM_DRAG__.folded());
+  const A = await one(), B = await one();
+  const ids = await A.p.evaluate(() => { const E = window.__EM_DRAG__; const pd = E.edgesOf("has_paradata_nodegroup");
+    const g = pd.find((e) => E.node(e.source)?.name === "VSF125")?.target; const h = pd.find((e) => e.target !== g)?.target; return { g, h }; });
+  const out = { ids };
+  const a0 = new Set(await folded(A.p));
+  await A.p.evaluate((g) => window.__EM_DRAG__.fold(g, true), ids.g); await B.p.waitForTimeout(1500);
+  out.b1 = (await folded(B.p)).includes(ids.g);
+  await A.p.evaluate(([g, h]) => { window.__EM_DRAG__.fold(g, false); window.__EM_DRAG__.fold(h, !window.__EM_DRAG__.folded().includes(h)); }, [ids.g, ids.h]); await B.p.waitForTimeout(1500);
+  const aNow = new Set(await folded(A.p));
+  out.b2 = { g: (await folded(B.p)).includes(ids.g), h: (await folded(B.p)).includes(ids.h), hA: aNow.has(ids.h) };
+  const C = await one();
+  const cNow = new Set(await folded(C.p));
+  out.c = { g: cNow.has(ids.g), h: cNow.has(ids.h), sameAsA: [...aNow].every((x) => cNow.has(x)) && [...cNow].every((x) => aNow.has(x)) };
+  const rest = await (await fetch(`${LAY_NODE}/v1/rooms/${room}/document`)).json().catch(() => null);
+  const lay = Object.values(rest?.doc?.graphs ?? {}).find((g) => (g.nodes ?? []).length > 100)?.layout ?? {};
+  out.rest = { g: (lay.folded_groups ?? []).includes(ids.g), h: (lay.folded_groups ?? []).includes(ids.h) };
+  out.frames = A.frames.filter((f) => f.folded).length;
+  out.ops = [...A.frames, ...B.frames, ...C.frames].filter((f) => f.type === "op").length;
+  out.errors = [...A.errors, ...B.errors, ...C.errors];
+  out.a0 = a0.size;
+  await A.ctx.close(); await B.ctx.close(); await C.ctx.close();
+  const pass = !!ids.g && !!ids.h && out.b1 === true && out.b2.g === false && out.b2.h === out.b2.hA && out.c.g === false && out.c.h === out.b2.hA && out.c.sameAsA
+    && out.rest.g === false && out.rest.h === out.b2.hA && out.frames >= 2 && out.ops === 0 && !out.errors.length;
   return { pass, detail: out };
 });
 

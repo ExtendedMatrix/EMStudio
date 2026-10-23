@@ -99,6 +99,8 @@ export interface HostInfo {
    * positions stay on this screen, as they always have.
    */
   layout?: boolean;
+  /** MICRO-GLOBO-INTERAZIONE p.5 · …and the groups' open/closed with them (`folded`) */
+  layout_folded?: boolean;
 }
 
 /**
@@ -116,6 +118,9 @@ export interface LayoutPayload {
   /** with a whole Matrix: the archival layout's lanes and canvas */
   swimlanes?: unknown;
   canvas?: unknown;
+  /** MICRO-GLOBO-INTERAZIONE p.5 · groups opened (false) or closed (true): a
+   *  graph's group, or the view's group of a unit's loose paradata (`implicit-pd:`) */
+  folded?: Record<string, boolean>;
   /** set by a ROOM: whose positions these are */
   connection_id?: string;
   author?: string | null;

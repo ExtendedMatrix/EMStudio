@@ -2514,6 +2514,10 @@ window.__EM_SCENE__ = () => {
   // the ring of a node type on (the jump's «show the ring»)
   showRingFor: (nodeType: string) => ensureCircleVisibleFor(nodeType),
   fold: (id: string, folded: boolean) => { store?.setFoldedMany([id], folded); buildScenes(); draw(); },
+  // MICRO-GLOBO-INTERAZIONE p.5 · the view's groups of loose paradata: which there are, which are open, open/close one
+  implicitGroupIds: () => (store ? implicitGroups(store.doc).filter((g) => g.implicit).map((g) => g.group) : []),
+  implicitOpen: () => [...implicitOpen],
+  toggleImplicit: (id: string) => toggleImplicit(id),
   enterGroup: (id: string) => enterGroup(id),
   /** MICRO studio-luogo · the Graph view's HDT-O layer, read and switched, and
    *  the ids each view's projection holds (what is on screen, not the file) */
@@ -5041,6 +5045,7 @@ function toggleImplicit(groupId: string): void {
   viewDocDirty = true;
   buildScenes();
   draw();
+  shareFolds();                 // MICRO-GLOBO-INTERAZIONE p.5 · the room's too
 }
 /** «Rendi gruppo (Compatta)»: the same «Compatta» of today, on that unit only */
 function makeImplicitReal(groupId: string): void {
@@ -10462,9 +10467,62 @@ function layoutSeenNow(st: DocumentStore): void {
 function rectIn(st: DocumentStore, space: string, id: string): LayoutRect | undefined {
   return space === MATRIX_SPACE ? st.doc.layout?.positions?.[id] : st.doc.layout?.group_spaces?.[space]?.[id];
 }
+// ── MICRO-GLOBO-INTERAZIONE p.5 · the groups' open/closed travel with the positions
+// (E.D., 23 Oct 2026: everything shared — opening a group opens it for everyone).
+// A graph's group: the document's `layout.folded_groups`; the view's group of a
+// unit's loose paradata (`implicit-pd:<unit>`, closed unless opened): `implicitOpen`.
+// What changed since last seen goes in a `layout` frame's `folded`, when the room
+// declares it (`host_info.layout_folded`); what arrives lands without an undo step
+const foldSeen = new WeakMap<DocumentStore, { closed: Set<string>; open: Set<string> }>();
+let foldLocalSaid = false;
+const foldsOf = (st: DocumentStore) => ({ closed: new Set(st.doc.layout?.folded_groups ?? []), open: st === store ? new Set(implicitOpen) : new Set<string>() });
+function shareFolds(): void {
+  const st = store;
+  if (!st) return;
+  const now = foldsOf(st);
+  const seen = foldSeen.get(st);
+  foldSeen.set(st, now);
+  if (!seen || !sync.room || !sync.connected) return;
+  const changes: Record<string, boolean> = {};
+  for (const id of now.closed) if (!seen.closed.has(id)) changes[id] = true;
+  for (const id of seen.closed) if (!now.closed.has(id)) changes[id] = false;
+  for (const id of now.open) if (!seen.open.has(id)) changes[id] = false;
+  for (const id of seen.open) if (!now.open.has(id)) changes[id] = true;
+  if (!Object.keys(changes).length) return;
+  if (!hostInfo.layout || !hostInfo.layout_folded) {
+    if (!foldLocalSaid) { foldLocalSaid = true; logInfo(t("room.foldLocal")); }
+    return;
+  }
+  if (!sync.canWrite) return;
+  const graphId = String((st.doc.graph as Record<string, unknown>).graph_id ?? "");
+  const named = graphId && hubRoomGraphs.has(graphId) ? graphId : undefined;
+  sync.sendCommand(wireEnvelope("layout", { space: MATRIX_SPACE, positions: {}, folded: changes } as unknown as Record<string, unknown>, { graph_id: named }));
+}
+/** groups opened or closed by somebody else in the room: seen first (not sent back), then applied */
+function applyRemoteFolds(target: DocumentStore, folded: Record<string, boolean>): void {
+  const real: Record<string, boolean> = {};
+  let view = false;
+  const was = foldSeen.get(target) ?? foldsOf(target);
+  const next = { closed: new Set(was.closed), open: new Set(was.open) };
+  for (const [id, closed] of Object.entries(folded)) {
+    if (typeof closed !== "boolean") continue;
+    if (isImplicitGroup(id)) {
+      if (target !== store) continue;
+      if (closed) { implicitOpen.delete(id); next.open.delete(id); } else { implicitOpen.add(id); next.open.add(id); }
+      view = true;
+    } else {
+      real[id] = closed;
+      if (closed) next.closed.add(id); else next.closed.delete(id);
+    }
+  }
+  foldSeen.set(target, next);
+  if (Object.keys(real).length) target.applyRemoteFolded(real);
+  if (view) { viewDocDirty = true; buildScenes(); draw(); }
+}
 function shareGroupSpaces(): void {
   const st = store;
   if (!st) return;
+  shareFolds();
   // a drag in flight writes nothing (TOCCARE): its commit, at the release, is
   // the ONE frame — never one per move
   if (dragMode === "node" && dragMoving) return;
@@ -10530,7 +10588,10 @@ function releaseHeldLayout(): void {
 function hubApplyLayout(body: LayoutPayload, graphId?: string): void {
   if (dragMode === "node" && dragMoving) { heldLayout.push({ body, graphId }); return; }
   const target = hubStoreFor(graphId);
-  if (!target || typeof body?.space !== "string" || !body.positions) return;
+  if (!target || typeof body?.space !== "string") return;
+  // MICRO-GLOBO-INTERAZIONE p.5 · the groups opened or closed, with the positions or alone
+  if (body.folded && typeof body.folded === "object") applyRemoteFolds(target, body.folded);
+  if (!body.positions || (!body.whole && !Object.keys(body.positions).length)) return;
   const matrix = body.space === MATRIX_SPACE;
   const before = matrix ? { ...(target.doc.layout?.positions ?? {}) } : null;
   target.applyRemoteLayout(body.space, body.positions, { whole: body.whole, swimlanes: body.swimlanes, canvas: body.canvas });
@@ -10576,14 +10637,46 @@ function rectsOf(st: DocumentStore, space: string): Record<string, LayoutRect> {
  *   moved after it come back to where they started (`moved_from`, kept by the
  *   room) and move again on the view: without it, 7 of 1188 were elsewhere.
  */
-const roomMatrixPending = new WeakMap<DocumentStore, { positions: Record<string, LayoutRect>; ready: boolean }>();
+const roomMatrixPending = new WeakMap<DocumentStore, { positions: Record<string, LayoutRect>; ready: boolean; folds?: Record<string, boolean> }>();
 const roomMatrixByGraph = new Map<string, Record<string, LayoutRect>>();
+/** MICRO-GLOBO-INTERAZIONE p.5 · per graph: the room's opens and closes since its base */
+const roomFoldsByGraph = new Map<string, Record<string, boolean>>();
 function takeRoomMatrix(doc: Record<string, unknown>): void {
   roomMatrixByGraph.clear();
+  roomFoldsByGraph.clear();
   for (const [key, section] of Object.entries((doc.graphs ?? {}) as Record<string, Record<string, unknown>>)) {
     const layout = section?.layout as import("./types").EmLayout | undefined;
     const movedFrom = layout?.moved_from as Record<string, LayoutRect | null> | undefined;
     if (layout) delete layout.moved_from;          // the room's bookkeeping, not the document's
+    // MICRO-GLOBO-INTERAZIONE p.5 · the groups the room has closed (a graph's) and open
+    // (the view's), and the BASE they started from (`folded_from`, kept by the room
+    // like `moved_from`): the door lays its view out on the base, as the screens in
+    // the room did, and the room's opens and closes then land on it as frames would
+    const L = layout as (Record<string, unknown> & { folded_groups?: string[] }) | undefined;
+    const openView = Array.isArray(L?.open_implicit) ? (L!.open_implicit as unknown[]).filter((x): x is string => typeof x === "string" && isImplicitGroup(x)) : [];
+    const from = L?.folded_from as { folded_groups?: unknown; open_implicit?: unknown } | undefined;
+    if (L) { delete L.open_implicit; delete L.folded_from; }
+    const baseClosed = from && Array.isArray(from.folded_groups) ? (from.folded_groups as unknown[]).filter((x): x is string => typeof x === "string") : null;
+    const baseOpen = from && Array.isArray(from.open_implicit) ? (from.open_implicit as unknown[]).filter((x): x is string => typeof x === "string" && isImplicitGroup(x)) : null;
+    const front = key === Object.keys((doc.graphs ?? {}) as Record<string, unknown>)[0] || String(section?.graph_id ?? key) === String(doc.active_graph_id ?? "");
+    if (L && baseClosed) {
+      const now = new Set(L.folded_groups ?? []), base = new Set(baseClosed);
+      const diff: Record<string, boolean> = {};
+      for (const id of now) if (!base.has(id)) diff[id] = true;
+      for (const id of base) if (!now.has(id)) diff[id] = false;
+      const openNow = new Set(openView), openBase = new Set(baseOpen ?? []);
+      if (front) {
+        for (const id of openNow) if (!openBase.has(id)) diff[id] = false;
+        for (const id of openBase) if (!openNow.has(id)) diff[id] = true;
+      }
+      L.folded_groups = [...base].sort();
+      if (Object.keys(diff).length) roomFoldsByGraph.set(String(section.graph_id ?? key), diff);
+    }
+    if (front) {
+      implicitOpen.clear();
+      for (const id of baseClosed ? baseOpen ?? [] : openView) implicitOpen.add(id);
+      viewDocDirty = true;
+    }
     if (!layout?.positions || !Object.keys(layout.positions).length) continue;
     const graphId = String(section.graph_id ?? key);
     if (Array.isArray(layout.swimlanes) && layout.swimlanes.length) {
@@ -10610,9 +10703,15 @@ function takeRoomMatrix(doc: Record<string, unknown>): void {
 function seatRoomMatrix(): void {
   for (const [graphId, positions] of roomMatrixByGraph) {
     const st = hubStoreFor(graphId);
-    if (st) roomMatrixPending.set(st, { positions, ready: false });
+    if (st) roomMatrixPending.set(st, { positions, ready: false, folds: roomFoldsByGraph.get(graphId) });
+  }
+  // MICRO-GLOBO-INTERAZIONE p.5 · a room with folds and no positions to bring
+  for (const [graphId, folds] of roomFoldsByGraph) {
+    const st = hubStoreFor(graphId);
+    if (st && !roomMatrixPending.has(st)) roomMatrixPending.set(st, { positions: {}, ready: false, folds });
   }
   roomMatrixByGraph.clear();
+  roomFoldsByGraph.clear();
 }
 /** the door's layout is done (`ready`), and — for the graph in front — its view too */
 function applyRoomMatrix(st: DocumentStore | null, ready = false): void {
@@ -10622,7 +10721,13 @@ function applyRoomMatrix(st: DocumentStore | null, ready = false): void {
   if (!p.ready) return;
   if (st === store && (matrixViewQueued || matrixViewSig !== matrixViewSigNow())) return;
   roomMatrixPending.delete(st);
-  hubApplyLayout({ space: MATRIX_SPACE, positions: p.positions }, String((st.doc.graph as Record<string, unknown>).graph_id ?? "") || undefined);
+  const gid = String((st.doc.graph as Record<string, unknown>).graph_id ?? "") || undefined;
+  if (Object.keys(p.positions).length) hubApplyLayout({ space: MATRIX_SPACE, positions: p.positions }, gid);
+  // …and the groups the room opened and closed since its base, once the door's view
+  // is seated (not inside its computation: an emit there would lay the view out
+  // again on the closed groups — measured, 154 of 1188 nodes 20 px off)
+  const folds = p.folds;
+  if (folds) setTimeout(() => { applyRemoteFolds(st, folds); buildScenes(); draw(); }, 0);
 }
 
 /** where the scene's objects are going: a sliding one is drawn where it was
