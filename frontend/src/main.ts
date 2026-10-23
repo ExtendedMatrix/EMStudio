@@ -5576,7 +5576,10 @@ function buildScenesNow(): void {
   // and its line are not drawn (and not touched); the graph keeps them
   if (scenes.matrix && !overlayShown(overlaysOf("matrix"), "continuity")) dropContinuity(scenes.matrix, isContinuityType);
   // MICRO-CORSIA-GRUPPI p.1 · the epochs as the document came: what changes after is followed
-  if (!epochSeen.has(store)) epochSeen.set(store, firstEpochs(store));
+  if (!epochSeen.has(store)) {
+    epochSeen.set(store, firstEpochs(store));
+    nodesSeen.set(store, new Set(store.doc.graph.nodes.map((n) => n.id)));
+  }
   // MICRO-PULIZIA p.3 · the Graph: every node present (the whole view) unless
   // its HDT-O switch is off
   scenes.graph = buildGraphLiquid(doc, viewFor("graph", liquidHdto));
@@ -10304,8 +10307,9 @@ function settleDropped(
  * `continuity.ts`), a node the Matrix does not draw (filtered, folded).
  */
 const LANE_GAP = 12;
-/** per document: the epoch each node was last seen in */
+/** per document: the epoch each node was last seen in, and the nodes seen */
 const epochSeen = new WeakMap<DocumentStore, Map<string, string>>();
+const nodesSeen = new WeakMap<DocumentStore, Set<string>>();
 
 function firstEpochs(st: DocumentStore): Map<string, string> {
   const out = new Map<string, string>();
@@ -10320,11 +10324,16 @@ function followEpochChanges(): void {
   if (!st || !scenes.matrix) return;
   const now = firstEpochs(st);
   const seen = epochSeen.get(st);
+  const known = nodesSeen.get(st);
+  nodesSeen.set(st, new Set(st.doc.graph.nodes.map((n) => n.id)));
   if (!seen) { epochSeen.set(st, now); return; }
+  // a node that had another epoch, or none (an epoch given to a unit without
+  // one: the warning's fix, the Tabular's «—»); a node born with its epoch is
+  // placed by whoever made it
   const changed: [string, string, string][] = [];
   for (const [id, ep] of now) {
     const was = seen.get(id);
-    if (was && was !== ep) changed.push([id, was, ep]);
+    if (was !== ep && (was || known?.has(id))) changed.push([id, was ?? "", ep]);
     seen.set(id, ep);
   }
   for (const id of [...seen.keys()]) if (!now.has(id)) seen.delete(id);
