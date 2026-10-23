@@ -283,4 +283,19 @@ export const TEMPLATE_TABLE: TemplateDef[] = [
     edgeFamilies: ["stratigraphic", "pd_properties", "pd_extractors", "pd_combiners", "pd_sources", "pd_groups"],
     edgeTypes: ["has_same_time", "changed_from", "is_in_functional_unit", "has_timebranch"],
   },
+  // MICRO-FILTRI-DETTAGLIATI · the sequence alone: units and their physical
+  // relations, no epochs' edges, no contemporaneity, no instances
+  {
+    key: "strat-only",
+    label: "fam.tpl.stratOnly",
+    nodeFamilies: ["units_real", "units_virtual", "special_finds", "continuity"],
+    edgeFamilies: ["stratigraphic"],
+  },
+  // …and the chronology alone: units, epochs, the time's edges, no physical relation
+  {
+    key: "chrono-only",
+    label: "fam.tpl.chronoOnly",
+    nodeFamilies: ["units_real", "units_virtual", "special_finds", "continuity", "epochs"],
+    edgeFamilies: ["temporal"],
+  },
 ];

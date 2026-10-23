@@ -102,6 +102,12 @@ const edgeTypes = [...R.edgeTypeNames(), R.GENERIC_EDGE];
     eq(hidden(F.defaultVisibleLeaves(v)), { n: [], e: [] }, `the ${v} view shows every type by default`);
   for (const k of ["full", "harris", "em-compact", "em-complete"])
     eq(hidden(F.TEMPLATES.find((x) => x.key === k).leaves), frozen[k], `the template «${k}» hides what it hid`);
+  const so = F.TEMPLATES.find((x) => x.key === "strat-only").leaves;
+  const co = F.TEMPLATES.find((x) => x.key === "chrono-only").leaves;
+  ok(so.has("e:is_after") && so.has("n:US") && so.has("n:SF") && so.has("n:BR"), "«Stratigraphy only»: units and the sequence");
+  ok(![...so].some((l) => l.startsWith("e:") && F.edgeFamilyOf(l.slice(2)) !== "stratigraphic"), "…and no other edge");
+  ok(co.has("e:has_first_epoch") && co.has("e:has_same_time") && co.has("n:US"), "«Chronology only»: units and the time's edges");
+  ok(![...co].some((l) => l.startsWith("e:") && F.edgeFamilyOf(l.slice(2)) !== "temporal"), "…and no other edge");
 }
 
 // ── 5 · labels in the interface's language ───────────────────────────────────

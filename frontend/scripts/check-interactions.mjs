@@ -9766,6 +9766,81 @@ test("GR6.follow", "GEOREF-GRAFO · una sola fonte: il globo acceso sul GT16 con
   return { pass, detail: out };
 });
 
+// ── MICRO-FILTRI-DETTAGLIATI · the «Detail level» by families ──────────────
+async function fdPanel(p) {
+  return p.evaluate(() => [...document.querySelectorAll("#filter-panel .fp-fam")].map((f) => {
+    const cb = f.querySelector("[data-fam-cb]");
+    return { fam: f.dataset.fam, hidden: f.classList.contains("hidden"), count: f.querySelector(".fp-famrow .fp-count")?.textContent,
+      on: cb.checked, ind: cb.indeterminate, rows: [...f.querySelectorAll(".fp-type:not(.hidden)")].map((r) => r.dataset.leaf) };
+  }));
+}
+test("FD1.panel", "FILTRI-DETTAGLIATI · il livello di dettaglio a due livelli (famiglia → tipi): famiglie dal datamodel, stratigrafiche separate dalle temporali, conteggi visibili/totali che sommano al grafo, ricerca, tutto/niente, «Solo stratigrafia» e «Solo cronologia», scelte per vista salvate, Monochrome nella Matrix", async () => {
+  const { p, ctx, errors } = await open({ doc: "TempluMare", locale: "en" });
+  const D = (f, a) => p.evaluate(f, a);
+  const r = {};
+  r.doc = await D(() => { const d = JSON.parse(window.__EM_DRAG__.docJson()); const g = d.graph ?? d.graphs[d.active_graph_id]; return [g.nodes.length, g.edges.length]; });
+  const isAfter = () => D(() => window.__EM_SCENE__().edges.filter((e) => e.type === "is_after").length);
+  r.isAfter0 = await isAfter();
+  await p.click("#btn-view-props"); await p.waitForTimeout(300);
+  const f0 = await fdPanel(p);
+  r.fams = [f0.filter((x) => x.fam.startsWith("n:")).length, f0.filter((x) => x.fam.startsWith("e:")).length];
+  const tot = (pre) => f0.filter((x) => x.fam.startsWith(pre)).reduce((a, x) => a + Number(x.count.split("/")[1]), 0);
+  r.totals = [tot("n:"), tot("e:")];
+  r.strat = f0.find((x) => x.fam === "e:stratigraphic")?.count;
+  r.temporal = f0.find((x) => x.fam === "e:temporal")?.count;
+  // the stratigraphic family off: the sequence leaves the Matrix, the family says 0/N
+  await p.click('#filter-panel [data-fam-cb="e:stratigraphic"]'); await p.waitForTimeout(600);
+  r.isAfterOff = await isAfter();
+  r.stratOff = (await fdPanel(p)).find((x) => x.fam === "e:stratigraphic");
+  r.saved = await D(() => JSON.parse(localStorage.getItem("emstudio.detailLeaves") ?? "{}").matrix?.off ?? []);
+  // «all» brings it back
+  await p.click('#filter-panel [data-fam-all="e:stratigraphic"]'); await p.waitForTimeout(600);
+  r.isAfterBack = await isAfter();
+  // one type only: a leaf off makes the family indeterminate
+  await p.click('#filter-panel .fp-exp[data-fam-exp="e:stratigraphic"]'); await p.waitForTimeout(150);
+  await p.click('#filter-panel [data-leaf-cb="e:is_after"]'); await p.waitForTimeout(600);
+  r.leafOff = { isAfter: await isAfter(), fam: (await fdPanel(p)).find((x) => x.fam === "e:stratigraphic") };
+  await p.click('#filter-panel [data-leaf-cb="e:is_after"]'); await p.waitForTimeout(600);
+  // the search: «cuts» shows the one family and the one type
+  await p.fill('#filter-panel [data-fp="search"]', "cuts"); await p.waitForTimeout(150);
+  r.search = (await fdPanel(p)).filter((x) => !x.hidden).map((x) => [x.fam, x.rows]);
+  await p.fill('#filter-panel [data-fp="search"]', ""); await p.waitForTimeout(150);
+  // the templates
+  await p.selectOption('#filter-panel [data-fp="template"]', "strat-only"); await p.waitForTimeout(600);
+  const so = await fdPanel(p);
+  r.stratOnly = { sel: await D(() => document.querySelector('#filter-panel [data-fp="template"]').value),
+    strat: so.find((x) => x.fam === "e:stratigraphic").on, temporal: so.find((x) => x.fam === "e:temporal").on || so.find((x) => x.fam === "e:temporal").ind,
+    paradata: so.find((x) => x.fam === "n:properties").on, isAfter: await isAfter() };
+  await p.selectOption('#filter-panel [data-fp="template"]', "chrono-only"); await p.waitForTimeout(600);
+  const co = await fdPanel(p);
+  r.chronoOnly = { sel: await D(() => document.querySelector('#filter-panel [data-fp="template"]').value),
+    strat: co.find((x) => x.fam === "e:stratigraphic").on || co.find((x) => x.fam === "e:stratigraphic").ind, temporal: co.find((x) => x.fam === "e:temporal").on, isAfter: await isAfter() };
+  r.mono = await D(() => [...document.querySelectorAll("#filter-panel .fp-row")].some((x) => /Monochrome/.test(x.textContent)));
+  await p.screenshot({ path: SHOT("fd1-matrix-chrono") }).catch(() => {});
+  // the Graph keeps its own choice (everything: «Full detail»), the Matrix its own
+  await p.keyboard.press("Escape");
+  await p.evaluate(() => [...document.querySelectorAll('.tile-area[data-win="canvas:1"] .tile-bar button')].find((b) => b.offsetParent && b.textContent.trim() === "Graph")?.click());
+  await p.waitForTimeout(1200);
+  await p.click("#btn-view-props"); await p.waitForTimeout(300);
+  r.graphSel = await D(() => document.querySelector('#filter-panel [data-fp="template"]').value);
+  r.graphMono = await D(() => [...document.querySelectorAll("#filter-panel .fp-row")].some((x) => /Monochrome/.test(x.textContent)));
+  await p.keyboard.press("Escape");
+  await p.evaluate(() => [...document.querySelectorAll('.tile-area[data-win="canvas:1"] .tile-bar button')].find((b) => b.offsetParent && b.textContent.trim() === "Matrix")?.click());
+  await p.waitForTimeout(1200);
+  await p.click("#btn-view-props"); await p.waitForTimeout(300);
+  r.matrixSel = await D(() => document.querySelector('#filter-panel [data-fp="template"]').value);
+  await p.screenshot({ path: SHOT("fd1-matrix-back") }).catch(() => {});
+  r.errors = errors;
+  await ctx.close();
+  const pass = r.fams[0] >= 15 && r.fams[1] >= 14 && r.totals[0] === r.doc[0] && r.totals[1] === r.doc[1]
+    && r.isAfter0 > 0 && r.isAfterOff === 0 && /^0\//.test(r.stratOff?.count ?? "") && r.saved.includes("e:is_after") && r.isAfterBack === r.isAfter0
+    && r.leafOff.isAfter === 0 && r.leafOff.fam.ind
+    && r.search.length === 1 && r.search[0][0] === "e:stratigraphic" && JSON.stringify(r.search[0][1]) === '["e:cuts"]'
+    && r.stratOnly.sel === "strat-only" && r.stratOnly.strat && !r.stratOnly.temporal && !r.stratOnly.paradata && r.stratOnly.isAfter > 0
+    && r.chronoOnly.sel === "chrono-only" && !r.chronoOnly.strat && r.chronoOnly.temporal && r.chronoOnly.isAfter === 0
+    && r.mono && !r.graphMono && r.graphSel === "full" && r.matrixSel === "chrono-only" && !errors.length;
+  return { pass, detail: r };
+});
 // ── run ─────────────────────────────────────────────────────────────────────
 const chosen =cases.filter((c) => !only.length || only.includes(c.id) || only.some((o) => c.id.startsWith(o + ".")));
 for (const c of chosen) {

@@ -1033,16 +1033,36 @@ const hiddenEdgesNow = hiddenEdgeTypes;
 // em.json for projection + the future HDT-O lens, never rendered as strat boxes.
 // Derived from the datamodel (no hardcoded list); independent of the circles.
 const HDTO_HIDDEN_TYPES = hdtoProfileTypes();
-
 // MICRO-FILTRI-DETTAGLIATI · the «Detail level»: which LEAVES (one node type,
 // one edge type — filters.ts) are visible, per view. Matrix, Graph, DTC and
-// «Graphs paradata» each keep their own.
+// «Graphs paradata» each keep their own, saved on this machine as the
+// differences from the view's default (so a type the datamodel adds tomorrow
+// follows its family's default instead of a list frozen today).
+const LEAVES_KEY = "emstudio.detailLeaves";
+function loadLeaves(v: ViewKind): Set<string> {
+  const out = defaultVisibleLeaves(v);
+  try {
+    const all = JSON.parse(localStorage.getItem(LEAVES_KEY) ?? "{}") as Record<string, { on?: string[]; off?: string[] }>;
+    for (const l of all[v]?.on ?? []) out.add(l);
+    for (const l of all[v]?.off ?? []) out.delete(l);
+  } catch { /* a broken entry is the default */ }
+  return out;
+}
+function saveLeaves(v: ViewKind): void {
+  const def = defaultVisibleLeaves(v);
+  const cur = circleState[v];
+  try {
+    const all = JSON.parse(localStorage.getItem(LEAVES_KEY) ?? "{}") as Record<string, unknown>;
+    all[v] = { on: [...cur].filter((l) => !def.has(l)), off: [...def].filter((l) => !cur.has(l)) };
+    localStorage.setItem(LEAVES_KEY, JSON.stringify(all));
+  } catch { /* no storage: the session keeps them */ }
+}
 const circleState: Record<ViewKind, Set<string>> = {
-  matrix: defaultVisibleLeaves("matrix"),
-  graph: defaultVisibleLeaves("graph"),
-  dtc: defaultVisibleLeaves("dtc"),
-  multigraph: defaultVisibleLeaves("multigraph"),
-  graphs: defaultVisibleLeaves("graphs"),
+  matrix: loadLeaves("matrix"),
+  graph: loadLeaves("graph"),
+  dtc: loadLeaves("dtc"),
+  multigraph: loadLeaves("multigraph"),
+  graphs: loadLeaves("graphs"),
 };
 // Recompute the hidden type sets from the current view's visible circles.
 function recomputeHiddenFromCircles(): void {
@@ -1078,6 +1098,7 @@ function ensureCircleVisibleFor(nodeType: string | undefined): void {
   const l = nodeLeaf(nodeType);
   if (!l || circleState[view].has(l)) return;
   circleState[view].add(l);
+  saveLeaves(view);
   recomputeHiddenFromCircles();
   buildScenes();
   draw();
@@ -16415,6 +16436,7 @@ function refreshFunnel(): void {
 let monochrome = false;
 function applyTemplate(t: DetailTemplate): void {
   circleState[view] = new Set(t.leaves);
+  saveLeaves(view);
   recomputeHiddenFromCircles();
   buildScenes();
   draw();
@@ -16433,6 +16455,7 @@ function setLeaves(leaves: string[], on: boolean, focusSel?: string): void {
     if (on) visible.add(l);
     else visible.delete(l);
   }
+  saveLeaves(view);
   recomputeHiddenFromCircles();
   buildScenes();
   draw();
@@ -16532,6 +16555,21 @@ function renderCirclesPanel(): void {
   tmpl.append(tlbl, tsel);
   filterPanel.appendChild(tmpl);
 
+  // the search, inside the panel: a family's name or a type's (label or wire name)
+  const search = document.createElement("input");
+  search.type = "search";
+  search.className = "fp-search";
+  search.dataset.fp = "search";
+  search.placeholder = t("fp.search");
+  search.value = fpQuery;
+  search.addEventListener("input", () => {
+    fpQuery = search.value;
+    applyFpSearch();
+  });
+  filterPanel.appendChild(search);
+  const noMatch = document.createElement("div");
+  noMatch.className = "fp-nomatch hidden";
+  filterPanel.appendChild(noMatch);
 
   const addSection = (title: string, kind: "node" | "edge", families: Family[]): void => {
     const h = document.createElement("div");
@@ -16592,6 +16630,17 @@ function renderCirclesPanel(): void {
       count.className = "fp-count";
       count.textContent = `${shownN}/${total}`;
       count.title = t("fp.countTitle");
+      const mk = (txt: string, title: string, on: boolean): HTMLButtonElement => {
+        const bt = document.createElement("button");
+        bt.className = "fp-mini";
+        bt.textContent = txt;
+        bt.title = title;
+        bt.dataset.famAll = on ? famId : "";
+        bt.dataset.famNone = on ? "" : famId;
+        bt.disabled = !leaves.length;
+        bt.addEventListener("click", () => setLeaves(leaves, on));
+        return bt;
+      };
       const exp = document.createElement("button");
       exp.className = "fp-exp";
       const open = fpOpenFamilies.has(famId);
@@ -16608,7 +16657,9 @@ function renderCirclesPanel(): void {
       };
       exp.addEventListener("click", toggle);
       name.addEventListener("click", toggle);
-      row.append(cb, name, count, exp);
+      row.append(cb, name, count,
+        mk(t("fp.all"), t("fp.allTitle", { family: famLabel }), true),
+        mk(t("fp.none"), t("fp.noneTitle", { family: famLabel }), false), exp);
       box.appendChild(row);
 
       const types = document.createElement("div");
@@ -16775,6 +16826,7 @@ function renderCirclesPanel(): void {
   reset.textContent = t("l.resetView");
   reset.addEventListener("click", () => {
     circleState[view] = defaultVisibleLeaves(view);
+    saveLeaves(view);
     recomputeHiddenFromCircles();
     buildScenes();
     draw();
