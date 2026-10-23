@@ -16388,6 +16388,30 @@ function closeFilterPanel(): void {
   filterOwner = null;
   refreshFunnel();
 }
+/**
+ * MICRO-FILTRI-DETTAGLIATI · Esc closes a floating panel and gives the keyboard
+ * back to the view. Inside the panel (a checkbox, the search, the template) the
+ * key never reached the app's handler — those are fields, which keep their keys —
+ * so each panel listens for it itself; outside, the app's Esc closes the open one.
+ */
+function giveKeysBackToView(owner: string | null): void {
+  const cv = owner ? graphWindows.get(owner)?.cv : undefined;
+  const active = document.activeElement as HTMLElement | null;
+  if (cv && cv.tabIndex >= 0) cv.focus();
+  else if (active && active !== document.body) active.blur();
+}
+function closePanelByEsc(which: "filter" | "overlay"): void {
+  const owner = which === "filter" ? filterOwner : overlayOwner;
+  if (which === "filter") closeFilterPanel();
+  else closeOverlayPanel();
+  giveKeysBackToView(owner);
+}
+filterPanel.addEventListener("keydown", (e) => {
+  if (e.key !== "Escape") return;
+  e.preventDefault();
+  e.stopPropagation();
+  closePanelByEsc("filter");
+});
 
 /**
  * The funnel is shown when it has something to filter: a document open, a CANVAS
@@ -16946,6 +16970,12 @@ overlayPanel.className = "hidden";
 btnViewProps.parentElement?.insertBefore(overlayPanel, filterPanel.nextSibling);
 for (const ev of ["pointerdown", "wheel", "dblclick", "contextmenu"])
   overlayPanel.addEventListener(ev, (e) => e.stopPropagation());
+overlayPanel.addEventListener("keydown", (e) => {
+  if (e.key !== "Escape") return;
+  e.preventDefault();
+  e.stopPropagation();
+  closePanelByEsc("overlay");
+});
 function overlayPanelOpen(): boolean {
   return !overlayPanel.classList.contains("hidden");
 }
@@ -39677,7 +39707,8 @@ window.addEventListener("keydown", (e) => {
   }
   if (e.key === "Escape") {
     if (ctxMenuEl) hideContextMenu();
-    else if (filterPanelOpen()) closeFilterPanel();
+    else if (filterPanelOpen()) closePanelByEsc("filter");
+    else if (overlayPanelOpen()) closePanelByEsc("overlay");
     else if (!edgeMenu.classList.contains("hidden")) hideEdgeMenu();
     else if (inContext()) {
       contextStack.pop();

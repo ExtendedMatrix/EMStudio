@@ -9841,6 +9841,44 @@ test("FD1.panel", "FILTRI-DETTAGLIATI · il livello di dettaglio a due livelli (
     && r.mono && !r.graphMono && r.graphSel === "full" && r.matrixSel === "chrono-only" && !errors.length;
   return { pass, detail: r };
 });
+test("FD2.esc", "FILTRI-DETTAGLIATI · Esc chiude il pannello del livello di dettaglio (fuoco nella ricerca, su una casella, sulla tela) e quello degli overlay, e restituisce il fuoco alla vista", async () => {
+  const { p, ctx, errors } = await open({ doc: "TempluMare", locale: "en" });
+  const D = (f, a) => p.evaluate(f, a);
+  const state = () => D(() => ({ filter: !document.getElementById("filter-panel").classList.contains("hidden"),
+    overlay: !document.getElementById("overlay-panel")?.classList.contains("hidden"),
+    focusIn: !!document.activeElement?.closest?.("#filter-panel, #overlay-panel") }));
+  const r = {};
+  await p.click("#btn-view-props"); await p.waitForTimeout(300);
+  await p.focus('#filter-panel [data-fp="search"]');
+  await p.keyboard.type("epo");
+  r.searchOpen = await state();
+  await p.keyboard.press("Escape"); await p.waitForTimeout(200);
+  r.fromSearch = await state();
+  await p.click("#btn-view-props"); await p.waitForTimeout(300);
+  await p.focus('#filter-panel [data-fam-cb="n:units_real"]');
+  await p.keyboard.press("Escape"); await p.waitForTimeout(200);
+  r.fromCheckbox = await state();
+  await p.click("#btn-view-props"); await p.waitForTimeout(300);
+  await D(() => document.activeElement?.blur?.());
+  await p.keyboard.press("Escape"); await p.waitForTimeout(200);
+  r.fromView = await state();
+  await p.click("#btn-overlays"); await p.waitForTimeout(300);
+  r.overlayOpen = await state();
+  await p.focus("#overlay-panel input");
+  await p.keyboard.press("Escape"); await p.waitForTimeout(200);
+  r.overlayFromInput = await state();
+  await p.click("#btn-overlays"); await p.waitForTimeout(300);
+  await D(() => document.activeElement?.blur?.());
+  await p.keyboard.press("Escape"); await p.waitForTimeout(200);
+  r.overlayFromView = await state();
+  r.errors = errors;
+  await ctx.close();
+  const closed = (x) => !x.filter && !x.overlay && !x.focusIn;
+  const pass = r.searchOpen.filter && closed(r.fromSearch) && closed(r.fromCheckbox) && closed(r.fromView)
+    && r.overlayOpen.overlay && closed(r.overlayFromInput) && closed(r.overlayFromView) && !errors.length;
+  return { pass, detail: r };
+});
+
 // ── run ─────────────────────────────────────────────────────────────────────
 const chosen =cases.filter((c) => !only.length || only.includes(c.id) || only.some((o) => c.id.startsWith(o + ".")));
 for (const c of chosen) {
