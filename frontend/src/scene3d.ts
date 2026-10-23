@@ -243,6 +243,8 @@ export interface SpaceSceneHandle {
   startModal(mode: ModalMode): boolean;
   /** MICRO-GEOGLOBO · the globe of the Space (null: none) */
   setGeo(g: GeoDriver | null): void;
+  /** MICRO-GEOREF-GRAFO p.3 · the box of the models drawn (three's axes), null while none has come */
+  contentBox(): [V3, V3] | null;
 }
 
 /** MICRO-GEOGLOBO · what the scene hands the globe (`globe3d.ts`) once its
@@ -3313,6 +3315,7 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
     toggleOrtho: () => api.toggleOrtho?.(),
     centreScene: (quiet) => api.centreScene?.(quiet) ?? false,
     startModal: (m) => api.startModal?.(m) ?? false,
+    contentBox: () => geoCtx?.contentBox?.() ?? null,
     setGeo: (g) => {
       if (g === geo) return;
       geo?.detach();

@@ -18,7 +18,8 @@
 import { t } from "./i18n";
 import type { DocumentStore } from "./model";
 import {
-  conversionPatch, crsWarning, epsgOf, fmtCoord, formatShiftTxt, verticalOf, VERTICAL_REFERENCES, type CrsInfo,
+  boxCentreData, conversionPatch, crsWarning, distanceFromShift, epsgOf, fmtCoord, formatShiftTxt, localToCrs, verticalOf,
+  VERTICAL_REFERENCES, type CrsInfo,
 } from "./georef";
 
 export interface GeorefDeps {
@@ -316,4 +317,102 @@ export function renderGeorefSection(host: HTMLElement, store: DocumentStore, dep
   sec.appendChild(acts);
   // the shift is not the pin
   sec.appendChild(el("div", "insp-hint", t("georef.shiftNotPin")));
+}
+
+// ── MICRO-GEOREF-GRAFO p.3 · the map's pin proposed on the models' centre ────
+
+export interface PinDeps extends Pick<GeorefDeps, "redraw" | "done"> {
+  /** the box of the models drawn in a Space (three's axes), null when no Space drew them */
+  contentBox: () => [[number, number, number], [number, number, number]] | null;
+  /** a CRS point → WGS 84 by the bridge (PROJ), or an error */
+  toWgs84: (x: number, y: number, epsg: number) => Promise<{ lat: number; lon: number } | { error: string }>;
+  /** the graph's declared geometry placed by the bridge (s3Dgraphy georeference_scene): its centroid */
+  declared: () => Promise<{ lat: number; lon: number } | null | { error: string }>;
+  /** «Move…»: the site selector, the proposal as its candidate */
+  openPicker: (proposed: { lat: number; lon: number }) => void;
+}
+
+export interface PinProposal {
+  lat: number;
+  lon: number;
+  /** where it comes from: the models drawn (their box's centre) or the declared geometry */
+  from: "models" | "declared";
+  /** the centre in the CRS, and its distance from the shift (models only) */
+  crs?: [number, number];
+  fromShift?: number;
+}
+
+const pins = new Map<string, PinProposal | "pending" | { error: string } | null>();
+
+/** the proposal for the graph (cached by its georeference and the models' box); null while computed */
+export function pinProposal(store: DocumentStore, deps: PinDeps): PinProposal | { error: string } | "none" | null {
+  const g = store.geoPositionNode();
+  const d = (g?.data ?? {}) as Record<string, unknown>;
+  const epsg = epsgOf(d);
+  if (!g || epsg === null) return "none";
+  const box = deps.contentBox();
+  const key = box ? `m|${epsg}|${d.shift_x}|${d.shift_y}|${d.rotation}|${box.flat().map((v) => v.toFixed(2)).join(",")}`
+    : `d|${epsg}|${d.shift_x}|${d.shift_y}|${d.rotation}|${store.liveNodes().length}`;
+  const have = pins.get(key);
+  if (have === "pending") return null;
+  if (have !== undefined) return have ?? "none";
+  pins.set(key, "pending");
+  void (async () => {
+    let out: PinProposal | { error: string } | null = null;
+    if (box) {
+      const [cx, cy] = boxCentreData(box);
+      const [X, Y] = localToCrs(d, cx, cy);
+      const w = await deps.toWgs84(X, Y, epsg);
+      out = "error" in w ? w : { lat: w.lat, lon: w.lon, from: "models", crs: [X, Y], fromShift: distanceFromShift(d, X, Y) };
+    } else {
+      const p = await deps.declared();
+      out = p && !("error" in p) ? { lat: p.lat, lon: p.lon, from: "declared" } : p ?? { error: t("georef.pinNoModels") };
+    }
+    pins.set(key, out);
+    deps.redraw();
+  })();
+  return null;
+}
+
+/**
+ * Under «Site position (map)», when the graph has none: the models' centre
+ * proposed (the box of the models the Space drew, else the geometry the graph
+ * declares, placed by its georeference), with «Use this» (written as the
+ * selector writes it, one undo step) and «Move…» (the selector, the proposal as
+ * its candidate). Nothing is written by itself.
+ */
+export function renderSitePinProposal(host: HTMLElement, store: DocumentStore, deps: PinDeps): void {
+  if (store.readSitePosition()) return;
+  const p = pinProposal(store, deps);
+  if (p === "none") return;
+  const box = el("div", "georef-pin");
+  box.dataset.georef = "pin";
+  host.appendChild(box);
+  if (p === null) { box.appendChild(el("div", "insp-hint", t("georef.pinComputing"))); return; }
+  if ("error" in p) {
+    box.dataset.georef = "pin-none";
+    box.appendChild(el("div", "insp-hint", t("georef.pinUnavailable", { why: p.error })));
+    return;
+  }
+  const words = p.from === "models"
+    ? t("georef.pinModels", { lat: p.lat.toFixed(6), lon: p.lon.toFixed(6), x: fmtCoord(Math.round(p.crs![0] * 100) / 100),
+        y: fmtCoord(Math.round(p.crs![1] * 100) / 100), d: (p.fromShift ?? 0).toFixed(1) })
+    : t("georef.pinDeclared", { lat: p.lat.toFixed(6), lon: p.lon.toFixed(6) });
+  const line = el("div", "insp-hint", words);
+  box.dataset.lat = String(p.lat);
+  box.dataset.lon = String(p.lon);
+  if (p.fromShift !== undefined) box.dataset.fromShift = p.fromShift.toFixed(2);
+  box.appendChild(line);
+  const acts = el("div", "georef-acts");
+  const use = el("button", "insp-btn primary", t("georef.pinUse")) as HTMLButtonElement;
+  use.dataset.georef = "pin-use";
+  use.addEventListener("click", () => {
+    store.setSitePosition(+p.lon.toFixed(6), +p.lat.toFixed(6));
+    deps.done(t("georef.pinWritten", { lat: p.lat.toFixed(6), lon: p.lon.toFixed(6) }));
+  });
+  const move = el("button", "insp-btn", t("georef.pinMove")) as HTMLButtonElement;
+  move.dataset.georef = "pin-move";
+  move.addEventListener("click", () => deps.openPicker({ lat: +p.lat.toFixed(6), lon: +p.lon.toFixed(6) }));
+  acts.append(use, move);
+  box.appendChild(acts);
 }

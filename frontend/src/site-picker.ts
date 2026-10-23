@@ -61,10 +61,13 @@ export function closeSitePicker(): void {
  * a person knows WHICH graph they are placing.
  */
 export function openSitePicker(store: DocumentStore, graphName: string,
-                               onWritten?: () => void): void {
+                               onWritten?: () => void,
+                               proposed?: { lat: number; lon: number }): void {
   closeSitePicker();
   const cur = store.readSitePosition();
-  let pin: { lat: number; lon: number } | null = cur ? { lat: cur.lat, lon: cur.lon } : null;
+  // MICRO-GEOREF-GRAFO p.3 · «Move…» from the proposal: the models' centre is the
+  // candidate, written only by «Use this point»
+  let pin: { lat: number; lon: number } | null = cur ? { lat: cur.lat, lon: cur.lon } : proposed ? { ...proposed } : null;
 
   const modal = el("div", "modal site-picker");
   modal.setAttribute("role", "dialog");
@@ -153,7 +156,7 @@ export function openSitePicker(store: DocumentStore, graphName: string,
     if (fly) map.setView(pin.lat, pin.lon, 15);
     ok.disabled = false;
   }
-  if (pin) { latIn.value = String(pin.lat); lonIn.value = String(pin.lon); }
+  if (pin) { latIn.value = String(pin.lat); lonIn.value = String(pin.lon); if (!cur) map.setMarker(pin.lat, pin.lon); }
   ok.disabled = !pin;
 
   const typed = (): void => {

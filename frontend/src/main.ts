@@ -247,7 +247,7 @@ import { diagnose, errorText, FailureLog, isNetworkError, type LoadFailure, type
 import { chooseVersion, SCENE_USES, USES } from "./asset-versions";
 import { mountGeoSpace, type GeoSpaceDeps } from "./geo-space";
 import { georefSummary } from "./georef";
-import { proposalNow, proposeConversion, renderGeorefSection, type GeorefDeps } from "./georef-panel";
+import { proposalNow, proposeConversion, renderGeorefSection, renderSitePinProposal, type GeorefDeps } from "./georef-panel";
 import { mountSpaceScene, type SceneItem, type SceneStats, type SceneMark, type SceneMenuRequest, type SceneView, type SpaceSceneHandle } from "./scene3d";
 import { ladderOf, versionChoices, viewerSourceLine, viewerTargetOf,
          type VersionChoice, type ViewerPart, type ViewerTarget, type WeighedVersion } from "./viewer-node";
@@ -17661,7 +17661,23 @@ function georefDeps(st: DocumentStore): GeorefDeps {
 }
 /** MICRO-GEOREF-GRAFO · the graph's georeference sections, under its site position */
 function renderGeoSections(host: HTMLElement, st: DocumentStore): void {
-  renderGeorefSection(host, st, georefDeps(st));
+  const deps = georefDeps(st);
+  // p.3 · the map's pin, when none is placed: the models' centre proposed
+  renderSitePinProposal(host, st, {
+    ...deps,
+    contentBox: () => {
+      if (st !== store) return null;
+      for (const h of sceneHandles.values()) { const b = h.contentBox(); if (b) return b; }
+      return null;
+    },
+    toWgs84: (x, y, epsg) => reprojectPoint(x, y, epsg),
+    declared: async () => {
+      const r = await georeferenceScene(JSON.parse(st.toJSON()));
+      return r && !("error" in r) ? { lat: r.centroid[1], lon: r.centroid[0] } : r;
+    },
+    openPicker: (pin) => openSitePickerOnGraph(pin),
+  });
+  renderGeorefSection(host, st, deps);
 }
 /** …the conversion proposed (a deprecated CRS, a ballpark operation): once, at the
  *  opening and after a SHIFT.txt */
@@ -20749,7 +20765,7 @@ function dropFileOnChapter(narrativeId: string, c: number, f: File, x: number, y
  * selector ON THE GRAPH NODE: the node is selected (so an inspector on screen
  * follows it to where the position lives), then the selector opens.
  */
-function openSitePickerOnGraph(): void {
+function openSitePickerOnGraph(proposed?: { lat: number; lon: number }): void {
   if (!store) return;
   const st = store;
   const rootNow = () => st.doc.graph.nodes.find((n) => n.node_type === "graph");
@@ -20761,7 +20777,7 @@ function openSitePickerOnGraph(): void {
   openSitePicker(st, slot ? slotLabel(slot) : String(root?.name ?? t("strip.untitled")), () => {
     const r = rootNow();
     if (r && selectedId !== r.id && store === st) select(r.id);
-  });
+  }, proposed);
 }
 setSitePicker(() => openSitePickerOnGraph());
 // NARRATIVA-BLOCCHI p.2 · a query block reads the graphs of the story's file

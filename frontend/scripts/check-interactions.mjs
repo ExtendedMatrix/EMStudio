@@ -9697,6 +9697,49 @@ test("GR4.inspector", "GEOREF-GRAFO p.2 · la sezione «Georeferencing» nell'In
   return { pass, detail: out };
 });
 
+test("GR5.pin", "GEOREF-GRAFO p.3 · il segnaposto del sito propone il centro dei modelli: GT16 (EPSG:3844), lo Spazio disegna i modelli; nell'Inspector del grafo «Site position (map)» non è posato e sotto c'è la proposta — il centro dell'ingombro dei modelli, posato col georiferimento (ruotato, più lo shift, a WGS 84 dal bridge), a pochi metri dallo shift (le coordinate dei modelli sono quelle del sistema meno lo shift: la stessa distanza misurata contro l'ancora posata dal bridge); «Move…» apre il selettore con la proposta come candidato e non scrive nulla; «Use this» la scrive (site_position, un passo), poi la proposta tace", async () => {
+  if (!existsSync(GEOREF_V4)) return { pass: false, detail: { missing: GEOREF_V4 } };
+  const { p, ctx, errors } = await grOpen();
+  await grSpace(p);
+  await p.waitForTimeout(3000);
+  const D = (fn, a) => p.evaluate(fn, a);
+  const f = JSON.parse(readFileSync(GEOREF_V4, "utf8"));
+  const gid = Object.keys(f.graphs).find((k) => (f.graphs[k].nodes ?? []).length > 100);
+  const ROOT = `${gid}_graphroot`;
+  const out = {};
+  await D((r) => window.__EM_DRAG__.select(r), ROOT);
+  await p.waitForSelector('[data-georef="pin"] [data-georef="pin-use"]', { timeout: 30000 }).catch(() => null);
+  out.pin = await D(() => { const e = document.querySelector('[data-georef="pin"]'); return e ? { lat: Number(e.dataset.lat), lon: Number(e.dataset.lon), d: Number(e.dataset.fromShift), text: e.textContent } : null; });
+  out.site0 = await D((r) => window.__EM_DRAG__.node(r)?.data?.site_position ?? null, ROOT);
+  const u0 = await D(() => window.__EM_DRAG__.undoDepth());
+  await p.click('[data-georef="pin"] [data-georef="pin-move"]').catch(() => null);
+  await p.waitForTimeout(800);
+  out.picker = await D(() => { const m = document.querySelector(".site-picker"); return m ? { lat: m.querySelector('[data-field="lat"]')?.value, lon: m.querySelector('[data-field="lon"]')?.value } : null; });
+  await p.click('.site-picker [data-action="cancel"]').catch(() => null);
+  await p.waitForTimeout(300);
+  out.afterMove = { steps: (await D(() => window.__EM_DRAG__.undoDepth())) - u0, site: await D((r) => window.__EM_DRAG__.node(r)?.data?.site_position ?? null, ROOT) };
+  await p.click('[data-georef="pin"] [data-georef="pin-use"]').catch(() => null);
+  await p.waitForTimeout(800);
+  out.used = { steps: (await D(() => window.__EM_DRAG__.undoDepth())) - u0, site: await D((r) => window.__EM_DRAG__.node(r)?.data?.site_position ?? null, ROOT),
+    still: await D(() => !!document.querySelector('[data-georef="pin"]')) };
+  out.errors = errors;
+  await ctx.close();
+  // the same distance read another way: the pin against the shift as the bridge places it (/geo/frame, PROJ)
+  const geo = f.graphs[gid].nodes.find((n) => n.node_type === "geo_position").data;
+  const fr = await (await fetch(`${GEOREF_BRIDGE}/geo/frame`, { method: "POST", headers: { origin: `http://localhost:${PORT}`, "content-type": "application/json" },
+    body: JSON.stringify({ epsg: geo.epsg, x: geo.shift_x, y: geo.shift_y, z: 0, rotation: geo.rotation ?? 0 }) })).json();
+  const R = 6371000, r = Math.PI / 180;
+  const far = out.pin && fr?.ok ? R * Math.hypot((out.pin.lat - fr.lat) * r, (out.pin.lon - fr.lon) * r * Math.cos(fr.lat * r)) : null;
+  out.anchor = fr?.ok ? [fr.lat, fr.lon] : fr;
+  out.fromAnchor = far;
+  const pass = !!out.pin && /the box of the models/.test(out.pin.text) && out.pin.d < 50 && far !== null && Math.abs(far - out.pin.d) < 0.5 && out.site0 === null
+    && Math.abs(Number(out.picker?.lat) - +out.pin.lat.toFixed(6)) < 1e-9 && Math.abs(Number(out.picker?.lon) - +out.pin.lon.toFixed(6)) < 1e-9
+    && out.afterMove.steps === 0 && out.afterMove.site === null
+    && out.used.steps === 1 && Math.abs(out.used.site?.lat - out.pin.lat) < 1e-6 && Math.abs(out.used.site?.lon - out.pin.lon) < 1e-6 && out.used.site?.crs === "EPSG:4326"
+    && out.used.still === false && !errors.length;
+  return { pass, detail: out };
+});
+
 // ── run ─────────────────────────────────────────────────────────────────────
 const chosen =cases.filter((c) => !only.length || only.includes(c.id) || only.some((o) => c.id.startsWith(o + ".")));
 for (const c of chosen) {
