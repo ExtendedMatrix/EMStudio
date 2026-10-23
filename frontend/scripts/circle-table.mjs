@@ -1,5 +1,5 @@
-// The circle of every edge type of the datamodel, as JSON on stdout — the table
-// of the MICRO-PROPRIETA-COMPATTA report (before/after a change of `edgeCircle`).
+// The family and the leaf of every edge type of the datamodel, as JSON on stdout
+// (was the circle of MICRO-PROPRIETA-COMPATTA; families since MICRO-FILTRI-DETTAGLIATI).
 //
 //   node scripts/circle-table.mjs [path/to/src/]
 import * as esbuild from "esbuild";
@@ -13,5 +13,5 @@ const b = await esbuild.build({
 });
 const F = await import("data:text/javascript;base64," + Buffer.from(b.outputFiles[0].text).toString("base64"));
 const out = {};
-for (const t of F.R.edgeTypeNames()) out[t] = F.edgeCircle(t);
+for (const t of F.R.edgeTypeNames()) out[t] = { family: F.edgeFamilyOf(t), leaf: F.edgeLeaf(t) };
 console.log(JSON.stringify(out, null, 1));

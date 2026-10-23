@@ -47,14 +47,14 @@ const eq = (got, want, what) => {
   ok(!F.ADORNMENT_EDGE_TYPES.has("has_first_epoch"), "a temporal edge is not an ornament edge");
 }
 
-// ── the ornament NODE set is anchored to the authors_licenses ring ────────────
+// ── the ornament NODE set is anchored to the rights family ────────────────────
 {
   for (const t of ["author", "author_ai", "license", "embargo"])
     ok(F.isAdornmentNodeType(t), `${t} is an ornament node type`);
   for (const t of ["US", "USVs", "document", "property", "extractor", "epoch", "EpochNode"])
     ok(!F.isAdornmentNodeType(t), `${t} is NOT an ornament node type`);
-  eq(F.nodeCircle("embargo"), "authors_licenses",
-    "embargo now maps to the authors_licenses ring (was links_other before BADGE1)");
+  eq(F.nodeFamilyOf("embargo"), "rights",
+    "embargo maps to the rights family (authors, licences, embargo)");
 }
 
 // helpers to drive adornmentBadges(nodes, allEdges, visibleIds)

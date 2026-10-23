@@ -804,6 +804,11 @@ export function edgeEndpointsRaw(edgeType: string): {
   return { source: ac?.source ?? [], target: ac?.target ?? [] };
 }
 
+/** A datamodel CLASS name and its ancestors, nearest first, up to "Node". */
+export function classAncestorsOf(className: string): string[] {
+  return classAncestors(className);
+}
+
 /** True when a datamodel CLASS name (not a node_type) is `ancestor` or one of
  *  its subclasses — the class hierarchy of the node registry, walked by name. */
 export function classIsA(className: string, ancestor: string): boolean {

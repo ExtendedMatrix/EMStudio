@@ -323,6 +323,7 @@ import {
   CONNECTIONS_VERSION,
   connectValidity,
   edgeLabel,
+  edgeTypeDescription,
   edgeTypeLabel,
   EM_VERSION,
   GENERIC_EDGE,
@@ -448,14 +449,19 @@ import {
 import { altLabelsOf } from "./altlabels";
 import {
   ADORNMENT_EDGE_TYPES,
-  CIRCLES,
-  type CircleKey,
-  defaultVisibleCircles,
+  defaultVisibleLeaves,
   type DetailTemplate,
-  edgeCircle,
+  EDGE_FAMILIES,
+  edgeLeaf,
+  type Family,
+  familyLeaves,
+  familyOfLeaf,
   isAdornmentNodeType,
-  nodeCircle,
+  NODE_FAMILIES,
+  nodeLeaf,
   TEMPLATES,
+  UNKNOWN_EDGE_LEAF,
+  UNKNOWN_NODE_LEAF,
 } from "./filters";
 import { adornmentBadges, type AdornmentBadge } from "./adornments";
 import { drawnPdChips, hitPdChip } from "./pd-chip";
@@ -643,7 +649,7 @@ import {
   DECLARED_KINDS, landStep, parentLabel, type DeclaredKind, type DeclaredLevel,
 } from "./declared";
 import { adaptDraft } from "./views/stamps";
-import { ancestorsOf, dtcFamiliesOf, dtcKindFamily, dtcKindsFor, isContinuityType, isVirtualType, propertyLabel, typeLabel as datamodelTypeLabel, endReasonLabel } from "./rules";
+import { ancestorsOf, dtcFamiliesOf, dtcKindFamily, dtcKindsFor, isContinuityType, isVirtualType, propertyLabel, typeDescription, typeLabel as datamodelTypeLabel, endReasonLabel } from "./rules";
 import { epochInstances, instanceTransform, instanceTypes, planInstance } from "./epoch-instances";
 import { continuityLinks, dropContinuity, END_REASONS, END_REASON_DEFAULT, endOfUnit, endReasonDescription, endReasonOf, endReasonPredicate, endReasonWritten, planContinuity, type EndReason } from "./continuity";
 import { digestOf, isStampPath, stampPathFor } from "./stamp";
@@ -1027,14 +1033,16 @@ const hiddenEdgesNow = hiddenEdgeTypes;
 // em.json for projection + the future HDT-O lens, never rendered as strat boxes.
 // Derived from the datamodel (no hardcoded list); independent of the circles.
 const HDTO_HIDDEN_TYPES = hdtoProfileTypes();
-// "circles of detail" — which detail rings are visible, per view. Matrix and
-// Graph keep independent visibility so each view has its own default depth.
-const circleState: Record<ViewKind, Set<CircleKey>> = {
-  matrix: defaultVisibleCircles("matrix"),
-  graph: defaultVisibleCircles("graph"),
-  dtc: defaultVisibleCircles("dtc"),
-  multigraph: defaultVisibleCircles("multigraph"),
-  graphs: defaultVisibleCircles("graphs"),
+
+// MICRO-FILTRI-DETTAGLIATI · the «Detail level»: which LEAVES (one node type,
+// one edge type — filters.ts) are visible, per view. Matrix, Graph, DTC and
+// «Graphs paradata» each keep their own.
+const circleState: Record<ViewKind, Set<string>> = {
+  matrix: defaultVisibleLeaves("matrix"),
+  graph: defaultVisibleLeaves("graph"),
+  dtc: defaultVisibleLeaves("dtc"),
+  multigraph: defaultVisibleLeaves("multigraph"),
+  graphs: defaultVisibleLeaves("graphs"),
 };
 // Recompute the hidden type sets from the current view's visible circles.
 function recomputeHiddenFromCircles(): void {
@@ -1054,28 +1062,34 @@ function hiddenFor(v: ViewKind): { nodes: Set<string>; edges: Set<string> } {
   if (!store) return { nodes, edges };
   const visible = circleState[v];
   for (const n of store.doc.graph.nodes) {
-    const c = nodeCircle(n.node_type);
-    if (c && !visible.has(c)) nodes.add(n.node_type);
+    const l = nodeLeaf(n.node_type);
+    if (l && !visible.has(l)) nodes.add(n.node_type);
   }
   for (const e of store.doc.graph.edges) {
     const t = e.edge_type ?? "";
-    const c = edgeCircle(t);
-    if (c && !visible.has(c)) edges.add(t);
+    const l = edgeLeaf(t);
+    if (l && !visible.has(l)) edges.add(t);
   }
   return { nodes, edges };
 }
 // If a freshly-created node's detail ring is hidden in the current view, turn
 // it back on — otherwise you "create" a node you can't see.
 function ensureCircleVisibleFor(nodeType: string | undefined): void {
-  const c = nodeCircle(nodeType);
-  if (!c || circleState[view].has(c)) return;
-  circleState[view].add(c);
+  const l = nodeLeaf(nodeType);
+  if (!l || circleState[view].has(l)) return;
+  circleState[view].add(l);
   recomputeHiddenFromCircles();
   buildScenes();
   draw();
   if (filterPanelOpen()) renderCirclesPanel();
-  const label = CIRCLES.find((x) => x.key === c)?.label ?? c;
-  toast(t("l.filterShowing", { label }));
+  toast(t("l.filterShowing", { label: leafLabel(l) }));
+}
+/** «Family › type», what a toast says of a leaf */
+function leafLabel(leaf: string): string {
+  const fam = familyOfLeaf(leaf);
+  const type = leaf.slice(2);
+  const name = type === "*" ? t("fp.unknown") : leaf.startsWith("n:") ? datamodelTypeLabel(type) : edgeLabel(type);
+  return fam ? `${t(fam.label)} › ${name}` : name;
 }
 /** group-context navigation stack; empty = full canvas */
 let contextStack: string[] = [];
@@ -5710,7 +5724,7 @@ function buildScenesNow(): void {
 // actively hid a ring that's on by default) — only then do we recompact, so
 // the default Matrix keeps the archival em-core layout and pays no WASM cost.
 function matrixTighterThanDefault(): boolean {
-  const def = defaultVisibleCircles("matrix");
+  const def = defaultVisibleLeaves("matrix");
   const cur = circleState.matrix;
   return [...def].some((k) => !cur.has(k));
 }
@@ -16400,7 +16414,7 @@ function refreshFunnel(): void {
 // as its own flag, exposed at the end of the detail panel.
 let monochrome = false;
 function applyTemplate(t: DetailTemplate): void {
-  circleState[view] = new Set(t.circles);
+  circleState[view] = new Set(t.leaves);
   recomputeHiddenFromCircles();
   buildScenes();
   draw();
@@ -16408,19 +16422,72 @@ function applyTemplate(t: DetailTemplate): void {
   // MICRO-GLIFI-OVERLAY-CONTINUITA p.4 · a filter hides and shows, it does not
   // re-lay the Matrix out: what it hides leaves its place empty
 }
+/** MICRO-FILTRI-DETTAGLIATI · the families open in the panel, and its search —
+ *  kept across the panel's redraws (a checkbox redraws it) */
+const fpOpenFamilies = new Set<string>();
+let fpQuery = "";
+/** switch a set of leaves of the current view on or off, and redraw */
+function setLeaves(leaves: string[], on: boolean, focusSel?: string): void {
+  const visible = circleState[view];
+  for (const l of leaves) {
+    if (on) visible.add(l);
+    else visible.delete(l);
+  }
+  recomputeHiddenFromCircles();
+  buildScenes();
+  draw();
+  // MICRO-GLIFI-OVERLAY-CONTINUITA p.4 · no recompaction: the Matrix keeps
+  // every place (a hidden node leaves its room; «Recompute layout» packs)
+  renderCirclesPanel();
+  if (focusSel) (filterPanel.querySelector(focusSel) as HTMLElement | null)?.focus();
+}
+/** show only the families and types the search names (a family named shows all its types) */
+function applyFpSearch(): void {
+  const q = fpQuery.trim().toLowerCase();
+  let shown = 0;
+  for (const fam of filterPanel.querySelectorAll<HTMLElement>(".fp-fam")) {
+    const famHit = !q || (fam.dataset.search ?? "").includes(q);
+    let typeHits = 0;
+    for (const row of fam.querySelectorAll<HTMLElement>(".fp-type")) {
+      const hit = famHit || (row.dataset.search ?? "").includes(q);
+      row.classList.toggle("hidden", !hit);
+      if (hit) typeHits++;
+    }
+    const show = famHit || typeHits > 0;
+    fam.classList.toggle("hidden", !show);
+    if (show) shown++;
+    const types = fam.querySelector<HTMLElement>(".fp-types");
+    // a search opens what it found; without one, the family's own state
+    if (types) types.classList.toggle("hidden", q ? !show : !fpOpenFamilies.has(fam.dataset.fam ?? ""));
+  }
+  const none = filterPanel.querySelector<HTMLElement>(".fp-nomatch");
+  if (none) {
+    none.classList.toggle("hidden", !q || shown > 0);
+    none.textContent = t("fp.noMatch", { q: fpQuery.trim() });
+  }
+  for (const sect of filterPanel.querySelectorAll<HTMLElement>(".fp-sect[data-kind]")) {
+    const any = filterPanel.querySelector(`.fp-fam[data-kind="${sect.dataset.kind}"]:not(.hidden)`);
+    sect.classList.toggle("hidden", !any);
+  }
+}
 function renderCirclesPanel(): void {
   filterPanel.innerHTML = "";
   if (!store) return;
-  // per-circle present counts, for the current document
-  const nodeCount = new Map<CircleKey, number>();
-  for (const n of store.doc.graph.nodes) {
-    const c = nodeCircle(n.node_type);
-    if (c) nodeCount.set(c, (nodeCount.get(c) ?? 0) + 1);
-  }
-  const edgeCount = new Map<CircleKey, number>();
+  // per-type counts, for the current document (the type as the document writes
+  // it; an edge's older spelling counts with the relation it spells)
+  const nodeCount = new Map<string, number>();
+  for (const n of store.doc.graph.nodes) nodeCount.set(n.node_type, (nodeCount.get(n.node_type) ?? 0) + 1);
+  const edgeCount = new Map<string, number>();
   for (const e of store.doc.graph.edges) {
-    const c = edgeCircle(e.edge_type ?? "");
-    if (c) edgeCount.set(c, (edgeCount.get(c) ?? 0) + 1);
+    const et = canonicalEdgeType(e.edge_type ?? "");
+    edgeCount.set(et, (edgeCount.get(et) ?? 0) + 1);
+  }
+  // the BR's ends, by type (said under the BR: the filter switches node types)
+  const brEnds = new Map<string, number>();
+  for (const n of store.doc.graph.nodes) {
+    if (!isContinuityType(n.node_type)) continue;
+    const r = String((n.data as Record<string, unknown> | undefined)?.end_reason ?? "unknown");
+    brEnds.set(r, (brEnds.get(r) ?? 0) + 1);
   }
   const visible = circleState[view];
 
@@ -16428,73 +16495,164 @@ function renderCirclesPanel(): void {
   head.className = "fp-head";
   const hint = document.createElement("span");
   hint.className = "fp-hint";
-  hint.textContent = `Detail level — ${t(`mode.${view}`)} view`;
+  hint.textContent = t("fp.title", { view: t(`mode.${view}`) });
   const close = document.createElement("button");
   close.className = "fp-close";
   close.textContent = "✕";
-  close.title = "Close (Esc)";
-  close.setAttribute("aria-label", "Close view properties");
+  close.title = t("fp.close");
+  close.setAttribute("aria-label", t("fp.close"));
   close.addEventListener("click", closeFilterPanel);
   head.append(hint, close);
   filterPanel.appendChild(head);
 
-  // Templates (at the top): one-click presets that set BOTH node and edge
-  // rings (this replaced the old edge-only "All edges / Stratigraphic / None").
-  const eq = (t: DetailTemplate): boolean =>
-    t.circles.length === visible.size && t.circles.every((k) => visible.has(k));
+  // Templates (at the top): one-click presets that set every node and edge type
+  const eq = (tp: DetailTemplate): boolean =>
+    tp.leaves.size === visible.size && [...tp.leaves].every((k) => visible.has(k));
   const tmpl = document.createElement("div");
   tmpl.className = "fp-template";
   const tlbl = document.createElement("span");
   tlbl.textContent = t("l.template");
   const tsel = document.createElement("select");
+  tsel.dataset.fp = "template";
   const ph = document.createElement("option");
   ph.value = "";
   ph.textContent = t("l.custom");
   tsel.appendChild(ph);
-  for (const t of TEMPLATES) {
+  for (const tp of TEMPLATES) {
     const o = document.createElement("option");
-    o.value = t.key;
-    o.textContent = t.label;
-    if (eq(t)) o.selected = true;
+    o.value = tp.key;
+    o.textContent = t(tp.label);
+    if (eq(tp)) o.selected = true;
     tsel.appendChild(o);
   }
   tsel.addEventListener("change", () => {
-    const t = TEMPLATES.find((x) => x.key === tsel.value);
-    if (t) applyTemplate(t);
+    const tp = TEMPLATES.find((x) => x.key === tsel.value);
+    if (tp) applyTemplate(tp);
   });
   tmpl.append(tlbl, tsel);
   filterPanel.appendChild(tmpl);
 
-  const addSection = (title: string, kind: "node" | "edge"): void => {
+
+  const addSection = (title: string, kind: "node" | "edge", families: Family[]): void => {
     const h = document.createElement("div");
     h.className = "fp-sect";
+    h.dataset.kind = kind;
     h.textContent = title;
     filterPanel.appendChild(h);
-    for (const circle of CIRCLES.filter((c) => c.kind === kind)) {
-      const count =
-        (kind === "node" ? nodeCount : edgeCount).get(circle.key) ?? 0;
-      const row = document.createElement("label");
-      row.className = "fp-row";
-      if (!count) row.style.opacity = "0.45";
+    const counts = kind === "node" ? nodeCount : edgeCount;
+    const known = new Set(families.flatMap((f) => f.types));
+    for (const fam of families) {
+      // the rows: the datamodel's types, then those the document carries and the
+      // datamodel does not know («Other», one wildcard row)
+      const unknownTypes = fam.key === "other" ? [...counts.keys()].filter((x) => !known.has(x)) : [];
+      const rows: Array<{ type: string; leaf: string | null; count: number; label: string; tip: string }> =
+        fam.types.map((ty) => ({
+          type: ty,
+          leaf: fam.structural.has(ty) ? null : `${kind === "node" ? "n" : "e"}:${ty}`,
+          count: counts.get(ty) ?? 0,
+          label: kind === "node" ? datamodelTypeLabel(ty) : edgeLabel(ty),
+          tip: kind === "node" ? typeDescription(ty) : edgeTypeDescription(ty),
+        }));
+      if (unknownTypes.length)
+        rows.push({
+          type: "*",
+          leaf: kind === "node" ? UNKNOWN_NODE_LEAF : UNKNOWN_EDGE_LEAF,
+          count: unknownTypes.reduce((a, x) => a + (counts.get(x) ?? 0), 0),
+          label: t("fp.unknown"),
+          tip: unknownTypes.join(", "),
+        });
+      const leaves = familyLeaves(fam);
+      const onLeaves = leaves.filter((l) => visible.has(l));
+      const total = rows.reduce((a, r) => a + r.count, 0);
+      const shownN = rows.reduce((a, r) => a + (!r.leaf || visible.has(r.leaf) ? r.count : 0), 0);
+      const famLabel = t(fam.label);
+      const famId = `${kind === "node" ? "n" : "e"}:${fam.key}`;
+
+      const box = document.createElement("div");
+      box.className = "fp-fam";
+      box.dataset.fam = famId;
+      box.dataset.kind = kind;
+      box.dataset.search = `${famLabel} ${fam.key}`.toLowerCase();
+      const row = document.createElement("div");
+      row.className = "fp-row fp-famrow";
+      if (!total) row.classList.add("fp-empty");
       const cb = document.createElement("input");
       cb.type = "checkbox";
-      cb.checked = visible.has(circle.key);
-      cb.addEventListener("change", () => {
-        if (cb.checked) visible.add(circle.key);
-        else visible.delete(circle.key);
-        recomputeHiddenFromCircles();
-        buildScenes();
-        draw();
-        // MICRO-GLIFI-OVERLAY-CONTINUITA p.4 · no recompaction: the Matrix keeps
-        // every place (a hidden node leaves its room; «Recompute layout» packs)
-      });
-      row.appendChild(cb);
-      row.appendChild(document.createTextNode(` ${circle.label} (${count})`));
-      filterPanel.appendChild(row);
+      cb.dataset.famCb = famId;
+      cb.checked = leaves.length ? onLeaves.length === leaves.length : true;
+      cb.indeterminate = onLeaves.length > 0 && onLeaves.length < leaves.length;
+      cb.disabled = !leaves.length;
+      if (!leaves.length) cb.title = t("fp.structural");
+      cb.setAttribute("aria-label", famLabel);
+      cb.addEventListener("change", () => setLeaves(leaves, onLeaves.length < leaves.length, `[data-fam-cb="${famId}"]`));
+      const name = document.createElement("span");
+      name.className = "fp-name";
+      name.textContent = famLabel;
+      const count = document.createElement("span");
+      count.className = "fp-count";
+      count.textContent = `${shownN}/${total}`;
+      count.title = t("fp.countTitle");
+      const exp = document.createElement("button");
+      exp.className = "fp-exp";
+      const open = fpOpenFamilies.has(famId);
+      exp.textContent = open ? "▾" : "▸";
+      exp.setAttribute("aria-expanded", String(open));
+      exp.dataset.famExp = famId;
+      const toggle = (): void => {
+        if (fpOpenFamilies.has(famId)) fpOpenFamilies.delete(famId);
+        else fpOpenFamilies.add(famId);
+        const now = fpOpenFamilies.has(famId);
+        exp.textContent = now ? "▾" : "▸";
+        exp.setAttribute("aria-expanded", String(now));
+        applyFpSearch();
+      };
+      exp.addEventListener("click", toggle);
+      name.addEventListener("click", toggle);
+      row.append(cb, name, count, exp);
+      box.appendChild(row);
+
+      const types = document.createElement("div");
+      types.className = "fp-types";
+      for (const r of rows) {
+        const tr = document.createElement("label");
+        tr.className = "fp-row fp-type";
+        tr.dataset.leaf = r.leaf ?? `${kind === "node" ? "n" : "e"}:${r.type}`;
+        tr.dataset.search = `${r.label} ${r.type}`.toLowerCase();
+        tr.title = r.leaf ? r.tip : `${r.tip ? r.tip + "\n\n" : ""}${t("fp.structural")}`;
+        if (!r.count) tr.classList.add("fp-empty");
+        const tc = document.createElement("input");
+        tc.type = "checkbox";
+        tc.checked = !r.leaf || visible.has(r.leaf);
+        tc.disabled = !r.leaf;
+        if (r.leaf) {
+          const leaf = r.leaf;
+          tc.dataset.leafCb = leaf;
+          tc.addEventListener("change", () => setLeaves([leaf], tc.checked, `[data-leaf-cb="${leaf}"]`));
+        }
+        const tn = document.createElement("span");
+        tn.className = "fp-name";
+        tn.textContent = r.label;
+        const tcnt = document.createElement("span");
+        tcnt.className = "fp-count";
+        tcnt.textContent = `${!r.leaf || visible.has(r.leaf) ? r.count : 0}/${r.count}`;
+        tcnt.title = t("fp.countTitle");
+        tr.append(tc, tn, tcnt);
+        types.appendChild(tr);
+        // the BR: how its units end, said (the filter switches the BR as a whole)
+        if (kind === "node" && r.type !== "*" && isContinuityType(r.type) && brEnds.size) {
+          const ends = document.createElement("div");
+          ends.className = "fp-sub";
+          ends.textContent = [...brEnds].map(([k, n]) => `${endReasonLabel(k)} ${n}`).join(" · ");
+          types.appendChild(ends);
+        }
+      }
+      box.appendChild(types);
+      filterPanel.appendChild(box);
     }
   };
-  addSection("Nodes", "node");
-  addSection("Edges", "edge");
+  addSection(t("fp.nodes"), "node", NODE_FAMILIES);
+  addSection(t("fp.edges"), "edge", EDGE_FAMILIES);
+  applyFpSearch();
 
   // G3 · the liquid Graph's own filters: the local graph, the epochs, a text,
   // and whether what they exclude is dimmed or hidden
@@ -16616,7 +16774,7 @@ function renderCirclesPanel(): void {
   reset.className = "fp-reset";
   reset.textContent = t("l.resetView");
   reset.addEventListener("click", () => {
-    circleState[view] = defaultVisibleCircles(view);
+    circleState[view] = defaultVisibleLeaves(view);
     recomputeHiddenFromCircles();
     buildScenes();
     draw();
@@ -18854,9 +19012,9 @@ function jumpTo(nodeId: string): void {
     // and then the ring is offered; an author, a licence or an embargo this
     // projection says as a badge has its node in the Full graph: the jump goes on there
     const nt = store?.node(nodeId)?.node_type;
-    const ring = nodeCircle(nt);
+    const ring = nodeLeaf(nt);
     if (ring && !circleState[view].has(ring)) {
-      const label = CIRCLES.find((x) => x.key === ring)?.label ?? ring;
+      const label = leafLabel(ring);
       toastAsk(t("jump.filtered", { name: String(store?.node(nodeId)?.name ?? nodeId), ring: label }),
                [{ label: t("jump.showRing", { ring: label }), run: () => { ensureCircleVisibleFor(nt); jumpTo(nodeId); } }]);
       return;
@@ -22035,7 +22193,7 @@ function placeOwnedPanels(): void {
     panel.style.transform = "none";
   };
   place(overlayPanel, overlayOwner, 300);
-  place(filterPanel, filterOwner, 250);
+  place(filterPanel, filterOwner, 300);
 }
 
 /**

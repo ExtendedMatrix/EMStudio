@@ -2282,7 +2282,7 @@ body.sync-active #mode-indicator::before {
   top: calc(var(--live-y, 0px) + var(--winbar-h, 0px) + 10px);
   left: calc(var(--live-x, 0px) + var(--live-w, 100%) - 10px);
   transform: translateX(-100%);
-  width: 250px;
+  width: 300px;
   max-height: 70vh;
   overflow-y: auto;
   background: var(--bg-elevated);
@@ -2337,6 +2337,41 @@ body.sync-active #mode-indicator::before {
   cursor: pointer;
   font-size: 12px;
 }
+/* MICRO-FILTRI-DETTAGLIATI · family → types */
+.fp-search {
+  width: 100%;
+  box-sizing: border-box;
+  margin: 0 0 4px;
+  padding: 3px 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  font-size: 12px;
+  background: var(--bg-panel);
+  color: var(--text);
+}
+.fp-nomatch { font-size: 11px; color: var(--text-muted); padding: 4px 0; }
+.fp-famrow, .fp-type {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.fp-famrow .fp-name { flex: 1; font-weight: 600; cursor: pointer; }
+.fp-type .fp-name { flex: 1; }
+.fp-count { font-size: 10.5px; color: var(--text-muted); font-variant-numeric: tabular-nums; }
+.fp-mini, .fp-exp {
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 10.5px;
+  padding: 0 2px;
+  cursor: pointer;
+}
+.fp-mini:hover, .fp-exp:hover { color: var(--text); }
+.fp-mini:disabled { opacity: 0.35; cursor: default; }
+.fp-exp { width: 14px; font-size: 11px; }
+.fp-types { margin: 0 0 4px 18px; }
+.fp-empty { opacity: 0.45; }
+.fp-sub { margin: -1px 0 2px 20px; font-size: 10.5px; color: var(--text-muted); }
 
 .fp-reset {
   margin-top: 10px;

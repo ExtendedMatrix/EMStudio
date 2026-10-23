@@ -1,149 +1,196 @@
-// Contextual "circles of detail" filter (EM progressive disclosure).
-// Each node / edge is assigned to a CIRCLE derived from the datamodel (never
-// hardcoded): real stratigraphic units at the core, then virtual units, then
-// paradata, with continuity as an orthogonal ring; authors/licenses and
-// links/other split out. Edges split into temporal, paradata, author/license,
-// other and generic. Structural things (group containers, epoch swimlanes,
-// membership edges) are NOT filterable — they carry the drawing's structure —
-// so they map to `null`.
-import { MEMBERSHIP_EDGES } from "./folding";
+// MICRO-FILTRI-DETTAGLIATI · the «Detail level» filter: FAMILIES of node and
+// edge types, two levels deep (family → the datamodel's types). The grouping is
+// the table of detail-families.ts; the types, their labels and descriptions are
+// the datamodel's (rules.ts). What the panel switches is a LEAF — one node type
+// (`n:<type>`) or one edge type (`e:<type>`), plus `n:*` / `e:*` for the types a
+// document carries and the datamodel does not know. Structural types (group
+// boxes, epochs, membership edges) have no leaf: they carry the drawing and are
+// never filtered — the panel lists and counts them all the same.
+//
+// This replaced the eleven «circles of detail» (real, virtual, continuity,
+// paradata, authors & licences, links & other; temporal, paradata, author,
+// other, generic edges): every view's defaults and every template show, type by
+// type, what the circles showed (check-detail-families).
 import {
-  ancestorsOf,
-  classIsA,
+  EDGE_FAMILY_TABLE,
+  type EdgeFamilyKey,
+  NODE_FAMILY_TABLE,
+  type NodeFamilyKey,
+  TEMPLATE_TABLE,
+} from "./detail-families";
+import {
+  canonicalEdgeType,
+  classAncestorsOf,
   classOf,
-  edgeEndpointClasses,
   edgeEndpointsRaw,
   edgeTypeNames,
   GENERIC_EDGE,
-  isContinuityType,
-  isGroupType,
-  isParadataType,
-  isStratigraphicType,
-  isVirtualType,
+  typesOfClass,
 } from "./rules";
 import type { ViewKind } from "./types";
 
-export type CircleKey =
-  | "real"
-  | "virtual"
-  | "continuity"
-  | "paradata_nodes"
-  | "authors_licenses"
-  | "links_other"
-  | "edges_temporal"
-  | "edges_paradata"
-  | "edges_author"
-  | "edges_other"
-  | "edges_generic";
+export type { EdgeFamilyKey, NodeFamilyKey } from "./detail-families";
+export type FamilyKey = NodeFamilyKey | EdgeFamilyKey;
 
-export interface Circle {
-  key: CircleKey;
-  label: string;
+/** the leaf a type the datamodel does not know falls in («Other») */
+export const UNKNOWN_NODE_LEAF = "n:*";
+export const UNKNOWN_EDGE_LEAF = "e:*";
+
+export interface Family {
+  key: FamilyKey;
   kind: "node" | "edge";
-  /** default visibility per view (Matrix hides the outer rings by default) */
-  matrix: boolean;
-  graph: boolean;
+  /** i18n key of the family's label */
+  label: string;
+  /** the datamodel's types in this family (node_types or edge names), table order */
+  types: string[];
+  /** the types among them that are structure (never switched off) */
+  structural: ReadonlySet<string>;
 }
 
-// Order = concentric rings, core first. The panel renders them top→down.
-export const CIRCLES: Circle[] = [
-  { key: "real", label: "Real stratigraphic units", kind: "node", matrix: true, graph: true },
-  { key: "virtual", label: "Virtual stratigraphic units", kind: "node", matrix: true, graph: true },
-  { key: "continuity", label: "Continuity (BR)", kind: "node", matrix: true, graph: true },
-  { key: "paradata_nodes", label: "Paradata nodes", kind: "node", matrix: true, graph: true },
-  // BADGE1 · author/license/embargo are no longer boxes but badges pinned to
-  // their referent. MICRO-SOVRAPPOSIZIONI · this ring decides whether the
-  // ornament NODES exist in the view (those still drawn as nodes: members of a
-  // paradata group, every one in the multigraph); the BADGES are overlays,
-  // switched in the Overlays menu (overlays.ts). Default ON in every view.
-  { key: "authors_licenses", label: "Authors & licenses", kind: "node", matrix: true, graph: true },
-  { key: "links_other", label: "Links & other", kind: "node", matrix: false, graph: true },
-  { key: "edges_temporal", label: "Temporal edges", kind: "edge", matrix: true, graph: true },
-  { key: "edges_paradata", label: "Paradata edges", kind: "edge", matrix: true, graph: true },
-  { key: "edges_author", label: "Author & license edges", kind: "edge", matrix: false, graph: true },
-  { key: "edges_other", label: "Other edges", kind: "edge", matrix: false, graph: true },
-  { key: "edges_generic", label: "Generic edges", kind: "edge", matrix: false, graph: true },
-];
+// ---- node families ----------------------------------------------------------
+const DATAMODEL_NODE_TYPES: string[] = typesOfClass("Node");
+const KNOWN_NODE_TYPES: ReadonlySet<string> = new Set(DATAMODEL_NODE_TYPES);
+const CLASS_TO_NODE_FAMILY = new Map<string, NodeFamilyKey>();
+for (const f of NODE_FAMILY_TABLE) for (const c of f.classes) CLASS_TO_NODE_FAMILY.set(c, f.key);
 
-const NODE_KEYS: CircleKey[] = [
-  "real",
-  "virtual",
-  "continuity",
-  "paradata_nodes",
-  "authors_licenses",
-  "links_other",
-];
-const EDGE_KEYS: CircleKey[] = [
-  "edges_temporal",
-  "edges_paradata",
-  "edges_author",
-  "edges_other",
-  "edges_generic",
-];
+function nodeFamilyOfKnown(nodeType: string): NodeFamilyKey {
+  // nearest named class of the type's ancestry (the class itself first)
+  for (const c of classAncestorsOf(classOf(nodeType))) {
+    const f = CLASS_TO_NODE_FAMILY.get(c);
+    if (f) return f;
+  }
+  return "other";
+}
 
-/** Detail-level presets applied at the top of the Detail panel — one click
- *  sets BOTH the node and edge rings. */
+/** The family of a node type — always one («Other» for what the table does
+ *  not name, or a type the datamodel does not know). */
+export function nodeFamilyOf(nodeType: string | undefined): NodeFamilyKey {
+  const t = nodeType ?? "";
+  return KNOWN_NODE_TYPES.has(t) ? nodeFamilyOfKnown(t) : "other";
+}
+
+function isStructuralNodeType(nodeType: string): boolean {
+  const def = NODE_FAMILY_TABLE.find((f) => f.key === nodeFamilyOf(nodeType));
+  if (!def?.structural?.length) return false;
+  const anc = classAncestorsOf(classOf(nodeType));
+  // the nearest named class decides: a ParadataNodeGroup is a GroupNode too
+  const nearest = anc.find((c) => CLASS_TO_NODE_FAMILY.has(c));
+  return !!nearest && def.structural.includes(nearest);
+}
+
+/** The leaf the panel switches for a node type, or null when it is structure. */
+export function nodeLeaf(nodeType: string | undefined): string | null {
+  const t = nodeType ?? "";
+  if (!KNOWN_NODE_TYPES.has(t)) return UNKNOWN_NODE_LEAF;
+  return isStructuralNodeType(t) ? null : `n:${t}`;
+}
+
+// ---- edge families ----------------------------------------------------------
+const EDGE_TO_FAMILY = new Map<string, EdgeFamilyKey>();
+for (const f of EDGE_FAMILY_TABLE) for (const e of f.edges) EDGE_TO_FAMILY.set(e, f.key);
+const DATAMODEL_EDGE_TYPES: string[] = [...edgeTypeNames(), GENERIC_EDGE];
+const KNOWN_EDGE_TYPES: ReadonlySet<string> = new Set(DATAMODEL_EDGE_TYPES);
+
+/** The family of an edge type (an older spelling reads as the relation it spells). */
+export function edgeFamilyOf(edgeType: string | undefined): EdgeFamilyKey {
+  return EDGE_TO_FAMILY.get(canonicalEdgeType(edgeType)) ?? "other";
+}
+
+/** The leaf the panel switches for an edge type, or null when it is structure
+ *  (the membership edges that build the containers). */
+export function edgeLeaf(edgeType: string | undefined): string | null {
+  const t = canonicalEdgeType(edgeType);
+  if (!KNOWN_EDGE_TYPES.has(t)) return UNKNOWN_EDGE_LEAF;
+  const def = EDGE_FAMILY_TABLE.find((f) => f.key === edgeFamilyOf(t));
+  return def?.structural?.includes(t) ? null : `e:${t}`;
+}
+
+// ---- the families as the panel lists them ----------------------------------
+export const NODE_FAMILIES: Family[] = NODE_FAMILY_TABLE.map((f) => ({
+  key: f.key,
+  kind: "node" as const,
+  label: `fam.n.${f.key}`,
+  types: DATAMODEL_NODE_TYPES.filter((t) => nodeFamilyOfKnown(t) === f.key),
+  structural: new Set(DATAMODEL_NODE_TYPES.filter((t) => nodeFamilyOfKnown(t) === f.key && isStructuralNodeType(t))),
+}));
+export const EDGE_FAMILIES: Family[] = EDGE_FAMILY_TABLE.map((f) => ({
+  key: f.key,
+  kind: "edge" as const,
+  label: `fam.e.${f.key}`,
+  // the table's order, then what the datamodel adds and no row names («Other»)
+  types: f.key === "other"
+    ? DATAMODEL_EDGE_TYPES.filter((t) => !EDGE_TO_FAMILY.has(t))
+    : f.edges.filter((t) => KNOWN_EDGE_TYPES.has(t)),
+  structural: new Set(f.structural ?? []),
+}));
+
+/** every leaf of a family (its switchable types, «Other» with its wildcard) */
+export function familyLeaves(f: Family): string[] {
+  const p = f.kind === "node" ? "n:" : "e:";
+  const out = f.types.filter((t) => !f.structural.has(t)).map((t) => p + t);
+  if (f.key === "other") out.push(f.kind === "node" ? UNKNOWN_NODE_LEAF : UNKNOWN_EDGE_LEAF);
+  return out;
+}
+
+const ALL_LEAVES: string[] = [...NODE_FAMILIES, ...EDGE_FAMILIES].flatMap(familyLeaves);
+
+// ---- defaults per view, templates ------------------------------------------
+function defaultOn(view: "matrix" | "graph", def: { matrix: boolean; graph: boolean; matrixExcept?: string[] }, type: string): boolean {
+  if (view === "graph") return def.graph;
+  return def.matrixExcept?.includes(type) ? !def.matrix : def.matrix;
+}
+
+/** The leaves visible by default in a view. The Matrix hides the outer ring;
+ *  Graph and DTC show it — the DTC substrate IS resources and links, so the
+ *  projection would be empty under the Matrix defaults. «Graphs paradata» (and
+ *  the multigraph) turn everything on: "show me everything attached to this
+ *  graph" is the point of that view, and a family left off would silently hide
+ *  what it came to find. */
+export function defaultVisibleLeaves(view: ViewKind): Set<string> {
+  if (view === "multigraph" || view === "graphs") return new Set(ALL_LEAVES);
+  const v = view === "matrix" ? "matrix" : "graph";
+  const out = new Set<string>();
+  for (const f of NODE_FAMILY_TABLE) {
+    const fam = NODE_FAMILIES.find((x) => x.key === f.key)!;
+    for (const leaf of familyLeaves(fam)) if (defaultOn(v, f, leaf.slice(2))) out.add(leaf);
+  }
+  for (const f of EDGE_FAMILY_TABLE) {
+    const fam = EDGE_FAMILIES.find((x) => x.key === f.key)!;
+    for (const leaf of familyLeaves(fam)) if (defaultOn(v, f, leaf.slice(2))) out.add(leaf);
+  }
+  return out;
+}
+
+/** Detail-level presets at the top of the panel — one click sets every leaf. */
 export interface DetailTemplate {
   key: string;
+  /** i18n key */
   label: string;
-  circles: CircleKey[];
+  leaves: ReadonlySet<string>;
 }
-export const TEMPLATES: DetailTemplate[] = [
-  { key: "full", label: "Full detail (all)", circles: [...NODE_KEYS, ...EDGE_KEYS] },
-  {
-    key: "harris",
-    label: "Harris Matrix",
-    circles: ["real", "continuity", "edges_temporal"],
-  },
-  {
-    key: "em-compact",
-    label: "EM compact",
-    circles: ["real", "virtual", "continuity", "edges_temporal"],
-  },
-  {
-    key: "em-complete",
-    label: "EM complete",
-    circles: [
-      "real",
-      "virtual",
-      "continuity",
-      "paradata_nodes",
-      "edges_temporal",
-      "edges_paradata",
-    ],
-  },
-];
+export const TEMPLATES: DetailTemplate[] = TEMPLATE_TABLE.map((tp) => {
+  const leaves = new Set<string>();
+  for (const k of tp.nodeFamilies) for (const l of familyLeaves(NODE_FAMILIES.find((f) => f.key === k)!)) leaves.add(l);
+  for (const k of tp.edgeFamilies) for (const l of familyLeaves(EDGE_FAMILIES.find((f) => f.key === k)!)) leaves.add(l);
+  for (const t of tp.nodeTypes ?? []) { const l = nodeLeaf(t); if (l) leaves.add(l); }
+  for (const t of tp.edgeTypes ?? []) { const l = edgeLeaf(t); if (l) leaves.add(l); }
+  return { key: tp.key, label: tp.label, leaves };
+});
 
-/** Which circle a node belongs to, or null if it is structural (group
- *  container / epoch swimlane) and therefore never filtered. */
-export function nodeCircle(nodeType: string | undefined): CircleKey | null {
-  if (isGroupType(nodeType)) {
-    // a ParadataNodeGroup IS paradata — it hides/reveals with the paradata
-    // ring; the other groups hold stratigraphic content and are structural.
-    return classOf(nodeType) === "ParadataNodeGroup" ? "paradata_nodes" : null;
-  }
-  if (classOf(nodeType) === "EpochNode") return null; // swimlane
-  if (isStratigraphicType(nodeType)) {
-    if (isContinuityType(nodeType)) return "continuity";
-    if (isVirtualType(nodeType)) return "virtual";
-    return "real";
-  }
-  if (isParadataType(nodeType)) return "paradata_nodes";
-  const anc = ancestorsOf(nodeType);
-  if (
-    anc.includes("AuthorNode") ||
-    anc.includes("LicenseNode") ||
-    anc.includes("EmbargoNode")
-  )
-    return "authors_licenses";
-  return "links_other"; // links, geo-position, representations, … the rest
+/** the family (node or edge) a leaf belongs to */
+export function familyOfLeaf(leaf: string): Family | undefined {
+  const kind = leaf.startsWith("n:") ? "node" : "edge";
+  const t = leaf.slice(2);
+  if (t === "*") return (kind === "node" ? NODE_FAMILIES : EDGE_FAMILIES).find((f) => f.key === "other");
+  const key = kind === "node" ? nodeFamilyOf(t) : edgeFamilyOf(t);
+  return (kind === "node" ? NODE_FAMILIES : EDGE_FAMILIES).find((f) => f.key === key);
 }
 
 // ---- ornament (adornment) classification — the ONE source (BADGE1) ----------
 // author / license / embargo are annotations of a referent, not stratigraphic
 // elements: the view collapses them into badges attached to the referent instead
 // of boxes joined by edges. "Is it an ornament?" is answered HERE, anchored to
-// the `authors_licenses` circle, so the filter and the collapse cannot disagree.
+// the `rights` family, so the filter and the collapse cannot disagree.
 const ORNAMENT_CLASSES: ReadonlySet<string> = new Set([
   "AuthorNode",
   "AuthorAINode",
@@ -152,10 +199,10 @@ const ORNAMENT_CLASSES: ReadonlySet<string> = new Set([
 ]);
 
 /** True for a node type that is a pure annotation of a referent (author /
- *  author_ai / license / embargo). Same answer as the `authors_licenses`
- *  ring — one source of truth. */
+ *  author_ai / license / embargo). Same answer as the `rights` family — one
+ *  source of truth. */
 export function isAdornmentNodeType(nodeType: string | undefined): boolean {
-  return nodeCircle(nodeType) === "authors_licenses";
+  return nodeFamilyOf(nodeType) === "rights";
 }
 
 /**
@@ -182,81 +229,3 @@ export const ADORNMENT_EDGE_TYPES: ReadonlySet<string> = new Set(
     return targetIsOrnament && sourceHasContent;
   }),
 );
-
-/** Which circle an edge belongs to, or null for structural membership edges
- *  (is_part_of / is_in_*) that build the containers and are never filtered. */
-export function edgeCircle(edgeType: string | undefined): CircleKey | null {
-  const t = edgeType ?? "";
-  if (MEMBERSHIP_EDGES.has(t)) return null; // container structure
-  if (t === GENERIC_EDGE) return "edges_generic";
-  const cls = edgeEndpointClasses(t);
-  // MICRO studio-luogo · the ARRIVAL decides here too (the PROPRIETA rule
-  // below). The union of the two ends used to: since s3Dgraphy's 1.6.39
-  // connections an AuthorNode is a spatiotemporal entity and is admitted as a
-  // SOURCE of has_property, is_after, has_same_time, has_first_epoch and
-  // survive_in_epoch — and by the union all five became «author» edges, so the
-  // Matrix, which hides that ring by default, would have stopped drawing the
-  // stratigraphic sequence (measured: 5 edge types moved, `check-compact`).
-  // An author / licence / embargo edge is one that ARRIVES at one of them:
-  // has_author, has_license, has_embargo, validated_by, as before.
-  const rawArrival = edgeEndpointsRaw(t).target;
-  if (
-    rawArrival.length > 0 &&
-    rawArrival.every((c) =>
-      ["AuthorNode", "AuthorAINode", "LicenseNode", "EmbargoNode"].some(
-        (o) => c === o || classIsA(c, o),
-      ),
-    )
-  )
-    return "edges_author";
-  // PROPRIETA · the ARRIVAL decides: an edge whose every admitted target is
-  // paradata (ParadataNode and its subclasses — property, extractor, combiner,
-  // document — or a ParadataNodeGroup) is a paradata edge, whatever its sources
-  // admit. The union of the two ends used to decide, and `has_property` admits
-  // EpochNode among its sources, so the epoch rule below sent it to "Other
-  // edges", off in the Matrix: a property of a US was drawn without its thread.
-  // The BUGS-UI test on the raw target (`has_paradata_nodegroup`, which also
-  // admits an epoch as source) is this same rule. Read off the RAW target (not
-  // the union): `has_first_epoch` ADMITS a ParadataNodeGroup — as a source —
-  // and is a temporal edge, not a paradata one.
-  const rawTarget = edgeEndpointsRaw(t).target;
-  if (
-    rawTarget.length > 0 &&
-    rawTarget.every((c) => classIsA(c, "ParadataNode") || classIsA(c, "ParadataNodeGroup"))
-  )
-    return "edges_paradata";
-  // epoch links are structural in the swimlane view (epochs ARE lanes), plus
-  // resources/geo/representation/HDT — none of these is a paradata edge
-  if (
-    cls.has("EpochNode") ||
-    cls.has("ResourceNode") ||
-    cls.has("GeoPositionNode") ||
-    cls.has("RepresentationNode") ||
-    cls.has("HDTNode") ||
-    cls.has("SemanticShapeNode")
-  )
-    return "edges_other";
-  // MICRO studio-luogo · a relation BETWEEN units (both ends admit one) is the
-  // sequence, whatever else it may join: since 1.6.39 documents and authors are
-  // spatiotemporal entities and is_after / has_same_time admit them too, and the
-  // ParadataNode test below (a document is paradata) took the sequence away
-  // from its ring
-  const raw = edgeEndpointsRaw(t);
-  const unit = (c: string): boolean => classIsA(c, "StratigraphicNode");
-  if (raw.source.some(unit) && raw.target.some(unit)) return "edges_temporal";
-  if (cls.has("ParadataNode")) return "edges_paradata";
-  if (cls.has("StratigraphicNode")) return "edges_temporal";
-  return "edges_other";
-}
-
-/** The set of circles visible by default in a given view. Matrix hides the outer
- *  rings; Graph and DTC show them — the DTC substrate IS resources and links, so
- *  the projection would be empty under the Matrix defaults. MULTIGRAPH turns
- *  every ring on: "show me everything attached to this graph" is the whole point
- *  of that mode, and a ring left off would silently hide what it came to find. */
-export function defaultVisibleCircles(view: ViewKind): Set<CircleKey> {
-  if (view === "multigraph" || view === "graphs") return new Set(CIRCLES.map((c) => c.key));
-  const out = new Set<CircleKey>();
-  for (const c of CIRCLES) if (view === "matrix" ? c.matrix : c.graph) out.add(c.key);
-  return out;
-}

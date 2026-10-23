@@ -29,7 +29,7 @@ const bundle = await esbuild.build({
       export * as C from "./compact";
       export * as PS from "./property-source";
       export { DocumentStore } from "./model";
-      export { edgeCircle, defaultVisibleCircles, TEMPLATES } from "./filters";
+      export { edgeLeaf, edgeFamilyOf, defaultVisibleLeaves, TEMPLATES } from "./filters";
       export { issues } from "./issues";
       export { buildMatrixScene } from "./views/matrix";
     `,
@@ -51,7 +51,7 @@ const bundle = await esbuild.build({
 const M = await import(
   "data:text/javascript;base64," + Buffer.from(bundle.outputFiles[0].text).toString("base64")
 );
-const { C, PS, DocumentStore, edgeCircle, defaultVisibleCircles, TEMPLATES, issues } = M;
+const { C, PS, DocumentStore, edgeLeaf, edgeFamilyOf, defaultVisibleLeaves, TEMPLATES, issues } = M;
 
 const S3D = new URL("../../../s3Dgraphy/", import.meta.url).pathname;
 const PY = `${S3D}.venv/bin/python`;
@@ -135,28 +135,30 @@ function numbers(st) {
   };
 }
 
-/** the scene the Matrix draws with its default circles, the carried threads
- *  left out as `filteredView` does */
+/** the scene the Matrix draws with its default detail level, the carried
+ *  threads left out as `filteredView` does */
 function matrixEdges(st) {
-  const visible = defaultVisibleCircles("matrix");
+  const visible = defaultVisibleLeaves("matrix");
   const carried = C.carriedPropertyEdges(st.doc);
   return st.doc.graph.edges.filter((e) => {
-    const c = edgeCircle(e.edge_type);
+    const c = edgeLeaf(e.edge_type);
     if (c && !visible.has(c)) return false;
     return !(e.edge_type === "has_property" && carried.has(C.drawnEdgeKey(e)));
   });
 }
 const drawn = (st, s, t) => matrixEdges(st).some((e) => e.edge_type === "has_property" && e.source === s && e.target === t);
 
-// ── Parte 1 · the circle of an edge is decided by its arrival ────────────────
+// ── Parte 1 · the family of an edge (MICRO-FILTRI-DETTAGLIATI: families, not rings)
 {
-  eq(edgeCircle("has_property"), "edges_paradata", "has_property is a paradata edge (was edges_other)");
-  eq(edgeCircle("has_paradata_nodegroup"), "edges_paradata", "has_paradata_nodegroup stays paradata (the BUGS-UI case)");
-  eq(edgeCircle("has_first_epoch"), "edges_other", "has_first_epoch stays an epoch edge (a PDG is only a SOURCE)");
-  eq(edgeCircle("has_data_provenance"), "edges_paradata", "has_data_provenance stays paradata");
-  eq(edgeCircle("extracted_from"), "edges_paradata", "extracted_from stays paradata (mixed target, by the ParadataNode rule)");
-  ok(defaultVisibleCircles("matrix").has("edges_paradata"), "the Matrix shows paradata edges by default");
-  ok(TEMPLATES.find((x) => x.key === "em-complete").circles.includes("edges_paradata"), "…and «EM complete» too");
+  eq(edgeFamilyOf("has_property"), "pd_properties", "has_property is a paradata edge (properties)");
+  eq(edgeFamilyOf("has_paradata_nodegroup"), "pd_groups", "has_paradata_nodegroup stays paradata (the BUGS-UI case)");
+  eq(edgeFamilyOf("has_first_epoch"), "temporal", "has_first_epoch is a temporal edge (a PDG is only a SOURCE)");
+  eq(edgeFamilyOf("has_data_provenance"), "pd_properties", "has_data_provenance stays paradata");
+  eq(edgeFamilyOf("extracted_from"), "pd_extractors", "extracted_from stays paradata (extractors)");
+  for (const e of ["has_property", "has_paradata_nodegroup", "has_data_provenance", "extracted_from", "combines"])
+    ok(defaultVisibleLeaves("matrix").has(`e:${e}`), `the Matrix shows ${e} by default`);
+  ok(!defaultVisibleLeaves("matrix").has("e:has_first_epoch"), "…not has_first_epoch (the epochs are its lanes)");
+  ok(TEMPLATES.find((x) => x.key === "em-complete").leaves.has("e:has_property"), "…and «EM complete» shows has_property too");
 }
 
 const FIXTURE = new URL("../testdata/proprieta.em.json", import.meta.url);
