@@ -206,6 +206,10 @@ export function mountGeoSpace(d: GeoSpaceDeps): GeoSpace {
     // that did not answer). Measured: the globe's tiles may hold the browser's six
     // connections to the bridge for seconds — meanwhile the line says «reading»
     globeMinReading = true;
+    // what the folder held at the last reading is not what it holds now: while the
+    // bridge has not answered the line says «reading», never the old state
+    // (measured: an answer late by a second showed the previous package's state)
+    globeMin = null;
     draw();
     const [c, g] = await Promise.all([ask("/tiles/cache"), ask("/tiles/globe-min")]);
     cacheInfo = c;
@@ -332,7 +336,7 @@ export function mountGeoSpace(d: GeoSpaceDeps): GeoSpace {
     cm.dataset.geoAct = "clip-margin"; cm.title = t("geo.clipMargin");
     const cs = document.createElement("span");
     cs.className = "geo-est";
-    const box = globe?.state().clip.box;
+    const box = globe?.clipBox() ?? null;
     cs.dataset.geoClip = box ? box.map((v) => v.toFixed(1)).join(",") : "";
     cs.textContent = box ? t("geo.clipState", { w: (box[2] - box[0]).toFixed(0), h: (box[3] - box[1]).toFixed(0) }) : t("geo.clipIdle");
     cr.append(cl, cm, document.createTextNode(" m "), cs);

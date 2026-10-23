@@ -76,6 +76,8 @@ export interface GlobeApi extends GeoDriver {
   goToSite(): void;
   /** MICRO-GEOREF-GRAFO p.0b · the terrain cut under the site: on/off, the margin (m) */
   setClip(on: boolean, margin: number): void;
+  /** …the box cut now (three's x0 z0 x1 z1), null: none */
+  clipBox(): [number, number, number, number] | null;
   state(): GlobeState;
 }
 
@@ -764,6 +766,7 @@ export function createGlobe(o: GlobeOptions): GlobeApi {
       const to = viewFor("site");
       if (to) fly(to, "site");
     },
+    clipBox: () => clipBox,
     setClip(on, margin) {
       clip = { on, margin: Number.isFinite(margin) ? Math.max(0, margin) : 10 };
       applyClip(true);
