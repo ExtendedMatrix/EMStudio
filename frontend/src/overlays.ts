@@ -322,7 +322,7 @@ export const NOBODY = "-";
 
 type Stored = Record<string, Partial<Record<OverlayView, OverlayState & { rev?: number }>>>;
 /** MICRO-GIZMO-ASSI · the revision of the Space's keys a remembered state was written with */
-const SPACE_REV = 3;
+export const SPACE_REV = 3;
 
 function readAll(): Stored {
   try {
@@ -334,7 +334,9 @@ function readAll(): Stored {
   }
 }
 
-function clean(v: unknown, view: OverlayView): OverlayState {
+/** a remembered state made sound (what a window keeps in its state is read
+ *  through the same door as what a person keeps: shell/lens.ts) */
+export function cleanOverlays(v: unknown, view: OverlayView): OverlayState {
   const d = defaultOverlays(view);
   if (!v || typeof v !== "object") return d;
   const o = v as { master?: unknown; off?: unknown; values?: unknown; rev?: unknown; keepFar?: unknown };
@@ -363,7 +365,7 @@ function clean(v: unknown, view: OverlayView): OverlayState {
 
 /** The overlays of a view for a person: what was remembered, else the default. */
 export function loadOverlays(person: string | null | undefined, view: OverlayView): OverlayState {
-  return clean(readAll()[person || NOBODY]?.[view], view);
+  return cleanOverlays(readAll()[person || NOBODY]?.[view], view);
 }
 
 /** Remember the overlays of a view for a person. A state equal to the default

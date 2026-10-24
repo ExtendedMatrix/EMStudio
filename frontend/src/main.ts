@@ -116,6 +116,10 @@ import {
   popupFeatures, recordsFor, saveRecords, wireRelay, DETACH_URL, type DetachedRecord,
 } from "./shell/detach";
 import {
+  leavesKey, LENS_MONO_KEY, lensLeavesKey, lensOverlayKey, OWN_LEAVES_VIEWS, ownLeaves, ownMono, ownOverlays,
+  pinned, storedLeaves, storedOverlays,
+} from "./shell/lens";
+import {
   paintSurface,
   preservingScroll,
   rememberSurfaceScroll,
@@ -1104,7 +1108,8 @@ const circleState: Record<ViewKind, Set<string>> = {
 function recomputeHiddenFromCircles(): void {
   hiddenNodeTypes.clear();
   hiddenEdgeTypes.clear();
-  const h = hiddenFor(view);
+  // MICRO-OVERLAY-PER-FINESTRA · the focused window's filter (a Matrix may have its own)
+  const h = hiddenFor(view, leavesOfWin(activeWin().id, view));
   for (const x of h.nodes) hiddenNodeTypes.add(x);
   for (const x of h.edges) hiddenEdgeTypes.add(x);
 }
@@ -1112,11 +1117,10 @@ function recomputeHiddenFromCircles(): void {
  *  every scene is built with its own (they used to share the focused one's, so
  *  a Graph window beside the Matrix was drawn with the Matrix's filter and
  *  re-laid itself out the moment the pointer entered it). */
-function hiddenFor(v: ViewKind): { nodes: Set<string>; edges: Set<string> } {
+function hiddenFor(v: ViewKind, visible: Set<string> = circleState[v]): { nodes: Set<string>; edges: Set<string> } {
   const nodes = new Set<string>();
   const edges = new Set<string>();
   if (!store) return { nodes, edges };
-  const visible = circleState[v];
   for (const n of store.doc.graph.nodes) {
     const l = nodeLeaf(n.node_type);
     if (l && !visible.has(l)) nodes.add(n.node_type);
@@ -1132,12 +1136,12 @@ function hiddenFor(v: ViewKind): { nodes: Set<string>; edges: Set<string> } {
 // it back on — otherwise you "create" a node you can't see.
 function ensureCircleVisibleFor(nodeType: string | undefined): void {
   const l = nodeLeaf(nodeType);
-  if (!l || circleState[view].has(l)) return;
-  circleState[view].add(l);
-  saveLeaves(view);
-  recomputeHiddenFromCircles();
-  buildScenes();
-  draw();
+  // MICRO-OVERLAY-PER-FINESTRA · the filter of the window the node is wanted in
+  const here = activeWin().type === "graph" ? activeWin().id : canvasAnchorId();
+  const v = here ? graphModeOf(here) : view;
+  const cur = leavesOfWin(here, v);
+  if (!l || cur.has(l)) return;
+  writeLeaves(here, v, new Set([...cur, l]));
   if (filterPanelOpen()) renderCirclesPanel();
   toast(t("l.filterShowing", { label: leafLabel(l) }));
 }
@@ -2369,7 +2373,7 @@ const inContext = (): boolean => contextIn(activeWin().id);
 
 function scene(): Scene | null {
   ensureScenes();
-  return inContext() ? contextScene : (scenes[view] ?? null);
+  return inContext() ? contextScene : sceneOfWin(activeWin().id, view);
 }
 
 // the seam declared above: what is on the canvas, as ids.
@@ -2553,7 +2557,7 @@ window.__EM_SCENE__ = () => {
     const mode = graphModeOf(winId);
     // MICRO-SPAZIO-3D · a window in a group's soloing: that scene, its camera
     const solo = contextIn(winId) && !!contextScene;
-    const s = solo ? contextScene : scenes[mode] ?? null;
+    const s = solo ? contextScene : sceneOfWin(winId, mode);
     const vp = solo ? contextViewport : viewportFor(winId, mode);
     const r = mount.cv.getBoundingClientRect();
     return {
@@ -2561,7 +2565,7 @@ window.__EM_SCENE__ = () => {
       rect: { x: r.x, y: r.y, w: r.width, h: r.height },
       boxes: (s?.nodes ?? []).map((n) => ({
         id: n.id, x: r.x + n.x * vp.scale + vp.x, y: r.y + n.y * vp.scale + vp.y,
-        w: n.w * vp.scale, h: n.h * vp.scale,
+        w: n.w * vp.scale, h: n.h * vp.scale, name: String(n.node.name ?? ""),
         // RISORSA-FILE · what the box SAYS when it is not the node's name
         ...(n.label ? { label: n.label } : {}), ...(n.instanceOf ? { instanceOf: n.instanceOf } : {}),
         // FONTE · the badge of an instance, and a trace
@@ -2575,6 +2579,9 @@ window.__EM_SCENE__ = () => {
       // p.4 · the camera's origin (a box's world x = (x − rect.x − origin.x) / scale)
       origin: { x: vp.x, y: vp.y },
       lanes: (s?.lanes ?? []).map((l) => l.label),
+      // MICRO-OVERLAY-PER-FINESTRA · the document change it was last PAINTED at
+      painted: paintedAt.get(winId) ?? null,
+      seq: docChangeSeq,
     };
   },
   /** AUDIT · a change that arrives from ELSEWHERE (a peer, another window): one
@@ -2593,11 +2600,23 @@ window.__EM_SCENE__ = () => {
   pdChips: () => drawnPdChips(),
   /** MICRO-SOVRAPPOSIZIONI · the overlays of a view (default: the focused
    *  one), and set them; the menu's view */
-  overlays: (v?: OverlayView) => {
-    const vv = v ?? focusedOverlayView();
-    const st = overlaysOf(vv);
+  overlays: (v?: OverlayView, winId?: string) => {
+    const vv = v ?? (winId ? overlayViewOfWin(winId) : null) ?? focusedOverlayView();
+    const st = overlaysOfWin(winId ?? overlayTargetWin(vv), vv);
     return { view: vv, master: st.master, off: [...st.off], hideFar: farGlyphsHidden(st) };
   },
+  /** MICRO-OVERLAY-PER-FINESTRA · a window's lens: what of it is its own */
+  lens: (winId: string) => {
+    const w = winById(winId);
+    if (!w) return null;
+    const own: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(w.state)) if (k.startsWith("current.lens.")) own[k.slice(13)] = v;
+    return { own, mono: ownMono(w.state), leaves: [...leavesOfWin(winId, "matrix")].sort() };
+  },
+  /** …a window's detail filter (the Matrix's), its monochrome */
+  setLeavesOf: (winId: string, leaves: string[]) => writeLeaves(winId, graphModeOf(winId), new Set(leaves)),
+  setMono: (winId: string, on: boolean) => setMonoOf(winId, on),
+  leafOf: (nodeType: string) => nodeLeaf(nodeType),
   overlaysDrawn: () => drawnOverlayCounts(),
   // MICRO-SPAZIO-3D · the ornament badges as drawn (canvas-relative): «ha 3D» among them
   adornmentHits: () => drawnAdornmentHits().map((h) => ({ ...h })),
@@ -2615,10 +2634,11 @@ window.__EM_SCENE__ = () => {
   liquidHdto: (on?: boolean) => { if (typeof on === "boolean") setLiquidHdto(on); return liquidHdto; },
   viewNodeIds: (v: "matrix" | "graph") =>
     (v === "matrix" ? scenes.matrix : scenes.graph)?.nodes.map((n: { id: string }) => n.id) ?? [],
-  setOverlays: (v: OverlayView, st: { master?: boolean; off?: OverlayKey[]; keepFar?: boolean }) => {
-    const cur = overlaysOf(v);
+  setOverlays: (v: OverlayView, st: { master?: boolean; off?: OverlayKey[]; keepFar?: boolean }, winId?: string) => {
+    const target = winId ?? overlayTargetWin(v);
+    const cur = overlaysOfWin(target, v);
     const next = { ...cur, master: st.master ?? cur.master, off: st.off ? [...st.off] : [...cur.off] };
-    setOverlays(v, typeof st.keepFar === "boolean" ? withHideFar(next, !st.keepFar) : next);
+    setOverlays(v, typeof st.keepFar === "boolean" ? withHideFar(next, !st.keepFar) : next, target);
   },
   /** MICRO-GLIFI-OVERLAY-CONTINUITA p.5 · every glyph node of a view's scene:
    *  the rect its glyph is drawn in and its plate (world units) */
@@ -3000,8 +3020,12 @@ interface GraphPaint {
   highlightEdgeType?: string | null;
 }
 
+/** MICRO-OVERLAY-PER-FINESTRA · per graph window, the document change and the
+ *  time of its last paint (a check reads it: a rename seen in every window) */
+const paintedAt = new Map<string, { seq: number; t: number }>();
 function paintGraphWindow(p: GraphPaint): void {
   const { cv, scene: s, vp, live } = p;
+  paintedAt.set(p.winId, { seq: docChangeSeq, t: performance.now() });
   // MICRO-FINESTRE-MULTIPLE · the density of the SCREEN this canvas is on: a
   // detached window on a second screen has its own
   const dpr = (cv.ownerDocument.defaultView ?? window).devicePixelRatio || 1;
@@ -3053,7 +3077,7 @@ function paintGraphWindow(p: GraphPaint): void {
       // every graph window is an editor now; `editable` says so to the renderer
       editable: true,
       insertBoundary: live?.insertBoundary ?? null,
-      monochrome,
+      monochrome: ownMono(winById(p.winId)?.state),   // MICRO-OVERLAY-PER-FINESTRA · the window's
       nameStatus, // NAME1: orange/red labels, one answer shared with the menu
       warnIds: warnedNodes, // STRUTTURA · the «!» on a node with a warning
       // COLLEGARE · the Matrix follows the chapter the story is on
@@ -3069,7 +3093,7 @@ function paintGraphWindow(p: GraphPaint): void {
         epochOf: (id: string) => liquidEpochOf.get(id) ?? [],
       } : undefined,
       // MICRO-SOVRAPPOSIZIONI · the overlays of this window's view
-      overlays: overlaysOf(overlayViewOf(p.winId, p.mode)),
+      overlays: overlaysOfWin(p.winId, overlayViewOf(p.winId, p.mode)),
       // E5 · an undated epoch's lane invites to date it — drawn, never saved
       dateInvite: p.mode === "matrix" ? { text: t("epoch.inviteDate"), add: t("epoch.inviteAdd") } : null,
     },
@@ -4986,7 +5010,7 @@ function contextSceneFor(id: string): Scene | null {
     const sc = buildGroupScene(vd, id, { with3d: !hiddenNodeTypes.has("representation_model") });
     const outside = outsideMembers(vd, id);
     if (outside.size) for (const sn of sc.nodes) if (outside.has(sn.id)) sn.outside = true;
-    if (!overlayShown(overlaysOf("soloing"), "continuity")) dropContinuity(sc, isContinuityType);
+    if (!overlayShown(overlaysOfWin(contextWinId, "soloing"), "continuity")) dropContinuity(sc, isContinuityType);
     return sc;
   }
   return buildDtcGenesisScene(store.doc, id);
@@ -5531,6 +5555,28 @@ function buildScenes(): void {
   perfSettled();
 }
 
+/**
+ * MICRO-OVERLAY-PER-FINESTRA · the scene ONE window draws: a Matrix window's
+ * lens (`shell/lens.ts`: its filter, its «Continuity») may differ from the
+ * view's, and then it has a scene of its own — the same document, layout and
+ * re-stack, other nodes drawn. Equal lenses share one; built once per rebuild.
+ */
+const lensScenes = new Map<string, Scene | null>();
+let lensBuild: ((leaves: Set<string>, cont: boolean) => Scene | null) | null = null;
+let lensFileCounts: ReturnType<typeof fileCounts> = new Map();
+function sceneOfWin(winId: string | null | undefined, mode: ViewKind): Scene | null {
+  ensureScenes();
+  if (mode !== "matrix" || !winId) return scenes[mode] ?? null;
+  const leaves = leavesOfWin(winId, "matrix");
+  const cont = overlayShown(overlaysOfWin(winId, "matrix"), "continuity");
+  const key = `${leavesKey(leaves)}|${cont}`;
+  if (!lensScenes.has(key)) {
+    if (!lensBuild) return scenes.matrix ?? null;
+    lensScenes.set(key, lensBuild(leaves, cont));
+  }
+  return lensScenes.get(key) ?? null;
+}
+
 /** Rebuild now if a document change is pending (see `scenes`). */
 function ensureScenes(): void {
   if (scenesDirty) buildScenes();
@@ -5689,20 +5735,39 @@ function buildScenesNow(): void {
       store.epochCoherenceWarnings(n.id).length > 0
     )
       warnIds.add(n.id);
-  scenes.matrix = buildMatrixScene(
-    viewDocNow(),
-    fview,
-    // MICRO-PULIZIA p.5 · the view layout; a node it does not know yet (added
-    // since — its own run is queued) at its archival place meanwhile
-    matrixViewLayout ? { ...matrixViewLayout, positions: viewPositionsNow(doc) } : undefined,
-    phasesVisible,
-    warnIds,
-    restackMemo,
-    restackKey(doc, fview, phasesVisible),
-  );
-  // MICRO-GLIFI-OVERLAY-CONTINUITA p.3 · the overlay «Continuity» off: the BR
-  // and its line are not drawn (and not touched); the graph keeps them
-  if (scenes.matrix && !overlayShown(overlaysOf("matrix"), "continuity")) dropContinuity(scenes.matrix, isContinuityType);
+  const vdoc = viewDocNow();
+  const matrixFrom = (fv: ReturnType<typeof filteredView>, cont: boolean): Scene | null => {
+    const sc = buildMatrixScene(
+      vdoc,
+      fv,
+      // MICRO-PULIZIA p.5 · the view layout; a node it does not know yet (added
+      // since — its own run is queued) at its archival place meanwhile
+      matrixViewLayout ? { ...matrixViewLayout, positions: viewPositionsNow(doc) } : undefined,
+      phasesVisible,
+      warnIds,
+      // MICRO-OVERLAY-PER-FINESTRA · one remembered re-stack for every lens: the
+      // key ignores what a filter hides, so a unit is in the same place in two
+      // Matrix windows that filter differently
+      restackMemo,
+      restackKey(doc, fv, phasesVisible),
+    );
+    // MICRO-GLIFI-OVERLAY-CONTINUITA p.3 · the overlay «Continuity» off: the BR
+    // and its line are not drawn (and not touched); the graph keeps them
+    if (sc && !cont) dropContinuity(sc, isContinuityType);
+    return sc;
+  };
+  const sharedCont = overlayShown(overlaysOf("matrix"), "continuity");
+  scenes.matrix = matrixFrom(fview, sharedCont);
+  // MICRO-OVERLAY-PER-FINESTRA · a Matrix window with a lens of its own (a
+  // filter, «Continuity») draws a scene of its own, built on demand
+  // (`sceneOfWin`) from the same document, layout and re-stack
+  lensScenes.clear();
+  lensScenes.set(`${leavesKey(circleState.matrix)}|${sharedCont}`, scenes.matrix ?? null);
+  lensBuild = (leaves, cont) => {
+    const sc = matrixFrom(filteredView({ wholeGraph: false, hidden: hiddenFor("matrix", leaves), placesUndrawn: true }), cont);
+    labelResources(sc, lensFileCounts);
+    return sc;
+  };
   // MICRO-CORSIA-GRUPPI p.1 · the epochs as the document came: what changes after is followed
   if (!epochSeen.has(store)) {
     epochSeen.set(store, firstEpochs(store));
@@ -5776,6 +5841,7 @@ function buildScenesNow(): void {
     const counts = fileCounts([...doc.graph.edges, ...(corpusForView?.liveEdges() ?? []),
       ...(draftScene?.edges ?? []), ...(fromDisk?.edges ?? [])]);
     for (const sc of [scenes.matrix, scenes.graph, scenes.dtc]) labelResources(sc, counts);
+    lensFileCounts = counts;
   }
   // …and when the SOURCE changes (a project with a corpus opens, or its first
   // documentation arrives), the DTC view is framed again: the camera it was left
@@ -16539,15 +16605,48 @@ function refreshFunnel(): void {
   refreshOverlayDot();
 }
 // Monochrome (B/W) display toggle — every node draws black-bordered + white
-// (shapes disambiguate). A pure presentation option (not a filter), so it lives
-// as its own flag, exposed at the end of the detail panel.
-let monochrome = false;
-function applyTemplate(t: DetailTemplate): void {
-  circleState[view] = new Set(t.leaves);
-  saveLeaves(view);
+// (shapes disambiguate). A pure presentation option (not a filter), exposed at
+// the end of the detail panel; MICRO-OVERLAY-PER-FINESTRA · the WINDOW's
+// (`shell/lens.ts`), no longer one flag for the app.
+function setMonoOf(winId: string | null, on: boolean): void {
+  const w = winById(winId);
+  if (!w) return;
+  setWinCurrent(w, LENS_MONO_KEY, on ? true : null);
+  draw();
+}
+/**
+ * MICRO-OVERLAY-PER-FINESTRA · the detail filter a window draws its view with:
+ * a Matrix window's own when it has one (`shell/lens.ts`), else the view's.
+ */
+function leavesOfWin(winId: string | null | undefined, v: ViewKind): Set<string> {
+  return ownLeaves(winById(winId)?.state, v) ?? circleState[v];
+}
+/** the graph window whose filter the panel edits: the one whose funnel opened it */
+function filterWinId(): string | null {
+  return filterOwner ?? canvasAnchorId();
+}
+function filterView(): ViewKind {
+  const id = filterWinId();
+  return id ? graphModeOf(id) : view;
+}
+/** A window's detail filter becomes `next`: the Matrix's its own (the other
+ *  windows pinned to what they showed), every view's the person's choice. */
+function writeLeaves(winId: string | null, v: ViewKind, next: Set<string>): void {
+  const win = winById(winId);
+  if (win && OWN_LEAVES_VIEWS.has(v)) {
+    const key = lensLeavesKey(v);
+    for (const w of pinned(windowsOf(), win.id, key, (x) => x.type === "graph"))
+      setWinCurrent(w, key, storedLeaves(circleState[v]));
+    setWinCurrent(win, key, storedLeaves(next));
+  }
+  circleState[v] = new Set(next);
+  saveLeaves(v);
   recomputeHiddenFromCircles();
   buildScenes();
   draw();
+}
+function applyTemplate(t: DetailTemplate): void {
+  writeLeaves(filterWinId(), filterView(), new Set(t.leaves));
   renderCirclesPanel();
   // MICRO-GLIFI-OVERLAY-CONTINUITA p.4 · a filter hides and shows, it does not
   // re-lay the Matrix out: what it hides leaves its place empty
@@ -16558,15 +16657,13 @@ const fpOpenFamilies = new Set<string>();
 let fpQuery = "";
 /** switch a set of leaves of the current view on or off, and redraw */
 function setLeaves(leaves: string[], on: boolean, focusSel?: string): void {
-  const visible = circleState[view];
+  const v = filterView();
+  const visible = new Set(leavesOfWin(filterWinId(), v));
   for (const l of leaves) {
     if (on) visible.add(l);
     else visible.delete(l);
   }
-  saveLeaves(view);
-  recomputeHiddenFromCircles();
-  buildScenes();
-  draw();
+  writeLeaves(filterWinId(), v, visible);
   // MICRO-GLIFI-OVERLAY-CONTINUITA p.4 · no recompaction: the Matrix keeps
   // every place (a hidden node leaves its room; «Recompute layout» packs)
   renderCirclesPanel();
@@ -16620,13 +16717,15 @@ function renderCirclesPanel(): void {
     const r = String((n.data as Record<string, unknown> | undefined)?.end_reason ?? "unknown");
     brEnds.set(r, (brEnds.get(r) ?? 0) + 1);
   }
-  const visible = circleState[view];
+  // MICRO-OVERLAY-PER-FINESTRA · the panel's window: its view, its filter
+  const fv = filterView();
+  const visible = leavesOfWin(filterWinId(), fv);
 
   const head = document.createElement("div");
   head.className = "fp-head";
   const hint = document.createElement("span");
   hint.className = "fp-hint";
-  hint.textContent = t("fp.title", { view: t(`mode.${view}`) });
+  hint.textContent = t("fp.title", { view: t(`mode.${fv}`) });
   const close = document.createElement("button");
   close.className = "fp-close";
   close.textContent = "✕";
@@ -16689,7 +16788,7 @@ function renderCirclesPanel(): void {
     const known = new Set(families.flatMap((f) => f.types));
     for (const fam of families) {
       // MICRO-CRONO-MULTIPLA · the epochs' edges are not in the Matrix's panel (its lanes)
-      if (fam.hiddenIn?.includes(view)) continue;
+      if (fam.hiddenIn?.includes(fv)) continue;
       // the rows: the datamodel's types, then those the document carries and the
       // datamodel does not know («Other», one wildcard row)
       const unknownTypes = fam.key === "other" ? [...counts.keys()].filter((x) => !known.has(x)) : [];
@@ -16847,7 +16946,7 @@ function renderCirclesPanel(): void {
 
   // G3 · the liquid Graph's own filters: the local graph, the epochs, a text,
   // and whether what they exclude is dimmed or hidden
-  if (view === "graph") {
+  if (fv === "graph") {
     const gh = document.createElement("div");
     gh.className = "fp-sect";
     gh.textContent = t("liq.section");
@@ -16942,7 +17041,7 @@ function renderCirclesPanel(): void {
   // MICRO-PULIZIA p.3 · the EM shapes' option: the Matrix's and the DTC's
   // (boxes and glyphs). The Graph draws discs (`renderLiquid`), which it
   // never read — offered there it changed nothing.
-  if (view !== "graph") {
+  if (fv !== "graph") {
   const dh = document.createElement("div");
   dh.className = "fp-sect";
   dh.textContent = t("l.display");
@@ -16951,11 +17050,9 @@ function renderCirclesPanel(): void {
   monoRow.className = "fp-row";
   const monoCb = document.createElement("input");
   monoCb.type = "checkbox";
-  monoCb.checked = monochrome;
-  monoCb.addEventListener("change", () => {
-    monochrome = monoCb.checked;
-    draw();
-  });
+  monoCb.dataset.lens = "mono";
+  monoCb.checked = ownMono(winById(filterWinId())?.state);
+  monoCb.addEventListener("change", () => setMonoOf(filterWinId(), monoCb.checked));
   monoRow.appendChild(monoCb);
   monoRow.appendChild(document.createTextNode(` ${t("l.monochrome")}`));
   filterPanel.appendChild(monoRow);
@@ -16965,11 +17062,7 @@ function renderCirclesPanel(): void {
   reset.className = "fp-reset";
   reset.textContent = t("l.resetView");
   reset.addEventListener("click", () => {
-    circleState[view] = defaultVisibleLeaves(view);
-    saveLeaves(view);
-    recomputeHiddenFromCircles();
-    buildScenes();
-    draw();
+    writeLeaves(filterWinId(), filterView(), defaultVisibleLeaves(filterView()));
     renderCirclesPanel();
     // p.4 · no recompaction (see the ring's checkbox)
   });
@@ -17020,10 +17113,38 @@ function overlaysOf(v: OverlayView): OverlayState {
   }
   return st;
 }
-function setOverlays(v: OverlayView, st: OverlayState): void {
-  const contWas = overlayShown(overlaysOf(v), "continuity");
+/** MICRO-OVERLAY-PER-FINESTRA · a window by id: a workspace's or a detached one */
+function winById(id: string | null | undefined): Win | undefined {
+  return id ? windowsOf().find((w) => w.id === id) : undefined;
+}
+/** the overlays a window draws a view with: its own (`shell/lens.ts`), else the person's */
+function overlaysOfWin(winId: string | null | undefined, v: OverlayView): OverlayState {
+  return ownOverlays(winById(winId)?.state, v) ?? overlaysOf(v);
+}
+/** the windows that draw a view's overlays (the Space's: the 3D windows) */
+const drawsOverlaysOf = (w: Win, v: OverlayView): boolean => (v === "space" ? w.type === "scene" : w.type === "graph");
+/** the window a change of a view's overlays is for when nobody names one: the
+ *  panel's, the anchor, the focused, else the first that draws that view */
+function overlayTargetWin(v: OverlayView): string | null {
+  const ids = [overlayOwner, canvasAnchorId(), activeWin().id, ...windowsOf().map((w) => w.id)];
+  return ids.find((id) => !!id && overlayViewOfWin(id) === v) ?? null;
+}
+/** write a window's overlays (the others that had none pinned to what they
+ *  showed) and the person's choice; no redraw */
+function storeOverlays(v: OverlayView, st: OverlayState, winId: string | null): void {
+  const win = winById(winId);
+  if (win) {
+    const key = lensOverlayKey(v);
+    for (const w of pinned(windowsOf(), win.id, key, (x) => drawsOverlaysOf(x, v)))
+      setWinCurrent(w, key, storedOverlays(overlaysOf(v), v));
+    setWinCurrent(win, key, storedOverlays(st, v));
+  }
   overlayMemo.set(`${overlayPerson()}|${v}`, st);
   saveOverlays(overlayPerson(), v, st);
+}
+function setOverlays(v: OverlayView, st: OverlayState, winId: string | null = overlayTargetWin(v)): void {
+  const contWas = overlayShown(overlaysOfWin(winId, v), "continuity");
+  storeOverlays(v, st, winId);
   // MICRO-GLIFI-OVERLAY-CONTINUITA p.3 · «Continuity» takes nodes out of the
   // drawn scene: the scene is rebuilt (no layout runs)
   if (contWas !== overlayShown(st, "continuity") && store) {
@@ -17127,7 +17248,7 @@ function refreshOverlayDot(): void {
   // the floating glyph's dot: its graph window's view
   const anchor = canvasAnchorId();
   const v = (anchor && overlayViewOfWin(anchor)) || focusedOverlayView();
-  const off = overlaysHideSomething(overlaysOf(v), v);
+  const off = overlaysHideSomething(overlaysOfWin(anchor, v), v);
   btnOverlays.classList.toggle("ov-off", off);
   const tip = t(off ? "ov.btnOff" : "ov.btn");
   if (btnOverlays.title !== tip) {
@@ -17136,9 +17257,10 @@ function refreshOverlayDot(): void {
   }
   // MICRO-PROVA-DEV47 · the 3D windows' glyphs: the Space's state, one for all of them
   if (sceneOverlayBtns.size) {
-    const sOff = overlaysHideSomething(overlaysOf("space"), "space");
-    const sTip = t(sOff ? "ov.btnOff" : "ov.btn");
-    for (const b of sceneOverlayBtns.values()) {
+    for (const [id, b] of sceneOverlayBtns) {
+      // MICRO-OVERLAY-PER-FINESTRA · each 3D window's own
+      const sOff = overlaysHideSomething(overlaysOfWin(id, "space"), "space");
+      const sTip = t(sOff ? "ov.btnOff" : "ov.btn");
       b.classList.toggle("ov-off", sOff);
       if (b.title !== sTip) { b.title = sTip; b.setAttribute("aria-label", sTip); }
     }
@@ -17165,7 +17287,9 @@ function setOverlayGroupFolded(g: string, folded: boolean): void {
 }
 function renderOverlayPanel(): void {
   const v = overlayPanelView();
-  const st = overlaysOf(v);
+  // MICRO-OVERLAY-PER-FINESTRA · the panel's window's own
+  const owner = overlayOwner ?? canvasAnchorId();
+  const st = overlaysOfWin(owner, v);
   overlayPanel.textContent = "";
   overlayPanel.dataset.view = v;
   overlayPanel.classList.toggle("ov-master-off", !st.master);
@@ -17189,7 +17313,7 @@ function renderOverlayPanel(): void {
   mcb.type = "checkbox";
   mcb.checked = st.master;
   mcb.dataset.ov = "master";
-  mcb.addEventListener("change", () => setOverlays(v, { ...overlaysOf(v), master: mcb.checked, off: [...overlaysOf(v).off] }));
+  mcb.addEventListener("change", () => setOverlays(v, { ...overlaysOfWin(owner, v), master: mcb.checked, off: [...overlaysOfWin(owner, v).off] }, owner));
   master.append(mcb, document.createTextNode(" " + t("ov.master")));
   overlayPanel.appendChild(master);
   // MICRO-GLIFI-OVERLAY-CONTINUITA p.1 · a unit a few pixels high loses its
@@ -17201,7 +17325,7 @@ function renderOverlayPanel(): void {
     fcb.type = "checkbox";
     fcb.checked = farGlyphsHidden(st);
     fcb.dataset.ov = "hide_far";
-    fcb.addEventListener("change", () => setOverlays(v, withHideFar(overlaysOf(v), fcb.checked)));
+    fcb.addEventListener("change", () => setOverlays(v, withHideFar(overlaysOfWin(owner, v), fcb.checked), owner));
     far.append(fcb, document.createTextNode(" " + t("ov.hideFar")));
     far.title = t("ov.hideFarTip");
     overlayPanel.appendChild(far);
@@ -17237,13 +17361,13 @@ function renderOverlayPanel(): void {
     allB.className = "ov-link";
     allB.dataset.ovAll = g.key;
     allB.textContent = t("ov.all");
-    allB.addEventListener("click", () => setOverlays(v, withGroup(overlaysOf(v), g.key, true, v)));
+    allB.addEventListener("click", () => setOverlays(v, withGroup(overlaysOfWin(owner, v), g.key, true, v), owner));
     const noneB = document.createElement("button");
     noneB.type = "button";
     noneB.className = "ov-link";
     noneB.dataset.ovNone = g.key;
     noneB.textContent = t("ov.none");
-    noneB.addEventListener("click", () => setOverlays(v, withGroup(overlaysOf(v), g.key, false, v)));
+    noneB.addEventListener("click", () => setOverlays(v, withGroup(overlaysOfWin(owner, v), g.key, false, v), owner));
     gh.append(gl);
     if (items.length) gh.append(allB, noneB);
     sec.appendChild(gh);
@@ -17261,9 +17385,8 @@ function renderOverlayPanel(): void {
       out.textContent = `${Math.round(Number(r.value) * 100)} %`;
       r.addEventListener("input", () => {
         out.textContent = `${Math.round(Number(r.value) * 100)} %`;
-        const next = withValue(overlaysOf(v), it.key, Number(r.value));
-        overlayMemo.set(`${overlayPerson()}|${v}`, next);
-        saveOverlays(overlayPerson(), v, next);
+        const next = withValue(overlaysOfWin(owner, v), it.key, Number(r.value));
+        storeOverlays(v, next, owner);
         for (const h of sceneHandles.values()) h.applyOverlays();
         for (const vs of viewerScenes.values()) vs.handle.applyOverlays();
       });
@@ -17277,7 +17400,7 @@ function renderOverlayPanel(): void {
       cb.type = "checkbox";
       cb.checked = !st.off.includes(it.key);
       cb.dataset.ov = it.key;
-      cb.addEventListener("change", () => setOverlays(v, withOverlay(overlaysOf(v), it.key as OverlayKey, cb.checked)));
+      cb.addEventListener("change", () => setOverlays(v, withOverlay(overlaysOfWin(owner, v), it.key as OverlayKey, cb.checked), owner));
       const ic = document.createElement("span");
       ic.className = "ov-glyph";
       if (it.kind) ic.appendChild(typeIconElement(it.kind));
@@ -17300,7 +17423,7 @@ function renderOverlayPanel(): void {
   reset.type = "button";
   reset.className = "fp-reset";
   reset.textContent = t("ov.reset");
-  reset.addEventListener("click", () => setOverlays(v, defaultOverlays(v)));
+  reset.addEventListener("click", () => setOverlays(v, defaultOverlays(v), owner));
   overlayPanel.appendChild(reset);
 }
 
@@ -19211,7 +19334,8 @@ function jumpTo(nodeId: string): void {
     // projection says as a badge has its node in the Full graph: the jump goes on there
     const nt = store?.node(nodeId)?.node_type;
     const ring = nodeLeaf(nt);
-    if (ring && !circleState[view].has(ring)) {
+    const jw = target ?? here;   // the window the jump started in, not the one under the pointer now
+    if (ring && !leavesOfWin(jw.id, jw.type === "graph" ? graphModeOf(jw.id) : view).has(ring)) {
       const label = leafLabel(ring);
       toastAsk(t("jump.filtered", { name: String(store?.node(nodeId)?.name ?? nodeId), ring: label }),
                [{ label: t("jump.showRing", { ring: label }), run: () => { ensureCircleVisibleFor(nt); jumpTo(nodeId); } }]);
@@ -21644,7 +21768,7 @@ function mountGraphCanvas(cv: HTMLCanvasElement, mini: HTMLCanvasElement,
     paint: (live) => {
       const mode = graphModeOf(winId);
       const here = contextIn(winId);
-      const shown = here ? contextScene : (scenes[mode] ?? null);
+      const shown = here ? contextScene : sceneOfWin(winId, mode);
       // AUDIT N6 · an empty graph window SAYS what is missing, and offers the
       // gesture that remedies it; and there is no minimap of nothing
       const empty = !(shown?.nodes.length);
@@ -21657,7 +21781,7 @@ function mountGraphCanvas(cv: HTMLCanvasElement, mini: HTMLCanvasElement,
         // the hypergraph context belongs to the window that entered it, and the
         // context scene is the app's one — so a window in context draws it and
         // every other draws its own projection
-        scene: here ? contextScene : (scenes[mode] ?? null),
+        scene: here ? contextScene : sceneOfWin(winId, mode),
         vp: here ? contextViewport : viewportFor(winId, mode),
         live,
         overview,
@@ -24455,8 +24579,15 @@ function openUnitInSpace(unitId: string): void {
  *  switch leaves them as they are — switching the overlays off does not empty
  *  the scene, as in Blender */
 const CONTENT_3D = new Set<OverlayKey>(["s3_proxies", "s3_rm", "s3_tiles", "s3_sketches", "s3_proxy_wire"]);
-function space3dShown(k: OverlayKey): boolean {
-  const st = overlaysOf("space");
+/** MICRO-OVERLAY-PER-FINESTRA · the 3D window whose overlays a question about
+ *  «the Space» answers when none is named: the focused one, else the first */
+function spaceWinId(): string | null {
+  const here = activeWin();
+  if (here.type === "scene") return here.id;
+  return windowsOf().find((w) => w.type === "scene")?.id ?? null;
+}
+function space3dShown(k: OverlayKey, winId: string | null = spaceWinId()): boolean {
+  const st = overlaysOfWin(winId, "space");
   return CONTENT_3D.has(k) ? !st.off.includes(k) : overlayShown(st, k);
 }
 let sp3: { person: string; prefs: Space3dPrefs } | null = null;
@@ -25047,8 +25178,8 @@ function addShapeIn(win: Win, shapeId: string, drop?: { x: number; y: number }):
     const s = h.surfaceAt(drop.x, drop.y);
     if (s) { at = s.point; rot = eulerFromUp(s.normal); }
   }
-  if (!space3dShown("s3_sketches"))
-    setOverlays("space", withOverlay(overlaysOf("space"), "s3_sketches", true));
+  if (!space3dShown("s3_sketches", win.id))
+    setOverlays("space", withOverlay(overlaysOfWin(win.id, "space"), "s3_sketches", true), win.id);
   const sk = addSketch(shapeId, at, shapeLabel(spec, getLocale()), rot);
   // a new object is the only one selected, and the active (Blender)
   setSpaceSel({ keys: [`sketch:${sk.id}`], active: `sketch:${sk.id}` });
@@ -27456,8 +27587,8 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
     limit: { bytes: getSettings().viewer.lodLimitMB * 1024 * 1024, points: getSettings().viewer.lodLimitPoints },
     tilesMemoryMB: getSettings().viewer.tilesMemoryMB,
     isFocused: () => activeWin().id === win.id,
-    overlay: (k) => space3dShown(k),
-    overlayValue: (k) => overlayValue(overlaysOf("space"), k),
+    overlay: (k) => space3dShown(k, win.id),
+    overlayValue: (k) => overlayValue(overlaysOfWin(win.id, "space"), k),
     locked: () => new Set(space3dPrefs().locked),
     sketchVisible: (id) => { const k = `sketch:${id}`; return !space3dPrefs().hidden.includes(k) && (!spaceIsolated || spaceIsolated === k); },
     epochLabel: () => { const sp = currentSpace(); const e = sp ? spaceEpochOf(sp) : null; return e ? String(store?.node(e)?.name ?? e) : ""; },
@@ -27467,7 +27598,7 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
     onPickSketch: (id) => setSpaceSel(id ? { keys: [`sketch:${id}`], active: `sketch:${id}` } : EMPTY_SEL),
     onMenu: (m) => sceneMenu(win, handle, m),
     // MICRO-SERVSF-FINE-ISTANZE p.3 · the instances of the unit selected, a dashed line; a point picks that instance
-    marks: () => instanceMarks(),
+    marks: () => instanceMarks(win.id),
     onMark: (id) => { if (id.startsWith("inst:")) goToInstance(id.slice(5)); },
     onBeforeJump: () => pushView(),
     onKeyAction: (a) => {
@@ -27532,7 +27663,7 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
       // MICRO-SPAZIO-3D · the two switches of the bar are two doors of the
       // Space's overlays «RM» and «Proxy»: one state
       const k: OverlayKey = b.dataset.toggle === "rm" ? "s3_rm" : "s3_proxies";
-      setOverlays("space", withOverlay(overlaysOf("space"), k, !space3dShown(k)));
+      setOverlays("space", withOverlay(overlaysOfWin(win.id, "space"), k, !space3dShown(k, win.id)), win.id);
       return;
     } else if (b.dataset.frame) {
       handle.frame();
@@ -27585,7 +27716,7 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
       b.className = "scn-tg";
       b.dataset.toggle = which;
       b.textContent = t(key);
-      b.setAttribute("aria-pressed", String(space3dShown(which === "rm" ? "s3_rm" : "s3_proxies")));
+      b.setAttribute("aria-pressed", String(space3dShown(which === "rm" ? "s3_rm" : "s3_proxies", win.id)));
       return b;
     };
     const fr = document.createElement("button");
@@ -27722,7 +27853,7 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
     const items: SceneItem[] = [];
     for (const r of sum.rms) {
       const isTiles = !!r.resource?.tiles;
-      if (!space3dShown(isTiles ? "s3_tiles" : "s3_rm") || !shown(`rm:${r.id}`)) continue;
+      if (!space3dShown(isTiles ? "s3_tiles" : "s3_rm", win.id) || !shown(`rm:${r.id}`)) continue;
       // p.12 · one of the two drawn: the other is «sostituito da» (manual modes), or the scene decides (auto)
       const alt = altOfRm.get(r.id);
       if (alt && alt.mode !== "auto" && (alt.mode === "tileset") !== (alt.role === "tileset")) continue;
@@ -27739,10 +27870,10 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
         // MICRO-SPAZIO-3D-2 · the model's transform (data.transform), over its file
         pose: r.resource?.tiles ? undefined : poseOfNode(r.id),
         // MICRO-3DTILES · the tileset of the same model, and the weight
-        tileset: r.tileset?.state === "resident" && space3dShown("s3_tiles") ? r.tileset.url || undefined : undefined,
+        tileset: r.tileset?.state === "resident" && space3dShown("s3_tiles", win.id) ? r.tileset.url || undefined : undefined,
         bytes: (plan.versionId ? plan.bytes : null) ?? r.resource?.bytes ?? null, points: r.resource?.points ?? null });
     }
-    if (space3dShown("s3_proxies"))
+    if (space3dShown("s3_proxies", win.id))
       for (const u of sum.withProxy) {
         const px = sp.proxies.get(u);
         if (!px || !shown(`proxy:${u}`)) continue;
@@ -39759,9 +39890,9 @@ function renderInstancesSection(unitId: string): HTMLElement | null {
 /** the dashed line of the Space: the instances of the unit selected, through
  *  their positions (three's axes), and a point per instance named by its epoch */
 let instanceMarksMemo: { key: string; chain: InstRow[]; trans: V3[]; labels: string[] } | null = null;
-function instanceMarks(): SceneMark[] {
+function instanceMarks(winId?: string): SceneMark[] {
   const st = store;
-  if (!st || !selectedId || !space3dShown("s3_instances")) return [];
+  if (!st || !selectedId || !space3dShown("s3_instances", winId)) return [];
   // read at every frame: the chain, its translations and names once per change
   // (`spaceVersion`), only the drawn boxes per frame
   const key = `${selectedId}|${spaceVersion}`;
