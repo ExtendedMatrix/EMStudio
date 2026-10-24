@@ -1,7 +1,7 @@
 {
   "name": "emstudio-frontend",
   "private": true,
-  "version": "1.6.0-dev.69",
+  "version": "1.6.0-dev.70",
   "type": "module",
   "scripts": {
     "dev": "vite",
