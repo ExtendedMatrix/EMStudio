@@ -28,6 +28,7 @@ import { uuid5 } from "./commands";
 import type { DocumentStore } from "./model";
 import type { EmEdge, EmNode } from "./types";
 import { basename } from "./paths";
+import { sha256Hex } from "./sha256";
 
 export const EDGE_HAS_FILE = "has_file";
 export const EDGE_DERIVED_FROM = "dtc_derived_from";
@@ -531,6 +532,63 @@ function resourceNode(id: string, o: AddResourceOptions, url: string, checksum: 
   return { id, name: o.name, node_type: "resource", description: o.description ?? "", data };
 }
 
+/** s3Dgraphy `file_set_members` + `dtcstamp.members_digest`: the identity of a
+ *  resource of several files is the sha256 of the canonical LIST of its members
+ *  — one line per member, `role NUL path NUL sha256:<hex> LF`, sorted by the
+ *  UTF-8 bytes of the NFC path (`size_bytes` is not in it). Null when the list
+ *  has no canonical form: an implicit file, a member without a sha256, a path
+ *  twice, two entry points. */
+export function membersDigest(g: ResourceGraph, resId: string): string | null {
+  const files = resourceFiles(g, resId);
+  if (!files.length || files.some((f) => f.implicit)) return null;
+  const enc = new TextEncoder();
+  const rows: Array<{ role: string; path: string; digest: string; key: Uint8Array }> = [];
+  const seen = new Set<string>();
+  let entries = 0;
+  for (const f of files) {
+    const path = f.path.normalize("NFC").replace(/\\/g, "/").replace(/^\/+/, "");
+    if (!path || seen.has(path) || /[\u0000-\u001f\u007f]/.test(path)
+        || path.split("/").some((x) => x === "" || x === "." || x === "..")) return null;
+    seen.add(path);
+    const m = /^sha256:([0-9a-f]{64})$/i.exec(str(dataOf(f.node).checksum).trim());
+    if (!m) return null;
+    entries += f.role === "entry_point" ? 1 : 0;
+    rows.push({ role: f.role || "member", path, digest: `sha256:${m[1].toLowerCase()}`, key: enc.encode(path) });
+  }
+  if (entries > 1) return null;
+  const cmp = (x: Uint8Array, y: Uint8Array): number => {
+    for (let i = 0; i < Math.min(x.length, y.length); i++) if (x[i] !== y[i]) return x[i] - y[i];
+    return x.length - y.length;
+  };
+  rows.sort((a, b) => cmp(a.key, b.key));
+  return `sha256:${sha256Hex(rows.map((r) => `${r.role}\u0000${r.path}\u0000${r.digest}\n`).join(""))}`;
+}
+
+/** s3Dgraphy `refresh_members_digest` (MICRO-SUITE-VERDE, 24 Oct: the port
+ *  had missed it since 2 Oct, and a file set made here had no identity — never
+ *  resident for `geometry_summary`, never drawn by the Space or the Viewer):
+ *  `checksum` = the members digest, `digest_covers: members`. A list with no
+ *  canonical form takes the old identity away (it no longer names this set). */
+export function refreshMembersDigest(g: ResourceGraph, resId: string): string | null {
+  const res = g.node(resId);
+  if (!res) return null;
+  const d: Record<string, unknown> = { ...dataOf(res) };
+  const digest = membersDigest(g, resId);
+  if (digest === null) {
+    if (d.digest_covers !== "members") return null;
+    delete d.checksum;
+    delete d.digest_covers;
+  } else {
+    if (d.checksum === digest && d.digest_covers === "members") return digest;
+    d.checksum = digest;
+    d.digest_covers = "members";
+  }
+  g.setData(resId, d);
+  return digest;
+}
+const isMembersIdentity = (n: EmNode | undefined): boolean =>
+  !!n && (dataOf(n).digest_covers === "members" || dataOf(n).packaging === "file_set");
+
 /** Make a resource — THE one way, for every creation point.
  *
  *  * no file → `url: ""` (a placeholder, a parent named by a stamp);
@@ -564,7 +622,10 @@ export function addResource(g: ResourceGraph | null, o: AddResourceOptions): EmN
   }
   return g.batch(() => {
     g.addNode(node);
-    if (specs.length && !single) writeFiles(g, rid, specs);
+    if (specs.length && !single) {
+      writeFiles(g, rid, specs);
+      if (o.packaging === "file_set") refreshMembersDigest(g, rid);
+    }
     for (const parent of o.derivedFrom ?? []) declareRepresentation(g, rid, parent);
     return g.node(rid) ?? node;
   });
@@ -615,7 +676,11 @@ export function addFile(g: ResourceGraph, resId: string, file: FileSpec & { path
   const spec = checkFile(dropNull({ ...file }));
   return g.batch(() => {
     const current = resourceFiles(g, resId);
-    if (!current.length && !hasIdentity(spec)) {
+    // a DIRECTORY (or a file set) has no implicit form: its url and checksum are
+    // the set's, and the first file written onto them would overwrite the
+    // digest of the whole with one member's (s3Dgraphy `add_file`)
+    const isSet = ["directory", "file_set"].includes(str(dataOf(res).packaging));
+    if (!current.length && !hasIdentity(spec) && !isSet) {
       const d: Record<string, unknown> = { ...dataOf(res), url: locatorOf(spec) };
       if (spec.checksum) d.checksum = spec.checksum;
       if (spec.size_bytes !== undefined && spec.size_bytes !== null) d.size_bytes = sizeOf(spec.size_bytes);
@@ -623,11 +688,12 @@ export function addFile(g: ResourceGraph, resId: string, file: FileSpec & { path
       g.setData(resId, d);
       return { file_id: null, role: "entry_point" as FileRole, path: spec.path!, materialized: false };
     }
-    const materialized = materializeImplicit(g, resId) !== null;
+    const materialized = !isSet && materializeImplicit(g, resId) !== null;
     const hasEntry = resourceFiles(g, resId).some((f) => f.role === "entry_point");
     if (spec.role === "entry_point" && hasEntry) throw new Error(`'${resId}' already has an entry point`);
     const role: FileRole = spec.role || (hasEntry ? "member" : "entry_point");
     const node = writeFile(g, resId, spec, role);
+    if (isMembersIdentity(g.node(resId))) refreshMembersDigest(g, resId);
     return { file_id: node.id, role, path: spec.path!, materialized };
   });
 }
@@ -643,6 +709,7 @@ export function removeFile(g: ResourceGraph, resId: string, fileId: string):
     const held = g.edges().some((e) => e.source === fileId || e.target === fileId);
     if (!held) g.removeNode(fileId);
     const left = resourceFiles(g, resId).some((f) => f.role === "entry_point");
+    if (isMembersIdentity(g.node(resId)) && fileEdges(g, resId).length) refreshMembersDigest(g, resId);
     return { removed_edge: edges[0].id!, removed_node: !held, entry_point_left: left };
   });
 }

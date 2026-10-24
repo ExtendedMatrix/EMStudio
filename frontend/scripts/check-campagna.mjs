@@ -113,7 +113,12 @@ const { receipts, compose, tree, tropy, naming, DocumentStore, CALLS_OTHERS, sea
   const links = st.doc.graph.edges.filter((e) => e.source === r.documentId);
   eq(links.map((e) => e.edge_type), ["has_linked_resource"], "4 · …linked to its resource by has_linked_resource");
   const res = st.node(links[0].target);
-  eq([res.node_type, res.data.packaging, res.data.url, res.data.checksum], ["resource", "file_set", "", "sha256:" + "5".repeat(64)],
+  // the members digest IS the digest of the canonical list of the members
+  // (dtcstamp.members_digest, s3Dgraphy's add_resource): computed by the
+  // constructor since MICRO-SUITE-VERDE (24 Oct), not the stand-in «5…5» the
+  // case handed in — the value is the one dtcstamp gives for these three members
+  eq([res.node_type, res.data.packaging, res.data.url, res.data.checksum], ["resource", "file_set", "",
+      "sha256:84510ba982873e64603b8459c6984bf5576ed999cbbbca29e201ba949c7cf69f"],
      "4 · …a ResourceNode, packaging file_set, the members digest as its checksum, no url of its own");
   const files = st.doc.graph.edges.filter((e) => e.source === res.id && e.edge_type === "has_file");
   eq(files.map((e) => [e.attributes?.role, e.attributes?.path, st.node(e.target)?.node_type]),

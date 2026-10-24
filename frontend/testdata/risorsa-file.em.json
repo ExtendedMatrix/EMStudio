@@ -199,7 +199,9 @@
      "description": "",
      "tier": "distribution",
      "packaging": "file_set",
-     "dtc_kind": "mesh"
+     "dtc_kind": "mesh",
+     "checksum": "sha256:57a693d553e8c28fcafd59fa17b1c88c6419efe73890a657d6f244366b688d91",
+     "digest_covers": "members"
     }
    },
    {
@@ -242,7 +244,9 @@
      "url_type": "3d_model",
      "description": "",
      "packaging": "file_set",
-     "dtc_kind": "mesh"
+     "dtc_kind": "mesh",
+     "checksum": "sha256:cdf12521482fb96c13f049a9f9048605180bfffe3f398a867c8218d065f8b335",
+     "digest_covers": "members"
     }
    },
    {
@@ -285,7 +289,9 @@
      "url_type": "3d_model",
      "description": "",
      "packaging": "file_set",
-     "dtc_kind": "mesh"
+     "dtc_kind": "mesh",
+     "checksum": "sha256:111e01949cd90d1e93610c8c367f86ca70e6d8c9b087919e58392d2c496cb0fd",
+     "digest_covers": "members"
     }
    },
    {
@@ -328,7 +334,9 @@
      "url_type": "3d_model",
      "description": "",
      "packaging": "file_set",
-     "dtc_kind": "mesh"
+     "dtc_kind": "mesh",
+     "checksum": "sha256:50f522923858e7e660fd6c7b8413b2754cc588373d391259ed233c1ffc3b14ce",
+     "digest_covers": "members"
     }
    },
    {
