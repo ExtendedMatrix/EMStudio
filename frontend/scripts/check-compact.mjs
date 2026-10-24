@@ -152,7 +152,7 @@ const drawn = (st, s, t) => matrixEdges(st).some((e) => e.edge_type === "has_pro
 {
   eq(edgeFamilyOf("has_property"), "pd_properties", "has_property is a paradata edge (properties)");
   eq(edgeFamilyOf("has_paradata_nodegroup"), "pd_groups", "has_paradata_nodegroup stays paradata (the BUGS-UI case)");
-  eq(edgeFamilyOf("has_first_epoch"), "temporal", "has_first_epoch is a temporal edge (a PDG is only a SOURCE)");
+  eq(edgeFamilyOf("has_first_epoch"), "epochs", "has_first_epoch is an epochs' edge (a PDG is only a SOURCE)");
   eq(edgeFamilyOf("has_data_provenance"), "pd_properties", "has_data_provenance stays paradata");
   eq(edgeFamilyOf("extracted_from"), "pd_extractors", "extracted_from stays paradata (extractors)");
   for (const e of ["has_property", "has_paradata_nodegroup", "has_data_provenance", "extracted_from", "combines"])

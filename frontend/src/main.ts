@@ -452,7 +452,9 @@ import {
   defaultVisibleLeaves,
   type DetailTemplate,
   EDGE_FAMILIES,
+  edgeFamilyOf,
   edgeLeaf,
+  edgeOrigin,
   type Family,
   familyLeaves,
   familyOfLeaf,
@@ -16604,6 +16606,8 @@ function renderCirclesPanel(): void {
     const counts = kind === "node" ? nodeCount : edgeCount;
     const known = new Set(families.flatMap((f) => f.types));
     for (const fam of families) {
+      // MICRO-CRONO-MULTIPLA · the epochs' edges are not in the Matrix's panel (its lanes)
+      if (fam.hiddenIn?.includes(view)) continue;
       // the rows: the datamodel's types, then those the document carries and the
       // datamodel does not know («Other», one wildcard row)
       const unknownTypes = fam.key === "other" ? [...counts.keys()].filter((x) => !known.has(x)) : [];
@@ -16650,6 +16654,19 @@ function renderCirclesPanel(): void {
       const name = document.createElement("span");
       name.className = "fp-name";
       name.textContent = famLabel;
+      // MICRO-CRONO-MULTIPLA · a family that says what it is, and where its edges
+      // come from as far as the data tells (derived / imported / no mark)
+      if (kind === "edge") {
+        const tipKey = `${fam.label}.tip`;
+        const tip = t(tipKey) !== tipKey ? [t(tipKey)] : [];
+        if (fam.key === "chronology" && total) {
+          const o = { derived: 0, imported: 0, unmarked: 0 };
+          for (const e of store!.doc.graph.edges) if (edgeFamilyOf(e.edge_type) === fam.key) o[edgeOrigin(e)]++;
+          tip.push(t("fam.origin", { derived: String(o.derived), imported: String(o.imported), unmarked: String(o.unmarked) }));
+          row.dataset.origin = `${o.derived}/${o.imported}/${o.unmarked}`;
+        }
+        if (tip.length) name.title = tip.join("\n\n");
+      }
       const count = document.createElement("span");
       count.className = "fp-count";
       count.textContent = `${shownN}/${total}`;
@@ -16688,7 +16705,24 @@ function renderCirclesPanel(): void {
 
       const types = document.createElement("div");
       types.className = "fp-types";
+      // sub-families: a heading over their types, «between the epochs» over the rest
+      const subOf = new Map<string, string>();
+      for (const sf of fam.subfamilies ?? []) for (const ty of sf.types) subOf.set(ty, sf.key);
+      let lastSub: string | null = null;
       for (const r of rows) {
+        if (fam.subfamilies?.length && r.type !== "*") {
+          const sk = subOf.get(r.type) ?? "rest";
+          if (sk !== lastSub) {
+            lastSub = sk;
+            const sh = document.createElement("div");
+            sh.className = "fp-subfam";
+            sh.dataset.subfam = `${famId}.${sk}`;
+            sh.textContent = t(`${fam.label}.${sk}`);
+            const tk = `${fam.label}.${sk}.tip`;
+            if (t(tk) !== tk) sh.title = t(tk);
+            types.appendChild(sh);
+          }
+        }
         const tr = document.createElement("label");
         tr.className = "fp-row fp-type";
         tr.dataset.leaf = r.leaf ?? `${kind === "node" ? "n" : "e"}:${r.type}`;

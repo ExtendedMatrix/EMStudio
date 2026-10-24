@@ -65,15 +65,25 @@ const edgeTypes = [...R.edgeTypeNames(), R.GENERIC_EDGE];
   eq(structuralN, want, "the structural nodes are the group boxes (a paradata group excepted) and the epochs");
 }
 
-// ── 3 · stratigraphic and temporal are two families ──────────────────────────
+// ── 3 · relative chronology, stratigraphic relations, epochs: three families ──
+// (MICRO-CRONO-MULTIPLA, E.D. 24 Oct: is_after is chronology, not a physical
+// relation; the epochs' edges are a family of their own, with two sub-families)
 {
-  const strat = F.EDGE_FAMILIES.find((f) => f.key === "stratigraphic").types;
-  const temp = F.EDGE_FAMILIES.find((f) => f.key === "temporal").types;
-  eq(strat.filter((e) => temp.includes(e)), [], "no edge is both stratigraphic and temporal");
-  for (const e of ["is_after", "cuts", "fills", "overlies", "abuts", "bonded_to", "is_bonded_to", "equals", "is_physically_equal_to"])
-    eq(F.edgeFamilyOf(e), "stratigraphic", `${e} is stratigraphic`);
-  for (const e of ["has_first_epoch", "survive_in_epoch", "has_sub_epoch", "has_same_time", "changed_from"])
-    eq(F.edgeFamilyOf(e), "temporal", `${e} is temporal`);
+  const fam = (k) => F.EDGE_FAMILIES.find((f) => f.key === k);
+  const chrono = fam("chronology").types, strat = fam("stratigraphic").types, ep = fam("epochs").types;
+  eq([...chrono, ...strat, ...ep].filter((e, i, a) => a.indexOf(e) !== i), [], "the three families are disjoint");
+  eq(chrono, ["is_after", "has_same_time", "changed_from"], "relative chronology: the sequence, the contemporaneity, the instances");
+  for (const e of ["cuts", "fills", "overlies", "abuts", "bonded_to", "is_bonded_to", "equals", "is_physically_equal_to"])
+    eq(F.edgeFamilyOf(e), "stratigraphic", `${e} is a stratigraphic (physical) relation`);
+  eq(F.edgeFamilyOf("is_after"), "chronology", "is_after is relative chronology");
+  eq(ep, ["has_first_epoch", "survive_in_epoch", "has_sub_epoch"], "epochs: creation, survival, sub-epochs");
+  eq(fam("epochs").subfamilies, [{ key: "creation", types: ["has_first_epoch"] }, { key: "survival", types: ["survive_in_epoch"] }],
+    "…with its two sub-families");
+  eq(fam("epochs").hiddenIn, ["matrix"], "…not listed in the Matrix's panel (its lanes)");
+  ok(!fam("chronology").hiddenIn && !fam("stratigraphic").hiddenIn, "the other two are listed everywhere");
+  eq(F.edgeOrigin({ attributes: { original_edge_id: "n0::e1" } }), "imported", "an edge the GraphML importer read is imported");
+  eq(F.edgeOrigin({ attributes: { derived: true } }), "derived", "s3Dgraphy's own mark is derived");
+  eq(F.edgeOrigin({}), "unmarked", "an edge that says nothing is unmarked");
   // a spelling reads as what it spells; an unknown name is «Other», with the wildcard leaf
   eq(F.edgeFamilyOf("not_an_edge"), "other", "an edge type the datamodel does not know is «Other»");
   eq(F.edgeLeaf("not_an_edge"), F.UNKNOWN_EDGE_LEAF, "…switched by the wildcard leaf");
@@ -104,10 +114,10 @@ const edgeTypes = [...R.edgeTypeNames(), R.GENERIC_EDGE];
     eq(hidden(F.TEMPLATES.find((x) => x.key === k).leaves), frozen[k], `the template «${k}» hides what it hid`);
   const so = F.TEMPLATES.find((x) => x.key === "strat-only").leaves;
   const co = F.TEMPLATES.find((x) => x.key === "chrono-only").leaves;
-  ok(so.has("e:is_after") && so.has("n:US") && so.has("n:SF") && so.has("n:BR"), "«Stratigraphy only»: units and the sequence");
+  ok(so.has("e:cuts") && so.has("n:US") && so.has("n:SF") && so.has("n:BR"), "«Stratigraphy only»: units and their physical relations");
   ok(![...so].some((l) => l.startsWith("e:") && F.edgeFamilyOf(l.slice(2)) !== "stratigraphic"), "…and no other edge");
-  ok(co.has("e:has_first_epoch") && co.has("e:has_same_time") && co.has("n:US"), "«Chronology only»: units and the time's edges");
-  ok(![...co].some((l) => l.startsWith("e:") && F.edgeFamilyOf(l.slice(2)) !== "temporal"), "…and no other edge");
+  ok(co.has("e:is_after") && co.has("e:has_same_time") && co.has("n:US"), "«Relative chronology only»: units and the sequence");
+  ok(![...co].some((l) => l.startsWith("e:") && F.edgeFamilyOf(l.slice(2)) !== "chronology"), "…and no other edge (no physical one, none to the epochs)");
 }
 
 // ── 5 · labels in the interface's language ───────────────────────────────────
@@ -134,12 +144,14 @@ const table = (path, strict) => {
   const n = sum(g.nodes, (x) => x.node_type, F.NODE_FAMILIES, F.nodeFamilyOf);
   const e = sum(g.edges, (x) => x.edge_type ?? "", F.EDGE_FAMILIES, F.edgeFamilyOf);
   eq([n, e], [g.nodes.length, g.edges.length], `${path.split("/").pop()}: the families' counts add up to the totals`);
+  const byFam = {};
+  for (const x of g.edges) { const k = F.edgeFamilyOf(x.edge_type ?? ""); byFam[k] = (byFam[k] ?? 0) + 1; }
   const orphanN = [...new Set(g.nodes.map((x) => x.node_type))].filter((t) => F.nodeFamilyOf(t) === "other");
   const orphanE = [...new Set(g.edges.map((x) => x.edge_type ?? ""))].filter((t) => F.edgeFamilyOf(t) === "other");
   if (strict) eq([orphanN, orphanE], [[], []], `${path.split("/").pop()}: no type falls in «Other»`);
   // a type the datamodel does not know (the fixture's legacy «link») is «Other», by the wildcard
   for (const t of orphanN) eq(F.nodeLeaf(t), R.typesOfClass("Node").includes(t) ? `n:${t}` : F.UNKNOWN_NODE_LEAF, `${t} is switched in «Other»`);
-  return { nodes: g.nodes.length, edges: g.edges.length, orphanN };
+  return { nodes: g.nodes.length, edges: g.edges.length, orphanN, byFam, edges_: g.edges };
 };
 const fx = table(new URL("../testdata/TempluMare.em.json", import.meta.url).pathname, false);
 eq(fx.orphanN, ["link"], "the fixture's only type outside the datamodel is its legacy «link»");
@@ -148,5 +160,10 @@ let gt = null;
 if (GT16 && existsSync(GT16)) {
   gt = table(GT16, true);
   eq([gt.nodes, gt.edges], [2059, 4048], "the GT16: 2059 nodes, 4048 edges");
+  // MICRO-CRONO-MULTIPLA · the GT16's three families (the report's table)
+  eq([gt.byFam.chronology, gt.byFam.stratigraphic, gt.byFam.epochs], [81, 10, 157], "the GT16: chronology 81, stratigraphic 10, epochs 157");
+  const o = { derived: 0, imported: 0, unmarked: 0 };
+  for (const x of gt.edges_) if (F.edgeFamilyOf(x.edge_type) === "chronology") o[F.edgeOrigin(x)]++;
+  eq(o, { derived: 0, imported: 75, unmarked: 6 }, "the GT16's chronology: 75 imported (GraphML), 6 unmarked, none derived");
 }
 console.log(`detail-families: ${checks} checks passed (fixture ${fx.nodes}/${fx.edges}${gt ? `, GT16 ${gt.nodes}/${gt.edges}` : ", GT16 not given"})`);

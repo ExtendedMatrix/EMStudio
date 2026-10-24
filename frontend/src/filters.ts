@@ -45,6 +45,10 @@ export interface Family {
   types: string[];
   /** the types among them that are structure (never switched off) */
   structural: ReadonlySet<string>;
+  /** sub-families (edges only): a heading over their types, i18n `<label>.<key>` */
+  subfamilies?: ReadonlyArray<{ key: string; types: string[] }>;
+  /** views whose panel does not list the family */
+  hiddenIn?: ReadonlyArray<ViewKind>;
 }
 
 // ---- node families ----------------------------------------------------------
@@ -122,7 +126,23 @@ export const EDGE_FAMILIES: Family[] = EDGE_FAMILY_TABLE.map((f) => ({
     ? DATAMODEL_EDGE_TYPES.filter((t) => !EDGE_TO_FAMILY.has(t))
     : f.edges.filter((t) => KNOWN_EDGE_TYPES.has(t)),
   structural: new Set(f.structural ?? []),
+  ...(f.subfamilies ? { subfamilies: f.subfamilies.map((x) => ({ key: x.key, types: x.edges.filter((t) => KNOWN_EDGE_TYPES.has(t)) })) } : {}),
+  ...(f.hiddenIn ? { hiddenIn: f.hiddenIn } : {}),
 }));
+
+/** MICRO-CRONO-MULTIPLA · where an edge comes from, as far as the data says it:
+ *  `derived` — s3Dgraphy's own mark of a computed edge (`attributes.derived`, the
+ *  one it writes on propagated properties); `imported` — the GraphML importer
+ *  keeps the yEd edge it read (`attributes.original_edge_id`); `unmarked` — the
+ *  edge says nothing (drawn here, or from a file that does not tell). The data
+ *  has no mark for «written by the user»: unmarked is not «the user's». */
+export type EdgeOrigin = "derived" | "imported" | "unmarked";
+export function edgeOrigin(e: { attributes?: unknown; [k: string]: unknown }): EdgeOrigin {
+  const a = (e.attributes ?? {}) as Record<string, unknown>;
+  if (a.derived === true || a.derived === "true") return "derived";
+  if (a.original_edge_id != null && a.original_edge_id !== "") return "imported";
+  return "unmarked";
+}
 
 /** every leaf of a family (its switchable types, «Other» with its wildcard) */
 export function familyLeaves(f: Family): string[] {

@@ -45,8 +45,9 @@ export type NodeFamilyKey =
   | "other";
 
 export type EdgeFamilyKey =
+  | "chronology"
   | "stratigraphic"
-  | "temporal"
+  | "epochs"
   | "containment"
   | "pd_properties"
   | "pd_extractors"
@@ -81,6 +82,11 @@ export interface EdgeFamilyDef {
   matrix: boolean;
   graph: boolean;
   matrixExcept?: string[];
+  /** sub-families inside the family (a heading over their types, i18n
+   *  `fam.e.<family>.<key>`); the family's other types follow them */
+  subfamilies?: Array<{ key: string; edges: string[] }>;
+  /** views whose panel does not list the family (its types keep their default) */
+  hiddenIn?: Array<"matrix">;
 }
 
 // Order = the panel's order: the units first, then time, the paradata, the outer ring.
@@ -165,22 +171,37 @@ export const NODE_FAMILY_TABLE: NodeFamilyDef[] = [
 ];
 
 export const EDGE_FAMILY_TABLE: EdgeFamilyDef[] = [
-  // the physical relations and the sequence between units — the Harris matrix
+  // MICRO-CRONO-MULTIPLA (E.D., 24 Oct) · the RELATIVE CHRONOLOGY between units:
+  // the sequence (is_after, read backwards «is before»), the contemporaneity, one
+  // object's instances across the epochs. It is derived from the non-redundant
+  // stratigraphic relations (a unit that cuts another is after it…) or written by
+  // the user; for a table imported from another software it is derived from its
+  // stratigraphic relations. The family's tooltip says where its edges come from
+  // when the data says it (`filters.edgeOrigin`).
   {
-    key: "stratigraphic",
-    edges: [
-      "is_after", "overlies", "cuts", "fills", "abuts",
-      "is_bonded_to", "bonded_to", "is_physically_equal_to", "equals",
-    ],
+    key: "chronology",
+    edges: ["is_after", "has_same_time", "changed_from"],
     matrix: true, graph: true,
   },
-  // time: the epochs, the contemporaneity, one object's instances across the epochs.
-  // In the Matrix the epochs are the lanes, so their edges are not drawn there.
+  // the PHYSICAL relations between units — what the excavation sees
   {
-    key: "temporal",
-    edges: ["has_first_epoch", "survive_in_epoch", "has_sub_epoch", "has_same_time", "changed_from"],
+    key: "stratigraphic",
+    edges: ["overlies", "cuts", "fills", "abuts", "is_bonded_to", "bonded_to", "is_physically_equal_to", "equals"],
     matrix: true, graph: true,
-    matrixExcept: ["has_first_epoch", "survive_in_epoch", "has_sub_epoch"],
+  },
+  // the epochs: a unit is CREATED in its epoch (an epoch is a creation, and
+  // has_first_epoch ties the unit to it) and SURVIVES in later ones; the epochs
+  // nest by has_sub_epoch. In the Matrix the epochs are the lanes, so the family
+  // is not in its panel and its edges are not drawn there.
+  {
+    key: "epochs",
+    edges: ["has_first_epoch", "survive_in_epoch", "has_sub_epoch"],
+    subfamilies: [
+      { key: "creation", edges: ["has_first_epoch"] },
+      { key: "survival", edges: ["survive_in_epoch"] },
+    ],
+    hiddenIn: ["matrix"],
+    matrix: false, graph: true,
   },
   // what is part of what: containers, functional units, activities, places,
   // the time branches (alternative hypotheses) and the groups of models
@@ -262,16 +283,16 @@ export const TEMPLATE_TABLE: TemplateDef[] = [
     key: "harris",
     label: "fam.tpl.harris",
     nodeFamilies: ["units_real", "continuity"],
-    edgeFamilies: ["stratigraphic"],
+    edgeFamilies: ["chronology", "stratigraphic"],
     nodeTypes: ["SF", "RSF", "USD", "serUSD"],
-    edgeTypes: ["has_same_time", "changed_from", "is_in_functional_unit", "has_timebranch"],
+    edgeTypes: ["is_in_functional_unit", "has_timebranch"],
   },
   {
     key: "em-compact",
     label: "fam.tpl.emCompact",
     nodeFamilies: ["units_real", "units_virtual", "special_finds", "continuity"],
-    edgeFamilies: ["stratigraphic"],
-    edgeTypes: ["has_same_time", "changed_from", "is_in_functional_unit", "has_timebranch"],
+    edgeFamilies: ["chronology", "stratigraphic"],
+    edgeTypes: ["is_in_functional_unit", "has_timebranch"],
   },
   {
     key: "em-complete",
@@ -280,22 +301,23 @@ export const TEMPLATE_TABLE: TemplateDef[] = [
       "units_real", "units_virtual", "special_finds", "continuity",
       "documents", "extractors", "combiners", "properties", "groups",
     ],
-    edgeFamilies: ["stratigraphic", "pd_properties", "pd_extractors", "pd_combiners", "pd_sources", "pd_groups"],
-    edgeTypes: ["has_same_time", "changed_from", "is_in_functional_unit", "has_timebranch"],
+    edgeFamilies: ["chronology", "stratigraphic", "pd_properties", "pd_extractors", "pd_combiners", "pd_sources", "pd_groups"],
+    edgeTypes: ["is_in_functional_unit", "has_timebranch"],
   },
-  // MICRO-FILTRI-DETTAGLIATI · the sequence alone: units and their physical
-  // relations, no epochs' edges, no contemporaneity, no instances
+  // MICRO-FILTRI-DETTAGLIATI · the stratigraphy alone: units and their physical
+  // relations (MICRO-CRONO-MULTIPLA: no longer the sequence, which is chronology)
   {
     key: "strat-only",
     label: "fam.tpl.stratOnly",
     nodeFamilies: ["units_real", "units_virtual", "special_finds", "continuity"],
     edgeFamilies: ["stratigraphic"],
   },
-  // …and the chronology alone: units, epochs, the time's edges, no physical relation
+  // …and the relative chronology alone: units, the sequence, the contemporaneity,
+  // the instances — no physical relation, no edge to the epochs
   {
     key: "chrono-only",
     label: "fam.tpl.chronoOnly",
     nodeFamilies: ["units_real", "units_virtual", "special_finds", "continuity", "epochs"],
-    edgeFamilies: ["temporal"],
+    edgeFamilies: ["chronology"],
   },
 ];
