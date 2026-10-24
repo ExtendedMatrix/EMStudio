@@ -76,7 +76,8 @@ const edgeTypes = [...R.edgeTypeNames(), R.GENERIC_EDGE];
   for (const e of ["cuts", "fills", "overlies", "abuts", "bonded_to", "is_bonded_to", "equals", "is_physically_equal_to"])
     eq(F.edgeFamilyOf(e), "stratigraphic", `${e} is a stratigraphic (physical) relation`);
   eq(F.edgeFamilyOf("is_after"), "chronology", "is_after is relative chronology");
-  eq(ep, ["has_first_epoch", "survive_in_epoch", "has_sub_epoch"], "epochs: creation, survival, sub-epochs");
+  // (+ is_in_periodization, datamodel 1.6.47: a horizon in its periodization — MICRO-SUITE-VERDE)
+  eq(ep, ["has_first_epoch", "survive_in_epoch", "has_sub_epoch", "is_in_periodization"], "epochs: creation, survival, sub-epochs, periodizations");
   eq(fam("epochs").subfamilies, [{ key: "creation", types: ["has_first_epoch"] }, { key: "survival", types: ["survive_in_epoch"] }],
     "…with its two sub-families");
   eq(fam("epochs").hiddenIn, ["matrix"], "…not listed in the Matrix's panel (its lanes)");
@@ -102,14 +103,22 @@ const edgeTypes = [...R.edgeTypeNames(), R.GENERIC_EDGE];
   const frozen = JSON.parse(readFileSync(new URL("../testdata/detail-rings-70c8699.json", import.meta.url), "utf8"));
   // the frozen lists know the datamodel of their day: compare on its types
   const dmN = new Set([...frozen.matrix.n, ...nodeTypes]);
-  const hidden = (vis) => ({
-    n: nodeTypes.filter((t) => { const l = F.nodeLeaf(t); return l && !vis.has(l); }).sort(),
-    e: edgeTypes.filter((t) => { const l = F.edgeLeaf(t); return l && !vis.has(l); }).sort(),
+  // the types born after the snapshot (datamodel 1.6.37/1.6.47, 24 Oct: the
+  // horizons, their periodizations and the edge between them) are not in it:
+  // they are compared apart, below (MICRO-SUITE-VERDE)
+  const NEW_N = new Set(["horizon", "periodization"]), NEW_E = new Set(["is_in_periodization"]);
+  const hidden = (vis, all = false) => ({
+    n: nodeTypes.filter((t) => (all || !NEW_N.has(t)) && (() => { const l = F.nodeLeaf(t); return l && !vis.has(l); })()).sort(),
+    e: edgeTypes.filter((t) => (all || !NEW_E.has(t)) && (() => { const l = F.edgeLeaf(t); return l && !vis.has(l); })()).sort(),
   });
   ok(dmN.size >= nodeTypes.length, "frozen snapshot read");
   eq(hidden(F.defaultVisibleLeaves("matrix")), frozen.matrix, "the Matrix's defaults hide what its rings hid");
   for (const v of ["graph", "dtc", "multigraph", "graphs"])
-    eq(hidden(F.defaultVisibleLeaves(v)), { n: [], e: [] }, `the ${v} view shows every type by default`);
+    eq(hidden(F.defaultVisibleLeaves(v), true), { n: [], e: [] }, `the ${v} view shows every type by default`);
+  // the horizons and periodizations: time's references, not lanes — off in the Matrix
+  eq(hidden(F.defaultVisibleLeaves("matrix"), true).n.filter((t) => NEW_N.has(t)), ["horizon", "periodization"],
+    "the Matrix hides the horizons and their periodizations by default (they are not its lanes)");
+  eq(F.nodeFamilyOf("horizon"), "epochs", "a horizon is with the epochs");
   for (const k of ["full", "harris", "em-compact", "em-complete"])
     eq(hidden(F.TEMPLATES.find((x) => x.key === k).leaves), frozen[k], `the template «${k}» hides what it hid`);
   const so = F.TEMPLATES.find((x) => x.key === "strat-only").leaves;

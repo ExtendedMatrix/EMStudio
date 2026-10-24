@@ -115,8 +115,12 @@ export const NODE_FAMILY_TABLE: NodeFamilyDef[] = [
     matrix: true, graph: true,
   },
   { key: "continuity", classes: ["ContinuityNode"], matrix: true, graph: true },
-  // the epochs are the Matrix's lanes: never a filtered node
-  { key: "epochs", classes: ["EpochNode"], structural: ["EpochNode"], matrix: true, graph: true },
+  // the epochs are the Matrix's lanes: never a filtered node. The horizons and
+  // their periodizations (datamodel 1.6.37: named spans the reader applies, not
+  // epochs, dating nothing) are time's references beside them — listed here,
+  // switchable, off in the Matrix, whose lanes are the epochs (MICRO-SUITE-VERDE)
+  { key: "epochs", classes: ["EpochNode", "PeriodizationNode", "HorizonNode"], structural: ["EpochNode"],
+    matrix: true, graph: true, matrixExcept: ["horizon", "periodization"] },
   // the abstract ParadataNode (a paradata node of no kind) sits with the sources
   { key: "documents", classes: ["ParadataNode", "DocumentNode"], matrix: true, graph: true },
   { key: "extractors", classes: ["ExtractorNode"], matrix: true, graph: true },
@@ -195,7 +199,9 @@ export const EDGE_FAMILY_TABLE: EdgeFamilyDef[] = [
   // is not in its panel and its edges are not drawn there.
   {
     key: "epochs",
-    edges: ["has_first_epoch", "survive_in_epoch", "has_sub_epoch"],
+    // (is_in_periodization: a horizon in its periodization, datamodel 1.6.47 —
+    // with the epochs' family, «Between the epochs», as has_sub_epoch)
+    edges: ["has_first_epoch", "survive_in_epoch", "has_sub_epoch", "is_in_periodization"],
     subfamilies: [
       { key: "creation", edges: ["has_first_epoch"] },
       { key: "survival", edges: ["survive_in_epoch"] },
