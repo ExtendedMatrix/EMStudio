@@ -570,6 +570,8 @@ function initial(): WorkspaceId {
 }
 
 let active: WorkspaceId = initial();
+/** MICRO-FINESTRE-MULTIPLE · the detached windows (see `addDetachedWindow`). */
+const detached: Win[] = [];
 const listeners: Array<(id: WorkspaceId) => void> = [];
 
 export function activeWorkspace(): WorkspaceId {
@@ -1339,25 +1341,70 @@ export function applyArrangement(ws: WorkspaceId = active): boolean {
   return true;
 }
 
-/** Every window of a workspace, in creation order. */
+/** Every window of a workspace, in creation order — and after them the windows
+ *  DETACHED into a system window of their own, which belong to the app and not
+ *  to one workspace (MICRO-FINESTRE-MULTIPLE). A fresh array when there are
+ *  some: the callers read it, nobody pushes into it. */
 export function windowsOf(ws: WorkspaceId = active): Win[] {
-  return registry[ws].wins;
+  const wins = registry[ws].wins;
+  return detached.length ? [...wins, ...detached] : wins;
 }
 
-/** The window the workspace is currently showing. */
+/** The window the workspace is currently showing — a detached one when the
+ *  focus is in its system window. */
 export function activeWin(ws: WorkspaceId = active): Win {
   const entry = registry[ws];
-  return entry.wins.find((w) => w.id === entry.activeId) ?? entry.wins[0];
+  return entry.wins.find((w) => w.id === entry.activeId)
+    ?? detached.find((w) => w.id === entry.activeId) ?? entry.wins[0];
 }
 
 /** Show another window of the workspace. Returns it (unchanged if unknown). */
 export function setActiveWin(winId: string, ws: WorkspaceId = active): Win {
   const entry = registry[ws];
-  if (entry.wins.some((w) => w.id === winId)) {
+  if (entry.wins.some((w) => w.id === winId) || detached.some((w) => w.id === winId)) {
     entry.activeId = winId;
     persistWindows();
   }
   return activeWin(ws);
+}
+
+// ── MICRO-FINESTRE-MULTIPLE · windows detached into a system window ─────────
+//
+// A detached window is a `Win` like any other — its type, its state, its
+// surface mounted by the same constructor — whose area lives in another
+// system window of the SAME page (`shell/detach.ts`). It is in no split tree
+// (`repairLayout` never sees it) and in no workspace: it stays on its screen
+// whichever workspace the main window shows. Not persisted with the
+// arrangement: where it was is a local preference per document (`detach.ts`).
+// (The list itself is declared beside `active`, above every reader.)
+
+/** The detached windows, in the order they were opened. */
+export function detachedWins(): readonly Win[] {
+  return detached;
+}
+
+export function isDetachedWin(winId: string): boolean {
+  return detached.some((w) => w.id === winId);
+}
+
+/** A new detached window of `type` with a COPY of `state`. Its id is `pop:<n>`,
+ *  never a workspace's (`<ws>:<n>`), so no arrangement can name it. */
+export function addDetachedWindow(type: WindowType, state: Record<string, unknown>): Win {
+  let n = 1;
+  while (detached.some((w) => w.id === `pop:${n}`)) n++;
+  const win: Win = { id: `pop:${n}`, type, state };
+  detached.push(win);
+  return win;
+}
+
+/** Forget a detached window; the focus goes back to the workspace's own. */
+export function removeDetachedWindow(winId: string): Win | null {
+  const i = detached.findIndex((w) => w.id === winId);
+  if (i < 0) return null;
+  const [win] = detached.splice(i, 1);
+  for (const entry of Object.values(registry))
+    if (entry.activeId === winId) entry.activeId = entry.wins[0]?.id ?? entry.activeId;
+  return win;
 }
 
 /** Add a window to a workspace and make it active. Its id is stable across

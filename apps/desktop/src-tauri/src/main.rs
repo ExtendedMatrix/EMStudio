@@ -855,6 +855,71 @@ fn restart_bridge(app: &tauri::AppHandle) {
     spawn_bridge(app);
 }
 
+/// MICRO-FINESTRE-MULTIPLE · the label of a detached window: `detached-<n>`.
+fn detached_label(n: usize) -> String {
+    format!("detached-{n}")
+}
+
+fn is_detached_label(label: &str) -> bool {
+    label.strip_prefix("detached-").is_some_and(|n| !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit()))
+}
+
+/// The main window, from tauri.conf.json, with the answer to `window.open`.
+///
+/// The page opens `about:blank` with the position and size it wants (near the
+/// cursor, or where the window was last time) and draws into it: the answer is
+/// a real system window — movable to another screen, with its own title — that
+/// KEEPS ITS OPENER, which is what lets the page script it.
+/// `window_features` hands the new webview the opener's configuration (macOS),
+/// environment (Windows) and related view (Linux), as Tauri requires for
+/// `Create`. Any other URL (a link with `target=_blank`) is not a window of the
+/// app: the system browser opens it.
+fn build_main_window(app: &tauri::AppHandle) -> tauri::Result<()> {
+    use std::sync::atomic::AtomicUsize;
+    static NEXT: AtomicUsize = AtomicUsize::new(1);
+    let conf = app
+        .config()
+        .app
+        .windows
+        .iter()
+        .find(|w| w.label == "main")
+        .cloned()
+        .expect("tauri.conf.json declares the main window");
+    let handle = app.clone();
+    tauri::WebviewWindowBuilder::from_config(app, &conf)?
+        .on_new_window(move |url, features| {
+            if url.scheme() != "about" {
+                use tauri_plugin_opener::OpenerExt;
+                if url.scheme() == "https" || url.scheme() == "http" {
+                    let _ = handle.opener().open_url(url.as_str(), None::<&str>);
+                }
+                return tauri::webview::NewWindowResponse::Deny;
+            }
+            let label = detached_label(NEXT.fetch_add(1, Ordering::Relaxed));
+            let built = tauri::WebviewWindowBuilder::new(
+                &handle,
+                label,
+                tauri::WebviewUrl::External("about:blank".parse().unwrap()),
+            )
+            .window_features(features)
+            .title("EMStudio")
+            .min_inner_size(240.0, 180.0)
+            .on_document_title_changed(|window, title| {
+                let _ = window.set_title(&title);
+            })
+            .build();
+            match built {
+                Ok(window) => tauri::webview::NewWindowResponse::Create { window },
+                Err(e) => {
+                    eprintln!("[emstudio] a detached window could not be opened: {e}");
+                    tauri::webview::NewWindowResponse::Deny
+                }
+            }
+        })
+        .build()?;
+    Ok(())
+}
+
 fn main() {
     tauri::Builder::default()
         // FIRST, as the plugin requires. On Windows and Linux the OS answers a
@@ -909,6 +974,13 @@ fn main() {
             update_install
         ])
         .setup(|app| {
+            // MICRO-FINESTRE-MULTIPLE · the main window is built HERE, from its
+            // entry in tauri.conf.json (`create: false`), because only a builder
+            // can answer `window.open`: a window detached from the page (Shift +
+            // a corner dragged) is a system window of the SAME page, which the
+            // page draws into (frontend/src/shell/detach.ts). Built first, so
+            // everything below runs exactly as it did when Tauri created it.
+            build_main_window(app.handle())?;
             #[cfg(any(target_os = "linux", all(debug_assertions,
                                               windows)))]
             {
@@ -967,6 +1039,19 @@ fn main() {
                 spawn_bridge(app.handle());
             }
             Ok(())
+        })
+        // MICRO-FINESTRE-MULTIPLE · closing the main window closes the detached
+        // ones: their content is drawn by the main page, which is gone (the
+        // question about unsaved changes is the main page's, asked once)
+        .on_window_event(|window, event| {
+            if window.label() == "main" && matches!(event, tauri::WindowEvent::Destroyed) {
+                use tauri::Manager;
+                for (label, other) in window.app_handle().webview_windows() {
+                    if is_detached_label(&label) {
+                        let _ = other.destroy();
+                    }
+                }
+            }
         })
         .build(tauri::generate_context!())
         .expect("error while building EMStudio")
@@ -1209,6 +1294,27 @@ mod tests {
         assert!(!key.is_empty());
         assert!(!key.to_ascii_lowercase().contains("secret"), "a private key in the config");
         assert_eq!(conf["bundle"]["createUpdaterArtifacts"], serde_json::json!(false));
+    }
+
+    /// MICRO-FINESTRE-MULTIPLE · the main window is built in `setup` (only a
+    /// builder answers `window.open`), so the config must not create it too;
+    /// a detached window's label is never the main one's nor a stray one's.
+    #[test]
+    fn the_main_window_is_built_by_setup_and_detached_labels_are_recognised() {
+        let conf: serde_json::Value =
+            serde_json::from_str(include_str!("../tauri.conf.json")).unwrap();
+        let main = &conf["app"]["windows"][0];
+        assert_eq!(main["label"], "main");
+        assert_eq!(main["create"], false, "Tauri would create it before setup, without the handler");
+        let caps: serde_json::Value =
+            serde_json::from_str(include_str!("../capabilities/default.json")).unwrap();
+        assert_eq!(caps["windows"], serde_json::json!(["main"]),
+                   "a detached window gets no IPC of its own: the main page draws it");
+        assert_eq!(detached_label(3), "detached-3");
+        assert!(is_detached_label(&detached_label(12)));
+        for other in ["main", "detached-", "detached-x", "detached", "updater"] {
+            assert!(!is_detached_label(other), "{other}");
+        }
     }
 
     #[test]
