@@ -9849,6 +9849,97 @@ test("FD1.panel", "FILTRI-DETTAGLIATI · il livello di dettaglio a due livelli (
     && r.mono && !r.graphMono && r.graphSel === "full" && r.matrixSel === "chrono-only" && !errors.length;
   return { pass, detail: r };
 });
+// ── MICRO-CRONO-MULTIPLA p.2 · one edit, the whole selection, with ⌘ / Alt ────
+test("ME1.multi", "CRONO-MULTIPLA · con più nodi selezionati la modifica va al nodo attivo; tenendo premuto ⌘ (macOS) / Alt va a tutti i selezionati che hanno il campo: 5 documenti, epoca di creazione — il suggerimento «Applica a 5 nodi selezionati · 0 saltati» mentre il tasto è premuto, tutti e 5 nell'epoca, una riga nel Log, un solo annulla li riporta tutti; senza il tasto solo l'attivo; ⌘+Invio su una descrizione la scrive su tre unità", async () => {
+  const { p, ctx, errors } = await open({ doc: "TempluMare", locale: "en" });
+  const D = (f, a) => p.evaluate(f, a);
+  const KEY = await D(() => (/Mac|iPhone|iPad/i.test(navigator.platform) ? "Meta" : "Alt"));
+  const r = { key: KEY };
+  const g = await D(() => { const d = JSON.parse(window.__EM_DRAG__.docJson()); const g = d.graph ?? d.graphs[d.active_graph_id];
+    return { docs: g.nodes.filter((n) => n.node_type === "document").slice(0, 5).map((n) => n.id),
+             units: g.nodes.filter((n) => n.node_type === "US").slice(0, 3).map((n) => n.id),
+             epochs: g.nodes.filter((n) => n.node_type === "EpochNode").map((n) => n.id) }; });
+  const epochOf = () => D((ids) => { const d = JSON.parse(window.__EM_DRAG__.docJson()); const gg = d.graph ?? d.graphs[d.active_graph_id];
+    return ids.map((id) => gg.edges.filter((e) => e.source === id && e.edge_type === "has_first_epoch").map((e) => e.target).join(",")); }, g.docs);
+  r.before = await epochOf();
+  const active = g.docs[g.docs.length - 1];
+  r.target = g.epochs.find((e) => !r.before.includes(e)) ?? g.epochs[0];
+  const sel = `select[data-doc-epoch="${active}"]`;
+  // without the key: the active document only
+  await D((ids) => window.__EM_DRAG__.selectMany(ids), g.docs); await p.waitForTimeout(500);
+  await p.waitForSelector(sel, { timeout: 5000 });
+  r.hintHidden = await D(() => [...document.querySelectorAll(".multi-hint")].every((h) => !h.offsetParent));
+  await p.selectOption(sel, r.target); await p.waitForTimeout(500);
+  r.plain = await epochOf();
+  await D(() => window.__EM_DRAG__.undo()); await p.waitForTimeout(400);
+  r.plainUndone = await epochOf();
+  // with the key: the hint while it is held, then all five
+  await D((ids) => window.__EM_DRAG__.selectMany(ids), g.docs); await p.waitForTimeout(500);
+  await p.waitForSelector(sel, { timeout: 5000 });
+  await p.keyboard.down(KEY); await p.waitForTimeout(150);
+  r.hint = await D(() => [...document.querySelectorAll(".multi-hint")].filter((h) => h.offsetParent).map((h) => h.textContent));
+  await p.screenshot({ path: SHOT("me1-hint") }).catch(() => {});
+  const logN = await D(() => window.__EM_DRAG__.log().length);
+  await p.selectOption(sel, r.target); await p.waitForTimeout(500);
+  await p.keyboard.up(KEY); await p.waitForTimeout(150);
+  r.multi = await epochOf();
+  r.hintAfterUp = await D(() => [...document.querySelectorAll(".multi-hint")].filter((h) => h.offsetParent).length);
+  r.log = await D((n) => window.__EM_DRAG__.log().slice(n).map((e) => e.message), logN);
+  r.selKept = await D(() => window.__EM_DRAG__.selected().length);
+  await D(() => window.__EM_DRAG__.undo()); await p.waitForTimeout(400);
+  r.undone = await epochOf();
+  // ⌘/Alt+Enter on a description: three units
+  await D((ids) => window.__EM_DRAG__.selectMany(ids), g.units); await p.waitForTimeout(500);
+  await p.click(".insp-desc-input"); await p.fill(".insp-desc-input", "ME1 · same description");
+  await p.keyboard.down(KEY); await p.keyboard.press("Enter"); await p.keyboard.up(KEY); await p.waitForTimeout(500);
+  r.desc = await D((ids) => { const d = JSON.parse(window.__EM_DRAG__.docJson()); const gg = d.graph ?? d.graphs[d.active_graph_id];
+    return ids.map((id) => gg.nodes.find((n) => n.id === id)?.description); }, g.units);
+  r.errors = errors;
+  await ctx.close();
+  const all = (xs, v) => xs.every((x) => x === v);
+  const pass = r.hintHidden
+    && r.plain[4] === r.target && JSON.stringify(r.plain.slice(0, 4)) === JSON.stringify(r.before.slice(0, 4))
+    && JSON.stringify(r.plainUndone) === JSON.stringify(r.before)
+    && r.hint.some((x) => /Apply to 5 selected nodes · 0 skipped/.test(x))
+    && all(r.multi, r.target) && r.hintAfterUp === 0
+    && r.log.some((m) => /«Epoch of creation» applied to 5 selected nodes/.test(m)) && r.selKept === 5
+    && JSON.stringify(r.undone) === JSON.stringify(r.before)
+    && all(r.desc, "ME1 · same description") && !errors.length;
+  return { pass, detail: r };
+});
+test("ME2.table", "CRONO-MULTIPLA · nel Tabular (Unità) la scelta della prima epoca con ⌘ / Alt premuto va a tutte le unità selezionate (righe del foglio), un solo annulla; senza il tasto solo la riga modificata; la colonna ID non si propaga", async () => {
+  const { p, ctx, errors } = await open({ doc: "spazio" });
+  const D = (f, a) => p.evaluate(f, a);
+  const KEY = await D(() => (/Mac|iPhone|iPad/i.test(navigator.platform) ? "Meta" : "Alt"));
+  await sheetMenu(p);
+  await p.locator('.dd-menu:not(.hidden) button[data-sheet="Units"]').first().click();
+  await p.waitForTimeout(600);
+  const rows = await D(() => [...document.querySelectorAll('.tile-tablebody select[data-col="EPOCH"]')].map((x) => x.dataset.row).slice(0, 3));
+  const ep = (ids) => D((xs) => xs.map((id) => window.__EM_DRAG__.nodeInfo(id).edges.filter((e) => e.type === "has_first_epoch").map((e) => e.target).join(",")), ids);
+  const r = { rows, before: await ep(rows) };
+  const active = rows[0];
+  await D((ids) => window.__EM_DRAG__.selectMany([...ids.slice(1), ids[0]]), rows); await p.waitForTimeout(500);
+  const sel = `.tile-tablebody select[data-col="EPOCH"][data-row="${active}"]`;
+  r.choice = await D((s) => [...document.querySelector(s).options].map((o) => o.value).find((v) => v && v !== document.querySelector(s).value), sel);
+  await p.selectOption(sel, r.choice); await p.waitForTimeout(500);
+  r.plain = await ep(rows);
+  await D(() => window.__EM_DRAG__.undo()); await p.waitForTimeout(400);
+  await D((ids) => window.__EM_DRAG__.selectMany([...ids.slice(1), ids[0]]), rows); await p.waitForTimeout(500);
+  await p.keyboard.down(KEY); await p.waitForTimeout(120);
+  r.hint = await D(() => [...document.querySelectorAll(".tile-tablebody .multi-hint")].filter((h) => h.offsetParent).map((h) => h.textContent));
+  await p.selectOption(sel, r.choice); await p.waitForTimeout(500);
+  await p.keyboard.up(KEY);
+  r.multi = await ep(rows);
+  await D(() => window.__EM_DRAG__.undo()); await p.waitForTimeout(400);
+  r.undone = await ep(rows);
+  r.idCell = await D(() => !!document.querySelector('.tile-tablebody input[data-col="ID"][data-multi-field]'));
+  r.errors = errors;
+  await ctx.close();
+  const pass = rows.length === 3 && r.plain[0] === r.choice && r.plain.slice(1).join("|") === r.before.slice(1).join("|")
+    && r.hint.some((x) => /(Apply to|Applica a) 3 (selected nodes|nodi selezionati) · 0 (skipped|saltati)/.test(x)) && r.multi.every((x) => x === r.choice)
+    && r.undone.join("|") === r.before.join("|") && !r.idCell && !errors.length;
+  return { pass, detail: r };
+});
 test("FD2.esc", "FILTRI-DETTAGLIATI · Esc chiude il pannello del livello di dettaglio (fuoco nella ricerca, su una casella, sulla tela) e quello degli overlay, e restituisce il fuoco alla vista", async () => {
   const { p, ctx, errors } = await open({ doc: "TempluMare", locale: "en" });
   const D = (f, a) => p.evaluate(f, a);

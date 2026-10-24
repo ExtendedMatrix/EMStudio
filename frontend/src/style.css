@@ -10229,3 +10229,8 @@ tr.tt-hidden { display: none; }
 .georef-pin { margin: 4px 0 8px; }
 /* MICRO-CRONO-MULTIPLA · a sub-family's heading inside a family (Epochs: creation, survival) */
 .fp-subfam { margin: 3px 0 1px 20px; font-size: 10.5px; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: .03em; }
+/* MICRO-CRONO-MULTIPLA p.2 · «Apply to N selected nodes · M skipped»: said beside
+   every field that can propagate, only while ⌘ (macOS) / Alt is held */
+.multi-hint { display: none; margin: 2px 0 4px; padding: 2px 6px; border-radius: 3px; font-size: 11px;
+  color: var(--accent, #2a6fdb); background: color-mix(in srgb, var(--accent, #2a6fdb) 12%, transparent); }
+body.multi-held .multi-hint { display: block; }

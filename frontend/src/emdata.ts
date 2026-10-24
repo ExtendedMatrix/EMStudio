@@ -56,6 +56,7 @@ import {
   type FacetSelection,
 } from "./facets";
 import { t } from "./i18n";
+import { commitField, confirmOnMultiEnter, multiHint, type MultiScope } from "./multi-edit";
 import { describeFile, filesOfDocument } from "./file-states";
 import { docFilesHtml } from "./file-states-ui";
 import { chronologyFor, onChronologyUpdate, type ChronEntry, type ChronRule,
@@ -82,6 +83,14 @@ let currentRowOf: () => string | null = () => null;
 let setCurrentRow: (id: string | null) => void = () => {};
 //: ROWSELECT · what picking a row means BEYOND marking it current.
 let onRowPicked: (id: string) => void = () => {};
+/** MICRO-CRONO-MULTIPLA p.2 · the selection (⌘/Alt: a cell's edit goes to every
+ *  selected row of the sheet) and the Log line of such an edit */
+let getSelection: () => string[] = () => [];
+let onMultiLog: ((msg: string, ids: string[], store: DocumentStore) => void) | null = null;
+/** the columns an edit never propagates: the name (an identity: N nodes with one
+ *  name), the type and the kind (what the node IS: its fields and its admitted
+ *  edges follow), the claim's property type (its name) */
+const NOT_MULTI_COLUMNS: ReadonlySet<string> = new Set(["ID", "TYPE", "KIND", "PROPERTY_TYPE"]);
 /** a warning's one-click fix, run from the Warnings view */
 let runIssueAction: (issueId: string) => void = () => {};
 /** CAMPAGNA · a warning's CORRECTION (its `fix`), with the value chosen */
@@ -370,7 +379,12 @@ export function initEmData(opts: {
   onShowInMatrix?: (id: string) => void;
   /** MICRO-VIEWER-UNICO p.6 · what the three new sheets ask the app (where a file is, the AI state) */
   getLedgerCtx?: () => LedgerCtx | null;
+  /** MICRO-CRONO-MULTIPLA p.2 · the selected nodes, and the Log line of an edit made on several */
+  getSelection?: () => string[];
+  onMultiLog?: (msg: string, ids: string[], store: DocumentStore) => void;
 }): void {
+  if (opts.getSelection) getSelection = opts.getSelection;
+  if (opts.onMultiLog) onMultiLog = opts.onMultiLog;
   if (opts.getLedgerCtx) getLedgerCtx = opts.getLedgerCtx;
   if (opts.onShowInMatrix) onShowInMatrix = opts.onShowInMatrix;
   if (opts.onDeleted) onDeleted = opts.onDeleted;
@@ -682,7 +696,7 @@ function emdbTableHtml(store: DocumentStore, sheet: SheetKey,
   const head = `<tr><th class="emdata-gutter-head" title="${escapeAttr(t("table.pickHint"))}"></th>` +
     // MICRO-PANNELLI-OVERLAY-TABULAR p.3 · in the interface's language (the key
     // is the column's, the English label the fallback)
-    table.columns.map((c) => `<th>${escapeHtml(t(`emdb.col.${c.key}`, undefined, c.label))}</th>`).join("") +
+    table.columns.map((c) => `<th data-col="${escapeAttr(c.key)}">${escapeHtml(t(`emdb.col.${c.key}`, undefined, c.label))}</th>`).join("") +
     (files ? `<th>${escapeHtml(t("dcard.files"))}</th>` : "") + `<th></th></tr>`;
   const rowsHtml = rows.map((row) => {
     const cells = table.columns.map((col, ci) =>
@@ -1056,14 +1070,35 @@ function wireBody(host: EmDataHost, store: DocumentStore, st: TableState): void 
 
   // the editable sheets: cell editors, row selection, delete
   const sheet = st.sheet as SheetKey;
-  body.querySelectorAll<HTMLElement>("[data-edit]").forEach((el) => {
+  // MICRO-CRONO-MULTIPLA p.2 · with ⌘/Alt the cell's edit goes to every selected
+  // node that is a row of this sheet (the others are skipped and counted)
+  const edits = body.querySelectorAll<HTMLElement>("[data-edit]");
+  const sheetRows = edits.length ? new Set(buildTable(store, sheet, volatileProvider).rows.map((r) => r.id)) : new Set<string>();
+  const isRow = (n: { id: string }): boolean => sheetRows.has(n.id);
+  const scopeOf = (rowId: string): MultiScope => {
+    const sel = getSelection().filter((id) => !!store.node(id));
+    return { store, active: rowId, selection: sel.includes(rowId) ? sel : [rowId],
+             log: (msg, ids) => onMultiLog?.(msg, ids, store) };
+  };
+  if (edits.length) {
+    const active = getSelection().find((id) => sheetRows.has(id));
+    const h = active ? multiHint(scopeOf(active), isRow) : null;
+    if (h) { h.classList.add("emdata-multi-hint"); body.prepend(h); }
+  }
+  edits.forEach((el) => {
     const rowId = el.getAttribute("data-row")!;
     const colKey = el.getAttribute("data-col")!;
+    const colLabel = el.closest("table")?.querySelector(`th[data-col="${CSS.escape(colKey)}"]`)?.textContent?.trim() || colKey;
     const commit = (): void => {
       const value = (el as HTMLInputElement | HTMLSelectElement).value;
-      applyEdit(store, sheet, rowId, colKey, value);
+      if (NOT_MULTI_COLUMNS.has(colKey)) applyEdit(store, sheet, rowId, colKey, value);
+      else commitField(scopeOf(rowId), rowId, colLabel, isRow, (id) => { applyEdit(store, sheet, id, colKey, value); });
     };
     el.addEventListener("change", commit);
+    if (!NOT_MULTI_COLUMNS.has(colKey)) {
+      el.dataset.multiField = colLabel;
+      confirmOnMultiEnter(el as HTMLInputElement | HTMLSelectElement, commit);
+    }
     if (el.tagName !== "SELECT")
       el.addEventListener("keydown", (e) => {
         if ((e as KeyboardEvent).key === "Enter") (el as HTMLInputElement).blur();

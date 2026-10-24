@@ -19,6 +19,7 @@ import { renderSitePosition } from "./study-panel";
 import { linksOfGraph } from "./links";
 import { chainCard, isChainNode } from "./hdto-card";
 import { naturalFields, qualeOf, TRANSLATION_TYPE } from "./translation";
+import { commitField, confirmOnMultiEnter, multiHint, multiKeyOf, type MultiScope } from "./multi-edit";
 
 export interface InspectorCallbacks {
   onJump: (nodeId: string) => void;
@@ -128,6 +129,30 @@ export interface InspectorCallbacks {
   renderSketchUse?: (host: HTMLElement, nodeId: string) => void;
   /** MICRO-PROVA-DEV47 p.5 · a unit's proxy: its file, «Elimina il proxy» */
   renderProxy?: (host: HTMLElement, nodeId: string) => boolean;
+  /** MICRO-CRONO-MULTIPLA p.2 · the selection the active node belongs to (with
+   *  ⌘/Alt held an edit goes to every selected node that has the field) and the
+   *  Log line of such an edit. Absent = edits go to the active node only. */
+  selection?: () => string[];
+  logMulti?: (msg: string, ids: string[]) => void;
+}
+
+/** MICRO-CRONO-MULTIPLA p.2 · a field of the Inspector that can propagate: its
+ *  `change` (and ⌘/Alt+Enter) confirms it for the active node or, the key held,
+ *  for every selected node that `has` it; the hint goes right after the field. */
+function bindMulti(
+  scope: MultiScope | null,
+  active: string,
+  input: HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement,
+  field: string,
+  has: (n: EmNode) => boolean,
+  apply: (id: string, value: string) => void,
+): void {
+  input.dataset.multiField = field;
+  const run = (): void => { commitField(scope, active, field, has, (id) => apply(id, input.value)); };
+  input.addEventListener("change", run);
+  confirmOnMultiEnter(input, run);
+  const h = multiHint(scope, has);
+  if (h) input.after(h);
 }
 
 /** MICRO-PULIZIA p.6 · «Open with…»'s icons, by tool (currentColor, 18 px):
@@ -294,6 +319,17 @@ export function renderInspector(
     return;
   }
   const doc = store.doc;
+  // MICRO-CRONO-MULTIPLA p.2 · where an edit can go with ⌘/Alt held
+  const scope: MultiScope | null = cb.selection
+    ? { store, active: nodeId, selection: cb.selection().filter((id) => !!store.node(id)), log: cb.logMulti }
+    : null;
+  /** a button whose click is an edit: the active node, or with the key the selection */
+  const multiClick = (b: HTMLElement, field: string, has: (n: EmNode) => boolean, apply: (id: string) => void, hintAfter = true): void => {
+    b.dataset.multiField = field;
+    b.addEventListener("click", (e) => { commitField(scope, nodeId, field, has, apply, multiKeyOf(e)); });
+    const h = hintAfter ? multiHint(scope, has) : null;
+    if (h) b.after(h);
+  };
 
   const head = el("div", "insp-head");
   const st = nodeStyle(node.node_type);
@@ -368,14 +404,16 @@ export function renderInspector(
     hex.value = stored;
     hex.placeholder = "#RRGGBB";
     hex.title = t("l.colourHex");
+    const hasColour = (n: EmNode): boolean =>
+      n.node_type === "EpochNode" || typeof (n.data as Record<string, unknown> | undefined)?.color === "string";
     const apply = (v: string): void => {
-      const d = {
-        ...((store.node(nodeId)?.data ?? {}) as Record<string, unknown>),
-      };
-      const val = v.trim();
-      if (val === "") delete d.color;
-      else d.color = val;
-      store.updateNode(nodeId, { data: d });
+      commitField(scope, nodeId, t("multi.f.colour"), hasColour, (id) => {
+        const d = { ...((store.node(id)?.data ?? {}) as Record<string, unknown>) };
+        const val = v.trim();
+        if (val === "") delete d.color;
+        else d.color = val;
+        store.updateNode(id, { data: d });
+      });
     };
     // AUDIT · the picker shows its colour live in the hex field, and WRITES once,
     // when it closes (`change`): on `input` every drag step was a store write and
@@ -393,10 +431,14 @@ export function renderInspector(
     nameRow.appendChild(swatch);
     nameRow.appendChild(nameInput);
     nameRow.appendChild(hex);
+    hex.dataset.multiField = t("multi.f.colour");
+    const ch = multiHint(scope, hasColour);
+    root.appendChild(nameRow);
+    if (ch) root.appendChild(ch);
   } else {
     nameRow.appendChild(nameInput);
+    root.appendChild(nameRow);
   }
-  root.appendChild(nameRow);
   // MICRO-SPAZIO-3D-3 p.11 · a model: its name without the level suffix, the
   // technical name (the field above) beneath, as for the properties
   const rn = cb.readableName?.(nodeId) ?? null;
@@ -430,10 +472,9 @@ export function renderInspector(
     desc.rows = 3;
     desc.placeholder = "description…";
     desc.value = String(node.description ?? "");
-    desc.addEventListener("change", () =>
-      store.updateNode(nodeId, { description: desc.value }),
-    );
     root.appendChild(desc);
+    bindMulti(scope, nodeId, desc, t("multi.f.description"), (n) => n.node_type !== "property",
+      (id, v) => store.updateNode(id, { description: v }));
     if (cb.renderTextLanguages && naturalFields(node).includes("description"))
       cb.renderTextLanguages(root, nodeId, "description");
   }
@@ -501,15 +542,14 @@ export function renderInspector(
     const ptype = String(pdata.property_type ?? "");
     valIn.placeholder =
       ptype.startsWith("absolute_time") ? "e.g. -27  (negative = BCE)" : "value…";
-    valIn.addEventListener("change", () =>
-      store.setPropertyValue(nodeId, valIn.value),
-    );
     root.appendChild(valIn);
+    bindMulti(scope, nodeId, valIn, t("multi.f.value"), (n) => n.node_type === "property",
+      (id, v) => store.setPropertyValue(id, v));
     // the value of a property IS its description in em.json: its languages
     if (cb.renderTextLanguages && naturalFields(node).includes("description"))
       cb.renderTextLanguages(root, nodeId, "description");
     // dev28 · an OBJECT quale (attribution) is compiled here, field by field
-    renderQualeObject(root, store, node, cb);
+    renderQualeObject(root, store, node, cb, scope);
   }
 
   // DEV30 U3 · «Lock position» moved to the node's menu on the canvas, where
@@ -604,12 +644,11 @@ export function renderInspector(
       const cur = ((node as EmNode).data ?? {}) as Record<string, unknown>;
       inp.value = cur[key] != null ? String(cur[key]) : "";
       inp.placeholder = "e.g. -27  (negative = BCE)";
-      inp.addEventListener("change", () => {
-        // authoring a bound is what makes its absolute_time_* PropertyNode
-        // (F5: in the epoch's group, with has_property) — one undo step
-        store.setEpochBound(nodeId, which, inp.value);
-      });
       root.appendChild(inp);
+      // authoring a bound is what makes its absolute_time_* PropertyNode
+      // (F5: in the epoch's group, with has_property) — one undo step
+      bindMulti(scope, nodeId, inp, label === "Start" ? t("multi.f.epochStart") : t("multi.f.epochEnd"),
+        (n) => n.node_type === "EpochNode", (id, v) => store.setEpochBound(id, which, v));
       const q = qs.find((x) => x.id === qid);
       if (q?.rationale)
         root.appendChild(
@@ -730,6 +769,10 @@ export function renderInspector(
       const topEpoch = store.parentEpoch(cur) ?? cur;
       const phases = store.epochPhases(topEpoch);
       if (phases.length) {
+        const samePhasedEpoch = (n: EmNode): boolean => {
+          const f = store.doc.graph.edges.find((e) => e.edge_type === "has_first_epoch" && e.source === n.id)?.target;
+          return !!f && (store.parentEpoch(f) ?? f) === topEpoch;
+        };
         root.appendChild(el("h3", "insp-sect", "Phase"));
         const bar = el("div", "insp-actions");
         const mk = (id: string, label: string): void => {
@@ -738,12 +781,21 @@ export function renderInspector(
             b.disabled = true;
             b.textContent = `✓ ${label}`;
           }
-          b.addEventListener("click", () => cb.onAssignEpoch(nodeId, id));
           bar.appendChild(b);
+          // with ⌘/Alt: every selected node created in this same epoch (its
+          // phases are the choices); without, the active node as before
+          b.dataset.multiField = t("multi.f.phase");
+          b.addEventListener("click", (e) => {
+            if (multiKeyOf(e) && (scope?.selection.length ?? 0) > 1)
+              commitField(scope, nodeId, t("multi.f.phase"), samePhasedEpoch, (x) => store.setFirstEpoch([x], id), true);
+            else cb.onAssignEpoch(nodeId, id);
+          });
         };
         mk(topEpoch, `${store.node(topEpoch)?.name ?? "epoch"} (none)`);
         for (const ph of phases) mk(ph, store.node(ph)?.name ?? ph);
         root.appendChild(bar);
+        const ph = multiHint(scope, samePhasedEpoch);
+        if (ph) root.appendChild(ph);
       }
     }
   }
@@ -900,9 +952,12 @@ export function renderInspector(
     panel.appendChild(el("div", "insp-hint",
       isLot ? t("insp.lotRightsHint") : t("insp.resourceRightsHint")));
 
+    // MICRO-CRONO-MULTIPLA p.2 · the rights go, with ⌘/Alt, to every selected
+    // resource and lot (the nodes that have this panel)
+    const hasRights = (n: EmNode): boolean => n.node_type === "resource" || n.node_type === "dtc_acquisition";
     const field = (
       label: string, value: string, placeholder: string,
-      commit: (v: string) => void, kind = "text",
+      commit: (id: string, v: string) => void, kind = "text",
     ): HTMLInputElement => {
       panel.appendChild(el("label", "insp-field-label", label));
       const input = document.createElement("input");
@@ -910,8 +965,8 @@ export function renderInspector(
       input.type = kind;
       input.value = value;
       input.placeholder = placeholder;
-      input.addEventListener("change", () => commit(input.value));
       panel.appendChild(input);
+      bindMulti(scope, nodeId, input, label, hasRights, commit);
       return input;
     };
 
@@ -921,7 +976,7 @@ export function renderInspector(
     const graphLicence = store.readGraphScope().license.trim();
     const proposed = graphLicence || "CC-BY-SA-4.0";
     field(t("insp.licence"), rights.license, proposed,
-          (v) => store.setNodeRights(nodeId, { license: v }));
+          (id, v) => store.setNodeRights(id, { license: v }));
     if (!rights.license) {
       const suggest = el("button", "insp-btn",
                          graphLicence ? t("insp.applyGraphLicence", { lic: proposed })
@@ -929,16 +984,15 @@ export function renderInspector(
       suggest.dataset.action = "apply-licence";
       suggest.dataset.licence = proposed;
       suggest.title = graphLicence ? t("insp.applyGraphLicenceTitle") : t("insp.applyDefaultLicenceTitle");
-      suggest.addEventListener("click", () =>
-        store.setNodeRights(nodeId, { license: proposed }));
       panel.appendChild(suggest);
+      multiClick(suggest, t("insp.licence"), hasRights, (id) => store.setNodeRights(id, { license: proposed }));
     }
 
     const embargo = field(t("insp.embargoUntil"), rights.embargo, "2027-01-01",
-                          (v) => store.setNodeRights(nodeId, { embargo: v }),
+                          (id, v) => store.setNodeRights(id, { embargo: v }),
                           "date");
     field(t("insp.embargoReason"), rights.reason, t("insp.embargoReasonEg"),
-          (v) => store.setNodeRights(nodeId, { reason: v, embargo: embargo.value }));
+          (id, v) => store.setNodeRights(id, { reason: v, embargo: embargo.value }));
 
     // ── AUTORE ≠ ATTRIBUTORE ───────────────────────────────────────────────
     //
@@ -968,15 +1022,19 @@ export function renderInspector(
         return;
       }
       authorOrcid.classList.remove("insp-input-bad");
-      store.setNodeRights(nodeId, {
+      commitField(scope, nodeId, t("insp.author"), hasRights, (id) => store.setNodeRights(id, {
         author: authorName.value.trim() || iD,
         orcid: iD,
-      });
+      }));
     };
     authorName.addEventListener("change", commitAuthor);
     authorOrcid.addEventListener("change", commitAuthor);
+    confirmOnMultiEnter(authorName, commitAuthor);
+    confirmOnMultiEnter(authorOrcid, commitAuthor);
+    authorName.dataset.multiField = authorOrcid.dataset.multiField = t("insp.author");
     panel.appendChild(authorName);
     panel.appendChild(authorOrcid);
+    { const h = multiHint(scope, hasRights); if (h) panel.appendChild(h); }
     panel.appendChild(el("div", "insp-hint", t("insp.authorOrcidHint")));
 
     // …e la firma dell'atto, in chiaro
@@ -1008,20 +1066,17 @@ export function renderInspector(
     claim.disabled = !me;
     claim.title = me ? t("insp.iAmTheAuthorTitle", { orcid: me.orcid })
                      : t("insp.noIdentity");
-    claim.addEventListener("click", () => {
-      if (!me) return;
-      store.setNodeRights(nodeId, {
-        author: [me.name, me.surname].filter(Boolean).join(" ") || me.orcid,
-        orcid: me.orcid,
-      });
-    });
+    if (me) multiClick(claim, t("insp.author"), hasRights, (id) => store.setNodeRights(id, {
+      author: [me.name, me.surname].filter(Boolean).join(" ") || me.orcid,
+      orcid: me.orcid,
+    }), false);
     actions.appendChild(claim);
     if (rights.author || rights.license || rights.embargo) {
       const clear = el("button", "insp-btn",
                         t("insp.clearRights")) as HTMLButtonElement;
       clear.title = t("insp.clearRightsTitle");
-      clear.addEventListener("click", () =>
-        store.setNodeRights(nodeId, { author: "", license: "", embargo: "" }));
+      multiClick(clear, t("insp.clearRights"), hasRights,
+        (id) => store.setNodeRights(id, { author: "", license: "", embargo: "" }), false);
       actions.appendChild(clear);
     }
     panel.appendChild(actions);
@@ -1246,7 +1301,14 @@ export function renderInspector(
         x.className = "insp-field-clear";
         x.textContent = "×";
         x.title = t("insp.clearField");
-        x.addEventListener("click", () => cb.onClearField!(nodeId!, `data.${k}`));
+        // with ⌘/Alt: emptied on every selected node that has it written
+        const hasK = (n: EmNode): boolean => {
+          const w = ((n.data ?? {}) as Record<string, unknown>)[k];
+          return w !== undefined && w !== null && w !== "";
+        };
+        x.dataset.multiField = k;
+        x.addEventListener("click", (e) =>
+          commitField(scope, nodeId!, t("multi.f.clear", { field: k }), hasK, (id) => cb.onClearField!(id, `data.${k}`), multiKeyOf(e)));
         dd.appendChild(x);
       }
       into.appendChild(dd);
@@ -1433,11 +1495,14 @@ export function renderInspector(
  * The kinds of input come from the schema's own words: `a | b | c` is a closed
  * list, `float 0-1` a number between 0 and 1, the rest a line of text.
  */
-function renderQualeObject(root: HTMLElement, store: DocumentStore, node: EmNode, cb: InspectorCallbacks): void {
+function renderQualeObject(root: HTMLElement, store: DocumentStore, node: EmNode, cb: InspectorCallbacks, scope: MultiScope | null = null): void {
   const q = qualeOf(node);
   if (!q?.schema || !Object.keys(q.schema).length) return;
   const data = (node.data ?? {}) as Record<string, unknown>;
   const texts = new Set(q.naturalLanguageFields ?? []);
+  // MICRO-CRONO-MULTIPLA p.2 · with ⌘/Alt (Enter, a menu's choice, a slider let
+  // go) every selected property of the same quale takes the value
+  const sameQuale = (n: EmNode): boolean => qualeOf(n)?.id === q.id;
   const box = el("div", "insp-quale-object");
   box.dataset.quale = q.id;
   box.appendChild(el("div", "insp-field-label", t("insp.qualeObject", { name: q.name })));
@@ -1446,8 +1511,10 @@ function renderQualeObject(root: HTMLElement, store: DocumentStore, node: EmNode
     label.title = what;
     box.appendChild(label);
     const write = (v: unknown): void => {
-      if (v === "" || v === null || v === undefined) store.clearField(node.id, `data.${key}`);
-      else store.setField(node.id, `data.${key}`, v);
+      commitField(scope, node.id, key.replace(/_/g, " "), sameQuale, (id) => {
+        if (v === "" || v === null || v === undefined) store.clearField(id, `data.${key}`);
+        else store.setField(id, `data.${key}`, v);
+      });
     };
     const current = data[key];
     const choices = / \| /.test(what) ? what.split("|").map((s) => s.trim()).filter(Boolean) : null;
@@ -1458,6 +1525,7 @@ function renderQualeObject(root: HTMLElement, store: DocumentStore, node: EmNode
       area.value = typeof current === "string" ? current : "";
       area.placeholder = what;
       area.addEventListener("change", () => write(area.value.trim()));
+      confirmOnMultiEnter(area, () => write(area.value.trim()));
       box.appendChild(area);
       if (cb.renderTextLanguages) cb.renderTextLanguages(box, node.id, `data.${key}`);
     } else if (choices) {
@@ -1471,6 +1539,7 @@ function renderQualeObject(root: HTMLElement, store: DocumentStore, node: EmNode
       }
       sel.value = typeof current === "string" && choices.includes(current) ? current : "";
       sel.addEventListener("change", () => write(sel.value));
+      confirmOnMultiEnter(sel, () => write(sel.value));
       box.appendChild(sel);
     } else if (/^float 0-1/.test(what)) {
       // MICRO-DOVE-CHI-MENU p.6 · the Inspector's numbers are Blender's
@@ -1486,8 +1555,10 @@ function renderQualeObject(root: HTMLElement, store: DocumentStore, node: EmNode
       inp.value = typeof current === "string" ? current : "";
       inp.placeholder = what;
       inp.addEventListener("change", () => write(inp.value.trim()));
+      confirmOnMultiEnter(inp, () => write(inp.value.trim()));
       box.appendChild(inp);
     }
   }
+  { const h = multiHint(scope, sameQuale); if (h) box.appendChild(h); }
   root.appendChild(box);
 }

@@ -447,6 +447,7 @@ import {
   isImageResource,
 } from "./iiif";
 import { altLabelsOf } from "./altlabels";
+import { commitField, confirmOnMultiEnter, installMultiKey, multiHeld, multiHint, multiKeyOf, type MultiScope } from "./multi-edit";
 import {
   ADORNMENT_EDGE_TYPES,
   defaultVisibleLeaves,
@@ -2456,6 +2457,8 @@ window.__EM_SCENE__ = () => {
   hovered: () => hoverId,
   /** COLLEGARE · the gestures a probe needs without aiming at pixels */
   select: (id: string | null) => select(id),
+  /** MICRO-CRONO-MULTIPLA · several nodes selected, the last one active */
+  selectMany: (ids: string[]) => selectMany(ids),
   wins: () => windowsOf().map((w) => ({ id: w.id, type: w.type, state: w.state })),
   closeWin: (id: string) => { if (closeWindow(id)) renderTiles(); },
   data: (id: string) => JSON.parse(JSON.stringify(store?.node(id)?.data ?? null)),
@@ -3585,6 +3588,16 @@ function toggleSelect(nodeId: string): void {
  */
 /** The window the last pick came from: its own table does not scroll (MICRO-VIEWER-UNICO p.6). */
 let lastSelFrom: string | null = null;
+/** MICRO-CRONO-MULTIPLA p.2 · where an edit made on `active` can go with ⌘/Alt
+ *  held: the selected nodes of the same store. `log` says it in the Log and gives
+ *  it back («Annulla», one step). */
+function multiScopeFor(st: DocumentStore, active: string, log = true): MultiScope {
+  const sel = [...selectedIds].filter((id) => !!st.node(id));
+  return {
+    store: st, active, selection: sel.includes(active) ? sel : [active],
+    log: log ? (msg, ids) => { logInfo(msg, ids); toastUndo(msg, st); } : (msg, ids) => logInfo(msg, ids),
+  };
+}
 function markTableSelection(): void {
   const act = selectedId;
   // MICRO-VIEWER-UNICO p.6 · per AREA: with two or three Tabulars each goes to
@@ -3805,6 +3818,9 @@ function renderInspectorInto(host: HTMLElement): void {
         buildScenes();
         draw();
       },
+      // MICRO-CRONO-MULTIPLA p.2 · ⌘/Alt: the edit goes to the selection
+      selection: () => [...selectedIds],
+      logMulti: (msg, ids) => { logInfo(msg, ids); toastUndo(msg, owning); },
     },
     selectedEdge,
   );
@@ -11585,28 +11601,34 @@ function renderDocumentDating(st: DocumentStore, host: HTMLElement, docId: strin
   // the click on this menu caused, the inspector was rebuilt under the click,
   // and the menu that opened belonged to a removed element — the choice went
   // nowhere (D.02 saved with `data.year` and no `has_first_epoch`).
-  const dateIn = (v: string) => {
+  // MICRO-CRONO-MULTIPLA p.2 · with ⌘/Alt the epoch goes to every selected node
+  // that can have an epoch of creation (has_first_epoch towards an epoch)
+  const hasCreation = (n: EmNode): boolean => allowedEdgeTypes(n.node_type, "EpochNode").includes("has_first_epoch");
+  const dateIn = (v: string, multi = multiHeld()) => {
+    let multiMsg: string | null = null;
     st.batch(() => {
       writeYear();
-      if (v) st.setFirstEpoch([docId], v);
-      else {
-        const e = st.liveEdges().find((x) => x.source === docId && x.edge_type === "has_first_epoch");
-        if (e) st.deleteEdge(e);
-      }
+      const scope = { ...multiScopeFor(st, docId, false), log: (m: string, ids: string[]) => { multiMsg = m; logInfo(m, ids); } };
+      commitField(scope, docId, t("multi.f.firstEpoch"), hasCreation, (id) => {
+        if (v) st.setFirstEpoch([id], v);
+        else for (const e of st.liveEdges().filter((x) => x.source === id && x.edge_type === "has_first_epoch")) st.deleteEdge(e);
+      }, multi);
       // MICRO-GLIFI-OVERLAY-CONTINUITA p.4 · the document goes into its epoch's
       // lane, and nothing else moves (it was a whole relayout of the Matrix):
       // MICRO-CORSIA-GRUPPI p.1 · `followEpochChanges`, as for every epoch change
     });
-    const msg = v ? t("chain.datedIn", { d: String(d.name ?? docId), e: String(st.node(v)?.name ?? v) })
-                  : t("chain.undated", { d: String(d.name ?? docId) });
-    logInfo(msg, [docId]);
+    const msg = multiMsg ?? (v ? t("chain.datedIn", { d: String(d.name ?? docId), e: String(st.node(v)?.name ?? v) })
+                  : t("chain.undated", { d: String(d.name ?? docId) }));
+    if (!multiMsg) logInfo(msg, [docId]);
     buildScenes();
     draw();
-    select(docId);
+    if (!multiMsg) select(docId);
     refreshInspector();
     toastUndo(msg, st);
   };
   sel.addEventListener("change", () => dateIn(sel.value));
+  sel.dataset.multiField = t("multi.f.firstEpoch");
+  confirmOnMultiEnter(sel, () => dateIn(sel.value, true));
   const year = document.createElement("input");
   year.className = "chain-value chain-year";
   year.inputMode = "numeric";
@@ -11654,6 +11676,7 @@ function renderDocumentDating(st: DocumentStore, host: HTMLElement, docId: strin
   year.addEventListener("change", () => { writeYear(); });
   row.append(sel, year);
   host.appendChild(row);
+  { const h = multiHint(multiScopeFor(st, docId), hasCreation); if (h) host.appendChild(h); }
   // DEV30 U2 · the year PROPOSES the epoch whose bounds hold it, with a
   // confirmation (one button); without any dated epoch it says so and offers to
   // write the dates (the Chronology window)
@@ -38865,7 +38888,7 @@ function continuityAction(unitId: string): { cmd: string; label: string; state: 
   };
 }
 /** write it: one step of the undo */
-function applyContinuity(unitId: string, epoch: string, reason: EndReason | null | undefined, source: string | null | undefined): string | null {
+function applyContinuity(unitId: string, epoch: string, reason: EndReason | null | undefined, source: string | null | undefined, quiet = false): string | null {
   if (!store) return null;
   const st = store;
   const unit = st.node(unitId);
@@ -38899,7 +38922,7 @@ function applyContinuity(unitId: string, epoch: string, reason: EndReason | null
     }
   });
   const ep = String(st.node(epoch)?.name ?? epoch);
-  toastUndo(t(isVirtualType(unit.node_type) ? "cont.done.survive" : "cont.done.end", { unit: String(unit.name ?? unitId), epoch: ep }), st);
+  if (!quiet) toastUndo(t(isVirtualType(unit.node_type) ? "cont.done.survive" : "cont.done.end", { unit: String(unit.name ?? unitId), epoch: ep }), st);
   return br;
 }
 /** the small form: the epoch, the type of the end, the source */
@@ -38964,8 +38987,14 @@ function openContinuityForm(unitId: string, x: number, y: number): void {
   ok.className = "insp-btn";
   ok.dataset.cont = "apply";
   ok.textContent = t("cont.apply");
-  ok.addEventListener("click", () => {
-    applyContinuity(unitId, epSel.value, reasonSel.value || null, srcSel.value || null);
+  // MICRO-CRONO-MULTIPLA p.2 · ⌘/Alt on «Apply»: every selected unit that has a
+  // continuity (a unit, not a BR nor a group) ends — or survives — in that epoch
+  const hasContinuity = (n: EmNode): boolean => continuityAction(n.id) !== null;
+  ok.dataset.multiField = t("cont.sect");
+  ok.addEventListener("click", (e) => {
+    const multi = multiKeyOf(e);
+    commitField(multiScopeFor(store!, unitId), unitId, t("cont.sect"), hasContinuity,
+      (id) => { applyContinuity(id, epSel.value, reasonSel.value || null, srcSel.value || null, multi); }, multi);
     box.remove();
   });
   const no = document.createElement("button");
@@ -38976,6 +39005,7 @@ function openContinuityForm(unitId: string, x: number, y: number): void {
   no.addEventListener("click", () => box.remove());
   bar.append(ok, no);
   box.appendChild(bar);
+  { const h = store ? multiHint(multiScopeFor(store, unitId), hasContinuity) : null; if (h) box.appendChild(h); }
   box.addEventListener("keydown", (e) => { if (e.key === "Escape") { e.stopPropagation(); box.remove(); } });
   document.body.appendChild(box);
   epSel.focus();
@@ -39311,13 +39341,18 @@ function instanceMarks(): SceneMark[] {
 // property of the BR (has_property) as for any unit, so it takes its paradata.
 // A date of its own puts the end in the epoch of the date: the BR's
 // `has_first_epoch` and the unit's `survive_in_epoch` follow in the same step.
-function writeBrType(brId: string, reason: string): void {
+function writeBrType(brId: string, reason: string, multi = multiHeld()): void {
   if (!store || refuseReadOnly()) return;
   const st = store;
-  const data = { ...((st.node(brId)?.data ?? {}) as Record<string, unknown>) };
-  if (reason && reason !== END_REASON_DEFAULT) data.end_reason = reason;
-  else delete data.end_reason;
-  st.updateNode(brId, { data } as Partial<EmNode>);
+  // MICRO-CRONO-MULTIPLA p.2 · with ⌘/Alt every selected BR takes the type
+  const ids = commitField(multiScopeFor(st, brId), brId, t("br.type"), (n) => isContinuityType(n.node_type), (id) => {
+    const data = { ...((st.node(id)?.data ?? {}) as Record<string, unknown>) };
+    if (reason && reason !== END_REASON_DEFAULT) data.end_reason = reason;
+    else delete data.end_reason;
+    st.updateNode(id, { data } as Partial<EmNode>);
+  }, multi);
+  if (ids.length > 1) return;
+  const data = (st.node(brId)?.data ?? {}) as Record<string, unknown>;
   const unit = endOfUnit(st.doc, brId)?.unit;
   toastUndo(t("br.typeWritten", { unit: String((unit && st.node(unit)?.name) || unit || brId), type: endReasonLabel(endReasonOf(data)) }), st);
 }
@@ -39406,7 +39441,10 @@ function renderBrSection(brId: string): HTMLElement | null {
   }
   sel.title = endReasonDescription(eu.end_reason);
   sel.addEventListener("change", () => writeBrType(brId, sel.value));
+  sel.dataset.multiField = t("br.type");
+  confirmOnMultiEnter(sel, () => writeBrType(brId, sel.value, true));
   row(t("br.type"), sel);
+  { const h = multiHint(multiScopeFor(st, brId), (n) => isContinuityType(n.node_type)); if (h) sec.appendChild(h); }
   row(t("br.class"), [eu.cidoc_class, endReasonPredicate(eu.end_reason)].filter(Boolean).join(" · "), "class");
   const epName = eu.epoch ? String(st.node(eu.epoch)?.name ?? eu.epoch) : "—";
   row(t("br.epoch"), `${epName} · ${t(`br.rule.${eu.epoch_rule ?? "none"}`)}`, "epoch");
@@ -39828,6 +39866,8 @@ void wireDesktopDeepLink();
 // would show a frame of English (or an LTR frame in Hebrew) and then flip.
 initI18n();
 populateLanguageSelect();
+// MICRO-CRONO-MULTIPLA p.2 · ⌘ (macOS) / Alt: an edit goes to the whole selection
+installMultiKey();
 // MICRO-PULIZIA p.9 · every table of the app sorts and filters (table-tools.ts)
 installTableTools(document.body, () => ({
   filter: t("tt.filter"), any: t("tt.any"), clear: t("tt.clear"), clearNone: t("tt.clearNone"),
@@ -39914,6 +39954,9 @@ void bootSession();
 refreshIdentityChip();     // IDENTITY · who is authoring, from the first frame
 initEmData({
   onDeleted: (name, st) => toastUndo(t("del.one", { name }), st),
+  // MICRO-CRONO-MULTIPLA p.2 · ⌘/Alt: a cell's edit goes to the selected rows
+  getSelection: () => [...selectedIds],
+  onMultiLog: (msg, ids, st) => { logInfo(msg, ids); toastUndo(msg, st); },
   getStore: () => store,
   getCtx: tableCtx,
   runIssueAction: (id) => allIssues().find((i) => i.id === id)?.action?.run(),
