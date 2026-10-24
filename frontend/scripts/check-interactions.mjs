@@ -9814,7 +9814,12 @@ test("GR4.inspector", "GEOREF-GRAFO p.2 · la sezione «Georeferencing» nell'In
   const u0 = await D(() => window.__EM_DRAG__.undoDepth());
   await p.click('[data-section="georef"] [data-georef="convert"]');
   await p.waitForFunction((g) => window.__EM_DRAG__.node(g)?.data?.epsg === 3844, GEO, { timeout: 10000 }).catch(() => null);
-  await p.waitForTimeout(2500);
+  // the section reads the new CRS in PROJ's database through the bridge: under
+  // the whole suite's load that took more than the fixed 2.5 s («Reading the
+  // CRS…» read as the answer; MICRO-SUITE-VERDE) — read when it has answered
+  await p.waitForFunction(() => { const e = document.querySelector('[data-section="georef"] [data-georef="crs"]');
+    return !!e && !/Reading the CRS|Leggo il CRS/.test(e.textContent ?? ""); }, null, { timeout: 30000 }).catch(() => null);
+  await p.waitForTimeout(500);
   out.after = { node: await node(), steps: (await D(() => window.__EM_DRAG__.undoDepth())) - u0, said: await logs("EPSG:31700 → EPSG:3844, the same grid"),
     crs: await sec('[data-georef="crs"]'), acc: await sec('[data-georef="accuracy"]'), warn: await sec(".georef-warn") };
   await D(() => window.__EM_DRAG__.undo()); await p.waitForTimeout(500);
