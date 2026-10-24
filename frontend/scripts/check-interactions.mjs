@@ -3973,7 +3973,9 @@ test("V5.oneact", "«un atto per N file»: il nome dell'atto è proposto («Down
   await workspace(p, "assets");
   await storageInto(p, [root.split("/").pop(), "zenodo-1234567"]);
   await p.click("button[data-action=compose-folder]");
-  await p.waitForSelector(".stamp-compose", { timeout: 30000 });
+  // the form's fields, not its frame: they are drawn after it (read too early
+  // under load, the field list was empty — MICRO-SUITE-VERDE)
+  await p.waitForSelector('.stamp-compose [data-field="campaign"]', { timeout: 30000 }).catch(() => {});
   const before = await p.evaluate(() => [...document.querySelectorAll(".stamp-compose [data-field]")].map((x) => x.dataset.field));
   await p.selectOption('.stamp-compose select[data-field="kind"]', "download");
   await p.waitForTimeout(500);
@@ -7330,6 +7332,9 @@ test("VU3.quota", "VIEWER-UNICO p.4 · un punto quota sul 3D di D.01 crea l'estr
   await p.waitForFunction((x) => window.__EM_DRAG__.viewerState(x)?.scene?.framed, w, { timeout: 60000 }).catch(() => {});
   await p.waitForTimeout(3000);
   const area = `.tile-area[data-win="${w}"]`;
+  // the tools are the bar's once the document's scene is there: under the whole
+  // suite's load that came after the fixed 3 s (MICRO-SUITE-VERDE)
+  await p.waitForSelector(`${area} [data-tool="elevation"]`, { state: "visible", timeout: 90000 }).catch(() => {});
   await p.click(`${area} [data-tool="elevation"]`);
   const box = await p.locator(`${area} .vw-scene canvas`).first().boundingBox();
   const at = await p.evaluate(([x, b]) => {
@@ -7549,26 +7554,58 @@ test("VS1.gestures", "VIEWER-SPAZIO-EMTREE p.1 · Spazio: il clic seleziona il p
   const reset = async () => { await p.evaluate((c) => document.querySelector(".scn-host").__spaceSetCam(c), home); await p.keyboard.press("Escape"); await p.waitForTimeout(300);
     await p.waitForFunction(([a, b]) => { const h = document.querySelector(".scn-host"); return h.__spaceHit(a.x, a.y)?.kind === "rm" && h.__spaceHit(b.x, b.y)?.kind === "proxy"; }, [rm, px], { timeout: 10000 }).catch(() => {});
     await p.waitForTimeout(300); };
+  // MICRO-SUITE-VERDE (24 Oct) · a pick lands PICK_WAIT_MS (250 ms) after the
+  // release, and then the selection is painted: under the whole suite's load
+  // that was more than the 600 ms this case waited, and it read an empty
+  // selection («instabile» in three reports). It waits for the selection to
+  // CHANGE (up to 5 s); where nothing must change (the double clicks) it waits
+  // for the camera to arrive, then beyond DOUBLE_MS for a pick that must not come
+  // …and a change of the selection (Alt+A, a pick) rebuilds the scene: until it
+  // is drawn again a press hits nothing (seen: 5 s and more under load, every
+  // gesture after Alt+A empty). Before each gesture: the two points answer again
+  const hitsBack = () => p.waitForFunction(([a, b]) => { const h = document.querySelector(".scn-host");
+    return h.__spaceHit(a.x, a.y)?.kind === "rm" && h.__spaceHit(b.x, b.y)?.kind === "proxy"; }, [rm, px], { timeout: 20000 }).catch(() => {});
+  const selChanged = async (prev) => {
+    await p.waitForFunction((pv) => JSON.stringify(document.querySelector(".scn-host").__spaceSelected().selected) !== pv,
+      JSON.stringify(prev), { timeout: 5000 }).catch(() => {});
+    return sel();
+  };
   // a click on the mesh in front: the proxy under it, not the mesh
   await reset();
-  await p.mouse.click(rm.x, rm.y); await p.waitForTimeout(600);
-  r.clickOnMesh = await sel();
-  await p.mouse.move(rm.x, rm.y); await p.keyboard.press("Alt+KeyA"); await p.waitForTimeout(200);
-  await p.mouse.click(px.x, px.y); await p.waitForTimeout(600);
-  r.click = await sel();
-  await p.keyboard.down("Alt"); await p.mouse.click(rm.x, rm.y); await p.keyboard.up("Alt"); await p.waitForTimeout(600);
-  r.alt = await sel();
+  const s0 = await sel();
+  await hitsBack();
+  await p.mouse.click(rm.x, rm.y);
+  r.clickOnMesh = await selChanged(s0);
+  await p.mouse.move(rm.x, rm.y); await p.keyboard.press("Alt+KeyA");
+  await p.waitForFunction(() => !document.querySelector(".scn-host").__spaceSelected().selected.length, null, { timeout: 5000 }).catch(() => {});
+  r.afterNone = await sel();
+  // (and past DOUBLE_MS: the next press is not the second of a double click)
+  await p.waitForTimeout(550); await hitsBack();
+  await p.mouse.click(px.x, px.y);
+  r.click = await selChanged([]);
+  await p.waitForTimeout(550); await hitsBack();
+  await p.keyboard.down("Alt"); await p.mouse.click(rm.x, rm.y); await p.keyboard.up("Alt");
+  r.alt = await selChanged(r.click);
   // the double click: the selection stays the mesh's, the centre goes to the point
   const before = await sel();
-  await p.mouse.dblclick(px.x, px.y); await p.waitForTimeout(2500);
+  await p.waitForTimeout(550); await hitsBack();
+  await p.mouse.dblclick(px.x, px.y);
+  await p.waitForFunction((pt) => { const c = document.querySelector(".scn-host").__spaceCamState();
+    return Math.hypot(...c.target.map((v, i) => v - pt[i])) < 0.6; }, px.hit.point, { timeout: 8000 }).catch(() => {});
+  await p.waitForTimeout(800);
   const c1 = await cam();
   r.dbl = { sel: await sel(), dist: Math.hypot(...c1.target.map((v, i) => v - px.hit.point[i])), isolated: await p.evaluate(() => document.querySelector("[data-sol=isolate]")?.getAttribute("aria-pressed")) };
   // a slow double click (the first click has already picked): undone
   await reset();
-  await p.mouse.move(rm.x, rm.y); await p.keyboard.down("Alt"); await p.mouse.click(rm.x, rm.y); await p.keyboard.up("Alt"); await p.waitForTimeout(500);
-  const beforeSlow = await sel();
+  const s1 = await sel();
+  await p.mouse.move(rm.x, rm.y); await p.keyboard.down("Alt"); await p.mouse.click(rm.x, rm.y); await p.keyboard.up("Alt");
+  const beforeSlow = await selChanged(s1);
+  await p.waitForTimeout(550); await hitsBack();
   await p.mouse.click(px.x, px.y); await p.waitForTimeout(330);
-  await p.mouse.click(px.x, px.y, { clickCount: 2 }); await p.waitForTimeout(1000);
+  await p.mouse.click(px.x, px.y, { clickCount: 2 });
+  // the first click's pick landed and is undone by the second press: nothing to
+  // wait for but the time of both (DOUBLE_MS) and a pick's
+  await p.waitForTimeout(1200);
   r.slow = await sel();
   const help = await p.evaluate(() => document.querySelector("[data-gestures=space]")?.getAttribute("title") ?? null);
   await p.screenshot({ path: SHOT("vs1-spazio-gesti") }).catch(() => {});
@@ -7588,7 +7625,7 @@ test("VS1.gestures", "VIEWER-SPAZIO-EMTREE p.1 · Spazio: il clic seleziona il p
 // bridge under C:/… is rewritten to the copy on its way (nothing else). The
 // rewrite holds the requests to 6 at a time, as the browser does: from node
 // they would all go at once and the bridge's queue would reset them.
-const WP_V4 = process.env.WINPATHS_V4 ?? "/tmp/winpaths/EM/TempluMare_v4.em.json";
+const WP_V4 = benchFile("WINPATHS_V4");
 const WP_BRIDGE = (process.env.WINPATHS_BRIDGE ?? "http://127.0.0.1:8872").replace("//localhost:", "//127.0.0.1:");
 test("WP1.windows", "PERCORSI-WINDOWS p.1/p.2 · Templu Mare v4 aperto da C:\\…\\EM\\ con un bridge che non serve nessuna sua cartella: la pagina dice al bridge quale em.json è aperto (/fs/doc), lo Spazio chiede i modelli come C:/…/RB/… e li disegna tutti (10 RM, il tileset, 5 proxy del XX sec), nessun «file mancante»", async () => {
   if (!existsSync(WP_V4)) throw new Error(`the v4 copy is not at ${WP_V4}`);
@@ -7820,6 +7857,7 @@ test("WM1.loadfail", "WINDOWS-MODELLI p.1 · un modello che non arriva lo dice: 
   await p.waitForTimeout(6000);   // the tileset's root waits 8 s before it is given up on
   const log = await p.evaluate(() => window.__EM_DRAG__.log().map((e) => `${e.level} ${e.message}`));
   const marks = await p.evaluate(() => [...document.querySelectorAll(".sol-fail")].map((e) => e.title));
+  const later = await p.evaluate(() => document.querySelector(".scn-host").__space().filter((x) => x.kind === "rm").map((x) => `${x.as}:${x.state}`));
   await p.screenshot({ path: SHOT("wm1-loadfail") }).catch(() => {});
   await ctx.close();
   const lines = log.filter((l) => /^warn Modello non caricato: /.test(l));
@@ -7827,7 +7865,7 @@ test("WM1.loadfail", "WINDOWS-MODELLI p.1 · un modello che non arriva lo dice: 
   const pass = lines.length === 16 && lines.every((l) => l.includes(`${base}/fs/at/C:/Users/Utente/`) && /· HTTP 403 · il bridge non serve la cartella di questo file \(403\)$/.test(l))
     && lines.some((l) => /tileset\.json/.test(l)) && log.some((l) => /^warn Il bridge non ha servito le cartelle del documento aperto .*404\) not an em\.json/.test(l))
     && marks.length >= 10 && marks.every((m) => /il bridge non serve la cartella/.test(m)) && drawn["rm/label"] === 10 && !errors.length;
-  return { pass, detail: { lines: lines.length, first: lines[0], doc: log.find((l) => /fs\/doc/.test(l)), marks: marks.length, drawn, errors } };
+  return { pass, detail: { lines: lines.length, first: lines[0], doc: log.find((l) => /fs\/doc/.test(l)), marks: marks.length, drawn, later, errors } };
 });
 
 test("WM2.port", "WINDOWS-MODELLI p.2 · la pagina come il desktop (IPC simulato): la porta è quella decisa dalla shell (8765 di un altro programma → la successiva); con l'em.json in C:/Users/Utente/OneDrive - CNR/… ogni richiesta — modelli, tileset.json e tessere, proxy — va a quella base e mai alla 8765, nella forma C:/…; il XX sec è disegnato (10 RM, il tileset, 5 proxy), nessun segno di modello mancato", async () => {
@@ -8918,7 +8956,7 @@ if (LAY_NODE) test("GL7.room", "STANZA-POSIZIONI · istanza di prova del server 
     && out.framesA.filter((f) => f.type === "layout" && !f.fold && f.space === "").length === 2
     && !!out.kept.unit && !!out.kept.combiner && w.kept.positions > 50 && w.kept.positions === w.archA && !out.errors.length;
   return { pass, detail: out };
-});
+}));
 
 // GLOBO-INTERAZIONE p.5 (LAYOUT_NODE + FOLDS_ROOM: a stratigraph-server that declares
 // `layout_folded`, a room holding the GT16): the groups' open/closed are the room's
@@ -9056,7 +9094,7 @@ test("GG1.globe", "GEOGLOBO p.1 · il GT16 sul globo: «Territory» misura l'anc
     && out.landed.mode === "site" && out.landed.alt < 3000 && out.pressed === "site"
     && /EOX/.test(out.attribution) && /Mapterhorn/.test(out.attribution) && !out.errors.length;
   return { pass, detail: out };
-}));
+});
 
 test("GG2.layers", "GEOGLOBO p.2–4 · il pannello «Layers»: un'ortofoto GeoTIFF in EPSG:31700 aggiunta dal suo percorso diventa un livello (il bridge la riproietta in un PMTiles accanto, l'originale resta) drappeggiato sul terreno, in cima all'elenco; l'opacità e l'ordine cambiano senza errori di three; «su un piano» la mette sul piano del sito con i suoi spigoli dove il CRS li dice (±100 m attorno all'ancora), appena sopra il terreno; «Estrai area» non offre OpenStreetMap (solo online); nessun «could not be decoded»", async () => {
   if (!existsSync(GEO_V4) || !existsSync(GEO_ORTHO)) return { pass: false, detail: { missing: [GEO_V4, GEO_ORTHO].filter((f) => !existsSync(f)) } };
@@ -9137,7 +9175,8 @@ test("GG6.hands", "GLOBO-INTERAZIONE p.2 · le mani di Google Earth nel Globo e 
     for (let i = 1; i <= 8; i++) { await p.mouse.move(x0 + (dx * i) / 8, y0 + (dy * i) / 8); await p.waitForTimeout(16); }
     await p.mouse.up({ button: o.button ?? "left" });
     if (o.key) await p.keyboard.up(o.key);
-    await p.waitForTimeout(250);
+    // MICRO-SUITE-VERDE · read when the camera has stopped, not after a fixed 250 ms
+    await p.waitForTimeout(100); await geoIdle(p, 5000);
   };
   const grabErr = async (x0, y0, dx, dy) => { const P = await pick(x0, y0); await drag(x0, y0, dx, dy); const s = P ? await scr(P) : null; return s ? Math.hypot(s.x - x0 - dx, s.y - y0 - dy) : null; };
   // the globe: north up after the flight, the compass shown
@@ -9204,12 +9243,18 @@ test("GG6.hands", "GLOBO-INTERAZIONE p.2 · le mani di Google Earth nel Globo e 
   const s3 = await p.evaluate(() => document.querySelector(".scn-host").__spaceProject([0, 0, 0]));
   await p.mouse.move(s3.x, s3.y);
   const burst = [];
+  // a burst is wheel events less than 300 ms apart (geo-hands): ONE question to
+  // the page per event (the state and where the site is), not three — under the
+  // whole suite's load four round trips per event made gaps of more than 300 ms,
+  // the burst ended early and the hand-off came above 2.5 km (MICRO-SUITE-VERDE)
+  let at = s3;
   for (let i = 0; i < 200; i++) {
-    g = await geoState(p);
-    if (g.altitude < 2500 || g.mode !== "globe") break;
-    await p.mouse.wheel(0, g.altitude > 10000 ? -300 : -60);
+    const q = await p.evaluate(() => { const h = document.querySelector(".scn-host"); const g = h.__geo();
+      return { altitude: g.altitude, mode: g.mode, site: h.__spaceProject([0, 0, 0]) }; });
+    if (q.altitude < 2500 || q.mode !== "globe") break;
+    if (q.site && Math.hypot(q.site.x - at.x, q.site.y - at.y) > 2) { at = q.site; await p.mouse.move(at.x, at.y); }
+    await p.mouse.wheel(0, q.altitude > 10000 ? -300 : -60);
     await p.waitForTimeout(30);
-    const s4 = await p.evaluate(() => document.querySelector(".scn-host").__spaceProject([0, 0, 0])); if (s4) await p.mouse.move(s4.x, s4.y);
   }
   g = await geoState(p);
   burst.push({ alt: Math.round(g.altitude), mode: g.mode, busy: g.hands.busy });
