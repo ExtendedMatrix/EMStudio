@@ -2249,9 +2249,15 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
         text: e.textContent, x: parseFloat((e as HTMLElement).style.left), y: parseFloat((e as HTMLElement).style.top), shown: (e as HTMLElement).style.display !== "none" }));
       let raf = 0;
       let frames = 0;
+      // MICRO-OVERLAY-PER-FINESTRA p.2 · the frames of the window the canvas is
+      // IN: a Space in a detached window keeps turning while the main page
+      // (hidden, minimised) gets none
+      const frameWin = (): Window => renderer.domElement.ownerDocument.defaultView ?? window;
+      let rafWin: Window = window;
       const tick = () => {
         if (disposed) return;
-        raf = requestAnimationFrame(tick);
+        rafWin = frameWin();
+        raf = rafWin.requestAnimationFrame(tick);
         stepAnim(performance.now());
         // MICRO-GEOGLOBO · the globe moves the camera in its mode (its hands, a flight)
         if (geo) geo.update();
@@ -3134,7 +3140,7 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
       strips.appendChild(altStrip);
       showView();
       cleanup = () => {
-        cancelAnimationFrame(raf);
+        rafWin.cancelAnimationFrame(raf);
         geo?.detach();
         geo = null;
         dropPendingPick();

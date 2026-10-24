@@ -3256,11 +3256,49 @@ let drawQueued = false;
 function requestDraw(): void {
   if (drawQueued) return;
   drawQueued = true;
-  requestAnimationFrame(() => {
+  onNextFrame("draw", () => {
     drawQueued = false;
     perfTime("frame", draw);
   });
 }
+
+/**
+ * MICRO-OVERLAY-PER-FINESTRA p.2 · the frame the next paint waits for, from a
+ * window that is SEEN. A hidden or minimised page gets no animation frames
+ * (Chromium and WebKit pause them), and the main page's were the only ones
+ * asked for: with the main window minimised, a detached window waited for it
+ * to come back before it repainted a rename (measured: never, in
+ * check-detach D12, until the main page was shown again). So the frame is
+ * asked of the main page while it is visible, else of a visible detached
+ * window — the callback runs in this realm all the same — and a frame asked
+ * of a page that then goes hidden is asked again of one that is seen. The
+ * first to arrive runs it; the others find nothing pending.
+ */
+const framePending = new Map<string, () => void>();
+function frameHost(): Window {
+  if (!document.hidden || !popouts.size) return window;
+  for (const p of popouts.values())
+    if (!p.gone && !p.pop.closed && !p.pop.document.hidden) return p.pop;
+  return window;
+}
+function armFrame(key: string): void {
+  frameHost().requestAnimationFrame(() => {
+    const run = framePending.get(key);
+    if (!run) return;
+    framePending.delete(key);
+    run();
+  });
+}
+function onNextFrame(key: string, run: () => void): void {
+  const had = framePending.has(key);
+  framePending.set(key, run);
+  if (!had) armFrame(key);
+}
+/** a page hidden or shown: what was waiting for its frame asks a seen one */
+function rearmFrames(): void {
+  for (const k of framePending.keys()) armFrame(k);
+}
+document.addEventListener("visibilitychange", rearmFrames);
 
 function drawNow(): void {
   const liveId = activeWin().id;
@@ -5655,10 +5693,10 @@ function startSlide(before: SlideSnap | null): void {
     }
     for (const sc of new Set(run.items.map((i) => i.s))) invalidateRoutes(sc);
     draw();
-    if (t < 1) requestAnimationFrame(step);
+    if (t < 1) frameHost().requestAnimationFrame(step);
     else slideRun = null;
   };
-  requestAnimationFrame(step);
+  frameHost().requestAnimationFrame(step);
 }
 /** Jump a running slide to its end (a press must grab the node where it IS going). */
 function finishSlide(): void {
@@ -6280,7 +6318,7 @@ function wireStore(s: DocumentStore): void {
     aiMarksCache = null; // CATENA · the AI chips are read again on the next draw
     if (changeQueued) return;
     changeQueued = true;
-    requestAnimationFrame(() => perfTime("onChangeFlush", flushChange));
+    onNextFrame("change", () => perfTime("onChangeFlush", flushChange));
   });
   // forward local graph mutations to a connected peer (op-log, ADR-002 §2).
   // Remote-applied ops don't re-emit (DocumentStore suppresses), so no echo.
@@ -22186,7 +22224,14 @@ function detachWindow(src: Win | null, at: { x: number; y: number } | null,
   off.push(wireRelay(pop, document, {
     isWriting: (el) => isWritingField(el),
     ported: (el) => !!el?.closest?.("[data-ported], #overlay-panel, #filter-panel, #edge-menu"),
-    onPress: (e) => { lastInput = { win: pop, t: performance.now() }; notePress(e); },
+    onPress: (e) => {
+      lastInput = { win: pop, t: performance.now() };
+      // MICRO-OVERLAY-PER-FINESTRA · a press here makes this window the active
+      // one even when the system said no «focus» (it was already the key
+      // window for it, or a check's headless page)
+      if (activeWin().id !== win.id) selectWindow(win.id);
+      notePress(e);
+    },
   }));
   const listen = (target: EventTarget, type2: string, fn: EventListener): void => {
     target.addEventListener(type2, fn);
@@ -22196,8 +22241,11 @@ function detachWindow(src: Win | null, at: { x: number; y: number } | null,
   // the focus follows the system window that has it (Blender: the active
   // window is the one under the hand, and the one in front)
   listen(pop, "focus", () => { if (activeWin().id !== win.id) selectWindow(win.id); });
+
   listen(d, "click", () => { closeAllDropdowns(); closeAllSubmenus(); });
   listen(pop, "pagehide", () => popoutGone(win.id));
+  // MICRO-OVERLAY-PER-FINESTRA p.2 · seen or hidden, the frames follow (`onNextFrame`)
+  listen(d, "visibilitychange", rearmFrames);
   setAreaFocused(activeWin().id, false);
   selectWindow(win.id);
   setAreaFocused(win.id, true);
@@ -22219,6 +22267,8 @@ function popoutGone(winId: string): void {
   if (overlaysPorted) portalOverlays(canvasAnchorId() ?? activeWin().id);
   if (overlayOwner === winId) closeOverlayPanel();
   if (filterOwner === winId) closeFilterPanel();
+  // the hover card comes home too (its document is going)
+  if (tooltip.ownerDocument === p.pop.document) { tooltip.classList.add("hidden"); document.body.appendChild(tooltip); }
   destroyArea(winId);
   const wasActive = activeWin().id === winId;
   removeDetachedWindow(winId);
@@ -22374,18 +22424,63 @@ function portalOverlays(anchor: string): HTMLElement {
 
 /** A menu a press in a detached window opened at a point (the context menu,
  *  the add menu, a space menu) is appended to THIS body: it goes to the window
- *  the press was in. */
+ *  the press was in — and so does a submenu of a menu already carried there,
+ *  opened by hovering long after the press. */
 new MutationObserver((records) => {
-  if (!popouts.size || lastInput.win === window || performance.now() - lastInput.t > 1500) return;
-  const p = [...popouts.values()].find((x) => x.pop === lastInput.win && !x.gone);
+  if (!popouts.size) return;
+  const recent = performance.now() - lastInput.t <= 1500;
+  if (recent && lastInput.win === window) return;
+  const live = [...popouts.values()].filter((x) => !x.gone && !x.pop.closed);
+  const p = (recent ? live.find((x) => x.pop === lastInput.win) : undefined)
+    ?? live.find((x) => !!x.pop.document.body.querySelector(":scope > [data-ported]:not(.hidden)"));
   if (!p) return;
   for (const r of records) for (const n of r.addedNodes) {
     if (!(n instanceof HTMLElement) || n.parentNode !== document.body) continue;
-    if (n.classList.contains("gest") || n.id === "toast") continue;
+    if (n.classList.contains("gest") || n.id === "toast" || n.id === "tooltip") continue;
     n.dataset.ported = "1";
     p.pop.document.body.appendChild(n);
+    fitInView(n, p.pop);
   }
 }).observe(document.body, { childList: true });
+
+/**
+ * MICRO-OVERLAY-PER-FINESTRA p.2 · a menu placed for the MAIN window's width
+ * (`innerWidth - menuWidth`, forty call sites) and carried into a narrower
+ * detached one is brought inside the window it is in: moved left/up by what
+ * overflows, measured there. Again at the next frame, for a menu that grows
+ * once filled.
+ */
+function fitInView(el: HTMLElement, w: Window): void {
+  const fit = (): void => {
+    if (!el.isConnected) return;
+    const r = el.getBoundingClientRect();
+    if (!r.width && !r.height) return;
+    const cs = w.getComputedStyle(el);
+    if ((cs.position !== "fixed" && cs.position !== "absolute") || cs.transform !== "none") return;
+    const m = 4;
+    let dx = 0, dy = 0;
+    if (r.right > w.innerWidth - m) dx = w.innerWidth - m - r.right;
+    if (r.left + dx < m) dx = m - r.left;
+    if (r.bottom > w.innerHeight - m) dy = w.innerHeight - m - r.bottom;
+    if (r.top + dy < m) dy = m - r.top;
+    if (!dx && !dy) return;
+    el.style.left = `${Math.round(r.left + dx)}px`;
+    el.style.right = "auto";
+    el.style.top = `${Math.round(r.top + dy)}px`;
+    el.style.bottom = "auto";
+  };
+  fit();
+  w.requestAnimationFrame(fit);
+}
+/** the hover card where the pointer is: in the document of the window it
+ *  hovers, inside that window's width (it was the main page's, always) */
+function placeTooltip(e: MouseEvent): void {
+  const doc = (e.target as Node | null)?.ownerDocument ?? document;
+  const w = doc.defaultView ?? window;
+  if (tooltip.ownerDocument !== doc) doc.body.appendChild(tooltip);
+  tooltip.style.left = Math.max(4, Math.min(e.clientX + 14, w.innerWidth - 380)) + "px";
+  tooltip.style.top = e.clientY + 14 + "px";
+}
 document.addEventListener("pointerdown", () => {
   if (!isRelaying()) lastInput = { win: window, t: performance.now() };
 }, true);
@@ -38374,8 +38469,7 @@ function wireGraphCanvas(canvas: HTMLCanvasElement, winId: string): void {
         (tooltip.children[1] as HTMLElement).textContent = `[ParadataNodeGroup]`;
         (tooltip.children[3] as HTMLElement).textContent =
           `${pc.label} — ${t(pc.open ? "pdchip.actionsOpen" : "pdchip.actions")}`;
-        tooltip.style.left = Math.min(e.clientX + 14, innerWidth - 380) + "px";
-        tooltip.style.top = e.clientY + 14 + "px";
+        placeTooltip(e);
         tooltip.classList.remove("hidden");
         canvas.style.cursor = "pointer";
         return;
@@ -38422,8 +38516,7 @@ function wireGraphCanvas(canvas: HTMLCanvasElement, winId: string): void {
         `[${se.edge.edge_type ?? "edge"}]`;
       (tooltip.children[3] as HTMLElement).textContent =
         `${endName(se.source)} → ${endName(se.target)}`;
-      tooltip.style.left = Math.min(e.clientX + 14, innerWidth - 380) + "px";
-      tooltip.style.top = e.clientY + 14 + "px";
+      placeTooltip(e);
       tooltip.classList.remove("hidden");
     } else if (hit) {
       // The node id only surfaces when the developer "show node ids" setting is
@@ -38447,8 +38540,7 @@ function wireGraphCanvas(canvas: HTMLCanvasElement, winId: string): void {
         // MICRO-GEOREF-GRAFO p.1 · the georeference says itself: the CRS and the shift
         ? georefSummary((hit.node.data ?? {}) as Record<string, unknown>, t)
         : String(hit.node.description ?? "").slice(0, 220);
-      tooltip.style.left = Math.min(e.clientX + 14, innerWidth - 380) + "px";
-      tooltip.style.top = e.clientY + 14 + "px";
+      placeTooltip(e);
       tooltip.classList.remove("hidden");
     } else {
       tooltip.classList.add("hidden");
