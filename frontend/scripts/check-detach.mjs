@@ -118,7 +118,9 @@ const only = process.argv.slice(2).filter((a) => !a.startsWith("--"));
 const { chromium } = await playwright();
 const browser = await chromium.launch({ executablePath: existsSync(CHR) ? CHR : undefined,
   args: ["--enable-precise-memory-info", "--use-angle=swiftshader", "--enable-unsafe-swiftshader"] });
-const fixture = (name) => JSON.parse(readFileSync(`${TD}${name}.em.json`, "utf8"));
+const fixture = (name) => JSON.parse(readFileSync(name.startsWith("/") ? name : `${TD}${name}.em.json`, "utf8"));
+// MICRO-OVERLAY-PER-FINESTRA · the GT16 (a copy: never the original), when there is one
+const GT16 = process.env.GT16 ?? "/tmp/overlay-finestra/GT16.em.json";
 
 async function open({ doc = "catena", ws, keep } = {}) {
   const ctx = keep?.ctx ?? await browser.newContext({ viewport: { width: 1600, height: 1000 } });
@@ -428,6 +430,191 @@ test("D10.frame", "web dentro un riquadro: il gesto è spento, col perché", asy
     return b ? { off: b.classList.contains("dd-disabled"), title: b.title } : null;
   }, tb);
   ok(item?.off && /riquadro|frame/.test(item.title), `voce spenta con il tooltip «${item?.title}»`);
+  await ctx.close();
+});
+
+test("D11.lens", "due Matrix staccate con overlay, filtro e monocromo diversi; Esc chiude il pannello; una rinomina in tutte e due; ricordati e riportati", async () => {
+  const doc = existsSync(GT16) ? GT16 : "catena";
+  console.log(`    D11 documento: ${doc === GT16 ? "GT16 (copia)" : "catena"}`);
+  const { p, ctx, errors } = await open({ doc });
+  const g = await winOf(p, "graph");
+  const A = await detach(p, ctx, g);
+  const B = await detach(p, ctx, g);
+  const ov = (id) => p.evaluate((i) => window.__EM_DRAG__.overlays("matrix", i), id);
+  // (each page has its own mouse here, and one left over a window's area takes
+  // the focus back at its next layout change — a hand is in one window only:
+  // the mouse of the page not in use goes out of it)
+  const into = async (x, y) => {
+    await y.pop.mouse.move(5000, 5000);
+    await x.pop.bringToFront();
+    await x.pop.mouse.click(40, 300);
+    await p.waitForTimeout(250);
+    eq(await p.evaluate(() => window.__EM_DRAG__.activeWinId()), x.id, `una pressione in ${x.id} la fa attiva`);
+  };
+  // the overlays of A, switched from A's own panel
+  await into(A, B);
+  await A.pop.click("#btn-overlays");
+  await p.waitForTimeout(300);
+  const master = A.pop.locator('#overlay-panel input[data-ov="master"]');
+  ok(await master.isChecked(), "il pannello di A, overlay accesi");
+  await master.click();
+  await p.waitForTimeout(300);
+  eq([(await ov(A.id)).master, (await ov(B.id)).master, (await ov(g)).master], [false, true, true],
+     "spenti in A, accesi in B e nella Matrix della principale");
+  // Esc in the panel (focus on its checkbox) closes it
+  await master.focus();
+  await A.pop.keyboard.press("Escape");
+  await p.waitForTimeout(300);
+  ok(await A.pop.evaluate(() => document.getElementById("overlay-panel")?.classList.contains("hidden") ?? true), "Esc nel pannello lo chiude");
+  // …and Esc on the canvas (the app's handler, relayed) too
+  await A.pop.click("#btn-overlays");
+  await p.waitForTimeout(300);
+  await A.pop.mouse.click(40, 300);
+  await A.pop.keyboard.press("Escape");
+  await p.waitForTimeout(300);
+  ok(await A.pop.evaluate(() => document.getElementById("overlay-panel")?.classList.contains("hidden") ?? true), "Esc sulla tela lo chiude");
+  // B's panel says its own
+  await into(B, A);
+  await B.pop.click("#btn-overlays");
+  await p.waitForTimeout(300);
+  const masterB = B.pop.locator('#overlay-panel input[data-ov="master"]');
+  ok(await masterB.isChecked(), "il pannello di B: i suoi, accesi");
+  await masterB.focus();
+  await B.pop.keyboard.press("Escape");
+  await p.waitForTimeout(200);
+  // B's filter: one node type less (not the one renamed below)
+  const sA = await p.evaluate((i) => window.__EM_DRAG__.winScene(i), A.id);
+  const types = await p.evaluate((ids) => ids.map((id) => window.__EM_DRAG__.nodeInfo(id)?.type ?? null), sA.boxes.map((b) => b.id));
+  const target = sA.boxes.find((b, i) => types[i] && b.name && b.w > 4);
+  const tType = types[sA.boxes.indexOf(target)];
+  const tLeaf = await p.evaluate((t) => window.__EM_DRAG__.leafOf(t), tType);
+  const drop = types.find((t) => t && t !== tType && t !== "EpochNode");
+  const dLeaf = await p.evaluate((t) => window.__EM_DRAG__.leafOf(t), drop);
+  ok(!!dLeaf && dLeaf !== tLeaf, `in B si nasconde «${drop}» (${dLeaf}); si rinomina ${target.id} (${tType})`);
+  const lensB = await p.evaluate((i) => window.__EM_DRAG__.lens(i), B.id);
+  await p.evaluate(([i, l]) => window.__EM_DRAG__.setLeavesOf(i, l), [B.id, lensB.leaves.filter((l) => l !== dLeaf)]);
+  await p.waitForTimeout(400);
+  const [a1, b1, m1] = await p.evaluate((ids) => ids.map((i) => window.__EM_DRAG__.winScene(i).boxes.length), [A.id, B.id, g]);
+  ok(b1 < a1 && b1 < m1, `B disegna meno nodi (${b1}) di A (${a1}) e della principale (${m1})`);
+  // A's overlays off take «Continuity» with them: its BR are not drawn there
+  const gone = await p.evaluate(([a, m]) => {
+    const inA = new Set(window.__EM_DRAG__.winScene(a).boxes.map((b) => b.id));
+    return window.__EM_DRAG__.winScene(m).boxes.filter((b) => !inA.has(b.id)).map((b) => window.__EM_DRAG__.nodeInfo(b.id)?.type);
+  }, [A.id, g]);
+  ok(a1 + gone.length === m1 && gone.every((t) => /^BR|continuity/i.test(String(t))), `A senza overlay: senza i ${gone.length} BR della «Continuità» (${gone.join(", ")})`);
+  ok(await p.evaluate(([i, d]) => !window.__EM_DRAG__.winScene(i).boxes.some((b) => window.__EM_DRAG__.nodeInfo(b.id)?.type === d), [B.id, drop]), `nessun «${drop}» in B`);
+  // monochrome: A's
+  await p.evaluate((i) => window.__EM_DRAG__.setMono(i, true), A.id);
+  eq(await p.evaluate((ids) => ids.map((i) => window.__EM_DRAG__.lens(i).mono), [A.id, B.id, g]), [true, false, false], "monocromo: solo A");
+  // …in the Matrix's display options of A's filter panel
+  await into(A, B);
+  await A.pop.click("#btn-view-props");
+  await p.waitForTimeout(300);
+  ok(await A.pop.locator('#filter-panel input[data-lens="mono"]').isChecked(), "il pannello dei filtri di A: monocromo acceso (modalità Matrix)");
+  await A.pop.locator('#filter-panel input[data-lens="mono"]').focus();
+  await A.pop.keyboard.press("Escape");
+  // the rename, painted in both
+  const name = `${target.name}·lens`;
+  const lat = await p.evaluate(async ([ids, id, nm]) => {
+    const d = window.__EM_DRAG__;
+    const t0 = performance.now();
+    d.renameNode(id, nm);
+    const seq = d.winScene(ids[0]).seq;
+    const seen = {};
+    await new Promise((res) => {
+      const tick = () => {
+        for (const i of ids) {
+          const w = d.winScene(i);
+          if (!seen[i] && w.painted && w.painted.seq >= seq && w.boxes.some((b) => b.name === nm)) seen[i] = performance.now() - t0;
+        }
+        if (Object.keys(seen).length === ids.length || performance.now() - t0 > 3000) res(); else requestAnimationFrame(tick);
+      };
+      tick();
+    });
+    return seen;
+  }, [[A.id, B.id, g], target.id, name]);
+  ok(Object.keys(lat).length === 3, `la rinomina disegnata in A, B e nella principale (ms ${JSON.stringify(Object.fromEntries(Object.entries(lat).map(([k, v]) => [k, +v.toFixed(1)])))})`);
+  // remembered with the windows (local, never the em.json)
+  await p.waitForTimeout(1300);
+  const saved = await p.evaluate(() => JSON.parse(localStorage.getItem("emstudio.detached.v1") ?? "{}"));
+  const recs = Object.values(saved)[0] ?? [];
+  ok(recs.some((r) => r.state["current.lens.ov.matrix"]?.master === false && r.state["current.lens.mono"] === true), "A ricordata con i suoi overlay e il monocromo");
+  ok(recs.some((r) => Array.isArray(r.state["current.lens.leaves.matrix"]) && !r.state["current.lens.leaves.matrix"].includes(dLeaf)), "B ricordata con il suo filtro");
+  ok(!JSON.stringify(saved).includes(name), "niente del documento nella preferenza");
+  // «⇤ Back» brings A's lens into the main window
+  await A.pop.click(".win-detached-back");
+  await p.waitForTimeout(600);
+  const back = await p.evaluate(() => window.__EM_DRAG__.wins().filter((w) => !w.id.startsWith("pop:") && w.state["current.lens.ov.matrix"]?.master === false).map((w) => w.id));
+  ok(back.length === 1 && (await ov(back[0])).master === false, `riportata con i suoi overlay (${back[0]})`);
+  eq(await p.evaluate((i) => window.__EM_DRAG__.lens(i).mono, back[0]), true, "…e il suo monocromo");
+  eq(errors, [], "nessun errore");
+  await ctx.close();
+});
+
+test("D12.hidden", "principale nascosta o minimizzata: la staccata ridisegna una rinomina", async () => {
+  const { p, ctx, errors } = await open();
+  const g = await winOf(p, "graph");
+  const A = await detach(p, ctx, g);
+  await A.pop.bringToFront();
+  await p.waitForTimeout(300);
+  const hash = () => A.pop.evaluate(() => {
+    const c = document.querySelector(".tile-detached canvas");
+    const u = c.toDataURL();
+    let h = 0;
+    for (let i = 0; i < u.length; i += 7) h = (h * 31 + u.charCodeAt(i)) | 0;
+    return h;
+  });
+  // the main page as a minimised one: hidden, and its animation frames never come
+  await p.evaluate(() => {
+    Object.defineProperty(document, "hidden", { configurable: true, get: () => true });
+    Object.defineProperty(document, "visibilityState", { configurable: true, get: () => "hidden" });
+    window.__held = [];
+    window.requestAnimationFrame = (cb) => { window.__held.push(cb); return 0; };
+    document.dispatchEvent(new Event("visibilitychange"));
+  });
+  const h0 = await hash();
+  const t0 = Date.now();
+  await p.evaluate(() => window.__EM_DRAG__.renameNode("US102", "US102 nascosta e lunga"));
+  let ms = null;
+  while (Date.now() - t0 < 3000) {
+    if ((await hash()) !== h0) { ms = Date.now() - t0; break; }
+    await new Promise((r) => setTimeout(r, 20));
+  }
+  console.log(`    D12 ridisegno della staccata con la principale nascosta: ${ms === null ? "nessuno in 3 s" : `${ms} ms`}`);
+  ok(ms !== null && ms < 500, `ridisegnata (${ms} ms)`);
+  eq(errors, [], "nessun errore");
+  await ctx.close();
+});
+
+test("D13.menus", "menu e cartellino in una staccata stretta: dentro la sua finestra", async () => {
+  const { p, ctx, errors } = await open();
+  const g = await winOf(p, "graph");
+  const A = await detach(p, ctx, g);
+  await A.pop.setViewportSize({ width: 520, height: 420 });
+  await A.pop.bringToFront();
+  await p.waitForTimeout(500);
+  // a right press near the right edge, on the canvas
+  const cv = await A.pop.locator(".tile-detached canvas.surf-focus").boundingBox();
+  await A.pop.mouse.click(cv.x + cv.width - 12, cv.y + cv.height / 2, { button: "right" });
+  await p.waitForTimeout(500);
+  const menus = await A.pop.evaluate(() => [...document.body.children].filter((e) => e.dataset.ported && !e.classList.contains("hidden") && e.getBoundingClientRect().width > 0)
+    .map((e) => { const r = e.getBoundingClientRect(); return { cls: String(e.className).slice(0, 30), l: r.left, r: r.right, t: r.top, b: r.bottom, iw: innerWidth, ih: innerHeight }; }));
+  ok(menus.length >= 1, `un menu aperto nella staccata (${JSON.stringify(menus)})`);
+  ok(menus.every((m) => m.l >= 0 && m.r <= m.iw + 1 && m.t >= 0 && m.b <= m.ih + 1), "dentro la finestra stretta");
+  await A.pop.keyboard.press("Escape");
+  await p.waitForTimeout(200);
+  // the hover card of a node, in the detached window
+  const box = (await p.evaluate((i) => window.__EM_DRAG__.winScene(i), A.id)).boxes
+    .find((b) => b.w < 300 && b.h < 100 && b.x + b.w / 2 > 20 && b.x + b.w / 2 < 480 && b.y + b.h / 2 > 80 && b.y + b.h / 2 < 380);
+  ok(!!box, `un nodo dentro la finestra stretta (${box?.id})`);
+  await A.pop.mouse.move(box.x + box.w / 2, box.y + box.h / 2, { steps: 4 });
+  await p.waitForTimeout(900);
+  const tip = await A.pop.evaluate(() => { const t = document.getElementById("tooltip"); if (!t || t.classList.contains("hidden")) return null; const r = t.getBoundingClientRect(); return { l: r.left, r: r.right, iw: innerWidth, text: t.textContent.slice(0, 40) }; });
+  ok(!!tip && tip.l >= 0, `il cartellino nella staccata (${JSON.stringify(tip)})`);
+  await A.pop.close();
+  await p.waitForTimeout(1300);
+  ok(await p.evaluate(() => !!document.getElementById("tooltip")), "chiusa la staccata, il cartellino torna a casa");
+  eq(errors, [], "nessun errore");
   await ctx.close();
 });
 
