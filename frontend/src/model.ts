@@ -393,6 +393,10 @@ export class DocumentStore {
    * history. Outside a room nothing changes.
    */
   static liveHistory: ((st: DocumentStore) => boolean) | null = null;
+  /** MICRO-LAB orizzonti · the ORIGIN a line drawn here carries
+   *  (`attributes.origin`, connections 1.6.47): main.ts answers «user» for the
+   *  relative-chronology family. Null = no mark. */
+  static originOf: ((edgeType: string) => string | null) | null = null;
   private recording: Snapshot | null = null;
   private historyFn: ((note: LiveHistoryNote) => void) | null = null;
 
@@ -2064,9 +2068,12 @@ export class DocumentStore {
     let i = 2;
     const base = id;
     while (ids.has(id)) id = `${base}__${i++}`;
+    const origin = DocumentStore.originOf?.(edgeType) ?? null;
+    const attrs = origin && !(attributes && "origin" in attributes)
+      ? { ...(attributes ?? {}), origin } : attributes;
     const edge: EmEdge = { id, source, target, edge_type: edgeType,
-                           ...(attributes && Object.keys(attributes).length
-                             ? { attributes: { ...attributes } } : {}) };
+                           ...(attrs && Object.keys(attrs).length
+                             ? { attributes: { ...attrs } } : {}) };
     this.doc.graph.edges.push(edge);
     this.emit();
     this.emitOp({ op: "add_edge", edge });

@@ -10248,3 +10248,22 @@ body.em-detached #tile-root > .tile-area.tile-detached {
 }
 .win-detached-tail button:hover { background: var(--bg-panel); border-color: var(--border); color: var(--text); }
 .gest .gjoin.gdetach { border-style: dashed; }
+
+/* MICRO-LAB orizzonti · the horizons panel at the head of the Chronology */
+.hz-panel { padding: 8px 12px 10px; border-bottom: 1px solid var(--border, rgba(127,127,127,.3)); font-size: 12px; }
+.hz-head { margin-bottom: 6px; cursor: help; }
+.hz-row { display: flex; align-items: center; gap: 6px; margin: 4px 0; flex-wrap: wrap; }
+.hz-label { min-width: 92px; opacity: .8; }
+.hz-select { min-width: 160px; }
+.hz-mode { margin-right: 8px; white-space: nowrap; }
+.hz-btn { padding: 1px 7px; }
+.hz-note { margin: 4px 0; opacity: .8; font-style: italic; }
+.hz-empty { margin: 6px 0; opacity: .8; }
+.hz-table { border-collapse: collapse; margin: 6px 0; }
+.hz-table th { text-align: left; font-weight: 600; opacity: .75; padding: 2px 6px; }
+.hz-table td { padding: 2px 6px; vertical-align: middle; }
+.hz-table input[type="color"] { width: 30px; height: 20px; padding: 0; border: none; background: none; }
+.hz-name { width: 140px; }
+.hz-num { width: 72px; }
+.hz-count { display: inline-block; min-width: 2em; text-align: right; opacity: .8; }
+.hz-acts { white-space: nowrap; }

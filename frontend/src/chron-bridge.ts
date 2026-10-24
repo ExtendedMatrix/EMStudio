@@ -22,7 +22,7 @@
  */
 import type { EmDocument } from "./types";
 
-export type ChronRule = "written" | "epoch" | "contained" | "tpq" | "taq";
+export type ChronRule = "written" | "epoch" | "sub_epoch" | "contained" | "tpq" | "taq";
 
 /** One node's entry of `Graph.chronology()` (s3Dgraphy). */
 export interface ChronEntry {
@@ -54,6 +54,11 @@ export interface ChronState {
   error?: string;
   /** the map answers an OLDER version of the document; a new one is on its way */
   stale: boolean;
+  /** MICRO-LAB orizzonti · the epochs' effective intervals
+   *  (`Graph.epoch_intervals()`: a sub-epoch restricted by its parent), when
+   *  the bridge's s3dgraphy gives them */
+  epochs?: Record<string, { start: number | null; end: number | null; start_rule?: string | null;
+                            end_rule?: string | null; parent?: string | null }>;
 }
 
 const DEBOUNCE_MS = 500;
@@ -61,7 +66,9 @@ const DEBOUNCE_MS = 500;
 const RETRY_MS = 5000;
 
 let resolveBridge: () => Promise<string> = async () => "http://localhost:8765";
-let onUpdate: () => void = () => {};
+/** every view that shows something computed from the chronology (the Data
+ *  panel, the horizons of the Matrix and the Graph) is told when it lands */
+const onUpdate: Array<() => void> = [];
 
 let state: ChronState = { status: "idle", map: {}, warnings: [], stale: false };
 let lastSig: string | null = null;
@@ -75,7 +82,7 @@ export function setChronologyBridgeResolver(fn: () => Promise<string>): void {
 
 /** called when an answer lands, so the view can redraw itself */
 export function onChronologyUpdate(fn: () => void): void {
-  onUpdate = fn;
+  onUpdate.push(fn);
 }
 
 /**
@@ -148,8 +155,10 @@ async function ask(body: string): Promise<void> {
       } catch { /* non-JSON error body */ }
       next = { status: "error", map: {}, warnings: [], error: msg, stale: false };
     } else {
-      const j = (await res.json()) as { chronology?: Record<string, ChronEntry>; warnings?: string[] };
-      next = { status: "ok", map: j.chronology ?? {}, warnings: j.warnings ?? [], stale: false };
+      const j = (await res.json()) as { chronology?: Record<string, ChronEntry>; warnings?: string[];
+                                        epochs?: ChronState["epochs"] };
+      next = { status: "ok", map: j.chronology ?? {}, warnings: j.warnings ?? [], stale: false,
+               ...(j.epochs ? { epochs: j.epochs } : {}) };
     }
   } catch {
     next = { status: "off", map: {}, warnings: [], stale: false };
@@ -157,7 +166,7 @@ async function ask(body: string): Promise<void> {
   // an answer to an older request than the latest one is dropped
   if (mine !== seq) return;
   state = next;
-  onUpdate();
+  for (const fn of onUpdate) fn();
 }
 
 /** test/reset hook: forget everything (a new session, a closed document) */

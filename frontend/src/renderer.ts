@@ -122,6 +122,12 @@ export interface RenderState {
    *  decorators): one switched off is not drawn and has no hit rect. Nothing
    *  else changes — no layout, no scene. Absent → all drawn. */
   overlays?: OverlayState | null;
+  /** MICRO-LAB orizzonti · reading by horizons (the periodization chosen in
+   *  this session): `tint` = node id → the colour of the horizon its computed
+   *  interval overlaps, drawn as a halo behind the node; `fade` = the dated
+   *  nodes outside every visible horizon, drawn faded (filter mode). A view
+   *  state: nothing in the node changes, no layout, no scene. */
+  horizon?: { tint: Map<string, string>; fade: Set<string> } | null;
 }
 
 /** Label ink for a node: default, ORANGE when its name has a problem, RED when
@@ -953,10 +959,26 @@ export function render(
     n.id === state.selectedId ||
     n.instanceOf === state.selectedId ||
     (state.selectedIds?.has(n.id) ?? false);
+  const hz = state.horizon ?? null;
   for (const n of shown) {
     if (n.collapsed) continue; // PD1 · shown as a bottom-left tablet, not a node
     // FONTE · a TRACE (removed keeping its trace, still read) is attenuated
     ctx.globalAlpha = n.trace ? 0.38 : 1;
+    // MICRO-LAB orizzonti · the horizon's colour behind the node, and the node
+    // faded when it falls in no visible horizon (an instance reads its master)
+    if (hz) {
+      const hid = (n as { instanceOf?: string }).instanceOf ?? n.id;
+      if (hz.fade.has(hid)) ctx.globalAlpha *= 0.16;
+      const col = hz.tint.get(hid);
+      if (col && !hz.fade.has(hid)) {
+        ctx.save();
+        ctx.globalAlpha = 0.42;
+        ctx.fillStyle = col;
+        const m = 6 / vp.scale;
+        ctx.fillRect(n.x - m, n.y - m, n.w + 2 * m, n.h + 2 * m);
+        ctx.restore();
+      }
+    }
     // MICRO-SPAZIO-3D-2 · «fuori dal gruppo»: a loose property shown in the
     // unit's group by the view, a light dashed frame around it
     if (n.outside) {

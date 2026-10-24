@@ -42,6 +42,7 @@ export type NodeFamilyKey =
   | "dtc"
   | "narrative"
   | "hdto"
+  | "horizons"
   | "other";
 
 export type EdgeFamilyKey =
@@ -60,6 +61,7 @@ export type EdgeFamilyKey =
   | "dtc"
   | "narrative"
   | "hdto"
+  | "horizons"
   | "other"
   | "generic";
 
@@ -166,6 +168,9 @@ export const NODE_FAMILY_TABLE: NodeFamilyDef[] = [
     classes: ["GraphNode", "HDTNode", "HeritageEntityNode", "ProjectNode", "StudyNode"],
     matrix: false, graph: true,
   },
+  // MICRO-LAB orizzonti · they live in the container's own member, never in a
+  // study graph: named here so a file that puts one in a graph says what it is
+  { key: "horizons", classes: ["PeriodizationNode", "HorizonNode"], matrix: false, graph: true },
   // what no row names: Node itself, a class the datamodel adds, a type it does not know
   { key: "other", classes: ["Node"], matrix: false, graph: true },
 ];
@@ -251,6 +256,7 @@ export const EDGE_FAMILY_TABLE: EdgeFamilyDef[] = [
     ],
     matrix: false, graph: true,
   },
+  { key: "horizons", edges: ["is_in_periodization"], matrix: false, graph: true },
   // what no row names: an edge type the datamodel adds, a spelling it does not know
   { key: "other", edges: [], matrix: false, graph: true },
   { key: "generic", edges: ["generic_connection"], matrix: false, graph: true },

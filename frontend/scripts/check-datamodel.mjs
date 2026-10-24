@@ -27,13 +27,16 @@ import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { cpSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { DATAMODEL_FILES, canonical, differences, fingerprint } from "./datamodel-fingerprint.mjs";
 
 const FRONTEND = new URL("..", import.meta.url).pathname;
 const ASSETS = join(FRONTEND, "src/assets");
 const RECORD = join(ASSETS, "datamodel.fingerprint.json");
-const SIBLING = join(FRONTEND, "../../s3Dgraphy");
+// LAB (docs/LAB.md) · the lab worktree (EMStudio-lab) vendors from its own
+// sibling, s3Dgraphy-lab; EM_S3D_ROOT names another reference explicitly
+const LAB = basename(join(FRONTEND, "..")).endsWith("-lab") && existsSync(join(FRONTEND, "../../s3Dgraphy-lab"));
+const SIBLING = process.env.EM_S3D_ROOT || join(FRONTEND, LAB ? "../../s3Dgraphy-lab" : "../../s3Dgraphy");
 const SIBLING_CFG = join(SIBLING, "src/s3dgraphy/JSON_config");
 
 let checks = 0;

@@ -84,6 +84,9 @@ const edgeTypes = [...R.edgeTypeNames(), R.GENERIC_EDGE];
   eq(F.edgeOrigin({ attributes: { original_edge_id: "n0::e1" } }), "imported", "an edge the GraphML importer read is imported");
   eq(F.edgeOrigin({ attributes: { derived: true } }), "derived", "s3Dgraphy's own mark is derived");
   eq(F.edgeOrigin({}), "unmarked", "an edge that says nothing is unmarked");
+  // MICRO-LAB orizzonti · s3Dgraphy 1.6.47 writes the mark itself
+  eq(F.edgeOrigin({ attributes: { origin: "user" } }), "user", "attributes.origin user");
+  eq(F.edgeOrigin({ attributes: { origin: "derived" } }), "derived", "attributes.origin derived");
   // a spelling reads as what it spells; an unknown name is «Other», with the wildcard leaf
   eq(F.edgeFamilyOf("not_an_edge"), "other", "an edge type the datamodel does not know is «Other»");
   eq(F.edgeLeaf("not_an_edge"), F.UNKNOWN_EDGE_LEAF, "…switched by the wildcard leaf");
@@ -107,11 +110,17 @@ const edgeTypes = [...R.edgeTypeNames(), R.GENERIC_EDGE];
     e: edgeTypes.filter((t) => { const l = F.edgeLeaf(t); return l && !vis.has(l); }).sort(),
   });
   ok(dmN.size >= nodeTypes.length, "frozen snapshot read");
-  eq(hidden(F.defaultVisibleLeaves("matrix")), frozen.matrix, "the Matrix's defaults hide what its rings hid");
+  // MICRO-LAB orizzonti · the types the snapshot did not know: periodizations
+  // and horizons live in the container's member, hidden in the Matrix like the
+  // HDT-O, shown in the Graph
+  const LAB_NEW = { n: ["horizon", "periodization"], e: ["is_in_periodization"] };
+  const withLab = (x) => ({ n: [...new Set([...x.n, ...LAB_NEW.n])].sort(), e: [...new Set([...x.e, ...LAB_NEW.e])].sort() });
+  eq(hidden(F.defaultVisibleLeaves("matrix")), withLab(frozen.matrix), "the Matrix's defaults hide what its rings hid");
   for (const v of ["graph", "dtc", "multigraph", "graphs"])
     eq(hidden(F.defaultVisibleLeaves(v)), { n: [], e: [] }, `the ${v} view shows every type by default`);
   for (const k of ["full", "harris", "em-compact", "em-complete"])
-    eq(hidden(F.TEMPLATES.find((x) => x.key === k).leaves), frozen[k], `the template «${k}» hides what it hid`);
+    eq(hidden(F.TEMPLATES.find((x) => x.key === k).leaves), k === "full" ? frozen[k] : withLab(frozen[k]),
+       `the template «${k}» hides what it hid`);
   const so = F.TEMPLATES.find((x) => x.key === "strat-only").leaves;
   const co = F.TEMPLATES.find((x) => x.key === "chrono-only").leaves;
   ok(so.has("e:cuts") && so.has("n:US") && so.has("n:SF") && so.has("n:BR"), "«Stratigraphy only»: units and their physical relations");
@@ -162,8 +171,8 @@ if (GT16 && existsSync(GT16)) {
   eq([gt.nodes, gt.edges], [2059, 4048], "the GT16: 2059 nodes, 4048 edges");
   // MICRO-CRONO-MULTIPLA · the GT16's three families (the report's table)
   eq([gt.byFam.chronology, gt.byFam.stratigraphic, gt.byFam.epochs], [81, 10, 157], "the GT16: chronology 81, stratigraphic 10, epochs 157");
-  const o = { derived: 0, imported: 0, unmarked: 0 };
+  const o = { derived: 0, user: 0, imported: 0, unmarked: 0 };
   for (const x of gt.edges_) if (F.edgeFamilyOf(x.edge_type) === "chronology") o[F.edgeOrigin(x)]++;
-  eq(o, { derived: 0, imported: 75, unmarked: 6 }, "the GT16's chronology: 75 imported (GraphML), 6 unmarked, none derived");
+  eq(o, { derived: 0, user: 0, imported: 75, unmarked: 6 }, "the GT16's chronology: 75 imported (GraphML), 6 unmarked, none derived");
 }
 console.log(`detail-families: ${checks} checks passed (fixture ${fx.nodes}/${fx.edges}${gt ? `, GT16 ${gt.nodes}/${gt.edges}` : ", GT16 not given"})`);

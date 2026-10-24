@@ -130,15 +130,18 @@ export const EDGE_FAMILIES: Family[] = EDGE_FAMILY_TABLE.map((f) => ({
   ...(f.hiddenIn ? { hiddenIn: f.hiddenIn } : {}),
 }));
 
-/** MICRO-CRONO-MULTIPLA · where an edge comes from, as far as the data says it:
- *  `derived` — s3Dgraphy's own mark of a computed edge (`attributes.derived`, the
- *  one it writes on propagated properties); `imported` — the GraphML importer
- *  keeps the yEd edge it read (`attributes.original_edge_id`); `unmarked` — the
- *  edge says nothing (drawn here, or from a file that does not tell). The data
- *  has no mark for «written by the user»: unmarked is not «the user's». */
-export type EdgeOrigin = "derived" | "imported" | "unmarked";
+/** MICRO-CRONO-MULTIPLA · where an edge comes from, as far as the data says it.
+ *  MICRO-LAB orizzonti · s3Dgraphy (connections 1.6.47) writes the mark:
+ *  `attributes.origin` ∈ derived | user | imported — derived by
+ *  `derive_relative_chronology`, user for a relation a person wrote (a table, a
+ *  line drawn here), imported from another software's file. Files before 1.6.47
+ *  fall back on the old signs: `attributes.derived` (propagated) → derived,
+ *  `attributes.original_edge_id` (the GraphML importer) → imported; nothing →
+ *  `unmarked`, which is not «the user's». */
+export type EdgeOrigin = "derived" | "user" | "imported" | "unmarked";
 export function edgeOrigin(e: { attributes?: unknown; [k: string]: unknown }): EdgeOrigin {
   const a = (e.attributes ?? {}) as Record<string, unknown>;
+  if (a.origin === "derived" || a.origin === "user" || a.origin === "imported") return a.origin;
   if (a.derived === true || a.derived === "true") return "derived";
   if (a.original_edge_id != null && a.original_edge_id !== "") return "imported";
   return "unmarked";

@@ -3,7 +3,14 @@ import { hdtoDropped, shownCode, studyCode, withCode } from "./hdto";
 import { linksOf, resolveAddress, type GraphDocs } from "./links";
 import { applyFolding, buildMembership, MEMBERSHIP_EDGES } from "./folding";
 import { geoOf, georeferenceScene, reprojectPoint, setBridgeResolver } from "./geo";
-import { setChronologyBridgeResolver } from "./chron-bridge";
+import { chronologyFor, onChronologyUpdate, setChronologyBridgeResolver } from "./chron-bridge";
+import {
+  chosenPeriodization, horizonMarks, HORIZON_TYPE, initialHidden, intervalsFrom, isPeriodizationsSection,
+  MEMBERSHIP_EDGE, newPeriodizationsSection, nextSwatch, PERIODIZATION_TYPE, PERIODIZATIONS_MEMBER_ID,
+  readPeriodizations, reorderPlan,
+  type HorizonMarks, type HorizonView, type PeriodizationsRead,
+} from "./horizons";
+import { renderHorizonsPanel } from "./horizons-ui";
 import type { PlacedScene } from "./geo";
 import {
   buildContainer,
@@ -2701,6 +2708,21 @@ window.__EM_SCENE__ = () => {
   // document to `loadDocument` and lose the corpus of a project on the way
   // F2 · …and a single graph too: a path is a FILE, and only that door makes one
   openAt: (d: EmDocument, path: string) => loadContainerDocument(d, baseName(path), path),
+  // MICRO-LAB orizzonti · the horizons: the store, the session's reading, the
+  // marks a Matrix/Graph window paints now, and ⌘Z's own path
+  horizonsStore: () => periodizations({ create: false }),
+  horizonView: () => ({ mode: horizonView.mode, periodizationId: horizonView.periodizationId,
+                        hidden: [...horizonView.hidden] }),
+  horizonMarks: () => {
+    const m = horizonMarksNow();
+    return m ? { tint: Object.fromEntries(m.tint), fade: [...m.fade], inside: Object.fromEntries(m.inside) } : null;
+  },
+  undoAny: () => undoStore()?.undo(),
+  roomGraphsFor: (doc: unknown) => { noteRoomGraphs(doc); return [...hubRoomGraphs]; },
+  storeForGraph: (gid: string) => {
+    const st = hubStoreFor(gid);
+    return st === periodizationStore ? "periodizations" : st === store ? "active" : st ? "slot" : null;
+  },
   /** MICRO-PERCORSI-WINDOWS p.3 · «Ritrova i file…» in a named folder (no dialog
    *  for the folder), and what its window shows */
   relocate: (folder: string) => relocateFiles(folder),
@@ -3064,6 +3086,8 @@ function paintGraphWindow(p: GraphPaint): void {
       } : undefined,
       // MICRO-SOVRAPPOSIZIONI · the overlays of this window's view
       overlays: overlaysOf(overlayViewOf(p.winId, p.mode)),
+      // MICRO-LAB orizzonti · the Matrix and the Graph read by horizons
+      horizon: p.mode === "matrix" || p.mode === "graph" ? horizonMarksNow() : null,
       // E5 · an undated epoch's lane invites to date it — drawn, never saved
       dateInvite: p.mode === "matrix" ? { text: t("epoch.inviteDate"), add: t("epoch.inviteAdd") } : null,
     },
@@ -6767,6 +6791,19 @@ function loadContainerDocument(
   } else if (!emtree.files.some((f) => f.id !== file.id)) {
     corpusStore = null;        // the first file of a fresh workspace: nothing to keep
   }
+  // MICRO-LAB orizzonti · the horizons: ONE per workspace, like the corpus —
+  // its home file writes it, a second file's is retained in that file
+  if (parsed.periodizations) {
+    if (periodizationHomeFileId && emtree.file(periodizationHomeFileId) && projectPeriodizationsSection()) {
+      file.retained[String(parsed.periodizations.graph_id ?? PERIODIZATIONS_MEMBER_ID)] = parsed.periodizations;
+    } else {
+      adoptProjectPeriodizations(parsed.periodizations);
+      periodizationHomeFileId = file.id;
+    }
+  } else if (!emtree.files.some((f) => f.id !== file.id)) {
+    periodizationStore = null;
+    periodizationHomeFileId = null;
+  }
   if (activeSlotId) activateSlot(activeSlotId, { rebuildOnly: false });
   if (parsed.members.length > 1) {
     toast(t("container.opened", { n: String(parsed.members.length) }));
@@ -6912,6 +6949,97 @@ function adoptProjectCorpus(section: Record<string, unknown>): void {
     graph: section as unknown as EmDocument["graph"],
   } as EmDocument);
   wireCorpusStore(corpusStore);
+}
+
+// ── MICRO-LAB orizzonti · THE HORIZONS MEMBER, as a store of its own ─────────
+//
+// Periodizations (E32) and their horizons (crmgeo:SP10) are nodes of the
+// MULTIGRAPH, at the level of the container (E.D., 24 Oct 2026): the member
+// `graphs.periodizations`, routed like the corpus — one per workspace, owned by
+// the file that brought it (its HOME), written only by that file. It is a
+// `DocumentStore`, so every rule already written applies (ids, stamps,
+// tombstones, undo): an edit is ONE undo step, it goes to the Log, and in a room
+// its operations leave like any other, with the member's `graph_id` in the
+// envelope (G1) — the relay applies them to `graphs.periodizations`.
+let periodizationStore: DocumentStore | null = null;
+let periodizationHomeFileId: string | null = null;
+
+/** The horizons store; `create: false` answers "is there one?" */
+function periodizations(opts: { create?: boolean } = {}): DocumentStore | null {
+  if (periodizationStore) return periodizationStore;
+  if (opts.create === false) return null;
+  adoptProjectPeriodizations(newPeriodizationsSection());
+  return periodizationStore;
+}
+
+function adoptProjectPeriodizations(section: Record<string, unknown>): void {
+  periodizationStore = new DocumentStore({
+    header: { format: "em.json", version: "1.0" },
+    graph: section as unknown as EmDocument["graph"],
+  } as EmDocument);
+  horizonView.hidden = initialHidden(chosenPeriodization(
+    readPeriodizations(section), horizonView));
+  wirePeriodizationStore(periodizationStore);
+}
+
+function wirePeriodizationStore(s: DocumentStore): void {
+  s.onChange(() => {
+    lastTouchedStore = s;      // ⌘Z takes back the last horizon edit
+    const home = periodizationHomeFileId ? emtree.file(periodizationHomeFileId) : null;
+    if (home) home.dirty = true;
+    refreshSurfaces("chronology");
+    updateToolbar();
+    refreshEMTree();
+    draw();
+  });
+  s.onOp((op) => {
+    if (sync.room && !sync.canWrite) {
+      takeBackReadOnlyWrite(s);
+      return;
+    }
+    queueOpLog(s, op);         // the Log says what the hand changed
+    let wireOps: HubOp[];
+    try {
+      wireOps = opsForLocalChange(op as Parameters<typeof opsForLocalChange>[0], null);
+    } catch (e) {
+      opRefused(t("ops.notSent", { why: (e as Error).message }));
+      return;
+    }
+    const gid = String((s.doc.graph as Record<string, unknown>).graph_id ?? PERIODIZATIONS_MEMBER_ID);
+    if (sync.room) hubSendLocal(wireOps, gid);
+  });
+}
+
+/** The member to write, or null: a project without periodizations does not
+ *  grow an empty member (s3dgraphy writes it only when there is one). */
+function projectPeriodizationsSection(): Record<string, unknown> | null {
+  const st = periodizations({ create: false });
+  if (!st) return null;
+  const graph = st.doc.graph as unknown as Record<string, unknown>;
+  if (!readPeriodizations(graph).list.length) return null;
+  return JSON.parse(st.toJSON()).graph as Record<string, unknown>;
+}
+
+/** The session's way of reading the views by horizons (never in the file). */
+const horizonView: HorizonView = { mode: "off", periodizationId: null, hidden: new Set() };
+
+function horizonsRead(): PeriodizationsRead {
+  const st = periodizations({ create: false });
+  return st ? readPeriodizations(st.doc.graph) : { list: [], active: null };
+}
+
+/** The marks a Matrix or Graph window paints: tint and, in filter mode, the
+ *  dated nodes outside every visible horizon. The intervals are the bridge's
+ *  (`Graph.chronology()` + `epoch_intervals()`) for the graph on screen — so
+ *  one horizon reads every graph of the studio the same way. */
+function horizonMarksNow(): HorizonMarks | null {
+  if (horizonView.mode === "off" || !store) return null;
+  const per = chosenPeriodization(horizonsRead(), horizonView);
+  if (!per) return null;
+  const st = store;
+  const cs = chronologyFor(st.doc, () => st.toJSON());
+  if (cs.status !== "ok") return null;
+  return horizonMarks(per, horizonView, intervalsFrom(cs.map, cs.epochs ?? null));
 }
 
 function adoptProjectShelf(section: Record<string, unknown>): void {
@@ -7319,10 +7447,12 @@ function fileContainer(file: OpenFile | null, opts: { bump?: boolean } = {}): Re
   const open = new Set(graphs.map((g) => g.id));
   let retainedShelf: Record<string, unknown> | null = null;
   let retainedCorpus: Record<string, unknown> | null = null;
+  let retainedPeriodizations: Record<string, unknown> | null = null;
   for (const [gid, section] of Object.entries(file?.retained ?? {})) {
     if (open.has(gid)) continue;
     if (isShelfSection(section)) { retainedShelf = section; continue; }
     if (isCorpusSection(section)) { retainedCorpus = section; continue; }
+    if (isPeriodizationsSection(section)) { retainedPeriodizations = section; continue; }
     const { layout, ...graph } = section as Record<string, unknown>;
     graphs.push({ id: gid, doc: { graph, ...(layout ? { layout } : {}) } as unknown as EmDocument });
   }
@@ -7338,10 +7468,13 @@ function fileContainer(file: OpenFile | null, opts: { bump?: boolean } = {}): Re
   const homeless = (home: string | null): boolean => !home || !emtree.file(home);
   const writesShelf = fid ? fid === shelfHomeFileId : homeless(shelfHomeFileId);
   const writesCorpus = fid ? fid === corpusHomeFileId : homeless(corpusHomeFileId);
+  if (fid && !periodizationHomeFileId && projectPeriodizationsSection()) periodizationHomeFileId = fid;
+  const writesPeriodizations = fid ? fid === periodizationHomeFileId : homeless(periodizationHomeFileId);
   const container = buildContainer({
     graphs,
     shelf: writesShelf ? projectShelfSection() : retainedShelf,
     corpus: writesCorpus ? projectCorpusSection() : retainedCorpus,
+    periodizations: writesPeriodizations ? projectPeriodizationsSection() : retainedPeriodizations,
     activeGraphId: activeSlot
       ? String((activeSlot.store.doc.graph as Record<string, unknown>).graph_id ?? activeSlot.id)
       : null,
@@ -7372,7 +7505,7 @@ function markFileSaved(file: OpenFile, doc: ReturnType<typeof buildContainer>): 
   file.dirty = false;
   file.onDisk = {};
   for (const [gid, section] of Object.entries(doc.graphs)) {
-    if (!isShelfSection(section) && !isCorpusSection(section)) file.onDisk[gid] = section;
+    if (!isShelfSection(section) && !isCorpusSection(section) && !isPeriodizationsSection(section)) file.onDisk[gid] = section;
   }
 }
 
@@ -7493,6 +7626,8 @@ function hubStoreFor(graphId: string | undefined): DocumentStore | null {
   const own = (st: DocumentStore): string =>
     String((st.doc.graph as Record<string, unknown>).graph_id ?? "");
   if (own(store) === graphId) return store;
+  // MICRO-LAB orizzonti · the horizons member is addressed like a graph
+  if (periodizationStore && own(periodizationStore) === graphId) return periodizationStore;
   const roomFile = emtree.files.find((f) => f.room?.id === sync.room);
   const slots = roomFile ? emtree.slotsOf(roomFile.id) : emtree.slots;
   const hit = slots.find((sl) => own(sl.store) === graphId);
@@ -7506,10 +7641,13 @@ const hubKey = opKey;
  *  operations (`DocumentStore.liveHistory`). */
 function isRoomStore(st: DocumentStore): boolean {
   if (!sync.inRoom) return false;
+  if (st === periodizationStore) return true;   // MICRO-LAB orizzonti
   const roomFile = emtree.files.find((f) => f.room?.id === sync.room);
   return !!roomFile && emtree.slotsOf(roomFile.id).some((sl) => sl.store === st);
 }
 DocumentStore.liveHistory = isRoomStore;
+// MICRO-LAB orizzonti · a relative-chronology line drawn by a hand is the user's
+DocumentStore.originOf = (et) => edgeFamilyOf(et) === "chronology" ? "user" : null;
 
 function noteHub(note: AwarenessNote): void {
   hubNotes.unshift(note);
@@ -9680,6 +9818,7 @@ function forgetUnwrittenFile(slot: GraphSlot, file: OpenFile): void {
   emtree.files = emtree.files.filter((f) => f.id !== file.id);
   if (shelfHomeFileId === file.id) shelfHomeFileId = null;
   if (corpusHomeFileId === file.id) corpusHomeFileId = null;
+  if (periodizationHomeFileId === file.id) periodizationHomeFileId = null;
 }
 
 /** F2 · «Salva tutto»: every file with unsaved work. A graph with no file is
@@ -13364,6 +13503,11 @@ setTreeBridgeResolver(bridgeUrl);
 // MICRO-cronologia · the Chronology view asks s3Dgraphy for the propagated
 // chronology through the same bridge, by the same rule.
 setChronologyBridgeResolver(bridgeUrl);
+// MICRO-LAB orizzonti · an answer of the bridge repaints the horizons
+onChronologyUpdate(() => {
+  if (horizonView.mode !== "off") draw();
+  refreshSurfaces("chronology");
+});
 // DP-79 P1 · export the NARRATIVE — LaTeX, Word, HTML.
 //
 // Same shape as the Turtle button below and for the same reason (invariant 2):
@@ -16736,10 +16880,11 @@ function renderCirclesPanel(): void {
         const tipKey = `${fam.label}.tip`;
         const tip = t(tipKey) !== tipKey ? [t(tipKey)] : [];
         if (fam.key === "chronology" && total) {
-          const o = { derived: 0, imported: 0, unmarked: 0 };
+          const o = { derived: 0, user: 0, imported: 0, unmarked: 0 };
           for (const e of store!.doc.graph.edges) if (edgeFamilyOf(e.edge_type) === fam.key) o[edgeOrigin(e)]++;
-          tip.push(t("fam.origin", { derived: String(o.derived), imported: String(o.imported), unmarked: String(o.unmarked) }));
-          row.dataset.origin = `${o.derived}/${o.imported}/${o.unmarked}`;
+          tip.push(t("fam.origin", { derived: String(o.derived), user: String(o.user),
+                                     imported: String(o.imported), unmarked: String(o.unmarked) }));
+          row.dataset.origin = `${o.derived}/${o.user}/${o.imported}/${o.unmarked}`;
         }
         if (tip.length) name.title = tip.join("\n\n");
       }
@@ -17384,6 +17529,10 @@ function closeFile(fileId: string): void {
     corpusHomeFileId = null;
     corpusStore = null;   // its documentation goes with it, written or not
   }
+  if (periodizationHomeFileId === fileId) {
+    periodizationHomeFileId = null;
+    periodizationStore = null;   // its horizons go with it
+  }
   const next = emtree.activeId;
   if (next && wasActive) { store = null; activateSlot(next); }
   else if (!next) closeWorkspace();
@@ -17538,7 +17687,8 @@ const emtreeHandlers: EMTreeHandlers = {
   },
   keptGraphsOf: (fileId) => {
     const file = emtree.file(fileId);
-    return file ? Object.values(file.retained).filter((s) => !isShelfSection(s) && !isCorpusSection(s)).length : 0;
+    return file ? Object.values(file.retained).filter((s) => !isShelfSection(s) && !isCorpusSection(s)
+                                                       && !isPeriodizationsSection(s)).length : 0;
   },
   onShowCorpus: (fileId) => showFileCorpus(fileId),
   // AUDIT C · a story in the EMtree opens it: the graph becomes active and the
@@ -23905,6 +24055,7 @@ function renderChronologyInto(body: HTMLElement, _win: Win): void {
   if (!data || !store) {
     body.textContent = "";
     body.appendChild(emptyState("empty.chronology"));
+    if (store) horizonsPanelInto(body);   // MICRO-LAB orizzonti: no epochs, horizons still
     return;
   }
   const st = store;
@@ -23926,6 +24077,132 @@ function renderChronologyInto(body: HTMLElement, _win: Win): void {
     },
     onDissolve: (id, to) => dissolveEpochInto(id, to),
   });
+  horizonsPanelInto(body);
+}
+
+// ── MICRO-LAB orizzonti · the horizons panel and its gestures ───────────────
+
+/** The panel at the head of the Chronology. Every edit is ONE undo step in the
+ *  horizons store; reading choices (periodization, mode, visibility) are the
+ *  session's and never written. */
+function horizonsPanelInto(body: HTMLElement): void {
+  const host = document.createElement("div");
+  host.className = "hz-host";
+  const read = horizonsRead();
+  const chosen = chosenPeriodization(read, horizonView);
+  const counts = new Map<string, number>();
+  let note: string | null = null;
+  if (store && chosen) {
+    const st = store;
+    const cs = chronologyFor(st.doc, () => st.toJSON());
+    if (cs.status === "ok") {
+      const marks = horizonMarks(chosen, { ...horizonView, mode: "colour", hidden: new Set() },
+                                 intervalsFrom(cs.map, cs.epochs ?? null));
+      for (const ids of marks.inside.values()) for (const id of ids) counts.set(id, (counts.get(id) ?? 0) + 1);
+      if (!cs.epochs) note = t("hz.noEpochIntervals");
+    } else {
+      note = t(cs.status === "loading" || cs.status === "idle" ? "hz.loading" : "hz.bridgeOff");
+    }
+  }
+  if (sync.room && !roomHasPeriodizations()) note = t("hz.roomWithout");
+  renderHorizonsPanel(host, {
+    list: read.list, chosen: chosen?.id ?? null, proposed: read.active, mode: horizonView.mode,
+    hidden: horizonView.hidden, counts, note,
+    writable: !(sync.room && (!sync.canWrite || !roomHasPeriodizations())),
+  }, {
+    onChoose: (id) => {
+      horizonView.periodizationId = id;
+      horizonView.hidden = initialHidden(chosenPeriodization(horizonsRead(), horizonView));
+      refreshSurfaces("chronology");
+      draw();
+    },
+    onMode: (mode) => { horizonView.mode = mode; refreshSurfaces("chronology"); draw(); },
+    onToggle: (id, visible) => {
+      if (visible) horizonView.hidden.delete(id); else horizonView.hidden.add(id);
+      refreshSurfaces("chronology");
+      draw();
+    },
+    onAddPeriodization: () => {
+      const st = periodizations({ create: true })!;
+      const name = t("hz.newPeriodization", { n: String(horizonsRead().list.length + 1) });
+      const node = st.addNode({ id: st.newId(), node_type: PERIODIZATION_TYPE, name, data: {} });
+      horizonView.periodizationId = node.id;
+      if (!periodizationHomeFileId) periodizationHomeFileId = emtree.activeFile()?.id ?? null;
+      toastUndo(t("hz.didAddPeriodization", { name }), st);
+    },
+    onRenamePeriodization: (id, name) => {
+      const st = periodizations({ create: false });
+      if (!st) return;
+      st.updateNode(id, { name });
+      toastUndo(t("hz.didRename", { name }), st);
+    },
+    onDeletePeriodization: (id) => {
+      const st = periodizations({ create: false });
+      const per = horizonsRead().list.find((p) => p.id === id);
+      if (!st || !per) return;
+      st.batch(() => {
+        for (const h of per.horizons) st.deleteNode(h.id);
+        st.deleteNode(id);
+      });
+      if (horizonView.periodizationId === id) horizonView.periodizationId = null;
+      toastUndo(t("hz.didDeletePeriodization", { name: per.name }), st);
+    },
+    onAddHorizon: (perId) => {
+      const st = periodizations({ create: false });
+      const per = horizonsRead().list.find((p) => p.id === perId);
+      if (!st || !per) return;
+      const last = per.horizons[per.horizons.length - 1];
+      const start = last?.end ?? 0;
+      const name = t("hz.newHorizon", { n: String(per.horizons.length + 1) });
+      st.batch(() => {
+        const h = st.addNode({ id: st.newId(), node_type: HORIZON_TYPE, name,
+                               data: { start_time: start, end_time: start + 100,
+                                       color: nextSwatch(per), order: per.horizons.length, enabled: true } });
+        st.addEdge(h.id, perId, MEMBERSHIP_EDGE);
+      });
+      toastUndo(t("hz.didAddHorizon", { name }), st);
+    },
+    onSetHorizon: (id, field, value) => {
+      const st = periodizations({ create: false });
+      if (!st) return;
+      if (field === "name") st.updateNode(id, { name: value });
+      else if (field === "color") st.setField(id, "data.color", value);
+      else {
+        const v = value.trim() === "" ? null : Number(value);
+        if (v !== null && !Number.isFinite(v)) { toast(t("hz.notANumber")); return; }
+        if (v === null) st.clearField(id, `data.${field}`); else st.setField(id, `data.${field}`, v);
+      }
+      toastUndo(t("hz.didEdit", { name: String(st.node(id)?.name ?? id) }), st);
+    },
+    onMoveHorizon: (perId, id, dir) => {
+      const st = periodizations({ create: false });
+      const per = horizonsRead().list.find((p) => p.id === perId);
+      if (!st || !per) return;
+      const plan = reorderPlan(per, id, dir);
+      if (!plan.length) return;
+      st.batch(() => { for (const [hid, order] of plan) st.setField(hid, "data.order", order); });
+      toastUndo(t("hz.didMove", { name: String(st.node(id)?.name ?? id) }), st);
+    },
+    onDeleteHorizon: (id) => {
+      const st = periodizations({ create: false });
+      if (!st) return;
+      const name = String(st.node(id)?.name ?? id);
+      st.deleteNode(id);
+      horizonView.hidden.delete(id);
+      toastUndo(t("hz.didDelete", { name }), st);
+    },
+  });
+  body.prepend(host);
+}
+
+/** In a room the relay applies an op to a member the ROOM has: the horizons can
+ *  be edited there only when the room's em.json carries the member. */
+function roomHasPeriodizations(): boolean {
+  if (!sync.room) return true;
+  const gid = periodizationStore
+    ? String((periodizationStore.doc.graph as Record<string, unknown>).graph_id ?? PERIODIZATIONS_MEMBER_ID)
+    : PERIODIZATIONS_MEMBER_ID;
+  return hubRoomGraphs.has(gid);
 }
 
 /** A change of the epochs' NESTING, as one undo step: the change is tried on a
