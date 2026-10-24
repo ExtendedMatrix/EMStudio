@@ -321,6 +321,20 @@ mkdir -p "$DST/dtc-glyphs"
 cp "$CFG"/src/2D/dtc/*.svg "$DST/dtc-glyphs/" 2>/dev/null || true
 shopt -u nullglob
 
+# THE em.json SCHEMAS (MICRO specifica em.json, 24 Oct 2026). Their single home
+# is s3Dgraphy's `spec/em-json/`, beside the specification E.D. edits; EMStudio's
+# `schemas/` is a copy, refreshed here like the datamodels. They live in the
+# CHECKOUT, not in the pip package, so an installed s3dgraphy has none: then the
+# vendored copies stay as they are, and the script says so.
+SPEC="$(cd "$CFG/../../.." 2>/dev/null && pwd)/spec/em-json"
+if [ -d "$SPEC" ] && ls "$SPEC"/em.v*.schema.json >/dev/null 2>&1; then
+  mkdir -p "$FRONTEND/../schemas"
+  cp "$SPEC"/em.v*.schema.json "$FRONTEND/../schemas/"
+  echo "  em.json schemas  $(cd "$SPEC" && ls em.v*.schema.json | tr '\n' ' ')"
+else
+  echo "  em.json schemas  not in this source (an installed package): vendored copies kept"
+fi
+
 # THE FINGERPRINT of what was just copied (2026-10-01), beside the copies:
 # s3Dgraphy's `api.datamodel_fingerprint()` over the six datamodel JSONs,
 # recomputed in JavaScript by `datamodel-fingerprint.mjs` (RFC 8785 on both

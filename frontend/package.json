@@ -14,7 +14,8 @@
     "build:engine3d": "EM_ENTRY=engine3d vite build",
     "build:web": "EM_LAZY_3D=1 npm run build && npm run build:engine3d && npm run build:tiles3d && npm run build:reader",
     "build:tiles3d": "EM_ENTRY=tiles3d vite build",
-    "check:datamodel": "node scripts/check-datamodel.mjs"
+    "check:datamodel": "node scripts/check-datamodel.mjs",
+    "check:emjson": "node scripts/check-emjson-conformance.mjs"
   },
   "devDependencies": {
     "linkedom": "^0.18.13",
