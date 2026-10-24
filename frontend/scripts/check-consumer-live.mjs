@@ -233,6 +233,7 @@ console.log(`room  : ${ROOM}\nbase  : ${BASE}\nviewer: ${CONSUMER_ID}\n`);
 const editor = new S.SyncClient();
 const editorHeard = { snapshot: null, results: [], host: null };
 let viewer = null;
+let uploaded = null;   // the stand-in glTF's digest: forgotten with the room
 
 try {
   // ── 1 · the study, made by somebody who may ───────────────────────────────
@@ -260,6 +261,7 @@ try {
   ok(put.ok, `consumer · the asset was published (${put.status})`);
   const asset = await put.json();
   const digest = asset.ref;                       // `sha256:<hex>`
+  uploaded = digest;
 
   for (const one of [
     op("add_node", { node: { id: "us-1", node_type: "US", name: "US 1" } }),
@@ -417,6 +419,13 @@ try {
   try { viewer?.ws.close(); } catch { /* already gone */ }
   editor.disconnect();
   console.log(`consumer: room ${ROOM} ${await deleteRoom()}`);
+  // a deleted room's assets stay, as orphans: the stand-in's bytes (unique to
+  // this room) are forgotten too, or each run leaves one (measured 25 Oct)
+  if (uploaded) {
+    const r = await fetch(`${HTTP}/v1/admin/assets/${encodeURIComponent(uploaded)}`, {
+      method: "DELETE", headers: { authorization: `Bearer ${EDITOR}` } }).catch((e) => ({ status: 0, text: async () => String(e) }));
+    console.log(`consumer: its asset ${uploaded.slice(0, 19)}… ${r.status === 200 ? "forgotten" : `NOT forgotten (${r.status})`}`);
+  }
 }
 
 console.log(`consumer: ${checks} checks passed`);
