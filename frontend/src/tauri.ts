@@ -356,7 +356,8 @@ export async function onDetachedWindows(born: (label: string) => void, gone: (la
 export async function windowFrames(): Promise<Array<{ label: string; x: number; y: number; w: number; h: number }>> {
   if (!isTauri()) return [];
   try {
-    return await invoke("window_frames");
+    const v: unknown = await invoke("window_frames");
+    return Array.isArray(v) ? v : [];   // an older shell, or a check's stand-in, answers otherwise
   } catch {
     return [];
   }

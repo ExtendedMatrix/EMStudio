@@ -5601,13 +5601,18 @@ function buildScenes(): void {
  */
 const lensScenes = new Map<string, Scene | null>();
 let lensBuild: ((leaves: Set<string>, cont: boolean) => Scene | null) | null = null;
+let sharedLensKey = "";
 let lensFileCounts: ReturnType<typeof fileCounts> = new Map();
 function sceneOfWin(winId: string | null | undefined, mode: ViewKind): Scene | null {
   ensureScenes();
-  if (mode !== "matrix" || !winId) return scenes[mode] ?? null;
+  // no document: no lens has a scene (the cache is the LAST document's — TT1:
+  // the graph of a Blender session left drawn after it ended)
+  if (mode !== "matrix" || !winId || !store) return scenes[mode] ?? null;
   const leaves = leavesOfWin(winId, "matrix");
   const cont = overlayShown(overlaysOfWin(winId, "matrix"), "continuity");
   const key = `${leavesKey(leaves)}|${cont}`;
+  // the view's own lens: the view's scene as it is now
+  if (key === sharedLensKey) return scenes.matrix ?? null;
   if (!lensScenes.has(key)) {
     if (!lensBuild) return scenes.matrix ?? null;
     lensScenes.set(key, lensBuild(leaves, cont));
@@ -5800,7 +5805,7 @@ function buildScenesNow(): void {
   // filter, «Continuity») draws a scene of its own, built on demand
   // (`sceneOfWin`) from the same document, layout and re-stack
   lensScenes.clear();
-  lensScenes.set(`${leavesKey(circleState.matrix)}|${sharedCont}`, scenes.matrix ?? null);
+  sharedLensKey = `${leavesKey(circleState.matrix)}|${sharedCont}`;
   lensBuild = (leaves, cont) => {
     const sc = matrixFrom(filteredView({ wholeGraph: false, hidden: hiddenFor("matrix", leaves), placesUndrawn: true }), cont);
     labelResources(sc, lensFileCounts);

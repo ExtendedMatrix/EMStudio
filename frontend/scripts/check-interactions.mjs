@@ -1904,7 +1904,7 @@ const ovGeo = (p) => p.evaluate(() => [...document.querySelectorAll(".scn-host")
     overGizmo: hit(rb, R(h.querySelector(".scn-nav-box"))) || hit(rb, R(h.querySelector(".scn-nav-col"))),
     inside: !!rb && rb[0] >= rh[0] && rb[2] <= rh[2] && rb[1] >= rh[1] };
 }));
-test("S3.ovbtn", "Spazio · MICRO-PROVA-DEV47 p.1 · il pulsante delle sovrapposizioni è flottante in ogni finestra 3D (anche la seconda), sopra il gizmo senza toccarlo, con il pannello N aperto e chiuso, anche quando il fuoco è in un'altra finestra; apre il menu per gruppi e spegnere le etichette dei proxy funziona", async () => {
+test("S3.ovbtn", "Spazio · MICRO-PROVA-DEV47 p.1 · il pulsante delle sovrapposizioni è flottante in ogni finestra 3D (anche la seconda), sopra il gizmo senza toccarlo, con il pannello N aperto e chiuso, anche quando il fuoco è in un'altra finestra; apre il menu per gruppi e spegnere le etichette dei proxy funziona, in quella finestra sola (MICRO-OVERLAY-PER-FINESTRA)", async () => {
   const { p, ctx, errors } = await gizmoScene();
   const corner = async () => p.evaluate(() => { const c = document.querySelector(".scn-host canvas").getBoundingClientRect(); return { x: c.x + 40, y: c.y + c.height - 40 }; });
   const g0 = await ovGeo(p);
@@ -1921,21 +1921,26 @@ test("S3.ovbtn", "Spazio · MICRO-PROVA-DEV47 p.1 · il pulsante delle sovrappos
   const second = await p.evaluate((id) => window.__EM_DRAG__.splitDoc(id), sceneWin);
   await p.waitForTimeout(1500);
   const g2 = await ovGeo(p);
-  const labels = () => p.evaluate(() => [...document.querySelectorAll(".scn-label.k-proxy")].filter((e) => e.style.display !== "none" && e.closest(".scn-labels")?.style.display !== "none").length);
-  const px0 = await labels();
+  // MICRO-OVERLAY-PER-FINESTRA · each 3D window has its own overlays: switched
+  // off in the second, the proxies' labels go there and stay in the first
+  const labels = (id) => p.evaluate((w) => [...document.querySelectorAll(`.tile-area[data-win="${w}"] .scn-label.k-proxy`)].filter((e) => e.style.display !== "none" && e.closest(".scn-labels")?.style.display !== "none").length, id);
+  const px0 = await labels(second);
+  const first0 = await labels(sceneWin);
   await p.click(`.scn-ovbtn[data-scn-overlays="${second}"]`); await p.waitForTimeout(400);
   const panel = await p.evaluate(() => ({ open: !document.getElementById("overlay-panel").classList.contains("hidden"), view: document.getElementById("overlay-panel").dataset.view,
     groups: [...document.querySelectorAll("#overlay-panel .ov-group")].map((g) => g.dataset.group) }));
   await p.screenshot({ path: `${process.env.SHOTS ?? "."}/s3-ovbtn-seconda-finestra.png` }).catch(() => {});
   await p.click('#overlay-panel input[data-ov="s3_labels_proxy"]'); await p.waitForTimeout(500);
-  const px1 = await labels();
-  const dot = await p.evaluate(() => [...document.querySelectorAll(".scn-ovbtn")].every((b) => b.classList.contains("ov-off")));
+  const px1 = await labels(second);
+  const first1 = await labels(sceneWin);
+  const dot = await p.evaluate(([a, b]) => document.querySelector(`.scn-ovbtn[data-scn-overlays="${b}"]`)?.classList.contains("ov-off")
+    && !document.querySelector(`.scn-ovbtn[data-scn-overlays="${a}"]`)?.classList.contains("ov-off"), [sceneWin, second]);
   await ctx.close();
   const ok = (gs, n) => gs.length === n && gs.every((g) => g.shown && !g.overGizmo && g.inside && /Sovrapposizioni/.test(g.title ?? ""));
   const conds = { closed: ok(g0, 1), nOpen: ok(gN, 1), otherFocus: ok(gOther, 1), twoWindows: !!second && ok(g2, 2),
     menu: panel.open && panel.view === "space" && ["s3_guides", "s3_text", "s3_objects", "s3_geometry"].every((k) => panel.groups.includes(k)),
-    proxyLabelsOff: px0 > 0 && px1 === 0, dot, errors: !errors.length };
-  return { pass: Object.values(conds).every(Boolean), detail: { conds, g0, gN, gOther, g2, panel, px: [px0, px1], errors } };
+    proxyLabelsOff: px0 > 0 && px1 === 0, firstKept: first0 > 0 && first1 === first0, dot, errors: !errors.length };
+  return { pass: Object.values(conds).every(Boolean), detail: { conds, g0, gN, gOther, g2, panel, px: [px0, px1], first: [first0, first1], errors } };
 });
 /** MICRO-PROVA-DEV47 p.2 · the first point of each kind under a grid of the canvas */
 async function firstHits(p, kinds) {
