@@ -737,7 +737,15 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
         layers.set(url, live);
         return live;
       };
-      probe.__spaceTiles = () => liveLayers().map((l) => ({ id: l.itemId, files: l.layer.loadedFiles(), status: l.layer.status() }));
+      // (box and points: what the Doc's reader said of its tileset, read by the
+      // 3D Tiles cases now that the document's model is the Viewer's scene)
+      probe.__spaceTiles = () => liveLayers().map((l) => {
+        const box = l.layer.contentBox();
+        let points = 0;
+        l.layer.object.traverse((o: any) => { if (o.isPoints) points++; });
+        return { id: l.itemId, files: l.layer.loadedFiles(), status: l.layer.status(), mode: l.layer.mode(),
+          box: box ? [...box.min.toArray(), ...box.max.toArray()] : null, points };
+      });
       const toScreen = (v3: any): { x: number; y: number } | null => {
         const v = v3.clone().project(camera);
         if (v.z > 1) return null;
@@ -1917,10 +1925,12 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
       probe.__spaceCursor = () => cursorAt.map((q) => Math.round(q * 10000) / 10000);
       /** MICRO-PROVA-DEV47 · what an object is made of in the scene: meshes, vertices, in the content or not */
       probe.__spaceMeshesOf = (id: string) => {
-        let meshes = 0, verts = 0, other = 0;
+        let meshes = 0, verts = 0, other = 0, textured = 0;
         content.traverse((o: any) => { if (o.userData.rmId !== id && o.userData.unitId !== id) return;
-          if (o.isMesh) { meshes++; verts += o.geometry?.attributes?.position?.count ?? 0; } else if (o.isPoints || o.isLine) other++; });
-        return { meshes, verts, other };
+          if (o.isMesh) { meshes++; verts += o.geometry?.attributes?.position?.count ?? 0;
+            if ((Array.isArray(o.material) ? o.material : [o.material]).some((m: any) => m?.map)) textured++; }
+          else if (o.isPoints || o.isLine) other++; });
+        return { meshes, verts, other, textured };
       };
       /** MICRO-TILESET-CONTENITORE · what is DRAWN, by key: the object in the
        *  scene, visible all the way up, its visible meshes (a tileset's tiles) */

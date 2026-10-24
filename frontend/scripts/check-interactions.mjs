@@ -3167,16 +3167,30 @@ test("U4.lanemenu", "TempluMare: clic destro sull'intestazione di corsia (fermo,
 });
 
 // ── MICRO-3DTILES-LOD · parte 1 · i 3D Tiles nel visualizzatore ──────────────
-/** open a document of `tiles.em.json` in a Doc (the Fonti space), and wait for
- *  its 3D stage; `fetched()` lists every file the page asked for under testdata/ or /fs/at/ */
-async function openTilesDoc(docId, { doc = "tiles", mutate } = {}) {
+// Since MICRO-VIEWER-UNICO p.5 (E.D., 20 Oct: «The Doc window is gone»)
+// `openDoc` opens the Viewer and the document's model is the Viewer's scene,
+// the Space's engine: its tileset has its strip (`.scn-strips .v3d-strip`, the
+// bar «Manuale / Automatico / Più dettaglio qui / Meno dettaglio» and its
+// line), its LOD selector and its gate. The cases below read that scene
+// (MICRO-SUITE-VERDE, 24 Oct: until then they looked for the Doc's reader,
+// `.rd-3d-host`, that no window draws any more, and timed out).
+/** open a document of `tiles.em.json` in the Viewer (the Fonti space), and wait
+ *  for its scene; `fetched()` lists every file the page asked for under testdata/ or /fs/at/ */
+async function openTilesDoc(docId, { doc = "tiles", mutate, at } = {}) {
   let d = fixture(doc);
   if (mutate) d = mutate(d);
   const o = await open({ doc: d, ws: "provenance" });
+  // a tileset ON THE DISK belongs to a document on the disk: opened at `at`, its
+  // locators are read beside it, through the bridge (a document from nowhere
+  // has no folder, and its locators stay what they are — `spaceFileUrl`)
+  if (at) {
+    await o.p.evaluate(([x, path]) => window.__EM_DRAG__.openAt(x, path), [d, at]);
+    await o.p.waitForTimeout(800);
+  }
   const win = await o.p.evaluate((id) => window.__EM_DRAG__.openDoc(id), docId);
   await o.p.waitForFunction((w) => {
-    const h = document.querySelector(`[data-win="${w}"] .rd-3d-host`);
-    return h && (h.dataset.ready === "1" || h.dataset.gated === "1");
+    const h = document.querySelector(`.tile-area[data-win="${w}"] .vw-scene`);
+    return h && h.dataset.ready === "1" && (h.__space?.() ?? []).some((i) => i.as && i.as !== "pending");
   }, win, { timeout: 20000 });
   // what the page fetched under testdata/ or /fs/at/: the Resource Timing entries
   // (Playwright's request events do not reach this headless shell's fetches)
@@ -3186,11 +3200,14 @@ async function openTilesDoc(docId, { doc = "tiles", mutate } = {}) {
     .filter((u) => /testdata\/|\/fs\/at\//.test(u)).map((u) => decodeURIComponent(u.replace(/^.*?(testdata\/|\/fs\/at\/)/, ""))), bodies) };
 }
 const tilesState = (p, win) => p.evaluate((w) => {
-  const h = document.querySelector(`[data-win="${w}"] .rd-3d-host`);
-  const t = h?.__tiles?.();
-  return { tileset: h?.dataset.tileset === "1", model: h?.dataset.model ?? null, lod: h?.dataset.lod ?? null,
+  const h = document.querySelector(`.tile-area[data-win="${w}"] .vw-scene`);
+  const t = h?.__spaceTiles?.()?.[0];
+  const rm = (h?.__space?.() ?? []).find((i) => i.kind === "rm");
+  const lod = /_LOD(\d+)\.[a-z0-9]+$/i.exec(rm?.url ?? "")?.[1] ?? null;
+  return { tileset: !!t, model: rm?.url ?? null, as: rm?.as ?? null, lod,
     files: t?.files ?? null, status: t?.status ?? null, box: t?.box ?? null, points: t?.points ?? null,
-    line: h?.querySelector(".tl-status")?.textContent ?? null, gate: h?.querySelector(".v3d-gate")?.textContent ?? null,
+    line: h?.querySelector(".tl-status")?.textContent ?? null,
+    gate: [...(h?.querySelectorAll(".scn-label, .v3d-strip [data-gate]") ?? [])].map((e) => e.textContent).join(" · ") || null,
     options: [...(h?.querySelectorAll(".lod-pick option") ?? [])].map((o) => o.textContent) };
 }, win);
 /** wait until the loaded tile files are exactly `want` (or until time runs out) */
@@ -3207,9 +3224,9 @@ const tilesSettle = async (p, win, pred, ms = 10000) => {
 };
 /** «Più dettaglio qui» armed, then a click on the tile whose content is `uri` */
 async function moreHere(p, win, uri) {
-  const at = await p.evaluate(([w, u]) => document.querySelector(`[data-win="${w}"] .rd-3d-host`).__tilesScreenOf(u), [win, uri]);
-  const armed = await p.evaluate((w) => document.querySelector(`[data-win="${w}"] .tl-more`)?.getAttribute("aria-pressed"), win);
-  if (armed !== "true") await p.click(`[data-win="${win}"] .tl-more`);
+  const at = await p.evaluate(([w, u]) => document.querySelector(`.tile-area[data-win="${w}"] .vw-scene`).__spaceTileScreenOf(u), [win, uri]);
+  const armed = await p.evaluate((w) => document.querySelector(`.tile-area[data-win="${w}"] .tl-more`)?.getAttribute("aria-pressed"), win);
+  if (armed !== "true") await p.click(`.tile-area[data-win="${win}"] .tl-more`);
   if (at) await p.mouse.click(at.x, at.y);
   return at;
 }
@@ -3242,9 +3259,9 @@ test("T1.refine", "3D Tiles · in manuale «Più dettaglio qui» carica i figli 
   await p.screenshot({ path: `${process.env.SHOTS ?? "."}/t1-piu-dettaglio.png` }).catch(() => {});
   const asked = [...new Set((await fetched()).filter((r) => /\.glb$/.test(r)))].sort();
   // «Meno dettaglio» twice: back to the root
-  await p.click(`[data-win="${win}"] .tl-less`);
+  await p.click(`.tile-area[data-win="${win}"] .tl-less`);
   const s3 = await tilesSettle(p, win, (s) => same(s.status?.level, [0, 1]) || same(s.status?.level, [1, 1]));
-  await p.click(`[data-win="${win}"] .tl-less`);
+  await p.click(`.tile-area[data-win="${win}"] .tl-less`);
   const s4 = await tilesSettle(p, win, (s) => same(s.status?.level, [0, 0]));
   await ctx.close();
   const vis = (s) => s.status?.visible;
@@ -3309,9 +3326,9 @@ test("T1.points", "3D Tiles · una nuvola in tile (pnts, e glTF POINTS nel figli
 test("T1.auto", "3D Tiles · «Automatico» raffina da sé (errore sullo schermo); tornando a «Manuale» si resta al livello caricato", async () => {
   const { p, ctx, errors, win } = await openTilesDoc("D1");
   await tilesSettle(p, win, (s) => (s.files ?? []).length >= 1);
-  await p.click(`[data-win="${win}"] .tl-seg [data-mode="auto"]`);
+  await p.click(`.tile-area[data-win="${win}"] .tl-seg [data-mode="auto"]`);
   const a = await tilesSettle(p, win, (s) => (s.files ?? []).includes("tiles/c0_0.glb"));
-  await p.click(`[data-win="${win}"] .tl-seg [data-mode="manual"]`);
+  await p.click(`.tile-area[data-win="${win}"] .tl-seg [data-mode="manual"]`);
   await p.waitForTimeout(800);
   const m = await tilesState(p, win);
   await ctx.close();
@@ -3322,7 +3339,7 @@ test("T1.auto", "3D Tiles · «Automatico» raffina da sé (errore sullo schermo
 test("T1.disk", "3D Tiles · un tileset su disco passa dal bridge per percorso (`/fs/at/`): i tile relativi si risolvono accanto", async () => {
   const root = FS_ROOT ?? (await rootPath());
   const path = `${root}/tileset-disco/tileset.json`;
-  const { p, ctx, errors, win, fetched } = await openTilesDoc("D1", { mutate: (d) => {
+  const { p, ctx, errors, win, fetched } = await openTilesDoc("D1", { at: `${root}/tiles.em.json`, mutate: (d) => {
     for (const n of d.graph.nodes) if (n.id === "RES_TS") n.data.url = path;
     return d;
   } });
@@ -3377,8 +3394,8 @@ test("T2.lod", "LOD · un set `<base>_LOD0…N` (non un tileset) si apre al LOD 
   const { p, ctx, errors, win, fetched } = await openTilesDoc("D2");
   await p.waitForTimeout(600);
   const a = await tilesState(p, win);
-  await p.selectOption(`[data-win="${win}"] .lod-pick`, "1");
-  await p.waitForFunction((w) => /muro_LOD1\.glb$/.test(document.querySelector(`[data-win="${w}"] .rd-3d-host`)?.dataset.model ?? ""), win, { timeout: 10000 });
+  await p.selectOption(`.tile-area[data-win="${win}"] .lod-pick`, "1");
+  await tilesSettle(p, win, (s) => /muro_LOD1\.glb$/.test(s.model ?? "") && s.as === "mesh");
   const b = await tilesState(p, win);
   await p.screenshot({ path: `${process.env.SHOTS ?? "."}/t2-lod.png` }).catch(() => {});
   const glbs = (await fetched(true)).filter((r) => /^lod\/.*\.glb$/.test(r));
@@ -3396,10 +3413,11 @@ test("T2.gate", "Soglia · un glb oltre la soglia (le Preferenze) non si carica 
   // (the Fonti Doc showed D.1 before D.3 was asked for: only D.3's glb counts)
   const before = (await fetched()).filter((r) => /catena-muro/.test(r));
   await p.screenshot({ path: `${process.env.SHOTS ?? "."}/t2-soglia.png` }).catch(() => {});
-  await p.click(`[data-win="${win}"] [data-gate="tileset"]`);
+  await p.click(`.tile-area[data-win="${win}"] [data-gate="tileset"]`);
   const t = await tilesSettle(p, win, (s) => (s.files ?? []).length >= 1);
   await ctx.close();
-  return { pass: /858\.3 MB, oltre la soglia di 200\.0 MB/.test(g.gate ?? "") && /Apri il tileset/.test(g.gate ?? "")
+  // the Viewer's scene says it on the model's label (the Space's words, T1.space)
+  return { pass: /oltre la soglia \(858\.3 MB > 200\.0 MB\)/.test(g.gate ?? "") && /Apri il tileset/.test(g.gate ?? "")
       && /Caricalo comunque/.test(g.gate ?? "") && !before.length
       && t.tileset && same(t.files, ["punti.pnts"]) && !errors.length,
     detail: { gate: g.gate, before, after: t.files, errors } };
@@ -3715,11 +3733,21 @@ async function openBaseDoc(docId, opts = {}) {
   const win = await o.p.evaluate((id) => window.__EM_DRAG__.openDoc(id), docId);
   return { ...o, win, root };
 }
+// Since MICRO-VIEWER-UNICO p.5 (E.D., 20 Oct) the document's model is drawn by
+// the Viewer's scene, not by the Doc's reader: what was read on `.rd-3d-host`
+// (its kind, meshes, textured meshes, the files resolved) is read on the
+// scene (`__space`, `__spaceMeshesOf`) and on what the page fetched
+// (MICRO-SUITE-VERDE, 24 Oct)
 const modelHost = (p, win) => p.evaluate((w) => {
-  const h = document.querySelector(`[data-win="${w}"] .rd-3d-host`);
-  return h && { ready: h.dataset.ready ?? null, kind: h.dataset.modelKind ?? null, model: h.dataset.model ?? null,
-    meshes: Number(h.dataset.meshes ?? 0), textured: Number(h.dataset.textured ?? 0),
-    resolved: h.__v3dResolved?.() ?? [], note: h.querySelector(".nv-embed-note")?.textContent ?? "" };
+  const h = document.querySelector(`.tile-area[data-win="${w}"] .vw-scene`);
+  if (!h) return null;
+  const rm = (h.__space?.() ?? []).find((i) => i.kind === "rm");
+  const m = rm ? h.__spaceMeshesOf(rm.id) : null;
+  const fetched = performance.getEntriesByType("resource").map((e) => decodeURIComponent(e.name));
+  return { ready: rm?.as === "mesh" ? "1" : null, as: rm?.as ?? null, model: rm?.url ?? null,
+    kind: /\.obj(\?|$)/i.test(rm?.url ?? "") ? "obj" : rm?.url ? "gltf" : null,
+    meshes: m?.meshes ?? 0, textured: m?.textured ?? 0, fetched,
+    note: [...h.querySelectorAll(".scn-label, .scn-status, .vw-note")].map((e) => e.textContent).join(" · ") };
 }, win);
 const waitModel = async (p, win, ms = 60000) => {
   const t0 = Date.now();
@@ -3735,10 +3763,10 @@ test("R3.offline", "visualizzatore · OB_PODIO_LOD1 si apre dal file_set (obj + 
   const m = await waitModel(p, win);
   await p.screenshot({ path: SHOT("r3-podio-lod1-offline") }).catch(() => {});
   await ctx.close();
-  const got = Object.fromEntries(m.resolved ?? []);
-  return { pass: m.ready === "1" && m.kind === "obj" && m.meshes > 0 && m.textured > 0
-      && /\/fs\/at\/.*LOD1\/OB_PODIO_LOD1\.mtl$/.test(got["OB_PODIO_LOD1.mtl"] ?? "")
-      && /\/fs\/at\/.*LOD1\/textures\/T_OB_PODIO_LOD1\.jpg$/.test(got["textures/T_OB_PODIO_LOD1.jpg"] ?? "")
+  // the paths from the has_file edges: the mtl and the texture asked of the bridge beside the obj
+  const got = { mtl: (m.fetched ?? []).find((u) => /\/fs\/at\/.*LOD1\/OB_PODIO_LOD1\.mtl$/.test(u)) ?? null,
+    tex: (m.fetched ?? []).find((u) => /\/fs\/at\/.*LOD1\/textures\/T_OB_PODIO_LOD1\.jpg$/.test(u)) ?? null };
+  return { pass: m.ready === "1" && m.kind === "obj" && m.meshes > 0 && m.textured > 0 && !!got.mtl && !!got.tex
       && !errors.length,
     detail: { ready: m.ready, kind: m.kind, meshes: m.meshes, textured: m.textured, resolved: got, ms: m.ms, note: m.note, errors } };
 });
@@ -3765,18 +3793,24 @@ test("R3.online", "visualizzatore · lo stesso online: ogni file per digest dall
     detail: { ready: m.ready, textured: m.textured, asked, fromDisk, note: m.note, errors } };
 });
 test("R3.blender", "visualizzatore · un RM che ha solo il datablock dice «solo in Blender», con il nome del .blend", async () => {
+  // the Viewer's scene draws the model's place (a dashed contour) and its label
+  // says where the model is: in the .blend, by object (it said «file solo
+  // referenziato, non si può scaricare» until MICRO-SUITE-VERDE, 24 Oct)
   const { p, ctx, errors, win } = await openBaseDoc("D4");
-  await p.waitForTimeout(800);
-  const note = await p.evaluate((w) => document.querySelector(`[data-win="${w}"] [data-only-blender]`)?.textContent ?? null, win);
+  await p.waitForFunction((w) => (document.querySelector(`.tile-area[data-win="${w}"] .vw-scene`)?.__space?.() ?? [])
+    .some((i) => i.id === "RM_BLEND" && i.as === "contour"), win, { timeout: 20000 }).catch(() => {});
+  await p.waitForTimeout(400);
+  const labels = await p.evaluate((w) => [...document.querySelectorAll(`.tile-area[data-win="${w}"] .vw-scene .scn-label`)].map((l) => l.textContent), win);
+  const note = labels.find((l) => /Blender/.test(l)) ?? null;
   await p.screenshot({ path: SHOT("r3-solo-in-blender") }).catch(() => {});
   await ctx.close();
-  return { pass: note === "solo in Blender · TempluMare_2021.blend · OB_PRATO_LOD1" && !errors.length, detail: { note, errors } };
+  return { pass: note === "RM_BLEND: solo in Blender · TempluMare_2021.blend · OB_PRATO_LOD1" && !errors.length, detail: { labels, errors } };
 });
 test("R3.3tz", "visualizzatore · TempluMare_cesium.3tz si apre senza estrarlo e si raffina come la cartella, con lo stesso allineamento", async () => {
   const root = await rootPath();
   const run = async (url) => {
     const t0 = Date.now();
-    const o = await openTilesDoc("D1", { mutate: (d) => {
+    const o = await openTilesDoc("D1", { at: `${root}/tiles.em.json`, mutate: (d) => {
       for (const n of d.graph.nodes) if (n.id === "RES_TS") n.data.url = url;
       return d;
     } });
@@ -3785,7 +3819,7 @@ test("R3.3tz", "visualizzatore · TempluMare_cesium.3tz si apre senza estrarlo e
     // «Automatico»: the renderer refines by the error on screen — the same
     // camera for both, so the same tiles when it has settled (the hollow temple
     // leaves nothing under a click at the centre of the root tile)
-    await o.p.click(`[data-win="${o.win}"] .tl-seg [data-mode="auto"]`);
+    await o.p.click(`.tile-area[data-win="${o.win}"] .tl-seg [data-mode="auto"]`);
     let more = await tilesSettle(o.p, o.win, (s) => (s.files ?? []).length > (first.files ?? []).length, 40000);
     for (let i = 0; i < 20; i++) {
       await o.p.waitForTimeout(1000);
@@ -4486,28 +4520,34 @@ test("W15.library", "D6 · gli avvisi della libreria (api.validate via /validate
   return { pass: rows.some((x) => /download without origin/.test(x.txt) && x.node === "c1eef313-29e1-5361-ad19-ca01930832e7") && !errors.length, detail: { rows, errors } };
 });
 
-test("W16.identity", "U13–U16 · una sola verità sull'identità (barra, «Chi sei», Impostazioni dicono la stessa frase, verificata con testimone e data); sul desktop senza nodo «nessun nodo configurato» con il gesto per configurarlo; «Esci · dimentica»; Impostazioni ▸ Identità piena e in inglese", async () => {
+test("W16.identity", "U13–U16, rifatto su DOVE-CHI-MENU p.4 · una sola verità sull'identità («Chi sei» e Impostazioni dicono la stessa frase, verificata con testimone e data; l'etichetta nome · iD, lo stato e la legenda); senza nodo «nessun nodo» con il rimando a «Dove sei»; «Esci da questa identità»; Impostazioni ▸ Identità piena e in inglese", async () => {
   const ids = JSON.stringify({ current: "0000-0002-5065-7970", known: [{ orcid: "0000-0002-5065-7970", name: "Emanuel", surname: "Demetrescu",
     verified: true, verifiedAt: "2026-10-02T14:10:00Z", verifiedBy: "orcid.org", authMode: "orcid" }] });
   const { p, ctx, errors } = await open({ doc: LITE(), locale: "en", init: { "emstudio.identities": ids }, hook: tauriHook() });
   await p.evaluate((b) => { window.__BRIDGE__ = b; }, BRIDGE);
+  // MICRO-DOVE-CHI-MENU p.4 (E.D., 19 Oct, 64af313): the label's tooltip says
+  // «Name · iD», the state in one line and the legend of the outlines; the
+  // panel keeps the one sentence; the nodes are «Where you are»'s (here «no
+  // node yet» and the way there), «This computer's identities…» opens Settings ▸
+  // Identity filled from it
   const chip = await p.evaluate(() => document.getElementById("footer-identity").title);
   await p.click("#footer-identity");
   await p.waitForTimeout(1500);
   const panel = await p.evaluate(() => ({ state: document.querySelector(".idpanel .idp-state")?.textContent ?? "",
-    way1: document.querySelector('.idpanel [data-idp-way="stratigraph"] .idp-d')?.textContent ?? "",
-    configure: !!document.querySelector("[data-idp-configure]"), out: !!document.querySelector("[data-idp-signout]") }));
+    text: document.querySelector(".idpanel")?.textContent ?? "",
+    where: !!document.querySelector("[data-idp-where]"), out: !!document.querySelector("[data-idp-signout]") }));
   await p.screenshot({ path: SHOT("w16-chi-sei") }).catch(() => {});
-  await p.evaluate(() => [...document.querySelectorAll(".idpanel button")].find((b) => /Manage the identities/.test(b.textContent))?.click());
+  await p.click("[data-idp-manage]");
   await p.waitForTimeout(600);
   const set = await p.evaluate(() => ({ orcid: document.getElementById("set-orcid").value, name: document.getElementById("set-orcid-name").value,
     state: document.getElementById("set-orcid-state").textContent, h: document.querySelector("#settings-sect-identity h4").textContent }));
   await ctx.close();
   const sentence = "Verified: Emanuel Demetrescu (0000-0002-5065-7970), witnessed by orcid.org on";
-  return { pass: chip.startsWith(sentence) && panel.state.startsWith(sentence) && set.state.startsWith(sentence)
-      && /No StratiGraph node configured/.test(panel.way1) && !/tauri:\/\//.test(panel.way1) && panel.configure && panel.out
+  return { pass: chip.startsWith("Emanuel Demetrescu · 0000-0002-5065-7970\nVerified") && /dashed: declared/.test(chip)
+      && panel.state.startsWith(sentence) && set.state.startsWith(sentence)
+      && /no node yet/.test(panel.text) && panel.where && panel.out
       && set.orcid === "0000-0002-5065-7970" && set.name === "Emanuel" && set.h === "Identity (ORCID)" && !errors.length,
-    detail: { chip, panel, set, errors } };
+    detail: { chip, panel: { ...panel, text: panel.text.slice(0, 200) }, set, errors } };
 });
 
 // ── MICRO-OGNI-FILE-I-SUOI-GRAFI (2 ott) · F1–F4 on the canvas ───────────────
@@ -5262,7 +5302,10 @@ test("S6.frame", "S6 · Tempio (copia), Fonti › «Show in the Matrix» su D.02
   await workspace(p, "provenance");
   const names = await p.evaluate(() => Object.fromEntries(JSON.parse(window.__EM_DRAG__.graphJson()).nodes.map((n) => [n.id, n.name])));
   const d02 = Object.keys(names).find((k) => names[k] === "D.02");
-  await p.click(`[data-show-matrix="${d02}"]`);
+  // MICRO-VIEWER-UNICO p.5 (E.D., 20 Oct): «Show in the Matrix» is on the
+  // document's card in the Inspector — the document selected first
+  await pick(p, d02);
+  await p.locator(`[data-show-matrix="${d02}"]:visible`).first().click();
   await p.waitForTimeout(1500);
   const win = await winOf(p, "graph");
   const ws = await p.evaluate((w) => window.__EM_DRAG__.winScene(w), win);
@@ -5317,7 +5360,7 @@ test("P1.3dobj", "P1 · Tempio (copia con 3d_obj/ accanto), Spazio: «Link n pro
     detail: { offer, pairs: pairs.slice(0, 5), n: pairs.length, before, after: after.nodes.length, geo, res, log, undone, errors } };
 });
 
-test("F8.node", "F8 (U17) · Impostazioni › Sync: «Il tuo nodo StratiGraph» prima e a parte da Blender; il campo vuoto dice «per esempio …»; il rimando di «Chi sei» porta dritto al campo; «Prova» dice raggiungibile, versione e modi d'accesso; la stanza sta col nodo, nella lingua dell'interfaccia", async () => {
+test("F8.node", "F8 (U17), rifatto su DOVE-CHI-MENU p.4/p.5 · «Chi sei» rimanda a «Dove sei» (i nodi); Impostazioni › Connessioni: «Nodi StratiGraph» prima e a parte dalle app sincronizzate; ogni «nessun nodo» apre il campo dell'indirizzo, vuoto, che dice «per esempio …»; niente Stanza né Entra lì; un nodo aggiunto si prova: raggiungibile, versione e modi d'accesso", async () => {
   const { p, ctx, errors } = await open({ doc: LITE(), locale: "en", hook: tauriHook(),
     route: { pattern: "https://nodo.test/**", handler: (r) => {
       const u = r.request().url();
@@ -5326,28 +5369,38 @@ test("F8.node", "F8 (U17) · Impostazioni › Sync: «Il tuo nodo StratiGraph» 
       if (u.endsWith("/v1/auth-config")) return r.fulfill({ status: 200, headers: h, json: { issuer: "https://nodo.test/realms/sg", client_id: "emstudio", authorization_endpoint: "https://nodo.test/a", token_endpoint: "https://nodo.test/t", enforcing: true, orcid_idp: "orcid", node_name: "Nodo di prova" } });
       return r.fulfill({ status: 404, headers: h, body: "" });
     } } });
+  // MICRO-DOVE-CHI-MENU p.4/p.5 (E.D., 19 Oct, 64af313 and 209635c): «Who you
+  // are» sends to «Where you are» (entering a node is there); Settings ▸
+  // Connections holds the nodes as a LIST, with no Room and no Sign in; every
+  // «no node configured» opens it with the cursor in the address field
   await p.click("#footer-identity");
   await p.waitForTimeout(600);
-  await p.click("[data-idp-configure]");
+  const toWhere = await p.evaluate(() => !!document.querySelector("[data-idp-where]"));
+  await p.click("[data-idp-where]");
+  await p.waitForTimeout(600);
+  const where = await p.evaluate(() => !document.getElementById("conn-pop")?.classList.contains("hidden")
+    && [...document.querySelectorAll("#conn-pop > .conn-sect")].map((x) => x.dataset.sect).includes("nodes"));
+  await p.keyboard.press("Escape");
+  await p.evaluate(() => window.__EM_DRAG__.openNodeSettings());
   await p.waitForTimeout(600);
   const r = await p.evaluate(() => {
     const node = document.getElementById("settings-sect-node"), sync = document.getElementById("settings-sect-sync");
-    const url = document.getElementById("set-hub-url");
+    const url = document.getElementById("set-node-add");
     return { focus: document.activeElement?.id ?? null, nodeH: node?.querySelector("h4")?.textContent,
       syncH: sync?.querySelector("h4")?.textContent, order: !!node && !!sync && !!(node.compareDocumentPosition(sync) & Node.DOCUMENT_POSITION_FOLLOWING),
-      ph: url?.placeholder, value: url?.value, room: node?.querySelector("#set-hub-room")?.closest("label")?.textContent.trim(),
-      roomInNode: !!node?.querySelector("#set-hub-room"), signin: !!node?.querySelector("#set-node-signin") };
+      ph: url?.placeholder, value: url?.value, roomInNode: !!node?.querySelector("#set-hub-room"), signin: !!node?.querySelector("#set-node-signin") };
   });
-  await p.fill("#set-hub-url", "https://nodo.test");
-  await p.click("#set-node-test");
-  await p.waitForFunction(() => /Reachable|does not answer|not a/.test(document.getElementById("set-node-result")?.textContent ?? ""), null, { timeout: 8000 }).catch(() => {});
-  const result = await p.evaluate(() => document.getElementById("set-node-result")?.textContent ?? "");
+  await p.fill("#set-node-add", "https://nodo.test");
+  await p.click("#set-node-add-btn");
+  const said = '#set-nodes li[data-node="https://nodo.test"] .set-node-said';
+  await p.waitForFunction((sel) => /Reachable|does not answer|not a/.test(document.querySelector(sel)?.textContent ?? ""), said, { timeout: 8000 }).catch(() => {});
+  const result = await p.evaluate((sel) => document.querySelector(sel)?.textContent ?? "", said);
   await p.screenshot({ path: SHOT("f8-impostazioni-nodo") }).catch(() => {});
   await ctx.close();
-  return { pass: r.focus === "set-hub-url" && r.nodeH === "Your StratiGraph node" && r.syncH === "Sync with Blender / EMtools" && r.order
-      && r.ph === "for example https://em.localhost:8443" && r.value === "" && r.roomInNode && r.room === "Room" && r.signin
+  return { pass: toWhere && where && r.focus === "set-node-add" && r.nodeH === "StratiGraph nodes" && r.syncH === "Synchronised apps" && r.order
+      && r.ph === "for example https://em.localhost:8443" && r.value === "" && !r.roomInNode && !r.signin
       && /Reachable: https:\/\/nodo\.test · StratiGraph Server 0\.9\.1/.test(result) && /ORCID, through the node/.test(result) && !errors.length,
-    detail: { r, result, errors } };
+    detail: { toWhere, where, r, result, errors } };
 });
 
 // ── MICRO-ENTRARE-DAL-DESKTOP (3 ott) · E1–E5 ────────────────────────────────
@@ -5675,7 +5728,7 @@ if (process.env.LIVE_NODE) test("E2.live", "E2 dal vivo · il nodo del dev stack
     detail: { ways: before.ways, opened: u && u.origin + u.pathname, location: location && location.replace(/code=[^&]+/, "code=…"), chip, set, log, errors } };
 });
 
-test("E4.em", "E4 · Impostazioni › Sync, «Prova» su https://sito.test (il sito davanti al nodo): prova anche /em, dice dove risponde il nodo e lo propone; «Usa» lo mette nel campo e la prova riparte, raggiungibile. Su un indirizzo dove risponde solo un sito, lo dice", async () => {
+test("E4.em", "E4 · Impostazioni › Connessioni, https://sito.test aggiunto (il sito davanti al nodo) si prova sulla sua riga: prova anche /em, dice dove risponde il nodo e lo propone; «Usa» lo mette nella lista al suo posto e la prova riparte, raggiungibile. Su un indirizzo dove risponde solo un sito, lo dice", async () => {
   const health = { service: "stratigraph-server", version: "0.9.2", s3dgraphy: "1.6.0.dev31", auth: "open" };
   const { p, ctx, errors } = await open({ doc: LITE(), locale: "en", hook: tauriHook(),
     route: { pattern: /https:\/\/(sito|solosito)\.test\/.*/, handler: (r) => {
@@ -5685,24 +5738,29 @@ test("E4.em", "E4 · Impostazioni › Sync, «Prova» su https://sito.test (il s
       if (u.startsWith("https://sito.test/") || u.startsWith("https://solosito.test/")) return r.fulfill({ status: u.endsWith("/v1/health") ? 404 : 200, contentType: "text/html", body: "<!doctype html><title>site</title>" });
       return r.fulfill({ status: 404, body: "" });
     } } });
-  await p.click("#footer-identity");
+  // MICRO-DOVE-CHI-MENU p.5 (E.D., 19 Oct, 209635c): Settings ▸ Connections is
+  // a LIST of nodes — an address is added («Add»), and tested on its own row;
+  // the door is the one of every «no node configured» (`openNodeSettings`)
+  await p.evaluate(() => window.__EM_DRAG__.openNodeSettings());
   await p.waitForTimeout(500);
-  await p.click("[data-idp-configure]");
-  await p.waitForTimeout(500);
+  const said = (addr) => `#set-nodes li[data-node="${addr}"] .set-node-said`;
+  const settle = (addr) => p.waitForFunction((sel) => { const t = document.querySelector(sel)?.textContent ?? "";
+    return t.length > 3 && !/Testing|Provo/.test(t); }, said(addr), { timeout: 12000 }).catch(() => {});
   const test = async (addr) => {
-    await p.fill("#set-hub-url", addr);
-    await p.click("#set-node-test");
-    await p.waitForFunction(() => !/Testing|Provo/.test(document.getElementById("set-node-result")?.textContent ?? "") && (document.getElementById("set-node-result")?.textContent ?? "").length > 3, null, { timeout: 12000 }).catch(() => {});
+    await p.fill("#set-node-add", addr);
+    await p.click("#set-node-add-btn");
+    await settle(addr);
     await p.waitForTimeout(300);
-    return p.evaluate(() => ({ text: document.getElementById("set-node-result")?.textContent ?? "", state: document.getElementById("set-node-result")?.dataset.state,
-      suggest: document.querySelector("#set-node-result [data-node-suggest]")?.dataset.nodeSuggest ?? null }));
+    return p.evaluate((sel) => ({ text: document.querySelector(sel)?.textContent ?? "", state: document.querySelector(sel)?.dataset.state,
+      suggest: document.querySelector(`${sel} [data-node-suggest]`)?.dataset.nodeSuggest ?? null }), said(addr));
   };
   const a = await test("https://sito.test");
   let b = null;
   if (a.suggest) {
-    await p.click("#set-node-result [data-node-suggest]");
-    await p.waitForFunction(() => /Reachable/.test(document.getElementById("set-node-result")?.textContent ?? ""), null, { timeout: 12000 }).catch(() => {});
-    b = await p.evaluate(() => ({ field: document.getElementById("set-hub-url").value, text: document.getElementById("set-node-result")?.textContent ?? "" }));
+    await p.click(`${said("https://sito.test")} [data-node-suggest]`);
+    await p.waitForFunction((sel) => /Reachable/.test(document.querySelector(sel)?.textContent ?? ""), said(a.suggest), { timeout: 12000 }).catch(() => {});
+    b = await p.evaluate((sel) => ({ field: [...document.querySelectorAll("#set-nodes li[data-node]")].map((li) => li.dataset.node).join(" "),
+      text: document.querySelector(sel)?.textContent ?? "" }), said(a.suggest));
   }
   const c = await test("https://solosito.test");
   await p.screenshot({ path: SHOT("e4-indirizzo-em") }).catch(() => {});
