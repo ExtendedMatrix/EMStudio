@@ -674,6 +674,14 @@ const NINE = [
       testo: "over && over.winId !== activeWin().id",
       perche: "`perfTime(name, fn)` is `fn()` between two clock reads: " +
               "synchronous, never stored" },
+    // MICRO-FINESTRE-MULTIPLE · `listen(target, type, fn)` in `detachWindow` is
+    // `addEventListener` plus its removal kept for the window's close: the body
+    // runs in a fresh `focus` event of the detached system window, and asks who
+    // has the focus NOW — which is the point of reading it there.
+    { chi: "(argomento di listen)", ramo: "",
+      testo: "activeWin().id !== win.id",
+      perche: "`listen` is `addEventListener` with its unwire recorded: the " +
+              "body runs on the detached window's `focus` event, never inline" },
   ];
   for (const t of Sorg.tempoIgnoto(TS, "activeWin", "main.ts"))
     ok(IGNOTE.some((i) => nome(i) === Sorg.identita(t)),

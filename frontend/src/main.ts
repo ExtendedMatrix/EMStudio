@@ -97,7 +97,7 @@ import {
   mountedWinIs,
   unmountSurface,
 } from "./shell/surface";
-import { duringStoreFlush, keepFocusAcross, heldBy } from "./shell/hold";
+import { duringStoreFlush, keepFocusAcross, heldBy, isWritingField } from "./shell/hold";
 import {
   registerBuiltinSurfaces,
   type PanelMount,
@@ -111,6 +111,10 @@ import {
   type Rect,
 } from "./shell/layout";
 import { planJoin, snapDivider, type JoinPlan } from "./shell/join";
+import {
+  bridgeRealms, cloneState, defaultSize, detachSupport, isRelaying, mirrorLook, placeNear,
+  popupFeatures, recordsFor, saveRecords, wireRelay, type DetachedRecord,
+} from "./shell/detach";
 import {
   paintSurface,
   preservingScroll,
@@ -558,6 +562,10 @@ import {
   splitWindow,
   winMode,
   windowsOf,
+  detachedWins,
+  isDetachedWin,
+  addDetachedWindow,
+  removeDetachedWindow,
   type Win,
   type WorkspaceId,
   type WindowType,
@@ -735,6 +743,25 @@ const emtree = new EMTree();
 // Absolute path of the currently-open file on desktop (Tauri). null =
 // no file yet (Save falls back to Save As) or running in a browser.
 let currentFilePath: string | null = null;
+
+// MICRO-FINESTRE-MULTIPLE · the windows detached into a system window of their
+// own (`shell/detach.ts`), by window id. Declared up here because the shell's
+// first paints (`reflectLiveArea`) read it while this module is still loading.
+interface Popout {
+  win: Win;
+  pop: Window;
+  /** the detached document's `#tile-root`: the area, and the canvas overlays
+   *  while they belong to this window */
+  stage: HTMLElement;
+  area: HTMLElement;
+  off: Array<() => void>;
+  gone: boolean;
+}
+const popouts = new Map<string, Popout>();
+/** the canvas overlays are in a detached window right now */
+let overlaysPorted = false;
+/** where the last press or key happened: the menus it opens go there */
+let lastInput: { win: Window; t: number } = { win: window, t: 0 };
 
 // Live-sync (ADR-002 phase 1: selection). EMStudio is always the WS client.
 const sync = new SyncClient();
@@ -2460,6 +2487,20 @@ window.__EM_SCENE__ = () => {
   /** MICRO-CRONO-MULTIPLA · several nodes selected, the last one active */
   selectMany: (ids: string[]) => selectMany(ids),
   wins: () => windowsOf().map((w) => ({ id: w.id, type: w.type, state: w.state })),
+  /** MICRO-FINESTRE-MULTIPLE · a window detached as the gesture does it (the
+   *  release at screen `x`,`y`), the open ones, back / close */
+  detach: (winId: string, x = 240, y = 160) => {
+    const w = windowsOf().find((v) => v.id === winId);
+    return w ? detachWindow(w, { x, y })?.id ?? null : null;
+  },
+  popouts: () => [...popouts.values()].map((p) => ({ id: p.win.id, type: p.win.type, closed: p.pop.closed,
+    x: p.pop.screenX, y: p.pop.screenY, w: p.pop.innerWidth, h: p.pop.innerHeight, name: p.pop.name })),
+  popDocument: (id: string) => popouts.get(id)?.pop.document ?? null,
+  returnDetached: (id: string) => returnDetached(id),
+  closeDetached: (id: string) => closeDetached(id, { forget: true }),
+  activeWinId: () => activeWin().id,
+  renameNode: (id: string, name: string) => store?.updateNode(id, { name }),
+  nodeName: (id: string) => store?.node(id)?.name ?? null,
   closeWin: (id: string) => { if (closeWindow(id)) renderTiles(); },
   data: (id: string) => JSON.parse(JSON.stringify(store?.node(id)?.data ?? null)),
   issues: () => allIssues().map((i) => ({ rule: i.rule, node: i.node, txt: i.txt, sev: i.sev,
@@ -2955,7 +2996,9 @@ interface GraphPaint {
 
 function paintGraphWindow(p: GraphPaint): void {
   const { cv, scene: s, vp, live } = p;
-  const dpr = window.devicePixelRatio || 1;
+  // MICRO-FINESTRE-MULTIPLE · the density of the SCREEN this canvas is on: a
+  // detached window on a second screen has its own
+  const dpr = (cv.ownerDocument.defaultView ?? window).devicePixelRatio || 1;
   const w = cv.clientWidth || 1;
   const h = cv.clientHeight || 1;
   cv.width = Math.max(1, Math.round(w * dpr));
@@ -3268,7 +3311,9 @@ let lastPress: PickFrom | null = null;
 //: a pick made by the program (a jump back, «Indietro», «ha 3D»): no window moves
 let quietPick = false;
 function notePress(e: Event): void {
-  const el = e.target instanceof Element ? e.target : null;
+  // a detached window's press is noted THERE, with its real target (`wireRelay`)
+  if (isRelaying()) return;
+  const el = (e.target as Element | null)?.closest ? e.target as Element : null;
   const area = el?.closest<HTMLElement>(".tile-area[data-win]");
   const part: PickPart = el?.closest(".scn-outliner") ? "outliner" : el?.closest(".scn-host") ? "scene" : "window";
   lastPress = { win: area?.dataset.win ?? null, part, t: performance.now() };
@@ -6909,6 +6954,8 @@ function loadDocument(
   // MICRO-PERCORSI-WINDOWS · the bridge serves the em.json's folders (the
   // store is seated by the end of this call: asked right after it)
   if (path) void Promise.resolve().then(() => serveDocumentFolders(paths.toPosix(path)));
+  // MICRO-FINESTRE-MULTIPLE · the windows this document had detached, offered back
+  window.setTimeout(offerDetachedFor, 400);
   // QOL1 · remember this open (path for desktop reopen, name otherwise).
   // MICRO-DOVE-CHI-MENU p.2 · a room's document is not a dropped file: the
   // room itself is the recent (`fetchRoomTitle`), reopened by entering it
@@ -12520,7 +12567,12 @@ function openQualiaPicker(nodeId: string, wx: number, wy: number): void {
 // header dropdown menus (File / Export): toggle on click, close on outside
 // click, close after picking an item (the item's own handler still fires).
 function closeAllDropdowns(): void {
-  document.querySelectorAll(".dd-menu").forEach((m) => m.classList.add("hidden"));
+  for (const d of shellDocuments())
+    d.querySelectorAll(".dd-menu").forEach((m) => m.classList.add("hidden"));
+}
+/** this document and the detached windows' (MICRO-FINESTRE-MULTIPLE) */
+function shellDocuments(): Document[] {
+  return [document, ...[...popouts.values()].filter((p) => !p.gone).map((p) => p.pop.document)];
 }
 document.querySelectorAll<HTMLElement>(".dropdown").forEach((dd) => {
   const toggle = dd.querySelector<HTMLButtonElement>(".dd-toggle")!;
@@ -12548,7 +12600,8 @@ document.querySelectorAll<HTMLElement>(".dropdown").forEach((dd) => {
 // click would close the very menu the flyout hangs from. Picking an item does
 // bubble — that closes both, which is what finishing a command should do.
 function closeAllSubmenus(): void {
-  document.querySelectorAll(".dd-sub-menu").forEach((m) => m.classList.add("hidden"));
+  for (const d of shellDocuments())
+    d.querySelectorAll(".dd-sub-menu").forEach((m) => m.classList.add("hidden"));
 }
 document.querySelectorAll<HTMLElement>(".dd-sub").forEach((sub) => {
   const toggle = sub.querySelector<HTMLButtonElement>(".dd-sub-toggle")!;
@@ -21728,6 +21781,9 @@ type CornerPlan =
    *  `join` (whole side, aligned when within 12 px), `extend` («Allinea e
    *  unisci»), `no` (not beside each other) */
   | { kind: "join"; target: string; ok: boolean; rects?: JoinPlan }
+  /** MICRO-FINESTRE-MULTIPLE · Shift held: the window is duplicated into a
+   *  system window of its own, near the release (Blender's Shift + corner) */
+  | { kind: "detach"; ok: boolean }
   | null;
 
 /**
@@ -21788,6 +21844,16 @@ function addCornerGrips(area: HTMLElement, winId: string): void {
         `<div class="${cls}" style="left:${l}px;top:${tp}px;width:${w}px;height:${h}px">${html}</div>`;
       const paint = (): void => {
         if (!plan) { veil.innerHTML = ""; return; }
+        if (plan.kind === "detach") {
+          // the window's own rectangle, lifted, where the hand is: «New window»
+          const can = detachSupport(window);
+          const say = can.ok ? t("tile.detachHint")
+            : t(can.why === "frame" ? "tile.detachNoFrame" : "tile.detachNoApi");
+          veil.innerHTML = box(`gjoin gdetach${plan.ok ? "" : " no"}`,
+            lastX - 24, lastY - 12, Math.min(own.width, 320), Math.min(own.height, 220),
+            `<span><b>${plan.ok ? "⧉" : "⊘"}</b>${escapeHtml(say)}</span>`);
+          return;
+        }
         if (plan.kind === "split") {
           const R = own;
           const at = plan.dir === "row" ? R.left + R.width * plan.ratio
@@ -21825,9 +21891,13 @@ function addCornerGrips(area: HTMLElement, winId: string): void {
           `<span><b>${plan.ok ? arrow : "⊘"}</b>${escapeHtml(say)}</span>`) + sideBox;
       };
       let lastX = x0, lastY = y0;
+      let lastSX = e.screenX, lastSY = e.screenY;
       const move = (ev: PointerEvent): void => {
         lastX = ev.clientX; lastY = ev.clientY;
-        plan = cornerPlan(corner, own, x0, y0, ev.clientX, ev.clientY, winId);
+        lastSX = ev.screenX; lastSY = ev.screenY;
+        plan = ev.shiftKey && Math.hypot(ev.clientX - x0, ev.clientY - y0) >= 8
+          ? { kind: "detach", ok: detachSupport(window).ok }
+          : cornerPlan(corner, own, x0, y0, ev.clientX, ev.clientY, winId);
         paint();
       };
       const end = (): void => {
@@ -21835,6 +21905,7 @@ function addCornerGrips(area: HTMLElement, winId: string): void {
         window.removeEventListener("pointerup", up);
         window.removeEventListener("pointercancel", cancel);
         window.removeEventListener("keydown", esc, true);
+        window.removeEventListener("keyup", shiftUp, true);
         veil.remove();
         document.body.classList.remove("gesturing");
         shellGesture = false;
@@ -21843,6 +21914,14 @@ function addCornerGrips(area: HTMLElement, winId: string): void {
         end();
         const p = plan;
         if (!p) return;                               // a click, not a drag
+        if (p.kind === "detach") {
+          const src = windowsOf().find((w) => w.id === winId);
+          if (!p.ok) {
+            const can = detachSupport(window);
+            if (!can.ok) toast(t(can.why === "frame" ? "tile.detachNoFrame" : "tile.detachNoApi"));
+          } else if (src) detachWindow(src, { x: lastSX, y: lastSY });
+          return;
+        }
         if (p.kind === "split") {
           setActiveWin(winId);
           splitWindow(winId, p.dir, activeWorkspace(), p.ratio, p.side);
@@ -21866,11 +21945,25 @@ function addCornerGrips(area: HTMLElement, winId: string): void {
       };
       const cancel = (): void => { plan = null; end(); };
       const esc = (ev: KeyboardEvent): void => {
+        if (ev.key === "Shift") {
+          // MICRO-FINESTRE-MULTIPLE · Shift pressed mid-drag: the preview says so
+          // at once, without waiting for the hand to move
+          plan = Math.hypot(lastX - x0, lastY - y0) >= 8
+            ? { kind: "detach", ok: detachSupport(window).ok } : null;
+          paint();
+          return;
+        }
         if (ev.key !== "Escape") return;
         ev.stopPropagation();
         ev.preventDefault();
         cancel();
       };
+      const shiftUp = (ev: KeyboardEvent): void => {
+        if (ev.key !== "Shift") return;
+        plan = cornerPlan(corner, own, x0, y0, lastX, lastY, winId);
+        paint();
+      };
+      window.addEventListener("keyup", shiftUp, true);
       window.addEventListener("pointermove", move);
       window.addEventListener("pointerup", up);
       window.addEventListener("pointercancel", cancel);
@@ -21879,6 +21972,253 @@ function addCornerGrips(area: HTMLElement, winId: string): void {
     area.appendChild(grip);
   }
 }
+
+// ── MICRO-FINESTRE-MULTIPLE · a window in a system window of its own ────────
+//
+// Shift + a corner dragged (or «Open in a new window» in the type menu) opens a
+// system window of the SAME page (`window.open`, an `about:blank` of this
+// origin) and mounts there a twin of the window: its type, a copy of its state
+// (view, filters, overlays, sheet), its camera. The twin is a `Win` like any
+// other (`addDetachedWindow`), drawn by the one constructor of its type into an
+// area that lives in the other document — so the document, the selection, the
+// active node, the epoch, undo/redo and the save are the ones there are, not
+// copies kept in step (`shell/detach.ts` says why, and what was measured).
+
+/** The document's key for where its detached windows were: its path on the
+ *  desktop, its name otherwise. */
+function detachProject(): string | null {
+  if (currentFilePath) return currentFilePath;
+  const slot = emtree.active();
+  return slot ? `name:${emtree.fileOf(slot)?.name ?? slotLabel(slot)}` : null;
+}
+
+/** The detached area fills its system window. */
+function layoutPopout(p: Popout): void {
+  placeAt(p.area, { x: 0, y: 0, w: p.stage.clientWidth, h: p.stage.clientHeight });
+}
+
+/** Open `src`'s twin in a new system window, near `at` (screen px) — or from a
+ *  record, when a document comes back with the windows it had. */
+function detachWindow(src: Win | null, at: { x: number; y: number } | null,
+                      rec?: DetachedRecord): Win | null {
+  const can = detachSupport(window);
+  if (!can.ok) { toast(t(can.why === "frame" ? "tile.detachNoFrame" : "tile.detachNoApi")); return null; }
+  const type = rec?.type ?? src?.type;
+  if (!type) return null;
+  const srcArea = src ? winAreas.get(src.id) : undefined;
+  const size = srcArea && srcArea.clientWidth >= 320 && srcArea.clientHeight >= 240
+    ? { w: srcArea.clientWidth, h: srcArea.clientHeight } : defaultSize(type);
+  const r = rec ?? (at ? placeNear(at.x, at.y, size)
+    : { x: window.screenX + 80, y: window.screenY + 80, ...size });
+  const pop = window.open("", `emstudio-${Date.now().toString(36)}`, popupFeatures(r));
+  if (!pop) { toast(t("tile.detachBlocked")); return null; }
+  const d = pop.document;
+  // a standards-mode document (`about:blank` is in quirks mode)
+  d.open();
+  d.write('<!doctype html><html><head><meta charset="utf-8"><title>EMStudio</title></head><body></body></html>');
+  d.close();
+  const off: Array<() => void> = [mirrorLook(document, d)];
+  const stage = document.createElement("div");
+  stage.id = "tile-root";
+  stage.className = "em-detached-root";
+  d.body.appendChild(stage);
+  const win = addDetachedWindow(type, cloneState(rec?.state ?? src?.state ?? {}));
+  // the camera: where the original was looking (or where the twin was)
+  if (type === "graph") {
+    const mode = winMode(win);
+    const cam = rec?.camera ?? (src ? (() => {
+      const v = winViewports.get(viewportKey(src.id, mode));
+      return v ? { mode, x: v.x, y: v.y, scale: v.scale } : null;
+    })() : null);
+    if (cam && cam.mode === mode) {
+      const vp = viewportFor(win.id, mode);
+      vp.x = cam.x; vp.y = cam.y; vp.scale = cam.scale;
+      framedViews.add(viewportKey(win.id, mode));
+      markCameraTouched(win.id, mode);
+    }
+  }
+  const area = createArea(win.id, stage);
+  area.classList.add("tile-detached");
+  winAreas.set(win.id, area);
+  const p: Popout = { win, pop, stage, area, off, gone: false };
+  popouts.set(win.id, p);
+  layoutPopout(p);
+  areaFor(win);
+  renderAreaHeaders();
+  d.title = `${t(WINDOW_TYPE_META[type].labelKey)} — EMStudio`;
+  off.push(wireRelay(pop, document, {
+    isWriting: (el) => isWritingField(el),
+    ported: (el) => !!el?.closest?.("[data-ported], #overlay-panel, #filter-panel, #edge-menu"),
+    onPress: (e) => { lastInput = { win: pop, t: performance.now() }; notePress(e); },
+  }));
+  const listen = (target: EventTarget, type2: string, fn: EventListener): void => {
+    target.addEventListener(type2, fn);
+    off.push(() => target.removeEventListener(type2, fn));
+  };
+  listen(pop, "resize", () => { layoutPopout(p); reflectLiveArea(); requestDraw(); });
+  // the focus follows the system window that has it (Blender: the active
+  // window is the one under the hand, and the one in front)
+  listen(pop, "focus", () => { if (activeWin().id !== win.id) selectWindow(win.id); });
+  listen(d, "click", () => { closeAllDropdowns(); closeAllSubmenus(); });
+  listen(pop, "pagehide", () => popoutGone(win.id));
+  setAreaFocused(activeWin().id, false);
+  selectWindow(win.id);
+  setAreaFocused(win.id, true);
+  saveDetached();
+  ensureDetachWatch();
+  requestDraw();
+  logInfo(t("log.detached", { type: t(WINDOW_TYPE_META[type].labelKey) }));
+  return win;
+}
+
+/** The system window went away (its close button, the app quitting, ours). */
+function popoutGone(winId: string): void {
+  const p = popouts.get(winId);
+  if (!p || p.gone) return;
+  p.gone = true;
+  popouts.delete(winId);
+  p.off.forEach((f) => f());
+  // the canvas overlays come home before their host goes
+  if (overlaysPorted) portalOverlays(canvasAnchorId() ?? activeWin().id);
+  if (overlayOwner === winId) closeOverlayPanel();
+  if (filterOwner === winId) closeFilterPanel();
+  destroyArea(winId);
+  const wasActive = activeWin().id === winId;
+  removeDetachedWindow(winId);
+  if (!mainLeaving) saveDetached();
+  if (wasActive) setAreaFocused(activeWin().id, true);
+  reflectLiveArea();
+  requestDraw();
+}
+
+/** Close a detached window from here. */
+function closeDetached(winId: string, _o: { forget: boolean }): void {
+  const p = popouts.get(winId);
+  if (!p) return;
+  popoutGone(winId);
+  try { p.pop.close(); } catch { /* already closing */ }
+}
+
+/** «Back into the main window»: the window's twin takes half of the main
+ *  window's focused area (or the first one), and the system window closes. */
+function returnDetached(winId: string): void {
+  const p = popouts.get(winId);
+  if (!p) return;
+  const placed = paneIds(layoutOf());
+  const into = placed.includes(lastMainWinId ?? "") ? lastMainWinId! : placed[0];
+  if (!into) return;
+  setActiveWin(into);
+  const clone = splitWindow(into, "row", activeWorkspace(), 0.5, "b");
+  if (!clone) return;
+  setWinType(clone, p.win.type);
+  for (const k of Object.keys(clone.state)) delete clone.state[k];
+  Object.assign(clone.state, cloneState(p.win.state));
+  if (p.win.type === "graph") {
+    const mode = winMode(p.win);
+    const v = winViewports.get(viewportKey(p.win.id, mode));
+    if (v) {
+      const vp = viewportFor(clone.id, mode);
+      vp.x = v.x; vp.y = v.y; vp.scale = v.scale;
+      framedViews.add(viewportKey(clone.id, mode));
+      markCameraTouched(clone.id, mode);
+    }
+  }
+  closeDetached(winId, { forget: true });
+  setActiveWin(clone.id);
+  renderTiles();
+  toast(t("win.returned"));
+}
+
+/** the last window of the MAIN window that had the focus — where «back» goes */
+let lastMainWinId: string | null = null;
+/** the main page is going: its detached windows are remembered, not forgotten */
+let mainLeaving = false;
+
+/** Where the detached windows are, for this document — local, never em.json. */
+let lastSavedDetached = "";
+function saveDetached(): void {
+  const project = detachProject();
+  if (!project) return;
+  const recs: DetachedRecord[] = [];
+  for (const p of popouts.values()) {
+    if (p.gone || p.pop.closed) continue;
+    let camera: DetachedRecord["camera"] = null;
+    if (p.win.type === "graph") {
+      const mode = winMode(p.win);
+      const v = winViewports.get(viewportKey(p.win.id, mode));
+      if (v) camera = { mode, x: v.x, y: v.y, scale: v.scale };
+    }
+    recs.push({ type: p.win.type, state: cloneState(p.win.state),
+      x: p.pop.screenX, y: p.pop.screenY, w: p.pop.innerWidth, h: p.pop.innerHeight, camera });
+  }
+  const sig = project + JSON.stringify(recs);
+  if (sig === lastSavedDetached) return;
+  lastSavedDetached = sig;
+  saveRecords(project, recs, localStorage);
+}
+
+/** A moved system window says nothing: where it is is read once a second while
+ *  there are any (and a closed one noticed, when its `pagehide` did not come). */
+let detachWatch = 0;
+function ensureDetachWatch(): void {
+  if (detachWatch) return;
+  detachWatch = window.setInterval(() => {
+    for (const [id, p] of popouts) if (p.pop.closed) popoutGone(id);
+    if (!popouts.size) { window.clearInterval(detachWatch); detachWatch = 0; return; }
+    saveDetached();
+  }, 1000);
+}
+
+/** A document opened again: the windows it had detached are offered back (a
+ *  system window opens on a gesture: the browser and the desktop's webview
+ *  both refuse one opened by a program). */
+function offerDetachedFor(): void {
+  const project = detachProject();
+  if (!project || popouts.size) return;
+  const recs = recordsFor(project, localStorage);
+  if (!recs.length) return;
+  toastAsk(t("tile.detachRestore", { n: String(recs.length) }), [
+    { label: t("tile.detachReopen"), run: () => { for (const r of recs) detachWindow(null, null, r); } },
+    { label: t("tile.detachForget"), run: () => saveRecords(project, [], localStorage) },
+  ]);
+}
+
+/** The canvas overlays (the funnel, the overlays glyph and panel, the filter
+ *  panel, the edge menu) are where their window is: in a detached window's
+ *  document while it is the anchor, else home in `#tile-root`. */
+function portalOverlays(anchor: string): HTMLElement {
+  const p = popouts.get(anchor);
+  const host = p && !p.gone ? p.stage : tileRoot;
+  for (const el of [btnViewProps, btnOverlays, overlayPanel, filterPanel, edgeMenu])
+    if (el.parentElement !== host) host.appendChild(el);
+  overlaysPorted = host !== tileRoot;
+  return host;
+}
+
+/** A menu a press in a detached window opened at a point (the context menu,
+ *  the add menu, a space menu) is appended to THIS body: it goes to the window
+ *  the press was in. */
+new MutationObserver((records) => {
+  if (!popouts.size || lastInput.win === window || performance.now() - lastInput.t > 1500) return;
+  const p = [...popouts.values()].find((x) => x.pop === lastInput.win && !x.gone);
+  if (!p) return;
+  for (const r of records) for (const n of r.addedNodes) {
+    if (!(n instanceof HTMLElement) || n.parentNode !== document.body) continue;
+    if (n.classList.contains("gest") || n.id === "toast") continue;
+    n.dataset.ported = "1";
+    p.pop.document.body.appendChild(n);
+  }
+}).observe(document.body, { childList: true });
+document.addEventListener("pointerdown", () => {
+  if (!isRelaying()) lastInput = { win: window, t: performance.now() };
+}, true);
+window.addEventListener("pagehide", () => {
+  mainLeaving = true;
+  saveDetached();
+  for (const p of [...popouts.values()]) { try { p.pop.close(); } catch { /* gone */ } }
+});
+// `instanceof` asked here answers for the detached documents' nodes and events
+bridgeRealms(window, () => [...popouts.values()].filter((p) => !p.gone).map((p) => p.pop));
 
 // ── ONE SURFACE · the arrangement is geometry, the focus is routing ──────────
 //
@@ -21935,7 +22275,7 @@ const lastRects = new WeakMap<HTMLElement, Rect>();
 
 /** Wire an area's own gestures. Called ONCE per window: these listeners outlive
  *  every arrangement change, because the element does. */
-function createArea(winId: string): HTMLElement {
+function createArea(winId: string, parent: HTMLElement = tileRoot): HTMLElement {
   const area = document.createElement("div");
   area.className = "tile-area";
   area.dataset.win = winId;
@@ -22032,7 +22372,7 @@ function createArea(winId: string): HTMLElement {
    * starts a connector). Leaving this one would mean every press in a graph
    * window ran twice, the second time clearing what the first had begun.
    */
-  tileRoot.appendChild(area);
+  parent.appendChild(area);
   return area;
 }
 
@@ -22282,19 +22622,22 @@ function reflectLiveArea(): void {
   // their panels is open (`canvasAnchorId`)
   const anchor = canvasAnchorId() ?? activeWin().id;
   const el = winAreas.get(anchor);
-  const root = tileRoot.getBoundingClientRect();
-  const r = el ? el.getBoundingClientRect() : root;
+  // MICRO-FINESTRE-MULTIPLE · the overlays of a DETACHED graph window are in
+  // its system window: carried there, and placed against its document
+  const host = popouts.size || overlaysPorted ? portalOverlays(anchor) : tileRoot;
+  const root = host.getBoundingClientRect();
+  const r = el && el.ownerDocument === host.ownerDocument ? el.getBoundingClientRect() : root;
   const bar = el?.querySelector<HTMLElement>(":scope > .tile-bar");
-  tileRoot.style.setProperty("--live-x", `${Math.round(r.left - root.left)}px`);
-  tileRoot.style.setProperty("--live-y", `${Math.round(r.top - root.top)}px`);
-  tileRoot.style.setProperty("--live-w", `${Math.round(r.width)}px`);
-  tileRoot.style.setProperty("--live-h", `${Math.round(r.height)}px`);
-  tileRoot.style.setProperty("--winbar-h", `${bar?.offsetHeight ?? 0}px`);
+  host.style.setProperty("--live-x", `${Math.round(r.left - root.left)}px`);
+  host.style.setProperty("--live-y", `${Math.round(r.top - root.top)}px`);
+  host.style.setProperty("--live-w", `${Math.round(r.width)}px`);
+  host.style.setProperty("--live-h", `${Math.round(r.height)}px`);
+  host.style.setProperty("--winbar-h", `${bar?.offsetHeight ?? 0}px`);
   // MICRO-PANNELLI-OVERLAY · a window too narrow for the funnel and the glyph
   // side by side stacks them, still inside it
-  tileRoot.classList.toggle("live-narrow", r.width < 120);
+  host.classList.toggle("live-narrow", r.width < 120);
   placeOwnedPanels();
-  tileRoot.style.setProperty(
+  host.style.setProperty(
     "--palette-w",
     el ? getComputedStyle(el).getPropertyValue("--palette-w").trim() || "0px" : "0px");
 }
@@ -22309,11 +22652,12 @@ function reflectLiveArea(): void {
  * its neighbours (the Tabular below).
  */
 function placeOwnedPanels(): void {
-  const root = tileRoot.getBoundingClientRect();
   const place = (panel: HTMLElement, owner: string | null, maxW: number): void => {
     if (panel.classList.contains("hidden") || !owner) return;
     const area = winAreas.get(owner);
     if (!area) return;
+    // against the document the panel is in (a detached window's, or this one)
+    const root = (panel.parentElement ?? tileRoot).getBoundingClientRect();
     const r = area.getBoundingClientRect();
     const bar = area.querySelector<HTMLElement>(":scope > .tile-bar");
     let top = r.top + (bar?.offsetHeight ?? 0) + 10;
@@ -22348,16 +22692,19 @@ function renderTiles(): void {
   closeAllSubmenus();
   const placed = paneIds(layoutOf());
   const keep = new Set(placed);
-  for (const id of [...winAreas.keys()]) if (!keep.has(id)) destroyArea(id);
+  // MICRO-FINESTRE-MULTIPLE · a detached window's area is in its own system
+  // window, in no tree: it stays, and follows a change of its type like any
+  for (const id of [...winAreas.keys()]) if (!keep.has(id) && !isDetachedWin(id)) destroyArea(id);
   for (const id of placed) {
     const win = windowsOf().find((w) => w.id === id);
     if (win) areaFor(win);
   }
+  for (const w of detachedWins()) if (winAreas.has(w.id)) areaFor(w);
   // the resources panel and the corner grips belong to the ARRANGEMENT: they are
   // rebuilt here, with it, and never on a focus change
   for (const [id, area] of winAreas) {
     const win = windowsOf().find((w) => w.id === id);
-    if (!win) continue;
+    if (!win || isDetachedWin(id)) continue;
     area.querySelectorAll(".tile-corner, .win-resources, .win-res-chevron")
       .forEach((g) => g.remove());
     buildResourcePanel(area, win);
@@ -35379,6 +35726,7 @@ function setWindowMode(win: Win, mode: ViewKind): void {
 function selectWindow(winId: string): void {
   const previous = activeWin().id;
   const win = setActiveWin(winId);
+  if (!isDetachedWin(win.id)) lastMainWinId = win.id;
   if (previous === win.id) return;
   setAreaFocused(previous, false);
   setAreaFocused(win.id, true);
@@ -35469,7 +35817,38 @@ function buildAreaHeader(win: Win): DocumentFragment {
   // CLOSE is the last item of the type menu, after a rule — the × chip is gone
   // with the other four, and a window is also closed by dragging a divider all
   // the way over it (`positionAreas`).
-  if (windowsOf().length > 1) {
+  // MICRO-FINESTRE-MULTIPLE · the gesture's twin in words (Shift + a corner
+  // dragged), and in a detached window the way back
+  {
+    const sep = document.createElement("div");
+    sep.className = "dd-sep";
+    typeMenu.appendChild(sep);
+    const can = detachSupport(window);
+    const det = document.createElement("button");
+    det.className = "win-detach-item";
+    det.textContent = t("win.detachItem");
+    if (!can.ok) {
+      det.classList.add("dd-disabled");
+      det.title = t(can.why === "frame" ? "tile.detachNoFrame" : "tile.detachNoApi");
+    }
+    det.addEventListener("click", () => {
+      if (!can.ok) { toast(det.title); return; }
+      detachWindow(win, null);
+    });
+    typeMenu.appendChild(det);
+    if (isDetachedWin(win.id)) {
+      const back = document.createElement("button");
+      back.className = "win-return-item";
+      back.textContent = t("win.returnItem");
+      back.addEventListener("click", () => returnDetached(win.id));
+      const shut = document.createElement("button");
+      shut.className = "win-close-item";
+      shut.textContent = t("win.detachClose");
+      shut.addEventListener("click", () => closeDetached(win.id, { forget: true }));
+      typeMenu.append(back, shut);
+    }
+  }
+  if (windowsOf().length > 1 && !isDetachedWin(win.id)) {
     const sep = document.createElement("div");
     sep.className = "dd-sep";
     typeMenu.appendChild(sep);
@@ -36293,17 +36672,20 @@ function buildHeaderStrip(win: Win): HTMLElement {
 function renderAreaHeaders(): void {
   // `#window-header` is gone with `#canvas-wrap`: every area has a `.tile-bar`,
   // built here by the one builder, and there is no privileged one to do first.
-  for (const bar of document.querySelectorAll<HTMLElement>(".tile-area > .tile-bar")) {
-    const win = windowsOf().find((w) => w.id === bar.parentElement?.dataset.win);
-    if (!win) continue;
+  // (every area, the detached windows' too: `winAreas`, not this document)
+  for (const area of winAreas.values()) {
+    const bar = area.querySelector<HTMLElement>(":scope > .tile-bar");
+    const win = windowsOf().find((w) => w.id === area.dataset.win);
+    if (!bar || !win) continue;
     bar.innerHTML = "";
     bar.appendChild(buildAreaHeader(win));
+    if (isDetachedWin(win.id)) bar.appendChild(detachedBarTail(win));
   }
   // STEP A · every area publishes the height ITS bar takes, the way the focused
   // one always has (`--winbar-h`): the resources panel and its chevron sit below
   // the bar in any area, and they read that one measurement rather than each
   // guessing from a constant that would drift.
-  for (const area of document.querySelectorAll<HTMLElement>(".tile-area")) {
+  for (const area of winAreas.values()) {
     const bar = area.querySelector<HTMLElement>(":scope > .tile-bar");
     area.style.setProperty("--winbar-h", `${bar?.offsetHeight ?? 0}px`);
   }
@@ -36316,6 +36698,29 @@ function renderAreaHeaders(): void {
   if (windowsOf().some((w) => w.type === "storage")) renderStorage();
   if (windowsOf().some((w) => w.type === "table")) renderEmData();
   draw();
+}
+
+/** MICRO-FINESTRE-MULTIPLE · the minimal bar of a detached window: after its
+ *  type (the bar's own first control), «back into the main window» and close. */
+function detachedBarTail(win: Win): HTMLElement {
+  const tail = document.createElement("span");
+  tail.className = "win-detached-tail";
+  const back = document.createElement("button");
+  back.type = "button";
+  back.className = "win-detached-back";
+  back.textContent = "⇤";
+  back.title = t("win.returnItem");
+  back.setAttribute("aria-label", t("win.returnItem"));
+  back.addEventListener("click", (e) => { e.stopPropagation(); returnDetached(win.id); });
+  const shut = document.createElement("button");
+  shut.type = "button";
+  shut.className = "win-detached-close";
+  shut.textContent = "×";
+  shut.title = t("win.detachClose");
+  shut.setAttribute("aria-label", t("win.detachClose"));
+  shut.addEventListener("click", (e) => { e.stopPropagation(); closeDetached(win.id, { forget: true }); });
+  tail.append(back, shut);
+  return tail;
 }
 
 /** Kept as the name every caller already uses. The header IS rebuilt now rather

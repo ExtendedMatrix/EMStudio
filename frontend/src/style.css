@@ -10234,3 +10234,17 @@ tr.tt-hidden { display: none; }
 .multi-hint { display: none; margin: 2px 0 4px; padding: 2px 6px; border-radius: 3px; font-size: 11px;
   color: var(--accent, #2a6fdb); background: color-mix(in srgb, var(--accent, #2a6fdb) 12%, transparent); }
 body.multi-held .multi-hint { display: block; }
+
+/* ── MICRO-FINESTRE-MULTIPLE · a window in a system window of its own ───── */
+body.em-detached #tile-root.em-detached-root { flex: 1; }
+body.em-detached #tile-root > .tile-area.tile-detached {
+  border: 0;
+  border-radius: 0;
+}
+.win-detached-tail { display: inline-flex; gap: 2px; margin-left: auto; padding-left: 8px; flex-shrink: 0; }
+.win-detached-tail button {
+  border: 1px solid transparent; background: none; color: var(--text-dim, inherit);
+  font-size: 0.95rem; line-height: 1; padding: 3px 7px; border-radius: var(--radius-sm, 4px); cursor: pointer;
+}
+.win-detached-tail button:hover { background: var(--bg-panel); border-color: var(--border); color: var(--text); }
+.gest .gjoin.gdetach { border-style: dashed; }
