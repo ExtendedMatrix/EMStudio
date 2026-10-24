@@ -334,6 +334,42 @@ export async function onDesktopQueue(handler: () => void): Promise<void> {
   }
 }
 
+/**
+ * MICRO-OVERLAY-PER-FINESTRA p.0 · the desktop's detached windows. The shell
+ * says the label of each one it opens (`detached-born`, in the order of the
+ * `window.open` calls) and of each one the system closed (`detached-gone`);
+ * the page closes one by its label — on macOS `window.close()` from the page
+ * reaches nobody (wry has no `webViewDidClose`). No-ops in a browser.
+ */
+export async function onDetachedWindows(born: (label: string) => void, gone: (label: string) => void): Promise<void> {
+  if (!isTauri()) return;
+  try {
+    const { listen } = await import("@tauri-apps/api/event");
+    await listen<string>("detached-born", (e) => born(String(e.payload)));
+    await listen<string>("detached-gone", (e) => gone(String(e.payload)));
+  } catch {
+    // an older shell: window.close() is all there is
+  }
+}
+/** …and where the main and the detached windows are (logical points, the
+ *  desktop's top-left origin): WKWebView's screenX/screenY are not. */
+export async function windowFrames(): Promise<Array<{ label: string; x: number; y: number; w: number; h: number }>> {
+  if (!isTauri()) return [];
+  try {
+    return await invoke("window_frames");
+  } catch {
+    return [];
+  }
+}
+export async function closeDetachedWindow(label: string): Promise<void> {
+  if (!isTauri()) return;
+  try {
+    await invoke<boolean>("detached_close", { label });
+  } catch {
+    // an older shell
+  }
+}
+
 /** Basename of an absolute path, for the window title / info bar. */
 export function baseName(path: string): string {
   return basename(path) || path;

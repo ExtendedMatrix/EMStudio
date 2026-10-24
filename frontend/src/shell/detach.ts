@@ -113,6 +113,12 @@ export function placeNear(screenX: number, screenY: number,
   return { x: Math.round(screenX - 60), y: Math.round(screenY - 16), w: size.w, h: size.h };
 }
 
+/** The address a detached window is opened at. NOT the empty string: the
+ *  browsers read "" as `about:blank`, but WKWebView passes it on as an empty
+ *  url, which the desktop's `on_new_window` (Tauri: `url.parse()`) refuses
+ *  before the app's handler sees it — the window was never made. */
+export const DETACH_URL = "about:blank";
+
 /** The `window.open` features of a rectangle. `popup` asks for a window
  *  (not a tab) in the browser; the desktop reads position and size. */
 export function popupFeatures(r: { x: number; y: number; w: number; h: number }): string {

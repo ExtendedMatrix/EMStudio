@@ -71,6 +71,15 @@ fn no_store_message(detail: &str) -> String {
 }
 
 fn keyring_entry() -> Result<keyring::Entry, String> {
+    // MICRO-OVERLAY-PER-FINESTRA p.0 · a DEBUG build told so has no keychain:
+    // a rebuilt binary is a new signature, and macOS asks the person's
+    // password for the app's entry (24 Oct: the test build stopped in `setup`
+    // on that dialog, with nobody there to answer — and a test has no
+    // business reading the person's key)
+    #[cfg(debug_assertions)]
+    if std::env::var_os("EMSTUDIO_NO_KEYCHAIN").is_some() {
+        return Err("no keychain in this test build (EMSTUDIO_NO_KEYCHAIN)".to_string());
+    }
     keyring::Entry::new(KEYRING_SERVICE, KEYRING_USER).map_err(|e| e.to_string())
 }
 
@@ -309,6 +318,11 @@ fn queue_notice(app: &tauri::AppHandle, message: String) {
 /// Is this one of the app's own pages? The bundle's (`tauri://localhost`,
 /// `http(s)://tauri.localhost`), `tauri dev`'s (`devUrl`, localhost:5173), and
 /// the URLs a page makes for itself.
+/// MICRO-OVERLAY-PER-FINESTRA p.0 · the port of `devUrl` (5173; a test build's
+/// own, `tauri.test.conf.json`), read in `setup`: a debug build's page there
+/// is the app's, not «a page that is not EMStudio».
+static DEV_PORT: AtomicU16 = AtomicU16::new(5173);
+
 fn is_app_url(url: &str) -> bool {
     let Ok(u) = tauri::Url::parse(url) else { return false };
     match u.scheme() {
@@ -318,7 +332,7 @@ fn is_app_url(url: &str) -> bool {
             host == "tauri.localhost"
                 || (cfg!(debug_assertions)
                     && matches!(host, "localhost" | "127.0.0.1")
-                    && u.port() == Some(5173))
+                    && u.port() == Some(DEV_PORT.load(Ordering::Relaxed)))
         }
         _ => false,
     }
@@ -874,6 +888,68 @@ fn is_detached_label(label: &str) -> bool {
 /// environment (Windows) and related view (Linux), as Tauri requires for
 /// `Create`. Any other URL (a link with `target=_blank`) is not a window of the
 /// app: the system browser opens it.
+/// MICRO-OVERLAY-PER-FINESTRA p.0 · the bridge's port: 8765 — unless a DEBUG
+/// build is told another (`EMSTUDIO_BRIDGE_PORT`). A test build of the desktop
+/// (`tauri.test.conf.json`: its own identifier, so the single-instance lock
+/// does not hand it to the EMStudio.app that is open) must not even look at
+/// 8765: `decide_launch` takes an em-bridge it finds there for an orphan of an
+/// earlier session and closes it — and that one belongs to the app in use.
+/// A release build reads nothing.
+fn bridge_port_default() -> u16 {
+    #[cfg(debug_assertions)]
+    if let Some(p) = std::env::var("EMSTUDIO_BRIDGE_PORT").ok().and_then(|v| v.parse::<u16>().ok()) {
+        return p;
+    }
+    BRIDGE_PORT_DEFAULT
+}
+
+/// MICRO-OVERLAY-PER-FINESTRA p.0 · a DEBUG build told `EMSTUDIO_SELFTEST_JS`
+/// (a file) runs it in the main page once it has loaded: how a check drives the
+/// real webview (`frontend/scripts/check-desktop-detach.mjs`). A release build
+/// reads nothing.
+#[cfg(debug_assertions)]
+fn selftest_js() -> Option<String> {
+    std::env::var("EMSTUDIO_SELFTEST_JS").ok().and_then(|p| std::fs::read_to_string(p).ok())
+}
+
+/// MICRO-OVERLAY-PER-FINESTRA p.0 · close a detached window («×», «⇤ Back»,
+/// the main page going): the page's `window.close()` reaches nobody on macOS
+/// (wry answers no `webViewDidClose`). Only a detached label is closed.
+#[tauri::command]
+fn detached_close(app: tauri::AppHandle, label: String) -> bool {
+    if !is_detached_label(&label) {
+        return false;
+    }
+    app.get_webview_window(&label).map(|w| w.destroy().is_ok()).unwrap_or(false)
+}
+
+/// MICRO-OVERLAY-PER-FINESTRA p.0 · where the main and the detached windows
+/// are, in logical points of the desktop (top-left origin): WKWebView's
+/// `window.screenX/screenY` are not the window's (measured 24 Oct: 0 and the
+/// screen's height), and a detached window opened, or remembered, from them
+/// lands off the screen.
+#[derive(serde::Serialize)]
+struct WindowFrame {
+    label: String,
+    x: f64,
+    y: f64,
+    w: f64,
+    h: f64,
+}
+#[tauri::command]
+fn window_frames(app: tauri::AppHandle) -> Vec<WindowFrame> {
+    app.webview_windows()
+        .into_iter()
+        .filter(|(label, _)| label == "main" || is_detached_label(label))
+        .filter_map(|(label, w)| {
+            let k = w.scale_factor().ok()?;
+            let p = w.outer_position().ok()?.to_logical::<f64>(k);
+            let s = w.inner_size().ok()?.to_logical::<f64>(k);
+            Some(WindowFrame { label, x: p.x, y: p.y, w: s.width, h: s.height })
+        })
+        .collect()
+}
+
 fn build_main_window(app: &tauri::AppHandle) -> tauri::Result<()> {
     use std::sync::atomic::AtomicUsize;
     static NEXT: AtomicUsize = AtomicUsize::new(1);
@@ -898,7 +974,7 @@ fn build_main_window(app: &tauri::AppHandle) -> tauri::Result<()> {
             let label = detached_label(NEXT.fetch_add(1, Ordering::Relaxed));
             let built = tauri::WebviewWindowBuilder::new(
                 &handle,
-                label,
+                label.clone(),
                 tauri::WebviewUrl::External("about:blank".parse().unwrap()),
             )
             .window_features(features)
@@ -909,12 +985,40 @@ fn build_main_window(app: &tauri::AppHandle) -> tauri::Result<()> {
             })
             .build();
             match built {
-                Ok(window) => tauri::webview::NewWindowResponse::Create { window },
+                Ok(window) => {
+                    // MICRO-OVERLAY-PER-FINESTRA p.0 · the page learns the
+                    // label of the window it just opened (in order: one
+                    // `window.open` at a time), so it can close it — wry has
+                    // no `webViewDidClose`, and `window.close()` from the page
+                    // does nothing on macOS
+                    let _ = handle.emit_to("main", "detached-born", label);
+                    tauri::webview::NewWindowResponse::Create { window }
+                }
                 Err(e) => {
                     eprintln!("[emstudio] a detached window could not be opened: {e}");
                     tauri::webview::NewWindowResponse::Deny
                 }
             }
+        })
+        .on_page_load(|webview, payload| {
+            // MICRO-OVERLAY-PER-FINESTRA p.0 · the main page loading again (a
+            // reload): the detached windows were drawn by the page that went —
+            // empty now, and nobody's. They go (the page remembered them).
+            if matches!(payload.event(), tauri::webview::PageLoadEvent::Started) {
+                for (label, other) in webview.app_handle().webview_windows() {
+                    if is_detached_label(&label) {
+                        let _ = other.destroy();
+                    }
+                }
+            }
+            #[cfg(debug_assertions)]
+            if matches!(payload.event(), tauri::webview::PageLoadEvent::Finished) {
+                if let Some(js) = selftest_js() {
+                    let _ = webview.eval(&js);
+                }
+            }
+            #[cfg(not(debug_assertions))]
+            let _ = &payload;
         })
         .build()?;
     Ok(())
@@ -971,9 +1075,14 @@ fn main() {
             llm_key_status,
             set_llm_key,
             clear_llm_key,
-            update_install
+            update_install,
+            detached_close,
+            window_frames
         ])
         .setup(|app| {
+            if let Some(port) = app.config().build.dev_url.as_ref().and_then(|u| u.port()) {
+                DEV_PORT.store(port, Ordering::Relaxed);
+            }
             // MICRO-FINESTRE-MULTIPLE · the main window is built HERE, from its
             // entry in tauri.conf.json (`create: false`), because only a builder
             // can answer `window.open`: a window detached from the page (Shift +
@@ -1030,7 +1139,7 @@ fn main() {
             // `setup` runs (tauri 2.11.5, app.rs:2524–2530), but `transformer_url`
             // is a synchronous command, run on the main thread, which `setup`
             // holds until it returns.
-            let launch = decide_launch(BRIDGE_PORT_DEFAULT, BRIDGE_PORT_TRIES);
+            let launch = decide_launch(bridge_port_default(), BRIDGE_PORT_TRIES);
             BRIDGE_PORT.store(launch.port, Ordering::Relaxed);
             if let Some(n) = launch.notice {
                 queue_notice(app.handle(), n);
@@ -1044,6 +1153,11 @@ fn main() {
         // ones: their content is drawn by the main page, which is gone (the
         // question about unsaved changes is the main page's, asked once)
         .on_window_event(|window, event| {
+            // MICRO-OVERLAY-PER-FINESTRA p.0 · a detached window closed by the
+            // system (its red button): the page is told, and forgets it
+            if is_detached_label(window.label()) && matches!(event, tauri::WindowEvent::Destroyed) {
+                let _ = window.app_handle().emit_to("main", "detached-gone", window.label().to_string());
+            }
             if window.label() == "main" && matches!(event, tauri::WindowEvent::Destroyed) {
                 use tauri::Manager;
                 for (label, other) in window.app_handle().webview_windows() {
@@ -1130,6 +1244,14 @@ mod tests {
             assert!(!is_sign_in_page(app), "{app}");
         }
         assert_eq!(is_app_url("http://localhost:5173/"), cfg!(debug_assertions));
+        // MICRO-OVERLAY-PER-FINESTRA p.0 · a test build's own bridge port, read
+        // only by a debug build (never 8765's em-bridge, which `decide_launch`
+        // would take for an orphan and close)
+        std::env::remove_var("EMSTUDIO_BRIDGE_PORT");
+        assert_eq!(bridge_port_default(), BRIDGE_PORT_DEFAULT);
+        std::env::set_var("EMSTUDIO_BRIDGE_PORT", "8781");
+        assert_eq!(bridge_port_default(), if cfg!(debug_assertions) { 8781 } else { BRIDGE_PORT_DEFAULT });
+        std::env::remove_var("EMSTUDIO_BRIDGE_PORT");
         // a 3D embed, a node's page, a study: not sign-in pages, not the app
         for other in ["https://sketchfab.com/models/abc/embed",
                       "https://em.example.org/work/?room=r",

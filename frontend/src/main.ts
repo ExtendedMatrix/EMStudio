@@ -113,7 +113,7 @@ import {
 import { planJoin, snapDivider, type JoinPlan } from "./shell/join";
 import {
   bridgeRealms, cloneState, defaultSize, detachSupport, isRelaying, mirrorLook, placeNear,
-  popupFeatures, recordsFor, saveRecords, wireRelay, type DetachedRecord,
+  popupFeatures, recordsFor, saveRecords, wireRelay, DETACH_URL, type DetachedRecord,
 } from "./shell/detach";
 import {
   paintSurface,
@@ -370,6 +370,9 @@ import {
   pickXlsx,
   readBinaryFile,
   writeBinaryFile,
+  closeDetachedWindow,
+  onDetachedWindows,
+  windowFrames,
 } from "./tauri";
 import * as paths from "./paths";
 import { bridgeLevelVerdict, levelKey, type BridgeHealth } from "./bridge-level";
@@ -756,6 +759,9 @@ interface Popout {
   area: HTMLElement;
   off: Array<() => void>;
   gone: boolean;
+  /** MICRO-OVERLAY-PER-FINESTRA p.0 · the desktop's label of its system
+   *  window (`detached-<n>`), once the shell has said it */
+  label?: string;
 }
 const popouts = new Map<string, Popout>();
 /** the canvas overlays are in a detached window right now */
@@ -22008,9 +22014,15 @@ function detachWindow(src: Win | null, at: { x: number; y: number } | null,
   const srcArea = src ? winAreas.get(src.id) : undefined;
   const size = srcArea && srcArea.clientWidth >= 320 && srcArea.clientHeight >= 240
     ? { w: srcArea.clientWidth, h: srcArea.clientHeight } : defaultSize(type);
+  const home = screenOrigin();
   const r = rec ?? (at ? placeNear(at.x, at.y, size)
-    : { x: window.screenX + 80, y: window.screenY + 80, ...size });
-  const pop = window.open("", `emstudio-${Date.now().toString(36)}`, popupFeatures(r));
+    : { x: home.x + 80, y: home.y + 80, ...size });
+  // MICRO-OVERLAY-PER-FINESTRA p.0 · `about:blank`, said: WKWebView hands an
+  // EMPTY url ("") to the desktop's `on_new_window`, which Tauri cannot parse
+  // and denies before our handler runs — `window.open` gave null and the
+  // toast said «blocked» (E.D., EMStudio.app dev.70, 24 Oct). The browsers
+  // open the same document either way.
+  const pop = window.open(DETACH_URL, `emstudio-${Date.now().toString(36)}`, popupFeatures(r));
   if (!pop) { toast(t("tile.detachBlocked")); return null; }
   const d = pop.document;
   // a standards-mode document (`about:blank` is in quirks mode)
@@ -22042,6 +22054,7 @@ function detachWindow(src: Win | null, at: { x: number; y: number } | null,
   winAreas.set(win.id, area);
   const p: Popout = { win, pop, stage, area, off, gone: false };
   popouts.set(win.id, p);
+  if (isTauri()) labelWaiting.push(p);
   layoutPopout(p);
   areaFor(win);
   renderAreaHeaders();
@@ -22096,8 +22109,29 @@ function closeDetached(winId: string, _o: { forget: boolean }): void {
   const p = popouts.get(winId);
   if (!p) return;
   popoutGone(winId);
-  try { p.pop.close(); } catch { /* already closing */ }
+  closeSystemWindow(p);
 }
+/** the system window itself: `close()` in a browser; on the desktop the shell
+ *  closes it by its label (the page's `close()` reaches nobody on macOS) */
+function closeSystemWindow(p: Popout): void {
+  try { p.pop.close(); } catch { /* already closing */ }
+  if (p.label) void closeDetachedWindow(p.label);
+}
+/** MICRO-OVERLAY-PER-FINESTRA p.0 · the popouts opened on the desktop whose
+ *  label the shell has not said yet, oldest first (one `window.open` at a time) */
+const labelWaiting: Popout[] = [];
+void onDetachedWindows(
+  (label) => {
+    const p = labelWaiting.shift();
+    if (!p) return;
+    p.label = label;
+    if (p.gone) void closeDetachedWindow(label);   // closed before the shell spoke
+  },
+  (label) => {
+    const p = [...popouts.values()].find((x) => x.label === label);
+    if (p) popoutGone(p.win.id);
+  },
+);
 
 /** «Back into the main window»: the window's twin takes half of the main
  *  window's focused area (or the first one), and the system window closes. */
@@ -22148,13 +22182,31 @@ function saveDetached(): void {
       const v = winViewports.get(viewportKey(p.win.id, mode));
       if (v) camera = { mode, x: v.x, y: v.y, scale: v.scale };
     }
+    // on the desktop, where the SYSTEM says it is (`deskFrames`)
+    const f = p.label ? deskFrames.get(p.label) : undefined;
     recs.push({ type: p.win.type, state: cloneState(p.win.state),
-      x: p.pop.screenX, y: p.pop.screenY, w: p.pop.innerWidth, h: p.pop.innerHeight, camera });
+      x: f?.x ?? p.pop.screenX, y: f?.y ?? p.pop.screenY, w: p.pop.innerWidth, h: p.pop.innerHeight, camera });
   }
   const sig = project + JSON.stringify(recs);
   if (sig === lastSavedDetached) return;
   lastSavedDetached = sig;
   saveRecords(project, recs, localStorage);
+}
+
+/** MICRO-OVERLAY-PER-FINESTRA p.0 · on the desktop, where the windows are
+ *  as the system says (WKWebView's screenX/screenY are not: 0 and the
+ *  screen's height, measured), read with the watch below and at boot */
+const deskFrames = new Map<string, { x: number; y: number; w: number; h: number }>();
+async function refreshDeskFrames(): Promise<void> {
+  if (!isTauri()) return;
+  for (const f of await windowFrames()) deskFrames.set(f.label, f);
+}
+void refreshDeskFrames();
+window.addEventListener("focus", () => void refreshDeskFrames());
+/** the main window's top-left on the screen */
+function screenOrigin(): { x: number; y: number } {
+  const f = deskFrames.get("main");
+  return f ? { x: f.x, y: f.y } : { x: window.screenX, y: window.screenY };
 }
 
 /** A moved system window says nothing: where it is is read once a second while
@@ -22165,7 +22217,8 @@ function ensureDetachWatch(): void {
   detachWatch = window.setInterval(() => {
     for (const [id, p] of popouts) if (p.pop.closed) popoutGone(id);
     if (!popouts.size) { window.clearInterval(detachWatch); detachWatch = 0; return; }
-    saveDetached();
+    if (isTauri()) void refreshDeskFrames().then(saveDetached);
+    else saveDetached();
   }, 1000);
 }
 
@@ -22215,7 +22268,7 @@ document.addEventListener("pointerdown", () => {
 window.addEventListener("pagehide", () => {
   mainLeaving = true;
   saveDetached();
-  for (const p of [...popouts.values()]) { try { p.pop.close(); } catch { /* gone */ } }
+  for (const p of [...popouts.values()]) closeSystemWindow(p);
 });
 // `instanceof` asked here answers for the detached documents' nodes and events
 bridgeRealms(window, () => [...popouts.values()].filter((p) => !p.gone).map((p) => p.pop));

@@ -59,6 +59,8 @@ const { D } = await import("data:text/javascript;base64," + Buffer.from(bundle.o
   c.filters.q = "X";
   eq(st.filters.q, "US", "a copy, not the same object");
 
+  // MICRO-OVERLAY-PER-FINESTRA p.0 · never "": WKWebView passes it on empty, and Tauri denies it
+  eq(D.DETACH_URL, "about:blank", "the detached window's address is said");
   eq(D.placeNear(1000, 500, { w: 800, h: 600 }), { x: 940, y: 484, w: 800, h: 600 }, "near the cursor: the bar under the hand");
   eq(D.popupFeatures({ x: 1920.4, y: -300, w: 100, h: 50 }),
      "popup=yes,left=1920,top=-300,width=240,height=180", "features: a second screen's coordinates, a floor on the size");

@@ -1,0 +1,16 @@
+{
+  "//": "MICRO-OVERLAY-PER-FINESTRA p.0 · a TEST build of the desktop, beside an EMStudio.app that is open: its own identifier (the single-instance lock and the webview's storage are per identifier, so it is not handed to the app in use), the page from a Vite of its own (PORT 5199: `npx vite --port 5199 --strictPort` in frontend/), no URL scheme of the ecosystem's. Run: EMSTUDIO_BRIDGE_PORT=8781 cargo tauri dev --no-watch --config tauri.test.conf.json (the port: main.rs, `bridge_port_default`). frontend/scripts/check-desktop-detach.mjs drives it.",
+  "identifier": "org.extendedmatrix.emstudio.test",
+  "productName": "EMStudio Test",
+  "build": {
+    "devUrl": "http://localhost:5199",
+    "beforeDevCommand": ""
+  },
+  "plugins": {
+    "deep-link": {
+      "desktop": {
+        "schemes": ["org.extendedmatrix.emstudio.test"]
+      }
+    }
+  }
+}
