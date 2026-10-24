@@ -17,22 +17,33 @@
 //
 // What it needs, and refuses to invent:
 //
-// * a stack that is up, with the room seeded — `dev-stack/seed_rooms.py`;
+// * a stack that is up. The room is its OWN since 24 Oct (MICRO-SUITE-VERDE:
+//   no check may need a room that already exists): the engine seats
+//   `testdata/catena.em.json` in `room-live-claude-<time>` (`s3dgraphy
+//   room-import`, as «Bring into a room…»), and the room is DELETED at the end,
+//   also when a check fails. `EM_ROOM=<id>` runs it in a room that exists (a
+//   demo room seeded by `dev-stack/seed_rooms.py`), which is then left as it was
+//   found but for the rename;
 // * a token — `EM_TOKEN`, or `dev-stack/token.sh` beside this checkout;
 // * the internal CA, when the base is the https one: Node reads
 //   `NODE_EXTRA_CA_CERTS` at startup, so this re-execs itself once with it set
 //   rather than telling you to remember an environment variable.
 //
-// Not a smoke: nothing is left behind but one renamed unit in a demo room, and
-// the rename is the proof.
+// Not a smoke: nothing is left behind (with EM_ROOM, one renamed unit in that
+// room, and the rename is the proof).
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, mkdirSync } from "node:fs";
 import { homedir } from "node:os";
 import * as esbuild from "esbuild";
 
 const BASE = process.env.EM_HUB_BASE ?? "https://em.localhost:8443/em";
-const ROOM = process.env.EM_ROOM ?? "basilica-demo";
+const OWN_ROOM = !process.env.EM_ROOM;
+const ROOM = process.env.EM_ROOM ?? `room-live-claude-${Date.now().toString(36)}`;
+// the engine seats the room through the node's direct port when the base is
+// the https one (Python would need the internal CA); the same node behind it
+const IMPORT_NODE = process.env.EM_IMPORT_NODE
+  ?? (BASE.startsWith("https://") ? "http://localhost:8000" : BASE);
 const CA = process.env.EM_CA ?? `${homedir()}/caddy-em-root.crt`;
 const HERE = new URL(".", import.meta.url).pathname;
 const SRC = new URL("../src/", import.meta.url).pathname;
@@ -80,6 +91,40 @@ if (!TOKEN) {
   console.log("room: no token (EM_TOKEN unset and dev-stack/token.sh did not "
               + "answer) — is the stack up? checks SKIPPED");
   process.exit(0);
+}
+
+// ── the room, made here (unless EM_ROOM names one) ──────────────────────────
+const HTTP = BASE.replace(/\/+$/, "");
+/** DELETE the room this check made: 409 while a socket of ours is still open,
+ *  so it asks again for a few seconds. */
+async function deleteRoom() {
+  for (let i = 0; i < 20; i++) {
+    const r = await fetch(`${HTTP}/v1/rooms/${encodeURIComponent(ROOM)}`, {
+      method: "DELETE", headers: { authorization: `Bearer ${TOKEN}`, "content-type": "application/json" },
+      body: JSON.stringify({ confirm: ROOM }) }).catch((e) => ({ status: 0, text: async () => String(e) }));
+    if (r.status === 200 || r.status === 404) return r.status === 200 ? "deleted" : "not there";
+    if (r.status !== 409) return `NOT deleted (${r.status} ${(await r.text()).slice(0, 120)})`;
+    await new Promise((res) => setTimeout(res, 500));
+  }
+  return "NOT deleted (somebody still connected after 10 s)";
+}
+if (OWN_ROOM) {
+  const S3D = process.env.S3DGRAPHY_DIR ?? `${HERE}../../../s3Dgraphy/`;
+  const work = `${process.env.TMPDIR ?? "/tmp/"}room-live/${ROOM}`;
+  mkdirSync(work, { recursive: true });
+  let seated = null;
+  try {
+    seated = JSON.parse(execFileSync(`${S3D}.venv/bin/python`, ["-m", "s3dgraphy", "room-import",
+      `${HERE}../testdata/catena.em.json`, "--node", IMPORT_NODE, "--room", ROOM, "--title", `Room live ${ROOM}`,
+      "--token", TOKEN, "--journal", `${work}/journal.json`, "--report-dir", work, "--work-dir", `${work}/packs`, "--json"],
+      { env: { ...process.env, PYTHONPATH: `${S3D}src` }, encoding: "utf-8", maxBuffer: 1 << 26 }));
+  } catch (err) {
+    console.log(`room: the engine could not seat ${ROOM}: ${String(err.message ?? err).split("\n")[0]}`);
+  }
+  if (!seated?.room_state?.created || !(seated?.seeded?.applied > 0)) {
+    console.log(`room: ${ROOM} not seated — ${await deleteRoom()}`);
+    process.exit(1);
+  }
 }
 
 // ── the real client, loaded the way check-narrative loads modules ────────────
@@ -241,6 +286,7 @@ try {
 } finally {
   A.client.disconnect();
   B.client.disconnect();
+  if (OWN_ROOM) console.log(`room: ${ROOM} ${await deleteRoom()}`);
 }
 
 console.log(`room: ${checks} checks passed`);

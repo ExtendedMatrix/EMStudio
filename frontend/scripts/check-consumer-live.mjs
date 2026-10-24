@@ -107,7 +107,9 @@ if (!CONSUMER_ID) {
 }
 
 // A throwaway room: an embargo is declared and lifted in it, and doing that in
-// a demo room would leave somebody else's fixture changed.
+// a demo room would leave somebody else's fixture changed. It is DELETED at the
+// end, also when a check fails (MICRO-SUITE-VERDE: until 24 Oct each run left
+// one on the dev node — two hundred and more of them).
 const ROOM = `heriverse-standin-${Math.random().toString(16).slice(2, 10)}`;
 const HTTP = BASE.replace(/^ws/, "http").replace(/\/+$/, "");
 
@@ -135,6 +137,21 @@ async function until(what, predicate, ms = 10000) {
     await new Promise((r) => setTimeout(r, 60));
   }
   throw new Error(`timed out waiting for ${what}`);
+}
+
+/** DELETE the throwaway room: the node refuses (409) while a socket is still
+ *  open, so it asks again for a few seconds; 404 is a room never kept. */
+async function deleteRoom() {
+  for (let i = 0; i < 20; i++) {
+    const r = await fetch(`${HTTP}/v1/rooms/${encodeURIComponent(ROOM)}`, {
+      method: "DELETE", headers: { authorization: `Bearer ${EDITOR}`, "content-type": "application/json" },
+      body: JSON.stringify({ confirm: ROOM }) }).catch((e) => ({ status: 0, text: async () => String(e) }));
+    if (r.status === 200) return "deleted";
+    if (r.status === 404) return "not kept by the node (nothing to delete)";
+    if (r.status !== 409) return `NOT deleted (${r.status} ${(await r.text()).slice(0, 120)})`;
+    await new Promise((res) => setTimeout(res, 500));
+  }
+  return "NOT deleted (somebody still connected after 10 s)";
 }
 
 const stamp = () => new Date().toISOString();
@@ -399,6 +416,7 @@ try {
 } finally {
   try { viewer?.ws.close(); } catch { /* already gone */ }
   editor.disconnect();
+  console.log(`consumer: room ${ROOM} ${await deleteRoom()}`);
 }
 
 console.log(`consumer: ${checks} checks passed`);
