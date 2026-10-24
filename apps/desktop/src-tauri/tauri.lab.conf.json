@@ -1,0 +1,57 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "EMStudio Lab",
+  "identifier": "org.extendedmatrix.emstudio.lab",
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "create": false,
+        "title": "EMStudio Lab",
+        "width": 1440,
+        "height": 920,
+        "minWidth": 800,
+        "minHeight": 500
+      }
+    ]
+  },
+  "bundle": {
+    "icon": [
+      "icons-lab/32x32.png",
+      "icons-lab/128x128.png",
+      "icons-lab/128x128@2x.png",
+      "icons-lab/icon.icns",
+      "icons-lab/icon.ico"
+    ],
+    "fileAssociations": [
+      {
+        "ext": ["emj"],
+        "name": "Extended Matrix document",
+        "description": "Extended Matrix graph (em.json)",
+        "role": "Editor",
+        "rank": "Alternate"
+      },
+      {
+        "ext": ["json"],
+        "contentTypes": ["public.json"],
+        "name": "Extended Matrix graph (em.json)",
+        "description": "Extended Matrix graph (em.json)",
+        "role": "Editor",
+        "rank": "Alternate"
+      }
+    ]
+  },
+  "plugins": {
+    "deep-link": {
+      "//": "EMStudio Lab — an OVERLAY on tauri.conf.json (+ tauri.macos.conf.json), merged by `cargo tauri build --config tauri.lab.conf.json` (JSON Merge Patch: an array here REPLACES the base one). Only `./em.sh labrel` passes it; see docs/LAB.md. What it changes, and why: productName/identifier/icon so the lab app installs BESIDE the public one (its own bundle, its own app-data and WebKit storage, which Tauri derives from the identifier); fileAssociations at rank Alternate so the lab app appears under «Open With» and never becomes the default for .emj/.json; NO deep-link schemes, because `stratigraph://` and `org.extendedmatrix.emstudio:` belong to the public app and two apps claiming one scheme is LaunchServices choosing at random — in the lab app a sign-in is finished by pasting the return address (the paste field is there for exactly this); the updater pointed at the lab repository (main.rs refuses to install updates in a lab build anyway). The bridge's port, keychain entry and state directory are separated in main.rs (`LAB`, compiled in with EMSTUDIO_LAB=1).",
+      "desktop": {
+        "schemes": []
+      }
+    },
+    "updater": {
+      "endpoints": [
+        "https://github.com/ExtendedMatrix/EMStudio-lab/releases/latest/download/latest.json"
+      ]
+    }
+  }
+}

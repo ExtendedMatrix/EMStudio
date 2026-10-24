@@ -20,9 +20,26 @@ use tauri::{Emitter, Manager};
 use tauri_plugin_shell::process::CommandChild;
 use tauri_plugin_shell::ShellExt;
 
+// ── EMStudio Lab (`./em.sh labrel`, docs/LAB.md) ──────────────────────────
+//
+// The lab build is the SAME shell, compiled with `EMSTUDIO_LAB=1` in the
+// environment (labrel sets it; `option_env!` makes cargo rebuild when it
+// changes). It installs BESIDE the public app (its own identifier, from
+// tauri.lab.conf.json) and must not touch it while both run:
+//
+//   * the bridge's port: the public app considers an `em-bridge` on 8765 an
+//     orphan of its own and CLOSES it (`decide_launch`). A lab app on the same
+//     port would kill the public app's bridge, and vice versa — so the lab
+//     starts at 8865, whose 10 fallbacks (…8875) never meet the public ones;
+//   * the keychain entry, and the bridge's state directory (EM_BRIDGE_STATE_DIR,
+//     ~/.config/emstudio-lab): granted folders, geo cache, staging;
+//   * the updater: a lab app never installs a public release over itself.
+const LAB: bool = option_env!("EMSTUDIO_LAB").is_some();
+
 /// Port the local sidecar listens on (matches the frontend browser-dev
-/// default, so `?bridge=`/`EM_BRIDGE` overrides still line up).
-const BRIDGE_PORT_DEFAULT: u16 = 8765;
+/// default, so `?bridge=`/`EM_BRIDGE` overrides still line up). The lab build
+/// uses its own (see `LAB`).
+const BRIDGE_PORT_DEFAULT: u16 = if LAB { 8865 } else { 8765 };
 /// B3 (s3Dgraphy#25, Enzo Cocca) · how many ports after the default are tried
 /// when the default belongs to ANOTHER program (not an em-bridge).
 const BRIDGE_PORT_TRIES: u16 = 10;
@@ -55,7 +72,7 @@ struct BridgeChild(Mutex<Option<CommandChild>>);
 // it, so the frontend says so and the user exports the env var before ./dev.sh.
 // Degrading to "store it in plain text" would be worse than not offering it.
 
-const KEYRING_SERVICE: &str = "org.extendedmatrix.emstudio";
+const KEYRING_SERVICE: &str = if LAB { "org.extendedmatrix.emstudio.lab" } else { "org.extendedmatrix.emstudio" };
 const KEYRING_USER: &str = "anthropic-api-key";
 
 /// What to say when there is no credential store to write to. Names the one
@@ -207,6 +224,13 @@ const RELEASES_REPO: &str = "ExtendedMatrix/EMStudio";
 #[tauri::command]
 async fn update_install(app: tauri::AppHandle, tag: String) -> Result<(), String> {
     use tauri_plugin_updater::UpdaterExt;
+    if LAB {
+        // RELEASES_REPO is the PUBLIC channel: its archive would turn this
+        // EMStudio Lab into the public EMStudio, in place. A lab build is
+        // updated by installing the next `./em.sh labrel` (docs/LAB.md).
+        return Err("EMStudio Lab non si aggiorna da sé: installa la prossima \
+                    release lab (ExtendedMatrix/EMStudio-lab)".to_string());
+    }
     if !tag.chars().all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '-') {
         return Err(format!("not a release tag: {tag}"));
     }
@@ -432,6 +456,14 @@ fn spawn_bridge(app: &tauri::AppHandle) {
     // updater ends the app with `std::process::exit`): an environment variable,
     // so an older sidecar binary is not refused an argument it does not know
     env.insert("EM_BRIDGE_PARENT_PID".to_string(), std::process::id().to_string());
+    // EMStudio Lab · its own state directory (see `LAB`), unless the person
+    // chose one in the environment
+    if LAB && std::env::var_os("EM_BRIDGE_STATE_DIR").is_none() {
+        if let Some(home) = std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE")) {
+            let dir = std::path::Path::new(&home).join(".config").join("emstudio-lab");
+            env.insert("EM_BRIDGE_STATE_DIR".to_string(), dir.to_string_lossy().into_owned());
+        }
+    }
     match cmd
         .args(["--port", &bridge_port().to_string(), "--exit-with-parent"])
         .envs(env)

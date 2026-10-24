@@ -47,6 +47,12 @@
 #                                opens) → inc → commit → tag → push.
 #                                GitHub Actions then builds the three installers.
 #   ./em.sh ghrelease <x.y.z>    A stable release at an exact version.
+#                                devrel and ghrelease REFUSE on branch `lab`.
+#   ./em.sh labrel [--dry-run] [--yes] [--s3d-worktree]
+#                                EMStudio Lab (only on branch `lab`): <x.y.z>-lab.N,
+#                                built HERE (macOS arm64) with the sidecar frozen
+#                                from ../s3Dgraphy-lab, then a PRIVATE pre-release
+#                                on ExtendedMatrix/EMStudio-lab. docs/LAB.md.
 #   ./em.sh help
 #
 # In a DISTRIBUTED build the datamodels are already inlined into dist/index.html
@@ -87,6 +93,19 @@ REPO_URL="$(repo_url)"
 #: (il manuale) senza scriverne il proprietario una seconda volta
 REPO_OWNER="$(printf '%s' "$REPO_URL" | sed -n 's#.*github\.com/\([^/]*\)/.*#\1#p')"
 DOC_URL="https://github.com/${REPO_OWNER:-ExtendedMatrix}/EMStudio-doc"
+
+# ── EMStudio Lab: where the lab lives (docs/LAB.md) ──────────────────────────
+#
+# WRITTEN, not read from a remote, and that is the point: `labrel` must publish
+# to the private lab repository and NOWHERE else, so the destination is a
+# constant that the remote is checked against — never the other way round.
+LAB_BRANCH="lab"
+LAB_REMOTE="lab"
+LAB_REPO="ExtendedMatrix/EMStudio-lab"
+S3D_LAB_REPO="ExtendedMatrix/s3Dgraphy-lab"
+S3D_LAB="${S3DGRAPHY_LAB:-$ROOT/../s3Dgraphy-lab}"
+#: the lab counter: the last lab version released, `x.y.z-lab.N` (committed)
+LAB_COUNTER="$ROOT/.lab-version"
 
 log() { printf '\033[1;36m▸ %s\033[0m\n' "$*"; }
 warn() { printf '\033[1;33m⚠  %s\033[0m\n' "$*" >&2; }
@@ -682,6 +701,25 @@ do_pack() {
 
 # ── the release ──────────────────────────────────────────────────────────────
 
+#: The branch a release guard judges. `EM_GUARD_BRANCH` exists so the guards can
+#: be TESTED without a checkout, and it can only ADD a refusal: every guard asks
+#: the real branch AND the override, and refuses if either says so.
+real_branch() { git -C "$ROOT" branch --show-current; }
+
+#: devrel and ghrelease push to `origin`, the PUBLIC repository. From branch
+#: `lab` that would publish unpublished research (docs/LAB.md): refused, always,
+#: dry run included — before a single gate is asked.
+refuse_public_release_on_lab() {
+  local what="$1" b
+  for b in "$(real_branch)" "${EM_GUARD_BRANCH:-}"; do
+    if [[ "$b" == "$LAB_BRANCH" ]]; then
+      die "$what refuses on branch '$LAB_BRANCH': it would publish to origin \
+($REPO_URL), the PUBLIC repository, work that stays private until its paper is \
+out. The lab's release is ./em.sh labrel (docs/LAB.md)."
+    fi
+  done
+}
+
 require_clean_tree() {
   [[ -z "$(git -C "$ROOT" status --porcelain)" ]] || die "the working tree is not \
 clean. A release tags what is COMMITTED; anything else would produce a build that \
@@ -689,6 +727,7 @@ does not exist in any commit."
 }
 
 do_devrel() {
+  refuse_public_release_on_lab "devrel"
   local dry=0 assume_yes=0 if_changed=0
   for arg in "$@"; do
     case "$arg" in
@@ -774,6 +813,7 @@ do_devrel() {
 }
 
 do_ghrelease() {
+  refuse_public_release_on_lab "ghrelease"
   local version="${1:-}"
   [[ -n "$version" ]] || die "usage: ./em.sh ghrelease <x.y.z>   (an exact, \
 stable version — a dev release is ./em.sh devrel)"
@@ -794,6 +834,306 @@ x.y.z — a dev build is what ./em.sh devrel is for"
   git -C "$ROOT" push origin "$branch"
   git -C "$ROOT" push origin "v$version"
   log "pushed v$version — $REPO_URL/releases/tag/v$version"
+}
+
+# ── EMStudio Lab: the private release (docs/LAB.md) ──────────────────────────
+#
+# `./em.sh labrel [--dry-run] [--yes] [--s3d-worktree]`, on branch `lab` only.
+#
+#   version   <x.y.z>-lab.N — x.y.z is the numeric core of the committed version
+#             (1.6.0-dev.70 → 1.6.0), N the lab's OWN counter, in .lab-version
+#             (the last lab version released; it restarts at 1 when x.y.z moves).
+#             The version files get it only for the length of the build and are
+#             PUT BACK afterwards, dry run or not: a committed `-lab.N` in
+#             package.json/Cargo.toml would conflict with every `merge main`.
+#   sidecar   frozen from s3dgraphy installed (NOT editable) out of
+#             ../s3Dgraphy-lab — its committed HEAD, or with --s3d-worktree its
+#             working tree as it is — in a venv of its own, never from PyPI.
+#   app       `cargo tauri build --config tauri.lab.conf.json` with EMSTUDIO_LAB=1:
+#             «EMStudio Lab», org.extendedmatrix.emstudio.lab, its own icon, port,
+#             keychain entry and state dir — installable beside the public app.
+#             This Mac only (arm64); the .dmg is made with hdiutil.
+#   release   commit .lab-version · push branch `lab` to the remote `lab` ·
+#             `gh release create lab-v<version> -R ExtendedMatrix/EMStudio-lab
+#             --prerelease`. The tag is created ON GITHUB by gh (--target), not in
+#             this repository: the lab worktree shares its tags with the public
+#             checkout, and a local lab tag is one `git push --tags` from origin.
+#             `lab-v…` and not `v…`: a `v*` tag starts release.yml and immagine.yml.
+#
+# --dry-run  every guard and gate, the version, the WHOLE local build (sidecar,
+#            app, .dmg); then it prints the commit/push/release it would do and
+#            does none of them. No commit, no tag, no push; the version files are
+#            put back.
+# --yes      no question before building and publishing.
+
+#: `https://github.com/O/R(.git)` · `git@github.com:O/R(.git)` → `o/r`
+gh_slug() {
+  local u="${1%.git}"
+  u="${u#git@github.com:}"
+  u="${u#ssh://git@github.com/}"
+  u="${u#https://github.com/}"
+  u="${u#http://github.com/}"
+  printf '%s' "$u" | tr '[:upper:]' '[:lower:]'
+}
+
+#: refuse unless remote <name> of repo <dir> fetches AND pushes to <owner/repo>
+require_remote_is() {
+  local dir="$1" remote="$2" want="$3" url kind
+  for kind in fetch push; do
+    if [[ "$kind" == push ]]; then
+      url="$(git -C "$dir" remote get-url --push "$remote" 2>/dev/null || true)"
+    else
+      url="$(git -C "$dir" remote get-url "$remote" 2>/dev/null || true)"
+    fi
+    [[ -n "$url" ]] || die "no remote '$remote' in $dir — it must be $want (docs/LAB.md)"
+    if [[ "$(gh_slug "$url")" != "$(printf '%s' "$want" | tr '[:upper:]' '[:lower:]')" ]]; then
+      die "remote '$remote' of $dir ${kind}es $url, not github.com/$want — labrel \
+publishes ONLY to $want, and refuses a remote that says otherwise"
+    fi
+  done
+}
+
+#: the lab version this run will produce, from the committed version and the counter
+next_lab_version() {
+  local base last n=1
+  base="$(app_version)"; base="${base%%-*}"
+  [[ "$base" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || die "cannot read x.y.z out of $(app_version)"
+  if [[ -f "$LAB_COUNTER" ]]; then
+    last="$(tr -d ' \n\r' < "$LAB_COUNTER")"
+    [[ "$last" =~ ^([0-9]+\.[0-9]+\.[0-9]+)-lab\.([0-9]+)$ ]] \
+      || die ".lab-version says '$last', not x.y.z-lab.N"
+    if [[ "${BASH_REMATCH[1]}" == "$base" ]]; then n=$(( ${BASH_REMATCH[2]} + 1 )); fi
+  fi
+  printf '%s-lab.%s' "$base" "$n"
+}
+
+#: The four files a build writes a version into. Saved before, put back after —
+#: by the trap too, so an interrupted build does not leave `-lab.N` behind.
+LAB_SAVED=""
+lab_version_files=(frontend/package.json apps/desktop/src-tauri/Cargo.toml
+                   apps/desktop/src-tauri/tauri.conf.json apps/desktop/src-tauri/Cargo.lock)
+lab_save_versions() {
+  LAB_SAVED="$1/saved-versions"
+  local f
+  for f in "${lab_version_files[@]}"; do
+    mkdir -p "$LAB_SAVED/$(dirname "$f")"
+    cp -p "$ROOT/$f" "$LAB_SAVED/$f"
+  done
+}
+lab_restore_versions() {
+  [[ -n "$LAB_SAVED" && -d "$LAB_SAVED" ]] || return 0
+  local f
+  for f in "${lab_version_files[@]}"; do
+    if ! cmp -s "$LAB_SAVED/$f" "$ROOT/$f"; then cp -p "$LAB_SAVED/$f" "$ROOT/$f"; fi
+  done
+  LAB_SAVED=""
+  log "version files put back ($(app_version))"
+}
+
+do_labrel() {
+  local dry=0 assume_yes=0 s3d_worktree=0 arg
+  for arg in "$@"; do
+    case "$arg" in
+      --dry-run) dry=1 ;;
+      --yes | -y) assume_yes=1 ;;
+      --s3d-worktree) s3d_worktree=1 ;;
+      *) die "unknown option for labrel: $arg" ;;
+    esac
+  done
+
+  # ── guards: nothing is read, built or written before these ──
+  local b
+  for b in "$(real_branch)" ${EM_GUARD_BRANCH+"$EM_GUARD_BRANCH"}; do
+    [[ "$b" == "$LAB_BRANCH" ]] || die "labrel runs only on branch '$LAB_BRANCH' \
+(this is '${b:-a detached HEAD}'): a lab release is built from the lab and from \
+nothing else. docs/LAB.md"
+  done
+  require_remote_is "$ROOT" "$LAB_REMOTE" "$LAB_REPO"
+  [[ -d "$S3D_LAB/.git" || -f "$S3D_LAB/.git" ]] || die "no s3Dgraphy-lab checkout at \
+$S3D_LAB (set S3DGRAPHY_LAB=…)"
+  [[ "$(git -C "$S3D_LAB" branch --show-current)" == "$LAB_BRANCH" ]] || die \
+    "$S3D_LAB is not on branch '$LAB_BRANCH' — the sidecar is frozen from the lab's s3dgraphy"
+  require_remote_is "$S3D_LAB" "$LAB_REMOTE" "$S3D_LAB_REPO"
+  [[ "$(uname -s)/$(uname -m)" == "Darwin/arm64" ]] || die "labrel builds for macOS \
+arm64 (this machine is $(uname -s)/$(uname -m))"
+
+  # cargo is often not on a non-login PATH (rustup puts it in ~/.cargo/bin)
+  command -v cargo >/dev/null 2>&1 || PATH="$HOME/.cargo/bin:$PATH"
+  command -v cargo >/dev/null 2>&1 || die "cargo not found (rustup, ~/.cargo/bin)"
+  cargo tauri --version >/dev/null 2>&1 || die "cargo-tauri not found (cargo install tauri-cli)"
+  local py="${LAB_PYTHON:-}"
+  if [[ -z "$py" ]]; then
+    for py in python3.12 python3.11 python3; do command -v "$py" >/dev/null 2>&1 && break; done
+  fi
+  command -v "$py" >/dev/null 2>&1 || die "no python for the sidecar's venv (set LAB_PYTHON=…)"
+
+  local version tag em_sha s3d_sha s3d_dirty s3d_from
+  version="$(next_lab_version)"
+  tag="lab-v$version"
+  em_sha="$(git -C "$ROOT" rev-parse --short HEAD)"
+  s3d_sha="$(git -C "$S3D_LAB" rev-parse --short HEAD)"
+  s3d_dirty="$(git -C "$S3D_LAB" status --porcelain | grep -c . || true)"
+  if [[ "$s3d_worktree" -eq 1 ]]; then
+    s3d_from="s3Dgraphy-lab WORKING TREE at $s3d_sha (+$s3d_dirty uncommitted path(s))"
+  else
+    s3d_from="s3Dgraphy-lab HEAD $s3d_sha (committed only)"
+  fi
+
+  if [[ "$dry" -eq 0 ]]; then
+    require_clean_tree
+    command -v gh >/dev/null 2>&1 || die "gh not found: the release is made with the GitHub CLI"
+    gh auth status >/dev/null 2>&1 || die "gh is not signed in (gh auth login)"
+    local private
+    private="$(gh repo view "$LAB_REPO" --json isPrivate -q .isPrivate 2>/dev/null || true)"
+    [[ "$private" == "true" ]] || die "$LAB_REPO is not reachable as a PRIVATE \
+repository (gh says isPrivate='$private') — a lab release is published to a private \
+repository or not at all"
+    if gh release view "$tag" -R "$LAB_REPO" >/dev/null 2>&1; then
+      die "$LAB_REPO already has a release $tag — is .lab-version behind? (it says \
+$(cat "$LAB_COUNTER" 2>/dev/null || echo nothing))"
+    fi
+  elif [[ -n "$(git -C "$ROOT" status --porcelain)" ]]; then
+    warn "the working tree is not clean: this DRY RUN builds it as it is (a real \
+labrel refuses until it is committed)"
+  fi
+
+  local out="$ROOT/apps/desktop/src-tauri/target/labrel"
+  local dmg="$out/EMStudio-Lab_${version}_aarch64.dmg"
+  echo "════════════════════════════════════════════"
+  echo "  EMStudio Lab release$( [[ "$dry" -eq 1 ]] && echo '   (DRY RUN)')"
+  echo "════════════════════════════════════════════"
+  echo "  branch        $(real_branch) @ $em_sha"
+  echo "  version       $(app_version) → $version   (counter: .lab-version)"
+  echo "  app           EMStudio Lab · org.extendedmatrix.emstudio.lab · macOS arm64"
+  echo "  s3dgraphy     $s3d_from"
+  echo "  gates         the app opens in a browser"
+  echo "  build         sidecar (PyInstaller) · cargo tauri build --config tauri.lab.conf.json"
+  echo "  installer     $dmg"
+  if [[ "$dry" -eq 1 ]]; then
+    echo "  then          NOTHING: no commit, no push, no release (dry run)"
+  else
+    echo "  then          commit .lab-version · git push $LAB_REMOTE $LAB_BRANCH"
+    echo "                gh release create $tag -R $LAB_REPO --prerelease"
+  fi
+  echo "════════════════════════════════════════════"
+  if [[ "$s3d_worktree" -eq 0 && "$s3d_dirty" -gt 0 ]]; then
+    warn "s3Dgraphy-lab has $s3d_dirty uncommitted path(s): they are NOT in this \
+build (commit them there, or pass --s3d-worktree)"
+  fi
+
+  # the gate devrel has too; frontend deps from the lockfile, never re-resolved
+  if [ ! -d "$FE/node_modules" ]; then
+    log "installing frontend deps (npm ci)"
+    (cd "$FE" && npm ci)
+  fi
+  if [[ -z "${PLAYWRIGHT_CORE:-}" ]]; then
+    local pw="$ROOT/../EMStudio/.claude/wip/reports/2026-10-08-audit-interazioni/node_modules/playwright-core/index.js"
+    [[ -f "$pw" ]] && export PLAYWRIGHT_CORE="$pw"
+  fi
+  do_apertura
+
+  if [[ "$dry" -eq 0 && "$assume_yes" -eq 0 ]]; then
+    printf 'Build EMStudio Lab %s and publish it to %s? (y/N): ' "$version" "$LAB_REPO"
+    local reply
+    read -r reply
+    [[ "$reply" =~ ^[Yy]$ ]] || { log "cancelled"; return 0; }
+  fi
+
+  # ── the build ──
+  local work
+  work="$(mktemp -d "${TMPDIR:-/tmp}/emstudio-labrel.XXXXXX")"
+  lab_save_versions "$work"
+  trap 'lab_restore_versions' EXIT
+  trap 'exit 130' INT TERM
+  log "set the version for the build: $version"
+  node "$ROOT/scripts/set-version.mjs" "$version" >/dev/null
+
+  log "s3dgraphy from $s3d_from"
+  mkdir -p "$work/s3d-src"
+  if [[ "$s3d_worktree" -eq 1 ]]; then
+    rsync -a --exclude .git --exclude .venv --exclude build --exclude dist \
+      --exclude '*.egg-info' --exclude __pycache__ "$S3D_LAB/" "$work/s3d-src/"
+  else
+    git -C "$S3D_LAB" archive --format=tar HEAD | tar -x -C "$work/s3d-src"
+  fi
+  local venv="${LAB_VENV:-$HOME/.cache/emstudio-labrel/venv}" vpy
+  vpy="$venv/bin/python"
+  if [[ ! -x "$vpy" ]]; then
+    log "sidecar venv: $venv ($("$py" --version))"
+    mkdir -p "$(dirname "$venv")"
+    "$py" -m venv "$venv"
+    "$vpy" -m pip install --quiet --upgrade pip
+  fi
+  # the deps (and the extras) with the package, then the package alone and
+  # FORCED: the lab keeps one version string across many commits, and pip
+  # would otherwise call an older install of the same version "satisfied"
+  "$vpy" -m pip install --quiet "$work/s3d-src[geo,rdf]" \
+    pyinstaller pandas lxml python-docx Pillow certifi
+  "$vpy" -m pip install --quiet --no-deps --force-reinstall "$work/s3d-src"
+  local pkg s3d_version
+  pkg="$("$vpy" -c 'import s3dgraphy, os; print(os.path.dirname(s3dgraphy.__file__))')"
+  [[ "$pkg" == "$venv"/* ]] || die "s3dgraphy resolves to $pkg, outside the build venv \
+(an editable install?) — the sidecar would not freeze what was installed"
+  s3d_version="$("$vpy" -c 'from importlib.metadata import version; print(version("s3dgraphy"))')"
+  log "sidecar freezes s3dgraphy $s3d_version ($s3d_from)"
+  # build-bridge.sh reads a CHECKOUT layout: the installed package laid out as
+  # one, exactly as release.yml does with the PyPI wheel
+  mkdir -p "$work/shim/src"
+  cp -R "$pkg" "$work/shim/src/s3dgraphy"
+  (cd "$ROOT/apps/desktop" && PYTHON="$vpy" S3DGRAPHY="$work/shim" ./build-bridge.sh)
+
+  log "desktop bundle: EMStudio Lab (cargo tauri build --config tauri.lab.conf.json)"
+  (cd "$ROOT/apps/desktop" && EMSTUDIO_LAB=1 cargo tauri build \
+     --config "$ROOT/apps/desktop/src-tauri/tauri.lab.conf.json" --bundles app)
+  local app="$ROOT/apps/desktop/src-tauri/target/release/bundle/macos/EMStudio Lab.app"
+  [[ -d "$app" ]] || die "no bundle at $app"
+  local bid
+  bid="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$app/Contents/Info.plist")"
+  [[ "$bid" == "org.extendedmatrix.emstudio.lab" ]] || die "the bundle says $bid, \
+not org.extendedmatrix.emstudio.lab — it would replace the public app"
+  if /usr/libexec/PlistBuddy -c 'Print :CFBundleURLTypes:0' "$app/Contents/Info.plist" >/dev/null 2>&1; then
+    die "the lab bundle claims URL schemes (CFBundleURLTypes): they belong to the public app"
+  fi
+  lab_restore_versions
+
+  log "installer: $dmg"
+  mkdir -p "$out" "$work/dmg"
+  ditto "$app" "$work/dmg/EMStudio Lab.app"
+  ln -s /Applications "$work/dmg/Applications"
+  hdiutil create -quiet -volname "EMStudio Lab $version" -srcfolder "$work/dmg" \
+    -ov -format UDZO "$dmg"
+  rm -rf "$work"
+
+  local notes
+  notes="EMStudio Lab $version — PRIVATE, unpublished research (docs/LAB.md).
+macOS arm64 only, built locally, unsigned (right-click ▸ Open the first time).
+Installs beside the public EMStudio: org.extendedmatrix.emstudio.lab, bridge on :8865.
+
+- EMStudio-lab: $(git -C "$ROOT" rev-parse HEAD)
+- s3dgraphy $s3d_version from $s3d_from: $(git -C "$S3D_LAB" rev-parse HEAD)"
+
+  if [[ "$dry" -eq 1 ]]; then
+    echo
+    log "dry run: built, and NOTHING committed, pushed or released. A real run would now:"
+    echo "   printf '%s\n' $version > .lab-version"
+    echo "   git add .lab-version && git commit -m \"build: lab release $version\""
+    echo "   git push $LAB_REMOTE $LAB_BRANCH"
+    echo "   gh release create $tag '$dmg' -R $LAB_REPO --prerelease \\"
+    echo "      --target <that commit> --title 'EMStudio Lab $version' --notes …"
+    echo
+    echo "   app        $app"
+    echo "   installer  $dmg"
+    return 0
+  fi
+
+  printf '%s\n' "$version" > "$LAB_COUNTER"
+  git -C "$ROOT" add .lab-version
+  git -C "$ROOT" commit -m "build: lab release $version"
+  git -C "$ROOT" push "$LAB_REMOTE" "$LAB_BRANCH"
+  gh release create "$tag" "$dmg" -R "$LAB_REPO" --prerelease \
+    --target "$(git -C "$ROOT" rev-parse HEAD)" \
+    --title "EMStudio Lab $version" --notes "$notes"
+  log "released $tag — https://github.com/$LAB_REPO/releases/tag/$tag"
 }
 
 # ── dispatch ─────────────────────────────────────────────────────────────────
@@ -826,6 +1166,7 @@ case "$cmd" in
   apertura) do_apertura ;;
   devrel) do_devrel "$@" ;;
   ghrelease) do_ghrelease "$@" ;;
+  labrel) do_labrel "$@" ;;
   help | -h | --help) usage ;;
   *)
     warn "unknown command: $cmd"

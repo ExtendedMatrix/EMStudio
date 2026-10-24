@@ -60,8 +60,12 @@ const PACKAGE_JSON = join(ROOT, "frontend", "package.json");
 const CARGO_TOML = join(ROOT, "apps", "desktop", "src-tauri", "Cargo.toml");
 const TAURI_CONF = join(ROOT, "apps", "desktop", "src-tauri", "tauri.conf.json");
 
-/** semver with an optional `-dev.N` (the only pre-release form this app uses). */
-const VERSION_RE = /^(\d+)\.(\d+)\.(\d+)(?:-dev\.(\d+))?$/;
+/**
+ * semver with an optional `-dev.N` — or `-lab.N`, which only `./em.sh labrel`
+ * sets, for the length of a local build of EMStudio Lab, and puts back
+ * afterwards (docs/LAB.md): no committed file ever carries it.
+ */
+const VERSION_RE = /^(\d+)\.(\d+)\.(\d+)(?:-(dev|lab)\.(\d+))?$/;
 
 function fail(message) {
   console.error(`error: ${message}`);
@@ -91,12 +95,16 @@ function readCurrent() {
 function bumpDev(version) {
   const m = VERSION_RE.exec(version);
   if (!m) fail(`cannot bump ${version}: not x.y.z or x.y.z-dev.N`);
+  if (m[4] === "lab") {
+    fail(`cannot bump the dev counter of ${version}: a lab version is set only for `
+         + "the length of a labrel build — put the committed version back first");
+  }
   if (m[4] === undefined) {
     // A release with no dev counter starts one rather than inventing a patch
     // bump: "the next dev build of this version" is what the caller asked for.
     return `${m[1]}.${m[2]}.${m[3]}-dev.1`;
   }
-  return `${m[1]}.${m[2]}.${m[3]}-dev.${Number(m[4]) + 1}`;
+  return `${m[1]}.${m[2]}.${m[3]}-dev.${Number(m[5]) + 1}`;
 }
 
 /** Rewrite the crate version, and ONLY the one under [package]. */
@@ -159,7 +167,7 @@ if (rest.includes("--bump-dev")) {
   target = rest.find((a) => !a.startsWith("--"));
   if (!target) fail("give a version, or --bump-dev");
   if (!VERSION_RE.test(target)) {
-    fail(`"${target}" is not x.y.z or x.y.z-dev.N (the only forms this app uses)`);
+    fail(`"${target}" is not x.y.z, x.y.z-dev.N or x.y.z-lab.N (the only forms this app uses)`);
   }
 }
 
