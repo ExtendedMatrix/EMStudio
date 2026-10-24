@@ -23,7 +23,7 @@
 // (one epoch inside another, one that overhangs its neighbour by 20 years).
 import { createRequire } from "node:module";
 import { execFileSync } from "node:child_process";
-import { readFileSync, writeFileSync, existsSync, mkdirSync, copyFileSync } from "node:fs";
+import { readFileSync, writeFileSync, existsSync, mkdirSync, copyFileSync, realpathSync } from "node:fs";
 
 const require = createRequire(import.meta.url);
 const TD = new URL("../testdata/", import.meta.url).pathname;
@@ -32,6 +32,11 @@ const BRIDGE = process.env.BRIDGE ?? "http://localhost:8768";
 const CHR = process.env.CHR ??
   `${process.env.HOME}/Library/Caches/ms-playwright/chromium_headless_shell-1243/chrome-headless-shell-mac-arm64/chrome-headless-shell`;
 const FS_ROOT = process.env.FS_ROOT ?? null; // the bridge's fs-root, to reset the folders
+// MICRO-SUITE-VERDE (24 Oct) · the studies a case opens are given by the bench
+// (`scripts/suite-bench.mjs` clones them each run and sets these variables), or
+// by hand; never read from a copy a past session left in /tmp. Unset, the path
+// says so, and the case that needs it fails saying it is missing.
+const benchFile = (name) => process.env[name] ?? `(${name} unset: run scripts/suite-bench.mjs)`;
 
 async function playwright() {
   const tries = [process.env.PLAYWRIGHT_CORE, "playwright-core",
@@ -68,6 +73,10 @@ async function open({ doc = "catena", locale = "it", w = 1600, h = 1000, ws, ini
   const errors = [];
   p.on("pageerror", (e) => errors.push(String(e).slice(0, 300)));
   await p.addInitScript(([d, loc, extra]) => {
+    // the Resource Timing buffer holds 250 entries by default, and the dev
+    // server's modules fill it before a case asks for a file: the cases that
+    // read what the page fetched saw nothing (MICRO-SUITE-VERDE)
+    try { performance.setResourceTimingBufferSize(20000); } catch { /* old engine */ }
     if (d) window.__EM_TEST_DATA__ = d;
     try {
       if (!sessionStorage.getItem("probe")) {
@@ -3681,7 +3690,9 @@ test("R2.declared", "padre dichiarato · una tile timbrata col padre datablock (
   const stamp = existsSync(sidecar) ? JSON.parse(readFileSync(sidecar, "utf8")) : null;
   // saved, and reopened
   const saved = await p.evaluate(() => window.__EM_DRAG__.docJson());
-  if (process.env.SHOTS) writeFileSync(`${process.env.SHOTS}/../dbg/saved-declared.em.json`, saved);
+  // (a copy to look at, beside the shots: the folder is made here — it was
+  // expected to exist, and the case failed where it did not)
+  if (process.env.SHOTS) { mkdirSync(`${process.env.SHOTS}/../dbg`, { recursive: true }); writeFileSync(`${process.env.SHOTS}/../dbg/saved-declared.em.json`, saved); }
   const toasts = await p.evaluate(() => [...document.querySelectorAll(".toast, #toast, [data-toast]")].map((x) => x.textContent).slice(-4));
   const savedKeys = (() => { try { const d = JSON.parse(saved); return { graphs: Object.keys(d.graphs ?? {}), declared: saved.includes("declared_only") }; } catch { return null; } })();
   await ctx.close();
@@ -4346,7 +4357,8 @@ test("W07.scan", "U7 · «Scansiona come DosCo…» è sulla cartella dello Stor
     folder: document.getElementById("res-folder").value, dup: [...document.querySelectorAll("#res-shelf .res-note")].some((n) => n.dataset.dupId === "D.04") }));
   await p.screenshot({ path: SHOT("w07-scansiona-dosco") }).catch(() => {});
   await ctx.close();
-  return { pass: onShelf === 1 && r.open && r.folder === dir && r.dup && !errors.length, detail: { onShelf, r, errors } };
+  // the folder as the bridge names it: /tmp is /private/tmp on macOS
+  return { pass: onShelf === 1 && r.open && [dir, realpathSync(dir)].includes(r.folder) && r.dup && !errors.length, detail: { onShelf, r, errors } };
 });
 
 test("W08.save", "U8 · nel desktop, dopo «Salva come» e un cambio di grafo, «Salva» scrive sul file aperto senza riaprire il dialogo", async () => {
@@ -4759,7 +4771,7 @@ test("G3.seed", "G3 · un file VECCHIO il cui layout è del SEME, non del grafo 
 });
 
 test("G3.real", "G3 · San Pietro com'era (copia di Tempio_Giunone_Moneta.em.json prima della pulizia), ⌘S: ogni grafo ha nella sua sezione le posizioni dei SUOI nodi; il Tempio le ha tutte", async () => {
-  const at = process.env.G3_FILE ?? "/tmp/dev33-banco/G3-sanpietro.em.json";
+  const at = benchFile("G3_FILE");
   if (!existsSync(at)) return { pass: false, detail: { missing: at } };
   const doc = JSON.parse(readFileSync(at, "utf8"));
   const { writes, errors, log, out } = await g3Save(doc, at);
@@ -4970,14 +4982,14 @@ test("X1.blocked", "X1 · in Standalone, Inspector di un'unità: «Model the pro
       && r.fix === "Connect to Blender" && !errors.length, detail: { r, errors } };
 });
 
-const TEMPIO = process.env.TEMPIO_FILE ?? "/tmp/dev33-banco/tempio.em.json";
+const TEMPIO = benchFile("TEMPIO_FILE");
 test("TI3.ids", "T-I3 · Tempio (copia), Inspector di USM01b: con «Show node UUIDs» spento nessun graph_id né original_id, la grafica yEd dietro «Technical details» chiuso, niente label né stratigraphic_kind doppi; acceso, gli id ci sono (dentro «Technical details»)", async () => {
   if (!existsSync(TEMPIO)) return { pass: false, detail: { missing: TEMPIO } };
   const run = async (showIds) => {
     const { p, ctx, errors } = await open({ doc: null, locale: "en",
       init: { "emstudio.settings": JSON.stringify({ developer: { showNodeIds: showIds } }) } });
     await p.waitForFunction(() => !!window.__EM_DRAG__, null, { timeout: 20000 });
-    await p.evaluate(([d]) => window.__EM_DRAG__.openAt(d, "/tmp/dev33-banco/tempio.em.json"), [JSON.parse(readFileSync(TEMPIO, "utf8"))]);
+    await p.evaluate(([d, at]) => window.__EM_DRAG__.openAt(d, at), [JSON.parse(readFileSync(TEMPIO, "utf8")), TEMPIO]);
     await p.waitForTimeout(3000);
     await pick(p, "698e2c22-2e87-4773-97d4-c3107fc63fe9");
     const r = await p.evaluate(() => {
@@ -5004,7 +5016,7 @@ test("TT1.undated", "T-T1 · Tempio (copia, nessuna epoca con date): «Check the
   if (!existsSync(TEMPIO)) return { pass: false, detail: { missing: TEMPIO } };
   const { p, ctx, errors } = await open({ doc: null, locale: "en" });
   await p.waitForFunction(() => !!window.__EM_DRAG__, null, { timeout: 20000 });
-  await p.evaluate(([d]) => window.__EM_DRAG__.openAt(d, "/tmp/dev33-banco/tempio.em.json"), [JSON.parse(readFileSync(TEMPIO, "utf8"))]);
+  await p.evaluate(([d, at]) => window.__EM_DRAG__.openAt(d, at), [JSON.parse(readFileSync(TEMPIO, "utf8")), TEMPIO]);
   await p.waitForTimeout(3000);
   await openChrono(p);
   await p.waitForTimeout(600);
@@ -5052,7 +5064,7 @@ test("I5.click", "I5 · Tempio (copia), Matrix: un clic sinistro sul riquadro di
   if (!existsSync(TEMPIO)) return { pass: false, detail: { missing: TEMPIO } };
   const { p, ctx, errors } = await open({ doc: null, locale: "en" });
   await p.waitForFunction(() => !!window.__EM_DRAG__, null, { timeout: 20000 });
-  await p.evaluate(([d]) => window.__EM_DRAG__.openAt(d, "/tmp/dev33-banco/tempio.em.json"), [JSON.parse(readFileSync(TEMPIO, "utf8"))]);
+  await p.evaluate(([d, at]) => window.__EM_DRAG__.openAt(d, at), [JSON.parse(readFileSync(TEMPIO, "utf8")), TEMPIO]);
   await p.waitForTimeout(3500);
   const win = await winOf(p, "graph");
   const ws = await p.evaluate((w) => window.__EM_DRAG__.winScene(w), win);
@@ -5111,7 +5123,7 @@ test("TI2.contrast", "T-I2 · Tempio (copia), Inspector di USM01b e di USM05: og
   const run = async (theme) => {
     const { p, ctx, errors } = await open({ doc: null, locale: "en", init: { "emstudio.theme": theme } });
     await p.waitForFunction(() => !!window.__EM_DRAG__, null, { timeout: 20000 });
-    await p.evaluate(([d]) => window.__EM_DRAG__.openAt(d, "/tmp/dev33-banco/tempio.em.json"), [JSON.parse(readFileSync(TEMPIO, "utf8"))]);
+    await p.evaluate(([d, at]) => window.__EM_DRAG__.openAt(d, at), [JSON.parse(readFileSync(TEMPIO, "utf8")), TEMPIO]);
     await p.waitForTimeout(3000);
     const ids = await p.evaluate(() => JSON.parse(window.__EM_DRAG__.graphJson()).nodes.filter((n) => ["USM01b", "USM05"].includes(n.name)).map((n) => n.id));
     const rows = [];
@@ -5142,7 +5154,7 @@ test("TW1.order", "T-W1/W2/W3 · Tempio (copia), Warnings: la prima riga è l'av
   if (!existsSync(TEMPIO)) return { pass: false, detail: { missing: TEMPIO } };
   const { p, ctx, errors } = await open({ doc: null, locale: "en" });
   await p.waitForFunction(() => !!window.__EM_DRAG__, null, { timeout: 20000 });
-  await p.evaluate(([d]) => window.__EM_DRAG__.openAt(d, "/tmp/dev33-banco/tempio.em.json"), [JSON.parse(readFileSync(TEMPIO, "utf8"))]);
+  await p.evaluate(([d, at]) => window.__EM_DRAG__.openAt(d, at), [JSON.parse(readFileSync(TEMPIO, "utf8")), TEMPIO]);
   await p.waitForTimeout(3000);
   await p.click("#footer-warnings");
   await p.waitForTimeout(300);
@@ -5171,7 +5183,7 @@ test("TW1.order", "T-W1/W2/W3 · Tempio (copia), Warnings: la prima riga è l'av
 });
 
 test("G4.lanes", "G4 · San Pietro come la dev.17 l'aveva salvato (A_sanpietro, copia): nessuna corsia ha per nome un id; un'epoca senza nome è «Unnamed epoch · click to name it» e il clic sulla sua etichetta porta al campo del nome", async () => {
-  const at = "/tmp/dev33-banco/A_sanpietro.em.json";
+  const at = benchFile("A_SANPIETRO");
   if (!existsSync(at)) return { pass: false, detail: { missing: at } };
   const { p, ctx, errors } = await open({ doc: null, locale: "en" });
   await p.waitForFunction(() => !!window.__EM_DRAG__, null, { timeout: 20000 });
@@ -5198,7 +5210,7 @@ test("G4.lanes", "G4 · San Pietro come la dev.17 l'aveva salvato (A_sanpietro, 
 });
 
 test("G5.empty", "G5 · San Pietro com'era (copia): all'apertura l'«untitled graph» vuoto è proposto per la rimozione con una domanda (Log + «Remove it»/«Keep it»), mai tolto da solo; «Remove it» e ⌘S: il file ha solo il Tempio", async () => {
-  const at = process.env.G3_FILE ?? "/tmp/dev33-banco/G3-sanpietro.em.json";
+  const at = benchFile("G3_FILE");
   if (!existsSync(at)) return { pass: false, detail: { missing: at } };
   const doc = JSON.parse(readFileSync(at, "utf8"));
   const { p, ctx, errors } = await open({ doc: null, locale: "en", hook: tauriWrites() });
@@ -7066,7 +7078,7 @@ test("NB3.index", "NARRATIVA-BLOCCHI p.3 · una narrativa esistente non si tocca
 // VU1–VU3 need the Templu Mare v3.3 (a copy: `VIEWER_V33`) and a bridge that
 // serves its folder (`VIEWER_BRIDGE`, e.g. `em_bridge.py --fs-root /tmp/viewer`);
 // without them they say so and fail — the files are the case.
-const V33 = process.env.VIEWER_V33 ?? "/tmp/viewer/EM/TempluMare_v3.3.em.json";
+const V33 = benchFile("VIEWER_V33");
 const V33_BRIDGE = process.env.VIEWER_BRIDGE ?? BRIDGE;
 async function openV33(extra = {}) {
   if (!existsSync(V33)) throw new Error(`the v3.3 copy is not at ${V33}`);
@@ -8171,7 +8183,7 @@ test("PO3.menu", "PANNELLI-OVERLAY p.3 · il «⋯» del Tabular: senza em.json 
 });
 
 // p.4 needs the GT16 (Templu Mare v4, a COPY: `PANNELLI_V4`)
-const PO_V4 = process.env.PANNELLI_V4 ?? "/tmp/pannelli/EM/TempluMare_v4.em.json";
+const PO_V4 = benchFile("PANNELLI_V4");
 const poName = (p) => p.evaluate(() => { const id = window.__EM_DRAG__.selected()[0]; return id ? String(window.__EM_DRAG__.node(id)?.name ?? id) : null; });
 const poInspector = (p) => p.evaluate(() => document.querySelector('.tile-area[data-win="space:inspector"] .insp-name-row .insp-name-input')?.value
   ?? document.querySelector('.tile-area[data-win="space:inspector"] .insp-name-row')?.textContent?.trim() ?? null);
@@ -8238,7 +8250,7 @@ test("PO4.arrows", "PANNELLI-OVERLAY p.4 · le frecce nelle liste: GT16, Tabular
 });
 
 // ── MICRO-GLIFI-OVERLAY-CONTINUITA · the GT16 (Templu Mare v4, a COPY: `GLIFI_V4`) ──
-const GL_V4 = process.env.GLIFI_V4 ?? "/tmp/glifi/EM/TempluMare_v4.em.json";
+const GL_V4 = benchFile("GLIFI_V4");
 const glOpen = async () => {
   const o = await open({ doc: null, locale: "en", w: 1728, h: 1000 });
   await o.p.evaluate(([d, path]) => window.__EM_DRAG__.openAt(d, path), [JSON.parse(readFileSync(GL_V4, "utf8")), GL_V4]);
@@ -8755,7 +8767,44 @@ if (K_NODE && process.env.CORSIA_ROOM) test("GL6.live", "CORSIA p.2 dal vivo · 
 // arrival sees them; a frame does not move the node under somebody's hand
 const LAY_NODE = (process.env.LAYOUT_NODE ?? "").replace(/\/+$/, "");
 const LAY_ROOM = process.env.LAYOUT_ROOM ?? "";
-if (LAY_NODE && LAY_ROOM) test("GL7.room", "STANZA-POSIZIONI · istanza di prova del server con «layout», la stanza del GT16: A trascina un'unità della Matrix e il combinatore nel gruppo PD di VSF125 → B vede entrambi; B esce e rientra, restano; C che entra dopo li vede; un frame che arriva mentre B tiene l'unità in mano non la sposta, al rilascio vince B e A lo vede; «Layout» di A arriva intero e le tre Matrix restano uguali; un frame per rilascio, nessuna operazione di grafo; la stanza le tiene (lettura REST)", async () => {
+/** MICRO-SUITE-VERDE (24 Oct) · no case needs a room that already exists: given
+ *  none (LAYOUT_ROOM, FOLDS_ROOM), the case makes its own on LAYOUT_NODE — the
+ *  GT16's graph seated by the engine (`s3dgraphy room-import`, as «Bring into a
+ *  room…»; the em.json alone, so no file goes up) — and DELETES it at the end,
+ *  also when it fails. A room given is left as it was found. */
+async function withLayRoom(prefix, given, body) {
+  if (given) return body(given);
+  const room = `${prefix}-claude-${Date.now().toString(36)}`;
+  const { mkdtempSync, realpathSync: real } = await import("node:fs");
+  const work = real(mkdtempSync(`${(await import("node:os")).tmpdir()}/${prefix}-room-`));
+  mkdirSync(`${work}/EM`);
+  copyFileSync(CO_V4, `${work}/EM/study.em.json`);
+  const S3D = process.env.S3DGRAPHY_DIR ?? new URL("../../../s3Dgraphy/", import.meta.url).pathname;
+  const token = process.env.LAYOUT_TOKEN ? ["--token", process.env.LAYOUT_TOKEN] : [];
+  const drop = async () => {
+    for (let i = 0; i < 20; i++) {
+      const r = await fetch(`${LAY_NODE}/v1/rooms/${encodeURIComponent(room)}`, { method: "DELETE",
+        headers: { "content-type": "application/json", ...(process.env.LAYOUT_TOKEN ? { authorization: `Bearer ${process.env.LAYOUT_TOKEN}` } : {}) },
+        body: JSON.stringify({ confirm: room }) }).catch(() => ({ status: 0 }));
+      if (r.status === 200 || r.status === 404) return r.status === 200 ? "deleted" : "not there";
+      if (r.status !== 409) return `NOT deleted (${r.status})`;
+      await new Promise((res) => setTimeout(res, 500));
+    }
+    return "NOT deleted (somebody still connected)";
+  };
+  let out;
+  try {
+    execFileSync(`${S3D}.venv/bin/python`, ["-m", "s3dgraphy", "room-import", `${work}/EM/study.em.json`, "--node", LAY_NODE,
+      "--room", room, "--title", room, ...token, "--journal", `${work}/journal.json`, "--report-dir", work,
+      "--work-dir", `${work}/packs`, "--json"], { env: { ...process.env, PYTHONPATH: `${S3D}src` }, encoding: "utf8", maxBuffer: 1 << 26 });
+    out = await body(room);
+  } finally {
+    const gone = await drop();
+    if (out?.detail) out.detail.room = `${room}: ${gone}`;
+  }
+  return out;
+}
+if (LAY_NODE) test("GL7.room", "STANZA-POSIZIONI · istanza di prova del server con «layout», la stanza del GT16: A trascina un'unità della Matrix e il combinatore nel gruppo PD di VSF125 → B vede entrambi; B esce e rientra, restano; C che entra dopo li vede; un frame che arriva mentre B tiene l'unità in mano non la sposta, al rilascio vince B e A lo vede; «Layout» di A arriva intero e le tre Matrix restano uguali; un frame per rilascio, nessuna operazione di grafo; la stanza le tiene (lettura REST)", () => withLayRoom("gl7", LAY_ROOM, async (LAY_ROOM) => {
   const one = async () => {
     const o = await open({ doc: null, locale: "en", w: 1728, h: 1000, init: { "emstudio.settings": JSON.stringify({ sync: { hubUrl: LAY_NODE } }) } });
     const frames = [];
@@ -8873,8 +8922,7 @@ if (LAY_NODE && LAY_ROOM) test("GL7.room", "STANZA-POSIZIONI · istanza di prova
 
 // GLOBO-INTERAZIONE p.5 (LAYOUT_NODE + FOLDS_ROOM: a stratigraph-server that declares
 // `layout_folded`, a room holding the GT16): the groups' open/closed are the room's
-if (LAY_NODE && process.env.FOLDS_ROOM) test("GL8.live", "GLOBO-INTERAZIONE p.5 dal vivo · istanza di prova del server con «layout_folded», la stanza del GT16: A chiude il gruppo PD di VSF125 → B lo vede chiuso; A lo riapre e chiude quello di un'altra unità → B li vede così; C che entra dopo li trova come li ha lasciati A (dall'istantanea); la stanza li tiene (lettura REST, folded_groups); nessuna operazione di grafo", async () => {
-  const room = process.env.FOLDS_ROOM;
+if (LAY_NODE) test("GL8.live", "GLOBO-INTERAZIONE p.5 dal vivo · istanza di prova del server con «layout_folded», la stanza del GT16: A chiude il gruppo PD di VSF125 → B lo vede chiuso; A lo riapre e chiude quello di un'altra unità → B li vede così; C che entra dopo li trova come li ha lasciati A (dall'istantanea); la stanza li tiene (lettura REST, folded_groups); nessuna operazione di grafo", () => withLayRoom("gl8", process.env.FOLDS_ROOM, async (room) => {
   const one = async () => {
     const o = await open({ doc: null, locale: "en", w: 1728, h: 1000, init: { "emstudio.settings": JSON.stringify({ sync: { hubUrl: LAY_NODE } }) } });
     const frames = [];
@@ -8909,16 +8957,16 @@ if (LAY_NODE && process.env.FOLDS_ROOM) test("GL8.live", "GLOBO-INTERAZIONE p.5 
   const pass = !!ids.g && !!ids.h && out.b1 === true && out.b2.g === false && out.b2.h === out.b2.hA && out.c.g === false && out.c.h === out.b2.hA && out.c.sameAsA
     && out.rest.g === false && out.rest.h === out.b2.hA && out.frames >= 2 && out.ops === 0 && !out.errors.length;
   return { pass, detail: out };
-});
+}));
 
 // ── MICRO-GEOGLOBO · the GT16 (a COPY: `GEO_V4`) and a bridge of this tree that
 // serves its folder (`GEO_BRIDGE`, level 36: /tiles, /geo); the orthophoto of the
 // test (`GEO_ORTHO`, a GeoTIFF in EPSG:31700 made by the report's script). The
 // globe's tiles come from the sources online through that bridge: offline the
 // modes and the layers still answer, the pictures are empty ──
-const GEO_V4 = process.env.GEO_V4 ?? "/tmp/globo/EM/TempluMare_v4.em.json";
+const GEO_V4 = benchFile("GEO_V4");
 const GEO_BRIDGE = process.env.GEO_BRIDGE ?? BRIDGE;
-const GEO_ORTHO = process.env.GEO_ORTHO ?? "/tmp/globo/EM/geo-raster/ortho_gt16_31700.tif";
+const GEO_ORTHO = benchFile("GEO_ORTHO");
 const geoOpen = async () => {
   const ctx = await browser.newContext({ viewport: { width: 1600, height: 1000 } });
   const p = await ctx.newPage();
@@ -9008,7 +9056,7 @@ test("GG1.globe", "GEOGLOBO p.1 · il GT16 sul globo: «Territory» misura l'anc
     && out.landed.mode === "site" && out.landed.alt < 3000 && out.pressed === "site"
     && /EOX/.test(out.attribution) && /Mapterhorn/.test(out.attribution) && !out.errors.length;
   return { pass, detail: out };
-});
+}));
 
 test("GG2.layers", "GEOGLOBO p.2–4 · il pannello «Layers»: un'ortofoto GeoTIFF in EPSG:31700 aggiunta dal suo percorso diventa un livello (il bridge la riproietta in un PMTiles accanto, l'originale resta) drappeggiato sul terreno, in cima all'elenco; l'opacità e l'ordine cambiano senza errori di three; «su un piano» la mette sul piano del sito con i suoi spigoli dove il CRS li dice (±100 m attorno all'ancora), appena sopra il terreno; «Estrai area» non offre OpenStreetMap (solo online); nessun «could not be decoded»", async () => {
   if (!existsSync(GEO_V4) || !existsSync(GEO_ORTHO)) return { pass: false, detail: { missing: [GEO_V4, GEO_ORTHO].filter((f) => !existsSync(f)) } };
@@ -9247,7 +9295,7 @@ test("GG3.viewer", "GEOGLOBO p.4 · il raster come documento nel Viewer: «Apri 
 });
 
 // ── MICRO-SERVSF-FINE-ISTANZE ───────────────────────────────────────────────
-const SV_V4 = process.env.SERVSF_V4 ?? "/tmp/servsf/EM/TempluMare_v4.em.json";
+const SV_V4 = benchFile("SERVSF_V4");
 const svOpen = async (path = SV_V4) => {
   const o = await open({ doc: null, locale: "en", w: 1728, h: 1000 });
   await o.p.evaluate(([d, path]) => window.__EM_DRAG__.openAt(d, path), [JSON.parse(readFileSync(path, "utf8")), path]);
@@ -9485,7 +9533,7 @@ test("SV3.instances", "SERVSF-FINE-ISTANZE p.3 · le istanze per epoca: GT16, Sp
 
 // ── MICRO-GEOREF-GRAFO · the GT16 as it is now (EPSG:3844, shift z 0), a COPY
 // (`GEOREF_V4`), and a bridge of this tree serving its folder (`GEOREF_BRIDGE`) ──
-const GEOREF_V4 = process.env.GEOREF_V4 ?? "/tmp/georef/pkg/EM/TempluMare_v4.em.json";
+const GEOREF_V4 = benchFile("GEOREF_V4");
 const GEOREF_BRIDGE = process.env.GEOREF_BRIDGE ?? GEO_BRIDGE;
 const grOpen = async (doc = null) => {
   const ctx = await browser.newContext({ viewport: { width: 1600, height: 1000 } });
@@ -9638,9 +9686,15 @@ test("GR2.clip", "GEOREF-GRAFO p.0b · il terreno non copre il rilievo: GT16 (EP
 
 test("GR3.node", "GEOREF-GRAFO p.1 · il georiferimento è un nodo esposto del grafo: il GT16 (geo_TempluMare_v2, 0 archi su disco) all'apertura entra nel gruppo «Graph paradata» con un is_in_paradata_nodegroup — una correzione detta UNA volta nel Log, un passo che Ctrl+Z toglie, il file segnato come modificato; si vede nel Grafo e nella vista «Graphs paradata» accanto a licenza e autore; salvato e riaperto, l'arco c'è una volta e nessuna correzione è ridetta; i valori (EPSG:3844 327372.56 448682.65 0) non cambiano", async () => {
   if (!existsSync(GEOREF_V4)) return { pass: false, detail: { missing: GEOREF_V4 } };
-  const { p, ctx, errors } = await grOpen();
-  const D = (f, a) => p.evaluate(f, a);
   const GEO = "geo_TempluMare_v2";
+  // the premise, made here (MICRO-SUITE-VERDE): a GT16 saved BEFORE GEOREF-GRAFO,
+  // whose geo node is in no paradata group on disk — E.D.'s em.json has had the
+  // edge since he saved it (24 Oct), so the copy loses it before opening
+  const doc0 = JSON.parse(readFileSync(GEOREF_V4, "utf8"));
+  for (const g of Object.values(doc0.graphs ?? {}))
+    g.edges = (g.edges ?? []).filter((e) => !(e.edge_type === "is_in_paradata_nodegroup" && e.source === GEO));
+  const { p, ctx, errors } = await grOpen(doc0);
+  const D = (f, a) => p.evaluate(f, a);
   const geoEdges = () => D((g) => window.__EM_DRAG__.edgesOf("is_in_paradata_nodegroup").filter((e) => e.source === g).map((e) => e.target), GEO);
   const said = () => D(() => { const l = window.__EM_DRAG__.log(); return (Array.isArray(l) ? l : []).filter((x) => /joined the graph's paradata group/.test(x.message ?? "")).length; });
   const out = { edges: await geoEdges(), said: await said(), undo: await D(() => window.__EM_DRAG__.undoDepth()), dirty: await D(() => window.__EM_DRAG__.dirty()),
