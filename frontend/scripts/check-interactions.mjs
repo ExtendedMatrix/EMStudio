@@ -7332,6 +7332,17 @@ test("VU3.quota", "VIEWER-UNICO p.4 · un punto quota sul 3D di D.01 crea l'estr
   await p.waitForFunction((x) => window.__EM_DRAG__.viewerState(x)?.scene?.framed, w, { timeout: 60000 }).catch(() => {});
   await p.waitForTimeout(3000);
   const area = `.tile-area[data-win="${w}"]`;
+  // the spot height is taken on a MODEL: the Viewer opens D.01 on Survey2015's
+  // tileset (its default, the container's), whose tiles a pick does not hit —
+  // the lightest model level is chosen in «Versions» first, then framed
+  // (MICRO-SUITE-VERDE: the case was written when D.01 drew its models)
+  const lightest = await p.evaluate((a) => [...document.querySelectorAll(`${a} select[data-vw-versions] option`)].map((o) => o.value).find((v) => !v.startsWith("tileset:")) ?? null, area);
+  if (lightest) {
+    await p.selectOption(`${area} select[data-vw-versions]`, lightest);
+    await p.waitForFunction((x) => (window.__EM_DRAG__.viewerState(x)?.scene?.events ?? []).some((e) => e.what === "drawn"), w, { timeout: 60000 }).catch(() => {});
+    await p.click(`${area} [data-vw-fit]`).catch(() => {});
+    await p.waitForTimeout(1200);
+  }
   // the tools are the bar's once the document's scene is there: under the whole
   // suite's load that came after the fixed 3 s (MICRO-SUITE-VERDE)
   await p.waitForSelector(`${area} [data-tool="elevation"]`, { state: "visible", timeout: 90000 }).catch(() => {});
@@ -7339,7 +7350,11 @@ test("VU3.quota", "VIEWER-UNICO p.4 · un punto quota sul 3D di D.01 crea l'estr
   const box = await p.locator(`${area} .vw-scene canvas`).first().boundingBox();
   const at = await p.evaluate(([x, b]) => {
     const host = document.querySelector(`.tile-area[data-win="${x}"] .vw-scene`), cv = host.querySelector("canvas");
-    for (const fy of [0.5, 0.45, 0.55, 0.4, 0.6, 0.35, 0.65]) for (const fx of [0.5, 0.45, 0.55, 0.4, 0.6, 0.35, 0.65]) {
+    // the whole canvas, from its centre out: in this small Viewer the tileset is
+    // framed by its root volume and the model may lie at its lower edge, with
+    // only air in the middle band (measured, MICRO-SUITE-VERDE)
+    const fs = [0.5]; for (let d = 0.05; d <= 0.45; d += 0.05) fs.push(0.5 - d, 0.5 + d);
+    for (const fy of fs) for (const fx of fs) {
       const px = b.x + b.width * fx, py = b.y + b.height * fy;
       if (document.elementFromPoint(px, py) !== cv) continue;
       const h = host.__spaceHit?.(px, py);
@@ -7857,15 +7872,22 @@ test("WM1.loadfail", "WINDOWS-MODELLI p.1 · un modello che non arriva lo dice: 
   await p.waitForTimeout(6000);   // the tileset's root waits 8 s before it is given up on
   const log = await p.evaluate(() => window.__EM_DRAG__.log().map((e) => `${e.level} ${e.message}`));
   const marks = await p.evaluate(() => [...document.querySelectorAll(".sol-fail")].map((e) => e.title));
+  // a refused model is marked, the scene is drawn again and asks again before
+  // it settles on the label: what is drawn is read when the ten labels are
+  // there (measured: read at the opening, some were still «pending» — they all
+  // became labels a few seconds later; MICRO-SUITE-VERDE)
+  await p.waitForFunction(() => document.querySelector(".scn-host").__space().filter((x) => x.kind === "rm" && x.as === "label").length >= 10,
+    null, { timeout: 60000 }).catch(() => {});
   const later = await p.evaluate(() => document.querySelector(".scn-host").__space().filter((x) => x.kind === "rm").map((x) => `${x.as}:${x.state}`));
+  const drawnNow = await p.evaluate(() => { const c = {}; for (const x of document.querySelector(".scn-host").__space()) c[`${x.kind}/${x.as}`] = (c[`${x.kind}/${x.as}`] ?? 0) + 1; return c; });
   await p.screenshot({ path: SHOT("wm1-loadfail") }).catch(() => {});
   await ctx.close();
   const lines = log.filter((l) => /^warn Modello non caricato: /.test(l));
   const base = WP_BRIDGE.replace("127.0.0.1", "127.0.0.1");
   const pass = lines.length === 16 && lines.every((l) => l.includes(`${base}/fs/at/C:/Users/Utente/`) && /· HTTP 403 · il bridge non serve la cartella di questo file \(403\)$/.test(l))
     && lines.some((l) => /tileset\.json/.test(l)) && log.some((l) => /^warn Il bridge non ha servito le cartelle del documento aperto .*404\) not an em\.json/.test(l))
-    && marks.length >= 10 && marks.every((m) => /il bridge non serve la cartella/.test(m)) && drawn["rm/label"] === 10 && !errors.length;
-  return { pass, detail: { lines: lines.length, first: lines[0], doc: log.find((l) => /fs\/doc/.test(l)), marks: marks.length, drawn, later, errors } };
+    && marks.length >= 10 && marks.every((m) => /il bridge non serve la cartella/.test(m)) && drawnNow["rm/label"] === 10 && !errors.length;
+  return { pass, detail: { lines: lines.length, first: lines[0], doc: log.find((l) => /fs\/doc/.test(l)), marks: marks.length, drawn, drawnNow, later, errors } };
 });
 
 test("WM2.port", "WINDOWS-MODELLI p.2 · la pagina come il desktop (IPC simulato): la porta è quella decisa dalla shell (8765 di un altro programma → la successiva); con l'em.json in C:/Users/Utente/OneDrive - CNR/… ogni richiesta — modelli, tileset.json e tessere, proxy — va a quella base e mai alla 8765, nella forma C:/…; il XX sec è disegnato (10 RM, il tileset, 5 proxy), nessun segno di modello mancato", async () => {
@@ -10144,7 +10166,10 @@ test("FD2.esc", "FILTRI-DETTAGLIATI · Esc chiude il pannello del livello di det
 const chosen =cases.filter((c) => !only.length || only.includes(c.id) || only.some((o) => c.id.startsWith(o + ".")));
 for (const c of chosen) {
   let r;
-  try { r = await c.fn(); } catch (err) { r = { pass: false, detail: { error: String(err.message ?? err).split("\n")[0].slice(0, 240) } }; }
+  // the error's first line, and Playwright's call log after it (which element,
+  // what intercepted the click): «Timeout 30000ms exceeded» alone names nothing
+  try { r = await c.fn(); } catch (err) { const lines = String(err.message ?? err).split("\n");
+    r = { pass: false, detail: { error: lines[0].slice(0, 240), log: lines.slice(1).filter((l) => l.trim()).slice(-6).map((l) => l.trim().slice(0, 200)) } }; }
   results.push({ id: c.id, what: c.what, ...r });
   console.log(`${r.pass ? "✓" : "✗"} ${c.id} ${c.what}${r.pass && !process.env.DETAIL ? "" : "  " + JSON.stringify(r.detail)}`);
 }
