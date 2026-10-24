@@ -120,7 +120,9 @@ export interface SceneItem {
 export interface SceneTexts {
   loading: string;
   noEngine: string;
-  referenceOnly: (name: string) => string;
+  /** a file the scene cannot fetch: the RM's name, and its resource (a model
+   *  that lives only in a .blend is said so, not «cannot be fetched») */
+  referenceOnly: (name: string, resourceId?: string) => string;
   /** `resourceId`: MICRO-PERCORSI-WINDOWS, a file online only says so */
   missing: (name: string, resourceId?: string) => string;
   /** MICRO-SPAZIO-FIRMATO · the node refused the file (access) */
@@ -1788,7 +1790,7 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
               tag(c, item);
               content.add(c);
               // at the right-hand top corner: the summary sits top-left
-              addLabel(opts.texts.referenceOnly(item.label),
+              addLabel(opts.texts.referenceOnly(item.label, item.resourceId),
                 new THREE.Vector3(box.max.x, box.max.y + 0.15 * k, box.max.z), `ref k-${item.kind}`, item.id);
               drawn.set(key, { item, as: "contour" });
             } else {

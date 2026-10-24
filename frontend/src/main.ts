@@ -2228,11 +2228,51 @@ verBtn.addEventListener("click", () => {
 });
 
 let toastTimer: number | undefined;
-function toast(msg: string): void {
+/** MICRO-SUITE-VERDE (24 Oct) · ONE toast, and a QUESTION on it (`toastAsk`) is
+ *  not lost to what comes after it. Measured opening San Pietro (G5): «3 file(s)
+ *  not found · Find missing files…» replaced «… holds an empty graph … Remove
+ *  it / Keep it» a few milliseconds later, and the question was left in the Log
+ *  with no button to answer it. A question that arrives while another waits
+ *  waits its turn; a notice (a gesture's, with its «Undo») is shown at once, and
+ *  the question it covered comes back after it. */
+let asking: (() => void) | null = null;
+const afterAsk: Array<() => void> = [];
+function questionWaiting(): boolean { return !!asking && !toastEl.classList.contains("hidden"); }
+/** a notice over a waiting question: the question is shown again after it */
+function setQuestionAside(): void {
+  if (questionWaiting()) afterAsk.unshift(asking!);
+  asking = null;
+}
+function hideToast(): void {
+  toastEl.classList.add("hidden");
+  asking = null;
+  const next = afterAsk.shift();
+  if (next) next();
+}
+function showToast(msg: string, ms: number): void {
   toastEl.textContent = msg;
   toastEl.classList.remove("hidden");
   window.clearTimeout(toastTimer);
-  toastTimer = window.setTimeout(() => toastEl.classList.add("hidden"), 2600);
+  toastTimer = window.setTimeout(hideToast, ms);
+}
+function toastButton(label: string, run: () => void): void {
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.className = "toast-action";
+  btn.textContent = label;
+  btn.addEventListener("click", () => {
+    window.clearTimeout(toastTimer);
+    // the answer first (it may say something), then what waited
+    asking = null;
+    toastEl.classList.add("hidden");
+    run();
+    if (toastEl.classList.contains("hidden")) { const next = afterAsk.shift(); if (next) next(); }
+  });
+  toastEl.append(" ", btn);
+}
+function toast(msg: string): void {
+  setQuestionAside();
+  showToast(msg, 2600);
 }
 
 /** TOCCARE · a toast that can take the gesture back: «US12 → Medioevo  Annulla».
@@ -2241,52 +2281,27 @@ function toast(msg: string): void {
 /** AUDIT N11 · a toast with «Annulla» for what is not a store step (a shelf
  *  row, a space): the gesture that puts it back is handed in */
 function toastUndoWith(msg: string, undo: () => void): void {
-  toast(msg);
-  const btn = document.createElement("button");
-  btn.type = "button";
-  btn.className = "toast-action";
-  btn.textContent = t("toolbar.undo");
-  btn.addEventListener("click", () => {
-    undo();
-    toastEl.classList.add("hidden");
-  });
-  toastEl.append(" ", btn);
-  window.clearTimeout(toastTimer);
-  toastTimer = window.setTimeout(() => toastEl.classList.add("hidden"), 5000);
+  setQuestionAside();
+  showToast(msg, 5000);
+  toastButton(t("toolbar.undo"), undo);
 }
 
 /** G5 · a toast that ASKS: the message and its answers, each one a button;
  *  left alone it goes after `ms` and nothing is done */
 function toastAsk(msg: string, answers: { label: string; run: () => void }[], ms = 15000): void {
-  toast(msg);
-  for (const a of answers) {
-    const btn = document.createElement("button");
-    btn.type = "button";
-    btn.className = "toast-action";
-    btn.textContent = a.label;
-    btn.addEventListener("click", () => {
-      toastEl.classList.add("hidden");
-      a.run();
-    });
-    toastEl.append(" ", btn);
-  }
-  window.clearTimeout(toastTimer);
-  toastTimer = window.setTimeout(() => toastEl.classList.add("hidden"), ms);
+  const show = (): void => {
+    showToast(msg, ms);
+    asking = show;
+    for (const a of answers) toastButton(a.label, a.run);
+  };
+  if (questionWaiting()) { afterAsk.push(show); return; }
+  show();
 }
 
 function toastUndo(msg: string, st: DocumentStore): void {
-  toast(msg);
-  const btn = document.createElement("button");
-  btn.type = "button";
-  btn.className = "toast-action";
-  btn.textContent = t("toolbar.undo");
-  btn.addEventListener("click", () => {
-    st.undo();
-    toastEl.classList.add("hidden");
-  });
-  toastEl.append(" ", btn);
-  window.clearTimeout(toastTimer);
-  toastTimer = window.setTimeout(() => toastEl.classList.add("hidden"), 5000);
+  setQuestionAside();
+  showToast(msg, 5000);
+  toastButton(t("toolbar.undo"), () => st.undo());
 }
 
 /**
@@ -3547,7 +3562,24 @@ function frameNodeInContext(nodeId: string): void {
   if (!s || !n) return;
   const gid = s.memberOf?.get(nodeId);
   const g = gid ? s.groupsById?.get(gid) : undefined;
-  const r = g ? { x: g.x, y: g.y, w: g.w, h: g.h } : { x: n.x, y: n.y, w: n.w, h: n.h };
+  let r = g ? { x: g.x, y: g.y, w: g.w, h: g.h } : { x: n.x, y: n.y, w: n.w, h: n.h };
+  // S6 (dev.17, E.D.) · out of any group, a node is framed WITH its paradata
+  // chain: a document with the extractors made from it and the properties they
+  // feed (D.02 → D.02.01 → «existence»), as the Matrix draws them in a column
+  // — measured 24 Oct (MICRO-SUITE-VERDE): only the document was framed, and in
+  // the low window under the Viewer «existence» fell out at the top
+  if (!g && store) {
+    const es = store.doc.graph.edges ?? [];
+    const near = new Set<string>([nodeId]);
+    for (const e of es) if (e.edge_type === "extracted_from" && e.target === nodeId) near.add(e.source);
+    for (const e of es) if (e.edge_type === "has_data_provenance" && near.has(e.target) && e.target !== nodeId) near.add(e.source);
+    const boxes = [...near].map((id) => s.byId.get(id)).filter((b): b is NonNullable<typeof b> => !!b);
+    if (boxes.length > 1) {
+      const x0 = Math.min(...boxes.map((b) => b.x)), y0 = Math.min(...boxes.map((b) => b.y));
+      const x1 = Math.max(...boxes.map((b) => b.x + b.w)), y1 = Math.max(...boxes.map((b) => b.y + b.h));
+      r = { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
+    }
+  }
   const vp = viewport();
   const { w, h } = viewSize();
   const M = 56;   // room for the labels drawn above and below the boxes
@@ -23130,13 +23162,21 @@ function revealFromTable(nodeId: string): void {
  *  graph window, switched to the Matrix (the standard view). */
 function showInMatrix(nodeId: string): void {
   if (!store || !store.node(nodeId)) return;
-  select(nodeId);
+  // the frame below is this gesture's, not «Zoom to selection»'s (as `jumpTo`):
+  // its animation came after and centred the node alone (S6, MICRO-SUITE-VERDE)
+  pickOnCanvas = true;
+  try { select(nodeId); } finally { pickOnCanvas = false; }
   const graphs = windowsOf().filter((w) => w.type === "graph");
   const win = graphs.find((w) => winMode(w) === "matrix") ?? graphs[0];
   if (!win) { refreshInspector(); return; }
   setActiveWin(win.id);
   if (winMode(win) !== "matrix") setWindowMode(win, "matrix");
   requestAnimationFrame(() => {
+    // the gesture comes from the Inspector (the document's card) or the Tabular,
+    // and the pointer is still there: by this frame the active window was that
+    // one again, and the frame went to ITS viewport — the Matrix did not move
+    // (S6, MICRO-SUITE-VERDE). The Matrix is made active for the frame
+    if (windowsOf().some((w) => w.id === win.id)) setActiveWin(win.id);
     if (scene()?.byId.has(nodeId)) frameNodeInContext(nodeId);
     else toast(t("toast.selectedNotVisible"));
     refreshInspector();
@@ -27613,7 +27653,7 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
   const handle = mountSpaceScene(host, {
     texts: {
       loading: t("space.loading"), noEngine: t("em3d.noEngine"),
-      referenceOnly: (name) => t("space.refOnly", { x: name }),
+      referenceOnly: (name, rid) => refOnlyWords(name, rid),
       missing: (name, rid) => (rid && cloudOnly.has(rid) ? t("space.fileCloudOnly", { x: name }) : t("space.fileMissing", { x: name })),
       refused: (name) => t("space.fileRefused", { x: name }),
       overLimit: (name, size, lim) => t("space.overLimit", { x: name, size, lim }),
@@ -34558,6 +34598,9 @@ interface VwVersion extends WeighedVersion { url: string; obj?: { modifier?: (u:
 interface VwScene {
   key: string;
   host: HTMLElement;
+  /** the bridge's address when the ladders were weighed: a file on the disk has
+   *  no address before it is known (`spaceFileUrl`, `objAddressOf`) */
+  bridge?: string | null;
   handle: SpaceSceneHandle;
   docId: string | null;
   models: string[];
@@ -34613,9 +34656,15 @@ function vwLadderOf(rm: SpaceRM): VwVersion[] {
   const lv = rmLevels(rm);
   const vs = drawableVersions(rm).filter((v) => v.format !== "tiles");
   if (!vs.length) {
-    const url = rm.resource && rm.resource.state === "resident" && !rm.resource.tiles ? spaceFileUrl(rm.resource) : undefined;
-    return url ? [{ id: `res:${rm.resource!.id}`, label: rm.resource!.name, origin: "other", bytes: rm.resource!.bytes ?? null,
-                    tris: null, rank: 0, url }] : [];
+    const res = rm.resource && rm.resource.state === "resident" && !rm.resource.tiles ? rm.resource : null;
+    // RISORSA-FILE · the model's one resource is an OBJ file set (its files are
+    // its resource_file nodes, the .obj the door): opened from its members, each
+    // at its own address, as the Doc's reader did (R3, MICRO-SUITE-VERDE: the
+    // Viewer had only the resource's own url, which a file set does not have)
+    const obj = res && (rm.versions ?? []).some((v) => v.id === res.id && v.format === "obj") ? objAddressOf(res.id) : null;
+    const url = obj?.url || (res ? spaceFileUrl(res) : undefined);
+    return url && res ? [{ id: `res:${res.id}`, label: res.name, origin: "other", bytes: res.bytes ?? null,
+                    tris: null, rank: 0, url, ...(obj ? { obj: { modifier: obj.modifier } } : {}) }] : [];
   }
   const ladder = ladderOf(vs.map((v) => {
     const l = lv.get(v.id);
@@ -34674,6 +34723,17 @@ function vwSeenLine(s: VwScene): string {
 
 /** The items of the scene of a document: its models (and the container's
  *  tileset), the version of each by the Viewer's rule, as the Space draws them. */
+/** MICRO-SUITE-VERDE (24 Oct) · the label of a model the scene cannot fetch. A
+ *  model that lives only in a .blend (a datablock: `blend://…#Object/<name>`)
+ *  is not «a file that cannot be fetched»: it says where it is, the .blend and
+ *  the object, as the Doc's reader did before the Viewer took its place (R3). */
+function refOnlyWords(name: string, rid?: string): string {
+  const url = rid ? String((store?.node(rid)?.data as Record<string, unknown> | undefined)?.url ?? "") : "";
+  const blend = url ? parseBlendLocator(url) : null;
+  return blend ? `${name}: ${t("declared.onlyBlender", { file: `${paths.basename(blend[0])} · ${blend[2]}` })}`
+    : t("space.refOnly", { x: name });
+}
+
 function vwSceneItems(s: VwScene): SceneItem[] {
   const sp = currentSpace();
   if (!sp) return [];
@@ -34703,6 +34763,9 @@ function vwSceneItems(s: VwScene): SceneItem[] {
       url, resourceId: r.resource?.id, ...(v?.obj ? { obj: v.obj } : {}),
       ...(alt ? { alt: { group: alt.group, role: alt.role, err: alt.err, mode: alt.mode, name: sp.rmGroups.get(alt.group)?.name ?? alt.group } } : {}),
       tiles: r.resource?.tiles || undefined, edge: placementColour(r.genre) ?? undefined,
+      // MICRO-3DTILES p.2 · over the threshold the scene proposes the tileset of
+      // the same model, as the Space does (the Doc did; the Viewer had lost it)
+      tileset: r.tileset?.state === "resident" ? r.tileset.url || undefined : undefined,
       pose: isTiles ? undefined : poseOfNode(r.id), bytes: v?.bytes ?? r.resource?.bytes ?? null, points: r.resource?.points ?? null });
   }
   if (s.preview) items.push({ kind: "rm", id: `preview:${s.preview.id}`, label: s.preview.label, state: "resident", url: s.preview.url });
@@ -34821,7 +34884,10 @@ function vwScene(win: Win, stage: HTMLElement, target: ViewerTarget, preview: Vw
     stage.appendChild(kept.host);
     // the Space read again (the bridge said which files are on the disk, a
     // version was added): the ladders follow
-    if (kept.sp !== sp) { kept.sp = sp; vwWeigh(kept, sp, win.id); }
+    // …and so does the bridge's address, when it arrives after the first
+    // weighing (MICRO-SUITE-VERDE, R3: an OBJ set weighed before it had no
+    // address, and the Viewer showed only its label for good)
+    if (kept.sp !== sp || kept.bridge !== bridgeBaseNow) { kept.sp = sp; kept.bridge = bridgeBaseNow; vwWeigh(kept, sp, win.id); }
     // …and the scene, if what it draws changed since it was handed over: each
     // file's address and state too — MICRO-VIEWER-SPAZIO-EMTREE p.2, measured:
     // the bridge's address arrives after the first drawing (no Space change),
@@ -34838,7 +34904,7 @@ function vwScene(win: Win, stage: HTMLElement, target: ViewerTarget, preview: Vw
   stage.appendChild(host);
   const slot: VwScene = { key, host, docId: target.docId, models: target.models, groups: target.groups, ladders: new Map(),
     choices: [], choice: null, sp, framed: false, trace: { tool: null, vertices: [] }, events: [],
-    t0: performance.now(), urls: new Set(), preview, handle: null as unknown as SpaceSceneHandle };
+    t0: performance.now(), urls: new Set(), preview, handle: null as unknown as SpaceSceneHandle, bridge: bridgeBaseNow };
   vwWeigh(slot, sp, win.id);
   const tool = winCurrent(win, "doc.tool");
   slot.trace.tool = (VIEWER_3D_TOOLS as readonly string[]).includes(String(tool)) ? tool as Viewer3dTool
@@ -34847,7 +34913,7 @@ function vwScene(win: Win, stage: HTMLElement, target: ViewerTarget, preview: Vw
   slot.handle = mountSpaceScene(host, {
     texts: {
       loading: t("space.loading"), noEngine: t("em3d.noEngine"),
-      referenceOnly: (name) => t("space.refOnly", { x: name }),
+      referenceOnly: (name, rid) => refOnlyWords(name, rid),
       missing: (name, rid) => (rid && cloudOnly.has(rid) ? t("space.fileCloudOnly", { x: name }) : t("space.fileMissing", { x: name })),
       refused: (name) => t("space.fileRefused", { x: name }),
       overLimit: (name, size, lim) => t("space.overLimit", { x: name, size, lim }),
