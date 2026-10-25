@@ -150,6 +150,11 @@ export interface TilesOptions {
   /** TEMPLU MARE v2 · C1 · `url` is a `.3tz` though it does not say so (a
    *  store URL: the archive's digest); the graph declared it */
   archive?: boolean;
+  /** MICRO-TILESET-CARTELLA · the files come from a READER, not from `url`: a
+   *  folder or a zip dropped on the Viewer or the Scene, the RealityScan pair
+   *  served as one tree (`tileset-drop.ts servedSource`). Asked under a base
+   *  nobody serves, as an archive is. */
+  source?: { readEntry(path: string): Promise<Uint8Array | null> };
 }
 
 let draco: any = null;
@@ -184,7 +189,11 @@ export function createTilesLayer(E: any, T: any, url: string, camera0: any, rend
   // and the plugin answers every file of it from the archive — opened from its
   // end (the index), then each tile at its offset (tiles3tz.ts)
   let archivePlugin: any = null;
-  if ((opts.archive || isArchive3tzUrl(url)) && T.Tiles3tzPlugin) {
+  if (opts.source && T.Tiles3tzPlugin) {
+    const base = T.archiveBase();
+    archivePlugin = new T.Tiles3tzPlugin(Promise.resolve(opts.source), base);
+    url = `${base}tileset.json`;
+  } else if ((opts.archive || isArchive3tzUrl(url)) && T.Tiles3tzPlugin) {
     const base = T.archiveBase();
     // MICRO-SPAZIO-FIRMATO · a .3tz of the room's store is read signed
     const archive = T.sourceFor(url, roadFetch as typeof fetch).then((src: any) => T.Archive3tz.open(src));

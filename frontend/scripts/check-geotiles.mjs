@@ -164,7 +164,7 @@ const O = { origin: "http://localhost:5173" };
 try {
   for (let i = 0; i < 100; i++) { try { if ((await fetch(`${B}/health`)).ok) break; } catch { /* starting */ } await new Promise((r) => setTimeout(r, 150)); }
   const health = await (await fetch(`${B}/health`)).json();
-  eq(health.bridge_level, 38, "the bridge's level: 38 (/tiles, /geo, /tiles/failures, /geo/crs-info)");
+  eq(health.bridge_level, 39, "the bridge's level: 39 (/tiles, /geo, /tiles/failures, /geo/crs-info; 39 /fs/pack-3tz with root)");
   // MICRO-GEOREF-GRAFO · the GT16's CRS, as PROJ's database knows it
   const c31700 = await (await fetch(`${B}/geo/crs-info?epsg=31700&x=327372.56&y=448682.65`, { headers: O })).json();
   eq([c31700.deprecated, c31700.replacements.map((r) => [r.epsg, r.same_grid]), c31700.to_wgs84?.ballpark, c31700.to_wgs84?.accuracy],

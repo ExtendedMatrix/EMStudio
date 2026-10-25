@@ -282,6 +282,10 @@ import { FOOT_IN, footprintShare, leafCoverage } from "./tileset-leaves";
 import { ALT_RULE } from "./space";
 import { trackpadClassifier } from "./wheel-kind";
 import { isTilesetUrl } from "./tiles3d";
+import { mount3dViewer } from "./embed3d-native";
+import { httpSource } from "./tiles3tz";
+import { attachTileset, bridgeTree, isArchiveName, openArchive, position, recognise, servedSource, treeOfDrop, unionTree,
+  type Position, type Recognised, type TreeSource } from "./tileset-drop";
 import { nodeBlobReady, nodeBlobUrl, ownedByNode, setNodeRoad, type FetchFailure } from "./node-road";
 import { isRoomUrl, rebaseRoomUrl, storeAddress, storeUrlOf } from "./store-url";
 import { isRef3D, resolve3d } from "./embed3d";
@@ -2461,6 +2465,28 @@ window.__EM_SCENE__ = () => {
 // Read-only like `__EM_SCENE__`; `check-drag`'s browser twin reads it.
 (window as unknown as { __EM_DRAG__?: unknown }).__EM_DRAG__ = {
   selected: () => [...selectedIds],
+  /** MICRO-TILESET-CARTELLA · a drop of a tileset on a window, as the drop
+   *  handler does it: files of the system (path + Blob) or a Storage path */
+  tilesetDrop: async (winId: string, files: Array<{ path: string; blob: Blob }>) => {
+    const w = windowsOf().find((x) => x.id === winId);
+    const d = w ? await droppedFromFiles(files) : null;
+    if (w && d) showDropped(w, d);
+    return d?.id ?? null;
+  },
+  tilesetDropPath: async (winId: string, path: string, type: "dir" | "file") => {
+    const w = windowsOf().find((x) => x.id === winId);
+    const d = w ? await droppedFromPath(path, type) : null;
+    if (w && d) showDropped(w, d);
+    return d?.id ?? null;
+  },
+  /** …and what a dropped tileset is, and what it served */
+  tilesetDropped: (id: string) => {
+    const d = droppedTilesets.get(id);
+    if (!d) return null;
+    return { form: d.rec.form, says: d.rec.says, name: d.label, pos: d.pos, recentred: d.recentred, disk: d.disk ?? null,
+      served: d.reader.served.length, firstTileMs: d.reader.firstTileAt != null ? Math.round(d.reader.firstTileAt - d.t0) : null,
+      attached: d.attached ?? null, locator: droppedLocator(d) };
+  },
   /** G2/G3 · the liquid Graph: is the simulation settled, how many discs it
    *  moves, the local graph's depth (and set it), the panel's filter */
   liquid: () => ({ settled: liquidSim.settled, discs: liquidSim.pos.size, depth: localDepth,
@@ -13428,7 +13454,7 @@ async function bridgeUrl(): Promise<string> {
   return _bridgeUrl;
 }
 /** The bridge level this editor expects (`BRIDGE_LEVEL` in tools/em_bridge.py). */
-const BRIDGE_LEVEL_WANTED = 38;   // 38 = /geo/crs-info, /geo/convert-shift (MICRO-GEOREF-GRAFO); 37 = HTTPS through em_net, /tiles/failures (MICRO-BRIDGE-CERTIFICATI); 36 = /tiles/*, /geo/* (MICRO-GEOGLOBO); 31 = /property-source (FONTE); 32 = /room-import, «Bring into a room» through the engine; 33 = /fs/write (MICRO-SPAZIO-3D); 34 = /fs/doc, /fs/probe (MICRO-PERCORSI-WINDOWS); 35 = /fs/collect, /health's pid (MICRO-WINDOWS-MODELLI)
+const BRIDGE_LEVEL_WANTED = 39;   // 39 = /fs/pack-3tz with `root`, the RealityScan pair (MICRO-TILESET-CARTELLA); 38 = /geo/crs-info, /geo/convert-shift (MICRO-GEOREF-GRAFO); 37 = HTTPS through em_net, /tiles/failures (MICRO-BRIDGE-CERTIFICATI); 36 = /tiles/*, /geo/* (MICRO-GEOGLOBO); 31 = /property-source (FONTE); 32 = /room-import, «Bring into a room» through the engine; 33 = /fs/write (MICRO-SPAZIO-3D); 34 = /fs/doc, /fs/probe (MICRO-PERCORSI-WINDOWS); 35 = /fs/collect, /health's pid (MICRO-WINDOWS-MODELLI)
 /** MICRO-INSTALLER-PULSANTE p.3 · the bridge that answers says its level; one
  *  that differs from BRIDGE_LEVEL_WANTED is said in the Log (its url, pid, since
  *  when) and in a notice — once per bridge. Asked at start, while the sidecar
@@ -22665,15 +22691,21 @@ function createArea(winId: string, parent: HTMLElement = tileRoot): HTMLElement 
   // focus. (The node palette's drop was the other half of this; it left with
   // the palette, SHIFT-A.)
   area.addEventListener("dragover", (e) => {
-    if (storageDragPayload(e) &&
-        ["viewer", "shelf"].includes(winNow()?.type ?? "")) {
+    const ty = winNow()?.type ?? "";
+    // MICRO-TILESET-CARTELLA · a Storage path or files of the system on a
+    // Viewer or a Scene: a tileset may be in it (decided at the drop)
+    if ((storageDragPayload(e) && ["viewer", "shelf", "scene"].includes(ty))
+        || (carriesFiles(e) && ["viewer", "scene"].includes(ty))) {
       e.preventDefault();
+      if (e.dataTransfer) e.dataTransfer.dropEffect = "copy";
       area.classList.add("drop-target");
     }
   });
   area.addEventListener("dragleave", () => area.classList.remove("drop-target"));
   area.addEventListener("drop", (e) => {
     area.classList.remove("drop-target");
+    const into = winNow();
+    if (into && dropTilesetOn(into, e)) return;
     const resource = storageDragPayload(e);
     const target = winNow();
     if (resource && target?.type === "viewer") {
@@ -24551,9 +24583,12 @@ function spaceGenre(key: string | null): string {
  *  per Scene window, said as such in the bar and closed with ✕. A .3tz is read
  *  by ranges (the root and the index first, the tiles as the camera asks), a
  *  folder through `/fs/at/` so its tiles resolve beside it. */
-interface ScenePreview { label: string; url: string; path?: string; resourceId?: string }
+interface ScenePreview { label: string; url: string; path?: string; resourceId?: string;
+  /** MICRO-TILESET-CARTELLA · a dropped tileset (`droppedTilesets`): gone with the session */
+  dropId?: string }
 function scenePreviewOf(win: Win): ScenePreview | null {
   const v = winCurrent(win, "space.preview") as ScenePreview | null | undefined;
+  if (v && typeof v === "object" && v.dropId && !droppedTilesets.has(v.dropId)) return null;
   return v && typeof v === "object" && typeof v.url === "string" ? v : null;
 }
 
@@ -24585,6 +24620,381 @@ async function openResourceInScene(resId: string): Promise<void> {
   const loc = String(((entry?.node.data ?? {}) as Record<string, unknown>).url ?? d.url ?? "");
   if (!loc) { toast(t("scene.noLocator")); return; }
   await openPathInScene(locatorOnDisk(currentFilePath, loc, { onedriveRoot: oneDriveRoot() }) ?? loc, resId);
+}
+
+// ── MICRO-TILESET-CARTELLA · a tileset dropped on the Viewer or the Scene ───
+//
+// A folder, a zip, a .3tz — from the system (a Blob, read by slices: no path)
+// or from the Storage (a path on disk, read through the bridge). What it is
+// (`tileset-drop.ts recognise`: the forms of EM Tools, the RealityScan pair
+// included), where its root's transform puts it, and the tileset itself at
+// once — served as one tree with `tileset.json` at its root, centred for the
+// view when the transform puts it on the Earth. A bar: «Attacca all'epoca…»
+// (a representation model and its resource, one step of undo) and, for a
+// folder on disk, «Prepara il pacchetto» (the bridge's canonical .3tz).
+interface DroppedTileset {
+  id: string;
+  label: string;
+  /** the name as dropped (a file's, with its extension) */
+  droppedName: string;
+  rec: Recognised;
+  pos: Position;
+  /** the root's transform left out of what is served (the view only) */
+  recentred: boolean;
+  reader: ReturnType<typeof servedSource>;
+  /** what the disk says, when the drop came with a path (the Storage) */
+  disk?: { dropped: string; folder?: string; root?: string; archive?: string };
+  bytes: number | null;
+  t0: number;
+  attached?: { rmId: string; epoch: string };
+}
+const droppedTilesets = new Map<string, DroppedTileset>();
+/** the Viewer windows showing a dropped tileset (win → dropped id), and their 3D */
+const viewerDropped = new Map<string, string>();
+const viewerDroppedMounts = new Map<string, { id: string; host: HTMLElement; handle: { dispose(): void } }>();
+
+const droppedUrl = (d: DroppedTileset): string => `preview-tileset://${d.id}/tileset.json`;
+
+async function droppedFrom(tree: TreeSource, label: string, zipped: boolean,
+    disk?: DroppedTileset["disk"], bytes?: number | null): Promise<DroppedTileset | null> {
+  let rec: Recognised;
+  try { rec = await recognise(tree, label, zipped); } catch (e) { toast(t("tsp.unreadable", { x: label, why: String(e) })); return null; }
+  if (rec.form === "unknown") { toast(rec.says); logWarn(rec.says); return null; }
+  const pos = position(rec.root);
+  const recentred = pos.kind === "earth";
+  const id = crypto.randomUUID().slice(0, 8);
+  const d: DroppedTileset = { id, label: rec.name || label, droppedName: label, rec, pos, recentred,
+    reader: servedSource(tree, rec, recentred), bytes: bytes ?? null, t0: performance.now(), ...(disk ? { disk } : {}) };
+  droppedTilesets.set(id, d);
+  logInfo(`${rec.says} · ${pos.line}`);
+  return d;
+}
+
+/** The files of a drop from the system, folders walked. The entries are taken
+ *  DURING the event (a DataTransfer is emptied once it returns), read after. */
+function dropEntries(dt: DataTransfer): Array<{ entry: any; file: File | null }> {
+  const out: Array<{ entry: any; file: File | null }> = [];
+  for (const it of Array.from(dt.items ?? [])) {
+    if (it.kind !== "file") continue;
+    const entry = (it as unknown as { webkitGetAsEntry?: () => any }).webkitGetAsEntry?.() ?? null;
+    out.push({ entry, file: it.getAsFile() });
+  }
+  if (!out.length) for (const f of Array.from(dt.files ?? [])) out.push({ entry: null, file: f });
+  return out;
+}
+async function filesOfEntries(list: Array<{ entry: any; file: File | null }>): Promise<Array<{ path: string; blob: Blob }>> {
+  const files: Array<{ path: string; blob: Blob }> = [];
+  const walk = async (e: any, at: string): Promise<void> => {
+    if (e.isFile) {
+      const f: File = await new Promise((res, rej) => e.file(res, rej));
+      if (f.name !== ".DS_Store") files.push({ path: at + e.name, blob: f });
+      return;
+    }
+    const reader = e.createReader();
+    for (;;) {
+      const batch: any[] = await new Promise((res, rej) => reader.readEntries(res, rej));
+      if (!batch.length) break;
+      for (const c of batch) await walk(c, `${at}${e.name}/`);
+    }
+  };
+  for (const { entry, file } of list) {
+    if (entry?.isDirectory) await walk(entry, "");
+    else if (file) files.push({ path: file.name, blob: file });
+  }
+  return files;
+}
+/** a drop from the system that is a tileset's business: a folder, an archive */
+function dropLooksLikeTileset(list: Array<{ entry: any; file: File | null }>): boolean {
+  return list.some(({ entry, file }) => entry?.isDirectory || (!!file && isArchiveName(file.name)));
+}
+
+async function droppedFromFiles(files: Array<{ path: string; blob: Blob }>): Promise<DroppedTileset | null> {
+  if (!files.length) return null;
+  const { tree, label, zipped } = await treeOfDrop(files);
+  const bytes = files.reduce((s, f) => s + f.blob.size, 0);
+  return droppedFrom(tree, label, zipped, undefined, bytes);
+}
+
+/** A tree of the disk restricted, at its top, to some names (X.json and X/). */
+function topOnly(tree: TreeSource, keep: string[]): TreeSource {
+  return { ...tree, list: async (dir) => (dir ? tree.list(dir) : (await tree.list("")).filter((n) => keep.includes(n))) };
+}
+
+/** A path from the Storage: a folder, a .3tz / .zip, a RealityScan root X.json. */
+async function droppedFromPath(path: string, type: "dir" | "file"): Promise<DroppedTileset | null> {
+  const fns = {
+    list: async (abs: string) => (await fsList(abs)).entries ?? [],
+    read: async (abs: string) => {
+      const r = await fetch(await fsFileUrl(abs));
+      return r.ok ? new Uint8Array(await r.arrayBuffer()) : null;
+    },
+  };
+  const p = path.replace(/\/+$/, "");
+  const base = paths.basename(p), parent = paths.dirname(p);
+  try {
+    if (type === "dir") {
+      const rec0 = await recognise(bridgeTree(p, fns), base);
+      if (rec0.form !== "unknown") {
+        const inner = rec0.prefix ? `${p}/${rec0.prefix.replace(/\/$/, "")}` : p;
+        const disk = rec0.form === "folder" ? { dropped: p, folder: inner }
+          : { dropped: p, folder: `${inner}/${rec0.name}`, root: `${p}/${rec0.entry}` };
+        return droppedFrom(bridgeTree(p, fns), base, false, disk);
+      }
+      // X/ chosen: its root X.json beside it
+      const pt = topOnly(bridgeTree(parent, fns), [`${base}.json`, `${base}/`]);
+      if ((await pt.list("")).includes(`${base}.json`))
+        return droppedFrom(pt, base, false, { dropped: p, folder: p, root: `${parent}/${base}.json` });
+      return droppedFrom(bridgeTree(p, fns), base, false);
+    }
+    if (isArchiveName(base)) {
+      const src = httpSource(await fsFileUrl(p));
+      const inner = await openArchive(src);
+      const bytes = await src.size().catch(() => null);
+      const rec0 = await recognise(inner, base, true);
+      if (rec0.form === "unknown") {
+        // X/ alone in the zip: its root beside the zip
+        const tops = (await inner.list("")).filter((n) => n.endsWith("/")).map((n) => `${n.slice(0, -1)}.json`);
+        const beside = (await bridgeTree(parent, fns).list("")).filter((n) => tops.includes(n));
+        if (beside.length) return droppedFrom(unionTree(inner, topOnly(bridgeTree(parent, fns), beside)), base, true, { dropped: p }, bytes);
+      }
+      return droppedFrom(inner, base, true, rec0.form === "package" ? { dropped: p, archive: p } : { dropped: p }, bytes);
+    }
+    if (/\.json$/i.test(base)) {
+      if (base.toLowerCase() === "tileset.json")
+        return droppedFrom(bridgeTree(parent, fns), paths.basename(parent), false, { dropped: p, folder: parent });
+      const stem = base.replace(/\.json$/i, "");
+      return droppedFrom(topOnly(bridgeTree(parent, fns), [base, `${stem}/`]), stem, false,
+        { dropped: p, folder: `${parent}/${stem}`, root: p });
+    }
+  } catch (e) {
+    if (e instanceof BridgeDownError) { toast(t("storage.bridgeDown")); return null; }
+    toast(t("tsp.unreadable", { x: base, why: String((e as Error)?.message ?? e) }));
+    return null;
+  }
+  return null;
+}
+
+/** Show a dropped tileset in a window: the Viewer alone, centred; the Scene as
+ *  its preview (one per Scene window, as «Apri in Scena»). */
+function showDropped(win: Win, d: DroppedTileset): void {
+  if (win.type === "viewer") {
+    viewerDropped.set(win.id, d.id);
+    selectWindow(win.id);
+    renderViewer();
+  } else if (win.type === "scene") {
+    setWinCurrent(win, "space.preview", { label: d.label, url: droppedUrl(d), dropId: d.id });
+    selectWindow(win.id);
+    refreshSurfaces("scene");
+  }
+  logInfo(t("tsp.opened", { name: d.label }));
+}
+
+function closeViewerDropped(winId: string): void {
+  viewerDropped.delete(winId);
+  const m = viewerDroppedMounts.get(winId);
+  if (m) { m.handle.dispose(); m.host.remove(); viewerDroppedMounts.delete(winId); }
+}
+
+/** The Viewer of a dropped tileset: the bar, then the tileset alone. */
+function renderViewerDropped(win: Win, d: DroppedTileset, stage: HTMLElement): void {
+  disposeViewerScene(win.id);
+  let m = viewerDroppedMounts.get(win.id);
+  if (!m || m.id !== d.id) {
+    if (m) { m.handle.dispose(); m.host.remove(); }
+    const host = document.createElement("div");
+    host.className = "tsp-host";
+    host.dataset.tilesetPreview = d.id;
+    const handle = mount3dViewer(host, droppedUrl(d), { label: d.label,
+      model: { tiles: { source: d.reader, memoryMB: getSettings().viewer.tilesMemoryMB } } });
+    m = { id: d.id, host, handle };
+    viewerDroppedMounts.set(win.id, m);
+  }
+  const wrap = document.createElement("div");
+  wrap.className = "tsp-wrap";
+  wrap.append(droppedBar(d, win), m.host);
+  stage.append(wrap);
+}
+
+/** The epochs of the graph, for «Attacca all'epoca…»: the Space's first. */
+function epochChoices(): Array<{ id: string; name: string }> {
+  const st = store;
+  if (!st) return [];
+  const list = st.liveNodes().filter((n) => n.node_type === "EpochNode").map((n) => ({ id: n.id, name: String(n.name || n.id) }));
+  const first = spaceEpochId && list.find((e) => e.id === spaceEpochId);
+  return first ? [first, ...list.filter((e) => e !== first)] : list;
+}
+
+/** Where the attached resource points: the archive or the folder's
+ *  tileset.json, relative to the em.json when there is one; with no path (a
+ *  drop from the system) the file's name only, and it says so. */
+function droppedLocator(d: DroppedTileset): { locator: string; packaging: "archive" | "directory"; nameOnly: boolean } | null {
+  const rel = (abs: string) => (currentFilePath ? paths.relativeTo(currentFilePath, abs) : abs);
+  if (d.rec.form === "package")
+    return d.disk?.archive ? { locator: rel(d.disk.archive), packaging: "archive", nameOnly: false }
+      : { locator: d.disk?.dropped ? rel(d.disk.dropped) : d.droppedName, packaging: "archive", nameOnly: !d.disk };
+  if (d.rec.form === "folder")
+    return d.disk?.folder ? { locator: rel(`${d.disk.folder}/tileset.json`), packaging: "directory", nameOnly: false }
+      : { locator: `${d.label}/tileset.json`, packaging: "directory", nameOnly: true };
+  return null;
+}
+
+function attachDropped(d: DroppedTileset, epochId: string): void {
+  if (!store || refuseReadOnly()) return;
+  const st = store;
+  const loc = droppedLocator(d);
+  if (!loc) { toast(t("tsp.prepareFirst")); return; }
+  const epoch = String(st.node(epochId)?.name ?? epochId);
+  if (!window.confirm(t("tsp.attachAsk", { name: d.label, epoch, locator: loc.locator }))) return;
+  const out = attachTileset(storeGraph(st), { name: d.label, epochId, locator: loc.locator, packaging: loc.packaging,
+    sizeBytes: d.bytes, nameOnly: loc.nameOnly }, () => st.newId());
+  d.attached = { rmId: out.rmId, epoch };
+  toastUndo(t(loc.nameOnly ? "tsp.attachedNameOnly" : "tsp.attached", { name: d.label, epoch }), st);
+  refreshSurfaces("scene");
+  refreshInspector();
+  renderViewer();
+}
+
+async function packDropped(d: DroppedTileset): Promise<void> {
+  const folder = d.disk?.folder;
+  if (!folder) { toast(t("tsp.packNeedsPath")); return; }
+  const root = d.rec.form === "pair" ? d.disk?.root : undefined;
+  const where = root ? `${paths.dirname(folder)}/${paths.basename(folder)}.3tz` : `${folder}.3tz`;
+  if (!window.confirm(t("tsp.packAsk", { name: d.label, where }))) return;
+  toast(t("tsp.packing", { name: d.label }));
+  const out = await packTileset(await bridgeUrl(), folder, root);
+  if (!out.ok || !out.path) { toast(t("tsp.packFailed", { why: out.error ?? "?" })); logWarn(t("tsp.packFailed", { why: out.error ?? "?" })); return; }
+  d.disk = { ...d.disk!, archive: out.path };
+  d.rec = { ...d.rec, form: "package", ready: true, preparable: false };
+  toast(t(out.state === "same" ? "tsp.packSame" : "tsp.packed", { path: out.path, n: String(out.entries ?? "?"),
+    size: formatBytes(Number(out.bytes ?? 0)) }));
+  logInfo(t("tsp.packed", { path: out.path, n: String(out.entries ?? "?"), size: formatBytes(Number(out.bytes ?? 0)) }));
+  renderViewer();
+  refreshSurfaces("scene");
+}
+
+/** The bar of a dropped tileset: what it is, where it falls, the two acts. */
+function droppedBar(d: DroppedTileset, win: Win): HTMLElement {
+  const bar = document.createElement("div");
+  bar.className = "tsp-bar";
+  bar.dataset.tilesetBar = d.id;
+  const title = document.createElement("div");
+  title.className = "tsp-title";
+  const b = document.createElement("b");
+  b.textContent = t("scene.previewChip", { name: d.label });
+  const form = document.createElement("span");
+  form.className = "tsp-form";
+  form.dataset.form = d.rec.form;
+  form.textContent = t(`tsp.form.${d.rec.form}`, { x: d.rec.name });
+  form.title = d.rec.says;
+  title.append(b, form);
+  const pos = document.createElement("div");
+  pos.className = `tsp-pos${d.pos.warn ? " warn" : ""}`;
+  pos.dataset.warn = String(d.pos.warn);
+  pos.textContent = d.pos.kind === "earth"
+    ? t("tsp.posEarth", { lat: d.pos.lat!.toFixed(4), lon: d.pos.lon!.toFixed(4), h: d.pos.h!.toFixed(1) })
+      + (d.pos.warn ? ` — ${t("tsp.posWarn")}` : "")
+    : t("tsp.posLocal");
+  pos.title = d.pos.line;
+  bar.append(title, pos);
+  if (d.recentred) {
+    const n = document.createElement("div");
+    n.className = "tsp-note";
+    n.dataset.recentred = "1";
+    n.textContent = t(win.type === "scene" ? "tsp.recentredScene" : "tsp.recentred");
+    bar.appendChild(n);
+  }
+  const acts = document.createElement("div");
+  acts.className = "tsp-actions";
+  const loc = droppedLocator(d);
+  const epochs = epochChoices();
+  const sel = document.createElement("select");
+  sel.dataset.tspEpoch = "1";
+  for (const e of epochs) { const o = document.createElement("option"); o.value = e.id; o.textContent = e.name; sel.appendChild(o); }
+  const attach = document.createElement("button");
+  attach.type = "button";
+  attach.className = "insp-btn primary";
+  attach.dataset.tspAttach = "1";
+  attach.textContent = t("tsp.attach");
+  attach.disabled = !store || !epochs.length || !loc || !!d.attached;
+  attach.title = !store ? t("menu.noGraph") : !epochs.length ? t("tsp.noEpochs") : !loc ? t("tsp.prepareFirst")
+    : loc.nameOnly ? t("tsp.nameOnlyHint") : t("tsp.attachHint");
+  attach.addEventListener("click", (e) => { e.stopPropagation(); attachDropped(d, sel.value); });
+  if (epochs.length && !d.attached) acts.append(sel);
+  acts.append(attach);
+  if (d.rec.preparable && d.rec.form !== "package") {
+    const pack = document.createElement("button");
+    pack.type = "button";
+    pack.className = "insp-btn";
+    pack.dataset.tspPack = "1";
+    pack.textContent = t("tsp.pack");
+    const can = !!d.disk?.folder && (d.rec.form === "folder" || d.rec.form === "pair");
+    pack.disabled = !can;
+    pack.title = can ? t("tsp.packHint") : t("tsp.packNeedsPath");
+    pack.addEventListener("click", (e) => { e.stopPropagation(); void packDropped(d); });
+    acts.append(pack);
+  }
+  const x = document.createElement("button");
+  x.type = "button";
+  x.className = "scn-tg";
+  x.dataset.tspClose = "1";
+  x.textContent = "✕";
+  x.title = t("scene.previewClose");
+  x.addEventListener("click", (e) => {
+    e.stopPropagation();
+    if (win.type === "viewer") { closeViewerDropped(win.id); renderViewer(); }
+    else { setWinCurrent(win, "space.preview", null); refreshSurfaces("scene"); }
+  });
+  acts.append(x);
+  bar.appendChild(acts);
+  if (d.attached) {
+    const a = document.createElement("div");
+    a.className = "tsp-note";
+    a.dataset.attached = d.attached.rmId;
+    a.textContent = t("tsp.attachedLine", { epoch: d.attached.epoch });
+    bar.appendChild(a);
+  }
+  const st = document.createElement("div");
+  st.className = "tsp-status";
+  // the bar enters the page after this returns: the line keeps ticking until
+  // it has been in and left (a redraw makes a new one), or never came (10 s)
+  const born = performance.now();
+  let seen = false;
+  const tick = () => {
+    if (bar.isConnected) seen = true;
+    else if (seen || performance.now() - born > 10000) return;
+    const r = d.reader;
+    st.textContent = t("tsp.status", { n: String(r.served.length),
+      first: r.firstTileAt != null ? `${Math.round(r.firstTileAt - d.t0)} ms` : "…" });
+    setTimeout(tick, 700);
+  };
+  bar.appendChild(st);
+  setTimeout(tick, 0);
+  return bar;
+}
+
+/** A drop on a Viewer or a Scene window: true when it was a tileset's (the
+ *  window-wide drop that opens an em.json must not run). */
+function dropTilesetOn(win: Win, e: DragEvent): boolean {
+  if (win.type !== "viewer" && win.type !== "scene") return false;
+  const payload = storageDragPayload(e);
+  if (payload) {
+    const isT = payload.type === "dir" || isArchiveName(payload.name) || (/\.json$/i.test(payload.name) && !/\.em\.json$/i.test(payload.name));
+    if (!isT) return false;
+    e.preventDefault();
+    e.stopPropagation();
+    void droppedFromPath(payload.path, payload.type === "dir" ? "dir" : "file").then((d) => {
+      if (d) showDropped(win, d);
+      else if (win.type === "viewer" && payload.type === "dir") pinViewerCollection(win, payload);   // a folder of images, as before
+    });
+    return true;
+  }
+  if (!e.dataTransfer || !carriesFiles(e)) return false;
+  const list = dropEntries(e.dataTransfer);
+  if (!dropLooksLikeTileset(list)) return false;
+  e.preventDefault();
+  e.stopPropagation();
+  void filesOfEntries(list).then(droppedFromFiles).then((d) => { if (d) showDropped(win, d); });
+  return true;
 }
 
 
@@ -27651,7 +28061,11 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
   });
   sceneOverlayBtns.set(win.id, ovBtn);
   queueMicrotask(refreshFunnel);
-  host.append(overlay, empty, tab, ntab, ovBtn);
+  // MICRO-TILESET-CARTELLA · a dropped tileset's bar (filled by refresh)
+  const tsp = document.createElement("div");
+  tsp.className = "tsp-scene hidden";
+  for (const ev of ["pointerdown", "dblclick", "contextmenu", "wheel", "keydown"]) tsp.addEventListener(ev, (e) => e.stopPropagation());
+  host.append(overlay, empty, tab, ntab, ovBtn, tsp);
   row.append(outl, grip, host, ngrip, npanel);
   wrap.append(bar, row);
   body.appendChild(wrap);
@@ -27892,10 +28306,16 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
     // CAMPAGNA · the preview, said in the bar and closable; drawn whatever the
     // graph says (a tileset opened from the Storage needs no epoch)
     const preview = scenePreviewOf(win);
+    const dropTs = preview?.dropId ? droppedTilesets.get(preview.dropId) ?? null : null;
     const previewItem: SceneItem | null = preview ? {
       kind: "rm", id: `preview:${preview.resourceId ?? preview.url}`, label: preview.label, state: "resident",
-      url: preview.url, resourceId: preview.resourceId } : null;
-    if (preview) {
+      url: preview.url, resourceId: preview.resourceId,
+      ...(dropTs ? { tiles: "directory" as const, tilesSource: dropTs.reader } : {}) } : null;
+    // MICRO-TILESET-CARTELLA · the bar of a dropped tileset, over the scene
+    tsp.textContent = "";
+    tsp.classList.toggle("hidden", !dropTs);
+    if (dropTs) tsp.appendChild(droppedBar(dropTs, win));
+    if (preview && !dropTs) {
       const chip = document.createElement("span");
       chip.className = "scn-preview";
       chip.dataset.preview = preview.path ?? preview.url;
@@ -35579,6 +35999,14 @@ function renderViewerInto(win: Win, stage: HTMLElement, caption: HTMLElement,
   bar.classList.add("hidden");
 
   vwSyncModes(win);
+  // MICRO-TILESET-CARTELLA · a tileset dropped on it: shown alone until ✕
+  const dropTs = droppedTilesets.get(viewerDropped.get(win.id) ?? "");
+  if (dropTs) {
+    bar.classList.remove("vw-bar");
+    renderViewerDropped(win, dropTs, stage);
+    return;
+  }
+  if (viewerDroppedMounts.has(win.id)) closeViewerDropped(win.id);
   // MICRO-VIEWER-UNICO · no collection dropped on it: the Viewer of ONE node
   const dropped = winCurrent(win, "collection");
   if (!dropped) {

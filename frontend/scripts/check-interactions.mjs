@@ -10288,6 +10288,274 @@ test("FD2.esc", "FILTRI-DETTAGLIATI · Esc chiude il pannello del livello di det
   return { pass, detail: r };
 });
 
+// ── MICRO-TILESET-CARTELLA (25 Oct 2026) · a tileset dropped as it is ──────
+// The fixture: `tileset-disco` (44 KB, glb tiles) of the bench, turned into the
+// RealityScan form — `disco_rs.json` beside `disco_rs/`, its contents written
+// `disco_rs/tiles/…`, the root's transform the Basilica Iulia's (lat 0.0001°,
+// lon 10.51°: «written as geocentric») — and zipped as a package.
+const TSD_T = [-0.18243234, 0.98321841, 0.0, 0.0, -0.00000197, -0.00000036, 1.0, 0.0,
+  0.98321841, 0.18243234, 0.000002, 0.0, 6271103.68898329, 1163587.9280063, 12.30476309, 1.0];
+async function tsdBench(tag) {
+  const root = FS_ROOT ?? (await rootPath());
+  const dir = `${root}/tsdrop-${tag}`;
+  execFileSync("rm", ["-rf", dir]);
+  mkdirSync(dir, { recursive: true });
+  execFileSync("cp", ["-cR", `${root}/tileset-disco`, `${dir}/disco`]);
+  execFileSync("cp", ["-cR", `${root}/tileset-disco/tiles`, `${dir}/disco_rs`]);
+  execFileSync("mkdir", ["-p", `${dir}/disco_rs_tmp`]);
+  execFileSync("mv", [`${dir}/disco_rs`, `${dir}/disco_rs_tmp/tiles`]);
+  execFileSync("mv", [`${dir}/disco_rs_tmp`, `${dir}/disco_rs`]);
+  const doc = JSON.parse(readFileSync(`${root}/tileset-disco/tileset.json`, "utf8"));
+  const walk = (t) => { if (t.content?.uri) t.content.uri = `disco_rs/${t.content.uri}`; for (const c of t.children ?? []) walk(c); };
+  walk(doc.root);
+  doc.root.transform = TSD_T;
+  writeFileSync(`${dir}/disco_rs.json`, JSON.stringify(doc));
+  execFileSync("python3", ["-I", "-c", `import os,sys,zipfile
+src,out=sys.argv[1],sys.argv[2]
+z=zipfile.ZipFile(out,'w',zipfile.ZIP_STORED)
+for d,_,fs in os.walk(src):
+  for f in sorted(fs): z.write(os.path.join(d,f),os.path.relpath(os.path.join(d,f),src))
+z.close()`, `${dir}/disco`, `${dir}/disco.zip`]);
+  return { root, dir };
+}
+/** a real drop event on a window's area: files of the system, or a Storage path */
+const tsdDropFiles = (p, win, files) => p.evaluate(([w, fs]) => {
+  const dt = new DataTransfer();
+  for (const f of fs) dt.items.add(new File([Uint8Array.from(atob(f.b64), (c) => c.charCodeAt(0))], f.name));
+  const area = document.querySelector(`.tile-area[data-win="${w}"]`);
+  const r = area.getBoundingClientRect();
+  const at = { bubbles: true, cancelable: true, dataTransfer: dt, clientX: r.x + r.width / 2, clientY: r.y + r.height / 2 };
+  area.dispatchEvent(new DragEvent("dragover", at));
+  const ev = new DragEvent("drop", at);
+  area.dispatchEvent(ev);
+  return ev.defaultPrevented;
+}, [win, files]);
+const tsdDropPath = (p, win, payload) => p.evaluate(([w, pl]) => {
+  const dt = new DataTransfer();
+  dt.setData("application/x-em-storage-entry", JSON.stringify(pl));
+  const area = document.querySelector(`.tile-area[data-win="${w}"]`);
+  const at = { bubbles: true, cancelable: true, dataTransfer: dt };
+  area.dispatchEvent(new DragEvent("dragover", at));
+  const ev = new DragEvent("drop", at);
+  area.dispatchEvent(ev);
+  return ev.defaultPrevented;
+}, [win, payload]);
+const tsdBar = (p, win) => p.evaluate((w) => {
+  const b = document.querySelector(`.tile-area[data-win="${w}"] [data-tileset-bar]`);
+  if (!b) return null;
+  return { id: b.dataset.tilesetBar, form: b.querySelector("[data-form]")?.dataset.form, pos: b.querySelector(".tsp-pos")?.textContent,
+    warn: b.querySelector(".tsp-pos")?.dataset.warn === "true", recentred: !!b.querySelector("[data-recentred]"),
+    note: b.querySelector("[data-recentred]")?.textContent ?? null,
+    attach: { disabled: b.querySelector("[data-tsp-attach]")?.disabled ?? null, title: b.querySelector("[data-tsp-attach]")?.title ?? null },
+    pack: b.querySelector("[data-tsp-pack]") ? { disabled: b.querySelector("[data-tsp-pack]").disabled } : null,
+    status: b.querySelector(".tsp-status")?.textContent ?? "" };
+}, win);
+/** the tiles a Viewer's dropped tileset loaded (its `mount3dViewer` host) */
+const tsdViewerTiles = (p, win) => p.evaluate((w) => {
+  const h = document.querySelector(`.tile-area[data-win="${w}"] .tsp-host`);
+  const s = h?.__tiles?.();
+  return s ? { files: s.files, loaded: s.status.loaded, visible: s.status.visible, failed: s.status.failed, box: s.box } : null;
+}, win);
+const tsdWait = async (p, fn, ms = 30000) => { const t0 = Date.now(); for (;;) { const v = await fn(); if (v || Date.now() - t0 > ms) return v; await p.waitForTimeout(250); } };
+
+test("TD1.viewer", "tileset trascinato · uno zip dal sistema sul Viewer: si vede subito (le tile lette a pezzi dal Blob), la barra dice cos'è; «Attacca all'epoca…» chiede, scrive RM + risorsa nell'epoca, un passo di annulla", async () => {
+  const { dir } = await tsdBench("td1");
+  const { p, ctx, errors } = await open({ doc: "catena", ws: "provenance" });
+  p.on("dialog", (d) => { void d.accept(); });
+  const win = await winOf(p, "viewer");
+  const prevented = await tsdDropFiles(p, win, [{ name: "disco.zip", b64: readFileSync(`${dir}/disco.zip`).toString("base64") }]);
+  const bar = await tsdWait(p, () => tsdBar(p, win));
+  const tiles = await tsdWait(p, async () => { const t = await tsdViewerTiles(p, win); return t && t.files.length ? t : null; });
+  await p.screenshot({ path: SHOT("td1-viewer-zip") }).catch(() => {});
+  const before = await p.evaluate(() => ({ rm: window.__EM_DRAG__.idsOfType("representation_model").length, res: window.__EM_DRAG__.idsOfType("resource").length }));
+  const epoch = await p.evaluate((w) => document.querySelector(`.tile-area[data-win="${w}"] [data-tsp-epoch]`)?.value, win);
+  await p.click(`.tile-area[data-win="${win}"] [data-tsp-attach]`);
+  await p.waitForTimeout(500);
+  const after = await p.evaluate(() => {
+    const D = window.__EM_DRAG__;
+    const rms = D.idsOfType("representation_model").map((id) => D.node(id));
+    const rm = rms.find((n) => n?.data?.is_tileset);
+    const ep = rm ? D.edgesOf("has_first_epoch").find((e) => e.source === rm.id)?.target : null;
+    const link = rm ? D.edgesOf("has_linked_resource").find((e) => e.source === rm.id)?.target : null;
+    return { rm: rms.length, res: D.idsOfType("resource").length, url: rm?.data?.url ?? null, ep, res0: link ? D.node(link)?.data ?? null : null };
+  });
+  const line = await tsdBar(p, win);
+  await p.evaluate(() => window.__EM_DRAG__.undo?.());
+  await p.waitForTimeout(400);
+  const undone = await p.evaluate(() => ({ rm: window.__EM_DRAG__.idsOfType("representation_model").length, res: window.__EM_DRAG__.idsOfType("resource").length }));
+  await ctx.close();
+  return { pass: prevented && bar?.form === "package" && !bar.warn && !bar.recentred && (tiles?.files ?? []).length >= 1
+      && after.rm === before.rm + 1 && after.res === before.res + 1 && after.url === "disco.zip" && after.ep === epoch
+      && after.res0?.packaging === "archive" && line?.attach.disabled === true
+      && undone.rm === before.rm && undone.res === before.res && !errors.length,
+    detail: { prevented, bar, tiles, before, after, undone, errors } };
+});
+
+test("TD2.pair", "tileset trascinato · la forma RealityScan (X/ dallo Storage, X.json accanto) sul Viewer: riconosciuta e detta, la posizione avvisa «geocentriche», centrata solo per la vista, le tile si vedono", async () => {
+  const { dir } = await tsdBench("td2");
+  const { p, ctx, errors } = await open({ doc: "catena", ws: "provenance" });
+  const win = await winOf(p, "viewer");
+  const prevented = await tsdDropPath(p, win, { path: `${dir}/disco_rs`, type: "dir", name: "disco_rs", ext: "" });
+  const bar = await tsdWait(p, () => tsdBar(p, win));
+  const tiles = await tsdWait(p, async () => { const t = await tsdViewerTiles(p, win); return t && t.files.length ? t : null; });
+  const state = bar ? await p.evaluate((id) => window.__EM_DRAG__.tilesetDropped(id), bar.id) : null;
+  await p.screenshot({ path: SHOT("td2-viewer-coppia-realityscan") }).catch(() => {});
+  await ctx.close();
+  // centred: the root's box (2 × 2 × 0.5 around 2,2,0.5) near the origin, not 6 371 km away
+  const near = (tiles?.box ?? []).every((v) => Math.abs(v) < 100);
+  return { pass: prevented && bar?.form === "pair" && bar.warn && /geocentric/.test(bar.pos) && bar.recentred
+      && bar.attach.disabled === true && bar.pack?.disabled === false && (tiles?.files ?? []).length >= 1 && near
+      && state?.disk?.root === `${dir}/disco_rs.json` && Math.abs(state.pos.lon - 10.5115) < 0.001 && !errors.length,
+    detail: { prevented, bar, tiles, state, errors } };
+});
+
+test("TD3.pack", "tileset trascinato · «Prepara il pacchetto» sulla forma RealityScan: chiede, il bridge scrive disco_rs.3tz ACCANTO (canonico, X.json come tileset.json), gli originali intatti; poi si attacca", async () => {
+  const { dir } = await tsdBench("td3");
+  const listing = () => execFileSync("find", [dir, "-type", "f"], { encoding: "utf8" }).split("\n").filter(Boolean).sort();
+  const before = listing();
+  const { p, ctx, errors } = await open({ doc: "catena", ws: "provenance" });
+  p.on("dialog", (d) => { void d.accept(); });
+  const win = await winOf(p, "viewer");
+  await tsdDropPath(p, win, { path: `${dir}/disco_rs.json`, type: "file", name: "disco_rs.json", ext: "json" });
+  const bar0 = await tsdWait(p, () => tsdBar(p, win));
+  await p.click(`.tile-area[data-win="${win}"] [data-tsp-pack]`);
+  const bar1 = await tsdWait(p, async () => { const b = await tsdBar(p, win); return b?.form === "package" ? b : null; }, 30000);
+  const after = listing();
+  const added = after.filter((f) => !before.includes(f));
+  let names = [];
+  try { names = execFileSync("unzip", ["-Z1", `${dir}/disco_rs.3tz`], { encoding: "utf8" }).split("\n").filter(Boolean); } catch { /* not written */ }
+  await p.click(`.tile-area[data-win="${win}"] [data-tsp-attach]`);
+  await p.waitForTimeout(500);
+  const rm = await p.evaluate(() => { const D = window.__EM_DRAG__; const n = D.idsOfType("representation_model").map((id) => D.node(id)).find((x) => x?.data?.is_tileset); return n?.data?.url ?? null; });
+  await p.screenshot({ path: SHOT("td3-pacchetto-preparato") }).catch(() => {});
+  await ctx.close();
+  return { pass: bar0?.form === "pair" && bar1?.form === "package" && added.length === 1 && added[0] === `${dir}/disco_rs.3tz`
+      && before.every((f) => after.includes(f)) && names.includes("tileset.json") && names.includes("disco_rs/tiles/root.glb")
+      && names[names.length - 1] === "@3dtilesIndex1@" && rm === `${dir}/disco_rs.3tz` && !errors.length,
+    detail: { bar0, bar1, added, names: names.slice(0, 4).concat(names.slice(-1)), rm, errors } };
+});
+
+test("TD4.scene", "tileset trascinato · sulla Scena 3D (X.json dallo Storage): anteprima nello spazio dello studio, la barra con la posizione e «messo al centro solo per la vista»; ✕ la chiude", async () => {
+  const { dir } = await tsdBench("td4");
+  const { p, ctx, errors } = await open({ doc: "catena", ws: "space" });
+  const win = await winOf(p, "scene");
+  await p.waitForTimeout(800);
+  const prevented = await tsdDropPath(p, win, { path: `${dir}/disco_rs.json`, type: "file", name: "disco_rs.json", ext: "json" });
+  const bar = await tsdWait(p, () => tsdBar(p, win));
+  const layer = await tsdWait(p, () => p.evaluate(() => {
+    const h = document.querySelector(".scn-host");
+    const l = (h?.__spaceTiles?.() ?? []).find((x) => String(x.id).startsWith("preview:"));
+    return l && l.files.length ? { id: l.id, files: l.files.length, box: l.box } : null;
+  }), 40000);
+  await p.screenshot({ path: SHOT("td4-scena-anteprima") }).catch(() => {});
+  await p.click(`.tile-area[data-win="${win}"] [data-tsp-close]`);
+  await p.waitForTimeout(600);
+  const closed = await tsdBar(p, win);
+  await ctx.close();
+  return { pass: prevented && bar?.form === "pair" && bar.warn && /spazio/.test(bar.note ?? "") && !!layer
+      && (layer.box ?? []).every((v) => Math.abs(v) < 100) && closed === null && !errors.length,
+    detail: { prevented, bar, layer, closed, errors } };
+});
+
+test("TD5.refuse", "tileset trascinato · uno zip senza tileset dice che cosa c'è dentro; un .em.json trascinato sul Viewer non è preso dal tileset (va ad aprire il documento come prima)", async () => {
+  const { dir } = await tsdBench("td5");
+  execFileSync("python3", ["-I", "-c", "import sys,zipfile\nz=zipfile.ZipFile(sys.argv[1],'w');z.writestr('note/leggimi.txt','x');z.close()", `${dir}/niente.zip`]);
+  const { p, ctx, errors } = await open({ doc: "catena", ws: "provenance" });
+  const win = await winOf(p, "viewer");
+  await tsdDropFiles(p, win, [{ name: "niente.zip", b64: readFileSync(`${dir}/niente.zip`).toString("base64") }]);
+  await p.waitForTimeout(1200);
+  const toast = await p.evaluate(() => document.querySelector("#toast, .toast")?.textContent ?? "");
+  const bar = await tsdBar(p, win);
+  // an em.json: the area leaves it to the window's door (not prevented here)
+  const emjson = await p.evaluate((w) => {
+    const dt = new DataTransfer();
+    dt.items.add(new File(["{}"], "x.em.json"));
+    const area = document.querySelector(`.tile-area[data-win="${w}"]`);
+    let atArea = null;
+    const spy = (e) => { atArea = e.defaultPrevented; };
+    // on the area's parent: after the area's own handler, before the window's door
+    area.parentElement.addEventListener("drop", spy, { once: true });
+    const ev = new DragEvent("drop", { bubbles: true, cancelable: true, dataTransfer: dt });
+    area.dispatchEvent(ev);
+    return { reachedWindow: atArea !== null, preventedBeforeWindow: atArea };
+  }, win);
+  await ctx.close();
+  return { pass: /No tileset\.json in niente\.zip: it holds note\//.test(toast) && bar === null
+      && emjson.reachedWindow && emjson.preventedBeforeWindow === false && !errors.length,
+    detail: { toast, bar, emjson, errors } };
+});
+
+// the Basilica Iulia itself (E.D.'s RealityScan export, READ ONLY on the
+// Desktop): measured, when it is on this machine — a clone (APFS) in the bench
+test("TD6.basilica", "tileset trascinato · la Basilica Iulia (RealityScan 2.2, 1 GB): la coppia dallo Storage sul Viewer e sulla Scena, lo zip sistemato dal sistema sul Viewer — tile caricate, tempo alla prima tile, posizione", async () => {
+  const SRC = process.env.BASILICA_DIR ?? `${process.env.HOME}/Desktop/BasilicaTSL_cesium`;
+  const ZIP = process.env.BASILICA_FIXED ?? `${process.env.HOME}/Desktop/BasilicaTLS_tileset.zip`;
+  if (!existsSync(`${SRC}/tileset_Basilica_TLS_ED.json`)) return { pass: true, detail: { skipped: `${SRC} not here` } };
+  const root = FS_ROOT ?? (await rootPath());
+  const dir = `${root}/basilica`;
+  execFileSync("rm", ["-rf", dir]);
+  mkdirSync(dir, { recursive: true });
+  execFileSync("cp", ["-cR", `${SRC}/tileset_Basilica_TLS_ED`, `${SRC}/tileset_Basilica_TLS_ED.json`, dir]);
+  const out = {};
+  const settle = async (p, read, ms = 60000) => {
+    const t0 = Date.now(); let last = null, same = 0;
+    for (;;) {
+      const v = await read();
+      if (v && last && v.files === last.files) same++; else same = 0;
+      last = v ?? last;
+      if ((v && v.files > 0 && same >= 6) || Date.now() - t0 > ms) return last;
+      await p.waitForTimeout(500);
+    }
+  };
+  {
+    const { p, ctx, errors } = await open({ doc: "catena", ws: "provenance" });
+    const win = await winOf(p, "viewer");
+    const t0 = Date.now();
+    await tsdDropPath(p, win, { path: `${dir}/tileset_Basilica_TLS_ED`, type: "dir", name: "tileset_Basilica_TLS_ED", ext: "" });
+    const bar = await tsdWait(p, () => tsdBar(p, win), 60000);
+    const tiles = await settle(p, async () => { const t = await tsdViewerTiles(p, win); return t ? { files: t.files.length, loaded: t.loaded, visible: t.visible, box: t.box } : null; });
+    const st = bar ? await p.evaluate((id) => window.__EM_DRAG__.tilesetDropped(id), bar.id) : null;
+    await p.screenshot({ path: SHOT("td6-basilica-viewer") }).catch(() => {});
+    out.viewerPair = { bar, tiles, firstTileMs: st?.firstTileMs, served: st?.served, wallMs: Date.now() - t0, errors };
+    await ctx.close();
+  }
+  {
+    const { p, ctx, errors } = await open({ doc: "catena", ws: "space" });
+    const win = await winOf(p, "scene");
+    await p.waitForTimeout(800);
+    await tsdDropPath(p, win, { path: `${dir}/tileset_Basilica_TLS_ED.json`, type: "file", name: "tileset_Basilica_TLS_ED.json", ext: "json" });
+    const bar = await tsdWait(p, () => tsdBar(p, win), 60000);
+    const layer = await settle(p, () => p.evaluate(() => {
+      const l = (document.querySelector(".scn-host")?.__spaceTiles?.() ?? []).find((x) => String(x.id).startsWith("preview:"));
+      return l ? { files: l.files.length, loaded: l.status.loaded, visible: l.status.visible, box: l.box } : null;
+    }));
+    const st = bar ? await p.evaluate((id) => window.__EM_DRAG__.tilesetDropped(id), bar.id) : null;
+    await p.screenshot({ path: SHOT("td6-basilica-scena") }).catch(() => {});
+    out.scenePair = { bar, layer, firstTileMs: st?.firstTileMs, served: st?.served, errors };
+    await ctx.close();
+  }
+  if (existsSync(ZIP)) {
+    const { p, ctx, errors } = await open({ doc: "catena", ws: "provenance" });
+    const win = await winOf(p, "viewer");
+    // the 1 GB zip as a File of the system: Playwright hands the path, the page slices it
+    await p.evaluate(() => { const i = document.createElement("input"); i.type = "file"; i.id = "tsd-file"; i.style.display = "none"; document.body.appendChild(i); });
+    await p.setInputFiles("#tsd-file", ZIP);
+    const t0 = Date.now();
+    const id = await p.evaluate((w) => window.__EM_DRAG__.tilesetDrop(w, [{ path: document.getElementById("tsd-file").files[0].name, blob: document.getElementById("tsd-file").files[0] }]), win);
+    const bar = await tsdWait(p, () => tsdBar(p, win), 60000);
+    const tiles = await settle(p, async () => { const t = await tsdViewerTiles(p, win); return t ? { files: t.files.length, loaded: t.loaded, visible: t.visible, box: t.box } : null; });
+    const st = id ? await p.evaluate((x) => window.__EM_DRAG__.tilesetDropped(x), id) : null;
+    await p.screenshot({ path: SHOT("td6-basilica-zip-viewer") }).catch(() => {});
+    out.viewerZip = { bar, tiles, firstTileMs: st?.firstTileMs, served: st?.served, wallMs: Date.now() - t0, errors };
+    await ctx.close();
+  }
+  execFileSync("rm", ["-rf", dir]);
+  const okOf = (x, files) => !!x && (files ?? 0) > 0 && !x.errors.length;
+  return { pass: okOf(out.viewerPair, out.viewerPair?.tiles?.files) && out.viewerPair.bar?.warn
+      && okOf(out.scenePair, out.scenePair?.layer?.files) && (!out.viewerZip || okOf(out.viewerZip, out.viewerZip?.tiles?.files)),
+    detail: out };
+});
+
 // ── run ─────────────────────────────────────────────────────────────────────
 const chosen =cases.filter((c) => !only.length || only.includes(c.id) || only.some((o) => c.id.startsWith(o + ".")));
 for (const c of chosen) {

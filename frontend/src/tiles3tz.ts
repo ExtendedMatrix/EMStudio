@@ -298,6 +298,95 @@ export class Archive3tz {
   describe(): ReturnType<ByteSource["describe"]> { return this.src.describe(); }
 }
 
+/**
+ * MICRO-TILESET-CARTELLA · ANY zip, read by ranges: the whole central directory
+ * once (the Basilica Iulia's 1 GB zip: 1638 records, ~140 KB), then each entry
+ * at its offset. A tileset zipped by hand, or by RealityScan's export folder
+ * zipped in the Finder, has no `@3dtilesIndex1@` — `Archive3tz` refuses it,
+ * this reads it. Stored and deflated entries; zip64 sizes and offsets.
+ */
+export class ZipArchive {
+  private constructor(private src: ByteSource,
+                      private dir: Map<string, { lho: number; csize: number }>,
+                      readonly zip64: boolean) {}
+
+  static async open(src: ByteSource): Promise<ZipArchive> {
+    const size = await src.size();
+    const tailLen = Math.min(size, 22 + 0xffff);
+    const tail = await src.read(size - tailLen, tailLen);
+    const tv = new DataView(tail.buffer, tail.byteOffset, tail.byteLength);
+    let e = -1;
+    for (let i = tail.length - 22; i >= 0; i--) if (tv.getUint32(i, true) === SIG_EOCD) { e = i; break; }
+    if (e < 0) throw new Error("not a zip: no end of central directory");
+    let cdSize = tv.getUint32(e + 12, true), cdOffset = tv.getUint32(e + 16, true);
+    let zip64 = false;
+    if (cdOffset === 0xffffffff || cdSize === 0xffffffff || tv.getUint16(e + 10, true) === 0xffff) {
+      const loc = e - 20;
+      if (loc < 0 || tv.getUint32(loc, true) !== SIG_LOC64) throw new Error("zip64 without its locator");
+      const rec = await src.read(u64(tv, loc + 8), 56);
+      const rv = new DataView(rec.buffer, rec.byteOffset, rec.byteLength);
+      if (rv.getUint32(0, true) !== SIG_EOCD64) throw new Error("zip64 end of directory not found");
+      cdSize = u64(rv, 40); cdOffset = u64(rv, 48);
+      zip64 = true;
+    }
+    const cd = await src.read(cdOffset, cdSize);
+    const cv = new DataView(cd.buffer, cd.byteOffset, cd.byteLength);
+    const dir = new Map<string, { lho: number; csize: number }>();
+    const dec = new TextDecoder();
+    for (let p = 0; p + 46 <= cd.length && cv.getUint32(p, true) === SIG_CDH;) {
+      const nlen = cv.getUint16(p + 28, true), xlen = cv.getUint16(p + 30, true), clen = cv.getUint16(p + 32, true);
+      let csize = cv.getUint32(p + 20, true), usize = cv.getUint32(p + 24, true), lho = cv.getUint32(p + 42, true);
+      const name = normalizePath(dec.decode(cd.subarray(p + 46, p + 46 + nlen)));
+      if (usize === 0xffffffff || csize === 0xffffffff || lho === 0xffffffff) {
+        let q = p + 46 + nlen; const end = q + xlen;
+        while (q + 4 <= end) {
+          const tag = cv.getUint16(q, true), ln = cv.getUint16(q + 2, true);
+          if (tag === 1) {
+            let r = q + 4;
+            if (usize === 0xffffffff) { usize = u64(cv, r); r += 8; }
+            if (csize === 0xffffffff) { csize = u64(cv, r); r += 8; }
+            if (lho === 0xffffffff) lho = u64(cv, r);
+            break;
+          }
+          q += 4 + ln;
+        }
+      }
+      if (!name.endsWith("/") && name !== INDEX_NAME) dir.set(name, { lho, csize });
+      p += 46 + nlen + xlen + clen;
+    }
+    return new ZipArchive(src, dir, zip64);
+  }
+
+  /** every file's path (folders implied, the 3tz index left out) */
+  names(): string[] { return [...this.dir.keys()]; }
+
+  async readEntry(path: string): Promise<Uint8Array | null> {
+    const at = this.dir.get(normalizePath(path));
+    if (!at) return null;
+    const head = await this.src.read(at.lho, 30);
+    const hv = new DataView(head.buffer, head.byteOffset, head.byteLength);
+    if (hv.getUint32(0, true) !== SIG_LFH) throw new Error(`${path}: no local header at ${at.lho}`);
+    const method = hv.getUint16(8, true);
+    const data = await this.src.read(at.lho + 30 + hv.getUint16(26, true) + hv.getUint16(28, true), at.csize);
+    if (method === 0) return data;
+    if (method === 8) return inflateRaw(data);
+    throw new Error(`${path}: compression method ${method} is not read here`);
+  }
+
+  describe(): ReturnType<ByteSource["describe"]> { return this.src.describe(); }
+}
+
+/** MICRO-TILESET-CARTELLA · RealityScan (and RealityCapture) write every tile
+ *  GZIPPED — `1f 8b` where `b3dm` should be (measured on the Basilica Iulia's
+ *  `Geometry/lod5_0.b3dm`) — for a server that sends them with
+ *  `Content-Encoding: gzip`. Read from an archive or a dropped file there is
+ *  no server: the bytes are inflated here, as a browser would. */
+export async function gunzipIfGzip(bytes: Uint8Array | null): Promise<Uint8Array | null> {
+  if (!bytes || bytes.length < 3 || bytes[0] !== 0x1f || bytes[1] !== 0x8b || bytes[2] !== 0x08) return bytes;
+  const stream = new Blob([bytes as BlobPart]).stream().pipeThrough(new DecompressionStream("gzip"));
+  return new Uint8Array(await new Response(stream).arrayBuffer());
+}
+
 async function inflateRaw(data: Uint8Array): Promise<Uint8Array> {
   const ds = new DecompressionStream("deflate-raw");
   const stream = new Blob([data as BlobPart]).stream().pipeThrough(ds);
@@ -329,7 +418,7 @@ export class Tiles3tzPlugin {
   fetchData(url: string): Promise<Response> | null {
     if (!url.startsWith(this.base)) return null;
     const rel = decodeURIComponent(url.slice(this.base.length).split(/[?#]/)[0]);
-    return this.archive.then((a) => a.readEntry(rel)).then((bytes) => {
+    return this.archive.then((a) => a.readEntry(rel)).then(gunzipIfGzip).then((bytes) => {
       if (!bytes) return new Response(null, { status: 404, statusText: `${rel} is not in the archive` });
       this.served.push(rel);
       return new Response(bytes as BodyInit, { status: 200 });

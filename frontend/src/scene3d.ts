@@ -89,6 +89,9 @@ export interface SceneItem {
   /** TEMPLU MARE v2 · C1 · `url` IS a tileset, in this form, whatever it ends
    *  with: a store URL (`…/asset/sha256:…`) names no `.3tz` */
   tiles?: "directory" | "3tz";
+  /** MICRO-TILESET-CARTELLA · a dropped tileset (a preview): its files from
+   *  this reader, `url` only its name in the scene */
+  tilesSource?: { readEntry(path: string): Promise<Uint8Array | null> };
   /** MICRO-SPAZIO-3D-3 p.10 · the model's versions as a flow of LOD by the
    *  distance (`lod-flow.ts`): the scene draws the one the camera asks for,
    *  starting from `flowStart` (the lightest) */
@@ -719,13 +722,15 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
       /** the tilesets whose late root is watched (once each: a kept layer outlives the rebuilds) */
       const rootWatched = new WeakSet<object>();
       const liveLayers = () => [...layers.values()].filter((l) => l.layer.object.parent === content);
-      const ensureLayer = async (url: string, itemId: string, archive = false, mode?: "auto" | "manual"): Promise<Live | null> => {
+      const ensureLayer = async (url: string, itemId: string, archive = false, mode?: "auto" | "manual",
+                                 source?: SceneItem["tilesSource"]): Promise<Live | null> => {
         let live = layers.get(url);
         if (live) { live.itemId = itemId; return live; }
         try { T = T ?? await tilesEngine(); } catch { return null; }
         // MICRO-TILESET-CONTENITORE · a container's tileset refines by itself
         // (its tiles by the distance): «Manuale» stays one click away on its bar
-        const layer = createTilesLayer(E, T, url, camera, renderer, { memoryMB: opts.tilesMemoryMB, archive, ...(mode ? { mode } : {}) });
+        const layer = createTilesLayer(E, T, url, camera, renderer, { memoryMB: opts.tilesMemoryMB, archive, ...(mode ? { mode } : {}),
+          ...(source ? { source } : {}) });
         const bar = tilesBar(layer, tilesBarTexts());
         // ready = the root's first tile, or its failure (the frame waits for it)
         const ready = new Promise<void>((res) => {
@@ -1565,7 +1570,8 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
             used.add(tsUrl);
             drawn.set(key, { item, as: "pending", url: tsUrl });
             const el = stripOf(item);
-            pending.push(ensureLayer(tsUrl, item.id, tsUrl === item.url && item.tiles === "3tz", item.alt ? "auto" : undefined).then(async (live) => {
+            pending.push(ensureLayer(tsUrl, item.id, tsUrl === item.url && item.tiles === "3tz", item.alt ? "auto" : undefined,
+              tsUrl === item.url ? item.tilesSource : undefined).then(async (live) => {
               if (gen !== generation || disposed) return;
               if (!live) { drawn.set(key, { item: { ...item, state: "missing" }, as: "label" }); later.push({ ...item, state: "missing" }); return; }
               live.layer.object.userData.tiles = true;

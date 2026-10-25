@@ -42,11 +42,14 @@ export interface PackResult {
   error?: string;
 }
 
-/** Ask the bridge to pack `folder` (holding `tileset.json`) beside itself. */
-export async function packTileset(bridge: string, folder: string): Promise<PackResult> {
+/** Ask the bridge to pack `folder` (holding `tileset.json`) beside itself.
+ *  MICRO-TILESET-CARTELLA · `root`: the RealityScan form, `X.json` beside the
+ *  folder `X/` — the bridge packs the two as one tree, `X.json` as
+ *  `tileset.json`, into `X.3tz` beside them (bridge level 39). */
+export async function packTileset(bridge: string, folder: string, root?: string): Promise<PackResult> {
   const r = await fetch(`${bridge}/fs/pack-3tz`, {
     method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ folder }),
+    body: JSON.stringify(root ? { folder, root } : { folder }),
   });
   const body = (await r.json().catch(() => ({}))) as PackResult & { detail?: string; message?: string };
   if (!r.ok || !body.ok) return { ok: false, error: body.error ?? body.detail ?? body.message ?? `bridge ${r.status}` };

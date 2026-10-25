@@ -10248,3 +10248,19 @@ body.em-detached #tile-root > .tile-area.tile-detached {
 }
 .win-detached-tail button:hover { background: var(--bg-panel); border-color: var(--border); color: var(--text); }
 .gest .gjoin.gdetach { border-style: dashed; }
+
+/* MICRO-TILESET-CARTELLA · a dropped tileset: its bar in the Viewer and over the Scene */
+.tsp-bar { display: flex; flex-direction: column; gap: 3px; padding: 6px 8px; font-size: 12px;
+  background: var(--bg-elevated); color: var(--text); border: 1px solid var(--border); border-radius: var(--radius-sm); margin-bottom: 6px; }
+.tsp-title { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
+.tsp-form { opacity: .8; }
+.tsp-pos.warn { color: var(--warn-ink); background: var(--warn-soft); border-radius: var(--radius-sm); padding: 1px 4px; font-weight: 600; }
+.tsp-note { opacity: .75; font-style: italic; }
+.tsp-actions { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin-top: 2px; }
+.tsp-actions select { max-width: 220px; }
+.tsp-status { opacity: .6; font-variant-numeric: tabular-nums; }
+.tsp-wrap { display: flex; flex-direction: column; width: 100%; align-self: stretch; padding: 6px; box-sizing: border-box; }
+.tsp-host { min-height: 200px; width: 100%; }
+.tsp-scene { position: absolute; left: 8px; bottom: 8px; max-width: min(640px, calc(100% - 16px)); z-index: 6; }
+.tsp-scene .tsp-bar { margin: 0; box-shadow: 0 2px 8px rgba(0, 0, 0, .15); }
+.tsp-scene.hidden { display: none; }

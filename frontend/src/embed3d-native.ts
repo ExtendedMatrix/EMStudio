@@ -140,7 +140,9 @@ export interface ModelOptions {
   /** the tileset of the same model, proposed when the glb is over the limit */
   tileset?: string | null;
   /** the tileset's refinement and memory (the preferences) */
-  tiles?: { mode?: RefineMode; memoryMB?: number };
+  tiles?: { mode?: RefineMode; memoryMB?: number;
+    /** MICRO-TILESET-CARTELLA · a dropped tileset: its files from this reader */
+    source?: { readEntry(path: string): Promise<Uint8Array | null> } };
   /** look for the `<base>_LOD0…N` siblings of a glb (default: yes) */
   lods?: boolean;
   /** RISORSA-FILE · the files of a resource of several files: the URL the

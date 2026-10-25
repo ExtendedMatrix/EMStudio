@@ -174,7 +174,9 @@ import json
 import os
 import pathlib
 import re
+import shutil
 import sys
+import tempfile
 import threading
 import time
 import urllib.parse
@@ -1563,7 +1565,40 @@ def _load_s3dgraphy(s3dgraphy_src: "pathlib.Path | None"):
 #: 38 = /geo/crs-info (a CRS as PROJ's database knows it: its name, a deprecated
 #: code and its replacement, the accuracy of the operation to WGS 84 at the
 #: shift) and /geo/convert-shift — MICRO-GEOREF-GRAFO.
-BRIDGE_LEVEL = 38   # 30 also = /validate
+#: 39 = /fs/pack-3tz takes ``root``: the RealityScan form, X.json beside X/
+#: packed as one tree — MICRO-TILESET-CARTELLA.
+BRIDGE_LEVEL = 39   # 30 also = /validate
+
+
+#: the files of a tileset a server may send gzipped (MICRO-TILESET-CARTELLA)
+_GZIPPED_TILE = re.compile(r"\.(b3dm|i3dm|pnts|cmpt|glb|json|subtree)$", re.IGNORECASE)
+
+
+def _stage_tileset_pair(root_json: str, folder: str) -> str:
+    """MICRO-TILESET-CARTELLA · a folder with ``tileset.json`` at its root made
+    of the RealityScan pair (X.json beside X/), for a writer that packs
+    folders: hard links where the disk allows, copies otherwise; beside the
+    pair (never inside the originals), hidden, removed by the caller."""
+    parent = os.path.dirname(folder.rstrip(os.sep))
+    name = os.path.basename(folder.rstrip(os.sep))
+    stage = tempfile.mkdtemp(prefix=".em-tileset-", dir=parent)
+
+    def put(src, dst):
+        os.makedirs(os.path.dirname(dst), exist_ok=True)
+        try:
+            os.link(src, dst)
+        except OSError:
+            shutil.copy2(src, dst)
+
+    put(root_json, os.path.join(stage, "tileset.json"))
+    for d, dirs, files in os.walk(folder):
+        dirs.sort()
+        for f in files:
+            if f in (".DS_Store", "Thumbs.db"):
+                continue
+            src = os.path.join(d, f)
+            put(src, os.path.join(stage, name, os.path.relpath(src, folder)))
+    return stage
 
 
 # ── FONTE · the rules of «la proprietà come fonte», asked of the library ──────
@@ -2752,7 +2787,22 @@ def make_handler(api):
             if err:
                 self._fail(*err)
                 return
-            if not os.path.isfile(os.path.join(full, "tileset.json")):
+            # MICRO-TILESET-CARTELLA · the RealityScan form: ``root`` is X.json
+            # BESIDE the folder X/ (its contents written ``X/Geometry/…``); the
+            # two are packed as one tree, X.json as tileset.json, into X.3tz
+            # beside them. A staging folder of hard links (no byte copied, the
+            # originals untouched) is what the writer packs, then removed.
+            root_json = None
+            if body.get("root"):
+                rj = os.path.abspath(os.path.expanduser(str(body.get("root"))))
+                root_json, err = self._fs_resolve(rj, want="file")
+                if err:
+                    self._fail(*err)
+                    return
+                if os.path.dirname(root_json) != os.path.dirname(full.rstrip(os.sep)):
+                    self._fail(400, f"{rj} is not beside {folder}: the RealityScan form is X.json beside X/")
+                    return
+            elif not os.path.isfile(os.path.join(full, "tileset.json")):
                 self._fail(400, f"{folder}: no tileset.json at its root — not a tileset folder")
                 return
             target = full.rstrip(os.sep) + ".3tz"
@@ -2766,11 +2816,19 @@ def make_handler(api):
                 self._fail(501, f"dtcstamp with write_canonical_3tz (0.1.5) is not importable here: {exc}")
                 return
             aside = target + ".new" if os.path.exists(target) else target
+            stage = None
             try:
-                out = write(full, aside)
+                src = full
+                if root_json:
+                    stage = _stage_tileset_pair(root_json, full)
+                    src = stage
+                out = write(src, aside)
             except Exception as exc:
                 self._fail(400, f"cannot pack {folder}: {exc}")
                 return
+            finally:
+                if stage:
+                    shutil.rmtree(stage, ignore_errors=True)
             hexd = str(out["sha256"]).split(":")[-1]
             state = "written"
             if aside != target:
@@ -4608,6 +4666,15 @@ def make_handler(api):
                     self.send_header("X-EM-File", "cloud-only")
                 if partial:
                     self.send_header("Content-Range", f"bytes {start}-{end}/{size}")
+                elif fh is not None and _GZIPPED_TILE.search(full):
+                    # MICRO-TILESET-CARTELLA · RealityScan writes its tiles
+                    # GZIPPED (the Basilica Iulia's b3dm begin 1f 8b), for a
+                    # server that says so: this one says so, and the window
+                    # inflates them as any browser does
+                    head = fh.read(3)
+                    fh.seek(0)
+                    if head == b"\x1f\x8b\x08":
+                        self.send_header("Content-Encoding", "gzip")
                 self.send_header("Content-Length", str(end - start + 1))
                 # Mild, and REVALIDATED: a folder being worked on changes under
                 # the window, so a long cache would show yesterday's photo with
