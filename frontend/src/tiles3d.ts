@@ -27,10 +27,41 @@
  *   · `auto` — the renderer's own screen-space error, under a memory ceiling.
  *     Leaving it for `manual` keeps what is shown: the tiles refined at that
  *     moment become the asked set.
+ *
+ * **Upright, always** (MICRO tileset dritto e nitido, E.D. 25 Oct 2026). A
+ * root whose transform puts the tileset on the Earth (a translation over 1 km:
+ * an ECEF frame, `tileset-drop.ts position`) is relocated by its frame when it
+ * has one (`relocate`); when it has none, or the relocation is refused, it is
+ * CENTRED — the root's transform taken out whole, translation AND rotation, so
+ * the geometry stands in its own local frame (East-North-Up for RealityScan),
+ * up along three's Y. Drawn as written, the Basilica's floor stood at 88° (its
+ * up along the Earth's radius on the equator, three's X).
+ *
+ * **Memory at a steady level** (same MICRO). RealityScan's second export of the
+ * Basilica has an 8192² texture in every tile: 325 MB the root alone, 582 MB
+ * with one child — over the 400 MB ceiling, the renderer discarded every new
+ * tile and «Più dettaglio qui» stayed at level 0. Now (1) a tile's textures are
+ * reduced, as it arrives, to what the canvas and the ceiling can use
+ * (`textureMax`: the canvas's side to the next power of two, and no more than a
+ * sixteenth of the ceiling per texture); GPU compression (KTX2/Basis) is not
+ * possible here: the tiles carry JPEG/PNG and an encoder in the page would cost
+ * more than it saves; (2) the ancestors are not kept loaded under their
+ * children (`loadAncestors` off) and a tile whose children are shown leaves the
+ * memory at once; (3) the ceiling's default is the machine's (settings.ts).
+ *
+ * **Geometric errors too small for the extent** (same MICRO). The renderer
+ * refines a tile when its error, seen from the camera, is over 16 pixels; the
+ * `-2` export says 0.245 m for a root 214 m across — at that rate the root
+ * refines only from 16 m away. `errorScale` multiplies every error the
+ * renderer reads in automatic mode; «auto» estimates it from the root (an error
+ * under 1/600 of its diagonal is taken as written for another viewer: the
+ * scale that brings it to 1/60, to the next power of two) and the status says so.
  */
 import { engine } from "./embed3d-native";
 import { NodeRoadTilesPlugin, roadFetch } from "./node-road";
 import { readLeaves, type Box, type LeafResult } from "./tileset-leaves";
+import { estimateErrorScale, onEarth, textureSideFor, volumeDiagonal, type GeErrors } from "./tiles-budget";
+export { estimateErrorScale, onEarth, textureSideFor, volumeDiagonal, type GeErrors } from "./tiles-budget";
 
 export type RefineMode = "manual" | "auto";
 
@@ -104,7 +135,18 @@ export interface TilesStatus {
   asked: number;
   /** a download or a parse is under way */
   busy: boolean;
+  /** the memory ceiling, bytes (the renderer discards a new tile over it) */
+  maxBytes: number;
+  /** where the tileset stands: moved by its frame, centred (its root's
+   *  transform put it on the Earth and nothing relocated it), or as written */
+  placed: "relocated" | "centred" | "written";
+  /** the geometric errors: the root's, its diagonal, the scale applied (auto or chosen) */
+  ge: GeErrors | null;
+  /** the textures reduced as the tiles arrived: how many, the largest seen, the side allowed */
+  textures: { reduced: number; largest: number; max: number };
 }
+
+
 
 export interface TilesLayer {
   /** add this to the scene: the tileset, turned to Y-up */
@@ -148,12 +190,17 @@ export interface TilesLayer {
    *  untouched. Asked again only when `key` changes; `""` / null puts it back
    *  as written. */
   relocate(key: string, fn: RelocateFn | null): void;
-  /** …what the last relocation did: its key, the fit's residual, or why not */
-  relocated(): { key: string; residual_max_m: number | null; error?: string } | null;
+  /** …what the last relocation did: its key, the fit's residual, or why not,
+   *  who computed it, and where the tileset stands */
+  relocated(): { key: string; residual_max_m: number | null; error?: string; via?: string; bridgeError?: string; placed?: TilesStatus["placed"] } | null;
+  /** MICRO tileset dritto e nitido · the tileset's own up (its +Z) in the world, unit */
+  up(): [number, number, number] | null;
+  /** the multiplier of the errors in automatic mode: a number, or "auto" (estimated from the root) */
+  setErrorScale(v: number | "auto"): void;
 }
 
 export type RelocateFn = (root: { transform: number[] | null; boundingVolume: unknown }) =>
-  Promise<{ ok: boolean; transform?: number[]; residual_max_m?: number; error?: string }>;
+  Promise<{ ok: boolean; transform?: number[]; residual_max_m?: number; error?: string; via?: string; bridgeError?: string }>;
 
 export interface TilesOptions {
   mode?: RefineMode;
@@ -169,6 +216,60 @@ export interface TilesOptions {
   source?: { readEntry(path: string): Promise<Uint8Array | null> };
   /** MICRO tileset, shift e epoche · the frame from the start (`relocate`) */
   relocate?: { key: string; fn: RelocateFn } | null;
+  /** MICRO tileset dritto e nitido · the errors' multiplier (default "auto") */
+  errorScale?: number | "auto";
+  /** …the longest side a tile's texture keeps (default: `textureSideFor`) */
+  textureMax?: number;
+}
+
+/** 3d-tiles-renderer's LOADED (`core/renderer/constants.js`): a tile whose content is in */
+const LOADED_STATE = 4;
+
+/** MICRO tileset dritto e nitido · every texture of a tile's scene over `side`
+ *  reduced to side² texels (the aspect kept: `textureSideFor`), BEFORE the renderer
+ *  counts the tile's bytes and before the GPU sees it. An ImageBitmap through
+ *  `createImageBitmap` (resized off the page's thread), anything else through a
+ *  canvas. */
+async function reduceTextures(scene: any, side: number, stats: { reduced: number; largest: number }): Promise<void> {
+  // one reduction per IMAGE (two textures of a tile may share one)
+  const byImage = new Map<any, Promise<any>>();
+  const reduce = async (img: any, nw: number, nh: number): Promise<any> => {
+    let out: any = null;
+    try {
+      if (typeof createImageBitmap === "function") {
+        const b = await createImageBitmap(img, { resizeWidth: nw, resizeHeight: nh, resizeQuality: "high",
+          premultiplyAlpha: "none", colorSpaceConversion: "none" });
+        if (b.width === nw && b.height === nh) out = b; else b.close?.();
+      }
+    } catch { /* the canvas, below */ }
+    if (!out && typeof document !== "undefined") {
+      const c = document.createElement("canvas");
+      c.width = nw; c.height = nh;
+      c.getContext("2d")?.drawImage(img, 0, 0, nw, nh);
+      out = c;
+    }
+    if (out) { img.close?.(); stats.reduced++; }
+    return out;
+  };
+  const jobs: Promise<void>[] = [];
+  const seen = new Set<any>();
+  scene.traverse((o: any) => {
+    const mats = Array.isArray(o.material) ? o.material : o.material ? [o.material] : [];
+    for (const m of mats) for (const k of Object.keys(m)) {
+      const tex = m[k];
+      if (!tex?.isTexture || seen.has(tex)) continue;
+      seen.add(tex);
+      const img = tex.image;
+      const w = Number(img?.width ?? 0), h = Number(img?.height ?? 0);
+      stats.largest = Math.max(stats.largest, w, h);
+      if (!(w * h > side * side)) continue;
+      const f = side / Math.sqrt(w * h);
+      let job = byImage.get(img);
+      if (!job) { job = reduce(img, Math.max(1, Math.round(w * f)), Math.max(1, Math.round(h * f))); byImage.set(img, job); }
+      jobs.push(job.then((out) => { if (out) { tex.image = out; tex.needsUpdate = true; } }));
+    }
+  });
+  await Promise.all(jobs);
 }
 
 let draco: any = null;
@@ -230,6 +331,15 @@ export function createTilesLayer(E: any, T: any, url: string, camera0: any, rend
   const mb = Math.max(64, opts.memoryMB ?? 400);
   tiles.lruCache.maxBytesSize = mb * 1024 * 1024;
   tiles.lruCache.minBytesSize = Math.round(mb * 0.75) * 1024 * 1024;
+  // MICRO tileset dritto e nitido · the ancestors are not kept loaded under
+  // their children: with it on (the renderer's default) every tile on the way
+  // down was downloaded and held — 1.1 GB for 3 tiles of the Basilica
+  tiles.loadAncestors = false;
+  // the textures, reduced as each tile arrives (before the renderer counts its bytes)
+  const texMax = opts.textureMax ?? textureSideFor(Math.max(renderer?.domElement?.width ?? 0, renderer?.domElement?.height ?? 0, 1024),
+    mb * 1024 * 1024, Number(renderer?.capabilities?.maxTextureSize ?? 16384));
+  const texStats = { reduced: 0, largest: 0, max: texMax };
+  tiles.registerPlugin({ name: "EM_TEXTURE_SIDE", processTileModel: (scene: any) => reduceTextures(scene, texMax, texStats) });
 
   let mode: RefineMode = opts.mode ?? "manual";
   let leafRead: ReturnType<TilesLayer["leaves"]> | null = null;
@@ -256,9 +366,20 @@ export function createTilesLayer(E: any, T: any, url: string, camera0: any, rend
   // is seen is the first level with content (a 3DSC tileset without LODs has
   // it only at the leaves — measured, `sarcofago_v3_baseline`)
   const viewError = tiles.calculateTileViewError.bind(tiles);
+  // MICRO tileset dritto e nitido · the errors' multiplier (automatic mode)
+  let scaleChoice: number | "auto" = opts.errorScale ?? "auto";
+  let ge: GeErrors | null = null;
+  const geOf = (rootTile: any): GeErrors | null => {
+    if (!rootTile) return null;
+    const root = Number(rootTile.geometricError ?? 0);
+    const diagonal = volumeDiagonal(rootTile.boundingVolume);
+    const est = estimateErrorScale(root, diagonal);
+    return { root, diagonal, small: est.small, scale: scaleChoice === "auto" ? est.scale : scaleChoice, auto: scaleChoice === "auto" };
+  };
   tiles.calculateTileViewError = (tile: any, target: any) => {
     viewError(tile, target);
     if (mode === "manual") target.error = asked.has(tile) || !tile.internal?.hasRenderableContent ? 1e9 : 0;
+    else if (ge && ge.scale !== 1) target.error *= ge.scale;
   };
 
   tiles.addEventListener("load-model", (e: any) => {
@@ -282,6 +403,7 @@ export function createTilesLayer(E: any, T: any, url: string, camera0: any, rend
   tiles.addEventListener("load-root-tileset", (e: any) => {
     rootReady = true;
     const r = e?.tileset?.root ?? {};
+    ge = geOf(r);
     rootJson = { transform: Array.isArray(r.transform) && r.transform.length === 16 ? r.transform.map(Number) : null,
                  boundingVolume: r.boundingVolume ?? null };
     applyRelocation();
@@ -294,14 +416,30 @@ export function createTilesLayer(E: any, T: any, url: string, camera0: any, rend
   let rootJson: { transform: number[] | null; boundingVolume: unknown } | null = null;
   let relocKey = opts.relocate?.key ?? "";
   let relocFn: RelocateFn | null = opts.relocate?.fn ?? null;
-  let relocState: { key: string; residual_max_m: number | null; error?: string } | null = null;
+  let relocState: { key: string; residual_max_m: number | null; error?: string; via?: string; bridgeError?: string } | null = null;
+  let placed: TilesStatus["placed"] = "written";
+  const setGroup = (m: any) => {
+    tiles.group.matrixAutoUpdate = false;
+    tiles.group.matrix.copy(m);
+    tiles.group.matrix.decompose(tiles.group.position, tiles.group.quaternion, tiles.group.scale);
+    tiles.group.matrixWorldNeedsUpdate = true;
+    tiles.group.updateMatrixWorld(true);
+  };
+  /** as written, unless the root puts it on the Earth: then CENTRED — Rx(−90°)·W⁻¹,
+   *  the root's frame out whole (translation and rotation), the geometry upright in its own */
   const asWritten = () => {
+    if (rootJson && onEarth(rootJson.transform)) {
+      setGroup(new THREE.Matrix4().makeRotationX(-Math.PI / 2).multiply(new THREE.Matrix4().fromArray(rootJson.transform).invert()));
+      placed = "centred";
+      return;
+    }
     tiles.group.matrixAutoUpdate = true;
     tiles.group.position.set(0, 0, 0);
     tiles.group.rotation.set(-Math.PI / 2, 0, 0);
     tiles.group.scale.set(1, 1, 1);
     tiles.group.updateMatrix();
     tiles.group.updateMatrixWorld(true);
+    placed = "written";
   };
   const applyRelocation = () => {
     const key = relocKey;
@@ -309,21 +447,20 @@ export function createTilesLayer(E: any, T: any, url: string, camera0: any, rend
     if (!rootJson) return;
     if (!rootJson.transform) { asWritten(); relocState = { key, residual_max_m: null, error: "no-transform" }; changed(); return; }
     const W = new THREE.Matrix4().fromArray(rootJson.transform);
+    // until the answer: centred (upright), not on the equator
+    asWritten();
     void relocFn(rootJson).then((res) => {
       if (key !== relocKey) return;
       if (!res.ok || !res.transform || res.transform.length !== 16) {
         asWritten();
         relocState = { key, residual_max_m: null, error: res.error ?? "refused" };
       } else {
-        const m = new THREE.Matrix4().makeRotationX(-Math.PI / 2)
+        setGroup(new THREE.Matrix4().makeRotationX(-Math.PI / 2)
           .multiply(new THREE.Matrix4().fromArray(res.transform))
-          .multiply(W.clone().invert());
-        tiles.group.matrixAutoUpdate = false;
-        tiles.group.matrix.copy(m);
-        tiles.group.matrix.decompose(tiles.group.position, tiles.group.quaternion, tiles.group.scale);
-        tiles.group.matrixWorldNeedsUpdate = true;
-        tiles.group.updateMatrixWorld(true);
-        relocState = { key, residual_max_m: typeof res.residual_max_m === "number" ? res.residual_max_m : null };
+          .multiply(W.clone().invert()));
+        placed = "relocated";
+        relocState = { key, residual_max_m: typeof res.residual_max_m === "number" ? res.residual_max_m : null,
+          ...(res.via ? { via: res.via } : {}), ...(res.bridgeError ? { bridgeError: res.bridgeError } : {}) };
       }
       leafRead = null;
       changed();
@@ -343,11 +480,28 @@ export function createTilesLayer(E: any, T: any, url: string, camera0: any, rend
     return false;
   };
 
+  // MICRO tileset dritto e nitido · a loaded tile the view no longer uses,
+  // whose children are loaded and used, leaves the memory now — not when the
+  // cache overflows (REPLACE: the children cover it)
+  let frame = 0;
+  const releaseAncestors = () => {
+    const c = tiles.lruCache;
+    if (!c?.itemList) return;
+    const loaded = (t: any) => !t.internal?.hasContent || t.internal?.loadingState === LOADED_STATE;
+    for (const t of [...c.itemList]) {
+      if (c.isUsed(t) || t.refine === "ADD" || !t.internal?.hasRenderableContent || t.internal?.loadingState !== LOADED_STATE) continue;
+      const kids = t.children ?? [];
+      if (!kids.length || !kids.every(loaded) || !kids.some((k: any) => c.isUsed(k))) continue;
+      c.remove(t);
+    }
+  };
+
   const layer: TilesLayer = {
     object: tiles.group,
     update() {
       camera.updateMatrixWorld();
       tiles.update();
+      if (++frame % 10 === 0) releaseAncestors();
     },
     setMode(m) {
       if (m === mode) return;
@@ -406,6 +560,7 @@ export function createTilesLayer(E: any, T: any, url: string, camera0: any, rend
         mode, level: visible ? [lo, hi] : null, depth: deepest, loaded, visible,
         bytes: Number(tiles.lruCache?.cachedBytes ?? 0), missing: missing.slice(), failed,
         asked: asked.size, busy: (s.downloading ?? 0) + (s.parsing ?? 0) + (s.queued ?? 0) > 0,
+        maxBytes: Number(tiles.lruCache?.maxBytesSize ?? 0), placed, ge, textures: { ...texStats },
       };
     },
     bounds() {
@@ -476,7 +631,23 @@ export function createTilesLayer(E: any, T: any, url: string, camera0: any, rend
       relocFn = fn;
       applyRelocation();
     },
-    relocated: () => relocState ?? (relocKey ? { key: relocKey, residual_max_m: null, error: rootJson ? "pending" : "waiting-root" } : null),
+    relocated: () => {
+      const r = relocState ?? (relocKey ? { key: relocKey, residual_max_m: null, error: rootJson ? "pending" : "waiting-root" } : null);
+      return r ? { ...r, placed } : null;
+    },
+    up() {
+      if (!rootJson) return null;
+      tiles.group.updateMatrixWorld(true);
+      const m = tiles.group.matrixWorld.clone();
+      if (rootJson.transform) m.multiply(new THREE.Matrix4().fromArray(rootJson.transform));
+      const v = new THREE.Vector3(0, 0, 1).transformDirection(m);
+      return [v.x, v.y, v.z];
+    },
+    setErrorScale(v) {
+      scaleChoice = v === "auto" || !(Number(v) > 0) ? "auto" : Number(v);
+      ge = geOf(tiles.root);
+      changed();
+    },
     leaves() {
       leafRead ??= (async () => {
         // the renderer's road: its plugins turn the URL (an archive's base) and fetch it (signed, from the archive)
@@ -525,6 +696,9 @@ export interface TilesBarTexts {
   status: (s: TilesStatus) => string;
   leaf: string;
   noTile: string;
+  /** MICRO tileset dritto e nitido · the errors' multiplier: its title, «auto (×16)», «×4» */
+  geTitle: string;
+  geAuto: (scale: number) => string;
 }
 
 /**
@@ -566,11 +740,24 @@ export function tilesBar(layer: TilesLayer, texts: TilesBarTexts): { el: HTMLEle
   less.textContent = texts.less;
   less.title = texts.lessTitle;
   less.addEventListener("click", (e) => { e.stopPropagation(); layer.coarsen(); refresh(); });
+  // MICRO tileset dritto e nitido · the errors' multiplier (automatic mode)
+  const ge = document.createElement("select");
+  ge.className = "tl-ge";
+  ge.dataset.tiles = "error-scale";
+  ge.title = texts.geTitle;
+  for (const v of ["auto", "1", "2", "4", "8", "16", "32", "64"]) {
+    const o = document.createElement("option");
+    o.value = v;
+    o.textContent = v === "auto" ? texts.geAuto(1) : `×${v}`;
+    ge.appendChild(o);
+  }
+  ge.addEventListener("click", (e) => e.stopPropagation());
+  ge.addEventListener("change", (e) => { e.stopPropagation(); layer.setErrorScale(ge.value === "auto" ? "auto" : Number(ge.value)); refresh(); });
   const line = document.createElement("span");
   line.className = "tl-status";
   line.setAttribute("role", "status");
   let note = "";
-  el.append(seg, more, less, line);
+  el.append(seg, more, less, ge, line);
   const refresh = () => {
     const s = layer.status();
     const manual = s.mode === "manual";
@@ -582,6 +769,11 @@ export function tilesBar(layer: TilesLayer, texts: TilesBarTexts): { el: HTMLEle
     more.setAttribute("aria-pressed", String(armed));
     el.classList.toggle("armed", armed);
     line.textContent = texts.status(s) + (note ? ` · ${note}` : "");
+    ge.disabled = manual;
+    const autoOpt = ge.options[0];
+    if (autoOpt) autoOpt.textContent = texts.geAuto(s.ge?.auto ? s.ge.scale : 1);
+    el.dataset.errorScale = String(s.ge?.scale ?? 1);
+    el.dataset.placed = s.placed;
     line.classList.toggle("bad", !!(s.missing.length || s.failed));
     el.dataset.level = s.level ? `${s.level[0]}-${s.level[1]}` : "";
     el.dataset.loaded = String(s.loaded);

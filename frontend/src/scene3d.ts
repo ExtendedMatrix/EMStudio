@@ -471,6 +471,7 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
     __spaceSetCam?: (c: CamState) => void;
     __spaceCamState?: () => CamState;
     __spaceTiles?: () => unknown;
+    __spaceTilesUp?: () => unknown;
     __spaceLoadTimes?: () => Record<string, number>;
     __spaceMeshesOf?: (id: string) => { meshes: number; verts: number; other: number };
     __spaceTileScreenOf?: (uri: string) => { x: number; y: number } | null;
@@ -753,6 +754,11 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
         l.layer.object.traverse((o: any) => { if (o.isPoints) points++; });
         return { id: l.itemId, files: l.layer.loadedFiles(), status: l.layer.status(), mode: l.layer.mode(), relocated: l.layer.relocated(),
           box: box ? [...box.min.toArray(), ...box.max.toArray()] : null, points };
+      });
+      // MICRO tileset dritto e nitido · each tileset's own up in the scene, and its angle to three's Y
+      probe.__spaceTilesUp = () => liveLayers().map((l) => {
+        const u = l.layer.up();
+        return { id: l.itemId, up: u, angleDeg: u ? Math.acos(Math.min(1, Math.abs(u[1]))) * 180 / Math.PI : null };
       });
       const toScreen = (v3: any): { x: number; y: number } | null => {
         const v = v3.clone().project(camera);

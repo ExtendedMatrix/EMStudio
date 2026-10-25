@@ -147,7 +147,21 @@ export interface ViewerSettings {
  *  3DTilesRendererJS's own default (`LRUCache.maxBytesSize`, 0.4 GB). */
 export const LOD_LIMIT_MB = 200;
 export const LOD_LIMIT_POINTS = 10_000_000;
-export const TILES_MEMORY_MB = 400;
+/** MICRO tileset dritto e nitido (E.D., 25 Oct 2026) · the tiles' ceiling is
+ *  the MACHINE's: an eighth of its memory, between 256 MB and 2 GB — 1 GB on
+ *  8 GB. The memory is the browser's `navigator.deviceMemory` (Chromium: GB,
+ *  rounded, at most 8); where the engine does not say it (WebKit: the macOS
+ *  desktop, Safari) 8 GB is taken, the least a Mac of these years has. The
+ *  value is the field's in the Preferences. `TILES_MEMORY_MB_OLD` is the fixed
+ *  ceiling of before: a settings file that holds it was saved with the
+ *  default, not chosen, and reads as the machine's. */
+export const TILES_MEMORY_MB_OLD = 400;
+export function machineTilesMemoryMB(deviceMemoryGB?: number | null): number {
+  const gb = Number(deviceMemoryGB ?? (typeof navigator !== "undefined" ? (navigator as { deviceMemory?: number }).deviceMemory : undefined));
+  const mem = Number.isFinite(gb) && gb > 0 ? gb : 8;
+  return Math.max(256, Math.min(2048, Math.round(mem * 1024 / 8)));
+}
+export const TILES_MEMORY_MB = machineTilesMemoryMB();
 
 /** TRADUZIONI · «show the texts in…»: the language the texts of the GRAPH are
  *  shown in where a translation exists. "" = the interface language (the
@@ -292,7 +306,8 @@ function load(): Settings {
       developer: { ...DEFAULTS.developer, ...(parsed.developer ?? {}) },
       interaction: { ...DEFAULTS.interaction, ...(parsed.interaction ?? {}) },
       ai: { ...DEFAULTS.ai, ...(parsed.ai ?? {}) },
-      viewer: { ...DEFAULTS.viewer, ...(parsed.viewer ?? {}) },
+      viewer: ((v) => (v.tilesMemoryMB === TILES_MEMORY_MB_OLD ? { ...v, tilesMemoryMB: TILES_MEMORY_MB } : v))(
+        { ...DEFAULTS.viewer, ...(parsed.viewer ?? {}) }),
       iiif: { ...DEFAULTS.iiif, ...(parsed.iiif ?? {}) },
       files: { ...DEFAULTS.files, ...(parsed.files ?? {}) },
     };

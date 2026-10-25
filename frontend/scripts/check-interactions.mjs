@@ -10602,6 +10602,187 @@ test("TF1.frame", "tileset · il caso di E.D.: un contenitore RM senza mesh (tls
   return { pass: Object.values(conds).every(Boolean), detail: { conds, item, layer: layer && { files: layer.files, relocated: layer.relocated, box: layer.box }, c, rows: s.rows, i0, removed, back, asked, errors } };
 });
 
+// ── MICRO tileset dritto e nitido (E.D. 25 Oct 2026) ─────────────────────────
+// The Lab's sidecar answered the relocation «a dependency is missing» (no
+// pyproj): the Basilica stood on the equator, its floor at 88°. Now the browser
+// relocates a Transverse Mercator frame itself, a root on the Earth that nothing
+// relocates is CENTRED (its transform out whole), and a tileset whose textures
+// are 8192² is shown within the ceiling, its levels going down.
+const TT_LAB = { pattern: /\/geo\/tileset-frame/, handler: (r) => r.fulfill({ status: 200, contentType: "application/json",
+  body: JSON.stringify({ ok: false, error: "geo: a dependency is missing in this bridge (numpy: pyproj or Pillow)" }) }) };
+const ttSpace = async (p, id, ms = 20000) => {
+  const t0 = Date.now();
+  for (;;) {
+    const s = await p.evaluate((i) => {
+      const h = document.querySelector(".scn-host");
+      const l = (h?.__spaceTiles?.() ?? []).find((x) => String(x.id).startsWith(i));
+      const u = (h?.__spaceTilesUp?.() ?? []).find((x) => String(x.id).startsWith(i));
+      return l ? { files: l.files.length, names: l.files, status: l.status, relocated: l.relocated, box: l.box, up: u?.up ?? null, angle: u?.angleDeg ?? null } : null;
+    }, id);
+    if ((s && s.files > 0 && s.relocated?.error !== "pending" && s.relocated?.error !== "waiting-root" && !s.status.busy) || Date.now() - t0 > ms) return s;
+    await p.waitForTimeout(250);
+  }
+};
+
+test("TN1.lab", "tileset dritto · il caso di E.D. con il bridge della Lab (senza pyproj): il tileset in EPSG:6708 meno SHIFT6708 è ricollocato DAL BROWSER come dal bridge (stesso centro di TF1, residuo < 1 mm), dritto (l'alto del tileset a < 0,01° dalla Y della scena); l'Inspector dice «Ricollocato da EMStudio» e perché il bridge non poteva", async () => {
+  const { p, ctx, errors } = await open({ doc: "tiles-frame", ws: "space", route: TT_LAB });
+  await p.waitForFunction(() => document.querySelector(".scn-host")?.dataset.ready === "1", null, { timeout: 20000 });
+  const s = await ttSpace(p, "rmgroup_tls");
+  const c = s?.box ? [0, 1, 2].map((k) => (s.box[k] + s.box[k + 3]) / 2) : null;
+  await p.screenshot({ path: SHOT("tt1-lab-dritto") }).catch(() => {});
+  await p.click('.scn-outliner .sol-row[data-key="rm:rmgroup_tls"] .sol-name'); await p.waitForTimeout(800);
+  const states = await p.evaluate(() => [...document.querySelectorAll(".insp-frame [data-frame-state]")].map((e) => `${e.dataset.frameState}:${e.textContent}`));
+  await ctx.close();
+  const conds = {
+    browser: s?.relocated?.via === "browser" && /pyproj/.test(s.relocated.bridgeError ?? "") && s.relocated.residual_max_m < 0.001 && s.status.placed === "relocated",
+    where: !!c && Math.abs(c[0] - 34.73) < 3 && Math.abs(c[1] - 0.39) < 3 && Math.abs(c[2] + 14.34) < 3,
+    upright: s?.angle != null && s.angle < 0.01,
+    inspector: states.some((x) => /^relocated:.*EMStudio.*pyproj.*mm/.test(x)),
+    errors: !errors.length,
+  };
+  return { pass: Object.values(conds).every(Boolean), detail: { conds, s: s && { relocated: s.relocated, angle: s.angle, box: s.box, placed: s.status.placed }, c, states, errors } };
+});
+
+test("TN1.centred", "tileset dritto · lo stesso tileset SENZA frame: la sua radice lo mette sulla Terra e niente lo ricolloca — è centrato (la transform tolta intera, traslazione e rotazione), dritto, vicino all'origine; la barra lo dice", async () => {
+  const doc = fixture("tiles-frame");
+  for (const g of Object.values(doc.graphs ?? { a: doc.graph })) for (const n of g.nodes ?? []) if (n.data?.frame) delete n.data.frame;
+  const { p, ctx, errors } = await open({ doc, ws: "space" });
+  await p.waitForFunction(() => document.querySelector(".scn-host")?.dataset.ready === "1", null, { timeout: 20000 });
+  const s = await ttSpace(p, "rmgroup_tls");
+  const line = await p.evaluate(() => document.querySelector(".scn-host .tl-bar")?.dataset.placed ?? null);
+  await p.screenshot({ path: SHOT("tt1-centrato") }).catch(() => {});
+  await ctx.close();
+  const near = (s?.box ?? [1e9]).every((v) => Math.abs(v) < 100);
+  return { pass: s?.status.placed === "centred" && s.relocated === null && line === "centred" && s.angle != null && s.angle < 0.01 && near && !errors.length,
+    detail: { s: s && { placed: s.status.placed, angle: s.angle, box: s.box, relocated: s.relocated }, line, errors } };
+});
+
+test("TN1.preview", "tileset dritto · la coppia RealityScan (radice sull'equatore) trascinata sulla Scena: l'anteprima «centrata solo per la vista» sta dritta (< 0,01°)", async () => {
+  const { dir } = await tsdBench("tt1");
+  const { p, ctx, errors } = await open({ doc: "catena", ws: "space" });
+  const win = await winOf(p, "scene");
+  await p.waitForTimeout(800);
+  await tsdDropPath(p, win, { path: `${dir}/disco_rs.json`, type: "file", name: "disco_rs.json", ext: "json" });
+  const s = await ttSpace(p, "preview:");
+  await p.screenshot({ path: SHOT("tt1-anteprima") }).catch(() => {});
+  await ctx.close();
+  execFileSync("rm", ["-rf", dir]);
+  return { pass: !!s && s.files > 0 && s.angle != null && s.angle < 0.01 && !errors.length, detail: { s: s && { angle: s.angle, placed: s.status.placed, box: s.box }, errors } };
+});
+
+// a tileset as RealityScan's `-2` export makes it, in small: a root and four
+// children, every tile a textured quad with a 4096² texture, the errors
+// 1/2000 of the extent (a uniform PNG: 4096² in a few kB)
+function ttPng(side) {
+  const zlib = require("node:zlib");
+  const crcT = Array.from({ length: 256 }, (_, n) => { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1; return c >>> 0; });
+  const crc = (b) => { let c = 0xffffffff; for (const x of b) c = crcT[(c ^ x) & 0xff] ^ (c >>> 8); return (c ^ 0xffffffff) >>> 0; };
+  const chunk = (type, data) => { const l = Buffer.alloc(4); l.writeUInt32BE(data.length); const td = Buffer.concat([Buffer.from(type), data]);
+    const c = Buffer.alloc(4); c.writeUInt32BE(crc(td)); return Buffer.concat([l, td, c]); };
+  const ihdr = Buffer.alloc(13); ihdr.writeUInt32BE(side, 0); ihdr.writeUInt32BE(side, 4); ihdr[8] = 8; ihdr[9] = 2;
+  const row = Buffer.alloc(1 + side * 3, 0x90); row[0] = 0;
+  const raw = Buffer.concat(Array.from({ length: side }, () => row));
+  return Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), chunk("IHDR", ihdr), chunk("IDAT", zlib.deflateSync(raw, { level: 9 })), chunk("IEND", Buffer.alloc(0))]);
+}
+function ttGlb(x0, y0, w, png) {
+  // a quad on the ground (Z-up x0..x0+w, y0..y0+w), written Y-up: (x, y, z) → (x, z, −y)
+  const P = new Float32Array([x0, 0, -y0, x0 + w, 0, -y0, x0 + w, 0, -(y0 + w), x0, 0, -(y0 + w)]);
+  const N = new Float32Array([0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0]);
+  const T = new Float32Array([0, 0, 1, 0, 1, 1, 0, 1]);
+  const I = new Uint16Array([0, 1, 2, 0, 2, 3]);
+  const parts = [Buffer.from(P.buffer), Buffer.from(N.buffer), Buffer.from(T.buffer), Buffer.from(I.buffer)];
+  const p4 = (b) => Buffer.concat([b, Buffer.alloc((4 - (b.length % 4)) % 4)]);
+  let off = 0; const views = [];
+  const bin = [];
+  for (const b of [...parts, png]) { views.push({ buffer: 0, byteOffset: off, byteLength: b.length }); const q = p4(b); bin.push(q); off += q.length; }
+  const binBuf = Buffer.concat(bin);
+  const json = { asset: { version: "2.0" }, scene: 0, scenes: [{ nodes: [0] }], nodes: [{ mesh: 0 }],
+    meshes: [{ primitives: [{ attributes: { POSITION: 0, NORMAL: 1, TEXCOORD_0: 2 }, indices: 3, material: 0 }] }],
+    materials: [{ pbrMetallicRoughness: { baseColorTexture: { index: 0 }, metallicFactor: 0 } }],
+    textures: [{ source: 0 }], images: [{ bufferView: 4, mimeType: "image/png" }],
+    accessors: [{ bufferView: 0, componentType: 5126, count: 4, type: "VEC3", min: [x0, 0, -(y0 + w)], max: [x0 + w, 0, -y0] },
+      { bufferView: 1, componentType: 5126, count: 4, type: "VEC3" }, { bufferView: 2, componentType: 5126, count: 4, type: "VEC2" },
+      { bufferView: 3, componentType: 5123, count: 6, type: "SCALAR" }],
+    bufferViews: views, buffers: [{ byteLength: binBuf.length }] };
+  const j0 = Buffer.from(JSON.stringify(json));
+  const jj = Buffer.concat([j0, Buffer.alloc((4 - (j0.length % 4)) % 4, 0x20)]);   // the JSON chunk padded with spaces
+  const h = Buffer.alloc(12); h.writeUInt32LE(0x46546c67, 0); h.writeUInt32LE(2, 4); h.writeUInt32LE(12 + 8 + jj.length + 8 + binBuf.length, 8);
+  const ch = (len, type) => { const b = Buffer.alloc(8); b.writeUInt32LE(len, 0); b.writeUInt32LE(type, 4); return b; };
+  return Buffer.concat([h, ch(jj.length, 0x4e4f534a), jj, ch(binBuf.length, 0x004e4942), binBuf]);
+}
+function ttTileset() {
+  const png = ttPng(4096);
+  const files = { "tt/root.glb": ttGlb(0, 0, 40, png) };
+  const kids = [];
+  for (const [i, [x, y]] of [[0, 0], [20, 0], [0, 20], [20, 20]].entries()) {
+    files[`tt/c${i}.glb`] = ttGlb(x, y, 20, png);
+    kids.push({ boundingVolume: { box: [x + 10, y + 10, 0, 10, 0, 0, 0, 10, 0, 0, 0, 0.5] }, geometricError: 0, content: { uri: `c${i}.glb` } });
+  }
+  files["tt/tileset.json"] = Buffer.from(JSON.stringify({ asset: { version: "1.0" }, geometricError: 0.03,
+    root: { boundingVolume: { box: [20, 20, 0, 20, 0, 0, 0, 20, 0, 0, 0, 0.5] }, geometricError: 0.03, refine: "REPLACE", content: { uri: "root.glb" }, children: kids } }));
+  return Object.entries(files).map(([path, b]) => ({ path, b64: b.toString("base64") }));
+}
+const ttDrop = (p, win, files) => p.evaluate(async ([w, fs]) => window.__EM_DRAG__.tilesetDrop(w,
+  fs.map((f) => ({ path: f.path, blob: new Blob([Uint8Array.from(atob(f.b64), (c) => c.charCodeAt(0))]) }))), [win, files]);
+
+test("TN2.memory", "tileset nitido · un tileset con texture 4096² per tile ed errori geometrici 1/2000 dell'estensione, trascinato sulla Scena: le texture si riducono all'arrivo (sotto il tetto, il tetto scritto nella barra), gli errori «troppo piccoli» sono detti e moltiplicati (×auto); «Più dettaglio qui» scende davvero al livello 1 e la radice lascia la memoria; in Automatico, vicino, il livello 1 arriva da sé", async () => {
+  const files = ttTileset();
+  const { p, ctx, errors } = await open({ doc: "catena", ws: "space", init: { "emstudio.settings": JSON.stringify({ viewer: { tilesMemoryMB: 256 } }) } });
+  const win = await winOf(p, "scene");
+  await p.waitForTimeout(800);
+  await ttDrop(p, win, files);
+  const s0 = await ttSpace(p, "preview:");
+  const bar = ".scn-host .tl-bar";
+  const line0 = await p.evaluate((b) => document.querySelector(`${b} .tl-status`)?.textContent ?? "", bar);
+  const r = await p.locator(".scn-host canvas").first().boundingBox();
+  // manual: «Più dettaglio qui» on the middle of the root
+  await p.evaluate((b) => document.querySelector(`${b} button[data-mode="manual"]`)?.click(), bar);
+  await p.evaluate((b) => document.querySelector(`${b} .tl-more`)?.click(), bar);
+  const at = await p.evaluate(() => document.querySelector(".scn-host").__spaceProject([20, 0, -20]));
+  await p.mouse.click(at?.x ?? r.x + r.width / 2, at?.y ?? r.y + r.height / 2);
+  await p.waitForTimeout(600);
+  const s1 = await ttSpace(p, "preview:");
+  await p.waitForTimeout(1500);
+  const s1b = await ttSpace(p, "preview:");
+  // back to the root («Meno dettaglio»), then automatic with the camera 15 m over a quadrant
+  await p.evaluate((b) => document.querySelector(`${b} .tl-less`)?.click(), bar);
+  await p.waitForTimeout(800);
+  const sBack = await ttSpace(p, "preview:");
+  await p.evaluate((b) => document.querySelector(`${b} button[data-mode="auto"]`)?.click(), bar);
+  await p.evaluate(() => document.querySelector(".scn-host").__spaceSetCam({ pos: [10, 15, -10], target: [10, 0, -10] }));
+  await p.waitForTimeout(1500);
+  const s2 = await ttSpace(p, "preview:");
+  await p.screenshot({ path: SHOT("tt2-memoria-livelli") }).catch(() => {});
+  await ctx.close();
+  const MB = 1024 * 1024;
+  const conds = {
+    ceiling: s0?.status.maxBytes === 256 * MB && /256\.0 MB/.test(line0),
+    reduced: s0?.status.textures.reduced >= 1 && s0.status.textures.largest === 4096 && s0.status.textures.max <= 1024 && s0.status.bytes < 16 * MB,
+    errors: s0?.status.ge?.small === true && s0.status.ge.scale > 1 && /×\d+/.test(line0),
+    manual: s1b?.status.level?.[0] === 1 && s1b.status.level?.[1] === 1 && !s1b.names.some((f) => /root\.glb$/.test(f)) && s1b.status.bytes < 256 * MB,
+    auto: sBack?.status.level?.[1] === 0 && s2?.status.mode === "auto" && s2.status.level?.[1] === 1,
+    noErrors: !errors.length,
+  };
+  const pick = (s) => s && { files: s.files, level: s.status.level, MB: +(s.status.bytes / MB).toFixed(1), tex: s.status.textures, ge: s.status.ge, mode: s.status.mode };
+  return { pass: Object.values(conds).every(Boolean), detail: { conds, s0: pick(s0), s1: pick(s1), s1b: pick(s1b), sBack: pick(sBack), s2: pick(s2), line0, errors } };
+});
+
+test("TN3.preview-closes", "anteprima · un tileset trascinato sulla Scena resta nella barra come «Anteprima»; aprendo un em.json l'anteprima si chiude da sola", async () => {
+  const { p, ctx, errors } = await open({ doc: "catena", ws: "space" });
+  const win = await winOf(p, "scene");
+  await p.waitForTimeout(800);
+  await ttDrop(p, win, ttTileset());
+  await ttSpace(p, "preview:");
+  const before = await p.evaluate((w) => ({ bar: !!document.querySelector(`.tile-area[data-win="${w}"] [data-tileset-bar]`),
+    layers: (document.querySelector(".scn-host")?.__spaceTiles?.() ?? []).filter((x) => String(x.id).startsWith("preview:")).length }), win);
+  await p.evaluate((d) => window.__EM_DRAG__.openAt(d, "/tmp/tt3/tiles-frame.em.json"), fixture("tiles-frame"));
+  await p.waitForTimeout(2500);
+  const after = await p.evaluate((w) => ({ bar: !!document.querySelector(`.tile-area[data-win="${w}"] [data-tileset-bar]`),
+    layers: (document.querySelector(".scn-host")?.__spaceTiles?.() ?? []).filter((x) => String(x.id).startsWith("preview:")).length }), win);
+  await ctx.close();
+  return { pass: before.bar && before.layers === 1 && !after.bar && after.layers === 0 && !errors.length, detail: { before, after, errors } };
+});
+
 // ── run ─────────────────────────────────────────────────────────────────────
 const chosen =cases.filter((c) => !only.length || only.includes(c.id) || only.some((o) => c.id.startsWith(o + ".")));
 for (const c of chosen) {

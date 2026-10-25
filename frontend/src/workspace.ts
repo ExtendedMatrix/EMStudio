@@ -1350,6 +1350,12 @@ export function windowsOf(ws: WorkspaceId = active): Win[] {
   return detached.length ? [...wins, ...detached] : wins;
 }
 
+/** MICRO tileset dritto e nitido · every window of every workspace, and the
+ *  detached ones (a state that belongs to the document must go from all) */
+export function everyWindow(): Win[] {
+  return [...Object.values(registry).flatMap((e) => e.wins), ...detached];
+}
+
 /** The window the workspace is currently showing — a detached one when the
  *  focus is in its system window. */
 export function activeWin(ws: WorkspaceId = active): Win {

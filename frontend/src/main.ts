@@ -577,6 +577,7 @@ import {
   splitWindow,
   winMode,
   windowsOf,
+  everyWindow,
   detachedWins,
   isDetachedWin,
   addDetachedWindow,
@@ -6911,6 +6912,11 @@ function loadContainerDocument(
       closeFile(old.id);
     }
   }
+  // MICRO tileset dritto e nitido (E.D. 25 Oct 2026) · the preview of a tileset
+  // dropped or opened before (a Scene's «Anteprima», a Viewer's) is not this
+  // file's: it closes when an em.json opens (a room's snapshot, which comes again
+  // at every reconnection, leaves it)
+  if (!opts.room) closeTilesetPreviews();
   const file = emtree.addFile(path, path ? baseName(path) : sourceName);
   if (opts.room) file.room = { ...opts.room };
   // P3 · and its version comes with it — per FILE: two files, two histories.
@@ -15829,6 +15835,10 @@ function openSettings(section?: string): void {
   if (lm) lm.value = grouped(s.viewer.lodLimitMB);
   if (lp) lp.value = grouped(s.viewer.lodLimitPoints);
   if (tm) tm.value = grouped(s.viewer.tilesMemoryMB);
+  // MICRO tileset dritto e nitido · the machine's ceiling, said beside the field
+  const tmh = document.getElementById("set-tiles-memory-hint");
+  if (tmh) tmh.textContent = t("settings.tilesMemoryHint", { mb: grouped(TILES_MEMORY_MB),
+    gb: String((navigator as { deviceMemory?: number }).deviceMemory ?? "?") });
   // MICRO-SPAZIO-3D-2 · the Space's navigation
   const chk = (id: string, v: boolean) => { const c = document.getElementById(id) as HTMLInputElement | null; if (c) c.checked = v; };
   chk("set-nav-emulate3", s.viewer.emulate3Button);
@@ -24794,6 +24804,15 @@ function showDropped(win: Win, d: DroppedTileset): void {
   logInfo(t("tsp.opened", { name: d.label }));
 }
 
+/** Every tileset preview closed: the Scenes' (of every workspace, saved with the
+ *  windows) and the Viewers' dropped ones */
+function closeTilesetPreviews(): void {
+  let any = false;
+  for (const w of everyWindow()) if (w.type === "scene" && winCurrent(w, "space.preview")) { setWinCurrent(w, "space.preview", null); any = true; }
+  for (const id of [...viewerDropped.keys()]) { closeViewerDropped(id); any = true; }
+  if (any) { refreshSurfaces("scene"); renderViewer(); }
+}
+
 function closeViewerDropped(winId: string): void {
   viewerDropped.delete(winId);
   const m = viewerDroppedMounts.get(winId);
@@ -28616,7 +28635,8 @@ function renderFrameInto(host: HTMLElement, nodeId: string): boolean {
     if (live?.relocated) {
       const rl = live.relocated;
       const q = hint(rl.error ? t(rl.error === "old-bridge" ? "frm.oldBridge" : rl.error === "no-bridge" ? "frm.noBridge" : "frm.refused", { why: rl.error })
-        : t("frm.relocated", { mm: rl.residual_max_m == null ? "?" : (rl.residual_max_m * 1000).toFixed(2) }), rl.error ? "insp-hint warn" : "insp-hint");
+        : t(rl.via === "browser" ? "frm.relocatedBrowser" : "frm.relocated", { why: rl.bridgeError ?? "?",
+            mm: rl.residual_max_m == null ? "?" : (rl.residual_max_m * 1000).toFixed(2) }), rl.error ? "insp-hint warn" : "insp-hint");
       q.dataset.frameState = rl.error ? "error" : "relocated";
     }
   }
@@ -28624,9 +28644,10 @@ function renderFrameInto(host: HTMLElement, nodeId: string): boolean {
 }
 const normaliseGeoCrs = (v: unknown): string | null => { const n = epsgOf({ epsg: v }); return n ? `EPSG:${n}` : null; };
 /** what a Space scene did with a tileset's layer (its relocation), when one draws it */
-function sceneHandleTilesOf(id: string): { relocated: { key: string; residual_max_m: number | null; error?: string } | null } | null {
+type SceneRelocated = { key: string; residual_max_m: number | null; error?: string; via?: string; bridgeError?: string };
+function sceneHandleTilesOf(id: string): { relocated: SceneRelocated | null } | null {
   for (const host of document.querySelectorAll<HTMLElement>(".scn-host")) {
-    const tiles = (host as unknown as { __spaceTiles?: () => Array<{ id: string; relocated: { key: string; residual_max_m: number | null; error?: string } | null }> }).__spaceTiles?.();
+    const tiles = (host as unknown as { __spaceTiles?: () => Array<{ id: string; relocated: SceneRelocated | null }> }).__spaceTiles?.();
     const one = tiles?.find((x) => x.id === id);
     if (one) return { relocated: one.relocated };
   }

@@ -745,11 +745,16 @@ export function tilesBarTexts(): TilesBarTexts {
     manual: t("tl.manual"), auto: t("tl.auto"), modeTitle: t("tl.modeTitle"),
     more: t("tl.more"), moreTitle: t("tl.moreTitle"), less: t("tl.less"), lessTitle: t("tl.lessTitle"),
     leaf: t("tl.leaf"), noTile: t("tl.noTile"),
+    geTitle: t("tl.geTitle"), geAuto: (x) => t("tl.geAuto", { x: String(x) }),
     status: (s) => {
       const lv = !s.level ? t("tl.noLevel") : s.level[0] === s.level[1]
         ? t("tl.level", { n: String(s.level[0]) }) : t("tl.levels", { a: String(s.level[0]), b: String(s.level[1]) });
-      const parts = [lv, t("tl.loaded", { n: String(s.loaded) }), formatBytes(s.bytes)];
+      const parts = [lv, t("tl.loaded", { n: String(s.loaded) }), t("tl.memory", { used: formatBytes(s.bytes), max: formatBytes(s.maxBytes) })];
       if (s.busy) parts.push(t("tl.busy"));
+      // MICRO tileset dritto e nitido · what was done to show it: said
+      if (s.placed === "centred") parts.push(t("tl.centred"));
+      if (s.ge?.small) parts.push(t("tl.geSmall", { x: String(s.ge.scale) }));
+      if (s.textures.reduced) parts.push(t("tl.texReduced", { n: String(s.textures.reduced), from: String(s.textures.largest), to: String(s.textures.max) }));
       if (s.failed) parts.push(t("tl.failed", { x: s.failed }));
       if (s.missing.length) parts.push(t("tl.missing", { n: String(s.missing.length), x: s.missing.slice(0, 2).join(", ") }));
       return parts.join(" · ");
