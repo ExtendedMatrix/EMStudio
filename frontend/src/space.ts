@@ -29,6 +29,7 @@ import { classOf } from "./rules";
 import { SCENE_USES, assetOf, chooseVersion, versionsOf, type VersionChoice, type VersionGraph } from "./asset-versions";
 import { pickRepresentation, plainGraph } from "./resources";
 import { alternativeSets, iterSets, type AlternativesRule, type AltResult } from "./alternatives";
+import { frameAmong, type FileFrame } from "./file-frame";
 import visualRules from "./assets/em_visual_rules.json";
 import { basename } from "./paths";
 import { epochInstances } from "./epoch-instances";
@@ -117,6 +118,12 @@ export interface SpaceRM {
    *  1.6.41). Its id is the container's; drawn instead of the members, or they
    *  instead of it */
   altOf?: string | null;
+  /** MICRO tileset, shift e epoche · a tileset's FRAME (s3Dgraphy 1.6.38,
+   *  `data.frame`: its coordinates are a CRS minus a shift) and the node that
+   *  says it — the resource, its asset, then its hat (`frame_of`'s order) */
+  frame?: { frame: FileFrame; from: string } | null;
+  /** …and where a new frame is written: the tileset's asset (its versions inherit it) */
+  frameHome?: string | null;
 }
 
 /** MICRO-SPAZIO-3D-3 p.7 · an RM container as the graph has it (EM Tools writes
@@ -471,8 +478,11 @@ export function buildSpace(
     const entries = entriesOf(rm.id);
     // a membership to a node that is not a group is not one (a hand-edited file)
     const group = outOf(rm.id, RM_GROUP_EDGE).find((g) => byId.get(g)?.node_type === RM_GROUP_TYPE) ?? null;
+    const resource = chosen ? chosen.resource : resourceOf(rm.id);
+    const frame = resource?.tiles ? frameAmong([resource.id, assetOf(vg, resource.id), rm.id], (i) => dataOf(byId.get(i))) : null;
     return { id: rm.id, name: str(rm.name) || rm.id, epochs: [...eps], documentId, genre, group,
-             resource: chosen ? chosen.resource : resourceOf(rm.id), choice: chosen?.choice ?? null,
+             resource, choice: chosen?.choice ?? null, ...(frame ? { frame } : {}),
+             ...(resource?.tiles ? { frameHome: assetOf(vg, resource.id) } : {}),
              tileset: tilesetOf(rm.id),
              // MICRO-SPAZIO-3D-3 p.10 · its uses, its data (the measures), its file as the scene reads it
              versions: entries.map(versionRow) };
@@ -560,6 +570,7 @@ export function buildSpace(
   // with an alternative of its own (a tileset of the whole, hatted by the
   // container) gets it as a model of the Space, under the container's id: its
   // versions, the one a scene loads, the epochs of the members it replaces
+  // (with no member: the container's own)
   const alternatives = alternativeSets({ nodes, edges }, ALT_RULE);
   for (const set of iterSets(alternatives.sets)) {
     if (set.hat_kind !== "container" || !set.alternatives.length) continue;
@@ -568,8 +579,14 @@ export function buildSpace(
     const choice = chooseVersion(entries.filter((e) => opensGltf(e.data ?? {})), SCENE_USES);
     const node = choice?.entry ? byId.get(choice.entry.id) : byId.get(set.assets[0]);
     const eps = new Set(rms.filter((r) => set.covers.includes(r.id)).flatMap((r) => r.epochs));
+    // MICRO tileset, shift e epoche (E.D. 25 Oct 2026) · no member, or members
+    // without epochs: the container's own (its Document's), as s3Dgraphy says
+    // (`alternative_sets` → `epochs`, em_visual_rules 1.6.40)
+    if (!eps.size) for (const ep of set.epochs) eps.add(ep);
     const asset = byId.get(set.assets[0]);
+    const frame = frameAmong([node?.id, set.assets[0], set.hat], (i) => dataOf(byId.get(i)));
     rms.push({ id: set.hat, name: str(asset?.name) || set.name, epochs: [...eps], documentId: g?.documentId ?? null, genre: null,
+               ...(frame ? { frame } : {}), frameHome: set.assets[0] ?? null,
                group: null, altOf: set.hat, resource: node ? asResource(servable(node)) : null, choice: choice?.entry ? choice : null,
                tileset: null,
                versions: entries.map(versionRow) });

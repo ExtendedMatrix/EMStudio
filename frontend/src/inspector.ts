@@ -132,6 +132,9 @@ export interface InspectorCallbacks {
   renderVersions?: (host: HTMLElement, nodeId: string) => boolean;
   /** MICRO-PROVA-DEV47 p.4 · the section «Alternativa» of a tileset or a container */
   renderAlternative?: (host: HTMLElement, nodeId: string) => boolean;
+  /** MICRO tileset, shift e epoche · the section «Frame» of a tileset (its
+   *  coordinates are a CRS minus a shift): false when the node has no tileset */
+  renderFrame?: (host: HTMLElement, nodeId: string) => boolean;
   /** MICRO-SPAZIO-3D-3 p.6 · under «Model the proxy»: «Usa una forma abbozzata…» */
   renderSketchUse?: (host: HTMLElement, nodeId: string) => void;
   /** MICRO-PROVA-DEV47 p.5 · a unit's proxy: its file, «Elimina il proxy» */
@@ -1297,6 +1300,14 @@ export function renderInspector(
     const body = el("div");
     panel.appendChild(body);
     if (cb.renderAlternative(body, nodeId)) root.appendChild(panel);
+  }
+  // ── MICRO tileset, shift e epoche · «Frame»: a tileset's CRS and shift ──
+  if (nodeId && cb.renderFrame) {
+    const panel = el("div", "insp-canvas insp-frame");
+    panel.appendChild(el("h3", "insp-sect", t("frm.title")));
+    const body = el("div");
+    panel.appendChild(body);
+    if (cb.renderFrame(body, nodeId)) root.appendChild(panel);
   }
 
   // ── RISORSA-FILE · the files, the resources of a file, the revisions ─────

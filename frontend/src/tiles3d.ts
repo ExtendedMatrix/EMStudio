@@ -141,7 +141,19 @@ export interface TilesLayer {
    *  read from the tileset.json and its external ones through the renderer's
    *  own road (a `.3tz`, a room's store) — no tile loaded; once per layer */
   leaves(): Promise<(Omit<LeafResult, "boxes"> & { boxes: Box[] }) | null>;
+  /** MICRO tileset, shift e epoche · the tileset's FRAME (its coordinates are a
+   *  CRS minus a shift: `file-frame.ts`): `fn`, given the root's written
+   *  transform and volume, answers the transform from the tileset's own frame to
+   *  the study's (Z-up, column-major) and the layer is moved there — the file
+   *  untouched. Asked again only when `key` changes; `""` / null puts it back
+   *  as written. */
+  relocate(key: string, fn: RelocateFn | null): void;
+  /** …what the last relocation did: its key, the fit's residual, or why not */
+  relocated(): { key: string; residual_max_m: number | null; error?: string } | null;
 }
+
+export type RelocateFn = (root: { transform: number[] | null; boundingVolume: unknown }) =>
+  Promise<{ ok: boolean; transform?: number[]; residual_max_m?: number; error?: string }>;
 
 export interface TilesOptions {
   mode?: RefineMode;
@@ -155,6 +167,8 @@ export interface TilesOptions {
    *  served as one tree (`tileset-drop.ts servedSource`). Asked under a base
    *  nobody serves, as an archive is. */
   source?: { readEntry(path: string): Promise<Uint8Array | null> };
+  /** MICRO tileset, shift e epoche · the frame from the start (`relocate`) */
+  relocate?: { key: string; fn: RelocateFn } | null;
 }
 
 let draco: any = null;
@@ -265,7 +279,56 @@ export function createTilesLayer(E: any, T: any, url: string, camera0: any, rend
   // the root's VOLUME is known before any tile: the viewer frames it then — a
   // camera that does not see the root would never ask for a tile (measured:
   // 3DSC's `blocco_v13_real_lod` sits behind a camera left at the origin)
-  tiles.addEventListener("load-root-tileset", () => { rootReady = true; changed(); });
+  tiles.addEventListener("load-root-tileset", (e: any) => {
+    rootReady = true;
+    const r = e?.tileset?.root ?? {};
+    rootJson = { transform: Array.isArray(r.transform) && r.transform.length === 16 ? r.transform.map(Number) : null,
+                 boundingVolume: r.boundingVolume ?? null };
+    applyRelocation();
+    changed();
+  });
+  // MICRO tileset, shift e epoche · the frame: the group's matrix becomes
+  // Rx(−90°)·A·W⁻¹ — W the root's written transform, A the true one in the
+  // study's frame — so a tile lands at Rx·A·p; three composes in doubles, and
+  // W⁻¹·W cancels the 6 000 km of a geocentric root to the nanometre
+  let rootJson: { transform: number[] | null; boundingVolume: unknown } | null = null;
+  let relocKey = opts.relocate?.key ?? "";
+  let relocFn: RelocateFn | null = opts.relocate?.fn ?? null;
+  let relocState: { key: string; residual_max_m: number | null; error?: string } | null = null;
+  const asWritten = () => {
+    tiles.group.matrixAutoUpdate = true;
+    tiles.group.position.set(0, 0, 0);
+    tiles.group.rotation.set(-Math.PI / 2, 0, 0);
+    tiles.group.scale.set(1, 1, 1);
+    tiles.group.updateMatrix();
+    tiles.group.updateMatrixWorld(true);
+  };
+  const applyRelocation = () => {
+    const key = relocKey;
+    if (!key || !relocFn) { asWritten(); relocState = null; return; }
+    if (!rootJson) return;
+    if (!rootJson.transform) { asWritten(); relocState = { key, residual_max_m: null, error: "no-transform" }; changed(); return; }
+    const W = new THREE.Matrix4().fromArray(rootJson.transform);
+    void relocFn(rootJson).then((res) => {
+      if (key !== relocKey) return;
+      if (!res.ok || !res.transform || res.transform.length !== 16) {
+        asWritten();
+        relocState = { key, residual_max_m: null, error: res.error ?? "refused" };
+      } else {
+        const m = new THREE.Matrix4().makeRotationX(-Math.PI / 2)
+          .multiply(new THREE.Matrix4().fromArray(res.transform))
+          .multiply(W.clone().invert());
+        tiles.group.matrixAutoUpdate = false;
+        tiles.group.matrix.copy(m);
+        tiles.group.matrix.decompose(tiles.group.position, tiles.group.quaternion, tiles.group.scale);
+        tiles.group.matrixWorldNeedsUpdate = true;
+        tiles.group.updateMatrixWorld(true);
+        relocState = { key, residual_max_m: typeof res.residual_max_m === "number" ? res.residual_max_m : null };
+      }
+      leafRead = null;
+      changed();
+    });
+  };
   tiles.addEventListener("load-tileset", changed);
 
   const tileOf = (obj: any): any | null => {
@@ -404,7 +467,16 @@ export function createTilesLayer(E: any, T: any, url: string, camera0: any, rend
       });
       return box;
     },
-    rootReady: () => rootReady,
+    // with a frame, the root is ready where it will stay: once relocated (or refused)
+    rootReady: () => rootReady && !(relocKey && relocState?.key !== relocKey),
+    relocate(key, fn) {
+      const k = fn ? key : "";
+      if (k === relocKey) return;
+      relocKey = k;
+      relocFn = fn;
+      applyRelocation();
+    },
+    relocated: () => relocState ?? (relocKey ? { key: relocKey, residual_max_m: null, error: rootJson ? "pending" : "waiting-root" } : null),
     leaves() {
       leafRead ??= (async () => {
         // the renderer's road: its plugins turn the URL (an archive's base) and fetch it (signed, from the archive)

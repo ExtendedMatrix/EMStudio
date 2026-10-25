@@ -10556,6 +10556,52 @@ test("TD6.basilica", "tileset trascinato · la Basilica Iulia (RealityScan 2.2, 
     detail: out };
 });
 
+// ── MICRO tileset, shift e epoche (E.D. 25 Oct 2026) ──────────────────────────
+test("TF1.frame", "tileset · il caso di E.D.: un contenitore RM senza mesh (tls), il suo Documento D.1 in Epoch 1, l'alternativa un tileset scritto in EPSG:6708 meno SHIFT6708 (all'equatore) — Epoch 1 lo mostra nella scena e nell'Outliner; il frame lo ricolloca (bridge, residuo < 1 mm) alle coordinate del file; la sezione «Frame» dell'Inspector lo dice, «Togli» è un passo di annulla", async () => {
+  const { p, ctx, errors } = await open({ doc: "tiles-frame", ws: "space" });
+  const asked = [];
+  p.on("response", (r) => { if (/tileset-frame|tiles-frame|tiles-prova/.test(r.url())) asked.push(`${r.status()} ${r.url().replace(/^.*?\/\/[^/]+/, "")}`); });
+  await p.waitForFunction(() => document.querySelector(".scn-host")?.dataset.ready === "1", null, { timeout: 20000 });
+  const sc = () => p.evaluate(() => {
+    const h = document.querySelector(".scn-host");
+    return { items: h.__space(), tiles: h.__spaceTiles?.() ?? [],
+      rows: [...document.querySelectorAll(".scn-outliner .sol-row")].map((r) => r.dataset.key) };
+  });
+  const t0 = Date.now(); let s = await sc();
+  while (Date.now() - t0 < 20000 && !(s.tiles.find((x) => x.id === "rmgroup_tls")?.relocated && s.tiles.find((x) => x.id === "rmgroup_tls")?.files.length)) { await p.waitForTimeout(250); s = await sc(); }
+  await p.waitForTimeout(400); s = await sc();
+  const layer = s.tiles.find((x) => x.id === "rmgroup_tls");
+  const item = s.items.find((x) => x.id === "rmgroup_tls");
+  const c = layer?.box ? [0, 1, 2].map((k) => (layer.box[k] + layer.box[k + 3]) / 2) : null;
+  // the study declares no CRS: the file's own grid — the box centre (34.73, 14.34, 0.39) Z-up, (x, z, −y) in three
+  const near = !!c && Math.abs(c[0] - 34.73) < 3 && Math.abs(c[1] - 0.39) < 3 && Math.abs(c[2] + 14.34) < 3;
+  await p.screenshot({ path: SHOT("tf1-frame-scena") }).catch(() => {});
+  await p.click('.scn-outliner .sol-row[data-key="rm:rmgroup_tls"] .sol-name'); await p.waitForTimeout(800);
+  const insp = () => p.evaluate(() => {
+    const f = document.querySelector(".insp-frame");
+    return f ? { crs: f.querySelector('input[data-frame="crs"]')?.value, x: f.querySelector('input[data-frame="x"]')?.value,
+      states: [...f.querySelectorAll("[data-frame-state]")].map((e) => `${e.dataset.frameState}:${e.textContent}`),
+      buttons: [...f.querySelectorAll("[data-frame-action]")].map((b) => `${b.dataset.frameAction}:${b.disabled ? "off" : "on"}`) } : null;
+  });
+  const i0 = await insp();
+  const frameOf = () => p.evaluate(() => { const g = JSON.parse(window.__EM_DRAG__.docJson()); const gr = Object.values(g.graphs ?? { a: g.graph }).find((x) => x.nodes?.some((n) => n.id === "RES_TF"));
+    return gr.nodes.find((n) => n.id === "RES_TF").data.frame ?? null; });
+  await p.click('.insp-frame [data-frame-action="remove"]'); await p.waitForTimeout(600);
+  const removed = await frameOf();
+  await p.evaluate(() => window.__EM_DRAG__.undo()); await p.waitForTimeout(600);
+  const back = await frameOf();
+  await ctx.close();
+  const conds = {
+    epoch: !!item && item.as === "tiles" && s.rows.includes("rm:rmgroup_tls"),
+    relocated: !!layer?.relocated && !layer.relocated.error && layer.relocated.residual_max_m < 0.001 && near,
+    inspector: i0?.crs === "EPSG:6708" && i0.x === "291407" && i0.states.some((x) => /^relocated:.*mm/.test(x)) && i0.buttons.includes("remove:on")
+      && i0.buttons.includes("use-study:off"),
+    undo: (removed === null || removed === undefined) && back?.crs === "EPSG:6708" && back.shift?.[1] === 4640813,
+    errors: !errors.length,
+  };
+  return { pass: Object.values(conds).every(Boolean), detail: { conds, item, layer: layer && { files: layer.files, relocated: layer.relocated, box: layer.box }, c, rows: s.rows, i0, removed, back, asked, errors } };
+});
+
 // ── run ─────────────────────────────────────────────────────────────────────
 const chosen =cases.filter((c) => !only.length || only.includes(c.id) || only.some((o) => c.id.startsWith(o + ".")));
 for (const c of chosen) {

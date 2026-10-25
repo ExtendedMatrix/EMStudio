@@ -164,7 +164,22 @@ const O = { origin: "http://localhost:5173" };
 try {
   for (let i = 0; i < 100; i++) { try { if ((await fetch(`${B}/health`)).ok) break; } catch { /* starting */ } await new Promise((r) => setTimeout(r, 150)); }
   const health = await (await fetch(`${B}/health`)).json();
-  eq(health.bridge_level, 39, "the bridge's level: 39 (/tiles, /geo, /tiles/failures, /geo/crs-info; 39 /fs/pack-3tz with root)");
+  eq(health.bridge_level, 40, "the bridge's level: 40 (/tiles, /geo, /tiles/failures, /geo/crs-info; 39 /fs/pack-3tz with root; 40 /geo/tileset-frame)");
+  // MICRO tileset, shift e epoche · the Basilica Iulia's root (RealityScan,
+  // E−291407 N−4640813 declared as EPSG:6708: on the equator) back in Rome
+  {
+    const root = { transform: [-0.18243234, 0.98321841, 0, 0, -1.97e-06, -3.6e-07, 1, 0, 0.98321841, 0.18243234, 2e-06, 0, 6271099.97842686, 1163587.23952703, 12.30475555, 1],
+      bounding_volume: { box: [-4.6006813, -2.48278046, 6.83278513, 94.20596313, 0, 0, 0, 49.0687027, 0, 0, 0, 12.45930481] },
+      frame: { crs: "EPSG:6708", shift: [291407, 4640813, 0] } };
+    const post = (b) => fetch(`${B}/geo/tileset-frame`, { method: "POST", headers: { ...O, "Content-Type": "application/json" }, body: JSON.stringify(b) });
+    const ecef = await (await post(root)).json();
+    ok(ecef.ok && Math.abs(ecef.true.lat - 41.8918) < 1e-3 && Math.abs(ecef.true.lon - 12.4860) < 1e-3 && ecef.residual_max_m < 0.001,
+      `/geo/tileset-frame: the Basilica back in Rome (lat ${ecef.true?.lat?.toFixed(4)}, lon ${ecef.true?.lon?.toFixed(4)}), fit residual ${(ecef.residual_max_m * 1000).toFixed(3)} mm`);
+    const study = await (await post({ ...root, target: { crs: "EPSG:6708", shift: [291407, 4640813, 0] } })).json();
+    ok(study.ok && Math.abs(study.true.x - 28.11) < 0.05 && Math.abs(study.true.y - 9.85) < 0.05 && study.transform.length === 16,
+      "/geo/tileset-frame: into the study's frame (its shift = the file's): the file's own grid");
+    eq((await post({ ...root, frame: { shift: [1, 2, 3] } })).status, 422, "/geo/tileset-frame: a frame without a CRS is refused by name");
+  }
   // MICRO-GEOREF-GRAFO · the GT16's CRS, as PROJ's database knows it
   const c31700 = await (await fetch(`${B}/geo/crs-info?epsg=31700&x=327372.56&y=448682.65`, { headers: O })).json();
   eq([c31700.deprecated, c31700.replacements.map((r) => [r.epsg, r.same_grid]), c31700.to_wgs84?.ballpark, c31700.to_wgs84?.accuracy],

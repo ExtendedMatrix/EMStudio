@@ -47,7 +47,7 @@
 import { engine, headBytes, lodLevelOf, probeLods, tilesBarTexts } from "./embed3d-native";
 import { onFirstVisible } from "./lazy";
 import { nodeBytes, ownedByNode, RoadError, type FetchFailure } from "./node-road";
-import { createTilesLayer, dracoFor, formatBytes, isTilesetUrl, tilesBar, tilesEngine, type TilesLayer } from "./tiles3d";
+import { createTilesLayer, dracoFor, formatBytes, isTilesetUrl, tilesBar, tilesEngine, type RelocateFn, type TilesLayer } from "./tiles3d";
 import type { OverlayKey, OverlayValueKey } from "./overlays";
 import {
   alignedView, AXIS_INDEX, AXIS_VECTOR, boxZoom, freeAxes, modalHeader, threeToBlender, type ModalWords, clipPlanes, detailZoom, DRAG_PX, dragIntent, dragZoomFactor,
@@ -92,6 +92,9 @@ export interface SceneItem {
   /** MICRO-TILESET-CARTELLA · a dropped tileset (a preview): its files from
    *  this reader, `url` only its name in the scene */
   tilesSource?: { readEntry(path: string): Promise<Uint8Array | null> };
+  /** MICRO tileset, shift e epoche · the tileset's frame (a CRS minus a shift):
+   *  the layer is relocated into the study's frame (`TilesLayer.relocate`) */
+  tilesRelocate?: { key: string; fn: RelocateFn } | null;
   /** MICRO-SPAZIO-3D-3 p.10 · the model's versions as a flow of LOD by the
    *  distance (`lod-flow.ts`): the scene draws the one the camera asks for,
    *  starting from `flowStart` (the lightest) */
@@ -723,14 +726,14 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
       const rootWatched = new WeakSet<object>();
       const liveLayers = () => [...layers.values()].filter((l) => l.layer.object.parent === content);
       const ensureLayer = async (url: string, itemId: string, archive = false, mode?: "auto" | "manual",
-                                 source?: SceneItem["tilesSource"]): Promise<Live | null> => {
+                                 source?: SceneItem["tilesSource"], relocate?: SceneItem["tilesRelocate"]): Promise<Live | null> => {
         let live = layers.get(url);
-        if (live) { live.itemId = itemId; return live; }
+        if (live) { live.itemId = itemId; live.layer.relocate(relocate?.key ?? "", relocate?.fn ?? null); return live; }
         try { T = T ?? await tilesEngine(); } catch { return null; }
         // MICRO-TILESET-CONTENITORE · a container's tileset refines by itself
         // (its tiles by the distance): «Manuale» stays one click away on its bar
         const layer = createTilesLayer(E, T, url, camera, renderer, { memoryMB: opts.tilesMemoryMB, archive, ...(mode ? { mode } : {}),
-          ...(source ? { source } : {}) });
+          ...(source ? { source } : {}), ...(relocate ? { relocate } : {}) });
         const bar = tilesBar(layer, tilesBarTexts());
         // ready = the root's first tile, or its failure (the frame waits for it)
         const ready = new Promise<void>((res) => {
@@ -748,7 +751,7 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
         const box = l.layer.contentBox();
         let points = 0;
         l.layer.object.traverse((o: any) => { if (o.isPoints) points++; });
-        return { id: l.itemId, files: l.layer.loadedFiles(), status: l.layer.status(), mode: l.layer.mode(),
+        return { id: l.itemId, files: l.layer.loadedFiles(), status: l.layer.status(), mode: l.layer.mode(), relocated: l.layer.relocated(),
           box: box ? [...box.min.toArray(), ...box.max.toArray()] : null, points };
       });
       const toScreen = (v3: any): { x: number; y: number } | null => {
@@ -1571,7 +1574,7 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
             drawn.set(key, { item, as: "pending", url: tsUrl });
             const el = stripOf(item);
             pending.push(ensureLayer(tsUrl, item.id, tsUrl === item.url && item.tiles === "3tz", item.alt ? "auto" : undefined,
-              tsUrl === item.url ? item.tilesSource : undefined).then(async (live) => {
+              tsUrl === item.url ? item.tilesSource : undefined, tsUrl === item.url ? item.tilesRelocate : undefined).then(async (live) => {
               if (gen !== generation || disposed) return;
               if (!live) { drawn.set(key, { item: { ...item, state: "missing" }, as: "label" }); later.push({ ...item, state: "missing" }); return; }
               live.layer.object.userData.tiles = true;
@@ -2050,6 +2053,10 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
           let which: "tileset" | "models";
           let share: number | null = null;
           if (g.mode === "models" || g.mode === "tileset") which = g.mode;
+          // MICRO tileset, shift e epoche (E.D. 25 Oct 2026) · a container with
+          // no member drawn: its alternative is all there is (s3Dgraphy's
+          // choose_alternative), and it must be drawn for its root to load
+          else if (!g.models.length && g.tiles.length) which = "tileset";
           else {
             if (box.isEmpty()) continue;
             const sph = box.getBoundingSphere(new THREE.Sphere());

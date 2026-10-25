@@ -254,7 +254,7 @@ import { buildSpace, citationKey, SpaceMarks, UnansweredFiles, type Space, type 
 import { diagnose, errorText, FailureLog, isNetworkError, type LoadFailure, type Probes } from "./load-failure";
 import { chooseVersion, SCENE_USES, USES } from "./asset-versions";
 import { mountGeoSpace, type GeoSpaceDeps } from "./geo-space";
-import { georefSummary } from "./georef";
+import { epsgOf, georefSummary } from "./georef";
 import { proposalNow, proposeConversion, renderGeorefSection, renderSitePinProposal, type GeorefDeps } from "./georef-panel";
 import { mountSpaceScene, type SceneItem, type SceneStats, type SceneMark, type SceneMenuRequest, type SceneView, type SpaceSceneHandle } from "./scene3d";
 import { ladderOf, versionChoices, viewerSourceLine, viewerTargetOf,
@@ -280,6 +280,7 @@ import { oneLine } from "./one-line";
 import { findSet, measureCoverage, planDeclareAlternative, planSubcontainer, SAME_COVERAGE_IOU, type AltMode, type AltPlan, type Box, type TilesetAlternative } from "./alternatives";
 import { FOOT_IN, footprintShare, leafCoverage } from "./tileset-leaves";
 import { ALT_RULE } from "./space";
+import { frameKey, makeFrame, readFrame, relocation, studyTarget, type FileFrame } from "./file-frame";
 import { trackpadClassifier } from "./wheel-kind";
 import { isTilesetUrl } from "./tiles3d";
 import { mount3dViewer } from "./embed3d-native";
@@ -381,7 +382,10 @@ import {
   closeDetachedWindow,
   onDetachedWindows,
   windowFrames,
+  onDesktopDragDrop,
+  pathIsDir,
 } from "./tauri";
+import { guessKind, mightBeTileset, planDesktopDrop, positionsArePhysical, toCssPoint, TILESET_TARGETS } from "./desktop-drop";
 import * as paths from "./paths";
 import { bridgeLevelVerdict, levelKey, type BridgeHealth } from "./bridge-level";
 import { classify, isDiskUrl, locatorOnDisk, missingCount, rewritePlan, tally, type LostFile, type Verdict } from "./relocate";
@@ -3993,6 +3997,7 @@ function renderInspectorInto(host: HTMLElement): void {
       renderProxy: (host2, id) => renderProxyRow(host2, id),
       renderVersions: (host2, id) => renderVersionsInto(host2, id),
       renderAlternative: (host2, id) => renderAlternativeInto(host2, id),
+      renderFrame: (host2, id) => renderFrameInto(host2, id),
       readableName: (id) => { const r = rmShown(id); return r && r.shown !== r.technical ? { label: r.shown, chip: r.level, technical: r.technical } : null; },
       onClearField: (nodeId, field) => {
         (storeOfNode(nodeId) ?? store!).clearField(nodeId, field);
@@ -13454,7 +13459,7 @@ async function bridgeUrl(): Promise<string> {
   return _bridgeUrl;
 }
 /** The bridge level this editor expects (`BRIDGE_LEVEL` in tools/em_bridge.py). */
-const BRIDGE_LEVEL_WANTED = 39;   // 39 = /fs/pack-3tz with `root`, the RealityScan pair (MICRO-TILESET-CARTELLA); 38 = /geo/crs-info, /geo/convert-shift (MICRO-GEOREF-GRAFO); 37 = HTTPS through em_net, /tiles/failures (MICRO-BRIDGE-CERTIFICATI); 36 = /tiles/*, /geo/* (MICRO-GEOGLOBO); 31 = /property-source (FONTE); 32 = /room-import, «Bring into a room» through the engine; 33 = /fs/write (MICRO-SPAZIO-3D); 34 = /fs/doc, /fs/probe (MICRO-PERCORSI-WINDOWS); 35 = /fs/collect, /health's pid (MICRO-WINDOWS-MODELLI)
+const BRIDGE_LEVEL_WANTED = 40;   // 40 = /geo/tileset-frame, a tileset's shift (MICRO tileset, shift e epoche); 39 = /fs/pack-3tz with `root`, the RealityScan pair (MICRO-TILESET-CARTELLA); 38 = /geo/crs-info, /geo/convert-shift (MICRO-GEOREF-GRAFO); 37 = HTTPS through em_net, /tiles/failures (MICRO-BRIDGE-CERTIFICATI); 36 = /tiles/*, /geo/* (MICRO-GEOGLOBO); 31 = /property-source (FONTE); 32 = /room-import, «Bring into a room» through the engine; 33 = /fs/write (MICRO-SPAZIO-3D); 34 = /fs/doc, /fs/probe (MICRO-PERCORSI-WINDOWS); 35 = /fs/collect, /health's pid (MICRO-WINDOWS-MODELLI)
 /** MICRO-INSTALLER-PULSANTE p.3 · the bridge that answers says its level; one
  *  that differs from BRIDGE_LEVEL_WANTED is said in the Log (its url, pid, since
  *  when) and in a notice — once per bridge. Asked at start, while the sidecar
@@ -24997,6 +25002,61 @@ function dropTilesetOn(win: Win, e: DragEvent): boolean {
   return true;
 }
 
+/**
+ * MICRO-TILESET-SHIFT-E-EPOCHE p.3 · the DESKTOP's drop from the Finder. The
+ * shell takes the system's file drops and says them with absolute paths and
+ * the pointer's position (`onDesktopDragDrop`): the window under the pointer is
+ * found by its area, and the paths go where `desktop-drop.ts planDesktopDrop`
+ * says — a tileset as a STORAGE path (`droppedFromPath`, so «Prepara» packs it
+ * beside), a document through the door of «Open With». The browser's HTML5
+ * drop is not touched (in the browser this wires nothing).
+ */
+async function wireDesktopFileDrop(): Promise<void> {
+  let hovered: HTMLElement | null = null;
+  let maybeTileset = false;
+  const mark = (el: HTMLElement | null) => {
+    if (hovered === el) return;
+    hovered?.classList.remove("drop-target");
+    hovered = el;
+    hovered?.classList.add("drop-target");
+  };
+  const winAt = (pos: { x: number; y: number }): Win | null => {
+    const pt = toCssPoint(pos, window.devicePixelRatio || 1, positionsArePhysical(navigator.userAgent));
+    const area = pt ? (document.elementFromPoint(pt.x, pt.y) as HTMLElement | null)?.closest<HTMLElement>(".tile-area") : null;
+    const id = area?.dataset.win;
+    return id ? windowsOf().find((w) => w.id === id) ?? null : null;
+  };
+  const isTarget = (w: Win | null) => !!w && (TILESET_TARGETS as readonly string[]).includes(w.type);
+  await onDesktopDragDrop((ev) => {
+    if (ev.type === "leave") { mark(null); return; }
+    if (ev.type === "enter") maybeTileset = mightBeTileset(ev.paths);
+    const w = winAt(ev.position);
+    if (ev.type !== "drop") { mark(maybeTileset && isTarget(w) ? winAreas.get(w!.id) ?? null : null); return; }
+    mark(null);
+    void (async () => {
+      const items = await Promise.all(ev.paths.map(async (path) => {
+        const dir = await pathIsDir(path);
+        return { path, kind: dir == null ? guessKind(path) : dir ? "dir" as const : "file" as const };
+      }));
+      const plan = planDesktopDrop(items, w ? { win: w.id, type: w.type } : null);
+      logInfo(`desktop drop: ${ev.paths.length} path(s) on ${w?.type ?? "no window"} → ${plan.action}`);
+      if (plan.action === "open") { await openPathFromDesktop(plan.path); return; }
+      if (plan.action === "none") {
+        if (plan.why !== "empty") toast(t(plan.why === "folder-elsewhere" ? "tsp.desktopFolderElsewhere" : "tsp.desktopArchiveElsewhere"));
+        return;
+      }
+      const win = windowsOf().find((x) => x.id === plan.win);
+      if (!win) return;
+      const d = await droppedFromPath(plan.path, plan.type);
+      if (d) showDropped(win, d);
+      else if (plan.pinFolder) {
+        const name = paths.basename(plan.path) || plan.path;
+        pinViewerCollection(win, { type: "dir", path: plan.path, name, ext: "" });   // a folder of images, as from the Storage
+      }
+    })();
+  });
+}
+
 
 // ── P1 · the proxies of `3d_obj/`, by name (EM convention) ──────────────────
 // Beside the em.json a `3d_obj/` folder whose files carry the units' names
@@ -28451,6 +28511,8 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
         edge: placementColour(r.genre) ?? undefined, selected: isSel(`rm:${r.id}`), active: ssel.active === `rm:${r.id}`,
         // MICRO-SPAZIO-3D-2 · the model's transform (data.transform), over its file
         pose: r.resource?.tiles ? undefined : poseOfNode(r.id),
+        // MICRO tileset, shift e epoche · a tileset with a frame, relocated into the study's
+        tilesRelocate: isTiles ? spaceTilesRelocate(r) : undefined,
         // MICRO-3DTILES · the tileset of the same model, and the weight
         tileset: r.tileset?.state === "resident" && space3dShown("s3_tiles", win.id) ? r.tileset.url || undefined : undefined,
         bytes: (plan.versionId ? plan.bytes : null) ?? r.resource?.bytes ?? null, points: r.resource?.points ?? null });
@@ -28476,6 +28538,113 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
   };
   refresh();
   return { refresh, destroy: () => { bar.removeEventListener("click", onBar); geoSpace.destroy(); handle.dispose(); sceneHandles.delete(win.id); npanelRenderers.delete(win.id); sceneOverlayBtns.delete(win.id); } };
+}
+
+/** MICRO tileset, shift e epoche (E.D. 25 Oct 2026) · the Inspector's «Frame»
+ *  of a tileset (a container's alternative, an RM drawn as tiles, their
+ *  resource): CRS, shift X/Y/Z and a note, «Use the study's shift» (the
+ *  GeoPositionNode), «Remove»; each change ONE step of undo, written as
+ *  `data.frame` where the frame already is, else on the tileset's asset. What
+ *  the Space did with it (the fit's residual, or why not) under the fields. */
+function renderFrameInto(host: HTMLElement, nodeId: string): boolean {
+  const sp = currentSpace();
+  if (!sp || !store) return false;
+  const st = store;
+  const r = sp.rms.find((x) => (x.id === nodeId || x.resource?.id === nodeId || x.frameHome === nodeId) && (x.resource?.tiles || x.altOf));
+  if (!r) return false;
+  const home = r.frame?.from ?? r.frameHome ?? r.resource?.id ?? null;
+  if (!home || !st.node(home)) return false;
+  const cur: FileFrame | null = r.frame?.frame ?? null;
+  const geo = (st.doc.graph.nodes.find((n) => n.node_type === "geo_position")?.data ?? null) as Record<string, unknown> | null;
+  const hint = (text: string, cls = "insp-hint") => { const p = document.createElement("p"); p.className = cls; p.textContent = text; host.appendChild(p); return p; };
+  hint(t("frm.says"));
+  const grid = document.createElement("div");
+  grid.className = "insp-frame-grid";
+  host.appendChild(grid);
+  const field = (label: string, key: string, value: string, wide = false) => {
+    const l = document.createElement("label");
+    l.className = "insp-frame-field" + (wide ? " wide" : "");
+    const s = document.createElement("span");
+    s.textContent = label;
+    const i = document.createElement("input");
+    i.type = "text";
+    i.value = value;
+    i.dataset.frame = key;
+    l.append(s, i);
+    grid.appendChild(l);
+    return i;
+  };
+  const crs = field(t("frm.crs"), "crs", cur?.crs ?? "", true);
+  crs.placeholder = "EPSG:6708";
+  const xs = (["x", "y", "z"] as const).map((k, i) => field(t(`frm.shift${k.toUpperCase()}`), k, cur ? String(cur.shift[i]) : ""));
+  const note = field(t("frm.note"), "note", cur?.note ?? "", true);
+  const write = (f: FileFrame | null, msg: string) => {
+    if (f && !f.crs && !f.shift.some((v) => v !== 0)) f = null;
+    if (f) st.setField(home, "data.frame", f);
+    else if (readFrame((st.node(home)?.data ?? null) as Record<string, unknown> | null)) st.clearField(home, "data.frame");
+    else return;
+    logInfo(msg, [home]);
+  };
+  const commit = () => write(makeFrame(crs.value, xs.map((i) => i.value), note.value.trim(), "manual"),
+    t("frm.written", { name: String(st.node(home)?.name ?? home) }));
+  for (const i of [crs, ...xs, note]) i.addEventListener("change", commit);
+  const row = document.createElement("div");
+  row.className = "insp-frame-actions";
+  host.appendChild(row);
+  const btn = (label: string, probe: string, run: () => void, disabled = false, title = "") => {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "insp-btn";
+    b.dataset.frameAction = probe;
+    b.textContent = label;
+    b.disabled = disabled;
+    if (title) b.title = title;
+    b.addEventListener("click", run);
+    row.appendChild(b);
+  };
+  const gEpsg = geo ? normaliseGeoCrs(geo.epsg) : null;
+  const gShift = [Number(geo?.shift_x ?? 0) || 0, Number(geo?.shift_y ?? 0) || 0, Number(geo?.shift_z ?? 0) || 0];
+  btn(t("frm.useStudy"), "use-study", () => write(makeFrame(gEpsg, gShift, t("frm.fromStudy"), "graph"), t("frm.writtenStudy")),
+    !gEpsg && !gShift.some((v) => v !== 0), !gEpsg && !gShift.some((v) => v !== 0) ? t("frm.noStudy") : `${gEpsg ?? "—"} · ${gShift.join(", ")}`);
+  btn(t("frm.remove"), "remove", () => write(null, t("frm.removed")), !cur);
+  if (r.frame && r.frame.from !== home) hint(t("frm.from", { name: String(st.node(r.frame.from)?.name ?? r.frame.from) }));
+  if (cur) {
+    const target = studyTarget(geo, cur);
+    const live = sceneHandleTilesOf(r.id);
+    const p = hint(!cur.crs ? t("frm.noCrs") : target?.own ? t("frm.ownGrid") : t("frm.studyGrid", { crs: target?.crs ?? "" }));
+    p.dataset.frameState = "target";
+    if (live?.relocated) {
+      const rl = live.relocated;
+      const q = hint(rl.error ? t(rl.error === "old-bridge" ? "frm.oldBridge" : rl.error === "no-bridge" ? "frm.noBridge" : "frm.refused", { why: rl.error })
+        : t("frm.relocated", { mm: rl.residual_max_m == null ? "?" : (rl.residual_max_m * 1000).toFixed(2) }), rl.error ? "insp-hint warn" : "insp-hint");
+      q.dataset.frameState = rl.error ? "error" : "relocated";
+    }
+  }
+  return true;
+}
+const normaliseGeoCrs = (v: unknown): string | null => { const n = epsgOf({ epsg: v }); return n ? `EPSG:${n}` : null; };
+/** what a Space scene did with a tileset's layer (its relocation), when one draws it */
+function sceneHandleTilesOf(id: string): { relocated: { key: string; residual_max_m: number | null; error?: string } | null } | null {
+  for (const host of document.querySelectorAll<HTMLElement>(".scn-host")) {
+    const tiles = (host as unknown as { __spaceTiles?: () => Array<{ id: string; relocated: { key: string; residual_max_m: number | null; error?: string } | null }> }).__spaceTiles?.();
+    const one = tiles?.find((x) => x.id === id);
+    if (one) return { relocated: one.relocated };
+  }
+  return null;
+}
+
+/** MICRO tileset, shift e epoche (E.D. 25 Oct 2026) · a tileset whose frame
+ *  says «CRS X minus shift S» is relocated into the study's frame by the
+ *  bridge (`/geo/tileset-frame`, s3Dgraphy's `relocate_transform`): the study's
+ *  CRS and shift (its GeoPositionNode) when it declares a CRS, else the file's
+ *  own shifted grid — the frame of the models exported with the same shift. */
+function spaceTilesRelocate(r: SpaceRM): SceneItem["tilesRelocate"] {
+  if (!r.frame || !store) return null;
+  const geo = (store.doc.graph.nodes.find((n) => n.node_type === "geo_position")?.data ?? null) as Record<string, unknown> | null;
+  const frame = r.frame.frame;
+  const target = studyTarget(geo, frame);
+  if (!target) return null;
+  return { key: frameKey(frame, target), fn: async (root) => relocation(await bridgeUrl().catch(() => null), root, frame, target) };
 }
 
 /** The epoch's Inspector: its chronology problems, and the tool. */
@@ -35208,7 +35377,9 @@ function vwSceneItems(s: VwScene): SceneItem[] {
       // MICRO-3DTILES p.2 · over the threshold the scene proposes the tileset of
       // the same model, as the Space does (the Doc did; the Viewer had lost it)
       tileset: r.tileset?.state === "resident" ? r.tileset.url || undefined : undefined,
-      pose: isTiles ? undefined : poseOfNode(r.id), bytes: v?.bytes ?? r.resource?.bytes ?? null, points: r.resource?.points ?? null });
+      pose: isTiles ? undefined : poseOfNode(r.id), bytes: v?.bytes ?? r.resource?.bytes ?? null, points: r.resource?.points ?? null,
+      // MICRO tileset, shift e epoche · a tileset with a frame, relocated into the study's
+      tilesRelocate: isTiles ? spaceTilesRelocate(r) : undefined });
   }
   if (s.preview) items.push({ kind: "rm", id: `preview:${s.preview.id}`, label: s.preview.label, state: "resident", url: s.preview.url });
   return items;
@@ -41223,3 +41394,5 @@ if (window.__EM_TEST_DATA__) {
 // B2/B3 · LAST, once the app can open a document: the files this launch was
 // given (argv, the macOS open event) and the bridge's launch notices
 if (isTauri()) void onDesktopQueue(() => void drainDesktopQueue()).then(() => drainDesktopQueue());
+// MICRO-TILESET-SHIFT-E-EPOCHE p.3 · files and folders dropped from the Finder
+if (isTauri()) void wireDesktopFileDrop();

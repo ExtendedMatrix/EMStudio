@@ -1,0 +1,115 @@
+{
+ "header": {
+  "format": "em.json",
+  "version": "1.0",
+  "datamodel_versions": {
+   "connections": "1.6.49",
+   "nodes": "1.6.38",
+   "qualia": "1.6.9"
+  },
+  "ontology_versions": {}
+ },
+ "graph": {
+  "graph_id": "tiles-frame",
+  "name": "Un contenitore senza mesh e il suo tileset shiftato (MICRO tileset, shift e epoche)",
+  "description": "fixture: E.D.'s case of 25 Oct 2026 — the RM container tls with no mesh, its Document D.1 in Epoch 1, its alternative a tileset whose coordinates are EPSG:6708 minus SHIFT6708",
+  "nodes": [
+   {
+    "id": "geo_tf",
+    "node_type": "geo_position",
+    "name": "geo_position",
+    "data": {
+     "rotation": 0.0,
+     "rotation_reference": "grid",
+     "shift_x": 0.0,
+     "shift_y": 0.0,
+     "shift_z": 0.0
+    }
+   },
+   {
+    "id": "EP1",
+    "node_type": "EpochNode",
+    "name": "Epoch 1",
+    "description": "",
+    "data": {
+     "color": "#FFFFFF"
+    }
+   },
+   {
+    "id": "US_01",
+    "node_type": "US",
+    "name": "US_01",
+    "description": "",
+    "data": {}
+   },
+   {
+    "id": "rmgroup_tls",
+    "node_type": "RepresentationModelNodeGroup",
+    "name": "tls",
+    "data": {}
+   },
+   {
+    "id": "RES_TF",
+    "node_type": "resource",
+    "name": "tileset_Basilica_TLS_UAV_ED",
+    "description": "",
+    "data": {
+     "checksum": "sha256:e39250ba26f265ed5d57c076a7073416b2accee740cf612d74b94604f594919b",
+     "checksum_of": "entry-point",
+     "packaging": "directory",
+     "residency": "resident",
+     "tier": "master",
+     "url": "/em/studio/testdata/tiles-frame/tileset.json",
+     "url_type": "3d_model",
+     "frame": {
+      "crs": "EPSG:6708",
+      "shift": [
+       291407.0,
+       4640813.0,
+       0.0
+      ],
+      "note": "SHIFT6708.txt of the study",
+      "source": "file"
+     }
+    }
+   },
+   {
+    "id": "D.1",
+    "node_type": "document",
+    "name": "D.1",
+    "description": "Master Document 'D.1'",
+    "data": {
+     "content_nature": "2d_object",
+     "em_canonical_document": true,
+     "role": "analytical"
+    }
+   }
+  ],
+  "edges": [
+   {
+    "id": "US_01__has_first_epoch__EP1",
+    "edge_type": "has_first_epoch",
+    "source": "US_01",
+    "target": "EP1"
+   },
+   {
+    "id": "rmgroup_tls_has_linked_resource_RES_TF",
+    "edge_type": "has_linked_resource",
+    "source": "rmgroup_tls",
+    "target": "RES_TF"
+   },
+   {
+    "id": "D.1_has_first_epoch_EP1",
+    "edge_type": "has_first_epoch",
+    "source": "D.1",
+    "target": "EP1"
+   },
+   {
+    "id": "D.1_has_representation_model_rmgroup_tls",
+    "edge_type": "has_representation_model",
+    "source": "D.1",
+    "target": "rmgroup_tls"
+   }
+  ]
+ }
+}

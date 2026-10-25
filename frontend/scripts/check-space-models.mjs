@@ -79,4 +79,20 @@ if (existsSync(F)) {
   const identities = sp.rms.filter((r) => { const xf = M.readTransform(byId.get(r.id)?.data); return !xf || M.isIdentity(xf); }).length;
   console.log(`  Templu Mare v3.2: buildSpace in ${ms.toFixed(0)} ms, ${identities}/99 with the identity`);
 } else console.log(`  (Templu Mare v3.2 not at ${F}: skipped)`);
+// 3 · MICRO tileset, shift e epoche (E.D. 25 Oct 2026) · E.D.'s case: the
+//     container tls with NO mesh, its Document D.1 in Epoch 1, its alternative a
+//     tileset with a frame (EPSG:6708 minus SHIFT6708) — before, its alternative
+//     took the epochs of the meshes it covers (none) and was nowhere
+{
+  const raw = JSON.parse(readFileSync(new URL("../testdata/tiles-frame.em.json", import.meta.url), "utf8"));
+  const sp = M.buildSpace(raw, { isUnit: (t) => t === "US" });
+  const tls = sp.rms.find((r) => r.id === "rmgroup_tls");
+  eq(tls?.epochs, ["EP1"], "the container without meshes: its alternative lies in its own epoch (its Document's), Epoch 1");
+  eq(tls?.altOf, "rmgroup_tls", "…drawn as the container's alternative");
+  ok(tls?.resource?.tiles === "directory", "…a tileset");
+  eq(sp.summary("EP1")?.rms.map((r) => r.id), ["rmgroup_tls"], "…Epoch 1's models (the table «Modelli e proxy» and the scene read them)");
+  eq(tls?.frame, { frame: { crs: "EPSG:6708", shift: [291407, 4640813, 0], note: "SHIFT6708.txt of the study", source: "file" }, from: "RES_TF" },
+    "…its frame, said by its resource");
+  eq(tls?.frameHome, "RES_TF", "…and a new frame is written on the tileset's asset");
+}
 console.log(`check-space-models: ${n} checks passed`);

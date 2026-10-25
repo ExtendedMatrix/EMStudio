@@ -31,6 +31,9 @@ export interface AlternativesRule {
   member_edge: string;
   epoch_edge: string;
   epoch_types: string[];
+  /** em_visual_rules 1.6.40 · the epochs a container states of ITSELF, read
+   *  when its members have none (a tileset of the whole survey, no mesh yet) */
+  container_epochs?: { wrapper_edge: string; wrapper_types: string[]; epoch_edges: string[] };
   file_types: string[];
   tileset: { media_types: string[]; packaging: string[]; url_patterns: string[] };
   reasons: string[];
@@ -139,6 +142,22 @@ export function membersOf(g: DocGraph, groupId: string, rule: AlternativesRule):
   return [...new Set(g.edges.filter((e) => alive(e as unknown as { data?: unknown }) && e.edge_type === rule.member_edge && e.target === groupId).map((e) => e.source))];
 }
 
+/** The epochs a container states of ITSELF — s3Dgraphy's
+ *  `container_own_epochs` (em_visual_rules 1.6.40, `alternatives.container_epochs`):
+ *  an epoch reaching it with `epoch_edge`, and the epochs of the Document that
+ *  wraps it (`wrapper_edge` from a `wrapper_types` node, `epoch_edges` from the
+ *  Document to the epoch) — EM Tools' «Epochs of this set». */
+function containerOwnEpochs(ix: ReturnType<typeof index>, gid: string, rule: AlternativesRule): string[] {
+  const isEpoch = (id: string) => rule.epoch_types.includes(String(ix.byId.get(id)?.node_type ?? ""));
+  const out = new Set(ix.inOf(gid, rule.epoch_edge).filter(isEpoch));
+  const ce = rule.container_epochs;
+  if (ce) {
+    const wrappers = ix.inOf(gid, ce.wrapper_edge).filter((w) => ce.wrapper_types.includes(String(ix.byId.get(w)?.node_type ?? "")));
+    for (const w of wrappers) for (const t of ce.epoch_edges) for (const ep of ix.outOf(w, t)) if (isEpoch(ep)) out.add(ep);
+  }
+  return sortU(out);
+}
+
 /**
  * For every hat (an RM or an RM container) the set of its alternative
  * resources, nested, with the diagnoses — s3Dgraphy's `alternative_sets`. A
@@ -184,11 +203,18 @@ export function alternativeSets(g: DocGraph, rule: AlternativesRule, bounds?: Ma
   const epochCache = new Map<string, string[]>();
   const epochs = (hat: string): string[] => {
     if (epochCache.has(hat)) return epochCache.get(hat)!;
-    const ids = hatKind(byId.get(hat), rule) === "container" ? deepMembers(hat) : [hat];
-    const res = sortU(ids.flatMap((i) => ix.inOf(i, rule.epoch_edge).filter((s) => rule.epoch_types.includes(String(byId.get(s)?.node_type ?? "")))));
+    const isContainer = hatKind(byId.get(hat), rule) === "container";
+    const ids = isContainer ? deepMembers(hat) : [hat];
+    let res = reaching(ids);
+    // em_visual_rules 1.6.40 (E.D. 25 Oct 2026) · members without epochs, or
+    // none: the container's own (s3Dgraphy `container_own_epochs`)
+    if (isContainer && !res.length) res = containerOwnEpochs(ix, hat, rule);
     epochCache.set(hat, res);
     return res;
   };
+  function reaching(ids: string[]): string[] {
+    return sortU(ids.flatMap((i) => ix.inOf(i, rule.epoch_edge).filter((s) => rule.epoch_types.includes(String(byId.get(s)?.node_type ?? "")))));
+  }
   const warnings: AltWarning[] = [];
 
   const build = (hat: string, parent: string | null, seen: Set<string>): AltSet => {
@@ -336,6 +362,13 @@ export function chooseAlternative(s: AltSet, use: string | string[], preferLevel
   const members = (note = ""): AltChoice => ({ entry: null, reason: "none", use: null, note, level: "members", hat: s.hat,
     members: Object.fromEntries(s.members.map((m) => [m.hat, chooseAlternative(m, uses, preferLevel, null, pick)])) });
   const own = s.alternatives;
+  // em_visual_rules 1.6.40 (E.D. 25 Oct 2026) · an alternative and no member:
+  // the alternative is all there is to light, whatever the uses
+  if (own.length && !s.members.length && force !== "members") {
+    const ch = chooseVersion(pick(own), uses, preferLevel)!;
+    return { ...ch, note: ch.note || (force === "container" ? "" : "no members: the container's alternative"),
+             level: "container", hat: s.hat, members: null };
+  }
   if (force === "container" && own.length) {
     const ch = chooseVersion(pick(own), uses, preferLevel)!;
     return { ...ch, level: "container", hat: s.hat, members: null };

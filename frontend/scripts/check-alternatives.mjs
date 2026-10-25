@@ -37,6 +37,7 @@ for (const c of table.cases) {
   eq(sets, c.expect.sets, `${c.name}: the sets`);
   eq(res.warnings.map((w) => w.code).sort(), c.expect.warnings, `${c.name}: the warnings`);
   eq(res.counts, c.expect.counts, `${c.name}: the counts`);
+  for (const [hat, eps] of Object.entries(c.expect.epochs ?? {})) eq(A.findSet(res, hat).epochs, eps, `${c.name}: the epochs of ${hat}`);
   for (const ch of c.choices) {
     const got = A.chooseAlternative(A.findSet(res, ch.hat), ch.use, null, ch.force ?? null);
     const want = { level: got.level, id: got.entry ? got.entry.id : null, use: got.use };

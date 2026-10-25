@@ -5,7 +5,7 @@
 // place; nothing here executes at import time, so bundling into the
 // browser single-file build is harmless.
 import { open, save } from "@tauri-apps/plugin-dialog";
-import { exists, mkdir, readFile, readTextFile, writeFile, writeTextFile } from "@tauri-apps/plugin-fs";
+import { exists, mkdir, readFile, readTextFile, stat, writeFile, writeTextFile } from "@tauri-apps/plugin-fs";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { invoke } from "@tauri-apps/api/core";
 import { basename, dirname, toNative, toPosix } from "./paths";
@@ -368,6 +368,44 @@ export async function closeDetachedWindow(label: string): Promise<void> {
     await invoke<boolean>("detached_close", { label });
   } catch {
     // an older shell
+  }
+}
+
+/**
+ * MICRO-TILESET-SHIFT-E-EPOCHE p.3 · the system's file drops. The shell takes
+ * them (`dragDropEnabled`, tauri.conf.json) and says them to the webview the
+ * pointer is over: `enter` (the paths), `over` (where), `drop` (the paths and
+ * where), `leave`. Positions are PHYSICAL pixels from the webview's top-left;
+ * paths come back `/`-shaped. A no-op in a browser (its HTML5 drop stays).
+ */
+export type DesktopDragEvent =
+  | { type: "enter" | "drop"; paths: string[]; position: { x: number; y: number } }
+  | { type: "over"; position: { x: number; y: number } }
+  | { type: "leave" };
+export async function onDesktopDragDrop(handler: (e: DesktopDragEvent) => void): Promise<boolean> {
+  if (!isTauri()) return false;
+  try {
+    const { getCurrentWebview } = await import("@tauri-apps/api/webview");
+    await getCurrentWebview().onDragDropEvent((ev) => {
+      const p = ev.payload as { type: string; paths?: string[]; position?: { x: number; y: number } };
+      const position = { x: Number(p.position?.x), y: Number(p.position?.y) };
+      if (p.type === "enter" || p.type === "drop") handler({ type: p.type, paths: (p.paths ?? []).map(toPosix), position });
+      else if (p.type === "over") handler({ type: "over", position });
+      else handler({ type: "leave" });
+    });
+    return true;
+  } catch {
+    return false;   // an older shell, or no event API
+  }
+}
+/** …and whether each dropped path is a folder (plugin-fs `stat`, allowed on
+ *  every path in capabilities/default.json); null where the disk would not say. */
+export async function pathIsDir(path: string): Promise<boolean | null> {
+  if (!isTauri()) return null;
+  try {
+    return (await stat(toNative(path))).isDirectory;
+  } catch {
+    return null;
   }
 }
 

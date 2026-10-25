@@ -1,0 +1,48 @@
+{
+ "asset": {
+  "version": "1.1",
+  "generator": "EMStudio fixture (MICRO tileset, shift e epoche): the root of tiles-prova under the Basilica Iulia's RealityScan transform \u2014 shifted EPSG:6708 coordinates written as geocentric, on the equator"
+ },
+ "geometricError": 4,
+ "root": {
+  "boundingVolume": {
+   "box": [
+    2,
+    2,
+    0.5,
+    2,
+    0,
+    0,
+    0,
+    2,
+    0,
+    0,
+    0,
+    0.5
+   ]
+  },
+  "geometricError": 4,
+  "refine": "REPLACE",
+  "transform": [
+   -0.18243234,
+   0.98321841,
+   0.0,
+   0.0,
+   -1.97e-06,
+   -3.6e-07,
+   1.0,
+   0.0,
+   0.98321841,
+   0.18243234,
+   2e-06,
+   0.0,
+   6271099.97842686,
+   1163587.23952703,
+   12.30475555,
+   1.0
+  ],
+  "content": {
+   "uri": "../tiles-prova/tiles/root.glb"
+  }
+ }
+}

@@ -1567,7 +1567,10 @@ def _load_s3dgraphy(s3dgraphy_src: "pathlib.Path | None"):
 #: shift) and /geo/convert-shift — MICRO-GEOREF-GRAFO.
 #: 39 = /fs/pack-3tz takes ``root``: the RealityScan form, X.json beside X/
 #: packed as one tree — MICRO-TILESET-CARTELLA.
-BRIDGE_LEVEL = 39   # 30 also = /validate
+#: 40 = /geo/tileset-frame: a tileset written with shifted coordinates declared
+#: in a CRS, relocated by s3Dgraphy's ``geometry.frame.relocate_transform``
+#: (the file is never rewritten) — MICRO tileset, shift e epoche.
+BRIDGE_LEVEL = 40   # 30 also = /validate
 
 
 #: the files of a tileset a server may send gzipped (MICRO-TILESET-CARTELLA)
@@ -4563,6 +4566,17 @@ def make_handler(api):
                 elif route == "/geo/frame":
                     self._json(G.site_frame(int(body["epsg"]), float(body["x"]), float(body["y"]),
                                             float(body.get("z") or 0), float(body.get("rotation") or 0)))
+                elif route == "/geo/tileset-frame":
+                    # MICRO tileset, shift e epoche (E.D. 25 Oct 2026) · «the
+                    # coordinates of this file are CRS X minus shift S»: the
+                    # root.transform read back to the shifted coordinates by the
+                    # inverse of the same projection, the shift added, the true
+                    # transform fitted (to ECEF, or to a study's CRS − shift)
+                    from s3dgraphy.geometry.frame import relocate_transform
+                    out = relocate_transform(body.get("transform"), body.get("frame") or {},
+                                             bounding_volume=body.get("bounding_volume"),
+                                             target=body.get("target") or None)
+                    self._json(out, 200 if out.get("ok") else 422)
                 elif route == "/geo/convert-shift":
                     # MICRO-GEOREF-GRAFO · a shift to another CRS (the same grid: the same numbers)
                     out = G.convert_point(int(body["from"]), int(body["to"]), float(body["x"]), float(body["y"]))
