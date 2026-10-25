@@ -4988,6 +4988,57 @@ test("X1.blocked", "X1 · in Standalone, Inspector di un'unità: «Model the pro
       && r.inProxy && r.fix === "Connections…" && !r.connectBtn && pop && !errors.length, detail: { r, pop, errors } };
 });
 
+test("IS1.sections", "MICRO-INSPECTOR-SEZIONI · Inspector di USM101 (catena): ogni azione sotto la sua sezione — «Continuity» tiene solo «End in…»; «Compact»/«Dissolve» sotto «Paradata group» (che nomina PD_USM101 e i suoi membri); «Model the proxy in Blender» sotto «Proxy»; nei metadati propagativi inizio e fine con la provenienza di s3Dgraphy, e un clic sulla provenienza dell'epoca porta a Medioevo", async () => {
+  const { p, ctx, errors } = await open({ doc: "catena", locale: "en" });
+  await pick(p, "USM101");
+  // the time rows wait for the bridge's answer
+  await p.waitForFunction(() => document.querySelector('.insp-time [data-time="end"]') || document.querySelector('.insp-time [data-time="none"]:not(:empty)') && !/computing/.test(document.querySelector(".insp-time").textContent), null, { timeout: 15000 }).catch(() => {});
+  await p.waitForTimeout(300);
+  const r = await p.evaluate(() => {
+    const root = document.querySelector("#inspector") ?? document.body;
+    const heads = [...root.querySelectorAll("h3.insp-sect")];
+    const sectOf = (b) => {
+      let h = null;
+      for (const x of heads) if (x.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING) h = x;
+      return h?.textContent.replace(/^[▾▸]/, "").trim() ?? null;
+    };
+    const btn = (re) => [...root.querySelectorAll("button")].find((x) => re.test(x.textContent));
+    const under = (re) => { const b = btn(re); return b ? sectOf(b) : null; };
+    const contHead = heads.find((h) => /Continuity$/.test(h.textContent.trim()));
+    const contButtons = [...root.querySelectorAll("button")].filter((b) => !b.closest("h3") && sectOf(b) === "Continuity").map((b) => b.textContent.trim());
+    const pg = document.querySelector(".insp-pdgroup-state")?.textContent ?? null;
+    const time = [...document.querySelectorAll(".insp-time .insp-prop-row")].map((x) => ({ side: x.dataset.time, rule: x.dataset.rule,
+      value: x.querySelector(".insp-prop-value")?.textContent, from: x.querySelector(".insp-prop-source")?.textContent, go: x.querySelector("[data-go]")?.dataset.go ?? null }));
+    return { cont: !!contHead, contButtons, dissolve: under(/^Dissolve the group$/), model: under(/Model the proxy in Blender/),
+      pg, time, timeSect: (() => { const b = document.querySelector(".insp-time"); return b ? sectOf(b) : null; })() };
+  });
+  // a unit whose continuity is offered: its section holds that alone
+  await pick(p, "US102");
+  const cont2 = await p.evaluate(() => {
+    const root = document.querySelector("#inspector") ?? document.body;
+    const heads = [...root.querySelectorAll("h3.insp-sect")];
+    const i = heads.findIndex((h) => /Continuity$/.test(h.textContent.trim()));
+    if (i < 0) return null;
+    const next = heads[i + 1] ?? null;
+    return [...root.querySelectorAll("button")].filter((b) => !b.closest("h3") && (heads[i].compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING)
+      && (!next || (b.compareDocumentPosition(next) & Node.DOCUMENT_POSITION_FOLLOWING))).map((b) => b.textContent.trim());
+  });
+  await pick(p, "USM101"); await p.waitForTimeout(300);
+  const endRow = r.time.find((x) => x.side === "end");
+  let jumped = null;
+  if (endRow?.go) {
+    await p.click('.insp-time [data-time="end"] [data-go]'); await p.waitForTimeout(400);
+    jumped = await p.evaluate(() => window.__EM_DRAG__.nodeName?.(window.__EM_DRAG__.selected?.()?.[0] ?? "") ?? document.querySelector("#inspector .insp-name, #inspector input")?.value ?? null);
+  }
+  await ctx.close();
+  // «Continuity» holds only the unit's life in time
+  return { pass: r.cont && r.contButtons.length >= 1 && r.contButtons.every((x) => /End in|Survives until/.test(x))
+      && !!cont2 && cont2.length >= 1 && cont2.every((x) => /End in|Survives until/.test(x))
+      && r.dissolve === "Paradata group" && r.model === "Proxy" && /PD_USM101/.test(r.pg ?? "") && /member/.test(r.pg ?? "")
+      && /propagative/i.test(r.timeSect ?? "") && endRow?.rule === "epoch" && /Medioevo/.test(endRow?.from ?? "") && endRow?.value === "1300"
+      && jumped === "Medioevo" && !errors.length, detail: { r, cont2, jumped, errors } };
+});
+
 test("IS2.blender", "MICRO-INSPECTOR-SEZIONI p.2 · «Model the proxy in Blender» nei suoi stati, con un Blender simulato (EM Tools risponde come `commands.create_proxy_for_unit`): Standalone → spento, «Not connected…»; Sidecar senza Blender → spento, «Waiting for Blender…»; Blender senza consenso → spento, «does not accept commands»; con consenso → acceso, il clic manda il comando e il delta (proprietà geometry) entra nel grafo con un annulla", async () => {
   const port = 8897;
   let blender = false, consent = false, sock = null;

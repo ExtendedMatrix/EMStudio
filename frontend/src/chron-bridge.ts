@@ -22,7 +22,7 @@
  */
 import type { EmDocument } from "./types";
 
-export type ChronRule = "written" | "epoch" | "contained" | "tpq" | "taq";
+export type ChronRule = "written" | "epoch" | "sub_epoch" | "contained" | "tpq" | "taq";
 
 /** One node's entry of `Graph.chronology()` (s3Dgraphy). */
 export interface ChronEntry {
@@ -61,7 +61,9 @@ const DEBOUNCE_MS = 500;
 const RETRY_MS = 5000;
 
 let resolveBridge: () => Promise<string> = async () => "http://localhost:8765";
-let onUpdate: () => void = () => {};
+/** who redraws when an answer lands: the Chronology view, and since
+ *  MICRO-INSPECTOR-SEZIONI the Inspector's propagative metadata */
+const listeners: Array<() => void> = [];
 
 let state: ChronState = { status: "idle", map: {}, warnings: [], stale: false };
 let lastSig: string | null = null;
@@ -75,7 +77,7 @@ export function setChronologyBridgeResolver(fn: () => Promise<string>): void {
 
 /** called when an answer lands, so the view can redraw itself */
 export function onChronologyUpdate(fn: () => void): void {
-  onUpdate = fn;
+  listeners.push(fn);
 }
 
 /**
@@ -157,7 +159,7 @@ async function ask(body: string): Promise<void> {
   // an answer to an older request than the latest one is dropped
   if (mine !== seq) return;
   state = next;
-  onUpdate();
+  for (const fn of listeners) fn();
 }
 
 /** test/reset hook: forget everything (a new session, a closed document) */

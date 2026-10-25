@@ -20,6 +20,7 @@ import { linksOfGraph } from "./links";
 import { chainCard, isChainNode } from "./hdto-card";
 import { naturalFields, qualeOf, TRANSLATION_TYPE } from "./translation";
 import { commitField, confirmOnMultiEnter, multiHint, multiKeyOf, type MultiScope } from "./multi-edit";
+import type { ChronEntry, ChronStatus } from "./chron-bridge";
 
 export interface InspectorCallbacks {
   onJump: (nodeId: string) => void;
@@ -92,6 +93,10 @@ export interface InspectorCallbacks {
    *  MICRO-INSPECTOR-SEZIONI the way to the connection panel (`anchor` = the
    *  link pressed) */
   commandsFix?: () => { label: string; title?: string; run: (anchor?: HTMLElement) => void } | null;
+  /** MICRO-INSPECTOR-SEZIONI p.3 · the node's start and end as s3Dgraphy's
+   *  `Graph.chronology()` computes them (asked of the bridge, `chron-bridge`):
+   *  the answer's state and this node's entry. Absent = no rows. */
+  chronologyOf?: (nodeId: string) => { status: ChronStatus; entry: ChronEntry | null; stale: boolean };
   /** P4.1b · empty ONE field, through the act that leaves its tombstone. */
   onClearField?: (nodeId: string, field: string) => void;
   /** DOCUMENTATION · put this asset on the shelf — the study's explicit
@@ -269,6 +274,84 @@ function renderEditorialStamps(root: HTMLElement, node: EmNode): void {
   const box = el("div", "insp-stamps");
   for (const r of rows) box.appendChild(r);
   root.appendChild(box);
+}
+
+/** the time rows on screen, so an answer of the bridge repaints THEM and not
+ *  the whole Inspector (a field being typed in keeps its focus) */
+const timeBoxes = new Set<{ box: HTMLElement; paint: () => void }>();
+/** MICRO-INSPECTOR-SEZIONI p.3 · the chronology answered: the time rows again */
+export function repaintTimeRows(): void {
+  for (const x of [...timeBoxes]) {
+    if (!x.box.isConnected) { timeBoxes.delete(x); continue; }
+    x.box.textContent = "";
+    x.paint();
+  }
+}
+
+/**
+ * MICRO-INSPECTOR-SEZIONI p.3 · the node's TIME among its propagative
+ * metadata: start and end as `Graph.chronology()` gives them, each with where
+ * it comes from — written on the node, inherited from an epoch (or from the
+ * parent of its sub-epoch), or computed from the relations (what the unit
+ * contains, a TPQ/TAQ through `is_after`…). Nothing is computed here: the rule,
+ * the source and the relation are s3Dgraphy's answer. A click on the
+ * provenance goes to the node that gives it.
+ */
+function renderTimeRows(host: HTMLElement, store: DocumentStore,
+                        c: { status: ChronStatus; entry: ChronEntry | null; stale: boolean },
+                        onJump: (id: string) => void): void {
+  const name = (id: string | null | undefined): string => (id ? String(store.node(id)?.name || id) : "?");
+  const note = (text: string): void => {
+    const row = el("div", "insp-prop-row insp-prop-time insp-prop-inherited");
+    row.dataset.time = "none";
+    row.append(el("span", "insp-prop-rule", t("insp.timeRule")), el("span", "insp-prop-value insp-dim", text));
+    host.appendChild(row);
+  };
+  if (c.status === "idle" || c.status === "loading") { note(t("insp.time.loading")); return; }
+  if (c.status === "off") { note(t("insp.time.off")); return; }
+  if (c.status === "error") { note(t("insp.time.error")); return; }
+  const e = c.entry;
+  if (!e || (e.start == null && e.end == null)) { note(t("insp.time.noBound")); return; }
+  for (const side of ["start", "end"] as const) {
+    const v = side === "start" ? e.start : e.end;
+    if (v == null) continue;
+    const rule = side === "start" ? e.start_rule : e.end_rule;
+    const src = side === "start" ? e.start_source : e.end_source;
+    const rel = side === "start" ? e.start_relation : e.end_relation;
+    let text: string;
+    switch (rule) {
+      case "written": text = t("insp.time.written"); break;
+      case "epoch": text = t("insp.time.epoch", { epoch: name(src) }); break;
+      case "sub_epoch": text = t("insp.time.subEpoch", { epoch: name(src) }); break;
+      case "contained":
+        text = t("insp.time.contained", { node: name(e.contained?.source ?? src) })
+          + (e.contained?.original ? ` ← ${name(e.contained.original)}` : "");
+        break;
+      case "tpq": case "taq":
+        text = t("insp.time.bound", { rule: t(`table.rule.${rule}`), rel: rel ?? "", node: name(src) });
+        break;
+      default: text = `${rule ?? "?"} · ${name(src)}`;
+    }
+    const own = rule === "written";
+    const row = el("div", `insp-prop-row insp-prop-time${own ? " insp-prop-own" : " insp-prop-inherited"}`);
+    row.dataset.time = side;
+    row.dataset.rule = String(rule ?? "");
+    row.append(el("span", "insp-prop-rule", t(side === "start" ? "insp.timeStart" : "insp.timeEnd")),
+               el("span", "insp-prop-value", String(v)));
+    const target = rule === "contained" ? (e.contained?.source ?? src) : src;
+    const from = target && store.node(target)
+      ? el("button", "insp-prop-source insp-link", text) as HTMLButtonElement
+      : el("span", "insp-prop-source", text);
+    from.title = t("insp.time.title", { rule: rule ?? "?", rel: rel ?? "—", node: name(target) })
+      + (c.stale ? ` · ${t("table.chronStale")}` : "");
+    if (from instanceof HTMLButtonElement) {
+      from.type = "button";
+      from.dataset.go = target!;
+      from.addEventListener("click", () => onJump(target!));
+    }
+    row.appendChild(from);
+    host.appendChild(row);
+  }
 }
 
 export function renderInspector(
@@ -1273,7 +1356,8 @@ export function renderInspector(
         own: eff.explicit,
       });
     }
-    if (rows.length) {
+    const chron = cb.chronologyOf?.(nodeId) ?? null;
+    if (rows.length || chron) {
       // MICRO-PULIZIA p.6 · a section like the others (its triangle is theirs)
       root.appendChild(el("h3", "insp-sect", t("insp.propagative")));
       const details = el("div", "insp-propagative");
@@ -1288,6 +1372,14 @@ export function renderInspector(
                            : t("insp.inheritedTitle", { src: r.src });
         row.appendChild(from);
         details.appendChild(row);
+      }
+      if (chron) {
+        const box = el("div", "insp-time");
+        box.dataset.node = nodeId;
+        details.appendChild(box);
+        renderTimeRows(box, store, chron, cb.onJump);
+        const get = cb.chronologyOf!;
+        timeBoxes.add({ box, paint: () => renderTimeRows(box, store, get(nodeId), cb.onJump) });
       }
       root.appendChild(details);
     }

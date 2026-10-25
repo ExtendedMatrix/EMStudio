@@ -3,7 +3,7 @@ import { hdtoDropped, shownCode, studyCode, withCode } from "./hdto";
 import { linksOf, resolveAddress, type GraphDocs } from "./links";
 import { applyFolding, buildMembership, MEMBERSHIP_EDGES } from "./folding";
 import { geoOf, georeferenceScene, reprojectPoint, setBridgeResolver } from "./geo";
-import { setChronologyBridgeResolver } from "./chron-bridge";
+import { chronologyFor, onChronologyUpdate, setChronologyBridgeResolver } from "./chron-bridge";
 import type { PlacedScene } from "./geo";
 import {
   buildContainer,
@@ -87,7 +87,7 @@ import {
   type IdentityProvider,
   type SignatureAuth,
 } from "./identity";
-import { renderInspector } from "./inspector";
+import { renderInspector, repaintTimeRows } from "./inspector";
 import { searchTwins } from "./twins";
 import {
   mountSurface,
@@ -3948,6 +3948,11 @@ function renderInspectorInto(host: HTMLElement): void {
       commandsFix: () => (sync.connected ? null
         : { label: t("cmd.openConnections"), title: t("cmd.openConnectionsTitle"),
             run: (anchor) => toggleConnectionPanel(anchor ?? null) }),
+      chronologyOf: (id) => {
+        const st = storeOfNode(id) ?? store!;
+        const cs = chronologyFor(st.doc, () => st.toJSON());
+        return { status: cs.status, entry: cs.map[id] ?? null, stale: cs.stale };
+      },
       isResourceOpen: (id) => openResourceFiles.has(id),
       onToggleResourceFiles: (id) => toggleResourceFiles(id),
       onReplaceFile: (resId, fileId) => { void replaceFileFlow(resId, fileId); },
@@ -13519,6 +13524,8 @@ setTreeBridgeResolver(bridgeUrl);
 // MICRO-cronologia · the Chronology view asks s3Dgraphy for the propagated
 // chronology through the same bridge, by the same rule.
 setChronologyBridgeResolver(bridgeUrl);
+// MICRO-INSPECTOR-SEZIONI p.3 · an answer repaints the time rows of the Inspector
+onChronologyUpdate(() => repaintTimeRows());
 // DP-79 P1 · export the NARRATIVE — LaTeX, Word, HTML.
 //
 // Same shape as the Turtle button below and for the same reason (invariant 2):
