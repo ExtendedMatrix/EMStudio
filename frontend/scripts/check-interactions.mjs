@@ -4988,6 +4988,72 @@ test("X1.blocked", "X1 · in Standalone, Inspector di un'unità: «Model the pro
       && r.inProxy && r.fix === "Connections…" && !r.connectBtn && pop && !errors.length, detail: { r, pop, errors } };
 });
 
+test("IS2.blender", "MICRO-INSPECTOR-SEZIONI p.2 · «Model the proxy in Blender» nei suoi stati, con un Blender simulato (EM Tools risponde come `commands.create_proxy_for_unit`): Standalone → spento, «Not connected…»; Sidecar senza Blender → spento, «Waiting for Blender…»; Blender senza consenso → spento, «does not accept commands»; con consenso → acceso, il clic manda il comando e il delta (proprietà geometry) entra nel grafo con un annulla", async () => {
+  const port = 8897;
+  let blender = false, consent = false, sock = null;
+  const commands = [];
+  const { p, ctx, errors } = await open({ doc: "catena", locale: "en",
+    init: { "emstudio.settings": JSON.stringify({ sync: { protocol: "ws", host: "localhost", port } }) },
+    wsRoute: { pattern: new RegExp(`localhost:${port}`), handler: (ws) => {
+      if (!blender) { ws.close(); return; }
+      sock = ws;
+      const host = () => ({ tool: "Blender", accepts_commands: consent });
+      ws.onMessage((m) => {
+        const msg = JSON.parse(String(m));
+        if (msg.type === "request_snapshot") ws.send(JSON.stringify({ v: 2, type: "snapshot_unavailable", source: "blender", payload: { reason: "no_graph", host: host() } }));
+        if (msg.type === "command") {
+          commands.push(msg.payload);
+          ws.send(JSON.stringify({ v: 2, type: "command_result", source: "blender", payload: { cmd_id: msg.payload.cmd_id, ok: true,
+            delta: { nodes: [{ id: "PX_geo", node_type: "property", name: "geometry", data: {} }],
+                     edges: [{ id: "PX_e", edge_type: "has_property", source: msg.payload.target, target: "PX_geo" }] },
+            info: { proxy_object: "USM101", reused_object: false } } }));
+        }
+      });
+      ws.send(JSON.stringify({ v: 2, type: "host_info", source: "blender", payload: host() }));
+    } } });
+  // read as drawn, WITHOUT picking the unit again: the Inspector follows the
+  // connection by itself
+  const state = async () => {
+    await p.waitForTimeout(300);
+    return p.evaluate(() => {
+      const b = document.querySelector('.insp-proxy [data-cmd="create_proxy_for_unit"]');
+      return b && { disabled: b.disabled, why: document.querySelector(".insp-proxy .insp-blocked span")?.textContent ?? null,
+        fix: document.querySelector(".insp-proxy .insp-blocked-fix")?.textContent ?? null, title: b.title };
+    });
+  };
+  await pick(p, "USM101");
+  const standalone = await state();
+  await p.click("#mode-indicator");
+  await p.click('#conn-pop .conn-mode[data-mode="sidecar"]');
+  await p.waitForTimeout(1500);
+  const waiting = await state();
+  blender = true;
+  await p.waitForFunction(() => document.body.classList.contains("sync-active"), null, { timeout: 9000 }).catch(() => {});
+  await p.waitForTimeout(500);
+  const noConsent = await state();
+  consent = true;
+  sock?.send(JSON.stringify({ v: 2, type: "host_info", source: "blender", payload: { tool: "Blender", accepts_commands: true } }));
+  await p.waitForTimeout(400);
+  const ready = await state();
+  const graphs = () => p.evaluate(() => { const d = JSON.parse(window.__EM_DRAG__.docJson());
+    const gs = d.graphs ? Object.entries(d.graphs).filter(([k]) => k !== "shelf").map(([, g]) => g) : [d.graph];
+    return { nodes: gs.reduce((a, g) => a + g.nodes.length, 0), px: gs.some((g) => g.edges.some((e) => e.id === "PX_e")) }; });
+  const g0 = await graphs(), n0 = g0.nodes;
+  if (ready && !ready.disabled) await p.click('.insp-proxy [data-cmd="create_proxy_for_unit"]');
+  await p.waitForTimeout(800);
+  const g1 = await graphs(), n1 = g1.nodes, has = g1.px;
+  await p.evaluate(() => window.__EM_DRAG__.undo?.());
+  await p.waitForTimeout(300);
+  const undone = !(await graphs()).px;
+  await ctx.close();
+  return { pass: standalone?.disabled && /Not connected to Blender/.test(standalone.why ?? "") && standalone.fix === "Connections…"
+      && waiting?.disabled && /Waiting for Blender/.test(waiting.why ?? "")
+      && noConsent?.disabled && /does not accept commands/.test(noConsent.why ?? "")
+      && ready && !ready.disabled && /3D cursor/.test(ready.title) && commands.length === 1 && commands[0].verb === "create_proxy_for_unit"
+      && n1 === n0 + 1 && has && undone && !errors.length,
+    detail: { standalone, waiting, noConsent, ready, commands, n0, n1, has, undone, errors } };
+});
+
 const TEMPIO = benchFile("TEMPIO_FILE");
 test("TI3.ids", "T-I3 · Tempio (copia), Inspector di USM01b: con «Show node UUIDs» spento nessun graph_id né original_id, la grafica yEd dietro «Technical details» chiuso, niente label né stratigraphic_kind doppi; acceso, gli id ci sono (dentro «Technical details»)", async () => {
   if (!existsSync(TEMPIO)) return { pass: false, detail: { missing: TEMPIO } };

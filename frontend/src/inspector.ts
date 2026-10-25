@@ -896,7 +896,7 @@ export function renderInspector(
     const b = document.createElement("button");
     b.className = "insp-btn" + (blocked ? " insp-btn-off" : "");
     b.textContent = verb === "create_proxy_for_unit" ? t("cmd.modelProxy") : t("cmd.importGeometry");
-    b.title = blocked ? blocked : t("cmd.hint");
+    b.title = blocked ? blocked : t(verb === "create_proxy_for_unit" ? "cmd.modelProxyHint" : "cmd.hint");
     b.disabled = !!blocked;
     b.dataset.cmd = verb;
     b.setAttribute("aria-disabled", String(!!blocked));

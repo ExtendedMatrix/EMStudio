@@ -9414,7 +9414,9 @@ function connectToHub(url: string, room: string, token: string | null): void {
 
 /** Why a command cannot be sent right now, or null when it can. */
 function commandsBlockedReason(): string | null {
-  if (!sync.connected) return t("cmd.blocked.disconnected");
+  // MICRO-INSPECTOR-SEZIONI p.2 · «Sidecar» chosen and Blender not there yet is
+  // its own state: said, so the panel the link opens is not a surprise
+  if (!sync.connected) return sync.retrying && !sync.room ? t("cmd.blocked.waiting") : t("cmd.blocked.disconnected");
   if (!hostInfo.accepts_commands) return t("cmd.blocked.noConsent");
   return null;
 }
@@ -14094,12 +14096,19 @@ btnSync.addEventListener("click", () => {
       info.textContent = t("sync.waitingHost");
       if (attempt === 1) logInfo(t("sync.waitingHost"));
       renderStatusLine();
+      // MICRO-INSPECTOR-SEZIONI p.2 · «Model the proxy in Blender» says «waiting
+      // for Blender», not «not connected», from the first retry
+      if (attempt === 1) refreshInspector();
     },
     onStatus: (state) => {
       if (state === "open") {
         if (sidecarWaiting) logInfo(t("sync.hostBack"));
         sidecarWaiting = false;
       }
+      // MICRO-INSPECTOR-SEZIONI p.2 · the Inspector's blocked command reads the
+      // connection: redrawn when it changes (it kept «Not connected» until the
+      // unit was picked again)
+      refreshInspector();
       btnSync.classList.toggle("active", state === "open");
       // clear, high-visibility signal that we are in live-sync mode
       document.body.classList.toggle("sync-active", state === "open");
