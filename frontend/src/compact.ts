@@ -164,10 +164,35 @@ export function compactableUnits(doc: EmDocument): string[] {
   const out: string[] = [];
   for (const [id, n] of ix.node) {
     if (!isStratigraphicType(n.node_type)) continue;
-    if (outOf(ix, id, HAS_PROPERTY).some((e) => !isInherited(e) && cls(ix, e.target) === "PropertyNode"))
-      out.push(id);
+    if (hasLooseProperties(ix, id)) out.push(id);
   }
   return out;
+}
+
+/** MICRO-INSPECTOR-SEZIONI p.1 · what «Compact» would move for this unit: a
+ *  direct property of its own (one declared owner) outside its group, or an
+ *  element of its chain outside it. Until 25 Oct every unit with a direct
+ *  property counted — measured on the GT16, SU020 already compacted was offered
+ *  «Compact the properties», which moved 0 properties and left an undo step. */
+function hasLooseProperties(ix: Index, unitId: string): boolean {
+  const g = groupOf(ix, unitId);
+  const outside = (id: string): boolean => !g || !groupsHolding(ix, id).includes(g);
+  const chainOutside = (id: string, seen: Set<string>): boolean => {
+    if (seen.has(id)) return false;
+    seen.add(id);
+    const kind = cls(ix, id);
+    if (kind !== "CombinerNode" && kind !== "ExtractorNode") return false;
+    if (outside(id)) return true;
+    return kind === "CombinerNode" && outOf(ix, id, COMBINES).some((e) => chainOutside(e.target, seen));
+  };
+  for (const e of outOf(ix, unitId, HAS_PROPERTY)) {
+    if (isInherited(e) || cls(ix, e.target) !== "PropertyNode") continue;
+    if (declaredOwners(ix, e.target).length > 1) continue;
+    if (outside(e.target)) return true;
+    const seen = new Set<string>();
+    if (outOf(ix, e.target, HAS_DATA_PROVENANCE).some((x) => chainOutside(x.target, seen))) return true;
+  }
+  return false;
 }
 
 // ── writing ──────────────────────────────────────────────────────────────────

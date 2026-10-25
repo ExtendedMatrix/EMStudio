@@ -34,7 +34,7 @@ export interface InspectorCallbacks {
   otherStudyCodes?: () => string[];
   /** PROPRIETA · the verbs of a unit on its paradata group («Compact the
    *  properties», «Dissolve the group») that apply to it now */
-  propertyGroupActions?: (nodeId: string) => Array<{ cmd: string; label: string; run: () => void }>;
+  propertyGroupActions?: (nodeId: string) => Array<{ cmd: string; label: string; title?: string; run: () => void }>;
   /** MICRO-GLIFI-OVERLAY-CONTINUITA p.3 · «End in…» / «Survives until…» of a
    *  unit, and what its continuity says now */
   continuity?: (nodeId: string) => { cmd: string; label: string; state: string | null; run: (anchor?: HTMLElement) => void } | null;
@@ -88,8 +88,10 @@ export interface InspectorCallbacks {
   openWith?: (nodeId: string) => { key: string; label: string; ok: boolean; why?: string; run: () => void }[];
   /** MICRO-PULIZIA p.6 · a command that cannot run here was pressed: say why */
   onBlocked?: (why: string) => void;
-  /** X1 · the gesture that lifts the block, when there is one here (connect) */
-  commandsFix?: () => { label: string; run: () => void } | null;
+  /** X1 · the gesture that lifts the block, when there is one here: since
+   *  MICRO-INSPECTOR-SEZIONI the way to the connection panel (`anchor` = the
+   *  link pressed) */
+  commandsFix?: () => { label: string; title?: string; run: (anchor?: HTMLElement) => void } | null;
   /** P4.1b · empty ONE field, through the act that leaves its tombstone. */
   onClearField?: (nodeId: string, field: string) => void;
   /** DOCUMENTATION · put this asset on the shelf — the study's explicit
@@ -841,60 +843,86 @@ export function renderInspector(
     if (sec) root.appendChild(sec);
   }
 
-  // PROPRIETA · a unit's properties into its paradata group, and back
+  // PROPRIETA · a unit's properties into its paradata group, and back.
+  // MICRO-INSPECTOR-SEZIONI p.1 · a section of their own: the two verbs are
+  // about the unit's paradata group, and drawn without a title they read as
+  // part of «Continuity» (E.D., 25 Oct, SU020). The Inspector said nothing else
+  // about the group, so the section opens with it: its name (a click enters the
+  // drawing at it) and what it holds.
   if (nodeId && cb.propertyGroupActions && isStratigraphicType(node.node_type)) {
     const acts = cb.propertyGroupActions(nodeId);
-    if (acts.length) {
-      const bar = el("div", "insp-actions");
-      for (const a of acts) {
-        const b = el("button", "insp-btn", a.label) as HTMLButtonElement;
-        b.dataset.cmd = a.cmd;
-        b.addEventListener("click", () => a.run());
-        bar.appendChild(b);
+    const gid = store.paradataGroupOf(nodeId);
+    if (acts.length || gid) {
+      const panel = el("div", "insp-pdgroup");
+      panel.appendChild(el("h3", "insp-sect", t("pg.sect")));
+      const line = el("div", "insp-pdgroup-state");
+      if (gid) {
+        const n = store.doc.graph.edges.filter((e) => e.edge_type === "is_in_paradata_nodegroup" && e.target === gid).length;
+        const go = el("button", "insp-link", String(store.node(gid)?.name ?? gid)) as HTMLButtonElement;
+        go.type = "button";
+        go.dataset.go = gid;
+        go.title = t("pg.goTitle");
+        go.addEventListener("click", () => cb.onJump(gid));
+        line.append(go, document.createTextNode(` · ${t(n === 1 ? "pg.memberOne" : "pg.members", { n: String(n) })}`));
+      } else {
+        line.textContent = t("pg.none");
       }
-      root.appendChild(bar);
+      panel.appendChild(line);
+      if (acts.length) {
+        const bar = el("div", "insp-actions");
+        for (const a of acts) {
+          const b = el("button", "insp-btn", a.label) as HTMLButtonElement;
+          b.dataset.cmd = a.cmd;
+          if (a.title) b.title = a.title;
+          b.addEventListener("click", () => a.run());
+          bar.appendChild(b);
+        }
+        panel.appendChild(bar);
+      }
+      root.appendChild(panel);
     }
   }
 
-  // CMD1 · the 3D arm. On a stratigraphic unit: model its proxy in Blender. On
-  // a resource: import its mesh and bind it. The action lives HERE, on the node
-  // it is about, because "model the proxy for this unit" is a sentence about a
-  // unit — a global button would have to ask which one, which the selection
-  // already answered.
-  if (nodeId && cb.onCommand) {
-    const verb = isStratigraphicType(node.node_type)
-      ? "create_proxy_for_unit"
-      : node.node_type === "resource"
-        ? "import_geometry"
-        : null;
-    if (verb) {
-      const blocked = cb.commandsBlocked?.() ?? null;
-      const bar = el("div", "insp-actions");
-      const b = document.createElement("button");
-      b.className = "insp-btn" + (blocked ? " insp-btn-off" : "");
-      b.textContent = verb === "create_proxy_for_unit" ? t("cmd.modelProxy") : t("cmd.importGeometry");
-      b.title = blocked ? blocked : t("cmd.hint");
-      b.disabled = !!blocked;
-      b.setAttribute("aria-disabled", String(!!blocked));
-      b.addEventListener("click", () => cb.onCommand!(verb, nodeId));
-      bar.appendChild(b);
-      root.appendChild(bar);
-      if (verb === "create_proxy_for_unit" && cb.renderSketchUse) cb.renderSketchUse(root, nodeId);
-      // X1/Y3 · a button that cannot be pressed says WHY beside it, in words,
-      // and offers the gesture that lifts the block when there is one here: the
-      // reason used to live only in the tooltip, and the off button looked on
-      // («the click does nothing, no message» — dev.17).
-      if (blocked) {
-        const why = el("div", "insp-blocked");
-        why.appendChild(el("span", "", blocked));
-        const fix = cb.commandsFix?.() ?? null;
-        if (fix) {
-          const go = el("button", "insp-btn insp-blocked-fix", fix.label) as HTMLButtonElement;
-          go.addEventListener("click", () => fix.run());
-          why.appendChild(go);
-        }
-        root.appendChild(why);
+  // CMD1 · the 3D arm. On a resource: import its mesh and bind it. (On a
+  // stratigraphic unit, «Model the proxy in Blender» lives in the «Proxy»
+  // section below — MICRO-INSPECTOR-SEZIONI p.1.) The action lives HERE, on the
+  // node it is about, because "model the proxy for this unit" is a sentence
+  // about a unit — a global button would have to ask which one, which the
+  // selection already answered.
+  if (nodeId && cb.onCommand && node.node_type === "resource") commandRow(root, "import_geometry");
+  function commandRow(host: HTMLElement, verb: "create_proxy_for_unit" | "import_geometry"): void {
+    const blocked = cb.commandsBlocked?.() ?? null;
+    const bar = el("div", "insp-actions");
+    const b = document.createElement("button");
+    b.className = "insp-btn" + (blocked ? " insp-btn-off" : "");
+    b.textContent = verb === "create_proxy_for_unit" ? t("cmd.modelProxy") : t("cmd.importGeometry");
+    b.title = blocked ? blocked : t("cmd.hint");
+    b.disabled = !!blocked;
+    b.dataset.cmd = verb;
+    b.setAttribute("aria-disabled", String(!!blocked));
+    b.addEventListener("click", () => cb.onCommand!(verb, nodeId!));
+    bar.appendChild(b);
+    host.appendChild(bar);
+    if (verb === "create_proxy_for_unit" && cb.renderSketchUse) cb.renderSketchUse(host, nodeId!);
+    // X1/Y3 · a button that cannot be pressed says WHY beside it, in words,
+    // and offers the gesture that lifts the block when there is one here: the
+    // reason used to live only in the tooltip, and the off button looked on
+    // («the click does nothing, no message» — dev.17). MICRO-INSPECTOR-SEZIONI
+    // p.1 · the gesture is a short way to where connections are made (the
+    // connection panel), not «Connect to Blender» itself: connecting is not a
+    // verb of a unit.
+    if (blocked) {
+      const why = el("div", "insp-blocked");
+      why.appendChild(el("span", "", blocked));
+      const fix = cb.commandsFix?.() ?? null;
+      if (fix) {
+        const go = el("button", "insp-link insp-blocked-fix", fix.label) as HTMLButtonElement;
+        go.type = "button";
+        if (fix.title) go.title = fix.title;
+        go.addEventListener("click", () => fix.run(go));
+        why.appendChild(go);
       }
+      host.appendChild(why);
     }
   }
 
@@ -1154,12 +1182,21 @@ export function renderInspector(
   }
 
   // ── MICRO-PROVA-DEV47 p.5 · the unit's proxy, deletable ──
-  if (nodeId && cb.renderProxy) {
+  // MICRO-INSPECTOR-SEZIONI p.1 · …and made: «Model the proxy in Blender» is a
+  // verb on the proxy, so it is drawn here, under the proxy it would make (it
+  // sat above, between «Continuity» and «Open with…»)
+  if (nodeId && (cb.renderProxy || cb.onCommand)) {
     const panel = el("div", "insp-canvas insp-proxy");
     panel.appendChild(el("h3", "insp-sect", t("px.title")));
     const body = el("div");
     panel.appendChild(body);
-    if (cb.renderProxy(body, nodeId)) root.appendChild(panel);
+    const has = cb.renderProxy?.(body, nodeId) ?? false;
+    const unit = isStratigraphicType(node.node_type);
+    if (unit && cb.onCommand) {
+      if (!has) body.appendChild(el("div", "insp-hint", t("px.noneYet")));
+      commandRow(body, "create_proxy_for_unit");
+    }
+    if (has || (unit && cb.onCommand)) root.appendChild(panel);
   }
 
   // ── MICRO-SPAZIO-3D-3 p.10 · a model's versions, the same selector as the Space's ──

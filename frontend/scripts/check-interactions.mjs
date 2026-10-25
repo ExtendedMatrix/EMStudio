@@ -4969,7 +4969,7 @@ test("Y2.blender", "Y2 · un file «Temple» (EM 1.6.16) aperto, poi Sidecar: il
     detail: { slots: r.slots, strip: r.strip, tree, log: r.log.filter((m) => /Blender|EM 1/.test(m)), errors } };
 });
 
-test("X1.blocked", "X1 · in Standalone, Inspector di un'unità: «Model the proxy in Blender» è spento in modo visibile (tratteggiato, aria-disabled) e accanto c'è la frase «connect (Mode › Sidecar)» col gesto «Connect to Blender»", async () => {
+test("X1.blocked", "X1 · in Standalone, Inspector di un'unità: «Model the proxy in Blender» (sotto PROXY, MICRO-INSPECTOR-SEZIONI) è spento in modo visibile (tratteggiato, aria-disabled) e accanto c'è la frase che dice dove si collega, col rimando «Connections…» che apre il pannello delle connessioni (non collega da qui)", async () => {
   const { p, ctx, errors } = await open({ doc: "catena", locale: "en" });
   await pick(p, "USM101");
   const r = await p.evaluate(() => {
@@ -4977,11 +4977,15 @@ test("X1.blocked", "X1 · in Standalone, Inspector di un'unità: «Model the pro
     const why = document.querySelector(".insp-blocked");
     return b && { disabled: b.disabled, aria: b.getAttribute("aria-disabled"), cls: b.className,
       border: getComputedStyle(b).borderStyle, why: why?.querySelector("span")?.textContent ?? null,
-      fix: why?.querySelector(".insp-blocked-fix")?.textContent ?? null };
+      inProxy: !!b.closest(".insp-proxy") && !!why?.closest(".insp-proxy"),
+      fix: why?.querySelector(".insp-blocked-fix")?.textContent ?? null,
+      connectBtn: [...document.querySelectorAll("#inspector button")].some((x) => /Connect to Blender/.test(x.textContent)) };
   });
+  await p.click(".insp-blocked-fix"); await p.waitForTimeout(300);
+  const pop = await p.evaluate(() => { const e = document.getElementById("conn-pop"); return !!e && !e.classList.contains("hidden"); });
   await ctx.close();
-  return { pass: !!r && r.disabled && r.aria === "true" && r.border === "dashed" && /Mode › Sidecar/.test(r.why ?? "")
-      && r.fix === "Connect to Blender" && !errors.length, detail: { r, errors } };
+  return { pass: !!r && r.disabled && r.aria === "true" && r.border === "dashed" && /Connections/.test(r.why ?? "")
+      && r.inProxy && r.fix === "Connections…" && !r.connectBtn && pop && !errors.length, detail: { r, pop, errors } };
 });
 
 const TEMPIO = benchFile("TEMPIO_FILE");

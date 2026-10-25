@@ -278,6 +278,19 @@ const report = {};
   if (v) eq(v.incoherences, 0, "no paradata_group_incoherences either way");
 }
 
+// ── MICRO-INSPECTOR-SEZIONI p.1 · offered only where it would move something ──
+// (SU020 of the GT16, already compacted, was offered «Compact the properties»:
+// 0 properties moved, one empty undo step)
+{
+  const st = fresh();
+  const before = C.compactableUnits(st.doc);
+  ok(before.includes("US2"), "US2, its properties outside a group: Compact offered");
+  C.compactProperties(st, ["US2"]);
+  ok(!C.compactableUnits(st.doc).includes("US2"), "US2 compacted: Compact no longer offered");
+  C.dissolveGroups(st, ["US2"]);
+  ok(C.compactableUnits(st.doc).includes("US2"), "US2 dissolved: Compact offered again");
+}
+
 // ── Parte 3 · the warning, and «Duplicate for each owner» ────────────────────
 // FONTE (v2, part 4) · ONE diagnosis, the library's: `undeclared_owners` of
 // s3Dgraphy's property_source, and its cure `duplicate_per_owner` applied as

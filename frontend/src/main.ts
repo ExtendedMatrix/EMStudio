@@ -3852,11 +3852,11 @@ function renderInspectorInto(host: HTMLElement): void {
       onEnterGroup: enterGroup,
       propertyGroupActions: (id) => {
         if (!store) return [];
-        const acts: Array<{ cmd: string; label: string; run: () => void }> = [];
+        const acts: Array<{ cmd: string; label: string; title?: string; run: () => void }> = [];
         if (compactableUnits(store.doc).includes(id))
-          acts.push({ cmd: "compact", label: t("compact.cmd"), run: () => runCompact([id]) });
+          acts.push({ cmd: "compact", label: t("compact.cmd"), title: t("compact.cmdTitle"), run: () => runCompact([id]) });
         if (store.paradataGroupOf(id))
-          acts.push({ cmd: "dissolve", label: t("compact.dissolve"), run: () => runDissolve([id]) });
+          acts.push({ cmd: "dissolve", label: t("compact.dissolve"), title: t("compact.dissolveTitle"), run: () => runDissolve([id]) });
         return acts;
       },
       continuity: (id) => continuityAction(id),
@@ -3940,8 +3940,14 @@ function renderInspectorInto(host: HTMLElement): void {
       commandsBlocked: commandsBlockedReason,
       openWith: (id) => openWithTools(id),
       onBlocked: (why) => toast(why),
+      // MICRO-INSPECTOR-SEZIONI p.1 · connecting is not a verb of a unit: the
+      // Inspector points to where connections are made (the connection panel,
+      // «With an app»), it does not connect from here. The old «Connect to
+      // Blender» was a toggle in disguise: pressed again while waiting for
+      // Blender it STOPPED waiting (btnSync), with the same label.
       commandsFix: () => (sync.connected ? null
-        : { label: t("cmd.connect"), run: () => { if (!sync.connected) btnSync.click(); } }),
+        : { label: t("cmd.openConnections"), title: t("cmd.openConnectionsTitle"),
+            run: (anchor) => toggleConnectionPanel(anchor ?? null) }),
       isResourceOpen: (id) => openResourceFiles.has(id),
       onToggleResourceFiles: (id) => toggleResourceFiles(id),
       onReplaceFile: (resId, fileId) => { void replaceFileFlow(resId, fileId); },
