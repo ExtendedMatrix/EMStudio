@@ -233,7 +233,11 @@ const LOADED_STATE = 4;
 async function reduceTextures(scene: any, side: number, stats: { reduced: number; largest: number }): Promise<void> {
   // one reduction per IMAGE (two textures of a tile may share one)
   const byImage = new Map<any, Promise<any>>();
+  // never fails the tile: a reduction that cannot be made leaves the texture as it came
   const reduce = async (img: any, nw: number, nh: number): Promise<any> => {
+    try { return await reduceOne(img, nw, nh); } catch { return null; }
+  };
+  const reduceOne = async (img: any, nw: number, nh: number): Promise<any> => {
     let out: any = null;
     try {
       if (typeof createImageBitmap === "function") {

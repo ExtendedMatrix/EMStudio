@@ -3392,7 +3392,8 @@ test("T1.space", "3D Tiles · nella Scena 3D dello Spazio: il tileset dell'RM si
   const f = (s, id) => s.tiles.find((t) => t.id === id)?.files ?? [];
   return { pass: same(f(s0, "RM1"), ["tiles/root.glb"]) && /muro_LOD3\.glb$/.test(by(s0, "RM2")?.url ?? "")
       && s0.labels.some((l) => /Rilievo intero: oltre la soglia \(858\.3 MB > 200\.0 MB\)/.test(l))
-      && same(f(s1, "RM1"), ["tiles/c0.glb", "tiles/c1.glb", "tiles/c2.glb", "tiles/c3.glb", "tiles/root.glb"])
+      // MICRO tileset dritto e nitido · the root leaves the memory once its children are shown
+      && same(f(s1, "RM1"), ["tiles/c0.glb", "tiles/c1.glb", "tiles/c2.glb", "tiles/c3.glb"])
       && /muro_LOD1\.glb$/.test(by(s2, "RM2")?.url ?? "") && by(s2, "RM3")?.as === "tiles" && same(f(s2, "RM3"), ["punti.pnts"])
       && !errors.filter((e) => !/c1_0/.test(e)).length,
     detail: { s0: [s0.items, s0.tiles, s0.labels], s1: s1.tiles, s2: [s2.items, s2.tiles], at, errors } };
