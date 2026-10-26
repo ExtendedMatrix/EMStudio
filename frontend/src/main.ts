@@ -705,6 +705,7 @@ import {
   type DynamicItem,
 } from "./menu-ui";
 import { currentPlatform } from "./menu-table";
+import { askConfirm, askText } from "./app-dialog";
 
 // MICRO-DOVE-CHI-MENU p.1 · the menus come from ONE table (`menu-table.ts`):
 // drawn here, before any handler below looks its button up by id
@@ -1814,7 +1815,7 @@ function useNodeAddress(url: string): void {
 }
 /** p.3 · «Add a node…»: its address, asked; it joins the saved nodes. */
 async function addNodeByAddress(): Promise<void> {
-  const typed = window.prompt(t("conn.addNodeAsk"), "https://");
+  const typed = await askText(t("conn.addNodeAsk"), "https://");
   if (!typed) return;
   let url: string;
   try {
@@ -2003,7 +2004,7 @@ async function paintOrphans(): Promise<void> {
     del.dataset.act = "orph-delete";
     del.textContent = t("settings.orphDelete");
     del.onclick = async () => {
-      if (!confirm(t("settings.orphDeleteAsk", { x: o.ref, room: o.origin_room ?? "?" }))) return;
+      if (!(await askConfirm(t("settings.orphDeleteAsk", { x: o.ref, room: o.origin_room ?? "?" }), { danger: true }))) return;
       try { await api.deleteAsset(o.ref); toast(t("settings.orphDeleted", { x: o.ref.slice(0, 19) })); void paintOrphans(); }
       catch (error) { toast((error as Error).message); }
     };
@@ -7355,15 +7356,15 @@ const isGraphmlFile = (name: string, text: string): boolean =>
  *  ASKS. Nothing is thrown away — the open graph stays a slot of the EMTree —
  *  but the canvas changes under the hand, and measured on 1 Oct an open over
  *  an edited graph read as «replaced without asking». */
-function confirmOpenOverUnsaved(incoming: string): boolean {
+async function confirmOpenOverUnsaved(incoming: string): Promise<boolean> {
   const slot = emtree.active();
   if (!slot?.store.dirty) return true;
   if (isUntouchedSeed(slot)) return true;   // DEV30 V3 · nobody's graph: nothing to lose
-  return window.confirm(t("open.overUnsaved", { name: slotLabel(slot), file: incoming }));
+  return askConfirm(t("open.overUnsaved", { name: slotLabel(slot), file: incoming }));
 }
 
 async function loadFile(file: File): Promise<void> {
-  if (!confirmOpenOverUnsaved(file.name)) return;
+  if (!(await confirmOpenOverUnsaved(file.name))) return;
   const head = await file.slice(0, 2048).text();
   if (isGraphmlFile(file.name, head)) { await importGraphmlText(await file.text(), file.name); return; }
   if (!(await confirmLeaveSidecar("Opening a file"))) return;
@@ -8619,7 +8620,7 @@ async function acceptPendingInvite(): Promise<void> {
   if (!hubToken) {
     // The link opened the door; it does not authenticate. Ask for the identity
     // the same way joining a room does today.
-    hubToken = window.prompt(t("hub.tokenPrompt")) || null;
+    hubToken = (await askText(t("hub.tokenPrompt"))) || null;
   }
   if (!hubToken) {
     // the same rule as the study's refusal: name the gesture this session HAS
@@ -9906,16 +9907,16 @@ function browserDownload(text: string, filename: string): void {
 
 /** MICRO-DOVE-CHI-MENU p.1 · the document File ▸ Close closes: the active
  *  graph's file (all its graphs), or the active graph when it has no file. */
-function closeActiveDocument(): void {
+async function closeActiveDocument(): Promise<void> {
   const slot = emtree.active();
   if (!slot) return;
   const file = emtree.fileOf(slot);
   if (file) {
-    if (emtree.fileDirty(file.id) && !confirm(t("emtree.closeFileUnsaved", { name: file.name }))) return;
+    if (emtree.fileDirty(file.id) && !(await askConfirm(t("emtree.closeFileUnsaved", { name: file.name })))) return;
     closeFile(file.id);
     return;
   }
-  closeGraphAsking(slot.id);
+  void closeGraphAsking(slot.id);
 }
 
 /** MICRO-DOVE-CHI-MENU p.2 · File ▸ Open Recent (the page's and the system's):
@@ -9964,7 +9965,7 @@ async function openRecentFile(r: RecentFile): Promise<void> {
     res = await readEmJsonPath(r.path);
   } catch {
     // p.2 · a recent that is not there any more SAYS so, and offers to go
-    if (confirm(t("recent.missingAsk", { name: r.name, path: r.path }))) removeRecentEntry(r);
+    if (await askConfirm(t("recent.missingAsk", { name: r.name, path: r.path }))) removeRecentEntry(r);
     return;
   }
   if (!res) {
@@ -9989,7 +9990,7 @@ async function openPathFromDesktop(path: string): Promise<void> {
   try {
     const res = await readEmJsonPath(path);
     if (!res) return;
-    if (!confirmOpenOverUnsaved(baseName(res.path))) return;
+    if (!(await confirmOpenOverUnsaved(baseName(res.path)))) return;
     if (isGraphmlFile(res.path, res.text)) { await importGraphmlText(res.text, baseName(res.path), res.path); return; }
     if (!(await confirmLeaveSidecar("Opening a file"))) return;
     loadContainerDocument(JSON.parse(res.text), baseName(res.path), res.path);
@@ -10019,7 +10020,7 @@ async function openDocument(): Promise<void> {
     try {
       const res = await openEmJson();
       if (!res) return; // cancelled
-      if (!confirmOpenOverUnsaved(baseName(res.path))) return;
+      if (!(await confirmOpenOverUnsaved(baseName(res.path)))) return;
       if (isGraphmlFile(res.path, res.text)) { await importGraphmlText(res.text, baseName(res.path), res.path); return; }
       if (!(await confirmLeaveSidecar("Opening a file"))) return;
       // through the container reader, like the browser's <input type=file>:
@@ -10045,7 +10046,7 @@ async function openReplacing(): Promise<void> {
     try {
       const res = await openEmJson();
       if (!res) return;
-      if (!closeEverythingAsking()) return;
+      if (!(await closeEverythingAsking())) return;
       if (isGraphmlFile(res.path, res.text)) { await importGraphmlText(res.text, baseName(res.path), res.path); return; }
       if (!(await confirmLeaveSidecar("Opening a file"))) return;
       loadContainerDocument(JSON.parse(res.text), baseName(res.path), res.path);
@@ -10057,10 +10058,10 @@ async function openReplacing(): Promise<void> {
   const input = document.createElement("input");
   input.type = "file";
   input.accept = ".json,.em.json,.emj,.graphml,.xml";
-  input.addEventListener("change", () => {
+  input.addEventListener("change", async () => {
     const f = input.files?.[0];
     if (!f) return;
-    if (!closeEverythingAsking()) return;
+    if (!(await closeEverythingAsking())) return;
     void loadFile(f);
   });
   input.click();
@@ -10068,13 +10069,13 @@ async function openReplacing(): Promise<void> {
 
 /** F3 · every file and every loose graph closed — after asking for the unsaved
  *  ones, all questions first. Returns false (and closes nothing) on a «no». */
-function closeEverythingAsking(): boolean {
+async function closeEverythingAsking(): Promise<boolean> {
   for (const file of emtree.files) {
-    if (emtree.fileDirty(file.id) && !confirm(t("emtree.closeFileUnsaved", { name: file.name }))) return false;
+    if (emtree.fileDirty(file.id) && !(await askConfirm(t("emtree.closeFileUnsaved", { name: file.name })))) return false;
   }
   for (const slot of emtree.slotsOf(null)) {
     if (slot.store.dirty && !isUntouchedSeed(slot)
-        && !confirm(t("emtree.unsaved", { name: slotLabel(slot) }))) return false;
+        && !(await askConfirm(t("emtree.unsaved", { name: slotLabel(slot) })))) return false;
   }
   for (const slot of [...emtree.slots]) slot.store.dirty = false;  // asked: nothing more to ask
   for (const file of [...emtree.files]) closeFile(file.id);
@@ -13978,7 +13979,7 @@ async function keepGraphmlAsEmJson(slot: GraphSlot, srcName: string, srcPath: st
     const dir = srcPath ? paths.dirname(srcPath) : "";
     ok = await saveFileAs(file, dir ? paths.join(dir, proposed) : proposed);
   } else {
-    const typed = window.prompt(t("graphml.emjsonPrompt"), proposed)?.trim();
+    const typed = (await askText(t("graphml.emjsonPrompt"), proposed))?.trim();
     if (typed) {
       file.name = /\.(em\.json|emj|json)$/i.test(typed) ? typed : `${typed}.em.json`;
       ok = await saveFile(file);
@@ -14217,7 +14218,7 @@ document.getElementById("btn-mode-hub")?.addEventListener("click", async () => {
   if (sync.room === s.hubRoom && sync.connected) return;   // already there
   // A4 · the room's socket is opened with the token: a fresh one, if it can be
   await renewIfDueSoon();
-  const token = hubToken ?? window.prompt(t("hub.tokenPrompt")) ?? "";
+  const token = hubToken ?? (await askText(t("hub.tokenPrompt"))) ?? "";
   hubToken = token || null;
   connectToHub(s.hubUrl, s.hubRoom, hubToken);
 });
@@ -15350,10 +15351,10 @@ function identityChipClicked(): void {
 /** DEV30 U15 · «Sign out · forget this identity»: the iD leaves this
  *  machine's list and nobody is current; the node's session (in memory) goes
  *  too. What is already signed stays signed — a signature is history. */
-function signOutIdentity(): void {
+async function signOutIdentity(): Promise<void> {
   const me = currentIdentity();
   if (!me) return;
-  if (!window.confirm(t("idw.signOutAsk", { who: [me.name, me.surname].filter(Boolean).join(" ") || me.orcid, orcid: me.orcid }))) return;
+  if (!await askConfirm(t("idw.signOutAsk", { who: [me.name, me.surname].filter(Boolean).join(" ") || me.orcid, orcid: me.orcid }))) return;
   forgetIdentity(me.orcid);
   useNoIdentity();
   hubToken = null;
@@ -17626,12 +17627,12 @@ function closeSlot(id: string): void {
 }
 
 /** Close one graph, asking for its unsaved work (the EMtree's ×, File ▸ Close). */
-function closeGraphAsking(id: string): void {
+async function closeGraphAsking(id: string): Promise<void> {
   const slot = emtree.get(id);
   if (!slot) return;
   // Unsaved work is the one thing a close must not take silently.
   if (slot.store.dirty
-      && !confirm(t("emtree.unsaved", { name: slotLabel(slot) }))) {
+      && !(await askConfirm(t("emtree.unsaved", { name: slotLabel(slot) })))) {
     return;
   }
   // F2 · closing a graph is not deleting it from its file: the version on
@@ -17821,16 +17822,16 @@ const emtreeHandlers: EMTreeHandlers = {
     if (id === emtree.activeId) return;
     activateSlot(id);
   },
-  onRemove: (id) => closeGraphAsking(id),
+  onRemove: (id) => { void closeGraphAsking(id); },
   onMoveGraph: (slotId, anchor) => openMoveMenu(slotId, anchor),
   onSaveFile: (fileId) => {
     const file = emtree.file(fileId);
     if (file) void saveFile(file);
   },
-  onCloseFile: (fileId) => {
+  onCloseFile: async (fileId) => {
     const file = emtree.file(fileId);
     if (!file) return;
-    if (emtree.fileDirty(fileId) && !confirm(t("emtree.closeFileUnsaved", { name: file.name }))) return;
+    if (emtree.fileDirty(fileId) && !(await askConfirm(t("emtree.closeFileUnsaved", { name: file.name })))) return;
     closeFile(fileId);
   },
   // AUX1 · auxiliary files live on the SLOT and never in em.json, so every one of
@@ -24862,13 +24863,13 @@ function droppedLocator(d: DroppedTileset): { locator: string; packaging: "archi
   return null;
 }
 
-function attachDropped(d: DroppedTileset, epochId: string): void {
+async function attachDropped(d: DroppedTileset, epochId: string): Promise<void> {
   if (!store || refuseReadOnly()) return;
   const st = store;
   const loc = droppedLocator(d);
   if (!loc) { toast(t("tsp.prepareFirst")); return; }
   const epoch = String(st.node(epochId)?.name ?? epochId);
-  if (!window.confirm(t("tsp.attachAsk", { name: d.label, epoch, locator: loc.locator }))) return;
+  if (!(await askConfirm(t("tsp.attachAsk", { name: d.label, epoch, locator: loc.locator })))) return;
   const out = attachTileset(storeGraph(st), { name: d.label, epochId, locator: loc.locator, packaging: loc.packaging,
     sizeBytes: d.bytes, nameOnly: loc.nameOnly }, () => st.newId());
   d.attached = { rmId: out.rmId, epoch };
@@ -24883,7 +24884,7 @@ async function packDropped(d: DroppedTileset): Promise<void> {
   if (!folder) { toast(t("tsp.packNeedsPath")); return; }
   const root = d.rec.form === "pair" ? d.disk?.root : undefined;
   const where = root ? `${paths.dirname(folder)}/${paths.basename(folder)}.3tz` : `${folder}.3tz`;
-  if (!window.confirm(t("tsp.packAsk", { name: d.label, where }))) return;
+  if (!(await askConfirm(t("tsp.packAsk", { name: d.label, where })))) return;
   toast(t("tsp.packing", { name: d.label }));
   const out = await packTileset(await bridgeUrl(), folder, root);
   if (!out.ok || !out.path) { toast(t("tsp.packFailed", { why: out.error ?? "?" })); logWarn(t("tsp.packFailed", { why: out.error ?? "?" })); return; }
@@ -24942,7 +24943,7 @@ function droppedBar(d: DroppedTileset, win: Win): HTMLElement {
   attach.disabled = !store || !epochs.length || !loc || !!d.attached;
   attach.title = !store ? t("menu.noGraph") : !epochs.length ? t("tsp.noEpochs") : !loc ? t("tsp.prepareFirst")
     : loc.nameOnly ? t("tsp.nameOnlyHint") : t("tsp.attachHint");
-  attach.addEventListener("click", (e) => { e.stopPropagation(); attachDropped(d, sel.value); });
+  attach.addEventListener("click", (e) => { e.stopPropagation(); void attachDropped(d, sel.value); });
   if (epochs.length && !d.attached) acts.append(sel);
   acts.append(attach);
   if (d.rec.preparable && d.rec.form !== "package") {
@@ -26206,7 +26207,7 @@ function renderAssociateSection(host: HTMLElement, win: Win, sketchId: string, i
   };
   // p.5 · the summary, and the two buttons: Enter confirms, Esc cancels
   const shapeName = sk?.name ?? sketchId;
-  const confirm = async () => {
+  const confirmAssoc = async () => {
     const pick = assocPick;
     if (!pick) return;
     assocPick = null;
@@ -26236,7 +26237,7 @@ function renderAssociateSection(host: HTMLElement, win: Win, sketchId: string, i
     ok.className = "insp-btn primary";
     ok.dataset.assocOk = "1";
     ok.textContent = assocPick.kind === "unit" ? t("s3.assocOk") : t("s3.assocOkNew");
-    ok.addEventListener("click", () => { void confirm(); });
+    ok.addEventListener("click", () => { void confirmAssoc(); });
     const no = document.createElement("button");
     no.type = "button";
     no.className = "insp-btn";
@@ -26250,7 +26251,7 @@ function renderAssociateSection(host: HTMLElement, win: Win, sketchId: string, i
   sec.addEventListener("keydown", (e) => {
     if (!assocPick) return;
     if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); cancel(); }
-    else if (e.key === "Enter" && !(e.target instanceof HTMLInputElement) && !(e.target instanceof HTMLSelectElement)) { e.preventDefault(); e.stopPropagation(); void confirm(); }
+    else if (e.key === "Enter" && !(e.target instanceof HTMLInputElement) && !(e.target instanceof HTMLSelectElement)) { e.preventDefault(); e.stopPropagation(); void confirmAssoc(); }
   });
   q.addEventListener("input", () => { assocQuery = q.value; paint(); });
   fsel.addEventListener("change", () => { assocType = fsel.value; paint(); });
@@ -30588,7 +30589,7 @@ async function relinkFile(f: FileState): Promise<void> {
       return;
     }
   } else {
-    path = window.prompt(ask, "");
+    path = await askText(ask, "");
   }
   const st = storeOfNode(f.id);
   const n = st?.node(f.id);
@@ -30648,7 +30649,7 @@ async function relocateFiles(folderGiven?: string): Promise<void> {
     if (isTauri()) {
       try { folder = await pickFolder(); } catch { folder = null; }
     } else {
-      folder = window.prompt(t("relocate.pickPrompt"), paths.toNative(paths.dirname(emjson)))?.trim() || null;
+      folder = (await askText(t("relocate.pickPrompt"), paths.toNative(paths.dirname(emjson))))?.trim() || null;
     }
   }
   if (!folder) return;
@@ -30823,7 +30824,7 @@ async function setOneDriveFromRelocate(folder: string, modal: HTMLElement): Prom
     if (isTauri()) {
       try { root = await pickFolder(); } catch { root = null; }
     } else {
-      root = window.prompt(t("relocate.oneDrivePrompt"), "")?.trim() || null;
+      root = (await askText(t("relocate.oneDrivePrompt"), ""))?.trim() || null;
     }
   }
   if (!root) return;
@@ -31197,9 +31198,9 @@ async function keepFiles(fs: FileState[]): Promise<void> {
 
 /** C1 · «New EM project…» and «Reorder by the EM standard…» (through the bridge) */
 async function newProjectGesture(): Promise<void> {
-  const parent = window.prompt(t("fs.newProjectParent"), "");
+  const parent = await askText(t("fs.newProjectParent"), "");
   if (!parent) return;
-  const name = window.prompt(t("fs.newProjectName"), "Scavo");
+  const name = await askText(t("fs.newProjectName"), "Scavo");
   if (!name) return;
   try {
     const out = await newEmProject(await bridgeUrl(), parent.trim(), name.trim());
@@ -31216,7 +31217,7 @@ async function reorderGesture(): Promise<void> {
     const plan = (prev.plan as Array<{ action: string; from?: string; to: string }>) ?? [];
     if (!plan.length) { toast(t("fs.reorderNothing")); return; }
     const lines = plan.map((p) => p.action === "mkdir" ? `+ ${p.to}/` : `${p.from} → ${p.to}`).join("\n");
-    if (!window.confirm(t("fs.reorderAsk", { plan: lines }))) return;   // never without a yes
+    if (!(await askConfirm(t("fs.reorderAsk", { plan: lines })))) return;   // never without a yes
     const done = await reorderApply(bridge, root, plan);
     logInfo((done.done as string[]).join("; "));
   } catch (e) { toast((e as Error).message); }
@@ -35049,7 +35050,7 @@ async function addStorageRoot(win: Win): Promise<void> {
   // the Blender-style browser next to it as the way that does not need typing:
   // navigate there and press "+ bookmark this folder".
   let path = isTauri() ? await pickFolder() : null;
-  if (!path) path = window.prompt(t("storage.rootPrompt"), "");
+  if (!path) path = await askText(t("storage.rootPrompt"), "");
   if (!path?.trim()) return;
   await addStorageRootPath(path.trim(), win);
 }
@@ -35065,7 +35066,7 @@ async function postFsRoot(path: string): Promise<Response> {
   const first = await send(false);
   if (first.status !== 409) return first;
   const j = (await first.clone().json().catch(() => null)) as { code?: string } | null;
-  if (j?.code !== "whole-disk" || !window.confirm(t("storage.wholeDiskConfirm", { path }))) return first;
+  if (j?.code !== "whole-disk" || !(await askConfirm(t("storage.wholeDiskConfirm", { path }), { danger: true }))) return first;
   return await send(true);
 }
 
@@ -38098,8 +38099,8 @@ function setWorkspace(id: WorkspaceId): void {
  * (double-click) and closed (middle-click or the ×), the built-ins cannot.
  */
 /** Put a built-in back to the arrangement it comes with (after asking). */
-function resetWorkspace(id: WorkspaceId): void {
-  if (!confirm(t("ws.resetConfirm"))) return;
+async function resetWorkspace(id: WorkspaceId): Promise<void> {
+  if (!(await askConfirm(t("ws.resetConfirm")))) return;
   if (id !== activeWorkspace()) setActiveWorkspace(id);
   applyArrangement(id);
   renderTiles();
@@ -38229,19 +38230,19 @@ function renderWorkspaceBar(): void {
       r.title = t("ws.reset");
       r.addEventListener("click", (e) => {
         e.stopPropagation();
-        resetWorkspace(w.id);
+        void resetWorkspace(w.id);
       });
       b.appendChild(r);
     }
     // AUDIT N9 · ONE MEANING for the double click on every tab: RENAME (it was
     // «reset» on a built-in and «rename» on yours). Reset, rename and remove
     // are in the tab's own menu (right click), each said by its name.
-    const rename = (): void => {
-      const next = prompt(t("ws.renamePrompt"), label);
+    const rename = async (): Promise<void> => {
+      const next = await askText(t("ws.renamePrompt"), label, { kind: "ws-rename" });
       if (next == null || !renameWorkspace(w.id, next)) return;
       renderWorkspaceBar();
     };
-    b.addEventListener("dblclick", (e) => { e.stopPropagation(); rename(); });
+    b.addEventListener("dblclick", (e) => { e.stopPropagation(); void rename(); });
     b.addEventListener("contextmenu", (e) => {
       e.preventDefault();
       e.stopPropagation();
@@ -38264,8 +38265,10 @@ function renderWorkspaceBar(): void {
   add.className = "ws-tab ws-add";
   add.textContent = "+";
   add.title = t("ws.addTitle");
-  add.addEventListener("click", () => {
-    const name = prompt(t("ws.addPrompt"), t("ws.addDefault"));
+  // the name is asked by the app's dialog: `prompt` opens nothing in the
+  // desktop's WKWebView and returned null — the «+» did nothing (26 Oct 2026)
+  add.addEventListener("click", async () => {
+    const name = await askText(t("ws.addPrompt"), t("ws.addDefault"), { kind: "ws-add" });
     if (name == null) return;
     const ws = addWorkspace(name);
     renderWorkspaceBar();
@@ -38283,7 +38286,7 @@ function removeSpace(id: string, label: string): void {
 }
 
 /** AUDIT N9 · a tab's menu: rename · reset (a built-in reshaped) · remove (yours) */
-function showWorkspaceTabMenu(x: number, y: number, w: (typeof WORKSPACES)[number], rename: () => void): void {
+function showWorkspaceTabMenu(x: number, y: number, w: (typeof WORKSPACES)[number], rename: () => Promise<void>): void {
   hideContextMenu();
   const menu = document.createElement("div");
   menu.className = "ctx-menu";
@@ -38296,8 +38299,8 @@ function showWorkspaceTabMenu(x: number, y: number, w: (typeof WORKSPACES)[numbe
     b.onclick = () => { hideContextMenu(); if (why) toast(why); else run(); };
     menu.appendChild(b);
   };
-  item(t("ws.rename"), rename);
-  if (w.builtin) item(t("ws.resetItem"), () => resetWorkspace(w.id),
+  item(t("ws.rename"), () => { void rename(); });
+  if (w.builtin) item(t("ws.resetItem"), () => { void resetWorkspace(w.id); },
     workspaceModified(w.id) ? undefined : t("ws.notModified"));
   else item(t("ws.removeItem"), () => removeSpace(w.id, workspaceLabel(w, t)));
   document.body.appendChild(menu);

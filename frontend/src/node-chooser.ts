@@ -7,6 +7,7 @@
 // personal node: this computer only, the files stay in the folders). «Open to
 // the local network» is an explicit choice, with the sentence of who can come in.
 import { t, getLocale } from "./i18n";
+import { askConfirm } from "./app-dialog";
 import { stateBadge } from "./state-symbols";
 
 export interface NodeRow {
@@ -110,7 +111,7 @@ export async function paintChooser(host: HTMLElement, h: ChooserHooks, typed = "
     const lan = el("button", "ghost", mine.lan ? t("nodes.closeLan") : t("nodes.openLan")) as HTMLButtonElement;
     lan.dataset.act = mine.lan ? "close-lan" : "open-lan";
     lan.addEventListener("click", async () => {
-      if (!mine.lan && !window.confirm(t("nodes.openLanAsk"))) return;   // an explicit choice
+      if (!mine.lan && !(await askConfirm(t("nodes.openLanAsk")))) return;   // an explicit choice
       try { const s = await personal(h, "start", !mine.lan); h.log(`${lan.textContent}: ${s.who}`); }
       catch (e) { h.log((e as Error).message); }
       void paintChooser(host, h);

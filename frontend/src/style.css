@@ -10272,3 +10272,13 @@ body.em-detached #tile-root > .tile-area.tile-detached {
 .insp-frame-field input { font: inherit; font-size: 12px; min-width: 0; }
 .insp-frame-actions { display: flex; flex-wrap: wrap; gap: 4px; margin: 4px 0; }
 .insp-hint.warn { color: var(--warn, #b26a00); }
+
+/* the app's own dialog (app-dialog.ts): the message keeps its newlines — a
+   reorder plan, a path — and the field takes the card's width */
+.app-dialog { z-index: 3000; }
+.app-dialog-msg { margin: 0 0 10px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.app-dialog-field { display: flex; flex-direction: column; gap: 4px; }
+.app-dialog-field input { padding: 6px 8px; border: 1px solid var(--border); border-radius: var(--radius); font: inherit; }
+.app-dialog-err { color: var(--danger, #b3261e); font-size: 12px; min-height: 0; margin-top: 6px; }
+.app-dialog-err:empty { display: none; }
+.modal-foot button.primary.danger { background: var(--danger, #b3261e); border-color: var(--danger, #b3261e); color: #fff; }

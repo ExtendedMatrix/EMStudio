@@ -2015,6 +2015,8 @@ const EN: Dict = {
   // The design note's three verbs: APRI (File ▸ Open), ENTRA (Mode ▸ Hub), CREA
   // (these). A room with one member is not a degenerate room, it is YOUR TABLE.
   "common.cancel": "Cancel",
+  "dlg.title": "EMStudio",
+  "dlg.ok": "OK",
   // ── CONDIVIDI · a LINK to the node's panel, never a copy of it ─────────────
 
   "share.open": "Share this room…",
@@ -6597,6 +6599,8 @@ const IT: Dict = {
   "menu.exportZip": "+ figure (.zip)",
   "ident.otherPerson": "{node} ti ha fatto entrare come {them} ({orcid}) — NON come «{who}», la firma che hai dichiarato. Quindi questo nodo non ha confermato il TUO nome, e il chip non finge che l'abbia fatto. O l'iD dichiarato è sbagliato, o sei entrato come qualcun altro. Clicca per guardarli entrambi.",
   "common.cancel": "Annulla",
+  "dlg.title": "EMStudio",
+  "dlg.ok": "OK",
 
   "share.open": "Condividi questa stanza…",
   "share.openTitle": "Chi è a questo tavolo, e di chi è la copia viva. Apre il pannello del nodo per questa stanza, in una scheda nuova — là vivono l'ACL e il proprietario, e persone, squadre, inviti e trasferimento stanno in un posto solo. EMStudio ne disegnava uno suo; mostrava le persone e non le squadre, quindi è stato ritirato.",

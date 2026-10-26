@@ -72,6 +72,13 @@ async function open({ doc = "catena", locale = "it", w = 1600, h = 1000, ws, ini
   const p = await ctx.newPage();
   const errors = [];
   p.on("pageerror", (e) => errors.push(String(e).slice(0, 300)));
+  // no native dialog: the app asks with its own (app-dialog.ts) — a native one
+  // would be silent or wrong in the desktop, so here it is an error
+  // (`beforeunload` is the browser's own leave-page question, not the app's: let the page go)
+  p.on("dialog", (dlg) => {
+    if (dlg.type() === "beforeunload") { void dlg.accept().catch(() => {}); return; }
+    errors.push(`native ${dlg.type()}: ${dlg.message().slice(0, 80)}`); void dlg.dismiss().catch(() => {});
+  });
   await p.addInitScript(([d, loc, extra]) => {
     // the Resource Timing buffer holds 250 entries by default, and the dev
     // server's modules fill it before a case asks for a file: the cases that
@@ -95,6 +102,36 @@ async function open({ doc = "catena", locale = "it", w = 1600, h = 1000, ws, ini
   if (ws) await workspace(p, ws);
   return { p, ctx, errors };
 }
+/** The app's own dialogs (app-dialog.ts), answered as `page.on("dialog")` used
+ *  to answer the native ones: `answer` true = OK (a field keeps its proposal),
+ *  a string = that text in the field and OK, false = Cancel; it can be changed
+ *  by calling again. The messages seen are in
+ *  `seenDialogs(p)`. */
+async function answerAppDialogs(p, answer) {
+  await p.evaluate((a) => {
+    window.__EM_DIALOG_ANSWER__ = a;
+    window.__EM_DIALOG_SEEN__ ??= [];
+    if (window.__EM_DIALOG_OBS__) return;
+    const look = () => {
+      for (const d of document.querySelectorAll(".app-dialog:not([data-seen])")) {
+        d.dataset.seen = "1";
+        window.__EM_DIALOG_SEEN__.push(d.querySelector(".app-dialog-msg")?.textContent ?? "");
+        setTimeout(() => {
+          const ans = window.__EM_DIALOG_ANSWER__;
+          const field = d.querySelector("[data-dialog-input]");
+          if (typeof ans === "string" && field) field.value = ans;
+          const b = d.querySelector(ans || ans === "" ? "[data-dialog-ok]" : "[data-dialog-cancel]")
+            ?? d.querySelector("[data-dialog-ok]");
+          b?.click();
+        }, 0);
+      }
+    };
+    window.__EM_DIALOG_OBS__ = new MutationObserver(look);
+    window.__EM_DIALOG_OBS__.observe(document.body, { childList: true });
+    look();
+  }, answer);
+}
+const seenDialogs = (p) => p.evaluate(() => window.__EM_DIALOG_SEEN__ ?? []);
 const workspace = async (p, ws) => {
   await p.click(`#workspace-bar .ws-tab[data-ws="${ws}"]`);
   await p.waitForTimeout(700);
@@ -1039,8 +1076,9 @@ test("10.publish", "«Pubblica» ha un posto solo: la striscia del nome; la narr
 });
 test("10.tabs", "doppio clic su una scheda dello spazio = rinomina, per tutte; il reset sta nel menu della scheda", async () => {
   const { p, ctx } = await open({ doc: "catena" });
-  p.once("dialog", (d) => d.accept("Strati"));
   await p.dblclick('#workspace-bar .ws-tab[data-ws="canvas"]');
+  await p.fill('.app-dialog[data-app-dialog="ws-rename"] [data-dialog-input]', "Strati");
+  await p.keyboard.press("Enter");
   await p.waitForTimeout(300);
   const label = await p.evaluate(() => document.querySelector('#workspace-bar .ws-tab[data-ws="canvas"] .ws-lb')?.textContent);
   await p.click('#workspace-bar .ws-tab[data-ws="canvas"]', { button: "right" });
@@ -1048,6 +1086,76 @@ test("10.tabs", "doppio clic su una scheda dello spazio = rinomina, per tutte; i
   const items = await p.evaluate(() => [...document.querySelectorAll(".ctx-menu button")].map((b) => b.textContent));
   await ctx.close();
   return { pass: label === "Strati" && items.some((i) => /Rinomina/.test(i)) && items.some((i) => /Ripristina/.test(i)), detail: { label, items } };
+});
+
+// ── MICRO contenuti-workspace-elimina-grafo · the «+» and the app's dialogs ──
+/** the desktop's webview as measured (WKWebView without a UI delegate for
+ *  prompts + tauri-plugin-dialog 2.7.1's init script): `prompt` answers null at
+ *  once, `confirm` answers a Promise that rejects, `alert` says nothing */
+const DESKTOP_DIALOGS = () => {
+  window.__NATIVE__ = [];
+  window.prompt = (m) => { window.__NATIVE__.push(`prompt:${m}`); return null; };
+  window.confirm = async (m) => { window.__NATIVE__.push(`confirm:${m}`); throw new Error("Command confirm not found"); };
+  window.alert = (m) => { window.__NATIVE__.push(`alert:${m}`); };
+};
+const wsTabs = (p) => p.evaluate(() => [...document.querySelectorAll("#workspace-bar .ws-tab:not(.ws-add)")]
+  .map((b) => ({ id: b.dataset.ws, label: b.querySelector(".ws-lb")?.textContent ?? "", active: b.classList.contains("active") })));
+test("WS1.add", "il «+» dei workspace: chiede il nome con il dialogo dell'app (non `prompt`, che nella desktop torna null), Invio crea lo spazio, lo attiva, e resta dopo il riavvio; Esc non crea nulla", async () => {
+  const { p, ctx, errors } = await open({ doc: "catena", locale: "it", hook: DESKTOP_DIALOGS });
+  const before = await wsTabs(p);
+  await p.click("#workspace-bar .ws-add");
+  const dlg = await p.waitForSelector('.app-dialog[data-app-dialog="ws-add"]', { timeout: 5000 }).catch(() => null);
+  const shape = await p.evaluate(() => {
+    const d = document.querySelector(".app-dialog");
+    const card = d?.querySelector("[role=dialog]");
+    return { modal: card?.getAttribute("aria-modal"), labelled: !!document.getElementById(card?.getAttribute("aria-labelledby") ?? "-"),
+      focus: document.activeElement?.dataset?.dialogInput === "1", value: document.activeElement?.value ?? null };
+  });
+  await p.keyboard.type("Rilievo US");          // the proposal is selected: typing replaces it
+  await p.keyboard.press("Enter");
+  await p.waitForTimeout(500);
+  const after = await wsTabs(p);
+  await p.screenshot({ path: SHOT("ws1-piu-nuovo-spazio") }).catch(() => {});
+  // Escape: nothing is made
+  await p.click("#workspace-bar .ws-add");
+  await p.waitForSelector(".app-dialog", { timeout: 5000 }).catch(() => null);
+  await p.keyboard.press("Escape");
+  await p.waitForTimeout(300);
+  const afterEsc = await wsTabs(p);
+  const gone = await p.evaluate(() => !document.querySelector(".app-dialog"));
+  // the restart: the same browser profile, the page loaded again
+  await p.reload({ waitUntil: "domcontentloaded" });
+  await p.waitForSelector("#workspace-bar .ws-tab", { timeout: 30000 });
+  await p.waitForTimeout(800);
+  const reloaded = await wsTabs(p);
+  const native = await p.evaluate(() => window.__NATIVE__);
+  await ctx.close();
+  const made = after.find((t) => t.label === "Rilievo US");
+  return { pass: !!dlg && shape.modal === "true" && shape.labelled && shape.focus && !!shape.value
+      && after.length === before.length + 1 && !!made && made.active
+      && afterEsc.length === after.length && gone
+      && reloaded.some((t) => t.label === "Rilievo US" && t.id === made.id) && reloaded.find((t) => t.active)?.id === made.id
+      && !native.length && !errors.length,
+    detail: { before: before.length, after, shape, afterEsc: afterEsc.length, reloaded, native, errors } };
+});
+test("WS2.dialogs", "i dialoghi dell'app dove la desktop era sbagliata: File ▸ Chiudi su un grafo modificato chiede (Annulla lo tiene, OK lo chiude) — nella desktop `confirm` tornava una Promise e chiudeva senza chiedere; nessuna chiamata nativa", async () => {
+  const { p, ctx, errors } = await open({ doc: "catena", locale: "en", hook: DESKTOP_DIALOGS });
+  // reshape a built-in, then ask to reset it
+  await p.evaluate(() => window.__EM_DRAG__.edit(window.__EM_DRAG__.idsOfType("US")[0], { description: "edited, not saved" }));
+  await answerAppDialogs(p, false);
+  await p.evaluate(() => document.getElementById("btn-close-doc")?.click());
+  await p.waitForTimeout(500);
+  const keptOnCancel = await p.evaluate(() => window.__EM_DRAG__.slots().length);
+  await answerAppDialogs(p, true);
+  await p.evaluate(() => document.getElementById("btn-close-doc")?.click());
+  await p.waitForTimeout(800);
+  const closedOnOk = await p.evaluate(() => window.__EM_DRAG__.slots().length);
+  const seen = await seenDialogs(p);
+  const native = await p.evaluate(() => window.__NATIVE__);
+  await ctx.close();
+  return { pass: keptOnCancel === 1 && closedOnOk === 0 && seen.length === 2 && /unsaved|not saved/i.test(seen[0])
+      && !native.length && !errors.length,
+    detail: { keptOnCancel, closedOnOk, seen, native, errors } };
 });
 
 // ── PARTE 11 · shelf e storage leggibili ────────────────────────────────────
@@ -3945,16 +4053,15 @@ test("V9b.open", "aprire un em.json sopra un grafo con modifiche non salvate CHI
   const { p, ctx, errors } = await open({ doc: "catena", locale: "en" });
   const first = await p.evaluate(() => window.__EM_DRAG__.idsOfType("US")[0]);
   await p.evaluate((id) => window.__EM_DRAG__.edit(id, { description: "edited, not saved" }), first);
-  const dialogs = [];
-  let answer = false;
-  p.on("dialog", async (d) => { dialogs.push(d.message()); answer ? await d.accept() : await d.dismiss(); });
+  await answerAppDialogs(p, false);
   await p.setInputFiles("#file-input", `${TD}TempluMare.em.json`);
   await p.waitForTimeout(1200);
   const afterCancel = await p.evaluate(() => window.__EM_DRAG__.slots());
-  answer = true;
+  await answerAppDialogs(p, true);
   await p.setInputFiles("#file-input", `${TD}TempluMare.em.json`);
   await p.waitForFunction(() => window.__EM_DRAG__.slots().length === 2, null, { timeout: 30000 }).catch(() => {});
   const afterOk = await p.evaluate(() => window.__EM_DRAG__.slots());
+  const dialogs = await seenDialogs(p);
   await ctx.close();
   return { pass: dialogs.length === 2 && /unsaved changes/.test(dialogs[0])
       && afterCancel.length === 1 && afterCancel[0].dirty
@@ -4429,8 +4536,7 @@ test("W10.storage", "U10–U12, V1, V2 · Storage: il dettaglio è un riquadro f
 
 test("W11.seed", "V3 · un grafo nuovo che nessuno ha toccato (New / «Prima unità» e Esc) cede il posto al GraphML importato e non si salva; uno toccato resta", async () => {
   const { p, ctx, errors } = await open({ doc: null, locale: "en" });
-  const dialogs = [];
-  p.on("dialog", async (d) => { dialogs.push(d.message().slice(0, 60)); await d.accept(); });
+  await answerAppDialogs(p, true);
   await p.evaluate(() => document.getElementById("btn-new").click());
   await p.waitForTimeout(700);
   await p.setInputFiles("#file-input", `${TD}TempluMare.em.json`);
@@ -4445,6 +4551,7 @@ test("W11.seed", "V3 · un grafo nuovo che nessuno ha toccato (New / «Prima uni
   await p.setInputFiles("#file-input", `${TD}TempluMare.em.json`);
   await p.waitForTimeout(2500);
   const slots2 = await p.evaluate(() => window.__EM_DRAG__.slots().length);
+  const dialogs = (await seenDialogs(p)).map((m) => m.slice(0, 60));
   await ctx.close();
   return { pass: slots.length === 1 && graphs.length === 1 && !graphs.some((g) => /untitled/.test(String(g))) && dialogs.length === 1 && slots2 === 3 && !errors.length,
     detail: { slots, graphs, dialogs, slots2, errors } };
@@ -4476,8 +4583,7 @@ test("W13.compose", "D1/D2 · il compositore: per un Download «da dove» è obb
   await p.fill('.stamp-compose input[data-field="operator"]', "0000-0002-5065-7970");
   await p.click('.stamp-compose button[data-field="today"]');
   // emptied, the origin stops the stamp (no «stamp anyway?»)
-  const dialogs = [];
-  p.on("dialog", async (d) => { dialogs.push(d.message()); await d.dismiss(); });
+  await answerAppDialogs(p, false);
   await p.fill('.stamp-compose input[data-field="source"]', "");
   await p.click('.stamp-compose button[data-action="stamp"]');
   await p.waitForTimeout(500);
@@ -4494,6 +4600,7 @@ test("W13.compose", "D1/D2 · il compositore: per un Download «da dove» è obb
   // one output: no act's name
   await storageClick(p, files[0]);
   const one = await p.evaluate(() => !!document.querySelector('.stamp-compose input[data-field="campaign"]'));
+  const dialogs = await seenDialogs(p);
   await ctx.close();
   return { pass: src === "10.5281/zenodo.7654321" && name === "Download 10.5281/zenodo.7654321"
       && blocked.focus === "source" && !!blocked.err && !none && !dialogs.length
@@ -6445,7 +6552,7 @@ function leftoversOf(says, words, baseline) {
 // went on drawing its sheet while the header followed the menu)
 test("TT2.sheets", "MICRO T2 · Tabular: ogni foglio scelto dal menu mostra il SUO contenuto (Warnings → Units → Documents → Warnings e ritorno), nelle finestre Tabular di Stratigrafia, Fonti e Spazio, all'arrivo e dopo «↺»", async () => {
   const { p, ctx, errors } = await open({ doc: "TempluMare", locale: "en" });
-  p.on("dialog", (d) => d.accept());
+  await answerAppDialogs(p, true);
   const read = (win) => p.evaluate((w) => {
     const a = document.querySelector(`.tile-area[data-win="${w}"]`);
     const body = a?.querySelector(".tile-tablebody");
@@ -8093,10 +8200,10 @@ test("IP2.pill", "INSTALLER-PULSANTE p.2 · «Ritrova i file» sempre a portata:
     return { shown: !b.classList.contains("hidden"), text: b.textContent, title: b.title, missing: b.dataset.missing, link: b.dataset.link,
       besideLog: b.previousElementSibling?.id === "footer-log" && b.closest(".sb-log") !== null };
   });
-  let asked = null;
-  p.once("dialog", (d) => { asked = d.message(); void d.accept(WP_V4.replace(/\/EM\/[^/]+$/, "")); });
+  await answerAppDialogs(p, WP_V4.replace(/\/EM\/[^/]+$/, ""));
   await p.click("#footer-missing");
   const opened = await p.waitForSelector('.modal[data-dialog="relocate"]', { timeout: 180000 }).then(() => true, () => false);
+  const asked = (await seenDialogs(p))[0] ?? null;
   await p.screenshot({ path: SHOT("ip2-pill") }).catch(() => {});
   await ctx.close();
   const o = await open({ doc: "catena" });
@@ -8113,10 +8220,10 @@ test("IP2.failmenu", "INSTALLER-PULSANTE p.2 · nell'Outliner dello Spazio il se
   const mark = await p.evaluate(() => { const f = document.querySelector(".sol-fail-menu"); return { tag: f.tagName, title: f.title }; });
   await p.click(".sol-fail-menu");
   const menu = await p.evaluate(() => [...document.querySelectorAll(".scn-menu button")].map((b) => ({ act: b.dataset.s3, text: b.textContent, disabled: b.disabled })));
-  let asked = null;
-  p.once("dialog", (d) => { asked = d.message(); void d.dismiss(); });
+  await answerAppDialogs(p, false);
   await p.click('.scn-menu button[data-s3="relocate"]');
   await p.waitForTimeout(600);
+  const asked = (await seenDialogs(p))[0] ?? null;
   // the right click on a model's row that did not come
   const row = p.locator(".sol-row.failed", { has: p.locator(".sol-fail-menu") }).first();
   const rowCount = await row.count();
@@ -10362,7 +10469,7 @@ const tsdWait = async (p, fn, ms = 30000) => { const t0 = Date.now(); for (;;) {
 test("TD1.viewer", "tileset trascinato · uno zip dal sistema sul Viewer: si vede subito (le tile lette a pezzi dal Blob), la barra dice cos'è; «Attacca all'epoca…» chiede, scrive RM + risorsa nell'epoca, un passo di annulla", async () => {
   const { dir } = await tsdBench("td1");
   const { p, ctx, errors } = await open({ doc: "catena", ws: "provenance" });
-  p.on("dialog", (d) => { void d.accept(); });
+  await answerAppDialogs(p, true);
   const win = await winOf(p, "viewer");
   const prevented = await tsdDropFiles(p, win, [{ name: "disco.zip", b64: readFileSync(`${dir}/disco.zip`).toString("base64") }]);
   const bar = await tsdWait(p, () => tsdBar(p, win));
@@ -10415,7 +10522,7 @@ test("TD3.pack", "tileset trascinato · «Prepara il pacchetto» sulla forma Rea
   const listing = () => execFileSync("find", [dir, "-type", "f"], { encoding: "utf8" }).split("\n").filter(Boolean).sort();
   const before = listing();
   const { p, ctx, errors } = await open({ doc: "catena", ws: "provenance" });
-  p.on("dialog", (d) => { void d.accept(); });
+  await answerAppDialogs(p, true);
   const win = await winOf(p, "viewer");
   await tsdDropPath(p, win, { path: `${dir}/disco_rs.json`, type: "file", name: "disco_rs.json", ext: "json" });
   const bar0 = await tsdWait(p, () => tsdBar(p, win));

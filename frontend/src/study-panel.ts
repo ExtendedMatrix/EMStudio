@@ -32,6 +32,7 @@
  */
 
 import { t } from "./i18n";
+import { askConfirm } from "./app-dialog";
 import type {
   DocumentStore,
   HdtoFields,
@@ -456,16 +457,17 @@ export function renderSitePosition(host: HTMLElement, store: DocumentStore,
 }
 
 /** Asks before un-ticking «a recognised heritage asset» deletes the HC1, its
- *  twin and its «part of» (E.D., 11 Oct 2026). `window.confirm`, replaceable
- *  (`setUndeclareConfirm`) for a test or another dialog. */
-let askUndeclare = (name: string): boolean =>
-  typeof window !== "undefined" && typeof window.confirm === "function"
-    ? window.confirm(t("insp.hdtUndeclareConfirm", { name: name.trim() || "—" }))
+ *  twin and its «part of» (E.D., 11 Oct 2026). The app's dialog (no native
+ *  `confirm`: it is silent in the desktop), replaceable (`setUndeclareConfirm`)
+ *  for a test or another dialog — a test's answer may be synchronous. */
+let askUndeclare = (name: string): boolean | Promise<boolean> =>
+  typeof document !== "undefined"
+    ? askConfirm(t("insp.hdtUndeclareConfirm", { name: name.trim() || "—" }), { danger: true })
     : false;
-function confirmUndeclare(name: string): boolean {
+function confirmUndeclare(name: string): boolean | Promise<boolean> {
   return askUndeclare(name);
 }
-export function setUndeclareConfirm(fn: (name: string) => boolean): void {
+export function setUndeclareConfirm(fn: (name: string) => boolean | Promise<boolean>): void {
   askUndeclare = fn;
 }
 
@@ -772,13 +774,17 @@ export function renderStudyPanel(
   declaredCb.addEventListener("change", () => {
     // un-ticking DELETES the HC1, its twin and its «part of» (E.D., 11 Oct
     // 2026): asked first, and nothing happens without a yes
-    if (!declaredCb.checked && store.readHdto().heritageDeclared &&
-        !confirmUndeclare(store.readHdto().heritageName)) {
-      declaredCb.checked = true;
+    const go = (): void => {
+      heritageBox.style.display = declaredCb.checked ? "" : "none";
+      commit();
+    };
+    if (!declaredCb.checked && store.readHdto().heritageDeclared) {
+      const yes = confirmUndeclare(store.readHdto().heritageName);
+      const answer = (y: boolean): void => { if (y) go(); else declaredCb.checked = true; };
+      if (typeof yes === "boolean") answer(yes); else void yes.then(answer);
       return;
     }
-    heritageBox.style.display = declaredCb.checked ? "" : "none";
-    commit();
+    go();
   });
   panel = heritageBox;
   hfield("heritageName", t("insp.hdtEntityName"), t("insp.hdtEntityNamePh"));

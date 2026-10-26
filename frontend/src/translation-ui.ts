@@ -24,6 +24,7 @@
  * no text from the graph is ever parsed as HTML.
  */
 import { t } from "./i18n";
+import { askText, tell } from "./app-dialog";
 import type { DocumentStore } from "./model";
 import type { EmNode } from "./types";
 import type { SignerIdentity } from "./narrative-authorship";
@@ -100,11 +101,11 @@ function languageSelect(ui: TranslationUi, value: string | null, opts: { exclude
 
 /** A select that may answer «other…»: then a tag is asked, and refused unless
  *  it is one (never guessed). Resolves to the tag, "" (none), or null (cancel). */
-function readLanguage(sel: HTMLSelectElement): string | null {
+async function readLanguage(sel: HTMLSelectElement): Promise<string | null> {
   if (sel.value !== "__other") return sel.value;
-  const typed = (window.prompt(t("tr.typeTag")) ?? "").trim();
+  const typed = ((await askText(t("tr.typeTag"))) ?? "").trim();
   if (!typed) return null;
-  if (!isLanguageTag(typed)) { window.alert(t("tr.err.lang")); return null; }
+  if (!isLanguageTag(typed)) { await tell(t("tr.err.lang")); return null; }
   return typed;
 }
 
@@ -141,8 +142,8 @@ export function renderLanguageRow(host: HTMLElement, ui: TranslationUi, nodeId: 
     sel.classList.add("tr-declare");
     orig.replaceWith(sel);
     sel.focus();
-    const finish = (): void => {
-      const v = readLanguage(sel);
+    const finish = async (): Promise<void> => {
+      const v = await readLanguage(sel);
       if (v === null) { ui.done("", []); return; }
       const st = ui.store();
       if (!st) return;
@@ -302,8 +303,8 @@ export function openFacingText(ui: TranslationUi, nodeId: string, field: string,
       { none: o.from === "study" ? `${o.lang} · ${t("tr.fromStudy")}` : t("tr.noLang"), aria: t("tr.origLangAria") });
     origSel.dataset.ffOrig = "1";
     if (current) { origSel.disabled = true; origSel.title = t("tr.origLockedTitle"); }
-    origSel.addEventListener("change", () => {
-      const v = readLanguage(origSel);
+    origSel.addEventListener("change", async () => {
+      const v = await readLanguage(origSel);
       if (v === null) { render(); return; }
       declareNodeLanguage(st, nodeId, v || null);
       ui.done(v ? t("tr.langDeclared", { n: String(n.name ?? nodeId), lang: langLabel(ui, v) })
@@ -337,8 +338,8 @@ export function openFacingText(ui: TranslationUi, nodeId: string, field: string,
     const langSel = languageSelect(ui, draft.lang || null, { exclude: o.lang, none: "—", aria: t("tr.transLangAria") });
     langSel.dataset.ffLang = "1";
     if (current) { langSel.disabled = true; langSel.title = t("tr.langLockedTitle"); }
-    langSel.addEventListener("change", () => {
-      const v = readLanguage(langSel);
+    langSel.addEventListener("change", async () => {
+      const v = await readLanguage(langSel);
       if (v !== null) draft.lang = v;
       render();
     });
@@ -488,7 +489,7 @@ export function openFacingText(ui: TranslationUi, nodeId: string, field: string,
     btn.textContent = t("tr.aiAsking");
     const r = await ui.proposeAi(fieldText(n, field) ?? "", o, draft.lang);
     if (!veil.isConnected) return;
-    if (!r.ok) { window.alert(t("tr.aiFailed", { why: r.why })); render(); return; }
+    if (!r.ok) { await tell(t("tr.aiFailed", { why: r.why })); render(); return; }
     draft = { ...draft, text: r.text, method: "ai", review: true, provider: r.provider, model: r.model };
     render();
   };
@@ -551,7 +552,7 @@ export function openFacingText(ui: TranslationUi, nodeId: string, field: string,
       // a refusal inside the batch: the batch threw before writing anything
       // the store keeps; the reason is said in the interface's words
       const code = e instanceof TranslationError ? e.code : "";
-      window.alert(code ? t(`tr.err.${code}`) : String(e));
+      void tell(code ? t(`tr.err.${code}`) : String(e));
     }
   };
 

@@ -5,6 +5,7 @@
 // `resourceSummary` is PURE (it reads a ResourceGraph and answers data), so
 // `check-resources.mjs` asks it directly; `renderResourcePanel` only draws it.
 import { t } from "./i18n";
+import { askText, tell } from "./app-dialog";
 import { addresses } from "./addresses";
 import { COMMON_LANGUAGES, contentLanguages, contentLanguagesValue, isLanguageTag } from "./translation";
 import { contentDigestOf, formsOf } from "./pack3tz";
@@ -361,11 +362,11 @@ function contentLanguageSection(store: DocumentStore, id: string): HTMLElement {
   const other = document.createElement("option");
   other.value = "__other__"; other.textContent = t("res.contentLangOther");
   sel.appendChild(other);
-  sel.addEventListener("change", () => {
+  sel.addEventListener("change", async () => {
     let v = sel.value;
-    if (v === "__other__") v = (window.prompt(t("res.contentLangOther")) ?? "").trim();
+    if (v === "__other__") v = ((await askText(t("res.contentLangOther"))) ?? "").trim();
     if (!v) return;
-    if (!isLanguageTag(v)) { window.alert(t("tr.err.lang")); return; }
+    if (!isLanguageTag(v)) { await tell(t("tr.err.lang")); return; }
     write([...now, v]);
   });
   row.appendChild(sel);
