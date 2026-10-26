@@ -6760,7 +6760,8 @@ test("DC1.menu", "DOVE-CHI-MENU p.1 · il File della pagina viene dalla tabella:
   const help = await p.evaluate(() => [...document.querySelectorAll("#dd-help .dd-menu > button")].map((e) => e.dataset.cmd));
   const labels = await p.evaluate(() => [...document.querySelectorAll("#dd-file .dd-menu > button .dd-label-text")].map((e) => e.textContent));
   await ctx.close();
-  const want = ["new", "open", "openRecent", "openReplace", "close", "—", "save", "saveAs", "saveAll", "pin", "—",
+  // MICRO-CONTENTS-1 D9 · «New EM project…» beside New
+  const want = ["new", "newProject", "open", "openRecent", "openReplace", "close", "—", "save", "saveAs", "saveAll", "pin", "—",
     "import", "export", "integrate", "relocate", "collect", "—", "createRoom", "bringIntoRoom"];
   return { pass: JSON.stringify(file) === JSON.stringify(want) && JSON.stringify(edit) === JSON.stringify(["undo", "redo"])
       && help.includes("settingsHelp") && help.includes("aboutHelp") && !help.includes("updatesHelp")
@@ -10065,7 +10066,10 @@ test("GR2.clip", "GEOREF-GRAFO p.0b · il terreno non copre il rilievo: GT16 (EP
   return { pass, detail: out };
 });
 
-test("GR3.node", "GEOREF-GRAFO p.1 · il georiferimento è un nodo esposto del grafo: il GT16 (geo_TempluMare_v2, 0 archi su disco) all'apertura entra nel gruppo «Graph paradata» con un is_in_paradata_nodegroup — una correzione detta UNA volta nel Log, un passo che Ctrl+Z toglie, il file segnato come modificato; si vede nel Grafo e nella vista «Graphs paradata» accanto a licenza e autore; salvato e riaperto, l'arco c'è una volta e nessuna correzione è ridetta; i valori (EPSG:3844 327372.56 448682.65 0) non cambiano", async () => {
+// MICRO-CONTENTS-1 B6 (E.D., 26 Oct 2026) · the correction made at the open is
+// no longer «modified»: it is said on the graph's row («completato»), written by
+// the next Save (the reopening below proves it), redone by the next open
+test("GR3.node", "GEOREF-GRAFO p.1 · il georiferimento è un nodo esposto del grafo: il GT16 (geo_TempluMare_v2, 0 archi su disco) all'apertura entra nel gruppo «Graph paradata» con un is_in_paradata_nodegroup — una correzione detta UNA volta nel Log, un passo che Ctrl+Z toglie, il file NON segnato come modificato (completato all'apertura, MICRO-CONTENTS-1 B6); si vede nel Grafo e nella vista «Graphs paradata» accanto a licenza e autore; salvato e riaperto, l'arco c'è una volta e nessuna correzione è ridetta; i valori (EPSG:3844 327372.56 448682.65 0) non cambiano", async () => {
   if (!existsSync(GEOREF_V4)) return { pass: false, detail: { missing: GEOREF_V4 } };
   const GEO = "geo_TempluMare_v2";
   // the premise, made here (MICRO-SUITE-VERDE): a GT16 saved BEFORE GEOREF-GRAFO,
@@ -10100,7 +10104,7 @@ test("GR3.node", "GEOREF-GRAFO p.1 · il georiferimento è un nodo esposto del g
   await ctx.close();
   const PD = "6af9866e-96a9-5c99-a6b1-78524ae2e2c2_graph_paradata";
   const V = JSON.stringify([3844, 327372.56, 448682.65, 0]);
-  const pass = JSON.stringify(out.edges) === JSON.stringify([PD]) && out.said === 1 && out.undo === 1 && out.dirty === true && JSON.stringify(out.data) === V
+  const pass = JSON.stringify(out.edges) === JSON.stringify([PD]) && out.said === 1 && out.undo === 1 && out.dirty === false && JSON.stringify(out.data) === V
     && out.inGraph && out.inGraphs.geo && out.inGraphs.lic && out.afterUndo.length === 0
     && JSON.stringify(out.reopened.edges) === JSON.stringify([PD]) && out.reopened.said === 1 && JSON.stringify(out.reopened.data) === V && !errors.length;
   return { pass, detail: out };

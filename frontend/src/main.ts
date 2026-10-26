@@ -16378,12 +16378,15 @@ function openResources(): void {
   // MICRO-CONTENTS-1 D39 · the scan reads AGAINST a graph, and «→ Documento»
   // writes INTO it: the modal says which, and its ▾ changes it
   {
-    const body = resourcesModal.querySelector<HTMLElement>(".modal-body");
-    let line = body?.querySelector<HTMLElement>(":scope > .res-graphline") ?? null;
-    if (body && !line) {
+    // in the HEAD, beside the title: the body's height is the scan's (its rows'
+    // thumbnails load as they come into view — measured, a line on top of the
+    // body pushed the tenth out of it)
+    const head = resourcesModal.querySelector<HTMLElement>(".modal-head");
+    let line = head?.querySelector<HTMLElement>(":scope > .res-graphline") ?? null;
+    if (head && !line) {
       line = document.createElement("div");
       line.className = "win-graphline res-graphline";
-      body.prepend(line);
+      head.querySelector(":scope > span")?.after(line);
     }
     if (line) paintGraphLine(line);
   }

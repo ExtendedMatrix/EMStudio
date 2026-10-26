@@ -10390,7 +10390,7 @@ body.em-detached #tile-root > .tile-area.tile-detached {
   color: var(--text-muted);
   white-space: nowrap;
 }
-.res-graphline { border: 1px solid var(--border); border-radius: var(--radius); margin-bottom: 8px; }
+.res-graphline { border: none; background: none; padding: 0 8px; margin-right: auto; color: inherit; }
 .gl-label { flex: none; }
 .gl-pick {
   display: inline-flex;
