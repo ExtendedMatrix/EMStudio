@@ -33543,7 +33543,11 @@ function stampCard(stamp: Stamp): HTMLElement {
   row("stamp.card.when", w.when, "when");
   row("stamp.card.act", act + (w.withWhat ? ` · ${w.withWhat}` : ""), "act");
   row("stamp.card.from", w.from, "from");
-  row("stamp.card.seal", digest ? `${digest.slice(0, 15)}…${digest.slice(-6)}${st.self?.digest_covers ? ` · ${st.self.digest_covers}` : ""}` : "", "seal");
+  // MICRO-CONTENTS-2 D34 · the seal abbreviated, without «· artifact» (what
+  // the digest covers goes in the tooltip)
+  row("stamp.card.seal", digest ? `${digest.slice(0, 15)}…${digest.slice(-6)}` : "", "seal");
+  const sealDd = card.querySelector<HTMLElement>('[data-card="seal"]');
+  if (sealDd) sealDd.title = [digest, st.self?.digest_covers ? t("stamp.card.covers", { what: String(st.self.digest_covers) }) : ""].filter(Boolean).join("\n");
   return card;
 }
 
@@ -33802,9 +33806,11 @@ function stampReportBox(report: FolderReport): HTMLElement {
   box.className = "stamp-report";
   const head = document.createElement("div");
   head.className = "stamp-report-head";
-  head.textContent = t("stamp.reportHead", {
-    files: String(report.files), hashed: String(report.hashed),
-  });
+  // MICRO-CONTENTS-2 D29 · three short lines with their numbers; what each
+  // means, and how many digests were computed, in the tooltips («24 digests
+  // computed» beside «25 paired» read as figures that did not add up)
+  head.textContent = t("stamp.reportHeadShort", { files: String(report.files) });
+  head.title = t("stamp.reportHead", { files: String(report.files), hashed: String(report.hashed) });
   box.appendChild(head);
 
   const row = (cls: string, label: string, n: number, note: string): void => {
@@ -33814,9 +33820,8 @@ function stampReportBox(report: FolderReport): HTMLElement {
     count.textContent = String(n);
     const text = document.createElement("span");
     text.textContent = ` ${label}`;
-    const why = document.createElement("i");
-    why.textContent = note;
-    el.append(count, text, why);
+    el.title = note.replace(/^\s*—\s*/, "");
+    el.append(count, text);
     box.appendChild(el);
   };
   row("paired", t("stamp.classPaired"), report.paired.length,
@@ -35622,7 +35627,12 @@ function storageRow(win: Win, entry: FsEntry, cover?: FolderCover): HTMLElement 
   // the card; the sidecar row stays the plain file it is
   const own = cover?.selves.get(stampPathFor(entry.path));
   if (own && !isStampPath(entry.path)) {
-    name.prepend(sealMini(typeof own.digest === "string" ? own.digest : "", () => { void showSealOf(entry.path); }));
+    // MICRO-CONTENTS-2 D20 · the seal is a button of its own (drawn as one), and
+    // its click also chooses the file: the card opens on the row it belongs to
+    name.prepend(sealMini(typeof own.digest === "string" ? own.digest : "", () => {
+      if (entry.type === "file" && storageSelected(win) !== entry.path) setStorageSelected(win, entry.path);
+      void showSealOf(entry.path);
+    }));
     row.dataset.stamped = "1";
   }
   // CAMPAGNA · a member of a file set is IN a stamp, not unstamped: said here

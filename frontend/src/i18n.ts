@@ -2355,7 +2355,7 @@ const EN: Dict = {
   "assets.seeDag": "See the DAG",
   "assets.seeDagHint": "Draw the corpus as what it is: acquisitions → transformations → outputs, and a file two chains consumed showing BOTH of its inputs — which a stratigraphic matrix could not draw.",
   "assets.corpusCounts": "{lots} lot(s) · {chains} chain(s) · {shared} shared file(s). The corpus is a member of its own: acquisitions, transformations and the files they are about — a forest that shares its leaves, not a stratigraphic matrix.",
-  "assets.corpusEmpty": "Nothing documented yet. Publish a lot above and its acquisition lands in the corpus; then a derivation can be declared from it.",
+  "assets.corpusEmpty": "Nothing documented yet: a lot published in the room enters the corpus, and from there a derivation can be declared.",
   "assets.lotMembers": "{n} file",
   "assets.derivation": "Declare a derivation",
   "assets.derivationHint": "What came out of what. DECLARED, never guessed: nobody infers that an orthophoto came from that flight because the dates line up. An input can be a whole lot — that is what the serial node is for.",
@@ -3185,13 +3185,13 @@ const EN: Dict = {
   "stamp.reportWorking": "hashing…",
   "stamp.reportHead": "{files} files · {hashed} digests computed",
   "stamp.reportClose": "close",
-  "stamp.classPaired": "paired",
+  "stamp.classPaired": "stamped, the bytes agree",
   "stamp.classPairedNote": " — bytes and stamp agree on the digest",
-  "stamp.classStampNoBytes": "stamps without bytes",
+  "stamp.classStampNoBytes": "stamps without their file",
   "stamp.classStampNoBytesNote":
     " — moved, renamed out of this tree, deleted or modified: four different "
     + "things, and this does not guess which",
-  "stamp.classNoStamp": "bytes without a stamp",
+  "stamp.classNoStamp": "files without a stamp",
   "stamp.classNoStampNote": " — the normal state of a working folder",
   "stamp.classUnreadable": "unreadable",
   "stamp.classUnreadableNote": " — a .stamp.json that is not a stamp",
@@ -4100,7 +4100,7 @@ const EN: Dict = {
   "receipt.editInStampHint": "The title and the description are written in the stamp: this opens its form on this file, and the copy here follows",
   "receipt.noWords": "no title, no description",
   "receipt.editWords": "Edit title and description",
-  "receipt.wordsNote": "Only the title and the description change: they are a courtesy, not the act — the bytes, the provenance, how and who stay as they are.",
+  "receipt.wordsNote": "The title and the description can be corrected; the rest of the stamp cannot.",
   "receipt.saveWords": "Save in the stamp",
   "receipt.cancelWords": "Cancel",
   "receipt.wordsFailed": "The stamp was not rewritten: {why}",
@@ -4895,6 +4895,8 @@ const EN: Dict = {
   "win.splitBelow": "Split: a window below",
   "win.splitHint": "The same as dragging a corner of the area inwards; dragging it onto a neighbour joins them",
   "win.maximizeTitle": "Magnify this window (also a double click on the empty header, or Ctrl+Space)",
+  "stamp.reportHeadShort": "{files} files in this folder",
+  "stamp.card.covers": "the seal covers: {what}",
 };
 
 // ── Italiano: complete, because E.D. works in it ───────────────────────────────
@@ -7165,7 +7167,7 @@ const IT: Dict = {
   "assets.seeDag": "Vedi il DAG",
   "assets.seeDagHint": "Disegna il corpus per quel che è: acquisizioni → trasformazioni → output, e un file consumato da due catene che mostra ENTRAMBI i suoi ingressi — cosa che una matrice stratigrafica non sapeva disegnare.",
   "assets.corpusCounts": "{lots} lotti · {chains} catene · {shared} file condivisi. Il corpus è un membro a sé: acquisizioni, trasformazioni e i file di cui parlano — una foresta che condivide le foglie, non una matrice stratigrafica.",
-  "assets.corpusEmpty": "Niente ancora documentato. Pubblica un lotto qui sopra e la sua acquisizione entra nel corpus; da lì si può dichiarare una derivazione.",
+  "assets.corpusEmpty": "Niente ancora documentato: un lotto pubblicato nella stanza entra nel corpus, e da lì si può dichiarare una derivazione.",
   "assets.lotMembers": "{n} file",
   "assets.derivation": "Dichiara una derivazione",
   "assets.derivationHint": "Cosa è venuto da cosa. DICHIARATO, mai indovinato: nessuno deduce che un'ortofoto viene da quel volo perché le date coincidono. Un ingresso può essere un lotto intero — è a questo che serve il nodo seriale.",
@@ -7972,13 +7974,13 @@ const IT: Dict = {
   "stamp.reportWorking": "calcolo le impronte…",
   "stamp.reportHead": "{files} file · {hashed} impronte calcolate",
   "stamp.reportClose": "chiudi",
-  "stamp.classPaired": "accoppiati",
+  "stamp.classPaired": "timbrati, i byte coincidono",
   "stamp.classPairedNote": " — byte e timbro d'accordo sull'impronta",
-  "stamp.classStampNoBytes": "timbri senza byte",
+  "stamp.classStampNoBytes": "timbri senza il loro file",
   "stamp.classStampNoBytesNote":
     " — spostato, rinominato fuori da questo albero, cancellato o modificato: "
     + "quattro cose diverse, e qui non si indovina quale",
-  "stamp.classNoStamp": "byte senza timbro",
+  "stamp.classNoStamp": "file senza timbro",
   "stamp.classNoStampNote": " — lo stato normale di una cartella di lavoro",
   "stamp.classUnreadable": "illeggibili",
   "stamp.classUnreadableNote": " — un .stamp.json che non è un timbro",
@@ -8868,7 +8870,7 @@ const IT: Dict = {
   "receipt.editInStampHint": "Titolo e descrizione si scrivono nel timbro: apre il suo modulo su questo file, e la copia qui segue",
   "receipt.noWords": "nessun titolo, nessuna descrizione",
   "receipt.editWords": "Modifica titolo e descrizione",
-  "receipt.wordsNote": "Cambiano solo titolo e descrizione: sono una cortesia, non l'atto — i byte, la provenienza, il come e il chi restano quelli.",
+  "receipt.wordsNote": "Titolo e descrizione si possono correggere; il resto del timbro no.",
   "receipt.saveWords": "Salva nel timbro",
   "receipt.cancelWords": "Annulla",
   "receipt.wordsFailed": "Il timbro non è stato riscritto: {why}",
@@ -9663,6 +9665,8 @@ const IT: Dict = {
   "win.splitBelow": "Dividi: una finestra sotto",
   "win.splitHint": "Come trascinare dentro un angolo dell'area; trascinarlo su una vicina le unisce",
   "win.maximizeTitle": "Massimizza questa finestra (anche doppio clic sulla parte vuota dell'intestazione, o Ctrl+Spazio)",
+  "stamp.reportHeadShort": "{files} file in questa cartella",
+  "stamp.card.covers": "il sigillo copre: {what}",
 };
 
 // ── The six other project languages: AI DRAFTS, awaiting validation ───────────

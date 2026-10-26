@@ -10474,3 +10474,6 @@ body.em-detached #tile-root > .tile-area.tile-detached {
 .et-pencil { flex: none; padding: 0 4px; border: none; background: none; color: var(--text-dim); font-size: 12px;
   line-height: 1.4; cursor: pointer; border-radius: var(--radius-sm); opacity: .7; }
 .et-pencil:hover, .et-pencil:focus-visible { color: var(--accent-ink); background: var(--bg-accent-soft); opacity: 1; }
+/* MICRO-CONTENTS-2 D20 · the seal of a row is a button of its own, drawn as one */
+.storage-row .seal-mini { border-radius: 50%; cursor: pointer; }
+.storage-row .seal-mini:hover, .storage-row .seal-mini:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
