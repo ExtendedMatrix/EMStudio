@@ -122,6 +122,10 @@ export interface RenderState {
    *  decorators): one switched off is not drawn and has no hit rect. Nothing
    *  else changes — no layout, no scene. Absent → all drawn. */
   overlays?: OverlayState | null;
+  /** MICRO-CONTENTS-1 F10 · the «+» that adds a phase to an epoch, on the lane's
+   *  rail. Only an epoch lane has it: the DTC's lanes (Ingressi, passo, Prodotti)
+   *  are drawn by the same code and are not epochs. Absent → drawn. */
+  addPhase?: boolean;
 }
 
 /** Label ink for a node: default, ORANGE when its name has a problem, RED when
@@ -2076,6 +2080,7 @@ export function render(
     // AUDIT N5 · only when it fits in THIS lane: in a thin lane it hung over the
     // next one (the lane menu and the Inspector's «+ Add phase» remain)
     if (addCy + addR > sy + sh - 1) continue;
+    if (state.addPhase === false) continue;
     laneChipHits[laneChipHits.length - 1].h = addCy + addR - (ty - 2);
     const ecol = lane.color || canvasTheme().labelMuted;
     ctx.strokeStyle = ecol;

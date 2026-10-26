@@ -3145,6 +3145,8 @@ function paintGraphWindow(p: GraphPaint): void {
       overlays: overlaysOfWin(p.winId, overlayViewOf(p.winId, p.mode)),
       // E5 · an undated epoch's lane invites to date it — drawn, never saved
       dateInvite: p.mode === "matrix" ? { text: t("epoch.inviteDate"), add: t("epoch.inviteAdd") } : null,
+      // MICRO-CONTENTS-1 F10 · a DTC lane is not an epoch: no «+ phase» on it
+      addPhase: p.mode !== "dtc",
     },
     w,
     h,
@@ -38956,7 +38958,8 @@ function wireGraphCanvas(canvas: HTMLCanvasElement, winId: string): void {
         return;
       }
       // "+" quick-add-phase button on an epoch's rail
-      const ap = hitAddPhase(lx, ly);
+      // (never in the DTC: its lanes are not epochs — MICRO-CONTENTS-1 F10)
+      const ap = view === "dtc" ? null : hitAddPhase(lx, ly);
       if (ap) {
         addPhasePending = ap;
         armChip();
