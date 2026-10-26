@@ -7009,7 +7009,7 @@ test("PU2.emtree", "PULIZIA p.2 · pannello dei file e dei grafi: niente testo i
       help: bar?.querySelector(".win-help")?.title ?? "", helpAria: bar?.querySelector(".win-help")?.getAttribute("aria-label") ?? "",
       intro: !!a?.querySelector(".et-intro"), actions: !!a?.querySelector('[data-et="et-new"], [data-et="et-open"]'), recents: !!a?.querySelector(".et-recents"),
       files: a?.querySelectorAll(".et-file").length ?? 0, slots: a?.querySelectorAll(".et-file .et-slot").length ?? 0,
-      active: a?.querySelectorAll(".et-slot.active").length ?? 0, move: a?.querySelectorAll(".et-move").length ?? 0,
+      active: a?.querySelectorAll(".et-slot.active").length ?? 0, move: a?.querySelectorAll(".et-more").length ?? 0,   // MICRO-CONTENTS-1 · the graph's one «⋯»
       auxQ: a?.querySelector(".aux-sect-head .et-q")?.title ?? "", todo: !!a?.querySelector(".et-todo") };
   }, win);
   const stacked = await look("canvas:graphs");
@@ -7617,6 +7617,8 @@ test("VS6.emtree", "VIEWER-SPAZIO-EMTREE p.6 · l'EMtree: un file per riga col s
       const over = [...a.querySelectorAll(".et-file-name, .et-name, .et-story-name, .et-aux-names, .et-meta")].filter((e) => getComputedStyle(e).whiteSpace !== "nowrap" && !e.closest(".et-pick, .et-file-head, .et-story, .et-aux")).length;
       const files = [...a.querySelectorAll(".et-file")].map((f) => ({ name: f.querySelector(".et-file-name")?.textContent, tip: f.querySelector(".et-file-head")?.title,
         tail: !!f.querySelector(".et-file-tail"), dirty: !!f.querySelector(".et-file-head .et-dirty"),
+        // MICRO-CONTENTS-1 B6 · what the open completed is said, not ●
+        completed: !!f.querySelector(".et-completed"),
         graphs: [...f.querySelectorAll(".et-slot")].map((g) => ({ name: g.querySelector(".et-name")?.textContent, code: g.querySelector(".et-code")?.textContent ?? null,
           meta: g.querySelector(".et-row .et-meta")?.textContent, active: g.querySelector(".et-pick")?.getAttribute("aria-current") === "true",
           stories: g.querySelectorAll(".et-story").length, aux: g.querySelector(".et-aux .et-aux-names")?.textContent ?? null })) }));
@@ -7631,7 +7633,7 @@ test("VS6.emtree", "VIEWER-SPAZIO-EMTREE p.6 · l'EMtree: un file per riga col s
   await ctx.close();
   const ok = (x) => x && !x.tall.length && x.files.length === 2 && x.files.every((f) => !f.tail && /\.em\.json$/.test(f.tip ?? "") && /^[^/]+\.em\.json$/.test(f.name ?? ""))
     && x.files[0].graphs[0]?.code === "GT16" && /nodi/.test(x.files[0].graphs[0]?.meta ?? "") && x.files[0].graphs[0]?.stories >= 1
-    && x.files[1].graphs[0]?.active && x.files[1].graphs[0]?.aux === "US_schede_2024.xlsx" && x.files.some((f) => f.dirty);
+    && x.files[1].graphs[0]?.active && x.files[1].graphs[0]?.aux === "US_schede_2024.xlsx" && x.files.some((f) => f.dirty || f.completed);
   const pass = ok(r[280]) && ok(r[400]) && r.hoverActs === "1" && !errors.length;
   return { pass, detail: { ...r, errors } };
 });

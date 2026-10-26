@@ -658,10 +658,10 @@ function auxSection(tree: EMTree, labels: (key: string, vars?: Record<string, st
     return `
       <li class="aux-row${f.expanded ? " open" : ""}" data-aux="${esc(f.id)}">
         <button class="aux-head" data-aux-toggle="${esc(f.id)}"
-                title="${esc(`${f.name} · ${type ? labels(`aux.type.${type.value}`) : f.fileType}: ${type ? labels(`aux.typeHint.${type.value}`) : ""}\n${stateWhy}`)}">
+                title="${esc(`${f.name} · ${type ? labels("aux.type." + type.value) : f.fileType}: ${type ? labels("aux.typeHint." + type.value) : ""}\n${stateWhy}`)}">
           <span class="aux-caret">${f.expanded ? "▾" : "▸"}</span>
           <span class="aux-name">${esc(f.name)}</span>
-          <span class="aux-type">${esc(type ? labels(`aux.type.${type.value}`) : f.fileType)}<span class="et-q" aria-hidden="true">?</span></span>
+          <span class="aux-type">${esc(type ? labels("aux.type." + type.value) : f.fileType)}<span class="et-q" aria-hidden="true">?</span></span>
           <span class="aux-badge aux-${state}">${esc(stateWord)}</span>
         </button>
         <button class="aux-del" data-aux-remove="${esc(f.id)}"
@@ -743,7 +743,7 @@ function auxOptionField(f: AuxiliaryFile, spec: AuxOptSpec, labels: (key: string
     return `<label class="aux-field"><span>${esc(label)}</span>
       <select data-aux-opt="${id}" data-opt-key="${spec.key}">
         ${spec.options.map((o) =>
-          `<option value="${esc(o)}"${String(v) === o ? " selected" : ""}>${esc(labels(`aux.opt.${spec.key}.${o}`))}</option>`).join("")}
+          `<option value="${esc(o)}"${String(v) === o ? " selected" : ""}>${esc(labels("aux.opt." + spec.key + "." + o))}</option>`).join("")}
       </select></label>`;
   }
   return `<label class="aux-field"><span>${esc(label)}</span>
@@ -753,7 +753,7 @@ function auxOptionField(f: AuxiliaryFile, spec: AuxOptSpec, labels: (key: string
 
 /** Why the map action carries a caveat for this type (bridge/mapping gaps). */
 function auxMapNote(fileType: AuxFileType, labels: (key: string) => string): string {
-  return labels(`aux.mapNote.${fileType}`);
+  return labels("aux.mapNote." + fileType);
 }
 
 /**
@@ -781,12 +781,16 @@ function auxReport(f: AuxiliaryFile, labels: (key: string, vars?: Record<string,
   // count above it is the whole number either way.
   const shown = r.unmatched.slice(0, 40);
   const rest = r.unmatchedCount - shown.length;
+  // (said outside the template: an object literal inside `${…}` desynchronises
+  // the i18n sweep's scanner, which counts only `${` as an opening)
+  const unmatchedSay = labels("aux.reportUnmatched", { n: String(r.unmatchedCount) });
+  const moreSay = labels("aux.reportMore", { n: String(rest) });
   return `
     <div class="aux-report aux-unmatched">
       <p class="aux-hint">${esc(counts)}</p>
-      <p>${esc(labels("aux.reportUnmatched", { n: String(r.unmatchedCount) }))}</p>
+      <p>${esc(unmatchedSay)}</p>
       <p class="aux-keys">${shown.map((k) => `<code>${esc(k)}</code>`).join(" ")}${
-        rest > 0 ? ` <span class="aux-hint">${esc(labels("aux.reportMore", { n: String(rest) }))}</span>` : ""}</p>
+        rest > 0 ? ` <span class="aux-hint">${esc(moreSay)}</span>` : ""}</p>
       <p class="aux-hint">${esc(labels("aux.reportWhy"))}</p>
     </div>`;
 }
@@ -802,10 +806,10 @@ function auxDetail(f: AuxiliaryFile, labels: (key: string, vars?: Record<string,
         <select data-aux-type="${esc(f.id)}">
           ${AUX_FILE_TYPES.map((t) =>
             `<option value="${t.value}"${t.value === f.fileType ? " selected" : ""}
-             >${esc(labels(`aux.type.${t.value}`))}</option>`).join("")}
+             >${esc(labels("aux.type." + t.value))}</option>`).join("")}
         </select>
       </label>
-      <p class="aux-hint">${esc(type ? labels(`aux.typeHint.${type.value}`) : "")}</p>
+      <p class="aux-hint">${esc(type ? labels("aux.typeHint." + type.value) : "")}</p>
       <label class="aux-field">
         <span>${esc(labels(type?.folder ? "aux.fieldFolder" : "aux.fieldPath"))}</span>
         <input type="text" value="${esc(f.locator)}" readonly
@@ -870,8 +874,9 @@ export function renderEMTree(host: HTMLElement, tree: EMTree,
     const tip = [name, code ? `(${code})` : "", `· ${nodes} ${labels("emtree.nodes")} · ${edges} ${labels("emtree.edges")}`,
       isActive ? `· ${labels("emtree.activeTitle")}` : `· ${labels("emtree.pickTitle")}`].filter(Boolean).join(" ");
     // MICRO-CONTENTS-1 B6 · what the open completed by itself, said and not ●
+    const notesSay = labels("emtree.completedTitle", { what: (slot.openNotes ?? []).join("; ") });
     const notes = !slot.store.dirty && slot.openNotes?.length
-      ? `<span class="et-completed" role="img" title="${esc(labels("emtree.completedTitle", { what: slot.openNotes.join("; ") }))}"
+      ? `<span class="et-completed" role="img" title="${esc(notesSay)}"
               aria-label="${esc(labels("emtree.completedAria"))}">${esc(labels("emtree.completed"))}</span>` : "";
     // COLLEGARE · the graph's stories, under it: a narrative lives IN a graph
     const stories = (slot.store.doc.graph?.nodes ?? []).filter((n) => n.node_type === "narrative")
@@ -919,6 +924,7 @@ export function renderEMTree(host: HTMLElement, tree: EMTree,
     const members = tree.slotsOf(file.id);
     // MICRO-CONTENTS-1 B14 · the graphs closed here are a LIST, each with «Riapri»
     const closed = handlers.closedOf?.(file.id) ?? [];
+    const closedSay = labels(closed.length === 1 ? "emtree.closedHead1" : "emtree.closedHead", { n: String(closed.length) });
     const kept = closed.length || (handlers.keptGraphsOf ? handlers.keptGraphsOf(file.id) : Object.keys(file.retained).length);
     // E5 · the file's DTC corpus, under its file: shown, or kept with a way to show it
     const corpus = handlers.corpusOf?.(file.id) ?? null;
@@ -958,7 +964,7 @@ export function renderEMTree(host: HTMLElement, tree: EMTree,
         ${corpusRow}
         ${closed.length ? `
         <div class="et-closed" data-closed-file="${esc(file.id)}">
-          <p class="et-closed-head" title="${esc(labels("emtree.closedHeadTitle"))}">${esc(labels(closed.length === 1 ? "emtree.closedHead1" : "emtree.closedHead", { n: String(closed.length) }))}</p>
+          <p class="et-closed-head" title="${esc(labels("emtree.closedHeadTitle"))}">${esc(closedSay)}</p>
           <ul>${closed.map((c) => `
             <li class="et-closed-row">
               <span class="et-mark" aria-hidden="true">○</span>
