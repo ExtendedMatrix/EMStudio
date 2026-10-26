@@ -52,6 +52,7 @@ export interface RemovalReport {
   resources_alone: RemovalItem[];
   files_alone: string[];
   active_graph_id: string | null;
+  active_graph_name: string | null;
   active_changed: boolean;
 }
 
@@ -204,6 +205,7 @@ export function graphRemovalReport(doc: ContainerLike, graphId: string,
     resources_alone: alone,
     files_alone: files,
     active_graph_id: newActive,
+    active_graph_name: newActive ? (text(others.find(([id]) => id === newActive)?.[1].name) || newActive) : null,
     active_changed: newActive !== active,
   };
 }
