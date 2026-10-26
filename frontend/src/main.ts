@@ -29264,24 +29264,26 @@ function renderShelfInto(win: Win, body: HTMLElement,
     // CAMPAGNA (difetto 14) · the receipts of the ACTIVE study (`registry.
     // graph_id` of their stamps), and the others said, one click away
     const active = store ? String((store.doc.graph as Record<string, unknown>).graph_id ?? "") : "";
-    const all = !active || winCurrent(win, "shelf.studies") === "all";
+    // MICRO-CONTENTS-2 C10 · everything by default (71 entries opened on an
+    // empty list); «only this graph» is the choice, and the others are marked
+    const all = !active || winCurrent(win, "shelf.studies") !== "this";
     for (const e of entries) if (receiptOf(e) && paths.isAbsolute(e.locator) && !receiptChecks.has(e.id))
       void runReceiptCheck(e.id, e.locator, receiptOf(e)!);
     const shown = all ? entries : entries.filter((e) => !receiptOf(e) || receiptStudy.get(e.id) === active);
     const other = entries.filter((e) => receiptOf(e) && receiptStudy.has(e.id) && receiptStudy.get(e.id) !== active).length;
     const unknown = entries.filter((e) => receiptOf(e) && !receiptStudy.has(e.id)).length;
-    if (active && (other || unknown || all)) {
+    if (active && (other || unknown)) {
       const note = document.createElement("div");
       note.className = "shelf-studies";
       note.dataset.other = String(other);
       note.dataset.unknown = String(unknown);
-      note.textContent = all ? t("shelf.allStudies", { n: String(entries.length) })
+      note.textContent = all ? t("shelf.allStudies", { n: String(entries.length), o: String(other), u: String(unknown) })
         : t("shelf.thisStudy", { n: String(shown.length), o: String(other), u: String(unknown) });
       const b = document.createElement("button");
       b.className = "ghost";
       b.dataset.action = "shelf-studies";
       b.textContent = all ? t("shelf.showThisStudy") : t("shelf.showAllStudies");
-      b.onclick = () => { setWinCurrent(win, "shelf.studies", all ? null : "all"); renderShelf(); };
+      b.onclick = () => { setWinCurrent(win, "shelf.studies", all ? "this" : null); renderShelf(); };
       note.append(" ", b);
       body.appendChild(note);
     }
@@ -29577,7 +29579,10 @@ function shelfRow(entry: ShelfEntry): HTMLElement {
   name.textContent = entry.name;
   const locator = document.createElement("code");
   locator.className = "shelf-locator";
-  locator.textContent = entry.locator;
+  // MICRO-CONTENTS-2 C12 · the path shortened (its head and its last two
+  // steps), the whole of it in the tooltip
+  locator.textContent = shortLocator(entry.locator);
+  locator.title = entry.locator;
   main.append(name, locator);
 
   // The two axes, SHOWN — the three-fence model has to be visible or it is not
@@ -29588,22 +29593,37 @@ function shelfRow(entry: ShelfEntry): HTMLElement {
   badges.className = "shelf-badges";
   const scope = effectiveScope(entry);
   const residency = effectiveResidency(entry);
-  const scopeBadge = document.createElement("span");
-  scopeBadge.className = `shelf-badge scope-${scope}` + (entry.scope ? "" : " inferred");
-  scopeBadge.textContent = t(`shelf.scope.${scope}`);
-  scopeBadge.title = entry.scope ? t("shelf.recorded") : t("shelf.inferred");
-  const resBadge = document.createElement("span");
-  resBadge.className = "shelf-badge" + (entry.residency ? "" : " inferred");
-  resBadge.textContent = t(`shelf.residency.${residency}`);
-  resBadge.title = entry.residency ? t("shelf.recorded") : t("shelf.inferred");
-  badges.append(scopeBadge, resBadge);
-  if (entry.checksum) {
-    const sum = document.createElement("span");
-    sum.className = "shelf-badge checksum";
-    sum.textContent = "⌗ " + entry.checksum.slice(7, 15);
-    sum.title = entry.checksum;
-    badges.appendChild(sum);
+  // MICRO-CONTENTS-2 C14 · a badge only for what is RECORDED on the entry; the
+  // reading (a fence or a residence nobody wrote) and the digest go in the
+  // name's tooltip — the dotted border that meant «inferred» was not read
+  const said: string[] = [];
+  if (entry.scope) {
+    const scopeBadge = document.createElement("span");
+    scopeBadge.className = `shelf-badge scope-${scope}`;
+    scopeBadge.textContent = t(`shelf.scope.${scope}`);
+    scopeBadge.title = t("shelf.recorded");
+    badges.appendChild(scopeBadge);
+  } else said.push(`${t(`shelf.scope.${scope}`)} (${t("shelf.inferredShort")})`);
+  if (entry.residency) {
+    const resBadge = document.createElement("span");
+    resBadge.className = "shelf-badge";
+    resBadge.textContent = t(`shelf.residency.${residency}`);
+    resBadge.title = t("shelf.recorded");
+    badges.appendChild(resBadge);
+  } else said.push(`${t(`shelf.residency.${residency}`)} (${t("shelf.inferredShort")})`);
+  if (entry.checksum) said.push(`${t("shelf.digest")} ${entry.checksum}`);
+  // MICRO-CONTENTS-2 C10 · an entry stamped for ANOTHER graph is marked
+  const its = receiptStudy.get(entry.id);
+  const active = store ? String((store.doc.graph as Record<string, unknown>).graph_id ?? "") : "";
+  if (its && active && its !== active) {
+    const o = document.createElement("span");
+    o.className = "shelf-badge other-graph";
+    o.textContent = t("shelf.otherGraph");
+    o.title = t("shelf.otherGraphTitle");
+    badges.appendChild(o);
+    row.classList.add("is-other-graph");
   }
+  name.title = said.join("\n");
 
   // CATENA · the RECEIPT of a stamped file (dtcstamp's receipt(), a copy), and
   // how it compares with the sidecar and the bytes when they are reachable
@@ -29784,12 +29804,24 @@ function documentOfShelfEntry(entry: ShelfEntry): string | null {
   return typeof id === "string" && store?.node(id) ? id : null;
 }
 
+/** MICRO-CONTENTS-2 C12 · a long path, its head and its tail: `/Users/…/SegniAcropoli/DJI_0238.JPG` */
+function shortLocator(loc: string): string {
+  if (loc.length <= 44 || /^[a-z][a-z0-9+.-]*:\/\//i.test(loc)) return loc;
+  const parts = loc.split(/[\\/]/);
+  if (parts.length <= 4) return loc;
+  const sep = loc.includes("\\") && !loc.includes("/") ? "\\" : "/";
+  return [...parts.slice(0, 2), "…", ...parts.slice(-2)].join(sep);
+}
+
 /** receipt checks, once per entry per session (↻ asks again) */
 const receiptChecks = new Map<string, ReceiptCheck | "checking">();
 function receiptLine(entry: ShelfEntry, rec: NonNullable<ReturnType<typeof receiptOf>>): HTMLElement {
   const line = document.createElement("div");
   line.className = "shelf-receipt";
   line.dataset.receipt = entry.id;
+  // MICRO-CONTENTS-2 C13 · ONE word of state — «timbrato · verificato», or
+  // «non verificabile da qui» — and the rest (the resource id, the digest, the
+  // format's version, the parent) in the tooltip and in the seal's card
   const bits = [`${t("receipt.label")} · ${rec.id}`, rec.checksum ? `⌗ ${rec.checksum.slice(7, 15)}` : "",
     t("receipt.version", { v: String(rec.stamp) }),
     rec.parents.length ? t("receipt.parents", { n: String(rec.parents.length), first: rec.parents[0].resource_id }) : t("receipt.origin")];
@@ -29797,7 +29829,6 @@ function receiptLine(entry: ShelfEntry, rec: NonNullable<ReturnType<typeof recei
   // sidecar beside the file, when it is reachable)
   if (rec.checksum) line.appendChild(sealMini(rec.checksum, paths.isAbsolute(entry.locator)
     ? () => { void showSealOf(entry.locator); } : undefined));
-  line.appendChild(document.createTextNode(bits.filter(Boolean).join(" · ")));
   if (rec.title || rec.description) {
     const w = document.createElement("div");
     w.className = "shelf-receipt-words";
@@ -29809,10 +29840,10 @@ function receiptLine(entry: ShelfEntry, rec: NonNullable<ReturnType<typeof recei
   const tag = document.createElement("button");
   tag.type = "button";
   tag.className = `shelf-badge receipt-${st ?? "unchecked"}`;
-  tag.textContent = st === "checking" ? "…" : t(`receipt.check.${st ?? "unchecked"}`);
-  tag.title = t("receipt.checkHint");
+  tag.textContent = t(`receipt.state.${st ?? "unchecked"}`);
+  tag.title = `${bits.filter(Boolean).join(" · ")}\n${t("receipt.checkHint")}`;
   tag.addEventListener("click", () => void runReceiptCheck(entry.id, entry.locator, rec));
-  line.appendChild(tag);
+  line.insertBefore(tag, line.querySelector(".shelf-receipt-words"));
   if (st === undefined && paths.isAbsolute(entry.locator)) void runReceiptCheck(entry.id, entry.locator, rec);
   return line;
 }
@@ -32080,8 +32111,14 @@ function stampComposeBox(win: Win, listing: FsListing): HTMLElement {
 
   const head = document.createElement("div");
   head.className = "stamp-compose-head";
-  head.textContent = t("compose.head", { n: String(draft.outputs.length) });
+  const made = draft.outputs.length;
+  head.textContent = draft.madeFrom !== undefined
+    ? t(made === 1 ? "compose.headFrom1" : "compose.headFrom", { name: draft.madeFrom, n: String(made) })
+    : t(made === 1 ? "compose.head1" : "compose.head", { n: String(made) });
   box.appendChild(head);
+  // MICRO-CONTENTS-2 D31 · a step from a stamped file: what it made is asked,
+  // never proposed — the unstamped files of the folder, none chosen
+  if (draft.madeFrom !== undefined) box.appendChild(madeChoice(draft, listing));
   if (draft.tree) box.appendChild(treeChoice(draft));
   else if (hasFileSets(draft)) box.appendChild(handleChoice(draft));
 
@@ -32252,7 +32289,11 @@ function stampComposeBox(win: Win, listing: FsListing): HTMLElement {
   // one process_id for every stamp of the lot
   if (requiredFields(draft).includes("campaign")) {
     if (!draft.campaignEdited) draft.campaign = proposeActName(draft, kindLabelOf(draft), folderName);
-    const c = text("campaign", draft.campaign, t("stamp2.campaignEg"), (v) => {
+    // MICRO-CONTENTS-2 E8 · the example follows the kind chosen (a Zenodo DOI
+    // under a photogrammetry was out of place); a retrieval keeps the DOI one
+    const eg = retrieval ? t("stamp2.campaignEg")
+      : draft.kind ? t("stamp2.campaignEgOf", { kind: kindLabelOf(draft), folder: folderName }) : t("stamp2.campaignEgNone");
+    const c = text("campaign", draft.campaign, eg, (v) => {
       draft.campaign = v;
       draft.campaignEdited = true;
       redrawDraftPicture();
@@ -32393,6 +32434,50 @@ function stampComposeBox(win: Win, listing: FsListing): HTMLElement {
   return box;
 }
 
+/** MICRO-CONTENTS-2 D31 · «Che cosa ne hai ricavato?»: the unstamped files of
+ *  the folder, each a toggle, none on — the files made by the step. */
+function madeChoice(draft: Draft, listing: FsListing): HTMLElement {
+  const w = document.createElement("div");
+  w.className = "stamp-compose-made";
+  const q = document.createElement("b");
+  q.textContent = t("compose.askMade");
+  const hint = document.createElement("div");
+  hint.className = "stamp-compose-why-road";
+  hint.textContent = t("compose.askMadeHint");
+  const list = document.createElement("div");
+  list.className = "stamp-compose-inputs";
+  list.dataset.field = "outputs";
+  list.tabIndex = -1;
+  const from = draft.inputs[0]?.path;
+  const cands = unstampedOf(listing, from);
+  if (!cands.length) {
+    const none = document.createElement("i");
+    none.className = "stamp-compose-none";
+    none.textContent = t("compose.askMadeNone");
+    list.appendChild(none);
+  }
+  for (const entry of cands) {
+    const on = draft.picked.some((o) => o.path === entry.path);
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "ghost stamp-compose-input" + (on ? " on" : "");
+    b.dataset.output = entry.path;
+    b.setAttribute("aria-pressed", String(on));
+    b.textContent = entry.name;
+    b.onclick = () => {
+      draft.picked = on ? draft.picked.filter((o) => o.path !== entry.path) : [...draft.picked, outputFrom(entry)];
+      applyHandle(draft);
+      void fillDraftSets();
+    };
+    list.appendChild(b);
+  }
+  const err = document.createElement("span");
+  err.className = "stamp-err";
+  err.dataset.err = "outputs";
+  w.append(q, hint, list, err);
+  return w;
+}
+
 /** The label of the draft's kind, in the axis of its road (the datamodel's). */
 function kindLabelOf(draft: Draft): string {
   return dtcKindsFor(draft.origin ? "acquisition" : "process").find((k) => k.kind === draft.kind)?.label ?? "";
@@ -32404,7 +32489,7 @@ function checkField(form: HTMLElement, key: string): void {
   const line = form.querySelector<HTMLElement>(`[data-err="${key}"]`);
   if (!draft || !line) return;
   const missing = missingFields(draft).includes(key as never);
-  line.textContent = missing ? t(key === "inputs" ? "stamp2.errInputs" : "stamp2.errNeeded") : "";
+  line.textContent = missing ? t(key === "inputs" ? "stamp2.errInputs" : key === "outputs" ? "stamp2.errOutputs" : "stamp2.errNeeded") : "";
   form.querySelector(`[data-field="${key}"]`)?.setAttribute("aria-invalid", String(missing));
 }
 function clearErr(form: HTMLElement, key: string): void {
@@ -32913,7 +32998,14 @@ function isCovered(listing: FsListing, path: string): boolean {
 function unstampedOf(listing: FsListing, except?: string): FsEntry[] {
   return listing.entries.filter((e) =>
     e.type === "file" && !isStampPath(e.path) && !e.outside && e.path !== except
-    && !isCovered(listing, e.path));
+    && !isCovered(listing, e.path) && !isDocumentOrCopy(e.name));
+}
+
+/** MICRO-CONTENTS-2 D23/D24 · an em.json (or a GraphML) and its copies — a
+ *  `.bak-…`, a `.prima-…` — are the study's own documents, not files to stamp:
+ *  «Timbra» is not offered on them, and «Timbra insieme» leaves them out. */
+function isDocumentOrCopy(name: string): boolean {
+  return /\.(em\.json|emj|graphml)(\.|$)/i.test(name) || /\.bak(\b|-|$)/i.test(name);
 }
 
 /** A stamped sibling that is a PEER of the outputs, not their parent: another
@@ -32940,12 +33032,14 @@ function inputCandidates(listing: FsListing, outputs: Array<{ path: string; name
 function composeButtons(entry: FsEntry, listing: FsListing): HTMLElement {
   const box = document.createElement("div");
   box.className = "stamp-report-ask";
-  const one = document.createElement("button");
-  one.className = "ghost";
-  one.dataset.action = "compose-one";
-  one.textContent = t("compose.open", { name: entry.name });
-  one.onclick = () => openDraft([entry], listing);
-  box.appendChild(one);
+  if (!isDocumentOrCopy(entry.name)) {
+    const one = document.createElement("button");
+    one.className = "ghost";
+    one.dataset.action = "compose-one";
+    one.textContent = t("compose.open", { name: entry.name });
+    one.onclick = () => openDraft([entry], listing);
+    box.appendChild(one);
+  }
   box.appendChild(composeFolderButton(listing, true));
   // CAMPAGNA · a tileset — its .3tz or its tileset.json — opens in the Scene
   if (TREE_EXT.test(entry.name) || entry.name === "tileset.json") box.appendChild(openInSceneButton(entry.path));
@@ -33069,7 +33163,20 @@ function composeFolderButton(listing: FsListing, inline = false): HTMLElement {
     box.appendChild(b);
     return box;
   }
-  b.textContent = t("compose.openFolder", { n: String(stampable.length) });
+  // MICRO-CONTENTS-2 D24 · nothing to stamp together (a folder of em.json and
+  // their copies, the EM folder of a project): said, not a dead button
+  if (!stampable.length && listing.entries.some((e) => e.type === "file" && isDocumentOrCopy(e.name))) {
+    const none = document.createElement("span");
+    none.className = "insp-hint compose-folder-none";
+    none.dataset.action = "compose-folder";
+    none.textContent = t("compose.folderNothing");
+    if (inline) return none;
+    const box = document.createElement("div");
+    box.className = "stamp-report-ask";
+    box.appendChild(none);
+    return box;
+  }
+  b.textContent = stampable.length === 1 ? t("compose.openFolder1") : t("compose.openFolder", { n: String(stampable.length) });
   b.disabled = !stampable.length;
   b.onclick = () => openDraft(stampable, listing);
   if (inline) return b;
@@ -33414,8 +33521,12 @@ async function composeFromStamped(path: string, stamp: Stamp): Promise<void> {
     toast(t("compose.nothingToMake"));
     return;
   }
-  openDraft(stampable, listing);
+  // MICRO-CONTENTS-2 D31 · the step opens with NO file made: it asks «what did
+  // you make from it?» (the folder's 18 unstamped images were all proposed as
+  // made from TM035.pdf)
+  openDraft([], listing);
   if (stampDraft) {
+    stampDraft.madeFrom = baseName(path);
     stampDraft.origin = false;
     stampDraft.originDeclared = false;
     stampDraft.why = t("stamp2.whyFrom", { name: baseName(path) });

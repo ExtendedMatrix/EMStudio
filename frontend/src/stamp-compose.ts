@@ -137,6 +137,9 @@ export interface Draft {
   tree: TreeInfo | null;
   /** «La cartella, una risorsa» (true, the default) or «solo tileset.json» */
   asTree: boolean;
+  /** MICRO-CONTENTS-2 D31 · «Timbra un passo da questo file…»: the step opens
+   *  with NO file made and asks which — the name of the file it starts from */
+  madeFrom?: string;
 }
 
 export function newDraft(outputs: DraftOutput[]): Draft {
@@ -231,7 +234,7 @@ export const parentCount = (draft: Draft): number =>
  * The required fields, per road, in the order the form shows them — the first
  * missing one is where «Timbra» puts the focus.
  */
-export type StampField = "kind" | "inputs" | "software" | "operator" | "at" | "campaign" | "source";
+export type StampField = "outputs" | "kind" | "inputs" | "software" | "operator" | "at" | "campaign" | "source";
 
 export function requiredFields(draft: Draft): StampField[] {
   const base: StampField[] = draft.origin
@@ -245,8 +248,10 @@ export function requiredFields(draft: Draft): StampField[] {
   const withName: StampField[] = draft.outputs.length > 1 && !chainIsTemplate(draft.declared)
     ? [...base.slice(0, 1), "campaign", ...base.slice(1)] : base;
   // DEV30 D1 · a retrieval says where from, right after its kind
-  return draft.origin && draft.retrieval
+  const all: StampField[] = draft.origin && draft.retrieval
     ? [withName[0], "source", ...withName.slice(1)] : withName;
+  // MICRO-CONTENTS-2 D31 · a step from a stamped file asks first what it made
+  return draft.madeFrom !== undefined ? ["outputs", ...all] : all;
 }
 
 /** DEV29 B5 · a DOI or a URL as the stamp writes it: a DOI (`10.5281/…`,
@@ -294,6 +299,7 @@ export function proposeActName(draft: Draft, kindLabel: string, folder: string):
 export function missingFields(draft: Draft): StampField[] {
   return requiredFields(draft).filter((f) => {
     switch (f) {
+      case "outputs": return !draft.outputs.length;
       case "kind": return !draft.kind;
       // RISORSA-FILE · a DECLARED parent is a parent: an object of a .blend is
       // what the export came from even though nobody stamped it
