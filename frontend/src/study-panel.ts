@@ -543,6 +543,7 @@ export function renderStudyPanel(
     inp.className = "insp-name-input";
     inp.value = gscope[key];
     inp.placeholder = placeholder;
+    inp.dataset.graphScope = key;   // MICRO-CONTENTS-1 B20 · the Overview's invitation lands here
     inp.addEventListener("change", () =>
       store.setGraphScope({ [key]: inp.value }),
     );

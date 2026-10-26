@@ -10287,3 +10287,91 @@ body.em-detached #tile-root > .tile-area.tile-detached {
 .gdel-report ul { margin: -4px 0 8px; padding-left: 18px; font-size: 12px; color: var(--text-faint); max-height: 9em; overflow-y: auto; }
 .gdel-choice { display: block; margin: 0 0 10px; font-size: 12px; }
 .et-move-menu button.danger { color: var(--danger, #b3261e); }
+
+/* ── MICRO-CONTENTS-1 (27 Oct 2026) · which graph, and its life ───────────── */
+/* A3 · «file › grafo»: the file, quieter, before the graph's name */
+#ns-title { max-width: 60ch; }
+#ns-title .ns-file { font-weight: 500; font-size: 0.72em; color: var(--text-muted); }
+/* B8/B9 · the file's Save and × always in view, the × apart from Save */
+.et-acts.et-acts-shown {
+  position: static; transform: none; opacity: 1; pointer-events: auto;
+  box-shadow: none; background: none; margin-left: auto; gap: 8px; padding-left: 4px;
+}
+.et-file-head { display: flex; align-items: center; gap: 6px; }
+.et-file-head .et-acts.et-acts-shown .et-file-save {
+  border: 1px solid var(--border); padding: 0 7px;
+}
+/* the graph's ONE menu: «⋯», always in view */
+.et-more {
+  flex: none;
+  padding: 0 7px;
+  border: none;
+  background: none;
+  color: var(--text-dim);
+  font-size: 14px;
+  line-height: 1.4;
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+}
+.et-more:hover, .et-more:focus-visible { color: var(--accent-ink); background: var(--bg-accent-soft); }
+.ov-card .et-more { position: absolute; top: 2px; right: 2px; }
+.et-move-menu .dd-group {
+  padding: 6px 8px 2px; font-size: 10.5px; color: var(--text-faint);
+  text-transform: uppercase; letter-spacing: 0.04em;
+}
+.et-move-menu button.et-move-sub { padding-left: 18px; }
+/* B10 · the active graph, said in words as well as by the dot */
+.et-active-tag {
+  flex: none;
+  font-size: 9.5px;
+  font-weight: 700;
+  padding: 0 5px;
+  border-radius: var(--radius-sm);
+  background: var(--accent);
+  color: var(--on-accent);
+}
+/* B6 · completed at the open — not an unsaved change */
+.et-completed {
+  flex: none;
+  font-size: 9.5px;
+  font-style: italic;
+  color: var(--text-faint);
+  white-space: nowrap;
+}
+/* B14 · the graphs closed here, each with «Riapri» */
+.et-closed { margin: 2px 0 0 14px; }
+.et-closed-head {
+  margin: 2px 6px 0 6px; font-size: 10px; color: var(--text-faint);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.et-closed ul { list-style: none; margin: 0; padding: 0; }
+.et-closed-row {
+  display: flex; align-items: center; gap: 6px; min-width: 0;
+  padding: 2px 6px; color: var(--text-muted);
+}
+.et-closed-row .et-name { font-weight: 500; font-style: italic; }
+.et-reopen {
+  flex: none;
+  padding: 0 7px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--text-dim);
+  font: inherit;
+  font-size: 10.5px;
+  cursor: pointer;
+}
+.et-reopen:hover { color: var(--accent-ink); background: var(--bg-accent-soft); }
+/* B20 · a missing fact of the Overview is an invitation to write it */
+.ov-invite {
+  padding: 0;
+  border: none;
+  background: none;
+  font: inherit;
+  font-style: italic;
+  color: var(--accent-ink);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+.ov-invite:hover { color: var(--accent); }

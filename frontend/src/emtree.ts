@@ -308,6 +308,11 @@ export interface GraphSlot {
   store: DocumentStore;
   auxiliaryFiles: AuxiliaryFile[];
   viewState: SlotViewState;
+  /** MICRO-CONTENTS-1 B6 · what EMStudio completed by itself while opening the
+   *  graph (a georeference joined to the graph's paradata, …): said on the row,
+   *  never counted as an unsaved change — the next open completes it again, and
+   *  the next Save writes it. Emptied by the first change of the user's. */
+  openNotes?: string[];
 }
 
 /**
@@ -518,8 +523,17 @@ export interface EMTreeHandlers {
   onAuxOption?(auxId: string, key: string, value: string | boolean): void;
   /** AUDIT C · a story row opens that story (it was drawn and did nothing) */
   onOpenStory?(slotId: string, narrativeId: string): void;
-  /** F2 · «Sposta in…»: carry a graph to another open file, or a new one */
-  onMoveGraph?(slotId: string, anchor: HTMLElement): void;
+  /** MICRO-CONTENTS-1 · the graph's ONE menu «⋯» (Rename, Move to…, Close —
+   *  it stays in the file —, Delete from the file…): on its button, and on the
+   *  right click of the row */
+  onGraphMenu?(slotId: string, anchor: HTMLElement): void;
+  /** MICRO-CONTENTS-1 B14 · the graphs of a file closed here (kept in it) */
+  closedOf?(fileId: string): { gid: string; name: string; nodes: number }[];
+  /** …and one of them opened again */
+  onReopen?(fileId: string, gid: string): void;
+  /** MICRO-CONTENTS-1 B20 · a «—» of the Overview, an invitation: the place
+   *  where that fact is written opens (the Study, the site selector) */
+  onOverviewInvite?(slotId: string, field: "author" | "license" | "embargo" | "position" | "code"): void;
   /** F2 · save ONE file with its graphs */
   onSaveFile?(fileId: string): void;
   /** F2 · close a file and its graphs (asks if it has unsaved work) */
@@ -575,10 +589,14 @@ function overviewSection(tree: EMTree, labels: (key: string) => string): string 
     // the code of the graph is the STUDY's (E.D., 11 Oct 2026): the retired
     // EM-ID is shown only as the code it migrates to (hdto.ts `shownCode`)
     const code = shownCode(slot.store.doc);
-    const field = (label: string, value: string, missing: string): string =>
-      `<div class="ov-field"><dt>${esc(label)}</dt><dd${value ? "" : ' class="ov-missing"'}>${
-        esc(value || missing)
-      }</dd></div>`;
+    // MICRO-CONTENTS-1 B20 · a missing fact is an invitation to write it, and
+    // the invitation opens the place where it is written
+    const field = (label: string, value: string, invite: string,
+                   key: "author" | "license" | "embargo" | "position"): string =>
+      `<div class="ov-field"><dt>${esc(label)}</dt>${value
+        ? `<dd>${esc(value)}</dd>`
+        : `<dd class="ov-missing"><button type="button" class="ov-invite" data-invite="${key}" data-slot="${esc(slot.id)}"
+             title="${esc(labels("emtree.ovInviteTitle"))}">${esc(invite)}</button></dd>`}</div>`;
     const author = gs.author
       ? gs.author + (gs.orcid ? ` · ${gs.orcid}` : "")
       : "";
@@ -587,7 +605,7 @@ function overviewSection(tree: EMTree, labels: (key: string) => string): string 
       : "";
     return `
       <li class="ov-card${isActive ? " active" : ""}" data-id="${esc(slot.id)}">
-        <button class="ov-pick" data-id="${esc(slot.id)}"
+        <div class="ov-pick" role="button" tabindex="0" data-id="${esc(slot.id)}"
                 title="${esc(slot.path ?? labels("emtree.noFile"))}">
           <div class="ov-head">
             <span class="ov-name">${esc(name)}${slot.store.dirty ? " •" : ""}</span>
@@ -596,16 +614,15 @@ function overviewSection(tree: EMTree, labels: (key: string) => string): string 
             }</span>
           </div>
           <dl class="ov-fields">
-            ${field(labels("emtree.ovAuthor"), author, "—")}
-            ${field(labels("emtree.ovLicence"), gs.license, "—")}
-            ${field(labels("emtree.ovEmbargo"), gs.embargo, "—")}
-            ${field(labels("emtree.ovPosition"), siteText,
-                    labels("emtree.ovUnplaced"))}
+            ${field(labels("emtree.ovAuthor"), author, labels("emtree.ovAddAuthor"), "author")}
+            ${field(labels("emtree.ovLicence"), gs.license, labels("emtree.ovAddLicence"), "license")}
+            ${field(labels("emtree.ovEmbargo"), gs.embargo, labels("emtree.ovAddEmbargo"), "embargo")}
+            ${field(labels("emtree.ovPosition"), siteText, labels("emtree.ovAddPosition"), "position")}
           </dl>
           <div class="ov-meta">${nodes} ${labels("emtree.nodes")} · ${edges} ${labels("emtree.edges")}</div>
-        </button>
-        <button class="et-close" data-close="${esc(slot.id)}"
-                title="${esc(labels("emtree.close"))}">×</button>
+        </div>
+        <button class="et-more" data-more="${esc(slot.id)}"
+                title="${esc(labels("emtree.moreTitle"))}" aria-label="${esc(labels("emtree.moreTitle"))}">⋯</button>
       </li>`;
   }).join("");
   return `<ul class="ov-cards">${cards}</ul>`;
@@ -627,26 +644,28 @@ function overviewSection(tree: EMTree, labels: (key: string) => string): string 
  * invariant a user has to be able to see: nothing here is in the document until a
  * bake puts it there, so sharing an em.json does not share somebody's database.
  */
-function auxSection(tree: EMTree, labels: (key: string) => string): string {
+function auxSection(tree: EMTree, labels: (key: string, vars?: Record<string, string>) => string): string {
   const slot = tree.active();
   if (!slot) return "";
   const rows = slot.auxiliaryFiles.map((f) => {
     const type = AUX_FILE_TYPES.find((t) => t.value === f.fileType);
     const state = f.baked ? "baked" : f.mapped ? "volatile" : "attached";
+    // MICRO-CONTENTS-1 B19 · the state in words: written into the graph / mapped / attached
+    const stateWord = labels(f.baked ? "aux.badgeBaked" : f.mapped ? "aux.badgeMapped" : "aux.badgeAttached");
     // MICRO-PULIZIA p.2 · one row: name, type with its «?», state; what the type
     // is and what its state means are tooltips, not paragraphs
     const stateWhy = labels(f.baked ? "aux.stateBaked" : f.mapped ? "aux.stateVolatile" : "aux.stateIdle");
     return `
       <li class="aux-row${f.expanded ? " open" : ""}" data-aux="${esc(f.id)}">
         <button class="aux-head" data-aux-toggle="${esc(f.id)}"
-                title="${esc(`${f.name} · ${type?.label ?? f.fileType}: ${type?.hint ?? ""}\n${stateWhy}`)}">
+                title="${esc(`${f.name} · ${type ? labels(`aux.type.${type.value}`) : f.fileType}: ${type ? labels(`aux.typeHint.${type.value}`) : ""}\n${stateWhy}`)}">
           <span class="aux-caret">${f.expanded ? "▾" : "▸"}</span>
           <span class="aux-name">${esc(f.name)}</span>
-          <span class="aux-type">${esc(type?.label ?? f.fileType)}<span class="et-q" aria-hidden="true">?</span></span>
-          <span class="aux-badge aux-${state}">${state}</span>
+          <span class="aux-type">${esc(type ? labels(`aux.type.${type.value}`) : f.fileType)}<span class="et-q" aria-hidden="true">?</span></span>
+          <span class="aux-badge aux-${state}">${esc(stateWord)}</span>
         </button>
         <button class="aux-del" data-aux-remove="${esc(f.id)}"
-                title="Remove this auxiliary file (the document is untouched)">×</button>
+                title="${esc(labels("aux.removeTitle"))}" aria-label="${esc(labels("aux.removeTitle"))}">×</button>
         ${f.expanded ? auxDetail(f, labels) : ""}
       </li>`;
   }).join("");
@@ -676,18 +695,21 @@ type AuxOptSpec =
   | { key: string; label: string; kind: "bool" }
   | { key: string; label: string; kind: "select"; options: string[] };
 
+// MICRO-CONTENTS-1 B19 · `label` and `placeholder` are KEYS of the dictionary
+// (`aux.opt.*`), resolved where the field is drawn: the option tokens stay
+// EMtools' own, the words around them are the reader's language
 const AUX_OPTIONS: Record<AuxFileType, AuxOptSpec[]> = {
   emdb_xlsx: [
-    { key: "mapping", label: "Mapping (emdb)", kind: "text", placeholder: "registry mapping name" },
+    { key: "mapping", label: "aux.opt.mappingEmdb", kind: "text", placeholder: "aux.opt.mappingPh" },
   ],
   pyarchinit: [
-    { key: "mapping", label: "Mapping (pyarchinit)", kind: "text", placeholder: "registry mapping name" },
-    { key: "import_geometries", label: "Import geometries", kind: "bool" },
-    { key: "geom_force_update", label: "Force geometry update", kind: "bool" },
+    { key: "mapping", label: "aux.opt.mappingPyarchinit", kind: "text", placeholder: "aux.opt.mappingPh" },
+    { key: "import_geometries", label: "aux.opt.importGeometries", kind: "bool" },
+    { key: "geom_force_update", label: "aux.opt.geomForceUpdate", kind: "bool" },
   ],
   dosco: [
-    { key: "overwrite_paths", label: "Overwrite existing paths", kind: "bool" },
-    { key: "preserve_web_urls", label: "Preserve web URLs", kind: "bool" },
+    { key: "overwrite_paths", label: "aux.opt.overwritePaths", kind: "bool" },
+    { key: "preserve_web_urls", label: "aux.opt.preserveWebUrls", kind: "bool" },
   ],
   source_list: [],
   // IMPMAP · a mapped source carries WHICH mapping, and that is its whole
@@ -695,55 +717,43 @@ const AUX_OPTIONS: Record<AuxFileType, AuxOptSpec[]> = {
   // the dataset) or a registry name, never both — the import dialog writes one of
   // the two and the bridge reads whichever it finds.
   mapped_source: [
-    { key: "mappingPath", label: "Mapping file", kind: "text",
-      placeholder: "a path to a *_mapping.json" },
-    { key: "mappingName", label: "…or a registry mapping", kind: "text",
-      placeholder: "a name the s3Dgraphy registry knows" },
+    { key: "mappingPath", label: "aux.opt.mappingFile", kind: "text",
+      placeholder: "aux.opt.mappingFilePh" },
+    { key: "mappingName", label: "aux.opt.mappingName", kind: "text",
+      placeholder: "aux.opt.mappingNamePh" },
   ],
   resource_collection: [
-    { key: "thumbs_path", label: "Custom thumbnails folder", kind: "text" },
-    { key: "scan_mode", label: "Scan mode", kind: "select", options: ["by_filename", "manual"] },
-    { key: "target_node_types", label: "Target node types", kind: "text", placeholder: "e.g. US, SF" },
+    { key: "thumbs_path", label: "aux.opt.thumbsPath", kind: "text" },
+    { key: "scan_mode", label: "aux.opt.scanMode", kind: "select", options: ["by_filename", "manual"] },
+    { key: "target_node_types", label: "aux.opt.targetTypes", kind: "text", placeholder: "aux.opt.targetTypesPh" },
   ],
 };
 
-function auxOptionField(f: AuxiliaryFile, spec: AuxOptSpec): string {
+function auxOptionField(f: AuxiliaryFile, spec: AuxOptSpec, labels: (key: string) => string): string {
   const v = (f.options ?? {})[spec.key];
   const id = esc(f.id);
+  const label = labels(spec.label);
   if (spec.kind === "bool") {
     return `<label class="aux-field aux-field-inline">
       <input type="checkbox" data-aux-opt="${id}" data-opt-key="${spec.key}"
              ${v ? "checked" : ""} />
-      <span>${esc(spec.label)}</span></label>`;
+      <span>${esc(label)}</span></label>`;
   }
   if (spec.kind === "select") {
-    return `<label class="aux-field"><span>${esc(spec.label)}</span>
+    return `<label class="aux-field"><span>${esc(label)}</span>
       <select data-aux-opt="${id}" data-opt-key="${spec.key}">
         ${spec.options.map((o) =>
-          `<option value="${esc(o)}"${String(v) === o ? " selected" : ""}>${esc(o)}</option>`).join("")}
+          `<option value="${esc(o)}"${String(v) === o ? " selected" : ""}>${esc(labels(`aux.opt.${spec.key}.${o}`))}</option>`).join("")}
       </select></label>`;
   }
-  return `<label class="aux-field"><span>${esc(spec.label)}</span>
+  return `<label class="aux-field"><span>${esc(label)}</span>
     <input type="text" data-aux-opt="${id}" data-opt-key="${spec.key}"
-           value="${esc(String(v ?? ""))}" placeholder="${esc(spec.placeholder ?? "")}" /></label>`;
+           value="${esc(String(v ?? ""))}" placeholder="${esc(spec.placeholder ? labels(spec.placeholder) : "")}" /></label>`;
 }
 
 /** Why the map action carries a caveat for this type (bridge/mapping gaps). */
-function auxMapNote(fileType: AuxFileType): string {
-  switch (fileType) {
-    case "emdb_xlsx":
-      return "Maps via the bridge (/import-em-data) using an s3Dgraphy registry mapping (DP-61); its nodes enter the graph as volatile.";
-    case "source_list":
-      return "Maps into the Documents sheet. A dedicated source_list→Documents mapping is not yet in the s3Dgraphy registry (flagged) — mapped via the Documents columns for now.";
-    case "pyarchinit":
-      return "Needs a bridge endpoint for the pyArchInit importer (not yet exposed); flagged for the server side.";
-    case "dosco":
-      return "Harvests a documentation folder into document nodes — needs a bridge endpoint (flagged).";
-    case "resource_collection":
-      return "Scans a folder of resources (bridge /scan-resources) and links them — attach-as-volatile needs the endpoint wired (flagged).";
-    case "mapped_source":
-      return "Maps via the bridge (/mapping-apply) with the mapping named below, ONTO this graph: the units already here win, and a row whose key is not in the graph is listed as unmatched instead of creating a unit.";
-  }
+function auxMapNote(fileType: AuxFileType, labels: (key: string) => string): string {
+  return labels(`aux.mapNote.${fileType}`);
 }
 
 /**
@@ -758,13 +768,13 @@ function auxMapNote(fileType: AuxFileType): string {
  * and an empty box saying "0 unmatched" would be a claim about a measurement
  * that never happened.
  */
-function auxReport(f: AuxiliaryFile): string {
+function auxReport(f: AuxiliaryFile, labels: (key: string, vars?: Record<string, string>) => string): string {
   const r = f.report;
   if (!r) return "";
-  const counts = `${r.rows} row(s) read · ${r.nodesAdded} node(s) · ` +
-    `${r.edgesAdded} edge(s)`;
+  const counts = labels("aux.reportCounts", { rows: String(r.rows), nodes: String(r.nodesAdded),
+                                             edges: String(r.edgesAdded) });
   if (!r.unmatchedCount) {
-    return `<p class="aux-hint aux-report">${esc(counts)} — every key found its node.</p>`;
+    return `<p class="aux-hint aux-report">${esc(counts)} — ${esc(labels("aux.reportAllFound"))}</p>`;
   }
   // …capped, because a mismatched key COLUMN unmatches every row, and a panel
   // listing two thousand of them is a panel nobody scrolls to the end of. The
@@ -774,38 +784,36 @@ function auxReport(f: AuxiliaryFile): string {
   return `
     <div class="aux-report aux-unmatched">
       <p class="aux-hint">${esc(counts)}</p>
-      <p><b>${r.unmatchedCount}</b> key(s) matched no node in this graph —
-         nothing was created for them:</p>
+      <p>${esc(labels("aux.reportUnmatched", { n: String(r.unmatchedCount) }))}</p>
       <p class="aux-keys">${shown.map((k) => `<code>${esc(k)}</code>`).join(" ")}${
-        rest > 0 ? ` <span class="aux-hint">…and ${rest} more</span>` : ""}</p>
-      <p class="aux-hint">Either the key column has a typo, or those units are
-         not drawn in this graph yet.</p>
+        rest > 0 ? ` <span class="aux-hint">${esc(labels("aux.reportMore", { n: String(rest) }))}</span>` : ""}</p>
+      <p class="aux-hint">${esc(labels("aux.reportWhy"))}</p>
     </div>`;
 }
 
 /** The per-file detail panel: type, locator, per-type options, map/bake/unmap. */
-function auxDetail(f: AuxiliaryFile, labels: (key: string) => string): string {
+function auxDetail(f: AuxiliaryFile, labels: (key: string, vars?: Record<string, string>) => string): string {
   const type = AUX_FILE_TYPES.find((t) => t.value === f.fileType);
   const opts = AUX_OPTIONS[f.fileType] ?? [];
   return `
     <div class="aux-detail">
       <label class="aux-field">
-        <span>Type</span>
+        <span>${esc(labels("aux.fieldType"))}</span>
         <select data-aux-type="${esc(f.id)}">
           ${AUX_FILE_TYPES.map((t) =>
             `<option value="${t.value}"${t.value === f.fileType ? " selected" : ""}
-             >${esc(t.label)}</option>`).join("")}
+             >${esc(labels(`aux.type.${t.value}`))}</option>`).join("")}
         </select>
       </label>
-      <p class="aux-hint">${esc(type?.hint ?? "")}</p>
+      <p class="aux-hint">${esc(type ? labels(`aux.typeHint.${type.value}`) : "")}</p>
       <label class="aux-field">
-        <span>${type?.folder ? "Folder" : "Path"}</span>
+        <span>${esc(labels(type?.folder ? "aux.fieldFolder" : "aux.fieldPath"))}</span>
         <input type="text" value="${esc(f.locator)}" readonly
                title="${esc(f.locator)}" />
       </label>
-      ${opts.map((o) => auxOptionField(f, o)).join("")}
-      <p class="aux-hint">${esc(auxMapNote(f.fileType))}</p>
-      ${auxReport(f)}
+      ${opts.map((o) => auxOptionField(f, o, labels)).join("")}
+      <p class="aux-hint">${esc(auxMapNote(f.fileType, labels))}</p>
+      ${auxReport(f, labels)}
       <div class="aux-actions">
         ${f.mapped
           ? `<button data-aux-unmap="${esc(f.id)}"
@@ -860,7 +868,11 @@ export function renderEMTree(host: HTMLElement, tree: EMTree,
     const code = shownCode(slot.store.doc);
     const name = displayNames[i];
     const tip = [name, code ? `(${code})` : "", `· ${nodes} ${labels("emtree.nodes")} · ${edges} ${labels("emtree.edges")}`,
-      isActive ? `· ${labels("emtree.activeTitle")}` : ""].filter(Boolean).join(" ");
+      isActive ? `· ${labels("emtree.activeTitle")}` : `· ${labels("emtree.pickTitle")}`].filter(Boolean).join(" ");
+    // MICRO-CONTENTS-1 B6 · what the open completed by itself, said and not ●
+    const notes = !slot.store.dirty && slot.openNotes?.length
+      ? `<span class="et-completed" role="img" title="${esc(labels("emtree.completedTitle", { what: slot.openNotes.join("; ") }))}"
+              aria-label="${esc(labels("emtree.completedAria"))}">${esc(labels("emtree.completed"))}</span>` : "";
     // COLLEGARE · the graph's stories, under it: a narrative lives IN a graph
     const stories = (slot.store.doc.graph?.nodes ?? []).filter((n) => n.node_type === "narrative")
       .map((n) => {
@@ -885,15 +897,12 @@ export function renderEMTree(host: HTMLElement, tree: EMTree,
           <button class="et-pick" data-id="${esc(slot.id)}" title="${esc(tip)}"${isActive ? ' aria-current="true"' : ""}>
             <span class="et-mark" aria-hidden="true">${isActive ? "●" : "○"}</span>
             <span class="et-name">${esc(name)}</span>${code && !name.includes(`(${code})`) ? `<span class="et-code">${esc(code)}</span>` : ""}
-            ${slot.store.dirty ? dirtyDot(labels("emtree.dirtyTitle")) : ""}
+            ${slot.store.dirty ? dirtyDot(labels("emtree.dirtyTitle")) : notes}
+            ${isActive ? `<span class="et-active-tag" title="${esc(labels("emtree.activeTagTitle"))}">${esc(labels("emtree.activeTag"))}</span>` : ""}
             <span class="et-meta">${nodes} ${labels("emtree.nodes")}</span>
           </button>
-          <span class="et-acts">
-            <button class="et-move" data-move="${esc(slot.id)}"
-                    title="${esc(labels("emtree.moveTitle"))}" aria-label="${esc(labels("emtree.moveTitle"))}">⇄</button>
-            <button class="et-close" data-close="${esc(slot.id)}"
-                    title="${esc(labels("emtree.close"))}" aria-label="${esc(labels("emtree.close"))}">×</button>
-          </span>
+          <button class="et-more" data-more="${esc(slot.id)}"
+                  title="${esc(labels("emtree.moreTitle"))}" aria-label="${esc(labels("emtree.moreTitle"))}">⋯</button>
         </div>
         ${stories}
         ${aux}
@@ -908,7 +917,9 @@ export function renderEMTree(host: HTMLElement, tree: EMTree,
   const known = new Set(tree.files.map((f) => f.id));
   const groups = tree.files.map((file) => {
     const members = tree.slotsOf(file.id);
-    const kept = handlers.keptGraphsOf ? handlers.keptGraphsOf(file.id) : Object.keys(file.retained).length;
+    // MICRO-CONTENTS-1 B14 · the graphs closed here are a LIST, each with «Riapri»
+    const closed = handlers.closedOf?.(file.id) ?? [];
+    const kept = closed.length || (handlers.keptGraphsOf ? handlers.keptGraphsOf(file.id) : Object.keys(file.retained).length);
     // E5 · the file's DTC corpus, under its file: shown, or kept with a way to show it
     const corpus = handlers.corpusOf?.(file.id) ?? null;
     const corpusRow = !corpus ? "" : `
@@ -935,7 +946,7 @@ export function renderEMTree(host: HTMLElement, tree: EMTree,
           <span class="et-file-name">${esc(file.name)}</span>
           ${tree.fileDirty(file.id) ? dirtyDot(labels("emtree.dirtyTitle")) : ""}
           ${isTarget ? `<span class="et-file-target" title="${esc(labels("emtree.saveTargetTitle"))}">${esc(labels("emtree.saveTarget"))}</span>` : ""}
-          <span class="et-acts">
+          <span class="et-acts et-acts-shown">
             <button class="et-file-save" data-save-file="${esc(file.id)}"
                     title="${esc(labels("emtree.saveFileTitle"))}">${esc(labels("emtree.saveFile"))}</button>
             <button class="et-file-close" data-close-file="${esc(file.id)}"
@@ -945,7 +956,18 @@ export function renderEMTree(host: HTMLElement, tree: EMTree,
         </div>
         <ul class="et-slots">${members.map(slotRow).join("")}</ul>
         ${corpusRow}
-        ${kept ? `<p class="et-retained">${esc(labels("emtree.retained").replace("{n}", String(kept)))}</p>` : ""}
+        ${closed.length ? `
+        <div class="et-closed" data-closed-file="${esc(file.id)}">
+          <p class="et-closed-head" title="${esc(labels("emtree.closedHeadTitle"))}">${esc(labels(closed.length === 1 ? "emtree.closedHead1" : "emtree.closedHead", { n: String(closed.length) }))}</p>
+          <ul>${closed.map((c) => `
+            <li class="et-closed-row">
+              <span class="et-mark" aria-hidden="true">○</span>
+              <span class="et-name" title="${esc(c.name)}">${esc(c.name)}</span>
+              <span class="et-meta">${c.nodes} ${esc(labels("emtree.nodes"))}</span>
+              <button type="button" class="et-reopen" data-reopen="${esc(c.gid)}" data-reopen-file="${esc(file.id)}"
+                      title="${esc(labels("emtree.reopenTitle"))}">${esc(labels("emtree.reopen"))}</button>
+            </li>`).join("")}</ul>
+        </div>` : kept ? `<p class="et-retained">${esc(labels("emtree.retained").replace("{n}", String(kept)))}</p>` : ""}
       </li>`;
   });
   const loose = tree.slots.filter((s) => !s.fileId || !known.has(s.fileId));
@@ -1002,10 +1024,23 @@ export function renderEMTree(host: HTMLElement, tree: EMTree,
   host.querySelector<HTMLButtonElement>('[data-et="et-mode-overview"]')
     ?.addEventListener("click", () => setMode(true));
   // Overview cards activate their slot on click (same as a list row).
-  host.querySelectorAll<HTMLButtonElement>(".ov-pick").forEach((button) => {
-    button.addEventListener("click", () => {
-      const id = button.dataset.id;
+  host.querySelectorAll<HTMLElement>(".ov-pick").forEach((card) => {
+    const go = (): void => {
+      const id = card.dataset.id;
       if (id) handlers.onActivate(id);
+    };
+    card.addEventListener("click", go);
+    card.addEventListener("keydown", (e) => {
+      if (e.target === card && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); go(); }
+    });
+  });
+  host.querySelectorAll<HTMLButtonElement>(".ov-invite").forEach((button) => {
+    button.addEventListener("click", (event) => {
+      event.stopPropagation();   // the card activates; the invitation also opens
+      const { slot, invite } = button.dataset;
+      if (!slot || !invite) return;
+      handlers.onActivate(slot);
+      handlers.onOverviewInvite?.(slot, invite as "author" | "license" | "embargo" | "position");
     });
   });
 
@@ -1030,11 +1065,15 @@ export function renderEMTree(host: HTMLElement, tree: EMTree,
   // activates), and hanging a second control off it would crowd a list whose job
   // is to be scannable. Double-click is the outliner convention this tree is
   // modelled on.
-  host.querySelectorAll<HTMLElement>(".et-name").forEach((label) => {
+  host.querySelectorAll<HTMLElement>(".et-slot .et-name").forEach((label) => {
     label.addEventListener("dblclick", (event) => {
       event.stopPropagation(); // do not also activate the row
       const slotId = label.closest<HTMLElement>(".et-slot")?.dataset.id;
-      if (!slotId) return;
+      if (slotId) beginRename(label, slotId);
+    });
+  });
+  lastRendered = { host, beginRename };
+  function beginRename(label: HTMLElement, slotId: string): void {
       const slot = tree.get(slotId);
       if (!slot) return;
 
@@ -1066,8 +1105,7 @@ export function renderEMTree(host: HTMLElement, tree: EMTree,
         keyEvent.stopPropagation();
       });
       input.addEventListener("blur", () => commit(true));
-    });
-  });
+  }
   // AUX1 · the auxiliary-files section of the active slot. `main.ts` owns the
   // actions (it has the file picker and the store); the tree only reports them.
   host.querySelector<HTMLButtonElement>('[data-et="aux-add"]')
@@ -1107,21 +1145,26 @@ export function renderEMTree(host: HTMLElement, tree: EMTree,
     el.addEventListener("change", commit);
   });
 
-  // the graph's menu (move to…, delete from the file…) also on the right click
-  host.querySelectorAll<HTMLButtonElement>(".et-pick").forEach((button) => {
+  // the graph's ONE menu, on its «⋯» and on the right click of the row
+  host.querySelectorAll<HTMLElement>(".et-pick, .ov-pick").forEach((button) => {
     button.addEventListener("contextmenu", (event) => {
       const id = button.dataset.id;
-      if (!id || !handlers.onMoveGraph) return;
+      if (!id || !handlers.onGraphMenu) return;
       event.preventDefault();
-      handlers.onMoveGraph(id, button);
+      handlers.onGraphMenu(id, button);
     });
   });
-  // F2 · per-graph «Sposta in…», per-file Save and close
-  host.querySelectorAll<HTMLButtonElement>(".et-move").forEach((button) => {
+  host.querySelectorAll<HTMLButtonElement>(".et-more").forEach((button) => {
     button.addEventListener("click", (event) => {
       event.stopPropagation();
-      const id = button.dataset.move;
-      if (id) handlers.onMoveGraph?.(id, button);
+      const id = button.dataset.more;
+      if (id) handlers.onGraphMenu?.(id, button);
+    });
+  });
+  host.querySelectorAll<HTMLButtonElement>("[data-reopen]").forEach((button) => {
+    button.addEventListener("click", (event) => {
+      event.stopPropagation();
+      handlers.onReopen?.(button.dataset.reopenFile!, button.dataset.reopen!);
     });
   });
   host.querySelectorAll<HTMLButtonElement>("[data-save-file]").forEach((button) => {
@@ -1142,12 +1185,19 @@ export function renderEMTree(host: HTMLElement, tree: EMTree,
       handlers.onShowCorpus?.(button.dataset.showCorpus!);
     });
   });
-  host.querySelectorAll<HTMLButtonElement>(".et-close").forEach((button) => {
-    button.addEventListener("click", (event) => {
-      // The row is a button too; without this the close also re-activates.
-      event.stopPropagation();
-      const id = button.dataset.close;
-      if (id) handlers.onRemove(id);
-    });
-  });
+}
+
+/** The last tree drawn: the graph menu's «Rename» opens the same inline field
+ *  the double click opens, on the row of that graph. */
+let lastRendered: { host: HTMLElement; beginRename: (label: HTMLElement, slotId: string) => void } | null = null;
+
+/** MICRO-CONTENTS-1 B11 · «Rinomina» of the graph's menu. */
+export function renameGraphInTree(slotId: string): boolean {
+  const r = lastRendered;
+  if (!r || !r.host.isConnected) return false;
+  const label = [...r.host.querySelectorAll<HTMLElement>(".et-slot")]
+    .find((li) => li.dataset.id === slotId)?.querySelector<HTMLElement>(".et-name");
+  if (!label) return false;
+  r.beginRename(label, slotId);
+  return true;
 }

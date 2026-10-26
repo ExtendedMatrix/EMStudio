@@ -397,7 +397,7 @@ import {
   renderStratiMiner,
   unreadWarnings,
 } from "./stratiminer";
-import { EMTree, pathTail, renderEMTree, slotLabel, slotName } from "./emtree";
+import { EMTree, pathTail, renameGraphInTree, renderEMTree, slotLabel, slotName } from "./emtree";
 import type {
   AuxFileType, AuxiliaryFile, AuxMapReport, EMTreeHandlers, GraphSlot, OpenFile, SlotViewState,
 } from "./emtree";
@@ -7213,13 +7213,26 @@ function loadDocument(
   // A room's document is not a file: every person entering would send the same
   // edit (measured: GL6.room, two clients, two operations nobody asked for) — there
   // it is said, not written; the file is corrected where it is opened as a file
+  const completedAtOpen: string[] = [];
   if (loaded.geoOutsideGraphParadata()) {
     const g = loaded.geoPositionNode();
     if (fromRoom) logInfo(t("georef.outsideInRoom", { id: String(g?.id ?? "") }), g ? [g.id] : []);
     else {
       loaded.batch(() => loaded.putGeoInGraphParadata());
       logInfo(t("georef.joined", { id: String(g?.id ?? "") }), g ? [g.id] : []);
+      completedAtOpen.push(t("emtree.noteGeo"));
     }
+  }
+  if (placeholdersRemoved) completedAtOpen.push(t("emtree.notePlaceholders", { n: String(placeholdersRemoved) }));
+  // MICRO-CONTENTS-1 B6 · a graph of a FILE that EMStudio completed while
+  // opening it is not «modified»: nobody did anything. The completion is said
+  // on its row («completato all'apertura», what in the tooltip), the next Save
+  // writes it, the next open does it again — and closing does not ask.
+  // (A graph with no file — an import, a sync — keeps its dirty flag: there
+  // the open IS the only copy.)
+  if (fileId && !fromRoom && loaded.dirty) {
+    slot.openNotes = completedAtOpen.length ? completedAtOpen : [t("emtree.noteGeneric")];
+    loaded.dirty = false;
   }
   // …and a deprecated CRS, or one PROJ reaches only by a ballpark: the conversion proposed
   if (loaded.geoPositionNode()) proposeGeorefConversion(loaded);
@@ -7253,7 +7266,16 @@ function loadDocument(
     //
     // Silent and non-blocking: nothing moves, so there is nothing to explain, and
     // a failure leaves the document exactly as it was on disk.
-    void reassertSizes(loaded).finally(() => {
+    void reassertSizes(loaded).then((r) => {
+      // MICRO-CONTENTS-1 B6 · re-asserted sizes are a completion of the open, too:
+      // measured on GT16, Temple came up «modified» by 306 sizes nobody touched
+      if (r && !r.wasDirty && fileId && !fromRoom && emtree.get(slot.id)) {
+        loaded.dirty = false;
+        slot.openNotes = [...(slot.openNotes ?? []), t("emtree.noteSizes", { n: String(r.changed) })];
+        refreshEMTree();
+        updateToolbar();
+      }
+    }).finally(() => {
       applyRoomMatrix(loaded, true);  // MICRO-STANZA-POSIZIONI · a room's moves, on its layout
       if (store !== loaded) return;   // another graph is in front now: its own load frames it
       // BUGS-UI · the geometry is only FINAL here (sizes re-asserted / layout
@@ -7568,7 +7590,7 @@ function projectContainer(): ReturnType<typeof buildContainer> {
 
 /** F2 · after a write: the file's graphs are clean, and what is on disk is known. */
 function markFileSaved(file: OpenFile, doc: ReturnType<typeof buildContainer>): void {
-  for (const slot of emtree.slotsOf(file.id)) slot.store.dirty = false;
+  for (const slot of emtree.slotsOf(file.id)) { slot.store.dirty = false; slot.openNotes = undefined; }
   file.dirty = false;
   file.onDisk = {};
   for (const [gid, section] of Object.entries(doc.graphs)) {
@@ -10228,15 +10250,15 @@ document.getElementById("btn-tool-add")?.addEventListener("click", () => {
  * as the ordinary layout change it is; skipped silently when nothing is stale, so
  * opening an up-to-date document does not mark it dirty.
  */
-async function reassertSizes(target: DocumentStore | null = store): Promise<void> {
+async function reassertSizes(target: DocumentStore | null = store): Promise<{ changed: number; wasDirty: boolean } | null> {
   // F4 · THE store it was asked for, held across the await: a file with several
   // graphs opens them one after the other, and by the time the WASM answers the
   // active store is the NEXT graph — measured: the first graph's sizes and
   // positions were computed on, and written into, the second
   const st = target;
-  if (!st) return;
+  if (!st) return null;
   const sketch = st.doc.layout;
-  if (!sketch || !Object.keys(sketch.positions ?? {}).length) return;
+  if (!sketch || !Object.keys(sketch.positions ?? {}).length) return null;
   try {
     // lazily imported like the other two em-core call sites: the WASM is fetched
     // on first use, and opening a document must not wait for it
@@ -10247,7 +10269,8 @@ async function reassertSizes(target: DocumentStore | null = store): Promise<void
       const r = rect as { w: number; h: number };
       return before && (before.w !== r.w || before.h !== r.h);
     });
-    if (!changed.length) return;
+    if (!changed.length) return null;
+    const wasDirty = st.dirty;
     st.setLayout(fixed);
     // MICRO-STANZA-POSIZIONI · every screen re-asserts the same sizes: nobody's move
     layoutSeenNow(st);
@@ -10255,10 +10278,12 @@ async function reassertSizes(target: DocumentStore | null = store): Promise<void
       `${changed.length} node size(s) re-asserted from their type ` +
         `(a stored size never wins over the type's geometry)`,
     );
+    return { changed: changed.length, wasDirty };
   } catch (e) {
     // A failure here must not stop a document from opening: the layout on disk is
     // still a valid layout, only its glyph boxes are out of date.
     logWarn(`size re-assert skipped: ${e instanceof Error ? e.message : e}`);
+    return null;
   }
 }
 
@@ -17663,27 +17688,35 @@ function closeFile(fileId: string): void {
 }
 
 /**
- * F2 · «Sposta in…» — carry a graph from its file to another open file, to a
+ * MICRO-CONTENTS-1 · the graph's ONE menu «⋯» (variant B of E.D.'s decision):
+ * Rename · Move to… (the other open files, a new file — saved at once —, no
+ * file) · Close (it stays in the file) · Delete from the file…
+ *
+ * F2 · «Sposta in…» carries a graph from its file to another open file, to a
  * NEW file, or back to «Senza file». An explicit gesture: Save never moves a
  * graph any more. Both files become dirty (each has a different set of graphs
  * to write), and the graph's section is NOT retained by the file it left — it
- * left on purpose.
+ * left on purpose. Closing is not deleting: a closed graph stays in its file,
+ * written back as it was, and the EMtree lists it with «Riapri».
  */
-function openMoveMenu(slotId: string, anchor: HTMLElement): void {
+function openGraphMenu(slotId: string, anchor: HTMLElement): void {
   const slot = emtree.get(slotId);
   if (!slot) return;
   document.querySelector(".et-move-menu")?.remove();
   const menu = document.createElement("div");
   menu.className = "et-move-menu";
+  menu.dataset.menu = "graph";
   const title = document.createElement("div");
   title.className = "edge-menu-title";
-  title.textContent = t("emtree.moveMenuHead", { name: slotLabel(slot) });
+  title.textContent = slotLabel(slot);
   menu.appendChild(title);
   const close = (): void => { menu.remove(); document.removeEventListener("pointerdown", away, true); };
   const away = (e: Event): void => { if (!menu.contains(e.target as Node)) close(); };
-  const item = (label: string, tail: string, run: () => void): void => {
+  const item = (label: string, tail: string, act: string, run: () => void, cls = ""): void => {
     const b = document.createElement("button");
     b.textContent = label;
+    b.dataset.act = act;
+    if (cls) b.className = cls;
     if (tail) {
       const sp = document.createElement("span");
       sp.className = "et-move-tail";
@@ -17693,20 +17726,33 @@ function openMoveMenu(slotId: string, anchor: HTMLElement): void {
     b.addEventListener("click", () => { close(); run(); });
     menu.appendChild(b);
   };
+  const group = (label: string): void => {
+    const g = document.createElement("div");
+    g.className = "dd-group";
+    g.textContent = label;
+    menu.appendChild(g);
+  };
+  const sep = (): void => {
+    const d = document.createElement("div");
+    d.className = "dd-sep";
+    menu.appendChild(d);
+  };
+  item(t("emtree.menuRename"), "", "rename", () => {
+    if (!renameGraphInTree(slotId)) toast(t("emtree.menuRenameWhere"));
+  });
+  sep();
+  group(t("emtree.menuMoveHead"));
   for (const file of emtree.files) {
     if (file.id === slot.fileId) continue;
-    item(file.name, pathTail(file.path), () => moveGraph(slotId, file.id));
+    item(file.name, pathTail(file.path), "move-file", () => moveGraph(slotId, file.id), "et-move-sub");
   }
-  item(t("emtree.moveNewFile"), "", () => void moveGraphToNewFile(slotId));
-  if (slot.fileId) item(t("emtree.moveNoFile"), "", () => moveGraph(slotId, null));
+  item(t("emtree.moveNewFile"), "", "move-new", () => void moveGraphToNewFile(slotId), "et-move-sub");
+  if (slot.fileId) item(t("emtree.moveNoFile"), "", "move-none", () => moveGraph(slotId, null), "et-move-sub");
+  sep();
+  item(t(slot.fileId ? "emtree.menuClose" : "emtree.menuCloseNoFile"), "", "close", () => void closeGraphAsking(slotId));
   // MICRO contenuti-workspace-elimina-grafo · the graph LEAVES its file (closing
   // it keeps it there): asked with the report, one undo step
-  const sep = document.createElement("div");
-  sep.className = "dd-sep";
-  menu.appendChild(sep);
-  item(t("emtree.deleteGraph"), "", () => void deleteGraphAsking(slotId));
-  menu.lastElementChild?.classList.add("danger");
-  (menu.lastElementChild as HTMLElement | null)?.setAttribute("data-act", "delete-graph");
+  item(t("emtree.deleteGraph"), "", "delete-graph", () => void deleteGraphAsking(slotId), "danger");
   const cancel = document.createElement("button");
   cancel.className = "edge-menu-cancel";
   cancel.textContent = t("l.cancel");
@@ -17715,9 +17761,75 @@ function openMoveMenu(slotId: string, anchor: HTMLElement): void {
   document.body.appendChild(menu);
   const r = anchor.getBoundingClientRect();
   const mw = menu.offsetWidth || 220;
+  const mh = menu.offsetHeight || 240;
   menu.style.left = `${Math.round(Math.max(4, Math.min(r.left, window.innerWidth - mw - 4)))}px`;
-  menu.style.top = `${Math.round(r.bottom + 2)}px`;
+  menu.style.top = `${Math.round(r.bottom + 2 + mh > window.innerHeight ? Math.max(4, r.top - mh - 2) : r.bottom + 2)}px`;
   setTimeout(() => document.addEventListener("pointerdown", away, true), 0);
+}
+
+/**
+ * MICRO-CONTENTS-1 B14 · a graph closed here comes back: the section the file
+ * keeps (as on disk — closing discarded the edits, after asking) becomes a slot
+ * of the same file again, and the file is no different from before the close.
+ */
+function reopenClosedGraph(fileId: string, gid: string): void {
+  const file = emtree.file(fileId);
+  const section = file?.retained[gid];
+  if (!file || !section || isShelfSection(section) || isCorpusSection(section)) return;
+  const { layout, ...graph } = JSON.parse(JSON.stringify(section)) as Record<string, unknown>;
+  delete file.retained[gid];
+  const doc = { header: { format: "em.json", version: "1.0" },
+                graph: { ...graph, graph_id: graph.graph_id ?? gid },
+                ...(layout ? { layout } : {}) } as unknown as EmDocument;
+  const before = emtree.activeId;
+  loadDocument(doc, gid, file.path, file.id);
+  if (emtree.activeId === before) { delete file.retained[gid]; return; }
+  logInfo(t("emtree.reopened", { name: slotLabel(emtree.active()!), file: file.name }));
+  refreshEMTree();
+}
+
+/**
+ * MICRO-CONTENTS-1 B20 · a «—» of the Overview is an invitation, and it takes
+ * you where that fact is written: the author, the licence and the embargo of
+ * the graph are fields of the Study (opened beside the EMtree when no Study
+ * window is on screen, the field focused); the position is the site selector.
+ */
+function overviewInvite(slotId: string, field: "author" | "license" | "embargo" | "position" | "code"): void {
+  if (emtree.activeId !== slotId) activateSlot(slotId);
+  if (!store) return;
+  if (field === "position") { openSitePickerOnGraph(); return; }
+  let win = windowsOf().find((w) => w.type === "study");
+  if (!win) {
+    const anchor = windowsOf().find((w) => w.type === "emtree") ?? activeWin();
+    setActiveWin(anchor.id);
+    const made = splitWindow(anchor.id, "col", activeWorkspace(), 0.5, "b");
+    if (!made) return;
+    for (const k of Object.keys(made.state)) delete made.state[k];
+    setWinType(made, "study");
+    win = made;
+  }
+  if (maximizedWin() && maximizedWin() !== win.id) toggleMaximize(maximizedWin()!);
+  setActiveWin(win.id);
+  renderTiles();
+  const area = winAreas.get(win.id);
+  area?.classList.add("flash");
+  setTimeout(() => area?.classList.remove("flash"), 1100);
+  const input = area?.querySelector<HTMLInputElement>(`[data-graph-scope="${field}"]`);
+  if (input) { input.scrollIntoView({ block: "center" }); input.focus(); }
+}
+
+/** The graphs a file keeps closed: its sections that are not open, nor the
+ *  shelf, nor the DTC corpus. */
+function closedGraphsOf(fileId: string): { gid: string; name: string; nodes: number }[] {
+  const file = emtree.file(fileId);
+  if (!file) return [];
+  return Object.entries(file.retained)
+    .filter(([, sec]) => !isShelfSection(sec) && !isCorpusSection(sec))
+    .map(([gid, sec]) => ({
+      gid,
+      name: String(sec.name ?? "").trim() || gid,
+      nodes: Array.isArray(sec.nodes) ? sec.nodes.length : 0,
+    }));
 }
 
 /**
@@ -17981,7 +18093,10 @@ const emtreeHandlers: EMTreeHandlers = {
     activateSlot(id);
   },
   onRemove: (id) => { void closeGraphAsking(id); },
-  onMoveGraph: (slotId, anchor) => openMoveMenu(slotId, anchor),
+  onGraphMenu: (slotId, anchor) => openGraphMenu(slotId, anchor),
+  closedOf: (fileId) => closedGraphsOf(fileId),
+  onReopen: (fileId, gid) => reopenClosedGraph(fileId, gid),
+  onOverviewInvite: (slotId, field) => overviewInvite(slotId, field),
   onSaveFile: (fileId) => {
     const file = emtree.file(fileId);
     if (file) void saveFile(file);
@@ -17998,7 +18113,7 @@ const emtreeHandlers: EMTreeHandlers = {
   onAuxAdd: () => {
     const slot = emtree.active();
     if (!slot) {
-      toast("Open a graph first");
+      toast(t("emtree.auxNoGraph"));
       return;
     }
     // The BROWSER picker cannot give an absolute path (same limit as StratiMiner's
@@ -36738,7 +36853,12 @@ function panelIdOf(win: Win): string {
 function mountPanel(panelId: string, host: HTMLElement, win: Win): PanelMount {
   void win;
   if (panelId === "emtree") {
-    const paint = (): void => renderEMTree(host, emtree, emtreeHandlers, t);
+    // MICRO-CONTENTS-1 B3 · the empty tree points at the Storage when one is on
+    // screen beside it: it opens an em.json too
+    const labels = (key: string, vars?: Record<string, string>): string =>
+      key === "emtree.empty" && windowsOf().some((w) => w.type === "storage")
+        ? t("emtree.emptyStorage", vars) : t(key, vars);
+    const paint = (): void => renderEMTree(host, emtree, emtreeHandlers, labels);
     paint();
     return { refresh: paint };
   }
@@ -37236,7 +37356,10 @@ function buildAreaHeader(win: Win): DocumentFragment {
   // room to another panel — the window is the upper side of a vertical split
   // (`stackedRatio` ≠ null, the only place `toggleCompressed` acts). Alone in
   // its column it would close the panel and give the space to nobody.
-  if (type === "emtree" && stackedRatio(win.id) !== null) {
+  // MICRO-CONTENTS-1 B1 · not in «Archivio»: there the EMtree and the Shelf
+  // share the column for good, and compressing one gave nothing useful (E.D.).
+  // The frame is common to every space: hidden here only.
+  if (type === "emtree" && stackedRatio(win.id) !== null && activeWorkspace() !== "assets") {
     const on = isCompressed(win.id);
     act(on ? "▸" : "▾", t(on ? "win.expand" : "win.compress"), on, () => {
       const area = winAreas.get(win.id);
@@ -37252,7 +37375,8 @@ function buildAreaHeader(win: Win): DocumentFragment {
     });
   }
   // MICRO-PULIZIA p.2 · what the panel is, as a «?» in its header, not a paragraph
-  if (type === "emtree") frag.appendChild(helpMark(t("emtree.intro")));
+  // MICRO-CONTENTS-1 B2 · in «Archivio» the «?» says what this space hangs on
+  if (type === "emtree") frag.appendChild(helpMark(t(activeWorkspace() === "assets" ? "emtree.introContents" : "emtree.intro")));
   // MICRO-VIEWER-SPAZIO-EMTREE p.1–2 · the clicks of the 3D, said where the 3D is
   if (type === "scene") { const q = helpMark(t("s3.gestures")); q.dataset.gestures = "space"; frag.appendChild(q); }
   if (type === "viewer") { const q = helpMark(t("vw.gestures")); q.dataset.gestures = "viewer"; frag.appendChild(q); }
