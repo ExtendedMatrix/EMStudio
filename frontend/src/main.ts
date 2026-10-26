@@ -32038,6 +32038,11 @@ function renderStorageInto(host: StorageHost): void {
   // DEV30 U12 · the LIST scrolls (the detail pane stays put): its place is kept
   const oldList = body.querySelector<HTMLElement>(":scope > .storage-list");
   const wasAt = rememberSurfaceScroll(win, oldList ?? body);
+  // MICRO-CONTENTS-2 · ONE answer per body: two renders of the same folder in
+  // flight each cleared the body, awaited, and appended their listing — seen
+  // three times stacked after a reload. The last render asked is the one drawn.
+  const seq = String(Number(body.dataset.renderSeq ?? "0") + 1);
+  body.dataset.renderSeq = seq;
   body.textContent = "";
   body.classList.remove("storage-split");
   body.appendChild(storageEmpty(t("storage.loading")));
@@ -32070,7 +32075,7 @@ function renderStorageInto(host: StorageHost): void {
     // any more must not overwrite the current screen. The test is now the BODY
     // rather than "am I the focused window": with several surfaces alive, a
     // secondary one is a legitimate place for an answer to land.
-    if (!body.isConnected || storagePath(win) !== path) return;
+    if (!body.isConnected || storagePath(win) !== path || body.dataset.renderSeq !== seq) return;
 
     // the strip may have been REBUILT while the listing was in flight: the crumb
     // is asked of the host again, never the element captured at the start
@@ -32102,7 +32107,7 @@ function renderStorageInto(host: StorageHost): void {
     // CAMPAGNA · what the stamps here cover (members of a file set are not
     // unstamped files), read once per listing before anything counts them
     await ensureFolderCover(listing);
-    if (!body.isConnected || storagePath(win) !== path) return;
+    if (!body.isConnected || storagePath(win) !== path || body.dataset.renderSeq !== seq) return;
     // DEV30 U10/U12 · THE DETAIL IS A PANE OF ITS OWN: the micro-card of the
     // stamp, the draft, and the commands on the selection sit in a fixed box
     // under the list, which scrolls alone. Measured on dev.15: the card and the

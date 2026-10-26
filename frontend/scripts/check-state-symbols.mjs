@@ -105,16 +105,18 @@ assert.ok(/roleStateId\(said\)/.test(main), "the identity chip draws the role fr
 checks += 4;
 // «Find here…» on a missing file: the desktop asks with the native file dialog
 // (the same @tauri-apps/plugin-dialog `open` as the other pickers), the browser
-// keeps the typed path — it has no path to give — asked with the app's own
-// dialog (`askText`: no native `prompt`, 26 Oct 2026).
+// has no path to give, so it walks the bridge's folders in the app's own
+// selector (`pickPathInApp`, MICRO-CONTENTS-2 D17; before, `askText`).
 const tauri = readFileSync(`${SRC}tauri.ts`, "utf8");
 const pick = tauri.slice(tauri.indexOf("export async function pickFile("));
 // (MICRO-PERCORSI-WINDOWS: the answer goes through `picked`, made `/`-shaped)
 assert.ok(/if \(!isTauri\(\)\) return null;\s*return picked\(await open\(\{ multiple: false, directory: false/.test(pick),
   "pickFile opens the native dialog for one file, and only in the desktop");
 const relink = main.slice(main.indexOf("async function relinkFile("), main.indexOf("async function uploadFiles("));
-assert.ok(/if \(isTauri\(\)\)[\s\S]*await pickFile\(ask,[\s\S]*\} else \{\s*path = await askText\(ask/.test(relink),
-  "«Find here…»: native dialog in the desktop, the app's text field in the browser");
+// MICRO-CONTENTS-2 D17 · …and in the browser the file is CHOSEN in the app's
+// selector over the folders the bridge serves (path-picker.ts), not typed
+assert.ok(/if \(isTauri\(\)\)[\s\S]*await pickFile\(ask,[\s\S]*\} else \{[\s\S]*?path = await pickPathInApp\(\{ mode: "file"/.test(relink),
+  "«Find here…»: native dialog in the desktop, the app's file selector in the browser");
 assert.ok(/onRelink: \(f\) => \{ void relinkFile\(f\); \}/.test(main), "the gesture calls relinkFile");
 checks += 3;
 console.log(`state-symbols: ${checks} checks passed`);

@@ -256,7 +256,8 @@ const eq = (got, want, what) => {
 // transform does not hand one type's mode to another.
 {
   eq(W.winModes("graph"), W.GRAPH_MODES, "the graph window's modes ARE GRAPH_MODES");
-  eq([...W.winModes("storage")], ["filesystem", "s3"], "storage offers its two backends");
+  // MICRO-CONTENTS-2 intervention 5 · «Disco», «File del grafo», «Nella stanza»
+  eq([...W.winModes("storage")], ["filesystem", "graphfiles", "s3"], "storage offers the disk, the graph's files and the room");
   eq([...W.winModes("viewer")], ["single", "gallery"], "viewer offers single + gallery");
   eq([...W.winModes("table")], [], "a type with no modes has no mode list");
 
