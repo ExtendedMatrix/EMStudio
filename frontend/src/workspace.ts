@@ -97,10 +97,12 @@ export type GraphMode = ViewKind;
  *  `multigraph` first shipped invisible to `winMode`). */
 export const GRAPH_MODES: GraphMode[] = ["matrix", "graph", "dtc", "graphs"];
 
-/** The backends a Storage window can show: the disk, and the room's S3 store
+/** The backends a Storage («File») window can show: the disk, the files of the
+ *  active graph (MICRO-CONTENTS-2: «Dove sono i file» in a home of its own),
+ *  and the room's S3 store
  *  (`s3Panel`: delivery, lots, derivation). AUDIT C · it said «NOT connected
  *  (phase 2)», which stopped being true when the panel was implemented. */
-export const STORAGE_MODES = ["filesystem", "s3"] as const;
+export const STORAGE_MODES = ["filesystem", "graphfiles", "s3"] as const;
 
 /** How a Viewer window shows its collection: one item at a time, or all of it.
  *  Same collection either way — the Mode is the reading, not the content. */
@@ -110,10 +112,10 @@ export const VIEWER_MODES = ["single", "gallery"] as const;
  *  resource, with its thumbnail); the TABLE is the same shelf read back from
  *  s3Dgraphy as rows — with the three columns only the library can answer
  *  (residence, role, mode). One window, two ways of looking, the same shape as
- *  the Storage window's backends: the table is not a second shelf. The third,
- *  RESOURCES, is not the shelf at all: one table of the resource nodes of EVERY
- *  graph of the em.json (file state, tier, level, uses, bucket), with the gestures. */
-export const SHELF_MODES = ["list", "table", "resources"] as const;
+ *  the Storage window's backends: the table is not a second shelf. (RESOURCES,
+ *  which was not the shelf at all, is the File window's «File del grafo» since
+ *  MICRO-CONTENTS-2: one home for where the files are.) */
+export const SHELF_MODES = ["list", "table"] as const;
 
 /** The modes that are listed but cannot be entered yet, with the reason shown
  *  to whoever tries. Data, not an `if` in the header code. Empty since the

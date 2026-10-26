@@ -39,9 +39,38 @@ export interface FileHooks {
   cites?: number;
   elsewhere?: { id: string; name: string; n: number }[];
   onSwitchGraph?(slotId: string): void;
+  /** MICRO-CONTENTS-2 D13 · what the last «Find moved files…» found, kept */
+  movedOutcome?: string;
+  /** MICRO-CONTENTS-2 D14 · a bucket belongs to this graph's story (false: no box) */
+  hasBucket?: boolean;
+}
+
+/** MICRO-CONTENTS-2 D12 · «44 mancanti», «1 mancante»: the count and its word */
+function countLabel(state: string, n: number): string {
+  return t(n === 1 ? `fs.n1.${state}` : `fs.n.${state}`, { n: String(n) }, `${n} ${stateSign(`file.${state}`).label}`);
+}
+
+/** MICRO-CONTENTS-2 D17 · the notes of s3Dgraphy's resolver (`locate.py`), in
+ *  the reader's language: they come in English, and «Nota: not on this
+ *  computer: onedrive://…» sat in an Italian card */
+export function noteText(note: string): string {
+  let m: RegExpExecArray | null;
+  if ((m = /^not on this computer: (.+)$/s.exec(note))) return t("fs.note.notHere", { where: m[1] });
+  if (note === "the graph does not say where the file is") return t("fs.note.noWhere");
+  if ((m = /^the copy here is empty: (.+)$/s.exec(note))) return t("fs.note.emptyHere", { path: m[1] });
+  if ((m = /^the bytes of (.+?) are zeros: /s.exec(note))) return t("fs.note.zeros", { name: m[1] });
+  if ((m = /^(\d+) files, all here$/.exec(note))) return t("fs.note.allHere", { n: m[1] });
+  if ((m = /^(\d+) of its (\d+) files: (\w+)$/.exec(note)))
+    return t("fs.note.someOf", { k: m[1], n: m[2], state: stateSign(`file.${m[3]}`).label });
+  return note;
 }
 
 const FILE_STATES = ["on_disk", "on_node", "both", "reference_only", "missing", "empty_copy"];
+
+/** MICRO-CONTENTS-2 D16 · a use of a version («mobile_ar», «realtime») in words */
+function useLabel(u: string): string {
+  return t(`fs.useOf.${u}`, undefined, u.replace(/_/g, " "));
+}
 
 function el(tag: string, cls?: string, text?: string): HTMLElement {
   const e = document.createElement(tag);
@@ -81,7 +110,7 @@ export function fileRow(f: FileState, h: FileHooks, withDoc = true): HTMLElement
   row.appendChild(name);
   if (withDoc && said.doc) row.appendChild(el("span", "fs-doc", said.doc));
   row.appendChild(fileGestures(f, h));
-  if (f.note) row.appendChild(el("div", "insp-hint fs-note", f.note));
+  if (f.note) row.appendChild(el("div", "insp-hint fs-note", noteText(f.note)));
   return row;
 }
 
@@ -138,7 +167,7 @@ export function filesSection(h: FileHooks): HTMLElement {
     if (!n) continue;
     const sign = stateSign(`file.${s}`);
     const c = el("button", `fs-chip st-${sign.tone}${fileFilter === s ? " is-on" : ""}`,
-                  `${sign.glyph} ${n} ${sign.label}`) as HTMLButtonElement;
+                  `${sign.glyph} ${countLabel(s, n)}`) as HTMLButtonElement;
     c.dataset.filter = s;
     c.title = sign.meaning;
     c.addEventListener("click", () => { setFileFilter(s); h.onRefilter(); });
@@ -166,7 +195,7 @@ export function filesSection(h: FileHooks): HTMLElement {
   if (group.childElementCount) box.appendChild(group);
   const lost = all.filter((f) => f.state === "missing" || f.state === "empty_copy");
   if ((lost.length || movedFiles().length) && h.onFindMoved) box.appendChild(movedBox(lost.length, h));
-  if (h.onBucketCheck) box.appendChild(bucketBox(h));
+  if (h.onBucketCheck && h.hasBucket !== false) box.appendChild(bucketBox(h));
   if (fileRows().length) {
     box.appendChild(rowsList(h));
     return box;
@@ -267,6 +296,7 @@ function movedBox(lostCount: number, h: FileHooks): HTMLElement {
   find.addEventListener("click", () => h.onFindMoved!());
   head.appendChild(find);
   box.appendChild(head);
+  if (h.movedOutcome) box.appendChild(el("div", "insp-hint fs-moved-outcome", h.movedOutcome));
   const moved = movedFiles();
   const sure = moved.filter((m) => SURE.has(m.matches[0].how));
   if (sure.length && h.onRelinkMoved) {
@@ -314,7 +344,7 @@ function rowsList(h: FileHooks): HTMLElement {
   const use = el("select", "fs-use") as HTMLSelectElement;
   use.dataset.role = "files-use";
   use.appendChild(new Option(t("fs.use.all"), "", false, !listFilter.use));
-  for (const u of uses) use.appendChild(new Option(u.replace(/_/g, " "), u, false, u === listFilter.use));
+  for (const u of uses) use.appendChild(new Option(useLabel(u), u, false, u === listFilter.use));
   use.addEventListener("change", () => { listFilter.use = use.value; renderRows(); });
   tools.append(q, kind, use);
   wrap.appendChild(tools);
@@ -372,12 +402,13 @@ function rowCard(r: StorageRow, h: FileHooks, redraw: () => void): HTMLElement {
   const what = r.kind === "master" ? t("fs.is.master")
     : r.kind === "version" ? t("fs.is.version", { asset: r.asset })
     : r.kind === "file" ? t("fs.is.file", { asset: r.asset }) : t("fs.is.link");
-  add("fs.card.is", what + (r.level ? ` · ${r.level}` : "") + (r.tier ? ` · tier ${r.tier}` : ""));
+  // MICRO-CONTENTS-2 D17 · «tier master» said in words («copia master»)
+  add("fs.card.is", what + (r.level ? ` · ${r.level}` : "") + (r.tier && r.kind !== "master" ? ` · ${t(`fs.tier.${r.tier}`, undefined, r.tier)}` : ""));
   add("fs.card.doc", r.doc);
-  add("fs.card.use", r.use.map((u) => u.replace(/_/g, " ")).join(", "));
+  add("fs.card.use", r.use.map(useLabel).join(", "));
   add("fs.card.rm", r.rm.join(", "));
   add("fs.card.where", f?.path || r.where);
-  if (f?.note) add("fs.card.note", f.note);
+  if (f?.note) add("fs.card.note", noteText(f.note));
   const bkc = bucketOf(r.id);
   if (bkc) add("fs.bucket", `${BUCKET_SIGN[bkc.state]} ${t("fs.bm." + bkc.state)}${bkc.note ? " — " + bkc.note : ""}${bkc.bucket ? "\n" + bkc.bucket : ""}`);
   const near = fileRows().filter((x) => x.asset_id === r.asset_id && x.id !== r.id);
@@ -410,7 +441,7 @@ export function fileStateLine(id: string, h: FileHooks): HTMLElement | null {
   const line = el("div", "fs-line");
   line.appendChild(stateBadge(`file.${f.state}`));
   line.appendChild(fileGestures(f, h));
-  if (f.note) line.appendChild(el("div", "insp-hint fs-note", f.note));
+  if (f.note) line.appendChild(el("div", "insp-hint fs-note", noteText(f.note)));
   return line;
 }
 
@@ -515,18 +546,36 @@ export function resourcesTable(h: FileHooks, redraw: () => void): HTMLElement {
   const rows = fileRows();
   head.appendChild(el("b", "", rows.length ? t("fs.tableTitle", { n: String(rows.length) }) : t("fs.title")));
   const check = el("button", "ghost", h.checking ? t("fs.checking") : t("fs.check")) as HTMLButtonElement;
-  check.disabled = h.checking; check.dataset.act = "check";
+  if (h.graph && !h.checking) { check.textContent = t("fs.checkOf", { graph: h.graph }); check.title = t("fs.checkOfTitle", { graph: h.graph }); }
+  check.disabled = h.checking || (!!h.graph && h.cites === 0);
+  check.dataset.act = "check";
   check.addEventListener("click", () => h.onCheck());
   head.appendChild(check);
+  if (h.onReorder) {
+    const b = el("button", "ghost", t("fs.reorder")) as HTMLButtonElement;
+    b.dataset.act = "reorder";
+    b.addEventListener("click", () => h.onReorder!());
+    head.appendChild(b);
+  }
   wrap.appendChild(head);
+  if (h.graph && h.cites === 0) {
+    wrap.appendChild(el("div", "insp-hint fs-none-cited", t("fs.noneCited", { graph: h.graph })));
+    for (const o of h.elsewhere ?? []) {
+      const b = el("button", "ghost fs-switch", t("fs.switchTo", { graph: o.name, n: String(o.n) })) as HTMLButtonElement;
+      b.dataset.act = "switch-graph";
+      b.addEventListener("click", () => h.onSwitchGraph?.(o.id));
+      wrap.appendChild(b);
+    }
+    return wrap;
+  }
   if (!rows.length) {
-    wrap.appendChild(el("div", "insp-hint", t("fs.notChecked")));
+    wrap.appendChild(el("div", "insp-hint", h.graph ? t("fs.notCheckedOf", { graph: h.graph }) : t("fs.notChecked")));
     return wrap;
   }
   const all = fileStates();
   const lost = all.filter((f) => f.state === "missing" || f.state === "empty_copy");
   if ((lost.length || movedFiles().length) && h.onFindMoved) wrap.appendChild(movedBox(lost.length, h));
-  if (h.onBucketCheck) wrap.appendChild(bucketBox(h));
+  if (h.onBucketCheck && h.hasBucket !== false) wrap.appendChild(bucketBox(h));
   // filters: the words, the kind, the use, the graph, the state
   const tools = el("div", "fs-tools");
   const q = el("input", "fs-search") as HTMLInputElement;
@@ -537,7 +586,7 @@ export function resourcesTable(h: FileHooks, redraw: () => void): HTMLElement {
   const use = el("select", "fs-use") as HTMLSelectElement;
   use.appendChild(new Option(t("fs.use.all"), "", false, !listFilter.use));
   for (const u of [...new Set(rows.flatMap((r) => r.use))].sort())
-    use.appendChild(new Option(u.replace(/_/g, " "), u, false, u === listFilter.use));
+    use.appendChild(new Option(useLabel(u), u, false, u === listFilter.use));
   const graphSel = el("select", "fs-graph") as HTMLSelectElement;
   graphSel.appendChild(new Option(t("fs.graph.all"), "", false, !listFilter.graph));
   for (const g of [...new Set(rows.map((r) => r.graph).filter(Boolean))].sort())
@@ -552,7 +601,7 @@ export function resourcesTable(h: FileHooks, redraw: () => void): HTMLElement {
     if (!n) continue;
     const sign = stateSign(`file.${s}`);
     const c = el("button", `fs-chip st-${sign.tone}${fileFilter === s ? " is-on" : ""}`,
-                 `${sign.glyph} ${n} ${sign.label}`) as HTMLButtonElement;
+                 `${sign.glyph} ${countLabel(s, n)}`) as HTMLButtonElement;
     c.dataset.filter = s; c.title = sign.meaning;
     c.addEventListener("click", () => { setFileFilter(s); redraw(); });
     chips.appendChild(c);
@@ -610,7 +659,7 @@ function tableRow(r: StorageRow, h: FileHooks): HTMLElement {
   tr.appendChild(td("file", name));
   tr.appendChild(td("kind", r.kind === "version" ? "↳ " + t("fs.kind.version") : t("fs.kind." + r.kind)));
   tr.appendChild(td("level", r.level));
-  tr.appendChild(td("use", r.use.map((u) => u.replace(/_/g, " ")).join(", ")));
+  tr.appendChild(td("use", r.use.map(useLabel).join(", ")));
   const bk = bucketOf(r.id);
   const bc = td("bucket");
   if (bk) {

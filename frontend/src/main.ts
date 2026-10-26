@@ -201,7 +201,7 @@ import datamodelTranslations from "./assets/datamodel_translations.json";
 import { createResourceThumb } from "./resource-preview";
 import { keepOnDisk, newEmProject, refreshFileStates, reorderApply, reorderPreview, revealFile,
          fileProjectRoot, describeFile, filesOfDocument, fileStateOf, fileStates, findMovedFiles, movedFiles, dropMoved, bucketCheck, bucketPromote, dropBucket,
-         freePlanOf, freeLocal, freeUi, fileRows, listFilter,
+         freePlanOf, freeLocal, freeUi, fileRows, listFilter, bucketRows,
          type FileState, type MovedFile } from "./file-states";
 import { docFilesBox, filesSection, fileStateLine, resourcesTable, type FileHooks } from "./file-states-ui";
 import { paintChooser } from "./node-chooser";
@@ -706,6 +706,7 @@ import {
 } from "./menu-ui";
 import { currentPlatform } from "./menu-table";
 import { askConfirm, askText, openDialog, tell } from "./app-dialog";
+import { pickPathInApp } from "./path-picker";
 import { GraphRemovalError, graphRemovalReport, settleLinksTowards } from "./graph-removal";
 import type { ContainerLike, LinksAction, RemovalReport, ShelfAction } from "./graph-removal";
 
@@ -2473,6 +2474,13 @@ window.__EM_SCENE__ = () => {
 // Read-only like `__EM_SCENE__`; `check-drag`'s browser twin reads it.
 (window as unknown as { __EM_DRAG__?: unknown }).__EM_DRAG__ = {
   selected: () => [...selectedIds],
+  /** MICRO-CONTENTS-2 · the path is a breadcrumb now, not a field to fill: a
+   *  bench sends a File window (the first, or `winId`) to a folder */
+  storageGo: (path: string | null, winId?: string) => {
+    const w = windowsOf().find((x) => x.type === "storage" && (!winId || x.id === winId));
+    if (w) setStoragePath(w, path);
+    return !!w;
+  },
   /** MICRO-TILESET-CARTELLA · a drop of a tileset on a window, as the drop
    *  handler does it: files of the system (path + Blob) or a Storage path */
   tilesetDrop: async (winId: string, files: Array<{ path: string; blob: Blob }>) => {
@@ -3483,7 +3491,7 @@ function showSelection(nodeId: string, from: PickFrom | null): void {
   if (scenes.length) showInSpace(nodeId, scenes.map((w) => ({
     id: w.id, frame: !(from?.win === w.id && from.part === "scene"), reveal: !(from?.win === w.id && from.part === "outliner") })));
   showInTables(nodeId, from);
-  showInShelf(nodeId, from);
+  showInGraphFiles(nodeId, from);
 }
 
 /** p.4 · the Space windows show a record: its epoch, its frame, its row. */
@@ -3572,19 +3580,21 @@ function showInTables(nodeId: string, from: PickFrom | null): void {
   });
 }
 
-/** p.4 · a resource, a version or a file picked: a Shelf window shows its files
- *  table with the row marked and in view. */
-function showInShelf(nodeId: string, from: PickFrom | null): void {
+/** p.4 · a resource, a version or a file picked: a «File» window shows the
+ *  files of the graph with the row marked and in view (MICRO-CONTENTS-2: the
+ *  Shelf's «Risorse» became the File window's «File del grafo»). */
+function showInGraphFiles(nodeId: string, from: PickFrom | null): void {
   if (!fileRows().some((r) => r.id === nodeId)) return;
-  const shelves = windowsOf().filter((w) => w.type === "shelf" && winAreas.has(w.id) && from?.win !== w.id);
-  if (!shelves.length) return;
+  const wins = windowsOf().filter((w) => w.type === "storage" && winModeOf(w) !== "s3"
+    && winAreas.has(w.id) && from?.win !== w.id);
+  if (!wins.length) return;
   listFilter.selected = nodeId;
-  for (const w of shelves) if (winModeOf(w) !== "resources") setWinModeOf(w, "resources");
-  renderShelf();
+  for (const w of wins) setWinModeOf(w, "graphfiles");
+  renderStorage();
   renderAreaHeaders();
   requestAnimationFrame(() => {
-    for (const w of shelves)
-      document.querySelector(`.tile-area[data-win="${CSS.escape(w.id)}"] .fs-item[data-id="${CSS.escape(nodeId)}"]`)
+    for (const w of wins)
+      document.querySelector(`.tile-area[data-win="${CSS.escape(w.id)}"] :is(.fs-item, .fs-trow)[data-id="${CSS.escape(nodeId)}"]`)
         ?.scrollIntoView({ block: "nearest" });
   });
 }
@@ -29648,7 +29658,9 @@ function shelfRow(entry: ShelfEntry): HTMLElement {
 
   const actions = document.createElement("div");
   actions.className = "shelf-actions";
-  if (!promoted || !store?.node(promoted)) {
+  // (no graph open: nothing to make it a document of — the button said
+  // «Make it a document of no graph open»)
+  if (store && (!promoted || !store.node(promoted))) {
     const pr = document.createElement("button");
     // MICRO-CONTENTS-1 C15 · made in the ACTIVE graph: the button says which
     pr.textContent = t("tropy.promoteTo", { graph: activeGraphName() });
@@ -30813,7 +30825,7 @@ function documentCard(): HTMLElement | null {
 // ── R1/R2 (E.D., 4 Oct 2026) · where the files are, with the ONE resolver ──
 let filesChecking = false;
 
-function filesRefresh(): void { renderStorage(); refreshInspector(); renderDocView(); renderEmData(); if (activeWin().type === "shelf") renderShelf(); renderMissingPill(); }
+function filesRefresh(): void { renderStorage(); refreshInspector(); renderDocView(); renderEmData(); renderMissingPill(); }
 
 function fileRoom(): { base: string; room_id: string; token?: string | null } | null {
   const base = (hubNodeUrl || getSettings().sync.hubUrl).trim().replace(/\/+$/, "");
@@ -30865,12 +30877,27 @@ function fileHooks(): FileHooks {
     onKeep: (fs) => { void keepFiles(fs); },
     onReorder: () => { void reorderGesture(); },
     onFindMoved: () => { void findMoved(); },
+    movedOutcome,
+    hasBucket: graphUsesBucket(),
     onRelinkMoved: (m, path) => { relinkMoved(m, path); },
     onBucketCheck: (deep) => { void bucketGesture(deep); },
     onFreeOpen: () => { void freeOpen(); },
     onFreeRun: () => { void freeRun(); },
     onPromote: (f) => { void promoteGesture(f); },
   };
+}
+
+/** MICRO-CONTENTS-2 D14 · a bucket is part of this graph's story: some file
+ *  points at one (an `s3://` address), or a check has already answered. With
+ *  none, the bucket box is not drawn — its two buttons said nothing. */
+function graphUsesBucket(): boolean {
+  if (bucketRows().length) return true;
+  for (const sl of emtree.slots) for (const n of sl.store.liveNodes()) {
+    const d = (n.data ?? {}) as Record<string, unknown>;
+    if (typeof d.url === "string" && d.url.startsWith("s3://")) return true;
+    if (Array.isArray(d.addresses) && JSON.stringify(d.addresses).includes("s3://")) return true;
+  }
+  return false;
 }
 
 /** the folders the file tools look in: the em.json's, its DosCo, the Storage windows' */
@@ -30945,6 +30972,8 @@ async function promoteGesture(f: FileState): Promise<void> {
 /** S1 · «Find moved files…»: the bridge looks, in the project's folders and in
  * one more the person may name (desktop: the native folder dialog), for the
  * files that are missing; the candidates are shown, nothing is changed. */
+/** MICRO-CONTENTS-2 D13 · what the last «Find moved files…» found, said in the box */
+let movedOutcome = "";
 async function findMoved(): Promise<void> {
   if (!store) return;
   const src = inventorySources();
@@ -30958,7 +30987,9 @@ async function findMoved(): Promise<void> {
   }
   try {
     const found = await findMovedFiles(await bridgeUrl(), store.doc, folders, fileProjectRoot(), oneDriveRoot());
-    toast(found.length ? t("fs.movedFound", { n: String(found.length) }) : t("fs.noneMoved"));
+    // MICRO-CONTENTS-2 D13 · the outcome STAYS written in the box (a toast went)
+    movedOutcome = found.length ? t("fs.movedFound", { n: String(found.length) }) : t("fs.noneMoved");
+    toast(movedOutcome);
   } catch (e) {
     toast(String((e as Error)?.message ?? e));
   }
@@ -31000,7 +31031,9 @@ async function relinkFile(f: FileState): Promise<void> {
       return;
     }
   } else {
-    path = await askText(ask, "");
+    // MICRO-CONTENTS-2 D17 · the browser chooses the file in the folders the
+    // bridge serves (the app's selector), it does not type a path
+    path = await pickPathInApp({ mode: "file", message: ask, start: fileProjectRoot() || inventorySources().baseDir || null });
   }
   const st = storeOfNode(f.id);
   const n = st?.node(f.id);
@@ -31728,6 +31761,99 @@ async function suspendedRootsNote(body: HTMLElement, win: Win): Promise<void> {
   body.prepend(box);
 }
 
+/** MICRO-CONTENTS-2 D4 · the steps of a path, each with the folder it names:
+ *  `/Users/a/EM` → `/`, `/Users`, `/Users/a`, `/Users/a/EM`; `C:\x\y` →
+ *  `C:\`, `C:\x`, `C:\x\y`. */
+function pathSteps(path: string): Array<{ label: string; path: string }> {
+  const sep = path.includes("\\") && !path.includes("/") ? "\\" : "/";
+  const parts = path.split(/[\\/]+/).filter(Boolean);
+  const out: Array<{ label: string; path: string }> = [];
+  let acc = "";
+  if (/^[\\/]/.test(path)) out.push({ label: sep, path: sep });
+  parts.forEach((p, i) => {
+    if (i === 0 && /^[A-Za-z]:$/.test(p)) acc = p + sep;
+    else acc = acc && !acc.endsWith(sep) ? `${acc}${sep}${p}` : `${acc || (/^[\\/]/.test(path) ? sep : "")}${p}`;
+    out.push({ label: p, path: acc });
+  });
+  return out;
+}
+
+/** MICRO-CONTENTS-2 D4 · the breadcrumb: the steps that fit, the head as «…»
+ *  (a click on it opens the selector there), the last step is where you are. */
+function paintBreadcrumb(crumb: HTMLElement, text: string, path: string): void {
+  crumb.dataset.path = path;
+  crumb.title = path ? t("storage.pathTitle", { path }) : "";
+  crumb.textContent = "";
+  const go = (crumb as HTMLElement & { goTo?: (p: string | null) => void }).goTo;
+  if (!path) {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "crumb-step is-here";
+    b.textContent = text;
+    crumb.appendChild(b);
+    return;
+  }
+  const steps = pathSteps(path);
+  const items = steps.map((s, i) => {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "crumb-step" + (i === steps.length - 1 ? " is-here" : "");
+    b.textContent = s.label;
+    b.title = s.path;
+    b.dataset.path = s.path;
+    if (i < steps.length - 1) b.addEventListener("click", () => go?.(s.path));
+    return b;
+  });
+  const sepOf = (): HTMLElement => { const x = document.createElement("span"); x.className = "crumb-sep"; x.textContent = "›"; return x; };
+  const more = document.createElement("button");
+  more.type = "button";
+  more.className = "crumb-step crumb-more";
+  more.textContent = "…";
+  more.title = t("storage.pickDirTitle");
+  const lay = (from: number): void => {
+    crumb.textContent = "";
+    if (from > 0) { crumb.append(more, sepOf()); more.onclick = () => go?.(steps[from - 1].path); }
+    items.slice(from).forEach((b, k) => { if (k) crumb.appendChild(sepOf()); crumb.appendChild(b); });
+  };
+  lay(0);
+  // the head gives way to «…» until the tail fits (after the strip is laid out)
+  const fit = (): void => {
+    if (!crumb.isConnected || !crumb.clientWidth) return;   // not laid out yet
+    let from = 0;
+    lay(0);
+    while (crumb.scrollWidth > crumb.clientWidth + 1 && from < steps.length - 1) lay(++from);
+  };
+  fit();
+  requestAnimationFrame(fit);
+}
+
+/** MICRO-CONTENTS-2 D4/D6 · go to a folder; one the bridge does not serve is
+ *  ASKED for — «add it to the allowed folders?» — and entered only after the yes. */
+async function storageGoChecked(win: Win, path: string | null): Promise<void> {
+  if (!path) { setStoragePath(win, null); return; }
+  try {
+    await fsList(path);
+  } catch (e) {
+    if (e instanceof BridgeDownError) { toast(t("storage.bridgeDown")); return; }
+    const yes = await askConfirm(t("storage.addAsk", { path }), { ok: t("storage.addAskOk"), kind: "add-root" });
+    if (!yes) return;
+    await addStorageRootPath(path, win, false);
+    try { await fsList(path); } catch { return; }
+  }
+  setStoragePath(win, path);
+}
+
+/** MICRO-CONTENTS-2 D4 · ▾ of the breadcrumb: a folder chosen, never typed —
+ *  the system's dialog on the desktop, the app's selector in a browser. */
+async function pickStorageFolder(win: Win): Promise<void> {
+  const at = storagePath(win);
+  const path = isTauri()
+    ? await pickFolder(at ?? undefined).catch(() => null)
+    : await pickPathInApp({ mode: "folder", start: at });
+  if (!path) return;
+  await storageGoChecked(win, path);
+}
+
 /** The Storage's crumb: a label (the object store) or the path FIELD — whose
  *  value is not overwritten while somebody is typing in it. */
 /** DEV30 U11 · the end of a path that fits the field, cut at a «/» and led by
@@ -31756,6 +31882,7 @@ function fitPathTail(field: HTMLInputElement, path: string): string {
 
 function setCrumb(crumb: HTMLElement | null, text: string, path: string): void {
   if (!crumb) return;
+  if (crumb.classList.contains("storage-breadcrumb")) { paintBreadcrumb(crumb, text, path); return; }
   if (crumb instanceof HTMLInputElement) {
     crumb.dataset.path = path;
     // DEV29 B4 · the whole path on hover, and the field shows its TAIL (where
@@ -31779,6 +31906,18 @@ function setCrumb(crumb: HTMLElement | null, text: string, path: string): void {
   crumb.textContent = text;
 }
 
+
+/** «File del grafo»: where the files the active graph cites are — the list
+ *  with its cards in a narrow window, the whole table (sortable, by graph) in a
+ *  wide one. The section that was the head of the disk and the Shelf's
+ *  «Risorse», in one place. */
+function graphFilesPanel(win: Win): HTMLElement {
+  const wide = (winAreas.get(win.id)?.clientWidth ?? 0) >= 760;
+  const box = wide ? resourcesTable(fileHooks(), renderStorage) : filesSection(fileHooks());
+  box.classList.add("storage-graph-files");
+  return box;
+}
+
 function renderStorageInto(host: StorageHost): void {
   const { win, body, crumb, up } = host;
   if (win.type !== "storage") return;
@@ -31794,12 +31933,24 @@ function renderStorageInto(host: StorageHost): void {
   // COLLEGARE · the document card stays on top whatever the listing does
   const withCard = (): void => {
     body.querySelector(":scope > .dcard")?.remove();
-    body.querySelector(":scope > .fs-section")?.remove();
-    // R2 · where the files of the graph are, at the head of Contents
-    if (store) body.prepend(filesSection(fileHooks()));
+    // MICRO-CONTENTS-2 D7 · «Dove sono i file» is not in the head of the disk
+    // any more: it is the window's other way, «File del grafo»
     const c = documentCard();
     if (c) body.prepend(c);
   };
+
+  // MICRO-CONTENTS-2 intervention 5 (variant B) · «File del grafo», the
+  // window's mode beside «Disco»: where the files the active graph cites are
+  // («Dove sono i file», which sat in the head of the disk and took a quarter
+  // of it, and the Shelf's «Risorse», its double). One home.
+  if (winModeOf(win) === "graphfiles") {
+    paintSurface(win, body, () => {
+      body.textContent = "";
+      body.classList.remove("storage-split");
+      body.appendChild(store ? graphFilesPanel(win) : storageEmpty(t("storage.graphFilesNoGraph")));
+    });
+    return;
+  }
 
   if (winModeOf(win) === "s3") {
     // THE OBJECT STORE, for real now. A file goes to the room's store, comes
@@ -35583,23 +35734,43 @@ async function openStoragePlaces(win: Win, anchor?: HTMLElement): Promise<void> 
   menu.appendChild(waiting);
   await loadMappingPlaces();                       // one loader, two surfaces
   menu.textContent = "";
+  // MICRO-CONTENTS-2 D6 · what the menu does, in words («Rendi visibile
+  // un'altra cartella»), the folders with the names this computer gives them in
+  // the app's language, and the WHOLE DISKS apart, each behind a question
+  const lead = document.createElement("div");
+  lead.className = "storage-place-head";
+  lead.textContent = t("storage.placesHead");
+  menu.appendChild(lead);
   const served = new Set(mePickerBookmarks.map((b) => b.path));
-  for (const place of mePickerPlaces) {
+  const placeRow = (place: MappingFsPlace): HTMLButtonElement => {
     const row = document.createElement("button");
     row.className = "storage-place";
     const already = place.served || served.has(place.path);
-    row.textContent = already ? `✓ ${place.label}` : `+ ${place.label}`;
+    const label = place.kind === "volume" ? place.label : t(`place.${place.label}`, undefined, place.label);
+    row.textContent = already ? `✓ ${label}` : `+ ${label}`;
     row.title = place.path;
     row.disabled = already;
     row.addEventListener("click", () => {
       menu.remove();
-      void addStorageRootPath(place.path, win);
+      void (async () => {
+        if (place.kind === "volume" && !(await askConfirm(t("storage.wholeDiskConfirm", { path: place.path }), { danger: true, kind: "whole-disk" }))) return;
+        await addStorageRootPath(place.path, win, true, place.kind === "volume");
+      })();
     });
-    menu.appendChild(row);
+    return row;
+  };
+  for (const place of mePickerPlaces.filter((p) => p.kind !== "volume")) menu.appendChild(placeRow(place));
+  const disks = mePickerPlaces.filter((p) => p.kind === "volume");
+  if (disks.length) {
+    const h = document.createElement("div");
+    h.className = "storage-place-head";
+    h.textContent = t("storage.placesDisks");
+    menu.appendChild(h);
+    for (const place of disks) menu.appendChild(placeRow(place));
   }
   const other = document.createElement("button");
   other.className = "storage-place other";
-  other.textContent = t("storage.rootOther");
+  other.textContent = t(isTauri() ? "storage.rootOtherPick" : "storage.rootOther");
   other.addEventListener("click", () => {
     menu.remove();
     void addStorageRoot(win);
@@ -35639,22 +35810,22 @@ async function addStorageRoot(win: Win): Promise<void> {
 
 /** CAMPAGNA (difetto 10) · grant a folder; the WHOLE DISK only when the person
  *  confirms it (the bridge answers 409 `whole-disk` and remembers the yes). */
-async function postFsRoot(path: string): Promise<Response> {
+async function postFsRoot(path: string, confirmed = false): Promise<Response> {
   const base = await bridgeUrl();
   const send = (confirm: boolean) => fetch(`${base}/fs/roots`, {
     method: "POST", headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ action: "add", path, ...(confirm ? { confirm_whole_disk: true } : {}) }),
   });
-  const first = await send(false);
-  if (first.status !== 409) return first;
+  const first = await send(confirmed);
+  if (first.status !== 409 || confirmed) return first;
   const j = (await first.clone().json().catch(() => null)) as { code?: string } | null;
   if (j?.code !== "whole-disk" || !(await askConfirm(t("storage.wholeDiskConfirm", { path }), { danger: true }))) return first;
   return await send(true);
 }
 
-async function addStorageRootPath(path: string, win: Win): Promise<void> {
+async function addStorageRootPath(path: string, win: Win, toRoots = true, confirmed = false): Promise<void> {
   try {
-    const res = await postFsRoot(path);
+    const res = await postFsRoot(path, confirmed);
     const payload = (await res.json().catch(() => null)) as
       | { ok?: boolean; error?: string; code?: string; roots?: string[] } | null;
     if (!res.ok || !payload?.ok) {
@@ -35670,7 +35841,7 @@ async function addStorageRootPath(path: string, win: Win): Promise<void> {
     // the RIGHT window went back to the roots and the left one never moved.
     // A command acts on the window it started from, which is the window whose
     // button was pressed — known here without asking the room.
-    setStoragePath(win, null);           // back to the roots, where it now shows
+    if (toRoots) setStoragePath(win, null);   // back to the roots, where it now shows
   } catch (err) {
     toast(t("storage.rootFailed", { detail: err instanceof Error ? err.message : String(err) }));
   }
@@ -38077,35 +38248,34 @@ function buildHeaderStrip(win: Win): HTMLElement {
   if (win.type === "storage" && winModeOf(win) === "filesystem") {
     // the object-store mode has no folder to walk, so it has no crumb: its own
     // "where am I" is the room, and the room is in the panel's first line
+    //
+    // (MICRO-CONTENTS-2 intervention 5: «File del grafo» is the window's
+    // other mode, beside «Disco» and «Nella stanza», `STORAGE_MODES`)
     const up = document.createElement("button");
     up.className = "win-act win-strip-up";
     up.textContent = "↑";
     up.title = t("storage.up");
-    // CAMPAGNA (difetto 11) · the path is WRITTEN and pasted, not only walked:
-    // eight clicks to a deep folder become one paste and Enter
-    const crumb = document.createElement("input");
-    crumb.type = "text";
-    crumb.className = "win-strip-crumb storage-crumb storage-path";
-    crumb.spellcheck = false;
+    // MICRO-CONTENTS-2 D4 · the path is a BREADCRUMB: a click on a step goes
+    // there, and ▾ opens a folder selector — the system's on the desktop, the
+    // app's in a browser (the allowed folders). Nothing is typed or pasted any
+    // more (E.D.: «aprire un selettore di percorso, non incollare un percorso»;
+    // a paste without selecting first was APPENDED to the path shown).
+    const crumb = document.createElement("div");
+    crumb.className = "win-strip-crumb storage-crumb storage-path storage-breadcrumb";
+    crumb.setAttribute("role", "navigation");
     crumb.setAttribute("aria-label", t("storage.pathLabel"));
-    crumb.placeholder = t("storage.pathPh");
     crumb.addEventListener("pointerdown", (e) => e.stopPropagation());
     crumb.addEventListener("click", (e) => e.stopPropagation());
-    crumb.addEventListener("keydown", (e) => {
+    (crumb as HTMLElement & { goTo?: (p: string | null) => void }).goTo = (p) => focusThen(win, () => void storageGoChecked(win, p));
+    const pick = document.createElement("button");
+    pick.className = "win-act win-strip-pickdir";
+    pick.textContent = "▾";
+    pick.title = t("storage.pickDirTitle");
+    pick.setAttribute("aria-label", t("storage.pickDirTitle"));
+    pick.addEventListener("click", (e) => {
       e.stopPropagation();
-      if (e.key === "Enter") {
-        e.preventDefault();
-        const v = crumb.value.trim().replace(/\/+$/, "") || null;
-        crumb.blur();
-        focusThen(win, () => setStoragePath(win, v));
-      } else if (e.key === "Escape") {
-        crumb.value = crumb.dataset.path ?? "";
-        crumb.blur();
-      }
+      focusThen(win, () => void pickStorageFolder(win));
     });
-    // DEV30 U11 · focus: the whole path, to edit; blur: its tail again
-    crumb.addEventListener("focus", () => { crumb.value = crumb.dataset.path ?? crumb.value; crumb.scrollLeft = crumb.scrollWidth; });
-    crumb.addEventListener("blur", () => { crumb.value = fitPathTail(crumb, crumb.dataset.path ?? crumb.value); });
     const root = document.createElement("button");
     root.className = "win-act win-strip-root";
     root.textContent = "+ 📁";
@@ -38116,16 +38286,22 @@ function buildHeaderStrip(win: Win): HTMLElement {
     });
     // TRADUZIONI parte 5 · «📍 the em.json's folder»: back to the folder of the
     // open file from wherever the Storage is; disabled, with the reason, when
-    // the graph does not come from a file with a known path
+    // the graph does not come from a file with a known path. MICRO-CONTENTS-2
+    // D5 · with its word beside it when the window has the room
     const home = document.createElement("button");
     home.className = "win-act win-strip-docdir";
-    home.textContent = "📍";
+    const pin = document.createElement("span");
+    pin.textContent = "📍";
+    const word = document.createElement("span");
+    word.className = "win-strip-docdir-word";
+    word.textContent = t("storage.docDirShort");
+    home.append(pin, word);
     home.addEventListener("click", (e) => {
       e.stopPropagation();
       focusThen(win, () => void storageToDocumentFolder(win));
     });
     refreshDocFolderButton(home);
-    strip.append(up, crumb, home, root);
+    strip.append(up, crumb, pick, home, root);
     return strip;
   }
 

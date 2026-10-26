@@ -109,9 +109,10 @@ export async function saveAsEmJson(
  * uploading a whole DosCo through the browser to reach a process running on the
  * same machine. Returns null outside Tauri — the browser has no folder picker
  * worth the name, so there the path is typed. */
-export async function pickFolder(): Promise<string | null> {
+export async function pickFolder(defaultPath?: string): Promise<string | null> {
   if (!isTauri()) return null;
-  return picked(await open({ directory: true, multiple: false }));
+  return picked(await open({ directory: true, multiple: false,
+    ...(defaultPath ? { defaultPath: toNative(defaultPath) } : {}) }));
 }
 
 /** Native picker for an em_data.xlsx → the chosen path, or null.

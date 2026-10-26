@@ -1259,7 +1259,7 @@ for (const w of [1280, 1600]) {
         const name = row.querySelector(".shelf-name").getBoundingClientRect();
         if (name.width < 60) bad.push(`${row.dataset.entry}:name ${Math.round(name.width)}px`);
       }
-      const c = document.querySelector('[data-win$=":shelf"] .win-strip-count');
+      const c = document.querySelector('[data-win$=":shelf"] .shelf-head-count');
       // MICRO-PROVA-DEV47 p.6 · the header is one line now: a count past its edge
       // is reached by scrolling the bar (whole, not cut), as Blender's headers
       const ol = c?.closest(".one-line");
@@ -4295,8 +4295,11 @@ test("V4.storage", "Storage: il percorso si legge (la coda, e intero al passaggi
   await row.dblclick();
   await p.waitForTimeout(700);
   const selection = await p.evaluate(() => String(window.getSelection() ?? ""));
-  const crumb = await p.evaluate(() => { const c = document.querySelector("input.storage-path"); return c && { title: c.title, value: c.value,
-    tail: c.scrollLeft + c.clientWidth >= c.scrollWidth - 2, long: c.scrollWidth > c.clientWidth }; });
+  // MICRO-CONTENTS-2 D4 · the path is a breadcrumb: its last step is where the
+  // window is, the steps that do not fit give way to «…» (never cut mid-name)
+  const crumb = await p.evaluate(() => { const c = document.querySelector(".storage-path"); const steps = c ? [...c.querySelectorAll(".crumb-step")] : [];
+    return c && { title: c.title, value: steps.filter((s) => !s.classList.contains("crumb-more") && s.textContent !== "/").map((s) => s.textContent).join("/"),
+      tail: c.scrollWidth <= c.clientWidth + 1, long: steps.some((s) => s.classList.contains("crumb-more")) }; });
   const file = p.locator(".storage-row", { has: p.locator(".storage-name", { hasText: /^a\.xlsx$/ }) }).first();
   await file.click();
   await p.waitForTimeout(1500);
@@ -4603,10 +4606,10 @@ test("W10.storage", "U10–U12, V1, V2 · Storage: il dettaglio è un riquadro f
   await p.waitForTimeout(1200);
   const r = await p.evaluate(() => {
     const list = document.querySelector(".storage-list"), det = document.querySelector(".storage-detail");
-    const crumb = document.querySelector("input.storage-path");
+    const crumb = document.querySelector(".storage-path");
     return { apart: !!list && !!det && !list.contains(det) && det.contains(document.querySelector(".stamp-card")),
              listScrolls: list && getComputedStyle(list).overflowY, cmds: [...(det?.querySelectorAll(".storage-commands button") ?? [])].map((b) => b.dataset.action),
-             crumb: crumb?.value, title: crumb?.title, when: document.querySelector('.stamp-card [data-card="when"]')?.textContent,
+             crumb: crumb?.dataset.path, title: crumb?.title, when: document.querySelector('.stamp-card [data-card="when"]')?.textContent,
              from: document.querySelector('.stamp-card [data-card="from"]')?.textContent, sidecars: document.querySelector('[data-action="toggle-stamp-files"]')?.textContent };
   });
   await p.screenshot({ path: SHOT("w10-storage-dettaglio") }).catch(() => {});
