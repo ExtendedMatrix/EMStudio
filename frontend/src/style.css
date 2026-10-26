@@ -10282,3 +10282,8 @@ body.em-detached #tile-root > .tile-area.tile-detached {
 .app-dialog-err { color: var(--danger, #b3261e); font-size: 12px; min-height: 0; margin-top: 6px; }
 .app-dialog-err:empty { display: none; }
 .modal-foot button.primary.danger { background: var(--danger, #b3261e); border-color: var(--danger, #b3261e); color: #fff; }
+/* «Delete the graph…» (graph-removal.ts): the report, its lists and choices */
+.gdel-report p { margin: 0 0 8px; }
+.gdel-report ul { margin: -4px 0 8px; padding-left: 18px; font-size: 12px; color: var(--text-faint); max-height: 9em; overflow-y: auto; }
+.gdel-choice { display: block; margin: 0 0 10px; font-size: 12px; }
+.et-move-menu button.danger { color: var(--danger, #b3261e); }

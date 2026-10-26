@@ -1107,6 +1107,15 @@ export function renderEMTree(host: HTMLElement, tree: EMTree,
     el.addEventListener("change", commit);
   });
 
+  // the graph's menu (move to…, delete from the file…) also on the right click
+  host.querySelectorAll<HTMLButtonElement>(".et-pick").forEach((button) => {
+    button.addEventListener("contextmenu", (event) => {
+      const id = button.dataset.id;
+      if (!id || !handlers.onMoveGraph) return;
+      event.preventDefault();
+      handlers.onMoveGraph(id, button);
+    });
+  });
   // F2 · per-graph «Sposta in…», per-file Save and close
   host.querySelectorAll<HTMLButtonElement>(".et-move").forEach((button) => {
     button.addEventListener("click", (event) => {

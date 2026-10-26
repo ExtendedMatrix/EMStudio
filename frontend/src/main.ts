@@ -705,7 +705,9 @@ import {
   type DynamicItem,
 } from "./menu-ui";
 import { currentPlatform } from "./menu-table";
-import { askConfirm, askText } from "./app-dialog";
+import { askConfirm, askText, openDialog, tell } from "./app-dialog";
+import { GraphRemovalError, graphRemovalReport, settleLinksTowards } from "./graph-removal";
+import type { ContainerLike, LinksAction, RemovalReport, ShelfAction } from "./graph-removal";
 
 // MICRO-DOVE-CHI-MENU p.1 · the menus come from ONE table (`menu-table.ts`):
 // drawn here, before any handler below looks its button up by id
@@ -17695,6 +17697,14 @@ function openMoveMenu(slotId: string, anchor: HTMLElement): void {
   }
   item(t("emtree.moveNewFile"), "", () => void moveGraphToNewFile(slotId));
   if (slot.fileId) item(t("emtree.moveNoFile"), "", () => moveGraph(slotId, null));
+  // MICRO contenuti-workspace-elimina-grafo · the graph LEAVES its file (closing
+  // it keeps it there): asked with the report, one undo step
+  const sep = document.createElement("div");
+  sep.className = "dd-sep";
+  menu.appendChild(sep);
+  item(t("emtree.deleteGraph"), "", () => void deleteGraphAsking(slotId));
+  menu.lastElementChild?.classList.add("danger");
+  (menu.lastElementChild as HTMLElement | null)?.setAttribute("data-act", "delete-graph");
   const cancel = document.createElement("button");
   cancel.className = "edge-menu-cancel";
   cancel.textContent = t("l.cancel");
@@ -17706,6 +17716,152 @@ function openMoveMenu(slotId: string, anchor: HTMLElement): void {
   menu.style.left = `${Math.round(Math.max(4, Math.min(r.left, window.innerWidth - mw - 4)))}px`;
   menu.style.top = `${Math.round(r.bottom + 2)}px`;
   setTimeout(() => document.addEventListener("pointerdown", away, true), 0);
+}
+
+/**
+ * MICRO contenuti-workspace-elimina-grafo · «Delete the graph from the file…».
+ *
+ * Closing a graph keeps it in its file (F2: retained, written back); this takes
+ * it OUT. Asked first with s3Dgraphy's report (graph-removal.ts, the mirror of
+ * `remove_graph`): its nodes and edges, the links of the other graphs that would
+ * hang (kept marked, or removed too), the shelf entries only it used (kept, or
+ * taken off the shelf too), the resources and files nobody else names — files
+ * are never deleted. The file becomes modified; ONE undo (the toast's) puts
+ * everything back: the graph with its own history, the links, the shelf.
+ */
+async function deleteGraphAsking(slotId: string): Promise<void> {
+  const slot = emtree.get(slotId);
+  if (!slot) return;
+  const file = emtree.fileOf(slot);
+  const fileName = file?.name ?? t("emtree.noFileGroup");
+  const gid = String((slot.store.doc.graph as Record<string, unknown>).graph_id ?? slot.id);
+  const doc = fileContainer(file, { bump: false }) as unknown as ContainerLike;
+  let links: LinksAction = "keep", shelf: ShelfAction = "keep";
+  let report: RemovalReport;
+  try { report = graphRemovalReport(doc, gid, { links, shelf }); }
+  catch (e) {
+    const code = e instanceof GraphRemovalError ? e.code : "unknown";
+    await tell(t(`gdel.refused.${code}`, { name: slotLabel(slot), file: fileName }), { kind: "delete-graph-refused" });
+    return;
+  }
+  const nameOf = (id: string): string => {
+    const sl = emtree.slotsOf(file?.id ?? null).find((x) => String((x.store.doc.graph as Record<string, unknown>).graph_id ?? x.id) === id);
+    return sl ? slotLabel(sl) : id;
+  };
+  const body = document.createElement("div");
+  body.className = "gdel-report";
+  const para = (txt: string, attr?: string): HTMLElement => {
+    const p = document.createElement("p");
+    p.textContent = txt;
+    if (attr) p.dataset.gdel = attr;
+    body.appendChild(p);
+    return p;
+  };
+  const list = (items: string[], attr: string): void => {
+    const ul = document.createElement("ul");
+    ul.dataset.gdel = attr;
+    for (const x of items.slice(0, 12)) { const li = document.createElement("li"); li.textContent = x; ul.appendChild(li); }
+    if (items.length > 12) { const li = document.createElement("li"); li.textContent = t("gdel.more", { n: String(items.length - 12) }); ul.appendChild(li); }
+    body.appendChild(ul);
+  };
+  const choice = (label: string, attr: string, on: (v: boolean) => void): void => {
+    const l = document.createElement("label");
+    l.className = "gdel-choice";
+    const cb = document.createElement("input");
+    cb.type = "checkbox";
+    cb.dataset.gdel = attr;
+    cb.addEventListener("change", () => { on(cb.checked); paintTail(); });
+    l.append(cb, ` ${label}`);
+    body.appendChild(l);
+  };
+  para(t("gdel.lead", { name: report.name, file: fileName, nodes: String(report.nodes), edges: String(report.edges) }), "lead");
+  if (report.links_out) para(t("gdel.linksOut", { n: String(report.links_out) }), "links-out");
+  if (report.links_in.length) {
+    para(t("gdel.linksIn", { n: String(report.links_in.length) }), "links-in");
+    list(report.links_in.map((l) => `${nameOf(l.graph_id)} · ${l.source_name || l.source} → ${l.target_name || l.target} (${l.edge_type})`), "links-in-list");
+    choice(t("gdel.linksDrop"), "links-drop", (v) => { links = v ? "drop" : "keep"; });
+  }
+  if (report.shelf_only_here.length) {
+    para(t("gdel.shelfOnly", { n: String(report.shelf_only_here.length) }), "shelf-only");
+    list(report.shelf_only_here.map((e) => e.name || e.locator || e.id), "shelf-only-list");
+    choice(t("gdel.shelfDrop"), "shelf-drop", (v) => { shelf = v ? "drop" : "keep"; });
+  }
+  // what depends on the choices: said again when they change
+  const tail = document.createElement("div");
+  body.appendChild(tail);
+  const paintTail = (): void => {
+    report = graphRemovalReport(doc, gid, { links, shelf });
+    tail.innerHTML = "";
+    const say = (txt: string, attr: string): void => {
+      const p = document.createElement("p"); p.textContent = txt; p.dataset.gdel = attr; tail.appendChild(p);
+    };
+    if (report.resources_alone.length) say(t("gdel.resources", { n: String(report.resources_alone.length),
+      names: report.resources_alone.slice(0, 8).map((r) => r.name || r.id).join(", ") }), "resources");
+    say(report.files_alone.length ? t("gdel.files", { n: String(report.files_alone.length) }) : t("gdel.noFiles"), "files");
+    if (report.files_alone.length) {
+      const ul = document.createElement("ul");
+      ul.dataset.gdel = "files-list";
+      for (const f of report.files_alone.slice(0, 12)) { const li = document.createElement("li"); li.textContent = f; ul.appendChild(li); }
+      tail.appendChild(ul);
+    }
+    if (report.active_changed && report.active_graph_id) say(t("gdel.active", { name: nameOf(report.active_graph_id) }), "active");
+  };
+  paintTail();
+  const answer = await openDialog({ kind: "delete-graph", title: t("gdel.title", { name: report.name }), body,
+    ok: t("gdel.ok"), danger: true });
+  if (!answer.ok || !emtree.get(slotId)) return;
+  applyGraphDeletion(slot, gid, report);
+}
+
+/** Do it, and keep what one undo needs to put it back. */
+function applyGraphDeletion(slot: GraphSlot, gid: string, report: RemovalReport): void {
+  const file = emtree.fileOf(slot);
+  const fileName = file?.name ?? t("emtree.noFileGroup");
+  const index = emtree.slots.indexOf(slot);
+  const wasDirty = file?.dirty ?? false;
+  const retained = file?.retained[gid];
+  // the other graphs of the file, open or kept, whose links point at it
+  const linkBacks: Array<() => void> = [];
+  for (const other of emtree.slotsOf(file?.id ?? null)) {
+    if (other === slot) continue;
+    const g = other.store.doc.graph as Record<string, unknown>;
+    if (!Array.isArray(g.links)) continue;
+    const before = JSON.parse(JSON.stringify(g.links)) as Array<Record<string, unknown>>;
+    const probe: Record<string, unknown> = { links: JSON.parse(JSON.stringify(before)) };
+    if (!settleLinksTowards(probe, gid, report.links_action)) continue;
+    other.store.setGraphLinks((probe.links as Array<Record<string, unknown>>) ?? []);
+    linkBacks.push(() => other.store.setGraphLinks(before));
+  }
+  for (const [kid, section] of Object.entries(file?.retained ?? {})) {
+    if (kid === gid || !Array.isArray(section.links)) continue;
+    const before = JSON.parse(JSON.stringify(section.links));
+    if (settleLinksTowards(section, gid, report.links_action)) linkBacks.push(() => { section.links = before; });
+  }
+  const shelfBacks: Array<() => void> = [];
+  if (report.shelf_action === "drop") {
+    for (const e of report.shelf_only_here) {
+      const back = removeFromShelfUndoable(e.id);
+      if (back) shelfBacks.push(back);
+    }
+    renderShelf();
+  }
+  if (file) { delete file.retained[gid]; file.dirty = true; }
+  closeSlot(slot.id);            // …and NOT retained: it leaves the file
+  logInfo(t("gdel.logged", { name: report.name, file: fileName, nodes: String(report.nodes),
+    links: String(report.links_in.length), action: report.links_action }));
+  toastUndoWith(t("gdel.done", { name: report.name, file: fileName }), () => {
+    if (emtree.get(slot.id)) return;
+    emtree.slots.splice(Math.min(index, emtree.slots.length), 0, slot);
+    if (file && retained) file.retained[gid] = retained;
+    if (file) file.dirty = wasDirty;
+    for (const back of linkBacks) back();
+    for (const back of shelfBacks) back();
+    if (shelfBacks.length) renderShelf();
+    store = null;
+    activateSlot(slot.id);
+    refreshEMTree();
+    logInfo(t("gdel.undone", { name: report.name, file: fileName }));
+  });
 }
 
 function moveGraph(slotId: string, toFileId: string | null): void {

@@ -2679,6 +2679,17 @@ export class DocumentStore {
     this.emit();
   }
 
+  /** The rapporti this graph writes towards the other graphs of its file
+   *  (`graph.links`, see links.ts), replaced as a whole — one undo step. An
+   *  empty list takes the key away, as s3Dgraphy writes no empty `links`. */
+  setGraphLinks(links: Array<Record<string, unknown>>): void {
+    this.checkpoint();
+    const g = this.doc.graph as Record<string, unknown>;
+    if (links.length) g["links"] = JSON.parse(JSON.stringify(links));
+    else delete g["links"];
+    this.emit();
+  }
+
   // ── MIG1-A · graph-scope rights metadata as first-class nodes (DP-65) ──────
   // CANVAS1's author/licence/embargo are no longer graph.data fields: they are
   // AuthorNode/LicenseNode/EmbargoNode MEMBERS of a graph-scope ParadataNodeGroup

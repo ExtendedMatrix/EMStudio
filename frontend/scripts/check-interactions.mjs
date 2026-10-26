@@ -1158,6 +1158,89 @@ test("WS2.dialogs", "i dialoghi dell'app dove la desktop era sbagliata: File ▸
     detail: { keptOnCancel, closedOnOk, seen, native, errors } };
 });
 
+// «Elimina il grafo…» — s3Dgraphy's parity container: saggi A, B, C; B links to
+// A, A to C; the shelf's res0 is A's alone, res1 A's and B's; A names a file of
+// its own (rilievi/pianta.dxf)
+const GDEL_DOC = () => JSON.parse(readFileSync(new URL("../testdata/graph-removal-parity.json", import.meta.url), "utf8")).doc;
+const gdelState = (p) => p.evaluate(() => {
+  const d = JSON.parse(window.__EM_DRAG__.docJson());
+  const b = d.graphs?.b;
+  return { slots: window.__EM_DRAG__.slots().map((s) => s.name), graphs: Object.keys(d.graphs ?? {}).sort(),
+    bLinks: (b?.links ?? []).map((l) => ({ to: l.target?.graph_id, mark: l.attributes?.target_graph_removed ?? null })),
+    shelf: (Object.values(d.graphs ?? {}).find((g) => g.data?.em_collection === "ShelfGraph")?.nodes ?? [])
+      .filter((n) => n.node_type === "resource").map((n) => n.id).sort() };
+});
+async function gdelOpenDialog(p, name) {
+  const row = p.locator(".et-slot", { has: p.locator(".et-name", { hasText: name }) }).first();
+  await row.locator(".et-pick").click({ button: "right" });
+  await p.click('.et-move-menu [data-act="delete-graph"]');
+  await p.waitForSelector('.app-dialog[data-app-dialog="delete-graph"]', { timeout: 5000 });
+  return p.evaluate(() => {
+    const d = document.querySelector('.app-dialog[data-app-dialog="delete-graph"]');
+    const txt = (k) => d.querySelector(`[data-gdel="${k}"]`)?.textContent ?? null;
+    const items = (k) => [...d.querySelectorAll(`[data-gdel="${k}"] li`)].map((li) => li.textContent);
+    return { title: d.querySelector(".modal-head")?.textContent, lead: txt("lead"), linksIn: txt("links-in"), linksList: items("links-in-list"),
+      shelf: items("shelf-only-list"), files: items("files-list"), filesSaid: txt("files"), active: txt("active"),
+      focus: document.activeElement?.dataset?.dialogCancel === "1" };
+  });
+}
+test("GD1.delete", "«Elimina il grafo dal file…» (menu ⇄ del grafo): il dialogo dice nodi e archi, i rapporti di B che resterebbero appesi, la voce dello shelf solo sua, il file che nessun altro usa (resta sul disco); OK: il grafo esce dal documento, il rapporto di B resta SEGNATO, il documento è modificato; un annulla rimette tutto", async () => {
+  const { p, ctx, errors } = await open({ doc: GDEL_DOC(), locale: "en" });
+  await p.waitForFunction(() => window.__EM_DRAG__.slots().length === 3, null, { timeout: 30000 }).catch(() => {});
+  const before = await gdelState(p);
+  const dlg = await gdelOpenDialog(p, "Saggio A");
+  await p.screenshot({ path: SHOT("gd1-elimina-grafo-dialogo") }).catch(() => {});
+  await p.click('.app-dialog[data-app-dialog="delete-graph"] [data-dialog-ok]');
+  await p.waitForTimeout(600);
+  const after = await gdelState(p);
+  const dirty = await p.evaluate(() => !!document.querySelector("[data-save-file]")?.closest(".et-file, li, div")?.querySelector(".et-dirty, .dirty-dot, [data-dirty]"));
+  const toast = await p.evaluate(() => document.querySelector(".toast-action")?.textContent ?? null);
+  await p.click(".toast-action");
+  await p.waitForTimeout(600);
+  const undone = await gdelState(p);
+  await ctx.close();
+  const pass = before.slots.length === 3 && before.graphs.includes("a")
+    && /Saggio A/.test(dlg.title ?? "") && /nodes/.test(dlg.lead ?? "") && /Links of other graphs pointing at it: 1\./.test(dlg.linksIn ?? "")
+    && dlg.linksList.length === 1 && /Saggio B · US3 → US1/.test(dlg.linksList[0]) && dlg.shelf.length === 1 && /foto\/a\.jpg/.test(dlg.shelf[0])
+    && dlg.files.length === 1 && dlg.files[0] === "rilievi/pianta.dxf" && /never deleted/.test(dlg.filesSaid ?? "") && dlg.focus
+    && !after.slots.some((s) => /Saggio A/.test(s)) && !after.graphs.includes("a") && after.graphs.includes("b")
+    && after.bLinks.length === 1 && after.bLinks[0].mark === "a" && after.shelf.length === before.shelf.length
+    && !!toast && undone.slots.length === 3 && undone.graphs.includes("a") && undone.bLinks.length === 1 && undone.bLinks[0].mark === null
+    && !errors.length;
+  return { pass, detail: { before, dlg, after, dirty, toast, undone, errors } };
+});
+test("GD2.options", "«Elimina il grafo…» con le due scelte: i rapporti di B verso A tolti, la voce dello shelf solo di A tolta (res0), le altre restano; Annulla del dialogo non cambia nulla; l'unico grafo rimasto non si elimina (lo dice)", async () => {
+  const { p, ctx, errors } = await open({ doc: GDEL_DOC(), locale: "en" });
+  await p.waitForFunction(() => window.__EM_DRAG__.slots().length === 3, null, { timeout: 30000 }).catch(() => {});
+  // Escape = Cancel: nothing changes
+  await gdelOpenDialog(p, "Saggio A");
+  await p.keyboard.press("Escape");
+  await p.waitForTimeout(300);
+  const cancelled = await gdelState(p);
+  await gdelOpenDialog(p, "Saggio A");
+  await p.check('.app-dialog [data-gdel="links-drop"]');
+  await p.check('.app-dialog [data-gdel="shelf-drop"]');
+  const files = await p.evaluate(() => [...document.querySelectorAll('.app-dialog [data-gdel="files-list"] li')].map((li) => li.textContent));
+  await p.click('.app-dialog[data-app-dialog="delete-graph"] [data-dialog-ok]');
+  await p.waitForTimeout(600);
+  const after = await gdelState(p);
+  // C, then B: the last one is refused, said
+  await gdelOpenDialog(p, "Saggio C").then(() => p.click('.app-dialog [data-dialog-ok]'));
+  await p.waitForTimeout(500);
+  await p.locator(".et-slot", { has: p.locator(".et-name", { hasText: "Saggio B" }) }).first().locator(".et-pick").click({ button: "right" });
+  await p.click('.et-move-menu [data-act="delete-graph"]');
+  const refused = await p.waitForSelector('.app-dialog[data-app-dialog="delete-graph-refused"]', { timeout: 5000 }).then(async () =>
+    p.evaluate(() => document.querySelector(".app-dialog .app-dialog-msg")?.textContent ?? ""), () => null);
+  await p.keyboard.press("Enter");
+  const last = await gdelState(p);
+  await ctx.close();
+  const pass = cancelled.slots.length === 3 && cancelled.graphs.includes("a")
+    && files.includes("foto/a.jpg") && files.includes("rilievi/pianta.dxf")
+    && !after.graphs.includes("a") && after.bLinks.length === 0 && JSON.stringify(after.shelf) === JSON.stringify(["res1", "res2"])
+    && /only graph/.test(refused ?? "") && last.slots.length === 1 && last.graphs.includes("b") && !errors.length;
+  return { pass, detail: { cancelled, files, after, refused, last, errors } };
+});
+
 // ── PARTE 11 · shelf e storage leggibili ────────────────────────────────────
 const SHELF3 = { id: "shelf", name: "Shelf di prova", entries: [
   { id: "sh1", name: "prospetto_nord_USM101_campagna2026.jpg", kind: "image", locator: "/Users/x/scavo/foto/prospetto_nord_USM101_campagna2026.jpg", scope: "own-study", residency: "resident", checksum: "sha256:4c5b80263bfa65b08e8f85db68426ebcfe31b0cbb36b07ad9286f11b3739679b" },
