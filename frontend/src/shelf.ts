@@ -239,6 +239,20 @@ export function clearShelf(): void {
   changed();
 }
 
+/** MICRO-CONTENTS-1 C3 · empty the shelf, and hand back the gesture that puts
+ *  every entry back where it was (the toast's «Annulla») */
+export function clearShelfUndoable(): (() => void) | null {
+  if (!entries.length) return null;
+  const before = entries;
+  entries = [];
+  changed();
+  return () => {
+    const ids = new Set(entries.map((e) => e.id));
+    entries = [...before.filter((e) => !ids.has(e.id)), ...entries];
+    changed();
+  };
+}
+
 // ── it is a GRAPH: save, open ───────────────────────────────────────────────
 
 interface ShelfNode {

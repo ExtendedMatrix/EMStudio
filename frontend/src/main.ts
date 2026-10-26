@@ -22,13 +22,13 @@ import {
 } from "./rooms";
 import {
   addToShelf,
-  clearShelf,
   effectiveResidency,
   effectiveScope,
   isAnnotatable,
   loadShelfDocument,
   onShelfChange,
   removeFromShelfUndoable,
+  clearShelfUndoable,
   restoreShelf,
   shelfEntries,
   shelfMeta,
@@ -13438,6 +13438,8 @@ document
   ?.addEventListener("click", () => pinProjectVersion());
 document.getElementById("btn-relocate-files")?.addEventListener("click", () => { void relocateFiles(); });
 document.getElementById("btn-collect-files")?.addEventListener("click", () => { void collectResources(); });
+// MICRO-CONTENTS-1 D9 · File ▸ New EM project…, beside New
+document.getElementById("btn-new-project")?.addEventListener("click", () => { void newProjectGesture(); });
 // MICRO-PERCORSI-WINDOWS p.4 · Settings ▸ Files on this computer ▸ «Find it»
 document.getElementById("set-onedrive-find")?.addEventListener("click", () => {
   const out = document.getElementById("set-onedrive-found");
@@ -30786,7 +30788,6 @@ function fileHooks(): FileHooks {
     onRelink: (f) => { void relinkFile(f); },
     onUpload: (fs) => { void uploadFiles(fs); },
     onKeep: (fs) => { void keepFiles(fs); },
-    onNewProject: () => { void newProjectGesture(); },
     onReorder: () => { void reorderGesture(); },
     onFindMoved: () => { void findMoved(); },
     onRelinkMoved: (m, path) => { relinkMoved(m, path); },
@@ -31531,15 +31532,49 @@ async function keepFiles(fs: FileState[]): Promise<void> {
   void checkFiles();
 }
 
+/** MICRO-CONTENTS-1 C3 · «Svuota lo shelf»: how many, asked; one «Annulla». */
+async function clearShelfAsking(): Promise<void> {
+  const n = shelfEntries().length;
+  if (!n) return;
+  if (!(await askConfirm(t(n === 1 ? "shelf.clearAsk1" : "shelf.clearAsk", { n: String(n) }),
+    { kind: "shelf-clear", ok: t("shelf.clearOk"), danger: true }))) return;
+  const back = clearShelfUndoable();
+  renderShelf();
+  logInfo(t("shelf.cleared", { n: String(n) }));
+  if (back) toastUndoWith(t("shelf.cleared", { n: String(n) }), () => { back(); renderShelf(); logInfo(t("shelf.clearUndone", { n: String(n) })); });
+}
+
 /** C1 · «New EM project…» and «Reorder by the EM standard…» (through the bridge) */
+// MICRO-CONTENTS-1 D9 · in File, beside New (it was among the file tools of a
+// graph already open). The folder is CHOSEN, never typed: the system's folder
+// dialog on the desktop; in a browser, where no page can be handed a location,
+// the folder the Storage is showing — the Storage is the selector, and the
+// dialog says which folder it took and how to choose another.
 async function newProjectGesture(): Promise<void> {
-  const parent = await askText(t("fs.newProjectParent"), "");
+  let parent: string | null = null;
+  if (isTauri()) parent = await pickFolder();
+  else {
+    const st = windowsOf().find((w) => w.type === "storage" && winModeOf(w) === "filesystem");
+    parent = st ? storagePath(st) : null;
+    if (!parent) { await tell(t("fs.newProjectNoFolder"), { kind: "new-project" }); return; }
+  }
   if (!parent) return;
-  const name = await askText(t("fs.newProjectName"), "Scavo");
-  if (!name) return;
+  const answer = await openDialog({
+    kind: "new-project",
+    title: t("fs.newProjectTitle"),
+    message: t(isTauri() ? "fs.newProjectWhere" : "fs.newProjectWhereStorage", { parent }),
+    input: { value: t("fs.newProjectDefault"), label: t("fs.newProjectName") },
+    ok: t("fs.newProjectOk"),
+    validate: (v) => v.trim() && !/[\\/]/.test(v) ? null : t("fs.newProjectBadName"),
+  });
+  if (!answer.ok || !answer.value.trim()) return;
   try {
-    const out = await newEmProject(await bridgeUrl(), parent.trim(), name.trim());
-    logInfo(`${t("fs.newProject")} ${String(out.root)}: ${(out.made as string[]).join(", ")}`);
+    const out = await newEmProject(await bridgeUrl(), parent.trim(), answer.value.trim());
+    const made = (out.made as string[]) ?? [];
+    logInfo(t("fs.newProjectMade", { root: String(out.root), made: made.join(", ") }));
+    toast(t("fs.newProjectMadeShort", { root: String(out.root), n: String(made.length) }));
+    const st = windowsOf().find((w) => w.type === "storage" && winModeOf(w) === "filesystem");
+    if (st && out.root) setStoragePath(st, String(out.root));
   } catch (e) { toast((e as Error).message); }
 }
 
@@ -31551,10 +31586,46 @@ async function reorderGesture(): Promise<void> {
     const prev = await reorderPreview(bridge, root);
     const plan = (prev.plan as Array<{ action: string; from?: string; to: string }>) ?? [];
     if (!plan.length) { toast(t("fs.reorderNothing")); return; }
-    const lines = plan.map((p) => p.action === "mkdir" ? `+ ${p.to}/` : `${p.from} → ${p.to}`).join("\n");
-    if (!(await askConfirm(t("fs.reorderAsk", { plan: lines })))) return;   // never without a yes
-    const done = await reorderApply(bridge, root, plan);
-    logInfo((done.done as string[]).join("; "));
+    // MICRO-CONTENTS-1 D10 · the plan READ, not «+ RM/»: one line per step, in
+    // words, in the app's dialog; nothing moves without a yes (s3Dgraphy refuses
+    // an unconfirmed plan too), and the moves come back with the toast's «Annulla»
+    const body = document.createElement("div");
+    body.className = "reorder-plan";
+    const ul = document.createElement("ul");
+    for (const p of plan.slice(0, 40)) {
+      const li = document.createElement("li");
+      li.textContent = p.action === "mkdir" ? t("fs.reorderMkdir", { dir: p.to })
+        : t("fs.reorderMove", { from: p.from ?? "", to: p.to });
+      li.dataset.step = p.action;
+      ul.appendChild(li);
+    }
+    if (plan.length > 40) { const li = document.createElement("li"); li.textContent = t("gdel.more", { n: String(plan.length - 40) }); ul.appendChild(li); }
+    const note = document.createElement("p");
+    note.className = "insp-hint";
+    note.textContent = t("fs.reorderNote");
+    body.append(ul, note);
+    const answer = await openDialog({ kind: "reorder", title: t("fs.reorderTitle", { root: baseName(root) }),
+      message: t("fs.reorderLead", { root }), body, ok: t("fs.reorderOk") });
+    if (!answer.ok) return;   // never without a yes
+    const done = (await reorderApply(bridge, root, plan)).done as string[];
+    logInfo(done.join("; "));
+    const moved = plan.filter((p) => p.action === "move" && p.from && done.includes(`moved ${p.from} → ${p.to}`));
+    const made = plan.filter((p) => p.action === "mkdir").length;
+    void checkFiles();
+    renderStorage();
+    const msg = t("fs.reorderDone", { moved: String(moved.length), made: String(made) });
+    if (!moved.length) { toast(msg); return; }
+    toastUndoWith(msg, () => {
+      // the way back: every file that moved goes back where it was (the
+      // folders made stay, empty — nothing is ever deleted)
+      const back = moved.map((p) => ({ action: "move", from: p.to, to: p.from! }));
+      void reorderApply(bridge, root, back).then((r) => {
+        logInfo((r.done as string[]).join("; "));
+        toast(t("fs.reorderUndone", { n: String(back.length) }));
+        void checkFiles();
+        renderStorage();
+      }).catch((e) => toast((e as Error).message));
+    });
   } catch (e) { toast((e as Error).message); }
 }
 
@@ -38457,10 +38528,9 @@ const WINDOW_MENUS: Record<WindowType, WinMenu[]> = {
           label: "menu.shelfClear",
           disabledReason: () =>
             shelfEntries().length ? null : t("menu.shelfEmpty"),
-          run: () => {
-            clearShelf();
-            renderShelf();
-          },
+          // MICRO-CONTENTS-1 C3 · asked with the number, and given back: the
+          // shelf is the project's too (a section of its em.json)
+          run: () => { void clearShelfAsking(); },
         },
       ],
     },

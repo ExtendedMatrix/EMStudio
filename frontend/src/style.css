@@ -10414,3 +10414,6 @@ body.em-detached #tile-root > .tile-area.tile-detached {
 .fs-none-cited { margin-top: 4px; }
 .fs-switch { margin: 4px 6px 0 0; }
 .res-scan-why { display: block; margin-top: 3px; }
+/* intervention 7 · the reorder's plan, read */
+.reorder-plan ul { margin: 6px 0; padding-left: 18px; max-height: 40vh; overflow: auto; font-size: 12.5px; }
+.reorder-plan li[data-step="mkdir"] { color: var(--text-muted); }

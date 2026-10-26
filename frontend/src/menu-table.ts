@@ -107,6 +107,9 @@ export const MENUS: MenuDef[] = [
     surfaces: { web: ["internal"], mac: ["internal", "native"], win: ["internal"], linux: ["internal"] },
     rows: [
       cmd("new", "toolbar.new", "btn-new", { title: "menu.newTitle", accel: "CmdOrCtrl+N" }),
+      // MICRO-CONTENTS-1 D9 · the folders of a new EM project, beside New (it was
+      // among the file tools of a graph already open, in the Storage)
+      cmd("newProject", "fs.newProject", "btn-new-project", { title: "fs.newProjectMenuTitle" }),
       cmd("open", "toolbar.open", "btn-open", { title: "menu.openTitle", accel: "CmdOrCtrl+O" }),
       { kind: "sub", id: "openRecent", label: "menu.openRecent", title: "menu.openRecentTitle", dynamic: "recent", rows: [] },
       cmd("openReplace", "toolbar.openReplace", "btn-open-replace", { title: "menu.openReplaceTitle" }),

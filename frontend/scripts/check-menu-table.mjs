@@ -85,7 +85,7 @@ function nativeOutline(items, prefix = "") {
 
 const EN = readFileSync(`${SRC}i18n.ts`, "utf8").split("const IT: Dict")[0];
 const MAIN = readFileSync(`${SRC}main.ts`, "utf8");
-const FILE_ORDER = ["new", "open", "openRecent▸", "openReplace", "close", "—",
+const FILE_ORDER = ["new", "newProject", "open", "openRecent▸", "openReplace", "close", "—",
   "save", "saveAs", "saveAll", "pin", "—",
   "import▸", "import/importGraphml", "import/importMapping",
   "export▸", "export/exportSvg", "export/exportTtl", "integrate", "relocate", "collect", "—",
