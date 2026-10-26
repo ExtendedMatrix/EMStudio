@@ -29221,7 +29221,7 @@ function renderShelf(): void {
 function syncShelfNameInputs(): void {
   for (const input of document.querySelectorAll<HTMLInputElement>(
          ".shelf-head-name")) {
-    if (document.activeElement !== input) input.value = shelfMeta().name;
+    if (document.activeElement !== input) input.value = shelfMeta().name === "Shelf" ? "" : shelfMeta().name;
   }
 }
 
@@ -29244,8 +29244,10 @@ function shelfHead(): HTMLElement {
   name.className = "shelf-head-name";
   name.title = t("shelf.nameTitle");
   name.setAttribute("aria-label", t("shelf.nameTitle"));
-  name.value = shelfMeta().name;
-  name.placeholder = t("shelf.namePh");
+  // the shelf's default name is the data's «Shelf»: shown as the placeholder,
+  // in the reader's language, not as a value
+  name.value = shelfMeta().name === "Shelf" ? "" : shelfMeta().name;
+  name.placeholder = t("win.shelf");
   name.addEventListener("pointerdown", (e) => e.stopPropagation());
   name.addEventListener("change", () => renameShelf(name.value));
   const count = document.createElement("span");
@@ -32132,7 +32134,7 @@ function renderStorageInto(host: StorageHost): void {
         clear.className = "ghost";
         clear.textContent = t("compose.clearPick");
         clear.onclick = () => setStoragePicked(win, []);
-        box.append(b, clear);
+        box.append(b, putOnShelfButton(picked.map((e) => e.path)), clear);
         detail.appendChild(box);
       } else if (entry && !isStampPath(entry.path)) {
         detail.appendChild(composeButtons(entry, listing));
@@ -33247,6 +33249,7 @@ function composeButtons(entry: FsEntry, listing: FsListing): HTMLElement {
     one.onclick = () => openDraft([entry], listing);
     box.appendChild(one);
   }
+  if (entry.type === "file" && !isDocumentOrCopy(entry.name)) box.appendChild(putOnShelfButton([entry.path]));
   box.appendChild(composeFolderButton(listing, true));
   // CAMPAGNA · a tileset — its .3tz or its tileset.json — opens in the Scene
   if (TREE_EXT.test(entry.name) || entry.name === "tileset.json") box.appendChild(openInSceneButton(entry.path));
@@ -33257,6 +33260,8 @@ function composeButtons(entry: FsEntry, listing: FsListing): HTMLElement {
     o.className = "ghost";
     o.dataset.action = "open-doc-here";
     o.textContent = t("storage.openDoc", { name: entry.name });
+    // MICRO-CONTENTS-2 D25 · «already open» when it is the file in front
+    if (currentFilePath === entry.path) { o.textContent = t("storage.alreadyOpenNamed", { name: entry.name }); o.disabled = true; o.title = t("storage.alreadyOpen"); }
     o.onclick = () => { void openFromStorage(entry.path); };
     box.appendChild(o);
   }
@@ -33505,6 +33510,7 @@ function stampedBox(path: string, stamp: Stamp): HTMLElement {
       bar.appendChild(go);
     }
   }
+  bar.appendChild(putOnShelfButton([path]));
   head.after(bar);
   return box;
 }
@@ -35610,7 +35616,7 @@ function storageRow(win: Win, entry: FsEntry, cover?: FolderCover): HTMLElement 
   meta.className = "storage-meta";
   meta.textContent = entry.type === "dir"
     ? ""
-    : `${formatBytes(entry.size)} · ${new Date(entry.mtime * 1000).toLocaleDateString()}`;
+    : `${formatBytes(entry.size)} · ${new Date(entry.mtime * 1000).toLocaleDateString(getLocale())}`;
   row.append(icon, name, meta);
   // CAMPAGNA · a stamped file (or folder) carries the little seal, which opens
   // the card; the sidecar row stays the plain file it is
@@ -35664,6 +35670,17 @@ function storageRow(win: Win, entry: FsEntry, cover?: FolderCover): HTMLElement 
     if (storagePicked(win).length) setStoragePicked(win, []);
     setStorageSelected(win, storageSelected(win) === entry.path ? null : entry.path);
   });
+  // MICRO-CONTENTS-2 D21 (variant B) · the right click says the gestures of a
+  // row: put it on the shelf, stamp it, open it, show it in the graph, copy
+  // its path (the right click did nothing; dragging to the Shelf was the only
+  // way to shelve a file)
+  row.addEventListener("contextmenu", (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (entry.type === "file" && storageSelected(win) !== entry.path && !storagePicked(win).includes(entry.path))
+      setStorageSelected(win, entry.path);
+    showStorageRowMenu(win, entry, e.clientX, e.clientY, !!own);
+  });
   row.dataset.type = entry.type;
   row.draggable = true;
   row.addEventListener("dragstart", (e) => {
@@ -35680,6 +35697,80 @@ function storageRow(win: Win, entry: FsEntry, cover?: FolderCover): HTMLElement 
     if (e.dataTransfer) e.dataTransfer.effectAllowed = "copy";
   });
   return row;
+}
+
+/** MICRO-CONTENTS-2 D21 · the menu of a disk row (`ctx-menu`, closed like the
+ *  canvas's: the next press elsewhere) */
+function showStorageRowMenu(win: Win, entry: FsEntry, x: number, y: number, stamped: boolean): void {
+  hideContextMenu();
+  const menu = document.createElement("div");
+  menu.className = "ctx-menu storage-row-menu";
+  menu.dataset.storageMenu = entry.path;
+  menu.style.left = Math.min(x, innerWidth - 260) + "px";
+  menu.style.top = Math.min(y, innerHeight - 220) + "px";
+  const header = document.createElement("div");
+  header.className = "ctx-header";
+  header.textContent = entry.name;
+  menu.appendChild(header);
+  const item = (label: string, act: string, run: () => void, disabled?: string): void => {
+    const b = document.createElement("button");
+    b.textContent = label;
+    b.dataset.act = act;
+    if (disabled) { b.disabled = true; b.title = disabled; }
+    b.onclick = () => { hideContextMenu(); run(); };
+    menu.appendChild(b);
+  };
+  const folder = paths.dirname(entry.path) || "/";
+  if (entry.type === "dir") {
+    item(t("storage.menuOpenFolder"), "open-folder", () => setStoragePath(win, entry.path));
+  } else {
+    const picked = storagePicked(win);
+    const group = picked.length > 1 && picked.includes(entry.path) ? picked : [entry.path];
+    item(group.length > 1 ? t("storage.putOnShelfN", { n: String(group.length) }) : t("storage.putOnShelf"), "put-on-shelf",
+      () => { for (const p of group) void addFileToShelf({ path: p, type: "file", name: baseName(p), ext: p.split(".").pop() ?? "" }); });
+    if (stamped) {
+      item(t("compose.fromThis"), "compose-from", () => {
+        void readStamp(stampPathFor(entry.path)).then((st) => { if (st) void composeFromStamped(entry.path, st); }, () => toast(t("storage.bridgeDown")));
+      });
+      item(t("storage.showInGraph"), "show-in-graph", () => {
+        void readStamp(stampPathFor(entry.path)).then((st) => {
+          const n = st ? graphNodeOfStamp(st) : null;
+          if (n) revealFromTable(n.id); else toast(t("storage.notInGraphOf", { graph: activeGraphName() }));
+        }, () => toast(t("storage.bridgeDown")));
+      });
+    } else if (!isDocumentOrCopy(entry.name) && !isStampPath(entry.path)) {
+      item(group.length > 1 ? t("compose.openGroup", { n: String(group.length) }) : t("compose.open"), "compose-one", () => {
+        void fsList(folder).then(async (listing) => {
+          await ensureFolderCover(listing);
+          const outs = group.map((p) => listing.entries.find((x) => x.path === p)).filter((x): x is FsEntry => !!x);
+          if (outs.length) openDraft(outs, listing);
+        }, () => toast(t("storage.bridgeDown")));
+      });
+    }
+    if (/\.(em\.json|emj|graphml)$/i.test(entry.name))
+      item(t("storage.openDoc", { name: entry.name }), "open-doc-here", () => { void openFromStorage(entry.path); },
+        currentFilePath === entry.path ? t("storage.alreadyOpen") : undefined);
+  }
+  item(t("storage.copyPath"), "copy-path", () => {
+    void navigator.clipboard?.writeText(entry.path).then(() => toast(t("storage.pathCopied")), () => toast(entry.path));
+  });
+  document.body.appendChild(menu);
+  ctxMenuEl = menu;
+}
+
+/** MICRO-CONTENTS-2 C22 · «Metti sullo scaffale», a button of the detail: the
+ *  drag to the Shelf was the only way to put a local file on it */
+function putOnShelfButton(paths_: string[]): HTMLButtonElement {
+  const b = document.createElement("button");
+  b.className = "ghost";
+  b.dataset.action = "put-on-shelf";
+  b.textContent = paths_.length > 1 ? t("storage.putOnShelfN", { n: String(paths_.length) }) : t("storage.putOnShelf");
+  const on = paths_.length === 1 && shelfEntries().some((e) => e.locator === paths_[0]);
+  if (on) { b.disabled = true; b.title = t("storage.onShelfAlready"); }
+  b.onclick = () => {
+    for (const p of paths_) void addFileToShelf({ path: p, type: "file", name: baseName(p), ext: p.split(".").pop() ?? "" });
+  };
+  return b;
 }
 
 /** The dropped Storage entry, or null when this drag is not one of ours. */
@@ -35735,10 +35826,13 @@ function openFileInViewer(path: string, from: Win): void {
   pinViewerCollection(w, { type: "file", path, name, ext: name.split(".").pop() ?? "" });
 }
 
+/** MICRO-CONTENTS-2 D19 · in the app's language, not the system's: «2,5 MB»
+ *  in Italian (the date of a row followed the system's locale too) */
 function formatBytes(n: number): string {
+  const f = (v: number, d: number): string => v.toLocaleString(getLocale(), { minimumFractionDigits: d, maximumFractionDigits: d });
   if (n < 1024) return `${n} B`;
-  if (n < 1024 * 1024) return `${(n / 1024).toFixed(0)} kB`;
-  return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+  if (n < 1024 * 1024) return `${f(n / 1024, 0)} kB`;
+  return `${f(n / (1024 * 1024), 1)} MB`;
 }
 
 /**
@@ -37630,6 +37724,20 @@ function buildAreaHeader(win: Win): DocumentFragment {
     const sep = document.createElement("div");
     sep.className = "dd-sep";
     typeMenu.appendChild(sep);
+    // MICRO-CONTENTS-2 A7 · the corner gesture in words: split this area in two
+    // (the new half is a window of the same type, as from the corner)
+    if (!isDetachedWin(win.id)) for (const [dir, key] of [["row", "win.splitBeside"], ["col", "win.splitBelow"]] as const) {
+      const sp = document.createElement("button");
+      sp.className = "win-split-item";
+      sp.dataset.split = dir;
+      sp.textContent = t(key);
+      sp.title = t("win.splitHint");
+      sp.addEventListener("click", () => {
+        setActiveWin(win.id);
+        if (splitWindow(win.id, dir, activeWorkspace())) renderTiles();
+      });
+      typeMenu.appendChild(sp);
+    }
     const can = detachSupport(window);
     const det = document.createElement("button");
     det.className = "win-detach-item";
@@ -37955,7 +38063,9 @@ function buildAreaHeader(win: Win): DocumentFragment {
           focusThen(win, () => void layoutAll(fresh));
         });
       } }
-    {
+    // MICRO-CONTENTS-2 F7 · not in the Chain: the DTC has no properties to
+    // compact, and the icon fell off the bar there (x = 1604 on 1600)
+    if (winMode(win) !== "dtc") {
       const why = !store ? t("menu.noGraph") : compactableUnits(store.doc).length ? null : t("compact.none");
       act("", why ? `${t("compact.cmdAll")} — ${why}` : t("compact.cmdAllTitle"), false, () => {
         if (why) { toast(why); return; }
@@ -38046,6 +38156,21 @@ function buildAreaHeader(win: Win): DocumentFragment {
   // part of the header or Ctrl+Space, close is the last item of the type menu or
   // a divider dragged all the way. What stays is the one chip that answers
   // "how do I get my arrangement back?" while a window is magnified.
+  // MICRO-CONTENTS-2 A8 · magnify said by a button, as in every tiling system
+  // (it was a double click on the empty header, or Ctrl+Space, said only in a
+  // tooltip); while magnified the chip below brings the arrangement back
+  if (maximizedWin() !== win.id && windowsOf().length > 1 && !isDetachedWin(win.id)) {
+    const max = document.createElement("button");
+    max.className = "win-act win-max";
+    max.textContent = "⛶";
+    max.title = t("win.maximizeTitle");
+    max.setAttribute("aria-label", t("win.maximizeTitle"));
+    max.addEventListener("click", (e) => {
+      e.stopPropagation();
+      magnifyWindow(win.id);
+    });
+    frag.appendChild(max);
+  }
   if (maximizedWin() === win.id) {
     const restore = document.createElement("button");
     restore.className = "wi-chip wi-restore";
@@ -40325,7 +40450,11 @@ function wireGraphCanvas(canvas: HTMLCanvasElement, winId: string): void {
             else if (ed.target === dragNodeId) liquidSim.release(ed.source);
           }
       }
-      if (!moved && dragNodeId) select(dragNodeId); // click (no drag) = select
+      // MICRO-CONTENTS-2 F13 · a parent that is NOT here (the «?» of the Chain)
+      // opens its menu with the left click too: it was only on the right one
+      const ghostL = !moved && dragNodeId ? missingParentAt(dragNodeId) : null;
+      if (ghostL) { hideContextMenu(); showMissingParentMenu(e.clientX, e.clientY, ghostL); }
+      else if (!moved && dragNodeId) select(dragNodeId); // click (no drag) = select
       else if (moved) {
         persistViewPositions();
         // the overrides were written during the drag; ONE rebuild settles the
@@ -40422,7 +40551,9 @@ function wireGraphCanvas(canvas: HTMLCanvasElement, winId: string): void {
       }
       // a document instance resolves to its real node (same outliner row);
       // Shift/Cmd-click toggles it in the multi-selection (D3)
-      if (hit && (e.shiftKey || e.metaKey || e.ctrlKey))
+      const ghostC = hit ? missingParentAt(hit.id) : null;
+      if (ghostC) { hideContextMenu(); showMissingParentMenu(e.clientX, e.clientY, ghostC); }
+      else if (hit && (e.shiftKey || e.metaKey || e.ctrlKey))
         toggleSelect(hit.instanceOf ?? hit.id);
       else select(hit ? (hit.instanceOf ?? hit.id) : null);
     } else if (mode === "node" && dragNodeId && dragMoving) {
@@ -40892,7 +41023,8 @@ function showMissingParentMenu(
   }
   item(t("stamp.searchElsewhere"), () => {
     void (async () => {
-      const folder = await pickFolder();
+      // (in a browser `pickFolder` answers null: the app's selector instead)
+      const folder = isTauri() ? await pickFolder(near || undefined) : await pickPathInApp({ mode: "folder", start: near || null });
       if (folder) await run(folder, true);
     })();
   });

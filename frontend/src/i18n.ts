@@ -4882,7 +4882,19 @@ const EN: Dict = {
   "shelf.addUriMenu": "+ Web address…",
   "tropy.importMenu": "Import from Tropy…",
   "shelf.tableCardHint": "A click opens the other columns of this entry",
-  "shelf.namePh": "shelf without a name",
+  "emtree.pencilTitle": "Rename this graph (the double click on its name does the same)",
+  "storage.menuOpenFolder": "Open the folder",
+  "storage.putOnShelf": "Put on the shelf",
+  "storage.putOnShelfN": "Put the {n} files on the shelf",
+  "storage.onShelfAlready": "Already on the shelf",
+  "storage.alreadyOpen": "Already open: it is the file in front",
+  "storage.alreadyOpenNamed": "{name} is already open",
+  "storage.copyPath": "Copy the path",
+  "storage.pathCopied": "Path copied",
+  "win.splitBeside": "Split: a window beside",
+  "win.splitBelow": "Split: a window below",
+  "win.splitHint": "The same as dragging a corner of the area inwards; dragging it onto a neighbour joins them",
+  "win.maximizeTitle": "Magnify this window (also a double click on the empty header, or Ctrl+Space)",
 };
 
 // ── Italiano: complete, because E.D. works in it ───────────────────────────────
@@ -9638,7 +9650,19 @@ const IT: Dict = {
   "shelf.addUriMenu": "+ Indirizzo web…",
   "tropy.importMenu": "Importa da Tropy…",
   "shelf.tableCardHint": "Un clic apre le altre colonne di questa voce",
-  "shelf.namePh": "scaffale senza nome",
+  "emtree.pencilTitle": "Rinomina questo grafo (lo fa anche il doppio clic sul nome)",
+  "storage.menuOpenFolder": "Apri la cartella",
+  "storage.putOnShelf": "Metti sullo scaffale",
+  "storage.putOnShelfN": "Metti i {n} file sullo scaffale",
+  "storage.onShelfAlready": "È già sullo scaffale",
+  "storage.alreadyOpen": "Già aperto: è il file in primo piano",
+  "storage.alreadyOpenNamed": "{name} è già aperto",
+  "storage.copyPath": "Copia il percorso",
+  "storage.pathCopied": "Percorso copiato",
+  "win.splitBeside": "Dividi: una finestra accanto",
+  "win.splitBelow": "Dividi: una finestra sotto",
+  "win.splitHint": "Come trascinare dentro un angolo dell'area; trascinarlo su una vicina le unisce",
+  "win.maximizeTitle": "Massimizza questa finestra (anche doppio clic sulla parte vuota dell'intestazione, o Ctrl+Spazio)",
 };
 
 // ── The six other project languages: AI DRAFTS, awaiting validation ───────────

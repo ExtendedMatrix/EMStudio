@@ -906,6 +906,8 @@ export function renderEMTree(host: HTMLElement, tree: EMTree,
             ${isActive ? `<span class="et-active-tag" title="${esc(labels("emtree.activeTagTitle"))}">${esc(labels("emtree.activeTag"))}</span>` : ""}
             <span class="et-meta">${nodes} ${labels("emtree.nodes")}</span>
           </button>
+          <button class="et-pencil" data-rename="${esc(slot.id)}"
+                  title="${esc(labels("emtree.pencilTitle"))}" aria-label="${esc(labels("emtree.pencilTitle"))}">✎</button>
           <button class="et-more" data-more="${esc(slot.id)}"
                   title="${esc(labels("emtree.moreTitle"))}" aria-label="${esc(labels("emtree.moreTitle"))}">⋯</button>
         </div>
@@ -1165,6 +1167,15 @@ export function renderEMTree(host: HTMLElement, tree: EMTree,
       event.stopPropagation();
       const id = button.dataset.more;
       if (id) handlers.onGraphMenu?.(id, button);
+    });
+  });
+  // MICRO-CONTENTS-2 B11 · a pencil says that the name is written here: the
+  // same field as the double click and the menu's «Rename»
+  host.querySelectorAll<HTMLButtonElement>(".et-pencil").forEach((button) => {
+    button.addEventListener("click", (event) => {
+      event.stopPropagation();
+      const id = button.dataset.rename;
+      if (id) renameGraphInTree(id);
     });
   });
   host.querySelectorAll<HTMLButtonElement>("[data-reopen]").forEach((button) => {
