@@ -4526,7 +4526,19 @@ function renderNameStrip(): void {
   }
   if (!n) {
     const slot = emtree.active();
-    title.textContent = graphTitle(store) + (slot?.originSuffix ? ` · ${slot.originSuffix}` : "");
+    // MICRO-CONTENTS-1 A3 · «file › grafo»: the name is the GRAPH's, and the
+    // file it lives in is said before it — the strip used to read as the
+    // name of what was opened, which is the file
+    const file = emtree.fileOf(slot);
+    title.textContent = "";
+    if (file) {
+      const f = document.createElement("span");
+      f.className = "ns-file";
+      f.textContent = `${file.name} › `;
+      f.title = file.path ?? file.name;
+      title.appendChild(f);
+    }
+    title.appendChild(document.createTextNode(graphTitle(store) + (slot?.originSuffix ? ` · ${slot.originSuffix}` : "")));
     ctx.textContent = t("strip.graphCtx", { n: String(store.liveNodes().length) });
     return;
   }
@@ -4961,9 +4973,10 @@ function updateWindowTitle(): void {
   if (store) {
     const g = store.doc.graph;
     const slot = emtree.active();
-    const name = currentFilePath
-      ? baseName(currentFilePath)
-      : slot ? slotLabel(slot) : String(g["name"] ?? g.graph_id ?? "untitled");
+    const graph = slot ? slotLabel(slot) : String(g["name"] ?? g.graph_id ?? "untitled");
+    // MICRO-CONTENTS-1 A3 · «file › grafo»
+    const file = emtree.fileOf(slot);
+    const name = file ? `${file.name} › ${graph}` : currentFilePath ? `${baseName(currentFilePath)} › ${graph}` : graph;
     title = `${withCode(name, shownCode(store.doc))}${store.dirty ? " ●" : ""} — EMStudio`;
   }
   void setWindowTitle(title);
@@ -6969,7 +6982,16 @@ function loadContainerDocument(
   }
   if (activeSlotId) activateSlot(activeSlotId, { rebuildOnly: false });
   if (parsed.members.length > 1) {
-    toast(t("container.opened", { n: String(parsed.members.length) }));
+    // MICRO-CONTENTS-1 B10 · which graph the file makes ACTIVE, said at the
+    // open: it is the one the Storage, the Shelf and the Chain work on, and the
+    // file decides it (`active_graph_id`), not the size of the graphs
+    const front = emtree.active();
+    const others = emtree.slotsOf(file.id).filter((sl) => sl !== front).map(slotLabel);
+    const msg = front ? t(activeSlotId ? "container.openedActive" : "container.openedActiveFirst", {
+      n: String(parsed.members.length), file: file.name, name: slotLabel(front), others: others.join(", ") })
+      : t("container.opened", { n: String(parsed.members.length) });
+    logInfo(msg);
+    toast(msg);
   }
   refreshEMTree();
   // G5 · a graph that a «New graph» left empty and somebody saved beside the
@@ -16315,9 +16337,20 @@ function scanDoscoButton(folder: string | null): HTMLElement {
   b.className = "ghost";
   b.dataset.action = "scan-dosco";
   b.textContent = t("res.scanHere");
-  b.title = folder ? t("res.scanHereHint", { folder }) : t("res.scanPick");
+  // MICRO-CONTENTS-1 D26 · against WHICH graph's documents
+  b.title = folder ? t("res.scanHereHintOf", { folder, graph: activeGraphName() }) : t("res.scanPick");
   b.onclick = () => scanDosco(folder);
   box.appendChild(b);
+  // MICRO-CONTENTS-1 C9 · with no document the scan has nothing to read against:
+  // the button is off, and says why (it used to toast «Open a document first»)
+  if (!store) {
+    b.disabled = true;
+    b.title = t("res.scanNoGraph");
+    const why = document.createElement("span");
+    why.className = "insp-hint res-scan-why";
+    why.textContent = t("res.scanNoGraph");
+    box.appendChild(why);
+  }
   return box;
 }
 function scanDosco(folder: string | null): void {
@@ -16331,11 +16364,23 @@ function scanDosco(folder: string | null): void {
 
 function openResources(): void {
   if (!store) {
-    toast("Open a document first");
+    toast(t("res.scanNoGraph"));
     return;
   }
   renderResDocuments();
   void renderResLinks();
+  // MICRO-CONTENTS-1 D39 · the scan reads AGAINST a graph, and «→ Documento»
+  // writes INTO it: the modal says which, and its ▾ changes it
+  {
+    const body = resourcesModal.querySelector<HTMLElement>(".modal-body");
+    let line = body?.querySelector<HTMLElement>(":scope > .res-graphline") ?? null;
+    if (body && !line) {
+      line = document.createElement("div");
+      line.className = "win-graphline res-graphline";
+      body.prepend(line);
+    }
+    if (line) paintGraphLine(line);
+  }
   resStatus.textContent = resFolderInp.value.trim()
     ? "Press Scan to refresh the Shelf."
     : "Set a library / DosCo folder, then Scan.";
@@ -16460,7 +16505,8 @@ function renderResShelf(): void {
     const { row } = resRow(thumb, e.filename, e.key_id);
     const btn = document.createElement("button");
     btn.textContent = t("res.toDocument");
-    btn.title = t("res.toDocumentTitle");
+    // MICRO-CONTENTS-1 D39 · the graph the Document is made in, said
+    btn.title = t("res.toDocumentOf", { graph: activeGraphName() });
     btn.addEventListener("click", () => hatShelfEntry(e));
     row.appendChild(btn);
     resShelf.appendChild(row);
@@ -17615,6 +17661,7 @@ function refreshEMTree(): void {
   // same sentence said better: the registry has no instances of this type, so
   // the loop does nothing. Nobody reads the DOM to find out where a thing lives.
   refreshSurfaces("emtree");
+  paintGraphLines();   // MICRO-CONTENTS-1 · «Grafo: … ▾» follows the active graph
 }
 
 /**
@@ -23279,12 +23326,11 @@ function reflectLiveArea(): void {
   const host = popouts.size || overlaysPorted ? portalOverlays(anchor) : tileRoot;
   const root = host.getBoundingClientRect();
   const r = el && el.ownerDocument === host.ownerDocument ? el.getBoundingClientRect() : root;
-  const bar = el?.querySelector<HTMLElement>(":scope > .tile-bar");
   host.style.setProperty("--live-x", `${Math.round(r.left - root.left)}px`);
   host.style.setProperty("--live-y", `${Math.round(r.top - root.top)}px`);
   host.style.setProperty("--live-w", `${Math.round(r.width)}px`);
   host.style.setProperty("--live-h", `${Math.round(r.height)}px`);
-  host.style.setProperty("--winbar-h", `${bar?.offsetHeight ?? 0}px`);
+  host.style.setProperty("--winbar-h", `${el ? headHeightOf(el) : 0}px`);
   // MICRO-PANNELLI-OVERLAY · a window too narrow for the funnel and the glyph
   // side by side stacks them, still inside it
   host.classList.toggle("live-narrow", r.width < 120);
@@ -23311,8 +23357,7 @@ function placeOwnedPanels(): void {
     // against the document the panel is in (a detached window's, or this one)
     const root = (panel.parentElement ?? tileRoot).getBoundingClientRect();
     const r = area.getBoundingClientRect();
-    const bar = area.querySelector<HTMLElement>(":scope > .tile-bar");
-    let top = r.top + (bar?.offsetHeight ?? 0) + 10;
+    let top = r.top + headHeightOf(area) + 10;
     const glyph = sceneOverlayBtns.get(owner);
     if (glyph && panel === overlayPanel) {
       // the 3D window's glyph sits below the scene's toolbar: the panel opens there
@@ -29539,8 +29584,9 @@ function shelfRow(entry: ShelfEntry): HTMLElement {
   actions.className = "shelf-actions";
   if (!promoted || !store?.node(promoted)) {
     const pr = document.createElement("button");
-    pr.textContent = t("tropy.promote");
-    pr.title = t("tropy.promoteHint");
+    // MICRO-CONTENTS-1 C15 · made in the ACTIVE graph: the button says which
+    pr.textContent = t("tropy.promoteTo", { graph: activeGraphName() });
+    pr.title = t("tropy.promoteHintOf", { graph: activeGraphName() });
     pr.dataset.promote = entry.id;
     pr.addEventListener("click", () => { void promoteShelfEntry(entry); });
     actions.appendChild(pr);
@@ -29676,7 +29722,8 @@ async function promoteShelfEntry(entry: ShelfEntry, opts: { quiet?: boolean } = 
   const r = promoteToDocument(st, entry, bytes);
   updateShelfEntry(entry.id, { extra: { ...(entry.extra ?? {}), promoted_to: r.documentId } });
   const d = String(st.node(r.documentId)?.name ?? r.documentId);
-  const msg = t("tropy.promotedMsg", { d, n: String(r.extractors.length) });
+  const msg = t("tropy.promotedMsgOf", { d, n: String(r.extractors.length),
+    graph: emtree.slots.find((sl) => sl.store === st) ? slotLabel(emtree.slots.find((sl) => sl.store === st)!) : "" });
   logInfo(msg, [r.documentId, ...r.extractors]);
   if (!opts.quiet) toastUndo(msg, st);
   renderShelf();
@@ -30712,10 +30759,25 @@ async function checkFiles(): Promise<void> {
   filesRefresh();
 }
 
+/** MICRO-CONTENTS-1 D8 · the files a graph cites: its resources (the targets of
+ *  `has_linked_resource`) and the files of their sets (`has_file`) */
+function citedFilesOf(st: DocumentStore): number {
+  const ids = new Set<string>();
+  for (const e of st.doc.graph?.edges ?? [])
+    if (e.edge_type === "has_linked_resource" || e.edge_type === "has_file") ids.add(e.target);
+  return ids.size;
+}
+
 function fileHooks(): FileHooks {
+  const sl = emtree.active();
   return {
     checking: filesChecking,
     inRoom: !!fileRoom(),
+    graph: sl ? slotLabel(sl) : undefined,
+    cites: store ? citedFilesOf(store) : 0,
+    elsewhere: emtree.slots.filter((x) => x.store !== store).map((x) => ({ id: x.id, name: slotLabel(x), n: citedFilesOf(x.store) }))
+      .filter((x) => x.n > 0),
+    onSwitchGraph: (id) => { if (emtree.get(id)) { activateSlot(id); void checkFiles(); } },
     onCheck: () => { void checkFiles(); },
     onJump: (id) => { jumpTo(id); },
     describe: (id, f) => describeFile((storeOfNode(id) ?? store)?.doc.graph ?? { nodes: [], edges: [] }, id, f),
@@ -32926,12 +32988,12 @@ function composeFolderButton(listing: FsListing, inline = false): HTMLElement {
  */
 /** DEV30 U10 · the graph's node of a stamped file: its resource id, or a node
  *  carrying its digest (checksum / content digest). */
-function graphNodeOfStamp(stamp: Stamp): EmNode | null {
-  if (!store) return null;
+function graphNodeOfStamp(stamp: Stamp, st: DocumentStore | null = store): EmNode | null {
+  if (!st) return null;
   const self = (stamp as unknown as SealStamp).self ?? {};
   const rid = String((self as { resource_id?: string }).resource_id ?? "");
   const dig = String((self as { digest?: string }).digest ?? "");
-  return store.liveNodes().find((n) => n.id === rid || (!!dig && (() => {
+  return st.liveNodes().find((n) => n.id === rid || (!!dig && (() => {
     const d = (n.data ?? {}) as Record<string, unknown>;
     return d.checksum === dig || d.content_digest === dig || (d.content_digest as { digest?: string } | undefined)?.digest === dig;
   })())) ?? null;
@@ -32990,9 +33052,30 @@ function stampedBox(path: string, stamp: Stamp): HTMLElement {
   show.dataset.action = "show-in-graph";
   show.textContent = t("storage.showInGraph");
   show.disabled = !node;
-  show.title = node ? String(node.name ?? node.id) : t("storage.notInGraph");
+  show.title = node ? t("storage.showInGraphOf", { node: String(node.name ?? node.id), graph: activeGraphName() })
+    : t("storage.notInGraphOf", { graph: activeGraphName() });
   show.onclick = () => { if (node) revealFromTable(node.id); };
   bar.appendChild(show);
+  // MICRO-CONTENTS-1 D32 (variant B) · «Show in the graph» stays on the active
+  // graph; when the file is in ANOTHER open graph, the bar says which, and
+  // offers to switch to it (GT16: TM035.pdf is in Temple, Saggio B is active)
+  if (!node) {
+    const other = emtree.slots.find((sl) => sl.store !== store && graphNodeOfStamp(stamp, sl.store));
+    if (other) {
+      const go = document.createElement("button");
+      go.className = "ghost";
+      go.dataset.action = "show-in-other-graph";
+      go.textContent = t("storage.inOtherGraph", { graph: slotLabel(other) });
+      go.title = t("storage.inOtherGraphTitle", { graph: slotLabel(other) });
+      go.onclick = () => {
+        if (!emtree.get(other.id)) return;
+        activateSlot(other.id);
+        const n = graphNodeOfStamp(stamp, other.store);
+        if (n) revealFromTable(n.id);
+      };
+      bar.appendChild(go);
+    }
+  }
   head.after(bar);
   return box;
 }
@@ -37937,6 +38020,140 @@ function buildHeaderStrip(win: Win): HTMLElement {
 }
 
 /**
+ * MICRO-CONTENTS-1 · intervention 2 · «Grafo: Saggio B ▾», in head of every
+ * window that works on a graph without drawing it: the Storage (Check the
+ * files, Show in the graph), the Shelf (Make it a document) and the Chain (a
+ * graph window in DTC mode). The graph is the ACTIVE one — `active_graph_id`
+ * of the file at the open, then the EMtree's choice (E.D.'s decision, 26 Oct
+ * 2026); the line says it, and its ▾ chooses another, as the EMtree does.
+ *
+ * A line of the AREA, between its bar and its body: the bodies are repainted
+ * wholesale by their own renderers, the bar by `renderAreaHeaders`; this one
+ * is placed by `syncGraphLines` and repainted by `paintGraphLines` when the
+ * active graph changes. Its height counts in the area's head (`headHeightOf`),
+ * so what opens «under the bar» opens under it.
+ */
+function graphLineWanted(win: Win): boolean {
+  if (!emtree.slots.length) return false;
+  return win.type === "storage" || win.type === "shelf"
+    || (win.type === "graph" && winMode(win) === "dtc");
+}
+
+function syncGraphLines(): void {
+  for (const area of winAreas.values()) {
+    const win = windowsOf().find((w) => w.id === area.dataset.win);
+    const bar = area.querySelector<HTMLElement>(":scope > .tile-bar");
+    let line = area.querySelector<HTMLElement>(":scope > .win-graphline");
+    if (!win || !bar || !graphLineWanted(win)) { line?.remove(); continue; }
+    if (!line) {
+      line = document.createElement("div");
+      line.className = "win-graphline";
+    }
+    if (line.previousElementSibling !== bar) bar.after(line);
+    paintGraphLine(line);
+  }
+}
+
+/** The text of every graph line (and of the Resources' line): the active graph changed. */
+function paintGraphLines(): void {
+  const want = [...winAreas.values()].some((a) => {
+    const w = windowsOf().find((x) => x.id === a.dataset.win);
+    return !!w && graphLineWanted(w) !== !!a.querySelector(":scope > .win-graphline");
+  });
+  if (want) { syncGraphLines(); for (const a of winAreas.values()) a.style.setProperty("--winbar-h", `${headHeightOf(a)}px`); }
+  else for (const a of winAreas.values()) a.querySelectorAll<HTMLElement>(":scope > .win-graphline").forEach(paintGraphLine);
+  document.querySelectorAll<HTMLElement>(".res-graphline").forEach(paintGraphLine);
+}
+
+function paintGraphLine(line: HTMLElement): void {
+  const slot = emtree.active();
+  const file = emtree.fileOf(slot);
+  line.textContent = "";
+  const label = document.createElement("span");
+  label.className = "gl-label";
+  label.textContent = t("gl.label");
+  const pick = document.createElement("button");
+  pick.type = "button";
+  pick.className = "gl-pick";
+  pick.dataset.act = "graph-pick";
+  const name = document.createElement("span");
+  name.className = "gl-name";
+  name.textContent = slot ? slotLabel(slot) : t("gl.none");
+  pick.appendChild(name);
+  if (file) {
+    const f = document.createElement("span");
+    f.className = "gl-file";
+    f.textContent = file.name;
+    pick.appendChild(f);
+  }
+  const many = emtree.slots.length > 1;
+  if (many) {
+    const caret = document.createElement("span");
+    caret.className = "gl-caret";
+    caret.textContent = "▾";
+    pick.appendChild(caret);
+  }
+  pick.title = slot ? t(many ? "gl.title" : "gl.titleOne", { name: slotLabel(slot), file: file?.name ?? t("emtree.noFileGroup") }) : t("gl.none");
+  pick.disabled = !many;
+  pick.addEventListener("click", (e) => { e.stopPropagation(); openGraphPicker(pick); });
+  line.append(label, pick);
+}
+
+/** The open graphs, by file, the active one marked: a click makes one active. */
+function openGraphPicker(anchor: HTMLElement): void {
+  const doc = anchor.ownerDocument;
+  doc.querySelector(".et-move-menu")?.remove();
+  const menu = doc.createElement("div");
+  menu.className = "et-move-menu gl-menu";
+  menu.dataset.menu = "graph-pick";
+  const close = (): void => { menu.remove(); doc.removeEventListener("pointerdown", away, true); };
+  const away = (e: Event): void => { if (!menu.contains(e.target as Node)) close(); };
+  const groups: Array<[string, GraphSlot[]]> = emtree.files.map((f) => [f.name, emtree.slotsOf(f.id)]);
+  const loose = emtree.slots.filter((sl) => !sl.fileId || !emtree.file(sl.fileId));
+  if (loose.length) groups.push([t("emtree.noFileGroup"), loose]);
+  for (const [head, slots] of groups) {
+    if (!slots.length) continue;
+    const g = doc.createElement("div");
+    g.className = "dd-group";
+    g.textContent = head;
+    menu.appendChild(g);
+    for (const sl of slots) {
+      const b = doc.createElement("button");
+      const on = sl.id === emtree.activeId;
+      b.className = "et-move-sub" + (on ? " gl-on" : "");
+      b.dataset.slot = sl.id;
+      b.textContent = `${on ? "● " : "○ "}${slotLabel(sl)}`;
+      const tail = doc.createElement("span");
+      tail.className = "et-move-tail";
+      tail.textContent = `${sl.store.doc.graph?.nodes?.length ?? 0} ${t("emtree.nodes")}`;
+      b.appendChild(tail);
+      b.addEventListener("click", () => { close(); if (!on) activateSlot(sl.id); });
+      menu.appendChild(b);
+    }
+  }
+  doc.body.appendChild(menu);
+  const r = anchor.getBoundingClientRect();
+  const view = doc.defaultView ?? window;
+  const mw = menu.offsetWidth || 220;
+  menu.style.left = `${Math.round(Math.max(4, Math.min(r.left, view.innerWidth - mw - 4)))}px`;
+  menu.style.top = `${Math.round(r.bottom + 2)}px`;
+  setTimeout(() => doc.addEventListener("pointerdown", away, true), 0);
+}
+
+/** The active graph's name as the windows say it (or «no graph»). */
+function activeGraphName(): string {
+  const sl = emtree.active();
+  return sl ? slotLabel(sl) : t("gl.none");
+}
+
+/** An area's head: its bar, and the graph line under it when it has one. */
+function headHeightOf(area: HTMLElement): number {
+  const bar = area.querySelector<HTMLElement>(":scope > .tile-bar");
+  const line = area.querySelector<HTMLElement>(":scope > .win-graphline");
+  return (bar?.offsetHeight ?? 0) + (line?.offsetHeight ?? 0);
+}
+
+/**
  * Rebuild the header of EVERY area (WIN-FIX1 §1).
  *
  * The focused area's bar is `#window-header` — the element `windowBarHeight()`
@@ -37956,13 +38173,13 @@ function renderAreaHeaders(): void {
     bar.appendChild(buildAreaHeader(win));
     if (isDetachedWin(win.id)) bar.appendChild(detachedBarTail(win));
   }
+  syncGraphLines();
   // STEP A · every area publishes the height ITS bar takes, the way the focused
   // one always has (`--winbar-h`): the resources panel and its chevron sit below
   // the bar in any area, and they read that one measurement rather than each
   // guessing from a constant that would drift.
   for (const area of winAreas.values()) {
-    const bar = area.querySelector<HTMLElement>(":scope > .tile-bar");
-    area.style.setProperty("--winbar-h", `${bar?.offsetHeight ?? 0}px`);
+    area.style.setProperty("--winbar-h", `${headHeightOf(area)}px`);
   }
   // HDR2 · the header now CONTAINS the storage crumb, and rebuilding the header
   // empties it. Measured: the folder path vanished from the bar on every

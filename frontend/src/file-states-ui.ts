@@ -33,6 +33,12 @@ export interface FileHooks {
   onFreeOpen?(): void;
   onFreeRun?(): void;
   onPromote?(f: FileState): void;
+  /** MICRO-CONTENTS-1 D8 · the graph the check works on (the active one), how
+   *  many files it cites, and the other open graphs that cite some */
+  graph?: string;
+  cites?: number;
+  elsewhere?: { id: string; name: string; n: number }[];
+  onSwitchGraph?(slotId: string): void;
 }
 
 const FILE_STATES = ["on_disk", "on_node", "both", "reference_only", "missing", "empty_copy"];
@@ -85,7 +91,10 @@ export function filesSection(h: FileHooks): HTMLElement {
   const head = el("div", "fs-head");
   head.appendChild(el("b", "", t("fs.title")));
   const check = el("button", "ghost", h.checking ? t("fs.checking") : t("fs.check")) as HTMLButtonElement;
-  check.disabled = h.checking;
+  // MICRO-CONTENTS-1 D8 · whose files: the active graph's
+  if (h.graph && !h.checking) { check.textContent = t("fs.checkOf", { graph: h.graph }); check.title = t("fs.checkOfTitle", { graph: h.graph }); }
+  check.disabled = h.checking || (!!h.graph && h.cites === 0);
+  if (!!h.graph && h.cites === 0) check.title = t("fs.noneCited", { graph: h.graph });
   check.dataset.act = "check";
   check.addEventListener("click", () => h.onCheck());
   head.appendChild(check);
@@ -103,8 +112,23 @@ export function filesSection(h: FileHooks): HTMLElement {
   }
   box.appendChild(head);
   const all = fileStates();
+  // MICRO-CONTENTS-1 D8 (variant B) · a graph that cites no file says so — a
+  // check would come back «not checked yet» forever — and names the open
+  // graphs that do cite some, with the way to switch to one
+  if (h.graph && h.cites === 0) {
+    const none = el("div", "insp-hint fs-none-cited", t("fs.noneCited", { graph: h.graph }));
+    box.appendChild(none);
+    for (const o of h.elsewhere ?? []) {
+      const b = el("button", "ghost fs-switch", t("fs.switchTo", { graph: o.name, n: String(o.n) })) as HTMLButtonElement;
+      b.dataset.act = "switch-graph";
+      b.title = t("fs.switchToTitle", { graph: o.name });
+      b.addEventListener("click", () => h.onSwitchGraph?.(o.id));
+      box.appendChild(b);
+    }
+    return box;
+  }
   if (!all.length) {
-    box.appendChild(el("div", "insp-hint", t("fs.notChecked")));
+    box.appendChild(el("div", "insp-hint", h.graph ? t("fs.notCheckedOf", { graph: h.graph }) : t("fs.notChecked")));
     return box;
   }
   const counts = fileSummary();

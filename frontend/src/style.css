@@ -10375,3 +10375,42 @@ body.em-detached #tile-root > .tile-area.tile-detached {
   cursor: pointer;
 }
 .ov-invite:hover { color: var(--accent); }
+/* intervention 2 · «Grafo: Saggio B ▾» under the bar of the Storage, the Shelf
+   and the Chain (and at the top of the Resources) */
+.win-graphline {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  padding: 3px 10px;
+  border-bottom: 1px solid var(--border-subtle, var(--border));
+  background: var(--bg-panel);
+  font-size: 12px;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+.res-graphline { border: 1px solid var(--border); border-radius: var(--radius); margin-bottom: 8px; }
+.gl-label { flex: none; }
+.gl-pick {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+  padding: 1px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-accent-soft);
+  color: var(--accent-ink);
+  font: inherit;
+  cursor: pointer;
+}
+.gl-pick:disabled { cursor: default; opacity: 1; }
+.gl-pick:not(:disabled):hover { border-color: var(--accent); }
+.gl-name { font-weight: 700; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.gl-file { font-size: 10.5px; color: var(--text-faint); overflow: hidden; text-overflow: ellipsis; }
+.gl-caret { flex: none; font-size: 10px; }
+.gl-menu button.gl-on { font-weight: 700; color: var(--accent-ink); }
+.fs-none-cited { margin-top: 4px; }
+.fs-switch { margin: 4px 6px 0 0; }
+.res-scan-why { display: block; margin-top: 3px; }
