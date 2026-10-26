@@ -22261,8 +22261,11 @@ function mountGraphCanvas(cv: HTMLCanvasElement, mini: HTMLCanvasElement,
  * Rebuilt only when that changes (the paint runs per frame).
  */
 function fillGraphEmpty(hint: HTMLElement, win: Win, mode: ViewKind): void {
-  const key = !store ? "none" : mode === "dtc" ? "dtc" : "graph";
-  const k = `${key}:${getLocale()}`;
+  const key = mode === "dtc" ? (store ? "dtc" : "dtcNone") : !store ? "none" : "graph";
+  // MICRO-CONTENTS-1 F8/F9 · the Chain points at the Storage beside it: where
+  // it is, said by an arrow, not a button that opens what is already open
+  const toStorage = mode === "dtc" ? arrowTowardsStorage(win) : null;
+  const k = `${key}:${toStorage ?? "-"}:${getLocale()}`;
   if (hint.dataset.k === k) return;
   hint.dataset.k = k;
   hint.textContent = "";
@@ -22279,13 +22282,33 @@ function fillGraphEmpty(hint: HTMLElement, win: Win, mode: ViewKind): void {
     x.addEventListener("click", (e) => { e.stopPropagation(); run(); });
     acts.appendChild(x);
   };
-  if (key === "dtc") {
+  if (key === "dtc" || key === "dtcNone") {
     b.textContent = t("empty.dtcT");
-    p.textContent = t("empty.dtcP");
-    act(t("empty.openStorage"), () => {
-      const st = windowsOf().find((w) => w.type === "storage");
-      if (st) selectWindow(st.id); else setWorkspace("assets");
-    });
+    // F8 · with no document either: not «Prima unità» (a stratigraphic unit, in
+    // a space of files) — the chain is drawn from a stamped file
+    p.textContent = t(key === "dtc" ? "empty.dtcP" : "empty.dtcNoneP");
+    if (toStorage) {
+      const go = document.createElement("button");
+      go.type = "button";
+      go.className = "win-empty-arrow";
+      go.dataset.act = "to-storage";
+      // with no document, the step before: a stamped file draws nothing until
+      // an em.json is open (measured: TM035.pdf chosen, the Chain stayed empty)
+      const say = t(key === "dtc" ? "empty.dtcPick" : "empty.dtcPickDoc");
+      go.textContent = toStorage === "→" || toStorage === "↓" ? `${say} ${toStorage}` : `${toStorage} ${say}`;
+      go.title = t(key === "dtc" ? "empty.dtcPickTitle" : "empty.dtcPickDocTitle");
+      go.addEventListener("click", (e) => {
+        e.stopPropagation();
+        const st = windowsOf().find((w) => w.type === "storage");
+        if (st) selectWindow(st.id);
+      });
+      acts.appendChild(go);
+    } else {
+      act(t("empty.openStorage"), () => {
+        const st = windowsOf().find((w) => w.type === "storage");
+        if (st) selectWindow(st.id); else setWorkspace("assets");
+      });
+    }
   } else {
     b.textContent = t(key === "none" ? "empty.graphT" : "empty.graphEmptyT");
     p.textContent = t("empty.graphP");
@@ -22300,6 +22323,20 @@ function fillGraphEmpty(hint: HTMLElement, win: Win, mode: ViewKind): void {
     });
   }
   hint.append(b, p, acts);
+}
+
+/** MICRO-CONTENTS-1 F9 · where the Storage is, seen from this window: an
+ *  arrow, or null when no Storage is on screen in the same document. */
+function arrowTowardsStorage(win: Win): "←" | "→" | "↑" | "↓" | null {
+  const st = windowsOf().find((w) => w.type === "storage");
+  const a = st ? winAreas.get(st.id) : null;
+  const mine = winAreas.get(win.id);
+  if (!a || !mine || a.ownerDocument !== mine.ownerDocument || !a.isConnected) return null;
+  const r = a.getBoundingClientRect(), m = mine.getBoundingClientRect();
+  if (!r.width || !m.width) return null;
+  const dx = (r.left + r.width / 2) - (m.left + m.width / 2);
+  const dy = (r.top + r.height / 2) - (m.top + m.height / 2);
+  return Math.abs(dx) >= Math.abs(dy) ? (dx < 0 ? "←" : "→") : (dy < 0 ? "↑" : "↓");
 }
 
 /** Which projection a graph window is showing. */

@@ -4804,6 +4804,11 @@ const EN: Dict = {
   "fs.reorderOk": "Reorder",
   "fs.reorderDone": "Reordered: {moved} files moved, {made} folders made",
   "fs.reorderUndone": "Reorder undone: {n} files back where they were",
+  "empty.dtcPick": "choose a stamped file in the Storage",
+  "empty.dtcPickTitle": "The Chain draws the stamps of the file chosen in the Storage beside it: a click there puts the focus on it",
+  "empty.dtcNoneP": "The Chain is drawn from the stamps of the files a study cites: open its em.json, then choose a stamped file.",
+  "empty.dtcPickDoc": "open an em.json in the Storage",
+  "empty.dtcPickDocTitle": "The Storage beside this opens an em.json (choose it, then «Open in EMStudio»): a click here puts the focus on it",
 };
 
 // ── Italiano: complete, because E.D. works in it ───────────────────────────────
@@ -9481,6 +9486,11 @@ const IT: Dict = {
   "fs.reorderOk": "Riordina",
   "fs.reorderDone": "Riordinato: {moved} file spostati, {made} cartelle create",
   "fs.reorderUndone": "Riordino annullato: {n} file tornati dov'erano",
+  "empty.dtcPick": "scegli un file timbrato nello Storage",
+  "empty.dtcPickTitle": "La Catena disegna i timbri del file scelto nello Storage qui accanto: un clic qui gli dà il fuoco",
+  "empty.dtcNoneP": "La Catena si disegna dai timbri dei file che uno studio cita: apri il suo em.json, poi scegli un file timbrato.",
+  "empty.dtcPickDoc": "apri un em.json nello Storage",
+  "empty.dtcPickDocTitle": "Lo Storage qui accanto apre un em.json (sceglilo, poi «Apri in EMStudio»): un clic qui gli dà il fuoco",
 };
 
 // ── The six other project languages: AI DRAFTS, awaiting validation ───────────

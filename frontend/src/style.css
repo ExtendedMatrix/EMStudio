@@ -10417,3 +10417,14 @@ body.em-detached #tile-root > .tile-area.tile-detached {
 /* intervention 7 · the reorder's plan, read */
 .reorder-plan ul { margin: 6px 0; padding-left: 18px; max-height: 40vh; overflow: auto; font-size: 12.5px; }
 .reorder-plan li[data-step="mkdir"] { color: var(--text-muted); }
+/* intervention 10 · the Chain's empty state points at the Storage beside it */
+.win-empty-arrow {
+  border: none;
+  background: none;
+  padding: 2px 4px;
+  font: inherit;
+  font-weight: 600;
+  color: var(--accent-ink);
+  cursor: pointer;
+}
+.win-empty-arrow:hover { text-decoration: underline; }
