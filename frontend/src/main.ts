@@ -4521,7 +4521,11 @@ function renderNameStrip(): void {
   const n = store && selectedId ? store.node(selectedId) : null;
   if (!store) {
     title.textContent = t("strip.untitled");
-    ctx.textContent = t("strip.noGraph");
+    // MICRO-CONTENTS-1 A1 · «Archivio» empty says its question under the title
+    // (it lived only in the tab's tooltip)
+    const ws = WORKSPACES.find((w) => w.id === activeWorkspace());
+    ctx.textContent = ws?.id === "assets" && ws.hintKey
+      ? `${t("strip.noGraph")} · ${t(ws.hintKey)}` : t("strip.noGraph");
     return;
   }
   if (!n) {
@@ -38692,6 +38696,7 @@ function setWorkspace(id: WorkspaceId): void {
   // the tab follows the WORKSPACE and nothing else — mounting an editor never
   // moves it (that is what made a transformed window possible).
   reflectWorkspaceInBar(id);
+  renderNameStrip();   // MICRO-CONTENTS-1 A1 · the empty strip says the space's question
 }
 
 /**

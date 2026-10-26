@@ -247,7 +247,9 @@ function bodyOf(src, signature) {
 {
   ok(/id: "assets", labelKey: "ws\.contents", hintKey: "ws\.qContents"/.test(WS),
     "the `assets` space is «Contenuti», and its tooltip is its question");
-  ok(/"ws\.contents": "Contents"/.test(I18N) && /"ws\.contents": "Contenuti"/.test(I18N),
+  // MICRO-CONTENTS-1 A1 (E.D., 26 Oct 2026) · and the place is now «Archivio»:
+  // «Contenuti» of what? (not «File»: that name goes to the Storage window)
+  ok(/"ws\.contents": "Archive"/.test(I18N) && /"ws\.contents": "Archivio"/.test(I18N),
     "…in both complete dictionaries");
   ok(!/ws\.documentation/.test(WS) && !/ws\.documentation"/.test(I18N),
     "…and the old «Documentation» key is gone, not left beside it");
