@@ -535,8 +535,10 @@ const PANEL_IDS = ["emtree", "nodelist", "inspector", "logpanel"];
 // that quietly disappeared fails this check, rather than being discovered in six
 // months in a trench.
 const NINE = [
-  ["the list's NAME",   "win-strip-shelfname", "header strip"],
-  ["its entry COUNT",   "win-strip-count",     "header strip"],
+  // MICRO-CONTENTS-2 C4/C5 · the name and the count left the strip for the
+  // first line of the body: at 1600 px the name field was 0 px wide there
+  ["the list's NAME",   "shelf-head-name",     "the body's first line"],
+  ["its entry COUNT",   "shelf-head-count",    "the body's first line"],
   ["⟳ refresh",         "win-strip-refresh",   "header strip · Table mode only"],
   ["the URI field",     "shelf-uri-input",     "+ URI form"],
   ["the FENCE select",  "shelf-uri-scope",     "+ URI form"],

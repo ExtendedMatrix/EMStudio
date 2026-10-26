@@ -10428,3 +10428,45 @@ body.em-detached #tile-root > .tile-area.tile-detached {
   cursor: pointer;
 }
 .win-empty-arrow:hover { text-decoration: underline; }
+
+/* MICRO-CONTENTS-2 D4 · the File window's path is a breadcrumb: a click on a
+   step goes there, «…» stands for the head that does not fit, ▾ chooses */
+.storage-breadcrumb { direction: ltr; display: flex; align-items: center; gap: 1px; min-width: 12ch; width: 42ch; max-width: 50vw;
+  flex: 1 1 auto; overflow: hidden; white-space: nowrap; font: 11px var(--font-mono); }
+.storage-breadcrumb .crumb-step { background: transparent; border: 1px solid transparent; border-radius: var(--radius-sm);
+  padding: 1px 3px; font: inherit; color: var(--text-muted); cursor: pointer; flex: 0 0 auto; max-width: 24ch;
+  overflow: hidden; text-overflow: ellipsis; }
+.storage-breadcrumb .crumb-step:hover { border-color: var(--border); color: var(--text); }
+.storage-breadcrumb .crumb-step.is-here { color: var(--text); font-weight: 600; cursor: default; }
+.storage-breadcrumb .crumb-sep { color: var(--text-muted); opacity: .6; flex: 0 0 auto; }
+/* D5 · the 📍 says its word when the window has the room */
+.win-strip-docdir { display: inline-flex; align-items: center; gap: 4px; }
+.win-header .win-act.win-strip-docdir { width: auto; padding: 0 6px; }
+.win-strip-docdir-word { font-size: 11px; white-space: nowrap; }
+@container (max-width: 980px) { .win-strip-docdir-word { display: none; } }
+.storage-graph-files { margin: 6px; }
+/* D6 · the places menu says what it does, and the whole disks apart */
+.storage-place-head { font-size: 11px; color: var(--text-muted); padding: 4px 8px 2px; max-width: 300px; white-space: normal; }
+/* D4/D17 · the app's own selector of a folder or a file */
+.path-picker { display: flex; flex-direction: column; gap: 6px; min-width: 420px; }
+.path-picker-where { display: flex; align-items: center; gap: 6px; }
+.path-picker-here { font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl; text-align: left; }
+.path-picker-list { display: flex; flex-direction: column; max-height: 46vh; overflow: auto; border: 1px solid var(--border);
+  border-radius: var(--radius-sm); padding: 2px; }
+.path-picker-row { text-align: left; justify-content: flex-start; }
+.path-picker-row.is-chosen { background: var(--accent-soft, rgba(196, 150, 40, .18)); }
+.stamp-compose-made { display: flex; flex-direction: column; gap: 4px; margin: 6px 0; }
+.compose-folder-none { align-self: center; }
+.shelf-badge.other-graph { border-style: dashed; }
+.fs-moved-outcome { margin: 2px 0 4px; }
+/* MICRO-CONTENTS-2 C4/C5 · the shelf's name and count, the first line of its body */
+.shelf-head { display: flex; align-items: center; gap: 8px; padding: 4px 8px; border-bottom: 1px solid var(--border); }
+.shelf-head-name { flex: 1 1 auto; min-width: 8ch; font: inherit; font-weight: 600; background: transparent;
+  border: 1px solid transparent; border-radius: var(--radius-sm); padding: 1px 4px; color: var(--text); }
+.shelf-head-name:hover { border-color: var(--border); }
+.shelf-head-name:focus { border-color: var(--accent); outline: none; background: var(--bg-panel); }
+.shelf-head-count { flex: 0 0 auto; white-space: nowrap; }
+/* C20 · the narrow table, and the card of a row */
+.shelf-table.is-narrow tr.is-openable { cursor: pointer; }
+.shelf-table tr.shelf-table-card > td { padding: 2px 8px 8px; background: var(--bg-panel); }
+.shelf-table tr.shelf-table-card dd { overflow-wrap: anywhere; }

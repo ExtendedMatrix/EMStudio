@@ -29220,7 +29220,7 @@ function renderShelf(): void {
  *  fingers. There is one per shelf window now, not one in the app. */
 function syncShelfNameInputs(): void {
   for (const input of document.querySelectorAll<HTMLInputElement>(
-         ".win-strip-shelfname")) {
+         ".shelf-head-name")) {
     if (document.activeElement !== input) input.value = shelfMeta().name;
   }
 }
@@ -29233,32 +29233,48 @@ function syncShelfNameInputs(): void {
  * as many mounts as there are Shelf windows — never a second, divergible
  * rendering of the same list.
  */
+/** MICRO-CONTENTS-2 C4/C5 · the shelf's name (to rename it) and its count, the
+ *  first line of the body — they were in the header, where they did not fit. */
+function shelfHead(): HTMLElement {
+  const head = document.createElement("div");
+  head.className = "shelf-head";
+  const name = document.createElement("input");
+  name.type = "text";
+  name.spellcheck = false;
+  name.className = "shelf-head-name";
+  name.title = t("shelf.nameTitle");
+  name.setAttribute("aria-label", t("shelf.nameTitle"));
+  name.value = shelfMeta().name;
+  name.placeholder = t("shelf.namePh");
+  name.addEventListener("pointerdown", (e) => e.stopPropagation());
+  name.addEventListener("change", () => renameShelf(name.value));
+  const count = document.createElement("span");
+  count.className = "emdata-count shelf-head-count";
+  const n = shelfEntries().length;
+  count.textContent = t(n === 1 ? "shelf.count1" : "shelf.count", { n: String(n) });
+  head.append(name, count);
+  return head;
+}
+
 function renderShelfInto(win: Win, body: HTMLElement,
                          count: HTMLElement | null): void {
   const entries = shelfEntries();
-  if (count) count.textContent = t("shelf.count", { n: String(entries.length) });
+  if (count) count.textContent = t(entries.length === 1 ? "shelf.count1" : "shelf.count", { n: String(entries.length) });
   // SHELF-B · the same shelf, two ways of looking (`SHELF_MODES`). The TABLE is
   // the library's answer about these entries; the LIST is what you drag into and
   // it keeps working with no bridge. Neither is a second shelf: both read the
   // one list that becomes the container's ShelfGraph.
-  if (winModeOf(win) === "resources") {
-    paintSurface(win, body, () => {
-      body.textContent = "";
-      body.appendChild(resourcesTable(fileHooks(), renderShelf));
-    });
-    return;
-  }
   if (winModeOf(win) === "table") {
     if (!shelfTableAsked && !shelfTableBusy) {
       shelfTableAsked = true;
       void refreshShelfTable();
     }
-    paintSurface(win, body, () => renderShelfTableInto(body));
+    paintSurface(win, body, () => { renderShelfTableInto(body, win); body.prepend(shelfHead()); });
     return;
   }
   paintSurface(win, body, () => {
     body.textContent = "";
-    body.appendChild(shelfBar());
+    body.appendChild(shelfHead());
     if (!entries.length) {
       const empty = document.createElement("div");
       empty.className = "viewer-empty";
@@ -29427,8 +29443,15 @@ async function refreshShelfTable(): Promise<void> {
 
 /** The table body. One row per shelf entry, columns and order as the library
  *  gave them — a column added in s3Dgraphy appears here without an edit. */
-function renderShelfTableInto(body: HTMLElement): void {
+/** MICRO-CONTENTS-2 C20 · in a narrow window the table keeps three columns —
+ *  the name, where, in use — and the rest of a row opens under it as a card;
+ *  the whole table where there is the room (11 columns in 340 px read «D…»). */
+const SHELF_NARROW_COLS = ["NAME", "RESIDENCE", "MODE"];
+let shelfTableOpen: string | null = null;
+
+function renderShelfTableInto(body: HTMLElement, win?: Win): void {
   body.textContent = "";
+  const narrow = ((win && winAreas.get(win.id)?.clientWidth) || body.clientWidth || 0) < 720;
   if (shelfTableNote) {
     const note = document.createElement("div");
     note.className = "shelf-note";
@@ -29456,6 +29479,7 @@ function renderShelfTableInto(body: HTMLElement): void {
   const hr = document.createElement("tr");
   for (const column of shelfTable.columns) {
     if (column === "ID") continue;              // the key, not a column to read
+    if (narrow && !SHELF_NARROW_COLS.includes(column)) continue;
     const th = document.createElement("th");
     th.textContent = t(`shelf.col.${column}`, {}, column);
     th.className = `c-${column.toLowerCase()}`;
@@ -29463,17 +29487,57 @@ function renderShelfTableInto(body: HTMLElement): void {
   }
   head.appendChild(hr);
   const tbody = document.createElement("tbody");
-  for (const row of shelfTable.rows) tbody.appendChild(shelfTableRow(row));
+  for (const row of shelfTable.rows) {
+    tbody.appendChild(shelfTableRow(row, narrow));
+    if (narrow && shelfTableOpen === rowId(row)) tbody.appendChild(shelfTableCard(row));
+  }
   table.append(head, tbody);
+  if (narrow) table.classList.add("is-narrow");
   body.appendChild(table);
 }
 
-function shelfTableRow(row: ShelfRow): HTMLElement {
+/** C20 · the other columns of a row, under it, as label: value */
+function shelfTableCard(row: ShelfRow): HTMLElement {
+  const tr = document.createElement("tr");
+  tr.className = "shelf-table-card";
+  const td = document.createElement("td");
+  td.colSpan = SHELF_NARROW_COLS.length;
+  const dl = document.createElement("dl");
+  dl.className = "stamp-card";
+  for (const column of shelfTable.columns) {
+    if (column === "ID" || SHELF_NARROW_COLS.includes(column)) continue;
+    const dt = document.createElement("dt");
+    dt.textContent = t(`shelf.col.${column}`, {}, column);
+    const dd = document.createElement("dd");
+    const v = cellText(row, column);
+    if (column === "ROLE") dd.appendChild(shelfRoleCell(rowId(row), v));
+    else if (column === "SIZE") dd.textContent = humanSize(row[column]) || "—";
+    else if (column === "SCOPE") dd.textContent = v ? t(`shelf.scope.${v}`, {}, v) : "—";
+    else if (isBadgeColumn(column)) dd.textContent = v ? t(`shelf.v.${v}`, {}, v) : "—";
+    else { dd.textContent = v || "—"; if (column === "LOCATOR" || column === "CHECKSUM") { dd.className = "mono"; dd.title = v; } }
+    dl.append(dt, dd);
+  }
+  td.appendChild(dl);
+  tr.appendChild(td);
+  return tr;
+}
+
+function shelfTableRow(row: ShelfRow, narrow = false): HTMLElement {
   const tr = document.createElement("tr");
   const id = rowId(row);
   tr.dataset.entry = id;
+  if (narrow) {
+    tr.classList.add("is-openable");
+    tr.title = t("shelf.tableCardHint");
+    tr.addEventListener("click", (e) => {
+      if ((e.target as HTMLElement).closest("select, button, input")) return;
+      shelfTableOpen = shelfTableOpen === id ? null : id;
+      renderShelf();
+    });
+  }
   for (const column of shelfTable.columns) {
     if (column === "ID") continue;
+    if (narrow && !SHELF_NARROW_COLS.includes(column)) continue;
     const td = document.createElement("td");
     td.className = `c-${column.toLowerCase()}`;
     if (column === "ROLE") {
@@ -29716,25 +29780,17 @@ function shelfRow(entry: ShelfEntry): HTMLElement {
 
 // ── CATENA · the shelf's bar, the receipts, Tropy, «Promuovi a documento» ────
 
-/** «Importa sessione Tropy (JSON-LD)…» — the shelf is where a Tropy session lands. */
-function shelfBar(): HTMLElement {
-  const bar = document.createElement("div");
-  bar.className = "shelf-bar";
-  const b = document.createElement("button");
-  b.textContent = t("tropy.import");
-  b.dataset.tropy = "1";
-  b.addEventListener("click", () => {
-    const input = document.createElement("input");
-    input.type = "file";
-    input.accept = ".json,.jsonld,application/ld+json,application/json";
-    input.addEventListener("change", () => {
-      const f = input.files?.[0];
-      if (f) void f.text().then((txt) => importTropy(txt, f.name));
-    });
-    input.click();
+/** «Importa da Tropy…» — the shelf is where a Tropy session (JSON-LD) lands.
+ *  MICRO-CONTENTS-2 C8 · in the Shelf's ⋯ menu, not at the head of every list. */
+function pickTropySession(): void {
+  const input = document.createElement("input");
+  input.type = "file";
+  input.accept = ".json,.jsonld,application/ld+json,application/json";
+  input.addEventListener("change", () => {
+    const f = input.files?.[0];
+    if (f) void f.text().then((txt) => importTropy(txt, f.name));
   });
-  bar.appendChild(b);
-  return bar;
+  input.click();
 }
 
 function importTropy(txt: string, fileName: string): number {
@@ -38354,46 +38410,9 @@ function buildHeaderStrip(win: Win): HTMLElement {
   //  · Open / Save / Empty went into the Shelf menu, which is where a verb you
   //    use once a session belongs.
   if (win.type === "shelf") {
-    const name = document.createElement("input");
-    name.type = "text";
-    name.spellcheck = false;
-    name.className = "win-strip-shelfname";
-    name.title = t("shelf.nameTitle");
-    name.value = shelfMeta().name;
-    // a click in the box is not a gesture on the window under it
-    name.addEventListener("pointerdown", (e) => e.stopPropagation());
-    name.addEventListener("change", () => renameShelf(name.value));
-    const count = document.createElement("span");
-    count.className = "emdata-count win-strip-count";
-    // FILLED HERE, not left for the renderer. Measured: the header is rebuilt
-    // AFTER the area's surface has been mounted and painted — `renderTiles`
-    // calls `areaFor()` for every placed window and only then
-    // `renderAreaHeaders()`, and `transformWindowOf` ends by calling
-    // `renderTiles` — so a count written by `renderShelfInto` and then rebuilt
-    // empty simply did not appear. The count is a pure function of the list, so
-    // the builder can state it, and the renderer still writes it: two paths, one
-    // value.
-    //
-    // (15 set 2026 · this used to cite `mountWindow`, deleted with the last
-    // privileged area. The ORDER it warns about is unchanged; only the names
-    // that make it are.)
-    count.textContent = t("shelf.count", { n: String(shelfEntries().length) });
-    strip.append(name, count);
-
-    const uri = document.createElement("button");
-    // `wi-chip`, not `win-act`: `.win-header .win-act` is a 30px SQUARE with no
-    // padding — a contract for one glyph (↑ ⤢ ⟳), and a two-word label put in
-    // one wraps onto two lines inside 28px (measured: the button came out 30px
-    // wide showing "+" over "URI"). A short text label is what `wi-chip` is.
-    uri.className = "wi-chip win-strip-uri";
-    uri.textContent = t("shelf.addUri");
-    uri.title = t("shelf.addUriTitle");
-    uri.addEventListener("click", (e) => {
-      e.stopPropagation();
-      openShelfUriForm(uri);
-    });
-    strip.appendChild(uri);
-
+    // MICRO-CONTENTS-2 intervention 8 · the NAME and the COUNT went into the
+    // body (`shelfHead`): at 1600 px the name field was 0 px wide and the count
+    // cut by the edge; «+ URI» and «Import from Tropy…» are in the ⋯ menu
     if (winModeOf(win) === "table") {
       // The LIST reads the shelf that is in memory: it cannot be out of date,
       // and a ⟳ next to it would promise work it will not do. The table is
@@ -38842,8 +38861,23 @@ const WINDOW_MENUS: Record<WindowType, WinMenu[]> = {
   // while moving in next door.
   shelf: [
     {
-      label: "Shelf",
-      items: () => [
+      label: "win.shelf",
+      items: (win) => [
+        // MICRO-CONTENTS-2 C6 · «+ URI» left the header (it was past its edge
+        // at 1600 px): a web address, put on the shelf from here
+        {
+          label: "shelf.addUriMenu",
+          run: () => {
+            const area = winAreas.get(win.id);
+            const anchor = area?.querySelector<HTMLElement>(".shelf-head") ?? area ?? document.body;
+            openShelfUriForm(anchor);
+          },
+        },
+        // C8 · a niche gesture, out of the head of every list
+        {
+          label: "tropy.importMenu",
+          run: () => pickTropySession(),
+        },
         {
           label: "menu.shelfOpen",
           run: () => openShelfFile(),
