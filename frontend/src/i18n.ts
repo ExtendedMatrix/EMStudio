@@ -13504,10 +13504,13 @@ export function tn(key: string, n: number, vars?: Record<string, string | number
   } catch {
     /* a locale the engine does not know: «other» */
   }
+  // the member in the reader's language first, its «other» second: a language
+  // that has only the «other» of a family (the families renamed from one key)
+  // keeps its own words rather than borrowing the English «one»
   const dict = DICTS[locale];
   const k = `${key}.${cat}`;
-  const has = (x: string) => x in dict || x in EN;
-  const pick = has(k) ? k : `${key}.other`;
+  const other = `${key}.other`;
+  const pick = k in dict ? k : other in dict ? other : k in EN ? k : other;
   return t(pick, { ...vars, n: String(n) });
 }
 
