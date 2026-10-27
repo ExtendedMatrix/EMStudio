@@ -10529,3 +10529,16 @@ body.em-detached #tile-root > .tile-area.tile-detached {
   0%, 40% { background: color-mix(in srgb, var(--accent, #c8a24a) 35%, transparent); }
   100% { background: transparent; }
 }
+
+/* MICRO-ARCHIVIO-1 · «Da dove si parte»: the File window with no document */
+.storage-start { display: flex; flex-direction: column; gap: 4px; padding: 10px 12px 6px; border-bottom: 1px solid var(--border); }
+.storage-start-title { font-weight: 600; font-size: 13px; }
+.storage-start-sub { color: var(--text-muted); font-size: 11.5px; margin-top: 4px; }
+.storage-start-recent { display: flex; align-items: baseline; gap: 8px; text-align: left; padding: 4px 8px;
+  border: 1px solid transparent; border-radius: var(--radius-sm); background: transparent; cursor: pointer; min-width: 0; }
+.storage-start-recent:hover { background: var(--bg-hover); border-color: var(--border); }
+.storage-start-name { font-weight: 600; white-space: nowrap; }
+.storage-start-where { color: var(--text-muted); font-size: 11.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.storage-start-new { align-self: flex-start; margin-top: 4px; }
+.storage-resumed { padding: 3px 10px; font-size: 11.5px; color: var(--text-muted); background: var(--bg-sunken); border-bottom: 1px solid var(--border); }
+.tile-storagebody.storage-split > .storage-start, .tile-storagebody.storage-split > .storage-resumed { flex: 0 0 auto; }

@@ -56,6 +56,19 @@ const jsonAt = args.includes("--json") ? args[args.indexOf("--json") + 1] : null
 const only = args.filter((a, i) => !a.startsWith("--") && args[i - 1] !== "--json");
 
 const fixture = (name) => JSON.parse(readFileSync(`${TD}${name}.em.json`, "utf8"));
+/** MICRO-ARCHIVIO-1 · a fixture with a SHELF: the shelf is the em.json's now (its
+ *  `shelf` member), not a key of the browser, so a case that needs one opens a
+ *  project that carries it. `shelf` in the old `{name, entries}` form. */
+const withShelf = (name, shelf) => {
+  const d = fixture(name);
+  const gid = String(d.graph.graph_id ?? name);
+  const nodes = shelf.entries.map((e) => ({ id: e.id, node_type: "resource", name: e.name, description: "",
+    data: { url: e.locator, ...(e.checksum ? { checksum: e.checksum } : {}), ...(e.scope ? { scope: e.scope } : {}),
+            ...(e.residency ? { residency: e.residency } : {}), ...(e.extra ?? {}) } }));
+  return { header: d.header ?? { format: "em.json", version: "1.0" }, active_graph_id: gid,
+    graphs: { [gid]: { ...d.graph, graph_id: gid, ...(d.layout ? { layout: d.layout } : {}) },
+              shelf: { graph_id: "shelf", name: shelf.name, data: { em_collection: "ShelfGraph" }, nodes, edges: [] } } };
+};
 
 const { chromium } = await playwright();
 const browser = await chromium.launch({ executablePath: existsSync(CHR) ? CHR : undefined });
@@ -790,7 +803,7 @@ test("5.polygon", "un poligono si chiude con Invio", async () => {
 test("5.shelf", "Shelf ▸ Annota apre la finestra Doc con quella risorsa, senza Annotatore nel layout", async () => {
   const shelf = { id: "shelf", name: "Shelf", entries: [{ id: "sh1", name: "prospetto.jpg", kind: "image",
     locator: `http://localhost:${PORT}/em/studio/testdata/catena-prospetto.jpg`, scope: "own-study", residency: "reference" }] };
-  const { p, ctx } = await open({ doc: "catena", init: { "emstudio.shelf": JSON.stringify(shelf) } });
+  const { p, ctx } = await open({ doc: withShelf("catena", shelf) });
   await workspace(p, "assets");
   const btn = p.locator(".shelf-row button", { hasText: /Annota|Annotate/ }).first();
   await btn.waitFor({ timeout: 8000 });
@@ -1252,7 +1265,7 @@ const SHELF3 = { id: "shelf", name: "Shelf di prova", entries: [
   { id: "sh3", name: "scheda_US105.pdf", kind: "document", locator: "s3://bucket/room/scheda_US105.pdf", scope: "own-study", residency: "resident" }] };
 for (const w of [1280, 1600]) {
   test(`11.shelf${w}`, `shelf a ${w}: righe a due livelli senza testo sovrapposto, conteggio intero (MICRO-PROVA-DEV47 p.6: l'intestazione su una riga, il conteggio raggiunto scorrendola)`, async () => {
-    const { p, ctx } = await open({ doc: "catena", ws: "assets", w, h: 860, init: { "emstudio.shelf": JSON.stringify(SHELF3) } });
+    const { p, ctx } = await open({ doc: withShelf("catena", SHELF3), ws: "assets", w, h: 860 });
     await p.waitForTimeout(500);
     const r = await p.evaluate(() => {
       const x = (a, b) => a.left < b.right - 0.5 && b.left < a.right - 0.5 && a.top < b.bottom - 0.5 && b.top < a.bottom - 0.5;
@@ -1310,7 +1323,7 @@ test("12.shortcuts", "l'aiuto delle scorciatoie si genera dalla mappa dei tasti 
 });
 test("12.undoall", "le eliminazioni danno «Annulla»: una connessione, una riga dello shelf", async () => {
   const shelf = { id: "shelf", name: "Shelf", entries: [{ id: "sh1", name: "prospetto.jpg", kind: "image", locator: "/x/prospetto.jpg", scope: "own-study", residency: "resident" }] };
-  const { p, ctx } = await open({ doc: "catena", init: { "emstudio.shelf": JSON.stringify(shelf) } });
+  const { p, ctx } = await open({ doc: withShelf("catena", shelf) });
   // a connection, from the Inspector
   await pick(p, "USM101");
   const e0 = await p.evaluate(() => window.__EM_DRAG__.nodeInfo("USM101").edges.length);
@@ -10985,6 +10998,80 @@ test("TN3.preview-closes", "anteprima · un tileset trascinato sulla Scena resta
     layers: (document.querySelector(".scn-host")?.__spaceTiles?.() ?? []).filter((x) => String(x.id).startsWith("preview:")).length }), win);
   await ctx.close();
   return { pass: before.bar && before.layers === 1 && !after.bar && after.layers === 0 && !errors.length, detail: { before, after, errors } };
+});
+
+// ── MICRO-ARCHIVIO-1 · lo stato all'apertura ──────────────────────────────────
+const AR_LEGACY = { id: "shelf", name: "Shelf", entries: [
+  { id: "old1", name: "DJI_0220.JPG", kind: "image", locator: "/Users/x/Desktop/Segni/DJI_0220.JPG" },
+  { id: "old2", name: "DJI_0221.JPG", kind: "image", locator: "/Users/x/Desktop/Segni/DJI_0221.JPG" }] };
+const arShelfRows = (p) => p.evaluate(() => document.querySelectorAll('[data-win$=":shelf"] .shelf-row, .shelf-row').length);
+const arDialogs = (p) => p.evaluate(() => (window.__EM_DIALOGS__ ?? []).map((d) => d.kind));
+
+test("AR1.start", "senza documento: la finestra File apre su «Da dove si parte» (recenti, + Nuovo progetto…, cartelle consentite) e lo Scaffale dice che è di un progetto — anche con la chiave vecchia `emstudio.shelf` piena", async () => {
+  const { p, ctx, errors } = await open({ doc: null, ws: "assets",
+    init: { "emstudio.shelf": JSON.stringify(AR_LEGACY), "em.recentFiles": JSON.stringify([{ path: "/x/TempluMare/EM/GT16.em.json", name: "GT16.em.json", ts: 1 }]) } });
+  await p.waitForSelector(".storage-start", { timeout: 8000 });
+  const r = await p.evaluate(() => ({
+    start: !!document.querySelector(".storage-start"),
+    recent: [...document.querySelectorAll(".storage-start-recent .storage-start-name")].map((n) => n.textContent),
+    newProject: !!document.querySelector('.storage-start [data-action="new-project"]'),
+    roots: document.querySelectorAll(".storage-row").length,
+    noProject: document.querySelector(".shelf-no-project")?.textContent ?? "",
+    legacyKept: !!localStorage.getItem("emstudio.shelf"),
+  }));
+  const rows = await arShelfRows(p);
+  await p.screenshot({ path: SHOT("ar1-start") }).catch(() => {});
+  await ctx.close();
+  return { pass: r.start && r.recent[0] === "TempluMare" && r.newProject && r.roots > 0 && /progetto/.test(r.noProject) && rows === 0 && r.legacyKept && !errors.length,
+           detail: { r, rows, errors } };
+});
+
+test("AR1.project", "un em.json senza `shelf` apre uno Scaffale vuoto; la chiave vecchia si propone una volta (messa nel progetto, il file diventa modificato); la cartella si ricorda per progetto; chiudere il file svuota lo Scaffale e riporta «Da dove si parte»", async () => {
+  const root = await rootPath();
+  mkdirSync(`${root}/ar1/EM/DosCo`, { recursive: true });
+  writeFileSync(`${root}/ar1/EM/DosCo/D.01.png`, PNG1);
+  const at = `${root}/ar1/EM/ar1.em.json`;
+  const { p, ctx, errors } = await open({ doc: null, ws: "assets", init: { "emstudio.shelf": JSON.stringify(AR_LEGACY) } });
+  await answerAppDialogs(p, true);
+  await p.evaluate(([d, path]) => window.__EM_DRAG__.openAt(d, path), [fixture("catena"), at]);
+  await p.waitForTimeout(2000);
+  const first = { dialogs: await arDialogs(p), rows: await arShelfRows(p),
+    dirty: await p.evaluate(() => !document.getElementById("dirty-dot")?.classList.contains("hidden")),
+    asked: await p.evaluate(() => !!localStorage.getItem("emstudio.shelf.asked")) };
+  await storageInto(p, ["DosCo"]);
+  const inDosco = await p.evaluate(() => JSON.parse(localStorage.getItem("emstudio.places") ?? "{}"));
+  await p.evaluate(() => document.getElementById("btn-close-doc").click());
+  await p.waitForTimeout(1200);
+  const closed = { rows: await arShelfRows(p), start: await p.evaluate(() => !!document.querySelector(".storage-start")),
+    noProject: await p.evaluate(() => !!document.querySelector(".shelf-no-project")) };
+  await p.evaluate(([d, path]) => window.__EM_DRAG__.openAt(d, path), [fixture("catena"), at]);
+  await p.waitForTimeout(2500);
+  const again = await p.evaluate(() => ({ resumed: document.querySelector(".storage-resumed")?.textContent ?? "",
+    names: [...document.querySelectorAll(".storage-row .storage-name")].map((n) => n.textContent),
+    dialogs: (window.__EM_DIALOGS__ ?? []).filter((d) => d.kind === "shelf-legacy").length }));
+  const rows2 = await arShelfRows(p);
+  await p.screenshot({ path: SHOT("ar1-ripreso") }).catch(() => {});
+  await ctx.close();
+  const conds = {
+    legacyOffered: first.dialogs.includes("shelf-legacy") && first.asked,
+    adopted: first.rows === 2 && first.dirty,
+    placeRemembered: Object.entries(inDosco).some(([k, v]) => k.endsWith("/ar1/EM/ar1.em.json") && v.dir.endsWith("/ar1/EM/DosCo")),
+    closedEmpty: closed.rows === 0 && closed.start && closed.noProject,
+    resumed: /DosCo/.test(again.resumed) && again.names.includes("D.01.png"),
+    emptyAgain: rows2 === 0, askedOnce: again.dialogs === 1, noErrors: !errors.length,
+  };
+  return { pass: Object.values(conds).every(Boolean), detail: { conds, first, inDosco, closed, again, rows2, errors } };
+});
+
+test("AR1.save-asks", "uno Scaffale senza file non entra nel file salvato senza chiedere: «Salva» su un grafo senza file chiede, e «Lascialo fuori» lo lascia fuori", async () => {
+  const { p, ctx, errors } = await open({ doc: "catena", ws: "assets" });
+  await p.evaluate(async () => { const m = await import("/em/studio/src/shelf.ts"); m.addToShelf({ locator: "https://example.org/a.jpg", name: "a.jpg" }); });
+  await answerAppDialogs(p, false);
+  await p.evaluate(() => document.getElementById("btn-save").click());
+  await p.waitForTimeout(1200);
+  const r = await p.evaluate(() => ({ seen: (window.__EM_DIALOGS__ ?? []).filter((d) => d.kind === "shelf-home").map((d) => d.ok) }));
+  await ctx.close();
+  return { pass: r.seen.length === 1 && r.seen[0] === false && !errors.length, detail: { r, errors } };
 });
 
 // ── run ─────────────────────────────────────────────────────────────────────

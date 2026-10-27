@@ -131,14 +131,19 @@ let shelfName = "Shelf";
 let shelfId = "shelf";
 let listeners: Array<() => void> = [];
 
-const STORAGE_KEY = "emstudio.shelf";
+/** The key the shelf lived under until MICRO-ARCHIVIO-1 (27 Oct 2026): ONE list
+ *  for the whole app, put back at every start whatever document was open — and
+ *  saved into whichever em.json was written next. Read now only to offer it, once,
+ *  to the project open (`legacyShelf`); never loaded on its own. */
+const LEGACY_KEY = "emstudio.shelf";
+/** …and the mark that the offer was made (whatever the answer) */
+const LEGACY_ASKED_KEY = "emstudio.shelf.asked";
 
 export function onShelfChange(fn: () => void): void {
   listeners.push(fn);
 }
 
 function changed(): void {
-  persist();
   for (const fn of listeners) fn();
 }
 
@@ -366,33 +371,60 @@ export function loadShelfDocument(doc: unknown): ShelfLoad {
   return { ok: true, count: loaded.length };
 }
 
-// ── keeping it across a reload ──────────────────────────────────────────────
+// ── the shelf is the PROJECT'S ──────────────────────────────────────────────
 //
-// The shelf is a saved list, and a list that vanishes when the tab reloads is
-// not saved. This is a convenience, NOT the save: the real one is the em.json,
-// which is what travels between studies and into the multigraph.
+// MICRO-ARCHIVIO-1 (27 Oct 2026) · the shelf lives in the em.json (its `shelf`
+// member) and nowhere else. Until today a copy in the browser came back at every
+// start, before any document: the app opened on 71 photos of Segni with no graph
+// open, and a Templu Mare saved afterwards took them into its own file. So no
+// copy is kept beside the file any more — the file is the save, and a change to
+// the shelf is unsaved work of the file (`main.ts`, `onShelfChange`).
 
-function persist(): void {
+/** An EMPTY shelf with the default name: no project open, or a project whose
+ *  file has no shelf. */
+export function resetShelf(): void {
+  entries = [];
+  shelfId = "shelf";
+  shelfName = "Shelf";
+  changed();
+}
+
+/** The list the browser kept under the old key, when it is there and the offer
+ *  was never made — null otherwise. Read, never loaded. */
+export function legacyShelf(): { name: string; entries: ShelfEntry[] } | null {
   try {
-    localStorage.setItem(
-      STORAGE_KEY,
-      JSON.stringify({ id: shelfId, name: shelfName, entries }),
-    );
+    if (localStorage.getItem(LEGACY_ASKED_KEY)) return null;
+    const raw = localStorage.getItem(LEGACY_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as { name?: string; entries?: ShelfEntry[] };
+    const list = Array.isArray(parsed.entries)
+      ? parsed.entries.filter((e) => e && typeof e.locator === "string") : [];
+    if (!list.length) return null;
+    return { name: String(parsed.name ?? "Shelf"), entries: list };
   } catch {
-    /* storage disabled — the shelf lives for this session */
+    return null;
   }
 }
 
-export function restoreShelf(): void {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return;
-    const parsed = JSON.parse(raw) as { id?: string; name?: string; entries?: ShelfEntry[] };
-    if (!Array.isArray(parsed.entries)) return;
-    entries = parsed.entries.filter((e) => e && typeof e.locator === "string");
-    shelfId = String(parsed.id ?? "shelf");
-    shelfName = String(parsed.name ?? "Shelf");
-  } catch {
-    /* a corrupt value must not stop the app from starting */
+/** The offer was made: it is not made again. The old list stays where it is
+ *  (nothing is deleted on somebody's behalf), and is never read again. */
+export function markLegacyShelfAsked(): void {
+  try { localStorage.setItem(LEGACY_ASKED_KEY, new Date().toISOString()); } catch { /* storage disabled */ }
+}
+
+/** Put the old list's entries on the open shelf — through `addToShelf`, so the
+ *  same bytes already there are not doubled. Returns how many were new. */
+export function adoptLegacyEntries(list: ShelfEntry[]): number {
+  const before = entries.length;
+  for (const e of [...list].reverse()) {
+    addToShelf({
+      locator: e.locator, name: e.name, id: e.id,
+      ...(e.checksum ? { checksum: e.checksum } : {}),
+      ...(e.scope ? { scope: e.scope } : {}),
+      ...(e.residency ? { residency: e.residency } : {}),
+      ...(e.role ? { role: e.role } : {}),
+      ...(e.extra ? { extra: e.extra } : {}),
+    });
   }
+  return entries.length - before;
 }

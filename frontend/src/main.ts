@@ -29,7 +29,10 @@ import {
   onShelfChange,
   removeFromShelfUndoable,
   clearShelfUndoable,
-  restoreShelf,
+  resetShelf,
+  legacyShelf,
+  markLegacyShelfAsked,
+  adoptLegacyEntries,
   shelfEntries,
   shelfMeta,
   shelfToDocument,
@@ -6989,7 +6992,19 @@ function loadContainerDocument(
       adoptProjectShelf(parsed.shelf);
       shelfHomeFileId = file.id;
     }
+  } else if (!shelfHomeFileId || !emtree.file(shelfHomeFileId)) {
+    // MICRO-ARCHIVIO-1 · an em.json with no shelf opens on an EMPTY one, and it
+    // is this file's: what the person puts on it from now on is saved here. The
+    // shelf of before stays only when it has an owner still open — a graph with
+    // no file yet (it asks at its first save, `askShelfHome`)
+    const homeless = emtree.slots.some((sl) => !emtree.fileOf(sl));
+    if (!homeless || !shelfEntries().length) {
+      shelfQuietly(() => resetShelf());
+      shelfHomeFileId = file.id;
+    }
   }
+  // MICRO-ARCHIVIO-1 · the shelf the browser used to keep, offered once
+  if (!opts.room) window.setTimeout(() => void offerLegacyShelf(file.id), 700);
   if (parsed.corpus) {
     if (corpusHomeFileId && emtree.file(corpusHomeFileId) && projectCorpusSection()) {
       file.retained[String(parsed.corpus.graph_id ?? "dtc")] = parsed.corpus;
@@ -7156,10 +7171,51 @@ function adoptProjectCorpus(section: Record<string, unknown>): void {
   wireCorpusStore(corpusStore);
 }
 
+/** MICRO-ARCHIVIO-1 · a shelf that ARRIVES (from its file, emptied with it) is
+ *  not a change of the file: while this runs the shelf's listener does not mark
+ *  the home file as unsaved. */
+let shelfQuiet = false;
+function shelfQuietly(fn: () => void): void {
+  const was = shelfQuiet;
+  shelfQuiet = true;
+  try { fn(); } finally { shelfQuiet = was; }
+}
+
+/**
+ * MICRO-ARCHIVIO-1 · the migration. The list the browser kept under the old key
+ * (`emstudio.shelf`) is not loaded any more; if it is there, the FIRST project
+ * opened after the update asks, once, whether to put it on its shelf or leave
+ * it out. Either answer closes the question; the old list is not deleted.
+ */
+async function offerLegacyShelf(fileId: string): Promise<void> {
+  const old = legacyShelf();
+  const file = emtree.file(fileId);
+  if (!old || !file) return;
+  markLegacyShelfAsked();
+  const home = (shelfHomeFileId && emtree.file(shelfHomeFileId)) || file;
+  const a = await openDialog({
+    kind: "shelf-legacy",
+    title: t("shelf.legacyTitle"),
+    message: t("shelf.legacyAsk", { n: String(old.entries.length), file: home.name }),
+    ok: t("shelf.legacyYes"),
+    cancel: t("shelf.legacyNo"),
+  });
+  if (!a.ok || !emtree.file(home.id)) return;
+  shelfHomeFileId = home.id;
+  const n = adoptLegacyEntries(old.entries);
+  renderShelf();
+  const msg = t("shelf.legacyDone", { n: String(n), file: home.name });
+  logInfo(msg);
+  toast(msg);
+}
+
 function adoptProjectShelf(section: Record<string, unknown>): void {
-  const res = loadShelfDocument({
-    header: { format: "em.json", version: "1.0" },
-    graph: section,
+  let res: ReturnType<typeof loadShelfDocument> = { ok: false, reason: "unreadable" };
+  shelfQuietly(() => {
+    res = loadShelfDocument({
+      header: { format: "em.json", version: "1.0" },
+      graph: section,
+    });
   });
   if (!res.ok) {
     toast(t("shelf.notAShelf"));
@@ -7593,9 +7649,10 @@ function fileContainer(file: OpenFile | null, opts: { bump?: boolean } = {}): Re
   const active = emtree.active();
   const activeSlot = active && kept.includes(active) ? active : kept[0];
   // the shelf and the corpus: written by their HOME file (a file saved first
-  // claims a shelf/corpus nobody's file brought)
+  // claims a corpus nobody's file brought). MICRO-ARCHIVIO-1 · the shelf is not
+  // claimed here: a file takes a homeless shelf only when the person says so,
+  // asked by the save gesture before it builds the file (`askShelfHome`)
   const fid = file ? file.id : null;
-  if (fid && !shelfHomeFileId && shelfEntries().length) shelfHomeFileId = fid;
   if (fid && !corpusHomeFileId && projectCorpusSection()) corpusHomeFileId = fid;
   // …and a graph with no file yet writes them when no open file is their home:
   // that document is what Save As gives the graph, and it must not lose them
@@ -9859,8 +9916,37 @@ async function saveDocument(): Promise<void> {
   await saveFile(file);
 }
 
+/** MICRO-ARCHIVIO-1 · the files that said «no» to a homeless shelf, this session
+ *  (asked once per file, not at every ⌘S) */
+const shelfRefused = new Set<string>();
+
+/**
+ * MICRO-ARCHIVIO-1 · a shelf with no file of its own (made beside a graph that
+ * had no file yet, or left by a file that was closed) is not taken by the next
+ * file saved without asking: until 27 Oct `fileContainer` did that silently, and
+ * GT16 ended up carrying 71 photos of another site. The answer is remembered for
+ * the file, this session.
+ */
+async function askShelfHome(file: OpenFile): Promise<void> {
+  if (shelfHomeFileId && emtree.file(shelfHomeFileId)) return;
+  const n = shelfEntries().length;
+  if (!n || shelfRefused.has(file.id)) return;
+  const a = await openDialog({
+    kind: "shelf-home",
+    title: t("shelf.homeTitle"),
+    message: t("shelf.homeAsk", { n: String(n), file: file.name }),
+    ok: t("shelf.homeYes"),
+    cancel: t("shelf.homeNo"),
+  });
+  if (a.ok) {
+    shelfHomeFileId = file.id;
+    shelfRefused.delete(file.id);
+  } else shelfRefused.add(file.id);
+}
+
 /** Write ONE file. Returns false when nothing was written (cancelled, failed). */
 async function saveFile(file: OpenFile): Promise<boolean> {
+  await askShelfHome(file);
   if (isTauri()) {
     if (!file.path) {
       // a file that came from a browser drop or a room has no place on disk yet
@@ -9895,6 +9981,7 @@ async function saveFile(file: OpenFile): Promise<boolean> {
  *  graphs follow. In a browser it is a download with a fresh name.
  *  `defaultPath`: where the desktop dialog proposes it (a GraphML's folder). */
 async function saveFileAs(file: OpenFile, defaultPath: string | null = null): Promise<boolean> {
+  await askShelfHome(file);
   const doc = fileContainer(file);
   const text = JSON.stringify(doc, null, 1);
   if (isTauri()) {
@@ -16120,8 +16207,14 @@ document.getElementById("footer-identity")?.addEventListener(
   "click", identityChipClicked);
 
 // ── SHELF1 · the wide list's own verbs ──────────────────────────────────────
-restoreShelf();                       // a saved list that vanishes on reload is not saved
+// MICRO-ARCHIVIO-1 · NOT restored from the browser any more: the shelf is the
+// em.json's (`shelf.ts`), and starts empty with no project open
 onShelfChange(() => {
+  // …and a change to it is unsaved work of the file that holds it
+  if (!shelfQuiet) {
+    const home = shelfHomeFileId ? emtree.file(shelfHomeFileId) : null;
+    if (home && !home.dirty) { home.dirty = true; updateToolbar(); refreshEMTree(); }
+  }
   // the list changed, so the library's answer about it is stale: the next draw
   // of the Table asks again rather than showing yesterday's rows
   shelfTableAsked = false;
@@ -17759,7 +17852,13 @@ async function closeGraphAsking(id: string): Promise<void> {
 function closeFile(fileId: string): void {
   const wasActive = emtree.activeFile()?.id === fileId;
   emtree.removeFile(fileId);
-  if (shelfHomeFileId === fileId) shelfHomeFileId = null;
+  if (shelfHomeFileId === fileId) {
+    shelfHomeFileId = null;
+    // MICRO-ARCHIVIO-1 · its shelf goes with it, as its documentation does: what
+    // is on it was saved in the file (or asked about, as unsaved work of it)
+    shelfQuietly(() => resetShelf());
+  }
+  shelfRefused.delete(fileId);
   if (corpusHomeFileId === fileId) {
     corpusHomeFileId = null;
     corpusStore = null;   // its documentation goes with it, written or not
@@ -18835,6 +18934,10 @@ function verifiedForTable(st: DocumentStore): NonNullable<ViewCtx["verified"]> {
 
 /** The last graph was closed: back to the empty canvas, without a stale view. */
 function closeWorkspace(): void {
+  // MICRO-ARCHIVIO-1 · no document, no shelf: the shelf is a project's
+  if (shelfEntries().length) shelfQuietly(() => resetShelf());
+  shelfHomeFileId = null;
+  storageToStart();
   showDocument(null);
   logInfo(t("toast.workspaceEmpty"));
 }
@@ -29296,6 +29399,19 @@ function renderShelfInto(win: Win, body: HTMLElement,
                          count: HTMLElement | null): void {
   const entries = shelfEntries();
   if (count) count.textContent = tn("shelf.count", entries.length);
+  // MICRO-ARCHIVIO-1 · no project open: the shelf is a project's, and says so
+  if (!emtree.slots.length && !entries.length) {
+    paintSurface(win, body, () => {
+      body.textContent = "";
+      const empty = document.createElement("div");
+      empty.className = "viewer-empty shelf-no-project";
+      const p = document.createElement("p");
+      p.textContent = t("shelf.noProject");
+      empty.appendChild(p);
+      body.appendChild(empty);
+    });
+    return;
+  }
   // SHELF-B · the same shelf, two ways of looking (`SHELF_MODES`). The TABLE is
   // the library's answer about these entries; the LIST is what you drag into and
   // it keeps working with no bridge. Neither is a second shelf: both read the
@@ -30469,6 +30585,7 @@ function storagePath(win: Win): string | null {
 }
 
 function setStoragePath(win: Win, path: string | null): void {
+  storageResumed = null;
   setWinCurrent(win, "fsPath", path);
   // Entering a folder drops the selection: a file selected in another folder is
   // not what this window is showing any more, and a chip naming something
@@ -32129,6 +32246,8 @@ function renderStorageInto(host: StorageHost): void {
     // the strip may have been REBUILT while the listing was in flight: the crumb
     // is asked of the host again, never the element captured at the start
     setCrumb(host.crumb, listing.roots ? t("storage.roots") : listing.path, listing.roots ? "" : listing.path);
+    // MICRO-ARCHIVIO-1 · the place, remembered for the project open
+    if (!listing.roots && currentFilePath && emtree.slots.length) rememberProjectPlace(currentFilePath, listing.path);
     // Up from a ROOT is the list of roots — not "nothing". The bridge says
     // `parent: null` there because there is no parent INSIDE the fence, and
     // reading that as "the button is dead" is what stranded the first version:
@@ -32147,6 +32266,18 @@ function renderStorageInto(host: StorageHost): void {
     // CAMPAGNA · the roots list says what is saved and NOT served: a whole disk
     // nobody confirmed (the «/» of a one-click «Macintosh HD»)
     if (listing.roots) void suspendedRootsNote(body, win);
+    // MICRO-ARCHIVIO-1 · with no document the roots are «Da dove si parte»
+    if (listing.roots && !emtree.slots.length) body.appendChild(storageStartBlock());
+    // …and a project reopened says where it took the window back to, once
+    if (!listing.roots && storageResumed && storageResumed.dir === listing.path && storageResumed.file === currentFilePath) {
+      const line = document.createElement("div");
+      line.className = "storage-resumed";
+      line.dataset.resumed = listing.path;
+      const proj = projectRootOf(storageResumed.file);
+      line.textContent = t("storage.resumed", { project: paths.basename(proj) || baseName(storageResumed.file),
+        where: listing.path.startsWith(proj + "/") ? listing.path.slice(proj.length + 1) : listing.path });
+      body.appendChild(line);
+    }
     if (!listing.entries.length) {
       body.appendChild(storageEmpty(t("storage.emptyFolder")));
       return;
@@ -33412,14 +33543,71 @@ async function openFromStorage(path: string): Promise<void> {
  *  the person navigates to afterwards stays theirs. */
 async function storageFollowDocument(path: string | null): Promise<void> {
   if (!path) return;
-  const dir = paths.dirname(path);
+  let dir = paths.dirname(path);
   if (!dir) return;
+  // MICRO-ARCHIVIO-1 · …or from where the person WAS in this project, the last
+  // time it was open (`projectPlace`): reopening Templu Mare goes back to
+  // EM/DosCo, not to EM, and not to the folder of another project
+  const was = projectPlace(path);
+  if (was && was !== dir) {
+    try { await fsList(was); dir = was; } catch { /* gone, or not served: the em.json's folder */ }
+  }
   try { await fsList(dir); } catch { return; }   // not served here: nothing to start from
   if (currentFilePath !== path) return;
+  storageResumed = was === dir ? { file: path, dir } : null;
   for (const ws of WORKSPACES)
     for (const w of windowsOf(ws.id).filter((x) => x.type === "storage" && winModeOf(x) === "filesystem"))
       setWinCurrent(w, "fsPath", dir);
   renderStorage();
+}
+
+// ── MICRO-ARCHIVIO-1 · the File window's place is a PROJECT'S ──────────────
+//
+// Until 27 Oct the folder a File window showed was the app's (`emstudio.windows`,
+// `current.fsPath`) and came back at every start, before any document: the app
+// opened inside Segni's drone photos with nothing open. Now the place is
+// remembered per em.json, and with no document the window starts from «Da dove
+// si parte» — the recent projects, a new one, the allowed folders.
+
+const PLACES_KEY = "emstudio.places";
+const PLACES_CAP = 40;
+
+function readPlaces(): Record<string, { dir: string; ts: number }> {
+  try {
+    const v = JSON.parse(localStorage.getItem(PLACES_KEY) ?? "{}") as unknown;
+    return v && typeof v === "object" ? v as Record<string, { dir: string; ts: number }> : {};
+  } catch { return {}; }
+}
+
+/** where the File window was, the last time, in the project of this em.json */
+function projectPlace(emjson: string): string | null {
+  const p = readPlaces()[paths.toPosix(emjson)];
+  return p && typeof p.dir === "string" ? p.dir : null;
+}
+
+function rememberProjectPlace(emjson: string, dir: string): void {
+  const key = paths.toPosix(emjson);
+  const all = readPlaces();
+  if (all[key]?.dir === dir) return;
+  all[key] = { dir, ts: Date.now() };
+  const kept = Object.entries(all).sort((a, b) => b[1].ts - a[1].ts).slice(0, PLACES_CAP);
+  try { localStorage.setItem(PLACES_KEY, JSON.stringify(Object.fromEntries(kept))); } catch { /* storage disabled */ }
+}
+
+/** the line «Ripreso dove eri in ‹progetto›», said once by the window that resumed */
+let storageResumed: { file: string; dir: string } | null = null;
+
+/** Every File window back to the start: no folder, no selection. */
+function storageToStart(render = true): void {
+  storageResumed = null;
+  for (const ws of WORKSPACES)
+    for (const w of windowsOf(ws.id).filter((x) => x.type === "storage")) {
+      if (storagePath(w) === null && !storageSelected(w)) continue;
+      setWinCurrent(w, "fsPath", null);
+      setWinCurrent(w, "fsSelected", null);
+      setWinCurrent(w, "fsPicked", null);
+    }
+  if (render) renderStorage();
 }
 
 /** TRADUZIONI parte 5 · the folder of the open em.json, or null with why. */
@@ -36153,6 +36341,63 @@ async function addStorageRootPath(path: string, win: Win, toRoots = true, confir
   } catch (err) {
     toast(t("storage.rootFailed", { detail: err instanceof Error ? err.message : String(err) }));
   }
+}
+
+/** MICRO-ARCHIVIO-1 · the root of a project: the folder above `EM/` when the
+ *  em.json sits in one (the EM standard tree), its own folder otherwise. */
+function projectRootOf(emjson: string): string {
+  const dir = paths.dirname(paths.toPosix(emjson));
+  return paths.basename(dir) === "EM" ? paths.dirname(dir) : dir;
+}
+
+/**
+ * MICRO-ARCHIVIO-1 · «Da dove si parte»: what a File window shows with no
+ * document open — the recent projects (a click opens one), «+ Nuovo progetto…»,
+ * and, under it, the allowed folders (the roots listing itself). Nothing of the
+ * last session's folder: that one is a project's, and comes back with it.
+ */
+function storageStartBlock(): HTMLElement {
+  const box = document.createElement("div");
+  box.className = "storage-start";
+  box.dataset.start = "1";
+  const h = document.createElement("div");
+  h.className = "storage-start-title";
+  h.textContent = t("storage.startTitle");
+  box.appendChild(h);
+  const recents = getRecents().filter((r) => r.kind !== "room" && recentReopenable(r)).slice(0, 6);
+  const sub = document.createElement("div");
+  sub.className = "storage-start-sub";
+  sub.textContent = recents.length ? t("storage.startRecents") : t("storage.startNoRecents");
+  box.appendChild(sub);
+  for (const r of recents) {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "storage-start-recent";
+    b.dataset.recent = r.path ?? r.name;
+    const n = document.createElement("span");
+    n.className = "storage-start-name";
+    n.textContent = r.path ? paths.basename(projectRootOf(r.path)) || r.name : r.name;
+    const w = document.createElement("span");
+    w.className = "storage-start-where";
+    w.textContent = r.name;
+    b.title = recentWhere(r);
+    b.append(n, w);
+    b.onclick = () => void openRecentFile(r);
+    box.appendChild(b);
+  }
+  const nb = document.createElement("button");
+  nb.type = "button";
+  nb.className = "storage-start-new";
+  nb.dataset.action = "new-project";
+  nb.textContent = t("storage.startNew");
+  nb.title = t("fs.newProjectMenuTitle");
+  nb.onclick = () => void newProjectGesture();
+  box.appendChild(nb);
+  const roots = document.createElement("div");
+  roots.className = "storage-start-sub";
+  roots.textContent = t("storage.startRoots");
+  box.appendChild(roots);
+  return box;
 }
 
 function storageEmpty(message: string): HTMLElement {
@@ -42699,6 +42944,10 @@ setVolatileProvider((id) => isVolatile(store?.node(id)));
 // New, Open…, drop a file, or Sync. __EM_TEST_DATA__ still injects a fixture
 // for automated tests.
 renderNameStrip();   // AUDIT N6 · «Senza titolo» from the first frame, not «EMStudio»
+// MICRO-ARCHIVIO-1 · no document yet: the File windows start from «Da dove si
+// parte», not from the folder of the last session (that one is remembered per
+// project and comes back when its em.json opens)
+storageToStart(false);
 if (window.__EM_TEST_DATA__) {
   // a PROJECT (`{graphs: …}`, with its corpus and shelf) goes through the door
   // a file does; a single graph keeps the old one

@@ -152,14 +152,31 @@ const DIGEST_B = "sha256:" + "cd".repeat(32);
   ok(!S.isAnnotatable(zip), "an archive cannot");
 }
 
-// ── it survives a reload (a convenience, not THE save) ──────────────────────
+// ── MICRO-ARCHIVIO-1 · the shelf is the project's: no copy in the browser ──
 {
+  mem.clear();
   S.clearShelf();
-  S.renameShelf("Persistente");
+  S.renameShelf("Del progetto");
   S.addToShelf({ locator: "/dati/x.jpg", checksum: DIGEST_B });
-  S.clearShelf();               // wipes the in-memory list AND the stored copy
-  S.restoreShelf();
-  eq(S.shelfEntries().length, 0, "restoring after a clear finds an empty shelf");
+  eq([...mem.keys()].filter((k) => k.startsWith("emstudio.shelf")), [],
+     "a change to the shelf writes nothing in the browser: the em.json is the save");
+  S.resetShelf();
+  eq(S.shelfEntries().length, 0, "resetShelf empties it");
+  eq(S.shelfMeta(), { id: "shelf", name: "Shelf" }, "…and gives back the default name");
+  eq(S.legacyShelf(), null, "no old key, nothing to offer");
+  mem.set("emstudio.shelf", JSON.stringify({ id: "shelf", name: "Vecchio", entries: [
+    { id: "o1", name: "a.jpg", locator: "/vecchio/a.jpg", checksum: DIGEST_A },
+    { id: "o2", name: "b.jpg", locator: "/vecchio/b.jpg" }, { bad: true }] }));
+  const old = S.legacyShelf();
+  eq(old?.entries.length, 2, "the old key is READ (the unreadable entry left out)…");
+  eq(S.shelfEntries().length, 0, "…and not loaded");
+  S.addToShelf({ locator: "/progetto/a-copia.jpg", checksum: DIGEST_A });
+  eq(S.adoptLegacyEntries(old.entries), 1, "adopting it puts on the shelf only what was not there (same digest = same entry)");
+  eq(S.shelfEntries().length, 2, "two entries in all");
+  S.markLegacyShelfAsked();
+  eq(S.legacyShelf(), null, "asked once: not offered again");
+  ok(mem.has("emstudio.shelf"), "…and the old list is left where it was, not deleted");
+  mem.clear();
 }
 
 // ── SHELF-B · the role: carried, persisted, never validated on this side ────
