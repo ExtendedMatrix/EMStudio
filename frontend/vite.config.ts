@@ -111,8 +111,9 @@ function dracoWithoutDefaults(): Plugin {
     name: "em-draco-without-defaults",
     enforce: "pre",
     transform(code, id) {
-      if (!/three\/examples\/jsm\/loaders\/DRACOLoader\.js$/.test(id)) return null;
-      const out = code.replace(/new URL\(\s*'\.\.\/libs\/draco\/[^']+',\s*import\.meta\.url\s*\)\.toString\(\)/g, '""');
+      // MICRO-OTTIMIZZA-1 · KTX2Loader names its Basis transcoder the same way
+      if (!/three\/examples\/jsm\/loaders\/(DRACO|KTX2)Loader\.js$/.test(id)) return null;
+      const out = code.replace(/new URL\(\s*'\.\.\/libs\/(draco|basis)\/[^']+',\s*import\.meta\.url\s*\)\.toString\(\)/g, '""');
       return out === code ? null : { code: out, map: null };
     },
   };
@@ -123,11 +124,15 @@ function dracoWithoutDefaults(): Plugin {
  *  otherwise inline both files as base64 into tiles3d.js. */
 function dracoBeside(): Plugin {
   const dir = fileURLToPath(new URL("./node_modules/three/examples/jsm/libs/draco/gltf/", import.meta.url));
+  const basis = fileURLToPath(new URL("./node_modules/three/examples/jsm/libs/basis/", import.meta.url));
   return {
     name: "em-draco-beside",
     generateBundle() {
       for (const f of ["draco_wasm_wrapper.js", "draco_decoder.wasm"])
         this.emitFile({ type: "asset", fileName: `draco/${f}`, source: readFileSync(dir + f) });
+      // MICRO-OTTIMIZZA-1 · the Basis transcoder (KTX2 textures), the same way
+      for (const f of ["basis_transcoder.js", "basis_transcoder.wasm"])
+        this.emitFile({ type: "asset", fileName: `basis/${f}`, source: readFileSync(basis + f) });
     },
   };
 }

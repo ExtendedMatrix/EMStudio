@@ -86,9 +86,31 @@ mem.set(F.STAMP_PRESETS_KEY, "{broken");
 eq(F.readStampPresets(store), [], "a broken store reads as none");
 
 // the destinations of Ottimizza: the names of Templu Mare's RB/versions
-eq(F.OPTIMIZE_PRESETS.map((p) => `${p.lod}-${p.destination}`), ["lod4-web", "lod4-mobile", "lod3-vr", "lod3-aton-heriverse", "lod1-print"],
+eq(F.OPTIMIZE_PRESETS.map((p) => `${p.lod}-${p.destination}`), ["lod4-web", "lod4-mobile", "lod3-aton-heriverse", "lod1-print", "lod3-realtime"],
    "the suffixes, as SM_…@lod4-web.glb and @lod3-aton-heriverse.glb");
 ok(F.OPTIMIZE_PRESETS.every((p) => p.ratio > 0 && p.ratio <= 1), "every ratio is a share of the triangles");
+// MICRO-OTTIMIZZA-1 · compression only where the Viewer and the destination read it
+const P = Object.fromEntries(F.OPTIMIZE_PRESETS.map((p) => [p.id, p]));
+ok(P.web.ktx2 && P.web.meshopt && P.web.texturePx === 1024 && P.web.ratio === 0.1, "web: 10% of the triangles, KTX2 at 1024, meshopt (round 0)");
+ok(P.mobile.ktx2 && P.mobile.meshopt && P.mobile.texturePx === 512, "mobile: KTX2 at 512, meshopt");
+ok(!P.heriverse.ktx2 && !P.heriverse.meshopt && P.heriverse.ratio === 1, "Heriverse/ATON: whole, nothing compressed (not proved there)");
+ok(!P.print.ktx2 && !P.print.meshopt && P.print.ratio === 1, "print: whole, nothing compressed");
+eq(P.heriverse.use, ["heriverse", "aton"], "the uses are s3Dgraphy's");
+eq(P.mobile.use, ["mobile_ar"], "mobile is s3Dgraphy's mobile_ar");
+// the engines (precisazione 3): each destination its default, said and changeable
+eq(F.engineFor(P.web, null), "gltfpack", "the web's engine is gltfpack");
+eq(F.engineFor(P.experience, {}), "blender3dsc", "the experiences' engine is Blender + 3DSC");
+eq(F.engineFor(P.experience, { experience: "gltfpack" }), "gltfpack", "the person may change it");
+eq(F.engineFor(P.web, { web: "nonsense" }), "gltfpack", "an engine the destination does not have is not taken");
+ok(F.ENGINES_TODAY.has("gltfpack") && !F.ENGINES_TODAY.has("blender3dsc"), "Blender + 3DSC is round 3's");
+ok(F.OPTIMIZE_PRESETS.every((p) => p.engines.includes(p.engine)), "every default is one of its engines");
+// the memory said before a job starts (round 0's measures)
+ok(F.variantMemoryMb(47 * 1048576) >= 220 && F.variantMemoryMb(47 * 1048576) < 400, "a 47 MB obj asks about 265 MB (measured 220)");
+ok(F.variantMemoryMb(1100 * 1048576) >= 3100, "1.1 GB asks over 3.1 GB (measured 3.1)");
+// a job in the status line
+eq(F.jobLine({ id: "a", kind: "variants", label: "gltfpack · Web", state: "running", progress: 0.42, stage: "X@lod4-web.glb" }),
+   "gltfpack · Web · X@lod4-web.glb 42%", "the job's line: label, stage, share");
+ok(F.jobRunning({ state: "queued" }) && F.jobRunning({ state: "running" }) && !F.jobRunning({ state: "done" }), "queued and running are running");
 
 // the places: favourites and recent folders
 eq(F.pushRecentDir(["/a", "/b", "/c"], "/b"), ["/b", "/a", "/c"], "a recent folder goes to the head, once");

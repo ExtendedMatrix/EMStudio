@@ -4067,7 +4067,7 @@ test("R3.3tz", "visualizzatore · TempluMare_cesium.3tz si apre senza estrarlo e
 });
 
 // ── NIGHT-RISORSA-FILE · parte 4: impacchettare un tileset ─────────────────
-test("R4.pack", "impacchettare · nel web il pulsante dice «nella desktop»; il flusso (quello della desktop) scrive il .3tz e il grafo ha UNA risorsa con due forme", async () => {
+test("R4.pack", "impacchettare · nella finestra File il pulsante è acceso anche nel web (scrive il bridge: MICRO-OTTIMIZZA-1); il flusso, un lavoro del bridge, scrive il .3tz e il grafo ha UNA risorsa con due forme", async () => {
   const root = await rootPath();
   const copy = `${root}/pack-test/TempluMare_cesium`;
   // a fresh copy (APFS clone): the archive is really written beside it
@@ -4097,7 +4097,7 @@ test("R4.pack", "impacchettare · nel web il pulsante dice «nella desktop»; il
   await p.screenshot({ path: SHOT("r4-due-forme") }).catch(() => {});
   await ctx.close();
   const forms = graph.filter((n) => n.cd === "sha256:8aa6fbd3e5847e9f8c2e219fb4305d9a3ad52e41135120e79bb8c3d18b67caed");
-  return { pass: web.disabled === true && /desktop/.test(web.note) && out?.ok && out.state === "written"
+  return { pass: web.disabled === false && !web.note && out?.ok && out.state === "written"
       && out.sha256 === "sha256:232dfcbc148f30e52098fef9c83606a3e1638a106fc0678563e909cde1db0c17"
       && forms.length === 2 && forms.some((n) => n.packaging === "directory") && forms.some((n) => n.packaging === "archive")
       && insp.length === 2 && !errors.length,
@@ -11432,7 +11432,7 @@ test("AR6.tabs", "il pannello a schede: con una scelta da timbrare apre Timbro (
   return { pass: Object.values(conds).every(Boolean), detail: { conds, noChoice, stamp, composer, presets, room, info, errors } };
 });
 
-test("AR7.optimize", "Ottimizza secondo il verdetto del giro 0: le varianti sperimentali dietro l'interruttore con l'avvertenza, il nome e la cartella dal bridge (RB/versions/‹modello›@lod4-web.glb), senza gltfpack lo dice e non parte, la sorgente senza timbro va timbrata prima; il .3tz acceso nella cartella di un tileset; il tileset da una mesh annunciato con come si fa oggi", async () => {
+test("AR7.optimize", "Ottimizza (MICRO-OTTIMIZZA-1): le varianti accese (il Viewer legge meshopt e KTX2), cinque destinazioni, il motore di ognuna detto con il perché e cambiabile (le esperienze → Blender + 3DSC, giro 3), il nome e la cartella dal bridge (RB/versions/‹modello›@lod4-web.glb), il comando e la memoria detti prima; senza gltfpack la scheda offre il componente aggiuntivo (MIT, versione e sha256 fissate) e il pulsante non parte; la sorgente senza timbro va timbrata prima; il .3tz acceso; il tileset annunciato con il suo interruttore «sperimentale» per il giro 2", async () => {
   const root = await rootPath();
   const { pr, at } = await abProject(root, "ab7");
   const { p, ctx, errors } = await open({ doc: null, ws: "assets", w: 1900, h: 1000 });
@@ -11443,31 +11443,84 @@ test("AR7.optimize", "Ottimizza secondo il verdetto del giro 0: le varianti sper
   await storageInto(p, ["LOD1"]);
   await storageClick(p, "OB_CUBO_LOD1.obj");
   await p.click('.files-tab[data-tab="optimize"]');
-  await p.waitForTimeout(600);
-  const off = await p.evaluate(() => ({ warn: document.querySelector(".files-tab-optimize .files-warn")?.textContent ?? "",
-    pills: [...document.querySelectorAll(".files-tab-optimize .files-pill")].map((x) => x.textContent),
-    chips: document.querySelectorAll(".files-tab-optimize [data-opt]").length }));
-  await p.click('[data-action="files-opt-experimental"]');
-  await p.waitForSelector(".files-tab-optimize [data-tool]", { timeout: 10000 }).catch(() => {});
+  await p.waitForSelector(".files-tab-optimize .files-prev td", { timeout: 10000 }).catch(() => {});
+  await p.waitForSelector('.files-tab-optimize [data-addon="gltfpack"]', { timeout: 8000 }).catch(() => {});
   await p.waitForTimeout(500);
-  const on = await p.evaluate(() => ({ chips: document.querySelectorAll(".files-tab-optimize [data-opt]").length,
+  const web = await p.evaluate(() => ({
+    pills: [...document.querySelectorAll(".files-tab-optimize .files-pill")].map((x) => x.textContent),
+    chips: document.querySelectorAll(".files-tab-optimize [data-opt]").length,
+    engine: document.querySelector(".files-tab-optimize .files-engine")?.dataset.engine ?? "",
+    why: document.querySelector(".files-tab-optimize .files-engine .files-hint")?.textContent ?? "",
+    kv: document.querySelector(".files-tab-optimize .files-kv")?.textContent ?? "",
     variant: [...document.querySelectorAll(".files-tab-optimize .files-prev td")].map((x) => x.textContent),
-    tool: document.querySelector(".files-tab-optimize [data-tool]")?.dataset.tool ?? "",
-    toolSays: document.querySelector(".files-tab-optimize [data-tool]")?.textContent ?? "",
+    command: document.querySelector(".files-tab-optimize .files-cmd")?.textContent ?? "",
+    addon: document.querySelector('.files-tab-optimize [data-addon="gltfpack"]')?.textContent ?? "",
+    install: !!document.querySelector('.files-tab-optimize [data-action="addon-install"]'),
     go: document.querySelector('[data-action="files-optimize"]')?.disabled ?? null,
     stampFirst: [...document.querySelectorAll(".files-tab-optimize .files-warn")].some((x) => /timbra/i.test(x.textContent)),
-    tiles: document.querySelector(".files-tab-optimize")?.textContent.includes("Obj2Tiles") }));
+    tilesSwitch: !!document.querySelector('[data-action="files-tiles-experimental"]'),
+    tiles: document.querySelector(".files-tab-optimize")?.textContent ?? "" }));
   await p.screenshot({ path: SHOT("ar7-ottimizza") }).catch(() => {});
+  await p.click('.files-tab-optimize [data-opt="experience"]');
+  await p.waitForTimeout(500);
+  const exp = await p.evaluate(() => ({ engine: document.querySelector(".files-tab-optimize .files-engine")?.dataset.engine ?? "",
+    notYet: [...document.querySelectorAll(".files-tab-optimize .files-warn")].some((x) => /giro 3/.test(x.textContent)),
+    options: [...document.querySelectorAll('[data-action="files-opt-engine"] option')].map((o) => o.value) }));
+  await p.selectOption('[data-action="files-opt-engine"]', "gltfpack");
+  await p.waitForTimeout(800);
+  const changed = await p.evaluate(() => ({ engine: document.querySelector(".files-tab-optimize .files-engine")?.dataset.engine ?? "",
+    said: document.querySelector(".files-tab-optimize .files-engine .files-hint")?.textContent ?? "",
+    stored: localStorage.getItem("emstudio.optEngine") ?? "" }));
+  await p.click('[data-action="files-tiles-experimental"]');
+  await p.waitForTimeout(500);
+  const tilesOn = await p.evaluate(() => ({ stored: localStorage.getItem("emstudio.tilesetExperimental"),
+    text: document.querySelector(".files-tab-optimize")?.textContent ?? "" }));
   await ctx.close();
   const conds = {
-    experimental: /meshopt/.test(off.warn) && off.pills.join(",") === "sperimentale,acceso,annunciato" && off.chips === 0,
-    named: on.chips === 5 && on.variant.includes("OB_CUBO_LOD1@lod4-web.glb"),
-    noTool: on.tool === "0" && /gltfpack non è su questo computer/.test(on.toolSays) && on.go === true,
-    stampFirst: on.stampFirst,
-    announced: on.tiles,
+    on: web.pills.join(",") === "acceso,acceso,annunciato" && web.chips === 5,
+    engine: web.engine === "gltfpack" && /un secondo/.test(web.why) && /KTX2/.test(web.kv) && /meshopt/.test(web.kv),
+    named: web.variant.includes("OB_CUBO_LOD1@lod4-web.glb") && /-si 0\.1 -cc -tc -tl 1024/.test(web.command),
+    addon: /gltfpack/.test(web.addon) && /licenza MIT/.test(web.addon) && /sha256/.test(web.addon) && web.install && web.go === true,
+    stampFirst: web.stampFirst,
+    experience: exp.engine === "blender3dsc" && exp.notYet && exp.options.join(",") === "blender3dsc,gltfpack",
+    changeable: changed.engine === "gltfpack" && /al posto di/.test(changed.said) && /"experience":"gltfpack"/.test(changed.stored),
+    tiles: web.tilesSwitch && /RealityScan/.test(web.tiles) && /Obj2Tiles/.test(web.tiles) && tilesOn.stored === "1" && /giro 2/.test(tilesOn.text),
     noErrors: !errors.length,
   };
-  return { pass: Object.values(conds).every(Boolean), detail: { conds, off, on, errors } };
+  return { pass: Object.values(conds).every(Boolean), detail: { conds, web, exp, changed, errors } };
+});
+
+test("AR10.variant", "MICRO-OTTIMIZZA-1 · il Viewer legge una variante di gltfpack: geometria meshopt (EXT_meshopt_compression), quantizzata, texture KTX2 (KHR_texture_basisu) trascodificate con il Basis servito come il Draco; la scheda Info la apre nel Viewer, senza errori", async () => {
+  const root = await rootPath();
+  const { pr, at } = await abProject(root, "ab10");
+  mkdirSync(`${pr}/RB/versions`, { recursive: true });
+  copyFileSync(new URL("../testdata/variant-meshopt-ktx2.glb", import.meta.url).pathname, `${pr}/RB/versions/OB_CUBO_LOD1@lod4-web.glb`);
+  const { p, ctx, errors } = await open({ doc: null, ws: "assets", w: 1900, h: 1000 });
+  const asked = [];
+  p.on("request", (r) => { if (/basis_transcoder|meshopt|draco/.test(r.url())) asked.push(r.url().replace(/^.*\//, "")); });
+  await p.evaluate(([d, path]) => window.__EM_DRAG__.openAt(d, path), [fixture("catena"), at]);
+  await p.waitForTimeout(2500);
+  await p.locator(`.files-pl[data-place="${pr}/RB"]`).first().click();
+  await p.waitForTimeout(800);
+  await storageInto(p, ["versions"]);
+  await p.click('.files-tab[data-tab="info"]');
+  await storageClick(p, "OB_CUBO_LOD1@lod4-web.glb");
+  await p.waitForTimeout(1200);
+  await p.click('.files-tab-info [data-action="files-open-viewer"]');
+  await p.waitForSelector("[data-gltf-ext]", { timeout: 20000 }).catch(() => {});
+  await p.waitForTimeout(1500);
+  const v = await p.evaluate(() => { const h = document.querySelector("[data-gltf-ext]");
+    return h ? { model: h.dataset.model ?? "", ext: h.dataset.gltfExt ?? "", gpu: Number(h.dataset.gpuTextures ?? 0),
+                 error: h.querySelector("[data-error]")?.dataset.error ?? "" } : null; });
+  await p.screenshot({ path: SHOT("ar10-variante") }).catch(() => {});
+  await ctx.close();
+  const conds = {
+    opened: !!v && /OB_CUBO_LOD1(@|%40)lod4-web\.glb/.test(v.model) && !v.error,
+    meshopt: !!v && /EXT_meshopt_compression/.test(v.ext) && /KHR_mesh_quantization/.test(v.ext),
+    ktx2: !!v && /KHR_texture_basisu/.test(v.ext) && v.gpu >= 1,
+    noErrors: !errors.length,
+  };
+  return { pass: Object.values(conds).every(Boolean), detail: { conds, v, asked: [...new Set(asked)], errors } };
 });
 
 test("AR8.project", "File ▸ Riordina secondo lo standard: il piano crea GIS/ e RM/, sposta un .geojson in GIS/, chiede dove va un .tif che non si legge (GIS o DosCo) e lo sposta dove si risponde; i luoghi si rileggono (niente più «da creare»); File ▸ Chiudi il progetto chiude il file e lo Scaffale va con lui", async () => {

@@ -30,6 +30,11 @@ export { Archive3tz, Tiles3tzPlugin, sourceFor, archiveBase } from "./tiles3tz";
 // the decoder's two files are imported by PATH, not as `three/…`, which this
 // build makes external and points at engine3d.js)
 export { DRACOLoader } from "three/examples/jsm/loaders/DRACOLoader.js";
+// MICRO-OTTIMIZZA-1 · meshopt and KTX2 (gltfpack's variants): both from
+// engine3d.js, as DRACOLoader; the Basis transcoder's two files beside this one
+// (`vite.config.ts dracoBeside`, `dist/basis/`), as Draco's
+export { KTX2Loader } from "three/examples/jsm/loaders/KTX2Loader.js";
+export { MeshoptDecoder } from "three/examples/jsm/libs/meshopt_decoder.module.js";
 // by its own file: the plugins index would bring every plugin (and three's FullScreenQuad)
 export { GLTFExtensionsPlugin } from "3d-tiles-renderer/src/three/plugins/GLTFExtensionsPlugin.js";
 // the two files are emitted BESIDE this one by the build (`vite.config.ts
@@ -38,3 +43,6 @@ export { GLTFExtensionsPlugin } from "3d-tiles-renderer/src/three/plugins/GLTFEx
 const DRACO_DIR = "./draco/";
 export const DRACO_FILES: Record<string, string> = Object.fromEntries(
   ["draco_wasm_wrapper.js", "draco_decoder.wasm"].map((f) => [f, new URL(DRACO_DIR + f, import.meta.url).href]));
+const BASIS_DIR = "./basis/";
+export const BASIS_FILES: Record<string, string> = Object.fromEntries(
+  ["basis_transcoder.js", "basis_transcoder.wasm"].map((f) => [f, new URL(BASIS_DIR + f, import.meta.url).href]));

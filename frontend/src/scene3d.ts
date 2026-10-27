@@ -47,7 +47,7 @@
 import { engine, headBytes, lodLevelOf, probeLods, tilesBarTexts } from "./embed3d-native";
 import { onFirstVisible } from "./lazy";
 import { nodeBytes, ownedByNode, RoadError, type FetchFailure } from "./node-road";
-import { createTilesLayer, dracoFor, formatBytes, isTilesetUrl, tilesBar, tilesEngine, type RelocateFn, type TilesLayer } from "./tiles3d";
+import { createTilesLayer, formatBytes, isTilesetUrl, tilesBar, tilesEngine, withDecoders, type RelocateFn, type TilesLayer } from "./tiles3d";
 import type { OverlayKey, OverlayValueKey } from "./overlays";
 import {
   alignedView, AXIS_INDEX, AXIS_VECTOR, boxZoom, freeAxes, modalHeader, threeToBlender, type ModalWords, clipPlanes, detailZoom, DRAG_PX, dragIntent, dragZoomFactor,
@@ -570,7 +570,7 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
       // for a use…»): the decoder the tilesets use, set once before the first load
       let dracoSet: Promise<void> | null = null;
       const withDraco = (): Promise<void> => (dracoSet ??= tilesEngine()
-        .then((T) => { loader.setDRACOLoader(dracoFor(E, T)); }).catch(() => undefined));
+        .then((T) => { withDecoders(loader, E, T, renderer); }).catch(() => undefined));
       // a model, or why it did not come. A failure is not kept: once the
       // access is granted (or the file uploaded), asking again asks again
       // `unanswered`: nothing answered (a network error, no HTTP status) —

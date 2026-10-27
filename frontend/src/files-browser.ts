@@ -183,30 +183,77 @@ export function dropStampPreset(store: Pick<Storage, "getItem" | "setItem"> | nu
   return next;
 }
 
-// ── the Ottimizza tab's destinations (AR14) ─────────────────────────────────
+// ── the Ottimizza tab's destinations (AR14, MICRO-OTTIMIZZA-1) ────────────
 
 /**
- * The destinations of a variant. The round-0 verdict (27 Oct 2026): variants
- * are EXPERIMENTAL — gltfpack does them in a second, but the Viewer of
- * EMStudio reads neither meshopt nor KTX2 yet, so the variants written here
- * are simplified and NOT compressed (`-noq`, no `-c`, no `-tc`): a variant
- * EMStudio cannot show would be a file nobody checks. Textures keep their
- * size (gltfpack resizes them only together with KTX2).
- * The name is s3Dgraphy's (`project_tree.variant_name`), asked of the bridge.
+ * The destinations of a variant. Round 0 (27 Oct 2026) made the variants
+ * experimental because the Viewer of EMStudio read neither meshopt nor KTX2;
+ * since MICRO-OTTIMIZZA-1 it reads both (`tiles3d.ts withDecoders`), and the
+ * variants are ON: the web and mobile ones simplified, quantised, meshopt
+ * compressed with KTX2 textures; Heriverse/ATON and print whole and
+ * uncompressed (nobody has yet proved Heriverse reads meshopt/KTX2, and a
+ * print wants the geometry as it is). The bridge holds the same table
+ * (`em_optimize.PRESETS`, by `id`); the name is s3Dgraphy's
+ * (`project_tree.variant_name`), asked of the bridge.
+ *
+ * ENGINES (E.D., precisazione 3): each destination has its default engine and
+ * says why; the person may change it. gltfpack is the quick way for the web
+ * and for whoever has neither Blender, Metashape nor RealityScan; Blender +
+ * 3DSC (re-baking the textures, the number of textures each level needs) is
+ * the engine of the «experiences» (Blender, Unreal) and arrives in round 3.
  */
+export type OptEngine = "gltfpack" | "blender3dsc";
 export interface OptimizePreset {
   id: string; labelKey: string; lod: string; destination: string;
   /** the share of the triangles kept (gltfpack `-si`) */
   ratio: number;
+  /** the textures' largest side (gltfpack `-tl`, only with KTX2); 0 = as they are */
+  texturePx: number;
+  ktx2: boolean; meshopt: boolean;
+  /** s3Dgraphy's USES of the version */
+  use: string[];
+  /** the default engine, the ones that may replace it, and why the default */
+  engine: OptEngine; engines: OptEngine[]; whyKey: string;
 }
 
 export const OPTIMIZE_PRESETS: readonly OptimizePreset[] = [
-  { id: "web", labelKey: "files.optWeb", lod: "lod4", destination: "web", ratio: 0.1 },
-  { id: "mobile", labelKey: "files.optMobile", lod: "lod4", destination: "mobile", ratio: 0.05 },
-  { id: "vr", labelKey: "files.optVr", lod: "lod3", destination: "vr", ratio: 0.25 },
-  { id: "heriverse", labelKey: "files.optHeriverse", lod: "lod3", destination: "aton-heriverse", ratio: 0.5 },
-  { id: "print", labelKey: "files.optPrint", lod: "lod1", destination: "print", ratio: 1 },
+  { id: "web", labelKey: "files.optWeb", lod: "lod4", destination: "web", ratio: 0.1, texturePx: 1024,
+    ktx2: true, meshopt: true, use: ["web"], engine: "gltfpack", engines: ["gltfpack", "blender3dsc"], whyKey: "files.optWhyWeb" },
+  { id: "mobile", labelKey: "files.optMobile", lod: "lod4", destination: "mobile", ratio: 0.05, texturePx: 512,
+    ktx2: true, meshopt: true, use: ["mobile_ar"], engine: "gltfpack", engines: ["gltfpack", "blender3dsc"], whyKey: "files.optWhyMobile" },
+  { id: "heriverse", labelKey: "files.optHeriverse", lod: "lod3", destination: "aton-heriverse", ratio: 1, texturePx: 0,
+    ktx2: false, meshopt: false, use: ["heriverse", "aton"], engine: "gltfpack", engines: ["gltfpack", "blender3dsc"], whyKey: "files.optWhyHeriverse" },
+  { id: "print", labelKey: "files.optPrint", lod: "lod1", destination: "print", ratio: 1, texturePx: 0,
+    ktx2: false, meshopt: false, use: ["print"], engine: "gltfpack", engines: ["gltfpack", "blender3dsc"], whyKey: "files.optWhyPrint" },
+  { id: "experience", labelKey: "files.optExperience", lod: "lod3", destination: "realtime", ratio: 0.25, texturePx: 0,
+    ktx2: false, meshopt: false, use: ["realtime"], engine: "blender3dsc", engines: ["blender3dsc", "gltfpack"], whyKey: "files.optWhyExperience" },
 ];
+
+/** The engines that run today: gltfpack (when the bridge has it). Blender + 3DSC
+ *  is round 3's. */
+export const ENGINES_TODAY: ReadonlySet<OptEngine> = new Set<OptEngine>(["gltfpack"]);
+
+/** The engine a destination uses: the person's choice when it is one of the
+ *  destination's, else its default. */
+export function engineFor(pre: OptimizePreset, chosen: Record<string, string> | null | undefined): OptEngine {
+  const c = chosen?.[pre.id] as OptEngine | undefined;
+  return c && pre.engines.includes(c) ? c : pre.engine;
+}
+
+/** The memory a gltfpack variant asks, said before it starts: measured in
+ *  round 0 (a 47 MB obj → 220 MB; 1.1 GB with 44 textures → 3.1 GB), about
+ *  100 MB plus three and a half times what it reads. */
+export function variantMemoryMb(bytesIn: number): number {
+  return Math.ceil(100 + 3.5 * Math.max(0, bytesIn) / (1024 * 1024));
+}
+
+/** A background job as the status line says it: its label, its share done. */
+export interface JobView { id: string; kind: string; label: string; state: string; progress: number; stage?: string }
+export function jobLine(j: JobView): string {
+  const pct = j.state === "running" ? ` ${Math.round(Math.max(0, Math.min(1, j.progress)) * 100)}%` : "";
+  return `${j.label}${j.stage ? ` · ${j.stage}` : ""}${pct}`;
+}
+export const jobRunning = (j: JobView): boolean => j.state === "queued" || j.state === "running";
 
 // ── the panel's tab when nobody chose one ───────────────────────────────────
 

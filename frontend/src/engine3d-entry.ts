@@ -30,5 +30,11 @@ export { estimateBytesUsed } from "three/examples/jsm/utils/BufferGeometryUtils.
 // RISORSA-FILE · Draco-compressed tiles: tiles3d.js takes the loader from here
 // (its decoder files ride in tiles3d.js)
 export { DRACOLoader } from "three/examples/jsm/loaders/DRACOLoader.js";
+// MICRO-OTTIMIZZA-1 · the variants of gltfpack: meshopt geometry
+// (`EXT_meshopt_compression`, the decoder's wasm is inside its module) and KTX2
+// textures (`KHR_texture_basisu`, its Basis transcoder rides with tiles3d.js
+// as the Draco decoder does)
+export { KTX2Loader } from "three/examples/jsm/loaders/KTX2Loader.js";
+export { MeshoptDecoder } from "three/examples/jsm/libs/meshopt_decoder.module.js";
 // …and the one addon GLTFExtensionsPlugin's metadata reader takes from three
 export { FullScreenQuad } from "three/examples/jsm/postprocessing/Pass.js";

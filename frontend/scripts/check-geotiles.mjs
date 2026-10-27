@@ -164,7 +164,7 @@ const O = { origin: "http://localhost:5173" };
 try {
   for (let i = 0; i < 100; i++) { try { if ((await fetch(`${B}/health`)).ok) break; } catch { /* starting */ } await new Promise((r) => setTimeout(r, 150)); }
   const health = await (await fetch(`${B}/health`)).json();
-  eq(health.bridge_level, 42, "the bridge's level: 42 (/tiles, /geo, /tiles/failures, /geo/crs-info; 39 /fs/pack-3tz with root; 40 /geo/tileset-frame; 41 /web-meta; 42 /project-tree, /fs/optimize)");
+  eq(health.bridge_level, 43, "the bridge's level: 43 (/tiles, /geo, /tiles/failures, /geo/crs-info; 39 /fs/pack-3tz with root; 40 /geo/tileset-frame; 41 /web-meta; 42 /project-tree, /fs/optimize; 43 /addons, /jobs, /graph/add-version)");
   // MICRO tileset, shift e epoche · the Basilica Iulia's root (RealityScan,
   // E−291407 N−4640813 declared as EPSG:6708: on the equator) back in Rome
   {

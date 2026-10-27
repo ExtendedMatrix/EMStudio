@@ -1375,7 +1375,14 @@ def _gltfpack_tool():
     version}`` or None."""
     import shutil as _sh
     import subprocess
-    cands = [os.environ.get("EM_GLTFPACK") or "", _sh.which("gltfpack") or ""]
+    # MICRO-OTTIMIZZA-1 · the add-on downloaded on request (Settings › Add-ons)
+    # comes right after the explicit EM_GLTFPACK
+    try:
+        import em_optimize
+        addon = em_optimize.tool_path("gltfpack") or ""
+    except Exception:  # noqa: BLE001 — a broken add-ons folder is no tool
+        addon = ""
+    cands = [os.environ.get("EM_GLTFPACK") or "", addon, _sh.which("gltfpack") or ""]
     here = os.path.dirname(os.path.abspath(sys.executable if getattr(sys, "frozen", False) else __file__))
     cands += [os.path.join(here, n) for n in ("gltfpack", "gltfpack.exe")]
     for c in cands:
@@ -1387,8 +1394,90 @@ def _gltfpack_tool():
                 version = head[0].strip() if head else ""
             except (OSError, subprocess.TimeoutExpired):
                 pass
-            return {"path": c, "version": version}
+            return {"path": c, "version": version, "addon": bool(addon) and c == addon}
     return None
+
+
+def _master_of(graph, source: str, em_json: str) -> str:
+    """The resource of ``graph`` whose file is ``source`` (see /graph/add-version)."""
+    if not source:
+        return ""
+    real = os.path.realpath(source)
+    base = os.path.dirname(os.path.abspath(em_json)) if em_json else ""
+    digests = set()
+    try:
+        digests.add("sha256:" + _sha256_path(source))
+    except OSError:
+        pass
+    try:
+        import dtcstamp
+        followed = dtcstamp.follow_references(source)
+        if len(followed["members"]) > 1:
+            digests.add(str(dtcstamp.members_digest(followed["members"])))
+    except Exception:  # noqa: BLE001 — a file dtcstamp cannot read is one file
+        pass
+    by_sum = ""
+    for n in graph.nodes:
+        if getattr(n, "node_type", None) != "resource":
+            continue
+        data = getattr(n, "data", None) or {}
+        url = str(data.get("url") or "")
+        if url and "://" not in url:
+            full = url if os.path.isabs(url) else (os.path.join(base, url) if base else "")
+            if full and os.path.realpath(full) == real:
+                return n.node_id
+        if not by_sum and data.get("checksum") in digests:
+            by_sum = n.node_id
+    return by_sum
+
+
+def _variant_parameters(params: dict) -> dict:
+    """The parameters a variant's stamp and its ``lod_generation`` step say."""
+    return {"lod": params["lod"], "destination": params["destination"], "ratio": params["ratio"],
+            "quantization": bool(params.get("quantize")),
+            "compression": "meshopt" if params.get("meshopt") else None,
+            "textures": ("ktx2" if params.get("ktx2") else "as they are"),
+            "max_texture_px": int(params.get("texture_px") or 0) or None,
+            "use": list(params.get("use") or []), "preset": params.get("preset") or None}
+
+
+def _variant_write(item: dict, params: dict, tool: dict, job=None) -> dict:
+    """ONE variant by gltfpack, never over a file that exists. With a job the
+    tool runs as the job's process (cancel ends it); without, synchronously.
+    → the item with ``state`` (written · exists · error), its bytes, sha256,
+    seconds, command, and what the glb holds (faces, textures, extensions)."""
+    import subprocess
+    import time as _time
+    import em_optimize as O
+    if item.get("error") or item.get("exists"):
+        return {**item, "state": "error" if item.get("error") else "exists"}
+    os.makedirs(os.path.dirname(item["path"]), exist_ok=True)
+    cmd = O.gltfpack_command(tool["path"], item["source"], item["path"], params)
+    t0 = _time.time()
+    if job:
+        job.say(" ".join([os.path.basename(cmd[0])] + cmd[1:]))
+    try:
+        run = (job.run_process(cmd, timeout=3600) if job
+               else subprocess.run(cmd, capture_output=True, text=True, timeout=1800))
+    except (OSError, subprocess.TimeoutExpired, TimeoutError) as exc:
+        return {**item, "state": "error", "error": str(exc)}
+    except O._Cancelled:
+        if os.path.exists(item["path"]):
+            try:
+                os.remove(item["path"])
+            except OSError:
+                pass
+        raise
+    if run.returncode != 0 or not os.path.isfile(item["path"]):
+        return {**item, "state": "error", "error": (run.stderr or run.stdout or "").strip()[-600:]}
+    facts = O.glb_facts(item["path"])
+    if job:
+        job.say(f"{os.path.basename(item['path'])}: {os.path.getsize(item['path'])} bytes, "
+                f"{facts['faces']} faces, {facts['texture_count']} textures")
+    return {**item, "state": "written", "bytes": os.path.getsize(item["path"]),
+            "sha256": "sha256:" + _sha256_path(item["path"]),
+            "seconds": round(_time.time() - t0, 2), "facts": facts,
+            "command": " ".join(os.path.basename(c) if i == 0 else c for i, c in enumerate(cmd))}
 
 
 def _fs_inside_roots(full: str) -> bool:
@@ -1690,7 +1779,15 @@ def _load_s3dgraphy(s3dgraphy_src: "pathlib.Path | None"):
 #: ``versions/`` folders, V4) and /fs/optimize (the Ottimizza tab: a model's
 #: variant by gltfpack, named and placed by s3Dgraphy's ``variant_path``;
 #: experimental) — MICRO-ARCHIVIO-2.
-BRIDGE_LEVEL = 42   # 30 also = /validate
+#: 43 = the Ottimizza tab's engine room (``em_optimize``): ``GET /addons`` and
+#: ``POST /jobs`` (``kind: addon``) — gltfpack downloaded on request, version
+#: and sha256 pinned, into the app's data folder; ``POST /jobs`` (``variants``,
+#: ``pack3tz``), ``GET /jobs?id=…&since=N``, ``{step: cancel}`` — every
+#: optimisation a background job; ``/fs/optimize`` takes a ``preset`` (meshopt
+#: and KTX2 for the web, the Viewer reads them); ``POST /graph/add-version``
+#: — a variant registered as a version of its asset (s3Dgraphy's
+#: ``api.add_version``) — MICRO-OTTIMIZZA-1.
+BRIDGE_LEVEL = 43   # 30 also = /validate
 
 
 #: the files of a tileset a server may send gzipped (MICRO-TILESET-CARTELLA)
@@ -2408,6 +2505,28 @@ def make_handler(api):
             elif route == "/web-meta":
                 q = urllib.parse.parse_qs(parsed.query)
                 self._web_meta((q.get("url") or [""])[0])
+            elif route == "/addons":
+                # MICRO-OTTIMIZZA-1 · the add-ons: what is pinned, what is here
+                import em_optimize as O
+                self._json({"ok": True, "addons": O.all_addons(), "platform": O.platform_key(),
+                            "folder": str(O.addons_dir())})
+            elif route == "/jobs":
+                # MICRO-OTTIMIZZA-1 · one job (its new lines since N), or them all
+                import em_optimize as O
+                q = urllib.parse.parse_qs(parsed.query)
+                jid = (q.get("id") or [""])[0]
+                if not jid:
+                    self._json({"ok": True, "jobs": O.listing()})
+                else:
+                    job = O.get(jid)
+                    if job is None:
+                        self._fail(404, "no such job (the bridge was restarted?)")
+                    else:
+                        try:
+                            since = int((q.get("since") or ["0"])[0] or 0)
+                        except ValueError:
+                            since = 0
+                        self._json(job.view(since))
             elif route == "/fs/list":
                 if not self._fs_gate():
                     return
@@ -2826,6 +2945,24 @@ def make_handler(api):
                     self._fail(400, f"invalid JSON body: {exc}")
                     return
                 self._optimize(body if isinstance(body, dict) else {})
+            elif route == "/jobs":
+                # MICRO-OTTIMIZZA-1 · a background job (variants, .3tz, an add-on)
+                if not self._fs_gate():
+                    return
+                try:
+                    body = json.loads(raw.decode("utf-8")) if raw else {}
+                except Exception as exc:
+                    self._fail(400, f"invalid JSON body: {exc}")
+                    return
+                self._jobs_post(body if isinstance(body, dict) else {})
+            elif route == "/graph/add-version":
+                # MICRO-OTTIMIZZA-1 · a variant, registered as a version of its asset
+                try:
+                    body = json.loads(raw.decode("utf-8")) if raw else {}
+                except Exception as exc:
+                    self._fail(400, f"invalid JSON body: {exc}")
+                    return
+                self._add_version(body if isinstance(body, dict) else {})
             elif route == "/stamp/retitle":
                 # RIFINITURE · the stamp's TITLE and DESCRIPTION, rewritten in
                 # its sidecar. They are a courtesy, not substance (dtcstamp
@@ -2909,6 +3046,10 @@ def make_handler(api):
             self._json({"ok": True, "identities": out})
 
         def _pack_3tz(self, body):
+            status, payload = self._pack_3tz_core(body)
+            self._json(payload, status)
+
+        def _pack_3tz_core(self, body):
             """``{"folder": <dir with tileset.json>}`` → the ``.3tz`` beside it.
 
             The writer is dtcstamp's (`dtcstamp.write_canonical_3tz`, taken
@@ -2924,8 +3065,7 @@ def make_handler(api):
             folder = os.path.abspath(os.path.expanduser(str(body.get("folder") or "")))
             full, err = self._fs_resolve(folder, want="dir")
             if err:
-                self._fail(*err)
-                return
+                return err[0], {"ok": False, "error": err[1]}
             # MICRO-TILESET-CARTELLA · the RealityScan form: ``root`` is X.json
             # BESIDE the folder X/ (its contents written ``X/Geometry/…``); the
             # two are packed as one tree, X.json as tileset.json, into X.3tz
@@ -2936,24 +3076,19 @@ def make_handler(api):
                 rj = os.path.abspath(os.path.expanduser(str(body.get("root"))))
                 root_json, err = self._fs_resolve(rj, want="file")
                 if err:
-                    self._fail(*err)
-                    return
+                    return err[0], {"ok": False, "error": err[1]}
                 if os.path.dirname(root_json) != os.path.dirname(full.rstrip(os.sep)):
-                    self._fail(400, f"{rj} is not beside {folder}: the RealityScan form is X.json beside X/")
-                    return
+                    return 400, {"ok": False, "error": f"{rj} is not beside {folder}: the RealityScan form is X.json beside X/"}
             elif not os.path.isfile(os.path.join(full, "tileset.json")):
-                self._fail(400, f"{folder}: no tileset.json at its root — not a tileset folder")
-                return
+                return 400, {"ok": False, "error": f"{folder}: no tileset.json at its root — not a tileset folder"}
             target = full.rstrip(os.sep) + ".3tz"
             if not _fs_inside_roots(target):
-                self._fail(403, f"{target} is outside the folders this bridge serves")
-                return
+                return 403, {"ok": False, "error": f"{target} is outside the folders this bridge serves"}
             try:
                 import dtcstamp
                 write = dtcstamp.write_canonical_3tz
             except (ImportError, AttributeError) as exc:
-                self._fail(501, f"dtcstamp with write_canonical_3tz (0.1.5) is not importable here: {exc}")
-                return
+                return 501, {"ok": False, "error": f"dtcstamp with write_canonical_3tz (0.1.5) is not importable here: {exc}"}
             aside = target + ".new" if os.path.exists(target) else target
             stage = None
             try:
@@ -2963,8 +3098,7 @@ def make_handler(api):
                     src = stage
                 out = write(src, aside)
             except Exception as exc:
-                self._fail(400, f"cannot pack {folder}: {exc}")
-                return
+                return 400, {"ok": False, "error": f"cannot pack {folder}: {exc}"}
             finally:
                 if stage:
                     shutil.rmtree(stage, ignore_errors=True)
@@ -2974,49 +3108,58 @@ def make_handler(api):
                 before = _sha256_path(target)
                 os.remove(aside)
                 if before != hexd:
-                    self._fail(409, f"{os.path.basename(target)} is already there with other "
+                    return 409, {"ok": False, "error": f"{os.path.basename(target)} is already there with other "
                                     f"bytes (sha256 {before[:12]}…, the folder packs to "
-                                    f"{hexd[:12]}…): not overwritten")
-                    return
+                                    f"{hexd[:12]}…): not overwritten"}
                 state = "same"
             canonical = None
             try:
                 canonical = dtcstamp.is_canonical_3tz(target)
             except Exception as exc:
                 canonical = {"error": str(exc)}
-            self._json({"ok": True, "state": state, "path": target,
+            return 200, {"ok": True, "state": state, "path": target,
                         "sha256": "sha256:" + hexd, "bytes": out["bytes"],
                         "entries": out["entries"], "seconds": out["seconds"],
                         "content_digest": out["content_digest"],
                         "canonical": canonical,
                         "writer": {"module": "dtcstamp.write_canonical_3tz",
-                                   "version": str(getattr(dtcstamp, "__version__", ""))}})
+                                   "version": str(getattr(dtcstamp, "__version__", ""))}}
 
-        def _optimize(self, body):
-            """``{"sources": [path…], "lod", "destination", "ratio", "dry_run"}``
-            → ``{tool, outputs: [{source, path, name, exists, …}]}``.
+        def _optimize_params(self, body):
+            """The parameters of a variant: a preset of ``em_optimize.PRESETS``
+            (``preset``), each field overridable by the body (``lod``,
+            ``destination``, ``ratio``, ``texture_px``, ``ktx2``, ``meshopt``,
+            ``quantize``). Without a preset and without the compression fields
+            the variant is the one of level 42: simplified, NOT quantised, NOT
+            compressed."""
+            import em_optimize as O
+            base = dict(O.PRESETS.get(str(body.get("preset") or ""), {}))
+            if not base:
+                base = {"lod": "lod4", "destination": "web", "ratio": 0.1, "texture_px": 0,
+                        "ktx2": False, "meshopt": False, "quantize": False, "use": []}
+            for k in ("lod", "destination"):
+                if body.get(k):
+                    base[k] = str(body[k])
+            if "ratio" in body:
+                try:
+                    base["ratio"] = float(body["ratio"])
+                except (TypeError, ValueError):
+                    pass
+            base["ratio"] = min(1.0, max(0.001, float(base.get("ratio") or 1.0)))
+            if "texture_px" in body:
+                try:
+                    base["texture_px"] = max(0, int(body["texture_px"] or 0))
+                except (TypeError, ValueError):
+                    pass
+            for k in ("ktx2", "meshopt", "quantize"):
+                if k in body:
+                    base[k] = bool(body[k])
+            base["preset"] = str(body.get("preset") or "")
+            return base
 
-            A dry run says only where each variant would go and whether
-            gltfpack is here (``EM_GLTFPACK``, the PATH, or beside the bridge).
-            The run writes, never over a file that exists: simplified to
-            ``ratio`` of the triangles (``-si``), NOT compressed and NOT
-            quantised (``-noq``; no ``-c``, no ``-tc``), because the Viewer of
-            EMStudio reads neither meshopt nor KTX2 yet (the round-0 verdict).
-            Stamping the variant is the page's: it is a derived step, and a
-            stamp is emitted by /stamp/emit like every other."""
-            try:
-                from s3dgraphy.project_tree import variant_path, find_project_root
-            except ImportError as exc:
-                self._fail(501, f"s3dgraphy with project_tree.variant_path is not importable here: {exc}")
-                return
-            lod = str(body.get("lod") or "lod4")
-            dest = str(body.get("destination") or "web")
-            try:
-                ratio = float(body.get("ratio", 0.1))
-            except (TypeError, ValueError):
-                ratio = 0.1
-            ratio = min(1.0, max(0.001, ratio))
-            tool = _gltfpack_tool()
+        def _optimize_plan(self, body, params):
+            """Where each variant goes (s3Dgraphy's ``variant_path``), or why not."""
+            from s3dgraphy.project_tree import variant_path, find_project_root
             planned = []
             for raw_path in (body.get("sources") or [])[:64]:
                 full, err = self._fs_resolve(os.path.abspath(os.path.expanduser(str(raw_path))), want="file")
@@ -3026,47 +3169,180 @@ def make_handler(api):
                 if not full.lower().endswith((".glb", ".gltf", ".obj")):
                     planned.append({"source": full, "error": "gltfpack reads .glb, .gltf and .obj"})
                     continue
-                out = variant_path(full, lod, dest, root=find_project_root(full))
+                out = variant_path(full, params["lod"], params["destination"], root=find_project_root(full))
                 if not _fs_inside_roots(out):
                     planned.append({"source": full, "error": f"{out} is outside the folders this bridge serves"})
                     continue
                 planned.append({"source": full, "path": out, "name": os.path.basename(out),
-                                "exists": os.path.exists(out)})
+                                "exists": os.path.exists(out), "bytes_in": os.path.getsize(full)})
+            return planned
+
+        def _optimize(self, body):
+            """``{"sources": [path…], "preset" | "lod", "destination", "ratio",
+            "texture_px", "ktx2", "meshopt", "quantize", "dry_run"}`` →
+            ``{tool, outputs: [{source, path, name, exists, …}], command}``.
+
+            A dry run says only where each variant would go, whether gltfpack
+            is here (``EM_GLTFPACK``, the add-on, the PATH, or beside the
+            bridge) and the command it would run. The run writes, never over a
+            file that exists, synchronously — the Ottimizza tab asks the same
+            through ``POST /jobs`` (``kind: variants``), in the background.
+            Stamping the variant is the page's: it is a derived step, and a
+            stamp is emitted by /stamp/emit like every other."""
+            try:
+                from s3dgraphy.project_tree import variant_path, find_project_root  # noqa: F401
+            except ImportError as exc:
+                self._fail(501, f"s3dgraphy with project_tree.variant_path is not importable here: {exc}")
+                return
+            import em_optimize as O
+            params = self._optimize_params(body)
+            tool = _gltfpack_tool()
+            planned = self._optimize_plan(body, params)
             if body.get("dry_run"):
-                self._json({"ok": True, "tool": tool, "outputs": planned})
+                self._json({"ok": True, "tool": tool, "outputs": planned, "parameters": _variant_parameters(params),
+                            "command": " ".join(O.gltfpack_command("gltfpack", "‹in›", "‹out›", params)[1:])})
                 return
             if not tool:
-                self._fail(501, "gltfpack is not here: set EM_GLTFPACK to its path, or put it on the PATH")
+                self._fail(501, "gltfpack is not here: install it from Settings › Add-ons, set EM_GLTFPACK to its path, or put it on the PATH")
                 return
-            import subprocess
-            import time as _time
-            done = []
-            for item in planned:
-                if item.get("error") or item.get("exists"):
-                    done.append({**item, "state": "error" if item.get("error") else "exists"})
-                    continue
-                os.makedirs(os.path.dirname(item["path"]), exist_ok=True)
-                cmd = [tool["path"], "-i", item["source"], "-o", item["path"], "-noq"]
-                if ratio < 1.0:
-                    cmd += ["-si", f"{ratio:g}"]
-                t0 = _time.time()
+            done = [_variant_write(item, params, tool) for item in planned]
+            self._json({"ok": True, "tool": tool, "outputs": done, "parameters": _variant_parameters(params)})
+
+        def _jobs_post(self, body):
+            """``POST /jobs``: ``{kind: "variants", sources, preset…}`` ·
+            ``{kind: "pack3tz", folder, root?}`` · ``{kind: "addon", id,
+            step: install}`` → 202 ``{job}``; ``{step: "cancel", id}``."""
+            import em_optimize as O
+            if body.get("step") == "cancel":
+                ok = O.cancel(str(body.get("id") or ""))
+                self._json({"ok": ok} if ok else {"ok": False, "error": "no such job"}, 200 if ok else 404)
+                return
+            kind = str(body.get("kind") or "")
+            if kind == "variants":
                 try:
-                    run = subprocess.run(cmd, capture_output=True, text=True, timeout=1800)
-                except (OSError, subprocess.TimeoutExpired) as exc:
-                    done.append({**item, "state": "error", "error": str(exc)})
-                    continue
-                if run.returncode != 0 or not os.path.isfile(item["path"]):
-                    done.append({**item, "state": "error",
-                                 "error": (run.stderr or run.stdout or "").strip()[-600:]})
-                    continue
-                done.append({**item, "state": "written", "bytes": os.path.getsize(item["path"]),
-                             "sha256": "sha256:" + _sha256_path(item["path"]),
-                             "seconds": round(_time.time() - t0, 2),
-                             "command": " ".join(os.path.basename(c) if i == 0 else c
-                                                 for i, c in enumerate(cmd))})
-            self._json({"ok": True, "tool": tool, "outputs": done,
-                        "parameters": {"lod": lod, "destination": dest, "ratio": ratio,
-                                       "quantization": False, "compression": None}})
+                    from s3dgraphy.project_tree import variant_path  # noqa: F401
+                except ImportError as exc:
+                    self._fail(501, f"s3dgraphy with project_tree.variant_path is not importable here: {exc}")
+                    return
+                params = self._optimize_params(body)
+                tool = _gltfpack_tool()
+                if not tool:
+                    self._fail(501, "gltfpack is not here: install it from Settings › Add-ons")
+                    return
+                planned = self._optimize_plan(body, params)
+
+                def target(job):
+                    done = []
+                    for i, item in enumerate(planned):
+                        job.stage = item.get("name") or os.path.basename(item["source"])
+                        job.progress = i / max(1, len(planned))
+                        done.append(_variant_write(item, params, tool, job))
+                        job.result = {"tool": tool, "outputs": done, "parameters": _variant_parameters(params)}
+                    return {"tool": tool, "outputs": done, "parameters": _variant_parameters(params)}
+                job = O.submit("variants", {"sources": [p["source"] for p in planned], **params}, target,
+                               label=f"gltfpack · {params['destination']}")
+                self._json({"ok": True, "job": job.id}, 202)
+            elif kind == "pack3tz":
+                if not body.get("folder"):
+                    self._fail(400, "pack3tz wants a folder")
+                    return
+
+                def target(job):
+                    job.stage = os.path.basename(str(body.get("folder")).rstrip("/\\"))
+                    status, payload = self._pack_3tz_core(body)
+                    if status != 200:
+                        raise RuntimeError(payload.get("error") or status)
+                    return payload
+                job = O.submit("pack3tz", {"folder": str(body["folder"])}, target, label=".3tz")
+                self._json({"ok": True, "job": job.id}, 202)
+            elif kind == "addon":
+                aid = str(body.get("id") or "")
+                if aid not in O.ADDONS:
+                    self._fail(404, f"unknown add-on {aid!r}")
+                    return
+                if body.get("step") == "remove":
+                    self._json({"ok": True, "addon": O.remove(aid)})
+                    return
+                job = O.submit("addon", {"id": aid}, lambda j: O.install(aid, j),
+                               label=f"{O.ADDONS[aid]['name']} {O.addon_state(aid)['version'] or ''}".strip())
+                self._json({"ok": True, "job": job.id}, 202)
+            else:
+                self._fail(400, f"unknown job kind {kind!r}")
+
+        def _add_version(self, body):
+            """``{doc, source, em_json, master_id?, locator, sha256, bytes,
+            level, destination, use, measures, primitives, parameters,
+            software, author, at}`` → the version of the asset in ``doc``
+            (s3Dgraphy's ``api.add_version``: the version resource, the
+            ``lod_generation`` step from the master) as a DELTA of nodes and
+            edges, as /annotate answers.
+
+            The master is ``master_id`` when the page knows it, else the
+            resource of the graph whose file is ``source``: its ``url``
+            resolved beside ``em_json``, or its checksum — the file's sha256,
+            or the members digest of the set it opens (an obj with its mtl and
+            textures, Templu Mare's ``LODn (OBJ)``). A source the graph does
+            not hold answers ``registered: false`` and why: the variant stays
+            stamped, out of the graph."""
+            doc = body.get("doc")
+            if not isinstance(doc, dict):
+                self._fail(400, "add-version needs the current 'doc' (em.json)")
+                return
+            if not hasattr(api, "add_version"):
+                self._fail(501, "s3dgraphy is out of date: no api.add_version")
+                return
+            try:
+                graph, warnings = api.load_emjson(doc)
+            except Exception as exc:
+                self._fail(400, f"em.json not readable: {exc}")
+                return
+            source = os.path.abspath(os.path.expanduser(str(body.get("source") or "")))
+            master = str(body.get("master_id") or "")
+            node_ids = {n.node_id for n in graph.nodes}
+            if master not in node_ids:
+                master = _master_of(graph, source, str(body.get("em_json") or ""))
+            if not master:
+                self._json({"ok": True, "registered": False,
+                            "reason": f"{os.path.basename(source)} is not a resource of this graph"})
+                return
+            before_nodes = node_ids
+            before_edges = {getattr(e, "edge_id", None) for e in graph.edges}
+            sha = str(body.get("sha256") or "")
+            files = [{"path": str(body.get("locator") or ""), "checksum": sha or None,
+                      "size_bytes": body.get("bytes"), "media_type": "model/gltf-binary"}]
+            kwargs = dict(
+                    level=str(body.get("level") or "") or None,
+                    purpose=str(body.get("destination") or ""),
+                    use=[u for u in (body.get("use") or []) if isinstance(u, str)] or None,
+                    measures={k: v for k, v in (body.get("measures") or {}).items() if v is not None} or None,
+                    primitives=body.get("primitives") or None,
+                    files=files, size_bytes=body.get("bytes"),
+                    technique=str(body.get("technique") or "decimation"),
+                    parameters=body.get("parameters") or None,
+                    tool=str(body.get("tool") or "gltfpack"),
+                    software=body.get("software") or None,
+                    author=str(body.get("author") or "") or None,
+                    at=str(body.get("at") or "") or None)
+            try:
+                try:
+                    out = api.add_version(graph, master, **kwargs)
+                except ValueError as exc:
+                    # the level holds other bytes (Templu Mare's lod4-web by EM
+                    # Tools): the same version made again with another recipe
+                    # is a REVISION of it (E.D., 6 Oct 2026; s3Dgraphy `revise`)
+                    if "already has a version" not in str(exc) and "holds other bytes" not in str(exc):
+                        raise
+                    graph, _w = api.load_emjson(doc)
+                    out = api.add_version(graph, master, revise=True, **kwargs)
+            except ValueError as exc:
+                self._json({"ok": True, "registered": False, "reason": str(exc)})
+                return
+            projected = api.graph_to_emjson(graph)
+            g = projected["graph"] if "graph" in projected else projected
+            nodes = [n for n in g["nodes"] if n.get("id") not in before_nodes]
+            edges = [e for e in g["edges"] if e.get("id") not in before_edges]
+            self._json({"ok": True, "registered": True, "master_id": master, **out,
+                        "nodes": nodes, "edges": edges, "warnings": [str(w) for w in warnings]})
 
         def _stamp_members(self, body):
             """``{"paths": [...]}`` → ``{"sets": {path: {members, digest,

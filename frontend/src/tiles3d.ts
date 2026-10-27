@@ -45,7 +45,8 @@
  * (`textureMax`: the canvas's side to the next power of two, and no more than a
  * sixteenth of the ceiling per texture); GPU compression (KTX2/Basis) is not
  * possible here: the tiles carry JPEG/PNG and an encoder in the page would cost
- * more than it saves; (2) the ancestors are not kept loaded under their
+ * more than it saves (tiles that ARRIVE as KTX2 are read since MICRO-OTTIMIZZA-1,
+ * `ktx2For`: encoding is the producer's, decoding the page's); (2) the ancestors are not kept loaded under their
  * children (`loadAncestors` off) and a tile whose children are shown leaves the
  * memory at once; (3) the ceiling's default is the machine's (settings.ts).
  *
@@ -73,6 +74,8 @@ let tilesPromise: Promise<any> | null = null;
 export async function tilesEngine(): Promise<{ TilesRenderer: any; ImplicitTilingPlugin: any;
     Archive3tz: any; Tiles3tzPlugin: any; sourceFor: any; archiveBase: any;
     DRACOLoader: any; GLTFExtensionsPlugin: any; DRACO_FILES: Record<string, string>;
+    /** MICRO-OTTIMIZZA-1 · gltfpack's variants: meshopt geometry, KTX2 textures */
+    KTX2Loader: any; MeshoptDecoder: any; BASIS_FILES: Record<string, string>;
     /** MICRO-GEOGLOBO · the globe's parts (`globe3d.ts`) */
     TerrariumMeshPlugin: any; ImageOverlayPlugin: any; XYZTilesOverlay: any;
     LRUCache: any; PriorityQueue: any; DownloadPriorityQueue: any }> {
@@ -81,13 +84,16 @@ export async function tilesEngine(): Promise<{ TilesRenderer: any; ImplicitTilin
     tilesPromise = __EM_LAZY_3D__
       ? engine().then(() => import(/* @vite-ignore */ new URL("./tiles3d.js", document.baseURI).href))
       : (async () => {
-          const [r, p, z, d, x, w, m, tr, io, co] = await Promise.all([import("3d-tiles-renderer/three"),
+          const [r, p, z, d, x, w, m, tr, io, co, k, mo, bj, bw] = await Promise.all([import("3d-tiles-renderer/three"),
             import("3d-tiles-renderer/core/plugins"), import("./tiles3tz"),
             import("three/examples/jsm/loaders/DRACOLoader.js"), import("3d-tiles-renderer/src/three/plugins/GLTFExtensionsPlugin.js"),
             import("../node_modules/three/examples/jsm/libs/draco/gltf/draco_wasm_wrapper.js?url"),
             import("../node_modules/three/examples/jsm/libs/draco/gltf/draco_decoder.wasm?url"),
             import("3d-tiles-renderer/src/three/plugins/images/terrain-rgb/TerrariumMeshPlugin.js"),
-            import("3d-tiles-renderer/src/three/plugins/images/ImageOverlayPlugin.js"), import("3d-tiles-renderer/core")]);
+            import("3d-tiles-renderer/src/three/plugins/images/ImageOverlayPlugin.js"), import("3d-tiles-renderer/core"),
+            import("three/examples/jsm/loaders/KTX2Loader.js"), import("three/examples/jsm/libs/meshopt_decoder.module.js"),
+            import("../node_modules/three/examples/jsm/libs/basis/basis_transcoder.js?url"),
+            import("../node_modules/three/examples/jsm/libs/basis/basis_transcoder.wasm?url")]);
           return { TilesRenderer: r.TilesRenderer, ImplicitTilingPlugin: p.ImplicitTilingPlugin,
                    TerrariumMeshPlugin: tr.TerrariumMeshPlugin,
                    ImageOverlayPlugin: io.ImageOverlayPlugin, XYZTilesOverlay: io.XYZTilesOverlay,
@@ -95,7 +101,9 @@ export async function tilesEngine(): Promise<{ TilesRenderer: any; ImplicitTilin
                    Archive3tz: z.Archive3tz, Tiles3tzPlugin: z.Tiles3tzPlugin,
                    sourceFor: z.sourceFor, archiveBase: z.archiveBase,
                    DRACOLoader: d.DRACOLoader, GLTFExtensionsPlugin: x.GLTFExtensionsPlugin,
-                   DRACO_FILES: { "draco_wasm_wrapper.js": w.default, "draco_decoder.wasm": m.default } };
+                   DRACO_FILES: { "draco_wasm_wrapper.js": w.default, "draco_decoder.wasm": m.default },
+                   KTX2Loader: k.KTX2Loader, MeshoptDecoder: mo.MeshoptDecoder,
+                   BASIS_FILES: { "basis_transcoder.js": bj.default, "basis_transcoder.wasm": bw.default } };
         })();
     tilesPromise.catch(() => { tilesPromise = null; });
   }
@@ -263,6 +271,8 @@ async function reduceTextures(scene: any, side: number, stats: { reduced: number
       const tex = m[k];
       if (!tex?.isTexture || seen.has(tex)) continue;
       seen.add(tex);
+      // a KTX2 texture is already the GPU's: its mipmaps are its reduction
+      if (tex.isCompressedTexture) continue;
       const img = tex.image;
       const w = Number(img?.width ?? 0), h = Number(img?.height ?? 0);
       stats.largest = Math.max(stats.largest, w, h);
@@ -287,6 +297,34 @@ export function dracoFor(E: any, T: any): any {
   draco.setDecoderPath("draco/");
   draco.setDecoderConfig({ type: "wasm" });
   return draco;
+}
+
+let ktx2: any = null;
+/** MICRO-OTTIMIZZA-1 · the one KTX2 loader of the page (`KHR_texture_basisu`,
+ *  gltfpack's `-tc`): its Basis transcoder served as the Draco decoder is —
+ *  bundled with three, asked beside tiles3d.js, never a CDN. What the GPU can
+ *  take (ASTC, ETC, BC…) is asked once, of the first renderer: every renderer
+ *  of a page sits on the same GPU. */
+export function ktx2For(E: any, T: any, renderer: any): any {
+  if (ktx2 || !T.KTX2Loader || !T.BASIS_FILES) return ktx2;
+  const manager = new E.THREE.LoadingManager();
+  manager.setURLModifier((u: string) => T.BASIS_FILES[String(u).split("/").pop() ?? ""] ?? u); // paths:url
+  ktx2 = new T.KTX2Loader(manager);
+  ktx2.setTranscoderPath("basis/");
+  try { ktx2.detectSupport(renderer); } catch { /* no WebGL here: the textures will say so */ }
+  return ktx2;
+}
+
+/** MICRO-OTTIMIZZA-1 · a glTF loader that reads what gltfpack writes: Draco
+ *  (EM Tools' web versions), meshopt (`EXT_meshopt_compression`), KTX2
+ *  (`KHR_texture_basisu`); quantised attributes (`KHR_mesh_quantization`) need
+ *  nothing, three reads them. */
+export function withDecoders(loader: any, E: any, T: any, renderer: any): any {
+  if (T.DRACOLoader) loader.setDRACOLoader(dracoFor(E, T));
+  if (T.MeshoptDecoder) loader.setMeshoptDecoder(T.MeshoptDecoder);
+  const k = renderer ? ktx2For(E, T, renderer) : null;
+  if (k) loader.setKTX2Loader(k);
+  return loader;
 }
 
 /** A tile's level: an implicit tile's own (`{level}` of its URI, 0 = the root
@@ -326,7 +364,11 @@ export function createTilesLayer(E: any, T: any, url: string, camera0: any, rend
   tiles.registerPlugin(new T.ImplicitTilingPlugin());
   // RISORSA-FILE · Draco-compressed tiles (TempluMare's b3dm): ONE decoder for
   // the page, its two files served from the engine's own (never a CDN)
-  if (T.DRACOLoader && T.GLTFExtensionsPlugin) tiles.registerPlugin(new T.GLTFExtensionsPlugin({ dracoLoader: dracoFor(E, T) }));
+  // MICRO-OTTIMIZZA-1 · …and meshopt and KTX2 tiles, the same decoders as the
+  // models'; the plugin must not dispose the page's shared loaders
+  if (T.DRACOLoader && T.GLTFExtensionsPlugin) tiles.registerPlugin(new T.GLTFExtensionsPlugin({
+    dracoLoader: dracoFor(E, T), meshoptDecoder: T.MeshoptDecoder ?? null,
+    ktxLoader: ktx2For(E, T, renderer), autoDispose: false }));
   // Z-up → Y-up: the one rotation (see the header)
   tiles.group.rotation.x = -Math.PI / 2;
   let camera = camera0;

@@ -7,6 +7,36 @@ that asked for one.
 ## [Unreleased]
 
 ### Added
+- **Ottimizza, round 1 of 3** (MICRO-OTTIMIZZA-1, the round-0 verdict and
+  E.D.'s precisions of 27 October 2026). The **variants of a model are on**:
+  the Viewer, the Space and the tilesets read `EXT_meshopt_compression`
+  (three's `MeshoptDecoder`) and `KHR_texture_basisu` (`KTX2Loader`, its Basis
+  transcoder served beside `tiles3d.js` as the Draco decoder is; `tiles3d.ts
+  withDecoders`), and «Viewer e scheda» draws a model of the disk as itself.
+  Five destinations, each with its engine said and why, and changeable: web
+  (10% of the triangles, KTX2 at 1024 px, meshopt), mobile (5%, 512 px),
+  Heriverse/ATON and print (whole, nothing compressed), experiences (Blender
+  + 3DSC, round 3; gltfpack meanwhile). **gltfpack is an add-on downloaded on
+  request** (`tools/em_optimize.py`): from meshoptimizer's official release
+  page, version and sha256 pinned (1.3 for macOS arm64, Windows, Linux; 1.2,
+  the last Intel build, for macOS x86_64), into the app's data folder; its
+  licence (MIT), source and version shown before the download and in
+  Settings ▸ Advanced ▸ Add-ons, where it is updated and removed. **Every
+  optimisation is a background job of the bridge** in a process of its own
+  (`POST /jobs`, `GET /jobs?id=…&since=N`, cancel): progress in the tab and in
+  the status line, the notice at the end, EMStudio usable meanwhile; the
+  memory asked is said before it starts. The variant, in
+  `RB/versions/‹model›@lodN-‹use›.glb`, is born stamped as derived
+  (`lod_generation`, `decimation`, the parameters, gltfpack's version), is
+  registered as a version of its asset (`POST /graph/add-version`, s3Dgraphy's
+  `api.add_version`; a level already taken becomes a revision of it) and
+  appears in the Chain. **The .3tz** is a job too (also in the browser of the
+  dev stack: it is the bridge that writes), born stamped as derived from its
+  folder (`packing`) and in the Chain. **A tileset from a mesh** is announced
+  with what comes, the order of its engines and its «experimental» switch for
+  round 2. Bridge level 43. `check-optimize-bridge`, `AR7.optimize`,
+  `AR10.variant`, `R4.pack`.
+
 - **The File window «alla Blender»** (MICRO-ARCHIVIO-2, E.D.'s decisions of
   27 October 2026: V1 = A, V2 = 4, V3 = under the File window, V4 = with GIS/;
   `files-browser.ts`). The places on the left, closed with ◧ or T: the
@@ -496,6 +526,9 @@ that asked for one.
   Collection's writer, is gone.
 
 ### Fixed
+- «Viewer e scheda» called every file it could not preview «an image no
+  browser draws (TIFF)» — a glb among them; only a TIFF says so now
+  (MICRO-OTTIMIZZA-1).
 - The epochs' dates made at READING (`ensureAllEpochParadata`) had a fresh UUID
   at each opening: the same file gave 9 new nodes and 15 edges every time on
   Templu Mare v3.2, and a second «Bring into a room…» seated them again. Their

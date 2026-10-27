@@ -175,6 +175,10 @@ back button returns to the full canvas.
 | dagre (if ever used for graph view) | MIT | yes |
 | ELK / elkjs | EPL-2.0 OR GPL-3.0-or-later (Secondary License declared) | yes — but unused (architectural: see §4.1) |
 | JointJS+ | commercial | no — excluded |
+| **Add-ons** (not shipped: downloaded on request, version and sha256 pinned in `tools/em_optimize.py`, called as separate programs) | | |
+| gltfpack 1.3 / 1.2 (meshoptimizer, Arseny Kapoulkine) | MIT | yes |
+| Obj2Tiles (OpenDroneMap) — round 2 | AGPL-3.0 | yes, as a separate program (GPL-3.0 §13) |
+| KTX-Software (toktx) — when used | Apache-2.0 | yes |
 | yFiles | commercial | no — excluded |
 
 ## 8. Documentation policy

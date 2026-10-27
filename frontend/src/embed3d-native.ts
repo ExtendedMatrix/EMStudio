@@ -34,7 +34,7 @@
 import { t } from "./i18n";
 import { onFirstVisible } from "./lazy";
 import { nodeBlobReady, nodeBlobUrl, nodeBytes, ownedByNode, roadFetch, RoadError } from "./node-road";
-import { createTilesLayer, formatBytes, isTilesetUrl, tilesBar, tilesEngine,
+import { createTilesLayer, formatBytes, isTilesetUrl, tilesBar, tilesEngine, withDecoders,
          type RefineMode, type TilesBarTexts, type TilesLayer } from "./tiles3d";
 
 /** Loaded once per session, on the first 3D embed a reader actually looks at. */
@@ -539,6 +539,10 @@ export function mount3dViewer(host: HTMLElement, url: string,
       };
 
       // ── a glb (or one level of a LOD set) ──────────────────────────────────
+      let glbLoading: Promise<any> | null = null;
+      const glbLoader = (): Promise<any> => (glbLoading ??= tilesEngine()
+        .then((T) => withDecoders(new GLTFLoader(manager), E, T, renderer))
+        .catch(() => new GLTFLoader(manager)));
       let framed = false;
       let glbGen = 0;
       const openGlb = (u: string, onDone?: () => void) => {
@@ -548,6 +552,12 @@ export function mount3dViewer(host: HTMLElement, url: string,
           clearContent();
           content.add(gltf.scene);
           host.dataset.model = u;
+          // MICRO-OTTIMIZZA-1 · what the file asked of the decoders, said on the host
+          host.dataset.gltfExt = ((gltf.parser?.json?.extensionsUsed ?? []) as string[]).join(" ");
+          let gpu = 0;
+          gltf.scene.traverse((o: any) => { const ms = Array.isArray(o.material) ? o.material : o.material ? [o.material] : [];
+            for (const m of ms) if (m?.map?.isCompressedTexture) gpu++; });
+          host.dataset.gpuTextures = String(gpu);
           if (!framed) { framed = true; frameBox(new THREE.Box3().setFromObject(gltf.scene)); }
           show();
           onDone?.();
@@ -555,15 +565,20 @@ export function mount3dViewer(host: HTMLElement, url: string,
         const failed = () => { if (gen === glbGen) { if (shown) strip.dataset.error = u; else unreachable(); } };
         // MICRO-SPAZIO-FIRMATO · the room's store: the bytes through the signed
         // road, then parsed (the loader's own request would carry no bearer)
-        if (ownedByNode(u)) {
-          void nodeBytes(u).then((buf) => new GLTFLoader(manager).parse(buf, "", loaded, failed), (e) => {
-            if (e instanceof RoadError && e.why === "refused") refused = true;
-            missed.push(u);
-            failed();
-          });
-          return;
-        }
-        new GLTFLoader(manager).load(u, loaded, undefined, failed);
+        // MICRO-OTTIMIZZA-1 · a variant of gltfpack (meshopt, KTX2) and a web
+        // version of EM Tools (Draco): the decoders the Space and the tilesets
+        // use, set before the first glb
+        void glbLoader().then((loader) => {
+          if (ownedByNode(u)) {
+            void nodeBytes(u).then((buf) => loader.parse(buf, "", loaded, failed), (e) => {
+              if (e instanceof RoadError && e.why === "refused") refused = true;
+              missed.push(u);
+              failed();
+            });
+            return;
+          }
+          loader.load(u, loaded, undefined, failed);
+        });
       };
 
       // ── a tileset ──────────────────────────────────────────────────────────

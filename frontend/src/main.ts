@@ -208,10 +208,10 @@ import { keepOnDisk, newEmProject, refreshFileStates, reorderApply, reorderPrevi
          type FileState, type MovedFile } from "./file-states";
 import { docFilesBox, filesSection, fileStateLine, resourcesTable, type FileHooks } from "./file-states-ui";
 import { paintChooser } from "./node-chooser";
-import { BUILTIN_STAMP_PRESETS, FAVORITES_KEY, KIND_FILTERS, OPTIMIZE_PRESETS, RECENT_DIRS_KEY, SORT_KEYS, TOOL_TABS,
-         autoTab, dropStampPreset, isOptimizable, isSystemFile, kindOf as browserKindOf, pushRecentDir, readPathList, readStampPresets,
+import { BUILTIN_STAMP_PRESETS, ENGINES_TODAY, FAVORITES_KEY, KIND_FILTERS, OPTIMIZE_PRESETS, RECENT_DIRS_KEY, SORT_KEYS, TOOL_TABS,
+         autoTab, dropStampPreset, engineFor, isOptimizable, jobLine, jobRunning, variantMemoryMb, isSystemFile, kindOf as browserKindOf, pushRecentDir, readPathList, readStampPresets,
          saveStampPreset, statusCounts, toggleFavorite, visibleEntries,
-         type BrowserKind, type OptimizePreset, type RowFacts, type SortKey, type StampPreset, type ToolTab } from "./files-browser";
+         type BrowserKind, type JobView, type OptimizePreset, type RowFacts, type SortKey, type StampPreset, type ToolTab } from "./files-browser";
 import { proposeLanguages, type LanguageProposal } from "./lang-guess";
 import {
   addCategories,
@@ -13647,7 +13647,7 @@ async function bridgeUrl(): Promise<string> {
   return _bridgeUrl;
 }
 /** The bridge level this editor expects (`BRIDGE_LEVEL` in tools/em_bridge.py). */
-const BRIDGE_LEVEL_WANTED = 42;   // 42 = /project-tree and /fs/optimize, the File window «alla Blender» (MICRO-ARCHIVIO-2); 41 = /web-meta, the Shelf's previews of web addresses (MICRO-ARCHIVIO-1); 40 = /geo/tileset-frame, a tileset's shift (MICRO tileset, shift e epoche); 39 = /fs/pack-3tz with `root`, the RealityScan pair (MICRO-TILESET-CARTELLA); 38 = /geo/crs-info, /geo/convert-shift (MICRO-GEOREF-GRAFO); 37 = HTTPS through em_net, /tiles/failures (MICRO-BRIDGE-CERTIFICATI); 36 = /tiles/*, /geo/* (MICRO-GEOGLOBO); 31 = /property-source (FONTE); 32 = /room-import, «Bring into a room» through the engine; 33 = /fs/write (MICRO-SPAZIO-3D); 34 = /fs/doc, /fs/probe (MICRO-PERCORSI-WINDOWS); 35 = /fs/collect, /health's pid (MICRO-WINDOWS-MODELLI)
+const BRIDGE_LEVEL_WANTED = 43;   // 43 = /addons, /jobs (gltfpack as an add-on downloaded on request, every optimisation a background job), /fs/optimize with a preset, /graph/add-version (MICRO-OTTIMIZZA-1); 42 = /project-tree and /fs/optimize, the File window «alla Blender» (MICRO-ARCHIVIO-2); 41 = /web-meta, the Shelf's previews of web addresses (MICRO-ARCHIVIO-1); 40 = /geo/tileset-frame, a tileset's shift (MICRO tileset, shift e epoche); 39 = /fs/pack-3tz with `root`, the RealityScan pair (MICRO-TILESET-CARTELLA); 38 = /geo/crs-info, /geo/convert-shift (MICRO-GEOREF-GRAFO); 37 = HTTPS through em_net, /tiles/failures (MICRO-BRIDGE-CERTIFICATI); 36 = /tiles/*, /geo/* (MICRO-GEOGLOBO); 31 = /property-source (FONTE); 32 = /room-import, «Bring into a room» through the engine; 33 = /fs/write (MICRO-SPAZIO-3D); 34 = /fs/doc, /fs/probe (MICRO-PERCORSI-WINDOWS); 35 = /fs/collect, /health's pid (MICRO-WINDOWS-MODELLI)
 /** MICRO-INSTALLER-PULSANTE p.3 · the bridge that answers says its level; one
  *  that differs from BRIDGE_LEVEL_WANTED is said in the Log (its url, pid, since
  *  when) and in a notice — once per bridge. Asked at start, while the sidecar
@@ -13671,6 +13671,20 @@ async function checkBridgeLevel(patience = 0): Promise<void> {
   logWarn(`${words} (${where})`);
   // a notice that stays: this one explains every failure that follows it
   toastAsk(words, [{ label: "Log", run: () => setLogDrawerOpen(true) }], 30000);
+}
+/** MICRO-OTTIMIZZA-1 · does the bridge that answers have this level? (asked
+ *  once per bridge url and pid, then remembered) */
+const bridgeLevels = new Map<string, number>();
+async function bridgeLevelAtLeast(level: number): Promise<boolean> {
+  const base = await bridgeUrl();
+  let have = bridgeLevels.get(base);
+  if (have === undefined) {
+    const h = await fetch(`${base}/health`, { cache: "no-store" }).then((r) => (r.ok ? r.json() : null), () => null) as
+      { bridge_level?: number } | null;
+    have = typeof h?.bridge_level === "number" ? h.bridge_level : 0;
+    if (h) bridgeLevels.set(base, have);
+  }
+  return have >= level;
 }
 /** the level that serves the open em.json's folders (`/fs/doc`): below it a
  *  model's 403 is the bridge's age, not the file (load-failure.ts) */
@@ -15992,6 +16006,7 @@ document.getElementById("set-node-add")?.addEventListener("keydown", (e) => {
 function openSettings(section?: string): void {
   const s = getSettings();
   void paintOrphans();
+  paintAddonsSettings();
   settingsOpenedWith = { locale: getLocale(), theme: storedMode(), settings: JSON.stringify(s) };
   setToolSel.value = s.sync.tool;
   setProtoSel.value = s.sync.protocol;
@@ -33796,19 +33811,290 @@ async function composeFromMany(pathsIn: string[]): Promise<void> {
   redrawNeighbourhood();
 }
 
-// ── Ottimizza (AR14): the round-0 verdict ───────────────────────────────────
+// ── Ottimizza (AR14, MICRO-OTTIMIZZA-1) ─────────────────────────────────────
 //
-// `.3tz` ON (the pack that exists, `/fs/pack-3tz`); a model's VARIANTS
-// EXPERIMENTAL, behind a switch with its warning (gltfpack on the bridge, not
-// compressed because the Viewer reads neither meshopt nor KTX2 yet); a TILESET
-// from a mesh ANNOUNCED, with how it is done today.
+// `.3tz` ON (the pack that exists, `/fs/pack-3tz`, now a job of the bridge, the
+// archive born stamped as derived and in the Chain); a model's VARIANTS ON since
+// the Viewer reads meshopt and KTX2 (gltfpack, an add-on downloaded on request,
+// as a background job: progress, cancel, the notice at the end); a TILESET from
+// a mesh ANNOUNCED, with its «experimental» switch ready for round 2.
 
-const OPT_EXPERIMENTAL_KEY = "emstudio.optimizeExperimental";
+const OPT_ENGINE_KEY = "emstudio.optEngine";
+const TILES_EXPERIMENTAL_KEY = "emstudio.tilesetExperimental";
 const optPlans = new Map<string, OptPlan>();
-interface OptPlan { at: number; tool: { path: string; version: string } | null; outputs: OptOut[]; error?: string }
+interface OptTool { path: string; version: string; addon?: boolean }
+interface OptPlan { at: number; tool: OptTool | null; outputs: OptOut[]; error?: string; command?: string }
 interface OptOut { source: string; path?: string; name?: string; exists?: boolean; error?: string; state?: string;
-  bytes?: number; sha256?: string; seconds?: number; command?: string }
-let optimizing = false;
+  bytes?: number; bytes_in?: number; sha256?: string; seconds?: number; command?: string;
+  facts?: { faces: number; vertices: number; texture_count: number; texture_side_px: number | null; extensions: string[] } }
+interface AddonState { id: string; name: string; project: string; author: string; licence: string; licence_url: string;
+  source: string; does: string; platform: string; available: boolean; version: string | null; url: string | null;
+  sha256: string | null; size: number | null; installed: { version: string; path: string; at: string } | null;
+  upgradable: boolean; folder: string }
+let addonsState: { at: number; list: AddonState[] | null; error?: string } | null = null;
+
+function readEngineChoice(): Record<string, string> {
+  try { return JSON.parse(localStorage.getItem(OPT_ENGINE_KEY) ?? "{}") as Record<string, string>; } catch { return {}; }
+}
+
+/** The add-ons the bridge pins (`GET /addons`), asked once and again after an
+ *  install or a removal. */
+async function loadAddons(force = false): Promise<AddonState[] | null> {
+  if (addonsState && !force && Date.now() - addonsState.at < 30000) return addonsState.list;
+  try {
+    const r = await fetch(`${await bridgeUrl()}/addons`, { cache: "no-store" });
+    const j = await r.json().catch(() => ({})) as { addons?: AddonState[] };
+    addonsState = { at: Date.now(), list: r.ok ? j.addons ?? [] : null, error: r.ok ? undefined : t("files.optOldBridge") };
+  } catch { addonsState = { at: Date.now(), list: null, error: t("storage.bridgeDown") }; }
+  return addonsState.list;
+}
+
+// ── the background jobs of the bridge (status line, tab, notice at the end) ──
+
+interface BgJob extends JobView { next: number; lines: string[]; result?: unknown; error?: string | null;
+  done: Promise<BgJob>; settle: (j: BgJob) => void }
+const bgJobs = new Map<string, BgJob>();
+let bgTimer: ReturnType<typeof setTimeout> | null = null;
+
+/** `POST /jobs` → the job, followed until it ends (the promise). Null when the
+ *  bridge refuses it (its reason toasted) or is older than level 43. */
+async function startJob(body: Record<string, unknown>, label: string): Promise<BgJob | null> {
+  let r: Response;
+  try {
+    r = await fetch(`${await bridgeUrl()}/jobs`, { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body) });
+  } catch { toast(t("storage.bridgeDown")); return null; }
+  const j = await r.json().catch(() => ({})) as { ok?: boolean; job?: string; error?: string };
+  if (r.status === 404 && !j.job) { toast(t("files.optOldBridge")); return null; }
+  if (!j.ok || !j.job) { toast(t("files.optFailed", { why: String(j.error ?? r.status) })); return null; }
+  let settle!: (x: BgJob) => void;
+  const done = new Promise<BgJob>((res) => { settle = res; });
+  const job: BgJob = { id: j.job, kind: String(body.kind), label, state: "queued", progress: 0, stage: "",
+    next: 0, lines: [], done, settle };
+  bgJobs.set(job.id, job);
+  paintJobs();
+  pollJobs();
+  return job;
+}
+
+function pollJobs(): void {
+  if (bgTimer) return;
+  bgTimer = setTimeout(async () => {
+    bgTimer = null;
+    const live = [...bgJobs.values()].filter(jobRunning);
+    let changed = false;
+    for (const job of live) {
+      try {
+        const r = await fetch(`${await bridgeUrl()}/jobs?id=${encodeURIComponent(job.id)}&since=${job.next}`, { cache: "no-store" });
+        const v = await r.json().catch(() => ({})) as { state?: string; progress?: number; stage?: string; lines?: string[];
+          next?: number; result?: unknown; error?: string | null };
+        if (r.status === 404) { job.state = "failed"; job.error = t("files.jobLost"); }
+        else {
+          if (v.state && v.state !== job.state) changed = true;
+          job.state = v.state ?? job.state;
+          job.progress = v.progress ?? job.progress;
+          job.stage = v.stage ?? job.stage;
+          job.lines.push(...(v.lines ?? []));
+          job.next = v.next ?? job.next;
+          job.result = v.result;
+          job.error = v.error;
+        }
+      } catch { /* the bridge is busy: asked again */ }
+      if (!jobRunning(job)) { changed = true; job.settle(job); }
+    }
+    paintJobs();
+    if (changed) renderStorage();
+    if ([...bgJobs.values()].some(jobRunning)) pollJobs();
+  }, 600);
+}
+
+async function cancelJob(id: string): Promise<void> {
+  try {
+    await fetch(`${await bridgeUrl()}/jobs`, { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ step: "cancel", id }) });
+  } catch { /* the poll says what happened */ }
+  pollJobs();
+}
+
+/** The status line's chip (the running jobs) and every progress bar of the
+ *  tab, written in place: a poll never rebuilds the File window. */
+function paintJobs(): void {
+  const live = [...bgJobs.values()].filter(jobRunning);
+  let chip = document.getElementById("footer-jobs") as HTMLButtonElement | null;
+  if (!chip) {
+    const zone = document.querySelector('#statusbar [data-zone="log"]');
+    if (zone) {
+      chip = document.createElement("button");
+      chip.id = "footer-jobs";
+      chip.type = "button";
+      chip.className = "footer-log footer-jobs hidden";
+      chip.onclick = () => { const j = [...bgJobs.values()].find(jobRunning); if (j && confirmInline(chip!, t("files.jobCancelAsk", { what: j.label }))) void cancelJob(j.id); };
+      zone.prepend(chip);
+    }
+  }
+  if (chip) {
+    chip.classList.toggle("hidden", !live.length);
+    chip.textContent = live.length ? `⟳ ${jobLine(live[0])}${live.length > 1 ? ` +${live.length - 1}` : ""}` : "";
+    chip.title = live.length ? `${live.map(jobLine).join("\n")}\n${t("files.jobChipHint")}` : "";
+    chip.dataset.jobs = String(live.length);
+  }
+  for (const el of document.querySelectorAll<HTMLElement>("[data-job]")) {
+    const job = bgJobs.get(el.dataset.job ?? "");
+    if (!job) continue;
+    const bar = el.querySelector<HTMLElement>(".files-job-bar > i");
+    if (bar) bar.style.width = `${Math.round(job.progress * 100)}%`;
+    const txt = el.querySelector<HTMLElement>(".files-job-text");
+    if (txt) txt.textContent = jobText(job);
+    el.dataset.state = job.state;
+  }
+}
+
+/** A two-click confirmation in the element itself (no native dialog). */
+function confirmInline(el: HTMLElement, ask: string): boolean {
+  if (el.dataset.asking === "1") { delete el.dataset.asking; return true; }
+  el.dataset.asking = "1";
+  const before = el.textContent;
+  el.textContent = ask;
+  setTimeout(() => { if (el.dataset.asking === "1") { delete el.dataset.asking; el.textContent = before; paintJobs(); } }, 3000);
+  return false;
+}
+
+function jobText(job: BgJob): string {
+  if (job.state === "queued") return t("files.jobQueued", { what: job.label });
+  if (job.state === "running") return jobLine(job);
+  if (job.state === "done") return t("files.jobDone", { what: job.label });
+  if (job.state === "cancelled") return t("files.jobCancelled", { what: job.label });
+  return t("files.jobFailed", { what: job.label, why: job.error ?? "" });
+}
+
+/** The jobs of a kind, as rows of the tab: a bar, its words, «Annulla». */
+function jobRows(kinds: string[]): HTMLElement | null {
+  const list = [...bgJobs.values()].filter((j) => kinds.includes(j.kind)).slice(-4);
+  if (!list.length) return null;
+  const box = document.createElement("div");
+  box.className = "files-jobs";
+  for (const job of list) {
+    const row = document.createElement("div");
+    row.className = "files-job";
+    row.dataset.job = job.id;
+    row.dataset.state = job.state;
+    const bar = document.createElement("span");
+    bar.className = "files-job-bar";
+    const fill = document.createElement("i");
+    fill.style.width = `${Math.round(job.progress * 100)}%`;
+    bar.appendChild(fill);
+    const txt = document.createElement("span");
+    txt.className = "files-job-text";
+    txt.textContent = jobText(job);
+    row.append(bar, txt);
+    if (jobRunning(job)) {
+      const x = document.createElement("button");
+      x.type = "button";
+      x.className = "ghost";
+      x.dataset.action = "files-job-cancel";
+      x.textContent = t("files.jobCancel");
+      x.onclick = () => { void cancelJob(job.id); };
+      row.appendChild(x);
+    }
+    box.appendChild(row);
+  }
+  return box;
+}
+
+/** The add-on's card: what it is, its licence and source, its version and
+ *  digest, and the gesture (install · update · remove). `compact`: the tab's
+ *  line; else Settings' row. */
+function addonCard(a: AddonState, compact: boolean): HTMLElement {
+  const box = document.createElement("div");
+  box.className = "files-box files-addon";
+  box.dataset.addon = a.id;
+  box.dataset.installed = a.installed ? "1" : "0";
+  const head = document.createElement("div");
+  const b = document.createElement("b");
+  b.textContent = `${a.name} ${a.installed?.version ?? a.version ?? ""}`.trim();
+  head.append(b, document.createTextNode(` · ${a.project} · ${t("files.addonLicence", { licence: a.licence })}`));
+  box.appendChild(head);
+  const facts = document.createElement("small");
+  facts.className = "files-addon-facts";
+  facts.textContent = a.installed
+    ? t("files.addonHere", { version: a.installed.version, path: a.installed.path })
+    : a.available
+      ? t("files.addonWillCome", { version: a.version ?? "", size: formatBytes(a.size ?? 0), platform: a.platform,
+          sha: (a.sha256 ?? "").slice(0, 12), source: a.source })
+      : t("files.addonNoBuild", { platform: a.platform });
+  box.appendChild(facts);
+  if (!compact) {
+    const src = document.createElement("small");
+    src.className = "files-addon-facts";
+    src.textContent = t("files.addonSource", { source: a.source, author: a.author,
+      does: t(`files.addonDoes.${a.id}`, undefined, a.does) });
+    box.appendChild(src);
+  }
+  const busy = [...bgJobs.values()].find((j) => j.kind === "addon" && jobRunning(j));
+  const row = document.createElement("div");
+  row.className = "files-addon-gestures";
+  const install = async (): Promise<void> => {
+    const job = await startJob({ kind: "addon", id: a.id }, `${a.name} ${a.version ?? ""}`.trim());
+    if (!job) return;
+    renderStorage();
+    const end = await job.done;
+    await loadAddons(true);
+    optPlans.clear();
+    if (end.state === "done") { const m = t("files.addonInstalled", { name: a.name, version: a.version ?? "" }); toast(m); logInfo(m); }
+    else logWarn(jobText(end));
+    renderStorage();
+    paintAddonsSettings();
+  };
+  if (a.available && (!a.installed || a.upgradable)) {
+    const go = document.createElement("button");
+    go.type = "button";
+    go.className = a.installed ? "ghost" : "primary";
+    go.dataset.action = a.installed ? "addon-update" : "addon-install";
+    go.textContent = a.installed ? t("files.addonUpdate", { version: a.version ?? "" }) : t("files.addonInstall");
+    go.disabled = !!busy;
+    go.onclick = () => { void install(); };
+    row.appendChild(go);
+  }
+  if (a.installed && !compact) {
+    const rm = document.createElement("button");
+    rm.type = "button";
+    rm.className = "ghost";
+    rm.dataset.action = "addon-remove";
+    rm.textContent = t("files.addonRemove");
+    rm.onclick = async () => {
+      if (!confirmInline(rm, t("files.addonRemoveAsk"))) return;
+      try {
+        await fetch(`${await bridgeUrl()}/jobs`, { method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ kind: "addon", id: a.id, step: "remove" }) });
+      } catch { toast(t("storage.bridgeDown")); }
+      await loadAddons(true);
+      optPlans.clear();
+      logInfo(t("files.addonRemoved", { name: a.name }));
+      paintAddonsSettings();
+      renderStorage();
+    };
+    row.appendChild(rm);
+  }
+  if (row.childElementCount) box.appendChild(row);
+  const rows = jobRows(["addon"]);
+  if (rows && busy) box.appendChild(rows);
+  return box;
+}
+
+/** Settings › Advanced › Add-ons: each add-on with its licence, source,
+ *  version — the credits of what EMStudio calls and does not ship. */
+function paintAddonsSettings(): void {
+  const host = document.getElementById("set-addons");
+  if (!host) return;
+  host.textContent = "";
+  host.appendChild(tabLead(t("files.addonsAsking"), "settings-hint"));
+  void loadAddons(true).then((list) => {
+    host.textContent = "";
+    if (!list) { host.appendChild(tabLead(addonsState?.error ?? t("storage.bridgeDown"), "settings-hint")); return; }
+    for (const a of list) host.appendChild(addonCard(a, false));
+    host.appendChild(tabLead(t("files.addonsWhere", { folder: list[0]?.folder.replace(/[/\\][^/\\]+$/, "") ?? "" }), "settings-hint"));
+  });
+}
 
 function filesOptimizeTab(win: Win, listing: FsListing): HTMLElement {
   const box = document.createElement("div");
@@ -33817,128 +34103,162 @@ function filesOptimizeTab(win: Win, listing: FsListing): HTMLElement {
   const chosen = filesChosen(win, listing);
   const models = chosen.filter((e) => isOptimizable(e.name));
 
-  // 1 · variants — experimental
+  // 1 · variants — on
   const sec = document.createElement("section");
   sec.className = "files-sec";
   const h = document.createElement("div");
   h.className = "files-sec-h";
-  h.innerHTML = "";
   const hb = document.createElement("b");
   hb.textContent = t("files.optVariants");
   const pill = document.createElement("span");
-  pill.className = "files-pill exp";
-  pill.textContent = t("files.experimental");
+  pill.className = "files-pill on";
+  pill.textContent = t("files.on");
   h.append(hb, pill);
   sec.appendChild(h);
-  const on = localStorage.getItem(OPT_EXPERIMENTAL_KEY) === "1";
-  const sw = document.createElement("label");
-  sw.className = "files-switch";
-  const cb = document.createElement("input");
-  cb.type = "checkbox";
-  cb.checked = on;
-  cb.dataset.action = "files-opt-experimental";
-  cb.onchange = () => { try { localStorage.setItem(OPT_EXPERIMENTAL_KEY, cb.checked ? "1" : "0"); } catch { /* off */ } renderStorage(); };
-  const swt = document.createElement("span");
-  swt.textContent = t("files.optSwitch");
-  sw.append(cb, swt);
-  sec.appendChild(sw);
-  sec.appendChild(tabLead(t("files.optWarning"), "files-hint files-warn"));
   box.appendChild(sec);
-  if (on) {
-    const dest = filesPref(win, "opt") ?? "web";
-    const pre = OPTIMIZE_PRESETS.find((p) => p.id === dest) ?? OPTIMIZE_PRESETS[0];
-    const chips = document.createElement("div");
-    chips.className = "files-chips";
-    for (const p of OPTIMIZE_PRESETS) {
-      const c = document.createElement("button");
-      c.type = "button";
-      c.className = "files-chip";
-      c.dataset.opt = p.id;
-      c.setAttribute("aria-pressed", String(p.id === pre.id));
-      c.textContent = t(p.labelKey);
-      c.title = t("files.optPresetHint", { pct: String(Math.round(p.ratio * 100)), suffix: `@${p.lod}-${p.destination}` });
-      c.onclick = () => { setFilesPref(win, "opt", p.id === "web" ? null : p.id); renderStorage(); };
-      chips.appendChild(c);
-    }
-    sec.appendChild(chips);
-    const kv = document.createElement("dl");
-    kv.className = "files-kv";
-    for (const [k, v] of [[t("files.optGeometry"), t("files.optGeometryIs", { pct: String(Math.round(pre.ratio * 100)) })],
-                          [t("files.optTextures"), t("files.optTexturesAre")],
-                          [t("files.optWhere"), t("files.optWhereIs")]]) {
-      const dt = document.createElement("dt"); dt.textContent = k;
-      const dd = document.createElement("dd"); dd.textContent = v;
-      kv.append(dt, dd);
-    }
-    sec.appendChild(kv);
-    if (!models.length) {
-      sec.appendChild(tabLead(chosen.length ? tn("files.optNoModels", chosen.length) : t("files.optChoose"), "files-lead"));
-    } else {
-      const key = `${pre.id}|${models.map((m) => m.path).join("|")}`;
-      const plan = optPlans.get(key);
-      const slot = document.createElement("div");
-      sec.appendChild(slot);
-      const paint = (pl: OptPlan): void => {
-        slot.textContent = "";
-        if (pl.error) { slot.appendChild(tabLead(pl.error, "files-hint files-warn")); return; }
+  const dest = filesPref(win, "opt") ?? "web";
+  const pre = OPTIMIZE_PRESETS.find((p) => p.id === dest) ?? OPTIMIZE_PRESETS[0];
+  const chips = document.createElement("div");
+  chips.className = "files-chips";
+  for (const p of OPTIMIZE_PRESETS) {
+    const c = document.createElement("button");
+    c.type = "button";
+    c.className = "files-chip";
+    c.dataset.opt = p.id;
+    c.setAttribute("aria-pressed", String(p.id === pre.id));
+    c.textContent = t(p.labelKey);
+    c.title = t("files.optPresetHint", { pct: String(Math.round(p.ratio * 100)), suffix: `@${p.lod}-${p.destination}` });
+    c.onclick = () => { setFilesPref(win, "opt", p.id === "web" ? null : p.id); renderStorage(); };
+    chips.appendChild(c);
+  }
+  sec.appendChild(chips);
+
+  // the engine: the destination's default, why, and the choice
+  const choice = readEngineChoice();
+  const engine = engineFor(pre, choice);
+  const eng = document.createElement("div");
+  eng.className = "files-engine";
+  eng.dataset.engine = engine;
+  const el = document.createElement("label");
+  el.textContent = t("files.optEngine") + " ";
+  const sel = document.createElement("select");
+  sel.dataset.action = "files-opt-engine";
+  for (const e of pre.engines) {
+    const o = document.createElement("option");
+    o.value = e;
+    o.textContent = t(`files.engine.${e}`) + (ENGINES_TODAY.has(e) ? "" : ` — ${t("files.engineLater")}`);
+    o.selected = e === engine;
+    sel.appendChild(o);
+  }
+  sel.onchange = () => {
+    const next = { ...readEngineChoice(), [pre.id]: sel.value };
+    if (sel.value === pre.engine) delete next[pre.id];
+    try { localStorage.setItem(OPT_ENGINE_KEY, JSON.stringify(next)); } catch { /* storage off */ }
+    renderStorage();
+  };
+  el.appendChild(sel);
+  eng.appendChild(el);
+  eng.appendChild(tabLead(engine === pre.engine ? t(pre.whyKey) : t("files.optEngineChanged", { engine: t(`files.engine.${engine}`), default: t(`files.engine.${pre.engine}`) }), "files-hint"));
+  sec.appendChild(eng);
+
+  const kv = document.createElement("dl");
+  kv.className = "files-kv";
+  const textures = pre.ktx2 ? t("files.optTexturesKtx2", { px: String(pre.texturePx) }) : t("files.optTexturesAre");
+  for (const [k, v] of [[t("files.optGeometry"), t("files.optGeometryIs", { pct: String(Math.round(pre.ratio * 100)) })],
+                        [t("files.optTextures"), textures],
+                        [t("files.optCompression"), pre.meshopt ? t("files.optCompressionMeshopt") : t("files.optCompressionNone")],
+                        [t("files.optWhere"), t("files.optWhereIs")]]) {
+    const dt = document.createElement("dt"); dt.textContent = k;
+    const dd = document.createElement("dd"); dd.textContent = v;
+    kv.append(dt, dd);
+  }
+  sec.appendChild(kv);
+
+  if (!ENGINES_TODAY.has(engine)) {
+    sec.appendChild(tabLead(t("files.optEngineNotYet", { engine: t(`files.engine.${engine}`) }), "files-hint files-warn"));
+  } else if (!models.length) {
+    sec.appendChild(tabLead(chosen.length ? tn("files.optNoModels", chosen.length) : t("files.optChoose"), "files-lead"));
+  } else {
+    const key = `${pre.id}|${models.map((m) => m.path).join("|")}`;
+    const plan = optPlans.get(key);
+    const slot = document.createElement("div");
+    sec.appendChild(slot);
+    const paint = (pl: OptPlan): void => {
+      slot.textContent = "";
+      if (pl.error) { slot.appendChild(tabLead(pl.error, "files-hint files-warn")); return; }
+      if (pl.tool) {
         const tool = document.createElement("div");
         tool.className = "files-box";
-        tool.dataset.tool = pl.tool ? "1" : "0";
-        tool.textContent = pl.tool ? t("files.optTool", { version: pl.tool.version || "gltfpack", path: pl.tool.path })
-          : t("files.optNoTool");
+        tool.dataset.tool = "1";
+        tool.textContent = t("files.optTool", { version: pl.tool.version || "gltfpack", path: pl.tool.path });
         slot.appendChild(tool);
-        const table = document.createElement("table");
-        table.className = "files-prev";
-        const hr = document.createElement("tr");
-        for (const k of ["files.optSource", "files.optVariant"]) { const th = document.createElement("th"); th.textContent = t(k); hr.appendChild(th); }
-        table.appendChild(hr);
-        for (const o of pl.outputs) {
-          const tr = document.createElement("tr");
-          if (o.exists || o.error) tr.className = "done";
-          const a = document.createElement("td"); a.className = "fn"; a.textContent = baseName(o.source); a.title = o.source;
-          const b = document.createElement("td"); b.className = "fn";
-          b.textContent = o.error ? o.error : o.exists ? t("files.optExists", { name: o.name ?? "" }) : `${o.name}`;
-          b.title = o.path ?? o.error ?? "";
-          tr.append(a, b);
-          table.appendChild(tr);
-        }
-        slot.appendChild(table);
-        const where = pl.outputs.find((o) => o.path)?.path;
-        if (where) slot.appendChild(tabLead(t("files.optInto", { dir: projectRelative(paths.dirname(where)) + "/" }), "files-hint"));
-        const unstamped = models.filter((m) => !filesStamped(listing, m.path));
-        if (unstamped.length) slot.appendChild(tabLead(tn("files.optStampFirst", unstamped.length), "files-hint files-warn"));
-        const todo = pl.outputs.filter((o) => o.path && !o.exists && !o.error && !unstamped.some((u) => u.path === o.source));
-        const go = document.createElement("button");
-        go.type = "button";
-        go.className = "primary";
-        go.dataset.action = "files-optimize";
-        go.textContent = optimizing ? t("files.optWorking") : tn("files.optGo", todo.length);
-        go.disabled = optimizing || !pl.tool || !todo.length;
-        go.onclick = () => { void runOptimize(win, pre, todo.map((o) => o.source)); };
-        slot.appendChild(go);
-        slot.appendChild(tabLead(t("files.optBorn"), "files-hint"));
-      };
-      if (plan) paint(plan);
-      else {
-        slot.appendChild(tabLead(t("files.optAsking"), "files-hint"));
-        void (async () => {
-          let pl: OptPlan;
-          try {
-            const r = await fetch(`${await bridgeUrl()}/fs/optimize`, {
-              method: "POST", headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ sources: models.map((m) => m.path), lod: pre.lod, destination: pre.destination,
-                                     ratio: pre.ratio, dry_run: true }) });
-            const j = await r.json().catch(() => ({})) as { ok?: boolean; error?: string; tool?: { path: string; version: string } | null; outputs?: OptOut[] };
-            pl = r.status === 404 ? { at: Date.now(), tool: null, outputs: [], error: t("files.optOldBridge") }
-              : j.ok ? { at: Date.now(), tool: j.tool ?? null, outputs: j.outputs ?? [] }
-              : { at: Date.now(), tool: null, outputs: [], error: String(j.error ?? r.status) };
-          } catch { pl = { at: Date.now(), tool: null, outputs: [], error: t("storage.bridgeDown") }; }
-          optPlans.set(key, pl);
-          if (slot.isConnected) paint(pl);
-        })();
+      } else {
+        // the add-on, downloaded on request
+        slot.appendChild(tabLead(t("files.optNoTool"), "files-hint"));
+        const a = addonsState?.list?.find((x) => x.id === "gltfpack");
+        if (a) slot.appendChild(addonCard(a, true));
+        else void loadAddons().then((list) => { if (list && slot.isConnected) renderStorage(); });
       }
+      const table = document.createElement("table");
+      table.className = "files-prev";
+      const hr = document.createElement("tr");
+      for (const k of ["files.optSource", "files.optVariant"]) { const th = document.createElement("th"); th.textContent = t(k); hr.appendChild(th); }
+      table.appendChild(hr);
+      for (const o of pl.outputs) {
+        const tr = document.createElement("tr");
+        if (o.exists || o.error) tr.className = "done";
+        const a = document.createElement("td"); a.className = "fn"; a.textContent = baseName(o.source); a.title = o.source;
+        const b = document.createElement("td"); b.className = "fn";
+        b.textContent = o.error ? o.error : o.exists ? t("files.optExists", { name: o.name ?? "" }) : `${o.name}`;
+        b.title = o.path ?? o.error ?? "";
+        tr.append(a, b);
+        table.appendChild(tr);
+      }
+      slot.appendChild(table);
+      const where = pl.outputs.find((o) => o.path)?.path;
+      if (where) slot.appendChild(tabLead(t("files.optInto", { dir: projectRelative(paths.dirname(where)) + "/" }), "files-hint"));
+      if (pl.command) slot.appendChild(tabLead(t("files.optCommand", { cmd: `gltfpack ${pl.command}` }), "files-hint files-cmd"));
+      const unstamped = models.filter((m) => !filesStamped(listing, m.path));
+      if (unstamped.length) slot.appendChild(tabLead(tn("files.optStampFirst", unstamped.length), "files-hint files-warn"));
+      const todo = pl.outputs.filter((o) => o.path && !o.exists && !o.error && !unstamped.some((u) => u.path === o.source));
+      const mb = variantMemoryMb(Math.max(0, ...todo.map((o) => o.bytes_in ?? 0)));
+      if (todo.length) slot.appendChild(tabLead(t("files.optMemory", { mb: String(mb) }), "files-hint"));
+      const running = [...bgJobs.values()].some((j) => j.kind === "variants" && jobRunning(j));
+      const go = document.createElement("button");
+      go.type = "button";
+      go.className = "primary";
+      go.dataset.action = "files-optimize";
+      go.textContent = tn("files.optGo", todo.length);
+      go.disabled = !pl.tool || !todo.length;
+      go.onclick = () => { void runOptimize(win, pre, todo.map((o) => o.source), mb); };
+      slot.appendChild(go);
+      if (running) slot.appendChild(tabLead(t("files.optParallel"), "files-hint"));
+      slot.appendChild(tabLead(t("files.optBorn"), "files-hint"));
+    };
+    if (plan) paint(plan);
+    else {
+      slot.appendChild(tabLead(t("files.optAsking"), "files-hint"));
+      void (async () => {
+        let pl: OptPlan;
+        try {
+          const r = await fetch(`${await bridgeUrl()}/fs/optimize`, {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ sources: models.map((m) => m.path), preset: pre.id, lod: pre.lod, destination: pre.destination,
+                                   ratio: pre.ratio, texture_px: pre.texturePx, ktx2: pre.ktx2, meshopt: pre.meshopt,
+                                   quantize: pre.meshopt, dry_run: true }) });
+          const j = await r.json().catch(() => ({})) as { ok?: boolean; error?: string; tool?: OptTool | null; outputs?: OptOut[]; command?: string };
+          pl = r.status === 404 ? { at: Date.now(), tool: null, outputs: [], error: t("files.optOldBridge") }
+            : j.ok ? { at: Date.now(), tool: j.tool ?? null, outputs: j.outputs ?? [], command: j.command }
+            : { at: Date.now(), tool: null, outputs: [], error: String(j.error ?? r.status) };
+          if (j.ok && !j.tool) await loadAddons();
+        } catch { pl = { at: Date.now(), tool: null, outputs: [], error: t("storage.bridgeDown") }; }
+        optPlans.set(key, pl);
+        if (slot.isConnected) paint(pl);
+      })();
     }
   }
+  const vrows = jobRows(["variants"]);
+  if (vrows) sec.appendChild(vrows);
 
   // 2 · .3tz — on
   const pk = document.createElement("section");
@@ -33953,11 +34273,16 @@ function filesOptimizeTab(win: Win, listing: FsListing): HTMLElement {
   ph.append(pb, pp);
   pk.appendChild(ph);
   const isTileset = !listing.roots && listing.entries.some((e) => e.type === "file" && e.name === "tileset.json");
-  if (isTileset) pk.appendChild(pack3tzButton(listing.path));
-  else pk.appendChild(tabLead(t("files.optPackWhere"), "files-hint"));
+  if (isTileset) {
+    pk.appendChild(pack3tzButton(listing.path, { viaBridge: true }));
+    if (!filesFolderStamped(listing)) pk.appendChild(tabLead(t("files.optPackStampFirst"), "files-hint files-warn"));
+    pk.appendChild(tabLead(t("files.optPackBorn"), "files-hint"));
+  } else pk.appendChild(tabLead(t("files.optPackWhere"), "files-hint"));
+  const prows = jobRows(["pack3tz"]);
+  if (prows) pk.appendChild(prows);
   box.appendChild(pk);
 
-  // 3 · a tileset from a mesh — announced
+  // 3 · a tileset from a mesh — announced, its switch ready for round 2
   const ts = document.createElement("section");
   ts.className = "files-sec";
   const th = document.createElement("div");
@@ -33969,62 +34294,147 @@ function filesOptimizeTab(win: Win, listing: FsListing): HTMLElement {
   tp.textContent = t("files.announced");
   th.append(tb, tp);
   ts.appendChild(th);
-  ts.appendChild(tabLead(t("files.optTilesToday"), "files-hint"));
+  const ton = localStorage.getItem(TILES_EXPERIMENTAL_KEY) === "1";
+  const sw = document.createElement("label");
+  sw.className = "files-switch";
+  const cb = document.createElement("input");
+  cb.type = "checkbox";
+  cb.checked = ton;
+  cb.dataset.action = "files-tiles-experimental";
+  cb.onchange = () => { try { localStorage.setItem(TILES_EXPERIMENTAL_KEY, cb.checked ? "1" : "0"); } catch { /* off */ } renderStorage(); };
+  const swt = document.createElement("span");
+  swt.textContent = t("files.optTilesSwitch");
+  sw.append(cb, swt);
+  ts.appendChild(sw);
+  ts.appendChild(tabLead(t("files.optTilesComing"), "files-hint"));
+  ts.appendChild(tabLead(t("files.optTilesEngines"), "files-hint"));
+  ts.appendChild(tabLead(ton ? t("files.optTilesSwitchOn") : t("files.optTilesToday"), "files-hint"));
   box.appendChild(ts);
   return box;
 }
 
-/** Run gltfpack on the bridge, then stamp each variant as DERIVED from its
- *  source (step `lod_generation`, technique `decimation`, the parameters and
- *  the tool said): the variant is born stamped, in `versions/`. */
-async function runOptimize(win: Win, pre: OptimizePreset, sources: string[]): Promise<void> {
-  if (optimizing || !sources.length) return;
-  optimizing = true;
-  renderStorage();
-  toast(tn("files.optStarted", sources.length));
-  try {
-    const r = await fetch(`${await bridgeUrl()}/fs/optimize`, {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ sources, lod: pre.lod, destination: pre.destination, ratio: pre.ratio }) });
-    const j = await r.json().catch(() => ({})) as { ok?: boolean; error?: string; tool?: { version: string }; outputs?: OptOut[];
-      parameters?: Record<string, unknown> };
-    if (!j.ok) { toast(t("files.optFailed", { why: String(j.error ?? r.status) })); return; }
-    const written = (j.outputs ?? []).filter((o) => o.state === "written" && o.path);
-    for (const o of (j.outputs ?? []).filter((x) => x.state === "error")) logWarn(`${baseName(o.source)}: ${o.error}`);
-    let stamped = 0;
-    const me = currentIdentity();
-    for (const o of written) {
-      const src = await readStamp(stampPathFor(o.source)).catch(() => null);
-      if (!src || !me?.orcid) continue;
-      const listing = await fsList(paths.dirname(o.path!));
-      const entry = listing.entries.find((e) => e.path === o.path);
-      if (!entry) continue;
-      const draft = newDraft([{ ...outputFrom(entry), digest: o.sha256 }]);
-      draft.origin = false;
-      draft.kind = "lod_generation";
-      draft.technique = "decimation";
-      draft.parameters = { ...(j.parameters ?? {}), tool: "gltfpack" };
-      draft.software = [{ name: "gltfpack", version: (j.tool?.version ?? "").replace(/^gltfpack\s*/i, "") }];
-      draft.operator = { id: `https://orcid.org/${me.orcid}`, label: [me.name, me.surname].filter(Boolean).join(" ") };
-      const n = new Date();
-      draft.at = `${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, "0")}-${String(n.getDate()).padStart(2, "0")}`;
-      draft.inputs = [{ resource_id: src.self.resource_id, digest: src.self.digest ?? "", label: baseName(o.source), path: o.source }];
-      const out = await emitDraft(draft, { graph_id: store?.doc?.graph?.graph_id as string | undefined });
-      if (out.written.length) { stamped++; landEmission(draft, out); }
-    }
-    const msg = tn("files.optDone", written.length, { stamped: String(stamped) });
-    toast(msg);
-    logInfo(msg + " — " + written.map((o) => `${baseName(o.path!)} (${formatBytes(o.bytes ?? 0)}, ${o.seconds}s)`).join(", "));
-    if (written.length > stamped) logWarn(t("files.optNotStamped", { n: String(written.length - stamped) }));
-    optPlans.clear();
-    forgetProjectTrees();
-    if (written[0]?.path) { await storageGoChecked(win, paths.dirname(written[0].path)); setStorageSelected(win, written[0].path); }
-  } catch (e) {
-    toast(t("files.optFailed", { why: String((e as Error).message) }));
-  } finally {
-    optimizing = false;
-    renderStorage();
+/** Is the tileset folder of this listing stamped (its own sidecar beside it)? */
+function filesFolderStamped(listing: FsListing): boolean {
+  return !!folderStampOf(listing.path);
+}
+const folderStamps = new Map<string, { self: { resource_id: string; digest?: string } } | null>();
+function folderStampOf(folder: string): { self: { resource_id: string; digest?: string } } | null {
+  if (!folderStamps.has(folder)) {
+    folderStamps.set(folder, null);
+    void readStamp(stampPathFor(folder)).then((st) => {
+      if (st) { folderStamps.set(folder, st as { self: { resource_id: string; digest?: string } }); renderStorage(); }
+    }).catch(() => undefined);
   }
+  return folderStamps.get(folder) ?? null;
+}
+
+/** A file just made by a job, stamped as DERIVED from its stamped source —
+ *  the act said (kind, technique, parameters, the tool and its version) — and
+ *  landed in the Chain. → true when the stamp was written. */
+async function stampDerived(source: string, out: { path: string; sha256?: string }, act: { kind: string; technique: string;
+    parameters: Record<string, unknown>; software: { name: string; version: string }[] }): Promise<boolean> {
+  const me = currentIdentity();
+  if (!me?.orcid) return false;
+  const src = await readStamp(stampPathFor(source)).catch(() => null);
+  if (!src) return false;
+  const listing = await fsList(paths.dirname(out.path));
+  const entry = listing.entries.find((e) => e.path === out.path);
+  if (!entry) return false;
+  const draft = newDraft([{ ...outputFrom(entry), digest: out.sha256 }]);
+  draft.origin = false;
+  draft.kind = act.kind;
+  draft.technique = act.technique;
+  draft.parameters = act.parameters;
+  draft.software = act.software;
+  draft.operator = { id: `https://orcid.org/${me.orcid}`, label: [me.name, me.surname].filter(Boolean).join(" ") };
+  const n = new Date();
+  draft.at = `${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, "0")}-${String(n.getDate()).padStart(2, "0")}`;
+  draft.inputs = [{ resource_id: src.self.resource_id, digest: src.self.digest ?? "", label: baseName(source), path: source }];
+  const emitted = await emitDraft(draft, { graph_id: store?.doc?.graph?.graph_id as string | undefined });
+  if (!emitted.written.length) return false;
+  landEmission(draft, emitted);
+  return true;
+}
+
+/** A variant registered as a VERSION of its asset in the open graph (s3Dgraphy's
+ *  `api.add_version` through the bridge): the version resource and its
+ *  `lod_generation` step, inserted as one step of undo. → why not, or null. */
+async function registerVersion(o: OptOut, pre: OptimizePreset, params: Record<string, unknown>, toolVersion: string): Promise<string | null> {
+  if (!store?.doc) return t("files.optNoGraph");
+  const me = currentIdentity();
+  const rel = (abs: string) => {
+    const dir = currentFilePath ? paths.dirname(currentFilePath) : "";
+    return dir && paths.isInside(dir, abs) ? paths.relativeTo(currentFilePath!, abs) : abs;
+  };
+  const master = filesUses(o.source).find((f) => f.node_type === "resource")?.id;
+  const f = o.facts;
+  const n = new Date();
+  const r = await fetch(`${await bridgeUrl()}/graph/add-version`, {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ doc: store.doc, source: o.source, em_json: currentFilePath ?? "", master_id: master ?? "",
+      locator: rel(o.path!), sha256: o.sha256, bytes: o.bytes, level: pre.lod, destination: pre.destination, use: pre.use,
+      measures: f ? { texture_count: f.texture_count, texture_side_px: f.texture_side_px ?? undefined } : undefined,
+      primitives: f ? { faces: f.faces, vertices: f.vertices } : undefined,
+      parameters: params, technique: "decimation", tool: "gltfpack",
+      software: [{ name: "gltfpack", version: toolVersion }],
+      author: me?.orcid ? `https://orcid.org/${me.orcid}` : undefined,
+      at: `${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, "0")}-${String(n.getDate()).padStart(2, "0")}` }) });
+  const j = await r.json().catch(() => ({})) as { ok?: boolean; registered?: boolean; reason?: string; error?: string;
+    nodes?: EmNode[]; edges?: EmEdge[]; version_id?: string; revises?: string | null };
+  if (r.status === 404) return t("files.optOldBridge");
+  if (!j.ok) return String(j.error ?? r.status);
+  if (!j.registered) return j.reason ?? "";
+  const st = store;
+  st.batch(() => {
+    for (const nd of j.nodes ?? []) if (!st.node(nd.id)) st.addNode(nd);
+    for (const e of j.edges ?? []) st.addEdge(e.source, e.target, String(e.edge_type ?? ""), undefined, e.id);
+  });
+  logInfo(t(j.revises ? "files.optRevision" : "files.optVersion", { name: baseName(o.path!), level: pre.lod }), j.version_id ? [j.version_id] : undefined);
+  return null;
+}
+
+/** gltfpack as a JOB of the bridge, then each variant: stamped as DERIVED from
+ *  its source (step `lod_generation`, technique `decimation`, the parameters
+ *  and the tool said), registered as a version of its asset, in the Chain. The
+ *  tab and the status line follow the job; EMStudio stays usable. */
+async function runOptimize(win: Win, pre: OptimizePreset, sources: string[], estimateMb: number): Promise<void> {
+  if (!sources.length) return;
+  const job = await startJob({ kind: "variants", sources, preset: pre.id, lod: pre.lod, destination: pre.destination,
+    ratio: pre.ratio, texture_px: pre.texturePx, ktx2: pre.ktx2, meshopt: pre.meshopt, quantize: pre.meshopt,
+    estimate_mb: estimateMb }, `gltfpack · ${t(pre.labelKey)}`);
+  if (!job) return;
+  toast(tn("files.optStarted", sources.length));
+  renderStorage();
+  const end = await job.done;
+  const res = (end.result ?? {}) as { tool?: { version: string }; outputs?: OptOut[]; parameters?: Record<string, unknown> };
+  if (end.state === "cancelled") { const m = t("files.jobCancelled", { what: end.label }); toast(m); logInfo(m); return; }
+  if (end.state !== "done") { toast(t("files.optFailed", { why: end.error ?? "" })); logWarn(jobText(end)); return; }
+  const written = (res.outputs ?? []).filter((o) => o.state === "written" && o.path);
+  for (const o of (res.outputs ?? []).filter((x) => x.state === "error")) logWarn(`${baseName(o.source)}: ${o.error}`);
+  const version = (res.tool?.version ?? "").replace(/^gltfpack\s*/i, "");
+  const params = { ...(res.parameters ?? {}), tool: "gltfpack" };
+  let stamped = 0, registered = 0;
+  for (const o of written) {
+    try {
+      if (await stampDerived(o.source, { path: o.path!, sha256: o.sha256 }, { kind: "lod_generation", technique: "decimation",
+          parameters: params, software: [{ name: "gltfpack", version }] })) stamped++;
+    } catch (e) { logWarn(`${baseName(o.path!)}: ${(e as Error).message}`); }
+    try {
+      const why = await registerVersion(o, pre, params, version);
+      if (why === null) registered++; else logWarn(t("files.optNotRegistered", { name: baseName(o.path!), why }));
+    } catch (e) { logWarn(`${baseName(o.path!)}: ${(e as Error).message}`); }
+  }
+  const msg = tn("files.optDone", written.length, { stamped: String(stamped), registered: String(registered) });
+  toast(msg);
+  logInfo(msg + " — " + written.map((o) => `${baseName(o.path!)} (${formatBytes(o.bytes ?? 0)}, ${o.seconds}s)`).join(", "));
+  if (written.length > stamped) logWarn(t("files.optNotStamped", { n: String(written.length - stamped) }));
+  optPlans.clear();
+  forgetProjectTrees();
+  if (written[0]?.path && win && storagePath(win) !== null) {
+    await storageGoChecked(win, paths.dirname(written[0].path));
+    setStorageSelected(win, written[0].path);
+  }
+  renderStorage();
 }
 
 // ── Stanza (AR15) ───────────────────────────────────────────────────────────
@@ -35350,14 +35760,16 @@ async function doStamp(win: Win): Promise<void> {
 /** RISORSA-FILE · «Impacchetta un tileset in .3tz». The desktop writes it (the
  *  bridge beside it, 3DSC's writer, the canonical profile); the web reads a
  *  .3tz and does not write one, and says where it is done. */
-function pack3tzButton(folder: string): HTMLElement {
+function pack3tzButton(folder: string, opts: { viaBridge?: boolean } = {}): HTMLElement {
   const box = document.createElement("div");
   box.className = "stamp-report-ask";
   const b = document.createElement("button");
   b.className = "ghost";
   b.dataset.action = "pack-3tz";
   b.textContent = t("pack3tz.button");
-  const here = isTauri();
+  // MICRO-OTTIMIZZA-1 · in the File window the bridge serves the folder, and
+  // it is the bridge that writes: the browser of the dev stack packs too
+  const here = isTauri() || !!opts.viaBridge;
   b.disabled = !here || pack3tzBusy;
   b.title = here ? t("pack3tz.hint") : t("pack3tz.desktopOnly");
   b.onclick = () => { void packTilesetFlow(folder); };
@@ -35382,7 +35794,15 @@ async function packTilesetFlow(folder: string): Promise<import("./pack3tz").Pack
   renderStorage();
   toast(t("pack3tz.working", { name: baseName(folder) }));
   try {
-    const out = await packTileset(await bridgeUrl(), folder);
+    // MICRO-OTTIMIZZA-1 · a job of the bridge (level 43): the page goes on
+    // while it packs; an older bridge packs in the one request as before
+    let out: import("./pack3tz").PackResult;
+    const job = await bridgeLevelAtLeast(43) ? await startJob({ kind: "pack3tz", folder }, `.3tz · ${baseName(folder)}`) : null;
+    if (job) {
+      const end = await job.done;
+      out = end.state === "done" ? (end.result as import("./pack3tz").PackResult)
+        : { ok: false, error: end.state === "cancelled" ? t("files.jobCancelled", { what: end.label }) : end.error ?? "" };
+    } else out = await packTileset(await bridgeUrl(), folder);
     if (!out.ok) { toast(t("pack3tz.failed", { detail: out.error ?? "" })); return out; }
     const canon = out.canonical?.canonical === true;
     const msg = t(out.state === "same" ? "pack3tz.same" : "pack3tz.done", {
@@ -35399,6 +35819,19 @@ async function packTilesetFlow(folder: string): Promise<import("./pack3tz").Pack
       const ids = landPack(storeGraph(store), rel(folder), { ...out, path: rel(out.path!) },
         { folder: baseName(folder), archive: baseName(out.path!) });
       select(ids.archiveId);
+    }
+    // MICRO-OTTIMIZZA-1 · the archive born stamped as DERIVED from its folder
+    // (act `packing`, the writer and its profile said), and in the Chain
+    if ((out.state === "written" || out.state === "same") && out.path
+        && !(await readStamp(stampPathFor(out.path)).catch(() => null))) {
+      const stamped = await stampDerived(folder, { path: out.path, sha256: out.sha256 }, { kind: "packing", technique: "3tz",
+        parameters: { profile: "dtcstamp 3tz", entries: out.entries ?? null, canonical: out.canonical?.canonical ?? null,
+                      content_digest: out.content_digest?.digest ?? null },
+        software: [{ name: "dtcstamp.write_canonical_3tz", version: String((out as { writer?: { version?: string } }).writer?.version ?? "") }] })
+        .catch(() => false);
+      if (stamped) logInfo(t("pack3tz.stamped", { name: baseName(out.path) }));
+      else logWarn(t("pack3tz.notStamped", { name: baseName(out.path) }));
+      folderStamps.delete(folder);
     }
     return out;
   } finally {
@@ -40074,8 +40507,27 @@ function drawViewerCollection(
 
 /** One item, drawn as itself. The image/PDF split is one element and nothing
  *  else, which is the whole point of treating them the same. */
+/** MICRO-OTTIMIZZA-1 · the 3D view a Viewer stage holds, ended when the stage
+ *  is drawn again (a WebGL context per stage, never one per repaint) */
+const stage3d = new WeakMap<HTMLElement, { dispose(): void }>();
 function viewerItemElement(item: CollectionItem, stage: HTMLElement): HTMLElement {
-  if (!isDecodable(item)) {
+  stage3d.get(stage)?.dispose();
+  stage3d.delete(stage);
+  // MICRO-OTTIMIZZA-1 · a model of the disk (a variant of gltfpack, a web
+  // version of EM Tools, an obj with its mtl) is drawn as itself, orbitable,
+  // with the decoders of the Space: meshopt, KTX2, Draco
+  if (item.path && /\.(glb|gltf|obj)$/i.test(item.path)) {
+    const host = document.createElement("div");
+    host.className = "viewer-media viewer-3d";
+    void fsUrlFor(item.path).then((u) => {
+      if (!host.isConnected && !stage.contains(host)) return;
+      stage3d.set(stage, mount3dViewer(host, u, { label: item.title }));
+    });
+    return host;
+  }
+  // a TIFF is an image no browser draws; any other kind of file is simply not
+  // previewable (it said «TIFF» for a glb before MICRO-OTTIMIZZA-1)
+  if (!isDecodable(item) && item.kind !== "other") {
     // A .tif IS an image and belongs in the collection; no browser draws one.
     // Saying that, with the way out, beats a broken-image icon that reads as
     // "the file is missing" when the file is perfectly fine.

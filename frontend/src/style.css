@@ -5846,6 +5846,15 @@ object.viewer-media {
   width: 100%;
   height: 100%;
 }
+/* MICRO-OTTIMIZZA-1 · a model takes the stage too, orbitable */
+.viewer-media.viewer-3d {
+  width: 100%;
+  height: 100%;
+  min-height: 220px;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+}
 /* ONE SURFACE · on the CLASS. This whole box was on the id, which is to say on
    the FOCUSED mount alone — so a Viewer area without the focus had a caption
    with no padding, no rule above it and no minimum height, and the picture above
@@ -8274,6 +8283,8 @@ body.gesturing-resize * {
 /* MICRO-INSTALLER-PULSANTE p.2 · «N missing files», beside the Log */
 .footer-missing { color: var(--warn-ink, #8a5a00); }
 .footer-missing.hidden { display: none; }
+.footer-jobs { font-variant-numeric: tabular-nums; max-width: 28ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.footer-jobs.hidden { display: none; }
 .log-drawer {
   position: fixed; left: 8px; right: 8px; bottom: 30px; z-index: 40;
   display: flex; flex-direction: column; min-height: 120px;
@@ -10747,6 +10758,21 @@ body.em-detached #tile-root > .tile-area.tile-detached {
 .files-pill.exp { color: var(--warn-ink); border-color: var(--warn); }
 .files-pill.on { color: var(--ok-ink); border-color: var(--ok); }
 .files-pill.soon { color: var(--text-faint); }
+/* MICRO-OTTIMIZZA-1 · the engine, the add-on, the jobs of the bridge */
+.files-engine { display: flex; flex-direction: column; gap: 2px; margin: 4px 0; }
+.files-engine label { font-size: 12px; display: flex; align-items: center; gap: 6px; }
+.files-engine select { font: inherit; font-size: 12px; max-width: 100%; }
+.files-addon { display: flex; flex-direction: column; gap: 3px; }
+.files-addon-facts { color: var(--text-faint); overflow-wrap: anywhere; }
+.files-addon-gestures { display: flex; gap: 6px; flex-wrap: wrap; }
+.files-cmd { font-family: var(--mono, ui-monospace, monospace); font-size: 11px; overflow-wrap: anywhere; }
+.files-jobs { display: flex; flex-direction: column; gap: 4px; margin-top: 6px; }
+.files-job { display: grid; grid-template-columns: 64px 1fr auto; align-items: center; gap: 6px; font-size: 12px; }
+.files-job-bar { height: 6px; border-radius: 3px; background: var(--border); overflow: hidden; }
+.files-job-bar > i { display: block; height: 100%; width: 0; background: var(--accent, #3b7ddd); transition: width .3s; }
+.files-job[data-state="done"] .files-job-bar > i { background: var(--ok); width: 100% !important; }
+.files-job[data-state="failed"] .files-job-bar > i, .files-job[data-state="cancelled"] .files-job-bar > i { background: var(--warn); }
+.files-job-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .files-switch { display: flex; align-items: center; gap: 6px; margin: 4px 0; font-weight: 600; }
 .files-kv { display: grid; grid-template-columns: max-content 1fr; gap: 2px 8px; margin: 6px 0; font-size: 11.5px; }
 .files-kv dt { color: var(--text-faint); }
