@@ -43622,8 +43622,11 @@ setVolatileProvider((id) => isVolatile(store?.node(id)));
 renderNameStrip();   // AUDIT N6 · «Senza titolo» from the first frame, not «EMStudio»
 // MICRO-ARCHIVIO-1 · no document yet: the File windows start from «Da dove si
 // parte», not from the folder of the last session (that one is remembered per
-// project and comes back when its em.json opens)
-storageToStart(false);
+// project and comes back when its em.json opens). Repainted: the windows were
+// mounted a moment ago and may already be reading the old folder — measured on
+// the profile of E.D.'s EMStudio.app, the File window stayed on «Lettura…» with
+// Segni in its path
+storageToStart();
 if (window.__EM_TEST_DATA__) {
   // a PROJECT (`{graphs: …}`, with its corpus and shelf) goes through the door
   // a file does; a single graph keeps the old one

@@ -11025,9 +11025,19 @@ test("AR1.start", "senza documento: la finestra File apre su «Da dove si parte�
   }));
   const rows = await arShelfRows(p);
   await p.screenshot({ path: SHOT("ar1-start") }).catch(() => {});
+  // a folder left open in this session, and the page reloaded (the profile of
+  // E.D.'s EMStudio.app: the window kept its folder, and stayed on «Lettura…»)
+  await storageInto(p, ["fs"]);
+  const inside = await p.evaluate(() => !document.querySelector(".storage-start"));
+  await p.reload();
+  await p.waitForSelector("#workspace-bar .ws-tab", { timeout: 30000 });
+  await p.waitForSelector(".storage-start", { timeout: 8000 }).catch(() => {});
+  const reloaded = await p.evaluate(() => ({ start: !!document.querySelector(".storage-start"),
+    reading: [...document.querySelectorAll(".viewer-empty")].some((e) => /Lettura|Loading/.test(e.textContent)) }));
   await ctx.close();
-  return { pass: r.start && r.recent[0] === "TempluMare" && r.newProject && r.roots > 0 && /progetto/.test(r.noProject) && rows === 0 && r.legacyKept && !errors.length,
-           detail: { r, rows, errors } };
+  return { pass: r.start && r.recent[0] === "TempluMare" && r.newProject && r.roots > 0 && /progetto/.test(r.noProject) && rows === 0 && r.legacyKept
+             && inside && reloaded.start && !reloaded.reading && !errors.length,
+           detail: { r, rows, inside, reloaded, errors } };
 });
 
 test("AR1.project", "un em.json senza `shelf` apre uno Scaffale vuoto; la chiave vecchia si propone una volta (messa nel progetto, il file diventa modificato); la cartella si ricorda per progetto; chiudere il file svuota lo Scaffale e riporta «Da dove si parte»", async () => {
