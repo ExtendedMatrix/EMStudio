@@ -386,7 +386,11 @@ function rowItem(r: StorageRow, h: FileHooks, redraw: () => void): HTMLElement {
     g.title = t("fs.bm." + bk.state);
     line.appendChild(g);
   }
-  line.appendChild(el("span", "fs-tag insp-hint", r.tag));
+  // MICRO-CONTENTS-3 · the resolver's tag says the uses by their ids («lod0 ·
+  // aton, heriverse»): in words, as the filter and the card say them
+  const usesRaw = r.use.join(", ");
+  const tag = usesRaw && r.tag.includes(usesRaw) ? r.tag.replace(usesRaw, r.use.map(useLabel).join(", ")) : r.tag;
+  line.appendChild(el("span", "fs-tag insp-hint", tag));
   item.appendChild(line);
   if (listFilter.selected === r.id) item.appendChild(rowCard(r, h, redraw));
   return item;
