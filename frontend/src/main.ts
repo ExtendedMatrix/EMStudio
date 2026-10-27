@@ -32704,7 +32704,8 @@ function stampComposeBox(win: Win, listing: FsListing): HTMLElement {
   today.dataset.field = "today";
   today.textContent = t("stamp2.today");
   today.onclick = () => {
-    // the local day, not UTC's: past 23:00 in Rome «today» was already tomorrow
+    // the local day, not UTC's: between midnight and 1 (2 in summer) in Rome
+    // UTC's «today» was still yesterday
     const n = new Date();
     draft.at = `${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, "0")}-${String(n.getDate()).padStart(2, "0")}`;
     at.value = showDate(draft.at, form);
