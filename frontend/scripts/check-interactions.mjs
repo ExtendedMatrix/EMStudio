@@ -937,7 +937,8 @@ test("7.dtc", "la finestra DTC vuota dice che il DTC nasce dai timbri, e offre l
   await workspace(p, "assets");
   const txt = await p.evaluate(() => [...document.querySelectorAll(".canvas-empty-hint:not(.hidden)")].map((h) => h.innerText).join(" | "));
   await ctx.close();
-  return { pass: /timbri/.test(txt) && /Storage/.test(txt) && !/Shift\+A/.test(txt), detail: { txt } };
+  // MICRO-CONTENTS-2 D1 · the Storage window is «File» («Files»)
+  return { pass: /timbri/.test(txt) && /finestra File|Files window|Storage/.test(txt) && !/Shift\+A/.test(txt), detail: { txt } };
 });
 
 // ── PARTE 8 · outliner e ricerca ───────────────────────────────────────────

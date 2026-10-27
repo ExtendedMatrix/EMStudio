@@ -4783,8 +4783,6 @@ const EN: Dict = {
   "fs.newProjectMenuTitle": "Make the folders of a new EM project (the EM standard tree) in a folder you choose",
   "fs.newProjectTitle": "New EM project",
   "fs.newProjectWhere": "The project is born in {parent}: a folder with its name, and in it the folders of the EM standard.",
-  "fs.newProjectWhereStorage": "The project is born in {parent}, the folder the Files window is showing (to choose another, open it in the Files window first): a folder with its name, and in it the folders of the EM standard.",
-  "fs.newProjectNoFolder": "Open in the Files window the folder where the project is to be born, then File ▸ New EM project…: in a browser the Files window is the folder selector.",
   "fs.newProjectDefault": "Excavation",
   "fs.newProjectOk": "Make the folders",
   "fs.newProjectBadName": "A name, without «/» or «\\»",
@@ -4897,6 +4895,7 @@ const EN: Dict = {
   "win.maximizeTitle": "Magnify this window (also a double click on the empty header, or Ctrl+Space)",
   "stamp.reportHeadShort": "{files} files in this folder",
   "stamp.card.covers": "the seal covers: {what}",
+  "fs.newProjectPick": "Where is the new project to be born?",
 };
 
 // ── Italiano: complete, because E.D. works in it ───────────────────────────────
@@ -9553,8 +9552,6 @@ const IT: Dict = {
   "fs.newProjectMenuTitle": "Crea le cartelle di un nuovo progetto EM (l'albero standard EM) in una cartella che scegli",
   "fs.newProjectTitle": "Nuovo progetto EM",
   "fs.newProjectWhere": "Il progetto nasce in {parent}: una cartella con il suo nome, e dentro le cartelle dello standard EM.",
-  "fs.newProjectWhereStorage": "Il progetto nasce in {parent}, la cartella che la finestra File sta mostrando (per sceglierne un'altra, aprila prima nella finestra File): una cartella con il suo nome, e dentro le cartelle dello standard EM.",
-  "fs.newProjectNoFolder": "Apri nella finestra File la cartella dove deve nascere il progetto, poi File ▸ Nuovo progetto EM…: nel browser la finestra File è il selettore della cartella.",
   "fs.newProjectDefault": "Scavo",
   "fs.newProjectOk": "Crea le cartelle",
   "fs.newProjectBadName": "Un nome, senza «/» né «\\»",
@@ -9667,6 +9664,7 @@ const IT: Dict = {
   "win.maximizeTitle": "Massimizza questa finestra (anche doppio clic sulla parte vuota dell'intestazione, o Ctrl+Spazio)",
   "stamp.reportHeadShort": "{files} file in questa cartella",
   "stamp.card.covers": "il sigillo copre: {what}",
+  "fs.newProjectPick": "Dove deve nascere il progetto nuovo?",
 };
 
 // ── The six other project languages: AI DRAFTS, awaiting validation ───────────

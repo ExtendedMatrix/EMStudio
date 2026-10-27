@@ -31720,15 +31720,16 @@ async function newProjectGesture(): Promise<void> {
   let parent: string | null = null;
   if (isTauri()) parent = await pickFolder();
   else {
+    // MICRO-CONTENTS-2 · the app's folder selector now exists (path-picker.ts):
+    // it opens where the File window is, and the folder is chosen there
     const st = windowsOf().find((w) => w.type === "storage" && winModeOf(w) === "filesystem");
-    parent = st ? storagePath(st) : null;
-    if (!parent) { await tell(t("fs.newProjectNoFolder"), { kind: "new-project" }); return; }
+    parent = await pickPathInApp({ mode: "folder", start: st ? storagePath(st) : null, title: t("fs.newProjectPick") });
   }
   if (!parent) return;
   const answer = await openDialog({
     kind: "new-project",
     title: t("fs.newProjectTitle"),
-    message: t(isTauri() ? "fs.newProjectWhere" : "fs.newProjectWhereStorage", { parent }),
+    message: t("fs.newProjectWhere", { parent }),
     input: { value: t("fs.newProjectDefault"), label: t("fs.newProjectName") },
     ok: t("fs.newProjectOk"),
     validate: (v) => v.trim() && !/[\\/]/.test(v) ? null : t("fs.newProjectBadName"),
