@@ -1250,6 +1250,15 @@ def _files_route(route, body):
         return {"ok": True, "found": found, "searched": folders}
     if route == "/project-new":
         return {"ok": True, **api.create_em_project(body["parent"], body["name"])}
+    if route == "/project-tree":
+        # MICRO-ARCHIVIO-2 · V4: the «Progetto» group of the File window's places
+        root = os.path.abspath(os.path.expanduser(body["root"]))
+        if not os.path.isdir(root):
+            raise ValueError(f"not a folder: {root}")
+        if not hasattr(api, "em_project_tree"):
+            raise ValueError("this s3dgraphy has no project tree (api.em_project_tree): "
+                             "it comes after 1.6.0.dev67")
+        return {"ok": True, **api.em_project_tree(root)}
     if route == "/project-reorder":
         root = os.path.abspath(os.path.expanduser(body["root"]))
         plan = body.get("plan") if body.get("apply") else reorder_plan(root)
@@ -1357,6 +1366,28 @@ def _resolve_on_folder(locator: str, folder: str):
     for c in cands:
         if os.path.isfile(c):
             return c
+    return None
+
+
+def _gltfpack_tool():
+    """MICRO-ARCHIVIO-2 · gltfpack (meshoptimizer, MIT) where it is: ``EM_GLTFPACK``,
+    the PATH, or beside the bridge (the desktop's sidecar folder). → ``{path,
+    version}`` or None."""
+    import shutil as _sh
+    import subprocess
+    cands = [os.environ.get("EM_GLTFPACK") or "", _sh.which("gltfpack") or ""]
+    here = os.path.dirname(os.path.abspath(sys.executable if getattr(sys, "frozen", False) else __file__))
+    cands += [os.path.join(here, n) for n in ("gltfpack", "gltfpack.exe")]
+    for c in cands:
+        if c and os.path.isfile(c) and os.access(c, os.X_OK):
+            version = ""
+            try:
+                run = subprocess.run([c, "-h"], capture_output=True, text=True, timeout=10)
+                head = (run.stdout or run.stderr or "").strip().splitlines()
+                version = head[0].strip() if head else ""
+            except (OSError, subprocess.TimeoutExpired):
+                pass
+            return {"path": c, "version": version}
     return None
 
 
@@ -1654,7 +1685,12 @@ def _load_s3dgraphy(s3dgraphy_src: "pathlib.Path | None"):
 #: picture and source — OpenGraph, JSON-LD, a IIIF manifest, an image), read
 #: here because a page cannot read another site — MICRO-ARCHIVIO-1, the
 #: Shelf's previews of remote resources.
-BRIDGE_LEVEL = 41   # 30 also = /validate
+#: 42 = /project-tree (the project's standard tree, folder by folder: there or
+#: to be made — s3Dgraphy's ``project_tree.describe_tree``, with GIS/ and the
+#: ``versions/`` folders, V4) and /fs/optimize (the Ottimizza tab: a model's
+#: variant by gltfpack, named and placed by s3Dgraphy's ``variant_path``;
+#: experimental) — MICRO-ARCHIVIO-2.
+BRIDGE_LEVEL = 42   # 30 also = /validate
 
 
 #: the files of a tileset a server may send gzipped (MICRO-TILESET-CARTELLA)
@@ -2582,7 +2618,7 @@ def make_handler(api):
                 self._annotate(body)
             elif route in ("/files-state", "/files-find-moved", "/bucket-check", "/bucket-promote",
                            "/files-free-plan", "/files-free-local", "/project-new", "/project-reorder",
-                           "/file-reveal", "/file-keep", "/nodes", "/node/personal"):
+                           "/project-tree", "/file-reveal", "/file-keep", "/nodes", "/node/personal"):
                 # R1/R2/C1 (E.D., 4 Oct 2026) · where each file is, with
                 # s3dgraphy's ONE resolver; the standard tree of a project
                 try:
@@ -2777,6 +2813,19 @@ def make_handler(api):
                     self._fail(400, f"invalid JSON body: {exc}")
                     return
                 self._pack_3tz(body)
+            elif route == "/fs/optimize":
+                # MICRO-ARCHIVIO-2 · the Ottimizza tab: a variant of a model,
+                # by gltfpack (the round-0 verdict: experimental), in the
+                # ``versions/`` of its part of the tree, named as Templu Mare's
+                # — both decided by s3Dgraphy (`project_tree.variant_path`)
+                if not self._fs_gate():
+                    return
+                try:
+                    body = json.loads(raw.decode("utf-8")) if raw else {}
+                except Exception as exc:
+                    self._fail(400, f"invalid JSON body: {exc}")
+                    return
+                self._optimize(body if isinstance(body, dict) else {})
             elif route == "/stamp/retitle":
                 # RIFINITURE · the stamp's TITLE and DESCRIPTION, rewritten in
                 # its sidecar. They are a courtesy, not substance (dtcstamp
@@ -2942,6 +2991,82 @@ def make_handler(api):
                         "canonical": canonical,
                         "writer": {"module": "dtcstamp.write_canonical_3tz",
                                    "version": str(getattr(dtcstamp, "__version__", ""))}})
+
+        def _optimize(self, body):
+            """``{"sources": [path…], "lod", "destination", "ratio", "dry_run"}``
+            → ``{tool, outputs: [{source, path, name, exists, …}]}``.
+
+            A dry run says only where each variant would go and whether
+            gltfpack is here (``EM_GLTFPACK``, the PATH, or beside the bridge).
+            The run writes, never over a file that exists: simplified to
+            ``ratio`` of the triangles (``-si``), NOT compressed and NOT
+            quantised (``-noq``; no ``-c``, no ``-tc``), because the Viewer of
+            EMStudio reads neither meshopt nor KTX2 yet (the round-0 verdict).
+            Stamping the variant is the page's: it is a derived step, and a
+            stamp is emitted by /stamp/emit like every other."""
+            try:
+                from s3dgraphy.project_tree import variant_path, find_project_root
+            except ImportError as exc:
+                self._fail(501, f"s3dgraphy with project_tree.variant_path is not importable here: {exc}")
+                return
+            lod = str(body.get("lod") or "lod4")
+            dest = str(body.get("destination") or "web")
+            try:
+                ratio = float(body.get("ratio", 0.1))
+            except (TypeError, ValueError):
+                ratio = 0.1
+            ratio = min(1.0, max(0.001, ratio))
+            tool = _gltfpack_tool()
+            planned = []
+            for raw_path in (body.get("sources") or [])[:64]:
+                full, err = self._fs_resolve(os.path.abspath(os.path.expanduser(str(raw_path))), want="file")
+                if err:
+                    planned.append({"source": str(raw_path), "error": err[1]})
+                    continue
+                if not full.lower().endswith((".glb", ".gltf", ".obj")):
+                    planned.append({"source": full, "error": "gltfpack reads .glb, .gltf and .obj"})
+                    continue
+                out = variant_path(full, lod, dest, root=find_project_root(full))
+                if not _fs_inside_roots(out):
+                    planned.append({"source": full, "error": f"{out} is outside the folders this bridge serves"})
+                    continue
+                planned.append({"source": full, "path": out, "name": os.path.basename(out),
+                                "exists": os.path.exists(out)})
+            if body.get("dry_run"):
+                self._json({"ok": True, "tool": tool, "outputs": planned})
+                return
+            if not tool:
+                self._fail(501, "gltfpack is not here: set EM_GLTFPACK to its path, or put it on the PATH")
+                return
+            import subprocess
+            import time as _time
+            done = []
+            for item in planned:
+                if item.get("error") or item.get("exists"):
+                    done.append({**item, "state": "error" if item.get("error") else "exists"})
+                    continue
+                os.makedirs(os.path.dirname(item["path"]), exist_ok=True)
+                cmd = [tool["path"], "-i", item["source"], "-o", item["path"], "-noq"]
+                if ratio < 1.0:
+                    cmd += ["-si", f"{ratio:g}"]
+                t0 = _time.time()
+                try:
+                    run = subprocess.run(cmd, capture_output=True, text=True, timeout=1800)
+                except (OSError, subprocess.TimeoutExpired) as exc:
+                    done.append({**item, "state": "error", "error": str(exc)})
+                    continue
+                if run.returncode != 0 or not os.path.isfile(item["path"]):
+                    done.append({**item, "state": "error",
+                                 "error": (run.stderr or run.stdout or "").strip()[-600:]})
+                    continue
+                done.append({**item, "state": "written", "bytes": os.path.getsize(item["path"]),
+                             "sha256": "sha256:" + _sha256_path(item["path"]),
+                             "seconds": round(_time.time() - t0, 2),
+                             "command": " ".join(os.path.basename(c) if i == 0 else c
+                                                 for i, c in enumerate(cmd))})
+            self._json({"ok": True, "tool": tool, "outputs": done,
+                        "parameters": {"lod": lod, "destination": dest, "ratio": ratio,
+                                       "quantization": False, "compression": None}})
 
         def _stamp_members(self, body):
             """``{"paths": [...]}`` → ``{"sets": {path: {members, digest,
