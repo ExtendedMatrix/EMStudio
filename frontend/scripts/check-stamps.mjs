@@ -543,11 +543,12 @@ console.log("\n· A3 — Stamp, mai Sign");
  *  guarda i valori risolti e non il file: un valore lo si può chiedere solo se
  *  si sa quale chiedere. */
 const CHIAVI_COMPORRE = [
-  "compose.head", "stamp2.question", "stamp2.origin", "stamp2.originSub",
-  "stamp2.derived", "stamp2.derivedSub", "stamp2.whyOrigin", "stamp2.whyDerived",
+  // MICRO-CONTENTS-3 · a count is a plural family (`tn`): its members are read
+  "compose.head.one", "compose.head.other", "stamp2.question", "stamp2.origin", "stamp2.originSub",
+  "stamp2.derived", "stamp2.derivedSub", "stamp2.whyOrigin", "stamp2.whyDerived.one", "stamp2.whyDerived.other",
   "stamp2.kind", "stamp2.processes",
   "stamp2.instrument", "stamp2.inputs", "stamp2.noInputs", "compose.software",
-  "compose.parameters", "compose.commit", "stamp2.operator", "stamp2.date",
+  "compose.parameters", "stamp2.commitLabel", "stamp2.operator", "stamp2.operatorWho", "stamp2.date",
   "stamp2.today", "stamp2.description", "stamp2.stamp", "stamp2.where",
   "stamp2.errNeeded", "stamp2.errInputs",
   "compose.stamping", "compose.cancel", "compose.open", "compose.openFolder",

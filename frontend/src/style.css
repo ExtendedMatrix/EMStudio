@@ -10487,6 +10487,22 @@ body.em-detached #tile-root > .tile-area.tile-detached {
   line-height: 1.35;
 }
 
+/* MICRO-CONTENTS-3 E9 · many starting files: chips in a box, with a search */
+.stamp-compose-inputs-box { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.stamp-compose-find { width: 100%; }
+.stamp-compose-inputs.compact {
+  display: flex; flex-wrap: wrap; gap: 4px;
+  max-height: 132px; overflow: auto;
+  padding: 2px; border: 1px solid var(--border-subtle, var(--border)); border-radius: 4px;
+}
+.stamp-compose-inputs.compact .stamp-compose-input {
+  display: inline-block; width: auto; max-width: 100%; margin: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11.5px; padding: 1px 6px;
+}
+.stamp-compose-inputs.compact .stamp-compose-input[hidden] { display: none; }
+/* MICRO-CONTENTS-3 E6 · what fills the operator */
+.stamp-field-hint { display: block; font-size: 11px; color: var(--fg-muted, var(--text-muted, #666)); margin-top: 2px; }
+
 /* MICRO-CONTENTS-3 F12 · the row of a file clicked in the Chain */
 .storage-row.storage-flash { animation: storage-flash 1.6s ease-out 1; }
 @keyframes storage-flash {

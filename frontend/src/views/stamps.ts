@@ -42,6 +42,7 @@ import { declaredId, declaredResource, type DeclaredLevel } from "../declared";
 import type { Chain, IdentityWord, Stamp, StampParent } from "../stamp";
 import type { EmEdge, EmNode } from "../types";
 import { dtcKindLabel } from "../rules";
+import { t } from "../i18n";
 
 /** I tre archi veri del substrato. Nominati qui perché questo file COSTRUISCE
  *  una catena sintetica, e deve usare gli stessi nomi che la libreria usa — non
@@ -78,7 +79,8 @@ function processNode(stamp: Stamp): EmNode {
     node_type: "dtc_process",
     // DEV29 B2 · the kind's LABEL when there is no technique, never its id (D5
     // of dev28: the step read «format_conversion» in the mini-graph)
-    name: how.technique || (how.dtc_kind ? dtcKindLabel(how.dtc_kind) : "") || "step",
+    // MICRO-CONTENTS-3 · a step nobody named says so in the reader's language
+    name: how.technique || (how.dtc_kind ? dtcKindLabel(how.dtc_kind) : "") || t("stamps.unnamedStep"),
     data: {
       dtc_kind: how.dtc_kind ?? "transformation",
       technique: how.technique,
@@ -303,9 +305,12 @@ export function adaptDraft(draft: {
   const nodes: EmNode[] = [];
   const edges: EmEdge[] = [];
   const stepId = "draft:step";
+  // MICRO-CONTENTS-3 · the kind's LABEL (as `processNode`), and the word for a
+  // step not named yet in the reader's language: the draft read «step»
+  const kindWord = draft.kind ? dtcKindLabel(draft.kind) : "";
   const label = draft.origin
-    ? (draft.campaign.trim() || draft.kind || "origin")
-    : (draft.technique.trim() || draft.kind || "step");
+    ? (draft.campaign.trim() || kindWord || t("stamps.unnamedOrigin"))
+    : (draft.technique.trim() || kindWord || t("stamps.unnamedStep"));
   // DEV29 B5 · an ORIGIN's act is an acquisition — where material enters the
   // study — and is drawn in the acquisitions' lane, not as «Processes · 1»
   // above its files; with no kind chosen yet it says nothing of its kind
@@ -361,7 +366,7 @@ export function adaptDraft(draft: {
       for (const id of ids) edges.push(edge(stepId, id, EDGE_HAD_INPUT, { draft: true }));
     } else {
       const pid = `draft:declared-step:${i}`;
-      nodes.push({ id: pid, node_type: "dtc_process", name: lv.technique || lv.dtc_kind || "step",
+      nodes.push({ id: pid, node_type: "dtc_process", name: lv.technique || (lv.dtc_kind ? dtcKindLabel(lv.dtc_kind) : "") || t("stamps.unnamedStep"),
                    data: { dtc_kind: lv.dtc_kind || "transformation", declared_only: true } } as unknown as EmNode);
       for (const b of below) edges.push(edge(pid, b, EDGE_HAD_OUTPUT, { draft: true }));
       for (const id of ids) edges.push(edge(pid, id, EDGE_HAD_INPUT, { draft: true }));

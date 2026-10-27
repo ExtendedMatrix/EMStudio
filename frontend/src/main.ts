@@ -30747,6 +30747,11 @@ function storageSelected(win: Win): string | null {
   return typeof value === "string" ? value : null;
 }
 
+/** MICRO-CONTENTS-3 E9 · from how many starting files the list is compact, with
+ *  a search; and what the search says, kept across the composer's redraws. */
+const STAMP_INPUTS_COMPACT = 8;
+let stampInputsQuery = "";
+
 /** CATENA · the files PICKED together (⌘-click), for a group stamp. */
 function storagePicked(win: Win): string[] {
   const v = winCurrent(win, "fsPicked");
@@ -32246,7 +32251,7 @@ function openDraft(outputs: FsEntry[], listing: FsListing): void {
   stampDraft.origin = roadFor(stamped);
   stampDraft.originDeclared = stampDraft.origin;
   stampDraft.why = stamped
-    ? t("stamp2.whyDerived", { n: String(stamped) })
+    ? tn("stamp2.whyDerived", stamped)
     : t("stamp2.whyOrigin");
   // dev28 · a LOD or a .3tz proposes its kind, with the reason beside it
   // (kept for the «comes from» road: a LOD with no stamped parent beside it
@@ -32562,18 +32567,46 @@ function stampComposeBox(win: Win, listing: FsListing): HTMLElement {
       nothing.textContent = t("stamp2.noInputs");
       list.appendChild(nothing);
     }
-    for (const entry of stamped) {
-      const chosen = draft.inputs.some((i) => i.path === entry.path);
+    // MICRO-CONTENTS-3 E9 · a COMPACT list with a search when the folder has
+    // many: GT16's DosCo offered 25 buttons the width of the composer, one under
+    // the other. The chosen come first; the search keeps through a redraw.
+    const compact = stamped.length > STAMP_INPUTS_COMPACT;
+    list.classList.toggle("compact", compact);
+    const isChosen = (e: { path: string }) => draft.inputs.some((i) => i.path === e.path);
+    const ordered = compact ? [...stamped.filter(isChosen), ...stamped.filter((e) => !isChosen(e))] : stamped;
+    const buttons: HTMLButtonElement[] = [];
+    for (const entry of ordered) {
+      const chosen = isChosen(entry);
       const b = document.createElement("button");
       b.type = "button";
       b.className = "ghost stamp-compose-input" + (chosen ? " on" : "");
       b.dataset.input = entry.path;
       b.setAttribute("aria-pressed", String(chosen));
       b.textContent = entry.name;
+      b.title = entry.name;
       b.onclick = () => { void toggleInput(entry, chosen); };
       list.appendChild(b);
+      buttons.push(b);
     }
-    fields.appendChild(wrap(t("stamp2.inputs"), list, "inputs", false, true));
+    let control: HTMLElement = list;
+    if (compact) {
+      const find = document.createElement("input");
+      find.type = "search";
+      find.className = "stamp-compose-find";
+      find.dataset.field = "inputsFind";
+      find.placeholder = tn("stamp2.inputsFind", stamped.length);
+      find.value = stampInputsQuery;
+      const filter = (): void => {
+        const q = find.value.trim().toLowerCase();
+        for (const b of buttons) b.hidden = !!q && !b.classList.contains("on") && !(b.textContent ?? "").toLowerCase().includes(q);
+      };
+      find.oninput = () => { stampInputsQuery = find.value; filter(); };
+      filter();
+      control = document.createElement("div");
+      control.className = "stamp-compose-inputs-box";
+      control.append(find, list);
+    }
+    fields.appendChild(wrap(t("stamp2.inputs"), control, "inputs", false, true));
     // RISORSA-FILE · …or a parent DECLARED and not stamped
     fields.appendChild(declaredEditor(draft));
     const sw = draft.software[0] ?? { name: "", version: "", commit: "" };
@@ -32598,7 +32631,8 @@ function stampComposeBox(win: Win, listing: FsListing): HTMLElement {
              } catch { draft.parameters = v.trim() ? { note: v.trim() } : {}; }
            }),
       null, true));
-    fields.appendChild(wrap(t("compose.commit"),
+    // MICRO-CONTENTS-3 E11 · «Commit» was git's word
+    fields.appendChild(wrap(t("stamp2.commitLabel"),
       text("commit", sw.commit ?? "", t("stamp2.commitEg"), (v) => setSw({ commit: v.trim() })),
       null, true));
   }
@@ -32608,13 +32642,23 @@ function stampComposeBox(win: Win, listing: FsListing): HTMLElement {
     const m = /(\d{4}-\d{4}-\d{4}-\d{3}[\dX])/.exec(v);
     return m ? m[1] : null;
   };
-  fields.appendChild(wrap(t("stamp2.operator"),
+  const operatorField = wrap(t("stamp2.operator"),
     text("operator", draft.operator.label || draft.operator.id, t("stamp2.operatorEg"), (v) => {
       const iD = orcidOf(v);
       draft.operator = iD ? { id: `https://orcid.org/${iD}`, label: v.replace(/https?:\/\/orcid\.org\//, "").replace(iD, "").trim() }
                           : { id: "", label: v.trim() };
       redrawDraftPicture();
-    }), "operator"));
+    }), "operator");
+  // MICRO-CONTENTS-3 E6 · empty because nobody said who is working: the field
+  // says where that is said, and that it fills itself from there
+  if (!currentIdentity()?.orcid) {
+    const say = document.createElement("span");
+    say.className = "stamp-field-hint";
+    say.dataset.hint = "operator";
+    say.textContent = t("stamp2.operatorWho");
+    operatorField.appendChild(say);
+  }
+  fields.appendChild(operatorField);
 
   // Data — the date of the act, empty until somebody says it; «Oggi» is a gesture
   const when = document.createElement("span");
@@ -33064,7 +33108,10 @@ function declaredEditor(draft: Draft): HTMLElement {
   title.textContent = t("declared.title");
   const hint = document.createElement("div");
   hint.className = "stamp-compose-why-road";
+  // MICRO-CONTENTS-3 E10 · an example in the sentence; the name's two
+  // placeholders, a template syntax, in its tooltip
   hint.textContent = t("declared.hint");
+  hint.title = t("declared.hintTokens");
   box.append(title, hint);
   const redraw = () => { renderStorage(); redrawDraftPicture(); };
   const input = (value: string, placeholder: string, key: string, onInput: (v: string) => void): HTMLInputElement => {
