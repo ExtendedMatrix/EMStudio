@@ -260,7 +260,8 @@ function bodyOf(src, signature) {
     "the ID stays `assets`: saved arrangements and the tiling checks are keyed " +
       "by it, and renaming an id to match a label would discard somebody's " +
       "layouts for a word nobody sees");
-  ok(/name: "chain", type: "graph", state: \{ mode: "dtc" \}/.test(preset),
+  // MICRO-CONTENTS-3 F1 · …a graph window FIXED on the DTC: the Chain
+  ok(/name: "chain", type: "graph", state: \{ mode: "dtc", chain: true \}/.test(preset),
     "…and the arrangement gains the CHAIN, so the story being written is " +
       "visible while it is written — the other half of yesterday's reading. " +
       "The key is the BARE `mode`: a graph window's slot has always been that " +

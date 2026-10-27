@@ -99,6 +99,11 @@ const ROLE_STYLE: Record<Role, { labelKey: string; color: string }> = {
   use: { labelKey: "dtc.laneUse", color: "#6f5326" },
 };
 
+/** MICRO-CONTENTS-3 F11 · a file's chain: where from, the step, what to. */
+const STEP_LANE: Partial<Record<Role, string>> = {
+  input: "dtc.laneFrom", process: "dtc.laneStep", output: "dtc.laneTo",
+};
+
 /** RISORSA-FILE · the colour a DTC node READS as outside the DTC's own lanes
  *  (the minimap): the colour of the lane its kind of node stands in — an
  *  acquisition, a process (a device is part of one), what was made. */
@@ -179,7 +184,13 @@ export function buildDtcScene(
   overrides?: Map<string, { x: number; y: number }>,
   opts: { openResources?: ReadonlySet<string>; allNodes?: readonly EmNode[];
           /** DEV29 B2 · the acquisitions whose members are shown one by one */
-          openSets?: ReadonlySet<string> } = {},
+          openSets?: ReadonlySet<string>;
+          /** MICRO-CONTENTS-3 F11 · the lanes of ONE file's chain (the stamps
+           *  read from the disk, or the step being composed): «Da» / «Passo» /
+           *  «A», the step's name in its node — «impaginazione su mode…misure e
+           *  scala · 1» cut the step in the lane, and «Prodotti · ‹step›» said it
+           *  twice. The corpus keeps its lanes named by what they hold. */
+          stepLanes?: boolean } = {},
 ): Scene {
   const present = new Set(nodes.map((n) => n.id));
   const keep = new Set<string>();
@@ -483,6 +494,7 @@ export function buildDtcScene(
       return all.slice(0, 2).map((x) => middleCut(x, 36)).join(" · ") + (all.length > 2 ? ` +${all.length - 2}` : "");
     };
     const roleWords = (rl: Role, first: boolean): string => {
+      if (opts.stepLanes && STEP_LANE[rl]) return `${t(STEP_LANE[rl]!)}${first && nth > 1 ? ` (${nth})` : ""}`;
       const ofRole = row.filter((n) => roleOf(n) === rl);
       if (rl === "process") {
         const ps = ofRole.filter((n) => n.node_type !== "dtc_acquisition");
@@ -497,7 +509,9 @@ export function buildDtcScene(
       }
       return `${t(ROLE_STYLE[rl].labelKey)}${first && nth > 1 ? ` (${nth})` : ""}`;
     };
-    const composition = ordered
+    const composition = opts.stepLanes && ordered.length === 1
+      ? roleWords(ordered[0][0], true)
+      : ordered
       .map(([rl, count], i) => `${roleWords(rl, i === 0)} · ${count}`)
       .join(" + ");
     return {

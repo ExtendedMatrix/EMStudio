@@ -574,6 +574,8 @@ import {
   winModeOf,
   winModes,
   setWinType,
+  isChainWin,
+  setChainWin,
   syncActiveWorkspace,
   splitWindow,
   winMode,
@@ -5975,7 +5977,9 @@ function buildScenesNow(): void {
   // resources the same way the study view does
   const dtcOf = (ns: EmNode[], es: EmEdge[]): Scene => {
     const f = foldFiles(ns, es, openResourceFiles);
-    return buildDtcScene(f.nodes, f.edges, dtcOverrides, { openResources: openResourceFiles, openSets: openDtcSets });
+    return buildDtcScene(f.nodes, f.edges, dtcOverrides, { openResources: openResourceFiles, openSets: openDtcSets,
+      // MICRO-CONTENTS-3 F11 · one file's chain says «Da / Passo / A»
+      stepLanes: dtcSource === "stamps" });
   };
   scenes.dtc = draftScene
     ? dtcOf(draftScene.nodes, draftScene.edges)
@@ -6275,12 +6279,10 @@ function applyCanvasView(v: ViewKind): void {
       ? t("stamp.superseded", { name, why: diskStamps.why })
       : diskStamps.status === "failed"
       ? t("stamp.failed", { name, why: diskStamps.why })
-      : diskStamps.scene.missing
-      ? t("stamp.chainPartial", {
-          name, n: String(diskStamps.chain.resolved.size + 1),
-          missing: String(diskStamps.scene.missing) })
-      : t("stamp.chain", {
-          name, n: String(diskStamps.chain.resolved.size + 1) });
+      // MICRO-CONTENTS-3 F17 · the chain's sentence is said in the Chain, under
+      // its «Grafo» line (`chainSentence`), where it is not cut; the bar says
+      // which file the Chain is drawing
+      : t("stamp.chainBar", { name });
   } else if (v === "dtc" && dtcNeighbourhood.status === "failed" && dtcNeighbourhood.noNode) {
     // RISORSA-FILE · Standalone is the normal state of a desk with no node, and
     // the bar says so in three words; the sentence (which node, why, where the
@@ -22712,7 +22714,7 @@ function detachWindow(src: Win | null, at: { x: number; y: number } | null,
   layoutPopout(p);
   areaFor(win);
   renderAreaHeaders();
-  d.title = `${t(WINDOW_TYPE_META[type].labelKey)} — EMStudio`;
+  d.title = `${winTypeLabel(win)} — EMStudio`;
   off.push(wireRelay(pop, document, {
     isWriting: (el) => isWritingField(el),
     ported: (el) => !!el?.closest?.("[data-ported], #overlay-panel, #filter-panel, #edge-menu"),
@@ -22744,7 +22746,7 @@ function detachWindow(src: Win | null, at: { x: number; y: number } | null,
   saveDetached();
   ensureDetachWatch();
   requestDraw();
-  logInfo(t("log.detached", { type: t(WINDOW_TYPE_META[type].labelKey) }));
+  logInfo(t("log.detached", { type: winTypeLabel(win) }));
   return win;
 }
 
@@ -23625,7 +23627,9 @@ function showInMatrix(nodeId: string): void {
   // its animation came after and centred the node alone (S6, MICRO-SUITE-VERDE)
   pickOnCanvas = true;
   try { select(nodeId); } finally { pickOnCanvas = false; }
-  const graphs = windowsOf().filter((w) => w.type === "graph");
+  // MICRO-CONTENTS-3 F1 · a Chain is the last resort: it would stop being one
+  const graphs = windowsOf().filter((w) => w.type === "graph")
+    .sort((a, b) => Number(isChainWin(a)) - Number(isChainWin(b)));
   const win = graphs.find((w) => winMode(w) === "matrix") ?? graphs[0];
   if (!win) { refreshInspector(); return; }
   setActiveWin(win.id);
@@ -30545,6 +30549,7 @@ function redrawNeighbourhood(): void {
   // dipende dall'avere un documento aperto, e la finestra del disco lo mostra
   // comunque.
   renderStorage();
+  paintGraphLines();   // MICRO-CONTENTS-3 F17 · the Chain says what it drew
   if (!store) return;
   buildScenes();
   draw();
@@ -35632,10 +35637,40 @@ function ingestTrail(): HTMLElement {
   return box;
 }
 
+/**
+ * MICRO-CONTENTS-3 F12 · a click on a FILE of the Chain shows that file in the
+ * File window: the Archive has no Inspector, and the click selected a node with
+ * nothing visible following. In the folder the window is showing, its row is
+ * brought into view and lit (the selection — the file the Chain is drawing —
+ * stays); in another folder the window goes there and selects it, and the Chain
+ * then draws that file's chain.
+ */
+let storageFlashPath: string | null = null;
+function revealChainFile(nodeId: string): void {
+  if (view !== "dtc" || !(diskStamps.status === "stamped" || stampDraft)) return;
+  const n = scene()?.byId.get(nodeId)?.node;
+  const path = (n?.data as { path?: unknown } | undefined)?.path;
+  if (typeof path !== "string" || !path) return;
+  const win = windowsOf().find((w) => w.type === "storage" && winAreas.has(w.id));
+  if (!win) return;
+  const folder = paths.dirname(path) || "/";
+  storageFlashPath = path;
+  setTimeout(() => { if (storageFlashPath === path) storageFlashPath = null; }, 2500);
+  if (storagePath(win) === folder) renderStorage();
+  else {
+    setStoragePath(win, folder);
+    setStorageSelected(win, path);
+  }
+}
+
 function storageRow(win: Win, entry: FsEntry, cover?: FolderCover): HTMLElement {
   const row = document.createElement("div");
   row.className = "storage-row" + (entry.outside ? " storage-outside" : "");
   row.dataset.path = entry.path;
+  if (storageFlashPath === entry.path) {
+    row.classList.add("storage-flash");
+    requestAnimationFrame(() => row.scrollIntoView({ block: "nearest" }));
+  }
   // DEV29 B4 · a double click opens, it does not select the panel's text
   row.addEventListener("mousedown", (e) => { if (e.detail > 1) e.preventDefault(); });
 
@@ -37738,13 +37773,14 @@ function buildAreaHeader(win: Win): DocumentFragment {
   typeTog.className = "dd-toggle win-type-toggle";
   typeTog.title = t("win.typeTitle");
   const typeIcon = WINDOW_TYPE_META[type].icon;
-  const typeName = t(WINDOW_TYPE_META[type].labelKey);
+  const typeName = winTypeLabel(win);
   typeTog.innerHTML =
     `<span class="win-type-icon">${typeIcon}</span>` +
     `<span class="win-type-label">${escapeHtml(typeName)}</span>` +
     `<span class="win-type-caret">▾</span>`;
   const typeMenu = document.createElement("div");
   typeMenu.className = "dd-menu hidden";
+  const chain = isChainWin(win);
   for (const tt of TRANSFORM_TYPES) {
     const meta = WINDOW_TYPE_META[tt];
     const b = document.createElement("button");
@@ -37753,6 +37789,21 @@ function buildAreaHeader(win: Win): DocumentFragment {
     b.innerHTML = `<span class="wt-ic">${meta.icon}</span> ${escapeHtml(t(meta.labelKey))}`;
     b.addEventListener("click", () => transformWindowOf(win, tt));
     typeMenu.appendChild(b);
+    // MICRO-CONTENTS-3 F1 · the Chain is offered beside the Graph it is built on
+    if (tt === "graph") {
+      const c = document.createElement("button");
+      c.dataset.wt = "chain";
+      c.classList.toggle("active", chain);
+      c.title = t("win.chainHint");
+      c.innerHTML = `<span class="wt-ic">${meta.icon}</span> ${escapeHtml(t("win.chain"))}`;
+      c.addEventListener("click", () => {
+        if (isChainWin(win)) return;
+        setActiveWin(win.id);
+        setChainWin(win, true);
+        renderTiles();
+      });
+      typeMenu.appendChild(c);
+    }
   }
   // CLOSE is the last item of the type menu, after a rule — the × chip is gone
   // with the other four, and a window is also closed by dragging a divider all
@@ -38293,8 +38344,21 @@ function openCorpusDag(): void {
   });
 }
 
+/** The name of a window's kind, as its header says it: a Chain is «Catena (DTC)»
+ *  (MICRO-CONTENTS-3 F1), every other window the name of its type. */
+function winTypeLabel(win: Win): string {
+  return isChainWin(win) ? t("win.chain") : t(WINDOW_TYPE_META[win.type].labelKey);
+}
+
 /** Transform a SPECIFIC window in place (its own bar's type dropdown). */
 function transformWindowOf(win: Win, type: WindowType): void {
+  // MICRO-CONTENTS-3 F1 · «Grafo» on a Chain gives it back its four views
+  if (type === "graph" && isChainWin(win)) {
+    setActiveWin(win.id);
+    setChainWin(win, false);
+    renderTiles();
+    return;
+  }
   if (win.type === type) return;
   setActiveWin(win.id);
   setWinType(win, type);
@@ -38343,6 +38407,8 @@ function headerModesOf(win: Win): {
            count?: number | null; note?: string; key?: string }[];
 } | null {
   if (win.type === "graph") {
+    // MICRO-CONTENTS-3 F2 · a Chain shows the chain of the files and nothing else
+    if (isChainWin(win)) return null;
     const cur = winMode(win);
     return {
       currentLabel: t(`mode.${cur}`),
@@ -38682,6 +38748,33 @@ function paintGraphLine(line: HTMLElement): void {
   pick.disabled = !many;
   pick.addEventListener("click", (e) => { e.stopPropagation(); openGraphPicker(pick); });
   line.append(label, pick);
+  // MICRO-CONTENTS-3 F17 · in a window on the DTC, the sentence of the chain it
+  // draws, under the graph — in the bar it was cut, and said «1 passi»
+  const area = line.parentElement;
+  const win = area ? windowsOf().find((w) => w.id === area.dataset.win) : undefined;
+  const say = win && win.type === "graph" && winMode(win) === "dtc" ? chainSentence() : null;
+  line.classList.toggle("gl-has-chain", !!say);
+  if (say) {
+    const c = document.createElement("div");
+    c.className = "gl-chain";
+    c.textContent = say;
+    line.appendChild(c);
+  }
+  if (area && area.dataset.win) area.style.setProperty("--winbar-h", `${headHeightOf(area)}px`);
+}
+
+/** MICRO-CONTENTS-3 F17 · what the Chain drew from the disk, in a sentence with
+ *  its plurals — «TM035.pdf: 1 passo timbrato, e 1 file di partenza che qui non
+ *  c'è (il nodo col ?)» —, or null when it drew no chain read from a stamp. */
+function chainSentence(): string | null {
+  if (diskStamps.status !== "stamped") return null;
+  const name = baseName(diskStamps.path);
+  const n = diskStamps.chain.resolved.size + 1;
+  const missing = diskStamps.scene.missing;
+  const steps = tn("stamp.chainSteps", n);
+  return missing
+    ? t("stamp.chainPartial", { name, steps, parents: tn("stamp.chainMissing", missing), n: String(n), missing: String(missing) })
+    : tn("stamp.chain", n, { name });
 }
 
 /** The open graphs, by file, the active one marked: a click makes one active. */
@@ -39217,7 +39310,7 @@ function describeArrangement(a: Arrangement): string {
   const leaf = (name: string): string => {
     const w = byName.get(name);
     if (!w) return name;
-    if (w.type === "graph") return t(`mode.${String(w.state?.["mode"] ?? "matrix")}`);
+    if (w.type === "graph") return w.state?.["chain"] === true ? t("win.chain") : t(`mode.${String(w.state?.["mode"] ?? "matrix")}`);
     if (w.type === "table") {
       const sheet = w.state?.["current.table.sheet"];
       const cards = w.state?.["current.table.view"] === "cards";
@@ -40493,7 +40586,7 @@ function wireGraphCanvas(canvas: HTMLCanvasElement, winId: string): void {
       // opens its menu with the left click too: it was only on the right one
       const ghostL = !moved && dragNodeId ? missingParentAt(dragNodeId) : null;
       if (ghostL) { hideContextMenu(); showMissingParentMenu(e.clientX, e.clientY, ghostL); }
-      else if (!moved && dragNodeId) select(dragNodeId); // click (no drag) = select
+      else if (!moved && dragNodeId) { select(dragNodeId); revealChainFile(dragNodeId); } // click (no drag) = select
       else if (moved) {
         persistViewPositions();
         // the overrides were written during the drag; ONE rebuild settles the

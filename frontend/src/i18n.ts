@@ -3162,9 +3162,8 @@ const EN: Dict = {
   "compose.nothingToMake": "nothing unstamped in this folder to make from it",
   // ── DTCEMS1 · il timbro, letto dal disco ──────────────────────────────────
   "stamp.reading": "Reading what is beside {name}…",
-  "stamp.chain": "{name}: a chain of {n} stamped steps, read from disk",
-  "stamp.chainPartial":
-    "{name}: {n} stamped steps, and {missing} parent(s) not found here — the ? nodes",
+  "stamp.chain.other": "{name}: a chain of {n} stamped steps, read from disk",
+  "stamp.chainPartial": "{name}: {steps}, and {parents}",
   // IL CASO CHE DECIDE IL DISEGNO, detto per intero e senza colpevolizzare
   "stamp.superseded":
     "{name} is NOT stamped: the stamp beside it describes other bytes ({why}). "
@@ -4946,6 +4945,17 @@ const EN: Dict = {
   "fs.reorderUndone.one": "Reorder undone: 1 file back where it was",
   "compose.done.one": "1 stamp written in {s} s",
   "status.emVersionTitle": "The versions EMStudio reads: the EM language, its configuration files, CIDOC-CRM",
+  "win.chain": "Chain (DTC)",
+  "win.chainHint": "The chain of the files (the DTC): where each stamped file comes from. A graph window fixed on the DTC.",
+  "stamp.chain.one": "{name}: a chain of 1 stamped step, read from disk",
+  "stamp.chainBar": "{name}: its chain is drawn in the Chain",
+  "stamp.chainSteps.one": "1 stamped step",
+  "stamp.chainSteps.other": "{n} stamped steps",
+  "stamp.chainMissing.one": "1 starting file that is not here (the node with ?)",
+  "stamp.chainMissing.other": "{n} starting files that are not here (the nodes with ?)",
+  "dtc.laneFrom": "From",
+  "dtc.laneStep": "Step",
+  "dtc.laneTo": "To",
 };
 
 // ── Italiano: complete, because E.D. works in it ───────────────────────────────
@@ -8001,9 +8011,8 @@ const IT: Dict = {
   "compose.nothingToMake": "in questa cartella non c'è niente di non timbrato da farci",
   // ── DTCEMS1 · il timbro, letto dal disco ──────────────────────────────────
   "stamp.reading": "Leggo che cosa c'è accanto a {name}…",
-  "stamp.chain": "{name}: una catena di {n} passi timbrati, letta dal disco",
-  "stamp.chainPartial":
-    "{name}: {n} passi timbrati, e {missing} genitori che qui non ci sono — i nodi col ?",
+  "stamp.chain.other": "{name}: una catena di {n} passi timbrati, letta dal disco",
+  "stamp.chainPartial": "{name}: {steps}, e {parents}",
   "stamp.superseded":
     "{name} NON è timbrato: il timbro accanto descrive altri byte ({why}). "
     + "Quel timbro non è rotto — è un'affermazione vera su qualcos'altro, e "
@@ -9765,6 +9774,17 @@ const IT: Dict = {
   "fs.reorderUndone.one": "Riordino annullato: 1 file tornato dov'era",
   "compose.done.one": "1 timbro scritto in {s} s",
   "status.emVersionTitle": "Le versioni che EMStudio legge: il linguaggio EM, i suoi file di configurazione, CIDOC-CRM",
+  "win.chain": "Catena (DTC)",
+  "win.chainHint": "La catena dei file (il DTC): da dove viene ogni file timbrato. Una finestra Grafo fissata sul DTC.",
+  "stamp.chain.one": "{name}: una catena di 1 passo timbrato, letta dal disco",
+  "stamp.chainBar": "{name}: la sua catena è disegnata nella Catena",
+  "stamp.chainSteps.one": "1 passo timbrato",
+  "stamp.chainSteps.other": "{n} passi timbrati",
+  "stamp.chainMissing.one": "1 file di partenza che qui non c'è (il nodo col ?)",
+  "stamp.chainMissing.other": "{n} file di partenza che qui non ci sono (i nodi col ?)",
+  "dtc.laneFrom": "Da",
+  "dtc.laneStep": "Passo",
+  "dtc.laneTo": "A",
 };
 
 // ── The six other project languages: AI DRAFTS, awaiting validation ───────────

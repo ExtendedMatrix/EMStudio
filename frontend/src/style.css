@@ -10477,3 +10477,19 @@ body.em-detached #tile-root > .tile-area.tile-detached {
 /* MICRO-CONTENTS-2 D20 · the seal of a row is a button of its own, drawn as one */
 .storage-row .seal-mini { border-radius: 50%; cursor: pointer; }
 .storage-row .seal-mini:hover, .storage-row .seal-mini:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+/* MICRO-CONTENTS-3 F17 · the Chain's sentence, a row of its own under «Grafo: …» */
+.win-graphline.gl-has-chain { flex-wrap: wrap; row-gap: 2px; }
+.win-graphline .gl-chain {
+  flex: 1 0 100%;
+  font-size: 11.5px;
+  color: var(--fg-muted, var(--text-muted, #555));
+  line-height: 1.35;
+}
+
+/* MICRO-CONTENTS-3 F12 · the row of a file clicked in the Chain */
+.storage-row.storage-flash { animation: storage-flash 1.6s ease-out 1; }
+@keyframes storage-flash {
+  0%, 40% { background: color-mix(in srgb, var(--accent, #c8a24a) 35%, transparent); }
+  100% { background: transparent; }
+}

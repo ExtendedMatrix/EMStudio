@@ -292,7 +292,9 @@ const BUILTIN_WORKSPACES: WorkspacePreset[] = [
         { name: "files", type: "storage", state: { "mode.storage": "filesystem" } },
         { name: "emtree", type: "emtree" },
         { name: "shelf", type: "shelf" },
-        { name: "chain", type: "graph", state: { mode: "dtc" } },
+        // MICRO-CONTENTS-3 F1 F2 F18 · the CHAIN: a graph window fixed on the DTC
+        // (`isChainWin`), «Catena (DTC)» in its header, no other projection
+        { name: "chain", type: "graph", state: { mode: "dtc", chain: true } },
       ],
       active: "files",
       layout: { dir: "row", ratio: 0.22,
@@ -841,6 +843,13 @@ function loadRegistry(): Registry {
       );
       if (!wins.length) continue;
       const migrated = wins.map((w) => migrateWin({ ...w, state: w.state ?? {} }));
+      // MICRO-CONTENTS-3 F1 · the Archive's chain window saved before it was a
+      // Chain: still on the DTC, it becomes one (moved to another view, it stays
+      // the graph window somebody made of it)
+      if (preset.id === "assets") for (const w of migrated) {
+        if (w.id === "assets:chain" && w.type === "graph" && w.state["mode"] === "dtc"
+            && w.state["chain"] === undefined) w.state["chain"] = true;
+      }
       if (migrated.some((w, i) => w.type !== wins[i].type ||
           w.state["current.panel"] !== (wins[i].state ?? {})["current.panel"] ||
           w.state["current.table.sheet"] !== (wins[i].state ?? {})["current.table.sheet"]))
@@ -1460,6 +1469,7 @@ export function closeWindow(winId: string, ws: WorkspaceId = active): boolean {
 export function setWinType(win: Win, type: WindowType): void {
   if (win.type === type) return;
   win.type = type;
+  delete win.state["chain"];   // a Chain is a graph window, and only that
   // a graph window must always have a mode for the header to show
   if (type === "graph" && !win.state["mode"]) win.state["mode"] = "matrix";
   persistWindows();
@@ -1521,6 +1531,7 @@ export function setWinModeOf(win: Win, mode: string): boolean {
 /** The mode of a graph window (its canvas projection) — the typed view of
  *  `winModeOf` the canvas code reads. */
 export function winMode(win: Win): GraphMode {
+  if (isChainWin(win)) return "dtc";
   const m = win.state["mode"];
   // MICRO-PULIZIA p.3 · a window left on the «Full graph» opens on the Graph,
   // which draws every node now
@@ -1528,10 +1539,36 @@ export function winMode(win: Win): GraphMode {
   return GRAPH_MODES.includes(m as GraphMode) ? (m as GraphMode) : "matrix";
 }
 
-/** Record a graph window's mode. */
+/** Record a graph window's mode. A Chain asked for another projection stops
+ *  being a Chain: it becomes the graph window it is built on, with its views. */
 export function setWinMode(win: Win, mode: GraphMode): void {
   if (win.type !== "graph") return;
+  if (isChainWin(win) && mode !== "dtc") delete win.state["chain"];
   setWinModeOf(win, mode);
+}
+
+/**
+ * MICRO-CONTENTS-3 F1 F2 F18 · **the Chain («Catena (DTC)») is a kind of window
+ * built on the graph window**: the same canvas, fixed on the DTC projection.
+ * E.D.: «giusto solo DTC» in the Archive — the chain of the files, not the
+ * stratigraphic graph or the graphs' paradata —, while the Graph window of the
+ * other spaces keeps its four views. A flag on the window and not a new
+ * `WindowType`: every canvas path keys on `type === "graph"`, and a Chain is
+ * that canvas; what it changes is the header (its name, no Mode) and the type
+ * menu, where «Catena (DTC)» is offered beside «Grafo».
+ */
+export function isChainWin(win: Win): boolean {
+  return win.type === "graph" && win.state["chain"] === true;
+}
+
+/** Make `win` a Chain (from any type), or give a Chain back its views. */
+export function setChainWin(win: Win, on: boolean): void {
+  if (on) {
+    if (win.type !== "graph") setWinType(win, "graph");
+    win.state["mode"] = "dtc";
+    win.state["chain"] = true;
+  } else delete win.state["chain"];
+  persistWindows();
 }
 
 /** The window type the active workspace centres on — now the ACTIVE window's
