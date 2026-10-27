@@ -110,6 +110,10 @@ export const MENUS: MenuDef[] = [
       // MICRO-CONTENTS-1 D9 · the folders of a new EM project, beside New (it was
       // among the file tools of a graph already open, in the Storage)
       cmd("newProject", "fs.newProject", "btn-new-project", { title: "fs.newProjectMenuTitle" }),
+      // MICRO-ARCHIVIO-2 · the project is the folder: open it, reorder it, close it
+      cmd("openProject", "fs.openProject", "btn-open-project", { title: "fs.openProjectTitle" }),
+      cmd("reorderProject", "fs.reorderItem", "btn-reorder-project", { title: "fs.reorderItemTitle" }),
+      cmd("closeProject", "fs.closeProject", "btn-close-project", { title: "fs.closeProjectTitle" }),
       cmd("open", "toolbar.open", "btn-open", { title: "menu.openTitle", accel: "CmdOrCtrl+O" }),
       { kind: "sub", id: "openRecent", label: "menu.openRecent", title: "menu.openRecentTitle", dynamic: "recent", rows: [] },
       cmd("openReplace", "toolbar.openReplace", "btn-open-replace", { title: "menu.openReplaceTitle" }),

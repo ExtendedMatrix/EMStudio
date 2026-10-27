@@ -208,6 +208,10 @@ import { keepOnDisk, newEmProject, refreshFileStates, reorderApply, reorderPrevi
          type FileState, type MovedFile } from "./file-states";
 import { docFilesBox, filesSection, fileStateLine, resourcesTable, type FileHooks } from "./file-states-ui";
 import { paintChooser } from "./node-chooser";
+import { BUILTIN_STAMP_PRESETS, FAVORITES_KEY, KIND_FILTERS, OPTIMIZE_PRESETS, RECENT_DIRS_KEY, SORT_KEYS, TOOL_TABS,
+         autoTab, dropStampPreset, isOptimizable, isSystemFile, kindOf as browserKindOf, pushRecentDir, readPathList, readStampPresets,
+         saveStampPreset, statusCounts, toggleFavorite, visibleEntries,
+         type BrowserKind, type OptimizePreset, type RowFacts, type SortKey, type StampPreset, type ToolTab } from "./files-browser";
 import { proposeLanguages, type LanguageProposal } from "./lang-guess";
 import {
   addCategories,
@@ -13558,6 +13562,10 @@ document.getElementById("btn-relocate-files")?.addEventListener("click", () => {
 document.getElementById("btn-collect-files")?.addEventListener("click", () => { void collectResources(); });
 // MICRO-CONTENTS-1 D9 · File ▸ New EM project…, beside New
 document.getElementById("btn-new-project")?.addEventListener("click", () => { void newProjectGesture(); });
+// MICRO-ARCHIVIO-2 · File ▸ Apri progetto / Riordina secondo lo standard / Chiudi il progetto
+document.getElementById("btn-open-project")?.addEventListener("click", () => { void openProjectGesture(); });
+document.getElementById("btn-reorder-project")?.addEventListener("click", () => { void reorderGesture(); });
+document.getElementById("btn-close-project")?.addEventListener("click", () => { void closeProjectGesture(); });
 // MICRO-PERCORSI-WINDOWS p.4 · Settings ▸ Files on this computer ▸ «Find it»
 document.getElementById("set-onedrive-find")?.addEventListener("click", () => {
   const out = document.getElementById("set-onedrive-found");
@@ -13637,7 +13645,7 @@ async function bridgeUrl(): Promise<string> {
   return _bridgeUrl;
 }
 /** The bridge level this editor expects (`BRIDGE_LEVEL` in tools/em_bridge.py). */
-const BRIDGE_LEVEL_WANTED = 41;   // 41 = /web-meta, the Shelf's previews of web addresses (MICRO-ARCHIVIO-1); 40 = /geo/tileset-frame, a tileset's shift (MICRO tileset, shift e epoche); 39 = /fs/pack-3tz with `root`, the RealityScan pair (MICRO-TILESET-CARTELLA); 38 = /geo/crs-info, /geo/convert-shift (MICRO-GEOREF-GRAFO); 37 = HTTPS through em_net, /tiles/failures (MICRO-BRIDGE-CERTIFICATI); 36 = /tiles/*, /geo/* (MICRO-GEOGLOBO); 31 = /property-source (FONTE); 32 = /room-import, «Bring into a room» through the engine; 33 = /fs/write (MICRO-SPAZIO-3D); 34 = /fs/doc, /fs/probe (MICRO-PERCORSI-WINDOWS); 35 = /fs/collect, /health's pid (MICRO-WINDOWS-MODELLI)
+const BRIDGE_LEVEL_WANTED = 42;   // 42 = /project-tree and /fs/optimize, the File window «alla Blender» (MICRO-ARCHIVIO-2); 41 = /web-meta, the Shelf's previews of web addresses (MICRO-ARCHIVIO-1); 40 = /geo/tileset-frame, a tileset's shift (MICRO tileset, shift e epoche); 39 = /fs/pack-3tz with `root`, the RealityScan pair (MICRO-TILESET-CARTELLA); 38 = /geo/crs-info, /geo/convert-shift (MICRO-GEOREF-GRAFO); 37 = HTTPS through em_net, /tiles/failures (MICRO-BRIDGE-CERTIFICATI); 36 = /tiles/*, /geo/* (MICRO-GEOGLOBO); 31 = /property-source (FONTE); 32 = /room-import, «Bring into a room» through the engine; 33 = /fs/write (MICRO-SPAZIO-3D); 34 = /fs/doc, /fs/probe (MICRO-PERCORSI-WINDOWS); 35 = /fs/collect, /health's pid (MICRO-WINDOWS-MODELLI)
 /** MICRO-INSTALLER-PULSANTE p.3 · the bridge that answers says its level; one
  *  that differs from BRIDGE_LEVEL_WANTED is said in the Log (its url, pid, since
  *  when) and in a notice — once per bridge. Asked at start, while the sidecar
@@ -32498,9 +32506,65 @@ async function newProjectGesture(): Promise<void> {
     const made = (out.made as string[]) ?? [];
     logInfo(t("fs.newProjectMade", { root: String(out.root), made: made.join(", ") }));
     toast(t("fs.newProjectMadeShort", { root: String(out.root), n: String(made.length) }));
+    forgetProjectTrees();
     const st = windowsOf().find((w) => w.type === "storage" && winModeOf(w) === "filesystem");
     if (st && out.root) setStoragePath(st, String(out.root));
   } catch (e) { toast((e as Error).message); }
+}
+
+/** MICRO-ARCHIVIO-2 · «Apri progetto…»: the project is the folder, the em.json
+ *  its heart — chosen as a folder (the system's dialog on the desktop, the
+ *  app's selector in a browser), its em.json found in EM/ (or beside, for a
+ *  project that keeps it at the top). Several: one is asked. */
+async function openProjectGesture(): Promise<void> {
+  let dir: string | null = null;
+  if (isTauri()) dir = await pickFolder();
+  else {
+    const st = windowsOf().find((w) => w.type === "storage" && winModeOf(w) === "filesystem");
+    dir = await pickPathInApp({ mode: "folder", start: st ? storagePath(st) : null, title: t("fs.openProjectPick") });
+  }
+  if (!dir) return;
+  const root = paths.basename(dir) === "EM" ? paths.dirname(dir) : dir;
+  const found: FsEntry[] = [];
+  for (const where of [paths.join(root, "EM"), root]) {
+    try {
+      const l = await fsList(where);
+      found.push(...l.entries.filter((e) => e.type === "file" && /\.em\.json$/i.test(e.name)));
+    } catch { /* not there, or not served */ }
+    if (found.length) break;
+  }
+  if (!found.length) { toast(t("fs.openProjectNone", { dir: root })); return; }
+  let pick = found[0];
+  if (found.length > 1) {
+    found.sort((a, b) => b.mtime - a.mtime);
+    const body = document.createElement("div");
+    const sel = document.createElement("select");
+    sel.className = "open-project-which";
+    for (const e of found) {
+      const o = document.createElement("option");
+      o.value = e.path;
+      o.textContent = `${e.name} · ${showDate(new Date(e.mtime * 1000).toISOString().slice(0, 10), dateFormOf(getLocale()))}`;
+      sel.appendChild(o);
+    }
+    body.appendChild(sel);
+    const answer = await openDialog({ kind: "open-project", title: t("fs.openProjectWhichTitle"),
+      message: t("fs.openProjectWhich", { project: paths.basename(root) }), body, ok: t("toolbar.open") });
+    if (!answer.ok) return;
+    pick = found.find((e) => e.path === sel.value) ?? found[0];
+  }
+  await openFromStorage(pick.path);
+}
+
+/** MICRO-ARCHIVIO-2 · «Chiudi il progetto»: every file of the open project
+ *  (asked once for the unsaved ones); the Shelf goes with its file. */
+async function closeProjectGesture(): Promise<void> {
+  const root = filesProjectRoot();
+  const files = emtree.files.filter((f) => !root || (f.path && paths.isInside(root, f.path)));
+  if (!files.length) { toast(t("fs.noProject")); return; }
+  const dirty = files.filter((f) => emtree.fileDirty(f.id));
+  if (dirty.length && !(await askConfirm(t("emtree.closeFileUnsaved", { name: dirty.map((f) => f.name).join(", ") })))) return;
+  for (const f of files) closeFile(f.id);
+  forgetProjectTrees();
 }
 
 async function reorderGesture(): Promise<void> {
@@ -32509,8 +32573,11 @@ async function reorderGesture(): Promise<void> {
   const bridge = await bridgeUrl();
   try {
     const prev = await reorderPreview(bridge, root);
-    const plan = (prev.plan as Array<{ action: string; from?: string; to: string }>) ?? [];
+    const plan = (prev.plan as Array<{ action: string; from?: string; to: string; choices?: string[] }>) ?? [];
     if (!plan.length) { toast(t("fs.reorderNothing")); return; }
+    // MICRO-ARCHIVIO-2 · V4 · a .tif the plan cannot read is ASKED: a GIS
+    // layer, or a document of the dossier (s3Dgraphy never guesses)
+    const asks = new Map<string, HTMLSelectElement>();
     // MICRO-CONTENTS-1 D10 · the plan READ, not «+ RM/»: one line per step, in
     // words, in the app's dialog; nothing moves without a yes (s3Dgraphy refuses
     // an unconfirmed plan too), and the moves come back with the toast's «Annulla»
@@ -32519,9 +32586,25 @@ async function reorderGesture(): Promise<void> {
     const ul = document.createElement("ul");
     for (const p of plan.slice(0, 40)) {
       const li = document.createElement("li");
+      li.dataset.step = p.action;
+      if (p.action === "ask" && p.from) {
+        li.textContent = t("fs.reorderAskWhere", { file: p.from }) + " ";
+        const sel = document.createElement("select");
+        sel.dataset.ask = p.from;
+        for (const [v, key] of [...(p.choices ?? []).map((c) => [c, c.startsWith("GIS/") ? "fs.reorderAskGis" : "fs.reorderAskDosco"]), ["", "fs.reorderAskLeave"]]) {
+          const o = document.createElement("option");
+          o.value = v;
+          o.textContent = t(key);
+          sel.appendChild(o);
+        }
+        sel.value = "";
+        asks.set(p.from, sel);
+        li.appendChild(sel);
+        ul.appendChild(li);
+        continue;
+      }
       li.textContent = p.action === "mkdir" ? t("fs.reorderMkdir", { dir: p.to })
         : t("fs.reorderMove", { from: p.from ?? "", to: p.to });
-      li.dataset.step = p.action;
       ul.appendChild(li);
     }
     if (plan.length > 40) { const li = document.createElement("li"); li.textContent = t("gdel.more", { n: String(plan.length - 40) }); ul.appendChild(li); }
@@ -32532,7 +32615,14 @@ async function reorderGesture(): Promise<void> {
     const answer = await openDialog({ kind: "reorder", title: t("fs.reorderTitle", { root: baseName(root) }),
       message: t("fs.reorderLead", { root }), body, ok: t("fs.reorderOk") });
     if (!answer.ok) return;   // never without a yes
+    // an answered ask is a move; one left unanswered stays where it is
+    for (const p of plan) {
+      if (p.action !== "ask" || !p.from) continue;
+      const to = asks.get(p.from)?.value;
+      if (to) { p.action = "move"; p.to = to; }
+    }
     const done = (await reorderApply(bridge, root, plan)).done as string[];
+    forgetProjectTrees();
     logInfo(done.join("; "));
     const moved = plan.filter((p) => p.action === "move" && p.from && done.includes(`moved ${p.from} → ${p.to}`));
     const made = plan.filter((p) => p.action === "mkdir").length;
@@ -32864,122 +32954,1286 @@ function renderStorageInto(host: StorageHost): void {
 
     body.textContent = "";
     withCard();
-    // CAMPAGNA · the roots list says what is saved and NOT served: a whole disk
-    // nobody confirmed (the «/» of a one-click «Macintosh HD»)
-    if (listing.roots) void suspendedRootsNote(body, win);
-    // MICRO-ARCHIVIO-1 · with no document the roots are «Da dove si parte»
-    if (listing.roots && !emtree.slots.length) body.appendChild(storageStartBlock());
-    // …and a project reopened says where it took the window back to, once
-    if (!listing.roots && storageResumed && storageResumed.dir === listing.path && storageResumed.file === currentFilePath) {
-      const line = document.createElement("div");
-      line.className = "storage-resumed";
-      line.dataset.resumed = listing.path;
-      const proj = projectRootOf(storageResumed.file);
-      line.textContent = t("storage.resumed", { project: paths.basename(proj) || baseName(storageResumed.file),
-        where: listing.path.startsWith(proj + "/") ? listing.path.slice(proj.length + 1) : listing.path });
-      body.appendChild(line);
-    }
-    if (!listing.entries.length) {
-      body.appendChild(storageEmpty(t("storage.emptyFolder")));
-      return;
-    }
-    // DTCEMS2 · la BOZZA in composizione, oppure — su un asset già timbrato —
-    // IL TIMBRO, che non è un modulo da compilare.
+    // MICRO-ARCHIVIO-2 · the recent folders are the places' «Recenti»
+    if (!listing.roots) rememberRecentDir(listing.path);
     // CAMPAGNA · what the stamps here cover (members of a file set are not
     // unstamped files), read once per listing before anything counts them
-    await ensureFolderCover(listing);
+    if (!listing.roots) await ensureFolderCover(listing);
     if (!body.isConnected || storagePath(win) !== path || body.dataset.renderSeq !== seq) return;
-    // DEV30 U10/U12 · THE DETAIL IS A PANE OF ITS OWN: the micro-card of the
-    // stamp, the draft, and the commands on the selection sit in a fixed box
-    // under the list, which scrolls alone. Measured on dev.15: the card and the
-    // buttons were appended ABOVE the rows in the same scroller, so with a file
-    // picked low in a folder of 142 rows they scrolled out of reach.
-    const detail = document.createElement("div");
-    detail.className = "storage-detail";
-    if (stampDraft) {
-      detail.appendChild(stampComposeBox(win, listing));
-    } else if (diskStamps.status === "stamped"
-               && diskStamps.path === storageSelected(win)) {
-      detail.appendChild(stampedBox(diskStamps.path, diskStamps.chain.root));
-    } else {
-      const selected = storageSelected(win);
-      const entry = selected
-        ? listing.entries.find((e) => e.path === selected) : undefined;
-      const picked = storagePicked(win).map((pth) => listing.entries.find((e) => e.path === pth))
-        .filter((e): e is FsEntry => !!e && e.type === "file" && !isStampPath(e.path) && !e.outside);
-      if (picked.length > 1) {
-        // CATENA · «EM Stamp di gruppo»: ONE act for the files picked together
-        const box = document.createElement("div");
-        box.className = "stamp-report-ask";
-        const b = document.createElement("button");
-        b.className = "primary";
-        b.dataset.action = "compose-group";
-        b.textContent = t("compose.openGroup", { n: String(picked.length) });
-        b.onclick = () => openDraft(picked, listing);
-        const clear = document.createElement("button");
-        clear.className = "ghost";
-        clear.textContent = t("compose.clearPick");
-        clear.onclick = () => setStoragePicked(win, []);
-        box.append(b, putOnShelfButton(picked.map((e) => e.path)), clear);
-        detail.appendChild(box);
-      } else if (entry && !isStampPath(entry.path)) {
-        detail.appendChild(composeButtons(entry, listing));
-        // dev28 · «è un'altra copia di R» also OUTSIDE a room (decision 14)
-        if (entry.type === "file" && !entry.outside) storageCopyOffer(detail, win, entry);
-      } else if (!listing.roots) {
-        detail.appendChild(composeFolderButton(listing));
-        // DEV30 U7 · «Scan DosCo» where E.D. looked for it: on the folder
-        detail.appendChild(scanDoscoButton(listing.path));
-      }
-      // RISORSA-FILE · a TILESET folder: pack it into a .3tz beside it (desktop)
-      if (!listing.roots && listing.entries.some((e) => e.type === "file" && e.name === "tileset.json")) {
-        detail.appendChild(pack3tzButton(listing.path));
-        if (!entry) {
-          const box = document.createElement("div");
-          box.className = "stamp-report-ask";
-          box.appendChild(openInSceneButton(listing.path));
-          detail.appendChild(box);
-        }
-      }
-    }
-    // DTCEMS1 · il referto delle tre classi su QUESTA cartella, quando qualcuno
-    // l'ha chiesto. Sopra l'elenco perché è una frase sull'elenco.
-    if (folderReport && folderReport.folder === listing.path) {
-      detail.appendChild(stampReportBox(folderReport));
-    } else if (!listing.roots) {
-      detail.appendChild(stampReportButton(listing.path));
-    }
-    const list = document.createElement("div");
-    list.className = "storage-list";
-    const cover = folderCover(listing);
-    // DEV30 V2 · the `*.stamp.json` beside each file are hidden by default:
-    // the seal on the file's icon already says it is stamped, and 71 photos
-    // listed as 142 rows hid the photos. One line says how many, and shows them.
-    const showStamps = winCurrent(win, "storage.showStamps") === "1";
-    const sidecars = listing.entries.filter((e) => e.type === "file" && isStampPath(e.path)
-      && listing.entries.some((x) => x.path === e.path.replace(/\.stamp\.json$/i, "")));
-    const hidden = new Set(showStamps ? [] : sidecars.map((e) => e.path));
-    for (const entry of listing.entries) {
-      if (hidden.has(entry.path)) continue;
-      list.appendChild(storageRow(win, entry, cover));
-    }
-    if (sidecars.length) {
-      const tog = document.createElement("button");
-      tog.type = "button";
-      tog.className = "ghost storage-sidecars";
-      tog.dataset.action = "toggle-stamp-files";
-      tog.textContent = tn(showStamps ? "storage.stampsShown" : "storage.stampsHidden", sidecars.length);
-      tog.onclick = () => { setWinCurrent(win, "storage.showStamps", showStamps ? null : "1"); renderStorage(); };
-      list.appendChild(tog);
-    }
-    body.classList.add("storage-split");
-    body.appendChild(list);
-    if (detail.childNodes.length) body.appendChild(detail);
-    // …and put it back where it was: a folder you had scrolled through does not
-    // jump to the top because the pointer crossed a divider
-    restoreSurfaceScroll(win, body.querySelector<HTMLElement>(":scope > .storage-list") ?? body, wasAt);
+    // MICRO-ARCHIVIO-2 · THE FILE WINDOW «ALLA BLENDER» (note
+    // em-design-archivio-ripensato §2; E.D.'s V1 = A, V2 = 4): the places on
+    // the left (T), the files in the centre with their columns and a line of
+    // state, the tools on the right in four tabs (N) — Timbro, Ottimizza,
+    // Stanza, Info — that work on the choice. The block of actions under the
+    // list (DEV30 U10/U12: the stamp's card, the draft, the commands) is gone:
+    // what it held lives in the tabs, and the bottom is one line of state.
+    body.classList.add("storage-split", "storage-blender");
+    body.appendChild(filesBrowser(win, listing, wasAt));
   })();
 }
+
+// ── MICRO-ARCHIVIO-2 · the File window «alla Blender» ────────────────────────
+//
+// The note `em-design-archivio-ripensato` (§2) and E.D.'s decisions of 27 Oct
+// 2026: V1 = A (the tools in a tabbed panel on the right, Blender's N region),
+// V2 = 4 (Timbro, Ottimizza, Stanza, Info — Info the compact form of the card
+// the Viewer will show whole, round 3), AR1 = the «Progetto» group of the
+// places is the project's standard tree (s3Dgraphy `project_tree`, V4 with
+// GIS/ and the variants' versions/). What is decided without the DOM —
+// system files, kinds, the order of the columns, the line of state, the tab
+// that opens, the presets — is `files-browser.ts`.
+
+const filesTreeCache = new Map<string, { at: number; tree: ProjectTree | null; why?: string }>();
+interface ProjectTree {
+  root: string;
+  dirs: Array<{ rel: string; what: string; depth: number; exists: boolean; files: number }>;
+  versions: string[];
+}
+let filesRoots: { at: number; dirs: FsEntry[] } | null = null;
+
+/** The window's own choices, kept with it (`current.*`). */
+function filesPref(win: Win, key: string): string | null {
+  const v = winCurrent(win, `files.${key}`);
+  return typeof v === "string" ? v : null;
+}
+function setFilesPref(win: Win, key: string, value: string | null): void {
+  setWinCurrent(win, `files.${key}`, value);
+}
+
+/** The project the File window shows in «Progetto»: the open em.json's. */
+function filesProjectRoot(): string | null {
+  if (!currentFilePath || !emtree.slots.length) return null;
+  return fileProjectRoot() || projectRootOf(currentFilePath);
+}
+
+async function filesProjectTree(root: string): Promise<{ tree: ProjectTree | null; why?: string }> {
+  const had = filesTreeCache.get(root);
+  if (had && Date.now() - had.at < 8000) return had;
+  let tree: ProjectTree | null = null;
+  let why: string | undefined;
+  try {
+    const r = await fetch(`${await bridgeUrl()}/project-tree`, {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ root }) });
+    if (r.status === 404) why = t("files.treeOldBridge");
+    else {
+      const j = await r.json().catch(() => ({})) as ProjectTree & { ok?: boolean; error?: string };
+      if (r.ok && j.ok) tree = j; else why = String(j.error ?? r.status);
+    }
+  } catch { why = t("storage.bridgeDown"); }
+  const out = { at: Date.now(), tree, why };
+  filesTreeCache.set(root, out);
+  return out;
+}
+/** a folder said from its project (`RB/versions`), whatever the disk calls
+ *  the way there (the bridge answers with the real path: /private/tmp for /tmp) */
+function projectRelative(dir: string): string {
+  const root = filesProjectRoot();
+  const d = paths.toPosix(dir);
+  if (root) {
+    const r = paths.toPosix(root);
+    for (const [a, b] of [[r, d], [r.replace(/^\/private\//, "/"), d.replace(/^\/private\//, "/")]])
+      if (b.startsWith(a + "/")) return b.slice(a.length + 1);
+  }
+  return d.split("/").slice(-2).join("/");
+}
+
+/** after a new project or a reorder: the tree is read again */
+function forgetProjectTrees(): void { filesTreeCache.clear(); }
+
+function rememberRecentDir(dir: string): void {
+  const list = readPathList(localStorage, RECENT_DIRS_KEY);
+  if (list[0] === dir) return;
+  try { localStorage.setItem(RECENT_DIRS_KEY, JSON.stringify(pushRecentDir(list, dir))); } catch { /* storage off */ }
+}
+
+/** Is a file of this listing stamped (its own sidecar, or a member of a set)? */
+function filesStamped(listing: FsListing, path: string): boolean {
+  return !listing.roots && isCovered(listing, path);
+}
+
+/** The graph's resources whose file is this path (the files' check, R1). */
+function filesUses(path: string): FileState[] {
+  const p = paths.toPosix(path);
+  return fileStates().filter((f) => f.path && paths.toPosix(f.path) === p);
+}
+
+/** The choice of the centre: the files picked, or the one selected. */
+function filesChosen(win: Win, listing: FsListing): FsEntry[] {
+  const picked = storagePicked(win);
+  const sel = storageSelected(win);
+  const want = picked.length ? picked : sel ? [sel] : [];
+  return want.map((p) => listing.entries.find((e) => e.path === p))
+    .filter((e): e is FsEntry => !!e && e.type === "file" && !e.outside && !isStampPath(e.path));
+}
+
+/** Which tab shows: the one chosen, else the one the state calls for. */
+function filesTabOf(win: Win, listing: FsListing): ToolTab {
+  const chosen = filesPref(win, "tab");
+  if (stampDraft) return "stamp";
+  if (chosen && (TOOL_TABS as readonly string[]).includes(chosen)) return chosen as ToolTab;
+  const ch = filesChosen(win, listing);
+  return autoTab({
+    drafting: !!stampDraft,
+    chosen: ch.length,
+    chosenUnstamped: ch.filter((e) => !filesStamped(listing, e.path) && !isDocumentOrCopy(e.name)).length,
+    chosenModels: ch.filter((e) => isOptimizable(e.name)).length,
+  });
+}
+
+/** ◧ and ◨ (T and N): open, closed, or «as the width allows» (null). */
+function filesRegion(win: Win, which: "places" | "panel"): "on" | "off" | null {
+  const v = filesPref(win, which);
+  return v === "on" || v === "off" ? v : null;
+}
+/** what each window last showed of its two sides (read after a paint): a key
+ *  pressed while the window is being drawn again turns round what was seen */
+const filesShown = new Map<string, { places: boolean; panel: boolean }>();
+function measureFilesRegions(win: Win, host: HTMLElement): void {
+  if (!host.isConnected) return;
+  const vis = (sel: string): boolean => {
+    const el = host.querySelector<HTMLElement>(sel);
+    return !!el && getComputedStyle(el).display !== "none";
+  };
+  filesShown.set(win.id, { places: vis(":scope > .files-places"), panel: vis(":scope > .files-panel") });
+}
+function toggleFilesRegion(win: Win, which: "places" | "panel"): void {
+  const pref = filesRegion(win, which);
+  const host = document.querySelector<HTMLElement>(`.files-browser[data-win="${CSS.escape(win.id)}"]`);
+  if (host && !pref) measureFilesRegions(win, host);
+  const shown = pref ? pref === "on" : filesShown.get(win.id)?.[which] ?? true;
+  setFilesPref(win, which, shown ? "off" : "on");
+  filesShown.set(win.id, { ...(filesShown.get(win.id) ?? { places: true, panel: true }), [which]: !shown });
+  renderStorage();
+}
+
+/**
+ * The window's body: places · centre · panel. `wasAt` is the list's scroll,
+ * put back when the rows are in.
+ */
+function filesBrowser(win: Win, listing: FsListing, wasAt: unknown): HTMLElement {
+  const host = document.createElement("div");
+  host.className = "files-browser";
+  host.dataset.win = win.id;
+  const places = filesRegion(win, "places");
+  const panel = filesRegion(win, "panel");
+  host.dataset.places = places ?? "auto";
+  // a draft being written is in the panel: the panel opens for it
+  host.dataset.panel = stampDraft ? "on" : panel ?? "auto";
+  host.append(filesPlaces(win, listing), filesCentre(win, listing, wasAt), filesPanel(win, listing));
+  requestAnimationFrame(() => measureFilesRegions(win, host));
+  return host;
+}
+
+// ── the places (AR1, AR2, AR3) ──────────────────────────────────────────────
+
+function filesPlaces(win: Win, listing: FsListing): HTMLElement {
+  const box = document.createElement("nav");
+  box.className = "files-places";
+  box.setAttribute("aria-label", t("files.places"));
+  const here = listing.roots ? null : listing.path;
+  const group = (title: string, cls: string): HTMLElement => {
+    const g = document.createElement("div");
+    g.className = `files-pg ${cls}`;
+    const h = document.createElement("div");
+    h.className = "files-pg-head";
+    h.textContent = title;
+    g.appendChild(h);
+    box.appendChild(g);
+    return g;
+  };
+  const place = (into: HTMLElement, label: string, dir: string | null, icon: string, opts: {
+    title?: string; depth?: number; count?: number; missing?: boolean; onClick?: () => void; act?: string } = {}): HTMLButtonElement => {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "files-pl" + (dir && dir === here ? " on" : "") + (opts.missing ? " missing" : "");
+    if (dir) b.dataset.place = dir;
+    if (opts.act) b.dataset.action = opts.act;
+    b.style.paddingLeft = `${6 + (opts.depth ?? 0) * 12}px`;
+    const ic = document.createElement("span");
+    ic.className = "files-pl-ic";
+    ic.textContent = icon;
+    const nm = document.createElement("span");
+    nm.className = "files-pl-nm";
+    nm.textContent = label;
+    b.append(ic, nm);
+    if (opts.missing || opts.count) {
+      const sm = document.createElement("small");
+      sm.textContent = opts.missing ? t("files.toMake") : String(opts.count);
+      b.appendChild(sm);
+    }
+    b.title = opts.title ?? dir ?? label;
+    b.onclick = opts.onClick ?? (() => { if (dir) void storageGoChecked(win, dir); });
+    into.appendChild(b);
+    return b;
+  };
+
+  // Progetto — the open em.json's standard tree, or «Da dove si parte»
+  const root = filesProjectRoot();
+  if (root) {
+    const g = group(t("files.project"), "files-pg-project");
+    const name = document.createElement("small");
+    name.className = "files-pg-name";
+    name.textContent = paths.basename(root);
+    name.title = root;
+    g.firstElementChild!.appendChild(name);
+    const slot = document.createElement("div");
+    slot.className = "files-tree";
+    g.appendChild(slot);
+    const paint = (res: { tree: ProjectTree | null; why?: string }): void => {
+      slot.textContent = "";
+      if (!res.tree) {
+        const why = document.createElement("div");
+        why.className = "files-pg-note";
+        why.textContent = res.why ?? "";
+        slot.appendChild(why);
+      } else {
+        for (const d of res.tree.dirs) {
+          const full = paths.join(root, d.rel);
+          place(slot, paths.basename(d.rel), d.exists ? full : null, d.depth ? "└" : "📁", {
+            depth: d.depth, count: d.files, missing: !d.exists,
+            title: d.exists ? `${d.rel}/ — ${d.what}` : t("files.toMakeHint", { dir: `${d.rel}/` }),
+            act: d.exists ? undefined : "files-make-tree",
+            onClick: d.exists ? undefined : () => { void reorderGesture(); },
+          });
+          for (const v of res.tree.versions.filter((x) => x.startsWith(d.rel + "/") && d.depth === 0))
+            place(slot, "versions", paths.join(root, v), "└", { depth: 1, title: t("files.versionsHint", { dir: `${v}/` }) });
+        }
+      }
+      place(slot, t("files.projectFolder"), root, "⌂", { title: `${root} — README.md, LICENCE.md` });
+    };
+    const cached = filesTreeCache.get(root);
+    if (cached) paint(cached);
+    if (!cached || Date.now() - cached.at >= 8000) void filesProjectTree(root).then((res) => { if (slot.isConnected) paint(res); });
+  } else {
+    const g = group(t("files.projects"), "files-pg-projects");
+    place(g, t("storage.startTitle"), null, "◈", { act: "files-start", onClick: () => { setStoragePath(win, null); } })
+      .classList.toggle("on", listing.roots);
+  }
+
+  // Preferiti — a star on the folder shown
+  const favs = readPathList(localStorage, FAVORITES_KEY);
+  const gf = group(t("files.favorites"), "files-pg-favorites");
+  for (const f of favs) place(gf, paths.basename(f) || f, f, "★");
+  if (here) {
+    const on = favs.includes(here);
+    place(gf, on ? t("files.unstar") : t("files.star"), null, on ? "☆" : "+", {
+      act: "files-star", title: here,
+      onClick: () => {
+        try { localStorage.setItem(FAVORITES_KEY, JSON.stringify(toggleFavorite(favs, here))); } catch { /* storage off */ }
+        renderStorage();
+      },
+    }).classList.add("files-pl-add");
+  } else if (!favs.length) {
+    const n = document.createElement("div");
+    n.className = "files-pg-note";
+    n.textContent = t("files.noFavorites");
+    gf.appendChild(n);
+  }
+
+  // Recenti — the folders visited, the newest first
+  const rec = readPathList(localStorage, RECENT_DIRS_KEY).filter((d) => d !== here).slice(0, 6);
+  if (rec.length) {
+    const gr = group(t("files.recent"), "files-pg-recent");
+    for (const d of rec) place(gr, paths.basename(d) || d, d, "🕘");
+  }
+
+  // Cartelle consentite — the roots the bridge serves, and «+ aggiungi…»
+  const ga = group(t("files.allowed"), "files-pg-allowed");
+  const roots = document.createElement("div");
+  ga.appendChild(roots);
+  const paintRoots = (dirs: FsEntry[]): void => {
+    roots.textContent = "";
+    for (const d of dirs) place(roots, d.name || d.path, d.path, "🗂", { title: d.path });
+  };
+  if (listing.roots) filesRoots = { at: Date.now(), dirs: listing.entries.filter((e) => e.type === "dir") };
+  if (filesRoots) paintRoots(filesRoots.dirs);
+  if (!filesRoots || Date.now() - filesRoots.at > 15000)
+    void fsList(undefined).then((l) => {
+      filesRoots = { at: Date.now(), dirs: l.entries.filter((e) => e.type === "dir") };
+      if (roots.isConnected) paintRoots(filesRoots.dirs);
+    }).catch(() => { /* the bridge is down: the list says it */ });
+  const add = place(ga, t("files.addAllowed"), null, "+", { act: "files-add-root", title: t("storage.rootTitle") });
+  add.classList.add("files-pl-add");
+  add.onclick = () => { void openStoragePlaces(win, add); };
+  return box;
+}
+
+// ── the centre (AR4–AR10) ───────────────────────────────────────────────────
+
+function filesCentre(win: Win, listing: FsListing, wasAt: unknown): HTMLElement {
+  const centre = document.createElement("div");
+  centre.className = "files-centre";
+  // the bar of the centre: ◧ · search · type · list|thumbnails · ◨
+  const bar = document.createElement("div");
+  bar.className = "files-bar";
+  const tog = (which: "places" | "panel", glyph: string, key: string, act: string): HTMLButtonElement => {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "ghost files-ib";
+    b.dataset.action = act;
+    b.textContent = glyph;
+    b.title = t(key);
+    b.setAttribute("aria-label", t(key));
+    b.onclick = () => toggleFilesRegion(win, which);
+    return b;
+  };
+  const q = document.createElement("input");
+  q.type = "search";
+  q.className = "files-q";
+  q.dataset.field = "files-q";
+  q.placeholder = listing.roots ? t("files.searchHere") : t("files.searchIn", { folder: paths.basename(listing.path) || listing.path });
+  q.value = filesPref(win, "q") ?? "";
+  const kind = document.createElement("select");
+  kind.className = "files-kind";
+  kind.title = t("files.kindTitle");
+  for (const k of KIND_FILTERS) {
+    const o = document.createElement("option");
+    o.value = k;
+    o.textContent = t(`files.kind.${k}`);
+    kind.appendChild(o);
+  }
+  kind.value = filesPref(win, "kind") ?? "all";
+  const view = filesPref(win, "view") === "grid" ? "grid" : "list";
+  const seg = document.createElement("span");
+  seg.className = "files-seg";
+  for (const [v, glyph, key] of [["list", "☰", "files.viewList"], ["grid", "▦", "files.viewGrid"]] as const) {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.dataset.action = `files-view-${v}`;
+    b.textContent = glyph;
+    b.title = t(key);
+    b.setAttribute("aria-pressed", String(view === v));
+    b.onclick = () => { setFilesPref(win, "view", v === "list" ? null : v); renderStorage(); };
+    seg.appendChild(b);
+  }
+  bar.append(tog("places", "◧", "files.placesToggle", "files-places-toggle"), q, kind, seg,
+             tog("panel", "◨", "files.panelToggle", "files-panel-toggle"));
+  centre.appendChild(bar);
+
+  // the lines that come before the files: suspended roots, «Da dove si parte»,
+  // «Ripreso dove eri»
+  if (listing.roots) void suspendedRootsNote(centre, win);
+  if (listing.roots && !emtree.slots.length) centre.appendChild(storageStartBlock());
+  if (!listing.roots && storageResumed && storageResumed.dir === listing.path && storageResumed.file === currentFilePath) {
+    const line = document.createElement("div");
+    line.className = "storage-resumed";
+    line.dataset.resumed = listing.path;
+    const proj = projectRootOf(storageResumed.file);
+    line.textContent = t("storage.resumed", { project: paths.basename(proj) || baseName(storageResumed.file),
+      where: listing.path.startsWith(proj + "/") ? listing.path.slice(proj.length + 1) : listing.path });
+    centre.appendChild(line);
+  }
+
+  const cols = document.createElement("div");
+  cols.className = "files-cols";
+  const list = document.createElement("div");
+  list.className = "storage-list" + (view === "grid" ? " files-grid" : "");
+  const status = document.createElement("div");
+  status.className = "storage-status";
+  const facts: RowFacts = { stamped: (p) => filesStamped(listing, p), used: (p) => filesUses(p).length > 0 };
+  const sort = (filesPref(win, "sort") ?? "name") as SortKey;
+  const desc = filesPref(win, "desc") === "1";
+  const showSystem = winCurrent(win, "storage.showStamps") === "1";
+  if (!listing.roots && view === "list") {
+    for (const k of SORT_KEYS) {
+      const h = document.createElement("button");
+      h.type = "button";
+      h.className = "files-col files-col-" + k + (k === sort ? " on" : "");
+      h.dataset.sort = k;
+      h.textContent = t(`files.col.${k}`) + (k === sort ? (desc ? " ▴" : " ▾") : "");
+      h.title = t("files.sortBy", { col: t(`files.col.${k}`) });
+      h.onclick = () => {
+        if (k === sort) setFilesPref(win, "desc", desc ? null : "1");
+        else { setFilesPref(win, "sort", k === "name" ? null : k); setFilesPref(win, "desc", null); }
+        renderStorage();
+      };
+      cols.appendChild(h);
+    }
+    centre.appendChild(cols);
+  }
+  centre.appendChild(list);
+  centre.appendChild(status);
+
+  const fill = (): void => {
+    list.textContent = "";
+    const shown = visibleEntries(listing.entries, {
+      query: q.value, kind: kind.value as BrowserKind | "all", showSystem, sort, desc, facts });
+    if (!listing.entries.length) list.appendChild(storageEmpty(t("storage.emptyFolder")));
+    else if (!shown.length) list.appendChild(storageEmpty(t("files.nothingWithFilter")));
+    const cover = listing.roots ? undefined : folderCover(listing);
+    for (const entry of shown)
+      list.appendChild(view === "grid" && !listing.roots ? filesTile(win, entry, listing) : storageRow(win, entry, cover));
+    paintFilesStatus(win, listing, status, shown.length, showSystem);
+  };
+  q.oninput = () => { setFilesPref(win, "q", q.value || null); fill(); };
+  kind.onchange = () => { setFilesPref(win, "kind", kind.value === "all" ? null : kind.value); fill(); };
+  fill();
+  requestAnimationFrame(() => restoreSurfaceScroll(win, list, wasAt as never));
+  return centre;
+}
+
+/** AR10 · the line of state, where the block of actions was */
+function paintFilesStatus(win: Win, listing: FsListing, status: HTMLElement, shown: number, showSystem: boolean): void {
+  status.textContent = "";
+  if (listing.roots) {
+    status.textContent = t("files.statusRoots");
+    return;
+  }
+  const chosen = filesChosen(win, listing).map((e) => e.path);
+  const c = statusCounts(listing.entries, chosen, { stamped: (p) => filesStamped(listing, p) }, shown, showSystem);
+  const said = document.createElement("span");
+  said.className = "storage-status-said";
+  said.textContent = c.chosen
+    ? [tn("files.statusChosen", c.chosen), tn("files.statusStamped", c.chosenStamped), tn("files.statusToStamp", c.chosen - c.chosenStamped)].join(" · ")
+    : [tn("files.statusFiles", c.files), tn("files.statusStamped", c.stamped), tn("files.statusToStamp", c.unstamped)].join(" · ");
+  status.appendChild(said);
+  const grow = document.createElement("span");
+  grow.className = "grow";
+  status.appendChild(grow);
+  const sys = listing.entries.filter((e) => e.type === "file" && isSystemFile(e.name)).length;
+  if (sys) {
+    const a = document.createElement("button");
+    a.type = "button";
+    a.className = "ghost storage-sidecars";
+    a.dataset.action = "toggle-stamp-files";
+    a.textContent = tn(showSystem ? "files.systemShown" : "files.systemHidden", sys);
+    a.title = t("files.systemHint");
+    a.onclick = () => { setWinCurrent(win, "storage.showStamps", showSystem ? null : "1"); renderStorage(); };
+    status.appendChild(a);
+  }
+  if (c.chosen) {
+    const clear = document.createElement("button");
+    clear.type = "button";
+    clear.className = "ghost";
+    clear.dataset.action = "files-clear-choice";
+    clear.textContent = t("files.clearChoice");
+    clear.onclick = () => { setStoragePicked(win, []); setStorageSelected(win, null); };
+    status.appendChild(clear);
+  }
+}
+
+/** AR7 · a file as a thumbnail (the pictures as themselves, read through the bridge) */
+function filesTile(win: Win, entry: FsEntry, listing: FsListing): HTMLElement {
+  const row = storageRow(win, entry, folderCover(listing));
+  row.classList.add("files-tile");
+  const im = document.createElement("span");
+  im.className = "files-tile-im";
+  const k = browserKindOf(entry);
+  im.textContent = k === "dir" ? "📁" : k === "model" ? "◆" : k === "tileset" ? "▦" : k === "document" ? "📄" : k === "gis" ? "🗺" : k === "emjson" ? "◈" : k === "image" ? "" : "•";
+  if (k === "image" && !/\.(tiff?|dng|cr2|nef|exr|heic)$/i.test(entry.name) && entry.size < 40 * 1024 * 1024) {
+    void fsFileUrl(entry.path).then((url) => {
+      const img = document.createElement("img");
+      img.loading = "lazy";
+      img.decoding = "async";
+      img.alt = "";
+      img.src = url;
+      im.appendChild(img);
+    }).catch(() => { im.textContent = "🖼"; });
+  } else if (k === "image") im.textContent = "🖼";
+  row.prepend(im);
+  return row;
+}
+
+// ── the panel (AR11, AR18) ──────────────────────────────────────────────────
+
+const FILES_PICK_MIME = "application/x-em-storage-picked";
+
+function filesPanel(win: Win, listing: FsListing): HTMLElement {
+  const panel = document.createElement("aside");
+  panel.className = "files-panel";
+  const tab = filesTabOf(win, listing);
+  panel.dataset.tab = tab;
+  const body = document.createElement("div");
+  body.className = "files-panel-body";
+  body.dataset.tab = tab;
+  const tabs = document.createElement("div");
+  tabs.className = "files-tabs";
+  tabs.setAttribute("role", "tablist");
+  tabs.setAttribute("aria-orientation", "vertical");
+  for (const k of TOOL_TABS) {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "files-tab";
+    b.dataset.tab = k;
+    b.setAttribute("role", "tab");
+    b.setAttribute("aria-selected", String(k === tab));
+    b.textContent = t(`files.tab.${k}`);
+    b.title = t(`files.tabHint.${k}`);
+    if (k === "stamp" && stampDraft) b.classList.add("drafting");
+    b.onclick = () => {
+      setFilesPref(win, "tab", k);
+      if (filesRegion(win, "panel") === "off") setFilesPref(win, "panel", "on");
+      renderStorage();
+    };
+    // AR18 · the choice (or entries of the Shelf) dragged onto a tab
+    b.addEventListener("dragover", (e) => {
+      const types = e.dataTransfer?.types ?? [];
+      if (types.includes(STORAGE_MIME) || types.includes(FILES_PICK_MIME) || types.includes(SHELF_ENTRIES_MIME)) {
+        e.preventDefault();
+        e.stopPropagation();
+        if (e.dataTransfer) e.dataTransfer.dropEffect = "copy";
+        b.classList.add("over");
+      }
+    });
+    b.addEventListener("dragleave", () => b.classList.remove("over"));
+    b.addEventListener("drop", (e) => {
+      b.classList.remove("over");
+      const got = filesDropped(e);
+      if (!got) return;
+      e.preventDefault();
+      e.stopPropagation();
+      void filesTakeDrop(win, k, got);
+    });
+    tabs.appendChild(b);
+  }
+  try {
+    body.appendChild(tab === "stamp" ? filesStampTab(win, listing)
+      : tab === "optimize" ? filesOptimizeTab(win, listing)
+      : tab === "room" ? filesRoomTab(win, listing)
+      : filesInfoTab(win, listing));
+  } catch (err) {
+    body.appendChild(storageEmpty(String((err as Error).message)));
+  }
+  panel.append(body, tabs);
+  return panel;
+}
+
+/** the paths a drop on a tab carries: the picked files, one row, Shelf entries */
+function filesDropped(e: DragEvent): string[] | null {
+  const many = e.dataTransfer?.getData(FILES_PICK_MIME);
+  if (many) { try { const v = JSON.parse(many) as unknown; if (Array.isArray(v)) return v.map(String); } catch { /* not ours */ } }
+  const one = storageDragPayload(e);
+  if (one) return one.type === "file" ? [one.path] : null;
+  const ids = shelfDragIds(e);
+  if (ids) {
+    const locs = ids.map((id) => shelfEntries().find((x) => x.id === id)?.locator ?? "")
+      .filter((l) => !!l && !/^[a-z][a-z0-9+.-]*:\/\//i.test(l));
+    return locs.length ? locs : null;
+  }
+  return null;
+}
+
+/** The dropped files become the choice of the window (in their folder), and the tab opens on them. */
+async function filesTakeDrop(win: Win, tab: ToolTab, dropped: string[]): Promise<void> {
+  const folder = paths.dirname(dropped[0]);
+  const here = dropped.filter((p) => paths.dirname(p) === folder);
+  if (here.length < dropped.length) toast(tn("files.dropOtherFolders", dropped.length - here.length, { folder: paths.basename(folder) }));
+  setFilesPref(win, "tab", tab);
+  if (filesRegion(win, "panel") === "off") setFilesPref(win, "panel", "on");
+  if (storagePath(win) !== folder) await storageGoChecked(win, folder);
+  if (here.length === 1) { setStoragePicked(win, []); setStorageSelected(win, here[0]); }
+  else setStoragePicked(win, here);
+  renderStorage();
+}
+
+const tabHead = (title: string, sub: string): HTMLElement => {
+  const h = document.createElement("div");
+  h.className = "files-ph";
+  const b = document.createElement("b");
+  b.textContent = title;
+  const s = document.createElement("small");
+  s.textContent = sub;
+  h.append(b, s);
+  return h;
+};
+const tabLead = (text: string, cls = "files-lead"): HTMLElement => {
+  const p = document.createElement("p");
+  p.className = cls;
+  p.textContent = text;
+  return p;
+};
+const noChoice = (box: HTMLElement, what: string): void => {
+  box.appendChild(tabLead(what));
+  box.appendChild(tabLead(t("files.chooseHint"), "files-hint"));
+};
+
+// ── Timbro (AR12, AR13): one place to stamp ─────────────────────────────────
+
+function filesStampPresets(): StampPreset[] {
+  return [...BUILTIN_STAMP_PRESETS, ...readStampPresets(localStorage)];
+}
+const presetLabel = (p: StampPreset): string => p.name ?? t(p.labelKey ?? p.id);
+
+/** a preset into a draft: the road, the kind, the instrument, the operator */
+function applyStampPreset(draft: Draft, p: StampPreset): void {
+  draft.origin = p.origin;
+  draft.originDeclared = p.origin;
+  draft.kind = p.kind;
+  delete draft.kindWhy;
+  draft.why = "";
+  if (p.instrument) draft.campaignMetadata.instrument = p.instrument;
+  if (p.technique) draft.technique = p.technique;
+  if (p.operator?.label && !draft.operator.label) draft.operator = { ...p.operator };
+}
+
+function openDraftWithPreset(win: Win, outputs: FsEntry[], listing: FsListing): void {
+  openDraft(outputs, listing);
+  const id = filesPref(win, "preset");
+  const p = id ? filesStampPresets().find((x) => x.id === id) : undefined;
+  if (stampDraft && p) {
+    applyStampPreset(stampDraft, p);
+    renderStorage();
+    redrawDraftPicture();
+  }
+}
+
+function filesStampTab(win: Win, listing: FsListing): HTMLElement {
+  const box = document.createElement("div");
+  box.className = "files-tab-stamp";
+  box.appendChild(tabHead(t("files.tab.stamp"), t("files.stampSub")));
+  // the presets: a click fills the composer (or the next one opened)
+  const chips = document.createElement("div");
+  chips.className = "files-chips";
+  const current = filesPref(win, "preset");
+  for (const p of filesStampPresets()) {
+    const c = document.createElement("button");
+    c.type = "button";
+    c.className = "files-chip";
+    c.dataset.preset = p.id;
+    c.setAttribute("aria-pressed", String(p.id === current));
+    c.textContent = presetLabel(p);
+    c.title = t("files.presetHint", { kind: dtcKindsFor(p.origin ? "acquisition" : "process").find((k) => k.kind === p.kind)?.label ?? p.kind });
+    c.onclick = () => {
+      setFilesPref(win, "preset", p.id === current ? null : p.id);
+      if (stampDraft && p.id !== current) { applyStampPreset(stampDraft, p); redrawDraftPicture(); }
+      renderStorage();
+    };
+    chips.appendChild(c);
+    if (!p.builtin) {
+      const x = document.createElement("button");
+      x.type = "button";
+      x.className = "files-chip-x";
+      x.textContent = "×";
+      x.title = t("files.presetDrop", { name: presetLabel(p) });
+      x.onclick = () => { dropStampPreset(localStorage, p.id); if (current === p.id) setFilesPref(win, "preset", null); renderStorage(); };
+      chips.appendChild(x);
+    }
+  }
+  const save = document.createElement("button");
+  save.type = "button";
+  save.className = "files-chip add";
+  save.dataset.action = "files-save-preset";
+  save.textContent = t("files.presetSave");
+  save.disabled = !stampDraft || !stampDraft.kind;
+  save.title = save.disabled ? t("files.presetSaveOff") : t("files.presetSaveHint");
+  save.onclick = () => { void saveDraftAsPreset(win); };
+  chips.appendChild(save);
+  box.appendChild(chips);
+
+  if (stampDraft) {
+    // the composer of today, here: ONE place to stamp
+    box.appendChild(stampComposeBox(win, listing));
+    box.appendChild(draftPreview(stampDraft, filesChosen(win, listing).filter((e) => filesStamped(listing, e.path))));
+    return box;
+  }
+  const chosen = filesChosen(win, listing);
+  if (!chosen.length) {
+    noChoice(box, t("files.stampNoChoice"));
+    if (!listing.roots) {
+      const row = document.createElement("div");
+      row.className = "stamp-report-ask";
+      row.appendChild(composeFolderButton(listing, true));
+      box.appendChild(row);
+    }
+    return box;
+  }
+  const docs = chosen.filter((e) => isDocumentOrCopy(e.name));
+  const done = chosen.filter((e) => !docs.includes(e) && filesStamped(listing, e.path));
+  const todo = chosen.filter((e) => !docs.includes(e) && !done.includes(e));
+  const pre = current ? filesStampPresets().find((x) => x.id === current) : undefined;
+  // the preview, before the composer opens: what each file will have
+  const table = document.createElement("table");
+  table.className = "files-prev";
+  const head = document.createElement("tr");
+  for (const k of ["files.prevFile", "files.prevStamp", "files.prevChain"]) {
+    const th = document.createElement("th");
+    th.textContent = t(k);
+    head.appendChild(th);
+  }
+  table.appendChild(head);
+  const row = (name: string, stamp: string, chain: string, cls = ""): void => {
+    const tr = document.createElement("tr");
+    if (cls) tr.className = cls;
+    for (const [i, v] of [name, stamp, chain].entries()) {
+      const td = document.createElement("td");
+      td.textContent = v;
+      if (i === 0) { td.className = "fn"; td.title = v; }
+      tr.appendChild(td);
+    }
+    table.appendChild(tr);
+  };
+  const kindLabel = pre ? dtcKindsFor(pre.origin ? "acquisition" : "process").find((k) => k.kind === pre.kind)?.label ?? pre.kind : "";
+  const me = currentIdentity();
+  const who = me ? [me.name, me.surname].filter(Boolean).join(" ") : "";
+  for (const e of todo)
+    row(e.name, pre ? [kindLabel, who, pre.instrument].filter(Boolean).join(" · ") : t("files.prevAsked"),
+        pre && !pre.origin ? t("files.prevFromStep", { name: e.name }) : t("files.prevOrigin", { name: e.name.replace(/\.[^.]+$/, "") }));
+  for (const e of done) row(e.name, t("files.prevDone"), "—", "done");
+  for (const e of docs) row(e.name, t("files.prevDocument"), "—", "done");
+  const lead = document.createElement("div");
+  lead.className = "files-box";
+  lead.textContent = todo.length > 1 ? tn("files.stampLeadAct", todo.length)
+    : todo.length === 1 ? t("files.stampLeadOne") : t("files.stampLeadNone");
+  box.append(lead, table);
+  if (todo.length) {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "primary";
+    b.dataset.action = todo.length > 1 ? "compose-group" : "compose-one";
+    b.textContent = tn("files.stampN", todo.length, { name: todo[0].name });
+    b.onclick = () => openDraftWithPreset(win, todo, listing);
+    box.appendChild(b);
+    if (done.length) box.appendChild(tabLead(tn("files.keptAsThey", done.length), "files-hint"));
+  } else if (done.length) {
+    box.appendChild(tabLead(t("files.stampNotAgain"), "files-hint"));
+    const step = document.createElement("button");
+    step.type = "button";
+    step.className = "ghost";
+    step.dataset.action = "compose-from";
+    step.textContent = tn("files.stepFrom", done.length);
+    step.onclick = () => { void composeFromMany(done.map((e) => e.path)); };
+    box.appendChild(step);
+  }
+  return box;
+}
+
+/** AR13 · per file: the stamp it will have, the act, the piece of Chain */
+function draftPreview(draft: Draft, keptAsThey: FsEntry[]): HTMLElement {
+  const wrap = document.createElement("div");
+  wrap.className = "files-draft-preview";
+  const n = draft.outputs.length;
+  const tt = document.createElement("div");
+  tt.className = "files-box";
+  const kind = kindLabelOf(draft) || t("files.prevKindMissing");
+  tt.textContent = n > 1 ? tn("files.previewAct", n, { act: draft.campaign || t("files.prevActMissing") })
+    : n === 1 ? t("files.previewOne") : t("files.previewNone");
+  wrap.appendChild(tt);
+  if (!n) return wrap;
+  const table = document.createElement("table");
+  table.className = "files-prev";
+  const head = document.createElement("tr");
+  for (const k of ["files.prevFile", "files.prevStamp", "files.prevChain"]) {
+    const th = document.createElement("th");
+    th.textContent = t(k);
+    head.appendChild(th);
+  }
+  table.appendChild(head);
+  const from = draft.inputs.map((i) => i.label).join(", ") || draft.declared.flatMap((d) => d.parents.map((x) => x.label ?? "")).filter(Boolean).join(", ");
+  for (const o of draft.outputs) {
+    const tr = document.createElement("tr");
+    const cells = [o.name,
+      [kind, draft.operator.label || t("files.prevOperatorMissing"), draft.campaignMetadata.instrument].filter(Boolean).join(" · "),
+      draft.origin ? t("files.prevOrigin", { name: o.name.replace(/\.[^.]+$/, "") })
+        : t("files.prevDerived", { from: from || "?", name: o.name.replace(/\.[^.]+$/, "") })];
+    for (const [i, v] of cells.entries()) {
+      const td = document.createElement("td");
+      td.textContent = v;
+      if (i === 0) { td.className = "fn"; td.title = v; }
+      tr.appendChild(td);
+    }
+    table.appendChild(tr);
+  }
+  for (const e of keptAsThey) {
+    const tr = document.createElement("tr");
+    tr.className = "done";
+    for (const v of [e.name, t("files.prevDone"), "—"]) {
+      const td = document.createElement("td");
+      td.textContent = v;
+      tr.appendChild(td);
+    }
+    table.appendChild(tr);
+  }
+  wrap.appendChild(table);
+  return wrap;
+}
+
+async function saveDraftAsPreset(win: Win): Promise<void> {
+  const d = stampDraft;
+  if (!d || !d.kind) return;
+  const answer = await openDialog({
+    kind: "stamp-preset", title: t("files.presetSaveTitle"), message: t("files.presetSaveMessage"),
+    input: { value: kindLabelOf(d), label: t("files.presetName") }, ok: t("files.presetSaveOk"),
+    validate: (v) => v.trim() ? null : t("files.presetNameNeeded"),
+  });
+  if (!answer.ok || !answer.value.trim()) return;
+  const saved = saveStampPreset(localStorage, {
+    id: "", name: answer.value.trim(), origin: d.origin, kind: d.kind,
+    instrument: d.campaignMetadata.instrument || undefined, technique: d.technique || undefined,
+    operator: d.operator.label ? { ...d.operator } : undefined });
+  const p = saved.find((x) => x.name === answer.value.trim());
+  if (p) setFilesPref(win, "preset", p.id);
+  toast(t("files.presetSaved", { name: answer.value.trim() }));
+  renderStorage();
+}
+
+/** «Timbra un passo da questi N file…»: the stamped files are the inputs of a new step */
+async function composeFromMany(pathsIn: string[]): Promise<void> {
+  if (pathsIn.length === 1) {
+    const st = await readStamp(stampPathFor(pathsIn[0])).catch(() => null);
+    if (st) await composeFromStamped(pathsIn[0], st);
+    return;
+  }
+  const stamps = await Promise.all(pathsIn.map((p) => readStamp(stampPathFor(p)).catch(() => null)));
+  const first = pathsIn.findIndex((_, i) => !!stamps[i]);
+  if (first < 0) { toast(t("seal.unreadable", { name: baseName(pathsIn[0]) })); return; }
+  await composeFromStamped(pathsIn[first], stamps[first]!);
+  if (!stampDraft) return;
+  stampDraft.inputs = pathsIn.map((p, i) => stamps[i] ? {
+    resource_id: stamps[i]!.self.resource_id, digest: stamps[i]!.self.digest ?? "", label: baseName(p), path: p } : null)
+    .filter((x): x is NonNullable<typeof x> => !!x);
+  stampDraft.madeFrom = stampDraft.inputs.map((i) => i.label).join(", ");
+  stampDraft.why = t("stamp2.whyFrom", { name: stampDraft.madeFrom });
+  renderStorage();
+  redrawNeighbourhood();
+}
+
+// ── Ottimizza (AR14): the round-0 verdict ───────────────────────────────────
+//
+// `.3tz` ON (the pack that exists, `/fs/pack-3tz`); a model's VARIANTS
+// EXPERIMENTAL, behind a switch with its warning (gltfpack on the bridge, not
+// compressed because the Viewer reads neither meshopt nor KTX2 yet); a TILESET
+// from a mesh ANNOUNCED, with how it is done today.
+
+const OPT_EXPERIMENTAL_KEY = "emstudio.optimizeExperimental";
+const optPlans = new Map<string, OptPlan>();
+interface OptPlan { at: number; tool: { path: string; version: string } | null; outputs: OptOut[]; error?: string }
+interface OptOut { source: string; path?: string; name?: string; exists?: boolean; error?: string; state?: string;
+  bytes?: number; sha256?: string; seconds?: number; command?: string }
+let optimizing = false;
+
+function filesOptimizeTab(win: Win, listing: FsListing): HTMLElement {
+  const box = document.createElement("div");
+  box.className = "files-tab-optimize";
+  box.appendChild(tabHead(t("files.tab.optimize"), t("files.optSub")));
+  const chosen = filesChosen(win, listing);
+  const models = chosen.filter((e) => isOptimizable(e.name));
+
+  // 1 · variants — experimental
+  const sec = document.createElement("section");
+  sec.className = "files-sec";
+  const h = document.createElement("div");
+  h.className = "files-sec-h";
+  h.innerHTML = "";
+  const hb = document.createElement("b");
+  hb.textContent = t("files.optVariants");
+  const pill = document.createElement("span");
+  pill.className = "files-pill exp";
+  pill.textContent = t("files.experimental");
+  h.append(hb, pill);
+  sec.appendChild(h);
+  const on = localStorage.getItem(OPT_EXPERIMENTAL_KEY) === "1";
+  const sw = document.createElement("label");
+  sw.className = "files-switch";
+  const cb = document.createElement("input");
+  cb.type = "checkbox";
+  cb.checked = on;
+  cb.dataset.action = "files-opt-experimental";
+  cb.onchange = () => { try { localStorage.setItem(OPT_EXPERIMENTAL_KEY, cb.checked ? "1" : "0"); } catch { /* off */ } renderStorage(); };
+  const swt = document.createElement("span");
+  swt.textContent = t("files.optSwitch");
+  sw.append(cb, swt);
+  sec.appendChild(sw);
+  sec.appendChild(tabLead(t("files.optWarning"), "files-hint files-warn"));
+  box.appendChild(sec);
+  if (on) {
+    const dest = filesPref(win, "opt") ?? "web";
+    const pre = OPTIMIZE_PRESETS.find((p) => p.id === dest) ?? OPTIMIZE_PRESETS[0];
+    const chips = document.createElement("div");
+    chips.className = "files-chips";
+    for (const p of OPTIMIZE_PRESETS) {
+      const c = document.createElement("button");
+      c.type = "button";
+      c.className = "files-chip";
+      c.dataset.opt = p.id;
+      c.setAttribute("aria-pressed", String(p.id === pre.id));
+      c.textContent = t(p.labelKey);
+      c.title = t("files.optPresetHint", { pct: String(Math.round(p.ratio * 100)), suffix: `@${p.lod}-${p.destination}` });
+      c.onclick = () => { setFilesPref(win, "opt", p.id === "web" ? null : p.id); renderStorage(); };
+      chips.appendChild(c);
+    }
+    sec.appendChild(chips);
+    const kv = document.createElement("dl");
+    kv.className = "files-kv";
+    for (const [k, v] of [[t("files.optGeometry"), t("files.optGeometryIs", { pct: String(Math.round(pre.ratio * 100)) })],
+                          [t("files.optTextures"), t("files.optTexturesAre")],
+                          [t("files.optWhere"), t("files.optWhereIs")]]) {
+      const dt = document.createElement("dt"); dt.textContent = k;
+      const dd = document.createElement("dd"); dd.textContent = v;
+      kv.append(dt, dd);
+    }
+    sec.appendChild(kv);
+    if (!models.length) {
+      sec.appendChild(tabLead(chosen.length ? tn("files.optNoModels", chosen.length) : t("files.optChoose"), "files-lead"));
+    } else {
+      const key = `${pre.id}|${models.map((m) => m.path).join("|")}`;
+      const plan = optPlans.get(key);
+      const slot = document.createElement("div");
+      sec.appendChild(slot);
+      const paint = (pl: OptPlan): void => {
+        slot.textContent = "";
+        if (pl.error) { slot.appendChild(tabLead(pl.error, "files-hint files-warn")); return; }
+        const tool = document.createElement("div");
+        tool.className = "files-box";
+        tool.dataset.tool = pl.tool ? "1" : "0";
+        tool.textContent = pl.tool ? t("files.optTool", { version: pl.tool.version || "gltfpack", path: pl.tool.path })
+          : t("files.optNoTool");
+        slot.appendChild(tool);
+        const table = document.createElement("table");
+        table.className = "files-prev";
+        const hr = document.createElement("tr");
+        for (const k of ["files.optSource", "files.optVariant"]) { const th = document.createElement("th"); th.textContent = t(k); hr.appendChild(th); }
+        table.appendChild(hr);
+        for (const o of pl.outputs) {
+          const tr = document.createElement("tr");
+          if (o.exists || o.error) tr.className = "done";
+          const a = document.createElement("td"); a.className = "fn"; a.textContent = baseName(o.source); a.title = o.source;
+          const b = document.createElement("td"); b.className = "fn";
+          b.textContent = o.error ? o.error : o.exists ? t("files.optExists", { name: o.name ?? "" }) : `${o.name}`;
+          b.title = o.path ?? o.error ?? "";
+          tr.append(a, b);
+          table.appendChild(tr);
+        }
+        slot.appendChild(table);
+        const where = pl.outputs.find((o) => o.path)?.path;
+        if (where) slot.appendChild(tabLead(t("files.optInto", { dir: projectRelative(paths.dirname(where)) + "/" }), "files-hint"));
+        const unstamped = models.filter((m) => !filesStamped(listing, m.path));
+        if (unstamped.length) slot.appendChild(tabLead(tn("files.optStampFirst", unstamped.length), "files-hint files-warn"));
+        const todo = pl.outputs.filter((o) => o.path && !o.exists && !o.error && !unstamped.some((u) => u.path === o.source));
+        const go = document.createElement("button");
+        go.type = "button";
+        go.className = "primary";
+        go.dataset.action = "files-optimize";
+        go.textContent = optimizing ? t("files.optWorking") : tn("files.optGo", todo.length);
+        go.disabled = optimizing || !pl.tool || !todo.length;
+        go.onclick = () => { void runOptimize(win, pre, todo.map((o) => o.source)); };
+        slot.appendChild(go);
+        slot.appendChild(tabLead(t("files.optBorn"), "files-hint"));
+      };
+      if (plan) paint(plan);
+      else {
+        slot.appendChild(tabLead(t("files.optAsking"), "files-hint"));
+        void (async () => {
+          let pl: OptPlan;
+          try {
+            const r = await fetch(`${await bridgeUrl()}/fs/optimize`, {
+              method: "POST", headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ sources: models.map((m) => m.path), lod: pre.lod, destination: pre.destination,
+                                     ratio: pre.ratio, dry_run: true }) });
+            const j = await r.json().catch(() => ({})) as { ok?: boolean; error?: string; tool?: { path: string; version: string } | null; outputs?: OptOut[] };
+            pl = r.status === 404 ? { at: Date.now(), tool: null, outputs: [], error: t("files.optOldBridge") }
+              : j.ok ? { at: Date.now(), tool: j.tool ?? null, outputs: j.outputs ?? [] }
+              : { at: Date.now(), tool: null, outputs: [], error: String(j.error ?? r.status) };
+          } catch { pl = { at: Date.now(), tool: null, outputs: [], error: t("storage.bridgeDown") }; }
+          optPlans.set(key, pl);
+          if (slot.isConnected) paint(pl);
+        })();
+      }
+    }
+  }
+
+  // 2 · .3tz — on
+  const pk = document.createElement("section");
+  pk.className = "files-sec";
+  const ph = document.createElement("div");
+  ph.className = "files-sec-h";
+  const pb = document.createElement("b");
+  pb.textContent = t("files.optPack");
+  const pp = document.createElement("span");
+  pp.className = "files-pill on";
+  pp.textContent = t("files.on");
+  ph.append(pb, pp);
+  pk.appendChild(ph);
+  const isTileset = !listing.roots && listing.entries.some((e) => e.type === "file" && e.name === "tileset.json");
+  if (isTileset) pk.appendChild(pack3tzButton(listing.path));
+  else pk.appendChild(tabLead(t("files.optPackWhere"), "files-hint"));
+  box.appendChild(pk);
+
+  // 3 · a tileset from a mesh — announced
+  const ts = document.createElement("section");
+  ts.className = "files-sec";
+  const th = document.createElement("div");
+  th.className = "files-sec-h";
+  const tb = document.createElement("b");
+  tb.textContent = t("files.optTiles");
+  const tp = document.createElement("span");
+  tp.className = "files-pill soon";
+  tp.textContent = t("files.announced");
+  th.append(tb, tp);
+  ts.appendChild(th);
+  ts.appendChild(tabLead(t("files.optTilesToday"), "files-hint"));
+  box.appendChild(ts);
+  return box;
+}
+
+/** Run gltfpack on the bridge, then stamp each variant as DERIVED from its
+ *  source (step `lod_generation`, technique `decimation`, the parameters and
+ *  the tool said): the variant is born stamped, in `versions/`. */
+async function runOptimize(win: Win, pre: OptimizePreset, sources: string[]): Promise<void> {
+  if (optimizing || !sources.length) return;
+  optimizing = true;
+  renderStorage();
+  toast(tn("files.optStarted", sources.length));
+  try {
+    const r = await fetch(`${await bridgeUrl()}/fs/optimize`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ sources, lod: pre.lod, destination: pre.destination, ratio: pre.ratio }) });
+    const j = await r.json().catch(() => ({})) as { ok?: boolean; error?: string; tool?: { version: string }; outputs?: OptOut[];
+      parameters?: Record<string, unknown> };
+    if (!j.ok) { toast(t("files.optFailed", { why: String(j.error ?? r.status) })); return; }
+    const written = (j.outputs ?? []).filter((o) => o.state === "written" && o.path);
+    for (const o of (j.outputs ?? []).filter((x) => x.state === "error")) logWarn(`${baseName(o.source)}: ${o.error}`);
+    let stamped = 0;
+    const me = currentIdentity();
+    for (const o of written) {
+      const src = await readStamp(stampPathFor(o.source)).catch(() => null);
+      if (!src || !me?.orcid) continue;
+      const listing = await fsList(paths.dirname(o.path!));
+      const entry = listing.entries.find((e) => e.path === o.path);
+      if (!entry) continue;
+      const draft = newDraft([{ ...outputFrom(entry), digest: o.sha256 }]);
+      draft.origin = false;
+      draft.kind = "lod_generation";
+      draft.technique = "decimation";
+      draft.parameters = { ...(j.parameters ?? {}), tool: "gltfpack" };
+      draft.software = [{ name: "gltfpack", version: (j.tool?.version ?? "").replace(/^gltfpack\s*/i, "") }];
+      draft.operator = { id: `https://orcid.org/${me.orcid}`, label: [me.name, me.surname].filter(Boolean).join(" ") };
+      const n = new Date();
+      draft.at = `${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, "0")}-${String(n.getDate()).padStart(2, "0")}`;
+      draft.inputs = [{ resource_id: src.self.resource_id, digest: src.self.digest ?? "", label: baseName(o.source), path: o.source }];
+      const out = await emitDraft(draft, { graph_id: store?.doc?.graph?.graph_id as string | undefined });
+      if (out.written.length) { stamped++; landEmission(draft, out); }
+    }
+    const msg = tn("files.optDone", written.length, { stamped: String(stamped) });
+    toast(msg);
+    logInfo(msg + " — " + written.map((o) => `${baseName(o.path!)} (${formatBytes(o.bytes ?? 0)}, ${o.seconds}s)`).join(", "));
+    if (written.length > stamped) logWarn(t("files.optNotStamped", { n: String(written.length - stamped) }));
+    optPlans.clear();
+    forgetProjectTrees();
+    if (written[0]?.path) { await storageGoChecked(win, paths.dirname(written[0].path)); setStorageSelected(win, written[0].path); }
+  } catch (e) {
+    toast(t("files.optFailed", { why: String((e as Error).message) }));
+  } finally {
+    optimizing = false;
+    renderStorage();
+  }
+}
+
+// ── Stanza (AR15) ───────────────────────────────────────────────────────────
+
+function filesRoomTab(win: Win, listing: FsListing): HTMLElement {
+  const box = document.createElement("div");
+  box.className = "files-tab-room";
+  box.appendChild(tabHead(t("files.tab.room"), t("files.roomSub")));
+  if (!sync.room) {
+    box.appendChild(tabLead(t("files.roomOutside")));
+    box.appendChild(tabLead(t("files.roomHowIn"), "files-hint"));
+    return box;
+  }
+  const kv = document.createElement("dl");
+  kv.className = "files-kv";
+  const scope = store?.readGraphScope?.() as { license?: string; embargo?: string } | undefined;
+  const licence = ingestDraft.license || scope?.license || "";
+  const embargo = ingestDraft.embargoUntil || scope?.embargo || "";
+  for (const [k, v] of [[t("files.roomRoom"), sync.room], [t("files.roomBrowse"), t("files.roomBrowseIs")]]) {
+    const dt = document.createElement("dt"); dt.textContent = k;
+    const dd = document.createElement("dd"); dd.textContent = v;
+    kv.append(dt, dd);
+  }
+  box.appendChild(kv);
+  const chosen = filesChosen(win, listing);
+  if (!chosen.length) { noChoice(box, t("files.roomNoChoice")); return box; }
+  const goes = chosen.filter((e) => filesStamped(listing, e.path));
+  const stays = chosen.filter((e) => !goes.includes(e));
+  const table = document.createElement("table");
+  table.className = "files-prev";
+  const hr = document.createElement("tr");
+  for (const k of ["files.prevFile", "files.roomLicence", "files.roomEmbargo"]) { const th = document.createElement("th"); th.textContent = t(k); hr.appendChild(th); }
+  table.appendChild(hr);
+  const licenceSaid = licence ? (ingestDraft.license ? t("files.roomFromDelivery", { v: licence }) : t("files.roomFromGraph", { v: licence })) : t("files.roomNotSaid");
+  const embargoSaid = embargo ? (ingestDraft.embargoUntil ? t("files.roomFromDelivery", { v: embargo }) : t("files.roomFromGraph", { v: embargo })) : t("files.roomNoEmbargo");
+  for (const e of goes) {
+    const tr = document.createElement("tr");
+    for (const [i, v] of [e.name, licenceSaid, embargoSaid].entries()) { const td = document.createElement("td"); td.textContent = v; if (!i) td.className = "fn"; tr.appendChild(td); }
+    table.appendChild(tr);
+  }
+  for (const e of stays) {
+    const tr = document.createElement("tr");
+    tr.className = "done";
+    for (const [i, v] of [e.name, "—", t("files.roomStaysPrivate")].entries()) { const td = document.createElement("td"); td.textContent = v; if (!i) td.className = "fn"; tr.appendChild(td); }
+    table.appendChild(tr);
+  }
+  box.appendChild(table);
+  const sum = document.createElement("div");
+  sum.className = "files-box";
+  sum.textContent = tn("files.roomGoes", goes.length, { size: formatBytes(goes.reduce((s, e) => s + e.size, 0)) })
+    + (stays.length ? " " + tn("files.roomStays", stays.length) : "");
+  box.appendChild(sum);
+  const go = document.createElement("button");
+  go.type = "button";
+  go.className = "primary";
+  go.dataset.action = "files-upload";
+  go.textContent = tn("files.roomGo", goes.length);
+  go.disabled = !goes.length;
+  go.onclick = () => {
+    for (const e of goes) queuePath(e.path, e.name);
+    toast(tn("files.roomQueued", goes.length));
+  };
+  box.appendChild(go);
+  box.appendChild(tabLead(t("files.roomDelivery"), "files-hint"));
+  return box;
+}
+
+// ── Info (AR16, AR17): the compact form of the card ─────────────────────────
+
+function filesInfoTab(win: Win, listing: FsListing): HTMLElement {
+  const box = document.createElement("div");
+  box.className = "files-tab-info";
+  box.appendChild(tabHead(t("files.tab.info"), t("files.infoSub")));
+  const chosen = filesChosen(win, listing);
+  if (listing.roots) { box.appendChild(tabLead(t("files.infoRoots"))); return box; }
+  if (!chosen.length) {
+    const files = listing.entries.filter((e) => e.type === "file" && !isSystemFile(e.name));
+    box.appendChild(tabLead(t("files.infoFolder", { folder: paths.basename(listing.path) || listing.path,
+      files: tn("files.statusFiles", files.length), stamped: tn("files.statusStamped", files.filter((e) => filesStamped(listing, e.path)).length) })));
+    // the folder's gestures, out of the bottom: DosCo, the stamps of this folder
+    const g = document.createElement("div");
+    g.className = "files-box files-folder-gestures";
+    const gt = document.createElement("div");
+    gt.className = "t";
+    gt.textContent = t("files.infoDosco");
+    g.appendChild(gt);
+    g.appendChild(composeFolderButton(listing));
+    g.appendChild(scanDoscoButton(listing.path));
+    if (folderReport && folderReport.folder === listing.path) g.appendChild(stampReportBox(folderReport));
+    else g.appendChild(stampReportButton(listing.path));
+    box.appendChild(g);
+    if (listing.entries.some((e) => e.type === "file" && e.name === "tileset.json")) {
+      const row = document.createElement("div");
+      row.className = "stamp-report-ask";
+      row.appendChild(openInSceneButton(listing.path));
+      box.appendChild(row);
+    }
+    return box;
+  }
+  if (chosen.length > 1) {
+    const st = chosen.filter((e) => filesStamped(listing, e.path)).length;
+    box.appendChild(tabLead(`${tn("files.statusChosen", chosen.length)} · ${tn("files.statusStamped", st)} · ${formatBytes(chosen.reduce((s, e) => s + e.size, 0))}`));
+    const ul = document.createElement("div");
+    ul.className = "files-box files-many";
+    for (const e of chosen) {
+      const r = document.createElement("div");
+      r.textContent = `${filesStamped(listing, e.path) ? "● " : "○ "}${e.name}`;
+      ul.appendChild(r);
+    }
+    box.appendChild(ul);
+    const ask = document.createElement("div");
+    ask.className = "stamp-report-ask";
+    ask.appendChild(putOnShelfButton(chosen.map((e) => e.path)));
+    box.appendChild(ask);
+    box.appendChild(tabLead(t("files.infoMany"), "files-hint"));
+    return box;
+  }
+  const entry = chosen[0];
+  box.appendChild(fileCardCompact(win, entry, listing));
+  return box;
+}
+
+/**
+ * The card of a file, in its compact form — the placeholder of the one
+ * component the Viewer will show whole (round 3, §5 of the note): the seal
+ * and the stamp, what it is, its uses in the graph, and «Apri nel Viewer».
+ * Same data, same source: the stamp on the disk, the files' check.
+ */
+function fileCardCompact(win: Win, entry: FsEntry, listing: FsListing): HTMLElement {
+  const card = document.createElement("div");
+  card.className = "file-card compact";
+  card.dataset.path = entry.path;
+  const k = browserKindOf(entry);
+  if (k === "image" && !/\.(tiff?|dng|cr2|nef|exr|heic)$/i.test(entry.name) && entry.size < 40 * 1024 * 1024) {
+    const big = document.createElement("div");
+    big.className = "file-card-pic";
+    void fsFileUrl(entry.path).then((url) => { const img = document.createElement("img"); img.alt = ""; img.src = url; big.appendChild(img); }).catch(() => {});
+    card.appendChild(big);
+  }
+  const name = document.createElement("div");
+  name.className = "file-card-name";
+  name.textContent = entry.name;
+  card.appendChild(name);
+  const kv = document.createElement("dl");
+  kv.className = "files-kv";
+  const add = (key: string, v: string): void => {
+    const dt = document.createElement("dt"); dt.textContent = t(key);
+    const dd = document.createElement("dd"); dd.textContent = v;
+    kv.append(dt, dd);
+  };
+  add("files.cardWhat", t(`files.kind.${k === "dir" || k === "other" ? "all" : k}`));
+  add("files.cardWeight", `${formatBytes(entry.size)} · ${showDate(new Date(entry.mtime * 1000).toISOString().slice(0, 10), dateFormOf(getLocale()))}`);
+  const uses = filesUses(entry.path);
+  add("files.cardUses", uses.length ? uses.map((u) => u.name || u.id).join(", ") : t("files.cardNotUsed"));
+  card.appendChild(kv);
+  const stamped = filesStamped(listing, entry.path);
+  if (stamped) {
+    if (diskStamps.status === "stamped" && diskStamps.path === entry.path) card.appendChild(stampedBox(diskStamps.path, diskStamps.chain.root));
+    else if (diskStamps.status === "reading" || diskStamps.status === "idle" || diskStamps.path !== entry.path)
+      card.appendChild(tabLead(t("files.cardReading"), "files-hint"));
+  } else if (!isDocumentOrCopy(entry.name)) {
+    const p = tabLead(t("files.cardUnstamped"), "files-lead");
+    const a = document.createElement("button");
+    a.type = "button";
+    a.className = "link";
+    a.dataset.action = "files-to-stamp";
+    a.textContent = t("files.cardToStamp");
+    a.onclick = () => { setFilesPref(win, "tab", "stamp"); renderStorage(); };
+    p.append(" ", a);
+    card.appendChild(p);
+  }
+  const acts = document.createElement("div");
+  acts.className = "stamp-report-ask file-card-acts";
+  const v = document.createElement("button");
+  v.type = "button";
+  v.className = "ghost";
+  v.dataset.action = "files-open-viewer";
+  v.textContent = t("shelf.openInViewer");
+  v.title = t("files.cardViewerHint");
+  v.onclick = () => openFileInViewer(entry.path, win);
+  acts.appendChild(v);
+  if (uses.length) {
+    const g = document.createElement("button");
+    g.type = "button";
+    g.className = "ghost";
+    g.dataset.action = "show-in-graph";
+    g.textContent = t("storage.showInGraph");
+    g.onclick = () => revealFromTable(uses[0].id);
+    acts.appendChild(g);
+  }
+  if (!isDocumentOrCopy(entry.name)) acts.appendChild(putOnShelfButton([entry.path]));
+  if (TREE_EXT.test(entry.name) || entry.name === "tileset.json") acts.appendChild(openInSceneButton(entry.path));
+  if (/\.(em\.json|emj|graphml)$/i.test(entry.name)) {
+    const o = document.createElement("button");
+    o.className = "ghost";
+    o.dataset.action = "open-doc-here";
+    o.textContent = t("storage.openDoc", { name: entry.name });
+    if (currentFilePath === entry.path) { o.textContent = t("storage.alreadyOpenNamed", { name: entry.name }); o.disabled = true; o.title = t("storage.alreadyOpen"); }
+    o.onclick = () => { void openFromStorage(entry.path); };
+    acts.appendChild(o);
+  }
+  card.appendChild(acts);
+  // dev28 · «è un'altra copia di R» also outside a room (decision 14)
+  if (!entry.outside) storageCopyOffer(card, win, entry);
+  return card;
+}
+
+// T and N, as in Blender, when a File window is the one in front
+document.addEventListener("keydown", (e) => {
+  if (e.metaKey || e.ctrlKey || e.altKey || e.defaultPrevented) return;
+  if (e.key !== "t" && e.key !== "T" && e.key !== "n" && e.key !== "N") return;
+  const el = e.target as HTMLElement | null;
+  if (el?.closest?.("input, textarea, select, [contenteditable], .app-dialog")) return;
+  const win = activeWin();
+  if (win.type !== "storage" || winModeOf(win) !== "filesystem") return;
+  e.preventDefault();
+  toggleFilesRegion(win, e.key.toLowerCase() === "t" ? "places" : "panel");
+});
 
 // ── DTCEMS2 · comporre un passo, e timbrarlo ────────────────────────────────
 //
@@ -33199,7 +34453,7 @@ function stampComposeBox(win: Win, listing: FsListing): HTMLElement {
     // looks entered (the commit «9555447», a date, an ORCID were read as data)
     if (example) input.placeholder = t("stamp2.eg", { x: example });
     input.oninput = () => { onInput(input.value); clearErr(box, key); };
-    input.onblur = () => checkField(box, key);
+    input.onblur = (e) => { if (!towardsStamp(e)) checkField(box, key); };
     return input;
   };
 
@@ -33240,7 +34494,7 @@ function stampComposeBox(win: Win, listing: FsListing): HTMLElement {
     renderStorage();
     redrawDraftPicture();
   };
-  select.onblur = () => checkField(box, "kind");
+  select.onblur = (e) => { if (!towardsStamp(e)) checkField(box, "kind"); };
   fields.appendChild(wrap(t("stamp2.kind"), select, "kind"));
   if (draft.kindWhy && draft.kindWhy.kind === draft.kind) {
     // dev28 · the proposal says why, so it is a choice and not a default
@@ -33462,7 +34716,8 @@ function stampComposeBox(win: Win, listing: FsListing): HTMLElement {
   stampBtn.className = "primary";
   stampBtn.dataset.action = "stamp";
   // «STAMP», MAI «SIGN»: c'è un'impronta e una dichiarazione, non una firma
-  stampBtn.textContent = stampEmitting ? t("compose.stamping") : t("stamp2.stamp");
+  // MICRO-ARCHIVIO-2 · «Timbra N file»: one file or a hundred, the same gesture
+  stampBtn.textContent = stampEmitting ? t("compose.stamping") : tn("files.stampsN", draft.outputs.length);
   stampBtn.disabled = stampEmitting;
   stampBtn.onclick = () => {
     // the check is next to each field, and the focus goes to the first gap
@@ -33537,6 +34792,15 @@ function madeChoice(draft: Draft, listing: FsListing): HTMLElement {
 /** The label of the draft's kind, in the axis of its road (the datamodel's). */
 function kindLabelOf(draft: Draft): string {
   return dtcKindsFor(draft.origin ? "acquisition" : "process").find((k) => k.kind === draft.kind)?.label ?? "";
+}
+
+/** MICRO-ARCHIVIO-2 · a field left FOR «Timbra»: its check is the click's (all
+ *  the fields at once, the focus on the first gap). Written at the blur, the
+ *  line under the field pushed the button away between press and release, and
+ *  the click was lost (measured in the panel: mousedown on the button, mouseup
+ *  on the box). */
+function towardsStamp(e: FocusEvent): boolean {
+  return (e.relatedTarget as HTMLElement | null)?.dataset?.action === "stamp";
 }
 
 /** AUDIT N3 · the check of ONE field, written next to it */
@@ -34084,38 +35348,6 @@ function inputCandidates(listing: FsListing, outputs: Array<{ path: string; name
     && !outputs.some((o) => o.path === e.path)
     && listing.entries.some((x) => x.path === stampPathFor(e.path))
     && (chosen.includes(e.path) || !isPeerDoor(listing, e, outputs)));
-}
-
-/** I due ingressi alla composizione: questo file, o tutti i file non timbrati
- *  della cartella. **Il secondo è il gesto dei quattrocento scatti.** */
-function composeButtons(entry: FsEntry, listing: FsListing): HTMLElement {
-  const box = document.createElement("div");
-  box.className = "stamp-report-ask";
-  if (!isDocumentOrCopy(entry.name)) {
-    const one = document.createElement("button");
-    one.className = "ghost";
-    one.dataset.action = "compose-one";
-    one.textContent = t("compose.open", { name: entry.name });
-    one.onclick = () => openDraft([entry], listing);
-    box.appendChild(one);
-  }
-  if (entry.type === "file" && !isDocumentOrCopy(entry.name)) box.appendChild(putOnShelfButton([entry.path]));
-  box.appendChild(composeFolderButton(listing, true));
-  // CAMPAGNA · a tileset — its .3tz or its tileset.json — opens in the Scene
-  if (TREE_EXT.test(entry.name) || entry.name === "tileset.json") box.appendChild(openInSceneButton(entry.path));
-  // …and a document opens in EMStudio FROM HERE, with its path: the Storage
-  // then starts from its folder, and its relative locators resolve beside it
-  if (/\.(em\.json|emj|graphml)$/i.test(entry.name)) {
-    const o = document.createElement("button");
-    o.className = "ghost";
-    o.dataset.action = "open-doc-here";
-    o.textContent = t("storage.openDoc", { name: entry.name });
-    // MICRO-CONTENTS-2 D25 · «already open» when it is the file in front
-    if (currentFilePath === entry.path) { o.textContent = t("storage.alreadyOpenNamed", { name: entry.name }); o.disabled = true; o.title = t("storage.alreadyOpen"); }
-    o.onclick = () => { void openFromStorage(entry.path); };
-    box.appendChild(o);
-  }
-  return box;
 }
 
 /** CAMPAGNA · open an em.json (or import a GraphML) that the Storage shows. */
@@ -36629,23 +37861,46 @@ function storageRow(win: Win, entry: FsEntry, cover?: FolderCover): HTMLElement 
   const name = document.createElement("span");
   name.className = "storage-name";
   name.textContent = entry.name;
-  const meta = document.createElement("span");
-  meta.className = "storage-meta";
-  meta.textContent = entry.type === "dir"
-    ? ""
-    : `${formatBytes(entry.size)} · ${new Date(entry.mtime * 1000).toLocaleDateString(getLocale())}`;
-  row.append(icon, name, meta);
+  name.title = entry.name;
+  // MICRO-ARCHIVIO-2 · the columns: name · stamp · in the graph · weight · date
+  const seal = document.createElement("span");
+  seal.className = "storage-seal-col";
+  const use = document.createElement("span");
+  use.className = "storage-use";
+  const size = document.createElement("span");
+  size.className = "storage-meta storage-size";
+  const date = document.createElement("span");
+  date.className = "storage-meta storage-date";
+  if (entry.type !== "dir") {
+    size.textContent = formatBytes(entry.size);
+    date.textContent = showDate(new Date(entry.mtime * 1000).toISOString().slice(0, 10), dateFormOf(getLocale()));
+    const uses = filesUses(entry.path);
+    if (uses.length) {
+      use.dataset.uses = String(uses.length);
+      const dot = document.createElement("i");
+      const said = document.createElement("span");
+      said.textContent = uses.map((u) => u.name || u.id).join(", ");
+      use.append(dot, said);
+      use.title = t("files.usedBy", { names: said.textContent });
+    }
+  }
+  row.append(icon, name, seal, use, size, date);
   // CAMPAGNA · a stamped file (or folder) carries the little seal, which opens
   // the card; the sidecar row stays the plain file it is
   const own = cover?.selves.get(stampPathFor(entry.path));
   if (own && !isStampPath(entry.path)) {
     // MICRO-CONTENTS-2 D20 · the seal is a button of its own (drawn as one), and
     // its click also chooses the file: the card opens on the row it belongs to
-    name.prepend(sealMini(typeof own.digest === "string" ? own.digest : "", () => {
+    seal.appendChild(sealMini(typeof own.digest === "string" ? own.digest : "", () => {
       if (entry.type === "file" && storageSelected(win) !== entry.path) setStorageSelected(win, entry.path);
       void showSealOf(entry.path);
     }));
     row.dataset.stamped = "1";
+  } else if (entry.type === "file" && !isStampPath(entry.path) && !isDocumentOrCopy(entry.name) && cover) {
+    const no = document.createElement("span");
+    no.className = "storage-noseal";
+    no.title = cover.memberOf.has(entry.path) ? t("files.inASet") : t("files.notStamped");
+    seal.appendChild(no);
   }
   // CAMPAGNA · a member of a file set is IN a stamp, not unstamped: said here
   const door = cover?.memberOf.get(entry.path);
@@ -36713,6 +37968,11 @@ function storageRow(win: Win, entry: FsEntry, cover?: FolderCover): HTMLElement 
       ext: entry.ext,
     };
     e.dataTransfer?.setData(STORAGE_MIME, JSON.stringify(payload));
+    // MICRO-ARCHIVIO-2 · AR18 · a row of the choice carries the whole choice,
+    // for the tabs of the panel
+    const picked = storagePicked(win);
+    if (entry.type === "file" && picked.length > 1 && picked.includes(entry.path))
+      e.dataTransfer?.setData(FILES_PICK_MIME, JSON.stringify(picked));
     // A plain-text flavour too, so dropping on anything else at least yields
     // the path rather than nothing.
     e.dataTransfer?.setData("text/plain", entry.path);

@@ -85,7 +85,8 @@ function nativeOutline(items, prefix = "") {
 
 const EN = readFileSync(`${SRC}i18n.ts`, "utf8").split("const IT: Dict")[0];
 const MAIN = readFileSync(`${SRC}main.ts`, "utf8");
-const FILE_ORDER = ["new", "newProject", "open", "openRecent▸", "openReplace", "close", "—",
+// MICRO-ARCHIVIO-2 · the project's four, together under New as in the mockup: New project, Open project, Reorder by the standard, Close the project
+const FILE_ORDER = ["new", "newProject", "openProject", "reorderProject", "closeProject", "open", "openRecent▸", "openReplace", "close", "—",
   "save", "saveAs", "saveAll", "pin", "—",
   "import▸", "import/importGraphml", "import/importMapping",
   "export▸", "export/exportSvg", "export/exportTtl", "integrate", "relocate", "collect", "—",

@@ -4076,6 +4076,9 @@ test("R4.pack", "impacchettare · nel web il pulsante dice «nella desktop»; il
   const { p, ctx, errors } = await open({ doc: "catena" });
   await workspace(p, "assets");
   await storageInto(p, [root.split("/").pop(), "pack-test", "TempluMare_cesium"]);
+  // MICRO-ARCHIVIO-2 · the pack is in the Ottimizza tab of the panel (acceso)
+  await p.click('.files-tab[data-tab="optimize"]');
+  await p.waitForTimeout(400);
   const web = await p.evaluate(() => ({
     disabled: document.querySelector('[data-action="pack-3tz"]')?.disabled ?? null,
     note: document.querySelector('[data-pack="desktop-only"]')?.textContent ?? "" }));
@@ -4568,7 +4571,8 @@ test("W07.scan", "U7 · «Scansiona come DosCo…» è sulla cartella dello Stor
   const { p, ctx, errors } = await open({ doc: LITE(), locale: "en", ws: "assets" });
   await storageInto(p, [root.split("/").pop(), "dev30", "DosCo"]);
   const onShelf = await p.locator('.viewer-empty [data-action="scan-dosco"]').count();
-  await p.locator('.storage-detail [data-action="scan-dosco"]').first().click();
+  // MICRO-ARCHIVIO-2 · the folder's gestures are in the Info tab of the panel (nothing chosen)
+  await p.locator('.files-folder-gestures [data-action="scan-dosco"]').first().click();
   await p.waitForTimeout(2500);
   const r = await p.evaluate(() => ({ open: !document.getElementById("resources-modal")?.classList.contains("hidden"),
     folder: document.getElementById("res-folder").value, dup: [...document.querySelectorAll("#res-shelf .res-note")].some((n) => n.dataset.dupId === "D.04") }));
@@ -4626,7 +4630,8 @@ test("W10.storage", "U10–U12, V1, V2 · Storage: il dettaglio è un riquadro f
   await storageClick(p, "a.xlsx");
   await p.waitForTimeout(1200);
   const r = await p.evaluate(() => {
-    const list = document.querySelector(".storage-list"), det = document.querySelector(".storage-detail");
+    // MICRO-ARCHIVIO-2 · the detail is the panel's Info tab, beside the list (it was a box under it)
+    const list = document.querySelector(".storage-list"), det = document.querySelector(".files-panel-body");
     const crumb = document.querySelector(".storage-path");
     return { apart: !!list && !!det && !list.contains(det) && det.contains(document.querySelector(".stamp-card")),
              listScrolls: list && getComputedStyle(list).overflowY, cmds: [...(det?.querySelectorAll(".storage-commands button") ?? [])].map((b) => b.dataset.action),
@@ -4637,7 +4642,7 @@ test("W10.storage", "U10–U12, V1, V2 · Storage: il dettaglio è un riquadro f
   await ctx.close();
   return { pass: r.apart && r.listScrolls === "auto" && r.cmds.includes("compose-from") && r.cmds.includes("show-in-graph")
       && /zenodo-1234567$/.test(r.crumb ?? "") && (r.title ?? "").includes(dir.replace(/^\/tmp\//, "")) && !/T\d\d:/.test(r.when ?? "T00:")
-      && r.from === "https://doi.org/10.5281/zenodo.1234567" && !names.some((n) => /\.stamp\.json$/.test(n)) && /3 stamp files/.test(r.sidecars ?? "")
+      && r.from === "https://doi.org/10.5281/zenodo.1234567" && !names.some((n) => /\.stamp\.json$/.test(n)) && /3 system files/.test(r.sidecars ?? "")
       && !errors.length, detail: { names, ...r, errors } };
 });
 
@@ -6785,7 +6790,8 @@ test("DC1.menu", "DOVE-CHI-MENU p.1 · il File della pagina viene dalla tabella:
   const labels = await p.evaluate(() => [...document.querySelectorAll("#dd-file .dd-menu > button .dd-label-text")].map((e) => e.textContent));
   await ctx.close();
   // MICRO-CONTENTS-1 D9 · «New EM project…» beside New
-  const want = ["new", "newProject", "open", "openRecent", "openReplace", "close", "—", "save", "saveAs", "saveAll", "pin", "—",
+  // MICRO-ARCHIVIO-2 · the project's four together under New: Nuovo progetto, Apri progetto, Riordina, Chiudi il progetto
+  const want = ["new", "newProject", "openProject", "reorderProject", "closeProject", "open", "openRecent", "openReplace", "close", "—", "save", "saveAs", "saveAll", "pin", "—",
     "import", "export", "integrate", "relocate", "collect", "—", "createRoom", "bringIntoRoom"];
   return { pass: JSON.stringify(file) === JSON.stringify(want) && JSON.stringify(edit) === JSON.stringify(["undo", "redo"])
       && help.includes("settingsHelp") && help.includes("aboutHelp") && !help.includes("updatesHelp")
@@ -11270,6 +11276,234 @@ test("AR4.preview", "la metà destra dello Scaffale: l'immagine sul disco, il re
     noErrors: !errors.length,
   };
   return { pass: Object.values(conds).every(Boolean), detail: { conds, local, remote, wide, narrow, errors } };
+});
+
+// ── MICRO-ARCHIVIO-2 · la finestra File alla Blender, il pannello a schede, l'albero del progetto ──
+/** a project with the standard tree where GIS/ and RM/ are missing, an em.json in EM/, a stamped
+ *  photo and two plain ones in EM/DosCo, a model in RB/LOD1, the system files beside them */
+async function abProject(root, name) {
+  const pr = `${root}/${name}`;
+  for (const d of ["EM/DosCo", "EM/proxies", "RB/LOD1", "SB"]) mkdirSync(`${pr}/${d}`, { recursive: true });
+  const at = `${pr}/EM/${name}.em.json`;
+  const a = await arStamped(`${pr}/EM/DosCo`, "D.01.png", "Pianta");
+  writeFileSync(`${pr}/EM/DosCo/D.02.png`, PNG1);
+  writeFileSync(`${pr}/EM/DosCo/D.03 grande.png`, Buffer.concat([PNG1, Buffer.alloc(4000)]));
+  writeFileSync(`${pr}/EM/DosCo/D.02.png.bak`, PNG1);
+  writeFileSync(`${pr}/EM/DosCo/~$scheda.docx`, "x");
+  writeFileSync(`${pr}/RB/LOD1/OB_CUBO_LOD1.obj`, "v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n");
+  return { pr, at, a };
+}
+
+test("AR5.window", "la finestra File alla Blender: i luoghi (il Progetto con l'albero, «da creare» per GIS/ e RM/, Preferiti con la stella, Recenti, Cartelle consentite con «aggiungi…»), si chiudono con T; ricerca, filtro per tipo, colonne ordinabili; i file di sistema nascosti e contati nella riga di stato; elenco o miniature; il pannello si chiude con N", async () => {
+  const root = await rootPath();
+  const { pr, at } = await abProject(root, "ab5");
+  const { p, ctx, errors } = await open({ doc: null, ws: "assets", w: 1900, h: 1000 });
+  await p.evaluate(([d, path]) => window.__EM_DRAG__.openAt(d, path), [fixture("catena"), at]);
+  await p.waitForTimeout(2500);
+  await p.locator(`.files-pl[data-place="${pr}/EM/DosCo"]`).first().click();
+  await p.waitForTimeout(1500);
+  const places = await p.evaluate(() => ({
+    tree: [...document.querySelectorAll(".files-pg-project .files-pl")].map((b) => `${b.querySelector(".files-pl-nm")?.textContent}${b.classList.contains("missing") ? "*" : ""}`),
+    on: document.querySelector(".files-pg-project .files-pl.on .files-pl-nm")?.textContent ?? "",
+    allowed: document.querySelectorAll(".files-pg-allowed .files-pl[data-place]").length,
+    add: !!document.querySelector('[data-action="files-add-root"]'),
+  }));
+  await p.click('[data-action="files-star"]');
+  await p.waitForTimeout(600);
+  const starred = await p.evaluate(() => [...document.querySelectorAll(".files-pg-favorites .files-pl[data-place]")].map((b) => b.dataset.place));
+  const names = () => p.evaluate(() => [...document.querySelectorAll(".files-centre .storage-row .storage-name")].map((n) => n.textContent));
+  const listed = await names();
+  const status = await p.evaluate(() => document.querySelector(".storage-status")?.textContent ?? "");
+  await p.click('.files-col[data-sort="size"]');
+  await p.waitForTimeout(600);
+  const bySize = await names();
+  await p.fill(".files-q", "grande");
+  await p.waitForTimeout(300);
+  const searched = await names();
+  await p.fill(".files-q", "");
+  await p.selectOption(".files-kind", "document");
+  await p.waitForTimeout(300);
+  const docs = await names();
+  await p.selectOption(".files-kind", "all");
+  await p.click('[data-action="toggle-stamp-files"]');
+  await p.waitForTimeout(800);
+  const withSystem = await names();
+  await p.click('[data-action="files-view-grid"]');
+  await p.waitForTimeout(1500);
+  const grid = await p.evaluate(() => ({ tiles: document.querySelectorAll(".files-tile").length,
+    img: !!document.querySelector(".files-tile .files-tile-im img") }));
+  await p.screenshot({ path: SHOT("ar5-miniature") }).catch(() => {});
+  await p.click('[data-action="files-view-list"]');
+  await p.waitForTimeout(600);
+  // T and N, with the File window in front
+  await p.locator(".files-centre .files-cols").click({ position: { x: 3, y: 3 } }).catch(() => {});
+  await p.waitForTimeout(500);
+  const activeIsFiles = await p.evaluate(() => window.__EM_DRAG__.activeWinId?.());
+  await p.keyboard.press("t");
+  await p.keyboard.press("n");
+  await p.waitForTimeout(1200);
+  const shut = await p.evaluate(() => ({ places: getComputedStyle(document.querySelector(".files-places")).display,
+    panel: getComputedStyle(document.querySelector(".files-panel")).display }));
+  await p.keyboard.press("t");
+  await p.keyboard.press("n");
+  await p.waitForTimeout(1200);
+  const back = await p.evaluate(() => ({ places: getComputedStyle(document.querySelector(".files-places")).display,
+    panel: getComputedStyle(document.querySelector(".files-panel")).display }));
+  await p.screenshot({ path: SHOT("ar5-finestra") }).catch(() => {});
+  await ctx.close();
+  const conds = {
+    tree: places.tree.join(",") === "EM,DosCo,proxies,RB,SB,RM*,GIS*,la cartella del progetto" && places.on === "DosCo",
+    allowed: places.allowed > 0 && places.add,
+    star: starred.includes(`${pr}/EM/DosCo`),
+    systemHidden: !listed.some((n) => /\.stamp\.json$|\.bak$|^~\$/.test(n)) && listed.includes("D.01.png") && /3 file · 1 timbrat/.test(status)
+      && /mostra 3 file di sistema/.test(status),
+    sorted: bySize[0] === "D.03 grande.png",
+    search: searched.join() === "D.03 grande.png",
+    kind: docs.length === 0 || !docs.some((n) => /\.png$/.test(n)),
+    systemShown: withSystem.includes("D.02.png.bak") && withSystem.includes("D.01.png.stamp.json"),
+    grid: grid.tiles >= 3 && grid.img,
+    keys: shut.places === "none" && shut.panel === "none" && back.places !== "none" && back.panel !== "none",
+    noErrors: !errors.length,
+  };
+  return { pass: Object.values(conds).every(Boolean), detail: { conds, places, starred, listed, status, bySize, searched, docs, grid, shut, back, activeIsFiles, errors } };
+});
+
+test("AR6.tabs", "il pannello a schede: con una scelta da timbrare apre Timbro (anteprima per file, «già timbrato · resta com'era», «Timbra N file…» apre il compositore nella scheda, un preset ne riempie il tipo e si salva); la scelta trascinata su «Stanza» apre la scheda su quei file (fuori da una stanza dice come entrarci); Info è la scheda compatta del file timbrato, e senza scelta i gesti della cartella", async () => {
+  const root = await rootPath();
+  const { pr, at } = await abProject(root, "ab6");
+  const { p, ctx, errors } = await open({ doc: null, ws: "assets", w: 1900, h: 1000 });
+  await answerAppDialogs(p, "Le mie piante");
+  await p.evaluate(([d, path]) => window.__EM_DRAG__.openAt(d, path), [fixture("catena"), at]);
+  await p.waitForTimeout(2500);
+  await p.locator(`.files-pl[data-place="${pr}/EM/DosCo"]`).first().click();
+  await p.waitForTimeout(1500);
+  const noChoice = await p.evaluate(() => ({ tab: document.querySelector(".files-tab[aria-selected=true]")?.dataset.tab,
+    gestures: !!document.querySelector('.files-folder-gestures [data-action="scan-dosco"]') && !!document.querySelector('.files-folder-gestures [data-action="compose-folder"]') }));
+  await storageClick(p, "D.01.png");
+  await p.locator(".storage-row", { has: p.locator(".storage-name", { hasText: /^D\.02\.png$/ }) }).first().click({ modifiers: ["Meta"] });
+  await p.waitForTimeout(1200);
+  const stamp = await p.evaluate(() => ({ tab: document.querySelector(".files-tab[aria-selected=true]")?.dataset.tab,
+    rows: [...document.querySelectorAll(".files-tab-stamp .files-prev tr")].map((r) => r.textContent),
+    button: document.querySelector('.files-tab-stamp [data-action="compose-one"]')?.textContent ?? "",
+    status: document.querySelector(".storage-status")?.textContent ?? "" }));
+  await p.click('.files-chip[data-preset="photo"]');
+  await p.click('.files-tab-stamp [data-action="compose-one"]');
+  await p.waitForSelector(".files-panel .stamp-compose", { timeout: 8000 });
+  const composer = await p.evaluate(() => ({ inPanel: !!document.querySelector(".files-panel-body .stamp-compose"),
+    kind: document.querySelector('.stamp-compose select[data-field="kind"]')?.value ?? "",
+    road: document.querySelector(".stamp-compose")?.dataset.road ?? "",
+    preview: [...document.querySelectorAll(".files-draft-preview tr")].map((r) => r.textContent),
+    stampBtn: document.querySelector('.stamp-compose [data-action="stamp"]')?.textContent ?? "",
+    noDetail: !document.querySelector(".storage-detail") }));
+  await p.click('[data-action="files-save-preset"]');
+  await p.waitForTimeout(800);
+  const presets = await p.evaluate(() => JSON.parse(localStorage.getItem("emstudio.stampPresets") ?? "[]").map((x) => `${x.name}:${x.kind}`));
+  await p.click('.stamp-compose [data-action="compose-cancel"]');
+  await p.waitForTimeout(600);
+  // the choice dragged onto «Stanza»
+  const dt = await p.evaluateHandle(() => new DataTransfer());
+  await p.dispatchEvent('.storage-row.storage-picked >> nth=0', "dragstart", { dataTransfer: dt });
+  await p.dispatchEvent('.files-tab[data-tab="room"]', "dragover", { dataTransfer: dt });
+  await p.dispatchEvent('.files-tab[data-tab="room"]', "drop", { dataTransfer: dt });
+  await p.waitForTimeout(1200);
+  const room = await p.evaluate(() => ({ tab: document.querySelector(".files-tab[aria-selected=true]")?.dataset.tab,
+    text: document.querySelector(".files-tab-room")?.textContent ?? "" }));
+  // Info: one stamped file, the compact card
+  await p.click('[data-action="files-clear-choice"]');
+  await p.click('.files-tab[data-tab="info"]');
+  await storageClick(p, "D.01.png");
+  await p.waitForTimeout(1500);
+  const info = await p.evaluate(() => ({ card: !!document.querySelector(".files-tab-info .file-card"),
+    stamp: !!document.querySelector(".files-tab-info .stamp-emitted"),
+    viewer: !!document.querySelector('.files-tab-info [data-action="files-open-viewer"]') }));
+  await p.screenshot({ path: SHOT("ar6-info") }).catch(() => {});
+  await ctx.close();
+  const conds = {
+    noChoiceInfo: noChoice.tab === "info" && noChoice.gestures,
+    autoStamp: stamp.tab === "stamp" && stamp.rows.some((r) => /D\.01\.png.*già timbrato/.test(r)) && stamp.rows.some((r) => /D\.02\.png.*origine → D\.02/.test(r))
+      && /Timbra D\.02\.png/.test(stamp.button) && /2 file scelti · 1 timbrat/.test(stamp.status),
+    composerHere: composer.inPanel && composer.kind === "photo" && composer.road === "origin" && composer.noDetail
+      && composer.preview.some((r) => /D\.02\.png/.test(r)) && /Timbra 1 file/.test(composer.stampBtn),
+    presetSaved: presets.includes("Le mie piante:photo"),
+    dragToRoom: room.tab === "room" && /Nessuna stanza/.test(room.text),
+    infoCard: info.card && info.stamp && info.viewer,
+    noErrors: !errors.length,
+  };
+  return { pass: Object.values(conds).every(Boolean), detail: { conds, noChoice, stamp, composer, presets, room, info, errors } };
+});
+
+test("AR7.optimize", "Ottimizza secondo il verdetto del giro 0: le varianti sperimentali dietro l'interruttore con l'avvertenza, il nome e la cartella dal bridge (RB/versions/‹modello›@lod4-web.glb), senza gltfpack lo dice e non parte, la sorgente senza timbro va timbrata prima; il .3tz acceso nella cartella di un tileset; il tileset da una mesh annunciato con come si fa oggi", async () => {
+  const root = await rootPath();
+  const { pr, at } = await abProject(root, "ab7");
+  const { p, ctx, errors } = await open({ doc: null, ws: "assets", w: 1900, h: 1000 });
+  await p.evaluate(([d, path]) => window.__EM_DRAG__.openAt(d, path), [fixture("catena"), at]);
+  await p.waitForTimeout(2500);
+  await p.locator(`.files-pl[data-place="${pr}/RB"]`).first().click();
+  await p.waitForTimeout(800);
+  await storageInto(p, ["LOD1"]);
+  await storageClick(p, "OB_CUBO_LOD1.obj");
+  await p.click('.files-tab[data-tab="optimize"]');
+  await p.waitForTimeout(600);
+  const off = await p.evaluate(() => ({ warn: document.querySelector(".files-tab-optimize .files-warn")?.textContent ?? "",
+    pills: [...document.querySelectorAll(".files-tab-optimize .files-pill")].map((x) => x.textContent),
+    chips: document.querySelectorAll(".files-tab-optimize [data-opt]").length }));
+  await p.click('[data-action="files-opt-experimental"]');
+  await p.waitForSelector(".files-tab-optimize [data-tool]", { timeout: 10000 }).catch(() => {});
+  await p.waitForTimeout(500);
+  const on = await p.evaluate(() => ({ chips: document.querySelectorAll(".files-tab-optimize [data-opt]").length,
+    variant: [...document.querySelectorAll(".files-tab-optimize .files-prev td")].map((x) => x.textContent),
+    tool: document.querySelector(".files-tab-optimize [data-tool]")?.dataset.tool ?? "",
+    toolSays: document.querySelector(".files-tab-optimize [data-tool]")?.textContent ?? "",
+    go: document.querySelector('[data-action="files-optimize"]')?.disabled ?? null,
+    stampFirst: [...document.querySelectorAll(".files-tab-optimize .files-warn")].some((x) => /timbra/i.test(x.textContent)),
+    tiles: document.querySelector(".files-tab-optimize")?.textContent.includes("Obj2Tiles") }));
+  await p.screenshot({ path: SHOT("ar7-ottimizza") }).catch(() => {});
+  await ctx.close();
+  const conds = {
+    experimental: /meshopt/.test(off.warn) && off.pills.join(",") === "sperimentale,acceso,annunciato" && off.chips === 0,
+    named: on.chips === 5 && on.variant.includes("OB_CUBO_LOD1@lod4-web.glb"),
+    noTool: on.tool === "0" && /gltfpack non è su questo computer/.test(on.toolSays) && on.go === true,
+    stampFirst: on.stampFirst,
+    announced: on.tiles,
+    noErrors: !errors.length,
+  };
+  return { pass: Object.values(conds).every(Boolean), detail: { conds, off, on, errors } };
+});
+
+test("AR8.project", "File ▸ Riordina secondo lo standard: il piano crea GIS/ e RM/, sposta un .geojson in GIS/, chiede dove va un .tif che non si legge (GIS o DosCo) e lo sposta dove si risponde; i luoghi si rileggono (niente più «da creare»); File ▸ Chiudi il progetto chiude il file e lo Scaffale va con lui", async () => {
+  const root = await rootPath();
+  const { pr, at } = await abProject(root, "ab8");
+  writeFileSync(`${pr}/mura.geojson`, '{"type":"FeatureCollection","features":[]}');
+  writeFileSync(`${pr}/rotto.tif`, "non un tiff");
+  const { p, ctx, errors } = await open({ doc: null, ws: "assets", w: 1900, h: 1000 });
+  await p.evaluate(([d, path]) => window.__EM_DRAG__.openAt(d, path), [fixture("catena"), at]);
+  await p.waitForTimeout(2500);
+  const menu = await p.evaluate(() => ["btn-open-project", "btn-reorder-project", "btn-close-project"].map((id) => !!document.getElementById(id)));
+  await p.evaluate(() => document.getElementById("btn-reorder-project").click());
+  await p.waitForSelector('.app-dialog [data-ask="rotto.tif"]', { timeout: 10000 });
+  const plan = await p.evaluate(() => [...document.querySelectorAll(".app-dialog .reorder-plan li")].map((l) => l.textContent));
+  await p.selectOption('.app-dialog [data-ask="rotto.tif"]', "EM/DosCo/rotto.tif");
+  await p.click(".app-dialog [data-dialog-ok]");
+  await p.waitForTimeout(2500);
+  const moved = { gis: existsSync(`${pr}/GIS/mura.geojson`), dosco: existsSync(`${pr}/EM/DosCo/rotto.tif`), rm: existsSync(`${pr}/RM`) };
+  await p.evaluate(() => document.querySelector(".files-pl[data-place]")?.click());
+  await p.waitForTimeout(9500);   // the tree is read again (its cache lasts 8 s at most; a reorder forgets it)
+  const tree = await p.evaluate(() => [...document.querySelectorAll(".files-pg-project .files-pl.missing")].length);
+  await p.evaluate(() => document.getElementById("btn-close-project").click());
+  await p.waitForTimeout(1500);
+  const closed = await p.evaluate(() => ({ slots: document.querySelectorAll(".emtree-file").length,
+    start: !!document.querySelector(".storage-start"), noProject: !!document.querySelector(".shelf-no-project") }));
+  await ctx.close();
+  const conds = {
+    menu: menu.every(Boolean),
+    plan: plan.some((l) => /GIS/.test(l) && /crea|cartella|mkdir/i.test(l)) && plan.some((l) => /mura\.geojson/.test(l) && /GIS/.test(l))
+      && plan.some((l) => /rotto\.tif.*GIS.*DosCo|layer GIS o documento/.test(l)),
+    moved: moved.gis && moved.dosco && moved.rm,
+    treeRead: tree === 0,
+    closed: closed.start && closed.noProject,
+    noErrors: !errors.length,
+  };
+  return { pass: Object.values(conds).every(Boolean), detail: { conds, menu, plan, moved, tree, closed, errors } };
 });
 
 // ── run ─────────────────────────────────────────────────────────────────────

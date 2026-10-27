@@ -297,9 +297,14 @@ const BUILTIN_WORKSPACES: WorkspacePreset[] = [
         { name: "chain", type: "graph", state: { mode: "dtc", chain: true } },
       ],
       active: "files",
-      layout: { dir: "row", ratio: 0.22,
-                a: { dir: "col", ratio: 0.42, a: { win: "emtree" }, b: { win: "shelf" } },
-                b: { dir: "row", ratio: 0.56, a: { win: "files" }, b: { win: "chain" } } },
+      // MICRO-ARCHIVIO-2 · V3 = «sotto la finestra File» (E.D., 27 Oct 2026):
+      // the Shelf under the File window, its right half for the previews; the
+      // EMtree alone on the left, the Chain on the right
+      layout: { dir: "row", ratio: 0.18,
+                a: { win: "emtree" },
+                b: { dir: "row", ratio: 0.66,
+                     a: { dir: "col", ratio: 0.6, a: { win: "files" }, b: { win: "shelf" } },
+                     b: { win: "chain" } } },
     },
   },
   // NARRATIVA · «Come lo racconto, e su cosa poggia?» The Index, the page (which

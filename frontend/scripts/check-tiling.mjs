@@ -361,8 +361,9 @@ const eq = (got, want, what) => {
   // documents, the Viewer above the Matrix, the Inspector
   eq(sig("provenance"), "row(table,row(col(viewer,graph:matrix),inspector))",
      "Fonti: Documents · the Viewer above the graph · Inspector");
-  eq(sig("assets"), "row(col(emtree,shelf),row(storage,graph:dtc))",
-     "Contenuti: EMTree above the Shelf · Storage · DTC — and no Inspector");
+  // MICRO-ARCHIVIO-2 · V3: the Shelf under the File window
+  eq(sig("assets"), "row(emtree,row(col(storage,shelf),graph:dtc))",
+     "Contenuti: EMTree · the File window above the Shelf · DTC — and no Inspector");
   eq(sig("space"), "row(col(scene,table),row(graph:matrix,inspector))",
      "Spazio: the Scena 3D above the Table (Modelli e proxy) · Matrix · Inspector");
   eq(W.WORKSPACES.find((w) => w.id === "space").arrangement.wins.find((w) => w.type === "table").state["current.table.sheet"],

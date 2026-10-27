@@ -7,6 +7,39 @@ that asked for one.
 ## [Unreleased]
 
 ### Added
+- **The File window «alla Blender»** (MICRO-ARCHIVIO-2, E.D.'s decisions of
+  27 October 2026: V1 = A, V2 = 4, V3 = under the File window, V4 = with GIS/;
+  `files-browser.ts`). The places on the left, closed with ◧ or T: the
+  open project's standard tree, read from s3Dgraphy (`/project-tree`, bridge
+  level 42) with «to be made» for the folders that are missing and the
+  `versions/` folders that exist, «Where to start» with no project; the
+  favourites (a star on the folder shown); the recent folders; the allowed
+  folders with «add…». The centre: a search, a filter by kind (GIS layers
+  among them), list or thumbnails, columns sortable by name · stamp · in the
+  graph · size · date, the system files (`.stamp.json`, `.bak`, `.prima-…`,
+  `.blend1`, `~$`) hidden and counted, and a line of state where the block of
+  actions under the list was. The tools on the right in four vertical tabs,
+  closed with ◨ or N, working on the choice (and on the choice or Shelf
+  entries dragged onto a tab): **Timbro** — presets (built-in and saved by
+  the person), the composer of today (one place to stamp), a preview per
+  file (its stamp, the act, the piece of Chain), «Timbra N file», the
+  stamped ones «stay as they were», «Stamp a step from these…»;
+  **Ottimizza** — as the round-0 verdict says: a tileset packed as .3tz on,
+  a model's variants experimental behind a switch with its warning
+  (gltfpack on the bridge, `/fs/optimize`, not compressed because the
+  Viewer reads neither meshopt nor KTX2 yet; the variant in
+  `RB|RM/versions/<model>@<lod>-<destination>.glb`, named by s3Dgraphy, born
+  stamped as derived — step `lod_generation`, the parameters and gltfpack's
+  version), a tileset from a mesh announced with how it is done today;
+  **Stanza** — what goes up, its size, the licence and the embargo (from the
+  delivery or the graph), the files without a stamp kept private, outside a
+  room how to enter one; **Info** — the compact form of the file's card
+  (its picture, what it is, its uses in the graph, its stamp, «Apri nel
+  Viewer»), with no choice the folder's gestures (stamp its files together,
+  DosCo, its stamps). **File ▸ Open project… / Reorder by the standard… /
+  Close the project** beside «New project…»; «Reorder» asks where a `.tif`
+  it cannot read goes (GIS/ or EM/DosCo/). The Archive puts the Shelf under
+  the File window. AR5–AR8; check-files-browser, check-files-bridge.
 - **Resources, Interpretations, Combiners in the Tabular** (MICRO-VIEWER-UNICO
   p.6; `ledger-sheets.ts`). Three computed views, a row per node: the
   resources (media, versions with the lightest and the highest weighed,
