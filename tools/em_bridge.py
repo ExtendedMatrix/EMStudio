@@ -185,6 +185,86 @@ import zipfile
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import em_net
+from html.parser import HTMLParser
+
+
+class _MetaReader(HTMLParser):
+    """The <head> of a page, for what it says of itself (MICRO-ARCHIVIO-1)."""
+
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.meta = {}
+        self.title = ""
+        self._in_title = False
+        self._in_ld = False
+        self._ld = []
+        self.icon = ""
+
+    def handle_starttag(self, tag, attrs):
+        a = {k.lower(): (v or "") for k, v in attrs}
+        if tag == "meta":
+            key = (a.get("property") or a.get("name") or "").lower()
+            if key and a.get("content") and key not in self.meta:
+                self.meta[key] = a["content"].strip()
+        elif tag == "title":
+            self._in_title = True
+        elif tag == "script" and "ld+json" in a.get("type", "").lower():
+            self._in_ld = True
+            self._ld.append("")
+        elif tag == "link" and "icon" in a.get("rel", "").lower() and not self.icon:
+            self.icon = a.get("href", "")
+
+    def handle_endtag(self, tag):
+        if tag == "title":
+            self._in_title = False
+        elif tag == "script":
+            self._in_ld = False
+
+    def handle_data(self, data):
+        if self._in_title and not self.title:
+            self.title = data.strip()
+        elif self._in_ld:
+            self._ld[-1] += data
+
+
+def _page_meta(text: str, base: str) -> dict:
+    """Title, description, picture and source of an HTML page: OpenGraph first,
+    then Twitter's cards, then JSON-LD, then the <title>. Relative pictures are
+    made absolute against the page's own address."""
+    r = _MetaReader()
+    try:
+        r.feed(text[:600_000])
+    except Exception:  # a broken page still says what it said before breaking
+        pass
+    m = r.meta
+    ld = {}
+    for block in r._ld:
+        try:
+            v = json.loads(block)
+        except ValueError:
+            continue
+        for item in (v if isinstance(v, list) else v.get("@graph", [v]) if isinstance(v, dict) else []):
+            if isinstance(item, dict) and (item.get("name") or item.get("headline")):
+                ld = item
+                break
+        if ld:
+            break
+    img = ld.get("image") if isinstance(ld, dict) else None
+    if isinstance(img, list):
+        img = img[0] if img else None
+    if isinstance(img, dict):
+        img = img.get("url") or img.get("contentUrl")
+    image = m.get("og:image") or m.get("og:image:url") or m.get("twitter:image") or img or ""
+    out = {
+        "title": m.get("og:title") or m.get("twitter:title") or ld.get("name") or ld.get("headline") or r.title,
+        "description": m.get("og:description") or m.get("twitter:description") or m.get("description")
+                       or (ld.get("description") if isinstance(ld.get("description"), str) else ""),
+        "image": urllib.parse.urljoin(base, image) if image else "",
+        "site": m.get("og:site_name") or m.get("application-name") or urllib.parse.urlparse(base).hostname or "",
+    }
+    if ld.get("@type"):
+        out["type"] = ld["@type"] if isinstance(ld["@type"], str) else ", ".join(map(str, ld["@type"]))
+    return {k: (re.sub(r"\s+", " ", v).strip() if isinstance(v, str) else v) for k, v in out.items() if v}
 
 
 #: Extra origins the operator vouches for, comma-separated in
@@ -1570,7 +1650,11 @@ def _load_s3dgraphy(s3dgraphy_src: "pathlib.Path | None"):
 #: 40 = /geo/tileset-frame: a tileset written with shifted coordinates declared
 #: in a CRS, relocated by s3Dgraphy's ``geometry.frame.relocate_transform``
 #: (the file is never rewritten) — MICRO tileset, shift e epoche.
-BRIDGE_LEVEL = 40   # 30 also = /validate
+#: 41 = /web-meta: what a web address says of itself (its title, description,
+#: picture and source — OpenGraph, JSON-LD, a IIIF manifest, an image), read
+#: here because a page cannot read another site — MICRO-ARCHIVIO-1, the
+#: Shelf's previews of remote resources.
+BRIDGE_LEVEL = 41   # 30 also = /validate
 
 
 #: the files of a tileset a server may send gzipped (MICRO-TILESET-CARTELLA)
@@ -2285,6 +2369,9 @@ def make_handler(api):
                 q = urllib.parse.parse_qs(parsed.query)
                 self._resolve_authority(
                     (q.get("term") or [""])[0], (q.get("facet") or [""])[0])
+            elif route == "/web-meta":
+                q = urllib.parse.parse_qs(parsed.query)
+                self._web_meta((q.get("url") or [""])[0])
             elif route == "/fs/list":
                 if not self._fs_gate():
                     return
@@ -4076,6 +4163,46 @@ def make_handler(api):
         # term + facet → ranked offline authority candidates (P1-D).
         # The resolver is pure Python (no rdflib/network); imported lazily so a
         # slimmed sidecar still serves it. Returns 400 on a bad facet.
+        def _web_meta(self, url):
+            """MICRO-ARCHIVIO-1 · what a web address says of itself, for the
+            Shelf's preview: ``{ok, kind, url, title, description, image, site,
+            media_type, json?}``. ``kind`` is ``image`` / ``pdf`` (the address IS
+            the thing), ``json`` (a IIIF manifest, a catalogue's record — handed
+            back for the page to read), or ``page`` (an HTML page, read for its
+            OpenGraph / Twitter / JSON-LD / <title>). Only http(s); at most
+            1.5 MB read; nothing is kept."""
+            if not re.match(r"^https?://", url or "", re.I):
+                self._fail(400, "web-meta needs an http(s) 'url'")
+                return
+            import urllib.request
+            req = urllib.request.Request(url, headers={
+                "User-Agent": "EMStudio-bridge/1 (shelf preview)",
+                "Accept": "text/html,application/ld+json,application/json;q=0.9,image/*;q=0.8,*/*;q=0.5"})
+            try:
+                with em_net.urlopen(req, timeout=12) as res:
+                    final = res.geturl() or url
+                    ctype = (res.headers.get("Content-Type") or "").split(";")[0].strip().lower()
+                    if ctype.startswith("image/"):
+                        self._json({"ok": True, "kind": "image", "url": final, "media_type": ctype})
+                        return
+                    if ctype == "application/pdf":
+                        self._json({"ok": True, "kind": "pdf", "url": final, "media_type": ctype})
+                        return
+                    raw = res.read(1_500_000)
+            except Exception as exc:
+                self._json({"ok": False, "url": url, "error": em_net.reason(exc)})
+                return
+            text = raw.decode("utf-8", errors="replace")
+            if "json" in ctype or text.lstrip()[:1] in ("{", "["):
+                try:
+                    self._json({"ok": True, "kind": "json", "url": final, "media_type": ctype,
+                                "json": json.loads(text)})
+                    return
+                except ValueError:
+                    pass
+            self._json({"ok": True, "kind": "page", "url": final, "media_type": ctype,
+                        **_page_meta(text, final)})
+
         def _resolve_authority(self, term, facet):
             facets = api.authority_facets()
             if not facets:  # resolver/authorities unavailable in this build

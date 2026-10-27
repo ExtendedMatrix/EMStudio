@@ -24,6 +24,7 @@
 import { createRequire } from "node:module";
 import { execFileSync } from "node:child_process";
 import { readFileSync, writeFileSync, existsSync, mkdirSync, copyFileSync, realpathSync } from "node:fs";
+import { createHash } from "node:crypto";
 
 const require = createRequire(import.meta.url);
 const TD = new URL("../testdata/", import.meta.url).pathname;
@@ -805,6 +806,8 @@ test("5.shelf", "Shelf ▸ Annota apre la finestra Doc con quella risorsa, senza
     locator: `http://localhost:${PORT}/em/studio/testdata/catena-prospetto.jpg`, scope: "own-study", residency: "reference" }] };
   const { p, ctx } = await open({ doc: withShelf("catena", shelf) });
   await workspace(p, "assets");
+  // MICRO-ARCHIVIO-1 · one line per entry: the buttons are in the card the click opens
+  await p.locator('.shelf-row[data-entry="sh1"] .shelf-line').click();
   const btn = p.locator(".shelf-row button", { hasText: /Annota|Annotate/ }).first();
   await btn.waitFor({ timeout: 8000 });
   await btn.click();
@@ -1335,6 +1338,7 @@ test("12.undoall", "le eliminazioni danno «Annulla»: una connessione, una riga
   const e1 = await p.evaluate(() => window.__EM_DRAG__.nodeInfo("USM101").edges.length);
   // a shelf row
   await workspace(p, "assets");
+  await p.locator('.shelf-row[data-entry="sh1"] .shelf-line').click();
   await p.locator('.shelf-row[data-entry="sh1"] .shelf-actions button', { hasText: "✕" }).click();
   await p.waitForTimeout(300);
   const toast2 = await p.evaluate(() => document.getElementById("toast").innerText);
@@ -11072,6 +11076,190 @@ test("AR1.save-asks", "uno Scaffale senza file non entra nel file salvato senza 
   const r = await p.evaluate(() => ({ seen: (window.__EM_DIALOGS__ ?? []).filter((d) => d.kind === "shelf-home").map((d) => d.ok) }));
   await ctx.close();
   return { pass: r.seen.length === 1 && r.seen[0] === false && !errors.length, detail: { r, errors } };
+});
+
+// ── MICRO-ARCHIVIO-1 · «Titolo e descrizione…» sul posto, lo Scaffale che cerca, la metà destra ──
+/** a file with a valid stamp beside it (the sidecar's form of dtcstamp), in the bench */
+async function arStamped(dir, name, label) {
+  mkdirSync(dir, { recursive: true });
+  const file = `${dir}/${name}`;
+  writeFileSync(file, PNG1);
+  const digest = "sha256:" + createHash("sha256").update(PNG1).digest("hex");
+  const rid = "res:" + digest.slice(7, 19);
+  writeFileSync(`${file}.stamp.json`, JSON.stringify({ stamp: 1,
+    self: { resource_id: rid, digest, label, digest_covers: "artifact", media_type: "image/png", packaging: "file", tier: "master",
+            measures: { size_bytes: PNG1.length } },
+    from: [], how: { process_id: "c1eef313-29e1-5361-ad19-ca01930832e7", dtc_kind: "download" },
+    by: { operator: { id: "https://orcid.org/0000-0002-5065-7970", label: "Emanuel Demetrescu" }, at: "2026-09-29T19:24:39Z" },
+    registry: { graph_id: "compose" } }, null, 1));
+  return { file, entry: { id: `st-${name}`, name, locator: file, checksum: digest,
+    extra: { stamp_receipt: { id: rid, checksum: digest, stamp: 1, parents: [], title: label } } } };
+}
+
+test("AR2.words", "«Titolo e descrizione…» apre il campo nella voce dello Scaffale, col fuoco in fondo al titolo; «Salva nel timbro» scrive il timbro e la finestra File non si è mossa; «Mostra nel disco» è un gesto suo", async () => {
+  const root = await rootPath();
+  const a = await arStamped(`${root}/ar2/foto`, "DJI_0238.png", "Veduta");
+  const { p, ctx, errors } = await open({ doc: withShelf("catena", { name: "Shelf", entries: [a.entry] }), ws: "assets" });
+  const crumbBefore = await p.evaluate(() => JSON.stringify([...document.querySelectorAll(".storage-row .storage-name")].map((n) => n.textContent).slice(0, 5)));
+  await p.locator(`.shelf-row[data-entry="${a.entry.id}"] .shelf-line`).click();
+  await p.locator(`.shelf-row[data-entry="${a.entry.id}"] [data-edit-stamp]`).click();
+  await p.waitForTimeout(300);
+  const opened = await p.evaluate(() => {
+    const f = document.activeElement;
+    return { field: f?.dataset?.field ?? "", value: f?.value ?? "", caretAtEnd: f?.selectionStart === f?.value?.length,
+      inShelf: !!f?.closest?.(".shelf-row"), visible: (() => { const r = f?.getBoundingClientRect(); const area = f?.closest(".tile-area")?.getBoundingClientRect();
+        return !!r && !!area && r.top >= area.top && r.bottom <= area.bottom; })() };
+  });
+  await p.keyboard.type(" da nord", { delay: 30 });
+  await p.locator('[data-field="shelf-description"]').fill("Il fronte della cella.");
+  await p.locator('[data-action="save-shelf-words"]').click();
+  await p.waitForTimeout(1500);
+  const sidecar = JSON.parse(readFileSync(`${a.file}.stamp.json`, "utf8")).self;
+  const after = await p.evaluate(() => ({ open: !!document.querySelector(".shelf-words-edit"),
+    files: JSON.stringify([...document.querySelectorAll(".storage-row .storage-name")].map((n) => n.textContent).slice(0, 5)) }));
+  await p.screenshot({ path: SHOT("ar2-titolo-sul-posto") }).catch(() => {});
+  // «Mostra nel disco»: the File window goes to the file and chooses it
+  await p.locator(`.shelf-row[data-entry="${a.entry.id}"] [data-show-on-disk]`).click();
+  await p.waitForTimeout(1500);
+  const disk = await p.evaluate(() => [...document.querySelectorAll(".storage-row")].filter((r) => r.classList.contains("selected") || r.getAttribute("aria-selected") === "true" || r.classList.contains("is-selected"))
+    .map((r) => r.querySelector(".storage-name")?.textContent));
+  const names = await p.evaluate(() => [...document.querySelectorAll(".storage-row .storage-name")].map((n) => n.textContent));
+  await ctx.close();
+  const conds = {
+    focusInPlace: opened.field === "shelf-title" && opened.value === "Veduta" && opened.caretAtEnd && opened.inShelf && opened.visible,
+    saved: sidecar.label === "Veduta da nord" && sidecar.description === "Il fronte della cella.",
+    closedAfter: !after.open, fileWindowStill: after.files === crumbBefore,
+    showOnDisk: names.includes("DJI_0238.png"), noErrors: !errors.length,
+  };
+  return { pass: Object.values(conds).every(Boolean), detail: { conds, opened, sidecar, after, crumbBefore, disk, names, errors } };
+});
+
+const AR_ARACHNE = { title: "Architrav mit Rankenfries", type: "Einzelobjekte", thumbnailId: 413653, facet_ort: ["Köln, Deutschland"],
+  facet_material: ["Kalkstein"], dates: [{ label: "claudisch" }], images: [{ imageId: 413653 }] };
+const arachneRoute = { pattern: /arachne\.dainst\.org\/data\//, handler: (route) => {
+  const u = route.request().url();
+  if (/\/data\/entity\//.test(u)) return route.fulfill({ status: 200, contentType: "application/json", headers: { "access-control-allow-origin": "*" }, body: JSON.stringify(AR_ARACHNE) });
+  return route.fulfill({ status: 200, contentType: "image/png", headers: { "access-control-allow-origin": "*" }, body: PNG1 });
+} };
+
+async function arFindBench() {
+  const root = await rootPath();
+  const a = await arStamped(`${root}/ar3/drone`, "DJI_0220.png", "Veduta da nord");
+  const plain = (dir, name) => { mkdirSync(dir, { recursive: true }); writeFileSync(`${dir}/${name}`, PNG1); return { id: `p-${name}`, name, locator: `${dir}/${name}` }; };
+  return { root, entries: [a.entry, plain(`${root}/ar3/drone`, "DJI_0221.png"), plain(`${root}/ar3/drone`, "DJI_0222.png"),
+    { id: "doc1", name: "D.07.01.pdf", locator: `${root}/ar3/EM/DosCo/D.07.01.pdf` },
+    { id: "web1", name: "Architrav (Arachne)", locator: "https://arachne.dainst.org/entity/1179876" }] };
+}
+const arRows = (p) => p.evaluate(() => [...document.querySelectorAll(".shelf-row")].map((r) => r.dataset.entry));
+
+test("AR3.find", "lo Scaffale che cerca: righe di una riga, ricerca (titolo del timbro), pastiglie (tipo, timbrato, dove), raggruppa per cartella, scheda al clic, ⌘-clic per più voci, trascinamento sul grafo (diventano documenti)", async () => {
+  const b = await arFindBench();
+  const { p, ctx, errors } = await open({ doc: withShelf("catena", { name: "Shelf", entries: b.entries }), ws: "assets", route: arachneRoute });
+  await p.waitForTimeout(800);
+  const all = await arRows(p);
+  const lineH = await p.evaluate(() => Math.max(...[...document.querySelectorAll(".shelf-line")].map((l) => l.getBoundingClientRect().height)));
+  await p.fill(".shelf-find-q", "nord");
+  await p.waitForTimeout(300);
+  const byTitle = await arRows(p);
+  const focusKept = await p.evaluate(() => document.activeElement?.dataset?.field === "shelf-q");
+  await p.fill(".shelf-find-q", "");
+  await p.waitForTimeout(200);
+  await p.click('.shelf-pill[data-pill="type:image"]');
+  await p.waitForTimeout(200);
+  const images = await arRows(p);
+  await p.click('.shelf-pill[data-pill="stamped:no"]');
+  await p.waitForTimeout(200);
+  const imagesToStamp = await arRows(p);
+  await p.click('[data-action="shelf-clear-find"]');
+  await p.click('.shelf-pill[data-pill="where:web"]');
+  await p.waitForTimeout(200);
+  const web = await arRows(p);
+  await p.click('[data-action="shelf-clear-find"]');
+  await p.selectOption(".shelf-find-group", "folder");
+  await p.waitForTimeout(300);
+  const groups = await p.evaluate(() => [...document.querySelectorAll(".shelf-group-head")].map((h) => h.textContent));
+  await p.selectOption(".shelf-find-group", "none");
+  // the card at the click; ⌘-click adds
+  await p.locator('.shelf-row[data-entry="p-DJI_0221.png"] .shelf-line').click();
+  await p.waitForTimeout(200);
+  const card = await p.evaluate(() => [...document.querySelectorAll(".shelf-row.is-open")].map((r) => r.dataset.entry));
+  await p.locator('.shelf-row[data-entry="p-DJI_0222.png"] .shelf-line').click({ modifiers: ["Meta"] });
+  await p.waitForTimeout(300);
+  const chosen = await p.evaluate(() => ({ rows: [...document.querySelectorAll(".shelf-row.is-chosen")].map((r) => r.dataset.entry),
+    preview: document.querySelector(".shelf-pane-preview .shelf-preview-title")?.textContent ?? "" }));
+  await p.screenshot({ path: SHOT("ar3-scaffale-che-cerca") }).catch(() => {});
+  // the drag onto the graph: the chosen ones become documents of the active graph
+  const nodesBefore = await p.evaluate(() => window.__EM_SCENE__().nodes.length);
+  await workspace(p, "canvas").catch(() => {});
+  const dropped = await p.evaluate((mime) => {
+    const area = document.querySelector('.tile-area[data-surface-type="graph"]');
+    if (!area) return "no graph area";
+    const dt = new DataTransfer();
+    dt.setData(mime, JSON.stringify(["p-DJI_0221.png", "p-DJI_0222.png"]));
+    area.dispatchEvent(new DragEvent("dragover", { dataTransfer: dt, bubbles: true, cancelable: true }));
+    area.dispatchEvent(new DragEvent("drop", { dataTransfer: dt, bubbles: true, cancelable: true }));
+    return "ok";
+  }, "application/x-em-shelf-entries");
+  await p.waitForTimeout(1500);
+  const nodesAfter = await p.evaluate(() => window.__EM_SCENE__().nodes.length);
+  const toast = await p.evaluate(() => document.getElementById("toast")?.innerText ?? "");
+  await workspace(p, "assets");
+  const inUse = await p.evaluate(() => [...document.querySelectorAll('.shelf-use[data-use="1"]')].map((u) => u.closest(".shelf-row").dataset.entry));
+  await ctx.close();
+  const conds = {
+    oneLine: all.length === 5 && lineH <= 34,
+    search: JSON.stringify(byTitle) === JSON.stringify(["st-DJI_0220.png"]) && focusKept,
+    pills: images.length === 3 && imagesToStamp.length === 2 && JSON.stringify(web) === JSON.stringify(["web1"]),
+    group: groups.length === 3 && groups.some((g) => /ar3\/drone · 3$/.test(g)),
+    card: JSON.stringify(card) === JSON.stringify(["p-DJI_0221.png"]),
+    multi: chosen.rows.length === 2 && /2/.test(chosen.preview),
+    // (the Matrix does not draw documents: the count of the scene is not the measure)
+    drag: dropped === "ok" && /: 2 \(/.test(toast) && inUse.includes("p-DJI_0221.png") && inUse.includes("p-DJI_0222.png"),
+    noErrors: !errors.length,
+  };
+  return { pass: Object.values(conds).every(Boolean), detail: { conds, all, lineH, byTitle, images, imagesToStamp, web, groups, card, chosen, nodesBefore, nodesAfter, toast, inUse, errors } };
+});
+
+test("AR4.preview", "la metà destra dello Scaffale: l'immagine sul disco, il record di un catalogo del DAI (Arachne: titolo, fatti, miniatura, «Letto da: iDAI.objects · Arachne (DAI)»); con lo Scaffale stretto le due metà vanno una sopra l'altra", async () => {
+  const b = await arFindBench();
+  const { p, ctx, errors } = await open({ doc: withShelf("catena", { name: "Shelf", entries: b.entries }), ws: "assets", route: arachneRoute });
+  await p.waitForTimeout(800);
+  await p.locator('.shelf-row[data-entry="p-DJI_0221.png"] .shelf-line').click();
+  await p.waitForTimeout(1500);
+  const local = await p.evaluate(() => { const img = document.querySelector(".shelf-pane-preview img.viewer-media");
+    return { img: !!img, loaded: !!img && img.complete && img.naturalWidth > 0, viewer: !!document.querySelector('[data-action="shelf-open-viewer"]') }; });
+  await p.locator('.shelf-row[data-entry="web1"] .shelf-line').click();
+  await p.waitForFunction(() => !!document.querySelector(".shelf-preview-source"), null, { timeout: 8000 }).catch(() => {});
+  await p.waitForTimeout(500);
+  const remote = await p.evaluate(() => ({
+    title: document.querySelector(".shelf-preview-rtitle")?.textContent ?? "",
+    source: document.querySelector(".shelf-preview-source")?.textContent ?? "",
+    fields: [...document.querySelectorAll(".shelf-preview-field")].map((f) => f.textContent),
+    img: document.querySelector(".shelf-pane-preview img.viewer-media")?.getAttribute("src") ?? "",
+    rowThumb: !!document.querySelector('.shelf-row[data-entry="web1"] img.shelf-thumb'),
+  }));
+  await p.screenshot({ path: SHOT("ar4-anteprima-arachne") }).catch(() => {});
+  const layout = async () => p.evaluate(() => {
+    const body = document.querySelector(".shelf-body.shelf-searching");
+    const l = document.querySelector(".shelf-pane-list")?.getBoundingClientRect();
+    const r = document.querySelector(".shelf-pane-preview")?.getBoundingClientRect();
+    return { w: Math.round(body?.getBoundingClientRect().width ?? 0), side: !!l && !!r && r.left >= l.right - 1, below: !!l && !!r && r.top >= l.bottom - 1 };
+  });
+  const wide = await layout();
+  // the Shelf made narrow: its area shrunk by the page (the halves follow the WINDOW's width)
+  await p.evaluate(() => { const b = document.querySelector(".shelf-body.shelf-searching"); b.style.maxWidth = "420px"; });
+  await p.waitForTimeout(300);
+  const narrow = await layout();
+  await p.screenshot({ path: SHOT("ar4-anteprima-stretta") }).catch(() => {});
+  await ctx.close();
+  const conds = {
+    localImage: local.img && local.loaded && local.viewer,
+    record: remote.title === "Architrav mit Rankenfries" && /Arachne/.test(remote.source) && remote.fields.some((f) => /Kalkstein/.test(f))
+      && /data\/image\/preview\/413653/.test(remote.img) && remote.rowThumb,
+    halves: (wide.w > 560 ? wide.side : wide.below) && narrow.w <= 420 && narrow.below,
+    noErrors: !errors.length,
+  };
+  return { pass: Object.values(conds).every(Boolean), detail: { conds, local, remote, wide, narrow, errors } };
 });
 
 // ── run ─────────────────────────────────────────────────────────────────────

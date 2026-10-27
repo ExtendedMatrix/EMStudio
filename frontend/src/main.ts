@@ -287,6 +287,11 @@ import { frameKey, makeFrame, readFrame, relocation, studyTarget, type FileFrame
 import { trackpadClassifier } from "./wheel-kind";
 import { isTilesetUrl } from "./tiles3d";
 import { mount3dViewer } from "./embed3d-native";
+import {
+  emptyQuery, findOnShelf, folderOf, pillCounts, queryActive, rangeOf, shelfTypeOf, whereOf,
+  SHELF_GROUPS, type EntryFacts, type ShelfGroupBy, type ShelfQuery, type ShelfWhere,
+} from "./shelf-find";
+import { resolveRemote, type PreviewDeps, type RemotePreview, type WebMeta } from "./web-preview";
 import { httpSource } from "./tiles3tz";
 import { attachTileset, bridgeTree, isArchiveName, openArchive, position, recognise, servedSource, treeOfDrop, unionTree,
   type Position, type Recognised, type TreeSource } from "./tileset-drop";
@@ -13632,7 +13637,7 @@ async function bridgeUrl(): Promise<string> {
   return _bridgeUrl;
 }
 /** The bridge level this editor expects (`BRIDGE_LEVEL` in tools/em_bridge.py). */
-const BRIDGE_LEVEL_WANTED = 40;   // 40 = /geo/tileset-frame, a tileset's shift (MICRO tileset, shift e epoche); 39 = /fs/pack-3tz with `root`, the RealityScan pair (MICRO-TILESET-CARTELLA); 38 = /geo/crs-info, /geo/convert-shift (MICRO-GEOREF-GRAFO); 37 = HTTPS through em_net, /tiles/failures (MICRO-BRIDGE-CERTIFICATI); 36 = /tiles/*, /geo/* (MICRO-GEOGLOBO); 31 = /property-source (FONTE); 32 = /room-import, «Bring into a room» through the engine; 33 = /fs/write (MICRO-SPAZIO-3D); 34 = /fs/doc, /fs/probe (MICRO-PERCORSI-WINDOWS); 35 = /fs/collect, /health's pid (MICRO-WINDOWS-MODELLI)
+const BRIDGE_LEVEL_WANTED = 41;   // 41 = /web-meta, the Shelf's previews of web addresses (MICRO-ARCHIVIO-1); 40 = /geo/tileset-frame, a tileset's shift (MICRO tileset, shift e epoche); 39 = /fs/pack-3tz with `root`, the RealityScan pair (MICRO-TILESET-CARTELLA); 38 = /geo/crs-info, /geo/convert-shift (MICRO-GEOREF-GRAFO); 37 = HTTPS through em_net, /tiles/failures (MICRO-BRIDGE-CERTIFICATI); 36 = /tiles/*, /geo/* (MICRO-GEOGLOBO); 31 = /property-source (FONTE); 32 = /room-import, «Bring into a room» through the engine; 33 = /fs/write (MICRO-SPAZIO-3D); 34 = /fs/doc, /fs/probe (MICRO-PERCORSI-WINDOWS); 35 = /fs/collect, /health's pid (MICRO-WINDOWS-MODELLI)
 /** MICRO-INSTALLER-PULSANTE p.3 · the bridge that answers says its level; one
  *  that differs from BRIDGE_LEVEL_WANTED is said in the Log (its url, pid, since
  *  when) and in a notice — once per bridge. Asked at start, while the sidecar
@@ -23222,7 +23227,9 @@ function createArea(winId: string, parent: HTMLElement = tileRoot): HTMLElement 
     // MICRO-TILESET-CARTELLA · a Storage path or files of the system on a
     // Viewer or a Scene: a tileset may be in it (decided at the drop)
     if ((storageDragPayload(e) && ["viewer", "shelf", "scene"].includes(ty))
-        || (carriesFiles(e) && ["viewer", "scene"].includes(ty))) {
+        || (carriesFiles(e) && ["viewer", "scene"].includes(ty))
+        // MICRO-ARCHIVIO-1 · entries of the Shelf, onto a graph, the File window, a Viewer
+        || (e.dataTransfer?.types.includes(SHELF_ENTRIES_MIME) && ["graph", "storage", "viewer"].includes(ty))) {
       e.preventDefault();
       if (e.dataTransfer) e.dataTransfer.dropEffect = "copy";
       area.classList.add("drop-target");
@@ -23232,6 +23239,14 @@ function createArea(winId: string, parent: HTMLElement = tileRoot): HTMLElement 
   area.addEventListener("drop", (e) => {
     area.classList.remove("drop-target");
     const into = winNow();
+    const fromShelf = shelfDragIds(e);
+    if (fromShelf && into && ["graph", "storage", "viewer"].includes(into.type)) {
+      e.preventDefault();
+      e.stopPropagation();
+      selectWindow(winId);
+      dropShelfEntries(into, fromShelf);
+      return;
+    }
     if (into && dropTilesetOn(into, e)) return;
     const resource = storageDragPayload(e);
     const target = winNow();
@@ -29401,8 +29416,10 @@ function renderShelfInto(win: Win, body: HTMLElement,
   if (count) count.textContent = tn("shelf.count", entries.length);
   // MICRO-ARCHIVIO-1 · no project open: the shelf is a project's, and says so
   if (!emtree.slots.length && !entries.length) {
+    shelfPreviewDispose(win.id);
     paintSurface(win, body, () => {
       body.textContent = "";
+      body.classList.remove("shelf-searching");
       const empty = document.createElement("div");
       empty.className = "viewer-empty shelf-no-project";
       const p = document.createElement("p");
@@ -29421,55 +29438,516 @@ function renderShelfInto(win: Win, body: HTMLElement,
       shelfTableAsked = true;
       void refreshShelfTable();
     }
+    shelfPreviewDispose(win.id);
+    body.classList.remove("shelf-searching");
     paintSurface(win, body, () => { renderShelfTableInto(body, win); body.prepend(shelfHead()); });
     return;
   }
-  paintSurface(win, body, () => {
-    body.textContent = "";
-    body.appendChild(shelfHead());
-    if (!entries.length) {
-      const empty = document.createElement("div");
-      empty.className = "viewer-empty";
-      const p = document.createElement("p");
-      p.textContent = t("shelf.empty");
-      empty.appendChild(p);
-      // DEV30 U7 · …and the scan of a DosCo, reachable from the shelf too
-      const dir = studyDir();
-      empty.appendChild(scanDoscoButton(dir ? `${dir}/DosCo` : null));
-      body.appendChild(empty);
-      return;
-    }
-    // CAMPAGNA (difetto 14) · the receipts of the ACTIVE study (`registry.
-    // graph_id` of their stamps), and the others said, one click away
-    const active = store ? String((store.doc.graph as Record<string, unknown>).graph_id ?? "") : "";
-    // MICRO-CONTENTS-2 C10 · everything by default (71 entries opened on an
-    // empty list); «only this graph» is the choice, and the others are marked
-    const all = !active || winCurrent(win, "shelf.studies") !== "this";
-    for (const e of entries) if (receiptOf(e) && paths.isAbsolute(e.locator) && !receiptChecks.has(e.id))
-      void runReceiptCheck(e.id, e.locator, receiptOf(e)!);
-    const shown = all ? entries : entries.filter((e) => !receiptOf(e) || receiptStudy.get(e.id) === active);
-    const other = entries.filter((e) => receiptOf(e) && receiptStudy.has(e.id) && receiptStudy.get(e.id) !== active).length;
-    const unknown = entries.filter((e) => receiptOf(e) && !receiptStudy.has(e.id)).length;
-    if (active && (other || unknown)) {
-      const note = document.createElement("div");
-      note.className = "shelf-studies";
-      note.dataset.other = String(other);
-      note.dataset.unknown = String(unknown);
-      note.textContent = all ? t("shelf.allStudies", { n: String(entries.length), o: String(other), u: String(unknown) })
-        : t("shelf.thisStudy", { n: String(shown.length), o: String(other), u: String(unknown) });
-      const b = document.createElement("button");
-      b.className = "ghost";
-      b.dataset.action = "shelf-studies";
-      b.textContent = all ? t("shelf.showThisStudy") : t("shelf.showAllStudies");
-      b.onclick = () => { setWinCurrent(win, "shelf.studies", all ? "this" : null); renderShelf(); };
-      note.append(" ", b);
-      body.appendChild(note);
+  // MICRO-ARCHIVIO-1 · a repaint (a receipt check answering, a letter of the
+  // search) while somebody writes in the shelf: the field comes back with its
+  // caret — the body is rebuilt, the writing is not interrupted
+  const writing = document.activeElement as HTMLInputElement | HTMLTextAreaElement | null;
+  const field = writing && body.contains(writing) ? writing.dataset?.field : undefined;
+  const caret = field ? [writing!.selectionStart, writing!.selectionEnd] as const : null;
+  const oldList = body.querySelector<HTMLElement>(".shelf-pane-list");
+  const listAt = oldList ? rememberSurfaceScroll(win, oldList, "shelf-list") : 0;
+  // the preview of the entry chosen is MOVED into the new body, not rebuilt: a
+  // model or a page read from a catalogue does not load again at every repaint
+  const keepPreview = body.querySelector<HTMLElement>(".shelf-pane-preview");
+  keepPreview?.remove();
+  body.textContent = "";
+  body.classList.remove("shelf-searching");
+  body.appendChild(shelfHead());
+  if (!entries.length) {
+    shelfPreviewDispose(win.id);
+    const empty = document.createElement("div");
+    empty.className = "viewer-empty";
+    const p = document.createElement("p");
+    p.textContent = t("shelf.empty");
+    empty.appendChild(p);
+    // DEV30 U7 · …and the scan of a DosCo, reachable from the shelf too
+    const dir = studyDir();
+    empty.appendChild(scanDoscoButton(dir ? `${dir}/DosCo` : null));
+    body.appendChild(empty);
+    return;
+  }
+  // CAMPAGNA (difetto 14) · the receipts are checked against their sidecars
+  // (which also says the study, the act and the author of each stamp)
+  for (const e of entries) if (receiptOf(e) && paths.isAbsolute(e.locator) && !receiptChecks.has(e.id))
+    void runReceiptCheck(e.id, e.locator, receiptOf(e)!);
+  body.classList.add("shelf-searching");
+  const q = shelfQueryOf(win);
+  const facts = shelfFactsOf(entries);
+  body.appendChild(shelfFindBar(win, q, facts));
+  const groups = findOnShelf(facts, q);
+  const shown = groups.flatMap((g) => g.ids);
+  shelfShownOrder.set(win.id, shown);
+  // the selection keeps only what is still on the shelf
+  for (const id of [...shelfSel]) if (!entries.some((e) => e.id === id)) shelfSel.delete(id);
+  const split = document.createElement("div");
+  split.className = "shelf-split";
+  const pane = document.createElement("div");
+  pane.className = "shelf-pane-list";
+  if (!shown.length) {
+    const none = document.createElement("div");
+    none.className = "viewer-empty shelf-none";
+    none.textContent = t("shelf.findNone");
+    const clear = document.createElement("button");
+    clear.className = "ghost";
+    clear.dataset.action = "shelf-clear-find";
+    clear.textContent = t("shelf.findClear");
+    clear.onclick = () => { setShelfQuery(win, { ...emptyQuery(), group: q.group }); renderShelf(); };
+    none.append(" ", clear);
+    pane.appendChild(none);
+  }
+  const byId = new Map(entries.map((e) => [e.id, e]));
+  for (const g of groups) {
+    if (q.group !== "none") {
+      const head = document.createElement("div");
+      head.className = "shelf-group-head";
+      head.dataset.group = g.key;
+      head.textContent = `${g.label === null ? t(`shelf.groupNone.${q.group}`)
+        : q.group === "type" ? shelfTypeLabel(g.label) : g.label} · ${g.ids.length}`;
+      head.title = g.label ?? "";
+      pane.appendChild(head);
     }
     const list = document.createElement("div");
     list.className = "shelf-list";
-    for (const entry of shown) list.appendChild(shelfRow(entry));
-    body.appendChild(list);
+    for (const id of g.ids) list.appendChild(shelfRow(byId.get(id)!, win));
+    pane.appendChild(list);
+  }
+  split.appendChild(pane);
+  split.appendChild(shelfPreviewPane(win, keepPreview));
+  body.appendChild(split);
+  restoreSurfaceScroll(win, pane, listAt, "shelf-list");
+  if (field) {
+    const back = body.querySelector<HTMLInputElement | HTMLTextAreaElement>(`[data-field="${field}"]`);
+    if (back) {
+      back.focus({ preventScroll: true });
+      try { back.setSelectionRange(caret![0], caret![1]); } catch { /* a field with no caret */ }
+    }
+  }
+}
+
+/** MICRO-ARCHIVIO-1 · the act each stamp records, and its author, read from
+ *  the sidecar with the study (absent = not read yet, or no sidecar here) */
+const receiptAct = new Map<string, { id: string; label: string } | null>();
+const receiptAuthor = new Map<string, string>();
+
+// ── MICRO-ARCHIVIO-1 · THE SHELF THAT SEARCHES ──────────────────────────────
+//
+// The query is the WINDOW's (two Shelf windows can look for two things); the
+// selection is the shelf's, one for every window, as the selection of a graph
+// is the graph's. A click chooses one entry and opens its card; ⌘/Ctrl-click
+// adds or takes away; ⇧-click takes the range shown. The chosen ones are shown
+// in the preview half, and they are what a drag carries.
+
+/** the entries chosen, and the one the last plain click opened (its card) */
+const shelfSel = new Set<string>();
+let shelfOpen: string | null = null;
+let shelfAnchor: string | null = null;
+/** the order the rows were shown in, per window — for a ⇧-click's range */
+const shelfShownOrder = new Map<string, string[]>();
+const SHELF_ENTRIES_MIME = "application/x-em-shelf-entries";
+
+function shelfQueryOf(win: Win): ShelfQuery {
+  const v = winCurrent(win, "shelf.query");
+  if (v && typeof v === "object") return { ...emptyQuery(), ...(v as Partial<ShelfQuery>) };
+  return emptyQuery();
+}
+function setShelfQuery(win: Win, q: ShelfQuery): void {
+  setWinCurrent(win, "shelf.query", queryActive(q) || q.group !== "none" ? (q as unknown as Record<string, unknown>) : null);
+}
+
+/** «Immagine», «Modello 3D», … — the datamodel's type in the reader's words;
+ *  a type with no word yet says its own name */
+function shelfTypeLabel(type: string): string {
+  const k = `shelf.type.${type}`;
+  const w = t(k);
+  return w === k ? type.replace(/_/g, " ") : w;
+}
+
+/** what the open graphs cite: urls and digests of their nodes, and the ids of
+ *  the documents (a shelf entry «in use» is one of these) */
+function citedByOpenGraphs(): { urls: Set<string>; digests: Set<string>; nodes: Map<string, string> } {
+  const urls = new Set<string>();
+  const digests = new Set<string>();
+  const nodes = new Map<string, string>();
+  for (const sl of emtree.slots) for (const n of sl.store.doc.graph.nodes) {
+    nodes.set(n.id, String(n.name ?? n.id));
+    const d = (n.data ?? {}) as Record<string, unknown>;
+    if (typeof d.url === "string" && d.url) urls.add(paths.toPosix(d.url));
+    if (typeof d.checksum === "string" && d.checksum) digests.add(d.checksum);
+    if (Array.isArray(d.files)) for (const f of d.files as Array<Record<string, unknown>>) {
+      if (typeof f?.path === "string") urls.add(paths.toPosix(f.path));
+      if (typeof f?.url === "string") urls.add(paths.toPosix(f.url));
+      if (typeof f?.checksum === "string") digests.add(f.checksum);
+    }
+  }
+  return { urls, digests, nodes };
+}
+
+function shelfFactsOf(entries: ShelfEntry[]): EntryFacts[] {
+  const cited = citedByOpenGraphs();
+  const active = store ? String((store.doc.graph as Record<string, unknown>).graph_id ?? "") : "";
+  return entries.map((e) => {
+    const rec = receiptOf(e);
+    const promoted = String(e.extra?.promoted_to ?? "");
+    const doc = promoted && cited.nodes.has(promoted) ? cited.nodes.get(promoted)! : null;
+    const its = receiptStudy.get(e.id);
+    const remote = remotePreviews.get(e.locator);
+    return {
+      id: e.id, name: e.name, locator: e.locator,
+      type: shelfTypeOf(e.locator),
+      stamped: !!rec,
+      inUse: !!doc || cited.urls.has(paths.toPosix(e.locator)) || (!!e.checksum && cited.digests.has(e.checksum)),
+      study: its && active ? (its === active ? "this" : "other") : null,
+      where: whereOf(e.locator),
+      folder: folderOf(e.locator),
+      act: receiptAct.get(e.id) ?? null,
+      doc,
+      words: [rec?.title ?? "", rec?.description ?? "", rec?.id ?? "", promoted, receiptAuthor.get(e.id) ?? "",
+        typeof remote === "object" ? `${remote.title ?? ""} ${remote.description ?? ""} ${remote.source}` : ""].filter(Boolean),
+    };
   });
+}
+
+/** the search, the pills and «Raggruppa per», at the head of the list */
+function shelfFindBar(win: Win, q: ShelfQuery, facts: EntryFacts[]): HTMLElement {
+  const bar = document.createElement("div");
+  bar.className = "shelf-find";
+  const row = document.createElement("div");
+  row.className = "shelf-find-row";
+  const input = document.createElement("input");
+  input.type = "search";
+  input.className = "shelf-find-q";
+  input.dataset.field = "shelf-q";
+  input.placeholder = t("shelf.findPh");
+  input.title = t("shelf.findTitle");
+  input.setAttribute("aria-label", t("shelf.findTitle"));
+  input.value = q.text;
+  input.spellcheck = false;
+  input.addEventListener("pointerdown", (e) => e.stopPropagation());
+  input.addEventListener("input", () => { setShelfQuery(win, { ...shelfQueryOf(win), text: input.value }); renderShelf(); });
+  input.addEventListener("keydown", (e) => {
+    e.stopPropagation();
+    if (e.key === "Escape" && input.value) { e.preventDefault(); input.value = ""; setShelfQuery(win, { ...shelfQueryOf(win), text: "" }); renderShelf(); }
+  });
+  const group = document.createElement("select");
+  group.className = "shelf-find-group";
+  group.dataset.action = "shelf-group";
+  group.title = t("shelf.groupTitle");
+  group.setAttribute("aria-label", t("shelf.groupTitle"));
+  for (const g of SHELF_GROUPS) {
+    const o = document.createElement("option");
+    o.value = g;
+    o.textContent = t(`shelf.group.${g}`);
+    group.appendChild(o);
+  }
+  group.value = q.group;
+  group.onchange = () => { setShelfQuery(win, { ...shelfQueryOf(win), group: group.value as ShelfGroupBy }); renderShelf(); };
+  row.append(input, group);
+  bar.appendChild(row);
+
+  const pills = document.createElement("div");
+  pills.className = "shelf-pills";
+  const counts = pillCounts(facts, q);
+  const pill = (label: string, n: number, on: boolean, key: string, flip: () => ShelfQuery): void => {
+    if (!n && !on) return;
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = `shelf-pill${on ? " on" : ""}`;
+    b.dataset.pill = key;
+    b.setAttribute("aria-pressed", String(on));
+    b.textContent = `${label} ${n}`;
+    b.onclick = () => { setShelfQuery(win, flip()); renderShelf(); };
+    pills.appendChild(b);
+  };
+  const sep = (): void => { if (pills.lastElementChild && !pills.lastElementChild.classList.contains("shelf-pill-sep")) {
+    const i = document.createElement("span"); i.className = "shelf-pill-sep"; pills.appendChild(i); } };
+  for (const [type, n] of [...counts.types].sort((a, b) => b[1] - a[1])) {
+    const on = q.types.includes(type);
+    pill(shelfTypeLabel(type), n, on, `type:${type}`, () => ({ ...shelfQueryOf(win),
+      types: on ? q.types.filter((x) => x !== type) : [...q.types, type] }));
+  }
+  sep();
+  const two = (key: "stamped" | "inUse", pair: [number, number], yes: string, no: string): void => {
+    const cur = q[key];
+    pill(yes, pair[0], cur === true, `${key}:yes`, () => ({ ...shelfQueryOf(win), [key]: cur === true ? null : true }));
+    pill(no, pair[1], cur === false, `${key}:no`, () => ({ ...shelfQueryOf(win), [key]: cur === false ? null : false }));
+  };
+  two("stamped", counts.stamped, t("shelf.pill.stamped"), t("shelf.pill.unstamped"));
+  sep();
+  two("inUse", counts.inUse, t("shelf.pill.inUse"), t("shelf.pill.notInUse"));
+  sep();
+  pill(t("shelf.pill.thisStudy"), counts.study[0], q.study === "this", "study:this",
+    () => ({ ...shelfQueryOf(win), study: q.study === "this" ? null : "this" }));
+  pill(t("shelf.pill.otherStudies"), counts.study[1], q.study === "other", "study:other",
+    () => ({ ...shelfQueryOf(win), study: q.study === "other" ? null : "other" }));
+  sep();
+  for (const w of ["disk", "room", "web"] as ShelfWhere[]) {
+    pill(t(`shelf.pill.${w}`), counts.where.get(w) ?? 0, q.where === w, `where:${w}`,
+      () => ({ ...shelfQueryOf(win), where: q.where === w ? null : w }));
+  }
+  if (pills.lastElementChild?.classList.contains("shelf-pill-sep")) pills.lastElementChild.remove();
+  bar.appendChild(pills);
+  if (queryActive(q)) {
+    const n = findOnShelf(facts, q).reduce((k, g) => k + g.ids.length, 0);
+    const said = document.createElement("div");
+    said.className = "shelf-find-said";
+    said.textContent = t("shelf.findShown", { n: String(n), of: String(facts.length) });
+    const clear = document.createElement("button");
+    clear.className = "ghost";
+    clear.dataset.action = "shelf-clear-find";
+    clear.textContent = t("shelf.findClear");
+    clear.onclick = () => { setShelfQuery(win, { ...emptyQuery(), group: q.group }); renderShelf(); };
+    said.append(" ", clear);
+    bar.appendChild(said);
+  }
+  return bar;
+}
+
+// ── MICRO-ARCHIVIO-1 · THE PREVIEW HALF ─────────────────────────────────────
+//
+// E.D. on V3: the previews of what the Shelf cites — remote ones too, a record
+// found in a DAI catalogue — go in the right half of the Shelf. The chosen entry
+// is shown there as itself: an image, a PDF, a model, a tileset, a page read
+// from its address with its source said. Several chosen: their pictures side by
+// side. With a narrow Shelf the two halves go one above the other (CSS, by the
+// width of the window).
+
+/** what a web address was read as (`web-preview.ts`), once per session */
+const remotePreviews = new Map<string, RemotePreview | "reading">();
+/** the preview drawn in each window: what it shows, and how to let it go */
+const shelfPreviews = new Map<string, { key: string; el: HTMLElement; dispose?: () => void }>();
+
+function shelfPreviewDispose(winId: string): void {
+  const p = shelfPreviews.get(winId);
+  if (!p) return;
+  try { p.dispose?.(); } catch { /* a viewer that is already gone */ }
+  shelfPreviews.delete(winId);
+}
+
+async function readRemote(url: string): Promise<void> {
+  if (remotePreviews.has(url)) return;
+  remotePreviews.set(url, "reading");
+  const deps: PreviewDeps = {
+    fetchJson: async (u) => {
+      try {
+        const r = await fetch(u, { headers: { Accept: "application/json, application/ld+json" } });
+        return r.ok ? await r.json() : null;
+      } catch { return null; }
+    },
+    webMeta: async (u) => {
+      try {
+        const r = await fetch(`${await bridgeUrl()}/web-meta?url=${encodeURIComponent(u)}`);
+        if (r.status === 404) return null;   // a bridge older than level 41
+        return (await r.json()) as WebMeta;
+      } catch { return null; }
+    },
+  };
+  let res: RemotePreview;
+  try { res = await resolveRemote(url, deps); } catch (e) { res = { kind: "none", url, link: url, source: url, error: errorText(e) ?? "" }; }
+  remotePreviews.set(url, res);
+  renderShelf();
+}
+
+function shelfPreviewPane(win: Win, keep: HTMLElement | null): HTMLElement {
+  const chosen = [...shelfSel].map((id) => shelfEntries().find((e) => e.id === id)).filter((e): e is ShelfEntry => !!e);
+  const one = chosen.length === 1 ? chosen[0] : null;
+  const remote = one && /^https?:/i.test(one.locator) ? remotePreviews.get(one.locator) : undefined;
+  const key = chosen.map((e) => `${e.id}:${e.locator}`).join("|")
+    + (one && remote ? `#${typeof remote === "object" ? "read" : remote}` : "")
+    + `#${getLocale()}`;
+  const was = shelfPreviews.get(win.id);
+  if (keep && was && was.key === key && was.el === keep) return keep;
+  shelfPreviewDispose(win.id);
+  const pane = document.createElement("div");
+  pane.className = "shelf-pane-preview";
+  pane.dataset.preview = chosen.length ? (one ? one.id : `${chosen.length}`) : "";
+  const record: { key: string; el: HTMLElement; dispose?: () => void } = { key, el: pane };
+  shelfPreviews.set(win.id, record);
+  if (!chosen.length) {
+    const hint = document.createElement("div");
+    hint.className = "viewer-empty shelf-preview-hint";
+    hint.textContent = t("shelf.previewHint");
+    pane.appendChild(hint);
+    return pane;
+  }
+  if (!one) {
+    const head = document.createElement("div");
+    head.className = "shelf-preview-title";
+    head.textContent = t("shelf.previewMany", { n: String(chosen.length) });
+    const grid = document.createElement("div");
+    grid.className = "shelf-preview-grid";
+    for (const e of chosen.slice(0, 24)) {
+      const cell = document.createElement("div");
+      cell.className = "shelf-preview-cell";
+      cell.title = e.name;
+      const pic = shelfRow(e).querySelector(".shelf-icon");
+      if (pic) cell.appendChild(pic);
+      const n = document.createElement("span");
+      n.textContent = e.name;
+      cell.appendChild(n);
+      grid.appendChild(cell);
+    }
+    const note = document.createElement("div");
+    note.className = "shelf-preview-note";
+    note.textContent = t("shelf.previewManyHint");
+    pane.append(head, grid, note);
+    return pane;
+  }
+  const head = document.createElement("div");
+  head.className = "shelf-preview-title";
+  head.textContent = one.name;
+  const where = document.createElement("code");
+  where.className = "shelf-preview-where";
+  where.textContent = shortLocator(one.locator);
+  where.title = one.locator;
+  pane.append(head, where);
+  const stage = document.createElement("div");
+  stage.className = "shelf-preview-stage";
+  pane.appendChild(stage);
+  const type = shelfTypeOf(one.locator);
+  const rec = receiptOf(one);
+  const words = (): void => {
+    if (!rec || (!rec.title && !rec.description)) return;
+    const w = document.createElement("div");
+    w.className = "shelf-preview-words";
+    w.textContent = [rec.title, rec.description].filter(Boolean).join(" — ");
+    pane.appendChild(w);
+  };
+  const actions = document.createElement("div");
+  actions.className = "shelf-preview-actions";
+  const mount3d = (url: string): void => {
+    const host = document.createElement("div");
+    host.className = "shelf-preview-3d";
+    stage.appendChild(host);
+    const h = mount3dViewer(host, url, { label: one.name });
+    record.dispose = () => h.dispose();
+  };
+  if (paths.isAbsolute(one.locator)) {
+    const path = one.locator;
+    if (type === "tileset" && /\.3tz$/i.test(path)) {
+      stage.appendChild(viewerEmpty(t("shelf.previewTileset")));
+    } else if (type === "tileset" || /model/.test(type)) {
+      void fsUrlFor(path).then((u) => { if (shelfPreviews.get(win.id) === record) mount3d(u); });
+    } else {
+      stage.appendChild(viewerEmpty(t("storage.loading")));
+      void collectionFromFile(path).then((c) => {
+        stage.textContent = "";
+        const item = c.items[0];
+        if (item) stage.appendChild(viewerItemElement(item, stage));
+      }).catch((err) => {
+        stage.textContent = "";
+        stage.appendChild(viewerEmpty(err instanceof FileRefusedError || err instanceof BridgeDownError
+          ? t("viewer.unreachable") : errorText(err) ?? t("viewer.unreachable")));
+      });
+    }
+    words();
+    const v = document.createElement("button");
+    v.dataset.action = "shelf-open-viewer";
+    v.textContent = t("shelf.openInViewer");
+    v.title = t("shelf.openInViewerHint");
+    v.onclick = () => openFileInViewer(path, win);
+    actions.appendChild(v);
+    if (type === "tileset") {
+      const sc = document.createElement("button");
+      sc.textContent = t("scene.openHere");
+      sc.title = t("scene.openHereHint");
+      sc.onclick = () => { void openPathInScene(path); };
+      actions.appendChild(sc);
+    }
+    const disk = document.createElement("button");
+    disk.dataset.action = "shelf-show-on-disk";
+    disk.textContent = t("shelf.showOnDisk");
+    disk.title = t("shelf.showOnDiskHint");
+    disk.onclick = () => showOnDisk(path);
+    actions.appendChild(disk);
+  } else if (/^https?:/i.test(one.locator)) {
+    if (!remote) void readRemote(one.locator);
+    if (!remote || remote === "reading") {
+      stage.appendChild(viewerEmpty(t("shelf.previewReading")));
+    } else {
+      if (remote.kind === "image" || remote.image) {
+        const img = document.createElement("img");
+        img.className = "viewer-media";
+        img.referrerPolicy = "no-referrer";
+        img.alt = remote.title ?? one.name;
+        img.src = remote.image ?? remote.url;
+        img.addEventListener("error", () => img.replaceWith(viewerEmpty(t("viewer.unreachable"))));
+        stage.appendChild(img);
+      } else if (remote.kind === "pdf") {
+        const obj = document.createElement("object");
+        obj.className = "viewer-media";
+        obj.type = "application/pdf";
+        obj.data = remote.url;
+        obj.appendChild(viewerOpenLink(remote.url));
+        stage.appendChild(obj);
+      } else if (remote.kind === "model" || (remote.kind === "tileset" && /tileset\.json/i.test(remote.url))) {
+        mount3d(remote.url);
+      } else {
+        stage.appendChild(viewerEmpty(remote.error === "no-bridge" ? t("shelf.previewNoBridge")
+          : remote.error ? t("shelf.previewUnread", { why: remote.error }) : t("shelf.previewNothing")));
+      }
+      const card = document.createElement("div");
+      card.className = "shelf-preview-record";
+      if (remote.title) {
+        const ti = document.createElement("div");
+        ti.className = "shelf-preview-rtitle";
+        ti.textContent = remote.title;
+        card.appendChild(ti);
+      }
+      if (remote.description) {
+        const d = document.createElement("div");
+        d.className = "shelf-preview-rdesc";
+        d.textContent = remote.description;
+        card.appendChild(d);
+      }
+      for (const [k, v] of remote.fields ?? []) {
+        const f = document.createElement("div");
+        f.className = "shelf-preview-field";
+        const kk = document.createElement("span");
+        kk.textContent = t(`shelf.field.${k}`);
+        f.append(kk, ` ${v}`);
+        card.appendChild(f);
+      }
+      const src = document.createElement("div");
+      src.className = "shelf-preview-source";
+      src.dataset.source = remote.source;
+      src.textContent = t("shelf.previewSource", { source: remote.source });
+      card.appendChild(src);
+      pane.appendChild(card);
+    }
+    words();
+    actions.appendChild(viewerOpenLink(one.locator));
+  } else {
+    stage.appendChild(viewerEmpty(t("shelf.previewRoom")));
+    words();
+  }
+  if (actions.childNodes.length) pane.appendChild(actions);
+  return pane;
+}
+
+/** a click on a row: choose it (and open its card), ⌘/Ctrl add or take away,
+ *  ⇧ take the range shown */
+function shelfRowClicked(win: Win, entry: ShelfEntry, e: MouseEvent): void {
+  if (e.metaKey || e.ctrlKey) {
+    if (shelfSel.has(entry.id)) shelfSel.delete(entry.id);
+    else shelfSel.add(entry.id);
+    shelfAnchor = entry.id;
+    if (shelfOpen && !shelfSel.has(shelfOpen)) shelfOpen = null;
+  } else if (e.shiftKey && shelfAnchor) {
+    for (const id of rangeOf(shelfShownOrder.get(win.id) ?? [], shelfAnchor, entry.id)) shelfSel.add(id);
+  } else {
+    const again = shelfOpen === entry.id && shelfSel.size === 1;
+    shelfSel.clear();
+    shelfSel.add(entry.id);
+    shelfAnchor = entry.id;
+    // a second click on the open one closes its card (the choice stays)
+    shelfOpen = again ? null : entry.id;
+  }
+  renderShelf();
 }
 
 /** CAMPAGNA · the study each receipt belongs to — its stamp's
@@ -29762,10 +30240,13 @@ function shelfRoleCell(id: string, current: string): HTMLElement {
   return sel;
 }
 
-function shelfRow(entry: ShelfEntry): HTMLElement {
+function shelfRow(entry: ShelfEntry, win?: Win): HTMLElement {
   const row = document.createElement("div");
   row.className = "shelf-row";
   row.dataset.entry = entry.id;
+  const open = shelfOpen === entry.id;
+  if (shelfSel.has(entry.id)) row.classList.add("is-chosen");
+  if (open) row.classList.add("is-open");
 
   // IIIF · a shelf that shows what it holds. The entry already carries the
   // checksum (SHELF1), and the checksum IS the image's identifier, so a
@@ -29779,10 +30260,16 @@ function shelfRow(entry: ShelfEntry): HTMLElement {
                                  media_type: "image/jpeg" } } as EmNode,
                        iiifBase(), 96)
     : null;
-  if (thumb) {
+  // MICRO-ARCHIVIO-1 · a web image is its own thumbnail; a record read from a
+  // catalogue lends its picture once it has been read (`remotePreviews`)
+  const remote = remotePreviews.get(entry.locator);
+  const webThumb = /^https?:/i.test(entry.locator)
+    ? (entry.kind === "image" ? entry.locator : typeof remote === "object" ? remote.image ?? null : null) : null;
+  if (thumb || webThumb) {
     const img = new Image();
     img.className = "shelf-thumb";
-    img.src = thumb;
+    img.src = (thumb ?? webThumb)!;
+    img.referrerPolicy = "no-referrer";
     img.alt = "";
     img.loading = "lazy";
     // a service that is configured but cannot answer must not leave a broken
@@ -29809,7 +30296,7 @@ function shelfRow(entry: ShelfEntry): HTMLElement {
   // steps), the whole of it in the tooltip
   locator.textContent = shortLocator(entry.locator);
   locator.title = entry.locator;
-  main.append(name, locator);
+  main.append(locator);
 
   // The two axes, SHOWN — the three-fence model has to be visible or it is not
   // a model, it is a field in a file. A badge that was never recorded is marked
@@ -29855,6 +30342,7 @@ function shelfRow(entry: ShelfEntry): HTMLElement {
   // how it compares with the sidecar and the bytes when they are reachable
   const rec = receiptOf(entry);
   if (rec) main.appendChild(receiptLine(entry, rec));
+  if (rec && shelfWords?.id === entry.id) main.appendChild(shelfWordsBox(entry));
   // CATENA · a Tropy photo: its notes and selections, and whether it was promoted
   const tr = tropyOf(entry);
   if (tr) {
@@ -29885,18 +30373,29 @@ function shelfRow(entry: ShelfEntry): HTMLElement {
     pr.addEventListener("click", () => { void promoteShelfEntry(entry); });
     actions.appendChild(pr);
   }
-  // RIFINITURE · the description is written IN THE STAMP: the shelf shows the
-  // receipt's copy read-only, and this opens the stamp's form on that file
+  // RIFINITURE · the description is written IN THE STAMP. MICRO-ARCHIVIO-1 ·
+  // and the button opens the field HERE, in the entry, with the focus: until 27
+  // Oct it moved the File window onto the file and opened the form there, half
+  // under the edge of its area — the name promised one thing, the click did
+  // another. Going to the file is a gesture of its own, «Mostra nel disco».
   if (rec && paths.isAbsolute(entry.locator)) {
     const ed = document.createElement("button");
-    // AUDIT N8 · the Storage of this space; when there is none it goes to
-    // Contenuti, and the button says so
-    ed.textContent = windowsOf().some((w) => w.type === "storage")
-      ? t("receipt.editInStamp") : t("receipt.editInStampTo");
+    ed.textContent = t("receipt.editInStamp");
     ed.title = t("receipt.editInStampHint");
     ed.dataset.editStamp = entry.id;
-    ed.addEventListener("click", () => openStampEditor(entry.locator));
+    ed.addEventListener("click", () => openShelfWords(entry));
     actions.appendChild(ed);
+  }
+  if (paths.isAbsolute(entry.locator)) {
+    const disk = document.createElement("button");
+    // AUDIT N8 · the File window of this space; when there is none it goes to
+    // Contenuti, and the button says so
+    disk.textContent = windowsOf().some((w) => w.type === "storage")
+      ? t("shelf.showOnDisk") : t("shelf.showOnDiskTo");
+    disk.title = t("shelf.showOnDiskHint");
+    disk.dataset.showOnDisk = entry.id;
+    disk.addEventListener("click", () => showOnDisk(entry.locator));
+    actions.appendChild(disk);
   }
   // CAMPAGNA · a tileset on the shelf (a .3tz, a tileset folder) opens in the Scene
   if (paths.isAbsolute(entry.locator) && (/\.3tz$/i.test(entry.locator) || /(^|\/)tileset\.json$/i.test(entry.locator)
@@ -29926,8 +30425,103 @@ function shelfRow(entry: ShelfEntry): HTMLElement {
   });
   actions.appendChild(drop);
 
-  row.append(icon, main, badges, actions);
+  // MICRO-ARCHIVIO-1 · ONE LINE: the picture, the name, the seal, the use — and
+  // the rest of what was the row (the address, the badges, the receipt, the
+  // buttons) in the CARD the click opens under it. 71 entries were four to a
+  // screen; now they are a list you can read.
+  const line = document.createElement("div");
+  line.className = "shelf-line";
+  line.draggable = true;
+  line.tabIndex = 0;
+  line.setAttribute("role", "option");
+  line.setAttribute("aria-selected", String(shelfSel.has(entry.id)));
+  const marks = document.createElement("span");
+  marks.className = "shelf-marks";
+  if (rec?.checksum) {
+    const seal = sealMini(rec.checksum, paths.isAbsolute(entry.locator) ? () => { void showSealOf(entry.locator); } : undefined);
+    seal.addEventListener("click", (e) => e.stopPropagation());
+    marks.appendChild(seal);
+  }
+  const fact = shelfFactsOf([entry])[0];
+  const use = document.createElement("span");
+  use.className = `shelf-use${fact.inUse ? " on" : ""}`;
+  use.dataset.use = fact.inUse ? "1" : "0";
+  use.textContent = fact.inUse ? "●" : "○";
+  use.title = fact.inUse ? (fact.doc ? t("shelf.inUseAs", { doc: fact.doc }) : t("shelf.pill.inUse")) : t("shelf.pill.notInUse");
+  marks.appendChild(use);
+  if (row.classList.contains("is-other-graph")) {
+    const o = document.createElement("span");
+    o.className = "shelf-other-mark";
+    o.textContent = "↗";
+    o.title = t("shelf.otherGraphTitle");
+    marks.appendChild(o);
+  }
+  name.textContent = entry.name;
+  if (rec?.title && rec.title !== entry.name) name.title = [rec.title, name.title].filter(Boolean).join("\n");
+  line.append(icon, name, marks);
+  line.addEventListener("click", (e) => { if (win) shelfRowClicked(win, entry, e); });
+  line.addEventListener("keydown", (e) => {
+    if ((e.key === "Enter" || e.key === " ") && win) { e.preventDefault(); shelfRowClicked(win, entry, e as unknown as MouseEvent); }
+  });
+  // the drag carries the chosen entries (this one, if it is not among them):
+  // onto a graph they become its documents, onto the File window or a Viewer
+  // they are shown there
+  line.addEventListener("dragstart", (e) => {
+    const ids = shelfSel.has(entry.id) ? [...shelfSel] : [entry.id];
+    const locs = ids.map((id) => shelfEntries().find((x) => x.id === id)?.locator).filter((x): x is string => !!x);
+    e.dataTransfer?.setData(SHELF_ENTRIES_MIME, JSON.stringify(ids));
+    e.dataTransfer?.setData("text/uri-list", locs.filter((l) => /^https?:/i.test(l)).join("\r\n"));
+    e.dataTransfer?.setData("text/plain", locs.join("\n"));
+    if (e.dataTransfer) e.dataTransfer.effectAllowed = "copy";
+  });
+  row.appendChild(line);
+  if (open) {
+    const card = document.createElement("div");
+    card.className = "shelf-card";
+    card.append(main, badges, actions);
+    row.appendChild(card);
+  }
   return row;
+}
+
+/** MICRO-ARCHIVIO-1 · the entries a drag from the Shelf carries (ids), or null */
+function shelfDragIds(e: DragEvent): string[] | null {
+  const raw = e.dataTransfer?.getData(SHELF_ENTRIES_MIME);
+  if (!raw) return null;
+  try {
+    const v = JSON.parse(raw) as unknown;
+    return Array.isArray(v) ? v.map(String) : null;
+  } catch { return null; }
+}
+
+/** …and what it does where it lands */
+function dropShelfEntries(win: Win, ids: string[]): void {
+  const list = ids.map((id) => shelfEntries().find((x) => x.id === id)).filter((x): x is ShelfEntry => !!x);
+  if (!list.length) return;
+  if (win.type === "graph") {
+    // onto a graph: each becomes a document of the ACTIVE graph («Fanne un
+    // documento», for all of them at once) — those already documents are left
+    if (!store) return;
+    void (async () => {
+      let made = 0;
+      for (const e of list) {
+        if (documentOfShelfEntry(e)) continue;
+        if (await promoteShelfEntry(e, { quiet: true })) made++;
+      }
+      const msg = t("shelf.droppedOnGraph", { n: String(made), graph: activeGraphName(), had: String(list.length - made) });
+      logInfo(msg);
+      toast(msg);
+    })();
+    return;
+  }
+  const local = list.find((e) => paths.isAbsolute(e.locator));
+  if (win.type === "storage" && local) { showOnDisk(local.locator); return; }
+  if (win.type === "viewer" && local) {
+    pinViewerCollection(win, { path: local.locator, type: "file", name: baseName(local.locator),
+      ext: local.locator.split(".").pop() ?? "" });
+    return;
+  }
+  toast(t("shelf.dropNothingHere"));
 }
 
 // ── CATENA · the shelf's bar, the receipts, Tropy, «Promuovi a documento» ────
@@ -30078,6 +30672,13 @@ async function runReceiptCheck(id: string, path: string, rec: NonNullable<Return
   if (sidecar) {
     const g = (sidecar as unknown as { registry?: { graph_id?: string } }).registry?.graph_id;
     receiptStudy.set(id, typeof g === "string" && g ? g : null);
+    // MICRO-ARCHIVIO-1 · the act and the hand, for the Shelf's search and groups
+    const sc = sidecar as unknown as { how?: { process_id?: string; dtc_kind?: string };
+      by?: { operator?: { label?: string; id?: string }; at?: string } };
+    const pid = sc.how?.process_id;
+    receiptAct.set(id, pid ? { id: pid, label: [sc.how?.dtc_kind ? dtcKindLabel(sc.how.dtc_kind) : "",
+      sc.by?.at ? readableWhen(sc.by.at) : "", sc.by?.operator?.label ?? ""].filter(Boolean).join(" · ") || pid } : null);
+    receiptAuthor.set(id, [sc.by?.operator?.label, sc.by?.operator?.id].filter(Boolean).join(" "));
   }
   // CAMPAGNA · a stamp of several files (a file set, a tree) is judged by its
   // members, asked of dtcstamp — the door's own sha256 is not its digest
@@ -33914,7 +34515,9 @@ let stampEditing: string | null = null;
 
 /** «Modifica nel timbro» from the shelf: the Contents desk, the file selected
  *  in its Storage, and the stamp's words open for editing. */
-function openStampEditor(path: string): void {
+/** MICRO-ARCHIVIO-1 · «Mostra nel disco»: the File window on the file's folder,
+ *  the file chosen (the window of this space; Contenuti when it has none). */
+function showOnDisk(path: string): void {
   let win = windowsOf().find((w) => w.type === "storage");
   if (!win) {
     setWorkspace("assets");
@@ -33922,7 +34525,6 @@ function openStampEditor(path: string): void {
   }
   if (!win) return;
   const folder = paths.dirname(path) || "/";
-  stampEditing = path;
   if (storagePath(win) !== folder) setStoragePath(win, folder);
   if (storageSelected(win) !== path) setStorageSelected(win, path);
   else renderStorage();
@@ -33977,17 +34579,90 @@ function stampWordsBox(path: string, stamp: Stamp): HTMLElement {
   return box;
 }
 
-async function saveStampWords(path: string, title: string, description: string): Promise<void> {
+// ── MICRO-ARCHIVIO-1 · «Titolo e descrizione…» in the shelf entry itself ─────
+
+/** the entry whose words are open, and what has been typed (kept across the
+ *  repaints the receipt checks ask for while somebody writes) */
+let shelfWords: { id: string; title: string; description: string } | null = null;
+
+function openShelfWords(entry: ShelfEntry): void {
+  const rec = receiptOf(entry);
+  shelfWords = { id: entry.id, title: rec?.title ?? "", description: rec?.description ?? "" };
+  renderShelf();
+  // the field, with the caret at the end of the title: one gesture, one place
+  requestAnimationFrame(() => {
+    const input = document.querySelector<HTMLInputElement>(
+      `.shelf-row[data-entry="${CSS.escape(entry.id)}"] [data-field="shelf-title"]`);
+    if (!input) return;
+    input.focus();
+    input.setSelectionRange(input.value.length, input.value.length);
+    input.scrollIntoView({ block: "nearest" });
+  });
+}
+
+function shelfWordsBox(entry: ShelfEntry): HTMLElement {
+  const box = document.createElement("div");
+  box.className = "shelf-words-edit";
+  box.dataset.shelfWords = entry.id;
+  const draft = shelfWords!;
+  const title = document.createElement("input");
+  title.type = "text";
+  title.value = draft.title;
+  title.dataset.field = "shelf-title";
+  title.placeholder = t("compose.title");
+  title.setAttribute("aria-label", t("compose.title"));
+  title.oninput = () => { draft.title = title.value; };
+  const desc = document.createElement("textarea");
+  desc.rows = 3;
+  desc.value = draft.description;
+  desc.dataset.field = "shelf-description";
+  desc.placeholder = t("compose.descriptionPh");
+  desc.setAttribute("aria-label", t("compose.description"));
+  desc.oninput = () => { draft.description = desc.value; };
+  const note = document.createElement("i");
+  note.className = "stamp-emitted-note";
+  note.textContent = t("receipt.wordsNote");
+  const row = document.createElement("div");
+  row.className = "stamp-words-actions";
+  const save = document.createElement("button");
+  save.className = "primary";
+  save.dataset.action = "save-shelf-words";
+  save.textContent = t("receipt.saveWords");
+  const cancel = document.createElement("button");
+  cancel.className = "ghost";
+  cancel.dataset.action = "cancel-shelf-words";
+  cancel.textContent = t("receipt.cancelWords");
+  const doSave = async (): Promise<void> => {
+    save.disabled = true;
+    const ok = await saveStampWords(entry.locator, draft.title.trim(), draft.description.trim());
+    if (ok && shelfWords === draft) shelfWords = null;
+    save.disabled = false;
+    renderShelf();
+  };
+  save.onclick = () => void doSave();
+  cancel.onclick = () => { shelfWords = null; renderShelf(); };
+  // Esc leaves, ⌘/Ctrl-Enter saves — and neither reaches the graph's keys
+  box.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); cancel.click(); }
+    else if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) { e.preventDefault(); e.stopPropagation(); void doSave(); }
+  });
+  for (const el of [title, desc]) el.addEventListener("pointerdown", (e) => e.stopPropagation());
+  row.append(save, cancel);
+  box.append(title, desc, note, row);
+  return box;
+}
+
+async function saveStampWords(path: string, title: string, description: string): Promise<boolean> {
   let res;
   try {
     res = await retitleStamp(path, title, description);
   } catch {
     toast(t("storage.bridgeDown"));
-    return;
+    return false;
   }
   if (!res.ok || !res.receipt) {
     toast(t("receipt.wordsFailed", { why: res.error ?? "" }));
-    return;
+    return false;
   }
   // the shelf's copy follows, in the receipt's one form
   const ups = refreshedCopies(shelfEntries(), path, res.receipt);
@@ -34000,6 +34675,7 @@ async function saveStampWords(path: string, title: string, description: string):
   void askStamps(path);
   renderShelf();
   renderStorage();
+  return true;
 }
 
 /** CAMPAGNA · the label of a DTC kind, from the datamodel (process or capture). */
