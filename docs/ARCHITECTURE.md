@@ -177,7 +177,8 @@ back button returns to the full canvas.
 | JointJS+ | commercial | no — excluded |
 | **Add-ons** (not shipped: downloaded on request, version and sha256 pinned in `tools/em_optimize.py`, called as separate programs) | | |
 | gltfpack 1.3 / 1.2 (meshoptimizer, Arseny Kapoulkine) | MIT | yes |
-| Obj2Tiles (OpenDroneMap) — round 2 | AGPL-3.0 | yes, as a separate program (GPL-3.0 §13) |
+| Obj2Tiles 1.8.0 (OpenDroneMap) — the zip carries its libktx beside it; on Apple Silicon the Osx64 build under Rosetta 2 until upstream publishes `osx-arm64` (PR #107) | AGPL-3.0 | yes, as a separate program (GPL-3.0 §13) |
+| 3d-tiles-validator 0.6.1 (Cesium) — installed by the machine's npm, tarball integrity pinned, install scripts off (`sharp` rebuilt) | Apache-2.0 | yes |
 | KTX-Software (toktx) — when used | Apache-2.0 | yes |
 | yFiles | commercial | no — excluded |
 

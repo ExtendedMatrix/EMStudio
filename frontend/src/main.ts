@@ -211,7 +211,9 @@ import { paintChooser } from "./node-chooser";
 import { BUILTIN_STAMP_PRESETS, ENGINES_TODAY, FAVORITES_KEY, KIND_FILTERS, OPTIMIZE_PRESETS, RECENT_DIRS_KEY, SORT_KEYS, TOOL_TABS,
          autoTab, dropStampPreset, engineFor, isOptimizable, jobLine, jobRunning, variantMemoryMb, isSystemFile, kindOf as browserKindOf, pushRecentDir, readPathList, readStampPresets,
          saveStampPreset, statusCounts, toggleFavorite, visibleEntries,
-         type BrowserKind, type JobView, type OptimizePreset, type RowFacts, type SortKey, type StampPreset, type ToolTab } from "./files-browser";
+         TILESET_PRESET_ID, TILES_ENGINES, TILES_ENGINES_TODAY, formatMb, jobItemOpen, tilesetSchedule,
+         type BrowserKind, type JobItemView, type JobView, type OptimizePreset, type RowFacts, type SortKey, type StampPreset,
+         type TilesEngine, type TilesetItem, type ToolTab } from "./files-browser";
 import { proposeLanguages, type LanguageProposal } from "./lang-guess";
 import {
   addCategories,
@@ -691,7 +693,7 @@ import { setTreeBridgeResolver, TREE_EXT, treeOf, verifyStamp, type TreeInfo } f
 import { actFacts, consumersOf, hasCard, hoverLines, isActType, producerOf, rightsOf, type ActFacts, type RightLine, type RightsFrom } from "./card-facts";
 import { openSealCard, readableWhen, sealMini, sealWords, type SealStamp } from "./seal";
 import {
-  DECLARED_KINDS, landStep, parentLabel, type DeclaredKind, type DeclaredLevel,
+  DECLARED_KINDS, landStep, parentLabel, type DeclaredKind, type DeclaredLevel, type DeclaredParent,
 } from "./declared";
 import { adaptDraft } from "./views/stamps";
 import { ancestorsOf, dtcFamiliesOf, dtcKindFamily, dtcKindsFor, isContinuityType, isVirtualType, propertyLabel, typeDescription, typeLabel as datamodelTypeLabel, endReasonLabel } from "./rules";
@@ -13647,7 +13649,7 @@ async function bridgeUrl(): Promise<string> {
   return _bridgeUrl;
 }
 /** The bridge level this editor expects (`BRIDGE_LEVEL` in tools/em_bridge.py). */
-const BRIDGE_LEVEL_WANTED = 43;   // 43 = /addons, /jobs (gltfpack as an add-on downloaded on request, every optimisation a background job), /fs/optimize with a preset, /graph/add-version (MICRO-OTTIMIZZA-1); 42 = /project-tree and /fs/optimize, the File window «alla Blender» (MICRO-ARCHIVIO-2); 41 = /web-meta, the Shelf's previews of web addresses (MICRO-ARCHIVIO-1); 40 = /geo/tileset-frame, a tileset's shift (MICRO tileset, shift e epoche); 39 = /fs/pack-3tz with `root`, the RealityScan pair (MICRO-TILESET-CARTELLA); 38 = /geo/crs-info, /geo/convert-shift (MICRO-GEOREF-GRAFO); 37 = HTTPS through em_net, /tiles/failures (MICRO-BRIDGE-CERTIFICATI); 36 = /tiles/*, /geo/* (MICRO-GEOGLOBO); 31 = /property-source (FONTE); 32 = /room-import, «Bring into a room» through the engine; 33 = /fs/write (MICRO-SPAZIO-3D); 34 = /fs/doc, /fs/probe (MICRO-PERCORSI-WINDOWS); 35 = /fs/collect, /health's pid (MICRO-WINDOWS-MODELLI)
+const BRIDGE_LEVEL_WANTED = 44;   // 44 = /fs/tileset, POST /jobs {kind: tileset} — Obj2Tiles and Cesium's validator as add-ons, a batch of tilesets in parallel under a memory ceiling, cancel by file (MICRO-OTTIMIZZA-2); 43 = /addons, /jobs (gltfpack as an add-on downloaded on request, every optimisation a background job), /fs/optimize with a preset, /graph/add-version (MICRO-OTTIMIZZA-1); 42 = /project-tree and /fs/optimize, the File window «alla Blender» (MICRO-ARCHIVIO-2); 41 = /web-meta, the Shelf's previews of web addresses (MICRO-ARCHIVIO-1); 40 = /geo/tileset-frame, a tileset's shift (MICRO tileset, shift e epoche); 39 = /fs/pack-3tz with `root`, the RealityScan pair (MICRO-TILESET-CARTELLA); 38 = /geo/crs-info, /geo/convert-shift (MICRO-GEOREF-GRAFO); 37 = HTTPS through em_net, /tiles/failures (MICRO-BRIDGE-CERTIFICATI); 36 = /tiles/*, /geo/* (MICRO-GEOGLOBO); 31 = /property-source (FONTE); 32 = /room-import, «Bring into a room» through the engine; 33 = /fs/write (MICRO-SPAZIO-3D); 34 = /fs/doc, /fs/probe (MICRO-PERCORSI-WINDOWS); 35 = /fs/collect, /health's pid (MICRO-WINDOWS-MODELLI)
 /** MICRO-INSTALLER-PULSANTE p.3 · the bridge that answers says its level; one
  *  that differs from BRIDGE_LEVEL_WANTED is said in the Log (its url, pid, since
  *  when) and in a notice — once per bridge. Asked at start, while the sidecar
@@ -33830,7 +33832,11 @@ interface OptOut { source: string; path?: string; name?: string; exists?: boolea
 interface AddonState { id: string; name: string; project: string; author: string; licence: string; licence_url: string;
   source: string; does: string; platform: string; available: boolean; version: string | null; url: string | null;
   sha256: string | null; size: number | null; installed: { version: string; path: string; at: string } | null;
-  upgradable: boolean; folder: string }
+  upgradable: boolean; folder: string;
+  /** MICRO-OTTIMIZZA-2 · an x86_64 build on Apple Silicon, and whether Rosetta is here */
+  emulated?: string; emulator_ready?: boolean;
+  /** a Node.js program (the validator), and the Node of this machine */
+  needs?: "node"; node?: string | null }
 let addonsState: { at: number; list: AddonState[] | null; error?: string } | null = null;
 
 function readEngineChoice(): Record<string, string> {
@@ -33852,6 +33858,8 @@ async function loadAddons(force = false): Promise<AddonState[] | null> {
 // ── the background jobs of the bridge (status line, tab, notice at the end) ──
 
 interface BgJob extends JobView { next: number; lines: string[]; result?: unknown; error?: string | null;
+  /** MICRO-OTTIMIZZA-2 · a batch's files, each with its state, share and cancel */
+  items?: JobItemView[];
   done: Promise<BgJob>; settle: (j: BgJob) => void }
 const bgJobs = new Map<string, BgJob>();
 let bgTimer: ReturnType<typeof setTimeout> | null = null;
@@ -33887,7 +33895,7 @@ function pollJobs(): void {
       try {
         const r = await fetch(`${await bridgeUrl()}/jobs?id=${encodeURIComponent(job.id)}&since=${job.next}`, { cache: "no-store" });
         const v = await r.json().catch(() => ({})) as { state?: string; progress?: number; stage?: string; lines?: string[];
-          next?: number; result?: unknown; error?: string | null };
+          next?: number; result?: unknown; error?: string | null; items?: JobItemView[] };
         if (r.status === 404) { job.state = "failed"; job.error = t("files.jobLost"); }
         else {
           if (v.state && v.state !== job.state) changed = true;
@@ -33898,6 +33906,7 @@ function pollJobs(): void {
           job.next = v.next ?? job.next;
           job.result = v.result;
           job.error = v.error;
+          if (v.items?.length) job.items = v.items;
         }
       } catch { /* the bridge is busy: asked again */ }
       if (!jobRunning(job)) { changed = true; job.settle(job); }
@@ -33908,10 +33917,10 @@ function pollJobs(): void {
   }, 600);
 }
 
-async function cancelJob(id: string): Promise<void> {
+async function cancelJob(id: string, item?: number): Promise<void> {
   try {
     await fetch(`${await bridgeUrl()}/jobs`, { method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ step: "cancel", id }) });
+      body: JSON.stringify({ step: "cancel", id, ...(item !== undefined ? { item } : {}) }) });
   } catch { /* the poll says what happened */ }
   pollJobs();
 }
@@ -33946,7 +33955,27 @@ function paintJobs(): void {
     const txt = el.querySelector<HTMLElement>(".files-job-text");
     if (txt) txt.textContent = jobText(job);
     el.dataset.state = job.state;
+    // MICRO-OTTIMIZZA-2 · the files of a batch, each its bar and words
+    for (const row of el.parentElement?.querySelectorAll<HTMLElement>(`[data-job-item^="${job.id}:"]`) ?? []) {
+      const it = job.items?.[Number(row.dataset.jobItem!.split(":")[1])];
+      if (!it) continue;
+      const ib = row.querySelector<HTMLElement>(".files-job-bar > i");
+      if (ib) ib.style.width = `${Math.round(it.progress * 100)}%`;
+      const it2 = row.querySelector<HTMLElement>(".files-job-text");
+      if (it2) it2.textContent = jobItemText(it);
+      row.dataset.state = it.state;
+      const x = row.querySelector<HTMLButtonElement>("button");
+      if (x) x.hidden = !jobItemOpen(it) || !!it.cancel;
+    }
   }
+}
+
+/** A file of a batch in words: its name, then its stage and share, or how it
+ *  ended. */
+function jobItemText(it: JobItemView): string {
+  const name = it.name ?? baseName(it.source);
+  if (it.state === "running") return `${name} · ${t(`files.tilesStage.${it.stage || "decimation"}`, undefined, it.stage ?? "")} ${Math.round(it.progress * 100)}%`;
+  return `${name} · ${t(`files.tilesItem.${it.state}`, undefined, it.state)}${it.state === "refused" && it.stage ? ` — ${it.stage}` : ""}`;
 }
 
 /** A two-click confirmation in the element itself (no native dialog). */
@@ -33992,11 +34021,37 @@ function jobRows(kinds: string[]): HTMLElement | null {
       x.type = "button";
       x.className = "ghost";
       x.dataset.action = "files-job-cancel";
-      x.textContent = t("files.jobCancel");
+      x.textContent = job.items && job.items.length > 1 ? t("files.jobCancelAll") : t("files.jobCancel");
       x.onclick = () => { void cancelJob(job.id); };
       row.appendChild(x);
     }
     box.appendChild(row);
+    // MICRO-OTTIMIZZA-2 · a batch: one row per file, with its own «Annulla»
+    if (job.items && job.items.length > 1) {
+      for (const [i, it] of job.items.entries()) {
+        const r = document.createElement("div");
+        r.className = "files-job files-job-item";
+        r.dataset.jobItem = `${job.id}:${i}`;
+        r.dataset.state = it.state;
+        const b = document.createElement("span");
+        b.className = "files-job-bar";
+        const f = document.createElement("i");
+        f.style.width = `${Math.round(it.progress * 100)}%`;
+        b.appendChild(f);
+        const tx = document.createElement("span");
+        tx.className = "files-job-text";
+        tx.textContent = jobItemText(it);
+        const x = document.createElement("button");
+        x.type = "button";
+        x.className = "ghost";
+        x.dataset.action = "files-job-item-cancel";
+        x.textContent = t("files.jobCancel");
+        x.hidden = !jobItemOpen(it) || !!it.cancel;
+        x.onclick = () => { x.hidden = true; void cancelJob(job.id, i); };
+        r.append(b, tx, x);
+        box.appendChild(r);
+      }
+    }
   }
   return box;
 }
@@ -34018,11 +34073,20 @@ function addonCard(a: AddonState, compact: boolean): HTMLElement {
   facts.className = "files-addon-facts";
   facts.textContent = a.installed
     ? t("files.addonHere", { version: a.installed.version, path: a.installed.path })
+    : a.available && a.needs === "node"
+      ? t("files.addonWillComeNpm", { version: a.version ?? "", node: a.node ?? "", sha: (a.sha256 ?? "").slice(0, 19), source: a.source })
     : a.available
       ? t("files.addonWillCome", { version: a.version ?? "", size: formatBytes(a.size ?? 0), platform: a.platform,
           sha: (a.sha256 ?? "").slice(0, 12), source: a.source })
-      : t("files.addonNoBuild", { platform: a.platform });
+      : a.needs === "node" ? t("files.addonNeedsNode") : t("files.addonNoBuild", { platform: a.platform });
   box.appendChild(facts);
+  if (a.emulated) {
+    const em = document.createElement("small");
+    em.className = "files-addon-facts";
+    em.dataset.emulated = a.emulator_ready ? "1" : "0";
+    em.textContent = t(a.emulator_ready ? "files.addonEmulated" : "files.addonNoEmulator", { emulator: a.emulated });
+    box.appendChild(em);
+  }
   if (!compact) {
     const src = document.createElement("small");
     src.className = "files-addon-facts";
@@ -34040,6 +34104,7 @@ function addonCard(a: AddonState, compact: boolean): HTMLElement {
     const end = await job.done;
     await loadAddons(true);
     optPlans.clear();
+    tsPlans.clear();
     if (end.state === "done") { const m = t("files.addonInstalled", { name: a.name, version: a.version ?? "" }); toast(m); logInfo(m); }
     else logWarn(jobText(end));
     renderStorage();
@@ -34069,6 +34134,7 @@ function addonCard(a: AddonState, compact: boolean): HTMLElement {
       } catch { toast(t("storage.bridgeDown")); }
       await loadAddons(true);
       optPlans.clear();
+      tsPlans.clear();
       logInfo(t("files.addonRemoved", { name: a.name }));
       paintAddonsSettings();
       renderStorage();
@@ -34116,7 +34182,11 @@ function filesOptimizeTab(win: Win, listing: FsListing): HTMLElement {
   h.append(hb, pill);
   sec.appendChild(h);
   box.appendChild(sec);
+  // MICRO-OTTIMIZZA-2 · «Tileset (3D Tiles)» is a destination too, while the
+  // experimental switch is on
+  const ton = localStorage.getItem(TILES_EXPERIMENTAL_KEY) === "1";
   const dest = filesPref(win, "opt") ?? "web";
+  const tiling = ton && dest === TILESET_PRESET_ID;
   const pre = OPTIMIZE_PRESETS.find((p) => p.id === dest) ?? OPTIMIZE_PRESETS[0];
   const chips = document.createElement("div");
   chips.className = "files-chips";
@@ -34125,15 +34195,45 @@ function filesOptimizeTab(win: Win, listing: FsListing): HTMLElement {
     c.type = "button";
     c.className = "files-chip";
     c.dataset.opt = p.id;
-    c.setAttribute("aria-pressed", String(p.id === pre.id));
+    c.setAttribute("aria-pressed", String(!tiling && p.id === pre.id));
     c.textContent = t(p.labelKey);
     c.title = t("files.optPresetHint", { pct: String(Math.round(p.ratio * 100)), suffix: `@${p.lod}-${p.destination}` });
     c.onclick = () => { setFilesPref(win, "opt", p.id === "web" ? null : p.id); renderStorage(); };
     chips.appendChild(c);
   }
+  if (ton) {
+    const c = document.createElement("button");
+    c.type = "button";
+    c.className = "files-chip files-chip-exp";
+    c.dataset.opt = TILESET_PRESET_ID;
+    c.setAttribute("aria-pressed", String(tiling));
+    c.textContent = t("files.optTileset");
+    c.title = t("files.optTilesetHint");
+    c.onclick = () => { setFilesPref(win, "opt", TILESET_PRESET_ID); renderStorage(); };
+    chips.appendChild(c);
+  }
   sec.appendChild(chips);
+  if (tiling) {
+    hb.textContent = t("files.optTiles");
+    pill.className = "files-pill exp";
+    pill.textContent = t("files.experimental");
+    sec.appendChild(filesTilesetBody(win, listing, chosen));
+  }
 
   // the engine: the destination's default, why, and the choice
+  if (!tiling) filesVariantsBody(win, listing, sec, pre, chosen, models);
+
+  // 2 · .3tz — on
+  box.appendChild(filesPackSection(listing));
+
+  // 3 · a tileset from a mesh — experimental, behind its switch
+  box.appendChild(filesTilesSwitch(win, ton));
+  return box;
+}
+
+/** The variants' body (MICRO-OTTIMIZZA-1): the engine, the facts, the plan. */
+function filesVariantsBody(win: Win, listing: FsListing, sec: HTMLElement, pre: OptimizePreset,
+                           chosen: FsEntry[], models: FsEntry[]): void {
   const choice = readEngineChoice();
   const engine = engineFor(pre, choice);
   const eng = document.createElement("div");
@@ -34259,8 +34359,9 @@ function filesOptimizeTab(win: Win, listing: FsListing): HTMLElement {
   }
   const vrows = jobRows(["variants"]);
   if (vrows) sec.appendChild(vrows);
+}
 
-  // 2 · .3tz — on
+function filesPackSection(listing: FsListing): HTMLElement {
   const pk = document.createElement("section");
   pk.className = "files-sec";
   const ph = document.createElement("div");
@@ -34280,37 +34381,345 @@ function filesOptimizeTab(win: Win, listing: FsListing): HTMLElement {
   } else pk.appendChild(tabLead(t("files.optPackWhere"), "files-hint"));
   const prows = jobRows(["pack3tz"]);
   if (prows) pk.appendChild(prows);
-  box.appendChild(pk);
+  return pk;
+}
 
-  // 3 · a tileset from a mesh — announced, its switch ready for round 2
+/** The switch of the tileset (experimental, off by default) and what it does. */
+function filesTilesSwitch(win: Win, ton: boolean): HTMLElement {
   const ts = document.createElement("section");
   ts.className = "files-sec";
+  ts.dataset.tilesSwitch = ton ? "on" : "off";
   const th = document.createElement("div");
   th.className = "files-sec-h";
   const tb = document.createElement("b");
   tb.textContent = t("files.optTiles");
   const tp = document.createElement("span");
-  tp.className = "files-pill soon";
-  tp.textContent = t("files.announced");
+  tp.className = ton ? "files-pill exp" : "files-pill soon";
+  tp.textContent = t("files.experimental");
   th.append(tb, tp);
   ts.appendChild(th);
-  const ton = localStorage.getItem(TILES_EXPERIMENTAL_KEY) === "1";
   const sw = document.createElement("label");
   sw.className = "files-switch";
   const cb = document.createElement("input");
   cb.type = "checkbox";
   cb.checked = ton;
   cb.dataset.action = "files-tiles-experimental";
-  cb.onchange = () => { try { localStorage.setItem(TILES_EXPERIMENTAL_KEY, cb.checked ? "1" : "0"); } catch { /* off */ } renderStorage(); };
+  cb.onchange = () => {
+    try { localStorage.setItem(TILES_EXPERIMENTAL_KEY, cb.checked ? "1" : "0"); } catch { /* off */ }
+    // on: the destination «Tileset» is chosen at once; off: back to the web
+    setFilesPref(win, "opt", cb.checked ? TILESET_PRESET_ID : null);
+    renderStorage();
+  };
   const swt = document.createElement("span");
   swt.textContent = t("files.optTilesSwitch");
   sw.append(cb, swt);
   ts.appendChild(sw);
-  ts.appendChild(tabLead(t("files.optTilesComing"), "files-hint"));
+  ts.appendChild(tabLead(ton ? t("files.optTilesSwitchOn") : t("files.optTilesOff"), "files-hint"));
   ts.appendChild(tabLead(t("files.optTilesEngines"), "files-hint"));
-  ts.appendChild(tabLead(ton ? t("files.optTilesSwitchOn") : t("files.optTilesToday"), "files-hint"));
-  box.appendChild(ts);
-  return box;
+  ts.appendChild(tabLead(t("files.optTilesMissing"), "files-hint"));
+  return ts;
+}
+
+// ── MICRO-OTTIMIZZA-2 · a tileset from a textured mesh (experimental) ───────
+//
+// One or more OBJ (or a folder of them), chosen in the File window or dragged
+// onto the tab with the destination «Tileset»: the bridge plans each (its depth
+// from the model's size, the memory it asks), then ONE heavy job runs them —
+// side by side as long as the memory ceiling allows, each file with its row,
+// its share and its «Annulla». Each tileset is judged by Cesium's validator
+// (one that does not pass never enters the graph), packed as .3tz, stamped as
+// DERIVED (tiling from the OBJ — stamped or declared —, packing from the
+// folder) and registered as a version of the model, which the Viewer offers
+// beside the mesh and the em.json carries to EM Tools and Heriverse.
+
+const TILES_ENGINE_KEY = "emstudio.tilesEngine";
+interface TsTool { path: string; version: string; addon?: boolean; progress?: boolean; emulated?: string | null }
+interface TsRecognized { path: string; engine: "tileset" | "blocks"; software: string; generator?: string; root?: string | null;
+  form?: string; blocks?: number; srs_origin?: string | null }
+interface TsPlan { at: number; error?: string; tool: TsTool | null; items: TilesetItem[]; recognized: TsRecognized[];
+  ceiling_mb: number; memory_mb: number; workers: number; validator: { name: string; node?: string | null } }
+interface TsOut extends TilesetItem { state: string; sha256?: string; bytes?: number; progress_estimated?: boolean;
+  run?: { seconds: number; peak_mb: number | null }; facts?: { files: number; bytes: number; geometric_error_m: number | null };
+  validation?: { validator: string; ok: boolean; errors: number; warnings: number; infos: number; messages: string[] };
+  pack?: import("./pack3tz").PackResult & { writer?: { version?: string } } }
+const tsPlans = new Map<string, TsPlan>();
+
+function filesTilesetBody(win: Win, listing: FsListing, chosen: FsEntry[]): HTMLElement {
+  const body = document.createElement("div");
+  body.className = "files-tiles";
+  // the engine: E.D.'s order, said, and the choice
+  let engine = (localStorage.getItem(TILES_ENGINE_KEY) ?? "obj2tiles") as TilesEngine;
+  if (!TILES_ENGINES.includes(engine)) engine = "obj2tiles";
+  const eng = document.createElement("div");
+  eng.className = "files-engine";
+  eng.dataset.engine = engine;
+  const el = document.createElement("label");
+  el.textContent = t("files.optEngine") + " ";
+  const sel = document.createElement("select");
+  sel.dataset.action = "files-tiles-engine";
+  for (const e of TILES_ENGINES) {
+    const o = document.createElement("option");
+    o.value = e;
+    o.textContent = t(`files.engine.${e}`) + (TILES_ENGINES_TODAY.has(e) ? "" : ` — ${t("files.engineLater")}`);
+    o.selected = e === engine;
+    sel.appendChild(o);
+  }
+  sel.onchange = () => {
+    try { if (sel.value === "obj2tiles") localStorage.removeItem(TILES_ENGINE_KEY); else localStorage.setItem(TILES_ENGINE_KEY, sel.value); } catch { /* off */ }
+    renderStorage();
+  };
+  el.appendChild(sel);
+  eng.appendChild(el);
+  eng.appendChild(tabLead(t("files.tilesWhy"), "files-hint"));
+  body.appendChild(eng);
+  if (!TILES_ENGINES_TODAY.has(engine)) {
+    body.appendChild(tabLead(t("files.optEngineNotYet", { engine: t(`files.engine.${engine}`) }), "files-hint files-warn"));
+    return body;
+  }
+  // the OBJ chosen, and the folders (a folder brings the OBJ at its top)
+  const sources = chosen.filter((e) => e.type === "dir" || /\.obj$/i.test(e.name)).map((e) => e.path);
+  if (!sources.length) {
+    body.appendChild(tabLead(chosen.length ? tn("files.tilesNoObj", chosen.length) : t("files.tilesChoose"), "files-lead"));
+    const rows = jobRows(["tileset"]);
+    if (rows) body.appendChild(rows);
+    return body;
+  }
+  const key = sources.join("|");
+  const slot = document.createElement("div");
+  body.appendChild(slot);
+  const paint = (pl: TsPlan): void => {
+    slot.textContent = "";
+    if (pl.error) { slot.appendChild(tabLead(pl.error, "files-hint files-warn")); return; }
+    // what a photogrammetry program already made: packed and stamped as theirs
+    for (const r of pl.recognized) {
+      const box = document.createElement("div");
+      box.className = "files-box files-recognized";
+      box.dataset.recognized = r.engine;
+      box.textContent = r.engine === "blocks"
+        ? t("files.tilesBlocks", { name: baseName(r.path), n: String(r.blocks ?? 0), software: r.software, origin: r.srs_origin ?? "—" })
+        : t("files.tilesRecognized", { name: baseName(r.path), software: r.software });
+      if (r.engine === "tileset") {
+        const b = document.createElement("button");
+        b.type = "button";
+        b.className = "ghost";
+        b.dataset.action = "files-tiles-pack-theirs";
+        b.textContent = t("files.tilesPackTheirs");
+        b.onclick = () => { void packTilesetFlow(r.path, { software: r.software, generator: r.generator ?? "" }); };
+        box.appendChild(document.createElement("br"));
+        box.appendChild(b);
+      }
+      slot.appendChild(box);
+    }
+    // Obj2Tiles: here, or the add-on to download (AGPL-3.0, said)
+    const o2t = addonsState?.list?.find((x) => x.id === "obj2tiles");
+    if (pl.tool) {
+      const tool = document.createElement("div");
+      tool.className = "files-box";
+      tool.dataset.tool = "obj2tiles";
+      tool.textContent = t("files.tilesTool", { version: pl.tool.version || "Obj2Tiles", path: pl.tool.path })
+        + (pl.tool.emulated ? " " + t("files.tilesRosetta") : "")
+        + " " + t(pl.tool.progress ? "files.tilesProgressExact" : "files.tilesProgressPhases");
+      slot.appendChild(tool);
+    } else {
+      slot.appendChild(tabLead(t("files.tilesNoTool"), "files-hint"));
+      if (o2t) slot.appendChild(addonCard(o2t, true));
+      else void loadAddons().then((list) => { if (list && slot.isConnected) renderStorage(); });
+    }
+    slot.appendChild(tabLead(t("files.tilesAgpl"), "files-hint"));
+    // the judge: Cesium's validator, or the structural check said as such
+    const val = addonsState?.list?.find((x) => x.id === "tiles-validator");
+    const vbox = document.createElement("div");
+    vbox.className = "files-box";
+    vbox.dataset.validator = pl.validator.name.startsWith("3d-tiles-validator") ? "cesium" : "basic";
+    vbox.textContent = vbox.dataset.validator === "cesium" ? t("files.tilesValidator", { name: pl.validator.name })
+      : pl.validator.node ? t("files.tilesValidatorMissing") : t("files.tilesValidatorNoNode");
+    slot.appendChild(vbox);
+    if (vbox.dataset.validator === "basic" && val && val.available) slot.appendChild(addonCard(val, true));
+    // the files, one row each
+    const table = document.createElement("table");
+    table.className = "files-prev";
+    const hr = document.createElement("tr");
+    for (const k of ["files.optSource", "files.tilesOut", "files.tilesLevels", "files.tilesMemory"]) {
+      const th = document.createElement("th"); th.textContent = t(k); hr.appendChild(th);
+    }
+    table.appendChild(hr);
+    const sched = tilesetSchedule(pl.items, pl.ceiling_mb, pl.workers);
+    for (const it of pl.items) {
+      const tr = document.createElement("tr");
+      const refused = !!it.error || !!it.exists || sched.over.includes(it);
+      if (refused) tr.className = "done";
+      tr.dataset.tilesItem = it.name;
+      const cells = [baseName(it.source),
+        it.error ? it.error : it.exists ? t("files.optExists", { name: it.name }) : `${it.name}/ → ${it.name}.3tz`,
+        it.error || it.exists ? "" : t("files.tilesLevelsIs", { lods: String(it.lods), d: String(it.divisions), leaves: String(it.leaves),
+          tri: (it.triangles_est ?? 0).toLocaleString(getLocale()) }),
+        it.error || it.exists ? "" : formatMb(it.estimate_mb ?? 0, getLocale()) + (sched.over.includes(it) ? ` — ${t("files.tilesOver")}` : "")];
+      for (const [i, v] of cells.entries()) {
+        const td = document.createElement("td");
+        if (i < 2) td.className = "fn";
+        td.textContent = v;
+        if (i === 0) td.title = it.source;
+        if (i === 3 && it.command) td.title = `Obj2Tiles ${it.command}`;
+        tr.appendChild(td);
+      }
+      table.appendChild(tr);
+    }
+    slot.appendChild(table);
+    const where = pl.items.find((o) => o.folder)?.folder;
+    if (where) slot.appendChild(tabLead(t("files.optInto", { dir: projectRelative(paths.dirname(where)) + "/" }), "files-hint"));
+    const first = pl.items.find((o) => o.command);
+    if (first) slot.appendChild(tabLead(t("files.optCommand", { cmd: `Obj2Tiles ${first.command}` }), "files-hint files-cmd"));
+    // the memory, said before anything starts
+    if (sched.todo.length) {
+      slot.appendChild(tabLead(t(sched.todo.length === 1 ? "files.tilesMemoryOne" : "files.tilesMemoryMany", {
+        mb: formatMb(sched.todo[0].estimate_mb ?? 0, getLocale()), total: formatMb(sched.totalMb, getLocale()),
+        parallel: String(sched.parallel), start: formatMb(sched.startMb, getLocale()),
+        ceiling: formatMb(pl.ceiling_mb, getLocale()), memory: formatMb(pl.memory_mb, getLocale()) }), "files-hint"));
+    }
+    const unstamped = sched.todo.filter((it) => !filesStampedPath(it.source));
+    if (unstamped.length) slot.appendChild(tabLead(tn("files.tilesDeclared", unstamped.length), "files-hint"));
+    const running = [...bgJobs.values()].some((j) => j.kind === "tileset" && jobRunning(j));
+    const go = document.createElement("button");
+    go.type = "button";
+    go.className = "primary";
+    go.dataset.action = "files-tileset";
+    go.textContent = tn("files.tilesGo", sched.todo.length);
+    go.disabled = !pl.tool || !sched.todo.length || running;
+    go.onclick = () => { void runTileset(win, sources, sched.todo.length); };
+    slot.appendChild(go);
+    if (running) slot.appendChild(tabLead(t("files.tilesOneAtATime"), "files-hint"));
+    slot.appendChild(tabLead(t("files.tilesBorn"), "files-hint"));
+  };
+  const plan = tsPlans.get(key);
+  if (plan) paint(plan);
+  else {
+    slot.appendChild(tabLead(t("files.tilesAsking"), "files-hint"));
+    void (async () => {
+      let pl: TsPlan;
+      const empty = { tool: null, items: [], recognized: [], ceiling_mb: 0, memory_mb: 0, workers: 1, validator: { name: "" } };
+      try {
+        const r = await fetch(`${await bridgeUrl()}/fs/tileset`, { method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ sources }) });
+        const j = await r.json().catch(() => ({})) as Partial<TsPlan> & { ok?: boolean; error?: string };
+        pl = r.status === 404 ? { at: Date.now(), ...empty, error: t("files.tilesOldBridge") }
+          : j.ok ? { at: Date.now(), ...empty, ...j } as TsPlan
+          : { at: Date.now(), ...empty, error: String(j.error ?? r.status) };
+        await loadAddons();
+      } catch { pl = { at: Date.now(), ...empty, error: t("storage.bridgeDown") }; }
+      tsPlans.set(key, pl);
+      if (slot.isConnected) paint(pl);
+    })();
+  }
+  const rows = jobRows(["tileset"]);
+  if (rows) body.appendChild(rows);
+  void listing;
+  return body;
+}
+
+/** Is this path stamped (its sidecar beside it)? Asked once, remembered. */
+const pathStamps = new Map<string, boolean>();
+function filesStampedPath(path: string): boolean {
+  if (!pathStamps.has(path)) {
+    pathStamps.set(path, false);
+    void readStamp(stampPathFor(path)).then((st) => { if (st) { pathStamps.set(path, true); renderStorage(); } }).catch(() => undefined);
+  }
+  return pathStamps.get(path) ?? false;
+}
+
+/** The batch as ONE heavy job of the bridge; then, for each tileset that
+ *  passed the validator and was packed: the folder stamped as DERIVED from the
+ *  OBJ (`tiling`, Obj2Tiles and its parameters), the .3tz from the folder
+ *  (`packing`), the .3tz registered as a version of the model with its
+ *  checksum; a summary at the end, wherever the person is. */
+async function runTileset(win: Win, sources: string[], n: number): Promise<void> {
+  const job = await startJob({ kind: "tileset", sources }, n === 1 ? `Obj2Tiles · ${baseName(sources[0])}` : `Obj2Tiles · ${tn("files.tilesN", n)}`);
+  if (!job) return;
+  toast(tn("files.tilesStarted", n));
+  tsPlans.clear();
+  renderStorage();
+  const end = await job.done;
+  const res = (end.result ?? {}) as { tool?: TsTool; outputs?: TsOut[] };
+  const outs = res.outputs ?? [];
+  if (end.state === "failed") { toast(t("files.optFailed", { why: end.error ?? "" })); logWarn(jobText(end)); }
+  const done = outs.filter((o) => o.state === "done" && o.path && o.sha256);
+  const version = (res.tool?.version ?? "").replace(/^Obj2Tiles\s*/i, "").replace(/\+.*$/, "");
+  let stamped = 0, registered = 0;
+  for (const o of done) {
+    const params: Record<string, unknown> = { lods: o.lods, divisions: o.divisions, preset: "standard", zsplit: false,
+      root_content: false, octree: true, leaves: o.leaves, tool: "Obj2Tiles",
+      validator: o.validation?.validator ?? null, validation_errors: o.validation?.errors ?? null,
+      validation_warnings: o.validation?.warnings ?? null };
+    const software = [{ name: "Obj2Tiles", version }];
+    try {
+      const a = await stampDerived(o.source, { path: o.folder! }, { kind: "tiling", technique: "obj2tiles",
+        parameters: params, software }, { tree: true, declare: true });
+      const b = a ? await stampDerived(o.folder!, { path: o.path!, sha256: o.sha256 }, { kind: "packing", technique: "3tz",
+        parameters: { profile: "dtcstamp 3tz", entries: o.pack?.entries ?? null, canonical: o.pack?.canonical?.canonical ?? null,
+                      content_digest: o.pack?.content_digest?.digest ?? null },
+        software: [{ name: "dtcstamp.write_canonical_3tz", version: String(o.pack?.writer?.version ?? "") }] }) : false;
+      if (a && b) stamped++;
+      else logWarn(t("files.tilesNotStamped", { name: baseName(o.path!) }));
+    } catch (e) { logWarn(`${baseName(o.path!)}: ${(e as Error).message}`); }
+    try {
+      const why = await registerTileset(o, params, version);
+      if (why === null) registered++; else logWarn(t("files.optNotRegistered", { name: baseName(o.path!), why }));
+    } catch (e) { logWarn(`${baseName(o.path!)}: ${(e as Error).message}`); }
+  }
+  for (const o of outs.filter((x) => x.state !== "done")) {
+    if (o.state === "invalid") logWarn(t("files.tilesInvalid", { name: o.name, n: String(o.validation?.errors ?? 0), why: o.error ?? "" }));
+    else if (o.state === "failed" || o.state === "refused" || o.state === "error") logWarn(`${o.name}: ${o.error ?? o.state}`);
+  }
+  const counts = (s: string) => String(outs.filter((o) => o.state === s).length);
+  const msg = t("files.tilesSummary", { done: String(done.length), total: String(outs.length), stamped: String(stamped),
+    registered: String(registered), invalid: counts("invalid"), failed: String(Number(counts("failed")) + Number(counts("refused")) + Number(counts("error"))),
+    cancelled: counts("cancelled") });
+  toast(msg);
+  logInfo(msg + (done.length ? " — " + done.map((o) => `${baseName(o.path!)} (${formatBytes(o.bytes ?? 0)}, ${o.facts?.files ?? 0} file, `
+    + `${o.run?.seconds ?? 0} s${o.run?.peak_mb ? `, ${formatMb(o.run.peak_mb, getLocale())}` : ""}, ${o.validation?.validator}: ${o.validation?.errors} err.)`).join(", ") : ""));
+  tsPlans.clear();
+  pathStamps.clear();
+  forgetProjectTrees();
+  if (done[0]?.path && win && storagePath(win) !== null) {
+    await storageGoChecked(win, paths.dirname(done[0].path));
+    setStorageSelected(win, done[0].path);
+  }
+  renderStorage();
+}
+
+/** The .3tz as a VERSION of its model in the open graph (level «tiles»), with
+ *  its checksum — without it the Viewer draws the resource as missing — and
+ *  the root geometric error, the measure s3Dgraphy keeps for a tileset. */
+async function registerTileset(o: TsOut, params: Record<string, unknown>, toolVersion: string): Promise<string | null> {
+  if (!store?.doc) return t("files.optNoGraph");
+  const me = currentIdentity();
+  const rel = (abs: string) => {
+    const dir = currentFilePath ? paths.dirname(currentFilePath) : "";
+    return dir && paths.isInside(dir, abs) ? paths.relativeTo(currentFilePath!, abs) : abs;
+  };
+  const master = filesUses(o.source).find((f) => f.node_type === "resource")?.id;
+  const n = new Date();
+  const r = await fetch(`${await bridgeUrl()}/graph/add-version`, {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ doc: store.doc, source: o.source, em_json: currentFilePath ?? "", master_id: master ?? "",
+      locator: rel(o.path!), sha256: o.sha256, bytes: o.bytes, level: "tiles", destination: "tileset", use: ["web", "realtime"],
+      media_type: "application/vnd.maxar.archive.3tz+zip", packaging: "archive",
+      measures: { geometric_error_m: o.facts?.geometric_error_m ?? undefined },
+      parameters: params, technique: "tiling", tool: "Obj2Tiles",
+      software: [{ name: "Obj2Tiles", version: toolVersion }],
+      author: me?.orcid ? `https://orcid.org/${me.orcid}` : undefined,
+      at: `${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, "0")}-${String(n.getDate()).padStart(2, "0")}` }) });
+  const j = await r.json().catch(() => ({})) as { ok?: boolean; registered?: boolean; reason?: string; error?: string;
+    nodes?: EmNode[]; edges?: EmEdge[]; version_id?: string; revises?: string | null };
+  if (r.status === 404) return t("files.optOldBridge");
+  if (!j.ok) return String(j.error ?? r.status);
+  if (!j.registered) return j.reason ?? "";
+  const st = store;
+  st.batch(() => {
+    for (const nd of j.nodes ?? []) if (!st.node(nd.id)) st.addNode(nd);
+    for (const e of j.edges ?? []) st.addEdge(e.source, e.target, String(e.edge_type ?? ""), undefined, e.id);
+  });
+  logInfo(t(j.revises ? "files.tilesRevision" : "files.tilesVersion", { name: baseName(o.path!) }), j.version_id ? [j.version_id] : undefined);
+  return null;
 }
 
 /** Is the tileset folder of this listing stamped (its own sidecar beside it)? */
@@ -34332,15 +34741,24 @@ function folderStampOf(folder: string): { self: { resource_id: string; digest?: 
  *  the act said (kind, technique, parameters, the tool and its version) — and
  *  landed in the Chain. → true when the stamp was written. */
 async function stampDerived(source: string, out: { path: string; sha256?: string }, act: { kind: string; technique: string;
-    parameters: Record<string, unknown>; software: { name: string; version: string }[] }): Promise<boolean> {
+    parameters: Record<string, unknown>; software: { name: string; version: string }[] },
+    opts: { tree?: boolean; declare?: boolean; parent?: DeclaredParent } = {}): Promise<boolean> {
   const me = currentIdentity();
   if (!me?.orcid) return false;
-  const src = await readStamp(stampPathFor(source)).catch(() => null);
-  if (!src) return false;
+  const src = opts.parent ? null : await readStamp(stampPathFor(source)).catch(() => null);
+  // MICRO-OTTIMIZZA-2 · a source nobody stamped is DECLARED (a file, by its
+  // name), when the caller allows it: the batch of a folder of OBJ
+  if (!src && !opts.declare) return false;
   const listing = await fsList(paths.dirname(out.path));
   const entry = listing.entries.find((e) => e.path === out.path);
   if (!entry) return false;
-  const draft = newDraft([{ ...outputFrom(entry), digest: out.sha256 }]);
+  // a tileset FOLDER is one resource (`packaging: directory`, its content
+  // digest), asked of dtcstamp through the bridge
+  const tree = opts.tree ? await treeOf(out.path).catch(() => null) : null;
+  if (opts.tree && !tree?.ok) return false;
+  const draft = newDraft([tree ? { path: out.path, name: entry.name, size: tree.size_bytes, mtime: entry.mtime, digest: tree.digest, tree }
+                               : { ...outputFrom(entry), digest: out.sha256 }]);
+  if (tree) draft.tree = tree;
   draft.origin = false;
   draft.kind = act.kind;
   draft.technique = act.technique;
@@ -34349,7 +34767,8 @@ async function stampDerived(source: string, out: { path: string; sha256?: string
   draft.operator = { id: `https://orcid.org/${me.orcid}`, label: [me.name, me.surname].filter(Boolean).join(" ") };
   const n = new Date();
   draft.at = `${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, "0")}-${String(n.getDate()).padStart(2, "0")}`;
-  draft.inputs = [{ resource_id: src.self.resource_id, digest: src.self.digest ?? "", label: baseName(source), path: source }];
+  if (src) draft.inputs = [{ resource_id: src.self.resource_id, digest: src.self.digest ?? "", label: baseName(source), path: source }];
+  else draft.declared = [{ parents: [opts.parent ?? { kind: "file", label: baseName(source), path: source }] }];
   const emitted = await emitDraft(draft, { graph_id: store?.doc?.graph?.graph_id as string | undefined });
   if (!emitted.written.length) return false;
   landEmission(draft, emitted);
@@ -35788,12 +36207,22 @@ let pack3tzBusy = false;
 /** Pack, then the graph: the folder and the archive as two FORMS of one
  *  content (equal `content_digest`), the archive derived from the folder.
  *  Locators beside the em.json are written relative to it. */
-async function packTilesetFlow(folder: string): Promise<import("./pack3tz").PackResult | null> {
+async function packTilesetFlow(folder: string, theirs?: { software: string; generator: string }): Promise<import("./pack3tz").PackResult | null> {
   if (pack3tzBusy) return null;
   pack3tzBusy = true;
   renderStorage();
   toast(t("pack3tz.working", { name: baseName(folder) }));
   try {
+    // MICRO-OTTIMIZZA-2 · a tileset that RealityScan (or another program)
+    // already made: the folder stamped first as ITS product — the act
+    // `tiling` by that software, its project declared as the parent
+    if (theirs && !(await readStamp(stampPathFor(folder)).catch(() => null))) {
+      const ok = await stampDerived(folder, { path: folder }, { kind: "tiling", technique: theirs.software,
+        parameters: theirs.generator ? { generator: theirs.generator } : {}, software: [{ name: theirs.software, version: "" }] },
+        { tree: true, declare: true, parent: { kind: "sources", label: t("files.tilesTheirProject", { software: theirs.software }) } })
+        .catch(() => false);
+      if (ok) { logInfo(t("files.tilesTheirsStamped", { name: baseName(folder), software: theirs.software })); folderStamps.delete(folder); }
+    }
     // MICRO-OTTIMIZZA-1 · a job of the bridge (level 43): the page goes on
     // while it packs; an older bridge packs in the one request as before
     let out: import("./pack3tz").PackResult;
@@ -40516,7 +40945,9 @@ function viewerItemElement(item: CollectionItem, stage: HTMLElement): HTMLElemen
   // MICRO-OTTIMIZZA-1 · a model of the disk (a variant of gltfpack, a web
   // version of EM Tools, an obj with its mtl) is drawn as itself, orbitable,
   // with the decoders of the Space: meshopt, KTX2, Draco
-  if (item.path && /\.(glb|gltf|obj)$/i.test(item.path)) {
+  // MICRO-OTTIMIZZA-2 · …and a tileset, its .3tz or its tileset.json, with the
+  // tiles reader of the Doc (its bar: Manuale / Automatico, the memory)
+  if (item.path && (/\.(glb|gltf|obj|3tz)$/i.test(item.path) || /(^|[/\\])tileset\.json$/i.test(item.path))) {
     const host = document.createElement("div");
     host.className = "viewer-media viewer-3d";
     void fsUrlFor(item.path).then((u) => {

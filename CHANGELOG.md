@@ -7,6 +7,46 @@ that asked for one.
 ## [Unreleased]
 
 ### Added
+- **Ottimizza, round 2 of 3: a tileset from a textured mesh** (MICRO-OTTIMIZZA-2,
+  experimental behind its switch). With the switch on, «Tileset (3D Tiles)»
+  joins the destinations of the Ottimizza tab: one or more textured OBJ — or a
+  folder of them — chosen in the File window or dragged onto the tab become
+  each a tileset. **Obj2Tiles** (OpenDroneMap, AGPL-3.0) is an add-on
+  downloaded on request (1.8.0, sha256 pinned per platform; the zip's libktx
+  beside it; on Apple Silicon the Osx64 build under Rosetta 2, said, until
+  upstream publishes the native one), called as a separate program with our
+  preset: `--preset standard --no-zsplit`, the depth from the model's size (a
+  leaf near 30 thousand triangles: the medium model of Templu Mare 16 leaves
+  instead of the 3.769 files of the default), no root content, the geometric
+  errors from the coarsest level's box (`ToplevelBoundingBoxDiagonal`: with
+  the default the root said 0.27 m on 15 m and no viewer refined it). **One
+  heavy job** (`POST /fs/tileset` plans, `POST /jobs {kind: tileset}` runs):
+  its files side by side as long as their memory estimates stay under the
+  ceiling (60% of the machine, never past it; a file that alone passes it is
+  refused before it starts), each with its row, its progress — Obj2Tiles' own
+  JSON lines when the build has `--progress`, else an estimate by phases from
+  the lines it prints — and its «Annulla»; a run that writes nothing for 15
+  minutes (the stall seen under Rosetta) is killed and tried once more.
+  **Cesium's 3d-tiles-validator** (Apache-2.0, an add-on installed by the
+  machine's npm, integrity pinned) judges every tileset inside the job, or
+  EMStudio's structural check said as such: a tileset that does not pass is
+  not packed and never enters the graph. Then the .3tz by the route that
+  exists (dtcstamp's writer); the folder stamped as derived from the OBJ —
+  stamped, or DECLARED by its name — (`tiling`, Obj2Tiles and its
+  parameters, the validator's verdict), the .3tz from the folder
+  (`packing`); the .3tz registered as a version of the model (level `tiles`,
+  its checksum, `geometric_error_m`, `application/vnd.maxar.archive.3tz+zip`),
+  which the Viewer and the Space offer beside the mesh. A tileset that
+  RealityScan already made (its `asset.generator`, or the X.json beside X/
+  pair) is recognised, packed and stamped as ITS product; the blocks
+  `block_xNNN_yNNN` of Metashape + 3DSC for Metashape are recognised with
+  their `SRSOrigin`. «Viewer e scheda» draws a `.3tz` or a `tileset.json`;
+  in «Manuale» a tileset whose empty root refines by ADD (Obj2Tiles' form)
+  now shows its first level (the renderer skipped the children of an ADD tile
+  whose error was 0); the canvas of «Viewer e scheda» fits the stage. Bridge
+  level 44. `check-tileset-bridge`, `AR11.tileset`, `T1.addroot`;
+  `check-files-browser`, `check-geotiles`, `AR7.optimize` follow.
+
 - **Ottimizza, round 1 of 3** (MICRO-OTTIMIZZA-1, the round-0 verdict and
   E.D.'s precisions of 27 October 2026). The **variants of a model are on**:
   the Viewer, the Space and the tilesets read `EXT_meshopt_compression`

@@ -3505,6 +3505,16 @@ test("T1.empty", "3D Tiles · una radice senza contenuto (3DSC senza LOD: conten
   return { pass: same(st.files, ["../tiles-prova/tiles/c2.glb", "../tiles-prova/tiles/c3.glb"]) && same(st.status?.level, [0, 0])
       && st.status?.asked === 0 && !errors.length, detail: { st, errors } };
 });
+test("T1.addroot", "3D Tiles · MICRO-OTTIMIZZA-2 · una radice VUOTA che raffina per ADD (la forma di Obj2Tiles con --no-root-content): in «Manuale» si vede il primo livello (prima il renderer saltava i figli di un ADD con errore 0, e il Viewer restava vuoto)", async () => {
+  const { p, ctx, errors, win } = await openTilesDoc("D1", { mutate: (d) => {
+    for (const n of d.graph.nodes) if (n.id === "RES_TS") n.data.url = "/em/studio/testdata/tiles-addroot/tileset.json";
+    return d;
+  } });
+  const st = await tilesSettle(p, win, (s) => (s.files ?? []).length >= 2);
+  await ctx.close();
+  return { pass: same(st.files, ["../tiles-prova/tiles/c2.glb", "../tiles-prova/tiles/c3.glb"]) && st.status?.mode === "manual"
+      && st.status?.asked === 0 && !errors.length, detail: { st, errors } };
+});
 test("T1.missing", "3D Tiles · un tile il cui file non c'è: la riga di stato lo dice, con il nome del file", async () => {
   const { p, ctx, errors, win } = await openTilesDoc("D1");
   await tilesSettle(p, win, (s) => (s.files ?? []).length >= 1);
@@ -11477,7 +11487,7 @@ test("AR7.optimize", "Ottimizza (MICRO-OTTIMIZZA-1): le varianti accese (il View
     text: document.querySelector(".files-tab-optimize")?.textContent ?? "" }));
   await ctx.close();
   const conds = {
-    on: web.pills.join(",") === "acceso,acceso,annunciato" && web.chips === 5,
+    on: web.pills.join(",") === "acceso,acceso,sperimentale" && web.chips === 5,
     engine: web.engine === "gltfpack" && /un secondo/.test(web.why) && /KTX2/.test(web.kv) && /meshopt/.test(web.kv),
     named: web.variant.includes("OB_CUBO_LOD1@lod4-web.glb") && /-si 0\.1 -cc -tc -tl 1024/.test(web.command),
     addon: /gltfpack/.test(web.addon) && /licenza MIT/.test(web.addon) && /sha256/.test(web.addon) && web.install && web.go === true,
@@ -11488,6 +11498,60 @@ test("AR7.optimize", "Ottimizza (MICRO-OTTIMIZZA-1): le varianti accese (il View
     noErrors: !errors.length,
   };
   return { pass: Object.values(conds).every(Boolean), detail: { conds, web, exp, changed, errors } };
+});
+
+test("AR11.tileset", "MICRO-OTTIMIZZA-2 · il tileset da una mesh texturizzata, sperimentale dietro il suo interruttore: acceso, la destinazione «Tileset (3D Tiles)» si aggiunge e si sceglie; il motore Obj2Tiles con il perché (Blender + 3DSC col giro 3); Obj2Tiles come componente aggiuntivo (AGPL-3.0, OpenDroneMap, versione e sha256 fissate; sotto Rosetta su Apple Silicon, detto); il giudice (il validatore di Cesium, o il controllo strutturale detto come tale); la riga del file con la sua cartella in RB/versions/‹modello›@tiles, livelli, profondità e memoria; la memoria e il tetto detti prima; il comando; senza Obj2Tiles il pulsante non parte; spento, si torna al web", async () => {
+  const root = await rootPath();
+  const { pr, at } = await abProject(root, "ab11");
+  const { p, ctx, errors } = await open({ doc: null, ws: "assets", w: 1900, h: 1000 });
+  await p.evaluate(([d, path]) => window.__EM_DRAG__.openAt(d, path), [fixture("catena"), at]);
+  await p.waitForTimeout(2500);
+  await p.locator(`.files-pl[data-place="${pr}/RB"]`).first().click();
+  await p.waitForTimeout(800);
+  await storageInto(p, ["LOD1"]);
+  await storageClick(p, "OB_CUBO_LOD1.obj");
+  await p.click('.files-tab[data-tab="optimize"]');
+  await p.waitForTimeout(800);
+  await p.click('[data-action="files-tiles-experimental"]');
+  await p.waitForSelector('.files-tiles .files-prev td', { timeout: 15000 }).catch(() => {});
+  await p.waitForSelector('.files-tiles [data-addon="obj2tiles"], .files-tiles [data-tool="obj2tiles"]', { timeout: 8000 }).catch(() => {});
+  await p.waitForTimeout(600);
+  const on = await p.evaluate(() => ({
+    chip: document.querySelector('.files-tab-optimize [data-opt="tileset"]')?.getAttribute("aria-pressed") ?? null,
+    pills: [...document.querySelectorAll(".files-tab-optimize .files-pill")].map((x) => x.textContent),
+    engine: document.querySelector(".files-tiles .files-engine")?.dataset.engine ?? "",
+    engines: [...document.querySelectorAll('[data-action="files-tiles-engine"] option')].map((o) => o.textContent),
+    why: document.querySelector(".files-tiles .files-engine .files-hint")?.textContent ?? "",
+    tool: !!document.querySelector('.files-tiles [data-tool="obj2tiles"]'),
+    addon: document.querySelector('.files-tiles [data-addon="obj2tiles"]')?.textContent ?? "",
+    validator: document.querySelector(".files-tiles [data-validator]")?.dataset.validator ?? "",
+    row: [...document.querySelectorAll(".files-tiles .files-prev td")].map((x) => x.textContent),
+    command: document.querySelector(".files-tiles .files-cmd")?.textContent ?? "",
+    text: document.querySelector(".files-tiles")?.textContent ?? "",
+    go: document.querySelector('[data-action="files-tileset"]')?.disabled ?? null,
+    goText: document.querySelector('[data-action="files-tileset"]')?.textContent ?? "" }));
+  await p.screenshot({ path: SHOT("ar11-tileset") }).catch(() => {});
+  await p.click('[data-action="files-tiles-experimental"]');
+  await p.waitForTimeout(600);
+  const off = await p.evaluate(() => ({ chip: !!document.querySelector('.files-tab-optimize [data-opt="tileset"]'),
+    web: document.querySelector('.files-tab-optimize [data-opt="web"]')?.getAttribute("aria-pressed") ?? null,
+    stored: localStorage.getItem("emstudio.tilesetExperimental") }));
+  await ctx.close();
+  const conds = {
+    chosen: on.chip === "true" && on.pills[0] === "sperimentale",
+    engine: on.engine === "obj2tiles" && on.engines.some((e) => /giro 3/.test(e)) && /senza Blender/.test(on.why),
+    addon: on.tool || (/Obj2Tiles 1\.8\.0/.test(on.addon) && /AGPL-3\.0/.test(on.addon) && /sha256/.test(on.addon)),
+    agpl: /AGPL-3\.0/.test(on.text) && /non lo distribuisce/.test(on.text),
+    judge: on.validator === "cesium" || (on.validator === "basic" && /controllo strutturale/.test(on.text)),
+    row: on.row.some((x) => /OB_CUBO_LOD1@tiles\/ → OB_CUBO_LOD1@tiles\.3tz/.test(x)) && on.row.some((x) => /LOD, profondità 0/.test(x))
+      && on.row.some((x) => /MB$/.test(x)),
+    memory: /Chiede circa .* di memoria \(tetto .* di questa macchina\)/.test(on.text),
+    command: /--no-root-content --error-estimation-mode ToplevelBoundingBoxDiagonal/.test(on.command),
+    go: on.goText === "Fai 1 tileset" && on.go === !on.tool,
+    off: !off.chip && off.web === "true" && off.stored === "0",
+    noErrors: !errors.length,
+  };
+  return { pass: Object.values(conds).every(Boolean), detail: { conds, on, off, errors } };
 });
 
 test("AR10.variant", "MICRO-OTTIMIZZA-1 · il Viewer legge una variante di gltfpack: geometria meshopt (EXT_meshopt_compression), quantizzata, texture KTX2 (KHR_texture_basisu) trascodificate con il Basis servito come il Draco; la scheda Info la apre nel Viewer, senza errori", async () => {

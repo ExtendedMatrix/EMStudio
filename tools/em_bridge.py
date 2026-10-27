@@ -1787,7 +1787,14 @@ def _load_s3dgraphy(s3dgraphy_src: "pathlib.Path | None"):
 #: and KTX2 for the web, the Viewer reads them); ``POST /graph/add-version``
 #: — a variant registered as a version of its asset (s3Dgraphy's
 #: ``api.add_version``) — MICRO-OTTIMIZZA-1.
-BRIDGE_LEVEL = 43   # 30 also = /validate
+#: 44 = a tileset from a textured mesh: Obj2Tiles (OpenDroneMap, AGPL-3.0) and
+#: Cesium's 3d-tiles-validator as add-ons; ``POST /fs/tileset`` (the plan of a
+#: batch: depth from the model's size, the memory each file asks, the ceiling,
+#: how many side by side; what RealityScan or Metashape already made) and
+#: ``POST /jobs {kind: tileset}`` — one heavy job, its files in parallel under
+#: the ceiling, each validated then packed as .3tz, cancel by file
+#: (``{step: cancel, id, item}``) — MICRO-OTTIMIZZA-2.
+BRIDGE_LEVEL = 44   # 30 also = /validate
 
 
 #: the files of a tileset a server may send gzipped (MICRO-TILESET-CARTELLA)
@@ -2932,6 +2939,16 @@ def make_handler(api):
                     self._fail(400, f"invalid JSON body: {exc}")
                     return
                 self._pack_3tz(body)
+            elif route == "/fs/tileset":
+                # MICRO-OTTIMIZZA-2 · the plan of a batch of tilesets (dry run)
+                if not self._fs_gate():
+                    return
+                try:
+                    body = json.loads(raw.decode("utf-8")) if raw else {}
+                except Exception as exc:
+                    self._fail(400, f"invalid JSON body: {exc}")
+                    return
+                self._json(self._tileset_plan(body if isinstance(body, dict) else {}))
             elif route == "/fs/optimize":
                 # MICRO-ARCHIVIO-2 · the Ottimizza tab: a variant of a model,
                 # by gltfpack (the round-0 verdict: experimental), in the
@@ -3208,16 +3225,100 @@ def make_handler(api):
             done = [_variant_write(item, params, tool) for item in planned]
             self._json({"ok": True, "tool": tool, "outputs": done, "parameters": _variant_parameters(params)})
 
+        def _tileset_plan(self, body):
+            """``{sources: [obj or folder…]}`` → what each OBJ will be (its
+            folder and archive in the ``versions/`` of its part of the tree,
+            named by s3Dgraphy: ``<model>@tiles`` and ``<model>@tiles.3tz``),
+            the levels and depth, the memory each asks, the ceiling and how
+            many run side by side; Obj2Tiles and the validator as they are
+            here; what a photogrammetry program already made (``recognized``).
+            A folder brings the OBJ files at its top."""
+            import em_optimize as O
+            try:
+                from s3dgraphy.project_tree import variant_path, find_project_root
+            except ImportError as exc:
+                return {"ok": False, "error": f"s3dgraphy with project_tree.variant_path is not importable here: {exc}"}
+            items, recognized = [], []
+            tool = O.obj2tiles_tool()
+            for raw_path in (body.get("sources") or [])[:256]:
+                full, err = self._fs_resolve(os.path.abspath(os.path.expanduser(str(raw_path))), want="any")
+                if err:
+                    items.append({"source": str(raw_path), "name": os.path.basename(str(raw_path)), "error": err[1]})
+                    continue
+                if os.path.isdir(full):
+                    rec = O.recognize(full)
+                    if rec:
+                        recognized.append({"path": full, **rec})
+                        continue
+                    objs = sorted(os.path.join(full, n) for n in os.listdir(full)
+                                  if n.lower().endswith(".obj") and not n.startswith("."))
+                    if not objs:
+                        items.append({"source": full, "name": os.path.basename(full),
+                                      "error": "no .obj at the top of this folder"})
+                else:
+                    objs = [full]
+                for src in objs:
+                    if not src.lower().endswith(".obj"):
+                        items.append({"source": src, "name": os.path.basename(src),
+                                      "error": "Obj2Tiles reads a textured .obj"})
+                        continue
+                    out = variant_path(src, "", "tiles", root=find_project_root(src), ext="")
+                    if not _fs_inside_roots(out):
+                        items.append({"source": src, "name": os.path.basename(out),
+                                      "error": f"{out} is outside the folders this bridge serves"})
+                        continue
+                    it = O.tileset_plan_one(src, out)
+                    it["command"] = " ".join(O.obj2tiles_command(
+                        "Obj2Tiles", os.path.basename(src), os.path.basename(out), it,
+                        progress=bool(tool and tool.get("progress")))[1:])
+                    items.append(it)
+            ceiling = O.memory_ceiling_mb()
+            workers = max(1, min(4, (os.cpu_count() or 4) // 4))
+            val = O.validator_tool()
+            node = O.node_tool()
+            return {"ok": True, "tool": tool, "items": items, "recognized": recognized,
+                    "ceiling_mb": ceiling, "memory_mb": O.memory_total_mb(), "workers": workers,
+                    "validator": {"name": val["version"]} if val else
+                                 {"name": "EMStudio structural check", "node": node["version"] if node else None},
+                    "command": " ".join(O.obj2tiles_command("Obj2Tiles", "‹in.obj›", "‹out›",
+                                                            {"lods": 3, "divisions": 0},
+                                                            progress=bool(tool and tool.get("progress")))[1:])}
+
         def _jobs_post(self, body):
             """``POST /jobs``: ``{kind: "variants", sources, preset…}`` ·
             ``{kind: "pack3tz", folder, root?}`` · ``{kind: "addon", id,
             step: install}`` → 202 ``{job}``; ``{step: "cancel", id}``."""
             import em_optimize as O
             if body.get("step") == "cancel":
-                ok = O.cancel(str(body.get("id") or ""))
+                ok = O.cancel(str(body.get("id") or ""), body.get("item"))
                 self._json({"ok": ok} if ok else {"ok": False, "error": "no such job"}, 200 if ok else 404)
                 return
             kind = str(body.get("kind") or "")
+            if kind == "tileset":
+                plan = self._tileset_plan(body)
+                if not plan.get("tool"):
+                    self._fail(501, "Obj2Tiles is not here: install it from Settings › Add-ons")
+                    return
+                todo = plan["items"]
+                if not any(not it.get("error") and not it.get("exists") for it in todo):
+                    self._fail(400, "nothing to make: every file is refused or already made")
+                    return
+
+                def pack(folder):
+                    status, payload = self._pack_3tz_core({"folder": folder})
+                    if status != 200:
+                        raise RuntimeError(payload.get("error") or status)
+                    return payload
+
+                def target(job):
+                    return O.run_tileset_batch(job, todo, plan["tool"], pack,
+                                               ceiling_mb=plan["ceiling_mb"], workers=plan["workers"])
+                total = sum(it.get("estimate_mb") or 0 for it in todo if not it.get("error") and not it.get("exists"))
+                job = O.submit("tileset", {"sources": [it["source"] for it in todo]}, target, heavy=True,
+                               estimate_mb=min(total, plan["ceiling_mb"]),
+                               label=f"Obj2Tiles · {len(todo)} tileset" if len(todo) != 1 else f"Obj2Tiles · {todo[0]['name']}")
+                self._json({"ok": True, "job": job.id, "plan": plan}, 202)
+                return
             if kind == "variants":
                 try:
                     from s3dgraphy.project_tree import variant_path  # noqa: F401
@@ -3308,8 +3409,10 @@ def make_handler(api):
             before_nodes = node_ids
             before_edges = {getattr(e, "edge_id", None) for e in graph.edges}
             sha = str(body.get("sha256") or "")
+            # MICRO-OTTIMIZZA-2 · a tileset's version is a .3tz (an archive)
             files = [{"path": str(body.get("locator") or ""), "checksum": sha or None,
-                      "size_bytes": body.get("bytes"), "media_type": "model/gltf-binary"}]
+                      "size_bytes": body.get("bytes"),
+                      "media_type": str(body.get("media_type") or "model/gltf-binary")}]
             kwargs = dict(
                     level=str(body.get("level") or "") or None,
                     purpose=str(body.get("destination") or ""),
@@ -3320,6 +3423,7 @@ def make_handler(api):
                     technique=str(body.get("technique") or "decimation"),
                     parameters=body.get("parameters") or None,
                     tool=str(body.get("tool") or "gltfpack"),
+                    packaging=str(body.get("packaging") or "") or None,
                     software=body.get("software") or None,
                     author=str(body.get("author") or "") or None,
                     at=str(body.get("at") or "") or None)

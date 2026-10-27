@@ -5855,6 +5855,10 @@ object.viewer-media {
   display: flex;
   flex-direction: column;
 }
+/* MICRO-OTTIMIZZA-2 · the canvas fits what is left under a tileset's bar,
+   its proportions kept (a canvas is a replaced element): it overflowed the
+   stage, and the lower half of the model was cut */
+.viewer-media.viewer-3d > .nv-3d-canvas { flex: 1 1 0; min-height: 0; height: 100%; object-fit: contain; }
 /* ONE SURFACE · on the CLASS. This whole box was on the id, which is to say on
    the FOCUSED mount alone — so a Viewer area without the focus had a caption
    with no padding, no rule above it and no minimum height, and the picture above
@@ -10772,6 +10776,12 @@ body.em-detached #tile-root > .tile-area.tile-detached {
 .files-job-bar > i { display: block; height: 100%; width: 0; background: var(--accent, #3b7ddd); transition: width .3s; }
 .files-job[data-state="done"] .files-job-bar > i { background: var(--ok); width: 100% !important; }
 .files-job[data-state="failed"] .files-job-bar > i, .files-job[data-state="cancelled"] .files-job-bar > i { background: var(--warn); }
+/* MICRO-OTTIMIZZA-2 · a batch's files, one row each, under the job's row */
+.files-job-item { padding-left: 14px; font-size: 11px; }
+.files-job-item .files-job-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.files-job[data-state="invalid"] .files-job-bar > i, .files-job[data-state="refused"] .files-job-bar > i { background: var(--warn); width: 100% !important; }
+.files-chip.files-chip-exp { border-style: dashed; }
+.files-recognized { border-left: 3px solid var(--ok); }
 .files-job-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .files-switch { display: flex; align-items: center; gap: 6px; margin: 4px 0; font-weight: 600; }
 .files-kv { display: grid; grid-template-columns: max-content 1fr; gap: 2px 8px; margin: 6px 0; font-size: 11.5px; }

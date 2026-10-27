@@ -120,4 +120,20 @@ eq(F.toggleFavorite(["/a", "/b"], "/a"), ["/b"], "a star off");
 mem.set(F.FAVORITES_KEY, JSON.stringify(["/x", 3, ""]));
 eq(F.readPathList(store, F.FAVORITES_KEY), ["/x"], "only paths are read");
 
+// MICRO-OTTIMIZZA-2 · the tileset's queue as the tab says it before it starts
+{
+  const it = (name, mb, extra = {}) => ({ source: `/p/${name}.obj`, name, estimate_mb: mb, ...extra });
+  const s1 = F.tilesetSchedule([it("a", 1000), it("b", 1000), it("c", 1000)], 2500, 4);
+  ok(s1.parallel === 2 && s1.startMb === 2000 && s1.totalMb === 3000, "two start side by side under a 2.5 GB ceiling, the third waits");
+  const s2 = F.tilesetSchedule([it("a", 1000), it("b", 1000), it("c", 1000)], 99999, 2);
+  ok(s2.parallel === 2, "never more than the workers");
+  const s3 = F.tilesetSchedule([it("big", 40000), it("a", 900), it("x", 10, { error: "no" }), it("y", 10, { exists: true })], 39000, 4);
+  ok(s3.over.length === 1 && s3.over[0].name === "big" && s3.todo.length === 1 && s3.parallel === 1,
+     "one that alone passes the ceiling is refused; refused and made ones are not counted");
+  ok(F.formatMb(977) === "977 MB" && F.formatMb(15360, "it") === "15 GB" && F.formatMb(1536, "en") === "1.5 GB", "megabytes as a person reads them");
+  ok(F.TILES_ENGINES[0] === "obj2tiles" && F.TILES_ENGINES_TODAY.has("obj2tiles") && !F.TILES_ENGINES_TODAY.has("blender3dsc"),
+     "the tileset's engines: Obj2Tiles today, Blender + 3DSC with round 3");
+  ok(F.jobItemOpen({ state: "running" }) && !F.jobItemOpen({ state: "invalid" }), "a file of a batch is open while queued or running");
+}
+
 console.log(`check-files-browser: ${checks} checks passed`);

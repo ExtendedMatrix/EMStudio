@@ -424,7 +424,19 @@ export function createTilesLayer(E: any, T: any, url: string, camera0: any, rend
   };
   tiles.calculateTileViewError = (tile: any, target: any) => {
     viewError(tile, target);
-    if (mode === "manual") target.error = asked.has(tile) || !tile.internal?.hasRenderableContent ? 1e9 : 0;
+    if (mode === "manual") {
+      target.error = asked.has(tile) || !tile.internal?.hasRenderableContent ? 1e9 : 0;
+      // MICRO-OTTIMIZZA-2 · a child of an EMPTY root that refines by ADD (the
+      // form of Obj2Tiles with --no-root-content): the renderer skips a child
+      // of an ADD tile whose error, scaled by its parent's, meets the target
+      // (Cesium's optimisation) — with 0 here the first level never came, and
+      // the Viewer showed nothing. Under the target, over it once scaled: the
+      // child is drawn and not refined.
+      const parent = tile.parent;
+      if (target.error === 0 && parent?.refine === "ADD" && !parent.internal?.hasRenderableContent) {
+        target.error = (tiles.errorTarget ?? 16) * 0.75;
+      }
+    }
     else if (ge && ge.scale !== 1) target.error *= ge.scale;
   };
 

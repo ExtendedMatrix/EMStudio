@@ -247,6 +247,54 @@ export function variantMemoryMb(bytesIn: number): number {
   return Math.ceil(100 + 3.5 * Math.max(0, bytesIn) / (1024 * 1024));
 }
 
+// ── MICRO-OTTIMIZZA-2 · a tileset from a textured mesh ──────────────────────
+
+/** The destination «Tileset (3D Tiles)», shown beside the variants' when the
+ *  experimental switch is on. Its engines, in E.D.'s order (precisazione 3):
+ *  what RealityScan or Metashape already made (recognised, packed and stamped
+ *  as theirs, whatever is chosen here), then Obj2Tiles, then 3D Survey
+ *  Collection in Blender (round 3). */
+export const TILESET_PRESET_ID = "tileset";
+export type TilesEngine = "obj2tiles" | "blender3dsc";
+export const TILES_ENGINES: readonly TilesEngine[] = ["obj2tiles", "blender3dsc"];
+export const TILES_ENGINES_TODAY: ReadonlySet<TilesEngine> = new Set<TilesEngine>(["obj2tiles"]);
+
+/** One OBJ of a batch, as the bridge plans it (`POST /fs/tileset`). */
+export interface TilesetItem {
+  source: string; name: string; folder?: string; path?: string; exists?: boolean; error?: string;
+  bytes_in?: number; bytes_calls?: number; triangles_est?: number; lods?: number; divisions?: number;
+  leaves?: number; estimate_mb?: number; command?: string;
+}
+
+/** How the queue will start: in order, a file joins the ones running while
+ *  their estimates stay under the ceiling together and the workers allow; a
+ *  file that alone passes the ceiling is refused (never past it). */
+export function tilesetSchedule(items: readonly TilesetItem[], ceilingMb: number, workers: number):
+    { todo: TilesetItem[]; over: TilesetItem[]; parallel: number; startMb: number; totalMb: number } {
+  const live = items.filter((i) => !i.error && !i.exists);
+  const over = live.filter((i) => (i.estimate_mb ?? 0) > ceilingMb);
+  const todo = live.filter((i) => !over.includes(i));
+  let parallel = 0, startMb = 0;
+  for (const it of todo) {
+    const mb = it.estimate_mb ?? 0;
+    if (parallel >= Math.max(1, workers) || (parallel > 0 && startMb + mb > ceilingMb)) break;
+    parallel++;
+    startMb += mb;
+  }
+  return { todo, over, parallel, startMb, totalMb: todo.reduce((s, i) => s + (i.estimate_mb ?? 0), 0) };
+}
+
+/** Megabytes as a person reads them: «977 MB», «15,3 GB». */
+export function formatMb(mb: number, locale = "it"): string {
+  if (mb < 1024) return `${Math.round(mb)} MB`;
+  return `${(mb / 1024).toLocaleString(locale, { maximumFractionDigits: 1 })} GB`;
+}
+
+/** A file of a batch job, as its row says it: its name, its stage, its share. */
+export interface JobItemView { source: string; name?: string | null; state: string; progress: number; stage?: string;
+  estimate_mb?: number | null; cancel?: boolean }
+export const jobItemOpen = (i: JobItemView): boolean => i.state === "queued" || i.state === "running";
+
 /** A background job as the status line says it: its label, its share done. */
 export interface JobView { id: string; kind: string; label: string; state: string; progress: number; stage?: string }
 export function jobLine(j: JobView): string {
