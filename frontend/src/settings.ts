@@ -71,6 +71,10 @@ export interface InteractionSettings {
    *  (Inspector, lists, outline, search, DTC…) is framed in the graph window; a
    *  click on the graph itself never moves the view. On by default. */
   zoomToSelection: boolean;
+  /** MICRO-ARCHIVIO-3 · over a node of the Chain, three lines (who, when,
+   *  licence/embargo) instead of «‹name› [resource]». OFF by default: E.D.
+   *  wants to try it before keeping it (§5 of «L'Archivio ripensato»). */
+  dtcHoverCard: boolean;
 }
 
 /**
@@ -213,7 +217,7 @@ const DEFAULTS: Settings = {
           accept: "everything", hubUrl: "", hubRoom: "", nodes: [] },
   developer: { showNodeIds: false },
   interaction: { edgeTooltips: true, strictDocumentNames: true,
-                 lotGapMinutes: 30, lotMinPhotos: 5, zoomToSelection: true },
+                 lotGapMinutes: 30, lotMinPhotos: 5, zoomToSelection: true, dtcHoverCard: false },
   ai: { provider: "claude", model: "" },
   // No default host on purpose: a wrong one would look like a broken viewer.
   // The Heriverse deployment guide mounts the wapp at /a/heriverse.

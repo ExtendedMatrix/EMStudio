@@ -11506,6 +11506,87 @@ test("AR8.project", "File ▸ Riordina secondo lo standard: il piano crea GIS/ e
   return { pass: Object.values(conds).every(Boolean), detail: { conds, menu, plan, moved, tree, closed, errors } };
 });
 
+test("AR9.card", "una selezione, una scheda (§5): il clic su un atto della Catena apre la sua scheda, che prende tutto il «Viewer e scheda» (tipo, uscite cliccabili, diritti con la provenienza); un'uscita cliccata apre la scheda della risorsa; il passaggio sul nodo dice «‹nome› [resource]» finché la preferenza è spenta, e tre righe (chi, quando, licenza/embargo) quando la si accende nelle Impostazioni; nella finestra File, Info è la stessa scheda compatta con i diritti, e «Apri nel Viewer» la mostra intera sotto il file, con la storia e «scritto nel timbro»", async () => {
+  // A · the Chain of the corpus: a click on the act
+  const { p, ctx, errors } = await open({ doc: catenaWithCorpus(), w: 1700, h: 1000 });
+  await workspace(p, "assets");
+  const win = await winOf(p, "graph");
+  let ws = await p.evaluate((w) => window.__EM_DRAG__.winScene(w), win);
+  await p.mouse.move(ws.rect.x + 20, ws.rect.y + 20);
+  await p.waitForTimeout(250);
+  ws = await p.evaluate((w) => window.__EM_DRAG__.winScene(w), win);
+  const box = ws.boxes.find((b) => b.id === "acq_a");
+  await p.mouse.click(box.x + box.w / 2, box.y + box.h / 2);
+  await p.waitForSelector('.viewer-card .res-card[data-subject="act"]', { timeout: 8000 }).catch(() => {});
+  const act = await p.evaluate(() => ({ whole: !!document.querySelector(".viewer-view.vw-card-only"),
+    name: document.querySelector(".viewer-card .res-card-name")?.textContent ?? "",
+    kind: document.querySelector('.viewer-card [data-card="actKind"]')?.textContent ?? "",
+    outputs: [...document.querySelectorAll('.viewer-card [data-card="outputs"] .res-ref')].map((b) => b.textContent),
+    rights: [...document.querySelectorAll(".viewer-card .res-rights dd")].map((d) => d.textContent) }));
+  await p.screenshot({ path: SHOT("ar9-atto") }).catch(() => {});
+  await p.click('.viewer-card [data-card="outputs"] .res-ref');
+  await p.waitForTimeout(800);
+  const res = await p.evaluate(() => ({ subject: document.querySelector(".viewer-card .res-card")?.dataset.subject ?? "",
+    whole: !!document.querySelector(".viewer-view.vw-card-only"),
+    history: document.querySelector(".viewer-card .res-card")?.textContent ?? "" }));
+  // the hover: off by default, then on through Settings
+  ws = await p.evaluate((w) => window.__EM_DRAG__.winScene(w), win);
+  const img = ws.boxes.find((b) => b.id === "img1");
+  const hover = async () => {
+    await p.mouse.move(ws.rect.x + 8, ws.rect.y + 8);
+    await p.mouse.move(img.x + img.w / 2 - 2, img.y + img.h / 2);
+    await p.mouse.move(img.x + img.w / 2, img.y + img.h / 2);
+    await p.waitForTimeout(400);
+    return p.evaluate(() => { const t = document.getElementById("tooltip"); return { text: t?.innerText ?? "", lines: t?.querySelectorAll(".tt-card > div").length ?? 0 }; });
+  };
+  const off = await hover();
+  await p.evaluate(() => document.getElementById("btn-settings")?.click());
+  await p.waitForTimeout(500);
+  const defaultOff = await p.evaluate(() => document.getElementById("set-dtc-hover-card")?.checked === false);
+  await p.evaluate(() => { document.getElementById("set-dtc-hover-card").checked = true; document.getElementById("settings-save")?.click(); });
+  await p.waitForTimeout(500);
+  const on = await hover();
+  await ctx.close();
+  // B · the File window: Info compact, then the whole card in the Viewer
+  const root = await rootPath();
+  const { pr, at } = await abProject(root, "ab9");
+  const b = await open({ doc: null, ws: "assets", w: 1900, h: 1000 });
+  await b.p.evaluate(([d, path]) => window.__EM_DRAG__.openAt(d, path), [fixture("catena"), at]);
+  await b.p.waitForTimeout(2500);
+  await b.p.locator(`.files-pl[data-place="${pr}/EM/DosCo"]`).first().click();
+  await b.p.waitForTimeout(1200);
+  await b.p.click('.files-tab[data-tab="info"]');
+  await storageClick(b.p, "D.01.png");
+  await b.p.waitForTimeout(1500);
+  const info = await b.p.evaluate(() => ({ compact: !!document.querySelector('.files-tab-info .res-card.compact[data-subject="file"]'),
+    rights: [...document.querySelectorAll(".files-tab-info .res-rights dt")].map((d) => d.textContent),
+    stamp: !!document.querySelector(".files-tab-info .stamp-emitted") }));
+  await b.p.click('.files-tab-info [data-action="files-open-viewer"]');
+  await b.p.waitForSelector('.viewer-card .res-card[data-subject="file"]', { timeout: 8000 }).catch(() => {});
+  await b.p.waitForTimeout(1500);
+  const full = await b.p.evaluate(() => ({ full: !!document.querySelector('.viewer-card .res-card.full[data-subject="file"]'),
+    whole: !!document.querySelector(".viewer-view.vw-card-only"),
+    stage: !!document.querySelector(".tile-viewer .viewer-stage img, .tile-viewer .viewer-stage .viewer-media"),
+    sections: [...document.querySelectorAll(".viewer-card .res-card-sect > h4")].map((h) => h.textContent),
+    author: document.querySelector('.viewer-card .res-rights dd[data-right="authors"]')?.textContent ?? "",
+    seal: !!document.querySelector(".viewer-card .res-seal"),
+    label: [...document.querySelectorAll(".area-head, .win-head, .tile-head")].some((h) => /Viewer e scheda/.test(h.textContent ?? "")) }));
+  await b.p.screenshot({ path: SHOT("ar9-file") }).catch(() => {});
+  await b.ctx.close();
+  const conds = {
+    actWhole: act.whole && act.name === "Volo marzo" && act.kind.length > 0 && act.outputs.includes("IMG_1.jpg") && act.rights.length === 3,
+    outputCard: res.subject === "resource" && !res.whole && /Volo marzo/.test(res.history),
+    hoverOff: /\[resource/.test(off.text) && off.lines === 0,
+    prefDefaultOff: defaultOff,
+    hoverOn: on.lines === 3 && /chi: /.test(on.text) && /quando: /.test(on.text),
+    infoCompact: info.compact && info.stamp && info.rights.join(",") === "Autori,Licenza,Embargo",
+    viewerFull: full.full && !full.whole && full.stage && full.seal && full.sections.includes("La sua storia") && full.sections.includes("Diritti")
+      && /Emanuel Demetrescu scritto nel timbro/.test(full.author),
+    noErrors: !errors.length && !b.errors.length,
+  };
+  return { pass: Object.values(conds).every(Boolean), detail: { conds, act, res, off, on, info, full, errors, errorsB: b.errors } };
+});
+
 // ── run ─────────────────────────────────────────────────────────────────────
 const chosen =cases.filter((c) => !only.length || only.includes(c.id) || only.some((o) => c.id.startsWith(o + ".")));
 for (const c of chosen) {

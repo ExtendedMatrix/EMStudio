@@ -10760,3 +10760,42 @@ body.em-detached #tile-root > .tile-area.tile-detached {
 .files-panel-body .stamp-compose-act { grid-template-columns: 1fr; }
 .files-panel-body button.link { border: 0; background: transparent; color: var(--accent-ink); padding: 0; cursor: pointer; font-weight: 600; }
 .reorder-plan select { font-size: 12px; margin-left: 4px; }
+
+/* MICRO-ARCHIVIO-3 · «Viewer e scheda» (§5 of the note): the thing above, its
+   card below — its history and its rights; for an act, which has nothing to
+   preview, the card takes the whole space. The same card, compact, in Info. */
+.viewer-card {
+  flex: 0 1 auto;
+  max-height: 46%;
+  min-height: 0;
+  overflow: auto;
+  border-top: 1px solid var(--border);
+  background: var(--bg-panel);
+  padding: 8px 12px 10px;
+  font-size: 12px;
+}
+.viewer-card[hidden] { display: none; }
+.viewer-card.folded { max-height: none; flex: 0 0 auto; padding-bottom: 6px; }
+.viewer-view.vw-card-only .viewer-stage,
+.viewer-view.vw-card-only .viewer-caption,
+.viewer-view.vw-card-only .viewer-bar { display: none; }
+.viewer-view.vw-card-only .viewer-card { flex: 1; max-height: none; border-top: 0; padding: 14px 18px; }
+.res-card-head { display: flex; align-items: baseline; gap: 8px; margin-bottom: 4px; }
+.res-card-name { font-weight: 700; overflow-wrap: anywhere; }
+.viewer-card .res-card-name { font-size: 13.5px; }
+.vw-card-only .res-card-name { font-size: 16px; }
+.res-card-tag { font-size: 10.5px; text-transform: uppercase; letter-spacing: .04em; color: var(--text-faint); border: 1px solid var(--border); border-radius: 999px; padding: 0 6px; }
+.res-card-fold { border: 0; background: none; padding: 0 2px; color: var(--text-muted); cursor: pointer; font-size: 11px; }
+.res-card.folded > :not(.res-card-head) { display: none; }
+.res-card-sect { margin: 6px 0 2px; }
+.res-card-sect > h4 { margin: 8px 0 2px; font-size: 10.5px; text-transform: uppercase; letter-spacing: .05em; color: var(--text-faint); font-weight: 600; }
+.res-card.full .files-kv { font-size: 12px; }
+.res-src { font-size: 10.5px; color: var(--text-faint); font-style: italic; white-space: nowrap; }
+.res-none { color: var(--text-faint); }
+.res-refs { display: inline-flex; flex-wrap: wrap; gap: 2px 10px; }
+.res-ref { padding: 0; text-align: left; }
+.res-seal { display: flex; align-items: center; gap: 4px; color: var(--text-muted); font-size: 11.5px; }
+.res-card .stamp-card { margin: 4px 0; }
+.res-card .file-card-acts { margin-top: 8px; }
+.shelf-pane-preview .res-card { margin-top: 8px; border-top: 1px solid var(--border); padding-top: 6px; }
+#tooltip .tt-card { margin-top: 3px; font-size: 11.5px; line-height: 1.45; }

@@ -78,7 +78,7 @@ export interface SurfaceDeps {
   renderStorage(): void;
   renderShelfInto(win: Win, body: HTMLElement, count: HTMLElement | null): void;
   renderViewerInto(win: Win, stage: HTMLElement, caption: HTMLElement,
-                   bar: HTMLElement): void;
+                   bar: HTMLElement, card?: HTMLElement): void;
   renderStudyInto(body: HTMLElement): void;
   /** COLLEGARE · the Index of a story, into any body. */
   renderNarrativeIndexInto(body: HTMLElement, win: Win): void;
@@ -225,6 +225,8 @@ export function registerBuiltinSurfaces(deps: SurfaceDeps): void {
       let stage: HTMLElement | null = null;
       let caption: HTMLElement | null = null;
       let bar: HTMLElement | null = null;
+      // MICRO-ARCHIVIO-3 · «Viewer e scheda»: the card of what it shows, below it
+      let card: HTMLElement | null = null;
       let win: Win | null = null;
       return {
         mount(area, w) {
@@ -237,19 +239,22 @@ export function registerBuiltinSurfaces(deps: SurfaceDeps): void {
           caption.className = "viewer-caption";
           bar = document.createElement("div");
           bar.className = "viewer-bar hidden";
-          root.append(bar, stage, caption);
+          card = document.createElement("div");
+          card.className = "viewer-card";
+          card.hidden = true;
+          root.append(bar, stage, caption, card);
           area.appendChild(root);
           this.refresh();
         },
         refresh() {
           if (!win || !stage || !caption || !bar || !stage.isConnected) return;
-          const w = win, s = stage, c = caption, b = bar;
-          paintSurface(w, s, () => deps.renderViewerInto(w, s, c, b));
+          const w = win, s = stage, c = caption, b = bar, k = card ?? undefined;
+          paintSurface(w, s, () => deps.renderViewerInto(w, s, c, b, k));
         },
         setFocused(on) { markFocus(root, on); },
         destroy() {
           root?.remove();
-          root = stage = caption = bar = null;
+          root = stage = caption = bar = card = null;
           win = null;
         },
       };

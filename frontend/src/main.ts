@@ -687,6 +687,8 @@ import {
   type Draft, type DraftInput,
 } from "./stamp-compose";
 import { setTreeBridgeResolver, TREE_EXT, treeOf, verifyStamp, type TreeInfo } from "./stamp-tree";
+// MICRO-ARCHIVIO-3 · what the card of what is chosen says (§5)
+import { actFacts, consumersOf, hasCard, hoverLines, isActType, producerOf, rightsOf, type ActFacts, type RightLine, type RightsFrom } from "./card-facts";
 import { openSealCard, readableWhen, sealMini, sealWords, type SealStamp } from "./seal";
 import {
   DECLARED_KINDS, landStep, parentLabel, type DeclaredKind, type DeclaredLevel,
@@ -15999,6 +16001,7 @@ function openSettings(section?: string): void {
   paintSettingsNodes();
   setDevUuid.checked = s.developer.showNodeIds;
   setEdgeTips.checked = s.interaction.edgeTooltips;
+  { const el = document.getElementById("set-dtc-hover-card") as HTMLInputElement | null; if (el) el.checked = !!s.interaction.dtcHoverCard; }
   setStrictDocNames.checked = s.interaction.strictDocumentNames;
   (document.getElementById("set-lot-gap") as HTMLInputElement).value = String(s.interaction.lotGapMinutes);
   (document.getElementById("set-lot-min") as HTMLInputElement).value = String(s.interaction.lotMinPhotos);
@@ -16351,6 +16354,7 @@ settingsModal.addEventListener("click", (e) => {
     developer: { showNodeIds: setDevUuid.checked },
     interaction: {
       edgeTooltips: setEdgeTips.checked,
+      dtcHoverCard: !!(document.getElementById("set-dtc-hover-card") as HTMLInputElement | null)?.checked,
       strictDocumentNames: setStrictDocNames.checked,
       lotGapMinutes: Number((document.getElementById("set-lot-gap") as HTMLInputElement)?.value) || 30,
       lotMinPhotos: Number((document.getElementById("set-lot-min") as HTMLInputElement)?.value) || 5,
@@ -29766,6 +29770,8 @@ function shelfPreviewPane(win: Win, keep: HTMLElement | null): HTMLElement {
   const remote = one && /^https?:/i.test(one.locator) ? remotePreviews.get(one.locator) : undefined;
   const key = chosen.map((e) => `${e.id}:${e.locator}`).join("|")
     + (one && remote ? `#${typeof remote === "object" ? "read" : remote}` : "")
+    // MICRO-ARCHIVIO-3 · the card under it is drawn again when its stamp is read
+    + (one && paths.isAbsolute(one.locator) ? `#${fileLooks.get(one.locator)?.status ?? ""}` : "")
     + `#${getLocale()}`;
   const was = shelfPreviews.get(win.id);
   if (keep && was && was.key === key && was.el === keep) return keep;
@@ -29853,6 +29859,8 @@ function shelfPreviewPane(win: Win, keep: HTMLElement | null): HTMLElement {
       });
     }
     words();
+    // MICRO-ARCHIVIO-3 · the same card, compact, under the preview: its history, its rights
+    pane.appendChild(resourceCard({ kind: "file", path }, "compact", { win, pic: false, actions: false }));
     const v = document.createElement("button");
     v.dataset.action = "shelf-open-viewer";
     v.textContent = t("shelf.openInViewer");
@@ -31416,6 +31424,7 @@ async function askStamps(path: string | null): Promise<void> {
     return;
   }
   diskStamps = { status: "reading", path };
+  forgetFileLook(path);   // MICRO-ARCHIVIO-3 · the card reads it again with it
   redrawNeighbourhood();
   try {
     const folder = paths.dirname(path) || "/";
@@ -34138,89 +34147,499 @@ function filesInfoTab(win: Win, listing: FsListing): HTMLElement {
   return box;
 }
 
-/**
- * The card of a file, in its compact form — the placeholder of the one
- * component the Viewer will show whole (round 3, §5 of the note): the seal
- * and the stamp, what it is, its uses in the graph, and «Apri nel Viewer».
- * Same data, same source: the stamp on the disk, the files' check.
- */
-function fileCardCompact(win: Win, entry: FsEntry, listing: FsListing): HTMLElement {
-  const card = document.createElement("div");
-  card.className = "file-card compact";
-  card.dataset.path = entry.path;
-  const k = browserKindOf(entry);
-  if (k === "image" && !/\.(tiff?|dng|cr2|nef|exr|heic)$/i.test(entry.name) && entry.size < 40 * 1024 * 1024) {
-    const big = document.createElement("div");
-    big.className = "file-card-pic";
-    void fsFileUrl(entry.path).then((url) => { const img = document.createElement("img"); img.alt = ""; img.src = url; big.appendChild(img); }).catch(() => {});
-    card.appendChild(big);
+// ── MICRO-ARCHIVIO-3 · the card of what is chosen (§5 of the note, decided) ──
+//
+// ONE SELECTION, ONE CARD: a file of the File window, an entry of the Shelf, a
+// node of the Chain. ONE component, two forms: whole under the thing in the
+// «Viewer e scheda» (`full`), compact in the Info tab of the File window and in
+// the Shelf's right half (`compact`). Same data, same source: the stamp beside
+// the bytes, the graph, the room. What it says is `card-facts.ts`.
+
+type CardForm = "full" | "compact";
+type CardSubject = { kind: "file"; path: string; nodeId?: string } | { kind: "node"; id: string };
+
+/** What the card knows of a file on the disk: its entry and its stamp. Read
+ *  once per path (the Viewer's file is not always the one chosen in the File
+ *  window, whose stamp `diskStamps` holds), and the card is repainted when it
+ *  arrives. */
+interface FileLook {
+  status: "reading" | "stamped" | "unstamped" | "superseded" | "failed";
+  entry?: FsEntry; stamp?: Stamp; chain?: StampChain; why?: string;
+}
+const fileLooks = new Map<string, FileLook>();
+function fileLook(path: string, entry?: FsEntry): FileLook {
+  if (diskStamps.status === "stamped" && diskStamps.path === path)
+    return { status: "stamped", stamp: diskStamps.chain.root, chain: diskStamps.chain, entry: entry ?? fileLooks.get(path)?.entry };
+  // the File window is reading it already: one hash, not two
+  if (diskStamps.status === "reading" && diskStamps.path === path) return { status: "reading", entry };
+  const had = fileLooks.get(path);
+  if (had) return entry && !had.entry ? { ...had, entry } : had;
+  const look: FileLook = { status: "reading", entry };
+  fileLooks.set(path, look);
+  void (async () => {
+    try {
+      const folder = paths.dirname(path) || "/";
+      const listing = await fsList(folder);
+      const e = listing.entries.find((x) => x.path === path);
+      if (!e) { fileLooks.set(path, { status: "failed", why: t("stamp.gone") }); return; }
+      const r = await resolveFile(e);
+      if (r.why === "digest-mismatch" && r.rejected) fileLooks.set(path, { status: "superseded", entry: e, stamp: r.rejected, why: r.note ?? t("stamp.otherBytes") });
+      else if (r.why !== "by-digest" || !r.stamp) fileLooks.set(path, { status: r.why === "unreadable" ? "failed" : "unstamped", entry: e, why: r.note });
+      else {
+        const chain = await walkChain(r.stamp, path, folder, 3);
+        fileLooks.set(path, { status: "stamped", entry: e, stamp: r.stamp, chain });
+      }
+    } catch (err) {
+      fileLooks.set(path, { status: "failed", why: String((err as Error).message) });
+    }
+    refreshSurfaces("viewer");
+    renderShelf();
+  })();
+  return look;
+}
+/** A stamp written again (words, a new act) is read again by the card. */
+function forgetFileLook(path: string): void { fileLooks.delete(path); }
+
+/** The node of the card, wherever it lives: the graph, the Chain on screen (a
+ *  file's stamps read from the disk, the corpus), or what the Chain showed when
+ *  it was clicked — the Chain follows the File window, the card stays. */
+interface CardGraph { node: EmNode; edges: EmEdge[]; nodeOf: (id: string) => EmNode | undefined; inStore: boolean }
+const cardSnaps = new Map<string, { node: EmNode; edges: EmEdge[]; nodes: Map<string, EmNode> }>();
+function cardGraphOf(id: string): CardGraph | null {
+  const dtc = scenes.dtc;
+  const sn = dtc?.byId.get(id);
+  if (sn && dtc) {
+    const nodes = new Map(dtc.nodes.map((n) => [n.id, n.node]));
+    return { node: sn.node, edges: dtc.edges.map((e) => e.edge), nodeOf: (x) => nodes.get(x) ?? store?.node(x) ?? undefined, inStore: !!store?.node(id) };
   }
-  const name = document.createElement("div");
-  name.className = "file-card-name";
-  name.textContent = entry.name;
-  card.appendChild(name);
+  const n = store?.node(id);
+  if (n && store) {
+    const st = store;
+    return { node: n, edges: st.doc.graph.edges, nodeOf: (x) => st.node(x) ?? undefined, inStore: true };
+  }
+  const snap = cardSnaps.get(id);
+  if (snap) return { node: snap.node, edges: snap.edges, nodeOf: (x) => snap.nodes.get(x) ?? store?.node(x) ?? undefined, inStore: false };
+  return null;
+}
+function cardNodeOf(id: string): EmNode | null { return cardGraphOf(id)?.node ?? null; }
+
+/** The file a node stands for on this computer, if it names one. */
+function localPathOf(node: EmNode | null): string | null {
+  const p = (node?.data as { path?: unknown } | undefined)?.path;
+  if (typeof p === "string" && p && paths.isAbsolute(p)) return p;
+  const src = viewerSourceOf(node);
+  return src && !viewerIsFetchable(src) && paths.isAbsolute(src) ? src : null;
+}
+
+/** The rights of the card, each with where it was read. The stamp's operator
+ *  is the author it writes; its `declared` the licence and the embargo. */
+function cardRights(o: { stamp?: Stamp | null; declared?: RightsFrom | null; nodeId?: string | null; resourceSays?: RightsFrom | null }): RightLine[] {
+  const op = o.stamp?.by?.operator;
+  const stampSays: RightsFrom | null = o.stamp
+    ? { authors: op?.label || op?.id || "", licence: o.stamp.declared?.license, embargo: o.stamp.declared?.embargo_until }
+    : o.declared ?? null;
+  const nr = o.nodeId && store?.node(o.nodeId) ? store.readNodeRights(o.nodeId) : null;
+  const g = store?.readGraphScope?.() as { author?: string; license?: string; embargo?: string } | undefined;
+  return rightsOf({
+    stamp: stampSays,
+    resource: nr ? { authors: nr.author, licence: nr.license, embargo: nr.embargo } : o.resourceSays ?? null,
+    room: sync.room ? { licence: ingestDraft.license, embargo: ingestDraft.embargoUntil } : null,
+    graph: g ? { authors: g.author, licence: g.license, embargo: g.embargo } : null,
+  });
+}
+
+function rightsBox(lines: RightLine[]): HTMLElement {
+  const box = document.createElement("section");
+  box.className = "res-card-sect res-rights";
+  const h = document.createElement("h4");
+  h.textContent = t("card.rights");
+  const dl = document.createElement("dl");
+  dl.className = "files-kv";
+  for (const l of lines) {
+    const dt = document.createElement("dt");
+    dt.textContent = t(`card.right.${l.key}`);
+    const dd = document.createElement("dd");
+    dd.dataset.right = l.key;
+    if (l.said) {
+      dd.dataset.source = l.said.source;
+      dd.append(l.key === "embargo" ? t("card.until", { date: showDate(l.said.value.slice(0, 10), dateFormOf(getLocale())) }) : l.said.value);
+      const src = document.createElement("span");
+      src.className = "res-src";
+      src.textContent = t(`card.src.${l.said.source}`);
+      dd.append(" ", src);
+      if (l.others.length) dd.title = t("card.alsoSaid", { list: l.others.map((x) => `${x.value} (${t(`card.src.${x.source}`)})`).join(" · ") });
+    } else {
+      dd.className = "res-none";
+      dd.textContent = t(`card.none.${l.key}`);
+    }
+    dl.append(dt, dd);
+  }
+  box.append(h, dl);
+  return box;
+}
+
+function cardKv(rows: Array<[string, string | Node | null | undefined]>): HTMLElement {
   const kv = document.createElement("dl");
   kv.className = "files-kv";
-  const add = (key: string, v: string): void => {
-    const dt = document.createElement("dt"); dt.textContent = t(key);
-    const dd = document.createElement("dd"); dd.textContent = v;
+  for (const [k, v] of rows) {
+    if (v == null || v === "") continue;
+    const dt = document.createElement("dt"); dt.textContent = t(k);
+    const dd = document.createElement("dd");
+    dd.dataset.card = k.replace(/^card\./, "");
+    if (typeof v === "string") dd.textContent = v; else dd.appendChild(v);
     kv.append(dt, dd);
-  };
-  add("files.cardWhat", t(`files.kind.${k === "dir" || k === "other" ? "all" : k}`));
-  add("files.cardWeight", `${formatBytes(entry.size)} · ${showDate(new Date(entry.mtime * 1000).toISOString().slice(0, 10), dateFormOf(getLocale()))}`);
-  const uses = filesUses(entry.path);
-  add("files.cardUses", uses.length ? uses.map((u) => u.name || u.id).join(", ") : t("files.cardNotUsed"));
-  card.appendChild(kv);
-  const stamped = filesStamped(listing, entry.path);
-  if (stamped) {
-    if (diskStamps.status === "stamped" && diskStamps.path === entry.path) card.appendChild(stampedBox(diskStamps.path, diskStamps.chain.root));
-    else if (diskStamps.status === "reading" || diskStamps.status === "idle" || diskStamps.path !== entry.path)
-      card.appendChild(tabLead(t("files.cardReading"), "files-hint"));
-  } else if (!isDocumentOrCopy(entry.name)) {
-    const p = tabLead(t("files.cardUnstamped"), "files-lead");
-    const a = document.createElement("button");
-    a.type = "button";
-    a.className = "link";
-    a.dataset.action = "files-to-stamp";
-    a.textContent = t("files.cardToStamp");
-    a.onclick = () => { setFilesPref(win, "tab", "stamp"); renderStorage(); };
-    p.append(" ", a);
-    card.appendChild(p);
   }
+  return kv;
+}
+
+/** Links to other cards: the inputs and outputs of an act, a file's parents. */
+function cardRefs(refs: Array<{ id: string; name: string; path?: string; missing?: boolean }>, win: Win): HTMLElement {
+  const span = document.createElement("span");
+  span.className = "res-refs";
+  for (const r of refs) {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "link res-ref";
+    b.dataset.ref = r.id;
+    b.textContent = r.missing ? `? ${r.name}` : r.name;
+    b.title = r.missing ? t("card.refMissing", { name: r.name }) : r.path ?? r.name;
+    b.disabled = !!r.missing && !r.path;
+    b.onclick = () => {
+      if (r.path && !cardGraphOf(r.id)) { pinViewerCollection(win, { type: "file", path: r.path, name: paths.basename(r.path), ext: "" }); return; }
+      showCardIn(win, r.id);
+    };
+    span.appendChild(b);
+  }
+  return span;
+}
+
+function cardSection(title: string, ...kids: HTMLElement[]): HTMLElement {
+  const s = document.createElement("section");
+  s.className = "res-card-sect";
+  const h = document.createElement("h4");
+  h.textContent = title;
+  s.append(h, ...kids);
+  return s;
+}
+
+/** The facts of an act, as a key-value list (the card of an act, and the
+ *  history of a file whose stamp or graph says how it was made). */
+function actKv(f: ActFacts, win: Win): HTMLElement {
+  const params = f.parameters.length ? f.parameters.map(([k, v]) => `${k} = ${v}`).join(" · ") : "";
+  const kind = f.kind ? dtcKindLabel(f.kind) : "";
+  return cardKv([
+    ["card.actKind", kind],
+    ["card.actName", f.name !== kind ? f.name : ""],
+    ["card.technique", f.technique && f.technique !== f.name ? f.technique : ""],
+    ["card.operator", f.operator],
+    ["card.tools", f.tools.join(", ")],
+    ["card.parameters", params],
+    ["card.date", f.date ? readableWhen(f.date) : ""],
+    ["card.inputs", f.inputs.length ? cardRefs(f.inputs, win) : null],
+    ["card.outputs", f.outputs.length ? cardRefs(f.outputs, win) : null],
+  ]);
+}
+
+/** The act a stamp records, as the facts of an act (no node needed). */
+function stampActFacts(stamp: Stamp, chain: StampChain | undefined): ActFacts {
+  const how = stamp.how ?? {};
+  const fromRefs = (stamp.from ?? []).map((p) => {
+    const found = chain?.resolved.get(p.resource_id);
+    return { id: p.resource_id, name: p.label || p.resource_id, ...(found ? { path: found.path } : {}) };
+  });
+  return {
+    kind: how.dtc_kind ?? "",
+    name: how.technique || (how.dtc_kind ? dtcKindLabel(how.dtc_kind) : ""),
+    technique: "",
+    operator: stamp.by?.operator?.label || stamp.by?.operator?.id || "",
+    tools: (how.software ?? []).map((s) => [s.name, s.version].filter(Boolean).join(" ")).filter(Boolean),
+    parameters: Object.entries(how.parameters ?? {}).map(([k, v]) => [k, typeof v === "string" ? v : JSON.stringify(v)] as [string, string]),
+    date: stamp.by?.at ?? "",
+    inputs: fromRefs,
+    outputs: [],
+    declared: { licence: stamp.declared?.license ?? "", embargo: stamp.declared?.embargo_until ?? "" },
+  };
+}
+
+/** THE card. A file, or a node of the graph or of the Chain. */
+function resourceCard(subject: CardSubject, form: CardForm, opts: { win: Win; entry?: FsEntry; listing?: FsListing; pic?: boolean; actions?: boolean }): HTMLElement {
+  if (subject.kind === "file") return fileCard(subject.path, form, opts, subject.nodeId ?? null);
+  const g = cardGraphOf(subject.id);
+  if (!g) {
+    const gone = document.createElement("div");
+    gone.className = "res-card res-gone";
+    gone.dataset.subject = "gone";
+    gone.appendChild(tabLead(t("card.gone"), "files-hint"));
+    return gone;
+  }
+  if (isActType(g.node.node_type)) return actCard(g, form, opts.win);
+  const path = localPathOf(g.node);
+  if (path) return fileCard(path, form, opts, g.inStore ? g.node.id : null, g);
+  return resourceNodeCard(g, form, opts.win);
+}
+
+function cardShell(subject: string, form: CardForm, name: string, tag: string): HTMLElement {
+  const card = document.createElement("div");
+  card.className = `res-card ${form}`;
+  card.dataset.subject = subject;
+  card.dataset.form = form;
+  const head = document.createElement("div");
+  head.className = "res-card-head";
+  const n = document.createElement("span");
+  n.className = "file-card-name res-card-name";
+  n.textContent = name;
+  n.title = name;
+  head.appendChild(n);
+  if (tag) {
+    const k = document.createElement("span");
+    k.className = "res-card-tag";
+    k.textContent = tag;
+    head.appendChild(k);
+  }
+  card.appendChild(head);
+  return card;
+}
+
+/** The card of an act: no preview, so in the Viewer it takes the whole space. */
+function actCard(g: CardGraph, form: CardForm, win: Win): HTMLElement {
+  const f = actFacts(g.node, g.edges, g.nodeOf);
+  const card = cardShell("act", form, f.name || t("stamps.unnamedStep"), t(g.node.node_type === "dtc_acquisition" ? "card.tagAcquisition" : "card.tagAct"));
+  card.dataset.node = g.node.id;
+  card.appendChild(cardSection(t("card.act"), actKv(f, win)));
+  if (!f.inputs.length && !f.outputs.length) card.appendChild(tabLead(t("card.actAlone"), "files-hint"));
+  const stampBorn = !!(g.node.data as { operator?: unknown } | undefined)?.operator;
+  card.appendChild(rightsBox(cardRights({
+    declared: { ...f.declared, ...(stampBorn ? { authors: f.operator } : {}) },
+    nodeId: g.inStore ? g.node.id : null,
+    resourceSays: !stampBorn && f.operator ? { authors: f.operator } : null,
+  })));
   const acts = document.createElement("div");
   acts.className = "stamp-report-ask file-card-acts";
-  const v = document.createElement("button");
-  v.type = "button";
-  v.className = "ghost";
-  v.dataset.action = "files-open-viewer";
-  v.textContent = t("shelf.openInViewer");
-  v.title = t("files.cardViewerHint");
-  v.onclick = () => openFileInViewer(entry.path, win);
-  acts.appendChild(v);
-  if (uses.length) {
-    const g = document.createElement("button");
-    g.type = "button";
-    g.className = "ghost";
-    g.dataset.action = "show-in-graph";
-    g.textContent = t("storage.showInGraph");
-    g.onclick = () => revealFromTable(uses[0].id);
-    acts.appendChild(g);
+  if (g.inStore) {
+    const s = document.createElement("button");
+    s.type = "button"; s.className = "ghost"; s.dataset.action = "show-in-graph";
+    s.textContent = t("storage.showInGraph");
+    s.onclick = () => revealFromTable(g.node.id);
+    acts.appendChild(s);
   }
-  if (!isDocumentOrCopy(entry.name)) acts.appendChild(putOnShelfButton([entry.path]));
-  if (TREE_EXT.test(entry.name) || entry.name === "tileset.json") acts.appendChild(openInSceneButton(entry.path));
-  if (/\.(em\.json|emj|graphml)$/i.test(entry.name)) {
+  if (acts.childElementCount) card.appendChild(acts);
+  return card;
+}
+
+/** The card of a resource of the graph that is not a file here (a web
+ *  address, a file elsewhere): what it is, the act that made it, where it is used. */
+function resourceNodeCard(g: CardGraph, form: CardForm, win: Win): HTMLElement {
+  const d = (g.node.data ?? {}) as Record<string, unknown>;
+  const card = cardShell("resource", form, String(g.node.name || g.node.id), t("card.tagResource"));
+  card.dataset.node = g.node.id;
+  const src = viewerSourceOf(g.node) ?? "";
+  const made = producerOf(g.node.id, g.edges, g.nodeOf);
+  const used = consumersOf(g.node.id, g.edges, g.nodeOf);
+  const cites = g.edges.filter((e) => e.edge_type === "has_linked_resource" && e.target === g.node.id)
+    .map((e) => ({ id: e.source, name: String(g.nodeOf(e.source)?.name || e.source) }));
+  card.appendChild(cardSection(t("card.what"), cardKv([
+    ["card.where", src],
+    ["card.kind", String(d.url_type ?? d.dtc_kind ?? "")],
+    ["card.description", String(g.node.description ?? d.description ?? "")],
+    ["card.cited", cites.length ? cardRefs(cites, win) : null],
+  ])));
+  card.appendChild(cardSection(t("card.history"), made
+    ? actKv(actFacts(made, g.edges, g.nodeOf), win)
+    : tabLead(t("card.noProducer"), "files-hint")));
+  if (used.length) card.appendChild(cardSection(t("card.consumedBy"), cardKv([["card.acts", cardRefs(used, win)]])));
+  card.appendChild(rightsBox(cardRights({ declared: made ? actFacts(made, g.edges, g.nodeOf).declared : null, nodeId: g.inStore ? g.node.id : null })));
+  return card;
+}
+
+/** The card of a file. Compact (Info, the Shelf): the picture, what, size and
+ *  date, uses, the stamp as the File window has always shown it, the rights,
+ *  «Apri nel Viewer». Full (the Viewer, the file is above): what, its history —
+ *  the act of its stamp, its parents to click — its uses, its rights. */
+function fileCard(path: string, form: CardForm, opts: { win: Win; entry?: FsEntry; listing?: FsListing; pic?: boolean; actions?: boolean },
+                  nodeId: string | null, g?: CardGraph): HTMLElement {
+  const win = opts.win;
+  // a file the listing knows to be unstamped is not hashed again for its card
+  const look: FileLook = opts.listing && !filesStamped(opts.listing, path)
+    ? { status: "unstamped", entry: opts.entry } : fileLook(path, opts.entry);
+  const entry = opts.entry ?? look.entry;
+  const name = paths.basename(path) || path;
+  const card = cardShell("file", form, name, "");
+  card.classList.add("file-card");
+  if (form === "compact") card.classList.add("compact");
+  card.dataset.path = path;
+  const k = browserKindOf(entry ?? { name, type: "file" } as FsEntry);
+  if (form === "compact" && opts.pic !== false && entry && k === "image" && !/\.(tiff?|dng|cr2|nef|exr|heic)$/i.test(name) && entry.size < 40 * 1024 * 1024) {
+    const big = document.createElement("div");
+    big.className = "file-card-pic";
+    void fsFileUrl(path).then((url) => { const img = document.createElement("img"); img.alt = ""; img.src = url; big.appendChild(img); }).catch(() => {});
+    card.insertBefore(big, card.firstChild);
+  }
+  const stamp = look.status === "stamped" ? look.stamp ?? null : null;
+  const uses = filesUses(path);
+  const graphNode = nodeId ?? uses[0]?.id ?? (stamp ? graphNodeOfStamp(stamp)?.id ?? null : null);
+  const usesEl = uses.length
+    ? cardRefs(uses.map((u) => ({ id: u.id, name: u.name || u.id })), win)
+    : null;
+  if (usesEl) for (const b of usesEl.querySelectorAll<HTMLButtonElement>(".res-ref")) b.onclick = () => revealFromTable(b.dataset.ref!);
+  card.appendChild(cardKv([
+    ["files.cardWhat", t(`files.kind.${k === "dir" || k === "other" ? "all" : k}`)],
+    ["files.cardWeight", entry ? `${formatBytes(entry.size)} · ${showDate(new Date(entry.mtime * 1000).toISOString().slice(0, 10), dateFormOf(getLocale()))}` : ""],
+    ["files.cardUses", usesEl ?? t("files.cardNotUsed")],
+    ...(form === "full" ? [["card.where", path] as [string, string]] : []),
+  ]));
+  // the history: the stamp, or what the graph knows of how it was made
+  const listingStamped = opts.listing ? filesStamped(opts.listing, path) : look.status === "stamped" || look.status === "reading";
+  if (form === "compact") {
+    if (look.status === "failed") {
+      card.appendChild(tabLead(t("card.unreadable"), "files-hint"));
+    } else if (listingStamped) {
+      if (stamp) card.appendChild(stampedBox(path, stamp));
+      else card.appendChild(tabLead(t("files.cardReading"), "files-hint"));
+    } else if (!isDocumentOrCopy(name)) {
+      const p = tabLead(t("files.cardUnstamped"), "files-lead");
+      const a = document.createElement("button");
+      a.type = "button";
+      a.className = "link";
+      a.dataset.action = "files-to-stamp";
+      a.textContent = t("files.cardToStamp");
+      a.onclick = () => { setFilesPref(win, "tab", "stamp"); renderStorage(); };
+      p.append(" ", a);
+      card.appendChild(p);
+    }
+  } else {
+    const hist: HTMLElement[] = [];
+    if (stamp) {
+      const seal = document.createElement("div");
+      seal.className = "res-seal";
+      seal.append(sealMini(stamp.self?.digest, () => showSeal(stamp, stampPathFor(path))), document.createTextNode(t("card.stamped")));
+      hist.push(seal, stampCard(stamp));
+      const f = stampActFacts(stamp, look.chain);
+      const missing = new Set((look.chain?.missing ?? []).map((m) => m.resource_id));
+      hist.push(cardKv([
+        ["card.tools", f.tools.join(", ")],
+        ["card.parameters", f.parameters.map(([a, b]) => `${a} = ${b}`).join(" · ")],
+        ["card.parents", f.inputs.length ? cardRefs(f.inputs.map((r) => ({ ...r, missing: missing.has(r.id) })), win) : null],
+      ]));
+    } else if (look.status === "reading") {
+      hist.push(tabLead(t("files.cardReading"), "files-hint"));
+    } else if (look.status === "failed") {
+      hist.push(tabLead(t("card.unreadable"), "files-hint"));
+    } else {
+      // not stamped: the graph may still say which act made it
+      const gg = g ?? (graphNode ? cardGraphOf(graphNode) : null);
+      const made = gg ? producerOf(gg.node.id, gg.edges, gg.nodeOf) : null;
+      hist.push(tabLead(look.status === "superseded" ? t("card.superseded") : t("files.cardUnstamped"), "files-lead"));
+      if (made && gg) hist.push(actKv(actFacts(made, gg.edges, gg.nodeOf), win));
+    }
+    card.appendChild(cardSection(t("card.history"), ...hist));
+  }
+  const gg = g ?? (graphNode ? cardGraphOf(graphNode) : null);
+  const made = !stamp && gg ? producerOf(gg.node.id, gg.edges, gg.nodeOf) : null;
+  card.appendChild(rightsBox(cardRights({ stamp, declared: made && gg ? actFacts(made, gg.edges, gg.nodeOf).declared : null, nodeId: graphNode })));
+  if (opts.actions === false) return card;
+  const acts = document.createElement("div");
+  acts.className = "stamp-report-ask file-card-acts";
+  const btn = (action: string, label: string, title: string, run: () => void): void => {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "ghost";
+    b.dataset.action = action;
+    b.textContent = label;
+    if (title) b.title = title;
+    b.onclick = run;
+    acts.appendChild(b);
+  };
+  if (form === "compact") btn("files-open-viewer", t("shelf.openInViewer"), t("files.cardViewerHint"), () => openFileInViewer(path, win));
+  else btn("shelf-show-on-disk", t("shelf.showOnDisk"), "", () => showOnDisk(path));
+  if (uses.length && form === "compact") btn("show-in-graph", t("storage.showInGraph"), "", () => revealFromTable(uses[0].id));
+  if (stamp && form === "full") btn("compose-from", t("compose.fromThis"), t("compose.fromThisHint"), () => { void composeFromStamped(path, stamp); });
+  if (!isDocumentOrCopy(name)) acts.appendChild(putOnShelfButton([path]));
+  if (TREE_EXT.test(name) || name === "tileset.json") acts.appendChild(openInSceneButton(path));
+  if (/\.(em\.json|emj|graphml)$/i.test(name)) {
     const o = document.createElement("button");
     o.className = "ghost";
     o.dataset.action = "open-doc-here";
-    o.textContent = t("storage.openDoc", { name: entry.name });
-    if (currentFilePath === entry.path) { o.textContent = t("storage.alreadyOpenNamed", { name: entry.name }); o.disabled = true; o.title = t("storage.alreadyOpen"); }
-    o.onclick = () => { void openFromStorage(entry.path); };
+    o.textContent = t("storage.openDoc", { name });
+    if (currentFilePath === path) { o.textContent = t("storage.alreadyOpenNamed", { name }); o.disabled = true; o.title = t("storage.alreadyOpen"); }
+    o.onclick = () => { void openFromStorage(path); };
     acts.appendChild(o);
   }
   card.appendChild(acts);
   // dev28 · «è un'altra copia di R» also outside a room (decision 14)
-  if (!entry.outside) storageCopyOffer(card, win, entry);
+  if (form === "compact" && entry && !entry.outside) storageCopyOffer(card, win, entry);
   return card;
+}
+
+/** The compact card of a file in the Info tab (the name it had in round 2). */
+function fileCardCompact(win: Win, entry: FsEntry, listing: FsListing): HTMLElement {
+  return resourceCard({ kind: "file", path: entry.path }, "compact", { win, entry, listing });
+}
+
+/** What the card of a Viewer is about: the file or the node it is pinned to,
+ *  else the node selected when it has a card (a resource, an act). */
+function viewerCardSubject(win: Win): CardSubject | null {
+  const d = winCurrent(win, "collection") as { kind?: string; ref?: string } | null;
+  if (d && typeof d === "object") {
+    if (d.kind === "card" && d.ref) return { kind: "node", id: d.ref };
+    if (d.kind === "file" && d.ref) return { kind: "file", path: d.ref };
+    return null;
+  }
+  if (!selectedId) return null;
+  const n = store?.node(selectedId);
+  return n && hasCard(n.node_type) ? { kind: "node", id: selectedId } : null;
+}
+
+/** The Viewer that shows a card asked from elsewhere: the one already showing
+ *  a card, else a free one, else a new one beside the asker. */
+function viewerForCard(from: Win): Win | null {
+  const vs = windowsOf().filter((w) => w.type === "viewer" && winAreas.has(w.id) && !viewerKept(w));
+  return vs.find((w) => (winCurrent(w, "collection") as { kind?: string } | null)?.kind === "card")
+    ?? docForRequests() ?? vs[0] ?? viewerBeside(from);
+}
+
+/** Show the card of a node in a Viewer (the click on a node of the Chain, an
+ *  input or output of an act). What the Chain shows is kept with it. */
+function showCardIn(win: Win | null, id: string): void {
+  const dtc = scenes.dtc;
+  const sn = dtc?.byId.get(id);
+  if (sn && dtc) cardSnaps.set(id, { node: sn.node, edges: dtc.edges.map((e) => e.edge), nodes: new Map(dtc.nodes.map((n) => [n.id, n.node])) });
+  const node = cardNodeOf(id);
+  if (!node || !hasCard(node.node_type)) return;
+  const w = win && win.type === "viewer" ? win : viewerForCard(win ?? activeWin());
+  if (!w) return;
+  setWinCurrent(w, "collection", { kind: "card", ref: id });
+  setWinCurrent(w, "item", null);
+  viewerCollections.delete(w.id);
+  setWinModeOf(w, "single");
+  renderViewer();
+  renderAreaHeaders();
+}
+
+/** The card under the Viewer's thing, or the whole Viewer for an act. Returns
+ *  true when the card took the whole space. */
+function paintViewerCard(win: Win, stage: HTMLElement, box: HTMLElement | undefined): boolean {
+  const root = stage.parentElement;
+  root?.classList.remove("vw-card-only");
+  if (!box) return false;
+  box.textContent = "";
+  const subject = viewerCardSubject(win);
+  box.hidden = !subject;
+  if (!subject) return false;
+  const card = resourceCard(subject, "full", { win });
+  const fold = document.createElement("button");
+  fold.type = "button";
+  fold.className = "res-card-fold";
+  fold.dataset.action = "card-fold";
+  const folded = winCurrent(win, "card.folded") === true && card.dataset.subject !== "act";
+  fold.textContent = folded ? "▸" : "▾";
+  fold.title = t(folded ? "card.unfold" : "card.fold");
+  fold.onclick = () => { setWinCurrent(win, "card.folded", folded ? null : true); renderViewer(); };
+  card.querySelector(".res-card-head")?.prepend(fold);
+  if (folded) card.classList.add("folded");
+  box.appendChild(card);
+  box.classList.toggle("folded", folded);
+  if (card.dataset.subject === "act") { root?.classList.add("vw-card-only"); return true; }
+  return false;
 }
 
 // T and N, as in Blender, when a File window is the one in front
@@ -38092,20 +38511,24 @@ function pinViewerCollection(win: Win, payload: StorageDragPayload): void {
  *  the service one, else one made beside the asker, as `requestDoc` does —
  *  pinned to the file, flat, with its georeference (`storage.ts withGeo`) */
 function openFileInViewer(path: string, from: Win): void {
-  let w = docForRequests();
-  if (!w) {
-    if (maximizedWin()) toggleMaximize(maximizedWin()!);
-    setActiveWin(from.id);
-    const made = splitWindow(from.id, "row", activeWorkspace(), 0.55, "b");
-    if (!made) return;
-    for (const k of Object.keys(made.state)) delete made.state[k];
-    setWinType(made, "viewer");
-    setWinCurrent(made, "viewer.role", "service");
-    w = made;
-    renderTiles();
-  }
+  // MICRO-ARCHIVIO-3 · the Viewer that shows a card is the one a file goes to
+  const w = viewerForCard(from);
+  if (!w) return;
   const name = paths.basename(path) || path;
   pinViewerCollection(w, { type: "file", path, name, ext: name.split(".").pop() ?? "" });
+}
+
+/** A Viewer made beside a window (the service one, as `requestDoc` makes it). */
+function viewerBeside(from: Win): Win | null {
+  if (maximizedWin()) toggleMaximize(maximizedWin()!);
+  setActiveWin(from.id);
+  const made = splitWindow(from.id, "row", activeWorkspace(), 0.55, "b");
+  if (!made) return null;
+  for (const k of Object.keys(made.state)) delete made.state[k];
+  setWinType(made, "viewer");
+  setWinCurrent(made, "viewer.role", "service");
+  renderTiles();
+  return made;
 }
 
 /** MICRO-CONTENTS-2 D19 · in the app's language, not the system's: «2,5 MB»
@@ -38393,6 +38816,11 @@ function viewerKeyOf(win: Win): { kind: "folder" | "file" | "node"; ref: string 
     const d = dropped as { kind?: string; ref?: string };
     if ((d.kind === "folder" || d.kind === "file") && d.ref) {
       return { kind: d.kind, ref: d.ref };
+    }
+    // MICRO-ARCHIVIO-3 · a card of the Chain: the file it stands for, else the node
+    if (d.kind === "card" && d.ref) {
+      const path = localPathOf(cardNodeOf(d.ref));
+      return path ? { kind: "file", ref: path } : { kind: "node", ref: d.ref };
     }
   }
   return selectedId ? { kind: "node", ref: selectedId } : null;
@@ -39428,7 +39856,7 @@ function renderViewer(): void {
 /** SURFACE-AUDIT · the same preview, into any three boxes — so a viewer window
  *  that is not the focused one is still showing its picture. */
 function renderViewerInto(win: Win, stage: HTMLElement, caption: HTMLElement,
-                          bar: HTMLElement): void {
+                          bar: HTMLElement, card?: HTMLElement): void {
   stage.textContent = "";
   caption.textContent = "";
   bar.classList.add("hidden");
@@ -39438,10 +39866,19 @@ function renderViewerInto(win: Win, stage: HTMLElement, caption: HTMLElement,
   const dropTs = droppedTilesets.get(viewerDropped.get(win.id) ?? "");
   if (dropTs) {
     bar.classList.remove("vw-bar");
+    if (card) { card.textContent = ""; card.hidden = true; }
+    stage.parentElement?.classList.remove("vw-card-only");
     renderViewerDropped(win, dropTs, stage);
     return;
   }
   if (viewerDroppedMounts.has(win.id)) closeViewerDropped(win.id);
+  // MICRO-ARCHIVIO-3 · «Viewer e scheda»: the thing above, its card below; an
+  // act has nothing to preview, and its card takes the whole space
+  if (paintViewerCard(win, stage, card)) {
+    disposeViewerScene(win.id);
+    bar.classList.remove("vw-bar");
+    return;
+  }
   // MICRO-VIEWER-UNICO · no collection dropped on it: the Viewer of ONE node
   const dropped = winCurrent(win, "collection");
   if (!dropped) {
@@ -39471,7 +39908,7 @@ function renderViewerInto(win: Win, stage: HTMLElement, caption: HTMLElement,
   }
 
   if (key.kind === "node") {
-    const node = store?.node(key.ref) ?? null;
+    const node = store?.node(key.ref) ?? cardNodeOf(key.ref);
     const label = String(node?.name || key.ref);
     const src = viewerSourceOf(node);
     if (!src) {
@@ -42699,6 +43136,31 @@ function wireGraphCanvas(canvas: HTMLCanvasElement, winId: string): void {
         `${endName(se.source)} → ${endName(se.target)}`;
       placeTooltip(e);
       tooltip.classList.remove("hidden");
+    } else if (hit && view === "dtc" && getSettings().interaction.dtcHoverCard && hasCard(hit.node.node_type)) {
+      // MICRO-ARCHIVIO-3 · behind a preference, off by default (E.D. wants to
+      // try it first): three lines — who, when, licence/embargo — where the
+      // hover said «‹name› [resource]»
+      const nodes = new Map(s.nodes.map((n) => [n.id, n.node]));
+      const edges = s.edges.map((x) => x.edge);
+      const nodeOf = (x: string): EmNode | undefined => nodes.get(x) ?? store?.node(x) ?? undefined;
+      const act = isActType(hit.node.node_type) ? hit.node : producerOf(hit.id, edges, nodeOf);
+      const rights = cardRights({ declared: act ? actFacts(act, edges, nodeOf).declared : null, nodeId: store?.node(hit.id) ? hit.id : null });
+      const lines = hoverLines(hit.node, edges, nodeOf, rights, {
+        who: (v) => t("card.hoverWho", { v }),
+        when: (v) => t("card.hoverWhen", { v }),
+        rights: (l, em) => `${l || t("card.none.licence")} · ${em ? t("card.until", { date: showDate(em.slice(0, 10), dateFormOf(getLocale())) }) : t("card.none.embargo")}`,
+        nobody: t("card.hoverNobody"),
+        undated: t("card.hoverUndated"),
+      }, (iso) => readableWhen(iso));
+      tooltip.textContent = "";
+      const b = document.createElement("b");
+      b.textContent = String(hit.node.name || hit.node.node_type);
+      const box = document.createElement("div");
+      box.className = "tt-card";
+      for (const line of lines) { const d = document.createElement("div"); d.textContent = line; box.appendChild(d); }
+      tooltip.append(b, box);
+      placeTooltip(e);
+      tooltip.classList.remove("hidden");
     } else if (hit) {
       // The node id only surfaces when the developer "show node ids" setting is
       // on — otherwise both the title fallback and the type line stay id-free.
@@ -42858,7 +43320,11 @@ function wireGraphCanvas(canvas: HTMLCanvasElement, winId: string): void {
       // opens its menu with the left click too: it was only on the right one
       const ghostL = !moved && dragNodeId ? missingParentAt(dragNodeId) : null;
       if (ghostL) { hideContextMenu(); showMissingParentMenu(e.clientX, e.clientY, ghostL); }
-      else if (!moved && dragNodeId) { select(dragNodeId); revealChainFile(dragNodeId); } // click (no drag) = select
+      else if (!moved && dragNodeId) {
+        select(dragNodeId); revealChainFile(dragNodeId); // click (no drag) = select
+        // MICRO-ARCHIVIO-3 · the click on a node of the Chain opens its card
+        if (view === "dtc") showCardIn(null, dragNodeId);
+      }
       else if (moved) {
         persistViewPositions();
         // the overrides were written during the drag; ONE rebuild settles the
