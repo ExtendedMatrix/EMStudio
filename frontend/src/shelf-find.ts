@@ -15,6 +15,7 @@
  * a tileset (a `.3tz`, a `tileset.json`).
  */
 
+import { dirname, toPosix } from "./paths";
 import { resourceTypeOfLocator } from "./rules";
 
 /** what the Shelf knows of one entry, gathered by the caller */
@@ -91,9 +92,7 @@ export function whereOf(locator: string): ShelfWhere {
 export function folderOf(locator: string): string {
   const m = /^([a-z][a-z0-9+.-]*):\/\/([^/?#]+)/i.exec(locator);
   if (m) return m[1].toLowerCase() === "s3" ? `s3://${m[2]}` : m[2];
-  const posix = locator.replace(/\\/g, "/").replace(/\/+$/, "");
-  const at = posix.lastIndexOf("/");
-  return at > 0 ? posix.slice(0, at) : at === 0 ? "/" : "";
+  return /[\\/]/.test(locator) ? dirname(toPosix(locator)) : "";
 }
 
 /** lower case, accents gone: «Città» is found by «citta» */
