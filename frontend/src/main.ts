@@ -413,6 +413,7 @@ import {
   setValidated,
   t,
 } from "./i18n";
+import { tn } from "./i18n";
 import type { Locale } from "./i18n";
 import type {
   ExtractResult,
@@ -589,6 +590,7 @@ import {
 import type { CentralMode, EmDocument, EmEdge, EmNode, LayoutRect, ViewKind } from "./types";
 import {
   BridgeDownError,
+  FsListError,
   FileRefusedError,
   collectionFromFile,
   collectionFromFolder,
@@ -5207,11 +5209,13 @@ function updateInfo(): void {
   // bar says how many of the count they are, so 90 / 166 here and 66 / 142 in
   // s3Dgraphy's convert_graphml_to_emjson read as the same file
   const dates = store.epochDateCounts();
+  // MICRO-CONTENTS-3 G9 · the line in the reader's language, with its plurals
+  // (it was English with an Italian aside: «30 nodes, … (di cui 12 nodi …)»)
   info.textContent =
-    `${title} — ${liveNodeCount} nodes, ${liveEdgeCount} edges` +
-    (lanes ? `, ${lanes} epochs` : "") +
+    `${title} — ${tn("info.nodes", liveNodeCount)}, ${tn("info.edges", liveEdgeCount)}` +
+    (lanes ? `, ${tn("info.epochs", lanes)}` : "") +
     (dates.nodes ? ` ${t("info.epochDates", { n: dates.nodes, e: dates.edges })}` : "") +
-    (buried > 0 ? ` (+${buried} deleted)` : "");
+    (buried > 0 ? ` ${tn("info.buried", buried)}` : "");
   info.dataset.epochDates = dates.nodes ? `${dates.nodes}/${dates.edges}` : "";
   renderNameStrip();
 }
@@ -7259,7 +7263,7 @@ function loadDocument(
       completedAtOpen.push(t("emtree.noteGeo"));
     }
   }
-  if (placeholdersRemoved) completedAtOpen.push(t("emtree.notePlaceholders", { n: String(placeholdersRemoved) }));
+  if (placeholdersRemoved) completedAtOpen.push(tn("emtree.notePlaceholders", placeholdersRemoved));
   // MICRO-CONTENTS-1 B6 · a graph of a FILE that EMStudio completed while
   // opening it is not «modified»: nobody did anything. The completion is said
   // on its row («completato all'apertura», what in the tooltip), the next Save
@@ -7307,7 +7311,7 @@ function loadDocument(
       // measured on GT16, Temple came up «modified» by 306 sizes nobody touched
       if (r && !r.wasDirty && fileId && !fromRoom && emtree.get(slot.id)) {
         loaded.dirty = false;
-        slot.openNotes = [...(slot.openNotes ?? []), t("emtree.noteSizes", { n: String(r.changed) })];
+        slot.openNotes = [...(slot.openNotes ?? []), tn("emtree.noteSizes", r.changed)];
         refreshEMTree();
         updateToolbar();
       }
@@ -7382,7 +7386,7 @@ function confirmLeaveSidecar(action: string): Promise<boolean> {
       if (proceed) {
         if (save) {
           sync.sendRequestSave();
-          toast("Asked the host (EMtools) to save its em.json");
+          toast(t("tst.askedHostSave"));
         }
         leaveHostDocuments(); // → Standalone; the new document replaces the view
       }
@@ -7634,8 +7638,14 @@ function markFileSaved(file: OpenFile, doc: ReturnType<typeof buildContainer>): 
   }
 }
 
+/** The active graph's file as Save would write it, WITHOUT settling a version:
+ *  MICRO-CONTENTS-3 A9 · reading the document is not saving it. The probes read
+ *  it after every gesture through `docJson`, and the bar's «Progetto v21» rose to
+ *  v24 by navigating (a phase added and undone, a mode changed) — the version
+ *  rises when a file is written, pinned, or receives other graphs. */
 function projectDocumentText(): string {
-  return JSON.stringify(projectContainer(), null, 1);
+  const file = emtree.activeFile();
+  return JSON.stringify(fileContainer(file ?? null, { bump: false }), null, 1);
 }
 
 /** The download name for a file in the browser: its own when it looks like one. */
@@ -10340,7 +10350,7 @@ function nextEpochName(): string {
 
 function addEpochEmMode(index = 0, start?: number, end?: number, name?: string): void {
   if (!store) {
-    toast("Open a document first");
+    toast(t("toast.openADocument"));
     return;
   }
   const node = store.addEpochAt(index, name ?? nextEpochName(), start, end);
@@ -12447,7 +12457,7 @@ function openAddMenu(
   } = {},
 ): void {
   if (!store) {
-    toast("Open a document first");
+    toast(t("toast.openADocument"));
     return;
   }
   if (win.type !== "graph") return;
@@ -13940,7 +13950,7 @@ function downloadBlob(blob: Blob, filename: string, _mime: string): void {
 // rdf_exporter — invariant 2: produced in Python, never reimplemented in TS).
 document.getElementById("btn-ttl")!.addEventListener("click", async () => {
   if (!store) {
-    toast("Open a document first");
+    toast(t("toast.openADocument"));
     return;
   }
   const g = store.doc.graph;
@@ -16401,8 +16411,8 @@ function openResources(): void {
     if (line) paintGraphLine(line);
   }
   resStatus.textContent = resFolderInp.value.trim()
-    ? "Press Scan to refresh the Shelf."
-    : "Set a library / DosCo folder, then Scan.";
+    ? t("res.statusRescan")
+    : t("res.statusNeedFolder");
   resourcesModal.classList.remove("hidden");
 }
 function closeResources(): void {
@@ -16452,7 +16462,7 @@ function renderResDocuments(): void {
   resDocs.innerHTML = "";
   resDocsCount.textContent = docs.length ? `(${docs.length})` : "";
   if (!docs.length) {
-    resDocs.innerHTML = `<div class="res-empty">— no documents yet</div>`;
+    resDocs.innerHTML = `<div class="res-empty">${escapeHtml(t("res.noDocs"))}</div>`;
     return;
   }
   const docJson = JSON.parse(store.toJSON());
@@ -16502,7 +16512,7 @@ function renderResShelf(): void {
       const d = document.createElement("div");
       d.className = "res-note";
       d.dataset.noId = String(resLastNotes.noId.length);
-      d.textContent = t("res.noId", { n: String(resLastNotes.noId.length), files: resLastNotes.noId.join(" · ") });
+      d.textContent = tn("res.noIdN", resLastNotes.noId.length, { files: resLastNotes.noId.join(" · ") });
       notes.appendChild(d);
     }
     resShelf.appendChild(notes);
@@ -16547,7 +16557,7 @@ async function scanResources(): Promise<void> {
       body: JSON.stringify({ folder, doc: JSON.parse(store.toJSON()) }),
     });
     if (!res.ok) {
-      let msg = `bridge error ${res.status}`;
+      let msg = t("res.bridgeError", { status: String(res.status) });
       try {
         const j = await res.json();
         if (j?.error) msg = j.error;
@@ -16559,9 +16569,14 @@ async function scanResources(): Promise<void> {
     }
     const j = await res.json();
     resLastShelf = (j.shelf ?? []) as OrphanEntry[];
-    resLastNotes = { noId: (j.no_id ?? []) as string[], dup: (j.duplicate_ids ?? {}) as Record<string, string[]> };
+    // MICRO-CONTENTS-3 D39 · a stamp's file (`x.stamp.json`) is the stamp of the
+    // file beside it, not a file without an EM id: GT16's DosCo counted «50 file
+    // senza id EM», 25 of them the sidecars of the 25 stamped tables
+    const noId = ((j.no_id ?? []) as string[]).filter((f) => !/\.stamp\.json$/i.test(f));
+    resLastNotes = { noId, dup: (j.duplicate_ids ?? {}) as Record<string, string[]> };
     renderResShelf();
-    resStatus.textContent = t("res.indexed", { n: String(resLastShelf.length) });
+    // G7 · «not yet a document», not «orphan»
+    resStatus.textContent = tn("res.indexedN", resLastShelf.length);
   } catch {
     resStatus.textContent = BRIDGE_UNREACHABLE;
   }
@@ -16598,7 +16613,7 @@ function hatShelfEntry(entry: OrphanEntry): void {
 // returned s3:// URI. The stable ID and every graph reference are unchanged.
 async function renderResLinks(): Promise<void> {
   if (!store) return;
-  resLinks.innerHTML = `<div class="res-empty">loading…</div>`;
+  resLinks.innerHTML = `<div class="res-empty">${escapeHtml(t("res.loading"))}</div>`;
   let rows: ResourceRow[] = [];
   try {
     const res = await fetch(`${await bridgeUrl()}/list-resources`, {
@@ -16614,7 +16629,7 @@ async function renderResLinks(): Promise<void> {
   resLinks.innerHTML = "";
   resLinksCount.textContent = rows.length ? `(${rows.length})` : "";
   if (!rows.length) {
-    resLinks.innerHTML = `<div class="res-empty">— no resources yet</div>`;
+    resLinks.innerHTML = `<div class="res-empty">${escapeHtml(t("res.noLinks"))}</div>`;
     return;
   }
   const docJson = JSON.parse(store.toJSON());
@@ -16633,7 +16648,7 @@ async function renderResLinks(): Promise<void> {
       locator: r.locator,
       label,
     });
-    const { row } = resRow(thumb, label, r.kind);
+    const { row } = resRow(thumb, label, t(`res.kind.${r.kind}`, undefined, r.kind));
     // Promote is offered only for LOCAL resources (a path we can upload);
     // already-remote (s3/http) resources have nothing to push.
     if (r.kind === "local_path" || r.kind === "file_uri") {
@@ -16683,7 +16698,7 @@ async function promoteToS3(r: ResourceRow, btn: HTMLButtonElement): Promise<void
       body: JSON.stringify({ path: r.locator, resource_id: r.id }),
     });
     if (!res.ok) {
-      let msg = `bridge error ${res.status}`;
+      let msg = t("res.bridgeError", { status: String(res.status) });
       try {
         const j = await res.json();
         if (j?.error) msg = j.error;
@@ -29253,7 +29268,7 @@ function shelfHead(): HTMLElement {
   const count = document.createElement("span");
   count.className = "emdata-count shelf-head-count";
   const n = shelfEntries().length;
-  count.textContent = t(n === 1 ? "shelf.count1" : "shelf.count", { n: String(n) });
+  count.textContent = tn("shelf.count", n);
   head.append(name, count);
   return head;
 }
@@ -29261,7 +29276,7 @@ function shelfHead(): HTMLElement {
 function renderShelfInto(win: Win, body: HTMLElement,
                          count: HTMLElement | null): void {
   const entries = shelfEntries();
-  if (count) count.textContent = t(entries.length === 1 ? "shelf.count1" : "shelf.count", { n: String(entries.length) });
+  if (count) count.textContent = tn("shelf.count", entries.length);
   // SHELF-B · the same shelf, two ways of looking (`SHELF_MODES`). The TABLE is
   // the library's answer about these entries; the LIST is what you drag into and
   // it keeps working with no bridge. Neither is a second shelf: both read the
@@ -30345,7 +30360,7 @@ function openShelfFile(): void {
       return;
     }
     renderShelf();
-    toast(t("shelf.opened", { n: String(res.count) }));
+    toast(tn("shelf.opened", res.count));
   });
   input.click();
 }
@@ -31046,7 +31061,7 @@ async function findMoved(): Promise<void> {
   try {
     const found = await findMovedFiles(await bridgeUrl(), store.doc, folders, fileProjectRoot(), oneDriveRoot());
     // MICRO-CONTENTS-2 D13 · the outcome STAYS written in the box (a toast went)
-    movedOutcome = found.length ? t("fs.movedFound", { n: String(found.length) }) : t("fs.noneMoved");
+    movedOutcome = found.length ? tn("fs.movedFound", found.length) : t("fs.noneMoved");
     toast(movedOutcome);
   } catch (e) {
     toast(String((e as Error)?.message ?? e));
@@ -31702,12 +31717,12 @@ async function keepFiles(fs: FileState[]): Promise<void> {
 async function clearShelfAsking(): Promise<void> {
   const n = shelfEntries().length;
   if (!n) return;
-  if (!(await askConfirm(t(n === 1 ? "shelf.clearAsk1" : "shelf.clearAsk", { n: String(n) }),
+  if (!(await askConfirm(tn("shelf.clearAsk", n),
     { kind: "shelf-clear", ok: t("shelf.clearOk"), danger: true }))) return;
   const back = clearShelfUndoable();
   renderShelf();
-  logInfo(t("shelf.cleared", { n: String(n) }));
-  if (back) toastUndoWith(t("shelf.cleared", { n: String(n) }), () => { back(); renderShelf(); logInfo(t("shelf.clearUndone", { n: String(n) })); });
+  logInfo(tn("shelf.cleared", n));
+  if (back) toastUndoWith(tn("shelf.cleared", n), () => { back(); renderShelf(); logInfo(tn("shelf.clearUndone", n)); });
 }
 
 /** C1 · «New EM project…» and «Reorder by the EM standard…» (through the bridge) */
@@ -31788,7 +31803,7 @@ async function reorderGesture(): Promise<void> {
       const back = moved.map((p) => ({ action: "move", from: p.to, to: p.from! }));
       void reorderApply(bridge, root, back).then((r) => {
         logInfo((r.done as string[]).join("; "));
-        toast(t("fs.reorderUndone", { n: String(back.length) }));
+        toast(tn("fs.reorderUndone", back.length));
         void checkFiles();
         renderStorage();
       }).catch((e) => toast((e as Error).message));
@@ -32057,13 +32072,21 @@ function renderStorageInto(host: StorageHost): void {
       if (!body.isConnected) return;
       body.textContent = "";
       const down = err instanceof BridgeDownError;
+      // MICRO-CONTENTS-3 G3 · the refusal in the reader's words, by its status
+      // («Il bridge ha rifiutato quel percorso. — not a directory»): the path
+      // under it, the service's own sentence in its tooltip
+      const status = err instanceof FsListError ? err.status : 0;
       const box = storageEmpty(
-        down ? t("storage.bridgeDown") : t("storage.refused"),
+        down ? t("storage.bridgeDown")
+          : status === 404 || status === 400 ? t("storage.refusedMissing")
+          : status === 403 ? t("storage.refusedOutside")
+          : t("storage.refused"),
       );
       if (!down) {
         const why = document.createElement("code");
         why.className = "viewer-path";
-        why.textContent = String((err as Error).message);
+        why.textContent = path ?? "";
+        why.title = String((err as Error).message);
         box.appendChild(why);
       }
       body.appendChild(box);
@@ -32188,7 +32211,7 @@ function renderStorageInto(host: StorageHost): void {
       tog.type = "button";
       tog.className = "ghost storage-sidecars";
       tog.dataset.action = "toggle-stamp-files";
-      tog.textContent = t(showStamps ? "storage.stampsShown" : "storage.stampsHidden", { n: String(sidecars.length) });
+      tog.textContent = tn(showStamps ? "storage.stampsShown" : "storage.stampsHidden", sidecars.length);
       tog.onclick = () => { setWinCurrent(win, "storage.showStamps", showStamps ? null : "1"); renderStorage(); };
       list.appendChild(tog);
     }
@@ -32328,8 +32351,8 @@ function stampComposeBox(win: Win, listing: FsListing): HTMLElement {
   head.className = "stamp-compose-head";
   const made = draft.outputs.length;
   head.textContent = draft.madeFrom !== undefined
-    ? t(made === 1 ? "compose.headFrom1" : "compose.headFrom", { name: draft.madeFrom, n: String(made) })
-    : t(made === 1 ? "compose.head1" : "compose.head", { n: String(made) });
+    ? tn("compose.headFrom", made, { name: draft.madeFrom })
+    : tn("compose.head", made);
   box.appendChild(head);
   // MICRO-CONTENTS-2 D31 · a step from a stamped file: what it made is asked,
   // never proposed — the unstamped files of the folder, none chosen
@@ -32789,7 +32812,7 @@ async function doStamp(win: Win): Promise<void> {
     if (out.error) {
       toast(out.error);
     } else if (out.written.length) {
-      toast(t("compose.done", { n: String(out.written.length), s: seconds }));
+      toast(tn("compose.done", out.written.length, { s: seconds }));
       // CATENA · every written stamp files its RECEIPT on the shelf (a copy;
       // the sidecar stays the truth)
       landEmission(draft, out);
@@ -37726,7 +37749,7 @@ function buildAreaHeader(win: Win): DocumentFragment {
     const meta = WINDOW_TYPE_META[tt];
     const b = document.createElement("button");
     b.dataset.wt = tt;
-    b.classList.toggle("active", tt === type);
+    b.classList.toggle("active", tt === type && !chain);
     b.innerHTML = `<span class="wt-ic">${meta.icon}</span> ${escapeHtml(t(meta.labelKey))}`;
     b.addEventListener("click", () => transformWindowOf(win, tt));
     typeMenu.appendChild(b);
@@ -39461,10 +39484,10 @@ async function layoutAll(fresh: boolean): Promise<void> {
       // Matrix filtered beyond its default → recompute the VIEW layout on the
       // visible subgraph (recompact), leaving the archival layout untouched.
       await refreshMatrixViewLayout();
-      toast("Layout (filtered subgraph)");
+      toast(t("tst.layoutFiltered"));
     } else {
       await runLayout(fresh, store, true); // store.setLayout → onChange → buildScenes + draw
-      toast(fresh ? "Fresh layout (em-core)" : "Layout from sketch (em-core)");
+      toast(fresh ? t("tst.layoutFresh") : t("tst.layoutSketch"));
     }
   } catch (e) {
     toast(t("l.layoutFailed", { why: String(e instanceof Error ? e.message : e) }));

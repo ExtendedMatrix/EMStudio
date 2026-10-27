@@ -104,9 +104,18 @@ export async function fsList(path?: string): Promise<FsListing> {
     } catch {
       /* not JSON — the status is all we have */
     }
-    throw new Error(message);
+    throw new FsListError(message, res.status);
   }
   return (await res.json()) as FsListing;
+}
+
+/** MICRO-CONTENTS-3 G3 · a refusal carries its status, so the page can say it
+ *  in the reader's words (404: the folder is not there, 403: not allowed) and
+ *  keep the bridge's own English sentence for the tooltip. */
+export class FsListError extends Error {
+  constructor(message: string, readonly status: number) {
+    super(message);
+  }
 }
 
 // ── the collection ──────────────────────────────────────────────────────────

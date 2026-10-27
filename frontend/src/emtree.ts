@@ -27,6 +27,8 @@
  */
 
 import { shownCode } from "./hdto";
+// MICRO-CONTENTS-3 G8 · counts with their plural (i18n is a leaf module)
+import { tn } from "./i18n";
 import type { DocumentStore } from "./model";
 import type { ViewKind } from "./types";
 
@@ -926,7 +928,7 @@ export function renderEMTree(host: HTMLElement, tree: EMTree,
     const members = tree.slotsOf(file.id);
     // MICRO-CONTENTS-1 B14 · the graphs closed here are a LIST, each with «Riapri»
     const closed = handlers.closedOf?.(file.id) ?? [];
-    const closedSay = labels(closed.length === 1 ? "emtree.closedHead1" : "emtree.closedHead", { n: String(closed.length) });
+    const closedSay = tn("emtree.closedHead", closed.length);
     const kept = closed.length || (handlers.keptGraphsOf ? handlers.keptGraphsOf(file.id) : Object.keys(file.retained).length);
     // E5 · the file's DTC corpus, under its file: shown, or kept with a way to show it
     const corpus = handlers.corpusOf?.(file.id) ?? null;
@@ -975,7 +977,7 @@ export function renderEMTree(host: HTMLElement, tree: EMTree,
               <button type="button" class="et-reopen" data-reopen="${esc(c.gid)}" data-reopen-file="${esc(file.id)}"
                       title="${esc(labels("emtree.reopenTitle"))}">${esc(labels("emtree.reopen"))}</button>
             </li>`).join("")}</ul>
-        </div>` : kept ? `<p class="et-retained">${esc(labels("emtree.retained").replace("{n}", String(kept)))}</p>` : ""}
+        </div>` : kept ? `<p class="et-retained">${esc(tn("emtree.retained", kept))}</p>` : ""}
       </li>`;
   });
   const loose = tree.slots.filter((s) => !s.fileId || !known.has(s.fileId));

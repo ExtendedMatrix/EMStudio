@@ -151,6 +151,22 @@ const dicts = (() => {
   eq(itGaps, [], "keys · Italian, the other validated locale, is complete too");
 }
 
+// ── 2b · MICRO-CONTENTS-3 G8 · a plural family is whole ────────────────────
+// `tn(key, n)` reads `key.one` / `key.other` (…`.few`, `.many`) by the language's
+// plural rules, `key.other` its fallback: every family a `tn("…")` names has its
+// «other» in English and in Italian — without it the key itself would be said.
+{
+  const families = new Set();
+  for (const name of readdirSync(SRC, { recursive: true }).filter((f) => String(f).endsWith(".ts"))) {
+    for (const m of read(String(name)).matchAll(/\btn\(\s*"([\w.]+)"/g)) families.add(m[1]);
+  }
+  ok(families.size >= 10, `plurals · the families said with \`tn\` are found (${families.size})`);
+  const gaps = [...families].filter((k) => !dicts.EN.has(`${k}.other`) || !dicts.IT.has(`${k}.other`));
+  eq(gaps, [], "plurals · every family named by `tn` has its «other» in EN and IT");
+  ok(/export function tn\(/.test(i18n) && /Intl\.PluralRules/.test(i18n),
+     "plurals · `tn` chooses the member by the language's plural rules");
+}
+
 // ── 3 · no Italian written by hand in the code ─────────────────────────────
 //
 // Words that do not occur in English prose. Kept short on purpose: a sweep that

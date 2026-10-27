@@ -94,7 +94,7 @@
           <!-- MICRO-PULIZIA p.4 · from the graph window's «⋯»: a fix-up of the document -->
           <button id="btn-tool-uniform" data-i18n="menu.uniformSpellings" data-i18n-title="menu.uniformSpellingsTitle" title="Bring the edges to the canonical spelling (one undo step)">Uniform spellings…</button>
           <button id="btn-tool-chronology" data-i18n="chr.checkEllipsis" data-i18n-title="chr.checkTitle" title="Check the chronology: the epochs on a time axis, the overlaps with their delta and their remedies">Check the chronology…</button>
-          <button id="btn-resources" data-i18n-title="menu.resourcesTitle" title="Resources: the shared Resource layer (Documents · RM · DTC · Shelf) via the bridge" data-i18n="toolbar.resources">Resources</button>
+          <button id="btn-resources" data-i18n-title="menu.resourcesTitle" title="Read a DosCo folder against the active graph's documents" data-i18n="toolbar.resources">Resources</button>
         </div>
       </div>
       <div class="dropdown" id="dd-help">
@@ -228,7 +228,9 @@
         <button
           id="btn-view-props"
           title="Filters — visible nodes/edges & display"
+          data-i18n-title="toolbar.filters"
           aria-label="View filters"
+          data-i18n-aria-label="toolbar.filtersAria"
         >
           <svg
             width="15"
@@ -323,7 +325,7 @@
           </g>
         </svg>
         <b>Extended Matrix</b>
-        <button id="em-version" title="Version breakdown (config files + CIDOC-CRM)"></button>
+        <button id="em-version" title="Version breakdown (config files + CIDOC-CRM)" data-i18n-title="status.emVersionTitle"></button>
         <span id="footer-app-version" class="footer-app-ver"></span>
       </span>
       <!-- MICRO-LA-BARRA · FOUR ZONES, one thing each, one click → one panel.
@@ -846,63 +848,49 @@
     <div id="resources-modal" class="modal hidden">
       <div class="modal-card">
         <div class="modal-head">
-          <span>Resources</span>
-          <button id="resources-close" class="modal-x" title="Close">✕</button>
+          <span data-i18n="res.modalTitle">Read as DosCo</span>
+          <button id="resources-close" class="modal-x" title="Close" data-i18n-title="res.modalClose">✕</button>
         </div>
         <div class="modal-body">
-          <p class="settings-hint">
-            The shared Resource layer for this graph, over the em-bridge (a
-            single connector). Scan a library / DosCo folder: un-hatted files
-            appear in the <b>Shelf</b> with stable IDs; hatting one creates a
-            Document that <b>adopts that stable ID</b> as its node id.
+          <!-- MICRO-CONTENTS-3 D39 · in the reader's language, without the two
+               placeholder sections (Representation Models, DTC: «follow-up») -->
+          <p class="settings-hint" data-i18n="res.modalIntro">
+            Read a DosCo folder against the documents of the graph named above.
           </p>
           <section class="settings-sect">
             <label
-              >Library / DosCo folder
+              ><span data-i18n="res.folderLabel">DosCo folder</span>
               <input
                 id="res-folder"
                 type="text"
                 placeholder="/absolute/path/to/folder"
+                data-i18n-placeholder="res.folderPh"
               />
             </label>
             <div class="res-scan-row">
-              <button id="res-scan" class="primary">Scan</button>
+              <button id="res-scan" class="primary" data-i18n="res.scanBtn">Read the folder</button>
               <span id="res-status" class="settings-hint"></span>
             </div>
           </section>
           <section class="settings-sect">
-            <h4><span data-i18n="res.orphans">Orphan files</span> <span class="res-count" id="res-shelf-count"></span></h4>
-            <p class="settings-hint" data-i18n="res.orphansHint">Files of the scanned folder that are not a Document yet. (The Shelf is its own window.)</p>
+            <h4><span data-i18n="res.orphans">Files not yet a document</span> <span class="res-count" id="res-shelf-count"></span></h4>
+            <p class="settings-hint" data-i18n="res.orphansHint">Files of the folder that are not a document of the graph yet.</p>
             <div id="res-shelf" class="res-list"></div>
           </section>
           <section class="settings-sect">
-            <h4>Documents <span class="res-count" id="res-docs-count"></span></h4>
+            <h4><span data-i18n="res.docsTitle">Documents of the graph</span> <span class="res-count" id="res-docs-count"></span></h4>
             <div id="res-docs" class="res-list"></div>
           </section>
           <section class="settings-sect">
-            <h4>Resources <span class="res-count" id="res-links-count"></span></h4>
-            <p class="settings-hint">
-              The graph's resources (link nodes). <b>Upload to the object store</b> uploads
-              a local resource into the shared object store, keeping its stable
-              ID, and repoints its locator at the <code>s3://…</code> URI.
+            <h4><span data-i18n="res.linksTitle">Resources of the graph</span> <span class="res-count" id="res-links-count"></span></h4>
+            <p class="settings-hint" data-i18n="res.linksHint">
+              The graph's resources (its link nodes).
             </p>
             <div id="res-links" class="res-list"></div>
           </section>
-          <section class="settings-sect">
-            <h4>Representation Models</h4>
-            <p class="settings-hint">
-              Hatting a resource → RM: follow-up (R2/R5+).
-            </p>
-          </section>
-          <section class="settings-sect">
-            <h4>DTC</h4>
-            <p class="settings-hint">
-              Digital Twin Chain provenance: follow-up (DTC-residency UI).
-            </p>
-          </section>
         </div>
         <div class="modal-foot">
-          <button id="resources-done" class="primary">Done</button>
+          <button id="resources-done" class="primary" data-i18n="res.modalDone">Done</button>
         </div>
       </div>
     </div>

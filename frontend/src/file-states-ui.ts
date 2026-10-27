@@ -4,7 +4,7 @@
 // Contents (Storage), the card of a document, the Inspector of a resource.
 // The gestures on one file and on the group: «Find here…» (relink a missing
 // one), «Upload to the room», «Keep on the disk too», «Open where it is».
-import { t } from "./i18n";
+import { t, tn } from "./i18n";
 import { stateBadge, stateSign } from "./state-symbols";
 import { bucketOf, bucketRows, fileFilter, fileRows, fileStateOf, freeUi, fileStates, fileSummary, filterRows, listFilter,
          movedFiles, setFileFilter, type BucketRow, type FileState, type MovedFile, type StorageRow } from "./file-states";
@@ -45,9 +45,12 @@ export interface FileHooks {
   hasBucket?: boolean;
 }
 
-/** MICRO-CONTENTS-2 D12 · «44 mancanti», «1 mancante»: the count and its word */
+/** MICRO-CONTENTS-2 D12 · «44 mancanti», «1 mancante»: the count and its word —
+ *  MICRO-CONTENTS-3 G8: a plural family (`tn`); a state the resolver names
+ *  tomorrow, with no family here, is said with its sign's label */
 function countLabel(state: string, n: number): string {
-  return t(n === 1 ? `fs.n1.${state}` : `fs.n.${state}`, { n: String(n) }, `${n} ${stateSign(`file.${state}`).label}`);
+  const key = `fs.count.${state}`;
+  return t(`${key}.other`, undefined, "") ? tn(key, n) : `${n} ${stateSign(`file.${state}`).label}`;
 }
 
 /** MICRO-CONTENTS-2 D17 · the notes of s3Dgraphy's resolver (`locate.py`), in
