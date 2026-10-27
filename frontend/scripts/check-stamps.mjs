@@ -497,6 +497,22 @@ prova("un processo senza ingresso non timbra, e dice quale campo manca per primo
   assert.equal(C.readyToStamp(o), "operator", "…né senza operatore");
 });
 
+// MICRO-CONTENTS-4 E7 · la data in una forma fissa, non quella del browser;
+// quello che si tiene è ISO
+prova("la data si scrive gg/mm/aaaa in italiano, aaaa-mm-gg altrove, e si tiene ISO", () => {
+  assert.equal(C.dateFormOf("it"), "dmy");
+  assert.equal(C.dateFormOf("en"), "iso");
+  assert.equal(C.showDate("2026-10-27", "dmy"), "27/10/2026");
+  assert.equal(C.showDate("2026-10-27T09:00:00Z", "iso"), "2026-10-27");
+  assert.equal(C.readDate("27/10/2026", "dmy"), "2026-10-27");
+  assert.equal(C.readDate("7.3.2026", "dmy"), "2026-03-07", "un giorno e un mese di una cifra, col punto");
+  assert.equal(C.readDate("2026-10-27", "dmy"), "2026-10-27", "una data ISO incollata nel campo italiano è una data");
+  assert.equal(C.readDate("27/10/2026", "iso"), null, "in inglese il giorno davanti non si indovina");
+  assert.equal(C.readDate("31/02/2026", "dmy"), null, "il 31 febbraio non c'è");
+  assert.equal(C.readDate("10/27/2026", "dmy"), null, "…né il mese 27 (la forma americana non passa per buona)");
+  assert.equal(C.readDate("  ", "dmy"), "", "vuoto è vuoto, non un errore");
+});
+
 prova("il modulo puro nasce «viene da»: la strada la sceglie chi lo apre, dai dati", () => {
   assert.equal(C.newDraft([]).origin, false);
   assert.ok(codice("main.ts").includes("stampDraft.origin = roadFor(stamped)"),

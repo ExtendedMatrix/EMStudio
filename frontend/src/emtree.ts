@@ -679,6 +679,7 @@ function auxSection(tree: EMTree, labels: (key: string, vars?: Record<string, st
               aria-label="${esc(labels("emtree.auxNote"))}">?</span>
         <button data-et="aux-add" title="${esc(labels("emtree.auxAddTitle"))}">${esc(labels("emtree.auxAdd"))}</button>
       </div>
+      <p class="aux-sect-line">${esc(labels("emtree.auxLine"))}</p>
       ${slot.auxiliaryFiles.length
         ? `<ul class="aux-list">${rows}</ul>`
         : `<p class="aux-empty">${esc(labels("emtree.noAux"))}</p>`}

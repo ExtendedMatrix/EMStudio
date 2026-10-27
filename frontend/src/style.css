@@ -2830,6 +2830,14 @@ body.sync-active #footer-brand #em-version {
   color: var(--brand-ink);
 }
 
+/* MICRO-CONTENTS-4 B17 · what the «?» says, said under the title */
+.aux-sect-line {
+  margin: -2px 0 6px;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--text-muted);
+}
+
 .aux-empty {
   margin: 0;
   font-size: 10.5px;
@@ -8962,6 +8970,18 @@ button.shelf-badge { cursor: pointer; font: inherit; font-size: 10.5px; }
   /* …and what still does not fit goes to a second row, never out of sight */
   .tile-area > .tile-bar { flex-wrap: wrap; height: auto; row-gap: 4px; overflow-x: hidden; }
   .win-strip { flex-shrink: 0; overflow: visible; }
+}
+/* MICRO-CONTENTS-4 F6 · the Chain's header wraps at any width (one row while it
+ * fits), and keeps its name whole even when the window is narrow: the rest of
+ * the headers stay on one line, scrolled sideways (`.one-line`, MICRO-PROVA-
+ * DEV47 p.6), which is why this one says `!important` too */
+.tile-area > .tile-bar.one-line.win-chain-bar {
+  flex-wrap: wrap !important; height: auto; min-height: calc(var(--winbar-row) + 10px);
+  row-gap: 4px; overflow-x: hidden;
+}
+.tile-bar.one-line.win-chain-bar::before, .tile-bar.one-line.win-chain-bar::after { display: none; }
+@container (max-width: 380px) {
+  .win-header.win-chain-bar .win-type-label, .win-header.win-chain-bar .win-type-caret { display: inline; }
 }
 
 /* ── SPAZIO · la Scena 3D (scrivania v11b) ───────────────────────────────── */

@@ -671,7 +671,7 @@ import { hintsPathFor, readHints, recordFound, setHintsBridgeResolver } from "./
 import {
   applyHandle, chainsFor, emitDraft, fetchSets, hasFileSets, missingFields, newDraft, outputFrom, suggestedKind,
   DOOR_EXT, requiredFields, retitleStamp, roadFor, setComposeBridgeResolver,
-  doiFromName, normalizeSource, proposeActName,
+  doiFromName, normalizeSource, proposeActName, dateFormOf, readDate, showDate,
   type Draft, type DraftInput,
 } from "./stamp-compose";
 import { setTreeBridgeResolver, TREE_EXT, treeOf, verifyStamp, type TreeInfo } from "./stamp-tree";
@@ -23062,6 +23062,21 @@ function createArea(winId: string, parent: HTMLElement = tileRoot): HTMLElement 
     magnifyWindow(winId);
   });
   area.appendChild(bar);
+  // MICRO-CONTENTS-4 F6 · a header that wraps (the Chain's) changes height when
+  // its window is resized, not only when it is rebuilt: what sits under it
+  // (`--winbar-h`: the resources panel, the canvas overlays) follows it
+  if (typeof ResizeObserver !== "undefined") {
+    let lastH = -1;
+    new ResizeObserver(() => {
+      const h = bar.offsetHeight;
+      if (h === lastH) return;
+      const first = lastH < 0;
+      lastH = h;
+      if (first || !area.isConnected) return;
+      area.style.setProperty("--winbar-h", `${headHeightOf(area)}px`);
+      reflectLiveArea();
+    }).observe(bar);
+  }
   const winNow = (): Win | undefined => windowsOf().find((w) => w.id === winId);
   /*
    * GONE (15 set 2026) · the area's own `wheel`, `pointermove` and
@@ -32663,15 +32678,36 @@ function stampComposeBox(win: Win, listing: FsListing): HTMLElement {
   // Data — the date of the act, empty until somebody says it; «Oggi» is a gesture
   const when = document.createElement("span");
   when.className = "stamp-when";
-  const at = text("at", draft.at.slice(0, 10), "", (v) => { draft.at = v; redrawDraftPicture(); }, "date");
+  // MICRO-CONTENTS-4 E7 · a fixed form (gg/mm/aaaa in Italian, aaaa-mm-gg
+  // otherwise), not the browser's; what is kept is ISO. A date that cannot be
+  // read keeps the field empty for the check, and says the form it wants.
+  const form = dateFormOf(getLocale());
+  const at = text("at", showDate(draft.at.slice(0, 10), form), "", (v) => {
+    draft.at = readDate(v, form) ?? "";
+    redrawDraftPicture();
+  });
+  at.placeholder = t(form === "dmy" ? "stamp2.dateDmy" : "stamp2.dateIso");
+  at.inputMode = "numeric";
+  at.classList.add("stamp-date");
+  at.onblur = () => {
+    const iso = readDate(at.value, form);
+    if (iso) at.value = showDate(iso, form);
+    checkField(box, "at");
+    if (iso === null) {
+      const line = box.querySelector<HTMLElement>(`[data-err="at"]`);
+      if (line) line.textContent = t("stamp2.errDate", { f: at.placeholder });
+    }
+  };
   const today = document.createElement("button");
   today.type = "button";
   today.className = "ghost";
   today.dataset.field = "today";
   today.textContent = t("stamp2.today");
   today.onclick = () => {
-    draft.at = new Date().toISOString().slice(0, 10);
-    at.value = draft.at;
+    // the local day, not UTC's: past 23:00 in Rome «today» was already tomorrow
+    const n = new Date();
+    draft.at = `${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, "0")}-${String(n.getDate()).padStart(2, "0")}`;
+    at.value = showDate(draft.at, form);
     checkField(box, "at");
     redrawDraftPicture();
   };
@@ -37818,7 +37854,8 @@ function buildAreaHeader(win: Win): DocumentFragment {
   typeDd.className = "dropdown win-type";
   const typeTog = document.createElement("button");
   typeTog.className = "dd-toggle win-type-toggle";
-  typeTog.title = t("win.typeTitle");
+  // MICRO-CONTENTS-4 §1 · on the Chain the tooltip spells DTC out first
+  typeTog.title = isChainWin(win) ? `${t("win.chainHint")}\n${t("win.typeTitle")}` : t("win.typeTitle");
   const typeIcon = WINDOW_TYPE_META[type].icon;
   const typeName = winTypeLabel(win);
   typeTog.innerHTML =
@@ -38194,7 +38231,9 @@ function buildAreaHeader(win: Win): DocumentFragment {
       if (b) {
         b.dataset.act = "layout";
         b.innerHTML = WIN_ICON_RELAYOUT;
-        b.setAttribute("aria-label", t("win.layoutTitle"));
+        // MICRO-CONTENTS-4 F6 · the tooltip is one sentence; the screen reader
+        // hears the command's name first, the sentence after
+        b.setAttribute("aria-label", `${t("menu.relayout")} — ${t("win.layoutTitle")}`);
         b.addEventListener("click", (e) => {
           const fresh = (e as MouseEvent).altKey;
           focusThen(win, () => void layoutAll(fresh));
@@ -38391,8 +38430,9 @@ function openCorpusDag(): void {
   });
 }
 
-/** The name of a window's kind, as its header says it: a Chain is «Catena (DTC)»
- *  (MICRO-CONTENTS-3 F1), every other window the name of its type. */
+/** The name of a window's kind, as its header says it: a Chain is «Catena di
+ *  trasformazione (DTC)» (MICRO-CONTENTS-3 F1, MICRO-CONTENTS-4 §1), every
+ *  other window the name of its type. */
 function winTypeLabel(win: Win): string {
   return isChainWin(win) ? t("win.chain") : t(WINDOW_TYPE_META[win.type].labelKey);
 }
@@ -38895,6 +38935,9 @@ function renderAreaHeaders(): void {
     const win = windowsOf().find((w) => w.id === area.dataset.win);
     if (!bar || !win) continue;
     bar.innerHTML = "";
+    // MICRO-CONTENTS-4 F6 · the Chain's header goes to a second row rather
+    // than scroll its last button out of sight (its name is long and whole)
+    bar.classList.toggle("win-chain-bar", isChainWin(win));
     bar.appendChild(buildAreaHeader(win));
     if (isDetachedWin(win.id)) bar.appendChild(detachedBarTail(win));
   }

@@ -313,6 +313,40 @@ export function missingFields(draft: Draft): StampField[] {
   });
 }
 
+/**
+ * MICRO-CONTENTS-4 E7 · the DATE of the act is written in a FIXED form, not the
+ * browser's: «gg/mm/aaaa» in Italian, «aaaa-mm-gg» (ISO) in every other
+ * language. A `<input type=date>` drew whatever the browser's own locale said
+ * («10/27/2026» in an Italian app). What is kept is always ISO (`draft.at`).
+ */
+export type DateForm = "dmy" | "iso";
+export const dateFormOf = (locale: string): DateForm => (locale === "it" ? "dmy" : "iso");
+
+/** ISO `yyyy-mm-dd…` → the form shown; anything else is shown as it is. */
+export function showDate(iso: string, form: DateForm): string {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(iso);
+  if (!m) return iso;
+  return form === "dmy" ? `${m[3]}/${m[2]}/${m[1]}` : `${m[1]}-${m[2]}-${m[3]}`;
+}
+
+/** What was typed → ISO `yyyy-mm-dd`, or null when it is not a real date.
+ *  Both forms are read in either language (an ISO date pasted into the Italian
+ *  field is still a date); in the day-first form «/», «.» and «-» all separate,
+ *  and a one-digit day or month is fine. Empty → "". */
+export function readDate(text: string, form: DateForm): string | null {
+  const v = text.trim();
+  if (!v) return "";
+  let y: number, mo: number, d: number;
+  const iso = /^(\d{4})-(\d{1,2})-(\d{1,2})$/.exec(v);
+  const dmy = /^(\d{1,2})[/.-](\d{1,2})[/.-](\d{4})$/.exec(v);
+  if (iso) { y = +iso[1]; mo = +iso[2]; d = +iso[3]; }
+  else if (dmy && form === "dmy") { d = +dmy[1]; mo = +dmy[2]; y = +dmy[3]; }
+  else return null;
+  const t = new Date(Date.UTC(y, mo - 1, d));
+  if (t.getUTCFullYear() !== y || t.getUTCMonth() !== mo - 1 || t.getUTCDate() !== d) return null;
+  return `${String(y).padStart(4, "0")}-${String(mo).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+}
+
 export function readyToStamp(draft: Draft): string | null {
   if (!draft.outputs.length) return "no output selected";
   return missingFields(draft)[0] ?? null;

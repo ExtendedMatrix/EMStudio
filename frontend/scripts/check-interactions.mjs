@@ -653,7 +653,10 @@ test("4.examples", "gli esempi sono esempi: «es. …», e nessun valore finto n
     .map((i) => ({ k: i.dataset.field, v: i.value, ph: i.placeholder })));
   const kinds = await p.evaluate(() => [...document.querySelectorAll('.stamp-compose select[data-field="kind"] optgroup')].map((g) => g.label));
   await ctx.close();
-  const bad = f.filter((x) => x.k !== "title" && (x.v || (x.ph && !/^(es\.|e\.g\.)/.test(x.ph))));
+  // MICRO-CONTENTS-4 E7 · the date shows its FORM («gg/mm/aaaa»), letters that
+  // cannot be read as a value: a form, not an example, and not a fake date
+  const form = (x) => x.k === "at" && /^(gg\/mm\/aaaa|aaaa-mm-gg|dd\/mm\/yyyy|yyyy-mm-dd)$/.test(x.ph);
+  const bad = f.filter((x) => x.k !== "title" && (x.v || (x.ph && !form(x) && !/^(es\.|e\.g\.)/.test(x.ph))));
   // MICRO-UN-POSTO · the groups are the datamodel's families now (em_visual_rules
   // 1.6.22): «Cattura», then «Recupero» — no longer «Acquisizione», which is the
   // AXIS both families belong to
