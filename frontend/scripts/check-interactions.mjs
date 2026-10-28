@@ -11704,6 +11704,113 @@ test("AR9.card", "una selezione, una scheda (§5): il clic su un atto della Cate
   return { pass: Object.values(conds).every(Boolean), detail: { conds, act, res, off, on, info, full, errors, errorsB: b.errors } };
 });
 
+/** MICRO-PROPRIETA-PARADATI (28 Oct 2026) · Templu Mare v4 (a COPY: TEMPLU_V4=<em.json>), SU020 and PD_SU020 */
+if (process.env.TEMPLU_V4) test("PP.templu", "Proprietà e paradati · MICRO-PROPRIETA-PARADATI su Templu Mare v4: p.1 il Value di construction_technique legge data.value; p.2 l'estrattore aggiunto a geometry dall'Ispettore entra nella Matrix dentro PD_SU020; p.3 geometry dice la sua forma (Shape for SU020 · proxies/SU020.glb), mai la lettura «height 492.771 m», e non offre «Usa come valore»; p.4 Shift+A dentro PD_SU020 ammette i paradati e il nodo nuovo entra nel gruppo; p.5 dal connettore di geometry rilasciato su un documento (un'istanza di D.12) nasce l'estrattore in mezzo, nome e testo in linea, nessun arco proprietà → documento; p.6 «+ fonte» fa il combinatore e lo disegna", async () => {
+  const { p, ctx, errors } = await open({ doc: null, w: 1700, h: 1050 });
+  await p.evaluate(([d, path]) => window.__EM_DRAG__.openAt(d, path), [JSON.parse(readFileSync(process.env.TEMPLU_V4, "utf8")), process.env.TEMPLU_V4]);
+  await p.waitForFunction(() => (window.__EM_SCENE__?.()?.nodes?.length ?? 0) > 50, null, { timeout: 60000 });
+  const G = async () => JSON.parse(await p.evaluate(() => window.__EM_DRAG__.graphJson()));
+  const g0 = await G();
+  const by = (n, t) => g0.nodes.find((x) => x.name === n && (!t || x.node_type === t))?.id;
+  const SU = by("SU020", "US"), PD = by("PD_SU020"), D12 = by("D.12", "document");
+  const prop = (n) => g0.edges.find((e) => e.source === SU && e.edge_type === "has_property" && g0.nodes.find((x) => x.id === e.target)?.name === n)?.target;
+  const GEOM = prop("geometry"), CT = prop("construction_technique");
+  await p.evaluate((pd) => window.__EM_DRAG__.fold(pd, false), PD);
+  const out = {};
+  // p.1
+  await p.evaluate((id) => window.__EM_DRAG__.select(id), CT);
+  await p.waitForTimeout(400);
+  out.value = await p.evaluate((id) => document.querySelector(`input[data-prop-value="${id}"]`)?.value ?? null, CT);
+  // p.2 + p.3
+  await p.evaluate((id) => window.__EM_DRAG__.select(id), GEOM);
+  await p.waitForTimeout(300);
+  await p.click(`button[data-add-reading="${GEOM}"]`);
+  await p.waitForTimeout(300);
+  await p.keyboard.type("D.01 · Rilievo"); await p.waitForTimeout(300); await p.keyboard.press("Enter"); await p.waitForTimeout(1200);
+  let g = await G();
+  const x = g.edges.find((e) => e.source === GEOM && e.edge_type === "has_data_provenance")?.target;
+  await p.evaluate((id) => window.__EM_DRAG__.edit(id, { data: { result: "height 492.771 m" } }), x);
+  await p.evaluate((id) => window.__EM_DRAG__.select(id), GEOM);
+  await p.waitForTimeout(500);
+  out.p2 = { name: g.nodes.find((n) => n.id === x)?.name, drawn: (await p.evaluate(() => window.__EM_SCENE__().nodes)).includes(x),
+             inPd: g.edges.some((e) => e.source === x && e.target === PD && e.edge_type === "is_in_paradata_nodegroup") };
+  out.p3 = await p.evaluate(() => { const ins = document.querySelector('[data-win="canvas:inspector"]');
+    return { geo: [...ins.querySelectorAll("[data-geo-value]")].map((e) => e.innerText.replace(/\s+/g, " ").trim()),
+             use: [...ins.querySelectorAll("button")].filter((b) => /Usa come valore/.test(b.textContent)).length }; });
+  out.p3.value = (await p.evaluate((id) => window.__EM_DRAG__.data(id), GEOM))?.value;
+  // p.4 · inside PD_SU020 (the Viewer «Interpretation» opened is closed first)
+  await p.evaluate(() => { for (const w of window.__EM_DRAG__.wins()) if (w.type === "viewer" || w.type === "doc") window.__EM_DRAG__.closeWin(w.id); });
+  await p.click('[data-win="canvas:1"] canvas', { position: { x: 20, y: 20 } }).catch(() => {});
+  await p.evaluate((pd) => window.__EM_DRAG__.enterGroup(pd), PD);
+  await p.waitForTimeout(600);
+  await p.evaluate(() => window.__EM_DRAG__.select(null));
+  const c = await p.evaluate(() => { const r = document.querySelector('[data-win="canvas:1"] canvas').getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; });
+  await p.mouse.move(c.x, c.y); await p.keyboard.press("Shift+A"); await p.waitForTimeout(400);
+  out.foot = await p.evaluate(() => /Seleziona un’unità per aggiungere paradata/.test(document.querySelector(".addm")?.innerText ?? ""));
+  const n4 = (await G()).nodes.length;
+  await p.keyboard.type("extractor"); await p.waitForTimeout(300); await p.keyboard.press("Enter"); await p.waitForTimeout(900);
+  g = await G();
+  const born = g.nodes.slice(n4);
+  out.p4 = born.map((n) => [n.node_type, g.edges.some((e) => e.source === n.id && e.target === PD && e.edge_type === "is_in_paradata_nodegroup")]);
+  await p.evaluate(() => window.__EM_DRAG__.undo());
+  await p.keyboard.press("Escape");
+  // out of the group's canvas: a jump to the unit, which is not in it
+  await p.evaluate((id) => window.__EM_DRAG__.jumpTo(id), SU);
+  await p.waitForTimeout(600);
+  out.leftPd = await p.evaluate(() => window.__EM_DRAG__.context().length === 0);
+  // p.5 · geometry's handle released on an instance of D.12 (frameWorld needs the graph window focused)
+  await p.click('[data-win="canvas:1"] canvas', { position: { x: 20, y: 20 } }).catch(() => {});
+  await p.waitForTimeout(300);
+  const all = await p.evaluate(() => window.__EM_DRAG__.winScene("canvas:1"));
+  const toW = (b) => ({ x: (b.x - all.rect.x - all.origin.x) / all.scale, y: (b.y - all.rect.y - all.origin.y) / all.scale, w: b.w / all.scale, h: b.h / all.scale });
+  const gb = all.boxes.find((b) => b.id === GEOM);
+  const db = gb && all.boxes.filter((b) => b.instanceOf === D12 || b.id === D12)
+    .sort((a, b) => Math.hypot(a.x - gb.x, a.y - gb.y) - Math.hypot(b.x - gb.x, b.y - gb.y))[0];
+  out.found5 = [!!gb, !!db];
+  if (gb && db) {
+    const A = toW(gb), B = toW(db);
+    const x0 = Math.min(A.x, B.x), y0 = Math.min(A.y, B.y);
+    await p.evaluate(([a, b, w, h]) => window.__EM_DRAG__.frameWorld(a, b, w, h, 30), [x0 - 40, y0 - 40, Math.max(A.x + A.w, B.x + B.w) - x0 + 80, Math.max(A.y + A.h, B.y + B.h) - y0 + 80]);
+    await p.waitForTimeout(500);
+    const w2 = await p.evaluate(() => window.__EM_DRAG__.winScene("canvas:1"));
+    const g2 = w2.boxes.find((b) => b.id === GEOM), d2 = w2.boxes.filter((b) => b.instanceOf === D12 || b.id === D12)
+      .sort((a, b) => Math.hypot(a.x - g2.x, a.y - g2.y) - Math.hypot(b.x - g2.x, b.y - g2.y))[0];
+    const hx = g2.x + g2.w, hy = g2.y + g2.h / 2, tx = d2.x + d2.w / 2, ty = d2.y + d2.h / 2;
+    const e5 = (await G()).edges.length;
+    await p.mouse.move(hx, hy); await p.waitForTimeout(100); await p.mouse.down();
+    for (let i = 1; i <= 12; i++) { await p.mouse.move(hx + (tx - hx) * i / 12, hy + (ty - hy) * i / 12); await p.waitForTimeout(15); }
+    await p.mouse.up(); await p.waitForTimeout(500);
+    out.drag = { from: [Math.round(hx), Math.round(hy)], to: [Math.round(tx), Math.round(ty)] };
+    await p.screenshot({ path: `${process.env.SHOTS ?? "."}/pp-p5-drag.png` }).catch(() => {});
+    out.form = await p.evaluate(() => document.querySelector(".docform")?.innerText.replace(/\s+/g, " ") ?? null);
+    if (out.form) { await p.fill(".docform input[name=description]", "punto sul modello"); await p.click(".docform-ok"); await p.waitForTimeout(500); }
+    g = await G();
+    const nm = (id) => g.nodes.find((n) => n.id === id)?.name;
+    out.p5 = g.edges.slice(e5).map((e) => `${nm(e.source)} ${e.edge_type} ${nm(e.target)}`);
+    out.direct = g.edges.some((e) => e.source === GEOM && e.target === D12);
+  }
+  // p.6 · «+ fonte» on construction_technique (it has D.12.10): the combiner
+  await p.evaluate((id) => window.__EM_DRAG__.select(id), CT);
+  await p.waitForTimeout(400);
+  await p.click(`button[data-add-reading="${CT}"]`); await p.waitForTimeout(300);
+  await p.keyboard.type("D.01 · Rilievo"); await p.waitForTimeout(300); await p.keyboard.press("Enter"); await p.waitForTimeout(1200);
+  g = await G();
+  const comb = g.edges.find((e) => e.source === CT && e.edge_type === "has_data_provenance" && g.nodes.find((n) => n.id === e.target)?.node_type === "combiner")?.target;
+  const scene6 = await p.evaluate(() => window.__EM_SCENE__().nodes);
+  out.p6 = { comb: !!comb, combines: g.edges.filter((e) => e.source === comb && e.edge_type === "combines").length, drawn: !!comb && scene6.includes(comb) };
+  await ctx.close();
+  const conds = {
+    p1: /^Rialzo dei muri/.test(out.value ?? ""),
+    p2: out.p2.name === "D.01.61" && out.p2.drawn && out.p2.inPd,
+    p3: out.p3.use === 0 && out.p3.geo.length > 0 && out.p3.geo.every((t) => /Shape for SU020/.test(t) && !/492/.test(t)) && out.p3.value !== "height 492.771 m",
+    p4: !out.foot && out.p4.length === 1 && out.p4[0][0] === "extractor" && out.p4[0][1],
+    p5: !!out.form && !out.direct && (out.p5 ?? []).some((e) => / has_data_provenance /.test(e)) && (out.p5 ?? []).some((e) => / extracted_from D\.12$/.test(e)),
+    p6: out.p6.comb && out.p6.combines === 2 && out.p6.drawn,
+    noErrors: !errors.filter((e) => !/tileset|Failed to load resource|404/.test(e)).length,
+  };
+  return { pass: Object.values(conds).every(Boolean), detail: { conds, out, errors } };
+});
+
 // ── run ─────────────────────────────────────────────────────────────────────
 const chosen =cases.filter((c) => !only.length || only.includes(c.id) || only.some((o) => c.id.startsWith(o + ".")));
 for (const c of chosen) {

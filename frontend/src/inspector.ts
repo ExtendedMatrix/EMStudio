@@ -19,6 +19,8 @@ import { renderSitePosition } from "./study-panel";
 import { linksOfGraph } from "./links";
 import { chainCard, isChainNode } from "./hdto-card";
 import { naturalFields, qualeOf, TRANSLATION_TYPE } from "./translation";
+import { isGeometryProperty, propertyValue } from "./paradata-chain";
+import { geometryValueEl } from "./paradata-inspector";
 import { commitField, confirmOnMultiEnter, multiHint, multiKeyOf, type MultiScope } from "./multi-edit";
 import type { ChronEntry, ChronStatus } from "./chron-bridge";
 
@@ -621,18 +623,29 @@ export function renderInspector(
   // `description` (uniform with real EM data). For an epoch's absolute_time_*
   // property this mirrors back to the epoch's start_time/end_time, so editing
   // it here updates the Temporal bounds.
-  if (node.node_type === "property") {
+  // MICRO-PROPRIETA-PARADATI p.1 · the value is READ where it truly is,
+  // `data.value` (s3Dgraphy's PropertyNode.value), the description only when
+  // that is empty (`propertyValue`); written in both, as always, and only when
+  // the person changes it. It read `description` alone: `construction_technique`
+  // of SU020, its value in `data.value`, showed an empty «value…».
+  // p.3 · a GEOMETRY's value is its shape, said and reached, never typed.
+  if (node.node_type === "property" && isGeometryProperty(node)) {
+    root.appendChild(el("label", "insp-field-label", "Value"));
+    root.appendChild(geometryValueEl(store, nodeId, cb.onJump));
+    renderQualeObject(root, store, node, cb, scope);
+  } else if (node.node_type === "property") {
     const pdata = (node.data ?? {}) as Record<string, unknown>;
     root.appendChild(el("label", "insp-field-label", "Value"));
     const valIn = document.createElement("input");
     valIn.className = "insp-name-input";
-    valIn.value = String(node.description ?? "");
+    valIn.dataset.propValue = nodeId;
+    valIn.value = propertyValue(node);
     const ptype = String(pdata.property_type ?? "");
     valIn.placeholder =
       ptype.startsWith("absolute_time") ? "e.g. -27  (negative = BCE)" : "value…";
     root.appendChild(valIn);
-    bindMulti(scope, nodeId, valIn, t("multi.f.value"), (n) => n.node_type === "property",
-      (id, v) => store.setPropertyValue(id, v));
+    bindMulti(scope, nodeId, valIn, t("multi.f.value"), (n) => n.node_type === "property" && !isGeometryProperty(n),
+      (id, v) => { if (v.trim() !== propertyValue(store.node(id))) store.setPropertyValue(id, v); });
     // the value of a property IS its description in em.json: its languages
     if (cb.renderTextLanguages && naturalFields(node).includes("description"))
       cb.renderTextLanguages(root, nodeId, "description");

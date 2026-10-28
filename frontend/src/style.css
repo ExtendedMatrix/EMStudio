@@ -8783,6 +8783,10 @@ button.chain-geo.chain-place:hover { background: var(--bg-hover); border-color: 
 .chain-result { font-weight: 600; }
 .chain-acts { display: inline-flex; gap: 4px; }
 .chain-note { font-size: 11.5px; color: var(--text-muted); margin: 4px 0; }
+/* MICRO-PROPRIETA-PARADATI p.3 · a geometry's value: its shape, or «— no value» and where the reading is */
+.chain-geo-value { font-size: 12px; margin: 3px 0 4px; overflow-wrap: anywhere; }
+.chain-geo-value .chain-geo-none { font-weight: 600; }
+.chain-geo-value .chain-geo-where, .chain-geo-value .chain-geo-file { color: var(--text-muted); }
 /* MICRO-PULIZIA p.6 · the property's buttons in a narrow panel: they wrap as
    whole buttons (one line each), never into a column of single words */
 .chain-card-acts { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }

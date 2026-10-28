@@ -242,7 +242,7 @@ import { descriptionFromFile, mediumOfFile, openNewDocumentForm, type NewDocumen
 import type { Arrangement } from "./workspace";
 import { renderNarrativeIndex } from "./narrative-index";
 import { renderCiteSection, renderNarrativeInspector } from "./narrative-inspector";
-import { linkGroupOf } from "./add-menu";
+import { linkGroupOf, throughExtractor } from "./add-menu";
 import { refsForViewType, unvalidatedForExport, viewTypesFor, type ProjChapter } from "./narrative-projection";
 import { chapterCitedIds, interpretiveCoverage, storyCoverage } from "./narrative-coverage";
 import { setSitePicker, type NarrativeSelection, type Reading } from "./narrative";
@@ -356,6 +356,7 @@ import {
   GENERIC_EDGE,
   hdtoProfileTypes,
   isGroupType,
+  isParadataType,
   isStratigraphicType,
   typesOfClass,
   isDtcChainEdge,
@@ -11488,6 +11489,16 @@ function finishConnect(forceCreate = false): void {
   if (!validity) return;
   const src = storeOfNode(fromId)?.node(fromId)?.node_type;
   const tgt = storeOfNode(targetId)?.node(targetId)?.node_type;
+  // MICRO-PROPRIETA-PARADATI p.5 · a property dropped on a document (its
+  // master, or one of its instances): the extractor in between, never the
+  // direct edge
+  const docId = documentAt(targetId);
+  if (docId && throughExtractor(src, "document")) {
+    const vp = viewport();
+    const r = liveCanvas()?.getBoundingClientRect();
+    askExtractionBetween(fromId, docId, (r?.left ?? 0) + x * vp.scale + vp.x, (r?.top ?? 0) + y * vp.scale + vp.y);
+    return;
+  }
   if (validity === "invalid") {
     toast(t("l.noConnection", { src: String(src), tgt: String(tgt) }));
     return;
@@ -11519,6 +11530,18 @@ function finishHandle(fromId: string, targetId: string | null, validity: Connect
   const src = storeOfNode(fromId)?.node(fromId);
   const tgt = storeOfNode(targetId)?.node(targetId);
   void validity;
+  // MICRO-PROPRIETA-PARADATI p.5 · «↓ below» of a property released on a
+  // document (or the document's «↑ above» on a property): the extractor in
+  // between — what E.D. did on `geometry` of SU020 towards D.01 made a direct
+  // property → document `has_documentation`
+  const [prId, dcAt] = dir === "down" ? [fromId, targetId] : [targetId, fromId];
+  const dcId = documentAt(dcAt);
+  if (dcId && throughExtractor(storeOfNode(prId)?.node(prId)?.node_type, "document")) {
+    const vp = viewport();
+    const r = liveCanvas()?.getBoundingClientRect();
+    askExtractionBetween(prId, dcId, (r?.left ?? 0) + x * vp.scale + vp.x, (r?.top ?? 0) + y * vp.scale + vp.y);
+    return;
+  }
   const types = handleEdgeTypes(src?.node_type, tgt?.node_type, dir);
   if (!types.length) {
     toast(t(dir === "up" ? "handle.noneAbove" : "handle.noneBelow",
@@ -11677,6 +11700,9 @@ interface AddSpec {
   /** COLLEGARE · what an explicit form already decided («Nuovo documento…»):
    *  the name, the description and `data` the node is born with */
   preset?: { name?: string; description?: string; data?: Record<string, unknown> };
+  /** MICRO-PROPRIETA-PARADATI p.4 · the paradata group the new node joins
+   *  (`is_in_paradata_nodegroup`): the group the menu was opened in or from */
+  group?: string;
 }
 
 /** A node's box from its TYPE, asked of em-core (the size owner, EM3) before
@@ -11783,6 +11809,11 @@ async function addNodeFromMenu(spec: AddSpec, wx: number, wy: number, alt: boole
         const [a, b] = spec.link.dir === "out" ? [other.id, id] : [id, other.id];
         createEdge(a, b, spec.link.edgeType);
       }
+      // p.4 · born for a paradata group (opened from a property, an extractor,
+      // a combiner, or the group itself): it is a member of that group
+      if (spec.group && st.node(spec.group) && !st.hasEdge(id, spec.group, IS_IN_PDG)
+          && allowedEdgeTypes(type, st.node(spec.group)?.node_type).includes(IS_IN_PDG))
+        st.addEdge(id, spec.group, IS_IN_PDG);
       if (matrix) {
         // the view moves a node by its lane's and band's translations: measure
         // and correct, as for a drop (TOCCARE), so it is born under the cursor
@@ -11831,6 +11862,7 @@ function addEntry(
   label: string,
   detail?: string,
   otherId?: string,
+  group?: string,
 ): AddMenuEntry {
   const li = "edgeType" in it ? (it as LinkedItem) : null;
   const link = li && otherId ? { otherId, edgeType: li.edgeType, dir: li.dir } : undefined;
@@ -11844,7 +11876,8 @@ function addEntry(
     icon: () => typeIconElement(it.nodeType, it.kind),
     run: () => {
       const spec: AddSpec = { nodeType: it.nodeType, kind: it.kind, isResource: it.isResource, link,
-                              ...(it.preset ? { preset: it.preset } : {}) };
+                              ...(it.preset ? { preset: it.preset } : {}),
+                              ...(group && isParadataType(it.nodeType) ? { group } : {}) };
       // COLLEGARE · a new document is a decision: the form first, then the node
       if (it.nodeType === "document" && store && !canvasWritesToCorpus()) {
         askNewDocument(addMenuPoint.x, addMenuPoint.y, {}, (v) =>
@@ -11909,6 +11942,12 @@ function existingMenu(selId: string, anchor: boolean, dir?: HandleDir): {
     alias: l.name,
     icon: () => typeIconElement(l.nodeType),
     run: () => linkExisting(selId, l),
+    // p.5 · a document from a property: through a new extractor
+    ...(l.via === "extractor" ? {
+      label: t("link.viaExtractor", { d: l.name }),
+      detail: l.description.slice(0, 40),
+      run: () => askExtractionBetween(selId, l.nodeId, addMenuPoint.x, addMenuPoint.y),
+    } : {}),
   });
   const flat = links.map(entryOf);
   const groups = LINK_GROUP_ORDER.map((g) => ({
@@ -11939,6 +11978,59 @@ function linkExisting(selId: string, l: ExistingLink): void {
 }
 
 // ── CATENA · the paradata chain in the inspector ─────────────────────────────
+
+/** p.5 · the document a drop landed on: the node itself, or the master of the
+ *  instance drawn there (a document read in a paradata group is drawn as an
+ *  instance whose id is not a node's). Null when it is not a document. */
+function documentAt(id: string | null): string | null {
+  if (!id || !store) return null;
+  const master = scene()?.byId.get(id)?.instanceOf ?? id;
+  return store.node(master)?.node_type === "document" ? master : null;
+}
+
+/**
+ * MICRO-PROPRIETA-PARADATI p.5 · «link to a document» from a property: the
+ * extractor in between is created, its NAME and TEXT asked in line (the name
+ * the naming rule gives, `<document>.<NN>`, already written), then ONE undo
+ * step makes it all (`chain.extractBetween`): the extractor, its
+ * `has_data_provenance` (or the combiner of a second source), its
+ * `extracted_from`, its membership of the property's paradata group.
+ */
+function askExtractionBetween(propertyId: string, documentId: string, clientX: number, clientY: number): void {
+  if (!store || refuseReadOnly()) return;
+  const st = store;
+  const prop = st.node(propertyId);
+  const dname = String(st.node(documentId)?.name ?? documentId);
+  openNewDocumentForm(clientX, clientY, { name: chain.nextExtractorNameFor(st.doc, documentId) }, (v) => {
+    if (store !== st || !st.node(propertyId) || !st.node(documentId)) return;
+    const r = chain.extractBetween(st, propertyId, documentId, { name: v.name, description: v.description });
+    const x = String(st.node(r.extractorId)?.name ?? r.extractorId);
+    let msg = t("chain.readingMade", { x, from: dname, prop: String(prop?.name ?? propertyId) });
+    if (r.combinerCreated)
+      msg += " · " + t("chain.combinerMade", { c: String(st.node(r.combinerCreated)?.name ?? ""), n: String(r.moved.length + 1) });
+    logInfo(msg, [r.extractorId, propertyId, documentId, ...(r.combinerCreated ? [r.combinerCreated] : [])]);
+    buildScenes();
+    select(r.extractorId);
+    refreshInspector();
+    toastUndo(msg, st);
+    draw();
+  }, { title: t("chain.extractBetweenTitle", { p: String(prop?.name ?? propertyId), d: dname }), noFile: true, nameLabel: t("chain.extractBetweenName"),
+       descLabel: t("chain.extractBetweenText"), descPh: t("chain.descPh"), descOptional: true,
+       okLabel: t("chain.extractBetweenOk") });
+}
+
+/** MICRO-PROPRIETA-PARADATI · what the hover of a property says: its value, a
+ *  geometry its shape or «— no value» and where the reading is (the words of
+ *  the Inspector's `geometryValueEl`, as text). */
+function propertyHoverValue(st: DocumentStore, id: string): string {
+  const p = st.node(id);
+  if (!chain.isGeometryProperty(p)) return chain.propertyValue(p);
+  const g = chain.geometryValueOf(st.doc, id);
+  if (!g.empty) return t("chain.geoShape", { s: g.shapeName }) + (g.file ? ` · ${g.file}` : "");
+  const xs = chain.extractorsOfProperty(st.doc, id).map((x) => String(st.node(x)?.name ?? x));
+  return t("chain.geoNoValue") + (xs.length
+    ? `; ${t(xs.length === 1 ? "chain.geoReadingIn" : "chain.geoReadingsIn", { x: xs.join(", ") })}` : "");
+}
 
 /** The callbacks the chain section draws with, bound to the store it reads. */
 function chainUi(st: DocumentStore): ChainUi {
@@ -12632,10 +12724,15 @@ function openAddMenu(
   const selId = selectedIds.size <= 1 ? selectedId : null;
   const sel = selId ? storeOfNode(selId)?.node(selId) : undefined;
   const otherName = sel ? String(sel.name ?? sel.id) : "";
+  // MICRO-PROPRIETA-PARADATI p.4 · inside a paradata group (its soloing), or
+  // from the group, a property, an extractor, a combiner that lives in one, the
+  // paradata are admitted — «Select a unit» was said there too — and what is
+  // born joins that group
+  const pdHome = paradataHome(selId);
   const links = (sel ? linkedItems(ctx, sel.node_type) : [])
     .filter((i) => !opts.onlyTypes || opts.onlyTypes.includes(i.nodeType));
   const linkEntry = (i: LinkedItem): AddMenuEntry =>
-    addEntry(i, wp.x, wp.y, alt, linkedLabel(i, otherName), edgeLabel(i.edgeType), sel!.id);
+    addEntry(i, wp.x, wp.y, alt, linkedLabel(i, otherName), edgeLabel(i.edgeType), sel!.id, pdHome ?? undefined);
   // COLLEGARE · «Collega a un esistente…», in the «Collegato a X» group: the
   // list of what is already there, with its own search (same component)
   const existingCount = sel && selId ? existingMenu(selId, false).flat.length : 0;
@@ -12650,17 +12747,21 @@ function openAddMenu(
   // the ornaments (author, licence, embargo, resource) fold into ONE row
   const chain = links.filter((i) => i.category !== "Context");
   const ornaments = links.filter((i) => i.category === "Context");
+  const home = pdHome ?? undefined;
   const plain = (i: AddItem): AddMenuEntry =>
-    addEntry(i, wp.x, wp.y, alt, i.label, addCategoryLabel(i.category));
+    addEntry(i, wp.x, wp.y, alt, i.label, addCategoryLabel(i.category), undefined, home);
+  // p.4 · in a paradata group the «linked» Paradata category is ON
+  const stateOf = (c: (typeof cats)[number]) => (pdHome && c.state === "linked" && c.id === "Paradata" ? "on" : c.state);
+  const allowedHere = [...allowed, ...cats.filter((c) => c.state !== "on" && stateOf(c) === "on").flatMap((c) => c.items)];
   const recent = recentTypes()
-    .map((k) => allowed.find((i) => itemKey(i) === k))
+    .map((k) => allowedHere.find((i) => itemKey(i) === k))
     .filter((i): i is AddItem => !!i)
-    .map((i) => addEntry(i, wp.x, wp.y, alt, i.label));
+    .map((i) => addEntry(i, wp.x, wp.y, alt, i.label, undefined, undefined, home));
   const categories: AddMenuCategory[] = cats.map((c) => ({
     label: addCategoryLabel(c.id),
-    offNote: c.state === "off" ? t("add.notHere") : undefined,
-    hint: c.state === "linked" ? (sel ? "↑" : "") : undefined,
-    entries: c.state === "on" ? c.items.map((i) => addEntry(i, wp.x, wp.y, alt, i.label)) : [],
+    offNote: stateOf(c) === "off" ? t("add.notHere") : undefined,
+    hint: stateOf(c) === "linked" ? (sel ? "↑" : "") : undefined,
+    entries: stateOf(c) === "on" ? c.items.map((i) => addEntry(i, wp.x, wp.y, alt, i.label, undefined, undefined, home)) : [],
   }));
   const extra: AddMenuEntry[] = [];
   if (ctx === "matrix" && !inContext() && !opts.linkedOnly)
@@ -12697,7 +12798,7 @@ function openAddMenu(
     }, clientX, clientY);
     return;
   }
-  const needsUnit = ctx === "matrix" && !chain.some((i) => i.category === "Paradata");
+  const needsUnit = ctx === "matrix" && !pdHome && !chain.some((i) => i.category === "Paradata");
   showAddMenu({
     title: t("add.title"),
     context,
@@ -12717,18 +12818,40 @@ function openAddMenu(
     searchable: [
       ...linkedAll,
       ...linkExistingEntry,
-      ...allowed.map(plain),
-      ...cats.filter((c) => c.state === "linked").flatMap((c) =>
+      ...allowedHere.map(plain),
+      ...cats.filter((c) => stateOf(c) === "linked").flatMap((c) =>
         c.items.map((i) => ({ ...plain(i), disabledReason: t("add.needSelShort") }))),
       ...extra,
     ],
     matches: (e, q) =>
       matchesAdd({ label: e.label, alias: e.alias, nodeType: e.nodeType ?? "", description: e.description ?? "", category: e.detail ?? "" }, q),
     footNote: needsUnit ? t("add.needSel") : undefined,
-    count: t("add.count", { n: allowed.length }),
+    count: t("add.count", { n: allowedHere.length }),
     noResults: t("add.noResults"),
     keysHint: t("add.keys"),
   }, clientX, clientY);
+}
+
+const IS_IN_PDG = "is_in_paradata_nodegroup";
+
+/** MICRO-PROPRIETA-PARADATI p.4 · the paradata group an «Add» belongs to: the
+ *  group the canvas is inside (its soloing), else the selected group, else the
+ *  group of the selected paradata node (a property, an extractor, a combiner, a
+ *  document drawn there). Null elsewhere: in the Matrix a loose paradata node
+ *  still waits for a unit. */
+function paradataHome(selId: string | null): string | null {
+  if (!store) return null;
+  const st = store;
+  if (inContext()) {
+    const gid = contextStack[contextStack.length - 1];
+    if (st.node(gid)?.node_type === "ParadataNodeGroup") return gid;
+  }
+  const n = selId ? st.node(selId) : undefined;
+  if (!n) return null;
+  if (n.node_type === "ParadataNodeGroup") return n.id;
+  if (!isParadataType(n.node_type)) return null;
+  return st.liveEdges().find((e) => e.source === n.id && e.edge_type === IS_IN_PDG
+    && st.node(e.target)?.node_type === "ParadataNodeGroup")?.target ?? null;
 }
 
 /** Shift+A: over the graph window under the pointer, or the active graph window
@@ -44065,7 +44188,11 @@ function wireGraphCanvas(canvas: HTMLCanvasElement, winId: string): void {
       (tooltip.children[3] as HTMLElement).textContent = hit.node.node_type === "geo_position"
         // MICRO-GEOREF-GRAFO p.1 · the georeference says itself: the CRS and the shift
         ? georefSummary((hit.node.data ?? {}) as Record<string, unknown>, t)
-        : String(hit.node.description ?? "").slice(0, 220);
+        // MICRO-PROPRIETA-PARADATI p.1/p.3 · a property says its VALUE (where it
+        // truly is), a geometry its shape — never an extractor's reading
+        : hit.node.node_type === "property" && store
+          ? propertyHoverValue(store, hit.node.id).slice(0, 220)
+          : String(hit.node.description ?? "").slice(0, 220);
       placeTooltip(e);
       tooltip.classList.remove("hidden");
     } else {

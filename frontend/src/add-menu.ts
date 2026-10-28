@@ -34,10 +34,27 @@ const PHRASED = new Set(Object.entries(
   (connections as { edge_types: Record<string, { ui_phrase?: unknown }> }).edge_types)
   .filter(([, v]) => !!v.ui_phrase).map(([k]) => k));
 function menuEdgeTypes(from: string | undefined, to: string | undefined): string[] {
+  if (throughExtractor(from, to)) return [];
   return allowedEdgeTypes(from, to).filter((e) => PHRASED.has(e));
+}
+
+/**
+ * MICRO-PROPRIETA-PARADATI p.5 · between a PROPERTY and a DOCUMENT there is
+ * always the EXTRACTOR: property → extractor (`has_data_provenance`) → document
+ * (`extracted_from`). The connections datamodel still ADMITS property →
+ * document `has_documentation` (1.6.7, BUGFIX-CONN3: the honest reading of a
+ * legacy yEd dashed connector), so an old file keeps it and validation accepts
+ * it; but no gesture of EMStudio writes it any more — a «link to a document»
+ * from a property makes the extractor in between (`chain.extractBetween`).
+ * Read off the class hierarchy, not the type names. The datamodel correction
+ * (the relation marked as read-only for authoring) is proposed in s3Dgraphy.
+ */
+export function throughExtractor(from: string | undefined, to: string | undefined): boolean {
+  return ancestorsOf(from).includes("PropertyNode") && ancestorsOf(to).includes("DocumentNode");
 }
 import {
   allowedEdgeTypes,
+  ancestorsOf,
   connectValidity,
   dtcAuthoringKinds,
   hdtoAuthoringTypes,
@@ -437,6 +454,8 @@ export interface ExistingLink {
   /** `out` = X → existing, `in` = existing → X */
   dir: "out" | "in";
   relation: "above" | "below" | "for";
+  /** p.5 · a property and a document: not an edge, an extractor in between */
+  via?: "extractor";
 }
 
 /**
@@ -481,6 +500,11 @@ export function existingLinks(
       description: String(n.description ?? ""), group,
     };
     const tStrat = isStratigraphicType(n.node_type);
+    // p.5 · from a property a document is reached through a new extractor
+    if (throughExtractor(selType, n.node_type)) {
+      out.push({ ...base, edgeType: "has_data_provenance", dir: "out", relation: "for", via: "extractor" });
+      continue;
+    }
     if (opts.anchor) {
       if (connectValidity(selType, n.node_type) !== "valid") continue;
       for (const e of menuEdgeTypes(selType, n.node_type))

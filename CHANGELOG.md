@@ -6,6 +6,35 @@ that asked for one.
 
 ## [Unreleased]
 
+### Fixed
+- **Properties and their paradata chain** (MICRO-PROPRIETA-PARADATI, E.D. on
+  dev.82, 28 October 2026; Templu Mare v4, SU020, PD_SU020).
+  - The Inspector's «Value» reads the value where it truly is, `data.value`
+    (s3Dgraphy's `PropertyNode.value`), and the description only when that is
+    empty: `construction_technique` of SU020 showed an empty «value…». Read,
+    not rewritten: both places are written, together, when the person changes it.
+  - What the Inspector adds to a chain is drawn: an extractor, its new document,
+    the combiner of a second source had no stored position and the Matrix drew
+    only positioned nodes (D.01.61 under `geometry`). They take, for the view
+    only, their paradata group's place and are arranged with the others.
+  - A **geometry** says its value — its semantic shape, and its file
+    («⬡ Shape for SU020 · proxies/SU020.glb»; «— no value» and where the
+    readings are, for an empty shape) — in the Inspector, the chain and the
+    hover; never an extractor's reading. «Use as value» is not offered on a
+    geometry: on dev.82 it overwrote the reference to the shape with
+    «height 492.771 m». A reading already copied there is shown, with «Remove it».
+  - **Shift+A inside a paradata group** (its canvas, the group selected, or a
+    property / extractor / combiner of it) admits the paradata, and the new node
+    joins that group; it said «Select a unit to add paradata».
+  - **Between a property and a document there is always the extractor**: the
+    connector of a property released on a document (or on one of its instances),
+    and «Link to an existing one…» → «D.01 — through a new extractor», create
+    property → extractor → document, the extractor's name and text asked in
+    line, one undo step. The menus no longer offer property → document
+    `has_documentation`; the datamodel still admits it (an old file keeps it).
+  - `scripts/check-proprieta-paradati.mjs` (45, on a copy of Templu Mare);
+    check-interactions `PP.templu` (TEMPLU_V4=<copy>).
+
 ### Added
 - **Ottimizza, round 2 of 3: a tileset from a textured mesh** (MICRO-OTTIMIZZA-2,
   experimental behind its switch). With the switch on, «Tileset (3D Tiles)»

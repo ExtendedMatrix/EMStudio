@@ -66,7 +66,9 @@ export function openNewDocumentForm(
   clientY: number,
   preset: Partial<NewDocumentValues> & { name: string },
   onSubmit: (v: NewDocumentValues) => void,
-  opts: { title?: string } = {},
+  /** MICRO-PROPRIETA-PARADATI p.5 · the same form asks an EXTRACTOR's name and
+   *  text: no file, the text optional, its own words */
+  opts: { title?: string; nameLabel?: string; noFile?: boolean; descLabel?: string; descPh?: string; descOptional?: boolean; okLabel?: string } = {},
 ): HTMLFormElement {
   closeNewDocumentForm();
   const box = document.createElement("div");
@@ -95,15 +97,16 @@ export function openNewDocumentForm(
     form.appendChild(l);
     return inp;
   };
-  field("name", t("doc.name"), preset.name, "", true);
-  const desc = field("description", t("doc.desc"), preset.description ?? "", t("doc.descPh"), true);
-  field("filename", t("doc.file"), preset.filename ?? "", t("doc.filePh"));
+  field("name", opts.nameLabel ?? t("doc.name"), preset.name, "", true);
+  const desc = field("description", opts.descLabel ?? t("doc.desc"), preset.description ?? "",
+                     opts.descPh ?? t("doc.descPh"), !opts.descOptional);
+  if (!opts.noFile) field("filename", t("doc.file"), preset.filename ?? "", t("doc.filePh"));
   const acts = document.createElement("div");
   acts.className = "docform-acts";
   const ok = document.createElement("button");
   ok.type = "submit";
   ok.className = "docform-ok";
-  ok.textContent = t("doc.create");
+  ok.textContent = opts.okLabel ?? t("doc.create");
   const cancel = document.createElement("button");
   cancel.type = "button";
   cancel.textContent = t("doc.cancel");

@@ -21,6 +21,10 @@ import type { DocumentStore } from "./model";
 import {
   extractorsOfProperty,
   geometryOf,
+  geometryValueOf,
+  isGeometryProperty,
+  restoreGeometryValue,
+  takesReadingAsValue,
   measureText,
   ownersOf,
   propertiesOf,
@@ -118,6 +122,53 @@ function linkBtn(ui: ChainUi, id: string, cls = ""): HTMLButtonElement {
   return b;
 }
 
+/**
+ * MICRO-PROPRIETA-PARADATI p.3 · the value of a GEOMETRY property, said: its
+ * semantic shape (the value is the reference to it, s3Dgraphy `geometry.proxy`),
+ * a link to it; an empty shape is «— no value», and where the reading is is
+ * said beside it — the reading of an extractor («height 492.771 m») is never
+ * shown as the geometry's value. A reading copied into the value field before
+ * is shown as such, with «Remove it». Read-only: a geometry is not typed.
+ */
+export function geometryValueEl(store: DocumentStore, propertyId: string, jump: (id: string) => void): HTMLElement {
+  const doc = store.doc;
+  const g = geometryValueOf(doc, propertyId);
+  const box = el("div", "chain-geo-value");
+  box.dataset.geoValue = propertyId;
+  const line = el("div", "chain-geo-line");
+  if (g.empty) {
+    line.appendChild(el("span", "chain-geo-none", t("chain.geoNoValue")));
+    const xs = extractorsOfProperty(doc, propertyId).map((x) => String(store.node(x)?.name ?? x));
+    if (xs.length) line.appendChild(el("span", "chain-geo-where",
+      `; ${t(xs.length === 1 ? "chain.geoReadingIn" : "chain.geoReadingsIn", { x: xs.join(", ") })}`));
+    box.dataset.empty = "1";
+  }
+  if (g.shape) {
+    const b = el("button", "tv-link chain-link shape", g.empty ? t("chain.geoEmptyShape", { s: g.shapeName })
+      : t("chain.geoShape", { s: g.shapeName }));
+    b.type = "button";
+    b.title = t("chain.geoShapeTitle");
+    b.dataset.shape = g.shape;
+    b.addEventListener("click", () => jump(g.shape!));
+    if (g.empty) line.append(" · ");
+    line.appendChild(b);
+    if (g.file) line.appendChild(el("span", "chain-geo-file", ` · ${g.file}`));
+  }
+  box.appendChild(line);
+  if (g.stray) {
+    const n = el("div", "chain-note chain-geo-stray", t("chain.geoStray", { v: g.stray.length > 60 ? `${g.stray.slice(0, 60)}…` : g.stray }));
+    if (g.shape) {
+      const r = el("button", "tv-act", t("chain.geoStrayRemove"));
+      r.type = "button";
+      r.dataset.geoStray = propertyId;
+      r.addEventListener("click", () => { restoreGeometryValue(store, propertyId); });
+      n.append(" ", r);
+    }
+    box.appendChild(n);
+  }
+  return box;
+}
+
 /** One reading, in the order of the argument (LUOGO):
  *  `└ D.2 ⬡ → [⌇ polilinea · 4.031 m] → D.2.01 (→ height)` — the document, the
  *  PLACE in it (its kind, and for a measure its length; a click opens the
@@ -210,7 +261,11 @@ function readingRow(ui: ChainUi, x: string, depth: number, withProperty = false)
     b.addEventListener("click", () => ui.linkExtraction!(x, b));
     acts.appendChild(b);
   }
-  if (res && propertyOfExtractor(doc, x)) {
+  // MICRO-PROPRIETA-PARADATI p.3 · the reading becomes the value only by this
+  // explicit gesture, and never on a geometry (its value is its shape)
+  const fed = propertyOfExtractor(doc, x);
+  if (res && fed && !takesReadingAsValue(ui.store.node(fed))) desc.title = t("chain.geoUseValueNo");
+  if (res && fed && takesReadingAsValue(ui.store.node(fed))) {
     const u = el("button", "tv-act", t("chain.useValue"));
     u.type = "button";
     u.title = res;
@@ -246,6 +301,13 @@ export function propertyCard(ui: ChainUi, propertyId: string, ownerId: string | 
   }
   const head = el("div", "chain-prop");
   head.appendChild(linkBtn(ui, propertyId, "p"));
+  if (isGeometryProperty(p)) {
+    const chip0 = ui.aiChip?.(propertyId);
+    if (chip0) head.appendChild(chip0);
+    card.appendChild(head);
+    card.appendChild(geometryValueEl(store, propertyId, ui.jump));
+    return chainBody(ui, card, propertyId, heir);
+  }
   const val = el("input", "chain-value");
   val.value = propertyValue(p);
   val.placeholder = t("chain.valuePh");
@@ -259,7 +321,13 @@ export function propertyCard(ui: ChainUi, propertyId: string, ownerId: string | 
   const chip = ui.aiChip?.(propertyId);
   if (chip) head.appendChild(chip);
   card.appendChild(head);
+  return chainBody(ui, card, propertyId, heir);
+}
 
+/** The card's chain under its head: the combiners and readings, the gestures. */
+function chainBody(ui: ChainUi, card: HTMLElement, propertyId: string, heir: boolean): HTMLElement {
+  const store = ui.store;
+  const doc = store.doc;
   const prov = provenanceOf(doc, propertyId);
   for (const c of prov.combiners) {
     const row = el("div", "chain-row comb");

@@ -23,6 +23,8 @@ import {
   IS_ON_RESOURCE,
   deriveCombinerName,
   initialName,
+  nextExtractorOrdinal,
+  ordinalTag,
   renameOnAttach,
   sourceOfExtractor,
   type ExtractorSource,
@@ -56,14 +58,72 @@ const inn = (doc: EmDocument, id: string, type: string): string[] =>
   edges(doc).filter((e) => e.target === id && e.edge_type === type).map((e) => e.source);
 const uniq = <T,>(xs: T[]): T[] => [...new Set(xs)];
 
-/** A property's value. EMStudio writes it in `description` (`setPropertyValue`);
- *  s3Dgraphy's importers also leave it in `data.value`. */
+/** A property's value. ONE place is the true one: `data.value`, s3Dgraphy's
+ *  `PropertyNode.value` (the exporter lifts it there, `source_changed` compares
+ *  it). `description` is the second place EMStudio also writes
+ *  (`setPropertyValue` writes both, together) and the only one some older
+ *  files have: it is read when `data.value` is empty — a normalisation on
+ *  reading, nothing is rewritten until somebody changes the value
+ *  (MICRO-PROPRIETA-PARADATI p.1: «construction_technique» of SU020 has its
+ *  value in `data.value` only, and the Inspector, reading `description`, showed
+ *  it empty). */
 export function propertyValue(p: EmNode | undefined): string {
   if (!p) return "";
-  const d = String(p.description ?? "").trim();
-  if (d) return d;
   const v = ((p.data ?? {}) as Record<string, unknown>).value;
-  return v == null ? "" : String(v);
+  if (v != null && String(v).trim() !== "") return String(v).trim();
+  return String(p.description ?? "").trim();
+}
+
+/** the qualia type of the proxy: a property whose payload is a semantic shape */
+export const GEOMETRY_PROPERTY_TYPE = "geometry";
+/** Is this the geometry (proxy) property of a unit? */
+export function isGeometryProperty(p: EmNode | undefined): boolean {
+  return p?.node_type === "property" && propertyKey(p) === GEOMETRY_PROPERTY_TYPE;
+}
+
+/** What a geometry property's value is. s3Dgraphy (`geometry.proxy`): the value
+ *  is a REFERENCE to its semantic shape (`data.value` = the shape's id,
+ *  `has_semantic_shape` to it), never numbers. `shape` is that shape (the edge
+ *  first, else the id in the value); `empty` when it holds nothing — no convex
+ *  shape, no sphere, no file (`data.url`, `has_linked_resource`); `stray` is a
+ *  text written in the value that is NOT the shape's reference (a reading copied
+ *  there before p.3), shown, never removed by reading it. */
+export interface GeometryValue { shape: string | null; shapeName: string; empty: boolean; stray: string | null;
+                                 /** the shape's file (its `data.url`, else its linked resource's url) */
+                                 file: string | null }
+export function geometryValueOf(doc: EmDocument, propertyId: string): GeometryValue {
+  const p = nodeOf(doc, propertyId);
+  const raw = propertyValue(p);
+  const byEdge = out(doc, propertyId, HAS_SEMANTIC_SHAPE).find((id) => nodeOf(doc, id));
+  const shape = byEdge ?? (raw && nodeOf(doc, raw)?.node_type === "semantic_shape" ? raw : null);
+  const sd = (nodeOf(doc, shape ?? undefined)?.data ?? {}) as Record<string, unknown>;
+  const parts = (k: string) => Array.isArray(sd[k]) && (sd[k] as unknown[]).length > 0;
+  const res = shape ? out(doc, shape, "has_linked_resource").map((r) => nodeOf(doc, r)).find((r) => !!r) : undefined;
+  const url = String(sd.url ?? "").trim() || String(((res?.data ?? {}) as Record<string, unknown>).url ?? "").trim()
+    || (res ? String(res.name ?? "") : "");
+  const file = url || null;
+  const empty = !shape || !(parts("convexshapes") || parts("spheres") || !!file || !!res);
+  const stray = raw && raw !== shape && !nodeOf(doc, raw) ? raw : null;
+  return { shape, shapeName: String(nodeOf(doc, shape ?? undefined)?.name ?? shape ?? ""), empty, stray, file };
+}
+
+/** «Toglila»: the value field of a geometry goes back to the reference to its
+ *  shape (and the description that repeated a reading is emptied). An explicit
+ *  gesture, one undo step; nothing when there is no shape to refer to. */
+export function restoreGeometryValue(store: DocumentStore, propertyId: string): boolean {
+  const g = geometryValueOf(store.doc, propertyId);
+  const p = store.node(propertyId);
+  if (!p || !g.shape || !g.stray) return false;
+  store.batch(() => store.updateNode(propertyId, {
+    description: "", data: { ...((p.data ?? {}) as Record<string, unknown>), value: g.shape } }));
+  return true;
+}
+
+/** May «Usa come valore» write this property? Not a geometry: its value is the
+ *  reference to its shape, and a reading's text written there would cut the
+ *  property off its shape (p.3) — the reading stays in the chain. */
+export function takesReadingAsValue(p: EmNode | undefined): boolean {
+  return !!p && p.node_type === "property" && !isGeometryProperty(p);
 }
 /** The name a property is compared by: its qualia type, else its name. */
 export function propertyKey(p: EmNode | undefined): string {
@@ -511,6 +571,38 @@ export function addReading(
   });
 }
 
+/**
+ * MICRO-PROPRIETA-PARADATI p.5 · «link this property to a document»: in EM
+ * there is always the extractor in between — property → extractor
+ * (`has_data_provenance`, or under its combiner when it is the second source)
+ * → document (`extracted_from`). ONE undo step: `addReading` from the document,
+ * the text the person wrote as the extractor's description, and the name they
+ * gave when it is not the one the naming rule chose (`<document>.<NN>`).
+ */
+export function extractBetween(
+  store: DocumentStore,
+  propertyId: string,
+  documentId: string,
+  opts: { name?: string; description?: string } = {},
+): NewReading {
+  return store.batch(() => {
+    const r = addReading(store, propertyId, { kind: "document", id: documentId },
+                         { description: opts.description ?? "" });
+    const want = opts.name?.trim();
+    if (want && want !== String(store.node(r.extractorId)?.name ?? ""))
+      store.updateNode(r.extractorId, { name: want });
+    return r;
+  });
+}
+
+/** The name the extractor `extractBetween` makes would take from the naming
+ *  rule (`<document>.<NN>`), for the form that asks it. */
+export function nextExtractorNameFor(doc: EmDocument, documentId: string): string {
+  const d = nodeOf(doc, documentId);
+  const n = String(d?.name ?? "").trim();
+  return n ? `${n}.${ordinalTag(nextExtractorOrdinal(doc, n))}` : (initialName(doc, "extractor") ?? "Temp1");
+}
+
 /** The extractor under the property: `has_data_provenance`, or `combines` from
  *  its combiner — and THE SECOND SOURCE (the property had a direct extractor
  *  and no combiner: a combiner `C.<n>` is made and the direct ones move under
@@ -710,7 +802,7 @@ export function useAsValue(store: DocumentStore, extractorId: string,
                            vertices?: (regionId: string) => Vec3[] | null): string | null {
   const p = propertyOfExtractor(store.doc, extractorId);
   const v = resultOf(store.doc, extractorId, vertices);
-  if (!p || !v) return null;
+  if (!p || !v || !takesReadingAsValue(store.node(p))) return null;
   store.batch(() => store.setPropertyValue(p, v));
   return p;
 }

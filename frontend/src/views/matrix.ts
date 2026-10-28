@@ -244,6 +244,33 @@ export function buildMatrixScene(
   for (const lane of scene.lanes)
     lane.paradataGroupId = pdgOfEpochNode.get(lane.id);
 
+  // MICRO-PROPRIETA-PARADATI p.2 · a paradata node born after the archival
+  // layout (an extractor added from the Inspector, its new document, the
+  // combiner of a second source) has no stored position, and a node without
+  // one was never drawn: D.01.61 under `geometry` of SU020 stayed out of the
+  // Matrix and of PD_SU020. It takes, for the view only, the place of its unit's
+  // paradata group, sized as a sibling: an open group arranges it with the
+  // others (`paradataGroupScene`), a folded one hides it. Nothing is written.
+  const pdgOfMember = new Map<string, string>();
+  for (const [pdg, ms] of propsOfPdg)
+    if (pdReferentNode.has(pdg)) for (const m of ms) if (!pdgOfMember.has(m)) pdgOfMember.set(m, pdg);
+  const sizeOfType = new Map<string, { w: number; h: number }>();
+  const provisional = (id: string): { x: number; y: number; w: number; h: number } | undefined => {
+    const pdg = pdgOfMember.get(id);
+    const at = pdg ? positions[pdg] : undefined;
+    if (!pdg || !at) return undefined;
+    // sized as a node of its own type (a member of the group first)
+    const type = nodeById.get(id)?.node_type ?? "";
+    let size = sizeOfType.get(type);
+    if (!size) {
+      const same = (m: string) => m !== id && nodeById.get(m)?.node_type === type && !!positions[m];
+      const sib = (propsOfPdg.get(pdg) ?? []).find(same) ?? doc.graph.nodes.find((n) => same(n.id))?.id;
+      size = sib ? { w: positions[sib].w, h: positions[sib].h } : { w: 120, h: 30 };
+      sizeOfType.set(type, size);
+    }
+    return { x: at.x, y: at.y, ...size };
+  };
+
   // base placement from the stored layout
   const relocateIds: string[] = [];
   const outlineIds: string[] = [];
@@ -258,7 +285,7 @@ export function buildMatrixScene(
     // B1 (#25) · a place is not drawn in the time projection, even when a
     // layout saved before the rule still holds a position for it
     if (ancestorsOf(node.node_type).includes("LocationNodeGroup")) continue;
-    const r = positions[node.id];
+    const r = positions[node.id] ?? provisional(node.id);
     if (!r) continue;
     const sn: SceneNode = {
       id: node.id,
