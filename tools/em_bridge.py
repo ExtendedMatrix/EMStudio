@@ -1814,6 +1814,92 @@ BRIDGE_LEVEL = 45   # 30 also = /validate
 #: the files of a tileset a server may send gzipped (MICRO-TILESET-CARTELLA)
 _GZIPPED_TILE = re.compile(r"\.(b3dm|i3dm|pnts|cmpt|glb|json|subtree)$", re.IGNORECASE)
 
+#: MICRO-OTTIMIZZA-3 · the DTC stamps beside served files, read once per stamp
+#: mtime: (stamp path, its mtime_ns) → (sha256 hex, size_bytes) or None
+_STAMP_SEEN: dict = {}
+
+
+def _stamp_digest(full, st):
+    """MICRO-OTTIMIZZA-3 · the sha256 the DTC stamp beside ``full``
+    (``<file>.stamp.json``, dtcstamp's sidecar) gives these bytes — when it
+    still speaks of them: an ARTIFACT stamp (``self.digest`` a sha256, not a
+    members or emstruct digest), its ``measures.size_bytes`` the file's size,
+    written after the file was. Else None: not stamped, or stamped before the
+    file changed (a copy is newer than its stamp: not trusted). The stamp is
+    read once per its mtime — a .3tz asks this at every tile."""
+    sp = full + ".stamp.json"
+    try:
+        sst = os.stat(_long_path(sp))
+    except OSError:
+        return None
+    key = (sp, sst.st_mtime_ns)
+    if key not in _STAMP_SEEN:
+        got = None
+        try:
+            with open(_long_path(sp), "r", encoding="utf-8") as fh:
+                itself = (json.load(fh) or {}).get("self") or {}
+            digest = str(itself.get("digest") or "")
+            size = (itself.get("measures") or {}).get("size_bytes")
+            if (itself.get("digest_covers") or "artifact") == "artifact" \
+                    and re.fullmatch(r"sha256:[0-9a-f]{64}", digest):
+                got = (digest[7:], size)
+        except (OSError, ValueError, AttributeError):
+            got = None
+        if len(_STAMP_SEEN) > 512:
+            _STAMP_SEEN.clear()
+        _STAMP_SEEN[key] = got
+    got = _STAMP_SEEN[key]
+    if not got or sst.st_mtime_ns < st.st_mtime_ns \
+            or (got[1] is not None and int(got[1]) != st.st_size):
+        return None
+    return got[0]
+
+
+def _file_validators(full, st):
+    """MICRO-OTTIMIZZA-3 · ``(etag, last_modified, cache_control)`` of a served
+    file. The ETag is the stamp's sha256 when the file is stamped
+    (``"sha256-<hex>"``: the page keys its tile cache on it, `tile-cache.ts`),
+    else its mtime and size — strong either way, so a Range is cached and
+    resumed on it. A stamped .3tz is IMMUTABLE (a published archive whose bytes
+    the stamp names); everything else — a folder being worked on — stays
+    revalidated after 60 s, now answered 304 instead of the bytes again."""
+    import email.utils
+
+    digest = _stamp_digest(full, st)
+    etag = f'"sha256-{digest}"' if digest else f'"{st.st_mtime_ns:x}-{st.st_size:x}"'
+    last_modified = email.utils.formatdate(st.st_mtime, usegmt=True)
+    if digest and full.lower().endswith(".3tz"):
+        return etag, last_modified, "public, max-age=31536000, immutable"
+    return etag, last_modified, "max-age=60, must-revalidate"
+
+
+def _not_modified(headers, etag, mtime):
+    """RFC 9110 §13.1: If-None-Match first (weak comparison, ``*``); only
+    without it, If-Modified-Since against the mtime in whole seconds."""
+    import email.utils
+
+    inm = headers.get("If-None-Match")
+    if inm:
+        bare = lambda t: t[2:] if t.startswith("W/") else t  # noqa: E731
+        tags = [t.strip() for t in inm.split(",")]
+        return "*" in tags or any(bare(t) == bare(etag) for t in tags)
+    ims = headers.get("If-Modified-Since")
+    if ims:
+        try:
+            return int(mtime) <= int(email.utils.parsedate_to_datetime(ims).timestamp())
+        except (TypeError, ValueError, IndexError, OverflowError):
+            return False
+    return False
+
+
+def _range_still_valid(headers, etag, last_modified):
+    """If-Range: the Range only when the client holds this very entity (the
+    strong ETag, or the exact date); else the whole file (RFC 9110 §13.1.5)."""
+    ir = (headers.get("If-Range") or "").strip()
+    if not ir:
+        return True
+    return ir == etag if ir.startswith(('"', "W/")) else ir == last_modified
+
 
 def _stage_tileset_pair(root_json: str, folder: str) -> str:
     """MICRO-TILESET-CARTELLA · a folder with ``tileset.json`` at its root made
@@ -2469,11 +2555,15 @@ def make_handler(api):
             # RISORSA-FILE · `Range` (a .3tz read from its end, then each tile at
             # its offset) and the headers a partial answer is read by.
             # MICRO-SPAZIO-3D · `X-EM-Path` / `X-EM-Overwrite` ride with /fs/write
+            # MICRO-OTTIMIZZA-3 · the conditionals a page may set itself
             self.send_header("Access-Control-Allow-Headers",
-                             "Content-Type, X-EM-Filename, Range, X-EM-Path, X-EM-Overwrite")
+                             "Content-Type, X-EM-Filename, Range, X-EM-Path, X-EM-Overwrite, "
+                             "If-None-Match, If-Modified-Since, If-Range")
             # MICRO-PERCORSI-WINDOWS · `X-EM-File: cloud-only` (a placeholder)
+            # MICRO-OTTIMIZZA-3 · `ETag`: the tile cache's key of an archive
             self.send_header("Access-Control-Expose-Headers",
-                             "Content-Range, Accept-Ranges, Content-Length, X-EM-File, X-EM-Tile")
+                             "Content-Range, Accept-Ranges, Content-Length, X-EM-File, X-EM-Tile, "
+                             "ETag, Last-Modified")
 
         def do_OPTIONS(self):
             if not self._gate():
@@ -5364,12 +5454,22 @@ def make_handler(api):
             full = _short_path(os.path.realpath(_long_path(os.path.expanduser(str(raw)))))
             return full if _fs_inside_roots(full) else None
 
-        def _send_bytes(self, data, media, *, cache="max-age=86400", extra=None, body=True):
+        def _send_bytes(self, data, media, *, cache="max-age=86400", extra=None, body=True, etag=None):
+            # MICRO-OTTIMIZZA-3 · with an ETag, revalidated: a 304, not the bytes again
+            if etag and self.headers.get("If-None-Match") and _not_modified(self.headers, etag, 0):
+                self.send_response(304)
+                self._cors()
+                self.send_header("ETag", etag)
+                self.send_header("Cache-Control", cache)
+                self.end_headers()
+                return
             self.send_response(200)
             self._cors()
             self.send_header("Content-Type", media)
             self.send_header("Content-Length", str(len(data)))
             self.send_header("Cache-Control", cache)
+            if etag:
+                self.send_header("ETag", etag)
             for k, v in (extra or {}).items():
                 self.send_header(k, v)
             self.end_headers()
@@ -5425,8 +5525,11 @@ def make_handler(api):
                     if not data:
                         self._send_bytes(G.EMPTY_PNG, "image/png", extra={"X-EM-Tile": "empty"}, body=body)
                         return
+                    # MICRO-OTTIMIZZA-3 · the tile's ETag: its package's mtime and size, its address
+                    pst = os.stat(_long_path(path))
                     self._send_bytes(data, G.TYPE_MEDIA.get(a.tile_type, "application/octet-stream"),
-                                     cache="max-age=60, must-revalidate", extra={"X-EM-Tile": "package"}, body=body)
+                                     cache="max-age=60, must-revalidate", extra={"X-EM-Tile": "package"}, body=body,
+                                     etag=f'"{pst.st_mtime_ns:x}-{pst.st_size:x}-{z}-{x}-{y}"')
                 elif route.startswith("/tiles/archive/"):
                     # a package's own bytes, by range (a PMTiles reader in the page)
                     self._fs_file(_fs_at_path("/fs/at/" + parsed.path[len("/tiles/archive/"):]), body=body)
@@ -5574,15 +5677,31 @@ def make_handler(api):
             # header (the bytes may still come: reading starts the download); a
             # read that fails on one says so instead of «cannot read»
             cloud = _file_state(full) == "cloud-only"
+            fh = None
             try:
-                size = os.path.getsize(disk)
-                fh = open(disk, "rb") if body else None
+                st = os.stat(disk)
+                size = st.st_size
+                # MICRO-OTTIMIZZA-3 · its validators (ETag, Last-Modified): a
+                # request that holds this very file — a Range too — is
+                # answered 304 before the file is opened
+                etag, last_modified, cache_control = _file_validators(full, st)
+                fresh = _not_modified(self.headers, etag, st.st_mtime)
+                if not fresh and body:
+                    fh = open(disk, "rb")
             except OSError as exc:
                 if cloud:
                     self._json({"ok": False, "code": "cloud-only", "error": CLOUD_ONLY_MESSAGE},
                                status=409, headers={"X-EM-File": "cloud-only"})
                     return
                 self._fail(403, f"cannot read that file: {exc.strerror}")
+                return
+            if fresh:
+                self.send_response(304)
+                self._cors()
+                self.send_header("ETag", etag)
+                self.send_header("Last-Modified", last_modified)
+                self.send_header("Cache-Control", cache_control)
+                self.end_headers()
                 return
             # RISORSA-FILE · ONE byte range (`bytes=a-b`, `a-`, `-n`), answered
             # 206: a .3tz is read without extracting it — its central directory
@@ -5594,7 +5713,8 @@ def make_handler(api):
             partial = False
             rng = (self.headers.get("Range") or "").strip()
             m = re.fullmatch(r"bytes=(\d*)-(\d*)", rng) if rng else None
-            if m and (m.group(1) or m.group(2)):
+            # If-Range: a Range of an entity the client no longer has is the whole file
+            if m and (m.group(1) or m.group(2)) and _range_still_valid(self.headers, etag, last_modified):
                 if m.group(1):
                     start = int(m.group(1))
                     end = min(int(m.group(2)), size - 1) if m.group(2) else size - 1
@@ -5633,8 +5753,11 @@ def make_handler(api):
                 # Mild, and REVALIDATED: a folder being worked on changes under
                 # the window, so a long cache would show yesterday's photo with
                 # no way to tell. Long enough to survive a gallery scrolling
-                # back and forth.
-                self.send_header("Cache-Control", "max-age=60, must-revalidate")
+                # back and forth. MICRO-OTTIMIZZA-3 · revalidated on the ETag
+                # (a 304, not the bytes again); a stamped .3tz, immutable
+                self.send_header("ETag", etag)
+                self.send_header("Last-Modified", last_modified)
+                self.send_header("Cache-Control", cache_control)
                 self.end_headers()
                 if fh is not None:
                     # Streamed in chunks: a 200 MB orthophoto must not be read
@@ -7442,6 +7565,10 @@ def main() -> int:
     # next run. This does NOT help against a bridge that is still alive — for
     # that there is the message below, and dev.sh frees the port up front.
     ThreadingHTTPServer.allow_reuse_address = True
+    # MICRO-OTTIMIZZA-3 · a tileset's page opens six connections at once (and
+    # two windows twelve): the listen backlog of 5 refused some (ECONNRESET,
+    # measured in check-tile-cache)
+    ThreadingHTTPServer.request_queue_size = 128
     try:
         httpd = ThreadingHTTPServer((args.host, args.port), handler)
     except OSError as exc:

@@ -26,6 +26,8 @@
  * TempluMare archive in node with the same code.
  */
 
+import { archiveIdentity, type TileCache } from "./tile-cache";
+
 export const INDEX_NAME = "@3dtilesIndex1@";
 const SIG_EOCD = 0x06054b50, SIG_EOCD64 = 0x06064b50, SIG_LOC64 = 0x07064b50;
 const SIG_CDH = 0x02014b50, SIG_LFH = 0x04034b50;
@@ -37,8 +39,10 @@ export interface ByteSource {
   /** MICRO-OTTIMIZZA-3 · the last `length` bytes AND the size, in one read
    *  (HTTP: a suffix `Range`, whose `Content-Range` says the size) */
   tail?(length: number): Promise<{ bytes: Uint8Array; size: number }>;
-  /** what it is, and — for HTTP — whether the server honoured `Range` */
-  describe(): { kind: "blob" | "http"; ranges: boolean | null; downloaded: number };
+  /** what it is, and — for HTTP — whether the server honoured `Range`; the
+   *  URL and the validator of the archive (`ETag`), the persistent tile
+   *  cache's key (`tile-cache.ts`) */
+  describe(): { kind: "blob" | "http"; ranges: boolean | null; downloaded: number; url?: string; etag?: string | null };
 }
 
 export function blobSource(blob: Blob): ByteSource {
@@ -60,10 +64,12 @@ export function httpSource(url: string, fetchFn: typeof fetch = fetch.bind(globa
   let whole: Uint8Array | null = null;
   let ranges: boolean | null = null;
   let total: number | null = null;
+  let etag: string | null = null;
   let downloaded = 0;
   /** the answer to a `Range`: its bytes (206), or the whole archive kept (200) */
   const ask = async (range: string): Promise<Uint8Array | null> => {
     const r = await fetchFn(url, { headers: { Range: range } });
+    etag ??= r.headers.get("etag");
     if (r.status === 206) {
       ranges = true;
       const m = /\/(\d+)\s*$/.exec(r.headers.get("content-range") ?? "");
@@ -104,7 +110,7 @@ export function httpSource(url: string, fetchFn: typeof fetch = fetch.bind(globa
       return { bytes: w.subarray(Math.max(0, w.byteLength - length)), size: w.byteLength };
     },
     read: grab,
-    describe: () => ({ kind: "http", ranges, downloaded }),
+    describe: () => ({ kind: "http", ranges, downloaded, url, etag }),
   };
 }
 
@@ -466,6 +472,9 @@ export function archiveBase(): string {
  * The 3DTilesRendererJS plugin: every file of the tileset under `base` is read
  * from the archive. Registered FIRST, so its `fetchData` answers before the
  * renderer's own `fetch`; a URL outside `base` is not its business (null).
+ * MICRO-OTTIMIZZA-3 · with a `cache` (`tile-cache.ts`), a tile read once is
+ * kept on disk under the archive's identity: asked again — the tile came back
+ * into view after the memory let it go, or another session — no request.
  */
 export class Tiles3tzPlugin {
   readonly name = "EM_3TZ";
@@ -473,14 +482,23 @@ export class Tiles3tzPlugin {
   readonly served: string[] = [];
   /** the archive once open (null while it opens, or if it failed) */
   opened: Archive3tz | null = null;
-  constructor(readonly archive: Promise<Archive3tz>, readonly base: string) {
+  /** the tiles the persistent cache answered */
+  cacheHits = 0;
+  constructor(readonly archive: Promise<Archive3tz>, readonly base: string, readonly cache: TileCache | null = null) {
     archive.then((a) => { this.opened = a; }, () => { /* the first fetch says why */ });
   }
   fetchData(url: string): Promise<Response> | null {
     if (!url.startsWith(this.base)) return null;
     const rel = decodeURIComponent(url.slice(this.base.length).split(/[?#]/)[0]);
     return this.archive.then(async (a) => {
-      const bytes = await gunzipIfGzip(await a.readEntry(rel));
+      const id = this.cache?.enabled ? archiveIdentity(a.describe()) : null;
+      const key = id ? `a ${id} ${normalizePath(rel)}` : null;
+      let bytes = key ? await this.cache!.get(key) : null;
+      if (bytes) this.cacheHits++;
+      else {
+        bytes = await gunzipIfGzip(await a.readEntry(rel));
+        if (bytes && key) void this.cache!.put(key, bytes);
+      }
       if (!bytes) return new Response(null, { status: 404, statusText: `${rel} is not in the archive` });
       this.served.push(rel);
       return new Response(bytes as BodyInit, { status: 200 });

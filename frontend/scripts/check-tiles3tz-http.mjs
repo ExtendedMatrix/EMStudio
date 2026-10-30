@@ -13,7 +13,9 @@
 //     longer than the margin, a second; through the index, one or two;
 //   · archives written here: stored, zip64, a local extra of 200 bytes, a
 //     directory longer than the tail, a non-ASCII name;
-//   · a server without Range: the archive downloaded once, as before.
+//   · a server without Range: the archive downloaded once, as before;
+//   · the persistent tile cache (`src/tile-cache.ts`): a second pass after the
+//     tiles left the memory asks nothing.
 import * as esbuild from "esbuild";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
@@ -30,6 +32,7 @@ const load = async (contents) => {
   return import("data:text/javascript;base64," + Buffer.from(b.outputFiles[0].text).toString("base64"));
 };
 const Z = await load(`export * from ${JSON.stringify(entry)};`);
+const C = MEASURE_ONLY ? null : await load(`export * from "./tile-cache";`);
 
 let checks = 0;
 const fails = [];
@@ -284,6 +287,31 @@ try {
        "a plain zip (no index): one request to open, one an entry");
   }
 
+  // ── the persistent cache: a second pass asks nothing ────────────────────
+  {
+    const mem = C.memoryStore();
+    const cache = new C.TileCache(mem, { maxMB: 64 });
+    const url = `${BASE}/a.3tz`;
+    const pass = async () => {
+      const plugin = new Z.Tiles3tzPlugin(Z.Archive3tz.open(Z.httpSource(url)), "https://emstudio.invalid/__3tz__/1/", cache);
+      const before = { reqs: log.reqs, bytes: log.bytes };
+      await plugin.archive;
+      const after = { reqs: log.reqs, bytes: log.bytes };
+      for (const n of ["tileset.json", ...T1.names]) {
+        const r = await plugin.fetchData(`${plugin.base}${n}`);
+        if (r.status !== 200) throw new Error(`${n}: ${r.status}`);
+        await r.arrayBuffer();
+      }
+      await cache.flush();
+      return { open: after.reqs - before.reqs, tiles: log.reqs - after.reqs, tileBytes: log.bytes - after.bytes, plugin };
+    };
+    reset();
+    const p1 = await pass();
+    const p2 = await pass();
+    ok(p1.tiles === 301 && p1.tileBytes > 5e6, `cache, pass 1: ${p1.tiles} tile requests, ${(p1.tileBytes / 1e6).toFixed(1)} MB`);
+    eq([p2.tiles, p2.tileBytes], [0, 0], "cache, pass 2 (a new layer, the tiles out of memory): 0 tile requests, 0 bytes");
+    ok(p2.plugin.cacheHits === 301, `…301 tiles from the cache (${p2.plugin.cacheHits})`);
+  }
 } finally {
   http.close();
 }

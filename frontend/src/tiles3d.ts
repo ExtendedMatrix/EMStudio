@@ -60,6 +60,7 @@
  */
 import { engine } from "./embed3d-native";
 import { NodeRoadTilesPlugin, roadFetch } from "./node-road";
+import { tileCache, TileCachePlugin } from "./tile-cache";
 import { readLeaves, type Box, type LeafResult } from "./tileset-leaves";
 import { estimateErrorScale, onEarth, textureSideFor, volumeDiagonal, type GeErrors } from "./tiles-budget";
 export { estimateErrorScale, onEarth, textureSideFor, volumeDiagonal, type GeErrors } from "./tiles-budget";
@@ -354,11 +355,16 @@ export function createTilesLayer(E: any, T: any, url: string, camera0: any, rend
     const base = T.archiveBase();
     // MICRO-SPAZIO-FIRMATO · a .3tz of the room's store is read signed
     const archive = T.sourceFor(url, roadFetch as typeof fetch).then((src: any) => T.Archive3tz.open(src));
-    archivePlugin = new T.Tiles3tzPlugin(archive, base);
+    // MICRO-OTTIMIZZA-3 · its tiles kept on disk under the archive's identity
+    archivePlugin = new T.Tiles3tzPlugin(archive, base, tileCache());
     url = `${base}tileset.json`;
   }
   const tiles = new T.TilesRenderer(url);
   if (archivePlugin) tiles.registerPlugin(archivePlugin);
+  // MICRO-OTTIMIZZA-3 · a folder's files over HTTP: from the persistent tile
+  // cache when fresh or still the same (a HEAD on the ETag) — after the
+  // archive's plugin, before the room's road, whose signed fetch it is handed
+  else if (!opts.source && /^https?:/i.test(url)) tiles.registerPlugin(new TileCachePlugin(tileCache(), roadFetch));
   // MICRO-SPAZIO-FIRMATO · a tileset in the room's store: its files signed
   tiles.registerPlugin(new NodeRoadTilesPlugin());
   tiles.registerPlugin(new T.ImplicitTilingPlugin());

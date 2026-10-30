@@ -473,6 +473,7 @@ import {
   TILES_MEMORY_MB,
   type Settings,
 } from "./settings";
+import { TILE_CACHE_MB, tileCache } from "./tile-cache";
 import { envelope as wireEnvelope } from "./wire";
 import {
   imageService as iiifImageService,
@@ -16128,6 +16129,30 @@ document.getElementById("set-node-add")?.addEventListener("keydown", (e) => {
   if (e.key === "Enter") { e.preventDefault(); document.getElementById("set-node-add-btn")?.click(); }
 });
 
+/** MICRO-OTTIMIZZA-3 · the persistent tile cache's ceiling, from the
+ *  Preferences — set before any tileset opens (the cache itself opens at the
+ *  first tile) */
+tileCache().setCeilingMB(getSettings().viewer.tileCacheMB ?? TILE_CACHE_MB);
+
+/** …what it holds, said beside its field; «Svuota la cache delle tile» */
+async function paintTileCacheHint(): Promise<void> {
+  const el = document.getElementById("set-tile-cache-hint");
+  const btn = document.getElementById("set-tile-cache-clear") as HTMLButtonElement | null;
+  if (!el) return;
+  const st = await tileCache().stats().catch(() => null);
+  el.textContent = !st || !("caches" in globalThis) ? t("settings.tileCacheOff")
+    : t("settings.tileCacheHint", { n: st.entries.toLocaleString(getLocale()), size: formatBytes(st.bytes) });
+  if (btn) {
+    btn.disabled = !st || !st.entries;
+    btn.onclick = async () => {
+      btn.disabled = true;
+      await tileCache().clear().catch(() => undefined);
+      toast(t("settings.tileCacheCleared"));
+      void paintTileCacheHint();
+    };
+  }
+}
+
 function openSettings(section?: string): void {
   const s = getSettings();
   void paintOrphans();
@@ -16162,6 +16187,10 @@ function openSettings(section?: string): void {
   const tmh = document.getElementById("set-tiles-memory-hint");
   if (tmh) tmh.textContent = t("settings.tilesMemoryHint", { mb: grouped(TILES_MEMORY_MB),
     gb: String((navigator as { deviceMemory?: number }).deviceMemory ?? "?") });
+  // MICRO-OTTIMIZZA-3 · the tiles kept on disk: the ceiling, what is held, «Svuota»
+  const tc = numIn("set-tile-cache-mb");
+  if (tc) tc.value = grouped(s.viewer.tileCacheMB ?? TILE_CACHE_MB);
+  void paintTileCacheHint();
   // MICRO-SPAZIO-3D-2 · the Space's navigation
   const chk = (id: string, v: boolean) => { const c = document.getElementById(id) as HTMLInputElement | null; if (c) c.checked = v; };
   chk("set-nav-emulate3", s.viewer.emulate3Button);
@@ -16513,6 +16542,8 @@ settingsModal.addEventListener("click", (e) => {
       lodLimitMB: posNum("set-lod-limit-mb", LOD_LIMIT_MB),
       lodLimitPoints: posNum("set-lod-limit-points", LOD_LIMIT_POINTS),
       tilesMemoryMB: Math.max(64, posNum("set-tiles-memory-mb", TILES_MEMORY_MB)),
+      tileCacheMB: ((v) => (v.trim() === "0" ? 0 : posNum("set-tile-cache-mb", TILE_CACHE_MB)))(
+        (document.getElementById("set-tile-cache-mb") as HTMLInputElement | null)?.value ?? ""),
       emulate3Button: !!(document.getElementById("set-nav-emulate3") as HTMLInputElement | null)?.checked,
       emulateNumpad: !!(document.getElementById("set-nav-numpad") as HTMLInputElement | null)?.checked,
       autoPerspective: (document.getElementById("set-nav-autopersp") as HTMLInputElement | null)?.checked ?? true,
@@ -16540,6 +16571,7 @@ settingsModal.addEventListener("click", (e) => {
   for (const k of ["identity", "texts", "sync", "interaction", "viewer", "iiif", "files", "ai", "developer"] as const)
     if (JSON.stringify(before[k]) !== JSON.stringify(next[k])) changed.push(t(`settings.w.${k}`));
   saveSettings(next);
+  tileCache().setCeilingMB(next.viewer.tileCacheMB);
   settingsOpenedWith = null;          // saved: nothing to put back
   const resume = aiPending;
   closeSettings();

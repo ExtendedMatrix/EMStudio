@@ -4076,6 +4076,54 @@ test("R3.3tz", "visualizzatore · TempluMare_cesium.3tz si apre senza estrarlo e
     detail: { folder, archive } };
 });
 
+test("R3.cache", "MICRO-OTTIMIZZA-3 p.6 · le tile non si riscaricano a ogni ritorno: TempluMare_cesium.3tz aperto, le sue tile restano nella cache su disco (Cache Storage); ricaricata la pagina e riaperto, l'archivio si apre con la sua coda e nessuna tile torna dalla rete; le Preferenze ‹Visualizzatori› hanno il tetto in MB (1024) accanto alla memoria delle tile, dicono quante tile tiene e «Svuota la cache delle tile» la svuota", async () => {
+  const root = await rootPath();
+  const url = `${root}/base/RM/TempluMare_cesium.3tz`;
+  const mutate = (d) => { for (const n of d.graph.nodes) if (n.id === "RES_TS") n.data.url = url; return d; };
+  const o = await openTilesDoc("D1", { at: `${root}/tiles.em.json`, mutate });
+  const first = await tilesSettle(o.p, o.win, (s) => (s.files ?? []).length >= 1, 30000);
+  // the archive's requests (Resource Timing: the bridge is another origin, the
+  // sizes of its bodies are not said — the requests are counted)
+  const archiveReads = () => o.p.evaluate(() => performance.getEntriesByType("resource")
+    .filter((e) => /TempluMare_cesium\.3tz/.test(decodeURIComponent(e.name))).length);
+  const reads1 = await archiveReads();
+  await o.p.waitForTimeout(4500);                       // the cache's index saved (3 s after the last change)
+  const kept = await o.p.evaluate(async () => (await (await caches.open("em-tiles-v1")).keys()).length);
+  await o.p.reload();
+  await o.p.waitForSelector("#workspace-bar .ws-tab", { timeout: 30000 });
+  await o.p.evaluate(([x, path]) => window.__EM_DRAG__.openAt(x, path), [mutate(fixture("tiles")), `${root}/tiles.em.json`]);
+  await o.p.waitForTimeout(800);
+  const win2 = await o.p.evaluate((id) => window.__EM_DRAG__.openDoc(id), "D1");
+  const second = await tilesSettle(o.p, win2, (s) => (s.files ?? []).length >= (first.files ?? []).length, 30000);
+  const reads2 = await archiveReads();
+  await o.p.evaluate(() => document.getElementById("btn-settings").click());
+  await o.p.waitForSelector("#settings-modal:not(.hidden)");
+  await o.p.click('#settings-tabs [data-tab-target="viewers"]');
+  await o.p.waitForTimeout(500);
+  const prefs = await o.p.evaluate(() => ({
+    mb: document.getElementById("set-tile-cache-mb")?.value ?? null,
+    hint: document.getElementById("set-tile-cache-hint")?.textContent ?? "",
+    btn: document.getElementById("set-tile-cache-clear")?.textContent ?? "",
+    beside: !!document.getElementById("set-tiles-memory-mb")?.closest("section")?.querySelector("#set-tile-cache-mb") }));
+  await o.p.screenshot({ path: SHOT("r3-cache-preferenze") }).catch(() => {});
+  await o.p.click("#set-tile-cache-clear");
+  await o.p.waitForTimeout(800);
+  const after = await o.p.evaluate(async () => ({ hint: document.getElementById("set-tile-cache-hint")?.textContent ?? "",
+    held: (await caches.keys()).includes("em-tiles-v1") ? (await (await caches.open("em-tiles-v1")).keys()).length : 0 }));
+  await o.ctx.close();
+  const conds = {
+    opened: (first.files ?? []).length >= 1 && (second.files ?? []).length >= (first.files ?? []).length,
+    kept: kept > (first.files ?? []).length,
+    // the second opening: the tail of the archive (1–2 requests), no tile
+    noTiles: reads2 >= 1 && reads2 <= 2 && reads1 > reads2,
+    prefs: prefs.mb === "1.024" || prefs.mb === "1024" || prefs.mb === "1 024",
+    hint: /Ora: [\d.]+ tile/.test(prefs.hint) && prefs.btn === "Svuota la cache delle tile" && prefs.beside,
+    cleared: /Ora: 0 tile/.test(after.hint) && after.held === 0,
+    noErrors: !o.errors.length,
+  };
+  return { pass: Object.values(conds).every(Boolean), detail: { conds, first: first.files?.length, second: second.files?.length, kept, reads1, reads2, prefs, after, errors: o.errors } };
+});
+
 // ── NIGHT-RISORSA-FILE · parte 4: impacchettare un tileset ─────────────────
 test("R4.pack", "impacchettare · nella finestra File il pulsante è acceso anche nel web (scrive il bridge: MICRO-OTTIMIZZA-1); il flusso, un lavoro del bridge, scrive il .3tz e il grafo ha UNA risorsa con due forme", async () => {
   const root = await rootPath();

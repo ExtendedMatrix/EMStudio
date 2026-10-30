@@ -3,6 +3,7 @@
 // sections (appearance, layout defaults…) can slot in later.
 
 import { type SyncAccept, SYNC_ACCEPTS } from "./sync";
+import { TILE_CACHE_MB } from "./tile-cache";
 
 export interface SyncSettings {
   /** ws (local/plain) or wss (TLS). A browser can only be a WS *client*. */
@@ -128,6 +129,9 @@ export interface ViewerSettings {
   lodLimitPoints: number;
   /** the memory ceiling of a tileset's automatic refinement, MB */
   tilesMemoryMB: number;
+  /** MICRO-OTTIMIZZA-3 · the ceiling of the tiles kept ON DISK (the browser's
+   *  Cache Storage, `tile-cache.ts`), MB; 0 = no persistent cache */
+  tileCacheMB: number;
   /** MICRO-SPAZIO-3D-2 · the Space's navigation, as Blender's Preferences ▸
    *  Input: «Emula mouse a 3 tasti» (Alt + left = middle), «Emula tastierino»
    *  (the top row's digits are the keypad's), «Auto Perspective», and what a
@@ -222,7 +226,7 @@ const DEFAULTS: Settings = {
   // No default host on purpose: a wrong one would look like a broken viewer.
   // The Heriverse deployment guide mounts the wapp at /a/heriverse.
   viewer: { atonBase: "", heriverseApp: "a/heriverse",
-            lodLimitMB: LOD_LIMIT_MB, lodLimitPoints: LOD_LIMIT_POINTS, tilesMemoryMB: TILES_MEMORY_MB,
+            lodLimitMB: LOD_LIMIT_MB, lodLimitPoints: LOD_LIMIT_POINTS, tilesMemoryMB: TILES_MEMORY_MB, tileCacheMB: TILE_CACHE_MB,
             emulate3Button: false, emulateNumpad: false, autoPerspective: true, leftDrag: "auto",
             invertTrackpadOrbit: false },
   // No default base, for the same reason the ATON one has none: a wrong host

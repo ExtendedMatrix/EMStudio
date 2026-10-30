@@ -710,6 +710,15 @@
               <input id="set-tiles-memory-mb" type="text" inputmode="numeric" />
             </label>
             <p class="settings-hint" id="set-tiles-memory-hint"></p>
+            <!-- MICRO-OTTIMIZZA-3 · the tiles kept on disk, beside their memory -->
+            <label
+              ><span data-i18n="settings.tileCacheMB">Tile cache on disk (MB)</span>
+              <input id="set-tile-cache-mb" type="text" inputmode="numeric" />
+            </label>
+            <p class="settings-hint">
+              <span id="set-tile-cache-hint"></span>
+              <button type="button" id="set-tile-cache-clear" data-i18n="settings.tileCacheClear">Empty the tile cache</button>
+            </p>
           </section>
 
           <!-- MICRO-SPAZIO-3D-2 · the Space's navigation, as Blender's Preferences ▸ Input -->
