@@ -6854,7 +6854,7 @@ test("DC1.menu", "DOVE-CHI-MENU p.1 · il File della pagina viene dalla tabella:
   await ctx.close();
   // MICRO-CONTENTS-1 D9 · «New EM project…» beside New
   // MICRO-ARCHIVIO-2 · the project's four together under New: Nuovo progetto, Apri progetto, Riordina, Chiudi il progetto
-  const want = ["new", "newProject", "openProject", "reorderProject", "closeProject", "open", "openRecent", "openReplace", "close", "—", "save", "saveAs", "saveAll", "pin", "—",
+  const want = ["new", "newProject", "openProject", "reorderProject", "closeProject", "revealDoc", "open", "openRecent", "openReplace", "close", "—", "save", "saveAs", "saveAll", "pin", "—",
     "import", "export", "integrate", "relocate", "collect", "—", "createRoom", "bringIntoRoom"];
   return { pass: JSON.stringify(file) === JSON.stringify(want) && JSON.stringify(edit) === JSON.stringify(["undo", "redo"])
       && help.includes("settingsHelp") && help.includes("aboutHelp") && !help.includes("updatesHelp")
