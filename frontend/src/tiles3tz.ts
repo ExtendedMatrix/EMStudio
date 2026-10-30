@@ -34,6 +34,9 @@ const SIG_CDH = 0x02014b50, SIG_LFH = 0x04034b50;
 export interface ByteSource {
   size(): Promise<number>;
   read(offset: number, length: number): Promise<Uint8Array>;
+  /** MICRO-OTTIMIZZA-3 · the last `length` bytes AND the size, in one read
+   *  (HTTP: a suffix `Range`, whose `Content-Range` says the size) */
+  tail?(length: number): Promise<{ bytes: Uint8Array; size: number }>;
   /** what it is, and — for HTTP — whether the server honoured `Range` */
   describe(): { kind: "blob" | "http"; ranges: boolean | null; downloaded: number };
 }
@@ -58,13 +61,12 @@ export function httpSource(url: string, fetchFn: typeof fetch = fetch.bind(globa
   let ranges: boolean | null = null;
   let total: number | null = null;
   let downloaded = 0;
-  const grab = async (offset: number, length: number): Promise<Uint8Array> => {
-    if (whole) return whole.subarray(offset, offset + length);
-    const r = await fetchFn(url, { headers: { Range: `bytes=${offset}-${offset + length - 1}` } });
+  /** the answer to a `Range`: its bytes (206), or the whole archive kept (200) */
+  const ask = async (range: string): Promise<Uint8Array | null> => {
+    const r = await fetchFn(url, { headers: { Range: range } });
     if (r.status === 206) {
       ranges = true;
-      const cr = r.headers.get("content-range") ?? "";
-      const m = /\/(\d+)\s*$/.exec(cr);
+      const m = /\/(\d+)\s*$/.exec(r.headers.get("content-range") ?? "");
       if (m) total = Number(m[1]);
       const b = new Uint8Array(await r.arrayBuffer());
       downloaded += b.byteLength;
@@ -75,24 +77,31 @@ export function httpSource(url: string, fetchFn: typeof fetch = fetch.bind(globa
     whole = new Uint8Array(await r.arrayBuffer());
     downloaded += whole.byteLength;
     total = whole.byteLength;
-    return whole.subarray(offset, offset + length);
+    return null;
+  };
+  // `ask` may have set it: read through a function, not a narrowed variable
+  const kept = (): Uint8Array | null => whole;
+  const grab = async (offset: number, length: number): Promise<Uint8Array> => {
+    const w = kept();
+    if (w) return w.subarray(offset, offset + length);
+    return (await ask(`bytes=${offset}-${offset + length - 1}`)) ?? kept()!.subarray(offset, offset + length);
   };
   return {
     async size() {
       if (total !== null) return total;
       // a suffix range answers the size in Content-Range (and 22 bytes we need)
-      const r = await fetchFn(url, { headers: { Range: "bytes=-1" } });
-      if (r.status === 206) {
-        ranges = true;
-        const m = /\/(\d+)\s*$/.exec(r.headers.get("content-range") ?? "");
-        await r.arrayBuffer();
-        if (m) return (total = Number(m[1]));
+      await ask("bytes=-1");
+      if (total === null) throw new Error(`${url}: no size in the answer to a Range`);
+      return total;
+    },
+    async tail(length) {
+      if (!kept()) {
+        const b = await ask(`bytes=-${length}`);
+        if (b && total !== null) return { bytes: b, size: total };
+        if (b) throw new Error(`${url}: no size in the answer to a Range`);
       }
-      if (!r.ok) throw new Error(`${url}: ${r.status}`);
-      ranges = false;
-      whole = new Uint8Array(await r.arrayBuffer());
-      downloaded += whole.byteLength;
-      return (total = whole.byteLength);
+      const w = kept()!;
+      return { bytes: w.subarray(Math.max(0, w.byteLength - length)), size: w.byteLength };
     },
     read: grab,
     describe: () => ({ kind: "http", ranges, downloaded }),
@@ -152,59 +161,195 @@ function compareKey(a: Uint8Array, ao: number, b: Uint8Array): number {
 export interface ArchiveStats {
   entries: number;
   indexBytes: number;
-  /** the reads made to open it (EOCD, the directory's tail, the index) */
+  /** the reads made to open it (the tail; the rest of a long directory; the index) */
   openReads: number;
   zip64: boolean;
+  /** MICRO-OTTIMIZZA-3 · where the entries were found: the central directory
+   *  (offset, name length and size of each: one request a tile), or — for a
+   *  directory over `cdMaxBytes` — the index (the offset only) */
+  directory: "central" | "index";
 }
 
-/** A `.3tz`, opened: its index, and the entries it serves on request. */
-export class Archive3tz {
-  private constructor(private src: ByteSource, private index: Uint8Array, readonly stats: ArchiveStats) {}
+/** MICRO-OTTIMIZZA-3 (E.D.'s MICRO, measured in `_datasets/cc-runs/bench-3tz`:
+ *  at 20 ms of latency the .3tz read 3× slower than its folder, 3000 tiles in
+ *  37 s against 13 s, the first tile at 290 ms against 55 ms — three Range in a
+ *  row a tile, five to open). What ONE request from the end brings: the EOCD
+ *  with any comment (64 KB at most), zip64's locator and record, and in most
+ *  tilesets the whole central directory (3000 tiles: ~190 KB; TempluMare's
+ *  7302: ~480 KB, the rest in a second request). */
+export const TAIL_BYTES = 256 * 1024;
+/** a central directory over this is not read: the index is, 24 B an entry
+ *  (~250 000 entries: the archives the index was made for) */
+export const CD_MAX_BYTES = 16 * 1024 * 1024;
+/** what a tile's request asks past its name for the LOCAL extra field (none
+ *  in a canonical 3tz, 20 B with zip64; Info-ZIP's timestamps ~28): a longer
+ *  one costs a second request */
+export const EXTRA_MARGIN = 64;
+/** through the index the size is not known before the local header: its
+ *  first request brings this much of the data with it, a longer tile the
+ *  rest in a second */
+export const SPECULATIVE_BYTES = 64 * 1024;
 
-  /** Open from the end: EOCD, the last directory record (the index), the index. */
-  static async open(src: ByteSource): Promise<Archive3tz> {
-    let reads = 0;
-    const read = async (o: number, l: number) => { reads++; return src.read(o, l); };
-    const size = await src.size();
-    // a canonical 3tz has no comment: the EOCD (and zip64's locator before it)
-    // are in the last kilobyte; only a zip with a comment needs the 64 KB look
-    let tailLen = Math.min(size, 1024);
-    let tail = await read(size - tailLen, tailLen);
-    let tv = new DataView(tail.buffer, tail.byteOffset, tail.byteLength);
-    const findEocd = () => {
-      for (let i = tail.length - 22; i >= 0; i--) if (tv.getUint32(i, true) === SIG_EOCD) return i;
-      return -1;
-    };
-    let e = findEocd();
-    if (e < 0 && tailLen < size) {
-      tailLen = Math.min(size, 22 + 0xffff);
-      tail = await read(size - tailLen, tailLen);
-      tv = new DataView(tail.buffer, tail.byteOffset, tail.byteLength);
-      e = findEocd();
+export interface OpenOptions { tailBytes?: number; cdMaxBytes?: number }
+
+/** an entry of the central directory: what reading it in one request needs */
+interface DirEntry { lho: number; csize: number; nlen: number; xlen: number; method: number }
+
+const concat = (a: Uint8Array, b: Uint8Array): Uint8Array => {
+  const out = new Uint8Array(a.length + b.length);
+  out.set(a); out.set(b, a.length);
+  return out;
+};
+
+/** The end of a zip, from one read of its tail: the EOCD (zip64's when it says
+ *  so), and the central directory — sliced from the tail when it is inside it,
+ *  its first part asked when it is longer (up to `cdMax`), else not read (null:
+ *  the caller goes to the index). */
+async function openEnd(src: ByteSource, tailBytes: number, cdMax: number) {
+  let reads = 0;
+  const read = async (o: number, l: number) => { reads++; return src.read(o, l); };
+  let tail: Uint8Array, size: number;
+  if (src.tail) { reads++; ({ bytes: tail, size } = await src.tail(tailBytes)); }
+  else { size = await src.size(); const l = Math.min(size, tailBytes); tail = await read(size - l, l); }
+  let tailAt = size - tail.length;
+  let tv = new DataView(tail.buffer, tail.byteOffset, tail.byteLength);
+  const findEocd = () => {
+    for (let i = tail.length - 22, stop = Math.max(0, tail.length - 22 - 0xffff); i >= stop; i--) {
+      if (tv.getUint32(i, true) === SIG_EOCD) return i;
     }
-    if (e < 0) throw new Error("not a zip: no end of central directory");
-    let cdSize = tv.getUint32(e + 12, true), cdOffset = tv.getUint32(e + 16, true);
-    let entries = tv.getUint16(e + 10, true);
-    let zip64 = false;
-    if (cdOffset === 0xffffffff || cdSize === 0xffffffff || entries === 0xffff) {
-      const loc = e - 20;
-      if (loc < 0 || tv.getUint32(loc, true) !== SIG_LOC64) throw new Error("zip64 without its locator");
-      const off64 = u64(tv, loc + 8);
-      const rec = await read(off64, 56);
-      const rv = new DataView(rec.buffer, rec.byteOffset, rec.byteLength);
-      if (rv.getUint32(0, true) !== SIG_EOCD64) throw new Error("zip64 end of directory not found");
-      entries = u64(rv, 32); cdSize = u64(rv, 40); cdOffset = u64(rv, 48);
-      zip64 = true;
+    return -1;
+  };
+  let e = findEocd();
+  if (e < 0 && tail.length < Math.min(size, 22 + 0xffff)) {
+    // a tail shorter than the longest comment (a caller's choice): the 64 KB look
+    const l = Math.min(size, 22 + 0xffff);
+    tail = await read(size - l, l); tailAt = size - l;
+    tv = new DataView(tail.buffer, tail.byteOffset, tail.byteLength);
+    e = findEocd();
+  }
+  if (e < 0) throw new Error("not a zip: no end of central directory");
+  /** bytes [at, at+len) — from the tail when they are in it */
+  const bytesAt = async (at: number, len: number): Promise<Uint8Array> =>
+    at >= tailAt && at + len <= size ? tail.subarray(at - tailAt, at - tailAt + len) : read(at, len);
+  let cdSize = tv.getUint32(e + 12, true), cdOffset = tv.getUint32(e + 16, true);
+  let records = tv.getUint16(e + 10, true);
+  let zip64 = false;
+  if (cdOffset === 0xffffffff || cdSize === 0xffffffff || records === 0xffff) {
+    const loc = e - 20;
+    if (loc < 0 || tv.getUint32(loc, true) !== SIG_LOC64) throw new Error("zip64 without its locator");
+    const rec = await bytesAt(u64(tv, loc + 8), 56);
+    const rv = new DataView(rec.buffer, rec.byteOffset, rec.byteLength);
+    if (rv.getUint32(0, true) !== SIG_EOCD64) throw new Error("zip64 end of directory not found");
+    records = u64(rv, 32); cdSize = u64(rv, 40); cdOffset = u64(rv, 48);
+    zip64 = true;
+  }
+  const cdEnd = cdOffset + cdSize;
+  let cd: Uint8Array | null = null;
+  if (cdOffset >= tailAt) cd = tail.subarray(cdOffset - tailAt, cdEnd - tailAt);
+  else if (cdSize <= cdMax) cd = concat(await read(cdOffset, tailAt - cdOffset), tail.subarray(0, Math.max(0, cdEnd - tailAt)));
+  /** the directory's last `len` bytes (the index's record is the last one) */
+  const cdTail = (len: number) => bytesAt(cdEnd - len, len);
+  return { size, zip64, records, cdSize, cd, cdTail, bytesAt, reads: () => reads };
+}
+
+/** Every record of a central directory: path → where its bytes are. The last
+ *  record's path too (a 3tz's must be the index). */
+function parseDirectory(cd: Uint8Array): { dir: Map<string, DirEntry>; last: string; lastEntry: DirEntry | null } {
+  const cv = new DataView(cd.buffer, cd.byteOffset, cd.byteLength);
+  const dir = new Map<string, DirEntry>();
+  const dec = new TextDecoder();
+  let last = "", lastEntry: DirEntry | null = null;
+  for (let p = 0; p + 46 <= cd.length && cv.getUint32(p, true) === SIG_CDH;) {
+    const nlen = cv.getUint16(p + 28, true), xlen = cv.getUint16(p + 30, true), clen = cv.getUint16(p + 32, true);
+    let csize = cv.getUint32(p + 20, true), usize = cv.getUint32(p + 24, true), lho = cv.getUint32(p + 42, true);
+    const name = normalizePath(dec.decode(cd.subarray(p + 46, p + 46 + nlen)));
+    if (usize === 0xffffffff || csize === 0xffffffff || lho === 0xffffffff) {
+      let q = p + 46 + nlen; const end = q + xlen;
+      while (q + 4 <= end) {
+        const tag = cv.getUint16(q, true), ln = cv.getUint16(q + 2, true);
+        if (tag === 1) {
+          let r = q + 4;
+          if (usize === 0xffffffff) { usize = u64(cv, r); r += 8; }
+          if (csize === 0xffffffff) { csize = u64(cv, r); r += 8; }
+          if (lho === 0xffffffff) lho = u64(cv, r);
+          break;
+        }
+        q += 4 + ln;
+      }
     }
-    // the LAST directory record is the index (specification): read the tail of
-    // the directory and walk back to its signature with the index's name
+    const at: DirEntry = { lho, csize, nlen, xlen, method: cv.getUint16(p + 10, true) };
+    if (!name.endsWith("/")) dir.set(name, at);
+    last = name; lastEntry = at;
+    p += 46 + nlen + xlen + clen;
+  }
+  return { dir, last, lastEntry };
+}
+
+/** The bytes of the entry whose local header is at `lho`, in ONE request when
+ *  its size is known (the central directory's): [lho, lho+30+name+margin+csize),
+ *  the data cut after the local header is read. A local extra past the margin
+ *  — or, through the index, data past the speculative read — costs a second.
+ *  The name in the local header must be the one asked (an MD5 collision, or a
+ *  directory that lies, is refused, as 3DSC's reader refuses it). */
+async function readLocal(src: ByteSource, path: string, lho: number, known: DirEntry | null): Promise<Uint8Array> {
+  const want = normalizePath(path);
+  const nlen0 = known?.nlen ?? new TextEncoder().encode(want).length;
+  let buf = await src.read(lho, 30 + nlen0 + EXTRA_MARGIN + (known ? known.csize : SPECULATIVE_BYTES));
+  /** at least `n` bytes from `lho`: one more request for what is missing */
+  const ensure = async (n: number) => {
+    if (buf.length < n) buf = concat(buf, await src.read(lho + buf.length, n - buf.length));
+  };
+  await ensure(30);
+  const hv = () => new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
+  if (hv().getUint32(0, true) !== SIG_LFH) throw new Error(`${path}: no local header at ${lho}`);
+  const flags = hv().getUint16(6, true), method = hv().getUint16(8, true);
+  const nlen = hv().getUint16(26, true), xlen = hv().getUint16(28, true);
+  const start = 30 + nlen + xlen;
+  let csize: number;
+  if (known) csize = known.csize;
+  else {
+    await ensure(start);
+    csize = hv().getUint32(18, true);
+    if (csize === 0xffffffff) {
+      for (let p = 30 + nlen; p + 4 <= start;) {
+        const tag = hv().getUint16(p, true), ln = hv().getUint16(p + 2, true);
+        if (tag === 1) { csize = u64(hv(), p + 12); break; }
+        p += 4 + ln;
+      }
+    }
+    if (flags & 0x8 && !csize) throw new Error(`${path}: sizes only in a data descriptor (not a canonical 3tz)`);
+  }
+  await ensure(start + csize);
+  // normalised as the directory's keys are (a zip from the Finder writes NFD)
+  const name = normalizePath(new TextDecoder().decode(buf.subarray(30, 30 + nlen)));
+  if (name !== want) throw new Error(`the index points to ${name}, not ${path}`);
+  const data = buf.subarray(start, start + csize);
+  if (method === 0) return data;
+  if (method === 8) return inflateRaw(data);
+  throw new Error(`${path}: compression method ${method} is not read here`);
+}
+
+/** A `.3tz`, opened: its entries, served on request. */
+export class Archive3tz {
+  private constructor(private src: ByteSource, private dir: Map<string, DirEntry> | null,
+                      private index: Uint8Array | null, readonly stats: ArchiveStats) {}
+
+  /** Open from the end: ONE read of the tail (EOCD, zip64, the central
+   *  directory), a second when the directory is longer than the tail; the
+   *  index `@3dtilesIndex1@` only for a directory over `cdMaxBytes`. */
+  static async open(src: ByteSource, opts: OpenOptions = {}): Promise<Archive3tz> {
+    const end = await openEnd(src, opts.tailBytes ?? TAIL_BYTES, opts.cdMaxBytes ?? CD_MAX_BYTES);
+    if (end.cd) {
+      const { dir, last, lastEntry } = parseDirectory(end.cd);
+      // the LAST directory record is the index (specification)
+      if (last !== INDEX_NAME || !lastEntry) throw new Error(`not a 3tz: the last entry is not ${INDEX_NAME}`);
+      if (lastEntry.method !== 0) throw new Error(`${INDEX_NAME} must be stored, not compressed (method ${lastEntry.method})`);
+      dir.delete(INDEX_NAME);
+      return new Archive3tz(src, dir, null, { entries: dir.size, indexBytes: lastEntry.csize, openReads: end.reads(),
+                                              zip64: end.zip64, directory: "central" });
+    }
+    // a directory too long to read: its last record (the index), then the index
     const want = new TextEncoder().encode(INDEX_NAME);
-    const cdTailOf = async (len: number): Promise<Uint8Array> => {
-      const at = cdOffset + cdSize - len;
-      return at >= size - tailLen
-        ? tail.subarray(at - (size - tailLen), cdOffset + cdSize - (size - tailLen))
-        : read(at, len);
-    };
     const findIndexRecord = (buf: Uint8Array): number => {
       const v = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
       for (let i = buf.length - 46; i >= 0; i--) {
@@ -214,85 +359,48 @@ export class Archive3tz {
       }
       return -1;
     };
-    // the record of the index is short (no extra field in a canonical 3tz): the
-    // directory's last 1 KB first, the long look only if it is not there
-    let cdTail = await cdTailOf(Math.min(cdSize, 1024));
+    // the record of the index is short (no extra field in a canonical 3tz)
+    let cdTail = await end.cdTail(Math.min(end.cdSize, 1024));
     let rec = findIndexRecord(cdTail);
-    if (rec < 0 && cdTail.length < cdSize) {
-      cdTail = await cdTailOf(Math.min(cdSize, 46 + want.length + 0xffff));
+    if (rec < 0 && cdTail.length < end.cdSize) {
+      cdTail = await end.cdTail(Math.min(end.cdSize, 46 + want.length + 0xffff));
       rec = findIndexRecord(cdTail);
     }
-    const cv = new DataView(cdTail.buffer, cdTail.byteOffset, cdTail.byteLength);
     if (rec < 0) throw new Error(`not a 3tz: the last entry is not ${INDEX_NAME}`);
-    const method = cv.getUint16(rec + 10, true);
-    if (method !== 0) throw new Error(`${INDEX_NAME} must be stored, not compressed (method ${method})`);
-    let isize = cv.getUint32(rec + 20, true);
-    let lho = cv.getUint32(rec + 42, true);
-    if (isize === 0xffffffff || lho === 0xffffffff) {
-      const nlen = cv.getUint16(rec + 28, true), xlen = cv.getUint16(rec + 30, true);
-      let p = rec + 46 + nlen; const end = p + xlen;
-      while (p + 4 <= end) {
-        const tag = cv.getUint16(p, true), ln = cv.getUint16(p + 2, true);
-        if (tag === 1) {
-          let q = p + 4;
-          if (cv.getUint32(rec + 24, true) === 0xffffffff) q += 8;          // uncompressed
-          if (isize === 0xffffffff) { isize = u64(cv, q); q += 8; }
-          if (lho === 0xffffffff) lho = u64(cv, q);
-          break;
-        }
-        p += 4 + ln;
-      }
-    }
-    const lfh = await read(lho, 30);
-    const lv = new DataView(lfh.buffer, lfh.byteOffset, lfh.byteLength);
-    if (lv.getUint32(0, true) !== SIG_LFH) throw new Error("the index's local header is not there");
-    const index = await read(lho + 30 + lv.getUint16(26, true) + lv.getUint16(28, true), isize);
+    const { dir } = parseDirectory(cdTail.subarray(rec));
+    const at = dir.get(INDEX_NAME)!;
+    if (at.method !== 0) throw new Error(`${INDEX_NAME} must be stored, not compressed (method ${at.method})`);
+    const index = await readLocal(src, INDEX_NAME, at.lho, at);
     if (index.length % 24) throw new Error("index length is not a multiple of 24");
-    return new Archive3tz(src, index, { entries: index.length / 24, indexBytes: isize, openReads: reads, zip64 });
+    return new Archive3tz(src, null, index, { entries: index.length / 24, indexBytes: at.csize, openReads: end.reads() + 1,
+                                              zip64: end.zip64, directory: "index" });
   }
 
-  /** The local header offset of `path`, or null (binary search on the MD5). */
+  /** The local header offset of `path`, or null (the directory; else a
+   *  binary search on the MD5 in the index). */
   offsetOf(path: string): number | null {
+    if (this.dir) return this.dir.get(normalizePath(path))?.lho ?? null;
+    const index = this.index!;
     const key = md5(new TextEncoder().encode(normalizePath(path)));
-    const dv = new DataView(this.index.buffer, this.index.byteOffset, this.index.byteLength);
+    const dv = new DataView(index.buffer, index.byteOffset, index.byteLength);
     let lo = 0, hi = this.stats.entries - 1;
     while (lo <= hi) {
       const mid = (lo + hi) >> 1;
-      const c = compareKey(this.index, mid * 24, key);
+      const c = compareKey(index, mid * 24, key);
       if (c === 0) return u64(dv, mid * 24 + 16);
       if (c < 0) lo = mid + 1; else hi = mid - 1;
     }
     return null;
   }
 
-  /** The bytes of `path`, or null when the archive has no such entry. The
-   *  name in the local header must be the one asked (an MD5 collision is
-   *  refused, as 3DSC's reader refuses it). */
+  /** The bytes of `path`, or null when the archive has no such entry. */
   async readEntry(path: string): Promise<Uint8Array | null> {
-    const off = this.offsetOf(path);
-    if (off === null) return null;
-    const head = await this.src.read(off, 30);
-    const hv = new DataView(head.buffer, head.byteOffset, head.byteLength);
-    if (hv.getUint32(0, true) !== SIG_LFH) throw new Error(`${path}: no local header at ${off}`);
-    const flags = hv.getUint16(6, true), method = hv.getUint16(8, true);
-    let csize = hv.getUint32(18, true);
-    const nlen = hv.getUint16(26, true), xlen = hv.getUint16(28, true);
-    const nx = await this.src.read(off + 30, nlen + xlen);
-    const name = new TextDecoder().decode(nx.subarray(0, nlen));
-    if (name !== normalizePath(path)) throw new Error(`the index points to ${name}, not ${path}`);
-    if (csize === 0xffffffff) {
-      const xv = new DataView(nx.buffer, nx.byteOffset + nlen, xlen);
-      for (let p = 0; p + 4 <= xlen;) {
-        const tag = xv.getUint16(p, true), ln = xv.getUint16(p + 2, true);
-        if (tag === 1) { csize = u64(xv, p + 12); break; }
-        p += 4 + ln;
-      }
+    if (this.dir) {
+      const at = this.dir.get(normalizePath(path));
+      return at ? readLocal(this.src, path, at.lho, at) : null;
     }
-    if (flags & 0x8 && !csize) throw new Error(`${path}: sizes only in a data descriptor (not a canonical 3tz)`);
-    const data = await this.src.read(off + 30 + nlen + xlen, csize);
-    if (method === 0) return data;
-    if (method === 8) return inflateRaw(data);
-    throw new Error(`${path}: compression method ${method} is not read here`);
+    const off = this.offsetOf(path);
+    return off === null ? null : readLocal(this.src, path, off, null);
   }
 
   describe(): ReturnType<ByteSource["describe"]> { return this.src.describe(); }
@@ -304,57 +412,18 @@ export class Archive3tz {
  * at its offset. A tileset zipped by hand, or by RealityScan's export folder
  * zipped in the Finder, has no `@3dtilesIndex1@` — `Archive3tz` refuses it,
  * this reads it. Stored and deflated entries; zip64 sizes and offsets.
+ * MICRO-OTTIMIZZA-3 · opened and read as a .3tz is: one read of the tail (and
+ * the rest of a long directory), one request an entry.
  */
 export class ZipArchive {
-  private constructor(private src: ByteSource,
-                      private dir: Map<string, { lho: number; csize: number }>,
-                      readonly zip64: boolean) {}
+  private constructor(private src: ByteSource, private dir: Map<string, DirEntry>, readonly zip64: boolean) {}
 
-  static async open(src: ByteSource): Promise<ZipArchive> {
-    const size = await src.size();
-    const tailLen = Math.min(size, 22 + 0xffff);
-    const tail = await src.read(size - tailLen, tailLen);
-    const tv = new DataView(tail.buffer, tail.byteOffset, tail.byteLength);
-    let e = -1;
-    for (let i = tail.length - 22; i >= 0; i--) if (tv.getUint32(i, true) === SIG_EOCD) { e = i; break; }
-    if (e < 0) throw new Error("not a zip: no end of central directory");
-    let cdSize = tv.getUint32(e + 12, true), cdOffset = tv.getUint32(e + 16, true);
-    let zip64 = false;
-    if (cdOffset === 0xffffffff || cdSize === 0xffffffff || tv.getUint16(e + 10, true) === 0xffff) {
-      const loc = e - 20;
-      if (loc < 0 || tv.getUint32(loc, true) !== SIG_LOC64) throw new Error("zip64 without its locator");
-      const rec = await src.read(u64(tv, loc + 8), 56);
-      const rv = new DataView(rec.buffer, rec.byteOffset, rec.byteLength);
-      if (rv.getUint32(0, true) !== SIG_EOCD64) throw new Error("zip64 end of directory not found");
-      cdSize = u64(rv, 40); cdOffset = u64(rv, 48);
-      zip64 = true;
-    }
-    const cd = await src.read(cdOffset, cdSize);
-    const cv = new DataView(cd.buffer, cd.byteOffset, cd.byteLength);
-    const dir = new Map<string, { lho: number; csize: number }>();
-    const dec = new TextDecoder();
-    for (let p = 0; p + 46 <= cd.length && cv.getUint32(p, true) === SIG_CDH;) {
-      const nlen = cv.getUint16(p + 28, true), xlen = cv.getUint16(p + 30, true), clen = cv.getUint16(p + 32, true);
-      let csize = cv.getUint32(p + 20, true), usize = cv.getUint32(p + 24, true), lho = cv.getUint32(p + 42, true);
-      const name = normalizePath(dec.decode(cd.subarray(p + 46, p + 46 + nlen)));
-      if (usize === 0xffffffff || csize === 0xffffffff || lho === 0xffffffff) {
-        let q = p + 46 + nlen; const end = q + xlen;
-        while (q + 4 <= end) {
-          const tag = cv.getUint16(q, true), ln = cv.getUint16(q + 2, true);
-          if (tag === 1) {
-            let r = q + 4;
-            if (usize === 0xffffffff) { usize = u64(cv, r); r += 8; }
-            if (csize === 0xffffffff) { csize = u64(cv, r); r += 8; }
-            if (lho === 0xffffffff) lho = u64(cv, r);
-            break;
-          }
-          q += 4 + ln;
-        }
-      }
-      if (!name.endsWith("/") && name !== INDEX_NAME) dir.set(name, { lho, csize });
-      p += 46 + nlen + xlen + clen;
-    }
-    return new ZipArchive(src, dir, zip64);
+  static async open(src: ByteSource, opts: OpenOptions = {}): Promise<ZipArchive> {
+    // no index to fall back on: the directory is read whatever its length
+    const end = await openEnd(src, opts.tailBytes ?? TAIL_BYTES, Infinity);
+    const { dir } = parseDirectory(end.cd!);
+    dir.delete(INDEX_NAME);
+    return new ZipArchive(src, dir, end.zip64);
   }
 
   /** every file's path (folders implied, the 3tz index left out) */
@@ -362,15 +431,7 @@ export class ZipArchive {
 
   async readEntry(path: string): Promise<Uint8Array | null> {
     const at = this.dir.get(normalizePath(path));
-    if (!at) return null;
-    const head = await this.src.read(at.lho, 30);
-    const hv = new DataView(head.buffer, head.byteOffset, head.byteLength);
-    if (hv.getUint32(0, true) !== SIG_LFH) throw new Error(`${path}: no local header at ${at.lho}`);
-    const method = hv.getUint16(8, true);
-    const data = await this.src.read(at.lho + 30 + hv.getUint16(26, true) + hv.getUint16(28, true), at.csize);
-    if (method === 0) return data;
-    if (method === 8) return inflateRaw(data);
-    throw new Error(`${path}: compression method ${method} is not read here`);
+    return at ? readLocal(this.src, path, at.lho, at) : null;
   }
 
   describe(): ReturnType<ByteSource["describe"]> { return this.src.describe(); }
@@ -418,7 +479,8 @@ export class Tiles3tzPlugin {
   fetchData(url: string): Promise<Response> | null {
     if (!url.startsWith(this.base)) return null;
     const rel = decodeURIComponent(url.slice(this.base.length).split(/[?#]/)[0]);
-    return this.archive.then((a) => a.readEntry(rel)).then(gunzipIfGzip).then((bytes) => {
+    return this.archive.then(async (a) => {
+      const bytes = await gunzipIfGzip(await a.readEntry(rel));
       if (!bytes) return new Response(null, { status: 404, statusText: `${rel} is not in the archive` });
       this.served.push(rel);
       return new Response(bytes as BodyInit, { status: 200 });

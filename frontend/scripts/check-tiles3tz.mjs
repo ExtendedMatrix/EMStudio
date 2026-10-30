@@ -85,9 +85,11 @@ if (existsSync(`${BASE}/TempluMare_cesium.3tz`)) {
   const a = await Z.Archive3tz.open(src);
   const tOpen = performance.now() - t0;
   eq(a.stats.entries, 7302, "TempluMare.3tz: 7302 entries in the index");
-  // what opening costs: the index (7302 × 24 B) and a few hundred bytes more
-  ok(src.describe().downloaded < a.stats.indexBytes + 4096,
-    `…opened reading ${src.describe().downloaded} B of 199 MB — the index is ${a.stats.indexBytes} B (${src.describe().reads} reads, ${tOpen.toFixed(0)} ms)`);
+  // what opening costs (MICRO-OTTIMIZZA-3): the central directory (7302
+  // records, ~480 KB: offset, name and size of every tile, so that a tile is
+  // ONE read) — the tail and the rest of it, two reads; the index is not read
+  ok(a.stats.openReads === 2 && a.stats.directory === "central" && src.describe().downloaded < 1024 * 1024,
+    `…opened reading ${src.describe().downloaded} B of 199 MB, the central directory (${src.describe().reads} reads, ${tOpen.toFixed(0)} ms)`);
   const same = async (rel) => {
     const got = await a.readEntry(rel);
     const want = readFileSync(`${BASE}/TempluMare_cesium/${rel}`);
@@ -114,7 +116,7 @@ if (bridgeUp && existsSync(`${BASE}/TempluMare_cesium.3tz`)) {
   const src = Z.httpSource(url, f);
   const a = await Z.Archive3tz.open(src);
   eq(a.stats.entries, 7302, "…and the archive opens THROUGH the bridge, by ranges");
-  ok(src.describe().ranges === true && src.describe().downloaded < a.stats.indexBytes + 4096,
+  ok(src.describe().ranges === true && src.describe().downloaded < 1024 * 1024,
     `…reading ${src.describe().downloaded} B, not 199 MB`);
 } else console.log(`  (skipped: no bridge at ${BRIDGE})`);
 {
