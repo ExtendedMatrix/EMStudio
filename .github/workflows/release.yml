@@ -326,7 +326,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { os: macos-14, target: aarch64-apple-darwin, label: macos-arm64 }
+          - { os: macos-15, target: aarch64-apple-darwin, label: macos-arm64 }
           # NESSUN BINARIO INTEL PER macOS — deciso il 2026-09-16, e la riga è
           # tolta invece di essere spostata su un runner vivo. Girava su
           # `macos-13`, che GitHub ha ritirato (fine supporto 4 dic 2025): il job
