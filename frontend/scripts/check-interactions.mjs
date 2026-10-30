@@ -1839,7 +1839,9 @@ test("S3.labels3", "Spazio · MICRO-GIZMO-ASSI · le etichette separate: modelli
   await toggle("s3_labels_proxy");
   const back = await kinds();
   // a sketch (a cube of «Forme base»): no label until its switch is on
-  await p.click('.scn-outliner button[data-shape="cube"]'); await p.waitForTimeout(600);
+  // MICRO-SPAZIO-COMPATTO p.2 · «Forme base» is the «+ Forma ▾» menu (Shift+A's) now
+  await p.click('.scn-outliner [data-sol="add"]'); await p.waitForTimeout(250);
+  await p.click('.scn-add button[data-s3="add:cube"]'); await p.waitForTimeout(600);
   const sk0 = await kinds();
   await toggle("s3_labels_sketch");
   const sk1 = await kinds();
@@ -1960,10 +1962,10 @@ async function assocScene(name, { w = 1600, h = 1000 } = {}) {
   await spaceOn(p, "EP_MED");
   return { p, ctx, errors, dir };
 }
-// the palette may sit below the Outliner's fold in a small window: scrolled to first
+// MICRO-SPAZIO-COMPATTO p.2 · the base shapes: «+ Forma ▾» at the head of the Outliner (Shift+A's menu)
 const addCube = async (p) => {
-  await p.evaluate(() => { const b = document.querySelector('.scn-outliner button[data-shape="cube"]'); b.closest("details")?.setAttribute("open", ""); b.scrollIntoView({ block: "center" }); });
-  await p.click('.scn-outliner button[data-shape="cube"]'); await p.waitForTimeout(700);
+  await p.click('.scn-outliner [data-sol="add"]'); await p.waitForTimeout(250);
+  await p.click('.scn-add button[data-s3="add:cube"]'); await p.waitForTimeout(700);
 };
 const assocView = (p) => p.evaluate(() => {
   const s = document.querySelector("[data-assoc]");
@@ -2081,10 +2083,11 @@ test("S3.assocMenu", "Spazio · MICRO-PANNELLI-LATERALI p.2 · il clic destro su
         if ((o.overflow !== "visible" || o.overflowX !== "visible") && R.right <= A.right + 1 && R.bottom <= A.bottom + 1) return false; }
       return true; }).map((e) => String(e.className).slice(0, 40));
   });
+  // MICRO-SPAZIO-COMPATTO p.4 · the summary is folded by default (a chip on the view's line): its title first, then opened
   const out1 = await outside();
+  const foldTitle = await p.evaluate(() => document.querySelector(".scn-ov").title);
   await p.evaluate(() => document.querySelector(".scn-ov [data-fold=summary]")?.click()); await p.waitForTimeout(300);
   const out2 = await outside();
-  const foldTitle = await p.evaluate(() => document.querySelector(".scn-ov").title);
   await p.evaluate(() => document.querySelector(".scn-ov [data-fold=summary]")?.click()); await p.waitForTimeout(300);
   await p.screenshot({ path: `${process.env.SHOTS ?? "."}/s3-associa-inspector-stretto.png` }).catch(() => {});
   // a unit with a proxy: the question, «Aggiungi come parte»
@@ -3601,6 +3604,8 @@ test("T1.space", "3D Tiles · nella Scena 3D dello Spazio: il tileset dell'RM si
     && s.tiles.some((t) => t.files.length));
   await p.screenshot({ path: `${process.env.SHOTS ?? "."}/t1-spazio.png` }).catch(() => {});
   // «Più dettaglio qui» on RM1's strip, then a click on its root
+  // (MICRO-SPAZIO-COMPATTO p.3 · the tileset's strip is in the chip's popover: Alt+click opens it here)
+  await p.click(".scn-tchip", { modifiers: ["Alt"] }); await p.waitForTimeout(200);
   await p.click('.scn-strips .v3d-strip[data-id="RM1"] .tl-more');
   const at = await p.evaluate(() => document.querySelector(".scn-host").__spaceTileScreenOf("tiles/root.glb"));
   if (at) await p.mouse.click(at.x, at.y);
@@ -8572,7 +8577,8 @@ const poHead = (p, at) => p.evaluate((at) => {
   const tb = document.elementFromPoint(b.left + 40, b.top + b.height * 0.75)?.closest("table");
   const seen = (el) => { if (!el) return false; const r = el.getBoundingClientRect(); const hit = document.elementFromPoint(r.left + Math.min(20, r.width / 2), r.top + r.height / 2); return r.top >= b.top - 1 && !!hit && (hit === el || el.contains(hit)); };
   const th = tb?.tHead?.rows[0]?.cells[0];
-  const filt = tb?.querySelector("tr.tt-filters .tt-filter")?.closest("th");
+  // MICRO-SPAZIO-COMPATTO p.7 · the filters are IN the headings (one head row)
+  const filt = tb?.querySelector("thead .tt-filter")?.closest("th");
   const h4 = document.elementFromPoint(b.left + 60, b.top + 8)?.closest("h4")?.textContent ?? null;
   return { head, barH: Math.round(barRect.height), inBar, rowsInBody, clearShown, scrolled: body.scrollTop, headingSeen: seen(th), filterSeen: seen(filt), table: tb?.className ?? null, h4 };
 }, at);
@@ -8599,7 +8605,7 @@ test("PO2.head", "PANNELLI-OVERLAY p.2 · il Tabular ha una sola riga di testa (
   await ctx.close();
   const one = (r) => r.inBar && r.rowsInBody === 0 && !r.clearShown && r.headingSeen && r.filterSeen && r.scrolled > 0;
   const pass = ["Units", "Documents", "Claims"].every((k) => one(out[k]))
-    && out.Models.inBar && /mdl-px/.test(out.Models.table ?? "") && out.Models.headingSeen && /prox/i.test(out.Models.h4 ?? "")
+    && out.Models.inBar && /mdl-px/.test(out.Models.table ?? "") && out.Models.headingSeen && !out.Models.h4 /* MICRO-SPAZIO-COMPATTO p.7: no title over the tables */
     && !!col && filtered.clearShown && cleared.clearShown === false && cleared.left === 0 && filtered.count !== cleared.count && !errors.length;
   return { pass, detail: { ...out, col, filtered, cleared, errors } };
 });

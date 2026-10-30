@@ -154,6 +154,12 @@ export interface SceneTexts {
   centreEmpty?: string;
   /** MICRO-VIEWER-SPAZIO-EMTREE p.4 · the overlay «Statistiche», top left */
   stats?: (s: SceneStats) => string;
+  /** MICRO-SPAZIO-COMPATTO p.4 · …in short, on one small line (a click gives the words above) */
+  statsShort?: (s: SceneStats) => string;
+  /** p.3 · the chip in the scene's corner: a tileset's mode, levels and memory */
+  tilesChip?: (s: import("./tiles3d").TilesStatus, more: number) => string;
+  /** …its tooltip */
+  tilesChipTitle?: string;
   /** MICRO-GIZMO-ASSI · the navigation gizmo's tooltips: an end («Vista
    *  frontale (1)»), the column (zoom, pan, frame all, perspective ⇄ orthographic) */
   gizmo?: { axis: (a: GizmoAxis, view: AlignedView) => string; zoom: string; pan: string; home: string; ortho: string; label: string };
@@ -241,6 +247,11 @@ export interface SpaceSceneHandle {
   leavesOf(key: string): Promise<{ boxes: [V3, V3][]; tiles: number; leaves: number; unread: string[]; regions: number } | null>;
   /** MICRO-TILESET-CONTENITORE p.3 · what a container draws now, in words (the strip's line) */
   altLine(group: string): string | null;
+  /** MICRO-SPAZIO-COMPATTO p.3 · a tileset's controls for another place (the
+   *  Inspector): a second bar of the same layer; null when it is not drawn */
+  tilesControls(key: string): { el: HTMLElement; dispose(): void } | null;
+  /** …and the popover of the chip, opened or closed */
+  tilesPopover(open?: boolean): boolean;
   /** MICRO-SPAZIO-3D-2 · the view (aligned, orthographic) and the lens */
   view(): SceneView;
   setView(v: AlignedView): void;
@@ -397,6 +408,9 @@ export interface SpaceSceneOptions {
   onAltLine?: () => void;
   /** MICRO-SPAZIO-3D-3 p.10 · a version of a model in the flow was drawn (the Outliner's dot follows) */
   onVersionDrawn?: (rmId: string, versionId: string) => void;
+  /** MICRO-SPAZIO-COMPATTO p.3 · a click on the tileset's chip: true when the
+   *  Inspector took it (the controls there), else the chip opens its popover */
+  onTilesChip?: (itemId: string | null) => boolean;
   /** MICRO-PROVA-DEV48 p.5 · a file loaded and counted (triangles, vertices, its
    *  box in its own frame): the caller keeps it in the measures' cache */
   onMeasured?: (url: string, m: { tris: number; verts: number; box: [[number, number, number], [number, number, number]] | null }) => void;
@@ -714,7 +728,9 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
       // MICRO-3DTILES · the tilesets of the scene (one layer per tileset url,
       // kept across rebuilds: a tileset is not re-fetched when a toggle
       // flips), the LOD sets asked for once, and what the reader chose
-      type Live = { layer: TilesLayer; bar: ReturnType<typeof tilesBar>; ready: Promise<void>; itemId: string };
+      type Live = { layer: TilesLayer; bar: ReturnType<typeof tilesBar>; ready: Promise<void>; itemId: string;
+        /** MICRO-SPAZIO-COMPATTO p.3 · the same controls elsewhere (the Inspector's) */
+        extra: Set<ReturnType<typeof tilesBar>> };
       const layers = new Map<string, Live>();
       const lodSets = new Map<string, Promise<Array<{ level: number; url: string; bytes: number | null }>>>();
       const lodChoice = new Map<string, number>();
@@ -722,6 +738,52 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
       const useTileset = new Set<string>();
       const strips = document.createElement("div");
       strips.className = "scn-strips";
+      // MICRO-SPAZIO-COMPATTO p.3 · the strips under the scene (the tileset's
+      // controls, the versions by distance, what a container draws) are a
+      // popover now: a chip in the corner says them in one line; its click
+      // gives the controls to the Inspector, or opens the popover. A strip that
+      // asks for a decision (a model over the threshold) stays in sight.
+      const tchip = document.createElement("button");
+      tchip.type = "button";
+      tchip.className = "scn-tchip hidden";
+      tchip.dataset.tchip = "1";
+      for (const ev of ["pointerdown", "dblclick", "contextmenu", "wheel"]) tchip.addEventListener(ev, (e) => e.stopPropagation());
+      for (const ev of ["pointerdown", "dblclick", "contextmenu", "wheel"]) strips.addEventListener(ev, (e) => e.stopPropagation());
+      const popover = (open?: boolean): boolean => {
+        const on = open ?? !strips.classList.contains("open");
+        strips.classList.toggle("open", on);
+        tchip.setAttribute("aria-expanded", String(on));
+        return on;
+      };
+      tchip.addEventListener("click", (e) => {
+        e.stopPropagation();
+        // the popover open: the chip closes it; else the Inspector first
+        if (strips.classList.contains("open")) { popover(false); return; }
+        const first = liveLayers()[0]?.itemId ?? null;
+        if (!e.altKey && opts.onTilesChip?.(first)) return;
+        popover(true);
+      });
+      const chipTick = () => {
+        const ls = liveLayers().filter((l) => l.layer.object.visible);
+        const parts: string[] = [];
+        if (ls.length) {
+          const s0 = ls[0].layer.status();
+          parts.push(opts.texts.tilesChip?.(s0, ls.length - 1)
+            ?? `Tileset · ${s0.mode} · ${s0.level ? `L${s0.level[0]}–${s0.level[1]}` : "…"} · ${formatBytes(s0.bytes)} / ${formatBytes(s0.maxBytes)}`);
+        }
+        const fl = flowStripRef?.classList.contains("hidden") ? "" : flowStripRef?.textContent ?? "";
+        if (fl) parts.push(fl);
+        const txt = parts.join(" · ");
+        // (only the Space's scene: a Viewer keeps its strips in sight)
+        const any = host.classList.contains("scn-host") && !host.classList.contains("vw-scene") && (!!txt || [...strips.children].some((c) => !c.classList.contains("hidden") && c.classList.contains("v3d-strip") && !c.querySelector("[data-gate], .lod-pick")));
+        tchip.classList.toggle("hidden", !any);
+        const shown = txt || (opts.texts.tilesChipTitle ?? "Tileset");
+        if (tchip.textContent !== shown) tchip.textContent = shown;
+        const lines = [...strips.querySelectorAll<HTMLElement>(":scope > .v3d-strip:not(.hidden)")].map((x) => x.textContent?.trim() ?? "").filter(Boolean);
+        tchip.title = [opts.texts.tilesChipTitle ?? "", ...lines].filter(Boolean).join("\n");
+        host.classList.toggle("has-tchip", any);
+      };
+      let flowStripRef: HTMLElement | null = null;
       let T: any = null;
       /** the tilesets whose late root is watched (once each: a kept layer outlives the rebuilds) */
       const rootWatched = new WeakSet<object>();
@@ -742,7 +804,7 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
           // the root's volume is enough to frame and to label: the tiles come after
           layer.onChange(() => { const st = layer.status(); if (layer.rootReady() || st.failed) { clearTimeout(t0); res(); } });
         });
-        live = { layer, bar, ready, itemId };
+        live = { layer, bar, ready, itemId, extra: new Set() };
         layers.set(url, live);
         return live;
       };
@@ -919,6 +981,16 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
       statsEl.dataset.stats = "1";
       let statsOn = ov("s3_stats");
       statsEl.className = "scn-stats" + (statsOn ? "" : " hidden");
+      // MICRO-SPAZIO-COMPATTO p.4 · one small line; a click gives the words (and takes them back)
+      let statsLong = false;
+      let statsWords = "";
+      statsEl.addEventListener("pointerdown", (e) => e.stopPropagation());
+      statsEl.addEventListener("click", (e) => {
+        e.stopPropagation();
+        statsLong = !statsLong;
+        statsEl.classList.toggle("long", statsLong);
+        if (stats) statsEl.textContent = statsLong || !opts.texts.statsShort ? statsWords : opts.texts.statsShort(stats);
+      });
       let statAt = 0, statFrames = 0;
       let stats: SceneStats | null = null;
       const statCost: number[] = [];
@@ -933,12 +1005,14 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
         const r = renderer.info.render;
         const fps = statAt ? Math.round((statFrames * 1000) / (now - statAt)) : 0;
         stats = { triangles: r.triangles, vertices, objects, calls: r.calls, points: r.points, fps };
-        statsEl.textContent = opts.texts.stats?.(stats) ?? `${r.triangles} ▲ · ${vertices} · ${objects} · ${fps} FPS`;
+        statsWords = opts.texts.stats?.(stats) ?? `${r.triangles} ▲ · ${vertices} · ${objects} · ${fps} FPS`;
+        statsEl.textContent = statsLong || !opts.texts.statsShort ? statsWords : opts.texts.statsShort(stats);
+        statsEl.title = statsWords;
         statCost.push(performance.now() - t0);
         if (statCost.length > 120) statCost.shift();
         statAt = now; statFrames = 0;
       };
-      (probe as Record<string, unknown>).__spaceStats = () => ({ on: statsOn, shown: !statsEl.classList.contains("hidden"), text: statsEl.textContent,
+      (probe as Record<string, unknown>).__spaceStats = () => ({ on: statsOn, shown: !statsEl.classList.contains("hidden"), text: statsWords || statsEl.textContent, line: statsEl.textContent,
         stats, readMs: statCost.length ? { last: statCost[statCost.length - 1], mean: statCost.reduce((a, b) => a + b, 0) / statCost.length, max: Math.max(...statCost), n: statCost.length } : null });
       const showView = () => {
         viewEl.textContent = opts.texts.viewName?.(aligned, isOrtho) ?? "";
@@ -2003,6 +2077,7 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
       const flowBytes = new Map<string, number>();
       const flowStrip = document.createElement("div");
       flowStrip.className = "v3d-strip scn-flow hidden";
+      flowStripRef = flowStrip;
       let flowAt = 0;
       const flowBudget = () => Math.max(64, opts.tilesMemoryMB ?? 512) * 1024 * 1024;
       const flowUsed = () => { let b = 0; const cur = new Set<string>();
@@ -2201,6 +2276,7 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
           by.set(nm, (by.get(nm) ?? 0) + 1);
         }
         flowStrip.classList.toggle("hidden", !any);
+        queueMicrotask(chipTick);
         if (any) {
           const mb = (flowUsed() / 1048576).toFixed(1);
           const parts = order.sort((a, b) => a[1] - b[1]).map(([nm]) => (by.size > 1 || flowState.size > 1 ? `${nm} ${by.get(nm)}` : nm));
@@ -2299,7 +2375,7 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
         // a tileset hidden by its container loads nothing (unless it is warming)
         altTick();
         for (const l of live) if (l.layer.object.visible || altWarming.has(l)) l.layer.update();
-        if (live.length && ++frames % 20 === 0) for (const l of live) l.bar.refresh();
+        if (live.length && ++frames % 20 === 0) { for (const l of live) { l.bar.refresh(); for (const b of l.extra) b.refresh(); } chipTick(); }
         renderer.render(scene, camera);
         if (statsOn) { statFrames++; const n = performance.now(); if (n - statAt >= 500) readStats(n); }
         place();
@@ -2932,10 +3008,12 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
           if (opts.onTool(hh ? { point: arr(hh.point), normal: worldNormal(hh), key: `${hh.kind}:${hh.id}` } : null, false)) return;
         }
         // MICRO-3DTILES · «Più dettaglio qui» armed on a tileset: the click is its
-        const armed = liveLayers().find((l) => l.bar.armed());
+        // (MICRO-SPAZIO-COMPATTO · the bar in the popover or its twin in the Inspector)
+        const armed = liveLayers().map((l) => ({ l, b: [l.bar, ...l.extra].find((b) => b.armed()) })).find((x) => x.b);
         if (armed && button === 0) {
-          const th = ray.intersectObject(armed.layer.object, true)[0];
-          armed.bar.picked(th ? armed.layer.refineAt(th.object) : "none");
+          const th = ray.intersectObject(armed.l.layer.object, true)[0];
+          const what = th ? armed.l.layer.refineAt(th.object) : "none";
+          for (const b of [armed.l.bar, ...armed.l.extra]) if (b.armed()) b.picked(what);
           return;
         }
         const intent = pointerIntent({ button, ctrlKey: e.ctrlKey, metaKey: e.metaKey, shiftKey: e.shiftKey, altKey: e.altKey }, mac);
@@ -3166,6 +3244,7 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
       host.appendChild(labels);
       host.append(marksEl, markLabels);
       host.appendChild(strips);
+      host.append(tchip);
       host.append(cursorEl, modalEl, boxEl, viewEl, statsEl, guides, vptr, navEl);
       strips.appendChild(flowStrip);
       strips.appendChild(altStrip);
@@ -3178,6 +3257,7 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
         for (const l of layers.values()) l.layer.dispose();
         layers.clear();
         strips.remove();
+        tchip.remove();
         ro.disconnect();
         document.removeEventListener("keydown", onKey, true);
         document.removeEventListener("pointermove", modalMove, true);
@@ -3256,6 +3336,16 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
         drawnUrl: (k: string) => drawn.get(k)?.url,
         localCentre: (k: string) => localCentre(k),
         altLine: (g: string) => altInfo.get(g)?.line ?? null,
+        tilesControls: (k: string) => {
+          // (a container in «automatico» may show its models now: its tileset is still the one to steer)
+          const ls = [...layers.values()].filter((x) => `rm:${x.itemId}` === k);
+          const l = ls.find((x) => x.layer.object.parent === content) ?? ls[0];
+          if (!l) return null;
+          const b = tilesBar(l.layer, tilesBarTexts());
+          l.extra.add(b);
+          return { el: b.el, dispose: () => { b.dispose(); l.extra.delete(b); b.el.remove(); } };
+        },
+        tilesPopover: (open?: boolean) => popover(open),
         leavesOf: (k: string) => {
           // every layer of the item, shown or not: the leaves are the tileset's JSON
           const l = [...layers.values()].find((x) => `rm:${x.itemId}` === k);
@@ -3347,6 +3437,8 @@ export function mountSpaceScene(host: HTMLElement, opts: SpaceSceneOptions): Spa
     boxOf: (k) => api.boxOf?.(k) ?? null,
     leavesOf: (k) => api.leavesOf?.(k) ?? Promise.resolve(null),
     altLine: (g) => api.altLine?.(g) ?? null,
+    tilesControls: (k) => api.tilesControls?.(k) ?? null,
+    tilesPopover: (o) => api.tilesPopover?.(o) ?? false,
     view: () => api.view?.() ?? { view: null, ortho: false, fov: 40, lensMm: 33 },
     setView: (v) => api.setView?.(v),
     toggleOrtho: () => api.toggleOrtho?.(),

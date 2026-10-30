@@ -26,11 +26,15 @@ export interface TableToolsLabels {
   clearNone: string;
   sortBy: (col: string) => string;
   shown: (n: number, total: number) => string;
+  /** MICRO-SPAZIO-COMPATTO p.8 · the tooltip of a column's edge */
+  resize?: string;
 }
 
 interface TableState {
   sort?: { col: string; dir: 1 | -1 };
   filters?: Record<string, string>;
+  /** MICRO-SPAZIO-COMPATTO p.8 · the widths a person dragged, px, by column */
+  widths?: Record<string, number>;
 }
 
 const STORE_KEY = "emstudio.tableTools";
@@ -53,7 +57,7 @@ function readAll(): Record<string, TableState> {
 }
 function writeState(key: string, st: TableState): void {
   const all = readAll();
-  const empty = !st.sort && !Object.values(st.filters ?? {}).some(Boolean);
+  const empty = !st.sort && !Object.values(st.filters ?? {}).some(Boolean) && !Object.keys(st.widths ?? {}).length;
   if (empty) delete all[key]; else all[key] = st;
   try { localStorage.setItem(STORE_KEY, JSON.stringify(all)); } catch { /* private mode */ }
 }
@@ -123,6 +127,12 @@ export function enhanceTable(table: HTMLTableElement, labels: TableToolsLabels):
   state.filters ??= {};
   const labelOf = (th: HTMLTableCellElement): string => th.dataset.ttLabel ?? (th.textContent ?? "").trim();
   const sortable = heads.map((th) => !!labelOf(th));
+  // MICRO-SPAZIO-COMPATTO p.7 · in the Tabular ONE head row: each heading IS its
+  // filter (the column's name its placeholder), the sort a small arrow beside it;
+  // p.8 · the columns as wide as their content, dragged wider or narrower by
+  // their edge and remembered (a double click on the edge: back to the content's)
+  const compact = !!table.closest(".tile-tablebody");
+  if (compact) table.classList.add("tt-compact");
 
   // ── the headings: a button each, that sorts ──────────────────────────────
   heads.forEach((th, ci) => {
@@ -135,7 +145,14 @@ export function enhanceTable(table: HTMLTableElement, labels: TableToolsLabels):
     b.title = labels.sortBy(label);
     b.setAttribute("aria-label", labels.sortBy(label));
     // the heading's own content moves into the button, the arrow after it
-    while (th.firstChild) b.appendChild(th.firstChild);
+    // (compact: the content is kept for the readers of the page, the eye sees the field)
+    if (compact) {
+      const lbl = document.createElement("span");
+      lbl.className = "tt-lbl";
+      while (th.firstChild) lbl.appendChild(th.firstChild);
+      b.appendChild(lbl);
+      b.classList.add("tt-sort-mini");
+    } else while (th.firstChild) b.appendChild(th.firstChild);
     const arrow = document.createElement("span");
     arrow.className = "tt-arrow";
     arrow.setAttribute("aria-hidden", "true");
@@ -166,7 +183,7 @@ export function enhanceTable(table: HTMLTableElement, labels: TableToolsLabels):
       let ctl: HTMLInputElement | HTMLSelectElement;
       if (choice) {
         const sel = document.createElement("select");
-        sel.appendChild(new Option(labels.any, ""));
+        sel.appendChild(new Option(compact ? label : labels.any, ""));
         for (const v of distinct) sel.appendChild(new Option(v, v));
         sel.value = distinct.includes(state.filters![label] ?? "") ? state.filters![label] : "";
         sel.addEventListener("change", () => { state.filters![label] = sel.value; writeState(key, state); apply(); });
@@ -174,7 +191,7 @@ export function enhanceTable(table: HTMLTableElement, labels: TableToolsLabels):
       } else {
         const inp = document.createElement("input");
         inp.type = "search";
-        inp.placeholder = labels.filter;
+        inp.placeholder = compact ? label : labels.filter;
         inp.value = state.filters![label] ?? "";
         inp.addEventListener("input", () => { state.filters![label] = inp.value; writeState(key, state); apply(); });
         ctl = inp;
@@ -184,11 +201,81 @@ export function enhanceTable(table: HTMLTableElement, labels: TableToolsLabels):
       ctl.setAttribute("aria-label", `${labels.filter} · ${label}`);
       ctl.addEventListener("keydown", (e) => e.stopPropagation());
       ctl.addEventListener("click", (e) => e.stopPropagation());
-      cell.appendChild(ctl);
+      if (compact) {
+        ctl.title = label;
+        th.classList.add("tt-head");
+        th.style.minWidth = `${Math.min(label.length, 18) + 6}ch`;
+        th.prepend(ctl);
+      } else cell.appendChild(ctl);
     }
     fr.appendChild(cell);
   });
-  table.tHead!.appendChild(fr);
+  if (!compact) table.tHead!.appendChild(fr);
+  const filterCtl = (label: string) => table.tHead!.querySelector<HTMLElement>(`.tt-filter[data-col="${CSS.escape(label)}"]`);
+
+  // ── p.8 · the widths: by the content, then by hand ───────────────────────
+  if (compact) {
+    state.widths ??= {};
+    let frozen = false;
+    const freeze = () => {
+      if (frozen) return true;
+      const ws = heads.map((th) => th.getBoundingClientRect().width);
+      if (!ws.some((w) => w > 0)) return false;
+      heads.forEach((th, i) => { const l = th.dataset.ttLabel; const w = (l && state.widths![l]) || ws[i]; th.style.width = `${Math.round(w)}px`; });
+      table.style.tableLayout = "fixed";
+      table.style.width = `${Math.round(heads.reduce((n, th) => n + parseFloat(th.style.width || "0"), 0))}px`;
+      table.classList.add("tt-fixed");
+      frozen = true;
+      return true;
+    };
+    const thaw = () => {
+      for (const th of heads) th.style.width = "";
+      table.style.tableLayout = "";
+      table.style.width = "";
+      table.classList.remove("tt-fixed");
+      frozen = false;
+    };
+    heads.forEach((th, ci) => {
+      const label = th.dataset.ttLabel ?? (sortable[ci] ? labelOf(th) : "");
+      if (!label) return;
+      const grip = document.createElement("span");
+      grip.className = "tt-grip";
+      grip.setAttribute("aria-hidden", "true");
+      grip.title = labels.resize ?? "";
+      grip.addEventListener("click", (e) => e.stopPropagation());
+      grip.addEventListener("dblclick", (e) => {
+        e.stopPropagation();
+        delete state.widths![label];
+        writeState(key, state);
+        thaw();
+        if (Object.keys(state.widths!).length) requestAnimationFrame(freeze);
+      });
+      grip.addEventListener("pointerdown", (e) => {
+        if (e.button !== 0) return;
+        e.preventDefault();
+        e.stopPropagation();
+        if (!freeze()) return;
+        const x0 = e.clientX, w0 = parseFloat(th.style.width), t0 = parseFloat(table.style.width);
+        grip.classList.add("on");
+        const move = (ev: PointerEvent) => {
+          const w = Math.max(32, Math.round(w0 + ev.clientX - x0));
+          th.style.width = `${w}px`;
+          table.style.width = `${t0 + w - w0}px`;
+        };
+        const up = () => {
+          document.removeEventListener("pointermove", move, true);
+          document.removeEventListener("pointerup", up, true);
+          grip.classList.remove("on");
+          state.widths![label] = Math.round(parseFloat(th.style.width));
+          writeState(key, state);
+        };
+        document.addEventListener("pointermove", move, true);
+        document.addEventListener("pointerup", up, true);
+      });
+      th.appendChild(grip);
+    });
+    if (Object.keys(state.widths).length) { if (!freeze()) requestAnimationFrame(() => { freeze(); }); }
+  }
 
   // ── «Clear filters», and how many rows are shown ─────────────────────────
   const bar = document.createElement("div");
@@ -202,7 +289,7 @@ export function enhanceTable(table: HTMLTableElement, labels: TableToolsLabels):
   clear.addEventListener("click", () => {
     if (clear.getAttribute("aria-disabled") === "true") return;
     state.filters = {};
-    for (const c of fr.querySelectorAll<HTMLInputElement | HTMLSelectElement>(".tt-filter")) c.value = "";
+    for (const c of table.tHead!.querySelectorAll<HTMLInputElement | HTMLSelectElement>(".tt-filter")) c.value = "";
     writeState(key, state);
     apply();
   });
@@ -218,7 +305,7 @@ export function enhanceTable(table: HTMLTableElement, labels: TableToolsLabels):
         const ci = colOf(label);
         if (ci < 0) return true;
         const val = cellValue(g[0].cells[ci]).toLowerCase();
-        const ctl = fr.querySelector<HTMLElement>(`.tt-filter[data-col="${CSS.escape(label)}"]`);
+        const ctl = filterCtl(label);
         return ctl instanceof HTMLSelectElement ? val === v.toLowerCase() : val.includes(v.trim().toLowerCase());
       });
       for (const tr of g) tr.classList.toggle("tt-hidden", !ok);

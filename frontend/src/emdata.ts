@@ -146,7 +146,7 @@ function rowKeys(host: EmDataHost, e: KeyboardEvent): void {
   if (e.metaKey || e.ctrlKey || e.altKey || e.shiftKey || !ROW_KEYS.includes(e.key)) return;
   const el = e.target as HTMLElement;
   // a cell being written keeps its arrows; the column filters keep theirs
-  if (el !== host.body && (!listMayMove(el as HTMLInputElement) || el.closest(".tt-filters, .emdata-claimform-slot"))) return;
+  if (el !== host.body && (!listMayMove(el as HTMLInputElement) || el.closest(".tt-filters, .tt-filter, .emdata-claimform-slot"))) return;
   const rows = pickableRows(host.body);
   const sel = rows.findIndex((tr) => tr.classList.contains("tv-sel-act"));
   const at = sel >= 0 ? sel : rows.findIndex((tr) => tr.classList.contains("emdata-current"));
@@ -176,7 +176,7 @@ function rowKeys(host: EmDataHost, e: KeyboardEvent): void {
 
 /** the column filters set in this window's tables (table-tools) */
 function columnFiltersOn(body: HTMLElement): HTMLElement[] {
-  return [...body.querySelectorAll<HTMLInputElement | HTMLSelectElement>("tr.tt-filters .tt-filter")].filter((c) => c.value.trim());
+  return [...body.querySelectorAll<HTMLInputElement | HTMLSelectElement>("thead .tt-filter")].filter((c) => c.value.trim());
 }
 /** the head row says what the column filters do: «Clear filters» shown while
  *  any filter is set (the text, a facet or a column), and the rows counted are
@@ -1019,6 +1019,16 @@ function wireBody(host: EmDataHost, store: DocumentStore, st: TableState): void 
     }));
   body.querySelectorAll<HTMLElement>("[data-show-matrix]").forEach((el) =>
     el.addEventListener("click", (e) => { e.stopPropagation(); onShowInMatrix(el.dataset.showMatrix!); }));
+  // MICRO-SPAZIO-COMPATTO p.8 / p.10 · the models' eye, «solo con proxy»
+  if (body.querySelector("[data-mdl-eye], [data-only-proxy]")) {
+    const mctx = getSpace()?.ctx;
+    body.querySelectorAll<HTMLElement>("[data-mdl-eye]").forEach((el) =>
+      el.addEventListener("click", (e) => { e.stopPropagation(); mctx?.toggleEye?.(el.dataset.mdlEye!); }));
+    body.querySelectorAll<HTMLInputElement>("[data-only-proxy]").forEach((el) => {
+      el.addEventListener("click", (e) => e.stopPropagation());
+      el.addEventListener("change", () => mctx?.setOnlyWithProxy?.(el.checked));
+    });
+  }
   body.querySelectorAll<HTMLElement>("[data-open-doc]").forEach((el) =>
     el.addEventListener("click", (e) => { e.stopPropagation(); onOpenDoc(el.dataset.openDoc!, el); }));
   body.querySelectorAll<HTMLElement>("[data-id]").forEach((el) =>

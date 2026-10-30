@@ -279,9 +279,12 @@ export interface OutlinerView {
   isolated: string | null;
   query: string;
   glyph: (kind: string) => HTMLElement;
-  texts: { search: string; isolate: string; frame: string; eye: string; arrow: string; palette: string; close: string; empty: string; substitutedBy?: string };
-  /** the palette of the shapes (p.4): id, name, family */
-  palette: Array<{ id: string; name: string; family: string; familyName: string }>;
+  texts: { search: string; isolate: string; frame: string; eye: string; arrow: string; palette: string; close: string; empty: string; substitutedBy?: string;
+           /** MICRO-SPAZIO-COMPATTO p.2 · «+ Forma ▾» and its tooltip */
+           addShape?: string; addShapeTitle?: string };
+  /** the palette of the shapes (p.4): id, name, family. MICRO-SPAZIO-COMPATTO
+   *  p.2 · no longer drawn under the tree: «+ Forma ▾» opens the Shift+A menu */
+  palette?: Array<{ id: string; name: string; family: string; familyName: string }>;
   /** MICRO-PROVA-DEV48 p.4 · a record selected in another window: its row is
    *  scrolled into view (its branches already opened by `opensFor`) */
   reveal?: string | null;
@@ -340,6 +343,8 @@ export interface OutlinerActions {
   dragSketch?(sketchId: string, e: PointerEvent): void;
   /** a shape of the palette: clicked (at the cursor), or dragged and dropped at a page point */
   addShape(id: string, drop?: { x: number; y: number }): void;
+  /** MICRO-SPAZIO-COMPATTO p.2 · «+ Forma ▾»: the menu of Shift+A, under the button */
+  addMenu?(x: number, y: number): void;
 }
 
 /** Draw the panel into `el` (emptied first). The search keeps its focus. */
@@ -352,6 +357,12 @@ export function renderOutliner(el: HTMLElement, v: OutlinerView, act: OutlinerAc
   const treeHadKeys = !!document.activeElement?.classList.contains("sol-tree") && el.contains(document.activeElement);
   el.textContent = "";
   el.style.width = `${v.prefs.width}px`;
+  const refocus = () => {
+    if (!hadFocus) return;
+    const nq = el.querySelector<HTMLInputElement>(".sol-search");
+    nq?.focus();
+    nq?.setSelectionRange(nq.value.length, nq.value.length);
+  };
   const head = document.createElement("div");
   head.className = "sol-head";
   const q = document.createElement("input");
@@ -373,12 +384,25 @@ export function renderOutliner(el: HTMLElement, v: OutlinerView, act: OutlinerAc
   fr.dataset.sol = "frame";
   fr.textContent = v.texts.frame;
   fr.addEventListener("click", () => act.frame());
+  // MICRO-SPAZIO-COMPATTO p.5 · closed by the «‹» of the side panels (the N panel's is «›»)
   const x = document.createElement("button");
   x.type = "button";
   x.className = "sol-x";
-  x.textContent = "×";
+  x.dataset.sol = "close";
+  x.textContent = "‹";
   x.title = v.texts.close;
   x.addEventListener("click", () => act.close());
+  // p.2 · the base shapes: a menu at the head of the Outliner, the tree takes the height
+  if (act.addMenu) {
+    const add = document.createElement("button");
+    add.type = "button";
+    add.className = "sol-btn sol-add";
+    add.dataset.sol = "add";
+    add.textContent = `${v.texts.addShape ?? "+"} ▾`;
+    if (v.texts.addShapeTitle) add.title = v.texts.addShapeTitle;
+    add.addEventListener("click", (e) => { e.stopPropagation(); const b = add.getBoundingClientRect(); act.addMenu!(b.left, b.bottom + 2); });
+    head.append(add);
+  }
   head.append(q, iso, fr, x);
   el.appendChild(head);
   const tree = document.createElement("div");
@@ -468,6 +492,11 @@ export function renderOutliner(el: HTMLElement, v: OutlinerView, act: OutlinerAc
     name.textContent = r.name;
     name.title = r.title ?? r.name;
     line.append(tw, g, name);
+    // MICRO-SPAZIO-COMPATTO p.5 · ↖ and 👁 beside the name (they were at the far
+    // right of a wide panel); the chips and the levels after them
+    const sw = document.createElement("span");
+    sw.className = "sol-sw";
+    line.appendChild(sw);
     if (r.failed) {
       // MICRO-WINDOWS-MODELLI p.1 · it did not come: a mark, the reason in its tooltip
       const f = document.createElement(act.failMenu ? "button" : "span");
@@ -542,9 +571,10 @@ export function renderOutliner(el: HTMLElement, v: OutlinerView, act: OutlinerAc
         arrow.dataset.on = String(!allLocked);
         arrow.addEventListener("pointerdown", (e) => dragSwitch(e, arrow, "arrow", !allLocked));
         arrow.addEventListener("click", (e) => e.stopPropagation());
-        line.append(arrow, eye);
+        sw.append(arrow, eye);
       }
     }
+    if (!sw.childElementCount) sw.remove();
     line.addEventListener("click", (e) => act.pick(r, { toggle: e.metaKey || e.ctrlKey, range: e.shiftKey }, order));
     if (act.rowMenu && (r.kind === "rm" || r.kind === "rmgroup"))
       line.addEventListener("contextmenu", (e) => { e.preventDefault(); act.rowMenu!(r, e.clientX, e.clientY); });
@@ -601,6 +631,7 @@ export function renderOutliner(el: HTMLElement, v: OutlinerView, act: OutlinerAc
   }
   // the palette of the base shapes (p.4): a click makes one at the 3D cursor,
   // a drag lays it on the surface under the pointer
+  if (act.addMenu || !v.palette) { refocus(); return; }
   const pal = document.createElement("details");
   pal.className = "sol-palette";
   pal.open = !toggled.has("palette");
@@ -611,7 +642,7 @@ export function renderOutliner(el: HTMLElement, v: OutlinerView, act: OutlinerAc
   let fam = "";
   const grid = document.createElement("div");
   grid.className = "sol-shapes";
-  for (const s of v.palette) {
+  for (const s of v.palette ?? []) {
     if (s.family !== fam) {
       fam = s.family;
       const h = document.createElement("div");
@@ -643,9 +674,5 @@ export function renderOutliner(el: HTMLElement, v: OutlinerView, act: OutlinerAc
   }
   pal.appendChild(grid);
   el.appendChild(pal);
-  if (hadFocus) {
-    const nq = el.querySelector<HTMLInputElement>(".sol-search");
-    nq?.focus();
-    nq?.setSelectionRange(nq.value.length, nq.value.length);
-  }
+  refocus();
 }

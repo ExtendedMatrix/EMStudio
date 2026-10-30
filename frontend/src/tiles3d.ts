@@ -176,7 +176,9 @@ export interface TilesLayer {
   resize(): void;
   /** MICRO-SPAZIO-3D-2 · the scene's camera changed (perspective ⇄ orthographic) */
   setCamera(camera: any): void;
-  onChange(cb: () => void): void;
+  /** a listener of every change; the function returned takes it away (MICRO-SPAZIO-COMPATTO:
+   *  a second bar of the same tileset, the Inspector's, comes and goes) */
+  onChange(cb: () => void): () => void;
   dispose(): void;
   /** the probes' seam: the content files loaded now (relative to the tileset) */
   loadedFiles(): string[];
@@ -641,7 +643,7 @@ export function createTilesLayer(E: any, T: any, url: string, camera0: any, rend
       tiles.setCamera(camera);
       tiles.setResolutionFromRenderer(camera, renderer);
     },
-    onChange(cb) { listeners.push(cb); },
+    onChange(cb) { listeners.push(cb); return () => { const i = listeners.indexOf(cb); if (i >= 0) listeners.splice(i, 1); }; },
     dispose() {
       listeners.length = 0;
       tiles.dispose();
@@ -771,7 +773,8 @@ export interface TilesBarTexts {
  * stays armed to go further down), «Meno dettaglio», and the status line.
  * `armed()` is what the viewer asks on a click.
  */
-export function tilesBar(layer: TilesLayer, texts: TilesBarTexts): { el: HTMLElement; armed(): boolean; picked(what: "refined" | "leaf" | "none"): void; refresh(): void } {
+export interface TilesBarHandle { el: HTMLElement; armed(): boolean; picked(what: "refined" | "leaf" | "none"): void; refresh(): void; dispose(): void }
+export function tilesBar(layer: TilesLayer, texts: TilesBarTexts): TilesBarHandle {
   const el = document.createElement("div");
   el.className = "tl-bar";
   const seg = document.createElement("span");
@@ -843,10 +846,11 @@ export function tilesBar(layer: TilesLayer, texts: TilesBarTexts): { el: HTMLEle
     el.dataset.loaded = String(s.loaded);
     el.dataset.missing = String(s.missing.length);
   };
-  layer.onChange(() => { note = ""; refresh(); });
+  const off = layer.onChange(() => { note = ""; refresh(); });
   refresh();
   return {
     el,
+    dispose: () => { off(); armed = false; },
     armed: () => armed,
     picked(what) {
       note = what === "leaf" ? texts.leaf : what === "none" ? texts.noTile : "";

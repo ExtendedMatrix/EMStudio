@@ -275,7 +275,7 @@ import { renderTransformForm, type TransformFormTexts } from "./transform-ui";
 import { NumGroup, numField } from "./num-field";
 import { checkForUpdates, RELEASES_PAGE, type UpdateCheck } from "./updates";
 import { implicitGroups, isImplicitGroup, outsideMembers, unitOfImplicit, withImplicitGroups } from "./implicit-pd";
-import { addFileSketch, addSketch, listSketches, loadSketches, onSketches, removeSketch, serializeSketches, SHAPE_FAMILIES, SHAPES, shapeById, shapeLabel, sketchById, updateSketch } from "./shapes3d";
+import { addFileSketch, addSketch, listSketches, loadSketches, onSketches, removeSketch, serializeSketches, SHAPES, shapeById, shapeLabel, sketchById, updateSketch } from "./shapes3d";
 import { boxSelect, clickOutliner, clickScene, EMPTY_SEL, hideKeys, selectAll, withoutKeys, type SpaceSel } from "./space-selection";
 import { type AssocGroupKey, type AssocUnit, assocGroups, NEW_UNIT_ORDER, newUnitTypes } from "./sketch-associate";
 import { buildOutlinerTree, loadSpacePrefs, opensFor, renderOutliner, saveSpacePrefs, squeezeSide, type Space3dPrefs } from "./space-outliner";
@@ -291,7 +291,7 @@ import { FOOT_IN, footprintShare, leafCoverage } from "./tileset-leaves";
 import { ALT_RULE } from "./space";
 import { frameKey, makeFrame, readFrame, relocation, studyTarget, type FileFrame } from "./file-frame";
 import { trackpadClassifier } from "./wheel-kind";
-import { isTilesetUrl } from "./tiles3d";
+import { formatBytes as tilesBytes, isTilesetUrl } from "./tiles3d";
 import { mount3dViewer } from "./embed3d-native";
 import {
   emptyQuery, findOnShelf, folderOf, pillCounts, queryActive, rangeOf, shelfTypeOf, whereOf,
@@ -4037,6 +4037,8 @@ function renderInspectorInto(host: HTMLElement): void {
       renderTransform: (host2, id) => renderTransformInto(host2, id),
       renderSketchUse: (host2, id) => renderSketchUse(host2, id),
       renderProxy: (host2, id) => renderProxyRow(host2, id),
+      renderInSpace: (host2, id) => renderInSpaceInto(host2, id),
+      renderTiles: (host2, id) => renderTilesInto(host2, id),
       renderVersions: (host2, id) => renderVersionsInto(host2, id),
       renderAlternative: (host2, id) => renderAlternativeInto(host2, id),
       renderFrame: (host2, id) => renderFrameInto(host2, id),
@@ -25923,6 +25925,9 @@ function openProxyFolderPreview(units: string[]): void {
 
 /** the scene of every Space window, for «Indietro» and the menus */
 const sceneHandles = new Map<string, SpaceSceneHandle>();
+/** MICRO-SPAZIO-COMPATTO p.1 · each Space's bar (epochs, layers, ⤢, Territory),
+ *  drawn IN its window's header: one row instead of two */
+const sceneBars = new Map<string, HTMLElement>();
 /** the ornament id of a unit's «ha 3D» badge: not a node, a door */
 const HAS3D_BADGE = "has3d:";
 
@@ -26543,6 +26548,31 @@ function openShapeMenu(x: number, y: number, win: Win): void {
   }
   const m = spaceMenu(x, y, t("s3.addMenu"), entries);
   m.classList.add("scn-add");
+  // MICRO-SPAZIO-COMPATTO p.2 · the gestures of the palette it replaces: a click
+  // makes the shape at the 3D cursor, a drag lays it on the surface under the pointer
+  for (const b of m.querySelectorAll<HTMLButtonElement>("button[data-s3^='add:']")) {
+    const id = b.dataset.s3!.slice(4);
+    b.style.touchAction = "none";
+    b.addEventListener("pointerdown", (e) => {
+      if (e.button !== 0) return;
+      const x0 = e.clientX, y0 = e.clientY;
+      let moved = false;
+      const move = (ev: PointerEvent) => {
+        if (!moved && Math.hypot(ev.clientX - x0, ev.clientY - y0) > 6) { moved = true; b.classList.add("dragging"); m.classList.add("dragging"); }
+      };
+      const up = (ev: PointerEvent) => {
+        document.removeEventListener("pointermove", move, true);
+        document.removeEventListener("pointerup", up, true);
+        if (!moved) return;
+        // a drag: no click after it; the shape where the pointer was let go
+        b.onclick = null;
+        closeSpaceMenu();
+        addShapeIn(win, id, { x: ev.clientX, y: ev.clientY });
+      };
+      document.addEventListener("pointermove", move, true);
+      document.addEventListener("pointerup", up, true);
+    });
+  }
 }
 
 /** A sketch of `shapeId`: at the 3D cursor, or laid on the surface under a
@@ -27686,6 +27716,7 @@ function versionFingerprint(v: RmVersion): string | null {
 }
 /** …and a file the Space loaded and counted, kept under it (never in the em.json) */
 function keepMeasure(url: string, m: { tris: number; verts: number; box: [[number, number, number], [number, number, number]] | null }): void {
+  drawnTris.set(url, m.tris);
   const fp = flowUrlPrint.get(url) ?? (() => {
     // a version drawn outside the flow (by use, fixed): its fingerprint from the graph
     for (const rm of currentSpace()?.rms ?? []) for (const v of drawableVersions(rm)) if (v.fetch === url) return versionFingerprint(v);
@@ -27730,6 +27761,66 @@ function rmVersionPlan(rm: SpaceRM): { url?: string; flow?: FlowVersion[]; flowS
     size_bytes: typeof (v.data ?? {}).size_bytes === "number" ? (v.data as { size_bytes: number }).size_bytes : undefined })), uses);
   const v = ch?.entry ? vs.find((x) => x.id === ch.entry!.id) : undefined;
   return v ? asPlan(v) : {};
+}
+/** MICRO-SPAZIO-COMPATTO p.8 · the «Modelli e proxy» sheet on screen follows what
+ *  the Space loads (level, weight, triangles): drawn again at most twice a second */
+let modelsSheetTimer = 0;
+function modelsSheetLater(): void {
+  if (modelsSheetTimer) return;
+  modelsSheetTimer = window.setTimeout(() => {
+    modelsSheetTimer = 0;
+    // someone writing in a filter of the table: not under their fingers, later
+    const ae = document.activeElement as HTMLElement | null;
+    if (ae && ae !== document.body && ae.matches("input, select, textarea") && ae.closest(".tile-tablebody, .win-fbar-slot")) { modelsSheetLater(); return; }
+    if (windowsOf().some((w) => w.type === "table" && winAreas.has(w.id) && currentSheetKey(w) === "Models")) renderEmData();
+  }, 500);
+}
+/** MICRO-SPAZIO-COMPATTO · the triangles of each file the Space loaded (by url) */
+const drawnTris = new Map<string, number>();
+/** p.6 / p.8 · what a model draws now, for the Inspector and the Tabular: its
+ *  level (or «tileset»), the weight of that file, its triangles (counted by the
+ *  Space, or the graph's, or the cache's); null when no Space draws it. */
+function spaceDrawnOf(rmId: string, sp: Space | null = currentSpace()): { level: string; bytes: number | null; tris: number | null; tiles: boolean } | null {
+  const rm = sp?.rms.find((r) => r.id === rmId);
+  if (!rm) return null;
+  let url: string | undefined;
+  for (const h of sceneHandles.values()) { url = h.drawnUrl(`rm:${rm.id}`); if (url) break; }
+  if (!url) return null;
+  if (rm.resource?.tiles) return { level: "tileset", bytes: null, tris: null, tiles: true };
+  const v = drawnVersionOf(rm);
+  const tris = drawnTris.get(url) ?? (v ? v.tris ?? getMeasure(versionFingerprint(v))?.tris ?? null : null);
+  return { level: v ? autoLevelName(rm, v) : rmShown(rm.id, sp)?.level ?? "", bytes: (v ? v.bytes : null) ?? rm.resource?.bytes ?? null,
+    tris: typeof tris === "number" ? tris : null, tiles: false };
+}
+/** p.6 · the Inspector's «Nello Spazio»: one line */
+function renderInSpaceInto(host: HTMLElement, nodeId: string): boolean {
+  const sp = currentSpace();
+  if (!sp?.rms.some((r) => r.id === nodeId)) return false;
+  const d = spaceDrawnOf(nodeId, sp);
+  const line = document.createElement("p");
+  line.className = "xf-note";
+  line.dataset.inSpace = d ? d.level : "";
+  line.textContent = !d ? t("insp.inSpaceNone")
+    : d.tiles ? t("tl.section")
+    : t("insp.inSpaceLine", { what: d.level || "—", size: mbOf(d.bytes) || "—", tris: d.tris != null ? d.tris.toLocaleString(getLocale()) : "—" });
+  host.appendChild(line);
+  return true;
+}
+/** p.3 · the Inspector's «Tileset»: a second bar of the tileset the Space draws
+ *  (the one under the scene is in the chip's popover); the previous one let go */
+let inspTilesBar: { el: HTMLElement; dispose(): void } | null = null;
+function renderTilesInto(host: HTMLElement, nodeId: string): boolean {
+  inspTilesBar?.dispose();
+  inspTilesBar = null;
+  for (const h of sceneHandles.values()) {
+    const c = h.tilesControls(`rm:${nodeId}`);
+    if (!c) continue;
+    inspTilesBar = c;
+    c.el.classList.add("insp-tl-bar");
+    host.appendChild(c.el);
+    return true;
+  }
+  return false;
 }
 /** The version a model draws now (the scene's, else its plan's). */
 function drawnVersionOf(rm: SpaceRM): RmVersion | null {
@@ -28606,7 +28697,6 @@ function renderSpaceOutliner(el: HTMLElement, win: Win, sp: Space | null): void 
   const prefs = space3dPrefs();
   const st = store;
   const h = sceneHandles.get(win.id);
-  const lang = getLocale();
   const cur = sp ? spaceEpochOf(sp) : null;
   const rows = sp && st ? buildOutlinerTree({
     epochs: sp.epochs.map((e) => ({ id: e.id, name: e.name, current: e.id === cur })),
@@ -28647,7 +28737,6 @@ function renderSpaceOutliner(el: HTMLElement, win: Win, sp: Space | null): void 
     sketches: listSketches().map((s) => ({ id: s.id, name: s.name, shape: s.shape })),
     texts: { rms: t("s3.rms"), proxies: t("s3.proxies"), sketches: t("s3.sketches"), lod: "LOD" },
   }) : [];
-  const fam = new Map(SHAPE_FAMILIES.map((f) => [f.id, shapeLabel(f, lang)]));
   // MICRO-PROVA-DEV48 p.4 · a record picked in another window: its branches
   // open (a change of the person's view, kept like a click on the triangle)
   const reveal = spaceReveal.get(win.id) ?? null;
@@ -28668,8 +28757,7 @@ function renderSpaceOutliner(el: HTMLElement, win: Win, sp: Space | null): void 
     glyph: (k) => typeIconElement(k),
     texts: { search: t("s3.search"), isolate: t("s3.isolate"), frame: t("s3.frame"), eye: t("s3.eye"),
              arrow: t("s3.arrow"), palette: t("s3.palette"), close: t("s3.closeOutliner"), empty: t("s3.outlinerEmpty"),
-             substitutedBy: t("alt.substitutedBy") },
-    palette: SHAPES.map((s) => ({ id: s.id, name: shapeLabel(s, lang), family: s.family, familyName: fam.get(s.family) ?? s.family })),
+             substitutedBy: t("alt.substitutedBy"), addShape: t("s3.addShape"), addShapeTitle: t("s3.addShapeTitle") },
   }, {
     // MICRO-SPAZIO-3D-3 · one selection, Blender's Outliner: click = only
     // it, ⌘/Ctrl+click adds or removes, Shift+click the range (space-selection.ts)
@@ -28756,6 +28844,8 @@ function renderSpaceOutliner(el: HTMLElement, win: Win, sp: Space | null): void 
     },
     close: () => setSpace3dPrefs({ ...space3dPrefs(), shown: false }),
     addShape: (id, drop) => addShapeIn(win, id, drop),
+    // MICRO-SPAZIO-COMPATTO p.2 · «+ Forma ▾»: Shift+A's menu, under the button
+    addMenu: (x, y) => openShapeMenu(x, y, win),
   });
 }
 
@@ -28815,6 +28905,15 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
   const bar = document.createElement("div");
   bar.className = "scn-bar";
   oneLine(bar);
+  // MICRO-SPAZIO-COMPATTO p.1 · the bar lives in the window's header: a press on
+  // it is not the header's (no drag of the window, no magnify on a double click)
+  for (const ev of ["pointerdown", "dblclick"]) bar.addEventListener(ev, (e) => e.stopPropagation());
+  sceneBars.set(win.id, bar);
+  const placeBar = () => {
+    const strip = body.closest<HTMLElement>(".tile-area")?.querySelector<HTMLElement>(":scope > .tile-bar .win-strip-scene");
+    if (strip && bar.parentElement !== strip) strip.appendChild(bar);
+    else if (!strip && !bar.parentElement) wrap.prepend(bar);
+  };
   // MICRO-SPAZIO-3D · the Outliner on the left (T), the scene on the right
   const row = document.createElement("div");
   row.className = "scn-row";
@@ -28874,8 +28973,9 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
   for (const ev of ["pointerdown", "dblclick", "contextmenu", "wheel", "keydown"]) tsp.addEventListener(ev, (e) => e.stopPropagation());
   host.append(overlay, empty, tab, ntab, ovBtn, tsp);
   row.append(outl, grip, host, ngrip, npanel);
-  wrap.append(bar, row);
+  wrap.append(row);
   body.appendChild(wrap);
+  queueMicrotask(placeBar);
   // the panel's width: a drag of the grip, remembered. MICRO-PANNELLI-LATERALI ·
   // squeezed under 80 px the panel closes and its triangle is left, as Blender's
   // regions; its width stays the one it had before the drag
@@ -28904,6 +29004,8 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
       lodNote: (n) => t("lod.note", { n: String(n) }),
       boxZoom: t("s3.boxZoom"), modalHint: t("s3.modalHint"),
       viewName, centreEmpty: t("s3.centreEmpty"), stats: sceneStatsWords,
+      // MICRO-SPAZIO-COMPATTO p.3–4 · the stats in short, the tileset's chip
+      statsShort: sceneStatsShort, tilesChip: tilesChipWords, tilesChipTitle: t("tl.chipTitle"),
       // MICRO-GIZMO-ASSI · the navigation gizmo: an end names its view and its key
       gizmo: { axis: (_a, view) => { const name = t(VIEW_NAMES[view]);
           return t("s3.gzView", { view: name, viewLow: name.charAt(0).toLocaleLowerCase(getLocale()) + name.slice(1), key: VIEW_KEYS[view] }); },
@@ -28917,7 +29019,7 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
     glyph: (k) => typeIconElement(k),
     flowTitle: t("ver.flowTitle"),
     // MICRO-PROVA-DEV48 p.5 · what a file holds, counted at its load: the measures' cache
-    onMeasured: (url, m) => keepMeasure(url, m),
+    onMeasured: (url, m) => { keepMeasure(url, m); modelsSheetLater(); },
     // p.12 · the automatic choice of a container: the Outliner's «sostituito da» follows
     onAltState: (g, which) => { if (altShown.get(g) !== which) { altShown.set(g, which); recomputeSubstituted(); if (space3dPrefs().shown) renderSpaceOutliner(outl, win, currentSpace()); drawNPanel(); } },
     // MICRO-TILESET-CONTENITORE p.3 · the strip says what a container draws; the N panel's line follows
@@ -28926,7 +29028,7 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
     onAltLine: () => { for (const el of document.querySelectorAll<HTMLElement>("[data-np=alt-line], [data-alt=line]")) { const g = el.dataset.group; const h = sceneHandles.get(win.id); const l = g && h ? h.altLine(g) : null; if (l) el.textContent = l; } },
     // p.10 · a version of the flow drawn: the Outliner's dot and the N panel follow (no rebuild)
     // MICRO-PROVA-DEV47 p.3 · …and the Inspector (its title's level) when the model drawn again is the one it shows
-    onVersionDrawn: (rmId) => { drawnAgain.add(rmId); if (!flowRedraw) { flowRedraw = true; requestAnimationFrame(() => { flowRedraw = false; if (space3dPrefs().shown) renderSpaceOutliner(outl, win, currentSpace()); drawNPanel();
+    onVersionDrawn: (rmId) => { drawnAgain.add(rmId); modelsSheetLater(); if (!flowRedraw) { flowRedraw = true; requestAnimationFrame(() => { flowRedraw = false; if (space3dPrefs().shown) renderSpaceOutliner(outl, win, currentSpace()); drawNPanel();
       if (selectedId && drawnAgain.has(selectedId)) refreshInspector(); drawnAgain.clear(); }); } },
     panelFolded: (k) => (space3dPrefs().collapsed ?? []).includes(k),
     onPanelFold: (k, c) => foldPanel(k, c, false),
@@ -28940,6 +29042,14 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
         leftPans: v.leftDrag === "pan", invertTrackpadOrbit: !!v.invertTrackpadOrbit };
     },
     onMiddleSeen: () => setMiddleSeen(),
+    // MICRO-SPAZIO-COMPATTO p.3 · the chip: the tileset selected, its controls in the Inspector (when one is on screen)
+    onTilesChip: (itemId) => {
+      if (!itemId || !inspectorOnScreen()) return false;
+      setSpaceSel({ keys: [`rm:${itemId}`], active: `rm:${itemId}` });
+      refreshInspector();
+      requestAnimationFrame(() => document.querySelector<HTMLElement>(".insp-tiles")?.scrollIntoView({ block: "nearest" }));
+      return true;
+    },
     onBoxSelect: (keys, extend) => setSpaceSel(boxSelect(spaceSel(), keys, extend)),
     // MICRO-SPAZIO-3D-3 · a click: Blender's rule on the one selection
     // (MICRO-VIEWER-SPAZIO-EMTREE p.1: the proxy; Alt + click the mesh)
@@ -29010,7 +29120,7 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
       return false;
     },
     onSketchChange: () => { refreshSurfaces("scene"); drawNPanel(); },
-    onLoadOutcome: (key, label, url, error) => noteModelLoad(key, label, url, error),
+    onLoadOutcome: (key, label, url, error) => { noteModelLoad(key, label, url, error); modelsSheetLater(); },
     onNotFound: (rid, why: FetchFailure, unanswered?: boolean) => {
       if (unanswered && why === "missing") { spaceAwaitAnswer(rid); return; }
       if (!spaceMarks.mark(rid, why)) return;
@@ -29019,6 +29129,21 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
     },
   });
   sceneHandles.set(win.id, handle);
+  // MICRO-SPAZIO-COMPATTO p.4 · the view's name, the stats and the summary on
+  // ONE small line at the top left (the summary a chip; its words on a click)
+  const topline = document.createElement("div");
+  topline.className = "scn-topline";
+  topline.appendChild(overlay);
+  host.appendChild(topline);
+  // (the scene makes its view's name and its stats once its engine is up: they join the line then)
+  const gather = () => {
+    const vEl = host.querySelector<HTMLElement>(":scope > .scn-view"), sEl = host.querySelector<HTMLElement>(":scope > .scn-stats");
+    if (vEl) topline.prepend(vEl);
+    if (sEl) topline.insertBefore(sEl, overlay);
+  };
+  gather();
+  const gatherer = new MutationObserver(gather);
+  gatherer.observe(host, { childList: true });
   // MICRO-GEOGLOBO · the territory of this Space: the globe, its modes, its layers
   const geoSpace = mountGeoSpace({
     host, handle, t: (k, v) => t(k, v), person: () => overlayPerson(),
@@ -29109,6 +29234,7 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
     fr.textContent = "⤢";
     fr.title = t("space.frame");
     bar.append(back, lab, seg, tog("rm", "space.layerRm"), tog("px", "space.layerPx"), fr, ...geoSpace.barButtons());
+    placeBar();
     renderBackButtons();
     // CAMPAGNA · the preview, said in the bar and closable; drawn whatever the
     // graph says (a tileset opened from the Storage needs no epoch)
@@ -29166,7 +29292,8 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
           + ` <span class="${r.resource?.state === "resident" ? "ok" : r.resource?.state === "reference" ? "ref" : "miss"}">(${escapeHtml(t(`space.st.${r.resource?.state ?? "none"}`))})</span>`).join(", ");
     overlay.classList.remove("hidden");
     // MICRO-SPAZIO-3D-3 p.9 · the summary reduced to its title line (a triangle, as «Forme base»)
-    const folded = (prefs.collapsed ?? []).includes("summary");
+    // MICRO-SPAZIO-COMPATTO p.4 · folded by default (a chip on the view's line): «summary:open» unfolds it
+    const folded = !(prefs.collapsed ?? []).includes("summary:open");
     const fold = `<button type="button" class="scn-fold" data-fold="summary" aria-expanded="${!folded}">${folded ? "▸" : "▾"}</button>`;
     overlay.classList.toggle("folded", folded);
     if (folded) overlay.innerHTML = `${fold}<b>${escapeHtml(sum.epoch.name)}</b> · ${escapeHtml(t("s3.foldedSummary", { rm: String(sum.rms.length), px: String(sum.withProxy.length), n: String(sum.units.length) }))}`
@@ -29186,8 +29313,10 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
     // MICRO-PANNELLI-LATERALI p.2 · folded, the line may be shortened: the whole in the tooltip
     if (folded) overlay.title = (overlay.textContent ?? "").replace(/^▸/, ""); else overlay.removeAttribute("title");
     overlay.querySelector<HTMLButtonElement>("[data-fold=summary]")?.addEventListener("click", (e) => {
-      e.stopPropagation(); foldPanel("summary", !folded);
+      e.stopPropagation(); foldPanel("summary:open", folded);
     });
+    // the chip as a whole opens it (its links stay links)
+    overlay.onclick = folded ? (e) => { if (!(e.target as HTMLElement).closest("button")) { e.stopPropagation(); foldPanel("summary:open", true); } } : null;
     overlay.querySelectorAll<HTMLElement>("[data-go]").forEach((b) => b.addEventListener("click", (e) => {
       e.stopPropagation(); select(b.dataset.go!); refreshInspector();
     }));
@@ -29284,7 +29413,7 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
     handle.syncSketches();
   };
   refresh();
-  return { refresh, destroy: () => { bar.removeEventListener("click", onBar); geoSpace.destroy(); handle.dispose(); sceneHandles.delete(win.id); npanelRenderers.delete(win.id); sceneOverlayBtns.delete(win.id); } };
+  return { refresh, destroy: () => { gatherer.disconnect(); bar.removeEventListener("click", onBar); bar.remove(); if (sceneBars.get(win.id) === bar) sceneBars.delete(win.id); geoSpace.destroy(); handle.dispose(); sceneHandles.delete(win.id); npanelRenderers.delete(win.id); sceneOverlayBtns.delete(win.id); } };
 }
 
 /** MICRO tileset, shift e epoche (E.D. 25 Oct 2026) · the Inspector's «Frame»
@@ -41215,6 +41344,24 @@ function sceneStatsWords(x: SceneStats): string {
   return t("s3.stats", { tri: n(x.triangles), vert: n(x.vertices), obj: n(x.objects), calls: n(x.calls), fps: String(x.fps) });
 }
 
+/** MICRO-SPAZIO-COMPATTO p.4 · …in short, one small line («1,2 M ▲ · 640 k v · 23 ogg · 31 ch · 60 FPS») */
+function sceneStatsShort(x: SceneStats): string {
+  const n = (v: number) => v.toLocaleString(getLocale(), { notation: "compact", maximumFractionDigits: 1 });
+  return t("s3.statsShort", { tri: n(x.triangles), vert: n(x.vertices), obj: n(x.objects), calls: n(x.calls), fps: String(x.fps) });
+}
+
+/** p.3 · the tileset's chip: «Tileset · auto · L1–2 · 2,4 MB / 1 GB» (+ the others) */
+function tilesChipWords(s: { mode: string; level: [number, number] | null; bytes: number; maxBytes: number }, more: number): string {
+  const lv = !s.level ? "…" : s.level[0] === s.level[1] ? `L${s.level[0]}` : `L${s.level[0]}–${s.level[1]}`;
+  return t("tl.chip", { mode: t(s.mode === "manual" ? "tl.manualShort" : "tl.autoShort"), lv, used: tilesBytes(s.bytes), max: tilesBytes(s.maxBytes) })
+    + (more > 0 ? ` +${more}` : "");
+}
+
+/** an Inspector window on screen (the main window's or a detached one) */
+function inspectorOnScreen(): boolean {
+  return windowsOf().some((w) => w.type === "inspector" && !!winAreas.get(w.id)?.isConnected && !!winAreas.get(w.id)?.offsetParent);
+}
+
 /** p.2 · what a scene draws, as a key: each item's file and state */
 function vwItemsSig(items: SceneItem[]): string {
   return JSON.stringify(items.map((i) => [i.id, i.url ?? null, i.state]));
@@ -43475,6 +43622,13 @@ function wireBarDropdown(
 function buildHeaderStrip(win: Win): HTMLElement {
   const strip = document.createElement("span");
   strip.className = "win-strip";
+  // MICRO-SPAZIO-COMPATTO p.1 · the Space's bar in its header (built by mountScene)
+  if (win.type === "scene") {
+    strip.classList.add("win-strip-scene");
+    const b = sceneBars.get(win.id);
+    if (b) strip.appendChild(b);
+    return strip;
+  }
 
 
 
@@ -43874,6 +44028,14 @@ interface WinMenu {
 }
 
 const click = (id: string): void => document.getElementById(id)?.click();
+/** MICRO-SPAZIO-COMPATTO p.9 · the Tabular's density: compact unless the person asked for comfortable rows */
+const TABLE_COMFY_KEY = "emstudio.table.comfy";
+function tableComfy(): boolean { try { return localStorage.getItem(TABLE_COMFY_KEY) === "1"; } catch { return false; } }
+function setTableComfy(on: boolean): void {
+  try { localStorage.setItem(TABLE_COMFY_KEY, on ? "1" : "0"); } catch { /* private mode */ }
+  document.body.classList.toggle("tt-comfy", on);
+}
+document.body.classList.toggle("tt-comfy", tableComfy());
 /** MICRO-PANNELLI-OVERLAY-TABULAR p.3 · the sheets a row is appended to (em-data `addRow`) */
 const TABLE_APPEND_SHEETS: TableView[] = ["Units", "Epochs", "Documents", "Authors"];
 
@@ -43976,6 +44138,12 @@ const WINDOW_MENUS: Record<WindowType, WinMenu[]> = {
           });
         return out;
       },
+    },
+    // MICRO-SPAZIO-COMPATTO p.9 · the rows compact (about 22 px) by default;
+    // «Righe comode» gives them their height back (a preference of the person)
+    {
+      label: "table.density",
+      items: () => (store ? [{ label: "table.comfy", checked: () => tableComfy(), run: () => setTableComfy(!tableComfy()) }] : []),
     },
   ],
   // WIN5 · the Doc window is real, so it has commands: the sources of the graph
@@ -47451,7 +47619,7 @@ installMultiKey();
 // MICRO-PULIZIA p.9 · every table of the app sorts and filters (table-tools.ts)
 installTableTools(document.body, () => ({
   filter: t("tt.filter"), any: t("tt.any"), clear: t("tt.clear"), clearNone: t("tt.clearNone"),
-  sortBy: (col) => t("tt.sortBy", { col }), shown: (n, total) => t("tt.shown", { n: String(n), total: String(total) }),
+  sortBy: (col) => t("tt.sortBy", { col }), shown: (n, total) => t("tt.shown", { n: String(n), total: String(total) }), resize: t("tt.resize"),
 }));
 renderWarningsPill();
 renderLogButton(); // SHIFT-A · «Log · n» in the status bar
@@ -47560,7 +47728,14 @@ initEmData({
     askResident();
     const st = store;
     return { space: sp, units: st.liveNodes().filter((n) => isStratigraphicType(n.node_type)).map((n) => n.id),
-             ctx: { node: (id) => st.node(id), t, genre: spaceGenre, rmName: (id) => rmShown(id) } };
+             ctx: { node: (id) => st.node(id), t, genre: spaceGenre, rmName: (id) => rmShown(id),
+               // MICRO-SPAZIO-COMPATTO p.8 · what the Space draws of each model, its eye
+               drawn: (id) => spaceDrawnOf(id, sp), hidden: (k) => space3dPrefs().hidden.includes(k),
+               toggleEye: (k) => { const p = space3dPrefs(); const h = new Set(p.hidden); if (h.has(k)) h.delete(k); else h.add(k); setSpace3dPrefs({ ...p, hidden: [...h] }); renderEmData(); },
+               // p.10 · «solo con proxy», a preference of the person's view
+               onlyWithProxy: localStorage.getItem("emstudio.models.onlyWithProxy") === "1",
+               setOnlyWithProxy: (on) => { try { localStorage.setItem("emstudio.models.onlyWithProxy", on ? "1" : "0"); } catch { /* private mode */ } renderEmData(); },
+               num: (n) => n.toLocaleString(getLocale()), bytes: (n) => mbOf(n) } };
   },
   onOpenDoc: (docId) => { requestDoc(docId, { reading: null }); select(docId); refreshInspector(); },
   onShowInMatrix: (id) => showInMatrix(id),

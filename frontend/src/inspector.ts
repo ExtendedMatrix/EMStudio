@@ -132,6 +132,12 @@ export interface InspectorCallbacks {
   readableName?: (nodeId: string) => { label: string; chip?: string | null; technical: string } | null;
   /** MICRO-SPAZIO-3D-3 p.10 · a model's versions: the mode, the version, the use */
   renderVersions?: (host: HTMLElement, nodeId: string) => boolean;
+  /** MICRO-SPAZIO-COMPATTO p.6 · a model in the Space: what is drawn of it now
+   *  (version, weight, triangles); false when no Space draws it */
+  renderInSpace?: (host: HTMLElement, nodeId: string) => boolean;
+  /** p.3 · a tileset drawn in the Space: its controls (Manual / Automatic, more
+   *  and less detail, the errors, the levels and the memory) */
+  renderTiles?: (host: HTMLElement, nodeId: string) => boolean;
   /** MICRO-PROVA-DEV47 p.4 · the section «Alternativa» of a tileset or a container */
   renderAlternative?: (host: HTMLElement, nodeId: string) => boolean;
   /** MICRO tileset, shift e epoche · the section «Frame» of a tileset (its
@@ -1298,6 +1304,22 @@ export function renderInspector(
     if (has || (unit && cb.onCommand)) root.appendChild(panel);
   }
 
+  // ── MICRO-SPAZIO-COMPATTO p.6 · a model in the Space: what is drawn of it ──
+  if (nodeId && cb.renderInSpace) {
+    const panel = el("div", "insp-canvas insp-inspace");
+    panel.appendChild(el("h3", "insp-sect", t("insp.inSpace")));
+    const body = el("div");
+    panel.appendChild(body);
+    if (cb.renderInSpace(body, nodeId)) root.appendChild(panel);
+  }
+  // ── p.3 · a tileset's controls, out of the strip under the scene ──
+  if (nodeId && cb.renderTiles) {
+    const panel = el("div", "insp-canvas insp-tiles");
+    panel.appendChild(el("h3", "insp-sect", t("tl.section")));
+    const body = el("div");
+    panel.appendChild(body);
+    if (cb.renderTiles(body, nodeId)) root.appendChild(panel);
+  }
   // ── MICRO-SPAZIO-3D-3 p.10 · a model's versions, the same selector as the Space's ──
   if (nodeId && cb.renderVersions) {
     const panel = el("div", "insp-canvas insp-ver");
