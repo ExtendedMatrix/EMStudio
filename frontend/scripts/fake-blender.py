@@ -61,3 +61,28 @@ elif op == "prepare":
     os.makedirs(os.path.dirname(out), exist_ok=True)
     glb(out, 300)
     say("RESULT", {"ok": True, "op": op, "result": {"path": out, "level": "lod3", "use": A.get("use"), "version_id": "v1"}})
+
+# MICRO-PREPARA-DIAGNOSI · EM Tools measures a .blend; EM Tools applies the ticks
+elif op == "measure":
+    objs = [{"name": "Col_%d" % i, "triangles": 53364, "vertices": 27000, "materials": 1,
+             "mesh_id": "Col_%d" % i, "geometry_key": "b:col", "textures": ["T_col"]} for i in range(6)]
+    objs.append({"name": "Wall", "triangles": 20000, "vertices": 11000, "materials": 2, "mesh_id": "Wall",
+                 "geometry_key": "b:wall", "textures": ["T_wall"]})
+    if A.get("container") == "Colonnato":
+        objs = objs[:6]
+    say("PROGRESS", {"stage": "measure", "done": 1, "total": 1})
+    say("RESULT", {"ok": True, "op": op, "result": {"blend": blend, "objects": objs, "names": [o["name"] for o in objs],
+        "textures": {"T_col": {"width": 4096, "height": 4096, "bytes": 6000000, "format": "jpeg"},
+                     "T_wall": {"width": 2048, "height": 2048, "bytes": 9000000, "format": "png"}},
+        "containers": [{"label": "Colonnato", "objects": ["Col_%d" % i for i in range(6)]}]}})
+elif op == "apply_use":
+    assert A.get("s3dgraphy_resources"), "the bridge says where its s3dgraphy.resources is"
+    dest = {"web": "web", "heriverse": "aton-heriverse", "realtime": "realtime", "mobile_ar": "mobile", "archive": "archive"}[A["profile"]]
+    folder = os.path.join(os.path.dirname(blend), "versions")
+    os.makedirs(folder, exist_ok=True)
+    out = os.path.join(folder, "%s@%s-%s.glb" % (A["model"], A["level"], dest))
+    if os.path.exists(out) and not A.get("replace"):
+        say("RESULT", {"ok": False, "error": "already there"}); sys.exit(1)
+    glb(out, 120)
+    say("RESULT", {"ok": True, "op": op, "result": {"entry": out, "bytes": os.path.getsize(out), "rows": A.get("checked"),
+        "measured": {"triangles": 120, "triangles_stored": 120}, "instanced": 5, "decimated": 1, "resized": 1, "warnings": []}})

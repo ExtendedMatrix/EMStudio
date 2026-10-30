@@ -1808,7 +1808,27 @@ def _load_s3dgraphy(s3dgraphy_src: "pathlib.Path | None"):
 #: lod_set | atlas | prepare}`` — the probe says what loads and why not, the
 #: experiences' LOD set and an atlas by 3D Survey Collection, a .blend's
 #: object, EM Tools' «Prepare for a use» on the open graph — MICRO-OTTIMIZZA-3.
-BRIDGE_LEVEL = 45   # 30 also = /validate
+#: 46 = preparing a model for a use (MICRO-PREPARA-DIAGNOSI): ``GET
+#: /optimize/profiles`` (s3Dgraphy's table of profiles), ``POST
+#: /optimize/diagnose`` (the pure diagnosis of glTF files or of a .blend's
+#: measurement, the grid, the estimate for the rows ticked), ``GET
+#: /optimize/versions`` and ``POST /optimize/versions/remove`` (the versions in
+#: versions/, removed with a dry run that names files and nodes); ``POST /jobs
+#: {kind: blender, op: measure | apply_use}`` — the .blend measured by EM Tools,
+#: the ticks applied by EM Tools in Blender.
+BRIDGE_LEVEL = 46   # 30 also = /validate
+
+
+def _s3dgraphy_resources_dir() -> str:
+    """The folder of the bridge's ``s3dgraphy.resources``: a Blender whose
+    bundled s3dgraphy predates the profiles of use reads them from here (the
+    runner adds it to that package's path), so EM Tools and EMStudio compute
+    with the same table."""
+    try:
+        import s3dgraphy.resources as R
+        return os.path.dirname(os.path.abspath(R.__file__))
+    except Exception:  # noqa: BLE001
+        return ""
 
 
 #: the files of a tileset a server may send gzipped (MICRO-TILESET-CARTELLA)
@@ -2620,6 +2640,23 @@ def make_handler(api):
                 # MICRO-OTTIMIZZA-3 · the Blenders found, the one used, its last probe
                 import em_blender as BL
                 self._json(BL.state())
+            elif route == "/optimize/profiles":
+                # MICRO-PREPARA-DIAGNOSI · s3Dgraphy's table, the one EM Tools reads
+                try:
+                    from s3dgraphy.resources import use_profiles as UP
+                except ImportError as exc:
+                    self._fail(501, f"this s3dgraphy has no profiles of use: {exc}")
+                    return
+                self._json({"ok": True, "profiles": UP.profiles(),
+                            "engines": {k: {kk: list(vv) for kk, vv in v.items()}
+                                        for k, v in UP.ENGINE_CAN.items()}})
+            elif route == "/optimize/versions":
+                if not self._fs_gate():
+                    return
+                q = urllib.parse.parse_qs(parsed.query)
+                status, payload = self._optimize_versions((q.get("folder") or [""])[0],
+                                                          (q.get("model") or [""])[0])
+                self._json(payload, status)
             elif route == "/addons":
                 # MICRO-OTTIMIZZA-1 · the add-ons: what is pinned, what is here
                 import em_optimize as O
@@ -3090,6 +3127,19 @@ def make_handler(api):
                 import em_blender as BL
                 out = BL.choose(str((body or {}).get("path") or ""))
                 self._json({**BL.state(), **out}, 200 if out.get("ok") else 400)
+            elif route in ("/optimize/diagnose", "/optimize/versions/remove"):
+                # MICRO-PREPARA-DIAGNOSI · the diagnosis, and the versions removed
+                if not self._fs_gate():
+                    return
+                try:
+                    body = json.loads(raw.decode("utf-8")) if raw else {}
+                except Exception as exc:
+                    self._fail(400, f"invalid JSON body: {exc}")
+                    return
+                body = body if isinstance(body, dict) else {}
+                status, payload = (self._optimize_diagnose(body) if route == "/optimize/diagnose"
+                                   else self._optimize_versions_remove(body))
+                self._json(payload, status)
             elif route == "/graph/add-version":
                 # MICRO-OTTIMIZZA-1 · a variant, registered as a version of its asset
                 try:
@@ -3538,6 +3588,125 @@ def make_handler(api):
             else:
                 self._fail(400, f"unknown job kind {kind!r}")
 
+        # ── MICRO-PREPARA-DIAGNOSI · a model prepared for a use ──────────────
+
+        def _optimize_diagnose(self, body):
+            """``{paths: [glTF…], profile, engine?, checked?}`` or ``{measured:
+            {objects, textures}, profile, …}`` (a .blend measured by EM Tools in
+            Blender: ``POST /jobs {kind: blender, op: measure}``) → s3Dgraphy's
+            diagnosis (``use_profiles.diagnose``: the same function and table
+            EM Tools uses), with ``after`` for the rows ``checked`` when given.
+            → ``(status, payload)``."""
+            try:
+                from s3dgraphy.resources import use_profiles as UP
+            except ImportError as exc:
+                return 501, {"ok": False, "error": f"this s3dgraphy has no profiles of use: {exc}"}
+            prof = str(body.get("profile") or "web")
+            engine = str(body.get("engine") or "blender")
+            try:
+                UP.profile(prof)
+            except ValueError as exc:
+                return 400, {"ok": False, "error": str(exc)}
+            if isinstance(body.get("measured"), dict):
+                m = body["measured"]
+                d = UP.diagnose_keep(m.get("objects") or [], m.get("textures") or {}, prof,
+                                     engine=engine)
+                d["source"] = "blend"
+            else:
+                paths = []
+                for raw_p in body.get("paths") or []:
+                    full, err = self._fs_resolve(str(raw_p), want="file")
+                    if err:
+                        return err[0], {"ok": False, "error": err[1]}
+                    if not full.lower().endswith((".glb", ".gltf")):
+                        return 400, {"ok": False, "error": "a diagnosis reads .glb or .gltf files (or a .blend through Blender)"}
+                    paths.append(full)
+                if not paths:
+                    return 400, {"ok": False, "error": "which files?"}
+                try:
+                    d = UP.diagnose_files(paths, prof, engine=engine)
+                except (OSError, ValueError, KeyError) as exc:
+                    return 400, {"ok": False, "error": f"could not read the glTF: {exc}"}
+                d["source"] = "files"
+            if isinstance(body.get("checked"), list):
+                d["after"] = UP.estimate(d, [str(x) for x in body["checked"]])
+            d.pop("_objects", None)
+            d.pop("_textures", None)
+            d["ok"] = True
+            return 200, d
+
+        def _optimize_versions(self, folder, model=""):
+            """The versions in ``folder`` (``versions/`` beside a .blend, or the
+            folder given): s3Dgraphy's ``list_versions``."""
+            try:
+                from s3dgraphy.resources import use_profiles as UP
+            except ImportError as exc:
+                return 501, {"ok": False, "error": f"this s3dgraphy has no profiles of use: {exc}"}
+            full, err = self._fs_resolve(folder, want="any")
+            if err:
+                if err[0] == 404:
+                    return 200, {"ok": True, "folder": folder, "versions": []}
+                return err[0], {"ok": False, "error": err[1]}
+            if os.path.isfile(full):
+                full = UP.versions_folder(full)
+            elif os.path.basename(full.rstrip(os.sep)) != "versions" and os.path.isdir(os.path.join(full, "versions")):
+                full = os.path.join(full, "versions")
+            rows = UP.list_versions(full, model or None)
+            return 200, {"ok": True, "folder": full, "versions": rows}
+
+        def _optimize_versions_remove(self, body):
+            """``{folder, names: [...], doc?, dry_run}`` → what goes: every file of
+            each version (its .bin, textures, stamp) and the nodes of ``doc``
+            (the document open in EMStudio) that name those files by locator or
+            sha256. Without ``dry_run`` the files are deleted; the page removes
+            the nodes from its document (it owns it)."""
+            status, listing = self._optimize_versions(str(body.get("folder") or ""))
+            if status != 200:
+                return status, listing
+            want = {str(x) for x in body.get("names") or []}
+            rows = [r for r in listing["versions"] if r["name"] in want]
+            if not rows:
+                return 400, {"ok": False, "error": "none of those versions is in the folder"}
+            nodes = {}
+            doc = body.get("doc") if isinstance(body.get("doc"), dict) else None
+            if doc:
+                g = doc.get("graph") if isinstance(doc.get("graph"), dict) else doc
+                for r in rows:
+                    bases = {os.path.basename(f) for f in r["files"] if not f.endswith(".stamp.json")}
+                    try:
+                        import em_blender as BL
+                        sha = "sha256:" + BL._sha256(r["entry"])
+                    except OSError:
+                        sha = ""
+                    hits = []
+                    for n in g.get("nodes") or []:
+                        d = n.get("data") or {}
+                        url = str(d.get("url") or n.get("url") or "")
+                        if (sha and d.get("checksum") == sha) or (url and os.path.basename(url.replace("\\", "/")) in bases):
+                            hits.append({"id": n.get("id"), "name": n.get("name") or n.get("id")})
+                    nodes[r["name"]] = hits
+            plan = [{"name": r["name"], "files": r["files"], "bytes": r["bytes"],
+                     "nodes": nodes.get(r["name"], [])} for r in rows]
+            if body.get("dry_run"):
+                return 200, {"ok": True, "dry_run": True, "plan": plan}
+            import shutil as _sh
+            deleted, failed = [], []
+            for r in rows:
+                for f in [r["path"]] + list(r["files"]):
+                    if not _fs_inside_roots(f):
+                        failed.append({"path": f, "error": "outside the bridge's folders"})
+                        continue
+                    try:
+                        if os.path.isdir(f):
+                            _sh.rmtree(f)
+                            deleted.append(f)
+                        elif os.path.isfile(f):
+                            os.remove(f)
+                            deleted.append(f)
+                    except OSError as exc:
+                        failed.append({"path": f, "error": str(exc)})
+            return 200, {"ok": True, "plan": plan, "deleted": deleted, "failed": failed}
+
         def _blender_plan(self, body):
             """MICRO-OTTIMIZZA-3 · what a Blender job will make, before it starts:
             ``{op, source | blend + object, levels?, size?, use?}`` → ``{ok,
@@ -3550,6 +3719,8 @@ def make_handler(api):
             import em_optimize as O
             from s3dgraphy.project_tree import variant_path, find_project_root
             op = str(body.get("op") or "")
+            if op in ("measure", "apply_use"):
+                return self._use_plan(body, op)
             if op not in ("probe", "objects", "lod_set", "atlas", "prepare"):
                 return {"ok": False, "error": f"unknown Blender operation {op!r}"}
             blender = str(body.get("blender") or "") or BL.current()
@@ -3605,6 +3776,69 @@ def make_handler(api):
                     "outputs": outputs, "estimate_mb": BL.memory_mb(op, bytes_in, tex), "heavy": True,
                     "ceiling_mb": O.memory_ceiling_mb()}
 
+        def _use_plan(self, body, op):
+            """MICRO-PREPARA-DIAGNOSI · a .blend measured (``measure``, light)
+            or the ticks applied (``apply_use``, heavy) by EM Tools in Blender.
+            The version goes in ``versions/`` beside the .blend under its
+            canonical name, never over a file there unless ``replace``."""
+            import em_blender as BL
+            import em_optimize as O
+            blender = str(body.get("blender") or "") or BL.current()
+            if not blender or not os.path.isfile(blender):
+                return {"ok": False, "error": "Blender is not here: choose it in Settings › Add-ons"}
+            blend, err = self._fs_resolve(os.path.abspath(os.path.expanduser(str(body.get("blend") or ""))), want="file")
+            if err or not blend.lower().endswith(".blend"):
+                return {"ok": False, "error": (err[1] if err else "a .blend is wanted")}
+            plan = {"ok": True, "op": op, "blender": blender, "blend": blend, "object": "",
+                    "source": blend, "outputs": [], "heavy": op == "apply_use",
+                    "estimate_mb": BL.memory_mb("objects" if op == "measure" else "prepare",
+                                                os.path.getsize(blend)),
+                    "ceiling_mb": O.memory_ceiling_mb()}
+            if op == "apply_use":
+                try:
+                    from s3dgraphy.resources import use_profiles as UP
+                    prof = UP.profile(str(body.get("profile") or "web"))
+                except (ImportError, ValueError) as exc:
+                    return {"ok": False, "error": str(exc)}
+                model = str(body.get("model") or os.path.splitext(os.path.basename(blend))[0])
+                level = str(body.get("level") or "lod0")
+                folder = UP.versions_folder(blend)
+                name = UP.version_file_name(model, level, prof)
+                path = os.path.join(folder, name if name.endswith(".glb") else name[:-5])
+                exists = os.path.exists(path)
+                plan["outputs"] = [{"level": level, "path": path, "name": name, "exists": exists}]
+                if not _fs_inside_roots(path):
+                    return {"ok": False, "error": f"{path} is outside the folders this bridge serves"}
+                if exists and not body.get("replace"):
+                    return {"ok": False, "error": f"{name} is already in versions/: tick «replace» to make it again",
+                            "exists": True}
+            return plan
+
+        def _use_job(self, body, plan):
+            import em_blender as BL
+            import em_optimize as O
+            op, blender = plan["op"], plan["blender"]
+            args = {"op": op, "objects": [str(x) for x in body.get("objects") or []],
+                    "container": str(body.get("container") or ""),
+                    "s3dgraphy_resources": _s3dgraphy_resources_dir()}
+            if op == "apply_use":
+                args.update({"profile": str(body.get("profile") or "web"),
+                             "checked": [str(x) for x in body.get("checked") or []],
+                             "model": str(body.get("model") or ""), "level": str(body.get("level") or "lod0"),
+                             "replace": bool(body.get("replace"))})
+
+            def target(job):
+                job.stage = os.path.basename(plan["blend"])
+                run = BL.run_op(job, blender, args, plan["blend"], timeout=900 if op == "measure" else 4 * 3600)
+                res = run["result"] or {}
+                return {"op": op, "blender": blender, "seconds": run["seconds"], "peak_mb": run["peak_mb"],
+                        "result": res, "outputs": plan["outputs"]}
+            what = {"measure": "measure for a use", "apply_use": "prepare for a use"}[op]
+            job = O.submit("blender", {"op": op, "sources": [plan["blend"]]}, target,
+                           heavy=plan["heavy"], estimate_mb=plan["estimate_mb"],
+                           label=f"Blender · {what} · {os.path.basename(plan['blend'])}")
+            self._json({"ok": True, "job": job.id, "plan": plan}, 202)
+
         def _blender_job(self, body):
             """``POST /jobs {kind: blender, op, …}`` (see :meth:`_blender_plan`);
             ``dry_run`` answers the plan. probe and objects are light jobs; a
@@ -3625,6 +3859,9 @@ def make_handler(api):
                 return
             if body.get("dry_run"):
                 self._json(plan)
+                return
+            if plan["op"] in ("measure", "apply_use"):
+                self._use_job(body, plan)
                 return
             op, blender = plan["op"], plan["blender"]
             todo = [o for o in plan["outputs"] if not o.get("exists") and not o.get("error")]

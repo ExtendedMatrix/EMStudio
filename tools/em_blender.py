@@ -330,10 +330,86 @@ def prepare():
     return {k: v for k, v in out.items() if isinstance(v, (str, int, float, bool, list, dict, type(None)))}
 
 
+def emtools_pd():
+    """EM Tools' «Prepare for a use: diagnosis» module (MICRO-PREPARA-DIAGNOSI).
+    When this Blender's s3dgraphy predates the profiles of use, the bridge's
+    ``s3dgraphy.resources`` folder joins that package's path: the same table
+    and the same diagnosis as EMStudio's."""
+    em_name, _ = module_with(None, ".graph_origins")
+    if not em_name:
+        raise RuntimeError("EM Tools is not loaded in this Blender")
+    pkg = em_name.rsplit(".graph_origins", 1)[0]
+    try:
+        import s3dgraphy.resources.use_profiles  # noqa: F401
+    except ImportError:
+        extra = A.get("s3dgraphy_resources") or ""
+        if extra and os.path.isfile(os.path.join(extra, "use_profiles.py")):
+            import s3dgraphy.resources as R
+            R.__path__.append(extra)
+    return importlib.import_module(pkg + ".sync_manager.prepare_diagnosis")
+
+
+def picked():
+    """The objects to measure: ``objects`` by name, else the meshes of the RM
+    container ``container`` (its label), else every mesh with faces."""
+    names = A.get("objects") or []
+    if not names and A.get("container"):
+        for c in getattr(bpy.context.scene, "rm_containers", ()):
+            if (c.label or c.doc_name) == A["container"]:
+                names = [e.name for e in c.mesh_names]
+    if names:
+        objs = [bpy.data.objects.get(n) for n in names]
+        return [o for o in objs if o is not None and o.type == "MESH"]
+    return [o for o in bpy.context.scene.objects if o.type == "MESH" and o.data is not None and len(o.data.polygons)]
+
+
+def containers():
+    return [{"label": c.label or c.doc_name, "objects": [e.name for e in c.mesh_names]}
+            for c in getattr(bpy.context.scene, "rm_containers", ())]
+
+
+def measure():
+    pd = emtools_pd()
+    objs = picked()
+    say("PROGRESS", {"stage": "measure", "done": 0, "total": 1})
+    t = time.time()
+    m = pd.measure_objects(objs)
+    say("PROGRESS", {"stage": "measure", "done": 1, "total": 1})
+    return {"blend": bpy.data.filepath, "objects": m["objects"], "textures": m["textures"],
+            "containers": containers(), "measure_seconds": round(time.time() - t, 2),
+            "names": [o.name for o in objs]}
+
+
+def apply_use():
+    """EM Tools' «Apply the ticks» on the objects of this .blend (never saved):
+    the version in versions/ beside it, stamped. The graph is EMStudio's: it is
+    not loaded here."""
+    pd = emtools_pd()
+    objs = picked()
+    if not objs:
+        raise RuntimeError("no object to prepare")
+    for o in bpy.context.view_layer.objects:
+        o.select_set(False)
+    for o in objs:
+        o.select_set(True)
+    bpy.context.view_layer.objects.active = objs[0]
+    say("PROGRESS", {"stage": "prepare", "done": 0, "total": 1})
+    r = bpy.ops.em.prepare_diagnose(profile=A.get("profile") or "web", scope="SELECTED",
+                                    model=A.get("model") or "", level=A.get("level") or "lod0",
+                                    replace=bool(A.get("replace")),
+                                    checked_ids=",".join(A.get("checked") or []) or "none")
+    if r != {"FINISHED"}:
+        raise RuntimeError("Prepare for a use answered %s" % sorted(r))
+    out = dict(pd.LAST.get("applied") or {})
+    say("PROGRESS", {"stage": "prepare", "done": 1, "total": 1})
+    return {k: v for k, v in out.items() if isinstance(v, (str, int, float, bool, list, dict, type(None)))}
+
+
 try:
     t0 = time.time()
     op = A.get("op") or "probe"
-    res = {"probe": probe, "objects": objects, "lod_set": lod_set, "atlas": atlas, "prepare": prepare}[op]()
+    res = {"probe": probe, "objects": objects, "lod_set": lod_set, "atlas": atlas, "prepare": prepare,
+           "measure": measure, "apply_use": apply_use}[op]()
     say("RESULT", {"ok": True, "op": op, "seconds": round(time.time() - t0, 2), "result": res})
 except Exception as exc:
     traceback.print_exc()

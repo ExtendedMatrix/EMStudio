@@ -728,6 +728,8 @@ import {
 } from "./menu-ui";
 import { currentPlatform } from "./menu-table";
 import { askConfirm, askText, openDialog, tell } from "./app-dialog";
+import { budgetRows, checkedIds, effectLine, heaviest, levelFor, mb as useMb, removalLines, versionsOf,
+  type Diagnosis, type UseProfile, type VersionOnDisk } from "./use-diagnosis";
 import { pickPathInApp } from "./path-picker";
 import { GraphRemovalError, graphRemovalReport, settleLinksTowards } from "./graph-removal";
 import type { ContainerLike, LinksAction, RemovalReport, ShelfAction } from "./graph-removal";
@@ -13773,7 +13775,7 @@ async function bridgeUrl(): Promise<string> {
   return _bridgeUrl;
 }
 /** The bridge level this editor expects (`BRIDGE_LEVEL` in tools/em_bridge.py). */
-const BRIDGE_LEVEL_WANTED = 45;   // 45 = /blender, POST /jobs {kind: blender} — Blender found, probed, used for the LOD set, the atlas, a .blend's object and «Prepare for a use» (MICRO-OTTIMIZZA-3); 44 = /fs/tileset, POST /jobs {kind: tileset} — Obj2Tiles and Cesium's validator as add-ons, a batch of tilesets in parallel under a memory ceiling, cancel by file (MICRO-OTTIMIZZA-2); 43 = /addons, /jobs (gltfpack as an add-on downloaded on request, every optimisation a background job), /fs/optimize with a preset, /graph/add-version (MICRO-OTTIMIZZA-1); 42 = /project-tree and /fs/optimize, the File window «alla Blender» (MICRO-ARCHIVIO-2); 41 = /web-meta, the Shelf's previews of web addresses (MICRO-ARCHIVIO-1); 40 = /geo/tileset-frame, a tileset's shift (MICRO tileset, shift e epoche); 39 = /fs/pack-3tz with `root`, the RealityScan pair (MICRO-TILESET-CARTELLA); 38 = /geo/crs-info, /geo/convert-shift (MICRO-GEOREF-GRAFO); 37 = HTTPS through em_net, /tiles/failures (MICRO-BRIDGE-CERTIFICATI); 36 = /tiles/*, /geo/* (MICRO-GEOGLOBO); 31 = /property-source (FONTE); 32 = /room-import, «Bring into a room» through the engine; 33 = /fs/write (MICRO-SPAZIO-3D); 34 = /fs/doc, /fs/probe (MICRO-PERCORSI-WINDOWS); 35 = /fs/collect, /health's pid (MICRO-WINDOWS-MODELLI)
+const BRIDGE_LEVEL_WANTED = 46;   // 46 = /optimize/profiles, /optimize/diagnose, /optimize/versions(/remove), POST /jobs {kind: blender, op: measure | apply_use} — a model prepared for a use, the same diagnosis as EM Tools' (MICRO-PREPARA-DIAGNOSI); 45 = /blender, POST /jobs {kind: blender} — Blender found, probed, used for the LOD set, the atlas, a .blend's object and «Prepare for a use» (MICRO-OTTIMIZZA-3); 44 = /fs/tileset, POST /jobs {kind: tileset} — Obj2Tiles and Cesium's validator as add-ons, a batch of tilesets in parallel under a memory ceiling, cancel by file (MICRO-OTTIMIZZA-2); 43 = /addons, /jobs (gltfpack as an add-on downloaded on request, every optimisation a background job), /fs/optimize with a preset, /graph/add-version (MICRO-OTTIMIZZA-1); 42 = /project-tree and /fs/optimize, the File window «alla Blender» (MICRO-ARCHIVIO-2); 41 = /web-meta, the Shelf's previews of web addresses (MICRO-ARCHIVIO-1); 40 = /geo/tileset-frame, a tileset's shift (MICRO tileset, shift e epoche); 39 = /fs/pack-3tz with `root`, the RealityScan pair (MICRO-TILESET-CARTELLA); 38 = /geo/crs-info, /geo/convert-shift (MICRO-GEOREF-GRAFO); 37 = HTTPS through em_net, /tiles/failures (MICRO-BRIDGE-CERTIFICATI); 36 = /tiles/*, /geo/* (MICRO-GEOGLOBO); 31 = /property-source (FONTE); 32 = /room-import, «Bring into a room» through the engine; 33 = /fs/write (MICRO-SPAZIO-3D); 34 = /fs/doc, /fs/probe (MICRO-PERCORSI-WINDOWS); 35 = /fs/collect, /health's pid (MICRO-WINDOWS-MODELLI)
 /** MICRO-INSTALLER-PULSANTE p.3 · the bridge that answers says its level; one
  *  that differs from BRIDGE_LEVEL_WANTED is said in the Log (its url, pid, since
  *  when) and in a notice — once per bridge. Asked at start, while the sidecar
@@ -34483,6 +34485,375 @@ function filesOptimizeTab(win: Win, listing: FsListing): HTMLElement {
 
   // 4 · Blender, the second way — experimental, behind its switch
   box.appendChild(filesBlenderSection(win, chosen, models));
+
+  // 5 · prepared for a use: the diagnosis, the grid, the versions on disk
+  box.appendChild(filesUseSection(win, chosen));
+  return box;
+}
+
+// ── MICRO-PREPARA-DIAGNOSI · a model prepared for a use ─────────────────────
+
+const useState = {
+  profiles: null as UseProfile[] | null, profilesError: "",
+  diag: new Map<string, Diagnosis>(), ticks: new Map<string, Map<string, boolean>>(),
+  measured: new Map<string, { objects: unknown[]; textures: Record<string, unknown>; names: string[];
+    containers: { label: string; objects: string[] }[] }>(),
+  versions: new Map<string, { folder: string; rows: VersionOnDisk[] }>(),
+  gone: new Set<string>(), busy: "" as string, error: "", replace: false,
+  container: new Map<string, string>(),
+};
+
+async function loadUseProfiles(): Promise<void> {
+  try {
+    const r = await fetch(`${await bridgeUrl()}/optimize/profiles`, { cache: "no-store" });
+    const j = await r.json().catch(() => ({})) as { ok?: boolean; profiles?: UseProfile[]; error?: string };
+    if (!r.ok || !j.profiles) useState.profilesError = r.status === 404 ? t("files.useOldBridge") : String(j.error ?? r.status);
+    else useState.profiles = j.profiles;
+  } catch { useState.profilesError = t("storage.bridgeDown"); }
+  renderStorage();
+}
+
+async function postUse<T>(route: string, body: Record<string, unknown>): Promise<T & { ok?: boolean; error?: string }> {
+  const r = await fetch(`${await bridgeUrl()}${route}`, { method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body) });
+  const j = await r.json().catch(() => ({})) as T & { ok?: boolean; error?: string };
+  if (!r.ok && !j.error) (j as { error?: string }).error = r.status === 404 ? t("files.useOldBridge") : String(r.status);
+  return j;
+}
+
+/** The key of what is diagnosed: the files, or the .blend and its scope. */
+function useKey(paths: string[], blend: string): string {
+  return blend ? `blend:${blend}|${useState.container.get(blend) ?? ""}` : `files:${paths.join("|")}`;
+}
+
+async function runUseDiagnosis(files: string[], blend: string, profile: string): Promise<void> {
+  const key = useKey(files, blend);
+  useState.busy = key;
+  useState.error = "";
+  renderStorage();
+  try {
+    let body: Record<string, unknown> = { profile, paths: files };
+    if (blend) {
+      let m = useState.measured.get(key);
+      if (!m) {
+        const cont = useState.container.get(blend) ?? "";
+        const job = await startJob({ kind: "blender", op: "measure", blend, container: cont },
+          t("files.useMeasuring", { name: baseName(blend) }));
+        if (!job) return;
+        renderStorage();
+        const end = await job.done;
+        if (end.state !== "done") { useState.error = jobText(end); return; }
+        const res = (end.result as { result?: typeof m })?.result;
+        if (!res) { useState.error = t("files.useNoMeasure"); return; }
+        m = res;
+        useState.measured.set(key, m);
+      }
+      body = { profile, measured: { objects: m.objects, textures: m.textures } };
+    }
+    const ticks = useState.ticks.get(`${key}|${profile}`);
+    const prev = useState.diag.get(`${key}|${profile}`);
+    if (prev && ticks) body.checked = checkedIds(prev, ticks);
+    const d = await postUse<Diagnosis>("/optimize/diagnose", body);
+    if (!d.ok) { useState.error = String(d.error ?? "?"); return; }
+    useState.diag.set(`${key}|${profile}`, d);
+  } catch (e) { useState.error = String(e instanceof Error ? e.message : e); }
+  finally { useState.busy = ""; renderStorage(); }
+}
+
+async function loadUseVersions(folder: string): Promise<void> {
+  try {
+    const r = await fetch(`${await bridgeUrl()}/optimize/versions?folder=${encodeURIComponent(folder)}`, { cache: "no-store" });
+    const j = await r.json().catch(() => ({})) as { ok?: boolean; folder?: string; versions?: VersionOnDisk[]; error?: string };
+    if (j.ok) useState.versions.set(folder, { folder: j.folder ?? folder, rows: j.versions ?? [] });
+    else useState.error = String(j.error ?? r.status);
+  } catch { useState.error = t("storage.bridgeDown"); }
+  renderStorage();
+}
+
+async function removeUseVersions(folder: string, names: string[]): Promise<void> {
+  const doc = store?.doc ?? null;
+  const dry = await postUse<{ plan: { name: string; files: string[]; bytes: number; nodes: { id: string; name: string }[] }[] }>(
+    "/optimize/versions/remove", { folder, names, dry_run: true, doc });
+  if (!dry.ok) { toast(t("files.optFailed", { why: String(dry.error ?? "") })); return; }
+  const lines = removalLines(dry.plan, { files: t("files.useFiles"), graph: t("files.useGraph") });
+  if (!(await askConfirm(`${t("files.useRemoveAsk", { n: String(names.length) })}\n\n${lines.join("\n")}\n\n${t("files.useRemoveNoUndo")}`,
+    { danger: true }))) return;
+  const done = await postUse<{ deleted: string[]; failed: { path: string; error: string }[]; plan: typeof dry.plan }>(
+    "/optimize/versions/remove", { folder, names, doc });
+  if (!done.ok) { toast(t("files.optFailed", { why: String(done.error ?? "") })); return; }
+  let nodes = 0;
+  for (const p of done.plan) for (const n of p.nodes) {
+    const st = storeOfNode(n.id) ?? store;
+    if (st?.node(n.id)) { st.deleteNode(n.id); nodes++; }
+  }
+  const m = t("files.useRemoved", { n: String(names.length), files: String(done.deleted.length), nodes: String(nodes) });
+  toast(m);
+  logInfo(m);
+  for (const f of done.failed) logWarn(`${f.path}: ${f.error}`);
+  useState.gone.clear();
+  await loadUseVersions(folder);
+}
+
+async function applyUse(blend: string, d: Diagnosis, ids: string[], model: string, level: string): Promise<void> {
+  const cont = useState.container.get(blend) ?? "";
+  const m = useState.measured.get(useKey([], blend));
+  const body = { kind: "blender", op: "apply_use", blend, container: cont, objects: cont ? [] : (m?.names ?? []),
+    profile: d.profile, checked: ids, model, level, replace: useState.replace };
+  const label = t("files.useApplying", { name: `${model}@${level}`, profile: d.profile_label });
+  const job = await startJob(body, label);
+  if (!job) { renderStorage(); return; }
+  toast(t("files.blStarted", { what: label }));
+  renderStorage();
+  const end = await job.done;
+  if (end.state === "cancelled") { toast(t("files.jobCancelled", { what: end.label })); renderStorage(); return; }
+  if (end.state !== "done") { toast(t("files.optFailed", { why: end.error ?? "" })); logWarn(jobText(end)); renderStorage(); return; }
+  const res = ((end.result ?? {}) as { result?: { entry?: string; bytes?: number; measured?: { triangles?: number;
+    triangles_stored?: number }; instanced?: number; decimated?: number; resized?: number; warnings?: string[] } }).result ?? {};
+  const msg = t("files.useMade", { name: baseName(res.entry ?? ""), tris: (res.measured?.triangles ?? 0).toLocaleString(),
+    stored: (res.measured?.triangles_stored ?? 0).toLocaleString(), size: useMb(res.bytes ?? 0),
+    inst: String(res.instanced ?? 0), dec: String(res.decimated ?? 0) });
+  toast(msg);
+  logInfo(msg);
+  for (const w of res.warnings ?? []) logWarn(w);
+  useState.replace = false;
+  const folder = paths.dirname(blend) + "/versions";
+  void loadUseVersions(folder);
+}
+
+function filesUseSection(win: Win, chosen: FsEntry[]): HTMLElement {
+  const sec = document.createElement("section");
+  sec.className = "files-sec files-use";
+  const h = document.createElement("div");
+  h.className = "files-sec-h";
+  const hb = document.createElement("b");
+  hb.textContent = t("files.useTitle");
+  const pill = document.createElement("span");
+  pill.className = "files-pill on";
+  pill.textContent = t("files.on");
+  h.append(hb, pill, " ", tabTip(t("files.useTip")));
+  sec.appendChild(h);
+  if (!useState.profiles) {
+    if (useState.profilesError) sec.appendChild(tabLead(useState.profilesError, "files-hint files-warn"));
+    else { sec.appendChild(tabLead(t("files.useLoading"), "files-hint")); void loadUseProfiles(); }
+    return sec;
+  }
+  const gltfs = chosen.filter((e) => /\.(glb|gltf)$/i.test(e.name)).map((e) => e.path);
+  const blendE = chosen.find((e) => /\.blend$/i.test(e.name));
+  const blend = blendE?.path ?? "";
+  if (!gltfs.length && !blend) { sec.appendChild(tabLead(t("files.useChoose"), "files-hint")); return sec; }
+  // the profile
+  const pkey = "use-profile";
+  const profile = filesPref(win, pkey) ?? "web";
+  const chips = document.createElement("div");
+  chips.className = "files-chips";
+  for (const p of useState.profiles) {
+    const c = document.createElement("button");
+    c.type = "button";
+    c.className = "files-chip";
+    c.dataset.useProfile = p.id;
+    c.setAttribute("aria-pressed", String(p.id === profile));
+    c.textContent = p.label;
+    c.title = t("files.useProfileHint", { tris: p.max_triangles?.toLocaleString() ?? "—",
+      obj: p.max_triangles_object?.toLocaleString() ?? "—", side: String(p.max_texture_side ?? "—"),
+      tex: p.texture_formats.join("/"), geo: p.geometry_compression.join("/") || "—",
+      inst: p.instancing ? t("files.yes") : t("files.no"), pack: p.packaging });
+    c.onclick = () => { setFilesPref(win, pkey, p.id === "web" ? null : p.id); renderStorage(); };
+    chips.appendChild(c);
+  }
+  sec.appendChild(chips);
+  // what: the files, or the .blend (through Blender, its container)
+  const key = useKey(gltfs, blend);
+  const probe = blenderState?.s?.probe;
+  if (blend) {
+    sec.appendChild(tabLead(t("files.useBlend", { name: baseName(blend) }), "files-lead"));
+    if (!blenderOn() || !probe?.ok || !probe.emtools?.loaded) {
+      sec.appendChild(tabLead(t("files.useNeedBlender"), "files-hint files-warn"));
+      if (!gltfs.length) return sec;
+    }
+    const m = useState.measured.get(key);
+    if (m?.containers?.length) {
+      const lab = document.createElement("label");
+      lab.textContent = t("files.useContainer") + " ";
+      const sel = document.createElement("select");
+      sel.dataset.action = "use-container";
+      const all = document.createElement("option");
+      all.value = "";
+      all.textContent = t("files.useAllMeshes");
+      sel.appendChild(all);
+      for (const c of m.containers) {
+        const o = document.createElement("option");
+        o.value = c.label;
+        o.textContent = `${c.label} (${c.objects.length})`;
+        o.selected = c.label === (useState.container.get(blend) ?? "");
+        sel.appendChild(o);
+      }
+      sel.onchange = () => { useState.container.set(blend, sel.value); renderStorage(); };
+      lab.appendChild(sel);
+      sec.appendChild(lab);
+    }
+  } else sec.appendChild(tabLead(t("files.useFilesLead", { n: String(gltfs.length) }), "files-lead"));
+  const go = document.createElement("button");
+  go.type = "button";
+  go.dataset.action = "use-diagnose";
+  go.disabled = useState.busy === key;
+  go.textContent = useState.busy === key ? t("files.useBusy") : t("files.useGo");
+  go.onclick = () => { void runUseDiagnosis(blend ? [] : gltfs, blend, profile); };
+  sec.appendChild(go);
+  if (useState.error) sec.appendChild(tabLead(useState.error, "files-hint files-warn"));
+  const d = useState.diag.get(`${key}|${profile}`);
+  if (d) sec.appendChild(useDiagnosisView(win, d, key, profile, blend));
+  // the versions on disk
+  const folder = blend ? `${paths.dirname(blend)}/versions`
+    : /\/versions$/.test(paths.dirname(gltfs[0])) ? paths.dirname(gltfs[0]) : `${paths.dirname(gltfs[0])}/versions`;
+  sec.appendChild(useVersionsView(folder));
+  const rows = jobRows(["blender"]);
+  if (rows) sec.appendChild(rows);
+  return sec;
+}
+
+function useDiagnosisView(win: Win, d: Diagnosis, key: string, profile: string, blend: string): HTMLElement {
+  const box = document.createElement("div");
+  box.className = "files-use-diag";
+  box.dataset.profile = d.profile;
+  const tt = d.totals;
+  box.appendChild(tabLead(t("files.useTotals", { objects: String(tt.objects), tris: tt.triangles.toLocaleString(),
+    verts: tt.vertices.toLocaleString(), mats: String(tt.materials), calls: String(tt.draw_calls),
+    tex: String(tt.textures), side: String(tt.texture_side_max) }), "files-lead"));
+  const bud = document.createElement("div");
+  bud.className = "files-use-budget";
+  for (const b of budgetRows(d)) {
+    const s = document.createElement("span");
+    s.className = `files-pill ${b.ok ? "on" : "warn"}`;
+    s.dataset.budget = b.key;
+    s.textContent = `${t(`files.useBudget.${b.key}`)} ${b.value.toLocaleString()} / ${b.limit.toLocaleString()}`;
+    bud.appendChild(s);
+  }
+  box.appendChild(bud);
+  if (d.duplicates.length) box.appendChild(tabLead(t("files.useCopies", { n: String(d.duplicates.reduce((a, x) => a + x.copies, 0)),
+    meshes: String(d.duplicates.length) }), "files-hint"));
+  if (d.peaks.length) box.appendChild(tabLead(t("files.usePeaks", { list: d.peaks.slice(0, 4).map((p) =>
+    `${p.name} ${p.triangles.toLocaleString()}`).join(", ") + (d.peaks.length > 4 ? "…" : "") }), "files-hint files-warn"));
+  // the heaviest objects
+  const tbl = document.createElement("table");
+  tbl.className = "files-use-objects";
+  const head = tbl.insertRow();
+  for (const k of ["useObject", "useTris", "useMats", "useCalls", "useTex"]) head.insertCell().textContent = t(`files.${k}`);
+  for (const o of heaviest(d, 10)) {
+    const r = tbl.insertRow();
+    if (o.over_budget) r.className = "files-warn";
+    for (const v of [o.name, o.triangles.toLocaleString(), String(o.materials), String(o.draw_calls), String(o.textures)])
+      r.insertCell().textContent = v;
+  }
+  box.appendChild(tbl);
+  // the grid
+  const tk = useState.ticks.get(`${key}|${profile}`) ?? new Map<string, boolean>();
+  useState.ticks.set(`${key}|${profile}`, tk);
+  const grid = document.createElement("div");
+  grid.className = "files-use-grid";
+  const words = { tris: t("files.useWTris"), stored: t("files.useWStored"), down: t("files.useWDown"),
+    gpu: t("files.useWGpu"), calls: t("files.useWCalls") };
+  for (const r of d.improvements) {
+    const row = document.createElement("label");
+    row.className = "files-use-row";
+    row.dataset.row = r.id;
+    const cb = document.createElement("input");
+    cb.type = "checkbox";
+    cb.checked = r.available && (tk.get(r.id) ?? r.checked);
+    cb.disabled = !r.available || r.kind === "packaging";
+    cb.onchange = () => { tk.set(r.id, cb.checked); void runUseDiagnosis(blend ? [] : (d.files ?? []).map((f) => f.path), blend, profile); };
+    const txt = document.createElement("span");
+    txt.textContent = r.problem ? `${r.problem} → ${r.action}` : r.action;
+    const eff = document.createElement("span");
+    eff.className = "files-hint";
+    eff.textContent = r.available ? effectLine(r.effect, words) : r.why;
+    row.append(cb, " ", txt, " ", eff);
+    if (r.kind === "decimate" && !blend) row.append(" ", tabTip(t("files.useOnlyBlender")));
+    grid.appendChild(row);
+  }
+  box.appendChild(grid);
+  const b = d.before, a = d.after;
+  box.appendChild(tabLead(t("files.useAfter", { d0: useMb(b.download_bytes), d1: useMb(a.download_bytes),
+    g0: useMb(b.gpu_bytes), g1: useMb(a.gpu_bytes), t0: b.triangles.toLocaleString(), t1: a.triangles.toLocaleString(),
+    c0: String(b.draw_calls), c1: String(a.draw_calls) }), "files-lead"));
+  // applied: by EM Tools in Blender, on the .blend
+  if (blend) {
+    const probe = blenderState?.s?.probe;
+    const ids = checkedIds(d, tk);
+    const level = levelFor(d, ids);
+    const model = filesPref(win, `use-model:${blend}`) ?? (useState.container.get(blend) || baseName(blend).replace(/\.blend$/i, ""));
+    const ml = document.createElement("label");
+    ml.textContent = t("files.useModel") + " ";
+    const mi = document.createElement("input");
+    mi.value = model;
+    mi.dataset.action = "use-model";
+    mi.onchange = () => { setFilesPref(win, `use-model:${blend}`, mi.value || null); renderStorage(); };
+    ml.appendChild(mi);
+    box.appendChild(ml);
+    box.appendChild(tabLead(t("files.useTarget", { name: `versions/${model}@${level}-${useState.profiles?.find((p) => p.id === d.profile)?.destination ?? d.profile}` }), "files-hint"));
+    const rep = document.createElement("label");
+    const rc = document.createElement("input");
+    rc.type = "checkbox";
+    rc.checked = useState.replace;
+    rc.onchange = () => { useState.replace = rc.checked; };
+    rep.append(rc, " ", t("files.useReplace"));
+    box.appendChild(rep);
+    const ap = document.createElement("button");
+    ap.type = "button";
+    ap.dataset.action = "use-apply";
+    ap.disabled = !(blenderOn() && probe?.ok && probe.emtools?.loaded);
+    ap.textContent = t("files.useApply");
+    ap.onclick = () => { void applyUse(blend, d, ids, model, level); };
+    box.appendChild(ap);
+  } else box.appendChild(tabLead(t("files.useApplyFiles"), "files-hint"));
+  return box;
+}
+
+function useVersionsView(folder: string): HTMLElement {
+  const box = document.createElement("div");
+  box.className = "files-use-versions";
+  const v = useState.versions.get(folder);
+  const hh = document.createElement("div");
+  hh.className = "files-sec-h";
+  const hb = document.createElement("b");
+  hb.textContent = t("files.useVersions");
+  hh.appendChild(hb);
+  const rl = document.createElement("button");
+  rl.type = "button";
+  rl.dataset.action = "use-versions";
+  rl.textContent = v ? t("files.useReload") : t("files.useList");
+  rl.onclick = () => { void loadUseVersions(folder); };
+  hh.append(" ", rl);
+  box.appendChild(hh);
+  if (!v) return box;
+  if (!v.rows.length) { box.appendChild(tabLead(t("files.useNoVersions", { folder: v.folder }), "files-hint")); return box; }
+  const tbl = document.createElement("table");
+  tbl.className = "files-use-objects";
+  const head = tbl.insertRow();
+  for (const k of ["", "useVersion", "useProfile", "useTris", "useSize", "useDate", "useStamp"])
+    head.insertCell().textContent = k ? t(`files.${k}`) : "";
+  for (const r of versionsOf(v.rows, [])) {
+    const tr = tbl.insertRow();
+    const c0 = tr.insertCell();
+    const cb = document.createElement("input");
+    cb.type = "checkbox";
+    cb.checked = useState.gone.has(r.name);
+    cb.dataset.version = r.name;
+    cb.onchange = () => { if (cb.checked) useState.gone.add(r.name); else useState.gone.delete(r.name); renderStorage(); };
+    c0.appendChild(cb);
+    for (const val of [r.name, r.profile || r.destination, r.triangles?.toLocaleString() ?? "—", useMb(r.bytes),
+      new Date(r.modified * 1000).toLocaleString(), r.stamp ? "✓" : "—"]) tr.insertCell().textContent = val;
+  }
+  box.appendChild(tbl);
+  const gone = v.rows.filter((r) => useState.gone.has(r.name)).map((r) => r.name);
+  if (gone.length) {
+    const del = document.createElement("button");
+    del.type = "button";
+    del.className = "danger";
+    del.dataset.action = "use-remove";
+    del.textContent = t("files.useRemove", { n: String(gone.length) });
+    del.onclick = () => { void removeUseVersions(v.folder, gone); };
+    box.appendChild(del);
+  }
   return box;
 }
 
