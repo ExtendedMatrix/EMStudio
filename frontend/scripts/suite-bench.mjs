@@ -37,7 +37,7 @@
 //   GT16_STUDY  …/OneDrive-CNR/…/T6.5/TempluMare_v2_for_3DR_2026-10-06
 //   S3DGRAPHY_DIR (its .venv runs the bridges)  ../../s3Dgraphy
 import { spawn, execFileSync } from "node:child_process";
-import { existsSync, mkdtempSync, mkdirSync, rmSync, writeFileSync, realpathSync } from "node:fs";
+import { chmodSync, existsSync, mkdtempSync, mkdirSync, rmSync, writeFileSync, realpathSync } from "node:fs";
 import { createServer } from "node:net";
 import { homedir, tmpdir, platform } from "node:os";
 
@@ -149,7 +149,14 @@ process.on("SIGINT", () => { stop(); process.exit(130); });
 try {
   const [vite, bridge, empty] = [await freePort(), await freePort(), await freePort()];
   start("npx", ["vite", "--port", String(vite), "--strictPort"], { cwd: FE });
-  start(PY, [`${REPO}tools/em_bridge.py`, "--port", String(bridge), "--fs-root", FS], { cwd: REPO });
+  // MICRO-OTTIMIZZA-3 · the bench's Blender is the FAKE of the checks (this
+  // machine's real Blender answers differently tomorrow), the runner and the
+  // add-ons in the bench, never in the app's data folder
+  const fakeBlender = `${BENCH}/Blender`;
+  execFileSync("cp", [`${HERE}fake-blender.py`, fakeBlender]);
+  chmodSync(fakeBlender, 0o755);
+  start(PY, [`${REPO}tools/em_bridge.py`, "--port", String(bridge), "--fs-root", FS], { cwd: REPO,
+    env: { ...process.env, EM_BLENDER: fakeBlender, EM_ADDONS_DIR: `${BENCH}/addons` } });
   start(PY, [`${REPO}tools/em_bridge.py`, "--port", String(empty), "--fs-root", EMPTY], { cwd: REPO });
   await until("Vite", `http://localhost:${vite}/em/studio/`);
   await until("the bridge", `http://localhost:${bridge}/health`);

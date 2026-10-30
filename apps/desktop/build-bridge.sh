@@ -196,7 +196,7 @@ fi
   --add-data "$SRC/mappings${SEP}s3dgraphy/mappings" \
   --hidden-import lxml --hidden-import lxml.etree --hidden-import lxml._elementpath \
   --collect-submodules rdflib --copy-metadata rdflib \
-  --hidden-import em_net --hidden-import em_optimize --hidden-import certifi --collect-data certifi \
+  --hidden-import em_net --hidden-import em_optimize --hidden-import em_blender --hidden-import certifi --collect-data certifi \
   ${S3_ARGS[@]+"${S3_ARGS[@]}"} \
   ${GEO_ARGS[@]+"${GEO_ARGS[@]}"} \
   ${PREVIEW_ARGS[@]+"${PREVIEW_ARGS[@]}"} \

@@ -1431,6 +1431,14 @@ def _master_of(graph, source: str, em_json: str) -> str:
     return by_sum
 
 
+def _norm_level(level) -> str:
+    """«LOD2», 2, "lod2" → "lod2" (3DSC names its levels as it likes)."""
+    s = str(level or "").strip().lower()
+    if not s:
+        return ""
+    return s if s.startswith("lod") else f"lod{s}"
+
+
 def _variant_parameters(params: dict) -> dict:
     """The parameters a variant's stamp and its ``lod_generation`` step say."""
     return {"lod": params["lod"], "destination": params["destination"], "ratio": params["ratio"],
@@ -1794,7 +1802,13 @@ def _load_s3dgraphy(s3dgraphy_src: "pathlib.Path | None"):
 #: ``POST /jobs {kind: tileset}`` — one heavy job, its files in parallel under
 #: the ceiling, each validated then packed as .3tz, cancel by file
 #: (``{step: cancel, id, item}``) — MICRO-OTTIMIZZA-2.
-BRIDGE_LEVEL = 44   # 30 also = /validate
+#: 45 = Blender as the second way (``em_blender``): ``GET /blender`` (the
+#: Blenders found, the one used, its last probe) and ``POST /blender`` (the
+#: one chosen in Settings); ``POST /jobs {kind: blender, op: probe | objects |
+#: lod_set | atlas | prepare}`` — the probe says what loads and why not, the
+#: experiences' LOD set and an atlas by 3D Survey Collection, a .blend's
+#: object, EM Tools' «Prepare for a use» on the open graph — MICRO-OTTIMIZZA-3.
+BRIDGE_LEVEL = 45   # 30 also = /validate
 
 
 #: the files of a tileset a server may send gzipped (MICRO-TILESET-CARTELLA)
@@ -2512,6 +2526,10 @@ def make_handler(api):
             elif route == "/web-meta":
                 q = urllib.parse.parse_qs(parsed.query)
                 self._web_meta((q.get("url") or [""])[0])
+            elif route == "/blender":
+                # MICRO-OTTIMIZZA-3 · the Blenders found, the one used, its last probe
+                import em_blender as BL
+                self._json(BL.state())
             elif route == "/addons":
                 # MICRO-OTTIMIZZA-1 · the add-ons: what is pinned, what is here
                 import em_optimize as O
@@ -2972,6 +2990,16 @@ def make_handler(api):
                     self._fail(400, f"invalid JSON body: {exc}")
                     return
                 self._jobs_post(body if isinstance(body, dict) else {})
+            elif route == "/blender":
+                # MICRO-OTTIMIZZA-3 · the Blender chosen in Settings ("" = the newest found)
+                try:
+                    body = json.loads(raw.decode("utf-8")) if raw else {}
+                except Exception as exc:
+                    self._fail(400, f"invalid JSON body: {exc}")
+                    return
+                import em_blender as BL
+                out = BL.choose(str((body or {}).get("path") or ""))
+                self._json({**BL.state(), **out}, 200 if out.get("ok") else 400)
             elif route == "/graph/add-version":
                 # MICRO-OTTIMIZZA-1 · a variant, registered as a version of its asset
                 try:
@@ -3294,6 +3322,9 @@ def make_handler(api):
                 self._json({"ok": ok} if ok else {"ok": False, "error": "no such job"}, 200 if ok else 404)
                 return
             kind = str(body.get("kind") or "")
+            if kind == "blender":
+                self._blender_job(body)
+                return
             if kind == "tileset":
                 plan = self._tileset_plan(body)
                 if not plan.get("tool"):
@@ -3369,6 +3400,175 @@ def make_handler(api):
                 self._json({"ok": True, "job": job.id}, 202)
             else:
                 self._fail(400, f"unknown job kind {kind!r}")
+
+        def _blender_plan(self, body):
+            """MICRO-OTTIMIZZA-3 · what a Blender job will make, before it starts:
+            ``{op, source | blend + object, levels?, size?, use?}`` → ``{ok,
+            op, blender, outputs: [{path, name, exists, level}], estimate_mb,
+            heavy}`` or ``{ok: false, error}``. The names are s3Dgraphy's
+            (``variant_path``): ``<model>@lodN-realtime.glb`` for the
+            experiences' set, ``<model>@atlas.glb`` for a re-baked atlas, the
+            object's name for a datablock of a .blend."""
+            import em_blender as BL
+            import em_optimize as O
+            from s3dgraphy.project_tree import variant_path, find_project_root
+            op = str(body.get("op") or "")
+            if op not in ("probe", "objects", "lod_set", "atlas", "prepare"):
+                return {"ok": False, "error": f"unknown Blender operation {op!r}"}
+            blender = str(body.get("blender") or "") or BL.current()
+            if not blender or not os.path.isfile(blender):
+                return {"ok": False, "error": "Blender is not here: choose it in Settings › Add-ons"}
+            if op == "probe":
+                return {"ok": True, "op": op, "blender": blender, "outputs": [], "estimate_mb": 400, "heavy": False}
+            blend = ""
+            if body.get("blend"):
+                blend, err = self._fs_resolve(os.path.abspath(os.path.expanduser(str(body["blend"]))), want="file")
+                if err:
+                    return {"ok": False, "error": err[1]}
+                if not blend.lower().endswith(".blend"):
+                    return {"ok": False, "error": "a .blend is wanted"}
+            if op == "objects":
+                if not blend:
+                    return {"ok": False, "error": "objects wants a .blend"}
+                return {"ok": True, "op": op, "blender": blender, "blend": blend, "outputs": [],
+                        "estimate_mb": BL.memory_mb(op, os.path.getsize(blend)), "heavy": False}
+            obj = str(body.get("object") or "")
+            if blend:
+                if not obj:
+                    return {"ok": False, "error": "which object of the .blend?"}
+                source = os.path.join(os.path.dirname(blend), obj)
+                bytes_in, tex = os.path.getsize(blend), 0
+            else:
+                source, err = self._fs_resolve(os.path.abspath(os.path.expanduser(str(body.get("source") or ""))), want="file")
+                if err:
+                    return {"ok": False, "error": err[1]}
+                if not source.lower().endswith((".obj", ".glb", ".gltf")):
+                    return {"ok": False, "error": "Blender reads here a .obj, .glb or .gltf (or an object of a .blend)"}
+                bytes_in, tex = O._set_bytes(source)
+            if op == "prepare" and not blend:
+                return {"ok": False, "error": "«Prepare for a use» works on an object of a .blend"}
+            root = find_project_root(source)
+            outputs = []
+            if op == "lod_set":
+                levels = max(1, min(4, int(body.get("levels") or 3)))
+                for i in range(1, levels + 1):
+                    outputs.append({"level": f"lod{i}", "path": variant_path(source, f"lod{i}", "realtime", root=root)})
+            elif op == "atlas":
+                outputs.append({"level": "", "path": variant_path(source, "", "atlas", root=root)})
+            else:
+                use = [u for u in (body.get("use") or ["realtime"]) if isinstance(u, str)]
+                outputs.append({"level": str(body.get("level") or "lod3"),
+                                "path": variant_path(source, str(body.get("level") or "lod3"), use[0] if use else "realtime", root=root)})
+            for o in outputs:
+                o["name"] = os.path.basename(o["path"])
+                o["exists"] = os.path.exists(o["path"])
+                if not _fs_inside_roots(o["path"]):
+                    o["error"] = f"{o['path']} is outside the folders this bridge serves"
+            return {"ok": True, "op": op, "blender": blender, "blend": blend, "object": obj, "source": source,
+                    "outputs": outputs, "estimate_mb": BL.memory_mb(op, bytes_in, tex), "heavy": True,
+                    "ceiling_mb": O.memory_ceiling_mb()}
+
+        def _blender_job(self, body):
+            """``POST /jobs {kind: blender, op, …}`` (see :meth:`_blender_plan`);
+            ``dry_run`` answers the plan. probe and objects are light jobs; a
+            LOD set, an atlas and «Prepare» are HEAVY (one at a time, the
+            memory said before). The outputs land in ``versions/`` under
+            s3Dgraphy's names, never over a file that exists."""
+            import shutil as _sh
+            import tempfile
+            import em_blender as BL
+            import em_optimize as O
+            try:
+                plan = self._blender_plan(body)
+            except ImportError as exc:
+                self._fail(501, f"s3dgraphy with project_tree.variant_path is not importable here: {exc}")
+                return
+            if not plan.get("ok"):
+                self._fail(400, plan.get("error") or "no plan")
+                return
+            if body.get("dry_run"):
+                self._json(plan)
+                return
+            op, blender = plan["op"], plan["blender"]
+            todo = [o for o in plan["outputs"] if not o.get("exists") and not o.get("error")]
+            if plan["outputs"] and not todo:
+                self._fail(400, "nothing to make: every output is refused or already made")
+                return
+            if plan["heavy"] and plan["estimate_mb"] > plan.get("ceiling_mb", 1 << 30):
+                self._fail(400, f"this job asks about {plan['estimate_mb']} MB, over the ceiling of {plan['ceiling_mb']} MB")
+                return
+            em_json = ""
+            if op == "prepare" and isinstance(body.get("doc"), dict):
+                fd, em_json = tempfile.mkstemp(prefix="emstudio-prepare-", suffix=".em.json")
+                with os.fdopen(fd, "w", encoding="utf-8") as fh:
+                    json.dump(body["doc"], fh)
+
+            def target(job):
+                if op == "probe":
+                    job.stage = "probe"
+                    out = BL.probe(blender, job)
+                    if not out.get("ok"):
+                        raise RuntimeError(out.get("error") or "Blender did not answer")
+                    return out
+                if op == "objects":
+                    job.stage = os.path.basename(plan["blend"])
+                    return BL.run_op(job, blender, {"op": "objects"}, plan["blend"], timeout=900)
+                stage_dir = tempfile.mkdtemp(prefix=f"emstudio-blender-{op}-")
+                args = {"op": op, "source": plan["source"], "object": plan["object"] or None}
+                if op == "lod_set":
+                    args.update({"out_dir": stage_dir, "levels": len(plan["outputs"])})
+                elif op == "atlas":
+                    args.update({"out_path": os.path.join(stage_dir, plan["outputs"][0]["name"]),
+                                 "size": int(body.get("size") or 4096)})
+                else:
+                    args.update({"em_json": em_json, "use": body.get("use") or ["realtime"]})
+                    for k in ("ratio", "max_texture", "draco"):
+                        if k in body:
+                            args[k] = body[k]
+                if body.get("options"):
+                    args["options"] = body["options"]
+                job.stage = plan["outputs"][0]["name"] if plan["outputs"] else op
+                try:
+                    run = BL.run_op(job, blender, args, plan["blend"])
+                    res = run["result"]
+                    if op == "prepare" and isinstance(res, dict):
+                        made = [p for p in (res.get("path"), res.get("filepath"), res.get("glb")) if p]
+                        res = {"outputs": [{"path": made[0], "level": res.get("level") or plan["outputs"][0]["level"],
+                                            "prepared": res}]} if made else res
+                    found = BL.outputs_of(res)
+                    written = []
+                    for i, o in enumerate(found):
+                        want = next((p for p in todo if p["level"] and p["level"] == _norm_level(o.get("level"))), None)
+                        if want is None and i < len(todo):
+                            want = todo[i]
+                        if want is None:
+                            continue
+                        os.makedirs(os.path.dirname(want["path"]), exist_ok=True)
+                        if os.path.exists(want["path"]):
+                            written.append({**want, "state": "exists"})
+                            continue
+                        _sh.copyfile(o["path"], want["path"])
+                        written.append({**want, "state": "written", "source": plan["source"],
+                                        "bytes": o["bytes"], "sha256": o["sha256"], "facts": o["facts"],
+                                        "textures": o.get("textures"), "texture_px": o.get("texture_px"),
+                                        "triangles": o.get("triangles")})
+                    if not written:
+                        raise RuntimeError("Blender ended without a glb to keep")
+                    return {"op": op, "blender": blender, "outputs": written, "seconds": run["seconds"],
+                            "peak_mb": run["peak_mb"], "raw": res if op != "lod_set" else None}
+                finally:
+                    _sh.rmtree(stage_dir, ignore_errors=True)
+                    if em_json:
+                        try:
+                            os.remove(em_json)
+                        except OSError:
+                            pass
+            what = {"probe": "probe", "objects": "objects", "lod_set": "LOD set", "atlas": "atlas", "prepare": "Prepare"}[op]
+            name = os.path.basename(plan.get("source") or plan.get("blend") or blender)
+            job = O.submit("blender", {"op": op, "sources": [plan.get("source") or plan.get("blend") or ""]}, target,
+                           heavy=plan["heavy"], estimate_mb=plan["estimate_mb"],
+                           label=f"Blender · {what}" + (f" · {name}" if op != "probe" else ""))
+            self._json({"ok": True, "job": job.id, "plan": plan}, 202)
 
         def _add_version(self, body):
             """``{doc, source, em_json, master_id?, locator, sha256, bytes,

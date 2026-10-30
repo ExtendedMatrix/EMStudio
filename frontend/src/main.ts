@@ -209,9 +209,9 @@ import { keepOnDisk, newEmProject, refreshFileStates, reorderApply, reorderPrevi
 import { docFilesBox, filesSection, fileStateLine, resourcesTable, type FileHooks } from "./file-states-ui";
 import { paintChooser } from "./node-chooser";
 import { BUILTIN_STAMP_PRESETS, ENGINES_TODAY, FAVORITES_KEY, KIND_FILTERS, OPTIMIZE_PRESETS, RECENT_DIRS_KEY, SORT_KEYS, TOOL_TABS,
-         autoTab, dropStampPreset, engineFor, isOptimizable, jobLine, jobRunning, variantMemoryMb, isSystemFile, kindOf as browserKindOf, pushRecentDir, readPathList, readStampPresets,
+         autoTab, dropStampPreset, engineFor, enginesToday, blenderCan, blenderLines, BLENDER_EXPERIMENTAL_KEY, isOptimizable, jobLine, jobRunning, variantMemoryMb, isSystemFile, kindOf as browserKindOf, pushRecentDir, readPathList, readStampPresets,
          saveStampPreset, statusCounts, toggleFavorite, visibleEntries,
-         TILESET_PRESET_ID, TILES_ENGINES, TILES_ENGINES_TODAY, formatMb, jobItemOpen, tilesetSchedule,
+         TILESET_PRESET_ID, TILES_ENGINES, TILES_ENGINES_TODAY, type BlenderProbe, type BlenderWay, formatMb, jobItemOpen, tilesetSchedule,
          type BrowserKind, type JobItemView, type JobView, type OptimizePreset, type RowFacts, type SortKey, type StampPreset,
          type TilesEngine, type TilesetItem, type ToolTab } from "./files-browser";
 import { proposeLanguages, type LanguageProposal } from "./lang-guess";
@@ -13772,7 +13772,7 @@ async function bridgeUrl(): Promise<string> {
   return _bridgeUrl;
 }
 /** The bridge level this editor expects (`BRIDGE_LEVEL` in tools/em_bridge.py). */
-const BRIDGE_LEVEL_WANTED = 44;   // 44 = /fs/tileset, POST /jobs {kind: tileset} — Obj2Tiles and Cesium's validator as add-ons, a batch of tilesets in parallel under a memory ceiling, cancel by file (MICRO-OTTIMIZZA-2); 43 = /addons, /jobs (gltfpack as an add-on downloaded on request, every optimisation a background job), /fs/optimize with a preset, /graph/add-version (MICRO-OTTIMIZZA-1); 42 = /project-tree and /fs/optimize, the File window «alla Blender» (MICRO-ARCHIVIO-2); 41 = /web-meta, the Shelf's previews of web addresses (MICRO-ARCHIVIO-1); 40 = /geo/tileset-frame, a tileset's shift (MICRO tileset, shift e epoche); 39 = /fs/pack-3tz with `root`, the RealityScan pair (MICRO-TILESET-CARTELLA); 38 = /geo/crs-info, /geo/convert-shift (MICRO-GEOREF-GRAFO); 37 = HTTPS through em_net, /tiles/failures (MICRO-BRIDGE-CERTIFICATI); 36 = /tiles/*, /geo/* (MICRO-GEOGLOBO); 31 = /property-source (FONTE); 32 = /room-import, «Bring into a room» through the engine; 33 = /fs/write (MICRO-SPAZIO-3D); 34 = /fs/doc, /fs/probe (MICRO-PERCORSI-WINDOWS); 35 = /fs/collect, /health's pid (MICRO-WINDOWS-MODELLI)
+const BRIDGE_LEVEL_WANTED = 45;   // 45 = /blender, POST /jobs {kind: blender} — Blender found, probed, used for the LOD set, the atlas, a .blend's object and «Prepare for a use» (MICRO-OTTIMIZZA-3); 44 = /fs/tileset, POST /jobs {kind: tileset} — Obj2Tiles and Cesium's validator as add-ons, a batch of tilesets in parallel under a memory ceiling, cancel by file (MICRO-OTTIMIZZA-2); 43 = /addons, /jobs (gltfpack as an add-on downloaded on request, every optimisation a background job), /fs/optimize with a preset, /graph/add-version (MICRO-OTTIMIZZA-1); 42 = /project-tree and /fs/optimize, the File window «alla Blender» (MICRO-ARCHIVIO-2); 41 = /web-meta, the Shelf's previews of web addresses (MICRO-ARCHIVIO-1); 40 = /geo/tileset-frame, a tileset's shift (MICRO tileset, shift e epoche); 39 = /fs/pack-3tz with `root`, the RealityScan pair (MICRO-TILESET-CARTELLA); 38 = /geo/crs-info, /geo/convert-shift (MICRO-GEOREF-GRAFO); 37 = HTTPS through em_net, /tiles/failures (MICRO-BRIDGE-CERTIFICATI); 36 = /tiles/*, /geo/* (MICRO-GEOGLOBO); 31 = /property-source (FONTE); 32 = /room-import, «Bring into a room» through the engine; 33 = /fs/write (MICRO-SPAZIO-3D); 34 = /fs/doc, /fs/probe (MICRO-PERCORSI-WINDOWS); 35 = /fs/collect, /health's pid (MICRO-WINDOWS-MODELLI)
 /** MICRO-INSTALLER-PULSANTE p.3 · the bridge that answers says its level; one
  *  that differs from BRIDGE_LEVEL_WANTED is said in the Log (its url, pid, since
  *  when) and in a notice — once per bridge. Asked at start, while the sidecar
@@ -34281,6 +34281,7 @@ function paintAddonsSettings(): void {
     host.textContent = "";
     if (!list) { host.appendChild(tabLead(addonsState?.error ?? t("storage.bridgeDown"), "settings-hint")); return; }
     for (const a of list) host.appendChild(addonCard(a, false));
+    host.appendChild(blenderSettingsCard());
     host.appendChild(tabLead(t("files.addonsWhere", { folder: list[0]?.folder.replace(/[/\\][^/\\]+$/, "") ?? "" }), "settings-hint"));
   });
 }
@@ -34351,6 +34352,9 @@ function filesOptimizeTab(win: Win, listing: FsListing): HTMLElement {
 
   // 3 · a tileset from a mesh — experimental, behind its switch
   box.appendChild(filesTilesSwitch(win, ton));
+
+  // 4 · Blender, the second way — experimental, behind its switch
+  box.appendChild(filesBlenderSection(win, chosen, models));
   return box;
 }
 
@@ -34366,10 +34370,11 @@ function filesVariantsBody(win: Win, listing: FsListing, sec: HTMLElement, pre: 
   el.textContent = t("files.optEngine") + " ";
   const sel = document.createElement("select");
   sel.dataset.action = "files-opt-engine";
+  const today = enginesToday(blenderOn(), blenderState?.s?.probe);
   for (const e of pre.engines) {
     const o = document.createElement("option");
     o.value = e;
-    o.textContent = t(`files.engine.${e}`) + (ENGINES_TODAY.has(e) ? "" : ` — ${t("files.engineLater")}`);
+    o.textContent = t(`files.engine.${e}`) + (today.has(e) ? "" : ` — ${t("files.engineNeedsBlender")}`);
     o.selected = e === engine;
     sel.appendChild(o);
   }
@@ -34397,7 +34402,10 @@ function filesVariantsBody(win: Win, listing: FsListing, sec: HTMLElement, pre: 
   }
   sec.appendChild(kv);
 
-  if (!ENGINES_TODAY.has(engine)) {
+  if (engine === "blender3dsc") {
+    // MICRO-OTTIMIZZA-3 · the experiences' engine: 3DSC's LOD set in Blender
+    filesBlenderVariants(win, listing, sec, chosen, models);
+  } else if (!ENGINES_TODAY.has(engine)) {
     sec.appendChild(tabLead(t("files.optEngineNotYet", { engine: t(`files.engine.${engine}`) }), "files-hint files-warn"));
   } else if (!models.length) {
     sec.appendChild(tabLead(chosen.length ? tn("files.optNoModels", chosen.length) : t("files.optChoose"), "files-lead"));
@@ -34480,7 +34488,7 @@ function filesVariantsBody(win: Win, listing: FsListing, sec: HTMLElement, pre: 
       })();
     }
   }
-  const vrows = jobRows(["variants"]);
+  const vrows = jobRows(engine === "blender3dsc" ? ["blender"] : ["variants"]);
   if (vrows) sec.appendChild(vrows);
 }
 
@@ -34901,7 +34909,8 @@ async function stampDerived(source: string, out: { path: string; sha256?: string
 /** A variant registered as a VERSION of its asset in the open graph (s3Dgraphy's
  *  `api.add_version` through the bridge): the version resource and its
  *  `lod_generation` step, inserted as one step of undo. → why not, or null. */
-async function registerVersion(o: OptOut, pre: OptimizePreset, params: Record<string, unknown>, toolVersion: string): Promise<string | null> {
+async function registerVersion(o: OptOut, pre: Pick<OptimizePreset, "lod" | "destination" | "use">, params: Record<string, unknown>, toolVersion: string,
+                               how: { technique: string; tool: string; software: { name: string; version: string }[] } | null = null): Promise<string | null> {
   if (!store?.doc) return t("files.optNoGraph");
   const me = currentIdentity();
   const rel = (abs: string) => {
@@ -34917,8 +34926,8 @@ async function registerVersion(o: OptOut, pre: OptimizePreset, params: Record<st
       locator: rel(o.path!), sha256: o.sha256, bytes: o.bytes, level: pre.lod, destination: pre.destination, use: pre.use,
       measures: f ? { texture_count: f.texture_count, texture_side_px: f.texture_side_px ?? undefined } : undefined,
       primitives: f ? { faces: f.faces, vertices: f.vertices } : undefined,
-      parameters: params, technique: "decimation", tool: "gltfpack",
-      software: [{ name: "gltfpack", version: toolVersion }],
+      parameters: params, technique: how?.technique ?? "decimation", tool: how?.tool ?? "gltfpack",
+      software: how?.software ?? [{ name: "gltfpack", version: toolVersion }],
       author: me?.orcid ? `https://orcid.org/${me.orcid}` : undefined,
       at: `${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, "0")}-${String(n.getDate()).padStart(2, "0")}` }) });
   const j = await r.json().catch(() => ({})) as { ok?: boolean; registered?: boolean; reason?: string; error?: string;
@@ -34976,6 +34985,451 @@ async function runOptimize(win: Win, pre: OptimizePreset, sources: string[], est
     await storageGoChecked(win, paths.dirname(written[0].path));
     setStorageSelected(win, written[0].path);
   }
+  renderStorage();
+}
+
+// ── MICRO-OTTIMIZZA-3 · Blender as the second way (experimental) ────────────
+//
+// The bridge FINDS Blender (the known places of each system, or the one chosen
+// in Settings), ASKS it in a second and a half what it has (EM Tools, 3D Survey
+// Collection, their operators — and, for an add-on that does not load, why),
+// and USES it only for what Blender does well, as background jobs: the
+// experiences' LOD set and an atlas re-baked by 3DSC, a LOD set from an object
+// of a .blend, EM Tools' «Prepare for a use» on the graph open here. Behind the
+// switch «sperimentale», off by default.
+
+interface BlenderState { found: string[]; chosen: string; current: string; env: boolean; probe: BlenderProbe | null }
+let blenderState: { at: number; s: BlenderState | null; error?: string } | null = null;
+const blenderPlans = new Map<string, BlPlan>();
+const blendObjects = new Map<string, { name: string; faces: number; vertices: number; materials: number; collection: string }[]>();
+interface BlOut { level: string; path: string; name: string; exists?: boolean; error?: string; state?: string; source?: string;
+  bytes?: number; sha256?: string; textures?: number; texture_px?: number; triangles?: number;
+  facts?: { faces: number; vertices: number; texture_count: number; texture_side_px: number | null; extensions: string[] } }
+interface BlPlan { at: number; error?: string; op?: string; outputs: BlOut[]; estimate_mb?: number; ceiling_mb?: number; blender?: string }
+
+const blenderOn = (): boolean => localStorage.getItem(BLENDER_EXPERIMENTAL_KEY) === "1";
+
+/** `GET /blender`: the Blenders found, the one used, its last probe. */
+async function loadBlender(force = false): Promise<BlenderState | null> {
+  if (blenderState && !force && Date.now() - blenderState.at < 30000) return blenderState.s;
+  try {
+    const r = await fetch(`${await bridgeUrl()}/blender`, { cache: "no-store" });
+    const j = await r.json().catch(() => ({})) as BlenderState & { ok?: boolean };
+    blenderState = r.ok && j.ok ? { at: Date.now(), s: j } : { at: Date.now(), s: null, error: t("files.blOldBridge") };
+  } catch { blenderState = { at: Date.now(), s: null, error: t("storage.bridgeDown") }; }
+  return blenderState.s;
+}
+
+/** Ask Blender what it has: a light job (about 1.5 s; the first start of an
+ *  add-on with its wheels, longer). */
+async function probeBlender(path = ""): Promise<void> {
+  const job = await startJob({ kind: "blender", op: "probe", ...(path ? { blender: path } : {}) }, t("files.blProbing"));
+  if (!job) return;
+  const end = await job.done;
+  await loadBlender(true);
+  if (end.state === "done") {
+    const p = end.result as BlenderProbe;
+    logInfo(t("files.blProbed", { blender: p.blender ?? "", s: String(p.seconds ?? "") }) + " — "
+      + blenderLines(p).slice(1).map((l) => t(l.key, l.vars)).join(" · "));
+  } else logWarn(jobText(end));
+  paintAddonsSettingsBlender();
+  renderStorage();
+}
+
+/** The report of the Blender used: which, and what it has, in sentences. */
+function blenderReport(compact: boolean): HTMLElement {
+  const box = document.createElement("div");
+  box.className = "files-box files-blender";
+  const st = blenderState?.s;
+  if (!blenderState) {
+    box.appendChild(tabLead(t("files.blAsking"), "files-hint"));
+    void loadBlender().then(() => { if (box.isConnected) renderStorage(); });
+    return box;
+  }
+  if (!st) { box.appendChild(tabLead(blenderState.error ?? t("storage.bridgeDown"), "files-hint files-warn")); return box; }
+  if (!st.current) {
+    box.dataset.blender = "none";
+    box.appendChild(tabLead(t("files.blNone"), "files-hint files-warn"));
+    box.appendChild(tabLead(t("files.blWhereLooked"), "files-hint"));
+    return box;
+  }
+  box.dataset.blender = st.probe ? (st.probe.ok ? "asked" : "silent") : "found";
+  const head = document.createElement("div");
+  head.textContent = t(st.chosen ? "files.blUsedChosen" : "files.blUsedFound", { path: st.current });
+  box.appendChild(head);
+  if (st.probe) {
+    const ul = document.createElement("ul");
+    ul.className = "files-bl-lines";
+    for (const l of blenderLines(st.probe)) {
+      const li = document.createElement("li");
+      li.dataset.ok = String(l.ok);
+      li.textContent = `${l.ok ? "✓" : "✗"} ${t(l.key, l.vars)}`;
+      ul.appendChild(li);
+    }
+    box.appendChild(ul);
+  } else box.appendChild(tabLead(t("files.blNotAsked"), "files-hint"));
+  const running = [...bgJobs.values()].some((j) => j.kind === "blender" && jobRunning(j) && j.label === t("files.blProbing"));
+  const b = document.createElement("button");
+  b.type = "button";
+  b.className = compact ? "ghost" : "";
+  b.dataset.action = "blender-probe";
+  b.textContent = st.probe ? t("files.blProbeAgain") : t("files.blProbe");
+  b.disabled = running;
+  b.onclick = () => { b.disabled = true; void probeBlender(); };
+  box.appendChild(b);
+  if (st.found.length > 1 && compact) box.appendChild(tabLead(tn("files.blOthers", st.found.length - 1), "files-hint"));
+  return box;
+}
+
+/** A plan of the bridge (`POST /jobs {kind: blender, dry_run}`), asked once. */
+function blenderPlanSlot(body: Record<string, unknown>, paint: (pl: BlPlan, slot: HTMLElement) => void): HTMLElement {
+  const slot = document.createElement("div");
+  const key = JSON.stringify(body);
+  const pl = blenderPlans.get(key);
+  if (pl) { paint(pl, slot); return slot; }
+  slot.appendChild(tabLead(t("files.optAsking"), "files-hint"));
+  void (async () => {
+    let plan: BlPlan;
+    try {
+      const r = await fetch(`${await bridgeUrl()}/jobs`, { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ kind: "blender", ...body, dry_run: true }) });
+      const j = await r.json().catch(() => ({})) as BlPlan & { ok?: boolean; error?: string };
+      plan = j.ok ? { ...j, at: Date.now() } : { at: Date.now(), outputs: [], error: String(j.error ?? r.status) };
+    } catch { plan = { at: Date.now(), outputs: [], error: t("storage.bridgeDown") }; }
+    blenderPlans.set(key, plan);
+    if (slot.isConnected) { slot.textContent = ""; paint(plan, slot); }
+  })();
+  return slot;
+}
+
+/** The outputs of a plan as a table, its memory said, the button. */
+function blenderPlanTable(pl: BlPlan, slot: HTMLElement, go: { label: string; action: string; run: (pl: BlPlan) => void }): void {
+  if (pl.error) { slot.appendChild(tabLead(pl.error, "files-hint files-warn")); return; }
+  const table = document.createElement("table");
+  table.className = "files-prev";
+  for (const o of pl.outputs) {
+    const tr = document.createElement("tr");
+    if (o.exists || o.error) tr.className = "done";
+    const a = document.createElement("td"); a.textContent = o.level || "—";
+    const b = document.createElement("td"); b.className = "fn";
+    b.textContent = o.error ? o.error : o.exists ? t("files.optExists", { name: o.name }) : o.name;
+    b.title = o.path;
+    tr.append(a, b);
+    table.appendChild(tr);
+  }
+  if (pl.outputs.length) slot.appendChild(table);
+  const where = pl.outputs.find((o) => o.path)?.path;
+  if (where) slot.appendChild(tabLead(t("files.optInto", { dir: projectRelative(paths.dirname(where)) + "/" }), "files-hint"));
+  const todo = pl.outputs.filter((o) => !o.exists && !o.error);
+  if (pl.estimate_mb) slot.appendChild(tabLead(t("files.blMemory", { mb: formatMb(pl.estimate_mb), ceiling: formatMb(pl.ceiling_mb ?? 0) }), "files-hint"));
+  const b = document.createElement("button");
+  b.type = "button";
+  b.className = "primary";
+  b.dataset.action = go.action;
+  b.textContent = go.label;
+  b.disabled = pl.outputs.length > 0 && !todo.length;
+  b.onclick = () => { b.disabled = true; go.run(pl); };
+  slot.appendChild(b);
+}
+
+/** The variants' body when the engine is Blender + 3DSC: the experiences' LOD
+ *  set, each level a glb Unreal reads (no meshopt, no KTX2). */
+function filesBlenderVariants(win: Win, listing: FsListing, sec: HTMLElement, chosen: FsEntry[], models: FsEntry[]): void {
+  if (!blenderOn()) { sec.appendChild(tabLead(t("files.blSwitchFirst"), "files-hint files-warn")); return; }
+  const probe = blenderState?.s?.probe;
+  if (!blenderCan(probe, "lod_set")) {
+    sec.appendChild(tabLead(t(blenderState?.s?.current ? (probe ? "files.blNeedDsc" : "files.blAskFirst") : "files.blNone"), "files-hint files-warn"));
+    return;
+  }
+  if (!models.length) { sec.appendChild(tabLead(chosen.length ? tn("files.optNoModels", chosen.length) : t("files.optChoose"), "files-lead")); return; }
+  const unstamped = models.filter((m) => !filesStamped(listing, m.path));
+  for (const m of models.slice(0, 8)) {
+    sec.appendChild(blenderPlanSlot({ op: "lod_set", source: m.path, levels: 3 }, (pl, slot) => {
+      const h = document.createElement("div");
+      h.className = "files-hint";
+      h.textContent = m.name;
+      slot.appendChild(h);
+      blenderPlanTable(pl, slot, { label: t("files.blGoLodSet"), action: "blender-lod-set",
+        run: () => { void runBlender(win, { op: "lod_set", source: m.path, levels: 3 }, m.path, "lod_set"); } });
+    }));
+  }
+  if (unstamped.length) sec.appendChild(tabLead(tn("files.blStampFirst", unstamped.length), "files-hint"));
+  sec.appendChild(tabLead(t("files.blLodSetBorn"), "files-hint"));
+}
+
+/** Section 4 of Ottimizza: Blender — its switch, what it has, and the ways
+ *  only Blender does well. */
+function filesBlenderSection(win: Win, chosen: FsEntry[], models: FsEntry[]): HTMLElement {
+  const on = blenderOn();
+  const sec = document.createElement("section");
+  sec.className = "files-sec";
+  sec.dataset.blenderSwitch = on ? "on" : "off";
+  const h = document.createElement("div");
+  h.className = "files-sec-h";
+  const hb = document.createElement("b");
+  hb.textContent = t("files.blTitle");
+  const pill = document.createElement("span");
+  pill.className = on ? "files-pill exp" : "files-pill soon";
+  pill.textContent = t("files.experimental");
+  h.append(hb, pill);
+  sec.appendChild(h);
+  const sw = document.createElement("label");
+  sw.className = "files-switch";
+  const cb = document.createElement("input");
+  cb.type = "checkbox";
+  cb.checked = on;
+  cb.dataset.action = "files-blender-experimental";
+  cb.onchange = () => {
+    try { localStorage.setItem(BLENDER_EXPERIMENTAL_KEY, cb.checked ? "1" : "0"); } catch { /* off */ }
+    if (cb.checked && !blenderState?.s?.probe) void loadBlender(true).then((s) => { if (s?.current && !s.probe) void probeBlender(); else renderStorage(); });
+    renderStorage();
+  };
+  const swt = document.createElement("span");
+  swt.textContent = t("files.blSwitch");
+  sw.append(cb, swt);
+  sec.appendChild(sw);
+  if (!on) { sec.appendChild(tabLead(t("files.blOff"), "files-hint")); return sec; }
+  sec.appendChild(blenderReport(true));
+  const probe = blenderState?.s?.probe;
+  if (!probe?.ok) { const rows = jobRows(["blender"]); if (rows) sec.appendChild(rows); return sec; }
+
+  // a model chosen: its textures re-baked into one atlas (3DSC)
+  const mesh = models.find((m) => /\.(obj|glb|gltf)$/i.test(m.name));
+  const ways = document.createElement("div");
+  ways.className = "files-bl-ways";
+  if (mesh) {
+    const w = document.createElement("div");
+    w.className = "files-bl-way";
+    w.dataset.way = "atlas";
+    w.appendChild(tabLead(t("files.blAtlas", { name: mesh.name }), "files-lead"));
+    if (!blenderCan(probe, "atlas")) w.appendChild(tabLead(t("files.blNeedDsc"), "files-hint files-warn"));
+    else w.appendChild(blenderPlanSlot({ op: "atlas", source: mesh.path, size: 4096 }, (pl, slot) =>
+      blenderPlanTable(pl, slot, { label: t("files.blGoAtlas"), action: "blender-atlas",
+        run: () => { void runBlender(win, { op: "atlas", source: mesh.path, size: 4096 }, mesh.path, "atlas"); } })));
+    ways.appendChild(w);
+  }
+  // a .blend chosen: its objects, then a LOD set from one, or «Prepare for a use»
+  const blend = chosen.find((e) => /\.blend$/i.test(e.name));
+  if (blend) {
+    const w = document.createElement("div");
+    w.className = "files-bl-way";
+    w.dataset.way = "blend";
+    w.appendChild(tabLead(t("files.blBlend", { name: blend.name }), "files-lead"));
+    const objs = blendObjects.get(blend.path);
+    if (!objs) {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.dataset.action = "blender-objects";
+      b.textContent = t("files.blReadObjects");
+      b.onclick = () => { b.disabled = true; void readBlendObjects(blend.path); };
+      w.appendChild(b);
+    } else if (!objs.length) w.appendChild(tabLead(t("files.blNoObjects"), "files-hint files-warn"));
+    else {
+      const key = `blobj:${blend.path}`;
+      const pick = filesPref(win, key) ?? objs[0].name;
+      const ob = objs.find((o) => o.name === pick) ?? objs[0];
+      const lab = document.createElement("label");
+      lab.textContent = t("files.blObject") + " ";
+      const sel = document.createElement("select");
+      sel.dataset.action = "blender-object";
+      for (const o of objs) {
+        const opt = document.createElement("option");
+        opt.value = o.name;
+        opt.textContent = `${o.name} · ${tn("files.blFaces", o.faces)}${o.collection ? ` · ${o.collection}` : ""}`;
+        opt.selected = o.name === ob.name;
+        sel.appendChild(opt);
+      }
+      sel.onchange = () => { setFilesPref(win, key, sel.value); renderStorage(); };
+      lab.appendChild(sel);
+      w.appendChild(lab);
+      if (!ob.faces) w.appendChild(tabLead(t("files.blNoFaces", { name: ob.name }), "files-hint files-warn"));
+      else {
+        if (blenderCan(probe, "lod_set")) {
+          w.appendChild(blenderPlanSlot({ op: "lod_set", blend: blend.path, object: ob.name, levels: 3 }, (pl, slot) =>
+            blenderPlanTable(pl, slot, { label: t("files.blGoLodSetObject", { name: ob.name }), action: "blender-lod-set-object",
+              run: () => { void runBlender(win, { op: "lod_set", blend: blend.path, object: ob.name, levels: 3 }, blend.path, "lod_set"); } })));
+        } else w.appendChild(tabLead(t("files.blNeedDsc"), "files-hint files-warn"));
+        // «Prepare for a use» — EM Tools, on the graph open here
+        const pw = document.createElement("div");
+        pw.className = "files-bl-way";
+        pw.dataset.way = "prepare";
+        pw.appendChild(tabLead(t("files.blPrepare", { name: ob.name }), "files-lead"));
+        if (!blenderCan(probe, "prepare")) pw.appendChild(tabLead(t("files.blNeedEmtools"), "files-hint files-warn"));
+        else if (!store?.doc) pw.appendChild(tabLead(t("files.optNoGraph"), "files-hint files-warn"));
+        else {
+          const ukey = "blprepare-use";
+          const use = filesPref(win, ukey) ?? "realtime";
+          const ul = document.createElement("label");
+          ul.textContent = t("files.blUse") + " ";
+          const us = document.createElement("select");
+          us.dataset.action = "blender-prepare-use";
+          for (const u of ["realtime", "web", "mobile_ar", "heriverse", "aton", "print", "render", "analysis", "preview"]) {
+            const opt = document.createElement("option");
+            opt.value = u;
+            opt.textContent = u;
+            opt.selected = u === use;
+            us.appendChild(opt);
+          }
+          us.onchange = () => { setFilesPref(win, ukey, us.value); renderStorage(); };
+          ul.appendChild(us);
+          pw.appendChild(ul);
+          const body = { op: "prepare", blend: blend.path, object: ob.name, use: [use], level: "lod3" };
+          pw.appendChild(blenderPlanSlot(body, (pl, slot) =>
+            blenderPlanTable(pl, slot, { label: t("files.blGoPrepare"), action: "blender-prepare",
+              run: () => { void runBlender(win, { ...body, doc: store?.doc }, blend.path, "prepare"); } })));
+          pw.appendChild(tabLead(t("files.blPrepareBorn"), "files-hint"));
+        }
+        w.appendChild(pw);
+      }
+    }
+    ways.appendChild(w);
+  }
+  if (!mesh && !blend) ways.appendChild(tabLead(t("files.blChoose"), "files-hint"));
+  sec.appendChild(ways);
+  const rows = jobRows(["blender"]);
+  if (rows) sec.appendChild(rows);
+  return sec;
+}
+
+/** The mesh objects of a .blend, asked of Blender (a light job). */
+async function readBlendObjects(blend: string): Promise<void> {
+  const job = await startJob({ kind: "blender", op: "objects", blend }, t("files.blReading", { name: baseName(blend) }));
+  if (!job) { renderStorage(); return; }
+  renderStorage();
+  const end = await job.done;
+  if (end.state === "done") {
+    const r = (end.result as { result?: { objects?: { name: string; faces: number; vertices: number; materials: number; collection: string }[] } })?.result;
+    blendObjects.set(blend, r?.objects ?? []);
+  } else { toast(jobText(end)); logWarn(jobText(end)); }
+  renderStorage();
+}
+
+/** A Blender job, then each glb it made: stamped as DERIVED from its source
+ *  (the model, or the .blend for one of its objects — declared when nobody
+ *  stamped it), registered as a version of its asset, in the Chain. */
+async function runBlender(win: Win, body: Record<string, unknown>, source: string, op: BlenderWay): Promise<void> {
+  const st = blenderState?.s;
+  const label = t(`files.blJob.${op}`, { name: baseName(String(body.object ?? source)) });
+  const job = await startJob({ kind: "blender", ...body }, label);
+  if (!job) { renderStorage(); return; }
+  toast(t("files.blStarted", { what: label }));
+  renderStorage();
+  const end = await job.done;
+  blenderPlans.clear();
+  if (end.state === "cancelled") { const m = t("files.jobCancelled", { what: end.label }); toast(m); logInfo(m); renderStorage(); return; }
+  if (end.state !== "done") { toast(t("files.optFailed", { why: end.error ?? "" })); logWarn(jobText(end)); renderStorage(); return; }
+  const res = (end.result ?? {}) as { outputs?: BlOut[]; seconds?: number; peak_mb?: number | null };
+  const written = (res.outputs ?? []).filter((o) => o.state === "written");
+  const blenderVersion = st?.probe?.blender ?? "";
+  const dscVersion = st?.probe?.dsc?.version ?? "";
+  const emVersion = st?.probe?.emtools?.version ?? "";
+  const software = op === "prepare" ? [{ name: "EM Tools · Prepare for a use", version: emVersion }, { name: "Blender", version: blenderVersion }]
+    : [{ name: "3D Survey Collection", version: dscVersion }, { name: "Blender", version: blenderVersion }];
+  const technique = op === "atlas" ? "texture bake (atlas)" : op === "prepare" ? "decimation" : "decimation + texture bake";
+  const destination = op === "prepare" ? String((body.use as string[] | undefined)?.[0] ?? "realtime") : op === "atlas" ? "atlas" : "realtime";
+  let stamped = 0, registered = 0;
+  for (const o of written) {
+    const params: Record<string, unknown> = { lod: o.level || null, destination, operation: op, tool: software[0].name,
+      object: body.object ?? null, textures: o.textures ?? o.facts?.texture_count ?? null, texture_px: o.texture_px ?? o.facts?.texture_side_px ?? null,
+      triangles: o.triangles ?? o.facts?.faces ?? null };
+    try {
+      if (await stampDerived(source, { path: o.path, sha256: o.sha256 }, { kind: "lod_generation", technique, parameters: params, software },
+          { declare: true })) stamped++;
+    } catch (e) { logWarn(`${o.name}: ${(e as Error).message}`); }
+    try {
+      const why = await registerVersion({ source: o.source ?? source, path: o.path, name: o.name, sha256: o.sha256, bytes: o.bytes, facts: o.facts } as OptOut,
+        { lod: o.level || "lod0", destination, use: op === "prepare" ? (body.use as string[]) : ["realtime"] }, params, "",
+        { technique, tool: software[0].name, software });
+      if (why === null) registered++; else logWarn(t("files.optNotRegistered", { name: o.name, why }));
+    } catch (e) { logWarn(`${o.name}: ${(e as Error).message}`); }
+  }
+  const msg = tn("files.blDone", written.length, { what: label, stamped: String(stamped), registered: String(registered),
+    s: String(res.seconds ?? ""), mb: res.peak_mb ? formatMb(res.peak_mb) : "—" });
+  toast(msg);
+  logInfo(msg + " — " + written.map((o) => `${o.name} (${formatBytes(o.bytes ?? 0)}${o.facts ? `, ${o.facts.faces} ${t("files.blFacesShort")}, ${o.facts.texture_count} tex` : ""})`).join(", "));
+  optPlans.clear();
+  forgetProjectTrees();
+  if (written[0]?.path && win && storagePath(win) !== null) {
+    await storageGoChecked(win, paths.dirname(written[0].path));
+    setStorageSelected(win, written[0].path);
+  }
+  renderStorage();
+}
+
+/** Settings ▸ Add-ons: Blender — the ones found, the one used (chosen or the
+ *  newest), what it has; another one chosen by its path. */
+function blenderSettingsCard(): HTMLElement {
+  const card = document.createElement("div");
+  card.className = "addon-card";
+  card.id = "set-blender";
+  paintBlenderCard(card);
+  return card;
+}
+
+function paintAddonsSettingsBlender(): void {
+  const card = document.getElementById("set-blender");
+  if (card) paintBlenderCard(card);
+}
+
+function paintBlenderCard(card: HTMLElement): void {
+  card.textContent = "";
+  const h = document.createElement("b");
+  h.textContent = t("files.blSettingsTitle");
+  card.appendChild(h);
+  card.appendChild(tabLead(t("files.blSettingsWhat"), "settings-hint"));
+  const st = blenderState?.s;
+  if (!st) {
+    card.appendChild(tabLead(blenderState?.error ?? t("files.blAsking"), "settings-hint"));
+    if (!blenderState) void loadBlender().then(() => { if (card.isConnected) paintBlenderCard(card); });
+    return;
+  }
+  const lab = document.createElement("label");
+  lab.textContent = t("files.blSettingsUse") + " ";
+  const sel = document.createElement("select");
+  sel.id = "set-blender-path";
+  const auto = document.createElement("option");
+  auto.value = "";
+  auto.textContent = t("files.blSettingsNewest");
+  sel.appendChild(auto);
+  for (const f of st.found) {
+    const o = document.createElement("option");
+    o.value = f;
+    o.textContent = f;
+    o.selected = f === st.chosen;
+    sel.appendChild(o);
+  }
+  sel.disabled = st.env;
+  sel.onchange = () => { void chooseBlender(sel.value, card); };
+  lab.appendChild(sel);
+  card.appendChild(lab);
+  const other = document.createElement("input");
+  other.type = "text";
+  other.id = "set-blender-other";
+  other.placeholder = t("files.blSettingsOther");
+  other.disabled = st.env;
+  const ob = document.createElement("button");
+  ob.type = "button";
+  ob.textContent = t("files.blSettingsChoose");
+  ob.disabled = st.env;
+  ob.onclick = () => { if (other.value.trim()) void chooseBlender(other.value.trim(), card); };
+  const row = document.createElement("p");
+  row.append(other, ob);
+  card.appendChild(row);
+  if (st.env) card.appendChild(tabLead(t("files.blSettingsEnv"), "settings-hint"));
+  card.appendChild(blenderReport(false));
+}
+
+async function chooseBlender(path: string, card: HTMLElement): Promise<void> {
+  try {
+    const r = await fetch(`${await bridgeUrl()}/blender`, { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ path }) });
+    const j = await r.json().catch(() => ({})) as { ok?: boolean; error?: string };
+    if (!j.ok) toast(String(j.error ?? r.status));
+  } catch { toast(t("storage.bridgeDown")); }
+  blenderPlans.clear();
+  const s = await loadBlender(true);
+  paintBlenderCard(card);
+  if (s?.current && !s.probe) void probeBlender();
   renderStorage();
 }
 

@@ -229,9 +229,67 @@ export const OPTIMIZE_PRESETS: readonly OptimizePreset[] = [
     ktx2: false, meshopt: false, use: ["realtime"], engine: "blender3dsc", engines: ["blender3dsc", "gltfpack"], whyKey: "files.optWhyExperience" },
 ];
 
-/** The engines that run today: gltfpack (when the bridge has it). Blender + 3DSC
- *  is round 3's. */
+/** The engines that run without asking anything: gltfpack (when the bridge has
+ *  it). Blender + 3DSC runs too (MICRO-OTTIMIZZA-3) when its switch is on and
+ *  the probe found 3D Survey Collection's headless module: `enginesToday`. */
 export const ENGINES_TODAY: ReadonlySet<OptEngine> = new Set<OptEngine>(["gltfpack"]);
+
+// ── MICRO-OTTIMIZZA-3 · Blender as the second way ───────────────────────────
+
+/** The «experimental» switch of the Blender ways (off by default). */
+export const BLENDER_EXPERIMENTAL_KEY = "emstudio.blenderExperimental";
+
+/** Why an add-on does not load in that Blender, as the bridge's probe says it. */
+export interface BlenderWhy { code: "missing" | "wheels" | "range" | "disabled" | "broken"; folder?: string; repo?: string;
+  version?: string; wheels?: string; python?: string; min?: string; max?: string }
+/** The probe of a Blender (`em_blender.probe`). */
+export interface BlenderProbe { ok: boolean; path: string; error?: string; seconds?: number; peak_mb?: number | null;
+  blender?: string; python?: string;
+  emtools?: { loaded: boolean; package?: string | null; version?: string | null; prepare_for_use?: boolean; why?: BlenderWhy };
+  dsc?: { loaded: boolean; package?: string | null; version?: string | null; export_cesium_tiles?: boolean; lod_creation?: boolean;
+    headless?: string | null; rebake_atlas?: boolean; stamps?: boolean; why?: BlenderWhy } }
+
+/** What each Blender way needs: the LOD set and the atlas want 3DSC's headless
+ *  module, «Prepare for a use» wants EM Tools. */
+export type BlenderWay = "lod_set" | "atlas" | "prepare";
+export function blenderCan(p: BlenderProbe | null | undefined, way: BlenderWay): boolean {
+  if (!p?.ok) return false;
+  if (way === "prepare") return !!p.emtools?.loaded && !!p.emtools.prepare_for_use;
+  if (way === "atlas") return !!p.dsc?.loaded && !!p.dsc.headless && !!p.dsc.rebake_atlas;
+  return !!p.dsc?.loaded && !!p.dsc.headless;
+}
+
+/** The engines that run here now: gltfpack always; Blender + 3DSC when the
+ *  switch is on and the probe says 3DSC's LOD set is there. */
+export function enginesToday(blenderOn: boolean, p: BlenderProbe | null | undefined): ReadonlySet<OptEngine> {
+  return blenderOn && blenderCan(p, "lod_set") ? new Set<OptEngine>(["gltfpack", "blender3dsc"]) : ENGINES_TODAY;
+}
+
+/** The probe in sentences: one per add-on, a key of `files.bl.*` and its
+ *  values, `ok` when the add-on is there. The page says them with `t()`. */
+export interface BlenderLine { key: string; vars: Record<string, string>; ok: boolean }
+export function blenderLines(p: BlenderProbe): BlenderLine[] {
+  if (!p.ok) return [{ key: "files.bl.noAnswer", vars: { why: p.error ?? "" }, ok: false }];
+  const v = { blender: p.blender ?? "", python: (p.python ?? "").split(".").slice(0, 2).join(".") };
+  const out: BlenderLine[] = [{ key: "files.bl.answered", vars: { ...v, s: String(p.seconds ?? ""), mb: String(p.peak_mb ?? "") }, ok: true }];
+  const one = (name: string, loaded: boolean, why: BlenderWhy | undefined, extra: string) => {
+    if (loaded) { out.push({ key: extra, vars: { name, ...v }, ok: true }); return; }
+    const w = why ?? { code: "broken" as const };
+    out.push({ key: `files.bl.why.${w.code}`, ok: false,
+      vars: { name, ...v, wheels: w.wheels ?? "", min: w.min ?? "—", max: w.max ?? "—", version: w.version ?? "", folder: w.folder ?? "" } });
+  };
+  one("EM Tools", !!p.emtools?.loaded, p.emtools?.why, p.emtools?.prepare_for_use ? "files.bl.emtoolsOk" : "files.bl.emtoolsNoPrepare");
+  one("3D Survey Collection", !!p.dsc?.loaded, p.dsc?.why,
+      p.dsc?.headless ? (p.dsc.stamps ? "files.bl.dscOk" : "files.bl.dscOkNoStamp") : "files.bl.dscNoHeadless");
+  return out;
+}
+
+/** The memory a Blender job asks (as the bridge's `em_blender.memory_mb`). */
+export function blenderMemoryMb(op: BlenderWay | "objects", bytesIn: number, textureBytes = 0): number {
+  if (op === "objects") return 600;
+  const base = 700 + 40 * Math.max(0, bytesIn) / 1048576 + 6 * Math.max(0, textureBytes) / 1048576;
+  return Math.trunc(base * (op === "lod_set" ? 1.2 : 1));
+}
 
 /** The engine a destination uses: the person's choice when it is one of the
  *  destination's, else its default. */

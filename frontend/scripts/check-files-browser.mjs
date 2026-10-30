@@ -132,8 +132,36 @@ eq(F.readPathList(store, F.FAVORITES_KEY), ["/x"], "only paths are read");
      "one that alone passes the ceiling is refused; refused and made ones are not counted");
   ok(F.formatMb(977) === "977 MB" && F.formatMb(15360, "it") === "15 GB" && F.formatMb(1536, "en") === "1.5 GB", "megabytes as a person reads them");
   ok(F.TILES_ENGINES[0] === "obj2tiles" && F.TILES_ENGINES_TODAY.has("obj2tiles") && !F.TILES_ENGINES_TODAY.has("blender3dsc"),
-     "the tileset's engines: Obj2Tiles today, Blender + 3DSC with round 3");
+     "the tileset's engines: Obj2Tiles from here, Blender + 3DSC in Blender itself");
   ok(F.jobItemOpen({ state: "running" }) && !F.jobItemOpen({ state: "invalid" }), "a file of a batch is open while queued or running");
+}
+
+// MICRO-OTTIMIZZA-3 · Blender as the second way: what each way needs, the
+// engines that run, the probe in sentences
+{
+  const p52 = { ok: true, path: "/B", blender: "5.2.0 LTS", python: "3.13.13", seconds: 1.1, peak_mb: 303,
+    emtools: { loaded: false, why: { code: "wheels", wheels: "3.11", python: "3.13", version: "1.6.0-dev.32" } },
+    dsc: { loaded: true, headless: "bl_ext.x.dsc.headless", rebake_atlas: true, stamps: false } };
+  ok(F.blenderCan(p52, "lod_set") && F.blenderCan(p52, "atlas") && !F.blenderCan(p52, "prepare"),
+     "5.2 with EM Tools on cp311 wheels: the LOD set and the atlas yes, «Prepare» no");
+  ok(!F.blenderCan({ ...p52, dsc: { loaded: true, headless: null } }, "lod_set"), "a 3DSC without its headless module cannot make the LOD set");
+  ok(!F.blenderCan(null, "lod_set") && !F.blenderCan({ ok: false, path: "/B" }, "atlas"), "no probe, or a silent Blender: nothing");
+  ok(F.blenderCan({ ...p52, emtools: { loaded: true, prepare_for_use: true } }, "prepare"), "EM Tools loaded with its operator: «Prepare» yes");
+  ok(F.enginesToday(true, p52).has("blender3dsc") && !F.enginesToday(false, p52).has("blender3dsc")
+     && !F.enginesToday(true, { ...p52, dsc: { loaded: false } }).has("blender3dsc") && F.enginesToday(false, null).has("gltfpack"),
+     "Blender + 3DSC runs only with its switch on and 3DSC's LOD set found");
+  const L = F.blenderLines(p52);
+  eq(L.map((l) => [l.key, l.ok]), [["files.bl.answered", true], ["files.bl.why.wheels", false], ["files.bl.dscOkNoStamp", true]],
+     "the probe in sentences: answered · EM Tools why not · 3DSC without stamps");
+  eq([L[0].vars.python, L[1].vars.wheels, L[1].vars.python, L[1].vars.name], ["3.13", "3.11", "3.13", "EM Tools"],
+     "«EM Tools does not load in Blender 5.2: its libraries are for Python 3.11, this Blender has Python 3.13»");
+  eq(F.blenderLines({ ok: false, path: "/B", error: "exit 1" }).map((l) => l.key), ["files.bl.noAnswer"], "a Blender that did not answer");
+  eq(F.blenderLines({ ...p52, dsc: { loaded: false, why: { code: "missing" } } })[2].key, "files.bl.why.missing", "3DSC not installed");
+  ok(F.blenderMemoryMb("objects", 1e9) === 600 && F.blenderMemoryMb("lod_set", 47 * 1048576, 2 * 1048576) > F.blenderMemoryMb("atlas", 47 * 1048576, 2 * 1048576),
+     "the memory of a Blender job: the LOD set asks more than the atlas");
+  ok(F.BLENDER_EXPERIMENTAL_KEY === "emstudio.blenderExperimental", "the switch's key");
+  const exp = F.OPTIMIZE_PRESETS.find((p) => p.id === "experience");
+  ok(exp.engine === "blender3dsc" && F.engineFor(exp, {}) === "blender3dsc", "the experiences' default engine is Blender + 3DSC");
 }
 
 console.log(`check-files-browser: ${checks} checks passed`);

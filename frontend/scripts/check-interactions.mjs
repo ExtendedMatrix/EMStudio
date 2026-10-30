@@ -11442,7 +11442,7 @@ test("AR6.tabs", "il pannello a schede: con una scelta da timbrare apre Timbro (
   return { pass: Object.values(conds).every(Boolean), detail: { conds, noChoice, stamp, composer, presets, room, info, errors } };
 });
 
-test("AR7.optimize", "Ottimizza (MICRO-OTTIMIZZA-1): le varianti accese (il Viewer legge meshopt e KTX2), cinque destinazioni, il motore di ognuna detto con il perché e cambiabile (le esperienze → Blender + 3DSC, giro 3), il nome e la cartella dal bridge (RB/versions/‹modello›@lod4-web.glb), il comando e la memoria detti prima; senza gltfpack la scheda offre il componente aggiuntivo (MIT, versione e sha256 fissate) e il pulsante non parte; la sorgente senza timbro va timbrata prima; il .3tz acceso; il tileset annunciato con il suo interruttore «sperimentale» per il giro 2", async () => {
+test("AR7.optimize", "Ottimizza (MICRO-OTTIMIZZA-1): le varianti accese (il Viewer legge meshopt e KTX2), cinque destinazioni, il motore di ognuna detto con il perché e cambiabile (le esperienze → Blender + 3DSC, dietro l'interruttore «Blender»), il nome e la cartella dal bridge (RB/versions/‹modello›@lod4-web.glb), il comando e la memoria detti prima; senza gltfpack la scheda offre il componente aggiuntivo (MIT, versione e sha256 fissate) e il pulsante non parte; la sorgente senza timbro va timbrata prima; il .3tz acceso; il tileset annunciato con il suo interruttore «sperimentale» per il giro 2", async () => {
   const root = await rootPath();
   const { pr, at } = await abProject(root, "ab7");
   const { p, ctx, errors } = await open({ doc: null, ws: "assets", w: 1900, h: 1000 });
@@ -11474,7 +11474,7 @@ test("AR7.optimize", "Ottimizza (MICRO-OTTIMIZZA-1): le varianti accese (il View
   await p.click('.files-tab-optimize [data-opt="experience"]');
   await p.waitForTimeout(500);
   const exp = await p.evaluate(() => ({ engine: document.querySelector(".files-tab-optimize .files-engine")?.dataset.engine ?? "",
-    notYet: [...document.querySelectorAll(".files-tab-optimize .files-warn")].some((x) => /giro 3/.test(x.textContent)),
+    notYet: [...document.querySelectorAll(".files-tab-optimize .files-warn")].some((x) => /accendi «Blender»/.test(x.textContent)),
     options: [...document.querySelectorAll('[data-action="files-opt-engine"] option')].map((o) => o.value) }));
   await p.selectOption('[data-action="files-opt-engine"]', "gltfpack");
   await p.waitForTimeout(800);
@@ -11487,7 +11487,7 @@ test("AR7.optimize", "Ottimizza (MICRO-OTTIMIZZA-1): le varianti accese (il View
     text: document.querySelector(".files-tab-optimize")?.textContent ?? "" }));
   await ctx.close();
   const conds = {
-    on: web.pills.join(",") === "acceso,acceso,sperimentale" && web.chips === 5,
+    on: web.pills.join(",") === "acceso,acceso,sperimentale,sperimentale" && web.chips === 5,
     engine: web.engine === "gltfpack" && /un secondo/.test(web.why) && /KTX2/.test(web.kv) && /meshopt/.test(web.kv),
     named: web.variant.includes("OB_CUBO_LOD1@lod4-web.glb") && /-si 0\.1 -cc -tc -tl 1024/.test(web.command),
     addon: /gltfpack/.test(web.addon) && /licenza MIT/.test(web.addon) && /sha256/.test(web.addon) && web.install && web.go === true,
@@ -11500,7 +11500,7 @@ test("AR7.optimize", "Ottimizza (MICRO-OTTIMIZZA-1): le varianti accese (il View
   return { pass: Object.values(conds).every(Boolean), detail: { conds, web, exp, changed, errors } };
 });
 
-test("AR11.tileset", "MICRO-OTTIMIZZA-2 · il tileset da una mesh texturizzata, sperimentale dietro il suo interruttore: acceso, la destinazione «Tileset (3D Tiles)» si aggiunge e si sceglie; il motore Obj2Tiles con il perché (Blender + 3DSC col giro 3); Obj2Tiles come componente aggiuntivo (AGPL-3.0, OpenDroneMap, versione e sha256 fissate; sotto Rosetta su Apple Silicon, detto); il giudice (il validatore di Cesium, o il controllo strutturale detto come tale); la riga del file con la sua cartella in RB/versions/‹modello›@tiles, livelli, profondità e memoria; la memoria e il tetto detti prima; il comando; senza Obj2Tiles il pulsante non parte; spento, si torna al web", async () => {
+test("AR11.tileset", "MICRO-OTTIMIZZA-2 · il tileset da una mesh texturizzata, sperimentale dietro il suo interruttore: acceso, la destinazione «Tileset (3D Tiles)» si aggiunge e si sceglie; il motore Obj2Tiles con il perché (Blender + 3DSC in Blender stesso); Obj2Tiles come componente aggiuntivo (AGPL-3.0, OpenDroneMap, versione e sha256 fissate; sotto Rosetta su Apple Silicon, detto); il giudice (il validatore di Cesium, o il controllo strutturale detto come tale); la riga del file con la sua cartella in RB/versions/‹modello›@tiles, livelli, profondità e memoria; la memoria e il tetto detti prima; il comando; senza Obj2Tiles il pulsante non parte; spento, si torna al web", async () => {
   const root = await rootPath();
   const { pr, at } = await abProject(root, "ab11");
   const { p, ctx, errors } = await open({ doc: null, ws: "assets", w: 1900, h: 1000 });
@@ -11539,7 +11539,7 @@ test("AR11.tileset", "MICRO-OTTIMIZZA-2 · il tileset da una mesh texturizzata, 
   await ctx.close();
   const conds = {
     chosen: on.chip === "true" && on.pills[0] === "sperimentale",
-    engine: on.engine === "obj2tiles" && on.engines.some((e) => /giro 3/.test(e)) && /senza Blender/.test(on.why),
+    engine: on.engine === "obj2tiles" && on.engines.some((e) => /non ancora da qui/.test(e)) && /senza Blender/.test(on.why),
     addon: on.tool || (/Obj2Tiles 1\.8\.0/.test(on.addon) && /AGPL-3\.0/.test(on.addon) && /sha256/.test(on.addon)),
     agpl: /AGPL-3\.0/.test(on.text) && /non lo distribuisce/.test(on.text),
     judge: on.validator === "cesium" || (on.validator === "basic" && /controllo strutturale/.test(on.text)),
@@ -11552,6 +11552,65 @@ test("AR11.tileset", "MICRO-OTTIMIZZA-2 · il tileset da una mesh texturizzata, 
     noErrors: !errors.length,
   };
   return { pass: Object.values(conds).every(Boolean), detail: { conds, on, off, errors } };
+});
+
+test("AR12.blender", "MICRO-OTTIMIZZA-3 · Blender come seconda via, dietro il suo interruttore «sperimentale»: acceso, il bridge trova Blender e lo interroga (un lavoro leggero) e la scheda dice in parole che cosa c'è e che cosa manca — EM Tools che non si carica perché le sue librerie sono per Python 3.11 e questo Blender ha Python 3.13, 3D Survey Collection con il suo set di LOD; l'atlante ricotto di un modello (OB_CUBO_LOD1@atlas.glb); le esperienze col motore Blender + 3DSC: tre livelli RB/versions/‹modello›@lodN-realtime.glb, la memoria detta prima; il set di LOD come lavoro, i glb nella cartella delle versioni; spento, la sezione lo dice", async () => {
+  const root = await rootPath();
+  const { pr, at } = await abProject(root, "ab12");
+  const { p, ctx, errors } = await open({ doc: null, ws: "assets", w: 1900, h: 1000 });
+  await p.evaluate(([d, path]) => window.__EM_DRAG__.openAt(d, path), [fixture("catena"), at]);
+  await p.waitForTimeout(2500);
+  await p.locator(`.files-pl[data-place="${pr}/RB"]`).first().click();
+  await p.waitForTimeout(800);
+  await storageInto(p, ["LOD1"]);
+  await storageClick(p, "OB_CUBO_LOD1.obj");
+  await p.click('.files-tab[data-tab="optimize"]');
+  await p.waitForTimeout(800);
+  const off = await p.evaluate(() => ({ sw: document.querySelector('[data-blender-switch]')?.dataset.blenderSwitch ?? "",
+    text: document.querySelector('[data-blender-switch]')?.textContent ?? "" }));
+  await p.click('[data-action="files-blender-experimental"]');
+  await p.waitForSelector(".files-bl-lines li", { timeout: 20000 }).catch(() => {});
+  await p.waitForSelector('[data-way="atlas"] .files-prev td', { timeout: 10000 }).catch(() => {});
+  await p.waitForTimeout(500);
+  const on = await p.evaluate(() => ({
+    pill: document.querySelector('[data-blender-switch] .files-pill')?.textContent ?? "",
+    blender: document.querySelector(".files-blender")?.dataset.blender ?? "",
+    used: document.querySelector(".files-blender > div")?.textContent ?? "",
+    lines: [...document.querySelectorAll(".files-bl-lines li")].map((x) => [x.dataset.ok, x.textContent]),
+    atlas: [...document.querySelectorAll('[data-way="atlas"] .files-prev td')].map((x) => x.textContent) }));
+  await p.screenshot({ path: SHOT("ar12-blender") }).catch(() => {});
+  await p.click('.files-tab-optimize [data-opt="experience"]');
+  await p.waitForSelector('[data-action="blender-lod-set"]', { timeout: 10000 }).catch(() => {});
+  await p.waitForTimeout(500);
+  const exp = await p.evaluate(() => ({ engine: document.querySelector(".files-tab-optimize .files-engine")?.dataset.engine ?? "",
+    options: [...document.querySelectorAll('[data-action="files-opt-engine"] option')].map((o) => o.textContent),
+    rows: [...document.querySelectorAll(".files-tab-optimize > section:first-of-type .files-prev td")].map((x) => x.textContent),
+    text: document.querySelector(".files-tab-optimize > section")?.textContent ?? "",
+    go: document.querySelector('[data-action="blender-lod-set"]')?.textContent ?? "" }));
+  await p.screenshot({ path: SHOT("ar12-esperienze") }).catch(() => {});
+  await p.click('[data-action="blender-lod-set"]').catch(() => {});
+  const t0 = Date.now();
+  while (Date.now() - t0 < 20000 && !existsSync(`${pr}/RB/versions/OB_CUBO_LOD1@lod3-realtime.glb`)) await p.waitForTimeout(300);
+  await p.waitForTimeout(2500);
+  const made = ["lod1", "lod2", "lod3"].map((l) => existsSync(`${pr}/RB/versions/OB_CUBO_LOD1@${l}-realtime.glb`));
+  await p.click('[data-action="files-blender-experimental"]').catch(() => {});
+  await p.waitForTimeout(400);
+  const stored = await p.evaluate(() => localStorage.getItem("emstudio.blenderExperimental"));
+  await ctx.close();
+  const conds = {
+    off: off.sw === "off" && /Spento/.test(off.text),
+    on: on.pill === "sperimentale" && on.blender === "asked" && /Blender usato: .*Blender/.test(on.used),
+    emtools: on.lines.some(([ok, x]) => ok === "false" && /EM Tools non si carica in Blender 5\.2\.0 LTS: le sue librerie sono per Python 3\.11, questo Blender ha Python 3\.13/.test(x)),
+    dsc: on.lines.some(([ok, x]) => ok === "true" && /3D Survey Collection si carica, con il suo set di LOD/.test(x)),
+    atlas: on.atlas.includes("OB_CUBO_LOD1@atlas.glb"),
+    experience: exp.engine === "blender3dsc" && exp.options.every((o) => !/vuole Blender/.test(o))
+      && ["OB_CUBO_LOD1@lod1-realtime.glb", "OB_CUBO_LOD1@lod2-realtime.glb", "OB_CUBO_LOD1@lod3-realtime.glb"].every((n) => exp.rows.includes(n))
+      && /Chiede circa .* di memoria/.test(exp.text) && exp.go === "Fai il set di LOD in Blender",
+    made: made.every(Boolean),
+    switchOff: stored === "0",
+    noErrors: !errors.length,
+  };
+  return { pass: Object.values(conds).every(Boolean), detail: { conds, off, on, exp, made, errors } };
 });
 
 test("AR10.variant", "MICRO-OTTIMIZZA-1 · il Viewer legge una variante di gltfpack: geometria meshopt (EXT_meshopt_compression), quantizzata, texture KTX2 (KHR_texture_basisu) trascodificate con il Basis servito come il Draco; la scheda Info la apre nel Viewer, senza errori", async () => {
