@@ -76,7 +76,10 @@ export interface OutlinerInput {
     /** …and the level of the version drawn, a chip */
     chip?: string;
     /** MICRO-WINDOWS-MODELLI p.1 · it did not come, and why */
-    failed?: string }>;
+    failed?: string;
+    /** MICRO-VERSIONE-CONTENITORE · the container's whole version (a level of
+     *  it, one file): first among its rows */
+    whole?: boolean }>;
   /** per epoch, its proxies: unit, its name, its type (and why it did not come) */
   proxies: (epochId: string) => Array<{ unitId: string; name: string; type: string; failed?: string }>;
   /** the type's label (US, USV/s…) */
@@ -106,7 +109,7 @@ export function buildOutlinerTree(input: OutlinerInput): OutlinerRow[] {
           glyphText: v.drawn ? "●" : v.chosen ? "○" : "·", ...(v.uses ? { uses: v.uses } : {}), ...(v.level ? { level: v.level } : {}),
           ...(v.auto ? { auto: true } : {}) })) } : {}),
       });
-      const sorted = rms.slice().sort((a, b) => Number(a.tileset) - Number(b.tileset) || coll.compare(a.name, b.name));
+      const sorted = rms.slice().sort((a, b) => Number(!!b.whole) - Number(!!a.whole) || Number(a.tileset) - Number(b.tileset) || coll.compare(a.name, b.name));
       // MICRO-SPAZIO-3D-3 p.7 · Epoch › Representation models › CONTAINER › RM;
       // a model without a container stays where it was
       const groups = new Map<string, { name: string; doc?: string; alt?: string; rows: OutlinerRow[] }>();

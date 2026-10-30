@@ -150,4 +150,33 @@ print(json.dumps({"resident": sorted(r["resource_id"] for r in s["resident"]), "
   eq(f.count, 1, "a filter counts what it leaves");
 }
 
+// ── MICRO-VERSIONE-CONTENITORE · a container's version (one glb of the whole) ──
+// EM Tools' «Prepare for a use» of a container, as written before 30 Oct 2026:
+// `data.represents: container`, `data.container`, and NO edge — read as hatted
+// by its container (a view); with the edge, the same.
+{
+  const withVersion = (edge) => {
+    const d = structuredClone(doc);
+    d.graph.nodes.push({ id: "G1", name: "Reconstruction", node_type: "RepresentationModelNodeGroup" },
+      { id: "VC1", name: "Reconstruction lod1 for Mobile webXR", node_type: "resource",
+        data: { url: "../SB/versions/Reconstruction@lod1-mobile.glb", url_type: "3d_model", residency: "resident",
+                represents: "container", container: "G1", size_bytes: 2535856, primitives: { triangles: 595058 }, use: ["mobile_ar"] } });
+    d.graph.edges.push({ id: "RM01_in_G1", edge_type: "is_in_representation_model_group", source: "RM01", target: "G1" });
+    if (edge) d.graph.edges.push({ id: "G1_has_linked_resource_VC1", edge_type: "has_linked_resource", source: "G1", target: "VC1" });
+    return M.buildSpace(d, { isUnit });
+  };
+  for (const edge of [false, true]) {
+    const sp = withVersion(edge);
+    const alt = sp.rms.find((r) => r.altOf === "G1");
+    ok(!!alt, `the container's version is the container's alternative (${edge ? "with" : "without"} the edge)`);
+    eq([alt.id, alt.epochs, alt.resource?.id, !!alt.resource?.tiles], ["G1", ["EP_MOD"], "VC1", false],
+       "…under the container's id, in its members' epoch, one file, not a tileset");
+    eq(sp.rmGroups.get("G1").members, ["RM01"], "…the members stay the container's");
+  }
+  // the graph is not written: the edge is read, never added to the document
+  const d0 = structuredClone(doc);
+  M.buildSpace(d0, { isUnit });
+  eq(d0.graph.edges.length, doc.graph.edges.length, "reading adds no edge to the document");
+}
+
 console.log(`space: ${checks} checks passed`);

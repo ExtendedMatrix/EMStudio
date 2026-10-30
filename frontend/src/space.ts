@@ -571,7 +571,19 @@ export function buildSpace(
   // container) gets it as a model of the Space, under the container's id: its
   // versions, the one a scene loads, the epochs of the members it replaces
   // (with no member: the container's own)
-  const alternatives = alternativeSets({ nodes, edges }, ALT_RULE);
+  // MICRO-VERSIONE-CONTENITORE (E.D. 30 Oct 2026) · a container's version EM
+  // Tools wrote before it linked it (`data.represents: container`,
+  // `data.container`, no hat): read as hatted by its container — a view, the
+  // graph is not written (EM Tools mends the file when it opens and saves it)
+  const hatted = new Set(edges.filter((e) => e.edge_type === ALT_RULE.hat_edge).map((e) => e.target));
+  const implied = nodes.flatMap((n) => {
+    const d = (n.data ?? {}) as Record<string, unknown>;
+    const gid = String(d.container ?? "");
+    if (n.node_type !== "resource" || d.represents !== "container" || !gid || hatted.has(n.id)
+        || !ALT_RULE.hats.container.includes(String(byId.get(gid)?.node_type ?? ""))) return [];
+    return [{ id: `${gid}_${ALT_RULE.hat_edge}_${n.id}`, source: gid, target: n.id, edge_type: ALT_RULE.hat_edge } as EmEdge];
+  });
+  const alternatives = alternativeSets({ nodes, edges: implied.length ? [...edges, ...implied] : edges }, ALT_RULE);
   for (const set of iterSets(alternatives.sets)) {
     if (set.hat_kind !== "container" || !set.alternatives.length) continue;
     const g = rmGroups.get(set.hat);

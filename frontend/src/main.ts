@@ -27787,6 +27787,12 @@ function spaceDrawnOf(rmId: string, sp: Space | null = currentSpace()): { level:
   for (const h of sceneHandles.values()) { url = h.drawnUrl(`rm:${rm.id}`); if (url) break; }
   if (!url) return null;
   if (rm.resource?.tiles) return { level: "tileset", bytes: null, tris: null, tiles: true };
+  // MICRO-VERSIONE-CONTENITORE · the container's whole version: «Intero · mobile webXR»
+  if (rm.altOf) {
+    const use = wholeUseWords(rm);
+    // the triangles drawn (the graph's, instances counted), as its label; the Space counts the stored ones
+    return { level: `${t("alt.chip.whole")}${use ? ` · ${use}` : ""}`, bytes: wholeBytes(rm), tris: wholeTris(rm) ?? drawnTris.get(url) ?? null, tiles: false };
+  }
   const v = drawnVersionOf(rm);
   const tris = drawnTris.get(url) ?? (v ? v.tris ?? getMeasure(versionFingerprint(v))?.tris ?? null : null);
   return { level: v ? autoLevelName(rm, v) : rmShown(rm.id, sp)?.level ?? "", bytes: (v ? v.bytes : null) ?? rm.resource?.bytes ?? null,
@@ -27939,7 +27945,8 @@ function lodMenuEntries(rmIds: string[]): Array<{ label: string; act: string; ru
 /** The models of an Outliner row: a model, a container's members, an epoch's models */
 function lodRowModels(r: { kind: string; id: string; children?: Array<{ kind: string; id: string; children?: unknown[] }> }): string[] {
   if (r.kind === "rm") return [r.id];
-  if (r.kind === "rmgroup") return (r.children ?? []).filter((c) => c.kind === "rm").map((c) => c.id);
+  // MICRO-VERSIONE-CONTENITORE · the container's whole version (its id) is a level of it, not a member
+  if (r.kind === "rmgroup") return (r.children ?? []).filter((c) => c.kind === "rm" && c.id !== r.id).map((c) => c.id);
   if (r.kind === "epoch") return (currentSpace()?.summary(r.id)?.rms ?? []).filter((x) => !x.resource?.tiles).map((x) => x.id);
   return [];
 }
@@ -28116,9 +28123,108 @@ function altModeOf(groupId: string): AltMode { return space3dPrefs().altModes?.[
  *  device's use (`deviceUse`), else the models — a choice of the menu, never the default */
 function altEffectiveMode(groupId: string, sp: Space | null = currentSpace()): Exclude<AltMode, "use"> {
   const m = altModeOf(groupId);
+  // MICRO-VERSIONE-CONTENITORE · the alternative is ONE file of the whole: in
+  // «Automatico» the Space decides here, by the weight (no distance to follow)
+  if (m === "auto" && wholeAltOf(groupId, sp)) return wholeWins(groupId, sp) ? "tileset" : "models";
   if (m !== "use") return m;
   const ts = sp?.rms.find((r) => r.altOf === groupId);
   return (ts?.versions ?? []).some((v) => (v.uses ?? []).includes(deviceUse())) ? "tileset" : "models";
+}
+/** MICRO-VERSIONE-CONTENITORE (E.D. 30 Oct 2026) · a container's version that
+ *  is ONE file, not a tileset: EM Tools' «Prepare for a use» of the whole
+ *  container (`data.represents: container`, hatted by the container). It is a
+ *  level of the container — «Intero · mobile webXR (2,5 MB, 595 k tri)» — drawn
+ *  in place of its members, never over them. */
+function wholeAltOf(groupId: string, sp: Space | null = currentSpace()): SpaceRM | null {
+  return sp?.rms.find((r) => r.altOf === groupId && !r.resource?.tiles) ?? null;
+}
+function wholeData(rm: SpaceRM): Record<string, unknown> {
+  const v = (rm.versions ?? []).find((x) => x.id === rm.resource?.id) ?? (rm.versions ?? [])[0];
+  return (v?.data ?? {}) as Record<string, unknown>;
+}
+function wholeBytes(rm: SpaceRM): number | null {
+  const d = wholeData(rm);
+  return rm.resource?.bytes ?? (typeof d.size_bytes === "number" ? d.size_bytes : null);
+}
+function wholeTris(rm: SpaceRM): number | null {
+  const pr = wholeData(rm).primitives as Record<string, unknown> | undefined;
+  return typeof pr?.triangles === "number" ? pr.triangles : null;
+}
+/** «mobile webXR»: the profile's words in the resource's name («… for Mobile webXR»), else its id */
+function wholeUseWords(rm: SpaceRM): string {
+  const d = wholeData(rm);
+  const m = / for (.+)$/.exec(String(rm.name ?? ""));
+  const w = m ? m[1] : String(d.profile ?? d.purpose ?? "").replace(/_/g, " ");
+  return w ? w.charAt(0).toLowerCase() + w.slice(1) : "";
+}
+/** «Intero · mobile webXR (2,5 MB, 595 k tri)» */
+function wholeLabel(rm: SpaceRM): string {
+  const b = wholeBytes(rm), tr = wholeTris(rm);
+  const nf = (x: number, d = 1) => x.toLocaleString(getLocale(), { maximumFractionDigits: d });
+  // the weight as the app says every other (the Inspector, the Tabular): 2 535 856 B → 2.4 MB
+  const size = mbOf(b);
+  const tris = tr != null ? (tr >= 1e6 ? `${nf(tr / 1e6)} M tri` : tr >= 1e3 ? `${nf(tr / 1e3, 0)} k tri` : `${tr} tri`) : "";
+  const use = wholeUseWords(rm);
+  const meta = [size, tris].filter(Boolean).join(", ");
+  return `${t("alt.chip.whole")}${use ? ` · ${use}` : ""}${meta ? ` (${meta})` : ""}`;
+}
+/** «Versioni: la più leggera» (the default) and «Automatico»: the whole when it
+ *  is a file the Space opens, not heavy, its members all in «the lightest»,
+ *  and lighter than what they draw together */
+function wholeWins(groupId: string, sp: Space | null = currentSpace()): boolean {
+  const w = wholeAltOf(groupId, sp);
+  if (!sp || !w || w.resource?.state !== "resident") return false;
+  const wb = wholeBytes(w);
+  if (wb == null || isHeavy({ bytes: wb, tris: wholeTris(w) })) return false;
+  const covers = findSet(sp.alternatives, groupId)?.covers ?? [];
+  const chosen = space3dPrefs().versionModes ?? {};
+  let sum = 0;
+  for (const id of covers) {
+    if (chosen[id] && chosen[id].mode !== "light") return false;
+    const r = sp.rms.find((x) => x.id === id);
+    const b = r ? rmVersionPlan(r).bytes ?? r.resource?.bytes ?? null : null;
+    if (typeof b === "number") sum += b;
+  }
+  return wb < sum;
+}
+/** A mode's word for a container: «Intero» where its alternative is a whole file */
+function altWord(groupId: string, k: AltMode, long = false): string {
+  if (k === "tileset" && wholeAltOf(groupId)) return long ? t("alt.wholeOne", { what: wholeLabel(wholeAltOf(groupId)!) }) : t("alt.chip.whole");
+  if (k === "auto" && wholeAltOf(groupId)) return long ? t("alt.autoWhole") : t("alt.chip.auto");
+  return long ? t(`alt.${k}`, { use: deviceUse() }) : t(`alt.chip.${k}`);
+}
+/** «Reconstruction II AC · automatico · intero (mobile webXR)» / «· modelli (derivata lod1)» */
+function wholeLine(x: { group: string; name: string; side: "tileset" | "models"; levels: string }): string {
+  const w = wholeAltOf(x.group);
+  const mode = altModeOf(x.group) === "auto" ? ` · ${t("alt.word.auto")}` : "";
+  return x.side === "tileset" ? t("alt.lineWhole", { name: x.name, mode, what: w ? wholeLabel(w) : "" })
+    : t("alt.lineModels", { name: x.name, mode, levels: x.levels || "…" });
+}
+/** The «LOD ▾» of a container (or of an epoch): its whole version a level
+ *  among the others — «● Intero · mobile webXR (2,5 MB, 595 k tri)», the
+ *  models, «Automatico» — before the members' levels */
+function wholeMenuEntries(r: { kind: string; id: string }): Array<{ label: string; act: string; run: () => void; disabled?: boolean } | "sep"> {
+  const sp = currentSpace();
+  if (!sp) return [];
+  const gids = r.kind === "rmgroup" ? [r.id]
+    : r.kind === "epoch" ? (sp.summary(r.id)?.rms ?? []).filter((x) => x.altOf && !x.resource?.tiles).map((x) => x.altOf!) : [];
+  const out: Array<{ label: string; act: string; run: () => void; disabled?: boolean } | "sep"> = [];
+  for (const gid of gids) {
+    const w = wholeAltOf(gid, sp);
+    if (!w) continue;
+    const side = altEffectiveMode(gid, sp);
+    const m = altModeOf(gid);
+    const n = findSet(sp.alternatives, gid)?.covers.length ?? 0;
+    const name = r.kind === "epoch" ? `${sp.rmGroups.get(gid)?.name ?? gid} · ` : "";
+    const ok = w.resource?.state === "resident";
+    out.push(
+      { label: `${side === "tileset" ? "●" : m === "tileset" ? "○" : "·"} ${name}${wholeLabel(w)}`, act: `whole:${gid}`, disabled: !ok,
+        run: () => setAltMode(gid, "tileset") },
+      { label: `${side === "models" ? "●" : "·"} ${name}${t("alt.wholeModels", { n: String(n) })}`, act: `whole-models:${gid}`, run: () => setAltMode(gid, "models") },
+      { label: `${m === "auto" ? "✓ " : ""}${name}${t("alt.autoWhole")}`, act: `whole-auto:${gid}`, run: () => setAltMode(gid, "auto") },
+      "sep");
+  }
+  return out;
 }
 function setAltMode(groupId: string, mode: AltMode): void {
   const p = space3dPrefs();
@@ -28131,7 +28237,7 @@ function setAltMode(groupId: string, mode: AltMode): void {
 const altShown = new Map<string, "tileset" | "models">();
 function altMenuEntries(groupId: string): Array<{ label: string; act: string; run: () => void }> {
   const m = altModeOf(groupId);
-  return (["models", "tileset", "auto", "use"] as const).map((k) => ({ label: `${m === k ? "● " : ""}${t(`alt.${k}`, { use: deviceUse() })}`, act: `alt-${k}`, run: () => setAltMode(groupId, k) }));
+  return (["models", "tileset", "auto", "use"] as const).map((k) => ({ label: `${m === k ? "● " : ""}${altWord(groupId, k, true)}`, act: `alt-${k}`, run: () => setAltMode(groupId, k) }));
 }
 /** MICRO-TILESET-CONTENITORE p.4 · the three buttons of a container's mode —
  *  Modelli / Tileset / Automatico — the same in the N panel and in the
@@ -28148,8 +28254,8 @@ function altModeButtons(host: HTMLElement, gid: string, probe: Record<string, st
     const b = document.createElement("button");
     b.type = "button";
     b.dataset.v = k;
-    b.textContent = t(`alt.chip.${k}`);
-    b.title = t(`alt.${k}`);
+    b.textContent = altWord(gid, k);
+    b.title = altWord(gid, k, true);
     b.setAttribute("aria-pressed", String(m === k));
     b.addEventListener("click", () => setAltMode(gid, k));
     d.appendChild(b);
@@ -28709,7 +28815,8 @@ function renderSpaceOutliner(el: HTMLElement, win: Win, sp: Space | null): void 
       // MICRO-SPAZIO-3D-3 p.11 · the name without its level, the level a chip
       const nm = rmShown(r.id, sp);
       const failed = modelFailureOf(`rm:${r.id}`);
-      return { id: r.id, name: nm?.shown ?? r.name, ...(nm && nm.shown !== nm.technical ? { technical: nm.technical } : {}),
+      const whole = r.altOf && !r.resource?.tiles ? wholeLabel(r) : null;
+      return { id: r.id, name: whole ?? nm?.shown ?? r.name, ...(whole ? { technical: r.name } : nm && nm.shown !== nm.technical ? { technical: nm.technical } : {}),
         ...(failed ? { failed } : {}),
         // MICRO-PROVA-DEV47 p.3b · the level and the mode («LOD2 · uso», «intero · fisso»), a small menu
         // MICRO-PROVA-DEV48 p.3 · in auto the label says what the distance drew: «auto · LOD0», «auto · derivata lod4»
@@ -28719,7 +28826,9 @@ function renderSpaceOutliner(el: HTMLElement, win: Win, sp: Space | null): void 
         glyph: String(st.node(r.id)?.node_type ?? "representation_model"),
         tileset: !!r.resource?.tiles,
         group: grp ? { id: grp.id, name: grp.name, doc: grp.documentId ? String(st.node(grp.documentId)?.name ?? "") : undefined,
-          ...(hasAlt ? { alt: t(`alt.chip.${altModeOf(grp.id)}`) } : {}) } : null,
+          ...(hasAlt ? { alt: altWord(grp.id, altModeOf(grp.id)) } : {}) } : null,
+        // MICRO-VERSIONE-CONTENITORE · the container's whole version, a level of it: first, in words
+        ...(r.altOf && !r.resource?.tiles ? { whole: true } : {}),
         versions: (r.versions ?? []).map((v) => {
           const dv = drawableVersions(r).find((x) => x.id === v.id);
           const isDrawn = !!drawnUrl && ((!!v.url && tail(drawnUrl) === tail(v.url)) || (!!dv && tail(drawnUrl) === tail(dv.fetch)));
@@ -28822,7 +28931,7 @@ function renderSpaceOutliner(el: HTMLElement, win: Win, sp: Space | null): void 
     },
     // MICRO-PROVA-DEV47 p.3b · the level's chip: the levels of a model, or the same for a container's, an epoch's models
     altMenu: (r, x, y) => spaceMenu(x, y, r.name, altMenuEntries(r.id)),
-    chipMenu: (r, x, y) => { const ids = lodRowModels(r); spaceMenu(x, y, r.kind === "rm" ? r.name : `${r.name} · ${t("lod.nModels", { n: String(ids.length) })}`, lodMenuEntries(ids)); },
+    chipMenu: (r, x, y) => { const ids = lodRowModels(r); spaceMenu(x, y, r.kind === "rm" ? r.name : `${r.name} · ${t("lod.nModels", { n: String(ids.length) })}`, [...wholeMenuEntries(r), ...lodMenuEntries(ids)]); },
     // p.7 · a right click on a model's row, or on a container's: the containers' entries
     // MICRO-INSTALLER-PULSANTE p.2 · the mark of a model that did not come: why, and «Find…»
     failMenu: (r, x, y) => spaceMenu(x, y, r.name, failMenuEntries(r)),
@@ -28830,7 +28939,7 @@ function renderSpaceOutliner(el: HTMLElement, win: Win, sp: Space | null): void 
       if (r.kind === "rm") spaceMenu(x, y, r.name, [...(r.failed ? [...failMenuEntries(r), "sep" as const] : []),
         ...groupMenuEntries(selectedModels(r.id), x, y), "sep", ...versionMenuEntries(selectedModels(r.id))]);
       else if (r.kind === "rmgroup") {
-        const members = (r.children ?? []).filter((c) => c.kind === "rm").map((c) => c.id);
+        const members = (r.children ?? []).filter((c) => c.kind === "rm" && c.id !== r.id).map((c) => c.id);
         spaceMenu(x, y, r.name, [
           { label: t("rmg.selectMembers"), act: "rmg-select", run: () => setSpaceSel({ keys: members.map((m) => `rm:${m}`), active: members.length ? `rm:${members[members.length - 1]}` : null }) },
           { label: t("rmg.remove"), act: "rmg-remove", run: () => applyGroupPlan(planRemove(store!.doc, members), t("rmg.removed", { n: String(members.length) })) },
@@ -29023,7 +29132,7 @@ function mountScene(body: HTMLElement, win: Win): { refresh(): void; destroy(): 
     // p.12 · the automatic choice of a container: the Outliner's «sostituito da» follows
     onAltState: (g, which) => { if (altShown.get(g) !== which) { altShown.set(g, which); recomputeSubstituted(); if (space3dPrefs().shown) renderSpaceOutliner(outl, win, currentSpace()); drawNPanel(); } },
     // MICRO-TILESET-CONTENITORE p.3 · the strip says what a container draws; the N panel's line follows
-    altLine: (x) => t(x.side === "tileset" ? "alt.lineTiles" : "alt.lineModels", { name: x.name, mode: x.mode === "auto" ? ` · ${t("alt.word.auto")}` : "",
+    altLine: (x) => wholeAltOf(x.group) ? wholeLine(x) : t(x.side === "tileset" ? "alt.lineTiles" : "alt.lineModels", { name: x.name, mode: x.mode === "auto" ? ` · ${t("alt.word.auto")}` : "",
       levels: x.side === "tileset" ? (x.levels ? t(/–/.test(x.levels) ? "alt.levels" : "alt.level", { l: x.levels }) : "…") : x.levels || "…" }),
     onAltLine: () => { for (const el of document.querySelectorAll<HTMLElement>("[data-np=alt-line], [data-alt=line]")) { const g = el.dataset.group; const h = sceneHandles.get(win.id); const l = g && h ? h.altLine(g) : null; if (l) el.textContent = l; } },
     // p.10 · a version of the flow drawn: the Outliner's dot and the N panel follow (no rebuild)
@@ -41605,7 +41714,7 @@ function vwScene(win: Win, stage: HTMLElement, target: ViewerTarget, preview: Vw
       vwFrameArrivals(win, slot);
       refreshViewerBar(win);
     },
-    altLine: (x) => t(x.side === "tileset" ? "alt.lineTiles" : "alt.lineModels", { name: x.name, mode: x.mode === "auto" ? ` · ${t("alt.word.auto")}` : "",
+    altLine: (x) => wholeAltOf(x.group) ? wholeLine(x) : t(x.side === "tileset" ? "alt.lineTiles" : "alt.lineModels", { name: x.name, mode: x.mode === "auto" ? ` · ${t("alt.word.auto")}` : "",
       levels: x.side === "tileset" ? (x.levels ? t(/–/.test(x.levels) ? "alt.levels" : "alt.level", { l: x.levels }) : "…") : x.levels || "…" }),
     // p.2 · the container's tileset drawn (its line changes as its tiles come):
     // the framing follows it as it follows the models' files

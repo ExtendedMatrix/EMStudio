@@ -85,4 +85,18 @@ eq(O.squeezeSide(79, "outliner", 260), { open: false, width: 260 }, "under 80: c
 eq(O.squeezeSide(-40, "npanel", 250), { open: false, width: 250 }, "the N panel the same, past the window's side");
 eq(O.squeezeSide(100, "npanel", 250), { open: true, width: 180 }, "the N panel held at its least (180)");
 eq(O.squeezeSide(900, "npanel", 250), { open: true, width: 520 }, "…and at its most (520)");
+// MICRO-VERSIONE-CONTENITORE · a container's whole version: a level of the
+// container, FIRST among its rows (before «Architrave…»), the members after it
+{
+  const g = { id: "G1", name: "Reconstruction II AC" };
+  const t2 = O.buildOutlinerTree({ ...input, proxies: () => [], sketches: [],
+    rms: (ep) => ep === "E2" ? [
+      { id: "Architrave", name: "Architrave_1", glyph: "representation_model", tileset: false, versions: [], group: g },
+      { id: "G1", name: "Intero · mobile webXR (2.4 MB, 595 k tri)", glyph: "RepresentationModelNodeGroup", tileset: false, versions: [], group: g, whole: true },
+      { id: "Column", name: "Column_light1", glyph: "representation_model", tileset: false, versions: [], group: g },
+    ] : [] });
+  const grp = t2[0].children[0].children[0];
+  eq([grp.kind, grp.children.map((r) => r.id)], ["rmgroup", ["G1", "Architrave", "Column"]], "the whole first in its container, then the models by name");
+  eq(grp.children[0].key, "rm:G1", "…a row of the Space (rm:<container>), selectable");
+}
 console.log(`check-space-outliner: ${checks} checks passed`);
